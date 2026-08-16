@@ -1782,6 +1782,8 @@ function setTheme(theme){
   }
   // theme === 'dark' -> aucune classe (c'est le thème de base)
   try{ localStorage.setItem('vabot_theme', theme); }catch(e){}
+  // Les icones iOS suivent le theme (et se retirent quand on en change)
+  if(typeof vaAppliquerIcones === 'function') vaAppliquerIcones(theme === 'apple');
   // Mettre à jour la sélection visuelle des cards
   document.querySelectorAll('.theme-card').forEach(function(c){
     if(c.dataset.theme === theme){
@@ -5495,38 +5497,8 @@ function capAddSubmit(){
 // (L auto-ajout de champ « quand on tape dans le dernier » a été RETIRÉ : les
 // extensions d autofill remplissaient chaque nouveau champ -> cascade de
 // doublons. On ajoute un champ UNIQUEMENT via le bouton.)
-// ---- Filtre des identités (Toutes / Avec du contenu / Vides) ----
-// Purement client : on lit le compteur deja affiche sous chaque nom.
-function identFilterApply(sec, val){
-  // memorise le choix sur la section : vaultRefilter() le relit (sinon la
-  // recherche ou le filtre de marche l'effacait au premier passage)
-  if(sec && sec.setAttribute) sec.setAttribute('data-identfval', val || 'all');
-  if(typeof vaultRefilter === 'function') vaultRefilter();
-}
-document.addEventListener('click', function(ev){
-  var t = ev.target.closest ? ev.target.closest('[data-identfilter]') : null;
-  if(t){
-    var menu = t.parentElement.querySelector('[data-filtermenu]');
-    if(menu) menu.style.display = (menu.style.display === 'block') ? 'none' : 'block';
-    return;
-  }
-  var opt = ev.target.closest ? ev.target.closest('.ident-fopt') : null;
-  if(opt){
-    var box = opt.closest('[data-filtermenu]');
-    var row = box.parentElement;
-    var sec = opt.closest('.form-section') || document;
-    var val = opt.getAttribute('data-fval');
-    box.querySelectorAll('.ident-fopt').forEach(function(o){ o.removeAttribute('data-on'); });
-    opt.setAttribute('data-on','1');
-    var lbl = row.querySelector('[data-filterlbl]');
-    if(lbl) lbl.textContent = opt.textContent;
-    identFilterApply(sec, val);
-    box.style.display = 'none';
-    return;
-  }
-  // clic ailleurs : on referme les menus ouverts
-  document.querySelectorAll('[data-filtermenu]').forEach(function(m){ m.style.display='none'; });
-});
+// (Le filtre « Toutes / Avec du contenu / Vides » a ete retire : il masquait
+//  des identites sans que ce soit visible. Son code est parti avec lui.)
 // ---- Réordonner les identités par GLISSER-DÉPOSER (sidebars vault) ----
 // On attrape le drag natif des <a> de la sidebar : déplacement libre dans la
 // liste, ordre sauvé serveur (/identity/reorder) => synchro entre Vidéo brut /
@@ -9314,7 +9286,88 @@ body.light .lb-btn-secondary:hover{background:#f3f4f6;color:#111}
 </div>
 
 <script src="/veille/prepare.js" defer></script>
-</div></body></html>
+</div>
+<script>
+// === Icones du menu, version iOS (theme Apple uniquement) ==================
+// Trace ORIGINAL : rien n'est repris d'Apple, seulement leur grammaire —
+// trait unique de 1.6, extremites arrondies, formes geometriques simples.
+// L'icone d'origine est mise de cote dans un attribut, donc quitter le theme
+// la restaure a l'identique.
+var VA_ICONES_APPLE = {
+  "Dashboard": "<rect x='3.2' y='3.2' width='7.2' height='7.2' rx='2.2'/><rect x='13.6' y='3.2' width='7.2' height='7.2' rx='2.2'/><rect x='3.2' y='13.6' width='7.2' height='7.2' rx='2.2'/><rect x='13.6' y='13.6' width='7.2' height='7.2' rx='2.2'/>",
+  "Bibliothèque": "<path d='M6.5 18.5h11a3.5 3.5 0 0 0 .3-7 5 5 0 0 0-9.7-1.4A3.6 3.6 0 0 0 6.5 18.5z'/>",
+  "Reels": "<rect x='3' y='5' width='18' height='14' rx='3.4'/><path d='M10.4 9.6v4.8l4.2-2.4z'/>",
+  "Posts": "<rect x='3' y='4' width='18' height='16' rx='3.4'/><circle cx='8.6' cy='9.4' r='1.5'/><path d='M4 16.4l4.4-3.6 4 3.2 3.2-2.4L20 16.6'/>",
+  "Stories": "<circle cx='12' cy='12' r='8.6' stroke-dasharray='2.6 2.4'/><circle cx='12' cy='12' r='3.2'/>",
+  "Story CTA": "<rect x='4' y='3.4' width='16' height='17.2' rx='3.4'/><path d='M9 12h6M12.6 9.4L15 12l-2.4 2.6'/>",
+  "Vidéo brut": "<rect x='2.8' y='6.6' width='12.6' height='10.8' rx='2.6'/><path d='M15.4 12l5.4-3.2v6.4z'/>",
+  "Bios": "<rect x='4.6' y='3' width='14.8' height='18' rx='3'/><path d='M8.4 8.4h7.2M8.4 12h7.2M8.4 15.6h4.4'/>",
+  "CTA": "<path d='M4 10.4v3.2a1.6 1.6 0 0 0 1.6 1.6h2L13 19V5l-5.4 3.8h-2A1.6 1.6 0 0 0 4 10.4z'/><path d='M16.6 9.4a3.6 3.6 0 0 1 0 5.2'/>",
+  "Photos profil": "<circle cx='12' cy='9' r='3.6'/><path d='M5 19.6a7.2 7.2 0 0 1 14 0'/>",
+  "Drive": "<path d='M3.4 7.4a2.4 2.4 0 0 1 2.4-2.4h3.2l2 2.4h7.6a2.4 2.4 0 0 1 2.4 2.4v6.8a2.4 2.4 0 0 1-2.4 2.4H5.8a2.4 2.4 0 0 1-2.4-2.4z'/>",
+  "Bibliothèque 2": "<rect x='3' y='6.6' width='13' height='13' rx='3'/><path d='M8 6.6V5.4a2.4 2.4 0 0 1 2.4-2.4h8.2A2.4 2.4 0 0 1 21 5.4v8.2a2.4 2.4 0 0 1-2.4 2.4h-1.2'/>",
+  "Métadonnées vidéo": "<path d='M4 7.6h16M4 12h16M4 16.4h16'/><circle cx='9' cy='7.6' r='1.9' fill='currentColor' stroke='none'/><circle cx='15' cy='12' r='1.9' fill='currentColor' stroke='none'/><circle cx='7.4' cy='16.4' r='1.9' fill='currentColor' stroke='none'/>",
+  "Reel montage": "<circle cx='6.4' cy='17.4' r='2.6'/><circle cx='17.6' cy='17.4' r='2.6'/><path d='M8.6 15.8L18 5M15.4 15.8L6 5'/>",
+  "Template montage": "<path d='M12 3.2l8.4 4.2-8.4 4.2-8.4-4.2z'/><path d='M3.6 12.2l8.4 4.2 8.4-4.2M3.6 16.6l8.4 4.2 8.4-4.2'/>",
+  "Caption": "<rect x='3' y='4.6' width='18' height='13.4' rx='3.2'/><path d='M7.6 10.8h3.2M13.2 10.8h3.2M7.6 14h8.8'/>",
+  "VAs": "<circle cx='9.2' cy='8.6' r='3.2'/><path d='M3.6 19.2a5.8 5.8 0 0 1 11.2 0'/><path d='M16.2 6.4a3.2 3.2 0 0 1 0 6M17.6 14.6a5.6 5.6 0 0 1 3 4.6'/>",
+  "Liste VAs": "<path d='M9 6.6h11M9 12h11M9 17.4h11'/><circle cx='4.6' cy='6.6' r='1.4'/><circle cx='4.6' cy='12' r='1.4'/><circle cx='4.6' cy='17.4' r='1.4'/>",
+  "Onboarding": "<path d='M4 18.6c4.4 0 4.4-6.4 8.8-6.4S17.2 5.4 20.4 5.4'/><path d='M17.6 3.6l2.8 1.8-2.8 1.8'/>",
+  "Paie VAs": "<rect x='2.8' y='6' width='18.4' height='12' rx='2.8'/><circle cx='12' cy='12' r='2.8'/><path d='M6.4 12h.1M17.6 12h.1'/>",
+  "Chatteurs": "<path d='M20.4 12.6a7.4 7.4 0 0 1-8 7.4L4 21l1-4.2a7.4 7.4 0 1 1 15.4-4.2z'/>",
+  "Emploi du temps": "<rect x='3.4' y='5.2' width='17.2' height='15.4' rx='3'/><path d='M3.4 10h17.2M8.4 3.4v3.6M15.6 3.4v3.6'/>",
+  "Revenus chatteurs": "<path d='M4 18.6V9.4M9.4 18.6V4.6M14.8 18.6v-6.4M20.2 18.6V7'/>",
+  "Trends": "<path d='M3.6 16.4l5-5.2 3.6 3.4L20.4 6'/><path d='M15.6 6h4.8v4.8'/>",
+  "Accounts": "<circle cx='12' cy='12' r='8.8'/><circle cx='12' cy='9.6' r='2.8'/><path d='M6.6 18.4a6 6 0 0 1 10.8 0'/>",
+  "SFS": "<path d='M12 19.4V5.2'/><path d='M6.6 10.4L12 5l5.4 5.4'/><path d='M4.4 19.4h15.2'/>",
+  "SFS Planning": "<rect x='3.4' y='5.2' width='17.2' height='15.4' rx='3'/><path d='M3.4 10h17.2'/><path d='M9.4 14.4l2 2 3.8-3.8'/>",
+  "GeeLark": "<rect x='6.4' y='2.6' width='11.2' height='18.8' rx='3'/><path d='M10.6 18.4h2.8'/>",
+  "Jailbreak": "<rect x='4.6' y='10.4' width='14.8' height='10.2' rx='3'/><path d='M8.2 10.4V7.8a3.8 3.8 0 0 1 7.6 0'/>",
+  "Liens": "<path d='M10.2 13.8a3.8 3.8 0 0 0 5.6.4l2.6-2.6a3.8 3.8 0 0 0-5.4-5.4l-1.4 1.4'/><path d='M13.8 10.2a3.8 3.8 0 0 0-5.6-.4l-2.6 2.6a3.8 3.8 0 0 0 5.4 5.4l1.4-1.4'/>",
+  "Finances": "<circle cx='12' cy='12' r='8.8'/><path d='M12 6.8v10.4M14.8 9.4a2.8 2.8 0 0 0-2.8-1.4c-1.8 0-2.8 1-2.8 2.2 0 2.8 5.6 1.6 5.6 4.4 0 1.2-1 2.4-2.8 2.4a3 3 0 0 1-2.9-1.6'/>",
+  "Remote": "<rect x='7' y='2.6' width='10' height='18.8' rx='3'/><path d='M10.4 6.4h3.2M12 11v4.6'/>",
+  "Settings": "<circle cx='12' cy='12' r='3.2'/><path d='M19.2 14.6a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1v.3a2 2 0 1 1-4 0v-.2a1.6 1.6 0 0 0-2.8-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7h-.3a2 2 0 1 1 0-4h.2A1.6 1.6 0 0 0 4.7 7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3h.1a1.6 1.6 0 0 0 1-1.5v-.3a2 2 0 1 1 4 0v.2a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1h.3a2 2 0 1 1 0 4h-.2a1.6 1.6 0 0 0-1.4 1z'/>"
+};
+function vaAppliquerIcones(actif){
+  try{
+    document.querySelectorAll('.sidebar .solo-item, .sidebar .group-head, .sidebar .group .item')
+      .forEach(function(el){
+        var svg = el.querySelector('svg');
+        if(!svg) return;
+        // libelle = le texte de l'entree, sans les pastilles de comptage
+        var lab = el.querySelector('.label');
+        var nom = ((lab ? lab.textContent : el.textContent) || '').replace(/\s+/g,' ').trim();
+        var d = VA_ICONES_APPLE[nom];
+        if(actif && d){
+          if(!svg.hasAttribute('data-icone-origine')){
+            svg.setAttribute('data-icone-origine', svg.innerHTML);
+            svg.setAttribute('data-viewbox-origine', svg.getAttribute('viewBox') || '0 0 24 24');
+          }
+          svg.setAttribute('viewBox','0 0 24 24');
+          svg.setAttribute('stroke-width','1.6');
+          svg.setAttribute('stroke-linecap','round');
+          svg.setAttribute('stroke-linejoin','round');
+          svg.innerHTML = d;
+        } else if(svg.hasAttribute('data-icone-origine')){
+          svg.innerHTML = svg.getAttribute('data-icone-origine');
+          svg.setAttribute('viewBox', svg.getAttribute('data-viewbox-origine'));
+          svg.removeAttribute('data-icone-origine');
+          svg.removeAttribute('data-viewbox-origine');
+        }
+      });
+  }catch(e){}
+}
+(function(){
+  function init(){
+    var t = '';
+    try{ t = localStorage.getItem('vabot_theme') || ''; }catch(e){}
+    vaAppliquerIcones(t === 'apple');
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
+</script>
+</body></html>
 """
 
 
@@ -15271,20 +15324,48 @@ function vaultItemVisible(a){
   if(mk && (a.getAttribute('data-market') || '') !== mk) return false;
   var q = window.__vaultQ;
   if(q && (a.getAttribute('data-ident') || '').toLowerCase().indexOf(q) === -1) return false;
-  var sec = a.closest ? a.closest('.form-section') : null;
-  var fv = (sec && sec.getAttribute('data-identfval')) || 'all';
-  if(fv !== 'all' && a.getAttribute('data-ident') !== '_pool_'){
-    var sub = a.querySelector('div[style*="color:#888"]');
-    var m = sub ? String(sub.textContent || '').match(/^(\d+)/) : null;
-    var n = m ? parseInt(m[1]) : 0;
-    if(fv === 'full' ? !(n > 0) : !(n === 0)) return false;
-  }
+  // Le filtre « Avec du contenu / Vides » a ete retire : il cachait des
+  // identites de facon invisible. Seule la recherche filtre encore.
   return true;
 }
 function vaultRefilter(){
   document.querySelectorAll('.vault-item').forEach(function(a){
     a.style.display = vaultItemVisible(a) ? '' : 'none';
   });
+  // Une liste vide sans explication passe pour une panne : on dit pourquoi,
+  // et on offre de tout reafficher.
+  try{
+    document.querySelectorAll('.vault-list').forEach(function(liste){
+      var cartes = liste.querySelectorAll('.vault-item');
+      if(!cartes.length) return;
+      var visibles = 0;
+      cartes.forEach(function(c){ if(c.style.display !== 'none') visibles++; });
+      var note = liste.querySelector('[data-vide-note]');
+      if(visibles === 0){
+        if(!note){
+          note = document.createElement('div');
+          note.setAttribute('data-vide-note','1');
+          note.style.cssText = 'padding:14px 12px;font-size:13px;color:#8b8b95;line-height:1.5';
+          liste.appendChild(note);
+        }
+        var q = window.__vaultQ || '';
+        note.innerHTML = q
+          ? 'Aucune identite ne correspond a « ' + q.replace(/[<>&]/g,'') + ' ».'
+          : 'Aucune identite affichee (filtre de marche actif).';
+        var b = document.createElement('button');
+        b.textContent = 'Tout afficher';
+        b.style.cssText = 'display:block;margin-top:8px;background:none;border:0;padding:0;'
+          + 'color:#3b82f6;font-weight:600;font-size:13px;cursor:pointer;font-family:inherit';
+        b.onclick = function(){
+          window.__vaultQ = '';
+          document.querySelectorAll('.vault-search input').forEach(function(i){ i.value = ''; });
+          try{ localStorage.setItem('vault_market',''); }catch(e){}
+          vaultRefilter();
+        };
+        note.appendChild(b);
+      } else if(note){ note.remove(); }
+    });
+  }catch(e){}
   var mk = marketCur();
   document.querySelectorAll('#market-floating button').forEach(function(b){
     if((b.getAttribute('data-mkopt') || '') === mk) b.setAttribute('data-on','1');
@@ -15696,23 +15777,10 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         "<div class='vault-sidebar'>"
         f"<div class='vault-search'>"
         f"<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2.5' style='color:#666'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
-        f"<input type='text' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' data-lpignore='true' data-1p-ignore='true' data-form-type='other' name='q_nofill' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-{subdir}'>"
+        f"<input type='text' readonly onfocus=\"this.removeAttribute('readonly')\" autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' data-lpignore='true' data-1p-ignore='true' data-form-type='other' name='q_nofill' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-{subdir}'>"
         f"</div>"
-        f"<div class='vault-filter-row' style='position:relative'>"
-        f"<button type='button' data-identfilter='{subdir}' "
-        "style='background:none;border:0;padding:0;cursor:pointer;font-family:inherit;"
-        "color:#3b82f6;font-weight:600;font-size:13px;letter-spacing:-.01em;display:flex;align-items:center;gap:6px'>"
-        "<span data-filterlbl>Toutes les identités</span>"
-        "<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2.5'><polyline points='6 9 12 15 18 9'/></svg>"
-        "</button>"
-        "<div data-filtermenu style='display:none;position:absolute;top:26px;left:0;z-index:40;"
-        "background:#141418;border:1px solid #2a2a30;border-radius:10px;padding:5px;min-width:170px;"
-        "box-shadow:0 10px 30px rgba(0,0,0,.5)'>"
-        "<button type='button' data-fval='all' class='ident-fopt'>Toutes les identités</button>"
-        "<button type='button' data-fval='full' class='ident-fopt'>Avec du contenu</button>"
-        "<button type='button' data-fval='empty' class='ident-fopt'>Vides</button>"
-        "</div>"
-        f"</div>"
+        # Filtre « Toutes / Avec du contenu / Vides » retire : il masquait des
+        # identites sans que ce soit visible, pour un service quasi nul.
         f"<div class='vault-list' id='vault-list-{subdir}'>"
         + "".join(vault_items)
         + "</div>"
@@ -16455,7 +16523,7 @@ def _render_cloud_captions_html() -> str:
         "<div class='vault-sidebar'>"
         "<div class='vault-search'>"
         "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2.5' style='color:#666'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
-        "<input type='text' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' data-lpignore='true' data-1p-ignore='true' data-form-type='other' name='q_nofill' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-captions'>"
+        "<input type='text' readonly onfocus=\"this.removeAttribute('readonly')\" autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' data-lpignore='true' data-1p-ignore='true' data-form-type='other' name='q_nofill' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-captions'>"
         "</div>"
         "<div class='vault-filter-row'>"
         "<div style='color:#a855f7;font-weight:600;font-size:13px;letter-spacing:-.01em;display:flex;align-items:center;gap:6px'>Toutes les identités"
@@ -16727,7 +16795,7 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
         "<div class='vault-sidebar'>"
         "<div class='vault-search'>"
         "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2.5' style='color:#666'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
-        f"<input type='text' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' data-lpignore='true' data-1p-ignore='true' data-form-type='other' name='q_nofill' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-{dom_key}'>"
+        f"<input type='text' readonly onfocus=\"this.removeAttribute('readonly')\" autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' data-lpignore='true' data-1p-ignore='true' data-form-type='other' name='q_nofill' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-{dom_key}'>"
         "</div>"
         "<div class='vault-filter-row'>"
         "<div style='color:#22c55e;font-weight:600;font-size:13px;letter-spacing:-.01em;display:flex;align-items:center;gap:6px'>Toutes les identités"
@@ -17174,7 +17242,7 @@ def _render_textvault_html(cat: str) -> str:
         "<div class='vault-sidebar'>"
         "<div class='vault-search'>"
         "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2.5' style='color:#666'><circle cx='11' cy='11' r='8'/><path d='m21 21-4.35-4.35'/></svg>"
-        f"<input type='text' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' data-lpignore='true' data-1p-ignore='true' data-form-type='other' name='q_nofill' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-{cat}'>"
+        f"<input type='text' readonly onfocus=\"this.removeAttribute('readonly')\" autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false' data-lpignore='true' data-1p-ignore='true' data-form-type='other' name='q_nofill' placeholder='Rechercher…' oninput='vaultFilter(this.value)' id='vault-search-{cat}'>"
         "</div>"
         "<div class='vault-filter-row'>"
         "<div style='color:#f59e0b;font-weight:600;font-size:13px;letter-spacing:-.01em;display:flex;align-items:center;gap:6px'>Toutes les identités"
