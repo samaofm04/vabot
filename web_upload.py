@@ -20457,7 +20457,11 @@ def _render_home_dashboard_html() -> str:
 .home-period-row{display:flex;gap:0;background:rgba(255,255,255,.04);border:1px solid #2a2a2a;border-radius:10px;padding:4px;font-size:13px}
 .home-period-btn{background:transparent;border:0;color:#888;padding:8px 18px;border-radius:7px;font-weight:600;cursor:pointer;text-decoration:none;transition:all .15s;flex:1;text-align:center}
 .home-period-btn:hover{color:#fff}
-.home-period-active{background:#3b82f6 !important;color:#fff !important;box-shadow:0 2px 8px rgba(59,130,246,.25)}
+.home-period-active{background:rgba(0,122,255,.12) !important;color:#0a84ff !important;box-shadow:none}
+body.light .home-period-btn{color:#3c3c43}
+body.light .home-period-btn:hover{color:#1c1c1e}
+body.light .home-period-active{background:rgba(0,122,255,.10) !important;color:#007aff !important}
+body.light .home-period-row{background:#fff;border-color:rgba(60,60,67,.12)}
 .home-overview{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:24px;margin-bottom:18px}
 .home-overview-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;gap:14px;flex-wrap:wrap}
 .home-overview-title{font-size:16px;font-weight:700;letter-spacing:-.01em;display:flex;align-items:center;gap:8px}
@@ -20500,7 +20504,9 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
             f"<div class='home-stat'>"
             f"<div class='home-stat-icon' style='background:{bg_color};color:{color}'>{icon_svg}</div>"
             f"<div>"
-            f"<div class='home-stat-value fx-amt' style='color:{color}' data-usd='{value:.2f}'{brut_attr}>${value:,.2f}</div>"
+            # montant en couleur de texte normale : seule l'icone porte la
+            # couleur, sinon le tableau de chiffres devient illisible
+            f"<div class='home-stat-value fx-amt' data-usd='{value:.2f}'{brut_attr}>${value:,.2f}</div>"
             f"<div class='home-stat-label'>{label}</div>"
             f"</div>"
             f"</div>"
