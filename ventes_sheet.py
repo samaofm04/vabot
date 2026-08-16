@@ -23,6 +23,7 @@ CONFIG = DATA_DIR / "ventes_sheet.json"
 ONGLET_VENTES = "Ventes"
 ONGLET_CHATTEURS = "Par chatteur"
 ONGLET_QUINZAINE = "Par quinzaine"
+ONGLET_FICHES = "Fiches chatteurs"
 
 _ETAT = {"state": "idle", "ts": 0, "lignes": 0, "err": ""}
 _LOCK = threading.Lock()
@@ -101,7 +102,8 @@ def preparer(transactions) -> tuple:
     entetes = ventes_export.COLONNES
     cols_recap, recap = ventes_export.recap_par_chatteur(lignes)
     cols_q, recap_q = ventes_export.recap_par_quinzaine(lignes)
-    return ([entetes] + lignes), ([cols_recap] + recap), ([cols_q] + recap_q)
+    fiches = [["Chatteur", "Quand", "Compte", "Fan", "Montant"]] +         ventes_export.fiches_chatteurs(lignes)
+    return ([entetes] + lignes), ([cols_recap] + recap), ([cols_q] + recap_q), fiches
 
 
 def pousser(transactions, periode: str = "") -> dict:
@@ -111,7 +113,7 @@ def pousser(transactions, periode: str = "") -> dict:
         return {"ok": False, "err": "Aucun classeur configure"}
     if not disponible():
         return {"ok": False, "err": "Compte de service Google indisponible"}
-    grille, recap, quinz = preparer(transactions)
+    grille, recap, quinz, fiches = preparer(transactions)
     _set(state="running", err="", ts=int(time.time()))
     try:
         gc = _client()
@@ -139,6 +141,14 @@ def pousser(transactions, periode: str = "") -> dict:
         ws3.update("A1", quinz, value_input_option="RAW")
         try:
             ws3.freeze(rows=1)
+        except Exception:
+            pass
+
+        ws4 = _onglet(classeur, ONGLET_FICHES, 5)
+        ws4.clear()
+        ws4.update("A1", fiches, value_input_option="RAW")
+        try:
+            ws4.freeze(rows=1)
         except Exception:
             pass
 

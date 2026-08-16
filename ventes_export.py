@@ -109,6 +109,33 @@ def recap_par_quinzaine(lignes) -> tuple:
     return (["Chatteur"] + quinz + ["Total"]), out
 
 
+def fiches_chatteurs(lignes) -> list:
+    """Une fiche par chatteur : ses chiffres, puis le detail de ses ventes.
+
+    C'est la vue qu'on ouvre quand quelqu'un conteste : on voit d'un coup ce
+    qu'il a fait, sa part du chiffre, son panier moyen, puis chaque vente avec
+    sa date, son heure, le compte sur lequel elle a ete faite et le fan.
+    """
+    par = defaultdict(list)
+    for r in lignes:
+        par[r[3]].append(r)
+    total_general = sum(r[6] for r in lignes) or 1.0
+    out = []
+    for chatteur in sorted(par, key=lambda c: -sum(r[6] for r in par[c])):
+        ventes = par[chatteur]
+        total = sum(r[6] for r in ventes)
+        panier = total / len(ventes) if ventes else 0.0
+        part = 100.0 * total / total_general
+        # en-tete de la fiche
+        out.append([chatteur, "%d vente(s)" % len(ventes), round(total, 2),
+                    "%.1f %% du total" % part, "panier %.2f" % panier])
+        # ses ventes, de la plus recente a la plus ancienne
+        for r in sorted(ventes, key=lambda x: (x[0], x[1]), reverse=True):
+            out.append(["", r[0] + " " + r[1], r[4], r[5], "%.2f %s" % (r[6], r[7])])
+        out.append(["", "", "", "", ""])          # respiration entre deux fiches
+    return out
+
+
 def controle(lignes, total_annonce=None) -> list:
     """Compare la somme du registre au total affiche ailleurs.
 
@@ -123,11 +150,47 @@ def controle(lignes, total_annonce=None) -> list:
             sans_chatteur += 1
         if not r[0]:
             sans_date += 1
+    # --- recherche de trous : un jour sans AUCUNE vente au milieu d'une
+    # periode active est suspect, c'est la trace d'un scraping incomplet.
+    jours = defaultdict(float)
+    for r in lignes:
+        if r[0]:
+            jours[r[0]] += r[6]
+    trous = []
+    if len(jours) >= 3:
+        tous = sorted(jours)
+        try:
+            d0 = _dt.date.fromisoformat(tous[0])
+            d1 = _dt.date.fromisoformat(tous[-1])
+            j = d0
+            while j <= d1:
+                if j.isoformat() not in jours:
+                    trous.append(j.isoformat())
+                j += _dt.timedelta(days=1)
+        except Exception:
+            pass
+
     ctrl = [["Ventes enregistrees", len(lignes)]]
     for d, v in sorted(par_devise.items()):
         ctrl.append(["Total " + d, round(v, 2)])
     ctrl.append(["Ventes sans chatteur identifie", sans_chatteur])
     ctrl.append(["Ventes sans date exploitable", sans_date])
+    ctrl.append(["Jours couverts", len(jours)])
+    ctrl.append(["Jours SANS aucune vente", len(trous)])
+    if trous:
+        ctrl.append(["", ""])
+        ctrl.append(["Jours vides — a verifier sur MyPuls", ""])
+        for j in trous[:40]:
+            ctrl.append(["", j])
+        if len(trous) > 40:
+            ctrl.append(["", "… et %d autre(s)" % (len(trous) - 40)])
+    # journee la plus faible : utile pour reperer un scraping tronque
+    if jours:
+        mini = min(jours, key=lambda k: jours[k])
+        maxi = max(jours, key=lambda k: jours[k])
+        ctrl.append(["", ""])
+        ctrl.append(["Journee la plus faible", "%s (%.2f)" % (mini, jours[mini])])
+        ctrl.append(["Journee la plus forte", "%s (%.2f)" % (maxi, jours[maxi])])
     if total_annonce is not None:
         somme = round(sum(par_devise.values()), 2)
         ctrl.append(["Total annonce par le dashboard", round(total_annonce, 2)])
@@ -136,7 +199,7 @@ def controle(lignes, total_annonce=None) -> list:
 
 
 def construire_xlsx(transactions, periode: str = "", total_annonce=None) -> bytes:
-    """Le classeur : Ventes / Par chatteur / Controle."""
+    """Le classeur : Ventes / Par chatteur / Par quinzaine / Fiches / Controle."""
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
     from openpyxl.utils import get_column_letter
@@ -198,7 +261,19 @@ def construire_xlsx(transactions, periode: str = "", total_annonce=None) -> byte
         for c in row:
             c.number_format = "#,##0.00"
 
-    # --- feuille 4 : controle ---
+    # --- feuille 4 : une fiche par chatteur ---
+    ws5 = wb.create_sheet("Fiches chatteurs")
+    _entete(ws5, ["Chatteur", "Quand", "Compte", "Fan", "Montant"])
+    from openpyxl.styles import Font as _F
+    for r in fiches_chatteurs(lignes):
+        ws5.append(r)
+        if r[0]:                                   # ligne d'en-tete de fiche
+            for c in ws5[ws5.max_row]:
+                c.font = _F(bold=True)
+    for col, larg in zip("ABCDE", (24, 20, 20, 24, 18)):
+        ws5.column_dimensions[col].width = larg
+
+    # --- feuille 5 : controle ---
     ws3 = wb.create_sheet("Controle")
     _entete(ws3, ["Verification", "Valeur"])
     if periode:
