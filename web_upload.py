@@ -15549,8 +15549,14 @@ window.vaultGoTo = function(ev, url){
     c.style.transition = 'opacity .15s';
     c.style.opacity = '.25';
   });
+  // Numero de navigation : si l'utilisateur repart ailleurs pendant le
+  // chargement, la reponse en retard ne doit RIEN remplacer (sinon on se
+  // retrouve ramene de force sur l'ecran precedent quelques secondes apres).
+  window.__vaultNav = (window.__vaultNav || 0) + 1;
+  const _monTour = window.__vaultNav;
   // Charge le nouveau HTML
   const apply = (html)=>{
+    if(_monTour !== window.__vaultNav) return;   // navigation depassee
     try{
       const doc = new DOMParser().parseFromString(html, 'text/html');
       const newSec = doc.getElementById(sec.id);
@@ -15934,9 +15940,9 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
 
         type_filter_html = (
             "<div class='media-type-pills'>"
-            + f"<a href='{_type_url('all')}' data-no-loader='1' class='media-pill {('media-pill-active' if type_filter == 'all' else '')}'>Tout</a>"
-            + f"<a href='{_type_url('photo')}' data-no-loader='1' class='media-pill {('media-pill-active' if type_filter == 'photo' else '')}'>Photo</a>"
-            + f"<a href='{_type_url('video')}' data-no-loader='1' class='media-pill {('media-pill-active' if type_filter == 'video' else '')}'>Vidéo</a>"
+            + f"<a href='{_type_url('all')}' onclick='return vaultGoTo(event,this.href)' data-no-loader='1' class='media-pill {('media-pill-active' if type_filter == 'all' else '')}'>Tout</a>"
+            + f"<a href='{_type_url('photo')}' onclick='return vaultGoTo(event,this.href)' data-no-loader='1' class='media-pill {('media-pill-active' if type_filter == 'photo' else '')}'>Photo</a>"
+            + f"<a href='{_type_url('video')}' onclick='return vaultGoTo(event,this.href)' data-no-loader='1' class='media-pill {('media-pill-active' if type_filter == 'video' else '')}'>Vidéo</a>"
             + "</div>"
         )
 
