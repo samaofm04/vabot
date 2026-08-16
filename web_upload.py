@@ -20148,7 +20148,7 @@ def _render_depenses_html() -> str:
 
 
 def _home_sales_svg(labels, vals, eur_usd: float = 1.14, api_src: bool = False,
-                    vals_brut=None) -> str:
+                    vals_brut=None, periode: str = "") -> str:
     """Courbe revenus/ventes par jour en SVG PUR généré côté serveur.
 
     Zéro dépendance (Chart.js pouvait être bloqué côté client -> carte vide),
@@ -20223,7 +20223,7 @@ def _home_sales_svg(labels, vals, eur_usd: float = 1.14, api_src: bool = False,
             + "</svg>")
 
     titre = "Revenus par jour" if api_src else "Ventes par jour"
-    sous = ("7 derniers jours · toutes créatrices" if api_src
+    sous = ((periode or "7 derniers jours") + " · toutes créatrices" if api_src
             else "7 derniers jours")
     body = _svg(vals, "hsc-net", False)
     if api_src and vals_brut:
@@ -20717,7 +20717,15 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
         + "</div>"
     )
 
-    # ---- Courbe revenus par jour (7 derniers jours, indépendante de la période) ----
+    # ---- Courbe revenus par jour : elle SUIT la periode choisie ----
+    # Elle etait figee sur les 7 derniers jours : selectionner « Ce mois »
+    # affichait les chiffres du mois au-dessus, et une courbe de 7 jours en
+    # dessous. Sur une periode d'un ou deux jours, un graphique n'aurait qu'un
+    # ou deux points : on elargit alors a 7 jours finissant a la date choisie.
+    _c_debut, _c_fin = start, end
+    if (_c_fin - _c_debut).days < 2:
+        _c_debut = _c_fin - _dt.timedelta(days=6)
+    _c_sous = period_label
     # PRIORITÉ API : toutes les créatrices (le scraping tronquait au top 10),
     # conversion EUR->USD par devise (le scraping additionnait EUR et USD bruts),
     # et la courbe s'affiche MÊME cookies morts (hors du gate mp_configured).
@@ -20728,8 +20736,7 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
     _chart_api = False
     try:
         if mypuls.api_configured():
-            wk_start = today - _dt.timedelta(days=6)
-            sres = mypuls.api_revenue_series(wk_start.isoformat(), today.isoformat(), _eur_usd)
+            sres = mypuls.api_revenue_series(_c_debut.isoformat(), _c_fin.isoformat(), _eur_usd)
             if sres.get("ok"):
                 _s_of = sres.get("usd_of") or []
                 _s_mym = sres.get("usd_mym") or []
@@ -20749,8 +20756,7 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
         log.warning("home chart API: %s", _e)
     if not chart_labels and mp_configured and not mp_error:
         try:
-            wk_start = today - _dt.timedelta(days=6)
-            wres = mypuls.fetch_team_stats(wk_start.isoformat(), today.isoformat(), use_cache=True)
+            wres = mypuls.fetch_team_stats(_c_debut.isoformat(), _c_fin.isoformat(), use_cache=True)
             if wres.get("ok"):
                 wch = wres.get("chart") or {}
                 days = wch.get("days") or []
@@ -20774,7 +20780,8 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
     if chart_labels:
         sales_chart_html = _home_sales_svg(chart_labels, chart_vals,
                                            eur_usd=_eur_usd, api_src=_chart_api,
-                                           vals_brut=chart_brut if _chart_api else None)
+                                           vals_brut=chart_brut if _chart_api else None,
+                                           periode=_c_sous)
 
     return (
         css
@@ -38311,9 +38318,81 @@ def _safe_upload_name(name: str) -> str:
     return base[:120]
 
 
+
+# ============ LANGUE : bascule FR / US (anglais par defaut) ============
+try:
+    from i18n_en import TRADUCTIONS as _TRAD_EN
+except Exception:          # pragma: no cover - le site doit tourner sans
+    _TRAD_EN = {}
+
+# Les libelles les plus LONGS d'abord : sinon « Posts » remplacerait le debut
+# de « Posts programmes ».
+_TRAD_ORDRE = sorted(_TRAD_EN.items(), key=lambda kv: -len(kv[0]))
+_TRAD_CACHE = {}
+
+
+def _traduire_html(html: str) -> str:
+    """Traduit les textes VISIBLES d'une page rendue.
+
+    On decoupe sur les <script> et <style> pour ne jamais toucher a leur
+    contenu : y remplacer un mot casserait le JS. Le reste est traite balise
+    par balise — uniquement le texte entre > et <, plus les attributs
+    placeholder et title.
+    """
+    if not _TRAD_EN or not html:
+        return html
+    import re as _re
+    morceaux = _re.split(r"(<script\b.*?</script>|<style\b.*?</style>)",
+                         html, flags=_re.S)
+    for i in range(0, len(morceaux), 2):        # 0, 2, 4... = hors script/style
+        bloc = morceaux[i]
+        if not bloc:
+            continue
+
+        def _texte(m):
+            brut = m.group(1)
+            cle = brut.strip()
+            if not cle or cle not in _TRAD_EN:
+                return m.group(0)
+            return m.group(0).replace(brut, brut.replace(cle, _TRAD_EN[cle]), 1)
+
+        bloc = _re.sub(r">([^<>]+)<", _texte, bloc)
+
+        def _attr(m):
+            cle = m.group(2).strip()
+            if cle not in _TRAD_EN:
+                return m.group(0)
+            return "%s=%s%s%s" % (m.group(1), m.group(3), _TRAD_EN[cle], m.group(3))
+
+        bloc = _re.sub(r"(placeholder|title)=(['\"])([^'\"]*)\2",
+                       lambda m: _attr_helper(m), bloc)
+        morceaux[i] = bloc
+    return "".join(morceaux)
+
+
+def _attr_helper(m):
+    """placeholder="…" / title="…" : traduit la valeur si on la connait."""
+    nom, quote, val = m.group(1), m.group(2), m.group(3)
+    cle = val.strip()
+    if cle in _TRAD_EN:
+        val = val.replace(cle, _TRAD_EN[cle], 1)
+    return "%s=%s%s%s" % (nom, quote, val, quote)
+
+
+def _langue_courante() -> str:
+    """« en » (defaut) ou « fr », d'apres le cookie va_lang."""
+    try:
+        from flask import request as _rq
+        v = (_rq.cookies.get("va_lang") or "").strip().lower()
+        return "fr" if v == "fr" else "en"
+    except Exception:
+        return "en"
+
 def _render_upload(msg=None, error=None):
     try:
-        return _render_upload_inner(msg=msg, error=error)
+        _page = _render_upload_inner(msg=msg, error=error)
+        # Anglais par defaut ; « fr » dans le cookie ramene le francais.
+        return _traduire_html(_page) if _langue_courante() == "en" else _page
     except Exception as e:
         import traceback as _tb
         tb_text = _tb.format_exc()
