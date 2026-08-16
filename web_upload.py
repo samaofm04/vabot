@@ -1279,6 +1279,33 @@ body.apple .sfw-switch,body.apple .sfw-thumb{transition:background-color .28s cu
   body.apple .stat:hover,body.apple .theme-card:hover{transform:none!important}
   @keyframes appleFade{from{opacity:0}to{opacity:1}}}
 
+/* =============== TRANSITIONS : l'interface ne « claque » plus ===============
+   Une section qui repasse de display:none a display:block rejoue son
+   animation : c'est exactement le moment ou l'onglet s'ouvre, sans une ligne
+   de JS. OPACITE SEULE et jamais transform : dix elements en position:fixed
+   vivent dans ces sections, et un transform sur leur parent en ferait leur
+   reference de position — ils sauteraient pendant l'animation. */
+@keyframes vaTabIn{from{opacity:0}to{opacity:1}}
+.form-section{animation:vaTabIn .24s ease-out both}
+/* Retour visuel des l'APPUI (pas au relachement) sur tout ce qui se clique.
+   Ici le transform est sans danger : ce sont de petits elements isoles. */
+.sidebar .solo-item,.sidebar .group-head,.sidebar .group .item,.sidebar .subgroup-head,
+.btn,button[type=submit],.up-submit,.subtab,.media-pill{
+  transition:transform .12s ease-out,background-color .15s ease,color .15s ease,border-color .15s ease}
+.sidebar .solo-item:active,.sidebar .group-head:active,.sidebar .group .item:active,
+.sidebar .subgroup-head:active,.btn:active,button[type=submit]:active,
+.up-submit:active,.subtab:active,.media-pill:active{transform:scale(.975)}
+/* Les cartes de galerie repondent au survol sans bousculer la mise en page */
+.vault-item{transition:transform .14s ease-out,background-color .15s ease}
+.vault-item:active{transform:scale(.985)}
+/* Reglage systeme « moins d'animations » : on coupe tout, on garde l'usage */
+@media (prefers-reduced-motion:reduce){
+  .form-section,.card,.card>h1,.card>.subtitle{animation:none!important}
+  .sidebar .solo-item:active,.sidebar .group-head:active,.sidebar .group .item:active,
+  .sidebar .subgroup-head:active,.btn:active,button[type=submit]:active,
+  .up-submit:active,.subtab:active,.media-pill:active,.vault-item:active{transform:none!important}
+}
+
 /* =============== SIDEBAR RAIL : menu réduit en icônes + flyouts au survol =============== */
 .sidebar{transition:width .25s cubic-bezier(.16,1,.3,1)}
 .rail-toggle{display:flex;align-items:center;gap:12px;margin:0 12px 4px;padding:8px 14px;background:transparent;border:0;color:#666;font-size:12px;font-weight:600;cursor:pointer;border-radius:8px;font-family:inherit;text-align:left;transition:background .15s,color .15s}
@@ -6421,6 +6448,9 @@ function showTab(group,name,title,subtitle){
         .then(function(htmlFrag){
           sec.innerHTML = htmlFrag;
           sec.dataset.lazyLoaded = '1';
+          // rejouer le fondu : la section etait deja visible (« Chargement... »),
+          // donc son animation d'ouverture ne se redeclencherait pas seule
+          try{ sec.style.animation='none'; void sec.offsetWidth; sec.style.animation=''; }catch(e){}
           // ré-exécuter les <script> du fragment (sinon charts/toggles muets)
           sec.querySelectorAll('script').forEach(function(old){
             var s=document.createElement('script');
@@ -15146,8 +15176,9 @@ document.addEventListener('DOMContentLoaded', function(){
   // UN SEUL observateur pour toute la page : il y en avait un par galerie,
   // et chacun re-filtrait toutes les cartes a la moindre mutation du DOM.
   if(window.__vaultObs) return;
+  window.__vaultObs = 1;          // poser AVANT : .observe() renvoie undefined
   try{
-    window.__vaultObs = new MutationObserver(function(){
+    new MutationObserver(function(){
       if(window.__mkTimer) return;
       window.__mkTimer = setTimeout(function(){ window.__mkTimer = 0; vaultRefilter(); }, 40);
     }).observe(document.body, {childList:true, subtree:true});
