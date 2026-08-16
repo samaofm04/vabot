@@ -136,6 +136,46 @@ def fiches_chatteurs(lignes) -> list:
     return out
 
 
+def paie_quinzaine(lignes, commissions=None, eur_usd: float = 1.14) -> tuple:
+    """Une ligne par chatteur et par quinzaine : CA, taux, a payer, et le
+    detail de toutes ses ventes SUR LA MEME LIGNE.
+
+    `commissions` : {chatteur: pourcentage}. La part EUR est convertie en USD,
+    la part USD est prise telle quelle — meme regle que la page Paie du site,
+    sinon les ventes OnlyFans seraient surpayees.
+    """
+    commissions = commissions or {}
+    par = defaultdict(list)
+    for r in lignes:
+        if r[2]:
+            par[(r[3], r[2])].append(r)
+    out = []
+    for (chatteur, quinz) in sorted(par, key=lambda k: (k[1], -sum(x[6] for x in par[k]))):
+        ventes = par[(chatteur, quinz)]
+        ca_eur = sum(v[6] for v in ventes if v[7] == "EUR")
+        ca_usd = sum(v[6] for v in ventes if v[7] == "USD")
+        autres = sum(v[6] for v in ventes if v[7] not in ("EUR", "USD"))
+        # Meme decoupage que le tableau du site : ce qui vient des messages
+        # payants d'un cote, les pourboires de l'autre.
+        def _est(mot):
+            return sum(v[6] for v in ventes if mot in (v[8] or "").lower())
+        ppv = _est("message") + _est("ppv") + _est("post")
+        tips = _est("tip") + _est("pourboire")
+        pct = float(commissions.get(chatteur, commissions.get("_defaut_", 0)) or 0)
+        a_payer = round((ca_eur * eur_usd + ca_usd + autres * eur_usd) * pct / 100.0, 2)
+        # toutes les ventes sur UNE ligne, de la plus recente a la plus ancienne
+        detail = " · ".join(
+            "%s %.2f%s (%s)" % (v[0][5:], v[6], "€" if v[7] == "EUR" else "$", v[4])
+            for v in sorted(ventes, key=lambda x: (x[0], x[1]), reverse=True))
+        out.append([quinz, chatteur, len(ventes),
+                    round(ca_eur + ca_usd + autres, 2), round(ppv, 2), round(tips, 2),
+                    round(ca_eur, 2), round(ca_usd, 2), pct, a_payer, detail])
+    cols = ["Quinzaine", "Chatteur", "Ventes", "CA total", "PPV", "Tips",
+            "CA EUR", "CA USD", "Commission %", "A payer (USD)",
+            "Detail des ventes"]
+    return cols, out
+
+
 def controle(lignes, total_annonce=None) -> list:
     """Compare la somme du registre au total affiche ailleurs.
 
@@ -198,7 +238,8 @@ def controle(lignes, total_annonce=None) -> list:
     return ctrl
 
 
-def construire_xlsx(transactions, periode: str = "", total_annonce=None) -> bytes:
+def construire_xlsx(transactions, periode: str = "", total_annonce=None,
+                    commissions=None, eur_usd: float = 1.14) -> bytes:
     """Le classeur : Ventes / Par chatteur / Par quinzaine / Fiches / Controle."""
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
@@ -261,7 +302,19 @@ def construire_xlsx(transactions, periode: str = "", total_annonce=None) -> byte
         for c in row:
             c.number_format = "#,##0.00"
 
-    # --- feuille 4 : une fiche par chatteur ---
+    # --- feuille : la paie, une ligne par chatteur et par quinzaine ---
+    ws6 = wb.create_sheet("Paie quinzaine")
+    cols6, paie = paie_quinzaine(lignes, commissions=commissions, eur_usd=eur_usd)
+    _entete(ws6, cols6)
+    for r in paie:
+        ws6.append(r)
+    for col, larg in zip("ABCDEFGHIJK", (16, 24, 8, 12, 11, 11, 11, 11, 13, 15, 90)):
+        ws6.column_dimensions[col].width = larg
+    for row in ws6.iter_rows(min_row=2, min_col=4, max_col=10):
+        for c in row:
+            c.number_format = "#,##0.00"
+
+    # --- feuille : une fiche par chatteur ---
     ws5 = wb.create_sheet("Fiches chatteurs")
     _entete(ws5, ["Chatteur", "Quand", "Compte", "Fan", "Montant"])
     from openpyxl.styles import Font as _F

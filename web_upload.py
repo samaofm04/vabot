@@ -42608,6 +42608,24 @@ def create_app():
                         **_vs.etat()})
 
 
+
+    def _ventes_contexte(tx):
+        """Taux EUR/USD et commissions REELS, pour que les montants du
+        classeur recoupent ceux de la page Paie."""
+        try:
+            taux = float(mypuls.get_eur_usd_rate()["rate"])
+        except Exception:
+            taux = 1.14
+        comm = {}
+        try:
+            noms = {(t.get("chatter") or "").strip() for t in (tx or [])}
+            for n in noms:
+                if n:
+                    comm[n] = float(mypuls.get_chatter_meta(n)["commission_pct"])
+        except Exception:
+            pass
+        return comm, taux
+
     @app.route("/ventes-sheet")
     def ventes_sheet_go():
         """Declenche la synchro et affiche le resultat — accessible a la main.
@@ -42688,7 +42706,9 @@ def create_app():
             _tot = None
         import ventes_export as _ve
         try:
-            data = _ve.construire_xlsx(tx, periode=f"{start} -> {end}", total_annonce=_tot)
+            _comm, _taux = _ventes_contexte(tx)
+            data = _ve.construire_xlsx(tx, periode=f"{start} -> {end}", total_annonce=_tot,
+                                       commissions=_comm, eur_usd=_taux)
         except Exception as e:
             return _error(f"Export impossible : {e}", tab="revenus")
         import io as _io

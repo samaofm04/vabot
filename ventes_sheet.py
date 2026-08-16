@@ -24,6 +24,7 @@ ONGLET_VENTES = "Ventes"
 ONGLET_CHATTEURS = "Par chatteur"
 ONGLET_QUINZAINE = "Par quinzaine"
 ONGLET_FICHES = "Fiches chatteurs"
+ONGLET_PAIE = "Paie quinzaine"
 
 _ETAT = {"state": "idle", "ts": 0, "lignes": 0, "err": ""}
 _LOCK = threading.Lock()
@@ -96,24 +97,28 @@ def _onglet(classeur, titre: str, colonnes: int):
         return classeur.add_worksheet(title=titre, rows=1000, cols=max(colonnes, 8))
 
 
-def preparer(transactions) -> tuple:
+def preparer(transactions, commissions=None, eur_usd: float = 1.14) -> tuple:
     """Transactions -> (lignes du registre, lignes du recap). Testable seul."""
     lignes = ventes_export.lignes_ventes(transactions)
     entetes = ventes_export.COLONNES
     cols_recap, recap = ventes_export.recap_par_chatteur(lignes)
     cols_q, recap_q = ventes_export.recap_par_quinzaine(lignes)
     fiches = [["Chatteur", "Quand", "Compte", "Fan", "Montant"]] +         ventes_export.fiches_chatteurs(lignes)
-    return ([entetes] + lignes), ([cols_recap] + recap), ([cols_q] + recap_q), fiches
+    cols_p, paie = ventes_export.paie_quinzaine(lignes, commissions=commissions,
+                                                eur_usd=eur_usd)
+    return (([entetes] + lignes), ([cols_recap] + recap), ([cols_q] + recap_q),
+            fiches, ([cols_p] + paie))
 
 
-def pousser(transactions, periode: str = "") -> dict:
+def pousser(transactions, periode: str = "", commissions=None,
+            eur_usd: float = 1.14) -> dict:
     """Ecrit les ventes dans le classeur. Retourne {ok, lignes, err}."""
     sid = sheet_id()
     if not sid:
         return {"ok": False, "err": "Aucun classeur configure"}
     if not disponible():
         return {"ok": False, "err": "Compte de service Google indisponible"}
-    grille, recap, quinz, fiches = preparer(transactions)
+    grille, recap, quinz, fiches, paie = preparer(transactions, commissions, eur_usd)
     _set(state="running", err="", ts=int(time.time()))
     try:
         gc = _client()
@@ -149,6 +154,14 @@ def pousser(transactions, periode: str = "") -> dict:
         ws4.update("A1", fiches, value_input_option="RAW")
         try:
             ws4.freeze(rows=1)
+        except Exception:
+            pass
+
+        ws5 = _onglet(classeur, ONGLET_PAIE, 11)
+        ws5.clear()
+        ws5.update("A1", paie, value_input_option="RAW")
+        try:
+            ws5.freeze(rows=1)
         except Exception:
             pass
 
@@ -207,8 +220,17 @@ def start_auto(interval: int = 300) -> bool:
                 debut = today.replace(day=1).isoformat()
                 res = mypuls.fetch_team_stats(debut, today.isoformat(), use_cache=True)
                 if res.get("ok"):
-                    pousser(res.get("transactions") or [],
-                            periode="%s -> %s (auto)" % (debut, today.isoformat()))
+                    tx = res.get("transactions") or []
+                    comm, taux = {}, 1.14
+                    try:
+                        taux = float(mypuls.get_eur_usd_rate()["rate"])
+                        for n in {(t.get("chatter") or "").strip() for t in tx}:
+                            if n:
+                                comm[n] = float(mypuls.get_chatter_meta(n)["commission_pct"])
+                    except Exception:
+                        pass
+                    pousser(tx, periode="%s -> %s (auto)" % (debut, today.isoformat()),
+                            commissions=comm, eur_usd=taux)
             except Exception:
                 pass          # une panne passagere ne doit pas tuer la boucle
 
