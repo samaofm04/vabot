@@ -1023,7 +1023,12 @@ input:focus,select:focus,textarea:focus{outline:0;border-color:#3b82f6;box-shado
 .confirm-box .btn-confirm{background:#d9534f;color:#fff}
 .confirm-box .btn-confirm:hover{background:#c9302c}
 /* Sidebar large avec groupes pliables + flèches + section labels */
-.sidebar{width:240px;background:#0a0a0a;border-right:1px solid #1a1a1a;padding:18px 0;flex-shrink:0;display:flex;flex-direction:column;gap:2px}
+.sidebar{width:240px;background:#0a0a0a;border-right:1px solid #1a1a1a;padding:18px 0;flex-shrink:0;display:flex;flex-direction:column;gap:2px;/* Le menu reste a l'ecran pendant qu'on fait defiler le contenu : sans ca il
+   defilait avec la page (hauteur = son contenu, ~1560px) et disparaissait
+   des qu'on descendait un peu. align-self evite que le flex l'etire, sinon
+   sticky n'a aucun effet ; overscroll-behavior empeche le defilement de se
+   propager a la page quand on arrive au bout du menu. */
+position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto;overscroll-behavior:contain}
 .sidebar .section-label{font-size:10px;color:#666;text-transform:uppercase;letter-spacing:1.5px;padding:14px 22px 6px;font-weight:700}
 /* Item standalone (Dashboard tout en haut) */
 .sidebar .solo-group{padding:0 12px 8px;margin-bottom:4px;border-bottom:1px solid #1a1a1a}
