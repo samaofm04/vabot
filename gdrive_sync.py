@@ -591,6 +591,31 @@ IMPORT_MAP = {
 }
 
 
+def _lister_paralleles(sess, taches):
+    """Liste PLUSIEURS dossiers a la fois.
+
+    `taches` : liste de (parent_id, dossiers). Retourne {(id, dossiers): files}.
+    Cinq requetes simultanees : un listage attend surtout le reseau, les
+    enchainer un par un multipliait la duree par le nombre de dossiers.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    taches = list(dict.fromkeys(taches))          # sans doublon
+    if not taches:
+        return {}
+    res = {}
+
+    def _un(t):
+        try:
+            return t, _lister(sess, t[0], dossiers=t[1])
+        except Exception:
+            return t, []
+
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        for t, files in ex.map(_un, taches):
+            res[t] = files
+    return res
+
+
 def _lister(sess, parent_id, dossiers=False):
     q = (f"'{parent_id}' in parents and trashed = false and mimeType "
          + ("=" if dossiers else "!=") + " 'application/vnd.google-apps.folder'")
@@ -706,10 +731,14 @@ def _candidats_import(sess, st, root):
                             for x in _lister(sess, sous["id"], dossiers=True)]
                            if nom_s.upper() in ("FR", "US")
                            else [(nom_s.lower(), sous["id"])])
-                for ident_b, did in grappes:
-                    if not (IDENTITIES_DIR / ident_b).exists():
-                        continue
-                    for typ in _lister(sess, did, dossiers=True):
+                # Les sous-dossiers de TOUTES les identites sont listes en une
+                # fois : c'est la partie qui coutait le plus cher (une
+                # quinzaine d'identites x un aller-retour chacune).
+                _utiles = [(i, d) for i, d in grappes
+                           if (IDENTITIES_DIR / i).exists()]
+                _types = _lister_paralleles(sess, [(d, True) for _i, d in _utiles])
+                for ident_b, did in _utiles:
+                    for typ in _types.get((did, True), []):
                         sub = _DRIVE_TO_SUB.get(typ["name"].strip().lower())
                         if sub:
                             _prendre(typ["id"], ident_b, sub, canonique=True)
