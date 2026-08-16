@@ -1602,6 +1602,10 @@ body.light .cap-prev .cap-prev-txt{paint-order:stroke fill}
 body.light .cap-prev{background:linear-gradient(160deg,#4a4a4f,#232327)!important;
   border-color:rgba(60,60,67,.16)!important}
 
+/* Bloc de metadonnees vide (la position a ete retiree) : sans ca il gardait
+   sa hauteur sous chaque carte. */
+.cap-card-meta:empty{display:none}
+
 /* =============== SIDEBAR RAIL : menu réduit en icônes + flyouts au survol =============== */
 .sidebar{transition:width .25s cubic-bezier(.16,1,.3,1)}
 .rail-toggle{display:flex;align-items:center;gap:12px;margin:0 12px 4px;padding:8px 14px;background:transparent;border:0;color:#666;font-size:12px;font-weight:600;cursor:pointer;border-radius:8px;font-family:inherit;text-align:left;transition:background .15s,color .15s}
@@ -16893,7 +16897,7 @@ def _render_cloud_captions_html() -> str:
     for it in block["items"]:
         cid = _h.escape(str(it["id"]), quote=True)
         on = it.get("enabled", True)
-        meta = f"📍 {round(it.get('x', 0.5) * 100)}·{round(it.get('y', 0.5) * 100)}%"
+        meta = ""   # position retiree : l'apercu montre deja ou tombe le texte
         if it.get("wrapW"):
             meta += f" · ↔ {round(it['wrapW'] * 100)}%"
         # 3 contrôles, MÊME look que les cartes Template montage : ▶ (éditeur),
