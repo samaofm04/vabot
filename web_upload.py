@@ -1441,6 +1441,18 @@ body.light .va-loading{color:rgba(60,60,67,.6)}
 body.light.apple .va-loading::before{border-color:rgba(60,60,67,.18);border-top-color:#007aff}
 @media (prefers-reduced-motion:reduce){.va-loading::before{animation:none}}
 
+/* --- Classement des ventes : pastilles et separateurs qui suivent le theme
+   (le fond des rangs 4+ et les traits restaient noirs sur fond clair) --- */
+.rank-row{display:flex;align-items:center;gap:12px;padding:10px 6px;border-bottom:1px solid #222}
+.rank-row:last-child{border-bottom:0}
+.rank-badge{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-weight:700;font-size:12px;flex-shrink:0;color:#fff}
+.rank-badge-off{background:#26262a;color:#aaa}
+.rank-amount{font-size:14px;color:#3b82f6;font-weight:700;font-variant-numeric:tabular-nums}
+body.light .rank-row{border-bottom-color:rgba(60,60,67,.10)}
+body.light .rank-badge-off{background:#f2f2f7;color:#3c3c43}
+body.light.apple .rank-amount{color:#007aff}
+
 /* =============== SIDEBAR RAIL : menu réduit en icônes + flyouts au survol =============== */
 .sidebar{transition:width .25s cubic-bezier(.16,1,.3,1)}
 .rail-toggle{display:flex;align-items:center;gap:12px;margin:0 12px 4px;padding:8px 14px;background:transparent;border:0;color:#666;font-size:12px;font-weight:600;cursor:pointer;border-radius:8px;font-family:inherit;text-align:left;transition:background .15s,color .15s}
@@ -20340,16 +20352,15 @@ def _render_home_dashboard_html() -> str:
         badge_bg = {1: "#14b8a6", 2: "#10b981", 3: "#34d399"}
         for i, c in enumerate(ranked[:8], start=1):
             bg = badge_bg.get(i)
-            badge = (
-                f"<div style='width:26px;height:26px;border-radius:50%;background:{bg};color:#04241d;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;flex-shrink:0'>{i}</div>"
-                if bg else
-                f"<div style='width:26px;height:26px;border-radius:50%;background:#26262a;color:#aaa;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;flex-shrink:0'>{i}</div>"
-            )
+            # Classes plutot que styles en dur : le fond des rangs 4+ et le
+            # trait de separation restaient NOIRS en theme clair.
+            badge = (f"<div class='rank-badge' style='background:{bg}'>{i}</div>"
+                     if bg else f"<div class='rank-badge rank-badge-off'>{i}</div>")
             items.append(
-                f"<div style='display:flex;align-items:center;gap:12px;padding:10px 6px;border-bottom:1px solid #222'>"
+                f"<div class='rank-row'>"
                 f"{badge}"
                 f"<div style='flex:1;min-width:0;font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{c['name']}</div>"
-                f"<div style='font-size:14px;color:#3b82f6;font-weight:700'>{c['ca_total']:,.2f}€</div>"
+                f"<div class='rank-amount'>{c['ca_total']:,.2f}€</div>"
                 f"</div>"
             )
         top_chatters_html = (
@@ -20609,9 +20620,12 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
         brut_attr = f" data-brut='{value / (1 - fee):.2f}'" if fee else ""
         return (
             f"<div style='flex:1;min-width:150px;background:#12151f;border:1px solid #1e2430;"
+            f"border-left:3px solid {color};"
             f"border-radius:12px;padding:12px 14px'>"
             f"<div style='font-size:10.5px;color:#8a91a8;text-transform:uppercase;letter-spacing:.07em;font-weight:700'>{label}</div>"
-            f"<div class='fx-amt' data-usd='{value:.2f}'{brut_attr} style='font-size:19px;font-weight:800;color:{color};margin-top:3px'>"
+            # montant en couleur de texte normale, comme les six cartes du
+            # dessus : seul un liseré rappelle la plateforme
+            f"<div class='fx-amt' data-usd='{value:.2f}'{brut_attr} style='font-size:19px;font-weight:800;margin-top:3px'>"
             f"${value:,.2f}</div></div>")
 
     segments_html = (
