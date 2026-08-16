@@ -837,35 +837,58 @@ def run_import() -> dict:
     total, imported, errors = len(cands), 0, 0
     _set_import(state="running", total=total, done=0, imported=0, errors=0,
                 err="", ts=int(time.time()))
-    for n, c in enumerate(cands, 1):
+    # Telechargements EN PARALLELE. Un import passe l'essentiel de son temps a
+    # attendre le reseau : les faire un par un multipliait la duree par le
+    # nombre de fichiers. Cinq a la fois, c'est net sans bousculer l'API.
+    # Le verrou protege l'etat partage (compteurs, fichier d'etat) ; le nom de
+    # destination est choisi DANS le verrou, sinon deux fichiers de meme nom
+    # pourraient viser la meme cible en meme temps.
+    from concurrent.futures import ThreadPoolExecutor
+    import threading as _th
+
+    _verrou = _th.Lock()
+    _faits = {"n": 0}
+
+    def _un_fichier(c):
+        nonlocal imported, errors
         cible_dir = IDENTITIES_DIR / c["identity"] / c["sub"]
         try:
             cible_dir.mkdir(parents=True, exist_ok=True)
-            dst = cible_dir / c["nom"]
-            k = 2
-            while dst.exists():                # jamais d'ecrasement
-                dst = cible_dir / f"{Path(c['nom']).stem}_{k}{Path(c['nom']).suffix}"
-                k += 1
+            with _verrou:
+                dst = cible_dir / c["nom"]
+                k = 2
+                while dst.exists() or dst.with_suffix(dst.suffix + ".part").exists():
+                    dst = cible_dir / f"{Path(c['nom']).stem}_{k}{Path(c['nom']).suffix}"
+                    k += 1
+                dst.with_suffix(dst.suffix + ".part").touch()   # reserve le nom
             _telecharger(sess, c["id"], dst)
-            st["imported"][c["id"]] = {"name": dst.name, "ts": int(time.time())}
-            # Il etait DEJA range au bon endroit du Drive : sans cette ligne,
-            # la synchro le renverrait juste a cote de lui-meme.
-            if c.get("canonique"):
-                try:
-                    cle = "/".join((RACINE_BIBLIO, _marche_de(c["identity"]),
-                                    c["identity"].title(),
-                                    _SUB_TO_LABEL.get(c["sub"], c["sub"]),
-                                    dst.name))
-                    st.setdefault("uploaded", {})[cle] = {
-                        "size": dst.stat().st_size, "id": c["id"]}
-                except Exception:
-                    pass
-            imported += 1
-            _save_state(st)
+            with _verrou:
+                st["imported"][c["id"]] = {"name": dst.name, "ts": int(time.time())}
+                # Il etait DEJA range au bon endroit du Drive : sans cette
+                # ligne, la synchro le renverrait juste a cote de lui-meme.
+                if c.get("canonique"):
+                    try:
+                        cle = "/".join((RACINE_BIBLIO, _marche_de(c["identity"]),
+                                        c["identity"].title(),
+                                        _SUB_TO_LABEL.get(c["sub"], c["sub"]),
+                                        dst.name))
+                        st.setdefault("uploaded", {})[cle] = {
+                            "size": dst.stat().st_size, "id": c["id"]}
+                    except Exception:
+                        pass
+                imported += 1
+                _save_state(st)
         except Exception as e:
-            errors += 1
-            _set_import(err=str(e)[:200])
-        _set_import(done=n, imported=imported, errors=errors)
+            with _verrou:
+                errors += 1
+                _set_import(err=str(e)[:200])
+        with _verrou:
+            _faits["n"] += 1
+            _set_import(done=_faits["n"], imported=imported, errors=errors)
+
+    if cands:
+        with ThreadPoolExecutor(max_workers=5) as ex:
+            list(ex.map(_un_fichier, cands))
     _save_state(st)
     res = {"total": total, "imported": imported, "errors": errors,
            "ts": int(time.time())}
