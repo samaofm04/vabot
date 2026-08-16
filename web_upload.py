@@ -1468,6 +1468,50 @@ body.light #rank-sort-btn:hover{color:#1c1c1e;background:rgba(60,60,67,.06)}
 body.light .toast-icon-logo{background:rgba(120,120,128,.10)!important}
 .toast-icon-logo svg{display:block}
 
+/* --- FACTURE : la page suit le theme clair -----------------------------
+   facture_app.js construit tout en styles inline sombres et n'a aucune
+   variante claire : Finances > Facture restait un ilot noir au milieu d'un
+   site clair. On remappe ses teintes ici plutot que de reecrire les 847
+   lignes du fichier. */
+body.light [style*="background:#0d0d16"],
+body.light [style*="background:#0e0e16"],
+body.light [style*="background:#0f0f17"],
+body.light [style*="background:#10101a"],
+body.light [style*="background:#12121a"],
+body.light [style*="background:#12121c"],
+body.light [style*="background:#14141f"],
+body.light [style*="background:#15151d"],
+body.light [style*="background:#161a26"]{background:#fff!important}
+body.light [style*="background:#1d1d28"],
+body.light [style*="background:#1d1d2c"],
+body.light [style*="background:#23232e"],
+body.light [style*="background:#2a2a35"]{background:#f2f2f7!important}
+body.light [style*="solid #22222e"],
+body.light [style*="solid #23232e"],
+body.light [style*="solid #26263a"],
+body.light [style*="solid #2a2a2a"],
+body.light [style*="solid #2a2a35"],
+body.light [style*="solid #2c2c3d"],
+body.light [style*="solid #33333f"],
+body.light [style*="solid #33334a"]{border-color:rgba(60,60,67,.14)!important}
+body.light [style*="color:#77778a"],
+body.light [style*="color:#8f8fa8"],
+body.light [style*="color:#8a8a98"],
+body.light [style*="color:#9a9aa8"],
+body.light [style*="color:#c8c8da"],
+body.light [style*="color:#c0c0d5"],
+body.light [style*="color:#ddd"],
+body.light [style*="color:#888"]{color:rgba(60,60,67,.62)!important}
+/* le texte blanc pose sur ces surfaces suivrait sinon la surface en blanc */
+body.light [style*="background:#0d0d16"] [style*="color:#fff"],
+body.light [style*="background:#12121a"] [style*="color:#fff"],
+body.light [style*="background:#15151d"] [style*="color:#fff"],
+body.light [style*="background:#1d1d28"] [style*="color:#fff"]{color:#1c1c1e!important}
+/* les totaux et montants gardent leur couleur : c'est ce qui se lit en premier */
+body.light [style*="color:#4ade80"]{color:#16a34a!important}   /* vert -> lisible sur blanc */
+body.light [style*="color:#f87171"]{color:#dc2626!important}   /* rouge -> lisible sur blanc */
+body.light [style*="color:#a5b4fc"]{color:#4f46e5!important}   /* indigo -> lisible sur blanc */
+
 /* =============== SIDEBAR RAIL : menu réduit en icônes + flyouts au survol =============== */
 .sidebar{transition:width .25s cubic-bezier(.16,1,.3,1)}
 .rail-toggle{display:flex;align-items:center;gap:12px;margin:0 12px 4px;padding:8px 14px;background:transparent;border:0;color:#666;font-size:12px;font-weight:600;cursor:pointer;border-radius:8px;font-family:inherit;text-align:left;transition:background .15s,color .15s}
