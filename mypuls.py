@@ -932,6 +932,14 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
 
     # Table 1 = chatter performance
     # Headers: Chatter | Présence | Réactivité | Proposé | Vendu | Taux conv. | CA PPV | CA Tips | CA Total
+    # Meme regle que le registre des ventes, definie a un seul endroit.
+    # Import local : ventes_export n'a pas a etre charge pour le reste.
+    try:
+        from ventes_export import est_non_attribue as _est_non_attribue
+    except Exception:                       # module absent : on ne marque rien
+        def _est_non_attribue(_n):
+            return False
+
     chatters: List[Dict[str, Any]] = []
     chatters_illisibles = 0
     for row in tables[1][1]:
@@ -939,7 +947,12 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
             if any((c or "").strip() for c in row):
                 chatters_illisibles += 1
             continue
+        # « Indetermine (Creatrice) » n'est pas quelqu'un : MyPuls met ce
+        # libelle quand la vente n'est rattachee a aucun chatteur. On le
+        # MARQUE sans le retirer — l'argent a bien ete encaisse, il doit
+        # rester dans le CA ; c'est la PART A PAYER qui doit l'ignorer.
         chatters.append({
+            "non_attribue": _est_non_attribue(row[0]),
             "name": row[0],
             "presence": row[1],
             "reactivity": row[2],
@@ -974,13 +987,21 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
         "ca_total": round(sum(c["ca_total"] for c in chatters), 2),
         "ca_ppv": round(sum(c["ca_ppv"] for c in chatters), 2),
         "ca_tips": round(sum(c["ca_tips"] for c in chatters), 2),
+        # Part du CA que MyPuls n'a rattachee a personne. Elle compte dans le
+        # chiffre d'affaires — elle ne doit compter dans aucune remuneration.
+        "ca_non_attribue": round(
+            sum(c["ca_total"] for c in chatters if c.get("non_attribue")), 2),
+        "nb_non_attribue": sum(1 for c in chatters if c.get("non_attribue")),
         # CA ventilé PAR DEVISE (depuis les transactions, seule table qui la porte).
         # EUR = MyM, USD = OnlyFans -> permet de convertir proprement et
         # d'appliquer les frais OF, au lieu d'additionner des € et des $.
         "ca_by_currency": _ca_by_currency(transactions),
         "nb_transactions": len(transactions),
         "nb_chatters": len(chatters),
-        "active_chatters": sum(1 for c in chatters if c["ca_total"] > 0),
+        # Compte des PERSONNES : les lignes « Indetermine (Creatrice) » sont
+        # des ventes orphelines, pas des chatteurs de plus.
+        "active_chatters": sum(1 for c in chatters
+                               if c["ca_total"] > 0 and not c.get("non_attribue")),
         "period_start": start_date,
         "period_end": end_date,
     }

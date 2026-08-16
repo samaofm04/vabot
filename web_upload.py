@@ -20675,7 +20675,11 @@ def _render_home_dashboard_html() -> str:
 
     # Sales ranking chatteurs (façon Infloww) : filtre les lignes à 0€, badges 1/2/3
     top_chatters_html = ""
-    ranked = [c for c in chatters if float(c.get("ca_total", 0) or 0) > 0]
+    # On écarte les lignes « Indéterminé (Créatrice) » : ce sont des ventes
+    # sans chatteur, les classer reviendrait à décerner un rang à personne et
+    # à repousser un vrai vendeur hors du podium.
+    ranked = [c for c in chatters
+              if float(c.get("ca_total", 0) or 0) > 0 and not c.get("non_attribue")]
     if ranked:
         items = []
         badge_bg = {1: "#14b8a6", 2: "#10b981", 3: "#34d399"}
@@ -21472,6 +21476,26 @@ body.light .mypuls-bar{background:#e5e7eb}
     for i, c in enumerate(chatters[:30]):
         bar_pct = (c["ca_total"] / max_ca * 100) if max_ca else 0
         name_esc = c["name"].replace("<", "&lt;").replace(">", "&gt;")
+
+        # « Indéterminé (Créatrice) » : MyPuls range ici les ventes qu'il n'a
+        # rattachées à personne. Ce n'est pas un chatteur — pas de commission,
+        # pas d'adresse crypto, pas de case « Payé ». On le laisse VISIBLE :
+        # ce chiffre d'affaires est réel et doit rester sous les yeux, sinon
+        # il disparaît sans que personne n'aille corriger l'attribution.
+        if c.get("non_attribue"):
+            chatters_rows.append(
+                f"<tr class='mp-chatter-row mp-row-orphelin' data-chatter='{name_esc}'>"
+                f"<td><div style='font-weight:600;color:#f87171'>{name_esc}</div>"
+                f"<div style='font-size:11px;color:#888;margin-top:2px'>ventes non attribuées</div></td>"
+                f"<td class='mp-cell-ca-total' style='font-weight:700;color:#f87171'>{c['ca_total']:.2f}€</td>"
+                f"<td style='color:#9a9a9a'>{c['ca_ppv']:.2f}€</td>"
+                f"<td style='color:#9a9a9a'>{c['ca_tips']:.2f}€</td>"
+                f"<td colspan='6' style='color:#f87171;font-size:12px'>"
+                f"Aucun chatteur associé — non payé. À rattacher dans MyPuls."
+                f"</td></tr>"
+            )
+            continue
+
         meta = mypuls.get_chatter_meta(c["name"])
         commission = meta["commission_pct"]
         to_pay = _pay_usd(c, commission)
@@ -21648,12 +21672,17 @@ body.light .mypuls-bar{background:#e5e7eb}
     chatters_body = "".join(chatters_rows) or chatters_empty
 
     # Total à payer : TOUS les chatteurs (pas seulement les 30 affichés),
-    # devise par devise via _pay_usd (fin du surpaiement des ventes OF)
+    # devise par devise via _pay_usd (fin du surpaiement des ventes OF).
+    # Les lignes « Indéterminé (Créatrice) » de MyPuls sont EXCLUES : ce CA
+    # existe bien, mais il n'appartient à personne — le compter ici gonflait
+    # le total d'une commission versée à un chatteur qui n'existe pas.
     total_to_pay_usd = round(sum(
         _pay_usd(c, mypuls.get_chatter_meta(c["name"])["commission_pct"])
-        for c in chatters
+        for c in chatters if not c.get("non_attribue")
     ), 2)
     total_to_pay_eur = round(total_to_pay_usd / eur_to_usd, 2) if eur_to_usd else 0.0
+    _ca_orphelin = round(sum(c["ca_total"] for c in chatters
+                             if c.get("non_attribue")), 2)
 
     # Indicateur de fraîcheur du taux
     rate_age = rate_info.get("cached_age_h", 0)
@@ -21680,7 +21709,16 @@ body.light .mypuls-bar{background:#e5e7eb}
         "<div style='text-align:right'>"
         f"<div data-mp-stat='total_pay_usd' style='font-weight:800;font-size:22px;color:#22c55e'>${total_to_pay_usd:.2f}</div>"
         f"<div data-mp-stat='total_pay_eur' style='font-size:11px;color:#666'>≈ {total_to_pay_eur:.2f}€</div>"
-        "</div>"
+        + (
+            # Le CA orphelin reste affiché sous le total : il est exclu de la
+            # paie, mais le masquer reviendrait à laisser 20 % du chiffre
+            # s'évaporer sans que personne n'aille corriger l'attribution.
+            f"<div style='font-size:11px;color:#f87171;margin-top:3px' "
+            f"title='Ventes que MyPuls n a rattachees a aucun chatteur'>"
+            f"dont {_ca_orphelin:.2f}€ non attribué — non payé</div>"
+            if _ca_orphelin > 0 else ""
+        )
+        + "</div>"
         "</div>"
     )
 
@@ -21696,7 +21734,12 @@ body.light .mypuls-bar{background:#e5e7eb}
             "network": m.get("crypto_network", "") or "",
             "address": m.get("crypto_address", "") or "",
             "has_screenshot": bool(m.get("crypto_file")),
-            "commission_pct": float(m.get("commission_pct", 0)),
+            # Commission NULLE pour les lignes non attribuées : le recalcul
+            # cote navigateur suit ainsi la meme regle que le serveur, au lieu
+            # d'afficher un total different des que l'on touche a un filtre.
+            "commission_pct": (0.0 if c.get("non_attribue")
+                               else float(m.get("commission_pct", 0))),
+            "non_attribue": bool(c.get("non_attribue")),
         }
     networks_js = _json_mod.dumps(mypuls.CRYPTO_NETWORKS, ensure_ascii=False)
     crypto_data_json = _json_mod.dumps(crypto_data_js, ensure_ascii=False)

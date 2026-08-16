@@ -57,6 +57,34 @@ def _quand(brut: str):
     return (m.group(1), m.group(2)) if m else (t, "")
 
 
+NON_ATTRIBUE = "(non attribue)"
+
+
+def _nom_chatteur(brut: str) -> str:
+    """Le nom du chatteur, ou NON_ATTRIBUE si MyPuls n'a rattache personne.
+
+    MyPuls ne laisse pas la case vide : il y ecrit « Indetermine (Creatrice) ».
+    Pris au pied de la lettre, ce libelle devient un chatteur a part entiere —
+    il apparait dans les recaps, se voit calculer une part, et personne ne
+    remarque que 20 % du chiffre est en fait orphelin. On le ramene donc a ce
+    qu'il est : une absence d'attribution. La creatrice reste lisible dans sa
+    propre colonne.
+    """
+    t = (brut or "").strip()
+    if not t:
+        return NON_ATTRIBUE
+    sans_accent = (t.replace("é", "e").replace("É", "E")
+                    .replace("è", "e").replace("ê", "e"))
+    if sans_accent.lower().lstrip("( ").startswith("indetermine"):
+        return NON_ATTRIBUE
+    return t
+
+
+def est_non_attribue(nom: str) -> bool:
+    """Vrai pour toute forme d'absence d'attribution, la notre comme celle de MyPuls."""
+    return _nom_chatteur(nom) == NON_ATTRIBUE
+
+
 def lignes_ventes(transactions) -> list:
     """Transactions MyPuls -> lignes du registre, triees par date decroissante."""
     lignes = []
@@ -68,7 +96,7 @@ def lignes_ventes(transactions) -> list:
             montant = 0.0
         lignes.append([
             d, h, quinzaine(d),
-            (t.get("chatter") or "").strip() or "(non attribue)",
+            _nom_chatteur(t.get("chatter")),
             (t.get("creator") or "").strip(),
             (t.get("fan") or "").strip(),
             montant,
@@ -201,12 +229,21 @@ def rapprochement(lignes, chatters=None, diagnostic=None) -> tuple:
     out, vus = [], set()
     for c in (chatters or []):
         nom = (c.get("name") or "").strip()
-        cle = nom.lower()
+        # Cote site aussi, « Indetermine (X) » se fait passer pour un chatteur :
+        # on le ramene au meme libellé que dans le registre, sinon les deux
+        # colonnes ne parlent pas de la meme chose.
+        cle = _nom_chatteur(nom).lower()
+        if cle == NON_ATTRIBUE:
+            nom = "%s — %s" % (NON_ATTRIBUE, nom)
         vus.add(cle)
         site = float(c.get("ca_total") or 0)
         reg = round(par_nom.get(cle, 0.0), 2)
         ecart = round(reg - site, 2)
         # 5 % de tolerance : les deux sources n'arrondissent pas pareil.
+        if cle == NON_ATTRIBUE:
+            verdict = "NON ATTRIBUE par MyPuls — ne pas payer"
+            out.append([nom, round(site, 2), nb.get(cle, 0), reg, ecart, verdict])
+            continue
         if not par_nom.get(cle) and site > 0:
             verdict = "ABSENT du registre — aucune vente detaillee"
         elif abs(ecart) <= max(1.0, 0.05 * site):
