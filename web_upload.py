@@ -1155,6 +1155,46 @@ body.gold .vlm-dup{border-color:#d9b74a!important}
 body.gold .sidebar .solo-item.active{background:linear-gradient(135deg,rgba(212,175,55,.18),rgba(247,231,180,.10))!important}
 body.gold input:focus,body.gold select:focus,body.gold textarea:focus{border-color:#d9b74a!important;box-shadow:0 0 0 3px rgba(212,175,55,.22)!important}
 
+/* --- APPLE (iOS) : clair, matériaux translucides, typo système.
+   Il s'applique EN PLUS de body.light (setTheme pose les deux classes) : on
+   hérite des règles du thème clair et on ne surcharge que la personnalité
+   iOS — palette systemBlue, surfaces, rayons, tracking. --- */
+body.apple{background:#f2f2f7!important;color:#1c1c1e!important;
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display",system-ui,"Segoe UI",Roboto,sans-serif!important;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+body.apple .main{background:#f2f2f7!important}
+/* Chrome translucide : le contenu défile DESSOUS la barre, il ne la recouvre pas */
+body.apple .sidebar{background:rgba(255,255,255,.72)!important;border-right-color:rgba(60,60,67,.13)!important;
+  -webkit-backdrop-filter:blur(20px) saturate(180%);backdrop-filter:blur(20px) saturate(180%)}
+body.apple .box,body.apple .stat,body.apple .reel-card,body.apple .cloud-card{background:#fff!important;
+  border-color:rgba(60,60,67,.10)!important;border-radius:14px!important;
+  box-shadow:0 1px 2px rgba(0,0,0,.045),0 8px 24px rgba(0,0,0,.04)!important}
+/* Tracking dépendant de la TAILLE : serré sur les grands titres, ~0 sur le corps */
+body.apple h1,body.apple .title{letter-spacing:-.022em!important;line-height:1.08!important;font-weight:700!important}
+body.apple h2,body.apple h3{letter-spacing:-.015em!important}
+body.apple .subtitle,body.apple small,body.apple label{letter-spacing:0!important;color:rgba(60,60,67,.62)!important}
+/* Accent systemBlue (#007aff) — mêmes points d'accroche que les autres thèmes */
+body.apple [style*="background:#3b82f6"]{background:#007aff!important}
+body.apple [style*="color:#3b82f6"]{color:#007aff!important}
+body.apple .btn,body.apple button[type=submit],body.apple .lb-btn-primary,body.apple .badge,body.apple .vac-btn-active,body.apple .vpm-kind-btn.active,body.apple .vpm-save,body.apple .cur-toggle button.active,body.apple .exp-submit,body.apple .sel-cb:checked + .sel-circle,body.apple .sidebar .group .item .badge,body.apple .up-step .up-dot{background:#007aff!important;border-color:#007aff!important}
+body.apple .btn,body.apple button[type=submit],body.apple .lb-btn-primary,body.apple .vpm-save,body.apple .exp-submit,body.apple .up-submit{border-radius:10px!important;font-weight:600!important;letter-spacing:-.01em!important}
+body.apple a,body.apple .subtab.active,body.apple .sidebar .item.active,body.apple .sidebar .group .item.active,body.apple .sidebar .group .item.active svg,body.apple .sidebar .solo-item.active,body.apple .sidebar .group-head.active svg.lead,body.apple .vlm-dup{color:#007aff!important}
+body.apple .vlm-dup{border-color:#007aff!important}
+body.apple .sidebar .solo-item.active,body.apple .sidebar .group .item.active{background:rgba(0,122,255,.10)!important}
+body.apple input,body.apple select,body.apple textarea,body.apple .up-input{background:#fff!important;
+  border-color:rgba(60,60,67,.18)!important;border-radius:10px!important}
+body.apple input:focus,body.apple select:focus,body.apple textarea:focus{border-color:#007aff!important;
+  box-shadow:0 0 0 3.5px rgba(0,122,255,.20)!important}
+/* Retour visuel dès l'APPUI (pointer-down), pas au relâchement */
+body.apple .btn:active,body.apple button:active,body.apple .theme-card:active,body.apple .up-submit:active,body.apple .sidebar .solo-item:active,body.apple .sidebar .group .item:active{transform:scale(.97);transition:transform .1s ease-out}
+/* Une seule couche translucide à la fois : le flyout du rail reste opaque */
+html.rail body.apple .sidebar .group:hover > .items{background:#fff;border-color:rgba(60,60,67,.12);border-radius:14px;box-shadow:0 18px 44px rgba(0,0,0,.16)}
+/* Réglages d'accessibilité du système */
+@media (prefers-reduced-transparency:reduce){
+  body.apple .sidebar{background:#fff!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}}
+@media (prefers-reduced-motion:reduce){
+  body.apple .btn:active,body.apple button:active,body.apple .theme-card:active,body.apple .up-submit:active,body.apple .sidebar .solo-item:active,body.apple .sidebar .group .item:active{transform:none!important}}
+
 /* =============== SIDEBAR RAIL : menu réduit en icônes + flyouts au survol =============== */
 .sidebar{transition:width .25s cubic-bezier(.16,1,.3,1)}
 .rail-toggle{display:flex;align-items:center;gap:12px;margin:0 12px 4px;padding:8px 14px;background:transparent;border:0;color:#666;font-size:12px;font-weight:600;cursor:pointer;border-radius:8px;font-family:inherit;text-align:left;transition:background .15s,color .15s}
@@ -1486,16 +1526,20 @@ document.addEventListener('click', function(e){
 // === THEME (dark / light / obsidian / violet / gold) ===
 var VABOT_DARK_VARIANTS = ['obsidian','violet','gold'];
 function _vabotThemeLabel(t){
-  return ({dark:'sombre',light:'clair',obsidian:'Obsidian glass',violet:'Neo luxe violet',gold:'Midnight gold'})[t] || t;
+  return ({dark:'sombre',light:'clair',apple:'Apple',obsidian:'Obsidian glass',violet:'Neo luxe violet',gold:'Midnight gold'})[t] || t;
 }
 function setTheme(theme){
   var de = document.documentElement, b = document.body;
   // On repart propre : on enlève TOUTES les classes de thème possibles
-  b.classList.remove('light','obsidian','violet','gold');
-  de.classList.remove('light-pre','pre-light','pre-obsidian','pre-violet','pre-gold');
+  b.classList.remove('light','apple','obsidian','violet','gold');
+  de.classList.remove('light-pre','pre-light','pre-apple','pre-obsidian','pre-violet','pre-gold');
   if(theme === 'light'){
     b.classList.add('light');
     de.classList.add('light-pre'); de.classList.add('pre-light');
+  } else if(theme === 'apple'){
+    // Apple = le theme clair + sa surcouche iOS : les DEUX classes
+    b.classList.add('light'); b.classList.add('apple');
+    de.classList.add('light-pre'); de.classList.add('pre-apple');
   } else if(VABOT_DARK_VARIANTS.indexOf(theme) !== -1){
     b.classList.add(theme);
   }
@@ -1519,11 +1563,12 @@ function setTheme(theme){
   try{
     var saved = localStorage.getItem('vabot_theme') || 'light';
     var darkVariants = ['obsidian','violet','gold'];
-    if(saved === 'light'){
+    if(saved === 'light' || saved === 'apple'){
       document.documentElement.classList.add('pre-light');
     }
     document.addEventListener('DOMContentLoaded', function(){
       if(saved === 'light') document.body.classList.add('light');
+      else if(saved === 'apple'){ document.body.classList.add('light'); document.body.classList.add('apple'); }
       else if(darkVariants.indexOf(saved) !== -1) document.body.classList.add(saved);
       document.querySelectorAll('.theme-card[data-theme="'+saved+'"]').forEach(function(c){
         c.style.outline = '3px solid #6aa8ff';
@@ -6754,6 +6799,16 @@ window.upClearPrefill = function(utab){
         'html.light-pre .box,html.light-pre .stat{background:#fff !important;border-color:#e5e7eb !important}'+
         'html.light-pre .main{background:#f9fafb !important}';
       document.head.appendChild(s);
+    } else if(theme === 'apple'){
+      // Fond iOS peint AVANT le 1er rendu (sinon flash blanc puis gris)
+      document.documentElement.classList.add('light-pre');
+      document.documentElement.classList.add('pre-apple');
+      var sa = document.createElement('style');
+      sa.textContent = 'html.pre-apple,html.pre-apple body{background:#f2f2f7 !important;color:#1c1c1e !important}'+
+        'html.pre-apple .main{background:#f2f2f7 !important}'+
+        'html.pre-apple .sidebar{background:rgba(255,255,255,.72) !important;border-right-color:rgba(60,60,67,.13) !important}'+
+        'html.pre-apple .box,html.pre-apple .stat{background:#fff !important;border-color:rgba(60,60,67,.10) !important;border-radius:14px !important}';
+      document.head.appendChild(sa);
     } else if(theme === 'obsidian' || theme === 'violet' || theme === 'gold'){
       // Thèmes sombres premium : on teinte le fond/sidebar/cartes AVANT le 1er paint
       var PAL = {obsidian:['#0b0d12','#0a0c11','#14171f','rgba(150,170,235,.14)'],
@@ -7281,6 +7336,34 @@ document.addEventListener('click',function(e){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg>
       Bilan
     </button>
+  </div>
+</div>
+
+<div class="section-label">Remote</div>
+
+<!-- REMOTE : raccourcis vers les outils qui pilotent l'iPhone. Ce sont des
+     adresses LOCALES (127.0.0.1) : elles ne repondent que depuis le PC ou
+     tournent services.py et start.py. Ouvertes dans un onglet a part pour ne
+     pas quitter le tableau de bord. -->
+<div class="group" id="grp-remote">
+  <button class="group-head" onclick="toggleGroup('remote')">
+    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
+    <span class="label">Remote</span>
+    <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+  </button>
+  <div class="items">
+    <a class="item" href="http://127.0.0.1:8097/" target="_blank" rel="noopener" style="text-decoration:none" title="Choisir les medias et vider la pellicule de l'iPhone">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+      Drop
+    </a>
+    <a class="item" href="http://127.0.0.1:8770/" target="_blank" rel="noopener" style="text-decoration:none" title="Console iPhone : flux video et lancement des scenarios">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
+      Console
+    </a>
+    <a class="item" href="http://127.0.0.1:8770/editor" target="_blank" rel="noopener" style="text-decoration:none" title="Editeur de scenarios">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+      Editeur
+    </a>
   </div>
 </div>
 
@@ -8199,6 +8282,16 @@ document.addEventListener('keydown', function(e){
       </div>
     </div>
     <div style="font-size:12.5px;font-weight:600;color:#111827">Clair</div>
+  </div>
+  <div onclick="setTheme('apple')" class="theme-card" data-theme="apple" style="background:#f2f2f7;border:2px solid #d8d8de;border-radius:12px;padding:12px;cursor:pointer;text-align:center">
+    <div style="display:flex;gap:5px;height:52px;border-radius:8px;overflow:hidden;margin-bottom:10px;border:1px solid #dcdce2">
+      <div style="width:20px;background:rgba(255,255,255,.88)"></div>
+      <div style="flex:1;background:#f2f2f7;padding:7px;display:flex;flex-direction:column;gap:5px;justify-content:center">
+        <div style="height:6px;width:82%;background:#e3e3e9;border-radius:4px"></div>
+        <div style="height:6px;width:52%;background:#007aff;border-radius:4px"></div>
+      </div>
+    </div>
+    <div style="font-size:12.5px;font-weight:600;color:#1c1c1e;letter-spacing:-.01em">Apple</div>
   </div>
   <div onclick="setTheme('obsidian')" class="theme-card" data-theme="obsidian" style="background:#0b0d12;border:2px solid #1b2130;border-radius:12px;padding:12px;cursor:pointer;text-align:center">
     <div style="display:flex;gap:5px;height:52px;border-radius:8px;overflow:hidden;margin-bottom:10px;border:1px solid #1b2130">
