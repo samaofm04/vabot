@@ -22,6 +22,31 @@ COLONNES = ["Date", "Heure", "Quinzaine", "Chatteur", "Creatrice", "Fan",
             "Montant", "Devise", "Type"]
 
 
+MOIS_FR = ["", "janvier", "fevrier", "mars", "avril", "mai", "juin", "juillet",
+           "aout", "septembre", "octobre", "novembre", "decembre"]
+
+
+def libelle_quinzaine(cle: str) -> str:
+    """« 2026-08 (1-15) » -> « 1 au 15 aout 2026 ».
+
+    La cle reste la forme technique, parce qu'elle se trie toute seule dans
+    l'ordre chronologique ; le libelle, lui, est fait pour etre lu.
+    """
+    t = (cle or "").strip()
+    if len(t) < 7:
+        return t
+    try:
+        annee, mois = int(t[:4]), int(t[5:7])
+        nom = MOIS_FR[mois]
+    except (ValueError, IndexError):
+        return t
+    if "16" in t:
+        import calendar
+        fin = calendar.monthrange(annee, mois)[1]
+        return "16 au %d %s %d" % (fin, nom, annee)
+    return "1 au 15 %s %d" % (nom, annee)
+
+
 def quinzaine(date_iso: str) -> str:
     """« 2026-08 (1-15) » ou « 2026-08 (16-fin) » — la maille de paie."""
     t = (date_iso or "").strip()
@@ -107,6 +132,16 @@ def lignes_ventes(transactions) -> list:
     return lignes
 
 
+def lignes_affichables(lignes) -> list:
+    """Les memes lignes, quinzaine ecrite en clair.
+
+    Le regroupement et le tri travaillent sur la cle technique, qui se classe
+    d'elle-meme dans l'ordre du calendrier ; ce n'est qu'au moment d'ecrire
+    dans le classeur qu'on la remplace par « 1 au 15 aout 2026 ».
+    """
+    return [r[:2] + [libelle_quinzaine(r[2])] + r[3:] for r in lignes]
+
+
 def recap_par_chatteur(lignes) -> list:
     """Total par chatteur et par devise — la base d'un calcul de paie."""
     par = defaultdict(lambda: defaultdict(float))
@@ -134,7 +169,9 @@ def recap_par_quinzaine(lignes) -> tuple:
     for chatteur in sorted(par, key=lambda c: -sum(par[c].values())):
         out.append([chatteur] + [round(par[chatteur].get(q, 0.0), 2) for q in quinz]
                    + [round(sum(par[chatteur].values()), 2)])
-    return (["Chatteur"] + quinz + ["Total"]), out
+    # Le tri s'est fait sur la cle technique (chronologique) ; l'en-tete, lui,
+    # s'affiche en clair.
+    return (["Chatteur"] + [libelle_quinzaine(q) for q in quinz] + ["Total"]), out
 
 
 def fiches_chatteurs(lignes) -> list:
@@ -191,16 +228,21 @@ def paie_quinzaine(lignes, commissions=None, eur_usd: float = 1.14) -> tuple:
         tips = _est("tip") + _est("pourboire")
         pct = float(commissions.get(chatteur, commissions.get("_defaut_", 0)) or 0)
         a_payer = round((ca_eur * eur_usd + ca_usd + autres * eur_usd) * pct / 100.0, 2)
-        # toutes les ventes sur UNE ligne, de la plus recente a la plus ancienne
-        detail = " · ".join(
-            "%s %.2f%s (%s)" % (v[0][5:], v[6], "€" if v[7] == "EUR" else "$", v[4])
-            for v in sorted(ventes, key=lambda x: (x[0], x[1]), reverse=True))
-        out.append([quinz, chatteur, len(ventes),
+        # Les ventes s'etalent vers la droite, UNE PAR CASE, de la plus
+        # recente a la plus ancienne. Entassees dans une seule cellule elles
+        # etaient illisibles et impossibles a trier ou filtrer.
+        detail = ["%s %.2f%s (%s)" % (v[0][5:], v[6],
+                                      "€" if v[7] == "EUR" else "$", v[4])
+                  for v in sorted(ventes, key=lambda x: (x[0], x[1]), reverse=True)]
+        out.append([libelle_quinzaine(quinz), chatteur, len(ventes),
                     round(ca_eur + ca_usd + autres, 2), round(ppv, 2), round(tips, 2),
-                    round(ca_eur, 2), round(ca_usd, 2), pct, a_payer, detail])
+                    round(ca_eur, 2), round(ca_usd, 2), pct, a_payer] + detail)
+
+    # Autant de colonnes « Vente N » que le chatteur le plus actif en a.
+    largeur = max((len(r) - 10 for r in out), default=0)
     cols = ["Quinzaine", "Chatteur", "Ventes", "CA total", "PPV", "Tips",
-            "CA EUR", "CA USD", "Commission %", "A payer (USD)",
-            "Detail des ventes"]
+            "CA EUR", "CA USD", "Commission %", "A payer (USD)"] + \
+           ["Vente %d" % (i + 1) for i in range(largeur)]
     return cols, out
 
 
@@ -377,7 +419,7 @@ def construire_xlsx(transactions, periode: str = "", total_annonce=None,
     ws = wb.active
     ws.title = "Ventes"
     _entete(ws, COLONNES)
-    for r in lignes:
+    for r in lignes_affichables(lignes):
         ws.append(r)
     if lignes:
         ws.auto_filter.ref = "A1:%s%d" % (get_column_letter(len(COLONNES)), len(lignes) + 1)
@@ -422,11 +464,15 @@ def construire_xlsx(transactions, periode: str = "", total_annonce=None,
     _entete(ws6, cols6)
     for r in paie:
         ws6.append(r)
-    for col, larg in zip("ABCDEFGHIJK", (16, 24, 8, 12, 11, 11, 11, 11, 13, 15, 90)):
+    for col, larg in zip("ABCDEFGHIJ", (20, 24, 8, 12, 11, 11, 11, 11, 13, 15)):
         ws6.column_dimensions[col].width = larg
+    # les colonnes « Vente N » : assez larges pour « 08-15 114.96€ (Emmabrn) »
+    for i in range(11, len(cols6) + 1):
+        ws6.column_dimensions[get_column_letter(i)].width = 26
     for row in ws6.iter_rows(min_row=2, min_col=4, max_col=10):
         for c in row:
             c.number_format = "#,##0.00"
+    ws6.freeze_panes = "C2"          # nom et quinzaine restent visibles
 
     # --- feuille : une fiche par chatteur ---
     ws5 = wb.create_sheet("Fiches chatteurs")

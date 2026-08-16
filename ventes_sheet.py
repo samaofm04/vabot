@@ -98,6 +98,38 @@ def _onglet(classeur, titre: str, colonnes: int):
         return classeur.add_worksheet(title=titre, rows=1000, cols=max(colonnes, 8))
 
 
+def _ecrire(classeur, titre: str, grille, gras_sur: str = "") -> None:
+    """Ecrit une grille entiere dans son onglet, en l'agrandissant au besoin.
+
+    Un onglet Google a une taille FIXE : ecrire au-dela de sa grille echoue.
+    La feuille de paie etale une colonne par vente — sa largeur depend donc
+    des donnees du mois et ne peut pas etre decidee a l'avance.
+    """
+    if not grille:
+        return
+    hauteur = len(grille) + 20                 # marge : evite un resize par ligne
+    largeur = max(len(r) for r in grille) + 2
+    ws = _onglet(classeur, titre, largeur)
+    try:
+        if ws.row_count < hauteur or ws.col_count < largeur:
+            ws.resize(rows=max(hauteur, ws.row_count),
+                      cols=max(largeur, ws.col_count))
+    except Exception:
+        pass
+    ws.clear()
+    # Toutes les lignes n'ont pas la meme longueur (une par vente) : on les
+    # complete, sinon l'API refuse la grille.
+    large = max(len(r) for r in grille)
+    plates = [list(r) + [""] * (large - len(r)) for r in grille]
+    ws.update("A1", plates, value_input_option="RAW")
+    try:
+        ws.freeze(rows=1)
+        if gras_sur:
+            ws.format(gras_sur, {"textFormat": {"bold": True}})
+    except Exception:
+        pass
+
+
 def preparer(transactions, commissions=None, eur_usd: float = 1.14,
              chatters=None, diagnostic=None) -> tuple:
     """Transactions -> les grilles a ecrire, un onglet chacune. Testable seul."""
@@ -109,7 +141,10 @@ def preparer(transactions, commissions=None, eur_usd: float = 1.14,
     cols_p, paie = ventes_export.paie_quinzaine(lignes, commissions=commissions,
                                                 eur_usd=eur_usd)
     cols_r, rappro = ventes_export.rapprochement(lignes, chatters, diagnostic)
-    return (([entetes] + lignes), ([cols_recap] + recap), ([cols_q] + recap_q),
+    # Les lignes ecrites portent la quinzaine en clair ; le tri, lui, s'est
+    # deja fait sur la cle technique.
+    return (([entetes] + ventes_export.lignes_affichables(lignes)),
+            ([cols_recap] + recap), ([cols_q] + recap_q),
             fiches, ([cols_p] + paie), ([cols_r] + rappro))
 
 
@@ -128,60 +163,18 @@ def pousser(transactions, periode: str = "", commissions=None,
         gc = _client()
         classeur = gc.open_by_key(sid)
 
-        ws = _onglet(classeur, ONGLET_VENTES, len(ventes_export.COLONNES))
-        ws.clear()
-        ws.update("A1", grille, value_input_option="RAW")
-        try:                       # en-tete figee et en gras : confort de lecture
-            ws.freeze(rows=1)
-            ws.format("A1:H1", {"textFormat": {"bold": True}})
-        except Exception:
-            pass
-
-        ws2 = _onglet(classeur, ONGLET_CHATTEURS, len(recap[0]) if recap else 4)
-        ws2.clear()
-        ws2.update("A1", recap, value_input_option="RAW")
-        try:
-            ws2.freeze(rows=1)
-        except Exception:
-            pass
-
-        ws3 = _onglet(classeur, ONGLET_QUINZAINE, len(quinz[0]) if quinz else 4)
-        ws3.clear()
-        ws3.update("A1", quinz, value_input_option="RAW")
-        try:
-            ws3.freeze(rows=1)
-        except Exception:
-            pass
-
-        ws4 = _onglet(classeur, ONGLET_FICHES, 5)
-        ws4.clear()
-        ws4.update("A1", fiches, value_input_option="RAW")
-        try:
-            ws4.freeze(rows=1)
-        except Exception:
-            pass
-
-        ws5 = _onglet(classeur, ONGLET_PAIE, 11)
-        ws5.clear()
-        ws5.update("A1", paie, value_input_option="RAW")
-        try:
-            ws5.freeze(rows=1)
-        except Exception:
-            pass
-
-        ws6 = _onglet(classeur, ONGLET_RAPPRO, 6)
-        ws6.clear()
-        ws6.update("A1", rappro, value_input_option="RAW")
-        try:
-            ws6.freeze(rows=1)
-            ws6.format("A1:F1", {"textFormat": {"bold": True}})
-        except Exception:
-            pass
+        _ecrire(classeur, ONGLET_VENTES, grille, "A1:I1")
+        _ecrire(classeur, ONGLET_CHATTEURS, recap)
+        _ecrire(classeur, ONGLET_QUINZAINE, quinz)
+        _ecrire(classeur, ONGLET_FICHES, fiches)
+        _ecrire(classeur, ONGLET_PAIE, paie, "A1:J1")
+        _ecrire(classeur, ONGLET_RAPPRO, rappro, "A1:F1")
+        ws = classeur.worksheet(ONGLET_VENTES)
 
         # une ligne d'horodatage : on sait de quand datent les chiffres
         try:
             quand = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-            ws.update("K1", [["Mis a jour", quand, periode]], value_input_option="RAW")
+            ws.update("L1", [["Mis a jour", quand, periode]], value_input_option="RAW")
         except Exception:
             pass
 
