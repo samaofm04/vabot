@@ -979,8 +979,8 @@ button[type=submit]:hover,.btn:hover{transform:translateY(-1px);box-shadow:0 4px
 .ig-period{transition:background .18s ease,color .18s ease!important}
 
 /* Action bar - slide up */
-#action-bar,#cap-action-bar{transition:opacity .2s ease,transform .25s cubic-bezier(.16,1,.3,1)}
-#action-bar[style*="flex"],#cap-action-bar[style*="flex"]{animation:slideUp .3s cubic-bezier(.16,1,.3,1)}
+#action-bar,#cap-action-bar,#txt-action-bar{transition:opacity .2s ease,transform .25s cubic-bezier(.16,1,.3,1)}
+#action-bar[style*="flex"],#cap-action-bar[style*="flex"],#txt-action-bar[style*="flex"]{animation:slideUp .3s cubic-bezier(.16,1,.3,1)}
 
 /* Page title - subtle transition */
 #page-title,#page-subtitle{transition:opacity .2s}
@@ -8834,7 +8834,7 @@ document.addEventListener('keydown', function(e){
   </div>
 </div>
 <style>
-#action-bar,#cap-action-bar{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:200;animation:slideUp .3s ease}
+#action-bar,#cap-action-bar,#txt-action-bar{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:200;animation:slideUp .3s ease}
 @keyframes slideUp{from{transform:translate(-50%,40px);opacity:0}to{transform:translateX(-50%);opacity:1}}
 .action-bar-inner{display:flex;align-items:center;gap:14px;background:#0a0a0a;border:1px solid #222;border-radius:14px;padding:10px 16px 10px 12px;box-shadow:0 12px 36px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.04) inset;min-width:300px}
 .action-close{background:transparent;border:0;color:#888;width:32px;height:32px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;margin:0;transition:all .15s}
