@@ -22,6 +22,7 @@ CONFIG = DATA_DIR / "ventes_sheet.json"
 
 ONGLET_VENTES = "Ventes"
 ONGLET_CHATTEURS = "Par chatteur"
+ONGLET_QUINZAINE = "Par quinzaine"
 
 _ETAT = {"state": "idle", "ts": 0, "lignes": 0, "err": ""}
 _LOCK = threading.Lock()
@@ -93,7 +94,8 @@ def preparer(transactions) -> tuple:
     lignes = ventes_export.lignes_ventes(transactions)
     entetes = ventes_export.COLONNES
     cols_recap, recap = ventes_export.recap_par_chatteur(lignes)
-    return ([entetes] + lignes), ([cols_recap] + recap)
+    cols_q, recap_q = ventes_export.recap_par_quinzaine(lignes)
+    return ([entetes] + lignes), ([cols_recap] + recap), ([cols_q] + recap_q)
 
 
 def pousser(transactions, periode: str = "") -> dict:
@@ -103,7 +105,7 @@ def pousser(transactions, periode: str = "") -> dict:
         return {"ok": False, "err": "Aucun classeur configure"}
     if not disponible():
         return {"ok": False, "err": "Compte de service Google indisponible"}
-    grille, recap = preparer(transactions)
+    grille, recap, quinz = preparer(transactions)
     _set(state="running", err="", ts=int(time.time()))
     try:
         gc = _client()
@@ -126,10 +128,18 @@ def pousser(transactions, periode: str = "") -> dict:
         except Exception:
             pass
 
+        ws3 = _onglet(classeur, ONGLET_QUINZAINE, len(quinz[0]) if quinz else 4)
+        ws3.clear()
+        ws3.update("A1", quinz, value_input_option="RAW")
+        try:
+            ws3.freeze(rows=1)
+        except Exception:
+            pass
+
         # une ligne d'horodatage : on sait de quand datent les chiffres
         try:
             quand = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-            ws.update("J1", [["Mis a jour", quand, periode]], value_input_option="RAW")
+            ws.update("K1", [["Mis a jour", quand, periode]], value_input_option="RAW")
         except Exception:
             pass
 
@@ -150,4 +160,41 @@ def pousser_async(transactions, periode: str = "") -> bool:
         return False
     threading.Thread(target=pousser, args=(transactions, periode),
                      daemon=True, name="ventes-sheet").start()
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Mise a jour automatique
+# ---------------------------------------------------------------------------
+_AUTO = {"on": False}
+
+
+def start_auto(interval: int = 300) -> bool:
+    """Rafraichit le classeur toutes les 5 minutes.
+
+    Periode couverte : le mois en cours — donc les DEUX quinzaines y sont
+    toujours. Le cache MyPuls dure aussi 5 minutes : on ne le sollicite donc
+    pas plus que necessaire.
+    """
+    if _AUTO["on"]:
+        return False
+    _AUTO["on"] = True
+
+    def _boucle():
+        while True:
+            try:
+                time.sleep(interval)
+                if not sheet_id() or not disponible():
+                    continue
+                import mypuls
+                today = _dt.date.today()
+                debut = today.replace(day=1).isoformat()
+                res = mypuls.fetch_team_stats(debut, today.isoformat(), use_cache=True)
+                if res.get("ok"):
+                    pousser(res.get("transactions") or [],
+                            periode="%s -> %s (auto)" % (debut, today.isoformat()))
+            except Exception:
+                pass          # une panne passagere ne doit pas tuer la boucle
+
+    threading.Thread(target=_boucle, daemon=True, name="ventes-sheet-auto").start()
     return True

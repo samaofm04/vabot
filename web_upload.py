@@ -39464,6 +39464,13 @@ def create_app():
         _mp_rf.start_pushs_refresh_daily(0, 5)
     except Exception as _e:
         log.warning(f"refresh-pushs nocturne non démarré: {_e}")
+    # Ventes des chatteurs -> Google Sheet, toutes les 5 min. Ne fait rien
+    # tant qu'aucun classeur n'est configure : la boucle verifie a chaque tour.
+    try:
+        import ventes_sheet as _vsheet
+        _vsheet.start_auto(300)
+    except Exception as _e:
+        log.warning(f"ventes-sheet auto non démarré: {_e}")
     # Auto-récupération des comptes JB depuis Google Sheets (une seule fois)
     try:
         import sheets_sync as _ss
