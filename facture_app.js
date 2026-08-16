@@ -1,3 +1,5 @@
+/* Icones monochromes de la page Facture (jeu du menu dans web_upload.py) */
+(function(){var st=document.createElement('style');st.textContent='.fic{vertical-align:-2px;margin-right:5px;flex-shrink:0;opacity:.7}';document.head.appendChild(st);})();
 /* ============================================================================
    Facture — compta mensuelle OFM (UI complète, consomme /facture/state)
    KPI, chips par catégorie, groupes pliables, marquer payé, % de revenus,
@@ -70,7 +72,7 @@
   /* ─────────────────────────── rendu principal ─────────────────────────── */
   // Sous-titre de la carte « Part lead » : % applicable (par marché si des
   // associés sont rattachés à un marché) + avances remboursées s'il y en a.
-  // Nom du lead (réglable dans ⚙️ Paramètres) — menu « Payée par » + badges.
+  // Nom du lead (réglable dans <svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3.6v2.4M12 18v2.4M20.4 12H18M6 12H3.6M18 6l-1.7 1.7M7.7 16.3L6 18M18 18l-1.7-1.7M7.7 7.7L6 6"/></svg>️ Paramètres) — menu « Payée par » + badges.
   function leadName() {
     var s = (S.data && S.data.settings) || {};
     return s.lead_name || 'Sama';
@@ -82,7 +84,7 @@
     var st = (S.data && S.data.settings) || {};
     var cur = line.paid_by || 'agence';
     var o = '<option value="agence"' + (cur === 'agence' ? ' selected' : '') + '>🏢 L&#39;agence</option>' +
-      '<option value="lead"' + (cur === 'lead' ? ' selected' : '') + '>👑 ' + esc(leadName()) + ' (toi) — à me rembourser</option>';
+      '<option value="lead"' + (cur === 'lead' ? ' selected' : '') + '><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17.6h16M4.4 7l4 3.4L12 5l3.6 5.4 4-3.4-1.6 8.2H6z"/></svg> ' + esc(leadName()) + ' (toi) — à me rembourser</option>';
     var seen = false, vals = [];
     (st.associates || []).forEach(function (a) {
       var nm = (a.name || '').trim();
@@ -91,11 +93,11 @@
       if (vals.indexOf(v) !== -1) return;   // même nom sur 2 marchés = 1 option
       vals.push(v);
       if (cur === v) seen = true;
-      o += '<option value="' + esc(v) + '"' + (cur === v ? ' selected' : '') + '>👥 ' + esc(nm) + ' — à lui rembourser</option>';
+      o += '<option value="' + esc(v) + '"' + (cur === v ? ' selected' : '') + '><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8.6" r="3.1"/><path d="M3.6 19.2a5.6 5.6 0 0 1 10.8 0"/><path d="M16 6.5a3.1 3.1 0 0 1 0 6M17.4 14.6a5.4 5.4 0 0 1 3 4.6"/></svg> ' + esc(nm) + ' — à lui rembourser</option>';
     });
     // associé supprimé des Paramètres depuis : on garde son option sélectionnée
     if (cur.indexOf('assoc:') === 0 && !seen) {
-      o += '<option value="' + esc(cur) + '" selected>👥 ' + esc(cur.slice(6)) + ' — à lui rembourser</option>';
+      o += '<option value="' + esc(cur) + '" selected><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8.6" r="3.1"/><path d="M3.6 19.2a5.6 5.6 0 0 1 10.8 0"/><path d="M16 6.5a3.1 3.1 0 0 1 0 6M17.4 14.6a5.4 5.4 0 0 1 3 4.6"/></svg> ' + esc(cur.slice(6)) + ' — à lui rembourser</option>';
     }
     return o;
   }
@@ -141,7 +143,7 @@
     var ra = t.reimb_assoc || {};
     var raKeys = Object.keys(ra).filter(function (k) { return ra[k] > 0 && !apNames['#' + k]; });
     var raBar = raKeys.length
-      ? '<div style="background:rgba(129,140,248,.06);border:1px solid rgba(129,140,248,.25);border-radius:12px;padding:10px 16px;margin-bottom:16px;font-size:12.5px;color:#c8c8da">💳 Avances à rembourser : ' +
+      ? '<div style="background:rgba(129,140,248,.06);border:1px solid rgba(129,140,248,.25);border-radius:12px;padding:10px 16px;margin-bottom:16px;font-size:12.5px;color:#c8c8da"><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.6" y="5.4" width="18.8" height="13.2" rx="2.6"/><path d="M2.6 10h18.8"/></svg> Avances à rembourser : ' +
         raKeys.map(function (k) { return '<b style="color:#a5b4fc">' + esc(k) + '</b> ' + moneyShort(ra[k]); }).join(' <span style="color:#55556a">·</span> ') + '</div>'
       : '';
     var monthOpts = d.months.map(function (m) {
@@ -149,10 +151,10 @@
     }).join('');
 
     var kpis =
-      kpi('📨 Revenus / mois' + mkTag, moneyShort(t.rev), '#22c55e', t.rev_count + ' ligne(s)', 'linear-gradient(90deg,#22c55e,#3b82f6)') +
-      kpi('📩 Dépenses / mois' + mkTag, moneyShort(t.exp), '#f87171', t.exp_count + ' ligne(s)', 'linear-gradient(90deg,#ef4444,#f59e0b)') +
-      kpi('💰 Bénéfice net / mois' + mkTag, moneyShort(t.net), t.net >= 0 ? '#22c55e' : '#f87171', 'Revenus − Dépenses', 'linear-gradient(90deg,#22c55e,#a855f7)') +
-      kpi('👑 Part ' + esc(leadName()) + mkTag, moneyShort(t.lead_pay != null ? t.lead_pay : t.lead), '#facc15', leadSub(t, d, S.market === 'all'), 'linear-gradient(90deg,#facc15,#f97316)');
+      kpi('<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.6v10.6"/><path d="M7.4 10.6L12 15.2l4.6-4.6"/><path d="M4.4 19.4h15.2"/></svg> Revenus / mois' + mkTag, moneyShort(t.rev), '#22c55e', t.rev_count + ' ligne(s)', 'linear-gradient(90deg,#22c55e,#3b82f6)') +
+      kpi('<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19.4V8.8"/><path d="M7.4 13.4L12 8.8l4.6 4.6"/><path d="M4.4 4.6h15.2"/></svg> Dépenses / mois' + mkTag, moneyShort(t.exp), '#f87171', t.exp_count + ' ligne(s)', 'linear-gradient(90deg,#ef4444,#f59e0b)') +
+      kpi('<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.6"/><path d="M12 6.8v10.4M14.7 9.4a2.7 2.7 0 0 0-2.7-1.4c-1.7 0-2.7 1-2.7 2.2 0 2.7 5.4 1.6 5.4 4.3 0 1.2-1 2.3-2.7 2.3a2.9 2.9 0 0 1-2.8-1.6"/></svg> Bénéfice net / mois' + mkTag, moneyShort(t.net), t.net >= 0 ? '#22c55e' : '#f87171', 'Revenus − Dépenses', 'linear-gradient(90deg,#22c55e,#a855f7)') +
+      kpi('<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17.6h16M4.4 7l4 3.4L12 5l3.6 5.4 4-3.4-1.6 8.2H6z"/></svg> Part ' + esc(leadName()) + mkTag, moneyShort(t.lead_pay != null ? t.lead_pay : t.lead), '#facc15', leadSub(t, d, S.market === 'all'), 'linear-gradient(90deg,#facc15,#f97316)');
 
     // Associés regroupés par PERSONNE (un même nom peut avoir une entrée par
     // marché) : la carte KPI et la boîte du Règlement montrent le MÊME montant.
@@ -183,10 +185,10 @@
         }).join(' + ') + ' du net';
       }
       if (g.reimb) sub += ' + ' + moneyShort(g.reimb) + ' à lui rembourser';
-      kpis += kpi('🤝 Part ' + esc(g.name) + mkTag, moneyShort(g.pay), '#a5b4fc', sub, 'linear-gradient(90deg,#818cf8,#a78bfa)');
+      kpis += kpi('<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7.4 12.6l3-3 3.4 3.2 3.2-3.2"/><path d="M3.6 9.4l3.8-3.8 4.6 1.4 4.6-1.4 3.8 3.8-4 6.6-4.4 2.6-4.4-2.6z"/></svg> Part ' + esc(g.name) + mkTag, moneyShort(g.pay), '#a5b4fc', sub, 'linear-gradient(90deg,#818cf8,#a78bfa)');
     });
 
-    // 🧾 Règlement du mois : pour chaque personne, la part du bénéf, chaque
+    // <svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2.4"/><path d="M8.6 8h6.8M8.6 12h6.8M8.6 16h4"/></svg> Règlement du mois : pour chaque personne, la part du bénéf, chaque
     // dépense avancée LIGNE PAR LIGNE, le total des avances, et le « À verser ».
     var setLines = (d.lines || []).filter(function (l) {
       return l.type !== 'rev' && (S.market === 'all' || (l.market || 'us') === S.market);
@@ -207,23 +209,23 @@
     });
     if (people.length || hasAdv) {
       var leadAdv = setLines.filter(function (l) { return l.paid_by === 'lead'; });
-      var boxes = settleBox('👑 ' + esc(leadName()) + ' (toi)', t.lead || 0, leadAdv,
+      var boxes = settleBox('<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17.6h16M4.4 7l4 3.4L12 5l3.6 5.4 4-3.4-1.6 8.2H6z"/></svg> ' + esc(leadName()) + ' (toi)', t.lead || 0, leadAdv,
         t.reimb || 0, t.lead_pay != null ? t.lead_pay : (t.lead || 0), '#facc15');
       people.forEach(function (g) {
         if (S.market !== 'all' && !g.part && !g.reimb) return;   // hors de son marché
         var adv = setLines.filter(function (l) { return l.paid_by === 'assoc:' + g.name; });
-        boxes += settleBox('🤝 ' + esc(g.name), g.part, adv, g.reimb, g.pay, '#a5b4fc');
+        boxes += settleBox('<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7.4 12.6l3-3 3.4 3.2 3.2-3.2"/><path d="M3.6 9.4l3.8-3.8 4.6 1.4 4.6-1.4 3.8 3.8-4 6.6-4.4 2.6-4.4-2.6z"/></svg> ' + esc(g.name), g.part, adv, g.reimb, g.pay, '#a5b4fc');
       });
       settleHtml =
         '<div style="background:#0f0f17;border:1px solid #23232e;border-radius:14px;padding:14px 16px;margin-bottom:16px">' +
-        '<div style="font-size:13px;font-weight:800;margin-bottom:5px">🧾 Règlement du mois' + mkTag + '</div>' +
+        '<div style="font-size:13px;font-weight:800;margin-bottom:5px"><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2.4"/><path d="M8.6 8h6.8M8.6 12h6.8M8.6 16h4"/></svg> Règlement du mois' + mkTag + '</div>' +
         '<div style="font-size:11.5px;color:#8f8fa8;margin-bottom:10px">' + money(t.rev || 0) + ' revenus − ' + money(t.exp || 0) +
         ' dépenses = <b style="color:' + (t.net >= 0 ? '#4ade80' : '#f87171') + '">' + money(t.net || 0) +
         '</b> de bénéf à splitter · chacun récupère EN PLUS ce qu&#39;il a avancé de sa poche</div>' +
         '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px">' + boxes + '</div></div>';
     }
 
-    var mktChips = [['all', '🌍 Tous'], ['fr', '🇫🇷 France'], ['us', '🇺🇸 US']]
+    var mktChips = [['all', '<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.6"/><path d="M3.4 12h17.2"/><path d="M12 3.4a13 13 0 0 1 0 17.2a13 13 0 0 1 0-17.2z"/></svg> Tous'], ['fr', '🇫🇷 France'], ['us', '🇺🇸 US']]
       .map(function (c) {
         var on = S.market === c[0];
         return '<button class="fx-mkt" data-m="' + c[0] + '" style="padding:8px 15px;border-radius:999px;border:1px solid ' +
@@ -231,8 +233,8 @@
           ';color:' + (on ? '#fff' : '#9a9aa8') + ';font-size:12.5px;font-weight:700;cursor:pointer;margin:0">' + c[1] + '</button>';
       }).join('');
 
-    var chips = [['all', 'Tout'], ['rev', '📨 Revenus'], ['rev_mym', '💛 MYM'], ['model', '🧜‍♀️ Modèles'],
-      ['chatter', '💬 Chatters'], ['va', '👤 VAs'], ['manager', '👔 Managers'], ['app', '📱 Apps'], ['other', '📁 Autres']]
+    var chips = [['all', 'Tout'], ['rev', '<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.6v10.6"/><path d="M7.4 10.6L12 15.2l4.6-4.6"/><path d="M4.4 19.4h15.2"/></svg> Revenus'], ['rev_mym', '💛 MYM'], ['model', '🧜‍♀️ Modèles'],
+      ['chatter', '💬 Chatters'], ['va', '<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="3.4"/><path d="M5.4 19.4a6.8 6.8 0 0 1 13.2 0"/></svg> VAs'], ['manager', '👔 Managers'], ['app', '📱 Apps'], ['other', '📁 Autres']]
       .map(function (c) {
         var on = S.filter === c[0];
         return '<button class="fx-chip" data-f="' + c[0] + '" style="padding:8px 15px;border-radius:999px;border:1px solid ' +
@@ -242,20 +244,20 @@
 
     var html =
       '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px">' +
-      '<h2 style="margin:0;font-size:26px;display:flex;align-items:center;gap:10px">🧾 Facture <span style="font-size:13px;color:#888;font-weight:500">— YouLab (lead)</span></h2>' +
+      '<h2 style="margin:0;font-size:26px;display:flex;align-items:center;gap:10px"><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2.4"/><path d="M8.6 8h6.8M8.6 12h6.8M8.6 16h4"/></svg> Facture <span style="font-size:13px;color:#888;font-weight:500">— YouLab (lead)</span></h2>' +
       '</div>' +
       '<p style="margin:0 0 16px;color:#888;font-size:13px">Gestion des revenus + dépenses de l&#39;agence (calculs en USD).</p>' +
       '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px">' +
-      '<select id="fx-month" style="width:auto;padding:10px 14px;background:#15151d;border:1px solid #2a2a35;color:#fff;border-radius:10px;font-size:13px;font-weight:700">📅 ' + monthOpts + '</select>' +
+      '<select id="fx-month" style="width:auto;padding:10px 14px;background:#15151d;border:1px solid #2a2a35;color:#fff;border-radius:10px;font-size:13px;font-weight:700"><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.4" y="5.2" width="17.2" height="15.4" rx="2.6"/><path d="M3.4 10h17.2M8.4 3.4v3.6M15.6 3.4v3.6"/></svg> ' + monthOpts + '</select>' +
       '<div style="flex:1"></div>' +
-      '<button id="fx-next" class="fx-btn2" style="padding:10px 16px">🧾 Démarrer mois suivant</button>' +
+      '<button id="fx-next" class="fx-btn2" style="padding:10px 16px"><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2.4"/><path d="M8.6 8h6.8M8.6 12h6.8M8.6 16h4"/></svg> Démarrer mois suivant</button>' +
       '</div>' +
       '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-bottom:16px">' + kpis + '</div>' +
       settleHtml + raBar +
       '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px">' + mktChips +
       '<span style="width:1px;height:22px;background:#2a2a35;margin:0 4px"></span>' + chips +
       '<div style="flex:1"></div>' +
-      '<button id="fx-settings" class="fx-btn2" style="padding:9px 15px">⚙️ Paramètres</button>' +
+      '<button id="fx-settings" class="fx-btn2" style="padding:9px 15px"><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3.6v2.4M12 18v2.4M20.4 12H18M6 12H3.6M18 6l-1.7 1.7M7.7 16.3L6 18M18 18l-1.7-1.7M7.7 7.7L6 6"/></svg>️ Paramètres</button>' +
       '<button id="fx-add" style="padding:9px 17px;background:linear-gradient(135deg,#818cf8,#a78bfa);border:0;color:#0d0d18;border-radius:10px;font-size:13px;font-weight:800;cursor:pointer;margin:0">+ Ajouter une ligne</button>' +
       '</div>' +
       renderGroups() +
@@ -287,7 +289,7 @@
     return '<div style="background:#12121a;border:1px solid #23232e;border-radius:12px;padding:13px 15px">' +
       '<div style="font-size:12.5px;font-weight:800;margin-bottom:8px">' + title + '</div>' +
       '<div style="display:flex;justify-content:space-between;font-size:12px;color:#c0c0d5;padding:2px 0"><span>Part du bénéf</span><b>' + money(part) + '</b></div>' +
-      '<div style="font-size:10px;color:#8a8a98;font-weight:800;letter-spacing:.06em;text-transform:uppercase;margin:8px 0 3px">💳 Avancé de sa poche</div>' +
+      '<div style="font-size:10px;color:#8a8a98;font-weight:800;letter-spacing:.06em;text-transform:uppercase;margin:8px 0 3px"><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.6" y="5.4" width="18.8" height="13.2" rx="2.6"/><path d="M2.6 10h18.8"/></svg> Avancé de sa poche</div>' +
       '<div style="max-height:150px;overflow:auto">' + rows + '</div>' +
       '<div style="display:flex;justify-content:space-between;font-size:12px;color:#c0c0d5;border-top:1px dashed #2a2a35;margin-top:6px;padding-top:6px"><span>Total avances</span><b>' + money(advTotal) + '</b></div>' +
       '<div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;border-top:1px solid #2a2a35;margin-top:8px;padding-top:8px"><span style="font-weight:800">= À verser</span><b style="color:' + color + ';font-size:16px">' + money(payTotal) + '</b></div>' +
@@ -365,7 +367,7 @@
       }
       origin = l.pct + '% ' + esc(baseLbl);
     } else if (l.form === 'mypuls') {
-      origin = '🔄 CA MyPuls · ' + esc(l.mypuls_model || '?') + ' <span style="color:#4ade80">(auto)</span>';
+      origin = '<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.6a8 8 0 1 1-2.4-5.4"/><path d="M20 4v4.6h-4.6"/></svg> CA MyPuls · ' + esc(l.mypuls_model || '?') + ' <span style="color:#4ade80">(auto)</span>';
       /* Provenance réelle du montant : API officielle (exact, posts inclus, net)
          ou repli scraping (incomplet). Si repli, on dit POURQUOI. */
       var src = l.mp_src;
@@ -390,24 +392,24 @@
         origin += ' <span style="color:#22c55e">net</span>';
       }
     } else if (l.form === 'mypuls_crm') {
-      origin = '🧾 Factures CRM MyPuls du mois <span style="color:#4ade80">(auto)</span>';
+      origin = '<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2.4"/><path d="M8.6 8h6.8M8.6 12h6.8M8.6 16h4"/></svg> Factures CRM MyPuls du mois <span style="color:#4ade80">(auto)</span>';
     } else if (l.form === 'va_clicks') {
-      origin = '👆 ' + (l.va_clicks || 0).toLocaleString('en-US') + ' clics éligibles × $0.07 <span style="color:#4ade80">(auto)</span>';
+      origin = '<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11V6.4a1.8 1.8 0 1 1 3.6 0V13"/><path d="M12.6 9.6a1.7 1.7 0 0 1 3.4 0v1.2"/><path d="M16 10.6a1.7 1.7 0 0 1 3.4 0v3.6a5.6 5.6 0 0 1-5.6 5.6h-1.6a5 5 0 0 1-3.6-1.6L5 14.4a1.8 1.8 0 0 1 2.6-2.4L9 13.4"/></svg> ' + (l.va_clicks || 0).toLocaleString('en-US') + ' clics éligibles × $0.07 <span style="color:#4ade80">(auto)</span>';
     } else {
       origin = (l.currency === 'EUR' ? '€' : '$') + (l.amount || 0).toFixed(2);
     }
     // badges
     var badges = '';
     var mb = monthBounds();
-    badges += badge('📅', 'Période : ' + frDate(mb[0]) + ' → ' + frDate(mb[1]) + ' ' + S.month.slice(0, 4));
+    badges += badge('<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.4" y="5.2" width="17.2" height="15.4" rx="2.6"/><path d="M3.4 10h17.2M8.4 3.4v3.6M15.6 3.4v3.6"/></svg>', 'Période : ' + frDate(mb[0]) + ' → ' + frDate(mb[1]) + ' ' + S.month.slice(0, 4));
     if (!isRev && l.paid_by === 'lead') {
-      badges += '<span style="background:rgba(250,204,21,.10);border:1px solid rgba(250,204,21,.4);color:#facc15;font-size:10.5px;font-weight:800;padding:4px 10px;border-radius:8px">💳 avancée par ' + esc(leadName()) + ' (toi) — à te rembourser</span>';
+      badges += '<span style="background:rgba(250,204,21,.10);border:1px solid rgba(250,204,21,.4);color:#facc15;font-size:10.5px;font-weight:800;padding:4px 10px;border-radius:8px"><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.6" y="5.4" width="18.8" height="13.2" rx="2.6"/><path d="M2.6 10h18.8"/></svg> avancée par ' + esc(leadName()) + ' (toi) — à te rembourser</span>';
     } else if (!isRev && String(l.paid_by || '').indexOf('assoc:') === 0) {
-      badges += '<span style="background:rgba(129,140,248,.10);border:1px solid rgba(129,140,248,.4);color:#a5b4fc;font-size:10.5px;font-weight:800;padding:4px 10px;border-radius:8px">💳 avancée par ' + esc(l.paid_by.slice(6)) + ' — à lui rembourser</span>';
+      badges += '<span style="background:rgba(129,140,248,.10);border:1px solid rgba(129,140,248,.4);color:#a5b4fc;font-size:10.5px;font-weight:800;padding:4px 10px;border-radius:8px"><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.6" y="5.4" width="18.8" height="13.2" rx="2.6"/><path d="M2.6 10h18.8"/></svg> avancée par ' + esc(l.paid_by.slice(6)) + ' — à lui rembourser</span>';
     }
     if (isRev && l.next_pay) {
       var days = Math.ceil((new Date(l.next_pay + 'T12:00:00') - new Date()) / 86400000);
-      badges += badge('🎯', 'Prochain paiement : ' + frDate(l.next_pay) + ' ' + l.next_pay.slice(0, 4) + (days >= 0 ? ' (dans ' + days + 'j)' : ''));
+      badges += badge('<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.4"/><circle cx="12" cy="12" r="4.4"/><circle cx="12" cy="12" r="1"/></svg>', 'Prochain paiement : ' + frDate(l.next_pay) + ' ' + l.next_pay.slice(0, 4) + (days >= 0 ? ' (dans ' + days + 'j)' : ''));
     }
     // phases
     var phasesHtml = '';
@@ -426,7 +428,7 @@
         : '<button class="fx-pay" data-id="' + l.id + '" style="padding:5px 12px;border-radius:999px;border:1px solid #33333f;background:transparent;color:#9a9aa8;font-size:11px;font-weight:700;cursor:pointer;margin:0">○ Marquer payé</button>';
     }
     var linkBtn = l.link
-      ? '<a href="' + esc(l.link) + '" target="_blank" title="Ouvrir le lien de paiement" style="color:#818cf8;font-size:13px;text-decoration:none;padding:4px">🔗</a>'
+      ? '<a href="' + esc(l.link) + '" target="_blank" title="Ouvrir le lien de paiement" style="color:#818cf8;font-size:13px;text-decoration:none;padding:4px"><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.2 13.8a3.8 3.8 0 0 0 5.6.4l2.6-2.6a3.8 3.8 0 0 0-5.4-5.4l-1.4 1.4"/><path d="M13.8 10.2a3.8 3.8 0 0 0-5.6-.4l-2.6 2.6a3.8 3.8 0 0 0 5.4 5.4l1.4-1.4"/></svg></a>'
       : '';
     return '<div style="background:#14141f;border:1px solid #23232e;border-left:3px solid ' + accent + ';border-radius:10px;padding:12px 14px">' +
       '<div style="display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap">' +
@@ -445,7 +447,7 @@
       eurHint(l.usd || 0, l.fee_pct,
         l.cat === 'rev_of' && (!l.mp_src || l.mp_src.api)) + '</span>' +
       '<button class="fx-edit" data-id="' + l.id + '" title="Modifier" style="background:transparent;border:0;color:#77778a;cursor:pointer;font-size:13px;padding:4px;margin:0">✎</button>' +
-      '<button class="fx-del" data-id="' + l.id + '" title="Supprimer" style="background:transparent;border:0;color:#77778a;cursor:pointer;font-size:13px;padding:4px;margin:0">🗑</button>' +
+      '<button class="fx-del" data-id="' + l.id + '" title="Supprimer" style="background:transparent;border:0;color:#77778a;cursor:pointer;font-size:13px;padding:4px;margin:0"><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 6.6h14.8M9.4 6.6V4.8h5.2v1.8M6.6 6.6l1 12.6h8.8l1-12.6"/></svg></button>' +
       '</div></div></div>';
   }
 
@@ -562,7 +564,7 @@
     var revLines = (d.rev_lines || []).filter(function (rl) { return rl.id !== line.id; });
     var isMulti = (line.pct_of || '').indexOf('lines:') === 0;
     var multiIds = isMulti ? line.pct_of.slice(6).split(',') : [];
-    var pctBaseOpts = '<option value="multi"' + (isMulti ? ' selected' : '') + '>🧩 Plusieurs revenus (multi-sélection)</option>';
+    var pctBaseOpts = '<option value="multi"' + (isMulti ? ' selected' : '') + '><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9.4 4.6h5.2v3a1.8 1.8 0 1 0 0 3.6v5.2h-3a1.8 1.8 0 1 1-3.6 0h-3V4.6z"/></svg> Plusieurs revenus (multi-sélection)</option>';
     pctBaseOpts += '<optgroup label="Global">';
     pctBaseOpts += Object.keys(d.pct_bases).map(function (k) {
       return '<option value="' + k + '"' + (line.pct_of === k ? ' selected' : '') + '>' + esc(d.pct_bases[k]) + '</option>';
@@ -582,23 +584,23 @@
       '<button class="fx-close" style="background:#1d1d28;border:0;color:#999;width:30px;height:30px;border-radius:8px;cursor:pointer;margin:0">✕</button></div>' +
       fld('📌 Libellé', '<input id="fxm-label" style="' + INP + '" placeholder="Ex: Revenue OF, VA Marc, Infloww…" value="' + esc(line.label || '') + '">') +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
-      fld('💼 Type', '<select id="fxm-type" style="' + INP + '"><option value="exp"' + (line.type !== 'rev' ? ' selected' : '') + '>📩 Dépense (sortie)</option><option value="rev"' + (line.type === 'rev' ? ' selected' : '') + '>📨 Revenu (entrée)</option></select>') +
+      fld('💼 Type', '<select id="fxm-type" style="' + INP + '"><option value="exp"' + (line.type !== 'rev' ? ' selected' : '') + '><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19.4V8.8"/><path d="M7.4 13.4L12 8.8l4.6 4.6"/><path d="M4.4 4.6h15.2"/></svg> Dépense (sortie)</option><option value="rev"' + (line.type === 'rev' ? ' selected' : '') + '><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.6v10.6"/><path d="M7.4 10.6L12 15.2l4.6-4.6"/><path d="M4.4 19.4h15.2"/></svg> Revenu (entrée)</option></select>') +
       fld('🗂 Catégorie', '<select id="fxm-cat" style="' + INP + '">' + catOpts + '</select>') +
-      fld('💲 Forme', '<select id="fxm-form" style="' + INP + '"><option value="fixed"' + (line.form !== 'pct' && line.form !== 'mypuls' ? ' selected' : '') + '>💵 Montant fixe</option><option value="pct"' + (line.form === 'pct' ? ' selected' : '') + '>％ Pourcentage d&#39;un revenu</option><option value="mypuls"' + (line.form === 'mypuls' ? ' selected' : '') + '>🔄 CA MyPuls (auto)</option><option value="mypuls_crm"' + (line.form === 'mypuls_crm' ? ' selected' : '') + '>🧾 Frais CRM MyPuls (auto)</option><option value="va_clicks"' + (line.form === 'va_clicks' ? ' selected' : '') + '>👆 Clics VA × 0.07$ (auto)</option></select>') +
+      fld('💲 Forme', '<select id="fxm-form" style="' + INP + '"><option value="fixed"' + (line.form !== 'pct' && line.form !== 'mypuls' ? ' selected' : '') + '>💵 Montant fixe</option><option value="pct"' + (line.form === 'pct' ? ' selected' : '') + '>％ Pourcentage d&#39;un revenu</option><option value="mypuls"' + (line.form === 'mypuls' ? ' selected' : '') + '><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.6a8 8 0 1 1-2.4-5.4"/><path d="M20 4v4.6h-4.6"/></svg> CA MyPuls (auto)</option><option value="mypuls_crm"' + (line.form === 'mypuls_crm' ? ' selected' : '') + '><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2.4"/><path d="M8.6 8h6.8M8.6 12h6.8M8.6 16h4"/></svg> Frais CRM MyPuls (auto)</option><option value="va_clicks"' + (line.form === 'va_clicks' ? ' selected' : '') + '><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11V6.4a1.8 1.8 0 1 1 3.6 0V13"/><path d="M12.6 9.6a1.7 1.7 0 0 1 3.4 0v1.2"/><path d="M16 10.6a1.7 1.7 0 0 1 3.4 0v3.6a5.6 5.6 0 0 1-5.6 5.6h-1.6a5 5 0 0 1-3.6-1.6L5 14.4a1.8 1.8 0 0 1 2.6-2.4L9 13.4"/></svg> Clics VA × 0.07$ (auto)</option></select>') +
       fld('🔁 Fréquence', '<select id="fxm-freq" style="' + INP + '"><option value="monthly"' + (line.freq === 'monthly' ? ' selected' : '') + '>Mensuel</option><option value="biweekly"' + (line.freq === 'biweekly' ? ' selected' : '') + '>Quinzaine (×2)</option><option value="weekly"' + (line.freq === 'weekly' ? ' selected' : '') + '>Hebdo (×4)</option><option value="once"' + (line.freq === 'once' ? ' selected' : '') + '>Une seule fois</option></select>') +
-      fld('🌍 Marché', '<select id="fxm-market" style="' + INP + '"><option value="fr"' + (line.market === 'fr' ? ' selected' : '') + '>🇫🇷 France</option><option value="us"' + (line.market !== 'fr' ? ' selected' : '') + '>🇺🇸 US</option></select>') +
+      fld('<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.6"/><path d="M3.4 12h17.2"/><path d="M12 3.4a13 13 0 0 1 0 17.2a13 13 0 0 1 0-17.2z"/></svg> Marché', '<select id="fxm-market" style="' + INP + '"><option value="fr"' + (line.market === 'fr' ? ' selected' : '') + '>🇫🇷 France</option><option value="us"' + (line.market !== 'fr' ? ' selected' : '') + '>🇺🇸 US</option></select>') +
       '<div id="fxm-paidby-wrap" style="display:' + (line.type === 'rev' ? 'none' : 'block') + '">' +
-      fld('💳 Payée par', '<select id="fxm-paidby" style="' + INP + '">' + paidByOpts(line) + '</select>') +
+      fld('<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.6" y="5.4" width="18.8" height="13.2" rx="2.6"/><path d="M2.6 10h18.8"/></svg> Payée par', '<select id="fxm-paidby" style="' + INP + '">' + paidByOpts(line) + '</select>') +
       '</div>' +
       '</div>' +
       '<div id="fxm-mypuls-wrap" style="display:' + (line.form === 'mypuls' ? 'block' : 'none') + '">' +
-      fld('🔄 Créatrice MyPuls <span style="color:#55556a;text-transform:none">(CA du mois récupéré automatiquement, converti en $)</span>',
+      fld('<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.6a8 8 0 1 1-2.4-5.4"/><path d="M20 4v4.6h-4.6"/></svg> Créatrice MyPuls <span style="color:#55556a;text-transform:none">(CA du mois récupéré automatiquement, converti en $)</span>',
         '<select id="fxm-mypulsmodel" style="' + INP + '">' +
         (line.mypuls_model ? '<option value="' + esc(line.mypuls_model) + '" selected>' + esc(line.mypuls_model) + '</option>' : '<option value="">⏳ Chargement des créatrices…</option>') +
         '</select>') +
       '</div>' +
       '<div id="fxm-fixed-wrap" style="display:' + (line.form && line.form !== 'fixed' ? 'none' : 'grid') + ';grid-template-columns:1fr 130px;gap:12px">' +
-      fld('💰 Montant', '<input id="fxm-amount" type="number" step="0.01" min="0" style="' + INP + '" value="' + (line.amount || '') + '" placeholder="0.00">') +
+      fld('<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.6"/><path d="M12 6.8v10.4M14.7 9.4a2.7 2.7 0 0 0-2.7-1.4c-1.7 0-2.7 1-2.7 2.2 0 2.7 5.4 1.6 5.4 4.3 0 1.2-1 2.3-2.7 2.3a2.9 2.9 0 0 1-2.8-1.6"/></svg> Montant', '<input id="fxm-amount" type="number" step="0.01" min="0" style="' + INP + '" value="' + (line.amount || '') + '" placeholder="0.00">') +
       fld('Devise', '<select id="fxm-currency" style="' + INP + '"><option value="USD"' + (line.currency !== 'EUR' ? ' selected' : '') + '>$ USD</option><option value="EUR"' + (line.currency === 'EUR' ? ' selected' : '') + '>€ EUR</option></select>') +
       '</div>' +
       '<div id="fxm-pct-wrap" style="display:' + (line.form === 'pct' ? 'grid' : 'none') + ';grid-template-columns:130px 1fr;gap:12px">' +
@@ -606,7 +608,7 @@
       fld('… calculé sur', '<select id="fxm-pctof" style="' + INP + '">' + pctBaseOpts + '</select>') +
       '</div>' +
       '<div id="fxm-multibox" style="display:' + (line.form === 'pct' && isMulti ? 'block' : 'none') + '">' +
-      fld('🧩 Revenus inclus dans la base (le % s&#39;applique à leur SOMME)',
+      fld('<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9.4 4.6h5.2v3a1.8 1.8 0 1 0 0 3.6v5.2h-3a1.8 1.8 0 1 1-3.6 0h-3V4.6z"/></svg> Revenus inclus dans la base (le % s&#39;applique à leur SOMME)',
         '<div style="display:flex;flex-direction:column;gap:7px;max-height:190px;overflow-y:auto;border:1px dashed #2c2c3d;border-radius:9px;padding:11px">' +
         (revLines.length ? revLines.map(function (rl) {
           var ck = multiIds.indexOf(rl.id) >= 0;
@@ -617,14 +619,14 @@
         '</div>') +
       '</div>' +
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">' +
-      fld('📆 Date de début', '<input id="fxm-start" type="date" style="' + INP + '" value="' + esc(line.start || '') + '">') +
+      fld('<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.4" y="5.2" width="17.2" height="15.4" rx="2.6"/><path d="M3.4 10h17.2M8.4 3.4v3.6M15.6 3.4v3.6"/></svg> Date de début', '<input id="fxm-start" type="date" style="' + INP + '" value="' + esc(line.start || '') + '">') +
       fld('Date de fin <span style="color:#55556a;text-transform:none">(optionnel)</span>', '<input id="fxm-end" type="date" style="' + INP + '" value="' + esc(line.end || '') + '">') +
       '</div>' +
       '<div id="fxm-nextpay-wrap" style="display:' + (line.type === 'rev' ? 'block' : 'none') + '">' +
-      fld('🎯 Prochain paiement (revenus)', '<input id="fxm-nextpay" type="date" style="' + INP + '" value="' + esc(line.next_pay || '') + '">') +
+      fld('<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.4"/><circle cx="12" cy="12" r="4.4"/><circle cx="12" cy="12" r="1"/></svg> Prochain paiement (revenus)', '<input id="fxm-nextpay" type="date" style="' + INP + '" value="' + esc(line.next_pay || '') + '">') +
       '</div>' +
-      fld('🔗 Lien de paiement (optionnel)', '<input id="fxm-link" style="' + INP + '" placeholder="https://infloww.com/billing — ouvert au moment de payer" value="' + esc(line.link || '') + '">') +
-      fld('📆 Phases de paiement (optionnel) <button id="fxm-genphases" style="float:right;background:#1d1d28;border:1px solid #2c2c3d;color:#bbb;padding:4px 10px;border-radius:7px;font-size:11px;cursor:pointer;margin:0;text-transform:none;letter-spacing:0">📆 Générer auto</button>',
+      fld('<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.2 13.8a3.8 3.8 0 0 0 5.6.4l2.6-2.6a3.8 3.8 0 0 0-5.4-5.4l-1.4 1.4"/><path d="M13.8 10.2a3.8 3.8 0 0 0-5.6-.4l-2.6 2.6a3.8 3.8 0 0 0 5.4 5.4l1.4-1.4"/></svg> Lien de paiement (optionnel)', '<input id="fxm-link" style="' + INP + '" placeholder="https://infloww.com/billing — ouvert au moment de payer" value="' + esc(line.link || '') + '">') +
+      fld('<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.4" y="5.2" width="17.2" height="15.4" rx="2.6"/><path d="M3.4 10h17.2M8.4 3.4v3.6M15.6 3.4v3.6"/></svg> Phases de paiement (optionnel) <button id="fxm-genphases" style="float:right;background:#1d1d28;border:1px solid #2c2c3d;color:#bbb;padding:4px 10px;border-radius:7px;font-size:11px;cursor:pointer;margin:0;text-transform:none;letter-spacing:0"><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.4" y="5.2" width="17.2" height="15.4" rx="2.6"/><path d="M3.4 10h17.2M8.4 3.4v3.6M15.6 3.4v3.6"/></svg> Générer auto</button>',
         '<div id="fxm-phases" style="display:flex;gap:6px;flex-wrap:wrap;min-height:34px;border:1px dashed #2c2c3d;border-radius:9px;padding:8px;font-size:11.5px;color:#66667a">' + renderPhaseChips(line.phases || []) + '</div>') +
       fld('📝 Notes (optionnel)', '<textarea id="fxm-notes" style="' + INP + ';min-height:60px;resize:vertical" placeholder="Ex: contrat 12 mois, paiement le 1er, etc.">' + esc(line.notes || '') + '</textarea>') +
       '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:6px">' +
@@ -762,7 +764,7 @@
   }
 
   function renderPhaseChips(phases) {
-    if (!phases.length) return 'Aucune phase. Clique 📆 Générer auto pour répartir le mois selon la fréquence.';
+    if (!phases.length) return 'Aucune phase. Clique <svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.4" y="5.2" width="17.2" height="15.4" rx="2.6"/><path d="M3.4 10h17.2M8.4 3.4v3.6M15.6 3.4v3.6"/></svg> Générer auto pour répartir le mois selon la fréquence.';
     return phases.map(function (p) {
       return '<span style="background:#1d1d2c;border:1px solid #33334a;color:#c0c0d5;padding:4px 11px;border-radius:999px;font-size:11px;font-weight:700">' + frDate(p.date) + '</span>';
     }).join('');
@@ -780,22 +782,22 @@
           '<input data-ai="' + i + '" data-k="pct" type="number" min="0" max="100" step="0.5" style="' + INP + ';width:80px" value="' + a.pct + '">' +
           '<span style="color:#77778a;font-size:12px">%</span>' +
           '<select data-ai="' + i + '" data-k="market" style="' + INP + ';width:118px">' +
-          '<option value="tous"' + (mk === 'tous' ? ' selected' : '') + '>🌍 Tous</option>' +
+          '<option value="tous"' + (mk === 'tous' ? ' selected' : '') + '><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.6"/><path d="M3.4 12h17.2"/><path d="M12 3.4a13 13 0 0 1 0 17.2a13 13 0 0 1 0-17.2z"/></svg> Tous</option>' +
           '<option value="fr"' + (mk === 'fr' ? ' selected' : '') + '>🇫🇷 FR</option>' +
           '<option value="us"' + (mk === 'us' ? ' selected' : '') + '>🇺🇸 US</option></select>' +
-          '<button data-adel="' + i + '" style="background:transparent;border:0;color:#77778a;cursor:pointer;font-size:13px;margin:0">🗑</button></div>';
+          '<button data-adel="' + i + '" style="background:transparent;border:0;color:#77778a;cursor:pointer;font-size:13px;margin:0"><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.6 6.6h14.8M9.4 6.6V4.8h5.2v1.8M6.6 6.6l1 12.6h8.8l1-12.6"/></svg></button></div>';
       }).join('');
     }
     modal(
       '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">' +
-      '<div style="font-size:17px;font-weight:800">⚙️ Paramètres de calcul</div>' +
+      '<div style="font-size:17px;font-weight:800"><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3.6v2.4M12 18v2.4M20.4 12H18M6 12H3.6M18 6l-1.7 1.7M7.7 16.3L6 18M18 18l-1.7-1.7M7.7 7.7L6 6"/></svg>️ Paramètres de calcul</div>' +
       '<button class="fx-close" style="background:#1d1d28;border:0;color:#999;width:30px;height:30px;border-radius:8px;cursor:pointer;margin:0">✕</button></div>' +
       fld('💱 Taux EUR → USD', '<input id="fxs-rate" type="number" step="0.01" min="0.5" max="2" style="' + INP + '" value="' + ((st.eur_usd_raw ? st.eur_usd_raw : '')) + '" placeholder="auto (' + (st.eur_usd || '') + ')">') +
-      fld('👑 Ton nom (lead)', '<input id="fxs-lead" style="' + INP + '" value="' + esc(st.lead_name || 'Sama') + '" placeholder="Sama">') +
+      fld('<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17.6h16M4.4 7l4 3.4L12 5l3.6 5.4 4-3.4-1.6 8.2H6z"/></svg> Ton nom (lead)', '<input id="fxs-lead" style="' + INP + '" value="' + esc(st.lead_name || 'Sama') + '" placeholder="Sama">') +
       fld('💸 Jour de coupure paie chatters', '<input id="fxs-cutoff" type="number" min="1" max="28" style="' + INP + '" value="' + st.cutoff + '">') +
       '<div style="background:#0d0d16;border:1px solid #26263a;border-radius:9px;padding:10px 13px;font-size:11.5px;color:#8f8fa8;margin-bottom:16px">Découpe le mois en 2 périodes de paie : <b style="color:#c0c0d5">1 → ce jour</b> et <b style="color:#c0c0d5">jour+1 → fin du mois</b>. Défaut : 15 (1-15 / 16-fin).</div>' +
       '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">' +
-      '<div style="font-size:13.5px;font-weight:800">👥 Associés (% du net)</div>' +
+      '<div style="font-size:13.5px;font-weight:800"><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8.6" r="3.1"/><path d="M3.6 19.2a5.6 5.6 0 0 1 10.8 0"/><path d="M16 6.5a3.1 3.1 0 0 1 0 6M17.4 14.6a5.4 5.4 0 0 1 3 4.6"/></svg> Associés (% du net)</div>' +
       '<button id="fxs-addassoc" class="fx-btn2" style="padding:6px 13px">+ Ajouter associé</button></div>' +
       '<div id="fxs-assoc">' + assocRows() + '</div>' +
       '<div style="background:#0d0d16;border:1px solid #26263a;border-radius:9px;padding:10px 13px;font-size:11.5px;color:#8f8fa8;margin:10px 0 18px">Le <b style="color:#c0c0d5">lead</b> récupère <b style="color:#c0c0d5">100% − associés</b>. Un associé rattaché à <b style="color:#c0c0d5">🇺🇸 US</b> (ou 🇫🇷 FR) ne touche que le net de <b style="color:#c0c0d5">ce marché</b> ; « Tous » = % du net global.</div>' +
