@@ -1463,6 +1463,11 @@ body.light #rank-sort-btn:hover{color:#1c1c1e;background:rgba(60,60,67,.06)}
 #rank-sort-btn svg{transition:transform .2s ease}
 #rank-sort-btn[data-asc='1'] svg{transform:rotate(180deg)}
 
+/* pastille portant un logo de service : fond neutre, le logo se suffit */
+.toast-icon-logo{background:rgba(120,120,128,.14)!important}
+body.light .toast-icon-logo{background:rgba(120,120,128,.10)!important}
+.toast-icon-logo svg{display:block}
+
 /* =============== SIDEBAR RAIL : menu réduit en icônes + flyouts au survol =============== */
 .sidebar{transition:width .25s cubic-bezier(.16,1,.3,1)}
 .rail-toggle{display:flex;align-items:center;gap:12px;margin:0 12px 4px;padding:8px 14px;background:transparent;border:0;color:#666;font-size:12px;font-weight:600;cursor:pointer;border-radius:8px;font-family:inherit;text-align:left;transition:background .15s,color .15s}
@@ -1912,6 +1917,31 @@ function setTheme(theme){
   };
 })();
 // === SYSTÈME DE TOASTS ===
+
+// Logos des services cites dans une notification : « Drive » affiche le logo
+// Drive plutot qu'un emoji. Tracés simples, lisibles a 20 px.
+var VA_LOGOS = {
+  drive: "<svg viewBox='0 0 24 24' width='19' height='19'>"
+    + "<path fill='#FFBA00' d='M12 3.2 L12 14.7 L2.6 20.4 Z'/>"
+    + "<path fill='#00AC47' d='M12 3.2 L12 14.7 L21.4 20.4 Z'/>"
+    + "<path fill='#0066DA' d='M2.6 20.4 L12 14.7 L21.4 20.4 Z'/></svg>",
+  instagram: "<svg viewBox='0 0 24 24' width='19' height='19' fill='none' stroke='#E1306C' "
+    + "stroke-width='1.9' stroke-linecap='round'><rect x='3.2' y='3.2' width='17.6' height='17.6' rx='5'/>"
+    + "<circle cx='12' cy='12' r='4'/><circle cx='17.2' cy='6.8' r='1.1' fill='#E1306C' stroke='none'/></svg>",
+  discord: "<svg viewBox='0 0 24 24' width='19' height='19' fill='#5865F2'>"
+    + "<path d='M19.3 6.4A16 16 0 0 0 15.4 5l-.3.5a12 12 0 0 1 3.3 1.6 13.6 13.6 0 0 0-12.8 0A12 12 0 0 1 9 5.5L8.6 5a16 16 0 0 0-4 1.4C2 10.4 1.4 14.2 1.7 18a16 16 0 0 0 4.9 2.4l.9-1.5a10 10 0 0 1-1.6-.8l.4-.3a11.4 11.4 0 0 0 9.8 0l.4.3a10 10 0 0 1-1.6.8l.9 1.5a16 16 0 0 0 4.9-2.4c.4-4.4-.6-8.2-2.4-11.6zM8.6 15.6c-1 0-1.7-.9-1.7-2s.8-2 1.7-2 1.8.9 1.7 2c0 1.1-.8 2-1.7 2zm6.8 0c-1 0-1.7-.9-1.7-2s.8-2 1.7-2 1.8.9 1.7 2c0 1.1-.7 2-1.7 2z'/></svg>",
+  telegram: "<svg viewBox='0 0 24 24' width='19' height='19' fill='#2AABEE'>"
+    + "<path d='M21.4 4.3 2.9 11.4c-1 .4-1 1 .1 1.3l4.7 1.5 1.8 5.5c.2.6.5.7 1 .3l2.6-2.1 4.4 3.3c.8.4 1.4.2 1.6-.8l3-13.9c.3-1.2-.4-1.7-1.2-1.4zM8.9 13.9l9.4-5.9c.4-.3.8-.1.5.2l-8 7.2-.3 3.2z'/></svg>"
+};
+function vaLogoPour(txt){
+  var t = String(txt || '').toLowerCase();
+  if(t.indexOf('drive') !== -1) return VA_LOGOS.drive;
+  if(t.indexOf('instagram') !== -1 || t.indexOf(' insta') !== -1) return VA_LOGOS.instagram;
+  if(t.indexOf('discord') !== -1) return VA_LOGOS.discord;
+  if(t.indexOf('telegram') !== -1) return VA_LOGOS.telegram;
+  return '';
+}
+
 function showToast(message, type, duration){
   type = type || 'info';
   duration = duration || 4500;
@@ -1947,7 +1977,10 @@ function showToast(message, type, duration){
   // du serveur (erreurs, noms de fichiers, texte lu dans une video par l IA).
   // Aucun appelant ne passe de HTML, donc rien ne se perd a les traiter en texte.
   var tIcon = document.createElement('div');
-  tIcon.className = 'toast-icon'; tIcon.textContent = icon;
+  tIcon.className = 'toast-icon';
+  var _logo = vaLogoPour(_brut);
+  if(_logo){ tIcon.innerHTML = _logo; tIcon.classList.add('toast-icon-logo'); }
+  else { tIcon.textContent = icon; }
   var tMsg = document.createElement('div');
   tMsg.className = 'toast-msg'; tMsg.textContent = msgClean;
   var tClose = document.createElement('button');
@@ -6849,7 +6882,7 @@ document.addEventListener('DOMContentLoaded', function(){
 // Toggle Veille : add si pas dedans, remove si deja dedans
 // Lit le payload depuis les data-attributs de la carte (deja echappes par le
 // serveur) au lieu d'un JSON inline dans onclick : une apostrophe ou un saut
-// de ligne dans la caption cassait tout l'attribut -> bouton 🔖 mort.
+// de ligne dans la caption cassait tout l'attribut -> bouton ⚑ mort.
 window.addToVeilleFromCard = function(btn){
   var card = btn.closest('.reel-card'); if(!card) return;
   var d = card.dataset;
@@ -6878,7 +6911,7 @@ window.addToVeille = async function(btn, payload){
         btn.removeAttribute('data-veille-id');
         btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
         btn.style.background = 'rgba(0,0,0,.6)';
-        if(typeof showToast === 'function') showToast('🔖 Retiré de la Veille', 'success');
+        if(typeof showToast === 'function') showToast('⚑ Retiré de la Veille', 'success');
         window.refreshVeilleSection && window.refreshVeilleSection();
       } else {
         btn.innerHTML = orig;
@@ -6898,7 +6931,7 @@ window.addToVeille = async function(btn, payload){
         if(rid) btn.setAttribute('data-veille-id', rid);
         btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="#22c55e" stroke="#22c55e" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
         btn.style.background = 'rgba(34,197,94,.3)';
-        const msg = j.ok ? '🔖 Ajouté à la Veille' : '🔖 Déjà dans la Veille';
+        const msg = j.ok ? '⚑ Ajouté à la Veille' : '⚑ Déjà dans la Veille';
         if(typeof showToast === 'function') showToast(msg, 'success');
         if(typeof j.veille_total === 'number') window.updateVeilleBadge && window.updateVeilleBadge(j.veille_total);
         window.refreshVeilleSection && window.refreshVeilleSection();
@@ -8093,7 +8126,7 @@ document.addEventListener('click',function(e){
 <!-- Sub-tabs style Insta : Mes suivies / Veille -->
 <div style="display:flex;gap:4px;border-bottom:1px solid #2a2a2a;margin-bottom:20px">
   <button class="ig-feed-tab active" onclick="showFeed(this,'suivies')" style="padding:12px 24px;background:none;border:0;color:#fff;cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid #3b82f6;margin:0">👥 Mes suivies</button>
-  <button class="ig-feed-tab" onclick="showFeed(this,'veille')" style="padding:12px 24px;background:none;border:0;color:#888;cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid transparent;margin:0">🔖 Veille <span id="veille-count-badge" style="background:#3b82f6;color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:10px;margin-left:4px;display:none"></span></button>
+  <button class="ig-feed-tab" onclick="showFeed(this,'veille')" style="padding:12px 24px;background:none;border:0;color:#888;cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid transparent;margin:0">⚑ Veille <span id="veille-count-badge" style="background:#3b82f6;color:#fff;font-size:10px;font-weight:800;padding:2px 7px;border-radius:10px;margin-left:4px;display:none"></span></button>
 </div>
 <script>
 function showFeed(btn,name){
@@ -17097,7 +17130,7 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
                 # ne transporte rien, c'est le serveur qui télécharge).
                 "<div style='margin-top:14px;padding-top:12px;border-top:1px solid #232327'>"
                 "<form method='POST' action='/gdrive/import' id='gd-import-form' style='display:flex;gap:12px;align-items:center;flex-wrap:wrap'>"
-                "<button type='button' onclick='gdScan(this)' style='padding:8px 16px;background:#1a1a1f;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'>🔍 Voir ce qui attend dans le Drive</button>"
+                "<button type='button' onclick='gdScan(this)' style='padding:8px 16px;background:#1a1a1f;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'>⌕ Voir ce qui attend dans le Drive</button>"
                 "<button type='submit' id='gd-import-go' style='display:none;padding:8px 16px;background:rgba(34,197,94,.14);border:1px solid rgba(34,197,94,.45);color:#22c55e;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'>⬇️ Importer</button>"
                 "<span style='font-size:12px;color:#9a9aa6'>dépose tes fichiers dans <b>A IMPORTER / &lt;identité&gt; / Video brut</b></span>"
                 "<span style='font-size:11.5px;color:#22c55e;font-weight:700;width:100%'>"
@@ -18162,7 +18195,7 @@ def _render_insta_trends_grid_html() -> str:
         comments = r.get("comments", 0)
         # échappe " ET ' (les data-attrs de la carte sont en simple quote) +
         # < > : sinon une apostrophe dans la caption cassait l'attribut ->
-        # bouton 🔖 mort. Aligné sur la Veille (:19909).
+        # bouton ⚑ mort. Aligné sur la Veille (:19909).
         caption = ((r.get("caption") or "").strip()
                    .replace('"', "&quot;").replace("'", "&#39;")
                    .replace("<", "&lt;").replace(">", "&gt;"))
@@ -19707,7 +19740,7 @@ window.addEventListener('DOMContentLoaded', function(){{
           <input type='time' name='time' value='19:00' required>
         </div>
         <div>
-          <label>Modèle qui REÇOIT 🎯</label>
+          <label>Modèle qui REÇOIT ◎</label>
           <select name='receiver_identity' id='sfs-modal-receiver' required></select>
         </div>
         <div>
@@ -19719,7 +19752,7 @@ window.addEventListener('DOMContentLoaded', function(){{
           <select name='status'>
             <option value='scheduled'>✓ Scheduled</option>
             <option value='to_program'>⚙ To program</option>
-            <option value='to_verify'>🔍 À vérifier</option>
+            <option value='to_verify'>⌕ À vérifier</option>
             <option value='done'>✓ Done</option>
           </select>
         </div>
@@ -27294,9 +27327,9 @@ def _render_veille_feed_html() -> str:
     if not by_day:
         return (
             "<div style='background:#161616;border:1px solid #2a2a2a;border-radius:12px;padding:60px 20px;text-align:center;color:#666'>"
-            "<div style='font-size:48px;margin-bottom:12px'>🔖</div>"
+            "<div style='font-size:48px;margin-bottom:12px'>⚑</div>"
             "<h3 style='margin:0 0 8px;color:#fff'>Pas de reels en veille</h3>"
-            "<p style='margin:0;font-size:14px'>Va dans <b>Mes suivies</b> et clique sur le bouton 🔖 d'un reel pour l'ajouter ici.</p>"
+            "<p style='margin:0;font-size:14px'>Va dans <b>Mes suivies</b> et clique sur le bouton ⚑ d'un reel pour l'ajouter ici.</p>"
             "</div>"
         )
 
@@ -27552,7 +27585,7 @@ def _render_veille_feed_html() -> str:
       </div>
     </div>
     <div style="position:absolute;top:10px;right:10px;display:flex;gap:6px;z-index:5" onclick="event.stopPropagation()">
-      <button onclick='veillePrepare("{rid}")' title="🎯 Préparer la veille : lire le texte incrusté, valider la caption + la description avant d'envoyer" style="width:30px;height:30px;background:rgba(37,99,235,.62);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center">
+      <button onclick='veillePrepare("{rid}")' title="◎ Préparer la veille : lire le texte incrusté, valider la caption + la description avant d'envoyer" style="width:30px;height:30px;background:rgba(37,99,235,.62);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
       </button>
       <a href="{url}" target="_blank" rel="noopener" title="Ouvrir sur Instagram" style="width:30px;height:30px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;text-decoration:none">
@@ -28309,9 +28342,9 @@ def _render_vtg_html() -> str:
         f"value='{cfg.get('chat_id', '')}' required style='flex:1'>"
         "<button type='button' onclick='vtgDetectChatId()' "
         "style='background:#3b82f6;color:#fff;border:0;padding:0 16px;border-radius:8px;cursor:pointer;font-weight:700;font-size:12px;white-space:nowrap'>"
-        "🔍 Détecter</button>"
+        "⌕ Détecter</button>"
         "</div>"
-        "<small style='color:#888'>Ajoute le bot au groupe → envoie un message → clique <b>🔍 Détecter</b> ci-dessus.</small>"
+        "<small style='color:#888'>Ajoute le bot au groupe → envoie un message → clique <b>⌕ Détecter</b> ci-dessus.</small>"
         "<div id='vtg-chats-list' style='margin-top:10px'></div>"
         "<button type='submit' style='margin-top:14px;background:#0088cc;color:#fff;border:0;padding:11px 22px;border-radius:10px;font-weight:700;cursor:pointer;font-size:13px'>💾 Sauvegarder</button>"
         "</form>"
@@ -28320,7 +28353,7 @@ def _render_vtg_html() -> str:
         "1. <b>Crée un bot</b> via <a href='https://t.me/BotFather' target='_blank' style='color:#3b82f6'>@BotFather</a> sur Telegram, copie le token<br>"
         "2. <b>Ajoute ton bot au groupe</b> Veille (et donne-lui les droits d'écrire)<br>"
         "3. <b>Envoie un message</b> dans le groupe (n'importe quoi : 'test')<br>"
-        "4. <b>Colle le token</b> ci-dessus puis clique <b>🔍 Détecter</b> → la liste des groupes apparaît<br>"
+        "4. <b>Colle le token</b> ci-dessus puis clique <b>⌕ Détecter</b> → la liste des groupes apparaît<br>"
         "5. <b>Sauvegarde</b> → tu peux maintenant cocher des reels sur Veille et cliquer Envoyer"
         "</div>"
         "<script>"
@@ -28580,7 +28613,7 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
     ) if platform == "mym" else ""
 
     bulk_meta = {
-        "niche":      {"icon": "🎯", "label": "Niche",       "placeholder": "ex: CAISSE"},
+        "niche":      {"icon": "◎", "label": "Niche",       "placeholder": "ex: CAISSE"},
         "age":        {"icon": "🎂", "label": "Âge",         "placeholder": "ex: 50 ans"},
         "abonnement": {"icon": "💳", "label": "Abonnement",  "placeholder": "ex: free"},
         "sub_total":  {"icon": "👥", "label": "SUB Total",   "placeholder": "ex: 20K9"},
@@ -33014,7 +33047,7 @@ def _render_mypulslive_html() -> str:
         height = max(20, bot - top)
         color = _color_for(s["chatter"])
         model = s.get("model", "")
-        model_tag = f"<div style='font-size:9.5px;color:rgba(255,255,255,.85);overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>🎯 {model}</div>" if model else ""
+        model_tag = f"<div style='font-size:9.5px;color:rgba(255,255,255,.85);overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>◎ {model}</div>" if model else ""
         return (
             f"<div onclick='editShift(\"{s['id']}\")' "
             f"style='position:absolute;top:{top}px;left:4px;right:4px;height:{height}px;"
@@ -36896,7 +36929,7 @@ def _render_gemini_settings() -> str:
         if present else
         "<div style='padding:12px 16px;background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.35);"
         "border-radius:8px;margin-bottom:14px;font-size:13px;color:#93c5fd'>"
-        "🎯 <b>Recommandé (gratuit)</b> : Gemini de Google lit le texte incrusté <b>ET les emojis</b> "
+        "◎ <b>Recommandé (gratuit)</b> : Gemini de Google lit le texte incrusté <b>ET les emojis</b> "
         "(ce que l'OCR gratuit Tesseract ne sait pas faire), sans carte bancaire.</div>"
     )
     return (
@@ -42458,7 +42491,7 @@ def create_app():
                         _upd_sfs(new_id, **{slot: f"/sfs_proof/{target.name}"})
         except Exception:
             pass
-        recv_lbl = f" → 🎯 <b>{receiver_identity}</b>" if receiver_identity != identity else ""
+        recv_lbl = f" → ◎ <b>{receiver_identity}</b>" if receiver_identity != identity else ""
         _verb = "modifié" if edit_id else "ajouté"
         return _success(f"✓ SFS {_verb} : <b>{identity}</b> ({platform}){recv_lbl} avec <b>@{partner}</b> le {date} à {time_s}")
 
@@ -46121,7 +46154,7 @@ button:hover{{filter:brightness(1.2)}}
   <div style="display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:18px">
     <div><h1 style="margin:0;font-size:24px">⚠️ Activité VA <span style="color:#5a6178;font-size:15px;font-weight:500">— {MONTH}</span></h1>
     <div style="font-size:12px;color:#5a6178;margin-top:4px">1 pénalité par VA et par jour si ≥1 compte n'a pas posté depuis +48 h · {html_escape(scan_line)}</div></div>
-    <button class="btn" style="background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff" onclick="jbaScan(this)">🔍 Scanner maintenant</button>
+    <button class="btn" style="background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff" onclick="jbaScan(this)">⌕ Scanner maintenant</button>
   </div>
   <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px">
     <div class="kpi"><div class="v">{tot_va}</div><div class="l">VA</div></div>
@@ -46140,7 +46173,7 @@ button:hover{{filter:brightness(1.2)}}
 function jbaScan(b){{ b.disabled=true; b.textContent='◌ scan lancé…';
   fetch('/jbactivity/scan',{{method:'POST'}}).then(r=>r.json()).then(function(){{
     setTimeout(function(){{ location.reload(); }}, 2500);
-  }}).catch(function(){{ b.disabled=false; b.textContent='🔍 Scanner maintenant'; }}); }}
+  }}).catch(function(){{ b.disabled=false; b.textContent='⌕ Scanner maintenant'; }}); }}
 function jbaPen(va, act){{ var fd=new FormData(); fd.set('va',va); fd.set('action',act);
   fetch('/jbactivity/penalty',{{method:'POST',body:fd}}).then(r=>r.json()).then(function(){{ location.reload(); }}); }}
 function jbaToggle(el){{ var tr=el.closest('tr'); var d=tr.nextElementSibling;
@@ -46533,7 +46566,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             # parti en LIEN), on REFUSE : un envoi complet re-posterait le lien.
             forward_only = bool(request.form.get("forward_only"))
             if forward_only and not reel.get("tg_file_id"):
-                return jsonify({"ok": False, "error": "Le 1er envoi est parti en LIEN (vidéo introuvable) — rien à re-forwarder. Récupère d'abord la vidéo (🔍 Analyser) puis renvoie."})
+                return jsonify({"ok": False, "error": "Le 1er envoi est parti en LIEN (vidéo introuvable) — rien à re-forwarder. Récupère d'abord la vidéo (⌕ Analyser) puis renvoie."})
             # ---- Étape en cours (lue par le client via /veille/send_stage) ----
             _wrm = bool(reel.get("tg_file_id"))
             if not _wrm:
