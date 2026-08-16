@@ -1085,7 +1085,16 @@ try:
     # -- owner : rien n'est bloqué --
     _owF = _cliF("boss", "owner", None, "F3")
     check("owner : /jbactivity accessible", _owF.get("/jbactivity").status_code != 403)
-    check("owner : ses données restent présentes", "__sfsData" in _owF.get("/").get_data(as_text=True))
+    # Les gros onglets sont chargés à l'ouverture, plus dans la page d'accueil :
+    # l'owner doit donc les recevoir sur SON chemin, et le rôle restreint non.
+    check("owner : ses données restent présentes",
+          "__sfsData" in _owF.get("/?lazy=sfs",
+                                  headers={"X-Tab-Ajax": "1"}).get_data(as_text=True))
+    check("rôle restreint : onglet différé interdit refusé (403)",
+          _chF.get("/?lazy=sfs", headers={"X-Tab-Ajax": "1"}).status_code == 403)
+    check("rôle restreint : aucune donnée dans le fragment refusé",
+          "__sfsData" not in _chF.get("/?lazy=sfs",
+                                      headers={"X-Tab-Ajax": "1"}).get_data(as_text=True))
     _wF._load_web_users, _wF._load_role_definitions = _svF, _svdF
 except Exception as _e:
     check("fuites rôles : testable", False, repr(_e)[:90])
