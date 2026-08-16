@@ -6768,15 +6768,18 @@ function showTab(group,name,title,subtitle){
     // Section absente = page servie par une version plus ancienne du site
     // (deploiement en cours). Sans ce garde-fou : ecran blanc, ou le Dashboard
     // qui reapparait sous le titre du nouvel onglet -> incomprehensible.
-    var _home=document.getElementById('form-home');
-    if(_home){
-      _home.style.display='block';
-      _home.insertAdjacentHTML('afterbegin',
-        "<div style='margin:0 0 14px;padding:12px 14px;background:rgba(251,191,36,.1);"
-        +"border:1px solid rgba(251,191,36,.35);border-radius:10px;color:#fbbf24;font-size:13px'>"
-        +"◌ Cet onglet vient d'etre ajoute au site — recharge la page "
-        +"(<b>Ctrl+Maj+R</b>) pour l'ouvrir.</div>");
-    }
+    // On ne demande plus a l'utilisateur de recharger : on FABRIQUE la
+    // section et on va chercher son contenu. Demander un rechargement ne
+    // reglait rien quand la page etait deja a jour, et le message
+    // s'empilait a chaque clic.
+    var _main = document.querySelector('.main') || document.body;
+    sec = document.createElement('div');
+    sec.className = 'form-section';
+    sec.id = 'form-' + name;
+    sec.innerHTML = "<div data-lazy-tab='" + name + "' style='padding:60px 20px;"
+      + "text-align:center'><div class='va-loading'>Chargement…</div></div>";
+    _main.appendChild(sec);
+    sec.style.display = 'block';
   }
   // ===== Lazy-load des onglets lourds (1er open seulement) =====
   if(sec){
@@ -6796,7 +6799,9 @@ function showTab(group,name,title,subtitle){
             old.parentNode.replaceChild(s, old);
           });
         })
-        .catch(function(){ sec.innerHTML="<div style='color:#f99;padding:24px'>Erreur de chargement. <a href='#' onclick='location.reload()' style='color:#3b82f6'>Recharger</a></div>"; })
+        .catch(function(){ sec.innerHTML="<div style='padding:24px;font-size:13px'>"
+          +"Cet onglet n'a pas pu etre charge. "
+          +"<a href='#' onclick='location.reload()' style='color:#3b82f6'>Reessayer</a></div>"; })
         .finally(function(){ delete sec.dataset.lazyLoading; });
     }
   }
@@ -39908,6 +39913,32 @@ def create_app():
             _prods = {
                 "gms": _render_gms_html,
                 "linkscale": _render_linkscale_html,
+                # Onglets rendus d'office dans la page, mais qui doivent
+                # AUSSI pouvoir etre charges seuls : si la section manque
+                # (page ouverte avant un deploiement), showTab la fabrique et
+                # vient chercher son contenu ici. Sans ces entrees, la route
+                # repondait 404 et l'onglet restait vide.
+                "home": _render_home_dashboard_html,
+                "revenus": _render_revenus_html,
+                "mypulslive": _render_mypulslive_html,
+                "sfs": _render_sfs_html,
+                "jailbreak": _render_jailbreak_html,
+                "gmsdash": _render_gmsdash_html,
+                "jbanalyse": _render_jbanalyse_html,
+                "jbactivite": _render_jbactivite_html,
+                "facture": _render_facture_html,
+                "paievas": _render_paievas_html,
+                "veille": _render_veille_feed_html,
+                "cloudbios": lambda: _render_textvault_html("bios"),
+                "cloudctas": lambda: _render_textvault_html("ctas"),
+                "cloudcaptions": _render_cloud_captions_html,
+                "cloudpps": _render_cloud_pps_page,
+                "cloudreels": lambda: _render_cloud_content_html("videos", VIDEO_EXTS),
+                "cloudposts": lambda: _render_cloud_content_html("posts", IMAGE_EXTS),
+                "cloudstories": lambda: _render_cloud_content_html("stories", IMAGE_EXTS),
+                "cloudstoryctas": lambda: _render_cloud_content_html("storyctas", IMAGE_EXTS),
+                "cloudbrutes": lambda: _render_cloud_content_html("brutes", VIDEO_EXTS),
+                "cloudtemplates": lambda: _render_cloud_content_html("templates", VIDEO_EXTS),
                 # bilan : recalculé à chaque ouverture (suit les modifs Facture)
                 "bilan": _render_bilan_html,
                 # rafale SAFE_LAZY (audit vitesse) : scripts sans init
