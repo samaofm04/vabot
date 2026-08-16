@@ -649,8 +649,45 @@ def _telecharger(sess, file_id, cible: Path):
     tmp.replace(cible)
 
 
+def _cle_dossier(nom: str) -> str:
+    """Nom de dossier Drive ramene a sa forme comparable.
+
+    Sans accents, sans ponctuation, sans casse : « Vidéo brut », « video-brut »
+    et « VIDEO BRUT » deviennent la meme chose.
+    """
+    import re as _re
+    import unicodedata as _ud
+    t = _ud.normalize("NFKD", nom or "").encode("ascii", "ignore").decode()
+    return _re.sub(r"[^a-z0-9]+", " ", t.lower()).strip()
+
+
+# Les noms qu'un dossier Drive peut porter pour chaque section.
+#
+# Indispensable : le site a affiche tour a tour « Rushs bruts », « Video brut »
+# (dans sa propre consigne de depot !) et « Raw video » depuis le passage en
+# anglais. Un dossier cree en suivant l'ecran n'etait pas reconnu, et les
+# fichiers restaient invisibles sans le moindre message. On accepte donc toutes
+# les formes plutot que d'imposer la bonne.
+_ALIAS_SECTIONS = {
+    "brutes": ["rushs bruts", "rush brut", "rushs brut", "rushes",
+               "video brut", "videos brutes", "video brutes", "videos brut",
+               "raw video", "raw videos", "brutes", "brut"],
+    "videos": ["reels", "reel"],
+    "posts": ["posts", "post"],
+    "stories": ["stories", "story"],
+    "storyctas": ["story cta", "story ctas", "storycta", "cta story",
+                  "story cta s"],
+    "profile_pics": ["photos de profil", "photo de profil", "profile pics",
+                     "profile pictures", "profile pic", "pp"],
+    "templates": ["templates montage", "template montage", "montage templates",
+                  "templates", "template", "montage"],
+}
+
 # nom de dossier Drive -> sous-dossier de l'identite (sens inverse de SECTIONS)
-_DRIVE_TO_SUB = {n.lower(): s for s, n, _ in SECTIONS}
+_DRIVE_TO_SUB = {_cle_dossier(n): s for s, n, _ in SECTIONS}
+for _sub, _noms in _ALIAS_SECTIONS.items():
+    for _n in _noms:
+        _DRIVE_TO_SUB.setdefault(_cle_dossier(_n), _sub)
 
 
 # nom de sous-dossier local -> libelle affiche (inverse de SECTIONS)
@@ -669,6 +706,7 @@ def _candidats_import(sess, st, root):
     # Ce que le scan ECARTE, et pourquoi : sans ca, « 0 a importer » ne
     # permettait pas de distinguer « tout est deja la » de « je n'ai rien vu ».
     _ignores: dict = {}
+    _inconnus: set = set()      # dossiers deposes sous un nom non reconnu
     deja = {r.get("id") for r in (st.get("uploaded") or {}).values() if r.get("id")}
     vus = st.get("imported") or {}
     trouves = []
@@ -725,9 +763,17 @@ def _candidats_import(sess, st, root):
         if not ident:
             continue
         for type_dir in _lister(sess, ident_dir["id"], dossiers=True):
-            sub = IMPORT_MAP.get(type_dir["name"].strip().lower())
+            # Un seul mapping pour tout le module : « A IMPORTER » et la
+            # bibliotheque rangee acceptaient des noms differents, si bien
+            # qu'un dossier valable d'un cote etait ignore de l'autre.
+            sub = _DRIVE_TO_SUB.get(_cle_dossier(type_dir["name"]))
             if sub:
                 _prendre(type_dir["id"], ident, sub)
+            else:
+                # Un dossier au nom inconnu ne disparait plus sans un mot :
+                # c'est exactement ce qui laissait « 0 a importer » sans la
+                # moindre explication.
+                _inconnus.add(type_dir["name"].strip())
 
     # 2) l'arborescence normale : depot directement dans le bon dossier
     for dossier in _lister(sess, root, dossiers=True):
@@ -750,7 +796,7 @@ def _candidats_import(sess, st, root):
                 _types = _lister_paralleles(sess, [(d, True) for _i, d in _utiles])
                 for ident_b, did in _utiles:
                     for typ in _types.get((did, True), []):
-                        sub = _DRIVE_TO_SUB.get(typ["name"].strip().lower())
+                        sub = _DRIVE_TO_SUB.get(_cle_dossier(typ["name"]))
                         if sub:
                             _prendre(typ["id"], ident_b, sub, canonique=True)
             continue
@@ -758,7 +804,7 @@ def _candidats_import(sess, st, root):
             for sous in _lister(sess, dossier["id"], dossiers=True):
                 ident_v = V2_PREFIX + sous["name"].strip().lower()
                 for typ in _lister(sess, sous["id"], dossiers=True):
-                    sub = _DRIVE_TO_SUB.get(typ["name"].strip().lower())
+                    sub = _DRIVE_TO_SUB.get(_cle_dossier(typ["name"]))
                     if sub:
                         _prendre(typ["id"], ident_v, sub, canonique=True)
             continue
@@ -766,12 +812,14 @@ def _candidats_import(sess, st, root):
         if not (IDENTITIES_DIR / ident).exists():
             continue
         for typ in _lister(sess, dossier["id"], dossiers=True):
-            sub = _DRIVE_TO_SUB.get(typ["name"].strip().lower())
+            sub = _DRIVE_TO_SUB.get(_cle_dossier(typ["name"]))
             if sub:
                 _prendre(typ["id"], ident, sub, canonique=True)
     try:
         trouves_ignores.clear()
         trouves_ignores.update(_ignores)
+        if _inconnus:
+            trouves_ignores["dossiers_non_reconnus"] = sorted(_inconnus)[:12]
     except Exception:
         pass
     return trouves
