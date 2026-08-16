@@ -948,7 +948,12 @@ body.light #page-loader,html.light-pre #page-loader{background:rgba(249,250,251,
   box-shadow:0 2px 6px rgba(0,0,0,.2)}
 .sel-circle-wrap:hover .sel-circle{background:#fff;transform:scale(1.08);box-shadow:0 4px 12px rgba(0,0,0,.3)}
 .sel-cb:checked + .sel-circle,.txt-sel-cb:checked + .sel-circle{background:#3b82f6;border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.25),0 4px 12px rgba(59,130,246,.3)}
-.sel-cb:checked + .sel-circle,.txt-sel-cb:checked + .sel-circle::after{content:'';position:absolute;left:50%;top:50%;width:11px;height:7px;border-left:2.5px solid #fff;border-bottom:2.5px solid #fff;transform:translate(-55%,-65%) rotate(-45deg)}
+/* Le ::after doit porter sur LES DEUX selecteurs : ecrit
+   « .sel-cb:checked + .sel-circle, .txt-sel-cb:checked + .sel-circle::after »,
+   la virgule laissait le premier SANS ::after. La coche (11x7, tournee a -45°,
+   positionnee en absolu) s'appliquait donc au CERCLE lui-meme : au clic, la
+   pastille de 24 px se ratatinait en un bout de bleu de travers. */
+.sel-cb:checked + .sel-circle::after,.txt-sel-cb:checked + .sel-circle::after{content:'';position:absolute;left:50%;top:50%;width:11px;height:7px;border-left:2.5px solid #fff;border-bottom:2.5px solid #fff;transform:translate(-55%,-65%) rotate(-45deg)}
 /* Bouton edit crayon sur les cards — frosted white aussi */
 .card-edit-btn{background:rgba(255,255,255,.85);border:0;color:#1a1a1a;width:28px;height:28px;
   border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;
