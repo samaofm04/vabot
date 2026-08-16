@@ -1439,7 +1439,14 @@ body.light .toast.warning,body.light .toast.info{
   animation:spin .7s linear infinite}
 body.light .va-loading{color:rgba(60,60,67,.6)}
 body.light.apple .va-loading::before{border-color:rgba(60,60,67,.18);border-top-color:#007aff}
-@media (prefers-reduced-motion:reduce){.va-loading::before{animation:none}}
+/* « Moins d'animations » ne doit pas donner un indicateur FIGE : un
+   cercle immobile ne dit pas que ca charge. On remplace la rotation
+   par une pulsation d'opacite — aucun mouvement, mais on voit que
+   quelque chose se passe. */
+@keyframes vaPulse{0%,100%{opacity:1}50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){
+  .va-loading::before{animation:vaPulse 1.2s ease-in-out infinite}
+  .va-loading{animation:vaPulse 1.2s ease-in-out infinite}}
 
 /* --- Classement des ventes : pastilles et separateurs qui suivent le theme
    (le fond des rangs 4+ et les traits restaient noirs sur fond clair) --- */
@@ -17246,8 +17253,8 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
                 # ne transporte rien, c'est le serveur qui télécharge).
                 "<div style='margin-top:14px;padding-top:12px;border-top:1px solid #232327'>"
                 "<form method='POST' action='/gdrive/import' id='gd-import-form' style='display:flex;gap:12px;align-items:center;flex-wrap:wrap'>"
-                "<button type='button' onclick='gdScan(this)' style='padding:8px 16px;background:#1a1a1f;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'>⌕ Voir ce qui attend dans le Drive</button>"
-                "<button type='submit' id='gd-import-go' style='display:none;padding:8px 16px;background:rgba(34,197,94,.14);border:1px solid rgba(34,197,94,.45);color:#22c55e;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'>⬇️ Importer</button>"
+                "<button type='button' onclick='gdScan(this)' style='padding:8px 16px;background:#1a1a1f;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'>⌕ Verifier ce qui attend (1)</button>"
+                "<button type='submit' id='gd-import-go' disabled style='opacity:.45;cursor:not-allowed;padding:8px 16px;background:rgba(34,197,94,.14);border:1px solid rgba(34,197,94,.45);color:#22c55e;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'>⬇️ Importer (2)</button>"
                 "<span style='font-size:12px;color:#9a9aa6'>dépose tes fichiers dans <b>A IMPORTER / &lt;identité&gt; / Video brut</b></span>"
                 "<span style='font-size:11.5px;color:#22c55e;font-weight:700;width:100%'>"
                 "&#9889; Automatique : le site regarde le Drive chaque minute et importe tout seul "
@@ -17270,13 +17277,14 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
                 "   if(!(j&&j.ok)){ box.innerHTML='<b style=\\'color:#f87171\\'>Erreur : '"
                 "     +((j&&j.error)||'?')+'</b>'; return; }"
                 "   if(!j.total){ box.innerHTML='Rien de nouveau dans le Drive.';"
-                "     if(go) go.style.display='none'; return; }"
+                "     if(go){ go.disabled=true; go.style.opacity='.45'; go.style.cursor='not-allowed'; } return; }"
                 "   var l=(j.detail||[]).map(function(d){"
                 "     return '&bull; <b>'+d.n+'</b> dans '+d.type+' de @'+d.identity; }).join('<br>');"
                 "   box.innerHTML='<b style=\\'color:#22c55e;font-size:13px\\'>'+j.total"
                 "     +' fichier'+(j.total>1?'s':'')+' à importer</b><br>'+l"
                 "     +'<br><span style=\\'color:#75757f;font-size:11px\\'>Rien ne sera supprimé du Drive.</span>';"
-                "   if(go){ go.style.display='inline-block';"
+                "   if(go){ go.style.display='inline-block'; go.disabled=false;"
+                "     go.style.opacity='1'; go.style.cursor='pointer';"
                 "     go.textContent='⬇️ Importer ces '+j.total+' fichier'+(j.total>1?'s':''); }"
                 "  }).catch(function(e){ btn.disabled=false; btn.textContent=t0;"
                 "   if(box) box.textContent='Erreur : '+e; });"
