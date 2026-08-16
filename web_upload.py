@@ -1340,6 +1340,98 @@ body.light #game-loader{background:rgba(255,255,255,.82)!important;
 body.light #game-loader *{color:#1c1c1e!important;image-rendering:auto!important}
 body.light #game-loader-bar{background:#e9e9ee!important;border-color:rgba(60,60,67,.12)!important}
 
+/* --- APPLE : bordures et ecriture --------------------------------------
+   Une seule couleur de trait pour toute l'interface, des rayons qui suivent
+   la taille de l'element, et un interlettrage qui depend de la taille du
+   texte (serre sur les grands titres, neutre sur le corps) — jamais une
+   valeur unique pour tout. */
+
+/* ---- BORDURES : un seul gris, jamais deux traits l'un sur l'autre ---- */
+body.light.apple .box,body.light.apple .stat,body.light.apple .reel-card,body.light.apple .cloud-card,
+body.light.apple .vault-item,body.light.apple .card,body.light.apple table,body.light.apple .up-card,
+body.light.apple input,body.light.apple select,body.light.apple textarea,body.light.apple .up-input{
+  border-color:rgba(60,60,67,.16)!important}
+body.light.apple .box,body.light.apple .card,body.light.apple .up-card{border-radius:14px!important}
+body.light.apple .stat,body.light.apple .cloud-card,body.light.apple .reel-card{border-radius:12px!important}
+body.light.apple input,body.light.apple select,body.light.apple textarea,body.light.apple .btn,
+body.light.apple button[type=submit],body.light.apple .up-submit,body.light.apple .media-pill{border-radius:10px!important}
+body.light.apple .badge,body.light.apple .pill,body.light.apple .tag{border-radius:980px!important}   /* capsule iOS */
+/* Deux traits colles (bordure du bloc + trait d'un enfant) : on n'en garde qu'un */
+body.light.apple .box > hr,body.light.apple .card > hr{display:none!important}
+body.light.apple .box > *:first-child,body.light.apple .card > *:first-child{border-top:0!important}
+body.light.apple .box > *:last-child,body.light.apple .card > *:last-child{border-bottom:0!important}
+/* Separateurs de liste facon iOS : ils s'arretent AVANT le bord gauche */
+body.light.apple .vault-item + .vault-item,body.light.apple tr + tr{
+  border-top:1px solid rgba(60,60,67,.10)!important}
+body.light.apple table{border-collapse:separate!important;border-spacing:0!important}
+
+/* ---- ECRITURE : l'interlettrage suit la taille ---- */
+body.light.apple{font-size:15px;line-height:1.47}
+body.light.apple h1,body.light.apple .title,body.light.apple #page-title{
+  font-size:28px!important;font-weight:700!important;letter-spacing:-.022em!important;line-height:1.12!important}
+body.light.apple h2{font-size:22px!important;font-weight:650!important;letter-spacing:-.018em!important}
+body.light.apple h3{font-size:17px!important;font-weight:600!important;letter-spacing:-.012em!important}
+body.light.apple p,body.light.apple td,body.light.apple li{letter-spacing:0!important;line-height:1.47!important}
+/* Texte secondaire : gris iOS, jamais du gris pale illisible */
+body.light.apple .subtitle,body.light.apple #page-subtitle,body.light.apple small{
+  color:rgba(60,60,67,.60)!important;letter-spacing:-.004em!important;font-size:13.5px!important}
+/* Menu : libelles nets, en-tetes de section en petites capitales espacees */
+body.light.apple .sidebar .solo-item,body.light.apple .sidebar .group-head,body.light.apple .sidebar .group .item{
+  font-size:14px!important;font-weight:500!important;letter-spacing:-.008em!important}
+body.light.apple .sidebar .item.active,body.light.apple .sidebar .solo-item.active,
+body.light.apple .sidebar .group .item.active{font-weight:600!important}
+body.light.apple .sidebar .section-label{
+  font-size:11px!important;font-weight:600!important;letter-spacing:.055em!important;
+  color:rgba(60,60,67,.45)!important;text-transform:uppercase!important}
+/* Chiffres alignes en colonne (tableaux, compteurs) */
+body.light.apple table td,body.light.apple .stat-value,body.light.apple .num{
+  font-variant-numeric:tabular-nums!important;font-feature-settings:'tnum' 1!important}
+/* Boutons : le texte d'un bouton est plus dense que le corps de page */
+body.light.apple .btn,body.light.apple button,body.light.apple .up-submit{
+  font-weight:590!important;letter-spacing:-.01em!important}
+
+/* --- NOTIFICATIONS facon iOS -------------------------------------------
+   Avant : bloc opaque, grosse barre verte a gauche, pastille ✅ generique.
+   Maintenant : verre depoli, coins larges, et une pastille qui porte l'emoji
+   du message (Drive, telechargement...) — comme une notification d'iPhone. */
+.toast{background:rgba(28,28,30,.72)!important;
+  -webkit-backdrop-filter:blur(30px) saturate(180%);backdrop-filter:blur(30px) saturate(180%);
+  border:1px solid rgba(255,255,255,.10)!important;border-left-width:1px!important;
+  border-radius:20px!important;box-shadow:0 10px 34px rgba(0,0,0,.34)!important;
+  padding:12px 14px!important;gap:11px!important;align-items:center!important}
+.toast-icon{width:38px;height:38px;min-width:38px;border-radius:11px;
+  display:flex;align-items:center;justify-content:center;font-size:19px;line-height:1;
+  background:rgba(120,120,128,.24)}
+.toast-msg{font-size:13.5px;line-height:1.35;letter-spacing:-.006em}
+.toast-close{opacity:.5;font-size:17px}
+.toast-close:hover{opacity:1}
+/* Themes clairs : verre clair, texte sombre (le vert criard disparait) */
+body.light .toast{background:rgba(250,250,252,.80)!important;
+  border:1px solid rgba(60,60,67,.10)!important;color:#1c1c1e!important;
+  box-shadow:0 10px 34px rgba(0,0,0,.12)!important}
+body.light .toast-icon{background:rgba(120,120,128,.14)}
+body.light .toast-msg{color:#1c1c1e!important}
+/* Apple : coins un poil plus larges, comme le centre de notifications */
+body.light.apple .toast{border-radius:22px!important}
+@media (prefers-reduced-transparency:reduce){
+  .toast{background:#1c1c1e!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+  body.light .toast{background:#fff!important}
+}
+
+/* Le TYPE ne teinte plus le fond : sur iOS c'est l'icone qui porte le sens,
+   la surface reste la meme (le vert pale et le rouge pale faisaient tache).
+   Une fine touche de couleur reste sur la pastille, ca suffit a lire l'etat. */
+.toast.success,.toast.error,.toast.warning,.toast.info,
+body.light .toast.success,body.light .toast.error,body.light .toast.warning,body.light .toast.info{
+  background:rgba(28,28,30,.72)!important;border-left-color:rgba(255,255,255,.10)!important}
+body.light .toast.success,body.light .toast.error,
+body.light .toast.warning,body.light .toast.info{
+  background:rgba(250,250,252,.80)!important;border-left-color:rgba(60,60,67,.10)!important;color:#1c1c1e!important}
+.toast.success .toast-icon{background:rgba(52,199,89,.18)}
+.toast.error .toast-icon{background:rgba(255,59,48,.18)}
+.toast.warning .toast-icon{background:rgba(255,149,0,.18)}
+.toast.info .toast-icon{background:rgba(0,122,255,.16)}
+
 /* =============== SIDEBAR RAIL : menu réduit en icônes + flyouts au survol =============== */
 .sidebar{transition:width .25s cubic-bezier(.16,1,.3,1)}
 .rail-toggle{display:flex;align-items:center;gap:12px;margin:0 12px 4px;padding:8px 14px;background:transparent;border:0;color:#666;font-size:12px;font-weight:600;cursor:pointer;border-radius:8px;font-family:inherit;text-align:left;transition:background .15s,color .15s}
@@ -1781,8 +1873,20 @@ function showToast(message, type, duration){
   // Skip les messages d auth (geres par le wrapper fetch global qui redirige)
   var msgLower = (message || '').toString().toLowerCase();
   if(msgLower.indexOf('unauth') !== -1) return;
-  // Strip emoji de tete pour eviter le double "✅ ✅" (le toast en ajoute deja un)
-  var msgClean = (message || '').toString().replace(/^[\s✅❌⚠️ℹ]+/, '').trim();
+  // L'emoji de tete du message EST l'icone de la notification (📥 Drive,
+  // ⚡ telechargement...) : plus parlant que la pastille verte generique, et
+  // c'est ainsi que se lisent les notifications d'iOS.
+  // Extraction sans expression reguliere : le JS vit dans une chaine Python,
+  // ou les echappements Unicode seraient un piege.
+  var _brut = (message || '').toString().trim();
+  var _emo = '', _i = 0;
+  while(_i < _brut.length){
+    var _cp = _brut.codePointAt(_i);
+    if(_cp < 0x2190) break;                 // lettres, chiffres, ponctuation
+    _emo += _brut.substr(_i, _cp > 0xFFFF ? 2 : 1);
+    _i += (_cp > 0xFFFF ? 2 : 1);
+  }
+  var msgClean = _brut.slice(_i).trim() || _brut;
   var container = document.getElementById('toast-container');
   if(!container){
     container = document.createElement('div');
@@ -1790,7 +1894,8 @@ function showToast(message, type, duration){
     container.className = 'toast-container';
     document.body.appendChild(container);
   }
-  var icon = type === 'success' ? '✅' : type === 'error' ? '❌' : type === 'warning' ? '⚠️' : 'ℹ️';
+  var icon = _emo || (type === 'success' ? '✅' : type === 'error' ? '❌'
+                      : type === 'warning' ? '⚠️' : 'ℹ️');
   var toast = document.createElement('div');
   toast.className = 'toast ' + type;
   // textContent et PAS innerHTML : les messages contiennent des donnees venues
