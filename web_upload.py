@@ -42582,6 +42582,7 @@ def create_app():
         if not _vs.disponible():
             return jsonify({"ok": False,
                             "error": "Compte de service Google indisponible sur le serveur"})
+        import mypuls
         import datetime as _d
         today = _d.date.today()
         start = (_rq.form.get("start") or "").strip() or (today - _d.timedelta(days=29)).isoformat()
@@ -42606,6 +42607,47 @@ def create_app():
                         "last": cfg.get("last"), "lignes": cfg.get("last_lignes"),
                         **_vs.etat()})
 
+
+    @app.route("/ventes-sheet")
+    def ventes_sheet_go():
+        """Declenche la synchro et affiche le resultat — accessible a la main.
+
+        Les boutons vivent dans la section MyPuls, qui ne s'affiche que si le
+        scraping a reussi. Cette adresse marche dans tous les cas : on la colle
+        dans la barre du navigateur.
+        """
+        if not is_auth():
+            return redirect("/")
+        import ventes_sheet as _vs
+        import mypuls
+        import datetime as _d
+        today = _d.date.today()
+        debut = today.replace(day=1).isoformat()
+        _err = None
+        try:
+            res = mypuls.fetch_team_stats(debut, today.isoformat(), use_cache=True)
+            tx = res.get("transactions") or []
+            if not res.get("ok"):
+                _err = res.get("error") or "MyPuls indisponible"
+        except Exception as e:
+            tx, _err = [], str(e)[:200]
+        out = _vs.pousser(tx, periode=f"{debut} -> {today.isoformat()}") if not _err else {"ok": False, "err": _err}
+        lien = "https://docs.google.com/spreadsheets/d/%s/edit" % _vs.sheet_id()
+        if out.get("ok"):
+            corps = (f"<h2 style='margin:0 0 8px'>Classeur mis a jour</h2>"
+                     f"<p>{out.get('lignes', 0)} vente(s) ecrite(s) — periode {debut} au {today.isoformat()}.</p>"
+                     f"<p>Il se rafraichira tout seul toutes les 5 minutes.</p>"
+                     f"<p><a href='{lien}' target='_blank'>Ouvrir le classeur</a></p>")
+        else:
+            corps = (f"<h2 style='margin:0 0 8px'>Echec</h2>"
+                     f"<p style='color:#b91c1c'>{html_escape(str(out.get('err') or '?'))}</p>"
+                     f"<p>Verifie que le classeur est partage en <b>Editeur</b> avec le compte "
+                     f"de service du site.</p>")
+        return ("<div style=\"font:15px/1.5 -apple-system,system-ui,sans-serif;padding:28px;"
+                "max-width:620px;margin:40px auto;background:#fff;border:1px solid #e5e7eb;"
+                "border-radius:14px\">" + corps +
+                "<p style='margin-top:18px'><a href='/?tab=revenus'>Retour au site</a></p></div>")
+
     @app.route("/chatters/ventes.xlsx")
     def chatters_ventes_xlsx():
         """Registre detaille des ventes, en Excel.
@@ -42625,6 +42667,7 @@ def create_app():
             _al = None
         if _al is not None and "revenus" not in _al:
             return ("", 403)
+        import mypuls
         import datetime as _d
         today = _d.date.today()
         start = (_rq.args.get("start") or "").strip() or (today - _d.timedelta(days=29)).isoformat()
