@@ -1284,6 +1284,62 @@ body.apple .sfw-switch,body.apple .sfw-thumb{transition:background-color .28s cu
   body.apple .stat:hover,body.apple .theme-card:hover{transform:none!important}
   @keyframes appleFade{from{opacity:0}to{opacity:1}}}
 
+/* --- THEMES CLAIRS : surfaces sombres oubliees ---------------------------------
+   Le theme clair ne remappe qu'une poignee de teintes ; le site en pose une
+   vingtaine en style inline (barres d'outils Trends, panneaux de filtres,
+   listes...). Sans ces regles, elles restent NOIRES sur fond clair.
+   Les media (video, image, apercu) sont exclus : leur fond sombre est voulu. */
+body.light [style*="background:#161616"],
+body.light [style*="background:#131316"],
+body.light [style*="background:#1a1a1f"],
+body.light [style*="background:#16181f"],
+body.light [style*="background:#0f1116"],
+body.light [style*="background:#0f0f12"],
+body.light [style*="background:#161a26"],
+body.light [style*="background:#0d0d0d"],
+body.light [style*="background:#101013"],
+body.light [style*="background:#12121a"],
+body.light [style*="background:#12151f"],
+body.light [style*="background:#0b0e15"],
+body.light [style*="background:#111"]{background:#fff!important;border-color:rgba(60,60,67,.14)!important;color:#1c1c1e!important}
+body.light [style*="background:#2a2a2a"],
+body.light [style*="background:#2a2a30"],
+body.light [style*="background:#232323"],
+body.light [style*="background:#26262c"],
+body.light [style*="background:#26263a"]{background:#f2f2f7!important;border-color:rgba(60,60,67,.14)!important;color:#1c1c1e!important}
+/* le texte blanc pose SUR ces surfaces deviendrait illisible */
+body.light [style*="background:#161616"] [style*="color:#fff"],
+body.light [style*="background:#131316"] [style*="color:#fff"],
+body.light [style*="background:#1a1a1f"] [style*="color:#fff"],
+body.light [style*="background:#16181f"] [style*="color:#fff"],
+body.light [style*="background:#0f1116"] [style*="color:#fff"],
+body.light [style*="background:#0f0f12"] [style*="color:#fff"],
+body.light [style*="background:#161a26"] [style*="color:#fff"],
+body.light [style*="background:#0d0d0d"] [style*="color:#fff"],
+body.light [style*="background:#101013"] [style*="color:#fff"],
+body.light [style*="background:#12121a"] [style*="color:#fff"],
+body.light [style*="background:#12151f"] [style*="color:#fff"],
+body.light [style*="background:#0b0e15"] [style*="color:#fff"],
+body.light [style*="background:#111"] [style*="color:#fff"],
+body.light [style*="background:#2a2a2a"] [style*="color:#fff"],
+body.light [style*="background:#2a2a30"] [style*="color:#fff"],
+body.light [style*="background:#232323"] [style*="color:#fff"],
+body.light [style*="background:#26262c"] [style*="color:#fff"],
+body.light [style*="background:#26263a"] [style*="color:#fff"]{color:#1c1c1e!important}
+/* meme chose pour les boutons : le theme clair les excluait explicitement,
+   c'est justement la qu'on se retrouvait avec du blanc sur blanc */
+body.light button[style*="color:#fff"]:not([style*="background:#3b82f6"]):not([style*="linear-gradient"]):not(.toast){color:#1c1c1e!important}
+/* mais un media garde son fond sombre : une video sur du blanc, c'est laid */
+body.light video,body.light .vault-card-bg,body.light .reel-thumb,
+body.light [style*="background:#000"] video{background:#000!important}
+/* le chargeur facon jeu retro : version sobre, cohérente avec le reste */
+body.light #game-loader{background:rgba(255,255,255,.82)!important;
+  -webkit-backdrop-filter:blur(20px) saturate(180%);backdrop-filter:blur(20px) saturate(180%);
+  border:1px solid rgba(60,60,67,.14)!important;border-radius:16px!important;
+  color:#1c1c1e!important;box-shadow:0 8px 30px rgba(0,0,0,.10)!important}
+body.light #game-loader *{color:#1c1c1e!important;image-rendering:auto!important}
+body.light #game-loader-bar{background:#e9e9ee!important;border-color:rgba(60,60,67,.12)!important}
+
 /* =============== SIDEBAR RAIL : menu réduit en icônes + flyouts au survol =============== */
 .sidebar{transition:width .25s cubic-bezier(.16,1,.3,1)}
 .rail-toggle{display:flex;align-items:center;gap:12px;margin:0 12px 4px;padding:8px 14px;background:transparent;border:0;color:#666;font-size:12px;font-weight:600;cursor:pointer;border-radius:8px;font-family:inherit;text-align:left;transition:background .15s,color .15s}
