@@ -25,6 +25,7 @@ ONGLET_CHATTEURS = "Par chatteur"
 ONGLET_QUINZAINE = "Par quinzaine"
 ONGLET_FICHES = "Fiches chatteurs"
 ONGLET_PAIE = "Paie quinzaine"
+ONGLET_RAPPRO = "Site vs registre"
 
 _ETAT = {"state": "idle", "ts": 0, "lignes": 0, "err": ""}
 _LOCK = threading.Lock()
@@ -97,8 +98,9 @@ def _onglet(classeur, titre: str, colonnes: int):
         return classeur.add_worksheet(title=titre, rows=1000, cols=max(colonnes, 8))
 
 
-def preparer(transactions, commissions=None, eur_usd: float = 1.14) -> tuple:
-    """Transactions -> (lignes du registre, lignes du recap). Testable seul."""
+def preparer(transactions, commissions=None, eur_usd: float = 1.14,
+             chatters=None, diagnostic=None) -> tuple:
+    """Transactions -> les grilles a ecrire, un onglet chacune. Testable seul."""
     lignes = ventes_export.lignes_ventes(transactions)
     entetes = ventes_export.COLONNES
     cols_recap, recap = ventes_export.recap_par_chatteur(lignes)
@@ -106,19 +108,21 @@ def preparer(transactions, commissions=None, eur_usd: float = 1.14) -> tuple:
     fiches = [["Chatteur", "Quand", "Compte", "Fan", "Montant"]] +         ventes_export.fiches_chatteurs(lignes)
     cols_p, paie = ventes_export.paie_quinzaine(lignes, commissions=commissions,
                                                 eur_usd=eur_usd)
+    cols_r, rappro = ventes_export.rapprochement(lignes, chatters, diagnostic)
     return (([entetes] + lignes), ([cols_recap] + recap), ([cols_q] + recap_q),
-            fiches, ([cols_p] + paie))
+            fiches, ([cols_p] + paie), ([cols_r] + rappro))
 
 
 def pousser(transactions, periode: str = "", commissions=None,
-            eur_usd: float = 1.14) -> dict:
+            eur_usd: float = 1.14, chatters=None, diagnostic=None) -> dict:
     """Ecrit les ventes dans le classeur. Retourne {ok, lignes, err}."""
     sid = sheet_id()
     if not sid:
         return {"ok": False, "err": "Aucun classeur configure"}
     if not disponible():
         return {"ok": False, "err": "Compte de service Google indisponible"}
-    grille, recap, quinz, fiches, paie = preparer(transactions, commissions, eur_usd)
+    grille, recap, quinz, fiches, paie, rappro = preparer(
+        transactions, commissions, eur_usd, chatters, diagnostic)
     _set(state="running", err="", ts=int(time.time()))
     try:
         gc = _client()
@@ -162,6 +166,15 @@ def pousser(transactions, periode: str = "", commissions=None,
         ws5.update("A1", paie, value_input_option="RAW")
         try:
             ws5.freeze(rows=1)
+        except Exception:
+            pass
+
+        ws6 = _onglet(classeur, ONGLET_RAPPRO, 6)
+        ws6.clear()
+        ws6.update("A1", rappro, value_input_option="RAW")
+        try:
+            ws6.freeze(rows=1)
+            ws6.format("A1:F1", {"textFormat": {"bold": True}})
         except Exception:
             pass
 
@@ -230,7 +243,9 @@ def start_auto(interval: int = 300) -> bool:
                     except Exception:
                         pass
                     pousser(tx, periode="%s -> %s (auto)" % (debut, today.isoformat()),
-                            commissions=comm, eur_usd=taux)
+                            commissions=comm, eur_usd=taux,
+                            chatters=res.get("chatters"),
+                            diagnostic=res.get("diagnostic"))
             except Exception:
                 pass          # une panne passagere ne doit pas tuer la boucle
 

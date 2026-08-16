@@ -176,6 +176,76 @@ def paie_quinzaine(lignes, commissions=None, eur_usd: float = 1.14) -> tuple:
     return cols, out
 
 
+def rapprochement(lignes, chatters=None, diagnostic=None) -> tuple:
+    """Confronte le tableau du site au registre, chatteur par chatteur.
+
+    Deux sources cohabitent chez MyPuls : la table de performance (celle
+    qu'affiche la page Revenus) et le log de transactions (celui qui detaille
+    chaque vente). Elles ne disent pas toujours la meme chose — un chatteur
+    peut peser sur la premiere et n'avoir presque rien dans la seconde.
+
+    Tant que personne ne les comparait, l'ecart restait invisible : c'est
+    exactement le « des ventes qui ne montent pas ». Ici on met les deux
+    colonnes cote a cote et on nomme le coupable.
+    """
+    cols = ["Chatteur", "CA affiche sur le site", "Ventes au registre",
+            "Total du registre", "Ecart", "Verdict"]
+    # Le CA de la table perf additionne EUR et USD dans la meme colonne : on
+    # compare donc a la somme BRUTE du registre, sans conversion.
+    par_nom, nb = defaultdict(float), defaultdict(int)
+    for r in lignes:
+        cle = (r[3] or "").strip().lower()
+        par_nom[cle] += r[6]
+        nb[cle] += 1
+
+    out, vus = [], set()
+    for c in (chatters or []):
+        nom = (c.get("name") or "").strip()
+        cle = nom.lower()
+        vus.add(cle)
+        site = float(c.get("ca_total") or 0)
+        reg = round(par_nom.get(cle, 0.0), 2)
+        ecart = round(reg - site, 2)
+        # 5 % de tolerance : les deux sources n'arrondissent pas pareil.
+        if not par_nom.get(cle) and site > 0:
+            verdict = "ABSENT du registre — aucune vente detaillee"
+        elif abs(ecart) <= max(1.0, 0.05 * site):
+            verdict = "coherent"
+        elif ecart < 0:
+            verdict = "INCOMPLET — il manque des ventes au registre"
+        else:
+            verdict = "registre plus fourni que le site"
+        out.append([nom, round(site, 2), nb.get(cle, 0), reg, ecart, verdict])
+
+    # Presents dans le registre, absents du tableau du site : ceux-la sont
+    # payes nulle part si on ne regarde que la page Revenus.
+    for cle, tot in sorted(par_nom.items(), key=lambda kv: -kv[1]):
+        if cle in vus:
+            continue
+        anonyme = (not cle) or cle.startswith("(")
+        nom = cle if anonyme else cle.title()
+        out.append([nom or "(non attribue)", "", nb[cle], round(tot, 2), "",
+                    "ventes sans nom — a rattacher"
+                    if anonyme else "ABSENT du tableau du site"])
+
+    out.sort(key=lambda r: (r[5] == "coherent", -(r[3] or 0)))
+
+    if diagnostic:
+        out.append(["", "", "", "", "", ""])
+        out.append(["Lecture du log MyPuls", "", "", "", "", ""])
+        etiquettes = [
+            ("ventes_lues", "Ventes lues dans le log"),
+            ("lignes_illisibles", "Lignes du log NON lues (colonnes manquantes)"),
+            ("chatters_illisibles", "Lignes du tableau chatteurs non lues"),
+            ("ventes_sans_chatteur", "Ventes sans chatteur"),
+            ("montant_sans_chatteur", "Montant sans chatteur"),
+        ]
+        for cle, libelle in etiquettes:
+            if cle in diagnostic:
+                out.append([libelle, diagnostic[cle], "", "", "", ""])
+    return cols, out
+
+
 def controle(lignes, total_annonce=None) -> list:
     """Compare la somme du registre au total affiche ailleurs.
 
@@ -239,8 +309,15 @@ def controle(lignes, total_annonce=None) -> list:
 
 
 def construire_xlsx(transactions, periode: str = "", total_annonce=None,
-                    commissions=None, eur_usd: float = 1.14) -> bytes:
-    """Le classeur : Ventes / Par chatteur / Par quinzaine / Fiches / Controle."""
+                    commissions=None, eur_usd: float = 1.14,
+                    chatters=None, diagnostic=None) -> bytes:
+    """Le classeur complet.
+
+    `chatters` est le tableau de performance affiche par le site : le fournir
+    active la feuille « Site vs registre », qui dit quel chatteur manque de
+    quel cote. Sans lui, le classeur reste valable, simplement muet sur ce
+    point.
+    """
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
     from openpyxl.utils import get_column_letter
@@ -325,6 +402,29 @@ def construire_xlsx(transactions, periode: str = "", total_annonce=None,
                 c.font = _F(bold=True)
     for col, larg in zip("ABCDE", (24, 20, 20, 24, 18)):
         ws5.column_dimensions[col].width = larg
+
+    # --- feuille : le site face au registre ---
+    # Placee AVANT le controle : c'est la premiere chose a regarder quand on
+    # soupconne des ventes manquantes, puisqu'elle nomme les chatteurs
+    # concernes au lieu de donner un ecart global.
+    ws7 = wb.create_sheet("Site vs registre")
+    cols7, rappro = rapprochement(lignes, chatters, diagnostic)
+    _entete(ws7, cols7)
+    from openpyxl.styles import PatternFill as _PF, Font as _Fo
+    alerte = _PF("solid", fgColor="FDE2E1")
+    for r in rappro:
+        ws7.append(r)
+        verdict = str(r[5] or "")
+        if verdict.startswith(("ABSENT", "INCOMPLET")):
+            for c in ws7[ws7.max_row]:
+                c.fill = alerte
+        elif not r[1] and not r[2] and r[0]:       # intitules de bas de feuille
+            ws7.cell(row=ws7.max_row, column=1).font = _Fo(bold=True)
+    for col, larg in zip("ABCDEF", (26, 22, 18, 18, 12, 42)):
+        ws7.column_dimensions[col].width = larg
+    for row in ws7.iter_rows(min_row=2, min_col=2, max_col=5):
+        for c in row:
+            c.number_format = "#,##0.00"
 
     # --- feuille 5 : controle ---
     ws3 = wb.create_sheet("Controle")

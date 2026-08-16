@@ -42649,11 +42649,46 @@ def create_app():
                 _err = res.get("error") or "MyPuls indisponible"
         except Exception as e:
             tx, _err = [], str(e)[:200]
-        out = _vs.pousser(tx, periode=f"{debut} -> {today.isoformat()}") if not _err else {"ok": False, "err": _err}
+        # Commissions et taux du jour : sans eux, la feuille de paie tombait
+        # sur les valeurs par defaut et n'avait plus rien a voir avec la page.
+        _comm, _taux = _ventes_contexte(tx)
+        out = _vs.pousser(tx, periode=f"{debut} -> {today.isoformat()}",
+                          commissions=_comm, eur_usd=_taux,
+                          chatters=(res.get("chatters") if not _err else None),
+                          diagnostic=(res.get("diagnostic") if not _err else None)
+                          ) if not _err else {"ok": False, "err": _err}
         lien = "https://docs.google.com/spreadsheets/d/%s/edit" % _vs.sheet_id()
         if out.get("ok"):
+            # Le resume des ecarts s'affiche ICI : le but de la manoeuvre est
+            # de reperer les ventes manquantes, pas seulement de recopier.
+            alerte = ""
+            try:
+                import ventes_export as _ve
+                _lg = _ve.lignes_ventes(tx)
+                _c, _rows = _ve.rapprochement(_lg, res.get("chatters"),
+                                              res.get("diagnostic"))
+                _pb = [r for r in _rows if str(r[5]).startswith(("ABSENT", "INCOMPLET"))]
+                if _pb:
+                    lis = "".join(
+                        "<li><b>%s</b> — %s</li>" % (html_escape(str(r[0])),
+                                                     html_escape(str(r[5])))
+                        for r in _pb[:12])
+                    alerte = ("<div style='margin:16px 0;padding:12px 14px;"
+                              "background:#fef2f2;border:1px solid #fecaca;"
+                              "border-radius:10px'>"
+                              "<b>%d ecart(s) entre le site et le registre</b>"
+                              "<ul style='margin:8px 0 0;padding-left:20px'>%s</ul>"
+                              "<p style='margin:8px 0 0;font-size:13px;color:#7f1d1d'>"
+                              "Detail complet dans l'onglet « Site vs registre ».</p>"
+                              "</div>") % (len(_pb), lis)
+                else:
+                    alerte = ("<p style='color:#166534'>Aucun ecart : le registre "
+                              "recoupe le tableau du site.</p>")
+            except Exception:
+                pass
             corps = (f"<h2 style='margin:0 0 8px'>Classeur mis a jour</h2>"
                      f"<p>{out.get('lignes', 0)} vente(s) ecrite(s) — periode {debut} au {today.isoformat()}.</p>"
+                     f"{alerte}"
                      f"<p>Il se rafraichira tout seul toutes les 5 minutes.</p>"
                      f"<p><a href='{lien}' target='_blank'>Ouvrir le classeur</a></p>")
         else:
@@ -42708,7 +42743,9 @@ def create_app():
         try:
             _comm, _taux = _ventes_contexte(tx)
             data = _ve.construire_xlsx(tx, periode=f"{start} -> {end}", total_annonce=_tot,
-                                       commissions=_comm, eur_usd=_taux)
+                                       commissions=_comm, eur_usd=_taux,
+                                       chatters=res.get("chatters"),
+                                       diagnostic=res.get("diagnostic"))
         except Exception as e:
             return _error(f"Export impossible : {e}", tab="revenus")
         import io as _io

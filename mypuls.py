@@ -910,8 +910,14 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
     # Table 0 = transactions log
     # Headers: Créateur | User (chatter) | Fan | Montant net | Devise | Type | Date | Contexte | Action
     transactions: List[Dict[str, Any]] = []
+    # Lignes du tableau qu'on n'a pas su lire (moins de colonnes que prevu).
+    # Avant, elles disparaissaient en silence : une vente ecartee ici
+    # n'apparaissait plus nulle part, et rien ne le signalait.
+    lignes_illisibles = 0
     for row in tables[0][1]:
         if len(row) < 7:
+            if any((c or "").strip() for c in row):
+                lignes_illisibles += 1
             continue
         transactions.append({
             "creator": row[0],
@@ -927,8 +933,11 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
     # Table 1 = chatter performance
     # Headers: Chatter | Présence | Réactivité | Proposé | Vendu | Taux conv. | CA PPV | CA Tips | CA Total
     chatters: List[Dict[str, Any]] = []
+    chatters_illisibles = 0
     for row in tables[1][1]:
         if len(row) < 9:
+            if any((c or "").strip() for c in row):
+                chatters_illisibles += 1
             continue
         chatters.append({
             "name": row[0],
@@ -1025,10 +1034,22 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
             "total": round(creator_totals[name], 2),
         })
 
+    # Ce que la lecture a laisse de cote : sans ca, un ecart entre le CA
+    # affiche et la somme des ventes n'a aucune explication consultable.
+    _sans_nom = [t for t in transactions if not (t.get("chatter") or "").strip()]
+    diagnostic = {
+        "lignes_illisibles": lignes_illisibles,
+        "chatters_illisibles": chatters_illisibles,
+        "ventes_lues": len(transactions),
+        "ventes_sans_chatteur": len(_sans_nom),
+        "montant_sans_chatteur": round(sum(t.get("amount") or 0 for t in _sans_nom), 2),
+    }
+
     result = {
         "ok": True,
         "transactions": transactions,
         "chatters": chatters,
+        "diagnostic": diagnostic,
         "totals": totals,
         "chart": {
             "days": days_list,
