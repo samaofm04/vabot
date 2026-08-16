@@ -42400,12 +42400,21 @@ def create_app():
 
     @app.route("/gdrive/doublons_drive", methods=["POST"])
     def gdrive_doublons_drive():
-        """Doublons DANS le Drive : plusieurs fichiers de meme nom ET meme
-        taille dans le MEME dossier. On garde le plus ancien, les autres vont
-        a la corbeille Google (recuperables 30 jours).
+        """Doublons DANS le Drive, deux familles, meme exigence.
 
-        Ne descend que dans notre arborescence « Bibliothèque » : le reste du
-        Drive n'est jamais parcouru. `dry=1` (defaut) : compte seulement."""
+          - meme nom, meme taille ET MEME EMPREINTE dans le meme dossier ;
+          - copies suffixees laissees par nos imports (pp_69_2, pp_69_2_3),
+            reconnues par _gd.copies_du_dossier().
+
+        Dans les deux cas un fichier n'est jete que si un AUTRE, au contenu
+        identique bit a bit (md5), reste en place. Sans empreinte, on ne
+        touche a rien. Le plus ancien est conserve — _lister trie par
+        createdTime, sans quoi « le premier » n'aurait servi qu'a designer
+        celui que Drive renvoyait en tete.
+
+        Corbeille Google : recuperable 30 jours, jamais de suppression.
+        Ne descend que dans « Bibliothèque » : le reste du Drive n'est jamais
+        parcouru. `dry=1` (defaut) : compte seulement."""
         from flask import jsonify
         if not is_auth() or not _is_admin():
             return jsonify({"ok": False}), 403
@@ -42424,6 +42433,7 @@ def create_app():
         if supprimer and _DDRIVE.get("etat") == "en cours":
             return jsonify({"ok": True, "deja": True, **_DDRIVE})
         trouves, jetes, echecs, detail = 0, 0, 0, {}
+        octets, exemples = 0, []          # volume recuperable + apercu
 
         def _feuilles(fid, chemin, profondeur=0):
             """Chaque dossier terminal de l'arborescence, avec son chemin."""
@@ -42445,18 +42455,37 @@ def create_app():
             # coupait au bout d'une minute.
             def _travail():
                 _DDRIVE.update(etat="en cours", trouves=0, corbeille=0, echecs=0)
+                jetes_ids = set()
                 try:
                     for did, chem in _feuilles(biblio, "Bibliothèque"):
                         try:
                             fichiers = _gd._lister(sess, did)
                         except Exception:
                             continue
-                        vus = set()
+                        vus, ids_vus = set(), set()
+                        # Deux familles de doublons : le meme nom deux fois, et
+                        # les copies suffixees laissees par nos imports
+                        # (pp_69_2, pp_69_2_3…). La seconde etait invisible
+                        # ici : les noms different, donc rien ne les reunissait.
+                        a_jeter = list(_gd.copies_du_dossier(fichiers))
+                        ids_copies = {c["id"] for c in a_jeter}
                         for f in fichiers:
-                            cle = (f.get("name"), int(f.get("size") or 0))
-                            if cle not in vus:
-                                vus.add(cle)
+                            if f.get("id") in ids_vus:
                                 continue
+                            ids_vus.add(f.get("id"))
+                            md5 = f.get("md5Checksum") or ""
+                            if f.get("id") in ids_copies:
+                                pass                 # deja verifiee par md5
+                            else:
+                                # Meme regle que l'apercu : sans empreinte, ou
+                                # sans jumeau au contenu identique, on ne
+                                # touche a rien.
+                                if not md5:
+                                    continue
+                                cle = (f.get("name"), int(f.get("size") or 0), md5)
+                                if cle not in vus:
+                                    vus.add(cle)
+                                    continue
                             _DDRIVE["trouves"] += 1
                             try:
                                 r = sess.patch(
@@ -42465,10 +42494,31 @@ def create_app():
                                     json={"trashed": True}, timeout=60)
                                 if r.status_code < 400:
                                     _DDRIVE["corbeille"] += 1
+                                    jetes_ids.add(f["id"])
                                 else:
                                     _DDRIVE["echecs"] += 1
                             except Exception:
                                 _DDRIVE["echecs"] += 1
+                    # L'etat local garde l'id Drive de chaque fichier envoye.
+                    # Laisser les ids jetes ferait croire a la synchro que la
+                    # sauvegarde existe toujours : elle ne les renverrait
+                    # jamais, et le rapport afficherait « sauvegarde » pour un
+                    # fichier parti a la corbeille. A J+30, la perte serait
+                    # definitive sans le moindre signal.
+                    if jetes_ids:
+                        try:
+                            st = _gd._load_state()
+                            up = st.get("uploaded") or {}
+                            oublies = [k for k, v in up.items()
+                                       if (v or {}).get("id") in jetes_ids]
+                            for k in oublies:
+                                up.pop(k, None)
+                            if oublies:
+                                st["uploaded"] = up
+                                _gd._save_state(st)
+                            _DDRIVE["etat_purge"] = len(oublies)
+                        except Exception as _e:
+                            _DDRIVE["etat_purge_err"] = str(_e)[:120]
                     _DDRIVE["etat"] = "fini"
                 except Exception as e:
                     _DDRIVE.update(etat="erreur", err=str(e)[:200])
@@ -42482,12 +42532,37 @@ def create_app():
                 fichiers = _gd._lister(sess, dossier_id)
             except Exception:
                 continue
-            vus = {}
-            for f in fichiers:                # ordre de listage = du plus ancien
-                cle = (f.get("name"), int(f.get("size") or 0))
-                if cle not in vus:
-                    vus[cle] = f              # le premier est gardé
+            vus, ids_vus = {}, set()
+            a_jeter = list(_gd.copies_du_dossier(fichiers))
+            ids_copies = {c["id"] for c in a_jeter}
+            octets += sum(c.get("taille") or 0 for c in a_jeter)
+            for c in a_jeter[:5]:             # de quoi verifier a l'oeil
+                exemples.append({"ou": chemin, "copie": c["nom"],
+                                 "origine": c["origine"], "famille": "suffixe"})
+            for f in fichiers:                # ordre : createdTime croissant
+                # Un id revu (pagination sans garantie d'unicite) ne doit pas
+                # se jeter lui-meme : il pourrait etre l'original d'une copie.
+                if f.get("id") in ids_vus:
                     continue
+                ids_vus.add(f.get("id"))
+                # L'empreinte fait partie de la cle : deux fichiers de meme nom
+                # et meme poids peuvent avoir un contenu DIFFERENT, et le
+                # second etait detruit sans qu'on l'ait jamais compare.
+                md5 = f.get("md5Checksum") or ""
+                if f.get("id") in ids_copies:
+                    pass                      # copie suffixee : deja verifiee
+                else:
+                    if not md5:
+                        continue              # rien pour comparer : on laisse
+                    cle = (f.get("name"), int(f.get("size") or 0), md5)
+                    if cle not in vus:
+                        vus[cle] = f          # le premier est gardé
+                        continue
+                    octets += int(f.get("size") or 0)
+                    if len(exemples) < 40:
+                        exemples.append({"ou": chemin, "copie": f.get("name"),
+                                         "origine": f.get("name"),
+                                         "famille": "meme nom"})
                 trouves += 1
                 detail[chemin] = detail.get(chemin, 0) + 1
                 if supprimer:
@@ -42503,7 +42578,8 @@ def create_app():
                     except Exception:
                         echecs += 1
         return jsonify({"ok": True, "doublons": trouves, "corbeille": jetes,
-                        "echecs": echecs,
+                        "echecs": echecs, "octets": octets,
+                        "exemples": exemples[:20],
                         "detail": [{"ou": k, "n": v} for k, v in
                                    sorted(detail.items(), key=lambda kv: -kv[1])[:30]]})
 

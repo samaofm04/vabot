@@ -623,7 +623,14 @@ def _lister(sess, parent_id, dossiers=False):
          + ("=" if dossiers else "!=") + " 'application/vnd.google-apps.folder'")
     out, page = [], None
     while True:
-        prm = {"q": q, "fields": "nextPageToken, files(id,name,size)",
+        # md5Checksum : Google le calcule pour tout fichier binaire. Deux
+        # fichiers de meme taille peuvent differer ; deux empreintes egales,
+        # non. C'est ce qui autorise a jeter une copie sans la telecharger.
+        prm = {"q": q,
+               "fields": "nextPageToken, files(id,name,size,md5Checksum)",
+               # Le nettoyage garde « le premier listé » : sans tri, ce n'etait
+               # pas le plus ancien mais celui que Drive renvoyait en tete.
+               "orderBy": "createdTime",
                "pageSize": 200, "supportsAllDrives": "true",
                "includeItemsFromAllDrives": "true"}
         if page:
@@ -687,6 +694,71 @@ def _est_copie(nom: str, tailles: dict) -> bool:
     if not ma_taille:
         return False
     return any(tailles.get(p) == ma_taille for p in _parents_possibles(nom))
+
+
+def copies_du_dossier(fichiers: list) -> list:
+    """Parmi ces fichiers, ceux qui sont des copies d'un autre du meme dossier.
+
+    Rend la liste des fichiers JETABLES — jamais l'original. Deux garde-fous,
+    parce qu'un faux positif detruirait du contenu unique :
+
+      - la copie doit deriver d'un nom PRESENT dans ce meme dossier ;
+      - les deux doivent peser exactement pareil.
+
+    Un « reel_2.mp4 » sans « reel.mp4 » a cote n'est donc pas touche, ni un
+    « IMG_1234.jpg » sous pretexte qu'il ressemble a « IMG.jpg ».
+    """
+    # Indexer par NOM serait un piege : Drive autorise deux fichiers homonymes
+    # dans un dossier, et notre propre synchro en fabrique (un envoi rejoue
+    # apres une coupure cree un second fichier au lieu d'ecraser). Le dernier
+    # listé ecrasait alors l'autre dans le dictionnaire, et son empreinte
+    # servait de verdict a un fichier qui n'etait pas le sien.
+    par_nom: dict = {}
+    for f in fichiers:
+        par_nom.setdefault(Path(f.get("name") or "").name, []).append(f)
+
+    def _unique(nom):
+        """Le fichier de ce nom, s'il n'y en a qu'un. Sinon rien : sur des
+        homonymes, le raisonnement par nom ne veut plus rien dire."""
+        lot = par_nom.get(nom) or []
+        return lot[0] if len(lot) == 1 else None
+
+    jetables = []
+    for f in fichiers:
+        nom = Path(f.get("name") or "").name
+        if not nom or not _unique(nom):
+            continue
+        # Chaque fichier est juge sur SES propres champs, jamais sur ceux d'un
+        # homonyme. Sans empreinte, on s'abstient : mieux vaut garder un
+        # doublon que perdre un original.
+        mon_md5 = f.get("md5Checksum") or ""
+        if not mon_md5:
+            continue
+        origine = None
+        for p in _parents_possibles(nom):
+            g = _unique(p)
+            if g is not None and (g.get("md5Checksum") or "") == mon_md5:
+                origine = g
+                break
+        if origine is None:
+            continue
+        try:
+            taille = int(f.get("size") or 0)
+        except Exception:
+            taille = 0
+        jetables.append({"id": f.get("id"), "nom": nom, "md5": mon_md5,
+                         "origine": origine.get("name"),
+                         "origine_id": origine.get("id"), "taille": taille})
+
+    # Dernier verrou : pour chaque contenu qu'on s'apprete a jeter, un fichier
+    # PORTANT LE MEME MD5 doit rester en place. Sans ce controle, deux regles
+    # differentes pouvaient emporter le dernier exemplaire chacune de leur
+    # cote. On ne repasse pas la liste en boucle : un seul tour, donc toujours
+    # dans le sens prudent.
+    ids_jetes = {j["id"] for j in jetables}
+    survivants = {(f.get("md5Checksum") or "") for f in fichiers
+                  if f.get("id") not in ids_jetes and f.get("md5Checksum")}
+    return [j for j in jetables if j["md5"] in survivants]
 
 
 def _cle_dossier(nom: str) -> str:
