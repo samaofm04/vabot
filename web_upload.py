@@ -1195,6 +1195,90 @@ html.rail body.apple .sidebar .group:hover > .items{background:#fff;border-color
 @media (prefers-reduced-motion:reduce){
   body.apple .btn:active,body.apple button:active,body.apple .theme-card:active,body.apple .up-submit:active,body.apple .sidebar .solo-item:active,body.apple .sidebar .group .item:active{transform:none!important}}
 
+/* --- APPLE, 2e couche : les COMPOSANTS, pas seulement les couleurs --- */
+/* Icônes façon SF Symbols : trait fin, extrémités et angles arrondis.
+   On ne touche qu'aux SVG dessinés au trait ([stroke]) : les drapeaux de
+   marché (preserveAspectRatio, remplis) et les courbes du dashboard gardent
+   leur rendu. */
+body.apple svg[stroke]:not([preserveAspectRatio]){stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+body.apple .sidebar svg[stroke]{stroke-width:1.8}
+body.apple .bilan-charts svg[stroke],body.apple #home-chart svg[stroke]{stroke-width:2}
+/* Interrupteur SFW = switch iOS (vert systemGreen, 44x26, pouce ombré) */
+body.apple #sfw-floating{background:rgba(255,255,255,.72)!important;border-color:rgba(60,60,67,.12)!important;
+  border-radius:99px!important;-webkit-backdrop-filter:blur(20px) saturate(180%);backdrop-filter:blur(20px) saturate(180%);
+  box-shadow:0 1px 2px rgba(0,0,0,.05),0 8px 24px rgba(0,0,0,.06)!important}
+body.apple #sfw-floating .sfw-switch{width:44px!important;height:26px!important;border-radius:99px!important;
+  background:rgba(120,120,128,.16)!important;box-shadow:none!important}
+body.apple #sfw-floating .sfw-thumb{width:22px!important;height:22px!important;
+  box-shadow:0 2px 5px rgba(0,0,0,.18),0 0 1px rgba(0,0,0,.12)!important}
+body.apple.sfw-on #sfw-floating .sfw-switch{background:#34c759!important;box-shadow:none!important}
+body.apple.sfw-on #sfw-floating .sfw-thumb{transform:translateX(18px)!important}
+body.apple.sfw-on #sfw-floating span:last-child{color:#34c759!important}
+/* Contrôle segmenté iOS : rail gris, segment actif blanc et ombré */
+body.apple .media-type-pills{background:rgba(118,118,128,.10);border-radius:99px;padding:3px;gap:2px}
+body.apple .media-pill{border-radius:99px!important;border-color:transparent!important;background:transparent!important;
+  color:rgba(60,60,67,.75)!important;font-weight:590!important;letter-spacing:-.01em}
+body.apple .media-pill-active{background:#fff!important;color:#1c1c1e!important;
+  box-shadow:0 1px 3px rgba(0,0,0,.10),0 0 0 .5px rgba(0,0,0,.04)!important}
+/* Boutons secondaires : gris iOS + libellé bleu (jamais un contour dur) */
+body.apple .btn-secondary,body.apple .btn.secondary,body.apple .vac-btn:not(.vac-btn-active){
+  background:rgba(120,120,128,.12)!important;border-color:transparent!important;color:#007aff!important;border-radius:10px!important}
+/* Feuilles et fenêtres : rayon large façon sheet iOS */
+body.apple .modal,body.apple .modal-content,body.apple .nxm-modal,body.apple .vpm-modal,body.apple #reel-details-modal > div{
+  border-radius:20px!important;border-color:rgba(60,60,67,.10)!important;
+  box-shadow:0 12px 48px rgba(0,0,0,.18),0 2px 8px rgba(0,0,0,.06)!important}
+body.apple .lb-close-btn,body.apple .lb-nav{-webkit-backdrop-filter:blur(20px) saturate(180%);backdrop-filter:blur(20px) saturate(180%)}
+/* Notifications façon bannière iOS */
+body.apple .toast{border-radius:16px!important;-webkit-backdrop-filter:blur(20px) saturate(180%);
+  backdrop-filter:blur(20px) saturate(180%);box-shadow:0 8px 32px rgba(0,0,0,.16)!important;letter-spacing:-.01em}
+/* Filets de séparation à l'épaisseur iOS */
+body.apple table th,body.apple table td,body.apple .row-sep,body.apple hr{border-color:rgba(60,60,67,.16)!important}
+body.apple .sidebar .section-label{color:rgba(60,60,67,.55)!important;font-weight:600!important;letter-spacing:.01em!important}
+/* Barres de défilement fines, sans flèches */
+body.apple ::-webkit-scrollbar{width:9px;height:9px}
+body.apple ::-webkit-scrollbar-track{background:transparent}
+body.apple ::-webkit-scrollbar-thumb{background:rgba(60,60,67,.26);border-radius:99px;border:2px solid transparent;background-clip:content-box}
+body.apple ::-webkit-scrollbar-thumb:hover{background:rgba(60,60,67,.42);background-clip:content-box}
+body.apple{scrollbar-width:thin;scrollbar-color:rgba(60,60,67,.30) transparent}
+/* Sélection de texte à la teinte système */
+body.apple ::selection{background:rgba(0,122,255,.22)}
+/* Focus clavier visible (accessibilité) sans anneau permanent à la souris */
+body.apple :focus-visible{outline:3px solid rgba(0,122,255,.45);outline-offset:2px;border-radius:8px}
+
+/* --- APPLE, 3e couche : le MOUVEMENT ---------------------------------------
+   Courbe unique cubic-bezier(.32,.72,0,1) : c'est le ressort critiquement
+   amorti des transitions iOS — il part vite, s'arrête net, ne rebondit pas.
+   Le rebond est réservé à ce qui suit un geste ; ici, rien n'est piloté au
+   doigt, donc aucun dépassement nulle part.
+   On n'anime que transform et opacity (les seules propriétés que le
+   compositeur traite sans repeindre), et jamais les .box en cascade — elles
+   se re-cachaient à chaque changement d'onglet. --- */
+body.apple .main{animation:appleMainIn .4s cubic-bezier(.32,.72,0,1)}
+@keyframes appleMainIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+body.apple .sidebar{transition:width .4s cubic-bezier(.32,.72,0,1)}
+body.apple .stat,body.apple .theme-card,body.apple .cloud-card,body.apple .reel-card{
+  transition:transform .28s cubic-bezier(.32,.72,0,1),box-shadow .28s cubic-bezier(.32,.72,0,1)}
+body.apple .stat:hover,body.apple .theme-card:hover{transform:translateY(-2px)}
+body.apple .stat:hover{box-shadow:0 2px 6px rgba(0,0,0,.06),0 14px 32px rgba(0,0,0,.08)!important}
+body.apple .btn,body.apple button,body.apple .sidebar .solo-item,body.apple .sidebar .group .item,body.apple .sidebar .group-head,body.apple .media-pill{
+  transition:background-color .2s cubic-bezier(.32,.72,0,1),color .2s cubic-bezier(.32,.72,0,1),transform .1s ease-out,box-shadow .2s cubic-bezier(.32,.72,0,1)}
+/* Feuilles : montée courte, sans rebond (0,3 s = la durée d'un sheet iOS) */
+body.apple .modal,body.apple .modal-content,body.apple .nxm-modal,body.apple .vpm-modal{
+  animation:appleSheetIn .3s cubic-bezier(.32,.72,0,1)}
+@keyframes appleSheetIn{from{opacity:0;transform:scale(.96) translateY(10px)}to{opacity:1;transform:none}}
+body.apple .toast{animation:appleToastIn .4s cubic-bezier(.32,.72,0,1)}
+@keyframes appleToastIn{from{opacity:0;transform:translateY(-14px) scale(.97)}to{opacity:1;transform:none}}
+html.rail body.apple .sidebar .group:hover > .items{animation:appleFlyIn .26s cubic-bezier(.32,.72,0,1)}
+@keyframes appleFlyIn{from{opacity:0;transform:translateX(-8px) scale(.97)}to{opacity:1;transform:none}}
+body.apple .sfw-switch,body.apple .sfw-thumb{transition:background-color .28s cubic-bezier(.32,.72,0,1),transform .28s cubic-bezier(.32,.72,0,1)!important}
+/* Mouvement réduit : on remplace tout par un fondu court, on ne supprime pas
+   le repère visuel (l'élément doit quand même signaler son arrivée). */
+@media (prefers-reduced-motion:reduce){
+  body.apple .main,body.apple .modal,body.apple .modal-content,body.apple .nxm-modal,body.apple .vpm-modal,body.apple .toast,
+  html.rail body.apple .sidebar .group:hover > .items{animation:appleFade .2s ease!important}
+  body.apple .stat:hover,body.apple .theme-card:hover{transform:none!important}
+  @keyframes appleFade{from{opacity:0}to{opacity:1}}}
+
 /* =============== SIDEBAR RAIL : menu réduit en icônes + flyouts au survol =============== */
 .sidebar{transition:width .25s cubic-bezier(.16,1,.3,1)}
 .rail-toggle{display:flex;align-items:center;gap:12px;margin:0 12px 4px;padding:8px 14px;background:transparent;border:0;color:#666;font-size:12px;font-weight:600;cursor:pointer;border-radius:8px;font-family:inherit;text-align:left;transition:background .15s,color .15s}
