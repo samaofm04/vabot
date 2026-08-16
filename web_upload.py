@@ -940,15 +940,15 @@ body.light #page-loader,html.light-pre #page-loader{background:rgba(249,250,251,
 .cloud-card.is-reel-off .card-actions{opacity:1;filter:none}
 
 /* Pop quand checkbox sélectionnée */
-.sel-cb:checked{animation:pop .25s ease}
+.sel-cb:checked,.txt-sel-cb:checked{animation:pop .25s ease}
 /* Cercle de sélection rond — frosted white pour rester lisible sur n'importe quelle image */
 .sel-circle{display:block;width:24px;height:24px;border-radius:50%;
   background:rgba(255,255,255,.85);border:2px solid #fff;
   backdrop-filter:blur(8px);transition:all .15s;position:relative;
   box-shadow:0 2px 6px rgba(0,0,0,.2)}
 .sel-circle-wrap:hover .sel-circle{background:#fff;transform:scale(1.08);box-shadow:0 4px 12px rgba(0,0,0,.3)}
-.sel-cb:checked + .sel-circle{background:#3b82f6;border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.25),0 4px 12px rgba(59,130,246,.3)}
-.sel-cb:checked + .sel-circle::after{content:'';position:absolute;left:50%;top:50%;width:11px;height:7px;border-left:2.5px solid #fff;border-bottom:2.5px solid #fff;transform:translate(-55%,-65%) rotate(-45deg)}
+.sel-cb:checked + .sel-circle,.txt-sel-cb:checked + .sel-circle{background:#3b82f6;border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.25),0 4px 12px rgba(59,130,246,.3)}
+.sel-cb:checked + .sel-circle,.txt-sel-cb:checked + .sel-circle::after{content:'';position:absolute;left:50%;top:50%;width:11px;height:7px;border-left:2.5px solid #fff;border-bottom:2.5px solid #fff;transform:translate(-55%,-65%) rotate(-45deg)}
 /* Bouton edit crayon sur les cards — frosted white aussi */
 .card-edit-btn{background:rgba(255,255,255,.85);border:0;color:#1a1a1a;width:28px;height:28px;
   border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;
@@ -1121,7 +1121,7 @@ body.obsidian [style*="background:#0a0a0a"]{background:#0a0c11!important}
 body.obsidian [style*="border:1px solid #2a2a2a"],body.obsidian [style*="border:1px solid #1a1a1a"]{border-color:rgba(150,170,235,.14)!important}
 body.obsidian [style*="background:#3b82f6"]{background:#8b9cf7!important}
 body.obsidian [style*="color:#3b82f6"]{color:#8b9cf7!important}
-body.obsidian .btn,body.obsidian button[type=submit],body.obsidian .lb-btn-primary,body.obsidian .badge,body.obsidian .vac-btn-active,body.obsidian .vpm-kind-btn.active,body.obsidian .vpm-save,body.obsidian .cur-toggle button.active,body.obsidian .exp-submit,body.obsidian .sel-cb:checked + .sel-circle,body.obsidian .sidebar .group .item .badge,body.obsidian .up-step .up-dot{background:#8b9cf7!important;border-color:#8b9cf7!important}
+body.obsidian .btn,body.obsidian button[type=submit],body.obsidian .lb-btn-primary,body.obsidian .badge,body.obsidian .vac-btn-active,body.obsidian .vpm-kind-btn.active,body.obsidian .vpm-save,body.obsidian .cur-toggle button.active,body.obsidian .exp-submit,body.obsidian .sel-cb:checked + .sel-circle,.txt-sel-cb:checked + .sel-circle,body.obsidian .sidebar .group .item .badge,body.obsidian .up-step .up-dot{background:#8b9cf7!important;border-color:#8b9cf7!important}
 body.obsidian a,body.obsidian .subtab.active,body.obsidian .sidebar .item.active,body.obsidian .sidebar .group .item.active,body.obsidian .sidebar .group .item.active svg,body.obsidian .sidebar .solo-item.active,body.obsidian .sidebar .group-head.active svg.lead,body.obsidian .vlm-dup{color:#8b9cf7!important}
 body.obsidian .vlm-dup{border-color:#8b9cf7!important}
 body.obsidian .sidebar .solo-item.active{background:linear-gradient(135deg,rgba(139,156,247,.16),rgba(103,232,249,.10))!important}
@@ -1137,7 +1137,7 @@ body.violet [style*="background:#0a0a0a"]{background:#0c0817!important}
 body.violet [style*="border:1px solid #2a2a2a"],body.violet [style*="border:1px solid #1a1a1a"]{border-color:#2d1b4e!important}
 body.violet [style*="background:#3b82f6"]{background:#a855f7!important}
 body.violet [style*="color:#3b82f6"]{color:#c084fc!important}
-body.violet .btn,body.violet button[type=submit],body.violet .lb-btn-primary,body.violet .badge,body.violet .vac-btn-active,body.violet .vpm-kind-btn.active,body.violet .vpm-save,body.violet .cur-toggle button.active,body.violet .exp-submit,body.violet .sel-cb:checked + .sel-circle,body.violet .sidebar .group .item .badge,body.violet .up-step .up-dot{background:#a855f7!important;border-color:#a855f7!important}
+body.violet .btn,body.violet button[type=submit],body.violet .lb-btn-primary,body.violet .badge,body.violet .vac-btn-active,body.violet .vpm-kind-btn.active,body.violet .vpm-save,body.violet .cur-toggle button.active,body.violet .exp-submit,body.violet .sel-cb:checked + .sel-circle,.txt-sel-cb:checked + .sel-circle,body.violet .sidebar .group .item .badge,body.violet .up-step .up-dot{background:#a855f7!important;border-color:#a855f7!important}
 body.violet a,body.violet .subtab.active,body.violet .sidebar .item.active,body.violet .sidebar .group .item.active,body.violet .sidebar .group .item.active svg,body.violet .sidebar .solo-item.active,body.violet .sidebar .group-head.active svg.lead,body.violet .vlm-dup{color:#c084fc!important}
 body.violet .vlm-dup{border-color:#a855f7!important}
 body.violet .sidebar .solo-item.active{background:linear-gradient(135deg,rgba(168,85,247,.18),rgba(236,72,153,.12))!important}
@@ -1153,7 +1153,7 @@ body.gold [style*="background:#0a0a0a"]{background:#0b0a07!important}
 body.gold [style*="border:1px solid #2a2a2a"],body.gold [style*="border:1px solid #1a1a1a"]{border-color:#2c2619!important}
 body.gold [style*="background:#3b82f6"]{background:#d9b74a!important}
 body.gold [style*="color:#3b82f6"]{color:#e6c65e!important}
-body.gold .btn,body.gold button[type=submit],body.gold .lb-btn-primary,body.gold .badge,body.gold .vac-btn-active,body.gold .vpm-kind-btn.active,body.gold .vpm-save,body.gold .cur-toggle button.active,body.gold .exp-submit,body.gold .sel-cb:checked + .sel-circle,body.gold .sidebar .group .item .badge,body.gold .up-step .up-dot{background:#d9b74a!important;border-color:#d9b74a!important}
+body.gold .btn,body.gold button[type=submit],body.gold .lb-btn-primary,body.gold .badge,body.gold .vac-btn-active,body.gold .vpm-kind-btn.active,body.gold .vpm-save,body.gold .cur-toggle button.active,body.gold .exp-submit,body.gold .sel-cb:checked + .sel-circle,.txt-sel-cb:checked + .sel-circle,body.gold .sidebar .group .item .badge,body.gold .up-step .up-dot{background:#d9b74a!important;border-color:#d9b74a!important}
 body.gold .btn,body.gold button[type=submit],body.gold .lb-btn-primary,body.gold .badge,body.gold .vpm-save,body.gold .exp-submit,body.gold .sidebar .group .item .badge,body.gold [style*="background:#3b82f6"]{color:#1c1600!important}
 body.gold a,body.gold .subtab.active,body.gold .sidebar .item.active,body.gold .sidebar .group .item.active,body.gold .sidebar .group .item.active svg,body.gold .sidebar .solo-item.active,body.gold .sidebar .group-head.active svg.lead,body.gold .vlm-dup{color:#e6c65e!important}
 body.gold .vlm-dup{border-color:#d9b74a!important}
@@ -1181,7 +1181,7 @@ body.apple .subtitle,body.apple small,body.apple label{letter-spacing:0!importan
 /* Accent systemBlue (#007aff) — mêmes points d'accroche que les autres thèmes */
 body.apple [style*="background:#3b82f6"]{background:#007aff!important}
 body.apple [style*="color:#3b82f6"]{color:#007aff!important}
-body.apple .btn,body.apple button[type=submit],body.apple .lb-btn-primary,body.apple .badge,body.apple .vac-btn-active,body.apple .vpm-kind-btn.active,body.apple .vpm-save,body.apple .cur-toggle button.active,body.apple .exp-submit,body.apple .sel-cb:checked + .sel-circle,body.apple .sidebar .group .item .badge,body.apple .up-step .up-dot{background:#007aff!important;border-color:#007aff!important}
+body.apple .btn,body.apple button[type=submit],body.apple .lb-btn-primary,body.apple .badge,body.apple .vac-btn-active,body.apple .vpm-kind-btn.active,body.apple .vpm-save,body.apple .cur-toggle button.active,body.apple .exp-submit,body.apple .sel-cb:checked + .sel-circle,.txt-sel-cb:checked + .sel-circle,body.apple .sidebar .group .item .badge,body.apple .up-step .up-dot{background:#007aff!important;border-color:#007aff!important}
 body.apple .btn,body.apple button[type=submit],body.apple .lb-btn-primary,body.apple .vpm-save,body.apple .exp-submit,body.apple .up-submit{border-radius:10px!important;font-weight:600!important;letter-spacing:-.01em!important}
 body.apple a,body.apple .subtab.active,body.apple .sidebar .item.active,body.apple .sidebar .group .item.active,body.apple .sidebar .group .item.active svg,body.apple .sidebar .solo-item.active,body.apple .sidebar .group-head.active svg.lead,body.apple .vlm-dup{color:#007aff!important}
 body.apple .vlm-dup{border-color:#007aff!important}
