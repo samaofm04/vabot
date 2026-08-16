@@ -17342,7 +17342,7 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
                 "     +'<br><span style=\\'color:#75757f;font-size:11px\\'>Rien ne sera supprimé du Drive.</span>';"
                 "   if(go){ go.style.display='inline-block'; go.disabled=false;"
                 "     go.style.opacity='1'; go.style.cursor='pointer';"
-                "     go.textContent='<svg class='fic' viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M12 4.6v10.6'/><path d='M7.4 10.6L12 15.2l4.6-4.6'/><path d='M4.4 19.4h15.2'/></svg> Importer ces '+j.total+' fichier'+(j.total>1?'s':''); }"
+                "     go.textContent='Importer ces '+j.total+' fichier'+(j.total>1?'s':''); }"
                 "  }).catch(function(e){ btn.disabled=false; btn.textContent=t0;"
                 "   if(box) box.textContent='Erreur : '+e; });"
                 "};"

@@ -657,11 +657,18 @@ _DRIVE_TO_SUB = {n.lower(): s for s, n, _ in SECTIONS}
 _SUB_TO_LABEL = {s: n for s, n, _ in SECTIONS}
 
 
+# Rempli par le dernier _candidats_import : ce qui a ete ecarte, par raison.
+trouves_ignores: dict = {}
+
+
 def _candidats_import(sess, st, root):
     """Tout ce qui est depose dans le Drive et pas encore sur le site.
 
     UN SEUL parcours, utilise par l'apercu ET par l'import : impossible que
     le nombre annonce et le nombre rapatrie se contredisent."""
+    # Ce que le scan ECARTE, et pourquoi : sans ca, « 0 a importer » ne
+    # permettait pas de distinguer « tout est deja la » de « je n'ai rien vu ».
+    _ignores: dict = {}
     deja = {r.get("id") for r in (st.get("uploaded") or {}).values() if r.get("id")}
     vus = st.get("imported") or {}
     trouves = []
@@ -674,7 +681,9 @@ def _candidats_import(sess, st, root):
         for f in _lister(sess, dossier_id):
             nom = Path(f["name"]).name
             if Path(nom).suffix.lower() not in exts:
+                _ignores["format_non_gere"] = _ignores.get("format_non_gere", 0) + 1
                 continue
+            _ignores["vus"] = _ignores.get("vus", 0)
             if vus.get(f["id"]) or f["id"] in deja:
                 # …SAUF s'il n'est plus sur le site. Ce test passait avant la
                 # verification d'existence locale : un fichier parti du site
@@ -685,6 +694,7 @@ def _candidats_import(sess, st, root):
                 # reste active pour tous les autres cas.
                 try:
                     if (IDENTITIES_DIR / ident / sub / nom).exists():
+                        _ignores["deja_sur_le_site"] = _ignores.get("deja_sur_le_site", 0) + 1
                         continue
                 except Exception:
                     continue
@@ -697,6 +707,7 @@ def _candidats_import(sess, st, root):
                 if local.exists():
                     taille = int(f.get("size") or 0)
                     if not taille or local.stat().st_size == taille:
+                        _ignores["identique_au_site"] = _ignores.get("identique_au_site", 0) + 1
                         continue
             except Exception:
                 pass
@@ -758,6 +769,11 @@ def _candidats_import(sess, st, root):
             sub = _DRIVE_TO_SUB.get(typ["name"].strip().lower())
             if sub:
                 _prendre(typ["id"], ident, sub, canonique=True)
+    try:
+        trouves_ignores.clear()
+        trouves_ignores.update(_ignores)
+    except Exception:
+        pass
     return trouves
 
 
@@ -841,7 +857,8 @@ def import_preview() -> dict:
         compte[cle] = compte.get(cle, 0) + 1
     detail = [{"identity": i, "type": _SUB_TO_LABEL.get(sub, sub), "n": n}
               for (i, sub), n in sorted(compte.items(), key=lambda x: -x[1])]
-    return {"total": len(cands), "detail": detail, "ts": int(time.time())}
+    return {"total": len(cands), "detail": detail, "ts": int(time.time()),
+            "ignores": dict(trouves_ignores)}
 
 
 def run_import() -> dict:
