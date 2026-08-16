@@ -888,7 +888,7 @@ input::placeholder{color:#5a6183}
 
 UPLOAD_HTML = """
 <!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Youlab Dashboard</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<html class="{theme_pre_class}"><head><meta charset="utf-8"><title>Youlab Dashboard</title><meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <!-- Fonts NON bloquantes (media=print + onload) : le premier rendu n'attend
@@ -1782,6 +1782,11 @@ function setTheme(theme){
   }
   // theme === 'dark' -> aucune classe (c'est le thème de base)
   try{ localStorage.setItem('vabot_theme', theme); }catch(e){}
+  // Aussi dans un cookie : c'est ce qui permet au SERVEUR de rendre la page
+  // deja au bon theme, au lieu d'un fond sombre repeint apres coup (l'ecran
+  // noir qu'on voyait a chaque changement de page).
+  try{ document.cookie = 'va_theme=' + encodeURIComponent(theme)
+        + ';path=/;max-age=31536000;samesite=lax'; }catch(e){}
   // Les icones iOS suivent le theme (et se retirent quand on en change)
   if(typeof vaAppliquerIcones === 'function') vaAppliquerIcones(theme === 'apple');
   // Mettre à jour la sélection visuelle des cards
@@ -1802,6 +1807,13 @@ function setTheme(theme){
   try{
     var saved = localStorage.getItem('vabot_theme') || 'light';
     var darkVariants = ['obsidian','violet','gold'];
+    // premiere visite depuis cette version : on sème le cookie tout de suite
+    try{
+      if(document.cookie.indexOf('va_theme=') === -1){
+        document.cookie = 'va_theme=' + encodeURIComponent(saved)
+          + ';path=/;max-age=31536000;samesite=lax';
+      }
+    }catch(e){}
     if(saved === 'light' || saved === 'apple'){
       document.documentElement.classList.add('pre-light');
     }
@@ -7079,7 +7091,7 @@ window.upClearPrefill = function(utab){
 })();
 </script>
 {vault_core_html}
-</head><body>
+</head><body class="{theme_body_class}">
 <!-- Page loader global (affiché pendant la navigation) -->
 <div id="page-loader"><div class="pl-ring"></div></div>
 <div class="layout">
@@ -38374,8 +38386,25 @@ def _render_upload_inner(msg=None, error=None):
         return (f"<div data-lazy-tab='{tab}' style='padding:60px 20px;text-align:center;color:#666'>"
                 f"<div style='font-size:13px'>⏳ Chargement…</div></div>")
 
+    # Theme lu dans le cookie : la page part deja au bon theme, sans le
+    # passage par un fond sombre repeint ensuite en JS.
+    try:
+        from flask import request as _rq      # pas importe dans cette fonction
+        _th = (_rq.cookies.get("va_theme") or "").strip().lower()
+    except Exception:
+        _th = ""
+    if _th not in ("light", "apple", "dark", "obsidian", "violet", "gold"):
+        _th = "light"          # defaut du site
+    _pre = {"light": "light-pre pre-light", "apple": "light-pre pre-apple",
+            "dark": "", "obsidian": "pre-obsidian", "violet": "pre-violet",
+            "gold": "pre-gold"}[_th]
+    _bod = {"light": "light", "apple": "light apple", "dark": "",
+            "obsidian": "obsidian", "violet": "violet", "gold": "gold"}[_th]
+
     html = (
         UPLOAD_HTML
+        .replace("{theme_pre_class}", _pre)
+        .replace("{theme_body_class}", _bod)
         # Socle des galeries : une seule fois pour toute la page.
         .replace("{vault_core_html}", _vault_core_html())
         .replace("{markets_json}", _markets_json())
