@@ -42940,7 +42940,14 @@ def create_app():
                   f"L'import en reconnait <b style='color:#2563eb'>"
                   f"{inv.get('total_import', 0)}</b> — il en reste "
                   f"<b style='color:#b91c1c'>{inv.get('total_invisible', 0)}</b> "
-                  f"qu'il ne voit pas.</p>")
+                  f"qu'il ne voit pas.</p>"
+                  + (f"<p style='color:#92400e;margin:0 0 16px;font-size:13px;"
+                     f"padding:10px 12px;background:#fffbeb;border:1px solid #fde68a;"
+                     f"border-radius:8px'><b>{inv['copies_drive']} copie(s) sur le "
+                     f"Drive</b> — des « _2 », « _3 » identiques a leur original, "
+                     f"laissees par d'anciens imports. Elles ne sont ni comptees "
+                     f"comme manquantes ni rapatriees.</p>"
+                     if inv.get("copies_drive") else ""))
 
         # Les compteurs du scan : c'est la que se lit POURQUOI un fichier
         # present sur le Drive n'est pas propose a l'import.
@@ -42948,6 +42955,8 @@ def create_app():
         _lbl = {"deja_sur_le_site": "ecartes car deja presents sur le site",
                 "identique_au_site": "ecartes : meme nom et meme taille en local",
                 "format_non_gere": "ecartes : extension non geree",
+                "copies_du_drive": "ecartes : copies du Drive (pp_69_2, pp_69_3…)",
+                "nom_deja_pris": "ecartes : ce nom existe deja sur le site",
                 "dossiers_non_reconnus": "dossiers au nom inconnu",
                 "erreur": "erreur pendant le scan"}
         _items = "".join(

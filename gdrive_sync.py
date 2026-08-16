@@ -651,6 +651,44 @@ def _telecharger(sess, file_id, cible: Path):
     tmp.replace(cible)
 
 
+def _parents_possibles(nom: str) -> list:
+    """Les noms dont « nom » pourrait etre une copie, du plus proche au plus loin.
+
+    « pp_69_2_3.png » -> [« pp_69_2.png », « pp_69.png », « pp.png »]
+
+    L'import renomme en _2 quand le nom est pris ; ces copies repartent vers le
+    Drive par la synchro montante, et l'import suivant en refait des _2 — d'ou
+    les pp_69_2_2 et pp_69_2_3, chaque tour ajoutant une couche.
+
+    On rend la liste plutot qu'un seul nom : « _69 » peut tres bien appartenir
+    au nom d'origine. C'est l'EXISTENCE d'un candidat, a taille identique, qui
+    tranche — jamais la seule forme du nom.
+    """
+    import re as _re
+    p = Path(nom)
+    out, tige = [], p.stem
+    while True:
+        neuf = _re.sub(r"_\d+$", "", tige)
+        if neuf == tige or not neuf:
+            break
+        out.append(neuf + p.suffix)
+        tige = neuf
+    return out
+
+
+def _est_copie(nom: str, tailles: dict) -> bool:
+    """Vrai si un fichier du meme dossier ressemble a l'original de « nom ».
+
+    Condition double : le nom derive d'un autre PRESENT dans le dossier, ET les
+    deux pesent exactement pareil. Un « reel_2.mp4 » sans « reel.mp4 » a cote
+    reste un fichier ordinaire.
+    """
+    ma_taille = tailles.get(nom)
+    if not ma_taille:
+        return False
+    return any(tailles.get(p) == ma_taille for p in _parents_possibles(nom))
+
+
 def _cle_dossier(nom: str) -> str:
     """Nom de dossier Drive ramene a sa forme comparable.
 
@@ -719,11 +757,35 @@ def _candidats_import(sess, st, root):
         (par opposition a un depot libre dans « A IMPORTER »)."""
         exts = (VIDEO_EXTS if sub in ("brutes", "templates", "videos", "pro_videos")
                 else IMAGE_EXTS)
-        for f in _lister(sess, dossier_id):
+        contenu = _lister(sess, dossier_id)
+        # Tailles par nom : sert a reconnaitre les copies (« pp_69_2.png »
+        # pesant exactement autant que « pp_69.png »).
+        tailles = {}
+        for f in contenu:
+            try:
+                tailles[Path(f["name"]).name] = int(f.get("size") or 0)
+            except Exception:
+                pass
+        for f in contenu:
             nom = Path(f["name"]).name
             if Path(nom).suffix.lower() not in exts:
                 _ignores["format_non_gere"] = _ignores.get("format_non_gere", 0) + 1
                 continue
+            # 1) Copie fabriquee par un import precedent : meme fichier sous un
+            # nom suffixe. Les rapatrier relance le cycle qui a produit les
+            # pp_69_2_2 et pp_69_2_3 — chaque tour en ajoute une couche.
+            if _est_copie(nom, tailles):
+                _ignores["copies_du_drive"] = _ignores.get("copies_du_drive", 0) + 1
+                continue
+            # 2) Le nom est deja pris sur le site : on n'importe pas. Choix du
+            # proprietaire — mieux vaut manquer une version modifiee que
+            # remplir la bibliotheque de _2 a trier a la main.
+            try:
+                if (IDENTITIES_DIR / ident / sub / nom).exists():
+                    _ignores["nom_deja_pris"] = _ignores.get("nom_deja_pris", 0) + 1
+                    continue
+            except Exception:
+                pass
             _ignores["vus"] = _ignores.get("vus", 0)
             if vus.get(f["id"]) or f["id"] in deja:
                 # …SAUF s'il n'est plus sur le site. Ce test passait avant la
@@ -989,6 +1051,7 @@ def inventaire(force: bool = False) -> dict:
     sess = _session()
 
     cote_drive: dict = {}          # (identite, sub) -> nb de fichiers
+    copies = [0]                   # copies suffixees reperees sur le Drive
     inconnus: dict = {}            # nom de dossier ignore -> nb de fichiers
     orphelines: dict = {}          # identite vue sur le Drive, absente du site
 
@@ -1056,7 +1119,24 @@ def inventaire(force: bool = False) -> dict:
             continue
         exts = (VIDEO_EXTS if sub in ("brutes", "templates", "videos", "pro_videos")
                 else IMAGE_EXTS)
-        n = sum(1 for f in liste if Path(f["name"]).suffix.lower() in exts)
+        tailles = {}
+        for f in liste:
+            try:
+                tailles[Path(f["name"]).name] = int(f.get("size") or 0)
+            except Exception:
+                pass
+        n = 0
+        for f in liste:
+            nom = Path(f["name"]).name
+            if Path(nom).suffix.lower() not in exts:
+                continue
+            # Les copies (« pp_69_2.png » a cote de « pp_69.png », meme taille)
+            # ne sont pas du contenu manquant : les compter gonflait l'ecart et
+            # faisait croire a des centaines de fichiers perdus.
+            if _est_copie(nom, tailles):
+                copies[0] += 1
+                continue
+            n += 1
         if n:
             cote_drive[(ident, sub)] = cote_drive.get((ident, sub), 0) + n
 
@@ -1097,6 +1177,7 @@ def inventaire(force: bool = False) -> dict:
     lignes.sort(key=lambda r: (-r["manque"], r["identity"]))
     resultat = {
         "raisons_import": raisons,
+        "copies_drive": copies[0],
         "total_import": sum(r.get("import", 0) for r in lignes),
         "total_invisible": sum(r.get("invisible", 0) for r in lignes),
         "lignes": lignes,
