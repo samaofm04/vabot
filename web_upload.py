@@ -1583,6 +1583,20 @@ body.light [style*="linear-gradient(to top"] [style*="color:#fbbf24"]{color:#fbb
 /* la vignette elle-meme et son fond restent sombres */
 body.light .reel-video,body.light [style*="background:#000"]{background:#000!important}
 
+/* --- Apercu des captions : fidele au rendu final -------------------------
+   Le texte est ecrit en blanc avec un contour noir, comme il apparaitra sur
+   la video. Deux problemes : mon remappage du theme clair transformait ce
+   blanc en sombre (« color:#fff » attrape aussi « color:#ffffff »), donc
+   texte sombre + contour noir = un pate illisible ; et le fond de l'apercu
+   etait blanc, alors que la caption se lit sur une video. */
+body.light .cap-prev-txt[style*="color:#fff"],
+body.light .cap-prev-txt[style*="color:#ffffff"],
+body.light .cap-prev-txt[style*="color:#FFF"]{color:#fff!important}
+/* fond neutre sombre : le blanc et son contour ressortent comme sur un reel */
+.cap-prev{background:linear-gradient(160deg,#4a4a4f,#232327)!important}
+body.light .cap-prev{background:linear-gradient(160deg,#4a4a4f,#232327)!important;
+  border-color:rgba(60,60,67,.16)!important}
+
 /* =============== SIDEBAR RAIL : menu réduit en icônes + flyouts au survol =============== */
 .sidebar{transition:width .25s cubic-bezier(.16,1,.3,1)}
 .rail-toggle{display:flex;align-items:center;gap:12px;margin:0 12px 4px;padding:8px 14px;background:transparent;border:0;color:#666;font-size:12px;font-weight:600;cursor:pointer;border-radius:8px;font-family:inherit;text-align:left;transition:background .15s,color .15s}
