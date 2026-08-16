@@ -14502,8 +14502,8 @@ def _get_or_create_thumbnail(src: Path, rel_key: str, is_video: bool) -> Path:
 
 def _pregen_thumbs_async(items):
     """Pré-génère en arrière-plan les thumbnails manquants d'une galerie.
-    items = [(src_path, rel_key, is_video)]. 1 seul worker à la fois (les
-    suivants seront pris au prochain rendu ou à la demande). Best-effort."""
+    items = [(src_path, rel_key, is_video)]. Trois miniatures a la fois : au
+    dela, ffmpeg sature le VPS ou tourne aussi le bot. Best-effort."""
     with _THUMB_META_LOCK:
         if _THUMB_PREGEN_ACTIVE[0]:
             return
@@ -14511,12 +14511,30 @@ def _pregen_thumbs_async(items):
 
     def _run():
         try:
-            for src, key, isv in items:
+            # Trois a la fois : une galerie de 200 rushs mettait plusieurs
+            # minutes a s'afficher, une miniature apres l'autre. On ne monte
+            # pas plus haut : ffmpeg est gourmand en CPU et le bot tourne sur
+            # la meme machine.
+            from concurrent.futures import ThreadPoolExecutor
+
+            def _une(it):
+                src, key, isv = it
                 try:
                     if not _thumb_path_for(key).exists():
                         _get_or_create_thumbnail(src, key, isv)
                 except Exception:
                     pass
+
+            manquants = []
+            for it in items:
+                try:
+                    if not _thumb_path_for(it[1]).exists():
+                        manquants.append(it)
+                except Exception:
+                    pass
+            if manquants:
+                with ThreadPoolExecutor(max_workers=3) as ex:
+                    list(ex.map(_une, manquants))
         finally:
             with _THUMB_META_LOCK:
                 _THUMB_PREGEN_ACTIVE[0] = False
