@@ -1622,6 +1622,8 @@ body.light .cap-prev{background:linear-gradient(160deg,#4a4a4f,#232327)!importan
   background:rgba(120,120,128,.16);user-select:all;font-size:11.5px}
 @media (prefers-reduced-motion:reduce){.gd-guide>summary::after{transition:none}}
 
+.mypuls-section>h3{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
 /* =============== SIDEBAR RAIL : menu réduit en icônes + flyouts au survol =============== */
 .sidebar{transition:width .25s cubic-bezier(.16,1,.3,1)}
 .rail-toggle{display:flex;align-items:center;gap:12px;margin:0 12px 4px;padding:8px 14px;background:transparent;border:0;color:#666;font-size:12px;font-weight:600;cursor:pointer;border-radius:8px;font-family:inherit;text-align:left;transition:background .15s,color .15s}
@@ -22102,6 +22104,15 @@ document.addEventListener('DOMContentLoaded', function(){
         "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='#3b82f6' stroke-width='2'><path d='M3 3v18h18'/><path d='M7 14l4-4 4 4 5-5'/></svg>"
         "MyPuls — Ventes chatteurs"
         f"<span style='font-size:11px;color:#888;font-weight:400;margin-left:6px'>scrape direct mypuls.app · {start_str} → {end_str}</span>"
+        # Registre verifiable, a cote du titre : une vente contestee se
+        # retrouve dedans avec son heure, la creatrice et le fan.
+        f"<a href='/chatters/ventes.xlsx?start={start_str}&end={end_str}' "
+        f"class='mypuls-export' style='margin-left:auto' "
+        f"title='Toutes les ventes de la periode : heure, chatteur, creatrice, fan, montant'>"
+        f"<svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' "
+        f"stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'>"
+        f"<path d='M12 3v12'/><path d='M7.5 10.5L12 15l4.5-4.5'/><path d='M4 20h16'/></svg>"
+        f"Registre des ventes (Excel)</a>"
         "</h3>"
         + period_html + stats_html + chart_html + tabs_html + chatters_table + tx_table + keepalive_info
         + "</div>"
