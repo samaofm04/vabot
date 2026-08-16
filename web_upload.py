@@ -42851,11 +42851,34 @@ def create_app():
         if not is_auth():
             return redirect("/")
         import gdrive_sync as _gd
-        try:
-            inv = _gd.inventaire()
-        except Exception as e:
+        if request.args.get("refaire"):
+            _gd._INVENTAIRE_CACHE["data"] = None
+        etat = _gd.inventaire_lancer()
+        if etat.get("state") != "done":
+            # La page s'affiche AVANT que le comptage soit fini : sinon le
+            # navigateur reste sur un ecran blanc pendant tout le parcours du
+            # Drive, sans rien pour dire que ca avance.
+            return ("<div style=\"font:14px/1.55 -apple-system,system-ui,sans-serif;"
+                    "padding:28px;max-width:640px;margin:40px auto;background:#fff;"
+                    "color:#1c1c1e;border:1px solid #e5e7eb;border-radius:14px\">"
+                    "<h2 style='margin:0 0 8px'>Lecture du Drive…</h2>"
+                    "<p style='color:#666'>Je compte les fichiers des deux cotes. "
+                    "Cela prend quelques dizaines de secondes la premiere fois ; "
+                    "la page se rafraichit toute seule.</p>"
+                    "<div style='height:4px;background:#eee;border-radius:3px;overflow:hidden'>"
+                    "<div style='height:100%;width:35%;background:#3b82f6;"
+                    "animation:vaSlide 1.4s ease-in-out infinite'></div></div>"
+                    "<style>@keyframes vaSlide{0%{margin-left:-35%}"
+                    "100%{margin-left:100%}}</style>"
+                    "<p style='margin-top:16px;font-size:12px;color:#999'>"
+                    + html_escape(str(etat.get("err") or "")) + "</p>"
+                    "<script>setTimeout(function(){location.reload();},4000);</script>"
+                    "</div>")
+        inv = _gd.inventaire_etat().get("data") or {}
+        if not inv:
             return ("<div style='font:15px/1.5 -apple-system,system-ui;padding:28px'>"
-                    "<b>Lecture impossible :</b> " + html_escape(str(e)[:300]) +
+                    "<b>Lecture impossible :</b> "
+                    + html_escape(str(etat.get("err") or "resultat vide")) +
                     "<p><a href='/?tab=cloud'>Retour</a></p></div>")
 
         def _tr(r):
@@ -42911,7 +42934,8 @@ def create_app():
                 "<th style='text-align:right'>Site</th>"
                 "<th style='text-align:right'>Manque</th></tr></thead>"
                 "<tbody>" + lignes + "</tbody></table>"
-                "<p style='margin-top:18px'><a href='/?tab=cloud'>Retour au Drive</a></p>"
+                "<p style='margin-top:18px'><a href='/?tab=cloud'>Retour au Drive</a>"
+                " &nbsp;·&nbsp; <a href='/drive-manques?refaire=1'>Recompter</a></p>"
                 "</div>")
 
     @app.route("/gdrive/root_cleanup", methods=["POST"])

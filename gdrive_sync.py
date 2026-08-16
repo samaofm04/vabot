@@ -610,7 +610,9 @@ def _lister_paralleles(sess, taches):
         except Exception:
             return t, []
 
-    with ThreadPoolExecutor(max_workers=5) as ex:
+    # 5 suffisaient pour une poignee de dossiers ; l'inventaire en ouvre
+    # plusieurs centaines d'un coup et attend uniquement le reseau.
+    with ThreadPoolExecutor(max_workers=min(12, max(2, len(taches)))) as ex:
         for t, files in ex.map(_un, taches):
             res[t] = files
     return res
@@ -909,7 +911,49 @@ def import_preview() -> dict:
             "ignores": dict(trouves_ignores)}
 
 
-def inventaire() -> dict:
+_INVENTAIRE_CACHE: dict = {"ts": 0, "data": None}
+_INVENTAIRE_TTL = 180          # 3 minutes : le temps de lire la page
+_INV_STATUS: dict = {"state": "idle", "err": "", "ts": 0}
+
+
+def inventaire_lancer() -> dict:
+    """Demarre le comptage en arriere-plan et rend la main aussitot.
+
+    Parcourir tout le Drive prend de longues secondes : le faire pendant que
+    le navigateur attend donne une page blanche qui « charge » sans fin, et le
+    moindre delai d'attente coupe tout sans rien afficher.
+    """
+    if _INV_STATUS.get("state") == "running":
+        return dict(_INV_STATUS)
+    if _INVENTAIRE_CACHE["data"] is not None and \
+            (time.time() - _INVENTAIRE_CACHE["ts"]) < _INVENTAIRE_TTL:
+        _INV_STATUS.update(state="done", err="", ts=int(time.time()))
+        return dict(_INV_STATUS)
+
+    _INV_STATUS.update(state="running", err="", ts=int(time.time()))
+
+    def _travail():
+        try:
+            inventaire(force=True)
+            _INV_STATUS.update(state="done", err="", ts=int(time.time()))
+        except Exception as e:
+            _INV_STATUS.update(state="error", err=str(e)[:200],
+                               ts=int(time.time()))
+
+    threading.Thread(target=_travail, daemon=True,
+                     name="gdrive-inventaire").start()
+    return dict(_INV_STATUS)
+
+
+def inventaire_etat() -> dict:
+    """L'avancement, et le resultat des qu'il est pret."""
+    out = dict(_INV_STATUS)
+    if out.get("state") == "done" and _INVENTAIRE_CACHE["data"] is not None:
+        out["data"] = _INVENTAIRE_CACHE["data"]
+    return out
+
+
+def inventaire(force: bool = False) -> dict:
     """Ce que le Drive contient, face a ce que le site possede.
 
     L'apercu d'import ne repond qu'a « qu'est-ce que je vais rapatrier ? ». Il
@@ -921,6 +965,10 @@ def inventaire() -> dict:
     C'est le seul moyen de reponder a « il ne capte pas qu'il lui manque des
     trucs » : encore faut-il regarder ce qu'on N'A PAS.
     """
+    if not force and _INVENTAIRE_CACHE["data"] is not None and \
+            (time.time() - _INVENTAIRE_CACHE["ts"]) < _INVENTAIRE_TTL:
+        return _INVENTAIRE_CACHE["data"]
+
     cfg = load_config()
     root = folder_id_from(cfg.get("folder") or "")
     if not root:
@@ -931,56 +979,70 @@ def inventaire() -> dict:
     inconnus: dict = {}            # nom de dossier ignore -> nb de fichiers
     orphelines: dict = {}          # identite vue sur le Drive, absente du site
 
-    def _compter(dossier_id, ident, sub):
-        exts = (VIDEO_EXTS if sub in ("brutes", "templates", "videos", "pro_videos")
-                else IMAGE_EXTS)
-        n = 0
-        for f in _lister(sess, dossier_id):
-            if Path(f["name"]).suffix.lower() in exts:
-                n += 1
-        if n:
-            cle = (ident, sub)
-            cote_drive[cle] = cote_drive.get(cle, 0) + n
+    # Le parcours se fait par VAGUES : tous les dossiers d'un meme niveau sont
+    # listes ensemble. En file indienne, une trentaine d'identites fois sept
+    # sous-dossiers font plusieurs centaines d'allers-retours reseau — la page
+    # tournait dans le vide plusieurs minutes.
 
-    def _parcourir_identite(ident, dossier_id):
-        connue = (IDENTITIES_DIR / ident).exists()
-        for typ in _lister(sess, dossier_id, dossiers=True):
-            sub = _DRIVE_TO_SUB.get(_cle_dossier(typ["name"]))
-            if not sub:
-                nb = len(_lister(sess, typ["id"]))
-                if nb:
-                    inconnus[typ["name"].strip()] = inconnus.get(
-                        typ["name"].strip(), 0) + nb
-                continue
-            if not connue:
-                # Le scan d'import saute purement et simplement ces dossiers :
-                # sans cette ligne, leurs fichiers restaient introuvables.
-                nb = len(_lister(sess, typ["id"]))
-                if nb:
-                    orphelines[ident] = orphelines.get(ident, 0) + nb
-                continue
-            _compter(typ["id"], ident, sub)
+    # vague 1 : la racine
+    niveau1 = _lister(sess, root, dossiers=True)
 
-    for dossier in _lister(sess, root, dossiers=True):
+    # vague 2 : ce que contiennent « Bibliothèque » et « A IMPORTER »
+    a_ouvrir, identites = [], []          # identites = (nom, id du dossier)
+    for dossier in niveau1:
         nom_d = dossier["name"].strip()
         if nom_d.lower() == "vault pro":
             continue
-        if nom_d.lower() == IMPORT_FOLDER_NAME.lower():
-            for ident_dir in _lister(sess, dossier["id"], dossiers=True):
-                _parcourir_identite(ident_dir["name"].strip().lower(),
-                                    ident_dir["id"])
+        if nom_d.lower() == IMPORT_FOLDER_NAME.lower() or \
+                _sansaccent(nom_d) == _sansaccent(RACINE_BIBLIO):
+            a_ouvrir.append(dossier["id"])
+        else:                              # ancien rangement : identite a la racine
+            identites.append((nom_d.lower(), dossier["id"]))
+    contenus = _lister_paralleles(sess, [(d, True) for d in a_ouvrir])
+
+    # vague 3 : sous « Bibliothèque », un niveau FR/US s'intercale
+    marches = []
+    for did in a_ouvrir:
+        for sous in contenus.get((did, True), []):
+            nom_s = sous["name"].strip()
+            if nom_s.upper() in ("FR", "US"):
+                marches.append(sous["id"])
+            else:
+                identites.append((nom_s.lower(), sous["id"]))
+    for cle, files in _lister_paralleles(sess, [(m, True) for m in marches]).items():
+        for x in files:
+            identites.append((x["name"].strip().lower(), x["id"]))
+
+    # vague 4 : les sous-dossiers de chaque identite
+    types = _lister_paralleles(sess, [(d, True) for _i, d in identites])
+
+    # vague 5 : le contenu de chaque sous-dossier, tout en meme temps
+    a_compter = []                         # (id, identite, sub|None, connue)
+    for ident, did in identites:
+        connue = (IDENTITIES_DIR / ident).exists()
+        for typ in types.get((did, True), []):
+            sub = _DRIVE_TO_SUB.get(_cle_dossier(typ["name"]))
+            a_compter.append((typ["id"], ident, sub, connue,
+                              typ["name"].strip()))
+    fichiers = _lister_paralleles(sess, [(t[0], False) for t in a_compter])
+
+    for did, ident, sub, connue, nom_typ in a_compter:
+        liste = fichiers.get((did, False), [])
+        if not sub:
+            if liste:
+                inconnus[nom_typ] = inconnus.get(nom_typ, 0) + len(liste)
             continue
-        if _sansaccent(nom_d) == _sansaccent(RACINE_BIBLIO):
-            for sous in _lister(sess, dossier["id"], dossiers=True):
-                nom_s = sous["name"].strip()
-                grappes = ([(x["name"].strip().lower(), x["id"])
-                            for x in _lister(sess, sous["id"], dossiers=True)]
-                           if nom_s.upper() in ("FR", "US")
-                           else [(nom_s.lower(), sous["id"])])
-                for ident_b, did in grappes:
-                    _parcourir_identite(ident_b, did)
+        if not connue:
+            # Le scan d'import saute purement et simplement ces dossiers :
+            # sans cette ligne, leurs fichiers restaient introuvables.
+            if liste:
+                orphelines[ident] = orphelines.get(ident, 0) + len(liste)
             continue
-        _parcourir_identite(nom_d.lower(), dossier["id"])
+        exts = (VIDEO_EXTS if sub in ("brutes", "templates", "videos", "pro_videos")
+                else IMAGE_EXTS)
+        n = sum(1 for f in liste if Path(f["name"]).suffix.lower() in exts)
+        if n:
+            cote_drive[(ident, sub)] = cote_drive.get((ident, sub), 0) + n
 
     # Cote site : on compte les memes paires, sans se fier a un quelconque etat
     lignes = []
@@ -997,7 +1059,7 @@ def inventaire() -> dict:
                        "drive": n_drive, "site": n_site,
                        "manque": max(0, n_drive - n_site)})
     lignes.sort(key=lambda r: (-r["manque"], r["identity"]))
-    return {
+    resultat = {
         "lignes": lignes,
         "total_drive": sum(r["drive"] for r in lignes),
         "total_site": sum(r["site"] for r in lignes),
@@ -1010,6 +1072,9 @@ def inventaire() -> dict:
                                                    key=lambda x: -x[1])],
         "ts": int(time.time()),
     }
+    _INVENTAIRE_CACHE["ts"] = time.time()
+    _INVENTAIRE_CACHE["data"] = resultat
+    return resultat
 
 
 def run_import() -> dict:
