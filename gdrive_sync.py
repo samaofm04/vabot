@@ -651,7 +651,18 @@ def _candidats_import(sess, st, root):
             if Path(nom).suffix.lower() not in exts:
                 continue
             if vus.get(f["id"]) or f["id"] in deja:
-                continue          # deja importe, ou c'est NOUS qui l'avons mis
+                # …SAUF s'il n'est plus sur le site. Ce test passait avant la
+                # verification d'existence locale : un fichier parti du site
+                # vers le Drive, puis disparu du site, n'etait donc JAMAIS
+                # rapatrie — « tout est sur le Drive, rien sur le site ».
+                # Aucun risque de doublon : on ne repart que si le fichier
+                # est absent en local, et la protection nom+taille ci-dessous
+                # reste active pour tous les autres cas.
+                try:
+                    if (IDENTITIES_DIR / ident / sub / nom).exists():
+                        continue
+                except Exception:
+                    continue
             # CEINTURE ET BRETELLES : meme si l'identifiant Drive s'est perdu
             # (etat reecrit, fichier renvoye...), un fichier de meme nom ET de
             # meme taille est deja sur le site — le rapatrier le mettrait en
