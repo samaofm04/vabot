@@ -40,8 +40,14 @@ def save_config(cfg: dict) -> None:
     safe_json.write(CONFIG, cfg, indent=2)
 
 
+# Classeur par defaut, fourni par le proprietaire du site. La configuration
+# posee depuis l'interface prime toujours : changer de classeur ne demande
+# donc pas de toucher au code.
+SHEET_DEFAUT = "1ulu1fGir3BDNRfiadaVtJpOOdcbwqHVnf0EEXEAvXAg"
+
+
 def sheet_id() -> str:
-    return str(load_config().get("sheet") or "").strip()
+    return str(load_config().get("sheet") or SHEET_DEFAUT or "").strip()
 
 
 def set_sheet(url_or_id: str) -> str:
