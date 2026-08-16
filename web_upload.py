@@ -1558,6 +1558,24 @@ body.light #nxm-apply-cancel{background:#f2f2f7!important;border-color:rgba(60,6
 .mypuls-export:active{transform:scale(.975)}
 body.light.apple .mypuls-export{color:#007aff}
 
+/* --- Textes poses SUR une vignette : ils restent clairs ------------------
+   Le theme clair transforme tout texte blanc en texte sombre. Mais les
+   badges et barres poses par-dessus une miniature ont un fond noir
+   translucide (rgba(0,0,0,…) ou un degrade) : leur texte doit rester BLANC,
+   sinon c'est du sombre sur du noir — illisible. Ces regles passent apres
+   celles du theme clair, donc elles gagnent. */
+body.light [style*="rgba(0,0,0"][style*="color:#fff"],
+body.light [style*="rgba(0,0,0"] [style*="color:#fff"],
+body.light [style*="linear-gradient(to top"] [style*="color:#fff"],
+body.light [style*="linear-gradient(to bottom"] [style*="color:#fff"]{color:#fff!important}
+/* meme chose pour les gris clairs et l'ambre des badges de statut */
+body.light [style*="rgba(0,0,0"] [style*="color:#cbd5e1"],
+body.light [style*="linear-gradient(to top"] [style*="color:#cbd5e1"]{color:#cbd5e1!important}
+body.light [style*="rgba(0,0,0"] [style*="color:#fbbf24"],
+body.light [style*="linear-gradient(to top"] [style*="color:#fbbf24"]{color:#fbbf24!important}
+/* la vignette elle-meme et son fond restent sombres */
+body.light .reel-video,body.light [style*="background:#000"]{background:#000!important}
+
 /* =============== SIDEBAR RAIL : menu réduit en icônes + flyouts au survol =============== */
 .sidebar{transition:width .25s cubic-bezier(.16,1,.3,1)}
 .rail-toggle{display:flex;align-items:center;gap:12px;margin:0 12px 4px;padding:8px 14px;background:transparent;border:0;color:#666;font-size:12px;font-weight:600;cursor:pointer;border-radius:8px;font-family:inherit;text-align:left;transition:background .15s,color .15s}
