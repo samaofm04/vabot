@@ -1606,6 +1606,22 @@ body.light .cap-prev{background:linear-gradient(160deg,#4a4a4f,#232327)!importan
    sa hauteur sous chaque carte. */
 .cap-card-meta:empty{display:none}
 
+/* --- Page Drive : le mode d'emploi tient dans un bloc replie ---------- */
+.gd-guide{margin:8px 0 14px;border:1px solid rgba(120,120,128,.24);border-radius:12px;
+  background:rgba(120,120,128,.06);overflow:hidden}
+.gd-guide>summary{cursor:pointer;padding:10px 14px;font-size:13px;font-weight:600;
+  letter-spacing:-.01em;list-style:none;display:flex;align-items:center;gap:8px;user-select:none}
+.gd-guide>summary::-webkit-details-marker{display:none}
+.gd-guide>summary::before{content:'';width:15px;height:15px;flex-shrink:0;
+  border:1.6px solid currentColor;border-radius:50%;opacity:.55;
+  background:radial-gradient(currentColor 0 1.4px,transparent 1.6px) center/100% 100% no-repeat}
+.gd-guide>summary::after{content:'▾';margin-left:auto;opacity:.5;transition:transform .2s}
+.gd-guide[open]>summary::after{transform:rotate(180deg)}
+.gd-guide-in{padding:2px 14px 14px;font-size:12.5px;line-height:1.65;opacity:.85}
+.gd-mail{display:inline-block;margin-top:4px;padding:3px 7px;border-radius:6px;
+  background:rgba(120,120,128,.16);user-select:all;font-size:11.5px}
+@media (prefers-reduced-motion:reduce){.gd-guide>summary::after{transition:none}}
+
 /* =============== SIDEBAR RAIL : menu réduit en icônes + flyouts au survol =============== */
 .sidebar{transition:width .25s cubic-bezier(.16,1,.3,1)}
 .rail-toggle{display:flex;align-items:center;gap:12px;margin:0 12px 4px;padding:8px 14px;background:transparent;border:0;color:#666;font-size:12px;font-weight:600;cursor:pointer;border-radius:8px;font-family:inherit;text-align:left;transition:background .15s,color .15s}
@@ -17103,7 +17119,7 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
         "</div>"
     )
 
-    # ---- Boîte admin « ☁️ Google Drive » (copie seule, jamais de suppression) ----
+    # ---- Boîte admin « <svg class='fic' viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M6.5 18.5h11a3.5 3.5 0 0 0 .3-7 5 5 0 0 0-9.7-1.4A3.6 3.6 0 0 0 6.5 18.5z'/></svg> Google Drive » (copie seule, jamais de suppression) ----
     # gdrive_sync ne connaît que les dossiers de la Bibliothèque : pas de boîte
     # (donc pas de bouton qui mentirait) sur le Drive du Vault PRO.
     sync_box = ""
@@ -17249,13 +17265,31 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
                        else ("all" if _rawiv else ""))
             sync_box = (
                 "<div style='margin:16px 0;padding:16px;background:#101013;border:1px solid #232327;border-radius:12px'>"
-                "<div style='font-weight:700;font-size:14px;margin-bottom:10px'>☁️ Google Drive — copie automatique (ne supprime JAMAIS rien)</div>"
+                "<div style='font-weight:700;font-size:14px;margin-bottom:10px'><svg class='fic' viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M6.5 18.5h11a3.5 3.5 0 0 0 .3-7 5 5 0 0 0-9.7-1.4A3.6 3.6 0 0 0 6.5 18.5z'/></svg> Google Drive — copie automatique (ne supprime JAMAIS rien)</div>"
                 + _oauth_box +
-                "<div style='font-size:12px;color:#888;margin:6px 0 12px;line-height:1.6'>"
-                "1) Dans TON Google Drive, crée un dossier (ex : « VA DRIVE ») et partage-le en <b>Éditeur</b> avec : "
-                f"<code style='background:#1a1a1f;padding:2px 6px;border-radius:5px;user-select:all'>{_email}</code><br>"
-                "2) Colle le lien du dossier ci-dessous, enregistre, puis lance la synchro. "
-                "Chaque identité aura son dossier (PP, Posts, Stories…). Relancer n'envoie que le nouveau.</div>"
+                # Tout l'explicatif tient dans un bloc replie : la page ne
+                # montre plus que les controles, le mode d'emploi est a un
+                # clic. <details> est natif, donc aucun JS a maintenir.
+                "<details class='gd-guide'><summary>Comment ça marche ?</summary>"
+                "<div class='gd-guide-in'>"
+                "<b>1. Preparer le dossier</b><br>Dans TON Google Drive, cree un dossier "
+                "(ex : « VA DRIVE ») et partage-le en <b>Editeur</b> avec :<br>"
+                f"<code class='gd-mail'>{_email}</code>"
+                "<br><br><b>2. Le relier au site</b><br>Colle le lien du dossier ci-dessous, "
+                "enregistre, puis lance la synchro. Chaque identite aura son dossier "
+                "(PP, Posts, Stories…). Relancer n'envoie que le nouveau."
+                "<br><br><b>3. Envoyer des fichiers depuis le Drive</b><br>Depose-les dans "
+                "<b>A IMPORTER / &lt;identite&gt; / Video brut</b> (ou dans le dossier de "
+                "l'identite deja cree). Puis <b>Verifier ce qui attend</b>, et <b>Importer</b>."
+                "<br><br><b>Bon a savoir</b><br>"
+                "• Le site regarde le Drive chaque minute et importe tout seul : les boutons "
+                "ne servent qu'a forcer.<br>"
+                "• Rien n'est jamais supprime du Drive.<br>"
+                "• Par defaut les videos ne partent pas (quota du compte de service) — coche "
+                "la case si tu veux tout envoyer.<br>"
+                "• Sous-dossiers reconnus : Video brut, Reels, Posts, Stories, Story CTA, "
+                "Photos de profil, Templates montage."
+                "</div></details>"
                 "<form method='POST' action='/gdrive/config' style='display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px'>"
                 f"<input type='text' name='folder' value='{_fol}' placeholder='Lien ou ID du dossier Drive partagé' "
                 "style='flex:1;min-width:260px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;height:34px;padding:0 10px;font-size:12.5px;font-family:inherit'>"
@@ -17265,19 +17299,19 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
                 f"<option value='montage'{' selected' if _ivmode == 'montage' else ''}>Reel montage (rushs bruts + templates)</option>"
                 f"<option value='1'{' selected' if _ivmode == 'all' else ''}>tout (reels compris)</option>"
                 f"</select></label>"
-                "<button type='submit' style='padding:8px 14px;background:#1a1a1f;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'>💾 Enregistrer</button>"
+                "<button type='submit' style='padding:8px 14px;background:#1a1a1f;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'><svg class='fic' viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M5 4.6h11L19.4 8v11.4H5z'/><path d='M8.6 4.6v5h6.8v-5M8 19.4v-5h8v5'/></svg> Enregistrer</button>"
                 "</form>"
                 "<form method='POST' action='/gdrive/sync' style='display:flex;gap:12px;align-items:center;flex-wrap:wrap'>"
-                "<button type='submit' style='padding:8px 16px;background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'>☁️ Synchroniser maintenant</button>"
+                "<button type='submit' style='padding:8px 16px;background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'><svg class='fic' viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M6.5 18.5h11a3.5 3.5 0 0 0 .3-7 5 5 0 0 0-9.7-1.4A3.6 3.6 0 0 0 6.5 18.5z'/></svg> Synchroniser maintenant</button>"
                 f"<span style='font-size:12px;color:#9a9aa6'>{_stat}</span>"
                 "</form>"
-                "<div style='font-size:11px;color:#75757f;margin-top:8px'>Par défaut les vidéos ne partent pas (quota ~15 Go du compte de service) — coche la case si tu veux tout envoyer.</div>"
+                ""   # explique dans le Guide
                 # SENS INVERSE : Drive -> site. Pour les gros lots (le navigateur
                 # ne transporte rien, c'est le serveur qui télécharge).
                 "<div style='margin-top:14px;padding-top:12px;border-top:1px solid #232327'>"
                 "<form method='POST' action='/gdrive/import' id='gd-import-form' style='display:flex;gap:12px;align-items:center;flex-wrap:wrap'>"
                 "<button type='button' onclick='gdScan(this)' style='padding:8px 16px;background:#1a1a1f;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'>⌕ Verifier ce qui attend (1)</button>"
-                "<button type='submit' id='gd-import-go' disabled style='opacity:.45;cursor:not-allowed;padding:8px 16px;background:rgba(34,197,94,.14);border:1px solid rgba(34,197,94,.45);color:#22c55e;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'>⬇️ Importer (2)</button>"
+                "<button type='submit' id='gd-import-go' disabled style='opacity:.45;cursor:not-allowed;padding:8px 16px;background:rgba(34,197,94,.14);border:1px solid rgba(34,197,94,.45);color:#22c55e;border-radius:8px;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit'><svg class='fic' viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M12 4.6v10.6'/><path d='M7.4 10.6L12 15.2l4.6-4.6'/><path d='M4.4 19.4h15.2'/></svg> Importer (2)</button>"
                 "<span style='font-size:12px;color:#9a9aa6'>dépose tes fichiers dans <b>A IMPORTER / &lt;identité&gt; / Video brut</b></span>"
                 "<span style='font-size:11.5px;color:#22c55e;font-weight:700;width:100%'>"
                 "&#9889; Automatique : le site regarde le Drive chaque minute et importe tout seul "
@@ -17308,7 +17342,7 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
                 "     +'<br><span style=\\'color:#75757f;font-size:11px\\'>Rien ne sera supprimé du Drive.</span>';"
                 "   if(go){ go.style.display='inline-block'; go.disabled=false;"
                 "     go.style.opacity='1'; go.style.cursor='pointer';"
-                "     go.textContent='⬇️ Importer ces '+j.total+' fichier'+(j.total>1?'s':''); }"
+                "     go.textContent='<svg class='fic' viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M12 4.6v10.6'/><path d='M7.4 10.6L12 15.2l4.6-4.6'/><path d='M4.4 19.4h15.2'/></svg> Importer ces '+j.total+' fichier'+(j.total>1?'s':''); }"
                 "  }).catch(function(e){ btn.disabled=false; btn.textContent=t0;"
                 "   if(box) box.textContent='Erreur : '+e; });"
                 "};"
@@ -17320,14 +17354,14 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
                 "<div id='gdBars' style='margin-top:14px;display:flex;flex-direction:column;gap:12px'>"
                 "<div data-gdbar='sync' style='display:none'>"
                 "<div style='display:flex;justify-content:space-between;font-size:11.5px;font-weight:700;color:#c4c4cc;margin-bottom:5px'>"
-                "<span>☁️ Envoi vers le Drive</span><span data-gdpct>0%</span></div>"
+                "<span><svg class='fic' viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M6.5 18.5h11a3.5 3.5 0 0 0 .3-7 5 5 0 0 0-9.7-1.4A3.6 3.6 0 0 0 6.5 18.5z'/></svg> Envoi vers le Drive</span><span data-gdpct>0%</span></div>"
                 "<div style='height:8px;background:#1a1a1f;border-radius:99px;overflow:hidden'>"
                 "<div data-gdfill style='height:100%;width:0%;background:linear-gradient(90deg,#3b82f6,#a855f7);transition:width .3s'></div></div>"
                 "<div data-gdinfo style='font-size:11px;color:#75757f;margin-top:5px'></div>"
                 "</div>"
                 "<div data-gdbar='import' style='display:none'>"
                 "<div style='display:flex;justify-content:space-between;font-size:11.5px;font-weight:700;color:#c4c4cc;margin-bottom:5px'>"
-                "<span>⬇️ Import depuis le Drive</span><span data-gdpct>0%</span></div>"
+                "<span><svg class='fic' viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'><path d='M12 4.6v10.6'/><path d='M7.4 10.6L12 15.2l4.6-4.6'/><path d='M4.4 19.4h15.2'/></svg> Import depuis le Drive</span><span data-gdpct>0%</span></div>"
                 "<div style='height:8px;background:#1a1a1f;border-radius:99px;overflow:hidden'>"
                 "<div data-gdfill style='height:100%;width:0%;background:linear-gradient(90deg,#22c55e,#3b82f6);transition:width .3s'></div></div>"
                 "<div data-gdinfo style='font-size:11px;color:#75757f;margin-top:5px'></div>"
