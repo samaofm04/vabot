@@ -39569,6 +39569,16 @@ def create_app():
             elif path.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg",
                                ".woff", ".woff2", ".ttf", ".css", ".js")):
                 response.headers.setdefault("Cache-Control", "public, max-age=86400")
+            elif (response.content_type or "").startswith("text/html"):
+                # Les pages du dashboard ne disaient RIEN sur le cache. Sans
+                # consigne, le navigateur applique sa propre heuristique et
+                # peut resservir une page d'hier : on voyait encore les
+                # anciennes icones de la barre laterale des heures apres leur
+                # remplacement, et un Ctrl+R ordinaire n'y changeait rien.
+                # Ces pages portent en plus des donnees de session : elles
+                # n'ont rien a faire dans un cache disque.
+                response.headers["Cache-Control"] = "no-store, must-revalidate"
+                response.headers["Pragma"] = "no-cache"
         except Exception:
             pass
 
