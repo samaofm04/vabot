@@ -7347,6 +7347,57 @@ window.upClearPrefill = function(utab){
 </script>
 {vault_core_html}
 </head><body class="{theme_body_class}">
+<!-- Temoin des analyses de montage : masque tant qu'il n'y a rien a dire. -->
+<a id="va-analyse-temoin" href="/a-relire" title="Analyses de montage"
+   style="display:none;position:fixed;top:12px;right:16px;z-index:9999;
+   align-items:center;gap:7px;padding:7px 13px;border-radius:99px;
+   background:rgba(59,130,246,.14);border:1px solid rgba(59,130,246,.4);
+   color:#3b82f6;font:600 12px/1 -apple-system,system-ui,sans-serif;
+   text-decoration:none;backdrop-filter:blur(8px)">
+  <svg id="va-analyse-ico" viewBox="0 0 24 24" width="14" height="14" fill="none"
+       stroke="currentColor" stroke-width="2" stroke-linecap="round">
+    <path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
+  <span id="va-analyse-txt">analyse en cours</span>
+</a>
+<style>
+@keyframes vaSpin{to{transform:rotate(360deg)}}
+#va-analyse-ico.tourne{animation:vaSpin 1s linear infinite;transform-origin:50% 50%}
+</style>
+<script>(function(){
+ // Un seul sondeur par page, meme apres un changement d'onglet.
+ if(window.__vaAnalysePoll) return; window.__vaAnalysePoll=1;
+ var el=null, txt=null, ico=null;
+ function maj(){
+  el=el||document.getElementById('va-analyse-temoin');
+  txt=txt||document.getElementById('va-analyse-txt');
+  ico=ico||document.getElementById('va-analyse-ico');
+  if(!el) return;
+  fetch('/analyses/etat',{credentials:'same-origin'})
+   .then(function(r){return r.json();})
+   .then(function(j){
+     if(!(j&&j.ok)){ el.style.display='none'; return; }
+     if(j.en_cours>0){
+       el.style.display='inline-flex';
+       ico.classList.add('tourne');
+       txt.textContent = j.en_cours>1 ? (j.en_cours+' analyses en cours')
+                                      : 'analyse en cours';
+       el.style.background='rgba(59,130,246,.14)';
+       el.style.borderColor='rgba(59,130,246,.4)';
+       el.style.color='#3b82f6';
+     } else if(j.a_relire>0){
+       el.style.display='inline-flex';
+       ico.classList.remove('tourne');
+       txt.textContent = j.a_relire+' a relire';
+       el.style.background='rgba(234,179,8,.14)';
+       el.style.borderColor='rgba(234,179,8,.45)';
+       el.style.color='#a16207';
+     } else {
+       el.style.display='none';
+     }
+   }).catch(function(){});
+ }
+ maj(); setInterval(maj, 5000);
+})();</script>
 <!-- Page loader global (affiché pendant la navigation) -->
 <div id="page-loader"><div class="pl-ring"></div></div>
 <div class="layout">
@@ -16698,6 +16749,60 @@ def _linkimp_fetch(u: str, inf: dict):
     return vb
 
 
+# Analyses de montage en cours. Le temoin de l'interface s'y refere ;
+# « fini » garde le dernier nom traite, pour annoncer le resultat.
+_ANALYSES = {"en_cours": 0, "faites": 0, "echecs": 0, "dernier": ""}
+_ANALYSES_LOCK = threading.Lock()
+
+
+def analyses_etat() -> dict:
+    with _ANALYSES_LOCK:
+        return dict(_ANALYSES)
+
+
+def _lancer_analyse_auto(video) -> bool:
+    """Analyse un template en arriere-plan ; ecrit <stem>.analyse.json.
+
+    On ne touche PAS au brouillon d'edition : le resultat est une
+    proposition, servie a l'editeur tant que rien n'a ete enregistre a la
+    main. Sans cle IA, on ne tente rien — inutile de faire tourner ffmpeg
+    pour echouer ensuite.
+    """
+    from pathlib import Path as _P
+    video = _P(video)
+
+    def _travail():
+        try:
+            out, err = _analyze_montage_template(video)
+            if err or not out:
+                with _ANALYSES_LOCK:
+                    _ANALYSES["echecs"] += 1
+                return
+            out["_source"] = "analyse automatique a l'import"
+            safe_json.write(video.with_suffix(".analyse.json"), out, indent=None)
+            with _ANALYSES_LOCK:
+                _ANALYSES["faites"] += 1
+                _ANALYSES["dernier"] = video.name
+        except Exception as e:
+            with _ANALYSES_LOCK:
+                _ANALYSES["echecs"] += 1
+            log.warning(f"analyse auto {video.name}: {e}")
+        finally:
+            with _ANALYSES_LOCK:
+                _ANALYSES["en_cours"] = max(0, _ANALYSES["en_cours"] - 1)
+
+    try:
+        if not _anthropic_key():
+            return False
+        with _ANALYSES_LOCK:
+            _ANALYSES["en_cours"] += 1
+        threading.Thread(target=_travail, daemon=True,
+                         name="analyse-auto").start()
+        return True
+    except Exception:
+        return False
+
+
 def _linkimp_run(ident: str, subdir: str, urls: list, desc: str = ""):
     import time as _t
     try:
@@ -16761,6 +16866,12 @@ def _linkimp_run(ident: str, subdir: str, urls: list, desc: str = ""):
                             encoding="utf-8")
                     except Exception:
                         pass
+                # Analyse du montage (OCR de la caption incrustee + point de
+                # coupe) lancee TOUT DE SUITE, en arriere-plan : elle prend
+                # plusieurs dizaines de secondes et ne doit pas retarder
+                # l'import des liens suivants.
+                if subdir == "templates":
+                    _lancer_analyse_auto(tdir / _fname)
                 _LINKIMP_STATUS["last_file"] = _fname   # miniature de la carte de progression
                 ok += 1
             except Exception as e:
@@ -40613,6 +40724,7 @@ def create_app():
                             to_delete.append(sibling)
 
                         if (n == f"{stem}.montage.json"      # brouillon d'édition
+                                or n == f"{stem}.analyse.json"   # analyse auto
                                 or n == f"{stem}.montage.png"):  # aperçu généré
                             to_delete.append(sibling)
                 for t in to_delete:
@@ -41137,7 +41249,19 @@ def create_app():
         except Exception:
             dsc = ""
         if not p.exists():
-            return jsonify({"ok": True, "draft": None, "desc": dsc})
+            # Aucun brouillon enregistre : on propose l'analyse automatique
+            # faite a l'import, si elle a abouti. Elle reste une PROPOSITION —
+            # rien n'est applique tant que l'editeur n'a pas ete enregistre.
+            _sugg = None
+            try:
+                _ap = target_dir / f"{src.stem}.analyse.json"
+                if _ap.exists():
+                    import json as _js0
+                    _sugg = _js0.loads(_ap.read_text(encoding="utf-8"))
+            except Exception:
+                _sugg = None
+            return jsonify({"ok": True, "draft": None, "desc": dsc,
+                            "analyse": _sugg})
         import json as _js
         try:
             return jsonify({"ok": True, "draft": _js.loads(p.read_text(encoding="utf-8")),
@@ -42862,14 +42986,40 @@ def create_app():
                             source = lignes[1].strip() if len(lignes) > 1 else ""
                         except Exception:
                             pass
+                        # Ce que l'analyse automatique a trouve : la caption
+                        # incrustee lue a l'image, et l'instant ou le montage
+                        # se separe de l'accroche.
+                        captions, coupe = [], None
+                        try:
+                            ap = dossier / (stem + ".analyse.json")
+                            if ap.exists():
+                                import json as _js1
+                                a = _js1.loads(ap.read_text(encoding="utf-8"))
+                                captions = [str(c.get("text") or "").strip()
+                                            for c in (a.get("captions") or [])
+                                            if str(c.get("text") or "").strip()]
+                                coupe = a.get("cut_at")
+                        except Exception:
+                            pass
                         out.append({"identity": d.name, "sub": sub, "stem": stem,
                                     "fichier": video.name, "desc": desc,
-                                    "source": source,
+                                    "source": source, "captions": captions,
+                                    "coupe": coupe,
                                     "ts": int(video.stat().st_mtime)})
         except Exception:
             pass
         out.sort(key=lambda r: -r["ts"])
         return out
+
+    @app.route("/analyses/etat")
+    def analyses_etat_json():
+        """Ou en sont les analyses de montage lancees a l'import."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        etat = analyses_etat()
+        etat["a_relire"] = len(_a_relire_liste())
+        return jsonify({"ok": True, **etat})
 
     @app.route("/a-relire")
     def page_a_relire():
@@ -42886,6 +43036,21 @@ def create_app():
                 src = (f"<a href='{html_escape(r['source'])}' target='_blank' "
                        f"style='font-size:12px'>voir le post</a>"
                        if r["source"].startswith("http") else "")
+                # Resultat de l'analyse : caption lue a l'image et point de
+                # coupe. Affiche en lecture seule — il sert a decider, pas a
+                # etre corrige ici (l'editeur est fait pour ca).
+                bloc_a = ""
+                if r.get("captions") or r.get("coupe"):
+                    lignes_a = "".join(
+                        "<div style='padding:2px 0'>&laquo; %s &raquo;</div>"
+                        % html_escape(c[:160]) for c in r["captions"][:4])
+                    if r.get("coupe"):
+                        lignes_a += ("<div style='color:#666;margin-top:4px'>"
+                                     "coupe proposee a %.2f s</div>" % r["coupe"])
+                    bloc_a = ("<div style='margin:8px 0;padding:9px 11px;"
+                              "background:#eef2ff;border:1px solid #c7d2fe;"
+                              "border-radius:9px;font-size:12.5px'>"
+                              "<b>Texte lu dans la video</b>" + lignes_a + "</div>")
                 cartes.append(
                     "<form method='POST' action='/a-relire/valider' "
                     "style='border:1px solid #e5e7eb;border-radius:12px;"
@@ -42896,6 +43061,7 @@ def create_app():
                     f"<div style='font-size:12px;color:#666;margin-bottom:6px'>"
                     f"@{html_escape(r['identity'])} &middot; {html_escape(r['sub'])} "
                     f"&middot; {html_escape(r['fichier'])} {src}</div>"
+                    + bloc_a +
                     f"<textarea name='desc' rows='3' style='width:100%;padding:9px 11px;"
                     "border:1px solid #d1d5db;border-radius:9px;font:inherit;"
                     f"resize:vertical'>{html_escape(r['desc'])}</textarea>"
