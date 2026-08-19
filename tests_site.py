@@ -2150,6 +2150,38 @@ try:
 except Exception as _eMk:
     check("marche : testable", False, repr(_eMk)[:120])
 
+# --- Les deux bibliotheques doivent porter LES MEMES icones ---------------
+# Le proprietaire a redemande cinq fois « mets les icones de Bibliotheque 2
+# dans Bibliotheque » alors qu'elles etaient deja identiques : il regardait
+# une page en cache. Ce test fige l'alignement, pour que la question ne se
+# repose plus et qu'une divergence future soit signalee ici.
+try:
+    import re as _reIc
+    _srcIc = pathlib.Path("web_upload.py").read_text(encoding="utf-8")
+
+    def _iconesIc(groupe):
+        d = _srcIc.find("toggleGroup('%s')" % groupe)
+        bloc = _srcIc[d:_srcIc.find("</div>" + chr(10) + "</div>", d)]
+        out = {}
+        for m in _reIc.finditer(
+                r'<button class="item"[^>]*>\s*(<svg.*?</svg>)\s*([^<\n]+)',
+                bloc, _reIc.S):
+            out[m.group(2).strip()] = _reIc.sub(r"\s+", " ", m.group(1))
+        return out
+
+    _b2Ic, _b1Ic = _iconesIc("vault2"), _iconesIc("cloud")
+    check("sidebar : les deux bibliotheques sont lisibles",
+          len(_b2Ic) >= 6 and len(_b1Ic) >= 8)
+    _communsIc = set(_b2Ic) & set(_b1Ic)
+    _ecartsIc = [k for k in _communsIc if _b2Ic[k] != _b1Ic[k]]
+    check("sidebar : memes icones dans Bibliotheque et Bibliotheque 2",
+          not _ecartsIc, "different : " + ", ".join(_ecartsIc[:4]))
+    check("sidebar : aucun emoji dans les icones de la Bibliotheque",
+          not any(_reIc.search("[🌀-🫿]", v)
+                  for v in _b1Ic.values()))
+except Exception as _eIc:
+    check("sidebar : icones testables", False, repr(_eIc)[:120])
+
 print()
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
