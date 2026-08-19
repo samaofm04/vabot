@@ -7434,41 +7434,41 @@ document.addEventListener('click',function(e){
   </button>
   <div class="items">
     <button class="item" onclick="showTab('cloud','cloudreels','Reels','Tous les reels stockés par identité')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="20" x="2" y="2" rx="2.5"/><path d="M7 2v20M17 2v20M2 12h20M2 7h5M2 17h5M17 7h5M17 17h5"/></svg>
       Reels
     </button>
     <button class="item" onclick="showTab('cloud','cloudposts','Posts','Tous les posts stockés')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2.5"/><path d="M3 9h18M9 3v18"/></svg>
       Posts
     </button>
     <button class="item" onclick="showTab('cloud','cloudstories','Stories','Toutes les stories stockées')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/></svg>
       Stories
     </button>
     <button class="item" onclick="showTab('cloud','cloudstoryctas','Story CTA','Toutes les stories CTA stockées')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 12h7"/><path d="m12.5 8.5 3.5 3.5-3.5 3.5"/></svg>
       Story CTA
     </button>
     <!-- Bibliothèque texte SCINDÉE en 2 vaults (Bios / CTA) — même stockage
          text_pool.json ; l'ancienne page reste accessible via ?tab=textpool -->
     <button class="item" id="tab-cloudbrutes" onclick="showTab('cloud','cloudbrutes','Vidéo brut','Tes rushs bruts par identité — la matière première des montages')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5h18v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m3.6 8.5 1.6-4 15.2 1.4-.6 2.6z"/><path d="m8.6 4.9-1 3.6M13.8 5.4l-1 3.6"/></svg>
       Vidéo brut
     </button>
     <button class="item" id="tab-cloudbios" onclick="showTab('cloud','cloudbios','Bios','Tes bios par identité — ajout en liste + génération IA')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 12h6M9 16h4"/></svg>
       Bios
     </button>
     <button class="item" id="tab-cloudctas" onclick="showTab('cloud','cloudctas','CTA','Tes call-to-action par identité')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m4 10 13-5v14L4 14z"/><path d="M4 10H3a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h1"/><path d="M8 15.5V19a2 2 0 0 0 3.5 1.3"/></svg>
       CTA
     </button>
     <button class="item" onclick="showTab('cloud','cloudpps','Photos de profil','PP par identité')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="10" r="3"/><path d="M6.6 18.5a6.5 6.5 0 0 1 10.8 0"/></svg>
       Photos profil
     </button>
     <button class="item" id="tab-clouddrive" onclick="showTab('cloud','clouddrive','Drive','Tout le contenu d’une identité — lecture seule, rien ne peut être supprimé ici')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
       Drive
     </button>
   </div>
@@ -7526,31 +7526,31 @@ document.addEventListener('click',function(e){
   </button>
   <div class="items">
     <button class="item" id="tab-v2reels" onclick="showTab('vault2','v2reels','Reels — Bibliothèque 2','Reels de la Bibliothèque 2 (identités séparées)')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="20" x="2" y="2" rx="2.5"/><path d="M7 2v20M17 2v20M2 12h20M2 7h5M2 17h5M17 7h5M17 17h5"/></svg>
       Reels
     </button>
     <button class="item" id="tab-v2posts" onclick="showTab('vault2','v2posts','Posts — Bibliothèque 2','Posts de la Bibliothèque 2')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2.5"/><path d="M3 9h18M9 3v18"/></svg>
       Posts
     </button>
     <button class="item" id="tab-v2stories" onclick="showTab('vault2','v2stories','Stories — Bibliothèque 2','Stories de la Bibliothèque 2')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/></svg>
       Stories
     </button>
     <button class="item" id="tab-v2storyctas" onclick="showTab('vault2','v2storyctas','Story CTA — Bibliothèque 2','Stories CTA de la Bibliothèque 2')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 12h7"/><path d="m12.5 8.5 3.5 3.5-3.5 3.5"/></svg>
       Story CTA
     </button>
     <button class="item" id="tab-v2pps" onclick="showTab('vault2','v2pps','Photos de profil — Bibliothèque 2','PP de la Bibliothèque 2, par identité')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3"/><path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="10" r="3"/><path d="M6.6 18.5a6.5 6.5 0 0 1 10.8 0"/></svg>
       Photos profil
     </button>
     <button class="item" id="tab-v2brutes" onclick="showTab('vault2','v2brutes','Vidéo brut — Bibliothèque 2','Rushs bruts de la Bibliothèque 2')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5h18v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m3.6 8.5 1.6-4 15.2 1.4-.6 2.6z"/><path d="m8.6 4.9-1 3.6M13.8 5.4l-1 3.6"/></svg>
       Vidéo brut
     </button>
     <button class="item" id="tab-v2drive" onclick="showTab('vault2','v2drive','Drive — Bibliothèque 2','Tout le contenu d’une identité de la Bibliothèque 2 — lecture seule')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>
       Drive
     </button>
   </div>
