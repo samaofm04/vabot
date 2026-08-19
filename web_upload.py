@@ -14,6 +14,11 @@ from pathlib import Path
 from html import escape as html_escape
 import safe_json
 
+# Instant de demarrage du processus : /version s'en sert pour dire
+# depuis quand ce serveur tourne, et donc s'il a bien redemarre apres
+# le dernier deploiement.
+_DEMARRAGE = time.time()
+
 log = logging.getLogger("vabot.web")
 
 BOT_DIR = Path(__file__).parent.resolve()
@@ -42784,6 +42789,54 @@ def create_app():
         except Exception:
             pass
         return comm, taux
+
+    @app.route("/version")
+    def version_du_site():
+        """Quelle version du code ce serveur fait-il tourner ?
+
+        Question posee plusieurs fois sans qu'on puisse y repondre : « les
+        icones sont changees dans le code mais je vois encore les anciennes ».
+        Sans ce reperage, impossible de distinguer un cache navigateur d'un
+        serveur reste sur un ancien processus.
+        """
+        import datetime as _d
+        import subprocess as _sp
+        commit, quand, sujet = "?", "?", ""
+        try:
+            r = _sp.run(["git", "log", "-1", "--format=%h|%cI|%s"],
+                        capture_output=True, text=True, timeout=5,
+                        cwd=str(Path(__file__).resolve().parent))
+            if r.returncode == 0 and r.stdout.strip():
+                commit, quand, sujet = (r.stdout.strip().split("|", 2) + ["", ""])[:3]
+        except Exception:
+            # Pas de git sur la machine : le fichier .git/HEAD suffit a
+            # identifier la revision.
+            try:
+                g = Path(__file__).resolve().parent / ".git"
+                tete = (g / "HEAD").read_text(encoding="utf-8").strip()
+                if tete.startswith("ref:"):
+                    commit = (g / tete[5:]).read_text(encoding="utf-8").strip()[:7]
+                else:
+                    commit = tete[:7]
+            except Exception:
+                pass
+        demarre = _d.datetime.fromtimestamp(_DEMARRAGE).strftime("%d/%m %H:%M")
+        age = int((time.time() - _DEMARRAGE) // 60)
+        return (
+            "<div style=\"font:14px/1.6 -apple-system,system-ui,sans-serif;"
+            "padding:26px;max-width:560px;margin:40px auto;background:#fff;"
+            "color:#1c1c1e;border:1px solid #e5e7eb;border-radius:14px\">"
+            "<h2 style='margin:0 0 14px'>Version en ligne</h2>"
+            f"<p><b>Code</b> : {html_escape(commit)}<br>"
+            f"<span style='color:#666'>{html_escape(sujet[:90])}</span><br>"
+            f"<span style='color:#666'>publie le {html_escape(quand[:16].replace('T', ' a '))}</span></p>"
+            f"<p><b>Serveur demarre</b> : {demarre} "
+            f"<span style='color:#666'>(il y a {age} min)</span></p>"
+            "<p style='color:#666;font-size:13px'>Si le code affiche ici n'est pas "
+            "le dernier publie, le serveur n'a pas redemarre. Si c'est bien le "
+            "dernier mais que la page reste ancienne, c'est le cache du "
+            "navigateur.</p>"
+            "<p><a href='/'>Retour au site</a></p></div>")
 
     @app.route("/ventes-sheet")
     def ventes_sheet_go():
