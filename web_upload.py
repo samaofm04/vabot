@@ -42820,7 +42820,12 @@ def create_app():
                     commit = tete[:7]
             except Exception:
                 pass
-        demarre = _d.datetime.fromtimestamp(_DEMARRAGE).strftime("%d/%m %H:%M")
+        # Les deux dates doivent se lire dans le MEME fuseau : la date de
+        # publication vient de git (heure de la machine qui a commite), celle
+        # du demarrage vient du serveur. Affichees telles quelles, un
+        # deploiement et son redemarrage semblaient separes de deux heures.
+        demarre = _d.datetime.fromtimestamp(
+            _DEMARRAGE, _d.timezone.utc).astimezone().strftime("%d/%m %H:%M %Z")
         age = int((time.time() - _DEMARRAGE) // 60)
         return (
             "<div style=\"font:14px/1.6 -apple-system,system-ui,sans-serif;"
