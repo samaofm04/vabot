@@ -1346,7 +1346,18 @@ body.light [style*="background:#26262c"] [style*="color:#fff"],
 body.light [style*="background:#26263a"] [style*="color:#fff"]{color:#1c1c1e!important}
 /* meme chose pour les boutons : le theme clair les excluait explicitement,
    c'est justement la qu'on se retrouvait avec du blanc sur blanc */
-body.light button[style*="color:#fff"]:not([style*="background:#3b82f6"]):not([style*="linear-gradient"]):not(.toast){color:#1c1c1e!important}
+/* Un bouton blanc sur fond TRANSLUCIDE est pose par-dessus une image : le
+   noircir le rendait illisible sur la vignette (les boutons d'action et le
+   pseudo des cartes Trends). Les deux formes translucides sont epargnees —
+   rgba(0,0,0,…) pour un voile sombre, rgba(255,255,255,…) pour un voile
+   clair, qui laisse voir l'image sombre dessous dans les deux cas. */
+body.light button[style*="color:#fff"]:not([style*="background:#3b82f6"]):not([style*="linear-gradient"]):not([style*="rgba(0,0,0"]):not([style*="rgba(255,255,255"]):not(.toast){color:#1c1c1e!important}
+/* Et tout ce qui vit DANS un bandeau en degrade noir reste clair, boutons
+   compris : le pseudo des cartes est un <button>, que les regles
+   precedentes excluaient explicitement. */
+body.light [style*="linear-gradient(to top,rgba(0,0,0"] button,
+body.light [style*="linear-gradient(to top,rgba(0,0,0"] button *,
+body.light [style*="linear-gradient(to top,rgba(0,0,0"] [style*="color:#fff"]{color:#fff!important}
 /* mais un media garde son fond sombre : une video sur du blanc, c'est laid */
 body.light video,body.light .vault-card-bg,body.light .reel-thumb,
 body.light [style*="background:#000"] video{background:#000!important}
