@@ -1589,15 +1589,27 @@ body.light.apple .mypuls-export{color:#007aff}
    translucide (rgba(0,0,0,…) ou un degrade) : leur texte doit rester BLANC,
    sinon c'est du sombre sur du noir — illisible. Ces regles passent apres
    celles du theme clair, donc elles gagnent. */
-body.light [style*="rgba(0,0,0"][style*="color:#fff"],
-body.light [style*="rgba(0,0,0"] [style*="color:#fff"],
-body.light [style*="linear-gradient(to top"] [style*="color:#fff"],
-body.light [style*="linear-gradient(to bottom"] [style*="color:#fff"]{color:#fff!important}
+body.light [style*="rgba(0,0,0"][style*="color:#fff"]:not(.toast):not(button),
+body.light [style*="rgba(0,0,0"] [style*="color:#fff"]:not(.toast):not(button),
+body.light [style*="linear-gradient(to top"] [style*="color:#fff"]:not(.toast):not(button),
+body.light [style*="linear-gradient(to bottom"] [style*="color:#fff"]:not(.toast):not(button){color:#fff!important}
 /* meme chose pour les gris clairs et l'ambre des badges de statut */
-body.light [style*="rgba(0,0,0"] [style*="color:#cbd5e1"],
-body.light [style*="linear-gradient(to top"] [style*="color:#cbd5e1"]{color:#cbd5e1!important}
-body.light [style*="rgba(0,0,0"] [style*="color:#fbbf24"],
-body.light [style*="linear-gradient(to top"] [style*="color:#fbbf24"]{color:#fbbf24!important}
+body.light [style*="rgba(0,0,0"] [style*="color:#cbd5e1"]:not(.toast):not(button),
+body.light [style*="linear-gradient(to top"] [style*="color:#cbd5e1"]:not(.toast):not(button){color:#cbd5e1!important}
+body.light [style*="rgba(0,0,0"][style*="color:#fbbf24"]:not(.toast):not(button),
+body.light [style*="linear-gradient(to top"][style*="color:#fbbf24"]:not(.toast):not(button){color:#fbbf24!important}
+body.light [style*="rgba(0,0,0"][style*="color:#cbd5e1"]:not(.toast):not(button),
+body.light [style*="linear-gradient(to top"][style*="color:#cbd5e1"]:not(.toast):not(button){color:#cbd5e1!important}
+body.light [style*="rgba(0,0,0"][style*="color:#e5e7eb"]:not(.toast):not(button),
+body.light [style*="linear-gradient(to top"][style*="color:#e5e7eb"]:not(.toast):not(button){color:#e5e7eb!important}
+body.light [style*="rgba(0,0,0"][style*="color:#f3f4f6"]:not(.toast):not(button),
+body.light [style*="linear-gradient(to top"][style*="color:#f3f4f6"]:not(.toast):not(button){color:#f3f4f6!important}
+body.light [style*="rgba(0,0,0"][style*="color:#9ca3af"]:not(.toast):not(button),
+body.light [style*="linear-gradient(to top"][style*="color:#9ca3af"]:not(.toast):not(button){color:#9ca3af!important}
+body.light [style*="rgba(0,0,0"][style*="color:#d1d5db"]:not(.toast):not(button),
+body.light [style*="linear-gradient(to top"][style*="color:#d1d5db"]:not(.toast):not(button){color:#d1d5db!important}
+body.light [style*="rgba(0,0,0"] [style*="color:#fbbf24"]:not(.toast):not(button),
+body.light [style*="linear-gradient(to top"] [style*="color:#fbbf24"]:not(.toast):not(button){color:#fbbf24!important}
 /* la vignette elle-meme et son fond restent sombres */
 body.light .reel-video,body.light [style*="background:#000"]{background:#000!important}
 
