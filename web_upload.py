@@ -18537,7 +18537,7 @@ def _render_insta_trends_grid_html() -> str:
         # proxy local QUE si le mp4 existe sur disque.
         dl_ready = video_url.startswith("/insta/proxy_video")
         dl_badge = "" if (dl_ready or not is_video) else (
-            "<div class='reel-dl-badge' style='position:absolute;top:10px;left:50%;transform:translateX(-50%);"
+            "<div class='reel-dl-badge' style='position:absolute;top:44px;left:10px;"
             "background:rgba(0,0,0,.62);backdrop-filter:blur(6px);color:#fbbf24;font-size:10px;font-weight:700;"
             "padding:4px 9px;border-radius:9px;z-index:3;display:flex;align-items:center;gap:4px;pointer-events:none;white-space:nowrap'>"
             "◌ pas encore téléchargé</div>")
