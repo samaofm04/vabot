@@ -16634,7 +16634,12 @@ def _linkimp_fetch(u: str, inf: dict):
     import re as _re
     import veille_telegram as _vt
     if "instagram.com" not in u:
-        return _vt.download_via_ytdlp(u, timeout=45, info=inf, use_cookies=False)
+        _vb = _vt.download_via_ytdlp(u, timeout=45, info=inf, use_cookies=False)
+        if not inf.get("caption"):
+            _d = inf.get("description") or inf.get("title") or ""
+            if _d:
+                inf["caption"] = str(_d).strip()
+        return _vb
     m = _re.search(r"/(?:reels?|p|tv)/([A-Za-z0-9_\-]+)", u)
     sc = m.group(1) if m else ""
     cache = (DATA_DIR / "insta" / "videos" / f"{sc}.mp4") if sc else None
@@ -16650,6 +16655,10 @@ def _linkimp_fetch(u: str, inf: dict):
             _ad = _ar.get(sc) or (list(_ar.values())[0] if _ar else None)
             if _ad and _ad.get("video_url"):
                 vb = _vt.download_video_bytes(_ad["video_url"])
+                # La legende du post, gardee pour servir de description : sans
+                # elle il fallait la recopier a la main pour chaque lien.
+                if _ad.get("caption"):
+                    inf["caption"] = str(_ad["caption"]).strip()
             if not vb:
                 _steps.append("Apify: pas de vidéo")
         else:
@@ -16659,7 +16668,10 @@ def _linkimp_fetch(u: str, inf: dict):
     # 2) scrape page publique -> URL CDN fraîche
     if not vb:
         try:
-            fresh = (_vt.refresh_post_data(u) or {}).get("video_url") or ""
+            _post = _vt.refresh_post_data(u) or {}
+            fresh = _post.get("video_url") or ""
+            if _post.get("caption") and not inf.get("caption"):
+                inf["caption"] = str(_post["caption"]).strip()
             if fresh:
                 vb = _vt.download_video_bytes(fresh)
             if not vb:
@@ -16670,6 +16682,10 @@ def _linkimp_fetch(u: str, inf: dict):
     if not vb:
         _yi = {}
         vb = _vt.download_via_ytdlp(u, timeout=45, info=_yi, use_cookies=False)
+        if not inf.get("caption"):
+            _d = _yi.get("description") or _yi.get("title") or ""
+            if _d:
+                inf["caption"] = str(_d).strip()
         if not vb:
             _steps.append(f"yt-dlp: {_yi.get('reason', '?')[:70]}")
             inf["reason"] = " · ".join(_steps)
@@ -16723,12 +16739,26 @@ def _linkimp_run(ident: str, subdir: str, urls: list, desc: str = ""):
                 tdir.mkdir(parents=True, exist_ok=True)
                 _fname = f"import_{int(_t.time())}_{i}.mp4"
                 (tdir / _fname).write_bytes(vb)
-                # Description du formulaire d'import : meme sidecar que les
-                # uploads fichier (.desc.txt), lu par /reelmonte et l'envoi banger.
-                if desc:
+                # Description : celle saisie dans le formulaire si elle existe,
+                # sinon la LEGENDE DU POST, recuperee au passage par la chaine
+                # de telechargement. Avant, il fallait la recopier a la main
+                # pour chaque lien — la donnee etait pourtant deja la.
+                _texte = desc or (inf.get("caption") or "").strip()
+                if _texte:
                     try:
                         (tdir / _fname).with_suffix(".desc.txt").write_text(
-                            desc, encoding="utf-8")
+                            _texte[:2000], encoding="utf-8")
+                    except Exception:
+                        pass
+                # Une description reprise du post n'est PAS validee : elle
+                # porte un marqueur tant que personne ne l'a relue. C'est la
+                # demande explicite du proprietaire — recuperer tout seul,
+                # mais ne rien considerer comme bon sans son accord.
+                if not desc and _texte:
+                    try:
+                        (tdir / _fname).with_suffix(".acheck.txt").write_text(
+                            "legende reprise du post — a relire\n%s" % u,
+                            encoding="utf-8")
                     except Exception:
                         pass
                 _LINKIMP_STATUS["last_file"] = _fname   # miniature de la carte de progression
@@ -40578,6 +40608,7 @@ def create_app():
                         # Métadonnées associées : <name>.txt, <name>.desc.txt, <name>.example.*
                         n = sibling.name
                         if (n == f"{stem}.txt" or n == f"{stem}.desc.txt"
+                                or n == f"{stem}.acheck.txt"   # « a relire »
                                 or n.startswith(f"{stem}.example.")):
                             to_delete.append(sibling)
 
@@ -42801,6 +42832,123 @@ def create_app():
         except Exception:
             pass
         return comm, taux
+
+    def _a_relire_liste():
+        """Les descriptions reprises d'un post et pas encore validees."""
+        out = []
+        try:
+            for d in sorted(IDENTITIES_DIR.iterdir()):
+                if not d.is_dir():
+                    continue
+                for sub in ("templates", "brutes"):
+                    dossier = d / sub
+                    if not dossier.is_dir():
+                        continue
+                    for marq in sorted(dossier.glob("*.acheck.txt")):
+                        stem = marq.name[:-len(".acheck.txt")]
+                        video = next((dossier / (stem + e) for e in VIDEO_EXTS
+                                      if (dossier / (stem + e)).exists()), None)
+                        if video is None:
+                            continue          # video partie : marqueur orphelin
+                        desc = ""
+                        dp = dossier / (stem + ".desc.txt")
+                        try:
+                            desc = dp.read_text(encoding="utf-8").strip()
+                        except Exception:
+                            pass
+                        source = ""
+                        try:
+                            lignes = marq.read_text(encoding="utf-8").splitlines()
+                            source = lignes[1].strip() if len(lignes) > 1 else ""
+                        except Exception:
+                            pass
+                        out.append({"identity": d.name, "sub": sub, "stem": stem,
+                                    "fichier": video.name, "desc": desc,
+                                    "source": source,
+                                    "ts": int(video.stat().st_mtime)})
+        except Exception:
+            pass
+        out.sort(key=lambda r: -r["ts"])
+        return out
+
+    @app.route("/a-relire")
+    def page_a_relire():
+        """Les descriptions reprises automatiquement, a valider une par une."""
+        if not is_auth():
+            return redirect("/")
+        lst = _a_relire_liste()
+        if not lst:
+            corps = ("<p style='color:#166534'>Rien a relire : toutes les "
+                     "descriptions importees ont ete validees.</p>")
+        else:
+            cartes = []
+            for r in lst:
+                src = (f"<a href='{html_escape(r['source'])}' target='_blank' "
+                       f"style='font-size:12px'>voir le post</a>"
+                       if r["source"].startswith("http") else "")
+                cartes.append(
+                    "<form method='POST' action='/a-relire/valider' "
+                    "style='border:1px solid #e5e7eb;border-radius:12px;"
+                    "padding:14px 16px;margin-bottom:12px;background:#fafafa'>"
+                    f"<input type='hidden' name='identity' value='{html_escape(r['identity'])}'>"
+                    f"<input type='hidden' name='sub' value='{html_escape(r['sub'])}'>"
+                    f"<input type='hidden' name='stem' value='{html_escape(r['stem'])}'>"
+                    f"<div style='font-size:12px;color:#666;margin-bottom:6px'>"
+                    f"@{html_escape(r['identity'])} &middot; {html_escape(r['sub'])} "
+                    f"&middot; {html_escape(r['fichier'])} {src}</div>"
+                    f"<textarea name='desc' rows='3' style='width:100%;padding:9px 11px;"
+                    "border:1px solid #d1d5db;border-radius:9px;font:inherit;"
+                    f"resize:vertical'>{html_escape(r['desc'])}</textarea>"
+                    "<div style='margin-top:9px;display:flex;gap:8px'>"
+                    "<button name='action' value='ok' style='padding:8px 15px;"
+                    "background:#16a34a;border:0;color:#fff;border-radius:9px;"
+                    "font:inherit;font-weight:600;cursor:pointer'>Valider</button>"
+                    "<button name='action' value='vider' style='padding:8px 15px;"
+                    "background:#f3f4f6;border:1px solid #d1d5db;color:#374151;"
+                    "border-radius:9px;font:inherit;cursor:pointer'>Effacer la "
+                    "description</button></div></form>")
+            corps = ("<p style='color:#666'>%d description(s) reprises d'un post, "
+                     "en attente de ta relecture. Corrige si besoin, puis valide."
+                     "</p>" % len(lst)) + "".join(cartes)
+        return ("<div style=\"font:14px/1.55 -apple-system,system-ui,sans-serif;"
+                "padding:26px;max-width:720px;margin:30px auto;background:#fff;"
+                "color:#1c1c1e;border:1px solid #e5e7eb;border-radius:14px\">"
+                "<h2 style='margin:0 0 10px'>Descriptions a relire</h2>"
+                + corps +
+                "<p style='margin-top:16px'><a href='/?tab=cloudtemplates'>"
+                "Retour aux templates</a></p></div>")
+
+    @app.route("/a-relire/valider", methods=["POST"])
+    def page_a_relire_valider():
+        """Valide (ou vide) une description reprise, et retire le marqueur."""
+        if not is_auth():
+            return redirect("/")
+        ident = (request.form.get("identity") or "").strip().lower()
+        sub = (request.form.get("sub") or "").strip().lower()
+        stem = (request.form.get("stem") or "").strip()
+        action = (request.form.get("action") or "ok").strip()
+        # Aucun chemin compose depuis le formulaire : identite et dossier sont
+        # verifies, et le nom de fichier ne peut pas remonter l'arborescence.
+        if sub not in ("templates", "brutes") or ident not in _list_identities()                 or not stem or "/" in stem or "\\" in stem or ".." in stem:
+            return redirect("/a-relire")
+        dossier = IDENTITIES_DIR / ident / sub
+        dp = dossier / (stem + ".desc.txt")
+        try:
+            if action == "vider":
+                dp.unlink(missing_ok=True)
+            else:
+                texte = (request.form.get("desc") or "").strip()[:2000]
+                if texte:
+                    dp.write_text(texte, encoding="utf-8")
+                else:
+                    dp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        try:
+            (dossier / (stem + ".acheck.txt")).unlink(missing_ok=True)
+        except Exception:
+            pass
+        return redirect("/a-relire")
 
     @app.route("/version")
     def version_du_site():
