@@ -43535,10 +43535,23 @@ def create_app():
         msg = ""
         if request.method == "POST":
             import secrets as _sec
-            safe_json.write(RIG_TOKEN_FILE,
-                            {"token": _sec.token_urlsafe(24)}, indent=2)
-            msg = ("<p style='color:#166534'>Jeton cree. Recopie-le sur la "
-                   "machine du telephone.</p>")
+            # Deux sens possibles, et le second compte autant que le premier :
+            # coller une valeur deja posee sur la machine du telephone evite
+            # d'avoir a la recopier a la main dans l'autre sens.
+            colle = (request.form.get("token") or "").strip()
+            if colle:
+                if len(colle) < 16:
+                    msg = ("<p style='color:#b45309'>Trop court — un jeton doit "
+                           "faire au moins 16 caracteres.</p>")
+                else:
+                    safe_json.write(RIG_TOKEN_FILE, {"token": colle[:200]}, indent=2)
+                    msg = ("<p style='color:#166534'>Jeton enregistre. Il doit "
+                           "etre identique sur la machine du telephone.</p>")
+            else:
+                safe_json.write(RIG_TOKEN_FILE,
+                                {"token": _sec.token_urlsafe(24)}, indent=2)
+                msg = ("<p style='color:#166534'>Jeton cree. Recopie-le sur la "
+                       "machine du telephone.</p>")
         actuel = _rig_token_attendu()
         par_env = bool(_os.environ.get("RIG_API_TOKEN"))
 
@@ -43554,12 +43567,18 @@ def create_app():
                     "503 et rien ne peut fonctionner.</p>")
 
         form = ("" if par_env else
-                "<form method='POST' style='margin-top:16px'>"
+                "<form method='POST' style='margin-top:16px;display:flex;"
+                "gap:9px;flex-wrap:wrap;align-items:center'>"
+                "<input type='text' name='token' placeholder='coller un jeton "
+                "existant (facultatif)' style='flex:1;min-width:230px;padding:9px 12px;"
+                "border:1px solid #d1d5db;border-radius:9px;font:inherit;"
+                "font-size:13px'>"
                 "<button style='padding:9px 16px;background:#007aff;border:0;"
                 "color:#fff;border-radius:9px;font:inherit;font-weight:600;"
-                "cursor:pointer'>"
-                + ("Remplacer le jeton" if actuel else "Creer le jeton")
-                + "</button></form>")
+                "cursor:pointer'>Enregistrer</button></form>"
+                "<p style='color:#666;font-size:12.5px;margin-top:7px'>"
+                "Champ vide : un jeton est cree ici. Champ rempli : c'est celui "
+                "de la machine du telephone qui est repris.</p>")
 
         return ("<div style=\"font:14px/1.6 -apple-system,system-ui,sans-serif;"
                 "padding:26px;max-width:620px;margin:40px auto;background:#fff;"
