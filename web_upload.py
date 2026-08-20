@@ -8658,21 +8658,25 @@ function remoteEtat(){
   if(!sec || sec.style.display==='none') return;
   var pt=document.querySelector('[data-rmt-pt]');
   var txt=document.querySelector('[data-rmt-lien]');
-  fetch('http://127.0.0.1:8770/api/state',{mode:'cors'})
+  // L'etat vient du SITE, pas de la console : c'est l'agent qui l'y a
+  // depose. Le bandeau se lit donc de n'importe ou, telephone compris.
+  fetch('/api/rig/jobs',{credentials:'same-origin'})
    .then(function(r){return r.json();})
    .then(function(j){
-     var dev=(j&&j.device)||{}, ec=(j&&j.screen)||{};
-     if(pt) pt.className='rmt-pt '+(j&&j.connected?'on':'ko');
-     if(txt) txt.textContent = j&&j.connected ? 'iPhone connecte' : 'iPhone absent';
-     var m=function(s,v){var e=document.querySelector(s); if(e) e.textContent=v;};
-     m('[data-rmt-dev]', dev.model||dev.name||'?');
-     m('[data-rmt-ios]', dev.ios||'?');
-     m('[data-rmt-ecran]', ec.width? (ec.width+'x'+ec.height) : '?');
-     m('[data-rmt-fps]', (j&&j.fps)||'?');
+     var e=(j&&j.etat_poste)||{};
+     var vivant = j && j.poste_en_ligne;
+     if(pt) pt.className='rmt-pt '+(vivant ? (e.connecte?'on':'ko') : '');
+     if(txt) txt.textContent = !vivant ? 'poste hors ligne'
+       : (e.connecte ? 'iPhone connecte' : 'iPhone absent');
+     var m=function(s,v){var el=document.querySelector(s); if(el) el.textContent=v;};
+     m('[data-rmt-dev]', e.appareil||'—');
+     m('[data-rmt-ios]', e.ios||'—');
+     m('[data-rmt-ecran]', e.ecran||'—');
+     m('[data-rmt-fps]', e.fps||'—');
    })
    .catch(function(){
      if(pt) pt.className='rmt-pt';
-     if(txt) txt.textContent='hors de portee depuis ce poste';
+     if(txt) txt.textContent='site injoignable';
    });
 }
 (function(){
@@ -43967,6 +43971,7 @@ def create_app():
         vieux = int(time.time()) - int(d.get("battement") or 0)
         return jsonify({"ok": True, "jobs": d["jobs"][:40],
                         "poste_en_ligne": vieux < 90,
+                        "etat_poste": d.get("etat_poste") or {},
                         "vu_il_y_a": vieux if d.get("battement") else None})
 
     RIG_SCENARIOS = DATA_DIR / "rig_scenarios.json"
@@ -44023,6 +44028,20 @@ def create_app():
             return jsonify({"ok": False, "error": "jeton"}), code
         d = _jobs_lire()
         d["battement"] = int(time.time())
+        # Le poste joint l'etat du telephone : c'est lui qui parle a la
+        # console, en local. Le navigateur ne le peut qu'en etant sur cette
+        # machine ET avec une autorisation de lecture — deux conditions de
+        # trop pour un simple bandeau.
+        corps = request.get_json(force=True, silent=True) or {}
+        et = corps.get("etat")
+        if isinstance(et, dict):
+            d["etat_poste"] = {
+                "connecte": bool(et.get("connecte")),
+                "appareil": str(et.get("appareil") or "")[:40],
+                "ios": str(et.get("ios") or "")[:20],
+                "ecran": str(et.get("ecran") or "")[:20],
+                "fps": int(et.get("fps") or 0),
+            }
         pris = None
         # Le plus ancien d'abord : la liste est rangee du plus recent au plus
         # vieux, on la parcourt donc a l'envers.
