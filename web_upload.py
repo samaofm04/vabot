@@ -43406,6 +43406,87 @@ def create_app():
         return jsonify({"ok": True, "items": items, "identites": list(identites),
                         "nb_ecartes": len(ecartes), "ecartes": ecartes[:50]})
 
+    RIG_FILE = DATA_DIR / "rig_file_attente.json"
+
+    def _rig_file_lire():
+        d = safe_json.load(RIG_FILE, default={}) or {}
+        return d if isinstance(d, dict) else {}
+
+    @app.route("/api/rig/queue", methods=["POST"])
+    def rig_queue():
+        """Le poste pose la file du cycle : une liste de medias, dans l'ordre.
+
+        Chaque entree est verifiee ici — un nom fabrique cote poste ne doit
+        pas pouvoir sortir de la bibliotheque.
+        """
+        from flask import jsonify
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        import json as _js
+        try:
+            brut = request.get_json(force=True, silent=True) or {}
+            demandes = brut.get("items") or []
+        except Exception:
+            demandes = []
+        retenus, refuses = [], []
+        for it in demandes[:60]:
+            if not isinstance(it, dict):
+                continue
+            chemin, c, motif = _cloud_media_path(
+                it.get("identity") or "", it.get("subdir") or "",
+                it.get("fichier") or "")
+            if chemin is None:
+                refuses.append({"fichier": it.get("fichier"), "motif": motif})
+                continue
+            retenus.append({"identity": (it.get("identity") or "").lower().strip(),
+                            "subdir": it.get("subdir"), "fichier": it.get("fichier"),
+                            "taille": chemin.stat().st_size})
+        safe_json.write(RIG_FILE, {"items": retenus, "servis": [],
+                                   "ts": int(time.time())}, indent=None)
+        return jsonify({"ok": True, "n": len(retenus), "refuses": refuses})
+
+    @app.route("/api/rig/count")
+    def rig_count():
+        """Combien de medias restent a prendre. Aucun nom n'est revele."""
+        from flask import jsonify
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        d = _rig_file_lire()
+        reste = len(d.get("items") or []) - len(d.get("servis") or [])
+        return jsonify({"n": max(0, reste)})
+
+    @app.route("/api/rig/next")
+    def rig_next():
+        """Le prochain media de la file, en octets.
+
+        Marque servi AVANT l'envoi, comme le serveur local : on ne sait pas
+        si le telephone a tout recu. C'est pourquoi l'etape 2 verifie la
+        pellicule au lieu de croire ce compteur — ne pas revenir la-dessus.
+        """
+        from flask import jsonify, send_file
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        d = _rig_file_lire()
+        items = d.get("items") or []
+        servis = set(d.get("servis") or [])
+        for i, it in enumerate(items):
+            cle = "%d" % i
+            if cle in servis:
+                continue
+            chemin, c, motif = _cloud_media_path(
+                it.get("identity"), it.get("subdir"), it.get("fichier"))
+            if chemin is None:
+                servis.add(cle)          # disparu depuis : on passe au suivant
+                continue
+            servis.add(cle)
+            d["servis"] = sorted(servis)
+            safe_json.write(RIG_FILE, d, indent=None)
+            return send_file(str(chemin), conditional=False)
+        return jsonify({"ok": False, "error": "file vide"}), 404
+
     @app.route("/api/rig/file/<identity>/<subdir>/<path:filename>")
     def rig_serve_file(identity, subdir, filename):
         """Un media, servi au poste. Memes controles que le dashboard."""
