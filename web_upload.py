@@ -8495,6 +8495,32 @@ body.light #rmt-conteneur,body.light #rmt-genre,body.light #rmt-etape{
 /* Un scenario deplie : une colonne de blocs relies. La couleur dit la
    FAMILLE de l'action — geste, lecture d'ecran, attente, generation — pour
    qu'on repere d'un coup d'oeil ce que fait un scenario de vingt etapes. */
+/* Catalogue de scenarios. Grille auto-ajustee : le nombre de colonnes
+   suit la largeur disponible, panneau ouvert ou non. */
+.rmt-grille{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));
+  gap:12px}
+.rmt-carte{border:1px solid #26262c;border-radius:13px;padding:15px 16px;
+  background:#141418;display:flex;flex-direction:column;gap:7px;position:relative}
+body.light .rmt-carte{background:#fff;border-color:rgba(60,60,67,.12)}
+.rmt-carte:hover{border-color:#34343a}
+body.light .rmt-carte:hover{border-color:rgba(60,60,67,.24)}
+.rmt-carte .tt{font-weight:700;font-size:14px;letter-spacing:-.01em;
+  padding-right:64px}
+.rmt-carte .dd{font-size:12px;color:#8b8b95;line-height:1.45;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+  overflow:hidden}
+.rmt-carte .nn{font-size:11px;color:#6b6b70;font-family:ui-monospace,monospace;
+  background:#1a1a1f;padding:3px 8px;border-radius:6px;align-self:flex-start}
+body.light .rmt-carte .nn{background:#f2f2f7;color:#6b6b70}
+.rmt-carte .bas{display:flex;align-items:center;gap:8px;margin-top:auto;
+  padding-top:9px;font-size:11.5px;color:#8b8b95}
+.rmt-carte .actions{position:absolute;top:13px;right:13px;display:flex;gap:6px}
+.rmt-mini{width:29px;height:29px;border-radius:8px;border:1px solid #303036;
+  background:#1a1a1f;color:#c4c4cc;cursor:pointer;display:flex;
+  align-items:center;justify-content:center;padding:0}
+body.light .rmt-mini{background:#fff;border-color:rgba(60,60,67,.16);color:#1c1c1e}
+.rmt-mini:hover,.rmt-mini-on{border-color:#3b82f6;color:#3b82f6}
+body.apple .rmt-mini:hover{border-color:#007aff;color:#007aff}
 .rmt-etapes{margin:10px 0 4px;padding-left:2px}
 .rmt-bloc{display:flex;align-items:flex-start;gap:11px;padding:9px 12px;
   border:1px solid #26262c;border-radius:10px;margin-bottom:6px;
@@ -8514,16 +8540,6 @@ body.light .rmt-bloc{background:#fff;border-color:rgba(60,60,67,.12)}
   font-family:ui-monospace,monospace;word-break:break-word}
 .rmt-bloc .opt{font-size:10px;font-weight:700;padding:1px 7px;border-radius:99px;
   background:rgba(234,179,8,.15);color:#a16207;margin-left:auto;white-space:nowrap}
-.rmt-sc{display:flex;align-items:center;gap:13px;padding:12px 14px;
-  border:1px solid #26262c;border-radius:11px;margin-bottom:8px;background:#141418}
-body.light .rmt-sc{background:#fff;border-color:rgba(60,60,67,.12)}
-.rmt-sc .t{font-weight:700;font-size:13.5px}
-.rmt-sc .d{font-size:12px;color:#8b8b95;margin-top:2px}
-.rmt-sc .n{font-size:11px;color:#6b6b70;font-family:ui-monospace,monospace;
-  white-space:nowrap}
-.rmt-sc .e{font-size:11px;font-weight:700;padding:2px 9px;border-radius:99px;
-  background:rgba(59,130,246,.14);color:#3b82f6;white-space:nowrap}
-body.apple .rmt-sc .e{background:rgba(0,122,255,.12);color:#007aff}
 .rmt-job{display:flex;align-items:center;gap:12px;padding:10px 13px;
   border:1px solid #26262c;border-radius:11px;margin-bottom:7px;background:#141418}
 body.light .rmt-job{background:#fff;border-color:rgba(60,60,67,.12)}
@@ -8767,16 +8783,27 @@ function remoteScenarios(){
          +'<code>agent_rig.py</code> : relance-le sur la machine.</div>';
        return;
      }
-     boite.innerHTML=l.map(function(x){
-       return '<div class="rmt-sc">'
-         + '<div style="flex:1;min-width:0"><div class="t">'+x.titre+'</div>'
-         + '<div class="d">'+(x.description||'')+'</div></div>'
-         + '<span class="n">'+x.nom+'</span>'
-         + '<span class="e">'+x.etapes+' etapes</span>'
-         + '<button type="button" class="rmt-btn" data-voir="'+x.nom+'">Voir</button>'
-         + '<button type="button" class="rmt-btn" data-sc="'+x.nom+'">Jouer</button>'
+     boite.innerHTML='<div class="rmt-grille">' + l.map(function(x){
+       // Les icones plutot que des mots : deux boutons de texte par carte
+       // repoussaient le titre sur deux lignes.
+       return '<div class="rmt-carte" data-carte="'+x.nom+'">'
+         + '<div class="actions">'
+         +   '<button type="button" class="rmt-mini" title="Voir les etapes" '
+         +     'data-voir="'+x.nom+'">'
+         +     '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" '
+         +     'stroke="currentColor" stroke-width="2" stroke-linecap="round">'
+         +     '<path d="M3 12h6M3 6h13M3 18h9"/></svg></button>'
+         +   '<button type="button" class="rmt-mini" title="Jouer maintenant" '
+         +     'data-sc="'+x.nom+'">'
+         +     '<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">'
+         +     '<polygon points="6 4 19 12 6 20"/></svg></button>'
+         + '</div>'
+         + '<div class="tt">'+x.titre+'</div>'
+         + '<div class="dd">'+(x.description||'Aucune description.')+'</div>'
+         + '<div class="bas"><span class="nn">'+x.nom+'</span>'
+         +   '<span style="margin-left:auto">'+x.etapes+' etapes</span></div>'
          + '</div>';
-     }).join('');
+     }).join('') + '</div>';
    }).catch(function(){});
 }
 // Un seul ecouteur pose une fois : les boutons sont recrees a chaque
@@ -8843,21 +8870,29 @@ function rmtBlocs(detail){
   }).join('') + '</div>';
 }
 function rmtDeplier(nom, bouton){
-  var carte = bouton.closest('.rmt-sc');
+  var carte = bouton.closest('.rmt-carte');
   if(!carte) return;
   var ouvert = carte.nextElementSibling
             && carte.nextElementSibling.hasAttribute('data-sc-detail');
-  if(ouvert){ carte.nextElementSibling.remove(); bouton.textContent='Voir'; return; }
+  if(ouvert){
+    carte.nextElementSibling.remove();
+    bouton.classList.remove('rmt-mini-on');
+    return;
+  }
   fetch('/api/rig/scenarios',{credentials:'same-origin'})
    .then(function(r){return r.json();})
    .then(function(j){
      var sc=((j&&j.scenarios)||[]).filter(function(x){return x.nom===nom;})[0];
      var d=document.createElement('div');
      d.setAttribute('data-sc-detail','1');
-     d.style.margin='-4px 0 12px 14px';
-     d.innerHTML = rmtBlocs(sc && sc.detail);
+     // La grille place les cartes en colonnes : un detail insere entre deux
+     // d'entre elles casserait l'alignement. On le pose donc SOUS la grille,
+     // sur toute la largeur.
+     d.style.cssText='grid-column:1/-1;margin:-2px 0 6px';
+     d.innerHTML = '<div style="font-size:12px;color:#8b8b95;margin-bottom:6px">'
+                 + nom + '</div>' + rmtBlocs(sc && sc.detail);
      carte.parentNode.insertBefore(d, carte.nextSibling);
-     bouton.textContent='Masquer';
+     bouton.classList.add('rmt-mini-on');
    }).catch(function(){});
 }
 </script>
