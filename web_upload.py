@@ -8383,10 +8383,7 @@ document.addEventListener('click',function(e){
 
 <div class="form-section" id="form-remotedrop" style="display:none">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 14px;flex-wrap:wrap">
-    <div>
-      <h2 style="margin:0;font-size:26px">Drop</h2>
-      <div style="font-size:13px;color:#8b8b95;margin-top:3px">Choisir les medias et vider la pellicule de l'iPhone — tourne sur ta machine</div>
-    </div>
+    <div style="font-size:12.5px;color:#8b8b95">Choisir les medias et vider la pellicule de l'iPhone — tourne sur ta machine</div>
     <div style="display:flex;gap:8px;align-items:center">
       <span data-remote-etat="drop" style="font-size:12px;color:#8b8b95"></span>
       <button type="button" onclick="remoteRecharger('drop')"
@@ -8414,10 +8411,7 @@ document.addEventListener('click',function(e){
 
 <div class="form-section" id="form-remoteconsole" style="display:none">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 14px;flex-wrap:wrap">
-    <div>
-      <h2 style="margin:0;font-size:26px">Console</h2>
-      <div style="font-size:13px;color:#8b8b95;margin-top:3px">Console iPhone : flux video et lancement des scenarios — tourne sur ta machine</div>
-    </div>
+    <div style="font-size:12.5px;color:#8b8b95">Console iPhone : flux video et lancement des scenarios — tourne sur ta machine</div>
     <div style="display:flex;gap:8px;align-items:center">
       <span data-remote-etat="console" style="font-size:12px;color:#8b8b95"></span>
       <button type="button" onclick="remoteRecharger('console')"
@@ -8445,10 +8439,7 @@ document.addEventListener('click',function(e){
 
 <div class="form-section" id="form-remoteediteur" style="display:none">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 14px;flex-wrap:wrap">
-    <div>
-      <h2 style="margin:0;font-size:26px">Editeur</h2>
-      <div style="font-size:13px;color:#8b8b95;margin-top:3px">Editeur de scenarios — tourne sur ta machine</div>
-    </div>
+    <div style="font-size:12.5px;color:#8b8b95">Editeur de scenarios — tourne sur ta machine</div>
     <div style="display:flex;gap:8px;align-items:center">
       <span data-remote-etat="editeur" style="font-size:12px;color:#8b8b95"></span>
       <button type="button" onclick="remoteRecharger('editeur')"
@@ -8485,6 +8476,12 @@ function remoteCharger(cle){
   var et=document.querySelector('[data-remote-etat="'+cle+'"]');
   if(!f) return;
   var url=f.getAttribute('data-src');
+  // Le cadre est cross-origin : on ne peut pas le styler depuis ici. On lui
+  // passe le theme, a lui de s'y conformer.
+  try{
+    var th=(document.body.className.match(/(apple|light|obsidian|violet|gold)/)||[])[1]||'dark';
+    url += (url.indexOf('?')<0?'?':'&') + 'theme=' + th;
+  }catch(e){}
   if(et) et.textContent='connexion…';
   if(vide) vide.style.display='none';
   f.style.display='block';
