@@ -8485,7 +8485,14 @@ function remoteCharger(cle){
   // Le cadre est cross-origin : on ne peut pas le styler depuis ici. On lui
   // passe le theme, a lui de s'y conformer.
   try{
-    var th=(document.body.className.match(/(apple|light|obsidian|violet|gold)/)||[])[1]||'dark';
+    // Le theme Apple pose DEUX classes : « light apple ». Chercher un
+    // simple alternatif rendait « light », le premier rencontre dans la
+    // chaine — la console recevait donc le mauvais theme. On interroge du
+    // plus precis au plus general.
+    var cl=' '+document.body.className+' ', th='dark';
+    ['apple','obsidian','violet','gold','light'].forEach(function(n){
+      if(th==='dark' && cl.indexOf(' '+n+' ')>=0) th=n;
+    });
     url += (url.indexOf('?')<0?'?':'&') + 'theme=' + th;
   }catch(e){}
   if(et) et.textContent='connexion…';
