@@ -7904,18 +7904,18 @@ document.addEventListener('click',function(e){
     <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
   <div class="items">
-    <a class="item" href="http://127.0.0.1:8097/" target="_blank" rel="noopener" style="text-decoration:none" title="Choisir les medias et vider la pellicule de l'iPhone">
+    <button class="item" id="tab-remotedrop" onclick="showTab('remote','remotedrop','Drop','Choisir les medias et vider la pellicule de l’iPhone')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
       Drop
-    </a>
-    <a class="item" href="http://127.0.0.1:8770/" target="_blank" rel="noopener" style="text-decoration:none" title="Console iPhone : flux video et lancement des scenarios">
+    </button>
+    <button class="item" id="tab-remoteconsole" onclick="showTab('remote','remoteconsole','Console','Console iPhone : flux video et lancement des scenarios')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
       Console
-    </a>
-    <a class="item" href="http://127.0.0.1:8770/editor" target="_blank" rel="noopener" style="text-decoration:none" title="Editeur de scenarios">
+    </button>
+    <button class="item" id="tab-remoteediteur" onclick="showTab('remote','remoteediteur','Editeur','Editeur de scenarios')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
       Editeur
-    </a>
+    </button>
   </div>
 </div>
 
@@ -8380,6 +8380,148 @@ document.addEventListener('click',function(e){
 </div>
 
 <!-- INSTAGRAM TRENDS -->
+
+<div class="form-section" id="form-remotedrop" style="display:none">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 14px;flex-wrap:wrap">
+    <div>
+      <h2 style="margin:0;font-size:26px">Drop</h2>
+      <div style="font-size:13px;color:#8b8b95;margin-top:3px">Choisir les medias et vider la pellicule de l'iPhone — tourne sur ta machine</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span data-remote-etat="drop" style="font-size:12px;color:#8b8b95"></span>
+      <button type="button" onclick="remoteRecharger('drop')"
+        style="padding:8px 14px;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;
+        border-radius:9px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit">Recharger</button>
+      <a href="http://127.0.0.1:8097/" target="_blank" rel="noopener"
+        style="padding:8px 14px;background:rgba(59,130,246,.14);border:1px solid rgba(59,130,246,.4);
+        color:#3b82f6;border-radius:9px;font-size:12.5px;font-weight:600;text-decoration:none">Ouvrir dans un onglet</a>
+    </div>
+  </div>
+  <div data-remote-vide="drop" style="display:none;padding:26px;border:1px dashed #34343a;
+    border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6">
+    <b style="color:#fbbf24">La console ne repond pas.</b><br>
+    Trois causes possibles, dans l'ordre :<br>
+    &bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>
+    &bull; tu n'es pas sur la machine ou l'iPhone est branche — cette page ne
+    peut l'atteindre que depuis ce poste ;<br>
+    &bull; ton navigateur refuse d'afficher une page locale dans un site en
+    HTTPS : utilise alors « Ouvrir dans un onglet ».
+  </div>
+  <iframe data-remote-cadre="drop" src="about:blank" data-src="http://127.0.0.1:8097/"
+    style="width:100%;height:calc(100vh - 210px);min-height:520px;border:1px solid #26262c;
+    border-radius:12px;background:#0d0d10"></iframe>
+</div>
+
+<div class="form-section" id="form-remoteconsole" style="display:none">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 14px;flex-wrap:wrap">
+    <div>
+      <h2 style="margin:0;font-size:26px">Console</h2>
+      <div style="font-size:13px;color:#8b8b95;margin-top:3px">Console iPhone : flux video et lancement des scenarios — tourne sur ta machine</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span data-remote-etat="console" style="font-size:12px;color:#8b8b95"></span>
+      <button type="button" onclick="remoteRecharger('console')"
+        style="padding:8px 14px;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;
+        border-radius:9px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit">Recharger</button>
+      <a href="http://127.0.0.1:8770/" target="_blank" rel="noopener"
+        style="padding:8px 14px;background:rgba(59,130,246,.14);border:1px solid rgba(59,130,246,.4);
+        color:#3b82f6;border-radius:9px;font-size:12.5px;font-weight:600;text-decoration:none">Ouvrir dans un onglet</a>
+    </div>
+  </div>
+  <div data-remote-vide="console" style="display:none;padding:26px;border:1px dashed #34343a;
+    border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6">
+    <b style="color:#fbbf24">La console ne repond pas.</b><br>
+    Trois causes possibles, dans l'ordre :<br>
+    &bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>
+    &bull; tu n'es pas sur la machine ou l'iPhone est branche — cette page ne
+    peut l'atteindre que depuis ce poste ;<br>
+    &bull; ton navigateur refuse d'afficher une page locale dans un site en
+    HTTPS : utilise alors « Ouvrir dans un onglet ».
+  </div>
+  <iframe data-remote-cadre="console" src="about:blank" data-src="http://127.0.0.1:8770/"
+    style="width:100%;height:calc(100vh - 210px);min-height:520px;border:1px solid #26262c;
+    border-radius:12px;background:#0d0d10"></iframe>
+</div>
+
+<div class="form-section" id="form-remoteediteur" style="display:none">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 14px;flex-wrap:wrap">
+    <div>
+      <h2 style="margin:0;font-size:26px">Editeur</h2>
+      <div style="font-size:13px;color:#8b8b95;margin-top:3px">Editeur de scenarios — tourne sur ta machine</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span data-remote-etat="editeur" style="font-size:12px;color:#8b8b95"></span>
+      <button type="button" onclick="remoteRecharger('editeur')"
+        style="padding:8px 14px;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;
+        border-radius:9px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit">Recharger</button>
+      <a href="http://127.0.0.1:8770/editor" target="_blank" rel="noopener"
+        style="padding:8px 14px;background:rgba(59,130,246,.14);border:1px solid rgba(59,130,246,.4);
+        color:#3b82f6;border-radius:9px;font-size:12.5px;font-weight:600;text-decoration:none">Ouvrir dans un onglet</a>
+    </div>
+  </div>
+  <div data-remote-vide="editeur" style="display:none;padding:26px;border:1px dashed #34343a;
+    border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6">
+    <b style="color:#fbbf24">La console ne repond pas.</b><br>
+    Trois causes possibles, dans l'ordre :<br>
+    &bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>
+    &bull; tu n'es pas sur la machine ou l'iPhone est branche — cette page ne
+    peut l'atteindre que depuis ce poste ;<br>
+    &bull; ton navigateur refuse d'afficher une page locale dans un site en
+    HTTPS : utilise alors « Ouvrir dans un onglet ».
+  </div>
+  <iframe data-remote-cadre="editeur" src="about:blank" data-src="http://127.0.0.1:8770/editor"
+    style="width:100%;height:calc(100vh - 210px);min-height:520px;border:1px solid #26262c;
+    border-radius:12px;background:#0d0d10"></iframe>
+</div>
+
+
+<script>
+// Le cadre n'est rempli QU'A l'ouverture de l'onglet : charger les trois au
+// demarrage ferait trois requetes vers la machine locale a chaque visite du
+// dashboard, y compris quand le projet est eteint.
+function remoteCharger(cle){
+  var f=document.querySelector('[data-remote-cadre="'+cle+'"]');
+  var vide=document.querySelector('[data-remote-vide="'+cle+'"]');
+  var et=document.querySelector('[data-remote-etat="'+cle+'"]');
+  if(!f) return;
+  var url=f.getAttribute('data-src');
+  if(et) et.textContent='connexion…';
+  if(vide) vide.style.display='none';
+  f.style.display='block';
+  var repondu=false;
+  f.onload=function(){ repondu=true; if(et) et.textContent='connectee'; };
+  f.src=url;
+  // Un cadre bloque ou injoignable ne declenche jamais onload : au bout de
+  // 4 s sans reponse, on montre l'explication plutot qu'un rectangle noir.
+  setTimeout(function(){
+    if(repondu) return;
+    if(et) et.textContent='injoignable';
+    if(vide) vide.style.display='block';
+    f.style.display='none';
+  }, 4000);
+}
+function remoteRecharger(cle){
+  var f=document.querySelector('[data-remote-cadre="'+cle+'"]');
+  if(f) f.src='about:blank';
+  setTimeout(function(){ remoteCharger(cle); }, 60);
+}
+// showTab est appele partout : on se greffe dessus sans le reecrire.
+(function(){
+  if(window.__remoteHook) return; window.__remoteHook=1;
+  var origine=window.showTab;
+  if(typeof origine!=='function') return;
+  window.showTab=function(grp, tab){
+    var r=origine.apply(this, arguments);
+    try{
+      if(typeof tab==='string' && tab.indexOf('remote')===0){
+        remoteCharger(tab.slice(6));
+      }
+    }catch(e){}
+    return r;
+  };
+})();
+</script>
+
 <div class="form-section" id="form-igtrends" style="display:none">
 
 <h2 style="margin:0 0 18px;font-size:26px">Trends</h2>
