@@ -8390,7 +8390,46 @@ document.addEventListener('click',function(e){
   </span>
 </div>
 
-<div class="rmt-tabs"><button type="button" class="rmt-tab" data-rmt="drop" onclick="remoteVue('drop')" title="Choisir les medias et vider la pellicule">Drop</button><button type="button" class="rmt-tab" data-rmt="console" onclick="remoteVue('console')" title="Flux video et lancement des scenarios">Console</button><button type="button" class="rmt-tab" data-rmt="editeur" onclick="remoteVue('editeur')" title="Editeur de scenarios">Editeur</button></div>
+<div class="rmt-tabs"><button type="button" class="rmt-tab" data-rmt="cycle" onclick="remoteVue('cycle')" title="Lancer et suivre un cycle">Cycle</button><button type="button" class="rmt-tab" data-rmt="drop" onclick="remoteVue('drop')" title="Choisir les medias et vider la pellicule">Drop</button><button type="button" class="rmt-tab" data-rmt="console" onclick="remoteVue('console')" title="Flux video et lancement des scenarios">Console</button><button type="button" class="rmt-tab" data-rmt="editeur" onclick="remoteVue('editeur')" title="Editeur de scenarios">Editeur</button></div>
+<div data-remote-vue="cycle" style="display:none">
+  <div class="rmt-lancer">
+    <div style="flex:1;min-width:190px">
+      <div style="font-size:12.5px;color:#8b8b95;margin-bottom:5px">
+        Conteneur <span style="color:#6b6b70">(vide = le dernier cree)</span></div>
+      <input type="text" id="rmt-conteneur" placeholder="ig-445bt"
+        style="width:100%;padding:9px 12px;border-radius:9px;border:1px solid #303036;
+        background:#0f0f12;color:#e6e6ea;font:inherit;font-size:13px">
+    </div>
+    <div>
+      <div style="font-size:12.5px;color:#8b8b95;margin-bottom:5px">Travail</div>
+      <select id="rmt-genre" style="padding:9px 12px;border-radius:9px;
+        border:1px solid #303036;background:#0f0f12;color:#e6e6ea;font:inherit;
+        font-size:13px">
+        <option value="cycle">Cycle complet (8 etapes)</option>
+        <option value="etape">Une seule etape</option>
+      </select>
+    </div>
+    <div id="rmt-bloc-etape" style="display:none">
+      <div style="font-size:12.5px;color:#8b8b95;margin-bottom:5px">Laquelle</div>
+      <select id="rmt-etape" style="padding:9px 12px;border-radius:9px;
+        border:1px solid #303036;background:#0f0f12;color:#e6e6ea;font:inherit;
+        font-size:13px">
+        <option value="conteneur">1 · conteneur</option>
+        <option value="instagram">2 · instagram</option>
+        <option value="numero">3 · numero</option>
+        <option value="identite">4 · identite</option>
+        <option value="fin">5 · ecrans de fin</option>
+        <option value="medias">6 · medias</option>
+        <option value="profil">7 · profil</option>
+        <option value="reels">8 · reels</option>
+      </select>
+    </div>
+    <button type="button" class="rmt-btn rmt-btn-p" id="rmt-go"
+      onclick="remoteLancer()" style="align-self:flex-end;padding:10px 18px">
+      Lancer</button>
+  </div>
+  <div id="rmt-jobs" style="margin-top:16px"></div>
+</div>
 <div data-remote-vue="drop" style="display:none"><div data-remote-vide="drop" style="display:none;padding:22px;border:1px dashed #34343a;border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6;margin-bottom:12px"><b style="color:#fbbf24">Cette vue tarde a repondre.</b><br>Le cadre reste juste en dessous : si elle finit par s'afficher, ignore ce message.<br>&bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>&bull; tu n'es pas sur le poste ou l'iPhone est branche.</div><iframe data-remote-cadre="drop" src="about:blank" data-src="http://127.0.0.1:8097/" style="width:100%;height:calc(100vh - 250px);min-height:520px;border:1px solid #26262c;border-radius:12px;background:#0d0d10"></iframe></div><div data-remote-vue="console" style="display:none"><div data-remote-vide="console" style="display:none;padding:22px;border:1px dashed #34343a;border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6;margin-bottom:12px"><b style="color:#fbbf24">Cette vue tarde a repondre.</b><br>Le cadre reste juste en dessous : si elle finit par s'afficher, ignore ce message.<br>&bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>&bull; tu n'es pas sur le poste ou l'iPhone est branche.</div><iframe data-remote-cadre="console" src="about:blank" data-src="http://127.0.0.1:8770/" style="width:100%;height:calc(100vh - 250px);min-height:520px;border:1px solid #26262c;border-radius:12px;background:#0d0d10"></iframe></div><div data-remote-vue="editeur" style="display:none"><div data-remote-vide="editeur" style="display:none;padding:22px;border:1px dashed #34343a;border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6;margin-bottom:12px"><b style="color:#fbbf24">Cette vue tarde a repondre.</b><br>Le cadre reste juste en dessous : si elle finit par s'afficher, ignore ce message.<br>&bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>&bull; tu n'es pas sur le poste ou l'iPhone est branche.</div><iframe data-remote-cadre="editeur" src="about:blank" data-src="http://127.0.0.1:8770/editor" style="width:100%;height:calc(100vh - 250px);min-height:520px;border:1px solid #26262c;border-radius:12px;background:#0d0d10"></iframe></div>
 
 <style>
@@ -8418,6 +8457,22 @@ body.light .rmt-btn{background:#fff;border-color:rgba(60,60,67,.16);color:#1c1c1
   color:#3b82f6}
 body.apple .rmt-btn-p{background:rgba(0,122,255,.12);
   border-color:rgba(0,122,255,.4);color:#007aff}
+.rmt-lancer{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;
+  padding:15px;border:1px solid #26262c;border-radius:12px;background:#141418}
+body.light .rmt-lancer{background:#fff;border-color:rgba(60,60,67,.12)}
+body.light #rmt-conteneur,body.light #rmt-genre,body.light #rmt-etape{
+  background:#fff;border-color:rgba(60,60,67,.16);color:#1c1c1e}
+.rmt-job{display:flex;align-items:center;gap:12px;padding:10px 13px;
+  border:1px solid #26262c;border-radius:11px;margin-bottom:7px;background:#141418}
+body.light .rmt-job{background:#fff;border-color:rgba(60,60,67,.12)}
+.rmt-job .id{font-size:11px;color:#6b6b70;font-family:ui-monospace,monospace}
+.rmt-job .quoi{font-weight:600;font-size:13px}
+.rmt-job .av{margin-left:auto;font-size:12px;color:#8b8b95}
+.rmt-job .et{font-size:11px;font-weight:700;padding:2px 9px;border-radius:99px}
+.et-attente{background:rgba(107,107,112,.16);color:#8b8b95}
+.et-pris,.et-en_cours{background:rgba(59,130,246,.15);color:#3b82f6}
+.et-fini{background:rgba(36,138,61,.15);color:#248a3d}
+.et-echec{background:rgba(201,58,58,.14);color:#c93a3a}
 .rmt-tabs{display:flex;gap:2px;border-bottom:1px solid #26262c;margin-bottom:14px}
 body.light .rmt-tabs{border-bottom-color:rgba(60,60,67,.12)}
 .rmt-tab{padding:10px 16px;font:inherit;font-size:13.5px;font-weight:600;
@@ -8514,6 +8569,7 @@ function remoteVue(cle){
   if(f && (!f.src || f.src==='about:blank')) remoteCharger(cle);
   var lien=document.querySelector('[data-rmt-onglet]');
   if(lien && f) lien.href=f.getAttribute('data-src');
+  if(cle==='cycle' && typeof remoteJobs==='function') remoteJobs();
 }
 // Etat du telephone, lu directement sur la console locale. Elle n'autorise
 // que la LECTURE depuis cette origine ; un echec ici veut simplement dire
@@ -8547,6 +8603,87 @@ function remoteEtat(){
   });
   setInterval(remoteEtat, 5000);
   setTimeout(remoteEtat, 400);
+})();
+</script>
+
+<script>
+// L'etat du poste commande le bouton : inscrire un travail que personne ne
+// viendra prendre ne ferait qu'allonger une file muette.
+function remoteLancer(){
+  var go=document.getElementById('rmt-go');
+  var genre=(document.getElementById('rmt-genre')||{}).value||'cycle';
+  var corps={type:genre,
+             conteneur:((document.getElementById('rmt-conteneur')||{}).value||'').trim()};
+  if(genre==='etape') corps.etape=(document.getElementById('rmt-etape')||{}).value||'';
+  if(go){ go.disabled=true; go.textContent='...'; }
+  fetch('/api/rig/jobs',{method:'POST',credentials:'same-origin',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify(corps)})
+   .then(function(r){return r.json();})
+   .then(function(j){
+     if(go){ go.disabled=false; go.textContent='Lancer'; }
+     if(!(j&&j.ok)){
+       if(typeof showToast==='function') showToast('Refuse : '+((j&&j.error)||'?'),'error');
+       return;
+     }
+     if(typeof showToast==='function') showToast('Travail inscrit — le poste le prendra sous 10 s','success');
+     remoteJobs();
+   })
+   .catch(function(e){
+     if(go){ go.disabled=false; go.textContent='Lancer'; }
+     if(typeof showToast==='function') showToast('Echec : '+e,'error');
+   });
+}
+function remoteJobs(){
+  var boite=document.getElementById('rmt-jobs');
+  if(!boite) return;
+  fetch('/api/rig/jobs',{credentials:'same-origin'})
+   .then(function(r){return r.json();})
+   .then(function(j){
+     if(!(j&&j.ok)) return;
+     var go=document.getElementById('rmt-go');
+     if(go){
+       go.disabled = !j.poste_en_ligne;
+       go.title = j.poste_en_ligne ? '' :
+         'Le poste ne repond pas — lance agent_rig.py sur la machine';
+       go.style.opacity = j.poste_en_ligne ? '1' : '.45';
+     }
+     var etat = j.poste_en_ligne ? '' :
+       '<div style="padding:11px 13px;border-radius:10px;margin-bottom:10px;'
+       + 'background:rgba(234,179,8,.12);border:1px solid rgba(234,179,8,.4);'
+       + 'color:#a16207;font-size:12.5px">Le poste ne repond pas'
+       + (j.vu_il_y_a!=null ? (' — vu il y a '+Math.round(j.vu_il_y_a/60)+' min') : '')
+       + '. Lance <code>agent_rig.py</code> sur la machine du telephone.</div>';
+     var jobs=(j.jobs||[]);
+     if(!jobs.length){
+       boite.innerHTML = etat + '<div style="color:#8b8b95;font-size:13px;'
+         + 'padding:16px 0">Aucun travail en cours.</div>';
+       return;
+     }
+     boite.innerHTML = etat + jobs.map(function(x){
+       var quoi = x.type==='cycle' ? 'Cycle complet' : ('Etape — '+(x.etape||'?'));
+       return '<div class="rmt-job">'
+         + '<span class="et et-'+(x.etat||'attente')+'">'+(x.etat||'?').replace('_',' ')+'</span>'
+         + '<span class="quoi">'+quoi+'</span>'
+         + '<span class="id">'+(x.conteneur||'dernier cree')+'</span>'
+         + '<span class="av">'+(x.erreur ? x.erreur : (x.avancement||''))+'</span>'
+         + '</div>';
+     }).join('');
+   }).catch(function(){});
+}
+(function(){
+  if(window.__rmtJobs) return; window.__rmtJobs=1;
+  document.addEventListener('change', function(e){
+    if(e.target && e.target.id==='rmt-genre'){
+      var b=document.getElementById('rmt-bloc-etape');
+      if(b) b.style.display = e.target.value==='etape' ? 'block' : 'none';
+    }
+  });
+  // On ne sonde que quand l'onglet est ouvert : sinon chaque page du
+  // dashboard interrogerait la file toutes les cinq secondes pour rien.
+  setInterval(function(){
+    var v=document.querySelector('[data-remote-vue="cycle"]');
+    if(v && v.style.display!=='none') remoteJobs();
+  }, 5000);
 })();
 </script>
 
