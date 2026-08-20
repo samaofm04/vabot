@@ -43442,6 +43442,107 @@ def create_app():
         d = safe_json.load(RIG_FILE, default={}) or {}
         return d if isinstance(d, dict) else {}
 
+    RIG_JOBS = DATA_DIR / "rig_jobs.json"
+
+    def _jobs_lire():
+        d = safe_json.load(RIG_JOBS, default={}) or {}
+        if not isinstance(d, dict):
+            d = {}
+        d.setdefault("jobs", [])
+        d.setdefault("battement", 0)
+        return d
+
+    @app.route("/api/rig/jobs", methods=["GET", "POST"])
+    def rig_jobs():
+        """Lit la file, ou y inscrit un travail.
+
+        En POST, l'appelant est le SITE (session ouverte) ; en GET, ce peut
+        etre le poste (jeton). Les deux voies sont donc acceptees, mais
+        jamais confondues : inscrire un travail demande une session.
+        """
+        from flask import jsonify
+        if request.method == "POST":
+            if not is_auth():
+                return jsonify({"ok": False, "error": "unauth"}), 401
+            d = _jobs_lire()
+            corps = request.get_json(force=True, silent=True) or {}
+            genre = (corps.get("type") or "").strip()[:40]
+            if genre not in ("cycle", "etape", "scenario"):
+                return jsonify({"ok": False, "error": "type inconnu"}), 400
+            job = {
+                "id": "j%d" % int(time.time() * 1000),
+                "type": genre,
+                "conteneur": (corps.get("conteneur") or "").strip()[:60],
+                "etape": (corps.get("etape") or "").strip()[:40],
+                "identity": (corps.get("identity") or "").strip().lower()[:60],
+                "par": (session.get("username") or "?")[:40],
+                "cree": int(time.time()),
+                "etat": "en_attente", "avancement": "", "erreur": "",
+            }
+            d["jobs"] = ([job] + d["jobs"])[:80]     # les 80 derniers suffisent
+            safe_json.write(RIG_JOBS, d, indent=None)
+            return jsonify({"ok": True, "job": job})
+
+        # GET : l'etat de la file. Session OU jeton — l'interface et le poste
+        # regardent la meme chose.
+        if not is_auth() and _rig_ok() != 200:
+            return jsonify({"ok": False, "error": "jeton"}), 403
+        d = _jobs_lire()
+        vieux = int(time.time()) - int(d.get("battement") or 0)
+        return jsonify({"ok": True, "jobs": d["jobs"][:40],
+                        "poste_en_ligne": vieux < 90,
+                        "vu_il_y_a": vieux if d.get("battement") else None})
+
+    @app.route("/api/rig/pull", methods=["POST"])
+    def rig_pull():
+        """Le poste prend le plus ancien travail en attente, et signale qu'il
+        est vivant. Rend null s'il n'y a rien — ce n'est pas une erreur."""
+        from flask import jsonify
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        d = _jobs_lire()
+        d["battement"] = int(time.time())
+        pris = None
+        # Le plus ancien d'abord : la liste est rangee du plus recent au plus
+        # vieux, on la parcourt donc a l'envers.
+        for job in reversed(d["jobs"]):
+            if job.get("etat") == "en_attente":
+                job["etat"] = "pris"
+                job["pris_a"] = int(time.time())
+                pris = job
+                break
+        safe_json.write(RIG_JOBS, d, indent=None)
+        return jsonify({"ok": True, "job": pris})
+
+    @app.route("/api/rig/report", methods=["POST"])
+    def rig_report():
+        """Le poste rend compte d'un travail : avancement, fin ou echec."""
+        from flask import jsonify
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        corps = request.get_json(force=True, silent=True) or {}
+        ident = (corps.get("id") or "").strip()
+        d = _jobs_lire()
+        d["battement"] = int(time.time())
+        touche = False
+        for job in d["jobs"]:
+            if job.get("id") != ident:
+                continue
+            etat = (corps.get("etat") or "").strip()
+            if etat in ("en_cours", "fini", "echec"):
+                job["etat"] = etat
+            job["avancement"] = str(corps.get("avancement") or "")[:200]
+            job["erreur"] = str(corps.get("erreur") or "")[:300]
+            job["maj"] = int(time.time())
+            touche = True
+            break
+        safe_json.write(RIG_JOBS, d, indent=None)
+        # Un rapport sur un travail inconnu n'est pas une erreur du poste : le
+        # site a pu etre redeploye entre-temps. On le dit sans echouer.
+        return jsonify({"ok": True, "connu": touche})
+
     @app.route("/api/rig/queue", methods=["POST"])
     def rig_queue():
         """Le poste pose la file du cycle : une liste de medias, dans l'ordre.
