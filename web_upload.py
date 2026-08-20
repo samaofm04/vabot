@@ -7898,26 +7898,11 @@ document.addEventListener('click',function(e){
      tournent services.py et start.py. Ouvertes dans un onglet a part pour ne
      pas quitter le tableau de bord. -->
 <div class="group" id="grp-remote">
-  <button class="group-head" onclick="toggleGroup('remote')">
+  <button class="group-head" onclick="showTab('remote','remote','Remote','Pilotage de l’iPhone')">
     <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
     <span class="label">Remote</span>
-    <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
-  <div class="items">
-    <button class="item" id="tab-remotedrop" onclick="showTab('remote','remotedrop','Drop','Choisir les medias et vider la pellicule de l’iPhone')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-      Drop
-    </button>
-    <button class="item" id="tab-remoteconsole" onclick="showTab('remote','remoteconsole','Console','Console iPhone : flux video et lancement des scenarios')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
-      Console
-    </button>
-    <button class="item" id="tab-remoteediteur" onclick="showTab('remote','remoteediteur','Editeur','Editeur de scenarios')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
-      Editeur
-    </button>
-  </div>
-</div>
+
 
 <div class="section-label">Settings</div>
 
@@ -8381,97 +8366,68 @@ document.addEventListener('click',function(e){
 
 <!-- INSTAGRAM TRENDS -->
 
-<div class="form-section" id="form-remotedrop" style="display:none">
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 14px;flex-wrap:wrap">
-    <div style="font-size:12.5px;color:#8b8b95">Choisir les medias et vider la pellicule de l'iPhone — tourne sur ta machine</div>
-    <div style="display:flex;gap:8px;align-items:center">
-      <span data-remote-etat="drop" style="font-size:12px;color:#8b8b95"></span>
-      <button type="button" onclick="remoteRecharger('drop')"
-        style="padding:8px 14px;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;
-        border-radius:9px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit">Recharger</button>
-      <a href="http://127.0.0.1:8097/" target="_blank" rel="noopener"
-        style="padding:8px 14px;background:rgba(59,130,246,.14);border:1px solid rgba(59,130,246,.4);
-        color:#3b82f6;border-radius:9px;font-size:12.5px;font-weight:600;text-decoration:none">Ouvrir dans un onglet</a>
-    </div>
-  </div>
-  <div data-remote-vide="drop" style="display:none;padding:26px;border:1px dashed #34343a;
-    border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6">
-    <b style="color:#fbbf24">La console tarde a repondre.</b><br>
-    Le cadre reste juste en dessous : si elle finit par s'afficher,
-    ignore ce message.<br>
-    Trois causes possibles, dans l'ordre :<br>
-    &bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>
-    &bull; tu n'es pas sur la machine ou l'iPhone est branche — cette page ne
-    peut l'atteindre que depuis ce poste ;<br>
-    &bull; ton navigateur refuse d'afficher une page locale dans un site en
-    HTTPS : utilise alors « Ouvrir dans un onglet ».
-  </div>
-  <iframe data-remote-cadre="drop" src="about:blank" data-src="http://127.0.0.1:8097/"
-    style="width:100%;height:calc(100vh - 210px);min-height:520px;border:1px solid #26262c;
-    border-radius:12px;background:#0d0d10"></iframe>
+<div class="form-section" id="form-remote" style="display:none">
+<h2 style="margin:0 0 4px;font-size:26px">Remote</h2>
+<div style="font-size:13px;color:#8b8b95;margin-bottom:14px">
+  Pilotage de l'iPhone — tourne sur ta machine</div>
+
+<!-- Bandeau d'etat : ce qu'on veut savoir sans rien ouvrir. -->
+<div class="rmt-etat">
+  <span class="rmt-pastille"><span class="rmt-pt" data-rmt-pt></span>
+    <span data-rmt-lien>connexion…</span></span>
+  <span class="rmt-sep"></span>
+  <span class="rmt-meta">appareil <b data-rmt-dev>—</b></span>
+  <span class="rmt-sep"></span>
+  <span class="rmt-meta">iOS <b data-rmt-ios>—</b></span>
+  <span class="rmt-sep"></span>
+  <span class="rmt-meta">ecran <b data-rmt-ecran>—</b></span>
+  <span class="rmt-sep"></span>
+  <span class="rmt-meta"><b data-rmt-fps>—</b> images/s</span>
+  <span style="margin-left:auto;display:flex;gap:8px">
+    <button type="button" class="rmt-btn" onclick="remoteRecharger(remoteVueCourante())">Recharger</button>
+    <a class="rmt-btn rmt-btn-p" data-rmt-onglet href="http://127.0.0.1:8770/"
+       target="_blank" rel="noopener">Ouvrir dans un onglet</a>
+  </span>
 </div>
 
-<div class="form-section" id="form-remoteconsole" style="display:none">
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 14px;flex-wrap:wrap">
-    <div style="font-size:12.5px;color:#8b8b95">Console iPhone : flux video et lancement des scenarios — tourne sur ta machine</div>
-    <div style="display:flex;gap:8px;align-items:center">
-      <span data-remote-etat="console" style="font-size:12px;color:#8b8b95"></span>
-      <button type="button" onclick="remoteRecharger('console')"
-        style="padding:8px 14px;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;
-        border-radius:9px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit">Recharger</button>
-      <a href="http://127.0.0.1:8770/" target="_blank" rel="noopener"
-        style="padding:8px 14px;background:rgba(59,130,246,.14);border:1px solid rgba(59,130,246,.4);
-        color:#3b82f6;border-radius:9px;font-size:12.5px;font-weight:600;text-decoration:none">Ouvrir dans un onglet</a>
-    </div>
-  </div>
-  <div data-remote-vide="console" style="display:none;padding:26px;border:1px dashed #34343a;
-    border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6">
-    <b style="color:#fbbf24">La console tarde a repondre.</b><br>
-    Le cadre reste juste en dessous : si elle finit par s'afficher,
-    ignore ce message.<br>
-    Trois causes possibles, dans l'ordre :<br>
-    &bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>
-    &bull; tu n'es pas sur la machine ou l'iPhone est branche — cette page ne
-    peut l'atteindre que depuis ce poste ;<br>
-    &bull; ton navigateur refuse d'afficher une page locale dans un site en
-    HTTPS : utilise alors « Ouvrir dans un onglet ».
-  </div>
-  <iframe data-remote-cadre="console" src="about:blank" data-src="http://127.0.0.1:8770/"
-    style="width:100%;height:calc(100vh - 210px);min-height:520px;border:1px solid #26262c;
-    border-radius:12px;background:#0d0d10"></iframe>
-</div>
+<div class="rmt-tabs"><button type="button" class="rmt-tab" data-rmt="drop" onclick="remoteVue('drop')" title="Choisir les medias et vider la pellicule">Drop</button><button type="button" class="rmt-tab" data-rmt="console" onclick="remoteVue('console')" title="Flux video et lancement des scenarios">Console</button><button type="button" class="rmt-tab" data-rmt="editeur" onclick="remoteVue('editeur')" title="Editeur de scenarios">Editeur</button></div>
+<div data-remote-vue="drop" style="display:none"><div data-remote-vide="drop" style="display:none;padding:22px;border:1px dashed #34343a;border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6;margin-bottom:12px"><b style="color:#fbbf24">Cette vue tarde a repondre.</b><br>Le cadre reste juste en dessous : si elle finit par s'afficher, ignore ce message.<br>&bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>&bull; tu n'es pas sur le poste ou l'iPhone est branche.</div><iframe data-remote-cadre="drop" src="about:blank" data-src="http://127.0.0.1:8097/" style="width:100%;height:calc(100vh - 250px);min-height:520px;border:1px solid #26262c;border-radius:12px;background:#0d0d10"></iframe></div><div data-remote-vue="console" style="display:none"><div data-remote-vide="console" style="display:none;padding:22px;border:1px dashed #34343a;border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6;margin-bottom:12px"><b style="color:#fbbf24">Cette vue tarde a repondre.</b><br>Le cadre reste juste en dessous : si elle finit par s'afficher, ignore ce message.<br>&bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>&bull; tu n'es pas sur le poste ou l'iPhone est branche.</div><iframe data-remote-cadre="console" src="about:blank" data-src="http://127.0.0.1:8770/" style="width:100%;height:calc(100vh - 250px);min-height:520px;border:1px solid #26262c;border-radius:12px;background:#0d0d10"></iframe></div><div data-remote-vue="editeur" style="display:none"><div data-remote-vide="editeur" style="display:none;padding:22px;border:1px dashed #34343a;border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6;margin-bottom:12px"><b style="color:#fbbf24">Cette vue tarde a repondre.</b><br>Le cadre reste juste en dessous : si elle finit par s'afficher, ignore ce message.<br>&bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>&bull; tu n'es pas sur le poste ou l'iPhone est branche.</div><iframe data-remote-cadre="editeur" src="about:blank" data-src="http://127.0.0.1:8770/editor" style="width:100%;height:calc(100vh - 250px);min-height:520px;border:1px solid #26262c;border-radius:12px;background:#0d0d10"></iframe></div>
 
-<div class="form-section" id="form-remoteediteur" style="display:none">
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 14px;flex-wrap:wrap">
-    <div style="font-size:12.5px;color:#8b8b95">Editeur de scenarios — tourne sur ta machine</div>
-    <div style="display:flex;gap:8px;align-items:center">
-      <span data-remote-etat="editeur" style="font-size:12px;color:#8b8b95"></span>
-      <button type="button" onclick="remoteRecharger('editeur')"
-        style="padding:8px 14px;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;
-        border-radius:9px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit">Recharger</button>
-      <a href="http://127.0.0.1:8770/editor" target="_blank" rel="noopener"
-        style="padding:8px 14px;background:rgba(59,130,246,.14);border:1px solid rgba(59,130,246,.4);
-        color:#3b82f6;border-radius:9px;font-size:12.5px;font-weight:600;text-decoration:none">Ouvrir dans un onglet</a>
-    </div>
-  </div>
-  <div data-remote-vide="editeur" style="display:none;padding:26px;border:1px dashed #34343a;
-    border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6">
-    <b style="color:#fbbf24">La console tarde a repondre.</b><br>
-    Le cadre reste juste en dessous : si elle finit par s'afficher,
-    ignore ce message.<br>
-    Trois causes possibles, dans l'ordre :<br>
-    &bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>
-    &bull; tu n'es pas sur la machine ou l'iPhone est branche — cette page ne
-    peut l'atteindre que depuis ce poste ;<br>
-    &bull; ton navigateur refuse d'afficher une page locale dans un site en
-    HTTPS : utilise alors « Ouvrir dans un onglet ».
-  </div>
-  <iframe data-remote-cadre="editeur" src="about:blank" data-src="http://127.0.0.1:8770/editor"
-    style="width:100%;height:calc(100vh - 210px);min-height:520px;border:1px solid #26262c;
-    border-radius:12px;background:#0d0d10"></iframe>
-</div>
-
-
+<style>
+.rmt-etat{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  padding:11px 15px;border:1px solid #26262c;border-radius:12px;
+  background:#141418;margin-bottom:12px}
+body.light .rmt-etat{background:#fff;border-color:rgba(60,60,67,.12)}
+.rmt-pastille{display:inline-flex;align-items:center;gap:7px;
+  font-weight:600;font-size:13px}
+.rmt-pt{width:8px;height:8px;border-radius:50%;background:#6b6b70;
+  box-shadow:0 0 0 3px rgba(107,107,112,.18);transition:.2s}
+.rmt-pt.on{background:#248a3d;box-shadow:0 0 0 3px rgba(36,138,61,.18)}
+.rmt-pt.ko{background:#c93a3a;box-shadow:0 0 0 3px rgba(201,58,58,.18)}
+.rmt-sep{width:1px;height:16px;background:#2a2a30}
+body.light .rmt-sep{background:rgba(60,60,67,.16)}
+.rmt-meta{font-size:12.5px;color:#8b8b95}
+.rmt-meta b{color:#e6e6ea;font-weight:600}
+body.light .rmt-meta b{color:#1c1c1e}
+.rmt-btn{padding:7px 13px;border-radius:9px;border:1px solid #303036;
+  background:#1a1a1f;color:#c4c4cc;font:inherit;font-size:12.5px;
+  font-weight:600;cursor:pointer;text-decoration:none;display:inline-flex;
+  align-items:center}
+body.light .rmt-btn{background:#fff;border-color:rgba(60,60,67,.16);color:#1c1c1e}
+.rmt-btn-p{background:rgba(59,130,246,.14);border-color:rgba(59,130,246,.4);
+  color:#3b82f6}
+body.apple .rmt-btn-p{background:rgba(0,122,255,.12);
+  border-color:rgba(0,122,255,.4);color:#007aff}
+.rmt-tabs{display:flex;gap:2px;border-bottom:1px solid #26262c;margin-bottom:14px}
+body.light .rmt-tabs{border-bottom-color:rgba(60,60,67,.12)}
+.rmt-tab{padding:10px 16px;font:inherit;font-size:13.5px;font-weight:600;
+  color:#8b8b95;background:transparent;border:0;border-bottom:2px solid transparent;
+  cursor:pointer;margin-bottom:-1px}
+.rmt-tab:hover{color:#c4c4cc}
+body.light .rmt-tab:hover{color:#1c1c1e}
+.rmt-tab.on{color:#3b82f6;border-bottom-color:#3b82f6}
+body.apple .rmt-tab.on{color:#007aff;border-bottom-color:#007aff}
+</style>
 <script>
 // Le cadre n'est rempli QU'A l'ouverture de l'onglet : charger les trois au
 // demarrage ferait trois requetes vers la machine locale a chaque visite du
@@ -8535,6 +8491,62 @@ function remoteRecharger(cle){
     }catch(e){}
     return r;
   };
+})();
+</script>
+</div>
+
+<script>
+// Une seule page, trois vues. Le cadre qu'on quitte reste charge : le
+// recharger a chaque va-et-vient coupait le flux video et faisait
+// reinterroger le telephone pour rien.
+function remoteVueCourante(){
+  var on=document.querySelector('.rmt-tab.on');
+  return on ? on.getAttribute('data-rmt') : 'console';
+}
+function remoteVue(cle){
+  document.querySelectorAll('.rmt-tab').forEach(function(t){
+    t.classList.toggle('on', t.getAttribute('data-rmt')===cle);
+  });
+  document.querySelectorAll('[data-remote-vue]').forEach(function(v){
+    v.style.display = (v.getAttribute('data-remote-vue')===cle) ? 'block' : 'none';
+  });
+  var f=document.querySelector('[data-remote-cadre="'+cle+'"]');
+  if(f && (!f.src || f.src==='about:blank')) remoteCharger(cle);
+  var lien=document.querySelector('[data-rmt-onglet]');
+  if(lien && f) lien.href=f.getAttribute('data-src');
+}
+// Etat du telephone, lu directement sur la console locale. Elle n'autorise
+// que la LECTURE depuis cette origine ; un echec ici veut simplement dire
+// qu'on n'est pas sur le poste ou l'iPhone est branche.
+function remoteEtat(){
+  var sec=document.getElementById('form-remote');
+  if(!sec || sec.style.display==='none') return;
+  var pt=document.querySelector('[data-rmt-pt]');
+  var txt=document.querySelector('[data-rmt-lien]');
+  fetch('http://127.0.0.1:8770/api/state',{mode:'cors'})
+   .then(function(r){return r.json();})
+   .then(function(j){
+     var dev=(j&&j.device)||{}, ec=(j&&j.screen)||{};
+     if(pt) pt.className='rmt-pt '+(j&&j.connected?'on':'ko');
+     if(txt) txt.textContent = j&&j.connected ? 'iPhone connecte' : 'iPhone absent';
+     var m=function(s,v){var e=document.querySelector(s); if(e) e.textContent=v;};
+     m('[data-rmt-dev]', dev.model||dev.name||'?');
+     m('[data-rmt-ios]', dev.ios||'?');
+     m('[data-rmt-ecran]', ec.width? (ec.width+'x'+ec.height) : '?');
+     m('[data-rmt-fps]', (j&&j.fps)||'?');
+   })
+   .catch(function(){
+     if(pt) pt.className='rmt-pt';
+     if(txt) txt.textContent='hors de portee depuis ce poste';
+   });
+}
+(function(){
+  if(window.__rmtInit) return; window.__rmtInit=1;
+  document.addEventListener('DOMContentLoaded', function(){
+    var t=document.querySelector('.rmt-tab'); if(t) remoteVue(t.getAttribute('data-rmt'));
+  });
+  setInterval(remoteEtat, 5000);
+  setTimeout(remoteEtat, 400);
 })();
 </script>
 
@@ -38233,10 +38245,9 @@ _PERM_KEY_TO_TABS = {
     "cloud": {"cloudreels", "cloudposts", "cloudstories", "cloudstoryctas", "cloudpps"},
     # Drive lecture seule : sa propre case (clé == nom d'onglet).
     "clouddrive": {"clouddrive"},
-    # Les trois vues du poste qui pilote l'iPhone tiennent sous une seule
-    # case : elles donnent le meme pouvoir, les separer n'aurait fait
-    # qu'ouvrir des chemins de traverse.
-    "remote": {"remotedrop", "remoteconsole", "remoteediteur"},
+    # Les trois vues ont fusionne en une seule page : la case garde son nom,
+    # elle ne pointe plus que sur l'onglet qui existe encore.
+    "remote": {"remote"},
     # Vault PRO : 2e bibliothèque, ses propres cases. Cocher « cloud » ne
     # l'ouvre pas — c'est tout l'intérêt d'un vault séparé.
     "provault": {"provaultreels", "provaultposts", "provaultstories",
