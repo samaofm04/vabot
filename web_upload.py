@@ -8389,8 +8389,6 @@ document.addEventListener('click',function(e){
   <span class="rmt-meta"><b data-rmt-fps>—</b> images/s</span>
   <span style="margin-left:auto;display:flex;gap:8px">
     <button type="button" class="rmt-btn" onclick="remoteRecharger(remoteVueCourante())">Recharger</button>
-    <a class="rmt-btn rmt-btn-p" data-rmt-onglet href="http://127.0.0.1:8770/"
-       target="_blank" rel="noopener">Ouvrir dans un onglet</a>
   </span>
 </div>
 
@@ -8502,6 +8500,19 @@ document.addEventListener('click',function(e){
 <div data-remote-vue="editeur" style="display:none"><div data-remote-vide="editeur" style="display:none;padding:22px;border:1px dashed #34343a;border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6;margin-bottom:12px"><b style="color:#fbbf24">Cette vue tarde a repondre.</b><br>Le cadre reste juste en dessous : si elle finit par s'afficher, ignore ce message.<br>&bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>&bull; tu n'es pas sur le poste ou l'iPhone est branche.</div><iframe data-remote-cadre="editeur" src="about:blank" data-src="http://127.0.0.1:8770/editor" style="width:100%;height:calc(100vh - 250px);min-height:520px;border:1px solid #26262c;border-radius:12px;background:#0d0d10"></iframe></div>
 
 <style>
+/* Une seule teinte d'accent pour Remote, redefinie par theme. Chaque
+   element portait sa couleur en dur avec une variante Apple ajoutee a part :
+   un oubli laissait une tache bleue au milieu du reste. */
+#form-remote{--rmt:#3b82f6;--rmt-doux:rgba(59,130,246,.14);
+  --rmt-trait:rgba(59,130,246,.40)}
+body.apple #form-remote{--rmt:#007aff;--rmt-doux:rgba(0,122,255,.12);
+  --rmt-trait:rgba(0,122,255,.42)}
+body.violet #form-remote{--rmt:#a855f7;--rmt-doux:rgba(168,85,247,.14);
+  --rmt-trait:rgba(168,85,247,.40)}
+body.gold #form-remote{--rmt:#d9b74a;--rmt-doux:rgba(217,183,74,.14);
+  --rmt-trait:rgba(217,183,74,.40)}
+body.obsidian #form-remote{--rmt:#8b9cf7;--rmt-doux:rgba(139,156,247,.14);
+  --rmt-trait:rgba(139,156,247,.40)}
 .rmt-etat{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
   padding:11px 15px;border:1px solid #26262c;border-radius:12px;
   background:#141418;margin-bottom:12px}
@@ -8522,10 +8533,8 @@ body.light .rmt-meta b{color:#1c1c1e}
   font-weight:600;cursor:pointer;text-decoration:none;display:inline-flex;
   align-items:center}
 body.light .rmt-btn{background:#fff;border-color:rgba(60,60,67,.16);color:#1c1c1e}
-.rmt-btn-p{background:rgba(59,130,246,.14);border-color:rgba(59,130,246,.4);
-  color:#3b82f6}
-body.apple .rmt-btn-p{background:rgba(0,122,255,.12);
-  border-color:rgba(0,122,255,.4);color:#007aff}
+.rmt-btn-p{background:var(--rmt-doux);border-color:var(--rmt-trait);
+  color:var(--rmt)}
 .rmt-champ{padding:9px 12px;border-radius:9px;border:1px solid #303036;
   background:#0f0f12;color:#e6e6ea;font:inherit;font-size:13px}
 #rmt-conteneur.rmt-champ{width:100%}
@@ -8534,7 +8543,6 @@ body.apple .rmt-btn-p{background:rgba(0,122,255,.12);
 .rmt-champ option{background:#141418;color:#e6e6ea}
 body.light .rmt-champ{background:#fff;border-color:rgba(60,60,67,.16);color:#1c1c1e}
 body.light .rmt-champ option{background:#fff;color:#1c1c1e}
-body.apple .rmt-champ:focus{outline:2px solid rgba(0,122,255,.35);outline-offset:1px}
 .rmt-lancer{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;
   padding:15px;border:1px solid #26262c;border-radius:12px;background:#141418}
 body.light .rmt-lancer{background:#fff;border-color:rgba(60,60,67,.12)}
@@ -8573,16 +8581,15 @@ body.light .rmt-carte .nn{background:#f2f2f7;color:#6b6b70}
   background:#1a1a1f;color:#c4c4cc;cursor:pointer;display:flex;
   align-items:center;justify-content:center;padding:0}
 body.light .rmt-mini{background:#fff;border-color:rgba(60,60,67,.16);color:#1c1c1e}
-.rmt-mini:hover,.rmt-mini-on{border-color:#3b82f6;color:#3b82f6}
-body.apple .rmt-mini:hover{border-color:#007aff;color:#007aff}
+.rmt-mini:hover,.rmt-mini-on{border-color:var(--rmt);color:var(--rmt)}
 .rmt-etapes{margin:10px 0 4px;padding-left:2px}
 .rmt-bloc{display:flex;align-items:flex-start;gap:11px;padding:9px 12px;
   border:1px solid #26262c;border-radius:10px;margin-bottom:6px;
   background:#141418;position:relative}
 body.light .rmt-bloc{background:#fff;border-color:rgba(60,60,67,.12)}
 .rmt-bloc::before{content:'';position:absolute;left:-1px;top:8px;bottom:8px;
-  width:3px;border-radius:99px;background:#3b82f6}
-.rmt-bloc.geste::before{background:#3b82f6}
+  width:3px;border-radius:99px;background:var(--rmt)}
+.rmt-bloc.geste::before{background:var(--rmt)}
 .rmt-bloc.lecture::before{background:#a855f7}
 .rmt-bloc.attente::before{background:#6b6b70}
 .rmt-bloc.texte::before{background:#248a3d}
@@ -8602,7 +8609,7 @@ body.light .rmt-job{background:#fff;border-color:rgba(60,60,67,.12)}
 .rmt-job .av{margin-left:auto;font-size:12px;color:#8b8b95}
 .rmt-job .et{font-size:11px;font-weight:700;padding:2px 9px;border-radius:99px}
 .et-attente{background:rgba(107,107,112,.16);color:#8b8b95}
-.et-pris,.et-en_cours{background:rgba(59,130,246,.15);color:#3b82f6}
+.et-pris,.et-en_cours{background:var(--rmt-doux);color:var(--rmt)}
 .et-fini{background:rgba(36,138,61,.15);color:#248a3d}
 .et-echec{background:rgba(201,58,58,.14);color:#c93a3a}
 .rmt-tabs{display:flex;gap:2px;border-bottom:1px solid #26262c;margin-bottom:14px}
@@ -8612,8 +8619,7 @@ body.light .rmt-tabs{border-bottom-color:rgba(60,60,67,.12)}
   cursor:pointer;margin-bottom:-1px}
 .rmt-tab:hover{color:#c4c4cc}
 body.light .rmt-tab:hover{color:#1c1c1e}
-.rmt-tab.on{color:#3b82f6;border-bottom-color:#3b82f6}
-body.apple .rmt-tab.on{color:#007aff;border-bottom-color:#007aff}
+.rmt-tab.on{color:var(--rmt);border-bottom-color:var(--rmt)}
 </style>
 <script>
 // Le cadre n'est rempli QU'A l'ouverture de l'onglet : charger les trois au
@@ -8699,8 +8705,6 @@ function remoteVue(cle){
   });
   var f=document.querySelector('[data-remote-cadre="'+cle+'"]');
   if(f && (!f.src || f.src==='about:blank')) remoteCharger(cle);
-  var lien=document.querySelector('[data-rmt-onglet]');
-  if(lien && f) lien.href=f.getAttribute('data-src');
   if(cle==='cycle' && typeof remoteJobs==='function') remoteJobs();
   if(cle==='scenarios' && typeof remoteScenarios==='function') remoteScenarios();
   if(typeof rmtCsOuvrir==='function'){
