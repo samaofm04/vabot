@@ -24,6 +24,10 @@ log = logging.getLogger("vabot.web")
 BOT_DIR = Path(__file__).parent.resolve()
 ENV_FILE = BOT_DIR / ".env"
 DATA_DIR = Path("data")
+
+#: Ce que le proprietaire doit recopier dans secrets.json, cote poste.
+GABARIT_JETON = '{\n  "rig_api_token": "%s"\n}'
+
 # Filigrane « PRÊT » (SVG en diagonale, vert semi-transparent) posé sur la vignette
 # d'un reel marqué prêt — purement visuel, tuilé sur toute la vidéo.
 READY_WM_URI = ("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20"
@@ -43502,11 +43506,83 @@ def create_app():
             pass
         return redirect("/a-relire")
 
+    RIG_TOKEN_FILE = DATA_DIR / "rig_token.json"
+
+    def _rig_token_attendu() -> str:
+        """Le jeton partage : l'environnement d'abord, le fichier ensuite.
+
+        L'environnement garde la priorite pour ne rien changer aux
+        installations qui le definissent deja. Le fichier existe parce que
+        poser une variable sur le VPS demande un acces SSH — sans lui, la
+        chaine restait inerte faute d'une ligne a ecrire.
+        """
+        import os as _os
+        v = (_os.environ.get("RIG_API_TOKEN") or "").strip()
+        if v:
+            return v
+        try:
+            return str((safe_json.load(RIG_TOKEN_FILE, default={}) or {})
+                       .get("token") or "").strip()
+        except Exception:
+            return ""
+
+    @app.route("/rig-jeton", methods=["GET", "POST"])
+    def rig_jeton_page():
+        """Voir, creer ou remplacer le jeton du poste."""
+        import os as _os
+        if not is_auth() or not _is_admin():
+            return redirect("/")
+        msg = ""
+        if request.method == "POST":
+            import secrets as _sec
+            safe_json.write(RIG_TOKEN_FILE,
+                            {"token": _sec.token_urlsafe(24)}, indent=2)
+            msg = ("<p style='color:#166534'>Jeton cree. Recopie-le sur la "
+                   "machine du telephone.</p>")
+        actuel = _rig_token_attendu()
+        par_env = bool(_os.environ.get("RIG_API_TOKEN"))
+
+        if actuel:
+            bloc = ("<p><b>Actuel :</b> <code style='background:#f2f2f7;"
+                    "padding:3px 8px;border-radius:6px'>"
+                    + html_escape(actuel) + "</code>"
+                    + (" <span style='color:#666;font-size:12px'>(pose par "
+                       "l'environnement du serveur)</span>" if par_env else "")
+                    + "</p>")
+        else:
+            bloc = ("<p style='color:#b45309'><b>Aucun jeton</b> — l'API repond "
+                    "503 et rien ne peut fonctionner.</p>")
+
+        form = ("" if par_env else
+                "<form method='POST' style='margin-top:16px'>"
+                "<button style='padding:9px 16px;background:#007aff;border:0;"
+                "color:#fff;border-radius:9px;font:inherit;font-weight:600;"
+                "cursor:pointer'>"
+                + ("Remplacer le jeton" if actuel else "Creer le jeton")
+                + "</button></form>")
+
+        return ("<div style=\"font:14px/1.6 -apple-system,system-ui,sans-serif;"
+                "padding:26px;max-width:620px;margin:40px auto;background:#fff;"
+                "color:#1c1c1e;border:1px solid #e5e7eb;border-radius:14px\">"
+                "<h2 style='margin:0 0 10px'>Jeton du poste</h2>"
+                "<p style='color:#666'>Il autorise la machine ou l'iPhone est "
+                "branche a venir chercher du travail. La meme valeur doit se "
+                "trouver des deux cotes.</p>"
+                + msg + bloc + form +
+                "<h3 style='margin:22px 0 6px;font-size:14px'>Sur la machine du "
+                "telephone</h3>"
+                "<p style='color:#666;font-size:13px'>Colle ceci dans "
+                "<code>secrets.json</code>, a la racine du projet :</p>"
+                "<pre style='background:#f2f2f7;padding:12px;border-radius:9px;"
+                "font-size:12.5px;overflow-x:auto'>"
+                + html_escape(GABARIT_JETON % (actuel or "…")) + "</pre>"
+                "<p style='margin-top:18px'><a href='/?tab=remote'>Retour a "
+                "Remote</a></p></div>")
+
     def _rig_ok():
         """Le jeton partage. 503 tant qu'il n'est pas configure, 403 s'il ne
         correspond pas : une API muette vaut mieux qu'une API ouverte."""
-        import os as _os
-        attendu = (_os.environ.get("RIG_API_TOKEN") or "").strip()
+        attendu = _rig_token_attendu()
         if not attendu:
             return 503
         donne = (request.headers.get("X-Rig-Token")
