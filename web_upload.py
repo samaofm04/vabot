@@ -8403,6 +8403,13 @@ document.addEventListener('click',function(e){
       <input type="text" id="rmt-conteneur" placeholder="ig-445bt" class="rmt-champ">
     </div>
     <div>
+      <div style="font-size:12.5px;color:#8b8b95;margin-bottom:5px">Categorie
+        <span style="color:#6b6b70">(obligatoire pour un cycle)</span></div>
+      <input type="text" id="rmt-categorie" class="rmt-champ" placeholder="beta"
+        title="Sans elle, l etape des medias ne saura pas quoi choisir"
+        style="width:120px">
+    </div>
+    <div>
       <div style="font-size:12.5px;color:#8b8b95;margin-bottom:5px">Travail</div>
       <select id="rmt-genre" class="rmt-champ">
         <option value="cycle">Cycle complet (8 etapes)</option>
@@ -8628,6 +8635,7 @@ function remoteLancer(){
   var corps={type:genre,
              conteneur:((document.getElementById('rmt-conteneur')||{}).value||'').trim()};
   if(genre==='etape') corps.etape=(document.getElementById('rmt-etape')||{}).value||'';
+  corps.categorie=((document.getElementById('rmt-categorie')||{}).value||'').trim();
   var sl=document.getElementById('rmt-sans-lien');
   if(sl && sl.checked) corps.sans_lien=true;
   if(go){ go.disabled=true; go.textContent='...'; }
@@ -43712,6 +43720,13 @@ def create_app():
             genre = (corps.get("type") or "").strip()[:40]
             if genre not in ("cycle", "etape", "scenario"):
                 return jsonify({"ok": False, "error": "type inconnu"}), 400
+            # Un cycle sans categorie va jusqu'a la sixieme etape puis
+            # echoue : l'etape des medias ne sait pas quoi choisir. Autant
+            # le refuser tout de suite que de creer un compte pour rien.
+            if genre == "cycle" and not (corps.get("categorie") or "").strip():
+                return jsonify({"ok": False,
+                                "error": "categorie obligatoire pour un cycle "
+                                         "(sinon l etape des medias echoue)"}), 400
             job = {
                 "id": "j%d" % int(time.time() * 1000),
                 "type": genre,
@@ -43723,6 +43738,7 @@ def create_app():
                 # soupconne ce lien de pousser Instagram vers WhatsApp, sans
                 # que la mesure ait jamais ete faite.
                 "sans_lien": bool(corps.get("sans_lien")),
+                "categorie": (corps.get("categorie") or "").strip()[:40],
                 "par": (session.get("username") or "?")[:40],
                 "cree": int(time.time()),
                 "etat": "en_attente", "avancement": "", "erreur": "",
