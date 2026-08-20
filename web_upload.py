@@ -8449,7 +8449,29 @@ document.addEventListener('click',function(e){
   </div>
   <div id="rmt-scenarios"></div>
 </div>
-<div data-remote-vue="drop" style="display:none"><div data-remote-vide="drop" style="display:none;padding:22px;border:1px dashed #34343a;border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6;margin-bottom:12px"><b style="color:#fbbf24">Cette vue tarde a repondre.</b><br>Le cadre reste juste en dessous : si elle finit par s'afficher, ignore ce message.<br>&bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>&bull; tu n'es pas sur le poste ou l'iPhone est branche.</div><iframe data-remote-cadre="drop" src="about:blank" data-src="http://127.0.0.1:8097/" style="width:100%;height:calc(100vh - 250px);min-height:520px;border:1px solid #26262c;border-radius:12px;background:#0d0d10"></iframe></div><div data-remote-vue="console" style="display:none">
+<div data-remote-vue="drop" style="display:none">
+  <div class="rmt-etat" style="margin-bottom:12px">
+    <div class="kpi"><span class="v" data-parc="total">—</span>
+      <span class="l">conteneurs</span></div>
+    <div class="kpi ok"><span class="v" data-parc="finis">—</span>
+      <span class="l">avec un compte</span></div>
+    <div class="kpi ko"><span class="v" data-parc="echecs">—</span>
+      <span class="l">abandonnes</span></div>
+    <div class="kpi"><span class="v" data-parc="neufs">—</span>
+      <span class="l">jamais lances</span></div>
+    <div class="kpi-barre" style="flex:1;min-width:150px">
+      <div class="piste"><i data-parc-b="ok"></i><i data-parc-b="ko"></i></div>
+      <div class="leg" data-parc="objectif"></div>
+    </div>
+    <span style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <input type="text" id="rmt-filtre" class="rmt-champ"
+        placeholder="filtrer" style="width:130px">
+      <button type="button" class="rmt-btn" onclick="remoteParc()">Actualiser</button>
+    </span>
+  </div>
+  <div id="rmt-parc"></div>
+</div>
+<div data-remote-vue="console" style="display:none">
   <div id="rmt-cs-absent" style="display:none;padding:20px;border:1px dashed #34343a;
     border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6">
     <b style="color:#fbbf24">Aucune image pour l instant.</b><br>
@@ -8555,6 +8577,30 @@ body.light #rmt-conteneur,body.light #rmt-genre,body.light #rmt-etape{
    suit la largeur disponible, panneau ouvert ou non. */
 /* L'ecran du telephone : proportions fixes, pour que les coordonnees
    restent justes quelle que soit la largeur disponible. */
+.kpi{display:flex;flex-direction:column;gap:1px;line-height:1.15}
+.kpi .v{font-size:18px;font-weight:700;letter-spacing:-.02em}
+.kpi .l{font-size:11px;color:#8b8b95;text-transform:uppercase;letter-spacing:.35px}
+.kpi.ok .v{color:#248a3d} .kpi.ko .v{color:#c93a3a}
+.kpi-barre .piste{height:6px;border-radius:99px;background:#26262c;
+  overflow:hidden;display:flex}
+body.light .kpi-barre .piste{background:rgba(60,60,67,.14)}
+.kpi-barre .piste i{display:block;height:100%}
+.kpi-barre .leg{font-size:11.5px;color:#8b8b95;margin-top:5px}
+.rmt-ct{display:flex;align-items:center;gap:12px;padding:10px 13px;
+  border:1px solid #26262c;border-radius:11px;margin-bottom:7px;background:#141418}
+body.light .rmt-ct{background:#fff;border-color:rgba(60,60,67,.12)}
+.rmt-ct .nm{font-weight:700;font-size:13px;min-width:78px}
+.rmt-ct .ct{font-size:11px;color:#8b8b95;background:#1a1a1f;padding:2px 8px;
+  border-radius:99px}
+body.light .rmt-ct .ct{background:#f2f2f7}
+.rmt-ct .ps{font-size:11.5px;color:var(--rmt)}
+.rmt-tr{display:flex;gap:3px;flex:1;min-width:90px}
+.rmt-tr i{flex:1;height:5px;border-radius:99px;background:#26262c;display:block}
+body.light .rmt-tr i{background:rgba(60,60,67,.14)}
+.rmt-tr i.ok{background:#248a3d} .rmt-tr i.now{background:var(--rmt)}
+.rmt-tr i.ko{background:#c93a3a}
+.rmt-ct .st{font-size:11.5px;color:#8b8b95;min-width:96px;text-align:right}
+.rmt-ct .st.ko{color:#c93a3a} .rmt-ct .st.now{color:var(--rmt);font-weight:600}
 .rmt-tel{width:250px;aspect-ratio:375/812;border-radius:20px;padding:7px;
   background:#111;border:1px solid #26262c;flex-shrink:0}
 body.light .rmt-tel{background:#1c1c1e;border-color:rgba(60,60,67,.2)}
@@ -8707,6 +8753,7 @@ function remoteVue(cle){
   if(f && (!f.src || f.src==='about:blank')) remoteCharger(cle);
   if(cle==='cycle' && typeof remoteJobs==='function') remoteJobs();
   if(cle==='scenarios' && typeof remoteScenarios==='function') remoteScenarios();
+  if(cle==='drop' && typeof remoteParc==='function') remoteParc();
   if(typeof rmtCsOuvrir==='function'){
     if(cle==='console') rmtCsOuvrir(); else rmtCsFermer();
   }
@@ -9065,6 +9112,82 @@ function rmtCsFermer(){
     }else{
       rmtCsRafraichir(); rmtCsMsg('rafraichi');
     }
+  });
+})();
+</script>
+
+<script>
+// L'ordre REEL d'execution : les medias viennent apres les ecrans de fin,
+// la pellicule ne servant qu'a partir de la photo de profil.
+var RMT_ORDRE = ['conteneur','instagram','numero','identite','fin',
+                 'medias','profil','reels'];
+var RMT_PARC = [];
+
+function rmtParcLignes(){
+  var boite=document.getElementById('rmt-parc');
+  if(!boite) return;
+  var f=((document.getElementById('rmt-filtre')||{}).value||'').toLowerCase();
+  var vus=RMT_PARC.filter(function(c){
+    return !f || (c.nom+' '+c.categorie+' '+c.pseudo).toLowerCase().indexOf(f)>=0;
+  });
+  if(!vus.length){
+    boite.innerHTML='<div style="color:#8b8b95;font-size:13px;padding:16px 0">'
+      + (RMT_PARC.length ? 'Aucun conteneur ne correspond.'
+         : 'Aucun conteneur connu. Lance <code>agent_rig.py</code> sur la machine.')
+      + '</div>';
+    return;
+  }
+  boite.innerHTML=vus.slice(0,120).map(function(c){
+    var et=c.etapes||{};
+    var traits=RMT_ORDRE.map(function(k){
+      var v=et[k]||'';
+      return '<i class="'+(v==='ok'?'ok':v==='echec'?'ko':v==='en cours'?'now':'')
+           + '" title="'+k+(v?' : '+v:'')+'"></i>';
+    }).join('');
+    var faits=RMT_ORDRE.filter(function(k){return et[k]==='ok';}).length;
+    var mot = c.statut==='echec' ? ('echec — '+(c.etape||''))
+            : c.statut==='en cours' ? ('en cours — '+(c.etape||''))
+            : c.abandonne ? 'abandonne'
+            : faits>=8 ? 'termine'
+            : faits ? (faits+'/8') : (c.passages? 'jamais fini' : 'neuf');
+    var cls = c.statut==='echec'||c.abandonne ? ' ko'
+            : c.statut==='en cours' ? ' now' : '';
+    return '<div class="rmt-ct">'
+      + '<span class="nm">'+c.nom+'</span>'
+      + '<span class="ct">'+(c.categorie||'sans categorie')+'</span>'
+      + (c.pseudo ? '<span class="ps">@'+c.pseudo+'</span>' : '')
+      + '<span class="rmt-tr">'+traits+'</span>'
+      + '<span class="st'+cls+'">'+mot+(c.reconstitue?' ~':'')+'</span>'
+      + '</div>';
+  }).join('');
+}
+function remoteParc(){
+  fetch('/api/rig/parc',{credentials:'same-origin'})
+   .then(function(r){return r.json();})
+   .then(function(j){
+     RMT_PARC=(j&&j.conteneurs)||[];
+     var t=RMT_PARC.length;
+     var fin=RMT_PARC.filter(function(c){return c.pseudo;}).length;
+     var ko=RMT_PARC.filter(function(c){return c.abandonne;}).length;
+     var neufs=RMT_PARC.filter(function(c){return !c.passages && !c.pseudo;}).length;
+     var m=function(k,v){var e=document.querySelector('[data-parc="'+k+'"]');
+                         if(e) e.textContent=v;};
+     m('total',t); m('finis',fin); m('echecs',ko); m('neufs',neufs);
+     var obj=(j&&j.objectif)||0;
+     m('objectif', obj ? ('objectif '+obj+' · '+t+' crees') : (t+' crees'));
+     var b=function(k,pc,coul){
+       var e=document.querySelector('[data-parc-b="'+k+'"]');
+       if(e){ e.style.width=pc+'%'; e.style.background=coul; }
+     };
+     b('ok', t?fin*100/t:0, '#248a3d');
+     b('ko', t?ko*100/t:0, '#c93a3a');
+     rmtParcLignes();
+   }).catch(function(){});
+}
+(function(){
+  if(window.__rmtParc) return; window.__rmtParc=1;
+  document.addEventListener('input', function(e){
+    if(e.target && e.target.id==='rmt-filtre') rmtParcLignes();
   });
 })();
 </script>
@@ -44126,6 +44249,47 @@ def create_app():
                         "vu_il_y_a": vieux if d.get("battement") else None})
 
     RIG_SCENARIOS = DATA_DIR / "rig_scenarios.json"
+
+    RIG_PARC = DATA_DIR / "rig_parc.json"
+
+    @app.route("/api/rig/parc", methods=["GET", "POST"])
+    def rig_parc():
+        """L'etat du parc de conteneurs, declare par l'agent."""
+        from flask import jsonify
+        if request.method == "POST":
+            code = _rig_ok()
+            if code != 200:
+                return jsonify({"ok": False, "error": "jeton"}), code
+            corps = request.get_json(force=True, silent=True) or {}
+            propres = []
+            for c in (corps.get("conteneurs") or [])[:200]:
+                if not isinstance(c, dict) or not c.get("nom"):
+                    continue
+                et = c.get("etapes")
+                propres.append({
+                    "nom": str(c["nom"])[:60],
+                    "categorie": str(c.get("categorie") or "")[:40],
+                    "pseudo": str(c.get("pseudo") or "")[:60],
+                    "passages": int(c.get("passages") or 0),
+                    "abandonne": bool(c.get("abandonne")),
+                    "etapes": et if isinstance(et, dict) else {},
+                    "statut": str(c.get("statut") or "")[:20],
+                    "etape": str(c.get("etape") or "")[:30],
+                    "reconstitue": bool(c.get("reconstitue")),
+                })
+            safe_json.write(RIG_PARC, {
+                "conteneurs": propres,
+                "categories": [str(x)[:40] for x in
+                               (corps.get("categories") or [])][:20],
+                "objectif": int(corps.get("objectif") or 0),
+                "wda": bool(corps.get("wda")),
+                "ts": int(time.time()),
+            }, indent=None)
+            return jsonify({"ok": True, "n": len(propres)})
+
+        if not is_auth() and _rig_ok() != 200:
+            return jsonify({"ok": False, "error": "jeton"}), 403
+        return jsonify({"ok": True, **(safe_json.load(RIG_PARC, default={}) or {})})
 
     @app.route("/api/rig/scenarios", methods=["GET", "POST"])
     def rig_scenarios():
