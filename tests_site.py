@@ -2251,6 +2251,80 @@ try:
     check("rig : le jeton n est jamais ecrit en dur",
           "RIG_API_TOKEN" in _srcRg and 'RIG_API_TOKEN"] =' not in _srcRg)
 
+    # --- l editeur de scenarios ------------------------------------------
+    # Le catalogue d actions est declare par le poste : sans lui l editeur
+    # ne peut proposer que des noms devines, et une action inventee fait
+    # echouer la validation au moment ou l on croit avoir enregistre.
+    check("editeur : le catalogue d actions exige le jeton",
+          _cRg.post("/api/rig/actions", json={"actions": []}).status_code == 403)
+    _repAc = _cRg.post("/api/rig/actions",
+                       json={"actions": [
+                           {"nom": "tap", "doc": "Touche un element.",
+                            "exemple": '{"tap": {"text": "Suivant"}}'},
+                           {"nom": "", "doc": "sans nom, a ecarter"}]},
+                       headers={"X-Rig-Token": _JETONRg})
+    check("editeur : le poste declare ses actions",
+          _repAc.status_code == 200
+          and _jsonRg.loads(_repAc.get_data(as_text=True)).get("n") == 1)
+
+    # Ecrire demande une session ; lire aussi, ou le jeton.
+    _cEd = _appRg.test_client()
+    with _cEd.session_transaction() as _sEd:
+        _sEd["auth"] = True
+        _sEd["username"] = "admin"
+    _dAc = _jsonRg.loads(
+        _cEd.get("/api/rig/actions").get_data(as_text=True))
+    check("editeur : le site rend le catalogue a l interface",
+          _dAc.get("ok") is True
+          and [a["nom"] for a in _dAc.get("actions") or []] == ["tap"])
+
+    # Un scenario vide effacerait le fichier du poste : refuser tot.
+    check("editeur : refuse un enregistrement sans etape",
+          _cEd.post("/api/rig/jobs",
+                    json={"type": "enregistrer", "scenario": "x",
+                          "etapes": []}).status_code == 400)
+    check("editeur : refuse au-dela de 200 etapes",
+          _cEd.post("/api/rig/jobs",
+                    json={"type": "enregistrer", "scenario": "x",
+                          "etapes": [{"tap": {}}] * 201}).status_code == 400)
+    _repJb = _cEd.post("/api/rig/jobs",
+                       json={"type": "enregistrer", "scenario": "post-reel",
+                             "etapes": [{"tap": {"text": "Suivant"}}]})
+    _dJb = _jsonRg.loads(_repJb.get_data(as_text=True))
+    check("editeur : le travail d enregistrement porte ses etapes",
+          _repJb.status_code == 200 and _dJb.get("ok") is True
+          and _dJb["job"]["type"] == "enregistrer"
+          and _dJb["job"]["etapes"] == [{"tap": {"text": "Suivant"}}])
+
+    # Un detail tronque a 120 reenregistre perdrait la fin du scenario.
+    _cRg.post("/api/rig/scenarios",
+              json={"scenarios": [
+                  {"nom": "long", "titre": "Long", "etapes": 300,
+                   "detail": [{"tap": {}}] * 130},
+                  {"nom": "court", "titre": "Court", "etapes": 3,
+                   "detail": [{"tap": {}}] * 3}]},
+              headers={"X-Rig-Token": _JETONRg})
+    _dSc = _jsonRg.loads(
+        _cEd.get("/api/rig/scenarios").get_data(as_text=True))
+    _parNom = {x["nom"]: x for x in _dSc.get("scenarios") or []}
+    check("editeur : un detail tronque est signale incomplet",
+          _parNom.get("long", {}).get("complet") is False
+          and _parNom.get("court", {}).get("complet") is True)
+
+    # L editeur doit refuser d enregistrer dans ce cas, cote interface.
+    check("editeur : l interface bloque l enregistrement d un detail tronque",
+          "if(!RMT_ED.complet){" in _srcRg
+          and "Enregistrement bloque" in _srcRg)
+
+    # Le site n ecrit jamais le fichier : c est le moteur du poste qui
+    # valide les actions, et lui seul sait ce qu il sait jouer.
+    check("editeur : le site n ecrit aucun fichier de scenario",
+          "scenarios/" not in _srcRg.split("def rig_jobs")[1][:4000])
+
+    # Plus aucun cadre vers la machine locale : Remote se voit de partout.
+    check("editeur : plus aucun cadre vers 127.0.0.1:8770",
+          "8770" not in _srcRg and "data-remote-cadre" not in _srcRg)
+
     if _avantRg is None:
         _osRg.environ.pop("RIG_API_TOKEN", None)
     else:

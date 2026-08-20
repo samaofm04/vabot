@@ -8519,7 +8519,493 @@ document.addEventListener('click',function(e){
     </div>
   </div>
 </div>
-<div data-remote-vue="editeur" style="display:none"><div data-remote-vide="editeur" style="display:none;padding:22px;border:1px dashed #34343a;border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6;margin-bottom:12px"><b style="color:#fbbf24">Cette vue tarde a repondre.</b><br>Le cadre reste juste en dessous : si elle finit par s'afficher, ignore ce message.<br>&bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>&bull; tu n'es pas sur le poste ou l'iPhone est branche.</div><iframe data-remote-cadre="editeur" src="about:blank" data-src="http://127.0.0.1:8770/editor" style="width:100%;height:calc(100vh - 250px);min-height:520px;border:1px solid #26262c;border-radius:12px;background:#0d0d10"></iframe></div>
+<div data-remote-vue="editeur" style="display:none">
+ <div class="rmt-ed">
+  <div class="rmt-ed-barre">
+   <select id="rmt-ed-choix" class="rmt-ed-sel"></select>
+   <span class="rmt-ed-info" id="rmt-ed-info"></span>
+   <span class="rmt-ed-etat" id="rmt-ed-etat"></span>
+   <button type="button" class="rmt-ed-b" id="rmt-ed-plus">
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none"
+     stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+     <path d="M12 5v14M5 12h14"/></svg> Ajouter</button>
+   <button type="button" class="rmt-ed-b" id="rmt-ed-annuler">Annuler</button>
+   <button type="button" class="rmt-ed-b rmt-ed-b-on" id="rmt-ed-ok">
+    Enregistrer</button>
+  </div>
+  <div class="rmt-ed-corps">
+   <div class="rmt-ed-liste" id="rmt-ed-liste"></div>
+   <div class="rmt-ed-panneau" id="rmt-ed-panneau"></div>
+  </div>
+ </div>
+ <div class="rmt-ed-voile" id="rmt-ed-voile">
+  <div class="rmt-ed-palette">
+   <div class="rmt-ed-pal-haut">
+    <input type="text" id="rmt-ed-rech" class="rmt-ed-champ"
+     placeholder="Chercher une action..." autocomplete="off">
+    <button type="button" class="rmt-ed-b" id="rmt-ed-fermer">Fermer</button>
+   </div>
+   <div class="rmt-ed-pal-corps" id="rmt-ed-pal"></div>
+  </div>
+ </div>
+</div>
+<style>
+/* L’editeur reprend les jetons de Remote : une couleur en dur ici
+   redeviendrait bleue le jour ou le theme change. */
+.rmt-ed{display:flex;flex-direction:column;gap:10px}
+.rmt-ed-barre{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+ padding:9px 11px;border:1px solid var(--rmt-trait);border-radius:12px;
+ background:var(--rmt-doux)}
+.rmt-ed-sel{background:rgba(0,0,0,.22);color:inherit;font:inherit;
+ font-size:13px;border:1px solid var(--rmt-trait);border-radius:9px;
+ padding:6px 9px;max-width:270px;cursor:pointer}
+.rmt-ed-info{font-size:12px;color:#8b8b95}
+.rmt-ed-etat{font-size:12px;margin-left:auto;min-height:1em}
+.rmt-ed-b{display:inline-flex;align-items:center;gap:5px;font:inherit;
+ font-size:12.5px;font-weight:600;padding:7px 13px;border-radius:9px;
+ cursor:pointer;background:transparent;color:inherit;
+ border:1px solid var(--rmt-trait);transition:background .14s}
+.rmt-ed-b:hover{background:var(--rmt-doux)}
+.rmt-ed-b:disabled{opacity:.45;cursor:default}
+.rmt-ed-b-on{background:var(--rmt);border-color:var(--rmt);color:#fff}
+.rmt-ed-b-on:hover{filter:brightness(1.08);background:var(--rmt)}
+.rmt-ed-corps{display:grid;grid-template-columns:minmax(0,1fr) 330px;
+ gap:12px;align-items:start}
+@media (max-width:900px){.rmt-ed-corps{grid-template-columns:minmax(0,1fr)}}
+.rmt-ed-liste{display:flex;flex-direction:column;gap:5px;
+ max-height:calc(100vh - 330px);min-height:240px;overflow-y:auto;padding:2px}
+.rmt-ed-liste .rmt-bloc{cursor:pointer}
+.rmt-ed-liste .rmt-bloc.sel{outline:2px solid var(--rmt);
+ outline-offset:-1px}
+.rmt-ed-poig{display:flex;gap:2px;opacity:0;transition:opacity .12s}
+.rmt-bloc:hover .rmt-ed-poig,.rmt-bloc.sel .rmt-ed-poig{opacity:1}
+.rmt-ed-poig button{width:22px;height:22px;display:grid;place-items:center;
+ border:0;border-radius:6px;background:rgba(255,255,255,.07);color:inherit;
+ cursor:pointer;font:inherit;font-size:12px;line-height:1;padding:0}
+.rmt-ed-poig button:hover{background:var(--rmt);color:#fff}
+.rmt-ed-panneau{border:1px solid var(--rmt-trait);border-radius:12px;
+ padding:13px;font-size:13px;background:rgba(0,0,0,.14);
+ position:sticky;top:8px}
+.rmt-ed-lab{font-size:11px;text-transform:uppercase;letter-spacing:.05em;
+ color:#8b8b95;margin:11px 0 5px}
+.rmt-ed-lab:first-child{margin-top:0}
+.rmt-ed-champ{width:100%;box-sizing:border-box;background:rgba(0,0,0,.25);
+ color:inherit;font:inherit;font-size:12.5px;padding:6px 9px;border-radius:8px;
+ border:1px solid var(--rmt-trait)}
+.rmt-ed-champ:focus{outline:1px solid var(--rmt)}
+.rmt-ed-par{display:grid;grid-template-columns:106px minmax(0,1fr) 22px;
+ gap:5px;align-items:center;margin-bottom:5px}
+.rmt-ed-par button{border:0;background:transparent;color:#8b8b95;
+ cursor:pointer;font:inherit;font-size:14px;padding:0}
+.rmt-ed-par button:hover{color:#e05252}
+.rmt-ed-doc{font-size:12px;color:#8b8b95;line-height:1.5;margin-top:6px}
+.rmt-ed-voile{display:none;position:fixed;inset:0;z-index:1200;
+ background:rgba(0,0,0,.55);align-items:flex-start;justify-content:center;
+ padding:70px 16px}
+.rmt-ed-voile.on{display:flex}
+.rmt-ed-palette{width:min(560px,100%);max-height:70vh;display:flex;
+ flex-direction:column;border-radius:14px;overflow:hidden;
+ border:1px solid var(--rmt-trait);background:#151519;color:#e9e9ee}
+body.light .rmt-ed-palette{background:#fff;color:#1c1c1e}
+.rmt-ed-pal-haut{display:flex;gap:8px;padding:11px;
+ border-bottom:1px solid var(--rmt-trait)}
+.rmt-ed-pal-corps{overflow-y:auto;padding:7px}
+.rmt-ed-act{padding:8px 10px;border-radius:9px;cursor:pointer}
+.rmt-ed-act:hover{background:var(--rmt-doux)}
+.rmt-ed-act b{font:600 12.5px ui-monospace,SFMono-Regular,Menlo,monospace}
+.rmt-ed-act span{display:block;font-size:11.5px;color:#8b8b95;
+ line-height:1.45;margin-top:2px}
+</style>
+<script>
+// Ce que l’editeur tient en main. « propre » vaut faux des la premiere
+// retouche : sans lui, quitter la vue effacerait un travail en cours sans
+// que personne ne s’en apercoive.
+var RMT_ED = {nom:'', etapes:[], sel:-1, propre:true, complet:true, actions:[]};
+
+function rmtEdAction(e){
+  // Une etape porte son action comme unique cle utile ; « optional » est un
+  // drapeau pose a cote, pas une action.
+  return Object.keys(e||{}).filter(function(k){return k!=='optional';})[0]||'';
+}
+function rmtEdResume(e){
+  var a=rmtEdAction(e), v=e[a];
+  if(v===true||v===undefined) return '';
+  if(typeof v==='object') return Object.keys(v).map(function(k){
+    return k+'='+JSON.stringify(v[k]);}).join('  ');
+  return String(v);
+}
+function rmtEdEchap(t){
+  return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function rmtEdMsg(t, genre){
+  var e=document.getElementById('rmt-ed-etat');
+  if(!e) return;
+  e.textContent=t||'';
+  e.style.color = genre==='mal' ? '#e05252'
+                : genre==='bien' ? '#4ade80' : '#8b8b95';
+}
+
+function rmtEdListe(){
+  var b=document.getElementById('rmt-ed-liste');
+  if(!b) return;
+  if(!RMT_ED.etapes.length){
+    b.innerHTML='<div style="color:#8b8b95;font-size:12.5px;padding:14px">'
+      +'Ce scenario n’a aucune etape. Utilise « Ajouter ».</div>';
+    return;
+  }
+  b.innerHTML = RMT_ED.etapes.map(function(e,i){
+    var a=rmtEdAction(e), r=rmtEdResume(e);
+    return '<div class="rmt-bloc '+(RMT_FAMILLES[a]||'geste')
+      + (i===RMT_ED.sel?' sel':'') + '" data-ed-i="'+i+'">'
+      + '<span class="num">'+(i+1)+'</span>'
+      + '<div style="flex:1;min-width:0"><div class="act">'
+      + rmtEdEchap(a||'?')+'</div>'
+      + (r?'<div class="par">'+rmtEdEchap(r)+'</div>':'')+'</div>'
+      + (e.optional?'<span class="opt">facultative</span>':'')
+      + '<span class="rmt-ed-poig">'
+      +  '<button type="button" data-ed-m="'+i+'" title="Monter">&#8593;</button>'
+      +  '<button type="button" data-ed-d="'+i+'" title="Descendre">&#8595;</button>'
+      +  '<button type="button" data-ed-x="'+i+'" title="Supprimer">&times;</button>'
+      + '</span></div>';
+  }).join('');
+}
+
+function rmtEdPanneau(){
+  var b=document.getElementById('rmt-ed-panneau');
+  if(!b) return;
+  var e=RMT_ED.etapes[RMT_ED.sel];
+  if(!e){
+    b.innerHTML='<div style="color:#8b8b95;font-size:12.5px;line-height:1.6">'
+      +'Choisis une etape a gauche pour en voir les reglages.</div>';
+    return;
+  }
+  var a=rmtEdAction(e), v=e[a];
+  var doc=(RMT_ED.actions.filter(function(x){return x.nom===a;})[0]||{}).doc||'';
+  var h='<div class="rmt-ed-lab">Action</div>'
+    + '<select class="rmt-ed-champ" id="rmt-ed-act">'
+    + (RMT_ED.actions.length
+        ? RMT_ED.actions.map(function(x){
+            return '<option'+(x.nom===a?' selected':'')+'>'
+                 + rmtEdEchap(x.nom)+'</option>';}).join('')
+        : '<option selected>'+rmtEdEchap(a)+'</option>')
+    + (RMT_ED.actions.length && !RMT_ED.actions.some(function(x){
+         return x.nom===a;})
+       ? '<option selected>'+rmtEdEchap(a)+'</option>' : '')
+    + '</select>'
+    + (doc?'<div class="rmt-ed-doc">'+rmtEdEchap(doc)+'</div>':'');
+
+  h += '<div class="rmt-ed-lab">Parametres</div>';
+  if(v && typeof v==='object' && !Array.isArray(v)){
+    var cles=Object.keys(v);
+    h += cles.length ? cles.map(function(k){
+      return '<div class="rmt-ed-par">'
+        + '<input class="rmt-ed-champ" value="'+rmtEdEchap(k)
+        +   '" data-ed-cle="'+rmtEdEchap(k)+'">'
+        + '<input class="rmt-ed-champ" value="'
+        +   rmtEdEchap(typeof v[k]==='string'?v[k]:JSON.stringify(v[k]))
+        +   '" data-ed-val="'+rmtEdEchap(k)+'">'
+        + '<button type="button" data-ed-cx="'+rmtEdEchap(k)
+        +   '" title="Retirer">&times;</button></div>';
+    }).join('') : '<div class="rmt-ed-doc">Aucun parametre.</div>';
+    h += '<button type="button" class="rmt-ed-b" id="rmt-ed-pplus" '
+       + 'style="margin-top:5px;padding:5px 10px;font-size:12px">'
+       + '+ parametre</button>';
+  } else {
+    h += '<input class="rmt-ed-champ" id="rmt-ed-simple" value="'
+       + rmtEdEchap(v===true||v===undefined?'':v)+'" '
+       + 'placeholder="valeur (vide = aucune)">';
+  }
+  h += '<div class="rmt-ed-lab">Divers</div>'
+    + '<label style="display:flex;gap:7px;align-items:center;font-size:12.5px;'
+    + 'cursor:pointer"><input type="checkbox" id="rmt-ed-opt"'
+    + (e.optional?' checked':'')+'> son echec n’arrete pas le scenario</label>'
+    + '<div class="rmt-ed-lab">Etape brute</div>'
+    + '<textarea class="rmt-ed-champ" id="rmt-ed-json" rows="4" '
+    + 'style="font:12px ui-monospace,SFMono-Regular,Menlo,monospace;'
+    + 'resize:vertical">'+rmtEdEchap(JSON.stringify(e,null,1))+'</textarea>'
+    + '<div class="rmt-ed-doc">Pour les cas que les champs ci-dessus ne '
+    + 'couvrent pas. Applique en quittant le cadre.</div>';
+  b.innerHTML=h;
+}
+
+function rmtEdSale(){
+  RMT_ED.propre=false;
+  rmtEdMsg('Modifications non enregistrees.');
+}
+function rmtEdRendu(){ rmtEdListe(); rmtEdPanneau(); }
+
+// Reecrit l’etape choisie a partir des champs, sans perdre l’ordre des
+// cles : reconstruire un objet a chaque frappe ferait sauter le curseur.
+function rmtEdMaj(f){
+  var e=RMT_ED.etapes[RMT_ED.sel];
+  if(!e) return;
+  f(e); rmtEdSale(); rmtEdListe();
+}
+
+function rmtEdCharger(nom, forcer){
+  if(!forcer && !RMT_ED.propre &&
+     !confirm('Des modifications ne sont pas enregistrees. Les abandonner ?'))
+    return;
+  RMT_ED.nom=nom; RMT_ED.sel=-1; RMT_ED.propre=true;
+  rmtEdMsg('Chargement...');
+  fetch('/api/rig/scenarios',{credentials:'same-origin'})
+   .then(function(r){return r.json();})
+   .then(function(j){
+     var l=(j&&j.scenarios)||[];
+     var ch=document.getElementById('rmt-ed-choix');
+     if(ch && ch.options.length!==l.length){
+       ch.innerHTML=l.map(function(x){
+         return '<option value="'+rmtEdEchap(x.nom)+'">'
+              + rmtEdEchap(x.titre||x.nom)+'</option>';}).join('');
+     }
+     if(!nom && l.length) RMT_ED.nom=nom=l[0].nom;
+     if(ch) ch.value=RMT_ED.nom;
+     var sc=l.filter(function(x){return x.nom===RMT_ED.nom;})[0];
+     RMT_ED.etapes = (sc && Array.isArray(sc.detail))
+                   ? JSON.parse(JSON.stringify(sc.detail)) : [];
+     RMT_ED.complet = !sc || sc.complet!==false;
+     var inf=document.getElementById('rmt-ed-info');
+     if(inf) inf.textContent = RMT_ED.etapes.length+' etapes';
+     var ok=document.getElementById('rmt-ed-ok');
+     if(ok) ok.disabled = !RMT_ED.complet;
+     rmtEdMsg(RMT_ED.complet ? ''
+       : 'Scenario trop long pour etre montre en entier : enregistrement '
+         + 'bloque, la fin serait perdue.', RMT_ED.complet?'':'mal');
+     rmtEdRendu();
+   }).catch(function(){ rmtEdMsg('Catalogue illisible.','mal'); });
+}
+
+function rmtEdPalette(ouvrir){
+  var v=document.getElementById('rmt-ed-voile');
+  if(!v) return;
+  v.classList.toggle('on', !!ouvrir);
+  if(!ouvrir) return;
+  var r=document.getElementById('rmt-ed-rech');
+  if(r){ r.value=''; setTimeout(function(){ r.focus(); },30); }
+  rmtEdPaletteListe('');
+}
+function rmtEdPaletteListe(q){
+  var b=document.getElementById('rmt-ed-pal');
+  if(!b) return;
+  q=(q||'').toLowerCase();
+  var l=RMT_ED.actions.filter(function(x){
+    return !q || x.nom.toLowerCase().indexOf(q)>=0
+             || (x.doc||'').toLowerCase().indexOf(q)>=0;});
+  if(!l.length){
+    b.innerHTML='<div style="padding:14px;color:#8b8b95;font-size:12.5px">'
+      + (RMT_ED.actions.length ? 'Aucune action ne correspond.'
+         : 'Le poste n’a pas encore declare ses actions. Relance '
+           + '<code>agent_rig.py</code>.')+'</div>';
+    return;
+  }
+  b.innerHTML=l.map(function(x){
+    return '<div class="rmt-ed-act" data-ed-add="'+rmtEdEchap(x.nom)+'">'
+      + '<b>'+rmtEdEchap(x.nom)+'</b>'
+      + (x.doc?'<span>'+rmtEdEchap(x.doc)+'</span>':'')+'</div>';
+  }).join('');
+}
+// Le catalogue porte un exemple : s’en servir evite de deposer une etape
+// vide que le moteur refusera au moment d’enregistrer.
+function rmtEdNeuve(nom){
+  var ex=(RMT_ED.actions.filter(function(x){return x.nom===nom;})[0]||{}).exemple;
+  if(ex){
+    try{
+      var o=JSON.parse(ex);
+      if(o && typeof o==='object' && rmtEdAction(o)===nom) return o;
+    }catch(err){}
+  }
+  var e={}; e[nom]={}; return e;
+}
+
+function rmtEdEnregistrer(){
+  if(!RMT_ED.complet){
+    rmtEdMsg('Enregistrement bloque : le detail est incomplet.','mal'); return;
+  }
+  if(!RMT_ED.etapes.length){
+    rmtEdMsg('Un scenario vide ne peut pas etre enregistre.','mal'); return;
+  }
+  var b=document.getElementById('rmt-ed-ok');
+  if(b) b.disabled=true;
+  rmtEdMsg('Envoi au poste...');
+  fetch('/api/rig/jobs',{method:'POST',credentials:'same-origin',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({type:'enregistrer', scenario:RMT_ED.nom,
+                         etapes:RMT_ED.etapes})})
+   .then(function(r){return r.json();})
+   .then(function(j){
+     if(!j||!j.ok){
+       if(b) b.disabled=false;
+       rmtEdMsg((j&&j.error)||'Refuse par le site.','mal'); return;
+     }
+     rmtEdSuivre(j.job.id, 0);
+   }).catch(function(){
+     if(b) b.disabled=false;
+     rmtEdMsg('Site injoignable.','mal');
+   });
+}
+// Le site ne fait qu’inscrire le travail ; c’est le moteur du poste qui
+// valide et ecrit. Tant qu’il n’a pas repondu, rien n’est enregistre —
+// afficher « enregistre » tout de suite serait mentir.
+function rmtEdSuivre(id, essai){
+  if(essai>40){
+    var b0=document.getElementById('rmt-ed-ok');
+    if(b0) b0.disabled=false;
+    rmtEdMsg('Le poste ne repond pas. Est-il lance ?','mal'); return;
+  }
+  rmtEdMsg('En attente du poste' + new Array((essai%3)+2).join('.'));
+  setTimeout(function(){
+    fetch('/api/rig/jobs',{credentials:'same-origin'})
+     .then(function(r){return r.json();})
+     .then(function(j){
+       var w=((j&&j.jobs)||[]).filter(function(x){return x.id===id;})[0];
+       var b=document.getElementById('rmt-ed-ok');
+       if(!w || w.etat==='en_attente' || w.etat==='en_cours')
+         return rmtEdSuivre(id, essai+1);
+       if(b) b.disabled=false;
+       if(w.etat==='fini'){
+         RMT_ED.propre=true;
+         rmtEdMsg(w.avancement||'Enregistre.','bien');
+         if(typeof showToast==='function')
+           showToast('Scenario ' + RMT_ED.nom + ' enregistre');
+         if(typeof remoteScenarios==='function') remoteScenarios();
+       } else {
+         rmtEdMsg(w.erreur||'Refuse par le poste.','mal');
+       }
+     }).catch(function(){ rmtEdSuivre(id, essai+1); });
+  }, 1500);
+}
+
+// Un seul ecouteur, pose une fois : le contenu est reconstruit a chaque
+// retouche, un ecouteur par bouton en laisserait derriere a chaque rendu.
+(function(){
+  if(window.__rmtEd) return; window.__rmtEd=1;
+  document.addEventListener('click', function(ev){
+    var t=ev.target;
+    if(!t || !t.closest) return;
+    var d=function(a){ var x=t.closest('['+a+']');
+                       return x?x.getAttribute(a):null; };
+
+    if(t.closest('#rmt-ed-plus')){ rmtEdPalette(true); return; }
+    if(t.closest('#rmt-ed-fermer')){ rmtEdPalette(false); return; }
+    if(t.id==='rmt-ed-voile'){ rmtEdPalette(false); return; }
+    if(t.closest('#rmt-ed-annuler')){ rmtEdCharger(RMT_ED.nom, true); return; }
+    if(t.closest('#rmt-ed-ok')){ rmtEdEnregistrer(); return; }
+    if(t.closest('#rmt-ed-pplus')){
+      var k=prompt('Nom du parametre ?');
+      if(k) rmtEdMaj(function(e){ e[rmtEdAction(e)][k]=''; });
+      rmtEdPanneau(); return;
+    }
+    var add=d('data-ed-add');
+    if(add!==null){
+      var pos = RMT_ED.sel>=0 ? RMT_ED.sel+1 : RMT_ED.etapes.length;
+      RMT_ED.etapes.splice(pos, 0, rmtEdNeuve(add));
+      RMT_ED.sel=pos; rmtEdSale(); rmtEdPalette(false); rmtEdRendu(); return;
+    }
+    var cx=d('data-ed-cx');
+    if(cx!==null){
+      rmtEdMaj(function(e){ delete e[rmtEdAction(e)][cx]; });
+      rmtEdPanneau(); return;
+    }
+    var m=d('data-ed-m');
+    if(m!==null){ m=+m;
+      if(m>0){ var s=RMT_ED.etapes.splice(m,1)[0];
+               RMT_ED.etapes.splice(m-1,0,s);
+               RMT_ED.sel=m-1; rmtEdSale(); rmtEdListe(); }
+      ev.stopPropagation(); return; }
+    var dn=d('data-ed-d');
+    if(dn!==null){ dn=+dn;
+      if(dn<RMT_ED.etapes.length-1){ var s2=RMT_ED.etapes.splice(dn,1)[0];
+               RMT_ED.etapes.splice(dn+1,0,s2);
+               RMT_ED.sel=dn+1; rmtEdSale(); rmtEdListe(); }
+      ev.stopPropagation(); return; }
+    var x=d('data-ed-x');
+    if(x!==null){ x=+x;
+      RMT_ED.etapes.splice(x,1);
+      if(RMT_ED.sel>=RMT_ED.etapes.length) RMT_ED.sel=RMT_ED.etapes.length-1;
+      rmtEdSale(); rmtEdRendu(); ev.stopPropagation(); return; }
+    var i=d('data-ed-i');
+    if(i!==null){ RMT_ED.sel=+i; rmtEdRendu(); return; }
+  });
+
+  document.addEventListener('input', function(ev){
+    var t=ev.target;
+    if(!t || !t.id && !t.hasAttribute) return;
+    if(t.id==='rmt-ed-rech'){ rmtEdPaletteListe(t.value); return; }
+    if(t.id==='rmt-ed-simple'){
+      rmtEdMaj(function(e){ e[rmtEdAction(e)]=t.value; }); return; }
+    var vk=t.getAttribute && t.getAttribute('data-ed-val');
+    if(vk!==null && vk!==undefined){
+      rmtEdMaj(function(e){
+        var p=e[rmtEdAction(e)], v=t.value;
+        // Un nombre ecrit dans un champ texte doit rester un nombre :
+        // « wait 2 » et « wait "2" » ne sont pas la meme chose pour
+        // le moteur.
+        if(v!=='' && !isNaN(v) && String(+v)===v.trim()) p[vk]=+v;
+        else if(v==='true'||v==='false') p[vk]=(v==='true');
+        else p[vk]=v;
+      });
+      return;
+    }
+  });
+
+  document.addEventListener('change', function(ev){
+    var t=ev.target;
+    if(!t) return;
+    if(t.id==='rmt-ed-choix'){ rmtEdCharger(t.value); return; }
+    if(t.id==='rmt-ed-opt'){
+      rmtEdMaj(function(e){
+        if(t.checked) e.optional=true; else delete e.optional; });
+      return; }
+    if(t.id==='rmt-ed-act'){
+      rmtEdMaj(function(e){
+        var a=rmtEdAction(e), v=e[a];
+        delete e[a]; e[t.value]=v;
+      });
+      rmtEdPanneau(); return; }
+    var ck=t.getAttribute && t.getAttribute('data-ed-cle');
+    if(ck!==null && ck!==undefined && t.value && t.value!==ck){
+      rmtEdMaj(function(e){
+        var p=e[rmtEdAction(e)], neuf={};
+        // Reconstruire en parcourant les cles garde l’ordre d’origine :
+        // renommer en supprimant-ajoutant renverrait le parametre en fin
+        // de liste a chaque frappe.
+        Object.keys(p).forEach(function(k){
+          if(k===ck) neuf[t.value]=p[k]; else neuf[k]=p[k]; });
+        e[rmtEdAction(e)]=neuf;
+      });
+      rmtEdPanneau(); return;
+    }
+  });
+
+  // L’etape brute ne s’applique qu’en quittant le cadre : a chaque
+  // frappe, un JSON a moitie ecrit est invalide et effacerait l’etape.
+  document.addEventListener('focusout', function(ev){
+    if(!ev.target || ev.target.id!=='rmt-ed-json') return;
+    var e=RMT_ED.etapes[RMT_ED.sel];
+    if(!e) return;
+    try{
+      var o=JSON.parse(ev.target.value);
+      if(!o || typeof o!=='object' || Array.isArray(o) || !rmtEdAction(o))
+        throw 0;
+      RMT_ED.etapes[RMT_ED.sel]=o; rmtEdSale(); rmtEdRendu();
+    }catch(err){ rmtEdMsg('Etape brute invalide : ignoree.','mal'); }
+  });
+})();
+
+// Le catalogue d’actions, demande une seule fois : il ne change qu’au
+// redemarrage du moteur.
+function rmtEdActions(){
+  if(RMT_ED.actions.length) return Promise.resolve();
+  return fetch('/api/rig/actions',{credentials:'same-origin'})
+   .then(function(r){return r.json();})
+   .then(function(j){ RMT_ED.actions=(j&&j.actions)||[]; })
+   .catch(function(){});
+}
+function rmtEdOuvrir(nom){
+  rmtEdActions().then(function(){ rmtEdCharger(nom||RMT_ED.nom, true); });
+}
+</script>
 
 <style>
 /* Une seule teinte d'accent pour Remote, redefinie par theme. Chaque
@@ -8668,69 +9154,22 @@ body.light .rmt-tab:hover{color:#1c1c1e}
 .rmt-tab.on{color:var(--rmt);border-bottom-color:var(--rmt)}
 </style>
 <script>
-// Le cadre n'est rempli QU'A l'ouverture de l'onglet : charger les trois au
-// demarrage ferait trois requetes vers la machine locale a chaque visite du
-// dashboard, y compris quand le projet est eteint.
-function remoteCharger(cle){
-  var f=document.querySelector('[data-remote-cadre="'+cle+'"]');
-  var vide=document.querySelector('[data-remote-vide="'+cle+'"]');
-  var et=document.querySelector('[data-remote-etat="'+cle+'"]');
-  if(!f) return;
-  var url=f.getAttribute('data-src');
-  // Le cadre est cross-origin : on ne peut pas le styler depuis ici. On lui
-  // passe le theme, a lui de s'y conformer.
-  try{
-    // Le theme Apple pose DEUX classes : « light apple ». Chercher un
-    // simple alternatif rendait « light », le premier rencontre dans la
-    // chaine — la console recevait donc le mauvais theme. On interroge du
-    // plus precis au plus general.
-    var cl=' '+document.body.className+' ', th='dark';
-    ['apple','obsidian','violet','gold','light'].forEach(function(n){
-      if(th==='dark' && cl.indexOf(' '+n+' ')>=0) th=n;
-    });
-    url += (url.indexOf('?')<0?'?':'&') + 'theme=' + th;
-  }catch(e){}
-  if(et) et.textContent='connexion…';
-  if(vide) vide.style.display='none';
-  f.style.display='block';
-  var repondu=false;
-  f.onload=function(){
-    repondu=true;
-    if(et) et.textContent='connectee';
-    if(vide) vide.style.display='none';   // l'avertissement n'a plus lieu d'etre
-  };
-  f.src=url;
-  // La console ouvre un flux video et interroge le telephone : elle met
-  // couramment plus de dix secondes. On ne CACHE JAMAIS le cadre — le faire
-  // rendait invisible une page qui finissait par arriver, et c'est ce qui
-  // s'est produit. Le message n'est qu'un avertissement pose en dessous, et
-  // il s'efface tout seul si la page se charge apres coup.
-  setTimeout(function(){
-    if(repondu) return;
-    if(et) et.textContent='lente a repondre';
-    if(vide) vide.style.display='block';
-  }, 12000);
-}
+// Les trois vues sont rendues par le site : il n'y a plus de cadre a
+// remplir. Le bouton « Recharger » redemande donc simplement ses
+// donnees a la vue ouverte — avant, il cherchait une iframe disparue
+// et ne faisait plus rien.
 function remoteRecharger(cle){
-  var f=document.querySelector('[data-remote-cadre="'+cle+'"]');
-  if(f) f.src='about:blank';
-  setTimeout(function(){ remoteCharger(cle); }, 60);
+  if(cle==='cycle' && typeof remoteJobs==='function') return remoteJobs();
+  if(cle==='scenarios' && typeof remoteScenarios==='function')
+    return remoteScenarios();
+  if(cle==='drop' && typeof remoteParc==='function') return remoteParc();
+  if(cle==='console' && typeof rmtCsRafraichir==='function')
+    return rmtCsRafraichir();
+  // L'editeur demande confirmation si un travail est en cours : passer
+  // par rmtEdCharger plutot que de forcer evite d'effacer sans prevenir.
+  if(cle==='editeur' && typeof rmtEdCharger==='function')
+    return rmtEdCharger(RMT_ED.nom);
 }
-// showTab est appele partout : on se greffe dessus sans le reecrire.
-(function(){
-  if(window.__remoteHook) return; window.__remoteHook=1;
-  var origine=window.showTab;
-  if(typeof origine!=='function') return;
-  window.showTab=function(grp, tab){
-    var r=origine.apply(this, arguments);
-    try{
-      if(typeof tab==='string' && tab.indexOf('remote')===0){
-        remoteCharger(tab.slice(6));
-      }
-    }catch(e){}
-    return r;
-  };
-})();
 </script>
 </div>
 
@@ -8749,11 +9188,14 @@ function remoteVue(cle){
   document.querySelectorAll('[data-remote-vue]').forEach(function(v){
     v.style.display = (v.getAttribute('data-remote-vue')===cle) ? 'block' : 'none';
   });
-  var f=document.querySelector('[data-remote-cadre="'+cle+'"]');
-  if(f && (!f.src || f.src==='about:blank')) remoteCharger(cle);
   if(cle==='cycle' && typeof remoteJobs==='function') remoteJobs();
   if(cle==='scenarios' && typeof remoteScenarios==='function') remoteScenarios();
   if(cle==='drop' && typeof remoteParc==='function') remoteParc();
+  // Le catalogue n'est demande qu'a l'ouverture : le charger avec la
+  // page ferait un appel de plus a chaque visite, pour une vue
+  // rarement ouverte.
+  if(cle==='editeur' && typeof rmtEdOuvrir==='function' && !RMT_ED.nom)
+    rmtEdOuvrir('');
   if(typeof rmtCsOuvrir==='function'){
     if(cle==='console') rmtCsOuvrir(); else rmtCsFermer();
   }
@@ -8932,16 +9374,11 @@ function remoteScenarios(){
   document.addEventListener('click', function(e){
     var ed=e.target && e.target.closest && e.target.closest('[data-editer]');
     if(ed){
-      // On recharge le cadre de l'editeur sur ce scenario, puis on bascule.
-      // Sans le rechargement il resterait sur ce qu'il affichait avant.
-      var nom=ed.getAttribute('data-editer');
-      var f=document.querySelector('[data-remote-cadre="editeur"]');
-      if(f){
-        var base=f.getAttribute('data-src').split('?')[0];
-        var th=(document.body.className.match(/(apple|obsidian|violet|gold|light)/)||[])[1]||'dark';
-        f.src = base + '?theme=' + th + '&ouvrir=' + encodeURIComponent(nom);
-      }
+      // L'editeur est rendu par le site : plus de cadre a recharger, et
+      // plus de theme a lui passer — il porte deja celui de la page.
       if(typeof remoteVue==='function') remoteVue('editeur');
+      if(typeof rmtEdOuvrir==='function')
+        rmtEdOuvrir(ed.getAttribute('data-editer'));
       return;
     }
     var v=e.target && e.target.closest && e.target.closest('[data-voir]');
@@ -44200,8 +44637,17 @@ def create_app():
             d = _jobs_lire()
             corps = request.get_json(force=True, silent=True) or {}
             genre = (corps.get("type") or "").strip()[:40]
-            if genre not in ("cycle", "etape", "scenario", "geste"):
+            if genre not in ("cycle", "etape", "scenario", "geste",
+                             "enregistrer"):
                 return jsonify({"ok": False, "error": "type inconnu"}), 400
+            if genre == "enregistrer":
+                etapes = corps.get("etapes")
+                if not isinstance(etapes, list) or not etapes:
+                    return jsonify({"ok": False,
+                                    "error": "aucune etape a enregistrer"}), 400
+                if len(etapes) > 200:
+                    return jsonify({"ok": False,
+                                    "error": "trop d etapes (max 200)"}), 400
             # Un cycle sans categorie va jusqu'a la sixieme etape puis
             # echoue : l'etape des medias ne sait pas quoi choisir. Autant
             # le refuser tout de suite que de creer un compte pour rien.
@@ -44229,6 +44675,11 @@ def create_app():
                 # que la mesure ait jamais ete faite.
                 "sans_lien": bool(corps.get("sans_lien")),
                 "categorie": (corps.get("categorie") or "").strip()[:40],
+                # Les etapes d'un scenario reecrit. C'est le moteur du poste
+                # qui les valide : le site ne connait pas les actions, et
+                # une etape refusee ne doit pas ecraser le fichier.
+                "etapes": (corps.get("etapes") or [])[:200] if isinstance(
+                    corps.get("etapes"), list) else [],
                 "par": (session.get("username") or "?")[:40],
                 "cree": int(time.time()),
                 "etat": "en_attente", "avancement": "", "erreur": "",
@@ -44320,6 +44771,10 @@ def create_app():
                     "description": str(it.get("description") or "")[:300],
                     "etapes": int(it.get("etapes") or 0),
                     "detail": detail[:120] if isinstance(detail, list) else [],
+                    # Sans ce drapeau, l'editeur reenregistrerait une liste
+                    # coupee a 120 et perdrait la fin du scenario en silence.
+                    "complet": bool(it.get("complet", True)) and (
+                        not isinstance(detail, list) or len(detail) <= 120),
                 })
             propres.sort(key=lambda x: x["nom"])
             safe_json.write(RIG_SCENARIOS,
@@ -44331,6 +44786,41 @@ def create_app():
             return jsonify({"ok": False, "error": "jeton"}), 403
         d = safe_json.load(RIG_SCENARIOS, default={}) or {}
         return jsonify({"ok": True, "scenarios": d.get("scenarios") or [],
+                        "ts": d.get("ts") or 0})
+
+    RIG_ACTIONS = DATA_DIR / "rig_actions.json"
+
+    @app.route("/api/rig/actions", methods=["GET", "POST"])
+    def rig_actions():
+        """Les actions que le moteur du poste comprend.
+
+        L'editeur s'en sert pour proposer une palette. Sans elle il faudrait
+        deviner les noms, et une action inventee fait echouer la validation
+        au moment ou l'on croit avoir enregistre.
+        """
+        from flask import jsonify
+        if request.method == "POST":
+            code = _rig_ok()
+            if code != 200:
+                return jsonify({"ok": False, "error": "jeton"}), code
+            corps = request.get_json(force=True, silent=True) or {}
+            propres = []
+            for a in (corps.get("actions") or [])[:80]:
+                if not isinstance(a, dict) or not (a.get("nom") or "").strip():
+                    continue
+                propres.append({"nom": str(a["nom"]).strip()[:40],
+                                "doc": str(a.get("doc") or "")[:200],
+                                "exemple": str(a.get("exemple") or "")[:300]})
+            propres.sort(key=lambda x: x["nom"])
+            safe_json.write(RIG_ACTIONS,
+                            {"actions": propres, "ts": int(time.time())},
+                            indent=None)
+            return jsonify({"ok": True, "n": len(propres)})
+
+        if not is_auth() and _rig_ok() != 200:
+            return jsonify({"ok": False, "error": "jeton"}), 403
+        d = safe_json.load(RIG_ACTIONS, default={}) or {}
+        return jsonify({"ok": True, "actions": d.get("actions") or [],
                         "ts": d.get("ts") or 0})
 
     RIG_ECRAN = DATA_DIR / "rig_ecran.jpg"
