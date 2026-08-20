@@ -8451,7 +8451,56 @@ document.addEventListener('click',function(e){
   </div>
   <div id="rmt-scenarios"></div>
 </div>
-<div data-remote-vue="drop" style="display:none"><div data-remote-vide="drop" style="display:none;padding:22px;border:1px dashed #34343a;border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6;margin-bottom:12px"><b style="color:#fbbf24">Cette vue tarde a repondre.</b><br>Le cadre reste juste en dessous : si elle finit par s'afficher, ignore ce message.<br>&bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>&bull; tu n'es pas sur le poste ou l'iPhone est branche.</div><iframe data-remote-cadre="drop" src="about:blank" data-src="http://127.0.0.1:8097/" style="width:100%;height:calc(100vh - 250px);min-height:520px;border:1px solid #26262c;border-radius:12px;background:#0d0d10"></iframe></div><div data-remote-vue="console" style="display:none"><div data-remote-vide="console" style="display:none;padding:22px;border:1px dashed #34343a;border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6;margin-bottom:12px"><b style="color:#fbbf24">Cette vue tarde a repondre.</b><br>Le cadre reste juste en dessous : si elle finit par s'afficher, ignore ce message.<br>&bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>&bull; tu n'es pas sur le poste ou l'iPhone est branche.</div><iframe data-remote-cadre="console" src="about:blank" data-src="http://127.0.0.1:8770/" style="width:100%;height:calc(100vh - 250px);min-height:520px;border:1px solid #26262c;border-radius:12px;background:#0d0d10"></iframe></div><div data-remote-vue="editeur" style="display:none"><div data-remote-vide="editeur" style="display:none;padding:22px;border:1px dashed #34343a;border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6;margin-bottom:12px"><b style="color:#fbbf24">Cette vue tarde a repondre.</b><br>Le cadre reste juste en dessous : si elle finit par s'afficher, ignore ce message.<br>&bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>&bull; tu n'es pas sur le poste ou l'iPhone est branche.</div><iframe data-remote-cadre="editeur" src="about:blank" data-src="http://127.0.0.1:8770/editor" style="width:100%;height:calc(100vh - 250px);min-height:520px;border:1px solid #26262c;border-radius:12px;background:#0d0d10"></iframe></div>
+<div data-remote-vue="drop" style="display:none"><div data-remote-vide="drop" style="display:none;padding:22px;border:1px dashed #34343a;border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6;margin-bottom:12px"><b style="color:#fbbf24">Cette vue tarde a repondre.</b><br>Le cadre reste juste en dessous : si elle finit par s'afficher, ignore ce message.<br>&bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>&bull; tu n'es pas sur le poste ou l'iPhone est branche.</div><iframe data-remote-cadre="drop" src="about:blank" data-src="http://127.0.0.1:8097/" style="width:100%;height:calc(100vh - 250px);min-height:520px;border:1px solid #26262c;border-radius:12px;background:#0d0d10"></iframe></div><div data-remote-vue="console" style="display:none">
+  <div id="rmt-cs-absent" style="display:none;padding:20px;border:1px dashed #34343a;
+    border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6">
+    <b style="color:#fbbf24">Le telephone n est pas joignable depuis ce poste.</b><br>
+    L ecran et les gestes passent par la machine ou l iPhone est branche —
+    cette page ne peut l atteindre que depuis ce poste.<br>
+    Depuis ailleurs, les onglets <b>Cycle</b> et <b>Scenarios</b> fonctionnent :
+    ils passent par l agent.
+  </div>
+  <div id="rmt-cs" style="display:none;gap:18px;align-items:flex-start;flex-wrap:wrap">
+    <div class="rmt-tel">
+      <img id="rmt-flux" alt="ecran du telephone"
+        style="width:100%;height:100%;object-fit:contain;border-radius:16px;
+        background:#000;cursor:crosshair;display:block">
+    </div>
+    <div style="flex:1;min-width:230px;display:flex;flex-direction:column;gap:12px">
+      <div>
+        <div class="rmt-lab">Boutons</div>
+        <div style="display:flex;gap:7px;flex-wrap:wrap">
+          <button type="button" class="rmt-btn" data-bt="home">Accueil</button>
+          <button type="button" class="rmt-btn" data-bt="lock">Verrouiller</button>
+          <button type="button" class="rmt-btn" data-cs="shot">Capture</button>
+        </div>
+      </div>
+      <div>
+        <div class="rmt-lab">Glisser</div>
+        <div style="display:flex;gap:7px;flex-wrap:wrap">
+          <button type="button" class="rmt-btn" data-sw="haut">Haut</button>
+          <button type="button" class="rmt-btn" data-sw="bas">Bas</button>
+          <button type="button" class="rmt-btn" data-sw="gauche">Gauche</button>
+          <button type="button" class="rmt-btn" data-sw="droite">Droite</button>
+        </div>
+      </div>
+      <div>
+        <div class="rmt-lab">Ecrire</div>
+        <div style="display:flex;gap:7px">
+          <input type="text" id="rmt-txt" class="rmt-champ" style="flex:1"
+            placeholder="texte a saisir">
+          <button type="button" class="rmt-btn" data-cs="txt">Envoyer</button>
+        </div>
+      </div>
+      <div class="rmt-lab" id="rmt-cs-msg" style="min-height:16px"></div>
+      <div style="font-size:11.5px;color:#6b6b70;line-height:1.5">
+        Clique sur l ecran pour taper au meme endroit. Les coordonnees sont
+        converties automatiquement.
+      </div>
+    </div>
+  </div>
+</div>
+<div data-remote-vue="editeur" style="display:none"><div data-remote-vide="editeur" style="display:none;padding:22px;border:1px dashed #34343a;border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6;margin-bottom:12px"><b style="color:#fbbf24">Cette vue tarde a repondre.</b><br>Le cadre reste juste en dessous : si elle finit par s'afficher, ignore ce message.<br>&bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>&bull; tu n'es pas sur le poste ou l'iPhone est branche.</div><iframe data-remote-cadre="editeur" src="about:blank" data-src="http://127.0.0.1:8770/editor" style="width:100%;height:calc(100vh - 250px);min-height:520px;border:1px solid #26262c;border-radius:12px;background:#0d0d10"></iframe></div>
 
 <style>
 .rmt-etat{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
@@ -8497,6 +8546,12 @@ body.light #rmt-conteneur,body.light #rmt-genre,body.light #rmt-etape{
    qu'on repere d'un coup d'oeil ce que fait un scenario de vingt etapes. */
 /* Catalogue de scenarios. Grille auto-ajustee : le nombre de colonnes
    suit la largeur disponible, panneau ouvert ou non. */
+/* L'ecran du telephone : proportions fixes, pour que les coordonnees
+   restent justes quelle que soit la largeur disponible. */
+.rmt-tel{width:250px;aspect-ratio:375/812;border-radius:20px;padding:7px;
+  background:#111;border:1px solid #26262c;flex-shrink:0}
+body.light .rmt-tel{background:#1c1c1e;border-color:rgba(60,60,67,.2)}
+.rmt-lab{font-size:11.5px;color:#8b8b95;margin-bottom:6px}
 .rmt-grille{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));
   gap:12px}
 .rmt-carte{border:1px solid #26262c;border-radius:13px;padding:15px 16px;
@@ -8649,6 +8704,9 @@ function remoteVue(cle){
   if(lien && f) lien.href=f.getAttribute('data-src');
   if(cle==='cycle' && typeof remoteJobs==='function') remoteJobs();
   if(cle==='scenarios' && typeof remoteScenarios==='function') remoteScenarios();
+  if(typeof rmtCsOuvrir==='function'){
+    if(cle==='console') rmtCsOuvrir(); else rmtCsFermer();
+  }
 }
 // Etat du telephone, lu directement sur la console locale. Elle n'autorise
 // que la LECTURE depuis cette origine ; un echec ici veut simplement dire
@@ -8920,6 +8978,90 @@ function rmtDeplier(nom, bouton){
      bouton.classList.add('rmt-mini-on');
    }).catch(function(){});
 }
+</script>
+
+<script>
+var RMT_CS = 'http://127.0.0.1:8770';
+// Points logiques de l'ecran. WebDriverAgent travaille en POINTS, jamais en
+// pixels : un tap envoye en pixels tomberait trois fois trop loin.
+var RMT_W = 375, RMT_H = 812;
+
+function rmtCsMsg(t, erreur){
+  var e=document.getElementById('rmt-cs-msg');
+  if(e){ e.textContent=t||''; e.style.color = erreur ? '#c93a3a' : '#8b8b95'; }
+}
+function rmtCsPost(chemin, corps){
+  return fetch(RMT_CS+chemin,{method:'POST',mode:'cors',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(corps||{})})
+   .then(function(r){ return r.json().catch(function(){ return {}; }); });
+}
+// L'ecran est joignable ou il ne l'est pas : on montre l'un ou l'autre, jamais
+// un cadre noir dont on ne sait pas s'il charge encore.
+function rmtCsOuvrir(){
+  var img=document.getElementById('rmt-flux');
+  var boite=document.getElementById('rmt-cs');
+  var absent=document.getElementById('rmt-cs-absent');
+  if(!img) return;
+  fetch(RMT_CS+'/api/state',{mode:'cors'})
+   .then(function(r){return r.json();})
+   .then(function(j){
+     boite.style.display='flex'; absent.style.display='none';
+     if(j&&j.screen&&j.screen.width){ RMT_W=j.screen.width; RMT_H=j.screen.height; }
+     if(!img.src) img.src = RMT_CS+'/api/stream?t='+Date.now();
+     rmtCsMsg(j&&j.connected ? '' : 'iPhone absent', !(j&&j.connected));
+   })
+   .catch(function(){
+     boite.style.display='none'; absent.style.display='block';
+   });
+}
+function rmtCsFermer(){
+  // Couper la source arrete le flux : le laisser tourner en fond garderait
+  // une connexion ouverte et ferait chauffer le telephone pour rien.
+  var img=document.getElementById('rmt-flux');
+  if(img){ img.removeAttribute('src'); }
+}
+(function(){
+  if(window.__rmtCs) return; window.__rmtCs=1;
+  document.addEventListener('click', function(e){
+    var t=e.target;
+    if(!t || !t.closest) return;
+    var img = t.id==='rmt-flux' ? t : null;
+    if(img){
+      // Le clic est en pixels d'affichage : on le ramene en points d'ecran.
+      var r=img.getBoundingClientRect();
+      var x=Math.round((e.clientX-r.left)/r.width*RMT_W);
+      var y=Math.round((e.clientY-r.top)/r.height*RMT_H);
+      rmtCsMsg('tap '+x+','+y);
+      rmtCsPost('/api/tap',{x:x,y:y}).catch(function(){ rmtCsMsg('geste refuse',1); });
+      return;
+    }
+    var b=t.closest('[data-bt]');
+    if(b){ rmtCsPost('/api/button',{name:b.getAttribute('data-bt')});
+           rmtCsMsg(b.getAttribute('data-bt')); return; }
+    var sw=t.closest('[data-sw]');
+    if(sw){
+      var d=sw.getAttribute('data-sw');
+      var cx=Math.round(RMT_W/2), cy=Math.round(RMT_H/2), p=Math.round(RMT_H/4);
+      var a={haut:[cx,cy+p,cx,cy-p], bas:[cx,cy-p,cx,cy+p],
+             gauche:[cx+p,cy,cx-p,cy], droite:[cx-p,cy,cx+p,cy]}[d];
+      rmtCsPost('/api/swipe',{x1:a[0],y1:a[1],x2:a[2],y2:a[3],duration:0.3});
+      rmtCsMsg('glisse vers '+d); return;
+    }
+    var c=t.closest('[data-cs]');
+    if(!c) return;
+    var quoi=c.getAttribute('data-cs');
+    if(quoi==='txt'){
+      var ch=document.getElementById('rmt-txt');
+      var v=ch ? ch.value : '';
+      if(!v) return;
+      rmtCsPost('/api/text',{text:v}); rmtCsMsg('texte envoye');
+      if(ch) ch.value='';
+    }else if(quoi==='shot'){
+      rmtCsPost('/api/screenshot',{}); rmtCsMsg('capture demandee');
+    }
+  });
+})();
 </script>
 
 <div class="form-section" id="form-igtrends" style="display:none">
