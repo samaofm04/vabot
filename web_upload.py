@@ -8793,6 +8793,13 @@ function remoteScenarios(){
          +     '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" '
          +     'stroke="currentColor" stroke-width="2" stroke-linecap="round">'
          +     '<path d="M3 12h6M3 6h13M3 18h9"/></svg></button>'
+         +   '<button type="button" class="rmt-mini" title="Ouvrir dans l editeur" '
+         +     'data-editer="'+x.nom+'">'
+         +     '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" '
+         +     'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+         +     'stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 '
+         +     '0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 '
+         +     '3L12 15l-4 1 1-4z"/></svg></button>'
          +   '<button type="button" class="rmt-mini" title="Jouer maintenant" '
          +     'data-sc="'+x.nom+'">'
          +     '<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">'
@@ -8811,6 +8818,20 @@ function remoteScenarios(){
 (function(){
   if(window.__rmtSc) return; window.__rmtSc=1;
   document.addEventListener('click', function(e){
+    var ed=e.target && e.target.closest && e.target.closest('[data-editer]');
+    if(ed){
+      // On recharge le cadre de l'editeur sur ce scenario, puis on bascule.
+      // Sans le rechargement il resterait sur ce qu'il affichait avant.
+      var nom=ed.getAttribute('data-editer');
+      var f=document.querySelector('[data-remote-cadre="editeur"]');
+      if(f){
+        var base=f.getAttribute('data-src').split('?')[0];
+        var th=(document.body.className.match(/(apple|obsidian|violet|gold|light)/)||[])[1]||'dark';
+        f.src = base + '?theme=' + th + '&ouvrir=' + encodeURIComponent(nom);
+      }
+      if(typeof remoteVue==='function') remoteVue('editeur');
+      return;
+    }
     var v=e.target && e.target.closest && e.target.closest('[data-voir]');
     if(v){ rmtDeplier(v.getAttribute('data-voir'), v); return; }
     var b=e.target && e.target.closest && e.target.closest('[data-sc]');
