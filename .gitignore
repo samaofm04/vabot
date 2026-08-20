@@ -29,3 +29,9 @@ update_user_cog.sh
 # IDE
 .vscode/
 .idea/
+
+# Sauvegardes manuelles prises avant une modification : utiles sur le moment,
+# sans interet dans l historique.
+*.avant
+*.avant[0-9]
+*.avant_*
