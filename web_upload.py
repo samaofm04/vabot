@@ -8422,6 +8422,12 @@ document.addEventListener('click',function(e){
         <option value="reels">8 · reels</option>
       </select>
     </div>
+    <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;
+      color:#8b8b95;cursor:pointer;align-self:flex-end;padding-bottom:9px"
+      title="L etape 1 appelle le lien de changement d IP avant de creer le conteneur">
+      <input type="checkbox" id="rmt-sans-lien" style="width:15px;height:15px;
+        accent-color:#3b82f6;cursor:pointer">
+      sans changement d IP</label>
     <button type="button" class="rmt-btn rmt-btn-p" id="rmt-go"
       onclick="remoteLancer()" style="align-self:flex-end;padding:10px 18px">
       Lancer</button>
@@ -8622,6 +8628,8 @@ function remoteLancer(){
   var corps={type:genre,
              conteneur:((document.getElementById('rmt-conteneur')||{}).value||'').trim()};
   if(genre==='etape') corps.etape=(document.getElementById('rmt-etape')||{}).value||'';
+  var sl=document.getElementById('rmt-sans-lien');
+  if(sl && sl.checked) corps.sans_lien=true;
   if(go){ go.disabled=true; go.textContent='...'; }
   fetch('/api/rig/jobs',{method:'POST',credentials:'same-origin',
     headers:{'Content-Type':'application/json'},body:JSON.stringify(corps)})
@@ -43710,6 +43718,11 @@ def create_app():
                 "conteneur": (corps.get("conteneur") or "").strip()[:60],
                 "etape": (corps.get("etape") or "").strip()[:40],
                 "identity": (corps.get("identity") or "").strip().lower()[:60],
+                # L'etape 1 appelle un lien de changement d'IP avant de creer
+                # le conteneur. Le sauter sert a comparer : la passation
+                # soupconne ce lien de pousser Instagram vers WhatsApp, sans
+                # que la mesure ait jamais ete faite.
+                "sans_lien": bool(corps.get("sans_lien")),
                 "par": (session.get("username") or "?")[:40],
                 "cree": int(time.time()),
                 "etat": "en_attente", "avancement": "", "erreur": "",
