@@ -8396,7 +8396,9 @@ document.addEventListener('click',function(e){
   </div>
   <div data-remote-vide="drop" style="display:none;padding:26px;border:1px dashed #34343a;
     border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6">
-    <b style="color:#fbbf24">La console ne repond pas.</b><br>
+    <b style="color:#fbbf24">La console tarde a repondre.</b><br>
+    Le cadre reste juste en dessous : si elle finit par s'afficher,
+    ignore ce message.<br>
     Trois causes possibles, dans l'ordre :<br>
     &bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>
     &bull; tu n'es pas sur la machine ou l'iPhone est branche — cette page ne
@@ -8424,7 +8426,9 @@ document.addEventListener('click',function(e){
   </div>
   <div data-remote-vide="console" style="display:none;padding:26px;border:1px dashed #34343a;
     border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6">
-    <b style="color:#fbbf24">La console ne repond pas.</b><br>
+    <b style="color:#fbbf24">La console tarde a repondre.</b><br>
+    Le cadre reste juste en dessous : si elle finit par s'afficher,
+    ignore ce message.<br>
     Trois causes possibles, dans l'ordre :<br>
     &bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>
     &bull; tu n'es pas sur la machine ou l'iPhone est branche — cette page ne
@@ -8452,7 +8456,9 @@ document.addEventListener('click',function(e){
   </div>
   <div data-remote-vide="editeur" style="display:none;padding:26px;border:1px dashed #34343a;
     border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6">
-    <b style="color:#fbbf24">La console ne repond pas.</b><br>
+    <b style="color:#fbbf24">La console tarde a repondre.</b><br>
+    Le cadre reste juste en dessous : si elle finit par s'afficher,
+    ignore ce message.<br>
     Trois causes possibles, dans l'ordre :<br>
     &bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>
     &bull; tu n'es pas sur la machine ou l'iPhone est branche — cette page ne
@@ -8486,16 +8492,22 @@ function remoteCharger(cle){
   if(vide) vide.style.display='none';
   f.style.display='block';
   var repondu=false;
-  f.onload=function(){ repondu=true; if(et) et.textContent='connectee'; };
+  f.onload=function(){
+    repondu=true;
+    if(et) et.textContent='connectee';
+    if(vide) vide.style.display='none';   // l'avertissement n'a plus lieu d'etre
+  };
   f.src=url;
-  // Un cadre bloque ou injoignable ne declenche jamais onload : au bout de
-  // 4 s sans reponse, on montre l'explication plutot qu'un rectangle noir.
+  // La console ouvre un flux video et interroge le telephone : elle met
+  // couramment plus de dix secondes. On ne CACHE JAMAIS le cadre — le faire
+  // rendait invisible une page qui finissait par arriver, et c'est ce qui
+  // s'est produit. Le message n'est qu'un avertissement pose en dessous, et
+  // il s'efface tout seul si la page se charge apres coup.
   setTimeout(function(){
     if(repondu) return;
-    if(et) et.textContent='injoignable';
+    if(et) et.textContent='lente a repondre';
     if(vide) vide.style.display='block';
-    f.style.display='none';
-  }, 4000);
+  }, 12000);
 }
 function remoteRecharger(cle){
   var f=document.querySelector('[data-remote-cadre="'+cle+'"]');
