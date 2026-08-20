@@ -8454,11 +8454,10 @@ document.addEventListener('click',function(e){
 <div data-remote-vue="drop" style="display:none"><div data-remote-vide="drop" style="display:none;padding:22px;border:1px dashed #34343a;border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6;margin-bottom:12px"><b style="color:#fbbf24">Cette vue tarde a repondre.</b><br>Le cadre reste juste en dessous : si elle finit par s'afficher, ignore ce message.<br>&bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>&bull; tu n'es pas sur le poste ou l'iPhone est branche.</div><iframe data-remote-cadre="drop" src="about:blank" data-src="http://127.0.0.1:8097/" style="width:100%;height:calc(100vh - 250px);min-height:520px;border:1px solid #26262c;border-radius:12px;background:#0d0d10"></iframe></div><div data-remote-vue="console" style="display:none">
   <div id="rmt-cs-absent" style="display:none;padding:20px;border:1px dashed #34343a;
     border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6">
-    <b style="color:#fbbf24">Le telephone n est pas joignable depuis ce poste.</b><br>
-    L ecran et les gestes passent par la machine ou l iPhone est branche —
-    cette page ne peut l atteindre que depuis ce poste.<br>
-    Depuis ailleurs, les onglets <b>Cycle</b> et <b>Scenarios</b> fonctionnent :
-    ils passent par l agent.
+    <b style="color:#fbbf24">Aucune image pour l instant.</b><br>
+    L ecran arrive par l agent qui tourne sur la machine du telephone.
+    Verifie qu il est lance (<code>agent_rig.py</code>) — la premiere image
+    apparait dans les deux secondes qui suivent.
   </div>
   <div id="rmt-cs" style="display:none;gap:18px;align-items:flex-start;flex-wrap:wrap">
     <div class="rmt-tel">
@@ -8981,63 +8980,66 @@ function rmtDeplier(nom, bouton){
 </script>
 
 <script>
-var RMT_CS = 'http://127.0.0.1:8770';
-// Points logiques de l'ecran. WebDriverAgent travaille en POINTS, jamais en
-// pixels : un tap envoye en pixels tomberait trois fois trop loin.
+// Points logiques de l'ecran. WebDriverAgent ne connait que les POINTS :
+// un geste envoye en pixels tomberait trois fois trop loin.
 var RMT_W = 375, RMT_H = 812;
+var rmtCsTimer = null;
 
 function rmtCsMsg(t, erreur){
   var e=document.getElementById('rmt-cs-msg');
   if(e){ e.textContent=t||''; e.style.color = erreur ? '#c93a3a' : '#8b8b95'; }
 }
-function rmtCsPost(chemin, corps){
-  return fetch(RMT_CS+chemin,{method:'POST',mode:'cors',
+// Un geste est un travail comme un autre : le site l'inscrit, l'agent le
+// prend. Il capture l'ecran juste apres, donc l'image se met a jour seule.
+function rmtGeste(g){
+  return fetch('/api/rig/jobs',{method:'POST',credentials:'same-origin',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(corps||{})})
-   .then(function(r){ return r.json().catch(function(){ return {}; }); });
+    body:JSON.stringify({type:'geste',geste:g})})
+   .then(function(r){return r.json();});
 }
-// L'ecran est joignable ou il ne l'est pas : on montre l'un ou l'autre, jamais
-// un cadre noir dont on ne sait pas s'il charge encore.
-function rmtCsOuvrir(){
+function rmtCsRafraichir(){
   var img=document.getElementById('rmt-flux');
-  var boite=document.getElementById('rmt-cs');
-  var absent=document.getElementById('rmt-cs-absent');
   if(!img) return;
-  fetch(RMT_CS+'/api/state',{mode:'cors'})
-   .then(function(r){return r.json();})
-   .then(function(j){
-     boite.style.display='flex'; absent.style.display='none';
-     if(j&&j.screen&&j.screen.width){ RMT_W=j.screen.width; RMT_H=j.screen.height; }
-     if(!img.src) img.src = RMT_CS+'/api/stream?t='+Date.now();
-     rmtCsMsg(j&&j.connected ? '' : 'iPhone absent', !(j&&j.connected));
-   })
-   .catch(function(){
-     boite.style.display='none'; absent.style.display='block';
-   });
+  // Signale qu'on regarde : sans ce signal l'agent capturerait en
+  // permanence, pour personne.
+  fetch('/api/rig/pilotage',{method:'POST',credentials:'same-origin'}).catch(function(){});
+  var url='/api/rig/ecran?t='+Date.now();
+  var essai=new Image();
+  essai.onload=function(){
+    img.src=url;
+    document.getElementById('rmt-cs').style.display='flex';
+    document.getElementById('rmt-cs-absent').style.display='none';
+  };
+  essai.onerror=function(){
+    // Pas encore d'image : le poste est peut-etre eteint, ou l'agent
+    // n'a pas encore eu le temps d'en deposer une.
+    document.getElementById('rmt-cs-absent').style.display='block';
+  };
+  essai.src=url;
+}
+function rmtCsOuvrir(){
+  rmtCsRafraichir();
+  if(rmtCsTimer) clearInterval(rmtCsTimer);
+  rmtCsTimer=setInterval(rmtCsRafraichir, 1500);
 }
 function rmtCsFermer(){
-  // Couper la source arrete le flux : le laisser tourner en fond garderait
-  // une connexion ouverte et ferait chauffer le telephone pour rien.
-  var img=document.getElementById('rmt-flux');
-  if(img){ img.removeAttribute('src'); }
+  if(rmtCsTimer){ clearInterval(rmtCsTimer); rmtCsTimer=null; }
 }
 (function(){
   if(window.__rmtCs) return; window.__rmtCs=1;
   document.addEventListener('click', function(e){
     var t=e.target;
     if(!t || !t.closest) return;
-    var img = t.id==='rmt-flux' ? t : null;
-    if(img){
-      // Le clic est en pixels d'affichage : on le ramene en points d'ecran.
-      var r=img.getBoundingClientRect();
+    if(t.id==='rmt-flux'){
+      var r=t.getBoundingClientRect();
       var x=Math.round((e.clientX-r.left)/r.width*RMT_W);
       var y=Math.round((e.clientY-r.top)/r.height*RMT_H);
       rmtCsMsg('tap '+x+','+y);
-      rmtCsPost('/api/tap',{x:x,y:y}).catch(function(){ rmtCsMsg('geste refuse',1); });
+      rmtGeste({quoi:'tap',x:x,y:y}).then(function(){ setTimeout(rmtCsRafraichir, 900); });
       return;
     }
     var b=t.closest('[data-bt]');
-    if(b){ rmtCsPost('/api/button',{name:b.getAttribute('data-bt')});
+    if(b){ rmtGeste({quoi:'button',nom:b.getAttribute('data-bt')});
            rmtCsMsg(b.getAttribute('data-bt')); return; }
     var sw=t.closest('[data-sw]');
     if(sw){
@@ -9045,20 +9047,19 @@ function rmtCsFermer(){
       var cx=Math.round(RMT_W/2), cy=Math.round(RMT_H/2), p=Math.round(RMT_H/4);
       var a={haut:[cx,cy+p,cx,cy-p], bas:[cx,cy-p,cx,cy+p],
              gauche:[cx+p,cy,cx-p,cy], droite:[cx-p,cy,cx+p,cy]}[d];
-      rmtCsPost('/api/swipe',{x1:a[0],y1:a[1],x2:a[2],y2:a[3],duration:0.3});
+      rmtGeste({quoi:'swipe',x1:a[0],y1:a[1],x2:a[2],y2:a[3]});
       rmtCsMsg('glisse vers '+d); return;
     }
     var c=t.closest('[data-cs]');
     if(!c) return;
-    var quoi=c.getAttribute('data-cs');
-    if(quoi==='txt'){
+    if(c.getAttribute('data-cs')==='txt'){
       var ch=document.getElementById('rmt-txt');
       var v=ch ? ch.value : '';
       if(!v) return;
-      rmtCsPost('/api/text',{text:v}); rmtCsMsg('texte envoye');
+      rmtGeste({quoi:'texte',texte:v}); rmtCsMsg('texte envoye');
       if(ch) ch.value='';
-    }else if(quoi==='shot'){
-      rmtCsPost('/api/screenshot',{}); rmtCsMsg('capture demandee');
+    }else{
+      rmtCsRafraichir(); rmtCsMsg('rafraichi');
     }
   });
 })();
@@ -44072,7 +44073,7 @@ def create_app():
             d = _jobs_lire()
             corps = request.get_json(force=True, silent=True) or {}
             genre = (corps.get("type") or "").strip()[:40]
-            if genre not in ("cycle", "etape", "scenario"):
+            if genre not in ("cycle", "etape", "scenario", "geste"):
                 return jsonify({"ok": False, "error": "type inconnu"}), 400
             # Un cycle sans categorie va jusqu'a la sixieme etape puis
             # echoue : l'etape des medias ne sait pas quoi choisir. Autant
@@ -44090,6 +44091,10 @@ def create_app():
                 "conteneur": (corps.get("conteneur") or "").strip()[:60],
                 "etape": (corps.get("etape") or "").strip()[:40],
                 "scenario": (corps.get("scenario") or "").strip()[:60],
+                # Un geste : tap, glissement, bouton, saisie. Les parametres
+                # sont verifies par l'agent, qui seul connait l'ecran.
+                "geste": (corps.get("geste") or {}) if isinstance(
+                    corps.get("geste"), dict) else {},
                 "identity": (corps.get("identity") or "").strip().lower()[:60],
                 # L'etape 1 appelle un lien de changement d'IP avant de creer
                 # le conteneur. Le sauter sert a comparer : la passation
@@ -44160,6 +44165,54 @@ def create_app():
         return jsonify({"ok": True, "scenarios": d.get("scenarios") or [],
                         "ts": d.get("ts") or 0})
 
+    RIG_ECRAN = DATA_DIR / "rig_ecran.jpg"
+    RIG_PILOTAGE = DATA_DIR / "rig_pilotage.json"
+
+    def _pilotage_actif() -> bool:
+        """Quelqu'un regarde-t-il l'ecran en ce moment ?"""
+        try:
+            d = safe_json.load(RIG_PILOTAGE, default={}) or {}
+            return (time.time() - float(d.get("ts") or 0)) < 25
+        except Exception:
+            return False
+
+    @app.route("/api/rig/pilotage", methods=["POST"])
+    def rig_pilotage():
+        """L'interface signale qu'elle affiche l'ecran."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        safe_json.write(RIG_PILOTAGE, {"ts": int(time.time())}, indent=None)
+        return jsonify({"ok": True})
+
+    @app.route("/api/rig/ecran", methods=["GET", "POST"])
+    def rig_ecran():
+        """La derniere capture d'ecran du telephone."""
+        from flask import jsonify, send_file
+        if request.method == "POST":
+            code = _rig_ok()
+            if code != 200:
+                return jsonify({"ok": False, "error": "jeton"}), code
+            data = request.get_data() or b""
+            # Une capture reduite tient en quelques dizaines de kilo-octets ;
+            # au-dela, c'est que la reduction n'a pas eu lieu cote poste.
+            if not (100 < len(data) <= 900_000):
+                return jsonify({"ok": False, "error": "taille inattendue"}), 400
+            tmp = RIG_ECRAN.with_suffix(".part")
+            tmp.write_bytes(data)
+            tmp.replace(RIG_ECRAN)
+            return jsonify({"ok": True, "octets": len(data)})
+
+        if not is_auth():
+            return redirect("/")
+        if not RIG_ECRAN.exists():
+            return ("", 204)
+        r = send_file(str(RIG_ECRAN), mimetype="image/jpeg")
+        # Jamais de cache : c'est une image qui change en permanence, et une
+        # copie gardee par le navigateur figerait l'ecran.
+        r.headers["Cache-Control"] = "no-store"
+        return r
+
     @app.route("/api/rig/pull", methods=["POST"])
     def rig_pull():
         """Le poste prend le plus ancien travail en attente, et signale qu'il
@@ -44194,7 +44247,8 @@ def create_app():
                 pris = job
                 break
         safe_json.write(RIG_JOBS, d, indent=None)
-        return jsonify({"ok": True, "job": pris})
+        return jsonify({"ok": True, "job": pris,
+                        "pilotage": _pilotage_actif()})
 
     @app.route("/api/rig/report", methods=["POST"])
     def rig_report():
