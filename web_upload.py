@@ -8394,7 +8394,7 @@ document.addEventListener('click',function(e){
   </span>
 </div>
 
-<div class="rmt-tabs"><button type="button" class="rmt-tab" data-rmt="cycle" onclick="remoteVue('cycle')" title="Lancer et suivre un cycle">Cycle</button><button type="button" class="rmt-tab" data-rmt="drop" onclick="remoteVue('drop')" title="Choisir les medias et vider la pellicule">Drop</button><button type="button" class="rmt-tab" data-rmt="console" onclick="remoteVue('console')" title="Flux video et lancement des scenarios">Console</button><button type="button" class="rmt-tab" data-rmt="editeur" onclick="remoteVue('editeur')" title="Editeur de scenarios">Editeur</button></div>
+<div class="rmt-tabs"><button type="button" class="rmt-tab" data-rmt="cycle" onclick="remoteVue('cycle')" title="Lancer et suivre un cycle">Cycle</button><button type="button" class="rmt-tab" data-rmt="scenarios" onclick="remoteVue('scenarios')" title="Les scenarios presents sur la machine">Scenarios</button><button type="button" class="rmt-tab" data-rmt="drop" onclick="remoteVue('drop')" title="Choisir les medias et vider la pellicule">Drop</button><button type="button" class="rmt-tab" data-rmt="console" onclick="remoteVue('console')" title="Flux video et lancement des scenarios">Console</button><button type="button" class="rmt-tab" data-rmt="editeur" onclick="remoteVue('editeur')" title="Editeur de scenarios">Editeur</button></div>
 <div data-remote-vue="cycle" style="display:none">
   <div class="rmt-lancer">
     <div style="flex:1;min-width:190px">
@@ -8441,6 +8441,16 @@ document.addEventListener('click',function(e){
   </div>
   <div id="rmt-jobs" style="margin-top:16px"></div>
 </div>
+<div data-remote-vue="scenarios" style="display:none">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;
+    flex-wrap:wrap">
+    <div style="font-size:13px;color:#8b8b95">Suites d etapes deja ecrites et
+      eprouvees, presentes sur la machine du telephone.</div>
+    <button type="button" class="rmt-btn" onclick="remoteScenarios()"
+      style="margin-left:auto">Actualiser</button>
+  </div>
+  <div id="rmt-scenarios"></div>
+</div>
 <div data-remote-vue="drop" style="display:none"><div data-remote-vide="drop" style="display:none;padding:22px;border:1px dashed #34343a;border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6;margin-bottom:12px"><b style="color:#fbbf24">Cette vue tarde a repondre.</b><br>Le cadre reste juste en dessous : si elle finit par s'afficher, ignore ce message.<br>&bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>&bull; tu n'es pas sur le poste ou l'iPhone est branche.</div><iframe data-remote-cadre="drop" src="about:blank" data-src="http://127.0.0.1:8097/" style="width:100%;height:calc(100vh - 250px);min-height:520px;border:1px solid #26262c;border-radius:12px;background:#0d0d10"></iframe></div><div data-remote-vue="console" style="display:none"><div data-remote-vide="console" style="display:none;padding:22px;border:1px dashed #34343a;border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6;margin-bottom:12px"><b style="color:#fbbf24">Cette vue tarde a repondre.</b><br>Le cadre reste juste en dessous : si elle finit par s'afficher, ignore ce message.<br>&bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>&bull; tu n'es pas sur le poste ou l'iPhone est branche.</div><iframe data-remote-cadre="console" src="about:blank" data-src="http://127.0.0.1:8770/" style="width:100%;height:calc(100vh - 250px);min-height:520px;border:1px solid #26262c;border-radius:12px;background:#0d0d10"></iframe></div><div data-remote-vue="editeur" style="display:none"><div data-remote-vide="editeur" style="display:none;padding:22px;border:1px dashed #34343a;border-radius:12px;color:#9a9aa6;font-size:13.5px;line-height:1.6;margin-bottom:12px"><b style="color:#fbbf24">Cette vue tarde a repondre.</b><br>Le cadre reste juste en dessous : si elle finit par s'afficher, ignore ce message.<br>&bull; le projet n'est pas lance sur cette machine (<code>start.py</code>) ;<br>&bull; tu n'es pas sur le poste ou l'iPhone est branche.</div><iframe data-remote-cadre="editeur" src="about:blank" data-src="http://127.0.0.1:8770/editor" style="width:100%;height:calc(100vh - 250px);min-height:520px;border:1px solid #26262c;border-radius:12px;background:#0d0d10"></iframe></div>
 
 <style>
@@ -8482,6 +8492,16 @@ body.apple .rmt-champ:focus{outline:2px solid rgba(0,122,255,.35);outline-offset
 body.light .rmt-lancer{background:#fff;border-color:rgba(60,60,67,.12)}
 body.light #rmt-conteneur,body.light #rmt-genre,body.light #rmt-etape{
   background:#fff;border-color:rgba(60,60,67,.16);color:#1c1c1e}
+.rmt-sc{display:flex;align-items:center;gap:13px;padding:12px 14px;
+  border:1px solid #26262c;border-radius:11px;margin-bottom:8px;background:#141418}
+body.light .rmt-sc{background:#fff;border-color:rgba(60,60,67,.12)}
+.rmt-sc .t{font-weight:700;font-size:13.5px}
+.rmt-sc .d{font-size:12px;color:#8b8b95;margin-top:2px}
+.rmt-sc .n{font-size:11px;color:#6b6b70;font-family:ui-monospace,monospace;
+  white-space:nowrap}
+.rmt-sc .e{font-size:11px;font-weight:700;padding:2px 9px;border-radius:99px;
+  background:rgba(59,130,246,.14);color:#3b82f6;white-space:nowrap}
+body.apple .rmt-sc .e{background:rgba(0,122,255,.12);color:#007aff}
 .rmt-job{display:flex;align-items:center;gap:12px;padding:10px 13px;
   border:1px solid #26262c;border-radius:11px;margin-bottom:7px;background:#141418}
 body.light .rmt-job{background:#fff;border-color:rgba(60,60,67,.12)}
@@ -8590,6 +8610,7 @@ function remoteVue(cle){
   var lien=document.querySelector('[data-rmt-onglet]');
   if(lien && f) lien.href=f.getAttribute('data-src');
   if(cle==='cycle' && typeof remoteJobs==='function') remoteJobs();
+  if(cle==='scenarios' && typeof remoteScenarios==='function') remoteScenarios();
 }
 // Etat du telephone, lu directement sur la console locale. Elle n'autorise
 // que la LECTURE depuis cette origine ; un echec ici veut simplement dire
@@ -8707,6 +8728,57 @@ function remoteJobs(){
     var v=document.querySelector('[data-remote-vue="cycle"]');
     if(v && v.style.display!=='none') remoteJobs();
   }, 5000);
+})();
+</script>
+
+<script>
+function remoteScenarios(){
+  var boite=document.getElementById('rmt-scenarios');
+  if(!boite) return;
+  fetch('/api/rig/scenarios',{credentials:'same-origin'})
+   .then(function(r){return r.json();})
+   .then(function(j){
+     var l=(j&&j.scenarios)||[];
+     if(!l.length){
+       boite.innerHTML='<div style="color:#8b8b95;font-size:13px;padding:16px 0">'
+         +'Aucun scenario connu. Ils sont declares au demarrage de '
+         +'<code>agent_rig.py</code> : relance-le sur la machine.</div>';
+       return;
+     }
+     boite.innerHTML=l.map(function(x){
+       return '<div class="rmt-sc">'
+         + '<div style="flex:1;min-width:0"><div class="t">'+x.titre+'</div>'
+         + '<div class="d">'+(x.description||'')+'</div></div>'
+         + '<span class="n">'+x.nom+'</span>'
+         + '<span class="e">'+x.etapes+' etapes</span>'
+         + '<button type="button" class="rmt-btn" data-sc="'+x.nom+'">Jouer</button>'
+         + '</div>';
+     }).join('');
+   }).catch(function(){});
+}
+// Un seul ecouteur pose une fois : les boutons sont recrees a chaque
+// actualisation, en attacher un par bouton en laisserait derriere.
+(function(){
+  if(window.__rmtSc) return; window.__rmtSc=1;
+  document.addEventListener('click', function(e){
+    var b=e.target && e.target.closest && e.target.closest('[data-sc]');
+    if(!b) return;
+    var nom=b.getAttribute('data-sc');
+    b.disabled=true; b.textContent='...';
+    fetch('/api/rig/jobs',{method:'POST',credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({type:'scenario',scenario:nom})})
+     .then(function(r){return r.json();})
+     .then(function(j){
+       b.disabled=false; b.textContent='Jouer';
+       if(typeof showToast==='function'){
+         showToast(j&&j.ok ? ('Scenario '+nom+' inscrit') :
+           ('Refuse : '+((j&&j.error)||'?')), j&&j.ok ? 'success' : 'error');
+       }
+       if(typeof remoteJobs==='function') remoteJobs();
+     })
+     .catch(function(){ b.disabled=false; b.textContent='Jouer'; });
+  });
 })();
 </script>
 
@@ -43723,6 +43795,9 @@ def create_app():
             # Un cycle sans categorie va jusqu'a la sixieme etape puis
             # echoue : l'etape des medias ne sait pas quoi choisir. Autant
             # le refuser tout de suite que de creer un compte pour rien.
+            if genre == "scenario" and not (corps.get("scenario") or "").strip():
+                return jsonify({"ok": False,
+                                "error": "aucun scenario choisi"}), 400
             if genre == "cycle" and not (corps.get("categorie") or "").strip():
                 return jsonify({"ok": False,
                                 "error": "categorie obligatoire pour un cycle "
@@ -43732,6 +43807,7 @@ def create_app():
                 "type": genre,
                 "conteneur": (corps.get("conteneur") or "").strip()[:60],
                 "etape": (corps.get("etape") or "").strip()[:40],
+                "scenario": (corps.get("scenario") or "").strip()[:60],
                 "identity": (corps.get("identity") or "").strip().lower()[:60],
                 # L'etape 1 appelle un lien de changement d'IP avant de creer
                 # le conteneur. Le sauter sert a comparer : la passation
@@ -43756,6 +43832,46 @@ def create_app():
         return jsonify({"ok": True, "jobs": d["jobs"][:40],
                         "poste_en_ligne": vieux < 90,
                         "vu_il_y_a": vieux if d.get("battement") else None})
+
+    RIG_SCENARIOS = DATA_DIR / "rig_scenarios.json"
+
+    @app.route("/api/rig/scenarios", methods=["GET", "POST"])
+    def rig_scenarios():
+        """Le catalogue des scenarios du poste.
+
+        En POST, c'est l'agent qui le declare — le site n'a pas les fichiers
+        et n'a aucun moyen de les deviner. En GET, l'interface le lit.
+        """
+        from flask import jsonify
+        if request.method == "POST":
+            code = _rig_ok()
+            if code != 200:
+                return jsonify({"ok": False, "error": "jeton"}), code
+            corps = request.get_json(force=True, silent=True) or {}
+            propres = []
+            for it in (corps.get("scenarios") or [])[:80]:
+                if not isinstance(it, dict):
+                    continue
+                nom = str(it.get("nom") or "").strip()[:60]
+                if not nom:
+                    continue
+                propres.append({
+                    "nom": nom,
+                    "titre": str(it.get("titre") or nom)[:80],
+                    "description": str(it.get("description") or "")[:300],
+                    "etapes": int(it.get("etapes") or 0),
+                })
+            propres.sort(key=lambda x: x["nom"])
+            safe_json.write(RIG_SCENARIOS,
+                            {"scenarios": propres, "ts": int(time.time())},
+                            indent=None)
+            return jsonify({"ok": True, "n": len(propres)})
+
+        if not is_auth() and _rig_ok() != 200:
+            return jsonify({"ok": False, "error": "jeton"}), 403
+        d = safe_json.load(RIG_SCENARIOS, default={}) or {}
+        return jsonify({"ok": True, "scenarios": d.get("scenarios") or [],
+                        "ts": d.get("ts") or 0})
 
     @app.route("/api/rig/pull", methods=["POST"])
     def rig_pull():
