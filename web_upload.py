@@ -8492,6 +8492,28 @@ body.apple .rmt-champ:focus{outline:2px solid rgba(0,122,255,.35);outline-offset
 body.light .rmt-lancer{background:#fff;border-color:rgba(60,60,67,.12)}
 body.light #rmt-conteneur,body.light #rmt-genre,body.light #rmt-etape{
   background:#fff;border-color:rgba(60,60,67,.16);color:#1c1c1e}
+/* Un scenario deplie : une colonne de blocs relies. La couleur dit la
+   FAMILLE de l'action — geste, lecture d'ecran, attente, generation — pour
+   qu'on repere d'un coup d'oeil ce que fait un scenario de vingt etapes. */
+.rmt-etapes{margin:10px 0 4px;padding-left:2px}
+.rmt-bloc{display:flex;align-items:flex-start;gap:11px;padding:9px 12px;
+  border:1px solid #26262c;border-radius:10px;margin-bottom:6px;
+  background:#141418;position:relative}
+body.light .rmt-bloc{background:#fff;border-color:rgba(60,60,67,.12)}
+.rmt-bloc::before{content:'';position:absolute;left:-1px;top:8px;bottom:8px;
+  width:3px;border-radius:99px;background:#3b82f6}
+.rmt-bloc.geste::before{background:#3b82f6}
+.rmt-bloc.lecture::before{background:#a855f7}
+.rmt-bloc.attente::before{background:#6b6b70}
+.rmt-bloc.texte::before{background:#248a3d}
+.rmt-bloc.fin::before{background:#c93a3a}
+.rmt-bloc .num{font-size:10.5px;color:#6b6b70;min-width:20px;
+  font-family:ui-monospace,monospace;padding-top:2px}
+.rmt-bloc .act{font-weight:700;font-size:12.5px}
+.rmt-bloc .par{font-size:11.5px;color:#8b8b95;margin-top:2px;
+  font-family:ui-monospace,monospace;word-break:break-word}
+.rmt-bloc .opt{font-size:10px;font-weight:700;padding:1px 7px;border-radius:99px;
+  background:rgba(234,179,8,.15);color:#a16207;margin-left:auto;white-space:nowrap}
 .rmt-sc{display:flex;align-items:center;gap:13px;padding:12px 14px;
   border:1px solid #26262c;border-radius:11px;margin-bottom:8px;background:#141418}
 body.light .rmt-sc{background:#fff;border-color:rgba(60,60,67,.12)}
@@ -8751,6 +8773,7 @@ function remoteScenarios(){
          + '<div class="d">'+(x.description||'')+'</div></div>'
          + '<span class="n">'+x.nom+'</span>'
          + '<span class="e">'+x.etapes+' etapes</span>'
+         + '<button type="button" class="rmt-btn" data-voir="'+x.nom+'">Voir</button>'
          + '<button type="button" class="rmt-btn" data-sc="'+x.nom+'">Jouer</button>'
          + '</div>';
      }).join('');
@@ -8761,6 +8784,8 @@ function remoteScenarios(){
 (function(){
   if(window.__rmtSc) return; window.__rmtSc=1;
   document.addEventListener('click', function(e){
+    var v=e.target && e.target.closest && e.target.closest('[data-voir]');
+    if(v){ rmtDeplier(v.getAttribute('data-voir'), v); return; }
     var b=e.target && e.target.closest && e.target.closest('[data-sc]');
     if(!b) return;
     var nom=b.getAttribute('data-sc');
@@ -8780,6 +8805,61 @@ function remoteScenarios(){
      .catch(function(){ b.disabled=false; b.textContent='Jouer'; });
   });
 })();
+</script>
+
+<script>
+// A quelle famille appartient chaque action. Les noms viennent du moteur du
+// poste (wda_flow) : une action absente d'ici s'affiche quand meme, en bleu.
+var RMT_FAMILLES = {
+  tap:'geste', smart_tap:'geste', ocr_tap:'geste', type:'geste',
+  swipe:'geste', long_press:'geste', launch:'geste', terminate:'fin',
+  sleep:'attente', ocr_wait:'attente', wait_code:'attente',
+  smart_assert:'lecture', if_exists:'lecture', assert_text:'lecture',
+  note:'attente', log:'attente',
+  generate_pseudo:'texte', generate_password:'texte', generate_bio:'texte',
+  generate_caption:'texte', generate_contact:'texte', date_naissance:'texte',
+  parcours:'lecture', ecrans_fin:'lecture'
+};
+function rmtBlocs(detail){
+  if(!detail || !detail.length) return '<div style="color:#8b8b95;'
+    + 'font-size:12.5px;padding:8px 0">Detail indisponible — relance '
+    + '<code>agent_rig.py</code> pour qu il le declare.</div>';
+  return '<div class="rmt-etapes">' + detail.map(function(e, i){
+    var opt = !!e.optional;
+    // Une etape porte son action comme UNIQUE cle utile ; « optional » est
+    // un drapeau pose a cote, pas une action.
+    var act = Object.keys(e).filter(function(k){ return k!=='optional'; })[0] || '?';
+    var par = e[act];
+    var txt = (par && typeof par==='object')
+      ? Object.keys(par).map(function(k){ return k+'='+JSON.stringify(par[k]); }).join('  ')
+      : (par===true ? '' : String(par===undefined?'':par));
+    return '<div class="rmt-bloc '+(RMT_FAMILLES[act]||'geste')+'">'
+      + '<span class="num">'+(i+1)+'</span>'
+      + '<div style="flex:1;min-width:0"><div class="act">'+act+'</div>'
+      + (txt ? '<div class="par">'+txt.replace(/</g,'&lt;')+'</div>' : '')
+      + '</div>'
+      + (opt ? '<span class="opt">facultative</span>' : '')
+      + '</div>';
+  }).join('') + '</div>';
+}
+function rmtDeplier(nom, bouton){
+  var carte = bouton.closest('.rmt-sc');
+  if(!carte) return;
+  var ouvert = carte.nextElementSibling
+            && carte.nextElementSibling.hasAttribute('data-sc-detail');
+  if(ouvert){ carte.nextElementSibling.remove(); bouton.textContent='Voir'; return; }
+  fetch('/api/rig/scenarios',{credentials:'same-origin'})
+   .then(function(r){return r.json();})
+   .then(function(j){
+     var sc=((j&&j.scenarios)||[]).filter(function(x){return x.nom===nom;})[0];
+     var d=document.createElement('div');
+     d.setAttribute('data-sc-detail','1');
+     d.style.margin='-4px 0 12px 14px';
+     d.innerHTML = rmtBlocs(sc && sc.detail);
+     carte.parentNode.insertBefore(d, carte.nextSibling);
+     bouton.textContent='Masquer';
+   }).catch(function(){});
+}
 </script>
 
 <div class="form-section" id="form-igtrends" style="display:none">
@@ -43855,11 +43935,15 @@ def create_app():
                 nom = str(it.get("nom") or "").strip()[:60]
                 if not nom:
                     continue
+                # Le detail sert a AFFICHER le scenario, pas a le jouer :
+                # c'est toujours le fichier local du poste qui est execute.
+                detail = it.get("detail")
                 propres.append({
                     "nom": nom,
                     "titre": str(it.get("titre") or nom)[:80],
                     "description": str(it.get("description") or "")[:300],
                     "etapes": int(it.get("etapes") or 0),
+                    "detail": detail[:120] if isinstance(detail, list) else [],
                 })
             propres.sort(key=lambda x: x["nom"])
             safe_json.write(RIG_SCENARIOS,
