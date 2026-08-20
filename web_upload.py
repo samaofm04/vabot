@@ -15042,6 +15042,27 @@ _PRO_SUBDIR_OF = {
 }
 # Source de vérité des dossiers servables/supprimables : les 5 routes qui
 # validaient un set en dur divergeaient dès qu'on ajoutait un dossier.
+def _cloud_media_path(identity: str, subdir: str, filename: str):
+    """Chemin d'un media de la bibliotheque, ou (None, code, message).
+
+    UN SEUL endroit decide : le dashboard et l'API du rig s'en servent tous
+    les deux. Les controles sont dans l'ordre ou ils comptent — dossier
+    connu, identite connue, puis remontee d'arborescence.
+    """
+    if subdir not in CLOUD_SUBDIRS:
+        return None, 404, "sous-dossier inconnu"
+    ident = (identity or "").lower().strip()
+    if ident not in _list_identities():
+        return None, 404, "identite inconnue"
+    nom = filename or ""
+    if "/" in nom or "\\" in nom or ".." in nom or not nom:
+        return None, 403, "chemin invalide"
+    chemin = IDENTITIES_DIR / ident / subdir / nom
+    if not chemin.exists() or not chemin.is_file():
+        return None, 404, "fichier absent"
+    return chemin, 200, ""
+
+
 CLOUD_SUBDIRS = frozenset(
     {"videos", "posts", "stories", "storyctas", "profile_pics",
      "brutes", "templates"} | set(_PRO_SUBDIR_OF.values())
@@ -38180,6 +38201,10 @@ ROLE_MENU_STRUCTURE = [
         {"key": "saikey", "name": "Clé IA", "perms": ["view", "edit"]},
         {"key": "vtg", "name": "Veille Telegram", "perms": ["view", "edit"]},
     ]},
+    {"section": "Remote — iPhone", "items": [
+        {"key": "remote", "name": "Drop, Console et Editeur de scenarios",
+         "perms": ["view"]},
+    ]},
 ]
 
 
@@ -38192,6 +38217,10 @@ _PERM_KEY_TO_TABS = {
     "cloud": {"cloudreels", "cloudposts", "cloudstories", "cloudstoryctas", "cloudpps"},
     # Drive lecture seule : sa propre case (clé == nom d'onglet).
     "clouddrive": {"clouddrive"},
+    # Les trois vues du poste qui pilote l'iPhone tiennent sous une seule
+    # case : elles donnent le meme pouvoir, les separer n'aurait fait
+    # qu'ouvrir des chemins de traverse.
+    "remote": {"remotedrop", "remoteconsole", "remoteediteur"},
     # Vault PRO : 2e bibliothèque, ses propres cases. Cocher « cloud » ne
     # l'ouvre pas — c'est tout l'intérêt d'un vault séparé.
     "provault": {"provaultreels", "provaultposts", "provaultstories",
@@ -40697,16 +40726,12 @@ def create_app():
     def cloud_thumb_file(identity, subdir, filename):
         if not is_auth():
             return redirect("/")
-        if subdir not in CLOUD_SUBDIRS:
-            return "Not found", 404
+        # Troisieme appelant de la meme regle : la miniature refaisait les
+        # controles a l'identique, c'est-a-dire une copie de plus a maintenir.
+        src, code, motif = _cloud_media_path(identity, subdir, filename)
+        if src is None:
+            return (motif.capitalize(), code)
         safe_identity = identity.lower().strip()
-        if safe_identity not in _list_identities():
-            return "Not found", 404
-        if "/" in filename or "\\" in filename or ".." in filename:
-            return "Forbidden", 403
-        src = IDENTITIES_DIR / safe_identity / subdir / filename
-        if not src.exists() or not src.is_file():
-            return "Not found", 404
         rel_key = f"{safe_identity}/{subdir}/{filename}"
         # TOUS les dossiers video (reels, rushs bruts, templates, reels PRO) :
         # sinon la miniature n'est pas extraite et le fallback sert la VIDEO COMPLETE.
@@ -40748,18 +40773,10 @@ def create_app():
     def cloud_serve_file(identity, subdir, filename):
         if not is_auth():
             return redirect("/")
-        # Sécurité : restreindre aux dossiers valides
-        if subdir not in CLOUD_SUBDIRS:
-            return "Not found", 404
-        safe_identity = identity.lower().strip()
-        if safe_identity not in _list_identities():
-            return "Not found", 404
-        # Empêcher path traversal
-        if "/" in filename or "\\" in filename or ".." in filename:
-            return "Forbidden", 403
-        path = IDENTITIES_DIR / safe_identity / subdir / filename
-        if not path.exists() or not path.is_file():
-            return "Not found", 404
+        # Memes controles que l'API du rig, par la MEME fonction.
+        path, code, motif = _cloud_media_path(identity, subdir, filename)
+        if path is None:
+            return (motif.capitalize(), code)
         from flask import send_file
         # conditional=True : 304 + Range requests (206) -> seek vidéo instantané.
         response = send_file(str(path), conditional=True)
@@ -43317,6 +43334,92 @@ def create_app():
         except Exception:
             pass
         return redirect("/a-relire")
+
+    def _rig_ok():
+        """Le jeton partage. 503 tant qu'il n'est pas configure, 403 s'il ne
+        correspond pas : une API muette vaut mieux qu'une API ouverte."""
+        import os as _os
+        attendu = (_os.environ.get("RIG_API_TOKEN") or "").strip()
+        if not attendu:
+            return 503
+        donne = (request.headers.get("X-Rig-Token")
+                 or request.args.get("token") or "").strip()
+        return 200 if donne and donne == attendu else 403
+
+    @app.route("/api/rig/media")
+    def rig_media():
+        """Les medias d'une identite, pour le poste qui pilote le telephone."""
+        from flask import jsonify
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+
+        subdir = (request.args.get("subdir") or "videos").strip().lower()
+        if subdir not in CLOUD_SUBDIRS:
+            return jsonify({"ok": False, "error": "sous-dossier inconnu"}), 404
+        identites = _list_identities()
+        demandee = (request.args.get("identity") or "").strip().lower()
+        if demandee:
+            if demandee not in identites:
+                return jsonify({"ok": False, "error": "identite inconnue"}), 404
+            cibles = [demandee]
+        else:
+            cibles = list(identites)
+
+        # « Ne jamais ecarter en silence » : ce qui n'est pas rendu est
+        # compte ET motive, sinon un media manquant reste inexplicable.
+        items, ecartes = [], []
+        exts = VIDEO_EXTS | IMAGE_EXTS
+        for ident in cibles:
+            dossier = IDENTITIES_DIR / ident / subdir
+            if not dossier.is_dir():
+                continue
+            for f in sorted(dossier.iterdir()):
+                if not f.is_file():
+                    continue
+                if f.suffix.lower() not in exts:
+                    ecartes.append({"fichier": f.name, "identite": ident,
+                                    "motif": "extension non geree"})
+                    continue
+                try:
+                    taille = f.stat().st_size
+                except Exception:
+                    ecartes.append({"fichier": f.name, "identite": ident,
+                                    "motif": "illisible"})
+                    continue
+                if taille <= 0:
+                    ecartes.append({"fichier": f.name, "identite": ident,
+                                    "motif": "fichier vide"})
+                    continue
+                # La description voisine part avec le media : le rig en a
+                # besoin pour legender la publication.
+                desc = ""
+                try:
+                    dp = f.with_suffix(".desc.txt")
+                    if dp.exists():
+                        desc = dp.read_text(encoding="utf-8").strip()[:2000]
+                except Exception:
+                    pass
+                items.append({
+                    "identite": ident, "subdir": subdir, "fichier": f.name,
+                    "taille": taille, "modifie": int(f.stat().st_mtime),
+                    "description": desc,
+                    "url": "/api/rig/file/%s/%s/%s" % (ident, subdir, f.name),
+                })
+        return jsonify({"ok": True, "items": items, "identites": list(identites),
+                        "nb_ecartes": len(ecartes), "ecartes": ecartes[:50]})
+
+    @app.route("/api/rig/file/<identity>/<subdir>/<path:filename>")
+    def rig_serve_file(identity, subdir, filename):
+        """Un media, servi au poste. Memes controles que le dashboard."""
+        from flask import jsonify, send_file
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        path, code, motif = _cloud_media_path(identity, subdir, filename)
+        if path is None:
+            return jsonify({"ok": False, "error": motif}), code
+        return send_file(str(path), conditional=True)
 
     @app.route("/version")
     def version_du_site():

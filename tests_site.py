@@ -2182,6 +2182,82 @@ try:
 except Exception as _eIc:
     check("sidebar : icones testables", False, repr(_eIc)[:120])
 
+
+# ----------------------------------------------------------------------
+# API du rig : deux routes GET en lecture seule, protegees par un jeton.
+#
+# On les eprouve au RENDU REEL, avec le client de test Flask : une route peut
+# etre syntaxiquement parfaite et renvoyer 403 a cause du garde-fou d ecriture,
+# ou 404 parce qu un sous-dossier n est pas dans CLOUD_SUBDIRS. Seul l appel
+# le dit.
+#
+# Le jeton est pose dans l environnement le temps du test, puis retire.
+try:
+    import os as _osRg
+    import json as _jsonRg
+    import web_upload as _wuRg
+
+    _appRg = _wuRg.create_app()
+    _appRg.config["TESTING"] = True
+    _cRg = _appRg.test_client()
+    _JETONRg = "tests-site-jeton-local"
+    _avantRg = _osRg.environ.get("RIG_API_TOKEN")
+
+    # Sans jeton cote serveur, aucune porte ne doit s ouvrir.
+    _osRg.environ.pop("RIG_API_TOKEN", None)
+    check("rig : 503 tant qu aucun RIG_API_TOKEN n est configure",
+          _cRg.get("/api/rig/media").status_code == 503)
+
+    _osRg.environ["RIG_API_TOKEN"] = _JETONRg
+    check("rig : 403 sans jeton dans la requete",
+          _cRg.get("/api/rig/media").status_code == 403)
+    check("rig : 403 avec un mauvais jeton",
+          _cRg.get("/api/rig/media?token=nawak").status_code == 403)
+    check("rig : 404 sur un sous-dossier inconnu",
+          _cRg.get("/api/rig/media?subdir=pouet&token=" + _JETONRg).status_code == 404)
+    check("rig : 404 sur une identite inconnue",
+          _cRg.get("/api/rig/media?identity=zzzz&token=" + _JETONRg).status_code == 404)
+
+    _repRg = _cRg.get("/api/rig/media?subdir=videos",
+                      headers={"X-Rig-Token": _JETONRg})
+    check("rig : la liste repond 200 avec le bon jeton", _repRg.status_code == 200)
+    _dRg = _jsonRg.loads(_repRg.get_data(as_text=True))
+    check("rig : la liste rend ok, items et identites",
+          _dRg.get("ok") is True and isinstance(_dRg.get("items"), list)
+          and isinstance(_dRg.get("identites"), list))
+    # « Ne jamais ecarter en silence » : ce qui est refuse doit etre compte ET
+    # motive, sinon un fichier disparait sans que personne ne le sache.
+    check("rig : ce qui est ecarte est compte et motive",
+          "nb_ecartes" in _dRg and isinstance(_dRg.get("ecartes"), list)
+          and all("motif" in e for e in _dRg.get("ecartes", [])))
+
+    # Le service de fichier : memes controles que le dashboard, meme fonction.
+    _identRg = (_dRg.get("identites") or ["_aucune_"])[0]
+    check("rig : 403 sur une remontee de chemin",
+          _cRg.get("/api/rig/file/%s/videos/..%%2F..%%2Fsecret" % _identRg,
+                   headers={"X-Rig-Token": _JETONRg}).status_code == 403)
+    check("rig : le fichier exige aussi le jeton",
+          _cRg.get("/api/rig/file/%s/videos/quoiquecesoit.mp4" % _identRg
+                   ).status_code == 403)
+    check("rig : 404 sur un fichier absent",
+          _cRg.get("/api/rig/file/%s/videos/absent-pour-de-bon.mp4" % _identRg,
+                   headers={"X-Rig-Token": _JETONRg}).status_code == 404)
+
+    # Le dashboard et le rig doivent trancher par la MEME fonction : deux
+    # copies finiraient par diverger (cf. les 598 fichiers Drive invisibles).
+    _srcRg = pathlib.Path("web_upload.py").read_text(encoding="utf-8")
+    check("rig : cloud_serve_file et rig_serve_file partagent _cloud_media_path",
+          _srcRg.count("_cloud_media_path(identity, subdir, filename)") >= 3)
+    check("rig : le jeton n est jamais ecrit en dur",
+          "RIG_API_TOKEN" in _srcRg and 'RIG_API_TOKEN"] =' not in _srcRg)
+
+    if _avantRg is None:
+        _osRg.environ.pop("RIG_API_TOKEN", None)
+    else:
+        _osRg.environ["RIG_API_TOKEN"] = _avantRg
+except Exception as _eRg:
+    check("rig : API testable", False, repr(_eRg)[:160])
+
 print()
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
