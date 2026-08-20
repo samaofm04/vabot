@@ -14700,7 +14700,7 @@ def _va_ready_watermark_uri():
 _VA_READY_WM = _va_ready_watermark_uri()
 
 
-def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "", deferred: bool = False, is_banger: bool = False, is_disabled: bool = False, is_va_ready: bool = False, can_montage: bool = None) -> str:
+def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "", deferred: bool = False, is_banger: bool = False, is_disabled: bool = False, is_va_ready: bool = False, can_montage: bool = None, a_approuver: bool = False) -> str:
     """Carte preview style propre : juste un badge date en haut à gauche + thumbnail
     en grand. Plus de nom de fichier ni de taille en dessous (visible au hover via title).
 
@@ -14745,6 +14745,9 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
         )
 
     _va_cls = " va-ready" if is_va_ready else ""   # filigrane « DISPO VA » via CSS (togglable live)
+    # Description reprise du post et pas encore relue : meme mecanique,
+    # en ambre. Le proprietaire doit le voir SANS ouvrir la carte.
+    _va_cls += " a-approuver" if a_approuver else ""
     is_video_js = "true" if is_video else "false"
     fid_safe = file_id.replace("'", "\\'") if file_id else ""
     example_safe = example_url.replace("'", "\\'") if example_url else ""
@@ -15043,6 +15046,12 @@ body.light .vault-card-bg{background:linear-gradient(110deg,#eceff1 8%,#f5f5f5 1
 .vault-img-load.loaded{opacity:1}
 
 /* Filigrane « DISPO VA » : reels marqués « Dispo pour les VA » (classe togglable en direct) */
+/* Description reprise d'un post, pas encore relue. Ambre : ni une erreur
+   (rouge), ni quelque chose de valide (vert) — quelque chose a regarder. */
+.vault-card-bg.a-approuver::after{content:'A APPROUVER';position:absolute;top:8px;left:8px;z-index:5;pointer-events:none;background:rgba(234,179,8,.96);color:#2a1c00;font-size:9.5px;font-weight:800;letter-spacing:.4px;padding:3px 7px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.35)}
+/* Un template peut etre a la fois « dispo VA » et « a approuver » : le
+   second se decale pour ne pas recouvrir le premier. */
+.vault-card-bg.va-ready.a-approuver::after{top:8px;left:8px}
 .vault-card-bg.va-ready::before{content:'';position:absolute;inset:0;pointer-events:none;z-index:3;background-repeat:repeat;background-size:150px 96px;background-image:url("__VA_WM__")}
 .vault-card-bg.va-ready::after{content:'✓ DISPO VA';position:absolute;bottom:8px;left:8px;z-index:4;pointer-events:none;background:rgba(34,197,94,.95);color:#04210f;font-size:10px;font-weight:800;padding:3px 8px;border-radius:6px;letter-spacing:.02em;box-shadow:0 2px 6px rgba(0,0,0,.3)}
 
@@ -16515,6 +16524,14 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         _disabled_reels = _load_disabled_reels()  # idem : reels grisés/désactivés
         # Reels marqués « Dispo pour les VA » (va_ready dans leur .montage.json) -> filigrane.
         # 1 scan pour toute la galerie (uniquement pour les vidéos, seules à avoir un montage).
+        # Templates dont la description vient du post et attend une
+        # relecture : un simple sidecar .acheck.txt a cote du fichier.
+        _a_approuver_stems = set()
+        try:
+            for _ac in folder.glob("*.acheck.txt"):
+                _a_approuver_stems.add(_ac.name[:-len(".acheck.txt")])
+        except Exception:
+            pass
         _va_ready_stems = set()
         # templates/ compte aussi : un template approuve part chez les VA au
         # meme titre qu'un reel (sinon le filigrane disparaissait au F5).
@@ -16549,7 +16566,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
                 second_url = ""
             # Apres INITIAL_BATCH : on render avec data-src vide, l image se charge a l intersection
             deferred = idx >= INITIAL_BATCH
-            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels), is_va_ready=((is_reels or subdir == "templates") and p.stem in _va_ready_stems), can_montage=can_montage))
+            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, a_approuver=(p.stem in _a_approuver_stems), deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels), is_va_ready=((is_reels or subdir == "templates") and p.stem in _va_ready_stems), can_montage=can_montage))
         gallery = (
             gallery_header
             # auto-fill 165px : le nombre de colonnes s'adapte a la largeur
@@ -43038,9 +43055,41 @@ def create_app():
         if not is_auth():
             return redirect("/")
         lst = _a_relire_liste()
+
+        # Diagnostic : sans ces trois conditions, rien ne peut arriver dans
+        # cette liste — autant le dire ici plutot que de laisser chercher.
+        import shutil as _sh
+        _souci = []
+        if not _anthropic_key():
+            _souci.append("<b>Cle IA absente</b> — aucune analyse de montage "
+                          "n'est lancee. Ajoute ANTHROPIC_API_KEY dans "
+                          "Reglages &rarr; Cle IA.")
+        if not _sh.which("ffmpeg") or not _sh.which("ffprobe"):
+            _souci.append("<b>ffmpeg introuvable</b> sur le serveur — l'analyse "
+                          "ne peut pas extraire d'images.")
+        _etat = analyses_etat()
+        if _etat.get("en_cours"):
+            _souci.append("<b>%d analyse(s) en cours</b> — le resultat "
+                          "apparaitra ici." % _etat["en_cours"])
+        if _etat.get("echecs"):
+            _souci.append("%d analyse(s) ont echoue depuis le demarrage."
+                          % _etat["echecs"])
+        _diag = ""
+        if _souci:
+            _diag = ("<div style='margin:0 0 16px;padding:12px 14px;"
+                     "background:#fffbeb;border:1px solid #fde68a;"
+                     "border-radius:10px;font-size:13px'><ul "
+                     "style='margin:0;padding-left:18px'>"
+                     + "".join("<li>%s</li>" % x for x in _souci)
+                     + "</ul></div>")
+        _rappel = ("<p style='color:#666;font-size:13px'>La description n'est "
+                   "reprise que pour les videos <b>importees par lien</b> "
+                   "(Instagram / TikTok) : une video deposee au glisser n'a pas "
+                   "de post d'origine, il n'y a donc rien a reprendre.</p>")
+
         if not lst:
-            corps = ("<p style='color:#166534'>Rien a relire : toutes les "
-                     "descriptions importees ont ete validees.</p>")
+            corps = (_diag + "<p style='color:#166534'>Rien a relire : toutes "
+                     "les descriptions importees ont ete validees.</p>" + _rappel)
         else:
             cartes = []
             for r in lst:
@@ -43084,9 +43133,9 @@ def create_app():
                     "background:#f3f4f6;border:1px solid #d1d5db;color:#374151;"
                     "border-radius:9px;font:inherit;cursor:pointer'>Effacer la "
                     "description</button></div></form>")
-            corps = ("<p style='color:#666'>%d description(s) reprises d'un post, "
-                     "en attente de ta relecture. Corrige si besoin, puis valide."
-                     "</p>" % len(lst)) + "".join(cartes)
+            corps = (_diag + "<p style='color:#666'>%d description(s) reprises "
+                     "d'un post, en attente de ta relecture. Corrige si besoin, "
+                     "puis valide.</p>" % len(lst)) + "".join(cartes) + _rappel
         return ("<div style=\"font:14px/1.55 -apple-system,system-ui,sans-serif;"
                 "padding:26px;max-width:720px;margin:30px auto;background:#fff;"
                 "color:#1c1c1e;border:1px solid #e5e7eb;border-radius:14px\">"
