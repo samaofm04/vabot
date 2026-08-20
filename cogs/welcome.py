@@ -688,7 +688,14 @@ async def _ensure_us_menu(bot, channel):
                 pass
         # Marche du PROPRIETAIRE du salon : chaque -menu appartient a une seule
         # personne, on peut donc lui servir SES models (role Jailbreak FR/US).
-        marche = "us"
+        # Repli sur le marche du SERVEUR, pas sur « us » en dur : depuis que la
+        # commande marche aussi sur le serveur principal, un salon dont le
+        # proprietaire n'est pas retrouve recevait la liste des models US.
+        try:
+            import guild_features as _gf
+            marche = "us" if _gf.is_us_guild(channel.guild) else "fr"
+        except Exception:
+            marche = "us"
         try:
             from cogs.user import marche_du_membre
             proprio = _proprio_du_salon(channel)
@@ -780,8 +787,13 @@ async def reset_us_menu(bot, channel):
     messages permanents. Utile quand le salon s'est encombre de contenu."""
     if channel is None:
         return False
+    # On n'efface QUE ce que le bot a poste. Avant, la purge prenait tout —
+    # d'ou le bridage de la commande au serveur US : sur le serveur
+    # principal, elle aurait emporte des conversations.
+    _moi = getattr(getattr(bot, "user", None), "id", 0)
     try:
-        await channel.purge(limit=200, check=lambda m: True)
+        await channel.purge(limit=200,
+                            check=lambda m: m.author.id == _moi)
     except Exception as e:
         log.warning(f"reset_us_menu purge: {e}")
     try:
@@ -1924,7 +1936,7 @@ class Welcome(commands.Cog):
 
     @app_commands.command(
         name="resetmenus",
-        description="[ADMIN] Serveur US : vide les salons -menu et repose les 2 menus permanents",
+        description="[ADMIN] Repose les 2 menus permanents dans les salons -menu, dans le bon ordre",
     )
     @app_commands.describe(salon="Ne remettre a neuf QUE ce salon -menu (sinon : tous)")
     async def resetmenus(self, interaction: discord.Interaction,
@@ -1935,12 +1947,10 @@ class Welcome(commands.Cog):
         if guild is None:
             await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
             return
-        import guild_features as gf
-        if not gf.is_us_guild(guild):
-            await interaction.response.send_message(
-                "🔒 Réservé au serveur US (Youl4b) — protection du serveur principal.",
-                ephemeral=True)
-            return
+        # Plus de bridage au serveur US : la purge ne touche que les
+        # messages du bot, donc plus rien a proteger. Les menus poses
+        # suivent le marche du PROPRIETAIRE de chaque salon (_ensure_us_menu),
+        # un salon FR recoit donc des models FR.
         cibles = ([salon] if salon is not None
                   else [c for c in guild.text_channels if c.name.endswith("-menu")])
         if not cibles:
