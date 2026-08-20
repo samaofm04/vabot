@@ -8396,24 +8396,18 @@ document.addEventListener('click',function(e){
     <div style="flex:1;min-width:190px">
       <div style="font-size:12.5px;color:#8b8b95;margin-bottom:5px">
         Conteneur <span style="color:#6b6b70">(vide = le dernier cree)</span></div>
-      <input type="text" id="rmt-conteneur" placeholder="ig-445bt"
-        style="width:100%;padding:9px 12px;border-radius:9px;border:1px solid #303036;
-        background:#0f0f12;color:#e6e6ea;font:inherit;font-size:13px">
+      <input type="text" id="rmt-conteneur" placeholder="ig-445bt" class="rmt-champ">
     </div>
     <div>
       <div style="font-size:12.5px;color:#8b8b95;margin-bottom:5px">Travail</div>
-      <select id="rmt-genre" style="padding:9px 12px;border-radius:9px;
-        border:1px solid #303036;background:#0f0f12;color:#e6e6ea;font:inherit;
-        font-size:13px">
+      <select id="rmt-genre" class="rmt-champ">
         <option value="cycle">Cycle complet (8 etapes)</option>
         <option value="etape">Une seule etape</option>
       </select>
     </div>
     <div id="rmt-bloc-etape" style="display:none">
       <div style="font-size:12.5px;color:#8b8b95;margin-bottom:5px">Laquelle</div>
-      <select id="rmt-etape" style="padding:9px 12px;border-radius:9px;
-        border:1px solid #303036;background:#0f0f12;color:#e6e6ea;font:inherit;
-        font-size:13px">
+      <select id="rmt-etape" class="rmt-champ">
         <option value="conteneur">1 · conteneur</option>
         <option value="instagram">2 · instagram</option>
         <option value="numero">3 · numero</option>
@@ -8457,6 +8451,15 @@ body.light .rmt-btn{background:#fff;border-color:rgba(60,60,67,.16);color:#1c1c1
   color:#3b82f6}
 body.apple .rmt-btn-p{background:rgba(0,122,255,.12);
   border-color:rgba(0,122,255,.4);color:#007aff}
+.rmt-champ{padding:9px 12px;border-radius:9px;border:1px solid #303036;
+  background:#0f0f12;color:#e6e6ea;font:inherit;font-size:13px}
+#rmt-conteneur.rmt-champ{width:100%}
+/* Les <option> ne suivent PAS le style du <select> sur tous les systemes :
+   sans ces deux lignes, la liste s'ouvrait en noir sur noir. */
+.rmt-champ option{background:#141418;color:#e6e6ea}
+body.light .rmt-champ{background:#fff;border-color:rgba(60,60,67,.16);color:#1c1c1e}
+body.light .rmt-champ option{background:#fff;color:#1c1c1e}
+body.apple .rmt-champ:focus{outline:2px solid rgba(0,122,255,.35);outline-offset:1px}
 .rmt-lancer{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;
   padding:15px;border:1px solid #26262c;border-radius:12px;background:#141418}
 body.light .rmt-lancer{background:#fff;border-color:rgba(60,60,67,.12)}
