@@ -526,6 +526,67 @@ def _toggle_disabled_reel(file_id: str) -> bool:
     return now_off
 
 
+# ---- Rushs bruts favoris (⭐) : un VRAI favori, local, sans Discord ----------
+#
+# À ne pas confondre avec banger_marks.json, qui porte le même symbole mais ne
+# fait pas la même chose : l'étoile « banger » d'un reel POSTE la vidéo dans
+# banger-{identité} et stocke un accusé de réception. Ici, l'étoile ne fait
+# que marquer ; rien n'est envoyé au clic, le VA vient chercher quand il veut.
+#
+# Et surtout : partager banger_marks.json aurait été un piège.
+# _clear_banger_marks_for_identity purge par identité SANS regarder le
+# sous-dossier — un clic sur « ⌫ Vider le salon banger » depuis la galerie des
+# reels aurait effacé toutes les étoiles de brutes de l'identité.
+FAV_BRUTES_FILE = DATA_DIR / "fav_brutes.json"
+
+
+def _load_fav_brutes() -> set:
+    # Même cache par mtime que les reels désactivés : re-parse seulement si le
+    # fichier a changé. Tolère la liste et le dict, comme son modèle.
+    try:
+        data = _cached_json_load(FAV_BRUTES_FILE)
+        if isinstance(data, list):
+            return set(data)
+        if isinstance(data, dict):
+            return set(data.keys())
+    except Exception:
+        pass
+    return set()
+
+
+def _toggle_fav_brute(file_id: str) -> bool:
+    """Bascule l'étoile d'une brute. Retourne True si désormais favorite."""
+    s = _load_fav_brutes()
+    now_on = file_id not in s
+    if now_on:
+        s.add(file_id)
+    else:
+        s.discard(file_id)
+    try:
+        FAV_BRUTES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        safe_json.write_text(FAV_BRUTES_FILE, json.dumps(sorted(s), ensure_ascii=False))
+    except Exception:
+        pass
+    return now_on
+
+
+def _pop_fav_brute(file_id: str) -> None:
+    """Retire l'étoile d'une brute supprimée.
+
+    Sans ça, un nouveau fichier portant le même nom hériterait de l'étoile de
+    l'ancien — la clé est « identité|brutes|nom ». C'est exactement la raison
+    pour laquelle /cloud/delete purge déjà la marque banger.
+    """
+    s = _load_fav_brutes()
+    if file_id not in s:
+        return
+    s.discard(file_id)
+    try:
+        safe_json.write_text(FAV_BRUTES_FILE, json.dumps(sorted(s), ensure_ascii=False))
+    except Exception:
+        pass
+
+
 def _delete_banger_messages(info: dict) -> tuple:
     """Supprime du salon Discord les messages envoyés pour ce reel (via le bot)."""
     import asyncio
@@ -3424,6 +3485,85 @@ async function toggleReelDisabled(btn, fileId){
   }catch(e){ alert('Erreur réseau : ' + e); }
   finally{ btn.disabled = false; btn.style.opacity = '1'; }
 }
+// ⭐ Favori d'un rush brut. Rien n'est envoyé à Discord : on marque, c'est tout.
+// L'étoile jaune du dessus (toggleBanger) POSTE la vidéo dans le salon ; celle-ci
+// se contente d'alimenter le bouton « Montage Banger » du menu VA.
+async function toggleFavBrute(btn, fileId){
+  var svg = btn.querySelector('svg');
+  btn.disabled = true; btn.style.opacity = '0.55';
+  try{
+    var fd = new FormData(); fd.set('file_id', fileId);
+    var r = await fetch('/reel/toggle_fav_brute', { method:'POST', body: fd });
+    var j = await r.json();
+    if(!j.ok){ alert('✕ ' + (j.error || '?')); return; }
+    var on = !!j.fav;
+    btn.classList.toggle('is-fav', on);
+    btn.style.color = on ? '#ffd54a' : '#9aa0a6';
+    if(svg){
+      svg.setAttribute('fill', on ? '#ffd54a' : 'none');
+      svg.setAttribute('stroke', on ? 'none' : '#9aa0a6');
+      svg.setAttribute('stroke-width', on ? '0' : '2');
+    }
+    // Le filtre peut être actif : la carte qu'on vient de dé-marquer doit
+    // disparaître tout de suite, sinon elle reste affichée sous un filtre
+    // qui prétend ne montrer que les favoris.
+    if(typeof favBruteApply === 'function') favBruteApply();
+    if(typeof showToast === 'function') showToast(on ? '⭐ Brute favorite' : '☆ Retirée des favoris', on ? 'success' : 'warning');
+  }catch(e){ alert('Erreur réseau : ' + e); }
+  finally{ btn.disabled = false; btn.style.opacity = '1'; }
+}
+// === Filtre "⭐ Bangers" des rushs bruts (client, instantané) ===
+//
+// PIEGE : chaque galerie rend sa grille avec le MEME id 'vault-grid', donc le
+// document en contient plusieurs et getElementById renvoie toujours la
+// premiere — celle des Reels, rendue avant. Un filtre copie du filtre banger
+// masquerait donc les cartes de la mauvaise galerie. On passe par la section
+// visible, comme vaultSelectAll le fait deja.
+var favBruteFilterOn = false;
+function favBruteSection(){
+  var btn = document.getElementById('favbrute-toggle-btn');
+  if(btn && btn.closest) { var s = btn.closest('.form-section'); if(s) return s; }
+  var trouve = null;
+  document.querySelectorAll('.form-section').forEach(function(s){
+    if(!trouve && s.offsetParent !== null) trouve = s;
+  });
+  return trouve;
+}
+function favBruteApply(){
+  var sec = favBruteSection();
+  if(!sec) return;
+  var grid = sec.querySelector('#vault-grid');
+  if(!grid) return;
+  var cards = grid.querySelectorAll('.cloud-card');
+  var shown = 0;
+  cards.forEach(function(c){
+    if(!favBruteFilterOn){ c.style.display = ''; return; }
+    var on = c.querySelector('.fav-brute-star.is-fav');
+    c.style.display = on ? '' : 'none';
+    if(on) shown++;
+  });
+  var empty = sec.querySelector('.favbrute-empty-note');
+  if(favBruteFilterOn && shown === 0){
+    if(!empty){
+      empty = document.createElement('div');
+      empty.className = 'favbrute-empty-note';
+      empty.style.cssText = 'grid-column:1/-1;text-align:center;color:#888;padding:34px;font-size:14px';
+      empty.textContent = 'Aucun rush brut marqué ⭐ pour cette identité.';
+      grid.appendChild(empty);
+    }
+    empty.style.display = '';
+  } else if(empty){ empty.style.display = 'none'; }
+}
+function toggleFavBruteFilter(btn){
+  favBruteFilterOn = !favBruteFilterOn;
+  var b = btn || document.getElementById('favbrute-toggle-btn');
+  if(b){
+    b.style.background = favBruteFilterOn ? '#3a2f00' : '#1a1a1a';
+    b.style.borderColor = favBruteFilterOn ? '#f5c518' : '#3a3a3a';
+    b.textContent = favBruteFilterOn ? '⭐ Bangers ✓' : '⭐ Bangers';
+  }
+  favBruteApply();
+}
 // Lightbox style Infloww : navigation prev/next + compteur + édition caption/desc
 var lbGallery = [];   // {url, isVideo, name, fileId}
 var lbIndex = 0;
@@ -5517,6 +5657,8 @@ function capRenderCards(){
       +'<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg></button>'
       +'<button class="card-edit-btn" data-capact="desc" data-cid="'+cid+'" title="Description du post (légende) — vide = pas de description" style="color:'+(it.desc?'#8b9cf7':'#9aa0a6')+'">'
       +'<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg></button>'
+      +'<button class="card-edit-btn cap-fav-star'+(it.fav?' is-fav':'')+'" data-capact="fav" data-cid="'+cid+'" title="Favori — cette caption servira au bouton « Montage Banger »" style="color:'+(it.fav?'#ffd54a':'#9aa0a6')+'">'
+      +'<svg viewBox="0 0 24 24" width="13" height="13" fill="'+(it.fav?'#ffd54a':'none')+'" stroke="'+(it.fav?'none':'#9aa0a6')+'" stroke-width="'+(it.fav?'0':'2')+'"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></button>'
       +'<button class="card-edit-btn'+(on?'':' is-off')+'" data-capact="toggle" data-cid="'+cid+'" title="Désactiver / réactiver cette caption (sort du tirage random)" style="color:'+onoffCol+'">'
       +'<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><line x1="5.6" y1="5.6" x2="18.4" y2="18.4"/></svg></button>'
       +'<label class="sel-circle-wrap" onclick="event.stopPropagation()" style="cursor:pointer;display:block">'
@@ -5575,6 +5717,18 @@ document.addEventListener('click', function(ev){
   else if(act==='toggle'){
     var itT=(capLib.block.items||[]).filter(function(c){return c.id===cid;})[0];
     if(itT){ itT.enabled=(itT.enabled===false); capRenderCards(); capSave(); }
+  }
+  else if(act==='fav'){
+    // ⭐ favori : la caption entre dans le tirage du bouton « Montage Banger »
+    // du menu VA. Le champ voyage par /captions/save comme 'enabled' ; il est
+    // declare dans la liste blanche de _clean_caption_block, sans quoi il
+    // serait efface 250 ms plus tard, en silence.
+    var itF=(capLib.block.items||[]).filter(function(c){return c.id===cid;})[0];
+    if(itF){
+      itF.fav=(itF.fav!==true);
+      capRenderCards(); capSave();
+      if(typeof showToast==='function') showToast(itF.fav?'⭐ Caption favorite':'☆ Retirée des favoris', itF.fav?'success':'warning');
+    }
   }
   else if(act==='desc'){
     var itD=(capLib.block.items||[]).filter(function(c){return c.id===cid;})[0];
@@ -16134,7 +16288,7 @@ def _va_ready_watermark_uri():
 _VA_READY_WM = _va_ready_watermark_uri()
 
 
-def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "", deferred: bool = False, is_banger: bool = False, is_disabled: bool = False, is_va_ready: bool = False, can_montage: bool = None, a_approuver: bool = False) -> str:
+def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "", deferred: bool = False, is_banger: bool = False, is_disabled: bool = False, is_va_ready: bool = False, can_montage: bool = None, a_approuver: bool = False, is_fav_brute: bool = False) -> str:
     """Carte preview style propre : juste un badge date en haut à gauche + thumbnail
     en grand. Plus de nom de fichier ni de taille en dessous (visible au hover via title).
 
@@ -16230,6 +16384,24 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
                 f"<svg viewBox='0 0 24 24' width='14' height='14' fill='{_sfill}' stroke='{_sstroke}' stroke-width='{_sw}'><polygon points='12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2'/></svg>"
                 f"</button>"
             )
+        # ⭐ Favori : RESERVE aux rushs bruts. Rien n'est envoye au clic —
+        # contrairement a l'etoile banger juste au-dessus, qui poste dans
+        # Discord. Celle-ci ne fait que marquer ; le VA vient chercher ses
+        # brutes favorites par le bouton « Montage Banger » de son menu.
+        fav_brute_btn = ""
+        if "|brutes|" in (file_id or ""):
+            _fon = bool(is_fav_brute)
+            _fcol = "#ffd54a" if _fon else "#9aa0a6"
+            _ffill = "#ffd54a" if _fon else "none"
+            _fstroke = "none" if _fon else "#9aa0a6"
+            _fsw = "0" if _fon else "2"
+            _fcls = "card-edit-btn fav-brute-star" + (" is-fav" if _fon else "")
+            fav_brute_btn = (
+                f"<button class='{_fcls}' onclick='event.stopPropagation();toggleFavBrute(this, \"{fid_safe}\")' "
+                f"title='Favori — cette brute servira aux montages du bouton « Montage Banger »' style='color:{_fcol}'>"
+                f"<svg viewBox='0 0 24 24' width='14' height='14' fill='{_ffill}' stroke='{_fstroke}' stroke-width='{_fsw}'><polygon points='12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2'/></svg>"
+                f"</button>"
+            )
         montage_btn = ""
         if can_montage:
             montage_btn = (
@@ -16259,6 +16431,7 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
         actions_html = (
             f"<div class='card-actions' style='position:absolute;top:8px;right:8px;display:flex;gap:6px;align-items:center;z-index:5'>"
             f"{banger_btn}"
+            f"{fav_brute_btn}"
             f"{montage_btn}"
             f"{edit_btn}"
             f"{disable_btn}"
@@ -17810,6 +17983,18 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         "font-weight:700;font-family:inherit;white-space:nowrap'>★ Reels Banger</button>"
     ) if is_reels else ""
 
+    # Bouton VISIBLE « ⭐ Bangers » des rushs bruts. Même geste que celui des
+    # reels juste au-dessus, mais un registre different : ici c'est un favori
+    # local (fav_brutes.json), la-haut c'est un envoi Discord avec accuse de
+    # reception. Deux mecanismes, deux fichiers, un seul symbole.
+    fav_brute_toggle_html = (
+        "<button type='button' id='favbrute-toggle-btn' onclick='toggleFavBruteFilter(this)' "
+        "title='Afficher seulement les rushs bruts marqués ⭐ favoris' "
+        "style='display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#1a1a1a;"
+        "border:1px solid #3a3a3a;border-radius:8px;color:#f5c518;cursor:pointer;font-size:13px;"
+        "font-weight:700;font-family:inherit;white-space:nowrap'>⭐ Bangers</button>"
+    ) if subdir == "brutes" else ""
+
     # Filtre type (Tout / Photo / Vidéo) — uniquement pour les pages qui mixent vraiment.
     # Reels = vidéos only, Posts = photos only → pas de filtre.
     # Stories + Story CTA → peuvent contenir les deux, on affiche le filtre.
@@ -17950,7 +18135,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap'>"
         + type_filter_html.replace("<div class='media-type-pills'>", "<div class='media-type-pills' style='margin:0'>")
         + f"</div>"
-        f"<div style='display:flex;align-items:center;gap:8px'>{banger_toggle_html}{sort_btn_html}</div>"
+        f"<div style='display:flex;align-items:center;gap:8px'>{banger_toggle_html}{fav_brute_toggle_html}{sort_btn_html}</div>"
         f"</div>"
     )
 
@@ -17977,6 +18162,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         total_files = len(files)
         _banger_marks = _load_banger_marks()  # 1 lecture pour toute la galerie
         _disabled_reels = _load_disabled_reels()  # idem : reels grisés/désactivés
+        _fav_brutes = _load_fav_brutes()  # idem : rushs bruts marqués ⭐ favoris
         # Reels marqués « Dispo pour les VA » (va_ready dans leur .montage.json) -> filigrane.
         # 1 scan pour toute la galerie (uniquement pour les vidéos, seules à avoir un montage).
         # Templates dont la description vient du post et attend une
@@ -18021,7 +18207,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
                 second_url = ""
             # Apres INITIAL_BATCH : on render avec data-src vide, l image se charge a l intersection
             deferred = idx >= INITIAL_BATCH
-            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, a_approuver=(p.stem in _a_approuver_stems), deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels), is_va_ready=((is_reels or subdir == "templates") and p.stem in _va_ready_stems), can_montage=can_montage))
+            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, a_approuver=(p.stem in _a_approuver_stems), deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels), is_fav_brute=(file_id in _fav_brutes), is_va_ready=((is_reels or subdir == "templates") and p.stem in _va_ready_stems), can_montage=can_montage))
         gallery = (
             gallery_header
             # auto-fill 165px : le nombre de colonnes s'adapte a la largeur
@@ -18430,7 +18616,13 @@ def _clean_caption_block(raw) -> dict:
                  # défaut = CENTRE de la vidéo (demande user : la caption est
                  # « écrite au centre juste comme ça » tant qu'on ne la place pas)
                  "y": _clampf(it.get("y"), 0.0, 1.0, 0.5),
-                 "enabled": it.get("enabled") is not False}
+                 "enabled": it.get("enabled") is not False,
+                 # ⭐ favori. Cette liste est une liste BLANCHE : l'item est
+                 # reconstruit champ par champ, pas filtré. Un champ absent
+                 # d'ici est effacé au premier /captions/save — c'est-à-dire
+                 # 250 ms après le clic sur l'étoile, sans la moindre erreur.
+                 # L'étoile s'allumerait, puis s'éteindrait au rechargement.
+                 "fav": it.get("fav") is True}
         try:
             wf = float(it.get("wrapW"))
             if 0.2 <= wf <= 0.97:
@@ -18636,6 +18828,11 @@ def _render_cloud_captions_html() -> str:
         # 3 contrôles, MÊME look que les cartes Template montage : ▶ (éditeur),
         # ⊘ (désactiver = sort du tirage), ⚪ (cercle de sélection -> barre ⌫).
         onoff_col = "#9aa0a6" if on else "#ef4444"
+        _fav = it.get("fav") is True
+        _favcol = "#ffd54a" if _fav else "#9aa0a6"
+        _favfill = "#ffd54a" if _fav else "none"
+        _favstroke = "none" if _fav else "#9aa0a6"
+        _favsw = "0" if _fav else "2"
         cards.append(
             f"<div class='cap-card{'' if on else ' cap-off'}' data-cid='{cid}'>"
             f"<div class='cap-prev' data-capact='place' data-cid='{cid}' title='Clique pour ouvrir l’éditeur'>"
@@ -18643,6 +18840,9 @@ def _render_cloud_captions_html() -> str:
             "<div class='card-actions' style='position:absolute;top:8px;right:8px;display:flex;gap:6px;align-items:center;z-index:5'>"
             f"<button class='card-edit-btn' data-capact='place' data-cid='{cid}' title='Gérer la caption (éditeur)' style='color:#a855f7'>"
             "<svg viewBox='0 0 24 24' width='13' height='13' fill='currentColor'><polygon points='5 3 19 12 5 21 5 3'/></svg></button>"
+            f"<button class='card-edit-btn cap-fav-star{' is-fav' if _fav else ''}' data-capact='fav' data-cid='{cid}' "
+            f"title='Favori — cette caption servira au bouton « Montage Banger »' style='color:{_favcol}'>"
+            f"<svg viewBox='0 0 24 24' width='13' height='13' fill='{_favfill}' stroke='{_favstroke}' stroke-width='{_favsw}'><polygon points='12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2'/></svg></button>"
             f"<button class='card-edit-btn{'' if on else ' is-off'}' data-capact='toggle' data-cid='{cid}' "
             f"title='Désactiver / réactiver cette caption (sort du tirage random)' style='color:{onoff_col}'>"
             "<svg viewBox='0 0 24 24' width='13' height='13' fill='none' stroke='currentColor' stroke-width='2.2'><circle cx='12' cy='12' r='9'/><line x1='5.6' y1='5.6' x2='18.4' y2='18.4'/></svg></button>"
@@ -42194,6 +42394,38 @@ def create_app():
         now_off = _toggle_disabled_reel(file_id)
         return jsonify({"ok": True, "disabled": now_off})
 
+    @app.route("/reel/toggle_fav_brute", methods=["POST"])
+    def reel_toggle_fav_brute():
+        """Étoile ⭐ d'un rush brut. État persisté dans data/fav_brutes.json.
+
+        Rien n'est envoyé à Discord au clic — c'est un favori, pas un envoi.
+        Le VA récupère ses brutes favorites quand il le demande, par le bouton
+        « Montage Banger » de son menu.
+
+        Placée sous /reel/ à dessein : _guard_write_routes traite tout POST
+        comme une écriture et refuse par défaut pour les rôles restreints, donc
+        le gating owner/admin est obtenu sans rien déclarer. La mettre sous
+        /noctus/ ou /identity/ marcherait aussi mais brouillerait la lecture.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        file_id = (request.form.get("file_id") or "").strip()
+        if not file_id:
+            return jsonify({"ok": False, "error": "file_id manquant"})
+        # Garde de forme : la clé doit désigner une brute. Sans ça, un POST
+        # forgé étoilerait un reel, et le sélecteur du bot — qui filtre sur
+        # « identité|brutes| » — ne le retrouverait jamais : une étoile
+        # allumée à l'écran, invisible pour le VA, indébogable.
+        # Le pipe de tête compte : « |brutes| » attrape la Bibliothèque 2
+        # (identité préfixée v2_, sous-dossier inchangé) et laisse de côté le
+        # Vault PRO, dont le sous-dossier est « pro_brutes ».
+        if "|brutes|" not in file_id:
+            return jsonify({"ok": False,
+                            "error": "cette étoile ne vaut que pour les rushs bruts"})
+        now_on = _toggle_fav_brute(file_id)
+        return jsonify({"ok": True, "fav": now_on})
+
     @app.route("/cloud/banger_purge", methods=["POST"])
     def cloud_banger_purge():
         """Vide le salon banger-{identity} : supprime tous les messages du bot +
@@ -42283,6 +42515,13 @@ def create_app():
                 # montage — du fichier supprimé.
                 try:
                     _pop_banger_mark(fid)
+                except Exception:
+                    pass
+                # Même raison pour l'étoile ⭐ des rushs bruts : la clé est
+                # « identité|brutes|nom », donc un ré-upload homonyme naîtrait
+                # favori sans que personne ne l'ait voulu.
+                try:
+                    _pop_fav_brute(fid)
                 except Exception:
                     pass
                 deleted.append(filename)

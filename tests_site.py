@@ -317,7 +317,13 @@ try:
             ("changer sa commission", "/mypuls/chatter/set_pct", {"name": "chatteur1", "pct": "60"}),
             ("détourner une adresse crypto", "/mypuls/chatter/set_crypto", {"name": "a", "address": "moi"}),
             ("ajouter une dépense", "/business/expense/add", {"label": "x", "amount": "10"}),
-            ("supprimer un VA", "/jailbreak/remove_va", {"identity": "e", "va_name": "T"})):
+            ("supprimer un VA", "/jailbreak/remove_va", {"identity": "e", "va_name": "T"}),
+            # L etoile ⭐ des rushs bruts ecrit dans data/ : elle doit tomber
+            # sous la meme regle que le reste. Rien n a ete declare pour ca —
+            # _guard_write_routes refuse tout POST par defaut — et ce test
+            # verifie justement que personne ne l a « ouverte » par megarde.
+            ("etoiler une brute", "/reel/toggle_fav_brute",
+             {"file_id": "x|brutes|y.mp4"})):
         _r = _c.post(_path, data=_data)
         check(f"rôle restreint bloqué : {_label}", _r.status_code == 403, f"HTTP {_r.status_code}")
     _r = _c.post("/chatting/update_cell", data={"edt": "x", "row": "0", "col": "0", "value": "v"})
@@ -1645,6 +1651,49 @@ try:
           _itd[2].get("desc", "").startswith("Lien en bio")
           and len(_itd[2].get("desc", "")) <= 1000
           and "desc" not in _itd[4] and "desc" not in _itd[0], str(_itd[2])[:90])
+    # ⭐ favori : le champ doit SURVIVRE a l aller-retour. _clean_caption_block
+    # ne filtre pas l item, il le reconstruit depuis une liste blanche : un
+    # champ non declare la est efface au premier /captions/save, c est-a-dire
+    # 250 ms apres le clic sur l etoile. L etoile s allumerait puis
+    # s eteindrait au rechargement, sans la moindre erreur.
+    _blk["items"][1]["fav"] = True
+    _blk["items"][5]["fav"] = False
+    _cCa.post("/captions/save", data={"identity": "_tst_captions", "data": _jsCa.dumps(_blk)})
+    _jf = (_cCa.get("/captions/list?identity=_tst_captions").get_json() or {})
+    _itf = _jf["block"]["items"]
+    check("captions : le favori ⭐ survit a l aller-retour",
+          _itf[1].get("fav") is True and _itf[5].get("fav") is False
+          and _itf[0].get("fav") is False, str(_itf[1])[:90])
+    # Un favori n a de sens que s il est encore dans le tirage : le selecteur du
+    # bot exige fav ET enabled. On verifie au moins que les deux cohabitent.
+    _blk["items"][1]["enabled"] = False
+    _cCa.post("/captions/save", data={"identity": "_tst_captions", "data": _jsCa.dumps(_blk)})
+    _jf2 = (_cCa.get("/captions/list?identity=_tst_captions").get_json() or {})
+    check("captions : favori et desactive cohabitent sans s ecraser",
+          _jf2["block"]["items"][1].get("fav") is True
+          and _jf2["block"]["items"][1].get("enabled") is False,
+          str(_jf2["block"]["items"][1])[:90])
+    _blk["items"][1]["enabled"] = True
+
+    # ⭐ l etoile des rushs bruts : posee sur les brutes, ABSENTE ailleurs.
+    # _preview_card est une fonction pure, on l appelle directement.
+    _pcB = _wCa._preview_card("/m.mp4", "/t.jpg", _plCa.Path("clip.mp4"), True,
+                              "ident|brutes|clip.mp4")
+    _pcR = _wCa._preview_card("/m.mp4", "/t.jpg", _plCa.Path("r.mp4"), True,
+                              "ident|videos|r.mp4")
+    _pcP = _wCa._preview_card("/m.mp4", "/t.jpg", _plCa.Path("p.mp4"), True,
+                              "ident|pro_brutes|p.mp4")
+    check("brutes : l etoile ⭐ est sur la carte d un rush brut",
+          "fav-brute-star" in _pcB)
+    check("brutes : elle n est PAS sur un reel (il a deja son etoile banger)",
+          "fav-brute-star" not in _pcR and "banger-star" in _pcR)
+    check("brutes : le Vault PRO est epargne (sous-dossier pro_brutes)",
+          "fav-brute-star" not in _pcP)
+    _pcOn = _wCa._preview_card("/m.mp4", "/t.jpg", _plCa.Path("c.mp4"), True,
+                               "ident|brutes|c.mp4", is_fav_brute=True)
+    check("brutes : l etoile allumee se voit dans le HTML",
+          "is-fav" in _pcOn and "#ffd54a" in _pcOn)
+
     # partage vers une autre model : copie (desc comprise) + dédupe normalisée
     _idCb = _plCa.Path("data/identities/_tst_captions2")
     _shCa.rmtree(_idCb, ignore_errors=True)
