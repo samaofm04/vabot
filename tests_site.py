@@ -1689,6 +1689,10 @@ try:
           "fav-brute-star" not in _pcR and "banger-star" in _pcR)
     check("brutes : le Vault PRO est epargne (sous-dossier pro_brutes)",
           "fav-brute-star" not in _pcP)
+    _pcT = _wCa._preview_card("/m.mp4", "/t.jpg", _plCa.Path("t.mp4"), True,
+                              "ident|templates|t.mp4")
+    check("templates : l etoile ⭐ est aussi sur un template de montage",
+          "fav-brute-star" in _pcT)
     _pcOn = _wCa._preview_card("/m.mp4", "/t.jpg", _plCa.Path("c.mp4"), True,
                                "ident|brutes|c.mp4", is_fav_brute=True)
     check("brutes : l etoile allumee se voit dans le HTML",

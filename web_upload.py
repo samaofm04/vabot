@@ -537,6 +537,12 @@ def _toggle_disabled_reel(file_id: str) -> bool:
 # _clear_banger_marks_for_identity purge par identité SANS regarder le
 # sous-dossier — un clic sur « ⌫ Vider le salon banger » depuis la galerie des
 # reels aurait effacé toutes les étoiles de brutes de l'identité.
+# Le nom du fichier est historique : il ne portait que les rushs bruts, il
+# porte aussi les templates de montage depuis le 22/08. On ne le renomme
+# PAS — les etoiles deja posees vivent dedans, et un renommage sans
+# migration les perdrait toutes en silence. La cle porte de toute facon le
+# sous-dossier (« identite|brutes|... », « identite|templates|... »), donc
+# rien n'est ambigu a la lecture.
 FAV_BRUTES_FILE = DATA_DIR / "fav_brutes.json"
 
 
@@ -16384,12 +16390,17 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
                 f"<svg viewBox='0 0 24 24' width='14' height='14' fill='{_sfill}' stroke='{_sstroke}' stroke-width='{_sw}'><polygon points='12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2'/></svg>"
                 f"</button>"
             )
-        # ⭐ Favori : RESERVE aux rushs bruts. Rien n'est envoye au clic —
-        # contrairement a l'etoile banger juste au-dessus, qui poste dans
-        # Discord. Celle-ci ne fait que marquer ; le VA vient chercher ses
-        # brutes favorites par le bouton « Montage Banger » de son menu.
+        # ⭐ Favori : rushs bruts ET templates de montage. Rien n'est envoye au
+        # clic — contrairement a l'etoile banger juste au-dessus, qui poste dans
+        # Discord. Celle-ci ne fait que marquer.
+        #
+        # Sur les brutes elle alimente le bouton « Montage Banger » du menu VA.
+        # Sur les templates elle ne sert (pour l'instant) qu'a retrouver les
+        # bons d'un coup d'oeil dans l'editeur : elle ne change pas ce que le
+        # VA recoit. Dire lequel des deux fait quoi evite de croire qu'etoiler
+        # un template le mettra entre les mains des VA.
         fav_brute_btn = ""
-        if "|brutes|" in (file_id or ""):
+        if "|brutes|" in (file_id or "") or "|templates|" in (file_id or ""):
             _fon = bool(is_fav_brute)
             _fcol = "#ffd54a" if _fon else "#9aa0a6"
             _ffill = "#ffd54a" if _fon else "none"
@@ -17993,7 +18004,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         "style='display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#1a1a1a;"
         "border:1px solid #3a3a3a;border-radius:8px;color:#f5c518;cursor:pointer;font-size:13px;"
         "font-weight:700;font-family:inherit;white-space:nowrap'>⭐ Bangers</button>"
-    ) if subdir == "brutes" else ""
+    ) if subdir in ("brutes", "templates") else ""
 
     # Filtre type (Tout / Photo / Vidéo) — uniquement pour les pages qui mixent vraiment.
     # Reels = vidéos only, Posts = photos only → pas de filtre.
@@ -42413,16 +42424,17 @@ def create_app():
         file_id = (request.form.get("file_id") or "").strip()
         if not file_id:
             return jsonify({"ok": False, "error": "file_id manquant"})
-        # Garde de forme : la clé doit désigner une brute. Sans ça, un POST
-        # forgé étoilerait un reel, et le sélecteur du bot — qui filtre sur
-        # « identité|brutes| » — ne le retrouverait jamais : une étoile
-        # allumée à l'écran, invisible pour le VA, indébogable.
+        # Garde de forme : la clé doit désigner une brute ou un template. Sans
+        # ça, un POST forgé étoilerait un reel, et le sélecteur du bot — qui
+        # filtre sur « identité|brutes| » — ne le retrouverait jamais : une
+        # étoile allumée à l'écran, invisible pour le VA, indébogable.
         # Le pipe de tête compte : « |brutes| » attrape la Bibliothèque 2
         # (identité préfixée v2_, sous-dossier inchangé) et laisse de côté le
         # Vault PRO, dont le sous-dossier est « pro_brutes ».
-        if "|brutes|" not in file_id:
+        if "|brutes|" not in file_id and "|templates|" not in file_id:
             return jsonify({"ok": False,
-                            "error": "cette étoile ne vaut que pour les rushs bruts"})
+                            "error": "cette étoile ne vaut que pour les rushs "
+                                     "bruts et les templates de montage"})
         now_on = _toggle_fav_brute(file_id)
         return jsonify({"ok": True, "fav": now_on})
 
