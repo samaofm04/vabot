@@ -2325,8 +2325,13 @@ try:
           _cEd.post("/api/rig/jobs",
                     json={"type": "enregistrer", "scenario": "x",
                           "etapes": [{"tap": {}}] * 201}).status_code == 400)
+    # Le nom vise n existe VOLONTAIREMENT pas. Un travail reste dans la
+    # file apres le test ; si l agent tourne, il le prendra pour de bon. Un
+    # essai anterieur, pose sur « post-reel », a ramene ce scenario de vingt
+    # etapes a une — ne jamais nommer ici un scenario qui existe.
     _repJb = _cEd.post("/api/rig/jobs",
-                       json={"type": "enregistrer", "scenario": "post-reel",
+                       json={"type": "enregistrer",
+                             "scenario": "__scenario_de_test_inexistant__",
                              "etapes": [{"tap": {"text": "Suivant"}}]})
     _dJb = _jsonRg.loads(_repJb.get_data(as_text=True))
     check("editeur : le travail d enregistrement porte ses etapes",
@@ -2388,6 +2393,23 @@ try:
     # POSTE, pas ici. Le site ne doit surtout pas croire qu il l a.
     check("editeur : le site ne pretend pas garder de version",
           "VERSIONS_GARDEES" not in _srcRg)
+
+    # La file est rendue telle qu elle a ete trouvee : les travaux poses
+    # ici n ont rien a faire dans celle du poste.
+    try:
+        _filesRg = _wuRg.Path("data") / "rig_jobs.json"
+        _dRgF = _wuRg.safe_json.load(_filesRg, default={}) or {}
+        _restants = [j for j in (_dRgF.get("jobs") or [])
+                     if not str(j.get("scenario") or "").startswith("__")]
+        if len(_restants) != len(_dRgF.get("jobs") or []):
+            _dRgF["jobs"] = _restants
+            _wuRg.safe_json.write(_filesRg, _dRgF, indent=None)
+        check("rig : les tests ne laissent aucun travail dans la file",
+              not [j for j in (_wuRg.safe_json.load(_filesRg, default={})
+                               or {}).get("jobs") or []
+                   if str(j.get("scenario") or "").startswith("__")])
+    except Exception as _eF:
+        check("rig : la file est nettoyable", False, repr(_eF)[:120])
 
     if _avantRg is None:
         _osRg.environ.pop("RIG_API_TOKEN", None)
