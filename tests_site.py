@@ -2630,6 +2630,35 @@ try:
           and _uFv._MENU_BTN_FEATURE.get("cmenu:montagebanger") == "contenu")
     check("favoris : la vue tient dans les 25 composants de Discord",
           len(_vFv.children) <= 25, "%d composants" % len(_vFv.children))
+
+    # -- le menu du serveur US -----------------------------------------------
+    # Le serveur US n'utilise PAS ContentMenuView : ses salons -menu portent le
+    # panneau Jailbreak, pilote par _JB_ACTIONS_US. Sans entree la, les deux
+    # boutons n'existent que sur le serveur francais.
+    import re as _reFv
+    _clesFv = {a[0] for a in _uFv._JB_ACTIONS_US}
+    check("favoris : les 2 actions sont dans le menu US",
+          "capbanger" in _clesFv and "montagebanger" in _clesFv)
+    # Le panneau US declenche cmd.callback sur un ATTRIBUT du cog : une action
+    # qui pointe vers une methode inexistante repond « Action indisponible ».
+    for _k, _lb, _cmd, _sc in _uFv._JB_ACTIONS_US:
+        check("favoris : l action US '%s' pointe vers une commande reelle" % _k,
+              hasattr(_uFv.UserCog, _cmd), _cmd)
+    # Le custom_id n'accepte que des lettres pour la cle : un chiffre ou un
+    # tiret bas rendrait le bouton muet, sans erreur nulle part.
+    _tplFv = r"jbus:a:(?P<ident>[a-z0-9_.\-]+):(?P<key>[a-z]+):(?P<qty>\d+)"
+    check("favoris : les cles US passent le motif du custom_id",
+          all(_reFv.fullmatch(_tplFv, "jbus:a:x:%s:3" % a[0])
+              for a in _uFv._JB_ACTIONS_US),
+          str([a[0] for a in _uFv._JB_ACTIONS_US
+               if not _reFv.fullmatch(_tplFv, "jbus:a:x:%s:3" % a[0])]))
+    # Rangees du panneau : row = 1 + i//4, et Discord plafonne a 5 par rangee.
+    _rowsFv = {}
+    for _i, _a in enumerate(_uFv._JB_ACTIONS_US):
+        _rowsFv[1 + _i // 4] = _rowsFv.get(1 + _i // 4, 0) + 1
+    check("favoris : le panneau US ne deborde aucune rangee",
+          all(_n <= 5 for _n in _rowsFv.values()) and max(_rowsFv) <= 4,
+          str(_rowsFv))
 except Exception as _eFv:
     check("favoris : selecteurs testables", False, repr(_eFv)[:160])
 

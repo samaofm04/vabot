@@ -2320,6 +2320,26 @@ class UserCog(commands.Cog):
                 label="MONTAGE BANGER", emoji="🎬",
                 prefixe_fichier="montage_banger")
 
+    # Les deux actions existent AUSSI en commandes, pour une raison precise :
+    # le panneau du serveur US ne sait declencher que des app_commands — il
+    # appelle cmd.callback sur un attribut du cog (_run_for_model). Sans ces
+    # deux commandes, les boutons n'auraient pu vivre que dans le menu FR.
+    #
+    # Le bouton, lui, marche des le redemarrage : il n'a pas besoin que Discord
+    # connaisse la commande. Seule la frappe de « /captionbanger » exige une
+    # resynchronisation de l'arbre.
+    @app_commands.command(
+        name="captionbanger",
+        description="Tes meilleures captions (marquees ⭐ sur le site)")
+    async def captionbanger(self, interaction: discord.Interaction):
+        await self._send_caption_bangers(interaction)
+
+    @app_commands.command(
+        name="montagebanger",
+        description="Une video brute ⭐ + une caption ⭐, montees pour toi")
+    async def montagebanger(self, interaction: discord.Interaction):
+        await self._send_montage_bangers(interaction)
+
     @app_commands.command(name="reel", description="Genere 3 reels (par defaut) : video clean + caption + description + exemple")
     @app_commands.describe(nombre="Combien de reels envoyer (1-10, defaut 3)")
     async def reel(
@@ -4832,6 +4852,13 @@ _JB_ACTIONS_US = [
     ("bio", "💬 Bio", "bio", True),
     ("pp", "🖼️ PP", "profilepic", True),
     ("brute", "🎥 Vidéo brut", "videobrut", True),
+    # Les favoris ⭐ poses sur le site. Pas de quantite : le VA recoit ce qui
+    # est marque, ni plus ni moins — c'est tout l'interet d'un favori.
+    # La cle doit rester en [a-z] : le template du custom_id
+    # (jbus:a:<ident>:<key>:<qty>) refuse chiffres et tirets bas, et un bouton
+    # deja poste deviendrait muet sans la moindre erreur.
+    ("capbanger", "⭐ Caption Banger", "captionbanger", False),
+    ("montagebanger", "🎬 Montage Banger", "montagebanger", False),
 ]
 
 # Quantites proposees (multiplicateur). Plafonnees au stock reel de la model.
