@@ -2251,6 +2251,44 @@ try:
     check("rig : le jeton n est jamais ecrit en dur",
           "RIG_API_TOKEN" in _srcRg and 'RIG_API_TOKEN"] =' not in _srcRg)
 
+    # --- le JavaScript de la page rendue ---------------------------------
+    # Le piege le plus couteux de cette base : le JS vit dans des chaines
+    # Python, et une apostrophe echappee ou un « \n » ecrit en toutes
+    # lettres tue le script de la page ENTIERE, sans erreur serveur et sans
+    # qu aucun autre test ne bronche.
+    import re as _reJs
+    import shutil as _shJs
+    import subprocess as _spJs
+
+    _cJs = _appRg.test_client()
+    with _cJs.session_transaction() as _sJs:
+        _sJs["auth"] = True
+        _sJs["username"] = "admin"
+    _hJs = _cJs.get("/?tab=remote").get_data(as_text=True)
+    check("page : le tableau de bord se rend", len(_hJs) > 100000)
+
+    # Les blocs <script type="application/json"> portent des donnees, pas
+    # du code : les passer a node ferait echouer la verification sur eux.
+    _blocsJs = _reJs.findall(
+        r"<script(?![^>]*\bsrc=)([^>]*)>(.*?)</script>", _hJs, _reJs.S)
+    _codeJs = [c for a, c in _blocsJs if "json" not in a.lower()]
+    check("page : elle porte bien du JavaScript", len(_codeJs) >= 10)
+
+    _node = _shJs.which("node")
+    if _node:
+        _fJs = TMP / "page_rendue.js"
+        _fJs.write_text((chr(10) + ";" + chr(10)).join(_codeJs),
+                        encoding="utf-8")
+        _rJs = _spJs.run([_node, "--check", str(_fJs)],
+                         capture_output=True, text=True, timeout=90)
+        check("page : le JavaScript rendu passe node --check",
+              _rJs.returncode == 0,
+              (_rJs.stderr or "")[:200].replace(chr(10), " "))
+    else:
+        # Ne jamais ecarter en silence : dire que la verification n a pas
+        # eu lieu vaut mieux qu un OK trompeur.
+        print("     (node absent : le JS rendu n a pas ete verifie)")
+
     # --- l editeur de scenarios ------------------------------------------
     # Le catalogue d actions est declare par le poste : sans lui l editeur
     # ne peut proposer que des noms devines, et une action inventee fait
@@ -2324,6 +2362,32 @@ try:
     # Plus aucun cadre vers la machine locale : Remote se voit de partout.
     check("editeur : plus aucun cadre vers 127.0.0.1:8770",
           "8770" not in _srcRg and "data-remote-cadre" not in _srcRg)
+
+    # --- les garde-fous, un par facon de perdre du travail ---------------
+    for _quoi, _temoin in (
+            ("fermer l onglet avertit", "beforeunload"),
+            ("changer d ecran avertit", "modifications non "),
+            ("Ctrl+S enregistre", "ev.key==='s'"),
+            ("Echap ferme la palette", "ev.key==='Escape'"),
+            ("le double clic ne part pas deux fois",
+             "if(RMT_ED.enregistrement) return;"),
+            ("l edition concurrente est detectee", "RMT_ED.depart"),
+            ("une etape sans action est nommee", "rmtEdIncompletes"),
+            ("un parametre ne peut pas etre sans nom",
+             "ne peut pas etre sans nom"),
+            ("un parametre en double est refuse",
+             "Il y a deja un parametre nomme"),
+            ("une etape brute a exactement une action",
+             "une seule action"),
+            ("le poste hors ligne est annonce", "poste hors ligne"),
+            ("une etape se duplique", "data-ed-c="),
+    ):
+        check("editeur : " + _quoi, _temoin in _srcRg, "temoin : " + _temoin)
+
+    # Le filet le plus important : la version precedente est gardee sur le
+    # POSTE, pas ici. Le site ne doit surtout pas croire qu il l a.
+    check("editeur : le site ne pretend pas garder de version",
+          "VERSIONS_GARDEES" not in _srcRg)
 
     if _avantRg is None:
         _osRg.environ.pop("RIG_API_TOKEN", None)

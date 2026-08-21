@@ -8617,10 +8617,11 @@ body.light .rmt-ed-palette{background:#fff;color:#1c1c1e}
  line-height:1.45;margin-top:2px}
 </style>
 <script>
-// Ce que l’editeur tient en main. « propre » vaut faux des la premiere
-// retouche : sans lui, quitter la vue effacerait un travail en cours sans
-// que personne ne s’en apercoive.
-var RMT_ED = {nom:'', etapes:[], sel:-1, propre:true, complet:true, actions:[]};
+// Ce que l’editeur tient en main. « propre » vaut faux des la
+// premiere retouche ; « depart » retient le scenario tel qu’il a
+// ete charge, pour reconnaitre un changement venu d’ailleurs.
+var RMT_ED = {nom:'', etapes:[], sel:-1, propre:true, complet:true,
+              actions:[], depart:'', enregistrement:false};
 
 function rmtEdAction(e){
   // Une etape porte son action comme unique cle utile ; « optional » est un
@@ -8666,6 +8667,7 @@ function rmtEdListe(){
       + '<span class="rmt-ed-poig">'
       +  '<button type="button" data-ed-m="'+i+'" title="Monter">&#8593;</button>'
       +  '<button type="button" data-ed-d="'+i+'" title="Descendre">&#8595;</button>'
+      +  '<button type="button" data-ed-c="'+i+'" title="Dupliquer">&#8853;</button>'
       +  '<button type="button" data-ed-x="'+i+'" title="Supprimer">&times;</button>'
       + '</span></div>';
   }).join('');
@@ -8764,11 +8766,26 @@ function rmtEdCharger(nom, forcer){
      var sc=l.filter(function(x){return x.nom===RMT_ED.nom;})[0];
      RMT_ED.etapes = (sc && Array.isArray(sc.detail))
                    ? JSON.parse(JSON.stringify(sc.detail)) : [];
+     // Le scenario tel qu’il etait au chargement. Si le poste le
+     // redeclare pendant qu’on l’edite — parce que quelqu’un d’autre
+     // l’a enregistre — on le reconnaitra au moment d’ecrire.
+     RMT_ED.depart = JSON.stringify(RMT_ED.etapes);
      RMT_ED.complet = !sc || sc.complet!==false;
      var inf=document.getElementById('rmt-ed-info');
      if(inf) inf.textContent = RMT_ED.etapes.length+' etapes';
      var ok=document.getElementById('rmt-ed-ok');
      if(ok) ok.disabled = !RMT_ED.complet;
+     // L’etat du poste se lit avant de cliquer : sinon on attendait une
+     // minute pour apprendre qu’il etait eteint.
+     fetch('/api/rig/jobs',{credentials:'same-origin'})
+      .then(function(r){return r.json();})
+      .then(function(e){
+        var inf2=document.getElementById('rmt-ed-info');
+        if(inf2 && e && !e.poste_en_ligne)
+          inf2.innerHTML = RMT_ED.etapes.length + ' etapes &middot; '
+            + '<span style=\"color:#e0a052\">poste hors ligne, '
+            + 'l enregistrement attendra</span>';
+      }).catch(function(){});
      rmtEdMsg(RMT_ED.complet ? ''
        : 'Scenario trop long pour etre montre en entier : enregistrement '
          + 'bloque, la fin serait perdue.', RMT_ED.complet?'':'mal');
@@ -8818,15 +8835,61 @@ function rmtEdNeuve(nom){
   var e={}; e[nom]={}; return e;
 }
 
+// Une etape sans action ne veut rien dire, et le moteur la refuserait
+// apres coup : autant la nommer ici, avec son numero.
+function rmtEdIncompletes(){
+  var mauvaises=[];
+  RMT_ED.etapes.forEach(function(e,i){
+    var cles=Object.keys(e||{}).filter(function(k){return k!=='optional';});
+    if(cles.length!==1) mauvaises.push(i+1);
+  });
+  return mauvaises;
+}
 function rmtEdEnregistrer(){
+  if(RMT_ED.enregistrement) return;          // double clic
   if(!RMT_ED.complet){
     rmtEdMsg('Enregistrement bloque : le detail est incomplet.','mal'); return;
   }
   if(!RMT_ED.etapes.length){
     rmtEdMsg('Un scenario vide ne peut pas etre enregistre.','mal'); return;
   }
+  var mauvaises=rmtEdIncompletes();
+  if(mauvaises.length){
+    rmtEdMsg('Etape ' + mauvaises.join(', ') + ' : il faut exactement une '
+             + 'action.','mal');
+    RMT_ED.sel=mauvaises[0]-1; rmtEdRendu(); return;
+  }
+  RMT_ED.enregistrement=true;
   var b=document.getElementById('rmt-ed-ok');
   if(b) b.disabled=true;
+  rmtEdMsg('Verification...');
+  // Le catalogue a-t-il bouge depuis le chargement ? Si oui, quelqu’un a
+  // enregistre ce scenario entre-temps et ecrire l’effacerait. On demande
+  // avant, plutot que de le decouvrir dans l’historique du poste.
+  fetch('/api/rig/scenarios',{credentials:'same-origin'})
+   .then(function(r){return r.json();})
+   .then(function(j){
+     var sc=((j&&j.scenarios)||[]).filter(function(x){
+       return x.nom===RMT_ED.nom;})[0];
+     var ici=sc && Array.isArray(sc.detail) ? JSON.stringify(sc.detail) : null;
+     if(ici!==null && RMT_ED.depart && ici!==RMT_ED.depart){
+       RMT_ED.enregistrement=false;
+       if(b) b.disabled=false;
+       if(!confirm('Ce scenario a change sur le poste depuis que tu l as '
+                 + 'ouvert. Enregistrer maintenant effacerait cette autre '
+                 + 'version. Continuer quand meme ?')){
+         rmtEdMsg('Enregistrement abandonne. « Annuler » recharge la '
+                  + 'derniere version.','mal');
+         return;
+       }
+       RMT_ED.enregistrement=true;
+       if(b) b.disabled=true;
+     }
+     rmtEdEnvoyer();
+   }).catch(function(){ rmtEdEnvoyer(); });
+}
+function rmtEdEnvoyer(){
+  var b=document.getElementById('rmt-ed-ok');
   rmtEdMsg('Envoi au poste...');
   fetch('/api/rig/jobs',{method:'POST',credentials:'same-origin',
     headers:{'Content-Type':'application/json'},
@@ -8835,11 +8898,13 @@ function rmtEdEnregistrer(){
    .then(function(r){return r.json();})
    .then(function(j){
      if(!j||!j.ok){
+       RMT_ED.enregistrement=false;
        if(b) b.disabled=false;
        rmtEdMsg((j&&j.error)||'Refuse par le site.','mal'); return;
      }
      rmtEdSuivre(j.job.id, 0);
    }).catch(function(){
+     RMT_ED.enregistrement=false;
      if(b) b.disabled=false;
      rmtEdMsg('Site injoignable.','mal');
    });
@@ -8850,8 +8915,11 @@ function rmtEdEnregistrer(){
 function rmtEdSuivre(id, essai){
   if(essai>40){
     var b0=document.getElementById('rmt-ed-ok');
+    RMT_ED.enregistrement=false;
     if(b0) b0.disabled=false;
-    rmtEdMsg('Le poste ne repond pas. Est-il lance ?','mal'); return;
+    rmtEdMsg('Le poste n a pas repondu en une minute. Est-il lance ? Rien n a '
+             + 'ete perdu : les modifications sont toujours a l ecran.','mal');
+    return;
   }
   rmtEdMsg('En attente du poste' + new Array((essai%3)+2).join('.'));
   setTimeout(function(){
@@ -8862,9 +8930,13 @@ function rmtEdSuivre(id, essai){
        var b=document.getElementById('rmt-ed-ok');
        if(!w || w.etat==='en_attente' || w.etat==='en_cours')
          return rmtEdSuivre(id, essai+1);
+       RMT_ED.enregistrement=false;
        if(b) b.disabled=false;
        if(w.etat==='fini'){
          RMT_ED.propre=true;
+         // Le scenario enregistre devient le nouveau point de depart :
+         // sans cela, le prochain enregistrement croirait a un conflit.
+         RMT_ED.depart=JSON.stringify(RMT_ED.etapes);
          rmtEdMsg(w.avancement||'Enregistre.','bien');
          if(typeof showToast==='function')
            showToast('Scenario ' + RMT_ED.nom + ' enregistre');
@@ -8892,8 +8964,17 @@ function rmtEdSuivre(id, essai){
     if(t.closest('#rmt-ed-annuler')){ rmtEdCharger(RMT_ED.nom, true); return; }
     if(t.closest('#rmt-ed-ok')){ rmtEdEnregistrer(); return; }
     if(t.closest('#rmt-ed-pplus')){
-      var k=prompt('Nom du parametre ?');
-      if(k) rmtEdMaj(function(e){ e[rmtEdAction(e)][k]=''; });
+      var k=(prompt('Nom du parametre ?')||'').trim();
+      var e1=RMT_ED.etapes[RMT_ED.sel], p1=e1 && e1[rmtEdAction(e1)];
+      if(!k) return;
+      if(!p1 || typeof p1!=='object'){
+        rmtEdMsg('Cette action ne prend pas de parametres nommes.','mal');
+        return;
+      }
+      if(Object.prototype.hasOwnProperty.call(p1, k)){
+        rmtEdMsg('Il y a deja un parametre nomme « '+k+' ».','mal'); return;
+      }
+      rmtEdMaj(function(e){ e[rmtEdAction(e)][k]=''; });
       rmtEdPanneau(); return;
     }
     var add=d('data-ed-add');
@@ -8918,6 +8999,14 @@ function rmtEdSuivre(id, essai){
       if(dn<RMT_ED.etapes.length-1){ var s2=RMT_ED.etapes.splice(dn,1)[0];
                RMT_ED.etapes.splice(dn+1,0,s2);
                RMT_ED.sel=dn+1; rmtEdSale(); rmtEdListe(); }
+      ev.stopPropagation(); return; }
+    var cp=d('data-ed-c');
+    if(cp!==null){ cp=+cp;
+      // Une copie profonde : partager l’objet ferait bouger les deux
+      // etapes ensemble des la premiere retouche.
+      RMT_ED.etapes.splice(cp+1, 0,
+        JSON.parse(JSON.stringify(RMT_ED.etapes[cp])));
+      RMT_ED.sel=cp+1; rmtEdSale(); rmtEdRendu();
       ev.stopPropagation(); return; }
     var x=d('data-ed-x');
     if(x!==null){ x=+x;
@@ -8964,7 +9053,18 @@ function rmtEdSuivre(id, essai){
       });
       rmtEdPanneau(); return; }
     var ck=t.getAttribute && t.getAttribute('data-ed-cle');
-    if(ck!==null && ck!==undefined && t.value && t.value!==ck){
+    if(ck!==null && ck!==undefined && t.value!==ck){
+      var e0=RMT_ED.etapes[RMT_ED.sel], p0=e0 && e0[rmtEdAction(e0)];
+      // Un nom vide, ou deja porte par un autre parametre : renommer
+      // quand meme en faisait disparaitre un, sans rien dire.
+      if(!t.value.trim()){
+        rmtEdMsg('Un parametre ne peut pas etre sans nom.','mal');
+        t.value=ck; return;
+      }
+      if(p0 && Object.prototype.hasOwnProperty.call(p0, t.value)){
+        rmtEdMsg('Il y a deja un parametre nomme « '+t.value+' ».','mal');
+        t.value=ck; return;
+      }
       rmtEdMaj(function(e){
         var p=e[rmtEdAction(e)], neuf={};
         // Reconstruire en parcourant les cles garde l’ordre d’origine :
@@ -8986,12 +9086,62 @@ function rmtEdSuivre(id, essai){
     if(!e) return;
     try{
       var o=JSON.parse(ev.target.value);
-      if(!o || typeof o!=='object' || Array.isArray(o) || !rmtEdAction(o))
-        throw 0;
+      if(!o || typeof o!=='object' || Array.isArray(o)) throw 0;
+      var cles=Object.keys(o).filter(function(k){return k!=='optional';});
+      // Deux actions dans une meme etape : le moteur en jouerait une, et
+      // laquelle depend de l’ordre des cles. Autant refuser.
+      if(cles.length!==1){
+        rmtEdMsg(cles.length ? 'Une etape ne porte qu une seule action.'
+                             : 'Cette etape n a aucune action.','mal');
+        return;
+      }
       RMT_ED.etapes[RMT_ED.sel]=o; rmtEdSale(); rmtEdRendu();
-    }catch(err){ rmtEdMsg('Etape brute invalide : ignoree.','mal'); }
+      rmtEdMsg('Etape brute appliquee.');
+    }catch(err){ rmtEdMsg('Etape brute : JSON invalide, ignoree.','mal'); }
   });
 })();
+
+// Fermer l’onglet avec des modifications en cours les perdait sans un mot.
+// Le navigateur n’affiche pas notre texte — il pose sa propre question —
+// mais il la pose, et c’est tout ce qu’on lui demande.
+window.addEventListener('beforeunload', function(ev){
+  if(RMT_ED.propre || !RMT_ED.nom) return;
+  ev.preventDefault();
+  ev.returnValue = '';
+  return '';
+});
+// Changer d’ecran a l’interieur du site ne declenche pas beforeunload :
+// la page ne se recharge pas. On se greffe donc sur showTab, comme le
+// reste de Remote.
+(function(){
+  if(window.__rmtEdQuitter) return; window.__rmtEdQuitter=1;
+  var origine=window.showTab;
+  if(typeof origine!=='function') return;
+  window.showTab=function(grp, tab){
+    try{
+      if(!RMT_ED.propre && RMT_ED.nom && typeof tab==='string'
+         && tab.indexOf('remote')!==0
+         && !confirm('L editeur de scenarios a des modifications non '
+                   + 'enregistrees. Quitter cet ecran ?')) return;
+    }catch(e){}
+    return origine.apply(this, arguments);
+  };
+})();
+// Les raccourcis que tout le monde essaie. Sans eux, enregistrer demandait
+// d’aller chercher le bouton en haut, a chaque fois.
+document.addEventListener('keydown', function(ev){
+  var vue=document.querySelector('[data-remote-vue=\"editeur\"]');
+  if(!vue || vue.style.display==='none') return;
+  if(ev.key==='Escape'){
+    var v=document.getElementById('rmt-ed-voile');
+    if(v && v.classList.contains('on')){ rmtEdPalette(false);
+                                         ev.preventDefault(); }
+    return;
+  }
+  if((ev.ctrlKey||ev.metaKey) && (ev.key==='s'||ev.key==='S')){
+    ev.preventDefault(); rmtEdEnregistrer();
+  }
+});
 
 // Le catalogue d’actions, demande une seule fois : il ne change qu’au
 // redemarrage du moteur.
