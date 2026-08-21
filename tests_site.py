@@ -436,6 +436,19 @@ try:
                        ("photo (1).png", "photo (1).png"), ("", "fichier")):
         check(f"upload assaini : {_raw or '(vide)'}", _w2._safe_upload_name(_raw) == _exp,
               _w2._safe_upload_name(_raw))
+    # Nom de plus de 120 caracteres : la troncature doit couper la BASE et
+    # garder l'extension. Sans ca le fichier arrivait nu, donc invisible des
+    # galeries ET de gdrive_sync (tous deux filtrent par extension) : 78
+    # photos de themikkiangel n'etaient sauvegardees nulle part.
+    _long = "themikkiangel_" + "photo" * 32 + "_2026-06-26_DaBn1IYSFh-_392759552498.jpg"
+    _cut = _w2._safe_upload_name(_long)
+    check("upload : nom > 120 caracteres, extension conservee",
+          _cut.endswith(".jpg") and len(_cut) <= 120, f"{len(_cut)} {_cut!r}")
+    _cut_maj = _w2._safe_upload_name("i" * 130 + ".JPEG")
+    check("upload : extension conservee telle quelle (.JPEG)",
+          _cut_maj.endswith(".JPEG") and len(_cut_maj) <= 120, _cut_maj)
+    check("upload : nom long sans extension reste tronque",
+          len(_w2._safe_upload_name("j" * 200)) == 120)
 except Exception as _e:
     check("sécurité 2 : testable", False, repr(_e)[:90])
 

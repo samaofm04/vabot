@@ -40383,10 +40383,25 @@ def _render_account_section_html() -> str:
 
 def _safe_upload_name(name: str) -> str:
     """Nom de fichier SUR : une tentative de traversee de repertoire
-    (chemin relatif dans le nom du fichier) ne peut plus sortir du dossier."""
+    (chemin relatif dans le nom du fichier) ne peut plus sortir du dossier.
+
+    La troncature porte sur la BASE, jamais sur l'extension. Un
+    `return base[:120]` coupait les noms Instagram (tres longs) AVANT leur
+    point : le fichier arrivait sans extension, donc invisible a la fois des
+    galeries et de gdrive_sync, tous deux filtres par extension. 78 photos
+    de themikkiangel se sont ainsi retrouvees sauvegardees nulle part.
+    """
     base = os.path.basename(str(name or "").replace("\\", "/").strip())
     base = re.sub(r"[^A-Za-z0-9._()\- ]", "_", base).strip().lstrip(".") or "fichier"
-    return base[:120]
+    if len(base) <= 120:
+        return base
+    stem, ext = os.path.splitext(base)
+    # Un point tardif dans un nom sans vrai suffixe ne doit pas manger la
+    # place utile : au-dela de 12 caracteres ce n'est plus une extension.
+    if not ext or len(ext) > 12:
+        return base[:120]
+    stem = stem[:120 - len(ext)].rstrip(". ") or "fichier"
+    return stem + ext
 
 
 
