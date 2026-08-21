@@ -10,12 +10,22 @@ Vérifie, sur des fichiers TEMPORAIRES (aucune donnée réelle touchée) :
 """
 import importlib
 import json
+import os
 import pathlib
 import shutil
 import sys
 import tempfile
 import threading
 import time
+
+# AVANT tout import du site : l'observateur de parc_web.py est un
+# after_request global, il se declenchait sur les requetes de ce banc d'essai
+# et ecrivait dans les VRAIS data/parc_journal.jsonl et data/parc_hist.json.
+# Chaque passage de tests ajoutait une ligne « hors_plan / inscrit dans la
+# file » — un evenement qui n'a jamais eu lieu sur un telephone — au journal
+# cense etre la memoire fiable du parc. L'en-tete promet « aucune donnee
+# reelle touchee » : ce drapeau est ce qui rend la promesse vraie.
+os.environ["VABOT_BANC_ESSAI"] = "1"
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 

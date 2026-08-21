@@ -7902,9 +7902,30 @@ document.addEventListener('click',function(e){
      tournent services.py et start.py. Ouvertes dans un onglet a part pour ne
      pas quitter le tableau de bord. -->
 <div class="group" id="grp-remote">
-  <button class="group-head" onclick="showTab('remote','remote','Remote','Pilotage de l’iPhone')">
+  <button class="group-head" id="tab-remote" onclick="showTab('remote','remote','Remote','Pilotage de l’iPhone')">
     <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
     <span class="label">Remote</span>
+  </button>
+</div>
+
+<!-- REMOTE 2 : le poste de pilotage du parc (bot/parc_web.py). Onglet SEPARE,
+     a cote de Remote, sur le meme patron qu'a suivi « Bibliotheque 2 » : le
+     proprietaire veut comparer les deux et garder ce qu'il prefere, donc
+     Remote 1 ne bouge pas d'une ligne. Les deux lisent les memes fichiers
+     rig_*.json ; tout ce qui appartient a Remote 2 est prefixe r2-/parc-. -->
+<div class="group" id="grp-remote2">
+  <!-- id="tab-remote2" LOAD-BEARING, deux fois : (1) le restaurateur d'onglet
+       (?tab=remote2 apres un F5) fait getElementById('tab-'+tab) puis se
+       rabat sur les seuls « .item[onclick] » — or ce bouton est un
+       « .group-head » : sans l'id, showTab n'etait jamais appele, le
+       chargeur paresseux ne partait pas et la section restait bloquee sur
+       « Loading… », Dashboard masque par le !important du pre-rendu ;
+       (2) findBtn() du garde RBAC cherche le meme id avant de se rabattre
+       sur « .item » : sans l'id, un role n'ayant que remote2 ne voyait
+       aucune entree de menu. Les 24 autres onglets paresseux ont cet id. -->
+  <button class="group-head" id="tab-remote2" onclick="showTab('remote2','remote2','Remote 2','Poste de pilotage du parc — un bouton, des regles, des garde-fous')">
+    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
+    <span class="label">Remote 2</span>
   </button>
 </div>
 
@@ -9779,6 +9800,19 @@ function remoteParc(){
 })();
 </script>
 
+<!-- REMOTE 2 — poste de pilotage du parc. Tout le contenu vient de
+     parc_web.render_page() (style + coquille) et de /parc/app.js ; il n'y a
+     AUCUN JavaScript en ligne ici, expres : dans ce projet le JS vivait dans
+     les grandes chaines Python, ou une apostrophe mal echappee tuait le
+     script de la page entiere en silence. Le fichier .js separe passe
+     « node --check » tel qu'il est servi, donc le piege n'existe plus ici.
+     NB en ecrivant ce commentaire : ne JAMAIS y mettre trois guillemets
+     doubles a la suite — ca ferme UPLOAD_HTML et casse tout le fichier.
+     Onglet LOURD -> _lazy() : il n'est fabrique qu'au premier clic. -->
+<div class="form-section" id="form-remote2" style="display:none">
+{remote2_html}
+</div>
+
 <div class="form-section" id="form-igtrends" style="display:none">
 
 <h2 style="margin:0 0 18px;font-size:26px">Trends</h2>
@@ -11062,6 +11096,7 @@ var VA_ICONES_APPLE = {
   "Liens": "<path d='M10.2 13.8a3.8 3.8 0 0 0 5.6.4l2.6-2.6a3.8 3.8 0 0 0-5.4-5.4l-1.4 1.4'/><path d='M13.8 10.2a3.8 3.8 0 0 0-5.6-.4l-2.6 2.6a3.8 3.8 0 0 0 5.4 5.4l1.4-1.4'/>",
   "Finances": "<circle cx='12' cy='12' r='8.8'/><path d='M12 6.8v10.4M14.8 9.4a2.8 2.8 0 0 0-2.8-1.4c-1.8 0-2.8 1-2.8 2.2 0 2.8 5.6 1.6 5.6 4.4 0 1.2-1 2.4-2.8 2.4a3 3 0 0 1-2.9-1.6'/>",
   "Remote": "<rect x='7' y='2.6' width='10' height='18.8' rx='3'/><path d='M10.4 6.4h3.2M12 11v4.6'/>",
+  "Remote 2": "<rect x='3.2' y='3.2' width='7' height='8.6' rx='2.2'/><rect x='13.8' y='3.2' width='7' height='5' rx='2.2'/><rect x='13.8' y='10.6' width='7' height='10.2' rx='2.2'/><rect x='3.2' y='14.2' width='7' height='6.6' rx='2.2'/>",
   "Settings": "<circle cx='12' cy='12' r='3.2'/><path d='M19.2 14.6a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1v.3a2 2 0 1 1-4 0v-.2a1.6 1.6 0 0 0-2.8-1.1l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7h-.3a2 2 0 1 1 0-4h.2A1.6 1.6 0 0 0 4.7 7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3h.1a1.6 1.6 0 0 0 1-1.5v-.3a2 2 0 1 1 4 0v.2a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1h.3a2 2 0 1 1 0 4h-.2a1.6 1.6 0 0 0-1.4 1z'/>"
 };
 function vaAppliquerIcones(actif){
@@ -33852,6 +33887,22 @@ def _render_facture_html() -> str:
         return f"<div style='padding:24px;color:#f99'>Module « Facture » indisponible : {type(e).__name__}: {e}</div>"
 
 
+def _render_remote2_html() -> str:
+    """Onglet « Remote 2 » : poste de pilotage du parc, isolé dans parc_web.py.
+
+    Ne rend QUE le style + la coquille ; tout le vivant est posé par
+    /parc/app.js. On dit lequel des deux manque au lieu d'afficher une page
+    blanche : sans ce message, un module absent donnait un onglet vide et
+    « ça ne marche pas » sans la moindre trace de la cause.
+    """
+    try:
+        import parc_web
+        return parc_web.render_page()
+    except Exception as e:
+        return ("<div style='padding:24px;color:#f99'>Module « Remote 2 » "
+                f"indisponible : {type(e).__name__}: {e}</div>")
+
+
 def _render_chatplanning_html() -> str:
     """Emploi du temps chatteurs - tableau Excel-style multi-EDT multi-semaines."""
     try:
@@ -39461,6 +39512,11 @@ ROLE_MENU_STRUCTURE = [
     {"section": "Remote — iPhone", "items": [
         {"key": "remote", "name": "Drop, Console et Editeur de scenarios",
          "perms": ["view"]},
+        # Clé == nom d'onglet réel : rien à ajouter dans _PERM_KEY_TO_TABS.
+        # « view » seul : l'écriture est admin-only (_ADMIN_ONLY_WRITE), donc
+        # cocher la case donne la surveillance, jamais la commande.
+        {"key": "remote2", "name": "Remote 2 — poste de pilotage du parc (lecture)",
+         "perms": ["view"]},
     ]},
 ]
 
@@ -40632,6 +40688,9 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{chatplanning_html}", _lazy("chatplanning"))
         .replace("{videocrea_html}", _lazy("videocrea"))
         .replace("{bilan_html}", _lazy("bilan"))
+        # Remote 2 : onglet lourd (style + coquille + un .js de 84 Ko) — on ne
+        # le fabrique qu'au premier clic, comme les galeries.
+        .replace("{remote2_html}", _lazy("remote2"))
         .replace("{account_section_html}", _g("saccount", _render_account_section_html))
         .replace("{security_sessions_html}", _g("ssecurity", _render_security_sessions_html))
         .replace("{mypuls_cookies_html}", _g("smypuls", _render_mypuls_cookies_settings))
@@ -41298,6 +41357,10 @@ def create_app():
         "/jbanalyse/", "/insta/", "/sheets", "/va/", "/identity/",
         "/textpool/", "/onboarding/", "/biolinks/", "/geelark/", "/noctus/",
         "/veille/", "/tg/", "/sfs", "/guild", "/vtg/", "/schedule/",
+        # Remote 2 : démarrer le pilote, changer les règles, mettre une machine
+        # en pause ou un conteneur en quarantaine — ça pilote des téléphones.
+        # Jamais un rôle restreint, même s'il a l'onglet en lecture.
+        "/parc/",
     )
 
     def _live_role() -> str:
@@ -41336,6 +41399,12 @@ def create_app():
         # Bibliothèque de captions (onglet Caption du Reel montage) : la lecture
         # est réservée aux rôles qui ont l'onglet (mapping ci-dessous).
         "/captions/",
+        # Remote 2 : /parc/state expose l'inventaire complet du parc, le journal
+        # et les écarts. Réservé aux rôles à qui on a donné l'onglet (mapping
+        # ci-dessous). /parc/app.js n'est PAS concerné : le garde exempte les
+        # assets par extension avant d'arriver ici — d'où le .js obligatoire
+        # dans le nom de cette route.
+        "/parc/",
     )
     # Prefixe de lecture -> onglet (showTab) qui le sert. Un rôle restreint à qui
     # on a EXPLICITEMENT accordé cet onglet peut lire ses données ; les autres
@@ -41359,6 +41428,9 @@ def create_app():
         # Bibliothèque captions : lisible par un rôle qui a l'onglet Caption
         # (permission « montage ») ; l'écriture reste admin-only (deny par défaut).
         "/captions/": "cloudcaptions",
+        # Remote 2 : un rôle à qui on accorde l'onglet peut LIRE le parc
+        # (surveillance de nuit) ; toute écriture reste admin-only.
+        "/parc/": "remote2",
     }
 
     @app.before_request
@@ -41688,6 +41760,10 @@ def create_app():
                 "jbanalyse": _render_jbanalyse_html,
                 "jbactivite": _render_jbactivite_html,
                 "facture": _render_facture_html,
+                # Remote 2 : la coquille est inerte sans /parc/app.js, donc
+                # ré-injectable telle quelle par le chargeur paresseux (le JS
+                # se re-exécute sur un #parc-root neuf et se rebranche seul).
+                "remote2": _render_remote2_html,
                 "paievas": _render_paievas_html,
                 "veille": _render_veille_feed_html,
                 "cloudbios": lambda: _render_textvault_html("bios"),
@@ -52895,6 +52971,17 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         facture_web.register(app, is_auth)
     except Exception as _fx_e:
         log.error(f"facture_web register échoué: {_fx_e}")
+
+    # Onglet « Remote 2 » : poste de pilotage du parc (parc_web.py).
+    # Enregistre /parc/* ET un after_request qui OBSERVE /api/rig/* sans
+    # modifier aucune réponse — c'est ce qui donne les dates, les durées et le
+    # compteur de chutes de WDA sans toucher au poste. Sous try/except comme
+    # les autres : un module cassé ne doit pas emporter le dashboard.
+    try:
+        import parc_web
+        parc_web.register(app, is_auth)
+    except Exception as _pc_e:
+        log.error(f"parc_web register échoué: {_pc_e}")
 
     # Inscription publique + file d'attente de validation (signup_public.py).
     #
