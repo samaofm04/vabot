@@ -2561,6 +2561,80 @@ except Exception as _eRg:
 
 print()
 print("=" * 70)
+print("SELECTEURS DES FAVORIS (bouton Caption Banger / Montage Banger)")
+print("=" * 70)
+try:
+    import json as _jsFv
+    import pathlib as _plFv
+    import shutil as _shFv
+    import cogs.user as _uFv
+
+    # -- brutes favorites ---------------------------------------------------
+    _idFv = "_tst_fav"
+    _dirFv = _uFv.IDENTITIES_DIR / _idFv / "brutes"
+    _shFv.rmtree(_uFv.IDENTITIES_DIR / _idFv, ignore_errors=True)
+    _dirFv.mkdir(parents=True)
+    (_dirFv / "a.mp4").write_bytes(b"\x00" * 6000)
+    _fvFile = _uFv.DATA_DIR / "fav_brutes.json"
+    _savFv = _fvFile.read_text(encoding="utf-8") if _fvFile.exists() else None
+    _fvFile.write_text(_jsFv.dumps([
+        _idFv + "|brutes|a.mp4",          # presente sur le disque
+        _idFv + "|brutes|disparue.mp4",   # cle orpheline
+        "autre|brutes|z.mp4",             # une autre identite
+        _idFv + "|videos|r.mp4",          # mauvais sous-dossier
+    ]), encoding="utf-8")
+    _gotFv = [p.name for p in _uFv.fav_brutes_for(_idFv)]
+    check("favoris : seule la brute presente sur le disque est retenue",
+          _gotFv == ["a.mp4"], str(_gotFv))
+    check("favoris : une identite inconnue ne rend rien",
+          _uFv.fav_brutes_for("_tst_inexistant") == [])
+    if _savFv is None:
+        _fvFile.unlink(missing_ok=True)
+    else:
+        _fvFile.write_text(_savFv, encoding="utf-8")
+    _shFv.rmtree(_uFv.IDENTITIES_DIR / _idFv, ignore_errors=True)
+
+    # -- captions favorites -------------------------------------------------
+    _idCv = "_tst_favcap"
+    _fCv = _uFv.DATA_DIR / "captions.json"
+    _savCv = _fCv.read_text(encoding="utf-8") if _fCv.exists() else None
+    _dCv = _jsFv.loads(_savCv) if _savCv else {}
+    _dCv[_idCv] = {"items": [
+        {"id": "c1", "text": "favorite active", "fav": True, "enabled": True},
+        {"id": "c2", "text": "favorite hors tirage", "fav": True, "enabled": False},
+        {"id": "c3", "text": "ordinaire", "fav": False, "enabled": True},
+        {"id": "c4", "text": "   ", "fav": True, "enabled": True},
+    ]}
+    _fCv.write_text(_jsFv.dumps(_dCv, ensure_ascii=False), encoding="utf-8")
+    _actCv = [c["id"] for c in _uFv.fav_captions_for(_idCv)]
+    _horsCv = [c["id"] for c in _uFv.fav_captions_desactivees(_idCv)]
+    check("favoris : seule la caption favorite ET active part", _actCv == ["c1"],
+          str(_actCv))
+    # Ce test protege un message honnete : une favorite desactivee ne doit pas
+    # se faire annoncer « aucune caption favorite », ce que personne ne saurait
+    # deboguer.
+    check("favoris : une favorite hors tirage est nommee a part",
+          _horsCv == ["c2"], str(_horsCv))
+    if _savCv is None:
+        _fCv.unlink(missing_ok=True)
+    else:
+        _fCv.write_text(_savCv, encoding="utf-8")
+
+    # -- le menu VA porte bien les deux boutons -----------------------------
+    _vFv = _uFv.ContentMenuView(None)
+    _idsFv = [getattr(i, "custom_id", "") for i in _vFv.children]
+    check("favoris : les 2 boutons sont dans le menu VA",
+          "cmenu:capbanger" in _idsFv and "cmenu:montagebanger" in _idsFv)
+    check("favoris : les 2 boutons sont declares dans _MENU_BTN_FEATURE",
+          _uFv._MENU_BTN_FEATURE.get("cmenu:capbanger") == "contenu"
+          and _uFv._MENU_BTN_FEATURE.get("cmenu:montagebanger") == "contenu")
+    check("favoris : la vue tient dans les 25 composants de Discord",
+          len(_vFv.children) <= 25, "%d composants" % len(_vFv.children))
+except Exception as _eFv:
+    check("favoris : selecteurs testables", False, repr(_eFv)[:160])
+
+print()
+print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
     print("ECHECS :")

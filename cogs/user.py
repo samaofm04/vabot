@@ -32,6 +32,10 @@ _MENU_BTN_FEATURE = {
     "cmenu:storycta": "contenu", "cmenu:pseudo": "contenu", "cmenu:name": "contenu",
     "cmenu:bio": "contenu", "cmenu:pp": "contenu", "cmenu:comptes": "contenu",
     "cmenu:banger": "contenu", "cmenu:reelmonte": "contenu",
+    # La fonction DOIT etre « contenu » : ALL_FEATURES filtre les cles
+    # inconnues, donc une fonction inventee ferait disparaitre le bouton en
+    # permanence sur tout serveur bride, sans erreur nulle part.
+    "cmenu:capbanger": "contenu", "cmenu:montagebanger": "contenu",
     "cmenu:addaccount": "onboarding",
     "cmenu:lien": "liens", "cmenu:clics": "clics",
 }
@@ -195,6 +199,8 @@ def _build_menu_embed(identity, guild=None):
     add("cmenu:post", "contenu", "🖼️ Post", "Photo + légende pour le feed")
     add("cmenu:storycta", "contenu", "📲 Story CTA", "Photo CTA (à poster le soir)")
     add("cmenu:banger", "contenu", "💥 Reels Banger", "Tes meilleurs reels (marqués ⭐)")
+    add("cmenu:capbanger", "contenu", "⭐ Caption Banger", "Tes meilleures captions (marquées ⭐)")
+    add("cmenu:montagebanger", "contenu", "🎬 Montage Banger", "Une brute ⭐ + une caption ⭐, montées pour toi")
     add("cmenu:pseudo", "contenu", "👤 Pseudo", "Des pseudos dispo")
     add("cmenu:name", "contenu", "📝 Name", "Des noms d'affichage")
     add("cmenu:bio", "contenu", "💬 Bio", "Des bios de ton identité")
@@ -1036,6 +1042,65 @@ def banger_reels_for(identity, limit=15):
             if limit and len(out) >= limit:
                 break
     return out
+
+
+def fav_brutes_for(identity, limit=15):
+    """Rushs bruts marques ⭐ favoris d'une identite -> [Path].
+
+    Lit data/fav_brutes.json (cle file_id = 'identity|brutes|filename', ecrite
+    par le site). ATTENTION : ce n'est PAS banger_marks.json — l'etoile des
+    reels poste dans Discord et stocke un accuse de reception, celle-ci est un
+    simple favori local. Deux fichiers, deux mecanismes, un seul symbole.
+
+    Ne garde que les fichiers encore presents sur le disque : une brute
+    supprimee laisserait sinon une cle orpheline, et le VA s'entendrait
+    annoncer des brutes qui n'existent plus.
+    """
+    import json as _json
+    fav_file = DATA_DIR / "fav_brutes.json"
+    try:
+        raw = _json.loads(fav_file.read_text(encoding="utf-8"))
+        keys = list(raw.keys()) if isinstance(raw, dict) else list(raw or [])
+    except Exception:
+        keys = []
+    prefix = f"{identity}|brutes|"
+    names = []
+    for k in keys:
+        if isinstance(k, str) and k.startswith(prefix):
+            fn = k[len(prefix):]
+            if fn and fn not in names:
+                names.append(fn)
+    brutes_dir = IDENTITIES_DIR / identity / "brutes"
+    out = []
+    for fn in names:
+        p = brutes_dir / fn
+        if p.exists() and p.is_file():
+            out.append(p)
+            if limit and len(out) >= limit:
+                break
+    return out
+
+
+def fav_captions_for(identity):
+    """Captions marquees ⭐ favorites ET encore dans le tirage -> [dict].
+
+    Les deux conditions comptent. Une caption etoilee puis DESACTIVEE ne doit
+    pas partir — mais repondre « aucune caption favorite » serait un mensonge
+    que personne ne saurait deboguer. L'appelant distingue les deux cas grace
+    a fav_captions_desactivees().
+    """
+    items = _captions_block(identity).get("items") or []
+    return [c for c in items
+            if c.get("fav") is True and c.get("enabled", True)
+            and str(c.get("text") or "").strip()]
+
+
+def fav_captions_desactivees(identity):
+    """Captions favorites mises HORS TIRAGE. Sert a nommer le vrai probleme."""
+    items = _captions_block(identity).get("items") or []
+    return [c for c in items
+            if c.get("fav") is True and not c.get("enabled", True)
+            and str(c.get("text") or "").strip()]
 
 
 def random_reel_for(identity):
@@ -2137,6 +2202,124 @@ class UserCog(commands.Cog):
             f"📝 **CAPTION** = par-dessus la vidéo · **DESCRIPTION** = dans la légende du post.")
         await self._deliver_reels_loop(interaction, reels, identity, label="BANGER", delete_after=False)
 
+    async def _send_caption_bangers(self, interaction):
+        """Bouton '⭐ Caption Banger' : les captions marquees favorites sur le site.
+
+        Du texte, rien d'autre : le VA copie-colle. C'est ce qui le distingue du
+        Montage Banger, qui fabrique une video.
+        """
+        if await self._gate_contenu(interaction):
+            return
+        identity = get_user_identity(interaction.user.id)
+        if not identity:
+            await interaction.response.send_message(
+                "Tu n'as pas d'identité assignée. Demande à un admin.", ephemeral=True)
+            return
+        caps = fav_captions_for(identity)
+        if not caps:
+            # Distinguer « aucune favorite » de « toutes hors tirage ». Sans ca,
+            # un admin qui a bien etoile ses captions chercherait au mauvais
+            # endroit pendant une heure.
+            hors = fav_captions_desactivees(identity)
+            if hors:
+                await interaction.response.send_message(
+                    f"⭐ Tes **{len(hors)} caption(s) favorite(s)** pour `{identity}` "
+                    f"sont **désactivées** (hors tirage).\n"
+                    "_(Un admin les réactive sur le site, onglet **Caption**, bouton ⊘.)_",
+                    ephemeral=True)
+            else:
+                await interaction.response.send_message(
+                    f"⭐ Aucune **caption favorite** pour `{identity}`.\n"
+                    "_(Un admin les marque avec l'étoile ⭐ sur le site, onglet **Caption**.)_",
+                    ephemeral=True)
+            return
+        await interaction.response.defer()
+        total = len(caps)
+        await interaction.followup.send(
+            f"⭐ **{total} CAPTION(S) BANGER pour `{identity}`** — les meilleures, "
+            f"à réutiliser ! 🔥\n"
+            f"📝 La **caption** se met **par-dessus la vidéo** dans l'éditeur Insta.")
+        for i, c in enumerate(caps, start=1):
+            txt = str(c.get("text") or "").strip()
+            if not txt:
+                continue
+            await interaction.followup.send(f"**{i}/{total}**\n```\n{txt[:1800]}\n```")
+            desc = str(c.get("desc") or "").strip()
+            if desc:
+                await interaction.followup.send(
+                    f"📄 **DESCRIPTION {i}/{total}** (champ légende du post) :\n"
+                    f"```\n{desc[:1800]}\n```")
+
+    async def _send_montage_bangers(self, interaction):
+        """Bouton '🎬 Montage Banger' : une BRUTE favorite + une CAPTION favorite.
+
+        Meme recette que /reelcaption, restreinte aux favoris. PAS de template :
+        la brute EST la source et la caption s'incruste dessus. Un template
+        aurait ete un piege — dans le modele d'assemblage c'est le TEMPLATE qui
+        est la source et la brute est tiree au hasard par le moteur, si bien
+        qu'un template sans point de coupe produit une video ou la brute
+        favorite n'apparait pas du tout, et sans un mot.
+        """
+        if await self._gate_contenu(interaction):
+            return
+        identity = get_user_identity(interaction.user.id)
+        if not identity:
+            await interaction.response.send_message(
+                "Tu n'as pas d'identité assignée. Demande à un admin.", ephemeral=True)
+            return
+        brutes = fav_brutes_for(identity)
+        caps = fav_captions_for(identity)
+        if not brutes or not caps:
+            # Toujours nommer le nombre de l'AUTRE cote : c'est ca qui apprend
+            # au VA — et au manager — ce qui manque reellement.
+            if not brutes and not caps:
+                manque = ("Il manque **les deux** : aucune vidéo brute étoilée "
+                          "(onglet **Vidéo brut**) et aucune caption étoilée "
+                          "(onglet **Caption**).")
+            elif not brutes:
+                manque = (f"Tu as **{len(caps)} caption(s) favorite(s)**, mais "
+                          f"**aucune vidéo brute étoilée** (onglet **Vidéo brut**).")
+            else:
+                hors = fav_captions_desactivees(identity)
+                extra = (f" _(Tes {len(hors)} caption(s) favorite(s) sont désactivées.)_"
+                         if hors else "")
+                manque = (f"Tu as **{len(brutes)} brute(s) favorite(s)**, mais "
+                          f"**aucune caption étoilée** (onglet **Caption**).{extra}")
+            await interaction.response.send_message(
+                f"🎬 Impossible de monter pour `{identity}`.\n{manque}\n"
+                "_(Un admin pose les étoiles ⭐ sur le site.)_", ephemeral=True)
+            return
+        try:
+            import noctus_web
+        except Exception as e:
+            await interaction.response.send_message(
+                f"⚠️ Module vidéo indisponible : {e}", ephemeral=True)
+            return
+        if not noctus_web.setup_ok():
+            await interaction.response.send_message(
+                "⚠️ La génération vidéo n'est pas prête sur le serveur (Node/ffmpeg). "
+                "Préviens un admin.", ephemeral=True)
+            return
+        await interaction.response.defer()
+        block = _captions_block(identity)
+        # Borne le nombre par les combinaisons REELLEMENT disponibles : sans
+        # elle, _pick_fresh recycle quand le pool est epuise, et 1 brute + 1
+        # caption produiraient trois fois la meme video.
+        total = min(3, len(brutes) * len(caps))
+        await interaction.followup.send(
+            f"🎬 **{total} MONTAGE(S) BANGER pour `{identity}`** — tes meilleures "
+            f"brutes avec tes meilleures captions.\n"
+            f"⏳ Je les génère (≈15-30s chacun). Le texte est **incrusté** : "
+            f"poste **tel quel**.")
+        used_b, used_c = set(), set()
+        for idx in range(1, total + 1):
+            cap = _pick_fresh(caps, used_c, key=lambda c: c.get("id"))
+            vid = _pick_fresh(brutes, used_b, key=lambda p: str(p))
+            await self._gen_and_send_caption(
+                interaction, vid, cap, block, idx, total, identity,
+                label="MONTAGE BANGER", emoji="🎬",
+                prefixe_fichier="montage_banger")
+
     @app_commands.command(name="reel", description="Genere 3 reels (par defaut) : video clean + caption + description + exemple")
     @app_commands.describe(nombre="Combien de reels envoyer (1-10, defaut 3)")
     async def reel(
@@ -2338,8 +2521,16 @@ class UserCog(commands.Cog):
             vid = _pick_fresh(brutes, used_b, key=lambda p: str(p))
             await self._gen_and_send_caption(interaction, vid, cap, block, idx, total, identity)
 
-    async def _gen_and_send_caption(self, interaction, video, cap, block, idx, total, identity):
-        """Génère UNE vidéo brute + caption incrustée puis l'envoie (+ description)."""
+    async def _gen_and_send_caption(self, interaction, video, cap, block, idx, total,
+                                    identity, label="REEL CAPTION", emoji="💬",
+                                    prefixe_fichier="reel_caption"):
+        """Génère UNE vidéo brute + caption incrustée puis l'envoie (+ description).
+
+        `label` sert au bouton « Montage Banger », qui emprunte exactement cette
+        recette : sans lui, le VA lirait « REEL CAPTION » sur un contenu qu'on
+        vient de lui annoncer comme un montage banger. Le défaut laisse
+        /reelcaption strictement inchangé.
+        """
         import asyncio
         import json as _js
         import noctus_web
@@ -2359,7 +2550,7 @@ class UserCog(commands.Cog):
         except Exception:
             model = None
         if not model:
-            await interaction.followup.send(f"⚠️ REEL CAPTION {idx}/{total} : génération impossible.")
+            await interaction.followup.send(f"⚠️ {label} {idx}/{total} : génération impossible.")
             return
         state = "running"
         for _ in range(90):                       # ~3 min max
@@ -2372,27 +2563,27 @@ class UserCog(commands.Cog):
                 break
         if state != "done":
             await interaction.followup.send(
-                f"⚠️ REEL CAPTION {idx}/{total} : génération échouée ({state}).")
+                f"⚠️ {label} {idx}/{total} : génération échouée ({state}).")
             return
         outs = noctus_web.output_paths(model)
         if not outs:
-            await interaction.followup.send(f"⚠️ REEL CAPTION {idx}/{total} : aucun fichier produit.")
+            await interaction.followup.send(f"⚠️ {label} {idx}/{total} : aucun fichier produit.")
             return
-        intro = (f"💬 **REEL CAPTION {idx}/{total}** → à poster sur ton **compte n°{idx}** "
+        intro = (f"{emoji} **{label} {idx}/{total}** → à poster sur ton **compte n°{idx}** "
                  f"(`{identity}`)\n📥 Poste cette vidéo **telle quelle** — la caption est "
                  f"**déjà écrite** dessus.")
         try:
             await interaction.followup.send(
                 content=intro,
-                file=discord.File(str(outs[0]), filename=f"reel_caption_{idx}.mp4"))
+                file=discord.File(str(outs[0]), filename=f"{prefixe_fichier}_{idx}.mp4"))
         except discord.HTTPException as e:
             await interaction.followup.send(
-                f"⚠️ REEL CAPTION {idx}/{total} : envoi impossible (trop lourd) : {e}")
+                f"⚠️ {label} {idx}/{total} : envoi impossible (trop lourd) : {e}")
             return
         desc = str(cap.get("desc") or "").strip()
         if desc:
             await interaction.followup.send(
-                f"📄 **DESCRIPTION REEL CAPTION {idx}/{total}** (à coller dans le **champ légende**) :")
+                f"📄 **DESCRIPTION {label} {idx}/{total}** (à coller dans le **champ légende**) :")
             await interaction.followup.send(desc)
 
     async def cog_load(self):
@@ -4396,6 +4587,17 @@ class ContentMenuView(discord.ui.View):
         )
         await interaction.response.send_message(
             embed=emb, view=PaymentMethodView(self.cog), ephemeral=True)
+
+    # Rangee 4, laissee libre jusqu'ici : les deux favoris ont leur propre
+    # ligne, ce qui les distingue a l'oeil du « Reels Banger » qui, lui, ne
+    # marche pas pareil (il envoie dans un salon, ceux-ci sont des favoris).
+    @discord.ui.button(label="Caption Banger", emoji="⭐", style=discord.ButtonStyle.primary, custom_id="cmenu:capbanger", row=4)
+    async def b_capbanger(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._send_caption_bangers(interaction)
+
+    @discord.ui.button(label="Montage Banger", emoji="🎬", style=discord.ButtonStyle.primary, custom_id="cmenu:montagebanger", row=4)
+    async def b_montagebanger(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._send_montage_bangers(interaction)
 
 
 class CentralMenuView(discord.ui.View):
