@@ -3570,6 +3570,107 @@ function toggleFavBruteFilter(btn){
   }
   favBruteApply();
 }
+// === Repérage des brutes qui portent déjà du texte incrusté ===
+//
+// Ça ne supprime RIEN. L'examen pose un verdict à côté de chaque vidéo et
+// affiche la liste ; le tri se fait ensuite à la main, avec les cases de
+// sélection et le bouton de suppression habituels.
+var scanTexteTimer = null;
+function scanTexteMaj(txt, couleur){
+  var e = document.getElementById('scantexte-etat');
+  if(e){ e.textContent = txt || ''; e.style.color = couleur || '#9a9aa6'; }
+}
+async function scanTexteLancer(identity){
+  if(!identity){ alert('Choisis d abord une identité.'); return; }
+  var btn = document.getElementById('scantexte-btn');
+  if(btn) btn.disabled = true;
+  try{
+    var fd = new FormData(); fd.set('identity', identity);
+    var r = await fetch('/cloud/scan_texte', { method:'POST', body: fd });
+    var j = await r.json();
+    if(!j.ok){
+      // Pas une erreur : le plus souvent « tout est déjà examiné ». On montre
+      // quand même le rapport, c'est ce que l'utilisateur venait chercher.
+      scanTexteMaj(j.message || j.error || '?', '#e0a33a');
+      scanTexteRapport(identity);
+      if(btn) btn.disabled = false;
+      return;
+    }
+    scanTexteMaj(j.message || 'Examen lancé…', '#8b9cf7');
+    scanTextePoll(identity);
+  }catch(e){
+    scanTexteMaj('Erreur réseau : ' + e, '#e0576b');
+    if(btn) btn.disabled = false;
+  }
+}
+function scanTextePoll(identity){
+  if(scanTexteTimer) clearInterval(scanTexteTimer);
+  scanTexteTimer = setInterval(async function(){
+    try{
+      var r = await fetch('/cloud/scan_texte_etat?identity=' + encodeURIComponent(identity));
+      var j = await r.json();
+      var e = (j && j.etat) || {};
+      if(e.en_cours){
+        scanTexteMaj(e.vus + ' / ' + e.total + ' examinées — ' + e.avec_texte
+                     + ' avec texte' + (e.erreurs ? (', ' + e.erreurs + ' illisibles') : ''),
+                     '#8b9cf7');
+        return;
+      }
+      clearInterval(scanTexteTimer); scanTexteTimer = null;
+      var btn = document.getElementById('scantexte-btn');
+      if(btn) btn.disabled = false;
+      scanTexteMaj('Examen terminé.', '#43b581');
+      scanTexteAfficher(j.rapport);
+    }catch(err){ /* on retentera au prochain tour */ }
+  }, 3000);
+}
+async function scanTexteRapport(identity){
+  try{
+    var r = await fetch('/cloud/scan_texte_etat?identity=' + encodeURIComponent(identity));
+    var j = await r.json();
+    scanTexteAfficher(j.rapport);
+  }catch(e){}
+}
+function scanTexteAfficher(rap){
+  if(!rap) return;
+  var sec = (document.getElementById('scantexte-btn') || {}).closest
+          ? document.getElementById('scantexte-btn').closest('.form-section') : null;
+  var boite = document.getElementById('scantexte-rapport');
+  if(!boite){
+    boite = document.createElement('div');
+    boite.id = 'scantexte-rapport';
+    boite.style.cssText = 'margin:14px 0;padding:14px 16px;background:#16161c;'
+      + 'border:1px solid #2c2c36;border-radius:10px;font-size:13px;color:#e8e8ee';
+    var g = sec ? sec.querySelector('#vault-grid') : null;
+    if(g && g.parentNode) g.parentNode.insertBefore(boite, g);
+    else if(sec) sec.appendChild(boite);
+    else document.body.appendChild(boite);
+  }
+  var h = '<b>' + (rap.avec_texte || []).length + ' brute(s) portent déjà du texte</b>'
+        + ' <span style="color:#9a9aa6">— sur ' + rap.total_examine + ' examinée(s), '
+        + rap.total_brutes + ' au total</span>';
+  if((rap.avec_texte || []).length){
+    h += '<div style="margin-top:10px;max-height:320px;overflow:auto">';
+    rap.avec_texte.forEach(function(x){
+      var ex = (x.extraits || []).join(' · ');
+      h += '<div style="padding:6px 0;border-top:1px solid #24242c">'
+         + '<code style="color:#f5c518">' + x.fichier + '</code>'
+         + (ex ? ('<div style="color:#9a9aa6;margin-top:2px">« ' + ex + ' »</div>') : '')
+         + '</div>';
+    });
+    h += '</div>';
+    h += '<div style="margin-top:10px;color:#9a9aa6">Aucune suppression faite. '
+       + 'Coche celles que tu veux jeter, puis utilise la suppression habituelle.</div>';
+  }
+  if((rap.non_conclu || []).length){
+    // Jamais rangées avec les « sans texte » : on n'a pas su lire, ce n'est
+    // pas la même chose que « pas de texte ».
+    h += '<div style="margin-top:10px;color:#e0a33a">'
+       + rap.non_conclu.length + ' vidéo(s) sont restées illisibles — '
+       + 'elles ne sont proposées à rien.</div>';
+  }
+  boite.innerHTML = h;
+}
 // Lightbox style Infloww : navigation prev/next + compteur + édition caption/desc
 var lbGallery = [];   // {url, isVideo, name, fileId}
 var lbIndex = 0;
@@ -18006,6 +18107,20 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         "font-weight:700;font-family:inherit;white-space:nowrap'>⭐ Bangers</button>"
     ) if subdir in ("brutes", "templates") else ""
 
+    # Bouton « Repérer le texte » : uniquement sur les rushs bruts. Une brute
+    # est censée être un rush NU — celle qui porte déjà une accroche ne sert
+    # plus à rien. Le bouton ne supprime RIEN : il pose un verdict à côté de
+    # chaque vidéo et affiche la liste, à trier à la main ensuite.
+    scan_texte_html = (
+        "<button type='button' id='scantexte-btn' "
+        "onclick=\"scanTexteLancer('" + (selected or "") + "')\" "
+        "title='Examiner ces rushs : lesquels portent déjà du texte incrusté ?' "
+        "style='display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#1a1a1a;"
+        "border:1px solid #3a3a3a;border-radius:8px;color:#8b9cf7;cursor:pointer;font-size:13px;"
+        "font-weight:700;font-family:inherit;white-space:nowrap'>🔎 Repérer le texte</button>"
+        "<span id='scantexte-etat' style='font-size:12px;color:#9a9aa6'></span>"
+    ) if (subdir == "brutes" and selected) else ""
+
     # Filtre type (Tout / Photo / Vidéo) — uniquement pour les pages qui mixent vraiment.
     # Reels = vidéos only, Posts = photos only → pas de filtre.
     # Stories + Story CTA → peuvent contenir les deux, on affiche le filtre.
@@ -18146,7 +18261,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap'>"
         + type_filter_html.replace("<div class='media-type-pills'>", "<div class='media-type-pills' style='margin:0'>")
         + f"</div>"
-        f"<div style='display:flex;align-items:center;gap:8px'>{banger_toggle_html}{fav_brute_toggle_html}{sort_btn_html}</div>"
+        f"<div style='display:flex;align-items:center;gap:8px'>{banger_toggle_html}{fav_brute_toggle_html}{scan_texte_html}{sort_btn_html}</div>"
         f"</div>"
     )
 
@@ -18438,6 +18553,113 @@ _ANALYSES_LOCK = threading.Lock()
 def analyses_etat() -> dict:
     with _ANALYSES_LOCK:
         return dict(_ANALYSES)
+
+
+# ---- Reperage des brutes qui portent deja du texte incruste -----------------
+#
+# But : faire le menage. Une brute est censee etre un rush NU — le texte est
+# ajoute au montage. Une brute qui porte deja une accroche ne sert plus a rien
+# et pollue les tirages.
+#
+# On ne supprime RIEN ici. Le scan pose un verdict a cote de chaque video ; le
+# proprietaire regarde la liste, coche, et supprime avec les outils existants.
+# C'est sa consigne, et c'est aussi la prudence : un faux positif efface une
+# video utilisable.
+_SCAN_TEXTE = {"en_cours": False, "identite": "", "vus": 0, "total": 0,
+               "avec_texte": 0, "erreurs": 0, "dernier": ""}
+_SCAN_TEXTE_LOCK = threading.Lock()
+
+
+def scan_texte_etat() -> dict:
+    with _SCAN_TEXTE_LOCK:
+        return dict(_SCAN_TEXTE)
+
+
+def _brutes_d_identite(identity: str):
+    """Les rushs bruts d'une identite, tries par nom."""
+    d = IDENTITIES_DIR / (identity or "").strip().lower() / "brutes"
+    if not d.exists():
+        return []
+    return sorted(p for p in d.iterdir()
+                  if p.is_file() and p.suffix.lower() in VIDEO_EXTS
+                  and ".example" not in p.name)
+
+
+def _lancer_scan_texte(identity: str, refaire: bool = False) -> tuple:
+    """Examine en arriere-plan les brutes d'une identite. (lance, message).
+
+    `refaire` reprend meme les brutes deja examinees — utile si le prompt
+    change. Par defaut on saute ce qui porte deja un verdict : chaque appel
+    coute, et 1345 brutes re-analysees a chaque clic seraient un gouffre.
+    """
+    key = _anthropic_key()
+    if not key:
+        return False, ("Clé IA manquante : ajoute ANTHROPIC_API_KEY dans "
+                       "Réglages → Clé IA.")
+    with _SCAN_TEXTE_LOCK:
+        if _SCAN_TEXTE["en_cours"]:
+            return False, ("Un examen tourne déjà (%s, %d/%d)."
+                           % (_SCAN_TEXTE["identite"], _SCAN_TEXTE["vus"],
+                              _SCAN_TEXTE["total"]))
+    brutes = _brutes_d_identite(identity)
+    a_faire = [p for p in brutes
+               if refaire or not _textecheck_lire(p).get("le")]
+    if not a_faire:
+        return False, ("Rien à examiner : les %d brute(s) de « %s » ont déjà "
+                       "leur verdict." % (len(brutes), identity))
+
+    with _SCAN_TEXTE_LOCK:
+        _SCAN_TEXTE.update({"en_cours": True, "identite": identity, "vus": 0,
+                            "total": len(a_faire), "avec_texte": 0,
+                            "erreurs": 0, "dernier": ""})
+
+    def _travail():
+        try:
+            for p in a_faire:
+                try:
+                    verdict, extraits, err = _brute_a_du_texte(p, key)
+                except Exception as e:
+                    verdict, extraits, err = None, [], str(e)[:120]
+                _textecheck_ecrire(p, verdict, extraits, err)
+                with _SCAN_TEXTE_LOCK:
+                    _SCAN_TEXTE["vus"] += 1
+                    _SCAN_TEXTE["dernier"] = p.name
+                    if verdict is True:
+                        _SCAN_TEXTE["avec_texte"] += 1
+                    elif verdict is None:
+                        _SCAN_TEXTE["erreurs"] += 1
+        finally:
+            with _SCAN_TEXTE_LOCK:
+                _SCAN_TEXTE["en_cours"] = False
+
+    threading.Thread(target=_travail, daemon=True,
+                     name="scan-texte-brutes").start()
+    return True, "Examen lancé : %d brute(s) de « %s »." % (len(a_faire), identity)
+
+
+def rapport_texte_brutes(identity: str) -> dict:
+    """Ce que l'examen a trouve, pret a etre affiche. Ne supprime rien."""
+    avec, sans, inconnu = [], 0, []
+    for p in _brutes_d_identite(identity):
+        d = _textecheck_lire(p)
+        if not d.get("le"):
+            continue
+        if d.get("texte") is True:
+            avec.append({"fichier": p.name,
+                         "extraits": d.get("extraits") or [],
+                         "le": d.get("le")})
+        elif d.get("texte") is False:
+            sans += 1
+        else:
+            # Verdict impossible : surtout PAS range avec les « sans texte ».
+            # Une video qu'on n'a pas su lire ne doit jamais glisser dans une
+            # liste de suppressions par defaut.
+            inconnu.append({"fichier": p.name,
+                            "erreur": d.get("erreur") or "non conclu"})
+    return {"identite": identity, "avec_texte": avec, "sans_texte": sans,
+            "non_conclu": inconnu,
+            "total_examine": len(avec) + sans + len(inconnu),
+            "total_brutes": len(_brutes_d_identite(identity))}
 
 
 def _lancer_analyse_auto(video) -> bool:
@@ -39079,6 +39301,131 @@ def _caption_size_for_width(text: str, target_w_px: float,
     return trial
 
 
+#: Le verdict est range a cote de la video, comme les autres metadonnees du
+#: projet (.txt, .desc.txt, .montage.json). Une brute deja examinee n'est donc
+#: jamais renvoyee a l'IA : sur 1345 brutes, re-analyser a chaque ouverture de
+#: page couterait cher pour rien.
+SUFFIXE_TEXTECHECK = ".textecheck.json"
+
+_PROMPT_TEXTE_BRUTE = (
+    "Regarde ces images extraites d'une même vidéo verticale.\n\n"
+    "UNE SEULE QUESTION : la vidéo porte-t-elle du TEXTE INCRUSTÉ, "
+    "c'est-à-dire un texte ajouté au montage, par-dessus l'image ?\n\n"
+    "COMPTE comme du texte incrusté :\n"
+    "  - une phrase ou un mot posé en surimpression (accroche, punchline, "
+    "sous-titre stylisé, texte dans une bulle ou un rectangle)\n"
+    "  - un texte manifestement ajouté après coup, quelle que soit sa police\n\n"
+    "NE COMPTE PAS :\n"
+    "  - l'interface d'une application (boutons, like, commentaires, partage, "
+    "barre de progression, heure du téléphone, batterie)\n"
+    "  - un pseudo ou un @identifiant seul\n"
+    "  - un watermark ou un logo\n"
+    "  - du texte qui appartient à la scène filmée : une enseigne, un panneau, "
+    "un t-shirt, un écran filmé, un livre. Ce texte-là est DANS le décor, il "
+    "n'a pas été ajouté au montage.\n\n"
+    "Dans le doute, réponds false : cette réponse sert à proposer des "
+    "suppressions, et effacer une vidéo utilisable coûte plus cher que d'en "
+    "garder une à retrier à la main.\n\n"
+    "Réponds UNIQUEMENT par un objet JSON :\n"
+    '{"texte": true|false, "extraits": ["le texte lu", "..."], '
+    '"confiance": "haute"|"moyenne"|"basse"}'
+)
+
+
+def _brute_a_du_texte(src: Path, key: str):
+    """La brute porte-t-elle du texte incrusté ? -> (verdict, extraits, erreur).
+
+    `verdict` vaut True, False, ou None si on n'a pas pu conclure. None n'est
+    JAMAIS traité comme False par l'appelant : une vidéo qu'on n'a pas su lire
+    ne doit pas se retrouver dans une liste de suppressions.
+
+    Haiku suffit pour une question binaire, et le choix n'est pas cosmétique :
+    sur 1345 brutes, Opus coûterait des dizaines d'euros là où Haiku coûte
+    quelques centimes. Quatre images, en 720 de haut — assez pour voir une
+    accroche, deux fois moins de jetons qu'en 1280.
+    """
+    import base64
+    import json as _json
+    import tempfile
+    import requests
+
+    duration, _w, h = _probe_video(src)
+    if duration <= 0:
+        return None, [], "vidéo illisible (ffmpeg absent ou fichier abîmé ?)"
+    times = sorted({round(duration * (i + 0.5) / 4, 2) for i in range(4)
+                    if 0 <= duration * (i + 0.5) / 4 < duration})
+    with tempfile.TemporaryDirectory(prefix="txtcheck_") as tmp:
+        frames = _grab_frames(src, times, Path(tmp), height=min(720, h or 720))
+        if not frames:
+            return None, [], "impossible d'extraire des images"
+        content = []
+        for _t, fp in frames:
+            try:
+                content.append({"type": "image", "source": {
+                    "type": "base64", "media_type": "image/jpeg",
+                    "data": base64.b64encode(fp.read_bytes()).decode()}})
+            except Exception:
+                continue
+        if not content:
+            return None, [], "images illisibles"
+        content.append({"type": "text", "text": _PROMPT_TEXTE_BRUTE})
+        body = {"model": "claude-haiku-4-5-20251001", "max_tokens": 600,
+                "messages": [{"role": "user", "content": content}]}
+        hdr = {"x-api-key": key, "anthropic-version": "2023-06-01",
+               "content-type": "application/json"}
+        derniere = ""
+        for wait in (0, 5, 12):        # surcharge passagere : on retente
+            if wait:
+                import time as _t2
+                _t2.sleep(wait)
+            try:
+                r = requests.post("https://api.anthropic.com/v1/messages",
+                                  json=body, headers=hdr, timeout=90)
+            except Exception as e:
+                derniere = str(e)[:120]
+                continue
+            if r.status_code in (429, 529) or r.status_code >= 500:
+                derniere = "HTTP %s" % r.status_code
+                continue
+            if r.status_code >= 400:
+                return None, [], "HTTP %s : %s" % (r.status_code, r.text[:120])
+            try:
+                txt = "".join(b.get("text", "")
+                              for b in (r.json().get("content") or [])).strip()
+                if txt.startswith("```"):
+                    txt = txt.split("```")[1]
+                    txt = txt[4:] if txt.lower().startswith("json") else txt
+                d = _json.loads(txt[txt.index("{"):txt.rindex("}") + 1])
+            except Exception as e:
+                return None, [], "réponse illisible : %s" % str(e)[:90]
+            extraits = [str(x)[:200] for x in (d.get("extraits") or [])][:6]
+            return bool(d.get("texte")), extraits, ""
+        return None, [], derniere or "l'IA n'a pas répondu"
+
+
+def _textecheck_lire(video: Path) -> dict:
+    """Le verdict deja calcule pour cette brute, ou {}."""
+    try:
+        return json.loads(
+            video.with_suffix(SUFFIXE_TEXTECHECK).read_text(
+                encoding="utf-8")) or {}
+    except Exception:
+        return {}
+
+
+def _textecheck_ecrire(video: Path, verdict, extraits, erreur="") -> None:
+    """Range le verdict a cote de la video, en ecriture atomique."""
+    import datetime as _dt
+    try:
+        safe_json.write(video.with_suffix(SUFFIXE_TEXTECHECK),
+                        {"texte": verdict, "extraits": extraits,
+                         "erreur": erreur,
+                         "le": _dt.datetime.now().strftime("%d/%m %H:%M")},
+                        indent=None)
+    except Exception:
+        pass
+
+
 def _analyze_montage_template(src: Path):
     """Analyse complète d'un template : (résultat, erreur)."""
     key = _anthropic_key()
@@ -42438,6 +42785,34 @@ def create_app():
         now_on = _toggle_fav_brute(file_id)
         return jsonify({"ok": True, "fav": now_on})
 
+    @app.route("/cloud/scan_texte", methods=["POST"])
+    def cloud_scan_texte():
+        """Lance l'examen des rushs bruts d'une identité : lesquels portent
+        déjà du texte incrusté ? Ne supprime RIEN — pose un verdict à côté de
+        chaque vidéo, que /cloud/scan_texte_etat restitue."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        identity = (request.form.get("identity") or "").strip().lower()
+        if not identity:
+            return jsonify({"ok": False, "error": "identité manquante"})
+        refaire = (request.form.get("refaire") or "") in ("1", "true", "on")
+        lance, msg = _lancer_scan_texte(identity, refaire)
+        return jsonify({"ok": bool(lance), "message": msg,
+                        "etat": scan_texte_etat()})
+
+    @app.route("/cloud/scan_texte_etat")
+    def cloud_scan_texte_etat():
+        """Où en est l'examen, et ce qu'il a trouvé pour cette identité."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        identity = (request.args.get("identity") or "").strip().lower()
+        out = {"ok": True, "etat": scan_texte_etat()}
+        if identity:
+            out["rapport"] = rapport_texte_brutes(identity)
+        return jsonify(out)
+
     @app.route("/cloud/banger_purge", methods=["POST"])
     def cloud_banger_purge():
         """Vide le salon banger-{identity} : supprime tous les messages du bot +
@@ -42506,6 +42881,7 @@ def create_app():
 
                         if (n == f"{stem}.montage.json"      # brouillon d'édition
                                 or n == f"{stem}.analyse.json"   # analyse auto
+                                or n == f"{stem}{SUFFIXE_TEXTECHECK}"  # verdict « porte du texte »
                                 or n == f"{stem}.montage.png"):  # aperçu généré
                             to_delete.append(sibling)
                 # Ce qui part sans copie sur le Drive est compte AVANT

@@ -2565,6 +2565,79 @@ except Exception as _eRg:
 
 print()
 print("=" * 70)
+print("REPERAGE DES BRUTES QUI PORTENT DEJA DU TEXTE")
+print("=" * 70)
+try:
+    import pathlib as _plTx
+    import shutil as _shTx
+    import web_upload as _wTx
+
+    _idTx = "_tst_textecheck"
+    _dTx = _wTx.IDENTITIES_DIR / _idTx / "brutes"
+    _shTx.rmtree(_wTx.IDENTITIES_DIR / _idTx, ignore_errors=True)
+    _dTx.mkdir(parents=True)
+    for _n in ("a.mp4", "b.mp4", "c.mp4", "d.mp4"):
+        (_dTx / _n).write_bytes(b"\x00" * 6000)
+    (_dTx / "e.example.mp4").write_bytes(b"\x00" * 6000)   # exemple : pas une brute
+    (_dTx / "notes.txt").write_text("x", encoding="utf-8")
+
+    check("texte : seules les vraies brutes sont listees",
+          [p.name for p in _wTx._brutes_d_identite(_idTx)]
+          == ["a.mp4", "b.mp4", "c.mp4", "d.mp4"],
+          str([p.name for p in _wTx._brutes_d_identite(_idTx)]))
+
+    # Aller-retour du verdict, et surtout : le nom suit la convention du projet.
+    _wTx._textecheck_ecrire(_dTx / "a.mp4", True, ["POV tu decouvres ca"])
+    _wTx._textecheck_ecrire(_dTx / "b.mp4", False, [])
+    _wTx._textecheck_ecrire(_dTx / "c.mp4", None, [], "vidéo illisible")
+    check("texte : le verdict se range en <stem>.textecheck.json",
+          (_dTx / "a.textecheck.json").exists())
+    check("texte : il se relit tel qu ecrit",
+          _wTx._textecheck_lire(_dTx / "a.mp4").get("texte") is True
+          and _wTx._textecheck_lire(_dTx / "a.mp4").get("extraits")
+          == ["POV tu decouvres ca"])
+    check("texte : une brute jamais examinee ne rend rien",
+          _wTx._textecheck_lire(_dTx / "d.mp4") == {})
+
+    _rapTx = _wTx.rapport_texte_brutes(_idTx)
+    check("texte : la brute avec texte est proposee",
+          [x["fichier"] for x in _rapTx["avec_texte"]] == ["a.mp4"],
+          str(_rapTx["avec_texte"]))
+    check("texte : la brute sans texte est comptee, pas listee",
+          _rapTx["sans_texte"] == 1)
+    # LE test qui compte : une video qu on n a pas su lire ne doit JAMAIS
+    # glisser parmi les « sans texte », sinon elle survivrait a un menage
+    # qu on croirait sur — ou pire, serait proposee a la suppression.
+    check("texte : un verdict impossible est mis a part, jamais avec les sans-texte",
+          [x["fichier"] for x in _rapTx["non_conclu"]] == ["c.mp4"]
+          and _rapTx["sans_texte"] == 1,
+          str(_rapTx["non_conclu"]))
+    check("texte : la brute non examinee n apparait nulle part",
+          _rapTx["total_examine"] == 3 and _rapTx["total_brutes"] == 4)
+
+    # Sans cle IA, on ne lance rien et on le DIT.
+    _savKey = _osRg.environ.pop("ANTHROPIC_API_KEY", None) if "_osRg" in dir() else None
+    import os as _osTx
+    _k0 = _osTx.environ.pop("ANTHROPIC_API_KEY", None)
+    _laTx, _msgTx = _wTx._lancer_scan_texte(_idTx)
+    check("texte : sans cle IA, rien n est lance et le message le dit",
+          _laTx is False and "clé ia" in _msgTx.lower(), _msgTx[:80])
+    if _k0 is not None:
+        _osTx.environ["ANTHROPIC_API_KEY"] = _k0
+
+    # Le voisin doit partir avec la video, sinon un re-upload homonyme
+    # heriterait du verdict de l ancienne.
+    _srcTx = _plTx.Path("web_upload.py").read_text(encoding="utf-8")
+    check("texte : le verdict est emporte quand la video est supprimee",
+          "SUFFIXE_TEXTECHECK}\"  # verdict" in _srcTx
+          or "{stem}{SUFFIXE_TEXTECHECK}" in _srcTx)
+
+    _shTx.rmtree(_wTx.IDENTITIES_DIR / _idTx, ignore_errors=True)
+except Exception as _eTx:
+    check("texte : reperage testable", False, repr(_eTx)[:160])
+
+print()
+print("=" * 70)
 print("SELECTEURS DES FAVORIS (bouton Caption Banger / Montage Banger)")
 print("=" * 70)
 try:
