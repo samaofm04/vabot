@@ -1930,6 +1930,75 @@ try:
               bool(_chGd) and all(c.startswith("Bibliothèque/") for c in _chGd), str(_chGd))
         check("gdrive : ni Vault PRO ni Bibliotheque 2 (retirees a la demande)",
               not any(("Vault PRO" in c or "Bibliotheque 2" in c) for c in _chGd))
+
+        # --- les fichiers VOISINS partent avec leur media ----------------
+        # « .example not in name » est une regle d AFFICHAGE (ne pas montrer
+        # l exemple comme une carte a part). Recopiee dans le module de
+        # SAUVEGARDE, elle laissait 102 videos exemple et toutes les
+        # captions hors du Drive — et, le meme generateur servant au
+        # comptage, la page affichait « 100 %, tout est a jour ».
+        _vGd = _tmpGd / "julia" / "videos"
+        for _nGd in ("f1.txt", "f1.desc.txt", "f1.montage.json",
+                     "f1.analyse.json", "f1.example.mp4",
+                     "f1.montage.json.prev", "f1.part"):
+            (_vGd / _nGd).write_bytes(b"x")
+        _nomsGd = [p.name for _c, p in _gdCa._iter_jobs(True)]
+        for _quoiGd, _fGd in (("la video exemple", "f1.example.mp4"),
+                              ("la caption", "f1.txt"),
+                              ("la description", "f1.desc.txt"),
+                              ("le brouillon de montage", "f1.montage.json"),
+                              ("l analyse", "f1.analyse.json")):
+            check("gdrive : %s est sauvegardee" % _quoiGd, _fGd in _nomsGd,
+                  str(sorted(_nomsGd)))
+        # .prev est une copie interne de safe_json, .part une ecriture
+        # interrompue : ni l un ni l autre n a sa place sur le Drive.
+        check("gdrive : les artefacts internes restent dehors",
+              "f1.montage.json.prev" not in _nomsGd and "f1.part" not in _nomsGd)
+
+        # Repondre « non » aux videos ne doit pas couper les captions :
+        # elles pesent quelques kilo-octets et rien d autre ne les garde.
+        _sansGd = [p.name for _c, p in _gdCa._iter_jobs(False)]
+        check("gdrive : « videos : non » garde quand meme les captions",
+              "f1.txt" in _sansGd and "f1.mp4" not in _sansGd,
+              str(sorted(_sansGd)))
+
+        # La regle d affichage n a rien a faire dans le module qui decide
+        # ce qui est SAUVEGARDE. C est le verrou contre le copier-coller.
+        check("gdrive : la regle d affichage a quitte le module de sauvegarde",
+              '".example" not in' not in _gdSrc)
+        # Un seul endroit calcule l ensemble des extensions : quand deux
+        # endroits decident la meme chose, ils divergent (cf. les 598
+        # fichiers Drive invisibles).
+        check("gdrive : un seul endroit decide des extensions",
+              _gdSrc.count("VIDEO_EXTS if is_video else IMAGE_EXTS") == 1
+              and _gdSrc.count("def _exts_de") == 1)
+
+        # Le comptage vient du MEME generateur que l envoi : un fichier
+        # jamais sauvegarde doit etre compte comme manquant, sinon la page
+        # affiche 100 % sur une identite a moitie sauvegardee.
+        _vraiEtatGd = _gdCa._load_state
+        _gdCa._load_state = lambda: {"uploaded": {}}
+        try:
+            _repGd = _gdCa.sync_report()
+            _juGd = [x for x in (_repGd.get("identities") or [])
+                     if x.get("identity") == "julia"]
+            check("gdrive : le total du rapport inclut les voisins",
+                  bool(_juGd) and _juGd[0].get("total") == len(
+                      [n for _c, n in _gdCa._iter_jobs(True)
+                       if n.parent.parent.name == "julia"]),
+                  str(_juGd[:1]))
+            check("gdrive : un fichier jamais envoye compte comme manquant",
+                  bool(_juGd) and _juGd[0].get("manque") == _juGd[0].get("total")
+                  and _juGd[0].get("sync") == 0, str(_juGd[:1]))
+        finally:
+            _gdCa._load_state = _vraiEtatGd
+
+        # non_sauvegardes sert au message de /cloud/delete : en cas de
+        # doute il doit repondre « pas de copie », jamais l inverse.
+        check("gdrive : sans etat, tout est declare non sauvegarde",
+              len(_gdCa.non_sauvegardes([_vGd / "f1.txt", _vGd / "f1.mp4"])) == 2)
+        check("gdrive : une liste vide ne fait rien",
+              _gdCa.non_sauvegardes([]) == [])
         _creGd = []
         _vraiGd = _gdCa._ensure_folder
         _gdCa._ensure_folder = lambda sess, parent, name, st: (

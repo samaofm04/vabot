@@ -42119,6 +42119,8 @@ def create_app():
             return jsonify({"ok": True, "channel": info, "deleted": count})
         return jsonify({"ok": False, "error": info})
 
+    import gdrive_sync as _gdrive_sync
+
     @app.route("/cloud/delete", methods=["POST"])
     def cloud_delete():
         if not is_auth():
@@ -42128,6 +42130,7 @@ def create_app():
             return _error("✕ Aucun fichier sélectionné")
         deleted = []
         failed = []
+        sans_copie = 0          # fichiers effaces dont le Drive n'a pas de copie
         identities_list = _list_identities()
         valid_subdirs = CLOUD_SUBDIRS
         for fid in files:
@@ -42170,6 +42173,15 @@ def create_app():
                                 or n == f"{stem}.analyse.json"   # analyse auto
                                 or n == f"{stem}.montage.png"):  # aperçu généré
                             to_delete.append(sibling)
+                # Ce qui part sans copie sur le Drive est compte AVANT
+                # l'effacement : apres, il n'y a plus rien a interroger.
+                # On ne bloque pas — c'est le proprietaire qui decide —
+                # mais il doit l'apprendre, parce que la veille va
+                # rapatrier le media et masquer la perte du reste.
+                try:
+                    sans_copie += len(_gdrive_sync.non_sauvegardes(to_delete))
+                except Exception:
+                    pass
                 for t in to_delete:
                     try:
                         t.unlink()
@@ -42188,6 +42200,12 @@ def create_app():
         msg_parts = []
         if deleted:
             msg_parts.append(f"✓ <b>{len(deleted)}</b> fichier(s) supprimé(s)")
+        if sans_copie:
+            # Le Drive rend ce qui y est monte ; il ne rend rien de ce qui
+            # n'y est jamais alle. Le dire ici est la seule occasion.
+            msg_parts.append(
+                f"⚠ <b>{sans_copie}</b> n'avai{'ent' if sans_copie > 1 else 't'} "
+                "pas de copie sur le Drive : perdu(s) définitivement")
         if failed:
             msg_parts.append(f"✕ <b>{len(failed)}</b> échec(s) : " + ", ".join(f"{fid} ({err})" for fid, err in failed[:3]))
         if bool(failed) and not deleted:

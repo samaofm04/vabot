@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+import pathlib
 from pathlib import Path
 
 import safe_json
@@ -30,6 +31,41 @@ STATE_FILE = DATA_DIR / "gdrive_sync_state.json"
 
 VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".m4v"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+
+#: Les fichiers VOISINS d'un media : caption (.txt), description
+#: (.desc.txt), brouillon de montage et analyse (.json). Ils ne sont dans
+#: aucun filet — data/ est hors git, et le zip de /admin/backup_data saute
+#: tout chemin contenant « videos », c'est-a-dire justement les captions
+#: des reels. Quelques dizaines de kilo-octets en tout.
+#:
+#: « .prev » (la copie de secours que safe_json laisse a cote de chaque
+#: JSON) en est volontairement absent : c'est un artefact interne, pas du
+#: travail a preserver, et le Drive n'a pas a en porter la trace.
+SIDECAR_EXTS = {".txt", ".json"}
+
+
+def _exts_de(sub: str, is_video=None) -> set:
+    """Les extensions a traiter pour ce sous-dossier, voisins compris.
+
+    Quatre endroits calculaient cet ensemble chacun de leur cote — la
+    montee, la descente, et les deux moities de l'inventaire. Quand deux
+    endroits decident la meme chose, ils divergent : c'est exactement ce
+    qui avait rendu 598 fichiers du Drive invisibles.
+    """
+    if is_video is None:
+        is_video = sub in ("brutes", "templates", "videos", "pro_videos")
+    return (VIDEO_EXTS if is_video else IMAGE_EXTS) | SIDECAR_EXTS
+
+
+def _est_voisin(nom: str) -> bool:
+    """Vrai si ce fichier accompagne un media au lieu d'en etre un.
+
+    Le site les cherche par leur nom EXACT, derive de celui du media
+    (« <stem>.txt », « <stem>.example.* »). Renomme, meme d'un « _2 », un
+    voisin n'est plus lu par personne.
+    """
+    return (Path(nom).suffix.lower() in SIDECAR_EXTS
+            or ".example." in nom.lower())
 
 # (sous-dossier local, nom du dossier Drive, vidéo ?)
 SECTIONS = (
@@ -506,23 +542,75 @@ def _iter_jobs(include_videos):
             else:
                 sub, drive_name, is_video = entree
                 biblio_x = biblio
+            # Le reglage des videos ne concerne que les MEDIAS. Leurs
+            # voisins partent toujours : ils pesent quelques dizaines de
+            # kilo-octets, et ce sont eux que rien d'autre ne sauvegarde.
+            # Avant, repondre « non » au choix des videos coupait aussi la
+            # sauvegarde des captions, sans que personne puisse le deviner.
+            medias_ecartes = False
             if is_video:
                 mode = include_videos
                 if not mode:
-                    continue
+                    medias_ecartes = True
                 # « montage » : les rushs et templates partent, PAS les reels
                 # (ce sont eux qui pesent le plus lourd dans le quota).
-                if str(mode).lower() == "montage" and sub in ("videos", "pro_videos"):
-                    continue
-            exts = VIDEO_EXTS if is_video else IMAGE_EXTS
+                elif str(mode).lower() == "montage" and sub in ("videos",
+                                                                "pro_videos"):
+                    medias_ecartes = True
+            exts = _exts_de(sub, is_video)
             folder = ident_dir / sub
             if not folder.exists():
                 continue
             for p in sorted(folder.iterdir()):
-                if p.is_file() and p.suffix.lower() in exts and ".example" not in p.name:
-                    chemin = (tuple(biblio_x.split("/")) if biblio_x else ()) \
-                        + (label.title(), drive_name)
-                    yield chemin, p
+                if not p.is_file():
+                    continue
+                suffixe = p.suffix.lower()
+                if suffixe not in exts:
+                    continue
+                # La video exemple pese autant qu'un reel : elle suit le
+                # sort des medias. Les captions, non.
+                if medias_ecartes and suffixe not in SIDECAR_EXTS:
+                    continue
+                chemin = (tuple(biblio_x.split("/")) if biblio_x else ()) \
+                    + (label.title(), drive_name)
+                yield chemin, p
+
+
+def non_sauvegardes(chemins) -> list:
+    """Parmi ces fichiers, ceux dont le Drive n'a pas de copie a jour.
+
+    On reutilise _iter_jobs et l'etat, exactement comme sync_report : la
+    regle de « ce qui devrait etre sauvegarde » ne doit exister qu'a un
+    seul endroit. Une seconde copie de cette regle finirait par diverger,
+    et c'est deja ce qui avait rendu 598 fichiers du Drive invisibles.
+
+    En cas de doute — etat illisible, fichier disparu — on repond « pas
+    sauvegarde ». Mieux vaut une alerte de trop qu'un fichier perdu en
+    silence.
+    """
+    voulus = [pathlib.Path(c) for c in chemins]
+    if not voulus:
+        return []
+    try:
+        up = (_load_state() or {}).get("uploaded") or {}
+        etat = {}
+        for chemin, p in _iter_jobs(True):
+            try:
+                etat[str(p.resolve())] = bool(
+                    (up.get("/".join(chemin) + "/" + p.name) or {}).get("size")
+                    == p.stat().st_size)
+            except OSError:
+                pass
+    except Exception:
+        return list(voulus)
+    dehors = []
+    for p in voulus:
+        try:
+            if not etat.get(str(p.resolve()), False):
+                dehors.append(p)
+        except OSError:
+            dehors.append(p)
+    return dehors
 
 
 def sync_report() -> dict:
@@ -827,8 +915,7 @@ def _candidats_import(sess, st, root):
     def _prendre(dossier_id, ident, sub, canonique=False):
         """`canonique` : le fichier est deja RANGE au bon endroit du Drive
         (par opposition a un depot libre dans « A IMPORTER »)."""
-        exts = (VIDEO_EXTS if sub in ("brutes", "templates", "videos", "pro_videos")
-                else IMAGE_EXTS)
+        exts = _exts_de(sub)
         contenu = _lister(sess, dossier_id)
         # Tailles par nom : sert a reconnaitre les copies (« pp_69_2.png »
         # pesant exactement autant que « pp_69.png »).
@@ -846,7 +933,12 @@ def _candidats_import(sess, st, root):
             # 1) Copie fabriquee par un import precedent : meme fichier sous un
             # nom suffixe. Les rapatrier relance le cycle qui a produit les
             # pp_69_2_2 et pp_69_2_3 — chaque tour en ajoute une couche.
-            if _est_copie(nom, tailles):
+            # Cette detection ne compare que la TAILLE. Sur des medias
+            # c'est sur ; sur des captions de quelques centaines d'octets,
+            # deux textes de meme longueur suffiraient a en faire
+            # disparaitre un, compte comme une copie. Les voisins n'y
+            # passent donc pas.
+            if not _est_voisin(nom) and _est_copie(nom, tailles):
                 _ignores["copies_du_drive"] = _ignores.get("copies_du_drive", 0) + 1
                 continue
             # 2) Le nom est deja pris sur le site : on n'importe pas. Choix du
@@ -1189,8 +1281,7 @@ def inventaire(force: bool = False) -> dict:
             if liste:
                 orphelines[ident] = orphelines.get(ident, 0) + len(liste)
             continue
-        exts = (VIDEO_EXTS if sub in ("brutes", "templates", "videos", "pro_videos")
-                else IMAGE_EXTS)
+        exts = _exts_de(sub)
         tailles = {}
         for f in liste:
             try:
@@ -1216,8 +1307,7 @@ def inventaire(force: bool = False) -> dict:
     lignes = []
     for (ident, sub), n_drive in cote_drive.items():
         d = IDENTITIES_DIR / ident / sub
-        exts = (VIDEO_EXTS if sub in ("brutes", "templates", "videos", "pro_videos")
-                else IMAGE_EXTS)
+        exts = _exts_de(sub)
         try:
             n_site = sum(1 for p in d.iterdir()
                          if p.is_file() and p.suffix.lower() in exts)
@@ -1289,6 +1379,8 @@ def run_import() -> dict:
     # seconde, au lieu de le voir grossir au fil du parcours.
     cands = _candidats_import(sess, st, root)
     total, imported, errors = len(cands), 0, 0
+    # Un voisin dont le nom est deja pris n'est PAS renomme : voir plus bas.
+    conflits = 0
     _set_import(state="running", total=total, done=0, imported=0, errors=0,
                 err="", ts=int(time.time()))
     # Telechargements EN PARALLELE. Un import passe l'essentiel de son temps a
@@ -1304,12 +1396,22 @@ def run_import() -> dict:
     _faits = {"n": 0}
 
     def _un_fichier(c):
-        nonlocal imported, errors
+        nonlocal imported, errors, conflits
         cible_dir = IDENTITIES_DIR / c["identity"] / c["sub"]
         try:
             cible_dir.mkdir(parents=True, exist_ok=True)
             with _verrou:
                 dst = cible_dir / c["nom"]
+                # Un voisin renomme « IMG.desc_2.txt » ou
+                # « IMG.example_2.mp4 » n'est plus lu par personne : le site
+                # cherche le nom EXACT derive du media. Mieux vaut renoncer
+                # et le compter que de deposer un fichier que rien ne
+                # rattachera jamais — et qui repartirait sur le Drive a
+                # chaque synchro.
+                if dst.exists() and _est_voisin(c["nom"]):
+                    conflits += 1
+                    _set_import(voisins_en_conflit=conflits)
+                    return
                 k = 2
                 while dst.exists() or dst.with_suffix(dst.suffix + ".part").exists():
                     dst = cible_dir / f"{Path(c['nom']).stem}_{k}{Path(c['nom']).suffix}"
@@ -1345,7 +1447,7 @@ def run_import() -> dict:
             list(ex.map(_un_fichier, cands))
     _save_state(st)
     res = {"total": total, "imported": imported, "errors": errors,
-           "ts": int(time.time())}
+           "voisins_en_conflit": conflits, "ts": int(time.time())}
     _set_import(state="done", **res)
     return res
 
