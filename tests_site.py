@@ -2598,6 +2598,41 @@ try:
         _fvFile.write_text(_savFv, encoding="utf-8")
     _shFv.rmtree(_uFv.IDENTITIES_DIR / _idFv, ignore_errors=True)
 
+    # -- templates favoris ---------------------------------------------------
+    # Le piege : un template SANS point de coupe fait recopier le template seul,
+    # donc la brute favorite n apparait pas dans la video. On les ecarte, et on
+    # les COMPTE pour pouvoir le dire au VA.
+    _idTv = "_tst_favtpl"
+    _dirTv = _uFv.IDENTITIES_DIR / _idTv / "templates"
+    _shFv.rmtree(_uFv.IDENTITIES_DIR / _idTv, ignore_errors=True)
+    _dirTv.mkdir(parents=True)
+    for _n in ("bon.mp4", "sanscoupe.mp4", "sansbrouillon.mp4"):
+        (_dirTv / _n).write_bytes(b"\x00" * 6000)
+    (_dirTv / "bon.montage.json").write_text(
+        _jsFv.dumps({"cut_at": 1.8, "segments": "[]"}), encoding="utf-8")
+    (_dirTv / "sanscoupe.montage.json").write_text(
+        _jsFv.dumps({"cut_at": 0, "segments": "[]"}), encoding="utf-8")
+    _savTv = _fvFile.read_text(encoding="utf-8") if _fvFile.exists() else None
+    _fvFile.write_text(_jsFv.dumps([
+        _idTv + "|templates|bon.mp4",
+        _idTv + "|templates|sanscoupe.mp4",
+        _idTv + "|templates|sansbrouillon.mp4",
+        _idTv + "|templates|disparu.mp4",     # cle orpheline
+    ]), encoding="utf-8")
+    _utTv, _ecartTv = _uFv.fav_templates_for(_idTv)
+    check("favoris : seul le template avec point de coupe est utilisable",
+          [p.name for p, _d in _utTv] == ["bon.mp4"],
+          str([p.name for p, _d in _utTv]))
+    check("favoris : les templates sans point de coupe sont COMPTES, pas ignores",
+          _ecartTv == 2, "%d ecarte(s)" % _ecartTv)
+    check("favoris : le brouillon du template est rendu avec lui",
+          _utTv and float(_utTv[0][1].get("cut_at")) == 1.8)
+    if _savTv is None:
+        _fvFile.unlink(missing_ok=True)
+    else:
+        _fvFile.write_text(_savTv, encoding="utf-8")
+    _shFv.rmtree(_uFv.IDENTITIES_DIR / _idTv, ignore_errors=True)
+
     # -- captions favorites -------------------------------------------------
     _idCv = "_tst_favcap"
     _fCv = _uFv.DATA_DIR / "captions.json"
@@ -2627,11 +2662,13 @@ try:
     # -- le menu VA porte bien les deux boutons -----------------------------
     _vFv = _uFv.ContentMenuView(None)
     _idsFv = [getattr(i, "custom_id", "") for i in _vFv.children]
-    check("favoris : les 2 boutons sont dans le menu VA",
-          "cmenu:capbanger" in _idsFv and "cmenu:montagebanger" in _idsFv)
-    check("favoris : les 2 boutons sont declares dans _MENU_BTN_FEATURE",
-          _uFv._MENU_BTN_FEATURE.get("cmenu:capbanger") == "contenu"
-          and _uFv._MENU_BTN_FEATURE.get("cmenu:montagebanger") == "contenu")
+    check("favoris : les 3 boutons sont dans le menu VA",
+          all(b in _idsFv for b in ("cmenu:capbanger", "cmenu:montagebanger",
+                                    "cmenu:templatebrut")))
+    check("favoris : les 3 boutons sont declares dans _MENU_BTN_FEATURE",
+          all(_uFv._MENU_BTN_FEATURE.get(b) == "contenu"
+              for b in ("cmenu:capbanger", "cmenu:montagebanger",
+                        "cmenu:templatebrut")))
     check("favoris : la vue tient dans les 25 composants de Discord",
           len(_vFv.children) <= 25, "%d composants" % len(_vFv.children))
 
@@ -2641,8 +2678,8 @@ try:
     # boutons n'existent que sur le serveur francais.
     import re as _reFv
     _clesFv = {a[0] for a in _uFv._JB_ACTIONS_US}
-    check("favoris : les 2 actions sont dans le menu US",
-          "capbanger" in _clesFv and "montagebanger" in _clesFv)
+    check("favoris : les 3 actions sont dans le menu US",
+          all(k in _clesFv for k in ("capbanger", "montagebanger", "templatebrut")))
     # Le panneau US declenche cmd.callback sur un ATTRIBUT du cog : une action
     # qui pointe vers une methode inexistante repond « Action indisponible ».
     for _k, _lb, _cmd, _sc in _uFv._JB_ACTIONS_US:

@@ -36,6 +36,7 @@ _MENU_BTN_FEATURE = {
     # inconnues, donc une fonction inventee ferait disparaitre le bouton en
     # permanence sur tout serveur bride, sans erreur nulle part.
     "cmenu:capbanger": "contenu", "cmenu:montagebanger": "contenu",
+    "cmenu:templatebrut": "contenu",
     "cmenu:addaccount": "onboarding",
     "cmenu:lien": "liens", "cmenu:clics": "clics",
 }
@@ -201,6 +202,7 @@ def _build_menu_embed(identity, guild=None):
     add("cmenu:banger", "contenu", "💥 Reels Banger", "Tes meilleurs reels (marqués ⭐)")
     add("cmenu:capbanger", "contenu", "⭐ Caption Banger", "Tes meilleures captions (marquées ⭐)")
     add("cmenu:montagebanger", "contenu", "🎬 Montage Banger", "Une brute ⭐ + une caption ⭐, montées pour toi")
+    add("cmenu:templatebrut", "contenu", "🎵 Template + Brut", "Un template ⭐ assemblé avec une brute ⭐")
     add("cmenu:pseudo", "contenu", "👤 Pseudo", "Des pseudos dispo")
     add("cmenu:name", "contenu", "📝 Name", "Des noms d'affichage")
     add("cmenu:bio", "contenu", "💬 Bio", "Des bios de ton identité")
@@ -1079,6 +1081,63 @@ def fav_brutes_for(identity, limit=15):
             if limit and len(out) >= limit:
                 break
     return out
+
+
+def fav_templates_for(identity, limit=15):
+    """Templates marques ⭐ favoris -> (utilisables, sans_point_de_coupe).
+
+    `utilisables` = [(Path, draft)] : les templates dont le brouillon
+    <stem>.montage.json porte un cut_at exploitable. `sans_point_de_coupe` = le
+    NOMBRE de templates etoiles qu'on a du ecarter.
+
+    Pourquoi ce second nombre. Le moteur prend le template comme SOURCE et
+    n'insere une brute que s'il trouve un point de coupe (_prepare_inputs :
+    « brutes = list_brutes(...) if (brutes_dir and cut > 0.05) »). Sans cut_at
+    il recopie le template seul : le VA recevrait une video ou sa brute
+    favorite n'apparait PAS, et personne ne saurait pourquoi. On les ecarte
+    donc, et on les compte pour pouvoir le dire — plutot que de les ignorer en
+    silence.
+    """
+    import json as _json
+    fav_file = DATA_DIR / "fav_brutes.json"      # meme registre, cle par sous-dossier
+    try:
+        raw = _json.loads(fav_file.read_text(encoding="utf-8"))
+        keys = list(raw.keys()) if isinstance(raw, dict) else list(raw or [])
+    except Exception:
+        keys = []
+    prefix = f"{identity}|templates|"
+    names = []
+    for k in keys:
+        if isinstance(k, str) and k.startswith(prefix):
+            fn = k[len(prefix):]
+            if fn and fn not in names:
+                names.append(fn)
+    tdir = IDENTITIES_DIR / identity / "templates"
+    utilisables, sans_coupe = [], 0
+    for fn in names:
+        p = tdir / fn
+        if not (p.exists() and p.is_file()):
+            continue
+        mj = p.parent / f"{p.stem}.montage.json"
+        if not mj.exists():
+            sans_coupe += 1
+            continue
+        try:
+            draft = _json.loads(mj.read_text(encoding="utf-8"))
+        except Exception:
+            sans_coupe += 1
+            continue
+        try:
+            cut = float((draft or {}).get("cut_at") or 0)
+        except (TypeError, ValueError):
+            cut = 0.0
+        if cut <= 0.05:
+            sans_coupe += 1
+            continue
+        utilisables.append((p, draft))
+        if limit and len(utilisables) >= limit:
+            break
+    return utilisables, sans_coupe
 
 
 def fav_captions_for(identity):
@@ -2120,7 +2179,9 @@ class UserCog(commands.Cog):
                 except Exception:
                     pass
 
-    async def _gen_and_send_montaged(self, interaction, video, draft, description, idx, total, identity):
+    async def _gen_and_send_montaged(self, interaction, video, draft, description, idx,
+                                     total, identity, label="REEL MONTÉ", emoji="🎞️",
+                                     prefixe_fichier="reel_monte", brutes_dir=None):
         """Génère À LA DEMANDE une variante MONTÉE (texte incrusté) du reel `video` via le
         pipeline Noctus (draft = son .montage.json), puis l'envoie à poster telle quelle +
         la description. Chaque appel = une variante UNIQUE (uniquification iPhone). Lent
@@ -2130,13 +2191,18 @@ class UserCog(commands.Cog):
         try:
             # brutes_dir : si le brouillon a un point de coupe et que l'identité a
             # des vidéos brutes, le début du template est remplacé par l'une d'elles.
-            _brutes = IDENTITIES_DIR / (identity or "").strip().lower() / "brutes"
+            # brutes_dir impose : le bouton « Template + Brut » passe un dossier
+            # ne contenant QUE la brute etoilee choisie. Sans ca, le moteur en
+            # tire une au hasard parmi toutes celles de l'identite et l'etoile
+            # de la brute ne servirait a rien.
+            _brutes = (Path(brutes_dir) if brutes_dir else
+                       IDENTITIES_DIR / (identity or "").strip().lower() / "brutes")
             model = await asyncio.to_thread(
                 noctus_web.gen_from_draft, str(video), draft, ["V1"], None, _brutes)
         except Exception:
             model = None
         if not model:
-            await interaction.followup.send(f"⚠️ REEL MONTÉ {idx}/{total} : génération impossible.")
+            await interaction.followup.send(f"⚠️ {label} {idx}/{total} : génération impossible.")
             return
         state = "running"
         for _ in range(90):                      # ~3 min max
@@ -2154,27 +2220,27 @@ class UserCog(commands.Cog):
             except Exception:
                 pass
             await interaction.followup.send(
-                f"⚠️ REEL MONTÉ {idx}/{total} : génération échouée ({state}) {err}".strip())
+                f"⚠️ {label} {idx}/{total} : génération échouée ({state}) {err}".strip())
             return
         outs = noctus_web.output_paths(model)
         if not outs:
-            await interaction.followup.send(f"⚠️ REEL MONTÉ {idx}/{total} : aucun fichier produit.")
+            await interaction.followup.send(f"⚠️ {label} {idx}/{total} : aucun fichier produit.")
             return
         out = outs[0]
         intro = (
-            f"🎞️ **REEL MONTÉ {idx}/{total}** → à poster sur ton **compte n°{idx}** (`{identity}`)\n"
+            f"{emoji} **{label} {idx}/{total}** → à poster sur ton **compte n°{idx}** (`{identity}`)\n"
             f"📥 Poste cette vidéo **telle quelle** — le texte est **déjà incrusté** dessus."
         )
         try:
             await interaction.followup.send(
-                content=intro, file=discord.File(str(out), filename=f"reel_monte_{idx}.mp4"))
+                content=intro, file=discord.File(str(out), filename=f"{prefixe_fichier}_{idx}.mp4"))
         except discord.HTTPException as e:
             await interaction.followup.send(
-                f"⚠️ REEL MONTÉ {idx}/{total} : envoi impossible (trop lourd) : {e}")
+                f"⚠️ {label} {idx}/{total} : envoi impossible (trop lourd) : {e}")
             return
         if description:
             await interaction.followup.send(
-                f"📄 **DESCRIPTION REEL MONTÉ {idx}/{total}** (à coller dans le **champ légende**) :")
+                f"📄 **DESCRIPTION {label} {idx}/{total}** (à coller dans le **champ légende**) :")
             await interaction.followup.send(description)
 
     async def _send_banger_reels(self, interaction):
@@ -2320,6 +2386,93 @@ class UserCog(commands.Cog):
                 label="MONTAGE BANGER", emoji="🎬",
                 prefixe_fichier="montage_banger")
 
+    async def _send_template_plus_brute(self, interaction):
+        """Bouton '🎵 Template + Brut' : un template ⭐ ASSEMBLE avec une brute ⭐.
+
+        La difference avec « Montage Banger » tient en une phrase : ici le
+        TEMPLATE est la source et la brute vient s'y inserer au point de coupe ;
+        la-bas la brute est la source et une caption s'incruste dessus.
+
+        La brute etoilee est imposee au moteur par un dossier temporaire ne
+        contenant qu'elle. Sans ce detour, _prepare_inputs en tire une au
+        hasard parmi TOUTES les brutes de l'identite, et l'etoile de la brute
+        ne servirait a rien.
+        """
+        import shutil as _sh
+        import tempfile as _tf
+        if await self._gate_contenu(interaction):
+            return
+        identity = get_user_identity(interaction.user.id)
+        if not identity:
+            await interaction.response.send_message(
+                "Tu n'as pas d'identité assignée. Demande à un admin.", ephemeral=True)
+            return
+        templates, sans_coupe = fav_templates_for(identity)
+        brutes = fav_brutes_for(identity)
+        if not templates or not brutes:
+            # Le nombre ecarte se dit TOUJOURS : un admin qui a etoile cinq
+            # templates et n'en voit aucun arriver doit apprendre qu'il leur
+            # manque un point de coupe, pas chercher une panne ailleurs.
+            note = ""
+            if sans_coupe:
+                note = (f"\n⚠️ {sans_coupe} template(s) étoilé(s) ont été **écartés** : "
+                        f"ils n'ont pas de **point de coupe**, donc ta brute n'y "
+                        f"apparaîtrait pas. _(À définir dans l'éditeur Montage du site.)_")
+            if not templates and not brutes:
+                manque = ("Il manque **les deux** : aucun template étoilé "
+                          "(onglet **Templates montage**) et aucune vidéo brute "
+                          "étoilée (onglet **Vidéo brut**).")
+            elif not templates:
+                manque = (f"Tu as **{len(brutes)} brute(s) favorite(s)**, mais "
+                          f"**aucun template utilisable** (onglet **Templates montage**).")
+            else:
+                manque = (f"Tu as **{len(templates)} template(s) utilisable(s)**, mais "
+                          f"**aucune vidéo brute étoilée** (onglet **Vidéo brut**).")
+            await interaction.response.send_message(
+                f"🎵 Impossible d'assembler pour `{identity}`.\n{manque}{note}\n"
+                "_(Un admin pose les étoiles ⭐ sur le site.)_", ephemeral=True)
+            return
+        try:
+            import noctus_web
+        except Exception as e:
+            await interaction.response.send_message(
+                f"⚠️ Module vidéo indisponible : {e}", ephemeral=True)
+            return
+        if not noctus_web.setup_ok():
+            await interaction.response.send_message(
+                "⚠️ La génération vidéo n'est pas prête sur le serveur (Node/ffmpeg). "
+                "Préviens un admin.", ephemeral=True)
+            return
+        await interaction.response.defer()
+        total = min(3, len(templates) * len(brutes))
+        intro = (f"🎵 **{total} TEMPLATE + BRUT pour `{identity}`** — ton template "
+                 f"étoilé, monté avec ta brute étoilée.\n"
+                 f"⏳ Je les génère (≈15-30s chacun).")
+        if sans_coupe:
+            intro += (f"\nℹ️ {sans_coupe} template(s) étoilé(s) écarté(s) : "
+                      f"pas de point de coupe.")
+        await interaction.followup.send(intro)
+        used_t, used_b = set(), set()
+        for idx in range(1, total + 1):
+            tpl, draft = _pick_fresh(templates, used_t, key=lambda t: str(t[0]))
+            vid = _pick_fresh(brutes, used_b, key=lambda p: str(p))
+            # Un dossier par generation, supprime quoi qu'il arrive : le VPS
+            # se remplirait sinon d'une copie de brute a chaque clic.
+            tmp = _tf.mkdtemp(prefix="favbrute-")
+            try:
+                cible = Path(tmp) / vid.name
+                try:
+                    os.link(str(vid), str(cible))   # pas de copie : lien dur
+                except Exception:
+                    _sh.copy2(str(vid), str(cible))
+                _cap, desc, _ex = _video_meta(tpl)
+                await self._gen_and_send_montaged(
+                    interaction, tpl, draft, desc, idx, total, identity,
+                    label="TEMPLATE + BRUT", emoji="🎵",
+                    prefixe_fichier="template_brut", brutes_dir=tmp)
+            finally:
+                _sh.rmtree(tmp, ignore_errors=True)
+
     # Les deux actions existent AUSSI en commandes, pour une raison precise :
     # le panneau du serveur US ne sait declencher que des app_commands — il
     # appelle cmd.callback sur un attribut du cog (_run_for_model). Sans ces
@@ -2339,6 +2492,12 @@ class UserCog(commands.Cog):
         description="Une video brute ⭐ + une caption ⭐, montees pour toi")
     async def montagebanger(self, interaction: discord.Interaction):
         await self._send_montage_bangers(interaction)
+
+    @app_commands.command(
+        name="templatebrut",
+        description="Un template ⭐ assemble avec une video brute ⭐")
+    async def templatebrut(self, interaction: discord.Interaction):
+        await self._send_template_plus_brute(interaction)
 
     @app_commands.command(name="reel", description="Genere 3 reels (par defaut) : video clean + caption + description + exemple")
     @app_commands.describe(nombre="Combien de reels envoyer (1-10, defaut 3)")
@@ -4619,6 +4778,10 @@ class ContentMenuView(discord.ui.View):
     async def b_montagebanger(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_montage_bangers(interaction)
 
+    @discord.ui.button(label="Template + Brut", emoji="🎵", style=discord.ButtonStyle.primary, custom_id="cmenu:templatebrut", row=4)
+    async def b_templatebrut(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._send_template_plus_brute(interaction)
+
 
 class CentralMenuView(discord.ui.View):
     """Menu CENTRAL (salon partagé type #commande-va) : chaque bouton envoie le
@@ -4859,6 +5022,7 @@ _JB_ACTIONS_US = [
     # deja poste deviendrait muet sans la moindre erreur.
     ("capbanger", "⭐ Caption Banger", "captionbanger", False),
     ("montagebanger", "🎬 Montage Banger", "montagebanger", False),
+    ("templatebrut", "🎵 Template + Brut", "templatebrut", False),
 ]
 
 # Quantites proposees (multiplicateur). Plafonnees au stock reel de la model.
