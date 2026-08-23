@@ -3811,7 +3811,10 @@ class UserCog(commands.Cog):
         )
         try:
             _vue_c = CentralMenuView(self)
-            _poser_icones_menu(_vue_c, guild)
+            # interaction.guild, PAS guild : cette fonction n a pas de
+            # variable « guild ». Un NameError serait tombe dans le except
+            # ci-dessous et le menu aurait cesse de se poster, sans un mot.
+            _poser_icones_menu(_vue_c, interaction.guild)
             msg = await ch.send(embed=emb, view=_vue_c)
         except Exception as e:
             await interaction.followup.send(f"❌ Impossible de poster le menu : {e}", ephemeral=True)
