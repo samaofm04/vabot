@@ -1177,12 +1177,14 @@ body.light .sidebar .subgroup .sub-items{border-left-color:#e5e7eb}
      #cbd5e1. Contraste mesure : 1,48. On ne lit rien.
    - .reel-expand : le panneau du reel reste NOIR en theme clair (c est un
      media), mais la regle generale body.light [style*="color:#888"]
-     assombrit sa legende -> gris fonce sur noir, 1,92. Il faut une regle
-     PLUS SPECIFIQUE, pas un !important : la specificite l emporte.
+     assombrit sa legende -> gris fonce sur noir, 1,92. Il faut !important
+     POUR BATTRE LE STYLE INLINE, et une specificite plus forte que la
+     regle generale, qui porte deja !important : mesure sur la page, une
+     regle plus specifique SANS !important ne changeait rien du tout.
    - les pastilles flottantes SFW / marche : #9ca3af sur blanc, 2,54. */
-body.light #ig-dl-bar [style*="color:#cbd5e1"]{color:#475569}
-body.light .reel-expand [style*="color:#888"]{color:#9aa0a6}
-body.light .reel-caption-area [style*="color:#888"]{color:#9aa0a6}
+body.light #ig-dl-bar [style*="color:#cbd5e1"]{color:#475569!important}
+body.light .reel-expand [style*="color:#888"]{color:#9aa0a6!important}
+body.light .reel-caption-area [style*="color:#888"]{color:#9aa0a6!important}
 body.light #sfw-floating [style*="color:#9ca3af"],body.light #sfw-floating span{color:#4b5563}
 body.light #market-floating button{color:#4b5563}
 /* EDITEUR DE MONTAGE — il avait recu ses regles claires pour les SURFACES

@@ -3328,9 +3328,16 @@ try:
     check("theme clair : la legende du reel reste claire sur son fond noir",
           'body.light .reel-expand [style*="color:#888"]' in _srcTh,
           "la regle generale l assombrissait sur un panneau noir -> 1,92")
-    # CLAUDE.md : ici c est la SPECIFICITE qui doit l emporter, pas !important.
-    check("theme clair : la correction passe par la specificite, pas !important",
-          'body.light .reel-expand [style*="color:#888"]{color:#9aa0a6}' in _srcTh)
+    # Ces couleurs vivent dans un attribut style= : sans !important la regle ne
+    # bat meme pas le style inline. Verifie sur la page — une premiere version
+    # plus specifique mais SANS !important laissait le contraste a 1,48.
+    # La specificite, elle, ne sert qu a departager DEUX regles !important.
+    for _r in ('body.light #ig-dl-bar [style*="color:#cbd5e1"]',
+               'body.light .reel-expand [style*="color:#888"]'):
+        _mR = _reTh.search(_reTh.escape(_r) + r"\{[^}]*\}", _srcTh)
+        check("theme clair : « %s » porte !important" % _r.split("]")[0][11:],
+              bool(_mR) and "!important" in _mR.group(0),
+              "sans lui, le style inline gagne et rien ne change")
 except Exception as _eTh:
     check("theme clair : testable", False, repr(_eTh)[:160])
 
