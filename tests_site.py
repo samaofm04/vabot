@@ -3340,6 +3340,36 @@ try:
           "inutiles, le style inline gagne : %s" % " | ".join(_sansImp[:3]))
     check("theme clair : les pastilles flottantes SFW / marche sont lisibles",
           "body.light #market-floating button{color:#4b5563!important}" in _srcTh)
+    check("theme clair : les boutons de filtre banger sont lisibles",
+          "body.light #banger-toggle-btn,body.light #favbrute-toggle-btn{" in _srcTh,
+          "dore #f5c518 sur un fond repeint en blanc -> 1,63")
+
+    # Garde-fou general : une couleur de TEXTE posee en inline qui ne se lit pas
+    # sur du blanc doit avoir son remap clair. Sans cette regle, dix teintes
+    # avaient traverse le site sans etre vues (#22c55e sur 168 elements, #e6e6ea
+    # sur 11, #f59e0b sur 10...), simplement parce qu on ne relit jamais le CSS
+    # en se demandant de quelle couleur est le fond.
+    from collections import Counter as _CntTh
+    _usages = _CntTh(_reTh.findall(r"(?<!-)color:\s*(#[0-9a-fA-F]{6})", _srcTh))
+
+    def _contrasteBlancTh(h):
+        _r, _g, _b = int(h[1:3], 16), int(h[3:5], 16), int(h[5:7], 16)
+
+        def _f(v):
+            v /= 255.0
+            return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+        _L = 0.2126 * _f(_r) + 0.7152 * _f(_g) + 0.0722 * _f(_b)
+        return round(1.05 / (_L + 0.05), 2)
+
+    _aveugles = []
+    for _h, _n in _usages.items():
+        if _n < 3 or _contrasteBlancTh(_h) >= 2.6:
+            continue
+        if not _reTh.search(r"body\.light[^{}]*" + _h[1:] + r"[^{}]*\{", _srcTh, _reTh.I):
+            _aveugles.append("%s (%d usages, %s sur blanc)"
+                             % (_h, _n, _contrasteBlancTh(_h)))
+    check("theme clair : aucune couleur de texte illisible sur blanc sans remap",
+          not _aveugles, " | ".join(sorted(_aveugles)[:5]))
 except Exception as _eTh:
     check("theme clair : testable", False, repr(_eTh)[:160])
 

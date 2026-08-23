@@ -1187,6 +1187,41 @@ body.light .reel-expand [style*="color:#888"]{color:#9aa0a6!important}
 body.light .reel-caption-area [style*="color:#888"]{color:#9aa0a6!important}
 body.light #sfw-floating [style*="color:#9ca3af"],body.light #sfw-floating span,
 body.light #market-floating button{color:#4b5563!important}
+/* Les deux boutons de filtre banger (« ★ Reels Banger » et « ⭐ Bangers »)
+   portent un fond #1a1a1a que le theme clair repeint en blanc — mais leur
+   texte dore #f5c518 et leur bordure #3a3a3a restaient tels quels : dore
+   sur blanc, contraste mesure 1,63, et un filet presque noir. On garde le
+   dore comme SIGNE (c est l etoile), en le fonçant assez pour se lire. */
+body.light #banger-toggle-btn,body.light #favbrute-toggle-btn{
+  color:#8a6d0b!important;border-color:#e5e7eb!important}
+/* Dix teintes de TEXTE n avaient aucune contrepartie claire : elles ont
+   ete pensees sur du noir et se posaient telles quelles sur du blanc.
+   Mesure faite dans la page, pas devinee : 211 elements concernes, tous
+   sur fond CLAIR, aucun sur fond sombre — donc les foncer ne casse rien
+   a l inverse. On garde la teinte (vert = ok, ambre = attention) et on
+   descend a un ton qui passe 4,5 sur du blanc.
+   Deux elements sur 211 ne posent qu une border-color de cette teinte :
+   ils heritent du texte plus fonce, ce qui les rend plus lisibles aussi. */
+body.light [style*="color:#22c55e"]{color:#15803d!important}   /* vert, 168 usages */
+body.light [style*="color:#34d399"]{color:#047857!important}   /* emeraude, 4 usages */
+body.light [style*="color:#00d68f"]{color:#047857!important}   /* menthe, 5 usages */
+body.light [style*="color:#f59e0b"]{color:#b45309!important}   /* ambre, 10 usages */
+body.light [style*="color:#ffb800"]{color:#a16207!important}   /* or, 4 usages */
+body.light [style*="color:#fb923c"]{color:#c2410c!important}   /* orange, 2 usages */
+body.light [style*="color:#8b9cf7"]{color:#4f46e5!important}   /* bleuet, 2 usages */
+body.light [style*="color:#e6e6ea"]{color:#111827!important}   /* gris tres clair, 11 usages */
+body.light [style*="color:#e8eaf2"]{color:#111827!important}   /* gris tres clair, 3 usages */
+body.light [style*="color:#7dd3fc"]{color:#0369a1!important}   /* ciel, 0 usages */
+body.light [style*="color:#e879f9"]{color:#a21caf!important}   /* fuchsia, 3 usages */
+body.light [style*="color:#f5c518"]{color:#8a6d0b!important}   /* dore banger, 3 usages */
+/* Ces trois bleus ne sont poses par aucun element du chassis partage : ils
+   naissent en JS, donc impossible de mesurer leur fond depuis la page. Sur
+   les 216 elements colores que j ai pu mesurer, AUCUN n etait sur du
+   sombre — c est le pari retenu ici, a corriger si un fond noir apparait. */
+body.light [style*="color:#60a5fa"]{color:#1d4ed8!important}
+body.light [style*="color:#7aa2ff"]{color:#1d4ed8!important}
+body.light [style*="color:#93c5fd"]{color:#1d4ed8!important}
+body.light [style*="color:#fca5a5"]{color:#b91c1c!important}   /* rouge pale, 3 usages */
 /* EDITEUR DE MONTAGE — il avait recu ses regles claires pour les SURFACES
    (.ce-app, .ce-title, .ce-lib, .ce-center, .ce-right passent au blanc)
    mais pas pour ce qui est POSE dessus. Resultat en theme clair :
