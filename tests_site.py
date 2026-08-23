@@ -4433,6 +4433,35 @@ try:
     check("clics : la vue est persistante", _vCl.timeout is None)
     check("clics : un frein protege le quota GetMySocial",
           _crCl._REFRESH_ATTENTE_S >= 30, str(_crCl._REFRESH_ATTENTE_S))
+
+    # -- autocompletion du groupe --------------------------------------------
+    import asyncio as _aioCl
+    import time as _tCl
+    _crCl._GROUPES_CACHE.update({"ts": _tCl.time(), "noms": [
+        "Hybride", "HYBRIDE US", "Amelia JB", "Toky", "Emma"]
+        + ["G%02d" % i for i in range(30)]})
+
+    class _FauxCogCl:
+        pass
+
+    def _acCl(frappe):
+        return _aioCl.run(_crCl.ClickRecap._ac_groupe(_FauxCogCl(), None, frappe))
+
+    _rCl = [c.value for c in _acCl("hyb")]
+    check("clics : l autocompletion trouve sans respecter la casse",
+          _rCl == ["Hybride", "HYBRIDE US"], str(_rCl))
+    # Discord REFUSE une reponse de plus de 25 propositions : au-dela, la liste
+    # n apparait pas du tout et l utilisateur croit la commande cassee.
+    check("clics : l autocompletion ne depasse jamais 25 propositions",
+          len(_acCl("")) == 25, str(len(_acCl(""))))
+    check("clics : une frappe sans correspondance ne propose rien",
+          _acCl("zzzz") == [])
+    # Sans cookie GMS (ou board injoignable) elle doit rendre une liste vide,
+    # pas lever : une exception laisserait la commande sans autocompletion et
+    # sans explication.
+    _crCl._GROUPES_CACHE.update({"ts": 0, "noms": []})
+    check("clics : GMS injoignable -> liste vide, aucune exception",
+          _acCl("x") == [])
 except Exception as _eCl:
     check("clics : report testable", False, repr(_eCl)[:160])
 

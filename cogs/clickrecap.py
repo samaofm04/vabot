@@ -264,6 +264,47 @@ _REFRESH_DERNIER = {}
 _REFRESH_ATTENTE_S = 60
 
 
+#: Noms de groupes GMS, pour l'autocompletion. Un cache est OBLIGATOIRE :
+#: Discord coupe une autocompletion qui n'a pas repondu en 3 secondes, et
+#: list_team_groups interroge le board prive (cookie, ~1 s par workspace).
+#: Sans cache, la liste serait vide une fois sur deux.
+_GROUPES_CACHE = {"ts": 0.0, "noms": []}
+_GROUPES_TTL = 600
+
+
+async def _groupes_gms(budget_s: float = 2.0) -> list:
+    """Noms des groupes GMS de tous les workspaces connus. Cache 10 min.
+
+    Rend la liste PERIMEE plutot que rien si le rafraichissement depasse son
+    budget : une liste un peu vieille reste utile, une liste vide ne l'est
+    jamais.
+    """
+    maintenant = time.time()
+    if _GROUPES_CACHE["noms"] and (maintenant - _GROUPES_CACHE["ts"]) < _GROUPES_TTL:
+        return _GROUPES_CACHE["noms"]
+
+    async def _charger():
+        import gms
+        noms = set()
+        for tid in getattr(gms, "KNOWN_TEAMS", ()) or ():
+            r = await asyncio.to_thread(gms.list_team_groups, tid)
+            if isinstance(r, dict) and r.get("ok"):
+                for g in r.get("groups") or []:
+                    n = str(g.get("name") or g.get("title") or "").strip()
+                    if n:
+                        noms.add(n)
+        return sorted(noms, key=str.lower)
+
+    try:
+        noms = await asyncio.wait_for(_charger(), timeout=budget_s)
+        if noms:
+            _GROUPES_CACHE.update({"ts": maintenant, "noms": noms})
+            return noms
+    except Exception:
+        pass
+    return _GROUPES_CACHE["noms"]
+
+
 class ReportRefreshView(discord.ui.View):
     """Bouton « Rafraichir » sous le report de clics. Ouvert a tout le monde.
 
@@ -357,6 +398,28 @@ class ClickRecap(commands.Cog):
             self.daily_recap.cancel()
         if self.hourly_report.is_running():
             self.hourly_report.cancel()
+
+    async def _ac_groupe(self, interaction: discord.Interaction, current: str):
+        """Propose les groupes GMS a la frappe.
+
+        Discord plafonne a 25 propositions et coupe au-dela de 3 secondes :
+        _groupes_gms travaille sur cache et rend une liste perimee plutot que
+        rien. Une autocompletion vide passerait pour un bug alors que le
+        groupe existe.
+        """
+        try:
+            noms = await _groupes_gms()
+        except Exception:
+            noms = []
+        cur = (current or "").strip().lower()
+        if cur:
+            # Ceux qui COMMENCENT par la frappe d'abord : on cherche presque
+            # toujours un nom dont on connait le debut.
+            debut = [n for n in noms if n.lower().startswith(cur)]
+            dedans = [n for n in noms if cur in n.lower() and n not in debut]
+            noms = debut + dedans
+        return [app_commands.Choice(name=n[:100], value=n[:100])
+                for n in noms[:25]]
 
     async def _is_owner(self, uid):
         if self._owner_id is None:
@@ -1454,6 +1517,7 @@ class ClickRecap(commands.Cog):
         app_commands.Choice(name="🇺🇸 États-Unis", value="us"),
         app_commands.Choice(name="🌍 Tous pays", value="tout"),
     ])
+    @app_commands.autocomplete(groupe=_ac_groupe)
     async def setreportclick(self, interaction: discord.Interaction,
                              groupe: str = None, marche: str = None):
         if not await self._is_owner(interaction.user.id):
@@ -1604,6 +1668,7 @@ class ClickRecap(commands.Cog):
         description="[OWNER] Poste MAINTENANT un report complet des clics (snapshot)",
     )
     @app_commands.describe(groupe="Nom du groupe GMS (défaut : identité du serveur, ex: Hybride)")
+    @app_commands.autocomplete(groupe=_ac_groupe)
     async def reportclicknow(self, interaction: discord.Interaction, groupe: str = None):
         if not await self._is_owner(interaction.user.id):
             await interaction.response.send_message("Owner only.", ephemeral=True)
