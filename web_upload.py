@@ -49366,15 +49366,35 @@ def create_app():
         if not mypuls.api_configured():
             return jsonify({"ok": False,
                             "error": "Token API absent (Settings → MyPuls)"})
-        candidats = [
+        # Un seul chemin a la fois si on le demande : quand l'API limite, c'est
+        # la seule facon d'obtenir une reponse nette sur une adresse precise.
+        _un = (request.args.get("chemin") or "").strip()
+        candidats = [_un] if _un else [
             "tracking-links", "tracking_links", "trackinglinks", "links",
             "trackers", "tracking", "subscriptions", "subscribers", "subs",
             "stats/links", "stats/tracking-links", "team/links",
             "team/tracking-links", "creators/links",
         ]
-        out = {"ok": True, "trouves": [], "absents": [], "erreurs": []}
-        for chemin in candidats:
+        out = {"ok": True, "trouves": [], "absents": [], "erreurs": [],
+               "non_testes": []}
+        for i, chemin in enumerate(candidats):
+            if i:
+                # MyPuls limite le debit. Sans pause, la premiere reponse 429
+                # entraine des 403 sur tout le reste — et on conclut a tort que
+                # ces adresses n'existent pas. C'est exactement ce qui s'est
+                # produit au premier essai.
+                time.sleep(2.0)
             r = mypuls.api_get(chemin, {"per_page": 3})
+            _err = str(r.get("error") or "")
+            if not r.get("ok") and ("429" in _err or "rate_limited" in _err):
+                # Aveugle : on s'arrete au lieu de rapporter des refus qui n'en
+                # sont pas. Ce qui suit n'a PAS ete teste, et on le dit.
+                out["arrete_sur_limite"] = {
+                    "chemin": chemin, "erreur": _err[:160],
+                    "conseil": "Attends une minute, puis relance — ou teste une "
+                               "seule adresse : ?chemin=tracking-links"}
+                out["non_testes"] = candidats[i + 1:]
+                break
             if r.get("ok"):
                 d = r.get("data")
                 # On rapporte la FORME, pas le contenu : de quoi coder ensuite
@@ -49394,9 +49414,11 @@ def create_app():
                               if d and isinstance(d[0], dict) else None}
                 out["trouves"].append({"chemin": chemin, "apercu": apercu})
             else:
-                err = str(r.get("error") or "")
-                (out["absents"] if "introuvable" in err or "404" in err
-                 else out["erreurs"]).append({"chemin": chemin, "erreur": err[:120]})
+                # Un 403 apres un 429 ne prouve RIEN : c'est la limite de debit
+                # qui parle, pas l'absence de l'adresse. On les range a part.
+                cible = ("absents" if ("introuvable" in _err or "404" in _err)
+                         else "erreurs")
+                out[cible].append({"chemin": chemin, "erreur": _err[:120]})
         return jsonify(out)
 
     @app.route("/mypuls/api_probe")
