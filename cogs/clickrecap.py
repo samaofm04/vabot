@@ -252,22 +252,37 @@ def _personne_du_lien(nom) -> str:
     « ( BO7 ) 1 », « ( BO7 ) 2 »… Sans regroupement, ses lignes se retrouvent
     dispersees dans le tableau et on ne voit jamais ce qu'elle rapporte.
 
-    Le nom de la personne est entre parentheses ; le nombre qui suit est le
-    numero du telephone. Certains sont ecrits « (VA 4 Noum) », ou « VA 4 » est
-    encore un numero — on le retire, sinon les quatre telephones de Noum
-    passeraient pour quatre personnes differentes.
+    La personne est TOUT ce qui est entre parentheses ; seul le nombre qui SUIT
+    la parenthese est le numero du telephone.
+
+    Piege corrige le 23/08 : on retirait un prefixe « VA n » a l'interieur des
+    parentheses, en le prenant pour un numero. C'etait faux — « VA 1 Noum »,
+    « VA 2 Noum » et « VA 3 Noum » sont TROIS personnes differentes. Seuls
+    « (VA 1 Noum) 1 » et « (VA 1 Noum) 2 » sont les deux telephones d'une meme.
+
+    Les espaces sont normalises : le meme compte s'ecrit « ( BO7 ) 1 » ici et
+    « (BO7) 2 » la, ce qui en ferait deux personnes.
 
     Rend '' quand il n'y a pas de parentheses (« VA 1 », « TEMPLATE ») : mieux
     vaut ne pas regrouper que regrouper a tort. Dans certains workspaces, cinq
     liens s'appellent tous « VA 1 » sans etre la meme personne.
     """
-    n = str(nom or "").strip()
-    m = re.search(r"\((.*?)\)", n)
+    m = re.search(r"\((.*?)\)", str(nom or ""))
     if not m:
         return ""
-    dedans = m.group(1).strip()
-    dedans = re.sub(r"^VA\s*\d+\s*", "", dedans, flags=re.I).strip()
-    return dedans
+    return re.sub(r"\s+", " ", m.group(1)).strip()
+
+
+def _nom_propre(nom) -> str:
+    """Le nom d'un lien, espaces normalises : « ( BO7 )  1 » -> « (BO7) 1 ».
+
+    Les noms sont saisis a la main et l'espacement varie d'un lien a l'autre ;
+    en chasse fixe, ces espaces en trop se voient et decalent la lecture.
+    """
+    n = re.sub(r"\s+", " ", str(nom or "")).strip()
+    n = re.sub(r"\(\s+", "(", n)
+    n = re.sub(r"\s+\)", ")", n)
+    return n
 
 
 def _creneau_30(d: datetime.datetime) -> tuple:
@@ -794,6 +809,8 @@ class ClickRecap(commands.Cog):
                 for g in ordre:
                     membres = g["lignes"]
                     if g["nom"] and len(membres) > 1:
+                        if lignes:
+                            lignes.append("")     # separe les groupes a l'oeil
                         lignes.append(
                             f"{(g['nom'] + ' (' + str(len(membres)) + ')')[:17]:<18}"
                             f"{_c(_somme(membres, 0, indice)):>7}"
@@ -804,7 +821,7 @@ class ClickRecap(commands.Cog):
                     else:
                         prefixe = ""
                     for lab, p in sorted(membres, key=lambda x: str(x[0])):
-                        etiquette = (prefixe + str(lab))[:17]
+                        etiquette = (prefixe + _nom_propre(lab))[:17]
                         lignes.append(
                             f"{etiquette:<18}"
                             f"{_c(p[0][indice]):>7}{_c(p[1][indice]):>7}"
@@ -812,11 +829,13 @@ class ClickRecap(commands.Cog):
                 bloc, blocs = "", []
                 for ln in lignes:
                     if len(bloc) + len(ln) + 1 > 880:
-                        blocs.append(bloc)
+                        blocs.append(bloc.strip("\n"))
                         bloc = ""
+                    if not bloc and not ln:
+                        continue      # pas de ligne vide en tete de bloc
                     bloc += ("\n" if bloc else "") + ln
-                if bloc:
-                    blocs.append(bloc)
+                if bloc.strip("\n"):
+                    blocs.append(bloc.strip("\n"))
                 return blocs
 
             _tables = ([(f"{drapeau} {libelle} clicks per link", 0)]

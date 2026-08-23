@@ -4432,19 +4432,36 @@ try:
     # et le message epingle deviendrait un decor mort.
     check("clics : la vue est persistante", _vCl.timeout is None)
     # -- regroupement par personne -------------------------------------------
-    # Une meme personne tient plusieurs telephones : « ( BO7 ) 1 »,
-    # « ( BO7 ) 2 »… Sans regroupement ses lignes se dispersent dans le tableau.
+    # Une meme personne tient plusieurs telephones : « (BO7) 1 », « (BO7) 2 »…
+    # Sans regroupement ses lignes se dispersent dans le tableau.
+    #
+    # PIEGE : « VA n Nom » designe une PERSONNE, pas un numero. VA 1 Noum,
+    # VA 2 Noum et VA 3 Noum sont TROIS personnes ; seul le chiffre APRES la
+    # parenthese est le telephone. Une premiere version les fusionnait.
     for _nomCl, _attCl in (
             ("( Bryan ) 2", "Bryan"),
-            ("(PAMPAM)", "PAMPAM"),
+            ("(PAMPAM) 1", "PAMPAM"),
             ("( BO7 ) 4", "BO7"),
-            ("(VA 4 Noum) 2", "Noum"),       # « VA 4 » est un numero, pas un nom
-            ("( VA 1 Noum ) 1", "Noum"),
+            ("( VA 1 Noum ) 1", "VA 1 Noum"),
+            ("(VA 1 Noum) 2", "VA 1 Noum"),
+            ("(VA 2 Noum) 1", "VA 2 Noum"),
+            ("(VA 3 Noum) 1", "VA 3 Noum"),
             ("VA 1", ""),                    # sans parentheses : PAS de groupe
             ("TEMPLATE", "")):
         check("clics : personne de %r -> %r" % (_nomCl, _attCl),
               _crCl._personne_du_lien(_nomCl) == _attCl,
               repr(_crCl._personne_du_lien(_nomCl)))
+
+    # Les noms sont saisis a la main : le meme compte s ecrit « ( BO7 ) 1 » ici
+    # et « (BO7) 1 » la. Sans normalisation, deux personnes au lieu d une.
+    for _nomCl, _attCl in (("( BO7 )  1", "(BO7) 1"),
+                           ("(Bryan) 2", "(Bryan) 2"),
+                           ("( VA 1 Noum ) 1", "(VA 1 Noum) 1")):
+        check("clics : nom normalise %r -> %r" % (_nomCl, _attCl),
+              _crCl._nom_propre(_nomCl) == _attCl,
+              repr(_crCl._nom_propre(_nomCl)))
+
+
 
     check("clics : un frein protege le quota GetMySocial",
           _crCl._REFRESH_ATTENTE_S >= 30, str(_crCl._REFRESH_ATTENTE_S))
