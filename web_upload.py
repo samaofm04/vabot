@@ -51052,6 +51052,26 @@ def create_app():
                 out["pseudos_proches"] = sorted(set(near))[:12]
         return jsonify(out)
 
+    def _pourquoi_rename_refuse(jb, identity, old_name, new_name):
+        """Dit LAQUELLE des deux raisons a fait echouer le renommage.
+
+        « Conflit de nom ou VA introuvable » ne disait pas laquelle : devant
+        sept fois le meme message, on ne sait pas s'il faut changer de nom ou
+        chercher pourquoi la fiche est invisible.
+        """
+        try:
+            noms = {str(n).strip().lower()
+                    for n in jb.list_va_names_for_identity(identity)}
+        except Exception:
+            return "Renommage refusé"
+        n = (new_name or "").strip().lower()
+        o = (old_name or "").strip().lower()
+        if n and n != o and n in noms:
+            return f"« {new_name} » existe déjà pour cette identité"
+        if o not in noms:
+            return f"« {old_name} » est introuvable dans cette identité"
+        return "Renommage refusé"
+
     @app.route("/jailbreak/update_va", methods=["POST"])
     def jailbreak_update_va():
         if not is_auth():
@@ -51076,6 +51096,21 @@ def create_app():
             kwargs["new_name"] = new_name
         kwargs["discord_username"] = discord_username
         ok = jb.update_va(identity, old_name, **kwargs)
+        # Push Sheet force, comme le fait deja la suppression juste en dessous.
+        # Sans lui, le classeur garde l'ANCIEN nom jusqu'au push suivant, qui
+        # est asynchrone, non force, et peut echouer sur quota ou mourir avec
+        # un redemarrage. Le poller passe toutes les 2 min : il lisait donc
+        # l'ancien nom et annulait le renommage. La pierre tombale couvre cette
+        # fenetre, ce push la referme a la source.
+        if ok and new_name:
+            try:
+                import sheets_sync, threading as _th_rn
+                _snap_rn = jb._load()
+                _th_rn.Thread(
+                    target=lambda: sheets_sync.push_all(_snap_rn, force=True),
+                    daemon=True, name="jb-renomme-sheet").start()
+            except Exception:
+                pass
         # AJAX : réponse instantanée (évite de re-rendre toute la page Jailbreak,
         # qui régénère des centaines de comptes -> c'était ça, la lenteur).
         if request.form.get("ajax"):
@@ -51096,7 +51131,8 @@ def create_app():
             return jsonify({"ok": bool(ok), "name": new_name or old_name,
                             "discord": discord_username,
                             "avatar": avatar, "discord_found": found,
-                            "error": "" if ok else "Conflit de nom ou VA introuvable"})
+                            "error": "" if ok else _pourquoi_rename_refuse(
+                                jb, identity, old_name, new_name)})
         if ok:
             return _success(f"✓ VA <b>{old_name}</b> mise à jour", tab="jailbreak")
         return _error("✕ Mise à jour échouée (conflit de nom ou VA introuvable)", tab="jailbreak")

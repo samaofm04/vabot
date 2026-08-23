@@ -683,7 +683,21 @@ def update_va(identity: str, old_name: str, new_name: str = None,
             target = v
             break
     if target is None:
-        return False
+        # Fiche IMPLICITE : list_vas_for_identity fabrique une fiche pour tout
+        # nom porte par un compte mais absent de vas[] (voir plus haut). Elle
+        # s'affiche donc dans la barre laterale, avec ses comptes et son
+        # compteur — mais update_va ne la trouvait pas et repondait « VA
+        # introuvable ». Le proprietaire voyait une fiche bien reelle refuser
+        # d'etre renommee, sept fois de suite.
+        #
+        # On la materialise avant de la modifier : c'est exactement ce que
+        # reorder_vas fait deja pour les memes fiches implicites.
+        if any((a.get("va") or "").strip().lower() == old_name.lower()
+               for a in (entry.get("accounts") or [])):
+            target = {"name": old_name, "discord_username": ""}
+            entry["vas"].append(target)
+        else:
+            return False
     new_name_clean = None
     if new_name is not None:
         new_name_clean = (new_name or "").strip()[:60]

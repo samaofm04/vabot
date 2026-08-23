@@ -92,6 +92,28 @@ check("rename VA reflété dans la liste", "Alpha2" in vanames(), vanames())
 check("rename vers un nom existant refusé", jb.update_va(IDENT, "Alpha2", new_name="Bêta") is False)
 check("VA introuvable -> False", jb.update_va(IDENT, "Fantome", new_name="X") is False)
 
+# Fiche IMPLICITE : list_vas_for_identity fabrique une fiche pour tout nom
+# porte par un compte mais absent de vas[]. Elle s affiche donc dans la barre
+# laterale, avec ses comptes — mais update_va ne la trouvait pas et repondait
+# « VA introuvable ». Le proprietaire voyait une fiche bien reelle refuser
+# d etre renommee.
+_IMP = "_tst_implicite_rename"
+_d = jb._load(); _d.pop(_IMP, None); jb._save(_d)
+jb.add_account(_IMP, "compte_imp", va="Abdoul")
+_d = jb._load(); _d[_IMP]["vas"] = []          # on la rend implicite
+jb._save(_d)
+check("implicite : la fiche s affiche bien alors qu elle n est pas dans vas[]",
+      [v["name"] for v in jb.list_vas_for_identity(_IMP)] == ["Abdoul"]
+      and jb._load()[_IMP]["vas"] == [])
+check("implicite : elle peut etre renommee",
+      jb.update_va(_IMP, "Abdoul", new_name="AbdoulX1") is True)
+check("implicite : ses comptes suivent le nouveau nom",
+      [a["va"] for a in jb._load()[_IMP]["accounts"]] == ["AbdoulX1"],
+      str(jb._load()[_IMP]["accounts"]))
+check("implicite : un nom qui n existe vraiment nulle part reste refuse",
+      jb.update_va(_IMP, "PersonneIci", new_name="Z") is False)
+_d = jb._load(); _d.pop(_IMP, None); jb._save(_d)
+
 # Pierre tombale sur l ANCIEN nom. C est ce qui empeche la synchro Sheets de
 # ressusciter la fiche renommee : le Sheet porte encore l ancien nom tant que
 # le push suivant n a pas eu lieu, et le poller (toutes les 2 min) recreait
@@ -122,6 +144,36 @@ check("synchro : la resurrection d un VA respecte la pierre tombale",
       bool(_blocSS) and "skipped_tomb.add" in _blocSS
       and "tomb_clear" not in _blocSS,
       _blocSS[:120])
+
+# Le semeur du demarrage : il reconnaissait un VA a son NOM. Renomme, le VA
+# semblait disparu et etait recree sous son ancien nom AVEC son pseudo — une
+# fiche de plus a chaque redemarrage du bot. Pire, add_va levait au passage la
+# pierre tombale qui protege de la synchro Sheets.
+import seed_jailbreak as _sj
+_savSeeds = _sj.VAS_SEEDS
+try:
+    _sj.VAS_SEEDS = {IDENT: [{"name": "Semé", "discord_username": "seme_1234"}]}
+    _r1 = _sj.seed_vas()
+    check("seed : cree le VA absent sur une installation neuve",
+          _r1[IDENT].get("Semé") == "added", str(_r1))
+    # On le renomme, comme le proprietaire le fait.
+    jb.update_va(IDENT, "Semé", new_name="Semé X1")
+    _r2 = _sj.seed_vas()
+    check("seed : un VA RENOMME n est pas recree (reconnu a son pseudo)",
+          _r2[IDENT].get("Semé") == "renomme", str(_r2))
+    check("seed : la pierre tombale du renommage a survecu au seed",
+          f"{IDENT}|semé" in (jb.tombstones().get("vas") or {}),
+          str(list((jb.tombstones().get("vas") or {}))[:6]))
+    check("seed : une seule fiche subsiste, pas deux",
+          len([n for n in vanames() if n.lower().startswith("semé")]) == 1,
+          str(vanames()))
+    # Sans pseudo, la pierre tombale reste le dernier rempart.
+    _sj.VAS_SEEDS = {IDENT: [{"name": "Semé", "discord_username": ""}]}
+    _r3 = _sj.seed_vas()
+    check("seed : sans pseudo, la pierre tombale bloque quand meme",
+          _r3[IDENT].get("Semé") == "pierre_tombale", str(_r3))
+finally:
+    _sj.VAS_SEEDS = _savSeeds
 
 print("\n", "=" * 70, "\n3) Bulk + dédoublonnage\n", "=" * 70)
 res = jb.bulk_add_accounts(IDENT, ["b1", "b2", "acc_two", " b3 ", "@b4", ""], va="Bêta")

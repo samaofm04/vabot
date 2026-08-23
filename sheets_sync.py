@@ -1294,8 +1294,20 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False,
                     kept.append(a)
                     continue
                 moved_to = other_tabs[0]
+                _cible = va_meta.get(moved_to, (moved_to, None))[0]
+                # Une cible portant une pierre tombale a ete supprimee ou
+                # RENOMMEE sur le site il y a moins de 15 min. L'onglet qui la
+                # porte encore est un vestige, pas un deplacement voulu : le
+                # suivre renverrait le compte sur l'ancien nom et annulerait le
+                # renommage. C'est ce qui faisait « revenir » les fiches malgre
+                # la tombe posee par update_va — elle ne protegeait que la
+                # recreation de la fiche, pas la reaffectation des comptes.
+                if f"{il}|{str(_cible).strip().lower()}" in _tv:
+                    conflits += 1
+                    kept.append(a)
+                    continue
                 # Avant, le compte etait supprime (mot de passe et 2FA perdus).
-                a["va"] = va_meta.get(moved_to, (moved_to, None))[0]
+                a["va"] = _cible
                 moved_users.add(u)   # le 'va' de l onglet identite (perime) ne doit PAS l ecraser
                 updated += 1
                 kept.append(a)
@@ -1363,6 +1375,17 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False,
                         v = (r.get(f) or "").strip()
                         cur = acct.get(f) or ""
                         if cur != v:
+                            # Le VA vise porte une pierre tombale : il a ete
+                            # supprime ou RENOMME sur le site il y a moins de
+                            # 15 min, et la cellule du Sheet porte encore
+                            # l'ancien nom. _valeur_perimee ne suffit pas ici :
+                            # elle compare a une photo prise au DEBUT du cycle
+                            # de lecture, donc un renommage anterieur au cycle
+                            # y figure deja et n'est pas juge perime. C'est
+                            # par ce trou que le renommage etait annule.
+                            if f == "va" and f"{il}|{v.strip().lower()}" in _tv:
+                                conflits += 1
+                                continue
                             if _valeur_perimee(photo_id, u.lower(), f, cur):
                                 # Corrige sur le site pendant la lecture reseau :
                                 # la cellule lue est perimee, le site fait foi.
