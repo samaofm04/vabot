@@ -12,6 +12,16 @@ import time
 import subprocess
 from pathlib import Path
 from html import escape as html_escape
+
+# Un print de diagnostic ne doit JAMAIS interrompre une requete. La console
+# Windows est en cp1252 : une fleche « -> » ou un emoji dans un message de
+# journal levait UnicodeEncodeError au milieu du traitement, et le repli
+# avalait l exception -- la page se rendait alors vide, sans rien dire.
+for _flux in (sys.stdout, sys.stderr):
+    try:
+        _flux.reconfigure(errors="replace")
+    except Exception:
+        pass          # flux redirige ou deja ferme : rien a durcir
 import safe_json
 
 # Instant de demarrage du processus : /version s'en sert pour dire

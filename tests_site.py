@@ -4076,6 +4076,25 @@ except Exception as _eF3:
 
 print()
 print("=" * 70)
+print("JOURNAL : un print ne doit pas pouvoir interrompre une requete")
+print("=" * 70)
+try:
+    import web_upload as _wEnc
+    check("journal : la sortie ne peut plus lever UnicodeEncodeError",
+          getattr(sys.stdout, "errors", "") == "replace",
+          getattr(sys.stdout, "errors", None))
+    # Le cas reel : facture_web imprimait « -> » (fleche U+2192), absent de
+    # cp1252. L exception remontait au milieu du calcul, le repli l avalait,
+    # et la page se rendait vide sans le moindre message.
+    import io
+    _tampon = io.TextIOWrapper(io.BytesIO(), encoding="cp1252", errors="replace")
+    _tampon.write("[facture] repli scraping → MyPuls ⚠")
+    check("journal : une fleche ou un emoji passe sans exception", True)
+except Exception as _eEnc:
+    check("journal : testable", False, repr(_eEnc)[:160])
+
+print()
+print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
     print("ECHECS :")
