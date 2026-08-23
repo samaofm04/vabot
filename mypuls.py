@@ -251,14 +251,36 @@ def api_creator_stats(creator_id, date_from: str = "", date_to: str = "") -> dic
     return api_get(f"creators/{creator_id}/stats", p)
 
 
+_API_DAY_CACHE: Dict[str, Any] = {}
+_API_DAY_TTL = 300  # 5 min, comme les autres caches API
+
+
 def api_revenue_by_day(creator_id, date_from: str = "", date_to: str = "") -> dict:
-    """Revenus journaliers d'un creator (GET /creators/{id}/revenue-by-day)."""
+    """Revenus journaliers d'un creator (GET /creators/{id}/revenue-by-day).
+
+    Cache 5 min PAR CREATRICE, succes uniquement — meme regle que
+    api_creator_stats_cached. Sans lui, api_revenue_series ne pouvait etre
+    econome qu'en mettant en cache la SERIE AGREGEE : une seule creatrice en
+    429 et la courbe amputee etait servie 5 minutes comme si elle etait
+    complete. Avec ce cache, refuser une serie incomplete ne coute qu'un
+    rappel des creatrices qui ont echoue, pas de toutes.
+    """
+    import time as _t
+    key = f"{creator_id}|{date_from}|{date_to}"
+    hit = _API_DAY_CACHE.get(key)
+    if hit and (_t.time() - hit[0]) < _API_DAY_TTL:
+        return hit[1]
     p = {}
     if date_from:
         p["from"] = date_from
     if date_to:
         p["to"] = date_to
-    return api_get(f"creators/{creator_id}/revenue-by-day", p)
+    r = api_get(f"creators/{creator_id}/revenue-by-day", p)
+    if r.get("ok"):
+        _API_DAY_CACHE[key] = (_t.time(), r)
+        if len(_API_DAY_CACHE) > 200:
+            _API_DAY_CACHE.clear()
+    return r
 
 
 _API_OVERVIEW_CACHE: Dict[str, Any] = {}
@@ -297,6 +319,8 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
     types_of = dict(types)
     types_mym = dict(types)
     per_creator, errors, stale = [], [], []
+    # Ce qu'aucune carte ne reconnait : compte a part, jamais perdu.
+    hors_type = {"montant": 0.0, "libelles": []}
     _MAP = {  # libellés API -> cartes du dashboard
         "message": "Messages", "post": "Posts", "tip": "Tips",
         "subscription": "Subscriptions", "sub": "Subscriptions",
@@ -324,10 +348,20 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
             seg["mym"] += total_usd
         for k, v in (rev.get("by_type") or {}).items():
             bucket = _MAP.get(str(k).strip().lower())
-            if bucket:
-                _amt = float(v or 0) * rate
-                types[bucket] += _amt
-                (types_of if c.get("platform") == "onlyfans" else types_mym)[bucket] += _amt
+            _amt = float(v or 0) * rate
+            if not bucket:
+                # Un libelle que _MAP ne connait pas etait jete : le montant
+                # restait dans total_usd mais dans AUCUNE carte, si bien que
+                # la somme des cartes ne recoupait plus le total et que
+                # personne ne pouvait dire d'ou venait l'ecart. C'est
+                # exactement ainsi que « Media prive » avait disparu du cote
+                # scraping. On le garde, avec son libelle en clair.
+                hors_type["montant"] += _amt
+                if str(k) not in hors_type["libelles"] and len(hors_type["libelles"]) < 12:
+                    hors_type["libelles"].append(str(k))
+                continue
+            types[bucket] += _amt
+            (types_of if c.get("platform") == "onlyfans" else types_mym)[bucket] += _amt
         if total_usd:
             per_creator.append({"pseudo": c.get("pseudo"), "usd": round(total_usd, 2),
                                 "platform": c.get("platform")})
@@ -337,6 +371,9 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
            "types": {k: round(v, 2) for k, v in types.items()},
            "types_of": {k: round(v, 2) for k, v in types_of.items()},
            "types_mym": {k: round(v, 2) for k, v in types_mym.items()},
+           # Tant que "montant" vaut 0, la somme des cartes recoupe total_usd.
+           "types_hors": {"montant": round(hors_type["montant"], 2),
+                          "libelles": hors_type["libelles"]},
            "creators": per_creator, "errors": errors, "stale": stale}
     # un agrégat AMPUTÉ (créatrice en 429/timeout) n'est jamais mis en cache :
     # sinon un total partiel s'affichait comme complet pendant 5 minutes.
@@ -411,8 +448,14 @@ def api_revenue_series(date_from: str, date_to: str, eur_usd: float = 1.14) -> d
            "errors": errors}
     if not days:
         out["error"] = "; ".join(errors) or "Aucune donnée"
-    if out["ok"]:                       # jamais d'échec en cache : un raté ne
-        _API_SERIES_CACHE[key] = (_t.time(), out)   # doit pas coller 5 min
+    # Jamais d'échec en cache — et jamais de série AMPUTÉE non plus : une
+    # créatrice en 429/timeout laissait `days` non vide, donc ok=True, donc la
+    # courbe partielle était servie 5 minutes comme si elle était complète.
+    # api_overview refuse déjà ce cas pour la même raison (« un total partiel
+    # s'affichait comme complet ») ; c'était un oubli, pas un compromis.
+    # Sans cache, l'appel suivant retente les créatrices manquantes.
+    if out["ok"] and not errors:
+        _API_SERIES_CACHE[key] = (_t.time(), out)
         if len(_API_SERIES_CACHE) > 40:
             _API_SERIES_CACHE.clear()
     return out
@@ -903,15 +946,65 @@ def _ca_by_currency(transactions) -> dict:
 
 
 def _parse_amount(s: str) -> float:
-    """Parse '18,32' ou '18,32 EUR' -> 18.32"""
+    """Parse '18,32', '18,32 EUR', '1.234,56', '1,234.56', '18.32 USD' -> float.
+
+    Ce qui ne se lit pas vaut 0.0 — et un 0.0 sur une colonne de montant ne
+    se voit pas : la vente est simplement absente du total. Mesure sur
+    l'ancienne version, qui remplacait toutes les virgules par des points sans
+    regarder :
+        '1.234,56'   -> 0.0   (millier a la francaise)
+        '1,234.56'   -> 0.0   (millier a l'anglaise)
+        '18.32 USD'  -> 0.0   (seuls « EUR » et « € » etaient retires)
+        '$1,234.56'  -> 0.0
+    Une seule ligne « CA Total » a 1 234,56 lue comme 0 suffit a faire
+    disparaitre le chatteur du classement et sa part du chiffre.
+
+    Regle : le DERNIER separateur rencontre est le separateur decimal, l'autre
+    marque les milliers. Quand il n'y en a qu'un, on garde le comportement
+    d'avant (decimal) — '1,234' vaut donc toujours 1.234, aucune lecture
+    existante ne change.
+    """
     if not s:
         return 0.0
-    s = s.replace("EUR", "").replace("€", "").strip()
-    s = s.replace(" ", "").replace(",", ".")
+    brut = str(s)
+    # Une date ou une heure tombee dans une colonne de montant (decalage de
+    # colonnes chez MyPuls) doit rester a zero : sans ce refus, « 05/08/2026 »
+    # devient 5 082 026 une fois les separateurs otes, et un chiffre absurde
+    # est bien pire qu'un zero.
+    if "/" in brut or ":" in brut:
+        return 0.0
+    # Tout ce qui n'est pas un chiffre, un signe ou un separateur s'en va :
+    # symboles et codes devise compris, dans les deux sens ('$18', '18 USD').
+    t = re.sub(r"[^0-9,.\-+]", "", brut)
+    if not t:
+        return 0.0
+    dernier_p, dernier_v = t.rfind("."), t.rfind(",")
+    if dernier_p >= 0 and dernier_v >= 0:
+        milliers, decimal = (",", ".") if dernier_p > dernier_v else (".", ",")
+        t = t.replace(milliers, "").replace(decimal, ".")
+    else:
+        t = t.replace(",", ".")
+    # Forme finale verifiee AVANT float() : '12.34.56' reste illisible, comme
+    # avant, plutot que d'etre devine.
+    if not re.fullmatch(r"[-+]?\d*\.?\d+", t):
+        return 0.0
     try:
-        return float(s)
+        return float(t)
     except Exception:
         return 0.0
+
+
+def _montant_illisible(brut: str) -> bool:
+    """Vrai quand la case porte quelque chose et que rien n'a pu en etre lu.
+
+    Sert a COMPTER ces cases : un montant qui ne se lit pas vaut 0.0, et un
+    0.0 se confond avec une vente a zero euro. Sans ce compteur, le seul
+    symptome est un CA trop bas que personne ne sait expliquer.
+    """
+    t = (brut or "").strip()
+    if not t:
+        return False
+    return _parse_amount(t) == 0.0 and re.search(r"[1-9]", t) is not None
 
 
 def _extract_tables(html: str) -> List[Tuple[List[str], List[List[str]]]]:
@@ -1010,11 +1103,17 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
     # Avant, elles disparaissaient en silence : une vente ecartee ici
     # n'apparaissait plus nulle part, et rien ne le signalait.
     lignes_illisibles = 0
+    # Cases « Montant net » qui portent un chiffre mais qu'on n'a pas su lire :
+    # elles valent 0.0, ce qui se confond avec une vente a zero. On les compte,
+    # sinon le seul symptome est un CA trop bas que rien n'explique.
+    montants_illisibles = 0
     for row in tables[0][1]:
         if len(row) < 7:
             if any((c or "").strip() for c in row):
                 lignes_illisibles += 1
             continue
+        if _montant_illisible(row[3]):
+            montants_illisibles += 1
         transactions.append({
             "creator": row[0],
             "chatter": row[1],
@@ -1185,6 +1284,7 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
     _sans_nom = [t for t in transactions if not (t.get("chatter") or "").strip()]
     diagnostic = {
         "lignes_illisibles": lignes_illisibles,
+        "montants_illisibles": montants_illisibles,
         "chatters_illisibles": chatters_illisibles,
         "ventes_lues": len(transactions),
         "ventes_sans_chatteur": len(_sans_nom),

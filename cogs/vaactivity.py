@@ -208,12 +208,16 @@ class VAActivity(commands.Cog):
     async def _backfill_history(self, days=WINDOW):
         """Importe l'activité réelle depuis l'historique des messages (va-/général-)
         des `days` derniers jours. Fusion par MAX/jour (re-scan idempotent, ne double
-        pas, garde les clics live). Retourne (messages, nb_users, nb_salons)."""
+        pas, garde les clics live).
+        Retourne (messages, nb_users, nb_salons, nb_salons_interdits) : les salons
+        que le bot n'a pas le droit de lire etaient sautes SANS TRACE, et un
+        scan qui ne ramenait rien passait pour un scan normal."""
         cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days + 1)
         fresh = {}
         fresh_last = {}   # {uid: dernier horodatage Paris ISO trouvé dans l'historique}
         n_msgs = 0
         chans = 0
+        interdits = 0   # salons refuses (permission « Lire l'historique »)
         for guild in self.bot.guilds:
             for ch in guild.text_channels:
                 if not self._is_va_channel(ch):
@@ -237,7 +241,7 @@ class VAActivity(commands.Cog):
                             fresh_last[uid] = iso
                         n_msgs += 1
                 except discord.Forbidden:
-                    pass
+                    interdits += 1
                 except Exception as e:
                     print(f"[vaactivity] scan #{getattr(ch,'name','?')} : {e}")
                 await asyncio.sleep(0.25)
@@ -252,7 +256,9 @@ class VAActivity(commands.Cog):
             if iso > ex.get("_last", ""):
                 ex["_last"] = iso
         _save(ACT_FILE, self._act)
-        return n_msgs, len(fresh), chans
+        if interdits:
+            print(f"[vaactivity] {interdits} salon(s) illisibles (permission) — activite ignoree")
+        return n_msgs, len(fresh), chans, interdits
 
     # ---------- Auto-renommage ----------
     async def _apply_all(self):
@@ -359,12 +365,17 @@ class VAActivity(commands.Cog):
         await interaction.response.defer(ephemeral=True, thinking=True)
         if actif:
             # Importe d'abord l'activité réelle depuis l'historique (sinon tout le monde est 🔴)
-            n_msgs, n_users, n_chan = await self._backfill_history()
+            n_msgs, n_users, n_chan, n_interdits = await self._backfill_history()
             st = await self._apply_all()
             msg = (f"✅ Auto-renommage **activé** (rafraîchi en continu, ~30 min).\n"
                    f"• Historique scanné : **{n_msgs}** messages de **{n_users}** membres ({n_chan} salons)\n"
                    f"• Salons `va-…` détectés : **{st['found']}**\n"
                    f"• Renommés : **{st['renamed']}** · déjà à jour : {st['skipped']}\n")
+            if n_interdits:
+                # Un salon illisible ne remonte aucune activite : le VA passe
+                # 🔴 alors qu'il travaille. On le dit au lieu de le sauter.
+                msg += (f"⚠️ **{n_interdits} salon(s) illisibles** (permission « Lire l'historique ») "
+                        f"— leur activité n'est PAS comptée.\n")
             if st["found"] == 0:
                 msg += "\n⚠️ **Aucun salon `va-…` détecté.** Vérifie que les salons s'appellent bien `va-<pseudo>` et que le bot peut les voir."
             elif st["forbidden"] > 0 and st["renamed"] == 0:
@@ -385,9 +396,13 @@ class VAActivity(commands.Cog):
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             jours = max(1, min(30, int(jours)))
-            n_msgs, n_users, n_chan = await self._backfill_history(days=jours)
+            n_msgs, n_users, n_chan, n_interdits = await self._backfill_history(days=jours)
+            alerte = ""
+            if n_interdits:
+                alerte = (f"\n⚠️ **{n_interdits} salon(s) illisibles** (permission) : leur activité "
+                          f"n'est PAS comptée — ces VAs paraîtront inactifs.")
             await interaction.followup.send(
-                f"✅ Historique importé ({jours}j) : **{n_msgs}** messages de **{n_users}** membres sur **{n_chan}** salons.\n"
+                f"✅ Historique importé ({jours}j) : **{n_msgs}** messages de **{n_users}** membres sur **{n_chan}** salons.{alerte}\n"
                 "Fais **/vascore** pour voir les scores, puis **/vascore_auto actif:true** pour appliquer les ronds.",
                 ephemeral=True,
             )

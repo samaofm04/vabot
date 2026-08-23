@@ -59,6 +59,26 @@ def quinzaine(date_iso: str) -> str:
     return "%s (%s)" % (t[:7], "1-15" if jour <= 15 else "16-fin")
 
 
+QUINZAINE_INCONNUE = "?? DATE ILLISIBLE — a rattacher a la main"
+
+# Une date reellement au format ISO, seule forme sur laquelle on ose calculer.
+_EST_ISO = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _libelle_colonne_quinzaine(cle: str) -> str:
+    """Libelle d'une colonne de quinzaine, cle vide comprise.
+
+    Une date que MyPuls ecrit dans un format non prevu donne une quinzaine
+    VIDE. Ces ventes etaient purement et simplement ecartees des tableaux de
+    paie : mesure sur trois ventes au registre (100 EUR datee, 999 EUR
+    « hier soir », 500 USD sans date), une seule arrivait dans la feuille de
+    paie — 999 EUR et 500 USD disparaissaient sans une ligne de trace, et la
+    colonne « Ventes » annoncait 1. Elles restent donc, sous une etiquette
+    qu'on ne peut pas confondre avec une quinzaine reelle.
+    """
+    return libelle_quinzaine(cle) if cle else QUINZAINE_INCONNUE
+
+
 def _quand(brut: str):
     """Coupe la date MyPuls en (date, heure). Formats rencontres :
     « 16/08/2026 14:32 », « 2026-08-16 14:32:05 », ou une date seule."""
@@ -139,7 +159,10 @@ def lignes_affichables(lignes) -> list:
     d'elle-meme dans l'ordre du calendrier ; ce n'est qu'au moment d'ecrire
     dans le classeur qu'on la remplace par « 1 au 15 aout 2026 ».
     """
-    return [r[:2] + [libelle_quinzaine(r[2])] + r[3:] for r in lignes]
+    # Cle vide = date que MyPuls a ecrite dans un format non prevu. Une case
+    # BLANCHE ne se remarque pas ; l'etiquette, si — et c'est la meme dans
+    # tous les onglets, donc les deux vues se rejoignent.
+    return [r[:2] + [_libelle_colonne_quinzaine(r[2])] + r[3:] for r in lignes]
 
 
 def recap_par_chatteur(lignes) -> list:
@@ -162,8 +185,9 @@ def recap_par_quinzaine(lignes) -> tuple:
     """Total par chatteur ET par quinzaine : c'est ce qui sert a payer."""
     par = defaultdict(lambda: defaultdict(float))
     for r in lignes:
-        if r[2]:
-            par[r[3]][r[2]] += r[6]
+        # Pas de « if r[2] » : une vente sans quinzaine lisible reste comptee,
+        # dans sa propre colonne (cf. _libelle_colonne_quinzaine).
+        par[r[3]][r[2]] += r[6]
     quinz = sorted({q for v in par.values() for q in v})
     out = []
     for chatteur in sorted(par, key=lambda c: -sum(par[c].values())):
@@ -171,7 +195,8 @@ def recap_par_quinzaine(lignes) -> tuple:
                    + [round(sum(par[chatteur].values()), 2)])
     # Le tri s'est fait sur la cle technique (chronologique) ; l'en-tete, lui,
     # s'affiche en clair.
-    return (["Chatteur"] + [libelle_quinzaine(q) for q in quinz] + ["Total"]), out
+    return (["Chatteur"] + [_libelle_colonne_quinzaine(q) for q in quinz]
+            + ["Total"]), out
 
 
 def fiches_chatteurs(lignes) -> list:
@@ -246,8 +271,10 @@ def paie_quinzaine(lignes, commissions=None, eur_usd: float = 1.14) -> tuple:
 
     par = defaultdict(list)
     for r in lignes:
-        if r[2]:
-            par[(r[3], r[2])].append(r)
+        # Pas de « if r[2] » : une date illisible mettait la vente a la
+        # poubelle sans un mot. Elle atterrit maintenant dans une ligne
+        # « ?? DATE ILLISIBLE » — visible, chiffree, en tete de tableau.
+        par[(r[3], r[2])].append(r)
     out = []
     for (chatteur, quinz) in sorted(par, key=lambda k: (k[1], -sum(x[6] for x in par[k]))):
         ventes = par[(chatteur, quinz)]
@@ -264,6 +291,13 @@ def paie_quinzaine(lignes, commissions=None, eur_usd: float = 1.14) -> tuple:
         # visible dans la ligne au lieu de manquer au total.
         autres_types = ca - ppv - tips
         pct = float(commissions.get(chatteur, commissions.get("_defaut_", 0)) or 0)
+        if chatteur == NON_ATTRIBUE:
+            # « Indetermine (Creatrice) » est un libelle, pas quelqu'un
+            # (CLAUDE.md : ne jamais le traiter comme un chatteur, ni le
+            # payer). Le CA reste visible, la commission tombe a zero — sans
+            # ce garde-fou, une commission « _defaut_ » remuneraient des
+            # ventes qui n'appartiennent a personne.
+            pct = 0.0
         a_payer = round(ca * pct / 100.0, 2)
         # Les ventes s'etalent vers la droite, UNE PAR CASE, de la plus
         # recente a la plus ancienne. Entassees dans une seule cellule elles
@@ -271,7 +305,7 @@ def paie_quinzaine(lignes, commissions=None, eur_usd: float = 1.14) -> tuple:
         detail = ["%s %.2f%s (%s)" % (v[0][5:], v[6],
                                       "€" if v[7] == "EUR" else "$", v[4])
                   for v in sorted(ventes, key=lambda x: (x[0], x[1]), reverse=True)]
-        out.append([libelle_quinzaine(quinz), chatteur, len(ventes),
+        out.append([_libelle_colonne_quinzaine(quinz), chatteur, len(ventes),
                     round(ca, 2), round(ppv, 2), round(tips, 2),
                     round(autres_types, 2),
                     # Une devise exotique est comptee avec les euros, comme
@@ -339,14 +373,27 @@ def rapprochement(lignes, chatters=None, diagnostic=None) -> tuple:
 
     # Presents dans le registre, absents du tableau du site : ceux-la sont
     # payes nulle part si on ne regarde que la page Revenus.
+    #
+    # « chatters is None » = le tableau du site n'a PAS ete fourni a l'appel.
+    # Sans cette distinction, tout le monde etait declare « ABSENT du tableau
+    # du site » — verifie : la poussee du bouton de la page accuse ainsi
+    # chaque chatteur d'etre absent alors qu'aucune comparaison n'a eu lieu.
+    # Une accusation fausse envoie chercher des ventes qui n'ont jamais
+    # manque.
+    pas_de_comparaison = chatters is None
     for cle, tot in sorted(par_nom.items(), key=lambda kv: -kv[1]):
         if cle in vus:
             continue
         anonyme = (not cle) or cle.startswith("(")
         nom = cle if anonyme else cle.title()
+        if anonyme:
+            verdict = "ventes sans nom — a rattacher"
+        elif pas_de_comparaison:
+            verdict = "non compare — tableau du site non fourni"
+        else:
+            verdict = "ABSENT du tableau du site"
         out.append([nom or "(non attribue)", "", nb[cle], round(tot, 2), "",
-                    "ventes sans nom — a rattacher"
-                    if anonyme else "ABSENT du tableau du site"])
+                    verdict])
 
     out.sort(key=lambda r: (r[5] == "coherent", -(r[3] or 0)))
 
@@ -356,6 +403,7 @@ def rapprochement(lignes, chatters=None, diagnostic=None) -> tuple:
         etiquettes = [
             ("ventes_lues", "Ventes lues dans le log"),
             ("lignes_illisibles", "Lignes du log NON lues (colonnes manquantes)"),
+            ("montants_illisibles", "Montants NON lus (comptes pour 0)"),
             ("chatters_illisibles", "Lignes du tableau chatteurs non lues"),
             ("ventes_sans_chatteur", "Ventes sans chatteur"),
             ("montant_sans_chatteur", "Montant sans chatteur"),
@@ -378,13 +426,20 @@ def controle(lignes, total_annonce=None) -> list:
         par_devise[r[7]] += r[6]
         if r[3] == "(non attribue)":
             sans_chatteur += 1
-        if not r[0]:
+        # « pas de date exploitable » = pas de quinzaine derivable, pas
+        # « case vide ». Une date que MyPuls ecrit « hier soir » remplit bien
+        # la case et ne se rattache pourtant a aucune periode de paie : ce
+        # compteur annoncait 0 alors qu'une vente etait dans ce cas.
+        if not r[2]:
             sans_date += 1
     # --- recherche de trous : un jour sans AUCUNE vente au milieu d'une
     # periode active est suspect, c'est la trace d'un scraping incomplet.
+    # Seules les dates VRAIMENT ISO entrent ici : une seule valeur exotique
+    # ('hier') faisait lever fromisoformat plus bas, et le calcul des trous —
+    # donc l'alerte « scraping tronque » — s'eteignait entierement sans un mot.
     jours = defaultdict(float)
     for r in lignes:
-        if r[0]:
+        if r[0] and _EST_ISO.fullmatch(r[0]):
             jours[r[0]] += r[6]
     trous = []
     if len(jours) >= 3:
@@ -422,9 +477,15 @@ def controle(lignes, total_annonce=None) -> list:
         ctrl.append(["Journee la plus faible", "%s (%.2f)" % (mini, jours[mini])])
         ctrl.append(["Journee la plus forte", "%s (%.2f)" % (maxi, jours[maxi])])
     if total_annonce is not None:
+        # Somme TOUTES DEVISES CONFONDUES : le dashboard annonce lui aussi un
+        # total qui empile euros MyM et dollars OnlyFans, donc les deux se
+        # comparent — mais le libelle doit le dire, sinon l'ecart passe pour
+        # un montant dans une devise.
         somme = round(sum(par_devise.values()), 2)
+        ctrl.append(["Total du registre (toutes devises confondues)", somme])
         ctrl.append(["Total annonce par le dashboard", round(total_annonce, 2)])
-        ctrl.append(["Ecart", round(somme - total_annonce, 2)])
+        ctrl.append(["Ecart (ni en EUR ni en USD : les deux sont melanges)",
+                     round(somme - total_annonce, 2)])
     return ctrl
 
 

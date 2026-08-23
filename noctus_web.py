@@ -29,6 +29,25 @@ V_FOLDERS = [f"V{i}" for i in range(1, 11)]
 
 _PROCS = {}  # model_id -> subprocess.Popen
 
+# Générations dont l'ASSEMBLAGE tourne, avant que le process Node existe.
+# _PROCS ne les connaît pas encore : la préparation dure des dizaines de secondes
+# (un ffmpeg par variante) et pendant tout ce temps le dossier n'était protégé de
+# la purge que par sa fraîcheur — 12 générations lancées entre-temps et input/
+# disparaissait sous les pieds de l'assemblage.
+_EN_PREPARATION = set()
+_PREP_LOCK = threading.Lock()
+
+
+def _marquer_preparation(mid: str, actif: bool):
+    if not mid:
+        return
+    with _PREP_LOCK:
+        if actif:
+            _EN_PREPARATION.add(mid)
+        else:
+            _EN_PREPARATION.discard(mid)
+
+
 # Node "embarqué" téléchargé par le setup auto (si pas de node système)
 _NODE_HOME = NOCTUS_SRC / ".node"
 _SETUP_STATUS_FILE = NOCTUS_SRC / ".setup_status.json"
@@ -326,7 +345,9 @@ def _rapport_vide(total=0) -> dict:
         # Sans ça, « template seul » est le comportement normal, pas un repli.
         "montage_demande": False,
         "mode": "sans_montage",     # "assemble" | "template_seul" | "sans_montage"
-        "repli": False,             # au moins une variante livrée SANS brute
+        # au moins une variante livrée SANS vidéo brute, OU pas livrée du tout
+        # (voir « perdues ») : dans les deux cas ce n'est pas ce qui a été demandé.
+        "repli": False,
         "total": 0,                 # variantes prévues
         "assemblees": 0,            # variantes réellement montées avec une brute
         "repliees": 0,              # variantes rendues à partir du template nu
@@ -348,10 +369,15 @@ def _finaliser_rapport(rap: dict) -> dict:
     à moitié rempli."""
     if rap.get("montage_demande"):
         rap["mode"] = "assemble" if rap["assemblees"] else "template_seul"
-        rap["repli"] = bool(rap["repliees"] or rap["perdues"])
     else:
         rap["mode"] = "sans_montage"
-        rap["repli"] = False
+    # « perdues » = variantes qui n'ont produit AUCUN fichier. C'est une alerte
+    # même quand aucun montage n'était demandé : observé en rejouant le cas où la
+    # copie de la source échoue (source purgée sous nos pieds), le rapport
+    # comptait bien perdues=2 mais sortait repli=False et le message
+    # « aucun point de coupe » — un appelant qui lit `repli` croyait que tout
+    # allait bien alors que rien n'avait été préparé.
+    rap["repli"] = bool(rap["repliees"] or rap["perdues"])
     if not rap["repli"]:
         rap["message"] = rap["raison"] or (
             f"{rap['assemblees']} variante(s) montée(s) avec une brute"
@@ -362,7 +388,8 @@ def _finaliser_rapport(rap: dict) -> dict:
         bouts.append(f"{rap['repliees']}/{rap['total']} variante(s) SANS vidéo brute "
                      "(template entier : l'accroche n'est pas celle de la model)")
     if rap["perdues"]:
-        bouts.append(f"{rap['perdues']} variante(s) perdue(s)")
+        bouts.append(f"{rap['perdues']}/{rap['total']} variante(s) PERDUE(S) "
+                     "(aucune vidéo produite)")
     if rap["raison"]:
         bouts.append(rap["raison"])
     rap["message"] = " — ".join(bouts)
@@ -397,20 +424,41 @@ def assembly_report(model_id) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def _entete_assemblage(mdir, targets) -> str:
-    """Lignes à écrire en tête de _run.log.
+def _rapport_si_courant(mdir, targets):
+    """Le rapport posé dans models/<id> S'IL décrit bien la génération qui
+    démarre, sinon None.
 
-    Le rapport n'est retenu que s'il décrit BIEN cette génération-ci : le
-    dossier models/<id> est réutilisé d'une génération à l'autre (son
-    identifiant ne dépend que du reel), un rapport laissé par la précédente
+    Le dossier models/<id> est réutilisé d'une génération à l'autre (son
+    identifiant ne dépend que du reel) : un rapport laissé par la précédente
     mentirait. On compare les fichiers d'entrée, pas un horodatage : c'est
-    exact, alors qu'un délai serait une devinette."""
+    exact, alors qu'un délai serait une devinette.
+
+    `targets` à None = l'appelant ne fixe aucune liste d'entrées (page
+    « Création de vidéos », /reeltest) : ces lancements ne passent pas par
+    _prepare_inputs, donc aucun rapport ne les décrit. Une liste VIDE, elle,
+    est un vrai résultat — tout a été perdu — et correspond à un rapport sans
+    fichiers : c'était justement le pire cas, et il ne laissait aucune trace
+    dans le journal parce que la comparaison rejetait les rapports vides."""
+    if targets is None:
+        return None
     try:
         data = safe_json.load(Path(mdir) / _RAPPORT_NOM, default=None)
-        if not isinstance(data, dict):
-            return ""
-        att = set(data.get("fichiers") or [])
-        if not att or att != set(targets or []):
+    except Exception as e:
+        print(f"[noctus] rapport d'assemblage illisible : {e}", flush=True)
+        return None
+    if not isinstance(data, dict):
+        return None
+    if set(data.get("fichiers") or []) != set(targets):
+        return None
+    return data
+
+
+def _entete_assemblage(mdir, targets) -> str:
+    """Lignes à écrire en tête de _run.log (vide si aucun rapport ne décrit
+    cette génération — voir _rapport_si_courant)."""
+    try:
+        data = _rapport_si_courant(mdir, targets)
+        if data is None:
             return ""
         lignes = ["===== assemblage brute + template =====",
                   f"variantes : {data.get('total', 0)} — montées avec une brute : "
@@ -467,7 +515,11 @@ def run(model_id: str, folders=None, captions=None, targets=None, folder_map=Non
     try:
         mdir.mkdir(parents=True, exist_ok=True)
         logf = open(str(mdir / "_run.log"), "wb")
-    except Exception:
+    except Exception as e:
+        # Sans journal, un crash du pipeline ne laisse plus AUCUNE trace : status()
+        # ne peut plus en renvoyer d'extrait et le front affiche « erreur » tout
+        # court. Au moins dire pourquoi le journal manque.
+        print(f"[noctus] journal de rendu impossible a ouvrir ({mid}) : {e}", flush=True)
         logf = None
     if logf is not None:
         # Rapport d'assemblage EN TÊTE, pendant qu'on tient encore le fichier :
@@ -481,6 +533,49 @@ def run(model_id: str, folders=None, captions=None, targets=None, folder_map=Non
                 logf.flush()
         except Exception as e:
             print(f"[noctus] entete d'assemblage non journalisee : {e}", flush=True)
+    # `targets == []` = la préparation n'a produit AUCUN fichier (assemblage
+    # perdu ET copie de la source impossible). Or une liste de cibles VIDE ne
+    # filtre rien côté Node (`targetFiles.length > 0` dans pipeline-core.js) :
+    # le moteur traiterait alors tout ce qui traîne dans input/ — un reste d'une
+    # génération précédente que le VA recevrait avec « poste cette vidéo telle
+    # quelle », sans la brute attendue et sans que rien ne le signale. On vide
+    # donc le dossier : mieux vaut zéro vidéo qu'une vidéo au hasard sur le
+    # compte d'une model. (`targets is None` = pas de liste de cibles du tout,
+    # page « Création de vidéos » : là, tout input/ est bien le sujet.)
+    if targets is not None and not targets:
+        restes = 0
+        try:
+            for f in (mdir / "input").glob("*"):
+                if not f.is_file():
+                    continue
+                try:
+                    f.unlink()
+                    restes += 1
+                except OSError as e:
+                    print(f"[noctus] {mid} : reste impossible a supprimer dans "
+                          f"input/ ({f.name}) : {e} — il PEUT etre rendu a la "
+                          "place du reel", flush=True)
+        except OSError as e:
+            print(f"[noctus] {mid} : input/ illisible : {e}", flush=True)
+        if restes:
+            print(f"[noctus] {mid} : {restes} reste(s) ecarte(s) de input/ — "
+                  "aucune entree preparee pour cette generation", flush=True)
+    # Le rapport d'assemblage posé dans le dossier est joint à status() par
+    # _avec_rapport, donc renvoyé au front ET au bot. S'il décrit une AUTRE
+    # génération (dossier réutilisé, ou lancement qui ne passe pas par
+    # _prepare_inputs : page « Création de vidéos », /reeltest), status()
+    # annoncerait un repli qui n'a pas eu lieu — ou tairait celui qui a lieu.
+    # On le remplace donc par un rapport neutre décrivant CETTE génération,
+    # au lieu de laisser l'ancien répondre à sa place.
+    if _rapport_si_courant(mdir, targets) is None:
+        import time as _tR
+        neutre = _rapport_vide()
+        neutre["ts"] = int(_tR.time())
+        neutre["total"] = len(folders or []) or 1
+        neutre["fichiers"] = list(targets or [])
+        neutre["raison"] = "génération sans assemblage (pas de vidéo brute demandée)"
+        _finaliser_rapport(neutre)
+        _ecrire_rapport(mdir, neutre)
     # ÉTAT « running » ÉCRIT ICI, AVANT de lancer Node.
     # Sinon : l'identifiant du modèle est fixe pour un reel donné, donc
     # _status.json contient encore le « done » de la génération précédente. Le
@@ -492,14 +587,21 @@ def run(model_id: str, folders=None, captions=None, targets=None, folder_map=Non
                            {"state": "running", "current": 0, "total": 0,
                             "pct": 0, "eta": None}, indent=None):
         print("[noctus] etat initial non ecrit", flush=True)
-    proc = subprocess.Popen(
-        [node_bin, "noctus_runner.js", json.dumps(payload)],
-        cwd=str(NOCTUS_SRC),
-        stdout=(logf if logf is not None else subprocess.DEVNULL),
-        stderr=subprocess.STDOUT,
-        **kwargs,
-    )
-    _PROCS[mid] = proc
+    # Occupé le temps que Popen rende la main : entre l'état « running » écrit
+    # ci-dessus et l'inscription dans _PROCS, la génération n'apparaît occupée
+    # NULLE PART, et une purge concurrente pourrait emporter le dossier.
+    _marquer_preparation(mid, True)
+    try:
+        proc = subprocess.Popen(
+            [node_bin, "noctus_runner.js", json.dumps(payload)],
+            cwd=str(NOCTUS_SRC),
+            stdout=(logf if logf is not None else subprocess.DEVNULL),
+            stderr=subprocess.STDOUT,
+            **kwargs,
+        )
+        _PROCS[mid] = proc
+    finally:
+        _marquer_preparation(mid, False)
     return proc
 
 
@@ -908,11 +1010,15 @@ def assemble_brute_template(template, brute, cut_at, out_path):
 
 
 def generations_en_cours() -> set:
-    """Identifiants des modèles dont le rendu Node tourne ENCORE.
+    """Identifiants des modèles dont la génération est ENCORE en cours :
+    rendu Node lancé, ou assemblage ffmpeg en train de remplir input/.
 
     _PROCS est la table des process lancés par run() ; `poll() is None` = vivant.
-    En cas de doute (process illisible) on considère le rendu vivant : garder un
-    dossier de trop coûte du disque, en supprimer un de trop tue un rendu."""
+    _EN_PREPARATION couvre la phase d'AVANT le process (assemblage brute+template) :
+    sans elle, un dossier en pleine préparation n'apparaissait nulle part comme
+    occupé. En cas de doute (process illisible) on considère le rendu vivant :
+    garder un dossier de trop coûte du disque, en supprimer un de trop tue un
+    rendu."""
     vivants = set()
     for mid, p in list(_PROCS.items()):          # copie : la table bouge en parallèle
         if p is None:
@@ -922,6 +1028,8 @@ def generations_en_cours() -> set:
                 vivants.add(mid)
         except Exception:
             vivants.add(mid)
+    with _PREP_LOCK:
+        vivants |= set(_EN_PREPARATION)
     return vivants
 
 
@@ -951,7 +1059,7 @@ def _mtime_recursif(d: Path) -> float:
     return best
 
 
-def purge_old_models(prefix: str, keep: int = 12):
+def purge_old_models(prefix: str, keep: int = 12, details=None):
     """Supprime les vieux dossiers de génération `<prefix>*` en gardant les
     `keep` plus récents. Chacun contient les vidéos d'entrée ET les sorties :
     avec l'assemblage il y a maintenant une entrée PAR VARIANTE, donc plusieurs
@@ -965,10 +1073,23 @@ def purge_old_models(prefix: str, keep: int = 12):
     Un dossier qui disparaît en cours de route (purge concurrente) est compté et
     signalé, il n'annule plus toute la purge — auparavant un seul
     FileNotFoundError dans le tri laissait le disque se remplir en silence.
-    Renvoie le nombre de dossiers réellement supprimés."""
+    Renvoie le nombre de dossiers réellement supprimés.
+
+    `details` : dict FACULTATIF rempli sur place — supprimes / proteges /
+    illisibles / candidats / erreur. Le nombre renvoyé ne dit que ce qui a été
+    effacé : une purge entièrement BLOQUÉE par des rendus en cours renvoie 0,
+    exactement comme une purge qui n'avait rien à faire. Les deux comptes ne
+    partaient que sur la sortie standard du bot, que personne ne lit."""
     supprimes = proteges = illisibles = 0
+    candidats = []
+
+    def _details(erreur=""):
+        if isinstance(details, dict):
+            details.clear()
+            details.update({"supprimes": supprimes, "proteges": proteges,
+                            "illisibles": illisibles, "candidats": len(candidats),
+                            "erreur": erreur})
     try:
-        candidats = []
         for d in _models_dir().glob(prefix + "*"):
             try:
                 if not d.is_dir():
@@ -988,13 +1109,34 @@ def purge_old_models(prefix: str, keep: int = 12):
             print(f"[noctus] purge {prefix}* : {supprimes} supprimé(s), "
                   f"{proteges} protégé(s) (rendu en cours), "
                   f"{illisibles} illisible(s)", flush=True)
+        _details()
         return supprimes
     except Exception as e:
         print(f"[noctus] purge {prefix}* : {e}", flush=True)
+        _details(f"{type(e).__name__}: {e}")
         return supprimes
 
 
 def _prepare_inputs(src, inp, draft, folders, brutes_dir, report=None):
+    """Remplit le dossier input/ du modèle — voir _preparer_entrees pour tout le
+    détail. Ne fait qu'une chose de plus : signaler la génération comme OCCUPÉE
+    pendant l'assemblage.
+
+    Sans ça, un dossier en pleine préparation (plusieurs dizaines de secondes de
+    ffmpeg) n'était protégé de purge_old_models que par sa fraîcheur : une fois
+    12 générations lancées entre-temps, input/ était effacé pendant que ffmpeg y
+    écrivait, et les variantes repartaient du template nu — ou disparaissaient.
+    Le `finally` est obligatoire : une génération restée marquée occupée ne
+    serait plus jamais purgée et le disque du VPS se remplirait."""
+    mid = Path(inp).parent.name
+    _marquer_preparation(mid, True)
+    try:
+        return _preparer_entrees(src, inp, draft, folders, brutes_dir, report)
+    finally:
+        _marquer_preparation(mid, False)
+
+
+def _preparer_entrees(src, inp, draft, folders, brutes_dir, report=None):
     """Remplit le dossier input/ du modèle et renvoie
     (targets, videoFolderMap, gaps).
 
@@ -1057,6 +1199,12 @@ def _prepare_inputs(src, inp, draft, folders, brutes_dir, report=None):
             rap["echecs"].append({"brute": "", "variante": "*", "perdue": True,
                                   "erreur": f"copie de la source impossible : {e}"})
             rap["echecs_total"] += 1
+            # La raison déjà posée (« aucun point de coupe », « aucun assemblage
+            # n'a abouti ») n'explique PAS la perte : sans cette ligne le message
+            # final gardait l'ancienne raison et taisait l'échec de copie, alors
+            # que c'est LUI qui fait qu'aucune vidéo ne sortira.
+            rap["raison"] = ((rap["raison"] + " — ") if rap["raison"] else "") \
+                + f"copie de la source impossible : {e}"
             print(f"[noctus] copie de la source impossible : {e}", flush=True)
             return []
 

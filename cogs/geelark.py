@@ -25,6 +25,8 @@ import requests
 from discord import app_commands
 from discord.ext import commands, tasks
 
+import safe_json
+
 log = logging.getLogger("vabot.geelark")
 
 DATA_DIR = Path("data")
@@ -234,8 +236,12 @@ def load_schedules() -> list:
 
 
 def save_schedules(items: list):
+    # Ecriture ATOMIQUE : le VPS redemarre a chaque deploiement, et un
+    # write_text tronque le fichier avant de le remplir -> un JSON incomplet
+    # etait relu comme "aucun schedule" (le load fait except -> []), donc les
+    # pushs planifies disparaissaient sans un mot.
     SCHEDULES_FILE.parent.mkdir(parents=True, exist_ok=True)
-    SCHEDULES_FILE.write_text(json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(SCHEDULES_FILE, json.dumps(items, indent=2, ensure_ascii=False))
 
 
 def load_watchers() -> list:
@@ -248,8 +254,10 @@ def load_watchers() -> list:
 
 
 def save_watchers(items: list):
+    # Meme raison que save_schedules : ecriture atomique obligatoire sur un
+    # fichier de data/ (coupure = fichier tronque = watchers perdus en silence).
     WATCHERS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    WATCHERS_FILE.write_text(json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8")
+    safe_json.write_text(WATCHERS_FILE, json.dumps(items, indent=2, ensure_ascii=False))
 
 
 # ---- Cog Discord ----------------------------------------------------------

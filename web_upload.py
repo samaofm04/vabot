@@ -3333,53 +3333,82 @@ function _setBangerStar(btn, on){
   }
   if(typeof applyBangerFilter === 'function') applyBangerFilter();  // garde le filtre cohérent
 }
-// === Filtre "★ Bangers seulement" (client, instantané) ===
-var bangerFilterOn = false;
-function applyBangerFilter(){
-  var grid = document.getElementById('vault-grid');
+// === Filtres étoile des galeries (client, instantané) ===
+//
+// La section (onglet) VISIBLE, jamais le document. Chaque galerie rend sa
+// grille avec le MEME id 'vault-grid' et son bouton avec le MEME id
+// ('banger-toggle-btn', 'favbrute-toggle-btn') : le document en porte
+// plusieurs et getElementById renvoie toujours celui de la PREMIERE galerie
+// rendue. Observé : dans la Bibliothèque 2, le filtre ★ ne changeait rien à
+// l'écran tout en masquant les cartes de la galerie cachée de l'autre
+// bibliothèque — même piège pour « Template montage » côté rushs bruts.
+function vaultSectionVisible(){
+  var v = null;
+  document.querySelectorAll('.form-section').forEach(function(s){
+    if(!v && s.offsetParent !== null) v = s;
+  });
+  return v;
+}
+// L'état du filtre vit sur le BOUTON RENDU (data-on), plus dans une variable
+// de page. Observé : au changement d'identité le serveur re-rend la section et
+// le bouton repart neutre, alors que la variable globale restait à true — le
+// premier clic sur une étoile rappelait le filtre et vidait la galerie sous un
+// bouton qui se disait inactif. Une seule vérité, celle qui est à l'écran.
+function vaultFiltreOn(sec, id){
+  var b = sec ? sec.querySelector('#' + id) : null;
+  return !!(b && b.getAttribute('data-on') === '1');
+}
+function vaultFiltreSection(btn){
+  var s = (btn && btn.closest) ? btn.closest('.form-section') : null;
+  return s || vaultSectionVisible();
+}
+// Masque/rétablit les cartes d'UNE grille et gère son message « rien à
+// montrer ». Le message porte une CLASSE (pas un id) : il y en a un par
+// galerie, un id serait à nouveau ambigu dans le document.
+function vaultFiltreAppliquer(sec, actif, selEtoile, classeVide, texteVide){
+  if(!sec) return;
+  var grid = sec.querySelector('#vault-grid');
   if(!grid) return;
-  var cards = grid.querySelectorAll('.cloud-card');
   var shown = 0;
-  cards.forEach(function(c){
-    if(!bangerFilterOn){ c.style.display = ''; return; }
-    var on = c.querySelector('.banger-star.is-banger');
+  grid.querySelectorAll('.cloud-card').forEach(function(c){
+    if(!actif){ c.style.display = ''; return; }
+    var on = c.querySelector(selEtoile);
     c.style.display = on ? '' : 'none';
     if(on) shown++;
   });
-  var empty = document.getElementById('banger-empty-note');
-  if(bangerFilterOn && shown === 0){
+  var empty = sec.querySelector('.' + classeVide);
+  if(actif && shown === 0){
     if(!empty){
       empty = document.createElement('div');
-      empty.id = 'banger-empty-note';
+      empty.className = classeVide;
       empty.style.cssText = 'grid-column:1/-1;text-align:center;color:#888;padding:34px;font-size:14px';
-      empty.textContent = 'Aucun reel marqué ★ banger pour cette identité.';
+      empty.textContent = texteVide;
       grid.appendChild(empty);
     }
     empty.style.display = '';
   } else if(empty){ empty.style.display = 'none'; }
 }
+// Recopie l'état sur le bouton : c'est lui qui le porte d'un clic à l'autre.
+function vaultFiltreBouton(b, actif, labelOn, labelOff){
+  if(!b) return;
+  b.setAttribute('data-on', actif ? '1' : '0');
+  b.classList.toggle('vault-sort-active', actif);
+  b.style.background = actif ? '#3a2f00' : '#1a1a1a';
+  b.style.borderColor = actif ? '#f5c518' : '#3a3a3a';
+  b.textContent = actif ? labelOn : labelOff;
+}
+function applyBangerFilter(sec){
+  sec = sec || vaultSectionVisible();
+  vaultFiltreAppliquer(sec, vaultFiltreOn(sec, 'banger-toggle-btn'),
+                       '.banger-star.is-banger', 'banger-empty-note',
+                       'Aucun reel marqué ★ banger pour cette identité.');
+}
 function toggleBangerFilter(btn){
-  bangerFilterOn = !bangerFilterOn;
-  if(btn){
-    btn.classList.toggle('vault-sort-active', bangerFilterOn);
-    var sort = btn.closest('.vault-sort');
-    if(sort){
-      sort.classList.remove('open');  // ferme le menu
-      var lbl = sort.querySelector('.vault-sort-btn span');
-      if(lbl){
-        if(bangerFilterOn){ if(!lbl.dataset.orig) lbl.dataset.orig = lbl.textContent; lbl.textContent = '★ Bangers'; }
-        else if(lbl.dataset.orig){ lbl.textContent = lbl.dataset.orig; }
-      }
-    }
-  }
-  // Retour visuel du bouton visible "Reels Banger" (peu importe ce qui a togglé).
-  var sb = document.getElementById('banger-toggle-btn');
-  if(sb){
-    sb.style.background = bangerFilterOn ? '#3a2f00' : '#1a1a1a';
-    sb.style.borderColor = bangerFilterOn ? '#f5c518' : '#3a3a3a';
-    sb.textContent = bangerFilterOn ? '★ Bangers ✓' : '★ Reels Banger';
-  }
-  applyBangerFilter();
+  var sec = vaultFiltreSection(btn);
+  var b = btn || (sec ? sec.querySelector('#banger-toggle-btn') : null);
+  var actif = !(b && b.getAttribute('data-on') === '1');
+  vaultFiltreBouton(b, actif, '★ Bangers ✓', '★ Reels Banger');
+  applyBangerFilter(sec);
 }
 // ⌫ Vide le salon banger-{identite} (supprime les messages du bot + etoiles -> gris)
 async function purgeBanger(identity, btn){
@@ -3526,55 +3555,24 @@ async function toggleFavBrute(btn, fileId){
 }
 // === Filtre "⭐ Bangers" des rushs bruts (client, instantané) ===
 //
-// PIEGE : chaque galerie rend sa grille avec le MEME id 'vault-grid', donc le
-// document en contient plusieurs et getElementById renvoie toujours la
-// premiere — celle des Reels, rendue avant. Un filtre copie du filtre banger
-// masquerait donc les cartes de la mauvaise galerie. On passe par la section
-// visible, comme vaultSelectAll le fait deja.
-var favBruteFilterOn = false;
-function favBruteSection(){
-  var btn = document.getElementById('favbrute-toggle-btn');
-  if(btn && btn.closest) { var s = btn.closest('.form-section'); if(s) return s; }
-  var trouve = null;
-  document.querySelectorAll('.form-section').forEach(function(s){
-    if(!trouve && s.offsetParent !== null) trouve = s;
-  });
-  return trouve;
-}
-function favBruteApply(){
-  var sec = favBruteSection();
-  if(!sec) return;
-  var grid = sec.querySelector('#vault-grid');
-  if(!grid) return;
-  var cards = grid.querySelectorAll('.cloud-card');
-  var shown = 0;
-  cards.forEach(function(c){
-    if(!favBruteFilterOn){ c.style.display = ''; return; }
-    var on = c.querySelector('.fav-brute-star.is-fav');
-    c.style.display = on ? '' : 'none';
-    if(on) shown++;
-  });
-  var empty = sec.querySelector('.favbrute-empty-note');
-  if(favBruteFilterOn && shown === 0){
-    if(!empty){
-      empty = document.createElement('div');
-      empty.className = 'favbrute-empty-note';
-      empty.style.cssText = 'grid-column:1/-1;text-align:center;color:#888;padding:34px;font-size:14px';
-      empty.textContent = 'Aucun rush brut marqué ⭐ pour cette identité.';
-      grid.appendChild(empty);
-    }
-    empty.style.display = '';
-  } else if(empty){ empty.style.display = 'none'; }
+// Même mécanique que le filtre ★ des reels (cf. vaultFiltreOn plus haut) :
+// portée = la section VISIBLE, état porté par le bouton rendu. L'ancienne
+// version cherchait son bouton par getElementById : elle retombait donc
+// toujours sur celui de « Vidéo brut » de la 1re bibliothèque, et le filtre
+// de « Template montage » ou de la Bibliothèque 2 travaillait sur la galerie
+// d'à côté, cachée.
+function favBruteApply(sec){
+  sec = sec || vaultSectionVisible();
+  vaultFiltreAppliquer(sec, vaultFiltreOn(sec, 'favbrute-toggle-btn'),
+                       '.fav-brute-star.is-fav', 'favbrute-empty-note',
+                       'Aucun rush brut marqué ⭐ pour cette identité.');
 }
 function toggleFavBruteFilter(btn){
-  favBruteFilterOn = !favBruteFilterOn;
-  var b = btn || document.getElementById('favbrute-toggle-btn');
-  if(b){
-    b.style.background = favBruteFilterOn ? '#3a2f00' : '#1a1a1a';
-    b.style.borderColor = favBruteFilterOn ? '#f5c518' : '#3a3a3a';
-    b.textContent = favBruteFilterOn ? '⭐ Bangers ✓' : '⭐ Bangers';
-  }
-  favBruteApply();
+  var sec = vaultFiltreSection(btn);
+  var b = btn || (sec ? sec.querySelector('#favbrute-toggle-btn') : null);
+  var actif = !(b && b.getAttribute('data-on') === '1');
+  vaultFiltreBouton(b, actif, '⭐ Bangers ✓', '⭐ Bangers');
+  favBruteApply(sec);
 }
 // === Repérage des brutes qui portent déjà du texte incrusté ===
 //
@@ -4685,7 +4683,14 @@ function nxMLoadDraft(fid){
     // description (sidecar, hors brouillon) : posee meme si aucun brouillon
     try{ var dta=document.getElementById('nx-m-desc'); if(dta) dta.value=String(j.desc||''); }catch(e){}
     if(!j.draft) return;
-    try{ var segs=JSON.parse(j.draft.segments||'[]'); if(Array.isArray(segs)&&segs.length) nxMState.caps=segs; }catch(e){}
+    // Un brouillon ENREGISTRE fait autorite, meme quand il ne contient PLUS
+    // aucune caption. Avec le « && segs.length » d avant, un brouillon vide
+    // laissait la caption voisine (<stem>.txt, reprise a l ouverture par
+    // /cloud/meta/get) se rafficher : on croyait avoir un texte, on laissait
+    // « Dispo VA », le VA recevait une video SANS texte — et un simple
+    // « Enregistrer » regravait la caption supprimee dans le brouillon.
+    // segments absent (brouillon d une autre origine) = on ne touche a rien.
+    try{ if(j.draft.segments!=null){ var segs=JSON.parse(j.draft.segments||'[]'); if(Array.isArray(segs)) nxMState.caps=segs; } }catch(e){}
     try{ var stl=JSON.parse(j.draft.style||'{}'); if(stl&&typeof stl==='object'){ if(!nxMState.style)nxMStyleInit(); nxMState.style=Object.assign(nxMState.style,stl); } }catch(e){}
     if(j.draft.font){ var fsel=document.getElementById('nx-m-font'); if(fsel) fsel.value=j.draft.font; }
     var s=nxMState.style||{};
@@ -5261,7 +5266,13 @@ function nxMontageApprove(){
         nxMSetApproveBtn(on);
         try{ nxMSyncCardFiligrane(nxMState.fid, on); }catch(e){}   // carte mise à jour EN DIRECT (derrière la modale)
         try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}   // filigrane à jour en revenant sur la VA
-        if(typeof showToast==='function') showToast(on?'✓ Reel « dispo pour les VA » — filigrane posé dans la Bibliothèque':'➖ Reel retiré des VA — filigrane enlevé','success',5000);
+        // j.retire===false : le serveur n avait RIEN a retirer (aucun
+        // brouillon, ou deja retire). Le dire, plutot que d annoncer un
+        // retrait qui n a pas eu lieu.
+        var _msgA = on ? '✓ Reel « dispo pour les VA » — filigrane posé dans la Bibliothèque'
+                       : (j.retire===false ? 'Ce reel ne figurait pas dans le stock VA'
+                                          : '➖ Reel retiré des VA — filigrane enlevé');
+        if(typeof showToast==='function') showToast(_msgA, j.retire===false?'info':'success',5000);
       } else {
         alert('✕ '+((j&&j.error)||'?'));
       }
@@ -5656,12 +5667,16 @@ function tplShareOpen(){
 // navigation d identité) ; toutes les actions passent par la délégation data-capact
 // (le contenu de la section est swappé par vaultGoTo -> les scripts inline ne
 // s exécutent pas, donc AUCUN handler ne doit vivre dans la section).
-var capLib={identity:'',block:null,brutes:[]};
+// capLib.max = plafond de captions par identité, ANNONCE PAR LE SERVEUR
+// (CAPTIONS_MAX). Le 80 en dur n'est qu'un filet si le bloc de données est
+// vieux : c'est le serveur qui tranche, et il refusait le surplus en silence.
+var capLib={identity:'',block:null,brutes:[],max:80};
 function capLibInit(){
   var el=document.getElementById('capLibData'); if(!el) return false;
   var j=null;
   try{ j=JSON.parse(el.textContent||'{}'); }catch(e){ return false; }
   if(!j||!j.identity) return false;
+  if(j.max) capLib.max=j.max;
   if(capLib.identity!==j.identity||!capLib.block){
     if(capLib.identity!==j.identity) capSelSet={};   // sélection liée à UNE identité
     capLib.identity=j.identity;
@@ -5806,9 +5821,20 @@ function capSave(){
     fetch('/captions/save',{method:'POST',body:fd,credentials:'same-origin'})
       .then(function(r){return r.json();}).then(function(j){
         if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('✕ Sauvegarde captions : '+((j&&j.error)||'?'),'error'); return; }
+        if(j.max) capLib.max=j.max;
+        // Le serveur a refusé du surplus : on le DIT et on aligne l écran sur
+        // ce qui est réellement enregistré. Sans ça les cartes en trop
+        // restaient affichées jusqu au prochain rechargement, puis
+        // disparaissaient sans explication.
+        if(j.refuses){
+          capLib.block.items=(capLib.block.items||[]).slice(0,j.count);
+          capRenderCards();
+          if(typeof showToast==='function') showToast('✕ '+j.refuses+' caption'+(j.refuses>1?'s non enregistrées':' non enregistrée')
+            +' : plafond de '+(j.max||80)+' atteint pour @'+capLib.identity,'error',9000);
+        }
         try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
         var el=document.getElementById('capLibData');
-        if(el) el.textContent=JSON.stringify({identity:capLib.identity,block:capLib.block,brutes:capLib.brutes});
+        if(el) el.textContent=JSON.stringify({identity:capLib.identity,block:capLib.block,brutes:capLib.brutes,max:capLib.max});
       }).catch(function(e){ if(typeof showToast==='function') showToast('✕ Sauvegarde captions : '+e,'error'); });
   },250);
 }
@@ -5967,9 +5993,16 @@ function capShareOpen(){
           ui.close();
           if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('✕ '+((j&&j.error)||'?'),'error'); return; }
           try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
+          // « déjà là » et « plus de place » sont DEUX refus différents : les
+          // confondre faisait annoncer des doublons alors que la bibliothèque
+          // de la model cible était pleine.
+          var _pl=j.pleins||0, _cp=(j.cibles_pleines||[]);
           if(typeof showToast==='function') showToast('✓ '+j.added+' caption'+(j.added>1?'s copiées':' copiée')
             +' vers '+((j.targets||[]).length)+' model'+(((j.targets||[]).length>1)?'s':'')
-            +(j.skipped?(' · '+j.skipped+' doublon'+(j.skipped>1?'s ignorés':' ignoré')):''),'success',7000);
+            +(j.skipped?(' · '+j.skipped+' doublon'+(j.skipped>1?'s ignorés':' ignoré')):'')
+            +(_pl?(' · ✕ '+_pl+' refusée'+(_pl>1?'s':'')+' : plafond de '+(j.max||80)+' atteint chez '
+                   +_cp.join(', ')):''),
+            _pl?'warning':'success', 9000);
         }).catch(function(e){ ui.close(); if(typeof showToast==='function') showToast('✕ '+e,'error'); });
     }
   });
@@ -6031,6 +6064,20 @@ function capAddSubmit(){
     if(typeof showToast==='function') showToast(dropped?'Déjà dans la bibliothèque (doublons ignorés)':'Écris au moins une caption','warning');
     return;
   }
+  // PLAFOND : le serveur n'en garde que capLib.max et refuse le reste. Avant,
+  // on poussait tout et on annonçait « N ajoutées » — la moitié disparaissait
+  // au rechargement, sans un mot. On coupe ICI et on dit combien sont
+  // refusées, avec LEUR raison (plein) et non celle des doublons.
+  var max=capLib.max||80;
+  var place=Math.max(0, max-(capLib.block.items||[]).length);
+  var refusesPlein=Math.max(0, vals.length-place);
+  if(place<=0){
+    if(typeof showToast==='function') showToast('✕ Bibliothèque pleine : '+max+' captions au maximum pour @'
+      +capLib.identity+'. Supprime avant d ajouter — '+vals.length+' caption'
+      +(vals.length>1?'s refusées':' refusée')+'.','error',9000);
+    return;
+  }
+  if(refusesPlein) vals=vals.slice(0,place);
   var now=Date.now();
   for(var i=0;i<vals.length;i++){
     var itN={id:'c'+now+'_'+i+'_'+Math.floor(Math.random()*1000), text:vals[i].text, x:0.5, y:0.5, wrapW:0.88, enabled:true, created:Math.floor(now/1000)};
@@ -6041,7 +6088,9 @@ function capAddSubmit(){
   capRenderCards(); capSave();
   if(typeof showToast==='function') showToast('✓ '+vals.length+' caption'+(vals.length>1?'s ajoutées au centre':' ajoutée au centre')
     +(dropped?(' · '+dropped+' déjà utilisée'+(dropped>1?'s ignorées':' ignorée')):'')
-    +(near?(' · ⚠️ '+near+' très proche'+(near>1?'s':'')+' de captions existantes'):''), near?'warning':'success');
+    +(refusesPlein?(' · ✕ '+refusesPlein+' refusée'+(refusesPlein>1?'s':'')+' : plafond de '+max+' atteint'):'')
+    +(near?(' · ⚠️ '+near+' très proche'+(near>1?'s':'')+' de captions existantes'):''),
+    (refusesPlein||near)?'warning':'success', (refusesPlein||near)?9000:undefined);
 }
 // NB : PAS de getElementById au chargement ici — ce script s exécute AVANT que
 // les modales (plus bas dans la page) existent ; les boutons de la modale sont
@@ -11780,6 +11829,44 @@ def _load_web_users() -> dict:
 def _save_web_users(users: dict):
     WEB_USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
     safe_json.write_text(WEB_USERS_FILE, json.dumps(users, indent=2, ensure_ascii=False))
+
+
+# Noms qu'aucune création de compte ne doit prendre — ni « Manage employees »,
+# ni l'inscription publique.
+#
+# « admin » est le nom d'affichage que porte la session ouverte par
+# WEB_PASSWORD seul (voir index() : `username or "admin"`). Laisser quelqu'un
+# créer un compte de ce nom, c'est mélanger deux identités dans les journaux,
+# dans « Sessions actives » et dans /settings/my_password. « samaali » est le
+# compte propriétaire, que /settings/role/remove protège déjà nommément :
+# le protéger à la suppression mais pas à la création n'avait pas de sens.
+_NOMS_RESERVES = frozenset({"admin", "samaali"})
+
+
+def _nom_reserve(username: str) -> bool:
+    """Vrai si ce nom d'utilisateur est réservé (comparaison normalisée)."""
+    return (username or "").strip().lower() in _NOMS_RESERVES
+
+
+def _save_web_users_inscription(users: dict):
+    """`save_web_users` du chemin PUBLIC : refuse de CRÉER un nom réservé.
+
+    L'inscription publique ne peut créer un compte qu'à travers la fonction
+    qu'on lui passe (voir create_app) — c'est le seul endroit de ce fichier qui
+    peut fermer la porte sans toucher à signup_public.py. La comparaison porte
+    sur les NOUVELLES clés uniquement : une entrée déjà présente doit rester
+    modifiable, sinon toute validation ultérieure exploserait. On refuse
+    bruyamment (journal + exception AVANT la moindre écriture, donc sans état
+    partiel) plutôt que d'écarter le nom en silence.
+    """
+    avant = {k.lower() for k in (_load_web_users() or {})}
+    interdits = sorted(n for n in users
+                       if str(n).lower() not in avant and _nom_reserve(n))
+    if interdits:
+        log.error("inscription refusée : nom d'utilisateur réservé %s",
+                  ", ".join(interdits))
+        raise ValueError("nom d'utilisateur réservé : " + ", ".join(interdits))
+    _save_web_users(users)
 
 
 def _bootstrap_web_users():
@@ -18310,8 +18397,12 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
 
     # Bouton VISIBLE "Reels Banger" (uniquement sur les pages vidéo/reels) : filtre
     # instantané pour n'afficher que les reels marqués ★ (banger_marks.json).
+    # data-on='0' : c'est le bouton qui PORTE l'etat du filtre (cf.
+    # vaultFiltreOn). Le serveur re-rend la section a chaque changement
+    # d'identite, donc le filtre repart neutre — avant, une variable de page
+    # survivait au rendu et la galerie se vidait sous un bouton « inactif ».
     banger_toggle_html = (
-        "<button type='button' id='banger-toggle-btn' onclick='toggleBangerFilter(this)' "
+        "<button type='button' id='banger-toggle-btn' data-on='0' onclick='toggleBangerFilter(this)' "
         "title='Afficher seulement les reels marqués ★ banger' "
         "style='display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#1a1a1a;"
         "border:1px solid #3a3a3a;border-radius:8px;color:#f5c518;cursor:pointer;font-size:13px;"
@@ -18323,7 +18414,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
     # local (fav_brutes.json), la-haut c'est un envoi Discord avec accuse de
     # reception. Deux mecanismes, deux fichiers, un seul symbole.
     fav_brute_toggle_html = (
-        "<button type='button' id='favbrute-toggle-btn' onclick='toggleFavBruteFilter(this)' "
+        "<button type='button' id='favbrute-toggle-btn' data-on='0' onclick='toggleFavBruteFilter(this)' "
         "title='Afficher seulement les rushs bruts marqués ⭐ favoris' "
         "style='display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#1a1a1a;"
         "border:1px solid #3a3a3a;border-radius:8px;color:#f5c518;cursor:pointer;font-size:13px;"
@@ -18623,6 +18714,11 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
 CAPTIONS_FILE = DATA_DIR / "captions.json"
 CAPTION_FONTS = ("Strong", "TikTokSans", "Inter", "Poppins", "Montserrat",
                  "BebasNeue", "Anton")
+# Plafond de captions par identité. UN SEUL endroit : le nettoyage, le partage
+# vers d'autres models et le compteur du navigateur le lisent tous ici. Quand
+# il vivait en dur à trois endroits, le navigateur annonçait « 10 ajoutées »
+# pendant que le serveur en jetait 6 sans le dire.
+CAPTIONS_MAX = 80
 
 
 def _load_captions_lib() -> dict:
@@ -19014,11 +19110,19 @@ def _linkimp_run(ident: str, subdir: str, urls: list, desc: str = ""):
     _invalidate_all_ttl_cache()   # compteurs/galeries à jour au prochain rendu
 
 
-def _clean_caption_block(raw) -> dict:
+def _clean_caption_block(raw, ecartes: dict = None) -> dict:
     """Valide/clampe le bloc caption d'une identité (bornes = celles du moteur).
-    Police par défaut = TikTokSans (demande user : l'écriture TikTok partout)."""
+    Police par défaut = TikTokSans (demande user : l'écriture TikTok partout).
+
+    `ecartes` : dictionnaire optionnel rempli avec ce qui a été REFUSÉ, jamais
+    jeté en silence. Clé "plein" = captions valides écartées parce que le
+    plafond CAPTIONS_MAX était atteint. Sans ce compte, un ajout de 10 captions
+    sur une bibliothèque déjà à 78 affichait « 10 ajoutées » et en perdait 8.
+    """
     out = {"font": "TikTokSans", "style": {},
            "global_pos": {"enabled": False, "x": 0.5, "y": 0.2}, "items": []}
+    if ecartes is not None:
+        ecartes["plein"] = 0
     if not isinstance(raw, dict):
         return out
     f = raw.get("font")
@@ -19059,11 +19163,17 @@ def _clean_caption_block(raw) -> dict:
                          "y": _clampf(gp.get("y"), 0.0, 1.0, 0.2)}
     items = raw.get("items") if isinstance(raw.get("items"), list) else []
     import time as _t
-    for it in items[:80]:                          # garde-fou
+    for it in items:
         if not isinstance(it, dict):
             continue
         txt = str(it.get("text") or "").strip()
         if not txt:
+            continue
+        # Plafond : on garde les CAPTIONS_MAX premières VALIDES et on compte
+        # les suivantes au lieu de couper la liste brute en silence.
+        if len(out["items"]) >= CAPTIONS_MAX:
+            if ecartes is not None:
+                ecartes["plein"] += 1
             continue
         entry = {"id": str(it.get("id") or f"c{int(_t.time() * 1000)}")[:48],
                  "text": txt[:300],
@@ -19281,17 +19391,24 @@ def _render_cloud_captions_html() -> str:
     for it in block["items"]:
         cid = _h.escape(str(it["id"]), quote=True)
         on = it.get("enabled", True)
-        meta = ""   # position retiree : l'apercu montre deja ou tombe le texte
-        if it.get("wrapW"):
-            meta += f" · ↔ {round(it['wrapW'] * 100)}%"
-        # 3 contrôles, MÊME look que les cartes Template montage : ▶ (éditeur),
-        # ⊘ (désactiver = sort du tirage), ⚪ (cercle de sélection -> barre ⌫).
+        # MIROIR EXACT de capRenderCards (le builder JS) : la carte est rendue
+        # ici par Flask puis RE-rendue en JS au premier clic. Tout écart entre
+        # les deux se voyait comme un saut de hauteur des cartes — il manquait
+        # ici le bouton Description et la ligne d'aperçu de la description, et
+        # il restait la ligne de largeur « ↔ N% » que le JS avait abandonnée
+        # (l'aperçu montre déjà la largeur). Toucher l'un = toucher l'autre.
+        # 4 contrôles, MÊME look que les cartes Template montage : ▶ (éditeur),
+        # 📄 (description du post), ★ (favori), ⊘ (désactiver = sort du
+        # tirage), ⚪ (cercle de sélection -> barre ⌫).
         onoff_col = "#9aa0a6" if on else "#ef4444"
         _fav = it.get("fav") is True
         _favcol = "#ffd54a" if _fav else "#9aa0a6"
         _favfill = "#ffd54a" if _fav else "none"
         _favstroke = "none" if _fav else "#9aa0a6"
         _favsw = "0" if _fav else "2"
+        _desc = str(it.get("desc") or "")
+        _desc_esc = _h.escape(_desc, quote=True)
+        _desccol = "#8b9cf7" if _desc else "#9aa0a6"
         cards.append(
             f"<div class='cap-card{'' if on else ' cap-off'}' data-cid='{cid}'>"
             f"<div class='cap-prev' data-capact='place' data-cid='{cid}' title='Clique pour ouvrir l’éditeur'>"
@@ -19299,6 +19416,9 @@ def _render_cloud_captions_html() -> str:
             "<div class='card-actions' style='position:absolute;top:8px;right:8px;display:flex;gap:6px;align-items:center;z-index:5'>"
             f"<button class='card-edit-btn' data-capact='place' data-cid='{cid}' title='Gérer la caption (éditeur)' style='color:#a855f7'>"
             "<svg viewBox='0 0 24 24' width='13' height='13' fill='currentColor'><polygon points='5 3 19 12 5 21 5 3'/></svg></button>"
+            f"<button class='card-edit-btn' data-capact='desc' data-cid='{cid}' "
+            f"title='Description du post (légende) — vide = pas de description' style='color:{_desccol}'>"
+            "<svg viewBox='0 0 24 24' width='13' height='13' fill='none' stroke='currentColor' stroke-width='2'><path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z'/><line x1='8' y1='13' x2='16' y2='13'/><line x1='8' y1='17' x2='13' y2='17'/></svg></button>"
             f"<button class='card-edit-btn cap-fav-star{' is-fav' if _fav else ''}' data-capact='fav' data-cid='{cid}' "
             f"title='Favori — cette caption servira au bouton « Montage Banger »' style='color:{_favcol}'>"
             f"<svg viewBox='0 0 24 24' width='13' height='13' fill='{_favfill}' stroke='{_favstroke}' stroke-width='{_favsw}'><polygon points='12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2'/></svg></button>"
@@ -19311,8 +19431,10 @@ def _render_cloud_captions_html() -> str:
             "</div>"
             + ("" if on else "<div class='cap-prev-off'>hors tirage</div>")
             + "</div>"
-            f"<div class='cap-card-meta'>{meta}</div>"
-            "</div>"
+            + (f"<div class='cap-card-meta' style='color:#8b9cf7;white-space:nowrap;"
+               f"overflow:hidden;text-overflow:ellipsis' title='{_desc_esc}'>📄 {_desc_esc}</div>"
+               if _desc else "")
+            + "</div>"
         )
     grid = ("<div id='capCards' style='display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:14px'>"
             + "".join(cards) + "</div>")
@@ -19325,7 +19447,11 @@ def _render_cloud_captions_html() -> str:
     results = ("<div id='capGenStatus' style='margin-top:16px;font-size:12.5px;color:#9a9aa6'></div>"
                "<div id='capGenResults' style='margin-top:8px;display:flex;flex-direction:column;gap:8px'></div>")
 
-    payload = _js.dumps({"identity": selected, "block": block, "brutes": brutes[:80]},
+    # "max" : le plafond voyage avec les données. Sans lui le navigateur
+    # ajoutait au-delà et annonçait « ajoutées » pendant que le serveur
+    # refusait le surplus.
+    payload = _js.dumps({"identity": selected, "block": block, "brutes": brutes[:80],
+                         "max": CAPTIONS_MAX},
                         ensure_ascii=False).replace("</", "<\\/")
     state = f"<script type='application/json' id='capLibData'>{payload}</script>"
 
@@ -25330,11 +25456,22 @@ def _render_bio_public_page(identity: str) -> str:
     except Exception:
         return "<h1>Erreur module</h1>"
     bio = get_bio(identity)
-    display_name = bio.get("display_name") or identity
-    bio_text = bio.get("bio") or ""
+    # Page PUBLIQUE (aucune authentification) dont l'identité vient de l'URL :
+    # /bio/<img src=x onerror=...> se retrouvait tel quel dans le <title>, dans
+    # le pseudo affiché et dans le nom (display_name retombe sur l'identité).
+    # Le script s'exécutait donc sur l'origine du dashboard, où aucune écriture
+    # n'est protégée par un jeton anti-CSRF : un lien envoyé au propriétaire
+    # connecté suffisait à agir en son nom. Tout ce qui vient de l'URL ou du
+    # fichier des bios est désormais échappé — y compris les liens, saisis
+    # ailleurs mais rendus ici.
+    avatar_url = html_escape(str(_identity_avatar_url(identity) or ""), quote=True)
+    nom_brut = str(bio.get("display_name") or identity or "")   # initiale de l'avatar
+    identity = html_escape(str(identity or ""), quote=True)
+    display_name = (html_escape(str(bio.get("display_name")), quote=True)
+                    if bio.get("display_name") else identity)  # identity : déjà échappée
+    bio_text = html_escape(str(bio.get("bio") or ""), quote=True)
     theme = bio.get("theme", "dark")
     links = bio.get("links", [])
-    avatar_url = _identity_avatar_url(identity)
 
     if theme == "light":
         bg = "#f9fafb"
@@ -25364,14 +25501,18 @@ def _render_bio_public_page(identity: str) -> str:
     if avatar_url:
         avatar = f"<img src='{avatar_url}' style='width:96px;height:96px;border-radius:50%;object-fit:cover;border:3px solid {text};box-shadow:0 4px 20px rgba(0,0,0,.3)'>"
     else:
-        init = (display_name[0] if display_name else "?").upper()
+        # Sur le nom BRUT : l'initiale d'un nom échappé serait « & ».
+        init = html_escape((nom_brut[0] if nom_brut else "?").upper())
         avatar = f"<div style='width:96px;height:96px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:42px'>{init}</div>"
 
     links_html = ""
     for l in links:
-        url = l.get("url", "#")
-        title = l.get("title", "")
-        icon = l.get("icon", "⛓")
+        # Rendus dans un attribut href entre apostrophes : une apostrophe dans
+        # l'URL en sortait et ouvrait un onmouseover à elle. Échappé ici, pas à
+        # la saisie — c'est ici qu'on connaît le contexte HTML.
+        url = html_escape(str(l.get("url", "#")), quote=True)
+        title = html_escape(str(l.get("title", "")), quote=True)
+        icon = html_escape(str(l.get("icon", "⛓")), quote=True)
         links_html += (
             f"<a href='{url}' target='_blank' rel='noopener' style='display:flex;align-items:center;gap:14px;padding:16px 20px;background:{link_bg};border:1px solid {link_border};border-radius:14px;color:{text};text-decoration:none;font-weight:600;transition:all .15s;font-size:15px' "
             f"onmouseover='this.style.background=\"{link_hover}\";this.style.transform=\"translateY(-2px)\"' "
@@ -39729,6 +39870,56 @@ def _textecheck_ecrire(video: Path, verdict, extraits, erreur="") -> None:
         pass
 
 
+# ---- Generation « Reel monte » depuis le site : une seule a la fois --------
+# Le garde d avant ne consultait que noctus_web._PROCS, table remplie SEULEMENT
+# quand le process Node demarre. Or l assemblage (un ffmpeg par variante) dure
+# des minutes AVANT ce lancement : pendant tout ce temps la table restait vide,
+# un second clic passait le garde et vidait input/ et output/ sous les pieds du
+# premier. La reservation est donc posee avant l assemblage, sous verrou.
+_MONTAGE_GEN_LOCK = threading.Lock()
+_MONTAGE_GEN_RESERVE = {}          # model_id -> heure de la reservation
+# Filet : un rendu tue en plein vol (redemarrage, exception hors du finally)
+# ne doit pas bloquer CE reel pour toujours.
+_MONTAGE_GEN_TTL = 3 * 3600
+
+
+def _montage_gen_reserver(model_id: str) -> bool:
+    """Reserve la generation de ce reel. False = une autre est deja en cours."""
+    import noctus_web
+    if not model_id:
+        return False
+    maintenant = time.time()
+    with _MONTAGE_GEN_LOCK:
+        for _mid, _t in list(_MONTAGE_GEN_RESERVE.items()):
+            if maintenant - _t > _MONTAGE_GEN_TTL:
+                # Ne jamais ecarter en silence : dire qu une reservation a ete
+                # oubliee, sinon un blocage de 3 h ressemble a un bug du bouton.
+                del _MONTAGE_GEN_RESERVE[_mid]
+                print("[montage] reservation perimee liberee : %s" % _mid, flush=True)
+        if model_id in _MONTAGE_GEN_RESERVE:
+            return False
+        # Rendu Node encore vivant, ou assemblage lance par un AUTRE chemin
+        # (« Reel deja monte » d un VA) : meme table que la purge, sinon deux
+        # avis differents sur « est-ce occupe ».
+        try:
+            occupe = model_id in noctus_web.generations_en_cours()
+        except Exception as e:
+            print("[montage] generations_en_cours indisponible (%s) — repli sur _PROCS"
+                  % e, flush=True)
+            _p = noctus_web._PROCS.get(model_id)
+            occupe = _p is not None and _p.poll() is None
+        if occupe:
+            return False
+        _MONTAGE_GEN_RESERVE[model_id] = maintenant
+        return True
+
+
+def _montage_gen_liberer(model_id: str) -> None:
+    """Rend la place. Le rendu Node, lui, reste protege par _PROCS."""
+    with _MONTAGE_GEN_LOCK:
+        _MONTAGE_GEN_RESERVE.pop(model_id, None)
+
+
 def _analyze_montage_template(src: Path):
     """Analyse complète d'un template : (résultat, erreur)."""
     key = _anthropic_key()
@@ -42189,8 +42380,18 @@ def create_app():
                 if _v and str(_v) in _rev:
                     session.clear()
                     return False
+            # Le contrôle du compte s'appliquait à tout le monde SAUF au nom
+            # « admin » : la session d'un compte réellement nommé admin
+            # survivait donc trente jours à sa suppression ou à sa
+            # désactivation, et rien n'empêchait de créer ce nom (voir
+            # _NOMS_RESERVES). L'exemption ne vise pas un NOM, elle vise la
+            # session ouverte par WEB_PASSWORD SEUL, sans nom saisi : celle-là
+            # n'a aucun compte derrière elle, il n'y a donc rien à relire.
+            # Le drapeau est posé au login (index) ; une session antérieure au
+            # correctif ne l'a pas, elle est simplement contrôlée comme les
+            # autres (le compte « admin » existe, personne n'est déconnecté).
             uname = (session.get("username") or "").lower()
-            if uname and uname != "admin":
+            if uname and not session.get("legacy_owner"):
                 users = _load_web_users() or {}
                 rec = users.get(uname)
                 if users and rec is None:
@@ -42296,6 +42497,15 @@ def create_app():
         "/mypuls/sales_window", "/mypuls/api_test", "/mypuls/api_stats_test",
         "/mypuls/api_probe", "/mypuls/calendar_probe",
         "/mypuls/pushs_refresh_probe", "/mypuls/refresh_pushs_now",
+        # Diagnostics Instagram : aucune page ne les appelle, ils se lancent à
+        # la main. Ils DÉPENSENT du quota payant (Apify, RapidAPI) et
+        # /insta/debug_rapidapi renvoie le scrape brut de n'importe quel profil
+        # — pas de raison qu'un rôle restreint les déclenche en boucle.
+        "/insta/apify_diag", "/insta/debug_rapidapi",
+        # Les push (messages de masse) des modèles SFS, et un scrape MyPuls à
+        # chaque appel sans cache. C'est la page SFS Planning qui s'en sert :
+        # mappé à son onglet ci-dessous, donc un rôle SFS légitime garde tout.
+        "/sfssetup/mypuls_pushes",
         # Pages STANDALONE (hors système d'onglets) : elles échappaient au filet
         # car aucun préfixe ne les couvrait. « /jbactivity » (orthographe -y) ne
         # commence pas par « /jbactivite/ » (-e), d'où le trou.
@@ -42329,6 +42539,9 @@ def create_app():
         # Planning. On le mappe donc à l'onglet "sfs" (sinon un rôle SFS légitime
         # se prenait un 403 en cliquant). Un chatter reste bloqué (pas d'onglet sfs).
         "/mypuls/refresh_pushs_now": "sfs",
+        # Même page (SFS Planning, #form-sfs) : c'est elle qui remplit le
+        # calendrier au chargement.
+        "/sfssetup/mypuls_pushes": "sfs",
         # Bibliothèque captions : lisible par un rôle qui a l'onglet Caption
         # (permission « montage ») ; l'écriture reste admin-only (deny par défaut).
         "/captions/": "cloudcaptions",
@@ -42533,6 +42746,16 @@ def create_app():
                 session["auth"] = True
                 session["username"] = username or "admin"
                 session["role"] = _web_user_role(username, password)
+                # Login par WEB_PASSWORD SEUL (aucun nom saisi) : la session
+                # porte le nom d'affichage « admin » mais AUCUN compte ne la
+                # soutient. C'est ce cas — et lui seul — qu'is_auth() doit
+                # dispenser de relire le fichier des comptes. Avant, la
+                # dispense portait sur le NOM : un vrai compte nommé « admin »
+                # gardait donc sa session trente jours après sa révocation.
+                if username:
+                    session.pop("legacy_owner", None)
+                else:
+                    session["legacy_owner"] = True
                 # Identifiant de session : permet de la RÉVOQUER vraiment
                 # (avant, « Déconnecter cette session » ne faisait que retirer
                 # une ligne d'affichage, l'accès restait valide 30 jours).
@@ -43900,181 +44123,199 @@ def create_app():
         # lancées en même temps (double-clic, deux onglets) partageraient le
         # même dossier et la seconde effacerait input/ et output/ de la
         # première EN PLEIN RENDU, en tuant son process. On refuse plutôt.
-        # On regarde le PROCESS, pas _status.json : ce fichier est écrit par le
-        # runner Node avec un délai, donc deux clics rapprochés passeraient tous
-        # les deux au travers.
+        # On ne regarde ni _status.json (écrit par le runner Node avec un
+        # délai : deux clics rapprochés passeraient tous les deux au travers),
+        # ni _PROCS SEUL : cette table n'est remplie qu'au LANCEMENT de Node, et
+        # l'assemblage qui le précède dure des minutes (un ffmpeg par variante).
+        # Pendant tout ce temps elle restait vide, un second clic passait le
+        # garde et vidait input/ et output/ sous les pieds du premier. La place
+        # est donc RÉSERVÉE ici, AVANT l'assemblage.
+        _mid_gen = noctus_web._safe(model)
+        if not _montage_gen_reserver(_mid_gen):
+            return jsonify({"ok": False, "error":
+                            "une génération est déjà en cours sur ce reel — "
+                            "attends qu'elle finisse (ou clique sur ✋ Stop)"})
         try:
-            _busy = noctus_web._PROCS.get(noctus_web._safe(model))
-            if _busy is not None and _busy.poll() is None:
-                return jsonify({"ok": False, "error":
-                                "une génération est déjà en cours sur ce reel — "
-                                "attends qu'elle finisse (ou clique sur ✋ Stop)"})
-        except Exception:
-            pass
-        # Chaque reel généré laissait son dossier models/reel-… sur le disque
-        # pour toujours ; avec l'assemblage il contient une vidéo PAR VARIANTE.
-        noctus_web.purge_old_models("reel-")
-        inp = noctus_web._models_dir() / model / "input"
-        inp.mkdir(parents=True, exist_ok=True)
-        for f in inp.glob("*"):
+            # Chaque reel généré laissait son dossier models/reel-… sur le disque
+            # pour toujours ; avec l'assemblage il contient une vidéo PAR VARIANTE.
+            noctus_web.purge_old_models("reel-")
+            inp = noctus_web._models_dir() / model / "input"
+            inp.mkdir(parents=True, exist_ok=True)
+            for f in inp.glob("*"):
+                try:
+                    f.unlink()
+                except Exception:
+                    pass
+            # Nettoie les sorties précédentes -> UNE seule vidéo à chaque génération
+            # (sinon les générations s'accumulent dans output/ et on voit N versions).
+            _outdir = noctus_web._models_dir() / model / "output"
             try:
-                f.unlink()
+                if _outdir.exists():
+                    _sh.rmtree(str(_outdir), ignore_errors=True)
             except Exception:
                 pass
-        # Nettoie les sorties précédentes -> UNE seule vidéo à chaque génération
-        # (sinon les générations s'accumulent dans output/ et on voit N versions).
-        _outdir = noctus_web._models_dir() / model / "output"
-        try:
-            if _outdir.exists():
-                _sh.rmtree(str(_outdir), ignore_errors=True)
-        except Exception:
-            pass
-        font = (request.form.get("font") or "Strong").strip() or "Strong"
-        folders = [f for f in (request.form.get("folders") or "").split(",") if f in noctus_web.V_FOLDERS] or ["V1", "V2", "V3"]
-        # ASSEMBLAGE : si un point de coupe est demandé et que l'identité a des
-        # vidéos brutes, chaque variante part d'un montage (brute + template) au
-        # lieu du template seul. Sinon _prepare_inputs recopie la source.
-        _cut = request.form.get("cut_at")
-        _targets, _fmap, _gaps = noctus_web._prepare_inputs(
-            src, inp, {"cut_at": _cut} if _cut else {}, folders,
-            IDENTITIES_DIR / identity / "brutes")
-        label = ("m_" + model)[:40]
-        caps = [c for c in noctus_web.read_captions()
-                if not (isinstance(c, dict)
-                        and (c.get("label") == label
-                             or str(c.get("label", "")).startswith(label + "_s")))]
+            font = (request.form.get("font") or "Strong").strip() or "Strong"
+            folders = [f for f in (request.form.get("folders") or "").split(",") if f in noctus_web.V_FOLDERS] or ["V1", "V2", "V3"]
+            # ASSEMBLAGE : si un point de coupe est demandé et que l'identité a des
+            # vidéos brutes, chaque variante part d'un montage (brute + template) au
+            # lieu du template seul. Sinon _prepare_inputs recopie la source.
+            _cut = request.form.get("cut_at")
+            _targets, _fmap, _gaps = noctus_web._prepare_inputs(
+                src, inp, {"cut_at": _cut} if _cut else {}, folders,
+                IDENTITIES_DIR / identity / "brutes")
+            label = ("m_" + model)[:40]
+            def _hms(v):
+                # garde les décimales (millisecondes) -> timing précis au centième
+                try:
+                    sec = max(0.0, float(v))
+                except Exception:
+                    sec = 0.0
+                h = int(sec // 3600)
+                m = int((sec % 3600) // 60)
+                s = sec - h * 3600 - m * 60
+                return f"{h:02d}:{m:02d}:{s:06.3f}"
 
-        def _hms(v):
-            # garde les décimales (millisecondes) -> timing précis au centième
-            try:
-                sec = max(0.0, float(v))
-            except Exception:
-                sec = 0.0
-            h = int(sec // 3600)
-            m = int((sec % 3600) // 60)
-            s = sec - h * 3600 - m * 60
-            return f"{h:02d}:{m:02d}:{s:06.3f}"
-
-        # Style texte GLOBAL (réglages CapCut) appliqué à toutes les captions.
-        # Nettoyé ici ; le moteur (renderCaptionsPng) re-valide de toute façon.
-        def _clean_style(raw):
-            out = {}
-            if not isinstance(raw, dict):
+            # Style texte GLOBAL (réglages CapCut) appliqué à toutes les captions.
+            # Nettoyé ici ; le moteur (renderCaptionsPng) re-valide de toute façon.
+            def _clean_style(raw):
+                out = {}
+                if not isinstance(raw, dict):
+                    return out
+                try:
+                    if raw.get("size") is not None:
+                        out["size"] = max(16, min(160, int(float(raw["size"]))))
+                except Exception:
+                    pass
+                c = raw.get("color")
+                if isinstance(c, str) and re.match(r"^#[0-9a-fA-F]{3,8}$", c):
+                    out["color"] = c
+                if raw.get("align") in ("left", "center", "right"):
+                    out["align"] = raw["align"]
+                if raw.get("case") in ("upper", "lower", "title", "none"):
+                    out["case"] = raw["case"]
+                for k in ("bold", "italic", "underline"):
+                    if k in raw:
+                        out[k] = bool(raw[k])
+                if raw.get("box") in (True, "1", "true"):
+                    out["box"] = True
+                bc = raw.get("boxColor")
+                if isinstance(bc, str) and re.match(r"^#[0-9a-fA-F]{3,8}$", bc):
+                    out["boxColor"] = bc
+                if raw.get("effect") in ("shadow", "neon"):
+                    out["effect"] = raw["effect"]
                 return out
-            try:
-                if raw.get("size") is not None:
-                    out["size"] = max(16, min(160, int(float(raw["size"]))))
-            except Exception:
-                pass
-            c = raw.get("color")
-            if isinstance(c, str) and re.match(r"^#[0-9a-fA-F]{3,8}$", c):
-                out["color"] = c
-            if raw.get("align") in ("left", "center", "right"):
-                out["align"] = raw["align"]
-            if raw.get("case") in ("upper", "lower", "title", "none"):
-                out["case"] = raw["case"]
-            for k in ("bold", "italic", "underline"):
-                if k in raw:
-                    out[k] = bool(raw[k])
-            if raw.get("box") in (True, "1", "true"):
-                out["box"] = True
-            bc = raw.get("boxColor")
-            if isinstance(bc, str) and re.match(r"^#[0-9a-fA-F]{3,8}$", bc):
-                out["boxColor"] = bc
-            if raw.get("effect") in ("shadow", "neon"):
-                out["effect"] = raw["effect"]
-            return out
-        _style = {}
-        try:
-            import json as _js
-            _style = _clean_style(_js.loads(request.form.get("style") or "{}"))
-        except Exception:
             _style = {}
-
-        # Plusieurs captions chronométrées (liste + frise) -> champ 'segments' JSON.
-        # Chaque segment = {text, start, end} en secondes (start/end null = toute la vidéo).
-        segments = []
-        seg_raw = request.form.get("segments")
-        if seg_raw:
-            import json as _json
             try:
-                arr = _json.loads(seg_raw)
+                import json as _js
+                _style = _clean_style(_js.loads(request.form.get("style") or "{}"))
             except Exception:
-                arr = []
-            if isinstance(arr, list):
-                for it in arr[:40]:  # garde-fou : 40 captions max
-                    if not isinstance(it, dict):
-                        continue
-                    txt = (it.get("text") or "").strip()
-                    if not txt:
-                        continue
-                    st = it.get("start")
-                    en = it.get("end")
-                    if st is None or en is None:
-                        start, end = "00:00:00", "99:99:99"
-                    else:
-                        start, end = _hms(st), _hms(en)
-                    seg = {"start": start, "end": end, "text": txt}
-                    seg.update(_style)   # applique le style global à chaque caption
-                    for _pk in ("x", "y"):   # position PAR caption (drag éditeur) -> écrase le défaut moteur
-                        _pv = it.get(_pk)
-                        try:
-                            if _pv is not None:
-                                _pf = float(_pv)
-                                if 0.0 <= _pf <= 1.0:
-                                    seg[_pk] = round(_pf, 4)
+                _style = {}
+
+            # Plusieurs captions chronométrées (liste + frise) -> champ 'segments' JSON.
+            # Chaque segment = {text, start, end} en secondes (start/end null = toute la vidéo).
+            segments = []
+            seg_raw = request.form.get("segments")
+            if seg_raw:
+                import json as _json
+                try:
+                    arr = _json.loads(seg_raw)
+                except Exception:
+                    arr = []
+                if isinstance(arr, list):
+                    for it in arr[:40]:  # garde-fou : 40 captions max
+                        if not isinstance(it, dict):
+                            continue
+                        txt = (it.get("text") or "").strip()
+                        if not txt:
+                            continue
+                        st = it.get("start")
+                        en = it.get("end")
+                        if st is None or en is None:
+                            start, end = "00:00:00", "99:99:99"
+                        else:
+                            start, end = _hms(st), _hms(en)
+                        seg = {"start": start, "end": end, "text": txt}
+                        seg.update(_style)   # applique le style global à chaque caption
+                        for _pk in ("x", "y"):   # position PAR caption (drag éditeur) -> écrase le défaut moteur
+                            _pv = it.get(_pk)
+                            try:
+                                if _pv is not None:
+                                    _pf = float(_pv)
+                                    if 0.0 <= _pf <= 1.0:
+                                        seg[_pk] = round(_pf, 4)
+                            except Exception:
+                                pass
+                        try:                     # largeur de wrap (poignée ↔)
+                            _wv = it.get("wrapW")
+                            if _wv is not None:
+                                _wf = float(_wv)
+                                if 0.2 <= _wf <= 0.97:
+                                    seg["wrapW"] = round(_wf, 4)
                         except Exception:
                             pass
-                    try:                     # largeur de wrap (poignée ↔)
-                        _wv = it.get("wrapW")
-                        if _wv is not None:
-                            _wf = float(_wv)
-                            if 0.2 <= _wf <= 0.97:
-                                seg["wrapW"] = round(_wf, 4)
-                    except Exception:
-                        pass
-                    try:                     # interligne (poignée ↕)
-                        _lv = it.get("lineSpacing")
-                        if _lv is not None:
-                            _lf = float(_lv)
-                            if 0.9 <= _lf <= 3.0:
-                                seg["lineSpacing"] = round(_lf, 3)
-                    except Exception:
-                        pass
-                    segments.append(seg)
+                        try:                     # interligne (poignée ↕)
+                            _lv = it.get("lineSpacing")
+                            if _lv is not None:
+                                _lf = float(_lv)
+                                if 0.9 <= _lf <= 3.0:
+                                    seg["lineSpacing"] = round(_lf, 3)
+                        except Exception:
+                            pass
+                        segments.append(seg)
 
-        _entry = None
-        if segments:
-            _entry = {"label": label, "font": font, "captions": segments}
-            caps.append(_entry)
-            sel = [label]
-        else:
-            # rétro-compat : ancien champ 'caption' unique (+ start_s/end_s)
-            caption = (request.form.get("caption") or "").strip()
-            if caption:
-                s_s = request.form.get("start_s")
-                e_s = request.form.get("end_s")
-                if s_s is not None and e_s is not None:
-                    start, end = _hms(s_s), _hms(e_s)
-                else:
-                    start, end = "00:00:00", "99:99:99"
-                _entry = {"label": label, "font": font, "captions": [{"start": start, "end": end, "text": caption}]}
-                caps.append(_entry)
-                sel = [label]
+            # Ce qu'il y aura à écrire dans captions.json : une entrée, ou rien.
+            _entry = None
+            if segments:
+                _entry = {"label": label, "font": font, "captions": segments}
             else:
-                if not any(isinstance(c, dict) and c.get("label") == "sans_texte" for c in caps):
-                    caps.append({"label": "sans_texte", "font": None, "captions": []})
-                sel = ["sans_texte"]
-        # variantes dont le début a été coupé (brute plus courte que la place) :
-        # copie DÉCALÉE des captions pour chacune, sinon elles arrivent en retard.
-        _cmap = noctus_web.caption_map_for(_entry, _targets, _gaps, caps)
-        noctus_web.write_captions(caps)
-        proc = noctus_web.run(model, folders, sel, targets=_targets, folder_map=_fmap,
-                              caption_map=_cmap)
-        if not proc:
-            return jsonify({"ok": False, "error": "lancement impossible"})
-        return jsonify({"ok": True, "model": model, "identity": identity,
-                        "assembled": bool(_fmap)})
+                # rétro-compat : ancien champ 'caption' unique (+ start_s/end_s)
+                caption = (request.form.get("caption") or "").strip()
+                if caption:
+                    s_s = request.form.get("start_s")
+                    e_s = request.form.get("end_s")
+                    if s_s is not None and e_s is not None:
+                        start, end = _hms(s_s), _hms(e_s)
+                    else:
+                        start, end = "00:00:00", "99:99:99"
+                    _entry = {"label": label, "font": font,
+                              "captions": [{"start": start, "end": end, "text": caption}]}
+            # captions.json est PARTAGÉ avec le « Reel déjà monté » des VA
+            # (noctus_web.gen_from_draft) : ici il était lu, modifié puis écrit HORS
+            # VERROU, donc deux générations lancées ensemble repartaient du même
+            # contenu et la seconde écriture effaçait le label de la première : sa
+            # vidéo sortait sans aucun texte. Même verrou que gen_from_draft — un
+            # second verrou ne sérialiserait rien du tout.
+            with noctus_web._GEN_LOCK:
+                caps = [c for c in noctus_web.read_captions()
+                        if not (isinstance(c, dict)
+                                and (c.get("label") == label
+                                     or str(c.get("label", "")).startswith(label + "_s")))]
+                if _entry:
+                    caps.append(_entry)
+                    sel = [label]
+                else:
+                    if not any(isinstance(c, dict) and c.get("label") == "sans_texte" for c in caps):
+                        caps.append({"label": "sans_texte", "font": None, "captions": []})
+                    sel = ["sans_texte"]
+                # variantes dont le début a été coupé (brute plus courte que la place) :
+                # copie DÉCALÉE des captions pour chacune, sinon elles arrivent en retard.
+                _cmap = noctus_web.caption_map_for(_entry, _targets, _gaps, caps)
+                # Écriture ratée = le moteur ne trouve pas le label et rend la vidéo
+                # SANS texte, alors que la page annonce « ok ». On refuse plutôt.
+                if not noctus_web.write_captions(caps):
+                    return jsonify({"ok": False, "error":
+                                    "captions.json non écrit — génération annulée "
+                                    "(la vidéo serait sortie sans texte)"})
+                proc = noctus_web.run(model, folders, sel, targets=_targets, folder_map=_fmap,
+                                      caption_map=_cmap)
+            if not proc:
+                return jsonify({"ok": False, "error": "lancement impossible"})
+            return jsonify({"ok": True, "model": model, "identity": identity,
+                            "assembled": bool(_fmap)})
+        finally:
+            # Sans ce retrait, un assemblage qui échoue (ffmpeg, disque plein)
+            # laisserait le reel bloqué « en cours » jusqu'au redémarrage du bot.
+            _montage_gen_liberer(_mid_gen)
 
     @app.route("/noctus/montage_send", methods=["POST"])
     def noctus_montage_send():
@@ -44319,13 +44560,33 @@ def create_app():
         target_dir, src = parsed
         p = target_dir / f"{src.stem}.montage.json"
         import json as _js
+        # Répondre « ok » sans avoir rien retiré est le pire des deux mondes : le
+        # bouton repasse au gris et la carte perd son filigrane, alors que
+        # va_ready est TOUJOURS sur le disque — le reel continue de partir aux
+        # VA et personne ne le sait. Chaque cas est donc distingué et dit.
+        if not p.exists():
+            # Pas de brouillon = pas de va_ready : le disque est déjà dans
+            # l'état voulu, il n'y a rien à retirer (et rien à cacher).
+            return jsonify({"ok": True, "retire": False,
+                            "detail": "ce reel ne figurait pas dans le stock VA"})
         try:
             d = _js.loads(p.read_text(encoding="utf-8"))
-            if isinstance(d, dict) and d.pop("va_ready", None) is not None:
-                safe_json.write(p, d, indent=None)
-        except Exception:
-            pass
-        return jsonify({"ok": True})
+        except Exception as e:
+            return jsonify({"ok": False, "error":
+                            f"brouillon illisible ({e}) — le reel PEUT être encore "
+                            "proposé aux VA"})
+        if not isinstance(d, dict):
+            return jsonify({"ok": False, "error":
+                            "brouillon inattendu (ce n'est pas un objet) — retrait "
+                            "impossible, le reel PEUT être encore proposé aux VA"})
+        if d.pop("va_ready", None) is None:
+            return jsonify({"ok": True, "retire": False,
+                            "detail": "ce reel ne figurait pas dans le stock VA"})
+        if not safe_json.write(p, d, indent=None):
+            return jsonify({"ok": False, "error":
+                            "écriture du brouillon impossible — le reel est TOUJOURS "
+                            "proposé aux VA"})
+        return jsonify({"ok": True, "retire": True})
 
     # ================= CAPTIONS (onglet Caption du Reel montage) =============
     # Bibliothèque de textes par identité (data/captions.json). La génération
@@ -44487,7 +44748,16 @@ def create_app():
     def identity_reorder():
         """Ordre custom des identités dans les sidebars Bibliothèque (glisser-
         déposer). Liste PARTAGÉE data/identity_order.json -> synchro entre
-        Vidéo brut / Template / Caption (et tous les onglets vault)."""
+        Vidéo brut / Template / Caption (et tous les onglets vault).
+
+        La sidebar n'envoie QUE les identités qu'elle affiche : celle de la
+        Bibliothèque 2 n'envoie que les v2_, le Vault PRO que les siennes.
+        Écraser le fichier avec cette seule liste effaçait donc l'ordre de
+        toutes les autres, qui repartaient en alphabétique — un rangement à la
+        main perdu par un simple glissement dans l'autre bibliothèque. On
+        FUSIONNE : les identités reçues se replacent dans les emplacements
+        qu'elles occupaient déjà, les absentes ne bougent pas.
+        """
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
@@ -44499,15 +44769,34 @@ def create_app():
         if not isinstance(arr, list):
             return jsonify({"ok": False, "error": "liste attendue"})
         known = set(_list_identities())
-        order = []
+        soumis = []
+        inconnues = 0
         for x in arr[:300]:
             n = str(x).strip().lower()
-            if n in known and n not in order:
-                order.append(n)
-        if not _save_identity_order(order):
+            if n in soumis:
+                continue
+            if n in known:
+                soumis.append(n)
+            elif n:
+                inconnues += 1      # jamais écartée en silence : cf. réponse
+        ancien = _load_identity_order()
+        vus = set(soumis)
+        restants = list(soumis)
+        fusion = []
+        for n in ancien:
+            if n in vus:
+                # emplacement déjà tenu par une identité de cette sidebar :
+                # il reçoit la suivante dans le NOUVEL ordre.
+                if restants:
+                    fusion.append(restants.pop(0))
+            elif n not in fusion:
+                fusion.append(n)    # d'une autre bibliothèque : intouchée
+        fusion.extend(restants)     # celles qui n'étaient pas encore rangées
+        if not _save_identity_order(fusion):
             return jsonify({"ok": False, "error": "écriture impossible"})
         _invalidate_all_ttl_cache()
-        return jsonify({"ok": True, "count": len(order)})
+        return jsonify({"ok": True, "count": len(soumis),
+                        "total": len(fusion), "inconnues": inconnues})
 
     @app.route("/captions/list", methods=["GET"])
     def captions_list():
@@ -44533,7 +44822,11 @@ def create_app():
             raw = _js.loads(request.form.get("data") or "{}")
         except Exception:
             return jsonify({"ok": False, "error": "JSON invalide"})
-        block = _clean_caption_block(raw)
+        # `refuses` : ce que le plafond a écarté. Le navigateur affichait
+        # « N ajoutées » sans savoir que le serveur tronquait -> il le sait
+        # maintenant, et le dit.
+        _ec = {}
+        block = _clean_caption_block(raw, _ec)
         lib = _load_captions_lib()
         lib[ident] = block
         if not _save_captions_lib(lib):
@@ -44541,7 +44834,9 @@ def create_app():
         # Route AJAX : pas de _success() -> on invalide les caches ttl à la main
         # (compteurs de la sidebar vault, page pleine éventuellement cachée).
         _invalidate_all_ttl_cache()
-        return jsonify({"ok": True, "count": len(block["items"])})
+        return jsonify({"ok": True, "count": len(block["items"]),
+                        "refuses": int(_ec.get("plein") or 0),
+                        "max": CAPTIONS_MAX})
 
     @app.route("/captions/apply", methods=["POST"])
     def captions_apply():
@@ -44581,19 +44876,30 @@ def create_app():
             s = re.sub(r"[^a-z0-9à-ɏ\s]", " ", s)
             return re.sub(r"\s+", " ", s).strip()
 
-        added = skipped = 0
+        # DEUX refus, DEUX compteurs. « Déjà là » et « plus de place » n'ont
+        # ni la même cause ni le même remède : tout mettre dans `skipped`
+        # faisait annoncer des doublons là où la bibliothèque de la cible était
+        # simplement pleine, et personne ne comprenait pourquoi la caption
+        # n'arrivait pas.
+        added = skipped = pleins = 0
         done = []
+        cibles_pleines = []
         for t in targets:
             tblock = _clean_caption_block(lib.get(t))
             have = {_tnorm(c.get("text")) for c in tblock["items"]}
             n0 = len(tblock["items"])
+            _plein_ici = 0
             for i, it in enumerate(items):
-                if len(tblock["items"]) >= 80:      # même garde-fou que le save
-                    skipped += 1
-                    continue
+                # Le doublon PASSE AVANT le plafond : une caption déjà présente
+                # ne réclame aucune place, l'annoncer « refusée faute de place »
+                # envoyait chercher un problème qui n'existe pas.
                 key = _tnorm(it.get("text"))
                 if key in have:
                     skipped += 1
+                    continue
+                if len(tblock["items"]) >= CAPTIONS_MAX:   # même plafond que le save
+                    pleins += 1
+                    _plein_ici += 1
                     continue
                 have.add(key)
                 cp = dict(it)
@@ -44601,6 +44907,8 @@ def create_app():
                 cp["created"] = int(_t.time())
                 tblock["items"].append(cp)
                 added += 1
+            if _plein_ici:
+                cibles_pleines.append(t)
             if len(tblock["items"]) != n0:
                 if n0 == 0:                          # cible vierge : hérite du look
                     tblock["font"] = sblock["font"]
@@ -44612,7 +44920,9 @@ def create_app():
             if not _save_captions_lib(lib):
                 return jsonify({"ok": False, "error": "écriture impossible"})
             _invalidate_all_ttl_cache()
-        return jsonify({"ok": True, "added": added, "skipped": skipped, "targets": done})
+        return jsonify({"ok": True, "added": added, "skipped": skipped,
+                        "pleins": pleins, "cibles_pleines": cibles_pleines,
+                        "max": CAPTIONS_MAX, "targets": done})
 
     @app.route("/captions/gen", methods=["POST"])
     def captions_gen():
@@ -52352,9 +52662,22 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             return _error("✕ Champs requis manquants ou password trop court (min 6 caractères)", tab="semp")
         # Normalise le username : lowercase + sans espaces
         username = username.lower().strip()
+        if _nom_reserve(username):
+            return _error(f"✕ <b>{html_escape(username)}</b> est un nom réservé "
+                          "(session de dépannage / compte propriétaire) — "
+                          "choisis-en un autre.", tab="semp")
         users = _load_role_users()
         if any((u.get("username") or "").lower() == username for u in users):
             return _error(f"✕ {username} existe déjà", tab="semp")
+        # L'existence n'était vérifiée que dans role_users.json, alors que
+        # l'étape 2 écrit dans web_admin_users.json — le fichier qui décide du
+        # LOGIN. Un compte présent seulement là (l'owner, un compte désactivé
+        # dont l'entrée de rôle a été purgée) se faisait donc écraser sans un
+        # mot : mot de passe et rôle remplacés par ceux du formulaire.
+        if username in {k.lower() for k in (_load_web_users() or {})}:
+            return _error(f"✕ <b>{html_escape(username)}</b> a déjà un accès de "
+                          "connexion — supprime-le d'abord si tu veux le recréer.",
+                          tab="semp")
         # 1) Enregistre dans role_users.json (pour affichage + permissions)
         hashed = _hash_password(password)
         users.append({
@@ -54041,7 +54364,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         signup_public.register(app, {
             "hash_password": _hash_password,
             "load_web_users": _load_web_users,
-            "save_web_users": _save_web_users,
+            "save_web_users": _save_web_users_inscription,
             "load_role_users": _load_role_users,
             "save_role_users": _save_role_users,
             "is_auth": is_auth,

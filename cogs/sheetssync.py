@@ -5,6 +5,7 @@ Ici : un poller lit le Sheet toutes les 2 min et applique les changements dans
 jailbreak.json (pull_and_merge), + une commande OWNER pour configurer/tester.
 """
 import asyncio
+import time
 
 import discord
 from discord import app_commands
@@ -14,9 +15,17 @@ import sheets_sync
 
 
 class SheetsSync(commands.Cog):
+    # Anti-noyade du journal : le poller tourne toutes les 2 min, donc un état
+    # QUI DURE (pause, Sheet illisible, état local illisible) écrirait 720
+    # lignes par jour et noierait tout le reste — un journal illisible cache
+    # aussi bien que le silence. Un message identique n'est réécrit qu'au bout
+    # de 30 min ; un cycle qui CHANGE quelque chose est toujours écrit.
+    _RELOG_S = 1800
+
     def __init__(self, bot):
         self.bot = bot
         self._owner_id = None
+        self._dernier_log = ("", 0.0)   # (message, horodatage) — cf. _RELOG_S
         if sheets_sync.is_configured():
             self.poll.start()
 
@@ -34,14 +43,34 @@ class SheetsSync(commands.Cog):
         return uid == self._owner_id
 
     # ---------- Poller Sheet -> site ----------
+    def _journal(self, res, toujours: bool = False) -> None:
+        """Écrit au journal le résultat d'un cycle de pull.
+
+        Avant, le journal ne recevait QUE les cycles qui avaient modifié
+        quelque chose (`if changed`). Or la protection anti-écrasement agit
+        exactement dans les cycles où rien n'est écrit : une valeur du Sheet
+        ignorée, un compte protégé, un pull ANNULÉ ne laissaient donc AUCUNE
+        trace nulle part. `toujours` = pull demandé à la main : une action
+        volontaire mérite sa ligne, même répétée."""
+        changed, summary = res[0], res[1]
+        outcome = getattr(res, "outcome", "") or "?"
+        if not (changed or toujours or getattr(res, "signale", False)):
+            return
+        ligne = f"[sheetssync] pull ({outcome}): {summary}"
+        maintenant = time.time()
+        if (not (changed or toujours) and ligne == self._dernier_log[0]
+                and maintenant - self._dernier_log[1] < self._RELOG_S):
+            return
+        self._dernier_log = (ligne, maintenant)
+        print(ligne, flush=True)
+
     @tasks.loop(minutes=2)
     async def poll(self):
         if not sheets_sync.is_configured():
             return
         try:
-            changed, summary = await asyncio.to_thread(sheets_sync.pull_and_merge)
-            if changed:
-                print(f"[sheetssync] pull: {summary}", flush=True)
+            res = await asyncio.to_thread(sheets_sync.pull_and_merge)
+            self._journal(res)
         except Exception as e:
             print(f"[sheetssync] poll: {e}", flush=True)
 
@@ -222,18 +251,14 @@ class SheetsSync(commands.Cog):
 
         if action == "pull":
             await interaction.response.defer(ephemeral=True, thinking=True)
-            changed, summary = await asyncio.to_thread(sheets_sync.pull_and_merge, force)
-            if changed:
-                msg = f"✅ Importé du Sheet : {summary}"
-            elif "RETENUES" in (summary or ""):
-                msg = f"ℹ️ Aucun ajout/modif, MAIS :{summary.split('suppr.', 1)[-1]}"
-            elif "indisponible" in (summary or "").lower():
-                msg = "❌ **Sheet ILLISIBLE** (API/quota Google ?) — le pull n'a rien pu lire. Réessaie dans 1-2 min, puis `/sheetsync status`."
-            elif "pause" in (summary or "").lower():
-                msg = "⏸️ **Sync en PAUSE** — aucun pull appliqué. Fais `/sheetsync resume` pour réactiver."
-            else:
-                msg = "Rien de nouveau côté Sheet (le contenu du Sheet = déjà l'état du site)."
-            await interaction.followup.send(msg[:1990], ephemeral=True)
+            res = await asyncio.to_thread(sheets_sync.pull_and_merge, force)
+            # La formulation vit dans sheets_sync.pull_message : elle se
+            # décidait ici en relisant le TEXTE du résumé (« RETENUES » dedans ?
+            # « pause » dedans ?), et tout ce que ce décodage ne prévoyait pas —
+            # à commencer par un pull ANNULÉ — retombait sur « rien de nouveau ».
+            self._journal(res, toujours=True)   # l'écran ET le journal, jamais l'un sans l'autre
+            await interaction.followup.send(sheets_sync.pull_message(res)[:1990],
+                                            ephemeral=True)
             return
 
         if action == "check":

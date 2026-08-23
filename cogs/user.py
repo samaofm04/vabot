@@ -11,6 +11,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+import safe_json
 from video_transform import transform_video, load_config as load_transform_config
 from image_transform import transform_image, load_config as load_image_config
 
@@ -1859,16 +1860,40 @@ class UserCog(commands.Cog):
             return
 
         VA_INSTA_FILE_C = DATA_DIR / "va_insta_accounts.json"
-        try:
-            existing = _json_ig.loads(VA_INSTA_FILE_C.read_text(encoding="utf-8")) if VA_INSTA_FILE_C.exists() else {}
-        except Exception:
+        existing = safe_json.load(VA_INSTA_FILE_C, {}) or {}
+        if not isinstance(existing, dict):
             existing = {}
-        existing[uid] = handles
-        try:
-            DATA_DIR.mkdir(parents=True, exist_ok=True)
-            VA_INSTA_FILE_C.write_text(_json_ig.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
-        except Exception as e:
-            await interaction.response.send_message(f"❌ Erreur de sauvegarde : {e}", ephemeral=True)
+        # Le SITE ecrit ce fichier au format riche
+        # ({handle, email, password, totp_seed}). Ecrire ici une simple liste de
+        # chaines effacait le mot de passe et le TOTP saisis sur le site pour ce
+        # VA : on repart donc des entrees existantes, appariees par handle.
+        anciens = {}
+        for it in (existing.get(uid) or []):
+            if isinstance(it, dict):
+                h = str(it.get("handle") or "").strip().lower()
+                if h:
+                    anciens[h] = it
+            elif isinstance(it, str) and it.strip():
+                anciens[it.strip().lower()] = None
+        nouveaux = []
+        for h in handles:
+            vieux = anciens.get(h)
+            if isinstance(vieux, dict):
+                entree = dict(vieux)
+                entree["handle"] = h
+            else:
+                entree = {"handle": h, "email": "", "password": "", "totp_seed": ""}
+            nouveaux.append(entree)
+        existing[uid] = nouveaux
+        # Ecriture ATOMIQUE : write_text tronquait le fichier avant de le
+        # remplir, une coupure emportait les comptes de TOUS les VAs.
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        if not safe_json.write_text(
+                VA_INSTA_FILE_C,
+                _json_ig.dumps(existing, indent=2, ensure_ascii=False)):
+            await interaction.response.send_message(
+                "❌ Erreur de sauvegarde — tes comptes n'ont PAS été enregistrés. "
+                "Préviens un admin.", ephemeral=True)
             return
 
         lines = [f"• @{h}" for h in handles]
@@ -2300,15 +2325,25 @@ class UserCog(commands.Cog):
                     ephemeral=True)
             return
         await interaction.response.defer()
-        total = len(caps)
-        await interaction.followup.send(
-            f"⭐ **{total} CAPTION(S) BANGER pour `{identity}`** — les meilleures, "
-            f"à réutiliser ! 🔥\n"
-            f"📝 La **caption** se met **par-dessus la vidéo** dans l'éditeur Insta.")
-        for i, c in enumerate(caps, start=1):
+        # Une favorite au texte VIDE etait sautee dans la boucle : le VA lisait
+        # « 5 CAPTIONS » et n'en recevait que 4, sans un mot. On les ecarte
+        # AVANT de compter, et on dit combien.
+        utiles = [c for c in caps if str(c.get("text") or "").strip()]
+        vides = len(caps) - len(utiles)
+        if not utiles:
+            await interaction.followup.send(
+                f"⭐ Tes **{vides} caption(s) favorite(s)** pour `{identity}` sont **vides** "
+                "(aucun texte). _(Un admin les corrige sur le site, onglet **Caption**.)_")
+            return
+        total = len(utiles)
+        entete = (f"⭐ **{total} CAPTION(S) BANGER pour `{identity}`** — les meilleures, "
+                  f"à réutiliser ! 🔥\n"
+                  f"📝 La **caption** se met **par-dessus la vidéo** dans l'éditeur Insta.")
+        if vides:
+            entete += f"\n⚠️ {vides} caption(s) favorite(s) écartée(s) : texte vide."
+        await interaction.followup.send(entete)
+        for i, c in enumerate(utiles, start=1):
             txt = str(c.get("text") or "").strip()
-            if not txt:
-                continue
             await interaction.followup.send(f"**{i}/{total}**\n```\n{txt[:1800]}\n```")
             desc = str(c.get("desc") or "").strip()
             if desc:
@@ -3231,7 +3266,10 @@ class UserCog(commands.Cog):
             ephemeral=True)
 
     def _store_payment(self, uid, info):
-        """Ecrit users.json[uid]['payment'] = info (cree l'entree dict si besoin)."""
+        """Ecrit users.json[uid]['payment'] = info (cree l'entree dict si besoin).
+        Retourne True SI l'ecriture a reussi : l'appelant annonce « enregistré »,
+        il ne doit pas le faire quand rien n'a ete ecrit (c'est le moyen d'etre
+        paye, un VA ne doit pas croire l'avoir declare pour rien)."""
         import time as _t
         info["updated_at"] = int(_t.time())
         users = load_json(USERS_FILE, {})
@@ -3240,7 +3278,7 @@ class UserCog(commands.Cog):
             data = {"identity": data} if isinstance(data, str) and data else {}
             users[uid] = data
         data["payment"] = info
-        save_json(USERS_FILE, users)
+        return bool(save_json(USERS_FILE, users))
 
     async def _notify_payment(self, interaction, info, screenshot_att=None):
         """Poste le moyen de paiement dans le SALON PERSO du VA (privé : seul le VA +
@@ -3278,8 +3316,14 @@ class UserCog(commands.Cog):
 
     async def _save_payment(self, interaction, info):
         """Enregistre le moyen de paiement (TapTap) + confirme + notifie."""
-        self._store_payment(str(interaction.user.id), info)
+        ok = self._store_payment(str(interaction.user.id), info)
         summary = _payment_summary(info) or "—"
+        if not ok:
+            await interaction.response.send_message(
+                f"❌ **Échec de l'enregistrement** de ton moyen de paiement.\n{summary}\n\n"
+                "Rien n'a été sauvegardé — réessaie, et préviens un manager si ça persiste.",
+                ephemeral=True)
+            return
         await interaction.response.send_message(
             f"✅ **Moyen de paiement enregistré !**\n{summary}\n\n"
             "Le boss le verra pour te payer. Tu peux le changer quand tu veux "
@@ -3293,7 +3337,12 @@ class UserCog(commands.Cog):
         au moyen de paiement + notif."""
         import asyncio as _a
         uid = str(interaction.user.id)
-        self._store_payment(uid, info)
+        if not self._store_payment(uid, info):
+            await interaction.response.send_message(
+                "❌ **Échec de l'enregistrement** de ton adresse — rien n'a été "
+                "sauvegardé. Réessaie, et préviens un manager si ça persiste.",
+                ephemeral=True)
+            return
         chain = info.get("chain", "")
         await interaction.response.send_message(
             f"✅ Adresse enregistrée : **USDC · {chain}**\n`{info.get('address', '')}`\n\n"
@@ -4626,13 +4675,19 @@ class MesComptesInstaModal(discord.ui.Modal, title="📷 Mes comptes Instagram")
         if not lines:
             await interaction.followup.send("⚠️ Tu n'as rempli aucun champ.", ephemeral=True)
             return
+        enregistre = False
         if valid:
             try:
                 users = load_json(USERS_FILE, {})
                 k = str(interaction.user.id)
                 entry = users.get(k)
                 if not isinstance(entry, dict):
-                    entry = {}
+                    # Fiche au format ANCIEN (users.json[uid] = "julia") : la
+                    # remplacer par {} effacait l'identite du VA, qui se
+                    # retrouvait sans contenu apres un simple clic sur
+                    # « Mes comptes Insta ». On la conserve (meme reprise que
+                    # _store_payment).
+                    entry = {"identity": entry} if isinstance(entry, str) and entry else {}
                     users[k] = entry
                 existing = [x for x in (entry.get("insta_accounts") or []) if isinstance(x, str)]
                 low = [e.lower() for e in existing]
@@ -4641,12 +4696,21 @@ class MesComptesInstaModal(discord.ui.Modal, title="📷 Mes comptes Instagram")
                         existing.append(u)
                         low.append(u.lower())
                 entry["insta_accounts"] = existing
-                save_json(USERS_FILE, users)
-            except Exception:
-                pass
+                enregistre = bool(save_json(USERS_FILE, users))
+            except Exception as e:
+                print(f"[user] enregistrement comptes insta échoué : {e}", flush=True)
+                enregistre = False
+        # Ne JAMAIS annoncer « enregistré » sans l'avoir ecrit : le VA repartait
+        # en croyant ses comptes connus alors que rien n'etait sauvegarde.
+        if valid and enregistre:
+            fin = "\n\n_Comptes valides enregistrés ✅ (visibles dans « Mes comptes Insta »)_"
+        elif valid:
+            fin = ("\n\n⚠️ **Impossible d'enregistrer** tes comptes pour l'instant "
+                   "(erreur d'écriture). Réessaie, et préviens un admin si ça persiste.")
+        else:
+            fin = ""
         await interaction.followup.send(
-            "📷 **Validation de tes comptes Instagram :**\n\n" + "\n".join(lines)
-            + ("\n\n_Comptes valides enregistrés ✅ (visibles dans « Mes comptes Insta »)_" if valid else ""),
+            "📷 **Validation de tes comptes Instagram :**\n\n" + "\n".join(lines) + fin,
             ephemeral=True)
 
 
@@ -5177,13 +5241,18 @@ class _JailbreakActionButton(discord.ui.Button):
         if cmd is None:
             await interaction.response.send_message("Action indisponible.", ephemeral=True)
             return
-        # Serveur US : pseudo / name / bio / pp viennent de l'identité SOURCE
-        # (toutes ces models, c'est Jessye) — le média reste celui de la model.
+        # Serveur US : pseudo / name viennent de l'identité SOURCE (Jessye) —
+        # le média reste celui de la model. Le MARCHE du VA tranche en plus du
+        # serveur, comme dans le panneau permanent (JBActionButton) : un VA
+        # « Jailbreak FR » sur le serveur US recevait ici les textes de Jessye
+        # alors que la meme action, dans le panneau, lui rendait ceux de SA
+        # model — deux chemins, deux resultats pour un seul bouton.
         model = self.model
         try:
             import guild_features as gf
             if (self.key in _US_SOURCED_ACTIONS
-                    and gf.is_us_guild(getattr(interaction, "guild", None))):
+                    and gf.is_us_guild(getattr(interaction, "guild", None))
+                    and marche_du_membre(interaction.user) != "fr"):
                 model = _US_SOURCE_IDENTITY
         except Exception:
             pass

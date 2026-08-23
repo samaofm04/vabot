@@ -133,31 +133,41 @@ def _desired(others, groups, seps):
 
 
 async def _apply_order(guild, category, desired):
+    """(déplacés, échecs). Les deux comptent des salons REELLEMENT bougés :
+    l'ancien code renvoyait la taille du payload même quand l'appel groupé ET
+    la reprise salon par salon avaient échoué (permission manquante) — /rangerva
+    annonçait alors « N salon(s) déplacé(s) » sans que rien n'ait bougé."""
     current = list(category.text_channels)
     if [c.id for c in current] == [c.id for c in desired]:
-        return 0
+        return 0, 0
     positions = sorted(c.position for c in current)
     payload = []
     for i, ch in enumerate(desired):
         if i < len(positions) and ch.position != positions[i]:
             payload.append({"id": ch.id, "position": positions[i]})
     if not payload:
-        return 0
+        return 0, 0
     try:
         await guild._state.http.bulk_channel_update(
             guild.id, payload, reason="Tri VA (liens/activité)")
-    except Exception:
-        for i, ch in enumerate(desired):
-            try:
-                await ch.move(category=category, beginning=True, offset=i)
-            except Exception:
-                pass
-    return len(payload)
+        return len(payload), 0
+    except Exception as e:
+        print(f"[vasort] tri groupe impossible dans {ascii(category.name)} : {e}", flush=True)
+    done = fails = 0
+    for i, ch in enumerate(desired):
+        try:
+            await ch.move(category=category, beginning=True, offset=i)
+            done += 1
+        except Exception as e:
+            fails += 1
+            print(f"[vasort] deplacement #{ascii(getattr(ch, 'name', '?'))} : {e}", flush=True)
+    return done, fails
 
 
 async def sort_guild(guild, create_seps=True) -> tuple:
-    """Trie toutes les catégories avec des salons VA. -> (cats_modifiées, moves)"""
-    cats = moves = 0
+    """Trie toutes les catégories avec des salons VA.
+    -> (cats_modifiées, moves, echecs)"""
+    cats = moves = fails = 0
     for cat in guild.categories:
         others, groups, seps = _split(cat)
         n_vas = sum(len(v) for v in groups.values())
@@ -166,16 +176,18 @@ async def sort_guild(guild, create_seps=True) -> tuple:
             for ch in list(seps.values()):
                 try:
                     await ch.delete(reason="Plus de salons VA ici")
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"[vasort] suppression separateur #{ascii(getattr(ch, 'name', '?'))} : {e}",
+                          flush=True)
             continue
         sep_changed = await _sync_separators(guild, cat, groups, seps, allow_create=create_seps)
         desired = _desired(others, groups, seps)
-        n = await _apply_order(guild, cat, desired)
+        n, nf = await _apply_order(guild, cat, desired)
+        fails += nf
         if n or sep_changed:
             cats += 1
             moves += n
-    return cats, moves
+    return cats, moves, fails
 
 
 class VASort(commands.Cog):
@@ -191,7 +203,13 @@ class VASort(commands.Cog):
     async def auto_sort(self):
         for g in self.bot.guilds:
             try:
-                await sort_guild(g)
+                _c, _m, _f = await sort_guild(g)
+                if _f:
+                    # Sans cette ligne, un tri qui echoue toutes les 20 min ne
+                    # laissait aucune trace : « les salons ne se rangent plus »
+                    # sans rien a lire dans les logs.
+                    print(f"[vasort] {ascii(g.name)}: {_f} deplacement(s) refuse(s) "
+                          "(permission « Gérer les salons » ?)", flush=True)
             except Exception as e:
                 print(f"[vasort] {g.name}: {e}", flush=True)
 
@@ -257,21 +275,41 @@ class VASort(commands.Cog):
                 chunks.append(buf)
             for c in chunks[:6]:
                 await interaction.followup.send(c, ephemeral=True)
+            # Au-dela de 6 messages l'apercu etait coupe sans le dire : on
+            # annonce ce qui n'a pas ete montre (le tri, lui, prend tout).
+            if len(chunks) > 6:
+                await interaction.followup.send(
+                    f"… +{len(chunks) - 6} bloc(s) non affiché(s) (aperçu trop long) — "
+                    "le rangement, lui, traitera **toutes** les catégories.",
+                    ephemeral=True)
             return
 
         try:
-            cats, moves = await sort_guild(interaction.guild)
+            cats, moves, fails = await sort_guild(interaction.guild)
         except Exception as e:
             await interaction.followup.send(f"❌ Erreur : {e}", ephemeral=True)
             return
+        # « fails » = déplacements refusés par Discord. Sans ça, un tri
+        # entièrement refusé (rôle du bot trop bas) répondait « tout est déjà
+        # dans le bon ordre » alors que rien n'avait bougé.
+        avert = ""
+        if fails:
+            avert = (f"\n🚫 **{fails} déplacement(s) refusé(s)** — le bot a besoin de "
+                     "**Gérer les salons** et son rôle doit être **au-dessus** "
+                     "(Paramètres serveur → Rôles).")
         if not cats:
-            await interaction.followup.send(
-                "✅ Tout est déjà dans le bon ordre (séparateurs + 🔗 → 🔗⚙️ → 🟢🟠🔴).",
-                ephemeral=True)
+            if fails:
+                await interaction.followup.send(
+                    "⚠️ **Rien n'a pu être rangé.**" + avert, ephemeral=True)
+            else:
+                await interaction.followup.send(
+                    "✅ Tout est déjà dans le bon ordre (séparateurs + 🔗 → 🔗⚙️ → 🟢🟠🔴).",
+                    ephemeral=True)
         else:
             await interaction.followup.send(
                 f"✅ **{cats}** catégorie(s) rangée(s) ({moves} salon(s) déplacé(s)).\n"
-                "Séparateurs staff-only en place. Le tri se refait tout seul toutes les 20 min.",
+                "Séparateurs staff-only en place. Le tri se refait tout seul toutes les 20 min."
+                + avert,
                 ephemeral=True)
 
 

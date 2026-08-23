@@ -272,6 +272,7 @@ async def run_autopost_for_all(bot):
     users = load_users()
     count = 0
     errors = 0
+    vides = 0   # VAs cibles mais restes sans aucun media
     for user_id_str, raw_data in users.items():
         if isinstance(raw_data, str):
             identity = raw_data
@@ -288,18 +289,29 @@ async def run_autopost_for_all(bot):
             log.warning(f"Autopost: channel {channel_id} introuvable pour user {user_id_str}")
             continue
         try:
+            # send_* rend False quand l'identite n'a pas de media : compter le VA
+            # comme « traite » dans ce cas donnait un log rassurant (« 12 VAs
+            # traites ») alors que personne n'avait rien recu.
+            n_ok = 0
             if cfg.get("post_reel", True):
-                await send_reel(channel, identity)
+                n_ok += 1 if await send_reel(channel, identity) else 0
             if cfg.get("post_post", True):
-                await send_post(channel, identity)
+                n_ok += 1 if await send_post(channel, identity) else 0
             if cfg.get("post_story", True):
-                await send_story(channel, identity)
+                n_ok += 1 if await send_story(channel, identity) else 0
             if cfg.get("post_storycta", True):
-                await send_storycta(channel, identity)
-            count += 1
+                n_ok += 1 if await send_storycta(channel, identity) else 0
+            if n_ok:
+                count += 1
+            else:
+                vides += 1
+                log.warning(f"Autopost: rien envoye a {user_id_str} "
+                            f"(identite {identity} sans media ?)")
         except Exception as e:
             log.error(f"Autopost erreur pour user {user_id_str}: {e}")
             errors += 1
+    if vides:
+        log.warning(f"Autopost: {vides} VA(s) n'ont RIEN recu (stock d'identite vide)")
     return count, errors
 
 
@@ -313,11 +325,20 @@ async def run_broadcast(
 ):
     """Envoie N de chaque type a chaque VA correspondant (ou tous si filter=None).
 
-    Retourne (nb_vas_touches, nb_erreurs).
+    Retourne (nb_vas_touches, nb_erreurs, details) ou `details` compte ce qui
+    n'est PAS parti : VAs dont le salon est introuvable, VAs pour lesquels
+    AUCUN media n'a pu etre envoye (stock vide pour leur identite), et le
+    nombre reel d'envois. Sans ces compteurs, /broadcast annoncait « N VAs
+    touches » et un total d'items alors qu'une identite sans stock ne recevait
+    strictement rien — send_reel/post/story rendent False en silence.
     """
     users = load_users()
     count = 0
     errors = 0
+    envois = 0        # medias REELLEMENT postes
+    sans_salon = 0    # salon introuvable (bot absent du serveur, salon supprime)
+    sans_contenu = 0  # VA cible mais 0 media envoye (stock de l'identite vide)
+    vides = {}        # identite -> nb de VAs restes sans rien
     for user_id_str, raw_data in users.items():
         if isinstance(raw_data, str):
             identity = raw_data
@@ -334,22 +355,32 @@ async def run_broadcast(
             continue
         channel = bot.get_channel(channel_id)
         if not channel:
+            sans_salon += 1
             log.warning(f"Broadcast: channel {channel_id} introuvable pour {user_id_str}")
             continue
         try:
+            n_ok = 0
             for _ in range(n_reels):
-                await send_reel(channel, identity)
+                n_ok += 1 if await send_reel(channel, identity) else 0
             for _ in range(n_posts):
-                await send_post(channel, identity)
+                n_ok += 1 if await send_post(channel, identity) else 0
             for _ in range(n_stories):
-                await send_story(channel, identity)
+                n_ok += 1 if await send_story(channel, identity) else 0
             for _ in range(n_storyctas):
-                await send_storycta(channel, identity)
-            count += 1
+                n_ok += 1 if await send_storycta(channel, identity) else 0
+            envois += n_ok
+            if n_ok:
+                count += 1
+            else:
+                sans_contenu += 1
+                vides[identity] = vides.get(identity, 0) + 1
+                log.warning(f"Broadcast: rien envoye a {user_id_str} "
+                            f"(identite {identity} sans stock ?)")
         except Exception as e:
             log.error(f"Broadcast erreur pour user {user_id_str}: {e}")
             errors += 1
-    return count, errors
+    return count, errors, {"envois": envois, "sans_salon": sans_salon,
+                           "sans_contenu": sans_contenu, "vides": vides}
 
 
 class AutoPost(commands.Cog):
@@ -520,7 +551,7 @@ class AutoPost(commands.Cog):
             f"{reels} reels + {posts} posts + {stories} stories + {storyctas} CTAs par VA...",
             ephemeral=True,
         )
-        count, errors = await run_broadcast(
+        count, errors, det = await run_broadcast(
             self.bot,
             identity_filter=identite,
             n_reels=reels,
@@ -528,11 +559,20 @@ class AutoPost(commands.Cog):
             n_stories=stories,
             n_storyctas=storyctas,
         )
-        await interaction.followup.send(
-            f"✅ Broadcast termine : **{count}** VAs touches, **{errors}** erreur(s).\n"
-            f"Total envois : ~{count * total} items.",
-            ephemeral=True,
-        )
+        # On annonce le nombre d'envois REELS (avant : count * total, un chiffre
+        # theorique qui restait juste meme quand une identite sans stock n'avait
+        # rien recu du tout).
+        msg = (f"✅ Broadcast termine : **{count}** VA(s) servis, "
+               f"**{det['envois']}** item(s) envoyes, **{errors}** erreur(s).")
+        if det["sans_contenu"]:
+            detail = ", ".join(f"`{k}` ×{v}" for k, v in sorted(det["vides"].items()))
+            msg += (f"\n⚠️ **{det['sans_contenu']} VA(s) n'ont RIEN recu** — aucun media "
+                    f"disponible pour leur identite ({detail}). Ajoute du contenu "
+                    f"(`/addreels`, `/addstories`, …).")
+        if det["sans_salon"]:
+            msg += (f"\n⚠️ {det['sans_salon']} VA(s) ignores : salon introuvable "
+                    f"(salon supprime, ou bot absent de leur serveur).")
+        await interaction.followup.send(msg[:1990], ephemeral=True)
 
     @app_commands.command(name="setvachannel", description="[ADMIN] Définit le salon d'auto-post pour un VA")
     @app_commands.describe(user="Le VA", channel="Le salon (laisse vide pour utiliser le salon courant)")

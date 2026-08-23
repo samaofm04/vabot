@@ -89,11 +89,14 @@ def read_lines(path):
 
 
 def write_lines(path, lines):
+    # Ecriture ATOMIQUE : usernames.txt / names.txt / captions sont des fichiers
+    # de data/. write_text tronque a zero puis reremplit ; une coupure au milieu
+    # (le VPS redemarre a chaque deploiement) laissait un pool a moitie ecrit.
+    # backup=False : pas de .prev a cote des medias (le dossier d'identite est
+    # parcouru et synchronise vers Drive, un fichier inconnu y ferait du bruit).
     path.parent.mkdir(parents=True, exist_ok=True)
-    if lines:
-        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    else:
-        path.write_text("", encoding="utf-8")
+    text = "\n".join(lines) + "\n" if lines else ""
+    safe_json.write_text(path, text, backup=False)
 
 
 def read_bios_from(path):
@@ -104,11 +107,11 @@ def read_bios_from(path):
 
 
 def write_bios_to(path, bios):
+    # Meme raison que write_lines : bios.txt est un fichier de data/, l'ecriture
+    # doit etre atomique (sinon une coupure laisse la liste de bios tronquee).
     path.parent.mkdir(parents=True, exist_ok=True)
-    if bios:
-        path.write_text("\n---\n".join(bios) + "\n", encoding="utf-8")
-    else:
-        path.write_text("", encoding="utf-8")
+    text = "\n---\n".join(bios) + "\n" if bios else ""
+    safe_json.write_text(path, text, backup=False)
 
 
 def read_bios(identity):
@@ -761,6 +764,9 @@ class Admin(commands.Cog):
         examples = 0
         captions = 0
         descriptions = 0
+        # Extensions inconnues : ecartees en silence jusqu'ici. Un zip de .HEIC
+        # ou de .avi donnait « Aucune vidéo trouvée » sans dire ce qui clochait.
+        ignores, ignore_names = 0, []
         with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
             tmp.write(zip_bytes)
             tmp_path = tmp.name
@@ -789,14 +795,27 @@ class Admin(commands.Cog):
                             with zf.open(member) as src, (videos_dir / base).open("wb") as dst:
                                 shutil.copyfileobj(src, dst)
                             videos += 1
+                        else:
+                            ignores += 1
+                            if len(ignore_names) < 5:
+                                ignore_names.append(base)
         finally:
             os.unlink(tmp_path)
+        _ignored_txt = ""
+        if ignores:
+            _ignored_txt = (
+                f"\n⚠️ **{ignores} fichier(s) ignorés — extension non reconnue** "
+                f"(vidéos acceptées : {', '.join(sorted(VIDEO_EXTS))}) : "
+                + ", ".join(f"`{n}`" for n in ignore_names)
+                + (" …" if ignores > len(ignore_names) else ""))
         if videos == 0:
             shutil.rmtree(identity_dir)
-            await interaction.followup.send("Aucune vidéo trouvée dans le zip.", ephemeral=True)
+            await interaction.followup.send(
+                ("Aucune vidéo trouvée dans le zip." + _ignored_txt)[:1990], ephemeral=True)
             return
         await interaction.followup.send(
-            f"✅ Identité `{safe_name}` créée: **{videos}** clean / **{examples}** exemples / **{captions}** caption(s) / **{descriptions}** description(s).",
+            (f"✅ Identité `{safe_name}` créée: **{videos}** clean / **{examples}** exemples / "
+             f"**{captions}** caption(s) / **{descriptions}** description(s).{_ignored_txt}")[:1990],
             ephemeral=True,
         )
 
@@ -808,6 +827,10 @@ class Admin(commands.Cog):
         if not identities:
             await interaction.response.send_message("Aucune identité.", ephemeral=True)
             return
+        # defer : le comptage lit tous les dossiers d'identite (reels, captions,
+        # bios, usernames) — au-dela d'une poignee d'identites ca depasse les 3 s
+        # d'acquittement de Discord et la commande repond « n'a pas repondu ».
+        await interaction.response.defer(ephemeral=True)
         users = load_json(USERS_FILE, {})
 
         def _va_identity(v):
@@ -830,9 +853,21 @@ class Admin(commands.Cog):
             lines.append(
                 f"• `{n}` — 🎬{n_reels} reels ({n_captions}cap/{n_descs}desc/{n_examples}ex) • 📝{n_bios} bios • 👤{n_usernames} usernames • {assigned} VA"
             )
-        await interaction.response.send_message(
-            f"**Identités** ({len(identities)})\n" + "\n".join(lines), ephemeral=True
-        )
+        # Le message etait envoye en entier : au-dela d'une vingtaine
+        # d'identites il depasse les 2000 caracteres de Discord et l'envoi
+        # ECHOUE (la commande ne repond rien du tout). On coupe, et on DIT
+        # combien de lignes ne sont pas affichees.
+        header = f"**Identités** ({len(identities)})\n"
+        shown, total = [], len(header)
+        for ln in lines:
+            if total + len(ln) + 1 > 1900:
+                break
+            shown.append(ln)
+            total += len(ln) + 1
+        body = header + "\n".join(shown)
+        if len(shown) < len(lines):
+            body += f"\n… +{len(lines) - len(shown)} identité(s) non affichée(s) (trop long pour un message)"
+        await interaction.followup.send(body, ephemeral=True)
 
     @app_commands.command(name="deleteidentite", description="Supprime une identité et tout son contenu")
     @app_commands.describe(name="Nom exact de l'identité")
@@ -1113,6 +1148,10 @@ class Admin(commands.Cog):
         zip_bytes = await videos_zip.read()
         videos_added = []  # liste des videos ajoutees (pour pairing avec captions/descriptions)
         videos = examples = captions = descriptions = skipped = 0
+        # Fichiers d'un type inconnu (.heic, .avi, .jpg…) : ils etaient ecartes
+        # SANS TRACE — un zip entier pouvait ne rien donner et le message disait
+        # « 0 vidéo » sans dire pourquoi. On compte et on nomme les premiers.
+        ignores, ignore_names = 0, []
         with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
             tmp.write(zip_bytes)
             tmp_path = tmp.name
@@ -1144,6 +1183,10 @@ class Admin(commands.Cog):
                                 shutil.copyfileobj(src, dst)
                             videos += 1
                             videos_added.append(target)
+                        else:
+                            ignores += 1
+                            if len(ignore_names) < 5:
+                                ignore_names.append(base)
         finally:
             os.unlink(tmp_path)
 
@@ -1195,7 +1238,12 @@ class Admin(commands.Cog):
         )
         if skipped:
             msg += f"\n⚠️ {skipped} fichier(s) ignorés (nom déjà existant)"
-        await interaction.followup.send(msg, ephemeral=True)
+        if ignores:
+            msg += (f"\n⚠️ **{ignores} fichier(s) ignorés — extension non reconnue** "
+                    f"(vidéos acceptées : {', '.join(sorted(VIDEO_EXTS))}) : "
+                    + ", ".join(f"`{n}`" for n in ignore_names)
+                    + (" …" if ignores > len(ignore_names) else ""))
+        await interaction.followup.send(msg[:1990], ephemeral=True)
 
     @app_commands.command(name="setreelcaption", description="Définit la caption (overlay) d'un reel")
     @app_commands.describe(

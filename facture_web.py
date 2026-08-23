@@ -596,25 +596,79 @@ def _line_usd(line: dict, rev_bases: dict, settings: dict) -> float:
     return round(_to_usd(float(line.get("amount") or 0), line.get("currency") or "USD", settings), 2)
 
 
-def _pct_base_missing(line: dict, rev_bases: dict) -> int:
-    """Nombre de bases « % d'une ligne » INTROUVABLES pour cette ligne.
+def _pct_base_ids(line: dict) -> list:
+    """Ids des revenus servant de base à une ligne en % (vide si base globale).
 
-    Supprimer un revenu laisse les payes en % pointées sur un id disparu :
-    _line_usd rend alors 0 sans un mot. On compte ici les bases manquantes pour
-    que l'écran puisse le dire (badge « base supprimée »). Les bases globales
-    (rev_total / rev_of / rev_mym) existent toujours -> jamais orphelines.
+    Une seule lecture de `pct_of` pour tout le module : 'line:<id>' (une base)
+    et 'lines:<id>,<id>' (plusieurs) se comportaient différemment à trois
+    endroits, et c'est exactement là que les messages se sont mis à mentir.
     """
     if (line.get("form") or "fixed") != "pct":
-        return 0
+        return []
     po = str(line.get("pct_of") or "")
     if po.startswith("lines:"):
-        ids = [i for i in po[6:].split(",") if i]
-        if not ids:
-            return 1        # base vidée : toutes les lignes de base supprimées
-        return sum(1 for i in ids if f"line:{i}" not in rev_bases)
-    if po.startswith("line:"):
-        return 0 if po in rev_bases else 1
-    return 0
+        return [i for i in po[6:].split(",") if i]
+    if po.startswith("line:") and po[5:]:
+        return [po[5:]]
+    return []               # rev_total / rev_of / rev_mym : jamais orphelines
+
+
+def _lines_index(d: dict) -> dict:
+    """id de ligne -> ligne, TOUS mois confondus (première occurrence gardée).
+
+    Le report mensuel réattribue des ids neufs : une base qui n'est plus
+    reportée parce que sa DATE DE FIN est passée n'existe plus que dans les
+    mois précédents. Sans cet index, impossible de distinguer une base
+    SUPPRIMÉE d'une base TERMINÉE — et l'écran conseillait « redonne-leur une
+    base » à propos d'une ligne qui s'était simplement arrêtée à sa date de fin.
+    """
+    idx = {}
+    for m in (d.get("months") or {}).values():
+        for l in (m.get("lines") or []):
+            i = l.get("id")
+            if i and i not in idx:
+                idx[i] = l
+    return idx
+
+
+def _pct_base_state(line: dict, rev_bases: dict, idx: dict, month: str):
+    """État des bases « % d'une ligne », ou None si elles répondent toutes.
+
+    Trois situations que l'écran confondait sous « base supprimée — 0 $ » :
+      - TOUTES les bases ont disparu -> la ligne vaut bien 0 $ ;
+      - une base sur plusieurs a disparu -> la ligne calcule encore sur les
+        bases restantes : annoncer 0 $ était faux ;
+      - la base n'a pas été supprimée, sa DATE DE FIN est passée (donc elle
+        n'est plus reportée) -> « base supprimée » est faux, et « rechoisis une
+        base » aussi : c'est l'arrêt de la ligne source qui est en cause.
+    Rendu : {"total", "manquantes", "vide", "expirees", "details"[{label,end}]}.
+    """
+    if (line.get("form") or "fixed") != "pct":
+        return None
+    po = str(line.get("pct_of") or "")
+    ids = _pct_base_ids(line)
+    if not ids:
+        if po.startswith("lines:"):
+            # base VIDÉE (la dernière ligne de base a été supprimée) : plus rien
+            # à calculer, et plus aucun id pour dire de quoi il s'agissait.
+            return {"total": 0, "manquantes": 0, "vide": True,
+                    "expirees": 0, "details": []}
+        return None
+    manquants = [i for i in ids if f"line:{i}" not in rev_bases]
+    if not manquants:
+        return None
+    first = _month_bounds(month)[0]
+    details, expirees = [], 0
+    for i in manquants:
+        src = idx.get(i) or {}
+        fin = _as_date(src.get("end"))
+        finie = bool(fin and fin < first)
+        if finie:
+            expirees += 1
+        details.append({"label": str(src.get("label") or "")[:60],
+                        "end": str(src.get("end") or "") if finie else ""})
+    return {"total": len(ids), "manquantes": len(manquants), "vide": False,
+            "expirees": expirees, "details": details[:6]}
 
 
 def _pin_creator_id(month: str, line_id, cid: int) -> None:
@@ -822,8 +876,14 @@ def compute_state(month: str) -> dict:
     tot_rev = tot_exp = 0.0
     by_market = {mk: {"rev": 0.0, "exp": 0.0, "rev_count": 0, "exp_count": 0,
                       "reimb": 0.0, "reimb_assoc": {}} for mk in MARKETS}
+    # Lignes en % dont la base ne répond plus. Trois compteurs SÉPARÉS parce
+    # que ce sont trois phrases différentes à l'écran : sans base du tout
+    # (0 $), sans base parce que la base est ARRIVÉE À SA FIN, et base
+    # MULTIPLE amputée (montant réduit, surtout pas 0 $).
     pct_orphelines = 0
-    hors_periode_n = 0
+    pct_orph_expirees = 0
+    pct_partielles = 0
+    _lidx = _lines_index(d)     # pour retrouver une base des mois précédents
     for l in lines:
         extra = {}
         if l.get("id") in resolved_src:
@@ -834,7 +894,6 @@ def compute_state(month: str) -> dict:
         _actif = _line_active_in(l, month)
         if not _actif:
             usd = 0.0
-            hors_periode_n += 1
         elif l.get("id") in resolved_rev:
             usd = resolved_rev[l["id"]]
         elif (l.get("form") or "") == "mypuls_crm":
@@ -847,15 +906,23 @@ def compute_state(month: str) -> dict:
             extra["va_clicks"] = clicks
         else:
             usd = _line_usd(l, rev_bases, settings)
-        if (l.get("form") or "") == "pct":
-            # Base « % d'une ligne » disparue (revenu supprimé) : _line_usd rend
-            # 0 sans le dire, et la paye s'évaporait en silence — 800 $ de paye
-            # modèle en moins, part lead gonflée d'autant, recopié chaque mois.
-            # On le REMONTE au client, qui pose un badge sur la ligne.
-            _miss = _pct_base_missing(l, rev_bases)
-            if _miss:
-                extra["pct_orphan"] = _miss
-                pct_orphelines += 1
+        if (l.get("form") or "") == "pct" and _actif:
+            # Base « % d'une ligne » qui ne répond plus : _line_usd rend 0 (ou
+            # moins que prévu) sans le dire, et la paye s'évaporait en silence
+            # — 800 $ de paye modèle en moins, part lead gonflée d'autant,
+            # recopié chaque mois. On REMONTE l'état exact au client, qui écrit
+            # la phrase correspondante. Inutile sur une ligne hors de sa
+            # période : son 0 $ vient de ses dates, pas de sa base, et lui
+            # donner une base n'y changerait rien.
+            _pb = _pct_base_state(l, rev_bases, _lidx, month)
+            if _pb:
+                extra["pct_base"] = _pb
+                if _pb["vide"] or _pb["manquantes"] >= _pb["total"]:
+                    pct_orphelines += 1          # plus AUCUNE base -> 0 $
+                    if _pb["manquantes"] and _pb["expirees"] >= _pb["manquantes"]:
+                        pct_orph_expirees += 1   # ... par date de fin, pas par suppression
+                else:
+                    pct_partielles += 1          # reste des bases -> montant RÉDUIT
         if not _actif:
             extra["hors_periode"] = True
         ll = dict(l)
@@ -994,10 +1061,13 @@ def compute_state(month: str) -> dict:
             "assoc_by_mk": {mk: round(v, 2) for mk, v in assoc_by_mk.items()},
             "rev_count": sum(1 for l in lines if l.get("type") == "rev"),
             "exp_count": sum(1 for l in lines if l.get("type") != "rev"),
-            # comptés et remontés : lignes en % dont la base a disparu, et
-            # lignes hors de leur période (début/fin) donc à 0 ce mois-ci.
+            # Comptés et remontés (bandeau en haut de page) : lignes en %
+            # qui n'ont plus AUCUNE base (donc 0 $), la part d'entre elles dont
+            # la base est seulement arrivée à sa date de fin, et celles dont il
+            # ne manque qu'une base sur plusieurs (montant réduit, pas 0 $).
             "pct_orphans": pct_orphelines,
-            "hors_periode": hors_periode_n,
+            "pct_orphans_expirees": pct_orph_expirees,
+            "pct_partielles": pct_partielles,
         },
         "cats": CATS,
         "cat_order": CAT_ORDER,
@@ -1554,16 +1624,41 @@ def register(app, is_auth):
         # Une ligne de revenu peut servir de BASE à des payes en % (« 35 % de
         # OF Lola »). La supprimer sans rien dire mettait ces payes à $0 et
         # gonflait la part lead d'autant. On prévient, et on répare les liens.
-        deps = []
+        # DEUX conséquences distinctes, donc deux listes : une paye qui perd sa
+        # SEULE base tombe à 0 $ ; une paye sur base MULTIPLE (« lines:A,B »)
+        # garde les autres et vaut encore quelque chose — lui annoncer 0 $
+        # était faux, l'écran et le message se contredisaient.
+        sans_base, reduites = [], []
         for l in lines:
-            po = str(l.get("pct_of") or "")
-            if (l.get("form") == "pct" and lid and
-                    (po == f"line:{lid}" or (po.startswith("lines:") and lid in po[6:].split(",")))):
-                deps.append(l.get("label") or l.get("id"))
-        if deps and (request.form.get("confirm") or "") != "1":
-            return jsonify({"ok": False, "needs_confirm": True, "dependents": deps,
-                            "error": "Des payes en % utilisent cette ligne comme base : "
-                                     + ", ".join(str(x) for x in deps[:6])})
+            if l.get("form") != "pct" or not lid or l.get("id") == lid:
+                continue
+            ids = _pct_base_ids(l)
+            if lid not in ids:
+                continue
+            nom = str(l.get("label") or l.get("id") or "?")
+            if [i for i in ids if i != lid]:
+                reduites.append(nom)
+            else:
+                sans_base.append(nom)
+        if (sans_base or reduites) and (request.form.get("confirm") or "") != "1":
+            # Texte écrit ICI : c'est le serveur qui sait laquelle des deux
+            # conséquences frappe quelle paye. Le client n'y ajoute que la
+            # question finale.
+            _nl = chr(10)
+            _p = ["Des payes en % utilisent cette ligne comme base :"]
+            if sans_base:
+                _p.append(f"- {len(sans_base)} paye(s) n'auront plus AUCUNE base et "
+                          "tomberont à 0 $ (elles ne sont PAS recalculées sur le total "
+                          "des revenus) : " + ", ".join(sans_base[:6])
+                          + (" ..." if len(sans_base) > 6 else ""))
+            if reduites:
+                _p.append(f"- {len(reduites)} paye(s) gardent leurs AUTRES bases : leur "
+                          "montant sera simplement recalculé sans celle-ci : "
+                          + ", ".join(reduites[:6])
+                          + (" ..." if len(reduites) > 6 else ""))
+            return jsonify({"ok": False, "needs_confirm": True,
+                            "sans_base": sans_base, "reduites": reduites,
+                            "error": _nl.join(_p)})
         def _flag_base_gone(l):
             # NE PAS rebaser sur rev_total : ça paierait ce % sur le CA des AUTRES
             # modèles, en boucle chaque mois. Le base disparue -> _line_usd rend
@@ -1572,28 +1667,29 @@ def register(app, is_auth):
             if "base supprimée" not in n:
                 l["notes"] = (n + " ⚠ base supprimée — à revérifier").strip()
         for l in lines:
-            po = str(l.get("pct_of") or "")
             if l.get("form") != "pct" or not lid:
                 continue
-            if po == f"line:{lid}":
-                # base unique disparue : on LAISSE pct_of pendant (résout à 0),
-                # on ne rebase PAS sur rev_total.
-                _flag_base_gone(l)
-            elif po.startswith("lines:"):
-                rest = [i for i in po[6:].split(",") if i and i != lid]
+            ids = _pct_base_ids(l)
+            if lid not in ids:
+                continue
+            if str(l.get("pct_of") or "").startswith("lines:"):
+                rest = [i for i in ids if i != lid]
                 l["pct_of"] = "lines:" + ",".join(rest)   # vide -> base 0
                 if not rest:
                     _flag_base_gone(l)
+            else:
+                # base unique disparue : on LAISSE pct_of pendant (résout à 0),
+                # on ne rebase PAS sur rev_total.
+                _flag_base_gone(l)
         before = len(lines)
         m["lines"] = [l for l in lines if l.get("id") != lid]
         _save(d)
-        # `orphelines` : les payes qui viennent de perdre leur base et valent
-        # donc 0 $ (rien n'est « rebasculé sur le total », ce serait payer ce %
-        # sur le CA des autres modèles). `relinked` est le même contenu, gardé
-        # sous son ancien nom trompeur le temps qu'un cache de navigateur serve
-        # encore l'ancien facture_app.js.
+        # `sans_base` : les payes qui n'ont plus aucune base et valent donc 0 $
+        # (rien n'est « rebasculé sur le total », ce serait payer ce % sur le CA
+        # des autres modèles). `reduites` : celles dont il restait d'autres
+        # bases — elles continuent de compter, avec un montant plus petit.
         return jsonify({"ok": True, "deleted": before - len(m["lines"]),
-                        "orphelines": deps, "relinked": deps})
+                        "sans_base": sans_base, "reduites": reduites})
 
     @app.route("/facture/line/pay", methods=["POST"])
     def facture_line_pay():

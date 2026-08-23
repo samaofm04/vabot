@@ -146,16 +146,32 @@
       ? '<div style="background:rgba(129,140,248,.06);border:1px solid rgba(129,140,248,.25);border-radius:12px;padding:10px 16px;margin-bottom:16px;font-size:12.5px;color:#c8c8da"><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.6" y="5.4" width="18.8" height="13.2" rx="2.6"/><path d="M2.6 10h18.8"/></svg> Avances à rembourser : ' +
         raKeys.map(function (k) { return '<b style="color:#a5b4fc">' + esc(k) + '</b> ' + moneyShort(ra[k]); }).join(' <span style="color:#55556a">·</span> ') + '</div>'
       : '';
-    /* Bandeau d'alerte : lignes en % dont la base a été supprimée. Elles
-       valent 0 $ (le serveur ne rebase PAS sur le total des revenus) et le
-       trou se recopie de mois en mois — il doit se voir en haut de page, pas
-       seulement ligne par ligne. Toujours pris sur d.totals : le compte est
+    /* Bandeaux d'alerte : lignes en % dont la base ne répond plus. DEUX
+       bandeaux, parce que ce sont deux conséquences différentes — plus aucune
+       base = 0 $ ; une base sur plusieurs = montant simplement réduit. Et la
+       cause est dite telle qu'elle est : une base arrivée à sa date de fin
+       n'a pas été « supprimée ». Toujours pris sur d.totals : le compte est
        global, il ne doit pas changer avec le filtre de marché. */
-    var orphN = (d.totals && d.totals.pct_orphans) || 0;
-    var orphBar = orphN
-      ? '<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.35);border-radius:12px;padding:10px 16px;margin-bottom:16px;font-size:12.5px;color:#fca5a5">⚠ <b>' +
-        orphN + ' ligne(s) en % sans base</b> (le revenu qui servait de base a été supprimé) : elles comptent pour <b>0 $</b> ce mois-ci. Repère le badge rouge plus bas et redonne-leur une base avec ✎.</div>'
-      : '';
+    var tt = d.totals || {};
+    var orphN = tt.pct_orphans || 0, orphExp = tt.pct_orphans_expirees || 0;
+    var partN = tt.pct_partielles || 0;
+    var orphBar = '';
+    if (orphN) {
+      var cause = orphExp >= orphN
+        ? 'le revenu qui servait de base est arrivé à sa date de fin, il ne se reporte plus'
+        : (orphExp
+            ? 'le revenu qui servait de base a été supprimé, ou est arrivé à sa date de fin'
+            : 'le revenu qui servait de base a été supprimé');
+      var conseil = orphExp >= orphN
+        ? 'Repère le badge rouge plus bas : choisis une autre base avec ✎, ou repousse la date de fin du revenu source.'
+        : 'Repère le badge rouge plus bas et redonne-leur une base avec ✎.';
+      orphBar = '<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.35);border-radius:12px;padding:10px 16px;margin-bottom:16px;font-size:12.5px;color:#fca5a5">⚠ <b>' +
+        orphN + ' ligne(s) en % sans plus aucune base</b> (' + cause + ') : elles comptent pour <b>0 $</b> ce mois-ci. ' + conseil + '</div>';
+    }
+    if (partN) {
+      orphBar += '<div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.35);border-radius:12px;padding:10px 16px;margin-bottom:16px;font-size:12.5px;color:#fcd34d">⚠ <b>' +
+        partN + ' ligne(s) en % à base incomplète</b> : une partie seulement des revenus de base a disparu. Elles ne tombent PAS à 0 $ — leur montant est calculé sur les bases restantes, donc plus petit. Badge orange plus bas.</div>';
+    }
     var monthOpts = d.months.map(function (m) {
       return '<option value="' + m + '"' + (m === S.month ? ' selected' : '') + '>' + esc(monthLabel(m)) + '</option>';
     }).join('');
@@ -388,12 +404,14 @@
         baseLbl = rl ? 'de « ' + rl.label + ' »' : '';
       }
       origin = l.pct + '% ' + esc(baseLbl);
-      /* Base disparue (le revenu qui servait de base a été supprimé) : le
-         serveur ne peut plus rien calculer, la ligne vaut 0 $. Avant, le seul
-         indice était une note invisible à l'écran, et 800 $ de paye modèle
-         s'évaporaient sans que rien ne le montre. */
-      if (l.pct_orphan) {
-        origin += ' <span style="color:#ef4444;font-weight:800">— base supprimée</span>';
+      /* Base qui ne répond plus : la ligne vaut 0 $ (plus aucune base) ou
+         moins que prévu (une base sur plusieurs). Avant, le seul indice était
+         une note invisible à l'écran, et 800 $ de paye modèle s'évaporaient
+         sans que rien ne le montre. */
+      if (l.pct_base) {
+        var pbi = pctBaseInfo(l.pct_base);
+        origin += ' <span style="color:' + (pbi.tout ? '#ef4444' : '#f59e0b') +
+          ';font-weight:800">— ' + pbi.court + '</span>';
       }
     } else if (l.form === 'mypuls') {
       origin = '<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.6a8 8 0 1 1-2.4-5.4"/><path d="M20 4v4.6h-4.6"/></svg> CA MyPuls · ' + esc(l.mypuls_model || '?') + ' <span style="color:#4ade80">(auto)</span>';
@@ -429,10 +447,16 @@
     }
     // badges
     var badges = '';
-    /* Deux états qui mettent une ligne à 0 $ : ils doivent SAUTER AUX YEUX,
-       sinon le trou se recopie de mois en mois sans que personne le voie. */
-    if (l.pct_orphan) {
-      badges += '<span style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.45);color:#fca5a5;font-size:10.5px;font-weight:800;padding:4px 10px;border-radius:8px">⚠ base supprimée — 0 $ tant que tu ne rechoisis pas une base (✎ Modifier)</span>';
+    /* États qui font qu'une ligne ne vaut pas ce qui était prévu : ils doivent
+       SAUTER AUX YEUX, sinon le trou se recopie de mois en mois sans que
+       personne le voie. Rouge = 0 $ (plus aucune base, ou hors période) ;
+       orange = montant seulement réduit (une base sur plusieurs a disparu) :
+       les peindre pareil revenait à annoncer 0 $ à une ligne qui compte encore. */
+    if (l.pct_base) {
+      var pbb = pctBaseInfo(l.pct_base);
+      badges += pbb.tout
+        ? '<span style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.45);color:#fca5a5;font-size:10.5px;font-weight:800;padding:4px 10px;border-radius:8px">' + pbb.badge + '</span>'
+        : '<span style="background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.45);color:#fcd34d;font-size:10.5px;font-weight:800;padding:4px 10px;border-radius:8px">' + pbb.badge + '</span>';
     }
     if (l.hors_periode) {
       badges += '<span style="background:rgba(148,163,184,.12);border:1px solid rgba(148,163,184,.45);color:#cbd5e1;font-size:10.5px;font-weight:800;padding:4px 10px;border-radius:8px">⏸ hors période' +
@@ -491,6 +515,46 @@
       '</div></div></div>';
   }
 
+  /* Une base de % qui ne répond plus, ce sont TROIS situations, et l'écran
+     les annonçait toutes « base supprimée — 0 $ » :
+       - plus AUCUNE base           -> 0 $, il faut en rechoisir une ;
+       - une base sur plusieurs     -> montant RÉDUIT, surtout pas 0 $ ;
+       - base arrivée à sa DATE DE FIN -> rien n'a été supprimé, et le conseil
+         « redonne-leur une base » était faux.
+     Rend {tout, court, badge} : `tout` = plus aucune base (rouge / 0 $).
+     Le HTML est déjà échappé ici (les libellés viennent de la saisie). */
+  function pctBaseInfo(pb) {
+    var nManq = pb.manquantes || 0, nExp = pb.expirees || 0;
+    var tout = !!pb.vide || nManq >= (pb.total || 0);
+    var toutExp = nManq > 0 && nExp >= nManq;
+    // une base dont on ne retrouve NI le libellé ni la date de fin (supprimée
+    // depuis longtemps) n'apporte rien à la phrase : on ne la nomme pas.
+    var noms = (pb.details || []).filter(function (x) { return x.label || x.end; })
+      .map(function (x) {
+        var t = x.label ? '« ' + esc(x.label) + ' »' : 'un revenu';
+        if (x.end) t += ' terminé le ' + esc(frDate(x.end) + ' ' + String(x.end).slice(0, 4));
+        return t;
+      }).join(', ');
+    var suf = noms ? ' : ' + noms : '';
+    if (tout && toutExp) {
+      return {tout: true, court: 'base terminée',
+        badge: '⚠ base arrivée à sa date de fin' + suf +
+               ' — elle ne se reporte plus, la ligne vaut 0 $. Choisis une autre base (✎ Modifier), ou repousse la date de fin du revenu.'};
+    }
+    if (tout) {
+      return {tout: true, court: nExp ? 'base supprimée ou terminée' : 'base supprimée',
+        badge: '⚠ ' + (nExp ? 'plus aucune base (supprimée ou arrivée à sa date de fin)' : 'base supprimée') +
+               suf + ' — 0 $ tant que tu ne rechoisis pas une base (✎ Modifier)'};
+    }
+    var poss = nManq > 1 ? 'leur date de fin' : 'sa date de fin';
+    var quoi = toutExp ? 'arrivée(s) à ' + poss
+                       : (nExp ? 'supprimée(s) ou arrivée(s) à ' + poss : 'supprimée(s)');
+    return {tout: false,
+      court: nManq + ' base(s) sur ' + pb.total + ' manquante(s)',
+      badge: '⚠ ' + nManq + ' base(s) sur ' + pb.total + ' ' + quoi + suf +
+             ' — la ligne compte encore : son montant est calculé sur les bases restantes, il est seulement plus petit.'};
+  }
+
   function badge(icon, txt) {
     return '<span style="background:#0e0e16;border:1px solid #26263a;color:#8f8fa8;font-size:10.5px;font-weight:600;padding:4px 10px;border-radius:8px">' + icon + ' ' + esc(txt) + '</span>';
   }
@@ -532,25 +596,29 @@
             .then(function (j) {
               if (j.ok) {
                 /* Le serveur NE rebase PAS sur le total des revenus (ça
-                   paierait ce % sur le CA des autres modèles) : les payes
-                   privées de base tombent à 0 $. Le message disait l'inverse,
-                   et le trou (800 $ sur les vraies données) se recopiait
-                   chaque mois. Elles portent maintenant un badge rouge. */
-                var orph = (j.orphelines || j.relinked || []).length;
-                if (orph) {
-                  toast('Ligne supprimée · ' + orph + ' paye(s) sans base : 0 $ (badge rouge) — redonne-leur une base', 'error');
+                   paierait ce % sur le CA des autres modèles) : une paye qui
+                   perd sa SEULE base tombe à 0 $ et porte un badge rouge. Mais
+                   celle qui gardait d'autres bases continue de compter — lui
+                   annoncer 0 $ était le mensonge inverse. Deux listes, deux
+                   messages. */
+                var nz = (j.sans_base || []).length, nr = (j.reduites || []).length;
+                if (nz && nr) {
+                  toast('Ligne supprimée · ' + nz + ' paye(s) sans base : 0 $ (badge rouge) · ' + nr + ' paye(s) recalculée(s) sur leurs autres bases', 'error');
+                } else if (nz) {
+                  toast('Ligne supprimée · ' + nz + ' paye(s) sans base : 0 $ (badge rouge) — redonne-leur une base', 'error');
+                } else if (nr) {
+                  toast('Ligne supprimée · ' + nr + ' paye(s) en % recalculée(s) sur leurs autres bases (montant plus petit)');
                 } else {
                   toast('Ligne supprimée');
                 }
                 load(S.month);
               } else if (j.needs_confirm) {
                 // Des payes en % s'appuient sur cette ligne : on demande AVANT
-                // de casser leur base (sinon elles tombaient à $0 en silence).
-                var _q = j.error + String.fromCharCode(10) + String.fromCharCode(10)
-                        + 'Supprimer quand meme ? Ces payes tomberont a 0 $ (elles ne sont PAS '
-                        + 'recalculees sur le total des revenus) jusqu a ce que tu leur donnes '
-                        + 'une nouvelle base.';
-                if (confirm(_q)) send(true);
+                // de toucher à leur base (sinon elles tombaient à $0 en
+                // silence). Le détail — qui tombe à 0 $, qui garde ses autres
+                // bases — est écrit par le serveur, seul à le savoir.
+                var _nl = String.fromCharCode(10);
+                if (confirm(j.error + _nl + _nl + 'Supprimer quand meme ?')) send(true);
               } else {
                 toast(j.error || 'Échec de la suppression');
               }

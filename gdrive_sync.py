@@ -551,15 +551,20 @@ def _identites_a_sauvegarder():
     return couvertes, exclues
 
 
-def _compte_fichiers(ident_dir: Path) -> int:
+def _compte_fichiers(ident_dir: Path, est_v2: bool = False) -> int:
     """Combien de fichiers cette identite a-t-elle a sauvegarder ?
 
     Sert a DIRE ce qu'une exclusion laisse dehors : « 14 identites, 3 200
     fichiers » plutot qu'une carte verte a 0 fichier. Memes sections et
-    memes extensions que l'envoi.
+    memes extensions que l'envoi — d'ou le meme plan que _iter_jobs : le
+    Vault PRO ne compte que s'il est reellement synchronise, sinon le
+    chiffre annoncait des fichiers qu'aucune identite n'envoie, exclue ou
+    non.
     """
     n = 0
-    for sub, _drive_name, is_video in tuple(SECTIONS) + tuple(SECTIONS_PRO):
+    plan = tuple(SECTIONS) + (() if est_v2 or not SYNC_VAULT_PRO
+                              else tuple(SECTIONS_PRO))
+    for sub, _drive_name, is_video in plan:
         d = ident_dir / sub
         exts = _exts_de(sub, is_video)
         try:
@@ -740,7 +745,9 @@ def sync_report(mode=_MODE_COURANT) -> dict:
             "pct": 100 if not tot else int(round(syn * 100.0 / tot)),
             "videos": mode if isinstance(mode, str) else bool(mode),
             "exclues": [{"identity": nom, "raison": raison,
-                         "fichiers": _compte_fichiers(IDENTITIES_DIR / nom)}
+                         "fichiers": _compte_fichiers(
+                             IDENTITIES_DIR / nom,
+                             nom.lower().startswith(V2_PREFIX))}
                         for nom, raison in sorted(exclues.items())],
             "mode": auth_mode(), "email": oauth_email()}
 
@@ -1107,8 +1114,12 @@ def _candidats_import(sess, st, root):
                         continue
             except Exception:
                 pass
+            # « src » : le dossier Drive d'ou vient le fichier. Il faut le
+            # garder pour que _planifier_noms rattache un voisin a SON media
+            # et pas a l'homonyme d'un autre dossier.
             trouves.append({"id": f["id"], "nom": nom, "identity": ident,
-                            "sub": sub, "canonique": canonique})
+                            "sub": sub, "canonique": canonique,
+                            "src": dossier_id})
 
     # 1) depot libre : « A IMPORTER / <identite> / <type> »
     racine = None
@@ -1166,6 +1177,15 @@ def _candidats_import(sess, st, root):
         if nom_d.lower() == "bibliotheque 2":
             for sous in _lister(sess, dossier["id"], dossiers=True):
                 ident_v = V2_PREFIX + sous["name"].strip().lower()
+                # Meme regle que les trois autres branches. Sans elle, les
+                # fichiers d'une identite que le site ne connait pas etaient
+                # proposes a l'import, puis REFUSES au plan (_planifier_noms
+                # ne fabrique jamais d'identite) : ils restaient candidats a
+                # chaque tour, la veille voyait « N fichier(s) a importer »
+                # toutes les minutes et relancait un import qui ne rapatriait
+                # rien — sans que personne apprenne quel dossier corriger.
+                if not _identite_connue(sous["name"], ident_v):
+                    continue
                 for typ in _lister(sess, sous["id"], dossiers=True):
                     sub = _DRIVE_TO_SUB.get(_cle_dossier(typ["name"]))
                     if sub:
@@ -1503,8 +1523,17 @@ def inventaire(force: bool = False) -> dict:
         # Range dans « raisons_import » parce que c'est le seul bloc que la
         # page affiche : un listage rate DOIT se voir, sinon la page annonce
         # « rien ne manque » sur un Drive qu'elle n'a pas su lire.
-        raisons["listages_drive_en_echec"] = len(echecs_listage)
-        raisons["listages_drive_detail"] = echecs_listage[:3]
+        #
+        # On AJOUTE : le scan d'import remplit deja la meme cle (il a ses
+        # propres listages), et l'ecraser effacait ses echecs a lui — le
+        # comptage du Drive faisait disparaitre en silence ceux de l'import.
+        try:
+            _deja = int(raisons.get("listages_drive_en_echec") or 0)
+        except Exception:
+            _deja = 0
+        raisons["listages_drive_en_echec"] = _deja + len(echecs_listage)
+        raisons["listages_drive_detail"] = (
+            list(raisons.get("listages_drive_detail") or []) + echecs_listage)[:3]
     for r in lignes:
         sub = _LABEL_TO_SUB.get(r["type"], r["type"])
         r["import"] = vus_import.get((r["identity"], sub), 0)
@@ -1590,10 +1619,18 @@ def _planifier_noms(cands: list) -> tuple:
     vus_dossiers: set = set()
     groupes: dict = {}
     for c in cands:
-        # Un media et ses voisins forment UN lot : meme tige, meme sort.
-        groupes.setdefault((c["identity"], c["sub"],
+        # Un media et ses voisins forment UN lot : meme DOSSIER D'ORIGINE,
+        # meme tige, meme sort.
+        #
+        # Sans le dossier d'origine, deux depots portant le meme nom (le meme
+        # reel dans « A IMPORTER » et dans la bibliotheque rangee) tombaient
+        # dans le meme lot : un seul media y gagnait le suffixe « _2 », et la
+        # caption du second etait comptee en conflit puis abandonnee, pendant
+        # que son media, lui, entrait sous « r1_2.mp4 ». Reel muet, caption
+        # perdue — reproduit a l'execution.
+        groupes.setdefault((c["identity"], c["sub"], str(c.get("src") or ""),
                             _tige_media(c["nom"])), []).append(c)
-    for (ident, sub, tige), lot in sorted(groupes.items()):
+    for (ident, sub, _src, tige), lot in sorted(groupes.items()):
         if not (IDENTITIES_DIR / ident).is_dir():
             # Ceinture et bretelles avec le scan : jamais fabriquer une
             # identite a partir d'un nom de dossier Drive. mkdir(parents=True)
@@ -1929,15 +1966,30 @@ def run_sync() -> dict:
     index_dossiers: dict = {}
 
     def _index(parent_id):
+        """Le contenu du dossier Drive — ou une ERREUR, jamais « vide ».
+
+        Un listage qui echoue etait rendu comme un dossier vide, et le
+        resultat mis en cache pour toute la synchro : le dossier entier
+        repartait une seconde fois. C'est exactement la comptabilite perdue
+        que cet index existe pour eviter, et c'est ainsi qu'on a obtenu des
+        triplicats — sans un compteur ni une trace.
+
+        L'echec est memorise lui aussi (un seul essai par dossier, _lister
+        reprend deja quatre fois) : les fichiers de ce dossier comptent en
+        erreur, sont remontes, et repartiront au passage suivant.
+        """
         idx = index_dossiers.get(parent_id)
         if idx is None:
-            idx = {}
             try:
+                idx = {}
                 for f in _lister(_session_thread(), parent_id):
                     idx[f.get("name")] = (f.get("id"), int(f.get("size") or 0))
-            except Exception:
-                idx = {}
+            except Exception as e:
+                idx = ("%s: %s" % (type(e).__name__, e))[:160]
             index_dossiers[parent_id] = idx
+        if isinstance(idx, str):
+            raise RuntimeError("listage du dossier Drive impossible — envoi "
+                               "reporte pour ne pas creer de doublon (" + idx + ")")
         return idx
 
     def _un(job):
@@ -1954,14 +2006,19 @@ def run_sync() -> dict:
             with verrou:                   # cache partage : jamais 2 creations
                 parent = _ensure_folder(s_th, parent, niveau, st)
         with verrou:
-            deja_bas = _index(parent).get(path.name)
+            # L'index est pris UNE fois, avant l'envoi : s'il devait echouer,
+            # mieux vaut le savoir maintenant qu'apres avoir depose le fichier
+            # — une erreur levee apres l'envoi le laisserait hors de l'etat, et
+            # le passage suivant l'enverrait une seconde fois.
+            idx = _index(parent)
+            deja_bas = idx.get(path.name)
         if deja_bas and deja_bas[1] == size:
             # meme nom, meme taille, deja dans CE dossier du Drive : on ne
             # renvoie pas, on note simplement son identifiant
             return ("deja", key, deja_bas[0], size)
         fid = _avec_reprise(_upload_file, s_th, parent, path)
         with verrou:
-            _index(parent)[path.name] = (fid, size)
+            idx[path.name] = (fid, size)
         return ("up", key, fid, size)
 
     from concurrent.futures import ThreadPoolExecutor, as_completed

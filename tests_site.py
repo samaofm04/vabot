@@ -1407,6 +1407,213 @@ try:
     check("re-appliquer la meme video ne cree pas de doublon", _ja2.get("ok") and _n_mp4 == 1, str(_n_mp4))
     shutil.rmtree(_t2.parent, ignore_errors=True)
 
+    # ==================================================================
+    # D3 — un brouillon VIDE de ses captions ne doit PAS reafficher le texte
+    # du fichier voisin. L editeur reprend <stem>.txt comme 1re caption a
+    # l ouverture ; le chargement du brouillon n ecrasait cette caption que si
+    # le brouillon en avait une : on supprimait tout, on enregistrait, on
+    # rouvrait, et l ancien texte etait de retour. On laissait « Dispo VA » en
+    # croyant avoir un texte, le VA recevait une video SANS texte, et un simple
+    # « Enregistrer » regravait la caption supprimee.
+    # Test de COMPORTEMENT : la fonction reellement servie au navigateur est
+    # executee par node avec un faux DOM et une fausse reponse serveur.
+    import subprocess as _spD3
+    _htmlD3 = _wM.UPLOAD_HTML
+    _iD3 = _htmlD3.find("function nxMLoadDraft(")
+    check("D3 : nxMLoadDraft est bien servie a la page", _iD3 >= 0)
+    _nodeD3 = shutil.which("node")
+    if _iD3 >= 0 and _nodeD3:
+        _fnD3 = _htmlD3[_iD3:_htmlD3.index(chr(10) + "function ", _iD3)]
+
+        def _caps_apres(_rep):
+            """captions de l editeur apres chargement de cette reponse serveur."""
+            _h = (
+                "var nxMState={caps:[{text:'caption du fichier voisin',"
+                "start:null,end:null}],style:{size:44}};\n"
+                "function nxMStyleInit(){nxMState.style={size:44};}\n"
+                "function nxMStylePaint(){}\nfunction nxMRenderCaps(){}\n"
+                "function nxMUpdatePreview(){}\nfunction nxMSetApproveBtn(){}\n"
+                "function nxMHistInit(){}\n"
+                "var document={getElementById:function(){return {};}};\n"
+                "function fetch(){return Promise.resolve({json:function(){"
+                "return Promise.resolve(" + json.dumps(_rep) + ");}});}\n"
+                + _fnD3 + chr(10) +
+                "nxMLoadDraft('x');\n"
+                "setTimeout(function(){console.log(JSON.stringify("
+                "nxMState.caps));},0);\n")
+            _f = TMP / "d3_loaddraft.js"
+            _f.write_text(_h, encoding="utf-8")
+            _r = _spD3.run([_nodeD3, str(_f)], capture_output=True, text=True,
+                           timeout=30)
+            if _r.returncode != 0:
+                return "ERREUR NODE : " + (_r.stderr or "")[:200]
+            return (_r.stdout or "").strip()
+
+        _o = _caps_apres({"ok": True, "desc": "",
+                          "draft": {"segments": "[]", "font": "Strong",
+                                    "style": "{}"}})
+        check("D3 : un brouillon vide EFFACE la caption du fichier voisin",
+              _o == "[]", _o[:160])
+        _o = _caps_apres({"ok": True, "desc": "",
+                          "draft": {"segments": json.dumps(
+                              [{"text": "la vraie", "start": None, "end": None}]),
+                              "font": "Strong", "style": "{}"}})
+        check("D3 : un brouillon rempli est toujours applique",
+              "la vraie" in _o and "voisin" not in _o, _o[:160])
+        _o = _caps_apres({"ok": True, "desc": "",
+                          "draft": {"font": "Strong", "style": "{}"}})
+        check("D3 : brouillon sans champ segments -> on ne touche a rien",
+              "voisin" in _o, _o[:160])
+    elif _iD3 >= 0:
+        # Ne jamais ecarter en silence : dire que la verification n a pas eu lieu.
+        print("     (node absent : nxMLoadDraft n a pas ete execute)")
+
+    # ==================================================================
+    # D4 — le garde anti-double-generation consultait noctus_web._PROCS, table
+    # remplie SEULEMENT au lancement de Node. Pendant les minutes d assemblage
+    # (un ffmpeg par variante) elle restait vide : un 2e clic passait le garde
+    # et vidait input/ et output/ sous les pieds du premier.
+    # Tout ce qui touche au disque reel est remplace (data/ intact).
+    _tmpG = TMP / "noctus_models"
+    _tmpG.mkdir(exist_ok=True)
+    _savG = {_k: getattr(_nw, _k) for _k in
+             ("setup_ok", "purge_old_models", "_models_dir", "_prepare_inputs",
+              "read_captions", "write_captions", "run")}
+    _porteG = threading.Event()     # tient le 1er appel DANS l assemblage
+    _capsG = []                     # captions.json en memoire
+    _lancesG = []
+
+    class _FauxProcG:
+        def poll(self):
+            return None
+
+        def kill(self):
+            pass
+
+    def _prepG(src_, inp_, draft_, folders_, brutes_, report=None):
+        inp_.mkdir(parents=True, exist_ok=True)
+        _porteG.wait(15)
+        return ([], {}, {})
+
+    def _runG(model_, folders_=None, captions_=None, targets=None,
+              folder_map=None, caption_map=None):
+        _lancesG.append(model_)
+        return _FauxProcG()
+
+    _nw.setup_ok = lambda: True
+    _nw.purge_old_models = lambda *a, **k: 0
+    _nw._models_dir = lambda: _tmpG
+    _nw._prepare_inputs = _prepG
+    _nw.read_captions = lambda: list(_capsG)
+    _nw.write_captions = lambda d: (_capsG.__setitem__(slice(None), list(d)), True)[1]
+    _nw.run = _runG
+    try:
+        _segsG = json.dumps([{"text": "texte du montage", "start": None, "end": None}])
+
+        def _clientG():
+            _c = _appM.test_client()
+            with _c.session_transaction() as _s:
+                _s["auth"] = True
+                _s["username"] = "boss"
+            return _c
+
+        _repG = {}
+
+        def _premierG():
+            _repG["1"] = (_clientG().post("/noctus/montage_gen",
+                                          data=dict(_base, segments=_segsG)
+                                          ).get_json() or {})
+
+        _thG = threading.Thread(target=_premierG)
+        _thG.start()
+        time.sleep(0.8)                     # le 1er est dans l assemblage
+        _j2G = (_cM.post("/noctus/montage_gen", data=dict(_base, segments=_segsG)
+                         ).get_json() or {})
+        check("D4 : un 2e clic PENDANT l assemblage est refuse",
+              _j2G.get("ok") is False and "cours" in (_j2G.get("error") or ""),
+              str(_j2G)[:140])
+        _porteG.set()
+        _thG.join(20)
+        check("D4 : le 1er clic va au bout", (_repG.get("1") or {}).get("ok") is True,
+              str(_repG.get("1"))[:140])
+        check("D4 : une seule generation lancee pour ce reel",
+              len(_lancesG) == 1, str(_lancesG))
+        check("D4 : la place est rendue une fois la generation lancee",
+              (_cM.post("/noctus/montage_gen", data=dict(_base, segments=_segsG)
+                        ).get_json() or {}).get("ok") is True)
+
+        # captions.json est PARTAGE : lu-modifie-ecrit hors verrou, deux
+        # generations simultanees repartaient du meme contenu et la seconde
+        # ecriture effacait le label de la premiere -> video sans texte.
+        _capsG[:] = []
+        _lancesG[:] = []
+
+        # Ecriture LENTE : elle simule le travail qui separe la lecture de
+        # l ecriture (segments, captionMap, lancement). Sans verrou, les deux
+        # routes lisent le MEME contenu et la seconde ecriture efface le label
+        # de la premiere -> la video de la premiere sort sans texte.
+        def _ecrireLentG(d):
+            time.sleep(0.3)
+            _capsG[:] = list(d)
+            return True
+
+        _nw.write_captions = _ecrireLentG
+        (_idM / "r2.mp4").write_bytes(b"\0" * 3000)
+        _sortiesG = {}
+
+        def _tirerG(cle, fid):
+            _sortiesG[cle] = (_clientG().post("/noctus/montage_gen", data={
+                "file_id": fid, "font": "Strong", "style": "{}",
+                "segments": json.dumps([{"text": cle, "start": None,
+                                         "end": None}])}).get_json() or {})
+
+        _tA = threading.Thread(target=_tirerG, args=("A", "_tst_montage|videos|r.mp4"))
+        _tB = threading.Thread(target=_tirerG, args=("B", "_tst_montage|videos|r2.mp4"))
+        _tA.start()
+        _tB.start()
+        _tA.join(25)
+        _tB.join(25)
+        check("D4 : les deux generations aboutissent",
+              all((_sortiesG.get(_k) or {}).get("ok") for _k in ("A", "B")),
+              str(_sortiesG)[:160])
+        _labelsG = [c.get("label") for c in _capsG if isinstance(c, dict)]
+        check("D4 : deux generations simultanees gardent CHACUNE leur caption",
+              len(_labelsG) == 2 and len(set(_labelsG)) == 2, str(_labelsG))
+    finally:
+        for _k, _v in _savG.items():
+            setattr(_nw, _k, _v)
+
+    # ==================================================================
+    # D5 — le retrait d approbation repondait « ok » meme quand il n avait rien
+    # retire : le bouton repassait au gris et le filigrane disparaissait alors
+    # que va_ready etait toujours sur le disque, donc le reel partait encore
+    # aux VA.
+    if _pM.exists():
+        _pM.unlink()
+    _jU = (_cM.post("/noctus/montage_unapprove",
+                    data={"file_id": _base["file_id"]}).get_json() or {})
+    check("D5 : sans brouillon, le retrait dit qu il n a rien retire",
+          _jU.get("ok") is True and _jU.get("retire") is False, str(_jU)[:140])
+    _cM.post("/noctus/montage_save", data=dict(_base))        # brouillon sans va_ready
+    _jU = (_cM.post("/noctus/montage_unapprove",
+                    data={"file_id": _base["file_id"]}).get_json() or {})
+    check("D5 : reel jamais approuve -> retrait annonce comme sans effet",
+          _jU.get("retire") is False, str(_jU)[:140])
+    _cM.post("/noctus/montage_approve", data=dict(_base))
+    _jU = (_cM.post("/noctus/montage_unapprove",
+                    data={"file_id": _base["file_id"]}).get_json() or {})
+    check("D5 : reel approuve -> retrait annonce ET va_ready parti",
+          _jU.get("retire") is True
+          and "va_ready" not in json.loads(_pM.read_text(encoding="utf-8")),
+          str(_jU)[:140])
+    _pM.write_text("{ brouillon tronque", encoding="utf-8")
+    _jU = (_cM.post("/noctus/montage_unapprove",
+                    data={"file_id": _base["file_id"]}).get_json() or {})
+    check("D5 : brouillon illisible -> echec dit, pas un « ok » trompeur",
+          _jU.get("ok") is False and bool(_jU.get("error")), str(_jU)[:140])
+    check("D5 : le client distingue « rien a retirer » du vrai retrait",
+          "j.retire===false" in _wM.UPLOAD_HTML)
+
     _wM._load_web_users = _savM          # rend le magasin d'utilisateurs intact
     shutil.rmtree(_idM.parent, ignore_errors=True)
 
@@ -1775,6 +1982,75 @@ try:
     check("captions : clamps serveur (size 160, x/y 0-1, wrapW ignore)",
           _j3["block"]["style"].get("size") == 160 and _it3.get("x") == 1.0
           and _it3.get("y") == 0.0 and "wrapW" not in _it3, str(_j3)[:120])
+
+    # -- F7 : le plafond de captions ne doit RIEN jeter en silence -----------
+    # Le serveur tronquait a CAPTIONS_MAX sans le dire ; le navigateur
+    # annoncait « N ajoutees » et la moitie disparaissait au rechargement.
+    _MAXCa = _wCa.CAPTIONS_MAX
+    _blkP = {"items": [{"id": f"p{i}", "text": f"Plafond {i}"}
+                       for i in range(_MAXCa + 10)]}
+    _jp = (_cCa.post("/captions/save",
+                     data={"identity": "_tst_captions",
+                           "data": _jsCa.dumps(_blkP)}).get_json() or {})
+    check("captions : le plafond est ANNONCE, pas subi (refuses comptes)",
+          _jp.get("ok") and _jp.get("count") == _MAXCa
+          and _jp.get("refuses") == 10 and _jp.get("max") == _MAXCa,
+          str(_jp)[:120])
+    _jpl = (_cCa.get("/captions/list?identity=_tst_captions").get_json() or {})
+    check("captions : le plafond garde bien les premieres, pas n importe lesquelles",
+          len((_jpl.get("block") or {}).get("items") or []) == _MAXCa
+          and _jpl["block"]["items"][0]["text"] == "Plafond 0", str(_jpl)[:90])
+
+    # Partage vers une cible DEJA PLEINE : « plus de place » n est pas
+    # « deja la ». Les confondre faisait annoncer des doublons imaginaires.
+    _idCp = _plCa.Path("data/identities/_tst_captions_plein")
+    _shCa.rmtree(_idCp, ignore_errors=True)
+    (_idCp / "brutes").mkdir(parents=True)
+    _cCa.post("/captions/save", data={
+        "identity": "_tst_captions_plein",
+        "data": _jsCa.dumps({"items": [{"id": f"q{i}", "text": f"Cible {i}"}
+                                       for i in range(_MAXCa)]})})
+    _jap = (_cCa.post("/captions/apply", data={
+        "identity": "_tst_captions", "ids": "[]",
+        "targets": _jsCa.dumps(["_tst_captions_plein"])}).get_json() or {})
+    check("captions : cible pleine -> refus compte a part (pas en doublons)",
+          _jap.get("ok") and _jap.get("added") == 0
+          and _jap.get("pleins") == _MAXCa and _jap.get("skipped") == 0
+          and _jap.get("cibles_pleines") == ["_tst_captions_plein"]
+          and _jap.get("max") == _MAXCa, str(_jap)[:140])
+    _shCa.rmtree(_idCp, ignore_errors=True)
+
+    # -- F6 : la carte caption, MEME chose cote serveur et cote navigateur ---
+    # Flask rend la carte, puis capRenderCards la RE-rend au premier clic.
+    # Tant que les deux differaient (bouton Description et ligne d apercu
+    # seulement en JS, ligne de largeur seulement en Python), les cartes
+    # sautaient en hauteur des qu on touchait a l onglet.
+    import re as _reCa
+    _blkR = {"items": [{"id": "r1", "text": "Avec description",
+                        "desc": "Legende du post", "wrapW": 0.5},
+                       {"id": "r2", "text": "Sans rien"}]}
+    _cCa.post("/captions/save", data={"identity": "_tst_captions",
+                                      "data": _jsCa.dumps(_blkR)})
+    with _aCa.test_request_context("/?cloud_captions_ident=_tst_captions"):
+        _hCap = _wCa._render_cloud_captions_html()
+    # « cap-card' » ferme la classe : sans le guillemet on tomberait sur
+    # <div class='cap-card-meta'>, qui commence pareil.
+    _i0Ca = _hCap.find("<div class='cap-card'")
+    _i1Ca = _hCap.find("<div class='cap-card'", _i0Ca + 10)
+    _card0 = _hCap[_i0Ca:_i1Ca] if (_i0Ca >= 0 and _i1Ca > 0) else ""
+    _srcCa = _plCa.Path("web_upload.py").read_text(encoding="utf-8")
+    _iJs = _srcCa.find("function capRenderCards(){")
+    _jsCard = _srcCa[_iJs:_srcCa.find("function capSave(", _iJs)] if _iJs > 0 else ""
+    _actsSrv = _reCa.findall(r"data-capact='([a-z]+)'", _card0)
+    _actsJs = _reCa.findall(r'data-capact="([a-z]+)"', _jsCard)
+    check("captions : la carte rendue par Flask a les MEMES boutons que celle du JS",
+          bool(_actsSrv) and _actsSrv == _actsJs,
+          f"serveur={_actsSrv} js={_actsJs}")
+    check("captions : le serveur rend la ligne d apercu de la description",
+          "📄 Legende du post" in _hCap, _card0[-220:])
+    check("captions : la ligne de largeur ↔ n est plus rendue (le JS l a lachee)",
+          "↔" not in _hCap and "↔" not in _jsCard)
+
     # identites refusees (traversal / inconnues)
     for _bad in ("../..", "..", "/etc", "_tst_nexiste_pas"):
         _rb = _cCa.post("/captions/save", data={"identity": _bad, "data": "{}"})
@@ -1875,20 +2151,57 @@ try:
     # -- reordonner les identites (glisser-deposer sidebar, ordre partage) ----
     _fOrd = _plCa.Path("data/identity_order.json")
     _savOrd = _fOrd.read_text(encoding="utf-8") if _fOrd.exists() else None
+    # Base CONNUE : sinon on compare au rangement REEL de l utilisateur, et le
+    # test ne dit plus rien de ce que la route a fait.
+    _wCa._save_identity_order([])
     _jo = (_cCa.post("/identity/reorder",
                      data={"order": _jsCa.dumps(["_tst_captions", "zz_inconnue", "_tst_captions"])}).get_json() or {})
-    check("ordre : sauvegarde + inconnues et doublons filtres",
-          _jo.get("ok") and _jo.get("count") == 1
-          and _jsCa.loads(_fOrd.read_text(encoding="utf-8")) == ["_tst_captions"], str(_jo)[:80])
+    check("ordre : sauvegarde + inconnues et doublons filtres (et comptes)",
+          _jo.get("ok") and _jo.get("count") == 1 and _jo.get("inconnues") == 1
+          and _jsCa.loads(_fOrd.read_text(encoding="utf-8")) == ["_tst_captions"], str(_jo)[:90])
     check("ordre : identite ordonnee rendue en premier",
           _wCa._apply_identity_order(["aaa", "_tst_captions"]) == ["_tst_captions", "aaa"])
     check("ordre : JSON invalide refuse",
           ((_cCa.post("/identity/reorder", data={"order": "pas du json"}).get_json() or {}).get("ok")) is not True)
+
+    # -- B7 : le fichier d ordre est PARTAGE, une sidebar n en connait qu une
+    # partie. L ecraser avec sa seule liste renvoyait toutes les autres en
+    # alphabetique : un rangement fait a la main perdu par un simple
+    # glissement dans la Bibliotheque 2.
+    _idOa = _plCa.Path("data/identities/_tst_ordre_a")
+    _idOb = _plCa.Path("data/identities/v2__tst_ordre_b")
+    for _dOr in (_idOa, _idOb):
+        _shCa.rmtree(_dOr, ignore_errors=True)
+        (_dOr / "brutes").mkdir(parents=True)
+    _wCa._IDENTITIES_CACHE["mtime"] = None   # la liste est cachee sur le mtime
+    try:
+        _wCa._save_identity_order(["_tst_ordre_a", "_tst_captions", "v2__tst_ordre_b"])
+        # la Bibliotheque 2 n affiche que ses v2_ : elle n envoie que celles-la
+        _jm = (_cCa.post("/identity/reorder",
+                         data={"order": _jsCa.dumps(["v2__tst_ordre_b"])}).get_json() or {})
+        _ordM = _jsCa.loads(_fOrd.read_text(encoding="utf-8"))
+        check("ordre : ranger dans la Bibliotheque 2 ne debranche pas les autres",
+              _jm.get("ok") and "_tst_ordre_a" in _ordM and "_tst_captions" in _ordM
+              and _ordM.index("_tst_ordre_a") < _ordM.index("_tst_captions"),
+              str(_ordM)[:120])
+        # ... et la sidebar qui range reordonne bien SES identites, sur place
+        _wCa._save_identity_order(["_tst_ordre_a", "v2__tst_ordre_b", "_tst_captions"])
+        _cCa.post("/identity/reorder",
+                  data={"order": _jsCa.dumps(["_tst_captions", "_tst_ordre_a"])})
+        _ordN = _jsCa.loads(_fOrd.read_text(encoding="utf-8"))
+        check("ordre : la sidebar qui range reordonne SES identites, sans bouger les autres",
+              _ordN == ["_tst_captions", "v2__tst_ordre_b", "_tst_ordre_a"], str(_ordN)[:120])
+    finally:
+        for _dOr in (_idOa, _idOb):
+            _shCa.rmtree(_dOr, ignore_errors=True)
+        _wCa._IDENTITIES_CACHE["mtime"] = None
+
     # restaure l ordre d origine (fichier reel de l utilisateur)
     if _savOrd is not None:
         _wCa.safe_json.write_text(_fOrd, _savOrd)
     else:
-        _cCa.post("/identity/reorder", data={"order": "[]"})
+        # ecriture DIRECTE : depuis la fusion, poster [] ne vide plus le fichier
+        _wCa._save_identity_order([])
     _wCa._invalidate_json_cache(_fOrd)
 
     # -- Drive (lecture seule, tout le contenu d une identite) ----------------
@@ -2223,10 +2536,15 @@ try:
 
     _wCa._load_web_users = _savCa
     _shCa.rmtree(_idCa, ignore_errors=True)
-    # nettoie l entree de test de data/captions.json
+    # nettoie les entrees de test de data/captions.json
     try:
         _lib = _jsCa.loads(_fCa.read_text(encoding="utf-8"))
-        if isinstance(_lib, dict) and _lib.pop("_tst_captions", None) is not None:
+        _oteCa = False
+        if isinstance(_lib, dict):
+            for _kCa in ("_tst_captions", "_tst_captions2", "_tst_captions_plein"):
+                if _lib.pop(_kCa, None) is not None:
+                    _oteCa = True
+        if _oteCa:
             _wCa.safe_json.write(_fCa, _lib, indent=2)
             _wCa._invalidate_json_cache(_fCa)
     except Exception:
@@ -3230,6 +3548,298 @@ try:
           'id="tab-tktrends"' in _pageTk and 'id="form-tktrends"' in _pageTk)
 except Exception as _eTkU:
     check("onglet TikTok : testable", False, repr(_eTkU)[:160])
+
+print()
+print("=" * 70)
+print("23) Securite : le nom « admin » n est plus un passe-droit (lot C4)")
+print("=" * 70)
+try:
+    import web_upload as _wC4
+    _appC4 = _wC4.create_app()
+    _appC4.config["TESTING"] = True
+    _savLoadC4 = _wC4._load_web_users
+    _savSaveC4 = _wC4._save_web_users
+    _savLoadRC4 = _wC4._load_role_users
+    _savSaveRC4 = _wC4._save_role_users
+    _srcC4 = pathlib.Path("web_upload.py").read_text(encoding="utf-8")
+
+    def _cliC4(username, extra=None):
+        _c = _appC4.test_client()
+        with _c.session_transaction() as _s:
+            _s["auth"] = True
+            _s["username"] = username
+            _s["role"] = "admin"
+            _s["sid"] = "C4"
+            for _k, _v in (extra or {}).items():
+                _s[_k] = _v
+        return _c
+
+    # -- 1) le controle « compte supprime / desactive » exemptait le NOM admin :
+    # une session de ce nom survivait 30 jours a la revocation du compte.
+    _wC4._load_web_users = lambda: {"autre": {"role": "owner"}}
+    _rC4a = _cliC4("admin").get("/external/list")
+    check("compte « admin » supprime : acces coupe",
+          _rC4a.status_code in (302, 401, 403), "HTTP %s" % _rC4a.status_code)
+    _wC4._load_web_users = lambda: {"admin": {"role": "admin", "disabled": True}}
+    _rC4b = _cliC4("admin").get("/external/list")
+    check("compte « admin » desactive : acces coupe",
+          _rC4b.status_code in (302, 401, 403), "HTTP %s" % _rC4b.status_code)
+    # -- ... sans casser le depannage : WEB_PASSWORD seul (aucun nom saisi)
+    # ouvre une session nommee « admin » qu AUCUN compte ne soutient.
+    _wC4._load_web_users = lambda: {"autre": {"role": "owner"}}
+    _rC4c = _cliC4("admin", {"legacy_owner": True}).get("/external/list")
+    check("depannage WEB_PASSWORD seul : session conservee",
+          _rC4c.status_code == 200, "HTTP %s" % _rC4c.status_code)
+    # Le drapeau est pose au login. On le verifie sur la SOURCE : poster le
+    # formulaire de connexion ecrirait dans data/active_sessions.json.
+    check("le login pose (et retire) le drapeau de depannage",
+          'session["legacy_owner"] = True' in _srcC4
+          and 'session.pop("legacy_owner", None)' in _srcC4)
+
+    # -- 2) noms reserves : plus personne ne peut CREER « admin »
+    check("noms reserves reconnus quelle que soit la casse",
+          all(_wC4._nom_reserve(n) for n in ("admin", "Admin", " SAMAALI ")))
+    check("un nom ordinaire n est pas reserve", not _wC4._nom_reserve("emma"))
+
+    _ecritsC4 = []
+    _wC4._save_web_users = lambda d: _ecritsC4.append(("web", dict(d)))
+    _wC4._save_role_users = lambda d: _ecritsC4.append(("role", list(d)))
+    _wC4._load_role_users = lambda: []
+    _wC4._load_web_users = lambda: {"boss": {"role": "owner"},
+                                    "dejala": {"role": "va"}}
+    _cAddC4 = _cliC4("boss")
+    for _nomC4, _pourquoiC4 in (("admin", "nom reserve"),
+                                ("dejala", "acces de connexion deja existant")):
+        _cAddC4.post("/settings/role/add",
+                     data={"username": _nomC4, "role": "va", "password": "azerty1"})
+        check(f"/settings/role/add refuse « {_nomC4} » ({_pourquoiC4})",
+              not _ecritsC4, "a ecrit : %s" % [t for t, _ in _ecritsC4])
+
+    # -- 3) inscription publique : signup_public ne cree un compte qu a travers
+    # la fonction qu on lui passe. Elle doit refuser un nom reserve, et le dire.
+    _wC4._load_web_users = lambda: {"boss": {"role": "owner"}}
+    _refuseC4 = False
+    try:
+        _wC4._save_web_users_inscription({"boss": {"role": "owner"},
+                                          "admin": {"role": "va"}})
+    except ValueError:
+        _refuseC4 = True
+    check("inscription publique : « admin » refuse, rien d ecrit",
+          _refuseC4 and not _ecritsC4, "refus=%s ecritures=%s" % (_refuseC4, len(_ecritsC4)))
+    _wC4._save_web_users_inscription({"boss": {"role": "owner"},
+                                      "nouvelle": {"role": "va"}})
+    check("inscription publique : un nom ordinaire passe toujours",
+          any(t == "web" for t, _ in _ecritsC4))
+    _wC4._load_web_users = _savLoadC4
+    _wC4._save_web_users = _savSaveC4
+    _wC4._load_role_users = _savLoadRC4
+    _wC4._save_role_users = _savSaveRC4
+
+    # -- 4) /bio/<identite> : page PUBLIQUE dont l identite vient de l URL.
+    # Elle etait recopiee telle quelle dans le HTML -> script execute sur
+    # l origine du dashboard, ou aucune ecriture n a de jeton anti-CSRF.
+    _savAvC4 = _wC4._identity_avatar_url
+    _wC4._identity_avatar_url = lambda i: ""
+    import bio_links as _blC4
+    _savBioC4 = _blC4.get_bio
+    _blC4.get_bio = lambda i: {"display_name": "", "bio": "", "theme": "dark",
+                               "links": []}
+    _chargeC4 = "<img src=x onerror=alert(1)>"
+    _htmlC4 = _wC4._render_bio_public_page(_chargeC4)
+    check("/bio/<identite> : la charge de l URL est echappee",
+          _chargeC4 not in _htmlC4
+          and "&lt;img src=x onerror=alert(1)&gt;" in _htmlC4)
+    _blC4.get_bio = lambda i: {
+        "display_name": "<b>x</b>", "bio": "<script>a</script>", "theme": "dark",
+        "links": [{"url": "' onmouseover='alert(1)", "title": "<i>t</i>",
+                   "icon": "<u>"}]}
+    _htmlC4b = _wC4._render_bio_public_page("emma")
+    check("/bio/<identite> : nom, bio et liens stockes sont echappes",
+          "<script>a</script>" not in _htmlC4b and "<i>t</i>" not in _htmlC4b
+          and "' onmouseover='alert(1)" not in _htmlC4b)
+    _blC4.get_bio = _savBioC4
+    _wC4._identity_avatar_url = _savAvC4
+
+    # -- 5) lectures qui depensent du quota paye / exposent les push des modeles
+    _wC4._load_web_users = lambda: {"chat": {"role": "chatter"}}
+    _cChatC4 = _appC4.test_client()
+    with _cChatC4.session_transaction() as _sC4:
+        _sC4["auth"] = True
+        _sC4["username"] = "chat"
+        _sC4["role"] = "chatter"
+    for _pC4 in ("/insta/apify_diag", "/insta/debug_rapidapi?owner=a&shortcode=b",
+                 "/sfssetup/mypuls_pushes"):
+        _rC4 = _cChatC4.get(_pC4)
+        check("role restreint bloque en lecture : " + _pC4.split("?")[0],
+              _rC4.status_code == 403, "HTTP %s" % _rC4.status_code)
+    # ... mais la page SFS Planning doit rester servie a qui a l onglet : on
+    # verifie le mapping sur la source (l appeler pour de vrai relancerait un
+    # scrape MyPuls et reecrirait data/sfs_pushs_cache.json).
+    _mapC4 = _srcC4[_srcC4.find("_READ_PREFIX_TO_TAB = {"):]
+    _mapC4 = _mapC4[:_mapC4.find("}")]
+    check("lecture SFS mappee a l onglet sfs (pas de sur-blocage)",
+          '"/sfssetup/mypuls_pushes": "sfs"' in _mapC4)
+    _wC4._load_web_users = _savLoadC4
+except Exception as _eC4:
+    check("securite lot C4 : testable", False, repr(_eC4)[:160])
+
+print()
+print("=" * 70)
+print("Filtres etoile des galeries (portee + etat)")
+print("=" * 70)
+# F3 : deux defauts a l ecran, tous deux invisibles en lecture.
+#  - PORTEE : chaque galerie rend sa grille avec le MEME id 'vault-grid' et son
+#    bouton avec le MEME id ; getElementById renvoyait celui de la 1re galerie
+#    du document. Dans la Bibliotheque 2 le filtre ne faisait donc rien a
+#    l ecran tout en masquant les cartes de la galerie cachee d a cote.
+#  - ETAT : il vivait dans une variable de page qui survivait au re-rendu de la
+#    section, alors que le bouton renvoye par le serveur repartait neutre. La
+#    galerie se vidait sous un bouton qui se disait inactif.
+# On execute les VRAIES fonctions de la page dans node, sur un DOM minimal.
+_DOM_STUB_F3 = """
+function El(tag){ this.tag=tag; this.classes=[]; this.attrs={}; this.children=[];
+  this.parent=null; this.style={}; this.textContent=''; }
+El.prototype.setAttribute=function(k,v){ this.attrs[k]=String(v); };
+El.prototype.getAttribute=function(k){ return (k in this.attrs)?this.attrs[k]:null; };
+El.prototype.appendChild=function(c){ c.parent=this; this.children.push(c); return c; };
+Object.defineProperty(El.prototype,'className',{
+  get:function(){ return this.classes.join(' '); },
+  set:function(v){ this.classes=String(v).split(' ').filter(Boolean); }
+});
+Object.defineProperty(El.prototype,'classList',{get:function(){
+  var self=this;
+  return {
+    add:function(n){ if(self.classes.indexOf(n)<0) self.classes.push(n); },
+    remove:function(n){ var i=self.classes.indexOf(n); if(i>=0) self.classes.splice(i,1); },
+    contains:function(n){ return self.classes.indexOf(n)>=0; },
+    toggle:function(n,f){ if(f===undefined) f=(self.classes.indexOf(n)<0);
+                          if(f) this.add(n); else this.remove(n); return f; }
+  };
+}});
+Object.defineProperty(El.prototype,'offsetParent',{get:function(){
+  var n=this; while(n && n.style){ if(n.style.display==='none') return null; n=n.parent; }
+  return this.parent||null;
+}});
+function correspond(el, sel){
+  if(!el || !el.classes) return false;
+  var toks = sel.match(/[.#][A-Za-z0-9_-]+/g) || [];
+  if(!toks.length) return false;
+  for(var i=0;i<toks.length;i++){
+    var t=toks[i];
+    if(t.charAt(0)==='#'){ if(el.attrs.id !== t.slice(1)) return false; }
+    else if(el.classes.indexOf(t.slice(1))<0) return false;
+  }
+  return true;
+}
+El.prototype.descendants=function(){
+  var out=[];
+  var marche=function(n){ for(var i=0;i<n.children.length;i++){ out.push(n.children[i]); marche(n.children[i]); } };
+  marche(this); return out;
+};
+El.prototype.querySelectorAll=function(s){
+  return this.descendants().filter(function(e){ return correspond(e,s); }); };
+El.prototype.querySelector=function(s){ var r=this.querySelectorAll(s); return r.length?r[0]:null; };
+El.prototype.closest=function(s){ var n=this; while(n){ if(correspond(n,s)) return n; n=n.parent; } return null; };
+var racine = new El('body');
+var document = {
+  querySelectorAll:function(s){ return racine.querySelectorAll(s); },
+  querySelector:function(s){ return racine.querySelector(s); },
+  getElementById:function(id){ return racine.querySelector('#'+id); },
+  createElement:function(t){ return new El(t); }
+};
+function faireSection(idSec, visible, etoiles, idBtn, clsEtoile){
+  var sec=new El('div'); sec.classes.push('form-section'); sec.attrs.id=idSec;
+  if(!visible) sec.style.display='none';
+  var btn=new El('button'); btn.attrs.id=idBtn; btn.setAttribute('data-on','0');
+  sec.appendChild(btn);
+  var grid=new El('div'); grid.attrs.id='vault-grid'; sec.appendChild(grid);
+  etoiles.forEach(function(allumee){
+    var c=new El('div'); c.classes.push('cloud-card');
+    var st=new El('button'); st.classes.push(clsEtoile.split('.')[0]);
+    if(allumee) st.classes.push(clsEtoile.split('.')[1]);
+    c.appendChild(st); grid.appendChild(c);
+  });
+  racine.appendChild(sec);
+  return {sec:sec, btn:btn, grid:grid};
+}
+function nbCaches(g){
+  return g.querySelectorAll('.cloud-card').filter(function(c){ return c.style.display==='none'; }).length;
+}
+function vider(){ racine.children.length = 0; }
+var res = {};
+// --- PORTEE : la 2e bibliotheque est la section VISIBLE ---------------------
+var cachee  = faireSection('form-cloudreels', false, [true,false,false], 'banger-toggle-btn', 'banger-star.is-banger');
+var visible = faireSection('form-v2reels',    true,  [true,false,false], 'banger-toggle-btn', 'banger-star.is-banger');
+toggleBangerFilter(visible.btn);
+res.banger_portee_visible = nbCaches(visible.grid);   // attendu 2
+res.banger_portee_cachee  = nbCaches(cachee.grid);    // attendu 0
+// --- ETAT : le filtre ne doit pas survivre au re-rendu de la section --------
+vider();
+var avant = faireSection('form-cloudreels', true, [true,false,false], 'banger-toggle-btn', 'banger-star.is-banger');
+toggleBangerFilter(avant.btn);
+res.banger_actif_apres_clic = nbCaches(avant.grid);   // attendu 2
+vider();   // changement d identite : le serveur renvoie une section neuve
+var apres = faireSection('form-cloudreels', true, [true,false,false], 'banger-toggle-btn', 'banger-star.is-banger');
+applyBangerFilter();       // ce que fait _setBangerStar au 1er clic sur une etoile
+res.banger_apres_rerendu = nbCaches(apres.grid);      // attendu 0
+res.banger_bouton_neutre = apres.btn.getAttribute('data-on');
+// --- meme chose pour l etoile des rushs bruts (Video brut / Template) -------
+vider();
+var brut1 = faireSection('form-cloudbrutes',    false, [true,false,false], 'favbrute-toggle-btn', 'fav-brute-star.is-fav');
+var brut2 = faireSection('form-cloudtemplates', true,  [true,false,false], 'favbrute-toggle-btn', 'fav-brute-star.is-fav');
+toggleFavBruteFilter(brut2.btn);
+res.fav_portee_visible = nbCaches(brut2.grid);        // attendu 2
+res.fav_portee_cachee  = nbCaches(brut1.grid);        // attendu 0
+console.log(JSON.stringify(res));
+"""
+try:
+    import shutil as _shF3
+    import subprocess as _spF3
+    import web_upload as _wF3
+    _uplF3 = _wF3.UPLOAD_HTML
+    _dA = _uplF3.find("function vaultSectionVisible(){")
+    _fA = _uplF3.find("// ⌫ Vide le salon banger-")
+    _dB = _uplF3.find("function favBruteApply(sec){")
+    _fB = _uplF3.find("// === Repérage des brutes")
+    check("filtres etoile : les fonctions sont retrouvables dans la page",
+          _dA >= 0 and _fA > _dA and _dB >= 0 and _fB > _dB,
+          f"dA={_dA} fA={_fA} dB={_dB} fB={_fB}")
+    # Le bouton rendu par le serveur PORTE l etat : sans data-on, la variable
+    # de page reprenait la main et la galerie se vidait sous un bouton neutre.
+    _srcF3 = pathlib.Path("web_upload.py").read_text(encoding="utf-8")
+    check("filtres etoile : le bouton rendu part neutre et porte l etat (data-on)",
+          "id='banger-toggle-btn' data-on='0'" in _srcF3
+          and "id='favbrute-toggle-btn' data-on='0'" in _srcF3)
+    if _dA >= 0 and _fA > _dA and _dB >= 0 and _fB > _dB:
+        _codeF3 = _uplF3[_dA:_fA] + "\n" + _uplF3[_dB:_fB] + "\n" + _DOM_STUB_F3
+        _fF3 = TMP / "filtres_etoile.js"
+        _fF3.write_text(_codeF3, encoding="utf-8")
+        _nodeF3 = _shF3.which("node")
+        if _nodeF3:
+            _rF3 = _spF3.run([_nodeF3, str(_fF3)], capture_output=True,
+                             text=True, encoding="utf-8", timeout=60)
+            try:
+                _resF3 = json.loads((_rF3.stdout or "").strip().splitlines()[-1])
+            except Exception:
+                _resF3 = {}
+            check("filtre ★ : il masque la galerie VISIBLE (Bibliotheque 2)",
+                  _resF3.get("banger_portee_visible") == 2,
+                  ((_rF3.stderr or "") + " " + str(_resF3))[:200])
+            check("filtre ★ : il ne touche PAS la galerie cachee de l autre bibliotheque",
+                  _resF3.get("banger_portee_cachee") == 0, str(_resF3)[:200])
+            check("filtre ★ : un clic sur le bouton filtre bien",
+                  _resF3.get("banger_actif_apres_clic") == 2, str(_resF3)[:200])
+            check("filtre ★ : il ne survit pas au re-rendu de la section (bouton neutre = galerie entiere)",
+                  _resF3.get("banger_apres_rerendu") == 0
+                  and _resF3.get("banger_bouton_neutre") == "0", str(_resF3)[:200])
+            check("filtre ⭐ brutes : il vise la galerie visible (Template montage), pas Video brut",
+                  _resF3.get("fav_portee_visible") == 2
+                  and _resF3.get("fav_portee_cachee") == 0, str(_resF3)[:200])
+        else:
+            # Ne jamais ecarter en silence : dire que la verification manque.
+            print("     (node absent : les filtres etoile n ont pas ete executes)")
+except Exception as _eF3:
+    check("filtres etoile : testable", False, repr(_eF3)[:160])
 
 print()
 print("=" * 70)

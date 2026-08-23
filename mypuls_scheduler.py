@@ -759,7 +759,10 @@ def _add_pending_delete(item_id: int, scheduled_date_iso: str,
         "kind": kind,
         "scheduled_at": sched.isoformat(),
         "delete_at": delete_at.isoformat(),
-        "added_at": datetime.utcnow().isoformat(),
+        # Heure LOCALE, comme scheduled_at et delete_at juste au-dessus :
+        # utcnow() dans la meme fiche donnait un troisieme champ decale de
+        # 1 a 2 h selon la saison, impossible a comparer aux deux autres.
+        "added_at": datetime.now().isoformat(),
     })
     _save_pending(items)
 
@@ -777,12 +780,21 @@ def process_pending_deletes(now=None) -> Dict[str, Any]:
         return {"processed": 0, "deleted": 0, "failed": 0, "errors": []}
     remaining: List[Dict[str, Any]] = []
     deleted, failed = 0, 0
+    corrompus = 0
     errors: List[str] = []
     for it in items:
         try:
             dt = datetime.fromisoformat(it["delete_at"])
         except Exception:
-            # Item corrompu : on le drop
+            # Fiche illisible : elle etait jetee sans un mot, et la story
+            # restait donc en ligne pour toujours sur le compte de la model
+            # alors que la file annoncait « rien en attente ». On la compte et
+            # on la remonte — c'est le seul endroit ou ca peut se voir.
+            corrompus += 1
+            # Message en ASCII pur : il finit dans un log, et une console
+            # Windows en cp1252 leve UnicodeEncodeError sur un tiret cadratin.
+            errors.append("id=%s: delete_at illisible (%r) - suppression "
+                          "abandonnee" % (it.get("id"), it.get("delete_at")))
             continue
         if dt > now:
             remaining.append(it)
@@ -804,6 +816,7 @@ def process_pending_deletes(now=None) -> Dict[str, Any]:
         "processed": len(items),
         "deleted": deleted,
         "failed": failed,
+        "corrompus": corrompus,
         "remaining": len(remaining),
         "errors": errors[:10],
     }

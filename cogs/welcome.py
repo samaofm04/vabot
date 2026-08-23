@@ -1784,14 +1784,18 @@ class Welcome(commands.Cog):
         users = load_users()
         existing = users.get(str(user.id))
         deleted = False
+        echec_salon = ""   # la suppression refusee etait avalee : l'admin croyait
+                           # le salon parti alors qu'il etait toujours la
         if delete_channel and isinstance(existing, dict) and existing.get("channel_id"):
             channel = interaction.guild.get_channel(existing["channel_id"])
             if channel:
                 try:
                     await channel.delete(reason="Reset VA")
                     deleted = True
-                except Exception:
-                    pass
+                except Exception as e:
+                    echec_salon = (f"\n⚠️ **Son salon {channel.mention} n'a PAS pu être supprimé** "
+                                   f"({type(e).__name__}) — supprime-le à la main, ou donne au bot "
+                                   f"la permission **Gérer les salons**.")
         users.pop(str(user.id), None)
         save_users(users)
         # Aussi clear les pending deletions
@@ -1806,6 +1810,7 @@ class Welcome(commands.Cog):
         msg = f"✅ {user.mention} reseté complètement."
         if deleted:
             msg += " Salon supprimé."
+        msg += echec_salon
         await interaction.response.send_message(msg, ephemeral=True)
 
 

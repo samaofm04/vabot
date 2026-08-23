@@ -162,6 +162,38 @@ def _ecrire(classeur, titre: str, grille, gras_sur: str = "",
         pass
 
 
+def contexte_reel(transactions) -> tuple:
+    """(commissions par chatteur, taux EUR->USD du jour), lus a la source.
+
+    Sans ca, une poussee qui ne les fournit pas ecrit une feuille de paie a
+    0 % de commission — donc « A payer (USD) » a 0,00 pour tout le monde — et
+    convertit les euros au taux de repli 1,14 au lieu du taux BCE du jour.
+    Constate a l'execution : web_upload.py appelle pousser_async(tx, periode=…)
+    sans aucun de ces deux arguments (c'est le bouton de la page Revenus),
+    et l'onglet « Paie quinzaine » sortait avec Commission 0 % / A payer 0,00
+    pour chaque chatteur. La boucle automatique, elle, les fournissait :
+    les deux poussees ecrivaient donc des montants differents dans le meme
+    onglet, selon qui avait pousse en dernier.
+    """
+    import mypuls
+    try:
+        taux = float(mypuls.get_eur_usd_rate()["rate"]) or 1.14
+    except Exception:
+        taux = 1.14
+    comm = {}
+    for nom in {(t.get("chatter") or "").strip() for t in (transactions or [])}:
+        if not nom:
+            continue
+        # Un try PAR NOM : quand il englobait toute la boucle, un seul nom
+        # illisible laissait la table a moitie remplie et les chatteurs
+        # suivants repartaient a 0 % de commission.
+        try:
+            comm[nom] = float(mypuls.get_chatter_meta(nom)["commission_pct"])
+        except Exception:
+            pass
+    return comm, taux
+
+
 def preparer(transactions, commissions=None, eur_usd: float = 1.14,
              chatters=None, diagnostic=None) -> tuple:
     """Transactions -> les grilles a ecrire, un onglet chacune. Testable seul."""
@@ -181,7 +213,7 @@ def preparer(transactions, commissions=None, eur_usd: float = 1.14,
 
 
 def pousser(transactions, periode: str = "", commissions=None,
-            eur_usd: float = 1.14, chatters=None, diagnostic=None,
+            eur_usd: float = None, chatters=None, diagnostic=None,
             auto: bool = False) -> dict:
     """Ecrit les ventes dans le classeur. Retourne {ok, lignes, err}.
 
@@ -189,12 +221,22 @@ def pousser(transactions, periode: str = "", commissions=None,
     de la page, adresse /ventes-sheet — est une poussee A LA MAIN, et une
     poussee a la main tient la boucle a distance le temps d'etre lue
     (cf. RESPIT_MANUEL_S).
+
+    `commissions` et `eur_usd` omis ne valent plus « 0 % » et « 1,14 » : ils
+    sont lus a la source (cf. contexte_reel). Un appelant qui les fournit
+    reste prioritaire — c'est le cas de la boucle et de /ventes-sheet.
     """
     sid = sheet_id()
     if not sid:
         return {"ok": False, "err": "Aucun classeur configure"}
     if not disponible():
         return {"ok": False, "err": "Compte de service Google indisponible"}
+    if commissions is None or eur_usd is None:
+        _comm, _taux = contexte_reel(transactions)
+        if commissions is None:
+            commissions = _comm
+        if eur_usd is None:
+            eur_usd = _taux
     grille, recap, quinz, fiches, paie, rappro = preparer(
         transactions, commissions, eur_usd, chatters, diagnostic)
     _set(state="running", err="", ts=int(time.time()))
@@ -344,14 +386,11 @@ def start_auto(interval: int = 300) -> bool:
                                               use_cache=True)
                 if res.get("ok"):
                     tx = res.get("transactions") or []
-                    comm, taux = {}, 1.14
-                    try:
-                        taux = float(mypuls.get_eur_usd_rate()["rate"])
-                        for n in {(t.get("chatter") or "").strip() for t in tx}:
-                            if n:
-                                comm[n] = float(mypuls.get_chatter_meta(n)["commission_pct"])
-                    except Exception:
-                        pass
+                    # Une seule implementation du contexte : la boucle en
+                    # tenait une copie, la poussee manuelle n'en avait aucune,
+                    # et les deux ecrivaient donc des montants differents dans
+                    # le meme onglet.
+                    comm, taux = contexte_reel(tx)
                     pousser(tx, periode="%s -> %s" % (debut.isoformat(),
                                                       today.isoformat()),
                             commissions=comm, eur_usd=taux,

@@ -1016,7 +1016,7 @@ _PHOTO_FIELDS = _FIELDS + ("username",)
 
 
 def _photo_comptes(data: dict) -> dict:
-    """Photo de l'état local : {identité_lower: {username_lower: {champ: valeur}}}.
+    """Photo de l'état local : {identité_lower: {username_lower: {champ: {valeurs}}}}.
 
     POURQUOI : le poller lit TOUS les classeurs Google hors verrou (15 à 40 s
     observées). Quand la lecture se termine, sa photo du Sheet est déjà périmée.
@@ -1026,6 +1026,16 @@ def _photo_comptes(data: dict) -> dict:
     effacée côté Sheet »). La photo prise AVANT la lecture permet de distinguer
     « la valeur a bougé dans le Sheet » (à appliquer) de « la valeur a bougé sur
     le site depuis » (à garder : elle est plus récente).
+
+    POURQUOI UN ENSEMBLE DE VALEURS PAR CHAMP : deux comptes locaux peuvent
+    porter le MÊME pseudo (cas documenté — c'est la raison d'être de
+    `_dedup_accounts`). La photo indexait alors « dernier gagnant » pendant que
+    le merge indexe « premier gagnant » (`by_uname`) : les deux ne parlaient
+    plus de la même ligne, la comparaison disait « modifié sur le site » à
+    CHAQUE cycle, et la ligne éditée dans le Sheet n'était plus jamais
+    appliquée — blocage permanent, silencieux. En gardant TOUTES les valeurs
+    vues sous ce pseudo, la comparaison reste juste quelle que soit la ligne
+    que le merge a retenue.
     """
     photo = {}
     for identity, entry in (data or {}).items():
@@ -1038,7 +1048,9 @@ def _photo_comptes(data: dict) -> dict:
             u = (a.get("username") or "").strip().lower()
             if not u:
                 continue
-            par_user[u] = {f: (a.get(f) or "") for f in _PHOTO_FIELDS}
+            snap = par_user.setdefault(u, {f: set() for f in _PHOTO_FIELDS})
+            for f in _PHOTO_FIELDS:
+                snap[f].add(a.get(f) or "")
         photo[str(identity).strip().lower()] = par_user
     return photo
 
@@ -1047,16 +1059,83 @@ def _valeur_perimee(photo_id: dict, u: str, champ: str, valeur_locale) -> bool:
     """La valeur lue dans le Sheet est-elle PÉRIMÉE pour ce champ ?
 
     Oui si le compte est inconnu de la photo (créé sur le site pendant la
-    lecture) ou si la valeur locale a changé depuis la photo. Dans ces deux cas
-    le site est plus frais que le Sheet : on garde le site, et le push qui suit
-    la sauvegarde réaligne la cellule."""
+    lecture) ou si la valeur locale ne figure pas dans la photo, donc a changé
+    depuis. Dans ces deux cas le site est plus frais que le Sheet : on garde le
+    site, et le push qui suit la sauvegarde réaligne la cellule."""
     snap = photo_id.get(u)
     if snap is None:
         return True
-    return (snap.get(champ) or "") != (valeur_locale or "")
+    vals = snap.get(champ)
+    if vals is None:
+        return True   # champ hors photo : on ne sait pas arbitrer -> on garde le site
+    if isinstance(vals, (set, frozenset, list, tuple)):
+        return (valeur_locale or "") not in vals
+    return (vals or "") != (valeur_locale or "")   # photo fournie à la main (bancs de test)
 
 
-def pull_and_merge(force_delete: bool = False) -> tuple:
+# ---------- Résultat d'un pull : ce qui s'est passé, pas seulement « ça a changé » ----------
+PULL_RIEN = "rien"          # lecture OK, le Sheet dit déjà la même chose que le site
+PULL_APPLIQUE = "applique"  # des comptes ont bougé
+PULL_SIGNALE = "signale"    # RIEN appliqué, mais des valeurs/comptes ont été retenus
+PULL_PAUSE = "pause"        # sync gelée
+PULL_INDISPO = "indispo"    # Sheet illisible (API/quota Google)
+PULL_ANNULE = "annule"      # état local illisible : le pull n'a même pas été tenté
+
+
+class PullResult(tuple):
+    """Résultat d'un pull. Reste le couple `(changed, summary)` — tous les
+    appelants continuent de faire `changed, summary = ...` — mais porte en plus
+    le MOTIF et les compteurs.
+
+    POURQUOI : `changed` est faux dans des situations opposées. « Le Sheet
+    n'apporte rien de neuf » et « le pull a été ANNULÉ » et « la protection
+    anti-écrasement a retenu des valeurs » renvoyaient tous `False`, donc
+    s'affichaient tous « Rien de nouveau côté Sheet » et ne laissaient aucune
+    ligne au journal. Or la protection agit EXACTEMENT dans les cycles où rien
+    n'est écrit : ses compteurs n'arrivaient donc jamais à personne — le même
+    silence que celui qui a rendu le bug d'écrasement invisible des mois."""
+
+    def __new__(cls, changed, summary, outcome=PULL_RIEN, details="", **compteurs):
+        self = super().__new__(cls, (bool(changed), str(summary)))
+        self.outcome = outcome
+        self.details = details or ""
+        self.compteurs = {k: int(v) for k, v in compteurs.items() if v}
+        return self
+
+    @property
+    def signale(self) -> bool:
+        """Y a-t-il quelque chose à DIRE (écran + journal), même sans modification ?"""
+        return self.outcome != PULL_RIEN
+
+
+def pull_message(res) -> str:
+    """Message utilisateur d'un pull. UN SEUL endroit décide de la formulation :
+    le cog Discord la déduisait du texte du résumé (« RETENUES » dedans ?
+    « pause » dedans ?), et tout ce que ce décodage ne prévoyait pas — dont un
+    pull ANNULÉ — retombait sur « Rien de nouveau côté Sheet »."""
+    changed = bool(res[0])
+    summary = str(res[1]) if len(res) > 1 else ""
+    outcome = getattr(res, "outcome", None)
+    details = (getattr(res, "details", "") or "").strip(" ·\n")
+    if outcome == PULL_ANNULE:
+        return ("🛑 **Pull ANNULÉ — aucune ligne appliquée.**\n" + summary +
+                "\nLe Sheet n'a pas été touché. Réessaie dans un instant ; "
+                "si ça persiste : `/sheetsync status`.")
+    if outcome == PULL_INDISPO:
+        return ("❌ **Sheet ILLISIBLE** (API/quota Google ?) — le pull n'a rien pu lire. "
+                "Réessaie dans 1-2 min, puis `/sheetsync status`.")
+    if outcome == PULL_PAUSE:
+        return ("⏸️ **Sync en PAUSE** — aucun pull appliqué. "
+                "Fais `/sheetsync resume` pour réactiver.")
+    if changed:
+        return f"✅ Importé du Sheet : {summary}"
+    if outcome == PULL_SIGNALE:
+        return ("ℹ️ **Aucun ajout ni modification**, mais le pull a retenu des choses :\n"
+                + (details or summary))
+    return "Rien de nouveau côté Sheet (le contenu du Sheet = déjà l'état du site)."
+
+
+def pull_and_merge(force_delete: bool = False) -> PullResult:
     """Applique le Sheet dans jailbreak.json. 2 types d'onglets ÉDITABLES :
       - IDENTITÉ (nom = 'amelia') : gouverne TOUS les comptes de l'identité.
       - PAR VA (nom = 'amelia andry') : gouverne les comptes de cette identité gérés
@@ -1066,10 +1145,14 @@ def pull_and_merge(force_delete: bool = False) -> tuple:
     username nouveau -> ajouté. ANTI-WIPE : un onglet VIDE n'entraîne aucune suppression.
     force_delete=True (action VOLONTAIRE /sheetsync pull force) : applique aussi
     les suppressions massives normalement retenues par le garde anti-effacement.
-    Retourne (changed, summary)."""
+    Retourne un PullResult : le couple (changed, summary) comme avant, PLUS le
+    motif (`.outcome`) et les compteurs de ce qui a été retenu (`.compteurs`) —
+    sans quoi un pull annulé ou une protection qui agit ne se distinguaient pas
+    d'un cycle sans nouveauté. Message prêt à afficher : `pull_message(res)`."""
     import jailbreak as jb
     if is_paused():
-        return False, "Sync en PAUSE (aucune modification appliquée)."
+        return PullResult(False, "Sync en PAUSE (aucune modification appliquée).",
+                          PULL_PAUSE)
     # PHOTO DE RÉFÉRENCE, prise AVANT la lecture réseau. On NE garde PAS le
     # verrou pendant les 15-40 s de lecture (ça figerait le site) : on horodate
     # l'état local à l'instant où la photo du Sheet commence, et le merge s'en
@@ -1081,10 +1164,13 @@ def pull_and_merge(force_delete: bool = False) -> tuple:
     except Exception as e:
         # Sans photo on ne sait plus arbitrer : ne rien appliquer plutôt que
         # d'écraser des éditions récentes — et le DIRE (jamais en silence).
-        return False, f"État local illisible ({e}) — pull annulé."
+        # Le motif PULL_ANNULE distingue ce refus d'un simple « rien de neuf » :
+        # sans lui, une annulation s'annonçait comme un cycle sans nouveauté.
+        return PullResult(False, f"État local illisible ({e}) — pull annulé, "
+                                 f"rien n'a été appliqué.", PULL_ANNULE)
     sheet = pull_all()          # lecture réseau HORS verrou (peut durer)
     if sheet is None:
-        return False, "Sheet indisponible"
+        return PullResult(False, "Sheet indisponible", PULL_INDISPO)
     # Toute la séquence load -> merge -> save sous le verrou de la base : sans
     # ça, une action du site pendant le merge du poller était écrasée.
     with jb.transaction():
@@ -1382,4 +1468,15 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False,
         _extra += (f"" + chr(10) + f"⚠️ **{blocked_del} suppression(s) RETENUES** (garde anti-effacement : "
                    f"quasi-effacement total d'une identité). Si c'est VOULU, relance "
                    f"`/sheetsync pull force:True` pour les appliquer.")
-    return changed, f"+{added} ajout(s) · {updated} modif(s) · -{removed} suppr.{_extra}"
+    # Un cycle qui n'écrit RIEN n'est pas forcément un cycle sans histoire : la
+    # protection anti-écrasement agit précisément dans ces cycles-là. Le motif
+    # PULL_SIGNALE force l'appelant à remonter ses compteurs au lieu de
+    # répondre « rien de nouveau » (constaté : les trois compteurs n'arrivaient
+    # ni à l'écran ni au journal).
+    retenus = conflits + proteges + disparus + blocked_del + len(skipped_tomb)
+    outcome = PULL_APPLIQUE if changed else (PULL_SIGNALE if retenus else PULL_RIEN)
+    return PullResult(changed,
+                      f"+{added} ajout(s) · {updated} modif(s) · -{removed} suppr.{_extra}",
+                      outcome, details=_extra,
+                      conflits=conflits, proteges=proteges, disparus=disparus,
+                      retenues=blocked_del, tombstones=len(skipped_tomb))

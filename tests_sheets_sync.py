@@ -344,6 +344,203 @@ ss.SA_FILE, ss.load_config, ss._client = _orig_sa, _orig_cfg, _orig_client
 
 print()
 print("=" * 70)
+print("4) DOUBLONS de pseudo : la photo et le merge doivent viser la MÊME ligne")
+print("=" * 70)
+
+
+def etat_doublon():
+    """Deux comptes locaux du MÊME pseudo — cas documenté (c'est la raison
+    d'être de `_dedup_accounts`). La photo indexait « dernier gagnant » et le
+    merge « premier gagnant » : la comparaison portait sur deux lignes
+    différentes, donc disait « modifié sur le site » à chaque cycle et la
+    ligne éditée dans le Sheet n'était plus JAMAIS appliquée."""
+    st = etat_depart()
+    st["lola"]["accounts"].append(
+        {"id": 3, "username": "u1", "va": "Andry", "password": "MDP1_BIS",
+         "email": "a2@x.io", "two_fa": "2FA1B", "notes": "n1b"})
+    return st
+
+
+_JB.state = etat_doublon()
+sheet = {"lola": [ligne(_JB.state["lola"]["accounts"][0], password="EDITE_DANS_LE_SHEET"),
+                  ligne(_JB.state["lola"]["accounts"][1])]}
+res = pull(sheet)
+_mdp = [a["password"] for a in _JB.state["lola"]["accounts"]]
+check("doublon de pseudo : l'édition du Sheet est appliquée",
+      _mdp[0] == "EDITE_DANS_LE_SHEET", _mdp)
+check("doublon de pseudo : l'autre ligne n'est pas touchée",
+      _mdp[1:] == ["MDP2", "MDP1_BIS"], _mdp)
+check("doublon de pseudo : aucun conflit fantôme",
+      res.compteurs.get("conflits", 0) == 0, res[1])
+check("doublon de pseudo : le pull n'est plus bloqué en permanence", res[0] is True, res[1])
+
+# ... et la protection anti-écrasement doit TENIR malgré le doublon
+_JB.state = etat_doublon()
+sheet = onglet_identite(_JB.state)
+res = pull(sheet, pendant_la_lecture=_edit_site("password", "CORRIGE_SUR_LE_SITE"))
+_mdp = [a["password"] for a in _JB.state["lola"]["accounts"]]
+check("doublon + édition concurrente : le site gagne encore",
+      _mdp[0] == "CORRIGE_SUR_LE_SITE", _mdp)
+check("doublon + édition concurrente : conflit toujours remonté",
+      res.compteurs.get("conflits", 0) >= 1, res[1])
+
+
+print()
+print("=" * 70)
+print("5) Contrat de retour : un pull sans écriture n'est pas un pull sans histoire")
+print("=" * 70)
+
+
+def etat_gros(n=25):
+    return {"lola": {"vas": [{"name": "Andry", "discord_username": ""}],
+                     "accounts": [{"id": i, "username": f"a{i}", "va": "Andry",
+                                   "password": f"P{i}", "email": "", "two_fa": "",
+                                   "notes": ""} for i in range(n)]}}
+
+
+# a) cycle vraiment calme
+_JB.state = etat_depart()
+res = pull(onglet_identite(_JB.state))
+_ch, _summ = res                       # le couple historique doit survivre
+check("résultat toujours un couple (changed, summary)",
+      len(res) == 2 and _ch is False and isinstance(_summ, str), repr(res))
+check("cycle calme : motif 'rien'", res.outcome == ss.PULL_RIEN, res.outcome)
+check("cycle calme : écran 'rien de nouveau'",
+      "Rien de nouveau" in ss.pull_message(res), ss.pull_message(res))
+
+# b) valeur du Sheet ignorée (conflit)
+_JB.state = etat_depart()
+res = pull(onglet_identite(_JB.state),
+           pendant_la_lecture=_edit_site("password", "CORRIGE_SUR_LE_SITE"))
+_m = ss.pull_message(res)
+check("conflit : rien d'écrit mais motif 'signale'",
+      res[0] is False and res.outcome == ss.PULL_SIGNALE, f"{res[0]} {res.outcome}")
+check("conflit : compteur porté par le résultat", res.compteurs.get("conflits") == 1,
+      res.compteurs)
+check("conflit : l'écran ne dit PAS 'rien de nouveau'", "Rien de nouveau" not in _m, _m)
+check("conflit : l'écran dit ce qui a été ignoré", "ignorée" in _m, _m)
+
+# c) compte protégé de la suppression
+_JB.state = etat_depart()
+res = pull(onglet_identite(_JB.state), pendant_la_lecture=_cree_compte)
+_m = ss.pull_message(res)
+check("compte protégé : motif 'signale'", res.outcome == ss.PULL_SIGNALE, res.outcome)
+check("compte protégé : compteur porté", res.compteurs.get("proteges") == 1, res.compteurs)
+check("compte protégé : remonté à l'écran", "protégé" in _m and "Rien de nouveau" not in _m, _m)
+
+# d) ligne périmée non ré-ajoutée (compte renommé pendant la lecture)
+_JB.state = etat_depart()
+res = pull(onglet_identite(_JB.state), pendant_la_lecture=_renomme)
+_m = ss.pull_message(res)
+check("ligne périmée : compteur porté", res.compteurs.get("disparus") == 1, res.compteurs)
+check("ligne périmée : remontée à l'écran", "non ré-ajoutée" in _m, _m)
+
+# e) suppressions retenues par le garde anti-effacement, sans aucune écriture
+_JB.state = etat_gros()
+res = pull({"lola": [ligne(_JB.state["lola"]["accounts"][0])]})
+_m = ss.pull_message(res)
+check("anti-effacement : aucune suppression appliquée",
+      len(_JB.state["lola"]["accounts"]) == 25, len(_JB.state["lola"]["accounts"]))
+check("anti-effacement : motif 'signale'", res.outcome == ss.PULL_SIGNALE, res.outcome)
+check("anti-effacement : compteur porté", res.compteurs.get("retenues") == 24, res.compteurs)
+check("anti-effacement : remonté à l'écran", "RETENUES" in _m, _m)
+
+# f) PULL ANNULÉ (état local illisible) — le pire cas : il s'annonçait « rien de nouveau »
+_JB.state = etat_depart()
+_orig_load = _JB._load
+_JB._load = _load_ko
+res = ss.pull_and_merge()
+_JB._load = _orig_load
+_m = ss.pull_message(res)
+check("pull annulé : motif dédié", res.outcome == ss.PULL_ANNULE, res.outcome)
+check("pull annulé : l'écran le DIT", "ANNULÉ" in _m, _m)
+check("pull annulé : jamais confondu avec un pull sans nouveauté",
+      "Rien de nouveau" not in _m, _m)
+
+# g) Sheet illisible
+_JB.state = etat_depart()
+ss.pull_all = lambda: None
+res = ss.pull_and_merge()
+check("Sheet illisible : motif dédié", res.outcome == ss.PULL_INDISPO, res.outcome)
+check("Sheet illisible : l'écran le DIT", "ILLISIBLE" in ss.pull_message(res),
+      ss.pull_message(res))
+
+# h) sync en pause
+ss.is_paused = lambda: True
+res = ss.pull_and_merge()
+ss.is_paused = lambda: False
+check("pause : motif dédié", res.outcome == ss.PULL_PAUSE, res.outcome)
+check("pause : l'écran le DIT", "PAUSE" in ss.pull_message(res), ss.pull_message(res))
+
+# i) un vrai changement reste un vrai changement
+_JB.state = etat_depart()
+res = pull(onglet_identite(_JB.state, u1={"password": "NOUVEAU"}))
+check("changement réel : motif 'applique'", res.outcome == ss.PULL_APPLIQUE, res.outcome)
+check("changement réel : écran d'import", "Importé" in ss.pull_message(res),
+      ss.pull_message(res))
+
+
+print()
+print("=" * 70)
+print("6) Journal du poller : ce qui est retenu doit laisser une trace")
+print("=" * 70)
+
+import io, contextlib                                 # noqa: E402
+
+try:
+    from cogs.sheetssync import SheetsSync as _Cog    # noqa: E402
+
+    class _FauxCog:
+        """Juste ce que `_journal` lit de `self` — ni bot, ni boucle discord."""
+        _RELOG_S = _Cog._RELOG_S
+
+        def __init__(self):
+            self._dernier_log = ("", 0.0)
+
+    def _journal(res, cog=None, **kw):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _Cog._journal(cog or _FauxCog(), res, **kw)
+        return buf.getvalue()
+
+    _JB.state = etat_depart()
+    _calme = pull(onglet_identite(_JB.state))
+    check("journal : cycle calme = aucune ligne", _journal(_calme) == "", _journal(_calme))
+
+    _JB.state = etat_depart()
+    _conflit = pull(onglet_identite(_JB.state),
+                    pendant_la_lecture=_edit_site("password", "CORRIGE_SUR_LE_SITE"))
+    _l = _journal(_conflit)
+    check("journal : conflit écrit au journal", "ignorée" in _l, _l.strip() or "(rien)")
+
+    _JB.state = etat_depart()
+    _prot = pull(onglet_identite(_JB.state), pendant_la_lecture=_cree_compte)
+    check("journal : compte protégé écrit au journal", "protégé" in _journal(_prot),
+          _journal(_prot).strip() or "(rien)")
+
+    _JB._load = _load_ko
+    _annule = ss.pull_and_merge()
+    _JB._load = _orig_load
+    _l = _journal(_annule)
+    check("journal : pull annulé écrit au journal", "annulé" in _l and "annule" in _l,
+          _l.strip() or "(rien)")
+
+    # Anti-noyade : le poller tourne toutes les 2 min. Un état qui DURE ne doit
+    # pas écrire 720 lignes/jour (un journal noyé cache autant que le silence),
+    # mais un pull demandé À LA MAIN garde toujours sa ligne.
+    _c = _FauxCog()
+    _un = _journal(_annule, cog=_c)
+    _deux = _journal(_annule, cog=_c)
+    check("journal : état qui dure = pas de répétition immédiate",
+          _un != "" and _deux == "", repr(_deux))
+    check("journal : pull manuel toujours écrit",
+          _journal(_annule, cog=_c, toujours=True) != "")
+except Exception as _e:                                # pragma: no cover
+    check("journal du poller : testable", False, repr(_e)[:120])
+
+
+print()
+print("=" * 70)
 print(f"{len(OKS)} OK · {len(FAILS)} FAIL")
 if FAILS:
     for f in FAILS:
