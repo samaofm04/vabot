@@ -4303,6 +4303,42 @@ except Exception as _ePy:
 
 print()
 print("=" * 70)
+print("LE FRAGMENT JAILBREAK EMPORTE SA PROPRE MISE EN PAGE")
+print("=" * 70)
+try:
+    import web_upload as _wJb
+    _aJb = _wJb.create_app(); _aJb.testing = True
+    _savJb = _wJb._load_web_users
+    _wJb._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"}}
+    _cJb = _aJb.test_client()
+    with _cJb.session_transaction() as _s:
+        _s["auth"] = True; _s["username"] = "boss"; _s["role"] = "owner"
+        _s["sid"] = "JB1"
+    _hJb = _cJb.get("/?tab=jailbreak&frag=1",
+                    headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+    # Le tableau des comptes empruntait sa grille a DEUX autres sections
+    # (.va-ig3-row au bloc GeeLark, .va-ig3-thead au bloc « liste VA »). Depuis
+    # que celles-ci sont differees, leur CSS ne partait plus avec la page :
+    # l en-tete se lisait « CompteAbonnesVues 24hVues sem… » d un seul tenant et
+    # les valeurs s empilaient. Une section doit emporter sa propre mise en page.
+    check("jailbreak : le fragment porte la grille du tableau des comptes",
+          "jb-detail-accounts .va-ig3-thead" in _hJb
+          and "grid-template-columns:36px 1fr auto" in _hJb,
+          "%d octets" % len(_hJb))
+    # Les 9 colonnes doivent correspondre aux 9 cases de _ACCT_THEAD : une case
+    # ajoutee a l en-tete sans colonne correspondante recasse tout.
+    _srcJb = _plCa.Path("web_upload.py").read_text(encoding="utf-8")
+    _iJb = _srcJb.index("_ACCT_THEAD = (")
+    _cases = _srcJb[_iJb:_iJb + 520].count("<span")
+    _cols = len([x for x in "36px 1fr auto auto auto auto auto 22px 28px".split()])
+    check("jailbreak : autant de colonnes que de cases d en-tete",
+          _cases == _cols, "%d cases / %d colonnes" % (_cases, _cols))
+    _wJb._load_web_users = _savJb
+except Exception as _eJb:
+    check("jailbreak : fragment testable", False, repr(_eJb)[:160])
+
+print()
+print("=" * 70)
 print("REPERAGE DES BRUTES QUI PORTENT DEJA DU TEXTE")
 print("=" * 70)
 try:

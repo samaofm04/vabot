@@ -28535,6 +28535,24 @@ def _render_jailbreak_html() -> str:
         # Trends -> sans ça, « Banni » s'affichait en texte brut sur la page Jailbreak.
         ".va-ig3-ban-badge{display:inline-flex;align-items:center;gap:5px;margin-left:8px;background:rgba(248,113,113,.14);color:#f87171;border:1px solid rgba(248,113,113,.32);font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;vertical-align:middle;white-space:nowrap}"
         ".va-ig3-ban-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#f87171;flex-shrink:0}"
+        # MEME PIEGE que la pastille juste au-dessus, en pire : le tableau des
+        # comptes empruntait sa mise en colonnes a DEUX autres sections —
+        # .va-ig3-row au bloc GeeLark, .va-ig3-thead au bloc « liste VA ».
+        # Depuis que ces sections sont differees, leur CSS ne part plus avec la
+        # page : l'en-tete se lisait « CompteAbonnesVues 24hVues sem… » d'un
+        # seul tenant et les valeurs s'empilaient a la verticale.
+        # La page Jailbreak declare donc sa propre grille. Les 9 colonnes
+        # correspondent aux 9 cases de _ACCT_THEAD ; toute case ajoutee la-haut
+        # doit etre ajoutee ici.
+        ".jb-detail-accounts .va-ig3-thead,.jb-detail-accounts .va-ig3-row{"
+        "display:grid;grid-template-columns:36px 1fr auto auto auto auto auto 22px 28px;"
+        "gap:14px;align-items:center}"
+        ".jb-detail-accounts .va-ig3-thead{background:#0c0e13;border:1px solid #23262f;"
+        "border-radius:10px 10px 0 0;padding:10px 14px;font-size:11px;color:#8a8a94;"
+        "text-transform:uppercase;letter-spacing:.04em;font-weight:700}"
+        ".jb-detail-accounts .va-ig3-thead .r{text-align:right}"
+        "body.light .jb-detail-accounts .va-ig3-thead{background:#f7f8fa;"
+        "border-color:#e5e7eb;color:#6b7280}"
         ".jb-detail-accounts{overflow-x:auto;max-width:1400px}"
         ".jb-prog-spin{width:12px;height:12px;border-radius:50%;border:2px solid rgba(34,197,94,.25);border-top-color:#22c55e;display:inline-block;animation:jbSpin .8s linear infinite;flex-shrink:0}"
         ".jb-row:hover{background:rgba(255,255,255,.02)}"
