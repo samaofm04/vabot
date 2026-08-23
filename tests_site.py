@@ -2610,6 +2610,47 @@ except Exception as _eRg:
 
 print()
 print("=" * 70)
+print("FRAGMENT LEGER DES GALERIES (defaut F5)")
+print("=" * 70)
+try:
+    import pathlib as _plFr
+    import shutil as _shFr
+    import web_upload as _wFr
+
+    _aFr = _wFr.create_app(); _aFr.testing = True
+    _savFr = _wFr._load_web_users
+    _wFr._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"}}
+    _cFr = _aFr.test_client()
+    with _cFr.session_transaction() as _s:
+        _s["auth"] = True; _s["username"] = "boss"; _s["role"] = "owner"; _s["sid"] = "FR1"
+
+    # « Video brut » et « Templates montage » manquaient a la table des
+    # fragments : chaque survol d identite renvoyait la page ENTIERE, soit
+    # 1,4 Mo, et reconstruisait sept galeries plus le tableau de bord cote
+    # serveur. Ce sont exactement les deux onglets ou l on constatait que
+    # « rien ne charge ».
+    for _tabFr, _identFr, _kFr in (("cloudbrutes", "_tst_frag", "cloud_brutes_ident"),
+                                   ("cloudtemplates", "_tst_frag2", "cloud_templates_ident")):
+        _dFr = _wFr.IDENTITIES_DIR / _identFr / _tabFr.replace("cloud", "")
+        _shFr.rmtree(_wFr.IDENTITIES_DIR / _identFr, ignore_errors=True)
+        _dFr.mkdir(parents=True)
+        (_dFr / "c1.mp4").write_bytes(b"\x00" * 9000)
+        _url = "/?tab=%s&%s=%s" % (_tabFr, _kFr, _identFr)
+        _plein = _cFr.get(_url).get_data(as_text=True)
+        _frag = _cFr.get(_url + "&frag=1",
+                         headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+        check("fragment %s : dix fois plus leger que la page" % _tabFr,
+              len(_frag) < len(_plein) / 10,
+              "%d vs %d octets" % (len(_frag), len(_plein)))
+        check("fragment %s : porte bien la galerie et la bonne identite" % _tabFr,
+              "vault-grid" in _frag and _identFr in _frag)
+        _shFr.rmtree(_wFr.IDENTITIES_DIR / _identFr, ignore_errors=True)
+    _wFr._load_web_users = _savFr
+except Exception as _eFr:
+    check("fragment : testable", False, repr(_eFr)[:160])
+
+print()
+print("=" * 70)
 print("SELECTION MULTIPLE ET NAVIGATION (defauts B1 et F2)")
 print("=" * 70)
 try:

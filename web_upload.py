@@ -42501,6 +42501,14 @@ def create_app():
                 "cloudposts": ("posts", IMAGE_EXTS, False),
                 "cloudstories": ("stories", IMAGE_EXTS, False),
                 "cloudstoryctas": ("storyctas", IMAGE_EXTS, False),
+                # Video brut et Templates montage MANQUAIENT a cette table :
+                # chaque survol d'identite (160 ms) et chaque clic renvoyait
+                # donc 1,4 Mo et reconstruisait sept galeries plus le tableau
+                # de bord cote serveur, au lieu du fragment de ~50 Ko. Ce sont
+                # exactement les deux onglets ou l'on constatait que « rien ne
+                # charge ».
+                "cloudbrutes": ("brutes", VIDEO_EXTS, False),
+                "cloudtemplates": ("templates", VIDEO_EXTS, False),
                 "cloudpps": None,   # PP a son propre producer
                 # Vault PRO : galeries generiques (les PP PRO aussi, contrairement
                 # a cloudpps qui a sa page a part)
