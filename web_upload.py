@@ -7548,6 +7548,13 @@ function showTab(group,name,title,subtitle){
   // Instagram Trends : la page affiche le DERNIER scrape (instantané). Le scrape
   // tourne en arrière-plan (2x/jour 00h/12h + à l'ajout d'un compte), PLUS à
   // l'ouverture. Si un scrape programmé est en cours, on rattache juste la barre.
+  // Remote : le sondeur ne part plus que si la section est visible. Sans ce
+  // reveil, la file resterait vide jusqu au tic suivant, soit 5 s apres
+  // l ouverture de l onglet.
+  if(name === 'remote'){
+    if(typeof remoteJobs === 'function') remoteJobs();
+    if(typeof remoteEtat === 'function') remoteEtat();
+  }
   if(name === 'igtrends'){
     try{
       fetch('/insta/scrape_status').then(function(r){return r.json();}).then(function(d){
@@ -10147,6 +10154,12 @@ function remoteLancer(){
 function remoteJobs(){
   var boite=document.getElementById('rmt-jobs');
   if(!boite) return;
+  // Onglet ferme = pas de sondage. Le garde regardait la SOUS-vue, que
+  // remoteVue('cycle') passe en display:block au chargement de chaque page :
+  // il etait donc toujours vrai et /api/rig/jobs partait sur tout le site,
+  // onglet Remote ferme, toutes les 5 s.
+  var sec=document.getElementById('form-remote');
+  if(!sec || sec.style.display==='none') return;
   fetch('/api/rig/jobs',{credentials:'same-origin'})
    .then(function(r){return r.json();})
    .then(function(j){
@@ -15550,7 +15563,7 @@ function extAutoLoadOne(row, force){
     if(s.profile_pic_url){
       var pp = row.querySelector('.va-ig3-row-pp');
       if(pp && pp.tagName === 'IMG'){ pp.src = s.profile_pic_url; }
-      else if(pp){ var newPp = document.createElement('img'); newPp.src = s.profile_pic_url; newPp.className = 'va-ig3-row-pp'; newPp.referrerPolicy = 'no-referrer'; pp.replaceWith(newPp); }
+      else if(pp){ var newPp = document.createElement('img'); newPp.className = 'va-ig3-row-pp'; newPp.loading = 'lazy'; newPp.decoding = 'async'; newPp.referrerPolicy = 'no-referrer'; newPp.src = s.profile_pic_url; pp.replaceWith(newPp); }
     }
     if(nums[0]) nums[0].textContent = fmt(s.followers||0);
     if(nums[1]) nums[1].textContent = fmt(s.daily||0);
@@ -15614,7 +15627,7 @@ function extRenderStats(row, s){
     var e=document.createElement('div'); e.className='va-ig3-row-err'; e.textContent=(s.error||'').slice(0,90)+' — stats précédentes conservées'; row.appendChild(e);
     return;
   }
-  if(s.profile_pic_url){var pp=row.querySelector('.va-ig3-row-pp');if(pp&&pp.tagName==='IMG'){pp.src=s.profile_pic_url;}else if(pp){var np=document.createElement('img');np.src=s.profile_pic_url;np.className='va-ig3-row-pp';np.referrerPolicy='no-referrer';pp.replaceWith(np);}}
+  if(s.profile_pic_url){var pp=row.querySelector('.va-ig3-row-pp');if(pp&&pp.tagName==='IMG'){pp.src=s.profile_pic_url;}else if(pp){var np=document.createElement('img');np.className='va-ig3-row-pp';np.loading='lazy';np.decoding='async';np.referrerPolicy='no-referrer';np.src=s.profile_pic_url;pp.replaceWith(np);}}
   if(nums[0]) nums[0].textContent=fmt(s.followers||0);
   if(nums[1]) nums[1].textContent=fmt(s.daily||0);
   if(nums[2]) nums[2].textContent=fmt(s.weekly||0);
@@ -15691,9 +15704,11 @@ function vaIg3MiniLoad(uid, detail, force){
           pp.src = s.profile_pic_url;
         } else if(pp){
           var newPp = document.createElement('img');
-          newPp.src = s.profile_pic_url;
           newPp.className = 'va-ig3-row-pp';
+          newPp.loading = 'lazy';
+          newPp.decoding = 'async';
           newPp.referrerPolicy = 'no-referrer';
+          newPp.src = s.profile_pic_url;
           pp.replaceWith(newPp);
         }
       }
@@ -24544,7 +24559,7 @@ body.light .mypuls-bar{background:#e5e7eb}
         if has_screenshot:
             thumb_html = (
                 f"<div class='mp-crypto-thumb' style='position:relative;display:inline-block'>"
-                f"<img src='/mypuls/chatter/crypto/{name_url_safe}' "
+                f"<img src='/mypuls/chatter/crypto/{name_url_safe}' loading='lazy' decoding='async' "
                 f"style='width:38px;height:38px;border-radius:6px;object-fit:cover;border:1px solid #2a2a2a;cursor:zoom-in;display:block' "
                 f"onclick=\"event.stopPropagation();mpEnlargeImg(this.src)\">"
                 f"</div>"
@@ -24637,7 +24652,11 @@ body.light .mypuls-bar{background:#e5e7eb}
             f"<div style='display:flex;flex-direction:column;gap:10px'>"
             + f"<div id='mp-shot-{i}'>"
             + (
-                f"<div style='position:relative'><img src='/mypuls/chatter/crypto/{name_url_safe}?t=now' style='width:100%;max-height:200px;object-fit:contain;border-radius:8px;border:1px solid #2a2a2a;background:#000'></div>"
+                # « ?t=now » est la chaine CONSTANTE "now" : ce n'est pas un
+                # anti-cache, c'est une SECONDE cle de cache pour les memes
+                # octets — d'ou deux telechargements par chatteur. Et un <img>
+                # non paresseux sous display:none est charge quand meme.
+                f"<div style='position:relative;min-height:120px'><img src='/mypuls/chatter/crypto/{name_url_safe}' loading='lazy' decoding='async' style='width:100%;max-height:200px;object-fit:contain;border-radius:8px;border:1px solid #2a2a2a;background:#000'></div>"
                 if has_screenshot else
                 "<div style='border:2px dashed #2a2a2a;border-radius:8px;padding:40px 20px;text-align:center;color:#666;font-size:12px'>Pas de screenshot</div>"
             )
@@ -29872,9 +29891,13 @@ def _render_jailbreak_html() -> str:
         "            var pp = r.querySelector('.va-ig3-row-pp');"
         "            if(pp && pp.tagName !== 'IMG'){"
         "              var img = document.createElement('img');"
-        "              img.src = s.profile_pic_url; img.className = 'va-ig3-row-pp';"
-        "              img.setAttribute('loading','lazy'); img.setAttribute('referrerpolicy','no-referrer');"
+        # src EN DERNIER : pose avant loading='lazy', le telechargement demarre
+        # aussitot et l attribut arrive trop tard — la paresse etait inoperante.
+        "              img.className = 'va-ig3-row-pp';"
+        "              img.setAttribute('loading','lazy'); img.setAttribute('decoding','async');"
+        "              img.setAttribute('referrerpolicy','no-referrer');"
         "              img.onerror = function(){ this.style.display='none'; };"
+        "              img.src = s.profile_pic_url;"
         "              if(pp.parentNode) pp.parentNode.replaceChild(img, pp);"
         "            }"
         "          }"
@@ -45207,15 +45230,43 @@ def create_app():
         """Sert la photo de profil téléchargée en local (data/insta/pp/<handle>.jpg).
         Évite de dépendre des URLs Instagram signées, qui expirent -> plus de comptes
         affichés sans photo. 404 si on n'a pas encore de copie."""
-        from flask import send_file
+        from flask import send_file, make_response
         if not is_auth():
             return "", 401
         try:
             import insta_scraper as _ig_pp
             p = _ig_pp.local_pp_path(handle)
             if not p:
-                return "", 404
-            resp = send_file(str(p), mimetype="image/jpeg", conditional=True)
+                # Un 404 sans en-tete de cache etait redemande a CHAQUE rendu, et a
+                # chaque reconstruction JS : un compte sans copie locale coutait une
+                # requete par affichage, pour rien.
+                r404 = make_response("", 404)
+                r404.headers["Cache-Control"] = "public, max-age=3600"
+                return r404
+            # La copie locale fait 320x320 — ce que rend Instagram — alors que la
+            # pastille affichee mesure 30 a 46 px. Avec ~800 comptes le navigateur
+            # gardait 800 bitmaps de 320x320x4 o, soit 328 Mo DECODES : c est ce qui
+            # figeait le rendu (la capture d ecran expirait au bout de 30 s). 96 px
+            # couvre encore les ecrans 2x. Reduction faite une seule fois, sous le
+            # verrou de generation deja en place pour les vignettes.
+            petite = THUMB_DIR / "insta_pp96" / (p.stem + ".jpg")
+            try:
+                if not (_vignette_valide(petite)
+                        and petite.stat().st_mtime >= p.stat().st_mtime):
+                    with _thumb_gen_lock("insta_pp96/" + p.stem):
+                        if not (_vignette_valide(petite)
+                                and petite.stat().st_mtime >= p.stat().st_mtime):
+                            from PIL import Image as _Im_pp
+                            petite.parent.mkdir(parents=True, exist_ok=True)
+                            _tmp_pp = petite.with_name(petite.name + ".tmp")
+                            with _Im_pp.open(p) as _src_pp:
+                                _im_pp = _src_pp.convert("RGB")
+                                _im_pp.thumbnail((96, 96), _Im_pp.LANCZOS)
+                                _im_pp.save(_tmp_pp, "JPEG", quality=72, optimize=True)
+                            os.replace(str(_tmp_pp), str(petite))   # ecriture atomique
+            except Exception:
+                petite = p        # jamais de compte sans photo : on sert l original
+            resp = send_file(str(petite), mimetype="image/jpeg", conditional=True)
             resp.headers["Cache-Control"] = "public, max-age=86400"
             return resp
         except Exception:

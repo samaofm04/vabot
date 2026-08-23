@@ -333,12 +333,37 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
         "subscription": "Subscriptions", "sub": "Subscriptions",
         "stream": "Streams", "referral": "Referrals",
     }
-    for c in creators:
+    def _retenue(c) -> bool:
+        """Créatrice à compter. Un seul point de décision : le préchargement et
+        la boucle doivent porter EXACTEMENT sur le même ensemble."""
         if not c.get("active"):
-            continue
+            return False
         _ps = re.sub(r"[^a-z0-9]", "", str(c.get("pseudo") or "").lower())
-        if _excl and any(_ps == e or _ps.startswith(e) for e in _excl):
-            continue      # modèle écartée (le scraping l'excluait, l'API doit aussi)
+        # modèle écartée (le scraping l'excluait, l'API doit aussi)
+        return not (_excl and any(_ps == e or _ps.startswith(e) for e in _excl))
+
+    # Préchargement en parallèle. Chaque relevé coûtait un aller-retour HTTP de
+    # 30 s au pire, ET ILS PARTAIENT L'UN APRÈS L'AUTRE : avec une vingtaine de
+    # créatrices la page Revenus tenait un worker pendant des minutes, si bien
+    # que /home/overview finissait en 503 — le serveur n'avait plus un seul
+    # worker libre pour ses propres pages.
+    # On ne remplit ici que le CACHE. La boucle qui suit reste séquentielle et
+    # inchangée : c'est elle qui additionne de l'argent, on n'y touche pas. Si
+    # le préchargement échoue, elle se comporte exactement comme avant.
+    try:
+        from concurrent.futures import ThreadPoolExecutor as _Pool
+        _a_charger = [c for c in creators if _retenue(c)]
+        if len(_a_charger) > 1:
+            with _Pool(max_workers=6) as _ex:
+                list(_ex.map(
+                    lambda _c: api_creator_stats_cached(_c["id"], date_from, date_to),
+                    _a_charger))
+    except Exception:
+        pass          # préchargement best-effort : la boucle sait se débrouiller
+
+    for c in creators:
+        if not _retenue(c):
+            continue
         r = api_creator_stats_cached(c["id"], date_from, date_to)
         if not r.get("ok"):
             errors.append(f"{c.get('pseudo') or c.get('id')}: {str(r.get('error'))[:60]}")

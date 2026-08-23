@@ -4672,6 +4672,67 @@ except Exception as _eF3:
 
 print()
 print("=" * 70)
+print("REVENUS API : le prechargement parallele ne change pas les totaux")
+print("=" * 70)
+try:
+    import mypuls as _mpP
+
+    # Les releves partaient l un apres l autre, 30 s de delai chacun : la page
+    # Revenus tenait un worker des minutes et /home/overview finissait en 503.
+    # Le prechargement remplit le cache en parallele ; la boucle qui additionne
+    # l argent doit rester identique, au centime pres.
+    _svCr, _svSt, _svCf = (_mpP.api_creators_cached, _mpP.api_creator_stats_cached,
+                           _mpP.api_configured)
+    _svOv = dict(_mpP._API_OVERVIEW_CACHE)
+    try:
+        _appels = []
+        _CREAS = [
+            {"id": 1, "pseudo": "alpha", "active": True, "platform": "mym",
+             "currency": "EUR"},
+            {"id": 2, "pseudo": "beta", "active": True, "platform": "onlyfans",
+             "currency": "USD"},
+            {"id": 3, "pseudo": "dormante", "active": False, "platform": "mym"},
+            {"id": 4, "pseudo": "bella", "active": True, "platform": "mym"},
+        ]
+        _REV = {1: 100.0, 2: 50.0, 3: 999.0, 4: 777.0}
+
+        def _faux_stats(cid, d1, d2):
+            _appels.append(cid)
+            return {"ok": True, "data": {"revenue": {
+                "total": _REV[cid], "currency": "EUR" if cid == 1 else "USD",
+                "by_type": {"message": _REV[cid]}}}}
+
+        _mpP.api_configured = lambda: True
+        _mpP.api_creators_cached = lambda force=False: _CREAS
+        _mpP.api_creator_stats_cached = _faux_stats
+        _mpP._API_OVERVIEW_CACHE.clear()
+
+        _ov = _mpP.api_overview("2026-08-01", "2026-08-31", eur_usd=2.0,
+                                exclude={"bella"})
+        check("revenus : l agregat repond ok", _ov.get("ok") is True,
+              str(_ov)[:120])
+        # alpha : 100 EUR x 2.0 = 200 $ ; beta : 50 $ ; total attendu 250 $
+        check("revenus : total inchange par le prechargement",
+              abs(float(_ov.get("total_usd") or 0) - 250.0) < 0.01,
+              _ov.get("total_usd"))
+        check("revenus : une creatrice inactive n est jamais interrogee",
+              3 not in _appels, _appels)
+        check("revenus : une creatrice ecartee n est jamais interrogee",
+              4 not in _appels, _appels)
+        # Le prechargement et la boucle doivent viser le MEME ensemble : si les
+        # deux filtres divergeaient, on paierait un aller-retour pour rien.
+        check("revenus : aucune creatrice hors perimetre prechargee",
+              set(_appels) == {1, 2}, _appels)
+    finally:
+        _mpP.api_creators_cached, _mpP.api_creator_stats_cached = _svCr, _svSt
+        _mpP.api_configured = _svCf
+        _mpP._API_OVERVIEW_CACHE.clear()
+        _mpP._API_OVERVIEW_CACHE.update(_svOv)
+except Exception as _eP:
+    check("revenus : prechargement testable", False, repr(_eP)[:160])
+
+print()
+print("=" * 70)
 print("JOURNAL : un print ne doit pas pouvoir interrompre une requete")
 print("=" * 70)
 try:
