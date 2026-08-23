@@ -17829,9 +17829,21 @@ window.addEventListener('popstate', function(){
 // n etaient jamais reprises, restaient a opacity:0, et la galerie ressemblait
 // a un mur de cartes noires.
 window.vaultChargerVignettes = function(){
+  // Portee : la section VISIBLE, jamais tout le document. Les galeries cachees
+  // en display:none ne declenchent ni load ni error sur leurs images — une
+  // seule d entre elles suffisait a bloquer la vague pour toujours, et rien ne
+  // se chargeait plus nulle part.
+  let racine = null;
+  document.querySelectorAll('.form-section').forEach(function(s){
+    if(!racine && s.offsetParent !== null) racine = s;
+  });
+  racine = racine || document;
   const imgs = Array.prototype.slice.call(
-    document.querySelectorAll('img.vault-defer-img[data-src]'));
-  const status = document.getElementById('vault-load-status');
+    racine.querySelectorAll('img.vault-defer-img[data-src]'));
+  const status = racine.querySelector
+    ? (racine.querySelector('#vault-load-status')
+       || document.getElementById('vault-load-status'))
+    : document.getElementById('vault-load-status');
   const total = imgs.length;
   if(!total){ if(status) status.style.display = 'none'; return; }
   let faites = 0;
@@ -17852,27 +17864,46 @@ window.vaultChargerVignettes = function(){
       const u = img.dataset.src;
       if(!u){ fini(); return; }
       delete img.dataset.src;
-      img.addEventListener('load', function(){
+      // UN SEUL point de sortie, garde contre le double appel : load, error et
+      // le filet de temps y menent tous les trois, et compter deux fois la
+      // meme image ferait repartir la vague suivante trop tot.
+      let clos = false;
+      const rt = setTimeout(function(){ terminer(); }, 20000);
+      function terminer(){
+        if(clos) return;
+        clos = true;
+        clearTimeout(rt);
+        // La carte se montre quoi qu il arrive : une vignette en echec affiche
+        // le pictogramme « aperçu indisponible », ce qui vaut infiniment mieux
+        // qu un carre noir qu on prend pour un chargement en cours.
         img.style.opacity = '1';
         const card = img.closest('.vault-card-bg');
         if(card) card.style.animation = 'none';
         fini();
-      }, {once:true});
-      // Une vignette qui echoue ne doit pas bloquer la vague ni laisser la
-      // carte noire pour toujours : on la montre quand meme (l image de repli
-      // « aperçu indisponible » y est visible) et on passe a la suite.
-      img.addEventListener('error', function(){
-        img.style.opacity = '1';
-        const card = img.closest('.vault-card-bg');
-        if(card) card.style.animation = 'none';
-        fini();
-      }, {once:true});
+      }
+      img.addEventListener('load', terminer, {once:true});
+      img.addEventListener('error', terminer, {once:true});
+      // loading='lazy' empeche le chargement tant que l image n est pas dans le
+      // viewport — or on veut justement TOUT charger.
+      img.loading = 'eager';
       img.src = u;
     });
   };
   suivant();
 };
-window.vaultChargerVignettes();
+// L appel se fait au DOM PRET, jamais avant. Ce script est servi dans le
+// <head> : lance immediatement, il ne trouvait AUCUNE image — la galerie
+// n existait pas encore — et sortait sans rien faire. Passe la 24e carte,
+// plus rien ne se chargeait jamais au chargement d une page ; seul un clic sur
+// une autre identite reveillait le mecanisme. C est ce qui restait du mur de
+// cartes noires apres le premier correctif.
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', function(){
+    window.vaultChargerVignettes();
+  });
+} else {
+  window.vaultChargerVignettes();
+}
 
 // Pour les imgs eager (premiers 24) : aussi stop le skeleton apres load
 document.querySelectorAll('img.vault-img-load:not(.vault-defer-img)').forEach(function(img){
@@ -18452,7 +18483,10 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         if total_files > INITIAL_BATCH:
             gallery += (
                 f"<div id='vault-load-status' style='text-align:center;padding:14px;color:#666;font-size:12px;margin-top:10px'>"
-                f"{INITIAL_BATCH} / {total_files} affiches — scroll pour charger plus"
+                # « scroll pour charger plus » etait une consigne FAUSSE :
+                # l IntersectionObserver a ete retire, defiler ne declenche
+                # plus rien. Les apercus se chargent tous d office, par vagues.
+                f"chargement des aperçus…"
                 f"</div>"
             )
 
@@ -42055,6 +42089,16 @@ def create_app():
         "/facture/", "/business/", "/jailbreak/", "/jbactivite/", "/jbanalyse/",
         "/gmsdash/", "/gms/", "/linkscale/", "/settings/role", "/admin/",
         "/sheets", "/external/list", "/va/get_insta",
+        # Le jeton de synchro ouvre la Bibliotheque 2 en lecture, en
+        # enumeration et en ECRITURE, sans cookie : /sync/list et /sync/file
+        # n'exigent que lui. Un compte restreint pouvait donc le recopier et
+        # s'en servir hors session. Ceinture et bretelles avec le _is_admin()
+        # pose dans le handler : le prefixe couvre aussi les routes /sync/
+        # qui seraient ajoutees plus tard sans y penser.
+        "/sync/",
+        # Toutes les bios et CTA de toutes les models, avec le handle Insta
+        # associe : pas de raison qu'un role restreint les enumere.
+        "/textpool/render",
         # revenus GLOBAUX et rapport de PAIE des VAs : jamais un onglet d'un
         # role restreint (le chatter n'a que sa propre page revenus, servie
         # cote page ; ces GET-la exposaient le CA agence et les salaires VA).
@@ -44435,10 +44479,20 @@ def create_app():
 
     @app.route("/sync/token")
     def sync_token_show():
-        """Le jeton à coller dans l'agent (visible seulement connecté)."""
+        """Le jeton à coller dans l'agent. RÉSERVÉ aux comptes complets.
+
+        « Visible seulement connecté » ne suffisait pas : ce jeton ouvre la
+        Bibliothèque 2 en lecture, en énumération ET en écriture, SANS cookie
+        — /sync/list et /sync/file n'exigent que lui. N'importe quel compte
+        restreint (rôle « va », dont les onglets se limitent au compte et aux
+        préférences) pouvait donc ouvrir cette adresse, copier le jeton et
+        s'en servir hors session. Il est permanent et n'est jamais renouvelé.
+        """
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
+        if not _is_admin():
+            return jsonify({"ok": False, "error": "reserve aux administrateurs"}), 403
         return jsonify({"ok": True, "token": _sync_token()})
 
     def _sync_auth() -> bool:

@@ -34,6 +34,9 @@ import safe_json
 FAILS, OKS = [], []
 
 
+import datetime as _dtVtk
+
+
 def check(label, cond, detail=""):
     (OKS if cond else FAILS).append(label)
     print(("OK   " if cond else "FAIL ") + label + (f"  [{detail}]" if detail and not cond else ""))
@@ -407,6 +410,20 @@ try:
         _s["sid"] = "T1"
     check("rôle restreint : identifiants Insta refusés", _cc.get("/external/list").status_code == 403)
     check("rôle restreint : /va/get_insta_3 refusé", _cc.get("/va/get_insta_3?user_id=1").status_code == 403)
+    # Le jeton de synchro ouvre la Bibliotheque 2 en lecture, en enumeration ET
+    # en ecriture, SANS cookie : /sync/list et /sync/file n'exigent que lui. Il
+    # n'etait garde que par « connecte », donc un role restreint pouvait le
+    # recopier et s'en servir hors session. Jeton permanent, jamais renouvele.
+    _rSy = _cc.get("/sync/token")
+    check("rôle restreint : le jeton de synchro est refusé",
+          _rSy.status_code == 403, "HTTP %s" % _rSy.status_code)
+    check("rôle restreint : le jeton n est pas dans la reponse",
+          "token" not in (_rSy.get_data(as_text=True) or "").lower()
+          or _rSy.status_code == 403)
+    # Toutes les bios et CTA de toutes les models, avec le handle Insta.
+    check("rôle restreint : le pool de textes est refusé",
+          _cc.get("/textpool/render").status_code == 403,
+          "HTTP %s" % _cc.get("/textpool/render").status_code)
     # compte supprimé / désactivé : coupure immédiate
     _w2._load_web_users = lambda: {"autre": {"role": "owner"}}
     _c3 = _app2.test_client()
@@ -2775,6 +2792,166 @@ try:
           str(_rowsFv))
 except Exception as _eFv:
     check("favoris : selecteurs testables", False, repr(_eFv)[:160])
+
+print()
+print("=" * 70)
+print("Veille TikTok : normalisation, classements, isolation")
+print("=" * 70)
+try:
+    import veille_tiktok as _vtk
+    import apify_reels as _apr
+    check("import veille_tiktok", True)
+
+    # Magasin isole : la suite ne doit jamais ecrire dans data/.
+    _origStore, _origData = _vtk.STORE, _vtk.DATA_DIR
+    _vtk.DATA_DIR = TMP
+    _vtk.STORE = TMP / "veille_tiktok.json"
+
+    check("veille TikTok separee de veille Instagram",
+          _vtk.STORE.name != "veille_reels.json"
+          and _origStore.name == "veille_tiktok.json",
+          f"{_origStore.name}")
+
+    # Payload realiste de clockworks~tiktok-scraper.
+    def _tk(vid, txt, iso, vues, likes, com, part):
+        return {"id": vid, "text": txt, "createTimeISO": iso,
+                "authorMeta": {"name": "rival", "nickName": "Rival"},
+                "videoMeta": {"duration": 21, "coverUrl": "http://c/%s.jpg" % vid},
+                "playCount": vues, "diggCount": likes, "commentCount": com,
+                "shareCount": part, "collectCount": 0,
+                "webVideoUrl": "https://www.tiktok.com/@rival/video/%s" % vid}
+
+    _aujHui = _dtVtk.date.today()
+    _isoJ = lambda n: (_aujHui - _dtVtk.timedelta(days=n)).strftime("%Y-%m-%dT10:00:00.000Z")
+    _brut = [_tk("111", "grosse portee", _isoJ(90), 1000000, 10000, 100, 50),
+             _tk("222", "fort engagement", _isoJ(5), 20000, 6000, 800, 400),
+             _tk("333", "la mediane", _isoJ(45), 50000, 1000, 50, 20),
+             {"error": "not found"}]
+
+    _f0 = _vtk.fiche(_brut[0])
+    check("fiche : les compteurs TikTok sont bien lus",
+          (_f0 or {}).get("vues") == 1000000 and _f0.get("likes") == 10000
+          and _f0.get("compte") == "rival" and _f0.get("duree") == 21,
+          str(_f0)[:120])
+    check("fiche : un item d'erreur (sans id) est rejete",
+          _vtk.fiche(_brut[3]) is None)
+    check("fiche : couverture acceptee en chaine comme en liste",
+          _vtk._texte("http://a.jpg") == "http://a.jpg"
+          and _vtk._texte(["http://b.jpg"]) == "http://b.jpg"
+          and _vtk._texte(None) == "")
+
+    _fiches = [x for x in (_vtk.fiche(b) for b in _brut) if x and x.get("compte")]
+    check("3 fiches sur 4 items", len(_fiches) == 3, str(len(_fiches)))
+    check("enregistrer : 3 nouvelles", _vtk.enregistrer(_fiches) == (3, 0))
+    check("enregistrer : rejoue, 0 nouvelle (idempotent)",
+          _vtk.enregistrer(_fiches) == (0, 3))
+
+    _ordre = lambda tri: [g["id"] for g in _vtk.classer(tri=tri, n=10)]
+    check("tri vues : la plus vue en tete", _ordre("vues")[0] == "111",
+          str(_ordre("vues")))
+    check("tri taux : la plus engageante en tete", _ordre("taux")[0] == "222",
+          str(_ordre("taux")))
+    check("tri vues et tri taux ne donnent PAS le meme ordre",
+          _ordre("vues") != _ordre("taux"))
+    _sc = {g["id"]: g["scores"] for g in _vtk.classer(tri="vues", n=10)}
+    check("surperf : la video mediane du compte vaut x1.0",
+          abs(_sc["333"]["surperf"] - 1.0) < 0.001,
+          "x%.3f" % _sc["333"]["surperf"])
+    check("taux : (likes+com+partages+favoris)/vues = 36 %",
+          abs(_sc["222"]["taux"] - 0.36) < 0.001, "%.4f" % _sc["222"]["taux"])
+    check("seuil : une video sous 500 vues n'a pas de taux",
+          _vtk.scores({"vues": 100, "likes": 60, "compte": "x"}, {})["taux"] is None)
+    check("filtre depuis : 30 jours ne garde que la video fraiche",
+          [g["id"] for g in _vtk.classer(tri="vues", n=10, depuis=30)] == ["222"],
+          str([g["id"] for g in _vtk.classer(tri="vues", n=10, depuis=30)]))
+    check("filtre compte : un compte absent ne rend rien",
+          _vtk.classer(comptes=["personne"], n=10) == [])
+    check("comptes_suivis : 3 videos, mediane 50000",
+          _vtk.comptes_suivis() == [{"compte": "rival", "videos": 3,
+                                     "vues_medianes": 50000.0}],
+          str(_vtk.comptes_suivis()))
+
+    # Aucun appel reseau ne doit partir sans token ni sans compte : ces deux
+    # sorties precoces sont ce qui empeche de bruler du credit Apify par erreur.
+    _vraiToken = _apr.get_token
+    _apr.get_token = lambda: ""
+    _r, _e = _vtk.collecter(["rival"])
+    check("collecter sans token : erreur propre, aucun appel", _r == [] and "token" in _e.lower(), _e)
+    _apr.get_token = _vraiToken
+    _r2, _e2 = _vtk.collecter([])
+    check("collecter sans compte : sortie immediate", _r2 == [] and bool(_e2), _e2)
+
+    check("oublier_compte retire les 3 videos", _vtk.oublier_compte("@rival") == 3)
+    check("magasin vide apres oubli", _vtk.classer(n=0) == [])
+    _vtk.STORE, _vtk.DATA_DIR = _origStore, _origData
+except Exception as _eVtk:
+    check("veille TikTok : testable", False, repr(_eVtk)[:160])
+
+print()
+print("=" * 70)
+print("Onglet TikTok Trends : rendu reel et cablage")
+print("=" * 70)
+try:
+    import veille_tiktok_ui as _tkui
+    _hTk = _tkui.rendu_html()
+    check("l'onglet se rend sans exception", len(_hTk) > 1500, str(len(_hTk)))
+    check("le rendu porte le titre, le champ et le bouton",
+          "TikTok Trends" in _hTk and 'id="tk-comptes"' in _hTk
+          and 'onclick="tkCollecter()"' in _hTk)
+    check("les 4 boutons de tri sont rendus",
+          _hTk.count('onclick="tkTri(') == 4, str(_hTk.count('onclick="tkTri(')))
+    # Le rendu est un f-string bourre de CSS et de JS : une accolade non
+    # dedoublee passe la compilation et ne se voit qu'a l'ecran.
+    check("aucune accolade de f-string orpheline dans le HTML",
+          "{{" not in _hTk and "}}" not in _hTk)
+    check("le cout Apify est annonce avant le clic",
+          "Apify" in _hTk and "tk-prix" in _hTk)
+
+    _srcTk = pathlib.Path("web_upload.py").read_text(encoding="utf-8")
+    check("cablage : bouton de nav TikTok Trends",
+          'id="tab-tktrends"' in _srcTk and "showTab('trends','tktrends'" in _srcTk)
+    check("cablage : panneau form-tktrends",
+          'id="form-tktrends"' in _srcTk and "{tiktok_trends_html}" in _srcTk)
+    check("cablage : rendu paresseux declare",
+          '"tktrends": _render_tiktok_trends_html' in _srcTk)
+    check("cablage : permission tktrends declaree",
+          '{"key": "tktrends"' in _srcTk)
+    # Dans le bloc TikTok, SEUL "Trends" est livre : "Accounts" reste
+    # volontairement SOON. L'assertion porte donc sur le bouton Trends, pas
+    # sur l'absence de tout SOON -- qui serait faux et le restera.
+    _blocTk = _srcTk[_srcTk.find('id="sub-tiktok"'):_srcTk.find('id="sub-twitter"')]
+    check("cablage : Trends n'est plus SOON dans le bloc TikTok",
+          'Trends</span><span class="badge">SOON' not in _blocTk
+          and 'id="tab-tktrends"' in _blocTk)
+    check("cablage : Accounts TikTok reste SOON (non livre)",
+          'Accounts</span><span class="badge">SOON' in _blocTk)
+
+    import web_upload as _wTk
+    _aTk = _wTk.create_app(); _aTk.config["TESTING"] = True
+    _rulesTk = {str(r.rule) for r in _aTk.url_map.iter_rules()}
+    check("les 4 routes /tiktok/* sont enregistrees",
+          {"/tiktok/render", "/tiktok/collect", "/tiktok/forget",
+           "/tiktok/video/<vid>"} <= _rulesTk,
+          str(sorted(x for x in _rulesTk if "tiktok" in x)))
+    _anonTk = _aTk.test_client()
+    check("/tiktok/render refuse l'anonyme",
+          _anonTk.get("/tiktok/render").status_code == 401,
+          str(_anonTk.get("/tiktok/render").status_code))
+    _wTk._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"}}
+    _cTk = _aTk.test_client()
+    with _cTk.session_transaction() as _sTk:
+        _sTk["auth"] = True; _sTk["username"] = "boss"; _sTk["role"] = "owner"
+    check("/tiktok/render rend l'onglet a un owner",
+          _cTk.get("/tiktok/render").status_code == 200
+          and b"TikTok Trends" in _cTk.get("/tiktok/render").data)
+    # L'identifiant vient de l'URL : un ../ doit mourir avant send_file.
+    check("/tiktok/video refuse la traversee de chemin",
+          _cTk.get("/tiktok/video/..%2f..%2fsecrets").status_code == 404)
+    _pageTk = _cTk.get("/").data.decode("utf-8", "ignore")
+    check("la page porte l'onglet et son panneau",
+          'id="tab-tktrends"' in _pageTk and 'id="form-tktrends"' in _pageTk)
+except Exception as _eTkU:
+    check("onglet TikTok : testable", False, repr(_eTkU)[:160])
 
 print()
 print("=" * 70)
