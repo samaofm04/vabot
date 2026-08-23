@@ -49345,6 +49345,60 @@ def create_app():
             "revenue_by_day": mypuls.api_revenue_by_day(cid, d1, d2),
         })
 
+    @app.route("/mypuls/probe_liens")
+    def mypuls_probe_liens():
+        """SONDE : l'API MyPuls expose-t-elle les « Liens de suivi » ?
+
+        Le token vit sur le VPS, pas sur le poste de developpement : impossible
+        d'essayer ces adresses depuis une machine locale. On les essaie donc
+        d'ici, et on rapporte ce que chacune repond — plutot que de coder
+        contre un point d'entree suppose.
+
+        Lecture seule, aucun effet de bord.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        try:
+            import mypuls
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+        if not mypuls.api_configured():
+            return jsonify({"ok": False,
+                            "error": "Token API absent (Settings → MyPuls)"})
+        candidats = [
+            "tracking-links", "tracking_links", "trackinglinks", "links",
+            "trackers", "tracking", "subscriptions", "subscribers", "subs",
+            "stats/links", "stats/tracking-links", "team/links",
+            "team/tracking-links", "creators/links",
+        ]
+        out = {"ok": True, "trouves": [], "absents": [], "erreurs": []}
+        for chemin in candidats:
+            r = mypuls.api_get(chemin, {"per_page": 3})
+            if r.get("ok"):
+                d = r.get("data")
+                # On rapporte la FORME, pas le contenu : de quoi coder ensuite
+                # sans avoir a redemander.
+                apercu = None
+                if isinstance(d, dict):
+                    inner = d.get("data") if isinstance(d.get("data"), list) else None
+                    if inner:
+                        apercu = {"n": len(inner),
+                                  "cles": sorted((inner[0] or {}).keys())[:25]
+                                  if isinstance(inner[0], dict) else str(inner[0])[:80]}
+                    else:
+                        apercu = {"cles_racine": sorted(d.keys())[:25]}
+                elif isinstance(d, list):
+                    apercu = {"n": len(d),
+                              "cles": sorted((d[0] or {}).keys())[:25]
+                              if d and isinstance(d[0], dict) else None}
+                out["trouves"].append({"chemin": chemin, "apercu": apercu})
+            else:
+                err = str(r.get("error") or "")
+                (out["absents"] if "introuvable" in err or "404" in err
+                 else out["erreurs"]).append({"chemin": chemin, "erreur": err[:120]})
+        return jsonify(out)
+
     @app.route("/mypuls/api_probe")
     def mypuls_api_probe():
         """SONDE one-shot avant migration : tranche les 4 inconnues dont dépendent
