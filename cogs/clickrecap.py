@@ -111,9 +111,11 @@ def _save_linkcache(d: dict):
         pass
 
 
-# ---- Report horaire des clics d'un GROUPE GMS (ex: Hybride) dans un salon dédié ----
+# ---- Report des clics d'un GROUPE GMS (ex: Hybride) dans un salon dedie ----
 # data/ est gitignore -> config runtime VPS. {guild_id: {channel_id, team_id,
-# group_id, group_name, message_id}}. message_id = message live édité chaque heure.
+# group_id, group_name, marche, message_id}}. La cle est « serveur:salon » —
+# un report par SALON, pour tenir un click-fr et un click-us cote a cote.
+# message_id = le message live, edite toutes les 30 minutes.
 _REPORT_CFG_FILE = pathlib.Path(__file__).resolve().parent.parent / "data" / "report_click.json"
 
 
@@ -177,12 +179,68 @@ def _pay_period(d: datetime.date):
     return d.replace(day=16), d.replace(day=last)
 
 
-def _next_hour_unix() -> int:
-    """Timestamp Unix (UTC) du prochain top d'heure — pour le timer Discord
-    dynamique <t:…:R> (« dans X min »). Les tops d'heure Paris et UTC coïncident
-    (décalage en heures pleines), donc on calcule direct en UTC."""
-    u = datetime.datetime.utcnow().replace(minute=0, second=0, microsecond=0)
-    nxt = u + datetime.timedelta(hours=1)
+#: Marches proposes au report. La cle est ce qu'on ecrit dans la config ; la
+#: valeur est (libelle, drapeau, pays comptes). Un ensemble vide = « tout », on
+#: n'affiche alors que le total.
+MARCHES = {
+    "fr": ("FR", "🇫🇷", frozenset({"FR", "BE", "CH", "LU", "MC"})),
+    "us": ("US", "🇺🇸", frozenset({"US"})),
+    "tout": ("tous pays", "🌍", frozenset()),
+}
+
+
+def _marche_de(c: dict) -> tuple:
+    """(cle, libelle, drapeau, pays) du marche d'un report. Defaut : tout."""
+    cle = str((c or {}).get("marche") or "tout").lower()
+    if cle not in MARCHES:
+        cle = "tout"
+    lib, dra, pays = MARCHES[cle]
+    return cle, lib, dra, pays
+
+
+def _cle_report(guild_id, channel_id) -> str:
+    """La cle d'un report dans la config : un par SALON, pas un par serveur.
+
+    Le proprietaire veut un salon « click-fr » et un salon « click-us » sur le
+    meme serveur. L'ancienne cle (l'identifiant du serveur seul) n'en autorisait
+    qu'un ; les anciennes entrees restent lues telles quelles, voir
+    _reports_configures.
+    """
+    return "%s:%s" % (guild_id, channel_id)
+
+
+def _reports_configures(cfg: dict) -> list:
+    """[(cle, config)] de tous les reports, anciens formats compris.
+
+    Une entree ecrite avant le passage au multi-salon est rangee sous le seul
+    identifiant du serveur. On la rend telle quelle : elle continue de marcher,
+    personne n'a a refaire sa configuration.
+    """
+    out = []
+    for cle, c in (cfg or {}).items():
+        if isinstance(c, dict) and c.get("channel_id"):
+            out.append((str(cle), c))
+    return out
+
+
+def _creneau_30(d: datetime.datetime) -> tuple:
+    """Le creneau de 30 minutes auquel appartient cet instant : (heure, 0|30).
+
+    Sert de repere au rafraichissement : on compare le creneau courant au
+    dernier traite. Aligne sur l'horloge (h:00 et h:30) plutot que sur un
+    compteur interne, pour que la cadence survive a un redemarrage — sinon
+    chaque relance du bot decalait le rythme.
+    """
+    return (d.hour, 0 if d.minute < 30 else 30)
+
+
+def _next_demi_heure_unix() -> int:
+    """Timestamp Unix (UTC) du prochain h:00 ou h:30 — pour le timer Discord
+    dynamique <t:…:R> (« dans X min »). Les demi-heures Paris et UTC coincident
+    (decalage en heures pleines), donc on calcule direct en UTC."""
+    u = datetime.datetime.utcnow().replace(second=0, microsecond=0)
+    nxt = (u.replace(minute=30) if u.minute < 30
+           else u.replace(minute=0) + datetime.timedelta(hours=1))
     return int(calendar.timegm(nxt.timetuple()))
 
 
@@ -195,6 +253,66 @@ NO_LINK_MSG = (
     "Demande ton lien à un **manager** ou au **boss** "
     "(bouton « Demander un lien » dans tes commandes, ou `/lien`)."
 )
+
+
+#: Dernier rafraichissement manuel, par salon. Le bouton est ouvert a TOUT le
+#: monde : sans ce frein, dix personnes qui cliquent d'affilee lanceraient dix
+#: series d'appels GetMySocial, et le quota est partage avec le rapport de paie
+#: — un 429 la-bas coute bien plus cher qu'un report en retard de trente
+#: secondes.
+_REFRESH_DERNIER = {}
+_REFRESH_ATTENTE_S = 60
+
+
+class ReportRefreshView(discord.ui.View):
+    """Bouton « Rafraichir » sous le report de clics. Ouvert a tout le monde.
+
+    Persistant (timeout=None + custom_id fixe) : le bouton doit continuer de
+    repondre apres un redemarrage du bot, sinon le message epingle deviendrait
+    un decor mort.
+    """
+
+    def __init__(self, cog=None):
+        super().__init__(timeout=None)
+        self.cog = cog
+
+    @discord.ui.button(label="Rafraîchir", emoji="🔄",
+                       style=discord.ButtonStyle.secondary,
+                       custom_id="reportclick:refresh")
+    async def b_refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
+        cog = self.cog or interaction.client.get_cog("ClickRecap")
+        if cog is None:
+            await interaction.response.send_message("⚠️ Module indispo.", ephemeral=True)
+            return
+        cid = getattr(interaction.channel, "id", None)
+        cfg = _load_report_cfg()
+        vises = [cle for cle, c in _reports_configures(cfg)
+                 if str(c.get("channel_id")) == str(cid)]
+        if not vises:
+            await interaction.response.send_message(
+                "ℹ️ Aucun report configuré dans ce salon.", ephemeral=True)
+            return
+        reste = _REFRESH_ATTENTE_S - (time.time() - _REFRESH_DERNIER.get(cid, 0))
+        if reste > 0:
+            # On le DIT au lieu de faire semblant : un bouton qui ne repond
+            # rien passe pour casse, et la personne reclique.
+            await interaction.response.send_message(
+                f"⏳ Déjà rafraîchi il y a moins d'une minute. Réessaie dans "
+                f"{int(reste)} s — les chiffres viennent de GetMySocial, "
+                f"qui a un quota.", ephemeral=True)
+            return
+        _REFRESH_DERNIER[cid] = time.time()
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            for cle in vises:
+                await cog._post_or_update_report(cle)
+            await interaction.followup.send("🔄 Report mis à jour.", ephemeral=True)
+        except Exception as e:
+            # Le compteur est relache : l'essai n'a rien coute en quota, la
+            # personne ne doit pas attendre une minute pour retenter.
+            _REFRESH_DERNIER.pop(cid, None)
+            await interaction.followup.send(
+                f"⚠️ Mise à jour impossible : {str(e)[:120]}", ephemeral=True)
 
 
 class MyClicksView(discord.ui.View):
@@ -221,7 +339,7 @@ class ClickRecap(commands.Cog):
         self.bot = bot
         self._owner_id = None
         self._last_run = None  # date ISO du dernier récap auto (anti-doublon)
-        self._report_last_hour = None  # heure Paris du dernier report horaire posté
+        self._report_creneau = None  # dernier creneau de 30 min deja publie
         if _auto_enabled():
             self.daily_recap.start()
         self.hourly_report.start()
@@ -230,6 +348,7 @@ class ClickRecap(commands.Cog):
         # Vue persistante : le bouton 'Mes clics' marche même après un restart.
         try:
             self.bot.add_view(MyClicksView(self))
+            self.bot.add_view(ReportRefreshView(self))
         except Exception as e:
             print(f"[clickrecap] add_view échoué : {e}")
 
@@ -264,18 +383,24 @@ class ClickRecap(commands.Cog):
     # ---------- Report HORAIRE des clics d'un groupe (ex: Hybride) ----------
     @tasks.loop(minutes=5)
     async def hourly_report(self):
-        """Met à jour (édite) le message de report de chaque serveur configuré,
-        une fois par heure Paris (aligné sur l'heure pile, survit aux restarts)."""
+        """Met a jour (edite) le message de report de chaque serveur configure,
+        toutes les 30 minutes (aligne sur h:00 et h:30, survit aux redemarrages).
+
+        La boucle tourne toutes les 5 minutes mais ne fait rien tant que le
+        creneau n'a pas change : c'est ce qui garde la cadence alignee sur
+        l'horloge meme apres un redemarrage du bot.
+        """
         now = _paris_now()
-        if self._report_last_hour == now.hour:
+        creneau = _creneau_30(now)
+        if self._report_creneau == creneau:
             return
-        self._report_last_hour = now.hour
+        self._report_creneau = creneau
         cfg = _load_report_cfg()
-        for gid in list(cfg.keys()):
+        for cle, _c in _reports_configures(cfg):
             try:
-                await self._post_or_update_report(gid)
+                await self._post_or_update_report(cle)
             except Exception as e:
-                print(f"[reportclick] update {gid} échoué : {e}")
+                print(f"[reportclick] update {cle} echoue : {e}")
             await asyncio.sleep(1)
 
     @hourly_report.before_loop
@@ -290,6 +415,7 @@ class ClickRecap(commands.Cog):
         group_id = c.get("group_id")
         identity = c.get("identity")  # si défini -> énumération par suffixe (clé API)
         name = c.get("group_name") or "Groupe"
+        _cle_m, libelle, drapeau, pays_marche = _marche_de(c)
         metas = await asyncio.to_thread(_tag_call, gms.report_links_meta, team_id, identity, group_id)
         # None = board GMS injoignable (cookie expiré, HTTP KO…). On NE réécrit
         # PAS le report avec un faux « 0 clic » : on skip et on garde le dernier
@@ -327,7 +453,7 @@ class ClickRecap(commands.Cog):
         else:
             color = discord.Color.dark_grey()
         emb = discord.Embed(
-            title=f"📊 Report clics — {name}",
+            title=f"📊 Report clics {drapeau} {libelle} — {name}",
             description=f"Clics cumulés du groupe **{name}** ({len(ids)} lien(s)).",
             color=color,
         )
@@ -356,25 +482,69 @@ class ClickRecap(commands.Cog):
         _MAX_PER_VA = 60
         if ids and not all_none and len(ids) <= _MAX_PER_VA:
             cyc_s, cyc_e = _pay_period(today)  # quinzaine de paie en cours (les 2 semaines)
+            # analytics_for_link plutot que clicks_for_link : MEME appel reseau,
+            # mais il rend aussi le detail par pays. Les clics US sortent donc
+            # gratuitement — les demander separement aurait double le cout.
+            _plages = [
+                (today, today),                 # aujourd'hui
+                (yest, yest),                   # hier
+                (week_start, today),            # cette semaine
+                (cyc_s, cyc_e),                 # quinzaine en cours
+            ]
             per = await asyncio.gather(*[
-                asyncio.gather(
-                    asyncio.to_thread(_tag_call, gms.clicks_for_link, m["id"], today.isoformat(), today.isoformat()),
-                    asyncio.to_thread(_tag_call, gms.clicks_for_link, m["id"], week_start.isoformat(), today.isoformat()),
-                    asyncio.to_thread(_tag_call, gms.clicks_for_link, m["id"], cyc_s.isoformat(), cyc_e.isoformat()),
-                )
+                asyncio.gather(*[
+                    asyncio.to_thread(_tagged_analytics, gms, m["id"],
+                                      s.isoformat(), e.isoformat())
+                    for (s, e) in _plages
+                ])
                 for m in metas if m.get("id")
             ])
-            rows = []
-            for m, (ct, cw, cc) in zip([m for m in metas if m.get("id")], per):
-                label = m.get("display_name") or m.get("shortcode") or "?"
-                rows.append((label, ct, cw, cc))
-            # tri : plus de clics aujourd'hui, puis semaine, puis quinzaine, puis nom
-            rows.sort(key=lambda r: (-(r[1] or 0), -(r[2] or 0), -(r[3] or 0), str(r[0])))
 
-            def _vfmt(v):
-                return "—" if v is None else str(v)
-            lines = [f"**{lab}** — {_vfmt(ct)} auj · {_vfmt(cw)} sem · {_vfmt(cc)} quinz"
-                     for lab, ct, cw, cc in rows]
+            def _duo_de(couple):
+                """(clics du marche, total) d'un couple (total, pays).
+
+                (None, None) si l'appel a echoue — surtout pas (0, 0), qui se
+                lirait comme « personne n'a clique » alors qu'on n'a rien su.
+                """
+                total, pays = couple if isinstance(couple, tuple) else (None, None)
+                if total is None:
+                    return None, None
+                if not pays_marche:              # marche « tout » : pas de detail
+                    return None, total
+                return sum(v for k, v in (pays or {}).items() if k in pays_marche), total
+
+            rows, cumul = [], [0, 0, 0, 0]
+            for m, quatre in zip([m for m in metas if m.get("id")], per):
+                label = m.get("display_name") or m.get("shortcode") or "?"
+                paires = [_duo_de(c) for c in quatre]
+                for i, (u, _t) in enumerate(paires):
+                    if u is not None:
+                        cumul[i] += u
+                rows.append((label, paires))
+            # tri : plus de clics aujourd'hui, puis semaine, puis quinzaine, puis nom
+            rows.sort(key=lambda r: (-((r[1][0][1]) or 0), -((r[1][2][1]) or 0),
+                                     -((r[1][3][1]) or 0), str(r[0])))
+
+            def _duo(paire):
+                """« marché/total », ou juste le total si le marché vaut « tout »."""
+                u, t = paire
+                if t is None:
+                    return "—"
+                return str(t) if u is None else f"{u}/{t}"
+            lines = [
+                f"**{lab}** — auj {_duo(p[0])} · hier {_duo(p[1])} · "
+                f"sem {_duo(p[2])} · quinz {_duo(p[3])}"
+                for lab, p in rows
+            ]
+            if pays_marche:
+                # Le cumul du marche vient des lignes ci-dessus : clicks_for_ids
+                # ne rend aucun detail pays, et refaire un appel par plage pour
+                # l'obtenir aurait double la facture pour rien.
+                emb.add_field(
+                    name=f"{drapeau} Clics {libelle} du groupe",
+                    value=(f"auj **{cumul[0]}** · hier **{cumul[1]}** · "
+                           f"sem **{cumul[2]}** · quinz **{cumul[3]}**"),
+                    inline=False)
             # Découpe en blocs <1024 chars (limite Discord par field)
             block, blocks = "", []
             for ln in lines:
@@ -393,7 +563,10 @@ class ClickRecap(commands.Cog):
                           value=f"_(trop de liens ({len(ids)}) pour le détail par lien — agrégat ci-dessus.)_",
                           inline=False)
 
-        emb.set_footer(text=f"🕐 Mis à jour à {_paris_now().strftime('%H:%M')} · maj chaque heure · GetMySocial")
+        _detail = (f" · « {libelle}/total » par lien" if pays_marche else "")
+        emb.set_footer(
+            text=f"🕐 Mis à jour à {_paris_now().strftime('%H:%M')} · maj toutes les 30 min"
+                 f"{_detail} · GetMySocial")
         return emb
 
     async def _post_or_update_report(self, guild_id: str):
@@ -413,7 +586,7 @@ class ClickRecap(commands.Cog):
             return
         # Timer dynamique : Discord rend <t:…:R> en « dans X min » qui décompte
         # tout seul côté client (pas besoin d'éditer pour le voir bouger).
-        ts = _next_hour_unix()
+        ts = _next_demi_heure_unix()
         content = f"⏱️ **Prochaine mise à jour** <t:{ts}:R> (à <t:{ts}:t>)"
         mid = c.get("message_id")
         msg = None
@@ -426,7 +599,8 @@ class ClickRecap(commands.Cog):
                 return  # erreur transitoire (5xx/perm) -> on garde l'ancien
         if msg is not None:
             try:
-                await msg.edit(content=content, embed=emb)
+                await msg.edit(content=content, embed=emb,
+                               view=ReportRefreshView(self))
                 return
             except discord.NotFound:
                 pass  # supprimé entre fetch et edit -> repost ci-dessous
@@ -436,7 +610,8 @@ class ClickRecap(commands.Cog):
                 print(f"[reportclick] edit transitoire échoué, ancien gardé : {e}")
                 return
         try:
-            m = await ch.send(content=content, embed=emb)
+            m = await ch.send(content=content, embed=emb,
+                              view=ReportRefreshView(self))
             try:
                 await m.pin()
             except Exception:
@@ -1268,12 +1443,19 @@ class ClickRecap(commands.Cog):
 
     @app_commands.command(
         name="setreportclick",
-        description="[OWNER] Report horaire des clics d'un groupe GMS dans CE salon",
+        description="[OWNER] Report des clics d'un groupe GMS dans CE salon (maj 30 min)",
     )
     @app_commands.describe(
         groupe="Nom du groupe GMS (défaut : identité du serveur, ex: Hybride)",
+        marche="Quels clics mettre en avant : fr, us, ou tout (défaut : tout)",
     )
-    async def setreportclick(self, interaction: discord.Interaction, groupe: str = None):
+    @app_commands.choices(marche=[
+        app_commands.Choice(name="🇫🇷 France (FR/BE/CH/LU/MC)", value="fr"),
+        app_commands.Choice(name="🇺🇸 États-Unis", value="us"),
+        app_commands.Choice(name="🌍 Tous pays", value="tout"),
+    ])
+    async def setreportclick(self, interaction: discord.Interaction,
+                             groupe: str = None, marche: str = None):
         if not await self._is_owner(interaction.user.id):
             await interaction.response.send_message("Owner only.", ephemeral=True)
             return
@@ -1291,25 +1473,40 @@ class ClickRecap(commands.Cog):
             await interaction.followup.send(err, ephemeral=True)
             return
         gid = str(interaction.guild.id)
+        cid = interaction.channel.id
         cfg = _load_report_cfg()
+        cle = _cle_report(gid, cid)
+        marche_cle = (marche or "tout").strip().lower()
+        if marche_cle not in MARCHES:
+            marche_cle = "tout"
         new_c = {
-            "channel_id": interaction.channel.id, "team_id": data["team_id"],
+            "channel_id": cid, "team_id": data["team_id"],
             "group_id": data["group_id"], "identity": data["identity"],
-            "group_name": data["group_name"],
+            "group_name": data["group_name"], "marche": marche_cle,
         }
-        # Re-lancer dans le MÊME salon : on réutilise le message épinglé existant
-        # (sinon on poste un doublon). Salon différent -> nouveau message.
-        old = cfg.get(gid)
-        if isinstance(old, dict) and old.get("channel_id") == interaction.channel.id and old.get("message_id"):
-            new_c["message_id"] = old["message_id"]
-        cfg[gid] = new_c
+        # Re-lancer dans le MÊME salon : on réutilise le message existant (sinon
+        # on poste un doublon). On regarde AUSSI l'ancienne clé, rangée sous le
+        # seul identifiant du serveur — sans ça, une config d'avant le
+        # multi-salon repartirait sur un second message dans le même salon.
+        for ancienne in (cle, gid):
+            old = cfg.get(ancienne)
+            if (isinstance(old, dict) and str(old.get("channel_id")) == str(cid)
+                    and old.get("message_id")):
+                new_c["message_id"] = old["message_id"]
+                if ancienne != cle:
+                    cfg.pop(ancienne, None)   # migrée vers la clé par salon
+                break
+        cfg[cle] = new_c
         _save_report_cfg(cfg)
-        self._report_last_hour = _paris_now().hour  # évite un double post immédiat par la boucle
+        gid = cle          # tout ce qui suit publie ce report-là
+        self._report_creneau = _creneau_30(_paris_now())  # evite un double post immediat par la boucle
         await self._post_or_update_report(gid)
         await interaction.followup.send(
-            f"✅ Report horaire des clics **{data['group_name']}** (workspace **{data['ws']}**, "
+            f"✅ Report des clics **{data['group_name']}** {_marche_de(new_c)[2]} "
+            f"(workspace **{data['ws']}**, "
             f"{data['n']} lien(s)) activé dans {interaction.channel.mention}.\n"
-            f"Message **édité chaque heure** (aujourd'hui / hier / semaine / période 1–15 / 16–fin). "
+            f"Message **édité toutes les 30 min** (aujourd'hui / hier / semaine / période 1–15 / 16–fin), "
+            f"et un bouton **Rafraîchir** que n'importe qui peut cliquer. "
             f"Snapshot à la demande : `/reportclicknow`. Désactive : `/reportclick_off`.{data['ambig']}",
             ephemeral=True)
 
@@ -1325,12 +1522,27 @@ class ClickRecap(commands.Cog):
             await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
             return
         cfg = _load_report_cfg()
-        if str(interaction.guild.id) in cfg:
-            cfg.pop(str(interaction.guild.id), None)
+        gid = str(interaction.guild.id)
+        cid = getattr(interaction.channel, "id", None)
+        # On coupe le report DE CE SALON. Deux reports peuvent coexister sur un
+        # meme serveur (un FR, un US) : couper le serveur entier en tuerait un
+        # que personne n aurait demande a arreter.
+        vises = [cle for cle, c in _reports_configures(cfg)
+                 if str(c.get("channel_id")) == str(cid)]
+        if not vises and gid in cfg:
+            vises = [gid]        # ancienne config, rangee sous le serveur seul
+        if vises:
+            for cle in vises:
+                cfg.pop(cle, None)
             _save_report_cfg(cfg)
-            await interaction.response.send_message("🛑 Report horaire désactivé.", ephemeral=True)
+            await interaction.response.send_message(
+                "🛑 Report des clics désactivé dans ce salon.", ephemeral=True)
         else:
-            await interaction.response.send_message("ℹ️ Aucun report configuré ici.", ephemeral=True)
+            restants = len(_reports_configures(cfg))
+            await interaction.response.send_message(
+                "ℹ️ Aucun report configuré dans ce salon."
+                + (f" ({restants} ailleurs sur ce serveur.)" if restants else ""),
+                ephemeral=True)
 
     async def _resolve_report_group(self, guild, groupe):
         """Résout la cible d'un report de clics. Retourne (data, None) si OK —

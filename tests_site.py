@@ -4376,6 +4376,68 @@ except Exception as _eJb:
 
 print()
 print("=" * 70)
+print("REPORT DES CLICS : deux salons (FR / US), maj 30 min, bouton refresh")
+print("=" * 70)
+try:
+    import datetime as _dtCl
+    import cogs.clickrecap as _crCl
+
+    # -- marches -------------------------------------------------------------
+    check("clics : le marche FR compte l Europe francophone",
+          _crCl._marche_de({"marche": "fr"})[3] == frozenset(
+              {"FR", "BE", "CH", "LU", "MC"}))
+    check("clics : le marche US ne compte que les Etats-Unis",
+          _crCl._marche_de({"marche": "us"})[3] == frozenset({"US"}))
+    # Un marche inconnu ne doit pas faire disparaitre le report : il retombe
+    # sur « tout », qui n affiche que le total.
+    check("clics : un marche inconnu retombe sur « tout », sans casser",
+          _crCl._marche_de({"marche": "klingon"})[0] == "tout"
+          and _crCl._marche_de({})[0] == "tout")
+
+    # -- une config par SALON, pas par serveur -------------------------------
+    check("clics : deux salons du meme serveur ont deux cles distinctes",
+          _crCl._cle_report(111, 222) != _crCl._cle_report(111, 333))
+    _cfgCl = {
+        "111:222": {"channel_id": 222, "marche": "fr"},
+        "111:333": {"channel_id": 333, "marche": "us"},
+        "999": {"channel_id": 444},        # config d avant le multi-salon
+        "casse": "pas un dict",
+    }
+    _clesCl = [c for c, _ in _crCl._reports_configures(_cfgCl)]
+    check("clics : les deux salons sont servis",
+          "111:222" in _clesCl and "111:333" in _clesCl)
+    # Celui-la protege les configs existantes : personne ne doit avoir a
+    # refaire son /setreportclick apres la mise a jour.
+    check("clics : une ancienne config (par serveur) continue de marcher",
+          "999" in _clesCl)
+    check("clics : une entree abimee est ecartee sans planter",
+          "casse" not in _clesCl)
+
+    # -- cadence -------------------------------------------------------------
+    check("clics : les creneaux tombent sur h:00 et h:30",
+          _crCl._creneau_30(_dtCl.datetime(2026, 8, 22, 9, 29)) == (9, 0)
+          and _crCl._creneau_30(_dtCl.datetime(2026, 8, 22, 9, 30)) == (9, 30))
+    # Aligne sur l horloge et non sur un compteur : la cadence doit survivre a
+    # un redemarrage du bot.
+    check("clics : deux instants du meme creneau ne declenchent qu une maj",
+          _crCl._creneau_30(_dtCl.datetime(2026, 8, 22, 9, 31))
+          == _crCl._creneau_30(_dtCl.datetime(2026, 8, 22, 9, 59)))
+
+    # -- bouton refresh ------------------------------------------------------
+    _vCl = _crCl.ReportRefreshView(None)
+    _idsCl = [getattr(i, "custom_id", "") for i in _vCl.children]
+    check("clics : le bouton Rafraichir est la, avec un identifiant fixe",
+          "reportclick:refresh" in _idsCl, str(_idsCl))
+    # Sans timeout=None le bouton cesserait de repondre apres un redemarrage,
+    # et le message epingle deviendrait un decor mort.
+    check("clics : la vue est persistante", _vCl.timeout is None)
+    check("clics : un frein protege le quota GetMySocial",
+          _crCl._REFRESH_ATTENTE_S >= 30, str(_crCl._REFRESH_ATTENTE_S))
+except Exception as _eCl:
+    check("clics : report testable", False, repr(_eCl)[:160])
+
+print()
+print("=" * 70)
 print("REPERAGE DES BRUTES QUI PORTENT DEJA DU TEXTE")
 print("=" * 70)
 try:
