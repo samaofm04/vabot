@@ -49384,7 +49384,7 @@ def create_app():
                 # ces adresses n'existent pas. C'est exactement ce qui s'est
                 # produit au premier essai.
                 time.sleep(2.0)
-            r = mypuls.api_get(chemin, {"per_page": 3})
+            r = mypuls.api_get(chemin, {"per_page": 500})
             _err = str(r.get("error") or "")
             if not r.get("ok") and ("429" in _err or "rate_limited" in _err):
                 # Aveugle : on s'arrete au lieu de rapporter des refus qui n'en
@@ -49412,6 +49412,19 @@ def create_app():
                     apercu = {"n": len(d),
                               "cles": sorted((d[0] or {}).keys())[:25]
                               if d and isinstance(d[0], dict) else None}
+                # ?lignes=1 : quelques lignes REELLES, pour verifier que le
+                # champ « code » ressemble bien aux suffixes des destinations
+                # GetMySocial (…/c83, …/c85). C'est de cette correspondance que
+                # depend la jointure clics <-> abonnes.
+                if request.args.get("lignes") in ("1", "true", "on"):
+                    src = (d.get("data") if isinstance(d, dict) else d) or []
+                    apercu = dict(apercu or {})
+                    apercu["exemples"] = [
+                        {k: x.get(k) for k in
+                         ("code", "name", "creator_id", "subscribers_total",
+                          "subscribers_period", "new_subscribers",
+                          "visits_total", "active")}
+                        for x in src[:6] if isinstance(x, dict)]
                 out["trouves"].append({"chemin": chemin, "apercu": apercu})
             else:
                 # Un 403 apres un 429 ne prouve RIEN : c'est la limite de debit
