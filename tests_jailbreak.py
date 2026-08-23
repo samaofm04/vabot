@@ -534,6 +534,12 @@ try:
         + _srcBot.count("_io.trier(list(models), _ordre)[:25]")
     check("ordre : on trie AVANT de couper a 25, aux deux endroits",
           _apres == 2, "%d endroit(s) sur 2" % _apres)
+    # Les libelles doivent etre calcules sur la liste VISIBLE, aux deux
+    # endroits : c est ce qui donne « 1. » et non le rang global.
+    _etiq = (_srcBot.count("_io.etiqueter(visibles, ordre)")
+             + _srcBot.count("_io.etiqueter(_visibles, _ordre)"))
+    check("ordre : les libelles viennent de la liste visible, aux deux endroits",
+          _etiq == 2, "%d endroit(s) sur 2" % _etiq)
     check("ordre : plus aucune coupe sur la liste non triee",
           "models[:25]" not in _srcBot,
           "une coupe alphabetique subsiste")
