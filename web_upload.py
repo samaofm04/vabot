@@ -27264,6 +27264,19 @@ _CSS_VA_IG3 = """
 .va-ig3-thead{background:#0c0e13;border:1px solid #2a2a2a;border-radius:10px 10px 0 0;padding:10px 14px;display:grid;grid-template-columns:36px 1fr auto auto auto auto auto 22px 28px;gap:14px;align-items:center;font-size:11px;color:#8a8a94;text-transform:uppercase;letter-spacing:.04em;font-weight:700}
 .va-ig3-thead .r{text-align:right}
 body.light .va-ig3-thead{background:#f7f8fa;border-color:#e5e7eb;color:#6b7280}
+
+/* Theme clair. Ces regles vivaient dans le bloc « liste VA », differe :
+   sans elles les lignes restaient en sombre sur une page claire, et les
+   chiffres devenaient illisibles. La specificite (body.light + classe) prime
+   sur la regle generale, comme l exige le theme clair du projet. */
+body.light .va-ig3-row{background:#fff;border-color:#e5e7eb}
+body.light .va-ig3-row:hover{border-color:#ec489966}
+body.light .va-ig3-row-num{color:#111}
+body.light .va-ig3-row-pp{background:#f3f4f6}
+body.light .va-ig3-preview{border-top-color:#e5e7eb}
+body.light .va-ig3-thumb{background:#f9fafb}
+body.light .va-ig3-detail{border-top-color:#e5e7eb}
+body.light .va-ig3-rm-btn{border-color:#e5e7eb;color:#6b7280}
 """
 
 

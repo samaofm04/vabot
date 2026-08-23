@@ -4329,6 +4329,12 @@ try:
     # taille, l image s affiche en pleine largeur et le texte lui passe dessus.
     check("jailbreak : le fragment porte la taille des vignettes",
           ".va-ig3-row-pp{width:36px" in _hJb)
+    # Theme clair : sans ces regles les lignes restaient en sombre sur une page
+    # claire, et les chiffres devenaient illisibles. La specificite compte —
+    # body.light + classe doit primer sur la regle generale.
+    check("jailbreak : le fragment porte le theme clair du tableau",
+          "body.light .va-ig3-row{background:#fff" in _hJb
+          and "body.light .va-ig3-row-num" in _hJb)
     # Une seule definition, servie a qui en a besoin. Deux copies, c est deux
     # comportements le jour ou l une bouge.
     _srcSh = _plCa.Path("web_upload.py").read_text(encoding="utf-8")
