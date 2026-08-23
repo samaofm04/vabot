@@ -3466,6 +3466,63 @@ try:
         else:
             check("apercus : une video locale existe pour tester la route",
                   True, "aucune video en local — controle saute")
+
+        # « .. » etait refuse PARTOUT dans le nom, pas seulement comme segment
+        # de remontee. Les captions Instagram sont pleines de points de
+        # suspension : « trop bien... #ootd.mp4 » recevait un 403 sur la
+        # miniature, sur la lecture ET sur le telechargement par le rig.
+        # C est la seconde moitie du probleme du « # », deja corrige.
+        # Le cache ne verifiait que la PRESENCE et la date. Un ffmpeg
+        # interrompu — timeout de 25 s, disque plein, redemarrage — laisse un
+        # fichier vide ou coupe, alors servi en 200 image/jpeg avec 24 h de
+        # cache. La carte restait noire pour toujours, et seul un changement de
+        # THUMB_RECETTE purgeait : d ou les « corrige puis re-casse ».
+        import tempfile as _tfAp
+        _dAp = _plAp.Path(_tfAp.mkdtemp())
+        try:
+            for _nomCas, _octets, _attendu in (
+                    ("vide", b"", False),
+                    ("tronque", bytes((0xFF, 0xD8)) + b"x" * 42, False),
+                    ("texte", b"<html>pas une image</html>" + b" " * 600, False),
+                    ("jpeg", bytes((0xFF, 0xD8, 0xFF, 0xE0)) + b"\x00" * 3000, True),
+                    ("png", bytes((0x89, 0x50, 0x4E, 0x47)) + b"\x00" * 3000, True)):
+                _fAp = _dAp / "x.jpg"
+                _fAp.write_bytes(_octets)
+                check("apercus : une vignette « %s » est jugee %s"
+                      % (_nomCas, "valide" if _attendu else "invalide"),
+                      _wAp._vignette_valide(_fAp) is _attendu)
+        finally:
+            import shutil as _sh0Ap
+            _sh0Ap.rmtree(_dAp, ignore_errors=True)
+        check("apercus : le cache verifie le CONTENU avant de servir",
+              "_vignette_valide(thumb)" in _srcAp,
+              "sinon un reste tronque est servi 24 h durant")
+        check("apercus : une extraction qui expire ne laisse pas de reste",
+              "except subprocess.TimeoutExpired" in _srcAp
+              and "dest.unlink(missing_ok=True)" in _srcAp)
+
+        import shutil as _shAp
+        _identAp = "_tstpts"
+        _dirAp = _wAp.IDENTITIES_DIR / _identAp / "brutes"
+        try:
+            _dirAp.mkdir(parents=True, exist_ok=True)
+            _nomAp = "trop bien... #ootd.mp4"
+            (_dirAp / _nomAp).write_bytes(b"\x00" * 2048)
+            _wAp._invalidate_json_cache(None) if hasattr(_wAp, "_invalidate_json_cache") else None
+            _chAp, _codeAp, _motifAp = _wAp._cloud_media_path(_identAp, "brutes", _nomAp)
+            check("apercus : un nom avec des points de suspension est accepte",
+                  _codeAp == 200,
+                  "code %s (%s) — meme famille de noms que le « # »"
+                  % (_codeAp, _motifAp))
+            # La securite doit rester entiere : une vraie remontee est refusee.
+            for _mechantAp in ("../../secret.txt", "..", "a/../../b.mp4",
+                               "..\\..\\secret.txt"):
+                _c2, _code2, _ = _wAp._cloud_media_path(_identAp, "brutes", _mechantAp)
+                check("apercus : la remontee %r reste refusee" % _mechantAp[:18],
+                      _c2 is None and _code2 in (403, 404),
+                      "code %s" % _code2)
+        finally:
+            _shAp.rmtree(_wAp.IDENTITIES_DIR / _identAp, ignore_errors=True)
     finally:
         _wAp._load_web_users = _svAp
 except Exception as _eAp:

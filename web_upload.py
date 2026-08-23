@@ -16914,8 +16914,19 @@ def _extraire_image(src: Path, dest: Path, depart: float) -> bool:
         cmd += ["-ss", f"{depart:.2f}"]
     cmd += ["-i", str(src), "-vf", f"thumbnail=60,scale={THUMB_SIZE}:-2",
             "-frames:v", "1", "-q:v", "5", str(dest)]
-    r = subprocess.run(cmd, capture_output=True, timeout=25)
-    return r.returncode == 0 and dest.exists() and dest.stat().st_size > 0
+    # Un timeout laissait le fichier a moitie ecrit sur le disque, et le
+    # cache le servait ensuite comme une vignette valide. On efface le
+    # reste dans TOUS les cas d echec, y compris a l expiration.
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=25)
+    except subprocess.TimeoutExpired:
+        dest.unlink(missing_ok=True)
+        log.warning("extraction expiree pour %s", src.name)
+        return False
+    if r.returncode != 0 or not _vignette_valide(dest):
+        dest.unlink(missing_ok=True)
+        return False
+    return True
 
 
 def _generate_video_thumbnail(src: Path, dest: Path) -> bool:
@@ -16972,6 +16983,28 @@ def _thumb_gen_lock(rel_key: str):
         return lk
 
 
+def _vignette_valide(chemin: Path) -> bool:
+    """Vrai si le fichier est bien une image complete, pas un reste tronque.
+
+    Le cache ne verifiait que la PRESENCE et la date. Or un ffmpeg interrompu
+    — timeout de 25 s, disque plein, redemarrage — laisse un fichier vide ou
+    coupe. Il etait alors servi en HTTP 200 image/jpeg avec 24 h de cache :
+    la carte restait noire pour toujours, et seul un changement de
+    THUMB_RECETTE purgeait. C est ce qui explique les « corrige puis
+    re-casse » du passage en v2.
+    """
+    try:
+        if chemin.stat().st_size < 512:
+            return False
+        with open(chemin, "rb") as f:
+            tete = f.read(12)
+    except OSError:
+        return False
+    return (tete[:2] == bytes((0xFF, 0xD8))                  # JPEG
+            or tete[:4] == bytes((0x89, 0x50, 0x4E, 0x47))   # PNG
+            or (tete[:4] == b"RIFF" and tete[8:12] == b"WEBP"))
+
+
 def _get_or_create_thumbnail(src: Path, rel_key: str, is_video: bool) -> Path:
     """Retourne le path du thumbnail, en le générant si besoin (1 génération max
     par clé grâce au verrou ; le 2e appelant attend puis trouve le fichier)."""
@@ -16983,8 +17016,11 @@ def _get_or_create_thumbnail(src: Path, rel_key: str, is_video: bool) -> Path:
         # favori dans ce cas exact ; la vignette etait le troisieme etat oublie.
         try:
             if thumb.stat().st_mtime >= src.stat().st_mtime:
-                return thumb
-            thumb.unlink()
+                if _vignette_valide(thumb):
+                    return thumb
+                thumb.unlink()          # reste tronque : on refabrique
+            else:
+                thumb.unlink()
         except OSError:
             return thumb
     with _thumb_gen_lock(rel_key):
@@ -17305,9 +17341,24 @@ def _cloud_media_path(identity: str, subdir: str, filename: str):
     if ident not in _list_identities():
         return None, 404, "identite inconnue"
     nom = filename or ""
-    if "/" in nom or "\\" in nom or ".." in nom or not nom:
+    # « .. » etait refuse PARTOUT dans le nom, et pas seulement comme
+    # segment de remontee. Or les captions Instagram sont pleines de
+    # points de suspension — « trop bien... #ootd.mp4 » recevait donc un
+    # 403 sur la miniature, sur la lecture, ET sur le telechargement par
+    # le rig. Meme population de noms que le « # » deja corrige : c est la
+    # seconde moitie du meme probleme.
+    # Ce qui protege vraiment, ce n est pas ce test de sous-chaine mais la
+    # VERIFICATION D APPARTENANCE ci-dessous : on resout le chemin et on
+    # exige qu il reste sous le dossier de l identite. Un « .. » isole ne
+    # peut donc rien, et un nom legitime passe.
+    if "/" in nom or "\\" in nom or nom in ("..", ".") or not nom:
         return None, 403, "chemin invalide"
-    chemin = IDENTITIES_DIR / ident / subdir / nom
+    base = (IDENTITIES_DIR / ident / subdir).resolve()
+    try:
+        chemin = (base / nom).resolve()
+        chemin.relative_to(base)          # leve si on est sorti du dossier
+    except (ValueError, OSError):
+        return None, 403, "chemin invalide"
     if not chemin.exists() or not chemin.is_file():
         return None, 404, "fichier absent"
     return chemin, 200, ""
