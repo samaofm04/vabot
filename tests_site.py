@@ -2610,6 +2610,67 @@ except Exception as _eRg:
 
 print()
 print("=" * 70)
+print("NOMS DE FICHIERS DANS LES URL (la cause du mur de cartes noires)")
+print("=" * 70)
+try:
+    import re as _reDi
+    import shutil as _shDi
+    import subprocess as _spDi
+    import web_upload as _wDi
+
+    # 89 % des rushs portent un « # » : leurs noms viennent de captions
+    # Instagram, donc de hashtags. Sans encodage, le navigateur coupe
+    # l adresse au premier « # » qu il prend pour une ancre — le serveur
+    # recoit « genesaag__ » au lieu du nom complet et repond 404. Mesure sur
+    # le site reel : 68 requetes de vignettes, 68 en 404, et autant de cartes
+    # noires. On a cherche du cote de ffmpeg puis du JavaScript avant de
+    # regarder les requetes.
+    check("url : le diese est encode", "%23" in _wDi._url_nom("a#b.mp4"))
+    check("url : la barre aussi (ces routes veulent UN segment)",
+          "/" not in _wDi._url_nom("a/b.mp4"))
+    check("url : un nom ordinaire n est pas abime",
+          _wDi._url_nom("clip.mp4") == "clip.mp4")
+
+    _idDi = "_tst_diese"
+    _dDi = _wDi.IDENTITIES_DIR / _idDi / "brutes"
+    _shDi.rmtree(_wDi.IDENTITIES_DIR / _idDi, ignore_errors=True)
+    _dDi.mkdir(parents=True)
+    _nomDi = "modele__ #fyp #outfitinspo_764.mp4"
+    _spDi.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi",
+               "-i", "testsrc=s=180x320:d=2", "-c:v", "libx264",
+               "-pix_fmt", "yuv420p", str(_dDi / _nomDi)],
+              capture_output=True, timeout=90)
+    _aDi = _wDi.create_app(); _aDi.testing = True
+    _savDi = _wDi._load_web_users
+    _wDi._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"}}
+    _cDi = _aDi.test_client()
+    with _cDi.session_transaction() as _s:
+        _s["auth"] = True; _s["username"] = "boss"; _s["role"] = "owner"; _s["sid"] = "DI1"
+    _hDi = _cDi.get("/?tab=cloudbrutes&cloud_brutes_ident=" + _idDi).get_data(as_text=True)
+    _mDi = _reDi.search(r"/cloud/thumb/" + _idDi + r"/brutes/[^'\" ]+", _hDi)
+    check("url : la galerie rend une adresse encodee pour un nom a diese",
+          bool(_mDi) and "%23" in _mDi.group(0),
+          _mDi.group(0)[:90] if _mDi else "aucune adresse trouvee")
+    if _mDi:
+        _rDi = _cDi.get(_mDi.group(0))
+        # LE test : c est la requete reelle qui rendait 404 et laissait la
+        # carte noire.
+        check("url : cette adresse rend bien une image, pas un 404",
+              _rDi.status_code == 200
+              and "image" in (_rDi.headers.get("Content-Type") or "")
+              and len(_rDi.get_data()) > 500,
+              "HTTP %s %s" % (_rDi.status_code, _rDi.headers.get("Content-Type")))
+    _wDi._load_web_users = _savDi
+    _shDi.rmtree(_wDi.IDENTITIES_DIR / _idDi, ignore_errors=True)
+    _shDi.rmtree(_wDi.THUMB_DIR / ("v%d" % _wDi.THUMB_RECETTE) / _idDi,
+                 ignore_errors=True)
+except FileNotFoundError:
+    check("url : testable (ffmpeg absent)", False, "ffmpeg introuvable")
+except Exception as _eDi:
+    check("url : testable", False, repr(_eDi)[:160])
+
+print()
+print("=" * 70)
 print("VIGNETTE NOIRE (la vraie cause du mur de cartes noires)")
 print("=" * 70)
 try:

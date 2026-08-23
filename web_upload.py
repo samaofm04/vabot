@@ -16279,6 +16279,21 @@ def _render_identity_stats_html() -> str:
     return "".join(rows)
 
 
+def _url_nom(nom: str) -> str:
+    """Un nom de fichier, rendu sur pour une portion d URL.
+
+    Indispensable et pas cosmetique : 89 % des rushs portent un « # » dans leur
+    nom, les fichiers venant de captions Instagram donc de hashtags. Sans
+    encodage, le navigateur coupe l adresse au premier « # » qu il prend pour
+    une ancre — le serveur recoit « genesaag__ » au lieu du nom complet, repond
+    404, et la carte reste NOIRE. On a cherche du cote de ffmpeg puis du
+    JavaScript avant de regarder les requetes reelles : 68 sur 68 en 404.
+    « / » reste interdit : ces routes attendent un seul segment.
+    """
+    from urllib.parse import quote as _q
+    return _q(str(nom), safe="")
+
+
 def _thumb_path_for(rel_key: str) -> Path:
     """Chemin du thumbnail pour une clé relative (genre 'amelia/videos/file.mp4').
 
@@ -18529,15 +18544,15 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
             pass
         for idx, p in enumerate(files):
             file_id = f"{selected}|{subdir}|{p.name}"
-            clean_url = f"/cloud/file/{selected}/{subdir}/{p.name}"
+            clean_url = f"/cloud/file/{selected}/{subdir}/{_url_nom(p.name)}"
             ex_name = example_by_stem.get(p.stem)
             if ex_name:
-                url = f"/cloud/file/{selected}/{subdir}/{ex_name}"
-                thumb_url = f"/cloud/thumb/{selected}/{subdir}/{ex_name}"
+                url = f"/cloud/file/{selected}/{subdir}/{_url_nom(ex_name)}"
+                thumb_url = f"/cloud/thumb/{selected}/{subdir}/{_url_nom(ex_name)}"
                 second_url = clean_url
             else:
                 url = clean_url
-                thumb_url = f"/cloud/thumb/{selected}/{subdir}/{p.name}"
+                thumb_url = f"/cloud/thumb/{selected}/{subdir}/{_url_nom(p.name)}"
                 second_url = ""
             # Apres INITIAL_BATCH : on render avec data-src vide, l image se charge a l intersection
             deferred = idx >= INITIAL_BATCH
@@ -19805,8 +19820,8 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
         is_video_js = "true" if is_video else "false"
         cards = []
         for p in files:
-            url = f"/cloud/file/{selected}/{sd}/{p.name}"
-            thumb = f"/cloud/thumb/{selected}/{sd}/{p.name}"
+            url = f"/cloud/file/{selected}/{sd}/{_url_nom(p.name)}"
+            thumb = f"/cloud/thumb/{selected}/{sd}/{_url_nom(p.name)}"
             # file_id VIDE : lightbox en pur visionnage (pas de crayon/étoile).
             cards.append(
                 "<div class='cloud-card' style='background:transparent;border:0;border-radius:10px;position:relative'>"
@@ -20094,8 +20109,8 @@ def _render_cloud_pps_html() -> str:
         return add_btn + "<p style='color:#888'>Aucune PP uploadée.</p>"
     rows = [add_btn, "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px'>"]
     for p in files:
-        url = f"/cloud/pp/{p.name}"
-        thumb_url = f"/cloud/thumb/pp/{p.name}"
+        url = f"/cloud/pp/{_url_nom(p.name)}"
+        thumb_url = f"/cloud/thumb/pp/{_url_nom(p.name)}"
         file_id = f"_pp_|pp|{p.name}"
         rows.append(_preview_card(url, thumb_url, p, is_video=False, file_id=file_id))
     rows.append(f"</div><div style='margin-top:18px'><small>Total : <b>{len(files)}</b> PP(s) partagée(s)</small></div>")
@@ -43674,13 +43689,13 @@ def create_app():
                 for sub in ("profile_pics", "posts", "stories", "storyctas"):
                     name = _first_img(base / sub)
                     if name:
-                        pp = f"/cloud/thumb/{ident}/{sub}/{name}"
+                        pp = f"/cloud/thumb/{ident}/{sub}/{_url_nom(name)}"
                         break
             if not pp:
                 for sub in ("videos", "templates", "brutes"):
                     name = _first_vid(base / sub)
                     if name:
-                        pp = f"/cloud/thumb/{ident}/{sub}/{name}"
+                        pp = f"/cloud/thumb/{ident}/{sub}/{_url_nom(name)}"
                         break
             nb = 0
             bdir = IDENTITIES_DIR / ident / "brutes"
