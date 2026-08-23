@@ -98,12 +98,12 @@ def load(path, default: Any = None) -> Any:
                 if txt.strip():
                     return json.loads(txt)
             except Exception as e:
-                print(f"[safe_json] ⚠ {p.name} illisible ({e}) — tentative .prev", flush=True)
+                print(f"[safe_json] ATTENTION : {p.name} illisible ({e}) — tentative .prev", flush=True)
         prev = p.with_suffix(p.suffix + ".prev")
         if prev.exists():
             try:
                 data = json.loads(prev.read_text(encoding="utf-8"))
-                print(f"[safe_json] ✔ {p.name} restauré depuis {prev.name}", flush=True)
+                print(f"[safe_json] OK : {p.name} restauré depuis {prev.name}", flush=True)
                 try:
                     write_text(p, json.dumps(data, indent=2, ensure_ascii=False), backup=False)
                 except Exception:
@@ -130,7 +130,7 @@ def load_or_prev(path):
     except Exception:
         prev = p.with_suffix(p.suffix + ".prev")
         data = _j.loads(prev.read_text(encoding="utf-8"))
-        print(f"[safe_json] ✔ {p.name} illisible -> restauré depuis {prev.name}", flush=True)
+        print(f"[safe_json] OK : {p.name} illisible -> restauré depuis {prev.name}", flush=True)
         try:
             write_text(p, _j.dumps(data, indent=2, ensure_ascii=False), backup=False)
         except Exception:

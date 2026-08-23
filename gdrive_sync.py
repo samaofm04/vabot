@@ -1055,10 +1055,19 @@ def _candidats_import(sess, st, root):
             # 1) Copie fabriquee par un import precedent : le MEME contenu
             # sous un nom suffixe. Les rapatrier relance le cycle qui a
             # produit les pp_69_2_2 et pp_69_2_3 — chaque tour ajoute une
-            # couche. Les voisins etaient exemptes parce que la taille seule
-            # aurait confondu deux captions de meme longueur ; l'empreinte
-            # md5 ne confond rien, ils passent donc par la meme regle.
-            if f.get("id") in ids_copies:
+            # couche.
+            #
+            # Les VOISINS restent exemptes, et pas pour la raison qu'on
+            # croyait. Ce n'est pas que la taille seule confondait deux
+            # captions de meme longueur : c'est qu'un voisin n'a de sens que
+            # RATTACHE A SON MEDIA. Le md5 ne le sauve pas — deux captions de
+            # contenu identique sont NORMALES ici, les textes venant d'un pool
+            # commun pose au hasard, et deux captions VIDES ont forcement la
+            # meme empreinte. Les soumettre a la meme regle faisait ecarter
+            # « f1_2.txt » alors que « f1_2.mp4 » etait un media distinct et
+            # bien importe : reel muet, caption orpheline — exactement le
+            # symptome que _planifier_noms existe pour eliminer.
+            if not _est_voisin(nom) and f.get("id") in ids_copies:
                 _ignores["copies_du_drive"] = _ignores.get("copies_du_drive", 0) + 1
                 continue
             # 2) Le nom est deja pris sur le site : on n'importe pas. Choix du

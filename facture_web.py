@@ -74,7 +74,16 @@ def _load() -> dict:
         print(f"[facture] {FACTURE_FILE.name} n'est pas un objet JSON "
               f"({type(d).__name__}) — base vide servie", flush=True)
     except FileNotFoundError:
-        pass                      # première ouverture : rien à récupérer
+        # « Fichier absent » et « fichier présent mais illisible » arrivaient
+        # ICI tous les deux : load_or_prev lève FileNotFoundError en cherchant
+        # un .prev qui n'existe pas, et le cas le plus DANGEREUX — compta
+        # tronquée, aucun filet — repartait donc à vide en silence, sous une
+        # branche écrite pour la première ouverture. On les sépare.
+        if FACTURE_FILE.exists():
+            print(f"[facture] ALERTE : {FACTURE_FILE.name} est illisible et il "
+                  f"n'existe aucun .prev — base vide servie. NE RIEN "
+                  f"ENREGISTRER avant d'avoir restauré une sauvegarde : la "
+                  f"prochaine écriture graverait ce vide.", flush=True)
     except Exception as e:
         # ni le fichier ni .prev ne sont lisibles : on le DIT (sinon la
         # sauvegarde suivante gravait ce vide sans laisser de trace).

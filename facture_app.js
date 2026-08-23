@@ -611,8 +611,17 @@
   function openLineModal(line) {
     var d = S.data;
     var isEdit = !!line;
+    // Date de debut = le 1er du mois AFFICHE, pas la date du jour. Le module
+    // propose explicitement les six mois precedents « pour saisir/consulter un
+    // mois passe » : avec la date du jour, une ligne saisie le 23/08 pour
+    // cloturer juillet naissait hors periode et valait 0 $. Mesure : 5000 $ de
+    // CA saisis, 0 $ comptes. Le filtre de periode est juste, c est ce
+    // pre-remplissage qui etait faux.
+    var _debutParDefaut = (S.month && /^\d{4}-\d{2}$/.test(S.month))
+      ? S.month + '-01'
+      : new Date().toISOString().slice(0, 10);
     line = line || {type: 'exp', cat: 'va', form: 'fixed', currency: 'USD', freq: 'monthly',
-                    start: new Date().toISOString().slice(0, 10), phases: []};
+                    start: _debutParDefaut, phases: []};
     var catOpts = d.cat_order.map(function (c) {
       return '<option value="' + c + '"' + (line.cat === c ? ' selected' : '') + '>' + d.cats[c].icon + ' ' + d.cats[c].label + '</option>';
     }).join('');
