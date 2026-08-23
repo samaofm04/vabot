@@ -96,8 +96,8 @@ def phrase_classement(identites, ordre=None) -> str:
     classees = [i for i in identites if str(i).lower() in connues]
     if not classees:
         return ""
-    return ("🏆 **Les numéros sont un classement** : la n°1 est celle qui "
-            "marche le mieux en ce moment. Commence par le haut de la liste.")
+    return ("**Les numéros sont un classement.** La n°1 est celle qui marche "
+            "le mieux en ce moment — commence par le haut.")
 
 
 def etiqueter(identites, ordre=None, gabarit="{rang}. {nom}") -> dict:

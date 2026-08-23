@@ -2996,13 +2996,14 @@ class UserCog(commands.Cog):
         import identites_ordre as _io
         _clst = _io.phrase_classement(models)
         emb = discord.Embed(
-            title=("🔓 Menu Jailbreak FR — models FR" if marche == "fr"
-                   else "🔓 Menu Jailbreak US — models US"),
+            title=("Menu Jailbreak FR — models FR" if marche == "fr"
+                   else "Menu Jailbreak US — models US"),
             description=(
-                "Clique **directement sur la model** 👇 puis choisis l'action "
-                "(reel, reel monté, story, post, story CTA, pseudo, name, bio, pp).\n\n"
+                "Choisis une model ci-dessous, puis l'action à réaliser : "
+                "reel, reel monté, story, post, story CTA, pseudo, name, "
+                "bio ou pp.\n\n"
                 + (_clst + "\n\n" if _clst else "")
-                + "✅ Ouvert à tout le monde sur ce serveur."
+                + "Ce menu est ouvert à tout le monde sur ce serveur."
             ),
             color=discord.Color.dark_red(),
         )
@@ -3697,11 +3698,12 @@ class UserCog(commands.Cog):
                 role = None
         role_txt = f"@{role.name}" if role else "Jailbreak"
         emb = discord.Embed(
-            title="🔓 Menu Jailbreak — toutes les models",
+            title="Menu Jailbreak — toutes les models",
             description=(
-                "Choisis une **model** dans le menu déroulant 👇 puis clique sur l'action "
-                "voulue (reel, reel monté, story, post, story CTA, pseudo, name, bio, pp).\n\n"
-                f"🔒 Réservé aux membres avec le rôle **{role_txt}**."
+                "Choisis une model dans le menu déroulant, puis l'action "
+                "à réaliser : reel, reel monté, story, post, story CTA, "
+                "pseudo, name, bio ou pp.\n\n"
+                f"Réservé aux membres portant le rôle **{role_txt}**."
             ),
             color=discord.Color.dark_red(),
         )
