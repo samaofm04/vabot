@@ -3400,6 +3400,9 @@ try:
         "lb-counter": "commande de la visionneuse, qui reste noire",
         "lb-nav": "commande de la visionneuse, qui reste noire",
         "lb-dual-label": "libelle dans la visionneuse, qui reste noire",
+        # L onglet actif est peint en bleu plein ; la pastille de comptage qu il
+        # contient est donc blanche sur bleu, ce qui est juste.
+        "gms-tab-active": "pastille posee dans un onglet peint en bleu plein",
     }
     # On lit le CSS REELLEMENT SERVI, pas le fichier source. Deux tentatives
     # precedentes ont echoue pour des raisons opposees : exiger un debut de
@@ -3419,6 +3422,17 @@ try:
             _sTh["username"] = "admin"
             _sTh["role"] = "owner"
         _htmlTh = _cTh.get("/?tab=home").get_data(as_text=True)
+        # Les onglets differes apportent LEUR PROPRE <style>, absent de la page
+        # d accueil. Sans eux, tout le module Jailbreak echappait au controle —
+        # c est ainsi que ses pastilles sont restees illisibles si longtemps.
+        for _lz in ("jailbreak", "gms", "clouddrive", "textpool", "geelark",
+                    "bilan", "schedule", "srole", "videocrea", "vtg"):
+            try:
+                _fr = _cTh.get("/?lazy=" + _lz, headers={"X-Tab-Ajax": "1"})
+                if _fr.status_code == 200:
+                    _htmlTh += "\n" + _fr.get_data(as_text=True)
+            except Exception:
+                pass
     finally:
         _wTh._load_web_users = _sauveTh
     _cssTh = "\n".join(_reTh.findall(r"<style[^>]*>(.*?)</style>", _htmlTh, _reTh.S))

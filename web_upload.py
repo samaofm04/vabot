@@ -1291,6 +1291,25 @@ body.light .mpl-event-type,body.light .mpl-mini-badge{color:#15803d}
 body.light .jb-acc-pill.warn{color:#c2410c}
 body.light .jb-acc-pill.ban{color:#b91c1c}
 body.light .jb-acc-pill.quiet{color:#4b5563}
+body.light .jb-detail-scrape-pill{color:#15803d}
+body.light .jb-side-summary{color:#4b5563}
+body.light .jb-side-id-count{color:#be185d}
+/* Survols qui passent le texte en BLANC sans poser de fond plein : sur une
+   surface claire, le bouton se vide au passage de la souris. */
+body.light .jb-row-btn:hover,body.light .jb-section-toggle:hover{color:#1d4ed8}
+body.light .va-ig3-row-num{color:#111827}
+body.light .jb-2fa-badge.jb-2fa-validated{color:#15803d}
+body.light .jb-2fa-badge.jb-2fa-pending,body.light .jb-stale-badge{color:#c2410c}
+/* Panneau des creneaux SFS : encore un module reste entierement sombre.
+   Contenant, champs et libelles repeints ENSEMBLE — separement, l un
+   aurait rendu l autre illisible. */
+body.light .sx-slot{background:#fff!important;border-color:#e5e7eb!important}
+body.light .sx-slot input[type=time],body.light .sx-slot select{
+  background:#fff!important;border-color:#e5e7eb!important;color:#111827!important}
+body.light .sx-slot select.public{color:#15803d!important}
+body.light .sx-slot select.private{color:#7e22ce!important}
+body.light .sx-opt-title{color:#111827}
+body.light .sx-opt-sub,body.light .sx-slot-rm{color:#6b7280}
 body.light .va-section-count{color:#1d4ed8}
 /* Selecteur d identites (le menu deroulant des cartes d import) : panneau
    et bouton restes en #131316. Ses 113 lignes sont donc CLAIRES SUR
@@ -14515,7 +14534,7 @@ body.light .va-section-head{border-color:#e5e7eb}
 body.light .va-card{background:#f9fafb;border-color:#e5e7eb}
 body.light .va-card:hover{background:#fff}
 body.light .va-change-form select{background:#fff;border-color:#e5e7eb;color:#111}
-body.light .va-id{color:#9ca3af}
+body.light .va-id{color:#6b7280}
 </style>
 """
 
