@@ -470,6 +470,75 @@ reset()
 with jb.transaction():
     check("identité test supprimée", IDENT not in (jb._load() or {}))
 
+print()
+print("=" * 70)
+print("ICONES DES BOUTONS DISCORD (style du site)")
+print("=" * 70)
+try:
+    import re as _reIc
+    from pathlib import Path as _PIc
+    from cogs.user import (_ICONES_ACTIONS, _JB_ACTIONS_US,
+                           _libelle_sans_emoji, icones_actions)
+
+    # Une icone qui ne vise aucune action ne s affichera jamais, et une action
+    # sans icone garde son emoji standard : deux oublis silencieux. On exige
+    # la correspondance exacte.
+    _clesAct = {c for c, _l, _a, _s in _JB_ACTIONS_US}
+    _orphelines = sorted(set(_ICONES_ACTIONS) - _clesAct)
+    check("icones : aucune icone ne vise une action inexistante",
+          not _orphelines, ", ".join(_orphelines))
+    _sansIc = sorted(_clesAct - set(_ICONES_ACTIONS))
+    check("icones : chaque action du panneau US a son icone",
+          not _sansIc, ", ".join(_sansIc))
+
+    _dossierIc = _PIc(__file__).parent / "emojis"
+    _manquants, _mauvais = [], []
+    for _cle, _nom in _ICONES_ACTIONS.items():
+        # Discord refuse tout ce qui sort de [a-z0-9_], et coupe a 32.
+        if not _reIc.fullmatch(r"[a-z0-9_]{2,32}", _nom):
+            _mauvais.append(_nom)
+        if not (_dossierIc / f"{_nom}.png").exists():
+            _manquants.append(_nom)
+    check("icones : les noms sont acceptables par Discord",
+          not _mauvais, ", ".join(_mauvais))
+    check("icones : les treize fichiers PNG sont presents",
+          not _manquants, "absents : " + ", ".join(_manquants))
+
+    # Un PNG trop lourd ou mal dimensionne est refuse au televersement, et on
+    # ne s en apercoit que le jour ou le menu est repose.
+    try:
+        from PIL import Image as _ImIc
+        _pbIc = []
+        for _nom in _ICONES_ACTIONS.values():
+            _f = _dossierIc / f"{_nom}.png"
+            if not _f.exists():
+                continue
+            if _f.stat().st_size > 256000:
+                _pbIc.append(f"{_nom} trop lourd")
+                continue
+            with _ImIc.open(_f) as _im:
+                if _im.size != (128, 128):
+                    _pbIc.append(f"{_nom} en {_im.size[0]}x{_im.size[1]}")
+                elif _im.mode != "RGBA":
+                    _pbIc.append(f"{_nom} sans transparence ({_im.mode})")
+        check("icones : 128x128, transparentes, sous la limite Discord",
+              not _pbIc, " | ".join(_pbIc))
+    except ImportError:
+        check("icones : PIL disponible pour verifier les PNG", True, "PIL absent")
+
+    # Sans ce retrait, le bouton afficherait DEUX icones : celle du serveur et
+    # l emoji reste dans le libelle.
+    check("icones : l emoji de tete est retire du libelle",
+          _libelle_sans_emoji("\U0001F4AC Reel caption") == "Reel caption")
+    check("icones : un libelle sans emoji n est pas ampute",
+          _libelle_sans_emoji("Reel caption") == "Reel caption")
+    # Au clic, on LIT seulement : televerser prendrait treize appels API dans
+    # le delai de 3 s d une interaction, et le bouton paraitrait mort.
+    check("icones : la lecture sans serveur ne leve pas",
+          icones_actions(None) == {})
+except Exception as _eIc:
+    check("icones : testable", False, repr(_eIc)[:170])
+
 print("\n" + "=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

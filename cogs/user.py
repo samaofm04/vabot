@@ -2868,6 +2868,12 @@ class UserCog(commands.Cog):
             emojis = await ensure_identity_emojis(guild, models)
         except Exception:
             emojis = {}
+        # Les icones des ACTIONS, au meme moment : c est le seul endroit ou
+        # l on a le droit de prendre le temps d appels API.
+        try:
+            await ensure_action_emojis(guild)
+        except Exception:
+            pass
         return emb, JailbreakModelsView(models, emojis=emojis)
 
     def jailbreak_us_menu(self, marche="us"):
@@ -5224,8 +5230,15 @@ class _JailbreakQtySelect(discord.ui.Select):
 
 class _JailbreakActionButton(discord.ui.Button):
     """Un bouton d'action (reel, story, ...) pour une model donnee. Ephemere."""
-    def __init__(self, cog, model, label, cmd_attr, supports_count, row, key=""):
-        super().__init__(label=label, style=discord.ButtonStyle.primary, row=row)
+    def __init__(self, cog, model, label, cmd_attr, supports_count, row, key="",
+                 icone=None):
+        # Icone du serveur si elle existe, sinon on garde le libelle tel quel,
+        # emoji standard compris : c est exactement le comportement d avant.
+        if icone is not None:
+            super().__init__(label=_libelle_sans_emoji(label), emoji=icone,
+                             style=discord.ButtonStyle.primary, row=row)
+        else:
+            super().__init__(label=label, style=discord.ButtonStyle.primary, row=row)
         self.cog = cog
         self.model = model
         self.cmd_attr = cmd_attr
@@ -5264,7 +5277,8 @@ class _JailbreakActionButton(discord.ui.Button):
 class JailbreakActionsView(discord.ui.View):
     """Quantite + actions pour UNE model. Ephemere (regeneree a chaque choix).
     us=True -> liste US (Reel caption au lieu du Reel brut)."""
-    def __init__(self, cog, model, quantity=3, us=False):
+    def __init__(self, cog, model, quantity=3, us=False, icones=None):
+        self.icones = icones or {}
         super().__init__(timeout=600)
         self.cog = cog
         self.model = model
@@ -5278,7 +5292,8 @@ class JailbreakActionsView(discord.ui.View):
         actions = _JB_ACTIONS_US        # « Reel caption » pour les 2 marches
         for i, (key, label, cmd_attr, sc) in enumerate(actions):
             self.add_item(_JailbreakActionButton(
-                self.cog, self.model, label, cmd_attr, sc, row=1 + i // 4, key=key))
+                self.cog, self.model, label, cmd_attr, sc, row=1 + i // 4, key=key,
+                icone=self.icones.get(key)))
 
     def _embed(self):
         m = self.model.capitalize()
@@ -5338,6 +5353,85 @@ def _identity_pp_file(ident):
 def _identity_emoji_name(ident):
     import re as _re
     return ("id" + _re.sub(r"[^a-z0-9_]", "", (ident or "").lower()))[:32]
+
+
+# Les icones du menu, dessinees dans le style du site (outils_icones_discord.py).
+# Cle d action -> nom de l emoji sur le serveur. Le prefixe « va » evite de
+# heurter un emoji deja present, et les noms restent en [a-z] : Discord refuse
+# le reste.
+_ICONES_ACTIONS = {
+    "reelcaption": "vareelcaption",
+    "reelmonte": "vareelmonte",
+    "story": "vastory",
+    "post": "vapost",
+    "storycta": "vastorycta",
+    "pseudo": "vapseudo",
+    "name": "vaname",
+    "bio": "vabio",
+    "pp": "vapp",
+    "brute": "vabrute",
+    "capbanger": "vacapbanger",
+    "montagebanger": "vamontagebanger",
+    "templatebrut": "vatemplatebrut",
+}
+
+
+def icones_actions(guild) -> dict:
+    """{cle d action: emoji} — LECTURE SEULE, instantanee.
+
+    Appelee au clic : discord.py garde deja les emojis du serveur en memoire,
+    donc rien ne part sur le reseau. Televerser ici ferait treize appels API
+    dans le delai de 3 s d une interaction, et le bouton paraitrait mort.
+    """
+    if guild is None:
+        return {}
+    presents = {e.name: e for e in getattr(guild, "emojis", [])}
+    return {cle: presents[nom] for cle, nom in _ICONES_ACTIONS.items()
+            if nom in presents}
+
+
+async def ensure_action_emojis(guild) -> dict:
+    """Televerse une fois les icones manquantes. Appelee quand on POSTE un
+    menu, jamais au clic.
+
+    Best-effort : serveur plein, permission retiree, fichier absent — on
+    renvoie ce qu on a, et les boutons gardent leur emoji standard. Un menu
+    sans icone reste utilisable ; un menu qui plante, non.
+    """
+    out = {}
+    if guild is None:
+        return out
+    presents = {e.name: e for e in getattr(guild, "emojis", [])}
+    dossier = Path(__file__).resolve().parent.parent / "emojis"
+    for cle, nom in _ICONES_ACTIONS.items():
+        if nom in presents:
+            out[cle] = presents[nom]
+            continue
+        f = dossier / f"{nom}.png"
+        if not f.exists():
+            continue
+        try:
+            data = f.read_bytes()
+            if len(data) > 256000:          # limite Discord
+                continue
+            out[cle] = await guild.create_custom_emoji(
+                name=nom, image=data, reason="icones du menu VA (style du site)")
+        except Exception as e:
+            log.warning(f"emoji action {nom}: {e}")
+    return out
+
+
+def _libelle_sans_emoji(label: str):
+    """(texte,) sans son emoji de tete.
+
+    Les libelles portent leur emoji dans la CHAINE (« 💬 Reel caption »). Pour
+    poser une icone du serveur a la place, il faut retirer celui-la, sinon on
+    en affiche deux.
+    """
+    bouts = (label or "").split(" ", 1)
+    if len(bouts) == 2 and bouts[0] and not bouts[0][0].isalnum():
+        return bouts[1]
+    return label
 
 
 async def ensure_identity_emojis(guild, models):
@@ -5412,7 +5506,8 @@ class _JailbreakModelSelect(discord.ui.Select):
                 "Aucune model disponible.", ephemeral=True)
             return
         view = JailbreakActionsView(
-            self.cog, model, us=(marche_du_membre(interaction.user) != "fr"))
+            self.cog, model, us=(marche_du_membre(interaction.user) != "fr"),
+            icones=icones_actions(interaction.guild))
         await interaction.response.send_message(
             embed=view._embed(), view=view, ephemeral=True)
 
@@ -5464,7 +5559,8 @@ class JBModelButton(discord.ui.DynamicItem[discord.ui.Button],
         # serveur : un VA FR sur le serveur US garde le menu FR.
         _marche = marche_du_membre(interaction.user)
         if not us:
-            view = JailbreakActionsView(cog, self.ident, us=(_marche != "fr"))
+            view = JailbreakActionsView(cog, self.ident, us=(_marche != "fr"),
+                                        icones=icones_actions(interaction.guild))
             await interaction.response.send_message(
                 embed=view._embed(), view=view, ephemeral=True)
             return
