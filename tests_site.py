@@ -4386,8 +4386,17 @@ try:
     check("clics : le marche FR compte l Europe francophone",
           _crCl._marche_de({"marche": "fr"})[3] == frozenset(
               {"FR", "BE", "CH", "LU", "MC"}))
-    check("clics : le marche US ne compte que les Etats-Unis",
-          _crCl._marche_de({"marche": "us"})[3] == frozenset({"US"}))
+    # « US » au sens du proprietaire : les anglophones a fort pouvoir d achat,
+    # pas les seuls Etats-Unis. Un clic canadien vaut un clic americain.
+    check("clics : le marche US couvre US, CA, AU et GB",
+          _crCl._marche_de({"marche": "us"})[3]
+          == frozenset({"US", "CA", "AU", "GB"}),
+          str(sorted(_crCl._marche_de({"marche": "us"})[3])))
+    check("clics : le marche US n avale pas la France",
+          "FR" not in _crCl._marche_de({"marche": "us"})[3])
+    check("clics : ce que US recouvre est dit sous le titre",
+          "us" in _crCl.MARCHE_DETAIL and _crCl.MARCHE_DETAIL["us"].count(" ") == 3,
+          _crCl.MARCHE_DETAIL.get("us", ""))
     # Un marche inconnu ne doit pas faire disparaitre le report : il retombe
     # sur « tout », qui n affiche que le total.
     check("clics : un marche inconnu retombe sur « tout », sans casser",

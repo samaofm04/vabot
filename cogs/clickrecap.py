@@ -206,8 +206,20 @@ def _pay_period(d: datetime.date):
 #: n'affiche alors que le total.
 MARCHES = {
     "fr": ("FR", "🇫🇷", frozenset({"FR", "BE", "CH", "LU", "MC"})),
-    "us": ("US", "🇺🇸", frozenset({"US"})),
+    # « US » au sens du proprietaire : les pays anglophones ou le public a de
+    # l'argent, pas les seuls Etats-Unis. Un clic canadien ou britannique vaut
+    # un clic americain ; les compter a part n'aurait servi a rien.
+    # Pour en ajouter un (NZ, IE...), il suffit de l'ecrire ici.
+    "us": ("US", "🇺🇸", frozenset({"US", "CA", "AU", "GB"})),
     "tout": ("tous pays", "🌍", frozenset()),
+}
+
+#: Ce que « US » recouvre, dit en toutes lettres sous le titre du report :
+#: sans ca, un chiffre plus gros que le nombre de clics americains passerait
+#: pour une erreur.
+MARCHE_DETAIL = {
+    "us": "🇺🇸 🇨🇦 🇦🇺 🇬🇧",
+    "fr": "🇫🇷 🇧🇪 🇨🇭 🇱🇺 🇲🇨",
 }
 
 
@@ -715,7 +727,10 @@ class ClickRecap(commands.Cog):
 
         emb = discord.Embed(
             title=f"{drapeau} Clicks — {name}",
-            description=f"**{len(ids)}** link(s) tracked.",
+            description=(
+                f"**{len(ids)}** link(s) tracked."
+                + (f"  ·  {libelle} = {MARCHE_DETAIL[_cle_m]}"
+                   if _cle_m in MARCHE_DETAIL else "")),
             color=color,
         )
 
@@ -767,13 +782,27 @@ class ClickRecap(commands.Cog):
             # Bloc de code : c'est la seule mise en forme que Discord aligne.
             # Les drapeaux, eux, ne s'alignent pas en chasse fixe — d'ou leur
             # place dans le titre plutot que dans le tableau.
-            entete = (f"{'LINK':<18}{'TODAY':>7}{'YEST':>7}"
-                      f"{'WEEK':>7}{'PERIOD':>8}")
+            # UN seul tableau, deux colonnes par periode : le marche et le
+            # total, cote a cote sur la meme ligne. Deux tableaux separes
+            # obligeaient a chercher la meme personne deux fois pour comparer.
+            _m = libelle if pays_marche else ""
+            entete = (
+                f"{'':<18}{'TODAY':^12}{'YESTERDAY':^12}{'WEEK':^12}\n"
+                f"{'LINK':<18}"
+                + (f"{_m:>5}{'GLOB':>7}" * 3 if pays_marche
+                   else f"{'GLOB':>12}" * 3))
 
             def _c(v):
                 # « — » veut dire « pas su lire », JAMAIS « zero ». Ecrire 0
                 # a la place d'un echec serait un mensonge qu'on ne verrait pas.
                 return "—" if v is None else str(v)
+
+            def _duo_col(paire):
+                """« marche  total » d'une periode, en deux colonnes alignees."""
+                u, t = paire
+                if not pays_marche:
+                    return f"{_c(t):>12}"
+                return f"{_c(u):>5}{_c(t):>7}"
 
             # Regroupement par PERSONNE : une meme personne tient plusieurs
             # telephones, ses lignes doivent se suivre et porter un sous-total.
@@ -796,14 +825,18 @@ class ClickRecap(commands.Cog):
                        if p[periode][indice] is not None]
                 return sum(vus) if vus else None
 
-            def _tableau(indice):
+            # On classe sur le MARCHE quand il y en a un — c est ce que le
+            # proprietaire regarde — sinon sur le total.
+            _tri = 0 if pays_marche else 1
+
+            def _tableau():
                 # Les personnes qui cliquent le plus en premier ; a egalite,
                 # par nom, pour que l'ordre ne danse pas d'un rafraichissement
                 # a l'autre.
                 ordre = sorted(
                     _paquets.values(),
-                    key=lambda g: (-(_somme(g["lignes"], 0, indice) or 0),
-                                   -(_somme(g["lignes"], 2, indice) or 0),
+                    key=lambda g: (-(_somme(g["lignes"], 0, _tri) or 0),
+                                   -(_somme(g["lignes"], 2, _tri) or 0),
                                    str(g["nom"] or g["lignes"][0][0]).lower()))
                 # Un paquet de lignes PAR personne : la coupure en plusieurs
                 # champs se fait ensuite entre les paquets, jamais au milieu.
@@ -816,10 +849,10 @@ class ClickRecap(commands.Cog):
                     if g["nom"] and len(membres) > 1:
                         lignes.append(
                             f"{(g['nom'] + ' (' + str(len(membres)) + ')')[:17]:<18}"
-                            f"{_c(_somme(membres, 0, indice)):>7}"
-                            f"{_c(_somme(membres, 1, indice)):>7}"
-                            f"{_c(_somme(membres, 2, indice)):>7}"
-                            f"{_c(_somme(membres, 3, indice)):>8}")
+                            + "".join(
+                                _duo_col((_somme(membres, i, 0),
+                                          _somme(membres, i, 1)))
+                                for i in (0, 1, 2)))
                         prefixe = "  "
                     else:
                         prefixe = ""
@@ -827,8 +860,7 @@ class ClickRecap(commands.Cog):
                         etiquette = (prefixe + _nom_propre(lab))[:17]
                         lignes.append(
                             f"{etiquette:<18}"
-                            f"{_c(p[0][indice]):>7}{_c(p[1][indice]):>7}"
-                            f"{_c(p[2][indice]):>7}{_c(p[3][indice]):>8}")
+                            + "".join(_duo_col(p[i]) for i in (0, 1, 2)))
                     paquets_lignes.append(lignes)
 
                 # Remplissage par paquets. Un champ Discord plafonne a 1024
@@ -850,19 +882,17 @@ class ClickRecap(commands.Cog):
                     blocs.append("\n".join(courant))
                 return blocs
 
-            _tables = ([(f"{drapeau} {libelle} clicks per link", 0)]
-                       if pays_marche else [])
-            _tables.append(("🌍 All countries per link", 1))
-            for titre, indice in _tables:
-                _blocs = _tableau(indice)
-                for i, b in enumerate(_blocs):
-                    # L'en-tete est repete partout : un bloc « (cont.) » sans
-                    # titres de colonnes n'est qu'une grille de chiffres.
-                    nom_champ = (titre if i == 0
-                                 else f"{titre} ({i + 1}/{len(_blocs)})")
-                    emb.add_field(name=nom_champ,
-                                  value=f"```\n{entete}\n{b}\n```",
-                                  inline=False)
+            _titre = (f"📋 Per link — {drapeau} {libelle} vs 🌍 global"
+                      if pays_marche else "📋 Per link — 🌍 global")
+            _blocs = _tableau()
+            for i, b in enumerate(_blocs):
+                # L'en-tete est repete partout : un bloc de suite sans titres
+                # de colonnes n'est qu'une grille de chiffres.
+                nom_champ = (_titre if i == 0
+                             else f"{_titre} ({i + 1}/{len(_blocs)})")
+                emb.add_field(name=nom_champ,
+                              value=f"```\n{entete}\n{b}\n```",
+                              inline=False)
         elif ids and not all_none and len(ids) > _MAX_PER_LIEN:
             emb.add_field(
                 name="📋 Per link",
