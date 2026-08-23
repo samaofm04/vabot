@@ -733,7 +733,10 @@ def _load_pending() -> List[Dict[str, Any]]:
 
 def _save_pending(items: List[Dict[str, Any]]):
     _PENDING_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _PENDING_FILE.write_text(_json.dumps(items, indent=2), encoding="utf-8")
+    # Ecriture atomique : une coupure au mauvais moment laissait la file des
+    # pushs en attente tronquee, donc illisible — et elle repartait a vide.
+    import safe_json as _sj
+    _sj.write(_PENDING_FILE, items, indent=2)
 
 
 def _add_pending_delete(item_id: int, scheduled_date_iso: str,

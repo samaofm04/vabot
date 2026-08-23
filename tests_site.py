@@ -169,7 +169,18 @@ print("=" * 70)
 print("4) Aucune écriture JSON non atomique ne subsiste")
 print("=" * 70)
 import re
-BAD = re.compile(r"\.write_text\(\s*json\.dumps")
+# Les ALIAS comptent autant que le nom. Le controle ne cherchait que
+# « json.dumps » ; trois ecritures sur les brouillons de montage passaient
+# « _js.dumps » et sont donc restees non atomiques depuis toujours, sous un
+# test qui se disait vert. Un module importe « as _js » ou « as _json » ecrit
+# exactement le meme JSON tronque apres une coupure.
+BAD = re.compile(r"(?<![\w.])(\w+)\.write_text\(\s*"
+                 r"(?:_?js|_?json|_json_mod|json)\.dumps")
+# Un nom de variable qui parle d un fichier TEMPORAIRE designe le motif
+# atomique lui-meme : ecrire dans .tmp puis remplacer. Le controle accusait
+# signup_public.py, qui fait exactement ca — un faux positif que personne
+# n avait leve, et qui a fini par rendre l echec normal a force d etre la.
+_TEMPORAIRE = ("tmp", "temp", "part")
 restants = []
 for f in sorted(pathlib.Path(".").rglob("*.py")):
     parts = set(f.parts)
@@ -179,6 +190,8 @@ for f in sorted(pathlib.Path(".").rglob("*.py")):
         continue          # jailbreak.py a son propre mécanisme (backups + verrou)
     txt = f.read_text(encoding="utf-8", errors="ignore")
     for m in BAD.finditer(txt):
+        if any(t in m.group(1).lower() for t in _TEMPORAIRE):
+            continue
         restants.append(f"{f.as_posix()}:{txt[:m.start()].count(chr(10)) + 1}")
 check("plus aucune écriture non atomique", not restants, ", ".join(restants[:4]))
 print(f"     (GeeLark exclu à ta demande)")

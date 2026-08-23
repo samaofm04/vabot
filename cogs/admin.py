@@ -574,7 +574,10 @@ class Admin(commands.Cog):
                         _d = {}
                 _d[va_handle.strip().lstrip("@").lower()] = (res.get("shortcode") or "").lower()
                 _cf.parent.mkdir(parents=True, exist_ok=True)
-                _cf.write_text(_json.dumps(_d, ensure_ascii=False), encoding="utf-8")
+                # Ecriture atomique : une coupure ici laissait un JSON tronque,
+                # et c est la correspondance VA -> shortcode GMS qui se perdait.
+                import safe_json as _sj
+                _sj.write(_cf, _d, indent=None)
             except Exception:
                 pass
         emb = discord.Embed(

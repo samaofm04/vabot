@@ -43449,7 +43449,10 @@ def create_app():
             except Exception:
                 pass
         try:
-            p.write_text(_js.dumps(draft), encoding="utf-8")
+            # Ecriture ATOMIQUE : un redemarrage pendant l ecriture
+            # laissait un brouillon tronque, et le reel perdait son point
+            # de coupe et ses captions sans un message.
+            safe_json.write(p, draft, indent=None)
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
         return jsonify({"ok": True})
@@ -44142,7 +44145,10 @@ def create_app():
         if _cut > 0:
             draft["cut_at"] = round(_cut, 3)
         try:
-            p.write_text(_js.dumps(draft), encoding="utf-8")
+            # Ecriture ATOMIQUE : un redemarrage pendant l ecriture
+            # laissait un brouillon tronque, et le reel perdait son point
+            # de coupe et ses captions sans un message.
+            safe_json.write(p, draft, indent=None)
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
         return jsonify({"ok": True})
@@ -44163,7 +44169,7 @@ def create_app():
         try:
             d = _js.loads(p.read_text(encoding="utf-8"))
             if isinstance(d, dict) and d.pop("va_ready", None) is not None:
-                p.write_text(_js.dumps(d), encoding="utf-8")
+                safe_json.write(p, d, indent=None)
         except Exception:
             pass
         return jsonify({"ok": True})
