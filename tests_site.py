@@ -3400,7 +3400,18 @@ try:
         _cls = _reTh.match(r"\.([a-z][a-z0-9_-]*)", _sel).group(1)
         if _cls in _EXEMPTES:
             continue
-        if _reTh.search(r"body\.light[^{]*\." + _reTh.escape(_cls) + r"\b", _srcTh):
+        # Une regle claire qui ne pose qu un FOND ne repare pas une couleur de
+        # texte : c est ce qui laissait .gd-mcard invisible alors que le test
+        # le comptait comme couvert. On exige une regle claire qui pose bien
+        # une couleur de TEXTE sur cette classe.
+        _couvert = False
+        for _lm in _reTh.finditer(r"(body\.light[^{}]*)\{([^}]*)\}", _srcTh):
+            if not _reTh.search(r"\." + _reTh.escape(_cls) + r"\b", _lm.group(1)):
+                continue
+            if _reTh.search(r"(?<!-)color:", _lm.group(2)):
+                _couvert = True
+                break
+        if _couvert:
             continue
         _classesKO[_cls] = "%s (%s sur blanc)" % (_h, _contrasteBlancTh(_h))
     check("theme clair : aucune classe coloree sans contrepartie claire",

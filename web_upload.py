@@ -1256,6 +1256,20 @@ body.light .gd-clicks{color:#15803d}
 body.light .gd-sel{background:#fff!important;border-color:#e5e7eb!important;color:#111827}
 body.light .gd-ctry,body.light .gd-leg,body.light .gd-mpills{
   background:#f9fafb!important;border-color:#e5e7eb!important;color:#374151}
+/* La couleur est posee sur les ENFANTS (.gd-mpills button, .gd-mcard),
+   pas sur le conteneur : une regle sur le conteneur seul se fait battre
+   par la leur, plus specifique. */
+body.light .gd-mpills button,body.light .gd-mcard{color:#374151}
+/* Les bulles d aide et les cartes de graphique ont bien recu leur fond
+   clair, mais la couleur vit sur leurs ENFANTS (.gd-tip .d, .gd-chart h4)
+   qui sont restes en blanc — invisibles une fois la bulle repeinte. */
+body.light .gd-tip .d,body.light .gd-tip .r b,body.light .gd-chart h4{color:#111827}
+body.light .gd-tip .r,body.light .av-row{color:#374151}
+body.light .ja-tip .d,body.light .ja-tip .r{color:#4b5563}
+/* Survol de pastille : la bordure passe au violet et le texte au blanc.
+   Sur une pastille devenue blanche, le libelle disparaissait au survol.
+   L etat .active, lui, pose son propre fond violet : son blanc est bon. */
+body.light .vlm-pill:hover{color:#7e22ce}
 body.light .gd-seg button,body.light .ja-seg button,body.light .av-seg button{color:#4b5563}
 body.light .gd-seg button.on,body.light .ja-seg button.on,body.light .av-seg button.on{color:#fff}
 body.light .gd-tbl [style*="color:#fbbf24"]{color:#a16207!important}
