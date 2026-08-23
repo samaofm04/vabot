@@ -1448,6 +1448,20 @@ body.light .ig3-trk-val,body.light .ig3-trk-refresh:hover,body.light .mpl-add-sl
 body.light .mpl-cr-saved-hint,body.light .reel-slot-status.ok,
 body.light .vlm-gen{color:#15803d}
 body.light .nxm-row{color:#374151}
+/* Inspecteur de l editeur (Montage ET Caption, meme .ce-app) : le bloc groupe
+   plus bas repeint .nxm-tg / .nxm-preset / .nxm-add en #f2f2f7 !important, ce
+   qui ecrase AUSSI l etat .on bleu -- plus aucun moyen de voir quel reglage est
+   actif, et B / centrer (actifs par defaut) etaient blanc sur #f2f2f7. */
+body.light .ce-app .nxm-tg{color:#374151!important}
+body.light .ce-app .nxm-tg:hover{background:#e5e7eb!important;color:#111827!important}
+body.light .ce-app .nxm-tg.on{background:#3467FF!important;border-color:#3467FF!important;color:#fff!important}
+body.light .ce-app .nxm-preset.on{border-color:#3467FF!important;box-shadow:0 0 0 1px #3467FF}
+/* #6b7280 et pas #d1d5db : la premiere pastille est un carre BLANC, un filet
+   a 1,47:1 la ferait disparaitre sur le panneau blanc. Ici 4,83:1. */
+body.light .ce-app .nxm-sw{border-color:#6b7280!important}
+body.light .ce-app .nxm-sw.on{border-color:#3467FF!important}
+body.light .ce-app .nxm-add{color:#3467FF!important;border-color:#3467FF!important}
+body.light .ce-app .nxm-lbl,body.light .ce-app .nxm-plabel{color:#4b5563!important}
 body.light .vt-mm{color:#4b5563}
 /* EDITEUR DE MONTAGE — il avait recu ses regles claires pour les SURFACES
    (.ce-app, .ce-title, .ce-lib, .ce-center, .ce-right passent au blanc)
@@ -1471,6 +1485,39 @@ body.light .ce-subtab.on{background:#f3f4f6;color:#111827}
 body.light .ce-libtabs,body.light .ce-rtabs,body.light .ce-chead,
 body.light .ce-title{border-color:#e5e7eb}
 body.light .ce-ctrl{border-top-color:#e5e7eb}
+/* Suite du meme oubli : le bloc groupe plus bas repeint les SURFACES
+   (.ce-btn/.ce-card/.ce-menu/.ce-play/.ce-tlic -> #f2f2f7 !important) mais rien
+   ne repeignait ce qui est POSE dessus. Les libelles gardaient #d4d4dc et #fff :
+   toute la barre du Montage, le Menu et les cartes de gauche etaient du blanc
+   sur du blanc casse (1,1 a 1,3 de contraste pour 4,5 exige).
+   Le prefixe .ce-app est obligatoire : sans ce 3e niveau de specificite, ces
+   regles feraient jeu EGAL avec le bloc groupe plus bas, qui gagnerait par
+   ordre d apparition. */
+body.light .ce-app .ce-btn,body.light .ce-app .ce-menu,body.light .ce-app .ce-card{color:#374151!important}
+body.light .ce-app .ce-btn:hover,body.light .ce-app .ce-menu:hover{background:#e5e7eb!important;color:#111827!important}
+body.light .ce-app .ce-card{border-color:#c7c9d1!important}
+body.light .ce-app .ce-card:hover{border-color:#3467FF!important;color:#3467FF!important}
+body.light .ce-app .ce-btn.accent,body.light .ce-app .ce-btn.ce-btn-ai,body.light .ce-app .ce-card.ce-card-ai{
+  background:#3467FF!important;border-color:#3467FF!important;color:#fff!important}
+body.light .ce-app .ce-btn.accent:hover,body.light .ce-app .ce-btn.ce-btn-ai:hover,body.light .ce-app .ce-card.ce-card-ai:hover{background:#2b57d9!important}
+body.light .ce-app .ce-tlic{color:#4b5563!important}
+body.light .ce-app .ce-tlic:hover{background:#e5e7eb!important;color:#111827!important}
+/* Le triangle lecture est un SVG a fill blanc fige (dans le HTML ET dans
+   NXM_PLAY_SVG) : sur #f2f2f7 il disparait, alors que l icone pause (fill noir)
+   reste visible. On garde donc un fond fonce sous l icone blanche et le fond
+   blanc sous l icone noire.
+   Le survol est scinde en :not(.playing) / .playing : a specificite egale
+   .playing passait apres :hover et mangeait tout retour visuel au survol. */
+body.light .ce-app .ce-play{background:#3467FF!important}
+body.light .ce-app .ce-play:not(.playing):hover{background:#2b57d9!important}
+body.light .ce-app .ce-play.playing{background:#fff!important;box-shadow:inset 0 0 0 1px #d1d5db}
+body.light .ce-app .ce-play.playing:hover{background:#f0f0f0!important}
+/* Liste des captions (#cap-ed-list, dans le meme .ce-app) : le bloc groupe lui
+   donne un fond blanc mais aucune couleur -- le libelle restait a #c4c4cc sur
+   du blanc (1,9:1) et la caption SELECTIONNEE gardait color:#fff sur ce meme
+   blanc, donc invisible. */
+body.light .ce-app .cap-ed-li{color:#374151!important}
+body.light .ce-app .cap-ed-li.on{background:#e8efff!important;border-color:#3467FF!important;color:#1c1c1e!important}
 body.light .sidebar .section-label{color:#9ca3af}
 body.light .sidebar .sep{background:#e5e7eb}
 body.light .sidebar .logout-btn{color:#6b7280}
@@ -3989,8 +4036,26 @@ function scanTexteAfficher(rap){
          + '</div>';
     });
     h += '</div>';
-    h += '<div style="margin-top:10px;color:#9a9aa6">Aucune suppression faite. '
-       + 'Coche celles que tu veux jeter, puis utilise la suppression habituelle.</div>';
+    // UN bouton pour toutes : le but est qu elles soient eteintes, pas de les
+    // pointer une par une. Rien n est supprime — le site n efface jamais un
+    // media, et le bouton inverse est juste a cote.
+    var reste = rap.a_eteindre || 0;
+    h += '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">';
+    if(reste){
+      h += '<button type="button" data-scanact="off" class="btn"'
+         + ' style="width:auto;margin:0;padding:9px 16px">'
+         + 'Désactiver ces ' + reste + ' vidéo(s)</button>';
+    }
+    if(rap.desactivees){
+      h += '<button type="button" data-scanact="on"'
+         + ' style="width:auto;margin:0;padding:9px 16px;background:none;'
+         + 'border:1px solid #3a3a44;color:#c4c4cc;border-radius:8px;'
+         + 'cursor:pointer;font-family:inherit;font-size:13px">'
+         + 'Remettre les ' + rap.desactivees + ' désactivée(s)</button>';
+    }
+    h += '<span style="color:#9a9aa6">Rien n’est supprimé : une vidéo '
+       + 'désactivée reste sur le disque, elle cesse simplement de partir '
+       + 'chez les VA.</span></div>';
   }
   if((rap.non_conclu || []).length){
     // Jamais rangées avec les « sans texte » : on n'a pas su lire, ce n'est
@@ -4000,6 +4065,35 @@ function scanTexteAfficher(rap){
        + 'elles ne sont proposées à rien.</div>';
   }
   boite.innerHTML = h;
+  // data-attributs + addEventListener : ce JS vit dans une chaine Python, et
+  // une apostrophe echappee a la main y tuerait le script de la page entiere,
+  // en silence.
+  boite.querySelectorAll('[data-scanact]').forEach(function(b){
+    b.addEventListener('click', async function(){
+      var remettre = b.getAttribute('data-scanact') === 'on';
+      b.disabled = true;
+      b.textContent = remettre ? 'Remise en service…' : 'Désactivation…';
+      try{
+        var fd = new FormData();
+        fd.append('identity', rap.identite || '');
+        if(remettre) fd.append('remettre', '1');
+        var r = await fetch('/cloud/desactiver_texte', {method:'POST', body:fd});
+        var j = await r.json();
+        if(!j || !j.ok){
+          scanTexteMaj((j && j.error) || 'échec', '#e0576b');
+          b.disabled = false;
+          return;
+        }
+        scanTexteMaj((remettre ? 'Remises en service : ' : 'Désactivées : ')
+                     + j.faits + (j.rates ? (' — ' + j.rates + ' en échec') : ''),
+                     j.rates ? '#e0a33a' : '#43b581');
+        scanTexteAfficher(j.rapport);
+      }catch(e){
+        scanTexteMaj('Erreur réseau : ' + e, '#e0576b');
+        b.disabled = false;
+      }
+    });
+  });
 }
 // Lightbox style Infloww : navigation prev/next + compteur + édition caption/desc
 var lbGallery = [];   // {url, isVideo, name, fileId}
@@ -18923,9 +19017,16 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
 
     # Construire les URLs de tri (préservant la sélection d'identité courante)
     def _sort_url(value):
+        # Le tri ne doit pas effacer les autres filtres : _type_url les
+        # reconduit deja, celui-ci les jetait — choisir « Croissant » apres
+        # « Aller a la date » ramenait tout le dossier, sans un mot.
         params = [f"tab={tab_name}", f"{subdir_key}={selected}"]
         if value != "recent":
             params.append(f"cloud_{subdir}_sort={value}")
+        if filter_date:
+            params.append(f"cloud_{subdir}_date={filter_date}")
+        if type_filter and type_filter != "all":
+            params.append(f"cloud_{subdir}_type={type_filter}")
         return "?" + "&".join(params)
 
     # Compteur fichiers affichés (après filtre)
@@ -18944,9 +19045,13 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         "<div class='vault-sort-menu' onclick='event.stopPropagation()'>"
         f"<a href='{_sort_url('all')}' data-no-loader='1' class='vault-sort-item {('vault-sort-active' if sort_mode == 'all' else '')}'>"
         "<span class='vault-radio'></span>Tout</a>"
+        # Choisir une date rejouait le formulaire SANS le tri ni la pastille
+        # Photo/Video : ils repartaient a zero en silence. On les reconduit.
         f"<form method='GET' class='vault-sort-form'>"
         f"<input type='hidden' name='tab' value='{tab_name}'>"
         f"<input type='hidden' name='{subdir_key}' value='{selected}'>"
+        f"<input type='hidden' name='cloud_{subdir}_sort' value='{sort_mode if sort_mode in ('all', 'recent', 'asc', 'desc') else 'recent'}'>"
+        f"<input type='hidden' name='cloud_{subdir}_type' value='{type_filter if type_filter in ('all', 'photo', 'video') else 'all'}'>"
         "<label class='vault-sort-item' style='cursor:default'>"
         "<span class='vault-radio'></span>Aller à la date :</label>"
         f"<input type='date' name='cloud_{subdir}_date' value='{filter_date}' onchange='this.form.submit()' "
@@ -19479,14 +19584,17 @@ def scan_texte_etat() -> dict:
         return dict(_SCAN_TEXTE)
 
 
-def _brutes_d_identite(identity: str):
-    """Les rushs bruts d'une identite, tries par nom."""
-    d = IDENTITIES_DIR / (identity or "").strip().lower() / "brutes"
-    if not d.exists():
-        return []
-    return sorted(p for p in d.iterdir()
-                  if p.is_file() and p.suffix.lower() in VIDEO_EXTS
-                  and ".example" not in p.name)
+def _brutes_d_identite(identity: str, inclure_desactivees: bool = True):
+    """Les rushs bruts d'une identite, tries par nom.
+
+    Par defaut on inclut les DESACTIVEES : les seuls appelants ici sont
+    l examen de texte et son rapport, qui doivent justement les voir pour
+    pouvoir les eteindre et les compter. Ce qui part chez un VA, lui, passe
+    par brutes_off.lister() sans cet argument.
+    """
+    return _off.lister(
+        IDENTITIES_DIR / (identity or "").strip().lower() / "brutes",
+        extensions=VIDEO_EXTS, inclure_desactivees=inclure_desactivees)
 
 
 def _lancer_scan_texte(identity: str, refaire: bool = False) -> tuple:
@@ -19544,13 +19652,22 @@ def _lancer_scan_texte(identity: str, refaire: bool = False) -> tuple:
 def rapport_texte_brutes(identity: str) -> dict:
     """Ce que l'examen a trouve, pret a etre affiche. Ne supprime rien."""
     avec, sans, inconnu = [], 0, []
+    desactivees = a_eteindre = 0
     for p in _brutes_d_identite(identity):
+        if brute_desactivee(p):
+            desactivees += 1
         d = _textecheck_lire(p)
         if not d.get("le"):
             continue
         if d.get("texte") is True:
+            # Ce qui reste a eteindre : c est ce nombre qui doit apparaitre sur
+            # le bouton, pas le total avec texte — sinon il propose de
+            # desactiver ce qui l est deja.
+            if not brute_desactivee(p):
+                a_eteindre += 1
             avec.append({"fichier": p.name,
                          "extraits": d.get("extraits") or [],
+                         "desactivee": brute_desactivee(p),
                          "le": d.get("le")})
         elif d.get("texte") is False:
             sans += 1
@@ -19562,6 +19679,7 @@ def rapport_texte_brutes(identity: str) -> dict:
                             "erreur": d.get("erreur") or "non conclu"})
     return {"identite": identity, "avec_texte": avec, "sans_texte": sans,
             "non_conclu": inconnu,
+            "desactivees": desactivees, "a_eteindre": a_eteindre,
             "total_examine": len(avec) + sans + len(inconnu),
             "total_brutes": len(_brutes_d_identite(identity))}
 
@@ -19825,13 +19943,11 @@ def _render_cloud_captions_html() -> str:
 
     block = _clean_caption_block(lib.get(selected))
 
-    # Brutes de l'identité : fond de l'éditeur + matière première du tirage
-    bdir = IDENTITIES_DIR / selected / "brutes"
-    brutes = []
-    if bdir.exists():
-        brutes = sorted(p.name for p in bdir.iterdir()
-                        if p.is_file() and p.suffix.lower() in VIDEO_EXTS
-                        and ".example" not in p.name)
+    # Brutes de l'identité : fond de l'éditeur + matière première du tirage.
+    # Les DESACTIVEES sont ecartees : ce sont celles qui portent deja une
+    # caption incrustee, en poser une seconde par-dessus n aurait aucun sens.
+    brutes = [p.name for p in _off.lister(IDENTITIES_DIR / selected / "brutes",
+                                          extensions=VIDEO_EXTS)]
 
     # ---- Sidebar identités (même vault que brutes/templates) ----
     def _vitem(ident):
@@ -40389,6 +40505,25 @@ def _caption_size_for_width(text: str, target_w_px: float,
 #: page couterait cher pour rien.
 SUFFIXE_TEXTECHECK = ".textecheck.json"
 
+#: Une brute DESACTIVEE reste sur le disque mais ne part plus jamais chez un
+#: VA. Le site n'efface jamais un media (cf. CLAUDE.md) : desactiver est la
+#: bonne reponse a « cette video porte deja une caption incrustee », parce
+#: qu'elle est reversible et qu'on garde de quoi comprendre plus tard.
+#: Le voisin porte la CAUSE et la DATE : sans elles, on retrouve six mois
+#: apres une video eteinte sans savoir par qui ni pourquoi.
+#: Les primitives vivent dans brutes_off, que le BOT importe aussi : le filtre
+#: etait deja recopie a trois endroits, une quatrieme regle n allait pas
+#: arranger les choses. Ces alias gardent les appels du site lisibles.
+import brutes_off as _off
+
+SUFFIXE_DESACTIVE = _off.SUFFIXE
+CAUSE_TEXTE = _off.CAUSE_TEXTE
+lire_desactive = _off.lire
+brute_desactivee = _off.est_desactivee
+desactiver_brute = _off.desactiver
+reactiver_brute = _off.reactiver
+sans_desactivees = _off.sans_desactivees
+
 _PROMPT_TEXTE_BRUTE = (
     "Regarde ces images extraites d'une même vidéo verticale.\n\n"
     "UNE SEULE QUESTION : la vidéo porte-t-elle du TEXTE INCRUSTÉ, "
@@ -44232,6 +44367,51 @@ def create_app():
             out["rapport"] = rapport_texte_brutes(identity)
         return jsonify(out)
 
+    @app.route("/cloud/desactiver_texte", methods=["POST"])
+    def cloud_desactiver_texte():
+        """Met de côté, EN UN CLIC, toutes les brutes où l'examen a vu du texte.
+
+        On ne supprime pas : le site n'efface jamais un média. Une brute
+        désactivée reste sur le disque, elle cesse simplement de partir chez
+        les VA — et le bouton inverse la remet en service.
+
+        Les vidéos « non conclues » sont volontairement laissées de côté :
+        éteindre une vidéo qu'on n'a pas su lire serait décider à la place de
+        quelqu'un qui n'a rien décidé.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        identity = (request.form.get("identity") or "").strip().lower()
+        if not identity or identity not in _list_identities():
+            return jsonify({"ok": False, "error": "identité invalide"})
+        remettre = (request.form.get("remettre") or "") in ("1", "true", "on")
+        faits, rates = 0, 0
+        for p in _brutes_d_identite(identity):
+            if remettre:
+                # On ne remet en service QUE ce que cet examen avait éteint :
+                # une brute désactivée à la main pour une autre raison n'a
+                # aucune raison de revenir avec ce bouton.
+                if lire_desactive(p).get("cause") != CAUSE_TEXTE:
+                    continue
+                if reactiver_brute(p):
+                    faits += 1
+                else:
+                    rates += 1
+                continue
+            if _textecheck_lire(p).get("texte") is not True:
+                continue
+            if brute_desactivee(p):
+                continue
+            if desactiver_brute(p, CAUSE_TEXTE):
+                faits += 1
+            else:
+                rates += 1
+        _invalidate_all_ttl_cache()
+        return jsonify({"ok": True, "faits": faits, "rates": rates,
+                        "remis": bool(remettre),
+                        "rapport": rapport_texte_brutes(identity)})
+
     @app.route("/cloud/banger_purge", methods=["POST"])
     def cloud_banger_purge():
         """Vide le salon banger-{identity} : supprime tous les messages du bot +
@@ -44751,12 +44931,10 @@ def create_app():
                     if name:
                         pp = f"/cloud/thumb/{ident}/{sub}/{_url_nom(name)}"
                         break
-            nb = 0
-            bdir = IDENTITIES_DIR / ident / "brutes"
-            if bdir.exists():
-                nb = sum(1 for p in bdir.iterdir()
-                         if p.is_file() and p.suffix.lower() in VIDEO_EXTS
-                         and ".example" not in p.name)
+            # Un compteur de stock DISPONIBLE : les desactivees n en font pas
+            # partie, sinon il annonce une matiere qui ne partira jamais.
+            nb = len(_off.lister(IDENTITIES_DIR / ident / "brutes",
+                                 extensions=VIDEO_EXTS))
             out.append({"name": ident, "pp": pp, "brutes": nb})
         return jsonify({"ok": True, "identities": out})
 
@@ -45804,12 +45982,10 @@ def create_app():
         pool = [c for c in block["items"] if c.get("enabled", True)]
         if not pool:
             return jsonify({"ok": False, "error": "aucune caption active pour cette identité"})
-        bdir = IDENTITIES_DIR / ident / "brutes"
-        brutes = []
-        if bdir.exists():
-            brutes = [p for p in bdir.iterdir()
-                      if p.is_file() and p.suffix.lower() in VIDEO_EXTS
-                      and ".example" not in p.name]
+        # Poser une caption sur une brute qui en porte deja une n aurait aucun
+        # sens : c est le cas meme que la desactivation vise.
+        brutes = _off.lister(IDENTITIES_DIR / ident / "brutes",
+                             extensions=VIDEO_EXTS)
         if not brutes:
             return jsonify({"ok": False, "error": "aucune vidéo brute pour cette identité"})
         import random as _rnd

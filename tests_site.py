@@ -3394,6 +3394,121 @@ except Exception as _eWm:
 
 print()
 print("=" * 70)
+print("BRUTES DESACTIVEES (caption deja incrustee)")
+print("=" * 70)
+try:
+    import re as _reOf
+    import shutil as _shOf
+    import pathlib as _plOf
+    import brutes_off as _offOf
+    import web_upload as _wOf
+
+    _identOf = "_tstoff"
+    _dirOf = _wOf.IDENTITIES_DIR / _identOf / "brutes"
+    try:
+        _shOf.rmtree(_wOf.IDENTITIES_DIR / _identOf, ignore_errors=True)
+        _dirOf.mkdir(parents=True, exist_ok=True)
+        for _n in ("a.mp4", "b.mp4", "c.mp4", "d.example.mp4", "notes.txt"):
+            (_dirOf / _n).write_bytes(b"\x00" * 64)
+
+        _tousOf = _offOf.lister(_dirOf)
+        check("desactivees : les .example et les non-videos sont ecartes",
+              [p.name for p in _tousOf] == ["a.mp4", "b.mp4", "c.mp4"],
+              "obtenu : %s" % [p.name for p in _tousOf])
+
+        # Desactiver ne touche PAS le fichier video : le site n efface jamais
+        # un media, et on doit pouvoir revenir en arriere.
+        _aOf = _dirOf / "a.mp4"
+        _tailleAvant = _aOf.stat().st_size
+        check("desactivees : la mise de cote reussit",
+              _offOf.desactiver(_aOf, _offOf.CAUSE_TEXTE))
+        check("desactivees : la video elle-meme n est pas touchee",
+              _aOf.exists() and _aOf.stat().st_size == _tailleAvant)
+        _voisinOf = _offOf.lire(_aOf)
+        check("desactivees : le voisin garde la CAUSE et la DATE",
+              _voisinOf.get("cause") == _offOf.CAUSE_TEXTE and _voisinOf.get("le"),
+              "voisin : %r" % _voisinOf)
+
+        check("desactivees : elle disparait de ce qui part chez un VA",
+              [p.name for p in _offOf.lister(_dirOf)] == ["b.mp4", "c.mp4"])
+        # Les vues du proprietaire doivent au contraire les MONTRER.
+        check("desactivees : mais reste visible pour le proprietaire",
+              len(_offOf.lister(_dirOf, inclure_desactivees=True)) == 3)
+        check("desactivees : le filtre de liste deja constituee marche aussi",
+              [p.name for p in _offOf.sans_desactivees(_tousOf)] == ["b.mp4", "c.mp4"])
+
+        check("desactivees : la remise en service fonctionne",
+              _offOf.reactiver(_aOf) and len(_offOf.lister(_dirOf)) == 3)
+
+        # LE point delicat : une video qu on n a pas su lire ne doit JAMAIS
+        # etre eteinte. Decider a la place de quelqu un qui n a rien decide
+        # est exactement ce qu on veut eviter.
+        _wOf._textecheck_ecrire(_dirOf / "a.mp4", True, ["accroche"], "")
+        _wOf._textecheck_ecrire(_dirOf / "b.mp4", None, [], "illisible")
+        _wOf._textecheck_ecrire(_dirOf / "c.mp4", False, [], "")
+
+        _appOf = _wOf.create_app()
+        _appOf.config["TESTING"] = True
+        _svOf = _wOf._load_web_users
+        _wOf._load_web_users = lambda: {"admin": {"role": "owner", "password": "x"}}
+        try:
+            _cOf = _appOf.test_client()
+            with _cOf.session_transaction() as _sOf:
+                _sOf["auth"] = True
+                _sOf["username"] = "admin"
+                _sOf["role"] = "owner"
+            _rOf = _cOf.post("/cloud/desactiver_texte", data={"identity": _identOf})
+            _jOf = _rOf.get_json() or {}
+            check("desactivees : la route eteint bien les brutes avec texte",
+                  _jOf.get("ok") and _jOf.get("faits") == 1,
+                  "reponse : %r" % {k: _jOf.get(k) for k in ("ok", "faits", "rates")})
+            check("desactivees : la video AVEC texte est eteinte",
+                  _offOf.est_desactivee(_dirOf / "a.mp4"))
+            check("desactivees : la video NON CONCLUE est laissee allumee",
+                  not _offOf.est_desactivee(_dirOf / "b.mp4"),
+                  "une video illisible ne doit jamais etre eteinte d office")
+            check("desactivees : la video SANS texte est laissee allumee",
+                  not _offOf.est_desactivee(_dirOf / "c.mp4"))
+
+            # Un second clic ne doit rien refaire : le bouton annonce le
+            # nombre RESTANT, pas le total.
+            _r2 = _cOf.post("/cloud/desactiver_texte", data={"identity": _identOf})
+            check("desactivees : un second clic ne compte pas deux fois",
+                  (_r2.get_json() or {}).get("faits") == 0)
+
+            _r3 = _cOf.post("/cloud/desactiver_texte",
+                            data={"identity": _identOf, "remettre": "1"})
+            check("desactivees : le bouton inverse les rallume",
+                  (_r3.get_json() or {}).get("faits") == 1
+                  and not _offOf.est_desactivee(_dirOf / "a.mp4"))
+
+            # Une brute eteinte a la MAIN pour une autre raison ne doit pas
+            # revenir avec ce bouton-la.
+            _offOf.desactiver(_dirOf / "c.mp4", "raison a moi")
+            _cOf.post("/cloud/desactiver_texte",
+                      data={"identity": _identOf, "remettre": "1"})
+            check("desactivees : le bouton inverse ne touche que ce qu il a eteint",
+                  _offOf.est_desactivee(_dirOf / "c.mp4"))
+        finally:
+            _wOf._load_web_users = _svOf
+    finally:
+        _shOf.rmtree(_wOf.IDENTITIES_DIR / _identOf, ignore_errors=True)
+
+    # Structure : tout ce qui sert un VA doit passer par la porte commune.
+    # Le filtre etait recopie a trois endroits ; en oublier un se voit ici.
+    _srcBot = _plOf.Path("cogs/user.py").read_text(encoding="utf-8")
+    check("desactivees : le bot passe par la porte commune",
+          _srcBot.count("_off.lister(") >= 2 and "_off.est_desactivee(" in _srcBot,
+          "un chemin Discord liste encore le dossier lui-meme")
+    _srcSite = _plOf.Path("web_upload.py").read_text(encoding="utf-8")
+    check("desactivees : le site aussi",
+          _srcSite.count("_off.lister(") >= 3,
+          "%d appel(s)" % _srcSite.count("_off.lister("))
+except Exception as _eOf:
+    check("desactivees : testable", False, repr(_eOf)[:200])
+
+print()
+print("=" * 70)
 print("FILTRE DE MARCHE : FR et US melanges pendant 6 secondes")
 print("=" * 70)
 try:

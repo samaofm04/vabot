@@ -1120,11 +1120,16 @@ def fav_brutes_for(identity, limit=15):
             fn = k[len(prefix):]
             if fn and fn not in names:
                 names.append(fn)
+    # Ce chemin lit un REGISTRE, pas le dossier : il ne passe donc pas par
+    # brutes_off.lister et doit ecarter les desactivees lui-meme. Une brute
+    # marquee favorite AVANT d etre eteinte serait sinon la seule a passer au
+    # travers — et c est justement celle qu on envoie le plus souvent.
+    import brutes_off as _off
     brutes_dir = IDENTITIES_DIR / identity / "brutes"
     out = []
     for fn in names:
         p = brutes_dir / fn
-        if p.exists() and p.is_file():
+        if p.exists() and p.is_file() and not _off.est_desactivee(p):
             out.append(p)
             if limit and len(out) >= limit:
                 break
@@ -2756,12 +2761,12 @@ class UserCog(commands.Cog):
             await interaction.response.send_message(
                 "Tu n'as pas d'identité assignée. Demande à un admin.", ephemeral=True)
             return
+        # brutes_off.lister ecarte aussi les brutes DESACTIVEES (celles qui
+        # portent deja une caption incrustee). Le filtre etait recopie ici et
+        # a deux autres endroits : une seule porte d entree, desormais.
+        import brutes_off as _off
         bdir = IDENTITIES_DIR / identity / "brutes"
-        vids = []
-        if bdir.exists():
-            vids = [p for p in bdir.iterdir()
-                    if p.is_file() and p.suffix.lower() in VIDEO_EXTS
-                    and ".example" not in p.name]
+        vids = _off.lister(bdir, extensions=VIDEO_EXTS)
         if not vids:
             await interaction.response.send_message(
                 f"Aucune **vidéo brute** pour `{identity}`.\n"
@@ -2811,12 +2816,11 @@ class UserCog(commands.Cog):
                 f"Aucune **caption** active pour `{identity}`.\n"
                 "_(Un admin les ajoute sur le site, onglet **Caption**.)_", ephemeral=True)
             return
+        # Meme porte d entree que la commande « Video brut » : les brutes
+        # desactivees ne doivent pas non plus servir de support a une caption.
+        import brutes_off as _off
         bdir = IDENTITIES_DIR / identity / "brutes"
-        brutes = []
-        if bdir.exists():
-            brutes = [p for p in bdir.iterdir()
-                      if p.is_file() and p.suffix.lower() in VIDEO_EXTS
-                      and ".example" not in p.name]
+        brutes = _off.lister(bdir, extensions=VIDEO_EXTS)
         if not brutes:
             await interaction.response.send_message(
                 f"Aucune **vidéo brute** pour `{identity}`.\n"
