@@ -1094,7 +1094,7 @@ body.apple .sel-cb:checked + .sel-circle::after,body.apple .txt-sel-cb:checked +
 /* Boutons - hover lift */
 button[type=submit],.btn,.danger-btn{transition:transform .12s ease,background .15s,box-shadow .15s}
 button[type=submit]:hover,.btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(59,130,246,.3)}
-.danger-btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(217,83,79,.3)}
+.danger-btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(239,68,68,.3)}
 
 /* Tooltip sidebar - smooth */
 .sidebar .ico .tip{transition:opacity .12s ease,transform .12s ease;transform:translateY(-50%) translateX(-4px)}
@@ -1148,8 +1148,8 @@ input:focus,select:focus,textarea:focus{outline:0;border-color:#3b82f6;box-shado
 .confirm-box button{padding:10px 22px;border:0;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;margin:0;transition:all .15s}
 .confirm-box .btn-cancel{background:#2a2a2a;color:#fff}
 .confirm-box .btn-cancel:hover{background:#333}
-.confirm-box .btn-confirm{background:#d9534f;color:#fff}
-.confirm-box .btn-confirm:hover{background:#c9302c}
+.confirm-box .btn-confirm{background:#ef4444;color:#fff}
+.confirm-box .btn-confirm:hover{background:#dc2626}
 /* Sidebar large avec groupes pliables + flèches + section labels */
 .sidebar{width:240px;background:#0a0a0a;border-right:1px solid #1a1a1a;padding:18px 0;flex-shrink:0;display:flex;flex-direction:column;gap:2px;/* Le menu reste a l'ecran pendant qu'on fait defiler le contenu : sans ca il
    defilait avec la page (hauteur = son contenu, ~1560px) et disparaissait
@@ -1407,7 +1407,17 @@ body.light .ja-tip .d,body.light .ja-tip .r{color:#4b5563}
 /* Survol de pastille : la bordure passe au violet et le texte au blanc.
    Sur une pastille devenue blanche, le libelle disparaissait au survol.
    L etat .active, lui, pose son propre fond violet : son blanc est bon. */
-body.light .vlm-pill:hover{color:#7e22ce}
+/* Le fond blanc !important de la liste generale ecrase aussi le violet de
+   .vlm-pill.active, dont le color:#fff n a pas de !important et survit : la
+   pastille selectionnee devenait blanche sur blanc dans une modale elle-meme
+   blanche — on ne voyait plus quel model etait filtre. */
+body.light .vlm-pill{color:#3c3c43!important}
+/* !important obligatoire ici : sans lui la regle ci-dessus, elle importante,
+   battrait ce survol malgre sa specificite superieure. */
+body.light .vlm-pill:hover{color:#7e22ce!important}
+/* Place APRES le survol : specificite egale (0,3,1), c est l ordre qui tranche. */
+body.light .vlm-pill.active,body.light .vlm-pill.active:hover{background:#a855f7!important;border-color:#a855f7!important;color:#fff!important}
+body.light .vim-open-btn:hover{background:#ec4899!important;border-color:#ec4899!important;color:#fff!important}
 /* Le theme peint en bleu plein TOUT bouton d action principale
    (button[type=submit], .btn, .badge, les bascules actives...) mais ne
    disait rien de leur texte. Mesure dans la page : 126 elements au fond
@@ -1433,7 +1443,11 @@ body.light .gd-tbl [style*="color:#fbbf24"]{color:#a16207!important}
    .remember-row vit sur l ecran de connexion, qui reste sombre. */
 body.light .flatpickr-months,body.light .flatpickr-current-month,
 body.light .flatpickr-current-month input.cur-year,
-body.light .flatpickr-time input{color:#111827!important}
+/* .cur-month n existe qu avec monthSelectorType:'static' (notre cas) et portait
+   color:#fff!important : nom du mois blanc sur le calendrier repeint en blanc.
+   input.cur-year etait deja couvert, pas lui. */
+body.light .flatpickr-time input,
+body.light .flatpickr-current-month .cur-month{color:#111827!important}
 body.light .flatpickr-day{color:#374151!important}
 body.light .flatpickr-day:hover{background:#f3f4f6!important;color:#111827!important;
   border-color:#e5e7eb!important}
@@ -1554,12 +1568,23 @@ body.light [style*="border:1px solid #2a2a2a"]{border-color:#e5e7eb!important}
 body.light [style*="border:1px solid #1a1a1a"]{border-color:#e5e7eb!important}
 body.light [style*="border:1px solid #333"]{border-color:#d1d5db!important}
 body.light [style*="color:#fff"]:not(.toast):not(button){color:#111827!important}
+/* Exception : les 3 vignettes de PREREGLAGE de l editeur sont des echantillons
+   de rendu, pas du texte d interface. La regle ci-dessus noircissait leur Aa
+   blanc et celle sur [style*="background:#111"] blanchissait la pastille noire :
+   en theme clair les trois boutons devenaient identiques et on ne pouvait plus
+   choisir un preset. 4 classes + 2 types : passe devant les deux. */
+body.light .ce-app .nxm-preset > span[style*="color:#fff"]{color:#fff!important}
+body.light .ce-app .nxm-preset > span[style*="background:#111"]{background:#111!important}
 body.light [style*="color:#aaa"]{color:#6b7280!important}
 body.light [style*="color:#888"]{color:#6b7280!important}
 body.light [style*="color:#666"]{color:#5b6472!important}
 body.light [style*="color:#ccc"]{color:#374151!important}
-body.light [style*="background:rgba(0,0,0,.6)"]{background:rgba(255,255,255,.85)!important}
-body.light [style*="background:rgba(0,0,0,.5)"]{background:rgba(255,255,255,.85)!important}
+/* Le × du detail reel est un BOUTON translucide noir pose sur la video. La
+   regle body.light button[style*="color:#fff"] l exclut deja : son texte RESTE
+   blanc. Lui repeindre le fond en blanc a 85 % donnait un × blanc sur blanc,
+   introuvable. On ne repeint donc que les NON-boutons. */
+body.light [style*="background:rgba(0,0,0,.6)"]:not(button){background:rgba(255,255,255,.85)!important}
+body.light [style*="background:rgba(0,0,0,.5)"]:not(button){background:rgba(255,255,255,.85)!important}
 body.light .sidebar .ico .tip{background:#111827;color:#fff}
 body.light .danger-btn{background:#ef4444!important;color:#fff!important}
 body.light a{color:#3b82f6}
@@ -2242,8 +2267,17 @@ table{width:100%;border-collapse:collapse;margin-top:12px}
 th{padding:10px 8px;text-align:left;background:#252525;font-weight:600;font-size:13px;text-transform:uppercase;color:#aaa}
 td{padding:10px 8px;border-bottom:1px solid #2a2a2a;font-size:14px}
 code{background:#0f0f0f;padding:2px 6px;border-radius:4px;font-size:13px}
-.danger-btn{padding:6px 12px;background:#d9534f;font-size:13px;border:0;color:#fff;border-radius:4px;cursor:pointer;margin:0}
-.danger-btn:hover{background:#c9302c}
+/* button.danger-btn et pas seulement .danger-btn : button[type=submit] (0,1,1),
+   pose 11 lignes plus haut, battait la classe (0,1,0) — les 7 boutons
+   Supprimer du site sont TOUS des type=submit et s affichaient donc en bleu
+   #3b82f6, la couleur de l action principale. */
+.danger-btn,button.danger-btn{padding:6px 12px;background:#ef4444;font-size:13px;border:0;color:#fff;border-radius:4px;cursor:pointer;margin:0}
+.danger-btn:hover,button.danger-btn:hover{background:#dc2626}
+/* Les 4 themes colores repeignent button[type=submit] en !important (obsidian
+   #8b9cf7, violet #a855f7, gold #d9b74a, apple #007aff) : sans ces deux lignes
+   a (0,2,2), un bouton Supprimer y garde la couleur de l accent. */
+body.obsidian button.danger-btn,body.violet button.danger-btn,body.gold button.danger-btn,body.apple button.danger-btn{background:#ef4444!important;border-color:#ef4444!important;color:#fff!important}
+body.obsidian button.danger-btn:hover,body.violet button.danger-btn:hover,body.gold button.danger-btn:hover,body.apple button.danger-btn:hover{background:#dc2626!important}
 .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px}
 .stat{background:#1a1a1a;padding:16px;border-radius:10px;border:1px solid #2a2a2a}
 .stat .v{font-size:28px;font-weight:700;color:#3b82f6}
@@ -3996,7 +4030,10 @@ function scanTextePoll(identity){
       clearInterval(scanTexteTimer); scanTexteTimer = null;
       var btn = document.getElementById('scantexte-btn');
       if(btn) btn.disabled = false;
-      scanTexteMaj('Examen terminé.', '#43b581');
+      // Un examen arrete faute de credit n est PAS un examen termine : le
+      // dire en vert laissait croire que tout avait ete passe en revue.
+      if(e.arret){ scanTexteMaj(e.arret, '#f59e0b'); }
+      else { scanTexteMaj('Examen terminé.', '#43b581'); }
       scanTexteAfficher(j.rapport);
     }catch(err){ /* on retentera au prochain tour */ }
   }, 3000);
@@ -10922,7 +10959,7 @@ document.addEventListener('keydown', function(e){
 <label>Token Discord du bot admin</label>
 <input type="password" name="token" placeholder="MTU... (colle le token Discord)" required>
 <small>⚠️ Le bot va redémarrer automatiquement après sauvegarde (~5 sec)</small>
-<button type="submit" style="background:#d9534f">Sauver et redémarrer</button>
+<button type="submit" style="background:#ef4444">Sauver et redémarrer</button>
 </form>
 </div>
 
@@ -11239,7 +11276,7 @@ document.addEventListener('keydown', function(e){
 <label>Nouveau mot de passe</label>
 <input type="password" name="password" placeholder="Choisis un mot de passe fort" required minlength="6">
 <small>⚠️ Le bot va redémarrer automatiquement après sauvegarde (~5 sec)</small>
-<button type="submit" style="background:#d9534f">Sauver et redémarrer</button>
+<button type="submit" style="background:#ef4444">Sauver et redémarrer</button>
 </form>
 </div>
 
@@ -11413,6 +11450,11 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
 .nxm-lbl{font-size:11.5px;font-weight:600;color:#9a9aa6;min-width:82px}
 .nxm-inp{flex:1;min-width:110px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;padding:8px 11px;font-size:13px;font-family:inherit;outline:none;cursor:pointer}
 .nxm-num{width:56px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;padding:7px 9px;font-size:13px;box-sizing:border-box}
+/* Un champ desactive doit se voir : nxMTimeToggle() passe de/a en disabled tant
+   que le bouton radio range n est pas coche, mais background et color etant
+   poses en dur, le grisage natif du navigateur ne s appliquait plus -- les deux
+   champs paraissaient saisissables et ne repondaient pas au clic. */
+.nxm-num:disabled,.nxm-inp:disabled,.nxm-ta:disabled{opacity:.42;cursor:not-allowed}
 .nxm-tlbl{display:inline-flex;align-items:center;gap:5px;cursor:pointer}
 .nxm-hint{font-size:11px;color:#75757f;margin-top:11px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;line-height:1.6}
 .nxm-chip{background:#2a2a30;border:1px solid #35353c;border-radius:6px;padding:5px 11px;font-size:11.5px;cursor:pointer}
@@ -11427,7 +11469,7 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
 .nxm-sw.on{border-color:#3467FF}
 .nxm-slider{flex:1;accent-color:#3467FF;cursor:pointer}
 .nxm-add{margin-top:15px;width:100%;background:#2a2a30;border:1px solid #3467FF;color:#3467FF;border-radius:8px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer}
-.nxm-add:hover{background:rgba(0,217,192,.12)}
+.nxm-add:hover{background:#35353c}
 .nxm-vf{display:flex;flex-wrap:wrap;gap:7px}
 .nxm-foot{display:flex;gap:14px;align-items:center;margin-top:12px}
 .nxm-gen{padding:11px 26px;background:linear-gradient(135deg,#3467FF,#2b57d9);border:0;color:#fff;border-radius:9px;font-weight:800;cursor:pointer;font-size:14px}
@@ -19575,7 +19617,7 @@ def analyses_etat() -> dict:
 # C'est sa consigne, et c'est aussi la prudence : un faux positif efface une
 # video utilisable.
 _SCAN_TEXTE = {"en_cours": False, "identite": "", "vus": 0, "total": 0,
-               "avec_texte": 0, "erreurs": 0, "dernier": ""}
+               "avec_texte": 0, "erreurs": 0, "dernier": "", "arret": ""}
 _SCAN_TEXTE_LOCK = threading.Lock()
 
 
@@ -19623,7 +19665,7 @@ def _lancer_scan_texte(identity: str, refaire: bool = False) -> tuple:
     with _SCAN_TEXTE_LOCK:
         _SCAN_TEXTE.update({"en_cours": True, "identite": identity, "vus": 0,
                             "total": len(a_faire), "avec_texte": 0,
-                            "erreurs": 0, "dernier": ""})
+                            "erreurs": 0, "dernier": "", "arret": ""})
 
     def _travail():
         try:
@@ -19632,6 +19674,17 @@ def _lancer_scan_texte(identity: str, refaire: bool = False) -> tuple:
                     verdict, extraits, err = _brute_a_du_texte(p, key)
                 except Exception as e:
                     verdict, extraits, err = None, [], str(e)[:120]
+                if err == "CREDIT_EPUISE":
+                    # On NE marque pas la brute : son verdict reste a faire.
+                    # L ecrire en « illisible » l aurait exclue du prochain
+                    # examen, une fois le compte recharge.
+                    with _SCAN_TEXTE_LOCK:
+                        _SCAN_TEXTE["arret"] = (
+                            "Credit Anthropic epuise : l examen s est arrete "
+                            "apres %d brute(s). Recharge le compte sur "
+                            "console.anthropic.com (Billing), puis relance."
+                            % _SCAN_TEXTE["vus"])
+                    break
                 _textecheck_ecrire(p, verdict, extraits, err)
                 with _SCAN_TEXTE_LOCK:
                     _SCAN_TEXTE["vus"] += 1
@@ -37134,6 +37187,16 @@ body.light .mpl-pillnav button:hover{background:#fff;color:#111}
 body.light .mpl-card{background:#fff;border-color:#e5e7eb}
 body.light .mpl-stat,body.light .mpl-row,body.light .mpl-slot,body.light .mpl-opt{background:#f9fafb;border-color:#e5e7eb}
 body.light .mpl-stat-num,body.light .mpl-row-title,body.light .mpl-name,body.light .mpl-opt-title,body.light .mpl-slot-time{color:#111;background:#fff}
+/* Le bloc clair du <head> force en !important le fond de .mpl-slot-vis (#fff)
+   et de .mpl-opt-toggle (#f2f2f7) ; les etats ACTIFS, eux, n'ont pas de
+   !important et se faisaient ecraser en gardant leur color:#fff. Sans ca :
+   pastille « Public » blanche sur blanc (1:1), pastille « Prive » en #aaa sur
+   blanc (2,3:1), et pouce blanc de l'interrupteur allume sur piste #f2f2f7
+   (1,1:1) — on ne voyait plus si l'option etait active. */
+body.light .mpl-slot-vis.public{background:#3b82f6!important;color:#fff!important;border-color:#3b82f6!important}
+body.light .mpl-slot-vis.private{color:#3c3c43!important}
+body.light .mpl-opt.active .mpl-opt-toggle{background:#3b82f6!important}
+body.light .mpl-row-icon{color:#6b7280}
 
 /* === Custom WHEEL time picker (style iOS) === */
 .mpl-wheel-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:9999;backdrop-filter:blur(4px);opacity:0;pointer-events:none;transition:opacity .15s}
@@ -40605,6 +40668,13 @@ def _brute_a_du_texte(src: Path, key: str):
                 derniere = "HTTP %s" % r.status_code
                 continue
             if r.status_code >= 400:
+                # Le credit epuise est LA panne courante, et elle sortait en
+                # « HTTP 400 : {json...} » tronque a 120 caracteres. Vu de
+                # l ecran, l examen affichait seulement « N illisibles » :
+                # impossible de deviner qu il fallait recharger le compte.
+                _corps = (r.text or "").lower()
+                if "credit balance" in _corps or "insufficient" in _corps:
+                    return None, [], "CREDIT_EPUISE"
                 return None, [], "HTTP %s : %s" % (r.status_code, r.text[:120])
             try:
                 txt = "".join(b.get("text", "")
