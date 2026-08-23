@@ -30912,6 +30912,7 @@ def _render_veille_feed_html() -> str:
         "<div style='flex:1;height:7px;background:#0c0c14;border-radius:5px;overflow:hidden'>"
         "<div id='vl-warm-fill' style='height:100%;width:0%;background:linear-gradient(90deg,#facc15,#3467FF);"
         "border-radius:5px;transition:width .4s'></div></div>"
+        "<svg viewBox='0 0 24 24' width='15' height='15' fill='#2AABEE' style='flex:0 0 auto;margin-right:2px' aria-hidden='true'><path d='M21.4 4.3 2.9 11.4c-1 .4-1 1 .1 1.3l4.7 1.5 1.8 5.5c.2.6.5.7 1 .3l2.6-2.1 4.4 3.3c.8.4 1.4.2 1.6-.8l3-13.9c.3-1.2-.4-1.7-1.2-1.4zM8.9 13.9l9.4-5.9c.4-.3.8-.1.5.2l-8 7.2-.3 3.2z'/></svg>"
         "<span id='vl-warm-txt' style='font-size:12px;color:#cbd5e1;font-weight:700;white-space:nowrap'>…</span>"
         "<button type='button' id='vl-warm-now' onclick='vlWarmNow(this)' "
         "title='Uploader maintenant sur Telegram toutes les vidéos non envoyées (en fond) : l&#39;envoi du soir sera instantané' "
@@ -31090,7 +31091,7 @@ def _render_veille_feed_html() -> str:
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
       </a>
       <button onclick='resendVeilleReel("{rid}", this)' title="Renvoyer ce reel sur Telegram (même déjà envoyé)" style="width:30px;height:30px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        <svg viewBox='0 0 24 24' width='15' height='15' fill='#2AABEE'><path d='M21.4 4.3 2.9 11.4c-1 .4-1 1 .1 1.3l4.7 1.5 1.8 5.5c.2.6.5.7 1 .3l2.6-2.1 4.4 3.3c.8.4 1.4.2 1.6-.8l3-13.9c.3-1.2-.4-1.7-1.2-1.4zM8.9 13.9l9.4-5.9c.4-.3.8-.1.5.2l-8 7.2-.3 3.2z'/></svg>
       </button>
       <button onclick='igDownloadVideo(this, "{url}", "{owner}")' title="Télécharger la vidéo" style="width:30px;height:30px;background:rgba(0,0,0,.42);backdrop-filter:blur(8px);border:0;border-radius:9px;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
