@@ -3388,12 +3388,49 @@ try:
         "va-pay-btn": "pose son propre fond (background:currentColor)",
         "va-ig3-thumb-play": "icone posee sur une miniature, avec ombre portee",
         "remember-row": "ecran de connexion, qui reste sombre",
+        # Initiales d avatar : posees sur une couleur GENEREE par identite, pas
+        # sur la surface du theme. Leur blanc vaut sur les deux themes.
+        "jb-avatar-fb": "initiale sur une couleur generee par identite",
+        "jb-va-avatar-fb": "initiale sur une couleur generee par identite",
+        "jb-side-va-fb": "initiale sur une couleur generee par identite",
     }
+    # On lit le CSS REELLEMENT SERVI, pas le fichier source. Deux tentatives
+    # precedentes ont echoue pour des raisons opposees : exiger un debut de
+    # ligne laissait passer les regles concatenees (les 19 classes du module
+    # Jailbreak, dont les pseudos en blanc sur blanc), et ne plus l exiger
+    # faisait prendre du JavaScript pour du CSS (« x.last_summary||{} »).
+    # Le contenu des <style> de la page rendue ne prete a aucune confusion.
+    import web_upload as _wTh
+    _appTh = _wTh.create_app()
+    _appTh.config["TESTING"] = True
+    _sauveTh = _wTh._load_web_users
+    _wTh._load_web_users = lambda: {"admin": {"role": "owner", "password": "x"}}
+    try:
+        _cTh = _appTh.test_client()
+        with _cTh.session_transaction() as _sTh:
+            _sTh["auth"] = True
+            _sTh["username"] = "admin"
+            _sTh["role"] = "owner"
+        _htmlTh = _cTh.get("/?tab=home").get_data(as_text=True)
+    finally:
+        _wTh._load_web_users = _sauveTh
+    _cssTh = "\n".join(_reTh.findall(r"<style[^>]*>(.*?)</style>", _htmlTh, _reTh.S))
+    check("theme clair : le CSS de la page est bien lisible par le test",
+          len(_cssTh) > 100_000, "%d octets extraits" % len(_cssTh))
+
     _classesKO = {}
-    for _m in _reTh.finditer(
-            r"(?m)^((?:\.[a-z][a-z0-9_-]*)(?:[ >,.:][^{]*)?)\{([^}]*)\}", _srcTh):
-        _sel, _corps = _m.group(1), _m.group(2)
-        if "body.light" in _sel:
+    # On raisonne sur le selecteur ENTIER, pas sur un fragment : decouper au
+    # milieu faisait passer « body.obsidian .vlm-dup » pour une classe nue sans
+    # regle claire, alors que c est une regle de THEME, deja specifique.
+    for _m in _reTh.finditer(r"([^{}]+)\{([^{}]*)\}", _cssTh):
+        _selTotal, _corps = _m.group(1), _m.group(2)
+        # Une regle deja portee par un theme n a rien a voir avec le theme clair.
+        _parts = [_p.strip() for _p in _selTotal.split(",")]
+        _parts = [_p for _p in _parts if _p.startswith(".")]
+        if not _parts:
+            continue
+        _sel = _parts[0]
+        if "body." in _selTotal or "@" in _selTotal:
             continue
         _c = _reTh.search(r"(?<!-)color:\s*(#[0-9a-fA-F]{3,6})", _corps)
         # Une regle qui pose son propre fond assume sa couleur de texte.

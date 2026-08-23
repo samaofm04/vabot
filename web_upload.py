@@ -1265,6 +1265,34 @@ body.light .jb-no-selection{color:#6b7280}
    eux, n ont pas de regle propre — ils HERITENT de .ja-row, restee sur
    la couleur du theme sombre. D ou 15 nombres a 1,47 sur du blanc. */
 body.light .ja-row{color:#374151}
+/* Repeindre les panneaux du Jailbreak a mis leur TEXTE a nu : 137 pseudos
+   en blanc sur une barre laterale devenue blanche. C est la contrepartie
+   obligatoire du commit precedent, pas un oubli separe — un fond qu on
+   eclaircit emporte toujours la couleur de ce qui est pose dessus.
+   Les initiales d avatar gardent leur blanc : elles sont posees sur une
+   couleur GENEREE par identite, pas sur la surface du theme. */
+body.light .jb-acct-username,body.light .jb-acct-username-link,
+body.light .jb-detail-head,body.light .jb-detail-head-name,
+body.light .jb-modal,body.light .jb-search,body.light .jb-section-name,
+body.light .jb-side-id-head,body.light .jb-side-id-name,body.light .jb-side-va,
+body.light .jb-side-va-name,body.light .jb-stat-num,
+body.light .jb-va-group-name{color:#111827}
+body.light .jb-acct-btn,body.light .jb-bulk-btn,
+body.light .jb-no-selection-title{color:#6b7280}
+body.light .jb-stat-green{color:#15803d}
+/* Pastille de comptage : fond bleu translucide sur du blanc, donc tres
+   pale ; le bleu clair du texte y tombait a 2,14. */
+body.light .va-vlist-count{color:#1d4ed8}
+/* Selecteur d identites (le menu deroulant des cartes d import) : panneau
+   et bouton restes en #131316. Ses 113 lignes sont donc CLAIRES SUR
+   SOMBRE — lisibles, mais c est un menu noir au milieu d une interface
+   blanche. On repeint le contenant ET son contenu dans le meme geste :
+   pris separement, l un des deux aurait rendu l autre illisible. */
+body.light .isel-btn,body.light .isel-pan{
+  background:#fff!important;border-color:#e5e7eb!important;color:#111827}
+body.light .isel-it{color:#111827}
+body.light .isel-it:hover{background:#f3f4f6}
+body.light .isel-av{background:#f3f4f6}
 /* PANNEAUX RESTES SOMBRES. La panne inverse de celle du dessus : ici c est
    le fond qui n a pas ete repeint, pendant que le texte, lui, passait au
    fonce. Mesure sur la page : une trentaine d elements en fonce sur fonce.
@@ -19046,7 +19074,13 @@ _VAULT_DND_CSS = ("<style>.vault-dragging{opacity:.35}"
                   ".ident-fopt{display:block;width:100%;text-align:left;background:none;border:0;"
                   "color:#c4c4cc;font-family:inherit;font-size:12.5px;padding:8px 10px;border-radius:7px;cursor:pointer}"
                   ".ident-fopt:hover{background:#1f1f26;color:#fff}"
-                  ".ident-fopt[data-on]{color:#3b82f6;font-weight:700}</style>")
+                  ".ident-fopt[data-on]{color:#3b82f6;font-weight:700}"
+                  # Ces options vivent dans les barres laterales de la
+                  # Bibliotheque, qui sont BLANCHES en theme clair : le
+                  # #c4c4cc y tombait a 1,73, et le survol y peignait un
+                  # bloc presque noir.
+                  "body.light .ident-fopt{color:#374151}"
+                  "body.light .ident-fopt:hover{background:#f3f4f6;color:#111827}</style>")
 
 
 def _load_identity_order() -> list:
