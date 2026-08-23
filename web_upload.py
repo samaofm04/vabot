@@ -16503,7 +16503,13 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
         )
     else:
         img_tag = (
-            f"<img src='{thumb_url}' loading='lazy' class='vault-img-load' onload='this.style.opacity=1' "
+            # onerror autant que onload : l image demarre a opacity:0 et n
+            # apparait qu au chargement. Sans onerror, une vignette qui echoue
+            # laissait une carte NOIRE pour toujours — impossible a distinguer
+            # d un chargement en cours, et c est ce qui faisait croire a un
+            # bug d affichage alors que la vignette n existait simplement pas.
+            f"<img src='{thumb_url}' loading='lazy' class='vault-img-load' "
+            f"onload='this.style.opacity=1' onerror='this.style.opacity=1' "
             f"style='width:100%;height:100%;object-fit:cover;display:block;opacity:0;transition:opacity .25s'>"
         )
     media_html = (
@@ -17786,6 +17792,14 @@ window.vaultGoTo = function(ev, url){
         newS.textContent = oldS.textContent;
         oldS.parentNode.replaceChild(newS, oldS);
       });
+      // Les vignettes de la NOUVELLE galerie doivent etre reprises en charge.
+      // Le chargeur vit dans le socle global, emis une seule fois : il ne
+      // repassait donc jamais sur les images injectees ici. Comme elles
+      // demarrent a opacity:0 et n apparaissent qu au load, la galerie restait
+      // un mur de cartes noires — indistinguable d un chargement en cours.
+      if(typeof window.vaultChargerVignettes === 'function'){
+        window.vaultChargerVignettes();
+      }
     } catch(e){ window.location.href = url; }
   };
   if(window.__vaultPrefetchCache[url]){
@@ -17802,40 +17816,63 @@ window.addEventListener('popstate', function(){
   window.vaultGoTo({preventDefault:()=>{}, ctrlKey:false}, window.location.href);
 });
 
-// === Lazy loading des thumbnails differees (IntersectionObserver) ===
-(function(){
-  const imgs = document.querySelectorAll('img.vault-defer-img');
-  if(!imgs.length || !('IntersectionObserver' in window)) {
-    // Fallback : charge tout direct
-    imgs.forEach(i=>{ if(i.dataset.src){ i.src = i.dataset.src; }});
-    return;
-  }
+// === Chargement des vignettes ===
+//
+// Demande explicite du proprietaire : « pour le chargement des previews je veux
+// TOUTES les voir ». On ne se contente donc plus d attendre que l image entre
+// dans le viewport — toutes sont chargees, par vagues, pour ne pas lancer 300
+// requetes d un coup au serveur (qui extrait les vignettes avec ffmpeg).
+//
+// Nommee et posee sur window : le socle n est emis QU UNE FOIS, alors que
+// vaultGoTo remplace la galerie a chaque changement d onglet ou d identite.
+// Tant que ce chargeur etait une IIFE anonyme, les images injectees ensuite
+// n etaient jamais reprises, restaient a opacity:0, et la galerie ressemblait
+// a un mur de cartes noires.
+window.vaultChargerVignettes = function(){
+  const imgs = Array.prototype.slice.call(
+    document.querySelectorAll('img.vault-defer-img[data-src]'));
   const status = document.getElementById('vault-load-status');
-  let loaded = 24; // INITIAL_BATCH
-  const total = 24 + imgs.length;
-  const io = new IntersectionObserver((entries)=>{
-    entries.forEach(entry=>{
-      if(entry.isIntersecting){
-        const img = entry.target;
-        if(img.dataset.src){
-          img.src = img.dataset.src;
-          delete img.dataset.src;
-          img.addEventListener('load', function(){
-            img.style.opacity = '1';
-            // Arret du skeleton apres chargement
-            const card = img.closest('.vault-card-bg');
-            if(card) card.style.animation = 'none';
-          }, {once:true});
-          io.unobserve(img);
-          loaded++;
-          if(status) status.textContent = loaded + ' / ' + total + ' charges';
-          if(loaded >= total && status) status.style.display = 'none';
-        }
+  const total = imgs.length;
+  if(!total){ if(status) status.style.display = 'none'; return; }
+  let faites = 0;
+  const VAGUE = 12;          // requetes simultanees, pas davantage
+  const suivant = function(){
+    const lot = imgs.splice(0, VAGUE);
+    if(!lot.length) return;
+    let restant = lot.length;
+    const fini = function(){
+      faites++;
+      if(status){
+        status.textContent = faites + ' / ' + total + ' aperçus chargés';
+        if(faites >= total) status.style.display = 'none';
       }
+      if(--restant === 0) suivant();
+    };
+    lot.forEach(function(img){
+      const u = img.dataset.src;
+      if(!u){ fini(); return; }
+      delete img.dataset.src;
+      img.addEventListener('load', function(){
+        img.style.opacity = '1';
+        const card = img.closest('.vault-card-bg');
+        if(card) card.style.animation = 'none';
+        fini();
+      }, {once:true});
+      // Une vignette qui echoue ne doit pas bloquer la vague ni laisser la
+      // carte noire pour toujours : on la montre quand meme (l image de repli
+      // « aperçu indisponible » y est visible) et on passe a la suite.
+      img.addEventListener('error', function(){
+        img.style.opacity = '1';
+        const card = img.closest('.vault-card-bg');
+        if(card) card.style.animation = 'none';
+        fini();
+      }, {once:true});
+      img.src = u;
     });
-  }, {rootMargin: '300px'});  // pre-charge avant que l img n entre dans le viewport
-  imgs.forEach(img=>io.observe(img));
-})();
+  };
+  suivant();
+};
+window.vaultChargerVignettes();
 
 // Pour les imgs eager (premiers 24) : aussi stop le skeleton apres load
 document.querySelectorAll('img.vault-img-load:not(.vault-defer-img)').forEach(function(img){
