@@ -4461,6 +4461,39 @@ try:
               _crCl._personne_du_lien(_nomCl) == _attCl,
               repr(_crCl._personne_du_lien(_nomCl)))
 
+    # -- rattachement aux liens de suivi : le NOM d abord, le code ensuite ----
+    # Plusieurs destinations GetMySocial trainent : « Gerome » vise c80
+    # (« VA 4 Geelark ») alors qu un lien « Gérôme » existe en c94. Lire le
+    # code lui attribuerait 12 715 visites qui ne sont pas les siennes.
+    _nomsCl = {"bo7": {"code": "c85", "nom": "Bo07", "abonnes": 0},
+               "gerome": {"code": "c94", "nom": "Gérôme", "abonnes": 0},
+               "safidy": {"code": "c84", "nom": "Safidy", "abonnes": 1}}
+    _codesCl = {"c80": {"code": "c80", "nom": "VA 4 Geelark", "abonnes": 683},
+                "c85": {"code": "c85", "nom": "Bo07", "abonnes": 0},
+                "c47": {"code": "c47", "nom": "VA 4 JB", "abonnes": 3766}}
+    _tCl2, _ecCl = _crCl._suivi_de("Gerome", "c80", _nomsCl, _codesCl)
+    check("clics : le nom prime sur une destination perimee",
+          _tCl2 and _tCl2["code"] == "c94" and _ecCl == "",
+          str(_tCl2))
+    _tCl2, _ecCl = _crCl._suivi_de("VA 1 Noum", "c47", _nomsCl, _codesCl)
+    check("clics : sans lien a son nom, on retombe sur le code",
+          _tCl2 and _tCl2["code"] == "c47", str(_tCl2))
+    # L ecart de nom se DIT : « Bryan » lisant les chiffres de « Jaurel » peut
+    # etre voulu, mais ne doit pas passer inapercu.
+    check("clics : un nom qui ne correspond pas est signale",
+          _crCl._suivi_de("VA 1 Noum", "c47", _nomsCl, _codesCl)[1] == "VA 4 JB")
+    check("clics : aucun rattachement possible -> rien, pas un faux zero",
+          _crCl._suivi_de("Inconnu", "cXX", _nomsCl, _codesCl)[0] is None)
+    # « BO7 » cote GetMySocial, « Bo07 » cote MyPuls : sans mise a plat des
+    # noms, aucun rapprochement ne tient.
+    for _aCl, _bCl in (("BO7", "Bo07"), ("PAMPAM", "Pam Pam"),
+                       ("Gerome", "Gérôme"), ("Safidy", "Safidy")):
+        check("clics : « %s » et « %s » se rejoignent" % (_aCl, _bCl),
+              _crCl._cle_nom(_aCl) == _crCl._cle_nom(_bCl),
+              "%r vs %r" % (_crCl._cle_nom(_aCl), _crCl._cle_nom(_bCl)))
+    check("clics : deux personnes differentes ne se rejoignent PAS",
+          _crCl._cle_nom("Mike") != _crCl._cle_nom("Mykey"))
+
     # -- code de suivi MyPuls -------------------------------------------------
     # Les liens GetMySocial pointent vers onlyfans.com/<pseudo>/c85 : « c85 »
     # est le code du lien de suivi MyPuls. C est par LUI qu on rattache les

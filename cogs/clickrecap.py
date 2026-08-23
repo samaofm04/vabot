@@ -269,6 +269,62 @@ def _code_suivi(destination) -> str:
     return m.group(1) if m else ""
 
 
+def _cle_nom(texte) -> str:
+    """Une forme comparable d'un nom : minuscules, sans accents ni ponctuation.
+
+    Le meme compte s'ecrit « BO7 » cote GetMySocial et « Bo07 » cote MyPuls,
+    « PAMPAM » et « Pam Pam », « Gerome » et « Gérôme ». Sans cette mise a plat,
+    aucun rapprochement ne tient. Les zeros de tete d'un nombre sautent aussi :
+    « bo07 » et « bo7 » doivent se rejoindre.
+    """
+    import unicodedata as _ud
+    t = _ud.normalize("NFKD", str(texte or ""))
+    t = "".join(c for c in t if not _ud.combining(c)).lower()
+    t = re.sub(r"[^a-z0-9]+", "", t)
+    return re.sub(r"0+(\d)", r"\1", t)
+
+
+async def _liens_suivi() -> list:
+    """Tous les liens de suivi MyPuls. [] si l'API ne repond pas.
+
+    UN SEUL appel pour les ~468 lignes, mis en cache dix minutes cote module :
+    l'API limite le debit, et un appel par personne serait le plus sur moyen de
+    la faire tomber — une sonde a deja pris un 429 suivi de 403 sur tout le
+    reste, et ces 403 avaient failli passer pour « ces adresses n'existent pas ».
+    """
+    try:
+        import mypuls
+        return await asyncio.to_thread(mypuls.api_tracking_links) or []
+    except Exception as e:
+        print(f"[reportclick] liens de suivi MyPuls indisponibles : {e}")
+        return []
+
+
+def _suivi_de(personne, code, par_nom, par_code):
+    """Le lien de suivi d'une personne : par le NOM d'abord, le code ensuite.
+
+    Le nom prime parce que les destinations GetMySocial trainent : plusieurs
+    pointent encore vers d'anciens liens Geelark alors qu'un lien nominatif a
+    ete cree depuis. « Gerome » vise c80 (« VA 4 Geelark ») alors que « Gérôme »
+    existe en c94 — c'est ce dernier qu'il faut lire, sans quoi on lui
+    attribuerait 12 715 visites qui ne sont pas les siennes.
+
+    Le code sert de secours pour ceux qui n'ont pas de lien a leur nom : les
+    trois « Noum » pointent vers VA 4 / 8 / 9 JB, ce que le proprietaire a
+    confirme.
+    """
+    t = par_nom.get(_cle_nom(personne))
+    if t is not None:
+        return t, ""
+    t = par_code.get(code or "")
+    if t is None:
+        return None, ""
+    # Le nom ne correspond pas : ce n'est pas forcement une erreur (les « Noum »
+    # sont legitimes), mais ca se signale plutot que de se taire.
+    ecart = "" if _cle_nom(t.get("nom")) == _cle_nom(personne) else t.get("nom") or ""
+    return t, ecart
+
+
 async def _abonnes_par_code(codes) -> dict:
     """{code: {abonnes, nouveaux, visites, nom}} pour les codes demandes.
 
@@ -942,36 +998,44 @@ class ClickRecap(commands.Cog):
             # ---- Abonnes MyPuls, par personne ------------------------------
             # Les clics disent qui envoie du trafic ; les abonnes disent qui le
             # convertit. Un VA a 500 clics et 0 abonne ne se voyait nulle part.
-            _codes = {}
-            for _cle_p, _g in _paquets.items():
-                for _lab, _p in _g["lignes"]:
-                    _cd = _code_suivi(_dest_par_nom.get(str(_lab), ""))
-                    if _cd:
-                        # Les telephones d'une meme personne partagent un code :
-                        # les abonnes sont donc naturellement par personne.
-                        _codes.setdefault(_cle_p, _cd)
-                        break
-            _abo = await _abonnes_par_code(set(_codes.values()))
-            if _abo:
-                _l = []
-                for _cle_p, _g in sorted(
-                        _paquets.items(),
-                        key=lambda kv: -( (_abo.get(_codes.get(kv[0], ""), {})
-                                           or {}).get("abonnes") or 0)):
-                    _t = _abo.get(_codes.get(_cle_p, ""))
-                    if not _t:
-                        continue
+            _tous = await _liens_suivi()
+            if _tous:
+                # Deux index : par nom (prioritaire) et par code (secours).
+                _par_nom, _par_code = {}, {}
+                for _t in _tous:
+                    _par_nom.setdefault(_cle_nom(_t.get("nom")), _t)
+                    _par_code.setdefault(_t.get("code"), _t)
+
+                _assoc = []
+                for _cle_p, _g in _paquets.items():
                     _nom = _g["nom"] or _nom_propre(_g["lignes"][0][0])
+                    # Les telephones d'une meme personne partagent un code : le
+                    # premier suffit, les abonnes sont par personne.
+                    _cd = ""
+                    for _lab, _p in _g["lignes"]:
+                        _cd = _code_suivi(_dest_par_nom.get(str(_lab), ""))
+                        if _cd:
+                            break
+                    _t, _ecart = _suivi_de(_nom, _cd, _par_nom, _par_code)
+                    if _t is not None:
+                        _assoc.append((_nom, _t, _ecart))
+
+                _assoc.sort(key=lambda x: -(x[1].get("abonnes") or 0))
+                _l = []
+                for _nom, _t, _ecart in _assoc[:22]:
+                    # L'ecart de nom se DIT : « Bryan » lit les chiffres de
+                    # « Jaurel », c'est peut-etre voulu, mais ca ne doit pas
+                    # passer inapercu.
+                    _sfx = f"  ({_ecart})" if _ecart else ""
                     _l.append(
                         f"{str(_nom)[:17]:<18}{str(_t.get('abonnes') or 0):>7}"
                         f"{str(_t.get('nouveaux') or 0):>7}"
-                        f"{str(_t.get('visites') or 0):>9}"
-                        + ("  ⚠" if _t.get("ambigu") else ""))
+                        f"{str(_t.get('visites') or 0):>9}{_sfx}")
                 if _l:
                     _e = f"{'PERSON':<18}{'SUBS':>7}{'NEW':>7}{'VISITS':>9}"
                     emb.add_field(
                         name="👥 Subscribers (MyPuls)",
-                        value="```\n" + _e + "\n" + "\n".join(_l[:22]) + "\n```",
+                        value="```\n" + _e + "\n" + "\n".join(_l) + "\n```",
                         inline=False)
 
             _titre = (f"📋 Per link — {drapeau} {libelle} vs 🌍 global"
