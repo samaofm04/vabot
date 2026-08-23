@@ -244,6 +244,16 @@ def _next_demi_heure_unix() -> int:
     return int(calendar.timegm(nxt.timetuple()))
 
 
+#: Mois en anglais : le report est en anglais, les VA du marche US le lisent.
+EN_MONTHS = ("", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+             "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def _en(d: datetime.date) -> str:
+    """« Aug » — le mois d'une date, en anglais abrege."""
+    return EN_MONTHS[d.month]
+
+
 def _fr(d: datetime.date) -> str:
     return f"{d.day} {FR_MONTHS[d.month]}"
 
@@ -575,53 +585,21 @@ class ClickRecap(commands.Cog):
         c_today, c_yest, c_week, c_p1, c_p2 = vals
         all_none = all(v is None for v in vals)
 
-        def fmt(v):
-            return "—" if v is None else f"**{v}**"
-
-        if all_none:
-            color = discord.Color.orange()
-        elif (c_today or 0) > 0 or (c_week or 0) > 0:
-            color = discord.Color.green()
-        else:
-            color = discord.Color.dark_grey()
-        emb = discord.Embed(
-            title=f"📊 Report clics {drapeau} {libelle} — {name}",
-            description=f"Clics cumulés du groupe **{name}** ({len(ids)} lien(s)).",
-            color=color,
-        )
-        emb.add_field(name="🟢 Aujourd'hui", value=f"{fmt(c_today)} clic(s)", inline=True)
-        emb.add_field(name="📅 Hier", value=f"{fmt(c_yest)} clic(s)", inline=True)
-        emb.add_field(name=f"🗓️ Cette semaine (dep. {_fr(week_start)})",
-                      value=f"{fmt(c_week)} clic(s)", inline=False)
-        emb.add_field(name=f"💰 Période 1–15 ({_fr(p1s)}–{_fr(p1e)})",
-                      value=f"{fmt(c_p1)} clic(s)", inline=True)
-        emb.add_field(name=f"💰 Période 16–{p2e.day} ({_fr(p2s)}–{_fr(p2e)})",
-                      value=f"{fmt(c_p2)} clic(s)", inline=True)
-        if all_none:
-            emb.add_field(name="⚠️ Données indisponibles",
-                          value="GetMySocial ne répond pas pour l'instant.", inline=False)
-        elif not ids:
-            # board OK mais 0 lien : groupe réellement vide OU group_id périmé
-            # (groupe supprimé/recréé) -> on le signale (sinon « 0 clic » trompeur).
-            emb.color = discord.Color.orange()
-            emb.add_field(
-                name="⚠️ Aucun lien dans ce groupe",
-                value="Groupe vide, ou config périmée (groupe supprimé/recréé). "
-                      "Relance `/setreportclick` si c'est inattendu.", inline=False)
-
-        # ---- Détail par VA : 1 ligne par lien (auj · cette semaine · quinzaine) ----
-        # Limité pour borner les appels analytics + la taille de l'embed.
-        _MAX_PER_VA = 60
-        if ids and not all_none and len(ids) <= _MAX_PER_VA:
-            cyc_s, cyc_e = _pay_period(today)  # quinzaine de paie en cours (les 2 semaines)
+        # ---- Detail par lien, calcule AVANT l'embed --------------------------
+        # Il faut les clics du marche par lien pour pouvoir en faire le cumul
+        # affiche dans le resume : clicks_for_ids ne rend aucun detail pays.
+        _MAX_PER_LIEN = 60
+        cyc_s, cyc_e = _pay_period(today)
+        rows, cumul, detail_ok = [], [None, None, None, None], False
+        if ids and not all_none and len(ids) <= _MAX_PER_LIEN:
             # analytics_for_link plutot que clicks_for_link : MEME appel reseau,
-            # mais il rend aussi le detail par pays. Les clics US sortent donc
-            # gratuitement — les demander separement aurait double le cout.
+            # mais il rend aussi le detail par pays. Les clics du marche sortent
+            # donc gratuitement — les demander a part aurait double la facture.
             _plages = [
-                (today, today),                 # aujourd'hui
-                (yest, yest),                   # hier
-                (week_start, today),            # cette semaine
-                (cyc_s, cyc_e),                 # quinzaine en cours
+                (today, today),          # today
+                (yest, yest),            # yesterday
+                (week_start, today),     # this week
+                (cyc_s, cyc_e),          # current pay period
             ]
             per = await asyncio.gather(*[
                 asyncio.gather(*[
@@ -633,19 +611,19 @@ class ClickRecap(commands.Cog):
             ])
 
             def _duo_de(couple):
-                """(clics du marche, total) d'un couple (total, pays).
+                """(clics du marche, total). (None, None) si l'appel a echoue.
 
-                (None, None) si l'appel a echoue — surtout pas (0, 0), qui se
-                lirait comme « personne n'a clique » alors qu'on n'a rien su.
+                Surtout pas (0, 0), qui se lirait « personne n'a clique » alors
+                qu'on n'a rien su lire.
                 """
                 total, pays = couple if isinstance(couple, tuple) else (None, None)
                 if total is None:
                     return None, None
-                if not pays_marche:              # marche « tout » : pas de detail
+                if not pays_marche:
                     return None, total
                 return sum(v for k, v in (pays or {}).items() if k in pays_marche), total
 
-            rows, cumul = [], [0, 0, 0, 0]
+            cumul = [0, 0, 0, 0]
             for m, quatre in zip([m for m in metas if m.get("id")], per):
                 label = m.get("display_name") or m.get("shortcode") or "?"
                 paires = [_duo_de(c) for c in quatre]
@@ -653,52 +631,105 @@ class ClickRecap(commands.Cog):
                     if u is not None:
                         cumul[i] += u
                 rows.append((label, paires))
-            # tri : plus de clics aujourd'hui, puis semaine, puis quinzaine, puis nom
             rows.sort(key=lambda r: (-((r[1][0][1]) or 0), -((r[1][2][1]) or 0),
                                      -((r[1][3][1]) or 0), str(r[0])))
+            detail_ok = True
 
-            def _duo(paire):
-                """« marché/total », ou juste le total si le marché vaut « tout »."""
+        # ---- L'embed ---------------------------------------------------------
+        if all_none:
+            color = discord.Color.orange()
+        elif (c_today or 0) > 0 or (c_week or 0) > 0:
+            color = discord.Color.green()
+        else:
+            color = discord.Color.dark_grey()
+
+        emb = discord.Embed(
+            title=f"{drapeau} Clicks — {name}",
+            description=f"**{len(ids)}** link(s) tracked.",
+            color=color,
+        )
+
+        def _n(v):
+            return "—" if v is None else f"{v:,}".replace(",", " ")
+
+        # Resume : une seule zone, alignee. Cinq champs separes rendaient la
+        # lecture impossible sur telephone (une colonne par periode).
+        # Le detail par lien ne mesure que la quinzaine EN COURS : on l'attribue
+        # a la bonne moitie du mois. L'autre n'affiche que le total — dire un
+        # chiffre US qu'on n'a pas mesure serait pire que de ne rien dire.
+        _premiere_moitie = cyc_s.day == 1
+        lignes_resume = []
+        for etiquette, marche_v, total_v in (
+                ("Today", cumul[0], c_today),
+                ("Yesterday", cumul[1], c_yest),
+                ("This week", cumul[2], c_week),
+                (f"{_en(p1s)} 1–15",
+                 cumul[3] if _premiere_moitie else None, c_p1),
+                (f"{_en(p2s)} 16–{p2e.day}",
+                 None if _premiere_moitie else cumul[3], c_p2)):
+            if pays_marche and marche_v is not None:
+                lignes_resume.append(
+                    f"`{etiquette:<12}` {drapeau} **{_n(marche_v)}**"
+                    f"   🌍 **{_n(total_v)}**")
+            else:
+                lignes_resume.append(f"`{etiquette:<12}` 🌍 **{_n(total_v)}**")
+        emb.add_field(name="​", value="\n".join(lignes_resume), inline=False)
+
+        if all_none:
+            emb.add_field(name="⚠️ No data",
+                          value="GetMySocial is not responding right now.",
+                          inline=False)
+        elif not ids:
+            # board OK mais 0 lien : groupe reellement vide OU config perimee.
+            # On le signale, sinon « 0 clic » serait trompeur.
+            emb.color = discord.Color.orange()
+            emb.add_field(
+                name="⚠️ No links here",
+                value="Empty workspace, or stale config. "
+                      "Run `/setreportclick` again if that's unexpected.",
+                inline=False)
+
+        if detail_ok and rows:
+            # Tableau en bloc de code : c'est la seule mise en forme que Discord
+            # aligne. Les drapeaux ne s'alignent pas en chasse fixe, ils restent
+            # donc dans l'en-tete de colonne, en toutes lettres.
+            entete = (f"{'LINK':<15}{'TODAY':>11}{'WEEK':>11}{'PERIOD':>11}\n"
+                      f"{'':<15}{'US/ALL' if pays_marche else 'ALL':>11}"
+                      f"{'US/ALL' if pays_marche else 'ALL':>11}"
+                      f"{'US/ALL' if pays_marche else 'ALL':>11}")
+
+            def _cell(paire):
                 u, t = paire
                 if t is None:
                     return "—"
                 return str(t) if u is None else f"{u}/{t}"
-            lines = [
-                f"**{lab}** — auj {_duo(p[0])} · hier {_duo(p[1])} · "
-                f"sem {_duo(p[2])} · quinz {_duo(p[3])}"
-                for lab, p in rows
-            ]
-            if pays_marche:
-                # Le cumul du marche vient des lignes ci-dessus : clicks_for_ids
-                # ne rend aucun detail pays, et refaire un appel par plage pour
-                # l'obtenir aurait double la facture pour rien.
-                emb.add_field(
-                    name=f"{drapeau} Clics {libelle} du groupe",
-                    value=(f"auj **{cumul[0]}** · hier **{cumul[1]}** · "
-                           f"sem **{cumul[2]}** · quinz **{cumul[3]}**"),
-                    inline=False)
-            # Découpe en blocs <1024 chars (limite Discord par field)
-            block, blocks = "", []
-            for ln in lines:
-                if len(block) + len(ln) + 1 > 1000:
-                    blocks.append(block)
-                    block = ""
-                block += ("\n" if block else "") + ln
-            if block:
-                blocks.append(block)
-            for i, b in enumerate(blocks):
-                title = (f"📋 Détail par VA — auj · sem · quinz ({cyc_s.day}–{cyc_e.day} {FR_MONTHS[cyc_s.month]})"
-                         if i == 0 else "📋 Détail par VA (suite)")
-                emb.add_field(name=title, value=b, inline=False)
-        elif ids and not all_none and len(ids) > _MAX_PER_VA:
-            emb.add_field(name="📋 Détail par VA",
-                          value=f"_(trop de liens ({len(ids)}) pour le détail par lien — agrégat ci-dessus.)_",
-                          inline=False)
 
-        _detail = (f" · « {libelle}/total » par lien" if pays_marche else "")
+            lignes = [f"{str(lab)[:14]:<15}{_cell(p[0]):>11}"
+                      f"{_cell(p[2]):>11}{_cell(p[3]):>11}"
+                      for lab, p in rows]
+            bloc, blocs = "", []
+            for ln in lignes:
+                if len(bloc) + len(ln) + 1 > 900:
+                    blocs.append(bloc)
+                    bloc = ""
+                bloc += ("\n" if bloc else "") + ln
+            if bloc:
+                blocs.append(bloc)
+            for i, b in enumerate(blocs):
+                titre = ("📋 Per link" if i == 0 else "📋 Per link (cont.)")
+                corps = (entete + "\n" + b) if i == 0 else b
+                emb.add_field(name=titre, value=f"```\n{corps}\n```", inline=False)
+        elif ids and not all_none and len(ids) > _MAX_PER_LIEN:
+            emb.add_field(
+                name="📋 Per link",
+                value=f"_({len(ids)} links — too many to detail, totals above.)_",
+                inline=False)
+
+        _quoi = (f"{drapeau} {libelle} vs 🌍 all countries" if pays_marche
+                 else "🌍 all countries")
         emb.set_footer(
-            text=f"🕐 Mis à jour à {_paris_now().strftime('%H:%M')} · maj toutes les 30 min"
-                 f"{_detail} · GetMySocial")
+            text=f"Updated {_paris_now().strftime('%H:%M')} · every 30 min · "
+                 f"{_quoi} · GetMySocial")
         return emb
 
     async def _post_or_update_report(self, guild_id: str):
