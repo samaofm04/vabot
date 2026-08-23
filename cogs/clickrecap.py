@@ -245,6 +245,31 @@ def _reports_configures(cfg: dict) -> list:
     return out
 
 
+def _personne_du_lien(nom) -> str:
+    """La PERSONNE derriere un nom de lien, ou '' si on ne peut pas la nommer.
+
+    Une meme personne tient plusieurs telephones, et chacun a son lien :
+    « ( BO7 ) 1 », « ( BO7 ) 2 »… Sans regroupement, ses lignes se retrouvent
+    dispersees dans le tableau et on ne voit jamais ce qu'elle rapporte.
+
+    Le nom de la personne est entre parentheses ; le nombre qui suit est le
+    numero du telephone. Certains sont ecrits « (VA 4 Noum) », ou « VA 4 » est
+    encore un numero — on le retire, sinon les quatre telephones de Noum
+    passeraient pour quatre personnes differentes.
+
+    Rend '' quand il n'y a pas de parentheses (« VA 1 », « TEMPLATE ») : mieux
+    vaut ne pas regrouper que regrouper a tort. Dans certains workspaces, cinq
+    liens s'appellent tous « VA 1 » sans etre la meme personne.
+    """
+    n = str(nom or "").strip()
+    m = re.search(r"\((.*?)\)", n)
+    if not m:
+        return ""
+    dedans = m.group(1).strip()
+    dedans = re.sub(r"^VA\s*\d+\s*", "", dedans, flags=re.I).strip()
+    return dedans
+
+
 def _creneau_30(d: datetime.datetime) -> tuple:
     """Le creneau de 30 minutes auquel appartient cet instant : (heure, 0|30).
 
@@ -727,7 +752,7 @@ class ClickRecap(commands.Cog):
             # Bloc de code : c'est la seule mise en forme que Discord aligne.
             # Les drapeaux, eux, ne s'alignent pas en chasse fixe — d'ou leur
             # place dans le titre plutot que dans le tableau.
-            entete = (f"{'LINK':<15}{'TODAY':>7}{'YEST':>7}"
+            entete = (f"{'LINK':<18}{'TODAY':>7}{'YEST':>7}"
                       f"{'WEEK':>7}{'PERIOD':>8}")
 
             def _c(v):
@@ -735,12 +760,55 @@ class ClickRecap(commands.Cog):
                 # a la place d'un echec serait un mensonge qu'on ne verrait pas.
                 return "—" if v is None else str(v)
 
+            # Regroupement par PERSONNE : une meme personne tient plusieurs
+            # telephones, ses lignes doivent se suivre et porter un sous-total.
+            # Sans ca, « ( BO7 ) 1 » a 4 et « ( BO7 ) 3 » a 12 se retrouvent a
+            # dix lignes d'ecart et on ne voit jamais ce que BO7 rapporte.
+            _paquets = {}
+            for lab, p in rows:
+                pers = _personne_du_lien(lab)
+                # Sans personne identifiable, la ligne reste seule : la cle
+                # porte le nom complet, elle ne peut donc se confondre.
+                # La cle est un COUPLE, pas une chaine bricolee : aucun nom de
+                # personne ne peut lui ressembler par accident.
+                cle = pers if pers else ("__seul__", str(lab))
+                _paquets.setdefault(cle, {"nom": pers, "lignes": []})
+                _paquets[cle]["lignes"].append((lab, p))
+
+            def _somme(lignes, periode, indice):
+                """Sous-total d'une personne. None si aucune valeur lisible."""
+                vus = [p[periode][indice] for _lab, p in lignes
+                       if p[periode][indice] is not None]
+                return sum(vus) if vus else None
+
             def _tableau(indice):
-                lignes = [
-                    f"{str(lab)[:14]:<15}"
-                    f"{_c(p[0][indice]):>7}{_c(p[1][indice]):>7}"
-                    f"{_c(p[2][indice]):>7}{_c(p[3][indice]):>8}"
-                    for lab, p in rows]
+                # Les personnes qui cliquent le plus en premier ; a egalite,
+                # par nom, pour que l'ordre ne danse pas d'un rafraichissement
+                # a l'autre.
+                ordre = sorted(
+                    _paquets.values(),
+                    key=lambda g: (-(_somme(g["lignes"], 0, indice) or 0),
+                                   -(_somme(g["lignes"], 2, indice) or 0),
+                                   str(g["nom"] or g["lignes"][0][0]).lower()))
+                lignes = []
+                for g in ordre:
+                    membres = g["lignes"]
+                    if g["nom"] and len(membres) > 1:
+                        lignes.append(
+                            f"{(g['nom'] + ' (' + str(len(membres)) + ')')[:17]:<18}"
+                            f"{_c(_somme(membres, 0, indice)):>7}"
+                            f"{_c(_somme(membres, 1, indice)):>7}"
+                            f"{_c(_somme(membres, 2, indice)):>7}"
+                            f"{_c(_somme(membres, 3, indice)):>8}")
+                        prefixe = "  "
+                    else:
+                        prefixe = ""
+                    for lab, p in sorted(membres, key=lambda x: str(x[0])):
+                        etiquette = (prefixe + str(lab))[:17]
+                        lignes.append(
+                            f"{etiquette:<18}"
+                            f"{_c(p[0][indice]):>7}{_c(p[1][indice]):>7}"
+                            f"{_c(p[2][indice]):>7}{_c(p[3][indice]):>8}")
                 bloc, blocs = "", []
                 for ln in lignes:
                     if len(bloc) + len(ln) + 1 > 880:
