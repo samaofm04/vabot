@@ -27210,6 +27210,63 @@ function gmsFilter(btn, cat){
     )
 
 
+#: Mise en page du tableau des comptes (@handle, vignette, stats, dernier
+#: reel). Ces regles vivaient dans le bloc de la page Trends/GeeLark, et la
+#: page Jailbreak les EMPRUNTAIT sans les declarer. Tant que les deux
+#: sections partaient avec la page, ca tenait par accident ; depuis qu elles
+#: sont servies a la demande, le Jailbreak perdait son tableau — en-tete
+#: d un seul tenant, vignettes debordantes, colonnes disparues.
+#:
+#: Une seule definition, deux consommateurs. Le depot avait deja paye ce
+#: piege deux fois (la pastille BANNI, puis les pastilles Actif/Non scrape,
+#: toutes deux « redeclarees ici »).
+_CSS_VA_IG3 = """
+.va-ig3-row{background:#0f1116;border:1px solid #2a2a2a;border-radius:10px;padding:10px 14px;display:grid;grid-template-columns:36px 1fr auto auto auto auto auto 22px 28px;gap:14px;align-items:center;position:relative;cursor:pointer;transition:all .12s}
+.va-ig3-row:hover{border-color:#ec489940}
+.va-ig3-rm-btn{background:transparent;border:1px solid #2a2a2a;color:#888;width:28px;height:28px;border-radius:7px;font-size:18px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:inherit;font-weight:700;transition:all .12s;padding:0}
+.va-ig3-rm-btn:hover{background:rgba(239,68,68,.12);border-color:#ef4444;color:#ef4444}
+.va-ig3-row-pp{width:36px;height:36px;border-radius:50%;object-fit:cover;background:#16181f}
+.va-ig3-row-name{display:flex;flex-direction:column;gap:1px;min-width:0}
+.va-ig3-row-handle{font-weight:700;font-size:13px;color:#ec4899;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;text-decoration:none;cursor:pointer;display:block}
+.va-ig3-row-handle:hover{text-decoration:underline}
+.va-ig3-row-platform{font-size:10px;color:#888;font-weight:500}
+.va-ig3-row-metric{text-align:center;min-width:55px}
+.va-ig3-row-num{font-size:14px;font-weight:800;color:#fff;line-height:1.1}
+.va-ig3-row-num.va-ig3-green{color:#22c55e}
+.va-ig3-row-lab{font-size:9px;color:#888;font-weight:600;margin-top:2px;text-transform:lowercase}
+.va-ig3-row-last{text-align:right;min-width:80px}
+.va-ig3-row-last-lab{font-size:9px;color:#666;text-transform:uppercase;font-weight:600}
+.va-ig3-row-last-val{font-size:11px;color:#aaa;font-weight:600;margin-top:1px}
+.va-ig3-row-last-date{font-size:9px;color:#666;font-weight:500;margin-top:1px}
+.va-ig3-row-open{color:#666;text-decoration:none;font-size:18px;font-weight:600;width:22px;height:22px;display:flex;align-items:center;justify-content:center}
+.va-ig3-row-open:hover{color:#ec4899}
+.va-ig3-row-err{grid-column:1 / -1;color:#ef4444;font-size:11px;font-weight:600;text-align:center;margin-top:6px;padding-top:6px;border-top:1px dashed #ef444430}
+.va-ig3-row-banned{background:rgba(239,68,68,.06) !important;border-color:rgba(239,68,68,.3) !important}
+.va-ig3-row-banned .va-ig3-row-handle{color:#ef4444;text-decoration:line-through;text-decoration-color:rgba(239,68,68,.4)}
+.va-ig3-row-banned .va-ig3-row-pp{filter:grayscale(.9) opacity(.7)}
+.va-ig3-ban-badge{display:inline-flex;align-items:center;gap:5px;margin-left:8px;background:rgba(248,113,113,.14);color:#f87171;border:1px solid rgba(248,113,113,.32);font-size:10px;font-weight:700;letter-spacing:.02em;padding:2px 9px;border-radius:20px;vertical-align:middle;white-space:nowrap}
+.va-ig3-ban-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#f87171;flex-shrink:0}
+/* Pastilles Actif / Non scrapé (mêmes classes que la page Jailbreak, redéclarées
+   ici car ce bloc CSS est celui de la page Trends) */
+.jb-ok-badge{display:inline-flex;align-items:center;gap:5px;margin-left:8px;background:rgba(34,197,94,.12);color:#4ade80;border:1px solid rgba(34,197,94,.28);font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;vertical-align:middle;white-space:nowrap}
+.jb-ok-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#22c55e;box-shadow:0 0 6px #22c55e;flex-shrink:0}
+.jb-not-scraped-badge{display:inline-flex;align-items:center;gap:5px;margin-left:8px;background:rgba(154,160,166,.12);color:#9aa0a6;border:1px solid rgba(154,160,166,.28);font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;vertical-align:middle;white-space:nowrap}
+.jb-not-scraped-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#9aa0a6;flex-shrink:0}
+.va-ig3-row-banned .jb-ok-badge{display:none}
+.va-ig3-detail{display:flex;flex-direction:column;gap:8px}
+.va-ig3-preview{grid-column:1 / -1;display:grid;grid-template-columns:repeat(3,1fr);gap:2px;margin-top:10px;padding-top:10px;border-top:1px dashed #2a2a2a;max-width:340px}
+.va-ig3-thumb{aspect-ratio:1;border-radius:4px;overflow:hidden;background:#16181f;display:block;position:relative;transition:transform .12s;cursor:pointer}
+.va-ig3-thumb:hover{transform:scale(1.04);z-index:2}
+.va-ig3-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.va-ig3-thumb-play{position:absolute;top:4px;right:4px;color:#fff;font-size:11px;text-shadow:0 1px 3px rgba(0,0,0,.8);pointer-events:none}
+.va-ig3-thumb-views{position:absolute;bottom:0;left:0;right:0;padding:8px 6px 4px;color:#fff;font-size:10px;font-weight:700;background:linear-gradient(to top,rgba(0,0,0,.7),transparent);text-align:center;pointer-events:none}
+
+.va-ig3-thead{background:#0c0e13;border:1px solid #2a2a2a;border-radius:10px 10px 0 0;padding:10px 14px;display:grid;grid-template-columns:36px 1fr auto auto auto auto auto 22px 28px;gap:14px;align-items:center;font-size:11px;color:#8a8a94;text-transform:uppercase;letter-spacing:.04em;font-weight:700}
+.va-ig3-thead .r{text-align:right}
+body.light .va-ig3-thead{background:#f7f8fa;border-color:#e5e7eb;color:#6b7280}
+"""
+
+
 @ttl_cache(seconds=10)
 def _render_geelark_html() -> str:
     """Page GeeLark : push planifies + watchers + historique.
@@ -27874,48 +27931,10 @@ async function glDeleteWatcher(id, btn){
 .ext-sb-va-item.active{background:rgba(168,85,247,.15)}
 .ext-sb-section.collapsed .ext-sb-section-body{display:none !important}
 .ext-sb-section.collapsed .ext-sb-chevron{transform:rotate(-90deg)}
-.va-ig3-row{background:#0f1116;border:1px solid #2a2a2a;border-radius:10px;padding:10px 14px;display:grid;grid-template-columns:36px 1fr auto auto auto auto auto 22px 28px;gap:14px;align-items:center;position:relative;cursor:pointer;transition:all .12s}
-.va-ig3-row:hover{border-color:#ec489940}
-.va-ig3-rm-btn{background:transparent;border:1px solid #2a2a2a;color:#888;width:28px;height:28px;border-radius:7px;font-size:18px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:inherit;font-weight:700;transition:all .12s;padding:0}
-.va-ig3-rm-btn:hover{background:rgba(239,68,68,.12);border-color:#ef4444;color:#ef4444}
-.va-ig3-row-pp{width:36px;height:36px;border-radius:50%;object-fit:cover;background:#16181f}
-.va-ig3-row-name{display:flex;flex-direction:column;gap:1px;min-width:0}
-.va-ig3-row-handle{font-weight:700;font-size:13px;color:#ec4899;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;text-decoration:none;cursor:pointer;display:block}
-.va-ig3-row-handle:hover{text-decoration:underline}
-.va-ig3-row-platform{font-size:10px;color:#888;font-weight:500}
-.va-ig3-row-metric{text-align:center;min-width:55px}
-.va-ig3-row-num{font-size:14px;font-weight:800;color:#fff;line-height:1.1}
-.va-ig3-row-num.va-ig3-green{color:#22c55e}
-.va-ig3-row-lab{font-size:9px;color:#888;font-weight:600;margin-top:2px;text-transform:lowercase}
-.va-ig3-row-last{text-align:right;min-width:80px}
-.va-ig3-row-last-lab{font-size:9px;color:#666;text-transform:uppercase;font-weight:600}
-.va-ig3-row-last-val{font-size:11px;color:#aaa;font-weight:600;margin-top:1px}
-.va-ig3-row-last-date{font-size:9px;color:#666;font-weight:500;margin-top:1px}
-.va-ig3-row-open{color:#666;text-decoration:none;font-size:18px;font-weight:600;width:22px;height:22px;display:flex;align-items:center;justify-content:center}
-.va-ig3-row-open:hover{color:#ec4899}
-.va-ig3-row-err{grid-column:1 / -1;color:#ef4444;font-size:11px;font-weight:600;text-align:center;margin-top:6px;padding-top:6px;border-top:1px dashed #ef444430}
-.va-ig3-row-banned{background:rgba(239,68,68,.06) !important;border-color:rgba(239,68,68,.3) !important}
-.va-ig3-row-banned .va-ig3-row-handle{color:#ef4444;text-decoration:line-through;text-decoration-color:rgba(239,68,68,.4)}
-.va-ig3-row-banned .va-ig3-row-pp{filter:grayscale(.9) opacity(.7)}
-.va-ig3-ban-badge{display:inline-flex;align-items:center;gap:5px;margin-left:8px;background:rgba(248,113,113,.14);color:#f87171;border:1px solid rgba(248,113,113,.32);font-size:10px;font-weight:700;letter-spacing:.02em;padding:2px 9px;border-radius:20px;vertical-align:middle;white-space:nowrap}
-.va-ig3-ban-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#f87171;flex-shrink:0}
-/* Pastilles Actif / Non scrapé (mêmes classes que la page Jailbreak, redéclarées
-   ici car ce bloc CSS est celui de la page Trends) */
-.jb-ok-badge{display:inline-flex;align-items:center;gap:5px;margin-left:8px;background:rgba(34,197,94,.12);color:#4ade80;border:1px solid rgba(34,197,94,.28);font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;vertical-align:middle;white-space:nowrap}
-.jb-ok-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#22c55e;box-shadow:0 0 6px #22c55e;flex-shrink:0}
-.jb-not-scraped-badge{display:inline-flex;align-items:center;gap:5px;margin-left:8px;background:rgba(154,160,166,.12);color:#9aa0a6;border:1px solid rgba(154,160,166,.28);font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;vertical-align:middle;white-space:nowrap}
-.jb-not-scraped-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#9aa0a6;flex-shrink:0}
-.va-ig3-row-banned .jb-ok-badge{display:none}
-.va-ig3-detail{display:flex;flex-direction:column;gap:8px}
+"""  + _CSS_VA_IG3 + """
 .ext-assign-row{grid-column:1 / -1;display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:1px dashed #2a2a2a;flex-wrap:wrap}
 .ext-mini-select,.ext-mini-input{background:#16181f;border:1px solid #2a2a2a;color:#fff;padding:5px 10px;border-radius:6px;font-size:11px;font-family:inherit;transition:border-color .3s}
 .ext-mini-input{min-width:140px}
-.va-ig3-preview{grid-column:1 / -1;display:grid;grid-template-columns:repeat(3,1fr);gap:2px;margin-top:10px;padding-top:10px;border-top:1px dashed #2a2a2a;max-width:340px}
-.va-ig3-thumb{aspect-ratio:1;border-radius:4px;overflow:hidden;background:#16181f;display:block;position:relative;transition:transform .12s;cursor:pointer}
-.va-ig3-thumb:hover{transform:scale(1.04);z-index:2}
-.va-ig3-thumb img{width:100%;height:100%;object-fit:cover;display:block}
-.va-ig3-thumb-play{position:absolute;top:4px;right:4px;color:#fff;font-size:11px;text-shadow:0 1px 3px rgba(0,0,0,.8);pointer-events:none}
-.va-ig3-thumb-views{position:absolute;bottom:0;left:0;right:0;padding:8px 6px 4px;color:#fff;font-size:10px;font-weight:700;background:linear-gradient(to top,rgba(0,0,0,.7),transparent);text-align:center;pointer-events:none}
 @media(max-width:900px){.ext-sb-layout{grid-template-columns:1fr;min-height:auto}}
 </style>
 """
@@ -28535,24 +28554,16 @@ def _render_jailbreak_html() -> str:
         # Trends -> sans ça, « Banni » s'affichait en texte brut sur la page Jailbreak.
         ".va-ig3-ban-badge{display:inline-flex;align-items:center;gap:5px;margin-left:8px;background:rgba(248,113,113,.14);color:#f87171;border:1px solid rgba(248,113,113,.32);font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;vertical-align:middle;white-space:nowrap}"
         ".va-ig3-ban-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#f87171;flex-shrink:0}"
-        # MEME PIEGE que la pastille juste au-dessus, en pire : le tableau des
-        # comptes empruntait sa mise en colonnes a DEUX autres sections —
-        # .va-ig3-row au bloc GeeLark, .va-ig3-thead au bloc « liste VA ».
-        # Depuis que ces sections sont differees, leur CSS ne part plus avec la
-        # page : l'en-tete se lisait « CompteAbonnesVues 24hVues sem… » d'un
-        # seul tenant et les valeurs s'empilaient a la verticale.
-        # La page Jailbreak declare donc sa propre grille. Les 9 colonnes
-        # correspondent aux 9 cases de _ACCT_THEAD ; toute case ajoutee la-haut
-        # doit etre ajoutee ici.
-        ".jb-detail-accounts .va-ig3-thead,.jb-detail-accounts .va-ig3-row{"
-        "display:grid;grid-template-columns:36px 1fr auto auto auto auto auto 22px 28px;"
-        "gap:14px;align-items:center}"
-        ".jb-detail-accounts .va-ig3-thead{background:#0c0e13;border:1px solid #23262f;"
-        "border-radius:10px 10px 0 0;padding:10px 14px;font-size:11px;color:#8a8a94;"
-        "text-transform:uppercase;letter-spacing:.04em;font-weight:700}"
-        ".jb-detail-accounts .va-ig3-thead .r{text-align:right}"
-        "body.light .jb-detail-accounts .va-ig3-thead{background:#f7f8fa;"
-        "border-color:#e5e7eb;color:#6b7280}"
+        # MEME PIEGE que la pastille juste au-dessus, mais sur toute la ligne :
+        # le tableau des comptes n'a JAMAIS eu sa mise en page. Il l'empruntait
+        # au bloc de la page Trends/GeeLark — vignettes, colonnes, cellules de
+        # stats, tout. Tant que cette section partait avec la page, ca tenait
+        # par accident ; depuis qu'elle est servie a la demande, le tableau se
+        # retrouvait nu : en-tete d'un seul tenant, vignettes debordantes,
+        # colonnes disparues.
+        #
+        # _CSS_VA_IG3 est desormais LA definition, et cette page la sert aussi.
+        + _CSS_VA_IG3 +
         ".jb-detail-accounts{overflow-x:auto;max-width:1400px}"
         ".jb-prog-spin{width:12px;height:12px;border-radius:50%;border:2px solid rgba(34,197,94,.25);border-top-color:#22c55e;display:inline-block;animation:jbSpin .8s linear infinite;flex-shrink:0}"
         ".jb-row:hover{background:rgba(255,255,255,.02)}"

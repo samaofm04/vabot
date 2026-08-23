@@ -4322,9 +4322,21 @@ try:
     # l en-tete se lisait « CompteAbonnesVues 24hVues sem… » d un seul tenant et
     # les valeurs s empilaient. Une section doit emporter sa propre mise en page.
     check("jailbreak : le fragment porte la grille du tableau des comptes",
-          "jb-detail-accounts .va-ig3-thead" in _hJb
+          ".va-ig3-thead{" in _hJb
           and "grid-template-columns:36px 1fr auto" in _hJb,
           "%d octets" % len(_hJb))
+    # La vignette est le symptome le plus visible quand la CSS manque : sans
+    # taille, l image s affiche en pleine largeur et le texte lui passe dessus.
+    check("jailbreak : le fragment porte la taille des vignettes",
+          ".va-ig3-row-pp{width:36px" in _hJb)
+    # Une seule definition, servie a qui en a besoin. Deux copies, c est deux
+    # comportements le jour ou l une bouge.
+    _srcSh = _plCa.Path("web_upload.py").read_text(encoding="utf-8")
+    check("jailbreak : la mise en page du tableau n existe qu en UN endroit",
+          _srcSh.count("_CSS_VA_IG3 = ") == 1
+          and _srcSh.count("_CSS_VA_IG3") >= 3,
+          "%d definition(s), %d usage(s)"
+          % (_srcSh.count("_CSS_VA_IG3 = "), _srcSh.count("_CSS_VA_IG3")))
     # Les 9 colonnes doivent correspondre aux 9 cases de _ACCT_THEAD : une case
     # ajoutee a l en-tete sans colonne correspondante recasse tout.
     _srcJb = _plCa.Path("web_upload.py").read_text(encoding="utf-8")
