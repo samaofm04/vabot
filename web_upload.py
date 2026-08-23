@@ -8713,13 +8713,13 @@ document.addEventListener('click',function(e){
      comptes par identite, l user gere lui-meme). -->
 <div class="group" id="grp-jailbreak">
   <button class="group-head" onclick="toggleGroup('jailbreak')">
-    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-    <span class="label">Jailbreak</span>
+    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
+    <span class="label">Social Analytics</span>
     <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
   <div class="items">
-    <button class="item" id="tab-jailbreak" onclick="showTab('jailbreak','jailbreak','Jailbreak — Comptes par identité','Gestion manuelle des comptes Jailbreak par identité (Amelia, Julia, ...)')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+    <button class="item" id="tab-jailbreak" onclick="showTab('jailbreak','jailbreak','Social Analytics — Comptes par identité','Les comptes Instagram par identité et par VA')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
       Comptes par identité
     </button>
     <button class="item" id="tab-jbanalyse" onclick="showTab('jailbreak','jbanalyse','Analyse vues Instagram','Vues des comptes JB par identité et par VA (scrape 2×/jour)')">
@@ -28440,9 +28440,9 @@ def _render_jailbreak_html() -> str:
         "<div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;margin-bottom:18px'>"
         "<div>"
         "<h2 style='margin:0 0 4px;font-size:22px;display:flex;align-items:center;gap:10px'>"
-        "🔓 Jailbreak"
+        "📊 Social Analytics"
         "<span style='font-size:11px;background:#ec4899;color:#fff;padding:3px 10px;border-radius:8px;font-weight:800;letter-spacing:.5px'>COMPTES MANUELS</span></h2>"
-        "<p style='margin:0;color:#888;font-size:13px'>Stockage des comptes Jailbreak par identité — pas d'automation, juste un référentiel sécurisé.</p>"
+        "<p style='margin:0;color:#888;font-size:13px'>Les comptes Instagram par identité — pas d'automation, juste un référentiel sécurisé.</p>"
         "</div>"
         f"<div style='display:flex;gap:14px;align-items:center'>"
         f"<button type='button' id='jb-scrape-now-btn' onclick='jbScrapeNow(this)' "
@@ -41586,7 +41586,7 @@ ROLE_MENU_STRUCTURE = [
         # Jailbreak ÉCLATÉ en 3 cases : avant, cocher « Jailbreak » ouvrait aussi
         # Analyse vues ET Activité VA (une case en donnait trois -> « il voit
         # trop de choses »). Maintenant chaque page se coche séparément.
-        {"key": "jailbreak", "name": "Jailbreak — Comptes par identité", "perms": ["view", "edit"]},
+        {"key": "jailbreak", "name": "Social Analytics — Comptes par identité", "perms": ["view", "edit"]},
         {"key": "jbanalyse", "name": "Jailbreak — Analyse vues", "perms": ["view"]},
         {"key": "jbactivite", "name": "Jailbreak — Activité VA (assiduité, paie)", "perms": ["view", "edit"]},
     ]},

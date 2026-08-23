@@ -4335,6 +4335,25 @@ try:
     check("jailbreak : le fragment porte le theme clair du tableau",
           "body.light .va-ig3-row{background:#fff" in _hJb
           and "body.light .va-ig3-row-num" in _hJb)
+
+    # Le menu s appelle « Social Analytics » et porte un graphe, plus un cadenas
+    # — mais SEUL l affichage change. Renommer les cles « jailbreak » casserait
+    # les routes, les droits, les identifiants DOM et la synchro Sheets.
+    _hMenu = _cJb.get("/").get_data(as_text=True)
+    _iG = _hMenu.find("grp-jailbreak")
+    _sec = _hMenu[_iG:_iG + 900] if _iG >= 0 else ""
+    check("menu : la section s appelle Social Analytics",
+          "Social Analytics" in _sec, _sec[:80])
+    check("menu : elle porte le graphe, plus le cadenas",
+          "M18 17V9" in _sec and "M7 11V7a5 5 0 0 1 10 0v4" not in _sec)
+    check("menu : les cles internes n ont pas bouge",
+          all(k in _hMenu for k in ("showTab('jailbreak','jailbreak'",
+                                    'id="tab-jailbreak"',
+                                    "toggleGroup('jailbreak')")))
+    # Le Vault PRO, lui, garde son cadenas : il a du sens la-bas.
+    _iP = _hMenu.find("grp-provault")
+    check("menu : le Vault PRO garde son cadenas",
+          "M7 11V7a5 5 0 0 1 10 0v4" in _hMenu[_iP:_iP + 700] if _iP >= 0 else False)
     # Une seule definition, servie a qui en a besoin. Deux copies, c est deux
     # comportements le jour ou l une bouge.
     _srcSh = _plCa.Path("web_upload.py").read_text(encoding="utf-8")
