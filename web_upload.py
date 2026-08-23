@@ -10763,7 +10763,7 @@ document.addEventListener('keydown', function(e){
     <div class="action-count"><span id="txt-sel-count">0</span> Sélectionné(s)</div>
     <div style="flex:1"></div>
     <button class="action-icon" onclick="txtSelAll()" title="Tout sélectionner / tout désélectionner" style="width:auto;padding:0 12px;font-size:12.5px;font-weight:700">☑ Tout</button>
-    <button class="action-icon" onclick="txtShareOpen()" title="Partager la sélection à d'autres models" style="width:auto;padding:0 12px;font-size:12.5px;font-weight:700;color:#c084fc;display:inline-flex;align-items:center;gap:6px">
+    <button type="button" class="btn-partager" onclick="txtShareOpen()" title="Copier la sélection vers d'autres models — les originaux restent">
       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="10.6" x2="15.4" y2="6.4"/><line x1="8.6" y1="13.4" x2="15.4" y2="17.6"/></svg>Partager
     </button>
     <button class="action-icon" onclick="txtSelDelete()" title="Supprimer la sélection">
@@ -10781,7 +10781,7 @@ document.addEventListener('keydown', function(e){
     <div class="action-count"><span id="cap-sel-count">0</span> Sélectionnée</div>
     <div style="flex:1"></div>
     <button class="action-icon" onclick="capSelAll()" title="Tout sélectionner / tout désélectionner" style="width:auto;padding:0 12px;font-size:12.5px;font-weight:700">☑ Tout</button>
-    <button class="action-icon" onclick="capShareOpen()" title="Partager la sélection à d'autres models" style="width:auto;padding:0 12px;font-size:12.5px;font-weight:700;color:#c084fc;display:inline-flex;align-items:center;gap:6px">
+    <button type="button" class="btn-partager" onclick="capShareOpen()" title="Copier la sélection vers d'autres models — les originaux restent">
       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="10.6" x2="15.4" y2="6.4"/><line x1="8.6" y1="13.4" x2="15.4" y2="17.6"/></svg>Partager
     </button>
     <button class="action-icon" onclick="capSelDelete()" title="Supprimer la sélection">
@@ -10803,6 +10803,25 @@ body.light .action-close{color:#666}
 body.light .action-close:hover{background:#f3f4f6;color:#111}
 body.light .action-count{color:#111}
 body.light .action-icon{color:#666}
+
+/* ===== « Partager » : UN seul bouton, partout =====
+   Il en existait QUATRE habillages pour la meme action : texte violet nu dans
+   les Bios et les Captions, pastille violette dans les Templates, pastille
+   GRISE avec une AUTRE icone dans les Photos de profil. Meme geste, quatre
+   apparences — on hesite avant de cliquer, et on croit que ce n'est pas la
+   meme chose. Une classe, un style, une icone. */
+.btn-partager{display:inline-flex;align-items:center;gap:8px;padding:9px 16px;
+  background:rgba(168,85,247,.12);border:1px solid rgba(168,85,247,.45);
+  color:#c084fc;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;
+  font-family:inherit;width:auto;height:auto;margin:0;transition:all .15s}
+.btn-partager:hover{background:rgba(168,85,247,.22);border-color:rgba(168,85,247,.7);
+  color:#d8b4fe}
+.btn-partager:focus-visible{outline:2px solid #c084fc;outline-offset:2px}
+/* Theme clair : le violet translucide sur fond blanc devient illisible, il
+   faut du contraste et non de la transparence. */
+body.light .btn-partager{background:rgba(147,51,234,.10);
+  border-color:rgba(147,51,234,.35);color:#7e22ce}
+body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
 </style>
 
 <!-- ▶ Modal Montage (génération variations d'un reel + envoi Discord) -->
@@ -18512,11 +18531,9 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
             # ↗ Partage des templates sélectionnés (cercles ⚪) à d'autres models
             # — même modale que « Appliquer ce montage à… », montage compris.
             add_media_btn = (
-                "<button type='button' onclick='tplShareOpen()' "
+                "<button type='button' class='btn-partager' onclick='tplShareOpen()' "
                 "title='Copier les templates sélectionnés (cercle ⚪) chez les autres models — montage, description et exemple compris' "
-                "style='display:inline-flex;align-items:center;gap:8px;padding:9px 16px;background:rgba(168,85,247,.12);"
-                "border:1px solid rgba(168,85,247,.45);color:#c084fc;border-radius:10px;font-size:13px;font-weight:700;"
-                "cursor:pointer;font-family:inherit;box-shadow:0 4px 12px rgba(168,85,247,.12);margin-right:8px'>"
+                "style='margin-right:8px'>"
                 "<svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' stroke-width='2.2' "
                 "stroke-linecap='round' stroke-linejoin='round'><circle cx='18' cy='5' r='3'/><circle cx='6' cy='12' r='3'/>"
                 "<circle cx='18' cy='19' r='3'/><line x1='8.6' y1='10.6' x2='15.4' y2='6.4'/><line x1='8.6' y1='13.4' x2='15.4' y2='17.6'/></svg>"
@@ -18547,12 +18564,10 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
             # « Partager » façon Share d'Infloww : COPIE les PP sélectionnées
             # (cercles ⚪) vers d'autres identités — les originaux restent.
             add_media_btn += (
-                "<button type='button' onclick='ppApplyOpen()' "
-                "title='Copier les PP sélectionnées (⚪) vers d autres identités' "
-                "style='display:inline-flex;align-items:center;gap:8px;padding:9px 16px;"
-                "background:#1a1a1f;border:1px solid #34343a;color:#c4c4cc;border-radius:10px;"
-                "font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;margin-left:8px'>"
-                "<svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7'/><polyline points='16 6 12 2 8 6'/><line x1='12' y1='2' x2='12' y2='15'/></svg>"
+                "<button type='button' class='btn-partager' onclick='ppApplyOpen()' "
+                "title='Copier les PP sélectionnées (⚪) vers d autres identités — les originaux restent' "
+                "style='margin-left:8px'>"
+                "<svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><circle cx='18' cy='5' r='3'/><circle cx='6' cy='12' r='3'/><circle cx='18' cy='19' r='3'/><line x1='8.6' y1='10.6' x2='15.4' y2='6.4'/><line x1='8.6' y1='13.4' x2='15.4' y2='17.6'/></svg>"
                 "Partager</button>"
             )
 
@@ -40345,6 +40360,34 @@ _NUMGEN_PAYS = (
 )
 
 
+@ttl_cache(seconds=300)
+def _numgen_stock() -> dict:
+    """{code pays: nombre de numeros Instagram disponibles}.
+
+    Demande au fournisseur ce qu'il a REELLEMENT, au lieu de proposer une
+    liste de pays au hasard. getNumbersStatus est une lecture : elle
+    n'achete rien et ne consomme aucun credit.
+
+    Mis en cache cinq minutes : la page des reglages ne doit pas declencher
+    six appels reseau a chaque affichage.
+    """
+    import json as _j
+    out = {}
+    try:
+        import numgen
+    except Exception:
+        return out
+    for code, _lib in _NUMGEN_PAYS:
+        try:
+            t = numgen._stubs("getatext", "getNumbersStatus", country=code)
+            d = _j.loads(t) if t and t.startswith("{") else {}
+            v = d.get("instagram/threads_0")
+            out[code] = int(v) if v is not None and str(v).isdigit() else 0
+        except Exception:
+            pass          # stock inconnu pour ce pays : on n'affirmera rien
+    return out
+
+
 def _render_numgen_settings() -> str:
     """Section Réglages : générateurs de numéros et de mails.
 
@@ -40378,10 +40421,29 @@ def _render_numgen_settings() -> str:
         "<span style='background:%s;color:#fff;padding:2px 9px;border-radius:5px;"
         "font-size:11px'>%s</span>" % (("#22c55e", "CLÉ POSÉE") if ok
                                        else ("#dc2626", "AUCUNE CLÉ")))
-    options = "".join(
-        "<option value='%s'%s>%s</option>"
-        % (c, " selected" if c == pays else "", html_escape(lib))
-        for c, lib in _NUMGEN_PAYS)
+
+    # Le stock RÉEL, demandé au fournisseur. Sans lui, cette liste proposait
+    # des pays où il n'a aucun numéro Instagram — on choisissait à l'aveugle
+    # et on retombait sur « aucun numéro dispo ». Mesure du 23/08 : 5061 aux
+    # États-Unis, ZÉRO partout ailleurs (France, Allemagne, UK, Russie).
+    stock = _numgen_stock()
+
+    def _opt(code, libelle):
+        n = stock.get(code)
+        if n is None:
+            suffixe = ""              # stock inconnu : on n'affirme rien
+        elif n > 0:
+            suffixe = " — %s dispo" % f"{n:,}".replace(",", " ")
+        else:
+            suffixe = " — aucun numéro"
+        return ("<option value='%s'%s>%s%s</option>"
+                % (code, " selected" if code == pays else "",
+                   html_escape(libelle), html_escape(suffixe)))
+
+    # Les pays qui ont du stock d'abord : c'est ce qu'on veut choisir.
+    _ordonnes = sorted(_NUMGEN_PAYS,
+                       key=lambda cl: -(stock.get(cl[0]) or 0))
+    options = "".join(_opt(c, lib) for c, lib in _ordonnes)
     inconnu = ("<option value='%s' selected>code %s (déjà réglé)</option>" % (pays, pays)
                if pays not in {c for c, _ in _NUMGEN_PAYS} else "")
 
