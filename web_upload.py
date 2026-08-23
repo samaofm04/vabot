@@ -19350,10 +19350,8 @@ def _render_cloud_captions_html() -> str:
         "<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
         # ↗ Partager = même modale que « Appliquer ce montage à… » (nxModelPicker) :
         # copie la sélection ⚪ (sinon TOUTES les captions) chez les models cochées.
-        "<button type='button' data-capact='share' title='Copier ces captions chez les autres models (sélection ⚪, sinon toutes)' "
-        "style='display:inline-flex;align-items:center;gap:8px;padding:9px 16px;background:rgba(168,85,247,.12);"
-        "border:1px solid rgba(168,85,247,.45);color:#c084fc;border-radius:10px;font-size:13px;font-weight:700;"
-        "cursor:pointer;font-family:inherit;box-shadow:0 4px 12px rgba(168,85,247,.12)'>"
+        "<button type='button' class='btn-partager' data-capact='share' "
+        "title='Copier ces captions chez les autres models (sélection ⚪, sinon toutes)'>"
         "<svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' stroke-width='2.2' "
         "stroke-linecap='round' stroke-linejoin='round'><circle cx='18' cy='5' r='3'/><circle cx='6' cy='12' r='3'/>"
         "<circle cx='18' cy='19' r='3'/><line x1='8.6' y1='10.6' x2='15.4' y2='6.4'/><line x1='8.6' y1='13.4' x2='15.4' y2='17.6'/></svg>"

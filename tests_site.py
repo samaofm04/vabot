@@ -3199,6 +3199,41 @@ except Exception as _eSel:
 
 print()
 print("=" * 70)
+print("COHERENCE VISUELLE : le bouton « Partager »")
+print("=" * 70)
+try:
+    import re as _rePa
+    import pathlib as _plPa
+
+    # Il en existait QUATRE habillages pour la meme action : texte violet nu
+    # dans les Bios et les Captions, pastille violette dans les Templates et la
+    # barre Caption, pastille GRISE avec une AUTRE icone dans les Photos de
+    # profil. Meme geste, quatre apparences — on hesite avant de cliquer, et on
+    # croit que ce n est pas la meme chose.
+    _srcPa = _plPa.Path("web_upload.py").read_text(encoding="utf-8")
+    _mPa = _rePa.compile(r"<button\b[^>]*>(?:(?!</button>).){0,900}?Partager\s*</button>",
+                         _rePa.S)
+    _btnPa = _mPa.findall(_srcPa)
+    check("partager : au moins quatre boutons trouves dans le source",
+          len(_btnPa) >= 4, "%d trouve(s)" % len(_btnPa))
+    _sansPa = [b for b in _btnPa if "btn-partager" not in b]
+    check("partager : TOUS portent la classe unique",
+          not _sansPa,
+          _rePa.sub(r"\s+", " ", _sansPa[0])[:110] if _sansPa else "")
+    # Deux icones differentes servaient la meme action : les cercles relies
+    # (partage) et une fleche d export. Une seule doit rester.
+    _fleche = [b for b in _btnPa if "polyline points='16 6 12 2 8 6'" in b]
+    check("partager : plus aucune icone d export detournee en partage",
+          not _fleche, "%d bouton(s)" % len(_fleche))
+    check("partager : la classe est definie, et pour les DEUX themes",
+          ".btn-partager{" in _srcPa and "body.light .btn-partager" in _srcPa)
+    check("partager : elle a un etat visible au clavier",
+          ".btn-partager:focus-visible" in _srcPa)
+except Exception as _ePa:
+    check("partager : testable", False, repr(_ePa)[:160])
+
+print()
+print("=" * 70)
 print("VEILLE INSTAGRAM RENDUE A LA DEMANDE (le navigateur qui se fige)")
 print("=" * 70)
 try:
