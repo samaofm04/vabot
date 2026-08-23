@@ -42135,8 +42135,16 @@ def create_app():
     # Politique : owner/admin = tout ; rôle restreint = DENY par défaut sur
     # toute écriture, sauf les routes dont il a réellement besoin.
     # ==================================================================
+    # Autorisations d ECRITURE pour un role restreint. Chaque entree est soit un
+    # prefixe nu (autorise pour tous les roles restreints), soit un couple
+    # (prefixe, onglet requis) — car autoriser une ecriture a « tous les roles
+    # restreints » revient a l ouvrir a des gens qui n ont meme pas l ecran
+    # correspondant.
     _RESTRICTED_WRITE_ALLOW = (
-        "/chatting/",          # planning chatteurs (onglet chatplanning)
+        # Le planning n est ecrivable que par qui possede l onglet. Sans cette
+        # condition, un compte « montage » pouvait supprimer l emploi du temps
+        # ou ecraser une semaine entiere depuis la console.
+        ("/chatting/", "chatplanning"),
         "/logout",
         # NB : /settings/my_password est autorisé plus haut par un retour
         # anticipé du guard (exact-match), pas via cette liste de préfixes.
@@ -42184,6 +42192,14 @@ def create_app():
         # Toutes les bios et CTA de toutes les models, avec le handle Insta
         # associe : pas de raison qu'un role restreint les enumere.
         "/textpool/render",
+        # Des routes qui ECRIVENT alors qu'elles repondent a un GET. Le garde
+        # ne regarde que la methode HTTP : elles passaient donc au travers.
+        # /ventes-sheet scrape MyPuls, reecrit les six onglets du classeur, et
+        # affiche le nombre de ventes, la liste NOMINATIVE des ecarts et le lien
+        # du classeur. Les deux autres ecrivent des fichiers de configuration
+        # alors que tous les POST equivalents sont deja reserves.
+        "/ventes-sheet", "/sfssetup/fetch_mypuls_subs",
+        "/mypulslive/refresh_creators",
         # revenus GLOBAUX et rapport de PAIE des VAs : jamais un onglet d'un
         # role restreint (le chatter n'a que sa propre page revenus, servie
         # cote page ; ces GET-la exposaient le CA agence et les salaires VA).
@@ -42273,7 +42289,19 @@ def create_app():
                       f"({_live_role()}) -> {path}", flush=True)
                 return jsonify({"ok": False, "error": "forbidden"}), 403
             return None
-        allowed = any(path.startswith(p) for p in _RESTRICTED_WRITE_ALLOW)
+        # Une entree peut exiger un ONGLET en plus du prefixe : autoriser une
+        # ecriture a « tous les roles restreints » revient sinon a l ouvrir a
+        # des gens qui n ont meme pas l ecran correspondant.
+        allowed = False
+        for _e in _RESTRICTED_WRITE_ALLOW:
+            if isinstance(_e, tuple):
+                _pref, _onglet = _e
+                if path.startswith(_pref) and _onglet in (_at or ()):
+                    allowed = True
+                    break
+            elif path.startswith(_e):
+                allowed = True
+                break
         if allowed and not any(path.startswith(p) for p in _ADMIN_ONLY_WRITE):
             return None
         print(f"[secu] écriture refusée : {session.get('username')} "

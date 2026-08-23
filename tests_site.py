@@ -344,6 +344,21 @@ try:
         check(f"rôle restreint bloqué : {_label}", _r.status_code == 403, f"HTTP {_r.status_code}")
     _r = _c.post("/chatting/update_cell", data={"edt": "x", "row": "0", "col": "0", "value": "v"})
     check("rôle restreint garde son planning", _r.status_code != 403, f"HTTP {_r.status_code}")
+    # ... mais SEULEMENT s il possede l onglet. « /chatting/ » etait autorise a
+    # tous les roles restreints sans le verifier : un compte « montage »
+    # pouvait supprimer l emploi du temps depuis la console, alors que la
+    # LECTURE du meme planning lui etait correctement refusee, deux fois.
+    _w._load_web_users = lambda: {"mont1": {"role": "montage", "password": "x"}}
+    _cm = _app.test_client()
+    with _cm.session_transaction() as _s:
+        _s["auth"] = True
+        _s["username"] = "mont1"
+        _s["role"] = "montage"
+    _rm = _cm.post("/chatting/update_cell",
+                   data={"edt": "x", "row": "0", "col": "0", "value": "v"})
+    check("rôle sans l onglet planning : ecriture refusee",
+          _rm.status_code == 403, f"HTTP {_rm.status_code}")
+    _w._load_web_users = lambda: {"chatteur1": {"role": "chatter", "password": "x"}}
     _w._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"}}
     _c2 = _app.test_client()
     with _c2.session_transaction() as _s:
