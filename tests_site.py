@@ -3332,12 +3332,14 @@ try:
     # bat meme pas le style inline. Verifie sur la page — une premiere version
     # plus specifique mais SANS !important laissait le contraste a 1,48.
     # La specificite, elle, ne sert qu a departager DEUX regles !important.
-    for _r in ('body.light #ig-dl-bar [style*="color:#cbd5e1"]',
-               'body.light .reel-expand [style*="color:#888"]'):
-        _mR = _reTh.search(_reTh.escape(_r) + r"\{[^}]*\}", _srcTh)
-        check("theme clair : « %s » porte !important" % _r.split("]")[0][11:],
-              bool(_mR) and "!important" in _mR.group(0),
-              "sans lui, le style inline gagne et rien ne change")
+    _sansImp = [_m.group(0)[:70] for _m in
+                _reTh.finditer(r'body\.light[^{}]*\[style\*="color:[^{}]*\{[^}]*\}', _srcTh)
+                if "!important" not in _m.group(0)]
+    check("theme clair : aucun remap de couleur inline n oublie !important",
+          not _sansImp,
+          "inutiles, le style inline gagne : %s" % " | ".join(_sansImp[:3]))
+    check("theme clair : les pastilles flottantes SFW / marche sont lisibles",
+          "body.light #market-floating button{color:#4b5563!important}" in _srcTh)
 except Exception as _eTh:
     check("theme clair : testable", False, repr(_eTh)[:160])
 

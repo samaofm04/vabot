@@ -1185,8 +1185,8 @@ body.light .sidebar .subgroup .sub-items{border-left-color:#e5e7eb}
 body.light #ig-dl-bar [style*="color:#cbd5e1"]{color:#475569!important}
 body.light .reel-expand [style*="color:#888"]{color:#9aa0a6!important}
 body.light .reel-caption-area [style*="color:#888"]{color:#9aa0a6!important}
-body.light #sfw-floating [style*="color:#9ca3af"],body.light #sfw-floating span{color:#4b5563}
-body.light #market-floating button{color:#4b5563}
+body.light #sfw-floating [style*="color:#9ca3af"],body.light #sfw-floating span,
+body.light #market-floating button{color:#4b5563!important}
 /* EDITEUR DE MONTAGE — il avait recu ses regles claires pour les SURFACES
    (.ce-app, .ce-title, .ce-lib, .ce-center, .ce-right passent au blanc)
    mais pas pour ce qui est POSE dessus. Resultat en theme clair :
