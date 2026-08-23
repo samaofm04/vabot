@@ -4442,15 +4442,17 @@ try:
         return {"team_id": "tm_" + espace[:6], "team_name": espace,
                 "group_id": "grp_" + gid, "group_name": nom, "link_count": n}
 
-    _crCl._GROUPES_CACHE.update({"ts": _tCl.time(), "en_cours": False, "groupes": [
+    _crCl._GROUPES_CACHE.update({"ts": _tCl.time(), "tache": None, "groupes": [
         _gCl("Hybride", "Threads US", "hyb", 11),
         _gCl("HYBRIDE US", "marche francais", "hybus", 3),
         _gCl("Amelia", "marche francais", "ame", 14),
         _gCl("VA 3 (Laboule)", "KHLOE", "va3"),
     ] + [_gCl("G%02d" % i, "marche francais", "g%02d" % i) for i in range(30)]})
 
-    class _FauxCogCl:
-        pass
+    # Le faux cog doit porter la VRAIE methode : sans elle, l autocompletion
+    # tombe dans sa garde et rend [], et les tests « passent » sur du vide.
+    _FauxCogCl = type("_FauxCogCl", (),
+                      {"_ac_groupe_reel": _crCl.ClickRecap._ac_groupe_reel})
 
     def _acCl(frappe):
         return _aioCl.run(_crCl.ClickRecap._ac_groupe(_FauxCogCl(), None, frappe))
@@ -4460,14 +4462,15 @@ try:
           _rCl == ["Hybride", "HYBRIDE US"], str(_rCl))
     # Le workspace doit figurer dans le libelle : « Hybride » existe dans
     # plusieurs workspaces, sans lui on ne saurait pas lequel on choisit.
+    _hybCl = _acCl("hyb")
     check("clics : le workspace est affiche a cote du groupe",
-          all(" — " in c.name for c in _acCl("hyb")),
-          str([c.name for c in _acCl("hyb")]))
+          bool(_hybCl) and all(" — " in c.name for c in _hybCl),
+          str([c.name for c in _hybCl]))
     # La VALEUR porte workspace + groupe : la resolution par nom seul ne cherche
     # que dans deux workspaces sur sept et se trompe sur les homonymes.
     check("clics : la valeur porte le workspace ET le groupe",
-          all("|grp_" in c.value for c in _acCl("hyb")),
-          str([c.value for c in _acCl("hyb")]))
+          bool(_hybCl) and all("|grp_" in c.value for c in _hybCl),
+          str([c.value for c in _hybCl]))
     # On doit pouvoir chercher par WORKSPACE aussi.
     check("clics : chercher par workspace fonctionne",
           [c.name.split(" — ")[0] for c in _acCl("khlo")] == ["VA 3 (Laboule)"],
@@ -4480,10 +4483,21 @@ try:
           _acCl("zzzz") == [])
     # GMS injoignable doit rendre une liste vide, pas lever : une exception
     # laisserait la commande sans autocompletion et sans explication.
-    _crCl._GROUPES_CACHE.update({"ts": 0, "groupes": [], "en_cours": True})
-    check("clics : GMS injoignable -> liste vide, aucune exception",
-          _acCl("x") == [])
-    _crCl._GROUPES_CACHE["en_cours"] = False
+    # GMS injoignable, pour de vrai : on fait echouer le chargement lui-meme.
+    # Sans ca le test rechargeait les vrais groupes et ne prouvait rien.
+    _vraiChargeCl = _crCl._charger_groupes_gms
+
+    async def _bouumCl():
+        raise RuntimeError("GetMySocial injoignable (simule)")
+
+    _crCl._charger_groupes_gms = _bouumCl
+    _crCl._GROUPES_CACHE.update({"ts": 0, "groupes": [], "tache": None})
+    try:
+        check("clics : GMS injoignable -> liste vide, aucune exception",
+              _acCl("x") == [])
+    finally:
+        _crCl._charger_groupes_gms = _vraiChargeCl
+        _crCl._GROUPES_CACHE.update({"ts": 0, "groupes": [], "tache": None})
 except Exception as _eCl:
     check("clics : report testable", False, repr(_eCl)[:160])
 

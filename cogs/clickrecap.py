@@ -295,41 +295,63 @@ async def _charger_groupes_gms() -> list:
     return out
 
 
-def _rafraichir_groupes(bot=None) -> None:
-    """Relance le chargement des groupes EN FOND, sans faire attendre personne.
+def _rafraichir_groupes(bot=None):
+    """Lance (ou retrouve) le chargement des groupes EN FOND. Rend la tache.
 
-    Discord coupe une autocompletion qui depasse 3 secondes, et sept
-    workspaces prennent plus que ca. On ne bloque donc jamais l'autocompletion
-    sur le reseau : elle sert le cache, qui se remplit de son cote.
+    Rendre la tache compte : l'autocompletion l'ATTEND avec un delai, au lieu
+    d'envelopper le chargement dans un wait_for. La difference n'est pas un
+    detail — wait_for ANNULE la coroutine quand le delai expire, si bien que le
+    travail etait jete a chaque frappe et n'aboutissait jamais. Le cache
+    restait vide indefiniment, et l'autocompletion echouait a chaque fois.
     """
-    if _GROUPES_CACHE.get("en_cours"):
-        return
-    _GROUPES_CACHE["en_cours"] = True
+    tache = _GROUPES_CACHE.get("tache")
+    if tache is not None and not tache.done():
+        return tache
 
     async def _travail():
         try:
             liste = await _charger_groupes_gms()
             if liste:
                 _GROUPES_CACHE.update({"ts": time.time(), "groupes": liste})
+            return liste
         except Exception as e:
             print(f"[reportclick] chargement des groupes echoue : {e}")
-        finally:
-            _GROUPES_CACHE["en_cours"] = False
+            return []
 
     try:
-        asyncio.get_running_loop().create_task(_travail())
+        tache = asyncio.get_running_loop().create_task(_travail())
     except RuntimeError:
-        _GROUPES_CACHE["en_cours"] = False
+        return None                    # pas de boucle : rien a lancer
+    _GROUPES_CACHE["tache"] = tache
+    return tache
 
 
-async def _groupes_gms() -> list:
-    """Les groupes connus, tout de suite. Declenche un rafraichissement si besoin.
+async def _groupes_gms(budget_s: float = 2.2) -> list:
+    """Les groupes connus. Rend la liste PERIMEE plutot que rien.
 
-    Rend la liste PERIMEE plutot que rien : une liste un peu vieille reste
-    utile, une liste vide ne l'est jamais.
+    Si le cache est encore VIDE — juste apres un redemarrage, par exemple — on
+    accepte d'attendre un court instant plutot que de rendre une liste vide :
+    une autocompletion vide se lit comme « ce groupe n'existe pas ». Le budget
+    reste sous les 3 secondes au-dela desquelles Discord abandonne.
+
+    Si le cache contient deja quelque chose, on ne bloque jamais : le
+    rafraichissement part en fond et la frappe suivante en profitera.
     """
-    if (time.time() - _GROUPES_CACHE.get("ts", 0)) >= _GROUPES_TTL:
-        _rafraichir_groupes()
+    vieux = (time.time() - _GROUPES_CACHE.get("ts", 0)) >= _GROUPES_TTL
+    deja = _GROUPES_CACHE.get("groupes") or []
+    if deja:
+        if vieux:
+            _rafraichir_groupes()      # en fond, on ne fait attendre personne
+        return deja
+    tache = _rafraichir_groupes()
+    if tache is not None:
+        # asyncio.wait — et NON wait_for : le delai expire sans annuler la
+        # tache. Elle continue, et la frappe suivante trouvera le cache rempli.
+        # wait_for l'aurait tuee, et le cache ne se serait jamais rempli.
+        try:
+            await asyncio.wait({tache}, timeout=budget_s)
+        except Exception as e:
+            print(f"[reportclick] attente des groupes : {e}")
     return _GROUPES_CACHE.get("groupes") or []
 
 
@@ -439,10 +461,17 @@ class ClickRecap(commands.Cog):
         rien. Une autocompletion vide passerait pour un bug alors que le
         groupe existe.
         """
+        # TOUT est sous garde : une exception ici fait afficher « Échec des
+        # options de chargement » a Discord, sans la moindre trace cote bot.
+        # Mieux vaut une liste incomplete qu'un message d'echec.
         try:
-            groupes = await _groupes_gms()
-        except Exception:
-            groupes = []
+            return await self._ac_groupe_reel(current)
+        except Exception as e:
+            print(f"[reportclick] autocompletion groupes : {type(e).__name__} {e}")
+            return []
+
+    async def _ac_groupe_reel(self, current: str):
+        groupes = await _groupes_gms()
         cur = (current or "").strip().lower()
         if cur:
             # Ceux qui COMMENCENT par la frappe d'abord : on cherche presque
