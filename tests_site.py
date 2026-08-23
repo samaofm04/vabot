@@ -4461,6 +4461,19 @@ try:
               _crCl._personne_du_lien(_nomCl) == _attCl,
               repr(_crCl._personne_du_lien(_nomCl)))
 
+    # -- un echec ne doit pas ecraser de bons chiffres -----------------------
+    # Vu en vrai : GetMySocial a refuse (429) et le report a remplace des
+    # chiffres justes par « No data ». Le lecteur croit alors que personne n a
+    # clique, alors qu on n a simplement pas su lire.
+    import inspect as _insCl
+    _sigCl = _insCl.signature(_crCl.ClickRecap._build_group_report)
+    check("clics : le report sait refuser de se vider",
+          "permettre_vide" in _sigCl.parameters, str(_sigCl))
+    _srcCl = _insCl.getsource(_crCl.ClickRecap._post_or_update_report)
+    check("clics : un report deja pose n accepte plus un contenu vide",
+          "permettre_vide=not c.get(\"message_id\")" in _srcCl
+          or "permettre_vide" in _srcCl, "_post_or_update_report")
+
     # -- rattachement aux liens de suivi : le NOM d abord, le code ensuite ----
     # Plusieurs destinations GetMySocial trainent : « Gerome » vise c80
     # (« VA 4 Geelark ») alors qu un lien « Gérôme » existe en c94. Lire le

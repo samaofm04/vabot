@@ -726,7 +726,7 @@ class ClickRecap(commands.Cog):
     async def _before_report(self):
         await self.bot.wait_until_ready()
 
-    async def _build_group_report(self, c: dict):
+    async def _build_group_report(self, c: dict, permettre_vide: bool = True):
         """Construit l'embed du report d'un groupe : aujourd'hui / hier / semaine
         / période 1–15 / période 16–fin. None si le module GMS est indispo."""
         import gms
@@ -763,6 +763,14 @@ class ClickRecap(commands.Cog):
         ])
         c_today, c_yest, c_week, c_p1, c_p2 = vals
         all_none = all(v is None for v in vals)
+        # Tout a echoue ET un message existe deja : on rend None pour que
+        # l'appelant garde l'ancien. Ecraser des chiffres justes par « No data »
+        # est pire que de laisser un report d'une heure : le lecteur croit que
+        # personne n'a clique, alors qu'on n'a simplement pas su lire.
+        # A la premiere pose, en revanche, on affiche l'echec — sinon rien
+        # n'apparaitrait et le report passerait pour non configure.
+        if all_none and not permettre_vide:
+            return None
 
         # ---- Detail par lien, calcule AVANT l'embed --------------------------
         # Il faut les clics du marche par lien pour pouvoir en faire le cumul
@@ -1075,7 +1083,10 @@ class ClickRecap(commands.Cog):
                 ch = await self.bot.fetch_channel(int(c["channel_id"]))
             except Exception:
                 return
-        emb = await self._build_group_report(c)
+        # Un message existe deja -> on refuse un report vide, pour ne pas
+        # remplacer de bons chiffres par « No data ».
+        emb = await self._build_group_report(
+            c, permettre_vide=not c.get("message_id"))
         if emb is None:
             return
         # Timer dynamique : Discord rend <t:…:R> en « dans X min » qui décompte
