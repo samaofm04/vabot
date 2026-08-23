@@ -3259,6 +3259,57 @@ except Exception as _eSel:
 
 print()
 print("=" * 70)
+print("FILIGRANE « DISPO VA » : trame au lieu du texte tuile")
+print("=" * 70)
+try:
+    import re as _reWm
+    import pathlib as _plWm
+    import urllib.parse as _uWm
+
+    _srcWm = _plWm.Path("web_upload.py").read_text(encoding="utf-8")
+    import web_upload as _wWm
+
+    # L ancien motif ecrivait « DISPO VA » en gras toutes les 150 px : lisible,
+    # mais il recouvrait l image et faisait tampon administratif. La trame
+    # marque la carte tout aussi nettement dans une grille de 200, sans rien
+    # cacher de reconnaissable.
+    _uriWm = _uWm.unquote(_wWm._va_ready_watermark_uri().split(",", 1)[1])
+    check("filigrane : le motif ne repete plus de texte",
+          "<text" not in _uriWm and "DISPO VA" not in _uriWm,
+          "le motif tuile porte encore du texte")
+    check("filigrane : c est bien une trame de hachures",
+          "<path" in _uriWm and "stroke" in _uriWm)
+    check("filigrane : la tuile est fine, pas un pave de 150 px",
+          "width='14'" in _uriWm and "background-size:14px 14px" in _srcWm)
+
+    _bandeWm = _reWm.search(r"\.vault-card-bg\.va-ready::after\{([^}]*)\}", _srcWm)
+    check("filigrane : le libelle est un bandeau pleine largeur en bas",
+          bool(_bandeWm)
+          and all(_x in _bandeWm.group(1)
+                  for _x in ("left:0", "right:0", "bottom:0", "top:auto")),
+          "sinon la pastille reste dans un coin")
+
+    # Les deux etats se disputaient le MEME pseudo-element : la regle « dispo
+    # VA », plus tardive, l emportait et l alerte ambre disparaissait sans
+    # bruit — alors qu elle existe justement pour etre vue sans ouvrir la carte.
+    _duoWm = _reWm.search(
+        r"\.vault-card-bg\.va-ready\.a-approuver::after\{([^}]*)\}", _srcWm)
+    check("filigrane : une carte dispo ET a approuver montre les DEUX etats",
+          bool(_duoWm) and "DISPO VA" in _duoWm.group(1)
+          and "APPROUVER" in _duoWm.group(1),
+          "l alerte ambre etait perdue en silence")
+    check("filigrane : cet etat double prend la couleur de l alerte",
+          bool(_duoWm) and "217,119,6" in _duoWm.group(1),
+          "sinon on croit la carte simplement dispo")
+    # La regle combinee doit rester PLUS SPECIFIQUE que celle de « dispo VA »
+    # seule, sinon la seconde l ecrase de nouveau.
+    check("filigrane : la regle combinee reste la plus specifique",
+          _srcWm.count(".vault-card-bg.va-ready.a-approuver::after") == 1)
+except Exception as _eWm:
+    check("filigrane : testable", False, repr(_eWm)[:160])
+
+print()
+print("=" * 70)
 print("FILTRE DE MARCHE : FR et US melanges pendant 6 secondes")
 print("=" * 70)
 try:
@@ -4669,6 +4720,30 @@ try:
             print("     (node absent : les filtres etoile n ont pas ete executes)")
 except Exception as _eF3:
     check("filtres etoile : testable", False, repr(_eF3)[:160])
+
+print()
+print("=" * 70)
+print("IMAGES CREEES EN JS : loading pose AVANT src, jamais apres")
+print("=" * 70)
+try:
+    _srcJs = (_plCa.Path(__file__).resolve().parent / "web_upload.py").read_text("utf-8")
+    # Le piege s est repete SIX fois dans ce fichier. Poser img.src d abord
+    # lance le telechargement immediatement : l attribut loading='lazy' arrive
+    # apres coup et ne sert plus a rien. C est ainsi que ~800 photos de profil
+    # partaient d un coup alors que le rendu serveur, lui, etait correct.
+    _fautifs = []
+    for _m in _reCa.finditer(r"createElement\(\s*['\"]img['\"]\s*\)", _srcJs):
+        _fen = _srcJs[_m.end():_m.end() + 700]
+        _iSrc = _fen.find(".src")
+        _iLaz = min([i for i in (_fen.find(".loading"),
+                                 _fen.find("'loading'"),
+                                 _fen.find('"loading"')) if i >= 0] or [-1])
+        if _iSrc >= 0 and _iLaz >= 0 and _iLaz > _iSrc:
+            _fautifs.append(_srcJs[:_m.start()].count("\n") + 1)
+    check("images JS : aucune ne pose src avant loading",
+          not _fautifs, "lignes " + str(_fautifs))
+except Exception as _eJs:
+    check("images JS : ordre des attributs testable", False, repr(_eJs)[:160])
 
 print()
 print("=" * 70)

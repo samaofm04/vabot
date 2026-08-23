@@ -4869,7 +4869,7 @@ function nxModelPicker(opts){
     if(pre[o.name]) cb.checked=true;
     var av;
     if(o.pp){
-      av=document.createElement('img'); av.src=o.pp; av.loading='lazy'; av.style.cssText=AVA;
+      av=document.createElement('img'); av.loading='lazy'; av.decoding='async'; av.style.cssText=AVA; av.src=o.pp;
       av.addEventListener('error',function(){   // image morte -> pastille initiale
         var d=document.createElement('div');
         d.style.cssText=AVA+';display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;background:'+PALETTE[i%PALETTE.length];
@@ -7227,7 +7227,10 @@ document.addEventListener('DOMContentLoaded', function(){
   document.head.appendChild(st);
   function mkAv(name){
     var img=document.createElement('img'); img.className='isel-av';
-    img.src='/identity/avatar/'+encodeURIComponent(name); img.loading='lazy';
+    // src EN DERNIER : pose avant loading, le telechargement demarre aussitot
+    // et l attribut arrive trop tard — la paresse etait inoperante.
+    img.loading='lazy'; img.decoding='async';
+    img.src='/identity/avatar/'+encodeURIComponent(name);
     img.addEventListener('error',function(){
       var d=document.createElement('div'); d.className='isel-avf';
       d.textContent=(name.charAt(0)||'?').toUpperCase();
@@ -17139,9 +17142,13 @@ def _va_ready_watermark_uri():
     """Data-URI d'un petit SVG « DISPO VA » incliné -> tuilé en filigrane sur les reels
     marqués « Dispo pour les VA ». UNIQUEMENT côté Bibliothèque (jamais sur la vidéo)."""
     import urllib.parse as _u
-    svg = ("<svg xmlns='http://www.w3.org/2000/svg' width='150' height='96'>"
-           "<text x='6' y='58' transform='rotate(-22 75 48)' fill='rgba(34,197,94,0.42)' "
-           "font-family='Arial,Helvetica,sans-serif' font-size='15' font-weight='800'>DISPO VA</text></svg>")
+    # Des hachures, pas un texte repete. L ancien motif ecrivait « DISPO VA »
+    # en gras toutes les 150 px : lisible, mais il mangeait l image et faisait
+    # tampon administratif. La trame marque la carte tout aussi nettement dans
+    # une grille de 200, sans rien recouvrir de reconnaissable.
+    svg = ("<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14'>"
+           "<path d='M-2 4 L4 -2 M2 12 L12 2 M10 16 L16 10' fill='none' "
+           "stroke='rgba(34,197,94,0.30)' stroke-width='2.4'/></svg>")
     return "data:image/svg+xml," + _u.quote(svg)
 
 
@@ -17570,9 +17577,9 @@ body.light .vault-card-bg{background:linear-gradient(110deg,#eceff1 8%,#f5f5f5 1
 .vault-card-bg.a-approuver::after{content:'A APPROUVER';position:absolute;top:8px;left:8px;z-index:5;pointer-events:none;background:rgba(234,179,8,.96);color:#2a1c00;font-size:9.5px;font-weight:800;letter-spacing:.4px;padding:3px 7px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.35)}
 /* Un template peut etre a la fois « dispo VA » et « a approuver » : le
    second se decale pour ne pas recouvrir le premier. */
-.vault-card-bg.va-ready.a-approuver::after{top:8px;left:8px}
-.vault-card-bg.va-ready::before{content:'';position:absolute;inset:0;pointer-events:none;z-index:3;background-repeat:repeat;background-size:150px 96px;background-image:url("__VA_WM__")}
-.vault-card-bg.va-ready::after{content:'✓ DISPO VA';position:absolute;bottom:8px;left:8px;z-index:4;pointer-events:none;background:rgba(34,197,94,.95);color:#04210f;font-size:10px;font-weight:800;padding:3px 8px;border-radius:6px;letter-spacing:.02em;box-shadow:0 2px 6px rgba(0,0,0,.3)}
+.vault-card-bg.va-ready.a-approuver::after{content:'DISPO VA · À APPROUVER';position:absolute;left:0;right:0;bottom:0;top:auto;z-index:4;pointer-events:none;text-align:center;font-size:9.5px;font-weight:800;letter-spacing:.1em;padding:4px 0;border-radius:0;color:#fff;box-shadow:0 -2px 8px rgba(0,0,0,.22);background:rgba(217,119,6,.94)}
+.vault-card-bg.va-ready::before{content:'';position:absolute;inset:0;pointer-events:none;z-index:3;background-repeat:repeat;background-size:14px 14px;background-image:url("__VA_WM__")}
+.vault-card-bg.va-ready::after{content:'DISPO VA';position:absolute;left:0;right:0;bottom:0;top:auto;z-index:4;pointer-events:none;text-align:center;font-size:9.5px;font-weight:800;letter-spacing:.1em;padding:4px 0;border-radius:0;color:#fff;box-shadow:0 -2px 8px rgba(0,0,0,.22);background:rgba(22,163,74,.92)}
 
 /* En PAUSE (clic manuel sur PC) : re-afficher le bouton ▶ meme sous la media
    query hover (feedback visuel du seul moyen de couper le son sur PC) */
@@ -22100,7 +22107,7 @@ def _render_sfs_html() -> str:
             _av = (
                 f"<div style='position:relative;width:36px;height:36px;flex-shrink:0'>"
                 f"<div style='position:absolute;inset:0;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#06b6d4);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:14px'>{_initial}</div>"
-                f"<img src='/mypuls/avatar/{_cid}' style='position:absolute;inset:0;width:36px;height:36px;border-radius:50%;object-fit:cover' onerror=\"this.remove()\">"
+                f"<img src='/mypuls/avatar/{_cid}' loading='lazy' decoding='async' style='position:absolute;inset:0;width:36px;height:36px;border-radius:50%;object-fit:cover' onerror=\"this.remove()\">"
                 f"</div>"
             )
         else:
@@ -23698,7 +23705,7 @@ def _render_home_dashboard_html() -> str:
         for i, ds in enumerate([d for d in chart_data["datasets"] if float(d.get("total", 0) or 0) > 0][:5]):
             cid = creators_map.get(ds["label"])
             avatar = (
-                f"<img src='/mypuls/avatar/{cid}' style='width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a'>"
+                f"<img src='/mypuls/avatar/{cid}' loading='lazy' decoding='async' style='width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a'>"
                 if cid else
                 f"<div style='width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700'>{ds['label'][:1].upper()}</div>"
             )
@@ -24399,7 +24406,7 @@ body.light .mypuls-bar{background:#e5e7eb}
             )
             avatars_header.append(avatar_img)
             avatar_legend = (
-                f"<img src='/mypuls/avatar/{creator_id}' style='width:18px;height:18px;border-radius:50%;object-fit:cover;border:1px solid {color}'>"
+                f"<img src='/mypuls/avatar/{creator_id}' loading='lazy' decoding='async' style='width:18px;height:18px;border-radius:50%;object-fit:cover;border:1px solid {color}'>"
             )
         else:
             avatar_legend = f"<span style='width:8px;height:8px;background:{color};border-radius:50%;display:inline-block'></span>"
@@ -29015,7 +29022,7 @@ def _render_jailbreak_html() -> str:
                 )
 
             avatar_img = (
-                f"<img src='/identity/avatar/{ident_safe}' "
+                f"<img src='/identity/avatar/{ident_safe}' loading='lazy' decoding='async' "
                 f"onerror=\"var d=document.createElement('div');d.className='jb-avatar-fb';"
                 f"d.style.background='hsl({avatar_hue},60%,45%)';d.textContent='{avatar_letter}';"
                 f"d.style.width='26px';d.style.height='26px';d.style.borderRadius='50%';"
@@ -36808,7 +36815,7 @@ def _render_mypulslive_html() -> str:
             f"<div class='mpl-campaign-row' data-campaign-creator-id='{c.get('creator_id') or ''}' data-campaign-creator-name='{cname}' "
             f"style='display:flex;align-items:center;gap:10px;padding:11px 14px;"
             f"background:#0f0f0f;border:1px solid #232323;border-left:3px solid {cr_color};border-radius:10px;margin-bottom:6px'>"
-            f"<img src='/mypuls/avatar/{c.get('creator_id')}' style='width:30px;height:30px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1.5px solid {cr_color}' onerror=\"this.style.display='none'\">"
+            f"<img src='/mypuls/avatar/{c.get('creator_id')}' loading='lazy' decoding='async' style='width:30px;height:30px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1.5px solid {cr_color}' onerror=\"this.style.display='none'\">"
             f"<div style='flex:1;min-width:0'>"
             f"<div style='color:{cr_color};font-weight:700;font-size:13px'>{cname} <span style='color:{type_color};font-size:10px;letter-spacing:.5px;padding:2px 6px;background:rgba({34 if ctype=='post' else 59},{197 if ctype=='post' else 130},{94 if ctype=='post' else 246},.15);border-radius:5px;margin-left:6px'>{ctype.upper()}</span></div>"
             f"<div style='color:#888;font-size:11px;font-family:monospace;margin-top:2px'>{slots_count}/jour · planifie jusqu au {sched_until} · {planned} total</div>"
