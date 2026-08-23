@@ -1917,3 +1917,72 @@ def ping() -> Dict[str, Any]:
     # Extraire l'email pour confirmer l'identité
     email_match = re.search(r"[\w.+-]+@[\w.-]+\.\w+", r.text)
     return {"ok": True, "email": email_match.group(0) if email_match else "?"}
+
+
+# ---- Liens de suivi (Stats > Liens de suivi) --------------------------------
+#
+# Un lien de suivi porte un CODE (« c85 ») qu'on retrouve a la fin de la
+# destination des liens GetMySocial : onlyfans.com/<pseudo>/c85. C'est par ce
+# code qu'on rattache les abonnes MyPuls aux clics GetMySocial — jamais par le
+# nom, qui s'ecrit « Bo07 » ici et « BO7 » la, « Pam Pam » ici et « PAMPAM »
+# la : aucun rapprochement de noms ne tiendrait.
+_TRACKING_CACHE: Dict[str, Any] = {}     # {"t": ts, "v": [...]}
+_TRACKING_TTL = 600                      # 10 min
+
+
+def api_tracking_links(force: bool = False) -> list:
+    """Les liens de suivi, normalises. [] si l'API refuse.
+
+    UN SEUL appel pour les ~468 lignes, garde 10 minutes. L'API MyPuls limite
+    le debit — une sonde a deja pris un 429 et rendu des 403 sur tout le reste.
+    Un appel par personne serait le plus sur moyen de tout faire tomber.
+    """
+    import time as _t
+    hit = _TRACKING_CACHE.get("v")
+    if hit is not None and not force and (_t.time() - _TRACKING_CACHE.get("t", 0)) < _TRACKING_TTL:
+        return hit
+    res = api_get("tracking-links", {"per_page": 500})
+    if not res.get("ok"):
+        # On ne met PAS en cache un echec : la prochaine tentative doit
+        # reessayer, pas servir une liste vide pendant dix minutes.
+        return _TRACKING_CACHE.get("v") or []
+    d = res.get("data")
+    items = d if isinstance(d, list) else None
+    if items is None and isinstance(d, dict):
+        inner = d.get("data")
+        items = inner.get("data") if isinstance(inner, dict) else inner
+    out = []
+    for it in (items or []):
+        if not isinstance(it, dict):
+            continue
+        code = str(it.get("code") or "").strip()
+        if not code:
+            continue
+        out.append({
+            "code": code,
+            "nom": str(it.get("name") or "").strip(),
+            "creator_id": it.get("creator_id"),
+            "abonnes": it.get("subscribers_total"),
+            "abonnes_periode": it.get("subscribers_period"),
+            "nouveaux": it.get("new_subscribers"),
+            "visites": it.get("visits_total"),
+            "visites_periode": it.get("visits_period"),
+            "actif": bool(it.get("active", True)),
+        })
+    _TRACKING_CACHE.update({"t": _t.time(), "v": out})
+    return out
+
+
+def tracking_par_code(creator_id=None) -> dict:
+    """{code: lien de suivi}, eventuellement limite a une creatrice.
+
+    Le code n'est unique QUE dans une creatrice : « c85 » chez l'une n'est pas
+    « c85 » chez l'autre. Sans le filtre, deux modeles se voleraient leurs
+    abonnes.
+    """
+    out = {}
+    for t in api_tracking_links():
+        if creator_id is not None and t.get("creator_id") != creator_id:
+            continue
+        out[t["code"]] = t
+    return out

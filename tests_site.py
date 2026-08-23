@@ -4461,6 +4461,21 @@ try:
               _crCl._personne_du_lien(_nomCl) == _attCl,
               repr(_crCl._personne_du_lien(_nomCl)))
 
+    # -- code de suivi MyPuls -------------------------------------------------
+    # Les liens GetMySocial pointent vers onlyfans.com/<pseudo>/c85 : « c85 »
+    # est le code du lien de suivi MyPuls. C est par LUI qu on rattache les
+    # abonnes aux clics — les noms ne se ressemblent pas assez (« Bo07 » cote
+    # MyPuls, « BO7 » cote GetMySocial ; « Pam Pam » contre « PAMPAM »).
+    for _dCl, _attCl in (
+            ("https://onlyfans.com/jessyewdiference/c85", "c85"),
+            ("https://onlyfans.com/jessyewdiference/c85/", "c85"),
+            ("https://onlyfans.com/jessyewdiference", ""),   # pas de code
+            ("", ""),
+            (None, "")):
+        check("clics : code de suivi de %r -> %r" % (_dCl, _attCl),
+              _crCl._code_suivi(_dCl) == _attCl,
+              repr(_crCl._code_suivi(_dCl)))
+
     # Les noms sont saisis a la main : le meme compte s ecrit « ( BO7 ) 1 » ici
     # et « (BO7) 1 » la. Sans normalisation, deux personnes au lieu d une.
     for _nomCl, _attCl in (("( BO7 )  1", "(BO7) 1"),

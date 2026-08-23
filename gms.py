@@ -1376,7 +1376,10 @@ def report_links_meta(team_id: str, identity: Optional[str] = None,
             return None
         return [
             {"id": l.get("id"), "shortcode": l.get("shortcode") or "",
-             "display_name": l.get("display_name") or ""}
+             "display_name": l.get("display_name") or "",
+             # La destination sert a retrouver le code de suivi MyPuls, qui en
+             # occupe le dernier segment : onlyfans.com/<pseudo>/c85.
+             "destination": l.get("url") or ""}
             for l in r.get("links", []) if l.get("id")
         ]
     suffix = _SHORTCODE_SUFFIX.get((identity or "").lower()) if identity else None

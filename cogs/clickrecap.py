@@ -257,6 +257,55 @@ def _reports_configures(cfg: dict) -> list:
     return out
 
 
+def _code_suivi(destination) -> str:
+    """Le code de suivi MyPuls au bout d'une destination, ou ''.
+
+    Les liens GetMySocial pointent vers onlyfans.com/<pseudo>/c85 : « c85 » est
+    le code du lien de suivi cote MyPuls. C'est par LUI qu'on rattache les
+    abonnes aux clics — jamais par le nom, qui s'ecrit « Bo07 » d'un cote et
+    « BO7 » de l'autre, « Pam Pam » ici et « PAMPAM » la.
+    """
+    m = re.search(r"/([A-Za-z]+\d+)/?$", str(destination or "").strip())
+    return m.group(1) if m else ""
+
+
+async def _abonnes_par_code(codes) -> dict:
+    """{code: {abonnes, nouveaux, visites, nom}} pour les codes demandes.
+
+    UN SEUL appel MyPuls pour tout le monde, mis en cache dix minutes cote
+    module : l'API limite le debit, et un appel par personne serait le plus sur
+    moyen de la faire tomber — une sonde a deja pris un 429 suivi de 403 sur
+    tout le reste.
+
+    Rend {} si MyPuls ne repond pas : l'appelant n'affiche alors rien, plutot
+    que des zeros qui se liraient « personne ne s'abonne ».
+    """
+    if not codes:
+        return {}
+    try:
+        import mypuls
+    except Exception:
+        return {}
+    try:
+        tous = await asyncio.to_thread(mypuls.api_tracking_links)
+    except Exception as e:
+        print(f"[reportclick] liens de suivi MyPuls indisponibles : {e}")
+        return {}
+    voulus = set(codes)
+    out = {}
+    for t in tous or []:
+        c = t.get("code")
+        if c in voulus:
+            # Un code n'est unique qu'a l'interieur d'une creatrice. On garde
+            # le PREMIER vu et on note le doublon plutot que d'ecraser en
+            # silence : deux modeles se voleraient leurs abonnes.
+            if c in out:
+                out[c]["ambigu"] = True
+                continue
+            out[c] = dict(t)
+    return out
+
+
 def _personne_du_lien(nom) -> str:
     """La PERSONNE derriere un nom de lien, ou '' si on ne peut pas la nommer.
 
@@ -665,6 +714,9 @@ class ClickRecap(commands.Cog):
         _MAX_PER_LIEN = 60
         cyc_s, cyc_e = _pay_period(today)
         rows, cumul, detail_ok = [], [None, None, None, None], False
+        # Le nom affiche ne porte pas la destination : on la garde a part pour
+        # en tirer le code de suivi MyPuls (…/c85) plus bas.
+        _dest_par_nom = {}
         if ids and not all_none and len(ids) <= _MAX_PER_LIEN:
             # analytics_for_link plutot que clicks_for_link : MEME appel reseau,
             # mais il rend aussi le detail par pays. Les clics du marche sortent
@@ -713,6 +765,7 @@ class ClickRecap(commands.Cog):
                     if u is not None:
                         cumul[i] += u
                 rows.append((label, paires))
+                _dest_par_nom[str(label)] = m.get("destination") or ""
             rows.sort(key=lambda r: (-((r[1][0][1]) or 0), -((r[1][2][1]) or 0),
                                      -((r[1][3][1]) or 0), str(r[0])))
             detail_ok = True
@@ -885,6 +938,41 @@ class ClickRecap(commands.Cog):
                 if courant:
                     blocs.append("\n".join(courant))
                 return blocs
+
+            # ---- Abonnes MyPuls, par personne ------------------------------
+            # Les clics disent qui envoie du trafic ; les abonnes disent qui le
+            # convertit. Un VA a 500 clics et 0 abonne ne se voyait nulle part.
+            _codes = {}
+            for _cle_p, _g in _paquets.items():
+                for _lab, _p in _g["lignes"]:
+                    _cd = _code_suivi(_dest_par_nom.get(str(_lab), ""))
+                    if _cd:
+                        # Les telephones d'une meme personne partagent un code :
+                        # les abonnes sont donc naturellement par personne.
+                        _codes.setdefault(_cle_p, _cd)
+                        break
+            _abo = await _abonnes_par_code(set(_codes.values()))
+            if _abo:
+                _l = []
+                for _cle_p, _g in sorted(
+                        _paquets.items(),
+                        key=lambda kv: -( (_abo.get(_codes.get(kv[0], ""), {})
+                                           or {}).get("abonnes") or 0)):
+                    _t = _abo.get(_codes.get(_cle_p, ""))
+                    if not _t:
+                        continue
+                    _nom = _g["nom"] or _nom_propre(_g["lignes"][0][0])
+                    _l.append(
+                        f"{str(_nom)[:17]:<18}{str(_t.get('abonnes') or 0):>7}"
+                        f"{str(_t.get('nouveaux') or 0):>7}"
+                        f"{str(_t.get('visites') or 0):>9}"
+                        + ("  ⚠" if _t.get("ambigu") else ""))
+                if _l:
+                    _e = f"{'PERSON':<18}{'SUBS':>7}{'NEW':>7}{'VISITS':>9}"
+                    emb.add_field(
+                        name="👥 Subscribers (MyPuls)",
+                        value="```\n" + _e + "\n" + "\n".join(_l[:22]) + "\n```",
+                        inline=False)
 
             _titre = (f"📋 Per link — {drapeau} {libelle} vs 🌍 global"
                       if pays_marche else "📋 Per link — 🌍 global")
