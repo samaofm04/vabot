@@ -201,6 +201,24 @@ def fiches_chatteurs(lignes) -> list:
     return out
 
 
+def _categorie_vente(type_vente: str) -> str:
+    """Famille d'une vente, decidee par mypuls et par lui seul.
+
+    La regle etait recopiee ici : la copie cherchait « ppv » alors que MyPuls
+    ecrit « Media prive », donc la colonne PPV affichait zero et PPV + Tips ne
+    recoupaient jamais le CA. Import tardif pour ne pas charger le scraper
+    quand on ne fait que relire un registre.
+    """
+    from mypuls import categorie_transaction
+    return categorie_transaction(type_vente)
+
+
+# Colonnes fixes de la feuille de paie, avant les colonnes « Vente N ».
+COLONNES_PAIE = ["Quinzaine", "Chatteur", "Ventes", "CA total (USD)",
+                 "PPV (USD)", "Tips (USD)", "Autres (USD)", "CA EUR", "CA USD",
+                 "Commission %", "A payer (USD)"]
+
+
 def paie_quinzaine(lignes, commissions=None, eur_usd: float = 1.14) -> tuple:
     """Une ligne par chatteur et par quinzaine : CA, taux, a payer, et le
     detail de toutes ses ventes SUR LA MEME LIGNE.
@@ -208,8 +226,24 @@ def paie_quinzaine(lignes, commissions=None, eur_usd: float = 1.14) -> tuple:
     `commissions` : {chatteur: pourcentage}. La part EUR est convertie en USD,
     la part USD est prise telle quelle — meme regle que la page Paie du site,
     sinon les ventes OnlyFans seraient surpayees.
+
+    TOUS les montants de synthese sont en dollars : additionner des euros MyM
+    et des dollars OnlyFans dans une colonne « CA total » gonflait la part
+    OnlyFans d'environ 6,5 %. Les colonnes « CA EUR » et « CA USD » gardent, elles,
+    les montants bruts dans leur devise d'origine — c'est la matiere premiere.
+
+    « PPV » = le contenu payant (messages prives + publications), « Tips » les
+    pourboires, « Autres » TOUT le reste (abonnements, streams, parrainages, et
+    les libelles qu'aucune famille ne reconnait). Les trois colonnes somment
+    exactement le CA total : une vente ne peut plus disparaitre entre elles.
     """
     commissions = commissions or {}
+
+    def _en_usd(v):
+        """Un montant de vente ramene en dollars. USD = OnlyFans, tout le reste
+        est traite comme du MyM (meme repli que mypuls._norm_currency)."""
+        return v[6] * (1.0 if v[7] == "USD" else eur_usd)
+
     par = defaultdict(list)
     for r in lignes:
         if r[2]:
@@ -219,15 +253,18 @@ def paie_quinzaine(lignes, commissions=None, eur_usd: float = 1.14) -> tuple:
         ventes = par[(chatteur, quinz)]
         ca_eur = sum(v[6] for v in ventes if v[7] == "EUR")
         ca_usd = sum(v[6] for v in ventes if v[7] == "USD")
-        autres = sum(v[6] for v in ventes if v[7] not in ("EUR", "USD"))
-        # Meme decoupage que le tableau du site : ce qui vient des messages
-        # payants d'un cote, les pourboires de l'autre.
-        def _est(mot):
-            return sum(v[6] for v in ventes if mot in (v[8] or "").lower())
-        ppv = _est("message") + _est("ppv") + _est("post")
-        tips = _est("tip") + _est("pourboire")
+        autres_devises = sum(v[6] for v in ventes if v[7] not in ("EUR", "USD"))
+        ca = sum(_en_usd(v) for v in ventes)
+        # Meme decoupage que les cartes du site, meme regle de classement.
+        # La famille est calculee UNE fois par vente : elle sert deux colonnes.
+        familles = [(_categorie_vente(v[8]), _en_usd(v)) for v in ventes]
+        ppv = sum(m for f, m in familles if f in ("Messages", "Posts"))
+        tips = sum(m for f, m in familles if f == "Tips")
+        # Le reste par SOUSTRACTION : ce qu'aucune famille ne reconnait reste
+        # visible dans la ligne au lieu de manquer au total.
+        autres_types = ca - ppv - tips
         pct = float(commissions.get(chatteur, commissions.get("_defaut_", 0)) or 0)
-        a_payer = round((ca_eur * eur_usd + ca_usd + autres * eur_usd) * pct / 100.0, 2)
+        a_payer = round(ca * pct / 100.0, 2)
         # Les ventes s'etalent vers la droite, UNE PAR CASE, de la plus
         # recente a la plus ancienne. Entassees dans une seule cellule elles
         # etaient illisibles et impossibles a trier ou filtrer.
@@ -235,14 +272,18 @@ def paie_quinzaine(lignes, commissions=None, eur_usd: float = 1.14) -> tuple:
                                       "€" if v[7] == "EUR" else "$", v[4])
                   for v in sorted(ventes, key=lambda x: (x[0], x[1]), reverse=True)]
         out.append([libelle_quinzaine(quinz), chatteur, len(ventes),
-                    round(ca_eur + ca_usd + autres, 2), round(ppv, 2), round(tips, 2),
-                    round(ca_eur, 2), round(ca_usd, 2), pct, a_payer] + detail)
+                    round(ca, 2), round(ppv, 2), round(tips, 2),
+                    round(autres_types, 2),
+                    # Une devise exotique est comptee avec les euros, comme
+                    # partout ailleurs (mypuls._norm_currency retombe sur EUR) :
+                    # ainsi CA EUR + CA USD reste la matiere du CA total.
+                    round(ca_eur + autres_devises, 2), round(ca_usd, 2),
+                    pct, a_payer] + detail)
 
     # Autant de colonnes « Vente N » que le chatteur le plus actif en a.
-    largeur = max((len(r) - 10 for r in out), default=0)
-    cols = ["Quinzaine", "Chatteur", "Ventes", "CA total", "PPV", "Tips",
-            "CA EUR", "CA USD", "Commission %", "A payer (USD)"] + \
-           ["Vente %d" % (i + 1) for i in range(largeur)]
+    fixes = len(COLONNES_PAIE)
+    largeur = max((len(r) - fixes for r in out), default=0)
+    cols = COLONNES_PAIE + ["Vente %d" % (i + 1) for i in range(largeur)]
     return cols, out
 
 
@@ -464,12 +505,13 @@ def construire_xlsx(transactions, periode: str = "", total_annonce=None,
     _entete(ws6, cols6)
     for r in paie:
         ws6.append(r)
-    for col, larg in zip("ABCDEFGHIJ", (20, 24, 8, 12, 11, 11, 11, 11, 13, 15)):
+    for col, larg in zip("ABCDEFGHIJK", (20, 24, 8, 13, 11, 11, 12, 11, 11, 13, 15)):
         ws6.column_dimensions[col].width = larg
     # les colonnes « Vente N » : assez larges pour « 08-15 114.96€ (Emmabrn) »
-    for i in range(11, len(cols6) + 1):
+    _fixes = len(COLONNES_PAIE)
+    for i in range(_fixes + 1, len(cols6) + 1):
         ws6.column_dimensions[get_column_letter(i)].width = 26
-    for row in ws6.iter_rows(min_row=2, min_col=4, max_col=10):
+    for row in ws6.iter_rows(min_row=2, min_col=4, max_col=_fixes):
         for c in row:
             c.number_format = "#,##0.00"
     ws6.freeze_panes = "C2"          # nom et quinzaine restent visibles

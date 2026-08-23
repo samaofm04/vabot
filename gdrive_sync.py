@@ -277,11 +277,15 @@ def oauth_exchange(code: str, redirect_uri: str) -> str:
                     "" if j.get("refresh_token") or r.status_code >= 400
                     else " (aucun jeton durable renvoyé — révoque l'accès puis recommence)")
     c["refresh_token"] = j["refresh_token"]
+    # Le jeton est ecrit AVANT d'interroger Google : _session() RELIT
+    # data/gdrive_oauth.json pour savoir quel compte utiliser. Interroge
+    # avant l'ecriture, il ne trouvait que le compte de service et la page
+    # affichait SON adresse — precisement le compte qu'on vient de quitter.
+    if not safe_json.write(OAUTH_FILE, c, indent=2):
+        return "jeton recu mais impossible de l'enregistrer (data/gdrive_oauth.json)"
     try:                                   # a qui appartient ce Drive ?
-        from google.auth.transport.requests import AuthorizedSession
-        sess = _session()
-        d = sess.get("https://www.googleapis.com/drive/v3/about",
-                     params={"fields": "user(emailAddress)"}, timeout=30)
+        d = _session().get("https://www.googleapis.com/drive/v3/about",
+                           params={"fields": "user(emailAddress)"}, timeout=30)
         c["email"] = (d.json().get("user") or {}).get("emailAddress", "")
     except Exception:
         c["email"] = ""
@@ -510,30 +514,74 @@ def _upload_resumable(sess, parent_id: str, path: Path) -> str:
 
 
 # ---------------------------------------------------------------- synchro
-def _iter_jobs(include_videos):
-    """`include_videos` : False/"" = photos seules, "montage" = + rushs bruts et
-    templates (Reel montage), True/"all" = tout (reels compris)."""
-    """(chemin Drive, Path fichier) pour TOUT le site.
+def _identites_a_sauvegarder():
+    """Les identites que la synchro couvre — et celles qu'elle laisse dehors.
 
-    Rangement dans le Drive : <Bibliothèque>/<Identité>/<Type>. Les trois
-    bibliothèques sont couvertes — sans ça, la Bibliothèque 2 arrivait en vrac
-    sous « V2_Beta » et le Vault PRO n'était pas sauvegardé du tout."""
+    Rend (couvertes, exclues) :
+      - couvertes : [(dossier, est_v2, label, biblio)], `biblio` etant le
+        chemin Drive au-dessus de l'identite (« Bibliothèque/FR »…) ;
+      - exclues   : {nom du dossier: raison}, pour pouvoir le DIRE.
+
+    Trois endroits appliquaient cette regle chacun de leur cote (_iter_jobs,
+    _creer_arborescence, sync_report). Resultat : sync_report donnait une
+    carte « 100 % — tout est a jour » aux identites de la Bibliotheque 2,
+    dont l'envoi ne prend RIEN. Quand deux endroits decident la meme chose,
+    ils divergent : on les fusionne.
+    """
+    couvertes, exclues = [], {}
     if not IDENTITIES_DIR.exists():
-        return
+        return couvertes, exclues
     for ident_dir in sorted(IDENTITIES_DIR.iterdir()):
         if not ident_dir.is_dir():
             continue
         nom = ident_dir.name
         est_v2 = nom.lower().startswith(V2_PREFIX)
         if est_v2 and not SYNC_VAULT2:
+            exclues[nom] = "Bibliotheque 2 hors synchro (SYNC_VAULT2)"
             continue
         if nom.strip().lower() in EXCLURE_DRIVE:
+            exclues[nom] = "identite exclue du Drive (EXCLURE_DRIVE)"
             continue
         label = nom[len(V2_PREFIX):] if est_v2 else nom
         # <Bibliotheque>/<FR|US>/<Identite>/<Type> : le marche d'abord, pour
         # ouvrir directement le bon lot.
         biblio = ("Bibliotheque 2" if est_v2
                   else RACINE_BIBLIO + "/" + _marche_de(nom))
+        couvertes.append((ident_dir, est_v2, label, biblio))
+    return couvertes, exclues
+
+
+def _compte_fichiers(ident_dir: Path) -> int:
+    """Combien de fichiers cette identite a-t-elle a sauvegarder ?
+
+    Sert a DIRE ce qu'une exclusion laisse dehors : « 14 identites, 3 200
+    fichiers » plutot qu'une carte verte a 0 fichier. Memes sections et
+    memes extensions que l'envoi.
+    """
+    n = 0
+    for sub, _drive_name, is_video in tuple(SECTIONS) + tuple(SECTIONS_PRO):
+        d = ident_dir / sub
+        exts = _exts_de(sub, is_video)
+        try:
+            n += sum(1 for p in d.iterdir()
+                     if p.is_file() and p.suffix.lower() in exts)
+        except OSError:
+            pass
+    return n
+
+
+def _iter_jobs(include_videos):
+    """(chemin Drive, Path fichier) pour TOUT le site.
+
+    `include_videos` est un MODE, pas un booleen : False/"" = photos seules,
+    « montage » = + rushs bruts et templates SANS les reels, True/« all » =
+    tout. Le passer dans un bool() ramenait « montage » a True, et les reels
+    partaient quand meme.
+
+    Rangement dans le Drive : <Bibliothèque>/<Identité>/<Type>. Les trois
+    bibliothèques sont couvertes — sans ça, la Bibliothèque 2 arrivait en vrac
+    sous « V2_Beta » et le Vault PRO n'était pas sauvegardé du tout."""
+    for ident_dir, est_v2, label, biblio in _identites_a_sauvegarder()[0]:
         plan = list(SECTIONS) + ([] if est_v2 or not SYNC_VAULT_PRO else
                                  [(s, n, v, "Vault PRO") for s, n, v in SECTIONS_PRO])
         for entree in plan:
@@ -613,25 +661,50 @@ def non_sauvegardes(chemins) -> list:
     return dehors
 
 
-def sync_report() -> dict:
+_MODE_COURANT = object()          # « le reglage enregistre », pas un mode
+
+
+def sync_report(mode=_MODE_COURANT) -> dict:
     """Etat de la copie Drive, identite par identite.
 
-    Compte TOUT (photos + videos, les 3 bibliotheques) : le pourcentage dit
-    ce qui est reellement sur le Drive, pas ce que le mode courant enverrait.
+    Quatre nombres par identite, et ils ne repondent PAS a la meme question :
+
+      - « total » / « sync » : ce que le Drive porte vraiment, toutes
+        sections et voisins compris. C'est le pourcentage affiche ;
+      - « manque » : l'ecart avec le Drive, soit total - sync ;
+      - « a_envoyer » : la part de cet ecart que le mode COURANT enverrait.
+        Elle vient du MEME generateur que l'envoi — _iter_jobs(mode) — et
+        c'est LE SEUL nombre a utiliser comme declencheur. La veille se
+        servait de « manque » : en mode « montage » il comptait des reels
+        qui ne partiront jamais, ne descendait donc jamais a zero, et
+        relançait une synchro complete toutes les minutes, sans fin ;
+      - « hors_mode » : le reste de l'ecart (manque = a_envoyer + hors_mode).
+        Remonte, jamais passe sous silence.
+
+    Les identites que la synchro ne touche pas (Bibliotheque 2, EXCLURE_DRIVE)
+    n'ont plus de carte : a 0 fichier elles affichaient 100 % et le resume
+    disait « tout est a jour » alors que RIEN n'est sauvegarde. Elles sont
+    dans « exclues », avec leur raison et leur nombre de fichiers.
+
     Un fichier compte comme synchronise si son id Drive est connu ET que sa
     taille n'a pas bouge depuis l'envoi."""
+    if mode is _MODE_COURANT:
+        mode = load_config().get("include_videos")
     st = _load_state()
     up = st.get("uploaded") or {}
     par: dict = {}
 
     def _e(ident):
         return par.setdefault(ident, {"identity": ident, "total": 0,
-                                      "sync": 0, "manque": 0, "octets": 0})
+                                      "sync": 0, "manque": 0, "octets": 0,
+                                      "a_envoyer": 0, "hors_mode": 0})
 
-    if IDENTITIES_DIR.exists():
-        for d in sorted(IDENTITIES_DIR.iterdir()):
-            if d.is_dir():
-                _e(d.name)
+    couvertes, exclues = _identites_a_sauvegarder()
+    for ident_dir, _v2, _lb, _bib in couvertes:
+        _e(ident_dir.name)
+    # Ce que le mode courant enverrait : exactement la liste de run_sync.
+    a_envoyer = {"/".join(chemin) + "/" + p.name
+                 for chemin, p in _iter_jobs(mode)}
     for chemin, path in _iter_jobs(True):
         # data/identities/<ident>/<sous-dossier>/<fichier>
         ent = _e(path.parent.parent.name)
@@ -640,12 +713,17 @@ def sync_report() -> dict:
             size = path.stat().st_size
         except OSError:
             size = -1
-        rec = up.get("/".join(chemin) + "/" + path.name)
+        cle = "/".join(chemin) + "/" + path.name
+        rec = up.get(cle)
         if rec and rec.get("size") == size:
             ent["sync"] += 1
+            continue
+        ent["manque"] += 1
+        ent["octets"] += max(0, size)
+        if cle in a_envoyer:
+            ent["a_envoyer"] += 1
         else:
-            ent["manque"] += 1
-            ent["octets"] += max(0, size)
+            ent["hors_mode"] += 1
     lignes = []
     for ent in par.values():
         t = ent["total"]
@@ -655,8 +733,15 @@ def sync_report() -> dict:
     tot = sum(e["total"] for e in lignes)
     syn = sum(e["sync"] for e in lignes)
     return {"identities": lignes, "total": tot, "sync": syn,
-            "manque": tot - syn, "octets": sum(e["octets"] for e in lignes),
+            "manque": sum(e["manque"] for e in lignes),
+            "a_envoyer": sum(e["a_envoyer"] for e in lignes),
+            "hors_mode": sum(e["hors_mode"] for e in lignes),
+            "octets": sum(e["octets"] for e in lignes),
             "pct": 100 if not tot else int(round(syn * 100.0 / tot)),
+            "videos": mode if isinstance(mode, str) else bool(mode),
+            "exclues": [{"identity": nom, "raison": raison,
+                         "fichiers": _compte_fichiers(IDENTITIES_DIR / nom)}
+                        for nom, raison in sorted(exclues.items())],
             "mode": auth_mode(), "email": oauth_email()}
 
 
@@ -679,12 +764,17 @@ IMPORT_MAP = {
 }
 
 
-def _lister_paralleles(sess, taches):
+def _lister_paralleles(sess, taches, echecs=None):
     """Liste PLUSIEURS dossiers a la fois.
 
-    `taches` : liste de (parent_id, dossiers). Retourne {(id, dossiers): files}.
-    Cinq requetes simultanees : un listage attend surtout le reseau, les
-    enchainer un par un multipliait la duree par le nombre de dossiers.
+    `taches` : liste de (parent_id, dossiers). Retourne {(id, dossiers): files}
+    — et **None**, jamais [], pour un dossier dont le listage a ECHOUE.
+
+    C'est toute la difference : rendre une liste vide faisait passer un 429
+    passager (12 listages en parallele) pour un dossier vide, sans compteur
+    ni trace, et le dossier « Reels » d'une identite disparaissait de la page
+    des manques. C'est le mode de panne des 598 fichiers invisibles. `echecs`,
+    quand il est fourni, recoit les messages pour pouvoir les REMONTER.
     """
     from concurrent.futures import ThreadPoolExecutor
     taches = list(dict.fromkeys(taches))          # sans doublon
@@ -694,23 +784,34 @@ def _lister_paralleles(sess, taches):
 
     def _un(t):
         try:
-            return t, _lister(sess, t[0], dossiers=t[1])
-        except Exception:
-            return t, []
+            return t, _lister(sess, t[0], dossiers=t[1]), ""
+        except Exception as e:
+            return t, None, ("%s: %s" % (type(e).__name__, e))[:160]
 
     # 5 suffisaient pour une poignee de dossiers ; l'inventaire en ouvre
     # plusieurs centaines d'un coup et attend uniquement le reseau.
     with ThreadPoolExecutor(max_workers=min(12, max(2, len(taches)))) as ex:
-        for t, files in ex.map(_un, taches):
+        for t, files, err in ex.map(_un, taches):
             res[t] = files
+            if err and echecs is not None:
+                echecs.append(err)
     return res
 
 
 def _lister(sess, parent_id, dossiers=False):
+    """Le contenu d'un dossier Drive, page par page.
+
+    Chaque page passe par _avec_reprise : ce chemin-la n'en avait aucune,
+    alors qu'il est le plus sollicite (12 listages en parallele). Un 429
+    passager suffisait a faire remonter un dossier PLEIN comme vide.
+    L'erreur remonte a l'appelant plutot que de se confondre avec « rien
+    dedans » ; _lister_paralleles la compte.
+    """
     q = (f"'{parent_id}' in parents and trashed = false and mimeType "
          + ("=" if dossiers else "!=") + " 'application/vnd.google-apps.folder'")
     out, page = [], None
-    while True:
+
+    def _page(jeton):
         # md5Checksum : Google le calcule pour tout fichier binaire. Deux
         # fichiers de meme taille peuvent differer ; deux empreintes egales,
         # non. C'est ce qui autorise a jeter une copie sans la telecharger.
@@ -721,11 +822,14 @@ def _lister(sess, parent_id, dossiers=False):
                "orderBy": "createdTime",
                "pageSize": 200, "supportsAllDrives": "true",
                "includeItemsFromAllDrives": "true"}
-        if page:
-            prm["pageToken"] = page
+        if jeton:
+            prm["pageToken"] = jeton
         r = sess.get("https://www.googleapis.com/drive/v3/files", params=prm, timeout=60)
-        r.raise_for_status()
-        d = r.json()
+        _ok(r, "listage d'un dossier")
+        return r.json()
+
+    while True:
+        d = _avec_reprise(_page, page)
         out += d.get("files") or []
         page = d.get("nextPageToken")
         if not page:
@@ -733,11 +837,17 @@ def _lister(sess, parent_id, dossiers=False):
 
 
 def _telecharger(sess, file_id, cible: Path):
-    """Ecrit le fichier sans jamais lire son contenu."""
+    """Ecrit le fichier sans jamais lire son contenu.
+
+    Le « .part » n'est PAS une reservation de nom (c'etait le piege : une
+    coupure bloquait « reel12.mp4 » pour toujours), juste l'ecriture en
+    cours. Reste-t-il d'un essai rate ? Le prochain passage le reecrit, et
+    _planifier_noms le compte.
+    """
     r = sess.get(f"https://www.googleapis.com/drive/v3/files/{file_id}",
                  params={"alt": "media", "supportsAllDrives": "true"},
                  stream=True, timeout=900)
-    r.raise_for_status()
+    _ok(r, "telechargement")          # le message de Google, pas « 403 » nu
     tmp = cible.with_suffix(cible.suffix + ".part")
     with tmp.open("wb") as fh:
         for bloc in r.iter_content(1 << 20):
@@ -769,19 +879,6 @@ def _parents_possibles(nom: str) -> list:
         out.append(neuf + p.suffix)
         tige = neuf
     return out
-
-
-def _est_copie(nom: str, tailles: dict) -> bool:
-    """Vrai si un fichier du meme dossier ressemble a l'original de « nom ».
-
-    Condition double : le nom derive d'un autre PRESENT dans le dossier, ET les
-    deux pesent exactement pareil. Un « reel_2.mp4 » sans « reel.mp4 » a cote
-    reste un fichier ordinaire.
-    """
-    ma_taille = tailles.get(nom)
-    if not ma_taille:
-        return False
-    return any(tailles.get(p) == ma_taille for p in _parents_possibles(nom))
 
 
 def copies_du_dossier(fichiers: list) -> list:
@@ -908,37 +1005,60 @@ def _candidats_import(sess, st, root):
     # permettait pas de distinguer « tout est deja la » de « je n'ai rien vu ».
     _ignores: dict = {}
     _inconnus: set = set()      # dossiers deposes sous un nom non reconnu
+    _identites_hs: set = set()  # dossiers d'identite inconnus du site
+    _echecs: list = []          # listages Drive qui ont echoue
     deja = {r.get("id") for r in (st.get("uploaded") or {}).values() if r.get("id")}
     vus = st.get("imported") or {}
     trouves = []
+
+    def _identite_connue(nom_drive: str, ident: str) -> bool:
+        """Le site connait-il cette identite ? Sinon on REFUSE, et on le dit.
+
+        Un dossier mal orthographie dans « A IMPORTER » (« Julia B ») etait
+        pris pour argent comptant : run_import faisait mkdir(parents=True) et
+        data/identities gagnait une model fantome — visible dans les galeries,
+        les menus Discord et la rotation VA — pendant que les fichiers
+        n'arrivaient jamais chez la vraie. La branche « arborescence rangee »
+        refusait deja ces cas, mais sans un mot.
+        """
+        if (IDENTITIES_DIR / ident).is_dir():
+            return True
+        _identites_hs.add((nom_drive or ident).strip())
+        return False
 
     def _prendre(dossier_id, ident, sub, canonique=False):
         """`canonique` : le fichier est deja RANGE au bon endroit du Drive
         (par opposition a un depot libre dans « A IMPORTER »)."""
         exts = _exts_de(sub)
-        contenu = _lister(sess, dossier_id)
-        # Tailles par nom : sert a reconnaitre les copies (« pp_69_2.png »
-        # pesant exactement autant que « pp_69.png »).
-        tailles = {}
-        for f in contenu:
-            try:
-                tailles[Path(f["name"]).name] = int(f.get("size") or 0)
-            except Exception:
-                pass
+        try:
+            contenu = _lister(sess, dossier_id)
+        except Exception as e:
+            # Un dossier illisible (429 passager, permission perdue) ne doit
+            # ni passer pour un dossier vide, ni faire echouer le scan
+            # ENTIER : les autres identites n'y sont pour rien. On compte, on
+            # remonte, on continue.
+            _echecs.append(("%s: %s" % (type(e).__name__, e))[:160])
+            return
+        # Les copies suffixees du dossier, reconnues par le MD5 que Drive
+        # renvoie deja dans le listage. Le comptage de l'inventaire et ce
+        # scan-ci en jugeaient chacun a sa facon (la taille seule, indexee
+        # par nom donc ecrasee entre homonymes) : deux regles pour une seule
+        # question, et deux resultats. copies_du_dossier porte les deux
+        # garde-fous qu'il faut — empreinte identique, et abstention des
+        # qu'un nom est porte par plusieurs fichiers.
+        ids_copies = {j["id"] for j in copies_du_dossier(contenu)}
         for f in contenu:
             nom = Path(f["name"]).name
             if Path(nom).suffix.lower() not in exts:
                 _ignores["format_non_gere"] = _ignores.get("format_non_gere", 0) + 1
                 continue
-            # 1) Copie fabriquee par un import precedent : meme fichier sous un
-            # nom suffixe. Les rapatrier relance le cycle qui a produit les
-            # pp_69_2_2 et pp_69_2_3 — chaque tour en ajoute une couche.
-            # Cette detection ne compare que la TAILLE. Sur des medias
-            # c'est sur ; sur des captions de quelques centaines d'octets,
-            # deux textes de meme longueur suffiraient a en faire
-            # disparaitre un, compte comme une copie. Les voisins n'y
-            # passent donc pas.
-            if not _est_voisin(nom) and _est_copie(nom, tailles):
+            # 1) Copie fabriquee par un import precedent : le MEME contenu
+            # sous un nom suffixe. Les rapatrier relance le cycle qui a
+            # produit les pp_69_2_2 et pp_69_2_3 — chaque tour ajoute une
+            # couche. Les voisins etaient exemptes parce que la taille seule
+            # aurait confondu deux captions de meme longueur ; l'empreinte
+            # md5 ne confond rien, ils passent donc par la meme regle.
+            if f.get("id") in ids_copies:
                 _ignores["copies_du_drive"] = _ignores.get("copies_du_drive", 0) + 1
                 continue
             # 2) Le nom est deja pris sur le site : on n'importe pas. Choix du
@@ -991,6 +1111,8 @@ def _candidats_import(sess, st, root):
         ident = ident_dir["name"].strip().lower()
         if not ident:
             continue
+        if not _identite_connue(ident_dir["name"], ident):
+            continue
         for type_dir in _lister(sess, ident_dir["id"], dossiers=True):
             # Un seul mapping pour tout le module : « A IMPORTER » et la
             # bibliotheque rangee acceptaient des noms differents, si bien
@@ -1021,10 +1143,13 @@ def _candidats_import(sess, st, root):
                 # fois : c'est la partie qui coutait le plus cher (une
                 # quinzaine d'identites x un aller-retour chacune).
                 _utiles = [(i, d) for i, d in grappes
-                           if (IDENTITIES_DIR / i).exists()]
-                _types = _lister_paralleles(sess, [(d, True) for _i, d in _utiles])
+                           if _identite_connue(i, i)]
+                _types = _lister_paralleles(sess, [(d, True) for _i, d in _utiles],
+                                            _echecs)
                 for ident_b, did in _utiles:
-                    for typ in _types.get((did, True), []):
+                    # None = listage en echec, pas dossier vide : le lot est
+                    # deja compte dans _echecs, on ne le prend pas pour du vide.
+                    for typ in (_types.get((did, True)) or []):
                         sub = _DRIVE_TO_SUB.get(_cle_dossier(typ["name"]))
                         if sub:
                             _prendre(typ["id"], ident_b, sub, canonique=True)
@@ -1038,7 +1163,7 @@ def _candidats_import(sess, st, root):
                         _prendre(typ["id"], ident_v, sub, canonique=True)
             continue
         ident = nom_d.lower()          # ancien rangement : identite a la racine
-        if not (IDENTITIES_DIR / ident).exists():
+        if not _identite_connue(nom_d, ident):
             continue
         for typ in _lister(sess, dossier["id"], dossiers=True):
             sub = _DRIVE_TO_SUB.get(_cle_dossier(typ["name"]))
@@ -1049,6 +1174,14 @@ def _candidats_import(sess, st, root):
         trouves_ignores.update(_ignores)
         if _inconnus:
             trouves_ignores["dossiers_non_reconnus"] = sorted(_inconnus)[:12]
+        if _identites_hs:
+            # Le contenu de ces dossiers n'ira nulle part tant que le nom
+            # n'est pas corrige : le dire vaut mieux que de creer l'identite.
+            trouves_ignores["identites_inconnues_du_site"] = \
+                sorted(_identites_hs)[:12]
+        if _echecs:
+            trouves_ignores["listages_drive_en_echec"] = len(_echecs)
+            trouves_ignores["listages_drive_detail"] = _echecs[:3]
     except Exception:
         pass
     return trouves
@@ -1090,10 +1223,17 @@ def start_watcher(interval: int = VEILLE_SECONDES) -> bool:
                     # --- site -> Drive : detection purement locale ---
                     if cfg.get("auto_sync", True):
                         try:
-                            rep = sync_report()
-                            if rep.get("manque") and status().get("state") != "running":
-                                print(f"[gdrive-auto] {rep['manque']} fichier(s) a "
-                                      f"envoyer -> synchro auto", flush=True)
+                            # Le mode COURANT, pas « tout » : sinon le compteur
+                            # ne descend jamais a zero (les reels, en mode
+                            # « montage ») et la synchro complete repartait
+                            # toutes les minutes, sans fin.
+                            rep = sync_report(cfg.get("include_videos"))
+                            if rep.get("a_envoyer") and status().get("state") != "running":
+                                _hm = rep.get("hors_mode") or 0
+                                print(f"[gdrive-auto] {rep['a_envoyer']} fichier(s) a "
+                                      f"envoyer -> synchro auto"
+                                      + (f" ({_hm} hors du mode courant)" if _hm else ""),
+                                      flush=True)
                                 start_background()
                         except Exception as e:
                             print(f"[gdrive-auto] rapport: {e}", flush=True)
@@ -1218,6 +1358,11 @@ def inventaire(force: bool = False) -> dict:
     copies = [0]                   # copies suffixees reperees sur le Drive
     inconnus: dict = {}            # nom de dossier ignore -> nb de fichiers
     orphelines: dict = {}          # identite vue sur le Drive, absente du site
+    # Un listage qui echoue n'est PAS un dossier vide. Cette page est le
+    # dernier recours quand « il manque des trucs » : compter un 429 passager
+    # pour zero fichier faisait disparaitre la ligne entiere, sans un mot.
+    echecs_listage: list = []
+    illisibles: dict = {}          # (identite, type) -> nb de dossiers rates
 
     # Le parcours se fait par VAGUES : tous les dossiers d'un meme niveau sont
     # listes ensemble. En file indienne, une trentaine d'identites fois sept
@@ -1239,38 +1384,55 @@ def inventaire(force: bool = False) -> dict:
             a_ouvrir.append(dossier["id"])
         else:                              # ancien rangement : identite a la racine
             identites.append((nom_d.lower(), dossier["id"]))
-    contenus = _lister_paralleles(sess, [(d, True) for d in a_ouvrir])
+    contenus = _lister_paralleles(sess, [(d, True) for d in a_ouvrir],
+                                  echecs_listage)
 
     # vague 3 : sous « Bibliothèque », un niveau FR/US s'intercale
     marches = []
     for did in a_ouvrir:
-        for sous in contenus.get((did, True), []):
+        for sous in (contenus.get((did, True)) or []):
             nom_s = sous["name"].strip()
             if nom_s.upper() in ("FR", "US"):
                 marches.append(sous["id"])
             else:
                 identites.append((nom_s.lower(), sous["id"]))
-    for cle, files in _lister_paralleles(sess, [(m, True) for m in marches]).items():
-        for x in files:
+    for cle, files in _lister_paralleles(sess, [(m, True) for m in marches],
+                                         echecs_listage).items():
+        for x in (files or []):
             identites.append((x["name"].strip().lower(), x["id"]))
 
     # vague 4 : les sous-dossiers de chaque identite
     _inv_etape("%d identite(s) trouvee(s)" % len(identites))
-    types = _lister_paralleles(sess, [(d, True) for _i, d in identites])
+    types = _lister_paralleles(sess, [(d, True) for _i, d in identites],
+                               echecs_listage)
 
     # vague 5 : le contenu de chaque sous-dossier, tout en meme temps
     a_compter = []                         # (id, identite, sub|None, connue)
     for ident, did in identites:
         connue = (IDENTITIES_DIR / ident).exists()
-        for typ in types.get((did, True), []):
+        if types.get((did, True)) is None:
+            # Les sous-dossiers de cette identite n'ont pas pu etre listes :
+            # on ne sait RIEN d'elle, ce n'est pas la meme chose que « vide ».
+            illisibles[(ident, "(tous les dossiers)")] = \
+                illisibles.get((ident, "(tous les dossiers)"), 0) + 1
+            continue
+        for typ in types.get((did, True)):
             sub = _DRIVE_TO_SUB.get(_cle_dossier(typ["name"]))
             a_compter.append((typ["id"], ident, sub, connue,
                               typ["name"].strip()))
     _inv_etape("comptage de %d dossier(s)" % len(a_compter))
-    fichiers = _lister_paralleles(sess, [(t[0], False) for t in a_compter])
+    fichiers = _lister_paralleles(sess, [(t[0], False) for t in a_compter],
+                                  echecs_listage)
 
     for did, ident, sub, connue, nom_typ in a_compter:
-        liste = fichiers.get((did, False), [])
+        liste = fichiers.get((did, False))
+        if liste is None:
+            # Listage en echec : ce dossier n'est pas vide, son contenu est
+            # INCONNU. Le compter pour zero, c'est le mode de panne des 598
+            # fichiers invisibles — la ligne n'apparaissait meme pas ici.
+            cle_ill = (ident, _SUB_TO_LABEL.get(sub, nom_typ))
+            illisibles[cle_ill] = illisibles.get(cle_ill, 0) + 1
+            continue
         if not sub:
             if liste:
                 inconnus[nom_typ] = inconnus.get(nom_typ, 0) + len(liste)
@@ -1282,21 +1444,18 @@ def inventaire(force: bool = False) -> dict:
                 orphelines[ident] = orphelines.get(ident, 0) + len(liste)
             continue
         exts = _exts_de(sub)
-        tailles = {}
-        for f in liste:
-            try:
-                tailles[Path(f["name"]).name] = int(f.get("size") or 0)
-            except Exception:
-                pass
+        # Meme regle que le scan d'import, et le meme code : les copies se
+        # reconnaissent au md5, jamais a la seule taille.
+        ids_copies = {j["id"] for j in copies_du_dossier(liste)}
         n = 0
         for f in liste:
             nom = Path(f["name"]).name
             if Path(nom).suffix.lower() not in exts:
                 continue
-            # Les copies (« pp_69_2.png » a cote de « pp_69.png », meme taille)
-            # ne sont pas du contenu manquant : les compter gonflait l'ecart et
-            # faisait croire a des centaines de fichiers perdus.
-            if _est_copie(nom, tailles):
+            # Les copies (« pp_69_2.png » a cote de « pp_69.png », meme
+            # contenu) ne sont pas du contenu manquant : les compter gonflait
+            # l'ecart et faisait croire a des centaines de fichiers perdus.
+            if f.get("id") in ids_copies:
                 copies[0] += 1
                 continue
             n += 1
@@ -1331,6 +1490,12 @@ def inventaire(force: bool = False) -> dict:
         raisons = dict(trouves_ignores)
     except Exception as e:
         raisons = {"erreur": str(e)[:150]}
+    if echecs_listage:
+        # Range dans « raisons_import » parce que c'est le seul bloc que la
+        # page affiche : un listage rate DOIT se voir, sinon la page annonce
+        # « rien ne manque » sur un Drive qu'elle n'a pas su lire.
+        raisons["listages_drive_en_echec"] = len(echecs_listage)
+        raisons["listages_drive_detail"] = echecs_listage[:3]
     for r in lignes:
         sub = _LABEL_TO_SUB.get(r["type"], r["type"])
         r["import"] = vus_import.get((r["identity"], sub), 0)
@@ -1340,6 +1505,10 @@ def inventaire(force: bool = False) -> dict:
     resultat = {
         "raisons_import": raisons,
         "copies_drive": copies[0],
+        "listages_echoues": len(echecs_listage),
+        "listages_echoues_detail": echecs_listage[:10],
+        "dossiers_illisibles": [{"identity": i, "type": t, "n": n}
+                                for (i, t), n in sorted(illisibles.items())],
         "total_import": sum(r.get("import", 0) for r in lignes),
         "total_invisible": sum(r.get("invisible", 0) for r in lignes),
         "lignes": lignes,
@@ -1357,6 +1526,115 @@ def inventaire(force: bool = False) -> dict:
     _INVENTAIRE_CACHE["ts"] = time.time()
     _INVENTAIRE_CACHE["data"] = resultat
     return resultat
+
+
+def _tige_media(nom: str) -> str:
+    """Le nom (sans extension) du media auquel ce fichier se rattache.
+
+    « reel12.mp4 » -> « reel12 » ; « reel12.desc.txt » -> « reel12 » ;
+    « reel12.example.mp4 » -> « reel12 ». Le site cherche les voisins par ce
+    nom EXACT (<stem>.txt, <stem>.desc.txt, <stem>.montage.json…) : quand le
+    media est renomme, ils doivent l'etre avec lui, sinon la caption reste
+    orpheline a cote d'un reel muet.
+    """
+    bas = (nom or "").lower()
+    i = bas.find(".example.")
+    if i > 0:
+        return nom[:i]
+    p = Path(nom or "")
+    if p.suffix.lower() in SIDECAR_EXTS:
+        tige = p.stem                      # « reel12.desc » pour .desc.txt
+        for marq in (".desc", ".acheck", ".montage", ".analyse"):
+            if tige.lower().endswith(marq):
+                return tige[:-len(marq)]
+        return tige
+    return p.stem
+
+
+def _planifier_noms(cands: list) -> tuple:
+    """Le nom LOCAL de chaque fichier a importer, choisi AVANT tout envoi.
+
+    Rend (noms, conflits, parts, refuses) :
+      - noms     : id Drive -> nom du fichier a ecrire (absent = on renonce) ;
+      - conflits : voisins abandonnes parce que leur nom est deja pris ;
+      - parts    : restes de telechargements interrompus rencontres ;
+      - refuses  : fichiers d'une identite que le site ne connait pas.
+
+    Pourquoi d'avance, et en un seul fil :
+
+      - un media renomme (« reel12_2.mp4 », parce que « reel12.mp4 » existe
+        deja) doit emporter SES VOISINS. Decide fichier par fichier dans un
+        pool de cinq, la caption etait ecrite « reel12.txt » pendant que son
+        media devenait « reel12_2.mp4 » : caption orpheline, reel muet ;
+      - un « .part » laisse par un telechargement coupe (un 403, ou le
+        redemarrage du VPS pendant l'import — c'est-a-dire a CHAQUE
+        deploiement) ne reserve plus le nom. Il etait relu comme « nom pris »
+        a tous les tours suivants : « reel12.mp4 » restait bloque pour
+        toujours et chaque passage ajoutait un _2. Le telechargement suivant
+        reecrit ce fichier de toute facon ; on se contente de le COMPTER,
+        parce que ce module ne supprime rien (garde-fou du module, verifie
+        par tests_site.py).
+    """
+    noms: dict = {}
+    conflits = refuses = parts = 0
+    pris: dict = {}                    # (identite, sub) -> noms deja attribues
+    vus_dossiers: set = set()
+    groupes: dict = {}
+    for c in cands:
+        # Un media et ses voisins forment UN lot : meme tige, meme sort.
+        groupes.setdefault((c["identity"], c["sub"],
+                            _tige_media(c["nom"])), []).append(c)
+    for (ident, sub, tige), lot in sorted(groupes.items()):
+        if not (IDENTITIES_DIR / ident).is_dir():
+            # Ceinture et bretelles avec le scan : jamais fabriquer une
+            # identite a partir d'un nom de dossier Drive. mkdir(parents=True)
+            # creait une model fantome dans data/identities — visible dans les
+            # galeries, les menus Discord et la rotation VA.
+            refuses += len(lot)
+            continue
+        dossier = IDENTITIES_DIR / ident / sub
+        deja = pris.setdefault((ident, sub), set())
+        if dossier not in vus_dossiers:
+            vus_dossiers.add(dossier)
+            try:
+                parts += sum(1 for _p in dossier.glob("*.part"))
+            except OSError:
+                pass
+
+        def _libre(n, _d=dossier, _pris=deja):
+            return n not in _pris and not (_d / n).exists()
+
+        # Les medias d'abord : c'est le media qui fixe le suffixe du lot.
+        lot.sort(key=lambda c: (_est_voisin(c["nom"]), c["nom"]))
+        suffixe = ""
+        media = next((c for c in lot if not _est_voisin(c["nom"])), None)
+        if media is not None:
+            ext = Path(media["nom"]).suffix
+            k = 2
+            while not _libre(tige + suffixe + ext):
+                suffixe = "_%d" % k
+                k += 1
+        for c in lot:
+            nom = c["nom"]
+            cible = (tige + suffixe + nom[len(tige):]
+                     if suffixe and nom.startswith(tige) else nom)
+            if not _libre(cible):
+                if _est_voisin(nom):
+                    # Un voisin renomme « IMG.desc_2.txt » n'est plus lu par
+                    # personne : le site cherche le nom EXACT derive du media.
+                    # Mieux vaut renoncer et le compter que de deposer un
+                    # fichier que rien ne rattachera jamais — et qui
+                    # repartirait sur le Drive a chaque synchro.
+                    conflits += 1
+                    continue
+                p = Path(nom)
+                k = 2
+                while not _libre("%s_%d%s" % (p.stem, k, p.suffix)):
+                    k += 1
+                cible = "%s_%d%s" % (p.stem, k, p.suffix)
+            noms[c["id"]] = cible
+            deja.add(cible)
+    return noms, conflits, parts, refuses
 
 
 def run_import() -> dict:
@@ -1379,16 +1657,24 @@ def run_import() -> dict:
     # seconde, au lieu de le voir grossir au fil du parcours.
     cands = _candidats_import(sess, st, root)
     total, imported, errors = len(cands), 0, 0
-    # Un voisin dont le nom est deja pris n'est PAS renomme : voir plus bas.
-    conflits = 0
+    ecrases = 0                  # noms pris entre le plan et le telechargement
+    # Les noms de destination sont choisis ICI, en un seul fil, medias et
+    # voisins ensemble : voir _planifier_noms.
+    plan, conflits, parts_orphelins, refuses = _planifier_noms(cands)
+    if parts_orphelins or refuses:
+        print(f"[gdrive-import] {parts_orphelins} telechargement(s) interrompu(s) "
+              f"retrouve(s), {refuses} fichier(s) d'identite inconnue refuse(s)",
+              flush=True)
     _set_import(state="running", total=total, done=0, imported=0, errors=0,
-                err="", ts=int(time.time()))
+                err="", voisins_en_conflit=conflits,
+                parts_orphelins=parts_orphelins, identites_refusees=refuses,
+                ts=int(time.time()))
     # Telechargements EN PARALLELE. Un import passe l'essentiel de son temps a
     # attendre le reseau : les faire un par un multipliait la duree par le
     # nombre de fichiers. Cinq a la fois, c'est net sans bousculer l'API.
-    # Le verrou protege l'etat partage (compteurs, fichier d'etat) ; le nom de
-    # destination est choisi DANS le verrou, sinon deux fichiers de meme nom
-    # pourraient viser la meme cible en meme temps.
+    # Le verrou protege l'etat partage (compteurs, fichier d'etat) ; les noms
+    # de destination, eux, sont deja attribues par _planifier_noms — deux
+    # fichiers ne peuvent donc pas viser la meme cible.
     from concurrent.futures import ThreadPoolExecutor
     import threading as _th
 
@@ -1396,27 +1682,27 @@ def run_import() -> dict:
     _faits = {"n": 0}
 
     def _un_fichier(c):
-        nonlocal imported, errors, conflits
-        cible_dir = IDENTITIES_DIR / c["identity"] / c["sub"]
+        nonlocal imported, errors, ecrases
         try:
+            nom_local = plan.get(c["id"])
+            if not nom_local:
+                # Ecarte au plan (voisin en conflit, identite inconnue) : il
+                # y est deja compte, on ne le compte pas deux fois.
+                return
+            cible_dir = IDENTITIES_DIR / c["identity"] / c["sub"]
+            dst = cible_dir / nom_local
+            # Le dossier de l'IDENTITE existe forcement (verifie au plan) :
+            # seul le sous-dossier de type peut manquer.
             cible_dir.mkdir(parents=True, exist_ok=True)
-            with _verrou:
-                dst = cible_dir / c["nom"]
-                # Un voisin renomme « IMG.desc_2.txt » ou
-                # « IMG.example_2.mp4 » n'est plus lu par personne : le site
-                # cherche le nom EXACT derive du media. Mieux vaut renoncer
-                # et le compter que de deposer un fichier que rien ne
-                # rattachera jamais — et qui repartirait sur le Drive a
-                # chaque synchro.
-                if dst.exists() and _est_voisin(c["nom"]):
-                    conflits += 1
-                    _set_import(voisins_en_conflit=conflits)
-                    return
-                k = 2
-                while dst.exists() or dst.with_suffix(dst.suffix + ".part").exists():
-                    dst = cible_dir / f"{Path(c['nom']).stem}_{k}{Path(c['nom']).suffix}"
-                    k += 1
-                dst.with_suffix(dst.suffix + ".part").touch()   # reserve le nom
+            if dst.exists():
+                # Le nom etait libre au moment du plan ; s'il ne l'est plus
+                # (un envoi depuis le site pendant l'import), on renonce :
+                # _telecharger finit par un replace() qui ecraserait le
+                # fichier en place.
+                with _verrou:
+                    ecrases += 1
+                    _set_import(noms_pris=ecrases)
+                return
             _telecharger(sess, c["id"], dst)
             with _verrou:
                 st["imported"][c["id"]] = {"name": dst.name, "ts": int(time.time())}
@@ -1438,49 +1724,47 @@ def run_import() -> dict:
             with _verrou:
                 errors += 1
                 _set_import(err=str(e)[:200])
-        with _verrou:
-            _faits["n"] += 1
-            _set_import(done=_faits["n"], imported=imported, errors=errors)
+        finally:
+            # TOUJOURS, meme sur un abandon : un fichier ecarte compte dans le
+            # total, et sans ce finally la barre d'avancement restait bloquee
+            # sous 100 % jusqu'a la fin de l'import.
+            with _verrou:
+                _faits["n"] += 1
+                _set_import(done=_faits["n"], imported=imported, errors=errors)
 
     if cands:
         with ThreadPoolExecutor(max_workers=5) as ex:
             list(ex.map(_un_fichier, cands))
     _save_state(st)
     res = {"total": total, "imported": imported, "errors": errors,
-           "voisins_en_conflit": conflits, "ts": int(time.time())}
+           "voisins_en_conflit": conflits, "noms_pris": ecrases,
+           "parts_orphelins": parts_orphelins, "identites_refusees": refuses,
+           "ts": int(time.time())}
     _set_import(state="done", **res)
     return res
 
 
 def _creer_arborescence(sess, root, st, include_videos):
-    _racine_biblio(sess, root, st)       # remet le cache d'aplomb si besoin
     """Cree le dossier de CHAQUE identite et de chaque type, meme sans fichier.
-    Ainsi tout est visible dans le Drive et on sait ou deposer."""
-    if not IDENTITIES_DIR.exists():
-        return
-    for ident_dir in sorted(IDENTITIES_DIR.iterdir()):
-        if not ident_dir.is_dir():
-            continue
-        nom = ident_dir.name
-        est_v2 = nom.lower().startswith(V2_PREFIX)
-        if est_v2 and not SYNC_VAULT2:
-            continue
-        if nom.strip().lower() in EXCLURE_DRIVE:
-            continue
-        label = (nom[len(V2_PREFIX):] if est_v2 else nom).title()
-        plans = [(("Bibliotheque 2",) if est_v2
-                  else (RACINE_BIBLIO, _marche_de(nom))) + (label,), SECTIONS]
+    Ainsi tout est visible dans le Drive et on sait ou deposer.
+
+    Les identites couvertes sont celles de _identites_a_sauvegarder : la
+    regle vivait ici en double, et une identite ecartee de l'envoi recevait
+    quand meme son arborescence."""
+    _racine_biblio(sess, root, st)       # remet le cache d'aplomb si besoin
+    for _ident_dir, est_v2, label_brut, biblio in _identites_a_sauvegarder()[0]:
+        label = label_brut.title()
         parent = root
-        for niveau in plans[0]:
+        for niveau in tuple(biblio.split("/")) + (label,):
             parent = _ensure_folder(sess, parent, niveau, st)
         # TOUS les dossiers, meme ceux dont le contenu ne part pas : ils
         # servent de point de depot et montrent ce qui est vide.
-        for sub, drive_name, is_video in SECTIONS:
+        for _sub, drive_name, _is_video in SECTIONS:
             _ensure_folder(sess, parent, drive_name, st)
         if not est_v2 and SYNC_VAULT_PRO:    # Vault PRO
             pro = _ensure_folder(sess, root, "Vault PRO", st)
             pro_ident = _ensure_folder(sess, pro, label, st)
-            for sub, drive_name, is_video in SECTIONS_PRO:
+            for _sub, drive_name, _is_video in SECTIONS_PRO:
                 _ensure_folder(sess, pro_ident, drive_name, st)
 
 
@@ -1586,7 +1870,11 @@ def run_sync() -> dict:
     root = folder_id_from(cfg.get("folder") or "")
     if not root:
         raise RuntimeError("dossier Drive non configuré")
-    include_videos = bool(cfg.get("include_videos"))
+    # PAS de bool() : _iter_jobs distingue "" (photos seules), « montage »
+    # (rushs et templates, sans les reels) et True. bool("montage") valait
+    # True — le select affichait « Reel montage » et tous les reels partaient
+    # quand meme, /gdrive/debug_state annoncant, lui, le bon mode.
+    include_videos = cfg.get("include_videos")
     st = _load_state()
     sess = _session()
 

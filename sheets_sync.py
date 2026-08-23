@@ -185,7 +185,14 @@ def restore_from_single_sheet() -> tuple:
     """URGENCE — réimporte les comptes depuis TOUTES les sources Google dispo :
     les classeurs par identité (mode dossier) ET l'ancien Sheet unique.
     100 % ADDITIF : n'efface JAMAIS rien, ajoute seulement les comptes absents.
-    Reconstruit aussi la liste des VA."""
+    Reconstruit aussi la liste des VA.
+
+    DEUX TEMPS, comme le poller (cf. pull_and_merge) : la lecture Google est
+    longue (un aller-retour réseau par onglet), l'application est instantanée.
+    Avant, la base était chargée AVANT la lecture puis réécrite après : tout ce
+    qui avait été fait sur le site pendant la lecture était effacé au `_save`
+    final — et le tout sans verrou, donc même une écriture concurrente passait
+    à la trappe."""
     if not (SA_FILE.exists() and gspread_available()):
         return False, "Clé de service / gspread manquants."
     cfg = load_config()
@@ -209,79 +216,91 @@ def restore_from_single_sheet() -> tuple:
             errs.append(f"ancien Sheet: {str(e)[:40]}")
     if not books:
         return False, "Aucun classeur lisible. " + (" · ".join(errs) if errs else "")
-    data = jb._load()
-    known = {str(k).strip().lower(): k for k in (data or {}).keys()}
-    used_ids = set()
-    for entry in (data or {}).values():
-        for a in (entry.get("accounts") or []):
-            try:
-                used_ids.add(int(a.get("id", 0)))
-            except Exception:
-                pass
-    nxt = [int(time.time() * 1000)]
 
-    def _gen():
-        while nxt[0] in used_ids:
-            nxt[0] += 1
-        v = nxt[0]
-        used_ids.add(v)
-        nxt[0] += 1
-        return v
-
-    added, tabs = 0, 0
+    # ---- 1) LECTURE GOOGLE (longue, réseau) : on ne touche PAS encore à la base
+    lues = []           # [(titre onglet, lignes)]
+    ws_illisibles = 0   # onglets écartés : comptés, jamais silencieux
     all_ws = []
     for _b in books:
         try:
             all_ws += list(_b.worksheets())
-        except Exception:
-            pass
+        except Exception as e:
+            errs.append(f"liste onglets: {str(e)[:40]}")
     for ws in all_ws:
-        title = ws.title.strip()
-        tl = title.lower()
-        identity, va_tab = None, ""
-        if tl in known:
-            identity = known[tl]
-        else:
-            parts = title.split(" ", 1)
-            if len(parts) == 2 and parts[0].strip().lower() in known:
-                identity = known[parts[0].strip().lower()]
-                va_tab = parts[1].strip()
-        if not identity:
-            continue
         try:
-            rows = _parse_ws(ws)
+            lues.append((ws.title.strip(), _parse_ws(ws)))
         except Exception:
-            continue
-        if not rows:
-            continue
-        tabs += 1
-        entry = data.setdefault(identity, {"vas": [], "accounts": []})
-        entry.setdefault("accounts", [])
-        entry.setdefault("vas", [])
-        by_u = {(a.get("username") or "").strip().lower(): a
-                for a in entry["accounts"] if (a.get("username") or "").strip()}
-        for r in rows:
-            u = (r.get("username") or "").strip()
-            if not u or u.lower() in by_u:
+            ws_illisibles += 1
+
+    # ---- 2) APPLICATION SOUS VERROU, sur l'état FRAIS (rapide, pas de réseau)
+    added, tabs, hors_identite = 0, 0, 0
+    with jb.transaction():
+        data = jb._load()
+        known = {str(k).strip().lower(): k for k in (data or {}).keys()}
+        used_ids = set()
+        for entry in (data or {}).values():
+            for a in (entry.get("accounts") or []):
+                try:
+                    used_ids.add(int(a.get("id", 0)))
+                except Exception:
+                    pass
+        nxt = [int(time.time() * 1000)]
+
+        def _gen():
+            while nxt[0] in used_ids:
+                nxt[0] += 1
+            v = nxt[0]
+            used_ids.add(v)
+            nxt[0] += 1
+            return v
+
+        for title, rows in lues:
+            tl = title.lower()
+            identity, va_tab = None, ""
+            if tl in known:
+                identity = known[tl]
+            else:
+                parts = title.split(" ", 1)
+                if len(parts) == 2 and parts[0].strip().lower() in known:
+                    identity = known[parts[0].strip().lower()]
+                    va_tab = parts[1].strip()
+            if not identity:
+                hors_identite += 1   # « Feuille 1 », onglet d'une identité inconnue…
                 continue
-            va = (r.get("va") or "").strip() or va_tab
-            acct = _row_new_account(u, r, va, _gen)
-            entry["accounts"].append(acct)
-            by_u[u.lower()] = acct
-            added += 1
-    # reconstruit la liste des VA à partir des comptes
-    for entry in (data or {}).values():
-        if not isinstance(entry, dict):
-            continue
-        have = {str((v.get("name") if isinstance(v, dict) else v) or "").strip().lower()
-                for v in (entry.get("vas") or [])}
-        for v in sorted({(a.get("va") or "").strip()
-                         for a in (entry.get("accounts") or []) if (a.get("va") or "").strip()}):
-            if v.lower() not in have:
-                entry.setdefault("vas", []).append(v)
-                have.add(v.lower())
-    jb._save(data)
+            if not rows:
+                continue
+            tabs += 1
+            entry = data.setdefault(identity, {"vas": [], "accounts": []})
+            entry.setdefault("accounts", [])
+            entry.setdefault("vas", [])
+            by_u = {(a.get("username") or "").strip().lower(): a
+                    for a in entry["accounts"] if (a.get("username") or "").strip()}
+            for r in rows:
+                u = (r.get("username") or "").strip()
+                if not u or u.lower() in by_u:
+                    continue
+                va = (r.get("va") or "").strip() or va_tab
+                acct = _row_new_account(u, r, va, _gen)
+                entry["accounts"].append(acct)
+                by_u[u.lower()] = acct
+                added += 1
+        # reconstruit la liste des VA à partir des comptes
+        for entry in (data or {}).values():
+            if not isinstance(entry, dict):
+                continue
+            have = {str((v.get("name") if isinstance(v, dict) else v) or "").strip().lower()
+                    for v in (entry.get("vas") or [])}
+            for v in sorted({(a.get("va") or "").strip()
+                             for a in (entry.get("accounts") or []) if (a.get("va") or "").strip()}):
+                if v.lower() not in have:
+                    entry.setdefault("vas", []).append(v)
+                    have.add(v.lower())
+        jb._save(data)
     msg = f"{added} compte(s) restauré(s) — {len(books)} classeur(s), {tabs} onglet(s) lus."
+    if hors_identite:
+        msg += f" ({hors_identite} onglet(s) hors identité ignoré(s))"
+    if ws_illisibles:
+        msg += f" ({ws_illisibles} onglet(s) illisible(s))"
     if errs:
         msg += f" (illisibles : {' · '.join(errs[:3])})"
     return True, msg
@@ -990,6 +1009,53 @@ def _row_new_account(u, r, va, gen_id):
     }
 
 
+# Champs d'un compte comparés à la photo d'avant-lecture (cf. _photo_comptes).
+# 'username' en fait partie : la casse d'un pseudo corrigée sur le site pendant
+# la lecture ne doit pas être ré-écrasée non plus.
+_PHOTO_FIELDS = _FIELDS + ("username",)
+
+
+def _photo_comptes(data: dict) -> dict:
+    """Photo de l'état local : {identité_lower: {username_lower: {champ: valeur}}}.
+
+    POURQUOI : le poller lit TOUS les classeurs Google hors verrou (15 à 40 s
+    observées). Quand la lecture se termine, sa photo du Sheet est déjà périmée.
+    Sans point de comparaison, l'appliquer telle quelle ré-écrasait un mot de
+    passe ou un secret 2FA corrigé sur le site pendant cette fenêtre — et
+    SUPPRIMAIT un compte créé pendant la même fenêtre (absent du Sheet = « ligne
+    effacée côté Sheet »). La photo prise AVANT la lecture permet de distinguer
+    « la valeur a bougé dans le Sheet » (à appliquer) de « la valeur a bougé sur
+    le site depuis » (à garder : elle est plus récente).
+    """
+    photo = {}
+    for identity, entry in (data or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        par_user = {}
+        for a in (entry.get("accounts") or []):
+            if not isinstance(a, dict):
+                continue
+            u = (a.get("username") or "").strip().lower()
+            if not u:
+                continue
+            par_user[u] = {f: (a.get(f) or "") for f in _PHOTO_FIELDS}
+        photo[str(identity).strip().lower()] = par_user
+    return photo
+
+
+def _valeur_perimee(photo_id: dict, u: str, champ: str, valeur_locale) -> bool:
+    """La valeur lue dans le Sheet est-elle PÉRIMÉE pour ce champ ?
+
+    Oui si le compte est inconnu de la photo (créé sur le site pendant la
+    lecture) ou si la valeur locale a changé depuis la photo. Dans ces deux cas
+    le site est plus frais que le Sheet : on garde le site, et le push qui suit
+    la sauvegarde réaligne la cellule."""
+    snap = photo_id.get(u)
+    if snap is None:
+        return True
+    return (snap.get(champ) or "") != (valeur_locale or "")
+
+
 def pull_and_merge(force_delete: bool = False) -> tuple:
     """Applique le Sheet dans jailbreak.json. 2 types d'onglets ÉDITABLES :
       - IDENTITÉ (nom = 'amelia') : gouverne TOUS les comptes de l'identité.
@@ -1004,17 +1070,36 @@ def pull_and_merge(force_delete: bool = False) -> tuple:
     import jailbreak as jb
     if is_paused():
         return False, "Sync en PAUSE (aucune modification appliquée)."
+    # PHOTO DE RÉFÉRENCE, prise AVANT la lecture réseau. On NE garde PAS le
+    # verrou pendant les 15-40 s de lecture (ça figerait le site) : on horodate
+    # l'état local à l'instant où la photo du Sheet commence, et le merge s'en
+    # sert pour arbitrer. Le sens PUSH fait déjà ça (push_all_async relit l'état
+    # frais sous verrou) ; le sens PULL, lui, avait été oublié.
+    try:
+        with jb.transaction():
+            photo = _photo_comptes(jb._load())
+    except Exception as e:
+        # Sans photo on ne sait plus arbitrer : ne rien appliquer plutôt que
+        # d'écraser des éditions récentes — et le DIRE (jamais en silence).
+        return False, f"État local illisible ({e}) — pull annulé."
     sheet = pull_all()          # lecture réseau HORS verrou (peut durer)
     if sheet is None:
         return False, "Sheet indisponible"
     # Toute la séquence load -> merge -> save sous le verrou de la base : sans
     # ça, une action du site pendant le merge du poller était écrasée.
     with jb.transaction():
-        return _merge_sheet_into_data(sheet, jb, force_delete)
+        return _merge_sheet_into_data(sheet, jb, force_delete, photo)
 
 
-def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False) -> tuple:
+def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False,
+                           photo: dict | None = None) -> tuple:
     data = jb._load()
+    # `photo` = état local AVANT la lecture réseau (cf. pull_and_merge). Absente
+    # (appel direct, bancs de test), on la prend sur l'état courant : la
+    # comparaison dit alors toujours « rien n'a bougé » et le comportement
+    # historique est conservé à l'identique.
+    if photo is None:
+        photo = _photo_comptes(data)
     known = {str(k).strip().lower() for k in data.keys()}
     # Tombstones : un VA/compte supprime sur le site (7 j) ne doit JAMAIS etre
     # re-importe depuis le Sheet (course pull/push, vieil onglet, etc.)
@@ -1064,11 +1149,18 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False) -> tuple
     added = updated = removed = 0
     skipped_tomb = set()
     blocked_del = 0
+    # Compteurs de la protection « photo périmée » — remontés dans le résumé :
+    # une valeur écartée sans trace est exactement ce qui a rendu ce bug
+    # invisible pendant des mois.
+    conflits = 0        # valeurs du Sheet ignorées (le site a bougé depuis)
+    proteges = 0        # comptes créés pendant la lecture, sauvés de la suppression
+    disparus = 0        # lignes du Sheet non ré-ajoutées (compte supprimé/renommé depuis)
     for identity in list(data.keys()):
         entry = data[identity]
         if not isinstance(entry, dict):
             continue
         il = str(identity).strip().lower()
+        photo_id = photo.get(il) or {}   # comptes de l'identité au moment de la photo
         va_meta = va_tabs.get(il, {})
         if il not in id_tabs and not va_meta:
             continue  # rien pour cette identité dans le Sheet -> on ne touche pas
@@ -1108,6 +1200,13 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False) -> tuple
             other_tabs = [vl for vl in tabs_with_u if vl != vx]
             in_own = vx in tabs_with_u
             if (not in_own) and len(other_tabs) == 1:
+                if _valeur_perimee(photo_id, u, "va", a.get("va")):
+                    # Le VA a bouge sur le site (ou le compte y a ete cree) depuis
+                    # la photo : le deplacement lu dans le Sheet decrit un etat
+                    # revolu. On garde le site, et on ne supprime surtout pas.
+                    conflits += 1
+                    kept.append(a)
+                    continue
                 moved_to = other_tabs[0]
                 # Avant, le compte etait supprime (mot de passe et 2FA perdus).
                 a["va"] = va_meta.get(moved_to, (moved_to, None))[0]
@@ -1120,6 +1219,13 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False) -> tuple
             gone = missing_id or missing_va
             if gone and u and (u in (id_present or set()) or u in seen_in_va):
                 gone = False     # present ailleurs dans le classeur : on ne supprime pas
+            if gone and u and u not in photo_id:
+                # Compte CREE sur le site pendant la lecture des classeurs : le
+                # Sheet ne pouvait pas le connaitre, son absence ne vaut pas
+                # suppression. Sans ca, creer un compte pendant la fenetre de
+                # lecture le faisait disparaitre au cycle suivant.
+                gone = False
+                proteges += 1
             (to_delete if gone else kept).append(a)
         # GARDE-FOU anti-suppression massive : si un seul sync voudrait supprimer
         # BEAUCOUP de comptes d'une identité (>10 ET >40%), c'est louche (lecture
@@ -1169,17 +1275,34 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False) -> tuple
                             # sinon la reassignation etait annulee a chaque cycle.
                             continue
                         v = (r.get(f) or "").strip()
-                        if (acct.get(f) or "") != v:
+                        cur = acct.get(f) or ""
+                        if cur != v:
+                            if _valeur_perimee(photo_id, u.lower(), f, cur):
+                                # Corrige sur le site pendant la lecture reseau :
+                                # la cellule lue est perimee, le site fait foi.
+                                conflits += 1
+                                continue
                             acct[f] = v
                             ch = True
                             touched.add((u.lower(), f))
                     if acct.get("username") != u:
-                        acct["username"] = u[:80]
-                        ch = True
+                        if _valeur_perimee(photo_id, u.lower(), "username", acct.get("username")):
+                            conflits += 1
+                        else:
+                            acct["username"] = u[:80]
+                            ch = True
                     if ch:
                         updated += 1
                 elif u.lower() not in deleted:
-                    if f"{il}|{u.lower()}" in _ta:
+                    if u.lower() in photo_id:
+                        # Le compte existait au moment de la photo et n'est plus
+                        # la : il vient d'etre SUPPRIME ou RENOMME sur le site
+                        # pendant la lecture. Le re-creer depuis le Sheet perime
+                        # ressusciterait un compte mort, ou fabriquerait un
+                        # doublon du compte renomme (update_account ne pose pas
+                        # de tombstone, contrairement a remove_account).
+                        disparus += 1
+                    elif f"{il}|{u.lower()}" in _ta:
                         skipped_tomb.add(f"{il}|{u.lower()}")   # supprime sur le site < 7 j
                     else:
                         acct = _row_new_account(u, r, (r.get("va") or "").strip(), _gen_id)
@@ -1205,13 +1328,19 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False) -> tuple
                         if (u.lower(), f) in touched:
                             continue      # deja applique depuis l onglet IDENTITE ce cycle
                         v = (r.get(f) or "").strip()
-                        if (acct.get(f) or "") != v:
+                        cur = acct.get(f) or ""
+                        if cur != v:
+                            if _valeur_perimee(photo_id, u.lower(), f, cur):
+                                conflits += 1   # meme arbitrage que l onglet identite
+                                continue
                             acct[f] = v
                             ch = True
                     if ch:
                         updated += 1
                 elif u.lower() not in deleted:
-                    if f"{il}|{u.lower()}" in _ta:
+                    if u.lower() in photo_id:
+                        disparus += 1   # meme arbitrage que l onglet identite
+                    elif f"{il}|{u.lower()}" in _ta:
                         skipped_tomb.add(f"{il}|{u.lower()}")
                     else:
                         acct = _row_new_account(u, r, vdisp, _gen_id)
@@ -1239,6 +1368,16 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False) -> tuple
     if changed:
         jb._save(data)  # -> push_all_async régénère tous les onglets (converge)
     _extra = f" · {len(skipped_tomb)} bloqué(s) (supprimés sur le site il y a < 15 min — réessaie dans quelques minutes)" if skipped_tomb else ""
+    if conflits:
+        _extra += (f" · {conflits} valeur(s) du Sheet ignorée(s) (modifiées sur le site "
+                   f"pendant la lecture des classeurs — le site fait foi, le push "
+                   f"suivant réaligne le Sheet)")
+    if proteges:
+        _extra += (f" · {proteges} compte(s) créé(s) pendant la lecture, protégé(s) "
+                   f"de la suppression")
+    if disparus:
+        _extra += (f" · {disparus} ligne(s) du Sheet non ré-ajoutée(s) (compte supprimé "
+                   f"ou renommé sur le site pendant la lecture)")
     if blocked_del:
         _extra += (f"" + chr(10) + f"⚠️ **{blocked_del} suppression(s) RETENUES** (garde anti-effacement : "
                    f"quasi-effacement total d'une identité). Si c'est VOULU, relance "

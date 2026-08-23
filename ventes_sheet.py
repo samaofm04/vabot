@@ -27,8 +27,18 @@ ONGLET_FICHES = "Fiches chatteurs"
 ONGLET_PAIE = "Paie quinzaine"
 ONGLET_RAPPRO = "Site vs registre"
 
-_ETAT = {"state": "idle", "ts": 0, "lignes": 0, "err": ""}
+_ETAT = {"state": "idle", "ts": 0, "lignes": 0, "err": "",
+         # periode reellement dans le classeur, et par qui elle y a ete mise :
+         # sans ca, personne ne peut savoir ce qu'il lit.
+         "periode": "", "source": "", "auto_pause": 0}
 _LOCK = threading.Lock()
+
+# Duree pendant laquelle une poussee faite A LA MAIN n'est pas ecrasee par la
+# boucle automatique. Sans ce respit, une periode poussee pour examiner une
+# vente contestee vivait moins de 5 minutes : le temps d'ouvrir le classeur,
+# elle avait deja ete remplacee. Le respit expire tout seul — un classeur qui
+# resterait fige sur une vieille periode serait un defaut pire.
+RESPIT_MANUEL_S = 30 * 60
 
 
 def load_config() -> dict:
@@ -90,6 +100,15 @@ def _client():
     return sheets_sync._client()
 
 
+def _colonne_a1(n: int) -> str:
+    """Numero de colonne -> lettre(s) : 1 -> A, 27 -> AA."""
+    lettres = ""
+    while n > 0:
+        n, reste = divmod(n - 1, 26)
+        lettres = chr(65 + reste) + lettres
+    return lettres
+
+
 def _onglet(classeur, titre: str, colonnes: int):
     """Recupere l'onglet, le cree s'il manque."""
     try:
@@ -98,17 +117,24 @@ def _onglet(classeur, titre: str, colonnes: int):
         return classeur.add_worksheet(title=titre, rows=1000, cols=max(colonnes, 8))
 
 
-def _ecrire(classeur, titre: str, grille, gras_sur: str = "") -> None:
+def _ecrire(classeur, titre: str, grille, gras_sur: str = "",
+            marqueur: str = "") -> None:
     """Ecrit une grille entiere dans son onglet, en l'agrandissant au besoin.
 
     Un onglet Google a une taille FIXE : ecrire au-dela de sa grille echoue.
     La feuille de paie etale une colonne par vente — sa largeur depend donc
     des donnees du mois et ne peut pas etre decidee a l'avance.
+
+    `marqueur` est pose sur CHAQUE onglet, juste apres les donnees : il dit
+    quelle periode l'onglet couvre. Il n'y etait que sur « Ventes », si bien
+    qu'on pouvait payer une quinzaine en lisant un onglet qui en montrait une
+    autre sans que rien ne le signale.
     """
     if not grille:
         return
     hauteur = len(grille) + 20                 # marge : evite un resize par ligne
-    largeur = max(len(r) for r in grille) + 2
+    # +3 : une colonne de respiration, puis la colonne du marqueur.
+    largeur = max(len(r) for r in grille) + 3
     ws = _onglet(classeur, titre, largeur)
     try:
         if ws.row_count < hauteur or ws.col_count < largeur:
@@ -122,6 +148,12 @@ def _ecrire(classeur, titre: str, grille, gras_sur: str = "") -> None:
     large = max(len(r) for r in grille)
     plates = [list(r) + [""] * (large - len(r)) for r in grille]
     ws.update("A1", plates, value_input_option="RAW")
+    if marqueur:
+        try:
+            ws.update("%s1" % _colonne_a1(large + 2), [[marqueur]],
+                      value_input_option="RAW")
+        except Exception:
+            pass
     try:
         ws.freeze(rows=1)
         if gras_sur:
@@ -149,8 +181,15 @@ def preparer(transactions, commissions=None, eur_usd: float = 1.14,
 
 
 def pousser(transactions, periode: str = "", commissions=None,
-            eur_usd: float = 1.14, chatters=None, diagnostic=None) -> dict:
-    """Ecrit les ventes dans le classeur. Retourne {ok, lignes, err}."""
+            eur_usd: float = 1.14, chatters=None, diagnostic=None,
+            auto: bool = False) -> dict:
+    """Ecrit les ventes dans le classeur. Retourne {ok, lignes, err}.
+
+    `auto` : reserve a la boucle de rafraichissement. Tout le reste — bouton
+    de la page, adresse /ventes-sheet — est une poussee A LA MAIN, et une
+    poussee a la main tient la boucle a distance le temps d'etre lue
+    (cf. RESPIT_MANUEL_S).
+    """
     sid = sheet_id()
     if not sid:
         return {"ok": False, "err": "Aucun classeur configure"}
@@ -163,37 +202,49 @@ def pousser(transactions, periode: str = "", commissions=None,
         gc = _client()
         classeur = gc.open_by_key(sid)
 
-        _ecrire(classeur, ONGLET_VENTES, grille, "A1:I1")
-        _ecrire(classeur, ONGLET_CHATTEURS, recap)
-        _ecrire(classeur, ONGLET_QUINZAINE, quinz)
-        _ecrire(classeur, ONGLET_FICHES, fiches)
-        _ecrire(classeur, ONGLET_PAIE, paie, "A1:J1")
-        _ecrire(classeur, ONGLET_RAPPRO, rappro, "A1:F1")
-        ws = classeur.worksheet(ONGLET_VENTES)
+        # Le meme marqueur sur tous les onglets : quelle periode, mise a jour
+        # quand, et par qui. C'est ce qui manquait pour qu'un onglet « Paie
+        # quinzaine » ne puisse plus etre lu pour une autre quinzaine que la
+        # sienne.
+        quand = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        marqueur = "Periode : %s — mis a jour le %s (%s)" % (
+            periode or "?", quand, "automatique" if auto else "a la main")
 
-        # une ligne d'horodatage : on sait de quand datent les chiffres
-        try:
-            quand = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-            ws.update("L1", [["Mis a jour", quand, periode]], value_input_option="RAW")
-        except Exception:
-            pass
+        _ecrire(classeur, ONGLET_VENTES, grille, "A1:I1", marqueur)
+        _ecrire(classeur, ONGLET_CHATTEURS, recap, "", marqueur)
+        _ecrire(classeur, ONGLET_QUINZAINE, quinz, "", marqueur)
+        _ecrire(classeur, ONGLET_FICHES, fiches, "", marqueur)
+        _ecrire(classeur, ONGLET_PAIE, paie, "A1:K1", marqueur)
+        _ecrire(classeur, ONGLET_RAPPRO, rappro, "A1:F1", marqueur)
 
         cfg = load_config()
         cfg["last"] = int(time.time())
         cfg["last_lignes"] = len(grille) - 1
+        cfg["derniere_periode"] = periode
+        cfg["derniere_source"] = "auto" if auto else "manuel"
+        if not auto:
+            # Horodate la poussee manuelle : la boucle s'y refere pour ne pas
+            # l'ecraser dans les minutes qui suivent.
+            cfg["manuel_ts"] = int(time.time())
         save_config(cfg)
-        _set(state="done", lignes=len(grille) - 1, ts=int(time.time()))
+        _set(state="done", lignes=len(grille) - 1, ts=int(time.time()),
+             periode=periode, source=("auto" if auto else "manuel"))
         return {"ok": True, "lignes": len(grille) - 1}
     except Exception as e:
         _set(state="error", err=str(e)[:200], ts=int(time.time()))
         return {"ok": False, "err": str(e)[:200]}
 
 
-def pousser_async(transactions, periode: str = "") -> bool:
-    """Lance l'ecriture en arriere-plan (la page ne doit pas attendre)."""
+def pousser_async(transactions, periode: str = "", **kw) -> bool:
+    """Lance l'ecriture en arriere-plan (la page ne doit pas attendre).
+
+    Les arguments nommes (commissions, eur_usd, chatters, diagnostic) sont
+    transmis tels quels a `pousser` : sans eux, la feuille de paie repart sur
+    les valeurs par defaut et ne recoupe plus la page Paie du site.
+    """
     if etat().get("state") == "running":
         return False
-    threading.Thread(target=pousser, args=(transactions, periode),
+    threading.Thread(target=pousser, args=(transactions, periode), kwargs=kw,
                      daemon=True, name="ventes-sheet").start()
     return True
 
@@ -204,12 +255,70 @@ def pousser_async(transactions, periode: str = "") -> bool:
 _AUTO = {"on": False}
 
 
+def debut_fenetre_auto(jour: _dt.date = None) -> _dt.date:
+    """Premier jour couvert par la boucle : le debut de la quinzaine PRECEDENTE.
+
+    La boucle ne couvrait que le mois en cours. Le 1er septembre a 00h05,
+    l'onglet « Paie quinzaine » ne contenait donc plus que le 1er septembre —
+    pendant que le proprietaire payait la quinzaine du 16 au 31 aout. Or on
+    paie toujours la quinzaine ECHUE : elle doit rester dans le classeur.
+
+    La fenetre porte donc exactement deux quinzaines, celle qu'on travaille et
+    celle qu'on paie. Elle reste bornee (16 a 46 jours) : on ne rescrape pas
+    l'annee entiere toutes les 5 minutes.
+    """
+    jour = jour or _dt.date.today()
+    if jour.day <= 15:
+        # quinzaine en cours = 1-15 ; la precedente est le 16-fin du mois d'avant
+        veille_du_mois = jour.replace(day=1) - _dt.timedelta(days=1)
+        return veille_du_mois.replace(day=16)
+    return jour.replace(day=1)
+
+
+def _bornes(periode: str) -> tuple:
+    """« 2026-08-01 -> 2026-08-23 (auto) » -> les deux dates, ou (None, None)."""
+    import re
+    dates = re.findall(r"\d{4}-\d{2}-\d{2}", periode or "")
+    if len(dates) < 2:
+        return None, None
+    try:
+        return _dt.date.fromisoformat(dates[0]), _dt.date.fromisoformat(dates[1])
+    except ValueError:
+        return None, None
+
+
+def respit_manuel(debut_auto: _dt.date, fin_auto: _dt.date) -> int:
+    """Secondes restantes avant que la boucle reprenne la main. 0 = elle peut ecrire.
+
+    Une poussee manuelle du mois en cours est deja incluse dans la fenetre
+    automatique : la reecrire ne fait perdre aucune ligne, on ne bloque rien.
+    C'est la poussee d'une periode PLUS ANCIENNE — celle qu'on fait pour
+    verifier une vente contestee — qui merite d'etre protegee.
+    """
+    cfg = load_config()
+    ts = int(cfg.get("manuel_ts") or 0)
+    if not ts:
+        return 0
+    reste = RESPIT_MANUEL_S - (int(time.time()) - ts)
+    if reste <= 0:
+        return 0
+    debut, fin = _bornes(cfg.get("derniere_periode") or "")
+    if debut and fin and debut_auto <= debut and fin <= fin_auto:
+        return 0
+    # Periode illisible : on protege plutot que d'ecraser au jugé.
+    return reste
+
+
 def start_auto(interval: int = 300) -> bool:
     """Rafraichit le classeur toutes les 5 minutes.
 
-    Periode couverte : le mois en cours — donc les DEUX quinzaines y sont
-    toujours. Le cache MyPuls dure aussi 5 minutes : on ne le sollicite donc
-    pas plus que necessaire.
+    Periode couverte : la quinzaine en cours ET la precedente (cf.
+    debut_fenetre_auto) — celle qu'on paie ne disparait donc jamais du
+    classeur. Le cache MyPuls dure aussi 5 minutes : on ne le sollicite pas
+    plus que necessaire.
+
+    Une poussee faite a la main sur une autre periode n'est pas ecrasee tout
+    de suite : voir respit_manuel.
     """
     if _AUTO["on"]:
         return False
@@ -221,10 +330,18 @@ def start_auto(interval: int = 300) -> bool:
                 time.sleep(interval)
                 if not sheet_id() or not disponible():
                     continue
-                import mypuls
                 today = _dt.date.today()
-                debut = today.replace(day=1).isoformat()
-                res = mypuls.fetch_team_stats(debut, today.isoformat(), use_cache=True)
+                debut = debut_fenetre_auto(today)
+                reste = respit_manuel(debut, today)
+                if reste > 0:
+                    # On ne saute pas en silence : l'etat dit pourquoi et
+                    # jusqu'a quand, la page peut l'afficher.
+                    _set(auto_pause=reste)
+                    continue
+                _set(auto_pause=0)
+                import mypuls
+                res = mypuls.fetch_team_stats(debut.isoformat(), today.isoformat(),
+                                              use_cache=True)
                 if res.get("ok"):
                     tx = res.get("transactions") or []
                     comm, taux = {}, 1.14
@@ -235,10 +352,11 @@ def start_auto(interval: int = 300) -> bool:
                                 comm[n] = float(mypuls.get_chatter_meta(n)["commission_pct"])
                     except Exception:
                         pass
-                    pousser(tx, periode="%s -> %s (auto)" % (debut, today.isoformat()),
+                    pousser(tx, periode="%s -> %s" % (debut.isoformat(),
+                                                      today.isoformat()),
                             commissions=comm, eur_usd=taux,
                             chatters=res.get("chatters"),
-                            diagnostic=res.get("diagnostic"))
+                            diagnostic=res.get("diagnostic"), auto=True)
             except Exception:
                 pass          # une panne passagere ne doit pas tuer la boucle
 

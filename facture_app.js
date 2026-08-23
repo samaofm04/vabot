@@ -146,6 +146,16 @@
       ? '<div style="background:rgba(129,140,248,.06);border:1px solid rgba(129,140,248,.25);border-radius:12px;padding:10px 16px;margin-bottom:16px;font-size:12.5px;color:#c8c8da"><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.6" y="5.4" width="18.8" height="13.2" rx="2.6"/><path d="M2.6 10h18.8"/></svg> Avances à rembourser : ' +
         raKeys.map(function (k) { return '<b style="color:#a5b4fc">' + esc(k) + '</b> ' + moneyShort(ra[k]); }).join(' <span style="color:#55556a">·</span> ') + '</div>'
       : '';
+    /* Bandeau d'alerte : lignes en % dont la base a été supprimée. Elles
+       valent 0 $ (le serveur ne rebase PAS sur le total des revenus) et le
+       trou se recopie de mois en mois — il doit se voir en haut de page, pas
+       seulement ligne par ligne. Toujours pris sur d.totals : le compte est
+       global, il ne doit pas changer avec le filtre de marché. */
+    var orphN = (d.totals && d.totals.pct_orphans) || 0;
+    var orphBar = orphN
+      ? '<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.35);border-radius:12px;padding:10px 16px;margin-bottom:16px;font-size:12.5px;color:#fca5a5">⚠ <b>' +
+        orphN + ' ligne(s) en % sans base</b> (le revenu qui servait de base a été supprimé) : elles comptent pour <b>0 $</b> ce mois-ci. Repère le badge rouge plus bas et redonne-leur une base avec ✎.</div>'
+      : '';
     var monthOpts = d.months.map(function (m) {
       return '<option value="' + m + '"' + (m === S.month ? ' selected' : '') + '>' + esc(monthLabel(m)) + '</option>';
     }).join('');
@@ -253,7 +263,7 @@
       '<button id="fx-next" class="fx-btn2" style="padding:10px 16px"><svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2.4"/><path d="M8.6 8h6.8M8.6 12h6.8M8.6 16h4"/></svg> Démarrer mois suivant</button>' +
       '</div>' +
       '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-bottom:16px">' + kpis + '</div>' +
-      settleHtml + raBar +
+      settleHtml + raBar + orphBar +
       '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px">' + mktChips +
       '<span style="width:1px;height:22px;background:#2a2a35;margin:0 4px"></span>' + chips +
       '<div style="flex:1"></div>' +
@@ -320,12 +330,24 @@
       var meta = d.cats[cat];
       var lines = d.lines.filter(function (l) { return l.cat === cat && lineMatchesFilter(l); });
       if (!lines.length) return;
-      var isRev = meta.type === 'rev';
-      var subtotal = lines.reduce(function (s, l) { return s + (l.usd || 0); }, 0);
-      var paidN = lines.filter(function (l) { return l.paid; }).length;
+      /* Le signe vient du TYPE DE LA LIGNE, jamais de la catégorie : rien
+         n'empêche de ranger un revenu dans « VA » (catégorie de dépense), et
+         il s'affichait alors −500 $ puis se SOUSTRAYAIT du sous-total du
+         groupe. Sur un groupe homogène (le cas normal) le rendu est identique
+         à avant : revenus en vert +, dépenses en rouge −. */
+      var subtotal = lines.reduce(function (s, l) {
+        return s + (l.type === 'rev' ? 1 : -1) * (l.usd || 0);
+      }, 0);
+      var expLines = lines.filter(function (l) { return l.type !== 'rev'; });
+      /* sous-total nul : on garde le signe du groupe (une catégorie de
+         dépenses reste « − $0.00 » en rouge, comme avant) */
+      var positif = subtotal > 0 || (subtotal === 0 && !expLines.length);
+      var paidN = expLines.filter(function (l) { return l.paid; }).length;
       var collapsed = S.collapsed[cat];
-      var paidBadge = !isRev && lines.length
-        ? '<span style="background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.35);color:#4ade80;font-size:10.5px;font-weight:800;padding:3px 9px;border-radius:999px">' + paidN + '/' + lines.length + ' payées</span>'
+      /* « x/y payées » ne concerne que les dépenses : un revenu logé dans un
+         groupe de dépenses le faisait passer pour une facture impayée. */
+      var paidBadge = expLines.length
+        ? '<span style="background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.35);color:#4ade80;font-size:10.5px;font-weight:800;padding:3px 9px;border-radius:999px">' + paidN + '/' + expLines.length + ' payées</span>'
         : '';
       html += '<div style="background:#10101a;border:1px solid #22222e;border-radius:14px;margin-bottom:14px;overflow:hidden">' +
         '<div class="fx-ghead" data-cat="' + cat + '" style="display:flex;align-items:center;gap:10px;padding:13px 16px;cursor:pointer;user-select:none">' +
@@ -335,8 +357,8 @@
         '<span style="background:#23232e;color:#9a9aa8;font-size:10.5px;font-weight:800;padding:3px 8px;border-radius:999px">' + lines.length + '</span>' +
         paidBadge +
         '<div style="flex:1"></div>' +
-        '<span style="font-weight:800;font-size:14.5px;color:' + (isRev ? '#22c55e' : '#f87171') + '">' +
-        (isRev ? '+ ' : '− ') + money(subtotal) + ' <span style="font-size:10.5px;color:#77778a;font-weight:600">/ mois</span></span>' +
+        '<span style="font-weight:800;font-size:14.5px;color:' + (positif ? '#22c55e' : '#f87171') + '">' +
+        (positif ? '+ ' : '− ') + money(Math.abs(subtotal)) + ' <span style="font-size:10.5px;color:#77778a;font-weight:600">/ mois</span></span>' +
         '</div>' +
         (collapsed ? '' : '<div style="padding:0 12px 12px;display:flex;flex-direction:column;gap:8px">' + lines.map(renderLine).join('') + '</div>') +
         '</div>';
@@ -366,6 +388,13 @@
         baseLbl = rl ? 'de « ' + rl.label + ' »' : '';
       }
       origin = l.pct + '% ' + esc(baseLbl);
+      /* Base disparue (le revenu qui servait de base a été supprimé) : le
+         serveur ne peut plus rien calculer, la ligne vaut 0 $. Avant, le seul
+         indice était une note invisible à l'écran, et 800 $ de paye modèle
+         s'évaporaient sans que rien ne le montre. */
+      if (l.pct_orphan) {
+        origin += ' <span style="color:#ef4444;font-weight:800">— base supprimée</span>';
+      }
     } else if (l.form === 'mypuls') {
       origin = '<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11.6a8 8 0 1 1-2.4-5.4"/><path d="M20 4v4.6h-4.6"/></svg> CA MyPuls · ' + esc(l.mypuls_model || '?') + ' <span style="color:#4ade80">(auto)</span>';
       /* Provenance réelle du montant : API officielle (exact, posts inclus, net)
@@ -400,6 +429,17 @@
     }
     // badges
     var badges = '';
+    /* Deux états qui mettent une ligne à 0 $ : ils doivent SAUTER AUX YEUX,
+       sinon le trou se recopie de mois en mois sans que personne le voie. */
+    if (l.pct_orphan) {
+      badges += '<span style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.45);color:#fca5a5;font-size:10.5px;font-weight:800;padding:4px 10px;border-radius:8px">⚠ base supprimée — 0 $ tant que tu ne rechoisis pas une base (✎ Modifier)</span>';
+    }
+    if (l.hors_periode) {
+      badges += '<span style="background:rgba(148,163,184,.12);border:1px solid rgba(148,163,184,.45);color:#cbd5e1;font-size:10.5px;font-weight:800;padding:4px 10px;border-radius:8px">⏸ hors période' +
+        (l.start ? ' · début ' + esc(frDate(l.start) + ' ' + String(l.start).slice(0, 4)) : '') +
+        (l.end ? ' · fin ' + esc(frDate(l.end) + ' ' + String(l.end).slice(0, 4)) : '') +
+        ' — 0 $ ce mois-ci</span>';
+    }
     var mb = monthBounds();
     badges += badge('<svg class="fic" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.4" y="5.2" width="17.2" height="15.4" rx="2.6"/><path d="M3.4 10h17.2M8.4 3.4v3.6M15.6 3.4v3.6"/></svg>', 'Période : ' + frDate(mb[0]) + ' → ' + frDate(mb[1]) + ' ' + S.month.slice(0, 4));
     if (!isRev && l.paid_by === 'lead') {
@@ -491,15 +531,25 @@
           fetch('/facture/line/delete', {method: 'POST', body: fd}).then(function (r) { return r.json(); })
             .then(function (j) {
               if (j.ok) {
-                toast(j.relinked && j.relinked.length
-                  ? ('Ligne supprimée · ' + j.relinked.length + ' paye(s) rebasculée(s) sur le total des revenus')
-                  : 'Ligne supprimée');
+                /* Le serveur NE rebase PAS sur le total des revenus (ça
+                   paierait ce % sur le CA des autres modèles) : les payes
+                   privées de base tombent à 0 $. Le message disait l'inverse,
+                   et le trou (800 $ sur les vraies données) se recopiait
+                   chaque mois. Elles portent maintenant un badge rouge. */
+                var orph = (j.orphelines || j.relinked || []).length;
+                if (orph) {
+                  toast('Ligne supprimée · ' + orph + ' paye(s) sans base : 0 $ (badge rouge) — redonne-leur une base', 'error');
+                } else {
+                  toast('Ligne supprimée');
+                }
                 load(S.month);
               } else if (j.needs_confirm) {
                 // Des payes en % s'appuient sur cette ligne : on demande AVANT
                 // de casser leur base (sinon elles tombaient à $0 en silence).
                 var _q = j.error + String.fromCharCode(10) + String.fromCharCode(10)
-                        + 'Supprimer quand meme ? Ces payes seront recalculees sur le TOTAL des revenus.';
+                        + 'Supprimer quand meme ? Ces payes tomberont a 0 $ (elles ne sont PAS '
+                        + 'recalculees sur le total des revenus) jusqu a ce que tu leur donnes '
+                        + 'une nouvelle base.';
                 if (confirm(_q)) send(true);
               } else {
                 toast(j.error || 'Échec de la suppression');
@@ -524,8 +574,15 @@
     var fd = new FormData(); fd.set('month', S.month);
     fetch('/facture/next_month', {method: 'POST', body: fd}).then(function (r) { return r.json(); })
       .then(function (j) {
-        if (j.ok) { toast('✓ ' + monthLabel(j.month) + ' créé (' + j.count + ' lignes reportées)'); load(j.month); }
-        else toast(j.error || 'Erreur', 'error');
+        if (j.ok) {
+          /* Les lignes dont la « Date de fin » est passée ne sont plus
+             reportées : on le DIT, sinon une charge qui disparaît du mois
+             passe pour un oubli (ou pour un bug). */
+          var fin = (j.expirees || []);
+          toast('✓ ' + monthLabel(j.month) + ' créé (' + j.count + ' lignes reportées)'
+            + (fin.length ? ' · ' + fin.length + ' terminée(s) non reportée(s) : ' + fin.slice(0, 3).join(', ') : ''));
+          load(j.month);
+        } else toast(j.error || 'Erreur', 'error');
       });
   }
 

@@ -230,19 +230,29 @@ def status(model_id: str) -> dict:
             pass
         return ""
 
+    def _avec_rapport(d):
+        """Joint le rapport d'assemblage à l'état. C'est status() que la page
+        interroge pendant le rendu : sans ça, le repli sur le template nu
+        (variante livrée sans vidéo brute) n'atteignait jamais l'appelant."""
+        rap = assembly_report(mid)
+        if rap:
+            d = dict(d)
+            d["assemblage"] = rap
+        return d
+
     if st is not None:
         # Le fichier dit "running" mais le process est MORT -> crash silencieux du pipeline.
         if st.get("state") == "running" and proc_dead:
             err = _tail_log() or "le rendu s'est arrêté (crash pipeline)"
-            return {"state": "error", "error": err}
-        return st
+            return _avec_rapport({"state": "error", "error": err})
+        return _avec_rapport(st)
     # Pas de fichier de statut
     if proc is not None and proc.poll() is None:
-        return {"state": "running"}
+        return _avec_rapport({"state": "running"})
     if proc_dead:
         err = _tail_log() or "le rendu ne s'est pas lancé"
-        return {"state": "error", "error": err}
-    return {"state": "idle"}
+        return _avec_rapport({"state": "error", "error": err})
+    return _avec_rapport({"state": "idle"})
 
 
 def list_outputs(model_id: str) -> dict:
@@ -283,6 +293,146 @@ def write_captions(data) -> bool:
         return False
 
 
+# ---------- rapport d'assemblage (repli sur le template nu) ----------
+# Une génération « Reel monté » peut livrer des variantes SANS vidéo brute :
+# soit parce qu'aucune brute n'était disponible, soit parce que l'assemblage
+# ffmpeg a échoué. Le VA reçoit alors le TEMPLATE ENTIER — donc l'accroche
+# d'une AUTRE vidéo — avec le message « poste cette vidéo telle quelle », et il
+# la publie sur le compte de la model. Observé : 10 variantes demandées,
+# 9 échecs d'assemblage, la page annonçait « 10 vidéos téléchargées » et la
+# seule trace était un print sur la sortie standard du bot, invisible depuis le
+# dashboard.
+#
+# Le rapport est donc remonté par TROIS chemins, tous alimentés par la même
+# structure (deux structures divergentes = deux comportements) :
+#   1. paramètre `report=` de _prepare_inputs() / gen_from_draft(), rempli sur
+#      place — le tuple de retour, lui, ne bouge pas (appelants inchangés) ;
+#   2. models/<id>/_assemblage.json, relu par assembly_report(model_id) et
+#      joint à status() sous la clé « assemblage » (c'est status() que la page
+#      interroge pendant le rendu) ;
+#   3. en TÊTE de _run.log, le seul journal consultable depuis le dashboard
+#      (/noctus/montage_log) — écrit par run() juste avant de lancer Node.
+_RAPPORT_NOM = "_assemblage.json"
+
+# Au-delà, la liste d'échecs ne sert plus qu'à gonfler le fichier ; le compte
+# exact reste dans « echecs_total » (ne jamais écarter en silence).
+_MAX_ECHECS = 40
+
+
+def _rapport_vide(total=0) -> dict:
+    """Structure du rapport d'assemblage, compteurs à zéro."""
+    return {
+        # un montage a-t-il été DEMANDÉ (point de coupe + dossier de brutes) ?
+        # Sans ça, « template seul » est le comportement normal, pas un repli.
+        "montage_demande": False,
+        "mode": "sans_montage",     # "assemble" | "template_seul" | "sans_montage"
+        "repli": False,             # au moins une variante livrée SANS brute
+        "total": 0,                 # variantes prévues
+        "assemblees": 0,            # variantes réellement montées avec une brute
+        "repliees": 0,              # variantes rendues à partir du template nu
+        "perdues": 0,               # variantes qui n'ont produit aucun fichier
+        "brutes_dispo": 0,
+        "coupe": 0.0,
+        "echecs": [],               # [{"brute", "variante", "erreur", "perdue"}]
+        "echecs_total": 0,          # avant plafonnement de la liste
+        "raison": "",               # pourquoi le repli, en clair
+        "message": "",              # phrase prête à afficher (page, Discord, log)
+        "fichiers": [],             # entrées préparées (= targets)
+        "ts": 0,
+    }
+
+
+def _finaliser_rapport(rap: dict) -> dict:
+    """Déduit mode / repli / message des compteurs. Appelé au point de sortie
+    unique de _prepare_inputs pour qu'aucun chemin ne puisse rendre un rapport
+    à moitié rempli."""
+    if rap.get("montage_demande"):
+        rap["mode"] = "assemble" if rap["assemblees"] else "template_seul"
+        rap["repli"] = bool(rap["repliees"] or rap["perdues"])
+    else:
+        rap["mode"] = "sans_montage"
+        rap["repli"] = False
+    if not rap["repli"]:
+        rap["message"] = rap["raison"] or (
+            f"{rap['assemblees']} variante(s) montée(s) avec une brute"
+            if rap["assemblees"] else "vidéo source utilisée telle quelle")
+        return rap
+    bouts = []
+    if rap["repliees"]:
+        bouts.append(f"{rap['repliees']}/{rap['total']} variante(s) SANS vidéo brute "
+                     "(template entier : l'accroche n'est pas celle de la model)")
+    if rap["perdues"]:
+        bouts.append(f"{rap['perdues']} variante(s) perdue(s)")
+    if rap["raison"]:
+        bouts.append(rap["raison"])
+    rap["message"] = " — ".join(bouts)
+    return rap
+
+
+def _ecrire_rapport(mdir, rap: dict) -> bool:
+    """Pose le rapport à côté du rendu, en écriture atomique : status() le relit
+    pendant que la page interroge l'état. backup=False : ce fichier est
+    régénéré à chaque génération, une copie .prev n'apporterait rien."""
+    try:
+        return safe_json.write(Path(mdir) / _RAPPORT_NOM, rap, indent=None, backup=False)
+    except Exception as e:
+        print(f"[noctus] rapport d'assemblage non ecrit : {e}", flush=True)
+        return False
+
+
+def assembly_report(model_id) -> dict:
+    """Rapport d'assemblage de la DERNIÈRE génération d'un modèle ({} si aucun).
+
+    Entrée publique pour savoir si les vidéos livrées contiennent bien une
+    vidéo brute. Clés utiles : « repli » (bool, au moins une variante sans
+    brute), « repliees » / « assemblees » / « perdues » (comptes), « echecs »
+    (détail par variante), « message » (phrase toute faite)."""
+    mid = _safe(model_id)
+    if not mid:
+        return {}
+    try:
+        data = safe_json.load(_models_dir() / mid / _RAPPORT_NOM, default=None)
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _entete_assemblage(mdir, targets) -> str:
+    """Lignes à écrire en tête de _run.log.
+
+    Le rapport n'est retenu que s'il décrit BIEN cette génération-ci : le
+    dossier models/<id> est réutilisé d'une génération à l'autre (son
+    identifiant ne dépend que du reel), un rapport laissé par la précédente
+    mentirait. On compare les fichiers d'entrée, pas un horodatage : c'est
+    exact, alors qu'un délai serait une devinette."""
+    try:
+        data = safe_json.load(Path(mdir) / _RAPPORT_NOM, default=None)
+        if not isinstance(data, dict):
+            return ""
+        att = set(data.get("fichiers") or [])
+        if not att or att != set(targets or []):
+            return ""
+        lignes = ["===== assemblage brute + template =====",
+                  f"variantes : {data.get('total', 0)} — montées avec une brute : "
+                  f"{data.get('assemblees', 0)} — template seul : "
+                  f"{data.get('repliees', 0)} — perdues : {data.get('perdues', 0)}",
+                  f"brutes disponibles : {data.get('brutes_dispo', 0)}, "
+                  f"coupe à {data.get('coupe', 0)}s"]
+        if data.get("message"):
+            lignes.append(("/!\\ " if data.get("repli") else "") + str(data["message"]))
+        for e in (data.get("echecs") or []):
+            lignes.append(f"  echec {e.get('variante', '?')} / {e.get('brute', '?')} : "
+                          f"{e.get('erreur', '?')}")
+        reste = int(data.get("echecs_total") or 0) - len(data.get("echecs") or [])
+        if reste > 0:
+            lignes.append(f"  ... et {reste} autre(s) echec(s) non detaille(s)")
+        lignes.append("=" * 39)
+        return "\n".join(lignes) + "\n"
+    except Exception as e:
+        print(f"[noctus] entete d'assemblage illisible : {e}", flush=True)
+        return ""
+
+
 # ---------- run / stop ----------
 def run(model_id: str, folders=None, captions=None, targets=None, folder_map=None,
         caption_map=None):
@@ -313,11 +463,24 @@ def run(model_id: str, folders=None, captions=None, targets=None, folder_map=Non
     # Logs du pipeline -> _run.log (au lieu de DEVNULL) : si ça crashe, on voit pourquoi
     # et status() en renvoie un extrait au front.
     mdir = _models_dir() / mid
+    logf = None                      # None = pas de fichier -> DEVNULL au Popen
     try:
         mdir.mkdir(parents=True, exist_ok=True)
         logf = open(str(mdir / "_run.log"), "wb")
     except Exception:
-        logf = subprocess.DEVNULL
+        logf = None
+    if logf is not None:
+        # Rapport d'assemblage EN TÊTE, pendant qu'on tient encore le fichier :
+        # ensuite Node écrit dedans. C'est le seul journal consultable depuis le
+        # dashboard ; les échecs d'assemblage n'allaient jusqu'ici que sur la
+        # sortie standard du bot, que personne ne lit.
+        try:
+            entete = _entete_assemblage(mdir, targets)
+            if entete:
+                logf.write(entete.encode("utf-8", "replace"))
+                logf.flush()
+        except Exception as e:
+            print(f"[noctus] entete d'assemblage non journalisee : {e}", flush=True)
     # ÉTAT « running » ÉCRIT ICI, AVANT de lancer Node.
     # Sinon : l'identifiant du modèle est fixe pour un reel donné, donc
     # _status.json contient encore le « done » de la génération précédente. Le
@@ -332,7 +495,7 @@ def run(model_id: str, folders=None, captions=None, targets=None, folder_map=Non
     proc = subprocess.Popen(
         [node_bin, "noctus_runner.js", json.dumps(payload)],
         cwd=str(NOCTUS_SRC),
-        stdout=logf,
+        stdout=(logf if logf is not None else subprocess.DEVNULL),
         stderr=subprocess.STDOUT,
         **kwargs,
     )
@@ -565,29 +728,45 @@ def probe_video(path):
         return 0, 0, 0.0, 0.0
 
 
-def list_brutes(brutes_dir):
+def list_brutes(brutes_dir, ecartes=None):
     """Vidéos utilisables du dossier brutes/, triées par nom.
     Les fichiers annexes (.txt, .desc.txt, .montage.json, miniatures, fichiers
     cachés et restes d'upload) ne sont pas des vidéos et sont donc écartés par
-    le filtre d'extension."""
+    le filtre d'extension.
+
+    `ecartes` : dict FACULTATIF {raison: nombre}, rempli sur place. Sans lui, un
+    dossier ne contenant que des .example ou des miniatures ressemblait à un
+    dossier VIDE : le repli sur le template nu devenait inexplicable pour le
+    propriétaire, qui voyait pourtant des fichiers dans le dossier."""
+    def _ecarte(raison):
+        if isinstance(ecartes, dict):
+            ecartes[raison] = ecartes.get(raison, 0) + 1
+
     d = Path(brutes_dir)
     if not d.exists() or not d.is_dir():
         return []
     out = []
     for f in sorted(d.iterdir()):
-        if not f.is_file() or f.name.startswith("."):
+        if not f.is_file():
+            continue
+        if f.name.startswith("."):
+            _ecarte("fichier caché")
             continue
         if ".example" in f.name:          # <stem>.example.mp4 = vidéo d'exemple
-            continue                      # (même convention que la Bibliothèque)
+            _ecarte("vidéo d'exemple")    # (même convention que la Bibliothèque)
+            continue
         if f.suffix.lower() not in VIDEO_EXTS:
+            _ecarte("pas une vidéo")
             continue
         try:
             # Seuil bas exprès : il ne sert qu'à jeter les fichiers vides ou les
             # uploads interrompus. Une vidéo courte mais valide doit passer — un
             # fichier réellement illisible sera écarté à l'assemblage (ffprobe).
             if f.stat().st_size < 1024:
+                _ecarte("fichier vide ou upload interrompu")
                 continue
         except OSError:
+            _ecarte("fichier illisible")
             continue
         out.append(f)
     return out
@@ -728,25 +907,94 @@ def assemble_brute_template(template, brute, cut_at, out_path):
     return False, f"ffmpeg : {last}"[:200]
 
 
+def generations_en_cours() -> set:
+    """Identifiants des modèles dont le rendu Node tourne ENCORE.
+
+    _PROCS est la table des process lancés par run() ; `poll() is None` = vivant.
+    En cas de doute (process illisible) on considère le rendu vivant : garder un
+    dossier de trop coûte du disque, en supprimer un de trop tue un rendu."""
+    vivants = set()
+    for mid, p in list(_PROCS.items()):          # copie : la table bouge en parallèle
+        if p is None:
+            continue
+        try:
+            if p.poll() is None:
+                vivants.add(mid)
+        except Exception:
+            vivants.add(mid)
+    return vivants
+
+
+def _mtime_recursif(d: Path) -> float:
+    """mtime le plus récent du dossier de génération, sous-dossiers compris.
+
+    Le mtime de models/<id> NE BOUGE PAS pendant un rendu : Node écrit dans
+    output/V1, pas à la racine. Trié sur ce seul mtime, un rendu long
+    redevenait « ancien » au fil des générations suivantes et se faisait purger
+    en pleine écriture."""
+    best = 0.0
+    try:
+        best = d.stat().st_mtime
+    except OSError:
+        return 0.0
+    for sub in ("input", "output"):
+        p = d / sub
+        try:
+            best = max(best, p.stat().st_mtime)
+            for c in p.iterdir():                # output/V1, output/V2, …
+                try:
+                    best = max(best, c.stat().st_mtime)
+                except OSError:
+                    pass
+        except OSError:
+            pass
+    return best
+
+
 def purge_old_models(prefix: str, keep: int = 12):
     """Supprime les vieux dossiers de génération `<prefix>*` en gardant les
     `keep` plus récents. Chacun contient les vidéos d'entrée ET les sorties :
     avec l'assemblage il y a maintenant une entrée PAR VARIANTE, donc plusieurs
-    dizaines de Mo par génération — sans ça le disque du VPS se remplit."""
+    dizaines de Mo par génération — sans ça le disque du VPS se remplit.
+
+    Un dossier dont la GÉNÉRATION EST EN COURS n'est jamais supprimé, même s'il
+    est le plus ancien : 13 générations lancées pendant un rendu lourd
+    effaçaient input/ et output/ sous les pieds du process Node, qui mourait, et
+    le FileNotFoundError qui suivait faisait échouer la requête en cours.
+
+    Un dossier qui disparaît en cours de route (purge concurrente) est compté et
+    signalé, il n'annule plus toute la purge — auparavant un seul
+    FileNotFoundError dans le tri laissait le disque se remplir en silence.
+    Renvoie le nombre de dossiers réellement supprimés."""
+    supprimes = proteges = illisibles = 0
     try:
-        olds = sorted((d for d in _models_dir().glob(prefix + "*") if d.is_dir()),
-                      key=lambda d: d.stat().st_mtime, reverse=True)[keep:]
-        for o in olds:
-            shutil.rmtree(str(o), ignore_errors=True)
-        if olds:
-            print(f"[noctus] purge : {len(olds)} dossier(s) {prefix}* supprimé(s)", flush=True)
-        return len(olds)
+        candidats = []
+        for d in _models_dir().glob(prefix + "*"):
+            try:
+                if not d.is_dir():
+                    continue
+                candidats.append((_mtime_recursif(d), d))
+            except OSError:
+                illisibles += 1                  # disparu entre le glob et le stat
+        vivants = generations_en_cours()
+        candidats.sort(key=lambda t: t[0], reverse=True)
+        for _m, d in candidats[keep:]:
+            if d.name in vivants:
+                proteges += 1
+                continue
+            shutil.rmtree(str(d), ignore_errors=True)
+            supprimes += 1
+        if supprimes or proteges or illisibles:
+            print(f"[noctus] purge {prefix}* : {supprimes} supprimé(s), "
+                  f"{proteges} protégé(s) (rendu en cours), "
+                  f"{illisibles} illisible(s)", flush=True)
+        return supprimes
     except Exception as e:
         print(f"[noctus] purge {prefix}* : {e}", flush=True)
-        return 0
+        return supprimes
 
 
-def _prepare_inputs(src, inp, draft, folders, brutes_dir):
+def _prepare_inputs(src, inp, draft, folders, brutes_dir, report=None):
     """Remplit le dossier input/ du modèle et renvoie
     (targets, videoFolderMap, gaps).
 
@@ -761,18 +1009,86 @@ def _prepare_inputs(src, inp, draft, folders, brutes_dir):
     décalées d'autant — voir shifted_caption_entry.
 
     Sans coupe, sans brute, ou si tous les assemblages échouent : on retombe sur
-    la vidéo source telle quelle (comportement d'avant)."""
+    la vidéo source telle quelle (comportement d'avant).
+
+    `report` : dict FACULTATIF rempli sur place avec le rapport d'assemblage
+    (voir _rapport_vide pour les clés). Le tuple de retour ne change pas : les
+    appelants qui l'ignorent gardent exactement le comportement d'avant. Le
+    même rapport est de toute façon écrit dans models/<id>/_assemblage.json,
+    donc relisible par assembly_report(model_id) et joint à status().
+    Repère utile pour l'appelant : `repli` (bool) dit qu'au moins une des
+    vidéos livrées est le TEMPLATE ENTIER, sans vidéo brute — à ne pas poster
+    telle quelle sans le dire."""
     import shutil as _sh
     import random as _rnd
     import re as _re
+    import time as _t
+    rap = _rapport_vide()
+    rap["ts"] = int(_t.time())
+    rap["total"] = len(folders or []) or 1
+    mdir = Path(inp).parent
+
+    def _sortie(targets, fmap, gaps):
+        """Point de sortie UNIQUE : quel que soit le chemin pris, le rapport est
+        finalisé, écrit sur le disque et remonté à l'appelant."""
+        rap["fichiers"] = list(targets)
+        _finaliser_rapport(rap)
+        _ecrire_rapport(mdir, rap)
+        if isinstance(report, dict):
+            report.clear()
+            report.update(rap)
+        if rap["repli"]:
+            # Volontairement bruyant : c'est le cas où le VA publierait
+            # l'accroche d'une autre vidéo sur le compte de la model.
+            print(f"[noctus] /!\\ repli : {rap['message']}", flush=True)
+        return targets, fmap, gaps
+
+    def _copier_source():
+        """Repli global : la vidéo source telle quelle. Renvoie [] si même la
+        copie échoue (dossier purgé sous nos pieds) — jamais un nom de fichier
+        qui n'existe pas, sinon le moteur annoncerait une vidéo introuvable."""
+        try:
+            Path(inp).mkdir(parents=True, exist_ok=True)
+            _sh.copy(str(src), str(Path(inp) / src.name))
+            return [src.name]
+        except Exception as e:
+            rap["repliees"] = 0
+            rap["perdues"] = rap["total"]
+            rap["echecs"].append({"brute": "", "variante": "*", "perdue": True,
+                                  "erreur": f"copie de la source impossible : {e}"})
+            rap["echecs_total"] += 1
+            print(f"[noctus] copie de la source impossible : {e}", flush=True)
+            return []
+
     try:
         cut = float((draft or {}).get("cut_at") or 0)
     except (TypeError, ValueError):
         cut = 0.0
-    brutes = list_brutes(brutes_dir) if (brutes_dir and cut > 0.05) else []
+    rap["coupe"] = round(cut, 3)
+    rap["montage_demande"] = bool(brutes_dir) and cut > 0.05
+
+    ecartes = {}
+    brutes = list_brutes(brutes_dir, ecartes) if rap["montage_demande"] else []
+    rap["brutes_dispo"] = len(brutes)
     if not brutes:
-        _sh.copy(str(src), str(inp / src.name))
-        return [src.name], None, {}
+        # Trois situations que l'ancien code confondait dans un même repli muet.
+        # Seule la troisième est un problème : un montage a été DEMANDÉ et le
+        # VA va recevoir le template entier avec « poste-la telle quelle ».
+        if not rap["montage_demande"]:
+            rap["raison"] = ("aucun point de coupe" if cut <= 0.05
+                             else "aucun dossier de brutes fourni")
+        else:
+            rap["repliees"] = rap["total"]
+            d = Path(brutes_dir)
+            if not d.is_dir():
+                rap["raison"] = ("point de coupe posé mais le dossier de brutes "
+                                 f"n'existe pas ({d.name})")
+            else:
+                det = ", ".join(f"{n} {k}" for k, n in sorted(ecartes.items()) if n)
+                rap["raison"] = ("point de coupe posé mais AUCUNE vidéo brute "
+                                 "utilisable dans " + d.name
+                                 + (f" ({det})" if det else " (dossier vide)"))
+        return _sortie(_copier_source(), None, {})
     stem = (_re.sub(r"[^A-Za-z0-9_-]", "", src.stem) or "reel")[:40]
     # 1) on attribue d'abord une brute à chaque variante (tirage sans remise,
     #    on ne repioche que quand toutes ont servi)
@@ -782,6 +1098,12 @@ def _prepare_inputs(src, inp, draft, folders, brutes_dir):
             pool = list(brutes)
             _rnd.shuffle(pool)
         plan.append((f"asm{i + 1}_{stem}.mp4", pool.pop(), vf))
+    rap["total"] = len(plan)
+
+    # Un échec d'assemblage n'est PAS un détail : la variante concernée part du
+    # template nu. On les collecte pour les compter et les journaliser (list
+    # .append est atomique, l'appel vient des workers ci-dessous).
+    echecs = []
 
     # 2) puis on assemble EN PARALLÈLE : cet appel est synchrone dans le thread
     #    de la requête HTTP, et en série 10 variantes feraient patienter très
@@ -789,20 +1111,26 @@ def _prepare_inputs(src, inp, draft, folders, brutes_dir):
     def _one(job):
         name, brute, vf = job
         ok, err = assemble_brute_template(src, brute, cut, inp / name)
-        if not ok:
-            # Une brute abîmée ne doit pas faire disparaître une variante : on
-            # rend le template seul pour celle-là, l'utilisateur a bien ses N
-            # vidéos et le log dit laquelle n'a pas été montée.
-            print(f"[noctus] assemblage {brute.name} -> {vf} : {err} "
-                  f"(cette variante partira du template seul)", flush=True)
-            try:
-                _sh.copy(str(src), str(inp / name))
-            except Exception:
-                return None
-            return name, vf, 0.0
-        # brute plus courte que la place -> le début (image + son) a été coupé
-        # de « gap » secondes : les captions minutées devront être décalées.
-        return name, vf, brute_gap(src, brute, cut)
+        if ok:
+            # brute plus courte que la place -> le début (image + son) a été coupé
+            # de « gap » secondes : les captions minutées devront être décalées.
+            return name, vf, brute_gap(src, brute, cut), True
+        # Une brute abîmée ne doit pas faire disparaître une variante : on rend
+        # le template seul pour celle-là, l'utilisateur a bien ses N vidéos.
+        # Mais ce repli est COMPTÉ et remonté : sans ça « 10 vidéos
+        # téléchargées » pouvait vouloir dire 9 templates nus.
+        perdue = False
+        try:
+            _sh.copy(str(src), str(inp / name))
+        except Exception as e:
+            err = f"{err} ; repli sur le template impossible aussi ({e})"
+            perdue = True
+        echecs.append({"brute": brute.name, "variante": vf, "erreur": err,
+                       "perdue": perdue})
+        print(f"[noctus] assemblage {brute.name} -> {vf} : {err} "
+              f"({'variante perdue' if perdue else 'cette variante partira du template seul'})",
+              flush=True)
+        return None if perdue else (name, vf, 0.0, False)
 
     targets, fmap, gaps = [], {}, {}
     workers = max(1, min(3, (os.cpu_count() or 2), len(plan)))
@@ -813,17 +1141,29 @@ def _prepare_inputs(src, inp, draft, folders, brutes_dir):
     else:
         done = [_one(j) for j in plan]
     for r in done:
-        if r:
-            targets.append(r[0])
-            fmap[r[0]] = [r[1]]
-            gaps[r[0]] = r[2]
+        if not r:
+            rap["perdues"] += 1
+            continue
+        targets.append(r[0])
+        fmap[r[0]] = [r[1]]
+        gaps[r[0]] = r[2]
+        if r[3]:
+            rap["assemblees"] += 1
+        else:
+            rap["repliees"] += 1
+    rap["echecs_total"] += len(echecs)
+    rap["echecs"] = echecs[:_MAX_ECHECS]
     if not targets:                        # aucun assemblage n'a abouti
         print("[noctus] aucun assemblage réussi -> template seul", flush=True)
-        _sh.copy(str(src), str(inp / src.name))
-        return [src.name], None, {}
-    print(f"[noctus] {len(targets)} variante(s) assemblée(s) avec une brute "
+        rap["assemblees"] = 0
+        rap["repliees"] = rap["total"]     # le moteur rendra N fois le template nu
+        rap["perdues"] = 0
+        rap["raison"] = rap["raison"] or "aucun assemblage n'a abouti"
+        return _sortie(_copier_source(), None, {})
+    print(f"[noctus] {rap['assemblees']} variante(s) assemblée(s) avec une brute, "
+          f"{rap['repliees']} sur template seul, {rap['perdues']} perdue(s) "
           f"(coupe à {cut:.2f}s, {len(brutes)} brute(s) dispo)", flush=True)
-    return targets, fmap, gaps
+    return _sortie(targets, fmap, gaps)
 
 
 def _shift_time(ts, gap):
@@ -873,10 +1213,17 @@ def caption_map_for(entry, targets, gaps, caps):
     return cmap
 
 
-def gen_from_draft(src_path, draft, folders=None, model=None, brutes_dir=None):
+def gen_from_draft(src_path, draft, folders=None, model=None, brutes_dir=None,
+                   report=None):
     """Génère une (ou N) variante MONTÉE d'un reel à partir d'un brouillon de montage
     {segments, font, style} — même moteur que l'éditeur web. À la demande (VA).
-    Retourne le model_id (à poller via status()) ou None."""
+    Retourne le model_id (à poller via status()) ou None.
+
+    `report` : dict FACULTATIF rempli sur place avec le rapport d'assemblage
+    (voir _prepare_inputs / _rapport_vide). En particulier `repli` = True
+    signale qu'au moins une vidéo livrée est le TEMPLATE ENTIER, sans vidéo
+    brute. Le retour reste le model_id : le rapport est aussi relisible plus
+    tard par assembly_report(model_id) et joint à status(model_id)."""
     import shutil as _sh
     import re as _re
     import time as _t
@@ -905,7 +1252,8 @@ def gen_from_draft(src_path, draft, folders=None, model=None, brutes_dir=None):
     except Exception:
         pass
     folders = folders or ["V1"]
-    targets, folder_map, gaps = _prepare_inputs(src, inp, draft, folders, brutes_dir)
+    targets, folder_map, gaps = _prepare_inputs(src, inp, draft, folders, brutes_dir,
+                                                report)
     label = ("vam_" + model)[:40]
     entry, _font = build_montage_caps(draft, label)
     # captions.json est PARTAGÉ (le runner Node le lit au démarrage) : on sérialise

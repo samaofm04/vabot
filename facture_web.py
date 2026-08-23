@@ -56,14 +56,32 @@ MARKET_DEFAULT = "us"
 
 
 def _load() -> dict:
+    """Lit data/facture.json — avec le filet `.prev`.
+
+    Avant : lecture directe + `except: pass`. Un fichier tronqué (coupure
+    pendant une écriture) rendait donc {} en silence ; les graines se
+    rejouaient sur cette « base vierge » et la première sauvegarde recopiait
+    d'abord le fichier corrompu sur .prev — la compta ET son filet étaient
+    perdus d'un coup. `load_or_prev` restaure la dernière copie saine (et la
+    réécrit sans écraser .prev) au lieu de faire croire à un fichier vide.
+    """
     try:
-        d = json.loads(FACTURE_FILE.read_text(encoding="utf-8"))
+        d = safe_json.load_or_prev(FACTURE_FILE)
         if isinstance(d, dict):
             d.setdefault("settings", {})
             d.setdefault("months", {})
             return d
-    except Exception:
-        pass
+        print(f"[facture] {FACTURE_FILE.name} n'est pas un objet JSON "
+              f"({type(d).__name__}) — base vide servie", flush=True)
+    except FileNotFoundError:
+        pass                      # première ouverture : rien à récupérer
+    except Exception as e:
+        # ni le fichier ni .prev ne sont lisibles : on le DIT (sinon la
+        # sauvegarde suivante gravait ce vide sans laisser de trace).
+        # Message sans emoji : la console Windows (cp1252) refuse de les
+        # encoder, et une exception ICI ferait tomber tout le module.
+        print(f"[facture] ALERTE : {FACTURE_FILE.name} illisible et .prev "
+              f"inutilisable ({e}) — base vide servie", flush=True)
     return {"settings": {}, "months": {}}
 
 
@@ -81,18 +99,60 @@ _AUTOFILL_LOCK = threading.Lock()
 _AUTOFILL_MAX = 12          # garde-fou : jamais plus d'un an de rattrapage
 
 
-def _carry_lines(src: list) -> list:
-    """Lignes d'un mois -> lignes du mois suivant.
+def _as_date(txt):
+    """'YYYY-MM-DD' -> date, ou None si vide/illisible (champ saisi à la main)."""
+    try:
+        return datetime.date.fromisoformat(str(txt or "").strip()[:10])
+    except Exception:
+        return None
+
+
+def _line_active_in(line: dict, month: str) -> bool:
+    """La ligne est-elle en vigueur pendant `month` ('YYYY-MM') ?
+
+    « Date de début » et « Date de fin » étaient saisies, stockées… et lues par
+    personne : un abonnement 50 $/mois terminé le 30/06 était reporté en
+    juillet, août, septembre, cumul du Bilan compris. Une ligne compte pour le
+    mois entier dès qu'elle chevauche le mois (pas de prorata : la compta se
+    fait au mois, comme le reste du module).
+    """
+    first, last = _month_bounds(month)
+    fin = _as_date(line.get("end"))
+    if fin and fin < first:
+        return False
+    debut = _as_date(line.get("start"))
+    if debut and debut > last:
+        return False
+    return True
+
+
+def _carry_lines(src: list, dest_month: str = "") -> tuple:
+    """Lignes d'un mois -> lignes du mois `dest_month`. Rend (lignes, terminées).
 
     On garde les récurrentes (freq != once), on leur donne une identité neuve,
     on remet les paiements à zéro et on décale les phases d'un mois. Les liens
     « % d'une autre ligne » sont réécrits vers les NOUVELLES ids : sinon le
     pourcentage pointerait sur les lignes du mois précédent et calculerait sur
     une base à zéro.
+
+    Une ligne dont la « Date de fin » est passée n'est PAS reportée : c'est
+    définitif, elle ne peut plus redevenir active, donc rien n'est perdu. Les
+    labels des lignes écartées sont rendus à l'appelant (jamais d'abandon
+    silencieux : le mois créé doit pouvoir dire ce qu'il a laissé derrière).
+
+    À l'inverse une ligne PAS ENCORE commencée est reportée quand même : la
+    supprimer ici la ferait disparaître avant même sa date de début (le report
+    est en chaîne, un mois ne voit que le précédent). Son montant est mis à
+    zéro à l'affichage par _line_active_in, pas ici.
     """
-    new_lines, id_map = [], {}
+    new_lines, id_map, finies = [], {}, []
     for l in src or []:
         if l.get("freq") == "once":
+            continue
+        _fin = _as_date(l.get("end"))
+        if dest_month and _fin and _fin < _month_bounds(dest_month)[0]:
+            finies.append({"label": l.get("label") or l.get("id") or "?",
+                           "end": str(l.get("end") or "")})
             continue
         nl = dict(l)
         nl["id"] = uuid.uuid4().hex[:12]
@@ -119,7 +179,7 @@ def _carry_lines(src: list) -> list:
             nl["pct_of"] = "line:" + id_map.get(po[5:], po[5:])
         elif po.startswith("lines:"):
             nl["pct_of"] = "lines:" + ",".join(id_map.get(i, i) for i in po[6:].split(",") if i)
-    return new_lines
+    return new_lines, finies
 
 
 def _autofill_months(upto: str = "") -> int:
@@ -149,7 +209,14 @@ def _autofill_months(upto: str = "") -> int:
             if nxt in mois:                       # mois existant : on n'y touche pas
                 cur = nxt
                 continue
-            lignes = _carry_lines((mois.get(cur) or {}).get("lines") or [])
+            lignes, finies = _carry_lines((mois.get(cur) or {}).get("lines") or [], nxt)
+            if finies:
+                # Rien ne doit disparaître sans trace : on nomme les lignes que
+                # leur date de fin sort du report.
+                print(f"[facture] {nxt} : {len(finies)} ligne(s) NON reportée(s) "
+                      "(date de fin passée) : "
+                      + ", ".join(f"{f['label']} (fin {f['end']})" for f in finies[:8]),
+                      flush=True)
             if not lignes:                        # rien de récurrent à propager
                 break
             mois[nxt] = {"lines": lignes, "auto": True}
@@ -520,6 +587,27 @@ def _line_usd(line: dict, rev_bases: dict, settings: dict) -> float:
     return round(_to_usd(float(line.get("amount") or 0), line.get("currency") or "USD", settings), 2)
 
 
+def _pct_base_missing(line: dict, rev_bases: dict) -> int:
+    """Nombre de bases « % d'une ligne » INTROUVABLES pour cette ligne.
+
+    Supprimer un revenu laisse les payes en % pointées sur un id disparu :
+    _line_usd rend alors 0 sans un mot. On compte ici les bases manquantes pour
+    que l'écran puisse le dire (badge « base supprimée »). Les bases globales
+    (rev_total / rev_of / rev_mym) existent toujours -> jamais orphelines.
+    """
+    if (line.get("form") or "fixed") != "pct":
+        return 0
+    po = str(line.get("pct_of") or "")
+    if po.startswith("lines:"):
+        ids = [i for i in po[6:].split(",") if i]
+        if not ids:
+            return 1        # base vidée : toutes les lignes de base supprimées
+        return sum(1 for i in ids if f"line:{i}" not in rev_bases)
+    if po.startswith("line:"):
+        return 0 if po in rev_bases else 1
+    return 0
+
+
 def _pin_creator_id(month: str, line_id, cid: int) -> None:
     """Écrit l'ID MyPuls résolu sur une ligne (backfill).
     Idempotent : n'écrase jamais un ID déjà posé. NB : pas de `with _LOCK` ici,
@@ -645,7 +733,14 @@ def compute_state(month: str) -> dict:
             continue
         form = l.get("form") or "fixed"
         _already_net = False
-        if form == "fixed":
+        if not _line_active_in(l, month):
+            # Hors [Date de début, Date de fin] : la ligne reste visible (elle
+            # sera reportée tant que sa fin n'est pas passée) mais ne rapporte
+            # rien ce mois-ci — et on n'interroge pas MyPuls pour rien.
+            if form == "pct":
+                continue          # mise à 0 par la 2e passe, plus bas
+            usd = 0.0
+        elif form == "fixed":
             usd = _to_usd(float(l.get("amount") or 0), l.get("currency") or "USD", settings)
         elif form == "mypuls":
             _amt, _cur, _already_net, _info = _mypuls_month_amount(
@@ -686,15 +781,52 @@ def compute_state(month: str) -> dict:
         if l.get("cat") in ("rev_of", "rev_mym"):
             rev_bases[l["cat"]] += usd
 
+    # 2e passe : les REVENUS en « % d'un autre revenu ». Ils étaient comptés
+    # dans le total affiché mais jamais versés dans rev_bases : toute dépense
+    # en % (paye chatteur « 7 % de TOUS les revenus ») était donc calculée sur
+    # une assiette amputée de ces revenus-là, et sous-payée d'autant.
+    # Les montants sont calculés sur un INSTANTANÉ des bases de la 1re passe
+    # puis ajoutés d'un bloc : sinon un revenu « % du total » se gonflerait
+    # lui-même, et le résultat des autres dépendrait de l'ordre de saisie.
+    _bases_1 = dict(rev_bases)
+    _pct_rev = []
+    for l in lines:
+        if l.get("type") != "rev" or (l.get("form") or "fixed") != "pct":
+            continue
+        if not _line_active_in(l, month):
+            usd = 0.0
+        else:
+            usd = _line_usd(l, _bases_1, settings)
+            _fee = float(l.get("fee_pct") or 0)
+            if _fee > 0:      # même règle que les autres revenus : brut -> net
+                usd = round(usd * (1 - _fee / 100.0), 2)
+        _pct_rev.append((l, usd))
+    for l, usd in _pct_rev:
+        if l.get("id"):
+            resolved_rev[l["id"]] = usd
+            rev_bases[f"line:{l['id']}"] = usd
+        rev_bases["rev_total"] += usd
+        if l.get("cat") in ("rev_of", "rev_mym"):
+            rev_bases[l["cat"]] += usd
+
     out_lines = []
     tot_rev = tot_exp = 0.0
     by_market = {mk: {"rev": 0.0, "exp": 0.0, "rev_count": 0, "exp_count": 0,
                       "reimb": 0.0, "reimb_assoc": {}} for mk in MARKETS}
+    pct_orphelines = 0
+    hors_periode_n = 0
     for l in lines:
         extra = {}
         if l.get("id") in resolved_src:
             extra["mp_src"] = resolved_src[l["id"]]
-        if l.get("id") in resolved_rev:
+        # Hors de sa période : plus rien à payer / à encaisser ce mois-ci. Le
+        # test est refait ici (et pas hérité de la 1re passe) pour couvrir AUSSI
+        # les lignes sans id, qui ne peuvent pas être retrouvées par leur clé.
+        _actif = _line_active_in(l, month)
+        if not _actif:
+            usd = 0.0
+            hors_periode_n += 1
+        elif l.get("id") in resolved_rev:
             usd = resolved_rev[l["id"]]
         elif (l.get("form") or "") == "mypuls_crm":
             # dépense AUTO : total des factures CRM MyPuls du mois (EUR->USD)
@@ -706,6 +838,17 @@ def compute_state(month: str) -> dict:
             extra["va_clicks"] = clicks
         else:
             usd = _line_usd(l, rev_bases, settings)
+        if (l.get("form") or "") == "pct":
+            # Base « % d'une ligne » disparue (revenu supprimé) : _line_usd rend
+            # 0 sans le dire, et la paye s'évaporait en silence — 800 $ de paye
+            # modèle en moins, part lead gonflée d'autant, recopié chaque mois.
+            # On le REMONTE au client, qui pose un badge sur la ligne.
+            _miss = _pct_base_missing(l, rev_bases)
+            if _miss:
+                extra["pct_orphan"] = _miss
+                pct_orphelines += 1
+        if not _actif:
+            extra["hors_periode"] = True
         ll = dict(l)
         ll.update(extra)
         ll["usd"] = usd
@@ -842,6 +985,10 @@ def compute_state(month: str) -> dict:
             "assoc_by_mk": {mk: round(v, 2) for mk, v in assoc_by_mk.items()},
             "rev_count": sum(1 for l in lines if l.get("type") == "rev"),
             "exp_count": sum(1 for l in lines if l.get("type") != "rev"),
+            # comptés et remontés : lignes en % dont la base a disparu, et
+            # lignes hors de leur période (début/fin) donc à 0 ce mois-ci.
+            "pct_orphans": pct_orphelines,
+            "hors_periode": hors_periode_n,
         },
         "cats": CATS,
         "cat_order": CAT_ORDER,
@@ -1431,8 +1578,13 @@ def register(app, is_auth):
         before = len(lines)
         m["lines"] = [l for l in lines if l.get("id") != lid]
         _save(d)
+        # `orphelines` : les payes qui viennent de perdre leur base et valent
+        # donc 0 $ (rien n'est « rebasculé sur le total », ce serait payer ce %
+        # sur le CA des autres modèles). `relinked` est le même contenu, gardé
+        # sous son ancien nom trompeur le temps qu'un cache de navigateur serve
+        # encore l'ancien facture_app.js.
         return jsonify({"ok": True, "deleted": before - len(m["lines"]),
-                        "relinked": deps})
+                        "orphelines": deps, "relinked": deps})
 
     @app.route("/facture/line/pay", methods=["POST"])
     def facture_line_pay():
@@ -1515,7 +1667,10 @@ def register(app, is_auth):
         if nm in d["months"] and (d["months"][nm].get("lines") or []):
             return jsonify({"ok": False, "error": f"Le mois {nm} existe déjà"})
         # Même report que l'automatique (une seule implémentation)
-        new_lines = _carry_lines((d["months"].get(month) or {}).get("lines") or [])
+        new_lines, finies = _carry_lines((d["months"].get(month) or {}).get("lines") or [], nm)
         d["months"][nm] = {"lines": new_lines}
         _save(d)
-        return jsonify({"ok": True, "month": nm, "count": len(new_lines)})
+        # `expirees` remonte à l'écran : une charge terminée qui cesse d'être
+        # reportée doit se voir, pas se deviner.
+        return jsonify({"ok": True, "month": nm, "count": len(new_lines),
+                        "expirees": [f"{f['label']} (fin {f['end']})" for f in finies]})

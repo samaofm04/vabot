@@ -794,6 +794,102 @@ def _norm_currency(c: str) -> str:
     return "EUR"
 
 
+# Familles de revenus du dashboard. Sert de vocabulaire commun a tous ceux
+# qui classent une vente : cartes de la page Revenus, registre, feuille de paie.
+CATEGORIES_TRANSACTION = ("Messages", "Tips", "Subscriptions", "Posts",
+                          "Streams", "Referrals")
+
+
+def _sans_accent(t: str) -> str:
+    """« Média privé » -> « media prive ». Le libelle MyPuls arrive accentue ou
+    non selon la page scrapee ; comparer sur la forme nue evite d'avoir a
+    prevoir les deux orthographes a chaque test."""
+    import unicodedata
+    plat = unicodedata.normalize("NFD", (t or "").strip().lower())
+    return "".join(c for c in plat if unicodedata.category(c) != "Mn")
+
+
+def categorie_transaction(libelle: str) -> str:
+    """Type de vente MyPuls -> famille de revenus. Chaine EXCLUSIVE : une vente
+    ne compte que dans une seule famille.
+
+    UN SEUL endroit decide de ce classement. Quand la regle etait recopiee dans
+    la feuille de paie, la copie cherchait « ppv » alors que MyPuls ecrit
+    « Media prive » : la colonne PPV affichait zero et ne recoupait jamais le CA.
+
+    Retourne "" si aucune famille ne reconnait le libelle — l'appelant doit
+    compter ces montants a part, jamais les laisser tomber en silence.
+    """
+    ty = _sans_accent(libelle)
+    if not ty:
+        return ""
+    if "media prive" in ty or "ppv" in ty or "message" in ty:
+        return "Messages"
+    if "pourboire" in ty or "tip" in ty:
+        return "Tips"
+    if "abonnement" in ty or "subscription" in ty:
+        return "Subscriptions"
+    # MyPuls est en francais : « Publication » ne contient pas « post »
+    if "post" in ty or "publication" in ty:
+        return "Posts"
+    if "stream" in ty:
+        return "Streams"
+    if "referral" in ty or "parrain" in ty:
+        return "Referrals"
+    return ""
+
+
+def ca_par_categorie_usd(transactions, eur_usd: float) -> tuple:
+    """Log de ventes -> (montant par famille en USD, ce qui n'entre nulle part).
+
+    Le second element n'est pas decoratif : un libelle nouveau chez MyPuls
+    (c'est ainsi que « Media prive » etait passe a la trappe) doit se VOIR,
+    pas disparaitre du total. Il porte le montant, le nombre de ventes et
+    quelques libelles en clair pour pouvoir corriger la regle.
+    """
+    par = {k: 0.0 for k in CATEGORIES_TRANSACTION}
+    montant_hors, nb_hors, libelles = 0.0, 0, []
+    for t in (transactions or []):
+        try:
+            montant = float(t.get("amount") or 0)
+        except (TypeError, ValueError):
+            montant = 0.0
+        usd = montant * (1.0 if _norm_currency(t.get("currency")) == "USD" else eur_usd)
+        famille = categorie_transaction(t.get("type"))
+        if famille:
+            par[famille] += usd
+            continue
+        montant_hors += usd
+        nb_hors += 1
+        lib = (t.get("type") or "").strip() or "(type vide)"
+        if lib not in libelles and len(libelles) < 12:
+            libelles.append(lib)
+    return ({k: round(v, 2) for k, v in par.items()},
+            {"montant": round(montant_hors, 2), "ventes": nb_hors,
+             "libelles": libelles})
+
+
+def ca_usd_chatteur(c: dict, eur_usd: float) -> float:
+    """CA d'un chatteur ramene en dollars, une seule devise.
+
+    La table de performance de MyPuls empile les euros MyM et les dollars
+    OnlyFans dans la meme colonne « CA Total » : tout convertir comme des euros
+    gonfle la part OnlyFans d'environ 6,5 %. La ventilation par devise vient du
+    log de transactions (`ca_eur` / `ca_usd`, poses par fetch_team_stats).
+
+    Elle n'est retenue que si elle recoupe le CA affiche a 5 % pres : les deux
+    tables de MyPuls ne concordent pas toujours, et un split qui ne colle pas
+    au total serait pire que la conversion approchee.
+    """
+    total = float(c.get("ca_total") or 0)
+    eur, usd = c.get("ca_eur"), c.get("ca_usd")
+    if eur is not None and usd is not None and (eur + usd) > 0:
+        if abs((eur + usd) - total) <= max(1.0, 0.05 * total):
+            return round(eur * eur_usd + usd, 2)
+    # Pas de ventilation exploitable : on retombe sur l'hypothese MyM (EUR).
+    return round(total * eur_usd, 2)
+
+
 def _ca_by_currency(transactions) -> dict:
     """Somme des montants par devise (EUR = MyM, USD = OnlyFans)."""
     out: Dict[str, float] = {}
@@ -982,8 +1078,22 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
     # Tri par CA Total décroissant
     chatters.sort(key=lambda c: c["ca_total"], reverse=True)
 
+    # Taux du jour, deja mis en cache 24 h dans la config : sert a rendre le CA
+    # dans UNE seule devise. Sans lui on retombe sur la valeur de repli, jamais
+    # sur un melange silencieux.
+    try:
+        _taux_eur_usd = float(get_eur_usd_rate()["rate"]) or 1.14
+    except Exception:
+        _taux_eur_usd = 1.14
+    _par_devise = _ca_by_currency(transactions)
+    _cat_usd, _hors_cat = ca_par_categorie_usd(transactions, _taux_eur_usd)
+
     # Totaux
     totals = {
+        # ATTENTION : somme BRUTE de la colonne « CA Total » de MyPuls, qui
+        # empile des euros MyM et des dollars OnlyFans. Elle n'est dans aucune
+        # devise — l'afficher suivie d'un « € » surevalue la part OnlyFans
+        # d'environ 6,5 %. Pour un montant affichable : "ca_total_usd".
         "ca_total": round(sum(c["ca_total"] for c in chatters), 2),
         "ca_ppv": round(sum(c["ca_ppv"] for c in chatters), 2),
         "ca_tips": round(sum(c["ca_tips"] for c in chatters), 2),
@@ -995,7 +1105,22 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
         # CA ventilé PAR DEVISE (depuis les transactions, seule table qui la porte).
         # EUR = MyM, USD = OnlyFans -> permet de convertir proprement et
         # d'appliquer les frais OF, au lieu d'additionner des € et des $.
-        "ca_by_currency": _ca_by_currency(transactions),
+        "ca_by_currency": _par_devise,
+        # Le meme CA, mais dans UNE devise : chaque chatteur est converti avec
+        # sa propre ventilation (ca_usd_chatteur), pas le total en bloc. C'est
+        # ce montant-la qui peut etre affiche avec un symbole.
+        "ca_total_usd": round(sum(ca_usd_chatteur(c, _taux_eur_usd)
+                                  for c in chatters), 2),
+        "eur_usd": _taux_eur_usd,
+        # Les deux parts, telles que le log les porte : EUR = MyM, USD = OF.
+        "ca_eur": round(_par_devise.get("EUR", 0.0), 2),
+        "ca_usd": round(_par_devise.get("USD", 0.0), 2),
+        # Ventilation par famille de vente, en dollars, issue du LOG (la table
+        # de performance ne donne ni la devise ni le detail par type).
+        # "ca_hors_categorie" recense ce qu'aucune famille ne reconnait :
+        # tant qu'il vaut 0, les familles recoupent le CA du log.
+        "ca_categories_usd": _cat_usd,
+        "ca_hors_categorie": _hors_cat,
         "nb_transactions": len(transactions),
         "nb_chatters": len(chatters),
         # Compte des PERSONNES : les lignes « Indetermine (Creatrice) » sont
