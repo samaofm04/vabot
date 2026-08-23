@@ -1228,6 +1228,25 @@ body.light [style*="color:#fca5a5"]{color:#b91c1c!important}   /* rouge pale, 3 
 body.light [style*="color:#f99"]{color:#b91c1c!important}
 body.light [style*="color:#bbb"]{color:#4b5563!important}
 body.light [style*="color:#eee"]{color:#111827!important}
+/* Fin du balayage des 58 onglets. Chaque teinte a ete comptee dans la
+   page AVANT d etre touchee — le nombre entre parentheses est ce que la
+   mesure a rendu, et « tous clairs » veut dire qu aucun element ne se
+   trouvait sur un fond sombre.
+   #fbbf24 est le seul cas mixte : 150 sur clair, 216 sur SOMBRE. Ces 216
+   sont des badges .reel-dl-badge poses sur une miniature, avec un fond
+   noir translucide — leur dore est juste. D ou l exception, plus
+   specifique que la regle generale. */
+body.light [style*="color:#fb7185"]{color:#be123c!important}   /* pastilles de compte, 106 tous clairs */
+body.light [style*="color:#facc15"]{color:#a16207!important}   /* facture, 23 tous clairs */
+body.light [style*="color:#fbbf24"]{color:#a16207!important}   /* 150 clairs */
+body.light .reel-dl-badge{color:#fbbf24!important}              /* les 216 sur miniature */
+body.light [style*="color:#43b581"]{color:#15803d!important}   /* TikTok Trends */
+body.light [style*="color:#84cc16"]{color:#4d7c0f!important}
+body.light [style*="color:#10b981"]{color:#047857!important}
+body.light [style*="background:#1f1f1f"]{background:#fff!important;border-color:#e5e7eb!important}
+body.light [style*="background:#141414"]{background:#f9fafb!important}
+body.light .nm{color:#111827}                                   /* noms d identites, 14 tous clairs */
+body.light .jb-ok-badge{color:#15803d}                          /* badges Actif, 524 tous clairs */
 /* PANNEAUX RESTES SOMBRES. La panne inverse de celle du dessus : ici c est
    le fond qui n a pas ete repeint, pendant que le texte, lui, passait au
    fonce. Mesure sur la page : une trentaine d elements en fonce sur fonce.
@@ -1308,7 +1327,7 @@ body.light .flatpickr-day:hover{background:#f3f4f6!important;color:#111827!impor
 body.light .gd-rank.top,body.light .vlm-row-star:hover{color:#a16207}
 body.light .ig3-cancel,body.light .vim-cancel,body.light .secondary,
 body.light .va-ig3-row-last-val,
-body.light .va-vlist-section-head-main > span:nth-child(1){color:#6b7280}
+body.light .va-vlist-section-head-main > span:nth-child(2){color:#6b7280}
 body.light .ig3-close:hover,body.light .vlm-close:hover,
 body.light .va-username,body.light .vt-h,
 body.light .mpl-banner-title,body.light .mpl-wheel-head-sub{color:#111827}
