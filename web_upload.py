@@ -12024,6 +12024,59 @@ def identity_market(ident: str) -> str:
     return _marche_mod.de(ident)
 
 
+def _marche_cache(ident: str, selected: str = "") -> str:
+    """« display:none » si cette identite n est pas du marche choisi.
+
+    Le filtre de marche vivait UNIQUEMENT dans localStorage, donc en
+    JavaScript, et ne s appliquait qu au DOMContentLoaded. Mesure faite sur
+    le site : 6 535 ms apres un changement d identite. Pendant ces six
+    secondes, la barre affichait les 160 identites, FR et US melangees,
+    alors qu on avait choisi un seul marche — c est exactement ce que
+    l utilisateur decrivait comme « le menu fr et us ensemble ».
+    Le serveur lit desormais le meme choix dans un cookie et masque les
+    autres des le HTML : plus rien a repeindre apres coup. Meme mecanique
+    que le cookie va_theme, pose pour la meme raison.
+
+    L identite SELECTIONNEE reste toujours visible : on vient d ouvrir son
+    contenu, la faire disparaitre de la liste n aurait aucun sens.
+    """
+    if selected and ident == selected:
+        return ""
+    try:
+        from flask import request as _rq
+        mk = (_rq.cookies.get("va_market") or "").strip().lower()
+    except Exception:
+        return ""          # hors requete (tests, rendu hors ligne)
+    if mk not in ("fr", "us"):
+        return ""          # aucun filtre choisi : on montre tout
+    return "" if identity_market(ident) == mk else "display:none"
+
+
+def _marche_prefere(identities: list) -> list:
+    """Les identites du marche choisi, ou toutes si aucun choix.
+
+    Sert UNIQUEMENT a choisir l identite par DEFAUT. La liste rendue, elle,
+    reste complete : les entrees de l autre marche sont masquees en CSS, ce
+    qui permet de rebasculer sur « All » sans recharger la page.
+
+    Sans ca, une galerie ouverte sans identite explicite retombait sur la
+    premiere de la liste, souvent de l autre marche — et cette seule entree
+    restait visible, puisqu une identite selectionnee ne se masque jamais.
+
+    Si le marche choisi ne contient AUCUNE identite, on rend la liste
+    entiere : mieux vaut une galerie du mauvais marche qu une page vide.
+    """
+    try:
+        from flask import request as _rq
+        mk = (_rq.cookies.get("va_market") or "").strip().lower()
+    except Exception:
+        return identities
+    if mk not in ("fr", "us"):
+        return identities
+    gardees = [i for i in identities if identity_market(i) == mk]
+    return gardees or identities
+
+
 def _set_identity_market(ident: str, market: str) -> bool:
     ok = _marche_mod.definir(ident, market)
     _invalidate_json_cache(MARKET_FILE)
@@ -18169,6 +18222,7 @@ function vaultRefilter(){
           window.__vaultQ = '';
           document.querySelectorAll('.vault-search input').forEach(function(i){ i.value = ''; });
           try{ localStorage.setItem('vault_market',''); }catch(e){}
+          marcheCookie('');
           vaultRefilter();
         };
         note.appendChild(b);
@@ -18183,11 +18237,29 @@ function vaultRefilter(){
 }
 function marketSet(v){
   try{ localStorage.setItem('vault_market', v || ''); }catch(e){}
+  // Aussi dans un cookie : c est ce qui permet au SERVEUR de ne pas rendre
+  // les identites de l autre marche. Sans lui, le filtre n existait qu en
+  // JavaScript et n arrivait qu au DOMContentLoaded — 6,5 s apres le clic
+  // sur cette page. Meme raison, meme motif que le cookie va_theme.
+  marcheCookie(v);
   vaultRefilter();
+}
+function marcheCookie(v){
+  try{ document.cookie = 'va_market=' + encodeURIComponent(v || '')
+        + ';path=/;max-age=31536000;samesite=lax'; }catch(e){}
 }
 // Les onglets remplacent leur contenu sans rejouer les scripts : on re-filtre
 // des que de nouvelles cartes apparaissent.
 document.addEventListener('DOMContentLoaded', function(){
+  // Un choix deja fait avant l existence du cookie vit encore dans
+  // localStorage : on le recopie, sinon le premier chargement suivant
+  // afficherait de nouveau les deux marches melanges.
+  try{
+    if(document.cookie.indexOf('va_market=') === -1){
+      var _mk = localStorage.getItem('vault_market') || '';
+      if(_mk) marcheCookie(_mk);
+    }
+  }catch(e){}
   vaultRefilter();
   // UN SEUL observateur pour toute la page : il y en avait un par galerie,
   // et chacun re-filtrait toutes les cartes a la moindre mutation du DOM.
@@ -18592,15 +18664,16 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
             last_up = (_sess_cloud.get("last_upload_identity") or "").lower().strip()
         except Exception:
             last_up = ""
-        if last_up in identities:
+        _pref = _marche_prefere(identities)
+        if last_up in _pref:
             selected = last_up
         else:
-            for ident in identities:
+            for ident in _pref:
                 if ident_stats[ident]["n_files"] > 0:
                     selected = ident
                     break
             if not selected:
-                selected = identities[0]
+                selected = _pref[0]
 
     tab_name = {"videos": "cloudreels", "posts": "cloudposts",
                 "stories": "cloudstories", "storyctas": "cloudstoryctas",
@@ -18645,7 +18718,8 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
             f"onclick='return vaultGoTo(event,this.href)' "
             f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
             f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}' "
-            f"data-market='{identity_market(ident)}'>"
+            f"data-market='{identity_market(ident)}' "
+            f"style='{_marche_cache(ident, selected)}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
             f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em;display:flex;"
@@ -19629,7 +19703,8 @@ def _render_cloud_captions_html() -> str:
     except Exception:
         pass
     if not selected or selected not in identities:
-        selected = next((i for i in identities if _n_caps(i) > 0), identities[0])
+        _pref = _marche_prefere(identities)
+        selected = next((i for i in _pref if _n_caps(i) > 0), _pref[0])
 
     block = _clean_caption_block(lib.get(selected))
 
@@ -19662,7 +19737,8 @@ def _render_cloud_captions_html() -> str:
             f"onclick='return vaultGoTo(event,this.href)' "
             f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
             f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}' "
-            f"data-market='{identity_market(ident)}'>"
+            f"data-market='{identity_market(ident)}' "
+            f"style='{_marche_cache(ident, selected)}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
             f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em;display:flex;"
@@ -19939,7 +20015,8 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
     except Exception:
         pass
     if not selected or selected not in identities:
-        selected = next((i for i in identities if _total(i) > 0), identities[0])
+        _pref = _marche_prefere(identities)
+        selected = next((i for i in _pref if _total(i) > 0), _pref[0])
 
     # ---- Sidebar identités (même vault que les autres bibliothèques) ----
     vault_items = []
@@ -19958,7 +20035,8 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
             f"onclick='return vaultGoTo(event,this.href)' "
             f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
             f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}' "
-            f"data-market='{identity_market(ident)}'>"
+            f"data-market='{identity_market(ident)}' "
+            f"style='{_marche_cache(ident, selected)}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
             f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em;display:flex;"
@@ -20417,7 +20495,8 @@ def _render_textvault_html(cat: str) -> str:
     except Exception:
         pass
     if selected != "_pool_" and (not selected or selected not in identities):
-        selected = next((i for i in identities if by_ident.get(i)), identities[0])
+        _pref = _marche_prefere(identities)
+        selected = next((i for i in _pref if by_ident.get(i)), _pref[0])
 
     # ---- Sidebar (pool commun en tête + identités, même vault que partout) ----
     def _count_label(n):
@@ -20441,7 +20520,8 @@ def _render_textvault_html(cat: str) -> str:
             f"onclick='return vaultGoTo(event,this.href)' "
             f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
             f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}' "
-            f"data-market='{identity_market(ident)}'>"
+            f"data-market='{identity_market(ident)}' "
+            f"style='{_marche_cache(ident, selected)}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
             f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em;display:flex;"

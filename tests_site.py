@@ -3259,6 +3259,130 @@ except Exception as _eSel:
 
 print()
 print("=" * 70)
+print("FILTRE DE MARCHE : FR et US melanges pendant 6 secondes")
+print("=" * 70)
+try:
+    import re as _reMk
+    import pathlib as _plMk
+
+    _srcMk = _plMk.Path("web_upload.py").read_text(encoding="utf-8")
+
+    # Le filtre ne vivait que dans localStorage, donc en JavaScript, et ne
+    # s appliquait qu au DOMContentLoaded : mesure sur le site, 6 535 ms apres
+    # un changement d identite. Pendant ces six secondes la barre montrait les
+    # 160 identites, FR et US melangees. Le serveur doit donc masquer lui-meme.
+    check("marche : le serveur sait masquer les identites de l autre marche",
+          "def _marche_cache(" in _srcMk)
+    _posesMk = _srcMk.count("style='{_marche_cache(ident, selected)}'")
+    check("marche : les QUATRE listes d identites appliquent le masquage",
+          _posesMk == 4, "%d liste(s) sur 4" % _posesMk)
+    check("marche : le choix est ecrit dans un cookie, lisible par le serveur",
+          "va_market=" in _srcMk and "function marcheCookie(" in _srcMk,
+          "sans cookie, le serveur ne peut pas rendre la bonne liste")
+    check("marche : « Tout afficher » efface aussi le cookie",
+          _reMk.search(r"localStorage\.setItem\('vault_market',''\);.{0,120}?marcheCookie\(''\)",
+                       _srcMk, _reMk.S) is not None,
+          "sinon le serveur masquerait ce que le client vient de reafficher")
+    check("marche : un choix deja fait est recopie dans le cookie au demarrage",
+          "document.cookie.indexOf('va_market=') === -1" in _srcMk,
+          "sinon les sessions ouvertes gardent le defaut pendant un chargement")
+
+    # Rendu reel : c est la seule preuve qui vaille.
+    import web_upload as _wMk
+    _appMk = _wMk.create_app()
+    _appMk.config["TESTING"] = True
+    _svMk = _wMk._load_web_users
+    _wMk._load_web_users = lambda: {"admin": {"role": "owner", "password": "x"}}
+    try:
+        _cMk = _appMk.test_client()
+        with _cMk.session_transaction() as _sMk:
+            _sMk["auth"] = True
+            _sMk["username"] = "admin"
+            _sMk["role"] = "owner"
+
+        def _itemsMk(html, section="form-cloudbrutes"):
+            """(identite, marche, masquee) pour la barre d UNE section.
+
+            La page rend la barre de CHAQUE galerie, et chacune a sa propre
+            identite selectionnee — laquelle reste visible par choix. Balayer
+            toute la page melangeait donc les sections et faisait passer pour
+            un defaut ce qui est le comportement voulu ailleurs.
+            """
+            _d = html.find("id='%s'" % section)
+            if _d < 0:
+                _d = html.find('id="%s"' % section)
+            if _d < 0:
+                return []
+            _f = html.find("class=\"form-section\"", _d + 10)
+            _bloc = html[_d:_f if _f > 0 else len(html)]
+            out = []
+            for _m in _reMk.finditer(
+                    r"class='vault-item[^']*' data-ident='([^']*)' "
+                    r"data-market='([^']*)' style='([^']*)'", _bloc):
+                out.append((_m.group(1), _m.group(2), "display:none" in _m.group(3)))
+            return out
+
+        # Le jeu local ne contient qu UNE identite, et c est la selectionnee :
+        # impossible d y prouver quoi que ce soit. On en fabrique deux, une par
+        # marche, et on les efface a la fin. Le marche est simule en memoire —
+        # on n ecrit RIEN dans le registre des marches.
+        import shutil as _shMk
+        _tmpMk = {"_tstmk_fr": "fr", "_tstmk_us": "us"}
+        _origMarcheMk = _wMk.identity_market
+        try:
+            for _nom in _tmpMk:
+                (_wMk.IDENTITIES_DIR / _nom / "brutes").mkdir(parents=True, exist_ok=True)
+            _wMk.identity_market = (lambda i: _tmpMk.get(i, _origMarcheMk(i)))
+
+            _sansMk = _itemsMk(_cMk.get("/?tab=cloudbrutes").get_data(as_text=True))
+            check("marche : sans choix, aucune identite n est masquee",
+                  bool(_sansMk) and not any(_h for _i, _m, _h in _sansMk),
+                  "%d entree(s), %d masquee(s)"
+                  % (len(_sansMk), sum(1 for _i, _m, _h in _sansMk if _h)))
+
+            _cMk.set_cookie("va_market", "us")
+            _url = "/?tab=cloudbrutes&cloud_brutes_ident=_tstmk_us"
+            _avecMk = _itemsMk(_cMk.get(_url).get_data(as_text=True))
+            _dico = {_i: _h for _i, _m, _h in _avecMk}
+            check("marche : avec le choix US, une identite FR est masquee des le HTML",
+                  _dico.get("_tstmk_fr") is True,
+                  "etat rendu : %r" % _dico.get("_tstmk_fr"))
+            check("marche : une identite US, elle, reste visible",
+                  _dico.get("_tstmk_us") is False,
+                  "etat rendu : %r" % _dico.get("_tstmk_us"))
+            # On vient d ouvrir son contenu : la faire disparaitre de sa propre
+            # liste laisserait une galerie sans entree correspondante.
+            _selFr = _itemsMk(_cMk.get(
+                "/?tab=cloudbrutes&cloud_brutes_ident=_tstmk_fr").get_data(as_text=True))
+            _dicoFr = {_i: _h for _i, _m, _h in _selFr}
+            check("marche : l identite SELECTIONNEE reste visible, meme hors marche",
+                  _dicoFr.get("_tstmk_fr") is False,
+                  "etat rendu : %r" % _dicoFr.get("_tstmk_fr"))
+
+            # Derniere fuite : une galerie ouverte SANS identite explicite
+            # retombait sur la premiere de la liste, souvent de l autre marche.
+            # Comme une selectionnee ne se masque jamais, cette entree restait
+            # visible — une seule, mais visible, et l utilisateur la voit.
+            _htmlDef = _cMk.get("/?tab=cloudbrutes").get_data(as_text=True)
+            _dicoDef = {_i: _h for _i, _m, _h in _itemsMk(_htmlDef)}
+            check("marche : sans identite dans l URL, le defaut respecte le marche",
+                  _dicoDef.get("_tstmk_fr") is not False,
+                  "une identite FR selectionnee par defaut alors qu on est en US")
+            check("marche : le helper de defaut existe et est branche partout",
+                  _srcMk.count("_marche_prefere(identities)") == 4,
+                  "%d branchement(s) sur 4"
+                  % _srcMk.count("_marche_prefere(identities)"))
+        finally:
+            _wMk.identity_market = _origMarcheMk
+            for _nom in _tmpMk:
+                _shMk.rmtree(_wMk.IDENTITIES_DIR / _nom, ignore_errors=True)
+    finally:
+        _wMk._load_web_users = _svMk
+except Exception as _eMk:
+    check("marche : testable", False, repr(_eMk)[:200])
+
+print()
+print("=" * 70)
 print("APERCUS DES VIDEOS : le fondu qui ne demarrait jamais")
 print("=" * 70)
 try:
