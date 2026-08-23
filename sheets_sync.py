@@ -1440,15 +1440,23 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False,
                 for _v in vas}
         for a in accts:
             va = (a.get("va") or "").strip()
-            if va and va.lower() not in have:
-                vas.append({"name": va, "discord_username": ""})
-                have.add(va.lower())
-                if f"{il}|{va.lower()}" in _tv:
-                    try:
-                        jb.tomb_clear("vas", il, va)
-                    except Exception:
-                        pass
-                have.add(va.lower())
+            if not va or va.lower() in have:
+                continue
+            # Une fiche portant une pierre tombale a ete supprimee ou RENOMMEE
+            # sur le site il y a moins de 15 min. Le Sheet, lui, porte encore
+            # l ancien nom tant que le push suivant n a pas eu lieu : la
+            # recreer ici ressuscitait la fiche que le proprietaire venait de
+            # renommer, et laissait deux entrees pour un seul VA — l une avec
+            # les comptes, l autre vide.
+            #
+            # Avant, ce chemin EFFACAIT la tombe au lieu de la respecter : la
+            # protection existait pour les comptes (skipped_tomb, plus haut) et
+            # etait activement annulee pour les VA. Constate le 22/08.
+            if f"{il}|{va.lower()}" in _tv:
+                skipped_tomb.add(f"{il}|{va.lower()}")
+                continue
+            vas.append({"name": va, "discord_username": ""})
+            have.add(va.lower())
 
     changed = bool(added or updated or removed)
     if changed:

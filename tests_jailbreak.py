@@ -92,6 +92,37 @@ check("rename VA reflété dans la liste", "Alpha2" in vanames(), vanames())
 check("rename vers un nom existant refusé", jb.update_va(IDENT, "Alpha2", new_name="Bêta") is False)
 check("VA introuvable -> False", jb.update_va(IDENT, "Fantome", new_name="X") is False)
 
+# Pierre tombale sur l ANCIEN nom. C est ce qui empeche la synchro Sheets de
+# ressusciter la fiche renommee : le Sheet porte encore l ancien nom tant que
+# le push suivant n a pas eu lieu, et le poller (toutes les 2 min) recreait
+# alors une seconde fiche — l une avec les comptes, l autre vide. Doublon
+# constate par le proprietaire le 22/08.
+_tv = (jb.tombstones().get("vas") or {})
+check("rename : l ancien nom recoit une pierre tombale",
+      f"{IDENT}|alpha" in _tv, str(list(_tv)[:6]))
+check("rename : le NOUVEAU nom n en a pas (sinon il se bloquerait lui-meme)",
+      f"{IDENT}|alpha2" not in _tv)
+# Renommer VERS un nom recemment supprime doit rester possible.
+jb.tomb_add("vas", IDENT, "Renaissance")
+jb.update_va(IDENT, "Alpha2", new_name="Renaissance")
+check("rename vers un nom recemment supprime : la tombe est levee",
+      f"{IDENT}|renaissance" not in (jb.tombstones().get("vas") or {})
+      and "Renaissance" in vanames(), vanames())
+jb.update_va(IDENT, "Renaissance", new_name="Alpha2")   # on remet en etat
+
+# Le garde-fou cote synchro : la resurrection d un VA doit RESPECTER la tombe,
+# pas l effacer. Avant, ce chemin appelait tomb_clear — la protection existait
+# pour les comptes et etait activement annulee pour les VA.
+_srcSS = pathlib.Path("sheets_sync.py").read_text(encoding="utf-8")
+_blocSS = _srcSS[_srcSS.index("Coherence : les 'va' des comptes"):][:1400] \
+    if "Coherence : les 'va' des comptes" in _srcSS else \
+    (_srcSS[_srcSS.index("Cohérence : les 'va' des comptes"):][:1400]
+     if "Cohérence : les 'va' des comptes" in _srcSS else "")
+check("synchro : la resurrection d un VA respecte la pierre tombale",
+      bool(_blocSS) and "skipped_tomb.add" in _blocSS
+      and "tomb_clear" not in _blocSS,
+      _blocSS[:120])
+
 print("\n", "=" * 70, "\n3) Bulk + dédoublonnage\n", "=" * 70)
 res = jb.bulk_add_accounts(IDENT, ["b1", "b2", "acc_two", " b3 ", "@b4", ""], va="Bêta")
 check("bulk : 4 ajoutés", res["added"] == 4, res)

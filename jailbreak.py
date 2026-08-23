@@ -698,6 +698,21 @@ def update_va(identity: str, old_name: str, new_name: str = None,
             for a in entry["accounts"]:
                 if (a.get("va") or "").strip().lower() == old_name.lower():
                     a["va"] = new_name_clean
+            # Pierre tombale sur l ANCIEN nom, exactement comme pour une
+            # suppression. Sans elle, le Sheet — qui porte encore l ancien nom
+            # tant que le push suivant n a pas eu lieu — fait RESSUSCITER la
+            # fiche au tour de scrutation suivant (toutes les 2 min) : le site
+            # se retrouve avec deux fiches pour un seul VA, l une avec les
+            # comptes, l autre vide. C est le doublon constate le 22/08.
+            #
+            # Et on leve celle du NOUVEAU nom : renommer vers un nom
+            # recemment supprime doit marcher, pas etre bloque par sa propre
+            # tombe.
+            try:
+                tomb_add("vas", identity, old_name)
+                tomb_clear("vas", identity, new_name_clean)
+            except Exception:
+                pass          # une annotation perdue ne doit pas rater le rename
     if discord_username is not None:
         target["discord_username"] = discord_username.strip()[:60]
     _save(data)
