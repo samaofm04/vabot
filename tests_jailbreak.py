@@ -554,6 +554,74 @@ with jb.transaction():
     check("identité test supprimée", IDENT not in (jb._load() or {}))
 
 print()
+print("\n", "=" * 70, "\nFusion des fiches VA dupliquees\n", "=" * 70)
+import fusion_vas as _fv
+
+# Le cas exact des captures : une fiche « machine » (sans pseudo) detient les
+# comptes, la fiche editee porte le pseudo et affiche 0.
+_FU = "_tst_fusion_suite"
+_d = jb._load(); _d.pop(_FU, None); jb._save(_d)
+for _i in range(14):
+    jb.add_account(_FU, "r%d" % _i, va="Roucham")
+_d = jb._load()
+_d[_FU]["vas"] = [{"name": "Roucham", "discord_username": ""},
+                  {"name": "Roucham X1", "discord_username": "roucham_79944"}]
+jb._save(_d)
+
+_avant = _fv._total_comptes(jb._load())
+_plan = _fv.analyser(jb._load(), _FU)
+check("fusion : les deux fiches sont regroupees",
+      len(_plan) == 1 and _plan[0]["comptes_deplaces"] == 14, str(_plan))
+check("fusion : la fiche PORTANT LE PSEUDO survit",
+      _plan[0]["survivant"] == "Roucham X1", str(_plan[0]))
+_ok, _msg = _fv.appliquer(_plan)
+_d = jb._load()
+check("fusion : ecrite sans perdre un seul compte",
+      _ok and _fv._total_comptes(_d) == _avant
+      and len(_d[_FU]["accounts"]) == 14, _msg[:100])
+check("fusion : tous les comptes portent le survivant",
+      {a["va"] for a in _d[_FU]["accounts"]} == {"Roucham X1"},
+      str({a["va"] for a in _d[_FU]["accounts"]}))
+check("fusion : la fiche absorbee a disparu",
+      [v["name"] for v in _d[_FU]["vas"]] == ["Roucham X1"],
+      str(_d[_FU]["vas"]))
+# Sans pierre tombale, le prochain pull du Sheet ferait revenir le nom retire.
+check("fusion : pierre tombale sur le nom retire",
+      f"{_FU}|roucham" in (jb.tombstones().get("vas") or {}))
+
+# Deux pseudos DIFFERENTS : on ne tranche pas a la place du proprietaire.
+_CF = "_tst_fusion_conflit"
+_d = jb._load(); _d.pop(_CF, None)
+_d[_CF] = {"vas": [{"name": "Jaurel", "discord_username": "aaa"},
+                   {"name": "Jaurel X1", "discord_username": "bbb"}],
+           "accounts": []}
+jb._save(_d)
+_pc = _fv.analyser(jb._load(), _CF)
+check("fusion : deux pseudos differents = conflit, rien n est fusionne",
+      len(_pc) == 1 and _pc[0]["conflit"] is True, str(_pc))
+_okc, _ = _fv.appliquer(_pc)
+check("fusion : un conflit laisse les deux fiches intactes",
+      len(jb._load()[_CF]["vas"]) == 2)
+
+# Deux VA sans rapport ne doivent JAMAIS se rejoindre.
+_SR = "_tst_fusion_sansrapport"
+_d = jb._load(); _d.pop(_SR, None)
+_d[_SR] = {"vas": [{"name": "Alice", "discord_username": "a"},
+                   {"name": "Bob", "discord_username": "b"}], "accounts": []}
+jb._save(_d)
+check("fusion : deux VA distincts ne sont pas regroupes",
+      _fv.analyser(jb._load(), _SR) == [])
+
+_d = jb._load()
+for _k in (_FU, _CF, _SR):
+    _d.pop(_k, None)
+jb._save(_d)
+import glob as _glob, os as _os
+for _b in _glob.glob(str(jb.DATA_DIR / "jailbreak.avant-fusion-*.json")):
+    try: _os.unlink(_b)
+    except Exception: pass
+
+
 print("=" * 70)
 print("ORDRE DES IDENTITES (range par le proprietaire, vu par les VA)")
 print("=" * 70)
