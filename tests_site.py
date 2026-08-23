@@ -3259,6 +3259,57 @@ except Exception as _eSel:
 
 print()
 print("=" * 70)
+print("CHARGEMENT DIFFERE : amorcage, portee, sections lourdes")
+print("=" * 70)
+try:
+    import re as _reLz
+    import pathlib as _plLz
+
+    _srcLz = _plLz.Path("web_upload.py").read_text(encoding="utf-8")
+
+    # BUG 1 (constate sur youl4b.com/?tab=gms) : la page finissait de charger,
+    # la section etait bien visible, et elle restait sur « Loading... » a vie.
+    # L onglet initial est AFFICHE par une regle CSS, mais seul un clic sur la
+    # navigation appelait showTab — donc rien ne declenchait le chargement.
+    # Ca touchait les 34 onglets differes, dont le Drive.
+    check("differe : l onglet ouvert par l URL est amorce au chargement",
+          "chargerOngletDiffere(document.getElementById('form-' + t))" in _srcLz)
+    check("differe : l amorcage attend que le DOM existe",
+          _reLz.search(r"DOMContentLoaded[\s\S]{0,400}chargerOngletDiffere", _srcLz)
+          is not None)
+
+    # BUG 2 : le fragment ecrasait la SECTION entiere (sec.innerHTML = frag).
+    # Sur la Veille, le premier clic effacait le volet feed-veille, la colonne
+    # de filtres et la modale des reels.
+    check("differe : le fragment ne remplace plus toute la section",
+          "sec.innerHTML = htmlFrag" not in _srcLz)
+    check("differe : c est l emplacement lui-meme qui est remplace",
+          "parent.insertBefore(n, trou)" in _srcLz
+          and "parent.removeChild(trou)" in _srcLz)
+    # Une section peut porter plusieurs emplacements (la Veille en a deux).
+    check("differe : TOUS les emplacements d une section sont servis",
+          "querySelectorAll('[data-lazy-tab]')" in _srcLz,
+          "un querySelector simple ne sert que le premier")
+    check("differe : un echec laisse la possibilite de reessayer",
+          "delete trou.dataset.enCours" in _srcLz)
+
+    # Sections lourdes : mesurees dans la vraie page, 70 % du DOM (75 977
+    # noeuds) vivait dans trois sections MASQUEES rendues d office.
+    for _t in ("valist", "jailbreak", "veille"):
+        check("differe : la section « %s » n est plus rendue d office" % _t,
+              '_lazy("%s")' % _t in _srcLz,
+              "encore en _g(...) = rendue meme quand on ne la regarde pas")
+    # Differer une section sans producteur la laisserait vide pour toujours.
+    _prodsLz = _reLz.search(r"_prods = \{[\s\S]*?\n            \}", _srcLz)
+    _corpsLz = _prodsLz.group(0) if _prodsLz else ""
+    for _t in ("valist", "jailbreak", "veille"):
+        check("differe : « %s » a bien un producteur a la demande" % _t,
+              '"%s":' % _t in _corpsLz)
+except Exception as _eLz:
+    check("differe : testable", False, repr(_eLz)[:160])
+
+print()
+print("=" * 70)
 print("COHERENCE VISUELLE : le bouton « Partager »")
 print("=" * 70)
 try:

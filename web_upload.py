@@ -7124,6 +7124,62 @@ function siteDebounce(key, fn, ms){
   try{ clearTimeout(window.__siteDeb[key]); }catch(e){}
   window.__siteDeb[key] = setTimeout(fn, ms || 120);
 }
+/* Chargement differe d une section lourde.
+
+   Trois choses ont ete corrigees ici, chacune vue en production :
+
+   1) On remplace le PLACEHOLDER, pas la section entiere. L ancien code faisait
+      sec.innerHTML = fragment : tout le reste de la section disparaissait. Sur
+      la Veille, le premier clic sur l onglet effacait le volet « feed-veille »,
+      la colonne de filtres et la modale des reels.
+
+   2) Une section peut porter PLUSIEURS emplacements differes — la Veille en a
+      deux : les comptes suivis et le fil. On les sert tous, chacun avec son
+      propre nom, au lieu de ne charger que le premier et de laisser l autre
+      sur « Chargement... » a vie.
+
+   3) On ne rejoue QUE les scripts injectes. Reprendre ceux de toute la section
+      les executait une deuxieme fois (doubles ecouteurs, doubles requetes). */
+function chargerOngletDiffere(sec){
+  if(!sec || !sec.querySelectorAll) return;
+  sec.querySelectorAll('[data-lazy-tab]').forEach(function(trou){
+    var nom = trou.getAttribute('data-lazy-tab');
+    if(!nom || trou.dataset.enCours) return;
+    trou.dataset.enCours = '1';
+    var q = (window.location.search || '').replace(/^[?]/, '');
+    fetch('/?lazy=' + encodeURIComponent(nom) + (q ? '&' + q : ''),
+          {headers:{'X-Tab-Ajax':'1'}, credentials:'same-origin'})
+      .then(function(r){ if(!r.ok) throw 0; return r.text(); })
+      .then(function(html){
+        var bac = document.createElement('div');
+        bac.innerHTML = html;
+        var noeuds = Array.prototype.slice.call(bac.childNodes);
+        var parent = trou.parentNode;
+        if(!parent) return;
+        noeuds.forEach(function(n){ parent.insertBefore(n, trou); });
+        parent.removeChild(trou);
+        noeuds.forEach(function(n){
+          if(!n.querySelectorAll) return;   // noeuds texte
+          var lst = (n.tagName === 'SCRIPT')
+            ? [n] : Array.prototype.slice.call(n.querySelectorAll('script'));
+          lst.forEach(function(old){
+            var s = document.createElement('script');
+            for(var i=0;i<old.attributes.length;i++){
+              s.setAttribute(old.attributes[i].name, old.attributes[i].value);
+            }
+            s.textContent = old.textContent;
+            old.parentNode.replaceChild(s, old);
+          });
+        });
+      })
+      .catch(function(){
+        trou.innerHTML = "<div style='padding:24px;font-size:13px'>"
+          + "Cet onglet n a pas pu etre charge. "
+          + "<a href='#' onclick='location.reload()' style='color:#3b82f6'>Reessayer</a></div>";
+        delete trou.dataset.enCours;   // un nouveau clic doit pouvoir reessayer
+      });
+  });
+}
 function showTab(group,name,title,subtitle){
   if(typeof igStopAllReels==="function") igStopAllReels();
   // Meme raison qu au changement d identite : la selection ne doit pas
@@ -7167,29 +7223,7 @@ function showTab(group,name,title,subtitle){
     sec.style.display = 'block';
   }
   // ===== Lazy-load des onglets lourds (1er open seulement) =====
-  if(sec){
-    var lazy = sec.querySelector('[data-lazy-tab]');
-    if(lazy && !sec.dataset.lazyLoaded && !sec.dataset.lazyLoading){
-      sec.dataset.lazyLoading = '1';
-      var _q = (window.location.search || '').replace(/^[?]/, '');
-      fetch('/?lazy=' + encodeURIComponent(name) + (_q ? '&' + _q : ''), {headers:{'X-Tab-Ajax':'1'}, credentials:'same-origin'})
-        .then(function(r){ if(!r.ok) throw 0; return r.text(); })
-        .then(function(htmlFrag){
-          sec.innerHTML = htmlFrag;
-          sec.dataset.lazyLoaded = '1';
-          // ré-exécuter les <script> du fragment (sinon charts/toggles muets)
-          sec.querySelectorAll('script').forEach(function(old){
-            var s=document.createElement('script');
-            if(old.src)s.src=old.src; else s.textContent=old.textContent;
-            old.parentNode.replaceChild(s, old);
-          });
-        })
-        .catch(function(){ sec.innerHTML="<div style='padding:24px;font-size:13px'>"
-          +"Cet onglet n'a pas pu etre charge. "
-          +"<a href='#' onclick='location.reload()' style='color:#3b82f6'>Reessayer</a></div>"; })
-        .finally(function(){ delete sec.dataset.lazyLoading; });
-    }
-  }
+  chargerOngletDiffere(sec);
   document.getElementById('page-title').textContent=title||'';
   document.getElementById('page-subtitle').textContent=subtitle||'';
   // Mettre à jour l'URL pour que le Referer soit conservé après POST
@@ -7697,6 +7731,22 @@ window.upClearPrefill = function(utab){
     }
   }catch(e){}
 })();
+
+/* L onglet ouvert DIRECTEMENT par l URL etait affiche par la regle CSS
+   ci-dessus, mais son chargement differe n etait jamais declenche : seul un
+   clic sur la navigation appelle showTab. Constate en production sur
+   youl4b.com/?tab=gms — page « complete », section visible, et « Loading... »
+   pour toujours. Ca touchait les 34 onglets differes, dont le Drive : d ou le
+   Drive qui « ne se connecte pas ». On amorce donc la section initiale. */
+document.addEventListener('DOMContentLoaded', function(){
+  try{
+    var t = new URLSearchParams(window.location.search).get('tab');
+    if(!t || !/^[a-zA-Z0-9_]{1,30}$/.test(t)) t = 'home';
+    if(typeof chargerOngletDiffere === 'function'){
+      chargerOngletDiffere(document.getElementById('form-' + t));
+    }
+  }catch(e){}
+});
 </script>
 {vault_core_html}
 </head><body class="{theme_body_class}">
@@ -41893,7 +41943,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{msg_html}", msg_html)
         .replace("{admin_token_status}", _admin_token_status())
         .replace("{web_password_status}", _web_password_status())
-        .replace("{va_list_html}", _g("valist", _render_va_list_html))
+        .replace("{va_list_html}", _lazy("valist"))
         .replace("{identity_stats_html}", _lazy("vastats"))
         .replace("{home_dashboard_html}", _g("home", _render_home_dashboard_html))
         .replace("{stat_va_count}", str(va_count))
@@ -41940,7 +41990,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{cloud_bios_html}", _g("cloudbios", lambda: _render_textvault_html("bios")))
         .replace("{cloud_ctas_html}", _g("cloudctas", lambda: _render_textvault_html("ctas")))
         .replace("{geelark_html}", _lazy("geelark"))
-        .replace("{jailbreak_html}", _g("jailbreak", _render_jailbreak_html))
+        .replace("{jailbreak_html}", _lazy("jailbreak"))
         .replace("{jbanalyse_html}", _g("jbanalyse", _render_jbanalyse_html))
         .replace("{jbactivite_html}", _g("jbactivite", _render_jbactivite_html))
         .replace("{gms_html}", _lazy("gms"))
@@ -41949,7 +41999,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{sfssetupmym_html}", _lazy("sfssetupmym"))
         .replace("{sfssetupof_html}", _lazy("sfssetupof"))
         .replace("{vtg_html}", _lazy("vtg"))
-        .replace("{veille_feed_html}", _g("veille", _render_veille_feed_html))
+        .replace("{veille_feed_html}", _lazy("veille"))
         .replace("{tiktok_trends_html}", _lazy("tktrends"))
         .replace("{mypulslive_html}", _g("mypulslive", _render_mypulslive_html))
         .replace("{chatplanning_html}", _lazy("chatplanning"))
@@ -43098,6 +43148,10 @@ def create_app():
             # DOMContentLoaded (ne se ré-initialiseraient pas après injection AJAX).
             _prods = {
                 "gms": _render_gms_html,
+                # Liste VA : 14 894 noeuds DOM rendus d office dans une
+                # section masquee. Elle est desormais differee comme les
+                # autres, donc il lui faut son producteur ici.
+                "valist": _render_va_list_html,
                 "linkscale": _render_linkscale_html,
                 # Onglets rendus d'office dans la page, mais qui doivent
                 # AUSSI pouvoir etre charges seuls : si la section manque
