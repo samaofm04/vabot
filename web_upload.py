@@ -24115,8 +24115,16 @@ body.light .mypuls-bar{background:#e5e7eb}
             f"<td style='color:#888;font-size:11px'>{c['presence']}</td>"
             f"<td style='text-align:center'>"
             f"<label class='mp-paid-toggle' title='Marquer paye pour cette periode'>"
+            # La case se lisait par egalite EXACTE de la plage de dates. La
+            # periode par defaut etant glissante, le lendemain d un paiement
+            # plus aucune case n etait cochee — et rien n empechait de
+            # REPAYER. mypuls.is_chatter_paid a ete ecrite pour ca, avec sa
+            # regle d inclusion (une plage affichee CONTENUE dans une periode
+            # deja reglee compte comme payee), mais elle n etait appelee nulle
+            # part dans le depot : le correctif avait ete livre sans jamais
+            # etre branche.
             f"<input type='checkbox' class='mp-paid-cb' data-name='{name_esc}' "
-            f"{'checked' if (f'{start_str}_{end_str}' in meta.get('paid_periods', [])) else ''} "
+            f"{'checked' if mypuls.is_chatter_paid(c['name'], f'{start_str}_{end_str}') else ''} "
             f"onchange='mpTogglePaid(this)'>"
             f"<span class='mp-paid-cb-mark'></span>"
             f"</label>"
@@ -24461,7 +24469,13 @@ function mpRecompute(){
       if(nextRow && nextRow.classList.contains('mp-edit-row')) nextRow.style.display = 'none';
       return;
     }
-    activeCount++;
+    // « Indetermine (Creatrice) » est un LIBELLE de MyPuls, pas une personne :
+    // ce sont les ventes qu il n a rattachees a personne. Le serveur l exclut
+    // deja du compte, mais ce recalcul le comptait — le nombre de chatteurs
+    // actifs gagnait donc une unite au PREMIER clic sur un filtre, et ne la
+    // reperdait jamais. On reconnait la ligne a la classe que le serveur lui
+    // pose, pas a son texte : le libelle peut changer, la classe non.
+    if(!row.classList.contains('mp-row-orphelin')) activeCount++;
     row.style.display = '';
     var cellTotal = row.querySelector('.mp-cell-ca-total');
     if(cellTotal) cellTotal.textContent = data.ca_total.toFixed(2) + '€';
@@ -45810,7 +45824,19 @@ def create_app():
             return jsonify({"ok": False, "error": f"MyPuls : {e}"})
         if not res.get("ok"):
             return jsonify({"ok": False, "error": res.get("error") or "MyPuls indisponible"})
-        _vs.pousser_async(res.get("transactions") or [], periode=f"{start} -> {end}")
+        # Commissions, taux et table de performance : sans eux, l'onglet
+        # « Paie quinzaine » sortait avec Commission % = 0 et A payer = 0 pour
+        # TOUT LE MONDE, et l'onglet « Site vs registre » accusait 100 % de
+        # l'equipe d'etre absente. Le bouton annoncait pourtant « Ventes
+        # envoyees ». La route soeur /ventes-sheet passait deja par
+        # _ventes_contexte ; celle-ci, appelee par le bouton de la page, ne le
+        # faisait pas — deux chemins pour la meme chose, un seul correct.
+        _tx = res.get("transactions") or []
+        _comm, _taux = _ventes_contexte(_tx)
+        _vs.pousser_async(_tx, periode=f"{start} -> {end}",
+                          commissions=_comm, eur_usd=_taux,
+                          chatters=res.get("chatters"),
+                          diagnostic=res.get("diagnostic"))
         return jsonify({"ok": True, "lance": True})
 
     @app.route("/chatters/ventes_sheet_etat")

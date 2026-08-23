@@ -3151,6 +3151,62 @@ except Exception as _eSel:
 
 print()
 print("=" * 70)
+print("CASE « PAYE » ET PERIODES (defaut A4)")
+print("=" * 70)
+try:
+    import pathlib as _plPd
+    import mypuls as _mpPd
+
+    # La case se lisait par egalite EXACTE de la plage de dates. La periode par
+    # defaut etant glissante, le lendemain d un paiement plus aucune case
+    # n etait cochee — et RIEN N EMPECHAIT DE REPAYER. is_chatter_paid a ete
+    # ecrite pour ca, avec sa regle d inclusion, mais n etait appelee nulle
+    # part : le correctif avait ete livre sans jamais etre branche.
+    _savPd = _mpPd.get_chatter_meta
+    _mpPd.get_chatter_meta = lambda n: {"paid_periods": ["2026-08-01_2026-08-15"]}
+    try:
+        check("paye : la periode exactement reglee est cochee",
+              _mpPd.is_chatter_paid("x", "2026-08-01_2026-08-15") is True)
+        check("paye : une plage INCLUSE dans une periode reglee est cochee",
+              _mpPd.is_chatter_paid("x", "2026-08-05_2026-08-10") is True)
+        check("paye : la quinzaine suivante n est PAS cochee",
+              _mpPd.is_chatter_paid("x", "2026-08-16_2026-08-31") is False)
+        check("paye : une plage qui deborde n est pas cochee",
+              _mpPd.is_chatter_paid("x", "2026-07-20_2026-08-05") is False)
+    finally:
+        _mpPd.get_chatter_meta = _savPd
+
+    # LE test qui compte : la page doit APPELER cette regle. Sans lui, la
+    # fonction pourrait de nouveau dormir sans que personne s en apercoive.
+    _srcPd = _plPd.Path("web_upload.py").read_text(encoding="utf-8")
+    check("paye : la page appelle bien is_chatter_paid",
+          "is_chatter_paid(" in _srcPd)
+    check("paye : elle ne compare plus la plage par egalite exacte",
+          "in meta.get('paid_periods'" not in _srcPd
+          and 'in meta.get("paid_periods"' not in _srcPd)
+
+    # A3 — le bouton de la page poussait les ventes SANS commissions ni taux :
+    # l onglet « Paie quinzaine » sortait a 0 $ pour tout le monde et l onglet
+    # « Site vs registre » accusait 100 % de l equipe d etre absente. La route
+    # soeur passait deja par _ventes_contexte ; deux chemins, un seul correct.
+    _iVs = _srcPd.index("def chatters_ventes_sheet(")
+    _blocVs = _srcPd[_iVs:_iVs + 2600]
+    check("classeur : le bouton transmet les commissions et le taux",
+          "commissions=" in _blocVs and "eur_usd=" in _blocVs)
+    check("classeur : il transmet aussi la table de performance",
+          "chatters=" in _blocVs and "diagnostic=" in _blocVs)
+
+    # A7 — « Indetermine (Creatrice) » est un LIBELLE, pas une personne. Il
+    # etait recompte au premier clic sur un filtre, et l unite ne repartait
+    # jamais.
+    check("chatteurs actifs : la ligne des ventes non attribuees n est pas comptee",
+          "mp-row-orphelin')) activeCount++" in _srcPd
+          or "mp-row-orphelin')) activeCount" in _srcPd)
+except Exception as _ePd:
+    check("paye : testable", False, repr(_ePd)[:160])
+
+print()
+print("=" * 70)
 print("GARDE-FOU DE PAIE (recalcul navigateur)")
 print("=" * 70)
 try:
