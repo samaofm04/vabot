@@ -1310,6 +1310,12 @@ body.light .sx-slot select.public{color:#15803d!important}
 body.light .sx-slot select.private{color:#7e22ce!important}
 body.light .sx-opt-title{color:#111827}
 body.light .sx-opt-sub,body.light .sx-slot-rm{color:#6b7280}
+/* Dernier lot du Jailbreak : des pastilles violettes a fond translucide,
+   entre 2,17 et 2,41 sur du blanc. Plus invisibles, mais faibles. On garde
+   le violet comme SIGNE (c est la couleur du module) en le foncant. */
+body.light .jb-side-va-count,body.light .jb-detail-count-badge,
+body.light .jb-detail-head-edit,body.light .jb-side-summary b{color:#7e22ce}
+body.light .va-ig3-ban-badge{color:#b91c1c}
 body.light .va-section-count{color:#1d4ed8}
 /* Selecteur d identites (le menu deroulant des cartes d import) : panneau
    et bouton restes en #131316. Ses 113 lignes sont donc CLAIRES SUR
