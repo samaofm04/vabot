@@ -1222,6 +1222,26 @@ body.light [style*="color:#60a5fa"]{color:#1d4ed8!important}
 body.light [style*="color:#7aa2ff"]{color:#1d4ed8!important}
 body.light [style*="color:#93c5fd"]{color:#1d4ed8!important}
 body.light [style*="color:#fca5a5"]{color:#b91c1c!important}   /* rouge pale, 3 usages */
+/* PANNEAUX RESTES SOMBRES. La panne inverse de celle du dessus : ici c est
+   le fond qui n a pas ete repeint, pendant que le texte, lui, passait au
+   fonce. Mesure sur la page : une trentaine d elements en fonce sur fonce.
+   - .vt-card (metadonnees video) : #07090d, AUCUNE regle claire ;
+   - .btn-cancel : sa regle claire etait limitee a .confirm-box, donc tous
+     les autres boutons Annuler restaient sur #2a2a2a ;
+   - .mypuls-period-btn-active : la regle claire du bouton NEUTRE (0,2,0)
+     l emportait sur celle de l ACTIF (0,1,0), donc du gris #666 sur le
+     bleu de selection ;
+   - .rank-badge : le podium garde du blanc sur des verts trop clairs
+     (1,92 a 2,54) ; on fonce le vert plutot que de toucher au blanc. */
+body.light .vt-card{background:#fff!important;color:#111827}
+body.light .vt-card.on{background:#eff6ff!important}
+body.light .btn-cancel{background:#f3f4f6!important;color:#374151!important}
+body.light .mypuls-period-btn-active{color:#fff!important}
+body.light .rank-badge[style*="background:#14b8a6"]{background:#0f766e!important}
+body.light .rank-badge[style*="background:#10b981"]{background:#047857!important}
+body.light .rank-badge[style*="background:#34d399"]{background:#059669!important}
+body.light [style*="background:#07090d"]{background:#fff!important}
+body.light [style*="background:#0f1a2e"]{background:#eff6ff!important}
 /* EDITEUR DE MONTAGE — il avait recu ses regles claires pour les SURFACES
    (.ce-app, .ce-title, .ce-lib, .ce-center, .ce-right passent au blanc)
    mais pas pour ce qui est POSE dessus. Resultat en theme clair :
