@@ -5680,6 +5680,8 @@ _ICONES_ACTIONS = {
     "capbanger": "vacapbanger",
     "montagebanger": "vamontagebanger",
     "templatebrut": "vatemplatebrut",
+    "brutbanger": "vabrutbanger",
+    "captionbrut": "vacaptionbrut",
 }
 
 

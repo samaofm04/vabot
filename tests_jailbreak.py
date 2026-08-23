@@ -792,7 +792,7 @@ try:
             _manquants.append(_nom)
     check("icones : les noms sont acceptables par Discord",
           not _mauvais, ", ".join(_mauvais))
-    check("icones : les treize fichiers PNG sont presents",
+    check("icones : tous les fichiers PNG sont presents",
           not _manquants, "absents : " + ", ".join(_manquants))
 
     # Un PNG trop lourd ou mal dimensionne est refuse au televersement, et on
