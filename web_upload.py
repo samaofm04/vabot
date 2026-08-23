@@ -38696,7 +38696,10 @@ function mplFlushPendingSaves(){{
 // Flush au beforeunload pour ne JAMAIS perdre le dernier change
 window.addEventListener('beforeunload', mplFlushPendingSaves);
 // Hook les events sur la section MyPuls Live
-document.addEventListener('DOMContentLoaded', () => {{
+// Onglet differe : DOMContentLoaded a deja eu lieu quand le fragment est
+// injecte, donc on execute tout de suite. La fermeture du bloc reste }}); a
+// l identique -- seule cette ligne d ouverture change.
+(function(f){{ if(document.readyState === 'loading'){{ document.addEventListener('DOMContentLoaded', f); }} else {{ f(); }} }})(() => {{
   const section = document.getElementById('form-mypulslive');
   if(!section) return;
   ['input', 'change', 'click'].forEach(ev => {{
@@ -39012,7 +39015,10 @@ function syncCaptionSlots(){{
   if(typeof mplScheduleSave === 'function') mplScheduleSave();
 }}
 // Init au boot : peuple les 2 pools media (posts + stories) + captionSlots
-document.addEventListener('DOMContentLoaded', () => {{
+// Onglet differe : DOMContentLoaded a deja eu lieu quand le fragment est
+// injecte, donc on execute tout de suite. La fermeture du bloc reste }}); a
+// l identique -- seule cette ligne d ouverture change.
+(function(f){{ if(document.readyState === 'loading'){{ document.addEventListener('DOMContentLoaded', f); }} else {{ f(); }} }})(() => {{
   // Posts pool depuis le JSON server-side pre-fill
   try {{
     window.mediaPoolsByMode = {{
@@ -42703,14 +42709,21 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{stat_stories}", str(stat_stories))
         .replace("{stat_storyctas}", str(stat_storyctas))
         .replace("{stat_pps}", str(stat_pps))
-        .replace("{cloud_reels_html}", _g("cloudreels", lambda: _render_cloud_content_html("videos", VIDEO_EXTS)))
-        .replace("{cloud_brutes_html}", _g("cloudbrutes", lambda: _render_cloud_content_html("brutes", VIDEO_EXTS)))
-        .replace("{cloud_templates_html}", _g("cloudtemplates", lambda: _render_cloud_content_html("templates", VIDEO_EXTS)))
-        .replace("{cloud_captions_html}", _g("cloudcaptions", _render_cloud_captions_html))
-        .replace("{cloud_posts_html}", _g("cloudposts", lambda: _render_cloud_content_html("posts", IMAGE_EXTS)))
-        .replace("{cloud_stories_html}", _g("cloudstories", lambda: _render_cloud_content_html("stories", IMAGE_EXTS)))
-        .replace("{cloud_storyctas_html}", _g("cloudstoryctas", lambda: _render_cloud_content_html("storyctas", IMAGE_EXTS)))
-        .replace("{cloud_pps_html}", _g("cloudpps", _render_cloud_pps_page))
+        # 8 galeries rendues d office alors qu UNE SEULE est visible. Chacune
+        # appelle _cloud_ident_stats_cached (iterdir + un stat() par fichier,
+        # sur TOUTES les identites) puis globe les voisins du dossier choisi et
+        # lance la pregeneration des vignettes : 118 188 caracteres de coquille
+        # fixe et 8 parcours d arborescence a chaque chargement de page.
+        # Les 8 producers sont deja dans la table _prods et servis par
+        # /?lazy=<tab> ; aucun n a de script en DOMContentLoaded.
+        .replace("{cloud_reels_html}", _lazy("cloudreels"))
+        .replace("{cloud_brutes_html}", _lazy("cloudbrutes"))
+        .replace("{cloud_templates_html}", _lazy("cloudtemplates"))
+        .replace("{cloud_captions_html}", _lazy("cloudcaptions"))
+        .replace("{cloud_posts_html}", _lazy("cloudposts"))
+        .replace("{cloud_stories_html}", _lazy("cloudstories"))
+        .replace("{cloud_storyctas_html}", _lazy("cloudstoryctas"))
+        .replace("{cloud_pps_html}", _lazy("cloudpps"))
         .replace("{cloud_drive_html}", _lazy("clouddrive"))
         # Vault PRO : mêmes producers, dossiers pro_*. TOUT en lazy — rendues
         # d'office, ces 5 galeries ajoutaient ~270 Ko à chaque chargement de
@@ -42751,7 +42764,13 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{vtg_html}", _lazy("vtg"))
         .replace("{veille_feed_html}", _lazy("veille"))
         .replace("{tiktok_trends_html}", _lazy("tktrends"))
-        .replace("{mypulslive_html}", _g("mypulslive", _render_mypulslive_html))
+        # MyPuls Live : 140 947 caracteres de HTML/CSS/JS fixe — le plus gros
+        # producteur unique de la page — plus un list_creators() et une carte
+        # <img src=/mypuls/avatar/N> par createur, chargees alors que la
+        # section est en display:none. Ses deux DOMContentLoaded viennent de
+        # passer par document.readyState : sans ca, les pools media et
+        # l auto-sauvegarde ne se rebranchaient jamais apres injection.
+        .replace("{mypulslive_html}", _lazy("mypulslive"))
         .replace("{chatplanning_html}", _lazy("chatplanning"))
         .replace("{videocrea_html}", _lazy("videocrea"))
         .replace("{bilan_html}", _lazy("bilan"))

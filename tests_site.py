@@ -58,6 +58,25 @@ def _dire(ligne):
         print(ligne.encode(enc, "replace").decode(enc, "replace"))
 
 
+def galerie(client, url):
+    """Le HTML d'une galerie Bibliotheque, comme le navigateur l'obtient.
+
+    Les 8 galeries sont DIFFEREES depuis la passe perf : la page complete ne
+    porte plus qu'un place-holder et le contenu arrive par /?lazy=<tab>. Un
+    test qui lit encore la page entiere ne verrait plus aucune carte et
+    conclurait a tort que la galerie est vide.
+    """
+    from urllib.parse import urlparse, parse_qs
+    tab = (parse_qs(urlparse(url).query).get("tab") or [""])[0]
+    sep = "&" if "?" in url else "?"
+    frag = client.get(f"{url}{sep}lazy={tab}",
+                      headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+    # Le navigateur injecte le fragment DANS <div class="form-section"
+    # id="form-<tab>"> deja present dans la page. On rend la meme chose, sinon
+    # les verifications qui reperent leur section par cet id ne trouvent rien.
+    return f'<div class="form-section" id="form-{tab}">{frag}</div>'
+
+
 TMP = pathlib.Path(tempfile.mkdtemp(prefix="vabot_tests_"))
 print(f"bac à sable : {TMP}\n")
 
@@ -3072,7 +3091,7 @@ try:
     _cDi = _aDi.test_client()
     with _cDi.session_transaction() as _s:
         _s["auth"] = True; _s["username"] = "boss"; _s["role"] = "owner"; _s["sid"] = "DI1"
-    _hDi = _cDi.get("/?tab=cloudbrutes&cloud_brutes_ident=" + _idDi).get_data(as_text=True)
+    _hDi = galerie(_cDi, "/?tab=cloudbrutes&cloud_brutes_ident=" + _idDi)
     _mDi = _reDi.search(r"/cloud/thumb/" + _idDi + r"/brutes/[^'\" ]+", _hDi)
     check("url : la galerie rend une adresse encodee pour un nom a diese",
           bool(_mDi) and "%23" in _mDi.group(0),
@@ -3610,7 +3629,7 @@ try:
                 (_wMk.IDENTITIES_DIR / _nom / "brutes").mkdir(parents=True, exist_ok=True)
             _wMk.identity_market = (lambda i: _tmpMk.get(i, _origMarcheMk(i)))
 
-            _sansMk = _itemsMk(_cMk.get("/?tab=cloudbrutes").get_data(as_text=True))
+            _sansMk = _itemsMk(galerie(_cMk, "/?tab=cloudbrutes"))
             check("marche : sans choix, aucune identite n est masquee",
                   bool(_sansMk) and not any(_h for _i, _m, _h in _sansMk),
                   "%d entree(s), %d masquee(s)"
@@ -3618,7 +3637,7 @@ try:
 
             _cMk.set_cookie("va_market", "us")
             _url = "/?tab=cloudbrutes&cloud_brutes_ident=_tstmk_us"
-            _avecMk = _itemsMk(_cMk.get(_url).get_data(as_text=True))
+            _avecMk = _itemsMk(galerie(_cMk, _url))
             _dico = {_i: _h for _i, _m, _h in _avecMk}
             check("marche : avec le choix US, une identite FR est masquee des le HTML",
                   _dico.get("_tstmk_fr") is True,
@@ -3628,8 +3647,7 @@ try:
                   "etat rendu : %r" % _dico.get("_tstmk_us"))
             # On vient d ouvrir son contenu : la faire disparaitre de sa propre
             # liste laisserait une galerie sans entree correspondante.
-            _selFr = _itemsMk(_cMk.get(
-                "/?tab=cloudbrutes&cloud_brutes_ident=_tstmk_fr").get_data(as_text=True))
+            _selFr = _itemsMk(galerie(_cMk, "/?tab=cloudbrutes&cloud_brutes_ident=_tstmk_fr"))
             _dicoFr = {_i: _h for _i, _m, _h in _selFr}
             check("marche : l identite SELECTIONNEE reste visible, meme hors marche",
                   _dicoFr.get("_tstmk_fr") is False,
@@ -3639,7 +3657,7 @@ try:
             # retombait sur la premiere de la liste, souvent de l autre marche.
             # Comme une selectionnee ne se masque jamais, cette entree restait
             # visible — une seule, mais visible, et l utilisateur la voit.
-            _htmlDef = _cMk.get("/?tab=cloudbrutes").get_data(as_text=True)
+            _htmlDef = galerie(_cMk, "/?tab=cloudbrutes")
             _dicoDef = {_i: _h for _i, _m, _h in _itemsMk(_htmlDef)}
             check("marche : sans identite dans l URL, le defaut respecte le marche",
                   _dicoDef.get("_tstmk_fr") is not False,
@@ -4182,6 +4200,8 @@ try:
     _cIg = _aIg.test_client()
     with _cIg.session_transaction() as _s:
         _s["auth"] = True; _s["username"] = "boss"; _s["role"] = "owner"; _s["sid"] = "IG1"
+    # Ici c'est bien la PAGE ENTIERE qu'on veut : le test verifie qu'elle pose
+    # le place-holder de la veille et qu'elle n'embarque aucune miniature.
     _hIg = _cIg.get("/?tab=cloudbrutes").get_data(as_text=True)
     check("veille : la page ne porte AUCUNE miniature Instagram au chargement",
           _hIg.count("cdninstagram") == 0,
@@ -5013,6 +5033,39 @@ except Exception as _eGd:
 
 print()
 print("=" * 70)
+print("ONGLETS DIFFERES : le fragment est traduit comme la page")
+print("=" * 70)
+try:
+    import web_upload as _wTr
+    _aTr = _wTr.create_app(); _aTr.testing = True
+    _svTr = _wTr._load_web_users
+    _wTr._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"}}
+    _cTr = _aTr.test_client()
+    with _cTr.session_transaction() as _s:
+        _s["auth"] = True; _s["username"] = "boss"; _s["role"] = "owner"; _s["sid"] = "TTR"
+    try:
+        # _traduire_html n etait applique QUE dans _render_upload : les ~40
+        # onglets differes repartaient en francais alors que l anglais est la
+        # langue PAR DEFAUT (cookie va_lang absent). Personne ne le voyait.
+        _cTr.set_cookie("va_lang", "fr")
+        _frTr = _cTr.get("/?lazy=cloudreels&tab=cloudreels",
+                         headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+        _cTr.delete_cookie("va_lang")
+        _enTr = _cTr.get("/?lazy=cloudreels&tab=cloudreels",
+                         headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+        check("differe : le fragment n est pas rendu a l identique dans les 2 langues",
+              bool(_frTr) and _frTr != _enTr)
+        # Un libelle francais bien present cote FR doit avoir disparu cote EN.
+        check("differe : un libelle francais ne survit pas en langue par defaut",
+              ("Décroissant" in _frTr) and ("Décroissant" not in _enTr),
+              "FR:%s EN:%s" % ("Décroissant" in _frTr, "Décroissant" in _enTr))
+    finally:
+        _wTr._load_web_users = _svTr
+except Exception as _eTr:
+    check("differe : traduction testable", False, repr(_eTr)[:160])
+
+print()
+print("=" * 70)
 print("BIBLIOTHEQUE : un filtre n en efface plus un autre")
 print("=" * 70)
 try:
@@ -5027,8 +5080,8 @@ try:
         # On pose une date ET un type, puis on regarde les liens de tri rendus :
         # ils doivent reconduire les deux. Avant, choisir « Croissant » apres
         # « Aller a la date » ramenait tout le dossier, sans un mot.
-        _hFl = _cFl.get("/?tab=cloudreels&cloud_videos_date=2026-08-12"
-                        "&cloud_videos_type=video").get_data(as_text=True)
+        _hFl = galerie(_cFl, "/?tab=cloudreels&cloud_videos_date=2026-08-12"
+                             "&cloud_videos_type=video")
         check("biblio : les liens de tri reconduisent la date",
               "cloud_videos_date=2026-08-12" in _hFl, "date absente des liens")
         check("biblio : les liens de tri reconduisent le type",
