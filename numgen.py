@@ -34,6 +34,22 @@ SERVICE_LABELS = {
     "fb": "Facebook", "tg": "Telegram", "wa": "WhatsApp", "sc": "Snapchat",
 }
 
+# Pays proposés, du plus fourni au moins fourni. Une seule table : le site et
+# le bot y lisaient chacun la leur, et elles divergeaient.
+PAYS = (
+    ("187", "🇺🇸 États-Unis"),
+    ("78", "🇫🇷 France"),
+    ("43", "🇩🇪 Allemagne"),
+    ("16", "🇬🇧 Royaume-Uni"),
+    ("12", "🇺🇸 États-Unis (2ᵉ pool)"),
+    ("0", "🇷🇺 Russie (défaut d'origine — rarement dispo)"),
+)
+
+# Le défaut d'origine était « 0 » = Russie, dont le stock est tombé à zéro :
+# le panneau répondait « aucun numéro dispo » alors que les clés et le solde
+# étaient bons, et rien dans le message ne pointait vers le pays.
+PAYS_DEFAUT = "187"
+
 
 def _cfg() -> dict:
     try:
@@ -83,7 +99,7 @@ def status() -> dict:
     return {
         "getatext": _m(getatext_key()),
         "smsbower": _m(smsbower_key()),
-        "country": str(c.get("country") or "0"),
+        "country": str(c.get("country") or PAYS_DEFAUT),
         "service": str(c.get("service") or "ig"),
         "sms_ok": bool(getatext_key() or smsbower_key()),
         "mail_ok": bool(smsbower_key()),
@@ -91,7 +107,29 @@ def status() -> dict:
 
 
 def default_country() -> str:
-    return str(_cfg().get("country") or "0")
+    return str(_cfg().get("country") or PAYS_DEFAUT)
+
+
+def stock(service="ig") -> dict:
+    """{code pays: numéros disponibles} chez GetAText.
+
+    getNumbersStatus est une LECTURE : elle n'achète rien et ne consomme
+    aucun crédit. Un pays dont la réponse est illisible est absent du
+    résultat — on ne prétend pas qu'il a zéro numéro.
+    """
+    import json as _js
+    cle = GETATEXT_SERVICES.get(service, service)
+    out = {}
+    for code, _lib in PAYS:
+        t = _stubs("getatext", "getNumbersStatus", country=code)
+        if not t.startswith("{"):
+            continue
+        try:
+            v = _js.loads(t).get(f"{cle}_0")
+        except Exception:
+            continue
+        out[code] = int(v) if str(v).isdigit() else 0
+    return out
 
 
 def balances() -> dict:
@@ -132,29 +170,56 @@ def _stubs(provider, action, **params):
     return _get(url, {"api_key": key, "action": action, **params})
 
 
-def get_number(service="ig", country=None):
-    """Commande un numéro (GetAText, fallback SMSBower).
-    -> (True, {id, phone, provider}) ou (False, message)."""
-    country = str(country if country is not None else default_country())
-    errs = []
+def _commander(service, country):
+    """Un achat, dans un pays. -> (ok, message|infos, réponses brutes)."""
+    errs, brut = [], []
     if getatext_key():
         txt = _stubs("getatext", "getNumber",
                      service=GETATEXT_SERVICES.get(service, service), country=country)
+        brut.append(txt)
         if txt.startswith("ACCESS_NUMBER"):
             p = txt.split(":")
             if len(p) >= 3:
                 return True, {"id": p[1], "phone": "+" + p[2].lstrip("+"),
-                              "provider": "getatext"}
+                              "provider": "getatext", "country": country}, brut
         errs.append(f"GetAText : {_human(txt)}")
     if smsbower_key():
         txt2 = _stubs("smsbower", "getNumber", service=service, country=country)
+        brut.append(txt2)
         if txt2.startswith("ACCESS_NUMBER"):
             p2 = txt2.split(":")
             if len(p2) >= 3:
                 return True, {"id": p2[1], "phone": "+" + p2[2].lstrip("+"),
-                              "provider": "smsbower"}
+                              "provider": "smsbower", "country": country}, brut
         errs.append(f"SMSBower : {_human(txt2)}")
-    return False, " | ".join(errs) or "aucune clé SMS configurée (`/smskey`)"
+    return False, " | ".join(errs) or "aucune clé SMS configurée (`/smskey`)", brut
+
+
+def get_number(service="ig", country=None):
+    """Commande un numéro (GetAText, fallback SMSBower).
+    -> (True, {id, phone, provider, country}) ou (False, message)."""
+    demande = str(country if country is not None else default_country())
+    ok, res, brut = _commander(service, demande)
+    if ok or country is not None:
+        return ok, res
+
+    # Le pays réglé est à sec. Répondre « aucun numéro dispo » n'aide
+    # personne : il faut connaître les codes pays pour s'en sortir, et le
+    # message ne dit même pas que le pays est en cause. On demande donc au
+    # fournisseur où il lui en reste — c'est une lecture gratuite — et on y
+    # va. Uniquement sur un manque de stock : une clé refusée ou un solde
+    # vide se reproduiraient à l'identique dans tous les pays.
+    if not any("NO_NUMBERS" in (t or "") for t in brut):
+        return False, res
+    ailleurs = sorted(((n, c) for c, n in stock(service).items()
+                       if n > 0 and c != demande), reverse=True)
+    for _n, code in ailleurs[:2]:
+        ok2, res2, _b = _commander(service, code)
+        if ok2:
+            return True, res2
+    if not ailleurs:
+        return False, f"{res} — aucun pays n'a de numéro pour ce service"
+    return False, res
 
 
 def get_code(activation_id, provider="getatext"):

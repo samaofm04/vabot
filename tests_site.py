@@ -39,7 +39,23 @@ import datetime as _dtVtk
 
 def check(label, cond, detail=""):
     (OKS if cond else FAILS).append(label)
-    print(("OK   " if cond else "FAIL ") + label + (f"  [{detail}]" if detail and not cond else ""))
+    _dire(("OK   " if cond else "FAIL ") + label
+          + (f"  [{detail}]" if detail and not cond else ""))
+
+
+def _dire(ligne):
+    """Affiche sans jamais planter sur l'encodage de la console.
+
+    La console Windows est en cp1252 : un « ≠ » ou un emoji dans un libelle
+    levait UnicodeEncodeError DANS check(), ce qui tuait la suite entiere au
+    milieu — on croyait alors que tout passait, alors que la moitie des
+    verifications n avait jamais tourne.
+    """
+    try:
+        print(ligne)
+    except UnicodeEncodeError:
+        enc = (getattr(sys.stdout, "encoding", None) or "ascii")
+        print(ligne.encode(enc, "replace").decode(enc, "replace"))
 
 
 TMP = pathlib.Path(tempfile.mkdtemp(prefix="vabot_tests_"))
@@ -2968,6 +2984,50 @@ try:
         _s["auth"] = True; _s["username"] = "chat"; _s["role"] = "chatter"; _s["sid"] = "NG2"
     check("sms : un role restreint ne peut pas changer le pays",
           _cRe.post("/numgen/save", data={"country": "187"}).status_code == 403)
+
+    # Repli automatique. Le pays regle peut tomber a sec du jour au lendemain
+    # — c est exactement ce qui est arrive au pays « 0 ». Repondre « aucun
+    # numero dispo » n aide personne : il faut connaitre les codes pays pour
+    # s en sortir. numgen demande donc au fournisseur ou il lui en reste.
+    # Tout est simule ici : ce test ne doit acheter aucun numero.
+    _svS, _svG = _ngT._stubs, _ngT.getatext_key
+    _svB, _svC = _ngT.smsbower_key, _ngT._cfg
+    try:
+        _vus = []
+
+        def _fauxNg(prov, action, **p):
+            _vus.append((action, p.get("country")))
+            if action == "getNumbersStatus":
+                return ('{"instagram/threads_0": %d}'
+                        % (5061 if p.get("country") == "187" else 0))
+            if action == "getNumber":
+                return ("ACCESS_NUMBER:9:12025550147"
+                        if p.get("country") == "187" else "NO_NUMBERS")
+            return "BAD_ACTION"
+
+        _ngT._stubs = _fauxNg
+        _ngT.getatext_key = lambda: "K"
+        _ngT.smsbower_key = lambda: ""
+        _ngT._cfg = lambda: {"country": "0"}
+        _okNg, _resNg = _ngT.get_number("ig")
+        check("sms : un pays a sec bascule sur un pays qui a du stock",
+              _okNg is True and _resNg.get("country") == "187", (_okNg, _resNg))
+        check("sms : le pays regle est quand meme essaye en premier",
+              [c for a, c in _vus if a == "getNumber"][:1] == ["0"], _vus)
+
+        _vus.clear()
+        _ngT._stubs = lambda pr, ac, **p: (_vus.append(ac) or "BAD_KEY")
+        _okNg2, _msgNg = _ngT.get_number("ig")
+        check("sms : une cle refusee ne fait pas le tour des pays",
+              _okNg2 is False and _vus == ["getNumber"], _vus)
+    finally:
+        _ngT._stubs, _ngT.getatext_key = _svS, _svG
+        _ngT.smsbower_key, _ngT._cfg = _svB, _svC
+
+    check("sms : le defaut n est plus la Russie", _ngT.PAYS_DEFAUT != "0",
+          _ngT.PAYS_DEFAUT)
+    check("sms : une seule table de pays pour le site et le bot",
+          _wNg._NUMGEN_PAYS is _ngT.PAYS)
 
     _ngT.set_keys(country=_avantNg)      # on repose ce qu on a trouve
     _wNg._load_web_users = _savNg

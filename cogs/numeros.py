@@ -217,9 +217,16 @@ class NumerosCog(commands.Cog):
         view.owner_id = interaction.user.id
         view.service = service
         solde = (await asyncio.to_thread(numgen.balances)).get("sms")
+        # Le pays réglé peut être à sec : numgen bascule alors seul sur un
+        # pays qui a du stock. Le dire, sinon on reçoit un numéro étranger
+        # sans comprendre pourquoi — et le réglage a l'air cassé.
+        note, pris = None, res.get("country")
+        if pris and pris != numgen.default_country():
+            note = (f"ℹ️ Plus de numéro dans le pays réglé — pris en "
+                    f"**{dict(numgen.PAYS).get(pris, pris)}**.")
         msg = await interaction.followup.send(
-            embed=self._embed_txt("📱", res["phone"], service,
-                                  user=interaction.user.id, solde=solde),
+            content=note, embed=self._embed_txt("📱", res["phone"], service,
+                                                user=interaction.user.id, solde=solde),
             view=view, ephemeral=True, wait=True)
         view.message = msg
         await self.watch(interaction, view, first=True)

@@ -40344,18 +40344,16 @@ def _render_video_manager() -> str:
     return _VT_HEAD + ff_line + toggle_btn + form
 
 
-#: Les fournisseurs numerotent les pays. « 0 » est la RUSSIE, et c'est le
-#: DEFAUT du module : une installation neuve demande donc des numeros russes
+#: Les fournisseurs numerotent les pays. « 0 » est la RUSSIE, et c'etait le
+#: DEFAUT du module : une installation neuve demandait donc des numeros russes
 #: pour des comptes Instagram francais ou americains, et les deux fournisseurs
-#: repondent « aucun numero dispo ». Le diagnostic a coute une matinee.
-_NUMGEN_PAYS = (
-    ("187", "🇺🇸 États-Unis"),
-    ("78", "🇫🇷 France"),
-    ("43", "🇩🇪 Allemagne"),
-    ("16", "🇬🇧 Royaume-Uni"),
-    ("12", "🇺🇸 États-Unis (2ᵉ pool)"),
-    ("0", "🇷🇺 Russie (défaut d'origine — rarement dispo)"),
-)
+#: repondaient « aucun numero dispo ». Le diagnostic a coute une matinee.
+#: La table vit desormais dans numgen : le site et le bot en avaient chacun
+#: une copie, et une liste mise a jour d'un seul cote ment de l'autre.
+try:
+    from numgen import PAYS as _NUMGEN_PAYS
+except Exception:          # numgen absent : la section se contente de dire non
+    _NUMGEN_PAYS = (("187", "🇺🇸 États-Unis"), ("0", "🇷🇺 Russie"))
 
 
 @ttl_cache(seconds=300)
@@ -40369,21 +40367,11 @@ def _numgen_stock() -> dict:
     Mis en cache cinq minutes : la page des reglages ne doit pas declencher
     six appels reseau a chaque affichage.
     """
-    import json as _j
-    out = {}
     try:
         import numgen
+        return numgen.stock("ig")
     except Exception:
-        return out
-    for code, _lib in _NUMGEN_PAYS:
-        try:
-            t = numgen._stubs("getatext", "getNumbersStatus", country=code)
-            d = _j.loads(t) if t and t.startswith("{") else {}
-            v = d.get("instagram/threads_0")
-            out[code] = int(v) if v is not None and str(v).isdigit() else 0
-        except Exception:
-            pass          # stock inconnu pour ce pays : on n'affirmera rien
-    return out
+        return {}         # stock inconnu : on n'affirmera rien
 
 
 def _render_numgen_settings() -> str:
@@ -40395,7 +40383,7 @@ def _render_numgen_settings() -> str:
     répond « aucun numéro dispo » sans qu'on puisse rien y faire. Le site doit
     pouvoir s'en charger seul.
     """
-    pays, service, sms_ok, mail_ok = "0", "ig", False, False
+    pays, service, sms_ok, mail_ok = _NUMGEN_PAYS[0][0], "ig", False, False
     soldes = {"sms": "—", "mail": "—"}
     erreur = ""
     try:
