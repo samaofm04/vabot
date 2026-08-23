@@ -2610,6 +2610,60 @@ except Exception as _eRg:
 
 print()
 print("=" * 70)
+print("VIGNETTE NOIRE (la vraie cause du mur de cartes noires)")
+print("=" * 70)
+try:
+    import subprocess as _spNo
+    import tempfile as _tfNo
+    import pathlib as _plNo
+    import web_upload as _wNo
+    from PIL import Image as _ImNo, ImageStat as _StNo
+
+    # LA cause, trouvee apres deux correctifs JavaScript inutiles : les
+    # vignettes se generaient tres bien, elles etaient simplement NOIRES.
+    # L ancienne recette prenait l image a 0,5 s telle quelle ; sur une video
+    # commencant par un fondu ou un logo — la norme sur les rushs — elle
+    # rendait 0,5 sur 255. Une vignette noire ne se distingue pas d un
+    # chargement en cours : on cherche alors du cote du navigateur.
+    with _tfNo.TemporaryDirectory() as _tmpNo:
+        _dNo = _plNo.Path(_tmpNo)
+        _srcNo = _dNo / "debut_noir.mp4"
+        _rNo = _spNo.run(
+            ["ffmpeg", "-y", "-loglevel", "error",
+             "-f", "lavfi", "-i", "color=c=black:s=360x640:d=1.2",
+             "-f", "lavfi", "-i", "testsrc=s=360x640:d=3",
+             "-filter_complex", "[0:v][1:v]concat=n=2:v=1",
+             "-c:v", "libx264", "-pix_fmt", "yuv420p", str(_srcNo)],
+            capture_output=True, timeout=90)
+        if _rNo.returncode != 0 or not _srcNo.exists():
+            raise RuntimeError("ffmpeg n a pas pu fabriquer la video d essai")
+        _outNo = _dNo / "v.jpg"
+        _okNo = _wNo._generate_video_thumbnail(_srcNo, _outNo)
+        _lumNo = (_StNo.Stat(_ImNo.open(_outNo).convert("L")).mean[0]
+                  if _outNo.exists() else -1)
+        check("vignette : une video qui commence par du noir donne une image LISIBLE",
+              _okNo and _lumNo >= 12, "luminosite %.1f / 255" % _lumNo)
+        # Et le detecteur doit reconnaitre une image reellement noire, sinon la
+        # seconde tentative ne partirait jamais.
+        _noirNo = _dNo / "noir.jpg"
+        _ImNo.new("RGB", (60, 60), (0, 0, 0)).save(_noirNo)
+        check("vignette : une image noire est bien reconnue comme telle",
+              _wNo._vignette_trop_sombre(_noirNo))
+        _ImNo.new("RGB", (60, 60), (140, 140, 140)).save(_noirNo)
+        check("vignette : une image normale n est pas prise pour du noir",
+              not _wNo._vignette_trop_sombre(_noirNo))
+    # Changer la recette doit rendre TOUT le cache obsolete : les anciennes
+    # vignettes sont plus recentes que leur media, elles ne seraient jamais
+    # refaites sans ca.
+    check("vignette : le cache est versionne par recette",
+          ("v%d" % _wNo.THUMB_RECETTE) in _wNo._thumb_path_for("a/b/c.mp4").as_posix())
+except FileNotFoundError:
+    check("vignette noire : testable (ffmpeg absent)", False, "ffmpeg introuvable")
+except Exception as _eNo:
+    check("vignette noire : testable", False, repr(_eNo)[:160])
+
+print()
+print("=" * 70)
 print("VIGNETTE PERIMEE (defaut F4)")
 print("=" * 70)
 try:

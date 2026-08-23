@@ -42,6 +42,12 @@ USERS_FILE = DATA_DIR / "users.json"
 IDENTITIES_CONFIG_FILE = DATA_DIR / "identities_config.json"
 BANGER_MARKS_FILE = DATA_DIR / "banger_marks.json"  # file_ids marqués "banger" (etoile jaune)
 THUMB_DIR = DATA_DIR / "thumbnails"
+#: Version de la RECETTE d extraction. A incrementer des qu on change la facon
+#: de fabriquer une vignette : les anciennes vivent en cache, plus recentes que
+#: leur media, et ne seraient donc jamais refaites. La v1 prenait l image a
+#: 0,5 s telle quelle et rendait du NOIR sur toute video commencant par un
+#: fondu ou un logo — c est-a-dire la plupart des rushs.
+THUMB_RECETTE = 2
 THUMB_SIZE = 360  # largeur max du thumbnail
 THUMB_QUALITY = 72  # qualité JPEG (compromis taille/vitesse)
 
@@ -16274,8 +16280,14 @@ def _render_identity_stats_html() -> str:
 
 
 def _thumb_path_for(rel_key: str) -> Path:
-    """Chemin du thumbnail pour une clé relative (genre 'amelia/videos/file.mp4')."""
-    return THUMB_DIR / f"{rel_key}.jpg"
+    """Chemin du thumbnail pour une clé relative (genre 'amelia/videos/file.mp4').
+
+    Le numero de recette entre dans le chemin : changer la facon d extraire une
+    vignette rend ainsi TOUT le cache obsolete d un coup, sans avoir a vider
+    quoi que ce soit a la main. Les anciennes restent sur le disque mais ne
+    sont plus servies ; elles se suppriment a l occasion.
+    """
+    return THUMB_DIR / f"v{THUMB_RECETTE}" / f"{rel_key}.jpg"
 
 
 def _generate_image_thumbnail(src: Path, dest: Path) -> bool:
@@ -16335,21 +16347,70 @@ def _diag_ffmpeg() -> str:
         return "indeterminable : %s" % html_escape(str(e)[:70])
 
 
+def _vignette_trop_sombre(chemin: Path) -> bool:
+    """Vrai si l'image est quasiment noire.
+
+    Une vignette noire ne se distingue pas d'un chargement en cours : la
+    galerie ressemble alors a un mur de cartes vides, et on cherche le defaut
+    du cote du navigateur pendant des heures. Mesure : une image tiree d'un
+    debut de video noir rend 0,5 sur 255, une image utilisable environ 125.
+    """
+    try:
+        from PIL import Image, ImageStat
+        with Image.open(chemin) as im:
+            return ImageStat.Stat(im.convert("L")).mean[0] < 12
+    except Exception:
+        return False          # illisible ici : on ne juge pas, on garde
+
+
+def _extraire_image(src: Path, dest: Path, depart: float) -> bool:
+    """Une image representative a partir de `depart` secondes.
+
+    Le filtre « thumbnail » d'ffmpeg choisit l'image la plus representative
+    d'un lot au lieu de prendre la premiere venue — c'est LUI qui evite les
+    fondus d'ouverture, les logos et les ecrans noirs.
+    """
+    cmd = ["ffmpeg", "-y", "-loglevel", "error"]
+    if depart > 0.05:
+        cmd += ["-ss", f"{depart:.2f}"]
+    cmd += ["-i", str(src), "-vf", f"thumbnail=60,scale={THUMB_SIZE}:-2",
+            "-frames:v", "1", "-q:v", "5", str(dest)]
+    r = subprocess.run(cmd, capture_output=True, timeout=25)
+    return r.returncode == 0 and dest.exists() and dest.stat().st_size > 0
+
+
 def _generate_video_thumbnail(src: Path, dest: Path) -> bool:
-    """Extrait une frame de la vidéo comme thumbnail via ffmpeg."""
+    """Extrait une image de la video comme vignette, via ffmpeg.
+
+    L'ancienne recette prenait l'image a 0,5 s, telle quelle. Sur une video qui
+    commence par du noir — fondu d'ouverture, logo, premiere image sombre, ce
+    qui est la NORME sur les rushs — elle produisait une vignette noire.
+    Mesuree a 0,5 sur 255. La galerie affichait donc un mur de cartes noires
+    alors que tout fonctionnait : les vignettes existaient, elles etaient
+    simplement vides. Deux correctifs cote navigateur ont ete tentes avant
+    qu'on pense a REGARDER l'image produite.
+    """
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
-        cmd = [
-            "ffmpeg", "-y", "-loglevel", "error",
-            "-ss", "0.5",  # commencer à 0.5 sec
-            "-i", str(src),
-            "-vframes", "1",
-            "-vf", f"scale={THUMB_SIZE}:-2",
-            "-q:v", "5",
-            str(dest),
-        ]
-        result = subprocess.run(cmd, capture_output=True, timeout=15)
-        return result.returncode == 0 and dest.exists()
+        duree, _w, _h = _probe_video(src)
+        # 1er essai : peu apres le debut, en laissant ffmpeg choisir l'image.
+        depart = max(0.5, duree * 0.08) if duree > 0 else 0.5
+        if not _extraire_image(src, dest, depart):
+            return False
+        if not _vignette_trop_sombre(dest):
+            return True
+        # Toujours noire : la video commence par une sequence sombre plus
+        # longue. On retente au tiers, ou l'action a commence.
+        if duree > 1.5:
+            second = duree * 0.35
+            if _extraire_image(src, dest, second) and not _vignette_trop_sombre(dest):
+                return True
+        # Une video reellement sombre existe : on garde l'image plutot que de
+        # ne rien rendre, mais on le DIT — sinon « vignette noire » et
+        # « video noire » restent indiscernables dans les journaux.
+        log.info("vignette sombre conservee pour %s (la video l'est peut-etre)",
+                 src.name)
+        return dest.exists()
     except Exception as e:
         log.error(f"Video thumbnail error pour {src}: {e}")
         return False
