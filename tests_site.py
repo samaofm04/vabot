@@ -3494,6 +3494,32 @@ try:
     finally:
         _shOf.rmtree(_wOf.IDENTITIES_DIR / _identOf, ignore_errors=True)
 
+    # Le voisin doit partir AVEC la video. Laisse seul, il eteindrait a la
+    # naissance une future video qui porterait le meme nom.
+    check("desactivees : le voisin part avec la video supprimee",
+          "or n == f\"{stem}{SUFFIXE_DESACTIVE}\"" in _plOf.Path(
+              "web_upload.py").read_text(encoding="utf-8"),
+          "un .off.json orphelin resterait sur le disque")
+
+    # Le moteur video : UN seul enumerateur alimente le montage, « Reel deja
+    # monte » et /noctus/montage_gen. Non filtre, il rouvrait les trois.
+    _srcNx = _plOf.Path("noctus_web.py").read_text(encoding="utf-8")
+    check("desactivees : le moteur video les ecarte aussi",
+          "est_desactivee(f)" in _srcNx,
+          "le montage repiocherait dedans")
+    check("desactivees : et il DIT pourquoi, au lieu de les taire",
+          "désactivée (caption déjà incrustée)" in _srcNx)
+
+    # Le parc de telephones PUBLIE sur Instagram : y laisser passer une brute
+    # eteinte est pire qu un envoi a un VA, qui aurait pu s en apercevoir.
+    _srcRig = _plOf.Path("web_upload.py").read_text(encoding="utf-8")
+    check("desactivees : les trois routes du rig sont fermees",
+          _srcRig.count("_off.est_desactivee(chemin)") == 2
+          and "_off.est_desactivee(f)" in _srcRig,
+          "une brute eteinte pourrait etre publiee publiquement")
+    check("desactivees : la route banger les refuse aussi",
+          "_off.est_desactivee(path)" in _srcRig)
+
     # Structure : tout ce qui sert un VA doit passer par la porte commune.
     # Le filtre etait recopie a trois endroits ; en oublier un se voit ici.
     _srcBot = _plOf.Path("cogs/user.py").read_text(encoding="utf-8")

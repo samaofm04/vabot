@@ -7628,6 +7628,16 @@ function chargerOngletDiffere(sec){
             old.parentNode.replaceChild(s, old);
           });
         });
+        /* Galerie injectee : le chargeur de vignettes vit dans le socle et
+           n est lance qu une seule fois, au DOM pret. Sans ce rappel, les
+           cartes au-dela de la 24e restent a opacity:0 - un mur de cartes
+           noires qu on prend pour un chargement en cours. Bug present
+           aujourd hui : cliquer Bibliotheque depuis Dashboard ne charge que
+           24 vignettes. La fonction sort tout de suite si la section visible
+           ne porte aucune vignette differee. */
+        if(typeof window.vaultChargerVignettes === 'function'){
+          try{ window.vaultChargerVignettes(); }catch(e){}
+        }
       })
       .catch(function(){
         trou.innerHTML = "<div style='padding:24px;font-size:13px'>"
@@ -43981,7 +43991,13 @@ def create_app():
             if _allowed is not None and _name not in _allowed:
                 return ("", 403)  # role-gate : onglet interdit
             try:
-                return _prod()
+                # _traduire_html n est applique QUE dans _render_upload() : un
+                # fragment paresseux repartait donc en francais alors que
+                # l anglais est la langue PAR DEFAUT (cookie va_lang absent).
+                # Les ~40 onglets deja differes sortaient tous en francais, en
+                # silence — et c est le prealable a tout nouveau _lazy().
+                _frag = _prod()
+                return _traduire_html(_frag) if _langue_courante() == "en" else _frag
             except Exception:
                 return ("<div style='color:#f99;padding:24px'>Erreur de chargement.</div>", 200)
         return _render_upload()
@@ -44355,11 +44371,22 @@ def create_app():
             return jsonify({"ok": False, "error": "dossier invalide"})
         if identity not in _list_identities():
             return jsonify({"ok": False, "error": "identité inconnue"})
-        if not filename or "/" in filename or "\\" in filename or ".." in filename:
+        # « .. » n'est refusé que comme SEGMENT : les captions Instagram sont
+        # pleines de points de suspension, et « trop bien... #ootd.mp4 » est un
+        # nom parfaitement légitime. Le nom ne contenant ni / ni \, il ne peut
+        # de toute façon pas sortir du dossier.
+        if not filename or "/" in filename or "\\" in filename or filename in ("..", "."):
             return jsonify({"ok": False, "error": "nom de fichier invalide"})
         path = IDENTITIES_DIR / identity / subdir / filename
         if not path.exists() or not path.is_file():
             return jsonify({"ok": False, "error": "fichier introuvable"})
+        # Une brute désactivée ne part pas dans Discord, même par cette route.
+        # Aucun bouton n'y mène aujourd'hui — l'étoile n'est rendue que sur les
+        # reels — mais le serveur accepte la requête, et une porte ouverte
+        # finit par être poussée.
+        if _off.est_desactivee(path):
+            return jsonify({"ok": False,
+                            "error": "vidéo désactivée (caption déjà incrustée)"})
         # Format COMPLET (REEL — identité + CLEAN + EXEMPLE + CAPTION + DESCRIPTION),
         # comme quand le bot envoie un reel a un VA.
         ok, msg, meta = _send_reel_to_banger_channel(identity, path)
@@ -44571,6 +44598,10 @@ def create_app():
                         if (n == f"{stem}.montage.json"      # brouillon d'édition
                                 or n == f"{stem}.analyse.json"   # analyse auto
                                 or n == f"{stem}{SUFFIXE_TEXTECHECK}"  # verdict « porte du texte »
+                                # Le voisin de désactivation part avec la vidéo :
+                                # laissé seul, il éteindrait à la naissance une
+                                # future vidéo qui porterait le même nom.
+                                or n == f"{stem}{SUFFIXE_DESACTIVE}"
                                 or n == f"{stem}.montage.png"):  # aperçu généré
                             to_delete.append(sibling)
                 # Ce qui part sans copie sur le Drive est compte AVANT
@@ -47314,6 +47345,14 @@ def create_app():
                     ecartes.append({"fichier": f.name, "identite": ident,
                                     "motif": "fichier vide"})
                     continue
+                # DESACTIVEE : ce que le rig recoit finit PUBLIE sur
+                # Instagram. Une brute qui porte deja une caption incrustee
+                # ne doit pas y arriver — c'est plus grave qu'un envoi a un
+                # VA, qui aurait au moins pu s'en apercevoir avant de poster.
+                if _off.est_desactivee(f):
+                    ecartes.append({"fichier": f.name, "identite": ident,
+                                    "motif": "désactivée (caption déjà incrustée)"})
+                    continue
                 # La description voisine part avec le media : le rig en a
                 # besoin pour legender la publication.
                 desc = ""
@@ -47689,6 +47728,13 @@ def create_app():
             if chemin is None:
                 refuses.append({"fichier": it.get("fichier"), "motif": motif})
                 continue
+            # Une brute desactivee n'entre pas dans la file : sans ce test elle
+            # y resterait meme si on l'eteint juste apres, et partirait au
+            # prochain cycle. Refusee AVEC son motif — jamais en silence.
+            if _off.est_desactivee(chemin):
+                refuses.append({"fichier": it.get("fichier"),
+                                "motif": "désactivée (caption déjà incrustée)"})
+                continue
             retenus.append({"identity": (it.get("identity") or "").lower().strip(),
                             "subdir": it.get("subdir"), "fichier": it.get("fichier"),
                             "taille": chemin.stat().st_size})
@@ -47730,6 +47776,14 @@ def create_app():
                 it.get("identity"), it.get("subdir"), it.get("fichier"))
             if chemin is None:
                 servis.add(cle)          # disparu depuis : on passe au suivant
+                continue
+            # Ceinture et bretelles : la file a pu etre remplie AVANT qu'on
+            # eteigne la video. C'est le dernier maillon avant la pellicule du
+            # telephone — donc avant la publication.
+            if _off.est_desactivee(chemin):
+                servis.add(cle)
+                d["servis"] = sorted(servis)
+                safe_json.write(RIG_FILE, d, indent=None)
                 continue
             servis.add(cle)
             d["servis"] = sorted(servis)

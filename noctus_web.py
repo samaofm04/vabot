@@ -860,6 +860,19 @@ def list_brutes(brutes_dir, ecartes=None):
         if f.suffix.lower() not in VIDEO_EXTS:
             _ecarte("pas une vidéo")
             continue
+        # Brute DESACTIVEE : elle porte deja une caption incrustee, en poser
+        # une seconde par-dessus n'a aucun sens. C'est le seul enumerateur du
+        # moteur : le montage, « Reel deja monte » et /noctus/montage_gen en
+        # dependent tous les trois, donc ce test les ferme d'un coup.
+        # On la compte dans `ecartes` avec sa vraie raison plutot que de la
+        # laisser passer pour « pas une video » a cause de son voisin.
+        try:
+            import brutes_off as _off_nx
+            if _off_nx.est_desactivee(f):
+                _ecarte("désactivée (caption déjà incrustée)")
+                continue
+        except Exception:
+            pass          # module absent : on ne bloque pas la generation
         try:
             # Seuil bas exprès : il ne sert qu'à jeter les fichiers vides ou les
             # uploads interrompus. Une vidéo courte mais valide doit passer — un
