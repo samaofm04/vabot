@@ -3370,6 +3370,42 @@ try:
                              % (_h, _n, _contrasteBlancTh(_h)))
     check("theme clair : aucune couleur de texte illisible sur blanc sans remap",
           not _aveugles, " | ".join(sorted(_aveugles)[:5]))
+
+    # Meme garde-fou, mais pour les couleurs posees par une CLASSE et non par un
+    # style inline : c est ainsi que le tableau de bord GMS ecrivait ses noms
+    # d identites en blanc sur blanc (contraste 1,0, 321 elements), et que la
+    # moitie de cet onglet etait invisible en theme clair.
+    # Trois exceptions verifiees a la main, listees avec leur raison.
+    _EXEMPTES = {
+        "va-ig-btn": "pose son propre fond (background:currentColor)",
+        "va-pay-btn": "pose son propre fond (background:currentColor)",
+        "va-ig3-thumb-play": "icone posee sur une miniature, avec ombre portee",
+        "remember-row": "ecran de connexion, qui reste sombre",
+    }
+    _classesKO = {}
+    for _m in _reTh.finditer(
+            r"(?m)^((?:\.[a-z][a-z0-9_-]*)(?:[ >,.:][^{]*)?)\{([^}]*)\}", _srcTh):
+        _sel, _corps = _m.group(1), _m.group(2)
+        if "body.light" in _sel:
+            continue
+        _c = _reTh.search(r"(?<!-)color:\s*(#[0-9a-fA-F]{3,6})", _corps)
+        # Une regle qui pose son propre fond assume sa couleur de texte.
+        if not _c or _reTh.search(r"background:\s*(?!none|transparent)", _corps):
+            continue
+        _h = _c.group(1)
+        if len(_h) == 4:
+            _h = "#" + "".join(_ch * 2 for _ch in _h[1:])
+        if _contrasteBlancTh(_h) >= 2.6:
+            continue
+        _cls = _reTh.match(r"\.([a-z][a-z0-9_-]*)", _sel).group(1)
+        if _cls in _EXEMPTES:
+            continue
+        if _reTh.search(r"body\.light[^{]*\." + _reTh.escape(_cls) + r"\b", _srcTh):
+            continue
+        _classesKO[_cls] = "%s (%s sur blanc)" % (_h, _contrasteBlancTh(_h))
+    check("theme clair : aucune classe coloree sans contrepartie claire",
+          not _classesKO,
+          " | ".join(".%s %s" % (_k, _v) for _k, _v in sorted(_classesKO.items())[:4]))
 except Exception as _eTh:
     check("theme clair : testable", False, repr(_eTh)[:160])
 

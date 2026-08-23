@@ -1242,6 +1242,50 @@ body.light .rank-badge[style*="background:#10b981"]{background:#047857!important
 body.light .rank-badge[style*="background:#34d399"]{background:#059669!important}
 body.light [style*="background:#07090d"]{background:#fff!important}
 body.light [style*="background:#0f1a2e"]{background:#eff6ff!important}
+/* TABLEAU DE BORD GMS — mesure sur la page en theme clair : 660 textes
+   illisibles sur 1336, soit la MOITIE de l onglet. Le tableau .gd-tbl
+   avait bien recu son fond blanc, mais .gd-name est reste en blanc pur
+   (contraste 1,0 : les noms d identites etaient litteralement invisibles)
+   et .gd-clicks en vert clair a 1,74. Le module a ete ecrit en sombre et
+   n a jamais eu son pendant clair.
+   Les memes boutons segmentes existent sur trois onglets (GMS, analyse JB,
+   activite VA) : leur fond passait au clair, leur libelle restait gris
+   pale. On les traite ensemble, l actif garde son blanc sur bleu. */
+body.light .gd-name{color:#111827}
+body.light .gd-clicks{color:#15803d}
+body.light .gd-sel{background:#fff!important;border-color:#e5e7eb!important;color:#111827}
+body.light .gd-ctry,body.light .gd-leg,body.light .gd-mpills{
+  background:#f9fafb!important;border-color:#e5e7eb!important;color:#374151}
+body.light .gd-seg button,body.light .ja-seg button,body.light .av-seg button{color:#4b5563}
+body.light .gd-seg button.on,body.light .ja-seg button.on,body.light .av-seg button.on{color:#fff}
+body.light .gd-tbl [style*="color:#fbbf24"]{color:#a16207!important}
+/* Derniere famille : des classes qui posent une couleur de texte sans
+   poser de fond, et sans contrepartie claire. Elles se retrouvent donc
+   telles quelles sur la surface blanche du theme clair. Recensees en
+   scannant le CSS, puis VERIFIEES une par une dans la page : sur les
+   ~500 elements mesures, aucun n etait sur un fond sombre.
+   Trois cas gardent volontairement leur blanc : .va-ig-btn:hover et
+   .va-pay-btn:hover posent leur PROPRE fond (background:currentColor),
+   .va-ig3-thumb-play est une icone posee sur une miniature, et
+   .remember-row vit sur l ecran de connexion, qui reste sombre. */
+body.light .flatpickr-months,body.light .flatpickr-current-month,
+body.light .flatpickr-current-month input.cur-year,
+body.light .flatpickr-time input{color:#111827!important}
+body.light .flatpickr-day{color:#374151!important}
+body.light .flatpickr-day:hover{background:#f3f4f6!important;color:#111827!important;
+  border-color:#e5e7eb!important}
+body.light .gd-rank.top,body.light .vlm-row-star:hover{color:#a16207}
+body.light .ig3-cancel,body.light .vim-cancel,body.light .secondary,
+body.light .va-ig3-row-last-val,
+body.light .va-vlist-section-head-main > span:nth-child(1){color:#6b7280}
+body.light .ig3-close:hover,body.light .vlm-close:hover,
+body.light .va-username,body.light .vt-h,
+body.light .mpl-banner-title,body.light .mpl-wheel-head-sub{color:#111827}
+body.light .ig3-trk-val,body.light .ig3-trk-refresh:hover,body.light .mpl-add-slot,
+body.light .mpl-cr-saved-hint,body.light .reel-slot-status.ok,
+body.light .vlm-gen{color:#15803d}
+body.light .nxm-row{color:#374151}
+body.light .vt-mm{color:#4b5563}
 /* EDITEUR DE MONTAGE — il avait recu ses regles claires pour les SURFACES
    (.ce-app, .ce-title, .ce-lib, .ce-center, .ce-right passent au blanc)
    mais pas pour ce qui est POSE dessus. Resultat en theme clair :
