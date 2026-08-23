@@ -1710,6 +1710,25 @@ class ClickRecap(commands.Cog):
             return {"team_id": tid, "identity": None, "group_id": None,
                     "tout": True, "group_name": libelle, "ws": libelle,
                     "ambig": "", "n": len(ids)}, None
+
+        # Le NOM d'un workspace, tape a la main plutot que choisi dans la liste.
+        # Sans ce repli, « marche francais » partait chercher un GROUPE de ce
+        # nom — qui n'existe pas, c'est un workspace — et repondait
+        # « introuvable » alors que la liste le proposait juste au-dessus.
+        _espaces = await _espaces_gms()
+        _cherche = name.strip().lower()
+        for e in _espaces:
+            if str(e.get("name") or "").strip().lower() == _cherche:
+                tid = str(e["id"])
+                ids = await asyncio.to_thread(gms.report_link_ids, tid, None,
+                                              None, True)
+                if ids is None:
+                    return None, ("❌ Impossible de lister les liens de "
+                                  f"**{e['name']}** (GetMySocial injoignable). "
+                                  "Réessaie dans un instant.")
+                return {"team_id": tid, "identity": None, "group_id": None,
+                        "tout": True, "group_name": e["name"], "ws": e["name"],
+                        "ambig": "", "n": len(ids)}, None
         ident = name.lower()
         group_name = name[0].upper() + name[1:]  # hybride -> Hybride (groupes capitalisés)
 
@@ -1740,9 +1759,17 @@ class ClickRecap(commands.Cog):
                 if g:
                     matches.append((tid, g))
             if not matches:
-                return None, (f"❌ Groupe « **{group_name}** » introuvable.\n"
-                              f"Si tu visais un groupe perso, le **cookie de session GMS du VPS** "
-                              f"est peut-être expiré. Pour **hybride**, essaie `groupe:hybride` (clé API).")
+                # On NOMME ce qui existe au lieu de laisser chercher : un
+                # « introuvable » sec envoie soupçonner le cookie alors que le
+                # nom tapé n'est simplement pas celui d'un groupe.
+                _dispo = ", ".join(f"**{e['name']}**" for e in _espaces[:8])
+                return None, (
+                    f"❌ « **{group_name}** » ne correspond à aucun groupe.\n"
+                    + (f"Workspaces disponibles : {_dispo}.\n" if _dispo else "")
+                    + "Choisis-en un **dans la liste** du champ `groupe` plutôt "
+                      "que de le taper.\n"
+                      "_(Si tu visais bien un groupe et non un workspace, le "
+                      "cookie de session GMS du VPS est peut-être expiré.)_")
             team_id, group_id = matches[0]
             if len(matches) > 1:
                 ambig = (f"\n⚠️ Un groupe « {group_name} » existe dans **{len(matches)}** workspaces "
