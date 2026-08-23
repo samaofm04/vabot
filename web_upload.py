@@ -1247,6 +1247,24 @@ body.light [style*="background:#1f1f1f"]{background:#fff!important;border-color:
 body.light [style*="background:#141414"]{background:#f9fafb!important}
 body.light .nm{color:#111827}                                   /* noms d identites, 14 tous clairs */
 body.light .jb-ok-badge{color:#15803d}                          /* badges Actif, 524 tous clairs */
+/* MODULE JAILBREAK — ecrit en sombre uniquement. Sept de ses panneaux
+   restaient noirs alors que leur texte suivait le theme clair et passait
+   au fonce : 73 elements mesures en fonce sur fonce, dont la modale et le
+   panneau de detail d un VA. Verifie a l ecran, un par un.
+   Ce qui n est PAS touche ici et qui l a ete verifie aussi : les boutons
+   d action roses (.jb-add-account-btn), les pastilles d etat vertes et la
+   poignee de glissement — ils posent leur propre couleur et tiennent. */
+body.light .jb-sidebar,body.light .jb-va-group,body.light .jb-va-group-novote{
+  background:#f9fafb!important;border-color:#e5e7eb!important}
+body.light .jb-section,body.light .jb-va-detail,body.light .jb-modal,
+body.light .jb-empty-page,body.light .jb-no-selection,body.light .jb-search{
+  background:#fff!important;border-color:#e5e7eb!important}
+body.light .jb-row-not-scraped{background:#f3f4f6!important}
+body.light .jb-no-selection{color:#6b7280}
+/* Analyse JB : seule la colonne du NOM avait ete traitee. Les chiffres,
+   eux, n ont pas de regle propre — ils HERITENT de .ja-row, restee sur
+   la couleur du theme sombre. D ou 15 nombres a 1,47 sur du blanc. */
+body.light .ja-row{color:#374151}
 /* PANNEAUX RESTES SOMBRES. La panne inverse de celle du dessus : ici c est
    le fond qui n a pas ete repeint, pendant que le texte, lui, passait au
    fonce. Mesure sur la page : une trentaine d elements en fonce sur fonce.
