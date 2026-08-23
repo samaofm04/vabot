@@ -1734,7 +1734,12 @@ body.light [style*="linear-gradient(to top,rgba(0,0,0"] button,
 body.light [style*="linear-gradient(to top,rgba(0,0,0"] button *,
 body.light [style*="linear-gradient(to top,rgba(0,0,0"] [style*="color:#fff"]{color:#fff!important}
 /* mais un media garde son fond sombre : une video sur du blanc, c'est laid */
-body.light video,body.light .vault-card-bg,body.light .reel-thumb,
+/* .vault-card-bg RETIRE de cette liste : elle a son propre degrade de
+   chargement (gris clair en theme clair), que ce fond noir !important
+   ecrasait. Une carte dont la miniature n est pas encore la devenait un
+   carre parfaitement noir, impossible a distinguer d une video sans apercu.
+   Le fond noir reste juste pour les <video>, dont les bandes doivent l etre. */
+body.light video,body.light .reel-thumb,
 body.light [style*="background:#000"] video{background:#000!important}
 /* le chargeur facon jeu retro : version sobre, cohérente avec le reste */
 body.light #game-loader{background:rgba(255,255,255,.82)!important;
@@ -17062,7 +17067,7 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
         img_tag = (
             f"<img data-src='{thumb_url}' class='vault-defer-img vault-img-load' loading='lazy' "
             f"src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxIiBoZWlnaHQ9IjEiPjwvc3ZnPg==' "
-            f"style='width:100%;height:100%;object-fit:cover;display:block;opacity:0;transition:opacity .25s'>"
+            f"style='width:100%;height:100%;object-fit:cover;display:block'>"
         )
     else:
         img_tag = (
@@ -17073,7 +17078,7 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
             # bug d affichage alors que la vignette n existait simplement pas.
             f"<img src='{thumb_url}' loading='lazy' class='vault-img-load' "
             f"onload='this.style.opacity=1' onerror='this.style.opacity=1' "
-            f"style='width:100%;height:100%;object-fit:cover;display:block;opacity:0;transition:opacity .25s'>"
+            f"style='width:100%;height:100%;object-fit:cover;display:block'>"
         )
     media_html = (
         f"<div onclick='openLightbox(\"{media_url}\",{is_video_js},\"{name}\",\"{fid_safe}\",\"{example_safe}\")' "
@@ -17396,9 +17401,14 @@ body.light .reel-slot .up-card{background:#fff}
 .vault-card-bg{background:linear-gradient(110deg,#1a1a1a 8%,#262626 18%,#1a1a1a 33%);background-size:200% 100%;animation:vaultSkel 1.4s linear infinite}
 body.light .vault-card-bg{background:linear-gradient(110deg,#eceff1 8%,#f5f5f5 18%,#eceff1 33%);background-size:200% 100%}
 @keyframes vaultSkel{0%{background-position:200% 0}100%{background-position:-200% 0}}
-/* L image apparait en fade quand elle a chargee */
-.vault-img-load{opacity:0}
-.vault-img-load.loaded{opacity:1}
+/* PAS de fondu ici, et c est deliberé. L image demarrait a opacity:0 avec
+   une transition de .25s, revelee par onload. Mais son ancetre .cloud-card
+   porte content-visibility:auto : le rendu des cartes hors ecran est SAUTE,
+   et la transition avec lui. Elle ne demarrait donc jamais et l opacite
+   restait bloquee a 0 — mesure sur le site : 204 miniatures sur 204
+   telechargees (naturalWidth 360x640), 204 invisibles. Retirer la seule
+   transition les faisait toutes apparaitre.
+   La classe « loaded » prevue pour les reveler n etait ajoutee NULLE PART. */
 
 /* Filigrane « DISPO VA » : reels marqués « Dispo pour les VA » (classe togglable en direct) */
 /* Description reprise d'un post, pas encore relue. Ambre : ni une erreur

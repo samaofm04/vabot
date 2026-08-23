@@ -3259,6 +3259,96 @@ except Exception as _eSel:
 
 print()
 print("=" * 70)
+print("APERCUS DES VIDEOS : le fondu qui ne demarrait jamais")
+print("=" * 70)
+try:
+    import re as _reAp
+    import pathlib as _plAp
+
+    _srcAp = _plAp.Path("web_upload.py").read_text(encoding="utf-8")
+
+    # LA panne, cherchee pendant des semaines du mauvais cote. Les miniatures
+    # etaient generees, servies et TELECHARGEES (mesure sur le site : 204 sur
+    # 204, naturalWidth 360x640) — mais invisibles. L image demarrait a
+    # opacity:0 avec une transition de .25s revelee par onload, et son ancetre
+    # .cloud-card porte content-visibility:auto : le rendu des cartes hors
+    # ecran est SAUTE, la transition ne demarre jamais, l opacite reste a 0.
+    # Retirer la seule transition faisait apparaitre les 204.
+    check("apercus : l image de carte ne demarre plus invisible",
+          "object-fit:cover;display:block;opacity:0;transition:opacity .25s" not in _srcAp,
+          "un fondu sous content-visibility:auto reste bloque a 0")
+    check("apercus : la classe .vault-img-load ne cache plus l image",
+          ".vault-img-load{opacity:0}" not in _srcAp)
+    # Le pendant de ce fondu n existait pas : rien n ajoutait « loaded ».
+    check("apercus : pas de reveal par une classe que personne n ajoute",
+          not (".vault-img-load.loaded" in _srcAp
+               and "classList.add('loaded')" not in _srcAp))
+
+    # Regle generale : sous un ancetre content-visibility:auto, on ne fait pas
+    # dependre la VISIBILITE d une transition. Les cartes media sont le seul
+    # endroit concerne, mais la regle doit tenir si on en ajoute.
+    _cvAp = _reAp.search(r"\.cloud-card\{[^}]*content-visibility:\s*auto", _srcAp)
+    check("apercus : les cartes media utilisent bien content-visibility",
+          _cvAp is not None, "sinon ce test ne protege plus rien")
+    _fonduAp = _reAp.findall(r"vault-img-load[^>']*transition:\s*opacity", _srcAp)
+    check("apercus : plus aucune transition d opacite sur ces images",
+          not _fonduAp, "%d restante(s)" % len(_fonduAp))
+
+    # Deuxieme moitie de la panne : la carte etait peinte en NOIR plein en
+    # theme clair, ce qui rendait une miniature manquante indiscernable d une
+    # video sans apercu. La regle visait les <video> et avait emporte la carte.
+    _noirAp = _reAp.search(r"body\.light[^{}]*\.vault-card-bg[^{}]*\{[^}]*background:\s*#000",
+                           _srcAp)
+    check("apercus : la carte n est plus peinte en noir en theme clair",
+          _noirAp is None,
+          "le degrade de chargement gris etait ecrase par un fond noir")
+
+    # Enfin : personne n avait JAMAIS verifie qu une miniature de video sort
+    # bien de la route. C est ce trou qui a laisse chercher du cote du
+    # navigateur pendant si longtemps.
+    import web_upload as _wAp
+    _appAp = _wAp.create_app()
+    _appAp.config["TESTING"] = True
+    _svAp = _wAp._load_web_users
+    _wAp._load_web_users = lambda: {"admin": {"role": "owner", "password": "x"}}
+    try:
+        _cAp = _appAp.test_client()
+        with _cAp.session_transaction() as _sAp:
+            _sAp["auth"] = True
+            _sAp["username"] = "admin"
+            _sAp["role"] = "owner"
+        _videoAp = None
+        for _sub in ("brutes", "videos", "templates"):
+            for _f in _wAp.IDENTITIES_DIR.glob("*/%s/*.mp4" % _sub):
+                _videoAp = (_f.parent.parent.name, _sub, _f.name)
+                break
+            if _videoAp:
+                break
+        if _videoAp:
+            _ident, _sub, _nom = _videoAp
+            from urllib.parse import quote as _qAp
+            _rAp = _cAp.get("/cloud/thumb/%s/%s/%s"
+                            % (_qAp(_ident, safe=""), _sub, _qAp(_nom, safe="")))
+            check("apercus : la route rend une miniature pour une video",
+                  _rAp.status_code == 200, "code %s" % _rAp.status_code)
+            _mtAp = (_rAp.mimetype or "")
+            check("apercus : ce qui sort est une IMAGE, jamais la video",
+                  _mtAp.startswith("image/"), "mimetype %r" % _mtAp)
+            # Le repli servait autrefois le fichier ORIGINAL : une galerie de
+            # 204 rushs telechargeait 400 Mo pour afficher des cartes noires.
+            check("apercus : le repli reste leger (jamais des megaoctets)",
+                  len(_rAp.data) < 3_000_000,
+                  "%d octets renvoyes" % len(_rAp.data))
+        else:
+            check("apercus : une video locale existe pour tester la route",
+                  True, "aucune video en local — controle saute")
+    finally:
+        _wAp._load_web_users = _svAp
+except Exception as _eAp:
+    check("apercus : testable", False, repr(_eAp)[:160])
+
+print()
+print("=" * 70)
 print("THEME CLAIR : les couleurs pensees pour le sombre")
 print("=" * 70)
 try:
