@@ -1316,6 +1316,16 @@ body.light .sx-opt-sub,body.light .sx-slot-rm{color:#6b7280}
 body.light .jb-side-va-count,body.light .jb-detail-count-badge,
 body.light .jb-detail-head-edit,body.light .jb-side-summary b{color:#7e22ce}
 body.light .va-ig3-ban-badge{color:#b91c1c}
+/* Un texte pose DANS un bouton bleu ne doit pas suivre le remap general
+   des gris : le fond, lui, reste bleu. Le montant du bouton de periode des
+   revenus tombait ainsi a 1,93. Plus specifique que la regle generale. */
+body.light [style*="background:#3b82f6"] [style*="color:#888"],
+body.light [style*="background:#007aff"] [style*="color:#888"]{
+  color:rgba(255,255,255,.85)!important}
+/* Barre de filtres des employes : fond #0f0f0f jamais repeint, libelles
+   passes au fonce par-dessus. 1,36. */
+body.light .emp-filters{background:#f9fafb!important;border-color:#e5e7eb!important}
+body.light .emp-filters .ef{color:#4b5563}
 body.light .va-section-count{color:#1d4ed8}
 /* Selecteur d identites (le menu deroulant des cartes d import) : panneau
    et bouton restes en #131316. Ses 113 lignes sont donc CLAIRES SUR
