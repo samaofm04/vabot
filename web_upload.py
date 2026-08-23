@@ -1160,6 +1160,53 @@ body.light .sidebar .item.active svg{color:#3b82f6}
 body.light .sidebar .group-head.active{background:#f3f4f6!important;color:#111827}
 body.light .sidebar .group-head.active svg.lead{color:#3b82f6}
 body.light .sidebar .group .items{border-left-color:#e5e7eb}
+/* Le sous-menu de la barre laterale (Instagram, TikTok, Twitter/X, Threads)
+   est arrive APRES les themes et n a jamais eu ses regles claires : ses
+   titres restaient en #bbb sur du blanc, soit un contraste de 1,92 — on ne
+   les lisait pas. Son survol peignait meme un bloc NOIR (#181818) au milieu
+   d une barre blanche. On l aligne sur .group-head / .item juste au-dessus,
+   pour que les deux niveaux de menu se ressemblent enfin. */
+body.light .sidebar .subgroup-head{color:#4b5563}
+body.light .sidebar .subgroup-head:hover{background:#f3f4f6!important;color:#111827}
+body.light .sidebar .subgroup-head .arrow{color:#9ca3af}
+body.light .sidebar .subgroup .sub-items{border-left-color:#e5e7eb}
+/* Meme panne, trois endroits : le CONTENEUR a recu sa regle claire, son
+   TEXTE non. Il reste donc une couleur choisie pour du sombre, posee sur
+   un fond devenu blanc — ou l inverse.
+   - #ig-dl-bar : la barre passe de #12121a au blanc, son libelle reste en
+     #cbd5e1. Contraste mesure : 1,48. On ne lit rien.
+   - .reel-expand : le panneau du reel reste NOIR en theme clair (c est un
+     media), mais la regle generale body.light [style*="color:#888"]
+     assombrit sa legende -> gris fonce sur noir, 1,92. Il faut une regle
+     PLUS SPECIFIQUE, pas un !important : la specificite l emporte.
+   - les pastilles flottantes SFW / marche : #9ca3af sur blanc, 2,54. */
+body.light #ig-dl-bar [style*="color:#cbd5e1"]{color:#475569}
+body.light .reel-expand [style*="color:#888"]{color:#9aa0a6}
+body.light .reel-caption-area [style*="color:#888"]{color:#9aa0a6}
+body.light #sfw-floating [style*="color:#9ca3af"],body.light #sfw-floating span{color:#4b5563}
+body.light #market-floating button{color:#4b5563}
+/* EDITEUR DE MONTAGE — il avait recu ses regles claires pour les SURFACES
+   (.ce-app, .ce-title, .ce-lib, .ce-center, .ce-right passent au blanc)
+   mais pas pour ce qui est POSE dessus. Resultat en theme clair :
+     - .ce-proj, le nom du projet, en #e6e6ea sur blanc : invisible ;
+     - les onglets actifs peints en blocs #2e2e34 / #131316, donc des
+       pastilles noires au milieu d un panneau blanc ;
+     - tous les separateurs en #2a2a30, des traits presque noirs.
+   On reprend les memes tons que le reste du theme clair : texte #111827,
+   texte secondaire #6b7280, surface #f3f4f6, filets #e5e7eb. L accent
+   #3467FF est garde, il tient sur les deux fonds. */
+body.light .ce-proj{color:#111827}
+body.light .ce-saved,body.light .ce-chead,body.light .ce-ctrl,
+body.light .ce-x,body.light .ce-libtab,body.light .ce-rtab,
+body.light .ce-subtab{color:#6b7280}
+body.light .ce-x:hover{background:#f3f4f6;color:#111827}
+body.light .ce-libtab:hover{background:#f3f4f6}
+body.light .ce-libtab.on{background:#dbeafe;color:#3467FF}
+body.light .ce-rtab.on{background:#f3f4f6;color:#111827}
+body.light .ce-subtab.on{background:#f3f4f6;color:#111827}
+body.light .ce-libtabs,body.light .ce-rtabs,body.light .ce-chead,
+body.light .ce-title{border-color:#e5e7eb}
+body.light .ce-ctrl{border-top-color:#e5e7eb}
 body.light .sidebar .section-label{color:#9ca3af}
 body.light .sidebar .sep{background:#e5e7eb}
 body.light .sidebar .logout-btn{color:#6b7280}

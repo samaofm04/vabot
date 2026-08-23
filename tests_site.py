@@ -3259,6 +3259,83 @@ except Exception as _eSel:
 
 print()
 print("=" * 70)
+print("THEME CLAIR : les couleurs pensees pour le sombre")
+print("=" * 70)
+try:
+    import re as _reTh
+    import pathlib as _plTh
+
+    _srcTh = _plTh.Path("web_upload.py").read_text(encoding="utf-8")
+
+    # Regle generale : une classe de la barre laterale qui recoit une couleur
+    # dans le theme sombre DOIT avoir sa contrepartie claire. Sans ca on obtient
+    # ce qui a ete mesure sur le site : les titres du sous-menu (Instagram,
+    # TikTok, Twitter/X, Threads) en #bbb sur du blanc — contraste 1,92, on ne
+    # les lit pas — et un survol qui peint un bloc NOIR dans une barre blanche.
+    _classesTh = set(_reTh.findall(r"\.sidebar \.([a-z][a-z0-9-]*)\s*\{[^}]*color:", _srcTh))
+    _manqueTh = sorted(c for c in _classesTh
+                       if ("body.light .sidebar .%s" % c) not in _srcTh
+                       and ("body.light .sidebar .subgroup .%s" % c) not in _srcTh)
+    check("theme clair : chaque classe coloree de la barre a sa regle claire",
+          not _manqueTh, "sans contrepartie claire : %s" % ", ".join(_manqueTh))
+
+    # EDITEUR DE MONTAGE : ses SURFACES passaient au blanc en theme clair, mais
+    # pas ce qui est pose dessus. Le nom du projet (.ce-proj, #e6e6ea) devenait
+    # blanc sur blanc, et les onglets actifs restaient des pastilles NOIRES
+    # (#2e2e34 / #131316) au milieu d un panneau blanc.
+    _ceTh = {}
+    for _m in _reTh.finditer(r"^\.(ce-[a-z0-9-]+)([^{]*)\{([^}]*)\}", _srcTh, _reTh.M):
+        _c = _reTh.search(r"(?<!-)color:\s*(#[0-9a-fA-F]{3,6})", _m.group(3))
+        # Une classe qui pose SON PROPRE fond (les boutons IA et leur degrade
+        # bleu) porte du blanc a dessein : ce blanc tient dans les deux themes,
+        # il n a rien a voir avec un gris herite du sombre.
+        if _c and not _reTh.search(r"background:\s*(?!none|transparent)", _m.group(3)):
+            _ceTh.setdefault(_m.group(1), _c.group(1))
+    _clairCe = set(_reTh.findall(r"body\.light[^{]*?\.(ce-[a-z0-9-]+)", _srcTh))
+    # On ne reclame que les tons GRIS/BLANCS : un accent (bleu, rose) tient sur
+    # les deux fonds, un gris pense pour du sombre ne tient sur aucun des deux.
+    def _griseTh(h):
+        h = h.lstrip("#")
+        if len(h) == 3:
+            h = "".join(c * 2 for c in h)
+        try:
+            r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        except Exception:
+            return False
+        return max(r, g, b) - min(r, g, b) <= 24 and max(r, g, b) >= 90
+    _manqueCe = sorted(c for c, h in _ceTh.items() if _griseTh(h) and c not in _clairCe)
+    check("theme clair : l editeur de montage n a plus de gris de theme sombre",
+          not _manqueCe, "sans regle claire : %s" % ", ".join(_manqueCe))
+    check("theme clair : le nom du projet du montage est lisible",
+          "body.light .ce-proj{color:#111827}" in _srcTh,
+          "#e6e6ea sur un .ce-title devenu blanc")
+    for _on in ("ce-libtab.on", "ce-rtab.on", "ce-subtab.on"):
+        check("theme clair : l onglet actif « %s » n est plus une pastille noire" % _on,
+              ("body.light .%s{" % _on) in _srcTh)
+
+    # Le sous-menu, arrive apres les themes, n avait AUCUNE regle claire.
+    for _sel, _quoi in (("subgroup-head{", "la couleur du titre"),
+                        ("subgroup-head:hover{", "le survol"),
+                        ("subgroup .sub-items{", "le trait de gauche")):
+        check("theme clair : le sous-menu a %s" % _quoi,
+              ("body.light .sidebar .%s" % _sel) in _srcTh)
+
+    # Conteneur remappe, texte oublie : la panne la plus frequente du theme.
+    # Mesures relevees dans la page : 1,48 puis 1,92.
+    check("theme clair : le libelle de la barre de telechargement est lisible",
+          'body.light #ig-dl-bar [style*="color:#cbd5e1"]' in _srcTh,
+          "barre repeinte en blanc, texte reste en #cbd5e1 -> 1,48")
+    check("theme clair : la legende du reel reste claire sur son fond noir",
+          'body.light .reel-expand [style*="color:#888"]' in _srcTh,
+          "la regle generale l assombrissait sur un panneau noir -> 1,92")
+    # CLAUDE.md : ici c est la SPECIFICITE qui doit l emporter, pas !important.
+    check("theme clair : la correction passe par la specificite, pas !important",
+          'body.light .reel-expand [style*="color:#888"]{color:#9aa0a6}' in _srcTh)
+except Exception as _eTh:
+    check("theme clair : testable", False, repr(_eTh)[:160])
+
+print()
+print("=" * 70)
 print("CHARGEMENT DIFFERE : amorcage, portee, sections lourdes")
 print("=" * 70)
 try:
