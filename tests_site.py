@@ -2928,6 +2928,54 @@ except Exception as _eRg:
 
 print()
 print("=" * 70)
+print("GENERATEURS SMS : le pays, reglable depuis le site")
+print("=" * 70)
+try:
+    import numgen as _ngT
+    import web_upload as _wNg
+
+    # Le pays ne se reglait que par /smskey dans Discord. Quand la commande
+    # n est pas encore propagee — les commandes globales sont mises en cache
+    # par le client — il n y avait plus AUCUN moyen de le changer, et les deux
+    # fournisseurs repondaient « aucun numero dispo » : le defaut est « 0 »,
+    # c est-a-dire la Russie, ou ils n ont quasiment jamais de numero Instagram.
+    _avantNg = _ngT.default_country()
+    _aNg = _wNg.create_app(); _aNg.testing = True
+    _savNg = _wNg._load_web_users
+    _wNg._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"}}
+    _cNg = _aNg.test_client()
+    with _cNg.session_transaction() as _s:
+        _s["auth"] = True; _s["username"] = "boss"; _s["role"] = "owner"; _s["sid"] = "NG1"
+
+    _hNg = _cNg.get("/?tab=snumgen").get_data(as_text=True)
+    check("sms : la page porte l onglet et son panneau",
+          "tab-snumgen" in _hNg and "form-snumgen" in _hNg)
+    check("sms : le piege du pays 0 est explique a l ecran",
+          "Russie" in _hNg and "/numgen/save" in _hNg)
+
+    _ngT.set_keys(country="187")
+    _cNg.post("/numgen/save", data={"country": "abc", "service": "ig"})
+    check("sms : un code pays qui n est pas un nombre ne change rien",
+          _ngT.default_country() == "187", _ngT.default_country())
+    _cNg.post("/numgen/save", data={"country": "78", "service": "ig"})
+    check("sms : un code valide est enregistre", _ngT.default_country() == "78",
+          _ngT.default_country())
+
+    # Ce reglage depense de l argent : il doit rester ferme aux roles restreints.
+    _wNg._load_web_users = lambda: {"chat": {"role": "chatter"}}
+    _cRe = _aNg.test_client()
+    with _cRe.session_transaction() as _s:
+        _s["auth"] = True; _s["username"] = "chat"; _s["role"] = "chatter"; _s["sid"] = "NG2"
+    check("sms : un role restreint ne peut pas changer le pays",
+          _cRe.post("/numgen/save", data={"country": "187"}).status_code == 403)
+
+    _ngT.set_keys(country=_avantNg)      # on repose ce qu on a trouve
+    _wNg._load_web_users = _savNg
+except Exception as _eNg:
+    check("sms : reglage du pays testable", False, repr(_eNg)[:160])
+
+print()
+print("=" * 70)
 print("NOMS DE FICHIERS DANS LES URL (la cause du mur de cartes noires)")
 print("=" * 70)
 try:
@@ -3148,6 +3196,40 @@ try:
           "for(const a of oldS.attributes)" in _srcSel)
 except Exception as _eSel:
     check("selection : testable", False, repr(_eSel)[:160])
+
+print()
+print("=" * 70)
+print("VEILLE INSTAGRAM RENDUE A LA DEMANDE (le navigateur qui se fige)")
+print("=" * 70)
+try:
+    import web_upload as _wIg
+
+    # La grille de veille rend jusqu a MILLE reels, chacun avec sa miniature
+    # servie par le CDN d Instagram — et elle etait rendue d office, dans la
+    # page, quel que soit l onglet ouvert. Mesure sur le site reel : plus de
+    # 1000 requetes reseau en affichant « Video brut », et le rendu du
+    # navigateur qui ne repond plus (trois captures expirees d affilee).
+    _aIg = _wIg.create_app(); _aIg.testing = True
+    _savIg = _wIg._load_web_users
+    _wIg._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"}}
+    _cIg = _aIg.test_client()
+    with _cIg.session_transaction() as _s:
+        _s["auth"] = True; _s["username"] = "boss"; _s["role"] = "owner"; _s["sid"] = "IG1"
+    _hIg = _cIg.get("/?tab=cloudbrutes").get_data(as_text=True)
+    check("veille : la page ne porte AUCUNE miniature Instagram au chargement",
+          _hIg.count("cdninstagram") == 0,
+          "%d trouvee(s)" % _hIg.count("cdninstagram"))
+    check("veille : un emplacement est pose pour le chargement a la demande",
+          "data-lazy-tab='igtrends'" in _hIg)
+    _fIg = _cIg.get("/?lazy=igtrends", headers={"X-Tab-Ajax": "1"})
+    check("veille : le fragment est servi quand on ouvre l onglet",
+          _fIg.status_code == 200, "HTTP %s" % _fIg.status_code)
+    # Un onglet vide doit DIRE quoi faire, pas rester blanc.
+    check("veille : sans reel, le fragment explique au lieu de rester blanc",
+          len(_fIg.get_data()) > 200)
+    _wIg._load_web_users = _savIg
+except Exception as _eIg:
+    check("veille : testable", False, repr(_eIg)[:160])
 
 print()
 print("=" * 70)

@@ -8303,6 +8303,9 @@ document.addEventListener('click',function(e){
       <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
       Veille Telegram
     </button>
+    <button class="item" id="tab-snumgen" onclick="showTab('settings','snumgen','Générateurs SMS','Pays des numéros et des mails — 0 = Russie, cause du « aucun numéro dispo »')">
+      <span class="ic">📱</span><span>Générateurs SMS</span>
+    </button>
     <button class="item" id="tab-saikey" onclick="showTab('settings','saikey','Clé IA','Lecture du texte sur les vidéos + bios IA')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 0-7 7c0 3 2 4 2 6h10c0-2 2-3 2-6a7 7 0 0 0-7-7z"/><line x1="9" y1="21" x2="15" y2="21"/><line x1="10" y1="18" x2="14" y2="18"/></svg>
       Clé IA
@@ -10677,6 +10680,15 @@ document.addEventListener('keydown', function(e){
 <h3 style="margin-top:0">🍪 Cookies MyPuls</h3>
 <small>Session mypuls.app — utilisée pour la sync des revenus chatteurs et le push planning</small>
 <div style="margin-top:14px">{mypuls_cookies_html}</div>
+</div>
+</div>
+
+<!-- SETTINGS - GÉNÉRATEURS SMS (pays + service ; les clés restent dans /smskey) -->
+<div class="form-section" id="form-snumgen" style="display:none">
+<div class="box">
+<h3 style="margin-top:0">📱 Générateurs de numéros et de mails</h3>
+<small>Le pays décide de ce que les fournisseurs peuvent te donner. Ce réglage n'existait que dans Discord — il est ici pour que le site s'en sorte seul.</small>
+<div style="margin-top:14px">{numgen_html}</div>
 </div>
 </div>
 
@@ -20821,6 +20833,30 @@ def _local_reel_src(url: str, owner: str, cdn_url: str) -> str:
     except Exception:
         pass
     return cdn_url or ""
+
+
+def _insta_trends_ou_vide() -> str:
+    """La grille de veille, ou l'explication quand il n'y a rien.
+
+    Ce repli vivait dans l'expression qui rendait la grille d'office. Depuis
+    qu'elle est servie a la demande, il doit vivre avec le producteur : sinon
+    l'onglet vide s'affiche blanc, sans dire quoi faire.
+    """
+    grille = _render_insta_trends_grid_html()
+    if grille:
+        return grille
+    return (
+        "<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;"
+        "padding:60px 20px;text-align:center;color:#666'>"
+        "<svg viewBox='0 0 24 24' width='48' height='48' fill='none' stroke='currentColor' "
+        "stroke-width='1.5' style='margin-bottom:14px'>"
+        "<polyline points='22 7 13.5 15.5 8.5 10.5 2 17'/>"
+        "<polyline points='16 7 22 7 22 13'/></svg>"
+        "<h3 style='margin:0 0 8px;color:#888'>Aucun reel scrapé</h3>"
+        "<p style='margin:0;font-size:14px'>Ajoute des comptes dans "
+        "<b>Instagram → Accounts</b> et lance un scrape.<br>"
+        "Configure d'abord tes cookies dans <b>Settings → Cookies Instagram</b>.</p>"
+        "</div>")
 
 
 def _render_insta_trends_grid_html() -> str:
@@ -40295,6 +40331,95 @@ def _render_video_manager() -> str:
     return _VT_HEAD + ff_line + toggle_btn + form
 
 
+#: Les fournisseurs numerotent les pays. « 0 » est la RUSSIE, et c'est le
+#: DEFAUT du module : une installation neuve demande donc des numeros russes
+#: pour des comptes Instagram francais ou americains, et les deux fournisseurs
+#: repondent « aucun numero dispo ». Le diagnostic a coute une matinee.
+_NUMGEN_PAYS = (
+    ("187", "🇺🇸 États-Unis"),
+    ("78", "🇫🇷 France"),
+    ("43", "🇩🇪 Allemagne"),
+    ("16", "🇬🇧 Royaume-Uni"),
+    ("12", "🇺🇸 États-Unis (2ᵉ pool)"),
+    ("0", "🇷🇺 Russie (défaut d'origine — rarement dispo)"),
+)
+
+
+def _render_numgen_settings() -> str:
+    """Section Réglages : générateurs de numéros et de mails.
+
+    Ce réglage n'existait QUE dans Discord, derrière /smskey. Quand la commande
+    n'est pas encore propagée — les commandes globales sont mises en cache par
+    le client — il n'y a plus aucun moyen de changer le pays, et le panneau
+    répond « aucun numéro dispo » sans qu'on puisse rien y faire. Le site doit
+    pouvoir s'en charger seul.
+    """
+    pays, service, sms_ok, mail_ok = "0", "ig", False, False
+    soldes = {"sms": "—", "mail": "—"}
+    erreur = ""
+    try:
+        import numgen
+        s = numgen.status()
+        pays = str(s.get("country") or "0")
+        service = str(s.get("service") or "ig")
+        sms_ok, mail_ok = bool(s.get("sms_ok")), bool(s.get("mail_ok"))
+        try:
+            soldes = numgen.balances()
+        except Exception:
+            pass
+    except Exception as e:
+        erreur = str(e)[:120]
+
+    if erreur:
+        return ("<div style='color:#f99;padding:14px'>Module indisponible : "
+                + html_escape(erreur) + "</div>")
+
+    _pastille = lambda ok: (
+        "<span style='background:%s;color:#fff;padding:2px 9px;border-radius:5px;"
+        "font-size:11px'>%s</span>" % (("#22c55e", "CLÉ POSÉE") if ok
+                                       else ("#dc2626", "AUCUNE CLÉ")))
+    options = "".join(
+        "<option value='%s'%s>%s</option>"
+        % (c, " selected" if c == pays else "", html_escape(lib))
+        for c, lib in _NUMGEN_PAYS)
+    inconnu = ("<option value='%s' selected>code %s (déjà réglé)</option>" % (pays, pays)
+               if pays not in {c for c, _ in _NUMGEN_PAYS} else "")
+
+    alerte = ""
+    if pays == "0":
+        alerte = (
+            "<div style='background:#3a2a08;border:1px solid #8a6a1a;color:#f0c24a;"
+            "border-radius:8px;padding:11px 14px;margin-bottom:14px;font-size:13px'>"
+            "Le pays vaut <b>0</b>, c'est-à-dire la <b>Russie</b>. Les fournisseurs "
+            "n'y ont quasiment jamais de numéro Instagram : c'est la cause du message "
+            "« aucun numéro dispo ». Choisis le pays de tes comptes ci-dessous.</div>")
+
+    return (
+        alerte
+        + "<div style='display:flex;gap:18px;flex-wrap:wrap;margin-bottom:14px;font-size:13px'>"
+        + "<div>Numéros (GetAText) " + _pastille(sms_ok)
+        + " <b style='color:#22c55e'>" + html_escape(soldes.get("sms", "—")) + "</b></div>"
+        + "<div>Mails (SMSBower) " + _pastille(mail_ok)
+        + " <b style='color:#22c55e'>" + html_escape(soldes.get("mail", "—")) + "</b></div>"
+        + "</div>"
+        "<form method='POST' action='/numgen/save' "
+        "style='display:flex;gap:8px;flex-wrap:wrap;align-items:center'>"
+        "<label style='font-size:13px;color:#8a91a8'>Pays des numéros</label>"
+        "<select name='country' style='padding:10px;background:#0b0e15;"
+        "border:1px solid #2a3245;color:#e8eaf2;border-radius:8px;min-width:230px'>"
+        + inconnu + options +
+        "</select>"
+        "<input type='text' name='service' value='" + html_escape(service) + "' "
+        "placeholder='service (ig)' style='width:110px;padding:10px;background:#0b0e15;"
+        "border:1px solid #2a3245;color:#e8eaf2;border-radius:8px'>"
+        "<button type='submit' style='padding:10px 18px;background:#22c55e;color:#fff;"
+        "border:0;border-radius:8px;cursor:pointer;font-weight:700'>Enregistrer</button>"
+        "</form>"
+        "<small style='color:#8a91a8;display:block;margin-top:10px'>Les clés API se "
+        "posent dans Discord avec <code>/smskey</code> — elles ne transitent jamais "
+        "par cette page. Ici on ne règle que le pays et le service.</small>")
+
+
 def _render_mypuls_cookies_settings() -> str:
     """Section Settings : cookies MyPuls (statut + formulaire + effacer).
 
@@ -40573,6 +40698,7 @@ ROLE_MENU_STRUCTURE = [
         {"key": "stoken", "name": "Token bot admin", "perms": ["view", "edit"]},
         {"key": "sinsta", "name": "Cookies Instagram", "perms": ["view", "edit"]},
         {"key": "smypuls", "name": "Cookies MyPuls", "perms": ["view", "edit"]},
+        {"key": "snumgen", "name": "Générateurs SMS", "perms": ["view", "edit"]},
         {"key": "saikey", "name": "Clé IA", "perms": ["view", "edit"]},
         {"key": "vtg", "name": "Veille Telegram", "perms": ["view", "edit"]},
     ]},
@@ -41777,6 +41903,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{account_section_html}", _g("saccount", _render_account_section_html))
         .replace("{security_sessions_html}", _g("ssecurity", _render_security_sessions_html))
         .replace("{mypuls_cookies_html}", _g("smypuls", _render_mypuls_cookies_settings))
+        .replace("{numgen_html}", _g("snumgen", _render_numgen_settings))
         .replace("{aikey_html}", _g("saikey", _render_aikey_settings))
         .replace("{video_manager_html}", _g("svideo", _render_video_manager))
         .replace("{role_settings_html}", _lazy("srole"))
@@ -41786,12 +41913,11 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{insta_accounts_html}", _g("igaccounts", _render_insta_accounts_html))
         # ({insta_accounts_html_for_trends} : placeholder inexistant dans
         # UPLOAD_HTML -> le rendu complet etait JETE a chaque GET / ; supprime)
-        .replace("{insta_trends_html_or_empty}", _g("igtrends", lambda: (_render_insta_trends_grid_html() or
-            "<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:60px 20px;text-align:center;color:#666'>"
-            "<svg viewBox='0 0 24 24' width='48' height='48' fill='none' stroke='currentColor' stroke-width='1.5' style='margin-bottom:14px'><polyline points='22 7 13.5 15.5 8.5 10.5 2 17'/><polyline points='16 7 22 7 22 13'/></svg>"
-            "<h3 style='margin:0 0 8px;color:#888'>Aucun reel scrapé</h3>"
-            "<p style='margin:0;font-size:14px'>Ajoute des comptes dans <b>Instagram → Accounts</b> et lance un scrape.<br>Configure d'abord tes cookies dans <b>Settings → Cookies Instagram</b>.</p>"
-            "</div>")))
+        # Rendu A LA DEMANDE : cette grille pese jusqu a 1000 miniatures du
+        # CDN Instagram. Rendue d office, elle les faisait charger a CHAQUE
+        # ouverture du site, meme sur un autre onglet — plus de 1000 requetes,
+        # et le navigateur qui se fige. showTab va la chercher au 1er open.
+        .replace("{insta_trends_html_or_empty}", _lazy("igtrends"))
     )
     if allowed is not None:
         html += _role_gate_script(allowed)
@@ -42920,6 +43046,12 @@ def create_app():
                 # (page ouverte avant un deploiement), showTab la fabrique et
                 # vient chercher son contenu ici. Sans ces entrees, la route
                 # repondait 404 et l'onglet restait vide.
+                # La veille Instagram : desormais rendue a la demande (1000
+                # miniatures du CDN), il FAUT qu elle puisse etre servie ici,
+                # sinon l onglet reste sur « Chargement... » pour toujours.
+                # Le message « aucun reel » vivait avec l ancien rendu d office :
+                # sans lui, un onglet vide resterait blanc, sans rien dire.
+                "igtrends": _insta_trends_ou_vide,
                 "home": _render_home_dashboard_html,
                 "revenus": _render_revenus_html,
                 "mypulslive": _render_mypulslive_html,
@@ -48591,6 +48723,34 @@ def create_app():
         if res.get("ok"):
             return jsonify({"ok": True, "email": res.get("email", "?"), "rememberme": bool(rem), "note": note})
         return jsonify({"ok": False, "error": f"Cookies enregistrés mais ping échoué : {res.get('error', '?')}"})
+
+    @app.route("/numgen/save", methods=["POST"])
+    def numgen_save():
+        """Pays et service des générateurs de numéros/mails.
+
+        Les CLÉS ne passent pas par ici : elles restent dans /smskey, qui les
+        demande dans un formulaire privé Discord. Cette route ne règle que le
+        pays — celui dont le défaut « 0 » (Russie) faisait répondre « aucun
+        numéro dispo » aux deux fournisseurs, sans autre recours que Discord.
+        """
+        if not is_auth():
+            return redirect("/")
+        try:
+            import numgen
+        except Exception as e:
+            return _error(f"✕ Module numgen indispo : {e}", tab="snumgen")
+        pays = (request.form.get("country") or "").strip()
+        if not pays.isdigit():
+            return _error("✕ Le code pays est un nombre (187 = USA, 78 = France)",
+                          tab="snumgen")
+        service = (request.form.get("service") or "ig").strip() or "ig"
+        try:
+            numgen.set_keys(country=pays, service=service)
+        except Exception as e:
+            return _error(f"✕ Enregistrement impossible : {e}", tab="snumgen")
+        _lib = dict(_NUMGEN_PAYS).get(pays, "code " + pays)
+        return _success(f"✓ Numéros demandés en {_lib} (service {service})",
+                        tab="snumgen")
 
     @app.route("/mypuls/clear_cookies", methods=["POST"])
     def mypuls_clear_cookies():
