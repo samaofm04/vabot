@@ -634,14 +634,26 @@ def _lines_index(d: dict) -> dict:
 def _pct_base_state(line: dict, rev_bases: dict, idx: dict, month: str):
     """État des bases « % d'une ligne », ou None si elles répondent toutes.
 
-    Trois situations que l'écran confondait sous « base supprimée — 0 $ » :
+    QUATRE situations que l'écran confondait sous « base supprimée — 0 $ » :
       - TOUTES les bases ont disparu -> la ligne vaut bien 0 $ ;
-      - une base sur plusieurs a disparu -> la ligne calcule encore sur les
-        bases restantes : annoncer 0 $ était faux ;
-      - la base n'a pas été supprimée, sa DATE DE FIN est passée (donc elle
-        n'est plus reportée) -> « base supprimée » est faux, et « rechoisis une
-        base » aussi : c'est l'arrêt de la ligne source qui est en cause.
-    Rendu : {"total", "manquantes", "vide", "expirees", "details"[{label,end}]}.
+      - une base sur plusieurs a disparu et ce qui RESTE vaut encore quelque
+        chose -> la ligne calcule dessus : annoncer 0 $ était faux ;
+      - une base sur plusieurs a disparu et ce qui RESTE vaut 0 $ ce mois-ci
+        (revenu pas encore commencé, ou à zéro) -> la ligne est rendue à 0 $ :
+        lui promettre « elle compte encore, seulement plus petit » était faux,
+        d'où `reste_usd` / `reste_nul`, calculés en DOLLARS et pas en nombre
+        d'ids ;
+      - la base n'a PAS été supprimée : on la RETROUVE dans le fichier (`idx`),
+        elle n'est simplement pas dans CE mois — date de fin passée, ligne
+        ponctuelle (freq « once »), fin repoussée après coup, type basculé en
+        dépense... Le badge la NOMME : écrire « supprimée » juste avant son nom
+        se contredisait à l'œil nu.
+
+    C'est donc l'INDEX qui tranche « supprimée » (un id retrouvé n'a pas été
+    supprimé), jamais la date de fin : celle-ci ne fait que préciser POURQUOI
+    la base n'est plus reportée.
+    Rendu : {"total", "manquantes", "vide", "expirees", "supprimees",
+             "absentes", "reste_usd", "reste_nul", "details"[{etat,label,end}]}.
     """
     if (line.get("form") or "fixed") != "pct":
         return None
@@ -652,23 +664,45 @@ def _pct_base_state(line: dict, rev_bases: dict, idx: dict, month: str):
             # base VIDÉE (la dernière ligne de base a été supprimée) : plus rien
             # à calculer, et plus aucun id pour dire de quoi il s'agissait.
             return {"total": 0, "manquantes": 0, "vide": True,
-                    "expirees": 0, "details": []}
+                    "expirees": 0, "supprimees": 0, "absentes": 0,
+                    "reste_usd": 0.0, "reste_nul": True, "details": []}
         return None
     manquants = [i for i in ids if f"line:{i}" not in rev_bases]
     if not manquants:
         return None
+    # Ce qui RESTE, en dollars : une base qui répond encore peut très bien
+    # valoir 0 ce mois-ci (revenu pas encore commencé, ou nul). Compter les ids
+    # ne dit donc rien du montant obtenu.
+    reste_usd = round(sum(float(rev_bases.get(f"line:{i}") or 0.0)
+                          for i in ids if f"line:{i}" in rev_bases), 2)
     first = _month_bounds(month)[0]
-    details, expirees = [], 0
+    details, expirees, supprimees, absentes = [], 0, 0, 0
     for i in manquants:
-        src = idx.get(i) or {}
+        src = idx.get(i)
+        if src is None:
+            # Introuvable dans TOUT le fichier : celle-là a bien été supprimée.
+            # (Le report donne des ids neufs : un id survivant se retrouve
+            # toujours dans le mois où il vit.) Ni libellé ni date à montrer.
+            supprimees += 1
+            details.append({"etat": "supprimee", "label": "", "end": ""})
+            continue
         fin = _as_date(src.get("end"))
-        finie = bool(fin and fin < first)
-        if finie:
+        if fin and fin < first:
             expirees += 1
-        details.append({"label": str(src.get("label") or "")[:60],
-                        "end": str(src.get("end") or "") if finie else ""})
+            details.append({"etat": "terminee",
+                            "label": str(src.get("label") or "")[:60],
+                            "end": str(src.get("end") or "")})
+        else:
+            # Retrouvée, pas terminée : elle EXISTE, elle n'est simplement pas
+            # dans ce mois. La faire retomber sur « supprimée » était le
+            # mensonge — le badge donne son nom dans la phrase suivante.
+            absentes += 1
+            details.append({"etat": "absente",
+                            "label": str(src.get("label") or "")[:60], "end": ""})
     return {"total": len(ids), "manquantes": len(manquants), "vide": False,
-            "expirees": expirees, "details": details[:6]}
+            "expirees": expirees, "supprimees": supprimees, "absentes": absentes,
+            "reste_usd": reste_usd, "reste_nul": abs(reste_usd) < 0.005,
+            "details": details[:6]}
 
 
 def _pin_creator_id(month: str, line_id, cid: int) -> None:
@@ -876,12 +910,15 @@ def compute_state(month: str) -> dict:
     tot_rev = tot_exp = 0.0
     by_market = {mk: {"rev": 0.0, "exp": 0.0, "rev_count": 0, "exp_count": 0,
                       "reimb": 0.0, "reimb_assoc": {}} for mk in MARKETS}
-    # Lignes en % dont la base ne répond plus. Trois compteurs SÉPARÉS parce
-    # que ce sont trois phrases différentes à l'écran : sans base du tout
-    # (0 $), sans base parce que la base est ARRIVÉE À SA FIN, et base
-    # MULTIPLE amputée (montant réduit, surtout pas 0 $).
+    # Lignes en % dont la base ne répond plus. Compteurs SÉPARÉS parce que ce
+    # sont des phrases différentes à l'écran : rendue à 0 $ (plus aucune base,
+    # ou bases restantes à 0 $), et parmi celles-là la part dont la base est
+    # seulement ARRIVÉE À SA FIN ou VRAIMENT supprimée ; à part, les lignes
+    # dont il reste une base QUI VAUT ENCORE quelque chose (montant réduit,
+    # surtout pas 0 $).
     pct_orphelines = 0
     pct_orph_expirees = 0
+    pct_orph_supprimees = 0
     pct_partielles = 0
     _lidx = _lines_index(d)     # pour retrouver une base des mois précédents
     for l in lines:
@@ -917,12 +954,20 @@ def compute_state(month: str) -> dict:
             _pb = _pct_base_state(l, rev_bases, _lidx, month)
             if _pb:
                 extra["pct_base"] = _pb
-                if _pb["vide"] or _pb["manquantes"] >= _pb["total"]:
-                    pct_orphelines += 1          # plus AUCUNE base -> 0 $
-                    if _pb["manquantes"] and _pb["expirees"] >= _pb["manquantes"]:
+                _aucune = _pb["vide"] or _pb["manquantes"] >= _pb["total"]
+                # 0 $ pour DEUX raisons : plus aucune base, ou des bases
+                # restantes qui ne valent rien ce mois-ci. Ranger la seconde
+                # dans « partielles » peignait en orange « la ligne compte
+                # encore, seulement plus petit » une ligne rendue à 0 $.
+                if _aucune or _pb["reste_nul"]:
+                    pct_orphelines += 1
+                    _mq = _pb["manquantes"]
+                    if _aucune and _mq and _pb["expirees"] >= _mq:
                         pct_orph_expirees += 1   # ... par date de fin, pas par suppression
+                    if _aucune and _mq and _pb["supprimees"] >= _mq:
+                        pct_orph_supprimees += 1  # ... vraiment supprimées (introuvables)
                 else:
-                    pct_partielles += 1          # reste des bases -> montant RÉDUIT
+                    pct_partielles += 1          # reste des bases QUI VALENT ENCORE
         if not _actif:
             extra["hors_periode"] = True
         ll = dict(l)
@@ -1062,11 +1107,15 @@ def compute_state(month: str) -> dict:
             "rev_count": sum(1 for l in lines if l.get("type") == "rev"),
             "exp_count": sum(1 for l in lines if l.get("type") != "rev"),
             # Comptés et remontés (bandeau en haut de page) : lignes en %
-            # qui n'ont plus AUCUNE base (donc 0 $), la part d'entre elles dont
-            # la base est seulement arrivée à sa date de fin, et celles dont il
-            # ne manque qu'une base sur plusieurs (montant réduit, pas 0 $).
+            # rendues à 0 $ par leur base, la part d'entre elles dont la base
+            # est seulement arrivée à sa date de fin, celle dont la base a
+            # vraiment été supprimée (le reste = une base absente de ce mois,
+            # ni supprimée ni terminée -> le bandeau ne doit affirmer ni l'un
+            # ni l'autre), et celles dont il ne manque qu'une base sur
+            # plusieurs AVEC un reste qui vaut encore quelque chose.
             "pct_orphans": pct_orphelines,
             "pct_orphans_expirees": pct_orph_expirees,
+            "pct_orphans_supprimees": pct_orph_supprimees,
             "pct_partielles": pct_partielles,
         },
         "cats": CATS,
@@ -1624,10 +1673,23 @@ def register(app, is_auth):
         # Une ligne de revenu peut servir de BASE à des payes en % (« 35 % de
         # OF Lola »). La supprimer sans rien dire mettait ces payes à $0 et
         # gonflait la part lead d'autant. On prévient, et on répare les liens.
-        # DEUX conséquences distinctes, donc deux listes : une paye qui perd sa
-        # SEULE base tombe à 0 $ ; une paye sur base MULTIPLE (« lines:A,B »)
-        # garde les autres et vaut encore quelque chose — lui annoncer 0 $
-        # était faux, l'écran et le message se contredisaient.
+        # DEUX conséquences distinctes, donc deux listes : une paye qui ne
+        # garde AUCUNE base tombe à 0 $ ; une paye qui en garde une vaut encore
+        # quelque chose — lui annoncer 0 $ était faux, l'écran et le message se
+        # contredisaient.
+        # Mais un id restant n'est pas une base restante : une paye reportée de mois
+        # en mois garde son pct_of vers des bases qui, elles, n'ont pas été
+        # reportées (date de fin passée, ligne ponctuelle...). Classer sur le
+        # NOMBRE d'ids promettait « montant simplement recalculé » à une paye
+        # qui, au rechargement, tombait à 0 $ avec un badge rouge — et sans la
+        # note ⚠ que reçoivent les payes privées de base. On classe donc sur
+        # les bases QUI RÉPONDENT ENCORE dans ce mois.
+        _vivantes = {l.get("id") for l in lines
+                     if l.get("type") == "rev" and l.get("id") and l.get("id") != lid}
+
+        def _reste_vivant(ids):
+            return [i for i in ids if i != lid and i in _vivantes]
+
         sans_base, reduites = [], []
         for l in lines:
             if l.get("form") != "pct" or not lid or l.get("id") == lid:
@@ -1636,7 +1698,7 @@ def register(app, is_auth):
             if lid not in ids:
                 continue
             nom = str(l.get("label") or l.get("id") or "?")
-            if [i for i in ids if i != lid]:
+            if _reste_vivant(ids):
                 reduites.append(nom)
             else:
                 sans_base.append(nom)
@@ -1652,8 +1714,9 @@ def register(app, is_auth):
                           "des revenus) : " + ", ".join(sans_base[:6])
                           + (" ..." if len(sans_base) > 6 else ""))
             if reduites:
-                _p.append(f"- {len(reduites)} paye(s) gardent leurs AUTRES bases : leur "
-                          "montant sera simplement recalculé sans celle-ci : "
+                _p.append(f"- {len(reduites)} paye(s) gardent au moins une AUTRE base "
+                          "PRÉSENTE dans ce mois : leur montant sera simplement "
+                          "recalculé sans celle-ci : "
                           + ", ".join(reduites[:6])
                           + (" ..." if len(reduites) > 6 else ""))
             return jsonify({"ok": False, "needs_confirm": True,
@@ -1673,21 +1736,23 @@ def register(app, is_auth):
             if lid not in ids:
                 continue
             if str(l.get("pct_of") or "").startswith("lines:"):
-                rest = [i for i in ids if i != lid]
-                l["pct_of"] = "lines:" + ",".join(rest)   # vide -> base 0
-                if not rest:
-                    _flag_base_gone(l)
-            else:
-                # base unique disparue : on LAISSE pct_of pendant (résout à 0),
-                # on ne rebase PAS sur rev_total.
+                # on retire l'id supprimé, on GARDE les autres tels quels (même
+                # morts : les purger effacerait la trace de ce qui manque).
+                l["pct_of"] = "lines:" + ",".join(i for i in ids if i != lid)
+            # base unique disparue : on LAISSE pct_of pendant (résout à 0), on
+            # ne rebase PAS sur rev_total.
+            # La note ⚠ suit la même règle que le message : elle est due dès
+            # qu'il ne reste aucune base VIVANTE, pas seulement aucun id.
+            if not _reste_vivant(ids):
                 _flag_base_gone(l)
         before = len(lines)
         m["lines"] = [l for l in lines if l.get("id") != lid]
         _save(d)
-        # `sans_base` : les payes qui n'ont plus aucune base et valent donc 0 $
-        # (rien n'est « rebasculé sur le total », ce serait payer ce % sur le CA
-        # des autres modèles). `reduites` : celles dont il restait d'autres
-        # bases — elles continuent de compter, avec un montant plus petit.
+        # `sans_base` : les payes qui n'ont plus aucune base VIVANTE et valent
+        # donc 0 $ (rien n'est « rebasculé sur le total », ce serait payer ce %
+        # sur le CA des autres modèles) ; elles portent la note ⚠. `reduites` :
+        # celles dont il restait une base présente dans ce mois — elles
+        # continuent de compter, avec un montant plus petit.
         return jsonify({"ok": True, "deleted": before - len(m["lines"]),
                         "sans_base": sans_base, "reduites": reduites})
 

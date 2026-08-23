@@ -42387,9 +42387,17 @@ def create_app():
             # _NOMS_RESERVES). L'exemption ne vise pas un NOM, elle vise la
             # session ouverte par WEB_PASSWORD SEUL, sans nom saisi : celle-là
             # n'a aucun compte derrière elle, il n'y a donc rien à relire.
-            # Le drapeau est posé au login (index) ; une session antérieure au
-            # correctif ne l'a pas, elle est simplement contrôlée comme les
-            # autres (le compte « admin » existe, personne n'est déconnecté).
+            # Le drapeau est posé au login (index). Une session ouverte AVANT
+            # ce correctif ne le porte pas : si le fichier des comptes ne
+            # contient pas « admin », elle sera coupée au premier chargement
+            # après déploiement, et il faudra se reconnecter une fois.
+            #
+            # C'est assumé. La solution inverse — traiter « admin » comme
+            # hérité tant que le drapeau manque — a été essayée et rejetée :
+            # elle rendait de nouveau son accès à un compte « admin »
+            # SUPPRIMÉ ou DÉSACTIVÉ, c'est-à-dire exactement le trou que ce
+            # contrôle vient de fermer. Une reconnexion coûte dix secondes ;
+            # une révocation qui ne révoque pas peut durer trente jours.
             uname = (session.get("username") or "").lower()
             if uname and not session.get("legacy_owner"):
                 users = _load_web_users() or {}

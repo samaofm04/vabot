@@ -1219,6 +1219,13 @@ def _candidats_import(sess, st, root):
 ATTENTE_FILE = DATA_DIR / "gdrive_attente.json"
 VEILLE_SECONDES = 60           # une minute : « je ne veux plus sync a la main »
 
+# Recul apres une synchro terminee EN ERREUR. Sans lui, la veille repartait
+# 60 s plus tard : une synchro qui echoue n'envoie rien, « a_envoyer » ne
+# descend donc pas, la condition de relance reste vraie et la boucle ne
+# s'arrete jamais. Quand la cause est un 429 Drive, relancer toutes les
+# minutes AGGRAVE precisement ce qui a fait echouer.
+RECUL_APRES_ERREUR = 300       # 5 minutes
+
 
 def attente() -> dict:
     """Dernier resultat connu de la veille, sans appeler Google."""
@@ -1230,6 +1237,59 @@ def _veille_une_fois() -> dict:
     res = import_preview()
     safe_json.write(ATTENTE_FILE, res, indent=2)
     return res
+
+
+def _recul_synchro(etat: dict, maintenant: float = None) -> float:
+    """Combien de secondes attendre avant de relancer une synchro complete.
+
+    0 = on peut y aller. Une synchro qui s'est terminee en erreur n'a, par
+    definition, rien envoye : le rapport redemande les memes fichiers au tour
+    suivant. Repartir 60 s plus tard donnait une boucle infinie — et sur un
+    429 Drive, une boucle qui entretient sa propre cause.
+    """
+    if (etat or {}).get("state") != "error":
+        return 0.0
+    try:
+        ts = float(etat.get("ts") or 0)
+    except (TypeError, ValueError):
+        ts = 0.0
+    if ts <= 0:                     # sans horodatage, on ne bloque pas
+        return 0.0
+    reste = RECUL_APRES_ERREUR - ((time.time() if maintenant is None
+                                   else maintenant) - ts)
+    return max(0.0, reste)
+
+
+def _tour_envoi_auto(cfg: dict) -> float:
+    """Un tour de veille du sens site -> Drive. Rend le recul a respecter (s).
+
+    Sorti de la boucle pour etre verifiable : c'est ici que se decide la
+    relance automatique, et c'est ici que la boucle infinie s'ecrivait.
+    """
+    # Le mode COURANT, pas « tout » : sinon le compteur ne descend jamais a
+    # zero (les reels, en mode « montage ») et la synchro complete repartait
+    # toutes les minutes, sans fin.
+    rep = sync_report(cfg.get("include_videos"))
+    if not rep.get("a_envoyer"):
+        return 0.0
+    etat = status()
+    if etat.get("state") == "running":
+        return 0.0
+    recul = _recul_synchro(etat)
+    if recul > 0:
+        print(f"[gdrive-auto] derniere synchro en echec "
+              f"({etat.get('errors') or 0} fichier(s) : "
+              f"{str(etat.get('err') or '')[:80]}) : relance dans "
+              f"{int(recul)}s au lieu de {max(30, VEILLE_SECONDES)}s",
+              flush=True)
+        return recul
+    _hm = rep.get("hors_mode") or 0
+    print(f"[gdrive-auto] {rep['a_envoyer']} fichier(s) a "
+          f"envoyer -> synchro auto"
+          + (f" ({_hm} hors du mode courant)" if _hm else ""),
+          flush=True)
+    start_background()
+    return 0.0
 
 
 def start_watcher(interval: int = VEILLE_SECONDES) -> bool:
@@ -1252,18 +1312,8 @@ def start_watcher(interval: int = VEILLE_SECONDES) -> bool:
                     # --- site -> Drive : detection purement locale ---
                     if cfg.get("auto_sync", True):
                         try:
-                            # Le mode COURANT, pas « tout » : sinon le compteur
-                            # ne descend jamais a zero (les reels, en mode
-                            # « montage ») et la synchro complete repartait
-                            # toutes les minutes, sans fin.
-                            rep = sync_report(cfg.get("include_videos"))
-                            if rep.get("a_envoyer") and status().get("state") != "running":
-                                _hm = rep.get("hors_mode") or 0
-                                print(f"[gdrive-auto] {rep['a_envoyer']} fichier(s) a "
-                                      f"envoyer -> synchro auto"
-                                      + (f" ({_hm} hors du mode courant)" if _hm else ""),
-                                      flush=True)
-                                start_background()
+                            attente = max(attente,
+                                          int(_tour_envoi_auto(cfg)) + 1)
                         except Exception as e:
                             print(f"[gdrive-auto] rapport: {e}", flush=True)
 
@@ -1960,10 +2010,11 @@ def run_sync() -> dict:
     # sont partages, donc proteges par un verrou.
     verrou = threading.Lock()
 
-    # Ce que le Drive contient DEJA, dossier par dossier (un seul listage par
-    # dossier). Sans ca, une comptabilite perdue faisait re-televerser des
-    # fichiers deja presents : c'est ainsi qu'on a obtenu des triplicats.
+    # Ce que le Drive contient DEJA, dossier par dossier (un seul listage
+    # REUSSI par dossier). Sans ca, une comptabilite perdue faisait
+    # re-televerser des fichiers deja presents : d'ou des triplicats.
     index_dossiers: dict = {}
+    INDEX_ESSAIS = 2               # deux listages par dossier, pas plus
 
     def _index(parent_id):
         """Le contenu du dossier Drive — ou une ERREUR, jamais « vide ».
@@ -1974,18 +2025,33 @@ def run_sync() -> dict:
         que cet index existe pour eviter, et c'est ainsi qu'on a obtenu des
         triplicats — sans un compteur ni une trace.
 
-        L'echec est memorise lui aussi (un seul essai par dossier, _lister
-        reprend deja quatre fois) : les fichiers de ce dossier comptent en
-        erreur, sont remontes, et repartiront au passage suivant.
+        L'echec, lui, n'etait mesure qu'UNE fois et garde pour toute la
+        synchro : un seul 429 passager condamnait alors les 500 fichiers du
+        dossier jusqu'a la fin du run. Comme rien ne partait, « a_envoyer »
+        ne descendait pas et la veille relançait la meme synchro toutes les
+        minutes — sur la cause meme du 429. On retente donc le listage
+        (INDEX_ESSAIS), et le premier fichier du dossier n'est plus perdu
+        pour un dossier qui repond a la seconde tentative.
+
+        Les essais restent bornes — _lister reprend deja quatre fois en
+        s'espacant, et marteler un dossier qui repond 429 entretient le 429.
+        Quota epuise : le dossier est memorise en echec (les fichiers
+        suivants echouent SANS rappeler Google), ils comptent en erreur et
+        sont remontes, et le recul de la veille (RECUL_APRES_ERREUR) laisse
+        au Drive le temps de respirer avant le passage suivant.
         """
         idx = index_dossiers.get(parent_id)
         if idx is None:
-            try:
-                idx = {}
-                for f in _lister(_session_thread(), parent_id):
-                    idx[f.get("name")] = (f.get("id"), int(f.get("size") or 0))
-            except Exception as e:
-                idx = ("%s: %s" % (type(e).__name__, e))[:160]
+            for _essai in range(INDEX_ESSAIS):
+                try:
+                    neuf = {}
+                    for f in _lister(_session_thread(), parent_id):
+                        neuf[f.get("name")] = (f.get("id"),
+                                               int(f.get("size") or 0))
+                    idx = neuf
+                    break
+                except Exception as e:
+                    idx = ("%s: %s" % (type(e).__name__, e))[:160]
             index_dossiers[parent_id] = idx
         if isinstance(idx, str):
             raise RuntimeError("listage du dossier Drive impossible — envoi "
@@ -2049,7 +2115,12 @@ def run_sync() -> dict:
            "errors": errors, "ts": int(time.time())}
     cfg["last_run"] = res
     save_config(cfg)
-    _set_status(state="done", **res)
+    # « done » ne se dit que si tout est passe. La barre du dashboard affiche
+    # « ✓ termine » a 100 % des que l'etat vaut « done » : une synchro ou
+    # aucun fichier n'est parti s'annoncait donc terminee. C'est aussi cet
+    # etat que la veille regarde pour prendre du recul (RECUL_APRES_ERREUR)
+    # au lieu de relancer la meme synchro 60 s plus tard.
+    _set_status(state=("error" if errors else "done"), **res)
     return res
 
 
@@ -2064,7 +2135,12 @@ def start_background() -> bool:
             try:
                 run_sync()
             except Exception as e:
-                _set_status(state="error", err=str(e)[:300])
+                # Horodater l'echec : c'est sur ce « ts » que la veille
+                # calcule son recul. Sans lui, une synchro tombee avant le
+                # premier envoi gardait la date de la precedente et la
+                # relance repartait aussitot.
+                _set_status(state="error", err=str(e)[:300],
+                            ts=int(time.time()))
 
         _THREAD = threading.Thread(target=_run, name="gdrive-sync", daemon=True)
         _THREAD.start()

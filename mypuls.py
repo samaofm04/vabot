@@ -321,6 +321,13 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
     per_creator, errors, stale = [], [], []
     # Ce qu'aucune carte ne reconnait : compte a part, jamais perdu.
     hors_type = {"montant": 0.0, "libelles": []}
+
+    def _hors_libelle(k):
+        """Note un libelle mis a l'ecart : sans doublon, et plafonne pour ne
+        pas transformer la reponse en liste a rallonge."""
+        t = str(k)
+        if t not in hors_type["libelles"] and len(hors_type["libelles"]) < 12:
+            hors_type["libelles"].append(t)
     _MAP = {  # libellés API -> cartes du dashboard
         "message": "Messages", "post": "Posts", "tip": "Tips",
         "subscription": "Subscriptions", "sub": "Subscriptions",
@@ -348,7 +355,22 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
             seg["mym"] += total_usd
         for k, v in (rev.get("by_type") or {}).items():
             bucket = _MAP.get(str(k).strip().lower())
-            _amt = float(v or 0) * rate
+            try:
+                _amt = float(v or 0) * rate
+            except (TypeError, ValueError):
+                # Convertir AVANT de trancher faisait dependre tout l'agregat
+                # d'un champ qu'on a justement decide de ne pas comprendre :
+                # by_type={'message': 100, 'breakdown': {...}} levait une
+                # TypeError, et api_overview partait en erreur EN ENTIER.
+                # Son seul appelant (page Revenus) avale l'exception dans un
+                # except large : la page retombait SANS RIEN DIRE sur les
+                # chiffres du scraping, qui ne contiennent pas les revenus
+                # « post » — total sous-evalue, seule trace un log.warning.
+                # Une case illisible est donc mise de cote avec son libelle
+                # (son montant, lui, reste inconnu : il ne peut pas entrer
+                # dans "montant"), et le reste de la creatrice est compte.
+                _hors_libelle("%s (montant illisible)" % k)
+                continue
             if not bucket:
                 # Un libelle que _MAP ne connait pas etait jete : le montant
                 # restait dans total_usd mais dans AUCUNE carte, si bien que
@@ -357,8 +379,7 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
                 # exactement ainsi que « Media prive » avait disparu du cote
                 # scraping. On le garde, avec son libelle en clair.
                 hors_type["montant"] += _amt
-                if str(k) not in hors_type["libelles"] and len(hors_type["libelles"]) < 12:
-                    hors_type["libelles"].append(str(k))
+                _hors_libelle(k)
                 continue
             types[bucket] += _amt
             (types_of if c.get("platform") == "onlyfans" else types_mym)[bucket] += _amt

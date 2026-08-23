@@ -154,23 +154,34 @@
        global, il ne doit pas changer avec le filtre de marché. */
     var tt = d.totals || {};
     var orphN = tt.pct_orphans || 0, orphExp = tt.pct_orphans_expirees || 0;
+    var orphSup = tt.pct_orphans_supprimees || 0;
     var partN = tt.pct_partielles || 0;
     var orphBar = '';
     if (orphN) {
+      /* « supprimé » n'est affirmé que si le serveur a compté AUTANT de bases
+         vraiment supprimées (introuvables) que de lignes en cause. Une base
+         retrouvée ailleurs, un revenu à 0 $ ce mois-ci : ce n'est pas une
+         suppression, et le badge de la ligne dit lequel des cas s'applique. */
       var cause = orphExp >= orphN
         ? 'le revenu qui servait de base est arrivé à sa date de fin, il ne se reporte plus'
-        : (orphExp
-            ? 'le revenu qui servait de base a été supprimé, ou est arrivé à sa date de fin'
-            : 'le revenu qui servait de base a été supprimé');
+        : (orphSup >= orphN
+            ? 'le revenu qui servait de base a été supprimé'
+            : 'le revenu qui servait de base ne compte plus dans ce mois : supprimé, arrivé à sa date de fin, absent de ce mois-ci, ou à 0 $');
       var conseil = orphExp >= orphN
         ? 'Repère le badge rouge plus bas : choisis une autre base avec ✎, ou repousse la date de fin du revenu source.'
-        : 'Repère le badge rouge plus bas et redonne-leur une base avec ✎.';
+        : (orphSup >= orphN
+            ? 'Repère le badge rouge plus bas et redonne-leur une base avec ✎.'
+            : 'Repère les badges rouges plus bas : chacun dit la cause exacte de SA ligne.');
       orphBar = '<div style="background:rgba(239,68,68,.07);border:1px solid rgba(239,68,68,.35);border-radius:12px;padding:10px 16px;margin-bottom:16px;font-size:12.5px;color:#fca5a5">⚠ <b>' +
-        orphN + ' ligne(s) en % sans plus aucune base</b> (' + cause + ') : elles comptent pour <b>0 $</b> ce mois-ci. ' + conseil + '</div>';
+        orphN + ' ligne(s) en % sans base qui compte</b> (' + cause + ') : elles comptent pour <b>0 $</b> ce mois-ci. ' + conseil + '</div>';
     }
     if (partN) {
+      /* Ce bandeau PROMET que ces lignes ne valent pas 0 $ : il ne compte donc
+         que les lignes dont la base restante vaut encore quelque chose (le
+         serveur range les autres avec les rouges). Sans ce tri, la promesse en
+         majuscules était démentie par le montant affiché deux lignes plus bas. */
       orphBar += '<div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.35);border-radius:12px;padding:10px 16px;margin-bottom:16px;font-size:12.5px;color:#fcd34d">⚠ <b>' +
-        partN + ' ligne(s) en % à base incomplète</b> : une partie seulement des revenus de base a disparu. Elles ne tombent PAS à 0 $ — leur montant est calculé sur les bases restantes, donc plus petit. Badge orange plus bas.</div>';
+        partN + ' ligne(s) en % à base incomplète</b> : une partie seulement des revenus de base répond encore. Elles ne tombent PAS à 0 $ — leur montant est calculé sur les bases restantes, qui valent encore quelque chose, donc plus petit. Badge orange plus bas.</div>';
     }
     var monthOpts = d.months.map(function (m) {
       return '<option value="' + m + '"' + (m === S.month ? ' selected' : '') + '>' + esc(monthLabel(m)) + '</option>';
@@ -515,43 +526,75 @@
       '</div></div></div>';
   }
 
-  /* Une base de % qui ne répond plus, ce sont TROIS situations, et l'écran
+  /* Une base de % qui ne répond plus, ce sont QUATRE situations, et l'écran
      les annonçait toutes « base supprimée — 0 $ » :
        - plus AUCUNE base           -> 0 $, il faut en rechoisir une ;
-       - une base sur plusieurs     -> montant RÉDUIT, surtout pas 0 $ ;
-       - base arrivée à sa DATE DE FIN -> rien n'a été supprimé, et le conseil
-         « redonne-leur une base » était faux.
-     Rend {tout, court, badge} : `tout` = plus aucune base (rouge / 0 $).
+       - une base sur plusieurs, ce qui reste vaut encore quelque chose
+                                    -> montant RÉDUIT, surtout pas 0 $ ;
+       - une base sur plusieurs, mais ce qui RESTE vaut 0 $ ce mois-ci
+         (reste_nul)                -> la ligne est rendue à 0 $ : lui écrire
+                                       « elle compte encore, seulement plus
+                                       petit » était faux ;
+       - base RETROUVÉE dans le fichier : elle n'a pas été supprimée, elle est
+         arrivée à sa date de fin ou simplement absente de ce mois. Le badge la
+         NOMME — dire « supprimée » juste avant son nom se contredisait tout
+         seul, et le serveur, lui, sait laquelle des deux c'est (etat).
+     Rend {tout, court, badge} : `tout` = la ligne vaut 0 $ (rouge).
      Le HTML est déjà échappé ici (les libellés viennent de la saisie). */
   function pctBaseInfo(pb) {
     var nManq = pb.manquantes || 0, nExp = pb.expirees || 0;
-    var tout = !!pb.vide || nManq >= (pb.total || 0);
-    var toutExp = nManq > 0 && nExp >= nManq;
-    // une base dont on ne retrouve NI le libellé ni la date de fin (supprimée
-    // depuis longtemps) n'apporte rien à la phrase : on ne la nomme pas.
+    var nSup = pb.supprimees || 0, nAbs = pb.absentes || 0;
+    var aucune = !!pb.vide || nManq >= (pb.total || 0);
+    /* reste_nul : les bases qui répondent encore valent 0 $ ce mois-ci (revenu
+       pas encore commencé, ou nul). Le serveur rend la ligne à 0 $ -> rouge,
+       comme une orpheline : c'est le montant qui décide de la couleur, pas le
+       nombre de bases manquantes. */
+    var tout = aucune || !!pb.reste_nul;
+    // une base dont on ne retrouve NI le libellé ni la date de fin (vraiment
+    // supprimée : introuvable dans tout le fichier) n'apporte rien : pas nommée.
     var noms = (pb.details || []).filter(function (x) { return x.label || x.end; })
       .map(function (x) {
         var t = x.label ? '« ' + esc(x.label) + ' »' : 'un revenu';
         if (x.end) t += ' terminé le ' + esc(frDate(x.end) + ' ' + String(x.end).slice(0, 4));
+        else if (x.etat === 'absente') t += ' (toujours présent, hors de ce mois)';
         return t;
       }).join(', ');
     var suf = noms ? ' : ' + noms : '';
-    if (tout && toutExp) {
-      return {tout: true, court: 'base terminée',
-        badge: '⚠ base arrivée à sa date de fin' + suf +
-               ' — elle ne se reporte plus, la ligne vaut 0 $. Choisis une autre base (✎ Modifier), ou repousse la date de fin du revenu.'};
+    var seul = nManq <= 1;
+    /* Cause EXACTE. « supprimée » n'est écrit que si le serveur n'a retrouvé
+       la base NULLE PART ; retrouvée = jamais supprimée. */
+    var cause, court, conseil;
+    if (nSup >= nManq) {
+      cause = seul ? 'base supprimée' : 'bases supprimées';
+      court = 'base supprimée';
+      conseil = 'Redonne-lui une base avec ✎ Modifier.';
+    } else if (nExp >= nManq) {
+      cause = seul ? 'base arrivée à sa date de fin' : 'bases arrivées à leur date de fin';
+      court = 'base terminée';
+      conseil = 'Choisis une autre base (✎ Modifier), ou repousse la date de fin du revenu source.';
+    } else if (nAbs >= nManq) {
+      cause = seul ? 'base absente de ce mois-ci' : 'bases absentes de ce mois-ci';
+      court = 'base absente de ce mois';
+      conseil = 'Le revenu existe toujours ailleurs : remets-le dans ce mois, ou choisis une autre base (✎ Modifier).';
+    } else {
+      cause = seul ? 'base introuvable dans ce mois' : 'bases introuvables dans ce mois';
+      court = 'base introuvable';
+      conseil = 'Ouvre la ligne (✎ Modifier) : le détail dit, base par base, ce qui manque.';
     }
+    if (aucune) {
+      return {tout: true, court: court,
+        badge: '⚠ ' + cause + suf + ' — la ligne vaut 0 $. ' + conseil};
+    }
+    var combien = nManq + ' base(s) sur ' + pb.total;
     if (tout) {
-      return {tout: true, court: nExp ? 'base supprimée ou terminée' : 'base supprimée',
-        badge: '⚠ ' + (nExp ? 'plus aucune base (supprimée ou arrivée à sa date de fin)' : 'base supprimée') +
-               suf + ' — 0 $ tant que tu ne rechoisis pas une base (✎ Modifier)'};
+      /* Il RESTE une base, mais elle vaut 0 $ ce mois-ci : la ligne est à 0 $,
+         pas « seulement plus petite ». */
+      return {tout: true, court: 'bases restantes à 0 $',
+        badge: '⚠ ' + combien + ' manquante(s) (' + cause + ')' + suf +
+               ' — et la ou les bases restantes valent 0 $ ce mois-ci : la ligne compte pour 0 $, pas seulement moins. ' + conseil};
     }
-    var poss = nManq > 1 ? 'leur date de fin' : 'sa date de fin';
-    var quoi = toutExp ? 'arrivée(s) à ' + poss
-                       : (nExp ? 'supprimée(s) ou arrivée(s) à ' + poss : 'supprimée(s)');
-    return {tout: false,
-      court: nManq + ' base(s) sur ' + pb.total + ' manquante(s)',
-      badge: '⚠ ' + nManq + ' base(s) sur ' + pb.total + ' ' + quoi + suf +
+    return {tout: false, court: combien + ' manquante(s)',
+      badge: '⚠ ' + combien + ' manquante(s) (' + cause + ')' + suf +
              ' — la ligne compte encore : son montant est calculé sur les bases restantes, il est seulement plus petit.'};
   }
 

@@ -291,12 +291,23 @@ def paie_quinzaine(lignes, commissions=None, eur_usd: float = 1.14) -> tuple:
         # visible dans la ligne au lieu de manquer au total.
         autres_types = ca - ppv - tips
         pct = float(commissions.get(chatteur, commissions.get("_defaut_", 0)) or 0)
-        if chatteur == NON_ATTRIBUE:
+        if chatteur == NON_ATTRIBUE or not quinz:
             # « Indetermine (Creatrice) » est un libelle, pas quelqu'un
             # (CLAUDE.md : ne jamais le traiter comme un chatteur, ni le
             # payer). Le CA reste visible, la commission tombe a zero — sans
             # ce garde-fou, une commission « _defaut_ » remuneraient des
             # ventes qui n'appartiennent a personne.
+            #
+            # MEME regle pour une vente qui n'appartient a aucune PERIODE :
+            # quinzaine vide = date ecrite par MyPuls dans un format non
+            # prevu. Ces lignes sont desormais gardees (c'etait le but), mais
+            # la cle vide se classe avant « 2026-08 » : elles arrivent EN
+            # TETE de l'onglet qui sert a payer, etiquetees « a rattacher a
+            # la main » pendant que la case d'a cote annoncait une somme a
+            # verser. Verse une fois ici, puis une seconde fois quand le
+            # scraping suivant rend la date lisible et remet la vente dans sa
+            # vraie quinzaine. Le CA reste chiffre et visible ; la ligne n'est
+            # simplement pas payable tant que la date n'est pas rattachee.
             pct = 0.0
         a_payer = round(ca * pct / 100.0, 2)
         # Les ventes s'etalent vers la droite, UNE PAR CASE, de la plus
