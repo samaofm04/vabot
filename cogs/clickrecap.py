@@ -805,12 +805,15 @@ class ClickRecap(commands.Cog):
                     key=lambda g: (-(_somme(g["lignes"], 0, indice) or 0),
                                    -(_somme(g["lignes"], 2, indice) or 0),
                                    str(g["nom"] or g["lignes"][0][0]).lower()))
-                lignes = []
+                # Un paquet de lignes PAR personne : la coupure en plusieurs
+                # champs se fait ensuite entre les paquets, jamais au milieu.
+                # Voir une personne dont la moitie des telephones est passee
+                # dans le bloc suivant n'a aucun sens.
+                paquets_lignes = []
                 for g in ordre:
+                    lignes = []
                     membres = g["lignes"]
                     if g["nom"] and len(membres) > 1:
-                        if lignes:
-                            lignes.append("")     # separe les groupes a l'oeil
                         lignes.append(
                             f"{(g['nom'] + ' (' + str(len(membres)) + ')')[:17]:<18}"
                             f"{_c(_somme(membres, 0, indice)):>7}"
@@ -826,27 +829,40 @@ class ClickRecap(commands.Cog):
                             f"{etiquette:<18}"
                             f"{_c(p[0][indice]):>7}{_c(p[1][indice]):>7}"
                             f"{_c(p[2][indice]):>7}{_c(p[3][indice]):>8}")
-                bloc, blocs = "", []
-                for ln in lignes:
-                    if len(bloc) + len(ln) + 1 > 880:
-                        blocs.append(bloc.strip("\n"))
-                        bloc = ""
-                    if not bloc and not ln:
-                        continue      # pas de ligne vide en tete de bloc
-                    bloc += ("\n" if bloc else "") + ln
-                if bloc.strip("\n"):
-                    blocs.append(bloc.strip("\n"))
+                    paquets_lignes.append(lignes)
+
+                # Remplissage par paquets. Un champ Discord plafonne a 1024
+                # signes ; on garde de la marge pour l'en-tete, qui est repete
+                # dans CHAQUE bloc — sans lui, le second n'a plus de titres de
+                # colonnes et ses chiffres ne veulent plus rien dire.
+                blocs, courant = [], []
+                for paq in paquets_lignes:
+                    sep = 1 if courant and len(paq) > 1 else 0
+                    taille = sum(len(x) + 1 for x in courant) + \
+                        sum(len(x) + 1 for x in paq) + sep
+                    if courant and taille > 820:
+                        blocs.append("\n".join(courant))
+                        courant = []
+                    elif sep:
+                        courant.append("")     # separe les groupes a l'oeil
+                    courant.extend(paq)
+                if courant:
+                    blocs.append("\n".join(courant))
                 return blocs
 
             _tables = ([(f"{drapeau} {libelle} clicks per link", 0)]
                        if pays_marche else [])
             _tables.append(("🌍 All countries per link", 1))
             for titre, indice in _tables:
-                for i, b in enumerate(_tableau(indice)):
-                    corps = (entete + "\n" + b) if i == 0 else b
-                    emb.add_field(
-                        name=(titre if i == 0 else f"{titre} (cont.)"),
-                        value=f"```\n{corps}\n```", inline=False)
+                _blocs = _tableau(indice)
+                for i, b in enumerate(_blocs):
+                    # L'en-tete est repete partout : un bloc « (cont.) » sans
+                    # titres de colonnes n'est qu'une grille de chiffres.
+                    nom_champ = (titre if i == 0
+                                 else f"{titre} ({i + 1}/{len(_blocs)})")
+                    emb.add_field(name=nom_champ,
+                                  value=f"```\n{entete}\n{b}\n```",
+                                  inline=False)
         elif ids and not all_none and len(ids) > _MAX_PER_LIEN:
             emb.add_field(
                 name="📋 Per link",
