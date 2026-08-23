@@ -2595,6 +2595,37 @@ except Exception as _eRg:
 
 print()
 print("=" * 70)
+print("SELECTION MULTIPLE ET NAVIGATION (defauts B1 et F2)")
+print("=" * 70)
+try:
+    import pathlib as _plSel
+    _srcSel = _plSel.Path("web_upload.py").read_text(encoding="utf-8")
+
+    # B1 — la selection ne doit JAMAIS traverser un changement de galerie :
+    # 4 rushs coches chez amelia, un clic sur julia, 1 fichier coche, et la
+    # corbeille en supprimait 5. Irreversible, sans corbeille.
+    _iGo = _srcSel.index("window.vaultGoTo = function")
+    check("selection : videe au changement d identite",
+          "clearSelection()" in _srcSel[_iGo:_iGo + 700])
+    _iTab = _srcSel.index("function showTab(")
+    check("selection : videe au changement d onglet",
+          "clearSelection()" in _srcSel[_iTab:_iTab + 500])
+
+    # « Tout selectionner » prenait aussi les cartes masquees par le filtre
+    # etoile : on croyait supprimer 3 fichiers, on en supprimait 200.
+    _iAll = _srcSel.index("function vaultSelectAll()")
+    check("selection : « tout selectionner » ignore les cartes masquees",
+          "offsetParent" in _srcSel[_iAll:_iAll + 900])
+
+    # F2 — les scripts recopies SANS leurs attributs perdaient l id et le type
+    # du bloc de donnees : tout l onglet Caption devenait inerte, sans message.
+    check("navigation : les scripts sont recopies avec leurs attributs",
+          "for(const a of oldS.attributes)" in _srcSel)
+except Exception as _eSel:
+    check("selection : testable", False, repr(_eSel)[:160])
+
+print()
+print("=" * 70)
 print("GARDE-FOU DE PAIE (recalcul navigateur)")
 print("=" * 70)
 try:

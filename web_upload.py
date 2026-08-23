@@ -5272,7 +5272,15 @@ function vaultSelectAll(){
     if(!sec && s.offsetParent!==null) sec=s;
   });
   if(!sec) return;
-  var cbs=sec.querySelectorAll('#vault-grid .sel-cb, #capCards .sel-cb');
+  // Seulement les cartes VISIBLES : le filtre etoile masque les autres, et
+  // les cocher faisait croire qu on supprimait 3 fichiers alors qu on en
+  // supprimait 200 — sans corbeille, donc sans retour possible.
+  var cbs=Array.prototype.filter.call(
+    sec.querySelectorAll('#vault-grid .sel-cb, #capCards .sel-cb'),
+    function(cb){
+      var carte = cb.closest('.cloud-card') || cb.closest('.cap-card');
+      return !carte || carte.offsetParent !== null;
+    });
   if(!cbs.length) return;
   var allOn=true;
   cbs.forEach(function(cb){ if(!cb.checked) allOn=false; });
@@ -7053,6 +7061,10 @@ function siteDebounce(key, fn, ms){
 }
 function showTab(group,name,title,subtitle){
   if(typeof igStopAllReels==="function") igStopAllReels();
+  // Meme raison qu au changement d identite : la selection ne doit pas
+  // traverser un changement d ONGLET non plus. Des fichiers coches dans les
+  // Reels partaient sinon avec une suppression declenchee depuis les Posts.
+  if(typeof clearSelection === "function") clearSelection();
   // (Revenus chatteurs : pas de rechargement au clic d'onglet -> ouverture instantanée.
   //  La tranche de dates est restaurée seulement après un VRAI reload, via le script HEAD.)
   // Retirer le style initial injecté en HEAD (pour le pre-paint)
@@ -17685,6 +17697,11 @@ window.vaultPrefetchCancel = function(){ clearTimeout(window.__vaultPrefetchTime
 window.vaultGoTo = function(ev, url){
   if(ev && (ev.ctrlKey || ev.metaKey || ev.shiftKey)) return true;
   ev.preventDefault();
+  // La selection ne survit PAS au changement d identite ni d onglet. Sans ca :
+  // 4 rushs coches chez amelia, un clic sur julia, 1 fichier coche — et la
+  // corbeille en supprimait 5, dont 4 disparus de l ecran depuis longtemps.
+  // Irreversible, sans corbeille.
+  if(typeof clearSelection === 'function') clearSelection();
   // Active item sidebar (UI feedback instant)
   const allItems = document.querySelectorAll('.vault-item');
   let activeItem = null;
@@ -17786,9 +17803,16 @@ window.vaultGoTo = function(ev, url){
       const newSec = doc.getElementById(sec.id);
       if(!newSec){ window.location.href = url; return; }
       sec.innerHTML = newSec.innerHTML;
-      // Re-execute les scripts inline
+      // Re-execute les scripts inline, ATTRIBUTS COMPRIS. Sans cette recopie,
+      // le bloc <script type="application/json" id="capLibData"> perdait son
+      // id et son type : capLibInit() ne le retrouvait plus, rendait false, et
+      // TOUTES les actions de l onglet Caption sortaient en silence — editeur,
+      // hors tirage, favori, description, generer. L onglet paraissait mort
+      // sans le moindre message, et les toasts « Recharge l onglet Caption »
+      // etaient des rustines du symptome.
       sec.querySelectorAll('script').forEach(oldS=>{
         const newS = document.createElement('script');
+        for(const a of oldS.attributes){ newS.setAttribute(a.name, a.value); }
         newS.textContent = oldS.textContent;
         oldS.parentNode.replaceChild(newS, oldS);
       });
