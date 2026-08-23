@@ -5597,9 +5597,13 @@ class _JailbreakModelSelect(discord.ui.Select):
                 models = list_active_identities()
         except Exception:
             models = []
-        for m in models[:25]:
+        # Meme ordre que les boutons, et meme raison de trier avant de couper :
+        # la model classee premiere doit etre dans les 25 affichees.
+        import identites_ordre as _io
+        _ordre = _io.lire()
+        for m in _io.trier(list(models), _ordre)[:25]:
             opts.append(discord.SelectOption(
-                label=str(m).capitalize(), value=str(m).lower(),
+                label=_io.etiquette(m, _ordre), value=str(m).lower(),
                 emoji=emojis.get(m)))
         if not opts:
             opts = [discord.SelectOption(label="(aucune model)", value="__none__")]
@@ -5641,11 +5645,18 @@ class JBModelButton(discord.ui.DynamicItem[discord.ui.Button],
     """UN bouton = UNE model (sa PP + son nom), clic = actions direct.
     custom_id porte l'identité -> persistant même si la liste des models change."""
 
-    def __init__(self, ident, emoji=None):
+    def __init__(self, ident, emoji=None, ordre=None):
         self.ident = (ident or "").lower()
+        # « 1. Lola » quand le proprietaire a range cette identite, « Lola »
+        # sinon. On ne numerote jamais une liste alphabetique : le VA lirait
+        # « 1 » comme « celle qui marche le mieux » alors que personne n aurait
+        # rien decide.
+        # from_custom_id ne repasse pas d ordre : ce chemin ne sert qu a
+        # repondre au clic, le libelle vient du message deja poste.
+        import identites_ordre as _io
         super().__init__(
             discord.ui.Button(
-                label=self.ident.capitalize(), emoji=emoji,
+                label=_io.etiquette(self.ident, ordre), emoji=emoji,
                 style=discord.ButtonStyle.secondary,
                 custom_id=f"jbus:m:{self.ident}",
             )
@@ -5895,8 +5906,12 @@ class JailbreakModelsView(discord.ui.View):
     def __init__(self, models, emojis=None):
         super().__init__(timeout=None)
         emojis = emojis or {}
-        for m in list(models)[:25]:          # 5 lignes × 5 boutons max
-            self.add_item(JBModelButton(m, emoji=emojis.get(m)))
+        # Trier AVANT de couper a 25 : sinon la coupe se ferait sur l ordre
+        # alphabetique et la model classee premiere pourrait ne pas apparaitre.
+        import identites_ordre as _io
+        ordre = _io.lire()
+        for m in _io.trier(list(models), ordre)[:25]:   # 5 lignes x 5 boutons
+            self.add_item(JBModelButton(m, emoji=emojis.get(m), ordre=ordre))
 
 
 class GenLinkModal(discord.ui.Modal, title="🔗 Générer un lien GetMySocial"):

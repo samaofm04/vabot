@@ -38,14 +38,22 @@ DATA_DIR = Path("data")
 #: Ce que le proprietaire doit recopier dans secrets.json, cote poste.
 GABARIT_JETON = '{\n  "rig_api_token": "%s"\n}'
 
-# Filigrane « PRÊT » (SVG en diagonale, vert semi-transparent) posé sur la vignette
-# d'un reel marqué prêt — purement visuel, tuilé sur toute la vidéo.
-READY_WM_URI = ("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20"
-                "width%3D%27150%27%20height%3D%27108%27%3E%3Ctext%20x%3D%2775%27%20y%3D%2760%27%20"
-                "font-family%3D%27Arial%2CHelvetica%2Csans-serif%27%20font-size%3D%2721%27%20"
-                "font-weight%3D%27800%27%20letter-spacing%3D%272%27%20fill%3D%27%252322c55e%27%20"
-                "fill-opacity%3D%270.5%27%20text-anchor%3D%27middle%27%20"
-                "transform%3D%27rotate%28-20%2075%2054%29%27%3EPR%C3%8AT%3C%2Ftext%3E%3C%2Fsvg%3E")
+# Trame verte des cartes « pretes ». UNE seule definition pour les deux
+# endroits qui la posent : les reels de la Veille (READY_WM_URI) et les rushs
+# « dispo VA » de la Bibliotheque. Les deux affichaient auparavant leur propre
+# texte tuile — « PRET » ici, « DISPO VA » la-bas — qui recouvrait la vignette
+# et faisait tampon administratif. Des hachures fines marquent la carte tout
+# aussi nettement dans une grille, sans rien cacher de reconnaissable.
+def _trame_verte_uri():
+    import urllib.parse as _u
+    svg = ("<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14'>"
+           "<path d='M-2 4 L4 -2 M2 12 L12 2 M10 16 L16 10' fill='none' "
+           "stroke='rgba(34,197,94,0.30)' stroke-width='2.4'/></svg>")
+    return "data:image/svg+xml," + _u.quote(svg)
+
+
+READY_WM_URI = _trame_verte_uri()
+
 IDENTITIES_DIR = DATA_DIR / "identities"
 PROFILE_PICS_DIR = DATA_DIR / "profile_pics"
 USERS_FILE = DATA_DIR / "users.json"
@@ -14772,7 +14780,7 @@ body.light .va-id{color:#6b7280}
                 assigned_side = _get_links_for_va(uid)
 
                 pp_side = (
-                    f"<img src='{avatar_url}' class='va-vlist-pp' alt=''>"
+                    f"<img src='{avatar_url}' class='va-vlist-pp' alt='' loading='lazy' decoding='async'>"
                     if avatar_url else
                     f"<div class='va-vlist-pp va-vlist-pp-fallback'>{(uname[:1] if uname else '?').upper()}</div>"
                 )
@@ -17139,17 +17147,13 @@ def _fmt_size(p) -> str:
 
 
 def _va_ready_watermark_uri():
-    """Data-URI d'un petit SVG « DISPO VA » incliné -> tuilé en filigrane sur les reels
-    marqués « Dispo pour les VA ». UNIQUEMENT côté Bibliothèque (jamais sur la vidéo)."""
-    import urllib.parse as _u
-    # Des hachures, pas un texte repete. L ancien motif ecrivait « DISPO VA »
-    # en gras toutes les 150 px : lisible, mais il mangeait l image et faisait
-    # tampon administratif. La trame marque la carte tout aussi nettement dans
-    # une grille de 200, sans rien recouvrir de reconnaissable.
-    svg = ("<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14'>"
-           "<path d='M-2 4 L4 -2 M2 12 L12 2 M10 16 L16 10' fill='none' "
-           "stroke='rgba(34,197,94,0.30)' stroke-width='2.4'/></svg>")
-    return "data:image/svg+xml," + _u.quote(svg)
+    """La trame verte commune — voir _trame_verte_uri en haut du fichier.
+
+    Gardee comme fonction : elle est le point d entree historique cote
+    Bibliotheque, et deux definitions de la meme trame finissaient toujours
+    par diverger.
+    """
+    return READY_WM_URI
 
 
 _VA_READY_WM = _va_ready_watermark_uri()
@@ -18806,7 +18810,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         stats = ident_stats[ident]
         avatar_url = _identity_avatar_url(ident)
         avatar_html = (
-            f"<img src='{avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0' onerror=\"this.style.display='none'\">"
+            f"<img src='{avatar_url}' loading='lazy' decoding='async' style='width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0' onerror=\"this.style.display='none'\">"
             if avatar_url else
             f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;flex-shrink:0'>{_v2_label(ident)[:1].upper()}</div>"
         )
@@ -18867,7 +18871,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
     sel_stats = ident_stats.get(selected, {"n_files": 0, "size_mb": 0})
     sel_avatar_url = _identity_avatar_url(selected)
     sel_avatar_html = (
-        f"<img src='{sel_avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a' onerror=\"this.style.display='none'\">"
+        f"<img src='{sel_avatar_url}' loading='lazy' decoding='async' style='width:42px;height:42px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a' onerror=\"this.style.display='none'\">"
         if sel_avatar_url else
         f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px'>{selected[:1].upper()}</div>"
     )
@@ -19338,9 +19342,14 @@ def _save_identity_order(lst) -> bool:
 
 
 def _apply_identity_order(identities):
-    """Trie selon l'ordre custom ; les non-listées après, en alphabétique."""
-    pos = {n: i for i, n in enumerate(_load_identity_order())}
-    return sorted(identities, key=lambda n: (pos.get(n, len(pos) + 1), n))
+    """Trie selon l'ordre custom ; les non-listées après, en alphabétique.
+
+    La regle vit dans identites_ordre : les menus Discord la partagent, et
+    deux implementations finiraient par diverger. On garde ICI le
+    chargement, parce que le site a son cache, invalide a chaque ecriture.
+    """
+    import identites_ordre
+    return identites_ordre.trier(identities, _load_identity_order())
 
 
 # ====================================================================
@@ -19829,7 +19838,7 @@ def _render_cloud_captions_html() -> str:
         n = _n_caps(ident)
         avatar_url = _identity_avatar_url(ident)
         avatar_html = (
-            f"<img src='{avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0' onerror=\"this.style.display='none'\">"
+            f"<img src='{avatar_url}' loading='lazy' decoding='async' style='width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0' onerror=\"this.style.display='none'\">"
             if avatar_url else
             f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;flex-shrink:0'>{_v2_label(ident)[:1].upper()}</div>"
         )
@@ -19880,7 +19889,7 @@ def _render_cloud_captions_html() -> str:
     # ---- Galerie (droite) ----
     sel_avatar_url = _identity_avatar_url(selected)
     sel_avatar_html = (
-        f"<img src='{sel_avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a' onerror=\"this.style.display='none'\">"
+        f"<img src='{sel_avatar_url}' loading='lazy' decoding='async' style='width:42px;height:42px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a' onerror=\"this.style.display='none'\">"
         if sel_avatar_url else
         f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px'>{selected[:1].upper()}</div>"
     )
@@ -20132,7 +20141,7 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
         n = _total(ident)
         avatar_url = _identity_avatar_url(ident)
         avatar_html = (
-            f"<img src='{avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0' onerror=\"this.style.display='none'\">"
+            f"<img src='{avatar_url}' loading='lazy' decoding='async' style='width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0' onerror=\"this.style.display='none'\">"
             if avatar_url else
             f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;flex-shrink:0'>{_v2_label(ident)[:1].upper()}</div>"
         )
@@ -20176,7 +20185,7 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
     # ---- Galerie (droite) : une section par bibliothèque ----
     sel_avatar_url = _identity_avatar_url(selected)
     sel_avatar_html = (
-        f"<img src='{sel_avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a' onerror=\"this.style.display='none'\">"
+        f"<img src='{sel_avatar_url}' loading='lazy' decoding='async' style='width:42px;height:42px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a' onerror=\"this.style.display='none'\">"
         if sel_avatar_url else
         f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px'>{selected[:1].upper()}</div>"
     )
@@ -20617,7 +20626,7 @@ def _render_textvault_html(cat: str) -> str:
         n = len(by_ident.get(ident, []))
         avatar_url = _identity_avatar_url(ident)
         avatar_html = (
-            f"<img src='{avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0' onerror=\"this.style.display='none'\">"
+            f"<img src='{avatar_url}' loading='lazy' decoding='async' style='width:42px;height:42px;border-radius:50%;object-fit:cover;flex-shrink:0' onerror=\"this.style.display='none'\">"
             if avatar_url else
             f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:16px;flex-shrink:0'>{_v2_label(ident)[:1].upper()}</div>"
         )
@@ -20667,7 +20676,7 @@ def _render_textvault_html(cat: str) -> str:
         cur = by_ident.get(selected, [])
         sel_avatar_url = _identity_avatar_url(selected)
         head_avatar = (
-            f"<img src='{sel_avatar_url}' style='width:42px;height:42px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a' onerror=\"this.style.display='none'\">"
+            f"<img src='{sel_avatar_url}' loading='lazy' decoding='async' style='width:42px;height:42px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a' onerror=\"this.style.display='none'\">"
             if sel_avatar_url else
             f"<div style='width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px'>{selected[:1].upper()}</div>"
         )
@@ -28808,12 +28817,16 @@ def _render_jailbreak_html() -> str:
                 hue_va = sum(ord(c) for c in va_name) % 360
                 init_va = html_escape(va_name[:1].upper() if va_name else '?')
                 if discord_info and discord_info.get("avatar_url"):
+                    # Le meme avatar est pose deux fois par VA (barre laterale +
+                    # fiche depliee) : sans paresse, chacun se decode a part.
                     side_av = (
                         f"<img src='{html_escape(discord_info['avatar_url'])}' "
+                        f"loading='lazy' decoding='async' "
                         f"alt='@{html_escape(discord_username)}'>"
                     )
                     detail_av = (
                         f"<img src='{html_escape(discord_info['avatar_url'])}' "
+                        f"loading='lazy' decoding='async' "
                         f"alt='@{html_escape(discord_username)}'>"
                     )
                 else:
@@ -31024,8 +31037,9 @@ def _render_veille_feed_html() -> str:
             # prêt) — sur TOUTES les cartes, envoyées comprises (re-préparation).
             ready_wm = (
                 f"<div class='vl-ready-wm' style=\"position:absolute;inset:0;z-index:3;pointer-events:none;"
-                f"display:{'block' if prepared else 'none'};background-color:rgba(34,197,94,.10);"
+                f"display:{'block' if prepared else 'none'};background-color:rgba(34,197,94,.07);"
                 f"background-image:url('{READY_WM_URI}');background-repeat:repeat;"
+                f"background-size:14px 14px;"
                 f"box-shadow:inset 0 0 0 2px rgba(34,197,94,.55)\"></div>")
             # Checkbox bulk selection : sur TOUS les reels (meme deja envoyes) pour
             # pouvoir multi-selectionner et RENVOYER en lot.
@@ -32032,7 +32046,7 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         if not avatar_url:
             avatar_url = _identity_avatar_url(ident)
         avatar = (
-            f"<img src='{avatar_url}' style='width:40px;height:40px;border-radius:50%;object-fit:cover'>"
+            f"<img src='{avatar_url}' loading='lazy' decoding='async' style='width:40px;height:40px;border-radius:50%;object-fit:cover'>"
             if avatar_url else
             f"<div style='width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px'>{ident[:1].upper()}</div>"
         )

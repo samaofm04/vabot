@@ -472,6 +472,59 @@ with jb.transaction():
 
 print()
 print("=" * 70)
+print("ORDRE DES IDENTITES (range par le proprietaire, vu par les VA)")
+print("=" * 70)
+try:
+    import inspect as _inspOr
+    import identites_ordre as _ioOr
+
+    _ordOr = ["lola", "emma", "sarah"]
+    check("ordre : les identites rangees passent devant, dans l ordre",
+          _ioOr.trier(["zoe", "emma", "lola", "anna"], _ordOr)[:2] == ["lola", "emma"])
+    # Les non-rangees ne disparaissent pas : elles suivent, en alphabetique.
+    check("ordre : les non-rangees suivent, en alphabetique",
+          _ioOr.trier(["zoe", "emma", "lola", "anna"], _ordOr)[2:] == ["anna", "zoe"])
+    check("ordre : le rang commence a 1, pas a 0",
+          _ioOr.rang("lola", _ordOr) == 1 and _ioOr.rang("emma", _ordOr) == 2)
+    check("ordre : une identite non rangee n a pas de rang",
+          _ioOr.rang("zoe", _ordOr) is None)
+
+    # Numeroter une liste alphabetique donnerait un FAUX classement : le VA
+    # lirait « 1 » comme « celle qui marche le mieux » alors que personne
+    # n aurait rien decide.
+    check("ordre : sans rangement, aucun numero n est affiche",
+          _ioOr.etiquette("lola", []) == "Lola")
+    check("ordre : avec rangement, le numero est affiche",
+          _ioOr.etiquette("lola", _ordOr) == "1. Lola")
+    check("ordre : une identite non rangee reste sans numero",
+          _ioOr.etiquette("zoe", _ordOr) == "Zoe")
+    check("ordre : un fichier absent ne fait pas tomber la lecture",
+          isinstance(_ioOr.lire(), list))
+
+    # Le site et le bot doivent trier PAREIL. Deux implementations finiraient
+    # par diverger — le depot a deja paye ca avec les deux tables du Drive.
+    import web_upload as _wOr
+    _srcTri = _inspOr.getsource(_wOr._apply_identity_order)
+    check("ordre : le site delegue a la regle partagee",
+          "identites_ordre" in _srcTri,
+          "le site aurait sa propre regle, qui divergerait")
+
+    # Couper a 25 AVANT de trier ferait disparaitre la model classee premiere
+    # si elle est en fin d alphabet.
+    import pathlib as _plOr
+    _srcBot = _plOr.Path("cogs/user.py").read_text(encoding="utf-8")
+    _apres = _srcBot.count("_io.trier(list(models), ordre)[:25]") \
+        + _srcBot.count("_io.trier(list(models), _ordre)[:25]")
+    check("ordre : on trie AVANT de couper a 25, aux deux endroits",
+          _apres == 2, "%d endroit(s) sur 2" % _apres)
+    check("ordre : plus aucune coupe sur la liste non triee",
+          "models[:25]" not in _srcBot,
+          "une coupe alphabetique subsiste")
+except Exception as _eOr:
+    check("ordre : testable", False, repr(_eOr)[:170])
+
+print()
+print("=" * 70)
 print("ICONES DES BOUTONS DISCORD (style du site)")
 print("=" * 70)
 try:
