@@ -540,6 +540,19 @@ try:
              + _srcBot.count("_io.etiqueter(_visibles, _ordre)"))
     check("ordre : les libelles viennent de la liste visible, aux deux endroits",
           _etiq == 2, "%d endroit(s) sur 2" % _etiq)
+
+    # Un numero sans explication n est qu un numero : le VA doit lire QUE
+    # c est un classement, sinon « 1. Lola » ne lui apprend rien.
+    _phr = _ioOr.phrase_classement(["lola", "emma"], _ordOr)
+    check("ordre : le menu explique que les numeros sont un classement",
+          "classement" in _phr.lower() and "1" in _phr,
+          "phrase : %r" % _phr[:60])
+    # Annoncer un classement qui n existe pas serait pire que se taire.
+    check("ordre : rien n est annonce quand rien n est range",
+          _ioOr.phrase_classement(["zoe", "anna"], _ordOr) == "")
+    check("ordre : la phrase est bien posee dans le menu des models",
+          "_io.phrase_classement(models)" in _srcBot,
+          "les numeros s afficheraient sans etre expliques")
     check("ordre : plus aucune coupe sur la liste non triee",
           "models[:25]" not in _srcBot,
           "une coupe alphabetique subsiste")

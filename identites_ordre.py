@@ -80,6 +80,26 @@ def rang(identite, ordre=None):
         return None
 
 
+def phrase_classement(identites, ordre=None) -> str:
+    """La phrase qui explique les numéros, ou "" s'il n'y a rien à expliquer.
+
+    Sans elle, « 1. Lola » ressemble à une liste arbitraire : le VA voit un
+    numéro et n'en tire rien. C'est le classement qui porte l'information —
+    encore faut-il dire ce qu'il classe.
+
+    Vide si aucune identité affichée n'a été rangée à la main : annoncer un
+    classement qui n'existe pas serait pire que de ne rien dire.
+    """
+    if ordre is None:
+        ordre = lire()
+    connues = set(ordre)
+    classees = [i for i in identites if str(i).lower() in connues]
+    if not classees:
+        return ""
+    return ("🏆 **Les numéros sont un classement** : la n°1 est celle qui "
+            "marche le mieux en ce moment. Commence par le haut de la liste.")
+
+
 def etiqueter(identites, ordre=None, gabarit="{rang}. {nom}") -> dict:
     """{identité: libellé} — « 1. Lola », « 2. Emma »… puis les non rangées.
 

@@ -44058,7 +44058,13 @@ def create_app():
                     rep = send_file(str(_vlVt.chemin_thumb(rid)), conditional=True)
                     rep.headers["Cache-Control"] = "public, max-age=604800"
                     return rep
-                return redirect(distant)
+                # PAS de redirection vers le lien d origine : si ce lien
+                # valait encore, le rapatriement juste au-dessus aurait
+                # reussi. On ne peut donc arriver ici QUE sur un lien mort,
+                # et y renvoyer le navigateur reproduisait exactement le
+                # carre casse qu on veut supprimer — mesure apres coup : 191
+                # miniatures « servies par nous » et pourtant 191 cassees.
+                # On tombe sur l image d attente juste en dessous.
         except Exception:
             pass
         rep = app.response_class(_VIGNETTE_ABSENTE, mimetype="image/svg+xml")

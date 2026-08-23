@@ -2990,13 +2990,19 @@ class UserCog(commands.Cog):
         posté automatiquement dans les salons -menu du serveur US. Les models
         affichées sont celles du MARCHÉ de la personne (rôle Jailbreak FR/US)."""
         models = _jb_models_marche(marche)
+        # Un classement ne sert a rien si personne ne sait que c en est un :
+        # sans cette phrase, « 1. Lola » n est qu une liste numerotee de plus.
+        # Elle est vide tant qu aucune model affichee n a ete rangee a la main.
+        import identites_ordre as _io
+        _clst = _io.phrase_classement(models)
         emb = discord.Embed(
             title=("🔓 Menu Jailbreak FR — models FR" if marche == "fr"
                    else "🔓 Menu Jailbreak US — models US"),
             description=(
                 "Clique **directement sur la model** 👇 puis choisis l'action "
                 "(reel, reel monté, story, post, story CTA, pseudo, name, bio, pp).\n\n"
-                "✅ Ouvert à tout le monde sur ce serveur."
+                + (_clst + "\n\n" if _clst else "")
+                + "✅ Ouvert à tout le monde sur ce serveur."
             ),
             color=discord.Color.dark_red(),
         )
