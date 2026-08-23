@@ -268,34 +268,31 @@ _REFRESH_ATTENTE_S = 60
 #: Discord coupe une autocompletion qui n'a pas repondu en 3 secondes, et
 #: list_team_groups interroge le board prive (cookie, ~1 s par workspace).
 #: Sans cache, la liste serait vide une fois sur deux.
-_GROUPES_CACHE = {"ts": 0.0, "groupes": [], "en_cours": False}
-_GROUPES_TTL = 600
+_ESPACES_CACHE = {"ts": 0.0, "espaces": [], "tache": None}
+_ESPACES_TTL = 600
 
 
-async def _charger_groupes_gms() -> list:
-    """Tous les groupes de TOUS les workspaces, par la cle API.
+async def _charger_espaces_gms() -> list:
+    """Les workspaces du compte, par la CLE API. [{id, name, link_count}].
 
-    Passe par teams_via_api / groups_via_api et NON par KNOWN_TEAMS, qui n'en
-    liste que deux en dur alors que le compte en compte sept : les groupes des
-    cinq autres etaient invisibles. Et par la cle API et non le cookie de
-    session, qui expire et rend alors une liste vide sans le dire — c'est ce
+    Par la cle et non par le cookie de session : le cookie expire, et la
+    fonction qui l'utilise rend alors une liste vide sans le dire — c'est ce
     qui affichait « aucune option ne correspond ».
+
+    Et par teams_via_api plutot que par la constante KNOWN_TEAMS, qui n'en
+    liste que deux en dur alors que le compte en compte sept.
     """
     import gms
     teams = await asyncio.to_thread(gms.teams_via_api)
-    out = []
-    # L'espace personnel a aussi ses groupes : team_id=None.
-    for t in [{"id": None, "name": "Personnel"}] + list(teams or []):
-        groupes = await asyncio.to_thread(gms.groups_via_api, t.get("id"))
-        for g in groupes or []:
-            out.append({"team_id": t.get("id") or "", "team_name": t.get("name") or "",
-                        "group_id": g["id"], "group_name": g["name"],
-                        "link_count": g.get("link_count") or 0})
-    out.sort(key=lambda x: (x["group_name"].lower(), x["team_name"].lower()))
+    out = [{"id": t["id"], "name": t.get("name") or t["id"],
+            "link_count": t.get("link_count") or 0}
+           for t in (teams or []) if t.get("id")]
+    # Les plus fournis d'abord : c'est presque toujours celui-la qu'on cherche.
+    out.sort(key=lambda e: (-(e["link_count"] or 0), e["name"].lower()))
     return out
 
 
-def _rafraichir_groupes(bot=None):
+def _rafraichir_espaces(bot=None):
     """Lance (ou retrouve) le chargement des groupes EN FOND. Rend la tache.
 
     Rendre la tache compte : l'autocompletion l'ATTEND avec un delai, au lieu
@@ -304,15 +301,15 @@ def _rafraichir_groupes(bot=None):
     travail etait jete a chaque frappe et n'aboutissait jamais. Le cache
     restait vide indefiniment, et l'autocompletion echouait a chaque fois.
     """
-    tache = _GROUPES_CACHE.get("tache")
+    tache = _ESPACES_CACHE.get("tache")
     if tache is not None and not tache.done():
         return tache
 
     async def _travail():
         try:
-            liste = await _charger_groupes_gms()
+            liste = await _charger_espaces_gms()
             if liste:
-                _GROUPES_CACHE.update({"ts": time.time(), "groupes": liste})
+                _ESPACES_CACHE.update({"ts": time.time(), "espaces": liste})
             return liste
         except Exception as e:
             print(f"[reportclick] chargement des groupes echoue : {e}")
@@ -322,11 +319,11 @@ def _rafraichir_groupes(bot=None):
         tache = asyncio.get_running_loop().create_task(_travail())
     except RuntimeError:
         return None                    # pas de boucle : rien a lancer
-    _GROUPES_CACHE["tache"] = tache
+    _ESPACES_CACHE["tache"] = tache
     return tache
 
 
-async def _groupes_gms(budget_s: float = 2.2) -> list:
+async def _espaces_gms(budget_s: float = 2.2) -> list:
     """Les groupes connus. Rend la liste PERIMEE plutot que rien.
 
     Si le cache est encore VIDE — juste apres un redemarrage, par exemple — on
@@ -337,13 +334,13 @@ async def _groupes_gms(budget_s: float = 2.2) -> list:
     Si le cache contient deja quelque chose, on ne bloque jamais : le
     rafraichissement part en fond et la frappe suivante en profitera.
     """
-    vieux = (time.time() - _GROUPES_CACHE.get("ts", 0)) >= _GROUPES_TTL
-    deja = _GROUPES_CACHE.get("groupes") or []
+    vieux = (time.time() - _ESPACES_CACHE.get("ts", 0)) >= _ESPACES_TTL
+    deja = _ESPACES_CACHE.get("espaces") or []
     if deja:
         if vieux:
-            _rafraichir_groupes()      # en fond, on ne fait attendre personne
+            _rafraichir_espaces()      # en fond, on ne fait attendre personne
         return deja
-    tache = _rafraichir_groupes()
+    tache = _rafraichir_espaces()
     if tache is not None:
         # asyncio.wait — et NON wait_for : le delai expire sans annuler la
         # tache. Elle continue, et la frappe suivante trouvera le cache rempli.
@@ -352,7 +349,7 @@ async def _groupes_gms(budget_s: float = 2.2) -> list:
             await asyncio.wait({tache}, timeout=budget_s)
         except Exception as e:
             print(f"[reportclick] attente des groupes : {e}")
-    return _GROUPES_CACHE.get("groupes") or []
+    return _ESPACES_CACHE.get("espaces") or []
 
 
 class ReportRefreshView(discord.ui.View):
@@ -445,7 +442,7 @@ class ClickRecap(commands.Cog):
         # Cache des groupes rempli dès le démarrage : sans ça la première
         # autocomplétion tombe sur un cache vide et n'affiche rien, ce qui se
         # lit comme « ce groupe n'existe pas » alors qu'il existe.
-        _rafraichir_groupes()
+        _rafraichir_espaces()
 
     def cog_unload(self):
         if self.daily_recap.is_running():
@@ -457,7 +454,7 @@ class ClickRecap(commands.Cog):
         """Propose les groupes GMS a la frappe.
 
         Discord plafonne a 25 propositions et coupe au-dela de 3 secondes :
-        _groupes_gms travaille sur cache et rend une liste perimee plutot que
+        _espaces_gms travaille sur cache et rend une liste perimee plutot que
         rien. Une autocompletion vide passerait pour un bug alors que le
         groupe existe.
         """
@@ -471,30 +468,24 @@ class ClickRecap(commands.Cog):
             return []
 
     async def _ac_groupe_reel(self, current: str):
-        groupes = await _groupes_gms()
+        """Propose les WORKSPACES, pas les groupes.
+
+        Le proprietaire suit ses clics par workspace (« marche francais »,
+        « JESSY LE RETOUR »…), pas groupe par groupe : proposer les 54 groupes
+        noyait le choix. Six lignes valent mieux que cinquante-quatre.
+        """
+        espaces = await _espaces_gms()
         cur = (current or "").strip().lower()
         if cur:
-            # Ceux qui COMMENCENT par la frappe d'abord : on cherche presque
-            # toujours un nom dont on connait le debut. Le workspace compte
-            # aussi — « khloe » doit trouver les groupes de ce workspace-la.
-            def _cle(g):
-                n, w = g["group_name"].lower(), g["team_name"].lower()
-                if n.startswith(cur):
-                    return 0
-                if cur in n:
-                    return 1
-                if cur in w:
-                    return 2
-                return 9
-            groupes = sorted([g for g in groupes if _cle(g) < 9], key=_cle)
+            debut = [e for e in espaces if e["name"].lower().startswith(cur)]
+            dedans = [e for e in espaces
+                      if cur in e["name"].lower() and e not in debut]
+            espaces = debut + dedans
         choix = []
-        for g in groupes[:25]:
-            # La valeur porte le workspace ET le groupe : un meme nom vit dans
-            # plusieurs workspaces (« Hybride »…), et sans le workspace la
-            # resolution repartirait deviner.
-            val = f"{g['team_id']}|{g['group_id']}"
-            lib = f"{g['group_name']} — {g['team_name']} ({g['link_count']})"
-            choix.append(app_commands.Choice(name=lib[:100], value=val[:100]))
+        for e in espaces[:25]:
+            lib = f"{e['name']} ({e.get('link_count') or 0} lien(s))"
+            choix.append(app_commands.Choice(name=lib[:100],
+                                             value=str(e["id"])[:100]))
         return choix
 
     async def _is_owner(self, uid):
@@ -555,7 +546,9 @@ class ClickRecap(commands.Cog):
         identity = c.get("identity")  # si défini -> énumération par suffixe (clé API)
         name = c.get("group_name") or "Groupe"
         _cle_m, libelle, drapeau, pays_marche = _marche_de(c)
-        metas = await asyncio.to_thread(_tag_call, gms.report_links_meta, team_id, identity, group_id)
+        tout_le_ws = bool(c.get("tout"))
+        metas = await asyncio.to_thread(_tag_call, gms.report_links_meta,
+                                        team_id, identity, group_id, tout_le_ws)
         # None = board GMS injoignable (cookie expiré, HTTP KO…). On NE réécrit
         # PAS le report avec un faux « 0 clic » : on skip et on garde le dernier
         # message valide (l'appelant voit None -> ne touche pas au message).
@@ -1585,7 +1578,7 @@ class ClickRecap(commands.Cog):
         description="[OWNER] Report des clics d'un groupe GMS dans CE salon (maj 30 min)",
     )
     @app_commands.describe(
-        groupe="Nom du groupe GMS (défaut : identité du serveur, ex: Hybride)",
+        groupe="Workspace GetMySocial a suivre (choisis dans la liste)",
         marche="Quels clics mettre en avant : fr, us, ou tout (défaut : tout)",
     )
     @app_commands.choices(marche=[
@@ -1623,6 +1616,9 @@ class ClickRecap(commands.Cog):
             "channel_id": cid, "team_id": data["team_id"],
             "group_id": data["group_id"], "identity": data["identity"],
             "group_name": data["group_name"], "marche": marche_cle,
+            # Sans ce drapeau, un report de workspace repartirait chercher un
+            # groupe au premier rafraichissement et ne trouverait plus rien.
+            "tout": bool(data.get("tout")),
         }
         # Re-lancer dans le MÊME salon : on réutilise le message existant (sinon
         # on poste un doublon). On regarde AUSSI l'ancienne clé, rangée sous le
@@ -1695,28 +1691,24 @@ class ClickRecap(commands.Cog):
             return None, ("⚠️ Précise le groupe : `groupe:Hybride` — ou définis l'identité "
                           "du serveur (`/setidentite`).")
 
-        # Valeur venue de l'autocomplétion : « <team_id>|<group_id> ». Elle
-        # désigne le groupe SANS ambiguïté, workspace compris. La résolution par
-        # nom, elle, ne cherche que dans KNOWN_TEAMS (deux workspaces sur sept)
-        # et se trompe de workspace quand deux groupes sont homonymes.
-        if "|" in name and name.split("|", 1)[1].startswith("grp_"):
-            tid, gid = name.split("|", 1)
-            tid = tid.strip() or None
-            # Le nom du groupe et celui du workspace viennent du cache de
-            # l'autocomplétion : il connaît les sept workspaces, là où
-            # _ws_label — défini plus bas — n'en nomme que deux.
-            libelle, espace = gid, (tid or "personnel")
-            for g in (_GROUPES_CACHE.get("groupes") or []):
-                if g.get("group_id") == gid:
-                    libelle = g.get("group_name") or gid
-                    espace = g.get("team_name") or espace
+        # Valeur venue de l'autocomplétion : un identifiant de WORKSPACE
+        # (« tm_… »). Le report couvre alors TOUS ses liens, sans regarder les
+        # groupes — c'est ce que veut le propriétaire : un salon par workspace,
+        # pas un par groupe (il y en a 54).
+        if name.startswith("tm_") and "|" not in name:
+            tid = name.strip()
+            libelle = tid
+            for e in (_ESPACES_CACHE.get("espaces") or []):
+                if str(e.get("id")) == tid:
+                    libelle = e.get("name") or tid
                     break
-            ids = await asyncio.to_thread(gms.report_link_ids, tid, None, gid)
+            ids = await asyncio.to_thread(gms.report_link_ids, tid, None, None,
+                                          True)
             if ids is None:
-                return None, ("❌ Impossible de lister les liens de ce groupe "
+                return None, ("❌ Impossible de lister les liens de ce workspace "
                               "(GetMySocial injoignable). Réessaie dans un instant.")
-            return {"team_id": tid, "identity": None, "group_id": gid,
-                    "group_name": libelle, "ws": espace,
+            return {"team_id": tid, "identity": None, "group_id": None,
+                    "tout": True, "group_name": libelle, "ws": libelle,
                     "ambig": "", "n": len(ids)}, None
         ident = name.lower()
         group_name = name[0].upper() + name[1:]  # hybride -> Hybride (groupes capitalisés)
@@ -1767,7 +1759,7 @@ class ClickRecap(commands.Cog):
         name="reportclicknow",
         description="[OWNER] Poste MAINTENANT un report complet des clics (snapshot)",
     )
-    @app_commands.describe(groupe="Nom du groupe GMS (défaut : identité du serveur, ex: Hybride)")
+    @app_commands.describe(groupe="Workspace GetMySocial a suivre (choisis dans la liste)")
     @app_commands.autocomplete(groupe=_ac_groupe)
     async def reportclicknow(self, interaction: discord.Interaction, groupe: str = None):
         if not await self._is_owner(interaction.user.id):

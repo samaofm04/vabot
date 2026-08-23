@@ -1333,7 +1333,8 @@ def link_ids_in_group(team_id: str, group_id: str) -> Optional[List[str]]:
 
 
 def report_link_ids(team_id: str, identity: Optional[str] = None,
-                    group_id: Optional[str] = None) -> Optional[List[str]]:
+                    group_id: Optional[str] = None,
+                    tout: bool = False) -> Optional[List[str]]:
     """Link ids a inclure dans un report de clics, le plus ROBUSTEMENT possible.
 
     Priorite au SUFFIXE de shortcode (ex: hybride -> '…secret') via la CLE API
@@ -1343,6 +1344,14 @@ def report_link_ids(team_id: str, identity: Optional[str] = None,
     None = impossible de recuperer (l'appelant NE DOIT PAS afficher « 0 clic »).
     []   = recupere mais aucun lien (vrai vide).
     """
+    # `tout` = tous les liens du workspace, sans regarder les groupes. Derriere
+    # un drapeau explicite : sans lui, un appel qui ne precise ni identite ni
+    # groupe rendait None, et des appelants comptent la-dessus.
+    if tout and team_id:
+        r = list_links_team(team_id)
+        if not r.get("ok"):
+            return None
+        return [l["id"] for l in r.get("links", []) if l.get("id")]
     suffix = _SHORTCODE_SUFFIX.get((identity or "").lower()) if identity else None
     if suffix and team_id:
         r = list_links_team(team_id)
@@ -1356,10 +1365,20 @@ def report_link_ids(team_id: str, identity: Optional[str] = None,
 
 
 def report_links_meta(team_id: str, identity: Optional[str] = None,
-                      group_id: Optional[str] = None) -> Optional[List[Dict[str, str]]]:
+                      group_id: Optional[str] = None,
+                      tout: bool = False) -> Optional[List[Dict[str, str]]]:
     """Comme report_link_ids mais renvoie les liens avec leur nom :
     [{id, shortcode, display_name}, …] pour un detail par lien (par VA).
     None = echec ; [] = vrai vide. Meme strategie clé API / cookie."""
+    if tout and team_id:
+        r = list_links_team(team_id)
+        if not r.get("ok"):
+            return None
+        return [
+            {"id": l.get("id"), "shortcode": l.get("shortcode") or "",
+             "display_name": l.get("display_name") or ""}
+            for l in r.get("links", []) if l.get("id")
+        ]
     suffix = _SHORTCODE_SUFFIX.get((identity or "").lower()) if identity else None
     if suffix and team_id:
         r = list_links_team(team_id)

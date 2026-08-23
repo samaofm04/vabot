@@ -4434,20 +4434,24 @@ try:
     check("clics : un frein protege le quota GetMySocial",
           _crCl._REFRESH_ATTENTE_S >= 30, str(_crCl._REFRESH_ATTENTE_S))
 
-    # -- autocompletion du groupe --------------------------------------------
+    # -- autocompletion : les WORKSPACES, pas les groupes ---------------------
+    # Le proprietaire suit ses clics par workspace (« marche francais »,
+    # « JESSY LE RETOUR »…) : proposer les 54 groupes noyait le choix.
     import asyncio as _aioCl
     import time as _tCl
 
-    def _gCl(nom, espace, gid, n=1):
-        return {"team_id": "tm_" + espace[:6], "team_name": espace,
-                "group_id": "grp_" + gid, "group_name": nom, "link_count": n}
+    def _eCl_(nom, tid, n=1):
+        return {"id": "tm_" + tid, "name": nom, "link_count": n}
 
-    _crCl._GROUPES_CACHE.update({"ts": _tCl.time(), "tache": None, "groupes": [
-        _gCl("Hybride", "Threads US", "hyb", 11),
-        _gCl("HYBRIDE US", "marche francais", "hybus", 3),
-        _gCl("Amelia", "marche francais", "ame", 14),
-        _gCl("VA 3 (Laboule)", "KHLOE", "va3"),
-    ] + [_gCl("G%02d" % i, "marche francais", "g%02d" % i) for i in range(30)]})
+    # Range par nombre de liens decroissant, comme _charger_espaces_gms : c est
+    # presque toujours le plus fourni qu on cherche, et l ordre du cache est
+    # celui des propositions.
+    _crCl._ESPACES_CACHE.update({"ts": _tCl.time(), "tache": None, "espaces": [
+        _eCl_("marche francais", "fr", 321),
+        _eCl_("Jessye Twitter", "jtw", 30),
+        _eCl_("JESSY LE RETOUR", "jlr", 20),
+        _eCl_("KHLOE", "khl", 10),
+    ] + [_eCl_("W%02d" % i, "w%02d" % i) for i in range(30)]})
 
     # Le faux cog doit porter la VRAIE methode : sans elle, l autocompletion
     # tombe dans sa garde et rend [], et les tests « passent » sur du vide.
@@ -4457,47 +4461,41 @@ try:
     def _acCl(frappe):
         return _aioCl.run(_crCl.ClickRecap._ac_groupe(_FauxCogCl(), None, frappe))
 
-    _rCl = [c.name.split(" — ")[0] for c in _acCl("hyb")]
-    check("clics : l autocompletion trouve sans respecter la casse",
-          _rCl == ["Hybride", "HYBRIDE US"], str(_rCl))
-    # Le workspace doit figurer dans le libelle : « Hybride » existe dans
-    # plusieurs workspaces, sans lui on ne saurait pas lequel on choisit.
-    _hybCl = _acCl("hyb")
-    check("clics : le workspace est affiche a cote du groupe",
-          bool(_hybCl) and all(" — " in c.name for c in _hybCl),
-          str([c.name for c in _hybCl]))
-    # La VALEUR porte workspace + groupe : la resolution par nom seul ne cherche
-    # que dans deux workspaces sur sept et se trompe sur les homonymes.
-    check("clics : la valeur porte le workspace ET le groupe",
-          bool(_hybCl) and all("|grp_" in c.value for c in _hybCl),
-          str([c.value for c in _hybCl]))
-    # On doit pouvoir chercher par WORKSPACE aussi.
-    check("clics : chercher par workspace fonctionne",
-          [c.name.split(" — ")[0] for c in _acCl("khlo")] == ["VA 3 (Laboule)"],
-          str([c.name for c in _acCl("khlo")]))
+    _jCl = _acCl("jessy")
+    check("clics : l autocompletion trouve les workspaces, sans la casse",
+          [c.name.split(" (")[0] for c in _jCl]
+          == ["Jessye Twitter", "JESSY LE RETOUR"],
+          str([c.name for c in _jCl]))
+    # La valeur est l identifiant du workspace : c est lui que la resolution
+    # attend pour couvrir TOUS ses liens.
+    check("clics : la valeur est un identifiant de workspace",
+          bool(_jCl) and all(c.value.startswith("tm_") for c in _jCl),
+          str([c.value for c in _jCl]))
+    check("clics : le nombre de liens est annonce",
+          bool(_jCl) and all("lien(s)" in c.name for c in _jCl),
+          str([c.name for c in _jCl]))
     # Discord REFUSE une reponse de plus de 25 propositions : au-dela, la liste
     # n apparait pas du tout et l utilisateur croit la commande cassee.
     check("clics : l autocompletion ne depasse jamais 25 propositions",
           len(_acCl("")) == 25, str(len(_acCl(""))))
     check("clics : une frappe sans correspondance ne propose rien",
           _acCl("zzzz") == [])
-    # GMS injoignable doit rendre une liste vide, pas lever : une exception
-    # laisserait la commande sans autocompletion et sans explication.
+
     # GMS injoignable, pour de vrai : on fait echouer le chargement lui-meme.
-    # Sans ca le test rechargeait les vrais groupes et ne prouvait rien.
-    _vraiChargeCl = _crCl._charger_groupes_gms
+    # Sans ca le test rechargeait les vrais workspaces et ne prouvait rien.
+    _vraiChargeCl = _crCl._charger_espaces_gms
 
     async def _bouumCl():
         raise RuntimeError("GetMySocial injoignable (simule)")
 
-    _crCl._charger_groupes_gms = _bouumCl
-    _crCl._GROUPES_CACHE.update({"ts": 0, "groupes": [], "tache": None})
+    _crCl._charger_espaces_gms = _bouumCl
+    _crCl._ESPACES_CACHE.update({"ts": 0, "espaces": [], "tache": None})
     try:
         check("clics : GMS injoignable -> liste vide, aucune exception",
               _acCl("x") == [])
     finally:
-        _crCl._charger_groupes_gms = _vraiChargeCl
-        _crCl._GROUPES_CACHE.update({"ts": 0, "groupes": [], "tache": None})
+        _crCl._charger_espaces_gms = _vraiChargeCl
+        _crCl._ESPACES_CACHE.update({"ts": 0, "espaces": [], "tache": None})
 except Exception as _eCl:
     check("clics : report testable", False, repr(_eCl)[:160])
 
