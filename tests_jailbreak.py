@@ -561,6 +561,57 @@ except Exception as _eOr:
 
 print()
 print("=" * 70)
+print("QUANTITE LIBRE (taper un nombre au lieu de le choisir)")
+print("=" * 70)
+try:
+    import pathlib as _plQ
+    from cogs.user import (_JB_QTY_OPTIONS, _JB_QTY_AUTRE, _JB_QTY_MAX,
+                           _jb_qty_options)
+
+    _o3 = _jb_qty_options(3)
+    check("quantite : les valeurs predefinies sont toujours proposees",
+          len(_o3) == len(_JB_QTY_OPTIONS) + 1,
+          "%d entrees pour %d valeurs" % (len(_o3), len(_JB_QTY_OPTIONS)))
+    check("quantite : l entree de saisie libre est la derniere",
+          _o3[-1].value == _JB_QTY_AUTRE,
+          "derniere entree : %r" % _o3[-1].value)
+    check("quantite : la valeur courante est cochee",
+          [o.value for o in _o3 if o.default] == ["3"])
+
+    # Sans reinjection, apres avoir tape 7 le menu n avait plus aucune ligne
+    # cochee : on ne savait plus ce qui etait selectionne.
+    _o7 = _jb_qty_options(7)
+    check("quantite : une valeur libre est reinjectee dans la liste",
+          "7" in [o.value for o in _o7])
+    check("quantite : et elle apparait cochee",
+          [o.value for o in _o7 if o.default] == ["7"])
+    check("quantite : la liste reste sous la limite Discord de 25",
+          len(_jb_qty_options(_JB_QTY_MAX)) <= 25,
+          "%d entrees" % len(_jb_qty_options(_JB_QTY_MAX)))
+
+    # DEUX selects de quantite existent : le menu ephemere et le panneau
+    # epingle. N en brancher qu un laisse la moitie des VA sans saisie libre,
+    # et rien ne le signale. C est deja arrive avec les icones.
+    _srcQ = _plQ.Path("cogs/user.py").read_text(encoding="utf-8")
+    check("quantite : les DEUX selects utilisent la meme liste",
+          _srcQ.count("_jb_qty_options(") == 3,   # 1 definition + 2 usages
+          "%d occurrence(s), 3 attendues" % _srcQ.count("_jb_qty_options("))
+    check("quantite : les DEUX callbacks ouvrent la fenetre de saisie",
+          _srcQ.count("_JBQtyModal(_suite)") == 2,
+          "%d sur 2" % _srcQ.count("_JBQtyModal(_suite)"))
+    check("quantite : plus aucune construction d options en dur",
+          "for q in _JB_QTY_OPTIONS]" not in _srcQ
+          and "for q in _JB_QTY_OPTIONS\n" not in _srcQ,
+          "un select fabrique encore sa liste de son cote")
+    # Un garde-fou de saisie : sans borne, un VA tapait 9999 et le bot partait
+    # chercher neuf mille medias.
+    check("quantite : la saisie libre est bornee",
+          isinstance(_JB_QTY_MAX, int) and 10 <= _JB_QTY_MAX <= 500)
+except Exception as _eQ:
+    check("quantite : testable", False, repr(_eQ)[:170])
+
+print()
+print("=" * 70)
 print("ICONES DES BOUTONS DISCORD (style du site)")
 print("=" * 70)
 try:

@@ -5220,6 +5220,58 @@ _JB_ACTIONS_US = [
 # Quantites proposees (multiplicateur). Plafonnees au stock reel de la model.
 _JB_QTY_OPTIONS = [1, 3, 5, 10, 15, 20, 30, 50, 60]
 
+# Discord ne sait pas faire un menu deroulant ou l on TAPE : une liste est une
+# liste fermee. Pour un nombre libre il faut une fenetre de saisie (Modal). On
+# ajoute donc une entree qui l ouvre, plutot que d allonger indefiniment la
+# liste des valeurs proposees.
+_JB_QTY_AUTRE = "__autre__"
+_JB_QTY_MAX = 100          # garde-fou de saisie ; le stock de la model plafonne ensuite
+
+
+def _jb_qty_options(courante: int) -> list:
+    """Les quantites proposees, plus la valeur libre en cours, plus « Autre ».
+
+    La valeur en cours est REINJECTEE si elle ne fait pas partie des choix
+    predefinis : sans ca, apres avoir tape 7, le menu n avait plus aucune
+    ligne cochee et on ne savait plus ce qui etait selectionne.
+    """
+    valeurs = sorted(set(_JB_QTY_OPTIONS) | {int(courante)})
+    opts = [discord.SelectOption(label=f"{q} média par action", value=str(q),
+                                 default=(q == int(courante)))
+            for q in valeurs]
+    opts.append(discord.SelectOption(
+        label="Autre nombre…", value=_JB_QTY_AUTRE, emoji="✏️",
+        description="Tape le nombre que tu veux"))
+    return opts
+
+
+class _JBQtyModal(discord.ui.Modal, title="Quantité par action"):
+    """La petite fenetre ou le VA tape son nombre."""
+
+    nombre = discord.ui.TextInput(
+        label="Combien de médias par action ?",
+        placeholder="ex : 7", required=True, min_length=1, max_length=3)
+
+    def __init__(self, suite):
+        super().__init__()
+        self._suite = suite          # coroutine(interaction, quantite)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        brut = str(self.nombre.value or "").strip()
+        try:
+            q = int(brut)
+        except ValueError:
+            # On repete ce qui a ete tape : « nombre invalide » tout court
+            # laisse chercher ce qui n allait pas.
+            await interaction.response.send_message(
+                f"« {brut} » n'est pas un nombre.", ephemeral=True)
+            return
+        if not 1 <= q <= _JB_QTY_MAX:
+            await interaction.response.send_message(
+                f"Choisis un nombre entre 1 et {_JB_QTY_MAX}.", ephemeral=True)
+            return
+        await self._suite(interaction, q)
+
 # Marché FR — exclu du menu Jailbreak US (/menujailbreakus). Le menu US montre
 # toutes les identités actives SAUF celles-ci (jessye/jailbreak-only INCLUSES,
 # contrairement au menu classique qui les exclut).
@@ -5326,25 +5378,27 @@ def _jb_us_models():
 class _JailbreakQtySelect(discord.ui.Select):
     """Choix de la quantite de media par action (multiplicateur jailbreak)."""
     def __init__(self, current):
-        opts = [
-            discord.SelectOption(
-                label=f"{q} média par action", value=str(q), default=(q == current))
-            for q in _JB_QTY_OPTIONS
-        ]
         super().__init__(
             placeholder=f"📦 Quantité : {current} par action",
-            min_values=1, max_values=1, options=opts, row=0)
+            min_values=1, max_values=1, options=_jb_qty_options(current), row=0)
 
     async def callback(self, interaction: discord.Interaction):
         if not _jb_can_use(interaction):
             await interaction.response.send_message(
                 "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
             return
+        view = self.view
+        if self.values and self.values[0] == _JB_QTY_AUTRE:
+            async def _suite(inter, q):
+                view.quantity = q
+                view._build()
+                await inter.response.edit_message(embed=view._embed(), view=view)
+            await interaction.response.send_modal(_JBQtyModal(_suite))
+            return
         try:
             q = int(self.values[0])
         except Exception:
             q = 3
-        view = self.view
         view.quantity = q
         view._build()  # reconstruit pour refleter la nouvelle quantite
         await interaction.response.edit_message(embed=view._embed(), view=view)
@@ -5775,12 +5829,9 @@ class JBQtySelect(discord.ui.DynamicItem[discord.ui.Select],
     def __init__(self, ident, qty):
         self.ident = (ident or "_").lower()
         self.qty = int(qty)
-        opts = [discord.SelectOption(label=f"{q} média par action", value=str(q),
-                                     default=(q == self.qty))
-                for q in _JB_QTY_OPTIONS]
         super().__init__(discord.ui.Select(
             placeholder=f"📦 Quantité : {self.qty} par action",
-            min_values=1, max_values=1, options=opts, row=0,
+            min_values=1, max_values=1, options=_jb_qty_options(self.qty), row=0,
             custom_id=f"jbus:q:{self.ident}:{self.qty}"))
 
     @classmethod
@@ -5792,13 +5843,28 @@ class JBQtySelect(discord.ui.DynamicItem[discord.ui.Select],
             await interaction.response.send_message(
                 "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
             return
+        vals = getattr(self.item, "values", None) or []
+
+        def _repose(inter, q):
+            """Reconstruit le panneau avec la quantite demandee."""
+            return _jb_panel(inter.client.get_cog("UserCog"), self.ident, q,
+                             guild=inter.guild,
+                             marche=marche_du_membre(inter.user))
+
+        if vals and vals[0] == _JB_QTY_AUTRE:
+            async def _suite(inter, q):
+                emb2, vue2 = _repose(inter, q)
+                # edit_message depuis une soumission de Modal modifie bien le
+                # message d origine : c est ce qui evite de reposter un
+                # panneau en double dans le salon.
+                await inter.response.edit_message(embed=emb2, view=vue2)
+            await interaction.response.send_modal(_JBQtyModal(_suite))
+            return
         try:
-            q = int(self.item.values[0])
+            q = int(vals[0])
         except Exception:
             q = self.qty
-        emb, view = _jb_panel(interaction.client.get_cog("UserCog"), self.ident, q,
-                              guild=interaction.guild,
-                              marche=marche_du_membre(interaction.user))
+        emb, view = _repose(interaction, q)
         await interaction.response.edit_message(embed=emb, view=view)
 
 
