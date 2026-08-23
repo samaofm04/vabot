@@ -2610,6 +2610,42 @@ except Exception as _eRg:
 
 print()
 print("=" * 70)
+print("VIGNETTE PERIMEE (defaut F4)")
+print("=" * 70)
+try:
+    import shutil as _shVg
+    import time as _tmVg
+    import web_upload as _wVg
+    from PIL import Image as _ImVg
+
+    # La cle d une vignette porte le NOM du fichier, pas son contenu.
+    # Supprimer puis re-televerser sous le meme nom laissait donc l apercu de
+    # l ANCIENNE video, definitivement — et avec un cache navigateur d une
+    # journee par-dessus. Le code nettoyait deja l etoile et le favori dans ce
+    # cas exact ; la vignette etait le troisieme etat oublie.
+    _idVg = "_tst_vignette"
+    _dVg = _wVg.IDENTITIES_DIR / _idVg / "posts"
+    _shVg.rmtree(_wVg.IDENTITIES_DIR / _idVg, ignore_errors=True)
+    _dVg.mkdir(parents=True)
+    _ImVg.new("RGB", (80, 80), (200, 0, 0)).save(_dVg / "p.jpg")
+    _cleVg = "%s/posts/p.jpg" % _idVg
+    _t1 = _wVg._get_or_create_thumbnail(_dVg / "p.jpg", _cleVg, False)
+    check("vignette : creee au premier appel", bool(_t1 and _t1.exists()))
+    _m1 = _t1.stat().st_mtime
+    _tmVg.sleep(1.1)                      # granularite du mtime
+    _ImVg.new("RGB", (80, 80), (0, 0, 200)).save(_dVg / "p.jpg")
+    _t2 = _wVg._get_or_create_thumbnail(_dVg / "p.jpg", _cleVg, False)
+    check("vignette : regeneree quand le media a change",
+          bool(_t2) and _t2.stat().st_mtime > _m1)
+    check("vignette : elle montre bien le NOUVEAU media",
+          _ImVg.open(_t2).convert("RGB").getpixel((40, 40))[2] > 100)
+    _shVg.rmtree(_wVg.IDENTITIES_DIR / _idVg, ignore_errors=True)
+    _shVg.rmtree(_wVg.THUMB_DIR / _idVg, ignore_errors=True)
+except Exception as _eVg:
+    check("vignette : testable", False, repr(_eVg)[:160])
+
+print()
+print("=" * 70)
 print("FRAGMENT LEGER DES GALERIES (defaut F5)")
 print("=" * 70)
 try:

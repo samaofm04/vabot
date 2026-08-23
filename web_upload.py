@@ -16377,7 +16377,16 @@ def _get_or_create_thumbnail(src: Path, rel_key: str, is_video: bool) -> Path:
     par clé grâce au verrou ; le 2e appelant attend puis trouve le fichier)."""
     thumb = _thumb_path_for(rel_key)
     if thumb.exists():
-        return thumb
+        # Perimee ? La cle porte le NOM du fichier, pas son contenu : supprimer
+        # puis re-televerser un fichier de meme nom laissait sinon l apercu de
+        # l ANCIENNE video, definitivement. Le code nettoie deja l etoile et le
+        # favori dans ce cas exact ; la vignette etait le troisieme etat oublie.
+        try:
+            if thumb.stat().st_mtime >= src.stat().st_mtime:
+                return thumb
+            thumb.unlink()
+        except OSError:
+            return thumb
     with _thumb_gen_lock(rel_key):
         if thumb.exists():   # généré pendant l'attente du verrou
             return thumb
@@ -43190,6 +43199,14 @@ def create_app():
                 # favori sans que personne ne l'ait voulu.
                 try:
                     _pop_fav_brute(fid)
+                except Exception:
+                    pass
+                # La vignette aussi : sans ca, un fichier re-televerse sous le
+                # meme nom heritait de l apercu de l ancien.
+                try:
+                    _t = _thumb_path_for(f"{scope}/{subdir}/{filename}")
+                    if _t.exists():
+                        _t.unlink()
                 except Exception:
                     pass
                 deleted.append(filename)
