@@ -38,6 +38,7 @@ _MENU_BTN_FEATURE = {
     # permanence sur tout serveur bride, sans erreur nulle part.
     "cmenu:capbanger": "contenu", "cmenu:montagebanger": "contenu",
     "cmenu:templatebrut": "contenu",
+    "cmenu:brutbanger": "contenu", "cmenu:captionbrut": "contenu",
     "cmenu:addaccount": "onboarding",
     "cmenu:lien": "liens", "cmenu:clics": "clics",
 }
@@ -251,6 +252,8 @@ def _build_menu_embed(identity, guild=None):
     add("cmenu:capbanger", "contenu", "⭐ Caption Banger", "Tes meilleures captions (marquées ⭐)")
     add("cmenu:montagebanger", "contenu", "🎬 Montage Banger", "Une brute ⭐ + une caption ⭐, montées pour toi")
     add("cmenu:templatebrut", "contenu", "🎵 Template + Brut", "Un template ⭐ assemblé avec une brute ⭐")
+    add("cmenu:brutbanger", "contenu", "🎥 Vidéo brut Banger", "Tes meilleures brutes ⭐, sans montage")
+    add("cmenu:captionbrut", "contenu", "📝 Caption + Brut", "Une brute ⭐ + sa caption ⭐ en texte")
     add("cmenu:pseudo", "contenu", "👤 Pseudo", "Des pseudos dispo")
     add("cmenu:name", "contenu", "📝 Name", "Des noms d'affichage")
     add("cmenu:bio", "contenu", "💬 Bio", "Des bios de ton identité")
@@ -2622,6 +2625,108 @@ class UserCog(commands.Cog):
             finally:
                 _sh.rmtree(tmp, ignore_errors=True)
 
+    async def _send_brutes_bangers(self, interaction):
+        """Bouton '🎥 Vidéo brut Banger' : les brutes ⭐, telles quelles.
+
+        Rien d'incruste, rien de genere : les fichiers partent comme ils sont.
+        C'est instantane, contrairement au Montage Banger qui fabrique une
+        video (15-30 s piece).
+        """
+        if await self._gate_contenu(interaction):
+            return
+        identity = get_user_identity(interaction.user.id)
+        if not identity:
+            await interaction.response.send_message(
+                "Tu n'as pas d'identité assignée. Demande à un admin.", ephemeral=True)
+            return
+        brutes = fav_brutes_for(identity)
+        if not brutes:
+            await interaction.response.send_message(
+                f"⭐ Aucune **vidéo brute favorite** pour `{identity}`.\n"
+                "_(Un admin les marque avec l'étoile ⭐ sur le site, onglet "
+                "**Vidéo brut**.)_", ephemeral=True)
+            return
+        await interaction.response.defer()
+        total = len(brutes)
+        await interaction.followup.send(
+            f"⭐ **{total} VIDÉO(S) BRUTE(S) BANGER pour `{identity}`** — les "
+            f"meilleures, sans texte ni montage : à toi de les monter. 🔥")
+        for idx, v in enumerate(brutes, start=1):
+            try:
+                await interaction.followup.send(
+                    content=f"🎥 **BRUTE BANGER {idx}/{total}** (`{identity}`)",
+                    file=discord.File(str(v), filename=v.name))
+            except discord.HTTPException as e:
+                await interaction.followup.send(
+                    f"⚠️ BRUTE BANGER {idx}/{total} : envoi impossible "
+                    f"(trop lourde) : {e}")
+
+    async def _send_caption_plus_brute(self, interaction):
+        """Bouton '📝 Caption + Brut Banger' : une brute ⭐ ET une caption ⭐,
+        envoyees SEPAREMENT.
+
+        La difference avec « Montage Banger » tient a un mot : ici la caption
+        arrive en TEXTE, a coller par le VA dans l'editeur Instagram ; la-bas
+        elle est incrustee dans la video par le moteur. D'ou deux couts tres
+        differents — instantane ici, 15-30 s par video la-bas.
+        """
+        if await self._gate_contenu(interaction):
+            return
+        identity = get_user_identity(interaction.user.id)
+        if not identity:
+            await interaction.response.send_message(
+                "Tu n'as pas d'identité assignée. Demande à un admin.", ephemeral=True)
+            return
+        brutes = fav_brutes_for(identity)
+        caps = fav_captions_for(identity)
+        if not brutes or not caps:
+            # Nommer le nombre de l'AUTRE cote : c'est ce qui apprend au VA —
+            # et au manager — ce qui manque reellement.
+            if not brutes and not caps:
+                manque = ("Il manque **les deux** : aucune vidéo brute étoilée "
+                          "(onglet **Vidéo brut**) et aucune caption étoilée "
+                          "(onglet **Caption**).")
+            elif not brutes:
+                manque = (f"Tu as **{len(caps)} caption(s) favorite(s)**, mais "
+                          f"**aucune vidéo brute étoilée**.")
+            else:
+                hors = fav_captions_desactivees(identity)
+                extra = (f" _(Tes {len(hors)} caption(s) favorite(s) sont "
+                         f"désactivées.)_" if hors else "")
+                manque = (f"Tu as **{len(brutes)} brute(s) favorite(s)**, mais "
+                          f"**aucune caption étoilée**.{extra}")
+            await interaction.response.send_message(
+                f"📝 Impossible pour `{identity}`.\n{manque}\n"
+                "_(Un admin pose les étoiles ⭐ sur le site.)_", ephemeral=True)
+            return
+        await interaction.response.defer()
+        total = min(len(brutes), 5)
+        await interaction.followup.send(
+            f"📝 **{total} BRUTE(S) + CAPTION BANGER pour `{identity}`**\n"
+            f"🎥 La vidéo est **nue** · 📝 la caption est à **écrire par-dessus** "
+            f"dans l'éditeur Instagram.")
+        used_c = set()
+        for idx, v in enumerate(brutes[:total], start=1):
+            cap = _pick_fresh(caps, used_c, key=lambda c: c.get("id"))
+            try:
+                await interaction.followup.send(
+                    content=f"🎥 **BRUTE {idx}/{total}** (`{identity}`)",
+                    file=discord.File(str(v), filename=v.name))
+            except discord.HTTPException as e:
+                await interaction.followup.send(
+                    f"⚠️ BRUTE {idx}/{total} : envoi impossible (trop lourde) : {e}")
+                continue
+            txt = str((cap or {}).get("text") or "").strip()
+            if txt:
+                await interaction.followup.send(
+                    f"📝 **CAPTION {idx}/{total}** (à mettre **par-dessus la "
+                    f"vidéo**) :\n```\n{txt[:1800]}\n```")
+            desc = str((cap or {}).get("desc") or "").strip()
+            if desc:
+                await interaction.followup.send(
+                    f"📄 **DESCRIPTION {idx}/{total}** (champ légende) :\n"
+                    f"```\n{desc[:1800]}\n```")
+
     # Les deux actions existent AUSSI en commandes, pour une raison precise :
     # le panneau du serveur US ne sait declencher que des app_commands — il
     # appelle cmd.callback sur un attribut du cog (_run_for_model). Sans ces
@@ -2647,6 +2752,18 @@ class UserCog(commands.Cog):
         description="Un template ⭐ assemble avec une video brute ⭐")
     async def templatebrut(self, interaction: discord.Interaction):
         await self._send_template_plus_brute(interaction)
+
+    @app_commands.command(
+        name="brutbanger",
+        description="Tes meilleures videos brutes (marquees ⭐), telles quelles")
+    async def brutbanger(self, interaction: discord.Interaction):
+        await self._send_brutes_bangers(interaction)
+
+    @app_commands.command(
+        name="captionbrut",
+        description="Une brute ⭐ + sa caption ⭐ en texte, a coller toi-meme")
+    async def captionbrut(self, interaction: discord.Interaction):
+        await self._send_caption_plus_brute(interaction)
 
     @app_commands.command(name="reel", description="Genere 3 reels (par defaut) : video clean + caption + description + exemple")
     @app_commands.describe(nombre="Combien de reels envoyer (1-10, defaut 3)")
@@ -4978,6 +5095,14 @@ class ContentMenuView(discord.ui.View):
     async def b_templatebrut(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_template_plus_brute(interaction)
 
+    @discord.ui.button(label="Vidéo brut Banger", emoji="🎥", style=discord.ButtonStyle.primary, custom_id="cmenu:brutbanger", row=4)
+    async def b_brutbanger(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._send_brutes_bangers(interaction)
+
+    @discord.ui.button(label="Caption + Brut", emoji="📝", style=discord.ButtonStyle.primary, custom_id="cmenu:captionbrut", row=4)
+    async def b_captionbrut(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._send_caption_plus_brute(interaction)
+
 
 class CentralMenuView(discord.ui.View):
     """Menu CENTRAL (salon partagé type #commande-va) : chaque bouton envoie le
@@ -5219,6 +5344,8 @@ _JB_ACTIONS_US = [
     ("capbanger", "⭐ Caption Banger", "captionbanger", False),
     ("montagebanger", "🎬 Montage Banger", "montagebanger", False),
     ("templatebrut", "🎵 Template + Brut", "templatebrut", False),
+    ("brutbanger", "🎥 Vidéo brut Banger", "brutbanger", False),
+    ("captionbrut", "📝 Caption + Brut", "captionbrut", False),
 ]
 
 # Quantites proposees (multiplicateur). Plafonnees au stock reel de la model.

@@ -4546,13 +4546,20 @@ try:
     # -- le menu VA porte bien les deux boutons -----------------------------
     _vFv = _uFv.ContentMenuView(None)
     _idsFv = [getattr(i, "custom_id", "") for i in _vFv.children]
-    check("favoris : les 3 boutons sont dans le menu VA",
-          all(b in _idsFv for b in ("cmenu:capbanger", "cmenu:montagebanger",
-                                    "cmenu:templatebrut")))
-    check("favoris : les 3 boutons sont declares dans _MENU_BTN_FEATURE",
-          all(_uFv._MENU_BTN_FEATURE.get(b) == "contenu"
-              for b in ("cmenu:capbanger", "cmenu:montagebanger",
-                        "cmenu:templatebrut")))
+    _BTNS = ("cmenu:capbanger", "cmenu:montagebanger", "cmenu:templatebrut",
+             "cmenu:brutbanger", "cmenu:captionbrut")
+    check("favoris : les 5 boutons sont dans le menu VA",
+          all(b in _idsFv for b in _BTNS),
+          str([b for b in _BTNS if b not in _idsFv]))
+    check("favoris : les 5 boutons sont declares dans _MENU_BTN_FEATURE",
+          all(_uFv._MENU_BTN_FEATURE.get(b) == "contenu" for b in _BTNS),
+          str([b for b in _BTNS if _uFv._MENU_BTN_FEATURE.get(b) != "contenu"]))
+    # Discord plafonne a 5 boutons par rangee : une 6e sur la meme ligne fait
+    # echouer l instanciation de la vue, donc le menu entier.
+    from collections import Counter as _CntFv
+    _rowsV = _CntFv(i.row for i in _vFv.children)
+    check("favoris : aucune rangee du menu VA ne deborde",
+          all(n <= 5 for n in _rowsV.values()), str(dict(_rowsV)))
     check("favoris : la vue tient dans les 25 composants de Discord",
           len(_vFv.children) <= 25, "%d composants" % len(_vFv.children))
 
@@ -4562,8 +4569,10 @@ try:
     # boutons n'existent que sur le serveur francais.
     import re as _reFv
     _clesFv = {a[0] for a in _uFv._JB_ACTIONS_US}
-    check("favoris : les 3 actions sont dans le menu US",
-          all(k in _clesFv for k in ("capbanger", "montagebanger", "templatebrut")))
+    check("favoris : les 5 actions sont dans le menu US",
+          all(k in _clesFv for k in ("capbanger", "montagebanger", "templatebrut",
+                                     "brutbanger", "captionbrut")),
+          str(sorted(_clesFv)))
     # Le panneau US declenche cmd.callback sur un ATTRIBUT du cog : une action
     # qui pointe vers une methode inexistante repond « Action indisponible ».
     for _k, _lb, _cmd, _sc in _uFv._JB_ACTIONS_US:
