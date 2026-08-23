@@ -3350,9 +3350,16 @@ try:
     # sur 11, #f59e0b sur 10...), simplement parce qu on ne relit jamais le CSS
     # en se demandant de quelle couleur est le fond.
     from collections import Counter as _CntTh
-    _usages = _CntTh(_reTh.findall(r"(?<!-)color:\s*(#[0-9a-fA-F]{6})", _srcTh))
+    # Les hex a TROIS chiffres comptent autant : #bbb et #eee etaient passes
+    # entre les mailles parce que le motif n acceptait que six caracteres.
+    _usages = _CntTh(_reTh.findall(
+        r"(?<!-)color:\s*(#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3}(?![0-9a-fA-F])))", _srcTh))
 
     def _contrasteBlancTh(h):
+        h = h.lstrip("#")
+        if len(h) == 3:
+            h = "".join(_c * 2 for _c in h)
+        h = "#" + h
         _r, _g, _b = int(h[1:3], 16), int(h[3:5], 16), int(h[5:7], 16)
 
         def _f(v):

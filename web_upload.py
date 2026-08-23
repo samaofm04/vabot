@@ -1222,6 +1222,12 @@ body.light [style*="color:#60a5fa"]{color:#1d4ed8!important}
 body.light [style*="color:#7aa2ff"]{color:#1d4ed8!important}
 body.light [style*="color:#93c5fd"]{color:#1d4ed8!important}
 body.light [style*="color:#fca5a5"]{color:#b91c1c!important}   /* rouge pale, 3 usages */
+/* Ecrites sur trois chiffres, elles avaient echappe au recensement qui ne
+   regardait que les hex a six. Mesurees dans la page : 43 elements, tous
+   sur fond clair. */
+body.light [style*="color:#f99"]{color:#b91c1c!important}
+body.light [style*="color:#bbb"]{color:#4b5563!important}
+body.light [style*="color:#eee"]{color:#111827!important}
 /* PANNEAUX RESTES SOMBRES. La panne inverse de celle du dessus : ici c est
    le fond qui n a pas ete repeint, pendant que le texte, lui, passait au
    fonce. Mesure sur la page : une trentaine d elements en fonce sur fonce.
@@ -1270,6 +1276,17 @@ body.light .ja-tip .d,body.light .ja-tip .r{color:#4b5563}
    Sur une pastille devenue blanche, le libelle disparaissait au survol.
    L etat .active, lui, pose son propre fond violet : son blanc est bon. */
 body.light .vlm-pill:hover{color:#7e22ce}
+/* Le theme peint en bleu plein TOUT bouton d action principale
+   (button[type=submit], .btn, .badge, les bascules actives...) mais ne
+   disait rien de leur texte. Mesure dans la page : 126 elements au fond
+   bleu, dont seulement 54 avec du texte blanc — les 72 autres gardaient
+   le texte fonce du theme clair, et l un d eux, le bouton Importer du
+   Drive, tombait a 1,25 parce qu il posait aussi sa propre couleur verte.
+   Un fond decide par le theme doit emporter la couleur du texte avec lui. */
+body.light .btn,body.light button[type=submit],body.light .lb-btn-primary,
+body.light .badge,body.light .vac-btn-active,body.light .vpm-kind-btn.active,
+body.light .vpm-save,body.light .cur-toggle button.active,body.light .exp-submit,
+body.light .sidebar .group .item .badge,body.light .up-step .up-dot{color:#fff!important}
 body.light .gd-seg button,body.light .ja-seg button,body.light .av-seg button{color:#4b5563}
 body.light .gd-seg button.on,body.light .ja-seg button.on,body.light .av-seg button.on{color:#fff}
 body.light .gd-tbl [style*="color:#fbbf24"]{color:#a16207!important}
