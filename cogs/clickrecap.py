@@ -30,6 +30,28 @@ def _tag_call(_fn, *a, **kw):
         return _fn(*a, **kw)
 
 
+def _analytics_reparti(gms, lid, a, b):
+    """analytics_for_link sur une clé du POOL, en rotation.
+
+    Le quota GetMySocial est PAR CLE. Le report d'un workspace de 20 liens fait
+    80 appels d'un coup : sur une seule clé, la moitie repartait en echec et le
+    tableau se remplissait de « — ». En les repartissant sur les 5 clés
+    dediees, chacune ne voit qu'un cinquieme du trafic.
+
+    La cle DOIT etre posee dans le thread qui appelle : use_key travaille sur un
+    thread-local. La poser dans la boucle asyncio n'aurait servi a rien — meme
+    raison que pour api_tag, cf. _tag_call.
+
+    Sans pool configure, next_dash_key rend '' et use_key est un no-op : on
+    retombe sur la cle principale, comme avant.
+    """
+    try:
+        with gms.use_key(gms.next_dash_key()):
+            return _tagged_analytics(gms, lid, a, b)
+    except AttributeError:          # vieux gms sans pool de cles
+        return _tagged_analytics(gms, lid, a, b)
+
+
 def _tagged_analytics(gms, lid, a, b):
     """analytics_for_link étiqueté 'report' (instrumentation gms.api_usage)."""
     try:
@@ -601,12 +623,20 @@ class ClickRecap(commands.Cog):
                 (week_start, today),     # this week
                 (cyc_s, cyc_e),          # current pay period
             ]
+            # Concurrence BORNEE. Sans elle, 20 liens x 4 periodes partaient en
+            # 80 appels simultanes : GetMySocial en laissait tomber la moitie,
+            # et le tableau se remplissait de « — » alors que les memes appels,
+            # passes en file, reussissent tous (mesure : 12/12 en 3,7 s).
+            # Meme borne que _fetch_daily_stats, qui a deja tranche la question.
+            _sem = asyncio.Semaphore(6)
+
+            async def _un(lid, s, e):
+                async with _sem:
+                    return await asyncio.to_thread(_analytics_reparti, gms, lid,
+                                                   s.isoformat(), e.isoformat())
+
             per = await asyncio.gather(*[
-                asyncio.gather(*[
-                    asyncio.to_thread(_tagged_analytics, gms, m["id"],
-                                      s.isoformat(), e.isoformat())
-                    for (s, e) in _plages
-                ])
+                asyncio.gather(*[_un(m["id"], s, e) for (s, e) in _plages])
                 for m in metas if m.get("id")
             ])
 
@@ -690,35 +720,46 @@ class ClickRecap(commands.Cog):
                 inline=False)
 
         if detail_ok and rows:
-            # Tableau en bloc de code : c'est la seule mise en forme que Discord
-            # aligne. Les drapeaux ne s'alignent pas en chasse fixe, ils restent
-            # donc dans l'en-tete de colonne, en toutes lettres.
-            entete = (f"{'LINK':<15}{'TODAY':>11}{'WEEK':>11}{'PERIOD':>11}\n"
-                      f"{'':<15}{'US/ALL' if pays_marche else 'ALL':>11}"
-                      f"{'US/ALL' if pays_marche else 'ALL':>11}"
-                      f"{'US/ALL' if pays_marche else 'ALL':>11}")
+            # DEUX tableaux, pas un : « 10/17 » dans une seule colonne laissait
+            # se demander lequel des deux chiffres etait le US. Chaque tableau
+            # porte son drapeau dans son titre, il n'y a plus a deviner.
+            #
+            # Bloc de code : c'est la seule mise en forme que Discord aligne.
+            # Les drapeaux, eux, ne s'alignent pas en chasse fixe — d'ou leur
+            # place dans le titre plutot que dans le tableau.
+            entete = (f"{'LINK':<15}{'TODAY':>7}{'YEST':>7}"
+                      f"{'WEEK':>7}{'PERIOD':>8}")
 
-            def _cell(paire):
-                u, t = paire
-                if t is None:
-                    return "—"
-                return str(t) if u is None else f"{u}/{t}"
+            def _c(v):
+                # « — » veut dire « pas su lire », JAMAIS « zero ». Ecrire 0
+                # a la place d'un echec serait un mensonge qu'on ne verrait pas.
+                return "—" if v is None else str(v)
 
-            lignes = [f"{str(lab)[:14]:<15}{_cell(p[0]):>11}"
-                      f"{_cell(p[2]):>11}{_cell(p[3]):>11}"
-                      for lab, p in rows]
-            bloc, blocs = "", []
-            for ln in lignes:
-                if len(bloc) + len(ln) + 1 > 900:
+            def _tableau(indice):
+                lignes = [
+                    f"{str(lab)[:14]:<15}"
+                    f"{_c(p[0][indice]):>7}{_c(p[1][indice]):>7}"
+                    f"{_c(p[2][indice]):>7}{_c(p[3][indice]):>8}"
+                    for lab, p in rows]
+                bloc, blocs = "", []
+                for ln in lignes:
+                    if len(bloc) + len(ln) + 1 > 880:
+                        blocs.append(bloc)
+                        bloc = ""
+                    bloc += ("\n" if bloc else "") + ln
+                if bloc:
                     blocs.append(bloc)
-                    bloc = ""
-                bloc += ("\n" if bloc else "") + ln
-            if bloc:
-                blocs.append(bloc)
-            for i, b in enumerate(blocs):
-                titre = ("📋 Per link" if i == 0 else "📋 Per link (cont.)")
-                corps = (entete + "\n" + b) if i == 0 else b
-                emb.add_field(name=titre, value=f"```\n{corps}\n```", inline=False)
+                return blocs
+
+            _tables = ([(f"{drapeau} {libelle} clicks per link", 0)]
+                       if pays_marche else [])
+            _tables.append(("🌍 All countries per link", 1))
+            for titre, indice in _tables:
+                for i, b in enumerate(_tableau(indice)):
+                    corps = (entete + "\n" + b) if i == 0 else b
+                    emb.add_field(
+                        name=(titre if i == 0 else f"{titre} (cont.)"),
+                        value=f"```\n{corps}\n```", inline=False)
         elif ids and not all_none and len(ids) > _MAX_PER_LIEN:
             emb.add_field(
                 name="📋 Per link",
