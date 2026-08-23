@@ -1283,6 +1283,15 @@ body.light .jb-stat-green{color:#15803d}
 /* Pastille de comptage : fond bleu translucide sur du blanc, donc tres
    pale ; le bleu clair du texte y tombait a 2,14. */
 body.light .va-vlist-count{color:#1d4ed8}
+/* Pastilles a fond TRANSLUCIDE. Un rgba(...,.12) pose sur du blanc reste
+   blanc : il ne protege pas le texte, contrairement a un fond plein. Les
+   verts clairs y tombaient a 1,57 et les bleus a 2,22. */
+body.light .jb-scrape-one,body.light .jb-acc-pill.ok,body.light .gd-tg,
+body.light .mpl-event-type,body.light .mpl-mini-badge{color:#15803d}
+body.light .jb-acc-pill.warn{color:#c2410c}
+body.light .jb-acc-pill.ban{color:#b91c1c}
+body.light .jb-acc-pill.quiet{color:#4b5563}
+body.light .va-section-count{color:#1d4ed8}
 /* Selecteur d identites (le menu deroulant des cartes d import) : panneau
    et bouton restes en #131316. Ses 113 lignes sont donc CLAIRES SUR
    SOMBRE — lisibles, mais c est un menu noir au milieu d une interface

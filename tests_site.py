@@ -3393,6 +3393,13 @@ try:
         "jb-avatar-fb": "initiale sur une couleur generee par identite",
         "jb-va-avatar-fb": "initiale sur une couleur generee par identite",
         "jb-side-va-fb": "initiale sur une couleur generee par identite",
+        # La visionneuse plein ecran (#lightbox, fond rgba(0,0,0,.78)) n a pas
+        # de regle claire : elle reste NOIRE dans les deux themes, comme toute
+        # visionneuse de media. Ses commandes doivent donc rester blanches.
+        "lb-close-btn": "commande de la visionneuse, qui reste noire",
+        "lb-counter": "commande de la visionneuse, qui reste noire",
+        "lb-nav": "commande de la visionneuse, qui reste noire",
+        "lb-dual-label": "libelle dans la visionneuse, qui reste noire",
     }
     # On lit le CSS REELLEMENT SERVI, pas le fichier source. Deux tentatives
     # precedentes ont echoue pour des raisons opposees : exiger un debut de
@@ -3433,9 +3440,19 @@ try:
         if "body." in _selTotal or "@" in _selTotal:
             continue
         _c = _reTh.search(r"(?<!-)color:\s*(#[0-9a-fA-F]{3,6})", _corps)
-        # Une regle qui pose son propre fond assume sa couleur de texte.
-        if not _c or _reTh.search(r"background:\s*(?!none|transparent)", _corps):
+        if not _c:
             continue
+        # Une regle qui pose un fond OPAQUE assume la couleur de son texte.
+        # Un fond TRANSLUCIDE, lui, ne protege rien : pose sur du blanc il
+        # reste blanc. C est ce qui laissait passer les pastilles du Jailbreak
+        # (fond rgba(...,.12), texte vert clair : 1,57) et les compteurs de VA.
+        _bg = _reTh.search(r"background(?:-color)?:\s*([^;]+)", _corps)
+        if _bg:
+            _v = _bg.group(1).strip().lower()
+            _op = _reTh.search(r"rgba\([^)]*?,\s*([0-9.]+)\s*\)", _v)
+            _translucide = bool(_op) and float(_op.group(1)) < 0.55
+            if _v not in ("none", "transparent") and not _translucide:
+                continue
         _h = _c.group(1)
         if len(_h) == 4:
             _h = "#" + "".join(_ch * 2 for _ch in _h[1:])
