@@ -8012,7 +8012,7 @@ document.addEventListener('click',function(e){
       </button>
       <div class="sub-items">
         <button class="item" onclick="comingSoon()"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9aa0a6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Accounts</span><span class="badge">SOON</span></button>
-        <button class="item soon" onclick="comingSoon()"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9aa0a6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>Trends</span><span class="badge">SOON</span></button>
+        <button class="item" id="tab-tktrends" onclick="showTab('trends','tktrends','TikTok Trends','Les meilleures videos des comptes concurrents')"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9aa0a6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>Trends</span></button>
       </div>
     </div>
 
@@ -10269,6 +10269,10 @@ document.addEventListener('keydown', function(e){
 </script>
 
 </div><!-- /form-igtrends -->
+
+<div class="form-section" id="form-tktrends" style="display:none">
+{tiktok_trends_html}
+</div><!-- /form-tktrends -->
 
 <!-- HOME -->
 <div class="form-section" id="form-home">
@@ -16275,6 +16279,48 @@ def _generate_image_thumbnail(src: Path, dest: Path) -> bool:
     except Exception as e:
         log.error(f"Image thumbnail error pour {src}: {e}")
         return False
+
+
+#: Servie a la place d'une vignette video qu'on n'a pas su extraire. Quelques
+#: centaines d'octets au lieu de la video entiere, et surtout : elle SE VOIT.
+#: Un carre noir ressemble a un chargement en cours ; ce pictogramme dit qu'il
+#: y a un probleme, et la carte reste cliquable pour ouvrir la vraie video.
+_VIGNETTE_ABSENTE = (
+    "<svg xmlns='http://www.w3.org/2000/svg' width='400' height='400' "
+    "viewBox='0 0 400 400'>"
+    "<rect width='400' height='400' fill='#23232b'/>"
+    "<g stroke='#5a5a6a' stroke-width='9' fill='none' stroke-linecap='round'>"
+    "<rect x='128' y='150' width='144' height='100' rx='12'/>"
+    "<path d='M175 200 l52 0'/>"
+    "<path d='M120 142 l160 116'/>"
+    "</g>"
+    "<text x='200' y='296' text-anchor='middle' fill='#6c6c7d' "
+    "font-family='sans-serif' font-size='19'>aperçu indisponible</text>"
+    "</svg>"
+).encode("utf-8")
+
+
+def _diag_ffmpeg() -> str:
+    """Une phrase sur l'etat de ffmpeg, pour la page /version.
+
+    Question posee autrement : « pourquoi mes apercus sont tout noirs ». Sans
+    ffmpeg, aucune vignette video n'est extraite, et le repli de la route
+    servait la VIDEO ENTIERE a la place — un <img> qui recoit une video
+    n'affiche rien, et la galerie telecharge des centaines de megaoctets pour
+    montrer du noir.
+    """
+    try:
+        r = subprocess.run(["ffmpeg", "-version"], capture_output=True,
+                           timeout=8, text=True)
+        if r.returncode == 0:
+            prem = (r.stdout or "").splitlines()[0][:70]
+            return "present — %s" % html_escape(prem)
+        return "repond mal (code %s) — les apercus video seront noirs" % r.returncode
+    except FileNotFoundError:
+        return ("ABSENT — c'est la cause des apercus noirs. "
+                "Installer ffmpeg sur le serveur.")
+    except Exception as e:
+        return "indeterminable : %s" % html_escape(str(e)[:70])
 
 
 def _generate_video_thumbnail(src: Path, dest: Path) -> bool:
@@ -29729,6 +29775,22 @@ async function obImportDiscord(){
     return header_html + cards_html + add_step_html + js
 
 
+def _render_tiktok_trends_html() -> str:
+    """Onglet « TikTok Trends ». Passe-plat vers veille_tiktok_ui.py.
+
+    L'import est local : si le module manque ou casse, c'est CET onglet qui
+    affiche l'erreur, pas le tableau de bord entier qui refuse de demarrer.
+    """
+    try:
+        import veille_tiktok_ui
+        return veille_tiktok_ui.rendu_html()
+    except Exception as e:
+        return ("<div style='background:#1a1a1a;border:1px solid #2a2a2a;"
+                "border-radius:12px;padding:40px 20px;text-align:center;"
+                "color:#f99'>Onglet TikTok indisponible : "
+                f"{type(e).__name__}: {e}</div>")
+
+
 def _render_veille_feed_html() -> str:
     """Liste des reels veille, groupes par jour. Bouton 'Send to Telegram' par reel."""
     try:
@@ -40033,6 +40095,7 @@ ROLE_MENU_STRUCTURE = [
     {"section": "Trends", "items": [
         {"key": "igaccounts", "name": "Instagram — Accounts (watchlist)", "perms": ["view", "edit"]},
         {"key": "igtrends", "name": "Instagram — Trends", "perms": ["view", "scrape"]},
+        {"key": "tktrends", "name": "TikTok — Trends", "perms": ["view", "scrape"]},
         {"key": "veille", "name": "Veille (reels sauvegardés) — ouvre aussi Instagram Trends",
          "perms": ["view", "create"]},
     ]},
@@ -41257,6 +41320,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{sfssetupof_html}", _lazy("sfssetupof"))
         .replace("{vtg_html}", _lazy("vtg"))
         .replace("{veille_feed_html}", _g("veille", _render_veille_feed_html))
+        .replace("{tiktok_trends_html}", _lazy("tktrends"))
         .replace("{mypulslive_html}", _g("mypulslive", _render_mypulslive_html))
         .replace("{chatplanning_html}", _lazy("chatplanning"))
         .replace("{videocrea_html}", _lazy("videocrea"))
@@ -42339,6 +42403,9 @@ def create_app():
                 "remote2": _render_remote2_html,
                 "paievas": _render_paievas_html,
                 "veille": _render_veille_feed_html,
+                # Onglet TikTok Trends : rendu delegue a veille_tiktok_ui.py
+                # (HTML sans dependance a l'etat de la page -> reinjectable).
+                "tktrends": _render_tiktok_trends_html,
                 "cloudbios": lambda: _render_textvault_html("bios"),
                 "cloudctas": lambda: _render_textvault_html("ctas"),
                 "cloudcaptions": _render_cloud_captions_html,
@@ -42643,10 +42710,21 @@ def create_app():
         is_video = subdir in ("videos", "brutes", "templates", "pro_videos")
         thumb = _get_or_create_thumbnail(src, rel_key, is_video)
         if thumb is None or not thumb.exists():
-            # Fallback : servir le fichier original
+            # Repli. Il servait le fichier ORIGINAL — pour une video, c'est
+            # envoyer plusieurs megaoctets dans un <img>, qui n'affiche alors
+            # rien : une galerie de 204 rushs telechargeait 400 Mo pour montrer
+            # un mur de cartes noires, et le navigateur passait pour le
+            # coupable. On ne sert donc l'original que si c'en est une IMAGE.
             from flask import send_file
-            response = send_file(str(src))
-            response.headers["Cache-Control"] = "public, max-age=3600"
+            if not is_video:
+                response = send_file(str(src))
+                response.headers["Cache-Control"] = "public, max-age=3600"
+                return response
+            # Video sans vignette : une image legere, et un en-tete qui NOMME
+            # la cause plutot que de la taire (ffmpeg absent, le plus souvent).
+            response = app.response_class(_VIGNETTE_ABSENTE, mimetype="image/svg+xml")
+            response.headers["X-Thumb-Error"] = "extraction impossible (ffmpeg ?)"
+            response.headers["Cache-Control"] = "no-store"
             return response
         from flask import send_file
         response = send_file(str(thumb), conditional=True)
@@ -45956,6 +46034,11 @@ def create_app():
             f"<span style='color:#666'>publie le {html_escape(quand[:16].replace('T', ' a '))}</span></p>"
             f"<p><b>Serveur demarre</b> : {demarre} "
             f"<span style='color:#666'>(il y a {age} min)</span></p>"
+            # ffmpeg decide de TOUTES les vignettes video. Sans lui, la
+            # galerie des rushs bruts est un mur de cartes noires — et on
+            # cherche du cote du navigateur pendant des heures. Autant que la
+            # page qu'on ouvre deja pour verifier un deploiement le dise.
+            f"<p><b>ffmpeg</b> : {_diag_ffmpeg()}</p>"
             "<p style='color:#666;font-size:13px'>Si le code affiche ici n'est pas "
             "le dernier publie, le serveur n'a pas redemarre. Si c'est bien le "
             "dernier mais que la page reste ancienne, c'est le cache du "
@@ -53613,6 +53696,13 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         facture_web.register(app, is_auth)
     except Exception as _fx_e:
         log.error(f"facture_web register échoué: {_fx_e}")
+
+    # Onglet « TikTok Trends » : collecte Apify + classement (veille_tiktok_ui.py)
+    try:
+        import veille_tiktok_ui
+        veille_tiktok_ui.register(app, is_auth)
+    except Exception as _tk_e:
+        log.error(f"veille_tiktok_ui register échoué: {_tk_e}")
 
     # Onglet « Remote 2 » : poste de pilotage du parc (parc_web.py).
     # Enregistre /parc/* ET un after_request qui OBSERVE /api/rig/* sans
