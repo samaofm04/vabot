@@ -4437,9 +4437,17 @@ try:
     # -- autocompletion du groupe --------------------------------------------
     import asyncio as _aioCl
     import time as _tCl
-    _crCl._GROUPES_CACHE.update({"ts": _tCl.time(), "noms": [
-        "Hybride", "HYBRIDE US", "Amelia JB", "Toky", "Emma"]
-        + ["G%02d" % i for i in range(30)]})
+
+    def _gCl(nom, espace, gid, n=1):
+        return {"team_id": "tm_" + espace[:6], "team_name": espace,
+                "group_id": "grp_" + gid, "group_name": nom, "link_count": n}
+
+    _crCl._GROUPES_CACHE.update({"ts": _tCl.time(), "en_cours": False, "groupes": [
+        _gCl("Hybride", "Threads US", "hyb", 11),
+        _gCl("HYBRIDE US", "marche francais", "hybus", 3),
+        _gCl("Amelia", "marche francais", "ame", 14),
+        _gCl("VA 3 (Laboule)", "KHLOE", "va3"),
+    ] + [_gCl("G%02d" % i, "marche francais", "g%02d" % i) for i in range(30)]})
 
     class _FauxCogCl:
         pass
@@ -4447,21 +4455,35 @@ try:
     def _acCl(frappe):
         return _aioCl.run(_crCl.ClickRecap._ac_groupe(_FauxCogCl(), None, frappe))
 
-    _rCl = [c.value for c in _acCl("hyb")]
+    _rCl = [c.name.split(" — ")[0] for c in _acCl("hyb")]
     check("clics : l autocompletion trouve sans respecter la casse",
           _rCl == ["Hybride", "HYBRIDE US"], str(_rCl))
+    # Le workspace doit figurer dans le libelle : « Hybride » existe dans
+    # plusieurs workspaces, sans lui on ne saurait pas lequel on choisit.
+    check("clics : le workspace est affiche a cote du groupe",
+          all(" — " in c.name for c in _acCl("hyb")),
+          str([c.name for c in _acCl("hyb")]))
+    # La VALEUR porte workspace + groupe : la resolution par nom seul ne cherche
+    # que dans deux workspaces sur sept et se trompe sur les homonymes.
+    check("clics : la valeur porte le workspace ET le groupe",
+          all("|grp_" in c.value for c in _acCl("hyb")),
+          str([c.value for c in _acCl("hyb")]))
+    # On doit pouvoir chercher par WORKSPACE aussi.
+    check("clics : chercher par workspace fonctionne",
+          [c.name.split(" — ")[0] for c in _acCl("khlo")] == ["VA 3 (Laboule)"],
+          str([c.name for c in _acCl("khlo")]))
     # Discord REFUSE une reponse de plus de 25 propositions : au-dela, la liste
     # n apparait pas du tout et l utilisateur croit la commande cassee.
     check("clics : l autocompletion ne depasse jamais 25 propositions",
           len(_acCl("")) == 25, str(len(_acCl(""))))
     check("clics : une frappe sans correspondance ne propose rien",
           _acCl("zzzz") == [])
-    # Sans cookie GMS (ou board injoignable) elle doit rendre une liste vide,
-    # pas lever : une exception laisserait la commande sans autocompletion et
-    # sans explication.
-    _crCl._GROUPES_CACHE.update({"ts": 0, "noms": []})
+    # GMS injoignable doit rendre une liste vide, pas lever : une exception
+    # laisserait la commande sans autocompletion et sans explication.
+    _crCl._GROUPES_CACHE.update({"ts": 0, "groupes": [], "en_cours": True})
     check("clics : GMS injoignable -> liste vide, aucune exception",
           _acCl("x") == [])
+    _crCl._GROUPES_CACHE["en_cours"] = False
 except Exception as _eCl:
     check("clics : report testable", False, repr(_eCl)[:160])
 

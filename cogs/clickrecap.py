@@ -268,41 +268,69 @@ _REFRESH_ATTENTE_S = 60
 #: Discord coupe une autocompletion qui n'a pas repondu en 3 secondes, et
 #: list_team_groups interroge le board prive (cookie, ~1 s par workspace).
 #: Sans cache, la liste serait vide une fois sur deux.
-_GROUPES_CACHE = {"ts": 0.0, "noms": []}
+_GROUPES_CACHE = {"ts": 0.0, "groupes": [], "en_cours": False}
 _GROUPES_TTL = 600
 
 
-async def _groupes_gms(budget_s: float = 2.0) -> list:
-    """Noms des groupes GMS de tous les workspaces connus. Cache 10 min.
+async def _charger_groupes_gms() -> list:
+    """Tous les groupes de TOUS les workspaces, par la cle API.
 
-    Rend la liste PERIMEE plutot que rien si le rafraichissement depasse son
-    budget : une liste un peu vieille reste utile, une liste vide ne l'est
-    jamais.
+    Passe par teams_via_api / groups_via_api et NON par KNOWN_TEAMS, qui n'en
+    liste que deux en dur alors que le compte en compte sept : les groupes des
+    cinq autres etaient invisibles. Et par la cle API et non le cookie de
+    session, qui expire et rend alors une liste vide sans le dire — c'est ce
+    qui affichait « aucune option ne correspond ».
     """
-    maintenant = time.time()
-    if _GROUPES_CACHE["noms"] and (maintenant - _GROUPES_CACHE["ts"]) < _GROUPES_TTL:
-        return _GROUPES_CACHE["noms"]
+    import gms
+    teams = await asyncio.to_thread(gms.teams_via_api)
+    out = []
+    # L'espace personnel a aussi ses groupes : team_id=None.
+    for t in [{"id": None, "name": "Personnel"}] + list(teams or []):
+        groupes = await asyncio.to_thread(gms.groups_via_api, t.get("id"))
+        for g in groupes or []:
+            out.append({"team_id": t.get("id") or "", "team_name": t.get("name") or "",
+                        "group_id": g["id"], "group_name": g["name"],
+                        "link_count": g.get("link_count") or 0})
+    out.sort(key=lambda x: (x["group_name"].lower(), x["team_name"].lower()))
+    return out
 
-    async def _charger():
-        import gms
-        noms = set()
-        for tid in getattr(gms, "KNOWN_TEAMS", ()) or ():
-            r = await asyncio.to_thread(gms.list_team_groups, tid)
-            if isinstance(r, dict) and r.get("ok"):
-                for g in r.get("groups") or []:
-                    n = str(g.get("name") or g.get("title") or "").strip()
-                    if n:
-                        noms.add(n)
-        return sorted(noms, key=str.lower)
+
+def _rafraichir_groupes(bot=None) -> None:
+    """Relance le chargement des groupes EN FOND, sans faire attendre personne.
+
+    Discord coupe une autocompletion qui depasse 3 secondes, et sept
+    workspaces prennent plus que ca. On ne bloque donc jamais l'autocompletion
+    sur le reseau : elle sert le cache, qui se remplit de son cote.
+    """
+    if _GROUPES_CACHE.get("en_cours"):
+        return
+    _GROUPES_CACHE["en_cours"] = True
+
+    async def _travail():
+        try:
+            liste = await _charger_groupes_gms()
+            if liste:
+                _GROUPES_CACHE.update({"ts": time.time(), "groupes": liste})
+        except Exception as e:
+            print(f"[reportclick] chargement des groupes echoue : {e}")
+        finally:
+            _GROUPES_CACHE["en_cours"] = False
 
     try:
-        noms = await asyncio.wait_for(_charger(), timeout=budget_s)
-        if noms:
-            _GROUPES_CACHE.update({"ts": maintenant, "noms": noms})
-            return noms
-    except Exception:
-        pass
-    return _GROUPES_CACHE["noms"]
+        asyncio.get_running_loop().create_task(_travail())
+    except RuntimeError:
+        _GROUPES_CACHE["en_cours"] = False
+
+
+async def _groupes_gms() -> list:
+    """Les groupes connus, tout de suite. Declenche un rafraichissement si besoin.
+
+    Rend la liste PERIMEE plutot que rien : une liste un peu vieille reste
+    utile, une liste vide ne l'est jamais.
+    """
+    if (time.time() - _GROUPES_CACHE.get("ts", 0)) >= _GROUPES_TTL:
+        _rafraichir_groupes()
+    return _GROUPES_CACHE.get("groupes") or []
 
 
 class ReportRefreshView(discord.ui.View):
@@ -392,6 +420,10 @@ class ClickRecap(commands.Cog):
             self.bot.add_view(ReportRefreshView(self))
         except Exception as e:
             print(f"[clickrecap] add_view échoué : {e}")
+        # Cache des groupes rempli dès le démarrage : sans ça la première
+        # autocomplétion tombe sur un cache vide et n'affiche rien, ce qui se
+        # lit comme « ce groupe n'existe pas » alors qu'il existe.
+        _rafraichir_groupes()
 
     def cog_unload(self):
         if self.daily_recap.is_running():
@@ -408,18 +440,33 @@ class ClickRecap(commands.Cog):
         groupe existe.
         """
         try:
-            noms = await _groupes_gms()
+            groupes = await _groupes_gms()
         except Exception:
-            noms = []
+            groupes = []
         cur = (current or "").strip().lower()
         if cur:
             # Ceux qui COMMENCENT par la frappe d'abord : on cherche presque
-            # toujours un nom dont on connait le debut.
-            debut = [n for n in noms if n.lower().startswith(cur)]
-            dedans = [n for n in noms if cur in n.lower() and n not in debut]
-            noms = debut + dedans
-        return [app_commands.Choice(name=n[:100], value=n[:100])
-                for n in noms[:25]]
+            # toujours un nom dont on connait le debut. Le workspace compte
+            # aussi — « khloe » doit trouver les groupes de ce workspace-la.
+            def _cle(g):
+                n, w = g["group_name"].lower(), g["team_name"].lower()
+                if n.startswith(cur):
+                    return 0
+                if cur in n:
+                    return 1
+                if cur in w:
+                    return 2
+                return 9
+            groupes = sorted([g for g in groupes if _cle(g) < 9], key=_cle)
+        choix = []
+        for g in groupes[:25]:
+            # La valeur porte le workspace ET le groupe : un meme nom vit dans
+            # plusieurs workspaces (« Hybride »…), et sans le workspace la
+            # resolution repartirait deviner.
+            val = f"{g['team_id']}|{g['group_id']}"
+            lib = f"{g['group_name']} — {g['team_name']} ({g['link_count']})"
+            choix.append(app_commands.Choice(name=lib[:100], value=val[:100]))
+        return choix
 
     async def _is_owner(self, uid):
         if self._owner_id is None:
@@ -1618,6 +1665,30 @@ class ClickRecap(commands.Cog):
         if not name:
             return None, ("⚠️ Précise le groupe : `groupe:Hybride` — ou définis l'identité "
                           "du serveur (`/setidentite`).")
+
+        # Valeur venue de l'autocomplétion : « <team_id>|<group_id> ». Elle
+        # désigne le groupe SANS ambiguïté, workspace compris. La résolution par
+        # nom, elle, ne cherche que dans KNOWN_TEAMS (deux workspaces sur sept)
+        # et se trompe de workspace quand deux groupes sont homonymes.
+        if "|" in name and name.split("|", 1)[1].startswith("grp_"):
+            tid, gid = name.split("|", 1)
+            tid = tid.strip() or None
+            # Le nom du groupe et celui du workspace viennent du cache de
+            # l'autocomplétion : il connaît les sept workspaces, là où
+            # _ws_label — défini plus bas — n'en nomme que deux.
+            libelle, espace = gid, (tid or "personnel")
+            for g in (_GROUPES_CACHE.get("groupes") or []):
+                if g.get("group_id") == gid:
+                    libelle = g.get("group_name") or gid
+                    espace = g.get("team_name") or espace
+                    break
+            ids = await asyncio.to_thread(gms.report_link_ids, tid, None, gid)
+            if ids is None:
+                return None, ("❌ Impossible de lister les liens de ce groupe "
+                              "(GetMySocial injoignable). Réessaie dans un instant.")
+            return {"team_id": tid, "identity": None, "group_id": gid,
+                    "group_name": libelle, "ws": espace,
+                    "ambig": "", "n": len(ids)}, None
         ident = name.lower()
         group_name = name[0].upper() + name[1:]  # hybride -> Hybride (groupes capitalisés)
 

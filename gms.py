@@ -429,6 +429,55 @@ def list_links(limit: int = 100) -> Dict[str, Any]:
     }
 
 
+def teams_via_api() -> List[Dict[str, Any]]:
+    """Les workspaces du compte, par la CLE API. [] si l'appel echoue.
+
+    A ne pas confondre avec la constante KNOWN_TEAMS, qui n'en liste que deux
+    en dur : le compte en compte sept (Threads US, marche francais, BOYA,
+    KHLOE, JESSY LE RETOUR, Jessye Twitter, Agence Noctus). Tout ce qui se
+    fonde sur KNOWN_TEAMS ignore donc les cinq autres — c'est ce qui rendait
+    l'autocompletion des groupes vide pour la plupart d'entre eux.
+
+    Passe par la cle API et non par le cookie de session : le cookie expire, la
+    cle non.
+    """
+    res = _call_tool("list_teams", {"limit": 100})
+    if not res.get("ok"):
+        return []
+    d = res.get("data") or {}
+    out = []
+    for t in (d.get("data") if isinstance(d, dict) else []) or []:
+        tid = str(t.get("id") or "").strip()
+        if tid:
+            out.append({"id": tid, "name": str(t.get("name") or "").strip(),
+                        "link_count": t.get("link_count")})
+    return out
+
+
+def groups_via_api(team_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Les groupes d'UN workspace (ou de l'espace personnel), par la CLE API.
+
+    [] si l'appel echoue. Meme raison qu'au-dessus de preferer la cle au
+    cookie : list_team_groups, qui passe par le board prive, rend une liste
+    vide des que la session a expire — sans le dire.
+    """
+    args: Dict[str, Any] = {"limit": 100}
+    if team_id:
+        args["team_id"] = team_id
+    res = _call_tool("list_groups", args)
+    if not res.get("ok"):
+        return []
+    d = res.get("data") or {}
+    out = []
+    for g in (d.get("data") if isinstance(d, dict) else []) or []:
+        gid = str(g.get("id") or "").strip()
+        nom = str(g.get("name") or "").strip()
+        if gid and nom:
+            out.append({"id": gid, "name": nom,
+                        "link_count": g.get("link_count") or 0})
+    return out
+
+
 _LINKS_CACHE: Dict[str, Any] = {"ts": 0.0, "data": None}
 _LINKS_TEAM_CACHE: Dict[str, Any] = {}  # team_id -> {"ts","data"}
 _LINKS_TTL = 900  # 15 min (invalidé par invalidate_grouping_cache sur create/delete)
