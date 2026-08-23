@@ -359,21 +359,71 @@ def _session_thread():
     return s
 
 
+_CREDS = None
+_CREDS_SIG = None
+_CREDS_LOCK = threading.Lock()
+
+
+def _identifiants():
+    """Les identifiants Google, fabriques UNE fois puis gardes.
+
+    Chaque appelant en fabriquait des neufs, avec token=None : la premiere
+    requete Drive commencait donc TOUJOURS par un aller-retour vers
+    oauth2.googleapis.com pour battre un jeton neuf, alors qu'un jeton vaut
+    une heure. Une synchro montante en battait treize (un par travailleur, plus
+    celui du thread principal) : autant de temps avant le premier octet utile.
+
+    La signature sert de cle : jeton durable + identifiants d'application, donc
+    reconnecter un autre compte Google ou se deconnecter refabrique bien les
+    identifiants. En mode compte de service, la date et la taille du fichier de
+    cle entrent dans la signature : /sheetssync le RE-ECRIT au meme endroit, et
+    sans ca une cle remplacee ne prenait effet qu'au redemarrage.
+    """
+    global _CREDS, _CREDS_SIG
+    c = oauth_config()
+    sig = (c.get("refresh_token"), c.get("client_id"), c.get("client_secret"))
+    if not all(sig):
+        try:
+            stt = SA_FILE.stat()
+            sig += (stt.st_mtime_ns, stt.st_size)
+        except OSError:
+            sig += (0, 0)
+    with _CREDS_LOCK:
+        if _CREDS is not None and _CREDS_SIG == sig:
+            return _CREDS
+        if all(sig[:3]):
+            from google.oauth2.credentials import Credentials as UserCreds
+            creds = UserCreds(None, refresh_token=sig[0], token_uri=_TOKEN_URI,
+                              client_id=sig[1], client_secret=sig[2],
+                              scopes=[OAUTH_SCOPE])
+        else:
+            from google.oauth2.service_account import Credentials
+            creds = Credentials.from_service_account_file(
+                str(SA_FILE), scopes=[OAUTH_SCOPE])
+        _CREDS, _CREDS_SIG = creds, sig
+        return creds
+
+
 def _session():
     """Ton compte Google si connecte (le stockage est le TIEN), sinon le
-    compte de service (lecture/dossiers seulement : il n'a pas de quota)."""
+    compte de service (lecture/dossiers seulement : il n'a pas de quota).
+
+    La session, elle, n'est jamais partagee sans raison (requests.Session
+    n'aime pas ca) ; seuls les identifiants — donc le jeton — sont communs.
+    Le pool est dimensionne sur le nombre de travailleurs : requests ne garde
+    que dix connexions par hote, or _lister_paralleles lance jusqu'a douze
+    listages sur UNE session — deux connexions etaient fermees a chaque vague
+    et refaisaient la poignee de main TLS au tour suivant.
+    """
     from google.auth.transport.requests import AuthorizedSession
-    c = oauth_config()
-    if c.get("refresh_token") and c.get("client_id") and c.get("client_secret"):
-        from google.oauth2.credentials import Credentials as UserCreds
-        return AuthorizedSession(UserCreds(
-            None, refresh_token=c["refresh_token"], token_uri=_TOKEN_URI,
-            client_id=c["client_id"], client_secret=c["client_secret"],
-            scopes=[OAUTH_SCOPE]))
-    from google.oauth2.service_account import Credentials
-    creds = Credentials.from_service_account_file(
-        str(SA_FILE), scopes=[OAUTH_SCOPE])
-    return AuthorizedSession(creds)
+    sess = AuthorizedSession(_identifiants())
+    try:
+        from requests.adapters import HTTPAdapter
+        n = max(16, UPLOAD_WORKERS + 4)
+        sess.mount("https://", HTTPAdapter(pool_connections=n, pool_maxsize=n))
+    except Exception:
+        pass
+    return sess
 
 
 class ErreurDrive(RuntimeError):
@@ -752,6 +802,49 @@ def sync_report(mode=_MODE_COURANT) -> dict:
             "mode": auth_mode(), "email": oauth_email()}
 
 
+_RAPPORT_CACHE: dict = {"cle": None, "ts": 0.0, "data": None}
+_RAPPORT_TTL = 30
+
+
+def _empreinte_rapport():
+    """Ce qui, en changeant, perime le rapport : l'etat des envois et le
+    reglage des videos. Deux stat(), la ou le rapport coute deux parcours
+    complets de data/identities."""
+    out = []
+    for f in (STATE_FILE, CONFIG_FILE):
+        try:
+            s = f.stat()
+            out.append((s.st_mtime_ns, s.st_size))
+        except OSError:
+            out.append(None)
+    return tuple(out)
+
+
+def sync_report_cache(ttl: int = _RAPPORT_TTL) -> dict:
+    """Le rapport pour l'AFFICHAGE, garde quelques secondes.
+
+    sync_report parcourt DEUX fois tout data/identities (une passe pour ce que
+    le mode enverrait, une passe pour l'etat reel) et fait un stat() par
+    fichier. L'onglet Drive l'appelait a chaque ouverture, en plein rendu.
+
+    La garde saute des que l'etat des envois bouge (run_sync ecrit STATE_FILE
+    tous les 10 fichiers et a la fin) : sans ca, la page invitait a « recharger
+    l'onglet pour suivre l'avancement » pendant que les cartes par identite
+    restaient figees 30 s.
+
+    La veille, elle, reste sur le chemin NON garde : c'est sur ce rapport
+    qu'elle decide de relancer une synchro, et une valeur perimee y a deja
+    fabrique une boucle sans fin.
+    """
+    cle = _empreinte_rapport()
+    if (_RAPPORT_CACHE["data"] is not None and _RAPPORT_CACHE["cle"] == cle
+            and (time.time() - _RAPPORT_CACHE["ts"]) < ttl):
+        return _RAPPORT_CACHE["data"]
+    d = sync_report()
+    _RAPPORT_CACHE.update(cle=cle, ts=time.time(), data=d)
+    return d
+
+
 # ===== Import Drive -> site =====
 # Dossier « A IMPORTER » a la racine du Drive : tu y deposes tes videos (par
 # l'app Drive, sans limite de taille du navigateur), le serveur les rapatrie
@@ -1033,12 +1126,16 @@ def _candidats_import(sess, st, root):
         _identites_hs.add((nom_drive or ident).strip())
         return False
 
-    def _prendre(dossier_id, ident, sub, canonique=False):
+    def _prendre(dossier_id, ident, sub, canonique=False, contenu=None):
         """`canonique` : le fichier est deja RANGE au bon endroit du Drive
-        (par opposition a un depot libre dans « A IMPORTER »)."""
+        (par opposition a un depot libre dans « A IMPORTER »).
+
+        `contenu` : le listage deja fait par l'appelant, par vagues paralleles.
+        Sans lui on redemande le dossier ici, un a la fois, et c'est ce mode
+        file indienne qui faisait durer le scan."""
         exts = _exts_de(sub)
         try:
-            contenu = _lister(sess, dossier_id)
+            contenu = _lister(sess, dossier_id) if contenu is None else contenu
         except Exception as e:
             # Un dossier illisible (429 passager, permission perdue) ne doit
             # ni passer pour un dossier vide, ni faire echouer le scan
@@ -1166,13 +1263,27 @@ def _candidats_import(sess, st, root):
                            if _identite_connue(i, i)]
                 _types = _lister_paralleles(sess, [(d, True) for _i, d in _utiles],
                                             _echecs)
+                _lots = []
                 for ident_b, did in _utiles:
                     # None = listage en echec, pas dossier vide : le lot est
                     # deja compte dans _echecs, on ne le prend pas pour du vide.
                     for typ in (_types.get((did, True)) or []):
                         sub = _DRIVE_TO_SUB.get(_cle_dossier(typ["name"]))
                         if sub:
-                            _prendre(typ["id"], ident_b, sub, canonique=True)
+                            _lots.append((typ["id"], ident_b, sub))
+                # Le CONTENU de ces dossiers, tous en meme temps. En file
+                # indienne c'etait un aller-retour Google par (identite x
+                # type) : une quinzaine d'identites font une centaine de
+                # requetes l'une apres l'autre, et c'est ce scan-la que la
+                # veille refait chaque minute et que le bouton attend.
+                _fics = _lister_paralleles(
+                    sess, [(_i, False) for _i, _b, _s in _lots], _echecs)
+                for _tid, ident_b, sub in _lots:
+                    _contenu = _fics.get((_tid, False))
+                    if _contenu is None:      # listage en echec, deja compte
+                        continue
+                    _prendre(_tid, ident_b, sub, canonique=True,
+                             contenu=_contenu)
             continue
         if nom_d.lower() == "bibliotheque 2":
             for sous in _lister(sess, dossier["id"], dossiers=True):

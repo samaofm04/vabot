@@ -4922,6 +4922,101 @@ except Exception as _eF3:
 
 print()
 print("=" * 70)
+print("DRIVE : identifiants gardes, mais JAMAIS au-dela d un changement de compte")
+print("=" * 70)
+
+
+class _SautGoogle(Exception):
+    """google-auth n est pas installe sur ce poste : on saute, en le disant."""
+
+
+try:
+    import gdrive_sync as _gdT
+
+    # Les identifiants etaient refabriques a chaque appel, avec token=None :
+    # la premiere requete Drive commencait donc toujours par battre un jeton
+    # neuf. Une synchro montante en battait treize. On les garde — mais se
+    # deconnecter ou brancher un autre compte DOIT les jeter, sinon on
+    # continuerait d ecrire dans le Drive du compte precedent.
+    try:
+        import google.oauth2.credentials as _gOauth   # noqa: F401
+        _google_dispo = True
+    except Exception:
+        _google_dispo = False
+
+    _svCfg = _gdT.oauth_config
+    _svC, _svS = _gdT._CREDS, _gdT._CREDS_SIG
+    try:
+        if not _google_dispo:
+            # Ne jamais ecarter en silence : dire que la verification manque.
+            _dire("     (google-auth absent : cache d identifiants non teste)")
+            raise _SautGoogle
+        _cfgT = {"refresh_token": "jeton-A", "client_id": "cid", "client_secret": "sec"}
+        _gdT.oauth_config = lambda: dict(_cfgT)
+        _gdT._CREDS, _gdT._CREDS_SIG = None, None
+        _a1 = _gdT._identifiants()
+        _a2 = _gdT._identifiants()
+        check("drive : deux appels de suite rendent LES MEMES identifiants",
+              _a1 is _a2)
+        _cfgT["refresh_token"] = "jeton-B"        # autre compte Google
+        _b1 = _gdT._identifiants()
+        check("drive : changer de compte refabrique les identifiants",
+              _b1 is not _a1 and getattr(_b1, "refresh_token", None) == "jeton-B",
+              getattr(_b1, "refresh_token", None))
+        _cfgT.clear()                              # deconnexion complete
+        _cfgT.update({"refresh_token": "", "client_id": "", "client_secret": ""})
+        _c1 = _gdT._identifiants()
+        check("drive : se deconnecter ne ressert pas l ancien jeton",
+              _c1 is not _b1)
+    except _SautGoogle:
+        pass
+    finally:
+        _gdT.oauth_config = _svCfg
+        _gdT._CREDS, _gdT._CREDS_SIG = _svC, _svS
+
+    check("drive : le rapport d affichage a sa version gardee",
+          callable(getattr(_gdT, "sync_report_cache", None)))
+    # La veille decide de relancer une synchro sur ce rapport : une valeur
+    # perimee y a deja fabrique une boucle sans fin. Elle doit rester sur le
+    # chemin NON garde.
+    _srcGd = (_plCa.Path(__file__).resolve().parent / "gdrive_sync.py").read_text("utf-8")
+    check("drive : la veille n utilise PAS le rapport garde",
+          "sync_report_cache" not in _srcGd.split("def _veille")[-1][:3000])
+except Exception as _eGd:
+    check("drive : identifiants testables", False, repr(_eGd)[:160])
+
+print()
+print("=" * 70)
+print("BIBLIOTHEQUE : un filtre n en efface plus un autre")
+print("=" * 70)
+try:
+    import web_upload as _wFl
+    _aFl = _wFl.create_app(); _aFl.testing = True
+    _svFl = _wFl._load_web_users
+    _wFl._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"}}
+    _cFl = _aFl.test_client()
+    with _cFl.session_transaction() as _s:
+        _s["auth"] = True; _s["username"] = "boss"; _s["role"] = "owner"; _s["sid"] = "TFL"
+    try:
+        # On pose une date ET un type, puis on regarde les liens de tri rendus :
+        # ils doivent reconduire les deux. Avant, choisir « Croissant » apres
+        # « Aller a la date » ramenait tout le dossier, sans un mot.
+        _hFl = _cFl.get("/?tab=cloudreels&cloud_videos_date=2026-08-12"
+                        "&cloud_videos_type=video").get_data(as_text=True)
+        check("biblio : les liens de tri reconduisent la date",
+              "cloud_videos_date=2026-08-12" in _hFl, "date absente des liens")
+        check("biblio : les liens de tri reconduisent le type",
+              "cloud_videos_type=video" in _hFl, "type absent des liens")
+        # Et le formulaire de date reconduit le tri + le type.
+        check("biblio : le formulaire de date reconduit tri et type",
+              "name='cloud_videos_sort'" in _hFl and "name='cloud_videos_type'" in _hFl)
+    finally:
+        _wFl._load_web_users = _svFl
+except Exception as _eFl:
+    check("biblio : filtres testables", False, repr(_eFl)[:160])
+
+print()
+print("=" * 70)
 print("IMAGES CREEES EN JS : loading pose AVANT src, jamais apres")
 print("=" * 70)
 try:

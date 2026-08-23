@@ -20471,7 +20471,9 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
 
             # --- Statut de synchro, identite par identite (avec la PP) ---
             try:
-                _rep = _gd.sync_report()
+                # Version gardee quelques secondes : le rapport parcourt DEUX
+                # fois tout data/identities, en plein rendu de l onglet.
+                _rep = _gd.sync_report_cache()
             except Exception:
                 _rep = {"identities": [], "total": 0, "sync": 0, "pct": 100}
             _cartes = []
@@ -24040,8 +24042,12 @@ def _render_home_dashboard_html() -> str:
 .home-period-row{display:flex;gap:0;background:rgba(255,255,255,.04);border:1px solid #2a2a2a;border-radius:10px;padding:4px;font-size:13px}
 .home-period-btn{background:transparent;border:0;color:#888;padding:8px 18px;border-radius:7px;font-weight:600;cursor:pointer;text-decoration:none;transition:all .15s;flex:1;text-align:center}
 .home-period-btn:hover{color:#fff}
-.home-period-active{background:rgba(0,122,255,.12) !important;color:#0a84ff !important;box-shadow:none}
-body.light .home-period-active{background:rgba(0,122,255,.10) !important;color:#007aff !important}
+/* #0a84ff etait la seule occurrence de ce bleu dans tout le fichier : la
+   pastille de periode ne ressemblait a aucun autre element actif. On rejoint
+   le bleu d accent du site ; le theme Apple garde le sien. */
+.home-period-active{background:rgba(59,130,246,.12) !important;color:#3b82f6 !important;box-shadow:none}
+body.light .home-period-active{background:rgba(59,130,246,.10) !important;color:#3b82f6 !important}
+body.light.apple .home-period-active{background:rgba(0,122,255,.10) !important;color:#007aff !important}
 body.light .home-period-row{background:#fff;border-color:rgba(60,60,67,.12)}
 .home-overview{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:24px;margin-bottom:18px}
 .home-overview-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;gap:14px;flex-wrap:wrap}
@@ -36692,7 +36698,21 @@ async function addChatRow(creneau){
     )
 
 
-def _render_mypulslive_html() -> str:
+def _render_chatshifts_html_mort() -> str:
+    """MORT — rien n appelle ce nom, et il ne faut PAS le rebrancher.
+
+    Ancienne grille horaire des shifts chatteurs. Elle portait le MEME nom que
+    le vrai _render_mypulslive_html defini ~200 lignes plus bas, qui l ecrasait
+    donc en silence : Python ne gardait que la seconde definition.
+
+    Ne pas la remettre en service : l ecran « Emploi du temps chatteurs » existe
+    deja, rendu par _render_chatplanning_html, avec ses routes
+    /chatting/create_edt, /chatting/add_row, /chatting/update_cell.
+    Ce bloc-ci poste vers /chatting/add_shift et /chatting/delete_shift, deux
+    routes qui n existent pas.
+
+    Le renommer ne change rien au rendu ; ca rend juste la collision visible.
+    """
 
     # Identites pour le dropdown "Model"
     try:
@@ -47936,6 +47956,19 @@ def create_app():
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
         import gdrive_sync as _gd
+        # La veille parcourt le Drive chaque minute et ecrit ce qu'elle a vu
+        # dans data/gdrive_attente.json (meme fonction, meme charge utile).
+        # Refaire le parcours pendant que le bouton attend, c'est une centaine
+        # d'allers-retours Google pour une reponse deja sur le disque. Passe
+        # 90 s, on redemande pour de vrai. Un fichier d'attente illisible ne
+        # doit PAS transformer le bouton en erreur : on retombe sur le parcours.
+        try:
+            _vu = _gd.attente() or {}
+            if _vu.get("detail") is not None and \
+                    (time.time() - float(_vu.get("ts") or 0)) < 90:
+                return jsonify({"ok": True, "cache": True, **_vu})
+        except Exception:
+            pass
         try:
             return jsonify({"ok": True, **_gd.import_preview()})
         except Exception as e:
@@ -53718,11 +53751,13 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             return _error("✕ Action réservée à l'admin", tab="saccount")
         settings = _load_account_settings()
         display_name = (request.form.get("display_name") or "").strip()
-        email = (request.form.get("email") or "").strip()
-        if display_name:
-            settings["display_name"] = display_name[:60]
-        if email:
-            settings["email"] = email[:120]
+        # Affectation inconditionnelle : avec `if display_name:`, vider le champ
+        # « Nom affiché » puis Sauvegarder affichait « ✓ Profil sauvegardé » et
+        # rechargeait l'ancien nom — le champ ne pouvait pas être remis à vide.
+        settings["display_name"] = display_name[:60]
+        # « email » était lu ici alors qu'aucun formulaire ne le rend et qu'aucun
+        # écran ne le réaffiche : lecture morte, retirée. La clé déjà écrite
+        # dans account_settings.json reste en place.
         f = request.files.get("profile_pic")
         if f and f.filename:
             ext = os.path.splitext(f.filename)[1].lower().lstrip(".")
