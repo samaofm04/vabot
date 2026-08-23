@@ -23988,6 +23988,18 @@ body.light .mypuls-bar{background:#e5e7eb}
         [{"name": c["name"], "presence": c["presence"], "conv_rate": c["conv_rate"]} for c in chatters[:50]],
         ensure_ascii=False,
     )
+    # CA de la TABLE DE PERFORMANCE, par chatteur. Indispensable au garde-fou
+    # du recalcul navigateur : celui-ci n'a sous la main que le journal de
+    # transactions, où « ca_eur + ca_usd » vaut « ca_total » PAR CONSTRUCTION.
+    # Le garde-fou porté en JS comparait donc une somme à elle-même et ne se
+    # déclenchait jamais — un simple clic sur un filtre faisait tomber le
+    # « Total à payer » (478,80 $ -> 191,52 $ mesuré sur un seul chatteur).
+    # Ce chiffre-ci vient d'une AUTRE source, donc la comparaison a un sens.
+    perf_ca_js = _json_mod.dumps(
+        {c["name"]: round(float(c.get("ca_total") or 0), 2)
+         for c in chatters if not c.get("non_attribue")},
+        ensure_ascii=False,
+    )
 
     # Period_id pour le tracking "paye" : YYYY-MM-DD_YYYY-MM-DD
     _period_id = f"{start_str}_{end_str}"
@@ -24002,6 +24014,7 @@ body.light .mypuls-bar{background:#e5e7eb}
         f"<script>window.__mpNetworks = {networks_js};</script>"
         f"<script>window.__mpTransactions = {transactions_js};</script>"
         f"<script>window.__mpChattersBase = {chatters_base_js};</script>"
+        f"<script>window.__mpPerfCa = {perf_ca_js};</script>"
         f"<script>window.__mpEurToUsd = {eur_to_usd};</script>"
         f"<script>window.__mpPeriodId = '{_period_id}';</script>"
         "</div>"
@@ -24137,6 +24150,12 @@ function mpRecompute(){
   var rate = window.__mpEurToUsd || 1;
   // Filtrer les transactions (créateurs exclus + shift horaire si choisi)
   var sh = window.__mpShift || null;
+  // Des qu un filtre est actif, le CA de la table de performance n est plus
+  // comparable au journal (elle n est filtrable ni par creatrice ni par
+  // heure). Le garde-fou de paie ne peut donc plus s appliquer : on le dit,
+  // au lieu de rendre un total qui a l air payable et ne l est pas.
+  var filtreActif = (excluded && excluded.size > 0) || !!sh;
+  var perfCa = window.__mpPerfCa || {};
   var filtered = txs.filter(function(t){
     if(excluded.has(t.c)) return false;
     if(sh){
@@ -24221,7 +24240,8 @@ function mpRecompute(){
     // Commission + à payer — devise par devise : la part USD (OnlyFans)
     // n'est PAS convertie (même règle que le calcul serveur _pay_usd)
     var pct = (window.__mpCryptoData[name] && window.__mpCryptoData[name].commission_pct) || 0;
-    var payUsd = mpPayUsd(data, pct, rate);
+    var payUsd = mpPayUsd(data, pct, rate,
+                          filtreActif ? null : perfCa[name]);
     var cellPay = row.querySelector('.mp-cell-pay');
     if(cellPay){
       cellPay.textContent = '$' + payUsd.toFixed(2);
@@ -24240,24 +24260,65 @@ function mpRecompute(){
   Object.keys(byChat).forEach(function(n){
     var d2 = byChat[n];
     var p2 = (window.__mpCryptoData[n] && window.__mpCryptoData[n].commission_pct) || 0;
-    totalPayUsd += mpPayUsd(d2, p2, rate);
+    totalPayUsd += mpPayUsd(d2, p2, rate,
+                            filtreActif ? null : perfCa[n]);
   });
   var totalUsdEl = document.querySelector('[data-mp-stat="total_pay_usd"]');
   if(totalUsdEl) totalUsdEl.textContent = '$' + totalPayUsd.toFixed(2);
   var totalEurEl = document.querySelector('[data-mp-stat="total_pay_eur"]');
   if(totalEurEl) totalEurEl.textContent = '≈ ' + (totalPayUsd / rate).toFixed(2) + '€';
+
+  // Sous filtre, le total est calculé sur le seul journal : il ne PEUT PAS
+  // être vérifié contre la table de performance. Le taire donnerait un
+  // montant qui a l air payable et qui ne l est pas — c est exactement
+  // comme ça qu on sous-paie quelqu un sans jamais s en apercevoir.
+  var avert = document.getElementById('mp-avert-filtre');
+  if(!avert && totalUsdEl){
+    var socle = totalUsdEl.closest('.mypuls-stat') || totalUsdEl.parentElement;
+    if(socle && socle.parentElement){
+      avert = document.createElement('div');
+      avert.id = 'mp-avert-filtre';
+      avert.style.cssText = 'flex-basis:100%;margin-top:8px;padding:8px 12px;'
+        + 'border-radius:8px;font-size:12.5px;line-height:1.45;'
+        + 'background:#3a2a08;border:1px solid #8a6a1a;color:#f0c24a';
+      socle.parentElement.appendChild(avert);
+    }
+  }
+  if(avert){
+    if(filtreActif){
+      avert.textContent = "Filtre actif : ce total est calculé sur le journal "
+        + "des transactions seul, sans le contrôle qui le recoupe avec la table "
+        + "de performance. Chiffre d analyse — ne paie pas dessus.";
+      avert.style.display = '';
+    } else {
+      avert.style.display = 'none';
+    }
+  }
 }
 // Même règle que le calcul serveur _pay_usd, GARDE-FOU COMPRIS : si le journal
 // des transactions ne recoupe pas le CA de la table (>5 % d'écart : log tronqué
 // ou nom différent), on garde l'ancien calcul pour ce chatteur au lieu de
 // sous-payer en silence. Sans ce garde-fou côté navigateur, le simple fait de
 // toucher un filtre faisait CHANGER le « Total à payer ».
-function mpPayUsd(d, pct, rate){
-  var e = (d && d.ca_eur) || 0, u = (d && d.ca_usd) || 0, t = (d && d.ca_total) || 0;
-  if((e + u) > 0 && Math.abs((e + u) - t) <= Math.max(1, 0.05 * t)){
+function mpPayUsd(d, pct, rate, perfCa){
+  var e = (d && d.ca_eur) || 0, u = (d && d.ca_usd) || 0;
+  // Sans CA de reference, AUCUN garde-fou possible : il n y a rien a comparer.
+  // C est le cas des qu un filtre est actif (la table de perf n est filtrable
+  // ni par creatrice ni par heure) et pour un chatteur absent de cette table.
+  // On calcule alors sur le journal, et l interface le DIT — voir le bandeau
+  // pose par mpRecompute.
+  if(typeof perfCa !== 'number' || perfCa <= 0){
     return (e * rate + u) * pct / 100;
   }
-  return t * pct / 100 * rate;
+  // Le journal recoupe la table de perf : on paie devise par devise, la part
+  // USD (OnlyFans) n etant PAS convertie.
+  if((e + u) > 0 && Math.abs((e + u) - perfCa) <= Math.max(1, 0.05 * perfCa)){
+    return (e * rate + u) * pct / 100;
+  }
+  // Il ne la recoupe pas — journal tronque, ou nom different. On paie sur la
+  // table de perf, exactement comme le serveur, plutot que de sous-payer en
+  // silence.
+  return perfCa * pct / 100 * rate;
 }
 function mpShowPeriodLoader(){
   var ov = document.getElementById('mp-loading');

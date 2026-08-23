@@ -2582,6 +2582,33 @@ except Exception as _eRg:
 
 print()
 print("=" * 70)
+print("GARDE-FOU DE PAIE (recalcul navigateur)")
+print("=" * 70)
+try:
+    import pathlib as _plPy
+    _srcPy = _plPy.Path("web_upload.py").read_text(encoding="utf-8")
+    _dPy = _srcPy.index("function mpPayUsd(")
+    _fnPy = _srcPy[_dPy:_dPy + 1400]
+
+    # Le defaut d origine etait INVISIBLE a la lecture : la fonction avait
+    # exactement la forme de la regle serveur, mais on lui passait un ca_total
+    # issu du MEME journal que ca_eur et ca_usd. La somme valait donc
+    # elle-meme, le garde-fou ne partait jamais, et toucher un filtre faisait
+    # tomber le total a payer. Ces trois controles verrouillent la reparation.
+    check("paie : mpPayUsd compare a un CA de reference, pas au sien",
+          "perfCa" in _fnPy and "d.ca_total" not in _fnPy,
+          _fnPy[:120])
+    check("paie : sans reference (filtre actif) il ne pretend pas verifier",
+          "typeof perfCa !== 'number'" in _fnPy)
+    check("paie : le CA de la table de perf est servi au navigateur",
+          "window.__mpPerfCa" in _srcPy and "perf_ca_js" in _srcPy)
+    check("paie : l ecran previent quand le total n est pas payable",
+          "mp-avert-filtre" in _srcPy and "ne paie pas dessus" in _srcPy)
+except Exception as _ePy:
+    check("paie : garde-fou testable", False, repr(_ePy)[:160])
+
+print()
+print("=" * 70)
 print("REPERAGE DES BRUTES QUI PORTENT DEJA DU TEXTE")
 print("=" * 70)
 try:
