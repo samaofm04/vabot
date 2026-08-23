@@ -1737,6 +1737,68 @@ class UserCog(commands.Cog):
             except Exception:
                 pass
 
+    @app_commands.command(
+        name="icones",
+        description="[ADMIN] Envoie sur le serveur les icones des boutons (style du site)")
+    async def icones(self, interaction: discord.Interaction):
+        """Televerse les icones du menu, et DIT ce qui s est passe.
+
+        Sans cette commande, l envoi n avait lieu qu en postant le menu
+        jailbreak : le panneau epingle, lui, gardait ses vieux emojis sans
+        que rien ne l explique. Un echec silencieux ressemble a un bug du
+        code, alors que c est souvent un serveur plein ou une permission
+        manquante — deux choses que seul l admin peut regler.
+        """
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "À utiliser dans un serveur.", ephemeral=True)
+            return
+        perms = getattr(interaction.user, "guild_permissions", None)
+        if perms is None or not perms.manage_guild:
+            await interaction.response.send_message(
+                "🔒 Réservé aux admins du serveur.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        attendus = dict(_ICONES_ACTIONS)
+        avant = {e.name for e in guild.emojis}
+        try:
+            await ensure_action_emojis(guild)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Envoi impossible : `{e}`", ephemeral=True)
+            return
+
+        apres = {e.name for e in guild.emojis}
+        crees = sorted((apres - avant) & set(attendus.values()))
+        presents = sorted(set(attendus.values()) & apres)
+        manquants = sorted(set(attendus.values()) - apres)
+
+        lignes = [f"**{len(presents)}/{len(attendus)} icônes disponibles** sur ce serveur."]
+        if crees:
+            lignes.append(f"➕ {len(crees)} envoyée(s) à l'instant.")
+        elif presents:
+            lignes.append("Elles y étaient déjà.")
+        if manquants:
+            # On NOMME la cause probable : « ça n a pas marché » n aide personne.
+            dossier = Path(__file__).resolve().parent.parent / "emojis"
+            absents = [n for n in manquants if not (dossier / f"{n}.png").exists()]
+            libre = getattr(guild, "emoji_limit", 50) - len(guild.emojis)
+            cause = []
+            if absents:
+                cause.append(f"fichier absent du serveur : {', '.join(absents[:4])}")
+            if libre <= 0:
+                cause.append("plus aucun emplacement d'emoji libre")
+            if not perms.manage_emojis_and_stickers:
+                cause.append("le bot n'a pas la permission « Gérer les emojis »")
+            detail = ("\n_Cause probable : " + " ; ".join(cause) + "_") if cause else ""
+            lignes.append("⚠️ Manquantes : " + ", ".join(manquants[:6]) + detail)
+            lignes.append("_Les boutons concernés gardent leur emoji standard._")
+        else:
+            lignes.append("Repose un menu pour les voir : `/menujailbreakus`, "
+                          "ou re-sélectionne une model dans le panneau épinglé.")
+        await interaction.followup.send("\n".join(lignes), ephemeral=True)
+
     @app_commands.command(name="username", description="Génère des pseudos Instagram VRAIMENT dispo basés sur ton identité")
     async def username(self, interaction: discord.Interaction):
         if await self._gate_contenu(interaction, threads_ok=True):
@@ -5566,7 +5628,8 @@ class JBModelButton(discord.ui.DynamicItem[discord.ui.Button],
             return
         # Serveur US : on met a jour le PANNEAU PERMANENT du salon au lieu
         # d'envoyer un message ephemere qui disparait au rafraichissement.
-        emb, view = _jb_panel(cog, self.ident, 3, marche=_marche)
+        emb, view = _jb_panel(cog, self.ident, 3, marche=_marche,
+                              guild=interaction.guild)
         chan = interaction.channel
         msg_id = _jb_panel_ids().get(str(getattr(chan, "id", 0)))
         cible = None
@@ -5664,6 +5727,7 @@ class JBQtySelect(discord.ui.DynamicItem[discord.ui.Select],
         except Exception:
             q = self.qty
         emb, view = _jb_panel(interaction.client.get_cog("UserCog"), self.ident, q,
+                              guild=interaction.guild,
                               marche=marche_du_membre(interaction.user))
         await interaction.response.edit_message(embed=emb, view=view)
 
@@ -5683,15 +5747,25 @@ class JBActionButton(discord.ui.DynamicItem[discord.ui.Button],
                      template=r"jbus:a:(?P<ident>[a-z0-9_.\-]+):(?P<key>[a-z]+):(?P<qty>\d+)"):
     """Une action du panneau permanent (reel caption, story, pseudo...)."""
 
-    def __init__(self, ident, key, qty, label=None, row=1):
+    def __init__(self, ident, key, qty, label=None, row=1, icone=None):
         self.ident = (ident or "_").lower()
         self.key = key
         self.qty = int(qty)
         _e = _jb_action(key)
         lib = label or (_e[1] if _e else key)
-        super().__init__(discord.ui.Button(
-            label=lib, style=discord.ButtonStyle.primary, row=row,
-            custom_id=f"jbus:a:{self.ident}:{self.key}:{self.qty}"))
+        # C est CE bouton qui compose le panneau epingle du salon — pas
+        # _JailbreakActionButton, qui ne sert qu au menu ephemere. Les deux
+        # doivent porter les memes icones, sinon le panneau qu on regarde
+        # toute la journee est le seul a garder les vieux emojis.
+        # from_custom_id ne repasse pas d icone : ce chemin ne sert qu a
+        # REPONDRE au clic, le rendu vient du message deja poste.
+        _btn = discord.ui.Button(
+            label=(_libelle_sans_emoji(lib) if icone is not None else lib),
+            style=discord.ButtonStyle.primary, row=row,
+            custom_id=f"jbus:a:{self.ident}:{self.key}:{self.qty}")
+        if icone is not None:
+            _btn.emoji = icone
+        super().__init__(_btn)
 
     @classmethod
     async def from_custom_id(cls, interaction, item, match, /):
@@ -5727,7 +5801,7 @@ class JBActionButton(discord.ui.DynamicItem[discord.ui.Button],
                                  count=self.qty, supports_count=supports_count)
 
 
-def _jb_panel(cog, ident, qty=3, marche="us"):
+def _jb_panel(cog, ident, qty=3, marche="us", guild=None):
     """(embed, view) du panneau permanent. `ident` vaut « _ » tant qu'aucune
     model n'est choisie : on n'affiche alors que la quantite.
     `marche` (role @Jailbreak FR / US du VA) decide des ACTIONS proposees :
@@ -5738,8 +5812,10 @@ def _jb_panel(cog, ident, qty=3, marche="us"):
     if ident != "_":
         # Meme liste pour tout le monde : « Reel caption », pas de Reel brut.
         _actions = _JB_ACTIONS_US
+        _ic = icones_actions(guild)      # lecture seule : rien sur le reseau
         for i, (key, label, _c, _s) in enumerate(_actions):
-            view.add_item(JBActionButton(ident, key, qty, label=label, row=1 + i // 4))
+            view.add_item(JBActionButton(ident, key, qty, label=label,
+                                         row=1 + i // 4, icone=_ic.get(key)))
         emb = discord.Embed(
             title=f"🔓 {ident.capitalize()} — que veux-tu générer ?",
             description=(

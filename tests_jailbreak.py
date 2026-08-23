@@ -536,6 +536,23 @@ try:
     # le delai de 3 s d une interaction, et le bouton paraitrait mort.
     check("icones : la lecture sans serveur ne leve pas",
           icones_actions(None) == {})
+
+    # Il existe DEUX implementations de boutons d action : celle du menu
+    # ephemere et celle du panneau EPINGLE du salon. N en brancher qu une
+    # laisse le panneau qu on regarde toute la journee avec ses vieux emojis,
+    # et rien ne le signale. C est arrive.
+    import inspect as _inspIc
+    from cogs.user import JBActionButton as _BtnPerm
+    from cogs.user import _JailbreakActionButton as _BtnEph
+    from cogs.user import _jb_panel as _PanIc
+    check("icones : le bouton du panneau EPINGLE accepte une icone",
+          "icone" in _inspIc.signature(_BtnPerm.__init__).parameters,
+          "le panneau du salon garderait les emojis standard")
+    check("icones : le bouton du menu ephemere accepte une icone",
+          "icone" in _inspIc.signature(_BtnEph.__init__).parameters)
+    check("icones : le panneau epingle recoit le serveur",
+          "guild" in _inspIc.signature(_PanIc).parameters,
+          "sans serveur, impossible de retrouver les icones televersees")
 except Exception as _eIc:
     check("icones : testable", False, repr(_eIc)[:170])
 

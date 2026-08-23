@@ -4672,6 +4672,27 @@ except Exception as _eF3:
 
 print()
 print("=" * 70)
+print("AVATARS DISCORD : demandes a la taille reellement affichee")
+print("=" * 70)
+try:
+    import web_upload as _wAv
+    _av = _wAv._avatar_petit
+    check("avatar : 1024 px ramene a 128",
+          _av("https://cdn.discordapp.com/avatars/1/ab.png?size=1024")
+          == "https://cdn.discordapp.com/avatars/1/ab.png?size=128",
+          _av("https://cdn.discordapp.com/avatars/1/ab.png?size=1024"))
+    check("avatar : la taille est reecrite meme en 2e parametre",
+          _av("https://x/a.png?quality=lossless&size=4096").endswith("size=128"),
+          _av("https://x/a.png?quality=lossless&size=4096"))
+    check("avatar : une URL sans taille est laissee intacte",
+          _av("https://cdn.discordapp.com/embed/avatars/0.png")
+          == "https://cdn.discordapp.com/embed/avatars/0.png")
+    check("avatar : une URL vide reste vide", _av("") == "" and _av(None) == "")
+except Exception as _eAv:
+    check("avatar : redimensionnement testable", False, repr(_eAv)[:160])
+
+print()
+print("=" * 70)
 print("REVENUS API : le prechargement parallele ne change pas les totaux")
 print("=" * 70)
 try:

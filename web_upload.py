@@ -98,16 +98,31 @@ def _resolve_user_obj(user_id):
     return None
 
 
+def _avatar_petit(url: str) -> str:
+    """Redimensionne une URL d'avatar Discord pour l'usage reel du site.
+
+    discord.py construit TOUTES ses URLs en « ?size=1024 ». Le site n'affiche
+    ces avatars qu'en pastilles de 26 a 46 px : chaque image pesait donc
+    1024x1024x4 = 4 Mo une fois decodee, et il y en a une vingtaine par page.
+    128 px couvre encore les ecrans 2x. Un seul endroit decide, sinon les deux
+    appels divergent au premier oubli.
+    """
+    u = str(url or "")
+    if not u:
+        return ""
+    return re.sub(r"([?&]size=)\d+", r"\g<1>128", u) if "size=" in u else u
+
+
 def _resolve_avatar_url(user_id) -> str:
     """Retourne l'URL de la PP Discord d'un user, ou empty string si introuvable."""
     u = _resolve_user_obj(user_id)
     if not u:
         return ""
     try:
-        return str(u.display_avatar.url)
+        return _avatar_petit(str(u.display_avatar.url))
     except Exception:
         try:
-            return str(u.avatar.url) if u.avatar else ""
+            return _avatar_petit(str(u.avatar.url)) if u.avatar else ""
         except Exception:
             return ""
 
@@ -206,7 +221,7 @@ def _resolve_discord_user_by_handle(handle: str):
                         if target in _cands or (
                                 tn and tn in {_norm_handle(c) for c in _cands if c}):
                             try:
-                                avatar_url = str(m.display_avatar.url)
+                                avatar_url = _avatar_petit(str(m.display_avatar.url))
                             except Exception:
                                 avatar_url = ""
                             return {
