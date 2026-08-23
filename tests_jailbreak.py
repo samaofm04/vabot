@@ -493,13 +493,30 @@ try:
     # lirait « 1 » comme « celle qui marche le mieux » alors que personne
     # n aurait rien decide.
     check("ordre : sans rangement, aucun numero n est affiche",
-          _ioOr.etiquette("lola", []) == "Lola")
-    check("ordre : avec rangement, le numero est affiche",
-          _ioOr.etiquette("lola", _ordOr) == "1. Lola")
+          _ioOr.etiqueter(["lola", "zoe"], []) == {"lola": "Lola", "zoe": "Zoe"})
+    check("ordre : avec rangement, les numeros partent de 1",
+          _ioOr.etiqueter(["emma", "lola"], _ordOr)
+          == {"lola": "1. Lola", "emma": "2. Emma"})
     check("ordre : une identite non rangee reste sans numero",
-          _ioOr.etiquette("zoe", _ordOr) == "Zoe")
+          _ioOr.etiqueter(["lola", "zoe"], _ordOr)["zoe"] == "Zoe")
     check("ordre : un fichier absent ne fait pas tomber la lecture",
           isinstance(_ioOr.lire(), list))
+
+    # LE point qui a failli passer inapercu. Sur les vraies donnees, les six
+    # identites FR occupent les rangs 1 a 6 du fichier — mais le menu US ne
+    # montre que les models US. Numeroter d apres le FICHIER y aurait affiche
+    # « 7. Ibenhaastrup » en premiere ligne, un numero sans aucun sens pour le
+    # VA qui le lit. Le numero doit venir de la liste AFFICHEE.
+    _globalOr = ["lola", "alicia", "julia", "amelia", "emma", "sarah",
+                 "ibenhaastrup", "e30princesss", "zezatwins"]
+    _usOr = ["zezatwins", "ibenhaastrup", "e30princesss"]
+    _libUs = _ioOr.etiqueter(_usOr, _globalOr)
+    check("ordre : un menu filtre numerote a partir de 1, pas du rang global",
+          _libUs["ibenhaastrup"] == "1. Ibenhaastrup",
+          "obtenu : %r" % _libUs.get("ibenhaastrup"))
+    check("ordre : le menu filtre garde l ordre choisi entre elles",
+          [_libUs[m] for m in _ioOr.trier(_usOr, _globalOr)]
+          == ["1. Ibenhaastrup", "2. E30princesss", "3. Zezatwins"])
 
     # Le site et le bot doivent trier PAREIL. Deux implementations finiraient
     # par diverger — le depot a deja paye ca avec les deux tables du Drive.

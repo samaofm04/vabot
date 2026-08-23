@@ -5601,10 +5601,12 @@ class _JailbreakModelSelect(discord.ui.Select):
         # la model classee premiere doit etre dans les 25 affichees.
         import identites_ordre as _io
         _ordre = _io.lire()
-        for m in _io.trier(list(models), _ordre)[:25]:
+        _visibles = _io.trier(list(models), _ordre)[:25]
+        _libelles = _io.etiqueter(_visibles, _ordre)
+        for m in _visibles:
             opts.append(discord.SelectOption(
-                label=_io.etiquette(m, _ordre), value=str(m).lower(),
-                emoji=emojis.get(m)))
+                label=_libelles.get(m, str(m).capitalize()),
+                value=str(m).lower(), emoji=emojis.get(m)))
         if not opts:
             opts = [discord.SelectOption(label="(aucune model)", value="__none__")]
         super().__init__(
@@ -5645,18 +5647,15 @@ class JBModelButton(discord.ui.DynamicItem[discord.ui.Button],
     """UN bouton = UNE model (sa PP + son nom), clic = actions direct.
     custom_id porte l'identité -> persistant même si la liste des models change."""
 
-    def __init__(self, ident, emoji=None, ordre=None):
+    def __init__(self, ident, emoji=None, libelle=None):
         self.ident = (ident or "").lower()
-        # « 1. Lola » quand le proprietaire a range cette identite, « Lola »
-        # sinon. On ne numerote jamais une liste alphabetique : le VA lirait
-        # « 1 » comme « celle qui marche le mieux » alors que personne n aurait
-        # rien decide.
-        # from_custom_id ne repasse pas d ordre : ce chemin ne sert qu a
-        # repondre au clic, le libelle vient du message deja poste.
-        import identites_ordre as _io
+        # Le libelle est calcule par l appelant, qui seul connait la LISTE
+        # affichee — donc le vrai numero. from_custom_id ne le repasse pas :
+        # ce chemin ne sert qu a repondre au clic, l affichage vient du
+        # message deja poste.
         super().__init__(
             discord.ui.Button(
-                label=_io.etiquette(self.ident, ordre), emoji=emoji,
+                label=libelle or self.ident.capitalize(), emoji=emoji,
                 style=discord.ButtonStyle.secondary,
                 custom_id=f"jbus:m:{self.ident}",
             )
@@ -5910,8 +5909,14 @@ class JailbreakModelsView(discord.ui.View):
         # alphabetique et la model classee premiere pourrait ne pas apparaitre.
         import identites_ordre as _io
         ordre = _io.lire()
-        for m in _io.trier(list(models), ordre)[:25]:   # 5 lignes x 5 boutons
-            self.add_item(JBModelButton(m, emoji=emojis.get(m), ordre=ordre))
+        visibles = _io.trier(list(models), ordre)[:25]   # 5 lignes x 5 boutons
+        # Numeroter d apres la liste VISIBLE, pas d apres le fichier : le menu
+        # US ne montre que les models US, et « 7. » en premiere ligne parce que
+        # six identites FR passent avant ne veut rien dire pour le VA.
+        libelles = _io.etiqueter(visibles, ordre)
+        for m in visibles:
+            self.add_item(JBModelButton(m, emoji=emojis.get(m),
+                                        libelle=libelles.get(m)))
 
 
 class GenLinkModal(discord.ui.Modal, title="🔗 Générer un lien GetMySocial"):

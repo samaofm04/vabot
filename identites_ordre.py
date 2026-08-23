@@ -80,8 +80,27 @@ def rang(identite, ordre=None):
         return None
 
 
-def etiquette(identite, ordre=None, gabarit="{rang}. {nom}") -> str:
-    """Le libellé affiché aux VA : « 1. Lola », ou « Lola » si non rangée."""
-    nom = str(identite or "").capitalize()
-    r = rang(identite, ordre)
-    return gabarit.format(rang=r, nom=nom) if r else nom
+def etiqueter(identites, ordre=None, gabarit="{rang}. {nom}") -> dict:
+    """{identité: libellé} — « 1. Lola », « 2. Emma »… puis les non rangées.
+
+    Le numéro est la position DANS LA LISTE AFFICHÉE, pas dans le fichier.
+    Vérifié sur les vraies données : les six identités FR occupent les rangs
+    1 à 6 du fichier, mais le menu US ne montre que les models US. Numéroter
+    d'après le fichier y aurait affiché « 7. Ibenhaastrup » en première
+    ligne — un numéro qui ne veut rien dire pour le VA qui le lit.
+
+    Les identités jamais rangées à la main suivent, SANS numéro : leur
+    donner un rang inventerait un classement que personne n'a décidé.
+    """
+    if ordre is None:
+        ordre = lire()
+    connues = set(ordre)
+    sortie, n = {}, 0
+    for ident in trier(identites, ordre):
+        nom = str(ident).capitalize()
+        if str(ident).lower() in connues:
+            n += 1
+            sortie[ident] = gabarit.format(rang=n, nom=nom)
+        else:
+            sortie[ident] = nom
+    return sortie

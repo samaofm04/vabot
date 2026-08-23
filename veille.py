@@ -33,6 +33,48 @@ import safe_json
 
 DATA_DIR = Path("data")
 VEILLE_FILE = DATA_DIR / "veille_reels.json"
+VEILLE_THUMBS_DIR = DATA_DIR / "veille_thumbs"
+
+
+def chemin_thumb(reel_id: str) -> Path:
+    return VEILLE_THUMBS_DIR / (str(reel_id) + ".jpg")
+
+
+def copier_thumb(reel_id: str, url: str) -> bool:
+    """Range une copie LOCALE de la miniature du reel.
+
+    Les adresses de miniature d Instagram sont SIGNEES et expirent. La Veille
+    garde des reels pendant des semaines : au bout de quelques jours, ses
+    cartes pointaient vers des liens morts. Mesure faite dans la page : 382
+    miniatures sur 382 en echec cote Veille, pendant que le volet « Suivies »,
+    lui frais du scrape, en chargeait 636 sur 636. Le symptome ressemblait a
+    « les videos ne chargent plus » alors que rien n etait casse chez nous.
+
+    On telecharge donc l image UNE fois, a l ajout, tant que le lien vaut
+    encore. Best-effort : un echec ici ne doit jamais empecher d enregistrer
+    le reel, la carte retombera sur l adresse d origine.
+    """
+    url = (url or "").strip()
+    if not url or not reel_id:
+        return False
+    dest = chemin_thumb(reel_id)
+    if dest.exists() and dest.stat().st_size > 512:
+        return True
+    try:
+        import requests
+        VEILLE_THUMBS_DIR.mkdir(parents=True, exist_ok=True)
+        rep = requests.get(url, timeout=15)
+        if rep.status_code != 200 or len(rep.content) < 512:
+            return False
+        entetes = (bytes((0xFF, 0xD8)), bytes((0x89, 0x50, 0x4E, 0x47)))
+        if not any(rep.content.startswith(e) for e in entetes):
+            return False          # pas une image : page d erreur du CDN
+        temporaire = dest.with_suffix(".part")
+        temporaire.write_bytes(rep.content)
+        temporaire.replace(dest)   # jamais de fichier a moitie ecrit
+        return True
+    except Exception:
+        return False
 
 
 import threading as _th_v
@@ -98,6 +140,8 @@ def add_reel(reel: Dict[str, Any]) -> Dict[str, Any]:
     }
     data["reels"].insert(0, new_reel)  # plus recent en haut
     _save(data)
+    # Apres l enregistrement : meme si la copie echoue, le reel est garde.
+    copier_thumb(new_reel["id"], new_reel.get("thumb", ""))
     return {"ok": True, "reel": new_reel}
 
 

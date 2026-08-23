@@ -3259,6 +3259,90 @@ except Exception as _eSel:
 
 print()
 print("=" * 70)
+print("VEILLE : les miniatures ne dependent plus d Instagram")
+print("=" * 70)
+try:
+    import re as _reVl
+    import shutil as _shVl
+
+    import veille as _vlVl
+    import web_upload as _wVl
+
+    # Les adresses de miniature d Instagram sont SIGNEES et expirent. La Veille
+    # garde des reels des semaines : ses cartes finissaient par pointer vers des
+    # liens morts. Mesure dans la page : 382 miniatures sur 382 en echec cote
+    # Veille, pendant que le volet « Suivies », frais du scrape, en chargeait
+    # 636 sur 636. Vu de l utilisateur : « les videos ne chargent plus ».
+    check("veille : une copie locale de la miniature est prevue",
+          hasattr(_vlVl, "copier_thumb") and hasattr(_vlVl, "chemin_thumb"))
+    import pathlib as _plVl
+    check("veille : la carte pointe vers NOUS, plus vers Instagram",
+          '<img src="/veille/thumb/{rid}"' in
+          _plVl.Path("web_upload.py").read_text(encoding="utf-8"),
+          "sinon l apercu meurt avec la signature du CDN")
+
+    _appVl = _wVl.create_app()
+    _appVl.config["TESTING"] = True
+    _svVl = _wVl._load_web_users
+    _wVl._load_web_users = lambda: {"admin": {"role": "owner", "password": "x"}}
+    try:
+        _cVl = _appVl.test_client()
+        check("veille : la miniature exige une session",
+              _cVl.get("/veille/thumb/deadbeef").status_code in (302, 401, 403),
+              "une route de lecture reste protegee")
+        with _cVl.session_transaction() as _sVl:
+            _sVl["auth"] = True
+            _sVl["username"] = "admin"
+            _sVl["role"] = "owner"
+        # Un carre casse laisse croire a une panne du site : on renvoie une
+        # image qui DIT que l apercu a expire.
+        _rVl = _cVl.get("/veille/thumb/deadbeef")
+        check("veille : un reel inconnu rend une image, pas une erreur",
+              _rVl.status_code == 200 and (_rVl.mimetype or "").startswith("image/"),
+              "code %s, type %s" % (_rVl.status_code, _rVl.mimetype))
+        check("veille : cette image dit pourquoi elle est la",
+              _rVl.headers.get("X-Thumb-Error") is not None)
+        for _malVl, _attVl in (("zz!!bad", 403), ("../etc", 404), ("", 404)):
+            check("veille : l identifiant %r est refuse" % _malVl[:10],
+                  _cVl.get("/veille/thumb/" + _malVl).status_code == _attVl)
+
+        # Une vraie copie locale doit etre servie telle quelle.
+        _ridVl = "abcdef123456"
+        try:
+            _vlVl.VEILLE_THUMBS_DIR.mkdir(parents=True, exist_ok=True)
+            _vlVl.chemin_thumb(_ridVl).write_bytes(
+                bytes((0xFF, 0xD8, 0xFF, 0xE0)) + b"\x00" * 3000)
+            _r2Vl = _cVl.get("/veille/thumb/" + _ridVl)
+            check("veille : une copie locale est servie directement",
+                  _r2Vl.status_code == 200 and len(_r2Vl.data) > 2000,
+                  "code %s, %d octets" % (_r2Vl.status_code, len(_r2Vl.data)))
+            check("veille : et gardee longtemps en cache",
+                  "max-age" in (_r2Vl.headers.get("Cache-Control") or ""))
+        finally:
+            # send_file garde le fichier OUVERT tant que la reponse n est pas
+            # fermee : sous Windows, l effacer avant leve une PermissionError.
+            try:
+                _r2Vl.close()
+            except Exception:
+                pass
+            try:
+                _vlVl.chemin_thumb(_ridVl).unlink(missing_ok=True)
+            except OSError:
+                pass
+        # Une reponse du CDN qui n est PAS une image ne doit pas etre gardee.
+        check("veille : une page d erreur du CDN n est pas prise pour une image",
+              _vlVl.copier_thumb("zzz_tst", "https://exemple.invalide/x.jpg") is False)
+    finally:
+        _wVl._load_web_users = _svVl
+        try:
+            _vlVl.chemin_thumb("zzz_tst").unlink(missing_ok=True)
+        except OSError:
+            pass
+except Exception as _eVl:
+    check("veille : testable", False, repr(_eVl)[:160])
+
+print()
+print("=" * 70)
 print("FILIGRANE « DISPO VA » : trame au lieu du texte tuile")
 print("=" * 70)
 try:

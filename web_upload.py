@@ -31075,7 +31075,7 @@ def _render_veille_feed_html() -> str:
        onclick='igPlayInline(this)'>
     {cb_html}
     {ribbon}
-    <img src="{r.get('thumb', '')}" loading="lazy" class="reel-thumb" style="width:100%;height:100%;object-fit:cover">
+    <img src="/veille/thumb/{rid}" loading="lazy" decoding="async" class="reel-thumb" style="width:100%;height:100%;object-fit:cover">
     {video_html_v}
     {ready_wm}
     <div class="reel-play-overlay" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:4;transition:opacity .2s">
@@ -44021,6 +44021,50 @@ def create_app():
         response = send_file(str(thumb), conditional=True)
         response.headers["Cache-Control"] = "public, max-age=86400"
         return response
+
+    @app.route("/veille/thumb/<rid>")
+    def veille_thumb(rid):
+        """Miniature d un reel de Veille, servie depuis NOTRE disque.
+
+        Les adresses d Instagram sont signees et expirent : au bout de
+        quelques jours la Veille pointait vers des liens morts. Mesure dans la
+        page : 382 miniatures sur 382 en echec, pendant que le volet
+        « Suivies », frais du scrape, en chargeait 636 sur 636.
+
+        Ordre : notre copie, sinon l adresse d origine (elle vaut peut-etre
+        encore), sinon une image legere qui DIT que l apercu a expire — un
+        carre casse laisse croire a une panne du site.
+        """
+        if not is_auth():
+            return redirect("/")
+        import re as _reVt
+        if not _reVt.fullmatch(r"[0-9a-fA-F]{1,32}", rid or ""):
+            return ("Forbidden", 403)
+        try:
+            import veille as _vlVt
+            local = _vlVt.chemin_thumb(rid)
+            if local.exists() and local.stat().st_size > 512:
+                from flask import send_file
+                rep = send_file(str(local), conditional=True)
+                rep.headers["Cache-Control"] = "public, max-age=604800"
+                return rep
+            reel = _vlVt.get_reel(rid) or {}
+            distant = (reel.get("thumb") or "").strip()
+            if distant:
+                # On tente de la rapatrier au passage : la prochaine fois,
+                # elle sera chez nous meme si le lien meurt entre-temps.
+                if _vlVt.copier_thumb(rid, distant):
+                    from flask import send_file
+                    rep = send_file(str(_vlVt.chemin_thumb(rid)), conditional=True)
+                    rep.headers["Cache-Control"] = "public, max-age=604800"
+                    return rep
+                return redirect(distant)
+        except Exception:
+            pass
+        rep = app.response_class(_VIGNETTE_ABSENTE, mimetype="image/svg+xml")
+        rep.headers["X-Thumb-Error"] = "apercu expire cote Instagram"
+        rep.headers["Cache-Control"] = "no-store"
+        return rep
 
     @app.route("/cloud/thumb/pp/<path:filename>")
     def cloud_thumb_pp(filename):
