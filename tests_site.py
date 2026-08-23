@@ -3501,6 +3501,42 @@ try:
               "except subprocess.TimeoutExpired" in _srcAp
               and "dest.unlink(missing_ok=True)" in _srcAp)
 
+        # LE chemin qui restait casse. Au-dela des 24 premieres cartes, l image
+        # n a qu un data-src ; seul vaultChargerVignettes la promeut en src. Il
+        # n etait arme que par le chargement initial et par le changement
+        # d IDENTITE — jamais par un clic sur un ONGLET. Mesure sur le site, en
+        # arrivant par la barre laterale sur Video brut : 24 apercus charges sur
+        # 204, les 180 autres restaient un pixel transparent. Par l URL directe
+        # tout marchait, ce qui a fait chercher ailleurs pendant longtemps.
+        def _corpsAp(entete):
+            """Le corps d une fonction JS, borne par la fonction SUIVANTE.
+
+            Compter les accolades ou limiter a N caracteres se trompait de
+            fin : showTab fait plusieurs milliers de caracteres et contient
+            des blocs fermes en colonne 0.
+            """
+            _d = _srcAp.find(entete)
+            if _d < 0:
+                return ""
+            _f = _srcAp.find("\nfunction ", _d + len(entete))
+            return _srcAp[_d:_f if _f > 0 else _d + 20000]
+
+        _showAp = _corpsAp("function showTab(group,name,title,subtitle){")
+        check("apercus : changer d ONGLET reprend les vignettes en charge",
+              "vaultChargerVignettes" in _showAp,
+              "afficher la galerie ne suffit pas, il faut promouvoir les data-src")
+        _lazyAp = _reAp.search(
+            r"function chargerOngletDiffere\(sec\)\{(.{0,4000}?)\n\}",
+            _srcAp, _reAp.S)
+        check("apercus : un fragment injecte reprend ses vignettes aussi",
+              bool(_lazyAp) and "vaultChargerVignettes" in _lazyAp.group(1),
+              "son HTML arrive apres le passage du chargeur et ne s arme pas seul")
+        # La racine est elue sur offsetParent, juste seulement APRES le recalcul
+        # de mise en page du display:block. Appeler tout de suite ne trouve rien.
+        check("apercus : l appel attend une frame avant d elire sa racine",
+              _reAp.search(r"requestAnimationFrame\(function\(\)\{\s*"
+                           r"window\.vaultChargerVignettes\(\);", _srcAp) is not None)
+
         import shutil as _shAp
         _identAp = "_tstpts"
         _dirAp = _wAp.IDENTITIES_DIR / _identAp / "brutes"

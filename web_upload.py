@@ -7451,6 +7451,13 @@ function chargerOngletDiffere(sec){
         if(!parent) return;
         noeuds.forEach(function(n){ parent.insertBefore(n, trou); });
         parent.removeChild(trou);
+        // Un fragment injecte arrive APRES le passage du chargeur, et son
+        // HTML ne porte aucun script capable de s armer lui-meme : sans
+        // cet appel, les galeries differees (Bibliotheque 2, vault PRO)
+        // restaient des murs de cartes vides.
+        if(typeof window.vaultChargerVignettes === 'function'){
+          requestAnimationFrame(function(){ window.vaultChargerVignettes(); });
+        }
         noeuds.forEach(function(n){
           if(!n.querySelectorAll) return;   // noeuds texte
           var lst = (n.tagName === 'SCRIPT')
@@ -7517,6 +7524,19 @@ function showTab(group,name,title,subtitle){
   }
   // ===== Lazy-load des onglets lourds (1er open seulement) =====
   chargerOngletDiffere(sec);
+  // Les vignettes au-dela des 24 premieres n ont qu un data-src : seul
+  // vaultChargerVignettes les promeut en src. Il n etait arme que par le
+  // chargement initial et par le changement d IDENTITE — jamais par un clic
+  // sur un onglet. Mesure : en arrivant par la barre laterale sur Video
+  // brut, 24 apercus charges sur 204, les 180 autres restaient un pixel
+  // transparent. Par l URL directe, tout marchait : d ou le « ca marche
+  // chez moi » qui a fait chercher ailleurs pendant si longtemps.
+  // Le report d une frame est necessaire : la fonction elit sa racine sur
+  // offsetParent, qui n est juste qu APRES le recalcul de mise en page du
+  // display:block ci-dessus.
+  if(typeof window.vaultChargerVignettes === 'function'){
+    requestAnimationFrame(function(){ window.vaultChargerVignettes(); });
+  }
   document.getElementById('page-title').textContent=title||'';
   document.getElementById('page-subtitle').textContent=subtitle||'';
   // Mettre à jour l'URL pour que le Referer soit conservé après POST
