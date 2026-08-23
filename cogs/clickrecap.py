@@ -899,8 +899,9 @@ class ClickRecap(commands.Cog):
                 value=f"_({len(ids)} links — too many to detail, totals above.)_",
                 inline=False)
 
-        _quoi = (f"{drapeau} {libelle} vs 🌍 all countries" if pays_marche
-                 else "🌍 all countries")
+        # Pas de drapeau dans le PIED de page : Discord y rend les emoji en
+        # toutes petites lettres, « 🇺🇸 US » se lisait « us US ».
+        _quoi = (f"{libelle} vs global" if pays_marche else "all countries")
         emb.set_footer(
             text=f"Updated {_paris_now().strftime('%H:%M')} · every 30 min · "
                  f"{_quoi} · GetMySocial")
