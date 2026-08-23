@@ -144,10 +144,57 @@ def _menu_feature_check(interaction, feature: str) -> bool:
         return True
 
 
+# Correspondance suffixe de custom_id -> icone. Couvre « cmenu: » comme
+# « cmenu2: » : on coupe au premier deux-points.
+_ICONE_PAR_ACTION_MENU = {
+    "reel": "reelcaption",
+    "reelmonte": "reelmonte",
+    "story": "story",
+    "post": "post",
+    "storycta": "storycta",
+    "pseudo": "pseudo",
+    "name": "name",
+    "bio": "bio",
+    "pp": "pp",
+    "capbanger": "capbanger",
+    "montagebanger": "montagebanger",
+    "templatebrut": "templatebrut",
+}
+
+
+def _poser_icones_menu(view, guild):
+    """Remplace l emoji standard des boutons par l icone du serveur.
+
+    Ces boutons declarent leur emoji dans le DECORATEUR, donc a la
+    definition de la classe : on ne peut pas y mettre une icone qui depend
+    du serveur. On la pose ici, au moment ou la vue part reellement.
+
+    Contrairement au panneau jailbreak, le libelle est deja separe de
+    l emoji sur ces boutons : il n y a rien a couper.
+    """
+    try:
+        ic = icones_actions(guild)
+    except Exception:
+        return
+    if not ic:
+        return
+    for item in getattr(view, "children", []):
+        cid = getattr(item, "custom_id", "") or ""
+        suffixe = cid.split(":", 1)[1] if ":" in cid else ""
+        cle = _ICONE_PAR_ACTION_MENU.get(suffixe)
+        emo = ic.get(cle) if cle else None
+        if emo is not None:
+            try:
+                item.emoji = emo
+            except Exception:
+                pass
+
+
 def _filter_menu_view(view, guild):
     """Retire les boutons désactivés sur ce serveur (fonctions + mode Threads).
     En mode Threads, garde uniquement le set _THREADS_MENU et renomme le bouton
     'Mes comptes Insta' en 'Mes comptes Threads'."""
+    _poser_icones_menu(view, guild)
     try:
         import guild_features as gf
         feats = gf.get_features(guild)
@@ -3763,7 +3810,9 @@ class UserCog(commands.Cog):
             color=discord.Color.blurple(),
         )
         try:
-            msg = await ch.send(embed=emb, view=CentralMenuView(self))
+            _vue_c = CentralMenuView(self)
+            _poser_icones_menu(_vue_c, guild)
+            msg = await ch.send(embed=emb, view=_vue_c)
         except Exception as e:
             await interaction.followup.send(f"❌ Impossible de poster le menu : {e}", ephemeral=True)
             return

@@ -45256,6 +45256,10 @@ def create_app():
                 # chaque reconstruction JS : un compte sans copie locale coutait une
                 # requete par affichage, pour rien.
                 r404 = make_response("", 404)
+                # PAS en text/html : le hook de cache force « no-store » sur
+                # tout le HTML (les pages portent des donnees de session), ce
+                # qui annulait justement la duree de vie posee ici.
+                r404.mimetype = "text/plain"
                 r404.headers["Cache-Control"] = "public, max-age=3600"
                 return r404
             # La copie locale fait 320x320 — ce que rend Instagram — alors que la

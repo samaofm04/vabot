@@ -4672,6 +4672,54 @@ except Exception as _eF3:
 
 print()
 print("=" * 70)
+print("PHOTOS DE PROFIL : servies a la taille affichee, 404 mis en cache")
+print("=" * 70)
+try:
+    import io as _ioPp
+    import web_upload as _wPp
+    from PIL import Image as _ImPp
+
+    _aPp = _wPp.create_app(); _aPp.testing = True
+    _svPp = _wPp._load_web_users
+    _wPp._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"}}
+    _cPp = _aPp.test_client()
+    with _cPp.session_transaction() as _s:
+        _s["auth"] = True; _s["username"] = "boss"; _s["role"] = "owner"; _s["sid"] = "TPP"
+
+    # La copie locale fait 320x320 pour des pastilles de 30 a 46 px : avec ~800
+    # comptes le navigateur gardait 328 Mo de bitmaps DECODES, ce qui figeait
+    # l onglet. La route doit servir une reduction, pas l original.
+    _dPp = _plCa.Path("data/insta/pp"); _dPp.mkdir(parents=True, exist_ok=True)
+    _fPp = _dPp / "_tst_pp_perf.jpg"
+    _ImPp.new("RGB", (320, 320), (200, 60, 120)).save(_fPp, "JPEG", quality=92)
+    try:
+        _rPp = _cPp.get("/insta/pp/_tst_pp_perf")
+        check("pp : la route repond", _rPp.status_code == 200, _rPp.status_code)
+        if _rPp.status_code == 200:
+            _szPp = _ImPp.open(_ioPp.BytesIO(_rPp.data)).size
+            check("pp : servie reduite, pas en 320 px", max(_szPp) <= 96, _szPp)
+        # Un 404 sans duree de vie etait redemande a CHAQUE affichage : un
+        # compte sans copie locale coutait une requete par rendu, pour rien.
+        # Le hook de cache force « no-store » sur tout le text/html, d ou le
+        # type text/plain — sans lui l en-tete posee ici etait annulee.
+        _r4 = _cPp.get("/insta/pp/_tst_absent_xyz")
+        check("pp : un compte sans photo repond 404", _r4.status_code == 404)
+        check("pp : ce 404 est mis en cache (plus une requete par affichage)",
+              "max-age" in (_r4.headers.get("Cache-Control") or "")
+              and "no-store" not in (_r4.headers.get("Cache-Control") or ""),
+              _r4.headers.get("Cache-Control"))
+    finally:
+        for _x in (_fPp, _wPp.THUMB_DIR / "insta_pp96" / "_tst_pp_perf.jpg"):
+            try:
+                _x.unlink()
+            except Exception:
+                pass
+        _wPp._load_web_users = _svPp
+except Exception as _ePp:
+    check("pp : reduction testable", False, repr(_ePp)[:160])
+
+print()
+print("=" * 70)
 print("AVATARS DISCORD : demandes a la taille reellement affichee")
 print("=" * 70)
 try:
