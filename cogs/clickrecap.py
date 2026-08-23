@@ -787,7 +787,7 @@ class ClickRecap(commands.Cog):
             # obligeaient a chercher la meme personne deux fois pour comparer.
             _m = libelle if pays_marche else ""
             entete = (
-                f"{'':<18}{'TODAY':^12}{'YESTERDAY':^12}{'WEEK':^12}\n"
+                f"{'':<18}{'TODAY':^12}{'YESTERDAY':^12}{'PERIOD':^12}\n"
                 f"{'LINK':<18}"
                 + (f"{_m:>5}{'GLOB':>7}" * 3 if pays_marche
                    else f"{'GLOB':>12}" * 3))
@@ -836,7 +836,7 @@ class ClickRecap(commands.Cog):
                 ordre = sorted(
                     _paquets.values(),
                     key=lambda g: (-(_somme(g["lignes"], 0, _tri) or 0),
-                                   -(_somme(g["lignes"], 2, _tri) or 0),
+                                   -(_somme(g["lignes"], 3, _tri) or 0),
                                    str(g["nom"] or g["lignes"][0][0]).lower()))
                 # Un paquet de lignes PAR personne : la coupure en plusieurs
                 # champs se fait ensuite entre les paquets, jamais au milieu.
@@ -849,10 +849,14 @@ class ClickRecap(commands.Cog):
                     if g["nom"] and len(membres) > 1:
                         lignes.append(
                             f"{(g['nom'] + ' (' + str(len(membres)) + ')')[:17]:<18}"
+                            # (0, 1, 3) = aujourd'hui, hier, quinzaine. La
+                            # semaine (2) reste calculee pour le resume du haut,
+                            # mais n'a plus de colonne : trois par ligne, pas
+                            # plus, sinon le tableau deborde sur telephone.
                             + "".join(
                                 _duo_col((_somme(membres, i, 0),
                                           _somme(membres, i, 1)))
-                                for i in (0, 1, 2)))
+                                for i in (0, 1, 3)))
                         prefixe = "  "
                     else:
                         prefixe = ""
@@ -860,7 +864,7 @@ class ClickRecap(commands.Cog):
                         etiquette = (prefixe + _nom_propre(lab))[:17]
                         lignes.append(
                             f"{etiquette:<18}"
-                            + "".join(_duo_col(p[i]) for i in (0, 1, 2)))
+                            + "".join(_duo_col(p[i]) for i in (0, 1, 3)))
                     paquets_lignes.append(lignes)
 
                 # Remplissage par paquets. Un champ Discord plafonne a 1024
