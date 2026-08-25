@@ -18065,7 +18065,10 @@ window.vaXhrUpload = function(url, fd, onProg){
     }, 5000);
     x.upload.onprogress = function(e){
       if(e.loaded !== vu){ vu = e.loaded; bouge = Date.now(); }
-      if(e.lengthComputable && onProg) onProg(e.loaded / e.total);
+      // On transmet AUSSI les octets : une barre figee a 85 % ne dit pas si
+      // quelque chose part encore. Avec les Mo, un envoi lent se distingue
+      // d une connexion coupee d un coup d oeil.
+      if(e.lengthComputable && onProg) onProg(e.loaded / e.total, e.loaded, e.total);
     };
     x.onload = function(){
       fini = true; clearInterval(garde);
@@ -18296,6 +18299,8 @@ document.addEventListener('submit', function(e){
   try { if(files[0] && files[0].type && files[0].type.indexOf('image/') === 0) thumbUrl = URL.createObjectURL(files[0]); } catch(e2){}
   vaTask.add(taskId, {title: 'Upload de ' + files.length + ' ' + typeLbl + (_identLbl ? ' → ' + _identLbl : ''), thumb: thumbUrl});
   const fileProg = {};
+  const fileOcts = {};        // octets deja partis, par fichier
+  function _mo(o){ return (o / 1048576).toFixed(1).replace(".", ",") + " Mo"; }
   let lastErr = '';
   function updAgg(){
     let sum = 0;
@@ -18306,7 +18311,19 @@ document.addEventListener('submit', function(e){
     const lbl = (frac >= 1 && fini < files.length)
       ? 'enregistrement…'
       : fini + '/' + files.length;
-    vaTask.progress(taskId, frac, lbl);
+    // Total pris sur la TAILLE des fichiers, jamais sur ce que le navigateur
+    // a deja annonce : sinon le total grandit en cours de route et le
+    // rapport affiche RECULE, ce qui est pire que pas de chiffre.
+    let envoyes = 0, totaux = 0;
+    for(let i = 0; i < files.length; i++){
+      const taille = (files[i] && files[i].size) || 0;
+      totaux += taille;
+      envoyes += (fileOcts[i] != null)
+        ? Math.min(fileOcts[i], taille)
+        : Math.round((fileProg[i] || 0) * taille);
+    }
+    const octets = totaux ? (" · " + _mo(envoyes) + " / " + _mo(totaux)) : "";
+    vaTask.progress(taskId, frac, lbl + octets);
   }
   // Le form est libéré tout de suite : on vide l'input (re-spam possible) et on
   // retourne DIRECT sur la bonne galerie — l'upload continue en haut à droite.
@@ -18326,7 +18343,7 @@ document.addEventListener('submit', function(e){
       fd.append('example', exampleFile, exampleFile.name);
     }
     try {
-      const r = await vaXhrUpload(form.action, fd, function(f){ fileProg[idx] = f; updAgg(); });
+      const r = await vaXhrUpload(form.action, fd, function(f, l, t){ fileProg[idx] = f; if(l != null) fileOcts[idx] = l; updAgg(); });
       fileProg[idx] = 1;
       if(r.ok) done++; else errs++;
     } catch(e){
@@ -19607,7 +19624,8 @@ def _linkimp_fetch(u: str, inf: dict):
 
 # Analyses de montage en cours. Le temoin de l'interface s'y refere ;
 # « fini » garde le dernier nom traite, pour annoncer le resultat.
-_ANALYSES = {"en_cours": 0, "faites": 0, "echecs": 0, "dernier": ""}
+_ANALYSES = {"en_cours": 0, "faites": 0, "echecs": 0, "dernier": "",
+             "motif": ""}   # motif du DERNIER echec, pour ne pas laisser chercher
 _ANALYSES_LOCK = threading.Lock()
 
 
@@ -19764,6 +19782,10 @@ def _lancer_analyse_auto(video) -> bool:
             if err or not out:
                 with _ANALYSES_LOCK:
                     _ANALYSES["echecs"] += 1
+                    # Sans le motif, la page « A relire » n annoncait qu un
+                    # NOMBRE d echecs : impossible de savoir s il fallait
+                    # recharger le compte, installer ffmpeg, ou autre chose.
+                    _ANALYSES["motif"] = (err or "raison inconnue")[:200]
                 return
             out["_source"] = "analyse automatique a l'import"
             safe_json.write(video.with_suffix(".analyse.json"), out, indent=None)
@@ -40441,6 +40463,16 @@ def _claude_montage_analyze(frames, duration: float, cuts, key: str):
             last_err = ""
         # 4xx = la requête déplaît -> on retente en plus simple. 5xx / 429 = côté
         # serveur, réessayer en plus simple n'y changerait rien.
+        # Un credit epuise ne se repare pas en reessayant « en plus simple » :
+        # chaque tentative repart pour un appel qui echouera pareil. On sort
+        # tout de suite, et on le dit en clair — le message d Anthropic est
+        # en anglais et noye au milieu du reste.
+        if 400 <= rr.status_code < 500 and (
+                "credit balance" in last_err.lower()
+                or "insufficient" in last_err.lower()):
+            return None, ("Credit Anthropic epuise : recharge le compte sur "
+                          "console.anthropic.com (Billing), puis relance "
+                          "l analyse.")
         if rr.status_code in (429, 503, 529):
             return None, ("Claude est surchargé en ce moment "
                           f"({rr.status_code}) — attends 1 min et re-clique")
@@ -47155,8 +47187,12 @@ def create_app():
             _souci.append("<b>%d analyse(s) en cours</b> — le resultat "
                           "apparaitra ici." % _etat["en_cours"])
         if _etat.get("echecs"):
-            _souci.append("%d analyse(s) ont echoue depuis le demarrage."
-                          % _etat["echecs"])
+            import html as _htmlAr    # le motif vient d une API : jamais brut
+            _m = (_etat.get("motif") or "").strip()
+            _souci.append("%d analyse(s) ont echoue depuis le demarrage.%s"
+                          % (_etat["echecs"],
+                             (" Derniere raison : <b>%s</b>"
+                              % _htmlAr.escape(_m)) if _m else ""))
         _diag = ""
         if _souci:
             _diag = ("<div style='margin:0 0 16px;padding:12px 14px;"
