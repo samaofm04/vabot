@@ -582,6 +582,44 @@ def _toggle_disabled_reel(file_id: str) -> bool:
 # migration les perdrait toutes en silence. La cle porte de toute facon le
 # sous-dossier (« identite|brutes|... », « identite|templates|... »), donc
 # rien n'est ambigu a la lecture.
+#: Chemins d'Instagram qui ne sont PAS des comptes : instagram.com/p/XXX est
+#: un post, /reel/ une video, /stories/ une story. Les accepter creerait des
+#: comptes fantomes nommes « p » ou « reel ».
+_IG_PAS_UN_COMPTE = {"p", "reel", "reels", "stories", "explore", "tv", "s",
+                     "accounts", "direct", "challenge"}
+
+
+def _pseudo_instagram(ligne) -> str:
+    """Le pseudo Instagram d'une ligne collee, ou '' si on n'en tire rien.
+
+    Accepte le pseudo nu, le @pseudo, et l'URL complete — c'est ce qu'on colle
+    depuis un partage Instagram :
+
+        https://www.instagram.com/jessy_jpte?igsi=MXNib24…%3D%3D&utm_source=qr
+
+    Tout ce qui suit « ? » ou « # » est du SUIVI ajoute par le partage
+    (igsi, utm_source…), jamais le pseudo. Sans cette coupe, le compte
+    s'appellerait « jessy_jpte?igsi=MXNib24… » et ne serait jamais retrouve.
+
+    Rend '' plutot que de deviner : l'appelant compte les lignes ecartees et
+    les montre, au lieu de les perdre en silence.
+    """
+    t = str(ligne or "").strip()
+    if not t:
+        return ""
+    t = t.split("?")[0].split("#")[0].strip()
+    m = re.search(r"instagram\.com/([^/\s]+)", t, re.I)
+    if m:
+        t = m.group(1)
+    t = t.strip().strip("/").lstrip("@").strip()
+    if not t or t.lower() in _IG_PAS_UN_COMPTE:
+        return ""
+    # Un pseudo Instagram : lettres, chiffres, point, tiret bas, 30 au plus.
+    if not re.fullmatch(r"[A-Za-z0-9._]{1,30}", t):
+        return ""
+    return t
+
+
 FAV_BRUTES_FILE = DATA_DIR / "fav_brutes.json"
 
 
@@ -29409,15 +29447,19 @@ def _render_jailbreak_html() -> str:
         "<input type='hidden' name='back_tab' value='jailbreak'>"
         "<input type='hidden' name='identity' id='jb-bulk-identity'>"
         "<input type='hidden' name='va' id='jb-bulk-va'>"
-        "<label>Usernames Instagram <span style='color:#ef4444'>*</span> "
-        "<span style='color:#666;text-transform:none;font-weight:400;letter-spacing:0'>(1 par ligne)</span></label>"
+        "<label>Comptes Instagram <span style='color:#ef4444'>*</span> "
+        "<span style='color:#666;text-transform:none;font-weight:400;letter-spacing:0'>"
+        "(1 par ligne — pseudo ou lien)</span></label>"
         "<textarea name='usernames' id='jb-bulk-textarea' required maxlength='8000' rows='10' "
         "style='font-family:monospace;font-size:13px' "
-        "placeholder='ex:&#10;jessye_acc1&#10;jessye_acc2&#10;jessye_acc3&#10;@avec_arobase_ok'></textarea>"
+        "placeholder='ex:&#10;jessye_acc1&#10;@avec_arobase_ok&#10;"
+        "https://www.instagram.com/jessy_jpte?igsi=...&amp;utm_source=qr'></textarea>"
         "<small style='display:block;color:#666;margin-top:4px;font-size:11px'>"
         "Chaque ligne = 1 compte créé avec juste le username. Les autres champs (mdp, 2FA, email, notes) "
         "se complètent plus tard via Edit. Les doublons (même username déjà existant) sont ignorés. "
-        "Le préfixe @ est retiré automatiquement."
+        "Le préfixe @ est retiré automatiquement, et un <b>lien Instagram</b> est accepté tel quel : "
+        "tout ce qui suit le « ? » (<code>igsi</code>, <code>utm_source</code>…) est du suivi et n'est pas gardé. "
+        "Les liens de post (<code>/p/</code>, <code>/reel/</code>) ne sont pas des comptes et sont signalés."
         "</small>"
         "<div id='jb-bulk-count' style='margin-top:8px;font-size:12px;color:#888'></div>"
         "<div style='display:flex;gap:10px;justify-content:flex-end;margin-top:18px'>"
@@ -50992,14 +51034,30 @@ def create_app():
         usernames_raw = request.form.get("usernames") or ""
         if not identity:
             return _error("✕ Identité manquante", tab="jailbreak")
-        # Parse : 1 username par ligne. Aussi tolerer separateurs , ; et tabs.
-        usernames = []
+        # Parse : 1 par ligne, separateurs , ; et tabulations tolérés. Chaque
+        # ligne peut être un pseudo, un @pseudo, ou une URL Instagram collée
+        # depuis un partage — auquel cas tout ce qui suit « ? » est du suivi
+        # (igsi, utm_source) et n'appartient pas au pseudo.
+        usernames, ecartes = [], []
         for chunk in usernames_raw.replace(",", "\n").replace(";", "\n").replace("\t", "\n").splitlines():
-            u = chunk.strip().lstrip("@")
+            brut = chunk.strip()
+            if not brut:
+                continue
+            u = _pseudo_instagram(brut)
             if u:
-                usernames.append(u)
+                if u not in usernames:
+                    usernames.append(u)
+            else:
+                # Compté et montré, jamais perdu en silence : une ligne avalée
+                # sans un mot, c'est un compte qu'on croit ajouté.
+                ecartes.append(brut[:60])
         if not usernames:
-            return _error("✕ Aucun username fourni", tab="jailbreak")
+            _det = (" Lignes non reconnues : " + ", ".join(ecartes[:5])) if ecartes else ""
+            if request.form.get("ajax") == "1":
+                from flask import jsonify
+                return jsonify({"ok": False,
+                                "error": ("Aucun compte reconnu." + _det)[:300]})
+            return _error("✕ Aucun username fourni." + _det, tab="jailbreak")
         try:
             res = jb.bulk_add_accounts(identity, usernames, va=va)
         except ValueError as e:
@@ -51024,6 +51082,11 @@ def create_app():
             parts.append(f"{res['skipped_dup']} doublons ignorés")
         if res['skipped_invalid']:
             parts.append(f"{res['skipped_invalid']} invalides")
+        if ecartes:
+            # Les lignes qu'on n'a pas su lire se DISENT : une ligne avalee
+            # sans un mot, c'est un compte qu'on croit ajoute et qui manque.
+            parts.append(f"{len(ecartes)} ligne(s) non reconnue(s) : "
+                         + ", ".join(ecartes[:3]))
         if va:
             parts.append(f"sous VA <b>{va}</b>")
         if n_kick:

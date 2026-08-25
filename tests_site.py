@@ -4376,6 +4376,42 @@ except Exception as _eJb:
 
 print()
 print("=" * 70)
+print("AJOUT EN MASSE DE COMPTES : coller un LIEN Instagram")
+print("=" * 70)
+try:
+    import web_upload as _wIg
+    for _tIg, _attIg in (
+            # Les liens colles depuis un partage Instagram portent du suivi
+            # apres le « ? » : igsi, utm_source. Sans la coupe, le compte
+            # s appellerait « jessy_jpte?igsi=... » et ne serait jamais retrouve.
+            ("https://www.instagram.com/jessy_jpte?igsi=MXNib24waXZ6Zjdzdg%3D%3D&utm_source=qr",
+             "jessy_jpte"),
+            ("https://www.instagram.com/jessy.hairys?igsi=ajd3bjM0cnU3YzFj", "jessy.hairys"),
+            ("instagram.com/jessyeztd/", "jessyeztd"),
+            ("@jessy_seafyu", "jessy_seafyu"),
+            ("jessy_jpte", "jessy_jpte"),
+            ("  jessy_jpte  ", "jessy_jpte"),
+            # Un post ou un reel n est PAS un compte : les accepter creerait
+            # des comptes fantomes nommes « p » ou « reel ».
+            ("https://www.instagram.com/p/ABC123/", ""),
+            ("https://www.instagram.com/reel/XY/", ""),
+            ("https://www.instagram.com/stories/qqn/1/", ""),
+            ("", ""),
+            ("n importe quoi !!", ""),
+            (None, "")):
+        check("instagram : %r -> %r" % (str(_tIg)[:46], _attIg),
+              _wIg._pseudo_instagram(_tIg) == _attIg,
+              repr(_wIg._pseudo_instagram(_tIg)))
+    # Le pseudo le plus long autorise par Instagram fait 30 signes.
+    check("instagram : un pseudo trop long est refuse",
+          _wIg._pseudo_instagram("a" * 31) == "")
+    check("instagram : 30 signes passent",
+          _wIg._pseudo_instagram("a" * 30) == "a" * 30)
+except Exception as _eIg:
+    check("instagram : extraction testable", False, repr(_eIg)[:160])
+
+print()
+print("=" * 70)
 print("REPORT DES CLICS : deux salons (FR / US), maj 30 min, bouton refresh")
 print("=" * 70)
 try:
