@@ -3998,6 +3998,55 @@ function vaultFiltreBouton(b, actif, labelOn, labelOff){
   b.style.borderColor = actif ? '#f5c518' : '#3a3a3a';
   b.textContent = actif ? labelOn : labelOff;
 }
+// Les deux filtres se COMBINENT, ils ne s'excluent pas.
+//
+//     aucun        tout, SAUF les ⚡        -- le tag sort de la vue de base
+//     ⭐ seul      les ⭐ non-⚡
+//     ⚡ seul      les ⚡
+//     ⭐ + ⚡      les ⚡ QUI SONT AUSSI ⭐   -- « Flash Banger »
+//
+// La premiere version les rendait exclusifs : allumer l'un eteignait l'autre.
+// Mais seul toggleFlashTrendFilter le faisait, pas son voisin -- clique dans
+// l'autre ordre, les deux restaient allumes et le filtre ⭐ gagnait, en
+// sortant un banger qui n'etait pas flash sous DEUX boutons coches.
+//
+// L'intersection n'est pas qu'une reparation : c'est exactement ce que va
+// chercher le bouton Discord « ⚡ Flash Banger », qui demande les deux
+// marques. Les deux ecrans disent donc enfin la meme chose.
+function vaultVuesAppliquer(sec){
+  sec = sec || vaultSectionVisible();
+  if(!sec) return;
+  var grid = sec.querySelector('#vault-grid');
+  if(!grid) return;
+  var bOn = vaultFiltreOn(sec, 'favbrute-toggle-btn');
+  var fOn = vaultFiltreOn(sec, 'flash-toggle-btn');
+  var shown = 0;
+  grid.querySelectorAll('.cloud-card').forEach(function(c){
+    var estFlash = !!c.querySelector('.flash-trend.is-flash');
+    var estFav = !!c.querySelector('.fav-brute-star.is-fav');
+    // Sans le filtre ⚡, les montages tagues restent CACHES : c'est le tag
+    // qui les sort de la vue ordinaire, et c'est tout son interet.
+    var ok = fOn ? estFlash : !estFlash;
+    if(bOn && !estFav) ok = false;
+    c.style.display = ok ? '' : 'none';
+    if(ok) shown++;
+  });
+  var vide = sec.querySelector('.vues-empty-note');
+  if(shown === 0 && (bOn || fOn)){
+    if(!vide){
+      vide = document.createElement('div');
+      vide.className = 'vues-empty-note';
+      vide.style.cssText = 'grid-column:1/-1;text-align:center;color:#888;padding:34px;font-size:14px';
+      grid.appendChild(vide);
+    }
+    vide.textContent = (bOn && fOn)
+      ? 'Aucun montage ⚡ Flash Trend marqué ⭐ pour cette identité.'
+      : (fOn ? 'Aucun montage ⚡ Flash Trend pour cette identité.'
+             : 'Aucun ⭐ pour cette identité.');
+    vide.style.display = '';
+  } else if(vide){ vide.style.display = 'none'; }
+}
+
 function applyBangerFilter(sec){
   sec = sec || vaultSectionVisible();
   vaultFiltreAppliquer(sec, vaultFiltreOn(sec, 'banger-toggle-btn'),
@@ -4162,55 +4211,6 @@ async function toggleFavBrute(btn, fileId){
 // toujours sur celui de « Vidéo brut » de la 1re bibliothèque, et le filtre
 // de « Template montage » ou de la Bibliothèque 2 travaillait sur la galerie
 // d'à côté, cachée.
-// Les deux filtres se COMBINENT, ils ne s'excluent pas.
-//
-//     aucun        tout, SAUF les ⚡        -- le tag sort de la vue de base
-//     ⭐ seul      les ⭐ non-⚡
-//     ⚡ seul      les ⚡
-//     ⭐ + ⚡      les ⚡ QUI SONT AUSSI ⭐   -- « Flash Banger »
-//
-// La premiere version les rendait exclusifs : allumer l'un eteignait l'autre.
-// Mais seul toggleFlashTrendFilter le faisait, pas son voisin -- clique dans
-// l'autre ordre, les deux restaient allumes et le filtre ⭐ gagnait, en
-// sortant un banger qui n'etait pas flash sous DEUX boutons coches.
-//
-// L'intersection n'est pas qu'une reparation : c'est exactement ce que va
-// chercher le bouton Discord « ⚡ Flash Banger », qui demande les deux
-// marques. Les deux ecrans disent donc enfin la meme chose.
-function vaultVuesAppliquer(sec){
-  sec = sec || vaultSectionVisible();
-  if(!sec) return;
-  var grid = sec.querySelector('#vault-grid');
-  if(!grid) return;
-  var bOn = vaultFiltreOn(sec, 'favbrute-toggle-btn');
-  var fOn = vaultFiltreOn(sec, 'flash-toggle-btn');
-  var shown = 0;
-  grid.querySelectorAll('.cloud-card').forEach(function(c){
-    var estFlash = !!c.querySelector('.flash-trend.is-flash');
-    var estFav = !!c.querySelector('.fav-brute-star.is-fav');
-    // Sans le filtre ⚡, les montages tagues restent CACHES : c'est le tag
-    // qui les sort de la vue ordinaire, et c'est tout son interet.
-    var ok = fOn ? estFlash : !estFlash;
-    if(bOn && !estFav) ok = false;
-    c.style.display = ok ? '' : 'none';
-    if(ok) shown++;
-  });
-  var vide = sec.querySelector('.vues-empty-note');
-  if(shown === 0 && (bOn || fOn)){
-    if(!vide){
-      vide = document.createElement('div');
-      vide.className = 'vues-empty-note';
-      vide.style.cssText = 'grid-column:1/-1;text-align:center;color:#888;padding:34px;font-size:14px';
-      grid.appendChild(vide);
-    }
-    vide.textContent = (bOn && fOn)
-      ? 'Aucun montage ⚡ Flash Trend marqué ⭐ pour cette identité.'
-      : (fOn ? 'Aucun montage ⚡ Flash Trend pour cette identité.'
-             : 'Aucun ⭐ pour cette identité.');
-    vide.style.display = '';
-  } else if(vide){ vide.style.display = 'none'; }
-}
-
 function favBruteApply(sec){
   vaultVuesAppliquer(sec);
 }
