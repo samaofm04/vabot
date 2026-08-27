@@ -3532,8 +3532,12 @@ try:
     # Le parc de telephones PUBLIE sur Instagram : y laisser passer une brute
     # eteinte est pire qu un envoi a un VA, qui aurait pu s en apercevoir.
     _srcRig = _plOf.Path("web_upload.py").read_text(encoding="utf-8")
-    check("desactivees : les trois routes du rig sont fermees",
-          _srcRig.count("_off.est_desactivee(chemin)") == 2
+    # Trois gardes « chemin » depuis que l'etoile des brutes envoie elle aussi
+    # dans Discord (_brute_banger_discord) : elle publie, donc elle se ferme
+    # comme les autres. Le compte monte avec le nombre de portes, jamais
+    # l'inverse — s'il baisse, c'est qu'une porte s'est rouverte.
+    check("desactivees : les routes publiantes du rig sont fermees",
+          _srcRig.count("_off.est_desactivee(chemin)") == 3
           and "_off.est_desactivee(f)" in _srcRig,
           "une brute eteinte pourrait etre publiee publiquement")
     check("desactivees : la route banger les refuse aussi",

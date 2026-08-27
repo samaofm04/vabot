@@ -313,7 +313,8 @@ def _move_channel_to_identity(channel_id: int, new_identity: str):
 
 def _send_video_to_banger_channel(identity: str, video_bytes: bytes,
                                   filename: str = "banger.mp4",
-                                  caption: str = "") -> tuple:
+                                  caption: str = "",
+                                  avec_meta: bool = False) -> tuple:
     """Envoie une video (bytes) dans le salon 'banger-{identity}' via le bot.
 
     Cherche, dans la categorie de l'identite, un salon texte dont le nom contient
@@ -323,16 +324,27 @@ def _send_video_to_banger_channel(identity: str, video_bytes: bytes,
     """
     import asyncio
     import io
+
+    # Une seule porte de sortie pour toute la fonction. Trois sorties
+    # anticipees rendaient un couple alors qu'on demandait un triplet :
+    # l'appelant aurait explose sur le deballage, et seulement en cas
+    # d'erreur — c'est-a-dire le jour ou Discord est en panne, quand on a le
+    # moins envie d'une surprise.
+    _meta_envoi: dict = {}
+
+    def _sortie(ok, msg):
+        return (ok, msg, dict(_meta_envoi)) if avec_meta else (ok, msg)
+
     if _BOT_REF is None:
-        return False, "bot pas initialise"
+        return _sortie(False, "bot pas initialise")
     if not video_bytes:
-        return False, "video vide"
+        return _sortie(False, "video vide")
     loop = getattr(_BOT_REF, "loop", None)
     if loop is None or not loop.is_running():
-        return False, "loop bot non actif"
+        return _sortie(False, "loop bot non actif")
     ident = (identity or "").strip()
     if not ident:
-        return False, "identite vide"
+        return _sortie(False, "identite vide")
 
     async def _do_send():
         import discord
@@ -363,7 +375,13 @@ def _send_video_to_banger_channel(identity: str, video_bytes: bytes,
                                f"({limit//(1024*1024)} Mo) — serveur non boost ?")
             try:
                 f = discord.File(io.BytesIO(video_bytes), filename=filename or "banger.mp4")
-                await banger.send(content=(caption or "")[:1900], file=f)
+                m = await banger.send(content=(caption or "")[:1900], file=f)
+                # De quoi retrouver ce message pour le supprimer quand l'etoile
+                # s'eteint. Recueilli dans un panier plutot que rendu ici : les
+                # huit autres sorties de cette fonction rendent un couple, et
+                # les passer toutes au triplet pour un seul cas d'usage aurait
+                # casse ses appelants sans rien apporter.
+                _meta_envoi.update({"channel_id": banger.id, "message_ids": [m.id]})
                 return True, f"#{banger.name}"
             except Exception as e:
                 return False, f"erreur envoi Discord: {e}"
@@ -373,9 +391,10 @@ def _send_video_to_banger_channel(identity: str, video_bytes: bytes,
 
     try:
         fut = asyncio.run_coroutine_threadsafe(_do_send(), loop)
-        return fut.result(timeout=90)
+        ok, msg = fut.result(timeout=90)
     except Exception as e:
-        return False, f"timeout / erreur: {e}"
+        ok, msg = False, f"timeout / erreur: {e}"
+    return _sortie(ok, msg)
 
 
 def _send_reel_to_banger_channel(identity: str, video_path) -> tuple:
@@ -664,6 +683,64 @@ def _toggle_fav_brute(file_id: str):
     except Exception as e:
         return now_on, str(e)[:150]
     return now_on, ""
+
+
+def _brute_banger_discord(file_id: str, allumee: bool) -> str:
+    """Envoie la brute etoilee dans le salon banger, ou retire ce qui y etait.
+
+    POURQUOI CETTE FONCTION EXISTE
+        L'etoile des REELS envoyait dans Discord ; celle des BRUTES ne faisait
+        que marquer un favori local. Deux mecanismes, deux fichiers, un seul
+        symbole a l'ecran — et donc un proprietaire qui etoile ses rushs et
+        attend sur Discord quelque chose qui n'est jamais parti. Les deux
+        etoiles se comportent desormais pareil.
+
+        Les TEMPLATES gardent l'ancien comportement : ce sont des sources de
+        montage, pas du contenu a publier tel quel.
+
+    ELLE NE LEVE JAMAIS
+        L'etoile est deja enregistree quand on arrive ici. La perdre parce que
+        Discord tousse serait pire que l'envoi manque : on rend donc un texte
+        qui dit ce qui s'est reellement passe, et l'ecran l'affiche.
+    """
+    parts = (file_id or "").split("|")
+    if len(parts) != 3:
+        return "clé inattendue, rien envoyé"
+    identity = parts[0].strip().lower()
+    subdir, filename = parts[1], parts[2]
+
+    if not allumee:
+        info = _pop_banger_mark(file_id)
+        if not info:
+            return ""                      # rien n'avait ete envoye
+        ok, msg = _delete_banger_messages(info)
+        return ("retiré de Discord : " + msg) if ok else ("Discord : " + msg)
+
+    # Memes gardes que la route des reels : ce qui part d'ici finit publie.
+    if identity not in _list_identities():
+        return "identité inconnue, rien envoyé"
+    if not filename or "/" in filename or "\\" in filename or filename in (".", ".."):
+        return "nom de fichier refusé, rien envoyé"
+    chemin = IDENTITIES_DIR / identity / subdir / filename
+    if not chemin.exists() or not chemin.is_file():
+        return "fichier introuvable sur le disque, rien envoyé"
+    if _off.est_desactivee(chemin):
+        return "brute désactivée (caption déjà incrustée) — non envoyée"
+    try:
+        octets = chemin.read_bytes()
+    except Exception as e:
+        return "lecture impossible : " + str(e)[:80]
+
+    ok, msg, meta = _send_video_to_banger_channel(
+        identity, octets, filename=filename,
+        caption="⭐ **BRUTE BANGER** — `%s`" % filename[:120],
+        avec_meta=True)
+    if not ok:
+        return "envoi Discord échoué : " + msg
+    # L'accuse de reception : sans lui, eteindre l'etoile laisserait la video
+    # dans le salon pour toujours.
+    _set_banger_mark(file_id, meta or {})
+    return "envoyé dans " + msg
 
 
 FLASH_TREND_FILE = DATA_DIR / "flash_trend.json"
@@ -4216,8 +4293,25 @@ async function toggleFavBrute(btn, fileId){
     // Le filtre peut être actif : la carte qu'on vient de dé-marquer doit
     // disparaître tout de suite, sinon elle reste affichée sous un filtre
     // qui prétend ne montrer que les favoris.
-    if(typeof favBruteApply === 'function') favBruteApply();
-    if(typeof showToast === 'function') showToast(on ? '⭐ Brute favorite' : '☆ Retirée des favoris', on ? 'success' : 'warning');
+    //
+    // La SECTION vient du bouton cliqué. Elle était omise : favBruteApply()
+    // recevait undefined et rafraîchissait « la première section visible du
+    // document », c'est-à-dire la galerie d'à côté. C'est le piège que ce
+    // fichier documente déjà pour les autres filtres — l'étoile prenait bien,
+    // mais la carte ne bougeait pas, donc « ça ne marche pas ».
+    if(typeof favBruteApply === 'function'){
+      favBruteApply(typeof vaultFiltreSection === 'function' ? vaultFiltreSection(btn) : undefined);
+    }
+    // Ce que Discord a réellement fait, et pas seulement l'état de l'étoile.
+    // Une étoile jaune qui s'allume pendant qu'aucune vidéo ne part est
+    // exactement ce qu'on cherchait à supprimer.
+    if(typeof showToast === 'function'){
+      var base = on ? '⭐ Brute favorite' : '☆ Retirée des favoris';
+      var info = (j.discord || '').trim();
+      var grave = /échoué|introuvable|refusé|inconnue|impossible|désactivée/i.test(info);
+      showToast(info ? (base + ' — ' + info) : base,
+                grave ? 'warning' : (on ? 'success' : 'warning'));
+    }
   }catch(e){ alert('Erreur réseau : ' + e); }
   finally{ btn.disabled = false; btn.style.opacity = '1'; }
 }
@@ -45051,7 +45145,11 @@ def create_app():
             # marque qui n'existe pas, et le VA recevrait n'importe quoi.
             return jsonify({"ok": False,
                             "error": "etoile NON enregistree : " + err})
-        return jsonify({"ok": True, "fav": now_on})
+        # Et maintenant l'etoile ENVOIE, comme celle des reels. Le favori reste
+        # enregistre meme si Discord echoue : le bouton « Vidéo brut Banger »
+        # du VA s'en sert, et le perdre pour une panne de salon serait pire.
+        discord = _brute_banger_discord(file_id, now_on) if "|brutes|" in file_id else ""
+        return jsonify({"ok": True, "fav": now_on, "discord": discord})
 
     @app.route("/cloud/sync_tags_templates", methods=["POST"])
     def cloud_sync_tags_templates():
