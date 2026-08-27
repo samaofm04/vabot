@@ -269,7 +269,6 @@ def _build_menu_embed(identity, guild=None):
         "Un montage ⚡ ET ⭐, monté avec une brute au hasard")
     add("cmenu:templateflashbrut", "contenu", "⭐⭐ ⚡ Flash + Brut",
         "Un montage ⚡ ET ⭐, monté avec ta brute ⭐")
-    add("cmenu:captionbrut", "contenu", "⭐⭐ Caption + Brut", "Une brute ⭐ + sa caption ⭐ en texte")
     add("cmenu:pseudo", "contenu", "👤 Pseudo", "Des pseudos dispo")
     add("cmenu:name", "contenu", "📝 Name", "Des noms d'affichage")
     add("cmenu:bio", "contenu", "💬 Bio", "Des bios de ton identité")
@@ -5413,9 +5412,6 @@ class ContentMenuView(discord.ui.View):
     async def b_brutbanger(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_brutes_bangers(interaction)
 
-    @discord.ui.button(label="⭐⭐ Caption + Brut", style=discord.ButtonStyle.primary, custom_id="cmenu:captionbrut", row=4)
-    async def b_captionbrut(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog._send_caption_plus_brute(interaction)
 
 
 class CentralMenuView(discord.ui.View):
@@ -5666,7 +5662,6 @@ _JB_ACTIONS_US = [
     ('montagebanger', '⭐⭐ Montage', 'montagebanger', False),
     ('templatebrut', '⭐⭐ Template + Brut', 'templatebrut', False),
     ('brutbanger', '⭐ Vidéo brut', 'brutbanger', False),
-    ('captionbrut', '⭐⭐ Caption + Brut', 'captionbrut', False),
 
     # Rangee 3 (suite) - LES FLASH TREND. Pas de quantite non plus : le VA
     # recoit ce qui est tague, ni plus ni moins.

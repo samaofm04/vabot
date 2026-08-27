@@ -4813,12 +4813,17 @@ try:
     # -- le menu VA porte bien les deux boutons -----------------------------
     _vFv = _uFv.ContentMenuView(None)
     _idsFv = [getattr(i, "custom_id", "") for i in _vFv.children]
+    # Quatre depuis le 21/08 : « Caption + Brut » a quitte le menu. Il prenait
+    # le meme couple d'ingredients que « Montage » — une brute etoilee et une
+    # caption etoilee — mais les envoyait separement, la caption en texte a
+    # recopier. Deux boutons pour un meme couple, dont un qui ne montait pas :
+    # c'est ce qui rendait le menu illisible. La commande /captionbrut reste.
     _BTNS = ("cmenu:capbanger", "cmenu:montagebanger", "cmenu:templatebrut",
-             "cmenu:brutbanger", "cmenu:captionbrut")
-    check("favoris : les 5 boutons sont dans le menu VA",
+             "cmenu:brutbanger")
+    check("favoris : les 4 boutons sont dans le menu VA",
           all(b in _idsFv for b in _BTNS),
           str([b for b in _BTNS if b not in _idsFv]))
-    check("favoris : les 5 boutons sont declares dans _MENU_BTN_FEATURE",
+    check("favoris : les 4 boutons sont declares dans _MENU_BTN_FEATURE",
           all(_uFv._MENU_BTN_FEATURE.get(b) == "contenu" for b in _BTNS),
           str([b for b in _BTNS if _uFv._MENU_BTN_FEATURE.get(b) != "contenu"]))
     # Discord plafonne a 5 boutons par rangee : une 6e sur la meme ligne fait
@@ -4838,9 +4843,9 @@ try:
     import os as _os
     import tempfile as _tempfile
     _clesFv = {a[0] for a in _uFv._JB_ACTIONS_US}
-    check("favoris : les 5 actions sont dans le menu US",
+    check("favoris : les 4 actions sont dans le menu US",
           all(k in _clesFv for k in ("capbanger", "montagebanger", "templatebrut",
-                                     "brutbanger", "captionbrut")),
+                                     "brutbanger")),
           str(sorted(_clesFv)))
     # Le panneau US declenche cmd.callback sur un ATTRIBUT du cog : une action
     # qui pointe vers une methode inexistante repond « Action indisponible ».
@@ -4887,8 +4892,11 @@ try:
     # cinq, donc les deux reels FINIS (caption, monte) ont ete remontes avec
     # les stories et le post, ce qui libere la rangee 3 pour « brut + Flash ».
     # Sans ce deplacement, les trois Flash n'avaient nulle part ou aller.
+    # Rangee 4 passee de 5 a 4 le 21/08, « Caption + Brut » ayant quitte le
+    # menu. La regle tient toujours : une rangee, une famille. C'est elle qu'on
+    # protege, pas le nombre.
     check("favoris : le panneau US garde ses 4 familles sur 4 rangees",
-          _rowsFv == {1: 4, 2: 5, 3: 4, 4: 5}, str(_rowsFv))
+          _rowsFv == {1: 4, 2: 5, 3: 4, 4: 4}, str(_rowsFv))
     # Et chaque action connait sa rangee : sans entree, elle retombe sur le
     # filet et atterrit n'importe ou.
     check("favoris : chaque action US a une rangee attribuee",
