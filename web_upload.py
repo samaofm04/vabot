@@ -653,6 +653,66 @@ def _toggle_fav_brute(file_id: str) -> bool:
     return now_on
 
 
+FLASH_TREND_FILE = DATA_DIR / "flash_trend.json"
+
+#: Un TROISIEME etat pour un montage, a cote de « ordinaire » et « banger ».
+#:
+#: Il ne s'ajoute pas, il REMPLACE : un montage marque Flash Trend sort de la
+#: vue de base ET de la vue Bangers. C'est toute la difference avec l'etoile,
+#: qui elle se surajoute. Un montage flash n'a donc qu'un seul endroit ou il
+#: apparait, et on ne peut pas le livrer par megarde dans un lot ordinaire.
+#:
+#: Meme forme de fichier que fav_brutes.json — une liste de file_id — pour que
+#: les deux se lisent, se sauvent et se purgent de la meme facon.
+
+
+def _load_flash_trend() -> set:
+    try:
+        data = _cached_json_load(FLASH_TREND_FILE)
+        if isinstance(data, list):
+            return set(data)
+        if isinstance(data, dict):
+            return set(data.keys())
+    except Exception:
+        pass
+    return set()
+
+
+def _toggle_flash_trend(file_id: str) -> bool:
+    """Bascule le tag Flash Trend. Retourne True s'il est desormais pose."""
+    s = _load_flash_trend()
+    now_on = file_id not in s
+    if now_on:
+        s.add(file_id)
+    else:
+        s.discard(file_id)
+    try:
+        FLASH_TREND_FILE.parent.mkdir(parents=True, exist_ok=True)
+        safe_json.write_text(FLASH_TREND_FILE,
+                             json.dumps(sorted(s), ensure_ascii=False))
+    except Exception:
+        pass
+    return now_on
+
+
+def _pop_flash_trend(file_id: str) -> None:
+    """Retire le tag d'un montage supprime.
+
+    Meme raison que pour l'etoile : la cle est « identite|templates|nom », donc
+    un nouveau fichier portant le meme nom heriterait du tag de l'ancien — et
+    disparaitrait de la vue de base sans que personne ne comprenne pourquoi.
+    """
+    s = _load_flash_trend()
+    if file_id not in s:
+        return
+    s.discard(file_id)
+    try:
+        safe_json.write_text(FLASH_TREND_FILE,
+                             json.dumps(sorted(s), ensure_ascii=False))
+    except Exception:
+        pass
+
+
 def _pop_fav_brute(file_id: str) -> None:
     """Retire l'étoile d'une brute supprimée.
 
@@ -3810,14 +3870,19 @@ function vaultFiltreSection(btn){
 // Masque/rétablit les cartes d'UNE grille et gère son message « rien à
 // montrer ». Le message porte une CLASSE (pas un id) : il y en a un par
 // galerie, un id serait à nouveau ambigu dans le document.
-function vaultFiltreAppliquer(sec, actif, selEtoile, classeVide, texteVide){
+// selExclu : un selecteur dont les cartes sont RETIREES de cette vue, filtre
+// actif ou non. C'est ce qui rend un tag exclusif plutot qu'additif — sans
+// lui, un montage Flash Trend reapparaitrait dans la vue de base des qu'on
+// eteint un filtre, et le tag ne voudrait plus rien dire.
+function vaultFiltreAppliquer(sec, actif, selEtoile, classeVide, texteVide, selExclu){
   if(!sec) return;
   var grid = sec.querySelector('#vault-grid');
   if(!grid) return;
   var shown = 0;
   grid.querySelectorAll('.cloud-card').forEach(function(c){
-    if(!actif){ c.style.display = ''; return; }
-    var on = c.querySelector(selEtoile);
+    var exclu = selExclu ? c.querySelector(selExclu) : null;
+    if(!actif){ c.style.display = exclu ? 'none' : ''; return; }
+    var on = c.querySelector(selEtoile) && !exclu;
     c.style.display = on ? '' : 'none';
     if(on) shown++;
   });
@@ -4008,9 +4073,65 @@ async function toggleFavBrute(btn, fileId){
 // d'à côté, cachée.
 function favBruteApply(sec){
   sec = sec || vaultSectionVisible();
+  // Un montage ⚡ Flash Trend n'apparait NI ici NI dans la vue de base : le
+  // tag remplace l'etat ordinaire, il ne s'y ajoute pas.
   vaultFiltreAppliquer(sec, vaultFiltreOn(sec, 'favbrute-toggle-btn'),
                        '.fav-brute-star.is-fav', 'favbrute-empty-note',
-                       'Aucun rush brut marqué ⭐ pour cette identité.');
+                       'Aucun rush brut marqué ⭐ pour cette identité.',
+                       '.flash-trend.is-flash');
+}
+
+// === Filtre « ⚡ Flash Trend » des montages ============================
+//
+// Le seul endroit ou ces montages se voient. Il n'exclut rien, lui : c'est
+// deja la vue reservee.
+function flashTrendApply(sec){
+  sec = sec || vaultSectionVisible();
+  vaultFiltreAppliquer(sec, vaultFiltreOn(sec, 'flash-toggle-btn'),
+                       '.flash-trend.is-flash', 'flash-empty-note',
+                       'Aucun montage ⚡ Flash Trend pour cette identité.');
+}
+function toggleFlashTrendFilter(btn){
+  var sec = vaultFiltreSection(btn);
+  var b = btn || (sec ? sec.querySelector('#flash-toggle-btn') : null);
+  var actif = !(b && b.getAttribute('data-on') === '1');
+  // Les deux vues s'excluent : laisser ⭐ Bangers allume pendant qu'on passe
+  // en Flash Trend donnerait un ecran vide sous DEUX boutons actifs, sans
+  // qu'on sache lequel filtre quoi.
+  if(actif){
+    var ba = sec ? sec.querySelector('#favbrute-toggle-btn') : null;
+    if(ba && ba.getAttribute('data-on') === '1'){
+      vaultFiltreBouton(ba, false, '⭐ Bangers ✓', '⭐ Bangers');
+    }
+  }
+  vaultFiltreBouton(b, actif, '⚡ Flash Trend ✓', '⚡ Flash Trend');
+  if(actif) flashTrendApply(sec); else favBruteApply(sec);
+}
+
+// ⚡ Tag Flash Trend d'un montage. Rien n'est envoye a Discord : on marque.
+async function toggleFlashTrend(btn, fileId){
+  var svg = btn.querySelector('svg');
+  btn.disabled = true; btn.style.opacity = '0.55';
+  try{
+    var fd = new FormData(); fd.set('file_id', fileId);
+    var r = await fetch('/reel/toggle_flash_trend', { method:'POST', body: fd });
+    var j = await r.json();
+    if(!j.ok){ alert('✕ ' + (j.error || '?')); return; }
+    var on = !!j.flash;
+    btn.classList.toggle('is-flash', on);
+    btn.style.color = on ? '#22d3ee' : '#9aa0a6';
+    if(svg) svg.setAttribute('fill', on ? 'currentColor' : 'none');
+    var carte = btn.closest('.cloud-card');
+    if(carte) carte.classList.toggle('is-flash-card', on);
+    // La carte qu'on vient de taguer doit QUITTER la vue tout de suite : elle
+    // n'a plus rien a y faire, et la laisser affichee ferait croire que le
+    // tag n'a pas pris.
+    var sec = vaultSectionVisible();
+    if(vaultFiltreOn(sec, 'flash-toggle-btn')) flashTrendApply(sec);
+    else favBruteApply(sec);
+    if(typeof showToast === 'function') showToast(on ? '⚡ Montage Flash Trend' : '○ Retiré des Flash Trend', on ? 'success' : 'warning');
+  }catch(e){ alert('Erreur réseau : ' + e); }
+  finally{ btn.disabled = false; btn.style.opacity = '1'; }
 }
 function toggleFavBruteFilter(btn){
   var sec = vaultFiltreSection(btn);
@@ -17343,7 +17464,7 @@ def _va_ready_watermark_uri():
 _VA_READY_WM = _va_ready_watermark_uri()
 
 
-def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "", deferred: bool = False, is_banger: bool = False, is_disabled: bool = False, is_va_ready: bool = False, can_montage: bool = None, a_approuver: bool = False, is_fav_brute: bool = False) -> str:
+def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "", deferred: bool = False, is_banger: bool = False, is_disabled: bool = False, is_va_ready: bool = False, can_montage: bool = None, a_approuver: bool = False, is_fav_brute: bool = False, is_flash_trend: bool = False) -> str:
     """Carte preview style propre : juste un badge date en haut à gauche + thumbnail
     en grand. Plus de nom de fichier ni de taille en dessous (visible au hover via title).
 
@@ -17468,6 +17589,21 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
                 f"<svg viewBox='0 0 24 24' width='14' height='14' fill='{_ffill}' stroke='{_fstroke}' stroke-width='{_fsw}'><polygon points='12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2'/></svg>"
                 f"</button>"
             )
+        # Eclair Flash Trend : uniquement sur les montages. Le tag EXCLUT au
+        # lieu d ajouter — voir FLASH_TREND_FILE — donc il n a de sens que la
+        # ou un montage peut partir chez un VA.
+        flash_btn = ""
+        if "|templates|" in (file_id or ""):
+            _xon = bool(is_flash_trend)
+            _xcol = "#22d3ee" if _xon else "#9aa0a6"
+            _xcls = "card-edit-btn flash-trend" + (" is-flash" if _xon else "")
+            flash_btn = (
+                f"<button class='{_xcls}' onclick='event.stopPropagation();toggleFlashTrend(this, \"{fid_safe}\")' "
+                f"title='Flash Trend — ce montage sort de la vue de base ET des Bangers' style='color:{_xcol}'>"
+                f"<svg viewBox='0 0 24 24' width='14' height='14' fill='{'currentColor' if _xon else 'none'}' "
+                f"stroke='currentColor' stroke-width='2'><polygon points='13 2 3 14 12 14 11 22 21 10 12 10 13 2'/></svg>"
+                f"</button>"
+            )
         montage_btn = ""
         if can_montage:
             montage_btn = (
@@ -17498,6 +17634,7 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
             f"<div class='card-actions' style='position:absolute;top:8px;right:8px;display:flex;gap:6px;align-items:center;z-index:5'>"
             f"{banger_btn}"
             f"{fav_brute_btn}"
+            f"{flash_btn}"
             f"{montage_btn}"
             f"{edit_btn}"
             f"{disable_btn}"
@@ -17511,7 +17648,10 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
         )
 
     return (
-        f"<div class='cloud-card{(' is-reel-off' if is_disabled else '')}' style='background:transparent;border:0;border-radius:10px;position:relative'>"
+        f"<div class='cloud-card{(' is-reel-off' if is_disabled else '')}"
+        f"{(' is-flash-card' if is_flash_trend else '')}' "
+        f"style='background:transparent;border:0;border-radius:10px;"
+        f"position:relative{';display:none' if is_flash_trend else ''}'>"
         f"{actions_html}"
         f"{media_html}"
         f"</div>"
@@ -19208,6 +19348,17 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         "font-weight:700;font-family:inherit;white-space:nowrap'>⭐ Bangers</button>"
     ) if subdir in ("brutes", "templates") else ""
 
+    # Bouton « ⚡ Flash Trend » : uniquement sur les montages. Le tag EXCLUT,
+    # donc son filtre est le SEUL endroit ou ces montages apparaissent — la vue
+    # de base et le filtre ⭐ Bangers les masquent tous les deux.
+    flash_toggle_html = (
+        "<button type='button' id='flash-toggle-btn' data-on='0' onclick='toggleFlashTrendFilter(this)' "
+        "title='Afficher seulement les montages ⚡ Flash Trend (ils sont cachés ailleurs)' "
+        "style='display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#1a1a1a;"
+        "border:1px solid #3a3a3a;border-radius:8px;color:#22d3ee;cursor:pointer;font-size:13px;"
+        "font-weight:700;font-family:inherit;white-space:nowrap'>⚡ Flash Trend</button>"
+    ) if subdir == "templates" else ""
+
     # Bouton « Repérer le texte » : uniquement sur les rushs bruts. Une brute
     # est censée être un rush NU — celle qui porte déjà une accroche ne sert
     # plus à rien. Le bouton ne supprime RIEN : il pose un verdict à côté de
@@ -19358,7 +19509,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap'>"
         + type_filter_html.replace("<div class='media-type-pills'>", "<div class='media-type-pills' style='margin:0'>")
         + f"</div>"
-        f"<div style='display:flex;align-items:center;gap:8px'>{banger_toggle_html}{fav_brute_toggle_html}{scan_texte_html}{sort_btn_html}</div>"
+        f"<div style='display:flex;align-items:center;gap:8px'>{banger_toggle_html}{fav_brute_toggle_html}{flash_toggle_html}{scan_texte_html}{sort_btn_html}</div>"
         f"</div>"
     )
 
@@ -19386,6 +19537,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         _banger_marks = _load_banger_marks()  # 1 lecture pour toute la galerie
         _disabled_reels = _load_disabled_reels()  # idem : reels grisés/désactivés
         _fav_brutes = _load_fav_brutes()  # idem : rushs bruts marqués ⭐ favoris
+        _flash_trend = _load_flash_trend()  # montages ⚡ Flash Trend (exclus ailleurs)
         # Reels marqués « Dispo pour les VA » (va_ready dans leur .montage.json) -> filigrane.
         # 1 scan pour toute la galerie (uniquement pour les vidéos, seules à avoir un montage).
         # Templates dont la description vient du post et attend une
@@ -19430,7 +19582,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
                 second_url = ""
             # Apres INITIAL_BATCH : on render avec data-src vide, l image se charge a l intersection
             deferred = idx >= INITIAL_BATCH
-            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, a_approuver=(p.stem in _a_approuver_stems), deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels), is_fav_brute=(file_id in _fav_brutes), is_va_ready=((is_reels or subdir == "templates") and p.stem in _va_ready_stems), can_montage=can_montage))
+            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, a_approuver=(p.stem in _a_approuver_stems), deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels), is_fav_brute=(file_id in _fav_brutes), is_flash_trend=(file_id in _flash_trend), is_va_ready=((is_reels or subdir == "templates") and p.stem in _va_ready_stems), can_montage=can_montage))
         gallery = (
             gallery_header
             # auto-fill 165px : le nombre de colonnes s'adapte a la largeur
@@ -44694,6 +44846,32 @@ def create_app():
         now_on = _toggle_fav_brute(file_id)
         return jsonify({"ok": True, "fav": now_on})
 
+    @app.route("/reel/toggle_flash_trend", methods=["POST"])
+    def reel_toggle_flash_trend():
+        """Tag ⚡ Flash Trend d'un montage. Persiste dans data/flash_trend.json.
+
+        Sous /reel/ comme sa voisine : _guard_write_routes traite tout POST
+        comme une ecriture et refuse par defaut pour les roles restreints, donc
+        le gating owner/admin est obtenu sans rien declarer.
+
+        Restreinte aux TEMPLATES, et c'est plus qu'une garde de forme : le tag
+        RETIRE le fichier de la vue de base. Pose par erreur sur une brute, il
+        la ferait disparaitre de l'ecran sans qu'aucun filtre ne la rende --
+        une brute evaporee, impossible a deboguer depuis l'interface.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        file_id = (request.form.get("file_id") or "").strip()
+        if not file_id:
+            return jsonify({"ok": False, "error": "file_id manquant"})
+        if "|templates|" not in file_id:
+            return jsonify({"ok": False,
+                            "error": "le tag Flash Trend ne vaut que pour les "
+                                     "montages"})
+        now_on = _toggle_flash_trend(file_id)
+        return jsonify({"ok": True, "flash": now_on})
+
     @app.route("/cloud/scan_texte", methods=["POST"])
     def cloud_scan_texte():
         """Lance l'examen des rushs bruts d'une identité : lesquels portent
@@ -44868,6 +45046,7 @@ def create_app():
                 # favori sans que personne ne l'ait voulu.
                 try:
                     _pop_fav_brute(fid)
+                    _pop_flash_trend(fid)
                 except Exception:
                     pass
                 # La vignette aussi : sans ca, un fichier re-televerse sous le
