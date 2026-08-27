@@ -695,6 +695,97 @@ def _toggle_flash_trend(file_id: str) -> bool:
     return now_on
 
 
+def propager_tags_templates(source: str) -> dict:
+    """Recopie les tags des montages de `source` sur les autres identites.
+
+    POURQUOI CE BOUTON EXISTE
+        Le meme montage sert a presque toutes les identites. Le taguer une
+        fois par identite est un travail mecanique, donc un travail qu on ne
+        fait pas -- et les tags finissent par ne plus rien vouloir dire.
+
+    LE LIEN, C EST LE NOM DE FICHIER
+        Les cles sont « identite|templates|nom ». Deux identites partagent
+        donc un montage quand elles portent le MEME NOM DE FICHIER, et c est
+        le seul lien disponible. Un montage renomme ailleurs ne sera pas
+        retrouve : il est compte dans `introuvables` plutot que d etre
+        silencieusement ignore.
+
+    ADDITIF, JAMAIS SOUSTRACTIF
+        On POSE des tags, on n en retire aucun. Une propagation qui alignerait
+        vraiment -- donc qui effacerait ce qui n est pas tague a la source --
+        detruirait en un clic le tri fait ailleurs, sans confirmation et sans
+        retour possible. Pour retirer un tag, on le retire a la main, la ou il
+        est.
+
+    MEME MARCHE SEULEMENT
+        Un montage FR n a rien a faire chez une identite US, meme si le nom
+        de fichier coincide.
+    """
+    src = (source or "").strip().lower()
+    if not src:
+        return {"ok": False, "error": "identite manquante"}
+    marche = identity_market(src)
+
+    try:
+        autres = [p.name for p in IDENTITIES_DIR.iterdir()
+                  if p.is_dir() and p.name != src
+                  and identity_market(p.name) == marche]
+    except Exception as e:
+        return {"ok": False, "error": "identites illisibles : %s" % e}
+
+    prefixe = src + "|templates|"
+
+    def _noms(charger):
+        return sorted({k[len(prefixe):] for k in charger()
+                       if isinstance(k, str) and k.startswith(prefixe)
+                       and k[len(prefixe):]})
+
+    noms_flash = _noms(_load_flash_trend)
+    noms_fav = _noms(lambda: set(_load_fav_brutes()))
+    if not noms_flash and not noms_fav:
+        return {"ok": False,
+                "error": "rien a propager : aucun montage tague chez « %s »" % src}
+
+    flash = _load_flash_trend()
+    fav = _load_fav_brutes()
+    poses_flash = poses_fav = 0
+    introuvables = 0
+    touchees = set()
+
+    for autre in autres:
+        tdir = IDENTITIES_DIR / autre / "templates"
+        for nom in set(noms_flash) | set(noms_fav):
+            if not (tdir / nom).is_file():
+                introuvables += 1
+                continue
+            cle = autre + "|templates|" + nom
+            if nom in noms_flash and cle not in flash:
+                flash.add(cle)
+                poses_flash += 1
+                touchees.add(autre)
+            if nom in noms_fav and cle not in fav:
+                fav.add(cle)
+                poses_fav += 1
+                touchees.add(autre)
+
+    try:
+        if poses_flash:
+            FLASH_TREND_FILE.parent.mkdir(parents=True, exist_ok=True)
+            safe_json.write_text(FLASH_TREND_FILE,
+                                 json.dumps(sorted(flash), ensure_ascii=False))
+        if poses_fav:
+            FAV_BRUTES_FILE.parent.mkdir(parents=True, exist_ok=True)
+            safe_json.write_text(FAV_BRUTES_FILE,
+                                 json.dumps(sorted(fav), ensure_ascii=False))
+    except Exception as e:
+        return {"ok": False, "error": "ecriture impossible : %s" % e}
+
+    return {"ok": True, "marche": marche, "identites": len(touchees),
+            "candidates": len(autres), "poses_flash": poses_flash,
+            "poses_fav": poses_fav, "introuvables": introuvables,
+            "noms_flash": len(noms_flash), "noms_fav": len(noms_fav)}
+
+
 def _pop_flash_trend(file_id: str) -> None:
     """Retire le tag d'un montage supprime.
 
@@ -4146,6 +4237,37 @@ function toggleFavBruteFilter(btn){
   vaultFiltreBouton(b, actif, '⭐ Bangers ✓', '⭐ Bangers');
   favBruteApply(sec);
 }
+// === « Appliquer a toutes » : propager les tags des montages ===========
+//
+// Le meme montage sert a presque toutes les identites. Ce bouton recopie ses
+// tags sur les soeurs du meme marche, en se reperant au NOM DE FICHIER --
+// seul lien disponible entre deux identites.
+//
+// Il AJOUTE seulement. Une propagation qui effacerait ce qui n est pas tague
+// a la source detruirait en un clic le tri fait ailleurs.
+async function syncTagsTemplates(identity){
+  if(!identity){ alert('Choisis d abord une identite.'); return; }
+  var btn = document.getElementById('synctags-btn');
+  var etat = document.getElementById('synctags-etat');
+  function dire(t, c){ if(etat){ etat.textContent = t || ''; etat.style.color = c || '#9a9aa6'; } }
+  if(btn){ btn.disabled = true; btn.style.opacity = '0.55'; }
+  dire('Propagation...', '#8b9cf7');
+  try{
+    var fd = new FormData(); fd.set('identity', identity);
+    var r = await fetch('/cloud/sync_tags_templates', { method:'POST', body: fd });
+    var j = await r.json();
+    if(!j || !j.ok){ dire(String((j && j.error) || 'echec'), '#e0a33a'); return; }
+    var m = j.identites + ' identite(s) mise(s) a jour sur ' + j.candidates
+          + ' (' + j.marche.toUpperCase() + ') : '
+          + j.poses_flash + ' tag(s) Flash, ' + j.poses_fav + ' etoile(s).';
+    // Le nombre INTROUVABLE se dit : un montage renomme ailleurs ne peut pas
+    // etre retrouve, et sans ce chiffre on croirait la propagation complete.
+    if(j.introuvables) m += ' ' + j.introuvables + ' nom(s) absent(s) ailleurs.';
+    dire(m, j.identites ? '#43b581' : '#e0a33a');
+  }catch(e){ dire('Erreur reseau : ' + e, '#e0576b'); }
+  finally{ if(btn){ btn.disabled = false; btn.style.opacity = '1'; } }
+}
+
 // === Repérage des brutes qui portent déjà du texte incrusté ===
 //
 // Ça ne supprime RIEN. L'examen pose un verdict à côté de chaque vidéo et
@@ -19365,6 +19487,21 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         "font-weight:700;font-family:inherit;white-space:nowrap'>⚡ Flash Trend</button>"
     ) if subdir == "templates" else ""
 
+    # Bouton « Appliquer a toutes » : recopie les tags des montages de cette
+    # identite sur ses soeurs du meme marche. Le meme montage sert a presque
+    # toutes, et le taguer une fois par identite est un travail qu on ne fait
+    # pas -- donc des tags qui ne veulent plus rien dire.
+    sync_tags_html = (
+        "<button type='button' id='synctags-btn' "
+        "onclick=\"syncTagsTemplates('" + (selected or "") + "')\" "
+        "title='Recopier les tags ⚡ et ⭐ de ces montages sur "
+        "toutes les identites du meme marche (ajoute seulement, ne retire rien)' "
+        "style='display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#1a1a1a;"
+        "border:1px solid #3a3a3a;border-radius:8px;color:#c4c4cc;cursor:pointer;font-size:13px;"
+        "font-weight:700;font-family:inherit;white-space:nowrap'>\u21bb Appliquer a toutes</button>"
+        "<span id='synctags-etat' style='font-size:12px;color:#9a9aa6'></span>"
+    ) if (subdir == "templates" and selected) else ""
+
     # Bouton « Repérer le texte » : uniquement sur les rushs bruts. Une brute
     # est censée être un rush NU — celle qui porte déjà une accroche ne sert
     # plus à rien. Le bouton ne supprime RIEN : il pose un verdict à côté de
@@ -19515,7 +19652,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap'>"
         + type_filter_html.replace("<div class='media-type-pills'>", "<div class='media-type-pills' style='margin:0'>")
         + f"</div>"
-        f"<div style='display:flex;align-items:center;gap:8px'>{banger_toggle_html}{fav_brute_toggle_html}{flash_toggle_html}{scan_texte_html}{sort_btn_html}</div>"
+        f"<div style='display:flex;align-items:center;gap:8px'>{banger_toggle_html}{fav_brute_toggle_html}{flash_toggle_html}{sync_tags_html}{scan_texte_html}{sort_btn_html}</div>"
         f"</div>"
     )
 
@@ -44851,6 +44988,20 @@ def create_app():
                                      "bruts et les templates de montage"})
         now_on = _toggle_fav_brute(file_id)
         return jsonify({"ok": True, "fav": now_on})
+
+    @app.route("/cloud/sync_tags_templates", methods=["POST"])
+    def cloud_sync_tags_templates():
+        """Recopie les tags des montages d'une identite sur ses soeurs.
+
+        Sous /cloud/ en POST : _guard_write_routes traite tout POST comme une
+        ecriture et refuse par defaut pour les roles restreints, donc le
+        gating owner/admin est obtenu sans rien declarer.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        identity = (request.form.get("identity") or "").strip().lower()
+        return jsonify(propager_tags_templates(identity))
 
     @app.route("/reel/toggle_flash_trend", methods=["POST"])
     def reel_toggle_flash_trend():
