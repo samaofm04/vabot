@@ -534,7 +534,9 @@ async def _ensure_dl_panel(bot, ch):
         pass
 
 
-US_TICKET_SUFFIXES = ("menu", "content", "numero-mail", "download")
+#: L ORDRE DE CE TUPLE EST L ORDRE DES SALONS dans la categorie du VA :
+#: le reconciliateur les repositionne dans cet ordre exact.
+US_TICKET_SUFFIXES = ("menu", "download", "numero-mail", "content")
 
 
 def _us_norm(nm):
