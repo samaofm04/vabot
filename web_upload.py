@@ -6385,21 +6385,31 @@ function tplShareOpen(){
     onConfirm:function(sel,_x,ui){
       ui.busy('◌ Copie…');
       (async function(){
-        var okN=0, errs=[];
+        var okN=0, errs=[], tagF=0, tagE=0;
         for(var i=0;i<files.length;i++){
           try{
             var fd=new FormData(); fd.set('file_id',files[i]); fd.set('targets',sel.join(','));
             var r=await fetch('/noctus/montage_apply',{method:'POST',body:fd,credentials:'same-origin'});
             var j=await r.json();
-            if(j&&j.ok) okN++; else errs.push((j&&j.error)||'?');
+            if(j&&j.ok){
+              okN++;
+              // Les tags ont suivi le fichier. On les COMPTE pour le dire :
+              // sans ca, on ne saurait pas si le montage est arrive tague, et
+              // on irait le retaguer a la main chez chaque model.
+              tagF += (j.tags_flash||0); tagE += (j.tags_fav||0);
+              if(j.tags_error) errs.push('tags : '+j.tags_error);
+            } else errs.push((j&&j.error)||'?');
           }catch(e){ errs.push(String(e)); }
         }
         ui.close();
         if(typeof clearSelection==='function') clearSelection();
         try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
+        var suite='';
+        if(tagF) suite += ' · '+tagF+' ⚡';
+        if(tagE) suite += ' · '+tagE+' ⭐';
         if(typeof showToast==='function') showToast(
           okN?('✓ '+okN+' template'+(okN>1?'s copiés':' copié')+' vers '+sel.length+' model'+(sel.length>1?'s':'')
-               +(errs.length?(' · '+errs.length+' échec(s)'):'')):('✕ '+(errs[0]||'échec')),
+               +suite+(errs.length?(' · '+errs.length+' échec(s)'):'')):('✕ '+(errs[0]||'échec')),
           errs.length?'warning':'success',7000);
       })();
     }
@@ -45678,6 +45688,20 @@ def create_app():
                     draft = _saved
             except Exception:
                 pass
+        # LES TAGS SUIVENT LE FICHIER.
+        #
+        # Partager un montage sans ses tags oblige a les reposer un par un
+        # chez chaque model -- exactement le travail que le partage evite. Un
+        # montage Flash Trend copie ailleurs est toujours un montage Flash
+        # Trend : le tag decrit la VIDEO, pas la copie.
+        #
+        # On releve l etat de la source ICI, une seule fois : le relire dans
+        # la boucle rechargerait le fichier a chaque model.
+        _cle_src = f"{src_ident}|templates|{src.name}"
+        _flash_src = _cle_src in _load_flash_trend()
+        _fav_src = _cle_src in _load_fav_brutes()
+        _tags_flash, _tags_fav = set(), set()
+
         done, errs = [], []
         src_size = src.stat().st_size
         for t in targets:
@@ -45707,10 +45731,42 @@ def create_app():
                     _sh.copy2(str(ex), str(dstdir / (dst.stem + ex.name[len(src.stem):])))
                 if not safe_json.write(dstdir / f"{dst.stem}.montage.json", draft, indent=None):
                     raise OSError("écriture du brouillon impossible")
+                # dst.name, PAS src.name : en cas de collision de nom la copie
+                # est suffixee (_2), et taguer le nom de depart poserait le tag
+                # sur un fichier qui n existe pas chez la cible.
+                if _flash_src:
+                    _tags_flash.add(f"{t}|templates|{dst.name}")
+                if _fav_src:
+                    _tags_fav.add(f"{t}|templates|{dst.name}")
                 done.append(t)
             except Exception as e:
                 errs.append(f"{t} : {e}")
-        return jsonify({"ok": bool(done), "done": done, "errors": errs})
+
+        # Une seule ecriture par registre, apres la boucle : sauver a chaque
+        # model reecrirait le fichier entier quarante fois pour rien.
+        #
+        # Un echec ici n annule PAS le partage : les fichiers sont copies, ils
+        # sont utilisables, et seuls les tags manquent. On le DIT dans la
+        # reponse plutot que de faire croire que rien n a marche.
+        _tags_err = ""
+        try:
+            if _tags_flash:
+                _f = _load_flash_trend() | _tags_flash
+                FLASH_TREND_FILE.parent.mkdir(parents=True, exist_ok=True)
+                safe_json.write_text(FLASH_TREND_FILE,
+                                     json.dumps(sorted(_f), ensure_ascii=False))
+            if _tags_fav:
+                _v = _load_fav_brutes() | _tags_fav
+                FAV_BRUTES_FILE.parent.mkdir(parents=True, exist_ok=True)
+                safe_json.write_text(FAV_BRUTES_FILE,
+                                     json.dumps(sorted(_v), ensure_ascii=False))
+        except Exception as e:
+            _tags_err = str(e)[:150]
+
+        return jsonify({"ok": bool(done), "done": done, "errors": errs,
+                        "tags_flash": len(_tags_flash),
+                        "tags_fav": len(_tags_fav),
+                        "tags_error": _tags_err})
 
     @app.route("/noctus/montage_load")
     def noctus_montage_load():
