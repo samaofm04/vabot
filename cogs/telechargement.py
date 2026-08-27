@@ -105,6 +105,114 @@ IG_WEB_HEADERS = {
 }
 
 
+# ─────────────────────────────────────────────────────────────────────────
+#  APIFY D'ABORD, COOKIES EN REPLI
+#
+#  apify_reels.py pose la regle du projet : Apify extrait avec SES proxys, donc
+#  le compte Instagram de l'agence n'est jamais utilise -- aucun cookie, aucun
+#  risque de ban. Le telechargeur passait a cote de cette regle : il ouvrait
+#  une session avec cookies.txt pour lister un profil.
+#
+#  Le meme acteur officiel (apify~instagram-scraper) sait lister un compte : il
+#  suffit de lui donner l'URL du profil au lieu d'une liste de liens de reels.
+#  On ne retombe sur les cookies que si le jeton Apify est absent.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _apify_pret() -> bool:
+    """Vrai si le jeton Apify est configure. Sans lui, on retombe aux cookies."""
+    try:
+        import apify_reels
+        return bool(apify_reels.get_token())
+    except Exception:
+        return False
+
+
+def _apify_appel(charge: dict, timeout: int = 240):
+    """Un run synchrone de l'acteur, et ses items. Liste vide si ca echoue."""
+    import apify_reels
+    import requests as _rq
+    tok = apify_reels.get_token()
+    if not tok:
+        return []
+    try:
+        r = _rq.post(
+            f"{apify_reels.BASE}/acts/{apify_reels.ACTOR}"
+            f"/run-sync-get-dataset-items?token={tok}",
+            json=charge, timeout=timeout)
+        if r.status_code not in (200, 201):
+            print(f"[dl] Apify HTTP {r.status_code} : {r.text[:160]}")
+            return []
+        items = r.json()
+        return items if isinstance(items, list) else []
+    except Exception as exc:
+        print(f"[dl] Apify injoignable : {str(exc)[:120]}")
+        return []
+
+
+def profil_entete_apify(username: str) -> dict:
+    """Fiche du compte via Apify. {} si indisponible."""
+    items = _apify_appel({
+        "directUrls": [f"https://www.instagram.com/{username}/"],
+        "resultsType": "details",
+        "resultsLimit": 1,
+        "addParentData": False,
+    }, timeout=120)
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        return {
+            "avatar": (it.get("profilePicUrlHD") or it.get("profilePicUrl") or ""),
+            "bio": (it.get("biography") or "").strip(),
+            "nom": (it.get("fullName") or "").strip(),
+            "posts": it.get("postsCount") or 0,
+            "abonnes": it.get("followersCount") or 0,
+        }
+    return {}
+
+
+def lister_posts_apify(username: str, max_posts: int) -> list:
+    """Publications d'un compte via Apify, au meme format que la voie cookies.
+
+    L'acteur ne dit pas toujours explicitement si un post est une video : on le
+    deduit de la presence d'une videoUrl, plus fiable qu'un champ 'type' dont
+    le libelle change d'une version a l'autre.
+    """
+    items = _apify_appel({
+        "directUrls": [f"https://www.instagram.com/{username}/"],
+        "resultsType": "posts",
+        "resultsLimit": int(max_posts),
+        "addParentData": False,
+    })
+    posts = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        url = (it.get("url") or "").strip()
+        if not url:
+            continue
+        video = bool(it.get("videoUrl")) or (it.get("type") == "Video")
+        horo = None
+        ts = it.get("timestamp")
+        if ts:
+            try:
+                horo = datetime.fromisoformat(
+                    str(ts).replace("Z", "+00:00")).timestamp()
+            except Exception:
+                horo = None
+        posts.append({
+            "shortcode": it.get("shortCode") or "",
+            "url": url,
+            "is_video": video,
+            "timestamp": horo,
+            "caption": (it.get("caption") or "").strip(),
+            "views": it.get("videoViewCount") or it.get("videoPlayCount") or 0,
+            "likes": it.get("likesCount") or 0,
+            "comments": it.get("commentsCount") or 0,
+        })
+    return posts
+
+
 def build_ydl_options(output_path: str) -> dict:
     opts = {
         "outtmpl": output_path,
@@ -278,8 +386,13 @@ class Telechargement(commands.Cog):
                      par_vues: bool = False):
         dossier = DOWNLOAD_DIR
 
+        apify = _apify_pret()
+        if apify:
+            await canal.send("Source : Apify (sans cookie).")
+
         if avatar or bio:
-            fiche = await asyncio.to_thread(profil_entete_sync, username)
+            fiche = await asyncio.to_thread(
+                profil_entete_apify if apify else profil_entete_sync, username)
             if not fiche:
                 await canal.send(
                     f"Fiche de @{username} illisible (cookies expires ?). "
@@ -311,7 +424,8 @@ class Telechargement(commands.Cog):
 
         try:
             posts = await asyncio.to_thread(
-                list_profile_posts_sync, username, combien)
+                lister_posts_apify if apify else list_profile_posts_sync,
+                username, combien)
         except Exception as e:
             await canal.send(f"Erreur en lisant le profil : {str(e)[:1500]}")
             return
@@ -447,8 +561,53 @@ class Telechargement(commands.Cog):
 
 #: Titres des deux panneaux. Ils servent aussi de marqueurs : c'est a eux que
 #: _ensure_dl_panel reconnait un salon deja equipe.
+#: Un pseudo Instagram : lettres, chiffres, point et tiret bas, 30 au plus.
+#: Sans ce controle, "#" ou une URL mal collee passait, et le bot annonçait
+#: « Compte retenu : @# » avant d aller interroger un compte inexistant.
+_PSEUDO_OK = re.compile(r"^[A-Za-z0-9._]{1,30}$")
+
+
+def salon_de_livraison(canal):
+    """Ou les fichiers atterrissent : le salon -content du meme VA.
+
+    Le salon -download ne porte que les deux panneaux ; y deverser des dizaines
+    de fichiers les repousserait hors de vue. Le contenu genere vit deja dans
+    -content, les telechargements l y rejoignent.
+
+    Si le salon jumeau n existe pas, on reste sur place plutot que de perdre
+    les fichiers.
+    """
+    nom = getattr(canal, "name", "") or ""
+    if not nom.endswith("-download"):
+        return canal
+    vise = nom[: -len("-download")] + "-content"
+    guilde = getattr(canal, "guild", None)
+    if guilde is None:
+        return canal
+    for c in guilde.text_channels:
+        if c.name == vise:
+            return c
+    return canal
+
+
 TITRE_COMPTE = "Telechargement - le compte"
 TITRE_OPTIONS = "Telechargement - les options"
+
+
+def _embed_compte(username: str = "", combien: int = 30):
+    """L embed du premier panneau, avec ou sans compte actif."""
+    import discord as _d
+    if username:
+        return _d.Embed(
+            title=TITRE_COMPTE,
+            description=f"Compte actif : **@{username}**  (au plus {combien})"
+                        + chr(10) + "Clique pour en changer.",
+            color=_d.Color.blurple())
+    return _d.Embed(
+        title=TITRE_COMPTE,
+        description="Clique et entre le pseudo du compte a descendre."
+                    + chr(10) + "Il reste retenu jusqu a ce que tu en changes.",
+        color=_d.Color.blurple())
 
 
 class ModalCompte(discord.ui.Modal, title="Quel compte ?"):
@@ -484,10 +643,24 @@ class ModalCompte(discord.ui.Modal, title="Quel compte ?"):
         except ValueError:
             n = 30
         n = max(1, min(n, 200))
+        if not _PSEUDO_OK.match(username):
+            await inter.response.send_message(
+                f"« {username} » ne ressemble pas a un pseudo Instagram.",
+                ephemeral=True)
+            return
         self.cog.choix[inter.user.id] = (username, n)
+
+        # Le panneau AFFICHE le compte actif. Chaque VA a son propre salon
+        # -download : il n y a donc qu une personne par panneau, et l afficher
+        # ne revele rien a personne d autre.
+        try:
+            await inter.message.edit(
+                embed=_embed_compte(username, n),
+                view=PanneauCompte(self.cog))
+        except Exception:
+            pass
         await inter.response.send_message(
-            f"Compte retenu : **@{username}** (au plus {n}).  "
-            "Choisis maintenant dans le panneau des options.", ephemeral=True)
+            f"Compte actif : **@{username}** (au plus {n}).", ephemeral=True)
 
 
 class PanneauCompte(discord.ui.View):
@@ -497,7 +670,7 @@ class PanneauCompte(discord.ui.View):
         super().__init__(timeout=None)
         self.cog = cog
 
-    @discord.ui.button(label="Entrer un compte", style=discord.ButtonStyle.primary,
+    @discord.ui.button(label="Changer de compte", style=discord.ButtonStyle.primary,
                        custom_id="dl:compte")
     async def b_compte(self, inter, _):
         await inter.response.send_modal(ModalCompte(self.cog))
@@ -518,10 +691,12 @@ class PanneauOptions(discord.ui.View):
                 ephemeral=True)
             return
         username, n = garde
+        cible = salon_de_livraison(inter.channel)
         await inter.response.send_message(
-            f"**@{username}** - {libelle}, en cours...", ephemeral=True)
+            f"**@{username}** - {libelle} : ca part dans {cible.mention}.",
+            ephemeral=True)
         await self.cog.livrer(
-            inter.channel, username, n,
+            cible, username, n,
             avatar=quoi in ("tout", "pp"),
             bio=quoi in ("tout", "bio"),
             photos=quoi in ("tout", "photos"),
@@ -579,12 +754,7 @@ async def poser_panneaux(cog, canal, epingler: bool = True):
     except Exception:
         pass
 
-    e1 = _d.Embed(
-        title=TITRE_COMPTE,
-        description="Clique et entre le pseudo du compte a descendre."
-                    + chr(10) + "Il reste retenu pour toi jusqu'a ce que tu en"
-                    " entres un autre.",
-        color=_d.Color.blurple())
+    e1 = _embed_compte()
     e2 = _d.Embed(
         title=TITRE_OPTIONS,
         description="Choisis ce que tu veux de ce compte."
