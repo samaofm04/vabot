@@ -260,16 +260,16 @@ def _build_menu_embed(identity, guild=None):
     add("cmenu:storycta", "contenu", "📲 Story CTA", "Photo CTA (à poster le soir)")
     add("cmenu:banger", "contenu", "⭐ Reels", "Tes meilleurs reels (marqués ⭐)")
     add("cmenu:capbanger", "contenu", "⭐ Caption", "Tes meilleures captions (marquées ⭐)")
-    add("cmenu:montagebanger", "contenu", "⭐ Montage", "Une brute ⭐ + une caption ⭐, montées pour toi")
-    add("cmenu:templatebrut", "contenu", "🎵 Template + Brut", "Un template ⭐ assemblé avec une brute ⭐")
+    add("cmenu:montagebanger", "contenu", "⭐⭐ Montage", "Une brute ⭐ + une caption ⭐, montées pour toi")
+    add("cmenu:templatebrut", "contenu", "⭐⭐ Template + Brut", "Un template ⭐ assemblé avec une brute ⭐")
     add("cmenu:brutbanger", "contenu", "⭐ Vidéo brut", "Tes meilleures brutes ⭐, sans montage")
     add("cmenu:templateflash", "contenu", "⚡ Template Flash",
         "Un montage ⚡ Flash Trend, monté avec une brute au hasard")
-    add("cmenu:templateflashbanger", "contenu", "⭐ Flash",
+    add("cmenu:templateflashbanger", "contenu", "⭐ ⚡ Flash",
         "Un montage ⚡ ET ⭐, monté avec une brute au hasard")
-    add("cmenu:templateflashbrut", "contenu", "⭐ Flash + Brut",
+    add("cmenu:templateflashbrut", "contenu", "⭐⭐ ⚡ Flash + Brut",
         "Un montage ⚡ ET ⭐, monté avec ta brute ⭐")
-    add("cmenu:captionbrut", "contenu", "📝 Caption + Brut", "Une brute ⭐ + sa caption ⭐ en texte")
+    add("cmenu:captionbrut", "contenu", "⭐⭐ Caption + Brut", "Une brute ⭐ + sa caption ⭐ en texte")
     add("cmenu:pseudo", "contenu", "👤 Pseudo", "Des pseudos dispo")
     add("cmenu:name", "contenu", "📝 Name", "Des noms d'affichage")
     add("cmenu:bio", "contenu", "💬 Bio", "Des bios de ton identité")
@@ -2488,8 +2488,18 @@ class UserCog(commands.Cog):
     async def _send_caption_bangers(self, interaction):
         """Bouton '⭐ Caption Banger' : les captions marquees favorites sur le site.
 
-        Du texte, rien d'autre : le VA copie-colle. C'est ce qui le distingue du
-        Montage Banger, qui fabrique une video.
+        Il rendait le TEXTE des captions, a copier-coller. Le VA devait alors
+        rouvrir l'editeur Instagram et le recopier a la main, alors que tous
+        les autres boutons lui livrent la video prete.
+
+        Sa place parmi ses voisins tient au stock qu'il exige :
+
+            Reel caption   brute quelconque + caption quelconque
+            Caption (*)    brute quelconque + caption ETOILEE
+            Montage (*)    brute ETOILEE    + caption ETOILEE
+
+        D'ou son interet propre : il marche encore quand AUCUNE brute n'est
+        etoilee, cas ou « Montage » ne rend rien.
         """
         if await self._gate_contenu(interaction):
             return
@@ -2527,21 +2537,58 @@ class UserCog(commands.Cog):
                 f"⭐ Tes **{vides} caption(s) favorite(s)** pour `{identity}` sont **vides** "
                 "(aucun texte). _(Un admin les corrige sur le site, onglet **Caption**.)_")
             return
-        total = len(utiles)
-        entete = (f"⭐ **{total} CAPTION(S) BANGER pour `{identity}`** — les meilleures, "
-                  f"à réutiliser ! 🔥\n"
-                  f"📝 La **caption** se met **par-dessus la vidéo** dans l'éditeur Insta.")
+        # Des VIDEOS, pas une liste a copier-coller. Le texte seul obligeait le
+        # VA a rouvrir l'editeur Instagram et a recopier la caption a la main,
+        # alors que tous les autres boutons lui livrent la video prete.
+        #
+        # La brute est prise dans TOUT le stock, pas seulement les etoilees.
+        # C'est ce qui distingue ce bouton de « Montage », qui exige les DEUX
+        # etoiles et ne rend donc rien tant qu'aucune brute n'est marquee :
+        #
+        #     Reel caption   brute quelconque + caption quelconque
+        #     Caption (*)    brute quelconque + caption ETOILEE     <- ici
+        #     Montage (*)    brute ETOILEE    + caption ETOILEE
+        import brutes_off as _off
+        brutes = _off.lister(IDENTITIES_DIR / identity / "brutes",
+                             extensions=VIDEO_EXTS)
+        if not brutes:
+            await interaction.followup.send(
+                f"Aucune **vidéo brute** pour `{identity}` : tes "
+                f"{len(utiles)} caption(s) étoilée(s) n'ont rien sur quoi "
+                "s'incruster.\n_(Un admin en ajoute sur le site, onglet "
+                "**Vidéo brut**.)_")
+            return
+        try:
+            import noctus_web
+        except Exception as e:
+            await interaction.followup.send(f"⚠️ Module vidéo indisponible : {e}")
+            return
+        if not noctus_web.setup_ok():
+            await interaction.followup.send(
+                "⚠️ La génération vidéo n'est pas prête sur le serveur "
+                "(Node/ffmpeg). Préviens un admin.")
+            return
+
+        block = _captions_block(identity)
+        # Borne par les combinaisons REELLEMENT disponibles : sans elle,
+        # _pick_fresh recycle une fois le vivier epuise, et le VA recoit trois
+        # fois la meme video.
+        total = min(3, len(utiles), len(brutes))
+        entete = (f"⭐ **{total} VIDÉO(S) À CAPTION BANGER pour `{identity}`** — "
+                  f"tes meilleures captions, déjà incrustées.\n"
+                  f"⏳ Je les génère (≈15-30s chacune). Poste **tel quel**.")
         if vides:
-            entete += f"\n⚠️ {vides} caption(s) favorite(s) écartée(s) : texte vide."
+            entete += f"\n{vides} caption(s) favorite(s) écartée(s) : texte vide."
         await interaction.followup.send(entete)
-        for i, c in enumerate(utiles, start=1):
-            txt = str(c.get("text") or "").strip()
-            await interaction.followup.send(f"**{i}/{total}**\n```\n{txt[:1800]}\n```")
-            desc = str(c.get("desc") or "").strip()
-            if desc:
-                await interaction.followup.send(
-                    f"📄 **DESCRIPTION {i}/{total}** (champ légende du post) :\n"
-                    f"```\n{desc[:1800]}\n```")
+
+        used_b, used_c = set(), set()
+        for idx in range(1, total + 1):
+            cap = _pick_fresh(utiles, used_c, key=lambda c: c.get("id"))
+            vid = _pick_fresh(brutes, used_b, key=lambda p: str(p))
+            await self._gen_and_send_caption(
+                interaction, vid, cap, block, idx, total, identity,
+                label="CAPTION BANGER", emoji="⭐",
+                prefixe_fichier="caption_banger")
 
     async def _send_montage_bangers(self, interaction):
         """Bouton '🎬 Montage Banger' : une BRUTE favorite + une CAPTION favorite.
@@ -5342,7 +5389,7 @@ class ContentMenuView(discord.ui.View):
     async def b_capbanger(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_caption_bangers(interaction)
 
-    @discord.ui.button(label="Montage", emoji="⭐", style=discord.ButtonStyle.primary, custom_id="cmenu:montagebanger", row=4)
+    @discord.ui.button(label="⭐ Montage", emoji="⭐", style=discord.ButtonStyle.primary, custom_id="cmenu:montagebanger", row=4)
     async def b_montagebanger(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_montage_bangers(interaction)
 
@@ -5350,15 +5397,15 @@ class ContentMenuView(discord.ui.View):
     async def b_templateflash(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_template_flash(interaction)
 
-    @discord.ui.button(label="Flash", emoji="⭐", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflashbanger", row=3)
+    @discord.ui.button(label="⚡ Flash", emoji="⭐", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflashbanger", row=3)
     async def b_templateflashbanger(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_template_flash(interaction, exiger_banger=True)
 
-    @discord.ui.button(label="Flash + Brut", emoji="⭐", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflashbrut", row=3)
+    @discord.ui.button(label="⭐ ⚡ Flash + Brut", emoji="⭐", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflashbrut", row=3)
     async def b_templateflashbrut(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_template_flash(interaction, exiger_banger=True, brute_favorite=True)
 
-    @discord.ui.button(label="Template + Brut", emoji="🎵", style=discord.ButtonStyle.primary, custom_id="cmenu:templatebrut", row=4)
+    @discord.ui.button(label="⭐ Template + Brut", emoji="⭐", style=discord.ButtonStyle.primary, custom_id="cmenu:templatebrut", row=4)
     async def b_templatebrut(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_template_plus_brute(interaction)
 
@@ -5366,7 +5413,7 @@ class ContentMenuView(discord.ui.View):
     async def b_brutbanger(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_brutes_bangers(interaction)
 
-    @discord.ui.button(label="Caption + Brut", emoji="📝", style=discord.ButtonStyle.primary, custom_id="cmenu:captionbrut", row=4)
+    @discord.ui.button(label="⭐ Caption + Brut", emoji="⭐", style=discord.ButtonStyle.primary, custom_id="cmenu:captionbrut", row=4)
     async def b_captionbrut(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_caption_plus_brute(interaction)
 
@@ -5615,17 +5662,17 @@ _JB_ACTIONS_US = [
     # Rangee 4 - LES FAVORIS ⭐ poses sur le site. Pas de quantite : le VA
     #                   recoit ce qui est marque, ni plus ni moins --
     #                   c'est tout l'interet d'un favori.
-    ('capbanger', '⭐ Caption Banger', 'captionbanger', False),
-    ('montagebanger', '🎬 Montage Banger', 'montagebanger', False),
-    ('templatebrut', '🎵 Template + Brut', 'templatebrut', False),
-    ('brutbanger', '🎥 Vidéo brut Banger', 'brutbanger', False),
-    ('captionbrut', '📝 Caption + Brut', 'captionbrut', False),
+    ('capbanger', '⭐ Caption', 'captionbanger', False),
+    ('montagebanger', '⭐⭐ Montage', 'montagebanger', False),
+    ('templatebrut', '⭐⭐ Template + Brut', 'templatebrut', False),
+    ('brutbanger', '⭐ Vidéo brut', 'brutbanger', False),
+    ('captionbrut', '⭐⭐ Caption + Brut', 'captionbrut', False),
 
     # Rangee 3 (suite) - LES FLASH TREND. Pas de quantite non plus : le VA
     # recoit ce qui est tague, ni plus ni moins.
     ('templateflash', '⚡ Template Flash', 'templateflash', False),
-    ('templateflashbanger', '⭐ Flash', 'templateflashbanger', False),
-    ('templateflashbrut', '⭐ Flash + Brut', 'templateflashbrut', False),
+    ('templateflashbanger', '⭐ ⚡ Flash', 'templateflashbanger', False),
+    ('templateflashbrut', '⭐⭐ ⚡ Flash + Brut', 'templateflashbrut', False),
 ]
 
 #: La rangee de chaque action : UNE rangee = UNE famille.
