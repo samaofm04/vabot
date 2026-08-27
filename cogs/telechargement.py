@@ -244,8 +244,14 @@ def build_ydl_options(output_path: str) -> dict:
         "noplaylist": True,
         "retries": 3,
     }
-    if COOKIES_FILE.exists():
-        opts["cookiefile"] = str(COOKIES_FILE)
+    # MEME SESSION QUE POUR LISTER, sinon on liste et on ne descend pas.
+    # _cookiefile_ytdlp rend cookies.txt s il existe, et fabrique sinon un
+    # fichier Netscape a partir d IG_SESSIONID. Cette fonction lisait
+    # UNIQUEMENT cookies.txt : sur le VPS, ou ce fichier n existe pas, le
+    # repli yt-dlp trouvait bien les reels puis echouait a les telecharger.
+    ck = _cookiefile_ytdlp()
+    if ck:
+        opts["cookiefile"] = ck
     return opts
 
 
@@ -257,17 +263,58 @@ def download_sync(lien: str, output_path: str) -> dict:
 
 
 def _build_ig_session() -> requests.Session:
-    """Cree une session requests avec les cookies Netscape charges."""
+    """Session Instagram, par IG_SESSIONID de preference, cookies.txt sinon.
+
+    LE PLUS SIMPLE D ABORD
+        Instagram n a besoin QUE du sessionid. Le mettre dans le .env evite
+        tout le reste : pas d extension de navigateur pour exporter un fichier
+        Netscape, pas de fichier a deposer a cote du bot, pas de chemin a
+        garder synchronise entre cette machine et le VPS.
+
+        Pour le recuperer : instagram.com ouvert et connecte, outils de
+        developpement, onglet Application (ou Stockage), Cookies, ligne
+        « sessionid » -- on copie la valeur.
+
+        Dans le .env :
+
+            IG_SESSIONID=...
+
+        Les deux autres cookies sont facultatifs. Instagram les accepte
+        absents pour les lectures publiques, mais les fournir rend la session
+        plus stable dans la duree :
+
+            IG_DS_USER_ID=...
+            IG_CSRFTOKEN=...
+
+    LE FICHIER RESTE ACCEPTE
+        Si IG_SESSIONID est vide, on retombe sur cookies.txt au format
+        Netscape. Rien de ce qui marchait ne cesse de marcher.
+
+    C EST UN IDENTIFIANT DE SESSION
+        Il vaut un acces au compte : il vit dans le .env, jamais dans le
+        depot. Le .gitignore le couvre deja.
+    """
+    s = requests.Session()
+    s.headers.update(IG_WEB_HEADERS)
+
+    sessionid = (os.getenv("IG_SESSIONID") or "").strip()
+    if sessionid:
+        for nom, valeur in (("sessionid", sessionid),
+                            ("ds_user_id", (os.getenv("IG_DS_USER_ID") or "").strip()),
+                            ("csrftoken", (os.getenv("IG_CSRFTOKEN") or "").strip())):
+            if valeur:
+                s.cookies.set(nom, valeur, domain=".instagram.com")
+        return s
+
     if not COOKIES_FILE.exists():
         raise RuntimeError(
-            "Fichier cookies.txt manquant. Exporte tes cookies Instagram et "
-            "place-les a cote de bot.py."
+            "Aucune session Instagram. Mets IG_SESSIONID dans le .env "
+            "(le plus simple), ou depose un cookies.txt au format Netscape "
+            f"dans {COOKIES_FILE.parent}."
         )
-    s = requests.Session()
     cj = http.cookiejar.MozillaCookieJar(str(COOKIES_FILE))
     cj.load(ignore_discard=True, ignore_expires=True)
     s.cookies = cj
-    s.headers.update(IG_WEB_HEADERS)
     return s
 
 
@@ -313,6 +360,87 @@ def telecharger_binaire_sync(url: str, destination: str) -> bool:
     except Exception:
         pass
     return False
+
+
+def _cookiefile_ytdlp():
+    """Le fichier de cookies a donner a yt-dlp, ou None.
+
+    veille.py lit la session VIVANTE du navigateur (cookiesfrombrowser), et
+    c est pour ca qu il ne demande jamais d entretien. Impossible ici : le VPS
+    n a pas de navigateur. On retombe donc sur un fichier Netscape -- fabrique
+    au besoin depuis IG_SESSIONID, pour que la meme variable serve a la fois a
+    requests et a yt-dlp plutot que d avoir deux sources de verite.
+    """
+    if COOKIES_FILE.exists():
+        return str(COOKIES_FILE)
+    sessionid = (os.getenv("IG_SESSIONID") or "").strip()
+    if not sessionid:
+        return None
+    chemin = Path(DOWNLOAD_DIR) / "cookies_sessionid.txt"
+    lignes = ["# Netscape HTTP Cookie File"]
+    for nom, valeur in (("sessionid", sessionid),
+                        ("ds_user_id", (os.getenv("IG_DS_USER_ID") or "").strip()),
+                        ("csrftoken", (os.getenv("IG_CSRFTOKEN") or "").strip())):
+        if valeur:
+            lignes.append(chr(9).join([".instagram.com", "TRUE", "/", "TRUE",
+                                       "2147483647", nom, valeur]))
+    try:
+        chemin.parent.mkdir(parents=True, exist_ok=True)
+        chemin.write_text(chr(10).join(lignes) + chr(10), encoding="utf-8")
+    except Exception:
+        return None
+    return str(chemin)
+
+
+def lister_reels_ytdlp(username: str, max_posts: int) -> list:
+    """Liste les reels par le mecanisme de la veille : yt-dlp, mode plat.
+
+    C est l outil qui descend deja des videos tous les jours. Il est LENT face
+    a l API web -- une requete par page, sans parallelisme -- mais il repond
+    quand elle refuse, et la lenteur n est pas un probleme ici.
+
+    Le mode plat est un choix, pas un raccourci : le mode complet redemande
+    chaque video une par une et se fait brider au bout de quelques appels,
+    alors que les entrees plates portent deja le compteur de vues, ce qui
+    suffit a classer les reels du plus vu au moins vu.
+    """
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "ignoreerrors": True,
+        "noprogress": True,
+        "retries": 3,
+        "extractor_retries": 3,
+        "socket_timeout": 30,
+        "skip_download": True,
+        "extract_flat": "in_playlist",
+        "playlistend": max_posts,
+    }
+    ck = _cookiefile_ytdlp()
+    if ck:
+        opts["cookiefile"] = ck
+
+    url = "https://www.instagram.com/%s/reels/" % username
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+
+    posts = []
+    for e in ((info or {}).get("entries") or [])[:max_posts]:
+        if not e:
+            continue
+        code = e.get("id") or ""
+        posts.append({
+            "shortcode": code,
+            "url": e.get("url") or ("https://www.instagram.com/reel/%s/" % code),
+            "media_type": "video",
+            "is_video": True,
+            "views": e.get("view_count") or 0,
+            "likes": e.get("like_count") or 0,
+            "comments": 0,
+            "timestamp": e.get("timestamp") or 0,
+            "caption": (e.get("description") or e.get("title") or ""),
+        })
+    return posts
 
 
 def list_profile_posts_sync(username: str, max_posts: int) -> list[dict]:
@@ -493,8 +621,27 @@ class Telechargement(commands.Cog):
                     list_profile_posts_sync, username, combien)
                 source = "cookies (repli)"
         except Exception as e:
-            await canal.send(f"Erreur en lisant le profil : {str(e)[:1500]}")
-            return
+            # On ne rend plus la main ici : l API web qui refuse ne veut pas
+            # dire que le compte est inaccessible, seulement que CE chemin est
+            # ferme. Le mecanisme de la veille reste a essayer.
+            await canal.send(
+                f"L API a refuse ({str(e)[:400]}). "
+                "Essai avec yt-dlp, le mecanisme de la veille.")
+            posts = []
+
+        if not posts and reels:
+            try:
+                posts = await asyncio.to_thread(
+                    lister_reels_ytdlp, username, combien)
+                source = "yt-dlp (comme la veille)"
+                if posts and photos:
+                    # Dire ce qui manque plutot que de livrer moins sans un mot.
+                    await canal.send(
+                        "Note : ce repli ne voit que l onglet Reels. "
+                        "Les posts photo ne seront pas livres cette fois.")
+            except Exception as e:
+                await canal.send(f"yt-dlp a echoue aussi : {str(e)[:800]}")
+
         if not posts:
             await canal.send("Aucun post trouve sur ce profil.")
             return
