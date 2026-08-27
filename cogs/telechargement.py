@@ -490,33 +490,50 @@ class Telechargement(commands.Cog):
                     date_str = datetime.fromtimestamp(
                         post["timestamp"], tz=timezone.utc).strftime("%d/%m/%Y")
 
+                # UN SEUL MESSAGE PAR PUBLICATION.
+                #
+                # Le fichier, le numero, la date et la description partaient en
+                # deux ou trois messages separes. Sur trente posts cela faisait
+                # pres de QUATRE-VINGT-DIX envois d affilee dans le meme salon,
+                # alors que Discord n en accepte qu environ cinq par cinq
+                # secondes. Le bot passait donc plusieurs minutes en file
+                # d attente derriere ses propres messages -- et pendant ce
+                # temps AUCUNE interaction ne pouvait etre servie dans les trois
+                # secondes imparties. D ou « L application n a pas repondu a
+                # temps » sur un bouton sans rapport (constate le 27/08).
+                #
+                # Tout tient maintenant dans un envoi, legende comprise.
+                entete = f"#{idx}" + (f" - {date_str}" if date_str else "")
+                corps = entete + ((chr(10) + legende[:1800]) if legende else "")
+
                 fichier = dossier / f"{uuid.uuid4().hex}.{ext}"
                 try:
                     await asyncio.to_thread(
                         download_sync, post["url"], str(fichier))
                 except Exception as e:
-                    await canal.send(f"#{idx} - echec : {str(e)[:300]}")
-                    await canal.send(post["url"])
-                    if legende:
-                        await canal.send(legende[:1900])
+                    await canal.send(
+                        corps + chr(10) + f"echec : {str(e)[:200]}"
+                        + chr(10) + post["url"])
                     continue
 
                 if not fichier.exists():
-                    await canal.send(post["url"])
-                    await canal.send(legende[:1900] or "Pas de description.")
+                    await canal.send(corps + chr(10) + post["url"])
                     continue
 
                 taille_mo = fichier.stat().st_size / (1024 * 1024)
                 if taille_mo > 24.5:
                     # Discord refuse au-dela : on donne le lien plutot que rien.
-                    await canal.send(f"#{idx} - {taille_mo:.1f} Mo, trop lourd "
-                                     "pour Discord")
-                    await canal.send(post["url"])
-                else:
                     await canal.send(
-                        content=f"#{idx}" + (f" - {date_str}" if date_str else ""),
-                        file=discord.File(str(fichier)))
-                await canal.send(legende[:1900] or "Pas de description.")
+                        corps + chr(10)
+                        + f"({taille_mo:.1f} Mo, trop lourd pour Discord)"
+                        + chr(10) + post["url"])
+                else:
+                    await canal.send(content=corps[:1900],
+                                     file=discord.File(str(fichier)))
+
+                # Une seconde entre deux publications : on reste sous la limite
+                # au lieu de la heurter et d attendre que Discord nous relache.
+                await asyncio.sleep(1.0)
 
         await canal.send(f"Termine pour @{username}.")
 
