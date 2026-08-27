@@ -4162,14 +4162,57 @@ async function toggleFavBrute(btn, fileId){
 // toujours sur celui de « Vidéo brut » de la 1re bibliothèque, et le filtre
 // de « Template montage » ou de la Bibliothèque 2 travaillait sur la galerie
 // d'à côté, cachée.
-function favBruteApply(sec){
+// Les deux filtres se COMBINENT, ils ne s'excluent pas.
+//
+//     aucun        tout, SAUF les ⚡        -- le tag sort de la vue de base
+//     ⭐ seul      les ⭐ non-⚡
+//     ⚡ seul      les ⚡
+//     ⭐ + ⚡      les ⚡ QUI SONT AUSSI ⭐   -- « Flash Banger »
+//
+// La premiere version les rendait exclusifs : allumer l'un eteignait l'autre.
+// Mais seul toggleFlashTrendFilter le faisait, pas son voisin -- clique dans
+// l'autre ordre, les deux restaient allumes et le filtre ⭐ gagnait, en
+// sortant un banger qui n'etait pas flash sous DEUX boutons coches.
+//
+// L'intersection n'est pas qu'une reparation : c'est exactement ce que va
+// chercher le bouton Discord « ⚡ Flash Banger », qui demande les deux
+// marques. Les deux ecrans disent donc enfin la meme chose.
+function vaultVuesAppliquer(sec){
   sec = sec || vaultSectionVisible();
-  // Un montage ⚡ Flash Trend n'apparait NI ici NI dans la vue de base : le
-  // tag remplace l'etat ordinaire, il ne s'y ajoute pas.
-  vaultFiltreAppliquer(sec, vaultFiltreOn(sec, 'favbrute-toggle-btn'),
-                       '.fav-brute-star.is-fav', 'favbrute-empty-note',
-                       'Aucun rush brut marqué ⭐ pour cette identité.',
-                       '.flash-trend.is-flash');
+  if(!sec) return;
+  var grid = sec.querySelector('#vault-grid');
+  if(!grid) return;
+  var bOn = vaultFiltreOn(sec, 'favbrute-toggle-btn');
+  var fOn = vaultFiltreOn(sec, 'flash-toggle-btn');
+  var shown = 0;
+  grid.querySelectorAll('.cloud-card').forEach(function(c){
+    var estFlash = !!c.querySelector('.flash-trend.is-flash');
+    var estFav = !!c.querySelector('.fav-brute-star.is-fav');
+    // Sans le filtre ⚡, les montages tagues restent CACHES : c'est le tag
+    // qui les sort de la vue ordinaire, et c'est tout son interet.
+    var ok = fOn ? estFlash : !estFlash;
+    if(bOn && !estFav) ok = false;
+    c.style.display = ok ? '' : 'none';
+    if(ok) shown++;
+  });
+  var vide = sec.querySelector('.vues-empty-note');
+  if(shown === 0 && (bOn || fOn)){
+    if(!vide){
+      vide = document.createElement('div');
+      vide.className = 'vues-empty-note';
+      vide.style.cssText = 'grid-column:1/-1;text-align:center;color:#888;padding:34px;font-size:14px';
+      grid.appendChild(vide);
+    }
+    vide.textContent = (bOn && fOn)
+      ? 'Aucun montage ⚡ Flash Trend marqué ⭐ pour cette identité.'
+      : (fOn ? 'Aucun montage ⚡ Flash Trend pour cette identité.'
+             : 'Aucun ⭐ pour cette identité.');
+    vide.style.display = '';
+  } else if(vide){ vide.style.display = 'none'; }
+}
+
+function favBruteApply(sec){
+  vaultVuesAppliquer(sec);
 }
 
 // === Filtre « ⚡ Flash Trend » des montages ============================
@@ -4177,26 +4220,16 @@ function favBruteApply(sec){
 // Le seul endroit ou ces montages se voient. Il n'exclut rien, lui : c'est
 // deja la vue reservee.
 function flashTrendApply(sec){
-  sec = sec || vaultSectionVisible();
-  vaultFiltreAppliquer(sec, vaultFiltreOn(sec, 'flash-toggle-btn'),
-                       '.flash-trend.is-flash', 'flash-empty-note',
-                       'Aucun montage ⚡ Flash Trend pour cette identité.');
+  vaultVuesAppliquer(sec);
 }
 function toggleFlashTrendFilter(btn){
   var sec = vaultFiltreSection(btn);
   var b = btn || (sec ? sec.querySelector('#flash-toggle-btn') : null);
   var actif = !(b && b.getAttribute('data-on') === '1');
-  // Les deux vues s'excluent : laisser ⭐ Bangers allume pendant qu'on passe
-  // en Flash Trend donnerait un ecran vide sous DEUX boutons actifs, sans
-  // qu'on sache lequel filtre quoi.
-  if(actif){
-    var ba = sec ? sec.querySelector('#favbrute-toggle-btn') : null;
-    if(ba && ba.getAttribute('data-on') === '1'){
-      vaultFiltreBouton(ba, false, '⭐ Bangers ✓', '⭐ Bangers');
-    }
-  }
+  // On n'eteint plus l'autre bouton : les deux se combinent, et allumer les
+  // deux donne « Flash Banger » plutot qu'un ecran incoherent.
   vaultFiltreBouton(b, actif, '⚡ Flash Trend ✓', '⚡ Flash Trend');
-  if(actif) flashTrendApply(sec); else favBruteApply(sec);
+  vaultVuesAppliquer(sec);
 }
 
 // ⚡ Tag Flash Trend d'un montage. Rien n'est envoye a Discord : on marque.
@@ -4223,9 +4256,7 @@ async function toggleFlashTrend(btn, fileId){
     // plusieurs galeries portent le meme #vault-grid, et vaultSectionVisible
     // renvoyait celle d'a cote. Le tag partait bien en base, l'eclair passait
     // au bleu, et la carte restait affichee -- donc « ca ne marche pas ».
-    var sec = vaultFiltreSection(btn);
-    if(vaultFiltreOn(sec, 'flash-toggle-btn')) flashTrendApply(sec);
-    else favBruteApply(sec);
+    vaultVuesAppliquer(vaultFiltreSection(btn));
     if(typeof showToast === 'function') showToast(on ? '⚡ Montage Flash Trend' : '○ Retiré des Flash Trend', on ? 'success' : 'warning');
   }catch(e){ alert('Erreur réseau : ' + e); }
   finally{ btn.disabled = false; btn.style.opacity = '1'; }
