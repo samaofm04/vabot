@@ -5554,10 +5554,27 @@ def _is_fr_market(identity: str) -> bool:
     idl = (identity or "").strip().lower()
     return idl != _US_SOURCE_IDENTITY and _market_of(idl) == "fr"
 
-# Serveur US : pseudo et name viennent d'une identité « source » commune
-# (Jessye) — des EXEMPLES posés à la main sur le site, aucune génération IA.
-# Tout le reste (reel, story, post, PP et les BIOS) vient de la model cliquée :
-# chaque model US a SA propre liste de bios sur le site.
+# Serveur US : pseudo et name sont GÉNÉRÉS à partir d'une identité « source »
+# commune (Jessye), quelle que soit la model cliquée. Tout le reste — reel,
+# story, post, PP et les BIOS — vient bien de la model : chaque model US a SA
+# propre liste de bios sur le site.
+#
+# POURQUOI JESSYE, ET PAS LA MODEL
+#     Les deux générateurs partent d'un PRÉNOM (generate_username_candidates,
+#     generate_display_names). Or les identités US sont des pseudos de compte,
+#     pas des prénoms : « themikkiangel » sort « themikkiangelstn » et
+#     « Themikkiangel Belle ». « jessye » est un vrai prénom, donc
+#     « jess_crush » et « Jessica Aubry ».
+#
+#     C'est acceptable parce qu'un pseudo n'a qu'un seul travail : être LIBRE
+#     et plausible. Il n'a pas à rappeler la model — c'est un compte neuf.
+#
+#     Retirer cette redirection sans rien changer d'autre DÉGRADE le résultat.
+#     Ce qui la rendrait inutile, c'est un vrai prénom stocké par identité sur
+#     le site ; le générateur partirait de là, et chaque model aurait les siens.
+#
+# (Un commentaire affirmait ici que c'étaient « des exemples posés à la main,
+# aucune génération IA ». C'était faux : rien n'est posé à la main.)
 _US_SOURCE_IDENTITY = "jessye"
 _US_SOURCED_ACTIONS = {"pseudo", "name"}
 
