@@ -129,30 +129,46 @@ def _apify_pret() -> bool:
 
 
 def _apify_appel(charge: dict, timeout: int = 240):
-    """Un run synchrone de l'acteur, et ses items. Liste vide si ca echoue."""
+    """Un run synchrone de l'acteur. Rend (items, raison d'echec).
+
+    La raison est REMONTEE, pas seulement imprimee : un print part dans le
+    journal du VPS, que personne ne lit au moment ou le bouton ne fait rien.
+    C'est exactement ce qui s'est passe le 27/08 -- le salon annoncait
+    « Termine » sans avoir rien descendu, et sans dire pourquoi.
+    """
     import apify_reels
     import requests as _rq
     tok = apify_reels.get_token()
     if not tok:
-        return []
+        return [], "jeton Apify absent"
     try:
         r = _rq.post(
             f"{apify_reels.BASE}/acts/{apify_reels.ACTOR}"
             f"/run-sync-get-dataset-items?token={tok}",
             json=charge, timeout=timeout)
         if r.status_code not in (200, 201):
-            print(f"[dl] Apify HTTP {r.status_code} : {r.text[:160]}")
-            return []
+            return [], f"HTTP {r.status_code} : {r.text[:200]}"
         items = r.json()
-        return items if isinstance(items, list) else []
+        if not isinstance(items, list):
+            return [], f"reponse inattendue : {str(items)[:200]}"
+        if not items:
+            return [], ("l'acteur n'a rien renvoye : compte prive, "
+                        "inexistant, ou resultsType refuse")
+        # Un item d'erreur est frequent : l'acteur repond 200 avec un objet
+        # qui porte le probleme au lieu d'une publication.
+        if len(items) == 1 and isinstance(items[0], dict):
+            pb = (items[0].get("error") or items[0].get("errorDescription")
+                  or items[0].get("message"))
+            if pb and not items[0].get("url"):
+                return [], str(pb)[:200]
+        return items, ""
     except Exception as exc:
-        print(f"[dl] Apify injoignable : {str(exc)[:120]}")
-        return []
+        return [], f"injoignable : {str(exc)[:150]}"
 
 
 def profil_entete_apify(username: str) -> dict:
     """Fiche du compte via Apify. {} si indisponible."""
-    items = _apify_appel({
+    items, _raison = _apify_appel({
         "directUrls": [f"https://www.instagram.com/{username}/"],
         "resultsType": "details",
         "resultsLimit": 1,
@@ -178,12 +194,13 @@ def lister_posts_apify(username: str, max_posts: int) -> list:
     deduit de la presence d'une videoUrl, plus fiable qu'un champ 'type' dont
     le libelle change d'une version a l'autre.
     """
-    items = _apify_appel({
+    items, raison = _apify_appel({
         "directUrls": [f"https://www.instagram.com/{username}/"],
         "resultsType": "posts",
         "resultsLimit": int(max_posts),
         "addParentData": False,
     })
+    lister_posts_apify.derniere_raison = raison
     posts = []
     for it in items:
         if not isinstance(it, dict):
@@ -387,15 +404,17 @@ class Telechargement(commands.Cog):
         dossier = DOWNLOAD_DIR
 
         apify = _apify_pret()
-        if apify:
-            await canal.send("Source : Apify (sans cookie).")
+        source = "Apify (sans cookie)" if apify else "cookies"
 
         if avatar or bio:
             fiche = await asyncio.to_thread(
                 profil_entete_apify if apify else profil_entete_sync, username)
+            if not fiche and apify:
+                # Apify muet sur la fiche : les cookies peuvent encore l'avoir.
+                fiche = await asyncio.to_thread(profil_entete_sync, username)
             if not fiche:
                 await canal.send(
-                    f"Fiche de @{username} illisible (cookies expires ?). "
+                    f"Fiche de @{username} illisible ({source}). "
                     "Je continue avec les publications.")
             else:
                 entete = f"**@{username}**"
@@ -426,6 +445,18 @@ class Telechargement(commands.Cog):
             posts = await asyncio.to_thread(
                 lister_posts_apify if apify else list_profile_posts_sync,
                 username, combien)
+            if apify and not posts:
+                # On NE S ARRETE PAS sur un Apify muet : on dit pourquoi, et on
+                # tente les cookies. Un « Termine » sans rien descendre ne
+                # renseigne personne.
+                raison = getattr(lister_posts_apify, "derniere_raison", "")
+                await canal.send(
+                    f"Apify n'a rien rendu pour @{username}"
+                    + (f" : {raison}" if raison else "")
+                    + ". Nouvel essai avec les cookies.")
+                posts = await asyncio.to_thread(
+                    list_profile_posts_sync, username, combien)
+                source = "cookies (repli)"
         except Exception as e:
             await canal.send(f"Erreur en lisant le profil : {str(e)[:1500]}")
             return
@@ -433,6 +464,7 @@ class Telechargement(commands.Cog):
             await canal.send("Aucun post trouve sur ce profil.")
             return
 
+        await canal.send(f"Source : {source}.")
         lot_photos = [p for p in posts if not p["is_video"]]
         lot_reels = [p for p in posts if p["is_video"]]
         if par_vues:
@@ -743,16 +775,26 @@ async def poser_panneaux(cog, canal, epingler: bool = True):
     """
     import discord as _d
     poses = 0
+    # On vide ce que LE BOT a poste : panneaux perimes, notices d'epinglage,
+    # comptes rendus d'un ancien telechargement. Le salon ne doit porter que
+    # les deux panneaux, sinon ils sortent de l'ecran et plus personne ne les
+    # trouve. On ne touche pas aux messages des humains.
+    moi = getattr(getattr(cog.bot, "user", None), "id", 0)
     try:
-        for p in await canal.pins():
-            if (p.author.id == getattr(cog.bot.user, "id", 0) and p.embeds
-                    and "Telechargement" in (p.embeds[0].title or "")):
-                try:
-                    await p.delete()
-                except Exception:
-                    pass
+        await canal.purge(limit=200, check=lambda m: m.author.id == moi)
     except Exception:
-        pass
+        # Purge refusee (permission manquante) : on retire au moins les
+        # anciens panneaux, sinon on en empilerait un troisieme.
+        try:
+            for p in await canal.pins():
+                if (p.author.id == moi and p.embeds
+                        and "Telechargement" in (p.embeds[0].title or "")):
+                    try:
+                        await p.delete()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
     e1 = _embed_compte()
     e2 = _d.Embed(
@@ -769,6 +811,14 @@ async def poser_panneaux(cog, canal, epingler: bool = True):
             if epingler:
                 try:
                     await msg.pin(reason="Menu de telechargement permanent")
+                    # Epingler produit une notice systeme « X a epingle un
+                    # message ». Elle compte comme un message dans le salon :
+                    # on la retire pour ne laisser QUE les panneaux.
+                    await asyncio.sleep(0.5)
+                    await canal.purge(
+                        limit=5,
+                        check=lambda m: (m.type == _d.MessageType.pins_add
+                                         or (m.author.id == moi and not m.embeds)))
                 except Exception:
                     pass
         except Exception:
