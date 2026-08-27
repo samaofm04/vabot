@@ -119,8 +119,18 @@ IG_WEB_HEADERS = {
 # ─────────────────────────────────────────────────────────────────────────
 
 
+#: Passe a True des qu Apify a repondu « quota epuise ». Un plafond mensuel ne
+#: se rouvre pas dans la minute : rappeler l acteur ne ferait qu ajouter deux
+#: secondes d attente et un pave de JSON a CHAQUE clic, pour le meme refus.
+#: Remis a False au redemarrage du bot, ce qui suffit -- un rechargement de
+#: credits s accompagne de toute facon d un restart.
+_APIFY_EPUISE = False
+
+
 def _apify_pret() -> bool:
-    """Vrai si le jeton Apify est configure. Sans lui, on retombe aux cookies."""
+    """Vrai si le jeton Apify est configure ET si le quota n est pas epuise."""
+    if _APIFY_EPUISE:
+        return False
     try:
         import apify_reels
         return bool(apify_reels.get_token())
@@ -147,7 +157,17 @@ def _apify_appel(charge: dict, timeout: int = 240):
             f"/run-sync-get-dataset-items?token={tok}",
             json=charge, timeout=timeout)
         if r.status_code not in (200, 201):
-            return [], f"HTTP {r.status_code} : {r.text[:200]}"
+            # Le plafond mensuel se presente en 403 avec un JSON illisible pour
+            # qui n a pas le nez dedans. On le nomme, et on cesse d essayer.
+            corps = r.text or ""
+            if ("hard limit exceeded" in corps
+                    or "platform-feature-disabled" in corps):
+                global _APIFY_EPUISE
+                _APIFY_EPUISE = True
+                return [], ("quota Apify epuise pour ce mois. Recharger le "
+                            "compte Apify, ou fournir IG_SESSIONID pour "
+                            "passer par la voie cookies.")
+            return [], f"HTTP {r.status_code} : {corps[:200]}"
         items = r.json()
         if not isinstance(items, list):
             return [], f"reponse inattendue : {str(items)[:200]}"
