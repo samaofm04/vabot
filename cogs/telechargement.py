@@ -373,8 +373,14 @@ class Telechargement(commands.Cog):
     # ----------------------------------------------------------------- menu --
 
     async def ouvrir_menu(self, interaction: discord.Interaction):
-        """Ouvre la fenetre du pseudo. Appele par le menu central."""
-        await interaction.response.send_modal(ModalProfil(self))
+        """Pose le panneau en ephemere, pour qui veut l'ouvrir a la demande.
+
+        Il montre les memes six boutons que le panneau permanent : on ne
+        renvoie pas vers une fenetre de saisie sans avoir dit ce qu'on peut
+        demander.
+        """
+        await interaction.response.send_message(
+            "Que veux-tu telecharger ?", view=Panneau(self), ephemeral=True)
 
     @app_commands.guilds(discord.Object(id=SERVEUR_ID))
     @app_commands.command(
@@ -421,21 +427,27 @@ class Telechargement(commands.Cog):
 
 
 class ModalProfil(discord.ui.Modal, title="Telecharger un profil"):
-    """Premier menu : QUI. Rien d'autre n'est demande ici.
+    """Demande le pseudo, et lance aussitot.
 
-    Separer le "qui" du "quoi" n'est pas cosmetique : on ne sait pas toujours
-    ce qu'on veut d'un compte avant de voir de qui il s'agit, et le nombre a
-    descendre depend de ce qu'on decouvre.
+    Le TYPE est deja choisi : il vient du bouton clique dans le panneau. Il ne
+    reste donc qu une chose a saisir, et le telechargement part sans autre
+    clic. C est la difference avec la premiere version, ou il fallait ouvrir
+    une fenetre, puis choisir, puis lancer.
     """
 
     pseudo = discord.ui.TextInput(
         label="Pseudo Instagram",
         placeholder="sky.ards  ou  https://instagram.com/sky.ards",
         required=True, max_length=120)
+    combien = discord.ui.TextInput(
+        label="Combien au maximum (defaut 30)",
+        placeholder="30", required=False, max_length=3)
 
-    def __init__(self, cog: "Telechargement"):
+    def __init__(self, cog: "Telechargement", quoi: str, libelle: str):
         super().__init__()
         self.cog = cog
+        self.quoi = quoi
+        self.libelle = libelle
 
     async def on_submit(self, inter: discord.Interaction):
         brut = str(self.pseudo).strip().rstrip("/")
@@ -443,73 +455,17 @@ class ModalProfil(discord.ui.Modal, title="Telecharger un profil"):
         if not username:
             await inter.response.send_message("Pseudo invalide.", ephemeral=True)
             return
-        vue = MenuContenu(self.cog, username)
-        await inter.response.send_message(
-            f"**@{username}** — que veux-tu descendre ?",
-            view=vue, ephemeral=True)
+        try:
+            n = int(str(self.combien).strip() or "30")
+        except ValueError:
+            n = 30
+        n = max(1, min(n, 200))
 
-
-class MenuContenu(discord.ui.View):
-    """Second menu : QUOI, et COMBIEN.
-
-    Deux listes deroulantes plutot que dix boutons : le contenu et la quantite
-    sont deux questions distinctes, et les combiner en boutons donnerait une
-    grille illisible (tous les reels, top 10, top 20, top 50, les posts...).
-
-    Le bouton Lancer n'agit qu'une fois : deux clics lanceraient deux
-    telechargements du meme compte en parallele, et le salon deviendrait
-    illisible.
-    """
-
-    def __init__(self, cog: "Telechargement", username: str):
-        super().__init__(timeout=900)
-        self.cog = cog
-        self.username = username
-        self.quoi = "tout"
-        self.combien = 30
-
-    @discord.ui.select(
-        placeholder="Quoi ?",
-        options=[
-            discord.SelectOption(label="Tout", value="tout", emoji="\U0001F4E6",
-                                 description="photo de profil, bio, posts, reels"),
-            discord.SelectOption(label="Photo de profil", value="pp", emoji="\U0001F464"),
-            discord.SelectOption(label="Bio", value="bio", emoji="\U0001F4AC"),
-            discord.SelectOption(label="Posts photo", value="photos", emoji="\U0001F5BC"),
-            discord.SelectOption(label="Reels", value="reels", emoji="\U0001F3AC",
-                                 description="les plus recents"),
-            discord.SelectOption(label="Top reels", value="top", emoji="\U0001F525",
-                                 description="les plus vus"),
-        ])
-    async def s_quoi(self, inter: discord.Interaction, select: discord.ui.Select):
-        self.quoi = select.values[0]
-        await inter.response.edit_message(content=self._resume(), view=self)
-
-    @discord.ui.select(
-        placeholder="Combien ?",
-        options=[discord.SelectOption(label=f"{n}", value=str(n))
-                 for n in (10, 15, 20, 30, 50, 100)])
-    async def s_combien(self, inter: discord.Interaction, select: discord.ui.Select):
-        self.combien = int(select.values[0])
-        await inter.response.edit_message(content=self._resume(), view=self)
-
-    def _resume(self) -> str:
-        libelle = {"tout": "tout", "pp": "la photo de profil", "bio": "la bio",
-                   "photos": "les posts photo", "reels": "les reels",
-                   "top": "les reels les plus vus"}[self.quoi]
-        if self.quoi in ("pp", "bio"):
-            return f"**@{self.username}** — {libelle}"
-        return f"**@{self.username}** — {libelle}, au plus {self.combien}"
-
-    @discord.ui.button(label="Lancer", style=discord.ButtonStyle.success, row=2)
-    async def b_lancer(self, inter: discord.Interaction, _):
-        for enfant in self.children:
-            enfant.disabled = True
-        await inter.response.edit_message(content=self._resume() + " — en cours...",
-                                          view=self)
         q = self.quoi
+        await inter.response.send_message(
+            f"**@{username}** - {self.libelle}, en cours...", ephemeral=True)
         await self.cog.livrer(
-            inter.channel, self.username, self.combien,
+            inter.channel, username, n,
             avatar=q in ("tout", "pp"),
             bio=q in ("tout", "bio"),
             photos=q in ("tout", "photos"),
@@ -518,17 +474,54 @@ class MenuContenu(discord.ui.View):
 
 
 class Panneau(discord.ui.View):
-    """Le panneau qui reste dans le salon."""
+    """Le panneau permanent : toutes les options visibles d entree.
+
+    Un bouton par type plutot qu un bouton unique suivi d un menu. On voit ce
+    qu on peut demander sans avoir a cliquer pour le decouvrir, et il ne reste
+    qu un geste : le pseudo.
+
+    Chaque bouton est SANS ETAT. Un panneau est partage par tout un salon :
+    memoriser le choix dans la vue ferait que deux personnes cliquant en meme
+    temps se voleraient leurs reglages. Ici le type voyage dans la fenetre de
+    saisie, donc chacun est chez soi.
+    """
 
     def __init__(self, cog: "Telechargement"):
         super().__init__(timeout=None)
         self.cog = cog
 
-    @discord.ui.button(label="Telecharger un profil",
-                       style=discord.ButtonStyle.success,
-                       custom_id="panneau_telechargeur_ig")
-    async def b_ouvrir(self, inter, _):
-        await inter.response.send_modal(ModalProfil(self.cog))
+    async def _demander(self, inter, quoi, libelle):
+        await inter.response.send_modal(ModalProfil(self.cog, quoi, libelle))
+
+    @discord.ui.button(label="Tout", style=discord.ButtonStyle.success,
+                       custom_id="dl:tout", row=0)
+    async def b_tout(self, inter, _):
+        await self._demander(inter, "tout", "tout")
+
+    @discord.ui.button(label="Photo de profil", style=discord.ButtonStyle.primary,
+                       custom_id="dl:pp", row=0)
+    async def b_pp(self, inter, _):
+        await self._demander(inter, "pp", "la photo de profil")
+
+    @discord.ui.button(label="Bio", style=discord.ButtonStyle.primary,
+                       custom_id="dl:bio", row=0)
+    async def b_bio(self, inter, _):
+        await self._demander(inter, "bio", "la bio")
+
+    @discord.ui.button(label="Posts photo", style=discord.ButtonStyle.primary,
+                       custom_id="dl:photos", row=1)
+    async def b_photos(self, inter, _):
+        await self._demander(inter, "photos", "les posts photo")
+
+    @discord.ui.button(label="Reels", style=discord.ButtonStyle.primary,
+                       custom_id="dl:reels", row=1)
+    async def b_reels(self, inter, _):
+        await self._demander(inter, "reels", "les reels")
+
+    @discord.ui.button(label="Top reels", style=discord.ButtonStyle.secondary,
+                       custom_id="dl:top", row=1)
+    async def b_top(self, inter, _):
+        await self._demander(inter, "top", "les reels les plus vus")
 
 
 async def setup(bot: commands.Bot):
