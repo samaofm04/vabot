@@ -19686,10 +19686,20 @@ _SCAN_TEXTE = {"en_cours": False, "identite": "", "vus": 0, "total": 0,
                "avec_texte": 0, "erreurs": 0, "dernier": "", "arret": ""}
 _SCAN_TEXTE_LOCK = threading.Lock()
 
+#: Les identites qui attendent leur tour, dans l ordre d arrivee.
+#:
+#: Un seul examen tourne a la fois, et c est voulu : deux en parallele
+#: doubleraient la charge ffmpeg du VPS et la pression sur l API. Mais le
+#: second clic etait REFUSE au lieu d etre retenu — il fallait surveiller la
+#: fin du premier et recliquer a la main. Il prend maintenant un ticket.
+_SCAN_FILE = []
+
 
 def scan_texte_etat() -> dict:
     with _SCAN_TEXTE_LOCK:
-        return dict(_SCAN_TEXTE)
+        etat = dict(_SCAN_TEXTE)
+        etat["file"] = list(_SCAN_FILE)
+        return etat
 
 
 def _brutes_d_identite(identity: str, inclure_desactivees: bool = True):
@@ -19716,10 +19726,25 @@ def _lancer_scan_texte(identity: str, refaire: bool = False) -> tuple:
     if not key:
         return False, ("Clé IA manquante : ajoute ANTHROPIC_API_KEY dans "
                        "Réglages → Clé IA.")
+    ident = (identity or "").strip().lower()
     with _SCAN_TEXTE_LOCK:
         if _SCAN_TEXTE["en_cours"]:
-            return False, ("Un examen tourne déjà (%s, %d/%d)."
-                           % (_SCAN_TEXTE["identite"], _SCAN_TEXTE["vus"],
+            # On ne renvoie pas True : rien n a demarre, et annoncer
+            # « Examen lance » ferait suivre a la page une progression qui
+            # n est pas la sienne. Le message dit ou en est la file.
+            en_cours = (_SCAN_TEXTE["identite"] or "").strip().lower()
+            if ident == en_cours:
+                return False, ("L'examen de « %s » tourne déjà (%d/%d)."
+                               % (_SCAN_TEXTE["identite"], _SCAN_TEXTE["vus"],
+                                  _SCAN_TEXTE["total"]))
+            if ident in _SCAN_FILE:
+                return False, ("« %s » est déjà en file, en position %d."
+                               % (identity, _SCAN_FILE.index(ident) + 1))
+            _SCAN_FILE.append(ident)
+            return False, ("« %s » est mis en file (position %d) : il partira "
+                           "tout seul après « %s » (%d/%d)."
+                           % (identity, len(_SCAN_FILE),
+                              _SCAN_TEXTE["identite"], _SCAN_TEXTE["vus"],
                               _SCAN_TEXTE["total"]))
     brutes = _brutes_d_identite(identity)
     a_faire = [p for p in brutes
@@ -19762,6 +19787,20 @@ def _lancer_scan_texte(identity: str, refaire: bool = False) -> tuple:
         finally:
             with _SCAN_TEXTE_LOCK:
                 _SCAN_TEXTE["en_cours"] = False
+                if _SCAN_TEXTE["arret"]:
+                    # Credit epuise : le suivant echouerait exactement pareil.
+                    # On vide la file plutot que de la derouler dans le vide.
+                    suivant, jetes = "", len(_SCAN_FILE)
+                    _SCAN_FILE.clear()
+                    if jetes:
+                        _SCAN_TEXTE["arret"] += (
+                            " %d identite(s) en attente ont ete retirees "
+                            "de la file." % jetes)
+                else:
+                    suivant = _SCAN_FILE.pop(0) if _SCAN_FILE else ""
+            # HORS du verrou : _lancer_scan_texte le reprend lui-meme.
+            if suivant:
+                _lancer_scan_texte(suivant)
 
     threading.Thread(target=_travail, daemon=True,
                      name="scan-texte-brutes").start()
