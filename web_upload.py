@@ -637,8 +637,19 @@ def _load_fav_brutes() -> set:
     return set()
 
 
-def _toggle_fav_brute(file_id: str) -> bool:
-    """Bascule l'étoile d'une brute. Retourne True si désormais favorite."""
+def _toggle_fav_brute(file_id: str):
+    """Bascule l'étoile d'une brute. Rend (etat, erreur d'ecriture).
+
+    L'ERREUR EST RENDUE, PLUS AVALEE.
+        Cette fonction repondait « c'est fait » meme quand l'ecriture avait
+        echoue. L'etoile s'allumait a l'ecran, rien n'etait enregistre, et le
+        bouton « Video brut Banger » ne trouvait aucune brute -- ou pire,
+        gardait les anciennes. Impossible a comprendre depuis l'interface :
+        tout avait l'air de marcher.
+
+        Un disque plein ou un fichier appartenant a root apres un deploiement
+        suffit a produire ca. Ce n'est donc pas theorique.
+    """
     s = _load_fav_brutes()
     now_on = file_id not in s
     if now_on:
@@ -647,10 +658,12 @@ def _toggle_fav_brute(file_id: str) -> bool:
         s.discard(file_id)
     try:
         FAV_BRUTES_FILE.parent.mkdir(parents=True, exist_ok=True)
-        safe_json.write_text(FAV_BRUTES_FILE, json.dumps(sorted(s), ensure_ascii=False))
-    except Exception:
-        pass
-    return now_on
+        if not safe_json.write_text(
+                FAV_BRUTES_FILE, json.dumps(sorted(s), ensure_ascii=False)):
+            return now_on, "ecriture refusee (droits ou disque plein ?)"
+    except Exception as e:
+        return now_on, str(e)[:150]
+    return now_on, ""
 
 
 FLASH_TREND_FILE = DATA_DIR / "flash_trend.json"
@@ -678,8 +691,12 @@ def _load_flash_trend() -> set:
     return set()
 
 
-def _toggle_flash_trend(file_id: str) -> bool:
-    """Bascule le tag Flash Trend. Retourne True s'il est desormais pose."""
+def _toggle_flash_trend(file_id: str):
+    """Bascule le tag Flash Trend. Rend (etat, erreur d'ecriture).
+
+    Meme raison que son voisin : un tag qui ne s'enregistre pas doit le dire,
+    pas s'allumer a l'ecran en silence.
+    """
     s = _load_flash_trend()
     now_on = file_id not in s
     if now_on:
@@ -688,11 +705,12 @@ def _toggle_flash_trend(file_id: str) -> bool:
         s.discard(file_id)
     try:
         FLASH_TREND_FILE.parent.mkdir(parents=True, exist_ok=True)
-        safe_json.write_text(FLASH_TREND_FILE,
-                             json.dumps(sorted(s), ensure_ascii=False))
-    except Exception:
-        pass
-    return now_on
+        if not safe_json.write_text(
+                FLASH_TREND_FILE, json.dumps(sorted(s), ensure_ascii=False)):
+            return now_on, "ecriture refusee (droits ou disque plein ?)"
+    except Exception as e:
+        return now_on, str(e)[:150]
+    return now_on, ""
 
 
 def propager_tags_templates(source: str) -> dict:
@@ -45027,7 +45045,12 @@ def create_app():
             return jsonify({"ok": False,
                             "error": "cette étoile ne vaut que pour les rushs "
                                      "bruts et les templates de montage"})
-        now_on = _toggle_fav_brute(file_id)
+        now_on, err = _toggle_fav_brute(file_id)
+        if err:
+            # On NE renvoie pas ok:True : l'ecran allumerait l'etoile sur une
+            # marque qui n'existe pas, et le VA recevrait n'importe quoi.
+            return jsonify({"ok": False,
+                            "error": "etoile NON enregistree : " + err})
         return jsonify({"ok": True, "fav": now_on})
 
     @app.route("/cloud/sync_tags_templates", methods=["POST"])
@@ -45067,7 +45090,10 @@ def create_app():
             return jsonify({"ok": False,
                             "error": "le tag Flash Trend ne vaut que pour les "
                                      "montages"})
-        now_on = _toggle_flash_trend(file_id)
+        now_on, err = _toggle_flash_trend(file_id)
+        if err:
+            return jsonify({"ok": False,
+                            "error": "tag NON enregistre : " + err})
         return jsonify({"ok": True, "flash": now_on})
 
     @app.route("/cloud/scan_texte", methods=["POST"])
