@@ -73,6 +73,15 @@ from discord.ext import commands
 #  l'extraction (scratchpad/rendre_autonome.py).
 # ─────────────────────────────────────────────────────────────────────────
 
+#: Le SEUL serveur ou cette commande existe. Anna est sur plusieurs serveurs,
+#: mais le telechargement ne concerne que celui-ci : la commande n'est donc
+#: pas seulement refusee ailleurs, elle n'y est pas proposee du tout.
+#:
+#: On passe par un identifiant et non par un nom : il survit a un renommage.
+#:     Youl4b        1535758943324999711
+#:     YouLab AGENCY 1505418484052394004  (volontairement exclu)
+SERVEUR_ID = int(os.getenv("IG_SERVEUR_ID") or "1535758943324999711")
+
 #: Ou atterrissent les fichiers descendus. A cote du bot, pas du cog.
 DOWNLOAD_DIR = Path(
     os.getenv("IG_DOWNLOAD_DIR")
@@ -367,6 +376,7 @@ class Telechargement(commands.Cog):
         """Ouvre la fenetre du pseudo. Appele par le menu central."""
         await interaction.response.send_modal(ModalProfil(self))
 
+    @app_commands.guilds(discord.Object(id=SERVEUR_ID))
     @app_commands.command(
         name="menudownload",
         description="Poser le menu de telechargement Instagram dans ce salon")
