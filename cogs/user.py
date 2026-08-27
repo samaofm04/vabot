@@ -260,7 +260,7 @@ def _build_menu_embed(identity, guild=None):
     add("cmenu:storycta", "contenu", "📲 Story CTA", "Photo CTA (à poster le soir)")
     add("cmenu:banger", "contenu", "⭐ Reels", "Tes meilleurs reels (marqués ⭐)")
     add("cmenu:capbanger", "contenu", "⭐ Caption", "Tes meilleures captions (marquées ⭐)")
-    add("cmenu:montagebanger", "contenu", "⭐⭐ Montage", "Une brute ⭐ + une caption ⭐, montées pour toi")
+    add("cmenu:montagebanger", "contenu", "⭐⭐ Caption + Vidéo brut", "Une brute ⭐ + une caption ⭐, montées pour toi")
     add("cmenu:templatebrut", "contenu", "⭐⭐ Template + Brut", "Un template ⭐ assemblé avec une brute ⭐")
     add("cmenu:brutbanger", "contenu", "⭐ Vidéo brut", "Tes meilleures brutes ⭐, sans montage")
     add("cmenu:templateflash", "contenu", "⚡ Template Flash",
@@ -5388,7 +5388,7 @@ class ContentMenuView(discord.ui.View):
     async def b_capbanger(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_caption_bangers(interaction)
 
-    @discord.ui.button(label="⭐⭐ Montage", style=discord.ButtonStyle.primary, custom_id="cmenu:montagebanger", row=4)
+    @discord.ui.button(label="⭐⭐ Caption + Vidéo brut", style=discord.ButtonStyle.primary, custom_id="cmenu:montagebanger", row=4)
     async def b_montagebanger(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_montage_bangers(interaction)
 
@@ -5659,7 +5659,7 @@ _JB_ACTIONS_US = [
     #                   recoit ce qui est marque, ni plus ni moins --
     #                   c'est tout l'interet d'un favori.
     ('capbanger', '⭐ Caption', 'captionbanger', False),
-    ('montagebanger', '⭐⭐ Montage', 'montagebanger', False),
+    ('montagebanger', '⭐⭐ Caption + Vidéo brut', 'montagebanger', False),
     ('templatebrut', '⭐⭐ Template + Brut', 'templatebrut', False),
     ('brutbanger', '⭐ Vidéo brut', 'brutbanger', False),
 
