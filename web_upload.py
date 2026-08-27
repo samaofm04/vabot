@@ -4126,7 +4126,13 @@ async function toggleFlashTrend(btn, fileId){
     // La carte qu'on vient de taguer doit QUITTER la vue tout de suite : elle
     // n'a plus rien a y faire, et la laisser affichee ferait croire que le
     // tag n'a pas pris.
-    var sec = vaultSectionVisible();
+    //
+    // La section vient du BOUTON CLIQUE, pas de « la premiere section visible
+    // du document ». C'est le piege que ce fichier documente deja plus haut :
+    // plusieurs galeries portent le meme #vault-grid, et vaultSectionVisible
+    // renvoyait celle d'a cote. Le tag partait bien en base, l'eclair passait
+    // au bleu, et la carte restait affichee -- donc « ca ne marche pas ».
+    var sec = vaultFiltreSection(btn);
     if(vaultFiltreOn(sec, 'flash-toggle-btn')) flashTrendApply(sec);
     else favBruteApply(sec);
     if(typeof showToast === 'function') showToast(on ? '⚡ Montage Flash Trend' : '○ Retiré des Flash Trend', on ? 'success' : 'warning');
