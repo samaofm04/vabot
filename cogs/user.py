@@ -12,7 +12,8 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 import safe_json
-from video_transform import transform_video, load_config as load_transform_config
+from video_transform import (transform_video, transform_metadata_strict,
+                             load_config as load_transform_config)
 from image_transform import transform_image, load_config as load_image_config
 
 DATA_DIR = Path("data")
@@ -2910,6 +2911,128 @@ class UserCog(commands.Cog):
                     f"⚠️ VIDÉO BRUTE {idx}/{total} : envoi impossible "
                     f"(trop lourde pour Discord) : {e}")
 
+    async def _envoyer_brutes_meta(self, interaction, videos, identity,
+                                   label, entete):
+        """Envoie des brutes dont les metadonnees ont ete reecrites.
+
+        L IMAGE N EST PAS TOUCHEE. Remux seul, aucun re-encodage : les pixels
+        sortent identiques au bit pres. Ce qui change, c est ce que Meta lit --
+        modele d iPhone, version d iOS, date de prise de vue, GPS d une vraie
+        ville -- donc une empreinte differente a chaque envoi.
+
+        L ECHEC EST DIT. Si ffmpeg manque ou refuse, la video part quand meme
+        (le VA est venu chercher sa video, pas un message d erreur) mais
+        l etiquette change : « metadonnees NON changees ». Annoncer le
+        contraire sur un fichier intact serait le defaut qui a coute le plus
+        cher a ce projet -- un message de succes qui ment.
+
+        Et on ne croit pas le booleen sur parole : le fichier de sortie doit
+        exister ET peser quelque chose. Un ffmpeg qui rend 0 en laissant un
+        fichier vide, c est arrive.
+        """
+        import asyncio as _aio
+        import tempfile as _tmp
+        total = len(videos)
+        await interaction.followup.send(entete)
+        with _tmp.TemporaryDirectory(prefix="brutmeta_") as _d:
+            for idx, v in enumerate(videos, start=1):
+                sortie = Path(_d) / v.name
+                try:
+                    ok = await _aio.to_thread(transform_metadata_strict, v, sortie)
+                except Exception:
+                    ok = False
+                reecrit = bool(ok) and sortie.exists() and sortie.stat().st_size > 0
+                fichier = sortie if reecrit else v
+                if reecrit:
+                    tete = (f"🎥 **{label} {idx}/{total}** (`{identity}`) "
+                            f"— métadonnées réécrites ✅")
+                else:
+                    tete = (f"🎥 **{label} {idx}/{total}** (`{identity}`)"
+                            f"{NL}⚠️ Métadonnées **NON** changées (ffmpeg absent "
+                            f"ou en échec) — la vidéo part **telle quelle**.")
+                try:
+                    await interaction.followup.send(
+                        content=tete,
+                        file=discord.File(str(fichier), filename=v.name))
+                except discord.HTTPException as e:
+                    await interaction.followup.send(
+                        f"⚠️ {label} {idx}/{total} : envoi impossible "
+                        f"(trop lourde pour Discord) : {e}")
+
+    @app_commands.command(
+        name="videobrutmeta",
+        description="Vidéos BRUTES avec métadonnées changées (iPhone, iOS, date, GPS)")
+    @app_commands.describe(nombre="Combien de vidéos (1-10, défaut 3)")
+    async def videobrutmeta(self, interaction: discord.Interaction,
+                            nombre: app_commands.Range[int, 1, 10] = 3):
+        """Meme dossier et meme filtre que /videobrut : des rushs nus, sans
+        texte ni montage. Seule difference, chaque fichier ressort avec une
+        autre identite d appareil."""
+        if await self._gate_contenu(interaction):
+            return
+        identity = get_user_identity(interaction.user.id)
+        if not identity:
+            await interaction.response.send_message(
+                "Tu n'as pas d'identité assignée. Demande à un admin.", ephemeral=True)
+            return
+        # Meme porte d entree que /videobrut : brutes_off.lister ecarte les
+        # brutes desactivees (celles qui portent deja une caption incrustee).
+        import brutes_off as _off
+        bdir = IDENTITIES_DIR / identity / "brutes"
+        vids = _off.lister(bdir, extensions=VIDEO_EXTS)
+        if not vids:
+            await interaction.response.send_message(
+                f"Aucune **vidéo brute** pour `{identity}`.{NL}"
+                "_(Un admin en ajoute sur le site, onglet **Vidéo brut**.)_",
+                ephemeral=True)
+            return
+        await interaction.response.defer()
+        picked = random.sample(vids, min(nombre, len(vids)))
+        entete = (f"🎥 **{len(picked)} vidéo(s) brute(s) pour `{identity}`** — "
+                  f"sans montage, avec des **métadonnées neuves** : modèle "
+                  f"d'iPhone, iOS, date de prise de vue et GPS d'une vraie "
+                  f"ville.{NL}L'image, elle, n'est **pas** retouchée.")
+        if len(picked) < nombre:
+            entete += (f"{NL}ℹ️ Seulement **{len(picked)}** dispo (tu en as "
+                       f"demandé {nombre}).")
+        await self._envoyer_brutes_meta(interaction, picked, identity,
+                                        "VIDÉO BRUTE + MÉTA", entete)
+
+    @app_commands.command(
+        name="brutbangermeta",
+        description="Tes brutes ⭐ avec métadonnées changées, sans montage")
+    async def brutbangermeta(self, interaction: discord.Interaction):
+        """Les brutes etoilees, telles quelles, metadonnees reecrites.
+
+        Ces brutes-la servent surtout a « Template + Brut » et « Montage
+        Banger », qui les assemblent. Ici elles partent NUES : c est le meme
+        contenu, sans template, juste maquille cote metadonnees.
+
+        Pas de quantite : le VA recoit ce qui est marque, ni plus ni moins --
+        c est tout l interet d un favori, et « Vidéo brut Banger » suit deja
+        cette regle.
+        """
+        if await self._gate_contenu(interaction):
+            return
+        identity = get_user_identity(interaction.user.id)
+        if not identity:
+            await interaction.response.send_message(
+                "Tu n'as pas d'identité assignée. Demande à un admin.", ephemeral=True)
+            return
+        brutes = fav_brutes_for(identity)
+        if not brutes:
+            await interaction.response.send_message(
+                f"⭐ Aucune **vidéo brute favorite** pour `{identity}`.{NL}"
+                "_(Un admin les marque avec l'étoile ⭐ sur le site, onglet "
+                "**Vidéo brut**.)_", ephemeral=True)
+            return
+        await interaction.response.defer()
+        entete = (f"⭐ **{len(brutes)} BRUTE(S) BANGER pour `{identity}`** — les "
+                  f"meilleures, sans texte ni montage, avec des **métadonnées "
+                  f"neuves**. 🔥{NL}L'image n'est **pas** retouchée.")
+        await self._envoyer_brutes_meta(interaction, brutes, identity,
+                                        "BRUTE BANGER + MÉTA", entete)
+
     @app_commands.command(
         name="reelcaption",
         description="Vidéo brute + caption incrustée (bibliothèque Caption du site)")
@@ -5346,6 +5469,13 @@ _JB_ACTIONS_US = [
     ("templatebrut", "🎵 Template + Brut", "templatebrut", False),
     ("brutbanger", "🎥 Vidéo brut Banger", "brutbanger", False),
     ("captionbrut", "📝 Caption + Brut", "captionbrut", False),
+    # Les memes brutes, mais avec une autre identite d appareil dans les
+    # metadonnees. L image n est pas touchee : c est toujours du brut.
+    # « brutmeta » et non « brut_meta » : le gabarit du custom_id
+    # (jbus:a:<ident>:<key>:<qty>) n accepte que [a-z], et un tiret bas rendrait
+    # le bouton muet sans la moindre erreur.
+    ("brutmeta", "🎥 Vidéo brut + méta", "videobrutmeta", True),
+    ("brutbangermeta", "⭐ Brut Banger + méta", "brutbangermeta", False),
 ]
 
 # Quantites proposees (multiplicateur). Plafonnees au stock reel de la model.
@@ -5599,7 +5729,7 @@ class JailbreakActionsView(discord.ui.View):
         actions = _JB_ACTIONS_US        # « Reel caption » pour les 2 marches
         for i, (key, label, cmd_attr, sc) in enumerate(actions):
             self.add_item(_JailbreakActionButton(
-                self.cog, self.model, label, cmd_attr, sc, row=1 + i // 4, key=key,
+                self.cog, self.model, label, cmd_attr, sc, row=1 + i // 5, key=key,
                 icone=self.icones.get(key)))
 
     def _embed(self):
@@ -6083,8 +6213,10 @@ def _jb_panel(cog, ident, qty=3, marche="us", guild=None):
         _actions = _JB_ACTIONS_US
         _ic = icones_actions(guild)      # lecture seule : rien sur le reseau
         for i, (key, label, _c, _s) in enumerate(_actions):
+            # 5 par rangee et non 4 : Discord s arrete a la rangee 4, et les
+            # 17 actions ne tiennent plus autrement.
             view.add_item(JBActionButton(ident, key, qty, label=label,
-                                         row=1 + i // 4, icone=_ic.get(key)))
+                                         row=1 + i // 5, icone=_ic.get(key)))
         emb = discord.Embed(
             title=f"🔓 {ident.capitalize()} — que veux-tu générer ?",
             description=(

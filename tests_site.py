@@ -4831,6 +4831,8 @@ try:
     # panneau Jailbreak, pilote par _JB_ACTIONS_US. Sans entree la, les deux
     # boutons n'existent que sur le serveur francais.
     import re as _reFv
+    import os as _os
+    import tempfile as _tempfile
     _clesFv = {a[0] for a in _uFv._JB_ACTIONS_US}
     check("favoris : les 5 actions sont dans le menu US",
           all(k in _clesFv for k in ("capbanger", "montagebanger", "templatebrut",
@@ -4849,13 +4851,55 @@ try:
               for a in _uFv._JB_ACTIONS_US),
           str([a[0] for a in _uFv._JB_ACTIONS_US
                if not _reFv.fullmatch(_tplFv, "jbus:a:x:%s:3" % a[0])]))
-    # Rangees du panneau : row = 1 + i//4, et Discord plafonne a 5 par rangee.
+    # Rangees du panneau : on CONSTRUIT le vrai panneau et on compte ses vraies
+    # rangees, au lieu de recopier ici la formule du rangement.
+    #
+    # Elle etait recopiee, et ca s est retourne contre nous : le jour ou le code
+    # est passe a 5 boutons par ligne pour loger deux actions de plus, ce test a
+    # echoue alors que le panneau tenait parfaitement. Un test qui reimplemente
+    # ce qu il verifie ne verifie que sa propre copie.
+    #
+    # Le selecteur de quantite n a pas de rangee fixee (row=None) : Discord la
+    # lui attribue. On ne compte donc que ce qui en porte une.
+    _emb_us, _vue_us = _uFv._jb_panel(None, "test", 3, "us", None)
     _rowsFv = {}
-    for _i, _a in enumerate(_uFv._JB_ACTIONS_US):
-        _rowsFv[1 + _i // 4] = _rowsFv.get(1 + _i // 4, 0) + 1
+    for _it in _vue_us.children:
+        if getattr(_it, "row", None) is not None:
+            _rowsFv[_it.row] = _rowsFv.get(_it.row, 0) + 1
     check("favoris : le panneau US ne deborde aucune rangee",
           all(_n <= 5 for _n in _rowsFv.values()) and max(_rowsFv) <= 4,
           str(_rowsFv))
+    check("favoris : le panneau US tient dans les 25 composants de Discord",
+          len(_vue_us.children) <= 25,
+          "%d composants" % len(_vue_us.children))
+
+    # -- brutes a metadonnees changees ---------------------------------------
+    # Les deux actions doivent EXISTER dans le menu US : sans entree la, les
+    # boutons ne sont nulle part, la commande slash restant seule.
+    check("brut+meta : les deux actions sont dans le menu US",
+          all(k in _clesFv for k in ("brutmeta", "brutbangermeta")),
+          str(sorted(_clesFv)))
+
+    # Et surtout : la porte stricte ne doit JAMAIS annoncer un succes qu elle
+    # n a pas obtenu. transform_video(), lui, rend True apres une simple copie
+    # -- pratique pour un envoi automatique, mensonger pour un bouton qui
+    # promet des metadonnees changees. C est la difference que ce test protege.
+    import video_transform as _vtFv
+    _vraiFv = _vtFv.is_ffmpeg_available
+    try:
+        _vtFv.is_ffmpeg_available = lambda: False
+        _cibleFv = _os.path.join(_tempfile.gettempdir(), "_jamais_ecrit_meta.mp4")
+        try:
+            _os.remove(_cibleFv)
+        except OSError:
+            pass
+        _rFv = _vtFv.transform_metadata_strict(__file__, _cibleFv)
+        check("brut+meta : sans ffmpeg, la porte stricte avoue l echec",
+              _rFv is False, repr(_rFv))
+        check("brut+meta : sans ffmpeg, aucun fichier recopie en douce",
+              not _os.path.exists(_cibleFv), _cibleFv)
+    finally:
+        _vtFv.is_ffmpeg_available = _vraiFv
 except Exception as _eFv:
     check("favoris : selecteurs testables", False, repr(_eFv)[:160])
 

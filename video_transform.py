@@ -292,6 +292,40 @@ def _transform_metadata_only(input_path, output_path, config, timeout):
         return False
 
 
+def transform_metadata_strict(input_path, output_path, config=None, timeout=60):
+    """Reecrit les metadonnees, et dit la VERITE sur ce qui s est passe.
+
+    transform_video() rend True meme quand il n a fait que RECOPIER le fichier :
+    interrupteur eteint, ffmpeg absent, ou ffmpeg en echec. C est volontaire
+    la-bas -- un envoi automatique ne doit pas s arreter pour ca -- et c est
+    inutilisable ici. Un bouton qui annonce « metadonnees changees » mentirait
+    sur un fichier intact, et le VA posterait une video a l empreinte inchangee
+    en croyant le contraire.
+
+    Ici, True veut dire que ffmpeg a REELLEMENT reecrit les atomes. Rien n est
+    recopie en douce : l appelant voit l echec, et c est a lui de le dire.
+
+    DEUX CHOIX ASSUMES
+
+    On force l ecriture des metadonnees quels que soient les reglages du site.
+    C est la raison d etre de l appel : le bouton promet ca, et rien d autre ne
+    doit pouvoir l eteindre a distance.
+
+    Et on s en tient aux metadonnees -- remux seul, aucun re-encodage. Les
+    pixels sortent identiques au bit pres. Une brute re-encodee ne serait plus
+    une brute, alors que c est exactement ce que le VA vient chercher.
+    """
+    if not is_ffmpeg_available():
+        return False
+    cfg = dict(config or load_config())
+    cfg["random_us_metadata"] = {"enabled": True}
+    try:
+        return bool(_transform_metadata_only(input_path, output_path, cfg,
+                                             timeout=timeout))
+    except Exception:
+        return False
+
+
 def transform_video(input_path, output_path, config=None, timeout=180):
     """Apply transformations to a video using ffmpeg. Returns True on success, False on failure."""
     input_path = Path(input_path)
