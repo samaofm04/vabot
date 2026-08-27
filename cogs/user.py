@@ -5385,13 +5385,12 @@ _JB_ACTIONS = [
 # exemple) — à la place « Reel caption » (brute + caption incrustée, biblio
 # Caption du site) et « Reel monté » (montage template).
 _JB_ACTIONS_US = [
-    # Rangee 1 - L'IDENTITE. La photo d'abord, puis la bio : c'est l'ordre dans
-    #                 lequel on monte un compte. Pseudo et nom suivent,
-    #                 ils se posent au meme moment.
+    # Rangee 1 - L'IDENTITE, dans l'ordre ou on la remplit : le nom, le pseudo,
+    #                 puis la photo et la bio.
+    ('name', '📝 Name', 'name', False),
+    ('pseudo', '👤 Pseudo', 'username', False),
     ('pp', '🖼️ PP', 'profilepic', True),
     ('bio', '💬 Bio', 'bio', True),
-    ('pseudo', '👤 Pseudo', 'username', False),
-    ('name', '📝 Name', 'name', False),
 
     # Rangee 2 - LES STORIES, PUIS LE POST. « Story CTA » est ce qu'on appelle
     #                 la story a la une : c'est le meme objet sous ses
@@ -5417,10 +5416,10 @@ _JB_ACTIONS_US = [
 
 #: La rangee de chaque action : UNE rangee = UNE famille.
 #:
-#: L'ordre suit le MONTAGE d'un compte, tel qu'un VA le fait : la photo de
-#: profil, la bio, les stories, le post, puis les reels. Les favoris ⭐
-#: restent groupes en bas -- ils ne servent pas au montage, ils servent
-#: quand le compte tourne.
+#: L'ordre suit le MONTAGE d'un compte, tel qu'un VA le fait : le nom et le
+#: pseudo, la photo et la bio, les stories, le post, puis les reels. Les
+#: favoris ⭐ restent groupes en bas -- ils ne servent pas au montage, ils
+#: servent quand le compte tourne.
 #:
 #: Le rangement se calculait avant par « i // 4 », qui coupait les familles
 #: n'importe ou -- « Vidéo brut » se retrouvait colle a « PP », et les
@@ -5430,7 +5429,7 @@ _JB_ACTIONS_US = [
 #: Discord : rangees 0 a 4, 5 composants par rangee. La 0 porte le
 #: selecteur de quantite, il reste donc 4 rangees, soit 20 places.
 _JB_RANGEES = {
-    'pp': 1, 'bio': 1, 'pseudo': 1, 'name': 1,
+    'name': 1, 'pseudo': 1, 'pp': 1, 'bio': 1,
     'story': 2, 'storycta': 2, 'post': 2,
     'reelcaption': 3, 'reelmonte': 3, 'brute': 3,
     'capbanger': 4, 'montagebanger': 4, 'templatebrut': 4, 'brutbanger': 4, 'captionbrut': 4,
