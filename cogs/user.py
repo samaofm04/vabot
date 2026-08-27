@@ -258,16 +258,16 @@ def _build_menu_embed(identity, guild=None):
     add("cmenu:story", "contenu", "📖 Story", "Photo + texte pour ta story")
     add("cmenu:post", "contenu", "🖼️ Post", "Photo + légende pour le feed")
     add("cmenu:storycta", "contenu", "📲 Story CTA", "Photo CTA (à poster le soir)")
-    add("cmenu:banger", "contenu", "💥 Reels Banger", "Tes meilleurs reels (marqués ⭐)")
-    add("cmenu:capbanger", "contenu", "⭐ Caption Banger", "Tes meilleures captions (marquées ⭐)")
-    add("cmenu:montagebanger", "contenu", "🎬 Montage Banger", "Une brute ⭐ + une caption ⭐, montées pour toi")
+    add("cmenu:banger", "contenu", "⭐ Reels", "Tes meilleurs reels (marqués ⭐)")
+    add("cmenu:capbanger", "contenu", "⭐ Caption", "Tes meilleures captions (marquées ⭐)")
+    add("cmenu:montagebanger", "contenu", "⭐ Montage", "Une brute ⭐ + une caption ⭐, montées pour toi")
     add("cmenu:templatebrut", "contenu", "🎵 Template + Brut", "Un template ⭐ assemblé avec une brute ⭐")
-    add("cmenu:brutbanger", "contenu", "🎥 Vidéo brut Banger", "Tes meilleures brutes ⭐, sans montage")
+    add("cmenu:brutbanger", "contenu", "⭐ Vidéo brut", "Tes meilleures brutes ⭐, sans montage")
     add("cmenu:templateflash", "contenu", "⚡ Template Flash",
         "Un montage ⚡ Flash Trend, monté avec une brute au hasard")
-    add("cmenu:templateflashbanger", "contenu", "⚡ Flash Banger",
+    add("cmenu:templateflashbanger", "contenu", "⭐ Flash",
         "Un montage ⚡ ET ⭐, monté avec une brute au hasard")
-    add("cmenu:templateflashbrut", "contenu", "⚡ Flash Banger + Brut",
+    add("cmenu:templateflashbrut", "contenu", "⭐ Flash + Brut",
         "Un montage ⚡ ET ⭐, monté avec ta brute ⭐")
     add("cmenu:captionbrut", "contenu", "📝 Caption + Brut", "Une brute ⭐ + sa caption ⭐ en texte")
     add("cmenu:pseudo", "contenu", "👤 Pseudo", "Des pseudos dispo")
@@ -5243,7 +5243,7 @@ class ContentMenuView(discord.ui.View):
     async def b_storycta(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.storycta.callback(self.cog, interaction)
 
-    @discord.ui.button(label="Reels Banger", emoji="💥", style=discord.ButtonStyle.primary, custom_id="cmenu:banger", row=0)
+    @discord.ui.button(label="Reels", emoji="⭐", style=discord.ButtonStyle.primary, custom_id="cmenu:banger", row=0)
     async def b_banger(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_banger_reels(interaction)
 
@@ -5338,11 +5338,11 @@ class ContentMenuView(discord.ui.View):
     # Rangee 4, laissee libre jusqu'ici : les deux favoris ont leur propre
     # ligne, ce qui les distingue a l'oeil du « Reels Banger » qui, lui, ne
     # marche pas pareil (il envoie dans un salon, ceux-ci sont des favoris).
-    @discord.ui.button(label="Caption Banger", emoji="⭐", style=discord.ButtonStyle.primary, custom_id="cmenu:capbanger", row=4)
+    @discord.ui.button(label="Caption", emoji="⭐", style=discord.ButtonStyle.primary, custom_id="cmenu:capbanger", row=4)
     async def b_capbanger(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_caption_bangers(interaction)
 
-    @discord.ui.button(label="Montage Banger", emoji="🎬", style=discord.ButtonStyle.primary, custom_id="cmenu:montagebanger", row=4)
+    @discord.ui.button(label="Montage", emoji="⭐", style=discord.ButtonStyle.primary, custom_id="cmenu:montagebanger", row=4)
     async def b_montagebanger(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_montage_bangers(interaction)
 
@@ -5350,11 +5350,11 @@ class ContentMenuView(discord.ui.View):
     async def b_templateflash(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_template_flash(interaction)
 
-    @discord.ui.button(label="Flash Banger", emoji="⚡", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflashbanger", row=3)
+    @discord.ui.button(label="Flash", emoji="⭐", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflashbanger", row=3)
     async def b_templateflashbanger(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_template_flash(interaction, exiger_banger=True)
 
-    @discord.ui.button(label="Flash Banger + Brut", emoji="⚡", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflashbrut", row=3)
+    @discord.ui.button(label="Flash + Brut", emoji="⭐", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflashbrut", row=3)
     async def b_templateflashbrut(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_template_flash(interaction, exiger_banger=True, brute_favorite=True)
 
@@ -5362,7 +5362,7 @@ class ContentMenuView(discord.ui.View):
     async def b_templatebrut(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_template_plus_brute(interaction)
 
-    @discord.ui.button(label="Vidéo brut Banger", emoji="🎥", style=discord.ButtonStyle.primary, custom_id="cmenu:brutbanger", row=4)
+    @discord.ui.button(label="Vidéo brut", emoji="⭐", style=discord.ButtonStyle.primary, custom_id="cmenu:brutbanger", row=4)
     async def b_brutbanger(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_brutes_bangers(interaction)
 
@@ -5624,8 +5624,8 @@ _JB_ACTIONS_US = [
     # Rangee 3 (suite) - LES FLASH TREND. Pas de quantite non plus : le VA
     # recoit ce qui est tague, ni plus ni moins.
     ('templateflash', '⚡ Template Flash', 'templateflash', False),
-    ('templateflashbanger', '⚡ Flash Banger', 'templateflashbanger', False),
-    ('templateflashbrut', '⚡ Flash Banger + Brut', 'templateflashbrut', False),
+    ('templateflashbanger', '⭐ Flash', 'templateflashbanger', False),
+    ('templateflashbrut', '⭐ Flash + Brut', 'templateflashbrut', False),
 ]
 
 #: La rangee de chaque action : UNE rangee = UNE famille.
