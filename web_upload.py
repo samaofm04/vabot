@@ -19694,6 +19694,18 @@ _SCAN_TEXTE_LOCK = threading.Lock()
 #: fin du premier et recliquer a la main. Il prend maintenant un ticket.
 _SCAN_FILE = []
 
+#: Combien de brutes sont examinees EN MEME TEMPS a l interieur d un examen.
+#:
+#: Une brute passe l essentiel de son temps a ATTENDRE la reponse de l API,
+#: pas a calculer : en serie, le VPS reste les bras croises. Quatre ouvriers
+#: divisent l attente par quatre sans multiplier le travail reel -- ffmpeg ne
+#: tire que quatre images en 720 par video, c est court.
+#:
+#: On reste modeste volontairement. Monter plus haut ferait tomber l API en
+#: 429 (elle est retentee, mais on n aurait rien gagne) et prendrait le
+#: processeur au bot Discord, qui vit dans le MEME processus.
+SCAN_OUVRIERS = max(1, int(os.getenv("SCAN_OUVRIERS") or "4"))
+
 
 def scan_texte_etat() -> dict:
     with _SCAN_TEXTE_LOCK:
@@ -19759,8 +19771,20 @@ def _lancer_scan_texte(identity: str, refaire: bool = False) -> tuple:
                             "erreurs": 0, "dernier": "", "arret": ""})
 
     def _travail():
-        try:
-            for p in a_faire:
+        # Une SEULE reserve de brutes, plusieurs ouvriers qui y puisent. Pas
+        # de decoupage en tranches fixes : une tranche de videos courtes finit
+        # tot et son ouvrier attendrait les autres pour rien.
+        reserve = iter(a_faire)
+        verrou_reserve = threading.Lock()
+        stop = threading.Event()
+
+        def _ouvrier():
+            while not stop.is_set():
+                with verrou_reserve:
+                    try:
+                        p = next(reserve)
+                    except StopIteration:
+                        return
                 try:
                     verdict, extraits, err = _brute_a_du_texte(p, key)
                 except Exception as e:
@@ -19769,13 +19793,20 @@ def _lancer_scan_texte(identity: str, refaire: bool = False) -> tuple:
                     # On NE marque pas la brute : son verdict reste a faire.
                     # L ecrire en « illisible » l aurait exclue du prochain
                     # examen, une fois le compte recharge.
+                    #
+                    # stop.set() arrete AUSSI les autres ouvriers : sans ca,
+                    # ils continueraient a taper une API qui refuse, et
+                    # chacun reecrirait le message d arret avec son propre
+                    # compteur.
+                    stop.set()
                     with _SCAN_TEXTE_LOCK:
-                        _SCAN_TEXTE["arret"] = (
-                            "Credit Anthropic epuise : l examen s est arrete "
-                            "apres %d brute(s). Recharge le compte sur "
-                            "console.anthropic.com (Billing), puis relance."
-                            % _SCAN_TEXTE["vus"])
-                    break
+                        if not _SCAN_TEXTE["arret"]:
+                            _SCAN_TEXTE["arret"] = (
+                                "Credit Anthropic epuise : l examen s est "
+                                "arrete apres %d brute(s). Recharge le compte "
+                                "sur console.anthropic.com (Billing), puis "
+                                "relance." % _SCAN_TEXTE["vus"])
+                    return
                 _textecheck_ecrire(p, verdict, extraits, err)
                 with _SCAN_TEXTE_LOCK:
                     _SCAN_TEXTE["vus"] += 1
@@ -19784,6 +19815,17 @@ def _lancer_scan_texte(identity: str, refaire: bool = False) -> tuple:
                         _SCAN_TEXTE["avec_texte"] += 1
                     elif verdict is None:
                         _SCAN_TEXTE["erreurs"] += 1
+
+        try:
+            # Jamais plus d ouvriers que de brutes : 4 fils pour 2 videos
+            # n irait pas plus vite et brouillerait le journal.
+            equipe = [threading.Thread(target=_ouvrier, daemon=True,
+                                       name="scan-texte-%d" % i)
+                      for i in range(min(SCAN_OUVRIERS, len(a_faire)))]
+            for o in equipe:
+                o.start()
+            for o in equipe:
+                o.join()
         finally:
             with _SCAN_TEXTE_LOCK:
                 _SCAN_TEXTE["en_cours"] = False
