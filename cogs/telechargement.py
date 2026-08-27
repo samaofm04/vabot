@@ -168,12 +168,16 @@ def _apify_appel(charge: dict, timeout: int = 240):
 
 def profil_entete_apify(username: str) -> dict:
     """Fiche du compte via Apify. {} si indisponible."""
-    items, _raison = _apify_appel({
+    items, raison = _apify_appel({
         "directUrls": [f"https://www.instagram.com/{username}/"],
         "resultsType": "details",
         "resultsLimit": 1,
         "addParentData": False,
     }, timeout=120)
+    # La raison est CONSERVEE, comme pour lister_posts_apify. Elle etait jetee :
+    # la fiche echouait, le salon disait « illisible » et personne ne savait si
+    # c etait le jeton, un compte prive, ou l acteur qui refusait la demande.
+    profil_entete_apify.derniere_raison = raison
     for it in items:
         if not isinstance(it, dict):
             continue
@@ -436,9 +440,17 @@ class Telechargement(commands.Cog):
                 # Apify muet sur la fiche : les cookies peuvent encore l'avoir.
                 fiche = await asyncio.to_thread(profil_entete_sync, username)
             if not fiche:
+                # « Je continue avec les publications » etait affiche meme
+                # quand aucune n avait ete demandee -- en cliquant « Bio » on
+                # lisait une promesse jamais tenue, suivie d un « Termine »
+                # qui paraissait fautif. On dit ce qui se passe vraiment.
+                pourquoi = getattr(profil_entete_apify, "derniere_raison", "")
+                suite = ("Je continue avec les publications."
+                         if (photos or reels) else "Rien d autre n a ete demande.")
                 await canal.send(
-                    f"Fiche de @{username} illisible ({source}). "
-                    "Je continue avec les publications.")
+                    f"Fiche de @{username} illisible ({source})"
+                    + (f" : {pourquoi}" if pourquoi else "")
+                    + ". " + suite)
             else:
                 entete = f"**@{username}**"
                 if fiche.get("nom"):
