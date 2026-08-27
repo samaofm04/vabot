@@ -266,6 +266,10 @@ def list_profile_posts_sync(username: str, max_posts: int) -> list[dict]:
 class Telechargement(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        #: Compte retenu par personne : {id Discord: (pseudo, combien)}.
+        #: En memoire seulement -- un redemarrage le vide, et c'est sans
+        #: consequence : on ressaisit un pseudo en deux secondes.
+        self.choix = {}
 
     # ---------------------------------------------------------------- envoi --
 
@@ -373,6 +377,21 @@ class Telechargement(commands.Cog):
     # ----------------------------------------------------------------- menu --
 
     async def ouvrir_menu(self, interaction: discord.Interaction):
+        """Pose les deux panneaux, pour qui veut les poser a la demande."""
+        await poser_panneaux(self, interaction.channel)
+        await interaction.response.send_message("Panneaux poses.", ephemeral=True)
+
+    @app_commands.guilds(discord.Object(id=SERVEUR_ID))
+    @app_commands.command(
+        name="menudownload",
+        description="Poser les deux panneaux de telechargement dans ce salon")
+    async def menudownload(self, interaction: discord.Interaction):
+        n = await poser_panneaux(self, interaction.channel)
+        await interaction.response.send_message(
+            f"{n} panneau(x) pose(s)." if n else
+            "Impossible de poser les panneaux ici.", ephemeral=True)
+
+    async def ouvrir_menu(self, interaction: discord.Interaction):
         """Pose le panneau en ephemere, pour qui veut l'ouvrir a la demande.
 
         Il montre les memes six boutons que le panneau permanent : on ne
@@ -426,13 +445,20 @@ class Telechargement(commands.Cog):
         await interaction.response.send_message("Menu pose.", ephemeral=True)
 
 
-class ModalProfil(discord.ui.Modal, title="Telecharger un profil"):
-    """Demande le pseudo, et lance aussitot.
+#: Titres des deux panneaux. Ils servent aussi de marqueurs : c'est a eux que
+#: _ensure_dl_panel reconnait un salon deja equipe.
+TITRE_COMPTE = "Telechargement - le compte"
+TITRE_OPTIONS = "Telechargement - les options"
 
-    Le TYPE est deja choisi : il vient du bouton clique dans le panneau. Il ne
-    reste donc qu une chose a saisir, et le telechargement part sans autre
-    clic. C est la difference avec la premiere version, ou il fallait ouvrir
-    une fenetre, puis choisir, puis lancer.
+
+class ModalCompte(discord.ui.Modal, title="Quel compte ?"):
+    """Retient le pseudo pour la personne qui l a saisi.
+
+    Le pseudo est garde PAR PERSONNE, jamais dans la vue : un panneau est
+    partage par tout un salon, et une valeur rangee dans la vue serait vue par
+    tout le monde. Deux VA travaillant en meme temps se voleraient leur
+    saisie -- l un choisit un compte, l autre clique, et recoit le compte du
+    premier.
     """
 
     pseudo = discord.ui.TextInput(
@@ -443,11 +469,9 @@ class ModalProfil(discord.ui.Modal, title="Telecharger un profil"):
         label="Combien au maximum (defaut 30)",
         placeholder="30", required=False, max_length=3)
 
-    def __init__(self, cog: "Telechargement", quoi: str, libelle: str):
+    def __init__(self, cog: "Telechargement"):
         super().__init__()
         self.cog = cog
-        self.quoi = quoi
-        self.libelle = libelle
 
     async def on_submit(self, inter: discord.Interaction):
         brut = str(self.pseudo).strip().rstrip("/")
@@ -460,68 +484,126 @@ class ModalProfil(discord.ui.Modal, title="Telecharger un profil"):
         except ValueError:
             n = 30
         n = max(1, min(n, 200))
-
-        q = self.quoi
+        self.cog.choix[inter.user.id] = (username, n)
         await inter.response.send_message(
-            f"**@{username}** - {self.libelle}, en cours...", ephemeral=True)
-        await self.cog.livrer(
-            inter.channel, username, n,
-            avatar=q in ("tout", "pp"),
-            bio=q in ("tout", "bio"),
-            photos=q in ("tout", "photos"),
-            reels=q in ("tout", "reels", "top"),
-            par_vues=(q == "top"))
+            f"Compte retenu : **@{username}** (au plus {n}).  "
+            "Choisis maintenant dans le panneau des options.", ephemeral=True)
 
 
-class Panneau(discord.ui.View):
-    """Le panneau permanent : toutes les options visibles d entree.
-
-    Un bouton par type plutot qu un bouton unique suivi d un menu. On voit ce
-    qu on peut demander sans avoir a cliquer pour le decouvrir, et il ne reste
-    qu un geste : le pseudo.
-
-    Chaque bouton est SANS ETAT. Un panneau est partage par tout un salon :
-    memoriser le choix dans la vue ferait que deux personnes cliquant en meme
-    temps se voleraient leurs reglages. Ici le type voyage dans la fenetre de
-    saisie, donc chacun est chez soi.
-    """
+class PanneauCompte(discord.ui.View):
+    """Premier panneau : QUI. Il ne fait que retenir."""
 
     def __init__(self, cog: "Telechargement"):
         super().__init__(timeout=None)
         self.cog = cog
 
-    async def _demander(self, inter, quoi, libelle):
-        await inter.response.send_modal(ModalProfil(self.cog, quoi, libelle))
+    @discord.ui.button(label="Entrer un compte", style=discord.ButtonStyle.primary,
+                       custom_id="dl:compte")
+    async def b_compte(self, inter, _):
+        await inter.response.send_modal(ModalCompte(self.cog))
+
+
+class PanneauOptions(discord.ui.View):
+    """Second panneau : QUOI. Il lit le compte retenu pour CETTE personne."""
+
+    def __init__(self, cog: "Telechargement"):
+        super().__init__(timeout=None)
+        self.cog = cog
+
+    async def _lancer(self, inter, quoi, libelle):
+        garde = self.cog.choix.get(inter.user.id)
+        if not garde:
+            await inter.response.send_message(
+                "Entre d'abord un compte dans le panneau du dessus.",
+                ephemeral=True)
+            return
+        username, n = garde
+        await inter.response.send_message(
+            f"**@{username}** - {libelle}, en cours...", ephemeral=True)
+        await self.cog.livrer(
+            inter.channel, username, n,
+            avatar=quoi in ("tout", "pp"),
+            bio=quoi in ("tout", "bio"),
+            photos=quoi in ("tout", "photos"),
+            reels=quoi in ("tout", "reels", "top"),
+            par_vues=(quoi == "top"))
 
     @discord.ui.button(label="Tout", style=discord.ButtonStyle.success,
                        custom_id="dl:tout", row=0)
     async def b_tout(self, inter, _):
-        await self._demander(inter, "tout", "tout")
+        await self._lancer(inter, "tout", "tout")
 
     @discord.ui.button(label="Photo de profil", style=discord.ButtonStyle.primary,
                        custom_id="dl:pp", row=0)
     async def b_pp(self, inter, _):
-        await self._demander(inter, "pp", "la photo de profil")
+        await self._lancer(inter, "pp", "la photo de profil")
 
     @discord.ui.button(label="Bio", style=discord.ButtonStyle.primary,
                        custom_id="dl:bio", row=0)
     async def b_bio(self, inter, _):
-        await self._demander(inter, "bio", "la bio")
+        await self._lancer(inter, "bio", "la bio")
 
     @discord.ui.button(label="Posts photo", style=discord.ButtonStyle.primary,
                        custom_id="dl:photos", row=1)
     async def b_photos(self, inter, _):
-        await self._demander(inter, "photos", "les posts photo")
+        await self._lancer(inter, "photos", "les posts photo")
 
     @discord.ui.button(label="Reels", style=discord.ButtonStyle.primary,
                        custom_id="dl:reels", row=1)
     async def b_reels(self, inter, _):
-        await self._demander(inter, "reels", "les reels")
+        await self._lancer(inter, "reels", "les reels")
 
     @discord.ui.button(label="Top reels", style=discord.ButtonStyle.secondary,
                        custom_id="dl:top", row=1)
     async def b_top(self, inter, _):
-        await self._demander(inter, "top", "les reels les plus vus")
+        await self._lancer(inter, "top", "les reels les plus vus")
+
+
+async def poser_panneaux(cog, canal, epingler: bool = True):
+    """Pose les DEUX panneaux dans un salon. Rend le nombre de messages poses.
+
+    Les anciens panneaux du bot sont retires d'abord : un message Discord est
+    fige, donc une evolution du menu laisse sinon un panneau perime a cote du
+    neuf, et personne ne sait lequel fait foi.
+    """
+    import discord as _d
+    poses = 0
+    try:
+        for p in await canal.pins():
+            if (p.author.id == getattr(cog.bot.user, "id", 0) and p.embeds
+                    and "Telechargement" in (p.embeds[0].title or "")):
+                try:
+                    await p.delete()
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    e1 = _d.Embed(
+        title=TITRE_COMPTE,
+        description="Clique et entre le pseudo du compte a descendre."
+                    + chr(10) + "Il reste retenu pour toi jusqu'a ce que tu en"
+                    " entres un autre.",
+        color=_d.Color.blurple())
+    e2 = _d.Embed(
+        title=TITRE_OPTIONS,
+        description="Choisis ce que tu veux de ce compte."
+                    + chr(10) + chr(10) +
+                    "Ordre d'envoi : photo de profil, bio, posts, puis reels."
+                    + chr(10) + "Chaque fichier part des qu'il est pret.",
+        color=_d.Color.green())
+    for emb, vue in ((e1, PanneauCompte(cog)), (e2, PanneauOptions(cog))):
+        try:
+            msg = await canal.send(embed=emb, view=vue)
+            poses += 1
+            if epingler:
+                try:
+                    await msg.pin(reason="Menu de telechargement permanent")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    return poses
 
 
 async def setup(bot: commands.Bot):

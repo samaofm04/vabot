@@ -507,31 +507,17 @@ async def _ensure_dl_panel(bot, ch):
     cog = bot.get_cog("Telechargement")
     if cog is None:
         return
-    titre = "Telechargement"
+    # Deux panneaux : le compte, puis les options. C'est le cog qui sait les
+    # composer -- ce fichier ne connait ni Instagram ni les cookies.
+    #
+    # poser_panneaux RETIRE d'abord les anciens panneaux du bot : un message
+    # Discord est fige, donc une evolution du menu laisserait sinon un panneau
+    # perime a cote du neuf, et personne ne saurait lequel fait foi.
     try:
-        for p in await ch.pins():
-            if (p.author.id == getattr(bot.user, "id", 0) and p.embeds
-                    and titre in (p.embeds[0].title or "")):
-                return                      # deja pose, on n'empile pas
-    except Exception:
-        pass
-    import discord as _d
-    emb = _d.Embed(
-        title=titre + " - clique, entre un pseudo, choisis",
-        description=(
-            "Deux etapes : d'abord **qui**, ensuite **quoi**."
-            + chr(10) + chr(10) +
-            "**Photo de profil** - **Bio** - **Posts photo** - "
-            "**Reels** - **Top reels** (les plus vus)"
-            + chr(10) + chr(10) +
-            "Chaque fichier part des qu'il est pret."),
-        color=_d.Color.green())
-    try:
-        from cogs.telechargement import Panneau
-        msg = await ch.send(embed=emb, view=Panneau(cog))
-        await msg.pin(reason="Menu de telechargement permanent")
-    except Exception:
-        pass
+        from cogs.telechargement import poser_panneaux
+        await poser_panneaux(cog, ch)
+    except Exception as e:
+        print(f"[dl] panneaux non poses dans {getattr(ch, 'name', '?')} : {e}")
 
 
 #: L ORDRE DE CE TUPLE EST L ORDRE DES SALONS dans la categorie du VA :
