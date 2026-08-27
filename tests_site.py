@@ -4916,6 +4916,59 @@ try:
               not _os.path.exists(_cibleFv), _cibleFv)
     finally:
         _vtFv.is_ffmpeg_available = _vraiFv
+
+    # -- on EXECUTE le chemin d envoi, dans les deux etats de l interrupteur --
+    # Tout ce qui precede lit le SOURCE. C est insuffisant, et ca s est vu : un
+    # f-string referencait un nom inexistant, le clic partait en NameError
+    # APRES le defer(), Discord n affichait donc rien du tout, et aucun test ne
+    # bronchait. Une lecture de source ne voit pas un nom qui manque.
+    #
+    # Les deux etats comptent : le bug ne frappait que l interrupteur ALLUME,
+    # c est-a-dire le seul cas qu on ne testait pas en local.
+    import asyncio as _aioX
+    import pathlib as _plX
+
+    class _RepX:
+        async def defer(self, *a, **k): pass
+        async def send_message(self, *a, **k): pass
+
+    class _SuiviX:
+        def __init__(self): self.envois = []
+        async def send(self, content=None, file=None, **k):
+            self.envois.append(content)
+
+    class _ItxX:
+        def __init__(self):
+            self.response, self.followup = _RepX(), _SuiviX()
+
+    _vidX = _os.path.join(_tempfile.gettempdir(), "_brute_test_envoi.mp4")
+    with open(_vidX, "wb") as _fX:
+        _fX.write(b"pas une vraie video, mais un fichier bien reel")
+    _cogX = _uFv.UserCog.__new__(_uFv.UserCog)
+    _loadX = _uFv.load_transform_config
+    for _etatX in (False, True):
+        try:
+            _cfgX = _vtFv.load_config()
+            _cfgX["enabled"] = _etatX
+            _uFv.load_transform_config = (lambda _c=_cfgX: _c)
+            _itxX = _ItxX()
+            _errX = None
+            try:
+                _aioX.run(_cogX._envoyer_brutes_meta(
+                    _itxX, [_plX.Path(_vidX)], "test", "BRUTE", "entete"))
+            except Exception as _eX:
+                _errX = repr(_eX)[:140]
+            # 2 envois attendus : l en-tete, puis la seule video.
+            check("brut+meta : l envoi s execute, interrupteur %s"
+                  % ("ALLUME" if _etatX else "ETEINT"),
+                  _errX is None and len(_itxX.followup.envois) == 2,
+                  _errX or ("%d envois" % len(_itxX.followup.envois)))
+        finally:
+            _uFv.load_transform_config = _loadX
+    try:
+        _os.remove(_vidX)
+    except OSError:
+        pass
 except Exception as _eFv:
     check("favoris : selecteurs testables", False, repr(_eFv)[:160])
 

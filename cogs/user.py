@@ -2898,7 +2898,7 @@ class UserCog(commands.Cog):
         entete = (f"🎥 **{total} vidéo(s) brute(s) pour `{identity}`** — sans "
                   f"texte ni montage, à toi de les monter.")
         if total < nombre:
-            entete += (f"{NL}ℹ️ Seulement **{total}** vidéo(s) brute(s) dispo "
+            entete += (f"\nℹ️ Seulement **{total}** vidéo(s) brute(s) dispo "
                        f"(tu en as demandé {nombre}).")
         await self._envoyer_brutes_meta(interaction, picked, identity,
                                         "VIDÉO BRUTE", entete)
@@ -2938,7 +2938,7 @@ class UserCog(commands.Cog):
             # Annonce faite UNE fois, et seulement si c est vrai. Le contraire --
             # une ligne « metadonnees neuves » affichee quoi qu il arrive --
             # serait le meme mensonge que celui qu on evite plus bas.
-            entete += (f"{NL}🆕 Métadonnées neuves à chaque envoi (iPhone, iOS, "
+            entete += (f"\n🆕 Métadonnées neuves à chaque envoi (iPhone, iOS, "
                        f"date, GPS). L'image n'est **pas** retouchée.")
         total = len(videos)
         await interaction.followup.send(entete)
@@ -2963,7 +2963,7 @@ class UserCog(commands.Cog):
                             f"— métadonnées réécrites ✅")
                 else:
                     tete = (f"🎥 **{label} {idx}/{total}** (`{identity}`)"
-                            f"{NL}⚠️ Métadonnées **NON** changées (ffmpeg absent "
+                            f"\n⚠️ Métadonnées **NON** changées (ffmpeg absent "
                             f"ou en échec) — la vidéo part **telle quelle**.")
                 try:
                     await interaction.followup.send(
