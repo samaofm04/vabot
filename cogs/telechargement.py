@@ -247,8 +247,9 @@ def build_ydl_options(output_path: str) -> dict:
     # MEME SESSION QUE POUR LISTER, sinon on liste et on ne descend pas.
     # _cookiefile_ytdlp rend cookies.txt s il existe, et fabrique sinon un
     # fichier Netscape a partir d IG_SESSIONID. Cette fonction lisait
-    # UNIQUEMENT cookies.txt : sur le VPS, ou ce fichier n existe pas, le
-    # repli yt-dlp trouvait bien les reels puis echouait a les telecharger.
+    # UNIQUEMENT cookies.txt : sur le VPS, ou ce fichier n existe pas, les
+    # reels listes par les cookies partaient ensuite se telecharger sans
+    # aucune session -- et un compte prive ou limite les refusait.
     ck = _cookiefile_ytdlp()
     if ck:
         opts["cookiefile"] = ck
@@ -390,57 +391,6 @@ def _cookiefile_ytdlp():
     except Exception:
         return None
     return str(chemin)
-
-
-def lister_reels_ytdlp(username: str, max_posts: int) -> list:
-    """Liste les reels par le mecanisme de la veille : yt-dlp, mode plat.
-
-    C est l outil qui descend deja des videos tous les jours. Il est LENT face
-    a l API web -- une requete par page, sans parallelisme -- mais il repond
-    quand elle refuse, et la lenteur n est pas un probleme ici.
-
-    Le mode plat est un choix, pas un raccourci : le mode complet redemande
-    chaque video une par une et se fait brider au bout de quelques appels,
-    alors que les entrees plates portent deja le compteur de vues, ce qui
-    suffit a classer les reels du plus vu au moins vu.
-    """
-    opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "ignoreerrors": True,
-        "noprogress": True,
-        "retries": 3,
-        "extractor_retries": 3,
-        "socket_timeout": 30,
-        "skip_download": True,
-        "extract_flat": "in_playlist",
-        "playlistend": max_posts,
-    }
-    ck = _cookiefile_ytdlp()
-    if ck:
-        opts["cookiefile"] = ck
-
-    url = "https://www.instagram.com/%s/reels/" % username
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-
-    posts = []
-    for e in ((info or {}).get("entries") or [])[:max_posts]:
-        if not e:
-            continue
-        code = e.get("id") or ""
-        posts.append({
-            "shortcode": code,
-            "url": e.get("url") or ("https://www.instagram.com/reel/%s/" % code),
-            "media_type": "video",
-            "is_video": True,
-            "views": e.get("view_count") or 0,
-            "likes": e.get("like_count") or 0,
-            "comments": 0,
-            "timestamp": e.get("timestamp") or 0,
-            "caption": (e.get("description") or e.get("title") or ""),
-        })
-    return posts
 
 
 def list_profile_posts_sync(username: str, max_posts: int) -> list[dict]:
@@ -621,26 +571,18 @@ class Telechargement(commands.Cog):
                     list_profile_posts_sync, username, combien)
                 source = "cookies (repli)"
         except Exception as e:
-            # On ne rend plus la main ici : l API web qui refuse ne veut pas
-            # dire que le compte est inaccessible, seulement que CE chemin est
-            # ferme. Le mecanisme de la veille reste a essayer.
-            await canal.send(
-                f"L API a refuse ({str(e)[:400]}). "
-                "Essai avec yt-dlp, le mecanisme de la veille.")
-            posts = []
-
-        if not posts and reels:
-            try:
-                posts = await asyncio.to_thread(
-                    lister_reels_ytdlp, username, combien)
-                source = "yt-dlp (comme la veille)"
-                if posts and photos:
-                    # Dire ce qui manque plutot que de livrer moins sans un mot.
-                    await canal.send(
-                        "Note : ce repli ne voit que l onglet Reels. "
-                        "Les posts photo ne seront pas livres cette fois.")
-            except Exception as e:
-                await canal.send(f"yt-dlp a echoue aussi : {str(e)[:800]}")
+            # PAS de repli yt-dlp ici, et ce n est pas un oubli : son
+            # extracteur de PROFIL est declare casse en amont
+            # (InstagramUserIE._WORKING = False) et son motif d URL ne
+            # reconnait meme pas /<pseudo>/reels/. Verifie le 27/08 : les deux
+            # formes rendent "Unsupported URL" ou "Unable to extract data".
+            #
+            # yt-dlp sait descendre un reel DONT ON LUI DONNE LE LIEN
+            # (InstagramIE, lui, fonctionne) mais il ne sait pas dresser la
+            # liste de ces liens. Lister reste donc le travail des cookies ou
+            # d Apify : il n existe pas de troisieme chemin a essayer.
+            await canal.send(f"Erreur en lisant le profil : {str(e)[:1500]}")
+            return
 
         if not posts:
             await canal.send("Aucun post trouve sur ce profil.")
