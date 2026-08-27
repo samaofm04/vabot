@@ -4872,11 +4872,19 @@ try:
     check("favoris : le panneau US tient dans les 25 composants de Discord",
           len(_vue_us.children) <= 25,
           "%d composants" % len(_vue_us.children))
-    # Une rangee = une famille : videos, photos, identite, favoris ⭐. C'est la
-    # forme VOULUE du panneau, pas un effet de bord d'un « i // 4 » -- une
-    # action ajoutee ne doit plus pousser les suivantes sur la ligne d'apres.
+    # Une rangee = une famille : identite, photos, brut+Flash, favoris ⭐.
+    # C'est la forme VOULUE du panneau, pas un effet de bord d'un « i // 4 » --
+    # une action ajoutee ne doit plus pousser les suivantes sur la ligne
+    # d'apres.
+    #
+    # La forme a change le 27/08 en passant de {1:4, 2:3, 3:3, 4:5} a
+    # {1:4, 2:5, 3:4, 4:5}, pour loger les trois actions Flash Trend. Ce
+    # n'est pas un glissement : la rangee des favoris etait DEJA pleine a
+    # cinq, donc les deux reels FINIS (caption, monte) ont ete remontes avec
+    # les stories et le post, ce qui libere la rangee 3 pour « brut + Flash ».
+    # Sans ce deplacement, les trois Flash n'avaient nulle part ou aller.
     check("favoris : le panneau US garde ses 4 familles sur 4 rangees",
-          _rowsFv == {1: 4, 2: 3, 3: 3, 4: 5}, str(_rowsFv))
+          _rowsFv == {1: 4, 2: 5, 3: 4, 4: 5}, str(_rowsFv))
     # Et chaque action connait sa rangee : sans entree, elle retombe sur le
     # filet et atterrit n'importe ou.
     check("favoris : chaque action US a une rangee attribuee",

@@ -40,6 +40,12 @@ _MENU_BTN_FEATURE = {
     "cmenu:capbanger": "contenu", "cmenu:montagebanger": "contenu",
     "cmenu:templatebrut": "contenu",
     "cmenu:brutbanger": "contenu", "cmenu:captionbrut": "contenu",
+    # Les trois Flash. « contenu » comme leurs voisins : ALL_FEATURES filtre
+    # les cles inconnues, donc une fonction inventee ferait disparaitre le
+    # bouton en permanence sur tout serveur bride, sans erreur nulle part.
+    "cmenu:templateflash": "contenu",
+    "cmenu:templateflashbanger": "contenu",
+    "cmenu:templateflashbrut": "contenu",
     "cmenu:addaccount": "onboarding",
     "cmenu:lien": "liens", "cmenu:clics": "clics",
 }
@@ -161,6 +167,9 @@ _ICONE_PAR_ACTION_MENU = {
     "capbanger": "capbanger",
     "montagebanger": "montagebanger",
     "templatebrut": "templatebrut",
+    "templateflash": "templatebrut",
+    "templateflashbanger": "templatebrut",
+    "templateflashbrut": "templatebrut",
 }
 
 
@@ -254,6 +263,12 @@ def _build_menu_embed(identity, guild=None):
     add("cmenu:montagebanger", "contenu", "🎬 Montage Banger", "Une brute ⭐ + une caption ⭐, montées pour toi")
     add("cmenu:templatebrut", "contenu", "🎵 Template + Brut", "Un template ⭐ assemblé avec une brute ⭐")
     add("cmenu:brutbanger", "contenu", "🎥 Vidéo brut Banger", "Tes meilleures brutes ⭐, sans montage")
+    add("cmenu:templateflash", "contenu", "⚡ Template Flash",
+        "Un montage ⚡ Flash Trend, monté avec une brute au hasard")
+    add("cmenu:templateflashbanger", "contenu", "⚡ Flash Banger",
+        "Un montage ⚡ ET ⭐, monté avec une brute au hasard")
+    add("cmenu:templateflashbrut", "contenu", "⚡ Flash Banger + Brut",
+        "Un montage ⚡ ET ⭐, monté avec ta brute ⭐")
     add("cmenu:captionbrut", "contenu", "📝 Caption + Brut", "Une brute ⭐ + sa caption ⭐ en texte")
     add("cmenu:pseudo", "contenu", "👤 Pseudo", "Des pseudos dispo")
     add("cmenu:name", "contenu", "📝 Name", "Des noms d'affichage")
@@ -1188,6 +1203,58 @@ def fav_templates_for(identity, limit=15):
             cut = float((draft or {}).get("cut_at") or 0)
         except (TypeError, ValueError):
             cut = 0.0
+        if cut <= 0.05:
+            sans_coupe += 1
+            continue
+        utilisables.append((p, draft))
+        if limit and len(utilisables) >= limit:
+            break
+    return utilisables, sans_coupe
+
+
+def flash_templates_for(identity, limit=15, exiger_banger=False):
+    """Templates marques Flash Trend -> ([(Path, draft)], nb_sans_coupe).
+
+    Meme contrat que fav_templates_for, meme validation : un template sans
+    point de coupe est ECARTE et COMPTE, parce que le moteur le recopierait
+    tel quel et que le VA recevrait une video ou aucune brute n'apparait.
+
+    `exiger_banger` demande en plus l'etoile. Les deux marques vivent dans
+    deux fichiers distincts et se cumulent sans se gener : c'est seulement
+    l'AFFICHAGE du site qui separe les deux vues, jamais la donnee.
+    """
+    import json as _json
+
+    def _noms(fichier, sous):
+        try:
+            raw = _json.loads((DATA_DIR / fichier).read_text(encoding="utf-8"))
+            keys = list(raw.keys()) if isinstance(raw, dict) else list(raw or [])
+        except Exception:
+            return set()
+        p = f"{identity}|{sous}|"
+        return {k[len(p):] for k in keys
+                if isinstance(k, str) and k.startswith(p) and k[len(p):]}
+
+    noms = _noms("flash_trend.json", "templates")
+    if exiger_banger:
+        noms &= _noms("fav_brutes.json", "templates")
+
+    tdir = IDENTITIES_DIR / identity / "templates"
+    utilisables, sans_coupe = [], 0
+    for fn in sorted(noms):
+        p = tdir / fn
+        if not (p.exists() and p.is_file()):
+            continue
+        mj = p.parent / f"{p.stem}.montage.json"
+        if not mj.exists():
+            sans_coupe += 1
+            continue
+        try:
+            draft = _json.loads(mj.read_text(encoding="utf-8"))
+            cut = float((draft or {}).get("cut_at") or 0)
+        except Exception:
+            sans_coupe += 1
+            continue
         if cut <= 0.05:
             sans_coupe += 1
             continue
@@ -2633,6 +2700,109 @@ class UserCog(commands.Cog):
             finally:
                 _sh.rmtree(tmp, ignore_errors=True)
 
+    async def _send_template_flash(self, interaction, exiger_banger=False,
+                                   brute_favorite=False):
+        """Les trois boutons Flash, qui ne different que par ce qu ils exigent.
+
+            Template Flash          template FLASH          brute au hasard
+            Template Flash Banger   template FLASH + ETOILE brute au hasard
+            Flash Banger + Brut     template FLASH + ETOILE brute ETOILEE
+
+        « brute au hasard » n est pas un pis-aller : sans brutes_dir, le moteur
+        pioche lui-meme parmi toutes les brutes de l identite. C est le
+        comportement voulu quand seul le TEMPLATE est trie -- imposer en plus
+        une brute etoilee reduirait le stock sans rien trier de mieux.
+        """
+        import shutil as _sh
+        import tempfile as _tf
+        if await self._gate_contenu(interaction):
+            return
+        identity = get_user_identity(interaction.user.id)
+        if not identity:
+            await interaction.response.send_message(
+                "Tu n'as pas d'identite assignee. Demande a un admin.", ephemeral=True)
+            return
+
+        quoi = ("montage \u26a1 **et** \u2b50" if exiger_banger
+                else "montage \u26a1")
+        templates, sans_coupe = flash_templates_for(
+            identity, exiger_banger=exiger_banger)
+        brutes = fav_brutes_for(identity) if brute_favorite else []
+
+        if not templates or (brute_favorite and not brutes):
+            # Le nombre ecarte se dit TOUJOURS : un admin qui a tague cinq
+            # montages et n en voit aucun arriver doit apprendre qu il leur
+            # manque un point de coupe, pas chercher une panne ailleurs.
+            note = ""
+            if sans_coupe:
+                note = ("\n" + "\u26a0\ufe0f " + str(sans_coupe) + " montage(s) "
+                        "\u26a1 **ecartes** : pas de **point de coupe**, donc aucune "
+                        "brute n'y apparaitrait. _(A definir dans l'editeur "
+                        "Montage du site.)_")
+            if not templates:
+                manque = ("Aucun " + quoi + " utilisable "
+                          "(onglet **Templates montage**).")
+            else:
+                manque = ("Tu as **" + str(len(templates)) + " montage(s) \u26a1 "
+                          "utilisable(s)**, mais **aucune video brute etoilee** "
+                          "(onglet **Video brut**).")
+            await interaction.response.send_message(
+                "\u26a1 Impossible d'assembler pour `" + identity + "`." + "\n"
+                + manque + note + "\n"
+                + "_(Un admin pose le \u26a1 sur le site, page Templates montage.)_",
+                ephemeral=True)
+            return
+
+        try:
+            import noctus_web
+        except Exception as e:
+            await interaction.response.send_message(
+                f"\u26a0\ufe0f Module video indisponible : {e}", ephemeral=True)
+            return
+        if not noctus_web.setup_ok():
+            await interaction.response.send_message(
+                "\u26a0\ufe0f La generation video n'est pas prete sur le serveur "
+                "(Node/ffmpeg). Previens un admin.", ephemeral=True)
+            return
+
+        await interaction.response.defer()
+        total = min(3, len(templates) * (len(brutes) if brute_favorite else 1))
+        libelle = ("FLASH BANGER + BRUT" if brute_favorite
+                   else "TEMPLATE FLASH BANGER" if exiger_banger
+                   else "TEMPLATE FLASH")
+        avec = " avec ta brute \u2b50" if brute_favorite else ""
+        intro = ("\u26a1 **" + str(total) + " " + libelle + " pour `" + identity
+                 + "`** \u2014 ton " + quoi + ", monte" + avec + "." + "\n"
+                 + "\u23f3 Je les genere (~15-30s chacun).")
+        if sans_coupe:
+            intro += ("\n" + "\u2139\ufe0f " + str(sans_coupe)
+                      + " montage(s) \u26a1 ecarte(s) : pas de point de coupe.")
+        await interaction.followup.send(intro)
+
+        used_t, used_b = set(), set()
+        for idx in range(1, total + 1):
+            tpl, draft = _pick_fresh(templates, used_t, key=lambda t: str(t[0]))
+            _cap, desc, _ex = _video_meta(tpl)
+            tmp = None
+            try:
+                if brute_favorite:
+                    # Un dossier par generation, supprime quoi qu il arrive : le
+                    # VPS se remplirait sinon d une copie de brute a chaque clic.
+                    vid = _pick_fresh(brutes, used_b, key=lambda p: str(p))
+                    tmp = _tf.mkdtemp(prefix="flashbrute-")
+                    cible = Path(tmp) / vid.name
+                    try:
+                        os.link(str(vid), str(cible))   # pas de copie : lien dur
+                    except Exception:
+                        _sh.copy2(str(vid), str(cible))
+                await self._gen_and_send_montaged(
+                    interaction, tpl, draft, desc, idx, total, identity,
+                    label=libelle, emoji="\u26a1",
+                    prefixe_fichier="flash", brutes_dir=tmp)
+            finally:
+                if tmp:
+                    _sh.rmtree(tmp, ignore_errors=True)
+
     async def _send_brutes_bangers(self, interaction):
         """Bouton '🎥 Vidéo brut Banger' : les brutes ⭐, sans montage.
 
@@ -2756,6 +2926,25 @@ class UserCog(commands.Cog):
         description="Un template ⭐ assemble avec une video brute ⭐")
     async def templatebrut(self, interaction: discord.Interaction):
         await self._send_template_plus_brute(interaction)
+
+    @app_commands.command(
+        name="templateflash",
+        description="Un montage Flash Trend, assemble avec une brute au hasard")
+    async def templateflash(self, interaction: discord.Interaction):
+        await self._send_template_flash(interaction)
+
+    @app_commands.command(
+        name="templateflashbanger",
+        description="Un montage Flash Trend ET etoile, avec une brute au hasard")
+    async def templateflashbanger(self, interaction: discord.Interaction):
+        await self._send_template_flash(interaction, exiger_banger=True)
+
+    @app_commands.command(
+        name="templateflashbrut",
+        description="Un montage Flash Trend ET etoile, avec ta brute etoilee")
+    async def templateflashbrut(self, interaction: discord.Interaction):
+        await self._send_template_flash(interaction, exiger_banger=True,
+                                        brute_favorite=True)
 
     @app_commands.command(
         name="brutbanger",
@@ -5136,7 +5325,7 @@ class ContentMenuView(discord.ui.View):
             pass
         await interaction.response.send_modal(MesComptesInstaModal(prefill=prefill))
 
-    @discord.ui.button(label="Mon paiement", emoji="💸", style=discord.ButtonStyle.secondary, custom_id="cmenu:pay", row=3)
+    @discord.ui.button(label="Mon paiement", emoji="💸", style=discord.ButtonStyle.secondary, custom_id="cmenu:pay", row=2)
     async def b_pay(self, interaction: discord.Interaction, button: discord.ui.Button):
         emb = discord.Embed(
             title="💸 Ton moyen de paiement",
@@ -5156,6 +5345,18 @@ class ContentMenuView(discord.ui.View):
     @discord.ui.button(label="Montage Banger", emoji="🎬", style=discord.ButtonStyle.primary, custom_id="cmenu:montagebanger", row=4)
     async def b_montagebanger(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_montage_bangers(interaction)
+
+    @discord.ui.button(label="Template Flash", emoji="⚡", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflash", row=3)
+    async def b_templateflash(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._send_template_flash(interaction)
+
+    @discord.ui.button(label="Flash Banger", emoji="⚡", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflashbanger", row=3)
+    async def b_templateflashbanger(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._send_template_flash(interaction, exiger_banger=True)
+
+    @discord.ui.button(label="Flash Banger + Brut", emoji="⚡", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflashbrut", row=3)
+    async def b_templateflashbrut(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._send_template_flash(interaction, exiger_banger=True, brute_favorite=True)
 
     @discord.ui.button(label="Template + Brut", emoji="🎵", style=discord.ButtonStyle.primary, custom_id="cmenu:templatebrut", row=4)
     async def b_templatebrut(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -5419,6 +5620,12 @@ _JB_ACTIONS_US = [
     ('templatebrut', '🎵 Template + Brut', 'templatebrut', False),
     ('brutbanger', '🎥 Vidéo brut Banger', 'brutbanger', False),
     ('captionbrut', '📝 Caption + Brut', 'captionbrut', False),
+
+    # Rangee 3 (suite) - LES FLASH TREND. Pas de quantite non plus : le VA
+    # recoit ce qui est tague, ni plus ni moins.
+    ('templateflash', '⚡ Template Flash', 'templateflash', False),
+    ('templateflashbanger', '⚡ Flash Banger', 'templateflashbanger', False),
+    ('templateflashbrut', '⚡ Flash Banger + Brut', 'templateflashbrut', False),
 ]
 
 #: La rangee de chaque action : UNE rangee = UNE famille.
@@ -5437,8 +5644,13 @@ _JB_ACTIONS_US = [
 #: selecteur de quantite, il reste donc 4 rangees, soit 20 places.
 _JB_RANGEES = {
     'name': 1, 'pseudo': 1, 'pp': 1, 'bio': 1,
-    'story': 2, 'storycta': 2, 'post': 2,
-    'reelcaption': 3, 'reelmonte': 3, 'brute': 3,
+    'story': 2, 'storycta': 2, 'post': 2, 'reelcaption': 2, 'reelmonte': 2,
+    # Rangee 3 : le brut, puis les Flash. Les deux reels FINIS remontent
+    # avec les stories -- Discord n'accepte que 5 boutons par rangee, et
+    # celle des favoris (rangee 4) etait deja pleine a cinq. Sans ce
+    # deplacement, les trois Flash n'avaient nulle part ou aller.
+    'brute': 3, 'templateflash': 3, 'templateflashbanger': 3,
+    'templateflashbrut': 3,
     'capbanger': 4, 'montagebanger': 4, 'templatebrut': 4, 'brutbanger': 4, 'captionbrut': 4,
 }
 
@@ -5838,6 +6050,9 @@ _ICONES_ACTIONS = {
     "capbanger": "vacapbanger",
     "montagebanger": "vamontagebanger",
     "templatebrut": "vatemplatebrut",
+    "templateflash": "vatemplateflash",
+    "templateflashbanger": "vatemplateflashbanger",
+    "templateflashbrut": "vatemplateflashbrut",
     "brutbanger": "vabrutbanger",
     "captionbrut": "vacaptionbrut",
 }
