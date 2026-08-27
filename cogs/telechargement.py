@@ -391,6 +391,29 @@ def list_profile_posts_sync(username: str, max_posts: int) -> list[dict]:
 class Telechargement(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+
+    async def cog_load(self):
+        """Reenregistre les panneaux deja poses dans les salons.
+
+        SANS CECI, RIEN NE MARCHE APRES UN REDEMARRAGE. Les vues sont
+        declarees persistantes (timeout=None, custom_id), mais discord.py ne
+        rattache pas tout seul les boutons d un message poste par une instance
+        precedente : il ne dispatche aucun callback, Discord n obtient jamais
+        de reponse, et la personne voit « L application n a pas repondu a
+        temps » sur un bouton pourtant intact.
+
+        Le symptome est trompeur -- il ressemble a une lenteur, alors que rien
+        ne s execute. Constate le 27/08 : le panneau repondait juste apres avoir
+        ete pose, puis plus jamais des le redemarrage suivant.
+
+        C est la convention de tous les autres cogs du bot : voir numeros.py,
+        clickrecap.py, cta_reminder.py, onboarding.py.
+        """
+        for vue in (PanneauCompte(self), PanneauOptions(self)):
+            try:
+                self.bot.add_view(vue)
+            except Exception as exc:
+                print(f"[telechargement] add_view echoue : {exc}")
         #: Compte retenu par personne : {id Discord: (pseudo, combien)}.
         #: En memoire seulement -- un redemarrage le vide, et c'est sans
         #: consequence : on ressaisit un pseudo en deux secondes.
