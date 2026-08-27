@@ -5636,35 +5636,27 @@ _JB_ACTIONS = [
 # exemple) — à la place « Reel caption » (brute + caption incrustée, biblio
 # Caption du site) et « Reel monté » (montage template).
 _JB_ACTIONS_US = [
-    # Rangee 1 - L'IDENTITE, dans l'ordre ou on la remplit : le nom, le pseudo,
-    #                 puis la photo et la bio.
+    # Rangee 1 - IDENTITE — le nom, le pseudo, puis la photo et la bio.
     ('name', '📝 Name', 'name', False),
     ('pseudo', '👤 Pseudo', 'username', False),
     ('pp', '🖼️ PP', 'profilepic', True),
     ('bio', '💬 Bio', 'bio', True),
 
-    # Rangee 2 - LES STORIES, PUIS LE POST. « Story CTA » est ce qu'on appelle
-    #                 la story a la une : c'est le meme objet sous ses
-    #                 deux noms, il n'y a pas de bouton a chercher en plus.
+    # Rangee 2 - STORIES, POST, et le reel deja monte.
     ('story', '📖 Story', 'story', True),
     ('storycta', '📲 Story CTA', 'storycta', True),
     ('post', '🖼️ Post', 'post', True),
-
-    # Rangee 3 - LES REELS. Du plus fini au plus brut.
-    ('reelcaption', '💬 Reel caption', 'reelcaption', True),
     ('reelmonte', '🎞️ Reel monté', 'reelmonte', True),
-    ('brute', '🎥 Vidéo brut', 'videobrut', True),
 
-    # Rangee 4 - LES FAVORIS ⭐ poses sur le site. Pas de quantite : le VA
-    #                   recoit ce qui est marque, ni plus ni moins --
-    #                   c'est tout l'interet d'un favori.
+    # Rangee 3 - CAPTIONS : la libre, la marquee, puis les deux fusions.
+    ('reelcaption', '💬 Reel caption', 'reelcaption', True),
     ('capbanger', '⭐ Caption', 'captionbanger', False),
     ('montagebanger', '⭐⭐ Caption + Vidéo brut', 'montagebanger', False),
     ('templatebrut', '⭐⭐ Template + Brut', 'templatebrut', False),
-    ('brutbanger', '⭐ Vidéo brut', 'brutbanger', False),
 
-    # Rangee 3 (suite) - LES FLASH TREND. Pas de quantite non plus : le VA
-    # recoit ce qui est tague, ni plus ni moins.
+    # Rangee 4 - BRUT et TEMPLATES : chaque version marquee suit sa base.
+    ('brute', '🎥 Vidéo brut', 'videobrut', True),
+    ('brutbanger', '⭐ Vidéo brut', 'brutbanger', False),
     ('templateflash', '⚡ Template Flash', 'templateflash', False),
     ('templateflashbanger', '⭐ ⚡ Flash', 'templateflashbanger', False),
     ('templateflashbrut', '⭐⭐ ⚡ Flash + Brut', 'templateflashbrut', False),
@@ -5686,14 +5678,20 @@ _JB_ACTIONS_US = [
 #: selecteur de quantite, il reste donc 4 rangees, soit 20 places.
 _JB_RANGEES = {
     'name': 1, 'pseudo': 1, 'pp': 1, 'bio': 1,
-    'story': 2, 'storycta': 2, 'post': 2, 'reelcaption': 2, 'reelmonte': 2,
-    # Rangee 3 : le brut, puis les Flash. Les deux reels FINIS remontent
-    # avec les stories -- Discord n'accepte que 5 boutons par rangee, et
-    # celle des favoris (rangee 4) etait deja pleine a cinq. Sans ce
-    # deplacement, les trois Flash n'avaient nulle part ou aller.
-    'brute': 3, 'templateflash': 3, 'templateflashbanger': 3,
-    'templateflashbrut': 3,
-    'capbanger': 4, 'montagebanger': 4, 'templatebrut': 4, 'brutbanger': 4, 'captionbrut': 4,
+    'story': 2, 'storycta': 2, 'post': 2, 'reelmonte': 2,
+    # Rangee 3 : les CAPTIONS, de la version libre aux versions marquees, puis
+    # les deux fusions. Rangee 4 : le BRUT et les TEMPLATES, meme progression.
+    #
+    # La version marquee suit toujours sa base : « Video brut » puis « ⭐ Video
+    # brut », « Template Flash » puis « ⭐ Flash ». Auparavant tous les etoiles
+    # etaient parques ensemble en rangee 4, loin de ce dont ils sont la
+    # variante — on lisait le compte d'etoiles sans voir la parente.
+    'reelcaption': 3, 'capbanger': 3, 'montagebanger': 3, 'templatebrut': 3,
+    'brute': 4, 'brutbanger': 4,
+    'templateflash': 4, 'templateflashbanger': 4, 'templateflashbrut': 4,
+    # Retire du menu, garde ici : un panneau DEJA poste porte encore ce bouton,
+    # et sans rangee il retomberait sur le filet et atterrirait n'importe ou.
+    'captionbrut': 3,
 }
 
 

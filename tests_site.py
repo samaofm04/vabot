@@ -4892,11 +4892,16 @@ try:
     # cinq, donc les deux reels FINIS (caption, monte) ont ete remontes avec
     # les stories et le post, ce qui libere la rangee 3 pour « brut + Flash ».
     # Sans ce deplacement, les trois Flash n'avaient nulle part ou aller.
-    # Rangee 4 passee de 5 a 4 le 21/08, « Caption + Brut » ayant quitte le
-    # menu. La regle tient toujours : une rangee, une famille. C'est elle qu'on
-    # protege, pas le nombre.
+    # Forme du 21/08 : {1:4, 2:4, 3:4, 4:5}. Les familles ont ete redecoupees
+    # pour que chaque bouton ETOILE suive celui dont il est la version marquee
+    # — « Video brut » puis « ⭐ Video brut », « Template Flash » puis
+    # « ⭐ Flash ». Avant, tous les etoiles etaient parques ensemble en rangee
+    # 4, loin de ce dont ils sont la variante.
+    #
+    # C'est la REGLE qu'on protege, pas les nombres : une rangee, une famille,
+    # et aucune qui deborde les cinq places de Discord.
     check("favoris : le panneau US garde ses 4 familles sur 4 rangees",
-          _rowsFv == {1: 4, 2: 5, 3: 4, 4: 4}, str(_rowsFv))
+          _rowsFv == {1: 4, 2: 4, 3: 4, 4: 5}, str(_rowsFv))
     # Et chaque action connait sa rangee : sans entree, elle retombe sur le
     # filet et atterrit n'importe ou.
     check("favoris : chaque action US a une rangee attribuee",
