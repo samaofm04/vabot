@@ -5290,7 +5290,7 @@ class ContentMenuView(discord.ui.View):
     async def b_storycta(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.storycta.callback(self.cog, interaction)
 
-    @discord.ui.button(label="Reels", emoji="⭐", style=discord.ButtonStyle.primary, custom_id="cmenu:banger", row=0)
+    @discord.ui.button(label="⭐ Reels", style=discord.ButtonStyle.primary, custom_id="cmenu:banger", row=0)
     async def b_banger(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_banger_reels(interaction)
 
@@ -5385,11 +5385,11 @@ class ContentMenuView(discord.ui.View):
     # Rangee 4, laissee libre jusqu'ici : les deux favoris ont leur propre
     # ligne, ce qui les distingue a l'oeil du « Reels Banger » qui, lui, ne
     # marche pas pareil (il envoie dans un salon, ceux-ci sont des favoris).
-    @discord.ui.button(label="Caption", emoji="⭐", style=discord.ButtonStyle.primary, custom_id="cmenu:capbanger", row=4)
+    @discord.ui.button(label="⭐ Caption", style=discord.ButtonStyle.primary, custom_id="cmenu:capbanger", row=4)
     async def b_capbanger(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_caption_bangers(interaction)
 
-    @discord.ui.button(label="⭐ Montage", emoji="⭐", style=discord.ButtonStyle.primary, custom_id="cmenu:montagebanger", row=4)
+    @discord.ui.button(label="⭐⭐ Montage", style=discord.ButtonStyle.primary, custom_id="cmenu:montagebanger", row=4)
     async def b_montagebanger(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_montage_bangers(interaction)
 
@@ -5397,23 +5397,23 @@ class ContentMenuView(discord.ui.View):
     async def b_templateflash(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_template_flash(interaction)
 
-    @discord.ui.button(label="⚡ Flash", emoji="⭐", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflashbanger", row=3)
+    @discord.ui.button(label="⭐ ⚡ Flash", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflashbanger", row=3)
     async def b_templateflashbanger(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_template_flash(interaction, exiger_banger=True)
 
-    @discord.ui.button(label="⭐ ⚡ Flash + Brut", emoji="⭐", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflashbrut", row=3)
+    @discord.ui.button(label="⭐⭐ ⚡ Flash + Brut", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflashbrut", row=3)
     async def b_templateflashbrut(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_template_flash(interaction, exiger_banger=True, brute_favorite=True)
 
-    @discord.ui.button(label="⭐ Template + Brut", emoji="⭐", style=discord.ButtonStyle.primary, custom_id="cmenu:templatebrut", row=4)
+    @discord.ui.button(label="⭐⭐ Template + Brut", style=discord.ButtonStyle.primary, custom_id="cmenu:templatebrut", row=4)
     async def b_templatebrut(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_template_plus_brute(interaction)
 
-    @discord.ui.button(label="Vidéo brut", emoji="⭐", style=discord.ButtonStyle.primary, custom_id="cmenu:brutbanger", row=4)
+    @discord.ui.button(label="⭐ Vidéo brut", style=discord.ButtonStyle.primary, custom_id="cmenu:brutbanger", row=4)
     async def b_brutbanger(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_brutes_bangers(interaction)
 
-    @discord.ui.button(label="⭐ Caption + Brut", emoji="⭐", style=discord.ButtonStyle.primary, custom_id="cmenu:captionbrut", row=4)
+    @discord.ui.button(label="⭐⭐ Caption + Brut", style=discord.ButtonStyle.primary, custom_id="cmenu:captionbrut", row=4)
     async def b_captionbrut(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_caption_plus_brute(interaction)
 
@@ -6150,17 +6150,33 @@ async def ensure_action_emojis(guild) -> dict:
     return out
 
 
+#: Le marqueur « contenu etoile ». Il n'est PAS un emoji de decor : il compte.
+ETOILE = "⭐"
+
+
 def _libelle_sans_emoji(label: str):
-    """(texte,) sans son emoji de tete.
+    """(texte,) sans son emoji de categorie, mais AVEC ses etoiles.
 
     Les libelles portent leur emoji dans la CHAINE (« 💬 Reel caption »). Pour
     poser une icone du serveur a la place, il faut retirer celui-la, sinon on
     en affiche deux.
+
+    LES ETOILES DE TETE SURVIVENT.
+        Elles ne decorent pas : il y en a UNE par ingredient marque qu'exige
+        l'action. Les couper avec le reste faisait disparaitre la seule
+        difference entre « Video brut » et « Video brut etoile », qui
+        s'affichaient alors identiques dans le menu — deux boutons au meme nom,
+        et personne pour deviner lequel prend quoi.
     """
-    bouts = (label or "").split(" ", 1)
+    texte = (label or "").strip()
+    etoiles = ""
+    while texte.startswith(ETOILE):
+        etoiles += ETOILE
+        texte = texte[len(ETOILE):].lstrip()
+    bouts = texte.split(" ", 1)
     if len(bouts) == 2 and bouts[0] and not bouts[0][0].isalnum():
-        return bouts[1]
-    return label
+        texte = bouts[1]
+    return (etoiles + " " + texte) if etoiles else texte
 
 
 async def ensure_identity_emojis(guild, models):
