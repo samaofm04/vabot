@@ -305,11 +305,13 @@ def transform_metadata_strict(input_path, output_path, config=None, timeout=60):
     Ici, True veut dire que ffmpeg a REELLEMENT reecrit les atomes. Rien n est
     recopie en douce : l appelant voit l echec, et c est a lui de le dire.
 
-    DEUX CHOIX ASSUMES
+    QUI DECIDE QUOI
 
-    On force l ecriture des metadonnees quels que soient les reglages du site.
-    C est la raison d etre de l appel : le bouton promet ca, et rien d autre ne
-    doit pouvoir l eteindre a distance.
+    Cette fonction n arbitre PAS. Appelee, elle reecrit -- l interrupteur
+    « Uniquification video » du site est lu par l APPELANT, qui sait quoi dire
+    au VA quand il est coupe. Melanger les deux ici rendrait False aussi bien
+    pour « eteint volontairement » que pour « ffmpeg en panne », deux situations
+    qui ne se racontent pas pareil.
 
     Et on s en tient aux metadonnees -- remux seul, aucun re-encodage. Les
     pixels sortent identiques au bit pres. Une brute re-encodee ne serait plus

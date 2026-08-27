@@ -4874,11 +4874,27 @@ try:
           "%d composants" % len(_vue_us.children))
 
     # -- brutes a metadonnees changees ---------------------------------------
-    # Les deux actions doivent EXISTER dans le menu US : sans entree la, les
-    # boutons ne sont nulle part, la commande slash restant seule.
-    check("brut+meta : les deux actions sont dans le menu US",
-          all(k in _clesFv for k in ("brutmeta", "brutbangermeta")),
-          str(sorted(_clesFv)))
+    # Pas de bouton separe : « Video brut » et « Video brut Banger » reecrivent
+    # les metadonnees d office. Ce qu on verifie, c est qu ils passent bien par
+    # la -- sinon la brute repart avec son empreinte d origine, sans que rien
+    # ne le signale.
+    import inspect as _insFv
+    for _mFv, _nomFv in ((_uFv.UserCog.videobrut, "Vidéo brut"),
+                         (_uFv.UserCog._send_brutes_bangers, "Vidéo brut Banger")):
+        _srcFv = _insFv.getsource(getattr(_mFv, "callback", _mFv))
+        check("brut+meta : « %s » passe par la reecriture" % _nomFv,
+              "_envoyer_brutes_meta" in _srcFv, _nomFv)
+
+    # L interrupteur du site doit etre LU, sinon il ne sert a rien -- c est
+    # exactement l etat dans lequel le module d uniquification video se
+    # trouvait : reglable, annonce comme « lu par /reel », et cable dans le vide.
+    _srcEnv = _insFv.getsource(_uFv.UserCog._envoyer_brutes_meta)
+    check("brut+meta : l interrupteur du site est lu",
+          "load_transform_config()" in _srcEnv and "enabled" in _srcEnv,
+          "aucune lecture de la config dans _envoyer_brutes_meta")
+    check("brut+meta : coupe, aucune promesse de metadonnees",
+          "if actif:" in _srcEnv and "if not actif:" in _srcEnv,
+          "les deux branches doivent exister")
 
     # Et surtout : la porte stricte ne doit JAMAIS annoncer un succes qu elle
     # n a pas obtenu. transform_video(), lui, rend True apres une simple copie
