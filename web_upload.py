@@ -19706,6 +19706,24 @@ _SCAN_FILE = []
 #: processeur au bot Discord, qui vit dans le MEME processus.
 SCAN_OUVRIERS = max(1, int(os.getenv("SCAN_OUVRIERS") or "4"))
 
+#: Combien d images sont tirees de CHAQUE video pour la juger.
+#:
+#: Quatre, reparties sur la duree. Descendre a une seule ne fait pas
+#: economiser ce qu on croit : le prompt et la reponse coutent pareil quel que
+#: soit le nombre d images, et representent deja plus de la moitie du prix
+#: d une video. Mesure sur 192 brutes : 0,52 $ a quatre images, 0,29 $ a une.
+#: Vingt-deux centimes, pour quatre fois moins de couverture.
+#:
+#: Et le risque n est pas symetrique. Une accroche RATEE est silencieuse : la
+#: video est classee « sans texte », elle part chez un VA, et elle se publie
+#: avec le texte de quelqu un d autre dessus -- exactement ce que cet examen
+#: existe pour eviter. Une image ne montre qu un quart de la video : un hook
+#: du debut serait vu, un sous-titre qui arrive plus tard, non.
+#:
+#: Le curseur est la pour qui veut trancher autrement, pas pour etre baisse
+#: par defaut.
+SCAN_IMAGES = max(1, min(8, int(os.getenv("SCAN_IMAGES") or "4")))
+
 
 def scan_texte_etat() -> dict:
     with _SCAN_TEXTE_LOCK:
@@ -40856,6 +40874,9 @@ def _brute_a_du_texte(src: Path, key: str):
     sur 1345 brutes, Opus coûterait des dizaines d'euros là où Haiku coûte
     quelques centimes. Quatre images, en 720 de haut — assez pour voir une
     accroche, deux fois moins de jetons qu'en 1280.
+
+    Le nombre d'images se règle par SCAN_IMAGES ; lire son commentaire avant
+    de le baisser, l'économie est plus petite qu'elle n'en a l'air.
     """
     import base64
     import json as _json
@@ -40865,8 +40886,9 @@ def _brute_a_du_texte(src: Path, key: str):
     duration, _w, h = _probe_video(src)
     if duration <= 0:
         return None, [], "vidéo illisible (ffmpeg absent ou fichier abîmé ?)"
-    times = sorted({round(duration * (i + 0.5) / 4, 2) for i in range(4)
-                    if 0 <= duration * (i + 0.5) / 4 < duration})
+    n_img = SCAN_IMAGES
+    times = sorted({round(duration * (i + 0.5) / n_img, 2) for i in range(n_img)
+                    if 0 <= duration * (i + 0.5) / n_img < duration})
     with tempfile.TemporaryDirectory(prefix="txtcheck_") as tmp:
         frames = _grab_frames(src, times, Path(tmp), height=min(720, h or 720))
         if not frames:
