@@ -4913,6 +4913,31 @@ try:
           "actif and not reecrit" in _srcEnv and "print(" in _srcEnv,
           "aucune trace serveur en cas d echec")
 
+    # -- pseudo et name : le drapeau du site, et lui seul ---------------------
+    # La regle vivait dans les deux boutons du panneau Jailbreak et nulle part
+    # ailleurs : /name, /username et le menu VA l'ignoraient, donc un VA sur une
+    # identite 🇺🇸 recevait « Ibenhaastrup Belle » selon le bouton clique.
+    _vraiMk = _uFv._market_of
+    try:
+        _uFv._market_of = (lambda i: "us" if i in ("ibenhaastrup", "themikkiangel")
+                           else "fr")
+        check("pseudo/name : une identite 🇺🇸 part de Jessye",
+              _uFv._source_pseudo_name("ibenhaastrup") == "jessye",
+              _uFv._source_pseudo_name("ibenhaastrup"))
+        check("pseudo/name : une identite 🇫🇷 garde la sienne",
+              _uFv._source_pseudo_name("emma") == "emma",
+              _uFv._source_pseudo_name("emma"))
+        check("pseudo/name : Jessye reste Jessye",
+              _uFv._source_pseudo_name("jessye") == "jessye",
+              _uFv._source_pseudo_name("jessye"))
+    finally:
+        _uFv._market_of = _vraiMk
+    # Une regle qu'aucune commande n'applique ne sert a rien.
+    for _cmdFv in ("username", "name"):
+        _sFv = _insFv.getsource(getattr(_uFv.UserCog, _cmdFv).callback)
+        check("pseudo/name : /%s applique la regle" % _cmdFv,
+              "_source_pseudo_name" in _sFv, _cmdFv)
+
     # Et surtout : la porte stricte ne doit JAMAIS annoncer un succes qu elle
     # n a pas obtenu. transform_video(), lui, rend True apres une simple copie
     # -- pratique pour un envoi automatique, mensonger pour un bouton qui

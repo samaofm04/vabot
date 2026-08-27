@@ -1866,6 +1866,10 @@ class UserCog(commands.Cog):
                 ephemeral=True,
             )
             return
+        # Drapeau 🇺🇸 posé sur le site -> les pseudos partent de Jessye. Ici et
+        # pas dans le bouton : /username, le menu VA et les deux panneaux
+        # Jailbreak passent tous par cette commande.
+        identity = _source_pseudo_name(identity)
         # Defer car on va check ~20 URLs Instagram = quelques secondes
         await interaction.response.defer()
         try:
@@ -1919,6 +1923,9 @@ class UserCog(commands.Cog):
                 "Tu n'as pas d'identité assignée. Demande à un admin.", ephemeral=True
             )
             return
+        # Drapeau 🇺🇸 posé sur le site -> les noms partent de Jessye. Voir
+        # _source_pseudo_name : la règle est écrite une seule fois.
+        identity = _source_pseudo_name(identity)
         # Genere 5 noms varies via le generateur
         names = generate_display_names(identity, count=5)
         if not names:
@@ -5576,7 +5583,53 @@ def _is_fr_market(identity: str) -> bool:
 # (Un commentaire affirmait ici que c'étaient « des exemples posés à la main,
 # aucune génération IA ». C'était faux : rien n'est posé à la main.)
 _US_SOURCE_IDENTITY = "jessye"
-_US_SOURCED_ACTIONS = {"pseudo", "name"}
+# (_US_SOURCED_ACTIONS a disparu : la liste des actions concernees etait la
+#  pour que les BOUTONS sachent quand rediriger. Ce sont desormais les deux
+#  commandes elles-memes qui appellent _source_pseudo_name, donc la reponse
+#  est dans le code qui s en sert, plus dans un ensemble a tenir a jour.)
+
+
+def _source_pseudo_name(identity: str) -> str:
+    """Identité qui SERT à fabriquer pseudo et name. Souvent elle-même.
+
+    LE DRAPEAU DU SITE TRANCHE, ET LUI SEUL
+        Bibliothèque → ✏️ Modifier → Marché. Une identité marquée 🇺🇸 fabrique
+        ses pseudos et ses noms à partir de Jessye ; une identité 🇫🇷 garde les
+        siens. Rien d'autre n'entre en compte — ni le serveur, ni le rôle
+        Discord du VA.
+
+    POURQUOI UNE SEULE FONCTION
+        La règle vivait avant dans les DEUX boutons du panneau Jailbreak, et
+        nulle part ailleurs. Résultat : `/name`, `/username` et les boutons du
+        menu VA l'ignoraient. Un VA sur une identité 🇺🇸 recevait
+        « Ibenhaastrup Belle » au lieu d'un nom de Jessye, selon le bouton
+        cliqué. Le même contenu, deux résultats.
+
+        Les deux boutons s'appuyaient en plus sur le RÔLE du VA
+        (marche_du_membre), pas sur le drapeau de l'identité. Deux critères
+        différents pour une seule intention.
+
+    POURQUOI JESSYE PLUTÔT QUE LA MODEL
+        generate_username_candidates et generate_display_names partent d'un
+        PRÉNOM. Les identités US sont des pseudos de compte :
+
+            ibenhaastrup  →  « Ibenhaastrup Belle »,  ibenhaastrupstn
+            jessye        →  « Jessica Aubry »,       jess_crush
+
+        Un pseudo n'a qu'un seul travail : être libre et plausible. Il n'a pas
+        à rappeler la model, c'est un compte neuf. Le jour où chaque identité
+        portera un vrai prénom sur le site, cette fonction pourra rendre
+        `identity` tout du long.
+    """
+    idl = (identity or "").strip().lower()
+    if not idl or idl == _US_SOURCE_IDENTITY:
+        return identity
+    try:
+        if _market_of(idl) == "us":
+            return _US_SOURCE_IDENTITY
+    except Exception:
+        pass                                # marché illisible -> on ne touche à rien
+    return identity
 
 
 def marche_du_membre(member) -> str:
@@ -5675,21 +5728,12 @@ class _JailbreakActionButton(discord.ui.Button):
         if cmd is None:
             await interaction.response.send_message("Action indisponible.", ephemeral=True)
             return
-        # Serveur US : pseudo / name viennent de l'identité SOURCE (Jessye) —
-        # le média reste celui de la model. Le MARCHE du VA tranche en plus du
-        # serveur, comme dans le panneau permanent (JBActionButton) : un VA
-        # « Jailbreak FR » sur le serveur US recevait ici les textes de Jessye
-        # alors que la meme action, dans le panneau, lui rendait ceux de SA
-        # model — deux chemins, deux resultats pour un seul bouton.
+        # Le bouton ne redirige plus rien : pseudo et name sont arbitrés par
+        # _source_pseudo_name, dans les commandes elles-mêmes, sur le DRAPEAU de
+        # l'identité. Ici on s'appuyait sur le rôle Discord du VA et sur le
+        # serveur — trois critères pour une seule intention, et les chemins qui
+        # ne passaient pas par ce bouton n'arbitraient rien du tout.
         model = self.model
-        try:
-            import guild_features as gf
-            if (self.key in _US_SOURCED_ACTIONS
-                    and gf.is_us_guild(getattr(interaction, "guild", None))
-                    and marche_du_membre(interaction.user) != "fr"):
-                model = _US_SOURCE_IDENTITY
-        except Exception:
-            pass
         qty = getattr(self.view, "quantity", 3)
         await self.cog._run_for_model(
             interaction, model, cmd, count=qty, supports_count=self.supports_count)
@@ -6171,12 +6215,9 @@ class JBActionButton(discord.ui.DynamicItem[discord.ui.Button],
             await interaction.response.send_message(
                 f"Action indisponible (`{cmd_attr}`).", ephemeral=True)
             return
+        # Même remarque que dans _JailbreakActionButton : pseudo et name sont
+        # arbitrés par _source_pseudo_name, sur le drapeau de l'identité.
         model = self.ident
-        # pseudo / name viennent de Jessye — UNIQUEMENT pour le marche US :
-        # un VA FR doit recevoir les textes de SA model.
-        if (self.key in _US_SOURCED_ACTIONS
-                and marche_du_membre(interaction.user) != "fr"):
-            model = _US_SOURCE_IDENTITY
         # ORDRE DES ARGUMENTS : (interaction, model, cmd, count, supports_count).
         # Les inverser faisait echouer l'action avant toute reponse -> Discord
         # affichait « n'a pas repondu a temps ».
