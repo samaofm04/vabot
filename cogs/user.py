@@ -2921,11 +2921,15 @@ class UserCog(commands.Cog):
         modele d iPhone, version d iOS, date de prise de vue, GPS d une vraie
         ville -- donc une empreinte differente a chaque envoi.
 
-        L ECHEC EST DIT. Si ffmpeg manque ou refuse, la video part quand meme
-        (le VA est venu chercher sa video, pas un message d erreur) mais
-        l etiquette change : « metadonnees NON changees ». Annoncer le
-        contraire sur un fichier intact serait le defaut qui a coute le plus
-        cher a ce projet -- un message de succes qui ment.
+        LE VA N EN LIT RIEN. Pas un mot sur les metadonnees dans le salon :
+        le reglage vit sur le site, c est l affaire de l admin. Le VA recoit sa
+        video, point -- exactement le message qu il avait avant.
+
+        MAIS L ECHEC NE DISPARAIT PAS. Si l uniquification est demandee et que
+        ffmpeg manque ou refuse, la video part quand meme et la ligne va au
+        JOURNAL du serveur. Muet pour le VA, visible pour qui administre : sans
+        ca, une uniquification allumee qui n uniquifie rien ne se verrait nulle
+        part.
 
         Et on ne croit pas le booleen sur parole : le fichier de sortie doit
         exister ET peser quelque chose. Un ffmpeg qui rend 0 en laissant un
@@ -2934,12 +2938,6 @@ class UserCog(commands.Cog):
         import asyncio as _aio
         import tempfile as _tmp
         actif = bool(load_transform_config().get("enabled", False))
-        if actif:
-            # Annonce faite UNE fois, et seulement si c est vrai. Le contraire --
-            # une ligne « metadonnees neuves » affichee quoi qu il arrive --
-            # serait le meme mensonge que celui qu on evite plus bas.
-            entete += (f"\n🆕 Métadonnées neuves à chaque envoi (iPhone, iOS, "
-                       f"date, GPS). L'image n'est **pas** retouchée.")
         total = len(videos)
         await interaction.followup.send(entete)
         with _tmp.TemporaryDirectory(prefix="brutmeta_") as _d:
@@ -2955,16 +2953,13 @@ class UserCog(commands.Cog):
                                and sortie.stat().st_size > 0)
                     if reecrit:
                         fichier = sortie
-                if not actif:
-                    # Interrupteur coupe : comportement d avant, a la lettre.
-                    tete = f"🎥 **{label} {idx}/{total}** (`{identity}`)"
-                elif reecrit:
-                    tete = (f"🎥 **{label} {idx}/{total}** (`{identity}`) "
-                            f"— métadonnées réécrites ✅")
-                else:
-                    tete = (f"🎥 **{label} {idx}/{total}** (`{identity}`)"
-                            f"\n⚠️ Métadonnées **NON** changées (ffmpeg absent "
-                            f"ou en échec) — la vidéo part **telle quelle**.")
+                # Le meme message dans tous les cas : celui d avant.
+                tete = f"🎥 **{label} {idx}/{total}** (`{identity}`)"
+                if actif and not reecrit:
+                    # Demandee mais pas appliquee. Rien dans le salon, mais pas
+                    # de silence complet non plus : au journal du serveur.
+                    print(f"[brutes] {identity} / {v.name} : uniquification "
+                          f"demandee, NON appliquee (ffmpeg absent ou en echec)")
                 try:
                     await interaction.followup.send(
                         content=tete,
@@ -5390,27 +5385,66 @@ _JB_ACTIONS = [
 # exemple) — à la place « Reel caption » (brute + caption incrustée, biblio
 # Caption du site) et « Reel monté » (montage template).
 _JB_ACTIONS_US = [
-    ("reelcaption", "💬 Reel caption", "reelcaption", True),
-    ("reelmonte", "🎞️ Reel monté", "reelmonte", True),
-    ("story", "📖 Story", "story", True),
-    ("post", "🖼️ Post", "post", True),
-    ("storycta", "📲 Story CTA", "storycta", True),
-    ("pseudo", "👤 Pseudo", "username", False),
-    ("name", "📝 Name", "name", False),
-    ("bio", "💬 Bio", "bio", True),
-    ("pp", "🖼️ PP", "profilepic", True),
-    ("brute", "🎥 Vidéo brut", "videobrut", True),
-    # Les favoris ⭐ poses sur le site. Pas de quantite : le VA recoit ce qui
-    # est marque, ni plus ni moins — c'est tout l'interet d'un favori.
-    # La cle doit rester en [a-z] : le template du custom_id
-    # (jbus:a:<ident>:<key>:<qty>) refuse chiffres et tirets bas, et un bouton
-    # deja poste deviendrait muet sans la moindre erreur.
-    ("capbanger", "⭐ Caption Banger", "captionbanger", False),
-    ("montagebanger", "🎬 Montage Banger", "montagebanger", False),
-    ("templatebrut", "🎵 Template + Brut", "templatebrut", False),
-    ("brutbanger", "🎥 Vidéo brut Banger", "brutbanger", False),
-    ("captionbrut", "📝 Caption + Brut", "captionbrut", False),
+    # Rangee 1 - L'IDENTITE. La photo d'abord, puis la bio : c'est l'ordre dans
+    #                 lequel on monte un compte. Pseudo et nom suivent,
+    #                 ils se posent au meme moment.
+    ('pp', '🖼️ PP', 'profilepic', True),
+    ('bio', '💬 Bio', 'bio', True),
+    ('pseudo', '👤 Pseudo', 'username', False),
+    ('name', '📝 Name', 'name', False),
+
+    # Rangee 2 - LES STORIES, PUIS LE POST. « Story CTA » est ce qu'on appelle
+    #                 la story a la une : c'est le meme objet sous ses
+    #                 deux noms, il n'y a pas de bouton a chercher en plus.
+    ('story', '📖 Story', 'story', True),
+    ('storycta', '📲 Story CTA', 'storycta', True),
+    ('post', '🖼️ Post', 'post', True),
+
+    # Rangee 3 - LES REELS. Du plus fini au plus brut.
+    ('reelcaption', '💬 Reel caption', 'reelcaption', True),
+    ('reelmonte', '🎞️ Reel monté', 'reelmonte', True),
+    ('brute', '🎥 Vidéo brut', 'videobrut', True),
+
+    # Rangee 4 - LES FAVORIS ⭐ poses sur le site. Pas de quantite : le VA
+    #                   recoit ce qui est marque, ni plus ni moins --
+    #                   c'est tout l'interet d'un favori.
+    ('capbanger', '⭐ Caption Banger', 'captionbanger', False),
+    ('montagebanger', '🎬 Montage Banger', 'montagebanger', False),
+    ('templatebrut', '🎵 Template + Brut', 'templatebrut', False),
+    ('brutbanger', '🎥 Vidéo brut Banger', 'brutbanger', False),
+    ('captionbrut', '📝 Caption + Brut', 'captionbrut', False),
 ]
+
+#: La rangee de chaque action : UNE rangee = UNE famille.
+#:
+#: L'ordre suit le MONTAGE d'un compte, tel qu'un VA le fait : la photo de
+#: profil, la bio, les stories, le post, puis les reels. Les favoris ⭐
+#: restent groupes en bas -- ils ne servent pas au montage, ils servent
+#: quand le compte tourne.
+#:
+#: Le rangement se calculait avant par « i // 4 », qui coupait les familles
+#: n'importe ou -- « Vidéo brut » se retrouvait colle a « PP », et les
+#: favoris etaient repartis sur deux lignes. Ici la position est DITE, donc
+#: ajouter une action ne deplace plus les autres.
+#:
+#: Discord : rangees 0 a 4, 5 composants par rangee. La 0 porte le
+#: selecteur de quantite, il reste donc 4 rangees, soit 20 places.
+_JB_RANGEES = {
+    'pp': 1, 'bio': 1, 'pseudo': 1, 'name': 1,
+    'story': 2, 'storycta': 2, 'post': 2,
+    'reelcaption': 3, 'reelmonte': 3, 'brute': 3,
+    'capbanger': 4, 'montagebanger': 4, 'templatebrut': 4, 'brutbanger': 4, 'captionbrut': 4,
+}
+
+
+def _jb_rangee(key, i):
+    """Rangee du bouton `key`. `i` ne sert que de filet.
+
+    Une cle inconnue -- une action du marche FR, ou une ajoutee sans
+    l'inscrire ci-dessus -- retombe sur un rangement par paquets de 5. Elle
+    s'affiche donc quand meme, plutot que de faire echouer la vue entiere.
+    """
+    return _JB_RANGEES.get(key, 1 + min(i, 19) // 5)
 
 # Quantites proposees (multiplicateur). Plafonnees au stock reel de la model.
 _JB_QTY_OPTIONS = [1, 3, 5, 10, 15, 20, 30, 50, 60]
@@ -5663,7 +5697,7 @@ class JailbreakActionsView(discord.ui.View):
         actions = _JB_ACTIONS_US        # « Reel caption » pour les 2 marches
         for i, (key, label, cmd_attr, sc) in enumerate(actions):
             self.add_item(_JailbreakActionButton(
-                self.cog, self.model, label, cmd_attr, sc, row=1 + i // 4, key=key,
+                self.cog, self.model, label, cmd_attr, sc, row=_jb_rangee(key, i), key=key,
                 icone=self.icones.get(key)))
 
     def _embed(self):
@@ -6148,7 +6182,7 @@ def _jb_panel(cog, ident, qty=3, marche="us", guild=None):
         _ic = icones_actions(guild)      # lecture seule : rien sur le reseau
         for i, (key, label, _c, _s) in enumerate(_actions):
             view.add_item(JBActionButton(ident, key, qty, label=label,
-                                         row=1 + i // 4, icone=_ic.get(key)))
+                                         row=_jb_rangee(key, i), icone=_ic.get(key)))
         emb = discord.Embed(
             title=f"🔓 {ident.capitalize()} — que veux-tu générer ?",
             description=(

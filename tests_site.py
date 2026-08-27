@@ -4872,6 +4872,17 @@ try:
     check("favoris : le panneau US tient dans les 25 composants de Discord",
           len(_vue_us.children) <= 25,
           "%d composants" % len(_vue_us.children))
+    # Une rangee = une famille : videos, photos, identite, favoris ⭐. C'est la
+    # forme VOULUE du panneau, pas un effet de bord d'un « i // 4 » -- une
+    # action ajoutee ne doit plus pousser les suivantes sur la ligne d'apres.
+    check("favoris : le panneau US garde ses 4 familles sur 4 rangees",
+          _rowsFv == {1: 4, 2: 3, 3: 3, 4: 5}, str(_rowsFv))
+    # Et chaque action connait sa rangee : sans entree, elle retombe sur le
+    # filet et atterrit n'importe ou.
+    check("favoris : chaque action US a une rangee attribuee",
+          all(a[0] in _uFv._JB_RANGEES for a in _uFv._JB_ACTIONS_US),
+          str([a[0] for a in _uFv._JB_ACTIONS_US
+               if a[0] not in _uFv._JB_RANGEES]))
 
     # -- brutes a metadonnees changees ---------------------------------------
     # Pas de bouton separe : « Video brut » et « Video brut Banger » reecrivent
@@ -4892,9 +4903,15 @@ try:
     check("brut+meta : l interrupteur du site est lu",
           "load_transform_config()" in _srcEnv and "enabled" in _srcEnv,
           "aucune lecture de la config dans _envoyer_brutes_meta")
-    check("brut+meta : coupe, aucune promesse de metadonnees",
-          "if actif:" in _srcEnv and "if not actif:" in _srcEnv,
-          "les deux branches doivent exister")
+    # Le VA ne doit RIEN lire sur les metadonnees : le reglage est sur le site,
+    # c est l affaire de l admin. On cherche la forme accentuee, celle des
+    # messages -- les commentaires et docstrings, eux, s ecrivent sans accents.
+    check("brut+meta : le VA ne lit pas un mot sur les metadonnees",
+          "étadonnées" not in _srcEnv, "un message en parle encore")
+    # Mais un echec demande-et-non-applique doit rester visible quelque part.
+    check("brut+meta : l echec part au journal du serveur",
+          "actif and not reecrit" in _srcEnv and "print(" in _srcEnv,
+          "aucune trace serveur en cas d echec")
 
     # Et surtout : la porte stricte ne doit JAMAIS annoncer un succes qu elle
     # n a pas obtenu. transform_video(), lui, rend True apres une simple copie
