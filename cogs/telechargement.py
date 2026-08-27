@@ -685,14 +685,24 @@ class ModalCompte(discord.ui.Modal, title="Quel compte ?"):
         # Le panneau AFFICHE le compte actif. Chaque VA a son propre salon
         # -download : il n y a donc qu une personne par panneau, et l afficher
         # ne revele rien a personne d autre.
+        # ON REPOND D ABORD, ON EDITE ENSUITE.
+        #
+        # Discord n accorde que TROIS SECONDES pour la premiere reponse a une
+        # interaction. inter.message.edit() est un appel reseau : le placer
+        # avant l accuse de reception faisait expirer le delai des que l API
+        # trainait un peu, et la personne voyait « n a pas repondu a temps »
+        # alors que sa saisie avait bien ete enregistree (constate le 27/08).
+        #
+        # Une fois l interaction acquittee, l edition peut prendre le temps
+        # qu elle veut sans rien casser.
+        await inter.response.send_message(
+            f"Compte actif : **@{username}** (au plus {n}).", ephemeral=True)
         try:
             await inter.message.edit(
                 embed=_embed_compte(username, n),
                 view=PanneauCompte(self.cog))
         except Exception:
             pass
-        await inter.response.send_message(
-            f"Compte actif : **@{username}** (au plus {n}).", ephemeral=True)
 
 
 class PanneauCompte(discord.ui.View):
