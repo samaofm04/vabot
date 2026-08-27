@@ -486,7 +486,55 @@ async def _push_content_menu(bot, channel, identity, member):
 # @pseudo-content (le contenu généré arrive là) et @pseudo-numero-mail,
 # privés, dans la catégorie TAFF. L'ordre du tuple = ordre de création
 # (menu juste au-dessus de content).
-US_TICKET_SUFFIXES = ("menu", "content", "numero-mail")
+#: Quatre salons par VA. "download" ajoute le 27/08 : le menu de
+#: telechargement Instagram y vit en permanence, comme le menu Jailbreak
+#: vit dans -menu.
+#:
+#: ATTENTION : cette constante ne suffit pas. /ticketsall porte SA PROPRE
+#: expression reguliere, ecrite en dur. Ajouter un suffixe ici sans l'y
+#: ajouter aussi cree une boucle : le reconciliateur cree les salons, ne
+#: les reconnait pas au passage suivant, et les recree indefiniment.
+async def _ensure_dl_panel(bot, ch):
+    """Pose le menu de telechargement dans un salon -download. Idempotent.
+
+    La vue vit dans le cog Telechargement : ce fichier ne connait donc ni
+    Instagram ni les cookies, il se contente de poser le panneau. Si le cog
+    n'est pas charge, on ne fait rien plutot que d'echouer -- le reste du
+    provisionnement d'un VA n'a pas a s'arreter pour ca.
+    """
+    if bot is None or ch is None:
+        return
+    cog = bot.get_cog("Telechargement")
+    if cog is None:
+        return
+    titre = "Telechargement"
+    try:
+        for p in await ch.pins():
+            if (p.author.id == getattr(bot.user, "id", 0) and p.embeds
+                    and titre in (p.embeds[0].title or "")):
+                return                      # deja pose, on n'empile pas
+    except Exception:
+        pass
+    import discord as _d
+    emb = _d.Embed(
+        title=titre + " - clique, entre un pseudo, choisis",
+        description=(
+            "Deux etapes : d'abord **qui**, ensuite **quoi**."
+            + chr(10) + chr(10) +
+            "**Photo de profil** - **Bio** - **Posts photo** - "
+            "**Reels** - **Top reels** (les plus vus)"
+            + chr(10) + chr(10) +
+            "Chaque fichier part des qu'il est pret."),
+        color=_d.Color.green())
+    try:
+        from cogs.telechargement import Panneau
+        msg = await ch.send(embed=emb, view=Panneau(cog))
+        await msg.pin(reason="Menu de telechargement permanent")
+    except Exception:
+        pass
+
+
+US_TICKET_SUFFIXES = ("menu", "content", "numero-mail", "download")
 
 
 def _us_norm(nm):
@@ -893,6 +941,9 @@ async def create_us_tickets(guild, member, bot=None):
     # Le panneau Numéro & Mail vit dans -numero-mail, en permanence.
     if chans.get("numero-mail") is not None:
         await _ensure_num_panel(bot, chans["numero-mail"])
+    # Le menu de telechargement vit dans -download, en permanence.
+    if chans.get("download") is not None:
+        await _ensure_dl_panel(bot, chans["download"])
     # Migration : retirer l'ancien menu épinglé dans -content (version précédente).
     if content_ch is not None and bot is not None:
         try:
@@ -2000,10 +2051,11 @@ class Welcome(commands.Cog):
             await interaction.response.send_message(
                 "🔒 Réservé au serveur US (Youl4b) — protection du serveur principal.", ephemeral=True)
             return
-        # RÉCONCILIATEUR : l'objectif est « 3 salons par personne, c'est tout » —
-        # menu → content → numero-mail, groupés par personne, sans doublon ni orphelin.
+        # RÉCONCILIATEUR : l'objectif est « 4 salons par personne, c'est tout » —
+        # menu → content → numero-mail → download, groupés par personne,
+        # sans doublon ni orphelin.
         import re as _re
-        pat = _re.compile(r"-(menu|content|numero-mail)$")
+        pat = _re.compile(r"-(menu|content|numero-mail|download)$")
         members = [m for m in guild.members if not m.bot and m.id != interaction.user.id]
         expected = {}
         for m in members:
