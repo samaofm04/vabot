@@ -5407,6 +5407,134 @@ class MesComptesInstaModal(discord.ui.Modal, title="📷 Mes comptes Instagram")
             ephemeral=True)
 
 
+class CaptionLibreModal(discord.ui.Modal, title="Ta caption"):
+    """La fenetre ou le VA ecrit son propre texte.
+
+    Elle existe parce que la bibliotheque de captions ne couvre pas tout : un
+    rush precis appelle parfois une phrase qui n y est pas, et obliger le VA a
+    demander a un admin de l ajouter pour un seul post revient a ne pas la lui
+    donner.
+    """
+
+    texte = discord.ui.TextInput(
+        label="Le texte à incruster sur la vidéo",
+        style=discord.TextStyle.paragraph,
+        placeholder="ex : POV : tu découvres mon compte…",
+        required=True, max_length=300)
+
+    description = discord.ui.TextInput(
+        label="Description (champ légende) — facultatif",
+        style=discord.TextStyle.paragraph,
+        required=False, max_length=1500)
+
+    def __init__(self, cog, identity, video):
+        super().__init__()
+        self.cog = cog
+        self.identity = identity
+        self.video = video
+
+    async def on_submit(self, interaction: discord.Interaction):
+        cap = {"id": "libre", "text": str(self.texte.value or "").strip(),
+               "desc": str(self.description.value or "").strip(),
+               "x": 0.5, "y": 0.3}
+        if not cap["text"]:
+            await interaction.response.send_message(
+                "Texte vide : rien à incruster.", ephemeral=True)
+            return
+        await interaction.response.defer()
+        # La caption ecrite a la main N EST PAS mise en reserve : elle ne
+        # servira qu une fois, et une recette a usage unique encombrerait le
+        # stock sans jamais etre reprise. D ou l absence de « famille ».
+        await self.cog._gen_and_send_caption(
+            interaction, self.video, cap, _captions_block(self.identity),
+            1, 1, self.identity, label="BRUTE + TA CAPTION", emoji="✍️",
+            prefixe_fichier="brute_caption")
+
+
+class ChoixCaptionView(discord.ui.View):
+    """Une fois la brute choisie : avec quelle caption ?
+
+    Trois voies, et c est voulu :
+      - telle quelle, sans rien incruster — le comportement d avant ;
+      - une caption de la bibliotheque, incrustee par le moteur ;
+      - la sienne, tapee sur le moment.
+
+    Le VA revient toujours au menu des brutes : il peut donc prendre la meme
+    brute deux fois avec deux captions differentes, ce que « ⭐ Video brut » ne
+    permettait pas.
+    """
+
+    def __init__(self, cog, identity, video):
+        super().__init__(timeout=600)
+        self.cog = cog
+        self.identity = identity
+        self.video = video
+
+        block = _captions_block(identity)
+        items = [c for c in (block.get("items") or [])
+                 if c.get("enabled", True) and str(c.get("text") or "").strip()]
+        self.captions = items[:25]          # Discord plafonne un menu a 25
+        if self.captions:
+            options = []
+            for i, c in enumerate(self.captions):
+                apercu = str(c.get("text") or "").strip().replace("\n", " ")
+                options.append(discord.SelectOption(
+                    label=apercu[:95] or "(vide)", value=str(i)))
+            select = discord.ui.Select(
+                placeholder="Choisir une caption de la bibliothèque",
+                options=options, row=0)
+            select.callback = self._caption_choisie
+            self.add_item(select)
+
+        brut = discord.ui.Button(label="Telle quelle", emoji="🎥",
+                                 style=discord.ButtonStyle.secondary, row=1)
+        brut.callback = self._sans_caption
+        self.add_item(brut)
+
+        libre = discord.ui.Button(label="Écrire la mienne", emoji="✍️",
+                                  style=discord.ButtonStyle.primary, row=1)
+        libre.callback = self._ecrire
+        self.add_item(libre)
+
+    async def _sans_caption(self, interaction):
+        await interaction.response.defer()
+        _c, desc, _e = _video_meta(self.video)
+        try:
+            await interaction.followup.send(
+                content=("🎥 **BRUTE CHOISIE** (`%s`) — sans montage."
+                         % self.identity),
+                file=discord.File(str(self.video), filename=self.video.name),
+                ephemeral=False)
+        except discord.HTTPException as e:
+            await interaction.followup.send(
+                "⚠️ Envoi impossible (trop lourde) : %s" % e, ephemeral=True)
+            return
+        if desc:
+            await interaction.followup.send(
+                "📄 **DESCRIPTION** (champ légende) :\n```\n%s\n```"
+                % str(desc)[:1800], ephemeral=False)
+
+    async def _ecrire(self, interaction):
+        await interaction.response.send_modal(
+            CaptionLibreModal(self.cog, self.identity, self.video))
+
+    async def _caption_choisie(self, interaction):
+        try:
+            rang = int(interaction.data["values"][0])
+            cap = self.captions[rang]
+        except Exception:
+            await interaction.response.send_message("Choix illisible.",
+                                                    ephemeral=True)
+            return
+        await interaction.response.defer()
+        # Pas de « famille » : ce couple brute+caption est choisi a la main,
+        # il ne correspond a aucune recette que la reserve prepare d avance.
+        await self.cog._gen_and_send_caption(
+            interaction, self.video, cap, _captions_block(self.identity),
+            1, 1, self.identity, label="BRUTE + CAPTION", emoji="💬",
+            prefixe_fichier="brute_caption")
+
+
 class ChoixBrutesView(discord.ui.View):
     """Le VA regarde ses brutes etoilees et prend celles qu il veut.
 
@@ -5537,29 +5665,14 @@ class ChoixBrutesView(discord.ui.View):
             return
         video = tranche[rang]
 
-        # Le menu reste ouvert : il en prendra peut-etre une autre. On accuse
-        # reception tout de suite, sinon Discord considere l interaction
-        # perdue au bout de trois secondes.
-        await interaction.response.defer()
-
-        # La video part EN CLAIR, pas en ephemere : c est ce que le VA vient
-        # chercher, et un message ephemere disparait des qu il ferme Discord.
-        _c, desc, _e = _video_meta(video)
-        try:
-            await interaction.followup.send(
-                content=("🎥 **BRUTE CHOISIE** (`%s`) — la voici, sans montage."
-                         % self.identity),
-                file=discord.File(str(video), filename=video.name),
-                ephemeral=False)
-        except discord.HTTPException as e:
-            await interaction.followup.send(
-                "⚠️ Envoi impossible (trop lourde pour Discord) : %s" % e,
-                ephemeral=True)
-            return
-        if desc:
-            await interaction.followup.send(
-                "📄 **DESCRIPTION** (champ légende) :\n```\n%s\n```"
-                % str(desc)[:1800], ephemeral=False)
+        # On ne l envoie pas encore : il peut vouloir une caption dessus. Le
+        # menu des brutes reste ouvert derriere, donc il pourra revenir en
+        # prendre une autre — ou la meme avec un autre texte.
+        await interaction.response.send_message(
+            content=("🎥 Brute **%d** retenue.\nAvec quelle caption ?"
+                     % (rang + 1)),
+            view=ChoixCaptionView(self.cog, self.identity, video),
+            ephemeral=True)
 
 
 class ContentMenuView(discord.ui.View):
