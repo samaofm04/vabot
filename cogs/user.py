@@ -2978,11 +2978,12 @@ class UserCog(commands.Cog):
         vue = ChoixBrutesView(self, identity, brutes)
         texte, fichier = vue._planche_et_texte()
         if fichier is not None:
-            await interaction.followup.send(content=texte, file=fichier,
-                                            view=vue, ephemeral=True)
+            vue.message = await interaction.followup.send(
+                content=texte, file=fichier, view=vue, ephemeral=True,
+                wait=True)
         else:
-            await interaction.followup.send(content=texte, view=vue,
-                                            ephemeral=True)
+            vue.message = await interaction.followup.send(
+                content=texte, view=vue, ephemeral=True, wait=True)
 
     async def _send_caption_plus_brute(self, interaction):
         """Bouton '📝 Caption + Brut Banger' : une brute ⭐ ET une caption ⭐,
@@ -5407,6 +5408,32 @@ class MesComptesInstaModal(discord.ui.Modal, title="📷 Mes comptes Instagram")
             ephemeral=True)
 
 
+def _vers_content(interaction):
+    """Rend une interaction dont les envois partent dans le salon -content.
+
+    Les boutons du panneau Jailbreak passent par _run_for_model, qui fait deja
+    ce travail. Un clic dans une VUE, lui, produit une interaction neuve :
+    sans ce passage, la video se deverse dans le salon -menu, qui est cense
+    rester vierge.
+
+    Hors serveur US, ou si aucun -content n est identifiable, on rend
+    l interaction telle quelle : mieux vaut publier dans le salon courant que
+    ne rien publier du tout.
+    """
+    try:
+        import guild_features as gf
+        if not gf.is_us_guild(getattr(interaction, "guild", None)):
+            return interaction
+        cible = _us_content_target(interaction)
+        if cible is None:
+            return interaction
+        if cible.id == getattr(interaction.channel, "id", None):
+            return interaction
+        return _JBRedirect(interaction, cible)
+    except Exception:
+        return interaction
+
+
 class CaptionLibreModal(discord.ui.Modal, title="Ta caption"):
     """La fenetre ou le VA ecrit son propre texte.
 
@@ -5446,7 +5473,8 @@ class CaptionLibreModal(discord.ui.Modal, title="Ta caption"):
         # servira qu une fois, et une recette a usage unique encombrerait le
         # stock sans jamais etre reprise. D ou l absence de « famille ».
         await self.cog._gen_and_send_caption(
-            interaction, self.video, cap, _captions_block(self.identity),
+            _vers_content(interaction), self.video, cap,
+            _captions_block(self.identity),
             1, 1, self.identity, label="BRUTE + TA CAPTION", emoji="✍️",
             prefixe_fichier="brute_caption")
 
@@ -5498,6 +5526,7 @@ class ChoixCaptionView(discord.ui.View):
 
     async def _sans_caption(self, interaction):
         await interaction.response.defer()
+        interaction = _vers_content(interaction)
         _c, desc, _e = _video_meta(self.video)
         try:
             await interaction.followup.send(
@@ -5530,7 +5559,8 @@ class ChoixCaptionView(discord.ui.View):
         # Pas de « famille » : ce couple brute+caption est choisi a la main,
         # il ne correspond a aucune recette que la reserve prepare d avance.
         await self.cog._gen_and_send_caption(
-            interaction, self.video, cap, _captions_block(self.identity),
+            _vers_content(interaction), self.video, cap,
+            _captions_block(self.identity),
             1, 1, self.identity, label="BRUTE + CAPTION", emoji="💬",
             prefixe_fichier="brute_caption")
 
@@ -5564,8 +5594,14 @@ class ChoixBrutesView(discord.ui.View):
     #: des deux limites qui commande.
     PAR_PAGE = 12
 
+    #: Court, volontairement. Un menu laisse ouvert apres un changement de
+    #: model continue de proposer les brutes de l ANCIENNE identite : le
+    #: proprietaire l a constate. On le laisse donc mourir vite, et on le dit.
+    DUREE_S = 180
+
     def __init__(self, cog, identity, brutes, page=0):
-        super().__init__(timeout=600)
+        super().__init__(timeout=self.DUREE_S)
+        self.message = None
         self.cog = cog
         self.identity = identity
         self.brutes = list(brutes)
@@ -5573,6 +5609,24 @@ class ChoixBrutesView(discord.ui.View):
         self._poser()
 
     # -- construction ------------------------------------------------------
+
+    async def on_timeout(self):
+        """Eteint le menu au lieu de le laisser mentir.
+
+        Un menu ephemere ne disparait pas tout seul : sans ca, celui d une
+        identite abandonnee reste cliquable dans la conversation et sert les
+        brutes d une autre.
+        """
+        for item in self.children:
+            item.disabled = True
+        try:
+            if self.message is not None:
+                await self.message.edit(
+                    content=("⏳ Menu expiré (identité `%s`). Relance "
+                             "**🎛️ Choisir ma brute**." % self.identity),
+                    attachments=[], view=self)
+        except Exception:
+            pass
 
     def _tranche(self):
         debut = self.page * self.PAR_PAGE
