@@ -94,7 +94,18 @@ def main():
         finally:
             _nw.generations_en_cours = vrai
 
+        # ---- les familles declarees ---------------------------------------
+        check("les huit familles qui generent sont declarees",
+              set(np.FAMILLES) == {"caption", "montage", "reelmonte",
+                                   "template", "template_brut",
+                                   "flash", "flash_banger", "flash_brut"},
+              sorted(np.FAMILLES))
+
         # ---- le choix de la case -----------------------------------------
+        # On restreint la liste : ce qu on eprouve ici est la SELECTION, pas
+        # le catalogue. Sans ca, ajouter une famille casserait ce test sans
+        # qu aucun comportement n ait change.
+        np.FAMILLES = ("caption", "montage")
         choisir = np.NoctusPool._case_la_plus_vide
         idents = ["emma", "julia"]
 

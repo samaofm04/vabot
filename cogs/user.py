@@ -2400,14 +2400,44 @@ class UserCog(commands.Cog):
 
     async def _gen_and_send_montaged(self, interaction, video, draft, description, idx,
                                      total, identity, label="REEL MONTÉ", emoji="🎞️",
-                                     prefixe_fichier="reel_monte", brutes_dir=None):
+                                     prefixe_fichier="reel_monte", brutes_dir=None,
+                                     famille=""):
         """Génère À LA DEMANDE une variante MONTÉE (texte incrusté) du reel `video` via le
         pipeline Noctus (draft = son .montage.json), puis l'envoie à poster telle quelle +
         la description. Chaque appel = une variante UNIQUE (uniquification iPhone). Lent
         (~15-30s) -> interaction déjà defer()."""
         import asyncio
         import noctus_web
+
+        # LA RESERVE D'ABORD, comme pour les captions. Une variante deja
+        # fabriquee pour cette recette exacte part tout de suite.
+        #
+        # La brute n'entre dans l'empreinte que si elle est IMPOSEE (brutes_dir
+        # ne contenant qu'elle). Quand le moteur tire au hasard, la recette est
+        # « ce template avec n'importe quelle brute » : toute variante deja
+        # produite pour ce template convient.
+        fichier, de_la_reserve = None, None
+        if famille:
+            try:
+                import noctus_reserve as _res
+                _imposees = ()
+                if brutes_dir:
+                    _lst = [x for x in Path(brutes_dir).iterdir() if x.is_file()]
+                    if len(_lst) == 1:
+                        _imposees = (str(_lst[0]),)
+                emp = _res.empreinte(identity, famille, video,
+                                     brutes=_imposees, draft=draft)
+                pris, _d = _res.prendre(
+                    identity, famille, emp,
+                    demandeur=str(getattr(interaction.user, "id", "")))
+                if pris is not None:
+                    fichier, de_la_reserve = pris, pris
+            except Exception:
+                fichier = None                # reserve illisible : on genere
+
         try:
+            if fichier is not None:
+                raise _DejaPret                # saute la generation
             # brutes_dir : si le brouillon a un point de coupe et que l'identité a
             # des vidéos brutes, le début du template est remplacé par l'une d'elles.
             # brutes_dir impose : le bouton « Template + Brut » passe un dossier
@@ -2418,13 +2448,15 @@ class UserCog(commands.Cog):
                        IDENTITIES_DIR / (identity or "").strip().lower() / "brutes")
             model = await asyncio.to_thread(
                 noctus_web.gen_from_draft, str(video), draft, ["V1"], None, _brutes)
+        except _DejaPret:
+            model = "reserve"
         except Exception:
             model = None
         if not model:
             await interaction.followup.send(f"⚠️ {label} {idx}/{total} : génération impossible.")
             return
-        state = "running"
-        for _ in range(90):                      # ~3 min max
+        state = "done" if fichier is not None else "running"
+        for _ in range(0 if fichier is not None else 90):   # ~3 min max
             await asyncio.sleep(2)
             try:
                 state = noctus_web.status(model).get("state", "running")
@@ -2441,11 +2473,13 @@ class UserCog(commands.Cog):
             await interaction.followup.send(
                 f"⚠️ {label} {idx}/{total} : génération échouée ({state}) {err}".strip())
             return
-        outs = noctus_web.output_paths(model)
-        if not outs:
-            await interaction.followup.send(f"⚠️ {label} {idx}/{total} : aucun fichier produit.")
-            return
-        out = outs[0]
+        if fichier is None:
+            outs = noctus_web.output_paths(model)
+            if not outs:
+                await interaction.followup.send(f"⚠️ {label} {idx}/{total} : aucun fichier produit.")
+                return
+            fichier = outs[0]
+        out = fichier
         intro = (
             f"{emoji} **{label} {idx}/{total}** → à poster sur ton **compte n°{idx}** (`{identity}`)\n"
             f"📥 Poste cette vidéo **telle quelle** — le texte est **déjà incrusté** dessus."
@@ -2457,6 +2491,16 @@ class UserCog(commands.Cog):
             await interaction.followup.send(
                 f"⚠️ {label} {idx}/{total} : envoi impossible (trop lourd) : {e}")
             return
+        finally:
+            # Sortie de la reserve = effacee, quoi qu il arrive. Elle n y
+            # retourne jamais : un echec d envoi ne prouve pas que Discord n a
+            # rien recu, et la re-servir serait le doublon qu on interdit.
+            if de_la_reserve is not None:
+                try:
+                    import noctus_reserve as _res2
+                    _res2.solder(de_la_reserve)
+                except Exception:
+                    pass
         if description:
             await interaction.followup.send(
                 f"📄 **DESCRIPTION {label} {idx}/{total}** (à coller dans le **champ légende**) :")
@@ -2763,7 +2807,8 @@ class UserCog(commands.Cog):
                 await self._gen_and_send_montaged(
                     interaction, tpl, draft, desc, idx, total, identity,
                     label="TEMPLATE + BRUT", emoji="🎵",
-                    prefixe_fichier="template_brut", brutes_dir=tmp)
+                    prefixe_fichier="template_brut", brutes_dir=tmp,
+                    famille=("template_brut" if brute_favorite else "template"))
             finally:
                 _sh.rmtree(tmp, ignore_errors=True)
 
@@ -2865,7 +2910,9 @@ class UserCog(commands.Cog):
                 await self._gen_and_send_montaged(
                     interaction, tpl, draft, desc, idx, total, identity,
                     label=libelle, emoji="\u26a1",
-                    prefixe_fichier="flash", brutes_dir=tmp)
+                    prefixe_fichier="flash", brutes_dir=tmp,
+                    famille=("flash_brut" if brute_favorite else
+                             "flash_banger" if exiger_banger else "flash"))
             finally:
                 if tmp:
                     _sh.rmtree(tmp, ignore_errors=True)
@@ -3130,7 +3177,9 @@ class UserCog(commands.Cog):
                 f"(tu en as demandé {nombre})."
             )
         for idx, (video, draft, description) in enumerate(ready, start=1):
-            await self._gen_and_send_montaged(interaction, video, draft, description, idx, total, identity)
+            await self._gen_and_send_montaged(
+                interaction, video, draft, description, idx, total, identity,
+                famille="reelmonte")
 
     @app_commands.command(
         name="videobrut",
@@ -6087,6 +6136,15 @@ class JailbreakActionsView(discord.ui.View):
             ),
             color=discord.Color.dark_red(),
         )
+
+
+class _DejaPret(Exception):
+    """Signal interne : la variante vient de la reserve, rien a generer.
+
+    Une exception plutot qu un « if » parce que la preparation du dossier de
+    brutes vit deja dans le try : la sauter proprement demanderait sinon de
+    dupliquer tout le bloc.
+    """
 
 
 def draft_caption(cap: dict, block: dict) -> dict:

@@ -31,6 +31,7 @@ que la machine produit réellement à l'heure, au lieu de le supposer.
 import asyncio
 import time
 from datetime import datetime
+from pathlib import Path
 
 from discord.ext import commands, tasks
 
@@ -59,10 +60,16 @@ FIN_H = int(_FIN or "5")
 #: et donne a une demande de VA le temps de se declarer avant qu'on reparte.
 REPOS_S = 3
 
-#: Familles que ce cog sait fabriquer aujourd'hui. Les familles template et
-#: flash passent par un autre chemin d'assemblage : elles viendront ensuite,
-#: et d'ici là leurs boutons gardent leur comportement actuel.
-FAMILLES = ("caption", "montage")
+#: Les sept familles de boutons qui paient une generation. Les autres servent
+#: des fichiers existants et n'ont rien a gagner ici.
+#:
+#: Chaque nom dit ce que la famille EXIGE, pas ce qu'elle produit — c'est ce
+#: qui rend une variante interchangeable avec une generation a la demande du
+#: meme bouton.
+FAMILLES = ("caption", "montage",           # une brute + une caption incrustee
+            "reelmonte",                    # un montage deja approuve
+            "template", "template_brut",    # un template assemble a une brute
+            "flash", "flash_banger", "flash_brut")
 
 #: Au-delà, on considère que la génération est perdue et on passe à la suite.
 #: Le moteur a lui-même un plafond de 300 s sur l'export.
@@ -116,87 +123,156 @@ class NoctusPool(commands.Cog):
     # ------------------------------------------------------------ recettes --
 
     def _recette(self, identite: str, famille: str):
-        """Rend (brute, caption, block) pour UNE variante, ou None.
+        """Ce qu il faut fabriquer pour UNE variante, ou None si c est hors
+        d atteinte (vivier vide).
 
-        Les ingrédients sont tirés exactement comme le bouton les tirerait —
-        mêmes fonctions, même vivier. C'est ce qui garantit qu'une variante de
-        la réserve est interchangeable avec une génération à la demande.
+        Rend un dictionnaire : la video source, le brouillon, la brute a
+        imposer s il y en a une, la description a joindre, et de quoi calculer
+        l empreinte.
+
+        Les ingredients sont tires par les MEMES fonctions que les boutons.
+        C est ce qui garantit qu une variante de la reserve est interchangeable
+        avec une generation a la demande : deux selections differentes
+        produiraient des videos qui ne se ressemblent plus, sans que rien ne le
+        signale.
         """
         import random
         from cogs import user as u
 
-        block = u._captions_block(identite)
-        caps = [c for c in u.fav_captions_for(identite)
-                if str(c.get("text") or "").strip()]
-        if not caps:
+        # --- les deux familles a caption incrustee ------------------------
+        if famille in ("caption", "montage"):
+            block = u._captions_block(identite)
+            caps = [c for c in u.fav_captions_for(identite)
+                    if str(c.get("text") or "").strip()]
+            if not caps:
+                return None
+            if famille == "montage":
+                brutes = u.fav_brutes_for(identite)
+            else:
+                import brutes_off as _off
+                brutes = _off.lister(u.IDENTITIES_DIR / identite / "brutes",
+                                     extensions=u.VIDEO_EXTS)
+            if not brutes:
+                return None
+            cap = random.choice(caps)
+            brute = random.choice(brutes)
+            _c, desc, _e = u._video_meta(brute)
+            return {"video": brute, "draft": u.draft_caption(cap, block),
+                    "imposees": (), "brute_imposee": None,
+                    "desc": desc or "", "caption": cap}
+
+        # --- « Template » : les montages deja approuves --------------------
+        if famille == "reelmonte":
+            prets = u.va_ready_montages_for(identite, 1)
+            if not prets:
+                return None
+            video, draft, desc = prets[0]
+            return {"video": video, "draft": draft, "imposees": (),
+                    "brute_imposee": None, "desc": desc or "", "caption": None}
+
+        # --- les templates et les Flash ------------------------------------
+        if famille in ("template", "template_brut"):
+            templates, _ecartes = u.fav_templates_for(identite)
+        else:
+            templates, _ecartes = u.flash_templates_for(
+                identite, exiger_banger=(famille != "flash"))
+        if not templates:
             return None
 
-        if famille == "montage":
+        # La brute n est IMPOSEE que pour les familles qui l exigent etoilee.
+        # Ailleurs le moteur en tire une au hasard — c est le comportement du
+        # bouton, et l imposer reduirait le stock sans rien trier de mieux.
+        brute_imposee = None
+        if famille in ("template_brut", "flash_brut"):
             brutes = u.fav_brutes_for(identite)
-        else:
-            import brutes_off as _off
-            brutes = _off.lister(u.IDENTITIES_DIR / identite / "brutes",
-                                 extensions=u.VIDEO_EXTS)
-        if not brutes:
-            return None
-        return random.choice(brutes), random.choice(caps), block
+            if not brutes:
+                return None
+            brute_imposee = random.choice(brutes)
+
+        tpl, draft = random.choice(templates)
+        _c, desc, _e = u._video_meta(tpl)
+        return {"video": tpl, "draft": draft,
+                "imposees": (str(brute_imposee),) if brute_imposee else (),
+                "brute_imposee": brute_imposee,
+                "desc": desc or "", "caption": None}
 
     async def _fabriquer_une(self, identite: str, famille: str) -> bool:
         """Fabrique UNE variante et la range. Rend True si elle est en stock."""
+        import os as _os
+        import shutil as _sh
+        import tempfile as _tf
         import noctus_web
-        from cogs import user as u
 
-        ingredients = self._recette(identite, famille)
-        if ingredients is None:
+        r = self._recette(identite, famille)
+        if r is None:
             return False
-        brute, cap, block = ingredients
-        draft = u.draft_caption(cap, block)
-        emp = reserve.empreinte(identite, famille, brute, caption=cap,
-                                draft=draft)
 
-        # Rien à faire si la case est déjà pleine POUR CETTE RECETTE.
+        emp = reserve.empreinte(identite, famille, r["video"],
+                                brutes=r.get("imposees") or (),
+                                caption=r.get("caption"), draft=r["draft"])
         if reserve.manque(identite, famille, emp) <= 0:
-            return False
+            return False                     # cette recette est deja pourvue
+
+        # Une brute imposee passe par un dossier ne contenant qu elle : sans ce
+        # detour, le moteur en tire une au hasard parmi toutes celles de
+        # l identite, et l etoile de la brute ne servirait a rien.
+        dossier_brutes, tmp = None, None
+        if r.get("brute_imposee") is not None:
+            tmp = _tf.mkdtemp(prefix="reserve-brute-")
+            cible = Path(tmp) / Path(r["brute_imposee"]).name
+            try:
+                _os.link(str(r["brute_imposee"]), str(cible))
+            except Exception:
+                _sh.copy2(str(r["brute_imposee"]), str(cible))
+            dossier_brutes = tmp
 
         debut = time.monotonic()
         try:
-            modele = await asyncio.to_thread(
-                noctus_web.gen_from_draft, str(brute), draft, ["V1"], None, None)
-        except Exception:
-            modele = None
-        if not modele:
-            return False
-
-        etat = "running"
-        limite = time.monotonic() + ATTENTE_MAX_S
-        while time.monotonic() < limite:
-            await asyncio.sleep(2)
             try:
-                etat = noctus_web.status(modele).get("state", "running")
+                modele = await asyncio.to_thread(
+                    noctus_web.gen_from_draft, str(r["video"]), r["draft"],
+                    ["V1"], None,
+                    Path(dossier_brutes) if dossier_brutes else None)
             except Exception:
-                etat = "running"
-            if etat in ("done", "error", "stopped"):
-                break
-        if etat != "done":
-            return False
+                modele = None
+            if not modele:
+                return False
 
-        try:
-            sorties = noctus_web.output_paths(modele)
-        except Exception:
-            sorties = []
-        if not sorties:
-            return False
+            etat = "running"
+            limite = time.monotonic() + ATTENTE_MAX_S
+            while time.monotonic() < limite:
+                await asyncio.sleep(2)
+                try:
+                    etat = noctus_web.status(modele).get("state", "running")
+                except Exception:
+                    etat = "running"
+                if etat in ("done", "error", "stopped"):
+                    break
+            if etat != "done":
+                return False
 
-        _cap, desc, _ex = u._video_meta(brute)
-        pose = reserve.deposer(
-            identite, famille, sorties[0], emp, desc=desc or "",
-            recette={"brute": str(brute), "caption_id": cap.get("id")})
-        if pose is None:
-            return False
+            try:
+                sorties = noctus_web.output_paths(modele)
+            except Exception:
+                sorties = []
+            if not sorties:
+                return False
+
+            pose = reserve.deposer(
+                identite, famille, sorties[0], emp, desc=r.get("desc") or "",
+                recette={"source": str(r["video"]),
+                         "imposees": list(r.get("imposees") or ())})
+            if pose is None:
+                return False
+        finally:
+            # Le dossier temporaire part quoi qu il arrive : le VPS se
+            # remplirait sinon d une copie de brute a chaque fabrication.
+            if tmp:
+                _sh.rmtree(tmp, ignore_errors=True)
 
         reserve._noter({"acte": "fabrique", "identite": identite,
-                        "famille": famille, "secondes": round(
-                            time.monotonic() - debut, 1)})
+                        "famille": famille,
+                        "secondes": round(time.monotonic() - debut, 1)})
         return True
 
     # -------------------------------------------------------------- boucle --
