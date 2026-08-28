@@ -255,7 +255,7 @@ def _build_menu_embed(identity, guild=None):
         emb.add_field(name=name, value=value, inline=True)
 
     add("cmenu:reel", "contenu", "🎬 Reel", "Vidéos + captions (1 par compte)")
-    add("cmenu:reelmonte", "contenu", "🎞️ Reel déjà monté", "Reels montés (texte déjà incrusté) — à poster tels quels")
+    add("cmenu:reelmonte", "contenu", "🎞️ Template", "Reels montés (texte déjà incrusté) — à poster tels quels")
     add("cmenu:story", "contenu", "📖 Story", "Photo + texte pour ta story")
     add("cmenu:post", "contenu", "🖼️ Post", "Photo + légende pour le feed")
     add("cmenu:storycta", "contenu", "📲 Story CTA", "Photo CTA (à poster le soir)")
@@ -5323,7 +5323,7 @@ class ContentMenuView(discord.ui.View):
     async def b_banger(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_banger_reels(interaction)
 
-    @discord.ui.button(label="Reel déjà monté", emoji="🎞️", style=discord.ButtonStyle.primary, custom_id="cmenu:reelmonte", row=1)
+    @discord.ui.button(label="Template", emoji="🎞️", style=discord.ButtonStyle.primary, custom_id="cmenu:reelmonte", row=1)
     async def b_reelmonte(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.reelmonte.callback(self.cog, interaction)
 
@@ -5460,7 +5460,7 @@ class CentralMenuView(discord.ui.View):
     async def b_reel(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._central_run(interaction, self.cog.reel)
 
-    @discord.ui.button(label="Reel déjà monté", emoji="🎞️", style=discord.ButtonStyle.primary, custom_id="cmenu2:reelmonte", row=0)
+    @discord.ui.button(label="Template", emoji="🎞️", style=discord.ButtonStyle.primary, custom_id="cmenu2:reelmonte", row=0)
     async def b_reelmonte(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._central_run(interaction, self.cog.reelmonte)
 
@@ -5651,7 +5651,7 @@ class _MobileNumberModal(discord.ui.Modal):
 # (cle action, label bouton, attribut commande cog, accepte une quantite ?)
 _JB_ACTIONS = [
     ("reel", "🎬 Reel", "reel", True),
-    ("reelmonte", "🎞️ Reel monté", "reelmonte", True),
+    ("reelmonte", "🎞️ Template", "reelmonte", True),
     ("story", "📖 Story", "story", True),
     ("post", "🖼️ Post", "post", True),
     ("storycta", "📲 Story CTA", "storycta", True),
@@ -5687,7 +5687,7 @@ _JB_ACTIONS_US = [
     ('reelcaption', '💬 Reel caption', 'reelcaption', True),
     ('capbanger', '⭐ Caption', 'captionbanger', False),
     ('montagebanger', '⭐⭐ Caption + Vidéo brut', 'montagebanger', False),
-    ('reelmonte', '🎞️ Reel monté', 'reelmonte', True),
+    ('reelmonte', '🎞️ Template', 'reelmonte', True),
     ('templatebanger', '⭐ Template', 'templatebanger', False),
 
     # Rangee 4 - fin des TEMPLATES, puis les FLASH.
