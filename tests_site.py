@@ -4901,7 +4901,7 @@ try:
     # C'est la REGLE qu'on protege, pas les nombres : une rangee, une famille,
     # et aucune qui deborde les cinq places de Discord.
     check("favoris : le panneau US garde ses 4 familles sur 4 rangees",
-          _rowsFv == {1: 4, 2: 5, 3: 5, 4: 4}, str(_rowsFv))
+          _rowsFv == {1: 4, 2: 5, 3: 5, 4: 5}, str(_rowsFv))
     # Et chaque action connait sa rangee : sans entree, elle retombe sur le
     # filet et atterrit n'importe ou.
     check("favoris : chaque action US a une rangee attribuee",

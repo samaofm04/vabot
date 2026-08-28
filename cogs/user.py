@@ -40,7 +40,7 @@ _MENU_BTN_FEATURE = {
     "cmenu:capbanger": "contenu", "cmenu:montagebanger": "contenu",
     "cmenu:templatebrut": "contenu",
     "cmenu:brutbanger": "contenu", "cmenu:captionbrut": "contenu",
-    "cmenu:templatebanger": "contenu",
+    "cmenu:templatebanger": "contenu", "cmenu:brutchoix": "contenu",
     # Les trois Flash. « contenu » comme leurs voisins : ALL_FEATURES filtre
     # les cles inconnues, donc une fonction inventee ferait disparaitre le
     # bouton en permanence sur tout serveur bride, sans erreur nulle part.
@@ -2949,6 +2949,41 @@ class UserCog(commands.Cog):
         await self._envoyer_brutes_meta(interaction, brutes, identity,
                                         "BRUTE BANGER", entete)
 
+    async def _send_choix_brutes(self, interaction):
+        """Bouton « 🎛️ Choisir ma brute » : il voit, puis il choisit.
+
+        La difference avec « ⭐ Video brut » tient en un mot : celui-la en
+        envoie trois au hasard, celui-ci le laisse decider. Quand une seule
+        brute l interesse, les deux autres etaient du bruit.
+        """
+        if await self._gate_contenu(interaction):
+            return
+        identity = get_user_identity(interaction.user.id)
+        if not identity:
+            await interaction.response.send_message(
+                "Tu n'as pas d'identité assignée. Demande à un admin.",
+                ephemeral=True)
+            return
+        brutes = fav_brutes_for(identity, limit=0)
+        if not brutes:
+            await interaction.response.send_message(
+                f"⭐ Aucune **vidéo brute favorite** pour `{identity}`.\n"
+                "_(Un admin les marque avec l'étoile ⭐ sur le site, onglet "
+                "**Vidéo brut**.)_", ephemeral=True)
+            return
+
+        # La premiere ouverture fabrique les vignettes manquantes : quelques
+        # dixiemes de seconde par brute. Les suivantes les relisent.
+        await interaction.response.defer(ephemeral=True)
+        vue = ChoixBrutesView(self, identity, brutes)
+        texte, fichier = vue._planche_et_texte()
+        if fichier is not None:
+            await interaction.followup.send(content=texte, file=fichier,
+                                            view=vue, ephemeral=True)
+        else:
+            await interaction.followup.send(content=texte, view=vue,
+                                            ephemeral=True)
+
     async def _send_caption_plus_brute(self, interaction):
         """Bouton '📝 Caption + Brut Banger' : une brute ⭐ ET une caption ⭐,
         envoyees SEPAREMENT.
@@ -3040,6 +3075,12 @@ class UserCog(commands.Cog):
         description="Un template ⭐ assemble avec une video brute ⭐")
     async def templatebrut(self, interaction: discord.Interaction):
         await self._send_template_plus_brute(interaction)
+
+    @app_commands.command(
+        name="choisirbrute",
+        description="Voir tes vidéos brutes ⭐ et choisir toi-même laquelle")
+    async def choisirbrute(self, interaction: discord.Interaction):
+        await self._send_choix_brutes(interaction)
 
     @app_commands.command(
         name="templatebanger",
@@ -5366,6 +5407,161 @@ class MesComptesInstaModal(discord.ui.Modal, title="📷 Mes comptes Instagram")
             ephemeral=True)
 
 
+class ChoixBrutesView(discord.ui.View):
+    """Le VA regarde ses brutes etoilees et prend celles qu il veut.
+
+    POURQUOI CE BOUTON EXISTE
+        « Video brut » lui en envoie trois au hasard. Quand une seule
+        l interesse vraiment, il recoit deux videos qu il ne postera pas et il
+        doit recliquer en esperant tomber sur la bonne. Ici il VOIT, puis il
+        choisit.
+
+    COMMENT IL VOIT
+        Discord ne sait pas montrer une video qu il n a pas recue, et
+        televerser douze rushs pour qu il en regarde douze couterait plus de
+        temps qu il n en gagne. On lui envoie donc UNE planche-contact : une
+        image ou chaque brute occupe une case numerotee. Les vignettes sont
+        fabriquees une fois puis gardees a cote des videos, donc la deuxieme
+        ouverture est instantanee.
+
+    EPHEMERE, ET IL PEUT EN PRENDRE PLUSIEURS
+        Le menu n est visible que par lui et disparait quand il quitte. La
+        video choisie, elle, est postee normalement : c est ce qu il vient
+        chercher, elle doit rester. Le menu reste ouvert pour qu il en prenne
+        une autre sans tout recommencer.
+    """
+
+    #: Discord plafonne un menu deroulant a 25 entrees, et une planche de plus
+    #: de douze cases devient illisible sur un telephone. C est la plus petite
+    #: des deux limites qui commande.
+    PAR_PAGE = 12
+
+    def __init__(self, cog, identity, brutes, page=0):
+        super().__init__(timeout=600)
+        self.cog = cog
+        self.identity = identity
+        self.brutes = list(brutes)
+        self.page = page
+        self._poser()
+
+    # -- construction ------------------------------------------------------
+
+    def _tranche(self):
+        debut = self.page * self.PAR_PAGE
+        return self.brutes[debut:debut + self.PAR_PAGE]
+
+    def _pages(self):
+        return max(1, (len(self.brutes) + self.PAR_PAGE - 1) // self.PAR_PAGE)
+
+    def _poser(self):
+        self.clear_items()
+        tranche = self._tranche()
+        options = []
+        for i, b in enumerate(tranche, start=1):
+            # Le libelle porte le NUMERO de la planche : c est par lui que le
+            # VA fait le lien entre ce qu il voit et ce qu il choisit. Le nom
+            # de fichier ne lui dit rien, mais il aide a distinguer deux rushs
+            # qui se ressemblent.
+            nom = b.name
+            if len(nom) > 60:
+                nom = nom[:57] + "..."
+            options.append(discord.SelectOption(
+                label="%d — %s" % (i, nom[:90]), value=str(i - 1)))
+        if options:
+            select = discord.ui.Select(
+                placeholder="Laquelle veux-tu ?", options=options, row=0)
+            select.callback = self._choisir
+            self.add_item(select)
+
+        if self._pages() > 1:
+            prec = discord.ui.Button(label="◀", row=1,
+                                     disabled=(self.page == 0))
+            prec.callback = self._precedente
+            self.add_item(prec)
+            suiv = discord.ui.Button(
+                label="▶", row=1,
+                disabled=(self.page >= self._pages() - 1))
+            suiv.callback = self._suivante
+            self.add_item(suiv)
+
+    def _planche_et_texte(self):
+        import vignettes
+        tranche = self._tranche()
+        vignettes.prechauffer(tranche)
+        image = vignettes.planche(tranche)
+        texte = ("⭐ **%d brute(s) étoilée(s)** pour `%s`"
+                 % (len(self.brutes), self.identity))
+        if self._pages() > 1:
+            texte += "  ·  page %d/%d" % (self.page + 1, self._pages())
+        texte += "\nRegarde les numéros, puis choisis dans le menu. "
+        texte += "Tu peux en prendre plusieurs."
+        fichier = None
+        if image:
+            import io
+            fichier = discord.File(io.BytesIO(image), filename="brutes.jpg")
+        return texte, fichier
+
+    # -- reactions ---------------------------------------------------------
+
+    async def _rafraichir(self, interaction):
+        self._poser()
+        texte, fichier = self._planche_et_texte()
+        try:
+            if fichier is not None:
+                await interaction.response.edit_message(
+                    content=texte, attachments=[fichier], view=self)
+            else:
+                await interaction.response.edit_message(content=texte, view=self)
+        except Exception:
+            pass
+
+    async def _precedente(self, interaction):
+        self.page = max(0, self.page - 1)
+        await self._rafraichir(interaction)
+
+    async def _suivante(self, interaction):
+        self.page = min(self._pages() - 1, self.page + 1)
+        await self._rafraichir(interaction)
+
+    async def _choisir(self, interaction):
+        try:
+            rang = int(interaction.data["values"][0])
+        except Exception:
+            await interaction.response.send_message("Choix illisible.",
+                                                    ephemeral=True)
+            return
+        tranche = self._tranche()
+        if not (0 <= rang < len(tranche)):
+            await interaction.response.send_message(
+                "Cette vidéo n'est plus dans la liste.", ephemeral=True)
+            return
+        video = tranche[rang]
+
+        # Le menu reste ouvert : il en prendra peut-etre une autre. On accuse
+        # reception tout de suite, sinon Discord considere l interaction
+        # perdue au bout de trois secondes.
+        await interaction.response.defer()
+
+        # La video part EN CLAIR, pas en ephemere : c est ce que le VA vient
+        # chercher, et un message ephemere disparait des qu il ferme Discord.
+        _c, desc, _e = _video_meta(video)
+        try:
+            await interaction.followup.send(
+                content=("🎥 **BRUTE CHOISIE** (`%s`) — la voici, sans montage."
+                         % self.identity),
+                file=discord.File(str(video), filename=video.name),
+                ephemeral=False)
+        except discord.HTTPException as e:
+            await interaction.followup.send(
+                "⚠️ Envoi impossible (trop lourde pour Discord) : %s" % e,
+                ephemeral=True)
+            return
+        if desc:
+            await interaction.followup.send(
+                "📄 **DESCRIPTION** (champ légende) :\n```\n%s\n```"
+                % str(desc)[:1800], ephemeral=False)
+
+
 class ContentMenuView(discord.ui.View):
     """Menu de contenu cliquable. Chaque bouton sert le contenu correspondant
     pour l'identité du VA qui clique (réutilise les commandes existantes).
@@ -5767,6 +5963,7 @@ _JB_ACTIONS_US = [
     ('templateflash', '⚡ Flash', 'templateflash', False),
     ('templateflashbanger', '⭐ Flash', 'templateflashbanger', False),
     ('templateflashbrut', '⭐⭐ Flash + Brut', 'templateflashbrut', False),
+    ('brutchoix', '🎛️ Choisir ma brute', 'choisirbrute', False),
 ]
 
 #: La rangee de chaque action : UNE rangee = UNE famille.
@@ -5798,7 +5995,7 @@ _JB_RANGEES = {
     'reelcaption': 3, 'capbanger': 3, 'montagebanger': 3,
     'reelmonte': 3, 'templatebanger': 3,
     # Rangee 4 : la fin des templates, puis les Flash.
-    'templatebrut': 4,
+    'templatebrut': 4, 'brutchoix': 4,
     'templateflash': 4, 'templateflashbanger': 4, 'templateflashbrut': 4,
     # Retire du menu, garde ici : un panneau DEJA poste porte encore ce bouton,
     # et sans rangee il retomberait sur le filet et atterrirait n'importe ou.

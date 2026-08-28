@@ -45340,6 +45340,7 @@ def create_app():
                                 # laissé seul, il éteindrait à la naissance une
                                 # future vidéo qui porterait le même nom.
                                 or n == f"{stem}{SUFFIXE_DESACTIVE}"
+                                or n == f"{stem}.thumb.jpg"      # vignette du menu
                                 or n == f"{stem}.montage.png"):  # aperçu généré
                             to_delete.append(sibling)
                 # Ce qui part sans copie sur le Drive est compte AVANT
