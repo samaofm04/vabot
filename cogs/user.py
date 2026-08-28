@@ -5670,28 +5670,28 @@ _JB_ACTIONS = [
 # exemple) — à la place « Reel caption » (brute + caption incrustée, biblio
 # Caption du site) et « Reel monté » (montage template).
 _JB_ACTIONS_US = [
-    # Rangee 1 - IDENTITE — le nom, le pseudo, puis la photo et la bio.
+    # Rangee 1 - IDENTITE.
     ('name', '📝 Name', 'name', False),
     ('pseudo', '👤 Pseudo', 'username', False),
     ('pp', '🖼️ PP', 'profilepic', True),
     ('bio', '💬 Bio', 'bio', True),
 
-    # Rangee 2 - STORIES, POST, et le reel deja monte.
+    # Rangee 2 - PUBLICATIONS, puis le brut nu et sa version marquee.
     ('story', '📖 Story', 'story', True),
     ('storycta', '📲 Story CTA', 'storycta', True),
     ('post', '🖼️ Post', 'post', True),
-    ('reelmonte', '🎞️ Reel monté', 'reelmonte', True),
+    ('brute', '🎥 Vidéo brut', 'videobrut', True),
+    ('brutbanger', '⭐ Vidéo brut', 'brutbanger', False),
 
-    # Rangee 3 - CAPTIONS : la libre, la marquee, puis les deux fusions.
+    # Rangee 3 - CAPTIONS en entier, puis l'entree de la famille Template.
     ('reelcaption', '💬 Reel caption', 'reelcaption', True),
     ('capbanger', '⭐ Caption', 'captionbanger', False),
     ('montagebanger', '⭐⭐ Caption + Vidéo brut', 'montagebanger', False),
+    ('reelmonte', '🎞️ Reel monté', 'reelmonte', True),
     ('templatebanger', '⭐ Template', 'templatebanger', False),
-    ('templatebrut', '⭐⭐ Template + Brut', 'templatebrut', False),
 
-    # Rangee 4 - BRUT et TEMPLATES : chaque version marquee suit sa base.
-    ('brute', '🎥 Vidéo brut', 'videobrut', True),
-    ('brutbanger', '⭐ Vidéo brut', 'brutbanger', False),
+    # Rangee 4 - fin des TEMPLATES, puis les FLASH.
+    ('templatebrut', '⭐⭐ Template + Brut', 'templatebrut', False),
     ('templateflash', '⚡ Template Flash', 'templateflash', False),
     ('templateflashbanger', '⭐ ⚡ Flash', 'templateflashbanger', False),
     ('templateflashbrut', '⭐⭐ ⚡ Flash + Brut', 'templateflashbrut', False),
@@ -5713,7 +5713,8 @@ _JB_ACTIONS_US = [
 #: selecteur de quantite, il reste donc 4 rangees, soit 20 places.
 _JB_RANGEES = {
     'name': 1, 'pseudo': 1, 'pp': 1, 'bio': 1,
-    'story': 2, 'storycta': 2, 'post': 2, 'reelmonte': 2,
+    # Rangee 2 : les publications, puis le brut nu et sa version marquee.
+    'story': 2, 'storycta': 2, 'post': 2, 'brute': 2, 'brutbanger': 2,
     # Rangee 3 : les CAPTIONS, de la version libre aux versions marquees, puis
     # les deux fusions. Rangee 4 : le BRUT et les TEMPLATES, meme progression.
     #
@@ -5721,9 +5722,11 @@ _JB_RANGEES = {
     # brut », « Template Flash » puis « ⭐ Flash ». Auparavant tous les etoiles
     # etaient parques ensemble en rangee 4, loin de ce dont ils sont la
     # variante — on lisait le compte d'etoiles sans voir la parente.
+    # Rangee 3 : les CAPTIONS en entier, puis l'entree de la famille Template.
     'reelcaption': 3, 'capbanger': 3, 'montagebanger': 3,
-    'templatebanger': 3, 'templatebrut': 3,
-    'brute': 4, 'brutbanger': 4,
+    'reelmonte': 3, 'templatebanger': 3,
+    # Rangee 4 : la fin des templates, puis les Flash.
+    'templatebrut': 4,
     'templateflash': 4, 'templateflashbanger': 4, 'templateflashbrut': 4,
     # Retire du menu, garde ici : un panneau DEJA poste porte encore ce bouton,
     # et sans rangee il retomberait sur le filet et atterrirait n'importe ou.
