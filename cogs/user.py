@@ -5684,7 +5684,7 @@ _JB_ACTIONS_US = [
     ('brutbanger', '⭐ Vidéo brut', 'brutbanger', False),
 
     # Rangee 3 - CAPTIONS en entier, puis l'entree de la famille Template.
-    ('reelcaption', '💬 Reel caption', 'reelcaption', True),
+    ('reelcaption', '💬 Caption', 'reelcaption', True),
     ('capbanger', '⭐ Caption', 'captionbanger', False),
     ('montagebanger', '⭐⭐ Caption + Vidéo brut', 'montagebanger', False),
     ('reelmonte', '🎞️ Template', 'reelmonte', True),
