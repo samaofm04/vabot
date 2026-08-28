@@ -266,11 +266,11 @@ def _build_menu_embed(identity, guild=None):
         "Ton template ⭐, monté avec une de tes brutes")
     add("cmenu:templatebrut", "contenu", "⭐⭐ Template + Brut", "Un template ⭐ assemblé avec une brute ⭐")
     add("cmenu:brutbanger", "contenu", "⭐ Vidéo brut", "Tes meilleures brutes ⭐, sans montage")
-    add("cmenu:templateflash", "contenu", "⚡ Template Flash",
+    add("cmenu:templateflash", "contenu", "⚡ Flash",
         "Un montage ⚡ Flash Trend, monté avec une brute au hasard")
-    add("cmenu:templateflashbanger", "contenu", "⭐ ⚡ Flash",
+    add("cmenu:templateflashbanger", "contenu", "⭐ Flash",
         "Un montage ⚡ ET ⭐, monté avec une brute au hasard")
-    add("cmenu:templateflashbrut", "contenu", "⭐⭐ ⚡ Flash + Brut",
+    add("cmenu:templateflashbrut", "contenu", "⭐⭐ Flash + Brut",
         "Un montage ⚡ ET ⭐, monté avec ta brute ⭐")
     add("cmenu:pseudo", "contenu", "👤 Pseudo", "Des pseudos dispo")
     add("cmenu:name", "contenu", "📝 Name", "Des noms d'affichage")
@@ -5422,15 +5422,15 @@ class ContentMenuView(discord.ui.View):
     async def b_montagebanger(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_montage_bangers(interaction)
 
-    @discord.ui.button(label="Template Flash", emoji="⚡", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflash", row=3)
+    @discord.ui.button(label="Flash", emoji="⚡", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflash", row=3)
     async def b_templateflash(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_template_flash(interaction)
 
-    @discord.ui.button(label="⭐ ⚡ Flash", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflashbanger", row=3)
+    @discord.ui.button(label="⭐ Flash", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflashbanger", row=3)
     async def b_templateflashbanger(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_template_flash(interaction, exiger_banger=True)
 
-    @discord.ui.button(label="⭐⭐ ⚡ Flash + Brut", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflashbrut", row=3)
+    @discord.ui.button(label="⭐⭐ Flash + Brut", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflashbrut", row=3)
     async def b_templateflashbrut(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_template_flash(interaction, exiger_banger=True, brute_favorite=True)
 
@@ -5692,9 +5692,9 @@ _JB_ACTIONS_US = [
 
     # Rangee 4 - fin des TEMPLATES, puis les FLASH.
     ('templatebrut', '⭐⭐ Template + Brut', 'templatebrut', False),
-    ('templateflash', '⚡ Template Flash', 'templateflash', False),
-    ('templateflashbanger', '⭐ ⚡ Flash', 'templateflashbanger', False),
-    ('templateflashbrut', '⭐⭐ ⚡ Flash + Brut', 'templateflashbrut', False),
+    ('templateflash', '⚡ Flash', 'templateflash', False),
+    ('templateflashbanger', '⭐ Flash', 'templateflashbanger', False),
+    ('templateflashbrut', '⭐⭐ Flash + Brut', 'templateflashbrut', False),
 ]
 
 #: La rangee de chaque action : UNE rangee = UNE famille.
