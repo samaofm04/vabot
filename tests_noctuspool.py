@@ -42,7 +42,14 @@ def main():
         import noctus_reserve as nr
         from cogs import noctuspool as np
 
-        # ---- le creneau ---------------------------------------------------
+        # ---- par defaut, il tourne TOUJOURS -------------------------------
+        check("par defaut : aucun creneau, il tourne a toute heure",
+              np.TOUJOURS and all(np._dans_le_creneau(a(h)) for h in range(24)),
+              "un remplissage seulement nocturne laisse la reserve se vider "
+              "en fin de journee")
+
+        # ---- le creneau, quand on en pose un ------------------------------
+        np.TOUJOURS = False
         np.DEBUT_H, np.FIN_H = 0, 5
         check("creneau 0h-5h : 1h dedans", np._dans_le_creneau(a(1)))
         check("creneau 0h-5h : 4h dedans", np._dans_le_creneau(a(4)))
@@ -65,6 +72,27 @@ def main():
               not any(np._dans_le_creneau(a(h)) for h in range(24)),
               "un creneau nul ne doit pas devenir permanent")
         np.DEBUT_H, np.FIN_H = 0, 5
+        np.TOUJOURS = True
+
+        # ---- la politesse : on ne fabrique pas pendant qu un VA attend ----
+        import noctus_web as _nw
+        vrai = _nw.generations_en_cours
+        try:
+            _nw.generations_en_cours = lambda: {"vam-en-cours"}
+            check("un VA attend : on cede le tour", np._quelqu_un_attend(),
+                  "les deux se disputeraient ffmpeg")
+            _nw.generations_en_cours = lambda: set()
+            check("personne n attend : on peut fabriquer",
+                  not np._quelqu_un_attend())
+
+            def _casse():
+                raise RuntimeError("moteur illisible")
+            _nw.generations_en_cours = _casse
+            check("moteur illisible : on cede, par prudence",
+                  np._quelqu_un_attend(),
+                  "ceder coute un retard, passer outre ralentit quelqu un")
+        finally:
+            _nw.generations_en_cours = vrai
 
         # ---- le choix de la case -----------------------------------------
         choisir = np.NoctusPool._case_la_plus_vide

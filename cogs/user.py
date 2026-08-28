@@ -2590,7 +2590,7 @@ class UserCog(commands.Cog):
             await self._gen_and_send_caption(
                 interaction, vid, cap, block, idx, total, identity,
                 label="CAPTION BANGER", emoji="⭐",
-                prefixe_fichier="caption_banger")
+                prefixe_fichier="caption_banger", famille="caption")
 
     async def _send_montage_bangers(self, interaction):
         """Bouton '🎬 Montage Banger' : une BRUTE favorite + une CAPTION favorite.
@@ -2660,7 +2660,7 @@ class UserCog(commands.Cog):
             await self._gen_and_send_caption(
                 interaction, vid, cap, block, idx, total, identity,
                 label="MONTAGE BANGER", emoji="🎬",
-                prefixe_fichier="montage_banger")
+                prefixe_fichier="montage_banger", famille="montage")
 
     async def _send_template_plus_brute(self, interaction, brute_favorite=True):
         """Bouton 'Template + Brut' : un template ⭐ ASSEMBLE avec une brute.
@@ -3298,7 +3298,7 @@ class UserCog(commands.Cog):
 
     async def _gen_and_send_caption(self, interaction, video, cap, block, idx, total,
                                     identity, label="REEL CAPTION", emoji="💬",
-                                    prefixe_fichier="reel_caption"):
+                                    prefixe_fichier="reel_caption", famille=""):
         """Génère UNE vidéo brute + caption incrustée puis l'envoie (+ description).
 
         `label` sert au bouton « Montage Banger », qui emprunte exactement cette
@@ -3309,42 +3309,75 @@ class UserCog(commands.Cog):
         import asyncio
         import noctus_web
         draft = draft_caption(cap, block)
-        try:
-            model = await asyncio.to_thread(
-                noctus_web.gen_from_draft, str(video), draft, ["V1"], None, None)
-        except Exception:
-            model = None
-        if not model:
-            await interaction.followup.send(f"⚠️ {label} {idx}/{total} : génération impossible.")
-            return
-        state = "running"
-        for _ in range(90):                       # ~3 min max
-            await asyncio.sleep(2)
+
+        # LA RESERVE D'ABORD. Une variante deja fabriquee pour cette recette
+        # exacte part tout de suite, au lieu des 15 a 30 s de generation. Si
+        # elle est vide, on genere comme avant : la reserve accelere, elle ne
+        # conditionne rien.
+        fichier, de_la_reserve = None, None
+        if famille:
             try:
-                state = noctus_web.status(model).get("state", "running")
+                import noctus_reserve as _res
+                emp = _res.empreinte(identity, famille, video, caption=cap,
+                                     draft=draft)
+                pris, _desc = _res.prendre(
+                    identity, famille, emp,
+                    demandeur=str(getattr(interaction.user, "id", "")))
+                if pris is not None:
+                    fichier, de_la_reserve = pris, pris
             except Exception:
-                state = "running"
-            if state in ("done", "error", "stopped"):
-                break
-        if state != "done":
-            await interaction.followup.send(
-                f"⚠️ {label} {idx}/{total} : génération échouée ({state}).")
-            return
-        outs = noctus_web.output_paths(model)
-        if not outs:
-            await interaction.followup.send(f"⚠️ {label} {idx}/{total} : aucun fichier produit.")
-            return
+                fichier = None                # reserve illisible : on genere
+
+        if fichier is None:
+            try:
+                model = await asyncio.to_thread(
+                    noctus_web.gen_from_draft, str(video), draft, ["V1"], None, None)
+            except Exception:
+                model = None
+            if not model:
+                await interaction.followup.send(f"⚠️ {label} {idx}/{total} : génération impossible.")
+                return
+            state = "running"
+            for _ in range(90):                       # ~3 min max
+                await asyncio.sleep(2)
+                try:
+                    state = noctus_web.status(model).get("state", "running")
+                except Exception:
+                    state = "running"
+                if state in ("done", "error", "stopped"):
+                    break
+            if state != "done":
+                await interaction.followup.send(
+                    f"⚠️ {label} {idx}/{total} : génération échouée ({state}).")
+                return
+            outs = noctus_web.output_paths(model)
+            if not outs:
+                await interaction.followup.send(f"⚠️ {label} {idx}/{total} : aucun fichier produit.")
+                return
+            fichier = outs[0]
         intro = (f"{emoji} **{label} {idx}/{total}** → à poster sur ton **compte n°{idx}** "
                  f"(`{identity}`)\n📥 Poste cette vidéo **telle quelle** — la caption est "
                  f"**déjà écrite** dessus.")
         try:
             await interaction.followup.send(
                 content=intro,
-                file=discord.File(str(outs[0]), filename=f"{prefixe_fichier}_{idx}.mp4"))
+                file=discord.File(str(fichier), filename=f"{prefixe_fichier}_{idx}.mp4"))
         except discord.HTTPException as e:
             await interaction.followup.send(
                 f"⚠️ {label} {idx}/{total} : envoi impossible (trop lourd) : {e}")
             return
+        finally:
+            # Une variante sortie de la reserve est effacee QUOI QU IL ARRIVE.
+            # Elle n y retourne jamais : un echec d envoi ne prouve pas que
+            # Discord n a rien recu, et la re-servir serait le doublon qu on
+            # interdit. Perdre une variante coute 25 s de calcul ; un doublon
+            # coute un shadowban.
+            if de_la_reserve is not None:
+                try:
+                    import noctus_reserve as _res2
+                    _res2.solder(de_la_reserve)
+                except Exception:
+                    pass
         desc = str(cap.get("desc") or "").strip()
         if desc:
             await interaction.followup.send(

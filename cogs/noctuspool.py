@@ -1,27 +1,27 @@
 # -*- coding: utf-8 -*-
-"""cogs/noctuspool.py — remplit la réserve de vidéos, la nuit.
+"""cogs/noctuspool.py — remplit la réserve de vidéos, en continu.
 
 CE QU'IL FAIT
 
-Entre minuit et 5 h, il fabrique des vidéos à l'avance et les range dans
-`noctus_reserve`. Le matin, un VA qui clique reçoit un fichier déjà prêt au
-lieu d'attendre 15 à 30 secondes par vidéo.
+Il fabrique des vidéos à l'avance et les range dans `noctus_reserve`, pour
+qu'un VA qui clique reçoive un fichier déjà prêt au lieu d'attendre 15 à 30
+secondes. Le stock se reconstitue au fil de sa consommation : il n'est donc
+jamais vide en fin de journée, ce qu'un remplissage seulement nocturne
+n'aurait pas garanti.
 
-BORNÉ PAR L'HEURE, PAS PAR UN COMPTE
+IL S'EFFACE, PLUTÔT QUE DE SE CACHER LA NUIT
 
-Il s'arrête à l'heure dite, quoi qu'il arrive. C'est délibéré : la durée réelle
-d'une génération n'est pas connue — les « 15-30 s » du dépôt sont un
-commentaire, jamais une mesure. Un objectif chiffré déborderait sur la journée
-le jour où une vidéo prend 40 secondes ; une borne horaire remplit simplement
-un peu moins et rend la main à l'heure.
+Avant chaque fabrication il regarde si une génération demandée par un VA est
+en cours. Si oui, il rend la main immédiatement. C'est ce qui lui permet de
+travailler à toute heure sans jamais ralentir quelqu'un : les deux se
+disputeraient ffmpeg, et celui qui regarde son écran attendrait deux fois plus
+longtemps — l'inverse exact du but.
 
 À chaque tour il sert la case la plus dégarnie. Si la machine va vite, tout le
 monde en profite ; si elle rame, les plus vides sont servis d'abord.
 
-IL NE TOURNE JAMAIS EN JOURNÉE
-
-Hors du créneau, il ne fait rien. Il ne peut donc pas voler le processeur à un
-VA qui clique à midi — c'est justement l'attente qu'on cherche à supprimer.
+Poser NOCTUS_POOL_DEBUT et NOCTUS_POOL_FIN le restreint à un créneau, si un
+jour la machine doit être laissée tranquille en journée.
 
 IL MESURE
 
@@ -36,11 +36,28 @@ from discord.ext import commands, tasks
 
 import noctus_reserve as reserve
 
-#: Créneau de travail, en heures locales. Bornes réglables sans toucher au code.
 import os
 
-DEBUT_H = int(os.environ.get("NOCTUS_POOL_DEBUT") or "0")
-FIN_H = int(os.environ.get("NOCTUS_POOL_FIN") or "5")
+#: Par DEFAUT il tourne en permanence : le stock se reconstitue au fil de sa
+#: consommation, donc il n'est jamais vide au moment ou un VA clique. Un
+#: creneau nocturne laisserait la reserve se vider en fin de journee, et
+#: l'apres-midi redeviendrait lent.
+#:
+#: Ce n'est possible que parce qu'il s'efface : voir _quelqu_un_attend. Sans
+#: cette politesse, remplir toute la journee volerait le processeur a celui
+#: qu'on cherche justement a ne plus faire attendre.
+#:
+#: Poser les DEUX bornes le restreint a un creneau, si un jour la machine doit
+#: etre laissee tranquille en journee.
+_DEBUT = os.environ.get("NOCTUS_POOL_DEBUT")
+_FIN = os.environ.get("NOCTUS_POOL_FIN")
+TOUJOURS = not (_DEBUT and _FIN)
+DEBUT_H = int(_DEBUT or "0")
+FIN_H = int(_FIN or "5")
+
+#: Repos entre deux fabrications. Court, mais il laisse le processeur souffler
+#: et donne a une demande de VA le temps de se declarer avant qu'on reparte.
+REPOS_S = 3
 
 #: Familles que ce cog sait fabriquer aujourd'hui. Les familles template et
 #: flash passent par un autre chemin d'assemblage : elles viendront ensuite,
@@ -58,12 +75,32 @@ def _dans_le_creneau(maintenant=None) -> bool:
     Gère le passage de minuit : un créneau 22 h → 5 h enjambe la date, et une
     comparaison naïve `DEBUT <= h < FIN` le rendrait toujours faux.
     """
+    if TOUJOURS:
+        return True
     h = (maintenant or datetime.now()).hour
     if DEBUT_H == FIN_H:
         return False
     if DEBUT_H < FIN_H:
         return DEBUT_H <= h < FIN_H
     return h >= DEBUT_H or h < FIN_H
+
+
+def _quelqu_un_attend() -> bool:
+    """Vrai si une generation demandee par un VA tourne en ce moment.
+
+    C'est ce qui permet de remplir toute la journee sans nuire : on ne lance
+    jamais une fabrication d'avance pendant qu'un VA attend la sienne. Les deux
+    se disputeraient ffmpeg, et celui qui regarde son ecran attendrait deux
+    fois plus longtemps — l'inverse exact du but.
+
+    En cas de doute, on repond OUI : ceder un tour ne coute qu'un retard de
+    remplissage, alors que passer outre ralentit quelqu'un.
+    """
+    try:
+        import noctus_web
+        return bool(noctus_web.generations_en_cours())
+    except Exception:
+        return True
 
 
 class NoctusPool(commands.Cog):
@@ -205,13 +242,15 @@ class NoctusPool(commands.Cog):
             while _dans_le_creneau():
                 case = self._case_la_plus_vide(identites, ecartees)
                 if case is None:
-                    return                   # plus rien a faire : bonne nuit
+                    return                   # tout est plein : rien a faire
+                if _quelqu_un_attend():
+                    return                   # un VA attend : on lui laisse tout
                 if not await self._fabriquer_une(*case):
                     # Vivier vide ou moteur en panne : on ecarte la case. Sans
                     # ca elle se represente comme « la plus degarnie » a chaque
-                    # tour, et la nuit entiere s y use.
+                    # tour, et le remplissage s y userait indefiniment.
                     ecartees.add(case)
-                    await asyncio.sleep(1)
+                await asyncio.sleep(REPOS_S)
         except Exception:
             pass
         finally:
