@@ -2972,6 +2972,11 @@ class UserCog(commands.Cog):
                 "**Vidéo brut**.)_", ephemeral=True)
             return
 
+        # Le menu precedent part AVANT qu on ouvre celui-ci : deux menus
+        # empiles proposent deux identites differentes, et rien ne dit lequel
+        # est le bon.
+        await _fermer_menu_brutes(interaction.user.id)
+
         # La premiere ouverture fabrique les vignettes manquantes : quelques
         # dixiemes de seconde par brute. Les suivantes les relisent.
         await interaction.response.defer(ephemeral=True)
@@ -2984,6 +2989,7 @@ class UserCog(commands.Cog):
         else:
             vue.message = await interaction.followup.send(
                 content=texte, view=vue, ephemeral=True, wait=True)
+        _DERNIER_MENU_BRUTES[int(interaction.user.id)] = vue.message
 
     async def _send_caption_plus_brute(self, interaction):
         """Bouton '📝 Caption + Brut Banger' : une brute ⭐ ET une caption ⭐,
@@ -5408,6 +5414,34 @@ class MesComptesInstaModal(discord.ui.Modal, title="📷 Mes comptes Instagram")
             ephemeral=True)
 
 
+#: Le dernier menu de brutes ouvert par chaque personne.
+#:
+#: Un message ephemere ne disparait pas quand on en ouvre un autre : le
+#: proprietaire se retrouvait avec le menu de « ibenhaastrup » et celui de
+#: « themikkiangel » empiles dans le meme salon, tous deux cliquables. On
+#: efface donc le precedent a l ouverture du suivant.
+#:
+#: Un dictionnaire suffit : une entree par personne, remplacee a chaque
+#: ouverture. Il ne grossit pas avec le temps.
+_DERNIER_MENU_BRUTES = {}
+
+
+async def _fermer_menu_brutes(user_id):
+    """Efface le menu de brutes encore ouvert par cette personne, s il y en a.
+
+    Ne leve jamais : le message a peut-etre deja ete rejete a la main, ou son
+    jeton d interaction a expire. Dans les deux cas il n y a plus rien a
+    fermer, et echouer ici empecherait d ouvrir le nouveau.
+    """
+    ancien = _DERNIER_MENU_BRUTES.pop(int(user_id or 0), None)
+    if ancien is None:
+        return
+    try:
+        await ancien.delete()
+    except Exception:
+        pass
+
+
 def _vers_content(interaction):
     """Rend une interaction dont les envois partent dans le salon -content.
 
@@ -5619,6 +5653,11 @@ class ChoixBrutesView(discord.ui.View):
         """
         for item in self.children:
             item.disabled = True
+        # Il ne doit plus etre ferme deux fois : le registre ne garde que les
+        # menus encore vivants.
+        for cle, msg in list(_DERNIER_MENU_BRUTES.items()):
+            if msg is self.message:
+                _DERNIER_MENU_BRUTES.pop(cle, None)
         try:
             if self.message is not None:
                 await self.message.edit(
