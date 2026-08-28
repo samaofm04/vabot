@@ -4818,12 +4818,12 @@ try:
     # caption etoilee — mais les envoyait separement, la caption en texte a
     # recopier. Deux boutons pour un meme couple, dont un qui ne montait pas :
     # c'est ce qui rendait le menu illisible. La commande /captionbrut reste.
-    _BTNS = ("cmenu:capbanger", "cmenu:montagebanger", "cmenu:templatebrut",
-             "cmenu:brutbanger")
-    check("favoris : les 4 boutons sont dans le menu VA",
+    _BTNS = ("cmenu:capbanger", "cmenu:montagebanger", "cmenu:templatebanger",
+             "cmenu:templatebrut", "cmenu:brutbanger")
+    check("favoris : les 5 boutons sont dans le menu VA",
           all(b in _idsFv for b in _BTNS),
           str([b for b in _BTNS if b not in _idsFv]))
-    check("favoris : les 4 boutons sont declares dans _MENU_BTN_FEATURE",
+    check("favoris : les 5 boutons sont declares dans _MENU_BTN_FEATURE",
           all(_uFv._MENU_BTN_FEATURE.get(b) == "contenu" for b in _BTNS),
           str([b for b in _BTNS if _uFv._MENU_BTN_FEATURE.get(b) != "contenu"]))
     # Discord plafonne a 5 boutons par rangee : une 6e sur la meme ligne fait
@@ -4843,9 +4843,9 @@ try:
     import os as _os
     import tempfile as _tempfile
     _clesFv = {a[0] for a in _uFv._JB_ACTIONS_US}
-    check("favoris : les 4 actions sont dans le menu US",
-          all(k in _clesFv for k in ("capbanger", "montagebanger", "templatebrut",
-                                     "brutbanger")),
+    check("favoris : les 5 actions sont dans le menu US",
+          all(k in _clesFv for k in ("capbanger", "montagebanger", "templatebanger",
+                                     "templatebrut", "brutbanger")),
           str(sorted(_clesFv)))
     # Le panneau US declenche cmd.callback sur un ATTRIBUT du cog : une action
     # qui pointe vers une methode inexistante repond « Action indisponible ».
@@ -4901,7 +4901,7 @@ try:
     # C'est la REGLE qu'on protege, pas les nombres : une rangee, une famille,
     # et aucune qui deborde les cinq places de Discord.
     check("favoris : le panneau US garde ses 4 familles sur 4 rangees",
-          _rowsFv == {1: 4, 2: 4, 3: 4, 4: 5}, str(_rowsFv))
+          _rowsFv == {1: 4, 2: 4, 3: 5, 4: 5}, str(_rowsFv))
     # Et chaque action connait sa rangee : sans entree, elle retombe sur le
     # filet et atterrit n'importe ou.
     check("favoris : chaque action US a une rangee attribuee",

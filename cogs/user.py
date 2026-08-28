@@ -40,6 +40,7 @@ _MENU_BTN_FEATURE = {
     "cmenu:capbanger": "contenu", "cmenu:montagebanger": "contenu",
     "cmenu:templatebrut": "contenu",
     "cmenu:brutbanger": "contenu", "cmenu:captionbrut": "contenu",
+    "cmenu:templatebanger": "contenu",
     # Les trois Flash. « contenu » comme leurs voisins : ALL_FEATURES filtre
     # les cles inconnues, donc une fonction inventee ferait disparaitre le
     # bouton en permanence sur tout serveur bride, sans erreur nulle part.
@@ -261,6 +262,8 @@ def _build_menu_embed(identity, guild=None):
     add("cmenu:banger", "contenu", "⭐ Reels", "Tes meilleurs reels (marqués ⭐)")
     add("cmenu:capbanger", "contenu", "⭐ Caption", "Tes meilleures captions (marquées ⭐)")
     add("cmenu:montagebanger", "contenu", "⭐⭐ Caption + Vidéo brut", "Une brute ⭐ + une caption ⭐, montées pour toi")
+    add("cmenu:templatebanger", "contenu", "⭐ Template",
+        "Ton template ⭐, monté avec une de tes brutes")
     add("cmenu:templatebrut", "contenu", "⭐⭐ Template + Brut", "Un template ⭐ assemblé avec une brute ⭐")
     add("cmenu:brutbanger", "contenu", "⭐ Vidéo brut", "Tes meilleures brutes ⭐, sans montage")
     add("cmenu:templateflash", "contenu", "⚡ Template Flash",
@@ -2659,8 +2662,17 @@ class UserCog(commands.Cog):
                 label="MONTAGE BANGER", emoji="🎬",
                 prefixe_fichier="montage_banger")
 
-    async def _send_template_plus_brute(self, interaction):
-        """Bouton '🎵 Template + Brut' : un template ⭐ ASSEMBLE avec une brute ⭐.
+    async def _send_template_plus_brute(self, interaction, brute_favorite=True):
+        """Bouton 'Template + Brut' : un template ⭐ ASSEMBLE avec une brute.
+
+        `brute_favorite` decide du STOCK de brutes, et rien d'autre :
+
+            True   la brute doit etre etoilee   -> « ⭐⭐ Template + Brut »
+            False  n'importe quelle brute       -> « ⭐ Template »
+
+        La seconde existe pour la meme raison que « ⭐ Caption » : elle marche
+        encore quand aucune brute n'est etoilee, cas ou la premiere ne rend
+        rien du tout.
 
         La difference avec « Montage Banger » tient en une phrase : ici le
         TEMPLATE est la source et la brute vient s'y inserer au point de coupe ;
@@ -2681,7 +2693,14 @@ class UserCog(commands.Cog):
                 "Tu n'as pas d'identité assignée. Demande à un admin.", ephemeral=True)
             return
         templates, sans_coupe = fav_templates_for(identity)
-        brutes = fav_brutes_for(identity)
+        if brute_favorite:
+            brutes = fav_brutes_for(identity)
+        else:
+            # Tout le stock, moins les desactivees : une brute dont la caption
+            # est deja incrustee ne doit pas servir de support.
+            import brutes_off as _off_t
+            brutes = _off_t.lister(IDENTITIES_DIR / identity / "brutes",
+                                   extensions=VIDEO_EXTS)
         if not templates or not brutes:
             # Le nombre ecarte se dit TOUJOURS : un admin qui a etoile cinq
             # templates et n'en voit aucun arriver doit apprendre qu'il leur
@@ -2700,7 +2719,9 @@ class UserCog(commands.Cog):
                           f"**aucun template utilisable** (onglet **Templates montage**).")
             else:
                 manque = (f"Tu as **{len(templates)} template(s) utilisable(s)**, mais "
-                          f"**aucune vidéo brute étoilée** (onglet **Vidéo brut**).")
+                          f"**aucune vidéo brute étoilée** (onglet **Vidéo brut**)."
+                          if brute_favorite else
+                          "**aucune vidéo brute** (onglet **Vidéo brut**).")
             await interaction.response.send_message(
                 f"🎵 Impossible d'assembler pour `{identity}`.\n{manque}{note}\n"
                 "_(Un admin pose les étoiles ⭐ sur le site.)_", ephemeral=True)
@@ -2718,8 +2739,8 @@ class UserCog(commands.Cog):
             return
         await interaction.response.defer()
         total = min(3, len(templates) * len(brutes))
-        intro = (f"🎵 **{total} TEMPLATE + BRUT pour `{identity}`** — ton template "
-                 f"étoilé, monté avec ta brute étoilée.\n"
+        intro = (f"🎵 **{total} TEMPLATE pour `{identity}`** — ton template "
+                 + ("étoilé, monté avec ta brute étoilée." if brute_favorite else "étoilé, monté avec une de tes brutes.") + "\n"
                  f"⏳ Je les génère (≈15-30s chacun).")
         if sans_coupe:
             intro += (f"\nℹ️ {sans_coupe} template(s) étoilé(s) écarté(s) : "
@@ -2972,6 +2993,15 @@ class UserCog(commands.Cog):
         description="Un template ⭐ assemble avec une video brute ⭐")
     async def templatebrut(self, interaction: discord.Interaction):
         await self._send_template_plus_brute(interaction)
+
+    @app_commands.command(
+        name="templatebanger",
+        description="Un template ⭐ assemble avec une de tes brutes")
+    async def templatebanger(self, interaction: discord.Interaction):
+        # La brute n'a pas a etre etoilee : c'est ce qui distingue ce bouton
+        # de /templatebrut, et ce qui le rend utilisable quand aucune brute
+        # n'est marquee.
+        await self._send_template_plus_brute(interaction, brute_favorite=False)
 
     @app_commands.command(
         name="templateflash",
@@ -5404,6 +5434,10 @@ class ContentMenuView(discord.ui.View):
     async def b_templateflashbrut(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_template_flash(interaction, exiger_banger=True, brute_favorite=True)
 
+    @discord.ui.button(label="⭐ Template", style=discord.ButtonStyle.primary, custom_id="cmenu:templatebanger", row=4)
+    async def b_templatebanger(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._send_template_plus_brute(interaction, brute_favorite=False)
+
     @discord.ui.button(label="⭐⭐ Template + Brut", style=discord.ButtonStyle.primary, custom_id="cmenu:templatebrut", row=4)
     async def b_templatebrut(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_template_plus_brute(interaction)
@@ -5652,6 +5686,7 @@ _JB_ACTIONS_US = [
     ('reelcaption', '💬 Reel caption', 'reelcaption', True),
     ('capbanger', '⭐ Caption', 'captionbanger', False),
     ('montagebanger', '⭐⭐ Caption + Vidéo brut', 'montagebanger', False),
+    ('templatebanger', '⭐ Template', 'templatebanger', False),
     ('templatebrut', '⭐⭐ Template + Brut', 'templatebrut', False),
 
     # Rangee 4 - BRUT et TEMPLATES : chaque version marquee suit sa base.
@@ -5686,7 +5721,8 @@ _JB_RANGEES = {
     # brut », « Template Flash » puis « ⭐ Flash ». Auparavant tous les etoiles
     # etaient parques ensemble en rangee 4, loin de ce dont ils sont la
     # variante — on lisait le compte d'etoiles sans voir la parente.
-    'reelcaption': 3, 'capbanger': 3, 'montagebanger': 3, 'templatebrut': 3,
+    'reelcaption': 3, 'capbanger': 3, 'montagebanger': 3,
+    'templatebanger': 3, 'templatebrut': 3,
     'brute': 4, 'brutbanger': 4,
     'templateflash': 4, 'templateflashbanger': 4, 'templateflashbrut': 4,
     # Retire du menu, garde ici : un panneau DEJA poste porte encore ce bouton,
