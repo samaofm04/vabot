@@ -3307,18 +3307,8 @@ class UserCog(commands.Cog):
         /reelcaption strictement inchangé.
         """
         import asyncio
-        import json as _js
         import noctus_web
-        gp = block.get("global_pos") or {}
-        seg = {"text": cap.get("text") or "", "start": None, "end": None,
-               "x": gp.get("x", 0.5) if gp.get("enabled") else cap.get("x", 0.5),
-               "y": gp.get("y", 0.2) if gp.get("enabled") else cap.get("y", 0.5)}
-        for k in ("wrapW", "lineSpacing"):
-            if cap.get(k) is not None:
-                seg[k] = cap[k]
-        draft = {"segments": _js.dumps([seg]),
-                 "font": block.get("font") or "TikTokSans",
-                 "style": _js.dumps(block.get("style") or {})}
+        draft = draft_caption(cap, block)
         try:
             model = await asyncio.to_thread(
                 noctus_web.gen_from_draft, str(video), draft, ["V1"], None, None)
@@ -6064,6 +6054,28 @@ class JailbreakActionsView(discord.ui.View):
             ),
             color=discord.Color.dark_red(),
         )
+
+
+def draft_caption(cap: dict, block: dict) -> dict:
+    """Le brouillon que le moteur attend pour incruster UNE caption.
+
+    Extrait de _gen_and_send_caption pour que la reserve de videos
+    pre-generees fabrique EXACTEMENT ce que le bouton fabriquerait. Deux
+    copies de cette recette divergeraient : la reserve servirait alors des
+    videos qui ne ressemblent plus a ce que le clic produit, et rien ne le
+    signalerait.
+    """
+    import json as _js
+    gp = block.get("global_pos") or {}
+    seg = {"text": cap.get("text") or "", "start": None, "end": None,
+           "x": gp.get("x", 0.5) if gp.get("enabled") else cap.get("x", 0.5),
+           "y": gp.get("y", 0.2) if gp.get("enabled") else cap.get("y", 0.5)}
+    for k in ("wrapW", "lineSpacing"):
+        if cap.get(k) is not None:
+            seg[k] = cap[k]
+    return {"segments": _js.dumps([seg]),
+            "font": block.get("font") or "TikTokSans",
+            "style": _js.dumps(block.get("style") or {})}
 
 
 def _captions_block(identity):
