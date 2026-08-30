@@ -6453,10 +6453,13 @@ try:
               _rcT._CARRES["inconnu"] == "⬛", _rcT._CARRES)
         # Seize carres a la file ne disent pas lequel est quel jour : sans les
         # dates on voit qu il a rate deux jours, pas LESQUELS.
+        # PAS de dates autour de la bande : sur un panneau Discord etroit elles
+        # cassaient la ligne en trois (date seule, carres, date seule). L
+        # en-tete du message donne deja la periode, et la bande part toujours
+        # du 1er.
         _bandeOb = _rcT.suite_jours(["tenu", "rate", "tenu"], "2026-08-16")
-        check("bilan : la bande est encadrée par ses dates",
-              _bandeOb.startswith("`16/08`") and _bandeOb.endswith("`18/08`"),
-              _bandeOb)
+        check("bilan : la bande n est QUE des carrés, sans date collée",
+              _bandeOb == "🟩🟥🟩", _bandeOb)
         check("bilan : sans date de début, la bande reste lisible",
               _rcT.suite_jours(["tenu"]) == "🟩", _rcT.suite_jours(["tenu"]))
 
@@ -6487,8 +6490,7 @@ try:
         check("mois : la barre sépare les deux quinzaines",
               "┃" in _bandeM, _bandeM)
         check("mois : elle tombe après le 15e carré",
-              _bandeM.index("┃") == _bandeM.index("`01/08`") + len("`01/08` ") + 15,
-              _bandeM)
+              _bandeM.index("┃") == 15, _bandeM)
         check("mois : février s arrête au 28",
               _obT.bilan_mois("m", "M", "2026-02-20")["fin"] == "2026-02-28",
               _obT.bilan_mois("m", "M", "2026-02-20")["fin"])

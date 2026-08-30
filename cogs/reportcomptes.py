@@ -116,7 +116,7 @@ HEURE_REPORT = 1
 #: changement de format ne se voyait qu'a la publication suivante — et on
 #: attendait 1 h du matin en croyant que ca ne marchait pas. Quand le numero
 #: stocke ne correspond plus, la boucle republie une fois, tout de suite.
-FORMAT_BILAN = 4
+FORMAT_BILAN = 5
 
 
 # ==============================================================================
@@ -259,9 +259,9 @@ def suite_jours(suite, debut: str = "", coupure: int = 0) -> str:
     jour de temps en temps — et ce n'est pas la même conversation au moment
     de payer.
 
-    Les dates aux deux bouts, parce que seize carrés à la file ne disent pas
-    lequel est quel jour : sans elles on voit qu'il a raté deux jours, mais
-    pas LESQUELS — et c'est justement ce qu'on veut pouvoir lui dire.
+    La bande commence toujours au 1er du mois, et l'en-tête du message donne
+    la période : c'est ce qui permet de dire « tu as lâché le 19 » sans avoir
+    à répéter les dates sur chaque ligne.
     """
     suite = list(suite or [])
     if not suite:
@@ -274,14 +274,12 @@ def suite_jours(suite, debut: str = "", coupure: int = 0) -> str:
                  + "┃" + "".join(_CARRES.get(x, "⬛") for x in suite[coupure:]))
     else:
         bande = "".join(_CARRES.get(x, "⬛") for x in suite)
-    if not debut:
-        return bande
-    try:
-        d0 = datetime.date.fromisoformat(debut)
-        d1 = d0 + datetime.timedelta(days=len(suite) - 1)
-        return f"`{d0.strftime('%d/%m')}` {bande} `{d1.strftime('%d/%m')}`"
-    except Exception:
-        return bande
+    # PAS de dates autour de la bande. Elles y ont ete un temps, et sur un
+    # panneau Discord etroit elles cassaient la ligne en trois : la date seule,
+    # les carres, la date seule. Un mur gris illisible. L'en-tete du message
+    # donne deja la periode, et la bande commence toujours au 1er : compter
+    # est immediat, et la ligne tient.
+    return bande
 
 
 def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> list:
