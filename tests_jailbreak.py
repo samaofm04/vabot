@@ -1428,14 +1428,204 @@ try:
     # irrecuperables et personne n a demande a les perdre.
     check("nettoyer : la purge ne vise que les messages de bot",
           "m.author.bot" in _sNe and "purge(limit=" in _sNe)
-    check("nettoyer : le panneau est repose juste apres",
-          "_ensure_num_panel" in _sNe.split("purge")[1][:400])
+    # Ce ne sont plus un panneau mais les TROIS messages qui sont reposes.
+    check("nettoyer : les trois messages sont reposes juste apres",
+          "poser_trois" in _sNe.split("purge")[1][:600])
+    check("nettoyer : et le salon repasse en lecture seule",
+          "verrouiller_salon" in _sNe)
     check("nettoyer : le compte rendu dit combien a ete efface",
           "message(s) de bot effac" in _sNe)
     check("nettoyer : et l option se rappelle quand on ne l a pas mise",
           "nettoyer:true" in _sNe)
 except Exception as _eNe:
     check("nettoyer : testable", False, repr(_eNe)[:200])
+
+
+# ==============================================================================
+# RENOMMER UNE FICHE : ne fusionne personne, et le passe de paie suit
+# ==============================================================================
+# Deux defauts trouves par une chasse adverse sur le pipeline de paie. Les
+# deux se reproduisent des qu on retire le correctif : verifie en remettant
+# l ancien comportement, pas seulement en constatant que ca marche.
+try:
+    import json as _jR, tempfile as _tR, pathlib as _pR
+    import jb_objectifs as _obR
+
+    _svR = (_obR.HISTO_FILE, _obR.OBJECTIFS_FILE)
+    _dosR = _pR.Path(_tR.mkdtemp())
+    _obR.HISTO_FILE = _dosR / "h.json"
+    _obR.OBJECTIFS_FILE = _dosR / "o.json"
+    _memR = {}
+    _vraiLoad, _vraiSave = jb._load, jb._save
+    _vraiTa, _vraiTc = jb.tomb_add, jb.tomb_clear
+    jb._load = lambda: _jR.loads(_jR.dumps(_memR))
+    jb._save = lambda d: (_memR.clear(), _memR.update(_jR.loads(_jR.dumps(d))))
+    jb.tomb_add = lambda *a, **k: None
+    jb.tomb_clear = lambda *a, **k: None
+
+    def _baseR():
+        """Une identite avec une fiche IMPLICITE : « Roucham X2 » est porte par
+        vingt comptes mais absent de vas[]. Cet etat n est pas theorique — la
+        synchro Sheet le produit (bloc de coherence, sheets_sync), et
+        list_vas_for_identity affiche donc la fiche dans la barre laterale."""
+        return {"jessye": {
+            "vas": [{"name": "Roucham X1", "discord_username": "roucham_2213"},
+                    {"name": "Fatou X1", "discord_username": "fatou_9081"}],
+            "accounts": [{"va": "Roucham X1", "username": f"r{_i}"} for _i in range(8)]
+                      + [{"va": "Fatou X1", "username": f"f{_i}"} for _i in range(6)]
+                      + [{"va": "Roucham X2", "username": f"x{_i}"} for _i in range(20)]}}
+
+    # ---- 1. renommer SUR une fiche implicite fusionnait deux personnes -----
+    _memR.clear(); _memR.update(_baseR())
+    _avantR = sorted(jb.list_va_names_for_identity("jessye"))
+    _rR = jb.update_va("jessye", "Roucham X1", new_name="Roucham X2")
+    _nX2 = sum(1 for _a in _memR["jessye"]["accounts"] if _a["va"] == "Roucham X2")
+    check("renommage : sur un nom deja porte par des comptes -> refuse",
+          _rR is False, _rR)
+    check("renommage : aucune fiche n a bouge",
+          sorted(jb.list_va_names_for_identity("jessye")) == _avantR,
+          sorted(jb.list_va_names_for_identity("jessye")))
+    check("renommage : les deux jeux de comptes restent separes",
+          _nX2 == 20, _nX2)
+
+    # Le meme scenario avec l ANCIEN test de conflit : il doit casser, sinon
+    # ces trois verifications ne prouvent rien.
+    _memR.clear(); _memR.update(_baseR())
+    _vraiNoms = jb.noms_occupes
+    jb.noms_occupes = lambda e: {jb._va_name(v).strip().lower()
+                                 for v in (e.get("vas") or [])}
+    _rVieux = jb.update_va("jessye", "Roucham X1", new_name="Roucham X2")
+    _nVieux = sum(1 for _a in _memR["jessye"]["accounts"] if _a["va"] == "Roucham X2")
+    jb.noms_occupes = _vraiNoms
+    check("renommage : sans le correctif, la fusion se produit (test non vide)",
+          _rVieux is True and _nVieux == 28, (_rVieux, _nVieux))
+
+    # ---- 2. l historique de paie doit suivre le nom ------------------------
+    _memR.clear(); _memR.update(_baseR())
+    for _j in ("2026-08-01", "2026-08-02", "2026-08-03"):
+        _obR.enregistrer_jour([{"identite": "jessye", "va": "Fatou X1",
+                                "objectif": 12, "actifs": 11, "atteint": True}], _j)
+    _obR.fixer_objectif("jessye", "Fatou X1", 12)
+    _bAv = _obR.bilan_mois("jessye", "Fatou X1", "2026-08-03")
+    check("renommage : la fiche a bien un passe avant qu on la renomme",
+          (_bAv["q1_tenus"], _bAv["q1_notes"]) == (3, 3), _bAv)
+    check("renommage : le renommage vers un nom libre passe",
+          jb.update_va("jessye", "Fatou X1", new_name="Fatou X3") is True)
+    _bAp = _obR.bilan_mois("jessye", "Fatou X3", "2026-08-03")
+    check("renommage : les jours tenus suivent le nouveau nom",
+          (_bAp["q1_tenus"], _bAp["q1_notes"]) == (3, 3), _bAp)
+    # L objectif comptait double : sans lui, une fiche reglee a 12 voyait son
+    # seuil passer de 10 a 24 et echouait toutes les nuits suivantes.
+    check("renommage : l objectif personnalise suit aussi",
+          _obR.objectif_de("jessye", "Fatou X3") == 12,
+          _obR.objectif_de("jessye", "Fatou X3"))
+    check("renommage : et l ancienne cle ne traine plus",
+          _obR.bilan_mois("jessye", "Fatou X1", "2026-08-03")["q1_notes"] == 0)
+
+    # Non vide, la aussi : sans la migration, tout le passe disparait.
+    _memR.clear(); _memR.update(_baseR())
+    for _j in ("2026-08-01", "2026-08-02", "2026-08-03"):
+        _obR.enregistrer_jour([{"identite": "jessye", "va": "Fatou X1",
+                                "objectif": 12, "actifs": 11, "atteint": True}], _j)
+    _obR.fixer_objectif("jessye", "Fatou X1", 12)
+    _vraiRen = _obR.renommer_fiche
+    _obR.renommer_fiche = lambda *a, **k: {"histo": 0, "objectifs": 0, "fusions": 0}
+    jb.update_va("jessye", "Fatou X1", new_name="Fatou X9")
+    _bMort = _obR.bilan_mois("jessye", "Fatou X9", "2026-08-03")
+    _objMort = _obR.objectif_de("jessye", "Fatou X9")
+    _obR.renommer_fiche = _vraiRen
+    check("renommage : sans migration, le passe est efface (test non vide)",
+          (_bMort["q1_tenus"], _bMort["q1_notes"]) == (0, 0) and _objMort == 30,
+          (_bMort["q1_notes"], _objMort))
+
+    # ---- 3. renommer une IDENTITE emporte toutes ses fiches ----------------
+    _memR.clear(); _memR.update(_baseR())
+    for _j in ("2026-08-01", "2026-08-02"):
+        _obR.enregistrer_jour([
+            {"identite": "jessye", "va": "Fatou X1", "objectif": 12,
+             "actifs": 11, "atteint": True},
+            {"identite": "jessye", "va": "Roucham X1", "objectif": 30,
+             "actifs": 28, "atteint": True}], _j)
+    _obR.fixer_objectif("jessye", "Fatou X1", 12)
+    check("renommage : renommer l identite passe",
+          jb.rename_identity_in_storage("jessye", "jessyca") is True)
+    _b1 = _obR.bilan_mois("jessyca", "Fatou X1", "2026-08-02")
+    _b2 = _obR.bilan_mois("jessyca", "Roucham X1", "2026-08-02")
+    check("renommage : TOUTES les fiches de l identite gardent leur passe",
+          (_b1["q1_notes"], _b2["q1_notes"]) == (2, 2), (_b1["q1_notes"], _b2["q1_notes"]))
+    check("renommage : et leurs objectifs aussi",
+          _obR.objectif_de("jessyca", "Fatou X1") == 12,
+          _obR.objectif_de("jessyca", "Fatou X1"))
+
+    # ---- 4. ajouter un nom deja porte par des comptes ----------------------
+    # Ce n etait pas une fiche neuve : ca ADOPTAIT vingt comptes existants en
+    # repondant « ajoute ». La barre laterale montrait deja cette fiche.
+    _memR.clear(); _memR.update(_baseR())
+    check("ajout : un nom deja porte par des comptes est un doublon",
+          jb.add_va("jessye", "Roucham X2") is False)
+    check("ajout : un nom libre passe toujours",
+          jb.add_va("jessye", "Tiana X1") is True)
+
+    jb._load, jb._save = _vraiLoad, _vraiSave
+    jb.tomb_add, jb.tomb_clear = _vraiTa, _vraiTc
+    (_obR.HISTO_FILE, _obR.OBJECTIFS_FILE) = _svR
+except Exception as _eR:
+    check("renommage : testable", False, repr(_eR)[:200])
+    try:
+        jb._load, jb._save = _vraiLoad, _vraiSave
+        jb.tomb_add, jb.tomb_clear = _vraiTa, _vraiTc
+        (_obR.HISTO_FILE, _obR.OBJECTIFS_FILE) = _svR
+    except Exception:
+        pass
+
+
+# ==============================================================================
+# Les trois messages permanents du salon d un VA
+# ==============================================================================
+try:
+    import cogs.numeros as _n3
+    # Les six etats des deux blocs. Ils ne DISPARAISSENT jamais : c est leur
+    # texte qui change. Un bloc qui s efface fait douter de l endroit ou il
+    # etait, et le VA reclique le panneau pour rien.
+    check("trois : sans numero, la place existe et le dit",
+          "Aucun numéro en cours" in _n3._emb_numero(None).description)
+    check("trois : avec un numero, il est en gros et se saisit a la main",
+          "+1555" in _n3._emb_numero({"valeur": "+1555"}).description
+          and "à la main" in _n3._emb_numero({"valeur": "+1555"}).description)
+    # Solde vide chez le fournisseur : demande user — le bloc reste, c est le
+    # texte qui annonce le probleme.
+    check("trois : un souci s affiche DANS la place, elle ne disparait pas",
+          _n3._emb_numero(None, souci="pas de solde").description == "pas de solde")
+    check("trois : le code s annonce avant d exister",
+          "dès qu" in _n3._emb_code(None).description)
+    check("trois : puis il s affiche seul, sans clic",
+          "123456" in _n3._emb_code({"x": 1}, "123456").description)
+    check("trois : et l attente se voit",
+          "En attente" in _n3._emb_code({"x": 1}).description)
+
+    # Les actions vivent sur le message 2, en permanence.
+    _vA3 = _n3.ActionsView(None)
+    _ids3 = sorted(str(c.custom_id) for c in _vA3.children if getattr(c, "custom_id", None))
+    check("trois : les trois actions sont permanentes",
+          _ids3 == ["numgen:annuler", "numgen:autre", "numgen:retry"]
+          and _vA3.timeout is None, str(_ids3))
+
+    import inspect as _i3
+    _s3 = _i3.getsource(_n3.NumerosCog.nouvelle_activation)
+    # Plus rien d ephemere : le VA doit retrouver le meme ecran apres un
+    # rechargement de Discord.
+    check("trois : la prise d un numero n est plus ephemere",
+          "ephemeral" not in _s3)
+    check("trois : un echec s ecrit dans la place du numero",
+          "souci_num" in _s3)
+    _s3b = _i3.getsource(_n3.NumerosCog.suivre)
+    check("trois : le code est ecrit par le bot, sans qu on le demande",
+          "maj_trois" in _s3b and "get_code" in _s3b)
+    _s3c = _i3.getsource(_n3.verrouiller_salon)
+    check("trois : le salon passe en lecture seule",
+          "send_messages=False" in _s3c and "default_role" in _s3c)
+except Exception as _e3:
+    check("trois : testable", False, repr(_e3)[:200])
 
 
 print("\n" + "=" * 70)

@@ -16,6 +16,8 @@ from discord import app_commands
 from discord.ext import commands
 
 import numgen
+import safe_json as _safe_json
+from pathlib import Path as _Path
 
 log = logging.getLogger("vabot.numeros")
 
@@ -157,19 +159,14 @@ class NumPanelView(discord.ui.View):
                 "⚠️ Aucune clé SMS configurée — un admin doit faire `/smskey`.",
                 ephemeral=True)
             return
-        await itx.response.defer(ephemeral=True, thinking=True)
-        await self.cog.start_sms(itx, "ig")
+        await itx.response.defer()
+        await self.cog.nouvelle_activation(itx, "sms", "ig")
 
     @discord.ui.button(label="Mail Instagram", emoji="📧",
                        style=discord.ButtonStyle.primary, custom_id="numgen:mail")
     async def mail(self, itx: discord.Interaction, btn: discord.ui.Button):
-        if not numgen.status()["mail_ok"]:
-            await itx.response.send_message(
-                "⚠️ Aucune clé SMSBower configurée — un admin doit faire `/smskey`.",
-                ephemeral=True)
-            return
-        await itx.response.defer(ephemeral=True, thinking=True)
-        await self.cog.start_mail(itx, "ig")
+        await itx.response.defer()
+        await self.cog.nouvelle_activation(itx, "mail", "ig")
 
     # « Autre service » retire du panneau le 30/08/2026 : c'est Instagram dans
     # tous les cas, et le bouton n'ajoutait qu'un detour de deux ecrans. Les
@@ -228,8 +225,136 @@ class NumerosCog(commands.Cog):
             # Les panneaux d avant portent encore « Autre service » : on
             # continue de le servir tant qu ils circulent.
             self.bot.add_view(_PanneauAncienView(self))
+            self.bot.add_view(ActionsView(self))
         except Exception:
             pass
+
+    # ---- Les trois messages : tout se passe DANS le salon -----------------
+    async def nouvelle_activation(self, itx, kind="sms", service="ig"):
+        """Prend un numero (ou un mail) et le montre dans le message 2.
+
+        Rien d'ephemere : le VA n'a pas a garder un message fantome ouvert, et
+        s'il recharge Discord il retrouve exactement le meme ecran.
+        """
+        ch = getattr(itx, "channel", None)
+        if ch is None:
+            return
+        await maj_trois(self.bot, ch, actif=None,
+                        souci_num="⏳ Recherche d'un numéro…",
+                        souci_code="")
+        if kind == "sms":
+            ok, res = await asyncio.to_thread(numgen.get_number, service)
+        else:
+            ok, res = await asyncio.to_thread(numgen.get_mail, service)
+        if not ok:
+            # Un solde vide ou un fournisseur a sec se DIT dans la place du
+            # numero, qui reste visible : demande user — le bloc ne disparait
+            # jamais, c'est son texte qui change.
+            _salon_ecrire(ch.id, actif=None)
+            await maj_trois(self.bot, ch, actif=None,
+                            souci_num="❌ %s" % str(res)[:400])
+            return
+        actif = {
+            "id": str(res.get("id") or ""),
+            "provider": res.get("provider") or "getatext",
+            "kind": kind,
+            "service": service,
+            "valeur": res.get("phone") or res.get("mail") or "?",
+            "stale": res.get("stale", ""),
+            "pays_nom": dict(numgen.PAYS).get(str(res.get("country") or ""), ""),
+            "par": getattr(getattr(itx, "user", None), "id", 0),
+        }
+        _salon_ecrire(ch.id, actif=actif, code=None)
+        try:
+            solde = (await asyncio.to_thread(numgen.balances)).get(
+                "sms" if kind == "sms" else "mail")
+        except Exception:
+            solde = None
+        await maj_trois(self.bot, ch, actif=actif, solde=solde)
+        self.bot.loop.create_task(self.suivre(ch))
+
+    async def suivre(self, channel):
+        """Ecoute le code et l'ECRIT dans le message 3 des qu'il arrive.
+
+        Personne n'a a cliquer « Voir le code » : c'etait un clic pour
+        apprendre quelque chose que le bot savait deja.
+        """
+        for _ in range(POLL_MAX // POLL_SECONDS):
+            await asyncio.sleep(POLL_SECONDS)
+            rec = _salon(channel.id)
+            actif = rec.get("actif")
+            if not actif:
+                return                      # annule entre-temps
+            if actif.get("kind") == "sms":
+                etat, val = await asyncio.to_thread(
+                    numgen.get_code, actif["id"], actif["provider"])
+            else:
+                etat, val = await asyncio.to_thread(
+                    numgen.get_mail_code, actif["id"], actif.get("stale", ""))
+            if etat == "code" and val:
+                if actif.get("kind") == "sms":
+                    await asyncio.to_thread(numgen.finish, actif["id"],
+                                            actif["provider"])
+                _salon_ecrire(channel.id, code=val)
+                rec2 = dict(actif); rec2["code"] = val
+                await maj_trois(self.bot, channel, actif=rec2, code=val)
+                return
+            if etat in ("cancel", "error"):
+                await maj_trois(self.bot, channel, actif=actif,
+                                souci_code="⚠️ %s" % (val or "activation close"))
+                return
+        await maj_trois(self.bot, channel,
+                        actif=_salon(channel.id).get("actif"),
+                        souci_code=("⏳ Aucun code reçu en %d min. "
+                                    "« Redemander un code », ou « Annuler » "
+                                    "pour être remboursé." % (POLL_MAX // 60)))
+
+    async def action_salon(self, itx, quoi):
+        """🔄 Redemander · 🔁 Autre numéro · ❌ Annuler, depuis le message 2."""
+        ch = getattr(itx, "channel", None)
+        if ch is None:
+            return
+        rec = _salon(ch.id)
+        actif = rec.get("actif")
+        if not actif:
+            # Les boutons restent visibles sans activation : ils le disent,
+            # au lieu de ne rien faire — un bouton muet passe pour casse.
+            await maj_trois(self.bot, ch, actif=None,
+                            souci_num=("_Aucun numéro en cours._\n"
+                                       "Prends-en un avec **📱 Numéro Instagram "
+                                       "/ Threads** au-dessus."))
+            return
+        sms = actif.get("kind") == "sms"
+        if quoi == "retry":
+            if sms:
+                ok, msg = await asyncio.to_thread(
+                    numgen.retry, actif["id"], actif["provider"])
+                if not ok:
+                    await maj_trois(self.bot, ch, actif=actif,
+                                    souci_code="⚠️ %s" % str(msg)[:200])
+                    return
+            else:
+                actif["stale"] = rec.get("code") or actif.get("stale", "")
+                _salon_ecrire(ch.id, actif=actif)
+            _salon_ecrire(ch.id, code=None)
+            await maj_trois(self.bot, ch, actif=actif)
+            self.bot.loop.create_task(self.suivre(ch))
+            return
+        # « Autre » et « Annuler » rendent le numero en cours : rembourse tant
+        # qu'aucun code n'est arrive.
+        try:
+            if sms:
+                await asyncio.to_thread(numgen.cancel, actif["id"], actif["provider"])
+            else:
+                await asyncio.to_thread(numgen.mail_cancel, actif["id"])
+        except Exception as e:
+            log.warning(f"action_salon {quoi} : {e}")
+        _salon_ecrire(ch.id, actif=None, code=None)
+        if quoi == "autre":
+            await self.nouvelle_activation(itx, "sms" if sms else "mail",
+                                           actif.get("service", "ig"))
+            return
+        await maj_trois(self.bot, ch, actif=None)
 
     # ------------------------------------------------------------ génération
     async def start_sms(self, interaction, service):
@@ -462,9 +587,12 @@ class NumerosCog(commands.Cog):
                     vides += len(partis)
                 except Exception as e:
                     log.warning(f"panelnumeroall: nettoyage de #{ch.name} : {e}")
-                olds = []                 # tout est parti, rien a remplacer
-                if await _ensure_num_panel(self.bot, ch):
+                # Le salon repart a neuf : les TROIS messages, et le verrou.
+                _salon_ecrire(ch.id, panneau=None, numero=None, code=None,
+                              actif=None)
+                if await poser_trois(self.bot, ch, self):
                     ok += 1
+                await verrouiller_salon(ch, self.bot)
                 await asyncio.sleep(0.6)
                 continue
             olds = []
@@ -487,8 +615,9 @@ class NumerosCog(commands.Cog):
                         await p.unpin()
                     except Exception:
                         pass
-            if await _ensure_num_panel(self.bot, ch):
+            if await poser_trois(self.bot, ch, self):
                 ok += 1
+            await verrouiller_salon(ch, self.bot)
             await asyncio.sleep(0.6)
         s = numgen.status()
         warn = "" if (s["sms_ok"] and s["mail_ok"]) else (
@@ -758,6 +887,225 @@ def panel_embed():
         ),
         color=discord.Color.blurple(),
     ).set_footer(text=f"Solde · 📱 numéros : {b['sms']}   |   📧 mails : {b['mail']}")
+
+
+# ==============================================================================
+# LES TROIS MESSAGES PERMANENTS
+# ==============================================================================
+# Le salon d'un VA porte trois messages, et rien d'autre. Ils ne sont jamais
+# supprimes ni reposes : leur CONTENU change.
+#
+#   1. le panneau  — les deux boutons, toujours cliquables
+#   2. le numero   — vide, ou le numero en cours + ses actions
+#   3. le code     — vide, ou le code des qu'il arrive
+#
+# Avant, chaque clic ouvrait un message EPHEMERE : le VA devait cliquer « Voir
+# le code », le message disparaissait au moindre rechargement, et le salon ne
+# gardait aucune trace de ce qui etait en cours. On veut l'inverse : un ecran
+# fixe qui se met a jour tout seul, comme une page web.
+
+SALONS_FILE = _Path("data") / "numgen_salons.json"
+
+
+def _salons() -> dict:
+    d = _safe_json.load(SALONS_FILE, default={})
+    return d if isinstance(d, dict) else {}
+
+
+def _salon(cid) -> dict:
+    return _salons().get(str(cid)) or {}
+
+
+def _salon_ecrire(cid, **champs):
+    """Ecrit les champs d'un salon. `actif=None` efface l'activation."""
+    d = _salons()
+    rec = dict(d.get(str(cid)) or {})
+    rec.update(champs)
+    d[str(cid)] = rec
+    SALONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _safe_json.write(SALONS_FILE, d, indent=2)
+    return rec
+
+
+def _emb_numero(actif=None, solde=None, souci=""):
+    """Message 2 : le numero en cours, ou la place vide qui l'attend."""
+    if souci:
+        e = discord.Embed(title="📱 Numéro", description=souci,
+                          color=discord.Color.red())
+        return e
+    if not actif:
+        e = discord.Embed(
+            title="📱 Numéro",
+            description=("_Aucun numéro en cours._\n"
+                         "Clique sur **📱 Numéro Instagram / Threads** au-dessus."),
+            color=discord.Color.dark_grey())
+        return e
+    e = discord.Embed(
+        title="📱 Numéro",
+        description=("## `%s`\n"
+                     "⚠️ Saisis-le **à la main** sur Instagram — ne le colle jamais.\n"
+                     "1. Entre le numéro · 2. Demande l'envoi du code\n"
+                     "3. Le code apparaît **tout seul** dans le message du dessous."
+                     % actif.get("valeur", "?")),
+        color=discord.Color.green())
+    bas = []
+    if actif.get("pays_nom"):
+        bas.append(actif["pays_nom"])
+    if solde:
+        bas.append("solde %s" % solde)
+    if bas:
+        e.set_footer(text=" · ".join(bas))
+    return e
+
+
+def _emb_code(actif=None, code=None, souci=""):
+    """Message 3 : le code, des qu'il arrive. Personne n'a a le demander."""
+    if code:
+        return discord.Embed(
+            title="🔑 Code reçu",
+            description="# `%s`" % code,
+            color=discord.Color.green())
+    if souci:
+        return discord.Embed(title="🔑 Code", description=souci,
+                             color=discord.Color.orange())
+    if not actif:
+        return discord.Embed(
+            title="🔑 Code",
+            description="_Il s'affichera ici dès qu'un numéro sera pris._",
+            color=discord.Color.dark_grey())
+    return discord.Embed(
+        title="🔑 Code",
+        description=("⏳ **En attente du SMS…**\n"
+                     "Demande l'envoi du code depuis Instagram : il arrive ici seul."),
+        color=discord.Color.blurple())
+
+
+class ActionsView(discord.ui.View):
+    """Les actions du message 2. Toujours la, meme sans numero en cours.
+
+    Elles ne sont pas cachees quand il n'y a rien : un bouton qui apparait et
+    disparait fait douter de l'endroit ou il etait. Elles repondent alors
+    qu'il n'y a pas d'activation, et c'est tout.
+    """
+    def __init__(self, cog=None):
+        super().__init__(timeout=None)
+        self.cog = cog
+
+    async def _cog(self, itx):
+        return self.cog or itx.client.get_cog("NumerosCog")
+
+    @discord.ui.button(label="Redemander un code", emoji="🔄",
+                       style=discord.ButtonStyle.primary,
+                       custom_id="numgen:retry")
+    async def retry(self, itx: discord.Interaction, btn: discord.ui.Button):
+        cog = await self._cog(itx)
+        await itx.response.defer()
+        await cog.action_salon(itx, "retry")
+
+    @discord.ui.button(label="Autre numéro", emoji="🔁",
+                       style=discord.ButtonStyle.secondary,
+                       custom_id="numgen:autre")
+    async def autre(self, itx: discord.Interaction, btn: discord.ui.Button):
+        cog = await self._cog(itx)
+        await itx.response.defer()
+        await cog.action_salon(itx, "autre")
+
+    @discord.ui.button(label="Annuler", emoji="❌",
+                       style=discord.ButtonStyle.danger,
+                       custom_id="numgen:annuler")
+    async def annuler(self, itx: discord.Interaction, btn: discord.ui.Button):
+        cog = await self._cog(itx)
+        await itx.response.defer()
+        await cog.action_salon(itx, "annuler")
+
+
+async def poser_trois(bot, channel, cog=None):
+    """Garantit les trois messages, dans l'ordre, et retient leurs identifiants.
+
+    Idempotent : si les trois sont deja la, on les MET A JOUR au lieu d'en
+    reposer — sinon chaque passage empilerait un jeu de plus.
+    """
+    if bot is None or channel is None:
+        return False
+    cog = cog or bot.get_cog("NumerosCog")
+    if cog is None:
+        log.warning("poser_trois: NumerosCog absent sur ce bot")
+        return False
+    rec = _salon(channel.id)
+    actif = rec.get("actif")
+    try:
+        solde = (await asyncio.to_thread(numgen.balances)).get("sms")
+    except Exception:
+        solde = None
+    voulus = (
+        ("panneau", panel_embed(), NumPanelView(cog)),
+        ("numero", _emb_numero(actif, solde), ActionsView(cog)),
+        ("code", _emb_code(actif, (actif or {}).get("code")), None),
+    )
+    ids = {}
+    for cle, emb, vue in voulus:
+        mid = rec.get(cle)
+        msg = None
+        if mid:
+            try:
+                msg = await channel.fetch_message(int(mid))
+            except Exception:
+                msg = None
+        try:
+            if msg is not None:
+                await msg.edit(embed=emb, view=vue)
+            else:
+                msg = await channel.send(embed=emb, view=vue)
+                try:
+                    await msg.pin()
+                except Exception:
+                    pass
+            ids[cle] = msg.id
+        except Exception as e:
+            log.warning(f"poser_trois #{getattr(channel, 'name', '?')} {cle} : {e}")
+        await asyncio.sleep(0.4)
+    if ids:
+        _salon_ecrire(channel.id, **ids)
+    return len(ids) == 3
+
+
+async def maj_trois(bot, channel, actif=None, code=None, souci_num="",
+                    souci_code="", solde=None):
+    """Reecrit les messages 2 et 3. Le panneau, lui, ne bouge jamais."""
+    rec = _salon(getattr(channel, "id", 0))
+    for cle, emb in (("numero", _emb_numero(actif, solde, souci_num)),
+                     ("code", _emb_code(actif, code, souci_code))):
+        mid = rec.get(cle)
+        if not mid:
+            continue
+        try:
+            msg = await channel.fetch_message(int(mid))
+            await msg.edit(embed=emb)
+        except Exception as e:
+            log.warning(f"maj_trois {cle} : {e}")
+
+
+async def verrouiller_salon(channel, bot):
+    """Le salon devient une vitrine : seul le bot y ecrit.
+
+    Le VA garde la LECTURE et les boutons — une interaction n'est pas un
+    message. Sans ca, un salon qui ne doit contenir que trois messages se
+    remplissait de conversations, et les trois se retrouvaient en haut,
+    hors de vue.
+    """
+    g = getattr(channel, "guild", None)
+    if g is None:
+        return False
+    try:
+        await channel.set_permissions(
+            g.default_role, send_messages=False,
+            reason="Salon numero/mail : seul le bot y ecrit")
+        return True
+    except Exception as e:
+        log.warning(f"verrouiller_salon #{getattr(channel, 'name', '?')} : {e}")
+        return False
+
+
 
 
 async def setup(bot):
