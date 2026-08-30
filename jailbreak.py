@@ -631,6 +631,33 @@ def list_va_names_for_identity(identity: str) -> List[str]:
     return [_va_name(v) for v in list_vas_for_identity(identity) if _va_name(v)]
 
 
+def noms_occupes(entry: dict) -> set:
+    """Tous les noms de fiche deja pris dans cette identite, en minuscules.
+
+    Les noms DECLARES dans vas[], et ceux que seuls des comptes portent — les
+    fiches dites implicites, que list_vas_for_identity fabrique et qui
+    s affichent donc dans la barre laterale avec leurs comptes.
+
+    Les ignorer laissait renommer une fiche SUR une autre : les deux jeux de
+    comptes tombaient alors sous le meme nom, etats_du_jour les regroupait en
+    une seule fiche, et la personne qui perdait son nom n avait plus de ligne
+    a payer. La fiche fusionnee, elle, affichait 40 comptes pour un objectif
+    de 30 : « objectif tenu » a perpetuite.
+    """
+    pris = set()
+    for v in (entry.get("vas") or []):
+        nom = _va_name(v).strip().lower()
+        if nom:
+            pris.add(nom)
+    for a in (entry.get("accounts") or []):
+        if not isinstance(a, dict):
+            continue
+        nom = str(a.get("va") or "").strip().lower()
+        if nom:
+            pris.add(nom)
+    return pris
+
+
 def add_va(identity: str, va_name: str, discord_username: str = "") -> bool:
     """Ajoute un VA a une identite. Returns True si ajoute, False si doublon."""
     identity = (identity or "").strip().lower()
@@ -642,7 +669,11 @@ def add_va(identity: str, va_name: str, discord_username: str = "") -> bool:
     discord_username = (discord_username or "").strip()[:60]
     data = _load()
     entry = _ensure_identity(data, identity)
-    if any(_va_name(v).lower() == va_name.lower() for v in entry["vas"]):
+    # `noms_occupes` et pas seulement vas[] : ajouter un nom deja porte par des
+    # comptes ne creait pas une fiche neuve, il ADOPTAIT vingt comptes
+    # existants en repondant « ajoute ». On refuse, comme pour un doublon
+    # declare — c est bien ce que la barre laterale montre deja.
+    if va_name.lower() in noms_occupes(entry):
         return False
     entry["vas"].append({
         "name": va_name,
@@ -722,7 +753,14 @@ def update_va(identity: str, old_name: str, new_name: str = None,
             return False
         # Conflit si nouveau nom existe (autre que le notre)
         if new_name_clean.lower() != old_name.lower():
-            if any(_va_name(v).lower() == new_name_clean.lower() for v in entry["vas"]):
+            # Le conflit se cherche dans TOUS les noms occupes, pas seulement
+            # les declares. La meme fonction, trente lignes plus haut,
+            # reconnait pourtant les fiches implicites pour `old_name` : deux
+            # traitements opposes du meme etat, et celui-ci fusionnait deux
+            # personnes en une sans un mot.
+            pris = noms_occupes(entry)
+            pris.discard(old_name.lower())     # le notre ne compte pas
+            if new_name_clean.lower() in pris:
                 return False
             target["name"] = new_name_clean
             # Propage le rename aux comptes
@@ -746,6 +784,32 @@ def update_va(identity: str, old_name: str, new_name: str = None,
                 pass          # une annotation perdue ne doit pas rater le rename
     if discord_username is not None:
         target["discord_username"] = discord_username.strip()[:60]
+    # L HISTORIQUE DE PAIE SUIT LE NOM, et il le suit AVANT qu on enregistre.
+    # jb_objectifs indexe ses deux fichiers par « identite|va » : renommer ici
+    # sans les toucher effacait tout le passe de la fiche du bilan du mois, et
+    # remettait son objectif personnalise au defaut de 30.
+    #
+    # Migration d abord : si elle echoue, on n a rien renomme, donc rien casse.
+    # Si c est l enregistrement qui echoue ensuite, on remet l historique comme
+    # il etait — les deux moities orphelines se valent, aucune n est acceptable.
+    if new_name_clean and new_name_clean.lower() != old_name.lower():
+        import jb_objectifs as _ob
+        try:
+            _ob.renommer_fiche(identity, old_name, new_name_clean)
+        except Exception as e:
+            print(f"[jailbreak] {identity}/{old_name} -> {new_name_clean} : "
+                  f"historique de paie non deplace ({e}) — renommage annule",
+                  flush=True)
+            return False
+        try:
+            _save(data)
+        except Exception:
+            try:
+                _ob.renommer_fiche(identity, new_name_clean, old_name)
+            except Exception:
+                pass
+            raise
+        return True
     _save(data)
     return True
 
@@ -831,7 +895,25 @@ def rename_identity_in_storage(old_name: str, new_name: str) -> bool:
     if new_name in data:
         return False
     data[new_name] = data.pop(old_name)
-    _save(data)
+    # Toutes les fiches de cette identite changent de cle d un coup : c est le
+    # plus gros degat possible sur l historique de paie. Meme ordre que
+    # update_va — migrer, puis enregistrer, et remettre en place si
+    # l enregistrement echoue.
+    import jb_objectifs as _ob
+    try:
+        _ob.renommer_identite(old_name, new_name)
+    except Exception as e:
+        print(f"[jailbreak] identite {old_name} -> {new_name} : historique de "
+              f"paie non deplace ({e}) — renommage annule", flush=True)
+        return False
+    try:
+        _save(data)
+    except Exception:
+        try:
+            _ob.renommer_identite(new_name, old_name)
+        except Exception:
+            pass
+        raise
     return True
 
 

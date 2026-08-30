@@ -362,6 +362,104 @@ def enregistrer_jour(etats: List[dict], jour: str = "") -> int:
         return len(etats)
 
 
+# ==============================================================================
+# Renommage : suivre une fiche qui change de nom
+# ==============================================================================
+#
+# Les deux fichiers de ce module sont indexes par `cle(identite, va)`, donc par
+# DEUX NOMS MODIFIABLES. Renommer une fiche dans jailbreak.json sans toucher a
+# ces cles orphelinait tout son passe : le bilan du 20 du mois repartait a
+# « aucune journee notee » — dix-neuf jours tenus effaces d un document qui sert
+# a PAYER — et `objectif_de` ne retrouvant plus rien rendait OBJECTIF_DEFAUT,
+# donc une fiche reglee a 12 comptes voyait son seuil passer de 10 a 24 et
+# echouait toutes les nuits suivantes.
+#
+# Renommer est une operation de routine : le site (✎ Modifier) et le poller
+# Google Sheet le font. Ce n etait donc pas un cas tordu.
+
+
+def _fusionner_jours(dest: dict, source: dict) -> dict:
+    """Fond deux enregistrements d historique. La SOURCE l emporte.
+
+    La source est la fiche VIVANTE, celle qu on vient de renommer. La
+    destination, quand elle existe, est ce que laisse une fiche disparue qui
+    portait deja ce nom. On garde quand meme ses journees : on ne jette rien
+    d un document de paie, meme vieux, meme en doublon.
+    """
+    jd = dest.get("jours") if isinstance(dest.get("jours"), dict) else {}
+    js = source.get("jours") if isinstance(source.get("jours"), dict) else {}
+    fondu = dict(jd)
+    fondu.update(js)
+    source["jours"] = fondu
+    return source
+
+
+def _deplacer(chemin, paires, histo: bool) -> tuple:
+    """Deplace des cles dans un des deux fichiers. Rend (deplacees, fusions)."""
+    d = _load(chemin)
+    bouge, fusions = 0, 0
+    for ancienne, nouvelle, va, ident in paires:
+        if ancienne == nouvelle or ancienne not in d:
+            continue
+        rec = d.pop(ancienne)
+        if nouvelle in d:
+            fusions += 1
+            if histo and isinstance(rec, dict) and isinstance(d[nouvelle], dict):
+                rec = _fusionner_jours(d[nouvelle], rec)
+        if histo and isinstance(rec, dict):
+            # Les champs d affichage suivent la cle, sinon le bilan afficherait
+            # l ancien nom a cote du nouveau.
+            if va:
+                rec["va"] = va
+            if ident:
+                rec["identite"] = ident
+        d[nouvelle] = rec
+        bouge += 1
+    if bouge:
+        _save(chemin, d)
+    return bouge, fusions
+
+
+def renommer_fiche(identite: str, ancien: str, nouveau: str) -> dict:
+    """Fait suivre l historique de paie ET l objectif d une fiche renommee."""
+    ident = str(identite or "").strip().lower()
+    a = str(ancien or "").strip()
+    n = str(nouveau or "").strip()
+    if not ident or not a or not n:
+        return {"histo": 0, "objectifs": 0, "fusions": 0}
+    paires = [(cle(ident, a), cle(ident, n), n, ident)]
+    with _LOCK:
+        h, hf = _deplacer(HISTO_FILE, paires, True)
+        o, of = _deplacer(OBJECTIFS_FILE, paires, False)
+    return {"histo": h, "objectifs": o, "fusions": hf + of}
+
+
+def renommer_identite(ancienne: str, nouvelle: str) -> dict:
+    """Idem, mais pour TOUTES les fiches d une identite qui change de nom.
+
+    Renommer une modele passait la hache sur le passe de tous ses VAs d un
+    seul coup — le plus gros degat possible sur ce fichier.
+    """
+    a = str(ancienne or "").strip().lower()
+    n = str(nouvelle or "").strip().lower()
+    if not a or not n or a == n:
+        return {"histo": 0, "objectifs": 0, "fusions": 0}
+    total = {"histo": 0, "objectifs": 0, "fusions": 0}
+    with _LOCK:
+        for chemin, histo, champ in ((HISTO_FILE, True, "histo"),
+                                     (OBJECTIFS_FILE, False, "objectifs")):
+            d = _load(chemin)
+            paires = []
+            for k in list(d):
+                ks = str(k)
+                if ks.startswith(a + "|"):
+                    paires.append((ks, n + "|" + ks[len(a) + 1:], "", n))
+            bouge, fus = _deplacer(chemin, paires, histo)
+            total[champ] = bouge
+            total["fusions"] += fus
+    return total
+
+
 def bilan_quinzaine(identite: str, va: str, jour: str = "") -> dict:
     """Le bilan de la quinzaine en cours pour une fiche.
 
