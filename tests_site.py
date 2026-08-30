@@ -6439,6 +6439,14 @@ try:
         # quinzaine a peine commencee avait l air d un mur d echecs.
         check("bilan : le carré « rien » est sombre, pas blanc",
               _rcT._CARRES["inconnu"] == "⬛", _rcT._CARRES)
+        # Seize carres a la file ne disent pas lequel est quel jour : sans les
+        # dates on voit qu il a rate deux jours, pas LESQUELS.
+        _bandeOb = _rcT.suite_jours(["tenu", "rate", "tenu"], "2026-08-16")
+        check("bilan : la bande est encadrée par ses dates",
+              _bandeOb.startswith("`16/08`") and _bandeOb.endswith("`18/08`"),
+              _bandeOb)
+        check("bilan : sans date de début, la bande reste lisible",
+              _rcT.suite_jours(["tenu"]) == "🟩", _rcT.suite_jours(["tenu"]))
         check("bilan : la légende explique les carrés",
               "🟩" in _pinOb and "pas de report" in _pinOb, _pinOb[:220])
 

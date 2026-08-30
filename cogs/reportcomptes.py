@@ -225,14 +225,26 @@ def bloc_jour(etats: list, jour: str, identite: str = "") -> list:
 _CARRES = {"tenu": "🟩", "rate": "🟥", "inconnu": "⬛"}
 
 
-def suite_jours(suite) -> str:
-    """La quinzaine jour par jour, en carrés.
+def suite_jours(suite, debut: str = "") -> str:
+    """La quinzaine jour par jour, en carrés, encadrée par ses dates.
 
     Un total « 12/14 » ne dit pas s'il a lâché trois jours d'affilée ou un
     jour de temps en temps — et ce n'est pas la même conversation au moment
     de payer.
+
+    Les dates aux deux bouts, parce que seize carrés à la file ne disent pas
+    lequel est quel jour : sans elles on voit qu'il a raté deux jours, mais
+    pas LESQUELS — et c'est justement ce qu'on veut pouvoir lui dire.
     """
-    return "".join(_CARRES.get(x, "⬜") for x in (suite or []))
+    bande = "".join(_CARRES.get(x, "⬛") for x in (suite or []))
+    if not bande or not debut:
+        return bande
+    try:
+        d0 = datetime.date.fromisoformat(debut)
+        d1 = d0 + datetime.timedelta(days=len(suite) - 1)
+        return f"`{d0.strftime('%d/%m')}` {bande} `{d1.strftime('%d/%m')}`"
+    except Exception:
+        return bande
 
 
 def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> str:
@@ -268,7 +280,7 @@ def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> st
         qui = f" `@{qui}`" if qui else ""
         t.append(f"{b['pastille']} **{e['va']}**{qui} · {detail} · "
                  f"{e['actifs']}/{e['objectif']}")
-        carres = suite_jours(b.get("suite"))
+        carres = suite_jours(b.get("suite"), b.get("debut") or debut)
         if carres:
             t.append(carres)
     return "\n".join(t)
