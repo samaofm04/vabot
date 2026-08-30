@@ -725,7 +725,7 @@ def _resume(comptes: List[dict], stats: dict, normaliser) -> Dict[str, int]:
 # ==============================================================================
 
 def register(app, deps):
-    """Branche `/va/<jeton>` sur `app`.
+    """Branche `/mes-comptes/<jeton>` sur `app`.
 
     `deps` doit fournir :
         pseudo_instagram(str) -> str     pseudo tire d'une ligne collee ('' si rien)
@@ -759,6 +759,41 @@ def register(app, deps):
         fwd = (request.headers.get("CF-Connecting-IP")
                or request.headers.get("X-Forwarded-For") or "")
         return (fwd.split(",")[0].strip() or request.remote_addr or "?")[:45]
+
+    def _visiteur_en_clair() -> bool:
+        """True SEULEMENT si on sait que le navigateur s'est connecte en http.
+
+        Ici l'adresse EST le secret : le jeton voyage dans la ligne de requete.
+        Sur ce site, `http://youl4b.com/...` repond 200 sans rediriger — le
+        jeton passait donc en clair, lisible par n'importe quel relais entre le
+        telephone du VA et Cloudflare. Aucune autre page du dashboard n'a ce
+        probleme au meme degre : ailleurs le secret est dans un cookie ou un
+        corps de requete, ici il est dans l'URL.
+
+        Flask ne peut pas voir le schema tout seul : derriere Cloudflare, il
+        recoit toujours du http. Seule l'en-tete posee par le proxy dit sur quoi
+        le navigateur s'est reellement connecte.
+
+        Dans le doute — en-tete absente, appel direct a l'origine, sonde de
+        supervision — on rend False. Une redirection posee sur une supposition
+        casse plus qu'elle ne protege.
+        """
+        xf = (request.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
+        if xf:
+            return xf == "http"
+        cfv = (request.headers.get("CF-Visitor") or "").replace(" ", "").lower()
+        if '"scheme":"http"' in cfv:
+            return True
+        if '"scheme":"https"' in cfv:
+            return False
+        return False
+
+    def _vers_https():
+        """La meme adresse en https, ou None s'il n'y a rien a corriger."""
+        if not _visiteur_en_clair():
+            return None
+        from flask import redirect
+        return redirect("https://" + (request.host or "") + (request.path or "/"), code=301)
 
     def _comptes_de(identite: str, va: str) -> List[dict]:
         import jailbreak as jb
@@ -798,6 +833,13 @@ def register(app, deps):
 
     @app.route(RACINE + "/<jeton>", methods=["GET"])
     def va_portail(jeton):
+        # AVANT de resoudre quoi que ce soit : si le VA est arrive en clair, on
+        # le renvoie en https. Le jeton du premier appel est deja passe en
+        # clair — on ne peut plus rien pour celui-la — mais tout le reste de la
+        # session, y compris les ajouts et les retraits, se fera chiffre.
+        vers = _vers_https()
+        if vers is not None:
+            return vers
         rec = resoudre(jeton)
         if rec is None:
             return _refus("Ce lien n'est plus valable.")

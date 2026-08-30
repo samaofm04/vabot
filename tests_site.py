@@ -5939,6 +5939,29 @@ try:
                          data={"comptes": "tentative"}).status_code == 404)
         check("portail : un jeton inconnu ne dit rien",
               _vaVP.get("/mes-comptes/nimportequoi").status_code == 404)
+
+        # Le jeton EST le secret, et il voyage dans la ligne de requete : arriver
+        # en clair l'expose a tout ce qui se trouve entre le telephone et le
+        # proxy. Le site repond 200 en http sans rediriger, donc c'est ici que
+        # ca se rattrape. Il faut un lien VIVANT — celui d'au-dessus vient
+        # d'etre ferme, il repondrait 404 en https et le test serait creux.
+        _urlVP2 = (_admVP.post("/jailbreak/va_lien", data={
+            "identity": "jessye", "va_name": "VA NOUM 1X2", "action": "creer"}
+        ).get_json().get("url") or "").replace("http://localhost", "")
+        check("portail : lien vivant pour l essai https", bool(_urlVP2), _urlVP2)
+        _clairVP = _vaVP.get(_urlVP2, headers={"X-Forwarded-Proto": "http"})
+        check("portail : arriver en clair renvoie vers https",
+              _clairVP.status_code == 301
+              and (_clairVP.headers.get("Location") or "").startswith("https://"),
+              f"{_clairVP.status_code} {_clairVP.headers.get('Location')}")
+        check("portail : en https la page se rend normalement",
+              _vaVP.get(_urlVP2, headers={"X-Forwarded-Proto": "https"}).status_code == 200)
+        check("portail : Cloudflare (CF-Visitor) est lu aussi",
+              _vaVP.get(_urlVP2, headers={"CF-Visitor": '{"scheme":"http"}'}).status_code == 301)
+        # Sans en-tete on ne SAIT pas : une sonde de supervision ou un appel
+        # direct a l'origine ne doit pas se prendre une redirection devinee.
+        check("portail : sans en-tete de proxy, aucune redirection",
+              _vaVP.get(_urlVP2).status_code == 200)
         check("portail : un jeton demesure est ecarte",
               _vaVP.get("/mes-comptes/" + "x" * 400).status_code == 404)
 
