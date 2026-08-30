@@ -42791,6 +42791,24 @@ function ngAction(btn, quoi){
       ngDit('Connexion perdue', true);
     });
 }
+function ngAcces(btn){
+  var m = document.getElementById('ng-acces-msg');
+  var vieux = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Ouverture…';
+  if(m){ m.textContent = 'Le bot principal passe sur les categories…'; m.style.color = '#8a91a8'; }
+  fetch('/discord/acces_bot_admin', {method:'POST', credentials:'same-origin'})
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      btn.disabled = false; btn.textContent = vieux;
+      if(!m) return;
+      m.innerHTML = (j && (j.msg || j.error)) || 'Echec';
+      m.style.color = (j && j.ok) ? '#22c55e' : '#f87171';
+    })
+    .catch(function(){
+      btn.disabled = false; btn.textContent = vieux;
+      if(m){ m.textContent = 'Connexion perdue'; m.style.color = '#f87171'; }
+    });
+}
 function ngCopier(btn){
   var t = document.getElementById('ng-tel');
   var v = (t && t.textContent || '').trim();
@@ -42902,6 +42920,26 @@ def _render_numgen_settings() -> str:
         "<button type='submit' style='padding:10px 18px;background:#22c55e;color:#fff;"
         "border:0;border-radius:8px;cursor:pointer;font-weight:700'>Enregistrer</button>"
         "</form>"
+        # Le panneau Discord des VA vit dans des salons PRIVES. Le bot qui a
+        # herite du module des numeros n y a jamais ete invite : il repondait
+        # « aucun salon » devant des salons bien reels. C est le bot principal
+        # qui pose la permission, lui les voit.
+        "<div style='margin-top:16px;padding:13px 15px;background:#0e1219;"
+        "border:1px solid #223047;border-radius:10px'>"
+        "<div style='font-size:13px;font-weight:700;margin-bottom:6px'>"
+        "Panneau Discord des VA</div>"
+        "<div style='font-size:12px;color:#8a91a8;line-height:1.55;margin-bottom:10px'>"
+        "Si <code>/panelnumeroall</code> répond « aucun salon » alors que les "
+        "salons existent, c'est que le bot qui porte les numéros n'a pas accès "
+        "aux catégories des VA. Ce bouton l'y ajoute — vue, écriture et "
+        "épinglage, rien de plus.</div>"
+        "<button type='button' onclick='ngAcces(this)' "
+        "style='padding:9px 15px;background:#1a1f2e;border:1px solid #2a3245;"
+        "color:#c4c4cc;border-radius:8px;cursor:pointer;font-size:13px;"
+        "font-weight:700'>🔑 Donner l accès au bot admin</button>"
+        "<span id='ng-acces-msg' style='font-size:12px;color:#8a91a8;"
+        "margin-left:10px'></span>"
+        "</div>"
         "<small style='color:#8a91a8;display:block;margin-top:10px'>Les clés API se "
         "posent dans Discord avec <code>/smskey</code> — elles ne transitent jamais "
         "par cette page. Ici on ne règle que le pays et le service.</small>")
@@ -51677,6 +51715,98 @@ def create_app():
     def _numgen_module():
         import numgen
         return numgen
+
+    @app.route("/discord/acces_bot_admin", methods=["POST"])
+    def discord_acces_bot_admin():
+        """Donne au bot ADMIN l'accès aux catégories que le PRINCIPAL voit.
+
+        Les salons des VA sont privés. Le bot principal y est — c'est lui qui
+        les a créés — mais le bot admin, qui a hérité du module des numéros
+        quand il a fallu libérer des places de commandes, n'y a jamais été
+        invité. D'où « aucun salon …-numero-mail » alors qu'ils sont à
+        l'écran : il ne les reçoit tout simplement pas.
+
+        C'est le PRINCIPAL qui pose la permission, pas l'admin : on ne peut
+        pas modifier une catégorie qu'on ne voit pas. Les deux bots vivent
+        dans le même processus, l'un peut donc agir pour l'autre.
+
+        Ce qu'on accorde, et rien de plus : voir le salon, y écrire, lire
+        l'historique et épingler. De quoi poser un panneau — pas de quoi
+        administrer le serveur.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        if not _is_admin():
+            return jsonify({"ok": False, "error": "Réservé aux accès complets"}), 403
+        principal, admin = _BOT_REF, _BOT_ADMIN_REF
+        if principal is None or admin is None:
+            return jsonify({"ok": False,
+                            "error": "Les deux bots doivent tourner (bot admin absent ?)"})
+        boucle = getattr(principal, "loop", None)
+        if boucle is None or not boucle.is_running():
+            return jsonify({"ok": False, "error": "boucle du bot à l'arrêt"})
+        # Les suffixes des salons d'un ticket VA : on ne touche QUE les
+        # catégories qui en contiennent. Une catégorie de discussion ordinaire
+        # n'a aucune raison de s'ouvrir au bot.
+        try:
+            from cogs.welcome import US_TICKET_SUFFIXES, _us_norm
+            suffixes = tuple("-" + s for s in US_TICKET_SUFFIXES)
+        except Exception:
+            suffixes = ("-menu", "-numero-mail", "-content", "-download")
+
+            def _us_norm(n):
+                return str(n or "").strip().lower()
+
+        async def _faire():
+            import discord as _dc
+            faits, deja, rates, sans_membre = [], 0, [], []
+            for g in list(principal.guilds or []):
+                moi_admin = g.get_member(admin.user.id) if admin.user else None
+                if moi_admin is None:
+                    sans_membre.append(g.name)
+                    continue
+                for cat in list(getattr(g, "categories", []) or []):
+                    # La catégorie doit porter des salons de ticket.
+                    if not any(any(_us_norm(c.name).endswith(s) for s in suffixes)
+                               for c in (cat.channels or [])):
+                        continue
+                    actuel = cat.overwrites_for(moi_admin)
+                    if actuel.view_channel and actuel.send_messages:
+                        deja += 1
+                        continue
+                    try:
+                        await cat.set_permissions(
+                            moi_admin, view_channel=True, send_messages=True,
+                            read_message_history=True, manage_messages=True,
+                            reason="Acces du bot admin aux panneaux des VA")
+                        faits.append(f"{g.name} / {cat.name}")
+                    except _dc.Forbidden:
+                        rates.append(f"{cat.name} (droits insuffisants)")
+                    except Exception as e:                  # noqa: BLE001
+                        rates.append(f"{cat.name} ({type(e).__name__})")
+                    await _aio_acces.sleep(0.35)   # on menage l'API Discord
+            return faits, deja, rates, sans_membre
+
+        import asyncio as _aio_acces
+        try:
+            fut = _aio_acces.run_coroutine_threadsafe(_faire(), boucle)
+            faits, deja, rates, sans_membre = fut.result(timeout=240)
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"échec : {e}"[:200]})
+
+        parts = [f"<b>{len(faits)}</b> catégorie(s) ouverte(s) au bot admin"]
+        if deja:
+            parts.append(f"{deja} déjà en ordre")
+        if sans_membre:
+            # Un bot absent du serveur ne peut pas y recevoir de permission :
+            # le dire, sinon on cherche pourquoi rien ne bouge.
+            parts.append("bot admin absent de : " + ", ".join(sans_membre[:3]))
+        if rates:
+            parts.append(f"{len(rates)} échec(s) : " + ", ".join(rates[:3]))
+        return jsonify({"ok": True, "msg": " · ".join(parts),
+                        "faits": len(faits), "deja": deja,
+                        "rates": len(rates)})
 
     @app.route("/numgen/number", methods=["POST"])
     def numgen_number():

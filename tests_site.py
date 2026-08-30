@@ -6832,20 +6832,50 @@ try:
         check("mois : aucune alerte quand tout est là",
               not any("manquante" in m for m in _msgs22))
 
-        check("mois : chaque morceau est numéroté",
-              all(f"partie {_i + 1}/{len(_msgs22)}" in m
-                  for _i, m in enumerate(_msgs22)),
-              [m.splitlines()[0][-16:] for m in _msgs22])
-        # Au-dela, on coupe encore — et chaque partie est NUMEROTEE, sinon un
-        # message qui commence par le titre passe pour le bilan entier.
+        # L EN-TETE N EST ECRIT QU UNE FOIS. Il pesait quatre cents unites
+        # — titre, legende des trois couleurs, regle des 80 %, role de la
+        # barre — recopiees sur chaque morceau. Sur une limite dont on sait
+        # qu elle est etroite, c est de la place prise aux fiches ; et le
+        # proprietaire lit cinq fois la meme legende avant d arriver aux
+        # chiffres. « Pas besoin de remettre a chaque fois les phrases. »
+        check("mois : la légende n est écrite qu une seule fois",
+              sum("carré par jour" in m for m in _msgs22) == 1,
+              sum("carré par jour" in m for m in _msgs22))
+        check("mois : le titre non plus n est pas répété",
+              sum("Bilan du mois" in m for m in _msgs22) == 1)
+        # Et ca RAPPORTE : les morceaux suivants tiennent plus de fiches, donc
+        # il y en a moins a lire. Vingt et une fiches passaient en six
+        # messages, elles en prennent quatre.
+        check("mois : en-tête allégé = moins de morceaux",
+              len(_msgs22) <= 5, len(_msgs22))
+        # Plus de « partie 1/6 » : elle servait a reconnaitre un bilan coupe
+        # quand chaque morceau rouvrait sur le meme titre. Un seul le porte
+        # desormais, un message sans titre est visiblement une suite.
+        check("mois : plus de numérotation de parties",
+              not any("partie " in m for m in _msgs22))
+        # LE VRAI GARDE-FOU, en remplacement du numero : on recompte les
+        # fiches REELLEMENT ecrites et on l annonce DANS le message. Il doit
+        # mordre — un garde-fou qui ne se declenche jamais n en est pas un.
+        _sauveRe = _rcT._LIGNE_FICHE
+        try:
+            _rcT._LIGNE_FICHE = __import__("re").compile(
+                r"^\S+ \*\*FICHE 0\d\*\*.*\d+/\d+$", __import__("re").M)
+            _ampute = _rcT.bloc_quinzaine(_22, _bMois["debut"], _bMois["fin"], "j")
+            check("mois : une fiche perdue est ANNONCÉE dans le message",
+                  any("manquante" in m for m in _ampute),
+                  [m[-90:] for m in _ampute][-1:])
+        finally:
+            _rcT._LIGNE_FICHE = _sauveRe
+        # Au-dela, on coupe encore, et rien ne se perd.
         _msgs60 = _rcT.bloc_quinzaine(
             [{"e": dict(_eOb, va=f"FICHE {_i:02d}", discord="roucham_79944"),
               "bilan": _bMois} for _i in range(60)],
             _bMois["debut"], _bMois["fin"], "jessye")
-        check("mois : au-delà, la coupe reprend et les parties sont numérotées",
-              len(_msgs60) > 1 and all(f"partie {_i + 1}/{len(_msgs60)}" in m
-                                       for _i, m in enumerate(_msgs60)),
-              [m.splitlines()[0][-30:] for m in _msgs60])
+        check("mois : soixante fiches, aucune perdue et un seul en-tête",
+              sum(m.count("FICHE ") for m in _msgs60) == 60
+              and sum("Bilan du mois" in m for m in _msgs60) == 1
+              and not any("manquante" in m for m in _msgs60),
+              (sum(m.count("FICHE ") for m in _msgs60), len(_msgs60)))
     finally:
         (_obT.OBJECTIFS_FILE, _obT.HISTO_FILE) = _svOb
         shutil.rmtree(_dosOb, ignore_errors=True)
@@ -7109,6 +7139,83 @@ try:
         _wNg._load_web_users = _vraiUsersNg
 except Exception as _eNg:
     check("numgen : testable", False, repr(_eNg)[:200])
+
+
+# ==============================================================================
+# Ouvrir les categories des VA au bot admin, depuis le site
+# ==============================================================================
+try:
+    import asyncio as _aioAc, threading as _thAc
+    import web_upload as _wAc
+
+    _posesAc = []
+
+    class _ChAc:
+        def __init__(s, n): s.name = n
+
+    class _OvAc:
+        view_channel = False
+        send_messages = False
+
+    class _CatAc:
+        def __init__(s, n, ch): s.name, s.channels = n, [_ChAc(x) for x in ch]
+        def overwrites_for(s, m): return _OvAc()
+        async def set_permissions(s, m, **kw): _posesAc.append((s.name, sorted(kw)))
+
+    class _MbAc:
+        id = 42
+
+    class _GuAc:
+        name = "Youl4b"
+        def __init__(s):
+            s.categories = [_CatAc("bid_a", ["bid_a-menu", "bid_a-numero-mail"]),
+                            _CatAc("abdoul", ["abdoul-content", "abdoul-download"]),
+                            _CatAc("discussions", ["general", "blabla"])]
+        def get_member(s, i): return _MbAc()
+
+    class _PrAc:
+        def __init__(s, boucle): s.guilds = [_GuAc()]; s.loop = boucle
+
+    class _AdAc:
+        user = _MbAc()
+
+    _bcAc = _aioAc.new_event_loop()
+    _thAc.Thread(target=_bcAc.run_forever, daemon=True).start()
+    _svAc = (_wAc._BOT_REF, _wAc._BOT_ADMIN_REF)
+    try:
+        _wAc._BOT_REF, _wAc._BOT_ADMIN_REF = _PrAc(_bcAc), _AdAc()
+        _aAc = _wAc.create_app()
+        _cAc = _aAc.test_client()
+        with _cAc.session_transaction() as _sAc:
+            _sAc["auth"] = True; _sAc["username"] = "admin"
+            _sAc["legacy_owner"] = True; _sAc["role"] = "owner"
+        _jAc = _cAc.post("/discord/acces_bot_admin").get_json() or {}
+        check("acces : les categories de tickets sont ouvertes",
+              _jAc.get("ok") is True and _jAc.get("faits") == 2, str(_jAc)[:110])
+        # Une categorie de discussion n a aucune raison de s ouvrir : on ne
+        # distribue pas des droits au-dela de ce qui est demande.
+        check("acces : une categorie sans salon de ticket est epargnee",
+              all(n != "discussions" for n, _ in _posesAc),
+              str([n for n, _ in _posesAc]))
+        # Juste de quoi poser un panneau — pas de quoi administrer.
+        _droits = _posesAc[0][1] if _posesAc else []
+        check("acces : on accorde la vue, l ecriture, l historique, l epinglage",
+              set(_droits) == {"view_channel", "send_messages",
+                               "read_message_history", "manage_messages", "reason"},
+              str(_droits))
+        check("acces : un anonyme ne peut pas distribuer de droits",
+              _aAc.test_client().post("/discord/acces_bot_admin").status_code == 401)
+
+        # Sans bot admin, on ne fait pas semblant d avoir travaille.
+        _wAc._BOT_ADMIN_REF = None
+        check("acces : sans bot admin, on le dit au lieu de reussir a vide",
+              (_cAc.post("/discord/acces_bot_admin").get_json()
+               or {}).get("ok") is not True)
+    finally:
+        (_wAc._BOT_REF, _wAc._BOT_ADMIN_REF) = _svAc
+        _bcAc.call_soon_threadsafe(_bcAc.stop)
+except Exception as _eAc:
+    check("acces : testable", False, repr(_eAc)[:200])
 
 
 print("=" * 70)
