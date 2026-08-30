@@ -1264,6 +1264,40 @@ try:
 except Exception as _eSa:
     check("saut : testable", False, repr(_eSa)[:200])
 
+# ==============================================================================
+# /panelnumero : la voie sure, dans le salon ou l on est
+# ==============================================================================
+try:
+    import inspect as _insIc
+    from cogs.numeros import NumerosCog as _NcIc
+    _srcIc = _insIc.getsource(_NcIc.panelnumero.callback
+                              if hasattr(_NcIc.panelnumero, "callback")
+                              else _NcIc.panelnumero)
+    # Aucun filtre sur le nom : la convention -numero-mail n existe que sur le
+    # serveur des tickets. Ailleurs le salon s appelle sms-email ou autrement,
+    # et les commandes « all » ne trouvent rien parmi 156 salons.
+    # On vise le CODE, pas la prose : la docstring explique justement
+    # pourquoi le filtre n existe pas, elle cite donc le suffixe.
+    _codeIc = _srcIc.split('"""')[-1]
+    check("ici : aucun filtre sur le nom du salon",
+          "endswith(" not in _codeIc and "interaction.channel" in _codeIc,
+          "un filtre de nom est revenu dans le corps")
+    # Le panneau mort, epingle, appartient a l autre application : sans
+    # nettoyage on pose le neuf a cote du cadavre.
+    check("ici : les anciens panneaux epingles sont retires",
+          'getattr(p.author, "bot", False)' in _srcIc
+          and "Numéros & Mails" in _srcIc and "Numéro & Mail" in _srcIc)
+    check("ici : le nouveau panneau est epingle",
+          "msg.pin()" in _srcIc)
+    # Un epinglage refuse ne doit pas passer pour une reussite muette.
+    check("ici : un epinglage refuse est dit",
+          "épinglage refusé" in _srcIc or "epinglage refuse" in _srcIc)
+    check("ici : et le nombre d anciens retires est rendu",
+          "ancien(s) panneau(x) retiré(s)" in _srcIc)
+except Exception as _eIc:
+    check("ici : testable", False, repr(_eIc)[:200])
+
+
 print("\n" + "=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

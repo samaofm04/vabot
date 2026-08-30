@@ -344,14 +344,60 @@ class NumerosCog(commands.Cog):
         name="panelnumero",
         description="[ADMIN] Poste ICI le panneau Numéro & Mail (boutons)")
     async def panelnumero(self, interaction: discord.Interaction):
+        """Pose le panneau DANS LE SALON COURANT, quel que soit son nom.
+
+        C est la voie sure : les commandes « all » cherchent des salons qui
+        finissent par -numero-mail, et cette convention n existe que sur le
+        serveur des tickets. Ailleurs le salon s appelle sms-email, ou
+        autrement — 156 salons visibles et pas un seul qui matche. Ici, aucun
+        filtre : le salon, c est celui ou l on est.
+
+        Elle retire aussi les anciens panneaux EPINGLES de ce salon, de
+        n importe quel bot. Le panneau pose avant que le cog ne demenage
+        appartient a l autre application et ne repond plus : sans ce
+        nettoyage, on se retrouvait avec le neuf a cote du mort, identiques a
+        l ecran.
+        """
         app = await interaction.client.application_info()
         if interaction.user.id != app.owner.id:
             from cogs.user import _is_staff_member
             if not _is_staff_member(interaction.user):
                 await interaction.response.send_message("Réservé aux admins.", ephemeral=True)
                 return
-        await interaction.response.send_message(
-            embed=panel_embed(), view=NumPanelView(self))
+        ch = interaction.channel
+        if ch is None:
+            await interaction.response.send_message("À utiliser dans un salon.",
+                                                    ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        vires = 0
+        try:
+            for p in await ch.pins():
+                t = (p.embeds[0].title or "") if p.embeds else ""
+                if getattr(p.author, "bot", False) and (
+                        "Numéros & Mails" in t or "Numéro & Mail" in t):
+                    try:
+                        await p.delete()
+                        vires += 1
+                    except Exception:
+                        try:
+                            await p.unpin()
+                            vires += 1
+                        except Exception:
+                            pass
+        except Exception as e:
+            log.warning(f"panelnumero: nettoyage impossible ({e})")
+        msg = await ch.send(embed=panel_embed(), view=NumPanelView(self))
+        epingle = True
+        try:
+            await msg.pin()
+        except Exception:
+            epingle = False
+        mot = "✅ Panneau posé" + (" et épinglé" if epingle else
+                                  " (épinglage refusé — permission « Gérer les messages »)")
+        if vires:
+            mot += f" · {vires} ancien(s) panneau(x) retiré(s)"
+        await interaction.followup.send(mot + ".", ephemeral=True)
 
     @app_commands.command(
         name="panelnumeroall",
