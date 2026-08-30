@@ -5928,6 +5928,72 @@ try:
         check("portail : le compte a bien disparu",
               not any(a["username"] == "un.deux" for a in _jbVP.list_accounts("jessye")))
 
+        # ---- Modifier un compte deja la ------------------------------------
+        # Un compte se renomme, un mot de passe change apres une alerte. Sans
+        # cette porte, la fiche vieillissait en silence.
+        _aMo = _jbVP.add_account("jessye", "avant.modif", password="AncienMdpXY",
+                                 two_fa="VIEUX 2FA", email="vieux@exemple.com",
+                                 va="VA NOUM 1X1")
+        _hMo = _vaVP.get(_urlVP).get_data(as_text=True)
+        check("modif : chaque ligne porte son bouton de modification",
+              "class='mod'" in _hMo and "data-a-mdp='1'" in _hMo)
+        check("modif : la page dit CE QUI est rempli, jamais la valeur",
+              "AncienMdpXY" not in _hMo and "VIEUX 2FA" not in _hMo
+              and "vieux@exemple.com" not in _hMo,
+              "un identifiant est lisible dans la page")
+
+        # Un champ vide ne change RIEN : c est ce qui permet de remplacer un
+        # mot de passe sans jamais l avoir affiche.
+        _jMo = (_vaVP.post(_urlVP + "/modifier", data={
+            "compte_id": str(_aMo["id"]), "pseudo": "avant.modif",
+            "mdp": "NouveauMdp2026", "deuxfa": "", "mail": "", "note": ""}
+        ).get_json() or {})
+        _dMo = [x for x in _jbVP.list_accounts("jessye") if x["id"] == _aMo["id"]][0]
+        check("modif : le mot de passe est remplace",
+              _jMo.get("ok") is True and _dMo.get("password") == "NouveauMdp2026",
+              str(_jMo.get("error"))[:90])
+        check("modif : un champ laisse vide n efface pas ce qui etait la",
+              _dMo.get("two_fa") == "VIEUX 2FA"
+              and _dMo.get("email") == "vieux@exemple.com",
+              "%s / %s" % (_dMo.get("two_fa"), _dMo.get("email")))
+        check("modif : la reponse ne renvoie pas ce qui vient d etre ecrit",
+              "NouveauMdp2026" not in str(_jMo))
+
+        # Renommer : un compte change de pseudo sur Instagram.
+        _jRn = (_vaVP.post(_urlVP + "/modifier", data={
+            "compte_id": str(_aMo["id"]),
+            "pseudo": "https://instagram.com/apres.modif?igsi=QQ"}).get_json() or {})
+        _dMo = [x for x in _jbVP.list_accounts("jessye") if x["id"] == _aMo["id"]][0]
+        check("modif : le renommage marche, lien de partage compris",
+              _jRn.get("ok") is True and _dMo.get("username") == "apres.modif",
+              str(_dMo.get("username")))
+        check("modif : renommer ne perd pas les identifiants",
+              _dMo.get("password") == "NouveauMdp2026"
+              and _dMo.get("two_fa") == "VIEUX 2FA")
+
+        # Rien a faire n est pas une panne, mais ne doit pas passer pour une
+        # reussite : sans ce mot, on croit avoir enregistre.
+        check("modif : un formulaire vide le dit au lieu de faire semblant",
+              (_vaVP.post(_urlVP + "/modifier",
+                          data={"compte_id": str(_aMo["id"])}).get_json()
+               or {}).get("ok") is not True)
+
+        # Le perimetre : le jeton n ouvre que SA fiche.
+        _voisinMo = _jbVP.add_account("jessye", "voisine.modif", va="VA NOUM 2X1")
+        _jHorsMo = (_vaVP.post(_urlVP + "/modifier", data={
+            "compte_id": str(_voisinMo["id"]), "mdp": "vole"}).get_json() or {})
+        check("modif : le compte d une autre fiche est refuse",
+              _jHorsMo.get("ok") is not True,
+              str(_jHorsMo.get("error"))[:80])
+        check("modif : et il n a pas ete touche",
+              [x for x in _jbVP.list_accounts("jessye")
+               if x["id"] == _voisinMo["id"]][0].get("password") == "")
+        check("modif : un jeton inconnu ne modifie rien",
+              _vaVP.post("/mes-comptes/jeton-bidon/modifier",
+                         data={"compte_id": "1", "mdp": "x"}).status_code == 404)
+        _jbVP.remove_account("jessye", int(_aMo["id"]))
+        _jbVP.remove_account("jessye", int(_voisinMo["id"]))
+
         # ---- Fiche detaillee : un compte avec ses identifiants -------------
         # Le VA CREE ces comptes : au moment ou il en ouvre un, il a le mot de
         # passe et le 2FA sous les yeux. On ECRIT par cette porte, on ne RELIT

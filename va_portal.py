@@ -96,6 +96,9 @@ _LOCK = threading.RLock()
 # destructeur : on peut polluer une fiche, pas la vider.
 MAX_AJOUTS_JOUR = 120
 MAX_RETRAITS_JOUR = 30
+# Corriger un pseudo ou un mot de passe est courant et sans danger : le
+# plafond est la contre la rafale, pas contre le travail.
+MAX_MODIFS_JOUR = 60
 
 # Nombre de lignes acceptees dans un seul collage. Au-dela on coupe et on le
 # DIT — une ligne avalee en silence, c'est un compte qu'on croit ajoute.
@@ -637,8 +640,9 @@ input:focus,textarea:focus{outline:2px solid rgba(236,72,153,.35);outline-offset
    chiffres / croix, et le bloc « chiffres » aligne les colonnes entre elles.
    Une grille plate a huit colonnes s'ecroulait sur telephone — les cinq
    valeurs atterrissaient dans la meme case et se superposaient. */
-.thead,.ligne{display:grid;grid-template-columns:38px minmax(0,1fr) auto 34px;
+.thead,.ligne{display:grid;grid-template-columns:38px minmax(0,1fr) auto 62px;
   gap:8px;align-items:center}
+.actes{display:flex;gap:4px;justify-content:flex-end}
 .chiffres{display:grid;grid-template-columns:66px 66px 66px 76px 94px;gap:8px;
   align-items:center}
 .thead{padding:8px 18px;font-size:10px;letter-spacing:.6px;color:var(--tres-doux);
@@ -666,9 +670,23 @@ input:focus,textarea:focus{outline:2px solid rgba(236,72,153,.35);outline-offset
 .reel{font-size:11px}
 .reel b{display:block;font-weight:700;font-size:12px}
 .reel span{color:var(--tres-doux)}
-.sup{background:transparent;border:1px solid var(--bord);color:var(--doux);
-  width:26px;height:26px;border-radius:7px;cursor:pointer;font-size:14px;line-height:1}
+.sup,.mod{background:transparent;border:1px solid var(--bord);color:var(--doux);
+  width:26px;height:26px;border-radius:7px;cursor:pointer;font-size:14px;line-height:1;
+  flex-shrink:0}
 .sup:hover{border-color:var(--rouge);color:var(--rouge)}
+.mod:hover{border-color:var(--accent);color:var(--accent)}
+/* La fenetre de modification vit HORS de la liste : celle-ci est refaite
+   entiere a chaque action, un editeur pose dedans disparaitrait sous les
+   doigts. */
+.voile{position:fixed;inset:0;background:rgba(0,0,0,.62);z-index:20;
+  display:none;align-items:center;justify-content:center;padding:14px}
+.voile.on{display:flex}
+.fenetre{background:var(--carte);border:1px solid var(--bord);border-radius:14px;
+  padding:18px;width:min(430px,100%);max-height:88vh;overflow:auto;
+  box-shadow:0 18px 50px rgba(0,0,0,.35)}
+.fenetre h2{margin:0 0 4px;font-size:15px;font-weight:800}
+.deja{font-size:11px;font-weight:700;color:var(--vert)}
+.deja.vide{color:var(--tres-doux);font-weight:600}
 .vide{padding:26px 18px;text-align:center;color:var(--doux);font-size:13px}
 .note{color:var(--tres-doux);font-size:11px;text-align:center;margin-top:18px}
 #msg{position:fixed;left:50%;transform:translateX(-50%);bottom:20px;z-index:9;
@@ -680,10 +698,10 @@ input:focus,textarea:focus{outline:2px solid rgba(236,72,153,.35);outline-offset
   /* L'en-tete de colonnes disparait : chaque chiffre porte alors son propre
      libelle, sinon on lit « 672 / 0 / 85.3k » sans savoir ce que c'est. */
   .thead{display:none}
-  .ligne{grid-template-columns:34px minmax(0,1fr) 30px;row-gap:8px;padding:11px 14px}
+  .ligne{grid-template-columns:34px minmax(0,1fr) 58px;row-gap:8px;padding:11px 14px}
   .ligne>:first-child{grid-column:1;grid-row:1}
   .ligne>.nom{grid-column:2;grid-row:1}
-  .ligne>.sup{grid-column:3;grid-row:1}
+  .ligne>.actes{grid-column:3;grid-row:1}
   .ligne>.chiffres{grid-column:1 / -1;grid-row:2;
     grid-template-columns:repeat(auto-fit,minmax(74px,1fr));gap:8px 10px}
   .chiffres .num{text-align:left}
@@ -792,6 +810,71 @@ document.addEventListener('keydown', function(ev){
   var b = c.querySelector('button.btn');
   if(b && !b.disabled) b.click();
 });
+// ---- Modifier un compte ----------------------------------------------
+// Les champs partent VIDES et vides veut dire « ne change pas ». Preremplir
+// reviendrait a afficher le mot de passe, ce que cette page ne fait jamais :
+// on ecrit par cette porte, on ne relit pas par elle.
+function vpFermeMod(){
+  var v = document.getElementById('mod-voile');
+  if(v) v.classList.remove('on');
+}
+function vpEtat(id, rempli){
+  var e = document.getElementById(id);
+  if(!e) return;
+  e.textContent = rempli ? '(déjà enregistré)' : '(vide)';
+  e.className = rempli ? 'deja' : 'deja vide';
+}
+document.addEventListener('click', function(ev){
+  var b = ev.target.closest ? ev.target.closest('button.mod') : null;
+  if(!b) return;
+  var compte = b.getAttribute('data-compte') || '';
+  window.__vpMod = b.getAttribute('data-id') || '';
+  var q = document.getElementById('mod-qui');
+  if(q) q.textContent = '@' + compte;
+  var p = document.getElementById('m-pseudo');
+  if(p) p.value = compte;
+  ['m-mdp','m-2fa','m-mail','m-note'].forEach(function(id){
+    var e = document.getElementById(id);
+    if(e) e.value = '';
+  });
+  vpEtat('m-etat-mdp',  !!b.getAttribute('data-a-mdp'));
+  vpEtat('m-etat-2fa',  !!b.getAttribute('data-a-2fa'));
+  vpEtat('m-etat-mail', !!b.getAttribute('data-a-mail'));
+  vpEtat('m-etat-note', !!b.getAttribute('data-a-note'));
+  var v = document.getElementById('mod-voile');
+  if(v) v.classList.add('on');
+  setTimeout(function(){ if(p) p.focus(); }, 40);
+});
+document.addEventListener('click', function(ev){
+  if(ev.target && ev.target.id === 'mod-voile') vpFermeMod();
+});
+document.addEventListener('keydown', function(ev){
+  var v = document.getElementById('mod-voile');
+  if(!v || !v.classList.contains('on')) return;
+  if(ev.key === 'Escape'){ vpFermeMod(); return; }
+  if(ev.key === 'Enter' && ev.target.tagName === 'INPUT'){
+    ev.preventDefault();
+    var b = v.querySelector('button.btn:not(.gris)');
+    if(b && !b.disabled) b.click();
+  }
+});
+function vpEnregistrerMod(btn){
+  var id = window.__vpMod || '';
+  if(!id){ vpMsg('Compte introuvable', true); return; }
+  var v = function(x){
+    var e = document.getElementById(x);
+    return (e && e.value || '').trim();
+  };
+  var fd = new FormData();
+  fd.append('compte_id', id);
+  fd.append('pseudo', v('m-pseudo'));
+  fd.append('mdp', v('m-mdp'));
+  fd.append('deuxfa', v('m-2fa'));
+  fd.append('mail', v('m-mail'));
+  fd.append('note', v('m-note'));
+  vpEnvoie(window.__vpBase + '/modifier', fd, btn, 'Enregistrer')
+    .then(function(j){ if(j && j.ok) vpFermeMod(); });
+}
 document.addEventListener('click', function(ev){
   var b = ev.target.closest ? ev.target.closest('button.sup') : null;
   if(!b) return;
@@ -1050,8 +1133,19 @@ def _ligne_compte(a: dict, stats: dict, normaliser, base_pp: str = "") -> str:
         f"<div class='reel'><b>{_esc(lbl)}</b>"
         f"<span>{_esc(date_courte)}</span></div>"
         f"</div>"
+        f"<div class='actes'>"
+        # Ce que la fiche porte deja se DIT, jamais ne se montre : le VA doit
+        # savoir s il a mis un mot de passe sans que la page le rende lisible
+        # a quiconque ouvre le lien. D ou des drapeaux, pas des valeurs.
+        f"<button type='button' class='mod' data-id='{aid}' data-compte='{ps}' "
+        f"data-a-mdp='{'1' if (a.get('password') or '').strip() else ''}' "
+        f"data-a-2fa='{'1' if (a.get('two_fa') or '').strip() else ''}' "
+        f"data-a-mail='{'1' if (a.get('email') or '').strip() else ''}' "
+        f"data-a-note='{'1' if (a.get('notes') or '').strip() else ''}' "
+        f"title='Modifier les infos de ce compte'>✎</button>"
         f"<button type='button' class='sup' data-id='{aid}' data-compte='{ps}' "
         f"title='Retirer ce compte de ta liste'>×</button>"
+        f"</div>"
         f"</div>"
     )
 
@@ -1441,6 +1535,38 @@ def register(app, deps):
             "</div>"
             "<div id='liste'>" + _liste_html(comptes, jeton) + "</div>"
             "</div>"
+            # Hors de la carte, donc hors de la liste : celle-ci est refaite
+            # entiere a chaque action.
+            "<div class='voile' id='mod-voile'>"
+            "<div class='fenetre'>"
+            "<h2>✎ Modifier <span id='mod-qui'></span></h2>"
+            "<p class='aide'>Laisse un champ vide pour ne rien changer.</p>"
+            "<div class='champs'>"
+            "<label class='champ'><span>Pseudo Instagram</span>"
+            "<input type='text' id='m-pseudo' autocomplete='off' autocapitalize='off' "
+            "autocorrect='off' spellcheck='false'></label>"
+            "<label class='champ'><span>Mot de passe <i id='m-etat-mdp'></i></span>"
+            "<input type='text' id='m-mdp' autocomplete='off' autocapitalize='off' "
+            "autocorrect='off' spellcheck='false' placeholder='nouveau mot de passe'></label>"
+            "<label class='champ'><span>2FA <i id='m-etat-2fa'></i></span>"
+            "<input type='text' id='m-2fa' autocomplete='off' autocapitalize='off' "
+            "autocorrect='off' spellcheck='false' placeholder='nouvelle clé ou codes'></label>"
+            "<label class='champ'><span>E-mail <i id='m-etat-mail'></i></span>"
+            "<input type='text' id='m-mail' autocomplete='off' autocapitalize='off' "
+            "autocorrect='off' spellcheck='false' placeholder='nouvelle adresse'></label>"
+            "<label class='champ'><span>Note <i id='m-etat-note'></i></span>"
+            "<input type='text' id='m-note' autocomplete='off' "
+            "placeholder='remplace la note'></label>"
+            "</div>"
+            "<p class='secret'>🔒 Ce qui est déjà enregistré ne s'affiche pas, "
+            "même ici — on peut le remplacer, pas le relire. Pour effacer un "
+            "champ, demande à ton manager.</p>"
+            "<div style='display:flex;gap:8px;margin-top:14px'>"
+            "<button type='button' class='btn gris' onclick='vpFermeMod()'>Annuler</button>"
+            "<button type='button' class='btn' onclick='vpEnregistrerMod(this)'>"
+            "Enregistrer</button>"
+            "</div>"
+            "</div></div>"
             "<p class='note'>Cette page ne montre que tes comptes. "
             "Les stats se rafraîchissent deux fois par jour.<br>"
             "Ne partage pas ce lien : il ouvre ta liste sans mot de passe.</p>"
@@ -1654,6 +1780,111 @@ def register(app, deps):
 
         comptes = _comptes_de(identite, va)
         return jsonify({"ok": True, "msg": message,
+                        "liste": _liste_html(comptes, jeton), "total": len(comptes),
+                        "pastilles": _pastilles_html(comptes, identite, va)})
+
+    @app.route(RACINE + "/<jeton>/modifier", methods=["POST"])
+    def va_portail_modifier(jeton):
+        """Corriger un compte deja la : pseudo, mot de passe, 2FA, mail, note.
+
+        Un compte se renomme sur Instagram, un mot de passe change apres une
+        alerte, un 2FA se refait : sans cette porte, le VA devait passer par
+        son manager pour chaque correction, et en pratique il ne le faisait
+        pas — la fiche vieillissait en silence.
+
+        UN CHAMP VIDE NE CHANGE RIEN. Il n'est pas efface : il est ignore.
+        C'est ce qui permet de remplacer un mot de passe sans jamais l'avoir
+        affiche — preremplir la fenetre reviendrait a rendre lisible, depuis
+        un lien qui se recopie, ce que cette page refuse de montrer. Effacer
+        pour de bon reste au tableau de bord.
+        """
+        rec = resoudre(jeton)
+        if rec is None:
+            return jsonify({"ok": False, "error": "Lien expiré — demande-en un nouveau"}), 404
+        identite, va = _norm(rec.get("identite")), _norm(rec.get("va"))
+        if not _fiche_vivante(identite, va):
+            return jsonify({"ok": False, "error": _MORTE}), 404
+        try:
+            compte_id = int(request.form.get("compte_id") or 0)
+        except Exception:
+            compte_id = 0
+        if not compte_id:
+            return jsonify({"ok": False, "error": "Compte introuvable"})
+
+        # Le jeton n'ouvre que SA fiche : on verifie l'appartenance AVANT de
+        # toucher quoi que ce soit, sinon un identifiant devine ailleurs
+        # serait modifiable depuis ici.
+        comptes = _comptes_de(identite, va)
+        vise = next((a for a in comptes if int(a.get("id") or 0) == compte_id), None)
+        if vise is None:
+            log.warning("va_portal: modification hors perimetre refusee (%s / %s / %s)",
+                        identite, va, compte_id)
+            return jsonify({"ok": False, "error": "Ce compte n'est pas dans ta liste"})
+
+        ancien = _norm(vise.get("username"))
+        champs, poses = {}, []
+        for cle, champ, libelle in (("password", "mdp", "mot de passe"),
+                                    ("two_fa", "deuxfa", "2FA"),
+                                    ("email", "mail", "e-mail"),
+                                    ("notes", "note", "note")):
+            valeur = _norm(request.form.get(champ))
+            if valeur:
+                champs[cle] = valeur
+                poses.append(libelle)
+
+        # Le pseudo se relit comme partout ailleurs : un lien de partage colle
+        # doit marcher ici aussi.
+        demande = _norm(request.form.get("pseudo"))
+        if demande and demande.lower().lstrip("@") != ancien.lower():
+            neuf = pseudo_instagram(demande)
+            if not neuf:
+                return jsonify({"ok": False,
+                                "error": "Pseudo illisible : " + demande[:40]})
+            if neuf.lower() != ancien.lower():
+                champs["username"] = neuf
+                poses.append("pseudo")
+
+        if not champs:
+            # Rien a faire n'est pas une panne, mais ne doit pas passer pour
+            # une reussite : sans ce mot, on croit avoir enregistre.
+            return jsonify({"ok": False,
+                            "error": "Rien à changer — remplis au moins un champ"})
+
+        if reserver(jeton, "modif", 1, MAX_MODIFS_JOUR,
+                    cibles=[ancien], ip=_ip()) <= 0:
+            return jsonify({"ok": False,
+                            "error": f"Plafond de modifications du jour atteint "
+                                     f"({MAX_MODIFS_JOUR}). Passe par ton manager."})
+
+        try:
+            import jailbreak as jb
+            ok = jb.update_account(identite, compte_id, **champs)
+        except Exception as e:                      # noqa: BLE001
+            log.error("va_portal: modification impossible (%s)", e)
+            return jsonify({"ok": False, "error": f"Modification impossible : {e}"[:200]})
+        if not ok:
+            # update_account rend False sur un pseudo deja pris par un autre
+            # compte de l'identite : le dire, sinon le refus est muet.
+            return jsonify({"ok": False,
+                            "error": ("Ce pseudo est déjà pris par un autre compte"
+                                      if "username" in champs else "Compte introuvable")})
+
+        if "username" in champs and callable(kick_scrape):
+            try:
+                kick_scrape([champs["username"]], label="va-portail")
+            except Exception as e:                  # noqa: BLE001
+                log.warning("va_portal: scrape non lance (%s)", e)
+        if callable(push_sheet):
+            try:
+                push_sheet()
+            except Exception as e:                  # noqa: BLE001
+                log.warning("va_portal: push Sheet non lance (%s)", e)
+
+        # On dit CE QUI a change, jamais la valeur.
+        nom = champs.get("username") or ancien
+        comptes = _comptes_de(identite, va)
+        return jsonify({"ok": True,
+                        "msg": f"@{nom} mis à jour — " + ", ".join(poses),
                         "liste": _liste_html(comptes, jeton), "total": len(comptes),
                         "pastilles": _pastilles_html(comptes, identite, va)})
 
