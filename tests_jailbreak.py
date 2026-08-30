@@ -1244,6 +1244,26 @@ except Exception as _ePq:
     check("pourquoi : testable", False, repr(_ePq)[:200])
 
 
+# ==============================================================================
+# Le panneau numero saute quand le bot n a pas le cog : ca doit se DIRE
+# ==============================================================================
+try:
+    import inspect as _insSa
+    import cogs.welcome as _weSa
+    _srcSa = _insSa.getsource(_weSa._ensure_num_panel)
+    check("saut : le bot sans NumerosCog le journalise au lieu de se taire",
+          "log.warning" in _srcSa and "NumerosCog" in _srcSa,
+          "le panneau etait saute sans une trace")
+    check("saut : et le message dit quoi faire",
+          "panelnumeroall" in _srcSa)
+    # Le bot principal cree les tickets mais n a PAS le cog : c est bien ce
+    # chemin-la qui se declenche en production.
+    import main as _mnSa
+    check("saut : c est bien le cas du bot qui cree les tickets",
+          "welcome" in _mnSa.MAIN_COGS and "numeros" not in _mnSa.MAIN_COGS)
+except Exception as _eSa:
+    check("saut : testable", False, repr(_eSa)[:200])
+
 print("\n" + "=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

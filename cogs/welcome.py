@@ -946,6 +946,16 @@ async def _ensure_num_panel(bot, channel):
         from cogs.numeros import NumPanelView, panel_embed
         ncog = bot.get_cog("NumerosCog")
         if ncog is None:
+            # Ce bot cree les salons mais n a plus le module des numeros : il a
+            # demenage sur le bot admin pour liberer des places de commandes.
+            # Le panneau etait donc simplement SAUTE — chaque nouveau ticket
+            # repartait avec un salon -numero-mail vide, sans que rien ne le
+            # dise. C est un des « ca ne marche plus » les plus couteux : il
+            # n y a aucune trace a chercher.
+            log.warning(
+                "panneau numero non pose dans #%s : ce bot n a pas NumerosCog "
+                "(il vit sur le bot admin) — lance /panelnumeroall depuis lui",
+                getattr(channel, "name", "?"))
             return False
         try:
             pins = await channel.pins()
