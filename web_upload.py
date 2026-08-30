@@ -42586,57 +42586,17 @@ def _render_video_manager() -> str:
         "Enregistrer).</div>"
     )
 
-    # ------------------------------------------------------------------
-    # PHOTOS. Elles ont leur PROPRE fichier de reglages
-    # (data/image_transform_config.json) et n avaient aucune commande sur le
-    # site : impossible de savoir si c etait allume, encore moins de
-    # l eteindre. C est allume par defaut -- mais « par defaut » n est pas une
-    # reponse quand on demande si c est actif.
-    # ------------------------------------------------------------------
-    try:
-        import image_transform as it
-        icfg = it.load_config()
-        i_on = bool(icfg.get("enabled", True))
-        pil_ok = it.is_pillow_available()
-    except Exception:
-        icfg, i_on, pil_ok = {}, False, False
-    pil_line = "" if pil_ok else (
+    # Les photos ont leur PROPRE fichier de reglages
+    # (data/image_transform_config.json) ; l interrupteur unique les commande
+    # avec les videos (voir _i_on0, plus haut). Ici on ne garde que l ALERTE :
+    # sans Pillow, elles partiraient sans retouche, et ca doit se voir.
+    pil_line = "" if _pil_ok0 else (
         "<div style='padding:9px 13px;border-radius:8px;font-size:12px;margin-bottom:10px;"
         "background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.35);color:#f87171'>"
         "✕ Pillow absent sur le VPS — les photos partiront sans retouche des "
         "métadonnées tant qu'il n'est pas installé.</div>"
     )
-    # Ce que l unique interrupteur couvre, dit noir sur blanc. Pas un second
-    # bouton : c est un etat, pas une commande — sinon on retombe a deux
-    # interrupteurs, et a une occasion d en oublier un.
-    def _pastille(on, quoi, detail):
-        coul = "#22c55e" if on else "#6b7280"
-        mot = "actif" if on else "coupé"
-        return (f"<div style='display:flex;align-items:center;gap:9px;padding:7px 0'>"
-                f"<span style='width:8px;height:8px;border-radius:50%;background:{coul};"
-                f"flex-shrink:0'></span>"
-                f"<span style='font-size:12.5px;color:#d4d4d8;font-weight:600'>{quoi}</span>"
-                f"<span style='font-size:11px;color:{coul};font-weight:700'>{mot}</span>"
-                f"<span style='font-size:11px;color:#6b7280;margin-left:auto;"
-                f"text-align:right'>{detail}</span></div>")
 
-    photo_btn = (
-        "<div style='margin:26px 0 0;padding-top:18px;border-top:1px solid #23283a'>"
-        "<div style='font-size:13px;font-weight:800;color:#fff;margin-bottom:6px'>"
-        "Ce que l'interrupteur couvre</div>"
-        + pil_line
-        + _pastille(bool(enabled), "🎬 Vidéos brutes",
-                    "Vidéo brut · ⭐ Vidéo brut · Telle quelle")
-        + _pastille(_i_on0, "🖼️ Photos",
-                    "posts · stories · story CTA · photo de profil")
-        + _pastille(True, "🎞️ Vidéos montées",
-                    "toujours — posé à la fabrication, sans interrupteur")
-        + "</div>"
-    )
-
-    # Mode en BARRE DU BAS façon « Instagram Preset » de TikFusion (demande
-    # user) : un select sombre bordé + la case « supprimer la source » à côté.
-    # Même champ name='mode' (meta/full) qu'avant -> handler POST inchangé.
     meta_sel = "selected" if meta_only else ""
     full_sel = "" if meta_only else "selected"
     del_chk = "checked" if del_src else ""
@@ -42674,8 +42634,7 @@ def _render_video_manager() -> str:
         "</form>"
     )
 
-    return _VT_HEAD + ff_line + toggle_btn + form + photo_btn
-
+    return _VT_HEAD + ff_line + pil_line + toggle_btn + form
 
 #: Les fournisseurs numerotent les pays. « 0 » est la RUSSIE, et c'etait le
 #: DEFAUT du module : une installation neuve demandait donc des numeros russes

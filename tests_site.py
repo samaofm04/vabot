@@ -5030,8 +5030,13 @@ try:
         check("photos : la page dit qu elles sont couvertes, et lesquelles",
               "story CTA" in _txtIt and "photo de profil" in _txtIt,
               "la ligne des photos ne se voit pas")
-        check("photos : leur etat est AFFICHE, pas un second bouton",
-              "Ce que l" in _txtIt and "onclick='itToggle" not in _pgIt)
+        # Un seul interrupteur sur la page, et aucun bloc d etat sous lui :
+        # le bouton dit deja ce qu il commande, trois lignes de plus
+        # alourdissaient sans rien apprendre.
+        check("photos : pas de second bouton, ni de bloc d etat",
+              "onclick='itToggle" not in _pgIt
+              and "Ce que l'interrupteur couvre" not in _txtIt
+              and _pgIt.count("onclick='mtToggle") == 1)
 
         # Les QUATRE sortes de photos doivent vraiment passer par la
         # transformation — meme garde que pour les brutes, ou une des trois
