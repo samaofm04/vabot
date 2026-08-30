@@ -146,9 +146,9 @@ class NumPanelView(discord.ui.View):
         super().__init__(timeout=None)
         self.cog = cog
 
-    # Boutons DIRECTS en Instagram/Threads (demande user : pas de menu de
-    # service, c'est Insta dans 100 % des cas). Le select reste dispo via
-    # « Autre service » pour les cas rares.
+    # Boutons DIRECTS en Instagram/Threads : c'est Insta dans 100 % des cas.
+    # « Autre service » a ete retire le 30/08/2026 — il n'ajoutait qu'un
+    # detour de deux ecrans pour un cas qui ne se presentait pas.
     @discord.ui.button(label="Numéro Instagram / Threads", emoji="📱",
                        style=discord.ButtonStyle.success, custom_id="numgen:sms")
     async def sms(self, itx: discord.Interaction, btn: discord.ui.Button):
@@ -171,8 +171,29 @@ class NumPanelView(discord.ui.View):
         await itx.response.defer(ephemeral=True, thinking=True)
         await self.cog.start_mail(itx, "ig")
 
-    @discord.ui.button(label="Autre service", emoji="⚙️",
-                       style=discord.ButtonStyle.secondary, row=1,
+    # « Autre service » retire du panneau le 30/08/2026 : c'est Instagram dans
+    # tous les cas, et le bouton n'ajoutait qu'un detour de deux ecrans. Les
+    # vues ci-dessous restent joignables par les panneaux DEJA POSES, dont les
+    # boutons portent encore custom_id="numgen:other" — un message Discord ne
+    # se redessine pas, et un bouton sans repondant affiche « n'a pas repondu
+    # a temps ». Elles partiront quand plus aucun panneau d'avant ne circulera.
+
+
+class _PanneauAncienView(discord.ui.View):
+    """Sert le bouton « Autre service » des panneaux DEJA POSES.
+
+    Le bouton a ete retire du panneau neuf, mais les messages epingles avant
+    ce jour le portent toujours — un message Discord ne se redessine pas. Sans
+    repondant, ce bouton-la afficherait « n a pas repondu a temps », qui est
+    precisement le symptome qu on vient de passer la soiree a chasser. Cette
+    vue disparaitra quand plus aucun ancien panneau ne circulera.
+    """
+    def __init__(self, cog):
+        super().__init__(timeout=None)
+        self.cog = cog
+
+    @discord.ui.button(label="Autre service", emoji="⚙️", row=1,
+                       style=discord.ButtonStyle.secondary,
                        custom_id="numgen:other")
     async def other(self, itx: discord.Interaction, btn: discord.ui.Button):
         await itx.response.send_message(
@@ -204,6 +225,9 @@ class NumerosCog(commands.Cog):
     async def cog_load(self):
         try:
             self.bot.add_view(NumPanelView(self))
+            # Les panneaux d avant portent encore « Autre service » : on
+            # continue de le servir tant qu ils circulent.
+            self.bot.add_view(_PanneauAncienView(self))
         except Exception:
             pass
 

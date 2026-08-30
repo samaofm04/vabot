@@ -1119,10 +1119,15 @@ try:
     # Les identifiants doivent coller EXACTEMENT a ceux du vrai panneau :
     # c est par eux que Discord retrouve le repondant. Un seul qui differe et
     # ce bouton-la retombe sur « n a pas repondu a temps ».
-    _vraisPe = _idsPe(_NpPe(None))
-    check("perime : les memes identifiants que le vrai panneau",
-          _idsPe(_vuePe) == _vraisPe,
-          "%s vs %s" % (_idsPe(_vuePe), _vraisPe))
+    # Le filet doit couvrir TOUT ce qu un ancien panneau porte — donc au moins
+    # les boutons du panneau actuel, plus ceux qui en ont ete retires depuis
+    # (« Autre service »). Un message Discord ne se redessine pas : le bouton
+    # d hier est toujours cliquable demain.
+    from cogs.numeros import _PanneauAncienView as _PaPe
+    _vraisPe = set(_idsPe(_NpPe(None))) | set(_idsPe(_PaPe(None)))
+    check("perime : le filet couvre tous les boutons d un ancien panneau",
+          set(_idsPe(_vuePe)) >= _vraisPe,
+          "manque : %s" % sorted(_vraisPe - set(_idsPe(_vuePe))))
     check("perime : la vue est persistante (elle survit au redemarrage)",
           _vuePe.timeout is None)
     check("perime : elle dit quoi faire, pas seulement que c est casse",
