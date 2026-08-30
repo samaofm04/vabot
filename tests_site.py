@@ -6410,8 +6410,16 @@ try:
             [dict(_eOb, va=f"FICHE {_i:02d}") for _i in range(60)], "2026-08-30")
         check("report : une longue liste est découpée",
               len(_longsOb) > 1, len(_longsOb))
+        # DISCORD COMPTE EN UTF-16 : un carre colore vaut DEUX unites, pas une.
+        # Mesurer en caracteres Python laissait passer des messages de 2340
+        # unites — refuses a l envoi, l erreur perdue dans un journal, et seul
+        # le dernier petit morceau arrivait. On lisait quatre fiches sur vingt.
         check("report : chaque morceau tient sous la limite Discord",
-              all(len(m) <= 2000 for m in _longsOb), [len(m) for m in _longsOb])
+              all(_rcT._taille(m) <= 2000 for m in _longsOb),
+              [_rcT._taille(m) for m in _longsOb])
+        check("mesure : un carré coloré compte pour deux",
+              _rcT._taille("🟥") == 2 and _rcT._taille("a") == 1,
+              (_rcT._taille("🟥"), _rcT._taille("a")))
         check("report : chaque morceau garde sa légende",
               all("comptes qui tournent" in m for m in _longsOb))
         check("report : aucune fiche perdue au découpage",
@@ -6652,8 +6660,22 @@ try:
             [{"e": dict(_eOb, va=f"FICHE {_i:02d}"), "bilan": _bOb} for _i in range(60)],
             "2026-08-16", "2026-08-31"))
         check("report : un message trop long est coupé, pas perdu",
-              len(_rcT._tronquer(_longOb)) <= 2000
-              and "tronquée" in _rcT._tronquer(_longOb), len(_rcT._tronquer(_longOb)))
+              _rcT._taille(_rcT._tronquer(_longOb)) <= 2000
+              and "tronquée" in _rcT._tronquer(_longOb),
+              _rcT._taille(_rcT._tronquer(_longOb)))
+        # LE cas qui a coute la soiree : vingt-deux fiches avec un mois de
+        # carres chacune. Toutes doivent arriver, et aucun message ne doit
+        # depasser la limite REELLE.
+        _bMois = _obT.bilan_mois("m", "M", "2026-08-20")
+        _22 = [{"e": dict(_eOb, va=f"FICHE {_i:02d}", discord=f"d{_i}"),
+                "bilan": _bMois} for _i in range(22)]
+        _msgs22 = _rcT.bloc_quinzaine(_22, _bMois["debut"], _bMois["fin"], "jessye")
+        check("mois : aucun message ne dépasse la limite Discord",
+              all(_rcT._taille(m) <= 2000 for m in _msgs22),
+              [_rcT._taille(m) for m in _msgs22])
+        check("mois : les 22 fiches sont toutes présentes",
+              sum(m.count("FICHE ") for m in _msgs22) == 22,
+              sum(m.count("FICHE ") for m in _msgs22))
     finally:
         (_obT.OBJECTIFS_FILE, _obT.HISTO_FILE) = _svOb
         shutil.rmtree(_dosOb, ignore_errors=True)

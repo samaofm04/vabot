@@ -82,8 +82,23 @@ import safe_json
 
 _CFG_FILE = pathlib.Path(__file__).resolve().parent.parent / "data" / "report_comptes.json"
 
-#: Longueur maxi d'un message Discord, avec de la marge pour le pied.
-_MAX_MSG = 1900
+#: Longueur maxi d'un message, EN UNITES DISCORD (voir _taille).
+_MAX_MSG = 1850
+
+
+def _taille(txt: str) -> int:
+    """La longueur d'un texte TELLE QUE DISCORD LA COMPTE.
+
+    Discord plafonne un message a 2000 unites UTF-16, pas a 2000 caracteres
+    Python. Un carre colore (🟥, hors du plan de base) compte donc pour DEUX.
+
+    Ca n'a rien d'academique : avec trente et un carres par fiche, un bloc de
+    vingt fiches faisait 1700 « caracteres » pour Python et 2340 pour Discord.
+    Les gros morceaux etaient donc REFUSES a l'envoi, l'erreur partait dans un
+    journal que personne ne lit, et seul le dernier petit morceau arrivait. On
+    lisait quatre fiches sur vingt et on croyait a un bug de calcul.
+    """
+    return len(str(txt or "").encode("utf-16-le")) // 2
 
 #: Les deux conventions de nom. Le report du jour et le bilan de quinzaine ne
 #: se lisent pas au meme moment ni pour la meme raison : l'un se regarde le
@@ -116,7 +131,7 @@ HEURE_REPORT = 1
 #: changement de format ne se voyait qu'a la publication suivante — et on
 #: attendait 1 h du matin en croyant que ca ne marchait pas. Quand le numero
 #: stocke ne correspond plus, la boucle republie une fois, tout de suite.
-FORMAT_BILAN = 9
+FORMAT_BILAN = 10
 
 
 # ==============================================================================
@@ -234,7 +249,7 @@ def bloc_jour(etats: list, jour: str, identite: str = "") -> list:
         ligne = ligne_fiche(e)
         # On coupe AVANT de depasser, et chaque morceau reprend la legende :
         # un deuxieme message sans en-tete est une liste de chiffres nus.
-        if sum(len(x) + 1 for x in bloc) + len(ligne) > _MAX_MSG:
+        if sum(_taille(x) + 1 for x in bloc) + _taille(ligne) > _MAX_MSG:
             messages.append("\n".join(bloc))
             bloc = list(tete)
         bloc.append(ligne)
@@ -347,7 +362,8 @@ def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> li
         # On coupe AVANT de dépasser, et jamais au milieu d'une fiche : une
         # fiche dont le nom est dans un message et les carrés dans le suivant
         # est illisible au moment précis où on s'en sert.
-        if sum(len(y) + 1 for y in bloc) + sum(len(y) + 1 for y in part) > _MAX_MSG:
+        if (sum(_taille(y) + 1 for y in bloc)
+                + sum(_taille(y) + 1 for y in part)) > _MAX_MSG:
             messages.append("\n".join(bloc))
             bloc = list(tete)
         bloc.extend(part)
