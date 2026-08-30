@@ -42523,7 +42523,29 @@ function mtTest(btn){
       if(n>0){
         var det='';
         for(var k in t){ det+='<div style=\"display:flex;gap:10px\"><span style=\"color:#6b7280;min-width:230px\">'+k+'</span><span>'+t[k]+'</span></div>'; }
-        l.push('<div style=\"margin-top:9px;padding-top:9px;border-top:1px solid #23283a;font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#d4d4d8\">'+det+'</div>');
+        l.push('<div style=\"margin-top:9px;padding-top:9px;border-top:1px solid #23283a;font-family:ui-monospace,Consolas,monospace;font-size:11px\">'+det+'</div>');
+      }
+      // Ce que le bot a fait aux DERNIERS envois reels. Le test dit que la
+      // chaine marche ; ceci dit si elle a servi — les deux peuvent diverger.
+      var env = d.derniers_envois || [];
+      if(env.length){
+        var e2='';
+        for(var i=0;i<env.length;i++){
+          var x=env[i], c=x.reecrit?'#22c55e':'#f87171';
+          var quand=new Date(x.t*1000).toLocaleTimeString();
+          e2+='<div style=\"display:flex;gap:9px;align-items:baseline\">'
+            + '<span style=\"color:'+c+'\">'+(x.reecrit?'reecrit':'NON reecrit')+'</span>'
+            + '<span style=\"color:#6b7280\">'+quand+'</span>'
+            + '<span style=\"color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px\">'+x.fichier+'</span>'
+            + (x.raison?'<span style=\"color:#fb923c\">'+x.raison+'</span>':'')
+            + '</div>';
+        }
+        l.push('<div style=\"margin-top:11px;padding-top:9px;border-top:1px solid #23283a\">'
+          + '<div style=\"font-weight:700;margin-bottom:5px\">Derniers envois de brutes</div>'
+          + '<div style=\"font-size:11px;line-height:1.7\">'+e2+'</div></div>');
+      } else {
+        l.push('<div style=\"margin-top:11px;padding-top:9px;border-top:1px solid #23283a;color:#6b7280\">'
+          + 'Aucun envoi de brute depuis le dernier redemarrage du bot.</div>');
       }
       var ok = d.ffmpeg && d.video_on && n>0;
       l.unshift('<div style=\"font-weight:800;margin-bottom:7px;color:'+(ok?'#22c55e':'#fb923c')+'\">'
@@ -42538,7 +42560,7 @@ function ligneDiag(ok, texte){
   var c = ok ? '#22c55e' : '#f87171';
   return '<div style=\"display:flex;align-items:center;gap:8px;padding:2px 0\">'
     + '<span style=\"width:8px;height:8px;border-radius:50%;background:'+c+';flex-shrink:0\"></span>'
-    + '<span style=\"color:#d4d4d8\">'+texte+'</span></div>';
+    + '<span>'+texte+'</span></div>';
 }
 function mtToggle(btn){
   btn.disabled=true;
@@ -42630,9 +42652,8 @@ def _render_video_manager() -> str:
         "style='background:transparent;border:1px solid #34343a;color:#6b7280;"
         "padding:7px 14px;border-radius:9px;cursor:pointer;font-size:12px;"
         "font-weight:600;font-family:inherit'>Tester maintenant</button></div>"
-        "<div id='mt-diag' style='display:none;background:#07090d;border:1px solid "
-        "#23283a;border-radius:10px;padding:13px 15px;margin-bottom:16px;"
-        "font-size:12px;line-height:1.5'></div>"
+        "<div id='mt-diag' class='vt-card' style='display:none;padding:13px 15px;"
+        "margin-bottom:16px;font-size:12px;line-height:1.5'></div>"
     )
 
     # Les photos ont leur PROPRE fichier de reglages
@@ -57556,6 +57577,15 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         except Exception as e:
             rap["ok"] = False
             rap["erreur"] = str(e)[:200]
+        # Ce que le bot a REELLEMENT fait aux derniers envois. Le test ci-dessus
+        # dit que la chaine marche ; ceci dit si elle a servi. Les deux peuvent
+        # diverger — c est exactement le cas qu on a mis une heure a cerner.
+        try:
+            from cogs.user import journal_brutes
+            rap["derniers_envois"] = journal_brutes()[:8]
+        except Exception as e:                  # noqa: BLE001
+            rap["derniers_envois"] = []
+            rap["journal_erreur"] = str(e)[:120]
         return jsonify(rap)
 
     @app.route("/settings/meta_toggle", methods=["POST"])

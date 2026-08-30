@@ -5597,6 +5597,33 @@ class ChoixCaptionView(discord.ui.View):
             prefixe_fichier="brute_caption")
 
 
+#: Les 20 derniers passages de brute_a_envoyer. En MEMOIRE seulement : ca sert
+#: a repondre a « qu est-ce qui s est passe au dernier envoi ? », pas a tenir un
+#: historique. Sans ca, un envoi non reecrit ne laissait qu une ligne sur la
+#: sortie standard du serveur — que personne ne lit — et la seule facon de le
+#: savoir etait de recuperer le fichier sur Discord et de lire ses proprietes.
+_JOURNAL_BRUTES = __import__("collections").deque(maxlen=20)
+
+
+def _noter_brute(fichier, identity, actif, reecrit, raison):
+    try:
+        _JOURNAL_BRUTES.append({
+            "t": int(__import__("time").time()),
+            "fichier": str(fichier)[:80],
+            "identite": str(identity or "")[:40],
+            "actif": bool(actif),
+            "reecrit": bool(reecrit),
+            "raison": str(raison or "")[:140],
+        })
+    except Exception:
+        pass          # un journal perdu ne doit jamais rater un envoi
+
+
+def journal_brutes():
+    """Le journal, du plus recent au plus ancien."""
+    return list(_JOURNAL_BRUTES)[::-1]
+
+
 async def brute_a_envoyer(video, dossier, identity=""):
     """(fichier a envoyer, metadonnees reecrites ?) pour UNE brute.
 
@@ -5619,19 +5646,27 @@ async def brute_a_envoyer(video, dossier, identity=""):
     JOURNAL du serveur. Muet pour le VA, visible pour qui administre.
     """
     import asyncio as _aio
+    import time as _t_br
     video = Path(video)
-    if not bool(load_transform_config().get("enabled", False)):
+    actif = bool(load_transform_config().get("enabled", False))
+    if not actif:
+        _noter_brute(video.name, identity, False, False, "interrupteur coupe")
         return video, False
     sortie = Path(dossier) / video.name
+    detail = ""
     try:
         ok = await _aio.to_thread(transform_metadata_strict, video, sortie)
-    except Exception:
-        ok = False
+    except Exception as e:                      # noqa: BLE001
+        ok, detail = False, f"{type(e).__name__}: {e}"[:120]
     reecrit = bool(ok) and sortie.exists() and sortie.stat().st_size > 0
     if not reecrit:
+        raison = detail or ("ffmpeg a rendu False" if not ok
+                            else "fichier de sortie vide ou absent")
         print(f"[brutes] {identity or '?'} / {video.name} : uniquification "
-              f"demandee, NON appliquee (ffmpeg absent ou en echec)")
+              f"demandee, NON appliquee ({raison})")
+        _noter_brute(video.name, identity, True, False, raison)
         return video, False
+    _noter_brute(video.name, identity, True, True, "")
     return sortie, True
 
 
