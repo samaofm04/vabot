@@ -4970,10 +4970,20 @@ try:
           "prochain /reel" not in _txtVt,
           "la page annonce encore un effet sur /reel")
     check("page meta : elle dit ce qu il commande vraiment",
-          "brutes envoy" in _txtVt and "Vidéo brut" in _txtVt,
-          "elle ne nomme pas les brutes")
-    check("page meta : elle previent que l image n est pas touchee",
-          "image n'est jamais touchée" in _txtVt)
+          "vidéos brutes" in _txtVt and "Vidéo brut" in _txtVt
+          and "photos" in _txtVt,
+          "elle ne nomme pas ce qui est couvert")
+    check("page meta : elle previent que l image n est pas retouchee",
+          "image n'est jamais retouchée" in _txtVt)
+    # UN seul interrupteur, pas deux. Deux boutons, c etait deux occasions
+    # d en oublier un et de croire que tout tournait.
+    check("page meta : un seul interrupteur sur la page",
+          _pgVt.count("onclick='mtToggle") == 1
+          and "onclick='vtToggle" not in _pgVt
+          and "onclick='itToggle" not in _pgVt,
+          "il en reste plusieurs")
+    check("page meta : elle dit que les montages n en ont pas besoin",
+          "montées" in _txtVt and "fabrication" in _txtVt)
     # « Supprimer la source apres le /reel », lui, reste VRAI : c est la seule
     # cle que l envoi de reels lit reellement.
     check("page meta : la mention vraie du /reel est conservee",
@@ -5017,12 +5027,11 @@ try:
 
         _pgIt = _wuSite._render_video_manager()
         _txtIt = _reFv.sub(r"\s+", " ", _reFv.sub(r"<[^>]+>", " ", _pgIt))
-        check("photos : la page porte leur interrupteur, et dit lesquelles",
-              "story CTA" in _txtIt and "photo de profil" in _txtIt
-              and "itToggle" in _pgIt,
-              "la section photos ne se voit pas")
-        check("photos : elle dit que le reglage est separe des videos",
-              "séparé" in _txtIt or "separe" in _txtIt)
+        check("photos : la page dit qu elles sont couvertes, et lesquelles",
+              "story CTA" in _txtIt and "photo de profil" in _txtIt,
+              "la ligne des photos ne se voit pas")
+        check("photos : leur etat est AFFICHE, pas un second bouton",
+              "Ce que l" in _txtIt and "onclick='itToggle" not in _pgIt)
 
         # Les QUATRE sortes de photos doivent vraiment passer par la
         # transformation — meme garde que pour les brutes, ou une des trois
@@ -5037,6 +5046,33 @@ try:
               "%d voie(s) sur 2" % _srcAp.count("to_thread(transform_image"))
         check("photos : la PP est du lot",
               'transform_image, pic, tmp_path, cfg, "profile"' in _srcU2)
+        # L INTERRUPTEUR UNIQUE : les deux fichiers bougent ensemble.
+        import video_transform as _vt2
+        _fV2 = _vt2.CONFIG_FILE
+        _savV2 = _fV2.read_text(encoding="utf-8") if _fV2.exists() else None
+        try:
+            def _etat2():
+                return (bool(_vt2.load_config().get("enabled")),
+                        bool(_itSite.load_config().get("enabled", True)))
+
+            # Etat MIXTE — celui dans lequel on se trouvait vraiment : les
+            # videos coupees, les photos allumees. Un clic doit tout allumer,
+            # pas inverser chacun dans son coin (ce qui aurait coupe les
+            # photos en croyant allumer les videos).
+            _vc2 = _vt2.load_config(); _vc2["enabled"] = False; _vt2.save_config(_vc2)
+            _ic2 = _itSite.load_config(); _ic2["enabled"] = True; _itSite.save_config(_ic2)
+            _jM = _cIt.post("/settings/meta_toggle").get_json() or {}
+            check("maitre : depuis un etat mixte, un clic allume TOUT",
+                  _jM.get("ok") is True and _etat2() == (True, True), str(_jM)[:90])
+            _cIt.post("/settings/meta_toggle")
+            check("maitre : le clic suivant coupe TOUT", _etat2() == (False, False))
+            _cIt.post("/settings/meta_toggle")
+            check("maitre : et on rallume les deux ensemble", _etat2() == (True, True))
+            check("maitre : un anonyme ne bascule rien",
+                  _aIt.test_client().post("/settings/meta_toggle").status_code == 401)
+        finally:
+            if _savV2 is not None:
+                _fV2.write_text(_savV2, encoding="utf-8")
     finally:
         _wuSite._load_web_users = _vraiUsersIt
         if _savIt is not None:
@@ -6969,6 +7005,46 @@ try:
               "manquante" not in _mEc[-1])
         check("mois : sans écartée, aucune ligne parasite",
               "sans aucun compte" not in "".join(_msgs22))
+        # LE PIED NE DOIT JAMAIS FAIRE DEBORDER UN MORCEAU. Il etait colle
+        # au dernier message APRES le controle de taille : le decoupage
+        # tenait son budget de 850, puis on rajoutait quatre cents unites
+        # par-dessus, et le dernier morceau repassait a 1080-1284 — au-dela
+        # du seuil vers 1100 ou Discord repond « OK » sans afficher la fin.
+        # Pire : l alarme etant ecrite en tout dernier, le garde-fou etait la
+        # PREMIERE chose mangee. Balayage complet plutot qu un cas choisi.
+        _ec27 = [("jessye", f"Fiche vide {_i:02d}") for _i in range(27)]
+        _debord, _perdues = [], []
+        for _n in range(1, 41):
+            _lg = [{"e": dict(_eOb, va=f"F{_i:02d}", discord="d"),
+                    "bilan": _bMois} for _i in range(_n)]
+            _mm = _rcT.bloc_quinzaine(_lg, _bMois["debut"], _bMois["fin"],
+                                      "jessye", _ec27)
+            if any(_rcT._taille(_x) > _rcT._MAX_EMBED for _x in _mm):
+                _debord.append((_n, [_rcT._taille(_x) for _x in _mm]))
+            if sum(_x.count("**F") for _x in _mm) != _n:
+                _perdues.append(_n)
+        check("mois : le pied ne fait déborder aucun morceau (1 à 40 fiches)",
+              not _debord, _debord[:3])
+        check("mois : et aucune fiche n est perdue au passage",
+              not _perdues, _perdues[:5])
+        # L alarme a son PROPRE message, court : une alarme noyee dans un long
+        # message est une alarme qu on ne lit pas, et une alarme tronquee
+        # n existe pas.
+        _pd = _rcT.pied_bilan(_ec27, 21, 17)
+        check("mois : l alerte « manquantes » est isolée et courte",
+              "manquante" in _pd[-1] and _rcT._taille(_pd[-1]) < 200,
+              _rcT._taille(_pd[-1]))
+        # UNE IDENTITE DONT TOUS LES TELEPHONES SONT VIDES. La sortie
+        # anticipee rendait « Aucune fiche suivie » et s arretait AVANT de
+        # nommer les ecartees : tout un monde s effacait d un coup, avec un
+        # message indiscernable de « cette identite n a aucun VA ». C est le
+        # trou que les ecartees devaient boucher, laisse ouvert dans le cas
+        # le plus dangereux — celui ou il n y a rien d autre a afficher.
+        _vide = _rcT.bloc_quinzaine([], _bMois["debut"], _bMois["fin"], "jessye",
+                                    [("jessye", "Safidy"), ("jessye", "Noum")])
+        check("mois : sans aucune fiche notée, les écartées sont quand même nommées",
+              "Safidy" in "".join(_vide) and "Noum" in "".join(_vide),
+              _vide)
         # Au-dela, on coupe encore, et rien ne se perd.
         _msgs60 = _rcT.bloc_quinzaine(
             [{"e": dict(_eOb, va=f"FICHE {_i:02d}", discord="roucham_79944"),

@@ -42501,30 +42501,18 @@ _VT_HEAD = """
 <script>
 function vtCard(cb){var c=cb.closest('.vt-card'); if(c) c.classList.toggle('on', cb.checked);}
 function vtPaint(btn,on){
-  btn.textContent = on ? '🟢 ACTIVÉ — clique pour couper' : '⚪ DÉSACTIVÉ — clique pour activer';
+  btn.textContent = on ? '🟢 ACTIVÉ — vidéos et photos · clique pour couper' : '⚪ DÉSACTIVÉ — clique pour activer';
   btn.style.background = on ? 'linear-gradient(135deg,#16a34a,#15803d)' : '#26263a';
 }
-function itToggle(btn){
+function mtToggle(btn){
   btn.disabled=true;
-  fetch('/settings/image_transform_toggle',{method:'POST',credentials:'same-origin'})
+  fetch('/settings/meta_toggle',{method:'POST',credentials:'same-origin'})
     .then(function(r){return r.json();})
     .then(function(d){
       btn.disabled=false;
       if(!d||!d.ok){ if(typeof showToast==='function') showToast('Erreur','error'); return; }
       vtPaint(btn,d.enabled);
-      if(typeof showToast==='function') showToast(d.enabled?'✓ Photos : metadonnees ACTIVEES':'⛔ Photos : metadonnees coupees', d.enabled?'success':'info');
-    })
-    .catch(function(){ btn.disabled=false; if(typeof showToast==='function') showToast('Erreur réseau','error'); });
-}
-function vtToggle(btn){
-  btn.disabled=true;
-  fetch('/settings/video_transform_toggle',{method:'POST',credentials:'same-origin'})
-    .then(function(r){return r.json();})
-    .then(function(d){
-      btn.disabled=false;
-      if(!d||!d.ok){ if(typeof showToast==='function') showToast('Erreur','error'); return; }
-      vtPaint(btn,d.enabled);
-      if(typeof showToast==='function') showToast(d.enabled?'✓ Uniquification ACTIVÉE':'⛔ Uniquification désactivée', d.enabled?'success':'info');
+      if(typeof showToast==='function') showToast(d.enabled?'✓ Metadonnees ACTIVEES — videos et photos':'⛔ Metadonnees coupees — videos et photos', d.enabled?'success':'info');
     })
     .catch(function(){ btn.disabled=false; if(typeof showToast==='function') showToast('Erreur réseau','error'); });
 }
@@ -42554,10 +42542,29 @@ def _render_video_manager() -> str:
         "✕ ffmpeg absent sur le VPS — les transformations ne s'appliqueront pas tant qu'il n'est pas installé.</div>"
     )
 
-    btn_txt = "🟢 ACTIVÉ — clique pour couper" if enabled else "⚪ DÉSACTIVÉ — clique pour activer"
-    btn_bg = "linear-gradient(135deg,#16a34a,#15803d)" if enabled else "#26263a"
+    # Les deux fichiers de reglages, mais UN seul interrupteur : on ne se
+    # demande pas si ses photos sont uniquifiees separement de ses videos, on
+    # se demande si c est allume. Deux boutons, c etait deux occasions d en
+    # oublier un et de croire que tout tournait.
+    try:
+        import image_transform as _it0
+        _i_on0 = bool(_it0.load_config().get("enabled", True))
+        _pil_ok0 = _it0.is_pillow_available()
+    except Exception:
+        _i_on0, _pil_ok0 = False, False
+    tout_on = bool(enabled) and _i_on0
+    partiel = (bool(enabled) != _i_on0)
+    if tout_on:
+        btn_txt = "🟢 ACTIVÉ — vidéos et photos · clique pour couper"
+    elif partiel:
+        btn_txt = ("🟠 À MOITIÉ — %s seulement · clique pour tout activer"
+                   % ("vidéos" if enabled else "photos"))
+    else:
+        btn_txt = "⚪ DÉSACTIVÉ — clique pour activer"
+    btn_bg = ("linear-gradient(135deg,#16a34a,#15803d)" if tout_on
+              else ("linear-gradient(135deg,#ea580c,#c2410c)" if partiel else "#26263a"))
     toggle_btn = (
-        "<button type='button' onclick='vtToggle(this)' style='width:100%;padding:15px;font-size:15px;"
+        "<button type='button' onclick='mtToggle(this)' style='width:100%;padding:15px;font-size:15px;"
         "font-weight:800;border:0;border-radius:12px;color:#fff;cursor:pointer;background:" + btn_bg + "'>"
         + btn_txt + "</button>"
         "<div style='font-size:11px;color:#6b7280;margin:7px 0 18px;text-align:center'>"
@@ -42566,12 +42573,16 @@ def _render_video_manager() -> str:
         # « supprimer la source ». Le SEUL endroit qui le lit, ce sont les
         # vidéos brutes envoyées aux VA. On y a cru assez longtemps pour se
         # demander pourquoi les brutes partaient sans rien changer.
-        "Interrupteur instantané — il commande les <b>vidéos brutes envoyées aux VA</b> "
-        "(« Vidéo brut », « ⭐ Vidéo brut », « Telle quelle ») : leurs métadonnées sont "
-        "réécrites à chaque envoi (modèle d'iPhone, version d'iOS, date de prise de vue, "
-        "GPS), <b>l'image n'est jamais touchée</b> — remux seul, les pixels sortent "
-        "identiques.<br>Les réglages ci-dessous sont des filtres d'image : ils ne "
-        "s'appliquent <b>pas</b> aux brutes, et se règlent séparément (bouton "
+        "Interrupteur instantané — il commande <b>tout ce qui part aux VA tel quel</b> : "
+        "les <b>vidéos brutes</b> (« Vidéo brut », « ⭐ Vidéo brut », « Telle quelle ») "
+        "et les <b>photos</b> (posts, stories, story CTA, photo de profil). Chaque envoi "
+        "repart avec d'autres métadonnées — modèle d'appareil, version d'iOS, date de "
+        "prise de vue, GPS d'une vraie ville — et <b>l'image n'est jamais retouchée</b> : "
+        "pour les vidéos c'est un remux, les pixels sortent identiques au bit près.<br>"
+        "Les vidéos <b>montées</b> par le site (Montage, Template + Brut) n'ont pas "
+        "besoin de cet interrupteur : leur fabrication pose déjà la même identité, "
+        "à chaque génération.<br>Les réglages ci-dessous sont des filtres d'image : ils "
+        "ne s'appliquent <b>pas</b> aux brutes, et se règlent séparément (bouton "
         "Enregistrer).</div>"
     )
 
@@ -42589,27 +42600,38 @@ def _render_video_manager() -> str:
         pil_ok = it.is_pillow_available()
     except Exception:
         icfg, i_on, pil_ok = {}, False, False
-    i_txt = "🟢 ACTIVÉ — clique pour couper" if i_on else "⚪ DÉSACTIVÉ — clique pour activer"
-    i_bg = "linear-gradient(135deg,#16a34a,#15803d)" if i_on else "#26263a"
     pil_line = "" if pil_ok else (
         "<div style='padding:9px 13px;border-radius:8px;font-size:12px;margin-bottom:10px;"
         "background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.35);color:#f87171'>"
         "✕ Pillow absent sur le VPS — les photos partiront sans retouche des "
         "métadonnées tant qu'il n'est pas installé.</div>"
     )
+    # Ce que l unique interrupteur couvre, dit noir sur blanc. Pas un second
+    # bouton : c est un etat, pas une commande — sinon on retombe a deux
+    # interrupteurs, et a une occasion d en oublier un.
+    def _pastille(on, quoi, detail):
+        coul = "#22c55e" if on else "#6b7280"
+        mot = "actif" if on else "coupé"
+        return (f"<div style='display:flex;align-items:center;gap:9px;padding:7px 0'>"
+                f"<span style='width:8px;height:8px;border-radius:50%;background:{coul};"
+                f"flex-shrink:0'></span>"
+                f"<span style='font-size:12.5px;color:#d4d4d8;font-weight:600'>{quoi}</span>"
+                f"<span style='font-size:11px;color:{coul};font-weight:700'>{mot}</span>"
+                f"<span style='font-size:11px;color:#6b7280;margin-left:auto;"
+                f"text-align:right'>{detail}</span></div>")
+
     photo_btn = (
-        "<div style='margin:26px 0 0;padding-top:20px;border-top:1px solid #23283a'>"
-        "<div style='font-size:14px;font-weight:800;color:#fff;margin-bottom:9px'>"
-        "🖼️ Photos — posts, stories, story CTA, photo de profil</div>"
-        + pil_line +
-        "<button type='button' onclick='itToggle(this)' style='width:100%;padding:15px;"
-        "font-size:15px;font-weight:800;border:0;border-radius:12px;color:#fff;"
-        "cursor:pointer;background:" + i_bg + "'>" + i_txt + "</button>"
-        "<div style='font-size:11px;color:#6b7280;margin:7px 0 4px;text-align:center'>"
-        "Réglage <b>séparé</b> de celui des vidéos, avec son propre fichier. Il "
-        "commande les photos envoyées aux VA : chaque copie repart avec ses "
-        "métadonnées EXIF réécrites (appareil, date de prise de vue, GPS d'une "
-        "vraie ville). L'image elle-même n'est pas retouchée.</div></div>"
+        "<div style='margin:26px 0 0;padding-top:18px;border-top:1px solid #23283a'>"
+        "<div style='font-size:13px;font-weight:800;color:#fff;margin-bottom:6px'>"
+        "Ce que l'interrupteur couvre</div>"
+        + pil_line
+        + _pastille(bool(enabled), "🎬 Vidéos brutes",
+                    "Vidéo brut · ⭐ Vidéo brut · Telle quelle")
+        + _pastille(_i_on0, "🖼️ Photos",
+                    "posts · stories · story CTA · photo de profil")
+        + _pastille(True, "🎞️ Vidéos montées",
+                    "toujours — posé à la fabrication, sans interrupteur")
+        + "</div>"
     )
 
     # Mode en BARRE DU BAS façon « Instagram Preset » de TikFusion (demande
@@ -57458,6 +57480,40 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             cfg["enabled"] = not bool(cfg.get("enabled"))
             vt.save_config(cfg)
             return jsonify({"ok": True, "enabled": cfg["enabled"]})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+
+    @app.route("/settings/meta_toggle", methods=["POST"])
+    def settings_meta_toggle():
+        """UN interrupteur pour tout ce qui part aux VA : vidéos ET photos.
+
+        Il y en avait deux, un par fichier de réglages — c'est vrai côté
+        stockage, mais personne ne se demande « est-ce que mes PHOTOS sont
+        uniquifiées » séparément des vidéos. On se demande si c'est allumé.
+        Deux boutons, c'était deux occasions d'en oublier un et de croire que
+        tout tournait.
+
+        Les deux fichiers restent séparés (ils n'ont pas les mêmes options) :
+        c'est l'interrupteur qui est commun. Si l'un des deux est allumé et
+        pas l'autre — état possible, hérité —, un clic allume TOUT plutôt que
+        d'inverser chacun dans son coin.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        try:
+            import video_transform as vt
+            import image_transform as it
+            vcfg, icfg = vt.load_config(), it.load_config()
+            v_on = bool(vcfg.get("enabled"))
+            i_on = bool(icfg.get("enabled", True))
+            cible = not (v_on and i_on)      # tout n'est pas allumé -> on allume
+            vcfg["enabled"] = cible
+            icfg["enabled"] = cible
+            vt.save_config(vcfg)
+            it.save_config(icfg)
+            return jsonify({"ok": True, "enabled": cible,
+                            "video": cible, "photo": cible})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
 
