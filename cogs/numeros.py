@@ -644,6 +644,31 @@ def _pourquoi_aucun_salon(guild, bot, suffixes):
                     "C'est donc bien un accès qui manque à CE bot-ci, pas un "
                     "problème de nom : ajoute-le aux catégories des VA."
                     % (_nom, _n2))
+            else:
+                # L absence de cette ligne etait deja la reponse, mais une
+                # ligne qui ne s affiche pas ne dit rien a personne : on
+                # cherchait une permission alors que les deux bots sont
+                # d accord — ces salons ne sont pas ICI.
+                _dautres = []
+                for _g3 in list(getattr(_autre, "guilds", []) or []):
+                    if getattr(_g3, "id", 0) == getattr(guild, "id", 0):
+                        continue
+                    _n3 = sum(1 for c in (_g3.text_channels or [])
+                              if any(_us_norm(c.name).endswith(s) for s in suffixes))
+                    if _n3:
+                        _dautres.append("**%s** (%d)" % (_g3.name, _n3))
+                if _dautres:
+                    txt.append(
+                        "🔎 Le bot **%s** n'en voit aucun ici non plus — mais il "
+                        "en voit sur : %s. Ces salons sont sur un AUTRE serveur : "
+                        "relance la commande là-bas."
+                        % (_nom, ", ".join(_dautres[:3])))
+                else:
+                    txt.append(
+                        "🔎 Le bot **%s** n'en voit aucun ici non plus, ni sur "
+                        "aucun autre serveur. Ce n'est donc pas une permission : "
+                        "vérifie le nom exact d'un salon (il doit **finir** par "
+                        "le suffixe)." % _nom)
             break
     except Exception:
         pass                      # un diagnostic en plus ne doit rien casser

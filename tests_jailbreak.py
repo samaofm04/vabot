@@ -1356,6 +1356,34 @@ try:
             _syCp.modules["main"] = _vraiCp
         else:
             _syCp.modules.pop("main", None)
+    # L absence de la ligne « il en voit N » etait deja la reponse, mais une
+    # ligne qui ne s affiche pas ne dit rien : on cherchait une permission
+    # alors que les deux bots etaient d accord — ces salons sont ailleurs.
+    _frCp = _GuCp(["général", "test", "sms-email"])
+    _usCp = _GuCp(["bid_a-menu", "bid_a-numero-mail"])
+    _frCp.id, _usCp.id = 1, 2
+    _frCp.name, _usCp.name = "YouLab AGENCY", "Youl4b"
+
+    class _Bo2Cp:
+        def __init__(s, gs): s.guilds = gs
+        def get_guild(s, gid): return next((g for g in s.guilds if g.id == gid), None)
+
+    _m2b = _tyCp.ModuleType("main")
+    _m2b.main_bot = _Bo2Cp([_frCp, _usCp])
+    _m2b.admin_bot = None
+    _syCp.modules["main"] = _m2b
+    try:
+        _mAil = _nuCp._pourquoi_aucun_salon(_frCp, _Bo2Cp([_frCp]), ("-numero-mail",))
+    finally:
+        if _vraiCp is not None:
+            _syCp.modules["main"] = _vraiCp
+        else:
+            _syCp.modules.pop("main", None)
+    check("compare : quand les salons sont AILLEURS, il nomme le serveur",
+          "Youl4b" in _mAil and "AUTRE serveur" in _mAil, _mAil[-200:])
+    check("compare : et il n accuse plus une permission a tort",
+          "acces qui manque" not in _mAil)
+
     check("compare : sans second bot, le message tient quand meme",
           "Voir les salons" in _m2Cp and "/panelnumero" in _m2Cp
           and "🔎" not in _m2Cp)
