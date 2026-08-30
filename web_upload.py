@@ -4597,11 +4597,18 @@ function lbCollectGallery(){
 //
 // Consequence voulue : un bouton ne s'affiche que si la vignette le porte.
 // Une story n'a pas d'etoile de brute, un rush brut n'a pas de Flash Trend.
+// La selection n'est pas un bouton mais une CASE, avec le cercle des
+// vignettes : c'est le meme geste et il doit avoir la meme tete. Son entree
+// porte donc un troisieme champ a null et se traite a part dans la synchro.
+//
+// L'etoile banger est la aussi, a la demande. Elle ne MARQUE pas : elle
+// ENVOIE le reel dans le salon Discord de l'identite. Un clic ici publie.
 var LB_ACTIONS = [
-  ['lb-sel',   '.sel-cb',          null],
-  ['lb-fav',   '.fav-brute-star',  'is-fav'],
-  ['lb-flash', '.flash-trend',     'is-flash'],
-  ['lb-off',   '.reel-disable',    'is-off']
+  ['lb-sel',    '.sel-cb',          null],
+  ['lb-banger', '.banger-star',     'is-banger'],
+  ['lb-fav',    '.fav-brute-star',  'is-fav'],
+  ['lb-flash',  '.flash-trend',     'is-flash'],
+  ['lb-off',    '.reel-disable',    'is-off']
 ];
 function lbCarte(){
   var it = lbGallery[lbIndex];
@@ -4618,13 +4625,22 @@ function lbCarte(){
 function lbActionsSync(){
   var carte = lbCarte();
   LB_ACTIONS.forEach(function(d){
-    var b = document.querySelector('.' + d[0]);
+    // La selection vit dans un <label> qui enveloppe sa case : c'est le
+    // support qu'on montre ou cache, et la CASE qu'on coche -- le cercle
+    // bleu vient du CSS « .sel-cb:checked + .sel-circle », comme sur les
+    // vignettes. Rien a peindre a la main.
+    var pourSel = (d[0] === 'lb-sel');
+    var b = document.querySelector(pourSel ? '.lb-sel-wrap' : '.' + d[0]);
     if(!b) return;
     var src = carte ? carte.querySelector(d[1]) : null;
     b.style.display = src ? 'flex' : 'none';
     if(!src) return;
-    var on = d[2] ? src.classList.contains(d[2]) : !!src.checked;
-    b.classList.toggle('active', on);
+    if(pourSel){
+      var cb = document.querySelector('.lb-sel-cb');
+      if(cb) cb.checked = !!src.checked;
+      return;
+    }
+    b.classList.toggle('active', src.classList.contains(d[2]));
   });
 }
 function lbAction(quoi){
@@ -12349,8 +12365,12 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
 <div id="lightbox" onclick="closeLightbox()">
   <div class="lb-header" onclick="event.stopPropagation()">
     <div class="lb-counter"><span id="lb-pos">1</span> / <span id="lb-total">1</span></div>
-    <button class="lb-act-btn lb-sel" onclick="lbAction('sel')" title="Sélectionner ce média">
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><polyline points="8.5 12 11 14.5 15.5 9.5"/></svg>
+    <label class="lb-sel-wrap sel-circle-wrap" title="Sélectionner ce média">
+      <input type="checkbox" class="sel-cb lb-sel-cb" onchange="lbAction('sel')" style="position:absolute;opacity:0;pointer-events:none">
+      <span class="sel-circle"></span>
+    </label>
+    <button class="lb-act-btn lb-banger" onclick="lbAction('banger')" title="Banger — envoie le reel dans le salon banger de l identité">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
     </button>
     <button class="lb-act-btn lb-fav" onclick="lbAction('fav')" title="Favori — Banger">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
@@ -12416,7 +12436,8 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
 .lb-prev{left:18px}
 .lb-next{right:18px}
 .lb-nav:hover{background:rgba(255,255,255,.15);transform:translateY(-50%) scale(1.08)}
-.lb-nav:disabled{opacity:.25;cursor:not-allowed;pointer-events:none}
+.lb-nav:disabled{opacity:.25;cursor:not-allowed}
+.lb-nav::before{content:'';position:absolute;top:-80px;bottom:-80px;left:-26px;right:-26px}
 .lb-stage{display:flex;align-items:center;justify-content:center;gap:18px;max-width:calc(100vw - 220px);width:100%;height:100%}
 .lb-stage.with-panel .lb-content-wrap{max-width:calc(100% - 380px)}
 .lb-content-wrap{display:flex;align-items:center;justify-content:center;flex:1;max-height:calc(100vh - 120px);height:100%;transition:max-width .25s;min-width:0}
@@ -12434,6 +12455,8 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
 .lb-dual-item video{max-width:100% !important;max-height:calc(100vh - 160px) !important}
 @media(max-width:900px){.lb-dual-video{flex-direction:column}.lb-dual-item{max-width:100%}}
 /* Bouton edit crayon dans header */
+.lb-sel-wrap{width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0}
+.lb-banger.active{background:#ffd54a;color:#111}
 .lb-act-btn{background:rgba(0,0,0,.5);border:0;color:#fff;width:40px;height:40px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;backdrop-filter:blur(6px);transition:all .15s}
 .lb-act-btn:hover{background:rgba(0,0,0,.72)}
 .lb-act-btn.active{background:#3b82f6;color:#fff}
