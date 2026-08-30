@@ -41,6 +41,21 @@ JOUR et par lien, et chacune est datee dans un journal que le proprietaire
 peut lire. Un lien qui fuit permet d'ajouter du bruit, pas de vider une
 fiche de cinquante comptes en une minute.
 
+Le plafond se tient dans un compteur A PART (`quota`), et se reserve avant
+d'agir, sous verrou. Ce n'est pas un detail d'implementation : la premiere
+version le recalculait en recomptant le journal, lequel est tronque a
+JOURNAL_MAX lignes. Le porteur du jeton faisait donc defiler la fenetre
+lui-meme avec des requetes sans effet et retrouvait un plafond neuf — la
+fiche de cinquante comptes se vidait en deux tours. Ne jamais deduire un
+plafond d'une liste bornee, et ne jamais lire un compteur dans une prise de
+verrou pour l'incrementer dans une autre.
+
+**Le portail ne cree jamais rien d'autre que des comptes.** Avant d'agir, on
+verifie que la fiche visee existe encore (`_fiche_vivante`). Sinon un jeton
+dont l'identite avait disparu — renommee, fusionnee, effacee — la
+RESSUSCITAIT au premier ajout, dans une entree que la page Jailbreak ne
+liste pas mais que l'Activite VA et la paie comptent.
+
 Le module ne s'installe pas seul : `register(app, deps)` recoit du fichier
 principal les quelques fonctions dont il a besoin. C'est ce qui evite
 l'import circulaire avec `web_upload`, et ce qui rend visible en une seule
@@ -50,6 +65,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import logging
+import re as _re
 import secrets
 import threading
 import time
@@ -99,13 +115,43 @@ def _load() -> Dict[str, Any]:
     return d if isinstance(d, dict) else {}
 
 
-def _save(d: Dict[str, Any]) -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    safe_json.write(LIENS_FILE, d)
+def _save(d: Dict[str, Any]) -> bool:
+    """Ecrit le registre. Rend False si l'ecriture n'a PAS eu lieu.
+
+    L'appelant doit regarder ce retour : annoncer un jeton qui n'a jamais ete
+    enregistre, c'est donner un lien qui repondra 404 au premier clic, et
+    personne ne saura pourquoi.
+    """
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        return bool(safe_json.write(LIENS_FILE, d))
+    except Exception as e:                        # noqa: BLE001
+        log.error("va_portal: registre des liens non ecrit (%s)", e)
+        return False
 
 
 def _norm(s: Any) -> str:
     return str(s or "").strip()
+
+
+def _va_declare(v: Any) -> str:
+    """Le nom d'une fiche VA, qu'elle soit notee en texte ou en dictionnaire.
+
+    Le referentiel a connu les deux formes et les lit toutes les deux
+    (`jailbreak._migrate_identity_entry`). Ne regarder que l'une des deux
+    reviendrait a declarer morte une fiche parfaitement vivante.
+    """
+    if isinstance(v, dict):
+        return _norm(v.get("name"))
+    if isinstance(v, str):
+        return v.strip()
+    return ""
+
+
+#: Ce que voit quelqu'un dont la fiche a disparu du referentiel. Volontairement
+#: identique au message d'un jeton inconnu : cette page n'a pas a renseigner sur
+#: ce qui existe ou non de l'autre cote.
+_MORTE = "Ce lien n'est plus valable — demande-en un nouveau à ton manager."
 
 
 def _meme_fiche(rec: Dict[str, Any], identite: str, va: str) -> bool:
@@ -168,12 +214,15 @@ def regenerer(identite: str, va: str) -> str:
         d = _load()
         ancien_journal: List[Dict[str, Any]] = []
         for jeton, rec in list(d.items()):
-            if isinstance(rec, dict) and _meme_fiche(rec, identite, va):
-                # On garde l'historique : c'est lui qui repond a « qui a
-                # retire ce compte », et regenerer un lien ne doit pas
-                # effacer ce qui s'est passe avant.
+            if isinstance(rec, dict) and rec.get("actif", True) and _meme_fiche(rec, identite, va):
+                # On recopie l'historique sur le nouveau lien ET on garde
+                # l'ancien enregistrement, ferme : c'est lui qui repond a
+                # « qu'a fait le lien qui a fuite », et on regenere justement
+                # quand cette question va se poser.
                 ancien_journal = list(rec.get("journal") or []) or ancien_journal
-                d.pop(jeton, None)
+                rec["actif"] = False
+                rec["ferme"] = int(time.time())
+                d[jeton] = rec
         jeton = secrets.token_urlsafe(18)
         d[jeton] = {
             "identite": identite.lower(),
@@ -190,7 +239,13 @@ def regenerer(identite: str, va: str) -> str:
 
 
 def revoquer(identite: str, va: str) -> bool:
-    """Ferme le lien de cette fiche. Rend True si quelque chose a ete ferme."""
+    """Ferme le lien de cette fiche. Rend True si quelque chose a ete ferme.
+
+    Le jeton est neutralise, pas efface : on garde l'enregistrement avec
+    `actif: False` et son journal. On ferme un lien surtout quand il a fuite —
+    c'est-a-dire exactement quand on veut pouvoir relire ce qu'il a fait. Le
+    supprimer emportait la seule trace existante.
+    """
     identite, va = _norm(identite), _norm(va)
     if not identite or not va:
         return False
@@ -198,8 +253,10 @@ def revoquer(identite: str, va: str) -> bool:
         d = _load()
         touche = False
         for jeton, rec in list(d.items()):
-            if isinstance(rec, dict) and _meme_fiche(rec, identite, va):
-                d.pop(jeton, None)
+            if isinstance(rec, dict) and rec.get("actif", True) and _meme_fiche(rec, identite, va):
+                rec["actif"] = False
+                rec["ferme"] = int(time.time())
+                d[jeton] = rec
                 touche = True
         if touche:
             _save(d)
@@ -229,19 +286,61 @@ def renommer_va(identite: str, ancien: str, nouveau: str) -> bool:
         return touche
 
 
+def renommer_identite(ancien: str, nouveau: str) -> int:
+    """Fait suivre les jetons quand une IDENTITE change de nom.
+
+    Meme principe que `renommer_va`, un cran au-dessus. Sans ca, renommer
+    « emma » en « emma2 » depuis le dashboard laissait tous les jetons colles
+    a « emma » : la page repondait 200 mais affichait « Aucun compte », sans
+    un mot d'explication — et le premier ajout du VA RECREAIT l'identite
+    « emma » dans le referentiel, avec ses comptes, dans une entree que la page
+    Jailbreak ne liste pas (elle boucle sur les dossiers d'identites) mais que
+    l'Activite VA et l'Analyse vues comptent. Des comptes en double, des oublis
+    inventes, et une retenue de paie derriere.
+
+    Rend le nombre de jetons deplaces.
+    """
+    ancien, nouveau = _norm(ancien).lower(), _norm(nouveau).lower()
+    if not ancien or not nouveau or ancien == nouveau:
+        return 0
+    with _LOCK:
+        d = _load()
+        n = 0
+        for rec in d.values():
+            if isinstance(rec, dict) and _norm(rec.get("identite")).lower() == ancien:
+                rec["identite"] = nouveau
+                n += 1
+        if n:
+            _save(d)
+            log.info("va_portal: %d lien(s) suivent %s -> %s", n, ancien, nouveau)
+        return n
+
+
 def oublier_identite(identite: str) -> int:
-    """Ferme tous les liens d'une identite (identite supprimee ou renommee)."""
+    """Ferme tous les liens d'une identite (identite reellement supprimee).
+
+    Ferme, ne supprime pas : le journal reste lisible. Pour un simple
+    renommage, c'est `renommer_identite` qu'il faut — fermer un lien qu'on
+    aurait pu faire suivre, c'est une page morte de plus a re-emettre a la
+    main.
+    """
     identite = _norm(identite).lower()
     if not identite:
         return 0
     with _LOCK:
         d = _load()
-        avant = len(d)
-        d = {k: v for k, v in d.items()
-             if not (isinstance(v, dict) and _norm(v.get("identite")).lower() == identite)}
-        if len(d) != avant:
+        n = 0
+        for jeton, rec in list(d.items()):
+            if (isinstance(rec, dict) and rec.get("actif", True)
+                    and _norm(rec.get("identite")).lower() == identite):
+                rec["actif"] = False
+                rec["ferme"] = int(time.time())
+                d[jeton] = rec
+                n += 1
+        if n:
             _save(d)
-        return avant - len(d)
+            log.info("va_portal: %d lien(s) fermes avec l identite %s", n, identite)
+        return n
 
 
 def resoudre(jeton: str) -> Optional[Dict[str, Any]]:
@@ -279,7 +378,31 @@ def _aujourdhui() -> str:
 
 
 def compte_du_jour(rec: Dict[str, Any], action: str) -> int:
+    """Ce que ce lien a deja consomme aujourd'hui pour cette action.
+
+    Lu dans un compteur DEDIE (`quota`), surtout pas en recomptant le journal.
+
+    Le journal est tronque a JOURNAL_MAX lignes ; en deduire un plafond en
+    faisait une fenetre glissante que le porteur du jeton faisait defiler
+    lui-meme. Concretement, sur une fiche de cinquante comptes : trente
+    retraits pour atteindre le plafond, puis quatre-vingts POST d'ajout d'un
+    pseudo DEJA present — sans effet, donc sans le moindre cout — qui
+    chassaient les trente lignes « retrait » hors de la fenetre. Le compteur
+    retombait a zero et le cycle recommencait. La fiche se vidait en cent
+    trente requetes, definitivement : chaque retrait pose une pierre tombale,
+    le classeur Google ne ramene rien.
+
+    Dans l'autre sens, le plafond d'ajouts etait carrement inatteignable : un
+    pseudo par requete ecrit une ligne n=1, quatre-vingts lignes au plus, donc
+    une somme bornee a 80 — jamais les 120 annonces.
+
+    Le repli sur le journal ne sert qu'aux liens crees avant ce compteur : ils
+    n'ont pas de champ `quota`, et leur premiere action du jour l'inaugure.
+    """
     jour = _aujourdhui()
+    q = rec.get("quota")
+    if isinstance(q, dict) and str(q.get("j")) == jour:
+        return int(q.get(action) or 0)
     n = 0
     for ligne in (rec.get("journal") or []):
         if isinstance(ligne, dict) and ligne.get("a") == action and str(ligne.get("j")) == jour:
@@ -287,8 +410,83 @@ def compte_du_jour(rec: Dict[str, Any], action: str) -> int:
     return n
 
 
+def reserver(jeton: str, action: str, demande: int, plafond: int,
+             cibles: Optional[List[str]] = None, ip: str = "") -> int:
+    """Reserve jusqu'a `demande` actions sous le plafond du jour. Rend l'accord.
+
+    Lire le compteur, agir, puis l'incrementer, c'est trois temps — et entre le
+    premier et le troisieme, une autre requete lit le meme compteur. Deux
+    onglets, ou une boucle curl, passaient donc la garde ensemble : le plafond
+    n'etait qu'une suggestion. Ici la lecture, la decision et l'ecriture
+    tiennent dans UNE section critique, avant l'action.
+
+    Reserver AVANT d'agir veut dire qu'un ajout refuse par le referentiel a
+    quand meme consomme son quota. C'est le sens voulu : le plafond compte les
+    TENTATIVES, pas les succes. Sinon il suffisait de ne tenter que des choses
+    vouees a l'echec pour ne rien consommer — et c'est exactement par la que
+    passait le contournement.
+    """
+    demande = max(0, int(demande or 0))
+    if demande <= 0:
+        return 0
+    try:
+        with _LOCK:
+            d = _load()
+            rec = d.get(jeton)
+            if not isinstance(rec, dict):
+                return 0
+            jour = _aujourdhui()
+            q = rec.get("quota")
+            if not isinstance(q, dict) or str(q.get("j")) != jour:
+                # Nouveau jour : on repart de ce que le journal sait deja du
+                # jour courant (cas des liens anterieurs a ce compteur), pas
+                # de zero — sinon le changement de version offrait un plafond
+                # neuf a qui etait en train de le consommer.
+                q = {"j": jour}
+                for _a in ("ajout", "retrait"):
+                    _d = 0
+                    for _l in (rec.get("journal") or []):
+                        if isinstance(_l, dict) and _l.get("a") == _a and str(_l.get("j")) == jour:
+                            _d += int(_l.get("n") or 1)
+                    if _d:
+                        q[_a] = _d
+            deja = int(q.get(action) or 0)
+            accorde = max(0, min(demande, plafond - deja))
+            if accorde <= 0:
+                return 0
+            q[action] = deja + accorde
+            rec["quota"] = q
+            j = list(rec.get("journal") or [])
+            j.append({
+                "t": int(time.time()),
+                "j": jour,
+                "a": action,
+                "n": accorde,
+                "c": [str(c)[:40] for c in (cibles or [])[:12]],
+                "ip": str(ip or "")[:45],
+            })
+            # Le journal reste un historique lisible, borne. Il n'est plus
+            # l'organe de comptage : le tronquer ne rend plus rien au porteur.
+            rec["journal"] = j[-JOURNAL_MAX:]
+            d[jeton] = rec
+            if not _save(d):
+                # Le quota n'est pas retombe sur ses pieds : on refuse plutot
+                # que d'accorder une action qu'aucune trace ne retiendra.
+                log.error("va_portal: reservation non enregistree (%s)", action)
+                return 0
+            return accorde
+    except Exception as e:                        # noqa: BLE001
+        log.warning("va_portal: reservation impossible (%s)", e)
+        return 0
+
+
 def journaliser(jeton: str, action: str, cibles: List[str], ip: str = "") -> None:
-    """Ecrit une ligne d'historique sur le lien. Jamais bloquant pour l'appelant."""
+    """Ajoute une ligne d'historique SANS toucher au quota.
+
+    Sert aux evenements qu'on veut voir dans l'historique mais qui ne se
+    plafonnent pas. Toute action plafonnee passe par `reserver`, qui journalise
+    elle-meme — deux ecritures pour une seule action compteraient double.
+    """
     try:
         with _LOCK:
             d = _load()
@@ -435,6 +633,9 @@ textarea:focus{outline:2px solid rgba(236,72,153,.35);outline-offset:1px}
 .nom a{color:var(--texte);font-weight:700;text-decoration:none;font-size:13px}
 .nom a:hover{color:var(--accent)}
 .nom .sous{color:var(--tres-doux);font-size:11px;margin-top:1px}
+/* La date d'entree est une precision, pas une information de premier plan :
+   elle se lit si on la cherche, elle ne dispute pas la place au pseudo. */
+.nom .depuis{opacity:.85;cursor:help}
 .badge{font-size:9px;font-weight:800;padding:1px 6px;border-radius:5px;margin-left:6px;
   white-space:nowrap;vertical-align:1px}
 .badge.actif{background:rgba(22,163,74,.14);color:var(--vert)}
@@ -487,11 +688,15 @@ function vpMsg(txt, err){
   clearTimeout(window.__vpT);
   window.__vpT = setTimeout(function(){ m.style.display = 'none'; }, 4200);
 }
-function vpPose(html, total){
+function vpPose(html, total, pastilles){
   var z = document.getElementById('liste');
   if(z && typeof html === 'string') z.innerHTML = html;
   var c = document.getElementById('total');
   if(c && typeof total !== 'undefined') c.textContent = total;
+  // Le bandeau du haut se refait avec la liste : sinon il continuait
+  // d annoncer 23 actifs pendant que le tableau juste dessous en montrait 24.
+  var m = document.getElementById('meta');
+  if(m && typeof pastilles === 'string') m.innerHTML = pastilles;
 }
 function vpEnvoie(url, data, btn, libelle){
   var vieux = btn ? btn.textContent : '';
@@ -500,7 +705,7 @@ function vpEnvoie(url, data, btn, libelle){
     .then(function(r){ return r.json(); })
     .then(function(j){
       if(btn){ btn.disabled = false; btn.textContent = libelle || vieux; }
-      if(j && j.liste !== undefined) vpPose(j.liste, j.total);
+      if(j && j.liste !== undefined) vpPose(j.liste, j.total, j.pastilles);
       vpMsg((j && (j.msg || j.error)) || 'Erreur', !(j && j.ok));
       return j;
     })
@@ -552,12 +757,23 @@ _GABARIT = """<!doctype html>
 
 
 def _page(titre: str, corps: str, base: str) -> str:
-    return (_GABARIT
-            .replace("__CSS__", _CSS)
-            .replace("__JS__", _JS)
-            .replace("__TITRE__", _esc(titre))
-            .replace("__BASE__", _esc(base))
-            .replace("__CORPS__", corps))
+    """Assemble la page. UNE seule passe, et c'est le point important.
+
+    Des `.replace()` en chaine relisent ce qu'ils viennent d'ecrire : un nom de
+    VA contenant `__CORPS__` faisait recopier tout le corps de la page dans la
+    balise `<title>`, et les marqueurs sont du texte libre que le proprietaire
+    peut taper. Une passe unique ne substitue jamais dans le resultat d'une
+    autre substitution.
+    """
+    valeurs = {
+        "__CSS__": _CSS,
+        "__JS__": _JS,
+        "__TITRE__": _esc(titre),
+        "__BASE__": _esc(base),
+        "__CORPS__": corps,
+    }
+    return _re.sub(r"__(?:CSS|JS|TITRE|BASE|CORPS)__",
+                   lambda m: valeurs[m.group(0)], _GABARIT)
 
 
 def _avatar(nom: str, classe: str = "pp", photo: str = "") -> str:
@@ -596,6 +812,62 @@ def _url_photo(s: dict, handle: str, base_pp: str) -> str:
     return url
 
 
+def anciennete(a: dict, s: dict) -> tuple:
+    """(libelle court, infobulle) pour l'age d'un compte. ('', '') si on ne sait pas.
+
+    Trois dates existent, et il ne faut surtout pas les confondre :
+
+    1. `created_at` — le jour ou le compte a rejoint la fiche. Il est pose par
+       `add_account`, `bulk_add_accounts` et la synchro Sheet, et il existe
+       depuis le tout premier commit de la section Jailbreak : en pratique tous
+       les comptes en ont un. C'est CETTE date qu'on affiche.
+    2. `premier_jour_connu` — le plus vieux jour ou on a vu un reel. Il ne
+       remonte pas dans le temps : `post_days` est purge a 30 jours, donc ce
+       qu'on n'a pas note avant est perdu. Il ne dit rien des comptes repris
+       plus tard, seulement de ce qu'on a observe.
+    3. La vraie date de creation du compte Instagram — Instagram ne la publie
+       nulle part. Elle n'est visible que par le proprietaire du compte, dans
+       ses reglages. On ne l'a pas, et on ne l'inventera pas.
+
+    Un `created_at` absent ou absurde (0, avant 2020) ne rend rien du tout :
+    mieux vaut une case vide qu'une date de 1970 qu'on croira vraie.
+    """
+    try:
+        ts = int(a.get("created_at") or 0)
+    except Exception:
+        return ("", "")
+    # Avant 2020 : ce projet n'existait pas. C'est une valeur parasite.
+    if ts < 1577836800:
+        return ("", "")
+    try:
+        d = _dt.datetime.fromtimestamp(ts)
+    except Exception:
+        return ("", "")
+    jours = max(0, int((_dt.datetime.now() - d).total_seconds() // 86400))
+    if jours == 0:
+        age = "aujourd'hui"
+    elif jours == 1:
+        age = "hier"
+    elif jours < 31:
+        age = f"il y a {jours} jours"
+    elif jours < 365:
+        age = f"il y a {jours // 30} mois"
+    else:
+        annees = jours // 365
+        age = f"il y a {annees} an{'s' if annees > 1 else ''}"
+    court = d.strftime("%d/%m/%y")
+    bulle = f"Ajouté à la fiche le {d.strftime('%d/%m/%Y')} — {age}"
+    premier = str((s or {}).get("premier_jour_connu") or "")
+    if premier:
+        try:
+            dp = _dt.date.fromisoformat(premier)
+            bulle += f" · premier reel vu le {dp.strftime('%d/%m/%Y')}"
+        except Exception:
+            pass
+    bulle += ". Instagram ne publie pas la date de création d'un compte."
+    return (court, bulle)
+
+
 def _ligne_compte(a: dict, stats: dict, normaliser, base_pp: str = "") -> str:
     """Une ligne du tableau. Volontairement sans mot de passe, sans 2FA et sans
     adresse mail : voir l'en-tete du module."""
@@ -631,13 +903,21 @@ def _ligne_compte(a: dict, stats: dict, normaliser, base_pp: str = "") -> str:
 
     aid = int(a.get("id") or 0)
     ps = _esc(pseudo_brut)
+    # « Depuis quand ce compte est-il a moi ? » — la question se pose devant
+    # chaque ligne, et la reponse etait dans le fichier sans etre nulle part
+    # a l'ecran.
+    depuis, bulle = anciennete(a, s)
+    sous = "Instagram"
+    if depuis:
+        sous += (f" <span class='depuis' title='{_esc(bulle)}'>"
+                 f"(ajouté le {_esc(depuis)})</span>")
     return (
         f"<div class='ligne{' bannie' if banni else ''}'>"
         f"{pp}"
         f"<div class='nom'>"
         f"<div><a href='https://instagram.com/{_esc(h)}/' target='_blank' "
         f"rel='noopener noreferrer'>@{ps}</a>{badge}</div>"
-        f"<div class='sous'>Instagram</div>"
+        f"<div class='sous'>{sous}</div>"
         f"</div>"
         f"<div class='chiffres'>"
         f"<div class='num' data-lab='abonnés'>{foll}</div>"
@@ -802,6 +1082,58 @@ def register(app, deps):
         return [a for a in (entree.get("accounts") or [])
                 if isinstance(a, dict) and (a.get("va") or "").strip().lower() == vl]
 
+    def _fiche_vivante(identite: str, va: str) -> bool:
+        """La fiche visee par le jeton existe-t-elle ENCORE dans le referentiel ?
+
+        Le portail ne doit jamais rien CREER d'autre que des comptes dans une
+        fiche existante. Sans ce controle, un jeton dont l'identite a disparu
+        — renommee, fusionnee par `fusion_vas`, effacee par `/jailbreakreset` —
+        restait vivant, et le premier ajout du VA passait par
+        `bulk_add_accounts`, qui appelle `_ensure_identity` et RECREE l'entree.
+        Une identite morte revenait donc a la vie avec des comptes dedans, dans
+        un compartiment que la page Jailbreak ne liste pas (elle boucle sur les
+        dossiers) mais que l'Activite VA et l'Analyse vues comptent : comptes en
+        double, oublis inventes, retenues de paie a la clef.
+
+        Un crochet par appelant aurait laisse passer le prochain appelant.
+        Celui-ci est le seul point de passage : il les couvre tous, y compris
+        ceux qu'on ecrira plus tard.
+
+        Une fiche VIDE reste vivante : c'est l'etat normal d'une fiche neuve a
+        qui on vient d'envoyer son lien. Ce qu'on exige, c'est que l'identite
+        existe et que la fiche y soit declaree.
+        """
+        import jailbreak as jb
+        entree = jb._load().get((identite or "").lower())
+        if not isinstance(entree, dict):
+            return False                      # identite disparue ou renommee
+        vl = (va or "").strip().lower()
+        if any(_va_declare(v).lower() == vl for v in (entree.get("vas") or [])):
+            return True
+        # Fiche « implicite » : aucun enregistrement dans vas[], mais des comptes
+        # la portent. Le dashboard l'affiche, donc elle existe.
+        return any(isinstance(a, dict) and (a.get("va") or "").strip().lower() == vl
+                   for a in (entree.get("accounts") or []))
+
+    def _pastilles_html(comptes: List[dict], identite: str = "") -> str:
+        """Le bandeau de compteurs. Rendu au meme endroit pour la page ET pour
+        les reponses d'action : sinon, apres un ajout, la liste montrait le
+        nouveau compte pendant que les pastilles juraient qu'il n'existait pas."""
+        r = _resume(comptes, stats_cache() or {}, normalize_handle)
+        out = []
+        if identite:
+            out.append(f"<span class='pill id'>@{_esc(identite)}</span>")
+        out.append(f"<span class='pill ok'>✓ {r['actif']} actifs</span>")
+        if r["ban"]:
+            out.append(f"<span class='pill ban'>⛔ {r['ban']} banni"
+                       f"{'s' if r['ban'] > 1 else ''}</span>")
+        if r["attente"]:
+            out.append(f"<span class='pill'>◌ {r['attente']} en attente</span>")
+        if r["oubli"]:
+            out.append(f"<span class='pill warn'>🕒 {r['oubli']} oubli"
+                       f"{'s' if r['oubli'] > 1 else ''} 48h</span>")
+        return "".join(out)
+
     def _liste_html(comptes: List[dict], jeton: str = "") -> str:
         stats = stats_cache() or {}
         if not comptes:
@@ -851,27 +1183,18 @@ def register(app, deps):
             log.error("va_portal: lecture jailbreak impossible (%s)", e)
             return _refus("Référentiel momentanément indisponible — réessaie dans une minute.", 503)
 
-        _marquer_ouverture(jeton)
-        stats = stats_cache() or {}
-        r = _resume(comptes, stats, normalize_handle)
+        if not _fiche_vivante(identite, va):
+            return _refus(_MORTE)
 
-        pastilles = [f"<span class='pill id'>@{_esc(identite)}</span>",
-                     f"<span class='pill ok'>✓ {r['actif']} actifs</span>"]
-        if r["ban"]:
-            pastilles.append(f"<span class='pill ban'>⛔ {r['ban']} banni"
-                             f"{'s' if r['ban'] > 1 else ''}</span>")
-        if r["attente"]:
-            pastilles.append(f"<span class='pill'>◌ {r['attente']} en attente</span>")
-        if r["oubli"]:
-            pastilles.append(f"<span class='pill warn'>🕒 {r['oubli']} oubli"
-                             f"{'s' if r['oubli'] > 1 else ''} 48h</span>")
+        _marquer_ouverture(jeton)
+        pastilles = [_pastilles_html(comptes, identite)]
 
         corps = (
             "<div class='carte'>"
             "<div class='tete'>"
             + _avatar(va)
             + "<div><h1>" + _esc(va) + "</h1>"
-              "<div class='meta'>" + "".join(pastilles) + "</div></div>"
+              "<div class='meta' id='meta'>" + "".join(pastilles) + "</div></div>"
               "<div class='compteur'><b id='total'>" + str(len(comptes)) + "</b>"
               "<span>COMPTES</span></div>"
             "</div>"
@@ -938,15 +1261,11 @@ def register(app, deps):
         if rec is None:
             return jsonify({"ok": False, "error": "Lien expiré — demande-en un nouveau"}), 404
         identite, va = _norm(rec.get("identite")), _norm(rec.get("va"))
-
-        deja = compte_du_jour(rec, "ajout")
-        if deja >= MAX_AJOUTS_JOUR:
-            return jsonify({"ok": False,
-                            "error": f"Plafond du jour atteint ({MAX_AJOUTS_JOUR}). "
-                                     "Reviens demain ou passe par ton manager."})
+        if not _fiche_vivante(identite, va):
+            return jsonify({"ok": False, "error": _MORTE}), 404
 
         brut = request.form.get("comptes") or ""
-        pseudos, ecartes, tronque = [], [], 0
+        pseudos, ecartes, doublons, tronque = [], [], 0, 0
         lignes = brut.replace(",", "\n").replace(";", "\n").replace("\t", "\n").splitlines()
         if len(lignes) > MAX_LIGNES_COLLAGE:
             tronque = len(lignes) - MAX_LIGNES_COLLAGE
@@ -959,14 +1278,25 @@ def register(app, deps):
             if p:
                 if p not in pseudos:
                     pseudos.append(p)
+                else:
+                    doublons += 1          # deux fois le meme pseudo dans le collage
             else:
                 ecartes.append(t[:40])
         if not pseudos:
             detail = (" Non reconnu : " + ", ".join(ecartes[:4])) if ecartes else ""
             return jsonify({"ok": False, "error": ("Aucun compte reconnu." + detail)[:240]})
-        if len(pseudos) > (MAX_AJOUTS_JOUR - deja):
-            pseudos = pseudos[:MAX_AJOUTS_JOUR - deja]
-            tronque += 1
+
+        # Le quota se reserve AVANT d'agir, en une seule prise de verrou. Lire
+        # puis agir puis incrementer laissait deux requetes simultanees passer
+        # la meme garde.
+        accorde = reserver(jeton, "ajout", len(pseudos), MAX_AJOUTS_JOUR,
+                           cibles=pseudos, ip=_ip())
+        if accorde <= 0:
+            return jsonify({"ok": False,
+                            "error": f"Plafond du jour atteint ({MAX_AJOUTS_JOUR} ajouts). "
+                                     "Reviens demain ou passe par ton manager."})
+        refuses_plafond = len(pseudos) - accorde
+        pseudos = pseudos[:accorde]
 
         try:
             import jailbreak as jb
@@ -976,7 +1306,6 @@ def register(app, deps):
             return jsonify({"ok": False, "error": f"Ajout impossible : {e}"[:200]})
 
         ajoutes = res.get("added_usernames") or []
-        journaliser(jeton, "ajout", ajoutes or pseudos, _ip())
         if ajoutes and callable(kick_scrape):
             try:
                 kick_scrape(ajoutes, label="va-portail")
@@ -990,18 +1319,29 @@ def register(app, deps):
 
         morceaux = [f"{res.get('added', 0)} compte(s) ajouté(s)"]
         if res.get("skipped_dup"):
+            # Volontairement muet sur QUI est le doublon : le dire nommerait un
+            # compte qui peut appartenir a une autre fiche de la meme identite,
+            # et cette page ne doit rien laisser deviner des voisins.
             morceaux.append(f"{res['skipped_dup']} déjà présent(s)")
         if res.get("skipped_invalid"):
             morceaux.append(f"{res['skipped_invalid']} invalide(s)")
+        if doublons:
+            morceaux.append(f"{doublons} doublon(s) dans le collage")
         if ecartes:
             morceaux.append(f"{len(ecartes)} ligne(s) non reconnue(s) : "
                             + ", ".join(ecartes[:3]))
+        # Deux troncatures differentes, deux nombres differents : le collage
+        # trop long, et le plafond du jour. Elles etaient additionnees dans un
+        # unique « 1 ligne laissee de cote » qui pouvait en cacher quatre-vingt-dix-neuf.
         if tronque:
-            morceaux.append(f"{tronque} ligne(s) laissée(s) de côté (plafond)")
+            morceaux.append(f"{tronque} ligne(s) au-delà de {MAX_LIGNES_COLLAGE} ignorée(s)")
+        if refuses_plafond:
+            morceaux.append(f"{refuses_plafond} compte(s) refusé(s) — plafond du jour")
 
         comptes = _comptes_de(identite, va)
         return jsonify({"ok": True, "msg": " · ".join(morceaux),
-                        "liste": _liste_html(comptes, jeton), "total": len(comptes)})
+                        "liste": _liste_html(comptes, jeton), "total": len(comptes),
+                        "pastilles": _pastilles_html(comptes)})
 
     @app.route(RACINE + "/<jeton>/retirer", methods=["POST"])
     def va_portail_retirer(jeton):
@@ -1009,11 +1349,9 @@ def register(app, deps):
         if rec is None:
             return jsonify({"ok": False, "error": "Lien expiré — demande-en un nouveau"}), 404
         identite, va = _norm(rec.get("identite")), _norm(rec.get("va"))
+        if not _fiche_vivante(identite, va):
+            return jsonify({"ok": False, "error": _MORTE}), 404
 
-        if compte_du_jour(rec, "retrait") >= MAX_RETRAITS_JOUR:
-            return jsonify({"ok": False,
-                            "error": f"Plafond de retraits du jour atteint "
-                                     f"({MAX_RETRAITS_JOUR}). Passe par ton manager."})
         try:
             compte_id = int(request.form.get("compte_id") or 0)
         except Exception:
@@ -1031,6 +1369,15 @@ def register(app, deps):
                         identite, va, compte_id)
             return jsonify({"ok": False, "error": "Ce compte n'est pas dans ta liste"})
 
+        # Reserve d'abord, supprime ensuite. Un retrait est irreversible cote
+        # Instagram comme cote Sheet (pierre tombale) : le plafond doit tenir
+        # meme sous une rafale, donc il se prend avant l'acte, sous verrou.
+        if reserver(jeton, "retrait", 1, MAX_RETRAITS_JOUR,
+                    cibles=[_norm(vise.get("username"))], ip=_ip()) <= 0:
+            return jsonify({"ok": False,
+                            "error": f"Plafond de retraits du jour atteint "
+                                     f"({MAX_RETRAITS_JOUR}). Passe par ton manager."})
+
         try:
             import jailbreak as jb
             enleve = jb.remove_account(identite, compte_id)
@@ -1041,7 +1388,6 @@ def register(app, deps):
             return jsonify({"ok": False, "error": "Compte introuvable"})
 
         pseudo = _norm(vise.get("username"))
-        journaliser(jeton, "retrait", [pseudo], _ip())
         if callable(push_sheet):
             try:
                 push_sheet()
@@ -1050,6 +1396,7 @@ def register(app, deps):
 
         comptes = _comptes_de(identite, va)
         return jsonify({"ok": True, "msg": f"@{pseudo} retiré",
-                        "liste": _liste_html(comptes, jeton), "total": len(comptes)})
+                        "liste": _liste_html(comptes, jeton), "total": len(comptes),
+                        "pastilles": _pastilles_html(comptes)})
 
     return app

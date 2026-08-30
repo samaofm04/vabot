@@ -5919,19 +5919,31 @@ try:
 
         # Renommer la fiche depuis le dashboard ne doit pas tuer le lien deja
         # parti sur Discord.
+        #
+        # Le nouveau nom n a AUCUN mot commun avec l ancien, et c est
+        # deliberé : la premiere version renommait « VA NOUM 1X1 » en
+        # « VA NOUM 1 », dont l ancien nom est un sur-ensemble. La verification
+        # « le nouveau nom est dans la page » etait donc deja vraie AVANT le
+        # renommage — le test ne pouvait pas echouer, meme si le crochet
+        # n existait pas du tout.
         _admVP.post("/jailbreak/update_va", data={
             "identity": "jessye", "old_name": "VA NOUM 1X1",
-            "new_name": "VA NOUM 1", "ajax": "1"})
+            "new_name": "Safidy Ravalison", "ajax": "1"})
         _rnVP = _vaVP.get(_urlVP)
+        _rnHtml = _rnVP.get_data(as_text=True)
         check("portail : le lien survit au renommage de la fiche",
               _rnVP.status_code == 200, _rnVP.status_code)
         check("portail : la page porte le nouveau nom",
-              "VA NOUM 1" in _rnVP.get_data(as_text=True))
+              "Safidy Ravalison" in _rnHtml)
+        check("portail : et plus du tout l ancien",
+              "VA NOUM 1X1" not in _rnHtml)
+        check("portail : les comptes ont suivi le renommage",
+              "a.moi" in _rnHtml)
 
         # Fermer le lien doit fermer la page ET l ecriture : un lien revoque qui
         # accepterait encore un POST ne serait pas revoque du tout.
         _admVP.post("/jailbreak/va_lien", data={
-            "identity": "jessye", "va_name": "VA NOUM 1", "action": "revoquer"})
+            "identity": "jessye", "va_name": "Safidy Ravalison", "action": "revoquer"})
         check("portail : le lien ferme ne s ouvre plus",
               _vaVP.get(_urlVP).status_code == 404)
         check("portail : le lien ferme n accepte plus d ajout",
@@ -5973,12 +5985,199 @@ try:
             "identity": "jessye", "va_name": "VA NOUM 1X2", "ajax": "1"})
         check("portail : supprimer la fiche ferme son lien",
               _vpVP.lien_pour("jessye", "VA NOUM 1X2") == "")
+
+        # ------------------------------------------------------------------
+        # LES PLAFONDS TIENNENT-ILS VRAIMENT ?
+        #
+        # Version d'origine : les plafonds etaient recalcules en recomptant le
+        # journal, et le journal est tronque a JOURNAL_MAX lignes. Le porteur
+        # du jeton faisait donc defiler la fenetre lui-meme avec des requetes
+        # sans effet, et retrouvait un plafond neuf. Ces essais rejouent
+        # exactement l'attaque.
+        # ------------------------------------------------------------------
+        _jbVP._save({"jessye": {"vas": [{"name": "Plafond", "discord_username": ""}],
+                                "accounts": []}})
+        for _i in range(45):
+            _jbVP.add_account("jessye", f"cible{_i:02d}", va="Plafond")
+        _uPl = (_admVP.post("/jailbreak/va_lien", data={
+            "identity": "jessye", "va_name": "Plafond", "action": "creer"}
+        ).get_json().get("url") or "").replace("http://localhost", "")
+        _pl = _appVP.test_client()
+
+        def _retire_un():
+            """Retire le premier compte encore la. Rend le JSON de la reponse."""
+            _restants = [a for a in _jbVP.list_accounts("jessye")
+                         if (a.get("va") or "") == "Plafond"]
+            if not _restants:
+                return {"ok": False, "error": "plus rien"}
+            return _pl.post(_uPl + "/retirer",
+                            data={"compte_id": _restants[0]["id"]}).get_json()
+
+        _faits = 0
+        for _i in range(_vpVP.MAX_RETRAITS_JOUR + 3):
+            if (_retire_un() or {}).get("ok"):
+                _faits += 1
+        check("plafond : les retraits s arretent pile au plafond",
+              _faits == _vpVP.MAX_RETRAITS_JOUR,
+              f"{_faits} passés / plafond {_vpVP.MAX_RETRAITS_JOUR}")
+        _restants_apres = len([a for a in _jbVP.list_accounts("jessye")
+                               if (a.get("va") or "") == "Plafond"])
+
+        # L'attaque : des ajouts SANS EFFET (un pseudo deja present) pour
+        # chasser les lignes « retrait » hors du journal.
+        _dejaLa = [a["username"] for a in _jbVP.list_accounts("jessye")
+                   if (a.get("va") or "") == "Plafond"][0]
+        for _i in range(_vpVP.JOURNAL_MAX + 10):
+            _pl.post(_uPl + "/ajouter", data={"comptes": _dejaLa})
+        check("plafond : le journal ne fait plus office de compteur",
+              (_retire_un() or {}).get("ok") is not True,
+              "un retrait est passe apres avoir fait defiler le journal")
+        check("plafond : et aucun compte n a ete perdu en plus",
+              len([a for a in _jbVP.list_accounts("jessye")
+                   if (a.get("va") or "") == "Plafond"]) == _restants_apres)
+
+        # Le plafond d'AJOUTS etait, lui, mathematiquement inatteignable : un
+        # pseudo par requete ecrit une ligne n=1, le journal en garde 80, la
+        # somme ne depassait jamais 80 alors que le plafond est a 120.
+        _jbVP._save({"jessye": {"vas": [{"name": "Vanne", "discord_username": ""}],
+                                "accounts": []}})
+        _uVa = (_admVP.post("/jailbreak/va_lien", data={
+            "identity": "jessye", "va_name": "Vanne", "action": "creer"}
+        ).get_json().get("url") or "").replace("http://localhost", "")
+        _va2 = _appVP.test_client()
+        _passes = 0
+        for _i in range(_vpVP.MAX_AJOUTS_JOUR + 15):
+            if (_va2.post(_uVa + "/ajouter",
+                          data={"comptes": f"neuf{_i:03d}"}).get_json() or {}).get("ok"):
+                _passes += 1
+        check("plafond : les ajouts s arretent aussi, et pile au plafond",
+              _passes == _vpVP.MAX_AJOUTS_JOUR,
+              f"{_passes} passés / plafond {_vpVP.MAX_AJOUTS_JOUR}")
+        check("plafond : le referentiel ne contient pas plus que le plafond",
+              len([a for a in _jbVP.list_accounts("jessye")
+                   if (a.get("va") or "") == "Vanne"]) <= _vpVP.MAX_AJOUTS_JOUR)
+
+        # ------------------------------------------------------------------
+        # LE PORTAIL NE CREE JAMAIS RIEN D'AUTRE QUE DES COMPTES
+        # ------------------------------------------------------------------
+        _jbVP._save({"morte": {"vas": [{"name": "Fantome", "discord_username": ""}],
+                               "accounts": []}})
+        _uFa = (_admVP.post("/jailbreak/va_lien", data={
+            "identity": "morte", "va_name": "Fantome", "action": "creer"}
+        ).get_json().get("url") or "").replace("http://localhost", "")
+        check("fiche morte : le lien marche tant que la fiche existe",
+              _appVP.test_client().get(_uFa).status_code == 200)
+        # L'identite disparait par un chemin qui ne previent pas le portail
+        # (fusion_vas, /jailbreakreset, un import...). Le jeton, lui, survit.
+        _jbVP._save({})
+        _fa = _appVP.test_client()
+        check("fiche morte : la page le dit au lieu d afficher une liste vide",
+              _fa.get(_uFa).status_code == 404)
+        _rFa = _fa.post(_uFa + "/ajouter", data={"comptes": "revenant"})
+        check("fiche morte : l ajout est refuse", _rFa.status_code == 404)
+        # LE point : sans ce garde, bulk_add_accounts appelait _ensure_identity
+        # et RESSUSCITAIT l identite, avec des comptes dedans, dans une entree
+        # que la page Jailbreak ne liste pas mais que la paie compte.
+        check("fiche morte : l identite n a pas ete ressuscitee",
+              "morte" not in _jbVP.list_all(), list(_jbVP.list_all()))
+
+        # ------------------------------------------------------------------
+        # RENOMMER UNE IDENTITE : le lien suit, il ne meurt pas
+        # ------------------------------------------------------------------
+        _jbVP._save({"emma": {"vas": [{"name": "Tina", "discord_username": ""}],
+                              "accounts": []}})
+        _jbVP.add_account("emma", "compte.emma", va="Tina")
+        _uEm = (_admVP.post("/jailbreak/va_lien", data={
+            "identity": "emma", "va_name": "Tina", "action": "creer"}
+        ).get_json().get("url") or "").replace("http://localhost", "")
+        _vpVP.renommer_identite("emma", "emma2")
+        _jbVP.rename_identity_in_storage("emma", "emma2")
+        _rEm = _appVP.test_client().get(_uEm)
+        check("identite renommee : le lien deja envoye reste vivant",
+              _rEm.status_code == 200, _rEm.status_code)
+        check("identite renommee : et il montre toujours les comptes",
+              "compte.emma" in _rEm.get_data(as_text=True))
+
+        # Fermer un lien ne doit pas emporter son historique : on ferme surtout
+        # quand il a fuite, c est-a-dire quand on veut relire ce qu il a fait.
+        _vpVP.revoquer("emma2", "Tina")
+        _jetEm = [k for k, v in _vpVP._load().items()
+                  if isinstance(v, dict) and _vpVP._norm(v.get("va")) == "Tina"]
+        check("lien ferme : l enregistrement et son journal sont gardés",
+              bool(_jetEm), "l enregistrement a ete supprime")
+        check("lien ferme : mais il ne resout plus",
+              all(_vpVP.resoudre(_k) is None for _k in _jetEm))
     finally:
         (_jbVP.JAILBREAK_FILE, _jbVP.PREV_FILE, _jbVP.BACKUP_DIR,
          _jbVP.TOMB_FILE, _vpVP.LIENS_FILE) = _svVP
         shutil.rmtree(_dosVP, ignore_errors=True)
 except Exception as _eVP:
     check("portail : testable", False, repr(_eVP)[:200])
+
+print()
+print("=" * 70)
+print("ANCIENNETE : depuis quand ce compte est-il dans la fiche")
+print("=" * 70)
+try:
+    import va_portal as _vpAg
+    import web_upload as _wAg
+    _nowAg = int(time.time())
+
+    # Le libelle court : une date lisible, et rien du tout quand on ne sait pas.
+    for _lbl, _acc, _att in (
+            ("aujourd hui", {"created_at": _nowAg}, True),
+            ("il y a deux ans", {"created_at": _nowAg - 800 * 86400}, True),
+            ("champ absent", {}, False),
+            ("valeur a zero", {"created_at": 0}, False),
+            # Le vrai piege : un created_at parasite donnait « 01/01/70 », une
+            # date fausse que personne n'aurait mise en doute a l'ecran.
+            ("horodatage parasite", {"created_at": 12345}, False),
+            ("texte au lieu d un nombre", {"created_at": "hier"}, False),
+            ("horodatage negatif", {"created_at": -5}, False)):
+        _c, _b = _vpAg.anciennete(_acc, {})
+        check(f"anciennete : {_lbl} -> {'une date' if _att else 'rien'}",
+              bool(_c) is _att, repr(_c))
+
+    _c30, _b30 = _vpAg.anciennete({"created_at": _nowAg - 30 * 86400}, {})
+    check("anciennete : la date courte est bien JJ/MM/AA",
+          len(_c30) == 8 and _c30[2] == "/" and _c30[5] == "/", _c30)
+    # L'infobulle doit dire ce que la date EST, sinon on la lira comme la date
+    # de creation du compte Instagram — qu'on n'a pas et qu'on ne peut pas avoir.
+    check("anciennete : l infobulle dit que c est l entree dans la fiche",
+          "fiche" in _b30.lower(), _b30[:80])
+    check("anciennete : l infobulle previent qu Instagram ne donne pas la creation",
+          "instagram ne publie pas" in _b30.lower(), _b30[-90:])
+    _cP, _bP = _vpAg.anciennete({"created_at": _nowAg - 40 * 86400},
+                                {"premier_jour_connu": "2026-07-22"})
+    check("anciennete : le premier reel vu apparait quand on le connait",
+          "22/07/2026" in _bP, _bP)
+
+    # Le premier jour connu : il ne recule jamais, et une purge ne l efface pas.
+    _f = _wAg._premier_jour_connu
+    check("premier jour : rien a partir de rien", _f({}, {}) == "")
+    check("premier jour : le plus vieux gagne",
+          _f({"reel_days": {"2026-08-20": 1, "2026-08-02": 1}}, {}) == "2026-08-02")
+    check("premier jour : post_days compte aussi",
+          _f({"post_days": {"2026-07-11": 1}, "reel_days": {"2026-08-20": 1}}, {}) == "2026-07-11")
+    # LE point du champ : post_days est purge a 30 jours, donc sans memoire le
+    # « depuis quand » s effacait tout seul un mois plus tard.
+    check("premier jour : il survit a la purge des 30 jours",
+          _f({"reel_days": {"2026-08-20": 1}}, {"premier_jour_connu": "2026-05-03"}) == "2026-05-03")
+    check("premier jour : il ne remonte jamais vers le present",
+          _f({"reel_days": {"2026-08-29": 1}}, {"premier_jour_connu": "2026-01-09"}) == "2026-01-09")
+    check("premier jour : mais il descend si on voit plus vieux",
+          _f({"reel_days": {"2025-12-01": 1}}, {"premier_jour_connu": "2026-01-09"}) == "2025-12-01")
+    # Les jours sont compares en tant que chaines : une cle mal formee deviendrait
+    # « le plus vieux » par le seul hasard de l ordre alphabetique.
+    check("premier jour : une cle qui n est pas une date est ecartee",
+          _f({"reel_days": {"aaaaaaaaaa": 1, "2026-08-20": 1}}, {}) == "2026-08-20")
+    check("premier jour : que des cles bidon -> rien",
+          _f({"reel_days": {"aaaaaaaaaa": 1}}, {}) == "")
+    check("premier jour : un ancien illisible ne contamine pas",
+          _f({"reel_days": {"2026-08-20": 1}}, {"premier_jour_connu": "2026/05/03"}) == "2026-08-20")
+    check("premier jour : pas de cache du tout", _f({"reel_days": {"2026-08-20": 1}}, None) == "2026-08-20")
+except Exception as _eAg:
+    check("anciennete : testable", False, repr(_eAg)[:200])
 
 print()
 print("=" * 70)

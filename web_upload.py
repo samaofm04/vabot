@@ -14566,8 +14566,44 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
                     continue                     # au-delà de 30 j : on purge
                 _merged[_d] = max(int(_v or 0), int(_merged.get(_d) or 0))
             out[_key] = _merged
+    _pjc = _premier_jour_connu(out, cached)
+    if _pjc:
+        out["premier_jour_connu"] = _pjc
     _cache_put_stats(h, out)
     return out
+
+
+def _premier_jour_connu(nouveau: dict, ancien) -> str:
+    """Le plus vieux jour de publication jamais observé pour ce compte, ou ''.
+
+    Pourquoi ce champ existe : `post_days` et `reel_days` sont purgés à 30
+    jours au moment de la fusion. « Depuis quand ce compte poste-t-il »
+    s'effaçait donc tout seul, un mois plus tard, sans que personne ne le
+    remarque. On grave le plus vieux jour vu dans un champ à part, et ce champ
+    ne recule jamais : il ne peut que descendre vers le passé si un scrape
+    ramène plus vieux, jamais remonter parce qu'une purge est passée.
+
+    Ce qu'il n'est PAS, et c'est important pour ne pas le lire de travers :
+    ce n'est pas la date de création du compte Instagram. Instagram ne la
+    publie nulle part — elle n'est visible que par le propriétaire, dans ses
+    réglages. C'est une borne haute honnête : « ce compte publiait déjà ce
+    jour-là ». Il ne remonte pas non plus le temps sur les mois déjà écoulés,
+    puisqu'ils sont déjà purgés : il commence à valoir quelque chose à partir
+    du jour où on l'écrit.
+
+    Les jours sont des chaînes ISO (AAAA-MM-JJ), donc l'ordre alphabétique est
+    l'ordre chronologique — pas besoin de les analyser pour les comparer, et
+    une clé mal formée ne fait pas planter la comparaison.
+    """
+    jours = [str(d) for d in list((nouveau.get("reel_days") or {}).keys())
+             + list((nouveau.get("post_days") or {}).keys()) if str(d).strip()]
+    if isinstance(ancien, dict) and ancien.get("premier_jour_connu"):
+        jours.append(str(ancien["premier_jour_connu"]).strip())
+    # Une clé qui n'a pas la forme d'une date ne doit pas devenir le « plus
+    # vieux jour » par le seul hasard de l'ordre alphabétique.
+    jours = [d for d in jours if len(d) == 10 and d[4] == "-" and d[7] == "-"
+             and d.replace("-", "").isdigit()]
+    return min(jours) if jours else ""
 
 
 def _kick_scrape_handles(handles, label: str = "kick-scrape") -> int:
@@ -29641,6 +29677,18 @@ def _render_jailbreak_html() -> str:
                 pass
 
         cred_parts = []
+        # Depuis quand ce compte est-il dans la fiche. La même fonction sert au
+        # portail VA : deux endroits qui répondent à la même question doivent
+        # répondre pareil, sinon l'écran du VA et le tien finissent par diverger.
+        try:
+            import va_portal as _vp_age
+            _depuis, _bulle_age = _vp_age.anciennete(a, s)
+        except Exception:
+            _depuis, _bulle_age = "", ""
+        if _depuis:
+            cred_parts.append(
+                f"<span title='{html_escape(_bulle_age)}' style='cursor:help'>"
+                f"📅 {html_escape(_depuis)}</span>")
         if email:
             cred_parts.append(f"✉ {email}")
         if has_pwd:
@@ -51888,6 +51936,18 @@ def create_app():
                 jb.rename_identity_in_storage(old_name, new_name)
             except Exception:
                 pass  # storage echec non bloquant - le filesystem est deja move
+            # Les liens publics des VAs suivent l'identité, comme ils suivent
+            # déjà le renommage d'une fiche. Sans ça, ils restaient collés à
+            # l'ancien nom : la page répondait 200 mais annonçait « aucun
+            # compte », et le premier ajout du VA RECRÉAIT l'identité disparue
+            # dans le référentiel — invisible sur cette page-ci, mais bien
+            # comptée par l'Activité VA et l'Analyse vues.
+            try:
+                import va_portal
+                va_portal.renommer_identite(old_name, new_name)
+            except Exception as _e_vpi:
+                print(f"[va-portail] liens non suivis au renommage d identite : {_e_vpi}",
+                      flush=True)
             renamed = True
         # Avatar : remplace si fourni
         avatar_file = request.files.get("avatar")
