@@ -6138,44 +6138,64 @@ try:
         check(f"anciennete : {_lbl} -> {'une date' if _att else 'rien'}",
               bool(_c) is _att, repr(_c))
 
-    _c30, _b30 = _vpAg.anciennete({"created_at": _nowAg - 30 * 86400}, {})
-    check("anciennete : la date courte est bien JJ/MM/AA",
-          len(_c30) == 8 and _c30[2] == "/" and _c30[5] == "/", _c30)
-    # L'infobulle doit dire ce que la date EST, sinon on la lira comme la date
-    # de creation du compte Instagram — qu'on n'a pas et qu'on ne peut pas avoir.
-    check("anciennete : l infobulle dit que c est l entree dans la fiche",
-          "fiche" in _b30.lower(), _b30[:80])
+    # PREMIER POST : c'est LA date demandee. Elle doit dire d'elle-meme si elle
+    # est sure ou si ce n'est qu'une borne — une borne presentee comme une date
+    # de naissance, et quelqu'un decide sur du faux.
+    _jourAg = lambda _n: (_dtVtk.date.today() - _dtVtk.timedelta(days=_n)).isoformat()
+    _cEx, _bEx = _vpAg.anciennete(
+        {"created_at": _nowAg - 40 * 86400},
+        {"premier_post_at": _jourAg(120), "premier_post_exact": True, "posts_count": 9})
+    check("premier post : la date exacte s annonce sans reserve",
+          _cEx.startswith("1er post ") and "avant" not in _cEx, _cEx)
+    check("premier post : l infobulle dit que l historique est complet",
+          "historique" in _bEx.lower(), _bEx[:100])
+    _cBo, _bBo = _vpAg.anciennete(
+        {"created_at": _nowAg - 40 * 86400},
+        {"premier_post_at": _jourAg(35), "premier_post_exact": False, "posts_count": 214})
+    # LE piege : Instagram ne rend qu une douzaine de posts. Sur un compte qui en
+    # a 214, la date vue n est pas le premier post, c est « il publiait deja ».
+    check("premier post : une borne se presente COMME une borne",
+          "avant" in _cBo, _cBo)
+    check("premier post : et l infobulle explique pourquoi",
+          "douzaine" in _bBo.lower() or "plus ancien" in _bBo.lower(), _bBo[:160])
+    check("premier post : le nombre de posts est rappele",
+          "214" in _bBo, _bBo)
+    _cRi, _bRi = _vpAg.anciennete({"created_at": _nowAg - 5 * 86400}, {})
+    check("premier post : sans post connu, on retombe sur la date d entree",
+          _cRi.startswith("ajouté le"), _cRi)
+    check("premier post : et on le DIT, au lieu de laisser croire a un 1er post",
+          "aucun post connu" in _bRi.lower(), _bRi[:120])
+    check("premier post : une date illisible ne passe pas pour une date",
+          _vpAg.anciennete({"created_at": _nowAg - 9 * 86400},
+                           {"premier_post_at": "pas-une-date"})[0].startswith("ajouté"))
     check("anciennete : l infobulle previent qu Instagram ne donne pas la creation",
-          "instagram ne publie pas" in _b30.lower(), _b30[-90:])
-    _cP, _bP = _vpAg.anciennete({"created_at": _nowAg - 40 * 86400},
-                                {"premier_jour_connu": "2026-07-22"})
-    check("anciennete : le premier reel vu apparait quand on le connait",
-          "22/07/2026" in _bP, _bP)
+          "instagram ne publie pas" in _bEx.lower(), _bEx[-90:])
 
-    # Le premier jour connu : il ne recule jamais, et une purge ne l efface pas.
-    _f = _wAg._premier_jour_connu
-    check("premier jour : rien a partir de rien", _f({}, {}) == "")
-    check("premier jour : le plus vieux gagne",
-          _f({"reel_days": {"2026-08-20": 1, "2026-08-02": 1}}, {}) == "2026-08-02")
-    check("premier jour : post_days compte aussi",
-          _f({"post_days": {"2026-07-11": 1}, "reel_days": {"2026-08-20": 1}}, {}) == "2026-07-11")
-    # LE point du champ : post_days est purge a 30 jours, donc sans memoire le
-    # « depuis quand » s effacait tout seul un mois plus tard.
-    check("premier jour : il survit a la purge des 30 jours",
-          _f({"reel_days": {"2026-08-20": 1}}, {"premier_jour_connu": "2026-05-03"}) == "2026-05-03")
-    check("premier jour : il ne remonte jamais vers le present",
-          _f({"reel_days": {"2026-08-29": 1}}, {"premier_jour_connu": "2026-01-09"}) == "2026-01-09")
-    check("premier jour : mais il descend si on voit plus vieux",
-          _f({"reel_days": {"2025-12-01": 1}}, {"premier_jour_connu": "2026-01-09"}) == "2025-12-01")
-    # Les jours sont compares en tant que chaines : une cle mal formee deviendrait
-    # « le plus vieux » par le seul hasard de l ordre alphabetique.
-    check("premier jour : une cle qui n est pas une date est ecartee",
-          _f({"reel_days": {"aaaaaaaaaa": 1, "2026-08-20": 1}}, {}) == "2026-08-20")
-    check("premier jour : que des cles bidon -> rien",
-          _f({"reel_days": {"aaaaaaaaaa": 1}}, {}) == "")
-    check("premier jour : un ancien illisible ne contamine pas",
-          _f({"reel_days": {"2026-08-20": 1}}, {"premier_jour_connu": "2026/05/03"}) == "2026-08-20")
-    check("premier jour : pas de cache du tout", _f({"reel_days": {"2026-08-20": 1}}, None) == "2026-08-20")
+    # Le calcul lui-meme, sur la liste BRUTE des posts.
+    _f = _wAg._premier_post
+    _pAg = lambda _n: {"taken_at": _nowAg - _n * 86400, "is_video": True}
+    check("premier post : rien a partir de rien", _f([], {}, 0, None)[0] == "")
+    _j, _e = _f([_pAg(200), _pAg(10)], {}, 2, None)
+    # LE point : post_days n enregistre QUE les posts de moins de 30 jours, donc
+    # il ne pouvait structurellement pas remonter a un post de 200 jours.
+    check("premier post : un post de 200 jours est bien remonte",
+          _j == _jourAg(200), f"{_j} au lieu de {_jourAg(200)}")
+    check("premier post : feed complet (2 posts vus / 2 au total) -> exact", _e is True)
+    check("premier post : feed partiel -> pas exact",
+          _f([_pAg(40), _pAg(1)], {}, 214, None)[1] is False)
+    check("premier post : compteur de posts inconnu -> pas exact",
+          _f([_pAg(40)], {}, 0, None)[1] is False)
+    # Un premier post ne bouge plus : une fois su, il ne redevient pas incertain
+    # parce que le compte a continue a publier et que la page ne montre plus rien
+    # d ancien.
+    _jS, _eS = _f([_pAg(5)], {"premier_post_at": "2026-01-02", "premier_post_exact": True},
+                  300, None)
+    check("premier post : une date exacte connue ne se degrade jamais",
+          _eS is True and _jS == "2026-01-02", f"{_jS} / {_eS}")
+    check("premier post : un horodatage illisible est ignore, pas fatal",
+          _f([{"taken_at": "n importe quoi"}, _pAg(30)], {}, 1, None)[0] == _jourAg(30))
+    check("premier post : l ancien champ, plus faible, sert de candidat",
+          _f([_pAg(3)], {"premier_jour_connu": "2026-05-01"}, 99, None)[0] == "2026-05-01")
 except Exception as _eAg:
     check("anciennete : testable", False, repr(_eAg)[:200])
 

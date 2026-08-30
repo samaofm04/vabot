@@ -14566,44 +14566,87 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
                     continue                     # au-delà de 30 j : on purge
                 _merged[_d] = max(int(_v or 0), int(_merged.get(_d) or 0))
             out[_key] = _merged
-    _pjc = _premier_jour_connu(out, cached)
-    if _pjc:
-        out["premier_jour_connu"] = _pjc
+    # Premier post connu : lu dans la liste BRUTE des posts, pas dans post_days
+    # (qui n'enregistre rien de plus vieux que 30 jours et ne peut donc pas
+    # remonter jusque-là). Voir _premier_post pour la question de l'exactitude.
+    _pp_jour, _pp_exact = _premier_post(reels, cached, posts_count, _tz_paris)
+    if _pp_jour:
+        out["premier_post_at"] = _pp_jour
+        out["premier_post_exact"] = bool(_pp_exact)
     _cache_put_stats(h, out)
     return out
 
 
-def _premier_jour_connu(nouveau: dict, ancien) -> str:
-    """Le plus vieux jour de publication jamais observé pour ce compte, ou ''.
+def _premier_post(reels, ancien, posts_count: int = 0, tz=None) -> tuple:
+    """(jour ISO du premier post connu, est-ce la VRAIE date) — ('', False) sinon.
 
-    Pourquoi ce champ existe : `post_days` et `reel_days` sont purgés à 30
-    jours au moment de la fusion. « Depuis quand ce compte poste-t-il »
-    s'effaçait donc tout seul, un mois plus tard, sans que personne ne le
-    remarque. On grave le plus vieux jour vu dans un champ à part, et ce champ
-    ne recule jamais : il ne peut que descendre vers le passé si un scrape
-    ramène plus vieux, jamais remonter parce qu'une purge est passée.
+    D'où vient la date. L'endpoint public d'Instagram rend le compteur total de
+    posts ET la première page du feed, soit une douzaine de posts, chacun avec
+    son horodatage — à n'importe quel âge. Le plus ancien de cette page est donc
+    une vraie donnée, pas une extrapolation.
 
-    Ce qu'il n'est PAS, et c'est important pour ne pas le lire de travers :
-    ce n'est pas la date de création du compte Instagram. Instagram ne la
-    publie nulle part — elle n'est visible que par le propriétaire, dans ses
-    réglages. C'est une borne haute honnête : « ce compte publiait déjà ce
-    jour-là ». Il ne remonte pas non plus le temps sur les mois déjà écoulés,
-    puisqu'ils sont déjà purgés : il commence à valoir quelque chose à partir
-    du jour où on l'écrit.
+    Quand est-elle EXACTE. Si la page contient au moins autant de posts que le
+    compteur total, on tient tout le feed : le plus ancien est le premier post,
+    point. C'est le cas des comptes jeunes — et ce sont justement ceux dont on
+    veut connaître l'âge. Au-delà d'une douzaine de posts, Instagram faudrait
+    paginer, ce qu'on ne fait pas : la date reste alors une BORNE, « ce compte
+    publiait déjà ce jour-là ». Elle est vraie, elle est simplement incomplète,
+    et l'affichage doit le dire au lieu de la faire passer pour une date de
+    naissance.
 
-    Les jours sont des chaînes ISO (AAAA-MM-JJ), donc l'ordre alphabétique est
-    l'ordre chronologique — pas besoin de les analyser pour les comparer, et
-    une clé mal formée ne fait pas planter la comparaison.
+    Une fois exacte, toujours exacte : un premier post ne bouge plus. On ne
+    redescend jamais ce drapeau, même si un scrape suivant voit moins de posts.
+
+    Pourquoi pas post_days. Ces dictionnaires n'enregistrent QUE les posts de
+    moins de trente jours (voir la boucle de `_compute_insta_3_stats`) : ils ne
+    peuvent structurellement pas remonter au premier post. Les lire pour ça
+    donnait une date qui n'était jamais plus vieille qu'un mois, ce qui ressemble
+    à une réponse sans en être une.
+
+    La date est en fuseau Paris comme post_days, pour qu'un post de 23 h ne soit
+    pas rangé au lendemain sur un écran et à la veille sur l'autre.
     """
-    jours = [str(d) for d in list((nouveau.get("reel_days") or {}).keys())
-             + list((nouveau.get("post_days") or {}).keys()) if str(d).strip()]
-    if isinstance(ancien, dict) and ancien.get("premier_jour_connu"):
-        jours.append(str(ancien["premier_jour_connu"]).strip())
-    # Une clé qui n'a pas la forme d'une date ne doit pas devenir le « plus
-    # vieux jour » par le seul hasard de l'ordre alphabétique.
-    jours = [d for d in jours if len(d) == 10 and d[4] == "-" and d[7] == "-"
-             and d.replace("-", "").isdigit()]
-    return min(jours) if jours else ""
+    import datetime as _dt_pp
+    plus_vieux = None
+    n_vus = 0
+    for p in (reels or []):
+        brut = p.get("date") or p.get("taken_at") or p.get("created_at")
+        try:
+            if isinstance(brut, (int, float)):
+                d = _dt_pp.datetime.fromtimestamp(brut, tz=_dt_pp.timezone.utc)
+            else:
+                s = str(brut or "").replace("Z", "+00:00")
+                d = _dt_pp.datetime.fromisoformat(s)
+                if d.tzinfo is None:
+                    d = d.replace(tzinfo=_dt_pp.timezone.utc)
+        except Exception:
+            continue
+        n_vus += 1
+        if plus_vieux is None or d < plus_vieux:
+            plus_vieux = d
+    jour = ""
+    if plus_vieux is not None:
+        jour = (plus_vieux.astimezone(tz) if tz else plus_vieux).date().isoformat()
+
+    exact = bool(posts_count) and n_vus >= int(posts_count)
+    anc = ancien if isinstance(ancien, dict) else {}
+    jour_anc = str(anc.get("premier_post_at") or "").strip()
+    # L'ancien champ, plus faible, sert quand même de candidat : c'était une
+    # observation réelle, il n'y a pas de raison de la jeter.
+    if not jour_anc:
+        jour_anc = str(anc.get("premier_jour_connu") or "").strip()
+    if len(jour_anc) != 10 or jour_anc[4] != "-" or jour_anc[7] != "-":
+        jour_anc = ""
+    if anc.get("premier_post_exact"):
+        exact = True
+        # Une date exacte deja connue fait foi : la page courante ne montre plus
+        # les vieux posts d'un compte qui a continue a publier.
+        if jour_anc:
+            return (jour_anc, True)
+    candidats = [j for j in (jour, jour_anc) if j]
+    if not candidats:
+        return ("", False)
+    return (min(candidats), exact)
 
 
 def _kick_scrape_handles(handles, label: str = "kick-scrape") -> int:

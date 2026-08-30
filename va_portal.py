@@ -812,60 +812,99 @@ def _url_photo(s: dict, handle: str, base_pp: str) -> str:
     return url
 
 
+def _depuis_quand(jours: int) -> str:
+    if jours <= 0:
+        return "aujourd'hui"
+    if jours == 1:
+        return "hier"
+    if jours < 31:
+        return f"il y a {jours} jours"
+    if jours < 365:
+        return f"il y a {jours // 30} mois"
+    annees = jours // 365
+    return f"il y a {annees} an{'s' if annees > 1 else ''}"
+
+
 def anciennete(a: dict, s: dict) -> tuple:
-    """(libelle court, infobulle) pour l'age d'un compte. ('', '') si on ne sait pas.
+    """(libelle court, infobulle) pour l'age d'un compte. ('', '') si on ne sait rien.
 
-    Trois dates existent, et il ne faut surtout pas les confondre :
+    Ce qu'on affiche : LA DATE DU PREMIER POST. C'est elle qui dit depuis quand
+    le compte vit vraiment, et c'est a partir d'elle qu'on jauge un rythme de
+    publication.
 
-    1. `created_at` — le jour ou le compte a rejoint la fiche. Il est pose par
-       `add_account`, `bulk_add_accounts` et la synchro Sheet, et il existe
-       depuis le tout premier commit de la section Jailbreak : en pratique tous
-       les comptes en ont un. C'est CETTE date qu'on affiche.
-    2. `premier_jour_connu` — le plus vieux jour ou on a vu un reel. Il ne
-       remonte pas dans le temps : `post_days` est purge a 30 jours, donc ce
-       qu'on n'a pas note avant est perdu. Il ne dit rien des comptes repris
-       plus tard, seulement de ce qu'on a observe.
+    Trois dates cohabitent, et les confondre serait grave :
+
+    1. `premier_post_at` — le plus ancien post connu. Affichee. Elle est EXACTE
+       quand on a vu tout le feed (`premier_post_exact`), sinon c'est une borne :
+       le compte publiait deja ce jour-la, peut-etre avant. Le libelle le dit —
+       « le 04/03/26 » quand c'est sur, « avant le 04/03/26 » quand ca ne l'est
+       pas. Presenter une borne comme une date de naissance serait un mensonge
+       commode, et quelqu'un prendrait une decision dessus.
+    2. `created_at` — le jour ou le compte a rejoint la fiche. Reléguee dans
+       l'infobulle : elle dit depuis quand NOUS l'avons, pas depuis quand IL
+       existe. C'est le repli quand aucun post n'est connu.
     3. La vraie date de creation du compte Instagram — Instagram ne la publie
-       nulle part. Elle n'est visible que par le proprietaire du compte, dans
-       ses reglages. On ne l'a pas, et on ne l'inventera pas.
+       nulle part, elle n'est visible que par le proprietaire dans ses reglages.
+       On ne l'a pas et on ne l'inventera pas.
 
-    Un `created_at` absent ou absurde (0, avant 2020) ne rend rien du tout :
-    mieux vaut une case vide qu'une date de 1970 qu'on croira vraie.
+    Une date absurde (0, avant 2020) ne rend rien : mieux vaut une case vide
+    qu'un « 01/01/70 » que personne ne songera a mettre en doute.
     """
+    s = s or {}
+    maintenant = _dt.datetime.now()
+
+    # --- la date d'entree dans la fiche, qui sert d'infobulle et de repli ---
+    entree = None
     try:
         ts = int(a.get("created_at") or 0)
+        if ts >= 1577836800:                       # 01/01/2020
+            entree = _dt.datetime.fromtimestamp(ts)
     except Exception:
-        return ("", "")
-    # Avant 2020 : ce projet n'existait pas. C'est une valeur parasite.
-    if ts < 1577836800:
-        return ("", "")
-    try:
-        d = _dt.datetime.fromtimestamp(ts)
-    except Exception:
-        return ("", "")
-    jours = max(0, int((_dt.datetime.now() - d).total_seconds() // 86400))
-    if jours == 0:
-        age = "aujourd'hui"
-    elif jours == 1:
-        age = "hier"
-    elif jours < 31:
-        age = f"il y a {jours} jours"
-    elif jours < 365:
-        age = f"il y a {jours // 30} mois"
-    else:
-        annees = jours // 365
-        age = f"il y a {annees} an{'s' if annees > 1 else ''}"
-    court = d.strftime("%d/%m/%y")
-    bulle = f"Ajouté à la fiche le {d.strftime('%d/%m/%Y')} — {age}"
-    premier = str((s or {}).get("premier_jour_connu") or "")
-    if premier:
+        entree = None
+
+    # --- le premier post ---
+    premier = None
+    brut = str(s.get("premier_post_at") or s.get("premier_jour_connu") or "").strip()
+    if brut:
         try:
-            dp = _dt.date.fromisoformat(premier)
-            bulle += f" · premier reel vu le {dp.strftime('%d/%m/%Y')}"
+            premier = _dt.date.fromisoformat(brut)
         except Exception:
-            pass
-    bulle += ". Instagram ne publie pas la date de création d'un compte."
-    return (court, bulle)
+            premier = None
+
+    if premier is not None:
+        exact = bool(s.get("premier_post_exact"))
+        n_jours = max(0, (maintenant.date() - premier).days)
+        court = ("1er post " if exact else "1er post avant ") + premier.strftime("%d/%m/%y")
+        if exact:
+            bulle = (f"Premier post le {premier.strftime('%d/%m/%Y')} — "
+                     f"{_depuis_quand(n_jours)}. Tout l'historique du compte est connu.")
+        else:
+            bulle = (f"Le compte publiait déjà le {premier.strftime('%d/%m/%Y')} — "
+                     f"{_depuis_quand(n_jours)}. Instagram ne rend que la douzaine "
+                     f"de posts les plus récents : le vrai premier post peut être "
+                     f"plus ancien.")
+        n_posts = 0
+        try:
+            n_posts = int(s.get("posts_count") or 0)
+        except Exception:
+            n_posts = 0
+        if n_posts:
+            bulle += f" {n_posts} post(s) au total."
+        if entree is not None:
+            bulle += f" Ajouté à la fiche le {entree.strftime('%d/%m/%Y')}."
+        bulle += " Instagram ne publie pas la date de création d'un compte."
+        return (court, bulle)
+
+    # --- aucun post connu : on dit ce qu'on sait, c'est-a-dire l'entree ---
+    if entree is None:
+        return ("", "")
+    n_jours = max(0, int((maintenant - entree).total_seconds() // 86400))
+    return (
+        "ajouté le " + entree.strftime("%d/%m/%y"),
+        f"Ajouté à la fiche le {entree.strftime('%d/%m/%Y')} — "
+        f"{_depuis_quand(n_jours)}. Aucun post connu pour l'instant : la date du "
+        f"premier post apparaîtra au prochain scrape.",
+    )
 
 
 def _ligne_compte(a: dict, stats: dict, normaliser, base_pp: str = "") -> str:
@@ -910,7 +949,7 @@ def _ligne_compte(a: dict, stats: dict, normaliser, base_pp: str = "") -> str:
     sous = "Instagram"
     if depuis:
         sous += (f" <span class='depuis' title='{_esc(bulle)}'>"
-                 f"(ajouté le {_esc(depuis)})</span>")
+                 f"({_esc(depuis)})</span>")
     return (
         f"<div class='ligne{' bannie' if banni else ''}'>"
         f"{pp}"
