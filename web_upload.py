@@ -18005,6 +18005,12 @@ def _diag_bot(bot=None) -> str:
                     n_fiches = len(_rc_diag.etats_du_jour())
                 except Exception as _e_nf:
                     n_fiches = f"illisible ({str(_e_nf)[:40]})"
+                envoi = getattr(cog, "dernier_envoi", None)
+                if envoi:
+                    detail = " + ".join(f"{x['fiches']} fiches/{x['unites']}u"
+                                        for x in envoi)
+                    bloc += ("<br><span style='color:#666'>dernier bilan envoyé : "
+                             f"{len(envoi)} message(s) — {html_escape(detail)}</span>")
                 bloc += ("<br><span style='color:#666'>report des comptes — "
                          f"{n_fiches} fiche(s) vues · "
                          f"jour : {html_escape(', '.join(jr) or 'aucun salon')} · "

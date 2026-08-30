@@ -6804,13 +6804,22 @@ try:
         # « Je veux qu en un morceau il y ait tous les VA. » Un message
         # ordinaire plafonne a 2000 unites, un EMBED a 4096 : c est ce qui
         # permet de tenir vingt-deux fiches et un mois de carres en un seul.
-        check("mois : vingt-deux fiches tiennent en UN message",
-              len(_msgs22) == 1, len(_msgs22))
-        check("mois : et il reste sous la limite d un embed",
-              _rcT._taille(_msgs22[0]) <= 4096, _rcT._taille(_msgs22[0]))
-        check("mois : la limite du bilan est celle des embeds",
-              _rcT._MAX_EMBED > 2000 and _rcT._MAX_EMBED < 4096,
-              _rcT._MAX_EMBED)
+        # On DECOUPE court, volontairement. Un bilan de vingt et une fiches
+        # mesurait 2783 unites — sous la limite annoncee de 4096 — et Discord
+        # n en affichait pourtant que six. Tant qu on ne sait pas pourquoi,
+        # des messages courts passent, et le proprietaire a dit « fais
+        # plusieurs trucs s il le faut ». Ce qui compte n est pas d avoir UN
+        # message, c est de n en perdre AUCUNE.
+        check("mois : chaque morceau reste court",
+              all(_rcT._taille(m) <= 1500 for m in _msgs22),
+              [_rcT._taille(m) for m in _msgs22])
+        check("mois : et toutes les fiches sont là malgré le découpage",
+              sum(m.count("FICHE ") for m in _msgs22) == 22,
+              sum(m.count("FICHE ") for m in _msgs22))
+        check("mois : chaque morceau est numéroté",
+              all(f"partie {_i + 1}/{len(_msgs22)}" in m
+                  for _i, m in enumerate(_msgs22)),
+              [m.splitlines()[0][-16:] for m in _msgs22])
         # Au-dela, on coupe encore — et chaque partie est NUMEROTEE, sinon un
         # message qui commence par le titre passe pour le bilan entier.
         _msgs60 = _rcT.bloc_quinzaine(

@@ -98,7 +98,12 @@ _MAX_MSG = 1850
 #:
 #: Marge volontaire sous les 4096 : le nombre de fiches grandit, et déborder
 #: fait refuser le message ENTIER par Discord.
-_MAX_EMBED = 3900
+#: Volontairement PRUDENT : 1400, pas 4096. Un bilan de vingt et une fiches
+#: mesure 2783 unites — sous la limite annoncee — et Discord n'en affichait
+#: pourtant que six. On ne sait pas encore pourquoi ; en attendant, des
+#: messages courts passent, et le proprietaire a dit « fais plusieurs trucs
+#: s'il le faut ». Mieux vaut trois messages complets qu'un seul ampute.
+_MAX_EMBED = 1400
 
 
 def _taille(txt: str) -> int:
@@ -146,7 +151,7 @@ HEURE_REPORT = 1
 #: changement de format ne se voyait qu'a la publication suivante — et on
 #: attendait 1 h du matin en croyant que ca ne marchait pas. Quand le numero
 #: stocke ne correspond plus, la boucle republie une fois, tout de suite.
-FORMAT_BILAN = 12
+FORMAT_BILAN = 13
 
 
 # ==============================================================================
@@ -879,6 +884,16 @@ class ReportComptes(commands.Cog):
             await self._ecrire_epingle(ch, mid, "_(suite du bilan — vide ce mois-ci)_",
                                        epingler=False)
             neufs.append(mid)
+        # Ce qui a REELLEMENT ete envoye : taille et nombre de fiches par
+        # message. Discord affiche six fiches la ou le message en annonce
+        # vingt et une ; sans cette trace, impossible de savoir si le bot a
+        # envoye vingt et une ou si Discord en a mange quinze.
+        self.dernier_envoi = [
+            {"unites": _taille(m),
+             "fiches": sum(1 for l in m.splitlines()
+                           if l.startswith(("⚪", "🟢", "🟠", "🔴"))),
+             "id": neufs[i] if i < len(neufs) else None}
+            for i, m in enumerate(messages)]
         c["pin_ids"] = [m for m in neufs if m]
         c["format"] = FORMAT_BILAN
         c.pop("pin_id", None)
