@@ -278,7 +278,24 @@ class NumerosCog(commands.Cog):
                 "sms" if kind == "sms" else "mail")
         except Exception:
             solde = None
-        await maj_trois(self.bot, ch, actif=actif, solde=solde)
+        montre = await maj_trois(self.bot, ch, actif=actif, solde=solde)
+        if not montre.get("numero"):
+            # On n'a pas pu l'ECRIRE : le VA ne le verra jamais. Le garder,
+            # c'est le payer pour rien — chaque clic coutait 0,25 $ pendant
+            # que le bloc restait sur « Recherche d'un numero… ». On le rend,
+            # ce qui rembourse tant qu'aucun code n'est arrive.
+            log.error("numgen: numero %s pris mais INAFFICHABLE dans #%s — on le rend",
+                      actif.get("valeur"), getattr(ch, "name", "?"))
+            try:
+                if kind == "sms":
+                    await asyncio.to_thread(numgen.cancel, actif["id"],
+                                            actif["provider"])
+                else:
+                    await asyncio.to_thread(numgen.mail_cancel, actif["id"])
+            except Exception as e:                  # noqa: BLE001
+                log.error("numgen: rendu impossible (%s)", e)
+            _salon_ecrire(ch.id, actif=None, code=None)
+            return
         self.bot.loop.create_task(self.suivre(ch))
 
     async def suivre(self, channel):
@@ -1142,6 +1159,7 @@ async def maj_trois(bot, channel, actif=None, code=None, souci_num="",
                     souci_code="", solde=None):
     """Reecrit les messages 2 et 3. Le panneau, lui, ne bouge jamais."""
     rec = _salon(getattr(channel, "id", 0))
+    poses = {}
     for cle, emb in (("numero", _emb_numero(actif, solde, souci_num)),
                      ("code", _emb_code(actif, code, souci_code))):
         mid = rec.get(cle)
@@ -1151,8 +1169,12 @@ async def maj_trois(bot, channel, actif=None, code=None, souci_num="",
             # Meme raison qu'au-dessus : pas de lecture, donc pas de doublon
             # possible, et une edition de moins a chaque mise a jour.
             await channel.get_partial_message(int(mid)).edit(embed=emb)
+            poses[cle] = True
         except Exception as e:
             log.warning(f"maj_trois {cle} : {e}")
+    # L'appelant doit pouvoir savoir si l'affichage a REELLEMENT eu lieu :
+    # un numero achete et jamais montre, c'est de l'argent perdu en silence.
+    return poses
 
 
 async def verrouiller_salon(channel, bot):

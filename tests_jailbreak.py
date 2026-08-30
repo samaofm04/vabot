@@ -1672,6 +1672,19 @@ try:
     check("trois : /panelnumero nettoie avant de poser",
           "purge(" in _s3p2 and _s3p2.index("purge(") < _s3p2.index("poser_trois"))
 
+    # Chaque clic achete. Si le bloc ne peut pas etre ECRIT, le VA ne verra
+    # jamais le numero : le garder, c est le payer pour rien. Constate en
+    # vrai — le bloc restait sur « Recherche d un numero… » et le solde
+    # baissait a chaque clic.
+    _s3n = _i3.getsource(_n3.NumerosCog.nouvelle_activation)
+    check("trois : un numero inaffichable est RENDU, pas perdu",
+          "numgen.cancel" in _s3n and "montre" in _s3n,
+          "un achat invisible reste a la charge du compte")
+    check("trois : et l incident va au journal",
+          "INAFFICHABLE" in _s3n)
+    check("trois : la mise a jour dit ce qu elle a reussi a ecrire",
+          "return poses" in _i3.getsource(_n3.maj_trois))
+
     _s3c = _i3.getsource(_n3.verrouiller_salon)
     check("trois : le salon passe en lecture seule",
           "send_messages=False" in _s3c and "default_role" in _s3c)
