@@ -12,7 +12,18 @@ configure un message par fiche VA :
 Puis il tient a jour UN message epingle, le bilan de la quinzaine : une ligne
 par fiche, avec sa pastille. C'est celui-la que tout le monde regarde.
 
-Trois choses valent d'etre dites, parce qu'elles ne se devinent pas :
+**Aucune commande slash, et c'est contraint.** Discord plafonne une
+APPLICATION a 100 commandes globales, et ce bot y est deja : quatre cogs
+(vaactivity, vasort, tgrouter, numeros) ne se chargent plus depuis un
+moment, en silence, pour cette raison — leurs commandes n'existent plus sur
+Discord. En ajouter trois faisait echouer celui-ci exactement pareil.
+
+Le report n'en a pas besoin : il tourne seul apres minuit. Le salon se
+trouve par CONVENTION DE NOM — tout salon dont le nom commence par
+« report-compte ». On cree le salon, il est servi. Le declenchement manuel
+vit sur le tableau de bord, bouton « Report des comptes ».
+
+Trois autres choses valent d'etre dites, parce qu'elles ne se devinent pas :
 
 **Le calcul n'est pas ici.** Il vit dans `jb_objectifs`, et le tableau de bord
 appelle la meme fonction. Deux facons de compter « les comptes actifs »
@@ -279,12 +290,10 @@ class ReportComptes(commands.Cog):
 
         cibles = []
         if salon_force is not None:
-            cibles = [(None, salon_force)]
+            cibles = [(_cle(getattr(salon_force.guild, "id", 0), salon_force.id),
+                       salon_force)]
         else:
-            for cle, c in _reports_configures(_load_cfg()):
-                ch = self.bot.get_channel(int(c.get("channel_id") or 0))
-                if ch is not None:
-                    cibles.append((cle, ch))
+            cibles = self.salons_report()
 
         n_msg = 0
         for cle, ch in cibles:
@@ -301,6 +310,36 @@ class ReportComptes(commands.Cog):
             except Exception as e:
                 print(f"[report-comptes] envoi : {e}", flush=True)
         return {"fiches": len(etats), "messages": n_msg, "salons": len(cibles)}
+
+    def salons_report(self) -> list:
+        """[(cle, salon)] ou publier : par convention de nom, et par config.
+
+        Convention : tout salon dont le nom commence par « report-compte »
+        (« report-compte », « report-comptes », « report-comptes-fr »...). Le
+        proprietaire cree le salon, il est servi — pas de commande a lancer,
+        et rien a reparametrer apres un changement de serveur.
+
+        La configuration par identifiant reste lue si elle existe : elle sert
+        aux salons qui ne suivent pas la convention.
+        """
+        vus, out = set(), []
+        for c in getattr(self.bot, "get_all_channels", lambda: [])():
+            nom = str(getattr(c, "name", "") or "").lower().replace("_", "-")
+            if not nom.startswith("report-compte"):
+                continue
+            if not hasattr(c, "send"):
+                continue
+            vus.add(c.id)
+            out.append((_cle(getattr(c.guild, "id", 0), c.id), c))
+        for cle, cfg in _reports_configures(_load_cfg()):
+            try:
+                ch = self.bot.get_channel(int(cfg.get("channel_id") or 0))
+            except Exception:
+                ch = None
+            if ch is not None and ch.id not in vus:
+                vus.add(ch.id)
+                out.append((cle, ch))
+        return out
 
     async def _poser_epingle(self, ch, cle, texte: str):
         """Reecrit le message epingle du bilan, ou le cree la premiere fois."""
@@ -327,60 +366,18 @@ class ReportComptes(commands.Cog):
         except Exception as e:
             print(f"[report-comptes] épingle : {e}", flush=True)
 
-    # ---- commandes -------------------------------------------------------
-    @app_commands.command(
-        name="setreportcomptes",
-        description="Poser ici le report quotidien des comptes par VA (minuit)")
-    async def setreportcomptes(self, interaction: discord.Interaction):
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message(
-                "Réservé aux administrateurs.", ephemeral=True)
-            return
-        await interaction.response.defer(ephemeral=True)
-        cfg = _load_cfg()
-        cle = _cle(interaction.guild_id, interaction.channel_id)
-        cfg[cle] = {"guild_id": interaction.guild_id,
-                    "channel_id": interaction.channel_id,
-                    "pose": int(time.time())}
-        _save_cfg(cfg)
-        res = await self.publier(_paris_now().date().isoformat(),
-                                 salon_force=interaction.channel)
-        await interaction.followup.send(
-            f"✅ Report des comptes posé ici. {res['fiches']} fiche(s) suivie(s), "
-            f"republication chaque nuit après minuit.", ephemeral=True)
-
-    @app_commands.command(
-        name="reportcomptesnow",
-        description="Publier tout de suite le report des comptes (test)")
-    async def reportcomptesnow(self, interaction: discord.Interaction):
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message(
-                "Réservé aux administrateurs.", ephemeral=True)
-            return
-        await interaction.response.defer(ephemeral=True)
-        res = await self.publier(_paris_now().date().isoformat(),
-                                 salon_force=interaction.channel)
-        await interaction.followup.send(
-            f"✅ {res['messages']} message(s) pour {res['fiches']} fiche(s).",
-            ephemeral=True)
-
-    @app_commands.command(
-        name="objectifva",
-        description="Fixer l'objectif de comptes actifs d'une fiche VA")
-    @app_commands.describe(identite="L'identité (ex : jessye)",
-                           va="Le nom de la fiche (ex : VA NOUM 1X1)",
-                           objectif="Nombre de comptes actifs visés (0 = défaut)")
-    async def objectifva(self, interaction: discord.Interaction,
-                         identite: str, va: str, objectif: int):
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message(
-                "Réservé aux administrateurs.", ephemeral=True)
-            return
-        import jb_objectifs as ob
-        n = await asyncio.to_thread(ob.fixer_objectif, identite, va, objectif)
-        await interaction.response.send_message(
-            f"✅ Objectif de **{va}** (`@{identite.lower()}`) : **{n}** comptes "
-            f"actifs — journée tenue à partir de {ob._seuil(n)}.", ephemeral=True)
+    # ---- pas de commande slash, et c'est un choix contraint -------------
+    #
+    # Discord plafonne une APPLICATION a 100 commandes slash globales. Ce bot
+    # y est deja : quatre cogs (vaactivity, vasort, tgrouter, numeros) ne se
+    # chargent plus depuis un moment, en silence, pour cette raison. En
+    # ajouter trois de plus faisait echouer celui-ci exactement pareil.
+    #
+    # Ce report n'a de toute facon pas besoin d'une commande : il tourne tout
+    # seul apres minuit. Ne restait que la configuration du salon — remplacee
+    # par une convention : le report va dans TOUT salon dont le nom commence
+    # par « report-compte ». Le proprietaire cree le salon, il est servi.
+    # Un declenchement manuel existe depuis le tableau de bord.
 
 
 async def setup(bot):

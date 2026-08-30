@@ -76,10 +76,28 @@ WEB_PORT = int(os.environ.get("WEB_UPLOAD_PORT", "8080"))
 _BOT_REF = None
 
 
+#: Le second bot (application Discord distincte). Il a SON PROPRE budget de
+#: 100 commandes slash : quand le bot principal sature — ce qui est arrivé, et
+#: a fait taire quatre cogs sans un mot — c'est là qu'on déménage.
+_BOT_ADMIN_REF = None
+
+
 def set_bot_ref(bot):
     """Appelé depuis main.py pour que le site web puisse lookup les users."""
     global _BOT_REF
     _BOT_REF = bot
+
+
+def set_bot_admin_ref(bot):
+    """Le bot admin, pour le diagnostic de /version.
+
+    Il n'est pas interchangeable avec le principal : autre application, autres
+    droits, autres serveurs. On ne s'en sert que pour DIRE son état — savoir
+    s'il pourrait accueillir des commandes est une question qu'on s'est posée
+    sans pouvoir y répondre.
+    """
+    global _BOT_ADMIN_REF
+    _BOT_ADMIN_REF = bot
 
 
 def _resolve_user_obj(user_id):
@@ -17783,7 +17801,7 @@ _VIGNETTE_ABSENTE = (
 ).encode("utf-8")
 
 
-def _diag_bot() -> str:
+def _diag_bot(bot=None) -> str:
     """État du bot Discord vivant dans ce processus, en une ligne.
 
     Quand une commande slash n'apparaît pas côté Discord, il y a trois causes
@@ -17795,15 +17813,18 @@ def _diag_bot() -> str:
     Ne rend que des noms de cogs et de commandes — ce qu'un membre du serveur
     voit déjà en tapant « / ». Aucun jeton, aucun identifiant.
     """
-    if _BOT_REF is None:
+    bot = bot if bot is not None else _BOT_REF
+    if bot is None:
         return "pas connecté à ce processus"
     try:
-        cogs = sorted(getattr(_BOT_REF, "cogs", {}) or {})
-        cmds = sorted(c.name for c in _BOT_REF.tree.get_commands())
-        pret = "prêt" if getattr(_BOT_REF, "is_ready", lambda: False)() else "pas prêt"
-        sync = getattr(_BOT_REF, "etat_sync", "inconnue")
-        echecs = getattr(_BOT_REF, "echecs_cogs", None)
-        bloc = (f"{pret} · {len(cogs)} cog(s) : {html_escape(', '.join(cogs))}"
+        cogs = sorted(getattr(bot, "cogs", {}) or {})
+        cmds = sorted(c.name for c in bot.tree.get_commands())
+        pret = "prêt" if getattr(bot, "is_ready", lambda: False)() else "pas prêt"
+        sync = getattr(bot, "etat_sync", "inconnue")
+        echecs = getattr(bot, "echecs_cogs", None)
+        n_g = len(getattr(bot, "guilds", []) or [])
+        bloc = (f"{pret} · {n_g} serveur(s) · {len(cmds)}/100 commandes · "
+                f"{len(cogs)} cog(s) : {html_escape(', '.join(cogs))}"
                 f"<br><span style='color:#666'>synchro : {html_escape(str(sync))}</span>"
                 f"<br><span style='color:#666'>{len(cmds)} commande(s) dans "
                 f"l'arbre : {html_escape(', '.join(cmds))}</span>")
@@ -29375,6 +29396,12 @@ def _render_jailbreak_html() -> str:
         f"title='Lance un scrape immédiat de TOUS les comptes, bannis compris (auto : 2x/jour, 00h/12h)' "
         f"style='background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;border:0;padding:10px 16px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(34,197,94,.3);display:inline-flex;align-items:center;gap:7px'>"
         f"<span id='jb-scrape-now-ico'>↻</span> <span id='jb-scrape-now-lbl'>Scraper maintenant</span></button>"
+        f"<button type='button' id='jb-report-now' onclick='jbReportComptes(this)' "
+        f"title='Publie tout de suite le report des comptes dans les salons dont le nom "
+        f"commence par « report-compte ». Il part de toute façon seul après minuit.' "
+        f"style='background:rgba(59,130,246,.14);color:#93c5fd;border:1px solid rgba(59,130,246,.4);"
+        f"padding:10px 16px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700'>"
+        f"📊 Report des comptes</button>"
         f"<button type='button' onclick='jbOpenCreateIdentityModal()' style='background:#3b82f6;color:#fff;border:0;padding:10px 18px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(59,130,246,.35)'>+ Nouvelle identité</button>"
         f"<div style='text-align:center' id='jb-kpi-comptes'><div style='font-size:22px;font-weight:800;color:#ec4899'>{stats['total_accounts']}</div><div style='font-size:9px;color:#888;letter-spacing:1px'>COMPTES</div></div>"
         f"<div style='text-align:center' id='jb-kpi-idents'><div style='font-size:22px;font-weight:800;color:#3b82f6'>{stats['identities_with_accounts']}/{len(identities) if identities else 0}</div><div style='font-size:9px;color:#888;letter-spacing:1px'>IDENTITÉS</div></div>"
@@ -30834,6 +30861,24 @@ def _render_jailbreak_html() -> str:
         "     if(typeof showToast === 'function')"
         "       showToast('Objectif : ' + j.objectif + ' (journee tenue a ' + j.seuil + ')', 'success');"
         "     jbSoftRefresh();"
+        "   });"
+        "}"
+        "function jbReportComptes(btn){"
+        "  if(!confirm('Publier le report des comptes maintenant dans les salons'"
+        "              + ' report-compte* ?')) return;"
+        "  var v = btn.textContent;"
+        "  btn.disabled = true; btn.textContent = '◌ envoi...';"
+        "  fetch('/jailbreak/report_comptes_now', {method:'POST'})"
+        "   .then(_jbJsonOrAuth)"
+        "   .then(function(j){"
+        "     btn.disabled = false; btn.textContent = v;"
+        "     if(!j) return;"
+        "     if(!j.ok){"
+        "       if(typeof showToast === 'function') showToast(j.error || 'Echec', 'error');"
+        "       return;"
+        "     }"
+        "     if(typeof showToast === 'function')"
+        "       showToast(j.fiches + ' fiche(s) postee(s) dans : ' + (j.salons||[]).join(', '), 'success');"
         "   });"
         "}"
         "function jbFermeLien(){"
@@ -49176,6 +49221,7 @@ def create_app():
             # commande n'est pas dans l'arbre, ou la synchro a échoué. Sans
             # cette ligne, on ne peut que deviner — et on a deviné trois fois.
             f"<p><b>bot</b> : {_diag_bot()}</p>"
+            f"<p><b>bot admin</b> : {_diag_bot(_BOT_ADMIN_REF)}</p>"
             "<p style='color:#666;font-size:13px'>Si le code affiche ici n'est pas "
             "le dernier publie, le serveur n'a pas redemarre. Si c'est bien le "
             "dernier mais que la page reste ancienne, c'est le cache du "
@@ -52570,6 +52616,43 @@ def create_app():
         if ok:
             return _success(f"✓ VA <b>{old_name}</b> mise à jour", tab="jailbreak")
         return _error("✕ Mise à jour échouée (conflit de nom ou VA introuvable)", tab="jailbreak")
+
+    @app.route("/jailbreak/report_comptes_now", methods=["POST"])
+    def jailbreak_report_comptes_now():
+        """Publie tout de suite le report des comptes dans les salons prévus.
+
+        Ce déclenchement vit ici et non dans une commande Discord : le bot est
+        au plafond des 100 commandes slash imposé par Discord, et en ajouter
+        une empêchait le cog entier de se charger. Le report tourne de toute
+        façon seul après minuit ; ce bouton sert à le voir sans attendre.
+        """
+        from flask import jsonify
+        import asyncio as _aio
+        if not is_auth():
+            return jsonify({"ok": False, "auth": True,
+                            "error": "Session expirée — la page va se recharger"}), 401
+        if _BOT_REF is None:
+            return jsonify({"ok": False, "error": "Bot Discord non connecté"})
+        cog = _BOT_REF.get_cog("ReportComptes")
+        if cog is None:
+            return jsonify({"ok": False,
+                            "error": "Cog report absent — voir /version, section bot"})
+        loop = getattr(_BOT_REF, "loop", None)
+        if loop is None or not loop.is_running():
+            return jsonify({"ok": False, "error": "Boucle du bot inactive"})
+        salons = [getattr(ch, "name", "?") for _c, ch in cog.salons_report()]
+        if not salons:
+            return jsonify({"ok": False,
+                            "error": "Aucun salon trouvé. Crée un salon dont le nom "
+                                     "commence par « report-compte »."})
+        try:
+            import cogs.reportcomptes as _rc
+            jour = _rc._paris_now().date().isoformat()
+            fut = _aio.run_coroutine_threadsafe(cog.publier(jour), loop)
+            res = fut.result(timeout=120)
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Envoi échoué : {e}"[:200]})
+        return jsonify({"ok": True, "salons": salons, **(res or {})})
 
     @app.route("/jailbreak/objectif", methods=["POST"])
     def jailbreak_objectif():
