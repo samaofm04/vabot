@@ -8009,11 +8009,56 @@ document.addEventListener('click', function(ev){
   var a=document.getElementById('ident-edit-avatar'); if(a) a.value='';
   identEditCtx.market0 = b.getAttribute('data-market') || 'fr';
   identEditMarket(identEditCtx.market0);
+  identEditCtx.styles0 = identStylesDe(identEditCtx.ident);
+  identEditCtx.styles = identEditCtx.styles0.slice();
+  identEditStylesPeindre();
   var e=document.getElementById('ident-edit-err'); if(e) e.textContent='';
   var g=document.getElementById('ident-edit-go'); if(g){ g.disabled=false; g.textContent='Enregistrer'; }
   var m=document.getElementById('ident-edit-modal'); if(m) m.style.display='flex';
 });
 function identEditClose(){ var m=document.getElementById('ident-edit-modal'); if(m) m.style.display='none'; }
+// ---- « Ce qui marche » : caption / brut / montage / flash -------------------
+// Les pastilles se dessinent depuis la table servie par le serveur, jamais
+// depuis une copie ecrite ici : le jour ou un style s ajoute, il apparait des
+// deux cotes ou d aucun, pas d un seul.
+function identStylesTable(){
+  try{
+    var n=document.getElementById('ident-styles-choix');
+    return n ? (JSON.parse(n.textContent||'[]')||[]) : [];
+  }catch(e){ return []; }
+}
+function identStylesDe(ident){
+  try{
+    var n=document.getElementById('ident-styles-data');
+    var d=n ? (JSON.parse(n.textContent||'{}')||{}) : {};
+    return d[String(ident||'').toLowerCase()] || [];
+  }catch(e){ return []; }
+}
+function identEditStylesPeindre(){
+  var box=document.getElementById('ident-edit-styles');
+  if(!box) return;
+  var poses=identEditCtx.styles||[];
+  box.innerHTML='';
+  identStylesTable().forEach(function(s){
+    var on=poses.indexOf(s.cle)>=0;
+    var b=document.createElement('button');
+    b.type='button';
+    b.title=s.titre;
+    b.setAttribute('data-style',s.cle);
+    b.textContent=s.emoji+' '+s.label;
+    b.style.cssText='background:'+(on?'rgba(255,255,255,.10)':'#131316')
+      +';border:1.5px solid '+(on?s.couleur:'#34343a')
+      +';color:'+(on?s.couleur:'#9a9aa6')
+      +';border-radius:9px;padding:7px 10px;font-size:12px;font-weight:700;'
+      +'cursor:pointer;font-family:inherit;flex:1 1 auto';
+    b.addEventListener('click',function(){
+      var i=identEditCtx.styles.indexOf(s.cle);
+      if(i>=0){ identEditCtx.styles.splice(i,1); } else { identEditCtx.styles.push(s.cle); }
+      identEditStylesPeindre();
+    });
+    box.appendChild(b);
+  });
+}
 function identEditMarket(v){
   identEditCtx.market = v;
   [['fr','ident-edit-fr'],['us','ident-edit-us']].forEach(function(p){
@@ -8049,6 +8094,16 @@ async function identEditSave(){
       var rm=await fetch('/identity/market',{method:'POST',body:fm,credentials:'same-origin'});
       var jm=await rm.json();
       if(!(jm&&jm.ok)){ if(err) err.textContent=(jm&&jm.error)||('Erreur '+rm.status);
+                        if(go){go.disabled=false;go.textContent='Enregistrer';} return; }
+      fait=true;
+    }
+    var st0=(identEditCtx.styles0||[]).slice().sort().join(',');
+    var st1=(identEditCtx.styles||[]).slice().sort().join(',');
+    if(st1!==st0){
+      var fs=new FormData(); fs.set('identity',cible); fs.set('styles',st1);
+      var rs=await fetch('/identity/styles',{method:'POST',body:fs,credentials:'same-origin'});
+      var js=await rs.json();
+      if(!(js&&js.ok)){ if(err) err.textContent=(js&&js.error)||('Erreur '+rs.status);
                         if(go){go.disabled=false;go.textContent='Enregistrer';} return; }
       fait=true;
     }
@@ -9442,6 +9497,11 @@ document.addEventListener('click',function(e){
   <span style="font-size:11px;font-weight:800;color:#9ca3af;letter-spacing:.8px">SFW</span>
 </div>
 <script type="application/json" id="mk-markets">{markets_json}</script>
+<!-- Ce qui marche par identite (caption / brut / montage / flash) et la
+     table des styles. La modale se dessine depuis CETTE table, la meme
+     que le serveur : deux listes en dur, ce serait deux comportements. -->
+<script type="application/json" id="ident-styles-data">{styles_json}</script>
+<script type="application/json" id="ident-styles-choix">{styles_choix_json}</script>
 <!-- Filtre de marche : Tout / FR / US (meme esprit que le SFW) -->
 <div id="market-floating" title="N'afficher que les identites d'un marche">
   <button type="button" data-mkopt="" onclick="marketSet('')">Tout</button>
@@ -12088,6 +12148,10 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
       </div>
       <div id="ident-edit-mhint" style="font-size:11px;color:#75757f;line-height:1.45"></div>
     </div>
+    <div style="font-size:12px;color:#c4c4cc;display:flex;flex-direction:column;gap:6px">Ce qui marche
+      <div id="ident-edit-styles" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+      <div style="font-size:11px;color:#75757f;line-height:1.45">Coche ce qui prend pour cette model. Les pastilles apparaissent a cote de son nom dans toute la Bibliotheque. On peut en cocher plusieurs, ou aucune.</div>
+    </div>
     <div id="ident-edit-err" style="color:#f87171;font-size:12px;min-height:15px"></div>
     <div style="display:flex;gap:8px">
       <button type="button" onclick="identEditClose()" style="flex:1;background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:9px;padding:9px;font-size:13px;cursor:pointer;font-family:inherit">Annuler</button>
@@ -12914,6 +12978,122 @@ def _market_flag_html(identity: str, h: int = 11) -> str:
         "role='img' aria-label='%s' style='border-radius:2px;flex-shrink:0;"
         "box-shadow:0 0 0 1px rgba(255,255,255,.22);vertical-align:-1px'>"
         "<title>%s</title>%s</svg>" % (vb, w, h, titre, titre, corps))
+
+
+STYLES_FILE = DATA_DIR / "identity_styles.json"
+
+# Ce qui MARCHE pour une identité, dit en un caractère. Rien ici n'est deviné :
+# c'est le propriétaire qui coche, parce que c'est lui qui voit ce qui prend.
+#
+# L'ordre de ce tuple est l'ordre d'affichage — les pastilles se lisent
+# toujours dans le même sens d'une identité à l'autre, sinon l'œil doit relire
+# à chaque ligne. La clé est stockée en dur dans le fichier : changer un emoji
+# ici ne perd aucune donnée, changer une CLÉ, si.
+_STYLES = (
+    ("caption", "💬", "Caption",  "#38bdf8",
+     "Les comptes marchent avec une caption incrustée"),
+    ("brut",    "🎥", "Brut",     "#a3a3a3",
+     "Les comptes marchent en publiant la vidéo brute, telle quelle"),
+    ("montage", "🎬", "Montage",  "#f472b6",
+     "Les comptes marchent avec un montage"),
+    ("flash",   "⚡", "Template", "#facc15",
+     "Les comptes marchent avec les templates / flash reels"),
+)
+_STYLES_CLES = tuple(c for c, _e, _l, _co, _t in _STYLES)
+
+
+def _load_styles() -> dict:
+    """{identité: ['caption', 'flash', ...]} — ce qui marche pour chacune."""
+    try:
+        d = _cached_json_load(STYLES_FILE)
+        if not isinstance(d, dict):
+            return {}
+        return {
+            str(k).lower(): [s for s in v if s in _STYLES_CLES]
+            for k, v in d.items() if isinstance(v, list)
+        }
+    except Exception:
+        return {}
+
+
+def identity_styles(ident: str) -> list:
+    """Les styles cochés pour cette identité, dans l'ordre d'affichage.
+
+    On re-trie sur `_STYLES` au lieu de rendre la liste telle qu'elle a été
+    enregistrée : sans ça, l'ordre dépendait de l'ordre des clics, et deux
+    identités aux mêmes styles n'affichaient pas la même chose."""
+    poses = set(_load_styles().get((ident or "").strip().lower()) or ())
+    return [c for c in _STYLES_CLES if c in poses]
+
+
+def _set_identity_styles(ident: str, styles) -> bool:
+    """Écrit les styles d'une identité. Liste vide = on retire l'entrée."""
+    ident = (ident or "").strip().lower()
+    if not ident:
+        return False
+    gardes = [c for c in _STYLES_CLES if c in set(styles or ())]
+    try:
+        d = safe_json.load(STYLES_FILE, default={})
+        if not isinstance(d, dict):
+            d = {}
+        if gardes:
+            d[ident] = gardes
+        else:
+            # Une identité sans style ne laisse pas une liste vide derriere
+            # elle : le fichier se lit a l oeil, autant qu il ne porte que ce
+            # qui existe vraiment.
+            d.pop(ident, None)
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        safe_json.write(STYLES_FILE, d)
+        _invalidate_json_cache(STYLES_FILE)
+        return True
+    except Exception as e:
+        log.error(f"identity_styles: écriture impossible ({e})")
+        return False
+
+
+def _style_badges_html(ident: str, taille: int = 12) -> str:
+    """Les pastilles de styles à côté du nom, ou rien si aucune n'est cochée.
+
+    Volontairement en emoji et pas en SVG — contrairement au drapeau, qui lui
+    n'a pas le choix (Windows n'a pas de police de drapeaux). Ceux-la sont
+    dessines par toutes les plateformes."""
+    poses = identity_styles(ident)
+    if not poses:
+        return ""
+    par_cle = {c: (e, lab, coul, titre) for c, e, lab, coul, titre in _STYLES}
+    bouts = []
+    for c in poses:
+        emoji, lab, _coul, titre = par_cle[c]
+        bouts.append(
+            f"<span title='{html_escape(lab)} — {html_escape(titre)}' "
+            f"style='font-size:{taille}px;line-height:1'>{emoji}</span>"
+        )
+    return (f"<span class='ident-styles' data-styles='{','.join(poses)}' "
+            f"style='display:inline-flex;align-items:center;gap:2px;flex-shrink:0'>"
+            + "".join(bouts) + "</span>")
+
+
+def _styles_json() -> str:
+    """{identité: [styles]} pour le JS — les listes que le serveur ne rend pas
+    lui-même (modale de modification) doivent afficher le même état."""
+    import json as _j
+    try:
+        return _j.dumps(_load_styles())
+    except Exception:
+        return "{}"
+
+
+def _styles_choix_json() -> str:
+    """La table des styles, pour que la modale se dessine depuis la MÊME
+    source que le serveur. Deux listes en dur = deux comportements le jour où
+    l'une bouge (le Drive l'a déjà payé)."""
+    import json as _j
+    try:
+        return _j.dumps([{"cle": c, "emoji": e, "label": lab, "couleur": co, "titre": t}
+                         for c, e, lab, co, t in _STYLES])
+    except Exception:
+        return "[]"
 
 
 def _gdrive_redirect_uri() -> str:
@@ -19810,7 +19990,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
             f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em;display:flex;"
             f"align-items:center;gap:6px'><span style='min-width:0;overflow:hidden;"
             f"text-overflow:ellipsis;white-space:nowrap'>{_v2_label(ident).title()}</span>"
-            f"{_market_flag_html(ident)}</div>"
+            f"{_market_flag_html(ident)}{_style_badges_html(ident, 11)}</div>"
             f"<div style='font-size:11px;color:#888;margin-top:2px'>{stats['n_files']} fichier{'s' if stats['n_files'] != 1 else ''}</div>"
             f"</div>"
             f"{count_badge}"
@@ -20133,7 +20313,8 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         f"<div style='flex:1;min-width:0'>"
         f"<div style='display:flex;align-items:center;gap:8px'>"
         f"<span data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{_v2_label(selected)}</span>"
-        f"<span data-vault-header-flag>{_market_flag_html(selected, 13)}</span></div>"
+        f"<span data-vault-header-flag>{_market_flag_html(selected, 13)}</span>"
+        f"<span data-vault-header-styles>{_style_badges_html(selected, 14)}</span></div>"
         f"<div data-vault-header-count style='font-size:12px;color:#888;margin-top:2px'>{n_shown} fichier{'s' if n_shown != 1 else ''} · {sel_stats['size_mb']:.1f} MB{filter_label}</div>"
         f"</div></div>"
         f"<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
@@ -20998,7 +21179,7 @@ def _render_cloud_captions_html() -> str:
             f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em;display:flex;"
             f"align-items:center;gap:6px'><span style='min-width:0;overflow:hidden;"
             f"text-overflow:ellipsis;white-space:nowrap'>{_v2_label(ident).title()}</span>"
-            f"{_market_flag_html(ident)}</div>"
+            f"{_market_flag_html(ident)}{_style_badges_html(ident, 11)}</div>"
             f"<div style='font-size:11px;color:#888;margin-top:2px'>{n} caption{'s' if n != 1 else ''}</div>"
             f"</div>{count_badge}</a>"
         )
@@ -21038,7 +21219,8 @@ def _render_cloud_captions_html() -> str:
         "<div style='flex:1;min-width:0'>"
         f"<div style='display:flex;align-items:center;gap:8px'>"
         f"<span data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{_v2_label(selected)}</span>"
-        f"<span data-vault-header-flag>{_market_flag_html(selected, 13)}</span></div>"
+        f"<span data-vault-header-flag>{_market_flag_html(selected, 13)}</span>"
+        f"<span data-vault-header-styles>{_style_badges_html(selected, 14)}</span></div>"
         f"<div data-vault-header-count id='capCountInfo' style='font-size:12px;color:#888;margin-top:2px'>{n_sel} caption{'s' if n_sel != 1 else ''} · {len(brutes)} brute{'s' if len(brutes) != 1 else ''} dispo</div>"
         "</div></div>"
         "<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
@@ -21296,7 +21478,7 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
             f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em;display:flex;"
             f"align-items:center;gap:6px'><span style='min-width:0;overflow:hidden;"
             f"text-overflow:ellipsis;white-space:nowrap'>{_v2_label(ident).title()}</span>"
-            f"{_market_flag_html(ident)}</div>"
+            f"{_market_flag_html(ident)}{_style_badges_html(ident, 11)}</div>"
             f"<div style='font-size:11px;color:#888;margin-top:2px'>{n} fichier{'s' if n != 1 else ''}</div>"
             f"</div></a>"
         )
@@ -21334,7 +21516,8 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
         "<div style='flex:1;min-width:0'>"
         f"<div style='display:flex;align-items:center;gap:8px'>"
         f"<span data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>@{_v2_label(selected)}</span>"
-        f"<span data-vault-header-flag>{_market_flag_html(selected, 13)}</span></div>"
+        f"<span data-vault-header-flag>{_market_flag_html(selected, 13)}</span>"
+        f"<span data-vault-header-styles>{_style_badges_html(selected, 14)}</span></div>"
         f"<div data-vault-header-count style='font-size:12px;color:#888;margin-top:2px'>{n_sel} fichier{'s' if n_sel != 1 else ''} au total</div>"
         "</div></div>"
         "<span title='Aucune suppression possible depuis le Drive' "
@@ -21783,7 +21966,7 @@ def _render_textvault_html(cat: str) -> str:
             f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em;display:flex;"
             f"align-items:center;gap:6px'><span style='min-width:0;overflow:hidden;"
             f"text-overflow:ellipsis;white-space:nowrap'>{_v2_label(ident).title()}</span>"
-            f"{_market_flag_html(ident)}</div>"
+            f"{_market_flag_html(ident)}{_style_badges_html(ident, 11)}</div>"
             f"<div style='font-size:11px;color:#888;margin-top:2px'>{_count_label(n)}</div>"
             f"</div></a>"
         )
@@ -21828,7 +22011,8 @@ def _render_textvault_html(cat: str) -> str:
         "<div style='flex:1;min-width:0'>"
         f"<div style='display:flex;align-items:center;gap:8px'>"
         f"<span data-vault-header-name style='font-weight:700;font-size:18px;letter-spacing:-.01em'>{head_name}</span>"
-        f"<span data-vault-header-flag>{_market_flag_html(selected, 13)}</span></div>"
+        f"<span data-vault-header-flag>{_market_flag_html(selected, 13)}</span>"
+        f"<span data-vault-header-styles>{_style_badges_html(selected, 14)}</span></div>"
         f"<div data-vault-header-count style='font-size:12px;color:#888;margin-top:2px'>{_count_label(len(cur))}</div>"
         "</div></div>"
         "<div style='display:flex;align-items:center;gap:10px;flex-shrink:0'>"
@@ -43940,6 +44124,8 @@ def _render_upload_inner(msg=None, error=None):
         # Socle des galeries : une seule fois pour toute la page.
         .replace("{vault_core_html}", _vault_core_html())
         .replace("{markets_json}", _markets_json())
+        .replace("{styles_json}", _styles_json())
+        .replace("{styles_choix_json}", _styles_choix_json())
         .replace("{ident_opts}", opts)
         .replace("{pp_ident_opts}", pp_opts)
         .replace("{msg_html}", msg_html)
@@ -47220,6 +47406,35 @@ def create_app():
             return jsonify({"ok": False, "error": "écriture impossible"})
         _invalidate_all_ttl_cache()
         return jsonify({"ok": True, "identity": ident, "market": market})
+
+    @app.route("/identity/styles", methods=["POST"])
+    def identity_styles_set():
+        """Ce qui MARCHE pour une identité : caption / brut / montage / flash.
+
+        Les styles arrivent en une seule liste séparée par des virgules — donc
+        décocher le dernier est une écriture comme une autre. Route par style
+        (« ajoute ceci », « retire cela »), on ne saurait jamais distinguer
+        « aucun style » de « la requête n'est pas passée »."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        ident = (request.form.get("identity") or "").strip().lower()
+        if ident not in _list_identities():
+            return jsonify({"ok": False, "error": "identité inconnue"})
+        demandes = [s.strip().lower()
+                    for s in (request.form.get("styles") or "").split(",") if s.strip()]
+        inconnus = [s for s in demandes if s not in _STYLES_CLES]
+        if inconnus:
+            # Jamais en silence : un style ecarte sans un mot, c est une case
+            # qu on croit cochee et qui ne s affichera nulle part.
+            return jsonify({"ok": False,
+                            "error": "style inconnu : " + ", ".join(inconnus[:4])})
+        if not _set_identity_styles(ident, demandes):
+            return jsonify({"ok": False, "error": "écriture impossible"})
+        _invalidate_all_ttl_cache()
+        poses = identity_styles(ident)
+        return jsonify({"ok": True, "identity": ident, "styles": poses,
+                        "badges": _style_badges_html(ident, 11)})
 
     @app.route("/identity/rename", methods=["POST"])
     def identity_rename():

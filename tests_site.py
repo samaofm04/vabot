@@ -6396,6 +6396,38 @@ try:
               sum(m.count("FICHE ") for m in _longsOb))
         _pinOb = _rcT.bloc_quinzaine(
             [{"e": _eOb, "bilan": _bOb}], "2026-08-16", "2026-08-31")
+        # LE BILAN SERT A PAYER : il lui faut le « @ » Discord (le nom de la
+        # fiche designe un telephone, pas quelqu un a qui virer de l argent) et
+        # le detail JOUR PAR JOUR — « 12/14 » ne dit pas s il a lache trois
+        # jours d affilee ou un jour de temps en temps.
+        _bJ = _obT.bilan_quinzaine("jessye", "VA NOUM 1X1", "2026-08-19")
+        check("bilan : la suite jour par jour est rendue",
+              _bJ.get("suite") == ["tenu", "tenu", "rate", "tenu"], _bJ.get("suite"))
+        # Les jours a VENIR ne sont pas des jours rates : on s arrete a la date
+        # demandee, sinon on reproche a quelqu un de ne pas avoir encore vecu.
+        check("bilan : la suite s arrête au jour demandé",
+              len(_obT.bilan_quinzaine("jessye", "VA NOUM 1X1", "2026-08-17")["suite"]) == 2)
+        # Une nuit sans report n est NI verte NI rouge.
+        _bTrou = _obT.bilan_quinzaine("jessye", "VA NOUM 1X1", "2026-08-21")
+        check("bilan : une nuit sans report reste blanche",
+              _bTrou["suite"][-1] == "inconnu" and _bTrou["suite"][-2] == "inconnu",
+              _bTrou["suite"])
+        check("bilan : les carrés traduisent la suite",
+              _rcT.suite_jours(["tenu", "rate", "inconnu"]) == "🟩🟥⬜",
+              _rcT.suite_jours(["tenu", "rate", "inconnu"]))
+        _pinPay = _rcT.bloc_quinzaine(
+            [{"e": dict(_eOb, discord="noum0075"), "bilan": _bJ}],
+            "2026-08-16", "2026-08-31")
+        check("bilan : le @ Discord est dans le message",
+              "@noum0075" in _pinPay, _pinPay)
+        check("bilan : les carrés du jour par jour aussi",
+              "🟩" in _pinPay and "🟥" in _pinPay, _pinPay)
+        # Une fiche sans Discord ne doit pas afficher un « @ » vide.
+        check("bilan : pas de @ vide quand le Discord est inconnu",
+              "`@`" not in _rcT.bloc_quinzaine(
+                  [{"e": dict(_eOb, discord=""), "bilan": _bJ}],
+                  "2026-08-16", "2026-08-31"))
+
         check("report : le message épinglé porte la pastille",
               "🟠" in _pinOb and "VA NOUM 1X1" in _pinOb, _pinOb[:200])
         check("report : et il explique la règle des 80 %",
@@ -6435,6 +6467,98 @@ try:
         shutil.rmtree(_dosOb, ignore_errors=True)
 except Exception as _eOb2:
     check("objectifs : testable", False, repr(_eOb2)[:200])
+
+# ==============================================================================
+# « Ce qui marche » par identite : les pastilles caption / brut / montage / flash
+# ==============================================================================
+try:
+    import web_upload as _wuST
+    _fST = _wuST.STYLES_FILE
+    _savST = _fST.read_text(encoding="utf-8") if _fST.exists() else None
+    _prevST = _fST.with_suffix(".json.prev")
+    _savPrevST = _prevST.read_text(encoding="utf-8") if _prevST.exists() else None
+    try:
+        _appST = _wuST.create_app()
+        _cST = _appST.test_client()
+        with _cST.session_transaction() as _sST:
+            _sST["auth"] = True; _sST["username"] = "admin"; _sST["legacy_owner"] = True
+        _idST = (_wuST._list_identities() or [""])[0]
+        check("styles : une identite pour tester", bool(_idST))
+
+        # Les deux tables — celle du serveur et celle servie au navigateur —
+        # doivent sortir de la MEME source. Deux listes en dur, c est deux
+        # comportements le jour ou l une bouge (le Drive l a deja paye).
+        import json as _jsST
+        _tableST = _jsST.loads(_wuST._styles_choix_json())
+        check("styles : la table servie au navigateur est celle du serveur",
+              [x["cle"] for x in _tableST] == list(_wuST._STYLES_CLES)
+              and len(_tableST) == 4,
+              str([x.get("cle") for x in _tableST])[:80])
+        check("styles : chaque style a un emoji et une explication",
+              all(x.get("emoji") and x.get("titre") and x.get("label")
+                  for x in _tableST) and len(_tableST) > 0)
+
+        # Aller-retour, et ordre NORMALISE : deux identites aux memes styles
+        # doivent s afficher pareil, quel que soit l ordre des clics.
+        _rST = _cST.post("/identity/styles",
+                         data={"identity": _idST, "styles": "flash,caption"}).get_json() or {}
+        check("styles : enregistres et relus", _rST.get("ok") is True
+              and _wuST.identity_styles(_idST) == ["caption", "flash"],
+              str(_rST)[:110])
+        check("styles : l ordre ne depend pas de celui des clics",
+              _rST.get("styles") == ["caption", "flash"])
+
+        # Le rendu REEL : c est la seule preuve que la pastille arrive a l ecran.
+        _hST = _cST.get("/?tab=cloudreels").get_data(as_text=True)
+        check("styles : la pastille sort dans la Bibliotheque",
+              _hST.count("class='ident-styles'") >= 2,
+              f"{_hST.count(chr(39).join([chr(0)]))} ")
+        check("styles : elle porte les emoji coches, pas les autres",
+              "💬" in _hST and "⚡" in _hST
+              and "🎥" not in _hST.split("ident-styles")[1][:400])
+        check("styles : le selecteur est dans la modale de modification",
+              "ident-edit-styles" in _hST and "identEditStylesPeindre" in _hST)
+        check("styles : la modale lit la table servie, pas une copie",
+              "ident-styles-choix" in _hST and "identStylesTable" in _hST)
+
+        # Un style invente ne doit rien ecrire NI passer sous silence.
+        _rBadST = _cST.post("/identity/styles",
+                            data={"identity": _idST, "styles": "flash,zebre"}).get_json() or {}
+        check("styles : un style inconnu est refuse, et nomme",
+              _rBadST.get("ok") is not True and "zebre" in (_rBadST.get("error") or ""),
+              str(_rBadST)[:110])
+        check("styles : et le refus n a rien change",
+              _wuST.identity_styles(_idST) == ["caption", "flash"])
+
+        # Tout decocher est une ecriture comme une autre — sinon on ne peut
+        # jamais retirer la derniere pastille.
+        _rVidST = _cST.post("/identity/styles",
+                            data={"identity": _idST, "styles": ""}).get_json() or {}
+        check("styles : tout decocher marche", _rVidST.get("ok") is True
+              and _wuST.identity_styles(_idST) == [], str(_rVidST)[:110])
+        check("styles : l identite vide ne laisse pas d entree morte",
+              _idST not in (_wuST._load_styles() or {}))
+        _hVidST = _cST.get("/?tab=cloudreels").get_data(as_text=True)
+        check("styles : plus aucune pastille une fois tout decoche",
+              "class='ident-styles'" not in _hVidST)
+
+        check("styles : une identite inconnue est refusee",
+              (_cST.post("/identity/styles",
+                         data={"identity": "zz_nexiste_pas", "styles": "flash"}
+                         ).get_json() or {}).get("ok") is not True)
+        check("styles : un anonyme ne peut rien poser",
+              _appST.test_client().post("/identity/styles",
+                                        data={"identity": _idST, "styles": "flash"}
+                                        ).status_code == 401)
+    finally:
+        for _pST, _vST in ((_fST, _savST), (_prevST, _savPrevST)):
+            if _vST is not None:
+                _pST.write_text(_vST, encoding="utf-8")
+            else:
+                _pST.unlink(missing_ok=True)
+        _wuST._invalidate_json_cache(_fST)
+except Exception as _eST:
+    check("styles : testable", False, repr(_eST)[:200])
 
 print()
 print("=" * 70)

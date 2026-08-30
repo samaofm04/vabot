@@ -180,6 +180,22 @@ def bloc_jour(etats: list, jour: str, identite: str = "") -> list:
     return messages
 
 
+#: Un carré par jour. « inconnu » n'est ni vert ni rouge : une nuit où le
+#: report n'a pas tourné n'est pas une faute du VA, et la payer comme telle
+#: serait une erreur qu'on ne pourrait pas lui défendre.
+_CARRES = {"tenu": "🟩", "rate": "🟥", "inconnu": "⬜"}
+
+
+def suite_jours(suite) -> str:
+    """La quinzaine jour par jour, en carrés.
+
+    Un total « 12/14 » ne dit pas s'il a lâché trois jours d'affilée ou un
+    jour de temps en temps — et ce n'est pas la même conversation au moment
+    de payer.
+    """
+    return "".join(_CARRES.get(x, "⬜") for x in (suite or []))
+
+
 def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> str:
     """Le message épinglé : une ligne par fiche, triée du pire au meilleur.
 
@@ -198,15 +214,22 @@ def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> st
     if not lignes:
         t.append("_Aucune fiche suivie pour l'instant._")
         return "\n".join(t)
-    ordre = sorted(lignes, key=lambda x: (x["bilan"]["pct"], x["e"]["actifs"]))
+    ordre = sorted(lignes, key=lambda x: (x["bilan"].get("pct", 0), x["e"]["actifs"]))
     for x in ordre:
         b, e = x["bilan"], x["e"]
-        if b["jours_notes"]:
-            detail = f"{b['jours_tenus']}/{b['jours_notes']} j tenus"
+        if b.get("jours_notes"):
+            detail = f"{b['jours_tenus']}/{b['jours_notes']} j"
         else:
-            detail = "pas encore de journée notée"
-        t.append(f"{b['pastille']} **{e['va']}** `@{e['identite']}` — {detail} "
-                 f"· aujourd'hui {e['actifs']}/{e['objectif']}")
+            detail = "aucune journée notée"
+        # Le « @ » Discord, parce que ce message sert à PAYER : le nom de la
+        # fiche désigne un téléphone, pas quelqu'un à qui virer de l'argent.
+        qui = str(e.get("discord") or "").strip()
+        qui = f" `@{qui}`" if qui else ""
+        t.append(f"{b['pastille']} **{e['va']}**{qui} · {detail} · "
+                 f"{e['actifs']}/{e['objectif']}")
+        carres = suite_jours(b.get("suite"))
+        if carres:
+            t.append(carres)
     return "\n".join(t)
 
 
@@ -271,13 +294,18 @@ def etats_du_jour(jour: str = "", identite_voulue: str = "") -> list:
         comptes = [a for a in (entree.get("accounts") or []) if isinstance(a, dict)]
         # Les fiches DECLAREES, plus celles que seuls leurs comptes designent :
         # une fiche implicite s'affiche sur le dashboard, elle doit compter ici.
-        noms, vus = [], set()
+        # Le pseudo Discord est releve en meme temps que le nom de la fiche :
+        # le bilan de quinzaine sert a PAYER, et « VA NOUM 1X1 » designe un
+        # telephone, pas quelqu'un a qui virer de l'argent.
+        noms, vus, discord = [], set(), {}
         for v in (entree.get("vas") or []):
             nom = (v.get("name") if isinstance(v, dict) else v) or ""
             nom = str(nom).strip()
             if nom and nom.lower() not in vus:
                 vus.add(nom.lower())
                 noms.append(nom)
+                if isinstance(v, dict):
+                    discord[nom.lower()] = str(v.get("discord_username") or "").strip()
         for a in comptes:
             nom = str(a.get("va") or "").strip()
             if nom and nom.lower() not in vus:
@@ -288,7 +316,9 @@ def etats_du_jour(jour: str = "", identite_voulue: str = "") -> list:
                      if str(a.get("va") or "").strip().lower() == nom.lower()]
             if not siens:
                 continue
-            out.append(ob.etat_fiche(identite, nom, siens, stats, maintenant, jour))
+            e = ob.etat_fiche(identite, nom, siens, stats, maintenant, jour)
+            e["discord"] = discord.get(nom.lower(), "")
+            out.append(e)
     out.sort(key=lambda e: (e["identite"].lower(), e["va"].lower()))
     return out
 

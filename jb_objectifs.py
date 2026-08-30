@@ -377,11 +377,29 @@ def bilan_quinzaine(identite: str, va: str, jour: str = "") -> dict:
     dans = {j: v for j, v in jours.items() if debut <= str(j) <= fin and isinstance(v, dict)}
     notes = len(dans)
     tenus = sum(1 for v in dans.values() if v.get("atteint"))
+
+    # La suite JOUR PAR JOUR, du debut de la quinzaine jusqu'a aujourd'hui.
+    # C'est ce qui sert a payer : un total « 12/14 » ne dit pas s'il a lache
+    # trois jours d'affilee ou un jour de temps en temps, et ce n'est pas la
+    # meme conversation. On s'arrete a AUJOURD'HUI : afficher les jours a venir
+    # comme non tenus reprocherait a quelqu'un de ne pas avoir encore vecu.
+    suite = []
+    d = _dt.date.fromisoformat(debut)
+    stop = min(_dt.date.fromisoformat(fin), _dt.date.fromisoformat(jour))
+    while d <= stop:
+        k = d.isoformat()
+        if k in dans:
+            suite.append("tenu" if dans[k].get("atteint") else "rate")
+        else:
+            suite.append("inconnu")     # pas de report ce jour-la
+        d += _dt.timedelta(days=1)
+
     return {
         "debut": debut, "fin": fin,
         "jours_notes": notes, "jours_tenus": tenus,
         "pct": round(100.0 * tenus / notes, 1) if notes else 0.0,
         "pastille": pastille(tenus, notes),
+        "suite": suite,
     }
 
 
