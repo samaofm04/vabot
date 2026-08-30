@@ -1103,6 +1103,64 @@ except Exception as _eBr:
     check("brutmeta : testable", False, repr(_eBr)[:200])
 
 
+# ==============================================================================
+# Panneau orphelin : un bouton pose par un bot qui n a plus le code
+# ==============================================================================
+try:
+    import asyncio as _aioPe
+    from cogs.general import PanneauPerime as _PePe, General as _GePe
+    from cogs.numeros import NumPanelView as _NpPe
+
+    def _idsPe(vue):
+        return sorted(str(getattr(c, "custom_id", "")) for c in vue.children
+                      if getattr(c, "custom_id", None))
+
+    _vuePe = _PePe()
+    # Les identifiants doivent coller EXACTEMENT a ceux du vrai panneau :
+    # c est par eux que Discord retrouve le repondant. Un seul qui differe et
+    # ce bouton-la retombe sur « n a pas repondu a temps ».
+    _vraisPe = _idsPe(_NpPe(None))
+    check("perime : les memes identifiants que le vrai panneau",
+          _idsPe(_vuePe) == _vraisPe,
+          "%s vs %s" % (_idsPe(_vuePe), _vraisPe))
+    check("perime : la vue est persistante (elle survit au redemarrage)",
+          _vuePe.timeout is None)
+    check("perime : elle dit quoi faire, pas seulement que c est casse",
+          "panelnumero" in _PePe._MOT and "périmé" in _PePe._MOT)
+
+    # Elle ne doit se poser QUE sur un bot qui n a pas le vrai cog, sinon
+    # elle volerait ses propres clics au bot admin.
+    class _BotPe:
+        def __init__(self, avec_cog):
+            self._avec = avec_cog
+            self.vues = []
+
+        def get_cog(self, nom):
+            return object() if (self._avec and nom == "NumerosCog") else None
+
+        def add_view(self, v):
+            self.vues.append(v)
+
+    _bSans = _BotPe(False)
+    _aioPe.run(_GePe(_bSans).cog_load())
+    check("perime : le filet se pose quand le vrai cog est absent",
+          len(_bSans.vues) == 1 and isinstance(_bSans.vues[0], _PePe))
+    _bAvec = _BotPe(True)
+    _aioPe.run(_GePe(_bAvec).cog_load())
+    check("perime : et JAMAIS sur le bot qui sert vraiment les panneaux",
+          _bAvec.vues == [], "il volerait les clics du bot admin")
+
+    # Les deux cogs ne doivent pas vivre sur le meme bot : c est ce qui rend
+    # le filet sans risque.
+    import main as _mainPe
+    check("perime : general et numeros ne sont pas sur le meme bot",
+          ("general" in _mainPe.MAIN_COGS and "numeros" not in _mainPe.MAIN_COGS
+           and "numeros" in _mainPe.ADMIN_COGS),
+          "MAIN=%s ADMIN=%s" % (_mainPe.MAIN_COGS[-3:], _mainPe.ADMIN_COGS))
+except Exception as _ePe:
+    check("perime : testable", False, repr(_ePe)[:200])
+
+
 print("\n" + "=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
