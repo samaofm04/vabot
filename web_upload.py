@@ -18028,6 +18028,21 @@ def _diag_bot(bot=None) -> str:
                     f"&permissions={perms}&scope=bot%20applications.commands")
             bloc += (f"<br><a href='{lien}' rel='noopener'>inviter ce bot sur "
                      f"un autre serveur</a>")
+        # Le report des comptes : quels salons il a trouves, et ou il en est.
+        # Sans ca, « ca n arrive pas » ne se distingue pas de « le salon n est
+        # pas reconnu » ni de « il a deja publie aujourd hui ».
+        try:
+            cog = bot.get_cog("ReportComptes")
+            if cog is not None:
+                jr = [getattr(c, "name", "?") for _k, c in cog.salons_report()]
+                ms = [getattr(c, "name", "?") for _k, c in cog.salons_quinzaine()]
+                bloc += ("<br><span style='color:#666'>report des comptes — "
+                         f"jour : {html_escape(', '.join(jr) or 'aucun salon')} · "
+                         f"mois : {html_escape(', '.join(ms) or 'aucun salon')} · "
+                         f"dernier tour : {html_escape(str(getattr(cog, '_dernier_jour', '') or 'pas encore'))}"
+                         "</span>")
+        except Exception as e:                  # noqa: BLE001
+            bloc += f"<br><span style='color:#666'>report : {html_escape(str(e)[:70])}</span>"
         if echecs:
             bloc += ("<br><span style='color:#b91c1c'>cogs en échec : "
                      + html_escape(" | ".join(str(x)[:160] for x in echecs))

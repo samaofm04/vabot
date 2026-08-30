@@ -94,8 +94,16 @@ _MAX_MSG = 1900
 #: Si aucun salon de quinzaine n'existe, le bilan reste dans le salon du jour :
 #: separer est une possibilite, pas une obligation, et personne ne doit se
 #: retrouver sans bilan pour avoir omis de creer un salon.
-PREFIXE_JOUR = "report-compte"
-PREFIXE_QUINZAINE = "report-quinzaine"
+#: Plusieurs noms acceptes par role, parce que le proprietaire nomme ses
+#: salons comme il les pense — « report-day » lui vient plus naturellement que
+#: « report-compte ». Une seule liste par role : ce sont des synonymes, pas
+#: deux comportements.
+PREFIXES_JOUR = ("report-compte", "report-day", "report-jour", "report-quotidien")
+PREFIXES_MOIS = ("report-quinzaine", "report-mois", "report-du-mois",
+                 "report-month", "report-paie")
+#: Gardes pour le code qui n'en veut qu'un (l'analyse du suffixe d'identite).
+PREFIXE_JOUR = PREFIXES_JOUR[0]
+PREFIXE_QUINZAINE = PREFIXES_MOIS[0]
 
 #: L'heure (Paris) a laquelle la journee de la veille est clôturée. Une heure
 #: apres minuit, pas a minuit : le scrape automatique des stats tourne a 00 h,
@@ -359,7 +367,7 @@ def identite_du_salon(nom: str, identites) -> str:
     sans que personne comprenne pourquoi.
     """
     n = str(nom or "").lower().replace("_", "-").strip()
-    for base in (PREFIXE_JOUR, PREFIXE_QUINZAINE):
+    for base in tuple(PREFIXES_JOUR) + tuple(PREFIXES_MOIS):
         for prefixe in (base + "s-", base + "-"):
             if n.startswith(prefixe):
                 suffixe = n[len(prefixe):].strip("-")
@@ -464,7 +472,12 @@ class ReportComptes(commands.Cog):
             # du jour n'a pas d'epingle quand le bilan vit ailleurs.
             neufs = [(cle, ch) for cle, ch in self.salons_report()
                      if not (cfg.get(cle) or {}).get("dernier_jour")]
-            pin_neuf = any(not (cfg.get(cle) or {}).get("pin_id")
+            # « pin_ids » au pluriel : le bilan tient en plusieurs messages
+            # depuis qu'il porte le mois entier. La boucle cherchait encore
+            # l'ancien « pin_id » au singulier — elle croyait donc le salon
+            # eternellement neuf, et le republiait tous les vingt tours.
+            pin_neuf = any(not ((cfg.get(cle) or {}).get("pin_ids")
+                                or (cfg.get(cle) or {}).get("pin_id"))
                            for cle, _ch in self.salons_quinzaine())
             if neufs or pin_neuf:
                 noms = ", ".join(str(getattr(c, "name", "?")) for _k, c in neufs)
@@ -597,16 +610,22 @@ class ReportComptes(commands.Cog):
         except Exception as e:                      # noqa: BLE001
             print(f"[report-comptes] marquage : {e}", flush=True)
 
-    def _salons(self, prefixe: str) -> list:
-        """[(cle, salon)] des salons dont le nom commence par `prefixe`.
+    def _salons(self, prefixes) -> list:
+        """[(cle, salon)] des salons dont le nom commence par l'un des prefixes.
 
         Le proprietaire cree le salon, il est servi — pas de commande a
         lancer, et rien a reparametrer apres un changement de serveur.
+
+        Les prefixes du MOIS sont testes avant ceux du jour par l'appelant :
+        « report-mois » commence aussi par... non, justement pas. Mais si un
+        jour deux listes se recouvrent, c'est ici qu'il faudra trancher.
         """
+        if isinstance(prefixes, str):
+            prefixes = (prefixes,)
         out = []
         for c in getattr(self.bot, "get_all_channels", lambda: [])():
             nom = str(getattr(c, "name", "") or "").lower().replace("_", "-")
-            if nom.startswith(prefixe) and hasattr(c, "send"):
+            if hasattr(c, "send") and any(nom.startswith(x) for x in prefixes):
                 out.append((_cle(getattr(c.guild, "id", 0), c.id), c))
         return out
 
@@ -616,7 +635,7 @@ class ReportComptes(commands.Cog):
         La configuration par identifiant reste lue si elle existe : elle sert
         aux salons qui ne suivent pas la convention de nom.
         """
-        out = self._salons(PREFIXE_JOUR)
+        out = self._salons(PREFIXES_JOUR)
         vus = {ch.id for _c, ch in out}
         for cle, cfg in _reports_configures(_load_cfg()):
             try:
@@ -630,7 +649,7 @@ class ReportComptes(commands.Cog):
 
     def salons_quinzaine(self) -> list:
         """Ou va le BILAN de quinzaine. Vide = il reste dans le salon du jour."""
-        return self._salons(PREFIXE_QUINZAINE)
+        return self._salons(PREFIXES_MOIS)
 
     async def _poser_bilan(self, ch, cle, messages: list):
         """Le bilan du mois, en un ou plusieurs messages RÉÉCRITS sur place.
