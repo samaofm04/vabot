@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """Report de fin de journee, par fiche VA : ou en est son telephone.
 
-Chaque nuit, une fois passe minuit a Paris, ce cog poste dans le salon
-configure un message par fiche VA :
+Chaque nuit a 1 h (Paris), ce cog poste dans le salon configure un message
+par fiche VA :
 
     Report du 30/08 · @jessye
     x/30 = comptes qui tournent. OK = objectif tenu.
@@ -30,10 +30,10 @@ APPLICATION a 100 commandes globales, et ce bot y est deja : quatre cogs
 moment, en silence, pour cette raison — leurs commandes n'existent plus sur
 Discord. En ajouter trois faisait echouer celui-ci exactement pareil.
 
-Le report n'en a pas besoin : il tourne seul apres minuit. Le salon se
-trouve par CONVENTION DE NOM — tout salon dont le nom commence par
-« report-compte ». On cree le salon, il est servi. Le declenchement manuel
-vit sur le tableau de bord, bouton « Report des comptes ».
+Le report n'en a pas besoin : il tourne seul chaque nuit. Le salon se
+trouve par CONVENTION DE NOM (voir plus haut). On cree le salon, il est
+servi. Le declenchement manuel vit sur le tableau de bord, bouton « Report
+des comptes ».
 
 Trois autres choses valent d'etre dites, parce qu'elles ne se devinent pas :
 
@@ -41,6 +41,12 @@ Trois autres choses valent d'etre dites, parce qu'elles ne se devinent pas :
 appelle la meme fonction. Deux facons de compter « les comptes actifs »
 finiraient par se contredire, et ce desaccord ne se remarque que le jour ou
 quelqu'un conteste une retenue de paie.
+
+**Ce cog ne scrape RIEN.** Il lit le cache des stats, celui que le scrape
+automatique remplit a 00 h et 12 h. D'ou l'heure de publication : 1 h, pas
+minuit. Cloturer a 00 h 05 revenait a juger la journee sur les chiffres de
+midi — un compte publie le soir aurait ete compte « oublie », et son VA paye
+la-dessus.
 
 **Un report manque n'est pas une journee ratee.** Le bilan de quinzaine
 compte les journees TENUES sur les journees NOTEES : si le bot etait a
@@ -81,6 +87,12 @@ _MAX_MSG = 1900
 #: retrouver sans bilan pour avoir omis de creer un salon.
 PREFIXE_JOUR = "report-compte"
 PREFIXE_QUINZAINE = "report-quinzaine"
+
+#: L'heure (Paris) a laquelle la journee de la veille est clôturée. Une heure
+#: apres minuit, pas a minuit : le scrape automatique des stats tourne a 00 h,
+#: et ce report LIT ce que le scrape ecrit. Cloturer a 00 h 05 revenait a juger
+#: la journee sur les chiffres de midi.
+HEURE_REPORT = 1
 
 
 # ==============================================================================
@@ -394,7 +406,13 @@ class ReportComptes(commands.Cog):
                       flush=True)
                 await self.publier(jour, cibles=neufs or None)
 
-            if maintenant.hour != 0 or self._dernier_jour == jour:
+            # À 1 h, pas à minuit — et ce n'est pas un détail. Le report ne
+            # scrape rien : il lit le cache des stats. Or ce cache est
+            # rafraîchi automatiquement à 00 h. Publier à 00 h 05 revenait donc
+            # à clôturer la journée sur les chiffres de MIDI : un compte qui
+            # publie le soir serait compté « oublié », et son VA payé dessus.
+            # Une heure laisse le scrape finir.
+            if maintenant.hour != HEURE_REPORT or self._dernier_jour == jour:
                 return
             # La journee qu'on cloture est CELLE QUI VIENT DE FINIR.
             veille = (maintenant.date() - datetime.timedelta(days=1)).isoformat()
