@@ -373,7 +373,8 @@ class NumerosCog(commands.Cog):
                    if _us_norm(c.name).endswith("-numero-mail")]
         if not targets:
             await interaction.response.send_message(
-                "Aucun salon `…-numero-mail` sur ce serveur.", ephemeral=True)
+                _pourquoi_aucun_salon(guild, self.bot, ("-numero-mail",)),
+                ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         ok = skipped = 0
@@ -428,7 +429,8 @@ class NumerosCog(commands.Cog):
         nums = [c for c in guild.text_channels if _us_norm(c.name).endswith("-numero-mail")]
         if not menus and not nums:
             await interaction.response.send_message(
-                "Aucun salon `…-menu` ni `…-numero-mail` ici.", ephemeral=True)
+                _pourquoi_aucun_salon(guild, self.bot, ("-menu", "-numero-mail")),
+                ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
         me = getattr(self.bot.user, "id", 0)
@@ -532,6 +534,46 @@ class _KeysModal(discord.ui.Modal, title="🔑 Clés des générateurs"):
             f"• 📱 GetAText : {s['getatext'] or '❌ absente'} — solde **{b['sms']}**\n"
             f"• 📧 SMSBower : {s['smsbower'] or '❌ absente'} — solde **{b['mail']}**\n"
             f"• 🌍 Pays par défaut : `{s['country']}`", ephemeral=True)
+
+
+def _pourquoi_aucun_salon(guild, bot, suffixes):
+    """Le message quand aucun salon cible n est trouve — avec la RAISON.
+
+    « Aucun salon …-numero-mail sur ce serveur » est un cul-de-sac : les
+    salons sont la, sous les yeux, et la commande dit qu ils n existent pas.
+    Ce qu elle veut dire, c est « je n en vois aucun » — et la difference est
+    entiere, parce que `guild.text_channels` ne contient QUE les salons que
+    ce bot a le droit de voir. Le panneau a ete pose par l autre bot, qui a
+    ses acces ; celui-ci ne les a pas forcement recus.
+
+    On dit donc combien de salons il voit, et on nomme les plus proches :
+    si la liste est courte alors que le serveur en compte des dizaines, la
+    cause saute aux yeux.
+    """
+    from cogs.welcome import _us_norm
+    vus = list(getattr(guild, "text_channels", []) or [])
+    libelles = " ni ".join("`…%s`" % s for s in suffixes)
+    txt = ["❌ Aucun salon %s **visible** ici." % libelles,
+           "Je vois **%d** salon(s) texte sur ce serveur." % len(vus)]
+    # Les presque-bons d abord : un salon qui contient le mot sans finir par
+    # le suffixe (faute de frappe, suffixe tronque) est la piste la plus utile.
+    mots = [s.strip("-").split("-")[0] for s in suffixes]
+    proches = [c.name for c in vus
+               if any(m in _us_norm(c.name) for m in mots)][:6]
+    if proches:
+        txt.append("Salons qui y ressemblent : " + ", ".join("`%s`" % n for n in proches)
+                   + " — le nom doit **finir** par le suffixe.")
+    elif vus:
+        txt.append("Exemples de ce que je vois : "
+                   + ", ".join("`%s`" % c.name for c in vus[:6]))
+    if len(vus) < 5:
+        txt.append("C'est peu : ce bot n'a probablement pas la permission "
+                   "**Voir les salons** sur les catégories des tickets. "
+                   "Donne-la-lui (ou ajoute-le au rôle qui l'a), puis relance.")
+    else:
+        txt.append("Si les salons existent mais n'apparaissent pas, c'est que "
+                   "ce bot n'a pas la permission **Voir les salons** dessus.")
+    return "\n".join(txt)
 
 
 def panel_embed():

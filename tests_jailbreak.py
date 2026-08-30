@@ -1202,6 +1202,48 @@ except Exception as _eRs:
     check("reset : testable", False, repr(_eRs)[:200])
 
 
+# ==============================================================================
+# « Aucun salon » doit dire POURQUOI, pas seulement constater
+# ==============================================================================
+try:
+    from cogs.numeros import _pourquoi_aucun_salon as _pqPq
+
+    class _ChPq:
+        def __init__(s, n): s.name = n
+
+    class _GuPq:
+        def __init__(s, noms): s.text_channels = [_ChPq(n) for n in noms]
+
+    # Le cas reel : le bot est bien sur le serveur, mais ne voit que deux
+    # salons — les tickets sont fermes pour lui. « Aucun salon » laissait
+    # croire qu ils n existaient pas.
+    _m1 = _pqPq(_GuPq(["general", "annonces"]), None, ("-menu", "-numero-mail"))
+    check("pourquoi : il dit combien de salons il VOIT",
+          "2" in _m1 and "visible" in _m1, _m1[:80])
+    check("pourquoi : et il nomme la permission qui manque",
+          "Voir les salons" in _m1, _m1[:120])
+
+    # Un nom presque bon est la piste la plus utile : on le montre.
+    _m2 = _pqPq(_GuPq(["6994-numero", "6994-content", "a", "b", "c", "d"]),
+                None, ("-numero-mail",))
+    check("pourquoi : un salon presque bon est montre",
+          "6994-numero" in _m2 and "finir" in _m2, _m2[:130])
+
+    # Beaucoup de salons visibles : ce n est plus la permission qu on soupconne
+    # en premier, on ne doit pas envoyer l admin sur une fausse piste.
+    _m3 = _pqPq(_GuPq(list("abcdefgh")), None, ("-numero-mail",))
+    check("pourquoi : avec beaucoup de salons, pas de faux diagnostic",
+          "C'est peu" not in _m3 and "8" in _m3, _m3[:90])
+
+    # Le message reste envoyable : Discord coupe a 2000 caracteres.
+    _m4 = _pqPq(_GuPq(["salon-tres-long-%03d" % i for i in range(300)]),
+                None, ("-numero-mail",))
+    check("pourquoi : le message tient dans une reponse Discord",
+          len(_m4) < 1900, "%d caracteres" % len(_m4))
+except Exception as _ePq:
+    check("pourquoi : testable", False, repr(_ePq)[:200])
+
+
 print("\n" + "=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
