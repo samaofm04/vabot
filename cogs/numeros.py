@@ -584,11 +584,22 @@ class NumerosCog(commands.Cog):
                             pass
         except Exception as e:
             log.warning(f"panelnumero: nettoyage impossible ({e})")
+        # On efface d'abord ce que les bots ont pose : sans ca, remettre les
+        # identifiants a zero puis reposter laissait les anciens en place —
+        # on repartait avec six messages au lieu de trois.
+        vires = 0
+        try:
+            partis = await ch.purge(limit=300, check=lambda m: m.author.bot)
+            vires = len(partis)
+        except Exception as e:
+            log.warning(f"panelnumero: nettoyage de #{ch.name} : {e}")
         _salon_ecrire(ch.id, panneau=None, numero=None, code=None, actif=None)
         pose = await poser_trois(self.bot, ch, self)
         await verrouiller_salon(ch, self.bot)
         mot = ("✅ Les trois messages sont posés et épinglés" if pose else
                "⚠️ Pose incomplète — regarde les droits du bot sur ce salon")
+        if vires:
+            mot += f" · {vires} ancien(s) message(s) de bot retiré(s)"
         if vires:
             mot += f" · {vires} ancien(s) panneau(x) retiré(s)"
         await interaction.followup.send(mot + ".", ephemeral=True)
@@ -1090,21 +1101,34 @@ async def poser_trois(bot, channel, cog=None):
     ids = {}
     for cle, emb, vue in voulus:
         mid = rec.get(cle)
-        msg = None
+        # On EDITE sans aller chercher le message : un fetch qui echoue une
+        # seconde — le temps d'une limite d'API — faisait croire que le
+        # message n'existait plus, et on en postait un deuxieme. C'est
+        # exactement le doublon « Code » constate. Un message partiel s'edite
+        # a partir de son seul identifiant, sans lecture prealable.
         if mid:
             try:
-                msg = await channel.fetch_message(int(mid))
-            except Exception:
-                msg = None
+                await channel.get_partial_message(int(mid)).edit(
+                    embed=emb, view=vue)
+                ids[cle] = int(mid)
+                await asyncio.sleep(0.4)
+                continue
+            except discord.NotFound:
+                pass          # celui-la est vraiment parti : on le repose
+            except Exception as e:
+                # Tout le reste — reseau, limite d'API — n'autorise PAS a
+                # reposter : on garde l'identifiant et on reessaiera.
+                log.warning(f"poser_trois #{getattr(channel, 'name', '?')} "
+                            f"{cle} (edition) : {e}")
+                ids[cle] = int(mid)
+                await asyncio.sleep(0.4)
+                continue
         try:
-            if msg is not None:
-                await msg.edit(embed=emb, view=vue)
-            else:
-                msg = await channel.send(embed=emb, view=vue)
-                try:
-                    await msg.pin()
-                except Exception:
-                    pass
+            msg = await channel.send(embed=emb, view=vue)
+            try:
+                await msg.pin()
+            except Exception:
+                pass
             ids[cle] = msg.id
         except Exception as e:
             log.warning(f"poser_trois #{getattr(channel, 'name', '?')} {cle} : {e}")
@@ -1124,8 +1148,9 @@ async def maj_trois(bot, channel, actif=None, code=None, souci_num="",
         if not mid:
             continue
         try:
-            msg = await channel.fetch_message(int(mid))
-            await msg.edit(embed=emb)
+            # Meme raison qu'au-dessus : pas de lecture, donc pas de doublon
+            # possible, et une edition de moins a chaque mise a jour.
+            await channel.get_partial_message(int(mid)).edit(embed=emb)
         except Exception as e:
             log.warning(f"maj_trois {cle} : {e}")
 

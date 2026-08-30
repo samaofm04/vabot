@@ -1652,6 +1652,26 @@ try:
     check("trois : et son demarrage laisse une trace au journal",
           "log.info" in _i3.getsource(_n3.NumerosCog._suivre))
 
+    # LE doublon : la pose allait CHERCHER chaque message avant de l editer.
+    # Une lecture qui echoue une seconde — une limite d API suffit — faisait
+    # croire que le message n existait plus, et un deuxieme « Code » etait
+    # poste. On edite desormais sans lire, et seul un NotFound autorise a
+    # reposter.
+    _s3q = _i3.getsource(_n3.poser_trois)
+    check("trois : la pose edite sans aller lire le message",
+          "get_partial_message" in _s3q and "fetch_message" not in _s3q,
+          "un fetch qui echoue recree un doublon")
+    check("trois : seul un message VRAIMENT absent est repose",
+          "discord.NotFound" in _s3q)
+    check("trois : les mises a jour non plus ne lisent rien",
+          "fetch_message" not in _i3.getsource(_n3.maj_trois))
+    # /panelnumero doit LAISSER trois messages, pas en ajouter trois.
+    _s3p2 = _i3.getsource(_n3.NumerosCog.panelnumero.callback
+                          if hasattr(_n3.NumerosCog.panelnumero, "callback")
+                          else _n3.NumerosCog.panelnumero)
+    check("trois : /panelnumero nettoie avant de poser",
+          "purge(" in _s3p2 and _s3p2.index("purge(") < _s3p2.index("poser_trois"))
+
     _s3c = _i3.getsource(_n3.verrouiller_salon)
     check("trois : le salon passe en lecture seule",
           "send_messages=False" in _s3c and "default_role" in _s3c)
