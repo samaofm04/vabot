@@ -1152,6 +1152,29 @@ async def poser_trois(bot, channel, cog=None):
         await asyncio.sleep(0.4)
     if ids:
         _salon_ecrire(channel.id, **ids)
+
+    # EXACTEMENT trois, jamais quatre. Tout message de bot qui n'est pas l'un
+    # des trois est supprime — c'est la seule facon de rattraper ceux qu'un
+    # incident passe a laisses derriere lui : ils ne sont dans aucun registre,
+    # donc personne ne les met a jour, et ils restent la a repeter un texte
+    # perime. Les messages des humains ne sont pas touches.
+    gardes = set(ids.values())
+    if len(gardes) == 3:
+        vires = 0
+        try:
+            async for vieux in channel.history(limit=100):
+                if getattr(vieux.author, "bot", False) and vieux.id not in gardes:
+                    try:
+                        await vieux.delete()
+                        vires += 1
+                        await asyncio.sleep(0.3)
+                    except Exception:
+                        pass
+        except Exception as e:
+            log.warning(f"poser_trois: menage de #{getattr(channel, 'name', '?')} : {e}")
+        if vires:
+            log.info("poser_trois: %d message(s) en trop retire(s) de #%s",
+                     vires, getattr(channel, "name", "?"))
     return len(ids) == 3
 
 

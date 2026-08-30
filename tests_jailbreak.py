@@ -1685,6 +1685,19 @@ try:
     check("trois : la mise a jour dit ce qu elle a reussi a ecrire",
           "return poses" in _i3.getsource(_n3.maj_trois))
 
+    # Exactement trois, jamais quatre : un message laisse par un incident
+    # passe n est dans aucun registre, donc personne ne le met a jour — il
+    # reste la a repeter un texte perime. La pose le supprime.
+    _s3q2 = _i3.getsource(_n3.poser_trois)
+    check("trois : la pose supprime tout message de bot en trop",
+          "channel.history" in _s3q2 and "vieux.id not in gardes" in _s3q2)
+    check("trois : mais jamais un message d humain",
+          'getattr(vieux.author, "bot", False)' in _s3q2)
+    # On ne fait le menage que si les trois sont bien identifies : sinon on
+    # supprimerait ceux qu on vient de rater.
+    check("trois : pas de menage tant que les trois ne sont pas surs",
+          "len(gardes) == 3" in _s3q2)
+
     _s3c = _i3.getsource(_n3.verrouiller_salon)
     check("trois : le salon passe en lecture seule",
           "send_messages=False" in _s3c and "default_role" in _s3c)
