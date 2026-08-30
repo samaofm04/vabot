@@ -256,6 +256,19 @@ class ReportComptes(commands.Cog):
         try:
             maintenant = _paris_now()
             jour = maintenant.date().isoformat()
+
+            # PREMIER PASSAGE. Un salon « report-compte » qui vient d'etre cree
+            # n'a aucune raison d'attendre minuit pour montrer quelque chose :
+            # on l'a cree justement pour voir. Un salon est « neuf » tant qu'il
+            # n'a pas de message epingle enregistre — donc une seule fois.
+            cfg = _load_cfg()
+            neufs = [(cle, ch) for cle, ch in self.salons_report()
+                     if not (cfg.get(cle) or {}).get("pin_id")]
+            if neufs:
+                noms = ", ".join(str(getattr(c, "name", "?")) for _k, c in neufs)
+                print(f"[report-comptes] premier passage : {noms}", flush=True)
+                await self.publier(jour, cibles=neufs)
+
             if maintenant.hour != 0 or self._dernier_jour == jour:
                 return
             # La journee qu'on cloture est CELLE QUI VIENT DE FINIR.
@@ -270,7 +283,7 @@ class ReportComptes(commands.Cog):
         await self.bot.wait_until_ready()
 
     # ---- publication -----------------------------------------------------
-    async def publier(self, jour: str, salon_force=None) -> dict:
+    async def publier(self, jour: str, salon_force=None, cibles=None) -> dict:
         """Poste le report de `jour` dans tous les salons configures.
 
         `salon_force` sert au declenchement manuel : on publie la, et nulle
@@ -288,12 +301,12 @@ class ReportComptes(commands.Cog):
             bilans.append({"e": e, "bilan": await asyncio.to_thread(
                 ob.bilan_quinzaine, e["identite"], e["va"], jour)})
 
-        cibles = []
-        if salon_force is not None:
-            cibles = [(_cle(getattr(salon_force.guild, "id", 0), salon_force.id),
-                       salon_force)]
-        else:
-            cibles = self.salons_report()
+        if cibles is None:
+            if salon_force is not None:
+                cibles = [(_cle(getattr(salon_force.guild, "id", 0), salon_force.id),
+                           salon_force)]
+            else:
+                cibles = self.salons_report()
 
         n_msg = 0
         for cle, ch in cibles:
@@ -359,7 +372,14 @@ class ReportComptes(commands.Cog):
                 await msg.pin()
             except Exception:
                 pass                    # pas le droit d'epingler : tant pis
-            if cle and isinstance(c, dict):
+            # L'entree est CREEE si elle n'existait pas : un salon trouve par
+            # son nom n'en a pas. Sans ca, pin_id n'etait jamais enregistre,
+            # le salon restait « jamais servi » — et le premier passage se
+            # serait rejoue toutes les vingt minutes, indefiniment.
+            if cle:
+                c = c if isinstance(c, dict) else {
+                    "guild_id": getattr(getattr(ch, "guild", None), "id", 0),
+                    "channel_id": ch.id, "auto": True}
                 c["pin_id"] = msg.id
                 cfg[cle] = c
                 _save_cfg(cfg)
