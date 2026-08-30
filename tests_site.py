@@ -6866,6 +6866,25 @@ try:
                   [m[-90:] for m in _ampute][-1:])
         finally:
             _rcT._LIGNE_FICHE = _sauveRe
+        # « QUI MANQUE ? » — la question doit avoir une reponse DANS le
+        # message. Une fiche sans aucun compte rattache ne peut pas etre
+        # notee, mais la taire rendait la question insoluble : rien ne
+        # distinguait un VA inexistant d un VA dont le telephone est vide. Or
+        # un telephone vide, sur un document de paie, c est ce qu il faut
+        # voir. CLAUDE.md l ecrit noir sur blanc : ne jamais ecarter en
+        # silence, compter et remonter.
+        _ecT = [("jessye", "Kilishi X1"), ("jessye", "Vou X1")]
+        _mEc = _rcT.bloc_quinzaine(_22, _bMois["debut"], _bMois["fin"], "j", _ecT)
+        check("mois : les fiches sans compte sont NOMMÉES, pas tues",
+              "Kilishi X1" in _mEc[-1] and "Vou X1" in _mEc[-1]
+              and "2 fiche(s) sans aucun compte" in _mEc[-1],
+              _mEc[-1][-140:])
+        # Et elles ne doivent pas passer pour des fiches PERDUES : ce sont
+        # deux choses differentes, et confondre les deux ferait crier au bug.
+        check("mois : une écartée n est pas comptée comme manquante",
+              "manquante" not in _mEc[-1])
+        check("mois : sans écartée, aucune ligne parasite",
+              "sans aucun compte" not in "".join(_msgs22))
         # Au-dela, on coupe encore, et rien ne se perd.
         _msgs60 = _rcT.bloc_quinzaine(
             [{"e": dict(_eOb, va=f"FICHE {_i:02d}", discord="roucham_79944"),

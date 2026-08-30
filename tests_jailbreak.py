@@ -1326,6 +1326,8 @@ try:
     _fauxCp.admin_bot = None
     _vraiCp = _syCp.modules.get("main")
     _syCp.modules["main"] = _fauxCp
+    _syCp.modules["__main__"].main_bot = _fauxCp.main_bot
+    _syCp.modules["__main__"].admin_bot = _fauxCp.admin_bot
     try:
         _mCp = _nuCp._pourquoi_aucun_salon(_admCp, _BoCp(_admCp), ("-numero-mail",))
     finally:
@@ -1349,6 +1351,8 @@ try:
     _videCp.main_bot = None
     _videCp.admin_bot = None
     _syCp.modules["main"] = _videCp
+    _syCp.modules["__main__"].main_bot = None
+    _syCp.modules["__main__"].admin_bot = None
     try:
         _m2Cp = _nuCp._pourquoi_aucun_salon(_admCp, _BoCp(_admCp), ("-numero-mail",))
     finally:
@@ -1372,6 +1376,8 @@ try:
     _m2b.main_bot = _Bo2Cp([_frCp, _usCp])
     _m2b.admin_bot = None
     _syCp.modules["main"] = _m2b
+    _syCp.modules["__main__"].main_bot = _m2b.main_bot
+    _syCp.modules["__main__"].admin_bot = _m2b.admin_bot
     try:
         _mAil = _nuCp._pourquoi_aucun_salon(_frCp, _Bo2Cp([_frCp]), ("-numero-mail",))
     finally:
@@ -1383,6 +1389,15 @@ try:
           "Youl4b" in _mAil and "AUTRE serveur" in _mAil, _mAil[-200:])
     check("compare : et il n accuse plus une permission a tort",
           "acces qui manque" not in _mAil)
+
+    # Le programme tourne sous « __main__ » : « import main » en fabriquerait
+    # une copie neuve, aux bots deconnectes, et la comparaison rendrait
+    # toujours zero. Elle l a fait, et son silence a ete pris pour une reponse.
+    _srcCp = _plSt.Path("cogs/numeros.py").read_text(encoding="utf-8")         if "_plSt" in dir() else __import__("pathlib").Path(
+            "cogs/numeros.py").read_text(encoding="utf-8")
+    check("compare : on lit le programme qui TOURNE, pas une copie",
+          "__main__" in _srcCp and "import main as" not in _srcCp,
+          "un import main recreerait des bots deconnectes")
 
     check("compare : sans second bot, le message tient quand meme",
           "Voir les salons" in _m2Cp and "/panelnumero" in _m2Cp

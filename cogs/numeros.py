@@ -628,7 +628,18 @@ def _pourquoi_aucun_salon(guild, bot, suffixes):
     # invitees — le bot qui a cree les tickets y est, celui qui a herite du
     # module ne l est pas forcement.
     try:
-        import main as _mn
+        # PAS `import main` : le programme est lance par `python main.py`, donc
+        # ce fichier est enregistre sous « __main__ ». `import main` en cree une
+        # SECONDE copie — code de module rejoue, bots neufs et deconnectes — et
+        # son main_bot ne connait aucun serveur. La comparaison rendait donc
+        # toujours zero, la ligne ne s affichait jamais, et son absence a ete
+        # lue comme « les salons sont ailleurs ». Ils ne l etaient pas.
+        import sys as _sys
+        _mn = _sys.modules.get("__main__")
+        if not hasattr(_mn, "main_bot"):
+            _mn = _sys.modules.get("main")
+        if _mn is None:
+            raise LookupError("module principal introuvable")
         for _autre, _nom in ((getattr(_mn, "main_bot", None), "principal"),
                              (getattr(_mn, "admin_bot", None), "admin")):
             if _autre is None or _autre is bot:

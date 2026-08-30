@@ -18000,9 +18000,14 @@ def _diag_bot(bot=None) -> str:
                 # manque » ne se distingue pas de « il n'y en a que six » sans
                 # ce chiffre : on cherche du cote du rendu alors que la
                 # reponse est dans le calcul.
+                # Le total est SANS filtre d identite : c est le nombre de
+                # fiches qui existent, toutes modeles confondues. Le compare
+                # a ce qu affiche un salon suffixe (« report-du-mois-jessye »)
+                # repond a « qui manque ? » : la difference, c est le filtre.
+                _ecartees = []
                 try:
                     import cogs.reportcomptes as _rc_diag
-                    n_fiches = len(_rc_diag.etats_du_jour())
+                    n_fiches = len(_rc_diag.etats_du_jour("", "", _ecartees))
                 except Exception as _e_nf:
                     n_fiches = f"illisible ({str(_e_nf)[:40]})"
                 envoi = getattr(cog, "dernier_envoi", None)
@@ -18011,8 +18016,17 @@ def _diag_bot(bot=None) -> str:
                                         for x in envoi)
                     bloc += ("<br><span style='color:#666'>dernier bilan envoyé : "
                              f"{len(envoi)} message(s) — {html_escape(detail)}</span>")
+                # Les ecartees NOMMEES ici aussi : une fiche sans compte
+                # n apparait dans aucun total, donc dans aucun ecran. C est
+                # precisement le genre d oubli silencieux qui a fait chercher
+                # « qui manque ? » sans qu aucune page puisse repondre.
+                _ec = ""
+                if _ecartees:
+                    _ec = (" · " + str(len(_ecartees)) + " écartée(s) sans compte : "
+                           + html_escape(", ".join(f"{i}/{n}" for i, n in _ecartees[:12]))
+                           + ("…" if len(_ecartees) > 12 else ""))
                 bloc += ("<br><span style='color:#666'>report des comptes — "
-                         f"{n_fiches} fiche(s) vues · "
+                         f"{n_fiches} fiche(s) vues{_ec} · "
                          f"jour : {html_escape(', '.join(jr) or 'aucun salon')} · "
                          f"mois : {html_escape(', '.join(ms) or 'aucun salon')} · "
                          f"dernier tour : {html_escape(str(getattr(cog, '_dernier_jour', '') or 'pas encore'))}"

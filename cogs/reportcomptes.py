@@ -305,6 +305,9 @@ def bloc_jour(etats: list, jour: str, identite: str = "") -> list:
 # Reconnait une ligne de fiche, et seulement elle : « <carre> **<nom>**
 # ... · 9/30 ». Le titre du bilan lui ressemble (emoji puis gras) mais ne
 # se termine pas par deux nombres separes d'une barre.
+#: Deux retours a la ligne. Ecrit ainsi parce que les antislash ne
+#: survivent pas toujours aux outils qui editent ce fichier.
+_SAUT = chr(10) + chr(10)
 _LIGNE_FICHE = re.compile(r"^\S+ \*\*.+?\*\*.*\d+/\d+$", re.M)
 
 _CARRES = {"tenu": "🟩", "moyen": "🟠", "rate": "🟥", "inconnu": "🟥"}
@@ -340,7 +343,8 @@ def suite_jours(suite, debut: str = "", coupure: int = 0) -> str:
     return bande
 
 
-def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> list:
+def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "",
+                   ecartees=None) -> list:
     """Le bilan du MOIS, une fiche par bloc, dans l'ordre du site.
 
     Rend une LISTE de messages. Un mois de carrés pour vingt-quatre fiches
@@ -430,6 +434,16 @@ def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> li
     # quelqu'un qui n'est pas paye, et ca s'est produit deux fois ce soir : une
     # fois sur une exception qui emportait tout le bilan, une fois sur Discord
     # qui tronquait a mi-message en repondant « OK ».
+    # LES FICHES ECARTEES SONT NOMMEES. Une fiche sans aucun compte rattache
+    # ne peut pas etre notee — mais la taire rendait « qui manque ? » sans
+    # reponse : rien ne distinguait un VA qui n'existe pas d'un VA dont le
+    # telephone est vide. Et un telephone vide, sur un document de paie,
+    # c'est justement ce qu'il faut voir.
+    if ecartees:
+        noms = ", ".join(n for _i, n in ecartees)
+        messages[-1] += (
+            f"{_SAUT}🚫 _{len(ecartees)} fiche(s) sans aucun compte rattaché, "
+            f"donc non notées : {noms}._")
     ecrites = sum(len(_LIGNE_FICHE.findall(m)) for m in messages)
     if ecrites != len(lignes):
         messages[-1] += (
@@ -500,12 +514,24 @@ def identite_du_salon(nom: str, identites) -> str:
     return ""
 
 
-def etats_du_jour(jour: str = "", identite_voulue: str = "") -> list:
+def etats_du_jour(jour: str = "", identite_voulue: str = "",
+                  ecartees=None) -> list:
     """L'etat de CHAQUE fiche VA aujourd'hui, dans l'ordre identite puis VA.
 
-    Une fiche sans le moindre compte est ecartee : elle n'a rien a dire, et
-    poster « 0 / 30 » pour un telephone qui n'existe pas encore ne ferait que
-    du bruit.
+    Une fiche sans le moindre compte est ecartee : poster « 0 / 30 » pour un
+    telephone qui n'a encore rien ne ferait que du bruit.
+
+    Mais ecartee N'EST PAS oubliee. Passer une liste a `ecartees` la remplit
+    des (identite, nom) mis de cote. La question « qui manque ? » etait sans
+    reponse possible tant que ce `continue` ne laissait aucune trace : ni le
+    proprietaire ni moi ne pouvions distinguer « ce VA n'existe pas » de « ce
+    VA existe mais son telephone n'a aucun compte rattache ». C'est
+    exactement ce que le CLAUDE.md de ce depot interdit — ne jamais ecarter
+    en silence, compter et remonter.
+
+    On passe une liste plutot que de garder un etat de module : cette
+    fonction est appelee depuis `asyncio.to_thread`, et deux appels
+    concurrents se marcheraient dessus.
     """
     import jailbreak as jb
     import jb_objectifs as ob
@@ -547,6 +573,8 @@ def etats_du_jour(jour: str = "", identite_voulue: str = "") -> list:
             siens = [a for a in comptes
                      if str(a.get("va") or "").strip().lower() == nom.lower()]
             if not siens:
+                if ecartees is not None:
+                    ecartees.append((str(identite), nom))
                 continue
             e = ob.etat_fiche(identite, nom, siens, stats, maintenant, jour)
             e["discord"] = discord.get(nom.lower(), "")
@@ -730,7 +758,12 @@ class ReportComptes(commands.Cog):
         # On grave AVANT de poster : si Discord refuse (permission, panne), la
         # journee reste comptee. L'inverse aurait perdu la mesure a cause d'un
         # probleme d'affichage.
-        tous = await asyncio.to_thread(etats_du_jour, jour)
+        # `ecartees` : les fiches sans aucun compte, que la mesure met de
+        # cote. On les recolte pour les NOMMER dans le bilan au lieu de les
+        # laisser disparaitre — « qui manque ? » doit avoir une reponse
+        # dans le message lui-meme.
+        ecartees = []
+        tous = await asyncio.to_thread(etats_du_jour, jour, "", ecartees)
         await asyncio.to_thread(ob.enregistrer_jour, tous, jour)
 
         bilans = {}
@@ -753,16 +786,22 @@ class ReportComptes(commands.Cog):
             salons_pin = list(cibles)
 
         def _pour(ch):
-            """(identité suivie, fiches, lignes de bilan) pour ce salon."""
+            """(identité suivie, fiches, lignes de bilan, écartées) pour ce salon.
+
+            Les écartées sont filtrées par la MEME identité que les fiches :
+            un salon qui ne suit que jessye ne doit pas afficher les
+            téléphones vides d'une autre modèle.
+            """
             v = identite_du_salon(getattr(ch, "name", ""), identites)
             ets = [e for e in tous if not v or e["identite"].lower() == v]
+            ec = [(i, n) for i, n in ecartees if not v or str(i).lower() == v]
             return v, ets, [{"e": e, "bilan": bilans.get(
-                (e["identite"].lower(), e["va"].lower())) or {}} for e in ets]
+                (e["identite"].lower(), e["va"].lower())) or {}} for e in ets], ec
 
         n_msg, n_fiches = 0, 0
         for cle, ch in cibles:
             # Chaque salon ne reçoit QUE ce qu'il annonce suivre.
-            voulue, etats, lignes_bilan = _pour(ch)
+            voulue, etats, lignes_bilan, ecartes_ci = _pour(ch)
             n_fiches = max(n_fiches, len(etats))
             try:
                 for morceau in bloc_jour(etats, jour, voulue):
@@ -771,7 +810,8 @@ class ReportComptes(commands.Cog):
                     await asyncio.sleep(0.6)     # on ne bouscule pas Discord
                 if not pin_a_part:
                     await self._poser_bilan(ch, cle, bloc_quinzaine(
-                        lignes_bilan, _mois(jour)[0], _mois(jour)[1], voulue))
+                        lignes_bilan, _mois(jour)[0], _mois(jour)[1], voulue,
+                        ecartes_ci))
                 # « Ce salon a deja recu un report. » Marque a part de
                 # l'epingle : quand le bilan part dans son propre salon,
                 # celui-ci n'a plus d'epingle du tout — s'y fier l'aurait
@@ -786,7 +826,7 @@ class ReportComptes(commands.Cog):
         if pin_a_part:
             debut, fin = _mois(jour)
             for cle, ch in salons_pin:
-                voulue, _ets, lignes_bilan = _pour(ch)
+                voulue, _ets, lignes_bilan, ecartes_ci = _pour(ch)
                 # Compter ICI aussi : le bouton « Rafraichir » ne refait que
                 # le bilan (cibles vide), donc la boucle du jour ne tourne pas
                 # et le compte restait a zero. « Bilan refait — 0 fiche(s) »
@@ -794,7 +834,8 @@ class ReportComptes(commands.Cog):
                 n_fiches = max(n_fiches, len(_ets))
                 try:
                     await self._poser_bilan(
-                        ch, cle, bloc_quinzaine(lignes_bilan, debut, fin, voulue))
+                        ch, cle, bloc_quinzaine(lignes_bilan, debut, fin,
+                                                voulue, ecartes_ci))
                 except discord.Forbidden:
                     print(f"[report-comptes] pas le droit d'écrire dans {ch}", flush=True)
                 except Exception as e:
