@@ -7253,12 +7253,14 @@ try:
 
     _posesAc = []
 
-    class _ChAc:
-        def __init__(s, n): s.name = n
-
     class _OvAc:
         view_channel = False
         send_messages = False
+
+    class _ChAc:
+        def __init__(s, n): s.name = n
+        def overwrites_for(s, m): return _OvAc()
+        async def set_permissions(s, m, **kw): _posesAc.append((s.name, sorted(kw)))
 
     class _CatAc:
         def __init__(s, n, ch): s.name, s.channels = n, [_ChAc(x) for x in ch]
@@ -7360,12 +7362,16 @@ try:
 
     _posesLe = []
 
-    class _ChLe:
-        def __init__(s, n): s.name = n
-
     class _OvLe:
         view_channel = False
         send_messages = False
+
+    class _ChLe:
+        def __init__(s, n): s.name = n
+        def overwrites_for(s, m): return _OvLe()
+        async def set_permissions(s, m, **kw):
+            await _aioLe.sleep(0.8)
+            _posesLe.append(s.name)
 
     class _CatLe:
         def __init__(s, n, ch): s.name, s.channels = n, [_ChLe(x) for x in ch]
