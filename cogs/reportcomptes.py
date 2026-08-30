@@ -116,7 +116,7 @@ HEURE_REPORT = 1
 #: changement de format ne se voyait qu'a la publication suivante — et on
 #: attendait 1 h du matin en croyant que ca ne marchait pas. Quand le numero
 #: stocke ne correspond plus, la boucle republie une fois, tout de suite.
-FORMAT_BILAN = 7
+FORMAT_BILAN = 8
 
 
 # ==============================================================================
@@ -459,6 +459,68 @@ def etats_du_jour(jour: str = "", identite_voulue: str = "") -> list:
 
 
 # ==============================================================================
+# Le bouton Rafraichir
+# ==============================================================================
+
+#: Delai minimum entre deux rafraichissements d'un meme salon. Recalculer le
+#: bilan lit tout le referentiel et tout le cache de stats : sans ce delai,
+#: trois clics de suite le font trois fois pour rien.
+_ATTENTE_S = 45
+_DERNIER_CLIC = {}
+
+
+class BilanRefreshView(discord.ui.View):
+    """Le bouton « Rafraichir » pose sous le bilan.
+
+    `timeout=None` et un `custom_id` fixe : la vue est REENREGISTREE au
+    demarrage du bot (voir cog_load), donc le bouton repond encore apres un
+    redemarrage. Sans ca le message epingle deviendrait un decor mort, et
+    c'est le genre de panne qu'on ne remarque qu'en cliquant.
+
+    Un bouton ne consomme AUCUNE commande slash — le seul moyen d'offrir un
+    declenchement depuis Discord sur ce bot, qui est au plafond des cent.
+    """
+
+    def __init__(self, cog=None):
+        super().__init__(timeout=None)
+        self.cog = cog
+
+    @discord.ui.button(label="Rafraîchir", emoji="🔄",
+                       style=discord.ButtonStyle.secondary,
+                       custom_id="reportcomptes:refresh")
+    async def b_refresh(self, interaction: discord.Interaction,
+                        button: discord.ui.Button):
+        cog = self.cog or interaction.client.get_cog("ReportComptes")
+        if cog is None:
+            await interaction.response.send_message(
+                "⚠️ Module indisponible.", ephemeral=True)
+            return
+        cid = getattr(interaction.channel, "id", None)
+        reste = _ATTENTE_S - (time.time() - _DERNIER_CLIC.get(cid, 0))
+        if reste > 0:
+            # On le DIT au lieu de ne rien faire : un bouton muet passe pour
+            # casse, et la personne reclique.
+            await interaction.response.send_message(
+                f"⏳ Déjà rafraîchi il y a moins d'une minute — "
+                f"réessaie dans {int(reste)} s.", ephemeral=True)
+            return
+        _DERNIER_CLIC[cid] = time.time()
+        await interaction.response.defer(ephemeral=True)
+        try:
+            jour = _paris_now().date().isoformat()
+            # `cibles=[]` : on ne repost PAS le report du jour, on ne refait
+            # que le bilan. Cliquer « rafraichir » sous un bilan ne doit pas
+            # deverser vingt-quatre lignes dans le salon d'a cote.
+            res = await cog.publier(jour, cibles=[])
+        except Exception as e:                      # noqa: BLE001
+            await interaction.followup.send(
+                f"✕ Échec : {str(e)[:150]}", ephemeral=True)
+            return
+        await interaction.followup.send(
+            f"✅ Bilan refait — {res.get('fiches', 0)} fiche(s).", ephemeral=True)
+
+
+# ==============================================================================
 # Le cog
 # ==============================================================================
 
@@ -469,6 +531,14 @@ class ReportComptes(commands.Cog):
         self.bot = bot
         self._dernier_jour = ""
         self.boucle.start()
+
+    async def cog_load(self):
+        """Réenregistre la vue : sans ça le bouton du message épinglé ne
+        répond plus après un redémarrage, et le message devient un décor."""
+        try:
+            self.bot.add_view(BilanRefreshView(self))
+        except Exception as e:                      # noqa: BLE001
+            print(f"[report-comptes] vue non enregistrée : {e}", flush=True)
 
     def cog_unload(self):
         self.boucle.cancel()
@@ -732,7 +802,11 @@ class ReportComptes(commands.Cog):
         neufs = []
         for i, texte in enumerate(messages):
             mid = ids[i] if i < len(ids) else 0
-            nouv = await self._ecrire_epingle(ch, mid, texte, epingler=(i == 0))
+            # Le bouton va sur le DERNIER morceau : c'est celui du bas, le plus
+            # proche de la zone de saisie, donc celui qu'on a sous la main.
+            vue = BilanRefreshView(self) if i == len(messages) - 1 else None
+            nouv = await self._ecrire_epingle(ch, mid, texte,
+                                              epingler=(i == 0), vue=vue)
             if nouv is None:                    # échec passager : on garde l'ancien
                 nouv = mid
             neufs.append(nouv)
@@ -747,12 +821,15 @@ class ReportComptes(commands.Cog):
         cfg[cle] = c
         _save_cfg(cfg)
 
-    async def _ecrire_epingle(self, ch, mid, texte: str, epingler: bool):
+    async def _ecrire_epingle(self, ch, mid, texte: str, epingler: bool, vue=None):
         """Réécrit le message `mid`, ou en crée un. Rend son identifiant."""
         if mid:
             try:
                 msg = await ch.fetch_message(int(mid))
-                await msg.edit(content=texte)
+                # `view=` est passé même à None : sans ça, un morceau qui
+                # n'est plus le dernier garderait son bouton, et on aurait
+                # trois « Rafraîchir » empilés.
+                await msg.edit(content=texte, view=vue)
                 return int(mid)
             except discord.NotFound:
                 print(f"[report-comptes] message {mid} effacé — on en repose un",
@@ -764,7 +841,7 @@ class ReportComptes(commands.Cog):
                       f"on garde l'existant", flush=True)
                 return None
         try:
-            msg = await ch.send(texte)
+            msg = await ch.send(texte, view=vue) if vue else await ch.send(texte)
             if epingler:
                 try:
                     await msg.pin()

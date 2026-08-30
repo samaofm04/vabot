@@ -6459,6 +6459,22 @@ try:
               _obT.bilan_quinzaine("y", "Y", "2026-08-30"))
         check("bilan : la légende prévient que le rouge peut être une absence",
               "pas de report" in _pinOb, _pinOb[:260])
+
+        # LE BOUTON RAFRAICHIR. Un bouton ne consomme aucune commande slash :
+        # c est le seul declenchement possible depuis Discord sur ce bot, qui
+        # est au plafond des cent.
+        _vueOb = _rcT.BilanRefreshView()
+        check("bouton : la vue porte un identifiant fixe",
+              [c.custom_id for c in _vueOb.children] == ["reportcomptes:refresh"],
+              [c.custom_id for c in _vueOb.children])
+        # timeout=None + custom_id fixe = la vue survit a un redemarrage, a
+        # condition d etre reenregistree — sinon le message epingle devient un
+        # decor mort et on ne s en apercoit qu en cliquant.
+        check("bouton : la vue est persistante", _vueOb.timeout is None, _vueOb.timeout)
+        check("bouton : le cog la réenregistre au démarrage",
+              hasattr(_rcT.ReportComptes, "cog_load"))
+        check("bouton : un délai empêche de le marteler",
+              _rcT._ATTENTE_S >= 30, _rcT._ATTENTE_S)
         # Seize carres a la file ne disent pas lequel est quel jour : sans les
         # dates on voit qu il a rate deux jours, pas LESQUELS.
         # PAS de dates autour de la bande : sur un panneau Discord etroit elles
