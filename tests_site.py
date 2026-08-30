@@ -4002,6 +4002,15 @@ try:
         # de regle claire : elle reste NOIRE dans les deux themes, comme toute
         # visionneuse de media. Ses commandes doivent donc rester blanches.
         "lb-close-btn": "commande de la visionneuse, qui reste noire",
+        # Ces deux-la echappaient au controle par ACCIDENT : un commentaire CSS
+        # les precedait (« /* Bouton edit crayon dans header */ »), le selecteur
+        # capture ne commencait donc pas par un point et la regle etait ecartee
+        # sans etre lue. Ajouter une classe juste apres ce commentaire a pris
+        # sa place a l abri et revele le trou. Elles ont la meme raison d etre
+        # exemptees que leurs voisines ci-dessus, elles sont donc NOMMEES ici
+        # plutot que protegees par un hasard de ponctuation.
+        "lb-edit-btn": "commande de la visionneuse, qui reste noire",
+        "lb-act-btn": "commande de la visionneuse, qui reste noire",
         "lb-counter": "commande de la visionneuse, qui reste noire",
         "lb-nav": "commande de la visionneuse, qui reste noire",
         "lb-dual-label": "libelle dans la visionneuse, qui reste noire",

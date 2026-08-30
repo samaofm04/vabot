@@ -4587,6 +4587,61 @@ function lbCollectGallery(){
     });
   });
 }
+// === Actions du lecteur : selection, favori, Flash, desactivation ======
+//
+// ON NE REFAIT RIEN. Chaque bouton du lecteur PILOTE son homologue sur la
+// vignette : meme requete, meme etat, meme registre. Recopier ici les appels
+// reseau aurait fait deux chemins a maintenir, et la grille serait restee
+// figee derriere le lecteur -- on ferme, et la carte affiche encore l'ancien
+// etat.
+//
+// Consequence voulue : un bouton ne s'affiche que si la vignette le porte.
+// Une story n'a pas d'etoile de brute, un rush brut n'a pas de Flash Trend.
+var LB_ACTIONS = [
+  ['lb-sel',   '.sel-cb',          null],
+  ['lb-fav',   '.fav-brute-star',  'is-fav'],
+  ['lb-flash', '.flash-trend',     'is-flash'],
+  ['lb-off',   '.reel-disable',    'is-off']
+];
+function lbCarte(){
+  var it = lbGallery[lbIndex];
+  if(!it || !it.fileId) return null;
+  // On compare la valeur au lieu d'ecrire un selecteur : un file_id porte des
+  // « | » et des points, et le glisser dans [data-fid="..."] revient a
+  // fabriquer un selecteur a partir d'une donnee.
+  var trouve = null;
+  document.querySelectorAll('.vault-card-bg[data-fid]').forEach(function(e){
+    if(!trouve && e.getAttribute('data-fid') === it.fileId) trouve = e;
+  });
+  return trouve && trouve.closest ? trouve.closest('.cloud-card') : null;
+}
+function lbActionsSync(){
+  var carte = lbCarte();
+  LB_ACTIONS.forEach(function(d){
+    var b = document.querySelector('.' + d[0]);
+    if(!b) return;
+    var src = carte ? carte.querySelector(d[1]) : null;
+    b.style.display = src ? 'flex' : 'none';
+    if(!src) return;
+    var on = d[2] ? src.classList.contains(d[2]) : !!src.checked;
+    b.classList.toggle('active', on);
+  });
+}
+function lbAction(quoi){
+  var carte = lbCarte();
+  if(!carte) return;
+  var d = null;
+  LB_ACTIONS.forEach(function(x){ if(x[0] === 'lb-' + quoi) d = x; });
+  if(!d) return;
+  var el = carte.querySelector(d[1]);
+  if(!el) return;
+  el.click();          // coche la case ou declenche le bouton de la vignette
+  // La vignette repond au serveur : on relit son etat APRES, plutot que de
+  // supposer que ca a marche. Un refus d'ecriture laisse donc le bouton
+  // eteint, ce qui est la verite.
+  setTimeout(lbActionsSync, 400);
+}
+
 function lbRender(){
   if(lbIndex < 0) lbIndex = 0;
   if(lbIndex >= lbGallery.length) lbIndex = lbGallery.length - 1;
@@ -4616,6 +4671,7 @@ function lbRender(){
   } else {
     content.innerHTML = '<img src="'+it.url+'" alt="'+(it.name||'').replace(/"/g,'')+'">';
   }
+  lbActionsSync();
   var pos = document.getElementById('lb-pos');
   var tot = document.getElementById('lb-total');
   if(pos) pos.textContent = (lbIndex + 1);
@@ -12293,6 +12349,18 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
 <div id="lightbox" onclick="closeLightbox()">
   <div class="lb-header" onclick="event.stopPropagation()">
     <div class="lb-counter"><span id="lb-pos">1</span> / <span id="lb-total">1</span></div>
+    <button class="lb-act-btn lb-sel" onclick="lbAction('sel')" title="Sélectionner ce média">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><polyline points="8.5 12 11 14.5 15.5 9.5"/></svg>
+    </button>
+    <button class="lb-act-btn lb-fav" onclick="lbAction('fav')" title="Favori — Banger">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+    </button>
+    <button class="lb-act-btn lb-flash" onclick="lbAction('flash')" title="Flash Trend">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+    </button>
+    <button class="lb-act-btn lb-off" onclick="lbAction('off')" title="Désactiver / réactiver">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><line x1="5.6" y1="5.6" x2="18.4" y2="18.4"/></svg>
+    </button>
     <button class="lb-edit-btn" onclick="lbToggleEdit()" title="Modifier caption / description">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
     </button>
@@ -12366,6 +12434,12 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
 .lb-dual-item video{max-width:100% !important;max-height:calc(100vh - 160px) !important}
 @media(max-width:900px){.lb-dual-video{flex-direction:column}.lb-dual-item{max-width:100%}}
 /* Bouton edit crayon dans header */
+.lb-act-btn{background:rgba(0,0,0,.5);border:0;color:#fff;width:40px;height:40px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;backdrop-filter:blur(6px);transition:all .15s}
+.lb-act-btn:hover{background:rgba(0,0,0,.72)}
+.lb-act-btn.active{background:#3b82f6;color:#fff}
+.lb-fav.active{background:#ffd54a;color:#111}
+.lb-flash.active{background:#22d3ee;color:#111}
+.lb-off.active{background:#ef4444;color:#fff}
 .lb-edit-btn{background:rgba(0,0,0,.5);border:0;color:#fff;width:40px;height:40px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;backdrop-filter:blur(6px);transition:all .15s}
 .lb-edit-btn:hover,.lb-edit-btn.active{background:#3b82f6;transform:scale(1.08)}
 /* Panneau latéral droite (Caption / Description) */
