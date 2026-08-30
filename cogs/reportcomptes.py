@@ -116,7 +116,7 @@ HEURE_REPORT = 1
 #: changement de format ne se voyait qu'a la publication suivante — et on
 #: attendait 1 h du matin en croyant que ca ne marchait pas. Quand le numero
 #: stocke ne correspond plus, la boucle republie une fois, tout de suite.
-FORMAT_BILAN = 5
+FORMAT_BILAN = 7
 
 
 # ==============================================================================
@@ -249,7 +249,16 @@ def bloc_jour(etats: list, jour: str, identite: str = "") -> list:
 #: Sombre plutôt que blanc — demandé, et meilleur : le blanc SAUTE aux yeux
 #: dans un salon sombre, si bien qu'une quinzaine à peine commencée avait
 #: l'air d'un mur d'échecs. Le carré sombre se lit « rien », ce qu'il est.
-_CARRES = {"tenu": "🟩", "rate": "🟥", "inconnu": "⬛"}
+#: Deux couleurs, pas trois : demande, et redemande. Le carre sombre du
+#: « pas de report cette nuit-la » disparait, il devient rouge.
+#:
+#: Ce que ca coute, et c'est dit dans la legende du message pour que personne
+#: ne le lise de travers : une nuit ou le bot n'a pas tourne s'affiche
+#: desormais comme une journee non tenue, alors que le VA n'y est pour rien.
+#: Le COMPTE, lui, reste honnete — `jours_notes` ne compte que les journees
+#: reellement mesurees, donc le score « 12/14 » ne bouge pas. Seule la bande
+#: est rouge.
+_CARRES = {"tenu": "🟩", "rate": "🟥", "inconnu": "🟥"}
 
 
 def suite_jours(suite, debut: str = "", coupure: int = 0) -> str:
@@ -302,8 +311,8 @@ def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> li
             return j
     portee = f" · `@{identite}`" if identite else ""
     tete = [f"📌 **Bilan du mois — du {_d(debut)} au {_d(fin)}**{portee}",
-            "_Un carré par jour : 🟩 objectif tenu · 🟥 raté · ⬛ pas de report "
-            "cette nuit-là (ne compte ni en bien ni en mal)._",
+            "_Un carré par jour : 🟩 objectif tenu · 🟥 non tenu — ou pas de "
+            "report cette nuit-là, auquel cas ça ne compte pas dans le score._",
             "_Une journée est tenue quand la fiche atteint 80 % de son "
             "objectif. La barre ┃ sépare les deux quinzaines de paie._",
             ""]
@@ -332,6 +341,8 @@ def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> li
                              b.get("coupure") or 15)
         if carres:
             part.append(carres)
+        part.append("")            # une ligne vide : sans elle, deux bandes de
+                                   # trente carres se lisent comme une seule
         # On coupe AVANT de dépasser, et jamais au milieu d'une fiche : une
         # fiche dont le nom est dans un message et les carrés dans le suivant
         # est illisible au moment précis où on s'en sert.
@@ -702,6 +713,22 @@ class ReportComptes(commands.Cog):
         ids = list(c.get("pin_ids") or [])
         if not ids and c.get("pin_id"):
             ids = [c["pin_id"]]                 # ancien format, un seul message
+        # Les morceaux doivent SE SUIVRE. Discord ne deplace pas un message :
+        # quand leur nombre change, reecrire « celui d'avant » laisse le
+        # premier morceau la ou il etait — parfois une heure plus haut dans le
+        # salon — et les suivants tout en bas. On lit alors trois fiches et on
+        # croit que les autres manquent. C'est arrive, et ca s'est lu comme un
+        # bug de calcul.
+        #
+        # Dans ce cas on republie l'ensemble a la suite, et on VIDE les anciens
+        # au lieu de les supprimer : ce depot n'efface rien, et un message
+        # efface emporterait ce qu'on aurait annote dessus.
+        if len(ids) != len(messages):
+            for mid in ids:
+                await self._ecrire_epingle(
+                    ch, mid, "_(bilan déplacé plus bas — ce message ne sert plus)_",
+                    epingler=False)
+            ids = []
         neufs = []
         for i, texte in enumerate(messages):
             mid = ids[i] if i < len(ids) else 0

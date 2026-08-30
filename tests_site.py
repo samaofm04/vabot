@@ -6449,8 +6449,16 @@ try:
               _obT.bilan_quinzaine("y", "Y", "2026-08-30")["suite"][-4:])
         # Pas de BLANC : dans un salon sombre il saute aux yeux, et une
         # quinzaine a peine commencee avait l air d un mur d echecs.
-        check("bilan : le carré « rien » est sombre, pas blanc",
-              _rcT._CARRES["inconnu"] == "⬛", _rcT._CARRES)
+        # Deux couleurs seulement, demande deux fois. Une nuit sans report
+        # s affiche donc en rouge — mais elle ne compte PAS dans le score, et
+        # la legende le dit.
+        check("bilan : deux couleurs, pas de troisième",
+              set(_rcT._CARRES.values()) == {"🟩", "🟥"}, _rcT._CARRES)
+        check("bilan : le score ignore toujours les nuits sans report",
+              _obT.bilan_quinzaine("y", "Y", "2026-08-30")["jours_notes"] == 2,
+              _obT.bilan_quinzaine("y", "Y", "2026-08-30"))
+        check("bilan : la légende prévient que le rouge peut être une absence",
+              "pas de report" in _pinOb, _pinOb[:260])
         # Seize carres a la file ne disent pas lequel est quel jour : sans les
         # dates on voit qu il a rate deux jours, pas LESQUELS.
         # PAS de dates autour de la bande : sur un panneau Discord etroit elles
@@ -6497,10 +6505,10 @@ try:
         check("mois : décembre ne déborde pas sur janvier",
               _obT.bilan_mois("m", "M", "2026-12-20")["fin"] == "2026-12-31")
         check("bilan : la légende explique les carrés",
-              "🟩" in _pinOb and "pas de report" in _pinOb, _pinOb[:220])
+              "🟩" in _pinOb and "🟥" in _pinOb, _pinOb[:220])
 
         check("bilan : les carrés traduisent la suite",
-              _rcT.suite_jours(["tenu", "rate", "inconnu"]) == "🟩🟥⬛",
+              _rcT.suite_jours(["tenu", "rate", "inconnu"]) == "🟩🟥🟥",
               _rcT.suite_jours(["tenu", "rate", "inconnu"]))
         _pinPay = _joinOb(_rcT.bloc_quinzaine(
             [{"e": dict(_eOb, discord="noum0075"), "bilan": _bJ}],
@@ -6662,6 +6670,34 @@ try:
         _hVidST = _cST.get("/?tab=cloudreels").get_data(as_text=True)
         check("styles : plus aucune pastille une fois tout decoche",
               "class='ident-styles'" not in _hVidST)
+
+        # La route previent les menus Discord — mais SEULEMENT quand quelque
+        # chose a bouge. Sans ce garde-fou, re-enregistrer la meme fiche
+        # relançait une tournee complete sur tout le parc pour rien.
+        _majST = []
+        _vraiDemST = None
+        try:
+            import cogs.welcome as _wST
+            _vraiDemST = _wST.demander_rafraichissement
+            _wST.demander_rafraichissement = (
+                lambda bot, raison="", delai=None: (_majST.append(raison), True)[1])
+            _wuST._BOT_REF = object()
+            _jA = (_cST.post("/identity/styles",
+                             data={"identity": _idST, "styles": "montage"}).get_json() or {})
+            check("styles : un changement previent les menus Discord",
+                  _jA.get("menus_discord") is True and len(_majST) == 1,
+                  "%s / %d appel(s)" % (_jA.get("menus_discord"), len(_majST)))
+            _jB = (_cST.post("/identity/styles",
+                             data={"identity": _idST, "styles": "montage"}).get_json() or {})
+            check("styles : re-enregistrer la meme chose ne les reveille pas",
+                  _jB.get("ok") is True and _jB.get("menus_discord") is not True
+                  and len(_majST) == 1,
+                  "%d appel(s) au lieu de 1" % len(_majST))
+        finally:
+            _wuST._BOT_REF = None
+            if _vraiDemST is not None:
+                _wST.demander_rafraichissement = _vraiDemST
+            _cST.post("/identity/styles", data={"identity": _idST, "styles": ""})
 
         check("styles : une identite inconnue est refusee",
               (_cST.post("/identity/styles",
