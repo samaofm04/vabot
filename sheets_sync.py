@@ -843,6 +843,19 @@ def _push_all_single(data: dict, force: bool = False) -> bool:
         return False
 
 
+#: Resultat du DERNIER push vers le Sheet. Il ne partait que dans un print,
+#: c est-a-dire dans le journal du VPS, c est-a-dire nulle part : un push qui
+#: echoue est pourtant la cause exacte d un compte qui disparait — present en
+#: local, absent du classeur, supprime par le pull suivant. La grace d ajout
+#: n achete que quinze minutes ; passe ce delai, il faut pouvoir DIRE pourquoi.
+DERNIER_PUSH = {"quand": 0.0, "ok": None, "erreur": ""}
+
+
+def etat_push() -> dict:
+    """Le dernier push : quand, et s il a abouti. Pour l afficher quelque part."""
+    return dict(DERNIER_PUSH)
+
+
 def push_all_async(data: dict) -> None:
     """Push en arriere-plan (non bloquant, ne casse jamais l'appelant).
 
@@ -859,7 +872,10 @@ def push_all_async(data: dict) -> None:
             with jb.transaction():
                 fresh = jb._load()
             push_all(fresh)
+            DERNIER_PUSH.update({"quand": time.time(), "ok": True, "erreur": ""})
         except Exception as e:
+            DERNIER_PUSH.update({"quand": time.time(), "ok": False,
+                                 "erreur": f"{type(e).__name__}: {e}"[:200]})
             print(f"[sheets_sync] push async : {e}", flush=True)
 
     try:
@@ -1177,6 +1193,31 @@ def pull_and_merge(force_delete: bool = False) -> PullResult:
         return _merge_sheet_into_data(sheet, jb, force_delete, photo)
 
 
+#: Combien de temps un compte fraichement ajoute est a l abri d une
+#: suppression venue du Sheet. Meme duree que les pierres tombales, et c est
+#: voulu : ce sont les deux moities de la meme fenetre de course. La tombe
+#: empeche le Sheet de RESSUSCITER ce qu on vient d effacer ; ceci l empeche
+#: d EFFACER ce qu on vient d ajouter. Il n y avait que la premiere.
+GRACE_AJOUT = 900
+
+
+def _naissance(a: dict) -> float:
+    """Quand ce compte a ete cree, en secondes epoch. 0 si on ne sait pas."""
+    try:
+        ts = float(a.get("created_at") or 0)
+        if ts > 0:
+            return ts
+    except Exception:
+        pass
+    # Les comptes d avant `created_at` : leur identifiant EST l horodatage de
+    # creation en millisecondes (jailbreak.add_account : int(time.time()*1000)).
+    try:
+        v = float(a.get("id") or 0)
+        return v / 1000.0 if v > 1e11 else 0.0
+    except Exception:
+        return 0.0
+
+
 def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False,
                            photo: dict | None = None) -> tuple:
     data = jb._load()
@@ -1240,6 +1281,7 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False,
     # invisible pendant des mois.
     conflits = 0        # valeurs du Sheet ignorées (le site a bougé depuis)
     proteges = 0        # comptes créés pendant la lecture, sauvés de la suppression
+    neufs = 0           # comptes trop jeunes pour que leur absence du Sheet vaille suppression
     disparus = 0        # lignes du Sheet non ré-ajoutées (compte supprimé/renommé depuis)
     for identity in list(data.keys()):
         entry = data[identity]
@@ -1317,6 +1359,19 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False,
             gone = missing_id or missing_va
             if gone and u and (u in (id_present or set()) or u in seen_in_va):
                 gone = False     # present ailleurs dans le classeur : on ne supprime pas
+            # TROP JEUNE POUR ETRE SUPPRIME. Le push vers le Sheet est
+            # asynchrone et silencieux quand il echoue : un compte ajoute a
+            # l instant peut tres bien ne pas encore y figurer. Son absence ne
+            # prouve donc rien pendant cette fenetre — elle ne prouve que la
+            # lenteur, ou la panne, du push.
+            #
+            # Sans ca : un VA ajoute un compte par son lien, le push echoue
+            # sans un mot, et le pull le supprime deux minutes plus tard. Le
+            # compte apparait, puis disparait, et rien nulle part ne dit
+            # pourquoi.
+            if gone and (_now_t - _naissance(a)) < GRACE_AJOUT:
+                gone = False
+                neufs += 1
             if gone and u and u not in photo_id:
                 # Compte CREE sur le site pendant la lecture des classeurs : le
                 # Sheet ne pouvait pas le connaitre, son absence ne vaut pas
@@ -1489,6 +1544,11 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False,
         _extra += (f" · {conflits} valeur(s) du Sheet ignorée(s) (modifiées sur le site "
                    f"pendant la lecture des classeurs — le site fait foi, le push "
                    f"suivant réaligne le Sheet)")
+    if neufs:
+        # On le dit. Un compte sauve en silence, c est une panne de push qu on
+        # ne voit jamais : le compte survit, mais le Sheet reste faux.
+        _extra += (f" · {neufs} compte(s) trop récent(s) gardé(s) malgré leur "
+                   f"absence du Sheet (push pas encore passé ?)")
     if proteges:
         _extra += (f" · {proteges} compte(s) créé(s) pendant la lecture, protégé(s) "
                    f"de la suppression")
@@ -1504,10 +1564,10 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False,
     # PULL_SIGNALE force l'appelant à remonter ses compteurs au lieu de
     # répondre « rien de nouveau » (constaté : les trois compteurs n'arrivaient
     # ni à l'écran ni au journal).
-    retenus = conflits + proteges + disparus + blocked_del + len(skipped_tomb)
+    retenus = (conflits + proteges + neufs + disparus + blocked_del + len(skipped_tomb))
     outcome = PULL_APPLIQUE if changed else (PULL_SIGNALE if retenus else PULL_RIEN)
     return PullResult(changed,
                       f"+{added} ajout(s) · {updated} modif(s) · -{removed} suppr.{_extra}",
                       outcome, details=_extra,
-                      conflits=conflits, proteges=proteges, disparus=disparus,
+                      conflits=conflits, proteges=proteges, neufs=neufs, disparus=disparus,
                       retenues=blocked_del, tombstones=len(skipped_tomb))

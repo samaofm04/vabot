@@ -692,6 +692,66 @@ try:
     check("FIX6 déplacement d'onglet VA tient (reassignation)", bool(_a) and _a["va"] == "andry")
     check("FIX6 credentials préservés au déplacement",
           bool(_a) and _a["password"] == "SECRET" and _a["two_fa"] == "2FA")
+
+    # ---------------------------------------------------------------------
+    # UN COMPTE QU ON VIENT D AJOUTER NE PEUT PAS ETRE SUPPRIME PAR LE SHEET
+    # ---------------------------------------------------------------------
+    # Asymetrie constatee : une SUPPRESSION faite sur le site est protegee
+    # 15 min contre une resurrection par le Sheet (pierres tombales, TTL
+    # 900 s), mais un AJOUT ne l etait que le temps de la lecture des
+    # classeurs — quelques secondes.
+    #
+    # Or le push vers le Sheet est asynchrone ET silencieux quand il echoue
+    # (jailbreak._save : try / push_all_async / except: pass). Push rate =
+    # compte present en local, absent du Sheet = le pull suivant, deux minutes
+    # plus tard, le SUPPRIME. Le proprietaire voyait le compte ajoute par son
+    # VA apparaitre, puis disparaitre, sans rien nulle part pour l expliquer.
+    import time as _tGr
+    _nowGr = int(_tGr.time())
+
+    def _jbGr(age_s):
+        """Le VA vient d ajouter un compte ; le classeur ne le connait pas."""
+        return _FJB({"jessye": {"vas": ["VA NOUM 1X1"], "accounts": [
+            {"id": 1, "username": "deja.la", "va": "VA NOUM 1X1",
+             "created_at": _nowGr - 86400},
+            {"id": 2, "username": "tout.neuf", "va": "VA NOUM 1X1",
+             "created_at": _nowGr - age_s}]}})
+
+    def _classeurGr():
+        return {"jessye": [{"username": "deja.la", "va": "VA NOUM 1X1",
+                            "__cols__": _COLS}]}
+
+    def _restentGr(age_s):
+        _j = _jbGr(age_s)
+        _ss._merge_sheet_into_data(_classeurGr(), _j, force_delete=False)
+        return [a["username"] for a in _j._data["jessye"]["accounts"]]
+
+    check("grace : un compte ajoute il y a 30 s survit a un push rate",
+          "tout.neuf" in _restentGr(30), _restentGr(30))
+    check("grace : idem apres trois minutes (deux cycles de pull)",
+          "tout.neuf" in _restentGr(180), _restentGr(180))
+    # La grace a une FIN, et c est voulu : supprimer une ligne dans le Sheet
+    # doit continuer de supprimer sur le site. Sans cette borne, on aurait
+    # repare la disparition en cassant la suppression.
+    check("grace : passe la fenetre, une absence du Sheet supprime toujours",
+          "tout.neuf" not in _restentGr(_ss.GRACE_AJOUT + 300),
+          _restentGr(_ss.GRACE_AJOUT + 300))
+    # Non vide : sans la grace, le compte de 30 s disparait.
+    _svGr = _ss.GRACE_AJOUT
+    try:
+        _ss.GRACE_AJOUT = 0
+        check("grace : sans elle, le compte tout neuf disparait (test non vide)",
+              "tout.neuf" not in _restentGr(30), _restentGr(30))
+    finally:
+        _ss.GRACE_AJOUT = _svGr
+    # Les comptes d avant le champ `created_at` : leur identifiant EST leur
+    # date de creation en millisecondes. On ne veut pas que le correctif les
+    # rende tous eternels.
+    check("grace : un vieux compte sans created_at n est pas protege",
+          _ss._naissance({"id": 1}) == 0.0, _ss._naissance({"id": 1}))
+    check("grace : un compte identifie en millisecondes est date correctement",
+          abs(_ss._naissance({"id": _nowGr * 1000}) - _nowGr) < 2,
+          _ss._naissance({"id": _nowGr * 1000}))
     # chemin normal : colonne 'va' de l'onglet identité fait toujours foi
     _jb2 = _FJB({"test": {"vas": ["jhon", "andry"],
                           "accounts": [{"id": 2, "username": "acc2", "va": "jhon",
