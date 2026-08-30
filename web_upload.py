@@ -4306,11 +4306,21 @@ async function toggleFavBrute(btn, fileId){
     // Une étoile jaune qui s'allume pendant qu'aucune vidéo ne part est
     // exactement ce qu'on cherchait à supprimer.
     if(typeof showToast === 'function'){
+      // Le favori est ENREGISTRE meme quand Discord echoue -- le serveur le
+      // garde expressement. Le message doit donc dire les deux, dans cet
+      // ordre : ce qui a marche, puis ce qui n'a pas marche. Avant, il
+      // annoncait « envoi Discord echoue » sans un mot sur l'etoile, et on
+      // croyait que le clic n'avait rien fait du tout.
       var base = on ? '⭐ Brute favorite' : '☆ Retirée des favoris';
       var info = (j.discord || '').trim();
       var grave = /échoué|introuvable|refusé|inconnue|impossible|désactivée/i.test(info);
-      showToast(info ? (base + ' — ' + info) : base,
-                grave ? 'warning' : (on ? 'success' : 'warning'));
+      var texte = base;
+      if(info){
+        texte = grave
+          ? (base + " — c’est enregistré. Seule la copie Discord n’est pas partie : " + info)
+          : (base + " — " + info);
+      }
+      showToast(texte, grave ? 'warning' : (on ? 'success' : 'warning'));
     }
   }catch(e){ alert('Erreur réseau : ' + e); }
   finally{ btn.disabled = false; btn.style.opacity = '1'; }
