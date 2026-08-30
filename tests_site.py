@@ -6362,6 +6362,28 @@ try:
               "🟠" in _pinOb and "VA NOUM 1X1" in _pinOb, _pinOb[:200])
         check("report : et il explique la règle des 80 %",
               "80 %" in _pinOb, _pinOb[:250])
+        # La PORTEE se lit dans le nom du salon : « report-compte-jessye » ne
+        # suit que jessye. Un suffixe inconnu ne filtre RIEN — un salon nomme
+        # un peu de travers deviendrait vide sans que personne comprenne.
+        _idsOb = ["jessye", "emma"]
+        for _nom, _att in (("report-compte", ""), ("report-comptes", ""),
+                           ("report-compte-jessye", "jessye"),
+                           ("report-comptes-jessye", "jessye"),
+                           ("Report_Compte_Emma", "emma"),
+                           ("report-comptes-equipe-1", ""),
+                           ("report-compte-fr", ""), ("general", "")):
+            check(f"portée : {_nom} -> {_att or 'toutes'}",
+                  _rcT.identite_du_salon(_nom, _idsOb) == _att,
+                  _rcT.identite_du_salon(_nom, _idsOb))
+        # Le titre de l epingle dit sur qui il porte, sinon on croit lire tout
+        # le monde.
+        check("portée : l épingle filtrée nomme son identité",
+              "@jessye" in _rcT.bloc_quinzaine([{"e": _eOb, "bilan": _bOb}],
+                                               "2026-08-16", "2026-08-31", "jessye"))
+        check("portée : l épingle non filtrée ne nomme personne",
+              "@jessye" not in _rcT.bloc_quinzaine(
+                  [], "2026-08-16", "2026-08-31").splitlines()[0])
+
         # Discord refuse au-dela de 2000 caracteres : une liste de 40 fiches
         # doit etre coupee proprement, pas partir en exception a minuit.
         _longOb = _rcT.bloc_quinzaine(

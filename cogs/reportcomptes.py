@@ -144,7 +144,7 @@ def ligne_fiche(e: dict) -> str:
     return "\n".join(t)
 
 
-def bloc_quinzaine(lignes: list, debut: str, fin: str) -> str:
+def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> str:
     """Le message épinglé : une ligne par fiche, triée du pire au meilleur.
 
     Du pire au meilleur à dessein : ce message sert à voir qui décroche, pas à
@@ -155,7 +155,8 @@ def bloc_quinzaine(lignes: list, debut: str, fin: str) -> str:
             return datetime.date.fromisoformat(j).strftime("%d/%m")
         except Exception:
             return j
-    t = [f"📌 **Bilan de la quinzaine — du {_d(debut)} au {_d(fin)}**",
+    portee = f" · `@{identite}`" if identite else ""
+    t = [f"📌 **Bilan de la quinzaine — du {_d(debut)} au {_d(fin)}**{portee}",
          "_Une journée est tenue quand la fiche atteint 80 % de son objectif. "
          "Les journées sans report ne comptent ni en bien ni en mal._", ""]
     if not lignes:
@@ -184,7 +185,31 @@ def _tronquer(txt: str) -> str:
 # Collecte
 # ==============================================================================
 
-def etats_du_jour(jour: str = "") -> list:
+def identite_du_salon(nom: str, identites) -> str:
+    """L'identite que ce salon suit, d'apres son NOM. '' = toutes.
+
+    « report-compte » suit tout le monde ; « report-compte-jessye » ne suit
+    que jessye. Le nom porte deja la convention qui designe ces salons, il
+    peut aussi en porter la portee : on lit le salon et on sait ce qu'il
+    contient, sans aller chercher un reglage ailleurs.
+
+    Un suffixe qui ne correspond a AUCUNE identite connue est traite comme une
+    simple etiquette (« report-comptes-equipe-1 ») et ne filtre rien. Le
+    contraire serait pire : un salon nomme un peu de travers deviendrait vide
+    sans que personne comprenne pourquoi.
+    """
+    n = str(nom or "").lower().replace("_", "-").strip()
+    for prefixe in ("report-comptes-", "report-compte-"):
+        if n.startswith(prefixe):
+            suffixe = n[len(prefixe):].strip("-")
+            for ident in (identites or []):
+                if str(ident).lower() == suffixe:
+                    return str(ident).lower()
+            return ""
+    return ""
+
+
+def etats_du_jour(jour: str = "", identite_voulue: str = "") -> list:
     """L'etat de CHAQUE fiche VA aujourd'hui, dans l'ordre identite puis VA.
 
     Une fiche sans le moindre compte est ecartee : elle n'a rien a dire, et
@@ -201,8 +226,11 @@ def etats_du_jour(jour: str = "") -> list:
     maintenant = time.time()
     jour = jour or ob.aujourdhui()
     out = []
+    voulue = str(identite_voulue or "").strip().lower()
     for identite, entree in (jb.list_all() or {}).items():
         if not isinstance(entree, dict):
+            continue
+        if voulue and str(identite).lower() != voulue:
             continue
         comptes = [a for a in (entree.get("accounts") or []) if isinstance(a, dict)]
         # Les fiches DECLAREES, plus celles que seuls leurs comptes designent :
@@ -290,17 +318,6 @@ class ReportComptes(commands.Cog):
         part ailleurs.
         """
         import jb_objectifs as ob
-        etats = await asyncio.to_thread(etats_du_jour, jour)
-        # On grave AVANT de poster : si Discord refuse (permission, panne), la
-        # journee reste comptee dans le bilan de quinzaine. L'inverse aurait
-        # perdu la mesure a cause d'un probleme d'affichage.
-        await asyncio.to_thread(ob.enregistrer_jour, etats, jour)
-
-        bilans = []
-        for e in etats:
-            bilans.append({"e": e, "bilan": await asyncio.to_thread(
-                ob.bilan_quinzaine, e["identite"], e["va"], jour)})
-
         if cibles is None:
             if salon_force is not None:
                 cibles = [(_cle(getattr(salon_force.guild, "id", 0), salon_force.id),
@@ -308,8 +325,36 @@ class ReportComptes(commands.Cog):
             else:
                 cibles = self.salons_report()
 
+        # La MESURE est faite une fois, sur tout le monde, et elle est gravee
+        # une fois. Elle ne depend pas de qui la regarde : un salon qui ne
+        # suit que jessye ne doit pas empecher les autres fiches d'etre
+        # comptees dans leur bilan de quinzaine.
+        #
+        # On grave AVANT de poster : si Discord refuse (permission, panne), la
+        # journee reste comptee. L'inverse aurait perdu la mesure a cause d'un
+        # probleme d'affichage.
+        tous = await asyncio.to_thread(etats_du_jour, jour)
+        await asyncio.to_thread(ob.enregistrer_jour, tous, jour)
+
+        bilans = {}
+        for e in tous:
+            bilans[(e["identite"].lower(), e["va"].lower())] = await asyncio.to_thread(
+                ob.bilan_quinzaine, e["identite"], e["va"], jour)
+
+        try:
+            import jailbreak as _jb_id
+            identites = list((_jb_id.list_all() or {}).keys())
+        except Exception:
+            identites = []
+
         n_msg = 0
         for cle, ch in cibles:
+            # Chaque salon ne recoit QUE ce qu'il annonce suivre.
+            voulue = identite_du_salon(getattr(ch, "name", ""), identites)
+            etats = [e for e in tous
+                     if not voulue or e["identite"].lower() == voulue]
+            lignes_bilan = [{"e": e, "bilan": bilans.get(
+                (e["identite"].lower(), e["va"].lower())) or {}} for e in etats]
             try:
                 for e in etats:
                     await ch.send(_tronquer(ligne_fiche(e)))
@@ -317,7 +362,7 @@ class ReportComptes(commands.Cog):
                     await asyncio.sleep(0.6)     # on ne bouscule pas Discord
                 debut, fin = ob.quinzaine(jour)
                 await self._poser_epingle(ch, cle, _tronquer(
-                    bloc_quinzaine(bilans, debut, fin)))
+                    bloc_quinzaine(lignes_bilan, debut, fin, voulue)))
             except discord.Forbidden:
                 print(f"[report-comptes] pas le droit d'écrire dans {ch}", flush=True)
             except Exception as e:
