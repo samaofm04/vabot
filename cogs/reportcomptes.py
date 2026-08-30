@@ -98,12 +98,20 @@ _MAX_MSG = 1850
 #:
 #: Marge volontaire sous les 4096 : le nombre de fiches grandit, et déborder
 #: fait refuser le message ENTIER par Discord.
-#: Volontairement PRUDENT : 1400, pas 4096. Un bilan de vingt et une fiches
-#: mesure 2783 unites — sous la limite annoncee — et Discord n'en affichait
-#: pourtant que six. On ne sait pas encore pourquoi ; en attendant, des
-#: messages courts passent, et le proprietaire a dit « fais plusieurs trucs
-#: s'il le faut ». Mieux vaut trois messages complets qu'un seul ampute.
-_MAX_EMBED = 1400
+#: 850, alors que Discord annonce 4096 pour une description d'embed.
+#:
+#: Ce chiffre n'est pas theorique, il est MESURE. Le bot a envoye trois
+#: messages — 8 fiches/1337u, 8 fiches/1306u, 5 fiches/923u — et Discord n'a
+#: affiche que 6, 6 et 5 fiches. Celui de 923 unites est passe ENTIER ; les
+#: deux de ~1320 ont perdu leurs deux dernieres fiches chacun. La coupe se
+#: situe donc autour de 1100, tres loin des 4096 annonces, et elle est
+#: SILENCIEUSE : le message part, Discord repond 200, et deux VAs manquent au
+#: bilan de paie.
+#:
+#: On se tient donc sous la seule taille dont on a la preuve qu'elle passe. Le
+#: proprietaire a dit « fais plusieurs trucs s'il le faut » : mieux vaut cinq
+#: messages complets que trois amputes.
+_MAX_EMBED = 850
 
 
 def _taille(txt: str) -> int:
@@ -151,7 +159,7 @@ HEURE_REPORT = 1
 #: changement de format ne se voyait qu'a la publication suivante — et on
 #: attendait 1 h du matin en croyant que ca ne marchait pas. Quand le numero
 #: stocke ne correspond plus, la boucle republie une fois, tout de suite.
-FORMAT_BILAN = 13
+FORMAT_BILAN = 15
 
 
 # ==============================================================================
@@ -762,6 +770,11 @@ class ReportComptes(commands.Cog):
             debut, fin = _mois(jour)
             for cle, ch in salons_pin:
                 voulue, _ets, lignes_bilan = _pour(ch)
+                # Compter ICI aussi : le bouton « Rafraichir » ne refait que
+                # le bilan (cibles vide), donc la boucle du jour ne tourne pas
+                # et le compte restait a zero. « Bilan refait — 0 fiche(s) »
+                # se lit comme un echec alors que tout s'est bien passe.
+                n_fiches = max(n_fiches, len(_ets))
                 try:
                     await self._poser_bilan(
                         ch, cle, bloc_quinzaine(lignes_bilan, debut, fin, voulue))
