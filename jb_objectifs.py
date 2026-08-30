@@ -412,6 +412,56 @@ def bilan_quinzaine(identite: str, va: str, jour: str = "") -> dict:
     }
 
 
+def bilan_mois(identite: str, va: str, jour: str = "") -> dict:
+    """Le MOIS entier, jour par jour, coupé en ses deux quinzaines de paie.
+
+    Le bilan ne portait que sur la quinzaine en cours. Au moment de payer on
+    veut voir le mois : la quinzaine qu'on solde, et celle d'avant qui donne
+    le contexte. Les deux moitiés restent distinctes — ce sont deux périodes
+    de paie, pas une seule longue bande.
+
+    La suite s'arrête à `jour` : les jours à venir ne sont pas pré-remplis.
+    """
+    jour = jour or aujourdhui()
+    d = _dt.date.fromisoformat(jour)
+    debut = d.replace(day=1)
+    if d.month == 12:
+        fin = _dt.date(d.year, 12, 31)
+    else:
+        fin = _dt.date(d.year, d.month + 1, 1) - _dt.timedelta(days=1)
+
+    rec = _load(HISTO_FILE).get(cle(identite, va)) or {}
+    jours = rec.get("jours") if isinstance(rec.get("jours"), dict) else {}
+
+    suite, q1, q2 = [], [0, 0], [0, 0]      # [tenus, notes] par quinzaine
+    cur, stop = debut, min(fin, d)
+    while cur <= stop:
+        k = cur.isoformat()
+        v = jours.get(k)
+        cible = q1 if cur.day <= 15 else q2
+        if isinstance(v, dict):
+            tenu = bool(v.get("atteint"))
+            suite.append("tenu" if tenu else "rate")
+            cible[1] += 1
+            cible[0] += 1 if tenu else 0
+        else:
+            suite.append("inconnu")
+        cur += _dt.timedelta(days=1)
+
+    # La pastille porte sur la quinzaine EN COURS : c'est celle qu'on solde.
+    encours = q1 if d.day <= 15 else q2
+    return {
+        "debut": debut.isoformat(), "fin": fin.isoformat(), "jour": jour,
+        "suite": suite,
+        "coupure": 15,                      # nombre de jours de la 1re moitie
+        "q1_tenus": q1[0], "q1_notes": q1[1],
+        "q2_tenus": q2[0], "q2_notes": q2[1],
+        "jours_tenus": encours[0], "jours_notes": encours[1],
+        "pct": round(100.0 * encours[0] / encours[1], 1) if encours[1] else 0.0,
+        "pastille": pastille(encours[0], encours[1]),
+    }
+
+
 def pastille(tenus: int, notes: int) -> str:
     """La pastille de la quinzaine. '⚪' tant qu'on n'a rien a dire.
 

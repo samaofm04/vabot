@@ -10,8 +10,17 @@ par fiche VA :
     OK  VA NOUM 1X1 · 39 comptes · 26/30 · pas d oubli
     KO  VA NOUM 1X2 · 12 comptes ·  4/30 · 8 oublis
 
-Puis il tient a jour UN message epingle, le bilan de la quinzaine : une ligne
-par fiche, le pseudo Discord a payer, et le detail jour par jour en carres.
+Puis il tient a jour le BILAN DU MOIS, epingle : une ligne par fiche, le
+pseudo Discord a payer, et le mois entier jour par jour en carres, coupe par
+une barre entre les deux quinzaines de paie.
+
+    VA NOUM 1X1 @noum0075 · 1–15 : 13/14 · 16–fin : 12/15 · 26/30
+    01/08 ..........#..#.┃...#....#..#... 31/08
+
+Un mois de carres pour vingt-quatre fiches DEPASSE les deux mille caracteres
+de Discord : le bilan tient donc en plusieurs messages, tous reecrits sur
+place. Avant, il etait tronque — des VAs disparaissaient du bilan de paie
+sans un mot.
 
 DEUX SALONS, DEUX CONVENTIONS DE NOM :
 
@@ -225,7 +234,7 @@ def bloc_jour(etats: list, jour: str, identite: str = "") -> list:
 _CARRES = {"tenu": "🟩", "rate": "🟥", "inconnu": "⬛"}
 
 
-def suite_jours(suite, debut: str = "") -> str:
+def suite_jours(suite, debut: str = "", coupure: int = 0) -> str:
     """La quinzaine jour par jour, en carrés, encadrée par ses dates.
 
     Un total « 12/14 » ne dit pas s'il a lâché trois jours d'affilée ou un
@@ -236,8 +245,18 @@ def suite_jours(suite, debut: str = "") -> str:
     lequel est quel jour : sans elles on voit qu'il a raté deux jours, mais
     pas LESQUELS — et c'est justement ce qu'on veut pouvoir lui dire.
     """
-    bande = "".join(_CARRES.get(x, "⬛") for x in (suite or []))
-    if not bande or not debut:
+    suite = list(suite or [])
+    if not suite:
+        return ""
+    if coupure and 0 < coupure < len(suite):
+        # La barre marque la frontiere des deux quinzaines de paie. Sans elle,
+        # trente et un carres a la file ne disent pas ou s'arrete la periode
+        # qu'on solde.
+        bande = ("".join(_CARRES.get(x, "⬛") for x in suite[:coupure])
+                 + "┃" + "".join(_CARRES.get(x, "⬛") for x in suite[coupure:]))
+    else:
+        bande = "".join(_CARRES.get(x, "⬛") for x in suite)
+    if not debut:
         return bande
     try:
         d0 = datetime.date.fromisoformat(debut)
@@ -247,11 +266,16 @@ def suite_jours(suite, debut: str = "") -> str:
         return bande
 
 
-def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> str:
-    """Le message épinglé : une ligne par fiche, triée du pire au meilleur.
+def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> list:
+    """Le bilan du MOIS, une fiche par bloc, du pire au meilleur.
 
-    Du pire au meilleur à dessein : ce message sert à voir qui décroche, pas à
-    féliciter. Ce qui compte est en haut, lisible sans dérouler.
+    Rend une LISTE de messages. Un mois de carrés pour vingt-quatre fiches
+    dépasse largement les deux mille caractères de Discord : la version
+    précédente rendait un seul texte, qu'on tronquait — donc des VAs
+    disparaissaient du bilan de paie sans un mot. On découpe, et chaque
+    morceau reprend l'en-tête.
+
+    Du pire au meilleur à dessein : ce message sert à voir qui décroche.
     """
     def _d(j):
         try:
@@ -259,31 +283,55 @@ def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> st
         except Exception:
             return j
     portee = f" · `@{identite}`" if identite else ""
-    t = [f"📌 **Bilan de la quinzaine — du {_d(debut)} au {_d(fin)}**{portee}",
-         "_Un carré par jour : 🟩 objectif tenu · 🟥 raté · ⬛ pas de report "
-         "cette nuit-là (ne compte ni en bien ni en mal)._",
-         "_Une journée est tenue quand la fiche atteint 80 % de son objectif._",
-         ""]
+    tete = [f"📌 **Bilan du mois — du {_d(debut)} au {_d(fin)}**{portee}",
+            "_Un carré par jour : 🟩 objectif tenu · 🟥 raté · ⬛ pas de report "
+            "cette nuit-là (ne compte ni en bien ni en mal)._",
+            "_Une journée est tenue quand la fiche atteint 80 % de son "
+            "objectif. La barre ┃ sépare les deux quinzaines de paie._",
+            ""]
     if not lignes:
-        t.append("_Aucune fiche suivie pour l'instant._")
-        return "\n".join(t)
+        return ["\n".join(tete + ["_Aucune fiche suivie pour l'instant._"])]
+
     ordre = sorted(lignes, key=lambda x: (x["bilan"].get("pct", 0), x["e"]["actifs"]))
+    messages, bloc = [], list(tete)
     for x in ordre:
         b, e = x["bilan"], x["e"]
-        if b.get("jours_notes"):
-            detail = f"{b['jours_tenus']}/{b['jours_notes']} j"
-        else:
-            detail = "aucune journée notée"
+        # Les deux quinzaines sont annoncees separement : ce sont deux
+        # periodes de paie, pas une seule longue bande.
+        moities = []
+        if b.get("q1_notes"):
+            moities.append(f"1–15 : {b['q1_tenus']}/{b['q1_notes']}")
+        if b.get("q2_notes"):
+            moities.append(f"16–fin : {b['q2_tenus']}/{b['q2_notes']}")
+        detail = " · ".join(moities) or "aucune journée notée"
         # Le « @ » Discord, parce que ce message sert à PAYER : le nom de la
         # fiche désigne un téléphone, pas quelqu'un à qui virer de l'argent.
         qui = str(e.get("discord") or "").strip()
         qui = f" `@{qui}`" if qui else ""
-        t.append(f"{b['pastille']} **{e['va']}**{qui} · {detail} · "
-                 f"{e['actifs']}/{e['objectif']}")
-        carres = suite_jours(b.get("suite"), b.get("debut") or debut)
+        part = [f"{b['pastille']} **{e['va']}**{qui} · {detail} · "
+                f"{e['actifs']}/{e['objectif']}"]
+        carres = suite_jours(b.get("suite"), b.get("debut") or debut,
+                             b.get("coupure") or 15)
         if carres:
-            t.append(carres)
-    return "\n".join(t)
+            part.append(carres)
+        # On coupe AVANT de dépasser, et jamais au milieu d'une fiche : une
+        # fiche dont le nom est dans un message et les carrés dans le suivant
+        # est illisible au moment précis où on s'en sert.
+        if sum(len(y) + 1 for y in bloc) + sum(len(y) + 1 for y in part) > _MAX_MSG:
+            messages.append("\n".join(bloc))
+            bloc = list(tete)
+        bloc.extend(part)
+    messages.append("\n".join(bloc))
+    return messages
+
+
+def _mois(jour: str) -> tuple:
+    """(premier, dernier) jour du mois qui contient `jour`."""
+    d = datetime.date.fromisoformat(jour)
+    debut = d.replace(day=1)
+    fin = (datetime.date(d.year, 12, 31) if d.month == 12
+           else datetime.date(d.year, d.month + 1, 1) - datetime.timedelta(days=1))
+    return debut.isoformat(), fin.isoformat()
 
 
 def _tronquer(txt: str) -> str:
@@ -472,7 +520,7 @@ class ReportComptes(commands.Cog):
         bilans = {}
         for e in tous:
             bilans[(e["identite"].lower(), e["va"].lower())] = await asyncio.to_thread(
-                ob.bilan_quinzaine, e["identite"], e["va"], jour)
+                ob.bilan_mois, e["identite"], e["va"], jour)
 
         try:
             import jailbreak as _jb_id
@@ -506,9 +554,9 @@ class ReportComptes(commands.Cog):
                     n_msg += 1
                     await asyncio.sleep(0.6)     # on ne bouscule pas Discord
                 if not pin_a_part:
-                    debut, fin = ob.quinzaine(jour)
-                    await self._poser_epingle(ch, cle, _tronquer(
-                        bloc_quinzaine(lignes_bilan, debut, fin, voulue)))
+                    await self._poser_bilan(ch, cle, [
+                        _tronquer(m) for m in bloc_quinzaine(
+                            lignes_bilan, _mois(jour)[0], _mois(jour)[1], voulue)])
                 # « Ce salon a deja recu un report. » Marque a part de
                 # l'epingle : quand le bilan part dans son propre salon,
                 # celui-ci n'a plus d'epingle du tout — s'y fier l'aurait
@@ -521,12 +569,13 @@ class ReportComptes(commands.Cog):
                 print(f"[report-comptes] envoi : {e}", flush=True)
 
         if pin_a_part:
-            debut, fin = ob.quinzaine(jour)
+            debut, fin = _mois(jour)
             for cle, ch in salons_pin:
                 voulue, _ets, lignes_bilan = _pour(ch)
                 try:
-                    await self._poser_epingle(ch, cle, _tronquer(
-                        bloc_quinzaine(lignes_bilan, debut, fin, voulue)))
+                    await self._poser_bilan(ch, cle, [
+                        _tronquer(m) for m in
+                        bloc_quinzaine(lignes_bilan, debut, fin, voulue)])
                 except discord.Forbidden:
                     print(f"[report-comptes] pas le droit d'écrire dans {ch}", flush=True)
                 except Exception as e:
@@ -583,59 +632,71 @@ class ReportComptes(commands.Cog):
         """Ou va le BILAN de quinzaine. Vide = il reste dans le salon du jour."""
         return self._salons(PREFIXE_QUINZAINE)
 
-    async def _poser_epingle(self, ch, cle, texte: str):
-        """RÉÉCRIT le message épinglé. N'en crée un second sous aucun prétexte.
+    async def _poser_bilan(self, ch, cle, messages: list):
+        """Le bilan du mois, en un ou plusieurs messages RÉÉCRITS sur place.
 
-        C'est LE même message du début à la fin de la quinzaine : le
-        propriétaire l'annote à la main, il ne doit pas se retrouver avec une
-        copie neuve à côté de celle qu'il a corrigée.
+        Un mois de carrés pour vingt-quatre fiches ne tient pas dans les deux
+        mille caractères de Discord. On garde donc une LISTE d'identifiants,
+        et on réécrit chacun. Le nombre de fiches bouge d'un jour à l'autre :
 
-        D'où la distinction entre les deux échecs possibles à la relecture :
+        - moins de messages qu'avant : les surnuméraires sont vidés, pas
+          supprimés — ce dépôt n'efface rien, et un message effacé emporterait
+          les annotations posées à la main dessus ;
+        - plus de messages qu'avant : on en ajoute à la suite.
 
-        - le message n'existe PLUS (supprimé à la main) : on en refait un,
-          c'est la seule façon de retrouver un bilan ;
-        - tout le reste — coupure réseau, Discord qui tousse, permission
-          momentanément refusée : on ne touche à rien et on réessaiera au tour
-          suivant. Reposter sur une erreur passagère, c'est exactement
-          fabriquer le doublon qu'on veut éviter.
+        Seul le premier est épinglé : c'est lui qui porte l'en-tête.
         """
         cfg = _load_cfg()
-        c = cfg.get(cle) if cle else None
-        mid = int((c or {}).get("pin_id") or 0)
+        c = cfg.get(cle) if isinstance(cfg.get(cle), dict) else {
+            "guild_id": getattr(getattr(ch, "guild", None), "id", 0),
+            "channel_id": ch.id}
+        ids = list(c.get("pin_ids") or [])
+        if not ids and c.get("pin_id"):
+            ids = [c["pin_id"]]                 # ancien format, un seul message
+        neufs = []
+        for i, texte in enumerate(messages):
+            mid = ids[i] if i < len(ids) else 0
+            nouv = await self._ecrire_epingle(ch, mid, texte, epingler=(i == 0))
+            if nouv is None:                    # échec passager : on garde l'ancien
+                nouv = mid
+            neufs.append(nouv)
+        # Les messages en trop sont VIDÉS, jamais supprimés.
+        for mid in ids[len(messages):]:
+            await self._ecrire_epingle(ch, mid, "_(suite du bilan — vide ce mois-ci)_",
+                                       epingler=False)
+            neufs.append(mid)
+        c["pin_ids"] = [m for m in neufs if m]
+        c.pop("pin_id", None)
+        cfg[cle] = c
+        _save_cfg(cfg)
+
+    async def _ecrire_epingle(self, ch, mid, texte: str, epingler: bool):
+        """Réécrit le message `mid`, ou en crée un. Rend son identifiant."""
         if mid:
             try:
-                msg = await ch.fetch_message(mid)
+                msg = await ch.fetch_message(int(mid))
                 await msg.edit(content=texte)
-                return
+                return int(mid)
             except discord.NotFound:
-                print(f"[report-comptes] épingle supprimée dans {ch} — "
-                      f"on en repose une", flush=True)
+                print(f"[report-comptes] message {mid} effacé — on en repose un",
+                      flush=True)
             except Exception as e:
-                # On NE reposte PAS. Le bilan de ce tour est perdu, le message
-                # existant reste celui du tour precedent : c'est moins grave
-                # qu'un deuxieme message.
-                print(f"[report-comptes] épingle illisible ({type(e).__name__}) — "
-                      f"on garde l'existante", flush=True)
-                return
+                # On NE reposte PAS : reposter sur une erreur passagère, c'est
+                # fabriquer le doublon qu'on veut éviter.
+                print(f"[report-comptes] message illisible ({type(e).__name__}) — "
+                      f"on garde l'existant", flush=True)
+                return None
         try:
             msg = await ch.send(texte)
-            try:
-                await msg.pin()
-            except Exception:
-                pass                    # pas le droit d'epingler : tant pis
-            # L'entree est CREEE si elle n'existait pas : un salon trouve par
-            # son nom n'en a pas. Sans ca, pin_id n'etait jamais enregistre,
-            # le salon restait « jamais servi » — et le premier passage se
-            # serait rejoue toutes les vingt minutes, indefiniment.
-            if cle:
-                c = c if isinstance(c, dict) else {
-                    "guild_id": getattr(getattr(ch, "guild", None), "id", 0),
-                    "channel_id": ch.id, "auto": True}
-                c["pin_id"] = msg.id
-                cfg[cle] = c
-                _save_cfg(cfg)
+            if epingler:
+                try:
+                    await msg.pin()
+                except Exception:
+                    pass                        # pas le droit d'épingler : tant pis
+            return msg.id
         except Exception as e:
-            print(f"[report-comptes] épingle : {e}", flush=True)
+            print(f"[report-comptes] envoi du bilan : {e}", flush=True)
+            return None
 
     # ---- pas de commande slash, et c'est un choix contraint -------------
     #

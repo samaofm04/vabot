@@ -6343,6 +6343,13 @@ try:
 
         # Le rendu Discord : il doit tenir sans planter et dire l essentiel.
         import cogs.reportcomptes as _rcT
+
+        def _joinOb(msgs):
+            """bloc_quinzaine rend une LISTE : un mois de carres pour vingt
+            fiches ne tient pas dans un seul message Discord. Les essais la
+            recollent pour chercher dedans."""
+            return "\n".join(msgs) if isinstance(msgs, list) else msgs
+
         # UNE ligne par fiche, et rien de plus. La premiere version en faisait
         # cinq, avec pourcentages et barre : sur vingt-quatre VAs c'etait un mur
         # que personne ne lit. « Je veux pas un truc si complet », mot pour mot.
@@ -6394,8 +6401,8 @@ try:
         check("report : aucune fiche perdue au découpage",
               sum(m.count("FICHE ") for m in _longsOb) == 60,
               sum(m.count("FICHE ") for m in _longsOb))
-        _pinOb = _rcT.bloc_quinzaine(
-            [{"e": _eOb, "bilan": _bOb}], "2026-08-16", "2026-08-31")
+        _pinOb = _joinOb(_rcT.bloc_quinzaine(
+            [{"e": _eOb, "bilan": _bOb}], "2026-08-16", "2026-08-31"))
         # LE BILAN SERT A PAYER : il lui faut le « @ » Discord (le nom de la
         # fiche designe un telephone, pas quelqu un a qui virer de l argent) et
         # le detail JOUR PAR JOUR — « 12/14 » ne dit pas s il a lache trois
@@ -6447,24 +6454,59 @@ try:
               _bandeOb)
         check("bilan : sans date de début, la bande reste lisible",
               _rcT.suite_jours(["tenu"]) == "🟩", _rcT.suite_jours(["tenu"]))
+
+        # LE MOIS ENTIER, coupé en ses deux quinzaines de paie. Le bilan ne
+        # portait que sur la quinzaine en cours ; au moment de payer on veut
+        # voir le mois, et les deux moities restent distinctes.
+        for _d in range(1, 21):
+            _obT.enregistrer_jour([{"identite": "m", "va": "M", "objectif": 30,
+                                    "atteint": _d not in (7, 19)}],
+                                  f"2026-08-{_d:02d}")
+        _bM = _obT.bilan_mois("m", "M", "2026-08-20")
+        check("mois : la bande couvre le mois jusqu à aujourd hui",
+              len(_bM["suite"]) == 20, len(_bM["suite"]))
+        check("mois : la première quinzaine est comptée à part",
+              (_bM["q1_tenus"], _bM["q1_notes"]) == (14, 15),
+              (_bM["q1_tenus"], _bM["q1_notes"]))
+        check("mois : la seconde aussi",
+              (_bM["q2_tenus"], _bM["q2_notes"]) == (4, 5),
+              (_bM["q2_tenus"], _bM["q2_notes"]))
+        # La pastille porte sur la quinzaine EN COURS : c est celle qu on solde.
+        check("mois : la pastille suit la quinzaine en cours",
+              _bM["jours_tenus"] == 4 and _bM["jours_notes"] == 5, _bM["pastille"])
+        check("mois : le 10 août, c est la première quinzaine qui compte",
+              _obT.bilan_mois("m", "M", "2026-08-10")["jours_notes"] == 10)
+        # La barre marque la frontiere : trente et un carres a la file ne
+        # disent pas ou s arrete la periode qu on solde.
+        _bandeM = _rcT.suite_jours(_bM["suite"], _bM["debut"], _bM["coupure"])
+        check("mois : la barre sépare les deux quinzaines",
+              "┃" in _bandeM, _bandeM)
+        check("mois : elle tombe après le 15e carré",
+              _bandeM.index("┃") == _bandeM.index("`01/08`") + len("`01/08` ") + 15,
+              _bandeM)
+        check("mois : février s arrête au 28",
+              _obT.bilan_mois("m", "M", "2026-02-20")["fin"] == "2026-02-28",
+              _obT.bilan_mois("m", "M", "2026-02-20")["fin"])
+        check("mois : décembre ne déborde pas sur janvier",
+              _obT.bilan_mois("m", "M", "2026-12-20")["fin"] == "2026-12-31")
         check("bilan : la légende explique les carrés",
               "🟩" in _pinOb and "pas de report" in _pinOb, _pinOb[:220])
 
         check("bilan : les carrés traduisent la suite",
               _rcT.suite_jours(["tenu", "rate", "inconnu"]) == "🟩🟥⬛",
               _rcT.suite_jours(["tenu", "rate", "inconnu"]))
-        _pinPay = _rcT.bloc_quinzaine(
+        _pinPay = _joinOb(_rcT.bloc_quinzaine(
             [{"e": dict(_eOb, discord="noum0075"), "bilan": _bJ}],
-            "2026-08-16", "2026-08-31")
+            "2026-08-16", "2026-08-31"))
         check("bilan : le @ Discord est dans le message",
               "@noum0075" in _pinPay, _pinPay)
         check("bilan : les carrés du jour par jour aussi",
               "🟩" in _pinPay and "🟥" in _pinPay, _pinPay)
         # Une fiche sans Discord ne doit pas afficher un « @ » vide.
         check("bilan : pas de @ vide quand le Discord est inconnu",
-              "`@`" not in _rcT.bloc_quinzaine(
+              "`@`" not in _joinOb(_rcT.bloc_quinzaine(
                   [{"e": dict(_eOb, discord=""), "bilan": _bJ}],
-                  "2026-08-16", "2026-08-31"))
+                  "2026-08-16", "2026-08-31")))
 
         check("report : le message épinglé porte la pastille",
               "🟠" in _pinOb and "VA NOUM 1X1" in _pinOb, _pinOb[:200])
@@ -6500,17 +6542,18 @@ try:
         # Le titre de l epingle dit sur qui il porte, sinon on croit lire tout
         # le monde.
         check("portée : l épingle filtrée nomme son identité",
-              "@jessye" in _rcT.bloc_quinzaine([{"e": _eOb, "bilan": _bOb}],
-                                               "2026-08-16", "2026-08-31", "jessye"))
+              "@jessye" in _joinOb(_rcT.bloc_quinzaine(
+                  [{"e": _eOb, "bilan": _bOb}],
+                  "2026-08-16", "2026-08-31", "jessye")))
         check("portée : l épingle non filtrée ne nomme personne",
-              "@jessye" not in _rcT.bloc_quinzaine(
-                  [], "2026-08-16", "2026-08-31").splitlines()[0])
+              "@jessye" not in _joinOb(_rcT.bloc_quinzaine(
+                  [], "2026-08-16", "2026-08-31")).splitlines()[0])
 
         # Discord refuse au-dela de 2000 caracteres : une liste de 40 fiches
         # doit etre coupee proprement, pas partir en exception a minuit.
-        _longOb = _rcT.bloc_quinzaine(
+        _longOb = _joinOb(_rcT.bloc_quinzaine(
             [{"e": dict(_eOb, va=f"FICHE {_i:02d}"), "bilan": _bOb} for _i in range(60)],
-            "2026-08-16", "2026-08-31")
+            "2026-08-16", "2026-08-31"))
         check("report : un message trop long est coupé, pas perdu",
               len(_rcT._tronquer(_longOb)) <= 2000
               and "tronquée" in _rcT._tronquer(_longOb), len(_rcT._tronquer(_longOb)))
