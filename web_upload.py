@@ -17834,6 +17834,20 @@ def _diag_bot(bot=None) -> str:
                 f"<br><span style='color:#666'>synchro : {html_escape(str(sync))}</span>"
                 f"<br><span style='color:#666'>{len(cmds)} commande(s) dans "
                 f"l'arbre : {html_escape(', '.join(cmds))}</span>")
+        # Le lien d'invitation, calcule depuis l'identifiant du bot lui-meme.
+        # Un cog deplace sur l'autre application ne sert que les serveurs ou
+        # cette application est presente : sans ce lien, « invite-le la-bas »
+        # est une consigne qu'on ne sait pas suivre.
+        uid = getattr(getattr(bot, "user", None), "id", 0)
+        if uid:
+            # Voir les salons, ecrire, epingler, joindre, lire l'historique, et
+            # gerer les salons (vasort les range). Discord laisse decocher au
+            # moment de l'invitation.
+            perms = 125968
+            lien = (f"https://discord.com/api/oauth2/authorize?client_id={uid}"
+                    f"&permissions={perms}&scope=bot%20applications.commands")
+            bloc += (f"<br><a href='{lien}' rel='noopener'>inviter ce bot sur "
+                     f"un autre serveur</a>")
         if echecs:
             bloc += ("<br><span style='color:#b91c1c'>cogs en échec : "
                      + html_escape(" | ".join(str(x)[:160] for x in echecs))
