@@ -1161,6 +1161,47 @@ except Exception as _ePe:
     check("perime : testable", False, repr(_ePe)[:200])
 
 
+# ==============================================================================
+# /resetpanels : emporter AUSSI le panneau orphelin de l autre bot
+# ==============================================================================
+try:
+    import inspect as _insRs
+    import pathlib as _plRs
+    from cogs.numeros import NumerosCog as _NcRs
+
+    _srcRs = _insRs.getsource(_NcRs.resetpanels.callback
+                              if hasattr(_NcRs.resetpanels, "callback")
+                              else _NcRs.resetpanels)
+    # Le panneau pose avant le demenagement du cog appartient a l AUTRE
+    # application : ne nettoyer que nos propres messages laissait le cadavre
+    # epingle a cote du neuf, deux panneaux identiques dont un mort.
+    check("reset : le nettoyage ne se limite plus a nos propres messages",
+          "p.author.id == me" not in _srcRs,
+          "il ne verrait toujours pas le panneau orphelin")
+    check("reset : mais il reste borne aux messages de BOT",
+          'getattr(p.author, "bot", False)' in _srcRs)
+    check("reset : et au titre de nos panneaux",
+          "any(k in t for k in titles)" in _srcRs)
+    check("reset : les deux libelles du panneau numero sont vises",
+          "Numéro & Mail" in _srcRs and "Numéros & Mails" in _srcRs,
+          "un panneau ancien libelle survivrait")
+
+    # Le titre a change en cours de route : la reconnaissance cherchait encore
+    # l ancien, qui n est pas un morceau du nouveau -> un panneau de plus a
+    # chaque passage.
+    _srcWe = _plRs.Path("cogs/welcome.py").read_text(encoding="utf-8")
+    _iWe = _srcWe.index("async def _ensure_num_panel")
+    _blocWe = _srcWe[_iWe:_iWe + 1800]
+    check("panneau : le titre reellement pose est reconnu",
+          "Numéros & Mails" in _blocWe,
+          "_ensure_num_panel reposterait un panneau a chaque passage")
+    from cogs.numeros import panel_embed as _peRs
+    check("panneau : et c est bien celui que panel_embed produit",
+          "Numéros & Mails" in (_peRs().title or ""), (_peRs().title or "")[:40])
+except Exception as _eRs:
+    check("reset : testable", False, repr(_eRs)[:200])
+
+
 print("\n" + "=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

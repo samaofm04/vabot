@@ -951,9 +951,14 @@ async def _ensure_num_panel(bot, channel):
             pins = await channel.pins()
         except Exception:
             pins = []
+        # Le titre a change en cours de route — c est « Numéros & Mails
+        # Instagram » depuis panel_embed(). La comparaison cherchait encore
+        # l ancien libelle, qui n est PAS un morceau du nouveau : le panneau
+        # n etait jamais reconnu, et chaque passage en reposait un de plus.
         for p in pins:
-            if (p.author.id == getattr(bot.user, "id", 0) and p.embeds
-                    and "Numéro & Mail" in (p.embeds[0].title or "")):
+            t = (p.embeds[0].title or "") if p.embeds else ""
+            if p.author.id == getattr(bot.user, "id", 0) and (
+                    "Numéros & Mails" in t or "Numéro & Mail" in t):
                 return True
         msg = await channel.send(embed=panel_embed(), view=NumPanelView(ncog))
         try:

@@ -434,11 +434,23 @@ class NumerosCog(commands.Cog):
         me = getattr(self.bot.user, "id", 0)
 
         async def _wipe(ch, titles):
-            """Supprime les anciens panneaux du bot (épinglés) de ce salon."""
+            """Supprime les anciens panneaux epingles de ce salon.
+
+            De N IMPORTE QUEL bot, pas seulement du notre. Le panneau pose
+            avant que le cog ne demenage appartient a l AUTRE application :
+            ses boutons ne trouvent plus personne et Discord repond « n a pas
+            repondu a temps ». En ne nettoyant que nos propres messages, le
+            reset laissait le cadavre epingle a cote du neuf — deux panneaux
+            identiques a l ecran, dont un mort, et rien pour les distinguer.
+
+            Le filet reste etroit : un message EPINGLE, d un BOT, dont le
+            titre d embed est l un des notres. Une conversation ne peut pas
+            tomber dedans.
+            """
             try:
                 for p in await ch.pins():
                     t = (p.embeds[0].title or "") if p.embeds else ""
-                    if p.author.id == me and any(k in t for k in titles):
+                    if getattr(p.author, "bot", False) and any(k in t for k in titles):
                         try:
                             await p.delete()
                         except Exception:
