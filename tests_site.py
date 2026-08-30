@@ -5078,6 +5078,42 @@ try:
         finally:
             if _savV2 is not None:
                 _fV2.write_text(_savV2, encoding="utf-8")
+
+        # -- Le diagnostic « Tester maintenant » -----------------------------
+        # Trois choses peuvent rendre l uniquification inoperante — interrupteur
+        # coupe, ffmpeg absent, ffmpeg qui refuse — et le VA recoit sa video
+        # dans les trois cas. Rien ne remontait a l ecran : on ne pouvait que
+        # constater, sur un fichier deja envoye, que les metadonnees manquaient.
+        _jD = _cIt.get("/settings/meta_test").get_json() or {}
+        check("diag : la route repond et dit si ffmpeg est la",
+              _jD.get("ok") is True and isinstance(_jD.get("ffmpeg"), bool),
+              str(_jD)[:110])
+        check("diag : elle rapporte l etat des deux interrupteurs",
+              isinstance(_jD.get("video_on"), bool)
+              and isinstance(_jD.get("photo_on"), bool))
+        if _jD.get("ffmpeg"):
+            # On ne SIMULE pas : la route passe par la meme fonction que le
+            # bouton « Video brut ». Si elle ecrit ici, elle ecrira la-bas.
+            _tD = _jD.get("tags") or {}
+            check("diag : il relit de VRAIES metadonnees sur le fichier produit",
+                  _jD.get("ecrit") is True and len(_tD) >= 4
+                  and any(k.startswith("com.apple") for k in _tD),
+                  "%d champ(s) : %s" % (len(_tD), list(_tD)[:3]))
+            check("diag : et l identite est bien une identite d iPhone",
+                  "iPhone" in str(_tD.get("com.apple.quicktime.model", "")),
+                  str(_tD.get("com.apple.quicktime.model"))[:40])
+            check("diag : le mouchard ffmpeg ne ressort pas",
+                  "encoder" not in _tD, str(_tD.get("encoder"))[:40])
+        else:
+            check("diag : sans ffmpeg, il le DIT au lieu de se taire",
+                  "ffmpeg" in (_jD.get("erreur") or "").lower(),
+                  _jD.get("erreur"))
+        check("diag : un anonyme n y a pas droit",
+              _aIt.test_client().get("/settings/meta_test").status_code == 401)
+        _pgD = _wuSite._render_video_manager()
+        check("diag : le bouton est sur la page, avec sa zone de rapport",
+              "Tester maintenant" in _pgD and "id='mt-diag'" in _pgD
+              and "onclick='mtTest(this)'" in _pgD)
     finally:
         _wuSite._load_web_users = _vraiUsersIt
         if _savIt is not None:

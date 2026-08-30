@@ -42504,6 +42504,42 @@ function vtPaint(btn,on){
   btn.textContent = on ? '🟢 ACTIVÉ — vidéos et photos · clique pour couper' : '⚪ DÉSACTIVÉ — clique pour activer';
   btn.style.background = on ? 'linear-gradient(135deg,#16a34a,#15803d)' : '#26263a';
 }
+function mtTest(btn){
+  var z=document.getElementById('mt-diag'); if(!z) return;
+  btn.disabled=true; var vieux=btn.textContent; btn.textContent='...';
+  z.style.display='block';
+  z.innerHTML='<span style=\"color:#6b7280\">Fabrication d une video de test, puis relecture de ses metadonnees...</span>';
+  fetch('/settings/meta_test',{credentials:'same-origin'})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      btn.disabled=false; btn.textContent=vieux;
+      if(!d){ z.innerHTML='Reponse illisible.'; return; }
+      var l=[];
+      l.push(ligneDiag(d.ffmpeg, d.ffmpeg?'ffmpeg present sur le serveur':'ffmpeg INTROUVABLE sur le serveur'));
+      l.push(ligneDiag(d.video_on, d.video_on?'interrupteur allume':'interrupteur COUPE — rien ne sera reecrit'));
+      var t=d.tags||{}, n=Object.keys(t).length;
+      l.push(ligneDiag(n>0, n>0?('metadonnees reellement ecrites ('+n+' champs)'):'AUCUNE metadonnee ecrite'));
+      if(d.erreur) l.push('<div style=\"color:#f87171;margin-top:6px\">'+d.erreur+'</div>');
+      if(n>0){
+        var det='';
+        for(var k in t){ det+='<div style=\"display:flex;gap:10px\"><span style=\"color:#6b7280;min-width:230px\">'+k+'</span><span>'+t[k]+'</span></div>'; }
+        l.push('<div style=\"margin-top:9px;padding-top:9px;border-top:1px solid #23283a;font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#d4d4d8\">'+det+'</div>');
+      }
+      var ok = d.ffmpeg && d.video_on && n>0;
+      l.unshift('<div style=\"font-weight:800;margin-bottom:7px;color:'+(ok?'#22c55e':'#fb923c')+'\">'
+        + (ok?'Tout fonctionne — une brute envoyee maintenant repart avec cette identite.'
+             :'Ca ne reecrit rien pour le moment. Voir ci-dessous.')+'</div>');
+      z.innerHTML=l.join('');
+    })
+    .catch(function(e){ btn.disabled=false; btn.textContent=vieux;
+      z.innerHTML='<span style=\"color:#f87171\">Erreur reseau : '+e.message+'</span>'; });
+}
+function ligneDiag(ok, texte){
+  var c = ok ? '#22c55e' : '#f87171';
+  return '<div style=\"display:flex;align-items:center;gap:8px;padding:2px 0\">'
+    + '<span style=\"width:8px;height:8px;border-radius:50%;background:'+c+';flex-shrink:0\"></span>'
+    + '<span style=\"color:#d4d4d8\">'+texte+'</span></div>';
+}
 function mtToggle(btn){
   btn.disabled=true;
   fetch('/settings/meta_toggle',{method:'POST',credentials:'same-origin'})
@@ -42584,6 +42620,19 @@ def _render_video_manager() -> str:
         "à chaque génération.<br>Les réglages ci-dessous sont des filtres d'image : ils "
         "ne s'appliquent <b>pas</b> aux brutes, et se règlent séparément (bouton "
         "Enregistrer).</div>"
+        # Le diagnostic. Trois choses peuvent rendre l'uniquification
+        # inoperante — interrupteur coupe, ffmpeg absent, ffmpeg qui refuse —
+        # et le VA recoit sa video dans les trois cas. Rien ne remontait donc
+        # jamais a l'ecran : on ne pouvait que constater, sur un fichier deja
+        # envoye, que les metadonnees manquaient.
+        "<div style='text-align:center;margin:-10px 0 16px'>"
+        "<button type='button' onclick='mtTest(this)' "
+        "style='background:transparent;border:1px solid #34343a;color:#6b7280;"
+        "padding:7px 14px;border-radius:9px;cursor:pointer;font-size:12px;"
+        "font-weight:600;font-family:inherit'>Tester maintenant</button></div>"
+        "<div id='mt-diag' style='display:none;background:#07090d;border:1px solid "
+        "#23283a;border-radius:10px;padding:13px 15px;margin-bottom:16px;"
+        "font-size:12px;line-height:1.5'></div>"
     )
 
     # Les photos ont leur PROPRE fichier de reglages
@@ -57441,6 +57490,73 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             return jsonify({"ok": True, "enabled": cfg["enabled"]})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
+
+    @app.route("/settings/meta_test")
+    def settings_meta_test():
+        """Le diagnostic : est-ce que l'uniquification marche VRAIMENT, ici, maintenant ?
+
+        Trois choses peuvent la rendre inopérante, et aucune ne se voyait :
+        l'interrupteur coupé, ffmpeg absent du VPS, ou ffmpeg présent mais qui
+        refuse d'écrire les atomes Apple. Le VA reçoit sa vidéo dans les trois
+        cas — c'est voulu, un envoi ne doit pas s'arrêter pour ça — donc rien
+        ne remonte jamais à l'écran.
+
+        On ne SIMULE pas : on fabrique une vidéo d'une seconde, on la passe
+        dans la MÊME fonction que le bouton « Vidéo brut », et on relit les
+        métadonnées du fichier produit. Ce qui est affiché est ce qui sortira.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        import json as _js_mt
+        import subprocess as _sp_mt
+        import tempfile as _tf_mt
+        rap = {"ok": True, "ffmpeg": False, "video_on": False, "photo_on": False,
+               "ecrit": False, "tags": {}, "erreur": ""}
+        try:
+            import video_transform as vt
+            import image_transform as it
+            rap["ffmpeg"] = bool(vt.is_ffmpeg_available())
+            rap["video_on"] = bool(vt.load_config().get("enabled"))
+            rap["photo_on"] = bool(it.load_config().get("enabled", True))
+            if not rap["ffmpeg"]:
+                rap["erreur"] = "ffmpeg introuvable sur le serveur"
+                return jsonify(rap)
+            with _tf_mt.TemporaryDirectory(prefix="metatest_") as d:
+                src = os.path.join(d, "src.mp4")
+                out = os.path.join(d, "out.mp4")
+                # Une seconde de mire : assez pour un conteneur MP4 valide,
+                # assez court pour que le test soit instantane.
+                _sp_mt.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+                            "-i", "testsrc=size=320x568:rate=15:duration=1",
+                            "-c:v", "libx264", "-preset", "ultrafast",
+                            "-pix_fmt", "yuv420p", src],
+                           capture_output=True, timeout=60)
+                if not os.path.exists(src):
+                    rap["erreur"] = "ffmpeg n'a pas su fabriquer la vidéo de test"
+                    return jsonify(rap)
+                # LA meme fonction que le bouton « Vidéo brut ». Si elle marche
+                # ici, elle marche la-bas.
+                vt.transform_metadata_strict(src, out)
+                rap["ecrit"] = os.path.exists(out) and os.path.getsize(out) > 0
+                if rap["ecrit"]:
+                    pr = _sp_mt.run(["ffprobe", "-v", "quiet", "-print_format",
+                                     "json", "-show_format", out],
+                                    capture_output=True, text=True, timeout=30)
+                    tags = ((_js_mt.loads(pr.stdout or "{}").get("format") or {})
+                            .get("tags") or {})
+                    rap["tags"] = {k: str(v)[:60] for k, v in tags.items()
+                                   if k.startswith(("com.apple", "make", "model",
+                                                    "creation_time", "encoder"))}
+                    if not rap["tags"]:
+                        rap["erreur"] = ("ffmpeg a bien écrit le fichier, mais AUCUNE "
+                                         "métadonnée Apple dedans")
+                else:
+                    rap["erreur"] = "ffmpeg a refusé de réécrire (voir le journal du serveur)"
+        except Exception as e:
+            rap["ok"] = False
+            rap["erreur"] = str(e)[:200]
+        return jsonify(rap)
 
     @app.route("/settings/meta_toggle", methods=["POST"])
     def settings_meta_toggle():
