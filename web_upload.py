@@ -586,10 +586,27 @@ def _toggle_disabled_reel(file_id: str) -> bool:
 
 # ---- Rushs bruts favoris (⭐) : un VRAI favori, local, sans Discord ----------
 #
-# À ne pas confondre avec banger_marks.json, qui porte le même symbole mais ne
-# fait pas la même chose : l'étoile « banger » d'un reel POSTE la vidéo dans
-# banger-{identité} et stocke un accusé de réception. Ici, l'étoile ne fait
-# que marquer ; rien n'est envoyé au clic, le VA vient chercher quand il veut.
+# À ne pas confondre avec banger_marks.json, qui porte le même symbole : c'est
+# le registre des ENVOIS, l'accusé de réception de ce qui est parti dans
+# banger-{identité}. Celui-ci est le registre des MARQUES.
+#
+# CE QUE FAIT L'ÉTOILE, EXACTEMENT — et ce n'est pas la même chose des deux côtés :
+#
+#   sur un RUSH BRUT   la marque est écrite ICI, ET la vidéo part dans
+#                      banger-{identité} (_brute_banger_discord, appelé par la
+#                      route). Deux registres sont donc touchés : celui-ci pour
+#                      la marque, banger_marks.json pour l'accusé.
+#   sur un TEMPLATE    la marque seule. La route ne déclenche l'envoi que si la
+#                      clé contient « |brutes| ».
+#
+# La marque est gardée MÊME SI l'envoi Discord échoue : « Vidéo brut Banger »
+# s'en sert, et la perdre pour une panne de salon serait pire que l'envoi
+# manqué. L'écran dit alors que c'est enregistré et que seule la copie n'est
+# pas partie.
+#
+# Cette section a longtemps affirmé « rien n'est envoyé au clic ». C'était vrai
+# à l'origine et faux depuis que l'envoi a été branché ; la documentation
+# périmée a coûté une recherche entière sur un symptôme sans rapport.
 #
 # Et surtout : partager banger_marks.json aurait été un piège.
 # _clear_banger_marks_for_identity purge par identité SANS regarder le
@@ -4271,9 +4288,18 @@ async function toggleReelDisabled(btn, fileId){
   }catch(e){ alert('Erreur réseau : ' + e); }
   finally{ btn.disabled = false; btn.style.opacity = '1'; }
 }
-// ⭐ Favori d'un rush brut. Rien n'est envoyé à Discord : on marque, c'est tout.
-// L'étoile jaune du dessus (toggleBanger) POSTE la vidéo dans le salon ; celle-ci
-// se contente d'alimenter le bouton « Montage Banger » du menu VA.
+// ⭐ Favori d'un rush brut — ET envoi dans le salon banger de l'identité.
+//
+// Deux étoiles coexistent dans ce fichier : toggleBanger (au-dessus) pour les
+// REELS, celle-ci pour les BRUTES et les TEMPLATES. Elles font aujourd'hui la
+// même chose côté Discord ; ce qui les sépare, c'est le registre de marques et
+// le sous-dossier visé.
+//
+// La marque est enregistrée AVANT l'envoi et le serveur la garde même si
+// Discord échoue. Le message le dit dans cet ordre : ce qui a marché, puis ce
+// qui n'a pas marché — l'inverse faisait croire que le clic n'avait rien fait.
+//
+// Sur un TEMPLATE, aucun envoi : la route ne le déclenche que sur « |brutes| ».
 async function toggleFavBrute(btn, fileId){
   var svg = btn.querySelector('svg');
   btn.disabled = true; btn.style.opacity = '0.55';
@@ -17954,9 +17980,11 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
                 f"<svg viewBox='0 0 24 24' width='14' height='14' fill='{_sfill}' stroke='{_sstroke}' stroke-width='{_sw}'><polygon points='12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2'/></svg>"
                 f"</button>"
             )
-        # ⭐ Favori : rushs bruts ET templates de montage. Rien n'est envoye au
-        # clic — contrairement a l'etoile banger juste au-dessus, qui poste dans
-        # Discord. Celle-ci ne fait que marquer.
+        # ⭐ Favori : rushs bruts ET templates de montage.
+        #
+        # Sur une BRUTE, ce clic envoie aussi la video dans banger-{identite},
+        # comme l'etoile des reels juste au-dessus. Sur un TEMPLATE il ne fait
+        # que marquer : la route ne declenche l'envoi que sur « |brutes| ».
         #
         # Sur les brutes elle alimente le bouton « Montage Banger » du menu VA.
         # Sur les templates elle ne sert (pour l'instant) qu'a retrouver les
@@ -45220,9 +45248,13 @@ def create_app():
     def reel_toggle_fav_brute():
         """Étoile ⭐ d'un rush brut. État persisté dans data/fav_brutes.json.
 
-        Rien n'est envoyé à Discord au clic — c'est un favori, pas un envoi.
-        Le VA récupère ses brutes favorites quand il le demande, par le bouton
-        « Montage Banger » de son menu.
+        SUR UNE BRUTE, LE CLIC ENVOIE AUSSI. La vidéo part dans
+        banger-{identité} et son accusé de réception va dans banger_marks.json.
+        Sur un TEMPLATE, rien ne part : l'appel est conditionné à « |brutes| ».
+
+        La marque est écrite d'abord et conservée même si Discord échoue — le
+        bouton « Vidéo brut Banger » du VA s'en sert, et la perdre pour une
+        panne de salon serait pire que l'envoi manqué.
 
         Placée sous /reel/ à dessein : _guard_write_routes traite tout POST
         comme une écriture et refuse par défaut pour les rôles restreints, donc

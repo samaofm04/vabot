@@ -1119,9 +1119,14 @@ def fav_brutes_for(identity, limit=15):
     """Rushs bruts marques ⭐ favoris d'une identite -> [Path].
 
     Lit data/fav_brutes.json (cle file_id = 'identity|brutes|filename', ecrite
-    par le site). ATTENTION : ce n'est PAS banger_marks.json — l'etoile des
-    reels poste dans Discord et stocke un accuse de reception, celle-ci est un
-    simple favori local. Deux fichiers, deux mecanismes, un seul symbole.
+    par le site). ATTENTION : ce n'est PAS banger_marks.json, qui porte le meme
+    symbole mais garde les ACCUSES d'envoi Discord.
+
+    Ne pas se fier a l'ancienne formule « simple favori local » : depuis que
+    l'envoi a ete branche, etoiler une brute sur le site la poste AUSSI dans
+    banger-{identite}. Ce registre-ci reste malgre tout la seule source pour
+    « Video brut Banger » -- la marque est conservee meme quand l'envoi
+    echoue.
 
     Ne garde que les fichiers encore presents sur le disque : une brute
     supprimee laisserait sinon une cle orpheline, et le VA s'entendrait
