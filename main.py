@@ -13,7 +13,7 @@ ADMIN_TOKEN = os.getenv("DISCORD_ADMIN_TOKEN")
 PREFIX = os.getenv("PREFIX", "!")
 
 # Repartition des cogs entre les 2 bots
-MAIN_COGS = ["welcome", "onboarding", "autopost", "general", "user", "cta_reminder", "noctustest", "clickrecap", "vaactivity", "sheetssync", "vasort", "tgrouter", "numeros", "telechargement"]
+MAIN_COGS = ["welcome", "onboarding", "autopost", "general", "user", "cta_reminder", "noctustest", "clickrecap", "vaactivity", "sheetssync", "vasort", "tgrouter", "numeros", "telechargement", "reportcomptes"]
 ADMIN_COGS = ["admin", "geelark"]
 
 logging.basicConfig(

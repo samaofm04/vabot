@@ -6201,6 +6201,166 @@ except Exception as _eAg:
 
 print()
 print("=" * 70)
+print("OBJECTIFS VA : combien de comptes vivants sur les N attendus")
+print("=" * 70)
+try:
+    import jb_objectifs as _obT
+    _dosOb = pathlib.Path(tempfile.mkdtemp(prefix="objectifs_"))
+    _svOb = (_obT.OBJECTIFS_FILE, _obT.HISTO_FILE)
+    _obT.OBJECTIFS_FILE = _dosOb / "obj.json"
+    _obT.HISTO_FILE = _dosOb / "histo.json"
+    try:
+        _nowOb = time.time()
+        _jourOb = _obT.aujourdhui()
+
+        def _cptOb(nom, cree_j=None, dernier_h=None, banni=False, poste=False):
+            """Rend (compte, entree de cache) pour un cas de figure."""
+            a = {"username": nom}
+            if cree_j is not None:
+                a["created_at"] = int(_nowOb - cree_j * 86400)
+            s = {}
+            if banni:
+                s["banned"] = True
+            if dernier_h is not None:
+                s["last_reel_at"] = _dtVtk.datetime.fromtimestamp(
+                    _nowOb - dernier_h * 3600, _dtVtk.timezone.utc).isoformat()
+            if poste:
+                s["reel_days"] = {_jourOb: 1}
+            return a, {nom: s}
+
+        _cOb, _sOb = [], {}
+        for _a, _s in (
+                _cptOb("publie_auj", cree_j=40, dernier_h=2, poste=True),
+                _cptOb("publie_hier", cree_j=40, dernier_h=20),
+                _cptOb("silencieux", cree_j=40, dernier_h=100),
+                _cptOb("tout_neuf", cree_j=1),
+                _cptOb("cree_ce_jour", cree_j=0),
+                _cptOb("banni", cree_j=40, dernier_h=500, banni=True)):
+            _cOb.append(_a)
+            _sOb.update(_s)
+        _eOb = _obT.etat_fiche("jessye", "VA NOUM 1X1", _cOb, _sOb, _nowOb)
+
+        check("objectif : les comptes sont tous comptés", _eOb["total"] == 6, _eOb["total"])
+        # Le coeur de la definition voulue : publie sous 48 h OU warm-up.
+        check("objectif : actif = a publié sous 48 h ou vient d être créé",
+              _eOb["actifs"] == 4, f"{_eOb['actifs']} au lieu de 4")
+        check("objectif : un banni n est jamais actif", _eOb["bannis"] == 1)
+        # Un compte en warm-up n a rien oublie : il n a pas encore commence.
+        check("objectif : le warm-up n est pas un oubli",
+              _eOb["oublies"] == 1, f"{_eOb['oublies']} oubli(s), attendu 1")
+        check("objectif : « a publié aujourd hui » se compte à part",
+              _eOb["publie"] == 1, _eOb["publie"])
+        check("objectif : « ajoutés aujourd hui » aussi",
+              _eOb["ajoutes"] == 1, _eOb["ajoutes"])
+        check("objectif : le défaut est 30", _eOb["objectif"] == 30, _eOb["objectif"])
+
+        # Le seuil s arrondit au SUPERIEUR : accepter 15 sur un objectif de 19
+        # reviendrait a valider 78,9 %, c est-a-dire moins que les 80 % annonces.
+        check("objectif : seuil 80 % arrondi au supérieur",
+              (_obT._seuil(30), _obT._seuil(19), _obT._seuil(10)) == (24, 16, 8),
+              str((_obT._seuil(30), _obT._seuil(19), _obT._seuil(10))))
+        check("objectif : un objectif nul ne fabrique pas un seuil",
+              _obT._seuil(0) == 0)
+
+        check("objectif : on peut le fixer",
+              _obT.fixer_objectif("jessye", "VA NOUM 1X1", 12) == 12)
+        check("objectif : et il est relu",
+              _obT.objectif_de("jessye", "VA NOUM 1X1") == 12)
+        # Zero serait TOUJOURS atteint : la pastille deviendrait muette sans
+        # que personne le remarque. On revient au defaut.
+        check("objectif : zéro remet au défaut, il ne pose pas zéro",
+              _obT.fixer_objectif("jessye", "VA NOUM 1X1", 0) == 30
+              and _obT.objectif_de("jessye", "VA NOUM 1X1") == 30)
+        check("objectif : une saisie absurde est bornée",
+              _obT.fixer_objectif("jessye", "VA NOUM 1X1", 99999) == 999)
+        check("objectif : du texte ne casse rien",
+              _obT.fixer_objectif("jessye", "VA NOUM 1X1", "beaucoup") == 30)
+        # La casse du nom ne doit pas fabriquer une deuxieme fiche : il se
+        # ressaisit a la main, a la commande Discord comme au dashboard.
+        _obT.fixer_objectif("jessye", "VA NOUM 1X1", 17)
+        check("objectif : la casse du nom ne crée pas une seconde fiche",
+              _obT.objectif_de("JESSYE", "va noum 1x1") == 17)
+        _obT.fixer_objectif("jessye", "VA NOUM 1X1", 0)
+
+        # Quinzaines : memes bornes que la paie et le report de clics.
+        check("quinzaine : du 1 au 15",
+              _obT.quinzaine("2026-08-07") == ("2026-08-01", "2026-08-15"))
+        check("quinzaine : du 16 à la fin du mois",
+              _obT.quinzaine("2026-08-30") == ("2026-08-16", "2026-08-31"))
+        check("quinzaine : février tombe juste",
+              _obT.quinzaine("2026-02-20") == ("2026-02-16", "2026-02-28"))
+        check("quinzaine : décembre ne déborde pas sur l année suivante",
+              _obT.quinzaine("2026-12-20") == ("2026-12-16", "2026-12-31"))
+
+        # Historique et bilan.
+        for _j, _atteint in (("2026-08-16", True), ("2026-08-17", True),
+                             ("2026-08-18", False), ("2026-08-19", True)):
+            _obT.enregistrer_jour([{"identite": "jessye", "va": "VA NOUM 1X1",
+                                    "total": 30, "actifs": 25 if _atteint else 10,
+                                    "publie": 5, "ajoutes": 0, "oublies": 2,
+                                    "bannis": 1, "objectif": 30,
+                                    "atteint": _atteint}], _j)
+        _bOb = _obT.bilan_quinzaine("jessye", "VA NOUM 1X1", "2026-08-19")
+        check("bilan : les journées notées sont comptées",
+              _bOb["jours_notes"] == 4, _bOb)
+        check("bilan : et les journées tenues aussi", _bOb["jours_tenus"] == 3, _bOb)
+        # 3 tenues sur 4 font 75 % : SOUS la barre des 80 %, donc orange. La
+        # pastille reprend le seuil de la journee, elle n a pas le sien.
+        check("bilan : la pastille suit la proportion, au même seuil que le jour",
+              _bOb["pastille"] == "🟠", _bOb)
+        # LE point : un bot a l arret a minuit ne doit pas se lire comme une
+        # journee ratee, sinon la premiere coupure punit un bon VA.
+        check("bilan : une journée sans report ne compte NI en bien ni en mal",
+              _bOb["jours_notes"] == 4 and _bOb["pct"] == 75.0, _bOb)
+        check("bilan : réécrire la même journée ne la compte pas deux fois",
+              (_obT.enregistrer_jour([{"identite": "jessye", "va": "VA NOUM 1X1",
+                                       "atteint": True, "objectif": 30}], "2026-08-19")
+               is not None)
+              and _obT.bilan_quinzaine("jessye", "VA NOUM 1X1",
+                                       "2026-08-19")["jours_notes"] == 4)
+        check("bilan : la quinzaine d à côté n est pas mélangée",
+              _obT.bilan_quinzaine("jessye", "VA NOUM 1X1", "2026-08-05")["jours_notes"] == 0)
+        # Une pastille rouge apres une seule journee condamnerait sur un
+        # echantillon de un.
+        check("bilan : pastille muette tant qu on a moins de 3 journées",
+              _obT.pastille(0, 1) == "⚪" and _obT.pastille(0, 2) == "⚪")
+        check("bilan : puis elle parle",
+              (_obT.pastille(3, 3), _obT.pastille(2, 3), _obT.pastille(1, 3))
+              == ("🟢", "🟠", "🔴"))
+
+        # Le rendu Discord : il doit tenir sans planter et dire l essentiel.
+        import cogs.reportcomptes as _rcT
+        _txtOb = _rcT.ligne_fiche(_eOb)
+        check("report : le message nomme la fiche et l identité",
+              "VA NOUM 1X1" in _txtOb and "jessye" in _txtOb)
+        check("report : il donne actifs sur objectif",
+              "4 / 30" in _txtOb or "4/30" in _txtOb, _txtOb[:200])
+        check("report : il dit ce qui a été ajouté aujourd hui",
+              "ajouté" in _txtOb, _txtOb[:200])
+        check("report : objectif non tenu -> il dit combien il manque",
+              "il manque" in _txtOb, _txtOb[-200:])
+        _pinOb = _rcT.bloc_quinzaine(
+            [{"e": _eOb, "bilan": _bOb}], "2026-08-16", "2026-08-31")
+        check("report : le message épinglé porte la pastille",
+              "🟠" in _pinOb and "VA NOUM 1X1" in _pinOb, _pinOb[:200])
+        check("report : et il explique la règle des 80 %",
+              "80 %" in _pinOb, _pinOb[:250])
+        # Discord refuse au-dela de 2000 caracteres : une liste de 40 fiches
+        # doit etre coupee proprement, pas partir en exception a minuit.
+        _longOb = _rcT.bloc_quinzaine(
+            [{"e": dict(_eOb, va=f"FICHE {_i:02d}"), "bilan": _bOb} for _i in range(60)],
+            "2026-08-16", "2026-08-31")
+        check("report : un message trop long est coupé, pas perdu",
+              len(_rcT._tronquer(_longOb)) <= 2000
+              and "tronquée" in _rcT._tronquer(_longOb), len(_rcT._tronquer(_longOb)))
+    finally:
+        (_obT.OBJECTIFS_FILE, _obT.HISTO_FILE) = _svOb
+        shutil.rmtree(_dosOb, ignore_errors=True)
+except Exception as _eOb2:
+    check("objectifs : testable", False, repr(_eOb2)[:200])
+
+print()
+print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
     print("ECHECS :")

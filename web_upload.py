@@ -30029,10 +30029,41 @@ def _render_jailbreak_html() -> str:
                     _n_ban = _sm["ban"]
                     _n_oubli = _sm["silent"]
                     _n_mois = _sm["mois"]
+                    # « Joignables », plus « actifs » : ce compteur dit
+                    # seulement que le compte répond au scrape et n'est pas
+                    # banni. Le mot « actif » désigne désormais autre chose, à
+                    # deux pastilles d'ici — un compte qui PUBLIE. Deux sens
+                    # pour un mot sur la même ligne, et personne ne sait plus
+                    # lequel on lui oppose.
                     scrape_pill += (
-                        f"<span class='jb-acc-pill ok' title='Comptes actifs (non bannis, avec données)'>"
-                        f"✓ {max(0, _n_actif)} actifs</span>"
+                        f"<span class='jb-acc-pill ok' title='Comptes qui répondent "
+                        f"au scrape et ne sont pas bannis. Ne dit rien de leurs "
+                        f"publications : voir la pastille 🎯.'>"
+                        f"✓ {max(0, _n_actif)} joignables</span>"
                     )
+                    # Objectif de la fiche : combien de comptes VIVANTS sur les
+                    # N attendus. Le calcul vit dans jb_objectifs, et c'est le
+                    # même que celui du report de minuit — sinon l'écran et le
+                    # message Discord finissent par se contredire.
+                    try:
+                        import jb_objectifs as _ob
+                        _eo = _ob.etat_fiche(ident_lc, va_name, va_accts, ig_stats_cache)
+                        _ocls2 = "ok" if _eo["atteint"] else "warn"
+                        scrape_pill += (
+                            f"<span class='jb-acc-pill {_ocls2} jb-obj-pill' "
+                            f"data-identity='{ident_safe}' data-va-name='{va_attr}' "
+                            f"data-objectif='{_eo['objectif']}' "
+                            f"onclick='jbOuvreObjectif(this)' style='cursor:pointer' "
+                            f"title=\"Comptes actifs : a publié dans les 48 h, ou créé "
+                            f"il y a moins de {_ob._regles()[1]} jours (warm-up). "
+                            f"Journée tenue à partir de {_eo['seuil']} "
+                            f"({int(_ob.SEUIL_REUSSITE * 100)} % de {_eo['objectif']}). "
+                            f"Clique pour changer l'objectif.\">"
+                            f"🎯 {_eo['actifs']}/{_eo['objectif']} actifs "
+                            f"({int(round(_eo['pct']))} %)</span>"
+                        )
+                    except Exception as _e_ob:
+                        print(f"[objectif] pastille non rendue : {_e_ob}", flush=True)
                     if _n_ban:
                         scrape_pill += (
                             f"<span class='jb-acc-pill ban' title='Comptes bannis / renommés (introuvables sur Instagram)'>"
@@ -30731,6 +30762,35 @@ def _render_jailbreak_html() -> str:
         "  var o = document.getElementById('jb-lien-overlay');"
         "  if(o) o.classList.add('show');"
         "  jbLienAction(null, 'creer');"
+        "}"
+        # === Objectif d une fiche ===
+        # Une invite suffit : c est UN nombre. Un modal de plus pour saisir un
+        # entier, c est du code a maintenir sans rien apporter au lecteur.
+        "function jbOuvreObjectif(el){"
+        "  var d = (el && el.dataset) || {};"
+        "  var actuel = d.objectif || '30';"
+        "  var rep = prompt('Objectif de comptes actifs pour ' + (d.vaName || 'cette fiche')"
+        "                   + ' ?\\n\\nUn compte actif a publie dans les 48 h, ou vient d etre'"
+        "                   + ' cree (warm-up).\\nLaisse vide ou mets 0 pour revenir au defaut.',"
+        "                   actuel);"
+        "  if(rep === null) return;"
+        "  var fd = new FormData();"
+        "  fd.append('identity', d.identity || '');"
+        "  fd.append('va_name', d.vaName || '');"
+        "  fd.append('objectif', rep);"
+        "  fd.append('ajax', '1');"
+        "  fetch('/jailbreak/objectif', {method:'POST', body:fd})"
+        "   .then(_jbJsonOrAuth)"
+        "   .then(function(j){"
+        "     if(!j) return;"
+        "     if(!j.ok){"
+        "       if(typeof showToast === 'function') showToast(j.error || 'Echec', 'error');"
+        "       return;"
+        "     }"
+        "     if(typeof showToast === 'function')"
+        "       showToast('Objectif : ' + j.objectif + ' (journee tenue a ' + j.seuil + ')', 'success');"
+        "     jbSoftRefresh();"
+        "   });"
         "}"
         "function jbFermeLien(){"
         "  var o = document.getElementById('jb-lien-overlay');"
@@ -52460,6 +52520,29 @@ def create_app():
         if ok:
             return _success(f"✓ VA <b>{old_name}</b> mise à jour", tab="jailbreak")
         return _error("✕ Mise à jour échouée (conflit de nom ou VA introuvable)", tab="jailbreak")
+
+    @app.route("/jailbreak/objectif", methods=["POST"])
+    def jailbreak_objectif():
+        """Fixe l'objectif de comptes actifs d'une fiche VA.
+
+        Zéro ou vide REMET AU DÉFAUT au lieu de poser zéro : un objectif nul
+        serait toujours atteint, ce qui rend la pastille muette sans que
+        personne s'en aperçoive.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "auth": True,
+                            "error": "Session expirée — la page va se recharger"}), 401
+        try:
+            import jb_objectifs as ob
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Module indispo : {e}"[:160]})
+        identity = (request.form.get("identity") or "").strip().lower()
+        va_name = (request.form.get("va_name") or "").strip()
+        if not identity or not va_name:
+            return jsonify({"ok": False, "error": "Identité ou nom du VA manquant"})
+        n = ob.fixer_objectif(identity, va_name, request.form.get("objectif"))
+        return jsonify({"ok": True, "objectif": n, "seuil": ob._seuil(n)})
 
     @app.route("/jailbreak/va_lien", methods=["POST"])
     def jailbreak_va_lien():
