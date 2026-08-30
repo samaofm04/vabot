@@ -5928,6 +5928,64 @@ try:
         check("portail : le compte a bien disparu",
               not any(a["username"] == "un.deux" for a in _jbVP.list_accounts("jessye")))
 
+        # ---- Fiche detaillee : un compte avec ses identifiants -------------
+        # Le VA CREE ces comptes : au moment ou il en ouvre un, il a le mot de
+        # passe et le 2FA sous les yeux. On ECRIT par cette porte, on ne RELIT
+        # jamais — un lien porteur se recopie et finit dans une conversation
+        # de groupe.
+        _hFi = _vaVP.get(_urlVP).get_data(as_text=True)
+        check("fiche : les cinq champs sont sur la page",
+              all(("id='%s'" % c) in _hFi
+                  for c in ("u-pseudo", "u-mdp", "u-2fa", "u-mail", "u-note")))
+        check("fiche : les deux facons d ajouter cohabitent",
+              _hFi.count("class='onglet'") == 2 and "id='ajout'" in _hFi)
+
+        _jFi = (_vaVP.post(_urlVP + "/ajouter_un", data={
+            "pseudo": "https://www.instagram.com/fiche.test?igsi=ZZ",
+            "mdp": "MotDePasseSecret1", "deuxfa": "AAAA BBBB CCCC DDDD",
+            "mail": "fiche@exemple.com", "note": "ouvert ce matin"}).get_json() or {})
+        check("fiche : le compte est ajoute, lien de partage compris",
+              _jFi.get("ok") is True, str(_jFi.get("error"))[:90])
+        _cptFi = [a for a in _jbVP.list_accounts("jessye")
+                  if (a.get("username") or "") == "fiche.test"]
+        check("fiche : le mot de passe, le 2FA et le mail sont bien poses",
+              len(_cptFi) == 1
+              and _cptFi[0].get("password") == "MotDePasseSecret1"
+              and _cptFi[0].get("two_fa") == "AAAA BBBB CCCC DDDD"
+              and _cptFi[0].get("email") == "fiche@exemple.com"
+              and _cptFi[0].get("notes") == "ouvert ce matin",
+              str(_cptFi[:1])[:120])
+        check("fiche : le compte tombe sous LA fiche du jeton",
+              len(_cptFi) == 1 and (_cptFi[0].get("va") or "") == "VA NOUM 1X1",
+              str(_cptFi[0].get("va") if _cptFi else "?"))
+        # Le secret ne revient JAMAIS : ni dans la reponse, ni dans la liste
+        # rendue, ni dans la page rechargee.
+        _pageFi = _vaVP.get(_urlVP).get_data(as_text=True)
+        check("fiche : rien de ce qui a ete saisi ne ressort a l ecran",
+              all(s not in str(_jFi) and s not in _pageFi
+                  for s in ("MotDePasseSecret1", "AAAA BBBB", "fiche@exemple.com")),
+              "un identifiant est relisible depuis le lien")
+        # Mais le VA doit pouvoir verifier qu il n a rien oublie.
+        check("fiche : le message dit CE QUI a ete retenu, sans la valeur",
+              "mot de passe" in (_jFi.get("msg") or "")
+              and "2FA" in (_jFi.get("msg") or ""), (_jFi.get("msg") or "")[:80])
+
+        check("fiche : sans pseudo, on le dit",
+              (_vaVP.post(_urlVP + "/ajouter_un",
+                          data={"pseudo": ""}).get_json() or {}).get("ok") is not True)
+        check("fiche : un pseudo illisible est nomme, pas avale",
+              "reels" in ((_vaVP.post(_urlVP + "/ajouter_un", data={"pseudo": "reels"}
+                                      ).get_json() or {}).get("error") or ""))
+        _jDupFi = (_vaVP.post(_urlVP + "/ajouter_un",
+                              data={"pseudo": "fiche.test"}).get_json() or {})
+        check("fiche : un doublon se dit clairement",
+              _jDupFi.get("ok") is not True and "existe" in (_jDupFi.get("error") or ""),
+              str(_jDupFi.get("error"))[:80])
+        check("fiche : un jeton inconnu n ecrit rien",
+              _vaVP.post("/mes-comptes/jeton-bidon/ajouter_un",
+                         data={"pseudo": "personne"}).status_code == 404)
+        _jbVP.remove_account("jessye", int(_cptFi[0]["id"]))
+
         # Renommer la fiche depuis le dashboard ne doit pas tuer le lien deja
         # parti sur Discord.
         #

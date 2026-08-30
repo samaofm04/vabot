@@ -614,6 +614,25 @@ textarea:focus{outline:2px solid rgba(236,72,153,.35);outline-offset:1px}
   font-size:13px;cursor:pointer;background:var(--accent);color:#fff}
 .btn:disabled{opacity:.55;cursor:default}
 .btn.gris{background:rgba(120,130,150,.16);color:var(--texte)}
+/* Les deux facons d'ajouter, cote a cote comme sur le tableau de bord : une
+   fiche detaillee pour un compte qu'on vient de creer (avec son mot de passe
+   et son 2FA), et le collage en masse pour des comptes qui existent deja. */
+.onglets{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+.onglet{border:1px solid var(--bord);background:transparent;color:var(--doux);
+  border-radius:9px;padding:7px 13px;font:inherit;font-size:12px;font-weight:700;
+  cursor:pointer}
+.onglet[aria-selected="true"]{background:var(--accent);border-color:var(--accent);
+  color:#fff}
+.champs{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+  gap:10px}
+.champ{display:flex;flex-direction:column;gap:5px;min-width:0}
+.champ span{font-size:11px;font-weight:700;color:var(--doux);letter-spacing:.2px}
+.champ span i{font-style:normal;font-weight:600;color:var(--tres-doux)}
+input[type=text],input[type=password]{width:100%;padding:9px 11px;font:inherit;
+  font-size:13px;border:1px solid var(--bord);border-radius:9px;
+  background:var(--fond);color:var(--texte)}
+input:focus,textarea:focus{outline:2px solid rgba(236,72,153,.35);outline-offset:1px}
+.secret{color:var(--tres-doux);font-size:11px;margin:10px 0 0;line-height:1.5}
 /* Deux grilles imbriquees, et c'est voulu : la ligne place pastille / nom /
    chiffres / croix, et le bloc « chiffres » aligne les colonnes entre elles.
    Une grille plate a huit colonnes s'ecroulait sur telephone — les cinq
@@ -724,6 +743,55 @@ function vpAjouter(btn){
     if(j && j.ok && ta) ta.value = '';
   });
 }
+function vpAjouterUn(btn){
+  var v = function(id){
+    var e = document.getElementById(id);
+    return (e && e.value || '').trim();
+  };
+  var pseudo = v('u-pseudo');
+  if(!pseudo){ vpMsg('Il faut au moins le pseudo', true); return; }
+  var fd = new FormData();
+  fd.append('pseudo', pseudo);
+  fd.append('mdp', v('u-mdp'));
+  fd.append('deuxfa', v('u-2fa'));
+  fd.append('mail', v('u-mail'));
+  fd.append('note', v('u-note'));
+  vpEnvoie(window.__vpBase + '/ajouter_un', fd, btn, '+ Ajouter ce compte')
+    .then(function(j){
+      // On ne vide les champs QUE si le compte est passe : sur un refus
+      // (doublon, pseudo illisible), tout retaper serait la punition de trop.
+      if(j && j.ok){
+        ['u-pseudo','u-mdp','u-2fa','u-mail','u-note'].forEach(function(id){
+          var e = document.getElementById(id);
+          if(e) e.value = '';
+        });
+        var p = document.getElementById('u-pseudo');
+        if(p) p.focus();
+      }
+    });
+}
+// Bascule entre la fiche detaillee et le collage en masse.
+document.addEventListener('click', function(ev){
+  var o = ev.target.closest ? ev.target.closest('.onglet') : null;
+  if(!o) return;
+  var vue = o.getAttribute('data-vue');
+  document.querySelectorAll('.onglet').forEach(function(b){
+    b.setAttribute('aria-selected', b.getAttribute('data-vue') === vue ? 'true' : 'false');
+  });
+  document.querySelectorAll('[data-vue]').forEach(function(z){
+    if(z.classList.contains('onglet')) return;
+    z.hidden = (z.getAttribute('data-vue') !== vue);
+  });
+});
+// Entree valide la fiche, comme partout ailleurs.
+document.addEventListener('keydown', function(ev){
+  if(ev.key !== 'Enter') return;
+  var c = ev.target.closest ? ev.target.closest('[data-vue="un"]') : null;
+  if(!c || ev.target.tagName !== 'INPUT') return;
+  ev.preventDefault();
+  var b = c.querySelector('button.btn');
+  if(b && !b.disabled) b.click();
+});
 document.addEventListener('click', function(ev){
   var b = ev.target.closest ? ev.target.closest('button.sup') : null;
   if(!b) return;
@@ -1321,12 +1389,54 @@ def register(app, deps):
             "</div>"
             "<div class='bloc'>"
             "<h2>+ Ajouter des comptes</h2>"
+            # Deux facons, comme sur le tableau de bord. La fiche detaillee
+            # sert au compte qu'on vient de creer — on a son mot de passe et
+            # son 2FA sous les yeux, c'est le moment de les poser. Le collage
+            # en masse sert aux comptes qui existent deja ailleurs.
+            "<div class='onglets' role='tablist'>"
+            "<button type='button' class='onglet' role='tab' data-vue='un' "
+            "aria-selected='true'>+ Un compte en détail</button>"
+            "<button type='button' class='onglet' role='tab' data-vue='bulk' "
+            "aria-selected='false'>⌗ Plusieurs pseudos</button>"
+            "</div>"
+            "<div data-vue='un'>"
+            "<div class='champs'>"
+            "<label class='champ'><span>Pseudo Instagram</span>"
+            "<input type='text' id='u-pseudo' autocomplete='off' autocapitalize='off' "
+            "autocorrect='off' spellcheck='false' placeholder='monpseudo'></label>"
+            "<label class='champ'><span>Mot de passe <i>(optionnel)</i></span>"
+            "<input type='text' id='u-mdp' autocomplete='off' autocapitalize='off' "
+            "autocorrect='off' spellcheck='false' placeholder='le mot de passe du compte'></label>"
+            "<label class='champ'><span>2FA <i>(clé ou codes de secours)</i></span>"
+            "<input type='text' id='u-2fa' autocomplete='off' autocapitalize='off' "
+            "autocorrect='off' spellcheck='false' placeholder='XXXX XXXX XXXX XXXX'></label>"
+            "<label class='champ'><span>E-mail <i>(optionnel)</i></span>"
+            "<input type='text' id='u-mail' autocomplete='off' autocapitalize='off' "
+            "autocorrect='off' spellcheck='false' placeholder='adresse du compte'></label>"
+            "<label class='champ'><span>Note <i>(optionnel)</i></span>"
+            "<input type='text' id='u-note' autocomplete='off' "
+            "placeholder='ce qu il faut savoir sur ce compte'></label>"
+            "</div>"
+            "<div style='margin-top:11px'>"
+            "<button type='button' class='btn' onclick='vpAjouterUn(this)'>"
+            "+ Ajouter ce compte</button>"
+            "</div>"
+            # Ce qui est saisi ici ne ressort JAMAIS a l'ecran : la liste du
+            # dessous ne montre ni mot de passe ni 2FA. Un lien porteur se
+            # recopie et finit dans une conversation de groupe — on peut
+            # ecrire par cette porte, on ne peut pas relire par elle.
+            "<p class='secret'>🔒 Le mot de passe et le 2FA sont enregistrés pour "
+            "ton manager. Ils ne réapparaissent nulle part sur cette page, même "
+            "pour toi — si quelqu'un d'autre ouvre ce lien, il ne peut rien en lire.</p>"
+            "</div>"
+            "<div data-vue='bulk' hidden>"
             "<p class='aide'>Un par ligne. Le pseudo, le @pseudo ou le lien Instagram "
             "collé depuis le partage — ce qui suit le « ? » est ignoré tout seul.</p>"
             "<textarea id='ajout' placeholder='monpseudo&#10;@autre.pseudo&#10;"
             "https://www.instagram.com/troisieme'></textarea>"
             "<div style='margin-top:9px'>"
             "<button type='button' class='btn' onclick='vpAjouter(this)'>+ Ajouter</button>"
+            "</div>"
             "</div>"
             "</div>"
             "<div id='liste'>" + _liste_html(comptes, jeton) + "</div>"
@@ -1461,6 +1571,89 @@ def register(app, deps):
 
         comptes = _comptes_de(identite, va)
         return jsonify({"ok": True, "msg": " · ".join(morceaux),
+                        "liste": _liste_html(comptes, jeton), "total": len(comptes),
+                        "pastilles": _pastilles_html(comptes, identite, va)})
+
+    @app.route(RACINE + "/<jeton>/ajouter_un", methods=["POST"])
+    def va_portail_ajouter_un(jeton):
+        """Un compte, avec ses identifiants — la fiche detaillee.
+
+        Le collage en masse ne sait poser qu'un pseudo. Or le VA CREE ces
+        comptes : au moment ou il en ouvre un, il a son mot de passe et son
+        2FA sous les yeux, et c'est le seul moment ou les noter ne coute
+        rien. Sans cette porte, ils partaient par Discord ou se perdaient.
+
+        On ECRIT par ici, on ne RELIT jamais : la liste rendue plus bas ne
+        montre ni mot de passe, ni 2FA, ni adresse. Un lien porteur se
+        recopie et finit dans une conversation de groupe — pouvoir y deposer
+        un identifiant n'oblige pas a le rendre lisible a quiconque ouvre
+        l'adresse.
+        """
+        rec = resoudre(jeton)
+        if rec is None:
+            return jsonify({"ok": False, "error": "Lien expiré — demande-en un nouveau"}), 404
+        identite, va = _norm(rec.get("identite")), _norm(rec.get("va"))
+        if not _fiche_vivante(identite, va):
+            return jsonify({"ok": False, "error": _MORTE}), 404
+
+        # Meme lecture que le collage : un lien de partage colle depuis
+        # Instagram doit marcher ici aussi, sinon la fiche detaillee est plus
+        # difficile a remplir que la boite d'a cote.
+        brut = _norm(request.form.get("pseudo"))
+        pseudo = pseudo_instagram(brut)
+        if not pseudo:
+            return jsonify({"ok": False,
+                            "error": ("Pseudo illisible : " + brut[:40]) if brut
+                                     else "Il faut au moins le pseudo"})
+
+        accorde = reserver(jeton, "ajout", 1, MAX_AJOUTS_JOUR,
+                           cibles=[pseudo], ip=_ip())
+        if accorde <= 0:
+            return jsonify({"ok": False,
+                            "error": f"Plafond du jour atteint ({MAX_AJOUTS_JOUR} ajouts). "
+                                     "Reviens demain ou passe par ton manager."})
+
+        try:
+            import jailbreak as jb
+            jb.add_account(
+                identite, pseudo,
+                password=_norm(request.form.get("mdp")),
+                email=_norm(request.form.get("mail")),
+                two_fa=_norm(request.form.get("deuxfa")),
+                notes=_norm(request.form.get("note")),
+                va=va,
+            )
+        except ValueError as e:
+            # Le doublon est le cas courant : il se dit clairement, sans
+            # ressembler a une panne.
+            return jsonify({"ok": False, "error": str(e)[:200]})
+        except Exception as e:                      # noqa: BLE001
+            log.error("va_portal: ajout detaille refuse (%s)", e)
+            return jsonify({"ok": False, "error": f"Ajout impossible : {e}"[:200]})
+
+        if callable(kick_scrape):
+            try:
+                kick_scrape([pseudo], label="va-portail")
+            except Exception as e:                  # noqa: BLE001
+                log.warning("va_portal: scrape non lance (%s)", e)
+        if callable(push_sheet):
+            try:
+                push_sheet()
+            except Exception as e:                  # noqa: BLE001
+                log.warning("va_portal: push Sheet non lance (%s)", e)
+
+        # Ce qui a ete retenu se DIT, sans jamais renvoyer la valeur : le VA
+        # doit pouvoir verifier qu'il n'a pas oublie le 2FA, sans que la
+        # reponse porte le secret.
+        poses = [nom for nom, champ in (("mot de passe", "mdp"), ("2FA", "deuxfa"),
+                                        ("e-mail", "mail"), ("note", "note"))
+                 if _norm(request.form.get(champ))]
+        message = f"@{pseudo} ajouté"
+        if poses:
+            message += " — avec " + ", ".join(poses)
+
+        comptes = _comptes_de(identite, va)
+        return jsonify({"ok": True, "msg": message,
                         "liste": _liste_html(comptes, jeton), "total": len(comptes),
                         "pastilles": _pastilles_html(comptes, identite, va)})
 
