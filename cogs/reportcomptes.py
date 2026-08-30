@@ -75,6 +75,7 @@ import asyncio
 import calendar
 import datetime
 import json
+import re
 import pathlib
 import time
 
@@ -159,7 +160,7 @@ HEURE_REPORT = 1
 #: changement de format ne se voyait qu'a la publication suivante — et on
 #: attendait 1 h du matin en croyant que ca ne marchait pas. Quand le numero
 #: stocke ne correspond plus, la boucle republie une fois, tout de suite.
-FORMAT_BILAN = 15
+FORMAT_BILAN = 16
 
 
 # ==============================================================================
@@ -301,6 +302,11 @@ def bloc_jour(etats: list, jour: str, identite: str = "") -> list:
 #: Le COMPTE, lui, reste honnete — `jours_notes` ne compte que les journees
 #: reellement mesurees, donc le score « 12/14 » ne bouge pas. Seule la bande
 #: est rouge.
+# Reconnait une ligne de fiche, et seulement elle : « <carre> **<nom>**
+# ... · 9/30 ». Le titre du bilan lui ressemble (emoji puis gras) mais ne
+# se termine pas par deux nombres separes d'une barre.
+_LIGNE_FICHE = re.compile(r"^\S+ \*\*.+?\*\*.*\d+/\d+$", re.M)
+
 _CARRES = {"tenu": "🟩", "moyen": "🟠", "rate": "🟥", "inconnu": "🟥"}
 
 
@@ -404,26 +410,37 @@ def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> li
         if (sum(_taille(y) + 1 for y in bloc)
                 + sum(_taille(y) + 1 for y in part)) > _MAX_EMBED:
             messages.append("\n".join(bloc))
-            bloc = list(tete)
+            # VIDE, plus `list(tete)`. L'en-tete pesait trois phrases et
+            # quatre cents unites, recopiees sur CHAQUE morceau : de la
+            # place perdue sur une limite qu'on sait etroite, et surtout la
+            # meme legende a relire cinq fois d'affilee. Les morceaux se
+            # suivent, celle du premier vaut pour tous.
+            #
+            # Effet de bord bienvenu : les morceaux suivants tiennent six
+            # fiches au lieu de quatre, donc il y en a moins.
+            bloc = []
         bloc.extend(part)
     messages.append("\n".join(bloc))
-    # NUMEROTER les parties. Chaque morceau porte le même en-tête : rien ne
-    # distinguait « le bilan complet » de « la moitié du bilan », et devant un
-    # message qui commence par le titre on croit légitimement l'avoir tout lu.
-    # On a cherché un bug de calcul pendant une heure alors qu'il manquait
-    # peut-être juste un message au-dessus — et faute de repère, ni lui ni moi
-    # ne pouvions trancher.
-    if len(messages) > 1:
-        n = len(messages)
-        numerotes = []
-        for i, m in enumerate(messages):
-            # On raccroche à la FIN de la première ligne, pas à « ** » : le
-            # titre se termine tantôt par le gras, tantôt par l'identité
-            # suivie. La version précédente cherchait « ** » suivi d'un saut
-            # de ligne et ne trouvait rien dès qu'un salon portait un suffixe.
-            titre, _, reste = m.partition("\n")
-            numerotes.append(f"{titre} — partie {i + 1}/{n}\n{reste}")
-        messages = numerotes
+    # RECOMPTER ce qui part vraiment. La numerotation « partie 1/6 » etait le
+    # seul signal qu'un morceau manquait, et elle vient de sauter : on remplace
+    # une devinette par une verification. Si le decoupage perd une fiche, on
+    # l'ECRIT dans le message — pas dans un journal du VPS que personne ne lit.
+    #
+    # Ce document sert a PAYER. Une fiche qui disparait sans bruit, c'est
+    # quelqu'un qui n'est pas paye, et ca s'est produit deux fois ce soir : une
+    # fois sur une exception qui emportait tout le bilan, une fois sur Discord
+    # qui tronquait a mi-message en repondant « OK ».
+    ecrites = sum(len(_LIGNE_FICHE.findall(m)) for m in messages)
+    if ecrites != len(lignes):
+        messages[-1] += (
+            f"\n\n⚠️ **{abs(len(lignes) - ecrites)} fiche(s) manquante(s)** — "
+            f"{ecrites} affichée(s) sur {len(lignes)} suivie(s). Prévenir un admin.")
+    # PAS de « partie 1/6 ». Elle servait a distinguer « le bilan complet »
+    # de « la moitie du bilan » quand chaque morceau rouvrait sur le meme
+    # titre. Un seul le porte desormais : un message sans titre est
+    # visiblement une suite, la question ne se pose plus. Et le vrai
+    # garde-fou reste le recomptage de `publier`, qui ecrit dans le message
+    # lui-meme s'il manque une fiche — un numero ne faisait que le suggerer.
     return messages
 
 
