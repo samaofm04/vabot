@@ -146,7 +146,7 @@ HEURE_REPORT = 1
 #: changement de format ne se voyait qu'a la publication suivante — et on
 #: attendait 1 h du matin en croyant que ca ne marchait pas. Quand le numero
 #: stocke ne correspond plus, la boucle republie une fois, tout de suite.
-FORMAT_BILAN = 11
+FORMAT_BILAN = 12
 
 
 # ==============================================================================
@@ -349,6 +349,12 @@ def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> li
             ""]
     if not lignes:
         return ["\n".join(tete + ["_Aucune fiche suivie pour l'instant._"])]
+    # Le NOMBRE de fiches, écrit dans le message. Sans lui, « il en manque »
+    # et « il n'y en a que six » ne se distinguent pas : on ne sait pas si le
+    # rendu a coupé ou si le calcul n'a rien trouvé de plus. On a cherché du
+    # côté du rendu alors que la réponse était peut-être dans le compte.
+    tete = list(tete)
+    tete.insert(-1, f"_{len(lignes)} fiche(s) suivie(s)._")
 
     # Meme ordre que le site, comme le report du jour.
     messages, bloc = [], list(tete)

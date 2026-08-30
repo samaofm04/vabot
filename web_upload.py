@@ -17996,7 +17996,17 @@ def _diag_bot(bot=None) -> str:
             if cog is not None:
                 jr = [getattr(c, "name", "?") for _k, c in cog.salons_report()]
                 ms = [getattr(c, "name", "?") for _k, c in cog.salons_quinzaine()]
+                # Le NOMBRE de fiches que le report voit reellement. « Il en
+                # manque » ne se distingue pas de « il n'y en a que six » sans
+                # ce chiffre : on cherche du cote du rendu alors que la
+                # reponse est dans le calcul.
+                try:
+                    import cogs.reportcomptes as _rc_diag
+                    n_fiches = len(_rc_diag.etats_du_jour())
+                except Exception as _e_nf:
+                    n_fiches = f"illisible ({str(_e_nf)[:40]})"
                 bloc += ("<br><span style='color:#666'>report des comptes — "
+                         f"{n_fiches} fiche(s) vues · "
                          f"jour : {html_escape(', '.join(jr) or 'aucun salon')} · "
                          f"mois : {html_escape(', '.join(ms) or 'aucun salon')} · "
                          f"dernier tour : {html_escape(str(getattr(cog, '_dernier_jour', '') or 'pas encore'))}"
