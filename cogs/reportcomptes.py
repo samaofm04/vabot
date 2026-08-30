@@ -377,8 +377,13 @@ def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> li
         # fiche désigne un téléphone, pas quelqu'un à qui virer de l'argent.
         qui = str(e.get("discord") or "").strip()
         qui = f" `@{qui}`" if qui else ""
-        part = [f"{b['pastille']} **{e['va']}**{qui} · {detail} · "
-                f"{e['actifs']}/{e['objectif']}"]
+        # `.get` partout, et ce n'est pas de la superstition : une fiche dont
+        # le bilan manquait levait KeyError sur 'pastille', l'exception
+        # remontait jusqu'au try/except de `publier`, et le bilan ENTIER
+        # partait en fumée — vingt et une fiches perdues pour une seule
+        # défaillante, avec pour toute trace une ligne dans un journal.
+        part = [f"{b.get('pastille') or '⚪'} **{e.get('va', '?')}**{qui} · "
+                f"{detail} · {e.get('actifs', 0)}/{e.get('objectif', 0)}"]
         carres = suite_jours(b.get("suite"), b.get("debut") or debut,
                              b.get("coupure") or 15)
         if carres:

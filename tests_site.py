@@ -6816,6 +6816,22 @@ try:
         check("mois : et toutes les fiches sont là malgré le découpage",
               sum(m.count("FICHE ") for m in _msgs22) == 22,
               sum(m.count("FICHE ") for m in _msgs22))
+        # UNE FICHE ABIMEE NE DOIT PAS EMPORTER LE BILAN ENTIER. Un bilan
+        # manquant levait KeyError sur 'pastille' ; l exception remontait au
+        # try/except de publier et les vingt et une fiches partaient en fumee,
+        # pour une seule defaillante, avec une ligne de journal pour trace.
+        _casse = [{"e": dict(_eOb, va=f"FICHE {_i:02d}"),
+                   "bilan": ({} if _i == 3 else _bMois)} for _i in range(10)]
+        _mCasse = _rcT.bloc_quinzaine(_casse, _bMois["debut"], _bMois["fin"], "j")
+        check("mois : une fiche sans bilan n emporte pas les autres",
+              sum(m.count("FICHE ") for m in _mCasse) == 10,
+              sum(m.count("FICHE ") for m in _mCasse))
+        # Et si malgre tout une fiche se perdait, le MESSAGE le dit — pas un
+        # journal. Ce sont les journaux qui ont laisse passer les trois
+        # defauts precedents de la soiree.
+        check("mois : aucune alerte quand tout est là",
+              not any("manquante" in m for m in _msgs22))
+
         check("mois : chaque morceau est numéroté",
               all(f"partie {_i + 1}/{len(_msgs22)}" in m
                   for _i, m in enumerate(_msgs22)),
