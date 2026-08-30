@@ -160,7 +160,7 @@ HEURE_REPORT = 1
 #: changement de format ne se voyait qu'a la publication suivante — et on
 #: attendait 1 h du matin en croyant que ca ne marchait pas. Quand le numero
 #: stocke ne correspond plus, la boucle republie une fois, tout de suite.
-FORMAT_BILAN = 16
+FORMAT_BILAN = 17
 
 
 # ==============================================================================
@@ -307,7 +307,8 @@ def bloc_jour(etats: list, jour: str, identite: str = "") -> list:
 # se termine pas par deux nombres separes d'une barre.
 #: Deux retours a la ligne. Ecrit ainsi parce que les antislash ne
 #: survivent pas toujours aux outils qui editent ce fichier.
-_SAUT = chr(10) + chr(10)
+_LF = chr(10)
+_SAUT = _LF + _LF
 _LIGNE_FICHE = re.compile(r"^\S+ \*\*.+?\*\*.*\d+/\d+$", re.M)
 
 _CARRES = {"tenu": "🟩", "moyen": "🟠", "rate": "🟥", "inconnu": "🟥"}
@@ -343,6 +344,47 @@ def suite_jours(suite, debut: str = "", coupure: int = 0) -> str:
     return bande
 
 
+def pied_bilan(ecartees, attendues: int, ecrites: int) -> list:
+    """Le pied du bilan, en messages SEPARES et bornes.
+
+    Il etait concatene au dernier morceau APRES le controle de taille. Le
+    decoupage tenait donc son budget de 850 unites, puis on rajoutait quatre
+    cents unites par-dessus : le dernier message repassait a 1080-1284 unites,
+    au-dela du seuil vers 1100 ou Discord repond « OK » et n'affiche pas la
+    fin. Mesure sur des donnees reelles, pas suppose.
+
+    Et ce qui se faisait manger en premier etait le PIRE : l'alarme
+    « N fiche(s) manquante(s) », ecrite en tout dernier. Le garde-fou
+    disparaissait avant le probleme qu'il signale.
+
+    D'ou deux regles : le pied ne s'ajoute plus aux morceaux de fiches, et
+    l'alarme a son PROPRE message, court, qui ne peut pas etre tronque.
+    """
+    out = []
+    if ecartees:
+        noms = [str(n) for _i, n in ecartees]
+        # Les noms sont decoupes eux aussi : vingt-sept fiches vides font une
+        # ligne plus longue que la limite a elle seule.
+        tete = (f"\U0001F6AB _{len(noms)} fiche(s) sans aucun compte "
+                f"rattaché, donc non notées :_")
+        lot, taille = [], _taille(tete)
+        for n in noms:
+            if lot and taille + _taille(n) + 2 > _MAX_EMBED:
+                out.append(tete + _SAUT + "_" + ", ".join(lot) + "_")
+                lot, taille = [], _taille(tete)
+            lot.append(n)
+            taille += _taille(n) + 2
+        if lot:
+            out.append(tete + _SAUT + "_" + ", ".join(lot) + "_")
+    if ecrites != attendues:
+        # Seule, et derniere : une alarme noyee dans un long message est une
+        # alarme qu'on ne lit pas, et une alarme tronquee n'existe pas.
+        out.append(f"\u26a0\ufe0f **{abs(attendues - ecrites)} fiche(s) "
+                   f"manquante(s)** \u2014 {ecrites} affichée(s) sur "
+                   f"{attendues} suivie(s). Prévenir un admin.")
+    return out
+
+
 def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "",
                    ecartees=None) -> list:
     """Le bilan du MOIS, une fiche par bloc, dans l'ordre du site.
@@ -370,8 +412,16 @@ def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "",
             "_Une journée est tenue quand la fiche atteint 80 % de son "
             "objectif. La barre ┃ sépare les deux quinzaines de paie._",
             ""]
+    # PAS de `return` sec ici. La sortie anticipee rendait « Aucune fiche
+    # suivie » et s'arretait AVANT de nommer les ecartees : une identite
+    # dont TOUS les telephones sont vides effacait donc tout son monde
+    # d'un coup, avec un message indiscernable de « cette identite n'a
+    # aucun VA ». C'est exactement le trou que les ecartees devaient
+    # boucher, laisse ouvert dans le cas le plus dangereux : celui ou il
+    # n'y a rien d'autre a afficher.
     if not lignes:
-        return ["\n".join(tete + ["_Aucune fiche suivie pour l'instant._"])]
+        vide = ["\n".join(tete + ["_Aucune fiche notée ce mois-ci._"])]
+        return vide + pied_bilan(ecartees, 0, 0)
     # Le NOMBRE de fiches, écrit dans le message. Sans lui, « il en manque »
     # et « il n'y en a que six » ne se distinguent pas : on ne sait pas si le
     # rendu a coupé ou si le calcul n'a rien trouvé de plus. On a cherché du
@@ -434,28 +484,17 @@ def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "",
     # quelqu'un qui n'est pas paye, et ca s'est produit deux fois ce soir : une
     # fois sur une exception qui emportait tout le bilan, une fois sur Discord
     # qui tronquait a mi-message en repondant « OK ».
-    # LES FICHES ECARTEES SONT NOMMEES. Une fiche sans aucun compte rattache
-    # ne peut pas etre notee — mais la taire rendait « qui manque ? » sans
-    # reponse : rien ne distinguait un VA qui n'existe pas d'un VA dont le
-    # telephone est vide. Et un telephone vide, sur un document de paie,
-    # c'est justement ce qu'il faut voir.
-    if ecartees:
-        noms = ", ".join(n for _i, n in ecartees)
-        messages[-1] += (
-            f"{_SAUT}🚫 _{len(ecartees)} fiche(s) sans aucun compte rattaché, "
-            f"donc non notées : {noms}._")
+    # Le pied part en messages A PART (voir pied_bilan) : le colle au
+    # dernier morceau le poussait au-dela du seuil de troncature, et
+    # emportait d'abord l'alarme.
     ecrites = sum(len(_LIGNE_FICHE.findall(m)) for m in messages)
-    if ecrites != len(lignes):
-        messages[-1] += (
-            f"\n\n⚠️ **{abs(len(lignes) - ecrites)} fiche(s) manquante(s)** — "
-            f"{ecrites} affichée(s) sur {len(lignes)} suivie(s). Prévenir un admin.")
     # PAS de « partie 1/6 ». Elle servait a distinguer « le bilan complet »
     # de « la moitie du bilan » quand chaque morceau rouvrait sur le meme
     # titre. Un seul le porte desormais : un message sans titre est
     # visiblement une suite, la question ne se pose plus. Et le vrai
     # garde-fou reste le recomptage de `publier`, qui ecrit dans le message
     # lui-meme s'il manque une fiche — un numero ne faisait que le suggerer.
-    return messages
+    return messages + pied_bilan(ecartees, len(lignes), ecrites)
 
 
 def _mois(jour: str) -> tuple:
