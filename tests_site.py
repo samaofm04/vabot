@@ -6165,6 +6165,19 @@ try:
           _cRi.startswith("ajouté le"), _cRi)
     check("premier post : et on le DIT, au lieu de laisser croire a un 1er post",
           "aucun post connu" in _bRi.lower(), _bRi[:120])
+    # Le repli sur les jours DEJA en cache : sans lui, tous les comptes deja
+    # scrapes affichaient « ajoute le … » jusqu au scrape suivant, ce qui se lit
+    # comme la reponse definitive alors que la donnee existait deja a cote.
+    _cRd, _bRd = _vpAg.anciennete(
+        {"created_at": _nowAg - 40 * 86400},
+        {"reel_days": {_jourAg(3): 1, _jourAg(27): 2}, "posts_count": 40})
+    check("premier post : à défaut, on lit les jours déjà en cache",
+          "avant" in _cRd and _jourAg(27)[8:10] in _cRd, _cRd)
+    check("premier post : ce repli reste une BORNE, jamais une date sûre",
+          "publiait déjà" in _bRd, _bRd[:90])
+    check("premier post : des clés de jour illisibles ne fabriquent pas de date",
+          _vpAg.anciennete({"created_at": _nowAg - 9 * 86400},
+                           {"reel_days": {"nimportequoi": 1}})[0].startswith("ajouté"))
     check("premier post : une date illisible ne passe pas pour une date",
           _vpAg.anciennete({"created_at": _nowAg - 9 * 86400},
                            {"premier_post_at": "pas-une-date"})[0].startswith("ajouté"))
@@ -6333,8 +6346,12 @@ try:
         _txtOb = _rcT.ligne_fiche(_eOb)
         check("report : le message nomme la fiche et l identité",
               "VA NOUM 1X1" in _txtOb and "jessye" in _txtOb)
-        check("report : il donne actifs sur objectif",
+        check("report : il donne les comptes qui tournent sur l objectif",
               "4 / 30" in _txtOb or "4/30" in _txtOb, _txtOb[:200])
+        # Le vocabulaire est celui du proprietaire : « qui tournent », pas
+        # « actifs » — ce mot designait deja autre chose sur la meme ligne.
+        check("report : il parle de comptes qui tournent",
+              "tournent" in _txtOb, _txtOb[:200])
         check("report : il dit ce qui a été ajouté aujourd hui",
               "ajouté" in _txtOb, _txtOb[:200])
         check("report : objectif non tenu -> il dit combien il manque",

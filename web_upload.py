@@ -30029,39 +30029,48 @@ def _render_jailbreak_html() -> str:
                     _n_ban = _sm["ban"]
                     _n_oubli = _sm["silent"]
                     _n_mois = _sm["mois"]
-                    # « Joignables », plus « actifs » : ce compteur dit
-                    # seulement que le compte répond au scrape et n'est pas
-                    # banni. Le mot « actif » désigne désormais autre chose, à
-                    # deux pastilles d'ici — un compte qui PUBLIE. Deux sens
-                    # pour un mot sur la même ligne, et personne ne sait plus
-                    # lequel on lui oppose.
-                    scrape_pill += (
-                        f"<span class='jb-acc-pill ok' title='Comptes qui répondent "
-                        f"au scrape et ne sont pas bannis. Ne dit rien de leurs "
-                        f"publications : voir la pastille 🎯.'>"
-                        f"✓ {max(0, _n_actif)} joignables</span>"
-                    )
-                    # Objectif de la fiche : combien de comptes VIVANTS sur les
-                    # N attendus. Le calcul vit dans jb_objectifs, et c'est le
-                    # même que celui du report de minuit — sinon l'écran et le
-                    # message Discord finissent par se contredire.
+                    # Il y avait ici une pastille « ✓ N joignables ». Elle
+                    # affichait le MÊME nombre que « ● N/M scrapés », deux
+                    # pastilles plus loin sur la même ligne, et le propriétaire
+                    # a demandé ce qu'elle voulait dire. Une pastille qui
+                    # répète sa voisine ne renseigne pas : elle fait douter des
+                    # autres. Retirée.
+                    #
+                    # Objectif de la fiche : combien de comptes TOURNENT sur
+                    # les N attendus. Le calcul vit dans jb_objectifs, et c'est
+                    # le même que celui du report de minuit — sinon l'écran et
+                    # le message Discord finissent par se contredire.
                     try:
                         import jb_objectifs as _ob
                         _eo = _ob.etat_fiche(ident_lc, va_name, va_accts, ig_stats_cache)
                         _ocls2 = "ok" if _eo["atteint"] else "warn"
+                        # « Qui tournent », le mot du propriétaire. « Actifs »
+                        # désignait déjà autre chose sur cette ligne, et le
+                        # jargon lui a fait perdre confiance dans la pastille.
                         scrape_pill += (
                             f"<span class='jb-acc-pill {_ocls2} jb-obj-pill' "
                             f"data-identity='{ident_safe}' data-va-name='{va_attr}' "
                             f"data-objectif='{_eo['objectif']}' "
                             f"onclick='jbOuvreObjectif(this)' style='cursor:pointer' "
-                            f"title=\"Comptes actifs : a publié dans les 48 h, ou créé "
-                            f"il y a moins de {_ob._regles()[1]} jours (warm-up). "
-                            f"Journée tenue à partir de {_eo['seuil']} "
+                            f"title=\"Comptes qui tournent : ont publié dans les "
+                            f"48 h. Les comptes créés il y a moins de "
+                            f"{_ob._regles()[1]} jours comptent aussi, le temps "
+                            f"du warm-up. Objectif tenu à partir de {_eo['seuil']} "
                             f"({int(_ob.SEUIL_REUSSITE * 100)} % de {_eo['objectif']}). "
                             f"Clique pour changer l'objectif.\">"
-                            f"🎯 {_eo['actifs']}/{_eo['objectif']} actifs "
+                            f"🎯 {_eo['actifs']}/{_eo['objectif']} tournent "
                             f"({int(round(_eo['pct']))} %)</span>"
                         )
+                        # Le warm-up ne se cache pas dans le compte principal :
+                        # ce sont des comptes qui n'ont encore rien publié.
+                        if _eo["warmup"]:
+                            scrape_pill += (
+                                f"<span class='jb-acc-pill quiet' title='Comptes créés "
+                                f"il y a moins de {_ob._regles()[1]} jours. Comptés "
+                                f"dans les 🎯 même sans publication : on ne reproche "
+                                f"pas à un compte neuf de ne pas encore poster.'>"
+                                f"🌱 {_eo['warmup']} en warm-up</span>"
+                            )
                     except Exception as _e_ob:
                         print(f"[objectif] pastille non rendue : {_e_ob}", flush=True)
                     if _n_ban:

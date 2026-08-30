@@ -121,15 +121,15 @@ def ligne_fiche(e: dict) -> str:
          f"Ont publié aujourd'hui : **{e['publie']}**"
          f"   ·   Oubliés (>48 h) : **{e['oublies']}**"
          + (f"   ·   Bannis : {e['bannis']}" if e["bannis"] else ""),
-         f"{marque} Actifs : **{e['actifs']} / {e['objectif']}** ({pct} %) "
+         f"{marque} Comptes qui tournent : **{e['actifs']} / {e['objectif']}** ({pct} %) "
          f"{_barre(e['actifs'], e['objectif'])}"]
     if e["warmup"]:
-        t.append(f"_dont {e['warmup']} en warm-up (créé il y a moins de 5 j, "
-                 f"compté actif même sans publication)_")
+        t.append(f"_dont {e['warmup']} en warm-up (créé il y a peu, compté "
+                 f"même sans publication)_")
     if not e["atteint"]:
         manque = max(0, e["seuil"] - e["actifs"])
         t.append(f"_Objectif du jour non tenu — il manque {manque} compte(s) "
-                 f"actif(s) pour atteindre {e['seuil']} (80 % de {e['objectif']})._")
+                 f"qui tourne(nt) pour atteindre {e['seuil']} (80 % de {e['objectif']})._")
     return "\n".join(t)
 
 

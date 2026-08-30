@@ -863,8 +863,24 @@ def anciennete(a: dict, s: dict) -> tuple:
         entree = None
 
     # --- le premier post ---
+    # Trois sources, de la meilleure a la pire, et c'est deliberé :
+    #   1. premier_post_at  — lu dans la liste brute des posts, peut etre EXACT
+    #   2. premier_jour_connu — ancien champ, plus faible, toujours une borne
+    #   3. le plus vieux jour de reel_days / post_days deja en cache
+    #
+    # La troisieme existe parce que les deux premieres ne sont ecrites qu'au
+    # PROCHAIN scrape : sans elle, tous les comptes deja scrapes affichaient
+    # « ajoute le … » pendant des heures, ce qui se lit comme la reponse
+    # definitive alors que c'est juste une donnee pas encore calculee. Ces
+    # dictionnaires sont purges a 30 jours, donc c'est une borne basse — jamais
+    # une date exacte, et l'affichage le dit.
     premier = None
     brut = str(s.get("premier_post_at") or s.get("premier_jour_connu") or "").strip()
+    if not brut:
+        jours = [str(j) for j in list((s.get("reel_days") or {}).keys())
+                 + list((s.get("post_days") or {}).keys())
+                 if len(str(j)) == 10 and str(j)[4] == "-" and str(j)[7] == "-"]
+        brut = min(jours) if jours else ""
     if brut:
         try:
             premier = _dt.date.fromisoformat(brut)
@@ -1188,23 +1204,55 @@ def register(app, deps):
         return any(isinstance(a, dict) and (a.get("va") or "").strip().lower() == vl
                    for a in (entree.get("accounts") or []))
 
-    def _pastilles_html(comptes: List[dict], identite: str = "") -> str:
+    def _pastilles_html(comptes: List[dict], identite: str = "", va: str = "") -> str:
         """Le bandeau de compteurs. Rendu au meme endroit pour la page ET pour
         les reponses d'action : sinon, apres un ajout, la liste montrait le
-        nouveau compte pendant que les pastilles juraient qu'il n'existait pas."""
-        r = _resume(comptes, stats_cache() or {}, normalize_handle)
+        nouveau compte pendant que les pastilles juraient qu'il n'existait pas.
+
+        Les chiffres viennent de `jb_objectifs`, la MEME fonction que la fiche
+        du dashboard et que le report de minuit. Le VA doit voir exactement le
+        nombre sur lequel on le juge — pas un compte approchant calcule ici.
+        """
+        stats = stats_cache() or {}
         out = []
         if identite:
             out.append(f"<span class='pill id'>@{_esc(identite)}</span>")
-        out.append(f"<span class='pill ok'>✓ {r['actif']} actifs</span>")
+        etat = None
+        if va:
+            try:
+                import jb_objectifs as _ob
+                etat = _ob.etat_fiche(identite, va, comptes, stats)
+            except Exception as e:                  # noqa: BLE001
+                log.warning("va_portal: objectif indisponible (%s)", e)
+        if etat is not None:
+            cls = "ok" if etat["atteint"] else "warn"
+            out.append(
+                f"<span class='pill {cls}' title=\"Comptes qui tournent : ont "
+                f"publié dans les 48 h. Un compte tout neuf compte aussi, le "
+                f"temps du warm-up. Objectif tenu à partir de {etat['seuil']}.\">"
+                f"🎯 {etat['actifs']}/{etat['objectif']} qui tournent "
+                f"({int(round(etat['pct']))} %)</span>")
+            if etat["warmup"]:
+                out.append(f"<span class='pill' title=\"Comptes créés il y a peu. "
+                           f"Comptés dans les 🎯 même sans publication.\">"
+                           f"🌱 {etat['warmup']} en warm-up</span>")
+            if etat["bannis"]:
+                out.append(f"<span class='pill ban'>⛔ {etat['bannis']} banni"
+                           f"{'s' if etat['bannis'] > 1 else ''}</span>")
+            if etat["jamais_scrapes"]:
+                out.append(f"<span class='pill'>◌ {etat['jamais_scrapes']} en attente</span>")
+            if etat["oublies"]:
+                out.append(f"<span class='pill warn' title=\"Aucune publication depuis "
+                           f"plus de 48 h.\">🕒 {etat['oublies']} à relancer</span>")
+            return "".join(out)
+        # Repli : le module d'objectifs est indisponible. On dit au moins ce
+        # qu'on sait plutot que de laisser un bandeau vide.
+        r = _resume(comptes, stats, normalize_handle)
         if r["ban"]:
             out.append(f"<span class='pill ban'>⛔ {r['ban']} banni"
                        f"{'s' if r['ban'] > 1 else ''}</span>")
-        if r["attente"]:
-            out.append(f"<span class='pill'>◌ {r['attente']} en attente</span>")
         if r["oubli"]:
-            out.append(f"<span class='pill warn'>🕒 {r['oubli']} oubli"
-                       f"{'s' if r['oubli'] > 1 else ''} 48h</span>")
+            out.append(f"<span class='pill warn'>🕒 {r['oubli']} à relancer</span>")
         return "".join(out)
 
     def _liste_html(comptes: List[dict], jeton: str = "") -> str:
@@ -1260,7 +1308,7 @@ def register(app, deps):
             return _refus(_MORTE)
 
         _marquer_ouverture(jeton)
-        pastilles = [_pastilles_html(comptes, identite)]
+        pastilles = [_pastilles_html(comptes, identite, va)]
 
         corps = (
             "<div class='carte'>"
@@ -1414,7 +1462,7 @@ def register(app, deps):
         comptes = _comptes_de(identite, va)
         return jsonify({"ok": True, "msg": " · ".join(morceaux),
                         "liste": _liste_html(comptes, jeton), "total": len(comptes),
-                        "pastilles": _pastilles_html(comptes)})
+                        "pastilles": _pastilles_html(comptes, identite, va)})
 
     @app.route(RACINE + "/<jeton>/retirer", methods=["POST"])
     def va_portail_retirer(jeton):
@@ -1470,6 +1518,6 @@ def register(app, deps):
         comptes = _comptes_de(identite, va)
         return jsonify({"ok": True, "msg": f"@{pseudo} retiré",
                         "liste": _liste_html(comptes, jeton), "total": len(comptes),
-                        "pastilles": _pastilles_html(comptes)})
+                        "pastilles": _pastilles_html(comptes, identite, va)})
 
     return app
