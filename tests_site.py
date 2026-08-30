@@ -4958,6 +4958,27 @@ try:
     check("brut+meta : « Telle quelle » passe aussi par la reecriture",
           "brute_a_envoyer" in _srcTq, "elle repart avec son empreinte d origine")
 
+    import web_upload as _wuSite
+    # La page de reglage a longtemps annonce « s applique au prochain /reel ».
+    # C etait faux : /reel ne lit PAS cet interrupteur (il ne lit que
+    # « supprimer la source »). Le seul endroit qui le lit, ce sont les brutes.
+    # On y a cru assez longtemps pour se demander pourquoi les brutes
+    # partaient sans que rien ne change.
+    _pgVt = _wuSite._render_video_manager()
+    _txtVt = _reFv.sub(r"\s+", " ", _reFv.sub(r"<[^>]+>", " ", _pgVt))
+    check("page meta : l interrupteur ne promet plus de s appliquer au /reel",
+          "prochain /reel" not in _txtVt,
+          "la page annonce encore un effet sur /reel")
+    check("page meta : elle dit ce qu il commande vraiment",
+          "brutes envoy" in _txtVt and "Vidéo brut" in _txtVt,
+          "elle ne nomme pas les brutes")
+    check("page meta : elle previent que l image n est pas touchee",
+          "image n'est jamais touchée" in _txtVt)
+    # « Supprimer la source apres le /reel », lui, reste VRAI : c est la seule
+    # cle que l envoi de reels lit reellement.
+    check("page meta : la mention vraie du /reel est conservee",
+          "source après le /reel" in _txtVt or "source apr" in _txtVt)
+
     # -- pseudo et name : le drapeau du site, et lui seul ---------------------
     # La regle vivait dans les deux boutons du panneau Jailbreak et nulle part
     # ailleurs : /name, /username et le menu VA l'ignoraient, donc un VA sur une
@@ -7235,6 +7256,36 @@ try:
         _bcAc.call_soon_threadsafe(_bcAc.stop)
 except Exception as _eAc:
     check("acces : testable", False, repr(_eAc)[:200])
+
+
+# ==============================================================================
+# Fond sombre pose en dur : le texte doit porter SA couleur
+# ==============================================================================
+try:
+    import re as _reTi
+    import web_upload as _wTi
+    import numgen as _ngTi
+    _svTi = (_ngTi.stock, _ngTi.balances)
+    try:
+        _ngTi.stock = lambda service="ig": {"187": 4141}
+        _ngTi.balances = lambda: {"sms": "64.77 $", "mail": "0.047 $"}
+        _hTi = _wTi._render_numgen_settings()
+    finally:
+        (_ngTi.stock, _ngTi.balances) = _svTi
+    # Un titre sans couleur herite de celle de la PAGE — noire en theme clair.
+    # Pose sur un fond sombre en dur, il devient noir sur presque noir : le
+    # bloc s affichait a moitie vide, seul le paragraphe (qui a sa couleur)
+    # se voyait.
+    for _tTi in ("Obtenir un numéro", "Panneau Discord des VA"):
+        _iTi = _hTi.find(_tTi)
+        _avTi = _hTi[max(0, _iTi - 170):_iTi] if _iTi >= 0 else ""
+        check("titres : « %s » porte sa propre couleur" % _tTi[:22],
+              _iTi >= 0 and "color:#e8eaf2" in _avTi,
+              "il herite de la page, donc invisible en theme clair")
+    check("titres : le fond sombre des deux blocs est toujours la",
+          _hTi.count("#0e1219") == 2, "%d bloc(s)" % _hTi.count("#0e1219"))
+except Exception as _eTi:
+    check("titres : testable", False, repr(_eTi)[:200])
 
 
 print("=" * 70)

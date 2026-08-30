@@ -42549,7 +42549,18 @@ def _render_video_manager() -> str:
         "font-weight:800;border:0;border-radius:12px;color:#fff;cursor:pointer;background:" + btn_bg + "'>"
         + btn_txt + "</button>"
         "<div style='font-size:11px;color:#6b7280;margin:7px 0 18px;text-align:center'>"
-        "Interrupteur instantané — s'applique au prochain /reel. Les réglages ci-dessous se règlent séparément (bouton Enregistrer).</div>"
+        # Cette ligne a longtemps annoncé « s'applique au prochain /reel ».
+        # C'était faux : /reel ne lit pas cet interrupteur, il ne lit que
+        # « supprimer la source ». Le SEUL endroit qui le lit, ce sont les
+        # vidéos brutes envoyées aux VA. On y a cru assez longtemps pour se
+        # demander pourquoi les brutes partaient sans rien changer.
+        "Interrupteur instantané — il commande les <b>vidéos brutes envoyées aux VA</b> "
+        "(« Vidéo brut », « ⭐ Vidéo brut », « Telle quelle ») : leurs métadonnées sont "
+        "réécrites à chaque envoi (modèle d'iPhone, version d'iOS, date de prise de vue, "
+        "GPS), <b>l'image n'est jamais touchée</b> — remux seul, les pixels sortent "
+        "identiques.<br>Les réglages ci-dessous sont des filtres d'image : ils ne "
+        "s'appliquent <b>pas</b> aux brutes, et se règlent séparément (bouton "
+        "Enregistrer).</div>"
     )
 
     # Mode en BARRE DU BAS façon « Instagram Preset » de TikFusion (demande
@@ -42668,7 +42679,7 @@ def _numgen_generateur_html(stock: dict, sms_ok: bool) -> str:
         "padding:16px;margin-bottom:18px'>"
         "<div style='display:flex;align-items:center;gap:10px;flex-wrap:wrap;"
         "margin-bottom:12px'>"
-        "<b style='font-size:14px'>Obtenir un numéro</b>"
+        "<b style='font-size:14px;color:#e8eaf2'>Obtenir un numéro</b>"
         "<span style='font-size:12px'>" + ou + "</span>"
         "</div>"
         "<div style='display:flex;gap:8px;flex-wrap:wrap;align-items:center'>"
@@ -42940,7 +42951,7 @@ def _render_numgen_settings() -> str:
         # qui pose la permission, lui les voit.
         "<div style='margin-top:16px;padding:13px 15px;background:#0e1219;"
         "border:1px solid #223047;border-radius:10px'>"
-        "<div style='font-size:13px;font-weight:700;margin-bottom:6px'>"
+        "<div style='font-size:13px;font-weight:700;margin-bottom:6px;color:#e8eaf2'>"
         "Panneau Discord des VA</div>"
         "<div style='font-size:12px;color:#8a91a8;line-height:1.55;margin-bottom:10px'>"
         "Si <code>/panelnumeroall</code> répond « aucun salon » alors que les "
