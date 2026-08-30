@@ -116,7 +116,7 @@ HEURE_REPORT = 1
 #: changement de format ne se voyait qu'a la publication suivante — et on
 #: attendait 1 h du matin en croyant que ca ne marchait pas. Quand le numero
 #: stocke ne correspond plus, la boucle republie une fois, tout de suite.
-FORMAT_BILAN = 8
+FORMAT_BILAN = 9
 
 
 # ==============================================================================
@@ -258,7 +258,7 @@ def bloc_jour(etats: list, jour: str, identite: str = "") -> list:
 #: Le COMPTE, lui, reste honnete — `jours_notes` ne compte que les journees
 #: reellement mesurees, donc le score « 12/14 » ne bouge pas. Seule la bande
 #: est rouge.
-_CARRES = {"tenu": "🟩", "rate": "🟥", "inconnu": "🟥"}
+_CARRES = {"tenu": "🟩", "moyen": "🟠", "rate": "🟥", "inconnu": "🟥"}
 
 
 def suite_jours(suite, debut: str = "", coupure: int = 0) -> str:
@@ -311,8 +311,9 @@ def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> li
             return j
     portee = f" · `@{identite}`" if identite else ""
     tete = [f"📌 **Bilan du mois — du {_d(debut)} au {_d(fin)}**{portee}",
-            "_Un carré par jour : 🟩 objectif tenu · 🟥 non tenu — ou pas de "
-            "report cette nuit-là, auquel cas ça ne compte pas dans le score._",
+            "_Un carré par jour : 🟩 objectif tenu · 🟠 à mi-chemin (50 % au "
+            "moins) · 🟥 loin du compte — ou pas de report cette nuit-là, "
+            "auquel cas ça ne compte pas dans le score._",
             "_Une journée est tenue quand la fiche atteint 80 % de son "
             "objectif. La barre ┃ sépare les deux quinzaines de paie._",
             ""]

@@ -4933,10 +4933,15 @@ try:
     # L interrupteur du site doit etre LU, sinon il ne sert a rien -- c est
     # exactement l etat dans lequel le module d uniquification video se
     # trouvait : reglable, annonce comme « lu par /reel », et cable dans le vide.
-    _srcEnv = _insFv.getsource(_uFv.UserCog._envoyer_brutes_meta)
+    # La decision a ete rassemblee dans brute_a_envoyer : trois boutons
+    # envoient une brute nue, et « Telle quelle » ne passait pas par la du
+    # tout -- l uniquification etait allumee et ne s appliquait pas, sans un
+    # mot. C est donc LUI qu on inspecte maintenant.
+    _srcEnv = (_insFv.getsource(_uFv.UserCog._envoyer_brutes_meta)
+               + _insFv.getsource(_uFv.brute_a_envoyer))
     check("brut+meta : l interrupteur du site est lu",
           "load_transform_config()" in _srcEnv and "enabled" in _srcEnv,
-          "aucune lecture de la config dans _envoyer_brutes_meta")
+          "aucune lecture de la config sur le chemin des brutes")
     # Le VA ne doit RIEN lire sur les metadonnees : le reglage est sur le site,
     # c est l affaire de l admin. On cherche la forme accentuee, celle des
     # messages -- les commentaires et docstrings, eux, s ecrivent sans accents.
@@ -4944,8 +4949,14 @@ try:
           "étadonnées" not in _srcEnv, "un message en parle encore")
     # Mais un echec demande-et-non-applique doit rester visible quelque part.
     check("brut+meta : l echec part au journal du serveur",
-          "actif and not reecrit" in _srcEnv and "print(" in _srcEnv,
+          "NON appliquee" in _srcEnv and "print(" in _srcEnv,
           "aucune trace serveur en cas d echec")
+    # La troisieme voie : « Telle quelle », au bout de « Choisir ma brute ».
+    # Elle envoyait le fichier tel quel depuis le disque — c est ce qui se
+    # voyait a l ecran, la video partait instantanement comme un simple envoi.
+    _srcTq = _insFv.getsource(_uFv.ChoixCaptionView._sans_caption)
+    check("brut+meta : « Telle quelle » passe aussi par la reecriture",
+          "brute_a_envoyer" in _srcTq, "elle repart avec son empreinte d origine")
 
     # -- pseudo et name : le drapeau du site, et lui seul ---------------------
     # La regle vivait dans les deux boutons du panneau Jailbreak et nulle part
@@ -6452,8 +6463,47 @@ try:
         # Deux couleurs seulement, demande deux fois. Une nuit sans report
         # s affiche donc en rouge — mais elle ne compte PAS dans le score, et
         # la legende le dit.
-        check("bilan : deux couleurs, pas de troisième",
-              set(_rcT._CARRES.values()) == {"🟩", "🟥"}, _rcT._CARRES)
+        # TROIS niveaux dans la bande, aux memes seuils que la pastille de
+        # quinzaine : un carre et une pastille ne doivent pas raconter deux
+        # histoires differentes sur le meme ecran.
+        for _a, _att in ((30, "tenu"), (24, "tenu"), (23, "moyen"),
+                         (15, "moyen"), (14, "rate"), (0, "rate")):
+            check(f"jour : {_a}/30 -> {_att}",
+                  _obT.etat_du_jour({"actifs": _a, "objectif": 30,
+                                     "atteint": _a >= 24}) == _att,
+                  _obT.etat_du_jour({"actifs": _a, "objectif": 30,
+                                     "atteint": _a >= 24}))
+        check("jour : sans chiffres, on retombe sur atteint",
+              _obT.etat_du_jour({"atteint": True}) == "tenu"
+              and _obT.etat_du_jour({"atteint": False}) == "rate")
+        # « actifs » ABSENT n est pas « actifs a zero » : les journees notees
+        # avant que ce chiffre soit garde auraient toutes vire au rouge, y
+        # compris les tenues.
+        # `atteint` FAIT FOI : c est lui qui compte dans le score, la bande ne
+        # doit jamais le contredire. enregistrer_jour ecrit « actifs: 0 » par
+        # defaut — sans cette regle, toutes les vieilles journees tenues
+        # viraient au rouge.
+        check("jour : le drapeau atteint l emporte sur le ratio",
+              _obT.etat_du_jour({"objectif": 30, "actifs": 0,
+                                 "atteint": True}) == "tenu")
+        check("jour : et la bande ne contredit jamais le score",
+              all(_obT.etat_du_jour({"objectif": 30, "actifs": _a,
+                                     "atteint": True}) == "tenu"
+                  for _a in (0, 5, 24, 30)))
+        check("bilan : trois couleurs dans la bande",
+              set(_rcT._CARRES.values()) == {"🟩", "🟠", "🟥"}, _rcT._CARRES)
+        # Le SCORE reste binaire : l orange nuance ce qu on VOIT, pas ce qu on
+        # compte — sinon « 12/14 j » ne voudrait plus rien dire au moment de payer.
+        _obT.enregistrer_jour([{"identite": "o", "va": "O", "objectif": 30,
+                                "actifs": 20, "atteint": False}], "2026-08-29")
+        _obT.enregistrer_jour([{"identite": "o", "va": "O", "objectif": 30,
+                                "actifs": 28, "atteint": True}], "2026-08-30")
+        _bO = _obT.bilan_mois("o", "O", "2026-08-30")
+        check("bilan : l orange ne compte pas comme une journée tenue",
+              (_bO["q2_tenus"], _bO["q2_notes"]) == (1, 2),
+              (_bO["q2_tenus"], _bO["q2_notes"]))
+        check("bilan : mais il se voit dans la bande",
+              _bO["suite"][-2:] == ["moyen", "tenu"], _bO["suite"][-2:])
         check("bilan : le score ignore toujours les nuits sans report",
               _obT.bilan_quinzaine("y", "Y", "2026-08-30")["jours_notes"] == 2,
               _obT.bilan_quinzaine("y", "Y", "2026-08-30"))
@@ -6524,8 +6574,8 @@ try:
               "🟩" in _pinOb and "🟥" in _pinOb, _pinOb[:220])
 
         check("bilan : les carrés traduisent la suite",
-              _rcT.suite_jours(["tenu", "rate", "inconnu"]) == "🟩🟥🟥",
-              _rcT.suite_jours(["tenu", "rate", "inconnu"]))
+              _rcT.suite_jours(["tenu", "moyen", "rate", "inconnu"]) == "🟩🟠🟥🟥",
+              _rcT.suite_jours(["tenu", "moyen", "rate", "inconnu"]))
         _pinPay = _joinOb(_rcT.bloc_quinzaine(
             [{"e": dict(_eOb, discord="noum0075"), "bilan": _bJ}],
             "2026-08-16", "2026-08-31"))

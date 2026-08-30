@@ -388,10 +388,7 @@ def bilan_quinzaine(identite: str, va: str, jour: str = "") -> dict:
     stop = min(_dt.date.fromisoformat(fin), _dt.date.fromisoformat(jour))
     while d <= stop:
         k = d.isoformat()
-        if k in dans:
-            suite.append("tenu" if dans[k].get("atteint") else "rate")
-        else:
-            suite.append("inconnu")     # pas de report ce jour-la
+        suite.append(etat_du_jour(dans[k]) if k in dans else "inconnu")
         d += _dt.timedelta(days=1)
     # La bande couvre TOUTE la quinzaine ecoulee, y compris les jours d'avant
     # la premiere mesure. Elle a un temps ete rognee de ses jours sans donnee
@@ -440,10 +437,13 @@ def bilan_mois(identite: str, va: str, jour: str = "") -> dict:
         v = jours.get(k)
         cible = q1 if cur.day <= 15 else q2
         if isinstance(v, dict):
-            tenu = bool(v.get("atteint"))
-            suite.append("tenu" if tenu else "rate")
+            suite.append(etat_du_jour(v))
             cible[1] += 1
-            cible[0] += 1 if tenu else 0
+            # Le SCORE reste binaire : une journee est tenue ou elle ne l'est
+            # pas. L'orange nuance ce qu'on VOIT, pas ce qu'on compte — sinon
+            # « 12/14 j » ne voudrait plus rien dire de precis au moment de
+            # payer.
+            cible[0] += 1 if v.get("atteint") else 0
         else:
             suite.append("inconnu")
         cur += _dt.timedelta(days=1)
@@ -460,6 +460,46 @@ def bilan_mois(identite: str, va: str, jour: str = "") -> dict:
         "pct": round(100.0 * encours[0] / encours[1], 1) if encours[1] else 0.0,
         "pastille": pastille(encours[0], encours[1]),
     }
+
+
+#: Le seuil intermediaire. Au-dessus, la journee n'est pas tenue mais elle
+#: n'est pas ratee non plus — c'est le meme decoupage que la pastille de
+#: quinzaine (80 % / 50 %), pour qu'un carre et une pastille ne racontent pas
+#: deux histoires differentes sur le meme ecran.
+SEUIL_MOYEN = 0.50
+
+
+def etat_du_jour(v) -> str:
+    """'tenu' / 'moyen' / 'rate' pour UNE journee enregistree.
+
+    Trois niveaux, pas deux : une bande tout en rouge ne distingue pas le VA
+    qui a fait vingt-trois comptes sur trente de celui qui en a fait quatre.
+    Au moment de payer, ce n'est pas la meme conversation.
+
+    On se rabat sur `atteint` quand la journee a ete enregistree avant que ces
+    chiffres soient gardes — mieux vaut deux niveaux qu'une exception.
+    """
+    if not isinstance(v, dict):
+        return "inconnu"
+    # `atteint` FAIT FOI. Il a ete calcule le jour meme, avec l'objectif du
+    # jour meme, et c'est lui qui compte dans le score. Recalculer un ratio
+    # par-dessus, c'est risquer que la bande dise vert la ou le score dit non
+    # tenu — ou l'inverse. On l'a vu tout de suite : `enregistrer_jour` ecrit
+    # « actifs: 0 » par defaut, donc toutes les vieilles journees tenues
+    # viraient au rouge.
+    if v.get("atteint"):
+        return "tenu"
+    # Le ratio ne sert qu'a DEPARTAGER les journees non tenues : celle a
+    # vingt-trois comptes sur trente n'est pas celle a quatre, et au moment de
+    # payer ce n'est pas la meme conversation.
+    try:
+        objectif = int(v.get("objectif") or 0)
+        actifs = int(v.get("actifs") or 0)
+    except Exception:
+        return "rate"
+    if objectif <= 0:
+        return "rate"
+    return "moyen" if (actifs / objectif) >= SEUIL_MOYEN else "rate"
 
 
 def pastille(tenus: int, notes: int) -> str:
