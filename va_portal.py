@@ -1051,6 +1051,7 @@ def register(app, deps):
         normalize_handle(str) -> str     handle normalise, cle du cache de stats
         stats_cache() -> dict            cache des stats Instagram par handle
         pp_locale(handle) -> Path|None   copie locale de la photo de profil
+        resolve_discord(pseudo) -> dict|None  fiche Discord (pour l'avatar du VA)
         kick_scrape(list, label=) -> int scrape immediat en arriere-plan (optionnel)
         push_sheet(snapshot) -> None     pousse le classeur Google (optionnel)
     """
@@ -1061,6 +1062,7 @@ def register(app, deps):
     stats_cache = deps.get("stats_cache") or (lambda: {})
     kick_scrape = deps.get("kick_scrape")
     push_sheet = deps.get("push_sheet")
+    resoudre_discord = deps.get("resolve_discord")
 
     def _pp_locale_defaut(handle):
         """Repli : le module de scrape sait deja ou vit la copie locale. Le
@@ -1120,6 +1122,38 @@ def register(app, deps):
         vl = (va or "").strip().lower()
         return [a for a in (entree.get("accounts") or [])
                 if isinstance(a, dict) and (a.get("va") or "").strip().lower() == vl]
+
+    def _avatar_du_va(identite: str, va: str) -> str:
+        """L'avatar Discord du VA, ou '' si on ne le connait pas.
+
+        Le dashboard affiche cette photo en tete de fiche ; le portail ne
+        montrait qu'une initiale, et c'est justement la page que le VA ouvre.
+        Il arrive de l'exterieur (cdn.discordapp.com) : il se charge sans
+        session, et `referrerpolicy=no-referrer` empeche le jeton de partir
+        dans l'en-tete Referer.
+
+        Le nom Discord est lu a chaque fois plutot que recopie dans le
+        registre des liens : le proprietaire le change depuis la fiche, et
+        une copie prise a la creation du lien aurait vieilli en silence.
+        """
+        if not callable(resoudre_discord):
+            return ""
+        try:
+            import jailbreak as jb
+            entree = jb._load().get((identite or "").lower()) or {}
+            vl = (va or "").strip().lower()
+            pseudo = ""
+            for v in (entree.get("vas") or []):
+                if _va_declare(v).lower() == vl and isinstance(v, dict):
+                    pseudo = _norm(v.get("discord_username"))
+                    break
+            if not pseudo:
+                return ""
+            info = resoudre_discord(pseudo)
+            return _norm((info or {}).get("avatar_url"))
+        except Exception as e:                      # noqa: BLE001
+            log.warning("va_portal: avatar du VA introuvable (%s)", e)
+            return ""
 
     def _fiche_vivante(identite: str, va: str) -> bool:
         """La fiche visee par le jeton existe-t-elle ENCORE dans le referentiel ?
@@ -1231,7 +1265,7 @@ def register(app, deps):
         corps = (
             "<div class='carte'>"
             "<div class='tete'>"
-            + _avatar(va)
+            + _avatar(va, photo=_avatar_du_va(identite, va))
             + "<div><h1>" + _esc(va) + "</h1>"
               "<div class='meta' id='meta'>" + "".join(pastilles) + "</div></div>"
               "<div class='compteur'><b id='total'>" + str(len(comptes)) + "</b>"

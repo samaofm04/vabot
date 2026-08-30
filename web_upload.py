@@ -14597,6 +14597,14 @@ def _premier_post(reels, ancien, posts_count: int = 0, tz=None) -> tuple:
     Une fois exacte, toujours exacte : un premier post ne bouge plus. On ne
     redescend jamais ce drapeau, même si un scrape suivant voit moins de posts.
 
+    Le test se trompe toujours du bon côté, y compris sur le chemin de repli.
+    `posts_count` compte TOUS les médias (photos, carrousels, vidéos), et la
+    liste reçue en est toujours un sous-ensemble : elle ne peut donc jamais la
+    dépasser. Quand le repli RapidAPI ne rend que les reels d'un compte qui a
+    aussi des photos, le compte s'arrête sous le total et on reste sur une
+    borne — moins précis, jamais faux. Ne pas « corriger » ça en comparant à un
+    compteur de reels : c'est ce qui ferait apparaître de fausses dates sûres.
+
     Pourquoi pas post_days. Ces dictionnaires n'enregistrent QUE les posts de
     moins de trente jours (voir la boucle de `_compute_insta_3_stats`) : ils ne
     peuvent structurellement pas remonter au premier post. Les lire pour ça
@@ -15992,6 +16000,22 @@ body.light .va-id{color:#6b7280}
                         )
                         continue
                     s = stats_cache.get(h) or {}
+                    # Depuis quand ce compte publie. La MÊME fonction que la
+                    # fiche VA et que le portail : trois écrans qui répondent à
+                    # la même question doivent répondre pareil, sinon ils
+                    # divergent au premier correctif appliqué d'un seul côté.
+                    # Ici les comptes viennent de _load_va_insta_3(), qui ne
+                    # garde que {handle, email, password, totp_seed} : pas de
+                    # created_at, donc pas de repli « ajouté le » — seule la
+                    # date de premier post s'affiche, quand elle est connue.
+                    try:
+                        import va_portal as _vp_dt
+                        _depuis, _bulle = _vp_dt.anciennete(a, s)
+                    except Exception:
+                        _depuis, _bulle = "", ""
+                    _depuis_html = (
+                        f" · <span title='{html_escape(_bulle)}' style='cursor:help'>"
+                        f"📅 {html_escape(_depuis)}</span>" if _depuis else "")
                     pp = s.get("profile_pic_url") or ""
                     pp_html = (
                         f"<img src='{pp}' class='va-ig3-row-pp' loading='lazy' referrerpolicy='no-referrer' onerror=\"this.style.display='none'\">"
@@ -16045,7 +16069,7 @@ body.light .va-id{color:#6b7280}
                         f"{pp_html}"
                         f"<div class='va-ig3-row-name'>"
                         f"<a href='https://instagram.com/{h}/' target='_blank' rel='noopener noreferrer' class='va-ig3-row-handle' onclick='event.stopPropagation()' title='Ouvrir @{h} sur Instagram'>@{h}</a>"
-                        f"<div class='va-ig3-row-platform'>Instagram</div>"
+                        + f"<div class='va-ig3-row-platform'>Instagram{_depuis_html}</div>"
                         f"</div>"
                         f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num'>{foll}</div><div class='va-ig3-row-lab'>abonnés</div></div>"
                         f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{d_v}</div><div class='va-ig3-row-lab'>vues 24h</div></div>"
@@ -28638,6 +28662,15 @@ async function glDeleteWatcher(id, btn){
         for it in items_in_grp:
             h = it.get("handle") or ""
             s = ext_stats_cache.get(h) or {}
+            # Même libellé que partout ailleurs (voir _render_account_row).
+            try:
+                import va_portal as _vp_gk
+                _dep_gk, _bul_gk = _vp_gk.anciennete(it, s)
+            except Exception:
+                _dep_gk, _bul_gk = "", ""
+            _dep_gk_html = (
+                f" · <span title='{html_escape(_bul_gk)}' style='cursor:help'>"
+                f"📅 {html_escape(_dep_gk)}</span>" if _dep_gk else "")
             pp = s.get("profile_pic_url") or ""
             has_stats = bool(s) and not s.get("error")
             def _fmt(n):
@@ -28720,7 +28753,7 @@ async function glDeleteWatcher(id, btn){
                 f"<a href='https://instagram.com/{h}/' target='_blank' rel='noopener noreferrer' "
                 f"class='va-ig3-row-handle' onclick='event.stopPropagation()' "
                 f"title='Ouvrir @{h} sur Instagram'>@{h}{ban_badge}</a>"
-                f"<div class='va-ig3-row-platform'>Externe · Insta</div>"
+                + f"<div class='va-ig3-row-platform'>Externe · Insta{_dep_gk_html}</div>"
                 f"</div>"
                 f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num'>{foll}</div><div class='va-ig3-row-lab'>abonnés</div></div>"
                 f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{d_v}</div><div class='va-ig3-row-lab'>vues 24h</div></div>"
@@ -57030,6 +57063,9 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             "pp_locale": (lambda h: __import__("insta_scraper").local_pp_path(h)),
             "kick_scrape": _kick_scrape_handles,
             "push_sheet": _jb_push_sheet_async,
+            # L'avatar Discord du VA, pour que sa page le montre comme le fait
+            # la fiche du dashboard — au lieu d'une initiale dans un rond.
+            "resolve_discord": _resolve_discord_user_by_handle,
         })
     except Exception as _vp_e:
         log.error(f"va_portal register échoué: {_vp_e}")
