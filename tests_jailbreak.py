@@ -1301,6 +1301,68 @@ except Exception as _eIc:
     check("ici : testable", False, repr(_eIc)[:200])
 
 
+# ==============================================================================
+# « ils sont pourtant la » : comparer avec ce que voit l AUTRE bot
+# ==============================================================================
+try:
+    import sys as _syCp, types as _tyCp
+    import cogs.numeros as _nuCp
+
+    class _ChCp:
+        def __init__(s, n): s.name = n
+
+    class _GuCp:
+        def __init__(s, noms): s.text_channels = [_ChCp(n) for n in noms]; s.id = 7
+
+    class _BoCp:
+        def __init__(s, g): s._g = g
+        def get_guild(s, gid): return s._g
+
+    _admCp = _GuCp(["général", "test", "sms-email"])
+    _prCp = _GuCp(["bid_a-menu", "bid_a-numero-mail",
+                   "abdoul_9684-numero-mail"] + ["x%d" % i for i in range(40)])
+    _fauxCp = _tyCp.ModuleType("main")
+    _fauxCp.main_bot = _BoCp(_prCp)
+    _fauxCp.admin_bot = None
+    _vraiCp = _syCp.modules.get("main")
+    _syCp.modules["main"] = _fauxCp
+    try:
+        _mCp = _nuCp._pourquoi_aucun_salon(_admCp, _BoCp(_admCp), ("-numero-mail",))
+    finally:
+        if _vraiCp is not None:
+            _syCp.modules["main"] = _vraiCp
+        else:
+            _syCp.modules.pop("main", None)
+
+    # Les deux bots tournent dans le meme processus : on peut trancher entre
+    # « mauvais nom » et « acces manquant » au lieu de supposer.
+    check("compare : il dit combien l AUTRE bot en voit",
+          "principal" in _mCp and "**2**" in _mCp, _mCp[-260:])
+    check("compare : et il tranche — un acces, pas un nom",
+          "pas un problème de nom" in _mCp)
+    check("compare : l issue de secours reste donnee",
+          "/panelnumero" in _mCp)
+
+    # Sans autre bot joignable, le message doit rester entier et sans trace
+    # d erreur : un diagnostic en plus ne peut pas casser celui d avant.
+    _videCp = _tyCp.ModuleType("main")
+    _videCp.main_bot = None
+    _videCp.admin_bot = None
+    _syCp.modules["main"] = _videCp
+    try:
+        _m2Cp = _nuCp._pourquoi_aucun_salon(_admCp, _BoCp(_admCp), ("-numero-mail",))
+    finally:
+        if _vraiCp is not None:
+            _syCp.modules["main"] = _vraiCp
+        else:
+            _syCp.modules.pop("main", None)
+    check("compare : sans second bot, le message tient quand meme",
+          "Voir les salons" in _m2Cp and "/panelnumero" in _m2Cp
+          and "🔎" not in _m2Cp)
+except Exception as _eCp:
+    check("compare : testable", False, repr(_eCp)[:200])
+
+
 print("\n" + "=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

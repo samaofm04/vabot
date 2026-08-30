@@ -620,6 +620,33 @@ def _pourquoi_aucun_salon(guild, bot, suffixes):
         txt.append("Si les salons existent mais n'apparaissent pas, c'est que "
                    "ce bot n'a pas la permission **Voir les salons** dessus — "
                    "un salon privé n'arrive même pas jusqu'à lui.")
+
+    # LA question qu on se pose devant ce message : « ils sont pourtant la,
+    # je les vois ». Les deux bots tournent dans le MEME processus : on peut
+    # donc demander a l autre ce qu il voit, lui, et trancher au lieu de
+    # supposer. Un salon prive n arrive qu aux applications qui y sont
+    # invitees — le bot qui a cree les tickets y est, celui qui a herite du
+    # module ne l est pas forcement.
+    try:
+        import main as _mn
+        for _autre, _nom in ((getattr(_mn, "main_bot", None), "principal"),
+                             (getattr(_mn, "admin_bot", None), "admin")):
+            if _autre is None or _autre is bot:
+                continue
+            _g2 = _autre.get_guild(getattr(guild, "id", 0))
+            if _g2 is None:
+                continue
+            _n2 = sum(1 for c in (_g2.text_channels or [])
+                      if any(_us_norm(c.name).endswith(s) for s in suffixes))
+            if _n2:
+                txt.append(
+                    "🔎 Le bot **%s**, lui, en voit **%d** sur ce serveur. "
+                    "C'est donc bien un accès qui manque à CE bot-ci, pas un "
+                    "problème de nom : ajoute-le aux catégories des VA."
+                    % (_nom, _n2))
+            break
+    except Exception:
+        pass                      # un diagnostic en plus ne doit rien casser
     # Il y a TOUJOURS une issue, et elle marche quelle que soit la cause :
     # /panelnumero ne regarde aucun nom et n a besoin de voir aucun autre
     # salon que celui ou on l appelle. Sans cette ligne, le message
