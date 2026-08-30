@@ -4978,6 +4978,69 @@ try:
     # cle que l envoi de reels lit reellement.
     check("page meta : la mention vraie du /reel est conservee",
           "source après le /reel" in _txtVt or "source apr" in _txtVt)
+    import pathlib as _plBrSite
+
+    # -- Photos : posts, stories, story CTA, PP ------------------------------
+    # Elles ont leur PROPRE fichier de reglages, separe de celui des videos, et
+    # il n avait aucune commande sur le site : impossible de savoir si c etait
+    # allume, encore moins de l eteindre.
+    import image_transform as _itSite
+    _fIt = _itSite.CONFIG_FILE
+    _savIt = _fIt.read_text(encoding="utf-8") if _fIt.exists() else None
+    _vraiUsersIt = _wuSite._load_web_users
+    _wuSite._load_web_users = lambda: {}
+    try:
+        _aIt = _wuSite.create_app()
+        _cIt = _aIt.test_client()
+        with _cIt.session_transaction() as _sIt:
+            _sIt["auth"] = True; _sIt["username"] = "admin"
+            _sIt["legacy_owner"] = True; _sIt["role"] = "owner"
+        _departIt = bool(_itSite.load_config().get("enabled", True))
+        import video_transform as _vtSite
+        _videoAvantIt = _vtSite.load_config().get("enabled")
+
+        _j1It = _cIt.post("/settings/image_transform_toggle").get_json() or {}
+        check("photos : l interrupteur bascule et s ecrit",
+              _j1It.get("ok") is True
+              and bool(_itSite.load_config().get("enabled", True)) != _departIt,
+              str(_j1It)[:90])
+        # Deux fichiers separes : basculer les photos ne doit RIEN faire aux
+        # videos, sinon on coupe les brutes en croyant regler les photos.
+        check("photos : les videos ne bougent pas",
+              _vtSite.load_config().get("enabled") == _videoAvantIt)
+        _cIt.post("/settings/image_transform_toggle")
+        check("photos : deux clics ramenent a l etat de depart",
+              bool(_itSite.load_config().get("enabled", True)) == _departIt)
+        check("photos : un anonyme ne bascule rien",
+              _aIt.test_client().post(
+                  "/settings/image_transform_toggle").status_code == 401)
+
+        _pgIt = _wuSite._render_video_manager()
+        _txtIt = _reFv.sub(r"\s+", " ", _reFv.sub(r"<[^>]+>", " ", _pgIt))
+        check("photos : la page porte leur interrupteur, et dit lesquelles",
+              "story CTA" in _txtIt and "photo de profil" in _txtIt
+              and "itToggle" in _pgIt,
+              "la section photos ne se voit pas")
+        check("photos : elle dit que le reglage est separe des videos",
+              "séparé" in _txtIt or "separe" in _txtIt)
+
+        # Les QUATRE sortes de photos doivent vraiment passer par la
+        # transformation — meme garde que pour les brutes, ou une des trois
+        # voies ne reecrivait rien.
+        _srcU2 = _plBrSite.Path("cogs/user.py").read_text(encoding="utf-8")
+        _srcAp = _plBrSite.Path("cogs/autopost.py").read_text(encoding="utf-8")
+        check("photos : les trois voies du menu passent par la transformation",
+              _srcU2.count("to_thread(transform_image") == 3,
+              "%d voie(s) sur 3" % _srcU2.count("to_thread(transform_image"))
+        check("photos : l auto-post aussi",
+              _srcAp.count("to_thread(transform_image") == 2,
+              "%d voie(s) sur 2" % _srcAp.count("to_thread(transform_image"))
+        check("photos : la PP est du lot",
+              'transform_image, pic, tmp_path, cfg, "profile"' in _srcU2)
+    finally:
+        _wuSite._load_web_users = _vraiUsersIt
+        if _savIt is not None:
+            _fIt.write_text(_savIt, encoding="utf-8")
 
     # -- pseudo et name : le drapeau du site, et lui seul ---------------------
     # La regle vivait dans les deux boutons du panneau Jailbreak et nulle part
@@ -7360,6 +7423,89 @@ try:
         _bLe.call_soon_threadsafe(_bLe.stop)
 except Exception as _eLe:
     check("lent : testable", False, repr(_eLe)[:200])
+
+
+# ==============================================================================
+# Ouvrir la categorie ne suffit pas : un salon prive garde ses propres regles
+# ==============================================================================
+try:
+    import asyncio as _aioSa, threading as _thSa
+    import web_upload as _wSa
+
+    _touchSa = []
+
+    class _OvSa:
+        def __init__(s, v=False): s.view_channel = v; s.send_messages = v
+
+    class _ChSa:
+        def __init__(s, n, deja=False): s.name = n; s._ov = _OvSa(deja)
+        def overwrites_for(s, m): return s._ov
+        async def set_permissions(s, m, **kw): _touchSa.append(("salon", s.name))
+
+    class _CatSa:
+        def __init__(s, n, ch): s.name, s.channels = n, ch
+        def overwrites_for(s, m): return _OvSa(False)
+        async def set_permissions(s, m, **kw): _touchSa.append(("cat", s.name))
+
+    class _MbSa:
+        id = 42
+
+    class _GuSa:
+        name = "Youl4b"
+        def __init__(s):
+            s.categories = [
+                _CatSa("bid_a", [_ChSa("bid_a-menu"), _ChSa("bid_a-numero-mail")]),
+                _CatSa("papote", [_ChSa("blabla")]),
+            ]
+        def get_member(s, i): return _MbSa()
+
+    class _PrSa:
+        def __init__(s, b): s.guilds = [_GuSa()]; s.loop = b
+
+    class _AdSa:
+        user = _MbSa()
+
+    _bSa = _aioSa.new_event_loop()
+    _thSa.Thread(target=_bSa.run_forever, daemon=True).start()
+    _svSa = (_wSa._BOT_REF, _wSa._BOT_ADMIN_REF)
+    try:
+        _wSa._BOT_REF, _wSa._BOT_ADMIN_REF = _PrSa(_bSa), _AdSa()
+        _aSa = _wSa.create_app()
+        _cSa = _aSa.test_client()
+        with _cSa.session_transaction() as _sSa:
+            _sSa["auth"] = True; _sSa["username"] = "admin"
+            _sSa["legacy_owner"] = True; _sSa["role"] = "owner"
+        _jSa = _cSa.post("/discord/acces_bot_admin").get_json() or {}
+        # LA correction : la permission d une categorie ne descend que dans les
+        # salons qui lui sont synchronises, et un salon prive ne l est jamais.
+        # Ouvrir 35 categories ne changeait donc rien — le bot admin n en
+        # voyait toujours qu un.
+        check("salons : chaque salon de ticket est ouvert, pas que la categorie",
+              ("salon", "bid_a-numero-mail") in _touchSa
+              and ("salon", "bid_a-menu") in _touchSa,
+              str(_touchSa)[:120])
+        check("salons : la categorie est ouverte aussi",
+              ("cat", "bid_a") in _touchSa)
+        check("salons : une categorie sans ticket reste fermee",
+              ("cat", "papote") not in _touchSa
+              and ("salon", "blabla") not in _touchSa)
+        check("salons : le compte rendu parle en SALONS",
+              "salon(s) ouvert(s)" in (_jSa.get("msg") or ""),
+              (_jSa.get("msg") or "")[:90])
+
+        # Un salon deja ouvert ne doit pas etre retouche : sinon chaque clic
+        # refait tout le parc et se fait brider pour rien.
+        _touchSa.clear()
+        for _c in _wSa._BOT_REF.guilds[0].categories[0].channels:
+            _c._ov = _OvSa(True)
+        _cSa.post("/discord/acces_bot_admin")
+        check("salons : un salon deja en ordre n est pas retouche",
+              all(k != "salon" for k, _n in _touchSa), str(_touchSa)[:100])
+    finally:
+        (_wSa._BOT_REF, _wSa._BOT_ADMIN_REF) = _svSa
+        _bSa.call_soon_threadsafe(_bSa.stop)
+except Exception as _eSa:
+    check("salons : testable", False, repr(_eSa)[:200])
 
 
 print("=" * 70)

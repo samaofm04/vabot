@@ -42504,6 +42504,18 @@ function vtPaint(btn,on){
   btn.textContent = on ? '🟢 ACTIVÉ — clique pour couper' : '⚪ DÉSACTIVÉ — clique pour activer';
   btn.style.background = on ? 'linear-gradient(135deg,#16a34a,#15803d)' : '#26263a';
 }
+function itToggle(btn){
+  btn.disabled=true;
+  fetch('/settings/image_transform_toggle',{method:'POST',credentials:'same-origin'})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      btn.disabled=false;
+      if(!d||!d.ok){ if(typeof showToast==='function') showToast('Erreur','error'); return; }
+      vtPaint(btn,d.enabled);
+      if(typeof showToast==='function') showToast(d.enabled?'✓ Photos : metadonnees ACTIVEES':'⛔ Photos : metadonnees coupees', d.enabled?'success':'info');
+    })
+    .catch(function(){ btn.disabled=false; if(typeof showToast==='function') showToast('Erreur réseau','error'); });
+}
 function vtToggle(btn){
   btn.disabled=true;
   fetch('/settings/video_transform_toggle',{method:'POST',credentials:'same-origin'})
@@ -42563,6 +42575,43 @@ def _render_video_manager() -> str:
         "Enregistrer).</div>"
     )
 
+    # ------------------------------------------------------------------
+    # PHOTOS. Elles ont leur PROPRE fichier de reglages
+    # (data/image_transform_config.json) et n avaient aucune commande sur le
+    # site : impossible de savoir si c etait allume, encore moins de
+    # l eteindre. C est allume par defaut -- mais « par defaut » n est pas une
+    # reponse quand on demande si c est actif.
+    # ------------------------------------------------------------------
+    try:
+        import image_transform as it
+        icfg = it.load_config()
+        i_on = bool(icfg.get("enabled", True))
+        pil_ok = it.is_pillow_available()
+    except Exception:
+        icfg, i_on, pil_ok = {}, False, False
+    i_txt = "🟢 ACTIVÉ — clique pour couper" if i_on else "⚪ DÉSACTIVÉ — clique pour activer"
+    i_bg = "linear-gradient(135deg,#16a34a,#15803d)" if i_on else "#26263a"
+    pil_line = "" if pil_ok else (
+        "<div style='padding:9px 13px;border-radius:8px;font-size:12px;margin-bottom:10px;"
+        "background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.35);color:#f87171'>"
+        "✕ Pillow absent sur le VPS — les photos partiront sans retouche des "
+        "métadonnées tant qu'il n'est pas installé.</div>"
+    )
+    photo_btn = (
+        "<div style='margin:26px 0 0;padding-top:20px;border-top:1px solid #23283a'>"
+        "<div style='font-size:14px;font-weight:800;color:#fff;margin-bottom:9px'>"
+        "🖼️ Photos — posts, stories, story CTA, photo de profil</div>"
+        + pil_line +
+        "<button type='button' onclick='itToggle(this)' style='width:100%;padding:15px;"
+        "font-size:15px;font-weight:800;border:0;border-radius:12px;color:#fff;"
+        "cursor:pointer;background:" + i_bg + "'>" + i_txt + "</button>"
+        "<div style='font-size:11px;color:#6b7280;margin:7px 0 4px;text-align:center'>"
+        "Réglage <b>séparé</b> de celui des vidéos, avec son propre fichier. Il "
+        "commande les photos envoyées aux VA : chaque copie repart avec ses "
+        "métadonnées EXIF réécrites (appareil, date de prise de vue, GPS d'une "
+        "vraie ville). L'image elle-même n'est pas retouchée.</div></div>"
+    )
+
     # Mode en BARRE DU BAS façon « Instagram Preset » de TikFusion (demande
     # user) : un select sombre bordé + la case « supprimer la source » à côté.
     # Même champ name='mode' (meta/full) qu'avant -> handler POST inchangé.
@@ -42603,7 +42652,7 @@ def _render_video_manager() -> str:
         "</form>"
     )
 
-    return _VT_HEAD + ff_line + toggle_btn + form
+    return _VT_HEAD + ff_line + toggle_btn + form + photo_btn
 
 
 #: Les fournisseurs numerotent les pays. « 0 » est la RUSSIE, et c'etait le
@@ -51784,34 +51833,59 @@ def create_app():
                 return str(n or "").strip().lower()
 
         async def _faire():
+            """Ouvre la CATEGORIE, puis chacun de ses salons de ticket.
+
+            La permission d une categorie ne descend que dans les salons qui
+            lui sont SYNCHRONISES. Un salon prive ne l est jamais : il porte
+            ses propres regles, c est ce qui le rend prive. Ouvrir les 35
+            categories n a donc rien change — le bot admin continuait de n en
+            voir qu un seul, celui ou il avait deja une regle a lui.
+
+            On pose donc aussi la permission sur chaque salon vise. C est long
+            (Discord bride fortement) mais c est le seul niveau qui compte.
+            """
             import discord as _dc
             faits, deja, rates, sans_membre = [], 0, [], []
+            n_salons = 0
+
+            async def _ouvrir(obj, etiquette):
+                """True si on a effectivement pose la permission."""
+                nonlocal deja
+                actuel = obj.overwrites_for(moi_admin)
+                if actuel.view_channel and actuel.send_messages:
+                    deja += 1
+                    return False
+                try:
+                    await obj.set_permissions(
+                        moi_admin, view_channel=True, send_messages=True,
+                        read_message_history=True, manage_messages=True,
+                        reason="Acces du bot admin aux panneaux des VA")
+                    return True
+                except _dc.Forbidden:
+                    rates.append(f"{etiquette} (droits insuffisants)")
+                except Exception as e:                      # noqa: BLE001
+                    rates.append(f"{etiquette} ({type(e).__name__})")
+                return False
+
             for g in list(principal.guilds or []):
                 moi_admin = g.get_member(admin.user.id) if admin.user else None
                 if moi_admin is None:
                     sans_membre.append(g.name)
                     continue
                 for cat in list(getattr(g, "categories", []) or []):
-                    # La catégorie doit porter des salons de ticket.
-                    if not any(any(_us_norm(c.name).endswith(s) for s in suffixes)
-                               for c in (cat.channels or [])):
+                    vises = [c for c in (cat.channels or [])
+                             if any(_us_norm(c.name).endswith(s) for s in suffixes)]
+                    if not vises:
                         continue
-                    actuel = cat.overwrites_for(moi_admin)
-                    if actuel.view_channel and actuel.send_messages:
-                        deja += 1
-                        continue
-                    try:
-                        await cat.set_permissions(
-                            moi_admin, view_channel=True, send_messages=True,
-                            read_message_history=True, manage_messages=True,
-                            reason="Acces du bot admin aux panneaux des VA")
+                    if await _ouvrir(cat, f"{g.name} / {cat.name}"):
                         faits.append(f"{g.name} / {cat.name}")
-                    except _dc.Forbidden:
-                        rates.append(f"{cat.name} (droits insuffisants)")
-                    except Exception as e:                  # noqa: BLE001
-                        rates.append(f"{cat.name} ({type(e).__name__})")
-                    await _aio_acces.sleep(0.35)   # on menage l'API Discord
-            return faits, deja, rates, sans_membre
+                        await _aio_acces.sleep(0.35)
+                    # Et surtout les salons eux-memes : c est la que ca compte.
+                    for ch in vises:
+                        if await _ouvrir(ch, ch.name):
+                            n_salons += 1
+                            await _aio_acces.sleep(0.35)
+            return faits, deja, rates, sans_membre, n_salons
 
         # On attend un PEU, pas la fin. Discord limite severement les
         # modifications de permissions : une seule categorie peut demander cinq
@@ -51826,7 +51900,7 @@ def create_app():
         import asyncio as _aio_acces
         fut = _aio_acces.run_coroutine_threadsafe(_faire(), boucle)
         try:
-            faits, deja, rates, sans_membre = fut.result(timeout=25)
+            faits, deja, rates, sans_membre, n_salons = fut.result(timeout=25)
         except Exception:
             return jsonify({
                 "ok": True, "encours": True,
@@ -51835,7 +51909,8 @@ def create_app():
                         "Reclique ce bouton pour voir où ça en est, "
                         "puis relance <code>/panelnumeroall</code>.")})
 
-        parts = [f"<b>{len(faits)}</b> catégorie(s) ouverte(s) au bot admin"]
+        parts = [f"<b>{n_salons}</b> salon(s) ouvert(s) au bot admin",
+                 f"{len(faits)} catégorie(s)"]
         if deja:
             parts.append(f"{deja} déjà en ordre")
         if sans_membre:
@@ -57382,6 +57457,28 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             cfg = vt.load_config()
             cfg["enabled"] = not bool(cfg.get("enabled"))
             vt.save_config(cfg)
+            return jsonify({"ok": True, "enabled": cfg["enabled"]})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+
+    @app.route("/settings/image_transform_toggle", methods=["POST"])
+    def settings_image_transform_toggle():
+        """Même interrupteur, pour les PHOTOS (posts, stories, story CTA, PP).
+
+        Les images ont leur propre fichier de réglages
+        (data/image_transform_config.json) — séparé de celui des vidéos, et il
+        n'avait aucune commande sur le site : impossible de savoir s'il était
+        allumé, encore moins de l'éteindre. Il l'est par défaut, mais « par
+        défaut » n'est pas une réponse quand on demande si c'est actif.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        try:
+            import image_transform as it
+            cfg = it.load_config()
+            cfg["enabled"] = not bool(cfg.get("enabled", True))
+            it.save_config(cfg)
             return jsonify({"ok": True, "enabled": cfg["enabled"]})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
