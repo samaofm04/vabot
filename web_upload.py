@@ -17783,6 +17783,31 @@ _VIGNETTE_ABSENTE = (
 ).encode("utf-8")
 
 
+def _diag_bot() -> str:
+    """État du bot Discord vivant dans ce processus, en une ligne.
+
+    Quand une commande slash n'apparaît pas côté Discord, il y a trois causes
+    possibles et elles se corrigent différemment : le cog n'a pas chargé
+    (erreur Python), la commande n'est pas dans l'arbre (mauvais nom, décorateur
+    manquant), ou la synchro vers Discord a échoué (limite de débit). Les logs
+    du VPS ne sont pas lisibles d'ici ; cette ligne l'est.
+
+    Ne rend que des noms de cogs et de commandes — ce qu'un membre du serveur
+    voit déjà en tapant « / ». Aucun jeton, aucun identifiant.
+    """
+    if _BOT_REF is None:
+        return "pas connecté à ce processus"
+    try:
+        cogs = sorted(getattr(_BOT_REF, "cogs", {}) or {})
+        cmds = sorted(c.name for c in _BOT_REF.tree.get_commands())
+        pret = "prêt" if getattr(_BOT_REF, "is_ready", lambda: False)() else "pas prêt"
+        return (f"{pret} · {len(cogs)} cog(s) : {html_escape(', '.join(cogs))}"
+                f"<br><span style='color:#666'>{len(cmds)} commande(s) dans "
+                f"l'arbre : {html_escape(', '.join(cmds))}</span>")
+    except Exception as e:
+        return f"état illisible ({html_escape(str(e)[:80])})"
+
+
 def _diag_ffmpeg() -> str:
     """Une phrase sur l'etat de ffmpeg, pour la page /version.
 
@@ -49135,6 +49160,12 @@ def create_app():
             # cherche du cote du navigateur pendant des heures. Autant que la
             # page qu'on ouvre deja pour verifier un deploiement le dise.
             f"<p><b>ffmpeg</b> : {_diag_ffmpeg()}</p>"
+            # Le bot vit dans CE processus, mais rien ne le disait ici. Quand
+            # une commande slash n'apparaît pas sur Discord, il faut savoir
+            # laquelle des trois causes c'est : le cog n'a pas chargé, la
+            # commande n'est pas dans l'arbre, ou la synchro a échoué. Sans
+            # cette ligne, on ne peut que deviner — et on a deviné trois fois.
+            f"<p><b>bot</b> : {_diag_bot()}</p>"
             "<p style='color:#666;font-size:13px'>Si le code affiche ici n'est pas "
             "le dernier publie, le serveur n'a pas redemarre. Si c'est bien le "
             "dernier mais que la page reste ancienne, c'est le cache du "
