@@ -1238,6 +1238,9 @@ try:
     # Le message reste envoyable : Discord coupe a 2000 caracteres.
     _m4 = _pqPq(_GuPq(["salon-tres-long-%03d" % i for i in range(300)]),
                 None, ("-numero-mail",))
+    check("pourquoi : il donne toujours une issue qui marche",
+          all("/panelnumero" in m for m in (_m1, _m2, _m3)),
+          "un message laisse l admin sans rien a faire")
     check("pourquoi : le message tient dans une reponse Discord",
           len(_m4) < 1900, "%d caracteres" % len(_m4))
 except Exception as _ePq:

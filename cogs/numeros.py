@@ -618,7 +618,15 @@ def _pourquoi_aucun_salon(guild, bot, suffixes):
                    "Donne-la-lui (ou ajoute-le au rôle qui l'a), puis relance.")
     else:
         txt.append("Si les salons existent mais n'apparaissent pas, c'est que "
-                   "ce bot n'a pas la permission **Voir les salons** dessus.")
+                   "ce bot n'a pas la permission **Voir les salons** dessus — "
+                   "un salon privé n'arrive même pas jusqu'à lui.")
+    # Il y a TOUJOURS une issue, et elle marche quelle que soit la cause :
+    # /panelnumero ne regarde aucun nom et n a besoin de voir aucun autre
+    # salon que celui ou on l appelle. Sans cette ligne, le message
+    # diagnostique laissait quand meme l admin sans rien a faire.
+    txt.append("➡️ En attendant : va **dans** le salon voulu et lance "
+               "**`/panelnumero`** — il pose le panneau là où tu es, sans "
+               "regarder le nom, et retire l'ancien.")
     return "\n".join(txt)
 
 
