@@ -925,6 +925,103 @@ except Exception as _eSt:
     check("styles : testable", False, repr(_eSt)[:200])
 
 
+# ==============================================================================
+# Mise a jour AUTOMATIQUE des menus Discord quand une pastille change
+# ==============================================================================
+try:
+    import asyncio as _aioMj
+    import threading as _thMj
+    import time as _tMj
+    import cogs.welcome as _wMj
+
+    class _SalonMj:
+        def __init__(self, nom, guild):
+            self.name, self.guild = nom, guild
+            self.id = abs(hash(nom)) % 10**9
+
+    class _GuildMj:
+        def __init__(self, nom, salons):
+            self.name = nom
+            self.text_channels = [_SalonMj(s, self) for s in salons]
+
+    class _BotMj:
+        def __init__(self, guilds, boucle):
+            self.guilds, self.loop = guilds, boucle
+            self.user = type("U", (), {"id": 1})()
+
+    _boucleMj = _aioMj.new_event_loop()
+    _thMj.Thread(target=_boucleMj.run_forever, daemon=True).start()
+    _vraiMaj = _wMj.maj_menu_marche
+    _vraiPause = _wMj.PAUSE_ENTRE_SALONS_S
+    _vraiDelai = _wMj.DELAI_REGROUPEMENT_S
+    try:
+        _botMj = _BotMj([_GuildMj("US", ["a-menu", "b-menu", "c-menu", "d-menu",
+                                         "a-content", "general"]),
+                         _GuildMj("FR", ["va-emma-menu", "annonces"])], _boucleMj)
+        _vusMj = []
+
+        async def _mouchardMj(b, ch, marche=None):
+            _vusMj.append(ch.name)
+            return True
+
+        _wMj.maj_menu_marche = _mouchardMj
+        _wMj.PAUSE_ENTRE_SALONS_S = 0.01
+        _wMj.DELAI_REGROUPEMENT_S = 0.4
+
+        _resMj = _aioMj.run_coroutine_threadsafe(
+            _wMj.rafraichir_menus_jailbreak(_botMj, raison="banc"), _boucleMj).result(timeout=60)
+        check("majmenu : seuls les salons -menu sont redessines",
+              sorted(_vusMj) == sorted(["a-menu", "b-menu", "c-menu", "d-menu",
+                                        "va-emma-menu"]),
+              str(sorted(_vusMj))[:110])
+        check("majmenu : ni les -content ni les salons ordinaires",
+              "a-content" not in _vusMj and "general" not in _vusMj
+              and "annonces" not in _vusMj)
+        check("majmenu : le bilan compte ce qui est passe",
+              _resMj == {"salons": 5, "faits": 5, "rates": 0}, str(_resMj))
+
+        # Cocher six models d affilee ne doit PAS lancer six passages sur tout
+        # le parc : les demandes proches se regroupent, la derniere gagne.
+        _vusMj.clear()
+        for _iMj in range(6):
+            _wMj.demander_rafraichissement(_botMj, raison="coche %d" % _iMj)
+            _tMj.sleep(0.03)
+        _tMj.sleep(1.6)
+        check("majmenu : une salve de coches ne donne qu un seul passage",
+              len(_vusMj) == 5, "%d edition(s) au lieu de 5" % len(_vusMj))
+
+        # Un salon qui refuse ne doit pas emporter les autres avec lui.
+        _vusMj.clear()
+
+        async def _capricieuxMj(b, ch, marche=None):
+            _vusMj.append(ch.name)
+            if ch.name == "b-menu":
+                raise RuntimeError("Discord a dit non")
+            return True
+
+        _wMj.maj_menu_marche = _capricieuxMj
+        _resMj2 = _aioMj.run_coroutine_threadsafe(
+            _wMj.rafraichir_menus_jailbreak(_botMj, raison="banc2"), _boucleMj).result(timeout=60)
+        check("majmenu : un salon en panne n arrete pas la tournee",
+              _resMj2["salons"] == 5 and _resMj2["faits"] == 4
+              and _resMj2["rates"] == 1, str(_resMj2))
+
+        # Le site tourne aussi sans bot (poste local, bot a l arret) : la
+        # demande doit se taire, pas lever.
+        check("majmenu : sans bot, on ne reveille rien et on ne plante pas",
+              _wMj.demander_rafraichissement(None, raison="rien") is False)
+        check("majmenu : sans boucle vivante non plus",
+              _wMj.demander_rafraichissement(
+                  type("B", (), {"loop": None})(), raison="rien") is False)
+    finally:
+        _wMj.maj_menu_marche = _vraiMaj
+        _wMj.PAUSE_ENTRE_SALONS_S = _vraiPause
+        _wMj.DELAI_REGROUPEMENT_S = _vraiDelai
+        _boucleMj.call_soon_threadsafe(_boucleMj.stop)
+except Exception as _eMj:
+    check("majmenu : testable", False, repr(_eMj)[:200])
+
+
 print("\n" + "=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

@@ -47403,12 +47403,27 @@ def create_app():
             # qu on croit cochee et qui ne s affichera nulle part.
             return jsonify({"ok": False,
                             "error": "style inconnu : " + ", ".join(inconnus[:4])})
+        avant = identity_styles(ident)
         if not _set_identity_styles(ident, demandes):
             return jsonify({"ok": False, "error": "écriture impossible"})
         _invalidate_all_ttl_cache()
         poses = identity_styles(ident)
+        # Les menus Discord portent les mêmes pastilles, mais un message posté
+        # ne se redessine pas tout seul : sans ce rappel il fallait relancer
+        # /resetmenus à la main après chaque coche, et on l'oubliait. La
+        # demande est REGROUPÉE côté bot (on coche plusieurs models d'affilée)
+        # et ne bloque pas la réponse — le site n'attend jamais Discord.
+        menus = False
+        if poses != avant:
+            try:
+                from cogs.welcome import demander_rafraichissement
+                menus = bool(demander_rafraichissement(
+                    _BOT_REF, raison=f"styles de {ident}"))
+            except Exception as e:
+                log.warning(f"identity_styles: menus Discord non prévenus ({e})")
         return jsonify({"ok": True, "identity": ident, "styles": poses,
-                        "badges": _style_badges_html(ident, 11)})
+                        "badges": _style_badges_html(ident, 11),
+                        "menus_discord": menus})
 
     @app.route("/identity/rename", methods=["POST"])
     def identity_rename():

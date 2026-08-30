@@ -789,6 +789,99 @@ async def maj_menu_marche(bot, channel, marche=None):
         return False
 
 
+#: Repos entre deux editions de menu. Discord repond 429 bien avant qu on
+#: ait fini un parc de plusieurs dizaines de salons.
+PAUSE_ENTRE_SALONS_S = 1.2
+
+
+async def rafraichir_menus_jailbreak(bot, raison=""):
+    """Repasse sur TOUS les menus Jailbreak epingles et les redessine.
+
+    Un message Discord ne se redessine pas tout seul : le libelle d un bouton
+    est cuit au moment de l envoi. Cocher une pastille sur le site ne changeait
+    donc rien aux menus deja poses — il fallait relancer /resetmenus a la main
+    apres chaque coche, et on l oubliait.
+
+    On EDITE le message epingle (maj_menu_marche), on ne repose pas : reposter
+    laisserait deux menus dans le salon et ferait remonter le message tout en
+    bas, loin des epingles.
+
+    Le marche de chaque salon est celui de son PROPRIETAIRE, decide par
+    maj_menu_marche : un salon FR garde ses models FR, ce passage ne doit
+    surtout pas uniformiser tout le monde sur US.
+
+    Une pause entre deux salons : sur le serveur US il y a un -menu par VA,
+    donc quelques dizaines d editions a la suite. Sans elle, Discord repond
+    429 et la moitie du parc garde ses vieux libelles sans un mot. Elle est
+    reglable pour que le banc d essai n ait pas a attendre une minute.
+    """
+    if bot is None:
+        return {"salons": 0, "faits": 0, "rates": 0}
+    faits = rates = vus = 0
+    for guild in list(getattr(bot, "guilds", []) or []):
+        for ch in list(getattr(guild, "text_channels", []) or []):
+            if not str(getattr(ch, "name", "")).endswith("-menu"):
+                continue
+            vus += 1
+            try:
+                if await maj_menu_marche(bot, ch):
+                    faits += 1
+                else:
+                    rates += 1
+            except Exception as e:
+                rates += 1
+                log.warning(f"rafraichir_menus_jailbreak {ch.name}: {e}")
+            await asyncio.sleep(PAUSE_ENTRE_SALONS_S)
+    log.info("menus Jailbreak redessines (%s) : %d/%d salon(s), %d echec(s)",
+             raison or "sans raison donnee", faits, vus, rates)
+    return {"salons": vus, "faits": faits, "rates": rates}
+
+
+#: Un seul rafraichissement en vol, et pas un par coche. Le proprietaire coche
+#: quatre pastilles sur six models d affilee : sans ce garde-fou, ce sont six
+#: passages complets sur tout le parc qui se marchent dessus. Le dernier appel
+#: gagne, et il part apres un court repos — le temps que la salve se termine.
+_REFRESH = {"tache": None, "quand": 0.0}
+DELAI_REGROUPEMENT_S = 8.0
+
+
+def demander_rafraichissement(bot, raison="", delai=None):
+    """Programme UN redessinage des menus, en regroupant les demandes proches.
+
+    Appelee depuis le site, donc depuis un autre thread : elle ne fait que
+    poser la tache sur la boucle du bot et rend la main tout de suite. Le site
+    ne doit jamais attendre Discord pour repondre a un clic.
+    """
+    if bot is None:
+        return False
+    boucle = getattr(bot, "loop", None)
+    if boucle is None or not boucle.is_running():
+        return False
+    attente = DELAI_REGROUPEMENT_S if delai is None else float(delai)
+
+    async def _plus_tard():
+        try:
+            await asyncio.sleep(attente)
+            await rafraichir_menus_jailbreak(bot, raison=raison)
+        except asyncio.CancelledError:
+            pass                      # une demande plus recente a pris la main
+        except Exception as e:
+            log.warning(f"demander_rafraichissement: {e}")
+
+    def _poser():
+        ancienne = _REFRESH.get("tache")
+        if ancienne is not None and not ancienne.done():
+            ancienne.cancel()
+        _REFRESH["tache"] = boucle.create_task(_plus_tard())
+
+    try:
+        boucle.call_soon_threadsafe(_poser)
+        return True
+    except Exception as e:
+        log.warning(f"demander_rafraichissement (pose): {e}")
+        return False
+
+
 async def _ensure_us_panel(bot, channel):
     """Second message PERMANENT : le panneau d'actions, qui suit la model
     choisie dans le menu du dessus. Les deux restent affiches en
