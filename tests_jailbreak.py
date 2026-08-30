@@ -1022,6 +1022,87 @@ except Exception as _eMj:
     check("majmenu : testable", False, repr(_eMj)[:200])
 
 
+# ==============================================================================
+# Brutes nues : toutes les voies doivent passer par la MEME reecriture
+# ==============================================================================
+try:
+    import asyncio as _aioBr
+    import tempfile as _tmpBr
+    import pathlib as _plBr
+    import cogs.user as _uBr
+
+    _dosBr = _plBr.Path(_tmpBr.mkdtemp(prefix="tstbrut_"))
+    _srcBr = _dosBr / "brute.mp4"
+    _srcBr.write_bytes(b"x" * 5000)
+    _vraiCfgBr = _uBr.load_transform_config
+    _vraiTrBr = _uBr.transform_metadata_strict
+    try:
+        _appelsBr = []
+
+        def _essaiBr(actif, rendu, ecrit=True, vide=False):
+            _uBr.load_transform_config = lambda: {"enabled": actif}
+
+            def _fauxBr(entree, sortie, *a, **k):
+                _appelsBr.append(_plBr.Path(entree).name)
+                if ecrit:
+                    _plBr.Path(sortie).write_bytes(b"" if vide else b"y" * 4000)
+                return rendu
+
+            _uBr.transform_metadata_strict = _fauxBr
+            with _tmpBr.TemporaryDirectory() as _d:
+                return _aioBr.run(_uBr.brute_a_envoyer(_srcBr, _d, "julia"))
+
+        # Interrupteur eteint : on ne touche a rien, et on n appelle meme pas
+        # ffmpeg — sinon une brute de 200 Mo passerait au remux pour rien.
+        _appelsBr.clear()
+        _fBr, _rBr = _essaiBr(False, True)
+        check("brutmeta : interrupteur eteint, la brute part telle quelle",
+              _plBr.Path(_fBr) == _srcBr and _rBr is False and not _appelsBr,
+              "%s / %s / %d appel(s)" % (_plBr.Path(_fBr).name, _rBr, len(_appelsBr)))
+
+        _appelsBr.clear()
+        _fBr, _rBr = _essaiBr(True, True)
+        check("brutmeta : allume, c est le fichier REECRIT qui part",
+              _plBr.Path(_fBr) != _srcBr and _rBr is True and len(_appelsBr) == 1)
+
+        # ffmpeg absent ou en echec : la video part QUAND MEME. Un envoi ne
+        # doit pas s arreter pour ca.
+        _fBr, _rBr = _essaiBr(True, False)
+        check("brutmeta : ffmpeg en echec, la video part quand meme",
+              _plBr.Path(_fBr) == _srcBr and _rBr is False)
+
+        # On ne croit pas le booleen sur parole : un ffmpeg qui rend 0 en
+        # laissant un fichier vide, c est arrive.
+        _fBr, _rBr = _essaiBr(True, True, vide=True)
+        check("brutmeta : une sortie vide n est pas une reussite",
+              _plBr.Path(_fBr) == _srcBr and _rBr is False)
+        _fBr, _rBr = _essaiBr(True, True, ecrit=False)
+        check("brutmeta : une sortie absente non plus",
+              _plBr.Path(_fBr) == _srcBr and _rBr is False)
+
+        # LA garde qui compte : trois boutons envoient une brute NUE (Video
+        # brut, Video brut Banger, et « Telle quelle » apres Choisir ma brute).
+        # « Telle quelle » envoyait le fichier du disque : l uniquification
+        # etait allumee et ne s appliquait pas la, sans un mot.
+        _srcUBr = _plBr.Path("cogs/user.py").read_text(encoding="utf-8")
+        check("brutmeta : toutes les voies passent par le meme reecrivain",
+              _srcUBr.count("await brute_a_envoyer(") == 2,
+              "%d appel(s) sur 2" % _srcUBr.count("await brute_a_envoyer("))
+        check("brutmeta : plus aucune brute nue envoyee droit du disque",
+              "file=discord.File(str(self.video), filename=self.video.name)"
+              not in _srcUBr)
+        check("brutmeta : un seul endroit lit l interrupteur",
+              _srcUBr.count("load_transform_config().get(") == 1,
+              "%d lecture(s)" % _srcUBr.count("load_transform_config().get("))
+    finally:
+        _uBr.load_transform_config = _vraiCfgBr
+        _uBr.transform_metadata_strict = _vraiTrBr
+        import shutil as _shBr
+        _shBr.rmtree(_dosBr, ignore_errors=True)
+except Exception as _eBr:
+    check("brutmeta : testable", False, repr(_eBr)[:200])
+
+
 print("\n" + "=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

@@ -3309,31 +3309,15 @@ class UserCog(commands.Cog):
         exister ET peser quelque chose. Un ffmpeg qui rend 0 en laissant un
         fichier vide, c est arrive.
         """
-        import asyncio as _aio
         import tempfile as _tmp
-        actif = bool(load_transform_config().get("enabled", False))
         total = len(videos)
         await interaction.followup.send(entete)
         with _tmp.TemporaryDirectory(prefix="brutmeta_") as _d:
             for idx, v in enumerate(videos, start=1):
-                reecrit, fichier = False, v
-                if actif:
-                    sortie = Path(_d) / v.name
-                    try:
-                        ok = await _aio.to_thread(transform_metadata_strict, v, sortie)
-                    except Exception:
-                        ok = False
-                    reecrit = (bool(ok) and sortie.exists()
-                               and sortie.stat().st_size > 0)
-                    if reecrit:
-                        fichier = sortie
-                # Le meme message dans tous les cas : celui d avant.
+                fichier, _reecrit = await brute_a_envoyer(v, _d, identity)
+                # Le meme message dans tous les cas : celui d avant. Le VA ne
+                # lit rien des metadonnees, c est l affaire de l admin.
                 tete = f"🎥 **{label} {idx}/{total}** (`{identity}`)"
-                if actif and not reecrit:
-                    # Demandee mais pas appliquee. Rien dans le salon, mais pas
-                    # de silence complet non plus : au journal du serveur.
-                    print(f"[brutes] {identity} / {v.name} : uniquification "
-                          f"demandee, NON appliquee (ffmpeg absent ou en echec)")
                 try:
                     await interaction.followup.send(
                         content=tete,
@@ -5567,12 +5551,21 @@ class ChoixCaptionView(discord.ui.View):
         await interaction.response.defer()
         interaction = _vers_content(interaction)
         _c, desc, _e = _video_meta(self.video)
+        # Meme traitement que « Video brut » : cette brute part NUE, elle doit
+        # donc sortir avec la meme empreinte reecrite. Elle partait telle
+        # quelle depuis le disque -- l uniquification etait allumee et ne
+        # s appliquait pas ici, sans un mot.
+        import tempfile as _tmp
         try:
-            await interaction.followup.send(
-                content=("🎥 **BRUTE CHOISIE** (`%s`) — sans montage."
-                         % self.identity),
-                file=discord.File(str(self.video), filename=self.video.name),
-                ephemeral=False)
+            with _tmp.TemporaryDirectory(prefix="brutmeta_") as _d:
+                fichier, _reecrit = await brute_a_envoyer(
+                    self.video, _d, self.identity)
+                await interaction.followup.send(
+                    content=("🎥 **BRUTE CHOISIE** (`%s`) — sans montage."
+                             % self.identity),
+                    file=discord.File(str(fichier),
+                                      filename=self.video.name),
+                    ephemeral=False)
         except discord.HTTPException as e:
             await interaction.followup.send(
                 "⚠️ Envoi impossible (trop lourde) : %s" % e, ephemeral=True)
@@ -5602,6 +5595,44 @@ class ChoixCaptionView(discord.ui.View):
             _captions_block(self.identity),
             1, 1, self.identity, label="BRUTE + CAPTION", emoji="💬",
             prefixe_fichier="brute_caption")
+
+
+async def brute_a_envoyer(video, dossier, identity=""):
+    """(fichier a envoyer, metadonnees reecrites ?) pour UNE brute.
+
+    Un seul endroit decide, parce qu il y a PLUSIEURS boutons qui envoient une
+    brute nue : « Video brut », « Video brut Banger », et « Telle quelle » au
+    bout de « Choisir ma brute ». Ce dernier envoyait le fichier tel qu il est
+    sur le disque -- l uniquification etait allumee et ne s appliquait pas la,
+    sans un mot. C est exactement ce qui se voyait : la video partait
+    instantanement, comme un simple envoi de fichier.
+
+    L interrupteur « Uniquification video » du site est lu ICI. Eteint, on rend
+    le fichier d origine et rien ne se passe.
+
+    On ne croit pas le booleen sur parole : le fichier de sortie doit exister
+    ET peser quelque chose. Un ffmpeg qui rend 0 en laissant un fichier vide,
+    c est arrive.
+
+    Demandee mais pas appliquee (ffmpeg absent ou en echec) : la video part
+    quand meme -- un envoi ne doit pas s arreter pour ca -- et la ligne va au
+    JOURNAL du serveur. Muet pour le VA, visible pour qui administre.
+    """
+    import asyncio as _aio
+    video = Path(video)
+    if not bool(load_transform_config().get("enabled", False)):
+        return video, False
+    sortie = Path(dossier) / video.name
+    try:
+        ok = await _aio.to_thread(transform_metadata_strict, video, sortie)
+    except Exception:
+        ok = False
+    reecrit = bool(ok) and sortie.exists() and sortie.stat().st_size > 0
+    if not reecrit:
+        print(f"[brutes] {identity or '?'} / {video.name} : uniquification "
+              f"demandee, NON appliquee (ffmpeg absent ou en echec)")
+        return video, False
+    return sortie, True
 
 
 class ChoixBrutesView(discord.ui.View):
