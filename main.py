@@ -36,10 +36,17 @@ class VABot(commands.Bot):
         self._cogs_to_load = cogs_to_load
 
     async def setup_hook(self):
+        # Les echecs sont GARDES, pas seulement journalises. Les journaux du
+        # VPS ne se lisent pas depuis un poste : quand une commande slash
+        # n'apparait pas sur Discord, on en etait reduit a deviner laquelle des
+        # trois causes c'etait. La page /version les affiche maintenant.
+        self.echecs_cogs = []
+        self.etat_sync = "pas encore tentee"
         for cog_name in self._cogs_to_load:
             path = f"./cogs/{cog_name}.py"
             if not os.path.exists(path):
                 log.warning(f"[{self._label}] cog {cog_name} introuvable, skip")
+                self.echecs_cogs.append(f"{cog_name} : fichier introuvable")
                 continue
             try:
                 await self.load_extension(f"cogs.{cog_name}")
@@ -47,11 +54,14 @@ class VABot(commands.Bot):
             except Exception as e:
                 log.error(f"[{self._label}] Erreur chargement {cog_name}: {e}")
                 log.error(traceback.format_exc())
+                self.echecs_cogs.append(f"{cog_name} : {type(e).__name__}: {e}")
         try:
             synced = await self.tree.sync()
             log.info(f"[{self._label}] {len(synced)} slash commands synchronisees")
+            self.etat_sync = f"{len(synced)} commande(s) synchronisee(s)"
         except Exception as e:
             log.warning(f"[{self._label}] Sync echoue (rate-limit?): {e}")
+            self.etat_sync = f"ECHEC : {type(e).__name__}: {e}"
 
 
 def register_sync_command(bot: commands.Bot, label: str):

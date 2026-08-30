@@ -17801,9 +17801,19 @@ def _diag_bot() -> str:
         cogs = sorted(getattr(_BOT_REF, "cogs", {}) or {})
         cmds = sorted(c.name for c in _BOT_REF.tree.get_commands())
         pret = "prêt" if getattr(_BOT_REF, "is_ready", lambda: False)() else "pas prêt"
-        return (f"{pret} · {len(cogs)} cog(s) : {html_escape(', '.join(cogs))}"
+        sync = getattr(_BOT_REF, "etat_sync", "inconnue")
+        echecs = getattr(_BOT_REF, "echecs_cogs", None)
+        bloc = (f"{pret} · {len(cogs)} cog(s) : {html_escape(', '.join(cogs))}"
+                f"<br><span style='color:#666'>synchro : {html_escape(str(sync))}</span>"
                 f"<br><span style='color:#666'>{len(cmds)} commande(s) dans "
                 f"l'arbre : {html_escape(', '.join(cmds))}</span>")
+        if echecs:
+            bloc += ("<br><span style='color:#b91c1c'>cogs en échec : "
+                     + html_escape(" | ".join(str(x)[:160] for x in echecs))
+                     + "</span>")
+        elif echecs is not None:
+            bloc += "<br><span style='color:#166534'>aucun cog en échec</span>"
+        return bloc
     except Exception as e:
         return f"état illisible ({html_escape(str(e)[:80])})"
 
