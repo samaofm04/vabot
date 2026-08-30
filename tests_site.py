@@ -6421,21 +6421,29 @@ try:
         _obT.enregistrer_jour([{"identite": "z", "va": "Z", "objectif": 30,
                                 "atteint": False}], "2026-08-30")
         _bTete = _obT.bilan_quinzaine("z", "Z", "2026-08-30")
-        check("bilan : pas de carrés blancs avant la première mesure",
-              _bTete["suite"] == ["tenu", "rate"], _bTete["suite"])
+        # La bande couvre TOUTE la quinzaine ecoulee : du 16 au 30, quinze
+        # jours, dont les treize d avant la premiere mesure.
+        check("bilan : la bande couvre toute la quinzaine écoulée",
+              len(_bTete["suite"]) == 15, len(_bTete["suite"]))
+        check("bilan : et se termine par les deux jours mesurés",
+              _bTete["suite"][-2:] == ["tenu", "rate"], _bTete["suite"][-3:])
         _obT.enregistrer_jour([{"identite": "y", "va": "Y", "objectif": 30,
                                 "atteint": True}], "2026-08-27")
         _obT.enregistrer_jour([{"identite": "y", "va": "Y", "objectif": 30,
                                 "atteint": True}], "2026-08-30")
-        check("bilan : mais un trou au MILIEU reste visible",
-              _obT.bilan_quinzaine("y", "Y", "2026-08-30")["suite"]
+        check("bilan : un trou au milieu reste visible",
+              _obT.bilan_quinzaine("y", "Y", "2026-08-30")["suite"][-4:]
               == ["tenu", "inconnu", "inconnu", "tenu"],
-              _obT.bilan_quinzaine("y", "Y", "2026-08-30")["suite"])
+              _obT.bilan_quinzaine("y", "Y", "2026-08-30")["suite"][-4:])
+        # Pas de BLANC : dans un salon sombre il saute aux yeux, et une
+        # quinzaine a peine commencee avait l air d un mur d echecs.
+        check("bilan : le carré « rien » est sombre, pas blanc",
+              _rcT._CARRES["inconnu"] == "⬛", _rcT._CARRES)
         check("bilan : la légende explique les carrés",
               "🟩" in _pinOb and "pas de report" in _pinOb, _pinOb[:220])
 
         check("bilan : les carrés traduisent la suite",
-              _rcT.suite_jours(["tenu", "rate", "inconnu"]) == "🟩🟥⬜",
+              _rcT.suite_jours(["tenu", "rate", "inconnu"]) == "🟩🟥⬛",
               _rcT.suite_jours(["tenu", "rate", "inconnu"]))
         _pinPay = _rcT.bloc_quinzaine(
             [{"e": dict(_eOb, discord="noum0075"), "bilan": _bJ}],

@@ -218,7 +218,11 @@ def bloc_jour(etats: list, jour: str, identite: str = "") -> list:
 #: Un carré par jour. « inconnu » n'est ni vert ni rouge : une nuit où le
 #: report n'a pas tourné n'est pas une faute du VA, et la payer comme telle
 #: serait une erreur qu'on ne pourrait pas lui défendre.
-_CARRES = {"tenu": "🟩", "rate": "🟥", "inconnu": "⬜"}
+#:
+#: Sombre plutôt que blanc — demandé, et meilleur : le blanc SAUTE aux yeux
+#: dans un salon sombre, si bien qu'une quinzaine à peine commencée avait
+#: l'air d'un mur d'échecs. Le carré sombre se lit « rien », ce qu'il est.
+_CARRES = {"tenu": "🟩", "rate": "🟥", "inconnu": "⬛"}
 
 
 def suite_jours(suite) -> str:
@@ -244,7 +248,7 @@ def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> st
             return j
     portee = f" · `@{identite}`" if identite else ""
     t = [f"📌 **Bilan de la quinzaine — du {_d(debut)} au {_d(fin)}**{portee}",
-         "_Un carré par jour : 🟩 objectif tenu · 🟥 raté · ⬜ pas de report "
+         "_Un carré par jour : 🟩 objectif tenu · 🟥 raté · ⬛ pas de report "
          "cette nuit-là (ne compte ni en bien ni en mal)._",
          "_Une journée est tenue quand la fiche atteint 80 % de son objectif._",
          ""]
