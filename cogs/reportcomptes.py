@@ -17,10 +17,14 @@ une barre entre les deux quinzaines de paie.
     VA NOUM 1X1 @noum0075 · 1–15 : 13/14 · 16–fin : 12/15 · 26/30
     01/08 ..........#..#.┃...#....#..#... 31/08
 
-Un mois de carres pour vingt-quatre fiches DEPASSE les deux mille caracteres
-de Discord : le bilan tient donc en plusieurs messages, tous reecrits sur
-place. Avant, il etait tronque — des VAs disparaissaient du bilan de paie
-sans un mot.
+Il part en EMBED, et pas par coquetterie : un message ordinaire plafonne a
+2000 unites, un embed a 4096. C'est ce qui permet de tenir vingt-deux fiches
+et un mois de carres dans UN SEUL message — un bilan coupe en deux se lit
+comme un bilan incomplet, et on cherche les VAs manquants.
+
+Attention en mesurant : Discord compte en UTF-16, donc un carre colore vaut
+DEUX unites. Compter en caracteres Python faisait fabriquer des messages
+refuses a l'envoi, dont l'erreur partait dans un journal que personne ne lit.
 
 DEUX SALONS, DEUX CONVENTIONS DE NOM :
 
@@ -85,6 +89,17 @@ _CFG_FILE = pathlib.Path(__file__).resolve().parent.parent / "data" / "report_co
 #: Longueur maxi d'un message, EN UNITES DISCORD (voir _taille).
 _MAX_MSG = 1850
 
+#: Longueur maxi de la DESCRIPTION d'un embed. Discord y accepte 4096 unités,
+#: contre 2000 pour un message ordinaire — c'est ce qui permet de tenir tout
+#: le bilan dans UN SEUL message, comme demandé : « je veux qu'en un morceau
+#: il y ait tous les VA ». Avec vingt-deux fiches et un mois de carrés
+#: chacune, un message ordinaire en demandait deux, et un bilan coupé en deux
+#: se lit comme un bilan incomplet.
+#:
+#: Marge volontaire sous les 4096 : le nombre de fiches grandit, et déborder
+#: fait refuser le message ENTIER par Discord.
+_MAX_EMBED = 3900
+
 
 def _taille(txt: str) -> int:
     """La longueur d'un texte TELLE QUE DISCORD LA COMPTE.
@@ -131,7 +146,7 @@ HEURE_REPORT = 1
 #: changement de format ne se voyait qu'a la publication suivante — et on
 #: attendait 1 h du matin en croyant que ca ne marchait pas. Quand le numero
 #: stocke ne correspond plus, la boucle republie une fois, tout de suite.
-FORMAT_BILAN = 10
+FORMAT_BILAN = 11
 
 
 # ==============================================================================
@@ -363,11 +378,28 @@ def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> li
         # fiche dont le nom est dans un message et les carrés dans le suivant
         # est illisible au moment précis où on s'en sert.
         if (sum(_taille(y) + 1 for y in bloc)
-                + sum(_taille(y) + 1 for y in part)) > _MAX_MSG:
+                + sum(_taille(y) + 1 for y in part)) > _MAX_EMBED:
             messages.append("\n".join(bloc))
             bloc = list(tete)
         bloc.extend(part)
     messages.append("\n".join(bloc))
+    # NUMEROTER les parties. Chaque morceau porte le même en-tête : rien ne
+    # distinguait « le bilan complet » de « la moitié du bilan », et devant un
+    # message qui commence par le titre on croit légitimement l'avoir tout lu.
+    # On a cherché un bug de calcul pendant une heure alors qu'il manquait
+    # peut-être juste un message au-dessus — et faute de repère, ni lui ni moi
+    # ne pouvions trancher.
+    if len(messages) > 1:
+        n = len(messages)
+        numerotes = []
+        for i, m in enumerate(messages):
+            # On raccroche à la FIN de la première ligne, pas à « ** » : le
+            # titre se termine tantôt par le gras, tantôt par l'identité
+            # suivie. La version précédente cherchait « ** » suivi d'un saut
+            # de ligne et ne trouvait rien dès qu'un salon portait un suffixe.
+            titre, _, reste = m.partition("\n")
+            numerotes.append(f"{titre} — partie {i + 1}/{n}\n{reste}")
+        messages = numerotes
     return messages
 
 
@@ -381,10 +413,21 @@ def _mois(jour: str) -> tuple:
 
 
 def _tronquer(txt: str) -> str:
-    if len(txt) <= _MAX_MSG:
+    """Dernier filet du report DU JOUR. Compte comme Discord, pas comme Python.
+
+    Il ne s'applique plus au bilan : celui-ci part en embed et se découpe
+    proprement. Ici il ne sert que si la liste du jour explose, et il coupe
+    LIGNE par ligne — au caractère, il tranchait un carré en deux, ce qui
+    donne un point d'interrogation à l'écran.
+    """
+    if _taille(txt) <= _MAX_MSG:
         return txt
-    coupe = txt[:_MAX_MSG].rsplit("\n", 1)[0]
-    return coupe + "\n…_(liste tronquée — Discord limite la taille d'un message)_"
+    lignes = txt.split("\n")
+    pied = "\n…_(liste tronquée — Discord limite la taille d'un message)_"
+    while lignes and (sum(_taille(x) + 1 for x in lignes)
+                      + _taille(pied)) > _MAX_MSG:
+        lignes.pop()
+    return "\n".join(lignes) + pied
 
 
 # ==============================================================================
@@ -686,9 +729,8 @@ class ReportComptes(commands.Cog):
                     n_msg += 1
                     await asyncio.sleep(0.6)     # on ne bouscule pas Discord
                 if not pin_a_part:
-                    await self._poser_bilan(ch, cle, [
-                        _tronquer(m) for m in bloc_quinzaine(
-                            lignes_bilan, _mois(jour)[0], _mois(jour)[1], voulue)])
+                    await self._poser_bilan(ch, cle, bloc_quinzaine(
+                        lignes_bilan, _mois(jour)[0], _mois(jour)[1], voulue))
                 # « Ce salon a deja recu un report. » Marque a part de
                 # l'epingle : quand le bilan part dans son propre salon,
                 # celui-ci n'a plus d'epingle du tout — s'y fier l'aurait
@@ -705,9 +747,8 @@ class ReportComptes(commands.Cog):
             for cle, ch in salons_pin:
                 voulue, _ets, lignes_bilan = _pour(ch)
                 try:
-                    await self._poser_bilan(ch, cle, [
-                        _tronquer(m) for m in
-                        bloc_quinzaine(lignes_bilan, debut, fin, voulue)])
+                    await self._poser_bilan(
+                        ch, cle, bloc_quinzaine(lignes_bilan, debut, fin, voulue))
                 except discord.Forbidden:
                     print(f"[report-comptes] pas le droit d'écrire dans {ch}", flush=True)
                 except Exception as e:
@@ -838,6 +879,17 @@ class ReportComptes(commands.Cog):
         cfg[cle] = c
         _save_cfg(cfg)
 
+    @staticmethod
+    def _embed(texte: str):
+        """Le bilan dans un embed : 4096 unités au lieu de 2000.
+
+        C'est la seule façon de tenir toutes les fiches dans UN message. La
+        couleur reprend le gris de fond de Discord — un bilan n'est ni une
+        alerte ni une félicitation, et une bande colorée à gauche viendrait
+        contredire les carrés qui, eux, veulent dire quelque chose.
+        """
+        return discord.Embed(description=texte, colour=0x2B2D31)
+
     async def _ecrire_epingle(self, ch, mid, texte: str, epingler: bool, vue=None):
         """Réécrit le message `mid`, ou en crée un. Rend son identifiant."""
         if mid:
@@ -846,7 +898,10 @@ class ReportComptes(commands.Cog):
                 # `view=` est passé même à None : sans ça, un morceau qui
                 # n'est plus le dernier garderait son bouton, et on aurait
                 # trois « Rafraîchir » empilés.
-                await msg.edit(content=texte, view=vue)
+                # `content=None` efface le texte des anciens bilans, qui
+                # étaient postés en clair : sans ça on lirait le bilan deux
+                # fois, une en texte et une dans l'embed.
+                await msg.edit(content=None, embed=self._embed(texte), view=vue)
                 return int(mid)
             except discord.NotFound:
                 print(f"[report-comptes] message {mid} effacé — on en repose un",
@@ -858,7 +913,9 @@ class ReportComptes(commands.Cog):
                       f"on garde l'existant", flush=True)
                 return None
         try:
-            msg = await ch.send(texte, view=vue) if vue else await ch.send(texte)
+            emb = self._embed(texte)
+            msg = (await ch.send(embed=emb, view=vue) if vue
+                   else await ch.send(embed=emb))
             if epingler:
                 try:
                     await msg.pin()

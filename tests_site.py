@@ -6794,12 +6794,33 @@ try:
         _22 = [{"e": dict(_eOb, va=f"FICHE {_i:02d}", discord=f"d{_i}"),
                 "bilan": _bMois} for _i in range(22)]
         _msgs22 = _rcT.bloc_quinzaine(_22, _bMois["debut"], _bMois["fin"], "jessye")
-        check("mois : aucun message ne dépasse la limite Discord",
-              all(_rcT._taille(m) <= 2000 for m in _msgs22),
+        # Le bilan part en EMBED : sa limite est 4096, pas 2000.
+        check("mois : aucun message ne dépasse la limite d un embed",
+              all(_rcT._taille(m) <= 4096 for m in _msgs22),
               [_rcT._taille(m) for m in _msgs22])
         check("mois : les 22 fiches sont toutes présentes",
               sum(m.count("FICHE ") for m in _msgs22) == 22,
               sum(m.count("FICHE ") for m in _msgs22))
+        # « Je veux qu en un morceau il y ait tous les VA. » Un message
+        # ordinaire plafonne a 2000 unites, un EMBED a 4096 : c est ce qui
+        # permet de tenir vingt-deux fiches et un mois de carres en un seul.
+        check("mois : vingt-deux fiches tiennent en UN message",
+              len(_msgs22) == 1, len(_msgs22))
+        check("mois : et il reste sous la limite d un embed",
+              _rcT._taille(_msgs22[0]) <= 4096, _rcT._taille(_msgs22[0]))
+        check("mois : la limite du bilan est celle des embeds",
+              _rcT._MAX_EMBED > 2000 and _rcT._MAX_EMBED < 4096,
+              _rcT._MAX_EMBED)
+        # Au-dela, on coupe encore — et chaque partie est NUMEROTEE, sinon un
+        # message qui commence par le titre passe pour le bilan entier.
+        _msgs60 = _rcT.bloc_quinzaine(
+            [{"e": dict(_eOb, va=f"FICHE {_i:02d}", discord="roucham_79944"),
+              "bilan": _bMois} for _i in range(60)],
+            _bMois["debut"], _bMois["fin"], "jessye")
+        check("mois : au-delà, la coupe reprend et les parties sont numérotées",
+              len(_msgs60) > 1 and all(f"partie {_i + 1}/{len(_msgs60)}" in m
+                                       for _i, m in enumerate(_msgs60)),
+              [m.splitlines()[0][-30:] for m in _msgs60])
     finally:
         (_obT.OBJECTIFS_FILE, _obT.HISTO_FILE) = _svOb
         shutil.rmtree(_dosOb, ignore_errors=True)
