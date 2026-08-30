@@ -1295,11 +1295,13 @@ try:
     check("ici : les anciens panneaux epingles sont retires",
           'getattr(p.author, "bot", False)' in _srcIc
           and "Numéros & Mails" in _srcIc and "Numéro & Mail" in _srcIc)
-    check("ici : le nouveau panneau est epingle",
-          "msg.pin()" in _srcIc)
-    # Un epinglage refuse ne doit pas passer pour une reussite muette.
-    check("ici : un epinglage refuse est dit",
-          "épinglage refusé" in _srcIc or "epinglage refuse" in _srcIc)
+    # L epinglage a demenage dans poser_trois, qui pose les TROIS messages.
+    import cogs.numeros as _n3b
+    check("ici : les trois messages sont epingles",
+          "msg.pin()" in _insIc.getsource(_n3b.poser_trois))
+    # Une pose incomplete ne doit pas passer pour une reussite muette.
+    check("ici : une pose incomplete est dite",
+          "incomplète" in _srcIc or "incomplete" in _srcIc)
     check("ici : et le nombre d anciens retires est rendu",
           "ancien(s) panneau(x) retiré(s)" in _srcIc)
 except Exception as _eIc:
@@ -1618,6 +1620,18 @@ try:
           "ephemeral" not in _s3)
     check("trois : un echec s ecrit dans la place du numero",
           "souci_num" in _s3)
+    # LE piege : un salon qui n a recu que le panneau n a ni place pour le
+    # numero ni place pour le code. Le clic achetait alors un numero que rien
+    # n affichait — perdu, avec l argent.
+    check("trois : on pose les places AVANT de commander quoi que ce soit",
+          "poser_trois" in _s3 and _s3.index("poser_trois") < _s3.index("get_number"),
+          "on depense avant d avoir ou l ecrire")
+    _s3p = _i3.getsource(_n3.NumerosCog.panelnumero.callback
+                         if hasattr(_n3.NumerosCog.panelnumero, "callback")
+                         else _n3.NumerosCog.panelnumero)
+    check("trois : /panelnumero pose les trois, pas le seul panneau",
+          "poser_trois" in _s3p and "verrouiller_salon" in _s3p)
+
     _s3b = _i3.getsource(_n3.NumerosCog.suivre)
     check("trois : le code est ecrit par le bot, sans qu on le demande",
           "maj_trois" in _s3b and "get_code" in _s3b)

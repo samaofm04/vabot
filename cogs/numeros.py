@@ -239,6 +239,14 @@ class NumerosCog(commands.Cog):
         ch = getattr(itx, "channel", None)
         if ch is None:
             return
+        # Les trois messages doivent EXISTER avant qu'on commande quoi que ce
+        # soit. Un salon qui n'a recu que le panneau — pose par l'ancienne
+        # route, ou par /panelnumero — n'a ni place pour le numero ni place
+        # pour le code : le clic achetait un numero que rien n'affichait, et
+        # il etait perdu avec l'argent. On les pose donc d'abord.
+        rec0 = _salon(ch.id)
+        if not (rec0.get("numero") and rec0.get("code")):
+            await poser_trois(self.bot, ch, self)
         await maj_trois(self.bot, ch, actif=None,
                         souci_num="⏳ Recherche d'un numéro…",
                         souci_code="")
@@ -536,14 +544,11 @@ class NumerosCog(commands.Cog):
                             pass
         except Exception as e:
             log.warning(f"panelnumero: nettoyage impossible ({e})")
-        msg = await ch.send(embed=panel_embed(), view=NumPanelView(self))
-        epingle = True
-        try:
-            await msg.pin()
-        except Exception:
-            epingle = False
-        mot = "✅ Panneau posé" + (" et épinglé" if epingle else
-                                  " (épinglage refusé — permission « Gérer les messages »)")
+        _salon_ecrire(ch.id, panneau=None, numero=None, code=None, actif=None)
+        pose = await poser_trois(self.bot, ch, self)
+        await verrouiller_salon(ch, self.bot)
+        mot = ("✅ Les trois messages sont posés et épinglés" if pose else
+               "⚠️ Pose incomplète — regarde les droits du bot sur ce salon")
         if vires:
             mot += f" · {vires} ancien(s) panneau(x) retiré(s)"
         await interaction.followup.send(mot + ".", ephemeral=True)
