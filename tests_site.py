@@ -5803,6 +5803,162 @@ except Exception as _eEnc:
 
 print()
 print("=" * 70)
+print("PORTAIL VA : un lien par fiche, et rien que sa fiche")
+print("=" * 70)
+try:
+    _dosVP = pathlib.Path(tempfile.mkdtemp(prefix="portail_"))
+    import jailbreak as _jbVP, va_portal as _vpVP
+
+    _svVP = (_jbVP.JAILBREAK_FILE, _jbVP.PREV_FILE, _jbVP.BACKUP_DIR,
+             _jbVP.TOMB_FILE, _vpVP.LIENS_FILE)
+    _jbVP.JAILBREAK_FILE = _dosVP / "jailbreak.json"
+    _jbVP.PREV_FILE = _dosVP / "jailbreak.prev.json"
+    _jbVP.BACKUP_DIR = _dosVP / "backups"
+    _jbVP.TOMB_FILE = _dosVP / "tomb.json"
+    _vpVP.LIENS_FILE = _dosVP / "liens.json"
+    try:
+        _jbVP._save({"jessye": {"vas": [{"name": "VA NOUM 1X1", "discord_username": ""},
+                                        {"name": "VA NOUM 1X2", "discord_username": ""}],
+                                "accounts": []}})
+        _jbVP.add_account("jessye", "a.moi", va="VA NOUM 1X1")
+        _jbVP.add_account("jessye", "au.voisin", va="VA NOUM 1X2")
+
+        import web_upload as _wVP
+        _appVP = _wVP.create_app()
+        _admVP = _appVP.test_client()
+        with _admVP.session_transaction() as _sVP:
+            _sVP["auth"] = True
+            _sVP["username"] = "admin"
+            _sVP["role"] = "owner"
+            # legacy_owner : un test precedent laisse _load_web_users remplace
+            # par une table qui ne contient pas « admin ». Sans ce drapeau,
+            # is_auth() vide la session avant meme d arriver a la route.
+            _sVP["legacy_owner"] = True
+
+        # Le lien ne se demande pas sans session : c'est la seule porte par
+        # laquelle un jeton sort, elle doit rester fermee aux anonymes.
+        _anoVP = _appVP.test_client()
+        check("portail : un anonyme ne peut pas reclamer de lien",
+              _anoVP.post("/jailbreak/va_lien",
+                          data={"identity": "jessye", "va_name": "VA NOUM 1X1"}).status_code == 401)
+
+        _rVP = _admVP.post("/jailbreak/va_lien", data={
+            "identity": "jessye", "va_name": "VA NOUM 1X1", "action": "creer"}).get_json()
+        check("portail : le lien se cree", bool(_rVP.get("ok") and _rVP.get("jeton")), str(_rVP)[:120])
+        _urlVP = (_rVP.get("url") or "").replace("http://localhost", "")
+        _jetVP = _rVP.get("jeton")
+
+        # Idempotent : rouvrir la fenetre ne doit pas invalider le lien deja
+        # envoye sur Discord.
+        _r2VP = _admVP.post("/jailbreak/va_lien", data={
+            "identity": "jessye", "va_name": "VA NOUM 1X1", "action": "creer"}).get_json()
+        check("portail : redemander le lien rend le MEME jeton",
+              _r2VP.get("jeton") == _jetVP, f"{_r2VP.get('jeton')} vs {_jetVP}")
+
+        _vaVP = _appVP.test_client()
+        _pVP = _vaVP.get(_urlVP)
+        _hVP = _pVP.get_data(as_text=True)
+        check("portail : la page s ouvre sans session", _pVP.status_code == 200, _pVP.status_code)
+        check("portail : le VA voit SON compte", "a.moi" in _hVP)
+        # Le coeur du besoin : quatre telephones = quatre fiches = quatre pages,
+        # et aucune ne doit laisser entrevoir les trois autres.
+        check("portail : il ne voit pas celui d une autre fiche", "au.voisin" not in _hVP)
+        check("portail : aucun autre jeton n est dans la page",
+              _hVP.count("/mes-comptes/") <= 1 or _hVP.count(_jetVP) == _hVP.count("/mes-comptes/"))
+        check("portail : la page n est pas indexable",
+              "noindex" in (_pVP.headers.get("X-Robots-Tag") or ""),
+              _pVP.headers.get("X-Robots-Tag"))
+        # Le lien fuit dans le Referer des qu on clique un profil Instagram si
+        # rien ne l en empeche.
+        check("portail : le jeton ne fuit pas par le Referer",
+              (_pVP.headers.get("Referrer-Policy") or "") == "no-referrer",
+              _pVP.headers.get("Referrer-Policy"))
+        # Un mot de passe se recopie avec le lien : il n a rien a faire ici.
+        _jbVP.update_account("jessye",
+                             [a for a in _jbVP.list_accounts("jessye")
+                              if a["username"] == "a.moi"][0]["id"],
+                             password="SECRETABC", two_fa="AAAA BBBB", email="x@y.z")
+        _hVP = _vaVP.get(_urlVP).get_data(as_text=True)
+        check("portail : le mot de passe ne sort jamais", "SECRETABC" not in _hVP)
+        check("portail : le 2FA ne sort jamais", "AAAA BBBB" not in _hVP)
+        check("portail : l adresse mail ne sort jamais", "x@y.z" not in _hVP)
+
+        # Collage : pseudo nu, @pseudo, lien de partage avec son suivi, et une
+        # URL qui n est pas un compte -- comptee, pas avalee.
+        _aVP = _vaVP.post(_urlVP + "/ajouter", data={"comptes":
+            "un.deux\n@trois.quatre\n"
+            "https://www.instagram.com/cinq.six?igsi=ZZZ&utm_source=qr\n"
+            "https://instagram.com/p/CabCabCab"}).get_json()
+        _nomsVP = [a["username"] for a in _jbVP.list_accounts("jessye")]
+        check("portail : le collage ajoute les trois comptes",
+              all(n in _nomsVP for n in ("un.deux", "trois.quatre", "cinq.six")), _nomsVP)
+        check("portail : le suivi du lien de partage est coupe",
+              not any("igsi" in n for n in _nomsVP), _nomsVP)
+        check("portail : la ligne non reconnue est DITE, pas avalee",
+              "non reconnue" in (_aVP.get("msg") or ""), _aVP.get("msg"))
+        check("portail : les comptes ajoutes tombent sous la bonne fiche",
+              all((a.get("va") or "") == "VA NOUM 1X1"
+                  for a in _jbVP.list_accounts("jessye") if a["username"] != "au.voisin"))
+
+        # Le controle de perimetre au retrait : sans lui, un identifiant devine
+        # dans une autre fiche serait supprimable depuis ce lien-ci.
+        _idAutreVP = [a["id"] for a in _jbVP.list_accounts("jessye")
+                      if a["username"] == "au.voisin"][0]
+        _xVP = _vaVP.post(_urlVP + "/retirer", data={"compte_id": _idAutreVP}).get_json()
+        check("portail : retirer le compte d une autre fiche est refuse",
+              _xVP.get("ok") is False, str(_xVP)[:100])
+        check("portail : et ce compte est toujours la",
+              any(a["username"] == "au.voisin" for a in _jbVP.list_accounts("jessye")))
+
+        _idMienVP = [a["id"] for a in _jbVP.list_accounts("jessye")
+                     if a["username"] == "un.deux"][0]
+        _oVP = _vaVP.post(_urlVP + "/retirer", data={"compte_id": _idMienVP}).get_json()
+        check("portail : retirer un de ses comptes marche", _oVP.get("ok") is True, str(_oVP)[:100])
+        check("portail : le compte a bien disparu",
+              not any(a["username"] == "un.deux" for a in _jbVP.list_accounts("jessye")))
+
+        # Renommer la fiche depuis le dashboard ne doit pas tuer le lien deja
+        # parti sur Discord.
+        _admVP.post("/jailbreak/update_va", data={
+            "identity": "jessye", "old_name": "VA NOUM 1X1",
+            "new_name": "VA NOUM 1", "ajax": "1"})
+        _rnVP = _vaVP.get(_urlVP)
+        check("portail : le lien survit au renommage de la fiche",
+              _rnVP.status_code == 200, _rnVP.status_code)
+        check("portail : la page porte le nouveau nom",
+              "VA NOUM 1" in _rnVP.get_data(as_text=True))
+
+        # Fermer le lien doit fermer la page ET l ecriture : un lien revoque qui
+        # accepterait encore un POST ne serait pas revoque du tout.
+        _admVP.post("/jailbreak/va_lien", data={
+            "identity": "jessye", "va_name": "VA NOUM 1", "action": "revoquer"})
+        check("portail : le lien ferme ne s ouvre plus",
+              _vaVP.get(_urlVP).status_code == 404)
+        check("portail : le lien ferme n accepte plus d ajout",
+              _vaVP.post(_urlVP + "/ajouter",
+                         data={"comptes": "tentative"}).status_code == 404)
+        check("portail : un jeton inconnu ne dit rien",
+              _vaVP.get("/mes-comptes/nimportequoi").status_code == 404)
+        check("portail : un jeton demesure est ecarte",
+              _vaVP.get("/mes-comptes/" + "x" * 400).status_code == 404)
+
+        # Supprimer la fiche doit emporter son lien, sinon l adresse reste
+        # vivante et on peut encore rattacher des comptes a une fiche morte.
+        _admVP.post("/jailbreak/va_lien", data={
+            "identity": "jessye", "va_name": "VA NOUM 1X2", "action": "creer"})
+        _admVP.post("/jailbreak/remove_va", data={
+            "identity": "jessye", "va_name": "VA NOUM 1X2", "ajax": "1"})
+        check("portail : supprimer la fiche ferme son lien",
+              _vpVP.lien_pour("jessye", "VA NOUM 1X2") == "")
+    finally:
+        (_jbVP.JAILBREAK_FILE, _jbVP.PREV_FILE, _jbVP.BACKUP_DIR,
+         _jbVP.TOMB_FILE, _vpVP.LIENS_FILE) = _svVP
+        shutil.rmtree(_dosVP, ignore_errors=True)
+except Exception as _eVP:
+    check("portail : testable", False, repr(_eVP)[:200])
+
+print()
+print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
     print("ECHECS :")

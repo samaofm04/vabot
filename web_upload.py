@@ -13926,6 +13926,35 @@ def _jb_handles_for(identity: str, va: str = "") -> set:
     return out
 
 
+def _jb_push_sheet_async(label: str = "jb-push-sheet") -> bool:
+    """Pousse le référentiel Jailbreak vers Google Sheets, en arrière-plan.
+
+    Le motif était recopié dans quatre routes : prendre l'instantané MAINTENANT
+    (sinon le thread relit un fichier qui a pu rebouger), puis pousser dans un
+    thread — en synchrone, l'écriture d'un classeur par identité prend plusieurs
+    secondes et fige le bouton qui a déclenché l'action.
+
+    Rend False si le push n'a même pas pu démarrer : le portail VA écrit dans le
+    même référentiel que le dashboard, et un ajout qui ne remonte pas au classeur
+    se fait effacer au tour de scrutation suivant.
+
+    Muet sous VABOT_BANC_ESSAI, pour la même raison que `_kick_scrape_handles` :
+    le classeur Google est une donnée bien réelle, et un banc d'essai n'a rien
+    à y écrire.
+    """
+    if os.environ.get("VABOT_BANC_ESSAI"):
+        return False
+    try:
+        import jailbreak as _jb_ps, sheets_sync as _ss_ps, threading as _th_ps
+        _snap = _jb_ps._load()
+        _th_ps.Thread(target=lambda: _ss_ps.push_all(_snap, force=True),
+                      daemon=True, name=label).start()
+        return True
+    except Exception as _e_ps:
+        print(f"[{label}] push Sheet non lancé : {_e_ps}", flush=True)
+        return False
+
+
 def _banned_handles() -> set:
     """Handles marqués bannis/renommés dans le cache des stats."""
     out = set()
@@ -14547,7 +14576,15 @@ def _kick_scrape_handles(handles, label: str = "kick-scrape") -> int:
     Sert a ce que les comptes fraichement ajoutes (Jailbreak, externals, ...)
     ne restent pas 'NON SCRAPÉ' jusqu au prochain cycle auto (00h/12h).
     Non-bloquant : spawn un thread daemon et rend la main tout de suite.
-    Retourne le nombre de handles uniques mis en file."""
+    Retourne le nombre de handles uniques mis en file.
+
+    Muet sous VABOT_BANC_ESSAI : le banc promet en en-tete de ne toucher
+    aucune donnee reelle, et cette fonction interroge Instagram pour de vrai
+    puis ecrit le VRAI cache des stats. Un test qui ajoutait trois comptes
+    lancait donc trois scrapes — et le thread daemon survivait a la fin du
+    process, jusqu au « could not acquire lock at interpreter shutdown »."""
+    if os.environ.get("VABOT_BANC_ESSAI"):
+        return 0
     norm = []
     seen = set()
     for h in (handles or []):
@@ -29916,6 +29953,12 @@ def _render_jailbreak_html() -> str:
                     f"onclick=\"jbScrapeScope(this,'{ident_safe}','{va_attr}')\" "
                     f"title='Scraper UNIQUEMENT les comptes de ce VA (bannis compris)'>"
                     f"↻ Scraper ce bloc</button>"
+                    f"<button type='button' class='jb-detail-head-lien' "
+                    f"data-identity='{ident_safe}' data-va-name='{va_attr}' "
+                    f"onclick='jbOuvreLien(this)' "
+                    f"title='Lien à envoyer à ce VA — il y voit SES comptes et peut en ajouter ou en retirer' "
+                    f"style='background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.35);color:#4ade80;"
+                    f"width:28px;height:28px;border-radius:8px;cursor:pointer;font-size:13px;flex-shrink:0;margin-right:6px'>🔗</button>"
                     f"<button type='button' class='jb-detail-head-edit' "
                     f"data-identity='{ident_safe}' data-va-name='{va_attr}' "
                     f"data-va-discord='{html_escape(discord_username)}' "
@@ -30203,6 +30246,36 @@ def _render_jailbreak_html() -> str:
         "<button type='submit' style='background:linear-gradient(135deg,#a855f7,#6366f1);color:#fff;border:0;padding:10px 22px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700'>Enregistrer</button>"
         "</div>"
         "</form>"
+        "</div></div></div>"
+    )
+
+    # Modal LIEN VA : l'adresse publique de la fiche, à envoyer au VA.
+    # Le champ est en lecture seule et se sélectionne au clic — un lien qu'on
+    # peut éditer par mégarde avant de le copier, c'est un lien mort envoyé.
+    lien_va_modal = (
+        "<div id='jb-lien-overlay' class='jb-overlay' onclick='if(event.target===this)jbFermeLien()'>"
+        "<div class='jb-modal' onclick='event.stopPropagation()'>"
+        "<div style='padding:24px'>"
+        "<h3>🔗 Lien de <span id='jb-lien-va'></span></h3>"
+        "<p style='color:#888;font-size:12px;margin:-6px 0 14px;line-height:1.5'>"
+        "À envoyer à ce VA, et à lui seul. La page n'affiche que SES comptes : "
+        "il peut en ajouter et en retirer, rien d'autre. "
+        "<b style='color:#fb923c'>Ni mot de passe ni 2FA n'y apparaissent.</b></p>"
+        "<input type='text' id='jb-lien-url' readonly onclick='this.select()' "
+        "style='width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px'>"
+        "<div id='jb-lien-stats' style='color:#666;font-size:11px;margin-top:8px'></div>"
+        "<div style='display:flex;gap:8px;justify-content:space-between;margin-top:18px;flex-wrap:wrap'>"
+        "<button type='button' onclick='jbLienAction(this,\"regenerer\")' "
+        "title='Coupe l ancien lien et en fabrique un neuf — à faire si le lien a fuité' "
+        "style='background:transparent;border:1px solid rgba(251,146,60,.4);color:#fb923c;padding:9px 14px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:700'>↻ Renouveler</button>"
+        "<button type='button' onclick='jbLienAction(this,\"revoquer\")' "
+        "title='Ferme le lien : la page ne s ouvre plus du tout' "
+        "style='background:transparent;border:1px solid rgba(239,68,68,.4);color:#ef4444;padding:9px 14px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:700'>✕ Fermer le lien</button>"
+        "<div style='flex:1'></div>"
+        "<button type='button' onclick='jbFermeLien()' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:9px 16px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:600'>Fermer</button>"
+        "<button type='button' id='jb-lien-copier' onclick='jbCopierLien(this)' "
+        "style='background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;border:0;padding:9px 20px;border-radius:9px;cursor:pointer;font-size:12px;font-weight:700'>Copier</button>"
+        "</div>"
         "</div></div></div>"
     )
 
@@ -30516,6 +30589,84 @@ def _render_jailbreak_html() -> str:
         "  } catch(e){"
         "    if(typeof showToast === 'function') showToast('Erreur ouverture modal : ' + e.message, 'error');"
         "  }"
+        "}"
+        # === Lien public d une fiche VA ===
+        # La fenetre s ouvre TOUJOURS sur le lien reel : on interroge le serveur
+        # a l ouverture au lieu de poser un lien dans la page. Sinon chaque fiche
+        # de chaque identite portait son jeton dans le HTML, et il suffisait de
+        # regarder la source pour repartir avec les liens de tout le monde.
+        "function jbOuvreLien(btn){"
+        "  var d = (btn && btn.dataset) || {};"
+        "  window.__jbLien = {identity: d.identity || '', va: d.vaName || ''};"
+        "  var t = document.getElementById('jb-lien-va');"
+        "  if(t) t.textContent = window.__jbLien.va;"
+        "  var u = document.getElementById('jb-lien-url');"
+        "  if(u) u.value = 'Chargement...';"
+        "  var s = document.getElementById('jb-lien-stats');"
+        "  if(s) s.textContent = '';"
+        "  var o = document.getElementById('jb-lien-overlay');"
+        "  if(o) o.classList.add('show');"
+        "  jbLienAction(null, 'creer');"
+        "}"
+        "function jbFermeLien(){"
+        "  var o = document.getElementById('jb-lien-overlay');"
+        "  if(o) o.classList.remove('show');"
+        "}"
+        "function jbLienAction(btn, action){"
+        "  var st = window.__jbLien || {};"
+        "  if(!st.identity || !st.va) return;"
+        "  if(action === 'regenerer' && !confirm('Renouveler le lien ? Celui deja envoye cessera de fonctionner.')) return;"
+        "  if(action === 'revoquer' && !confirm('Fermer le lien ? La page ne s ouvrira plus pour ce VA.')) return;"
+        "  var u = document.getElementById('jb-lien-url');"
+        "  if(u) u.value = 'Chargement...';"
+        "  var fd = new FormData();"
+        "  fd.append('identity', st.identity);"
+        "  fd.append('va_name', st.va);"
+        "  fd.append('action', action);"
+        "  fd.append('ajax', '1');"
+        "  fetch('/jailbreak/va_lien', {method:'POST', body:fd})"
+        "   .then(_jbJsonOrAuth)"
+        "   .then(function(j){"
+        "     if(!j) return;"
+        "     if(!j.ok){"
+        "       if(u) u.value = '';"
+        "       if(typeof showToast === 'function') showToast(j.error || 'Echec', 'error');"
+        "       return;"
+        "     }"
+        "     if(u) u.value = j.url || '';"
+        "     var s = document.getElementById('jb-lien-stats');"
+        "     if(s){"
+        "       if(!j.url){ s.textContent = 'Lien ferme. Clique Renouveler pour en refaire un.'; }"
+        "       else {"
+        "         var vu = j.vu ? (' - derniere ouverture ' + new Date(j.vu*1000).toLocaleString('fr-FR'))"
+        "                       : ' - jamais ouvert';"
+        "         s.textContent = (j.ouvertures || 0) + ' ouverture(s)' + vu;"
+        "       }"
+        "     }"
+        "     if(typeof showToast === 'function'){"
+        "       if(action === 'revoquer') showToast('Lien ferme', 'success');"
+        "       else if(action === 'regenerer') showToast('Nouveau lien genere', 'success');"
+        "     }"
+        "   });"
+        "}"
+        "function jbCopierLien(btn){"
+        "  var u = document.getElementById('jb-lien-url');"
+        "  if(!u || !u.value || u.value === 'Chargement...'){"
+        "    if(typeof showToast === 'function') showToast('Aucun lien a copier', 'error');"
+        "    return;"
+        "  }"
+        "  var fini = function(){"
+        "    var v = btn.textContent;"
+        "    btn.textContent = 'Copie !';"
+        "    setTimeout(function(){ btn.textContent = v; }, 1400);"
+        "  };"
+        "  try {"
+        "    if(navigator.clipboard && navigator.clipboard.writeText){"
+        "      navigator.clipboard.writeText(u.value).then(fini, function(){"
+        "        u.select(); document.execCommand('copy'); fini();"
+        "      });"
+        "    } else { u.select(); document.execCommand('copy'); fini(); }"
+        "  } catch(e){ u.select(); }"
         "}"
         "function jbSaveVaAjax(ev){"
         "  ev.preventDefault();"
@@ -31207,7 +31358,7 @@ def _render_jailbreak_html() -> str:
         "</script>"
     )
 
-    return css + header + datalist_html + toolbar + body + add_va_modal + edit_va_modal + bulk_modal + create_id_modal + edit_id_modal + modal + js
+    return css + header + datalist_html + toolbar + body + add_va_modal + edit_va_modal + lien_va_modal + bulk_modal + create_id_modal + edit_id_modal + modal + js
 
 
 def _render_textpool_html() -> str:
@@ -44391,6 +44542,13 @@ def create_app():
         # chatter était bloqué en 403 sur /settings/my_password.
         if path == "/settings/my_password":
             return None
+        # Portail VA : l'autorisation y est portée par le JETON de l'URL, pas
+        # par la session. Un anonyme passe déjà (le garde rend la main plus
+        # haut) ; sans cette ligne, la MÊME page refusait l'ajout dès qu'un
+        # manager au rôle restreint l'ouvrait depuis le navigateur où il est
+        # connecté — une porte qui se ferme parce qu'on est identifié.
+        if path.startswith("/mes-comptes/"):
+            return None
         is_write = request.method in ("POST", "PUT", "PATCH", "DELETE")
         if not is_write:
             # LECTURE : bloquer uniquement les API de DONNÉES sensibles. Les
@@ -52116,6 +52274,16 @@ def create_app():
             kwargs["new_name"] = new_name
         kwargs["discord_username"] = discord_username
         ok = jb.update_va(identity, old_name, **kwargs)
+        # Le lien partagé au VA suit la fiche, pas son nom. Sans ça, renommer
+        # depuis ici transformait en 404 un lien déjà envoyé sur Discord — et
+        # la fiche renommée se retrouvait sans lien du tout, donc sans moyen
+        # de comprendre ce qui venait de casser.
+        if ok and new_name and new_name.lower() != old_name.lower():
+            try:
+                import va_portal
+                va_portal.renommer_va(identity, old_name, new_name)
+            except Exception as _e_vp:
+                print(f"[va-portail] lien non suivi au renommage : {_e_vp}", flush=True)
         # Push Sheet force, comme le fait deja la suppression juste en dessous.
         # Sans lui, le classeur garde l'ANCIEN nom jusqu'au push suivant, qui
         # est asynchrone, non force, et peut echouer sur quota ou mourir avec
@@ -52157,6 +52325,50 @@ def create_app():
             return _success(f"✓ VA <b>{old_name}</b> mise à jour", tab="jailbreak")
         return _error("✕ Mise à jour échouée (conflit de nom ou VA introuvable)", tab="jailbreak")
 
+    @app.route("/jailbreak/va_lien", methods=["POST"])
+    def jailbreak_va_lien():
+        """Le lien public d'UNE fiche VA : le donner, le renouveler, le fermer.
+
+        `creer` est idempotent — il sert aussi bien à créer le lien qu'à le
+        relire, donc rouvrir la fenêtre ne casse pas celui qui circule déjà.
+        `regenerer` coupe l'ancien ; c'est ce qu'on fait quand un lien a fuité.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "auth": True,
+                            "error": "Session expirée — la page va se recharger"}), 401
+        try:
+            import va_portal
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Module portail indispo : {e}"[:160]})
+        identity = (request.form.get("identity") or "").strip().lower()
+        va_name = (request.form.get("va_name") or "").strip()
+        action = (request.form.get("action") or "creer").strip().lower()
+        if not identity or not va_name:
+            return jsonify({"ok": False, "error": "Identité ou nom du VA manquant"})
+        try:
+            if action == "regenerer":
+                jeton = va_portal.regenerer(identity, va_name)
+            elif action == "revoquer":
+                va_portal.revoquer(identity, va_name)
+                jeton = ""
+            else:
+                jeton = va_portal.creer_lien(identity, va_name)
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Action impossible : {e}"[:160]})
+        # L'adresse est construite depuis l'hôte de la requête : le lien copié
+        # depuis un poste local reste ouvrable en local, et celui copié depuis
+        # youl4b.com porte youl4b.com. En dur, l'un des deux était toujours faux.
+        base = (request.host_url or "/").rstrip("/")
+        url = f"{base}{va_portal.RACINE}/{jeton}" if jeton else ""
+        rec = va_portal.resoudre(jeton) if jeton else None
+        return jsonify({
+            "ok": True, "action": action, "jeton": jeton, "url": url,
+            "ouvertures": (rec or {}).get("ouvertures") or 0,
+            "vu": (rec or {}).get("vu") or 0,
+            "journal": ((rec or {}).get("journal") or [])[-8:],
+        })
+
     @app.route("/jailbreak/remove_va", methods=["POST"])
     def jailbreak_remove_va():
         if not is_auth():
@@ -52175,6 +52387,14 @@ def create_app():
             return _error("✕ Identité ou nom du VA manquant", tab="jailbreak")
         n = jb.remove_va_and_accounts(identity, va_name)
         if n >= 0:
+            # La fiche disparaît : son lien public doit mourir avec elle,
+            # sinon l'adresse reste vivante et ouvre une page vide qu'on peut
+            # encore remplir — des comptes rattachés à une fiche supprimée.
+            try:
+                import va_portal
+                va_portal.revoquer(identity, va_name)
+            except Exception as _e_vp:
+                print(f"[va-portail] lien non révoqué : {_e_vp}", flush=True)
             # Push Sheet en ARRIÈRE-PLAN : en synchrone il réécrit un classeur
             # par identité (plusieurs secondes) et figeait le bouton Supprimer.
             try:
@@ -56687,6 +56907,29 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         # Comme pour facture_web : une inscription cassée ne doit pas emporter le
         # dashboard, dont dépend toute l'équipe. On perd /signup, pas le reste.
         log.error(f"signup_public register échoué: {_sg_e}")
+
+    # Portail VA : un lien par fiche VA (va_portal.py), sans mot de passe.
+    #
+    # Même principe que signup_public — le module reçoit ses dépendances au
+    # lieu d'importer ce fichier. La liste ci-dessous est donc EXHAUSTIVE : une
+    # page ouverte par simple jeton ne peut toucher au reste du site que par
+    # ces quatre fonctions, et lire les comptes que par `jailbreak`.
+    try:
+        import va_portal
+        va_portal.register(app, {
+            "pseudo_instagram": _pseudo_instagram,
+            "normalize_handle": _normalize_insta_handle,
+            "stats_cache": _load_insta_3_stats_cache,
+            # La photo passe par le jeton, pas par /insta/pp/<handle> : cette
+            # route-la exige une session, donc sur la page du VA elle repondait
+            # 401 et les comptes AVEC photo etaient justement ceux qui
+            # s'affichaient vides.
+            "pp_locale": (lambda h: __import__("insta_scraper").local_pp_path(h)),
+            "kick_scrape": _kick_scrape_handles,
+            "push_sheet": _jb_push_sheet_async,
+        })
+    except Exception as _vp_e:
+        log.error(f"va_portal register échoué: {_vp_e}")
 
     return app
 
