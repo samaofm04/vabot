@@ -6955,6 +6955,95 @@ except Exception as _eST:
     check("styles : testable", False, repr(_eST)[:200])
 
 print()
+# ==============================================================================
+# Generateur de numeros SUR LE SITE : commander, attendre le code, rendre
+# ==============================================================================
+try:
+    import web_upload as _wNg
+    import numgen as _ngNg
+    _vraisNg = (_ngNg.get_number, _ngNg.get_code, _ngNg.retry, _ngNg.cancel,
+                _ngNg.finish, _ngNg.balances, _ngNg.default_country, _ngNg.stock)
+    _vraiUsersNg = _wNg._load_web_users
+    try:
+        # AUCUN appel au fournisseur : ces routes achetent, un banc d essai
+        # ne depense pas.
+        _ngNg.get_number = lambda service="ig", country=None: (
+            True, {"id": "77", "phone": "+15551234567",
+                   "provider": "getatext", "country": "187"})
+        _ngNg.get_code = lambda i, provider="getatext": ("code", "482913")
+        _ngNg.retry = lambda i, provider="getatext": (True, "ok")
+        _ngNg.cancel = lambda i, provider="getatext": (True, "ok")
+        _ngNg.finish = lambda i, provider="getatext": "ACCESS_ACTIVATION"
+        _ngNg.balances = lambda: {"sms": "69.52 $", "mail": "0.05 $"}
+        _ngNg.default_country = lambda: "0"
+        _ngNg.stock = lambda service="ig": {"187": 4175, "78": 0, "0": 0}
+
+        _hNg = _wNg._render_numgen_settings()
+        check("numgen : le generateur est sur la page, pas seulement les reglages",
+              "ngNumero" in _hNg and "id='ng-service'" in _hNg
+              and "id='ng-tel'" in _hNg)
+        check("numgen : le stock reel est annonce AVANT le clic",
+              "4 175" in _hNg, "le nombre de numeros dispo ne s affiche pas")
+        check("numgen : la page garde son alerte sur le pays a zero",
+              "Russie" in _hNg)
+
+        _wNg._load_web_users = lambda: {}
+        _aNg = _wNg.create_app()
+        _cNg = _aNg.test_client()
+        with _cNg.session_transaction() as _sNg:
+            _sNg["auth"] = True; _sNg["username"] = "admin"
+            _sNg["legacy_owner"] = True; _sNg["role"] = "owner"
+
+        _jNg = (_cNg.post("/numgen/number", data={"service": "ig"}).get_json() or {})
+        check("numgen : commander rend le numero et son fournisseur",
+              _jNg.get("ok") is True and _jNg.get("phone") == "+15551234567"
+              and _jNg.get("provider") == "getatext", str(_jNg)[:110])
+        # get_number se rabat sur un pays qui a du stock. Le taire donnerait un
+        # numero etranger sans prevenir — et ca se voit apres coup, sur le
+        # compte cree.
+        check("numgen : le repli sur un autre pays est ANNONCE, pas subi",
+              "Russie" in (_jNg.get("detourne") or "")
+              and "tats-Unis" in (_jNg.get("detourne") or ""),
+              (_jNg.get("detourne") or "(rien)")[:90])
+        check("numgen : le solde est rendu avec le numero",
+              (_jNg.get("solde") or "").startswith("69.52"))
+
+        _jCo = (_cNg.post("/numgen/code", data={"id": "77"}).get_json() or {})
+        check("numgen : le code recu remonte",
+              _jCo.get("ok") is True and _jCo.get("etat") == "code"
+              and _jCo.get("code") == "482913", str(_jCo)[:90])
+        check("numgen : redemander un SMS repond oui",
+              (_cNg.post("/numgen/retry", data={"id": "77"}).get_json()
+               or {}).get("ok") is True)
+        check("numgen : rendre le numero repond oui",
+              (_cNg.post("/numgen/cancel", data={"id": "77"}).get_json()
+               or {}).get("ok") is True)
+        # finish() rend le TEXTE brut, pas un couple : le depaqueter decoupait
+        # la chaine caractere par caractere et repondait toujours faux.
+        check("numgen : terminer repond oui, malgre son retour different",
+              (_cNg.post("/numgen/finish", data={"id": "77"}).get_json()
+               or {}).get("ok") is True)
+
+        check("numgen : un anonyme ne peut rien commander",
+              _aNg.test_client().post("/numgen/number",
+                                      data={"service": "ig"}).status_code == 401)
+        # Ces routes DEPENSENT : elles doivent rester sur le refus par defaut.
+        _wNg._load_web_users = lambda: {"chatteur.test": {"role": "chatter"}}
+        _aNg2 = _wNg.create_app()
+        _cNg2 = _aNg2.test_client()
+        with _cNg2.session_transaction() as _s2Ng:
+            _s2Ng["auth"] = True; _s2Ng["username"] = "chatteur.test"
+        check("numgen : un role restreint ne peut pas depenser",
+              _cNg2.post("/numgen/number", data={"service": "ig"}).status_code == 403)
+    finally:
+        (_ngNg.get_number, _ngNg.get_code, _ngNg.retry, _ngNg.cancel,
+         _ngNg.finish, _ngNg.balances, _ngNg.default_country,
+         _ngNg.stock) = _vraisNg
+        _wNg._load_web_users = _vraiUsersNg
+except Exception as _eNg:
+    check("numgen : testable", False, repr(_eNg)[:200])
+
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

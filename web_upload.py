@@ -1549,6 +1549,7 @@ body.light [style*="color:#34d399"]{color:#047857!important}   /* emeraude, 4 us
 body.light [style*="color:#00d68f"]{color:#047857!important}   /* menthe, 5 usages */
 body.light [style*="color:#f59e0b"]{color:#b45309!important}   /* ambre, 10 usages */
 body.light [style*="color:#ffb800"]{color:#a16207!important}   /* or, 4 usages */
+body.light [style*="color:#f0c24a"]{color:#a16207!important}   /* ambre clair : 1.68 sur blanc, l alerte du pays a zero etait illisible */
 body.light [style*="color:#fb923c"]{color:#c2410c!important}   /* orange, 2 usages */
 body.light [style*="color:#8b9cf7"]{color:#4f46e5!important}   /* bleuet, 2 usages */
 body.light [style*="color:#e6e6ea"]{color:#111827!important}   /* gris tres clair, 11 usages */
@@ -42594,6 +42595,207 @@ def _numgen_stock() -> dict:
         return {}         # stock inconnu : on n'affirmera rien
 
 
+def _numgen_generateur_html(stock: dict, sms_ok: bool) -> str:
+    """Le générateur lui-même : commander un numéro, attendre le code.
+
+    Ce parcours n'existait que dans Discord. Quand le panneau épinglé ne
+    répond plus — commande non propagée, salon supprimé, bot du second jeton
+    à l'arrêt — il n'y avait plus AUCUN moyen d'obtenir un numéro, alors que
+    la clé et le solde étaient bons. Le site doit savoir le faire seul.
+
+    Rien n'est acheté au chargement de la page : le premier appel payant part
+    au clic, et lui seul.
+    """
+    if not sms_ok:
+        return ("<div style='background:#3a0f0f;border:1px solid #7a2020;color:#f8b4b4;"
+                "border-radius:8px;padding:11px 14px;margin-bottom:16px;font-size:13px'>"
+                "Aucune clé SMS n'est posée : pose-la dans Discord avec "
+                "<code>/smskey</code>, puis reviens ici.</div>")
+
+    try:
+        import numgen as _ng
+        services = _ng.SERVICE_LABELS
+    except Exception:
+        services = {"ig": "Instagram / Threads"}
+    opts = "".join("<option value='%s'>%s</option>" % (html_escape(c), html_escape(lib))
+                   for c, lib in services.items())
+
+    # Le pays qui a réellement du stock, pour le dire AVANT le clic. Sans ça
+    # on découvre au clic que le pays réglé est à sec.
+    dispo = [(c, n) for c, n in (stock or {}).items() if n > 0]
+    libs = dict(_NUMGEN_PAYS)
+    if dispo:
+        c, n = max(dispo, key=lambda cn: cn[1])
+        ou = ("<span style='color:#22c55e'>%s numéros dispo (%s)</span>"
+              % (f"{n:,}".replace(",", " "), html_escape(libs.get(c, c))))
+    elif stock:
+        ou = "<span style='color:#f0c24a'>aucun pays n'a de numéro pour ce service</span>"
+    else:
+        ou = "<span style='color:#8a91a8'>stock inconnu</span>"
+
+    return (
+        "<div style='background:#0e1219;border:1px solid #223047;border-radius:12px;"
+        "padding:16px;margin-bottom:18px'>"
+        "<div style='display:flex;align-items:center;gap:10px;flex-wrap:wrap;"
+        "margin-bottom:12px'>"
+        "<b style='font-size:14px'>Obtenir un numéro</b>"
+        "<span style='font-size:12px'>" + ou + "</span>"
+        "</div>"
+        "<div style='display:flex;gap:8px;flex-wrap:wrap;align-items:center'>"
+        "<select id='ng-service' style='padding:10px;background:#0b0e15;"
+        "border:1px solid #2a3245;color:#e8eaf2;border-radius:8px;min-width:190px'>"
+        + opts +
+        "</select>"
+        "<button type='button' id='ng-go' onclick='ngNumero(this)' "
+        "style='padding:10px 18px;background:#3b82f6;color:#fff;border:0;"
+        "border-radius:8px;cursor:pointer;font-weight:700'>📱 Obtenir un numéro</button>"
+        "<span id='ng-msg' style='font-size:12px;color:#8a91a8'></span>"
+        "</div>"
+        "<div id='ng-zone' style='display:none;margin-top:14px;padding:14px;"
+        "background:#0b0e15;border:1px solid #2a3245;border-radius:10px'>"
+        "<div style='display:flex;gap:12px;align-items:center;flex-wrap:wrap'>"
+        "<span id='ng-tel' style='font-size:21px;font-weight:800;letter-spacing:.5px;"
+        "font-family:ui-monospace,Menlo,Consolas,monospace'></span>"
+        "<button type='button' onclick='ngCopier(this)' style='padding:6px 12px;"
+        "background:#1a1f2e;border:1px solid #2a3245;color:#c4c4cc;border-radius:7px;"
+        "cursor:pointer;font-size:12px'>Copier</button>"
+        "<span id='ng-pays' style='font-size:12px;color:#8a91a8'></span>"
+        "</div>"
+        "<div id='ng-etat' style='margin-top:12px;font-size:14px;color:#8a91a8'></div>"
+        "<div id='ng-code' style='margin-top:8px;font-size:30px;font-weight:800;"
+        "letter-spacing:5px;color:#22c55e;font-family:ui-monospace,Menlo,Consolas,"
+        "monospace;display:none'></div>"
+        "<div style='display:flex;gap:8px;margin-top:14px;flex-wrap:wrap'>"
+        "<button type='button' id='ng-retry' onclick='ngAction(this,\"retry\")' "
+        "style='padding:9px 14px;background:#1a1f2e;border:1px solid #2a3245;"
+        "color:#c4c4cc;border-radius:8px;cursor:pointer;font-size:13px'>"
+        "🔄 Redemander un SMS</button>"
+        "<button type='button' id='ng-cancel' onclick='ngAction(this,\"cancel\")' "
+        "style='padding:9px 14px;background:transparent;border:1px solid #7a2020;"
+        "color:#f87171;border-radius:8px;cursor:pointer;font-size:13px'>"
+        "✕ Rendre le numéro</button>"
+        "<button type='button' id='ng-finish' onclick='ngAction(this,\"finish\")' "
+        "style='padding:9px 14px;background:#16a34a;border:0;color:#fff;"
+        "border-radius:8px;cursor:pointer;font-size:13px;font-weight:700'>"
+        "✓ Terminé</button>"
+        "</div>"
+        "<p style='margin:12px 0 0;font-size:11px;color:#6b7280;line-height:1.5'>"
+        "Rendre le numéro le remet en vente et te rembourse — à faire si le SMS "
+        "n'arrive pas. « Terminé » le clôt définitivement.</p>"
+        "</div>"
+        "</div>"
+        + _NUMGEN_JS
+    )
+
+
+#: Le script du générateur. Il vit dans une chaîne Python : pas une seule
+#: apostrophe échappée, c'est la règle de ce fichier — une seule suffit à tuer
+#: le script de la page entière, en silence.
+_NUMGEN_JS = """<script>
+window.__ng = {id: '', provider: '', minuteur: 0, fin: 0};
+function ngDit(txt, err){
+  var m = document.getElementById('ng-msg');
+  if(m){ m.textContent = txt || ''; m.style.color = err ? '#f87171' : '#8a91a8'; }
+}
+function ngEtat(txt){
+  var e = document.getElementById('ng-etat');
+  if(e) e.textContent = txt || '';
+}
+function ngPost(url, data){
+  var fd = new FormData();
+  Object.keys(data || {}).forEach(function(k){ fd.append(k, data[k]); });
+  return fetch(url, {method:'POST', body:fd, credentials:'same-origin'})
+    .then(function(r){ return r.json(); });
+}
+function ngNumero(btn){
+  var s = document.getElementById('ng-service');
+  var vieux = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Recherche…';
+  ngDit('');
+  ngPost('/numgen/number', {service: (s && s.value) || 'ig'}).then(function(j){
+    btn.disabled = false; btn.textContent = vieux;
+    if(!j || !j.ok){ ngDit((j && j.error) || 'Echec', true); return; }
+    window.__ng.id = j.id; window.__ng.provider = j.provider || 'getatext';
+    window.__ng.fin = Date.now() + 15 * 60 * 1000;
+    var z = document.getElementById('ng-zone'); if(z) z.style.display = 'block';
+    var t = document.getElementById('ng-tel'); if(t) t.textContent = j.phone || '';
+    var p = document.getElementById('ng-pays');
+    if(p) p.textContent = (j.pays_nom || '') + (j.solde ? ' · solde ' + j.solde : '');
+    var c = document.getElementById('ng-code');
+    if(c){ c.style.display = 'none'; c.textContent = ''; }
+    ngEtat('En attente du SMS…');
+    ngDit(j.detourne ? j.detourne : '');
+    ngSurveille();
+  }).catch(function(){
+    btn.disabled = false; btn.textContent = vieux;
+    ngDit('Connexion perdue', true);
+  });
+}
+function ngSurveille(){
+  clearTimeout(window.__ng.minuteur);
+  if(!window.__ng.id) return;
+  if(Date.now() > window.__ng.fin){
+    ngEtat('Toujours rien apres 15 minutes — rends le numero pour etre rembourse.');
+    return;
+  }
+  window.__ng.minuteur = setTimeout(function(){
+    ngPost('/numgen/code', {id: window.__ng.id, provider: window.__ng.provider})
+      .then(function(j){
+        if(!j || !j.ok){ ngEtat((j && j.error) || 'Lecture impossible'); ngSurveille(); return; }
+        if(j.etat === 'code'){
+          var c = document.getElementById('ng-code');
+          if(c){ c.textContent = j.code || ''; c.style.display = 'block'; }
+          ngEtat('Code recu :');
+          return;
+        }
+        if(j.etat === 'cancel'){ ngEtat('Le numero a ete annule.'); return; }
+        ngEtat('En attente du SMS…');
+        ngSurveille();
+      })
+      .catch(function(){ ngEtat('Connexion perdue — nouvelle tentative…'); ngSurveille(); });
+  }, 5000);
+}
+function ngAction(btn, quoi){
+  if(!window.__ng.id){ ngDit('Aucun numero en cours', true); return; }
+  if(quoi === 'cancel' && !confirm('Rendre ce numero ? Il repart en vente et tu es rembourse.')) return;
+  var vieux = btn.textContent;
+  btn.disabled = true; btn.textContent = '…';
+  ngPost('/numgen/' + quoi, {id: window.__ng.id, provider: window.__ng.provider})
+    .then(function(j){
+      btn.disabled = false; btn.textContent = vieux;
+      ngDit((j && (j.msg || j.error)) || '', !(j && j.ok));
+      if(!j || !j.ok) return;
+      if(quoi === 'retry'){ ngEtat('Nouveau SMS demande…'); ngSurveille(); return; }
+      clearTimeout(window.__ng.minuteur);
+      window.__ng.id = '';
+      var z = document.getElementById('ng-zone'); if(z) z.style.display = 'none';
+    })
+    .catch(function(){
+      btn.disabled = false; btn.textContent = vieux;
+      ngDit('Connexion perdue', true);
+    });
+}
+function ngCopier(btn){
+  var t = document.getElementById('ng-tel');
+  var v = (t && t.textContent || '').trim();
+  if(!v) return;
+  var fini = function(){
+    var vieux = btn.textContent;
+    btn.textContent = 'Copie';
+    setTimeout(function(){ btn.textContent = vieux; }, 1200);
+  };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(v).then(fini, fini);
+  } else {
+    var z = document.createElement('textarea');
+    z.value = v; document.body.appendChild(z); z.select();
+    try { document.execCommand('copy'); } catch(e){}
+    document.body.removeChild(z); fini();
+  }
+}
+</script>"""
+
+
 def _render_numgen_settings() -> str:
     """Section Réglages : générateurs de numéros et de mails.
 
@@ -42664,6 +42866,7 @@ def _render_numgen_settings() -> str:
 
     return (
         alerte
+        + _numgen_generateur_html(stock, sms_ok)
         + "<div style='display:flex;gap:18px;flex-wrap:wrap;margin-bottom:14px;font-size:13px'>"
         + "<div>Numéros (GetAText) " + _pastille(sms_ok)
         + " <b style='color:#22c55e'>" + html_escape(soldes.get("sms", "—")) + "</b></div>"
@@ -51445,6 +51648,128 @@ def create_app():
         if res.get("ok"):
             return jsonify({"ok": True, "email": res.get("email", "?"), "rememberme": bool(rem), "note": note})
         return jsonify({"ok": False, "error": f"Cookies enregistrés mais ping échoué : {res.get('error', '?')}"})
+
+    # ---- Générateur de numéros, côté site --------------------------------
+    # Le parcours n'existait que dans Discord. Quand le panneau épinglé ne
+    # répond plus, il n'y avait plus AUCUN moyen d'obtenir un numéro alors que
+    # la clé et le solde étaient bons.
+    #
+    # Ces routes DÉPENSENT : elles restent donc sur le refus par défaut du
+    # before_request (rien n'est déclaré dans _RESTRICTED_WRITE_ALLOW), donc
+    # réservées aux accès complets. Un rôle restreint qui les appellerait
+    # depuis la console reçoit 403 sans qu'on ait rien à écrire ici.
+    def _numgen_module():
+        import numgen
+        return numgen
+
+    @app.route("/numgen/number", methods=["POST"])
+    def numgen_number():
+        """Commande UN numéro. Le seul appel payant de la page."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            ng = _numgen_module()
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indisponible : {e}"[:150]})
+        service = (request.form.get("service") or "ig").strip() or "ig"
+        demande = ng.default_country()
+        try:
+            ok, res = ng.get_number(service)
+        except Exception as e:
+            log.error(f"numgen: commande impossible ({e})")
+            return jsonify({"ok": False, "error": f"commande impossible : {e}"[:200]})
+        if not ok:
+            return jsonify({"ok": False, "error": str(res)[:240]})
+        pays = str(res.get("country") or "")
+        noms = dict(_NUMGEN_PAYS)
+        # get_number se rabat sur un pays qui a du stock quand celui reglé est
+        # à sec. Le taire donnerait un numéro d'un autre pays sans prévenir —
+        # et un compte créé sur un numéro étranger, ça se voit après coup.
+        detourne = ""
+        if pays and pays != str(demande):
+            detourne = ("Le pays réglé (%s) n'avait plus de numéro : celui-ci vient de %s."
+                        % (noms.get(str(demande), "code " + str(demande)),
+                           noms.get(pays, "code " + pays)))
+        solde = ""
+        try:
+            solde = (ng.balances() or {}).get("sms") or ""
+        except Exception:
+            pass
+        print(f"[numgen] numéro {res.get('phone')} ({pays}) pris par "
+              f"{session.get('username') or '?'} pour {service}", flush=True)
+        return jsonify({"ok": True, "id": str(res.get("id") or ""),
+                        "phone": res.get("phone") or "",
+                        "provider": res.get("provider") or "getatext",
+                        "pays": pays, "pays_nom": noms.get(pays, ""),
+                        "solde": solde, "detourne": detourne})
+
+    @app.route("/numgen/code", methods=["POST"])
+    def numgen_code():
+        """Lecture seule : le SMS est-il arrivé ? Appelée en boucle."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            ng = _numgen_module()
+            etat, valeur = ng.get_code((request.form.get("id") or "").strip(),
+                                       (request.form.get("provider") or "getatext").strip())
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"lecture impossible : {e}"[:150]})
+        if etat == "error":
+            return jsonify({"ok": False, "error": str(valeur)[:150]})
+        return jsonify({"ok": True, "etat": etat, "code": valeur or ""})
+
+    @app.route("/numgen/retry", methods=["POST"])
+    def numgen_retry():
+        """Redemande un SMS sur le même numéro (gratuit chez le fournisseur)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            ng = _numgen_module()
+            ok, msg = ng.retry((request.form.get("id") or "").strip(),
+                               (request.form.get("provider") or "getatext").strip())
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"impossible : {e}"[:150]})
+        return jsonify({"ok": bool(ok),
+                        "msg": "Nouveau SMS demandé" if ok else "",
+                        "error": "" if ok else str(msg)[:150]})
+
+    @app.route("/numgen/cancel", methods=["POST"])
+    def numgen_cancel():
+        """Rend le numéro : il repart en vente et le solde est recrédité."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            ng = _numgen_module()
+            ok, msg = ng.cancel((request.form.get("id") or "").strip(),
+                                (request.form.get("provider") or "getatext").strip())
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"impossible : {e}"[:150]})
+        return jsonify({"ok": bool(ok),
+                        "msg": "Numéro rendu — tu es remboursé" if ok else "",
+                        "error": "" if ok else str(msg)[:150]})
+
+    @app.route("/numgen/finish", methods=["POST"])
+    def numgen_finish():
+        """Clôt l'activation : plus de SMS attendu sur ce numéro."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            ng = _numgen_module()
+            # finish() rend le TEXTE brut du fournisseur, pas un couple comme
+            # ses voisines : le depaqueter en (ok, msg) decoupait la chaine
+            # caractere par caractere et « Termine » repondait toujours faux.
+            txt = str(ng.finish((request.form.get("id") or "").strip(),
+                                (request.form.get("provider") or "getatext").strip()))
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"impossible : {e}"[:150]})
+        ok = txt.startswith("ACCESS_ACTIVATION") or txt.startswith("ACCESS_")
+        return jsonify({"ok": ok, "msg": "Terminé" if ok else "",
+                        "error": "" if ok else ng._human(txt)[:150]})
 
     @app.route("/numgen/save", methods=["POST"])
     def numgen_save():
