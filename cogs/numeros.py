@@ -286,7 +286,30 @@ class NumerosCog(commands.Cog):
 
         Personne n'a a cliquer « Voir le code » : c'etait un clic pour
         apprendre quelque chose que le bot savait deja.
+
+        TOUT est rattrape : une tache de fond qui leve meurt sans un mot, et
+        c'est arrive — le code etait chez le fournisseur, le bloc restait
+        vide, et rien nulle part ne disait pourquoi. Un echec s'ecrit
+        desormais DANS le bloc du code.
         """
+        try:
+            await self._suivre(channel)
+        except Exception as e:                      # noqa: BLE001
+            log.error("suivre #%s : %r", getattr(channel, "name", "?"), e)
+            try:
+                await maj_trois(self.bot, channel,
+                                actif=_salon(channel.id).get("actif"),
+                                souci_code="⚠️ Écoute interrompue (%s). "
+                                           "Clique « Redemander un code »."
+                                           % type(e).__name__)
+            except Exception:
+                pass
+
+    async def _suivre(self, channel):
+        rec0 = _salon(channel.id)
+        log.info("numgen: ecoute du code demarree pour #%s (%s)",
+                 getattr(channel, "name", "?"),
+                 (rec0.get("actif") or {}).get("id"))
         for _ in range(POLL_MAX // POLL_SECONDS):
             await asyncio.sleep(POLL_SECONDS)
             rec = _salon(channel.id)
@@ -334,6 +357,23 @@ class NumerosCog(commands.Cog):
             return
         sms = actif.get("kind") == "sms"
         if quoi == "retry":
+            # D'ABORD regarder si le code est deja arrive. Il l'etait : visible
+            # chez le fournisseur, absent du salon parce que l'ecoute avait
+            # lache. Redemander un SMS dans ce cas fait perdre celui qu'on
+            # avait deja.
+            if sms:
+                etat0, val0 = await asyncio.to_thread(
+                    numgen.get_code, actif["id"], actif["provider"])
+            else:
+                etat0, val0 = await asyncio.to_thread(
+                    numgen.get_mail_code, actif["id"], actif.get("stale", ""))
+            if etat0 == "code" and val0:
+                if sms:
+                    await asyncio.to_thread(numgen.finish, actif["id"],
+                                            actif["provider"])
+                _salon_ecrire(ch.id, code=val0)
+                await maj_trois(self.bot, ch, actif=actif, code=val0)
+                return
             if sms:
                 ok, msg = await asyncio.to_thread(
                     numgen.retry, actif["id"], actif["provider"])

@@ -1632,9 +1632,26 @@ try:
     check("trois : /panelnumero pose les trois, pas le seul panneau",
           "poser_trois" in _s3p and "verrouiller_salon" in _s3p)
 
-    _s3b = _i3.getsource(_n3.NumerosCog.suivre)
+    # L ecoute est scindee : une enveloppe qui rattrape, et le corps qui
+    # interroge le fournisseur.
+    _s3b = _i3.getsource(_n3.NumerosCog._suivre)
     check("trois : le code est ecrit par le bot, sans qu on le demande",
           "maj_trois" in _s3b and "get_code" in _s3b)
+    # Le code peut etre DEJA arrive chez le fournisseur alors que le bloc est
+    # reste vide — l ecoute avait lache. Redemander un SMS dans ce cas ferait
+    # perdre celui qu on a deja.
+    _s3r = _i3.getsource(_n3.NumerosCog.action_salon)
+    check("trois : « Redemander » regarde d abord si le code est deja la",
+          "get_code" in _s3r and _s3r.index("get_code") < _s3r.index("numgen.retry"),
+          "on redemande avant d avoir regarde")
+    # Une tache de fond qui leve meurt sans un mot : c est arrive, le bloc
+    # restait vide et rien ne disait pourquoi.
+    _s3s = _i3.getsource(_n3.NumerosCog.suivre)
+    check("trois : une ecoute qui echoue l ecrit dans le bloc du code",
+          "except Exception" in _s3s and "souci_code" in _s3s)
+    check("trois : et son demarrage laisse une trace au journal",
+          "log.info" in _i3.getsource(_n3.NumerosCog._suivre))
+
     _s3c = _i3.getsource(_n3.verrouiller_salon)
     check("trois : le salon passe en lecture seule",
           "send_messages=False" in _s3c and "default_role" in _s3c)
