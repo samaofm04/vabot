@@ -17822,8 +17822,14 @@ def _diag_bot(bot=None) -> str:
         pret = "prêt" if getattr(bot, "is_ready", lambda: False)() else "pas prêt"
         sync = getattr(bot, "etat_sync", "inconnue")
         echecs = getattr(bot, "echecs_cogs", None)
-        n_g = len(getattr(bot, "guilds", []) or [])
-        bloc = (f"{pret} · {n_g} serveur(s) · {len(cmds)}/100 commandes · "
+        gs = list(getattr(bot, "guilds", []) or [])
+        n_g = len(gs)
+        # Le NOM des serveurs, pas seulement leur nombre : deplacer un cog
+        # d'un bot a l'autre n'a de sens que si le bot d'arrivee est sur le
+        # serveur ou ce cog travaille. Sans ca, on deplace a l'aveugle.
+        noms_g = ", ".join(str(getattr(g, "name", "?"))[:28] for g in gs[:6])
+        bloc = (f"{pret} · {n_g} serveur(s) ({html_escape(noms_g)}) · "
+                f"{len(cmds)}/100 commandes · "
                 f"{len(cogs)} cog(s) : {html_escape(', '.join(cogs))}"
                 f"<br><span style='color:#666'>synchro : {html_escape(str(sync))}</span>"
                 f"<br><span style='color:#666'>{len(cmds)} commande(s) dans "
