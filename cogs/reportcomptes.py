@@ -244,8 +244,10 @@ def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> st
             return j
     portee = f" · `@{identite}`" if identite else ""
     t = [f"📌 **Bilan de la quinzaine — du {_d(debut)} au {_d(fin)}**{portee}",
-         "_Une journée est tenue quand la fiche atteint 80 % de son objectif. "
-         "Les journées sans report ne comptent ni en bien ni en mal._", ""]
+         "_Un carré par jour : 🟩 objectif tenu · 🟥 raté · ⬜ pas de report "
+         "cette nuit-là (ne compte ni en bien ni en mal)._",
+         "_Une journée est tenue quand la fiche atteint 80 % de son objectif._",
+         ""]
     if not lignes:
         t.append("_Aucune fiche suivie pour l'instant._")
         return "\n".join(t)
@@ -566,7 +568,21 @@ class ReportComptes(commands.Cog):
         return self._salons(PREFIXE_QUINZAINE)
 
     async def _poser_epingle(self, ch, cle, texte: str):
-        """Reecrit le message epingle du bilan, ou le cree la premiere fois."""
+        """RÉÉCRIT le message épinglé. N'en crée un second sous aucun prétexte.
+
+        C'est LE même message du début à la fin de la quinzaine : le
+        propriétaire l'annote à la main, il ne doit pas se retrouver avec une
+        copie neuve à côté de celle qu'il a corrigée.
+
+        D'où la distinction entre les deux échecs possibles à la relecture :
+
+        - le message n'existe PLUS (supprimé à la main) : on en refait un,
+          c'est la seule façon de retrouver un bilan ;
+        - tout le reste — coupure réseau, Discord qui tousse, permission
+          momentanément refusée : on ne touche à rien et on réessaiera au tour
+          suivant. Reposter sur une erreur passagère, c'est exactement
+          fabriquer le doublon qu'on veut éviter.
+        """
         cfg = _load_cfg()
         c = cfg.get(cle) if cle else None
         mid = int((c or {}).get("pin_id") or 0)
@@ -575,8 +591,16 @@ class ReportComptes(commands.Cog):
                 msg = await ch.fetch_message(mid)
                 await msg.edit(content=texte)
                 return
-            except Exception:
-                pass                    # supprime a la main : on en refait un
+            except discord.NotFound:
+                print(f"[report-comptes] épingle supprimée dans {ch} — "
+                      f"on en repose une", flush=True)
+            except Exception as e:
+                # On NE reposte PAS. Le bilan de ce tour est perdu, le message
+                # existant reste celui du tour precedent : c'est moins grave
+                # qu'un deuxieme message.
+                print(f"[report-comptes] épingle illisible ({type(e).__name__}) — "
+                      f"on garde l'existante", flush=True)
+                return
         try:
             msg = await ch.send(texte)
             try:

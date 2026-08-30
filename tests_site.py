@@ -6412,6 +6412,28 @@ try:
         check("bilan : une nuit sans report reste blanche",
               _bTrou["suite"][-1] == "inconnu" and _bTrou["suite"][-2] == "inconnu",
               _bTrou["suite"])
+        # Les carres blancs de TETE disparaissent : la quinzaine a commence
+        # avant qu on se mette a mesurer, et quatorze blancs en tete se
+        # lisaient comme quatorze echecs. Les trous du MILIEU restent, eux :
+        # une nuit ou le bot n a pas tourne est une information.
+        _obT.enregistrer_jour([{"identite": "z", "va": "Z", "objectif": 30,
+                                "atteint": True}], "2026-08-29")
+        _obT.enregistrer_jour([{"identite": "z", "va": "Z", "objectif": 30,
+                                "atteint": False}], "2026-08-30")
+        _bTete = _obT.bilan_quinzaine("z", "Z", "2026-08-30")
+        check("bilan : pas de carrés blancs avant la première mesure",
+              _bTete["suite"] == ["tenu", "rate"], _bTete["suite"])
+        _obT.enregistrer_jour([{"identite": "y", "va": "Y", "objectif": 30,
+                                "atteint": True}], "2026-08-27")
+        _obT.enregistrer_jour([{"identite": "y", "va": "Y", "objectif": 30,
+                                "atteint": True}], "2026-08-30")
+        check("bilan : mais un trou au MILIEU reste visible",
+              _obT.bilan_quinzaine("y", "Y", "2026-08-30")["suite"]
+              == ["tenu", "inconnu", "inconnu", "tenu"],
+              _obT.bilan_quinzaine("y", "Y", "2026-08-30")["suite"])
+        check("bilan : la légende explique les carrés",
+              "🟩" in _pinOb and "pas de report" in _pinOb, _pinOb[:220])
+
         check("bilan : les carrés traduisent la suite",
               _rcT.suite_jours(["tenu", "rate", "inconnu"]) == "🟩🟥⬜",
               _rcT.suite_jours(["tenu", "rate", "inconnu"]))

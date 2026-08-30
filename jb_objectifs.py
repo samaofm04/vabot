@@ -393,6 +393,14 @@ def bilan_quinzaine(identite: str, va: str, jour: str = "") -> dict:
         else:
             suite.append("inconnu")     # pas de report ce jour-la
         d += _dt.timedelta(days=1)
+    # On ne montre RIEN avant le premier jour dont on a trace. La quinzaine
+    # avait commence bien avant qu'on se mette a mesurer : quatorze carres
+    # blancs en tete se lisaient comme quatorze echecs, alors qu'ils ne
+    # disaient qu'une chose — le report n'existait pas encore. Les trous au
+    # MILIEU, eux, restent : une nuit ou le bot n'a pas tourne est une
+    # information, et elle doit se voir.
+    while suite and suite[0] == "inconnu":
+        suite.pop(0)
 
     return {
         "debut": debut, "fin": fin,
