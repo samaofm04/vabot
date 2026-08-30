@@ -6978,6 +6978,48 @@ try:
         _ngNg.default_country = lambda: "0"
         _ngNg.stock = lambda service="ig": {"187": 4175, "78": 0, "0": 0}
 
+        # Le repli quand le pays regle est a sec : il doit ESSAYER les pays,
+        # pas demander l inventaire complet d abord. stock() coute six appels
+        # a 20 s de delai chacun, tous faits AVANT de retenter — l attente se
+        # comptait en minutes a chaque demande de numero.
+        _vraiStubsNg = _ngNg._stubs
+        _appelsNg = []
+        try:
+            _ngNg.get_number = _vraisNg[0]        # la VRAIE fonction, faux reseau
+            _ngNg.stock = _vraisNg[7]
+
+            def _fauxStubsNg(provider, action, **p):
+                _appelsNg.append((action, p.get("country")))
+                if action != "getNumber":
+                    return "{}"
+                return ("ACCESS_NUMBER:99887:15551234567"
+                        if p.get("country") == "187" else "NO_NUMBERS")
+
+            _ngNg._stubs = _fauxStubsNg
+            _okNg, _resNg = _ngNg.get_number("ig")
+            check("numgen : le repli trouve le pays fourni",
+                  _okNg is True and _resNg.get("country") == "187", str(_resNg)[:90])
+            check("numgen : et il n interroge plus tout l inventaire d abord",
+                  not any(a[0] == "getNumbersStatus" for a in _appelsNg)
+                  and len(_appelsNg) <= 4,
+                  "%d appel(s) : %s" % (len(_appelsNg), _appelsNg[:6]))
+
+            # Une cle refusee se reproduirait a l identique partout : inutile
+            # de faire le tour du monde pour s en convaincre.
+            _appelsNg.clear()
+            _ngNg._stubs = lambda provider, action, **p: (
+                _appelsNg.append((action, p.get("country"))) or "BAD_KEY")
+            _okNg2, _msgNg2 = _ngNg.get_number("ig")
+            check("numgen : une cle refusee arrete tout de suite",
+                  _okNg2 is False and len(_appelsNg) <= 2,
+                  "%d appel(s)" % len(_appelsNg))
+        finally:
+            _ngNg._stubs = _vraiStubsNg
+            _ngNg.get_number = lambda service="ig", country=None: (
+                True, {"id": "77", "phone": "+15551234567",
+                       "provider": "getatext", "country": "187"})
+            _ngNg.stock = lambda service="ig": {"187": 4175, "78": 0, "0": 0}
+
         _hNg = _wNg._render_numgen_settings()
         check("numgen : le generateur est sur la page, pas seulement les reglages",
               "ngNumero" in _hNg and "id='ng-service'" in _hNg

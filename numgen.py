@@ -211,15 +211,27 @@ def get_number(service="ig", country=None):
     # vide se reproduiraient à l'identique dans tous les pays.
     if not any("NO_NUMBERS" in (t or "") for t in brut):
         return False, res
-    ailleurs = sorted(((n, c) for c, n in stock(service).items()
-                       if n > 0 and c != demande), reverse=True)
-    for _n, code in ailleurs[:2]:
-        ok2, res2, _b = _commander(service, code)
+
+    # On ESSAIE les pays dans l'ordre de PAYS, du plus fourni au moins fourni,
+    # au lieu de demander d'abord l'inventaire complet. stock() coûte SIX
+    # appels HTTP a 20 s de delai chacun, tous faits avant meme de retenter :
+    # depuis que le pays reglé est a sec, chaque demande de numero passait par
+    # la, et l'attente se comptait en minutes. Un getNumber qui echoue est
+    # gratuit et ne coute qu'un aller-retour — le premier pays fourni repond
+    # donc tout de suite.
+    essayes = {str(demande)}
+    for code, _lib in PAYS:
+        if code in essayes:
+            continue
+        essayes.add(code)
+        ok2, res2, brut2 = _commander(service, code)
         if ok2:
             return True, res2
-    if not ailleurs:
-        return False, f"{res} — aucun pays n'a de numéro pour ce service"
-    return False, res
+        # Une cle refusee ou un solde vide se reproduiraient a l'identique
+        # partout : inutile de faire le tour du monde pour s'en convaincre.
+        if not any("NO_NUMBERS" in (t or "") for t in brut2):
+            return False, res2
+    return False, f"{res} — aucun pays n'a de numéro pour ce service"
 
 
 def get_code(activation_id, provider="getatext"):
