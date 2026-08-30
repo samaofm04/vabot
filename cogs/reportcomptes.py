@@ -111,6 +111,13 @@ PREFIXE_QUINZAINE = PREFIXES_MOIS[0]
 #: la journee sur les chiffres de midi.
 HEURE_REPORT = 1
 
+#: Version de mise en forme du bilan. A INCREMENTER des qu'on change son
+#: apparence : le message epingle est REECRIT, jamais repose, donc un
+#: changement de format ne se voyait qu'a la publication suivante — et on
+#: attendait 1 h du matin en croyant que ca ne marchait pas. Quand le numero
+#: stocke ne correspond plus, la boucle republie une fois, tout de suite.
+FORMAT_BILAN = 4
+
 
 # ==============================================================================
 # Heure de Paris — recopiee de clickrecap : meme besoin, meme methode, et le
@@ -217,10 +224,13 @@ def bloc_jour(etats: list, jour: str, identite: str = "") -> list:
             "a peu). ✅ = objectif tenu._", ""]
     if not etats:
         return ["\n".join(tete + ["_Aucune fiche à suivre._"])]
-    # Du pire au meilleur : ce message sert a voir qui decroche.
-    ordre = sorted(etats, key=lambda e: (e["atteint"], e["actifs"] - e["objectif"]))
+    # Meme ordre que le site, demande explicitement. On a d'abord trie du pire
+    # au meilleur — plus efficace pour reperer qui decroche, mais on perdait la
+    # correspondance ligne a ligne avec l'ecran qu'on a sous les yeux, et c'est
+    # elle qui compte quand on passe de l'un a l'autre. La pastille rouge
+    # suffit a reperer les fiches en peine.
     messages, bloc = [], list(tete)
-    for e in ordre:
+    for e in etats:
         ligne = ligne_fiche(e)
         # On coupe AVANT de depasser, et chaque morceau reprend la legende :
         # un deuxieme message sans en-tete est une liste de chiffres nus.
@@ -275,7 +285,7 @@ def suite_jours(suite, debut: str = "", coupure: int = 0) -> str:
 
 
 def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> list:
-    """Le bilan du MOIS, une fiche par bloc, du pire au meilleur.
+    """Le bilan du MOIS, une fiche par bloc, dans l'ordre du site.
 
     Rend une LISTE de messages. Un mois de carrés pour vingt-quatre fiches
     dépasse largement les deux mille caractères de Discord : la version
@@ -283,7 +293,9 @@ def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> li
     disparaissaient du bilan de paie sans un mot. On découpe, et chaque
     morceau reprend l'en-tête.
 
-    Du pire au meilleur à dessein : ce message sert à voir qui décroche.
+    L'ordre est celui de l'écran Social Analytics, pas un classement : on
+    passe de l'un à l'autre en permanence, et deux ordres différents obligent
+    à chercher la ligne au lieu de la lire.
     """
     def _d(j):
         try:
@@ -300,9 +312,9 @@ def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> li
     if not lignes:
         return ["\n".join(tete + ["_Aucune fiche suivie pour l'instant._"])]
 
-    ordre = sorted(lignes, key=lambda x: (x["bilan"].get("pct", 0), x["e"]["actifs"]))
+    # Meme ordre que le site, comme le report du jour.
     messages, bloc = [], list(tete)
-    for x in ordre:
+    for x in lignes:
         b, e = x["bilan"], x["e"]
         # Les deux quinzaines sont annoncees separement : ce sont deux
         # periodes de paie, pas une seule longue bande.
@@ -429,7 +441,11 @@ def etats_du_jour(jour: str = "", identite_voulue: str = "") -> list:
             e = ob.etat_fiche(identite, nom, siens, stats, maintenant, jour)
             e["discord"] = discord.get(nom.lower(), "")
             out.append(e)
-    out.sort(key=lambda e: (e["identite"].lower(), e["va"].lower()))
+    # PAS de tri. L'ordre dans lequel on vient de parcourir jailbreak.json est
+    # exactement celui du site : les identites dans l'ordre du fichier, et les
+    # fiches dans l'ordre de `vas` — que le proprietaire a range a la main
+    # (reorder_vas). Trier ici, meme alphabetiquement, cassait la
+    # correspondance entre l'ecran et le message.
     return out
 
 
@@ -476,9 +492,16 @@ class ReportComptes(commands.Cog):
             # depuis qu'il porte le mois entier. La boucle cherchait encore
             # l'ancien « pin_id » au singulier — elle croyait donc le salon
             # eternellement neuf, et le republiait tous les vingt tours.
-            pin_neuf = any(not ((cfg.get(cle) or {}).get("pin_ids")
-                                or (cfg.get(cle) or {}).get("pin_id"))
-                           for cle, _ch in self.salons_quinzaine())
+            def _a_refaire(cle):
+                rec = cfg.get(cle) or {}
+                if not (rec.get("pin_ids") or rec.get("pin_id")):
+                    return True                 # jamais publie
+                # Format change depuis la derniere ecriture : on reecrit une
+                # fois, sans attendre 1 h. C'est ce qui manquait — un nouveau
+                # rendu restait invisible des heures, et se lisait comme une
+                # panne.
+                return rec.get("format") != FORMAT_BILAN
+            pin_neuf = any(_a_refaire(cle) for cle, _ch in self.salons_quinzaine())
             if neufs or pin_neuf:
                 noms = ", ".join(str(getattr(c, "name", "?")) for _k, c in neufs)
                 print(f"[report-comptes] premier passage : {noms or 'bilan seul'}",
@@ -694,6 +717,7 @@ class ReportComptes(commands.Cog):
                                        epingler=False)
             neufs.append(mid)
         c["pin_ids"] = [m for m in neufs if m]
+        c["format"] = FORMAT_BILAN
         c.pop("pin_id", None)
         cfg[cle] = c
         _save_cfg(cfg)

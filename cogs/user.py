@@ -6779,7 +6779,7 @@ class _JailbreakModelSelect(discord.ui.Select):
         _libelles = _io.etiqueter(_visibles, _ordre)
         for m in _visibles:
             opts.append(discord.SelectOption(
-                label=_libelles.get(m, str(m).capitalize()),
+                label=_libelle_model(m, _libelles),
                 value=str(m).lower(), emoji=emojis.get(m)))
         if not opts:
             opts = [discord.SelectOption(label="(aucune model)", value="__none__")]
@@ -6814,6 +6814,33 @@ class JailbreakMenuView(discord.ui.View):
         super().__init__(timeout=None)
         self.cog = cog
         self.add_item(_JailbreakModelSelect(cog, us=us, emojis=emojis))
+
+
+def _libelle_model(ident, libelles=None) -> str:
+    """Le libelle d une model dans les menus : « 3. Lola 💬⚡ ».
+
+    Le rang vient de identites_ordre, les pastilles de identity_styles — la
+    MEME table que celle des pastilles du site. Deux menus affichent des
+    models (les boutons du menu US et le menu deroulant) : ils passent tous
+    les deux par ici, sinon l un des deux garde les vieux libelles au premier
+    style ajoute. tests_jailbreak compte les appels pour cette raison.
+
+    Le libelle d un bouton Discord est plafonne a 80 caracteres : on coupe le
+    NOM, jamais les pastilles, sinon la coupe emporte precisement ce qu on
+    vient d ajouter.
+    """
+    base = (libelles or {}).get(ident) or str(ident).capitalize()
+    try:
+        import identity_styles as _ist
+        past = _ist.emojis(ident)
+    except Exception:
+        past = ""
+    if not past:
+        return base[:80]
+    place = 80 - len(past) - 1
+    if len(base) > place:
+        base = base[:max(1, place - 1)] + "…"
+    return f"{base} {past}"
 
 
 class JBModelButton(discord.ui.DynamicItem[discord.ui.Button],
@@ -7099,7 +7126,7 @@ class JailbreakModelsView(discord.ui.View):
         libelles = _io.etiqueter(visibles, ordre)
         for m in visibles:
             self.add_item(JBModelButton(m, emoji=emojis.get(m),
-                                        libelle=libelles.get(m)))
+                                        libelle=_libelle_model(m, libelles)))
 
 
 class GenLinkModal(discord.ui.Modal, title="🔗 Générer un lien GetMySocial"):

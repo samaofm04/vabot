@@ -139,6 +139,23 @@ def _backups_newest_first() -> List[Path]:
     return out
 
 
+def _dire(ligne: str) -> None:
+    """Affiche sans jamais lever, quoi qu il arrive a l encodage.
+
+    La console Windows est en cp1252 : le « ⚠ » du message « FICHIER
+    CORROMPU » levait UnicodeEncodeError DANS la voie de secours, et tuait le
+    processus au lieu de restaurer. Le seul chemin qui doit tenir debout quand
+    tout le reste est casse ne peut pas tomber sur son propre message.
+    """
+    try:
+        print(ligne, flush=True)
+    except Exception:
+        try:
+            print(ligne.encode("ascii", "replace").decode("ascii"), flush=True)
+        except Exception:
+            pass
+
+
 def _load() -> Dict[str, Dict[str, Any]]:
     """Charge et NORMALISE tout vers le format v2.
 
@@ -153,7 +170,7 @@ def _load() -> Dict[str, Dict[str, Any]]:
         try:
             txt = JAILBREAK_FILE.read_text(encoding="utf-8")
         except Exception as e:
-            print(f"[jailbreak] lecture impossible : {e}", flush=True)
+            _dire(f"[jailbreak] lecture impossible : {e}")
             txt = ""
         if txt.strip():
             try:
@@ -161,14 +178,14 @@ def _load() -> Dict[str, Dict[str, Any]]:
                 _LAST_GOOD["data"] = json.loads(json.dumps(data))   # copie profonde
                 return data
             except Exception as e:
-                print(f"[jailbreak] ⚠ FICHIER CORROMPU ({e}) — repli", flush=True)
+                _dire(f"[jailbreak] ⚠ FICHIER CORROMPU ({e}) — repli")
         else:
-            print("[jailbreak] ⚠ fichier VIDE — repli", flush=True)
+            _dire("[jailbreak] ⚠ fichier VIDE — repli")
         # 1) dernier état SAIN vu par ce process (restauration exacte)
         if _LAST_GOOD.get("data") is not None:
             data = json.loads(json.dumps(_LAST_GOOD["data"]))
-            print(f"[jailbreak] ✔ restauré depuis la mémoire "
-                  f"({sum(len(v.get('accounts') or []) for v in data.values())} comptes)", flush=True)
+            _dire(f"[jailbreak] ✔ restauré depuis la mémoire "
+                  f"({sum(len(v.get('accounts') or []) for v in data.values())} comptes)")
             try:
                 _write_atomic(data)
             except Exception:
@@ -180,8 +197,8 @@ def _load() -> Dict[str, Dict[str, Any]]:
                 data = _parse(b.read_text(encoding="utf-8"))
             except Exception:
                 continue
-            print(f"[jailbreak] ✔ restauré depuis {b.name} "
-                  f"({sum(len(v.get('accounts') or []) for v in data.values())} comptes)", flush=True)
+            _dire(f"[jailbreak] ✔ restauré depuis {b.name} "
+                  f"({sum(len(v.get('accounts') or []) for v in data.values())} comptes)")
             try:                       # remet le fichier principal d aplomb
                 _write_atomic(data)
             except Exception:
@@ -237,7 +254,7 @@ def _rotate_backup():
             except Exception:
                 pass
     except Exception as e:
-        print(f"[jailbreak] backup impossible : {e}", flush=True)
+        _dire(f"[jailbreak] backup impossible : {e}")
 
 
 def _save(data: Dict[str, Dict[str, Any]]):

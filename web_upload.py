@@ -12980,76 +12980,37 @@ def _market_flag_html(identity: str, h: int = 11) -> str:
         "<title>%s</title>%s</svg>" % (vb, w, h, titre, titre, corps))
 
 
-STYLES_FILE = DATA_DIR / "identity_styles.json"
+# La table vit dans identity_styles.py — site ET bot y puisent. Elle etait
+# ici, donc invisible du bot : le menu Jailbreak n aurait jamais pu coller les
+# memes pastilles au bout de ses libelles sans la recopier. Meme raison, et
+# meme forme, que marche.py pour le drapeau FR/US.
+import identity_styles as _styles_mod
 
-# Ce qui MARCHE pour une identité, dit en un caractère. Rien ici n'est deviné :
-# c'est le propriétaire qui coche, parce que c'est lui qui voit ce qui prend.
-#
-# L'ordre de ce tuple est l'ordre d'affichage — les pastilles se lisent
-# toujours dans le même sens d'une identité à l'autre, sinon l'œil doit relire
-# à chaque ligne. La clé est stockée en dur dans le fichier : changer un emoji
-# ici ne perd aucune donnée, changer une CLÉ, si.
-_STYLES = (
-    ("caption", "💬", "Caption",  "#38bdf8",
-     "Les comptes marchent avec une caption incrustée"),
-    ("brut",    "🎥", "Brut",     "#a3a3a3",
-     "Les comptes marchent en publiant la vidéo brute, telle quelle"),
-    ("montage", "🎬", "Montage",  "#f472b6",
-     "Les comptes marchent avec un montage"),
-    ("flash",   "⚡", "Template", "#facc15",
-     "Les comptes marchent avec les templates / flash reels"),
-)
-_STYLES_CLES = tuple(c for c, _e, _l, _co, _t in _STYLES)
+STYLES_FILE = _styles_mod.FICHIER
+_STYLES = _styles_mod.STYLES
+_STYLES_CLES = _styles_mod.CLES
 
 
 def _load_styles() -> dict:
     """{identité: ['caption', 'flash', ...]} — ce qui marche pour chacune."""
-    try:
-        d = _cached_json_load(STYLES_FILE)
-        if not isinstance(d, dict):
-            return {}
-        return {
-            str(k).lower(): [s for s in v if s in _STYLES_CLES]
-            for k, v in d.items() if isinstance(v, list)
-        }
-    except Exception:
-        return {}
+    return dict(_styles_mod._table())
 
 
 def identity_styles(ident: str) -> list:
-    """Les styles cochés pour cette identité, dans l'ordre d'affichage.
-
-    On re-trie sur `_STYLES` au lieu de rendre la liste telle qu'elle a été
-    enregistrée : sans ça, l'ordre dépendait de l'ordre des clics, et deux
-    identités aux mêmes styles n'affichaient pas la même chose."""
-    poses = set(_load_styles().get((ident or "").strip().lower()) or ())
-    return [c for c in _STYLES_CLES if c in poses]
+    """Les styles cochés pour cette identité, dans l'ordre d'affichage."""
+    return _styles_mod.de(ident)
 
 
 def _set_identity_styles(ident: str, styles) -> bool:
     """Écrit les styles d'une identité. Liste vide = on retire l'entrée."""
-    ident = (ident or "").strip().lower()
-    if not ident:
-        return False
-    gardes = [c for c in _STYLES_CLES if c in set(styles or ())]
     try:
-        d = safe_json.load(STYLES_FILE, default={})
-        if not isinstance(d, dict):
-            d = {}
-        if gardes:
-            d[ident] = gardes
-        else:
-            # Une identité sans style ne laisse pas une liste vide derriere
-            # elle : le fichier se lit a l oeil, autant qu il ne porte que ce
-            # qui existe vraiment.
-            d.pop(ident, None)
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        safe_json.write(STYLES_FILE, d)
-        _invalidate_json_cache(STYLES_FILE)
-        return True
+        ok = _styles_mod.definir(ident, styles)
     except Exception as e:
         log.error(f"identity_styles: écriture impossible ({e})")
         return False
+    if ok:
+        _invalidate_json_cache(STYLES_FILE)
+    return ok
 
 
 def _style_badges_html(ident: str, taille: int = 12) -> str:
@@ -13086,12 +13047,10 @@ def _styles_json() -> str:
 
 def _styles_choix_json() -> str:
     """La table des styles, pour que la modale se dessine depuis la MÊME
-    source que le serveur. Deux listes en dur = deux comportements le jour où
-    l'une bouge (le Drive l'a déjà payé)."""
+    source que le serveur et que le bot."""
     import json as _j
     try:
-        return _j.dumps([{"cle": c, "emoji": e, "label": lab, "couleur": co, "titre": t}
-                         for c, e, lab, co, t in _STYLES])
+        return _j.dumps(_styles_mod.table_json())
     except Exception:
         return "[]"
 

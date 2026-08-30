@@ -6381,8 +6381,13 @@ try:
               len(_msgsOb) == 1, len(_msgsOb))
         check("report : les deux fiches y sont",
               "FICHE A" in _msgsOb[0] and "FICHE B" in _msgsOb[0])
-        check("report : la moins bonne est en haut",
-              _msgsOb[0].index("FICHE B") < _msgsOb[0].index("FICHE A"))
+        # L ORDRE EST CELUI DU SITE, pas un classement. On triait du pire au
+        # meilleur ; c est plus efficace pour reperer qui decroche, mais on
+        # perdait la correspondance ligne a ligne avec l ecran qu on a sous les
+        # yeux — et on passe de l un a l autre en permanence.
+        check("report : l ordre reçu est conservé, pas re-trié",
+              _msgsOb[0].index("FICHE A") < _msgsOb[0].index("FICHE B"),
+              _msgsOb[0][:400])
         # Sans legende, « 2/30 » ne dit pas de quoi on parle.
         check("report : la légende explique le x/30, une seule fois",
               _msgsOb[0].count("comptes qui tournent") == 1, _msgsOb[0][:200])
