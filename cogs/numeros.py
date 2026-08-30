@@ -403,9 +403,10 @@ class NumerosCog(commands.Cog):
         name="panelnumeroall",
         description="[ADMIN] Pose le panneau Numéro & Mail dans TOUS les salons -numero-mail")
     @app_commands.describe(
-        remplacer="true = supprime l'ancien panneau et repose le nouveau (mise à jour du design)")
+        remplacer="true = supprime l'ancien panneau et repose le nouveau (mise à jour du design)",
+        nettoyer="true = vide le salon de tout ce que les bots y ont posté, ne laisse que le panneau")
     async def panelnumeroall(self, interaction: discord.Interaction,
-                             remplacer: bool = False):
+                             remplacer: bool = False, nettoyer: bool = False):
         from cogs.user import _is_staff_member
         if not _is_staff_member(interaction.user):
             await interaction.response.send_message("Réservé aux admins.", ephemeral=True)
@@ -423,8 +424,25 @@ class NumerosCog(commands.Cog):
                 ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
-        ok = skipped = 0
+        ok = skipped = vides = 0
         for ch in targets:
+            if nettoyer:
+                # Le salon ne doit contenir QUE le panneau. On efface ce que
+                # les BOTS y ont pose — les deux applications, car l ancien
+                # panneau vient de l autre — et on laisse les messages des
+                # humains : ils sont irrecuperables, et personne n a demande
+                # a les perdre. Le panneau est repose juste apres.
+                try:
+                    partis = await ch.purge(limit=300,
+                                            check=lambda m: m.author.bot)
+                    vides += len(partis)
+                except Exception as e:
+                    log.warning(f"panelnumeroall: nettoyage de #{ch.name} : {e}")
+                olds = []                 # tout est parti, rien a remplacer
+                if await _ensure_num_panel(self.bot, ch):
+                    ok += 1
+                await asyncio.sleep(0.6)
+                continue
             olds = []
             try:
                 for p in await ch.pins():
@@ -456,7 +474,11 @@ class NumerosCog(commands.Cog):
             f"✅ Panneau posé dans **{ok}** salon(s)"
             + (f", {skipped} l'avaient déjà (`remplacer:true` pour les mettre à jour)"
                if skipped else "")
-            + f" (sur {len(targets)} salons `-numero-mail`).{warn}", ephemeral=True)
+            + (f" · {vides} message(s) de bot effacé(s)" if vides else "")
+            + f" (sur {len(targets)} salons `-numero-mail`).{warn}"
+            + ("" if nettoyer else
+               "\nℹ️ `nettoyer:true` pour ne laisser QUE le panneau dans chaque salon."),
+            ephemeral=True)
 
     @app_commands.command(
         name="resetpanels",

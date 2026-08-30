@@ -1406,6 +1406,33 @@ except Exception as _eCp:
     check("compare : testable", False, repr(_eCp)[:200])
 
 
+# ==============================================================================
+# « juste le menu dans leur salon » : nettoyer avant de reposer
+# ==============================================================================
+try:
+    import inspect as _insNe
+    from cogs.numeros import NumerosCog as _NcNe
+    _sNe = _insNe.getsource(_NcNe.panelnumeroall.callback
+                            if hasattr(_NcNe.panelnumeroall, "callback")
+                            else _NcNe.panelnumeroall)
+    check("nettoyer : l option existe et est fausse par defaut",
+          "nettoyer: bool = False" in _sNe,
+          "vider un salon ne doit jamais etre le comportement par defaut")
+    # On efface ce que les BOTS ont pose — les deux applications, l ancien
+    # panneau venant de l autre. Les messages des humains restent : ils sont
+    # irrecuperables et personne n a demande a les perdre.
+    check("nettoyer : la purge ne vise que les messages de bot",
+          "m.author.bot" in _sNe and "purge(limit=" in _sNe)
+    check("nettoyer : le panneau est repose juste apres",
+          "_ensure_num_panel" in _sNe.split("purge")[1][:400])
+    check("nettoyer : le compte rendu dit combien a ete efface",
+          "message(s) de bot effac" in _sNe)
+    check("nettoyer : et l option se rappelle quand on ne l a pas mise",
+          "nettoyer:true" in _sNe)
+except Exception as _eNe:
+    check("nettoyer : testable", False, repr(_eNe)[:200])
+
+
 print("\n" + "=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
