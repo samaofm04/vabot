@@ -6531,6 +6531,22 @@ try:
         # le bilan descend sous quinze jours de reports.
         check("portée : le salon de quinzaine a son propre préfixe",
               _rcT.PREFIXE_JOUR != _rcT.PREFIXE_QUINZAINE)
+        # Les deux familles de noms ne doivent jamais se recouvrir : un salon
+        # qui tomberait dans les deux recevrait le report du jour ET le bilan.
+        check("portée : aucun nom du jour ne commence comme un nom du mois",
+              not any(a.startswith(b) or b.startswith(a)
+                      for a in _rcT.PREFIXES_JOUR for b in _rcT.PREFIXES_MOIS),
+              (_rcT.PREFIXES_JOUR, _rcT.PREFIXES_MOIS))
+        # Les noms que le proprietaire emploie naturellement.
+        for _nom in ("report-day", "report-jour", "report-quotidien"):
+            check(f"portée : {_nom} est un salon du jour",
+                  any(_nom.startswith(x) for x in _rcT.PREFIXES_JOUR))
+        for _nom in ("report-mois", "report-du-mois", "report-paie"):
+            check(f"portée : {_nom} est un salon du mois",
+                  any(_nom.startswith(x) for x in _rcT.PREFIXES_MOIS))
+        check("portée : le suffixe d identité marche sur les nouveaux noms",
+              _rcT.identite_du_salon("report-day-jessye", _idsOb) == "jessye"
+              and _rcT.identite_du_salon("report-mois-emma", _idsOb) == "emma")
         for _nom, _att in (("report-quinzaine", ""),
                            ("report-quinzaine-jessye", "jessye"),
                            ("report-quinzaines-emma", "emma"),

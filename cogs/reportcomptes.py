@@ -642,9 +642,18 @@ class ReportComptes(commands.Cog):
                 ch = self.bot.get_channel(int(cfg.get("channel_id") or 0))
             except Exception:
                 ch = None
-            if ch is not None and ch.id not in vus:
-                vus.add(ch.id)
-                out.append((cle, ch))
+            if ch is None or ch.id in vus:
+                continue
+            # Le salon du BILAN a lui aussi une entree de configuration — c'est
+            # la qu'on garde les identifiants de ses messages epingles. Sans ce
+            # filtre il remontait ici, et recevait le report du jour EN PLUS du
+            # bilan : deux choses dans le salon qu'on venait justement de creer
+            # pour n'en avoir qu'une.
+            nom = str(getattr(ch, "name", "") or "").lower().replace("_", "-")
+            if any(nom.startswith(x) for x in PREFIXES_MOIS):
+                continue
+            vus.add(ch.id)
+            out.append((cle, ch))
         return out
 
     def salons_quinzaine(self) -> list:
