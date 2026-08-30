@@ -847,6 +847,84 @@ try:
 except Exception as _eIc:
     check("icones : testable", False, repr(_eIc)[:170])
 
+# ==============================================================================
+# Pastilles « ce qui marche » : la MEME table pour le site et pour les menus
+# ==============================================================================
+try:
+    import identity_styles as _ist
+    import pathlib as _plSt
+    _fSt = _ist.FICHIER
+    _savSt = _fSt.read_text(encoding="utf-8") if _fSt.exists() else None
+    _prevSt = _fSt.with_suffix(".json.prev")
+    _savPrevSt = _prevSt.read_text(encoding="utf-8") if _prevSt.exists() else None
+    _EMO_CAP, _EMO_FLASH = "💬", "⚡"
+    try:
+        check("styles : quatre styles, et le flash en fait partie",
+              len(_ist.STYLES) == 4 and "flash" in _ist.CLES
+              and dict((c, e) for c, e, _l, _co, _t in _ist.STYLES)["flash"] == _EMO_FLASH)
+
+        # Aller-retour, et ordre NORMALISE : deux models aux memes styles
+        # doivent se lire pareil, quel que soit l ordre des clics.
+        _ist.definir("zz_style", ["flash", "caption"])
+        check("styles : enregistre puis relu, dans l ordre de la table",
+              _ist.de("zz_style") == ["caption", "flash"], str(_ist.de("zz_style")))
+        check("styles : les emoji sortent colles, sans separateur",
+              _ist.emojis("zz_style") == _EMO_CAP + _EMO_FLASH,
+              "%d caractere(s)" % len(_ist.emojis("zz_style")))
+        check("styles : une model sans style ne rend rien",
+              _ist.emojis("zz_jamais_cochee") == "")
+
+        # Tout decocher est une ecriture : sinon on ne peut jamais retirer la
+        # derniere pastille.
+        _ist.definir("zz_style", [])
+        check("styles : tout decocher marche, et ne laisse pas d entree morte",
+              _ist.de("zz_style") == [] and "zz_style" not in _ist._table())
+
+        # Le libelle des menus Discord : rang + pastilles, en UN seul endroit.
+        from cogs.user import _libelle_model
+        _ist.definir("zz_style", ["caption", "flash"])
+        _attSt = "3. Zz_style " + _EMO_CAP + _EMO_FLASH
+        check("styles : le libelle du menu porte le rang PUIS les pastilles",
+              _libelle_model("zz_style", {"zz_style": "3. Zz_style"}) == _attSt,
+              "%d caractere(s) rendus"
+              % len(_libelle_model("zz_style", {"zz_style": "3. Zz_style"})))
+        check("styles : une model sans style garde son libelle intact",
+              _libelle_model("zz_jamais_cochee", {"zz_jamais_cochee": "5. Ellieann"})
+              == "5. Ellieann")
+
+        # Discord plafonne un libelle de bouton a 80 caracteres. La coupe doit
+        # tomber sur le NOM : couper la fin emporterait justement ce qu on
+        # vient d ajouter, et le bouton redeviendrait muet.
+        _longSt = "9. " + ("Zoe" * 40)
+        _labSt = _libelle_model("zz_style", {"zz_style": _longSt})
+        check("styles : un nom demesure est coupe, pas les pastilles",
+              len(_labSt) <= 80 and _labSt.endswith(_ist.emojis("zz_style")),
+              "len=%d" % len(_labSt))
+
+        # Les DEUX menus qui listent des models doivent passer par ce seul
+        # fabricant : sinon l un des deux garde les vieux libelles au premier
+        # style ajoute. Meme garde que pour _io.etiqueter, juste au-dessus.
+        _srcSt = _plSt.Path("cogs/user.py").read_text(encoding="utf-8")
+        check("styles : les deux menus passent par le meme fabricant",
+              _srcSt.count("_libelle_model(m, ") == 2,
+              "%d appel(s) sur 2" % _srcSt.count("_libelle_model(m, "))
+
+        # Une seule table : le site ne doit pas en tenir une deuxieme.
+        _srcWu = _plSt.Path("web_upload.py").read_text(encoding="utf-8")
+        check("styles : le site puise dans le module, il ne recopie pas la table",
+              "import identity_styles as _styles_mod" in _srcWu
+              and _srcWu.count('("caption", "' + _EMO_CAP + '"') == 0)
+    finally:
+        for _pSt, _vSt in ((_fSt, _savSt), (_prevSt, _savPrevSt)):
+            if _vSt is not None:
+                _pSt.write_text(_vSt, encoding="utf-8")
+            else:
+                _pSt.unlink(missing_ok=True)
+        _ist._CACHE.update(sig=None, data={})
+except Exception as _eSt:
+    check("styles : testable", False, repr(_eSt)[:200])
+
+
 print("\n" + "=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
