@@ -7288,6 +7288,80 @@ except Exception as _eTi:
     check("titres : testable", False, repr(_eTi)[:200])
 
 
+# ==============================================================================
+# Ouverture des categories : longue, donc elle rend la main
+# ==============================================================================
+try:
+    import asyncio as _aioLe, threading as _thLe, time as _tLe
+    import web_upload as _wLe
+
+    _posesLe = []
+
+    class _ChLe:
+        def __init__(s, n): s.name = n
+
+    class _OvLe:
+        view_channel = False
+        send_messages = False
+
+    class _CatLe:
+        def __init__(s, n, ch): s.name, s.channels = n, [_ChLe(x) for x in ch]
+        def overwrites_for(s, m): return _OvLe()
+        async def set_permissions(s, m, **kw):
+            await _aioLe.sleep(0.8)       # Discord freine ces modifications
+            _posesLe.append(s.name)
+
+    class _MbLe:
+        id = 42
+
+    class _GuLe:
+        name = "Youl4b"
+        def __init__(s):
+            s.categories = [_CatLe("va%02d" % i, ["va%02d-numero-mail" % i])
+                            for i in range(40)]
+        def get_member(s, i): return _MbLe()
+
+    class _PrLe:
+        def __init__(s, b): s.guilds = [_GuLe()]; s.loop = b
+
+    class _AdLe:
+        user = _MbLe()
+
+    _bLe = _aioLe.new_event_loop()
+    _thLe.Thread(target=_bLe.run_forever, daemon=True).start()
+    _svLe = (_wLe._BOT_REF, _wLe._BOT_ADMIN_REF)
+    try:
+        _wLe._BOT_REF, _wLe._BOT_ADMIN_REF = _PrLe(_bLe), _AdLe()
+        _aLe = _wLe.create_app()
+        _cLe = _aLe.test_client()
+        with _cLe.session_transaction() as _sLe:
+            _sLe["auth"] = True; _sLe["username"] = "admin"
+            _sLe["legacy_owner"] = True; _sLe["role"] = "owner"
+        _t0Le = _tLe.time()
+        _jLe = _cLe.post("/discord/acces_bot_admin").get_json() or {}
+        _dureeLe = _tLe.time() - _t0Le
+        # En attendant la FIN, la requete expirait et rendait « echec » alors
+        # que le travail continuait : on lisait « 1 salon sur 1 » sans
+        # comprendre qu il en restait 34 en route.
+        check("lent : le bouton rend la main sans attendre la fin",
+              _dureeLe < 40, "%.0f s" % _dureeLe)
+        check("lent : et ce n est pas annonce comme un echec",
+              _jLe.get("ok") is True and _jLe.get("encours") is True,
+              str(_jLe)[:110])
+        check("lent : le message dit que ca continue et quoi faire",
+              "cours" in (_jLe.get("msg") or "")
+              and "panelnumeroall" in (_jLe.get("msg") or ""))
+        _n1Le = len(_posesLe)
+        _tLe.sleep(4)
+        check("lent : le travail se poursuit en arriere-plan",
+              len(_posesLe) > _n1Le, "%d -> %d" % (_n1Le, len(_posesLe)))
+    finally:
+        (_wLe._BOT_REF, _wLe._BOT_ADMIN_REF) = _svLe
+        _bLe.call_soon_threadsafe(_bLe.stop)
+except Exception as _eLe:
+    check("lent : testable", False, repr(_eLe)[:200])
+
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

@@ -51813,12 +51813,27 @@ def create_app():
                     await _aio_acces.sleep(0.35)   # on menage l'API Discord
             return faits, deja, rates, sans_membre
 
+        # On attend un PEU, pas la fin. Discord limite severement les
+        # modifications de permissions : une seule categorie peut demander cinq
+        # secondes, et il y en a des dizaines. En attendant la fin, la requete
+        # expirait et rendait « echec » — alors que le travail continuait en
+        # arriere-plan et que quelques categories venaient de s ouvrir. On
+        # voyait donc « 1 salon sur 1 » sans comprendre pourquoi.
+        #
+        # Le travail part sur la boucle du bot et s y poursuit tout seul. Le
+        # bouton se reclique : les categories deja ouvertes sont comptees a
+        # part, ce qui donne l avancement.
         import asyncio as _aio_acces
+        fut = _aio_acces.run_coroutine_threadsafe(_faire(), boucle)
         try:
-            fut = _aio_acces.run_coroutine_threadsafe(_faire(), boucle)
-            faits, deja, rates, sans_membre = fut.result(timeout=240)
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"échec : {e}"[:200]})
+            faits, deja, rates, sans_membre = fut.result(timeout=25)
+        except Exception:
+            return jsonify({
+                "ok": True, "encours": True,
+                "msg": ("⏳ Ouverture en cours — Discord limite ces modifications, "
+                        "compte quelques minutes pour tout le parc. "
+                        "Reclique ce bouton pour voir où ça en est, "
+                        "puis relance <code>/panelnumeroall</code>.")})
 
         parts = [f"<b>{len(faits)}</b> catégorie(s) ouverte(s) au bot admin"]
         if deja:
