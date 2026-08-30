@@ -6343,19 +6343,57 @@ try:
 
         # Le rendu Discord : il doit tenir sans planter et dire l essentiel.
         import cogs.reportcomptes as _rcT
+        # UNE ligne par fiche, et rien de plus. La premiere version en faisait
+        # cinq, avec pourcentages et barre : sur vingt-quatre VAs c'etait un mur
+        # que personne ne lit. « Je veux pas un truc si complet », mot pour mot.
         _txtOb = _rcT.ligne_fiche(_eOb)
-        check("report : le message nomme la fiche et l identité",
-              "VA NOUM 1X1" in _txtOb and "jessye" in _txtOb)
-        check("report : il donne les comptes qui tournent sur l objectif",
-              "4 / 30" in _txtOb or "4/30" in _txtOb, _txtOb[:200])
-        # Le vocabulaire est celui du proprietaire : « qui tournent », pas
-        # « actifs » — ce mot designait deja autre chose sur la meme ligne.
-        check("report : il parle de comptes qui tournent",
-              "tournent" in _txtOb, _txtOb[:200])
-        check("report : il dit ce qui a été ajouté aujourd hui",
-              "ajouté" in _txtOb, _txtOb[:200])
-        check("report : objectif non tenu -> il dit combien il manque",
-              "il manque" in _txtOb, _txtOb[-200:])
+        check("report : la ligne tient sur UNE ligne",
+              "\n" not in _txtOb, repr(_txtOb[:120]))
+        check("report : elle nomme la fiche", "VA NOUM 1X1" in _txtOb, _txtOb)
+        check("report : elle donne les comptes qui tournent sur l objectif",
+              "4/30" in _txtOb, _txtOb)
+        check("report : elle donne le nombre total de comptes",
+              "6 comptes" in _txtOb, _txtOb)
+        check("report : elle dit les oublis", "1 oubli" in _txtOb, _txtOb)
+        # Zero oubli se DIT, il ne se devine pas par l absence de mention.
+        check("report : pas d oubli se dit aussi",
+              "pas d'oubli" in _rcT.ligne_fiche(dict(_eOb, oublies=0)),
+              _rcT.ligne_fiche(dict(_eOb, oublies=0)))
+        check("report : objectif non tenu -> pastille rouge", "🔴" in _txtOb, _txtOb)
+        check("report : objectif tenu -> pastille verte",
+              "✅" in _rcT.ligne_fiche(dict(_eOb, atteint=True)))
+
+        # Le message du jour : UN seul, toutes les fiches dedans, du pire au
+        # meilleur — vingt-quatre notifications d'affilee chaque nuit, c'etait
+        # le salon noye.
+        _msgsOb = _rcT.bloc_jour(
+            [dict(_eOb, va="FICHE A", actifs=28, atteint=True),
+             dict(_eOb, va="FICHE B", actifs=2, atteint=False)],
+            "2026-08-30", "jessye")
+        check("report : un seul message pour toutes les fiches",
+              len(_msgsOb) == 1, len(_msgsOb))
+        check("report : les deux fiches y sont",
+              "FICHE A" in _msgsOb[0] and "FICHE B" in _msgsOb[0])
+        check("report : la moins bonne est en haut",
+              _msgsOb[0].index("FICHE B") < _msgsOb[0].index("FICHE A"))
+        # Sans legende, « 2/30 » ne dit pas de quoi on parle.
+        check("report : la légende explique le x/30, une seule fois",
+              _msgsOb[0].count("comptes qui tournent") == 1, _msgsOb[0][:200])
+        check("report : l en-tête nomme l identité suivie",
+              "@jessye" in _msgsOb[0], _msgsOb[0][:120])
+        # Discord refuse au-dela de 2000 caracteres : soixante fiches doivent
+        # etre coupees en plusieurs messages, chacun avec sa legende.
+        _longsOb = _rcT.bloc_jour(
+            [dict(_eOb, va=f"FICHE {_i:02d}") for _i in range(60)], "2026-08-30")
+        check("report : une longue liste est découpée",
+              len(_longsOb) > 1, len(_longsOb))
+        check("report : chaque morceau tient sous la limite Discord",
+              all(len(m) <= 2000 for m in _longsOb), [len(m) for m in _longsOb])
+        check("report : chaque morceau garde sa légende",
+              all("comptes qui tournent" in m for m in _longsOb))
+        check("report : aucune fiche perdue au découpage",
+              sum(m.count("FICHE ") for m in _longsOb) == 60,
+              sum(m.count("FICHE ") for m in _longsOb))
         _pinOb = _rcT.bloc_quinzaine(
             [{"e": _eOb, "bilan": _bOb}], "2026-08-16", "2026-08-31")
         check("report : le message épinglé porte la pastille",

@@ -4,10 +4,11 @@
 Chaque nuit, une fois passe minuit a Paris, ce cog poste dans le salon
 configure un message par fiche VA :
 
-    VA NOUM 1X1 · @jessye
-    Comptes : 39   dont 5 ajoutes aujourd hui
-    Ont publie aujourd hui : 12      Oublies (>48 h) : 3
-    Actifs : 24 / 30  (80 %)  -- objectif tenu
+    Report du 30/08 · @jessye
+    x/30 = comptes qui tournent. OK = objectif tenu.
+
+    OK  VA NOUM 1X1 · 39 comptes · 26/30 · pas d oubli
+    KO  VA NOUM 1X2 · 12 comptes ·  4/30 · 8 oublis
 
 Puis il tient a jour UN message epingle, le bilan de la quinzaine : une ligne
 par fiche, avec sa pastille. C'est celui-la que tout le monde regarde.
@@ -123,25 +124,60 @@ def _barre(actifs: int, objectif: int, largeur: int = 10) -> str:
 
 
 def ligne_fiche(e: dict) -> str:
-    """Le bloc d'une fiche pour le report du jour."""
+    """UNE ligne par fiche. Volontairement court.
+
+    La premiere version faisait cinq lignes par VA, avec les pourcentages, la
+    barre de progression et la phrase qui explique combien il manque. Sur
+    vingt-quatre fiches ca donnait un mur que personne ne lit — et le
+    proprietaire l'a dit tout net : « je veux pas un truc si complet ».
+
+    Trois faits, dans l'ordre ou il les a dictes : combien de comptes en tout,
+    combien tournent sur l'objectif, combien d'oublis. Le detail (warm-up,
+    bannis, ajouts du jour, pourcentages) reste calcule et enregistre — il vit
+    sur la fiche du tableau de bord, pas dans un message qu'on lit d'un coup
+    d'oeil le matin.
+    """
     marque = "✅" if e["atteint"] else "🔴"
-    pct = int(round(e["pct"]))
-    t = [f"**{e['va']}** · `@{e['identite']}`",
-         f"Comptes : **{e['total']}**"
-         + (f"   ·   dont **{e['ajoutes']}** ajouté(s) aujourd'hui" if e["ajoutes"] else ""),
-         f"Ont publié aujourd'hui : **{e['publie']}**"
-         f"   ·   Oubliés (>48 h) : **{e['oublies']}**"
-         + (f"   ·   Bannis : {e['bannis']}" if e["bannis"] else ""),
-         f"{marque} Comptes qui tournent : **{e['actifs']} / {e['objectif']}** ({pct} %) "
-         f"{_barre(e['actifs'], e['objectif'])}"]
-    if e["warmup"]:
-        t.append(f"_dont {e['warmup']} en warm-up (créé il y a peu, compté "
-                 f"même sans publication)_")
-    if not e["atteint"]:
-        manque = max(0, e["seuil"] - e["actifs"])
-        t.append(f"_Objectif du jour non tenu — il manque {manque} compte(s) "
-                 f"qui tourne(nt) pour atteindre {e['seuil']} (80 % de {e['objectif']})._")
-    return "\n".join(t)
+    oublis = (f"{e['oublies']} oubli" + ("s" if e["oublies"] > 1 else "")
+              if e["oublies"] else "pas d'oubli")
+    return (f"{marque} **{e['va']}** · {e['total']} comptes · "
+            f"**{e['actifs']}/{e['objectif']}** · {oublis}")
+
+
+def bloc_jour(etats: list, jour: str, identite: str = "") -> list:
+    """Le report du jour, en UN message — ou plusieurs si Discord refuse.
+
+    Un message par fiche faisait vingt-quatre notifications d'affilee chaque
+    nuit. Une seule liste se lit d'un coup et ne noie pas le salon.
+
+    La legende est ecrite UNE fois en tete, pas repetee sur chaque ligne : sans
+    elle, « 16/30 » ne dit pas de quoi on parle ; repetee vingt-quatre fois,
+    elle redevient le mur qu'on vient d'enlever.
+    """
+    def _d(j):
+        try:
+            return datetime.date.fromisoformat(j).strftime("%d/%m")
+        except Exception:
+            return j
+    portee = f" · `@{identite}`" if identite else ""
+    tete = [f"📊 **Report du {_d(jour)}**{portee}",
+            "_x/30 = comptes qui tournent (ont publié sous 48 h, ou créés il y "
+            "a peu). ✅ = objectif tenu._", ""]
+    if not etats:
+        return ["\n".join(tete + ["_Aucune fiche à suivre._"])]
+    # Du pire au meilleur : ce message sert a voir qui decroche.
+    ordre = sorted(etats, key=lambda e: (e["atteint"], e["actifs"] - e["objectif"]))
+    messages, bloc = [], list(tete)
+    for e in ordre:
+        ligne = ligne_fiche(e)
+        # On coupe AVANT de depasser, et chaque morceau reprend la legende :
+        # un deuxieme message sans en-tete est une liste de chiffres nus.
+        if sum(len(x) + 1 for x in bloc) + len(ligne) > _MAX_MSG:
+            messages.append("\n".join(bloc))
+            bloc = list(tete)
+        bloc.append(ligne)
+    messages.append("\n".join(bloc))
+    return messages
 
 
 def bloc_quinzaine(lignes: list, debut: str, fin: str, identite: str = "") -> str:
@@ -356,8 +392,8 @@ class ReportComptes(commands.Cog):
             lignes_bilan = [{"e": e, "bilan": bilans.get(
                 (e["identite"].lower(), e["va"].lower())) or {}} for e in etats]
             try:
-                for e in etats:
-                    await ch.send(_tronquer(ligne_fiche(e)))
+                for morceau in bloc_jour(etats, jour, voulue):
+                    await ch.send(_tronquer(morceau))
                     n_msg += 1
                     await asyncio.sleep(0.6)     # on ne bouscule pas Discord
                 debut, fin = ob.quinzaine(jour)
