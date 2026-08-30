@@ -11,7 +11,18 @@ configure un message par fiche VA :
     KO  VA NOUM 1X2 · 12 comptes ·  4/30 · 8 oublis
 
 Puis il tient a jour UN message epingle, le bilan de la quinzaine : une ligne
-par fiche, avec sa pastille. C'est celui-la que tout le monde regarde.
+par fiche, le pseudo Discord a payer, et le detail jour par jour en carres.
+
+DEUX SALONS, DEUX CONVENTIONS DE NOM :
+
+    report-compte*     le report du jour
+    report-quinzaine*  le bilan, s'il existe — sinon il reste avec le jour
+
+Les deux ne se lisent pas au meme moment ni pour la meme raison : l'un le
+matin pour voir qui a decroche, l'autre au moment de payer. Laisses ensemble,
+le bilan descend sous quinze jours de reports et l'epingle ne se retrouve
+plus. Le suffixe restreint la portee : « report-compte-jessye » ne suit que
+jessye.
 
 **Aucune commande slash, et c'est contraint.** Discord plafonne une
 APPLICATION a 100 commandes globales, et ce bot y est deja : quatre cogs
@@ -58,6 +69,18 @@ _CFG_FILE = pathlib.Path(__file__).resolve().parent.parent / "data" / "report_co
 
 #: Longueur maxi d'un message Discord, avec de la marge pour le pied.
 _MAX_MSG = 1900
+
+#: Les deux conventions de nom. Le report du jour et le bilan de quinzaine ne
+#: se lisent pas au meme moment ni pour la meme raison : l'un se regarde le
+#: matin pour savoir qui a decroche, l'autre au moment de payer. Les laisser
+#: dans le meme salon, c'est un bilan qui descend sous quinze jours de reports
+#: et une epingle que plus personne ne retrouve.
+#:
+#: Si aucun salon de quinzaine n'existe, le bilan reste dans le salon du jour :
+#: separer est une possibilite, pas une obligation, et personne ne doit se
+#: retrouver sans bilan pour avoir omis de creer un salon.
+PREFIXE_JOUR = "report-compte"
+PREFIXE_QUINZAINE = "report-quinzaine"
 
 
 # ==============================================================================
@@ -258,13 +281,14 @@ def identite_du_salon(nom: str, identites) -> str:
     sans que personne comprenne pourquoi.
     """
     n = str(nom or "").lower().replace("_", "-").strip()
-    for prefixe in ("report-comptes-", "report-compte-"):
-        if n.startswith(prefixe):
-            suffixe = n[len(prefixe):].strip("-")
-            for ident in (identites or []):
-                if str(ident).lower() == suffixe:
-                    return str(ident).lower()
-            return ""
+    for base in (PREFIXE_JOUR, PREFIXE_QUINZAINE):
+        for prefixe in (base + "s-", base + "-"):
+            if n.startswith(prefixe):
+                suffixe = n[len(prefixe):].strip("-")
+                for ident in (identites or []):
+                    if str(ident).lower() == suffixe:
+                        return str(ident).lower()
+                return ""
     return ""
 
 
@@ -356,12 +380,19 @@ class ReportComptes(commands.Cog):
             # on l'a cree justement pour voir. Un salon est « neuf » tant qu'il
             # n'a pas de message epingle enregistre — donc une seule fois.
             cfg = _load_cfg()
+            # Un salon du jour est neuf tant qu'il n'a jamais recu de report ;
+            # un salon de quinzaine, tant qu'il n'a pas son epingle. Deux
+            # marqueurs parce que ce sont deux choses differentes : le salon
+            # du jour n'a pas d'epingle quand le bilan vit ailleurs.
             neufs = [(cle, ch) for cle, ch in self.salons_report()
-                     if not (cfg.get(cle) or {}).get("pin_id")]
-            if neufs:
+                     if not (cfg.get(cle) or {}).get("dernier_jour")]
+            pin_neuf = any(not (cfg.get(cle) or {}).get("pin_id")
+                           for cle, _ch in self.salons_quinzaine())
+            if neufs or pin_neuf:
                 noms = ", ".join(str(getattr(c, "name", "?")) for _k, c in neufs)
-                print(f"[report-comptes] premier passage : {noms}", flush=True)
-                await self.publier(jour, cibles=neufs)
+                print(f"[report-comptes] premier passage : {noms or 'bilan seul'}",
+                      flush=True)
+                await self.publier(jour, cibles=neufs or None)
 
             if maintenant.hour != 0 or self._dernier_jour == jour:
                 return
@@ -413,48 +444,95 @@ class ReportComptes(commands.Cog):
         except Exception:
             identites = []
 
-        n_msg = 0
+        # Le bilan part dans SES salons s'il en existe. Sinon il reste avec le
+        # report du jour : personne ne doit se retrouver sans bilan pour avoir
+        # omis de créer un salon.
+        salons_pin = self.salons_quinzaine() if salon_force is None else []
+        pin_a_part = bool(salons_pin)
+        if not pin_a_part:
+            salons_pin = list(cibles)
+
+        def _pour(ch):
+            """(identité suivie, fiches, lignes de bilan) pour ce salon."""
+            v = identite_du_salon(getattr(ch, "name", ""), identites)
+            ets = [e for e in tous if not v or e["identite"].lower() == v]
+            return v, ets, [{"e": e, "bilan": bilans.get(
+                (e["identite"].lower(), e["va"].lower())) or {}} for e in ets]
+
+        n_msg, n_fiches = 0, 0
         for cle, ch in cibles:
-            # Chaque salon ne recoit QUE ce qu'il annonce suivre.
-            voulue = identite_du_salon(getattr(ch, "name", ""), identites)
-            etats = [e for e in tous
-                     if not voulue or e["identite"].lower() == voulue]
-            lignes_bilan = [{"e": e, "bilan": bilans.get(
-                (e["identite"].lower(), e["va"].lower())) or {}} for e in etats]
+            # Chaque salon ne reçoit QUE ce qu'il annonce suivre.
+            voulue, etats, lignes_bilan = _pour(ch)
+            n_fiches = max(n_fiches, len(etats))
             try:
                 for morceau in bloc_jour(etats, jour, voulue):
                     await ch.send(_tronquer(morceau))
                     n_msg += 1
                     await asyncio.sleep(0.6)     # on ne bouscule pas Discord
-                debut, fin = ob.quinzaine(jour)
-                await self._poser_epingle(ch, cle, _tronquer(
-                    bloc_quinzaine(lignes_bilan, debut, fin, voulue)))
+                if not pin_a_part:
+                    debut, fin = ob.quinzaine(jour)
+                    await self._poser_epingle(ch, cle, _tronquer(
+                        bloc_quinzaine(lignes_bilan, debut, fin, voulue)))
+                # « Ce salon a deja recu un report. » Marque a part de
+                # l'epingle : quand le bilan part dans son propre salon,
+                # celui-ci n'a plus d'epingle du tout — s'y fier l'aurait
+                # laisse eternellement « neuf », donc republiant toutes les
+                # vingt minutes.
+                self._marquer_servi(cle, ch, jour)
             except discord.Forbidden:
                 print(f"[report-comptes] pas le droit d'écrire dans {ch}", flush=True)
             except Exception as e:
                 print(f"[report-comptes] envoi : {e}", flush=True)
-        return {"fiches": len(etats), "messages": n_msg, "salons": len(cibles)}
 
-    def salons_report(self) -> list:
-        """[(cle, salon)] ou publier : par convention de nom, et par config.
+        if pin_a_part:
+            debut, fin = ob.quinzaine(jour)
+            for cle, ch in salons_pin:
+                voulue, _ets, lignes_bilan = _pour(ch)
+                try:
+                    await self._poser_epingle(ch, cle, _tronquer(
+                        bloc_quinzaine(lignes_bilan, debut, fin, voulue)))
+                except discord.Forbidden:
+                    print(f"[report-comptes] pas le droit d'écrire dans {ch}", flush=True)
+                except Exception as e:
+                    print(f"[report-comptes] bilan : {e}", flush=True)
 
-        Convention : tout salon dont le nom commence par « report-compte »
-        (« report-compte », « report-comptes », « report-comptes-fr »...). Le
-        proprietaire cree le salon, il est servi — pas de commande a lancer,
-        et rien a reparametrer apres un changement de serveur.
+        return {"fiches": n_fiches, "messages": n_msg,
+                "salons": len(cibles) + (len(salons_pin) if pin_a_part else 0)}
 
-        La configuration par identifiant reste lue si elle existe : elle sert
-        aux salons qui ne suivent pas la convention.
+    def _marquer_servi(self, cle: str, ch, jour: str) -> None:
+        """Note qu'un salon a recu son report, et quel jour."""
+        try:
+            cfg = _load_cfg()
+            rec = cfg.get(cle) if isinstance(cfg.get(cle), dict) else {
+                "guild_id": getattr(getattr(ch, "guild", None), "id", 0),
+                "channel_id": ch.id}
+            rec["dernier_jour"] = jour
+            cfg[cle] = rec
+            _save_cfg(cfg)
+        except Exception as e:                      # noqa: BLE001
+            print(f"[report-comptes] marquage : {e}", flush=True)
+
+    def _salons(self, prefixe: str) -> list:
+        """[(cle, salon)] des salons dont le nom commence par `prefixe`.
+
+        Le proprietaire cree le salon, il est servi — pas de commande a
+        lancer, et rien a reparametrer apres un changement de serveur.
         """
-        vus, out = set(), []
+        out = []
         for c in getattr(self.bot, "get_all_channels", lambda: [])():
             nom = str(getattr(c, "name", "") or "").lower().replace("_", "-")
-            if not nom.startswith("report-compte"):
-                continue
-            if not hasattr(c, "send"):
-                continue
-            vus.add(c.id)
-            out.append((_cle(getattr(c.guild, "id", 0), c.id), c))
+            if nom.startswith(prefixe) and hasattr(c, "send"):
+                out.append((_cle(getattr(c.guild, "id", 0), c.id), c))
+        return out
+
+    def salons_report(self) -> list:
+        """Ou va le report DU JOUR.
+
+        La configuration par identifiant reste lue si elle existe : elle sert
+        aux salons qui ne suivent pas la convention de nom.
+        """
+        out = self._salons(PREFIXE_JOUR)
+        vus = {ch.id for _c, ch in out}
         for cle, cfg in _reports_configures(_load_cfg()):
             try:
                 ch = self.bot.get_channel(int(cfg.get("channel_id") or 0))
@@ -464,6 +542,10 @@ class ReportComptes(commands.Cog):
                 vus.add(ch.id)
                 out.append((cle, ch))
         return out
+
+    def salons_quinzaine(self) -> list:
+        """Ou va le BILAN de quinzaine. Vide = il reste dans le salon du jour."""
+        return self._salons(PREFIXE_QUINZAINE)
 
     async def _poser_epingle(self, ch, cle, texte: str):
         """Reecrit le message epingle du bilan, ou le cree la premiere fois."""

@@ -6445,6 +6445,20 @@ try:
             check(f"portée : {_nom} -> {_att or 'toutes'}",
                   _rcT.identite_du_salon(_nom, _idsOb) == _att,
                   _rcT.identite_du_salon(_nom, _idsOb))
+        # Le bilan peut vivre dans SON salon : « report-quinzaine ». Il ne se
+        # lit pas au meme moment que le report du jour — l un le matin pour
+        # voir qui decroche, l autre au moment de payer — et laisses ensemble,
+        # le bilan descend sous quinze jours de reports.
+        check("portée : le salon de quinzaine a son propre préfixe",
+              _rcT.PREFIXE_JOUR != _rcT.PREFIXE_QUINZAINE)
+        for _nom, _att in (("report-quinzaine", ""),
+                           ("report-quinzaine-jessye", "jessye"),
+                           ("report-quinzaines-emma", "emma"),
+                           ("report-quinzaine-nimporte", "")):
+            check(f"portée : {_nom} -> {_att or 'toutes'}",
+                  _rcT.identite_du_salon(_nom, _idsOb) == _att,
+                  _rcT.identite_du_salon(_nom, _idsOb))
+
         # Le titre de l epingle dit sur qui il porte, sinon on croit lire tout
         # le monde.
         check("portée : l épingle filtrée nomme son identité",
@@ -6478,10 +6492,13 @@ try:
     _prevST = _fST.with_suffix(".json.prev")
     _savPrevST = _prevST.read_text(encoding="utf-8") if _prevST.exists() else None
     try:
+        _vraiUsersST = _wuST._load_web_users
+        _wuST._load_web_users = lambda: {}
         _appST = _wuST.create_app()
         _cST = _appST.test_client()
         with _cST.session_transaction() as _sST:
-            _sST["auth"] = True; _sST["username"] = "admin"; _sST["legacy_owner"] = True
+            _sST["auth"] = True; _sST["username"] = "admin"
+            _sST["legacy_owner"] = True; _sST["role"] = "owner"
         _idST = (_wuST._list_identities() or [""])[0]
         check("styles : une identite pour tester", bool(_idST))
 
@@ -6557,6 +6574,10 @@ try:
             else:
                 _pST.unlink(missing_ok=True)
         _wuST._invalidate_json_cache(_fST)
+        try:
+            _wuST._load_web_users = _vraiUsersST
+        except NameError:
+            pass
 except Exception as _eST:
     check("styles : testable", False, repr(_eST)[:200])
 
