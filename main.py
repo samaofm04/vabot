@@ -13,8 +13,25 @@ ADMIN_TOKEN = os.getenv("DISCORD_ADMIN_TOKEN")
 PREFIX = os.getenv("PREFIX", "!")
 
 # Repartition des cogs entre les 2 bots
-MAIN_COGS = ["welcome", "onboarding", "autopost", "general", "user", "cta_reminder", "noctustest", "clickrecap", "vaactivity", "sheetssync", "vasort", "tgrouter", "numeros", "telechargement", "reportcomptes"]
-ADMIN_COGS = ["admin", "geelark"]
+# Repartition entre les DEUX applications Discord, et ce n'est pas un detail
+# d'organisation : Discord plafonne CHAQUE APPLICATION a 100 commandes slash.
+# Le bot principal etait exactement a 100, et quatre cogs ne se chargeaient
+# donc plus du tout — en silence, l'erreur partant dans un journal que
+# personne ne lit. Leurs commandes n'existaient plus sur Discord.
+#
+# vaactivity, vasort, tgrouter et numeros sont passes sur le bot admin, qui a
+# son propre budget (69/100 avant le deplacement). Ils travaillent tous sur
+# « YouLab AGENCY », ou le bot admin est present.
+#
+# CE QU'IL FAUT SAVOIR AVANT D'EN DEPLACER D'AUTRES : le bot admin n'est QUE
+# sur YouLab AGENCY, quand le principal est aussi sur « YouLab AGENCY THREADS »
+# et « Youl4b » (US). Un cog qui doit agir sur ces deux-la ne peut pas
+# demenager tant que le bot admin n'y est pas invite.
+#
+# L'etat des deux applications se lit sur youl4b.com/version : serveurs,
+# commandes sur 100, cogs charges, et les cogs en echec avec leur erreur.
+MAIN_COGS = ["welcome", "onboarding", "autopost", "general", "user", "cta_reminder", "noctustest", "clickrecap", "sheetssync", "telechargement", "reportcomptes"]
+ADMIN_COGS = ["admin", "geelark", "vaactivity", "vasort", "tgrouter", "numeros"]
 
 logging.basicConfig(
     level=logging.INFO,
