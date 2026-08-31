@@ -4979,11 +4979,26 @@ try:
     # Consequence a retenir : toute action supplementaire devra en remplacer
     # une, ou vivre sur un second panneau. Un bouton de trop ne casse pas le
     # bouton — il fait echouer la vue ENTIERE.
-    check("favoris : le panneau US garde ses 4 familles sur 4 rangees",
-          _rowsFv == {1: 4, 2: 5, 3: 5, 4: 5}, str(_rowsFv))
+    # Forme du 31/08 : {0:5, 1:5, 2:4, 3:4, 4:5}. La quantite est passee du
+    # menu deroulant au BOUTON, et ce n est pas cosmetique : un menu deroulant
+    # occupe une RANGEE ENTIERE, soit cinq places de bouton. Le panneau
+    # plafonnait donc a vingt et il etait plein ; en bouton, les vingt-cinq
+    # places sont disponibles — c est ce qui a permis d ajouter les trois
+    # ⭐⭐⭐ SANS EN RETIRER AUCUN.
+    #
+    # C est la REGLE qu on protege, pas les nombres : une rangee, une famille,
+    # les degres dans l ordre (nu, ⭐, ⭐⭐, ⭐⭐⭐), et aucune rangee qui
+    # deborde les cinq places de Discord.
+    check("favoris : le panneau US garde ses familles, une par rangee",
+          _rowsFv == {0: 5, 1: 5, 2: 4, 3: 4, 4: 5}, str(_rowsFv))
     check("favoris : et il ne deborde jamais les 5 places par rangee",
-          all(_n <= 5 for _n in _rowsFv.values()) and sum(_rowsFv.values()) <= 20,
+          all(_n <= 5 for _n in _rowsFv.values()) and len(_rowsFv) <= 5
+          and sum(_rowsFv.values()) <= 25,
           str(_rowsFv))
+    # Chaque famille porte son ⭐⭐⭐, et il est vert.
+    _vertsFv = [_b for _b in _uFv._JB_ACTIONS_US if _b[0] in _uFv._JB_CLES_TREND]
+    check("favoris : les trois familles ont leur ⭐⭐⭐",
+          len(_vertsFv) == 3, str([_b[0] for _b in _vertsFv]))
     # Et chaque action connait sa rangee : sans entree, elle retombe sur le
     # filet et atterrit n'importe ou.
     check("favoris : chaque action US a une rangee attribuee",

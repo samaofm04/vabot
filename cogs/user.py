@@ -2963,13 +2963,6 @@ class UserCog(commands.Cog):
     async def trendflash(self, interaction: discord.Interaction, count=None):
         await self._send_trends(interaction, "flash")
 
-    # Les memes, sous les noms qu attend le panneau Trends (« _trend_<famille> »).
-    # Des alias plutot qu une deuxieme implementation : deux chemins pour le
-    # meme geste, c est deux comportements le jour ou l un bouge.
-    _trend_caption = trendcaption
-    _trend_template = trendtemplate
-    _trend_flash = trendflash
-
     async def _send_trends(self, interaction, famille=""):
         """Boutons ⭐⭐⭐ : les videos deja FINIES, a poster telles quelles.
 
@@ -3592,11 +3585,10 @@ class UserCog(commands.Cog):
             self.bot.add_dynamic_items(JBModelButton)  # 1 bouton par model (menu US)
             # panneau d'actions permanent : l'etat vit dans le custom_id, donc
             # les boutons repondent encore apres un redemarrage
-            self.bot.add_dynamic_items(JBQtySelect, JBActionButton)
+            self.bot.add_dynamic_items(JBQtySelect, JBQtyButton, JBActionButton)
             # Panneau Trends : sans cet enregistrement, ses boutons ne
             # repondent plus apres un redemarrage — le message reste a
             # l ecran, les clics ne font rien, et rien ne le dit.
-            self.bot.add_dynamic_items(TrendModelSelect, TrendActionButton)
         except Exception:
             pass
         if not self.daily_menu.is_running():
@@ -6410,12 +6402,16 @@ _JB_ACTIONS_US = [
     ('templateflash', '⚡ Flash', 'templateflash', False),
     ('templateflashbanger', '⭐ Flash', 'templateflashbanger', False),
     ('templateflashbrut', '⭐⭐ Flash + Brut', 'templateflashbrut', False),
-    ('brutchoix', '🎛️ Choisir ma brute', 'choisirbrute', False),
 
-    # Les TRENDS ne sont PAS ici : elles ont leur propre panneau epingle
-    # (_panneau_trends). Celui-ci est plein — vingt boutons, le maximum que
-    # Discord accepte sur une vue — et un bouton de trop ne casse pas le
-    # bouton, il fait echouer la vue entiere.
+    # Les TRENDS : des videos deja FINIES, a poster telles quelles. Une entree
+    # par famille, posee juste apres les etoiles dont elle est le degre
+    # au-dessus. Elles tiennent parce que la quantite est passee en bouton :
+    # le menu deroulant qu elle occupait mangeait une rangee entiere, soit
+    # cinq places.
+    ('trendcaption', '⭐⭐⭐ Caption', 'trendcaption', False),
+    ('trendtemplate', '⭐⭐⭐ Template', 'trendtemplate', False),
+    ('trendflash', '⭐⭐⭐ Flash', 'trendflash', False),
+    ('brutchoix', '🎛️ Choisir ma brute', 'choisirbrute', False),
 ]
 
 #: La rangee de chaque action : UNE rangee = UNE famille.
@@ -6437,9 +6433,9 @@ _JB_ACTIONS_US = [
 _JB_CLES_TREND = frozenset({"trend", "trendcaption", "trendtemplate", "trendflash"})
 
 _JB_RANGEES = {
-    'name': 1, 'pseudo': 1, 'pp': 1, 'bio': 1,
-    # Rangee 2 : les publications, puis le brut nu et sa version marquee.
-    'story': 2, 'storycta': 2, 'post': 2, 'brute': 2, 'brutbanger': 2,
+    'name': 0, 'pseudo': 0, 'pp': 0, 'bio': 0,
+    # Rangee 1 : les publications, puis le brut nu et sa version marquee.
+    'story': 1, 'storycta': 1, 'post': 1, 'brute': 1, 'brutbanger': 1,
     # Rangee 3 : les CAPTIONS, de la version libre aux versions marquees, puis
     # les deux fusions. Rangee 4 : le BRUT et les TEMPLATES, meme progression.
     #
@@ -6448,11 +6444,13 @@ _JB_RANGEES = {
     # etaient parques ensemble en rangee 4, loin de ce dont ils sont la
     # variante — on lisait le compte d'etoiles sans voir la parente.
     # Rangee 3 : les CAPTIONS en entier, puis l'entree de la famille Template.
-    'reelcaption': 3, 'capbanger': 3, 'montagebanger': 3,
-    'reelmonte': 3, 'templatebanger': 3,
-    # Rangee 4 : la fin des templates, puis les Flash.
-    'templatebrut': 4, 'brutchoix': 4,
+    # Rangee 2 : la famille CAPTION en entier, degre par degre.
+    'reelcaption': 2, 'capbanger': 2, 'montagebanger': 2, 'trendcaption': 2,
+    # Rangee 3 : la famille TEMPLATE, meme progression.
+    'reelmonte': 3, 'templatebanger': 3, 'templatebrut': 3, 'trendtemplate': 3,
+    # Rangee 4 : la famille FLASH, puis l outil.
     'templateflash': 4, 'templateflashbanger': 4, 'templateflashbrut': 4,
+    'trendflash': 4, 'brutchoix': 4,
     # Retire du menu, garde ici : un panneau DEJA poste porte encore ce bouton,
     # et sans rangee il retomberait sur le filet et atterrirait n'importe ou.
     'captionbrut': 3,
@@ -7237,19 +7235,79 @@ class JBQtySelect(discord.ui.DynamicItem[discord.ui.Select],
 
         if vals and vals[0] == _JB_QTY_AUTRE:
             async def _suite(inter, q):
-                emb2, vue2 = _repose(inter, q)
-                # edit_message depuis une soumission de Modal modifie bien le
-                # message d origine : c est ce qui evite de reposter un
-                # panneau en double dans le salon.
-                await inter.response.edit_message(embed=emb2, view=vue2)
+                await _reposer_panneau(inter, self.ident, q)
+                await inter.response.edit_message(
+                    content=f"✓ Quantité : **{q}** par action.", view=None)
             await interaction.response.send_modal(_JBQtyModal(_suite))
             return
         try:
             q = int(vals[0])
         except Exception:
             q = self.qty
-        emb, view = _repose(interaction, q)
-        await interaction.response.edit_message(embed=emb, view=view)
+        await _reposer_panneau(interaction, self.ident, q)
+        await interaction.response.edit_message(
+            content=f"✓ Quantité : **{q}** par action.", view=None)
+
+
+class JBQtyButton(discord.ui.DynamicItem[discord.ui.Button],
+                  template=r"jbus:qb:(?P<ident>[a-z0-9_.\-]+):(?P<qty>\d+)"):
+    """La quantite, en BOUTON et non plus en menu deroulant.
+
+    Un menu deroulant occupe une RANGEE ENTIERE de la vue, soit cinq places de
+    bouton. Discord en autorise cinq rangees : le panneau plafonnait donc a
+    vingt boutons, et il etait plein. En bouton, il n en coute qu une : les
+    vingt-cinq places sont disponibles, ce qui a permis d ajouter les trois
+    ⭐⭐⭐ sans rien retirer.
+
+    Le clic ouvre le meme choix qu avant, en ephemere. La valeur choisie
+    reconstruit le panneau permanent — pas le message ephemere, sinon le
+    panneau garderait l ancienne quantite pendant que le VA lit la nouvelle.
+    """
+
+    def __init__(self, ident, qty):
+        self.ident = (ident or "_").lower()
+        self.qty = int(qty)
+        super().__init__(discord.ui.Button(
+            label=f"📦 Quantité : {self.qty}",
+            style=discord.ButtonStyle.secondary, row=0,
+            custom_id=f"jbus:qb:{self.ident}:{self.qty}"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match, /):
+        return cls(match["ident"], match["qty"])
+
+    async def callback(self, interaction: discord.Interaction):
+        if not _jb_can_use(interaction):
+            await interaction.response.send_message(
+                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
+            return
+        vue = discord.ui.View(timeout=180)
+        vue.add_item(JBQtySelect(self.ident, self.qty))
+        await interaction.response.send_message(
+            content=f"📦 Combien de médias par action ? (actuel : **{self.qty}**)",
+            view=vue, ephemeral=True)
+
+
+async def _reposer_panneau(interaction, ident, qty):
+    """Reecrit le panneau PERMANENT du salon avec la quantite demandee.
+
+    Appele depuis un message ephemere : `edit_message` y modifierait le message
+    ephemere et laisserait le panneau afficher l ancienne quantite. On retrouve
+    donc le panneau par son identifiant, celui-la meme que _ensure_us_panel a
+    enregistre en le posant.
+    """
+    emb, vue = _jb_panel(interaction.client.get_cog("UserCog"), ident, qty,
+                         guild=interaction.guild,
+                         marche=marche_du_membre(interaction.user))
+    pid = _jb_panel_ids().get(str(getattr(interaction, "channel_id", "")))
+    if pid and interaction.channel is not None:
+        try:
+            await interaction.channel.get_partial_message(int(pid)).edit(
+                embed=emb, view=vue)
+            return True
+        except Exception as e:                  # noqa: BLE001
+            print(f"[jb] panneau non remis a jour ({e})", flush=True)
+    return False
 
 
 def _jb_action(key):
@@ -7324,143 +7382,6 @@ class JBActionButton(discord.ui.DynamicItem[discord.ui.Button],
                                  count=self.qty, supports_count=supports_count)
 
 
-#: Les trois familles du panneau Trends. La cle finit dans le custom_id des
-#: boutons : la changer casserait les panneaux DEJA postes, qui ne savent plus
-#: a quoi repond leur bouton.
-_TREND_FAMILLES = (
-    ("caption", "⭐⭐⭐ Caption"),
-    ("template", "⭐⭐⭐ Template"),
-    ("flash", "⭐⭐⭐ Flash"),
-)
-_TREND_FAMILLES_OK = frozenset(k for k, _l in _TREND_FAMILLES)
-
-
-class TrendModelSelect(discord.ui.DynamicItem[discord.ui.Select],
-                       template=r"trend:m:(?P<ident>[a-z0-9_.\-]+)"):
-    """La model du panneau Trends.
-
-    Ce panneau a le SIEN, il ne suit pas celui des actions : sans ca il
-    servirait l identite du VA au lieu de la model choisie, et un VA qui gere
-    plusieurs models recevrait les trends de la mauvaise.
-    """
-
-    def __init__(self, ident, models=None, emojis=None):
-        self.ident = (ident or "_").lower()
-        opts = []
-        for m in (models or [])[:25]:
-            opts.append(discord.SelectOption(
-                label=str(m).capitalize(), value=str(m).lower(),
-                default=(str(m).lower() == self.ident),
-                emoji=(emojis or {}).get(m)))
-        if not opts:
-            opts = [discord.SelectOption(label="(aucune model)", value="__none__")]
-        super().__init__(discord.ui.Select(
-            placeholder="Choisis une model…", min_values=1, max_values=1,
-            options=opts, row=0, custom_id=f"trend:m:{self.ident}"))
-
-    @classmethod
-    async def from_custom_id(cls, interaction, item, match, /):
-        # Le clic sur un panneau deja poste : on reconstruit la liste depuis
-        # le marche de la personne, comme le fait le panneau des actions.
-        try:
-            models = _jb_models_marche(marche_du_membre(interaction.user))
-        except Exception:
-            models = []
-        return cls(match["ident"], models)
-
-    async def callback(self, interaction: discord.Interaction):
-        if not _jb_can_use(interaction):
-            await interaction.response.send_message(
-                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
-            return
-        vals = getattr(self.item, "values", None) or []
-        choisie = (vals[0] if vals else "").lower()
-        if not choisie or choisie == "__none__":
-            await interaction.response.send_message(
-                "Aucune model disponible.", ephemeral=True)
-            return
-        emb, vue = await _panneau_trends(interaction.client, choisie,
-                                         guild=interaction.guild,
-                                         membre=interaction.user)
-        await interaction.response.edit_message(embed=emb, view=vue)
-
-
-class TrendActionButton(discord.ui.DynamicItem[discord.ui.Button],
-                        template=r"trend:a:(?P<ident>[a-z0-9_.\-]+):(?P<fam>[a-z]+)"):
-    """Un bouton ⭐⭐⭐ : les videos deja finies de cette model."""
-
-    def __init__(self, ident, fam, label=None):
-        self.ident = (ident or "_").lower()
-        self.fam = fam
-        lib = label or dict(_TREND_FAMILLES).get(fam, fam)
-        super().__init__(discord.ui.Button(
-            label=lib, style=discord.ButtonStyle.success, row=1,
-            disabled=(self.ident == "_"),
-            custom_id=f"trend:a:{self.ident}:{self.fam}"))
-
-    @classmethod
-    async def from_custom_id(cls, interaction, item, match, /):
-        return cls(match["ident"], match["fam"])
-
-    async def callback(self, interaction: discord.Interaction):
-        if not _jb_can_use(interaction):
-            await interaction.response.send_message(
-                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
-            return
-        cog = interaction.client.get_cog("UserCog")
-        if cog is None or self.ident == "_":
-            await interaction.response.send_message(
-                "Choisis d'abord une model au-dessus 👆", ephemeral=True)
-            return
-        # MEME chemin que le panneau des actions : le contenu part dans le
-        # salon -content, et l identite de la model est posee le temps de
-        # l envoi. Sans ca, le VA recevrait les trends de SA fiche.
-        await cog._run_for_model(interaction, self.ident,
-                                 getattr(cog, "_trend_" + self.fam))
-
-
-async def _panneau_trends(bot, ident="_", guild=None, membre=None):
-    """(embed, view) du panneau Trends : sa model, et ses trois boutons.
-
-    Un panneau A PART, et pas trois boutons de plus sur celui des actions :
-    celui-la est PLEIN (20 boutons, le maximum que Discord accepte), et un
-    bouton de trop n aurait pas casse le bouton mais la vue entiere.
-    """
-    try:
-        marche = marche_du_membre(membre) if membre is not None else "us"
-    except Exception:
-        marche = "us"
-    try:
-        models = _jb_models_marche(marche)
-    except Exception:
-        models = []
-    emojis = {}
-    if guild is not None and models:
-        try:
-            emojis = await ensure_identity_emojis(guild, models)
-        except Exception:
-            emojis = {}
-    vue = discord.ui.View(timeout=None)
-    vue.add_item(TrendModelSelect(ident, models, emojis))
-    for fam, lib in _TREND_FAMILLES:
-        vue.add_item(TrendActionButton(ident, fam, label=lib))
-    titre = ("⭐⭐⭐ Trends — prêtes à poster"
-             if ident == "_" else
-             f"⭐⭐⭐ Trends — {ident.capitalize()}")
-    emb = discord.Embed(
-        title=titre,
-        description=(
-            "Des vidéos **déjà finies**. Le travail est fait : tu postes "
-            "**telle quelle**, tu ne remontes rien et tu ne réécris pas le texte.\n\n"
-            + ("Choisis une model au-dessus 👆, puis clique la famille.\n"
-               if ident == "_" else "")
-            + "Le son à utiliser arrive avec la vidéo, dans un bloc à copier.\n"
-              "Le contenu part dans ton salon **-content** 👇"),
-        color=discord.Color.green())
-    emb.set_footer(text="panneau-trends-us")
-    return emb, vue
-
-
 def _jb_panel(cog, ident, qty=3, marche="us", guild=None):
     """(embed, view) du panneau permanent. `ident` vaut « _ » tant qu'aucune
     model n'est choisie : on n'affiche alors que la quantite.
@@ -7468,7 +7389,7 @@ def _jb_panel(cog, ident, qty=3, marche="us", guild=None):
     le marche FR garde son Reel avec exemple, le marche US a Reel caption."""
     ident = (ident or "_").lower()
     view = discord.ui.View(timeout=None)
-    view.add_item(JBQtySelect(ident, qty))
+    view.add_item(JBQtyButton(ident, qty))
     if ident != "_":
         # Meme liste pour tout le monde : « Reel caption », pas de Reel brut.
         _actions = _JB_ACTIONS_US

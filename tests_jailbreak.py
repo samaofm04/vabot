@@ -1738,8 +1738,7 @@ try:
     # LA garde qui compte : Discord plafonne a 5 boutons par rangee et 5
     # rangees, dont une prise par le menu deroulant. Depasser ne casse pas le
     # bouton fautif — ca fait echouer la vue ENTIERE, donc tout le panneau.
-    import asyncio as _aTr
-    _embTr, _vueTr = _aTr.run(_uTr._panneau_trends(None, "julia"))
+    _embTr, _vueTr = _uTr._jb_panel(None, "julia", 3)
     _libTr = []
     for _itTr in _vueTr.children:
         _bTr = getattr(_itTr, "item", None) or _itTr
@@ -1748,44 +1747,59 @@ try:
             _libTr.append((getattr(_itTr, "row", None), _lTr, getattr(_bTr, "style", None)))
     from collections import Counter as _CTr
     _parRangeeTr = _CTr(r for r, _l, _s in _libTr)
-    check("trends : le panneau porte les trois familles",
+    check("trends : le menu porte les trois familles",
           len([1 for _r, _l, _s in _libTr if "⭐⭐⭐" in _l]) == 3,
-          str([_l for _r, _l, _s in _libTr])[:120])
-    check("trends : et il reste dans les limites de Discord",
-          all(_n <= 5 for _n in _parRangeeTr.values()) and len(_vueTr.children) <= 25,
+          str([_l for _r, _l, _s in _libTr if "⭐" in _l])[:130])
+    check("trends : et le menu reste dans les limites de Discord",
+          all(_n <= 5 for _n in _parRangeeTr.values())
+          and len(_parRangeeTr) <= 5 and len(_vueTr.children) <= 25,
           str(dict(sorted(_parRangeeTr.items()))))
     check("trends : les trois boutons sont verts",
           all(_s == _dTr.ButtonStyle.success
               for _r, _l, _s in _libTr if "⭐⭐⭐" in _l))
-    # Il a sa PROPRE model : sans ca il servirait l identite du VA au lieu de
-    # celle qu on regarde, et un VA qui gere plusieurs models recevrait les
-    # trends de la mauvaise.
-    check("trends : le panneau choisit sa propre model",
-          any(getattr(getattr(_i, "item", None), "placeholder", None)
-              for _i in _vueTr.children))
-    # Le panneau des ACTIONS, lui, doit avoir retrouve sa place libre.
-    _e2Tr, _v2Tr = _uTr._jb_panel(None, "julia", 3)
-    check("trends : le panneau des actions n en porte plus de doublon",
-          not any("⭐⭐⭐" in (getattr(getattr(_i, "item", None), "label", "") or "")
-                  for _i in _v2Tr.children))
+    # Chaque ⭐⭐⭐ est dans la rangee de SA famille : c est ce qui permet de
+    # lire les degres dans l ordre au lieu de chercher dans tout le panneau.
+    _rangTr = {_l: _r for _r, _l, _s in _libTr}
+    for _famTr, _baseTr in (("⭐⭐⭐ Caption", "💬 Caption"),
+                            ("⭐⭐⭐ Template", "🎞️ Template"),
+                            ("⭐⭐⭐ Flash", "⚡ Flash")):
+        check("trends : %s est dans la rangee de sa famille" % _famTr,
+              _rangTr.get(_famTr) is not None
+              and _rangTr.get(_famTr) == _rangTr.get(_baseTr),
+              "%s vs %s" % (_rangTr.get(_famTr), _rangTr.get(_baseTr)))
+    # La quantite est passee en BOUTON : un menu deroulant occupe une rangee
+    # entiere, soit cinq places. Sans ce changement, les trois ⭐⭐⭐ auraient
+    # demande d en supprimer deux autres.
+    check("trends : la quantite est un bouton, pas un menu deroulant",
+          any("Quantité" in _l for _r, _l, _s in _libTr),
+          str([_l for _r, _l, _s in _libTr])[:90])
 
     # Aucune commande slash consommee : le bot principal est deja au-dela du
     # plafond de 100, et chaque commande en trop en fait disparaitre une autre
     # sans le moindre message.
     for _famTr in ("caption", "template", "flash"):
-        _cibleTr = getattr(_uTr.UserCog, "_trend_" + _famTr, None)
-        check("trends : la cible _trend_%s existe" % _famTr, _cibleTr is not None)
-        check("trends : _trend_%s ne coute AUCUNE commande slash" % _famTr,
+        _entTr = _uTr._jb_action("trend" + _famTr)
+        check("trends : l action trend%s est declaree" % _famTr, _entTr is not None)
+        _cibleTr = getattr(_uTr.UserCog, _entTr[2], None) if _entTr else None
+        check("trends : sa cible existe sur le cog", _cibleTr is not None,
+              str(_entTr))
+        # Le bot principal est a 100 commandes sur 100 : une de plus en ferait
+        # disparaitre une autre, sans le moindre message.
+        check("trends : trend%s ne coute AUCUNE commande slash" % _famTr,
               _cibleTr is not None and not hasattr(_cibleTr, "callback"))
     check("trends : le panneau sait appeler une methode ordinaire",
           'getattr(cmd, "callback", None)' in
           _pTr.Path("cogs/user.py").read_text(encoding="utf-8"))
-    check("trends : ses boutons survivent a un redemarrage",
-          "add_dynamic_items(TrendModelSelect, TrendActionButton)" in
+    # Le bouton de quantite doit etre enregistre comme item dynamique, sinon
+    # il cesse de repondre apres un redemarrage : le panneau reste a l ecran,
+    # le clic ne fait rien, et rien ne le dit.
+    check("trends : le bouton de quantite survit a un redemarrage",
+          "add_dynamic_items(JBQtySelect, JBQtyButton, JBActionButton)" in
           _pTr.Path("cogs/user.py").read_text(encoding="utf-8"))
-    check("trends : le panneau est pose avec les deux autres",
-          "_ensure_us_trends(bot, channel)" in
-          _pTr.Path("cogs/welcome.py").read_text(encoding="utf-8"))
+    # Le menu deroulant de quantite vit desormais dans un message ephemere :
+    # il doit reecrire le panneau PERMANENT, pas l ephemere d ou il s ouvre.
+    check("trends : la quantite reecrit le panneau, pas l ephemere",
+          "_reposer_panneau(" in _pTr.Path("cogs/user.py").read_text(encoding="utf-8"))
 
     # Le stock : petit par nature, tire au hasard, et jamais un fichier voisin.
     _dosTr = _uTr.IDENTITIES_DIR / "_tst_trends" / "trends"
