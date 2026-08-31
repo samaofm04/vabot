@@ -7691,6 +7691,49 @@ except Exception as _eSa:
     check("salons : testable", False, repr(_eSa)[:200])
 
 
+# ==============================================================================
+# Categorie « Trends » : des videos FINIES, pretes a poster telles quelles
+# ==============================================================================
+try:
+    import web_upload as _wuTr
+    import re as _reTr
+    check("trends : la categorie est connue du stockage",
+          "trends" in _wuTr.CLOUD_SUBDIRS)
+    _srcTr = _plBrSite.Path("web_upload.py").read_text(encoding="utf-8")
+    # Une categorie a moitie declaree, c est un onglet qui s affiche et une
+    # galerie vide, ou l inverse — sans un mot. On compte les points d accroche.
+    for _quoiTr, _motTr in (
+        ("le bouton de la barre laterale", 'id="tab-cloudtrends"'),
+        ("la section de page", 'id="form-cloudtrends"'),
+        ("le rendu paresseux", '{cloud_trends_html}'),
+        ("la table des uploads", '"cloudtrends": ("trends"'),
+        ("le rendu de la galerie", '"cloudtrends": lambda:'),
+        ("le panneau d upload", '"trends": ("trend"'),
+    ):
+        check("trends : %s est declare" % _quoiTr, _motTr in _srcTr, _motTr)
+    check("trends : la permission montage l ouvre",
+          '"cloudtrends"' in _srcTr.split('"montage": {')[1][:120])
+
+    _aTr = _wuTr.create_app()
+    _vraiTr = _wuTr._load_web_users
+    _wuTr._load_web_users = lambda: {}
+    try:
+        _cTr = _aTr.test_client()
+        with _cTr.session_transaction() as _sTr:
+            _sTr["auth"] = True; _sTr["username"] = "admin"
+            _sTr["legacy_owner"] = True; _sTr["role"] = "owner"
+        _hTr = _cTr.get("/?tab=cloudtrends").get_data(as_text=True)
+        check("trends : l onglet sort dans la page rendue",
+              'id="tab-cloudtrends"' in _hTr and 'id="form-cloudtrends"' in _hTr)
+        # Elle ne doit pas se confondre avec les brutes : ce sont deux choses
+        # differentes, et melanger les deux enverrait du non-fini au VA.
+        check("trends : elle ne remplace pas la categorie brutes",
+              'id="tab-cloudbrutes"' in _hTr and "brutes" in _wuTr.CLOUD_SUBDIRS)
+    finally:
+        _wuTr._load_web_users = _vraiTr
+except Exception as _eTr:
+    check("trends : testable", False, repr(_eTr)[:200])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

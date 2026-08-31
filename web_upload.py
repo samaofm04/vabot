@@ -9030,6 +9030,10 @@ document.addEventListener('click',function(e){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
       Vidéo brut
     </button>
+    <button class="item" id="tab-cloudtrends" onclick="showTab('cloud','cloudtrends','Trends','Vidéos finies, prêtes à poster telles quelles — les meilleures')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      Trends
+    </button>
     <button class="item" id="tab-cloudbios" onclick="showTab('cloud','cloudbios','Bios','Tes bios par identité — ajout en liste + génération IA')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
       Bios
@@ -9810,6 +9814,11 @@ document.addEventListener('click',function(e){
 <!-- REEL MONTAGE : rushs bruts -->
 <div class="form-section" id="form-cloudbrutes" style="display:none">
 {cloud_brutes_html}
+</div>
+
+<!-- TRENDS : videos finies, pretes a poster -->
+<div class="form-section" id="form-cloudtrends" style="display:none">
+{cloud_trends_html}
 </div>
 
 <!-- REEL MONTAGE : modeles CapCut -->
@@ -18568,7 +18577,7 @@ def _cloud_media_path(identity: str, subdir: str, filename: str):
 
 CLOUD_SUBDIRS = frozenset(
     {"videos", "posts", "stories", "storyctas", "profile_pics",
-     "brutes", "templates"} | set(_PRO_SUBDIR_OF.values())
+     "brutes", "templates", "trends"} | set(_PRO_SUBDIR_OF.values())
 )
 
 
@@ -20238,6 +20247,11 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         "brutes": ("brute", "Rush brut", "Matière première des montages", "Add vidéo"),
         "templates": ("template", "Template montage", "Modèle CapCut — apporte le son",
                       "Add template"),
+        # Trends : des videos FINIES, pretes a poster telles quelles. Ce ne sont
+        # pas des brutes — les melanger a la matiere premiere ferait envoyer du
+        # non-fini au VA, et l inverse.
+        "trends": ("trend", "Trend prête à poster", "Vidéo finie — le VA la poste telle quelle",
+                   "Add trend"),
         # Vault PRO : MÊMES panneaux d'upload, le champ caché « vault » (posé par
         # upPrefillIdentity) fait atterrir le fichier dans pro_* côté serveur.
         "pro_videos": ("reel", "Upload Reel — Vault PRO", "Vidéo clean + caption + description", "Add media"),
@@ -43394,7 +43408,7 @@ _PERM_KEY_TO_TABS = {
     "vault2": {"v2reels", "v2posts", "v2stories", "v2storyctas", "v2pps",
                "v2brutes", "v2drive"},
     # Reel montage = ses 3 bibliotheques (rushs bruts + modeles CapCut + captions)
-    "montage": {"cloudbrutes", "cloudtemplates", "cloudcaptions"},
+    "montage": {"cloudbrutes", "cloudtemplates", "cloudcaptions", "cloudtrends"},
     # "veille" n'est PAS un onglet de sidebar : c'est un sous-feed DANS la page
     # "Instagram Trends". Le set DOIT contenir "veille" lui-même, sinon
     # _g("veille", ...) affiche « Accès non autorisé » alors qu'on vient de
@@ -44515,6 +44529,7 @@ def _render_upload_inner(msg=None, error=None):
         # /?lazy=<tab> ; aucun n a de script en DOMContentLoaded.
         .replace("{cloud_reels_html}", _lazy("cloudreels"))
         .replace("{cloud_brutes_html}", _lazy("cloudbrutes"))
+        .replace("{cloud_trends_html}", _lazy("cloudtrends"))
         .replace("{cloud_templates_html}", _lazy("cloudtemplates"))
         .replace("{cloud_captions_html}", _lazy("cloudcaptions"))
         .replace("{cloud_posts_html}", _lazy("cloudposts"))
@@ -45645,6 +45660,7 @@ def create_app():
                 # exactement les deux onglets ou l'on constatait que « rien ne
                 # charge ».
                 "cloudbrutes": ("brutes", VIDEO_EXTS, False),
+                "cloudtrends": ("trends", VIDEO_EXTS, False),
                 "cloudtemplates": ("templates", VIDEO_EXTS, False),
                 "cloudpps": None,   # PP a son propre producer
                 # Vault PRO : galeries generiques (les PP PRO aussi, contrairement
@@ -45764,6 +45780,7 @@ def create_app():
                 "cloudstories": lambda: _render_cloud_content_html("stories", IMAGE_EXTS),
                 "cloudstoryctas": lambda: _render_cloud_content_html("storyctas", IMAGE_EXTS),
                 "cloudbrutes": lambda: _render_cloud_content_html("brutes", VIDEO_EXTS),
+                "cloudtrends": lambda: _render_cloud_content_html("trends", VIDEO_EXTS),
                 "cloudtemplates": lambda: _render_cloud_content_html("templates", VIDEO_EXTS),
                 # bilan : recalculé à chaque ouverture (suit les modifs Facture)
                 "bilan": _render_bilan_html,
