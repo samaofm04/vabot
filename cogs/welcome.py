@@ -750,6 +750,7 @@ async def _ensure_us_menu(bot, channel):
         except Exception:
             pass
         await _ensure_us_panel(bot, channel)
+        await _ensure_us_trends(bot, channel)
         return True
     except Exception as e:
         log.warning(f"_ensure_us_menu: {e}")
@@ -879,6 +880,40 @@ def demander_rafraichissement(bot, raison="", delai=None):
         return True
     except Exception as e:
         log.warning(f"demander_rafraichissement (pose): {e}")
+        return False
+
+
+async def _ensure_us_trends(bot, channel):
+    """Troisieme message permanent : le panneau ⭐⭐⭐ Trends.
+
+    Un panneau A PART parce que celui des actions est PLEIN — vingt boutons,
+    le maximum que Discord accepte sur une vue. Un bouton de plus n aurait pas
+    casse le bouton, il aurait fait echouer la vue entiere.
+
+    Il porte sa PROPRE model : sans ca il servirait l identite du VA au lieu de
+    celle qu on regarde, et un VA qui gere plusieurs models recevrait les
+    trends de la mauvaise.
+    """
+    if bot is None or channel is None:
+        return False
+    try:
+        from cogs.user import _panneau_trends
+        try:
+            for m in await channel.pins():
+                if (m.author.id == getattr(bot.user, "id", 0) and m.embeds
+                        and (m.embeds[0].footer.text or "") == "panneau-trends-us"):
+                    return True                   # deja en place
+        except Exception:
+            pass
+        emb, view = await _panneau_trends(bot, "_", guild=channel.guild)
+        msg = await channel.send(embed=emb, view=view)
+        try:
+            await msg.pin()
+        except Exception:
+            pass
+        return True
+    except Exception as e:
+        log.warning(f"_ensure_us_trends: {e}")
         return False
 
 

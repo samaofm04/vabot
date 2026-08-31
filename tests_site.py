@@ -4979,10 +4979,10 @@ try:
     # Consequence a retenir : toute action supplementaire devra en remplacer
     # une, ou vivre sur un second panneau. Un bouton de trop ne casse pas le
     # bouton — il fait echouer la vue ENTIERE.
-    check("favoris : le panneau US garde ses familles, sans deborder",
-          _rowsFv == {1: 5, 2: 5, 3: 5, 4: 5}, str(_rowsFv))
-    check("favoris : le panneau est plein — 20 boutons, pas un de plus",
-          sum(_rowsFv.values()) == 20 and all(_n <= 5 for _n in _rowsFv.values()),
+    check("favoris : le panneau US garde ses 4 familles sur 4 rangees",
+          _rowsFv == {1: 4, 2: 5, 3: 5, 4: 5}, str(_rowsFv))
+    check("favoris : et il ne deborde jamais les 5 places par rangee",
+          all(_n <= 5 for _n in _rowsFv.values()) and sum(_rowsFv.values()) <= 20,
           str(_rowsFv))
     # Et chaque action connait sa rangee : sans entree, elle retombe sur le
     # filet et atterrit n'importe ou.
