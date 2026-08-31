@@ -328,6 +328,84 @@ def transform_metadata_strict(input_path, output_path, config=None, timeout=60):
         return False
 
 
+def duree_secondes(path) -> float:
+    """Duree de la video, ou 0 si on ne sait pas."""
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", str(path)],
+            capture_output=True, text=True, timeout=10,
+        )
+        return float((r.stdout or "0").strip() or 0)
+    except Exception:
+        return 0.0
+
+
+def _brider_debit(cfg: dict, chemin, plafond_mo: float) -> dict:
+    """Abaisse le debit video pour que la sortie tienne sous `plafond_mo`.
+
+    Le mode complet re-encode au debit configure (5000-6000 kbps par defaut).
+    Sur une brute de 10 s ca donne 5 Mo ; sur une de 40 s, 27 Mo — au-dela de
+    ce que Discord accepte, et le VA ne recoit alors RIEN. On calcule le debit
+    qui tient, et on garde le plus bas des deux : le plafond ne sert que de
+    limite haute, il ne remonte jamais un reglage volontairement bas.
+    """
+    duree = duree_secondes(chemin)
+    if duree <= 0 or plafond_mo <= 0:
+        return cfg
+    # 8 bits par octet, et on laisse la place a la piste audio et au conteneur.
+    tenable = int((plafond_mo * 8 * 1000) / duree) - 320
+    if tenable < 800:
+        tenable = 800            # en dessous, la video devient une bouillie
+    bloc = dict(cfg.get("video_bitrate_kbps") or {})
+    haut = int(bloc.get("max") or 0)
+    if not bloc.get("enabled") or haut <= tenable:
+        return cfg
+    bas = min(int(bloc.get("min") or tenable), tenable)
+    cfg = dict(cfg)
+    cfg["video_bitrate_kbps"] = {**bloc, "min": bas, "max": tenable}
+    # Et surtout : viser ce debit pour de vrai. Avec « -crf », x264 IGNORE
+    # « -b:v » — le plafond ne mordait pas et une brute de 48 s ressortait a
+    # 25 Mo malgre un -b:v 1080k. On bascule cet appel en debit cible.
+    cfg["_plafond_kbps"] = tenable
+    return cfg
+
+
+def transform_full_strict(input_path, output_path, config=None, timeout=300,
+                          plafond_mo: float = 0, mono_thread: bool = False):
+    """Transformation COMPLETE (filtres + metadonnees), et la verite sur le resultat.
+
+    Pendant du transform_metadata_strict, pour le cas ou le VA POSTE la brute
+    telle quelle. Les metadonnees seules ne servent alors a rien : l image
+    reste identique au pixel pres, et c est l image qu Instagram compare. Il
+    faut donc bouger l image — saturation, contraste, bruit, zoom, vitesse,
+    recadrage — ce que le mode complet sait deja faire.
+
+    Comme sa jumelle, cette porte ne RECOPIE JAMAIS en douce : transform_video
+    rend True meme quand il n a fait que copier (ffmpeg absent, interrupteur
+    coupe). Pratique pour un envoi automatique, mensonger pour un bouton qui
+    promet une video differente. Ici, True veut dire que ffmpeg a reellement
+    re-encode.
+
+    L interrupteur du site n est PAS relu ici : c est l appelant qui l a deja
+    consulte, et qui sait quoi dire quand il est coupe.
+    """
+    if not is_ffmpeg_available():
+        return False
+    cfg = dict(config or load_config())
+    cfg["enabled"] = True
+    cfg["metadata_only"] = False          # les filtres, justement
+    cfg["random_us_metadata"] = {"enabled": True}
+    if plafond_mo:
+        cfg = _brider_debit(cfg, input_path, plafond_mo)
+    if mono_thread:
+        cfg["_filter_threads"] = 1
+    try:
+        return bool(transform_video(input_path, output_path, cfg, timeout=timeout))
+    except Exception:
+        return False
+
+
 def transform_video(input_path, output_path, config=None, timeout=180):
     """Apply transformations to a video using ffmpeg. Returns True on success, False on failure."""
     input_path = Path(input_path)
@@ -456,6 +534,13 @@ def transform_video(input_path, output_path, config=None, timeout=180):
 
     # Build ffmpeg command
     cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
+    # ffmpeg SEGFAULTE par intermittence sur cette chaine de filtres (mesure :
+    # ~1 fois sur 8, exit 139 / 0xC0000005, stderr vide, en une seconde). C est
+    # une course entre ses threads de filtrage : « -filter_threads 1 » la
+    # supprime, mais coute 2,6x le temps de rendu. On garde donc la vitesse par
+    # defaut, et l appelant ne demande le mode sur qu apres un echec.
+    if config.get("_filter_threads"):
+        cmd.extend(["-filter_threads", str(int(config["_filter_threads"]))])
 
     # Cut start
     cut_start = 0.0
@@ -500,10 +585,17 @@ def transform_video(input_path, output_path, config=None, timeout=180):
         abr = int(_rand(config["audio_bitrate_kbps"]["min"], config["audio_bitrate_kbps"]["max"]))
 
     # Codec settings (rapid + bonne qualite)
+    _cap = int(config.get("_plafond_kbps") or 0)
+    # « -crf » (qualite constante) et « -b:v » (debit cible) sont exclusifs :
+    # donner les deux revient a ne garder que le premier, et la taille du
+    # fichier devient imprevisible. Quand un plafond est demande, on vise le
+    # debit et on borne les pointes ; sinon, qualite constante comme avant.
+    _qualite = (["-maxrate", f"{_cap}k", "-bufsize", f"{_cap * 2}k"]
+                if _cap else ["-crf", "23"])
     cmd.extend([
         "-c:v", "libx264",
         "-preset", "veryfast",
-        "-crf", "23",
+        *_qualite,
         "-threads", "0",
         "-pix_fmt", "yuv420p",
         "-c:a", "aac",

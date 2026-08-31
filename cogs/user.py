@@ -13,6 +13,7 @@ from discord.ext import commands, tasks
 
 import safe_json
 from video_transform import (transform_video, transform_metadata_strict,
+                             transform_full_strict,
                              load_config as load_transform_config)
 from image_transform import transform_image, load_config as load_image_config
 
@@ -3314,10 +3315,16 @@ class UserCog(commands.Cog):
         await interaction.followup.send(entete)
         with _tmp.TemporaryDirectory(prefix="brutmeta_") as _d:
             for idx, v in enumerate(videos, start=1):
-                fichier, _reecrit = await brute_a_envoyer(v, _d, identity)
-                # Le meme message dans tous les cas : celui d avant. Le VA ne
-                # lit rien des metadonnees, c est l affaire de l admin.
+                fichier, _reecrit, _raison = await brute_a_envoyer(v, _d, identity)
                 tete = f"🎥 **{label} {idx}/{total}** (`{identity}`)"
+                # En temps normal le VA ne lit RIEN sur l uniquification : le
+                # reglage vit sur le site, c est l affaire de l admin. Mais
+                # quand elle est demandee et qu elle ECHOUE, il doit le savoir :
+                # il poste la brute telle quelle, donc il publierait un doublon
+                # sans s en douter. Se taire ici lui coute un compte.
+                if _raison:
+                    tete += ("\n⚠️ _Celle-ci n a **pas** pu etre rendue unique — "
+                             "ne la poste pas telle quelle, previens un admin._")
                 try:
                     await interaction.followup.send(
                         content=tete,
@@ -5558,11 +5565,14 @@ class ChoixCaptionView(discord.ui.View):
         import tempfile as _tmp
         try:
             with _tmp.TemporaryDirectory(prefix="brutmeta_") as _d:
-                fichier, _reecrit = await brute_a_envoyer(
+                fichier, _reecrit, _raison = await brute_a_envoyer(
                     self.video, _d, self.identity)
+                _av = ("\n⚠️ _Elle n a **pas** pu etre rendue unique — ne la "
+                       "poste pas telle quelle, previens un admin._"
+                       if _raison else "")
                 await interaction.followup.send(
-                    content=("🎥 **BRUTE CHOISIE** (`%s`) — sans montage."
-                             % self.identity),
+                    content=("🎥 **BRUTE CHOISIE** (`%s`) — sans montage.%s"
+                             % (self.identity, _av)),
                     file=discord.File(str(fichier),
                                       filename=self.video.name),
                     ephemeral=False)
@@ -5605,7 +5615,17 @@ class ChoixCaptionView(discord.ui.View):
 _JOURNAL_BRUTES = __import__("collections").deque(maxlen=20)
 
 
-def _noter_brute(fichier, identity, actif, reecrit, raison):
+#: Reprises en mode complet. Le re-encodage echoue par intermittence (mesure :
+#: 1 fois sur 8), et il echoue vite — reessayer coute une seconde, laisser
+#: partir la brute inchangee coute un doublon publie.
+_BRUTE_ESSAIS = 3
+
+#: Plafond vise pour une brute re-encodee. Discord refuse au-dela de 10 Mo sur
+#: un serveur non boosté ; on garde de la marge pour le son et le conteneur.
+_PLAFOND_DISCORD_MO = 8.5
+
+
+def _noter_brute(fichier, identity, actif, reecrit, raison, mode=""):
     try:
         _JOURNAL_BRUTES.append({
             "t": int(__import__("time").time()),
@@ -5613,6 +5633,7 @@ def _noter_brute(fichier, identity, actif, reecrit, raison):
             "identite": str(identity or "")[:40],
             "actif": bool(actif),
             "reecrit": bool(reecrit),
+            "mode": str(mode or "")[:14],
             "raison": str(raison or "")[:140],
         })
     except Exception:
@@ -5646,28 +5667,59 @@ async def brute_a_envoyer(video, dossier, identity=""):
     JOURNAL du serveur. Muet pour le VA, visible pour qui administre.
     """
     import asyncio as _aio
-    import time as _t_br
     video = Path(video)
-    actif = bool(load_transform_config().get("enabled", False))
-    if not actif:
-        _noter_brute(video.name, identity, False, False, "interrupteur coupe")
-        return video, False
+    cfg = load_transform_config()
+    if not bool(cfg.get("enabled", False)):
+        _noter_brute(video.name, identity, False, False, "interrupteur coupe", "")
+        return video, False, ""
+
+    # Le MODE vient de la page (menu « Mode »), pas d une constante ici.
+    # - metadonnees seules : l image ne bouge pas. Suffit si le VA MONTE la
+    #   brute derriere, puisque le montage deplacera l empreinte visuelle.
+    # - complet : les filtres bougent l image. Indispensable si le VA POSTE la
+    #   brute telle quelle — Instagram compare ce qu on voit, et des
+    #   metadonnees ne changent rien a ce qu on voit.
+    complet = not bool(cfg.get("metadata_only", True))
+    moteur = transform_full_strict if complet else transform_metadata_strict
+    mode = "complet" if complet else "metadonnees"
+
+    # Le re-encodage echoue par intermittence (mesure : 1 fois sur 8, et il
+    # echoue vite). Une seule tentative laissait donc partir une brute sur huit
+    # sans rien changer — et comme le VA la poste telle quelle, c est un
+    # doublon publie. On reessaie ; chaque tentative retire ses propres des.
+    essais = _BRUTE_ESSAIS if complet else 1
     sortie = Path(dossier) / video.name
     detail = ""
-    try:
-        ok = await _aio.to_thread(transform_metadata_strict, video, sortie)
-    except Exception as e:                      # noqa: BLE001
-        ok, detail = False, f"{type(e).__name__}: {e}"[:120]
-    reecrit = bool(ok) and sortie.exists() and sortie.stat().st_size > 0
-    if not reecrit:
-        raison = detail or ("ffmpeg a rendu False" if not ok
-                            else "fichier de sortie vide ou absent")
-        print(f"[brutes] {identity or '?'} / {video.name} : uniquification "
-              f"demandee, NON appliquee ({raison})")
-        _noter_brute(video.name, identity, True, False, raison)
-        return video, False
-    _noter_brute(video.name, identity, True, True, "")
-    return sortie, True
+    # Le re-encodage gonfle le fichier (debit configure a 5000-6000 kbps) : une
+    # brute de 40 s sortirait a 27 Mo, au-dela de ce que Discord accepte, et le
+    # VA ne recevrait RIEN. On borne le debit pour que la sortie tienne.
+    kw = {"plafond_mo": _PLAFOND_DISCORD_MO} if complet else {}
+    for tour in range(essais):
+        # ffmpeg segfaute par intermittence sur la chaine de filtres (~1 fois
+        # sur 8, en une seconde). « -filter_threads 1 » l en empeche mais rend
+        # 2,6x plus lentement : on garde la vitesse pour les deux premieres
+        # tentatives, et on ne paie le mode sur que si elles ont echoue.
+        if complet:
+            kw["mono_thread"] = (tour >= essais - 1)
+        try:
+            if sortie.exists():
+                sortie.unlink()
+        except OSError:
+            pass
+        try:
+            ok = await _aio.to_thread(lambda: moteur(video, sortie, **kw))
+        except Exception as e:                  # noqa: BLE001
+            ok, detail = False, f"{type(e).__name__}: {e}"[:120]
+        if ok and sortie.exists() and sortie.stat().st_size > 0:
+            _noter_brute(video.name, identity, True, True, "", mode)
+            return sortie, True, ""
+
+    raison = detail or (f"ffmpeg a echoue {essais} fois de suite" if essais > 1
+                        else "ffmpeg a echoue")
+    print(f"[brutes] {identity or '?'} / {video.name} : uniquification "
+          f"demandee ({mode}), NON appliquee ({raison})")
+    _noter_brute(video.name, identity, True, False, raison, mode)
+    return video, False, raison
 
 
 class ChoixBrutesView(discord.ui.View):

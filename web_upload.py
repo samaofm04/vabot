@@ -42639,9 +42639,18 @@ def _render_video_manager() -> str:
         "pour les vidéos c'est un remux, les pixels sortent identiques au bit près.<br>"
         "Les vidéos <b>montées</b> par le site (Montage, Template + Brut) n'ont pas "
         "besoin de cet interrupteur : leur fabrication pose déjà la même identité, "
-        "à chaque génération.<br>Les réglages ci-dessous sont des filtres d'image : ils "
-        "ne s'appliquent <b>pas</b> aux brutes, et se règlent séparément (bouton "
-        "Enregistrer).</div>"
+        "à chaque génération.<br>"
+        # Le mode commande ce que recoivent les brutes, et la difference est
+        # tout sauf cosmetique : si le VA POSTE la brute telle quelle, des
+        # metadonnees ne le protegent de rien — Instagram compare l image, et
+        # l image est identique au pixel pres.
+        "<b>Le menu « Mode » ci-dessous décide de ce que reçoivent les brutes.</b> "
+        "« Métadonnées seules » ne touche pas à l'image : à réserver aux VA qui "
+        "<b>montent</b> la brute derrière. « Transformation complète » applique les "
+        "filtres cochés (saturation, bruit, zoom, vitesse, recadrage) et change donc "
+        "l'image elle-même — c'est le seul mode qui protège un VA qui <b>poste la "
+        "brute telle quelle</b>. Comptez quelques secondes par vidéo au lieu d'un "
+        "dixième de seconde, et une sortie bornée pour tenir dans Discord.</div>"
         # Le diagnostic. Trois choses peuvent rendre l'uniquification
         # inoperante — interrupteur coupe, ffmpeg absent, ffmpeg qui refuse —
         # et le VA recoit sa video dans les trois cas. Rien ne remontait donc

@@ -1050,7 +1050,8 @@ try:
 
             _uBr.transform_metadata_strict = _fauxBr
             with _tmpBr.TemporaryDirectory() as _d:
-                return _aioBr.run(_uBr.brute_a_envoyer(_srcBr, _d, "julia"))
+                _f, _r, _rs = _aioBr.run(_uBr.brute_a_envoyer(_srcBr, _d, "julia"))
+                return _f, _r
 
         # Interrupteur eteint : on ne touche a rien, et on n appelle meme pas
         # ffmpeg — sinon une brute de 200 Mo passerait au remux pour rien.
@@ -1085,15 +1086,35 @@ try:
         # « Telle quelle » envoyait le fichier du disque : l uniquification
         # etait allumee et ne s appliquait pas la, sans un mot.
         _srcUBr = _plBr.Path("cogs/user.py").read_text(encoding="utf-8")
+        check("brutmeta : le VA est averti quand la brute part inchangee",
+              _srcUBr.count("pas** pu etre rendue unique") == 2,
+              "%d avertissement(s) sur 2"
+              % _srcUBr.count("pas** pu etre rendue unique"))
         check("brutmeta : toutes les voies passent par le meme reecrivain",
               _srcUBr.count("await brute_a_envoyer(") == 2,
               "%d appel(s) sur 2" % _srcUBr.count("await brute_a_envoyer("))
         check("brutmeta : plus aucune brute nue envoyee droit du disque",
               "file=discord.File(str(self.video), filename=self.video.name)"
               not in _srcUBr)
+        # Un seul endroit decide s il faut uniquifier — sinon deux boutons
+        # peuvent diverger sans que rien ne le signale.
         check("brutmeta : un seul endroit lit l interrupteur",
-              _srcUBr.count("load_transform_config().get(") == 1,
-              "%d lecture(s)" % _srcUBr.count("load_transform_config().get("))
+              _srcUBr.count('cfg.get("enabled", False)') == 1,
+              "%d lecture(s)" % _srcUBr.count('cfg.get("enabled", False)'))
+        # Et un seul endroit choisit le MODE : metadonnees seules si le VA
+        # monte la brute, transformation complete s il la poste telle quelle.
+        check("brutmeta : le mode vient de la page, pas d une constante",
+              _srcUBr.count('cfg.get("metadata_only", True)') == 1
+              and "transform_full_strict" in _srcUBr,
+              "%d lecture(s) du mode" % _srcUBr.count('cfg.get("metadata_only", True)'))
+        check("brutmeta : le re-encodage est reessaye avant d abandonner",
+              "_BRUTE_ESSAIS" in _srcUBr and _uBr._BRUTE_ESSAIS >= 2,
+              str(getattr(_uBr, "_BRUTE_ESSAIS", None)))
+        check("brutmeta : la derniere tentative passe en mode sur",
+              "mono_thread" in _srcUBr)
+        check("brutmeta : la sortie est bornee pour tenir sur Discord",
+              "plafond_mo" in _srcUBr and 0 < _uBr._PLAFOND_DISCORD_MO <= 10,
+              str(getattr(_uBr, "_PLAFOND_DISCORD_MO", None)))
     finally:
         _uBr.load_transform_config = _vraiCfgBr
         _uBr.transform_metadata_strict = _vraiTrBr
