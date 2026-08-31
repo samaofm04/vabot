@@ -1747,8 +1747,8 @@ try:
             _libTr.append((getattr(_itTr, "row", None), _lTr, getattr(_bTr, "style", None)))
     from collections import Counter as _CTr
     _parRangeeTr = _CTr(r for r, _l, _s in _libTr)
-    check("trends : le menu porte le bouton ⭐⭐⭐",
-          len([1 for _r, _l, _s in _libTr if "⭐⭐⭐" in _l]) == 1,
+    check("trends : le menu porte les trois familles",
+          len([1 for _r, _l, _s in _libTr if "⭐⭐⭐" in _l]) == 3,
           str([_l for _r, _l, _s in _libTr if "⭐" in _l])[:130])
     check("trends : et le menu reste dans les limites de Discord",
           all(_n <= 5 for _n in _parRangeeTr.values())
@@ -1757,32 +1757,49 @@ try:
     check("trends : les trois boutons sont verts",
           all(_s == _dTr.ButtonStyle.success
               for _r, _l, _s in _libTr if "⭐⭐⭐" in _l))
-    # Le menu deroulant de la quantite est reste : il occupe la rangee 0 a lui
-    # seul, ce qui laisse vingt places de bouton — toutes prises.
-    check("trends : le menu deroulant de quantite est conserve",
-          any(getattr(getattr(_i, "item", None), "placeholder", None)
-              for _i in _vueTr.children))
+    # Chaque ⭐⭐⭐ est dans la rangee de SA famille : c est ce qui permet de
+    # lire les degres dans l ordre au lieu de chercher dans tout le panneau.
+    _rangTr = {_l: _r for _r, _l, _s in _libTr}
+    for _famTr, _baseTr in (("⭐⭐⭐ Caption", "💬 Caption"),
+                            ("⭐⭐⭐ Template", "🎞️ Template"),
+                            ("⭐⭐⭐ Flash", "⚡ Flash")):
+        check("trends : %s est dans la rangee de sa famille" % _famTr,
+              _rangTr.get(_famTr) is not None
+              and _rangTr.get(_famTr) == _rangTr.get(_baseTr),
+              "%s vs %s" % (_rangTr.get(_famTr), _rangTr.get(_baseTr)))
+    # La quantite est passee en BOUTON : un menu deroulant occupe une rangee
+    # entiere, soit cinq places. Sans ce changement, les trois ⭐⭐⭐ auraient
+    # demande d en supprimer deux autres.
+    check("trends : la quantite est un bouton, pas un menu deroulant",
+          any("Quantité" in _l for _r, _l, _s in _libTr),
+          str([_l for _r, _l, _s in _libTr])[:90])
 
     # Aucune commande slash consommee : le bot principal est deja au-dela du
     # plafond de 100, et chaque commande en trop en fait disparaitre une autre
     # sans le moindre message.
-    _entTr = _uTr._jb_action("trend")
-    check("trends : l action est declaree", _entTr is not None)
-    _cibleTr = getattr(_uTr.UserCog, _entTr[2], None) if _entTr else None
-    check("trends : sa cible existe sur le cog", _cibleTr is not None, str(_entTr))
-    # Le bot principal est a 100 commandes sur 100 : une de plus en ferait
-    # disparaitre une autre, sans le moindre message.
-    check("trends : elle ne coute AUCUNE commande slash",
-          _cibleTr is not None and not hasattr(_cibleTr, "callback"))
+    for _famTr in ("caption", "template", "flash"):
+        _entTr = _uTr._jb_action("trend" + _famTr)
+        check("trends : l action trend%s est declaree" % _famTr, _entTr is not None)
+        _cibleTr = getattr(_uTr.UserCog, _entTr[2], None) if _entTr else None
+        check("trends : sa cible existe sur le cog", _cibleTr is not None,
+              str(_entTr))
+        # Le bot principal est a 100 commandes sur 100 : une de plus en ferait
+        # disparaitre une autre, sans le moindre message.
+        check("trends : trend%s ne coute AUCUNE commande slash" % _famTr,
+              _cibleTr is not None and not hasattr(_cibleTr, "callback"))
     check("trends : le panneau sait appeler une methode ordinaire",
           'getattr(cmd, "callback", None)' in
           _pTr.Path("cogs/user.py").read_text(encoding="utf-8"))
     # Le bouton de quantite doit etre enregistre comme item dynamique, sinon
     # il cesse de repondre apres un redemarrage : le panneau reste a l ecran,
     # le clic ne fait rien, et rien ne le dit.
-    check("trends : les boutons du panneau survivent a un redemarrage",
-          "add_dynamic_items(JBQtySelect, JBActionButton)" in
+    check("trends : le bouton de quantite survit a un redemarrage",
+          "add_dynamic_items(JBQtySelect, JBQtyButton, JBActionButton)" in
           _pTr.Path("cogs/user.py").read_text(encoding="utf-8"))
+    # Le menu deroulant de quantite vit desormais dans un message ephemere :
+    # il doit reecrire le panneau PERMANENT, pas l ephemere d ou il s ouvre.
+    check("trends : la quantite reecrit le panneau, pas l ephemere",
+          "_reposer_panneau(" in _pTr.Path("cogs/user.py").read_text(encoding="utf-8"))
 
     # Le stock : petit par nature, tire au hasard, et jamais un fichier voisin.
     _dosTr = _uTr.IDENTITIES_DIR / "_tst_trends" / "trends"
