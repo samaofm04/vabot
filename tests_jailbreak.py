@@ -1726,6 +1726,77 @@ except Exception as _e3:
     check("trois : testable", False, repr(_e3)[:200])
 
 
+# ==============================================================================
+# Trends : les videos deja FINIES, et le panneau qui doit rester affichable
+# ==============================================================================
+try:
+    import cogs.user as _uTr
+    import discord as _dTr
+    import pathlib as _pTr
+    import shutil as _shTr
+
+    # LA garde qui compte : Discord plafonne a 5 boutons par rangee et 5
+    # rangees, dont une prise par le menu deroulant. Depasser ne casse pas le
+    # bouton fautif — ca fait echouer la vue ENTIERE, donc tout le panneau.
+    _embTr, _vueTr = _uTr._jb_panel(None, "julia", 3)
+    _libTr = []
+    for _itTr in _vueTr.children:
+        _bTr = getattr(_itTr, "item", None) or _itTr
+        _lTr = getattr(_bTr, "label", None)
+        if _lTr:
+            _libTr.append((getattr(_itTr, "row", None), _lTr, getattr(_bTr, "style", None)))
+    from collections import Counter as _CTr
+    _parRangeeTr = _CTr(r for r, _l, _s in _libTr)
+    check("trends : le panneau reste dans les limites de Discord",
+          all(_n <= 5 for _n in _parRangeeTr.values()) and len(_parRangeeTr) <= 4,
+          str(dict(sorted(_parRangeeTr.items()))))
+    check("trends : le bouton est bien pose",
+          any("Trend" in _l for _r, _l, _s in _libTr),
+          str([_l for _r, _l, _s in _libTr])[:110])
+    check("trends : il se distingue en vert du reste du panneau",
+          all(_s == _dTr.ButtonStyle.success
+              for _r, _l, _s in _libTr if "Trend" in _l))
+
+    # Aucune commande slash consommee : le bot principal est deja au-dela du
+    # plafond de 100, et chaque commande en trop en fait disparaitre une autre
+    # sans le moindre message.
+    _entreeTr = _uTr._jb_action("trend")
+    check("trends : l action se resout", _entreeTr is not None)
+    if _entreeTr:
+        _cibleTr = getattr(_uTr.UserCog, _entreeTr[2], None)
+        check("trends : elle existe sur le cog", _cibleTr is not None, _entreeTr[2])
+        check("trends : et elle ne coute AUCUNE commande slash",
+              _cibleTr is not None and not hasattr(_cibleTr, "callback"))
+    check("trends : le panneau sait appeler une methode ordinaire",
+          'getattr(cmd, "callback", None)' in
+          _pTr.Path("cogs/user.py").read_text(encoding="utf-8"))
+
+    # Le stock : petit par nature, tire au hasard, et jamais un fichier voisin.
+    _dosTr = _uTr.IDENTITIES_DIR / "_tst_trends" / "trends"
+    _shTr.rmtree(_dosTr.parent, ignore_errors=True)
+    check("trends : dossier absent -> liste vide, pas d erreur",
+          _uTr.trends_for("_tst_trends") == [])
+    _dosTr.mkdir(parents=True, exist_ok=True)
+    for _nTr in ("a.mp4", "b.mp4", "c.mp4", "d.mp4"):
+        (_dosTr / _nTr).write_bytes(b"x" * 10)
+    (_dosTr / "a.txt").write_text("le son a utiliser", encoding="utf-8")
+    _gotTr = _uTr.trends_for("_tst_trends", limit=3)
+    check("trends : le stock est plafonne a ce qu on demande", len(_gotTr) == 3)
+    check("trends : le texte voisin n est pas pris pour une video",
+          all(_p.suffix == ".mp4" for _p in _gotTr))
+    _shTr.rmtree(_dosTr.parent, ignore_errors=True)
+
+    # Elles sont postees TELLES QUELLES : ce sont donc celles qui ont le plus
+    # besoin d une empreinte propre a chaque envoi.
+    _srcTr2 = _pTr.Path("cogs/user.py").read_text(encoding="utf-8")
+    _blocTr = _srcTr2.split("async def _send_trends")[1][:2600]
+    check("trends : elles passent par la meme uniquification que les brutes",
+          "_envoyer_brutes_meta" in _blocTr)
+    check("trends : la consigne de son part avec la video",
+          "avec_texte=True" in _blocTr and "SON / CONSIGNE" in _srcTr2)
+except Exception as _eTr2:
+    check("trends bot : testable", False, repr(_eTr2)[:200])
+
 print("\n" + "=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

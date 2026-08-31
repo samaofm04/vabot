@@ -4969,8 +4969,21 @@ try:
     #
     # C'est la REGLE qu'on protege, pas les nombres : une rangee, une famille,
     # et aucune qui deborde les cinq places de Discord.
-    check("favoris : le panneau US garde ses 4 familles sur 4 rangees",
-          _rowsFv == {1: 4, 2: 5, 3: 5, 4: 5}, str(_rowsFv))
+    # Forme du 31/08 : {1:5, 2:5, 3:5, 4:5} — le panneau est PLEIN. Discord
+    # plafonne a 5 rangees dont une prise par le menu deroulant, soit vingt
+    # boutons : on y est. L arrivee du ⭐⭐⭐ Trend a donc coute une place, et
+    # « Choisir ma brute » est remonte en rangee 1 — c est un OUTIL, pas un
+    # membre de la famille Flash, il y est meme mieux. Le ⭐⭐⭐ ferme la
+    # rangee des etoiles, dont il est le degre au-dessus.
+    #
+    # Consequence a retenir : toute action supplementaire devra en remplacer
+    # une, ou vivre sur un second panneau. Un bouton de trop ne casse pas le
+    # bouton — il fait echouer la vue ENTIERE.
+    check("favoris : le panneau US garde ses familles, sans deborder",
+          _rowsFv == {1: 5, 2: 5, 3: 5, 4: 5}, str(_rowsFv))
+    check("favoris : le panneau est plein — 20 boutons, pas un de plus",
+          sum(_rowsFv.values()) == 20 and all(_n <= 5 for _n in _rowsFv.values()),
+          str(_rowsFv))
     # Et chaque action connait sa rangee : sans entree, elle retombe sur le
     # filet et atterrit n'importe ou.
     check("favoris : chaque action US a une rangee attribuee",

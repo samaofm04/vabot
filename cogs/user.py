@@ -1163,6 +1163,32 @@ def fav_brutes_for(identity, limit=15):
     return out
 
 
+def trends_for(identity, limit=3):
+    """Les videos FINIES d une identite -> [Path].
+
+    Rangees dans data/identities/<identite>/trends par le site (onglet
+    « Trends »). Ce ne sont PAS des brutes : elles sont pretes a poster telles
+    quelles, et c est exactement pour ca qu elles vivent dans leur propre
+    dossier — melanger le produit fini a la matiere premiere ferait envoyer
+    l un en croyant l autre, dans les deux sens.
+
+    Le stock est volontairement petit (les meilleures). On tire au hasard
+    plutot que de servir toujours les memes en tete de liste : deux VA qui
+    cliquent a la minute recevraient sinon la meme video.
+    """
+    dossier = IDENTITIES_DIR / identity / "trends"
+    if not dossier.is_dir():
+        return []
+    fichiers = sorted(p for p in dossier.iterdir()
+                      if p.is_file() and p.suffix.lower() in VIDEO_EXTS)
+    if not fichiers:
+        return []
+    if limit and len(fichiers) > limit:
+        return random.sample(fichiers, limit)
+    random.shuffle(fichiers)
+    return fichiers
+
+
 def fav_templates_for(identity, limit=15):
     """Templates marques ⭐ favoris -> (utilisables, sans_point_de_coupe).
 
@@ -2923,6 +2949,62 @@ class UserCog(commands.Cog):
                 if tmp:
                     _sh.rmtree(tmp, ignore_errors=True)
 
+    # Les trois entrees ⭐⭐⭐ du menu. Volontairement des METHODES et non des
+    # commandes slash : le bot principal est deja a 101 commandes pour un
+    # plafond de 100, et chaque commande en trop en fait disparaitre une autre
+    # sans le moindre message. Le panneau sait desormais appeler l une ou
+    # l autre.
+    async def trendcaption(self, interaction: discord.Interaction, count=None):
+        await self._send_trends(interaction, "caption")
+
+    async def trendtemplate(self, interaction: discord.Interaction, count=None):
+        await self._send_trends(interaction, "template")
+
+    async def trendflash(self, interaction: discord.Interaction, count=None):
+        await self._send_trends(interaction, "flash")
+
+    async def _send_trends(self, interaction, famille=""):
+        """Boutons ⭐⭐⭐ : les videos deja FINIES, a poster telles quelles.
+
+        Elles viennent de l onglet « Trends » du site, pas des brutes. Rien
+        n est monte ni incruste ici : le travail est deja fait, le VA n a plus
+        qu a publier.
+
+        Elles passent quand meme par brute_a_envoyer, et c est le point
+        important : ce sont justement les videos que le VA poste SANS RIEN
+        RETOUCHER, donc celles qui ont le plus besoin d une empreinte propre a
+        chaque envoi. Trois VA qui cliquent le meme bouton ne doivent pas
+        publier trois fichiers identiques.
+
+        Le texte voisin part avec : pour une trend, c est la consigne qui
+        compte — le son impose.
+        """
+        if await self._gate_contenu(interaction):
+            return
+        identity = get_user_identity(interaction.user.id)
+        if not identity:
+            await interaction.response.send_message(
+                "Tu n'as pas d'identité assignée. Demande à un admin.",
+                ephemeral=True)
+            return
+        videos = trends_for(identity, limit=_TRENDS_PAR_ENVOI)
+        if not videos:
+            await interaction.response.send_message(
+                f"⭐⭐⭐ Aucune **trend prête** pour `{identity}`.\n"
+                "_(Un admin en dépose sur le site, onglet **Trends** — ce sont "
+                "les vidéos finies, à poster telles quelles.)_",
+                ephemeral=True)
+            return
+        await interaction.response.defer()
+        n = len(videos)
+        suffixe = f" — {famille}" if famille else ""
+        entete = (f"⭐⭐⭐ **{n} TREND{'S' if n > 1 else ''} PRÊTE{'S' if n > 1 else ''} "
+                  f"pour `{identity}`**{suffixe}\n"
+                  f"🔥 Le travail est **déjà fait** : poste-la telle quelle, "
+                  f"ne la remonte pas, ne réécris pas le texte.")
+        await self._envoyer_brutes_meta(interaction, videos, identity,
+                                        "TREND", entete, avec_texte=True)
+
     async def _send_brutes_bangers(self, interaction):
         """Bouton '🎥 Vidéo brut Banger' : les brutes ⭐, sans montage.
 
@@ -3279,7 +3361,7 @@ class UserCog(commands.Cog):
                                         "VIDÉO BRUTE", entete)
 
     async def _envoyer_brutes_meta(self, interaction, videos, identity,
-                                   label, entete):
+                                   label, entete, avec_texte=False):
         """Envoie des brutes dont les metadonnees ont ete reecrites.
 
         C EST LE SITE QUI DECIDE. Reglages > Uniquification video, le gros
@@ -3333,6 +3415,20 @@ class UserCog(commands.Cog):
                     await interaction.followup.send(
                         f"⚠️ {label} {idx}/{total} : envoi impossible "
                         f"(trop lourde pour Discord) : {e}")
+                    continue
+                # Le texte voisin de la video, quand elle en a un. Pour une
+                # TREND c est la consigne qui compte — le son a utiliser — et
+                # l envoyer separement la rend copiable d un doigt sur mobile.
+                if avec_texte:
+                    _cap, _desc, _ = _video_meta(v)
+                    if _cap:
+                        await interaction.followup.send(
+                            "🎵 **SON / CONSIGNE** :\n```\n"
+                            + str(_cap)[:1800] + "\n```")
+                    if _desc:
+                        await interaction.followup.send(
+                            "📄 **DESCRIPTION** (champ légende) :\n```\n"
+                            + str(_desc)[:1800] + "\n```")
 
     @app_commands.command(
         name="reelcaption",
@@ -3875,10 +3971,17 @@ class UserCog(commands.Cog):
             itx, target = interaction, None
         token = _IDENTITY_OVERRIDE.set((model or "").strip().lower())
         try:
-            if supports_count and count and count > 0:
-                await cmd.callback(self, itx, count)
+            _rappel = getattr(cmd, "callback", None)
+            if _rappel is None:
+                # Methode ordinaire, deja liee au cog : pas de `self` a passer.
+                if supports_count and count and count > 0:
+                    await cmd(itx, count)
+                else:
+                    await cmd(itx)
+            elif supports_count and count and count > 0:
+                await _rappel(self, itx, count)
             else:
-                await cmd.callback(self, itx)
+                await _rappel(self, itx)
         finally:
             _IDENTITY_OVERRIDE.reset(token)
         # (Plus de note « Direction #salon » : le panneau permanent l'annonce
@@ -5624,6 +5727,10 @@ _BRUTE_ESSAIS = 3
 #: un serveur non boosté ; on garde de la marge pour le son et le conteneur.
 _PLAFOND_DISCORD_MO = 8.5
 
+#: Combien de trends part un clic. Le stock est petit par definition —
+#: ce sont LES meilleures — et en envoyer dix reviendrait a les banaliser.
+_TRENDS_PAR_ENVOI = 3
+
 
 def _noter_brute(fichier, identity, actif, reecrit, raison, mode=""):
     try:
@@ -6293,6 +6400,15 @@ _JB_ACTIONS_US = [
     ('templateflashbanger', '⭐ Flash', 'templateflashbanger', False),
     ('templateflashbrut', '⭐⭐ Flash + Brut', 'templateflashbrut', False),
     ('brutchoix', '🎛️ Choisir ma brute', 'choisirbrute', False),
+
+    # Les TRENDS : des videos deja FINIES, a poster telles quelles. Elles ne
+    # sortent pas des brutes mais de l onglet « Trends » du site.
+    #
+    # UNE seule entree, et c est une contrainte, pas un choix : Discord plafonne
+    # a 5 boutons par rangee et 5 rangees, dont une prise par le menu deroulant.
+    # Vingt boutons, pas un de plus — on y est. Trois entrees auraient fait
+    # echouer la vue ENTIERE, pas seulement les nouvelles.
+    ('trend', '⭐⭐⭐ Trend prête', 'trendcaption', False),
 ]
 
 #: La rangee de chaque action : UNE rangee = UNE famille.
@@ -6309,8 +6425,12 @@ _JB_ACTIONS_US = [
 #:
 #: Discord : rangees 0 a 4, 5 composants par rangee. La 0 porte le
 #: selecteur de quantite, il reste donc 4 rangees, soit 20 places.
+#: Les actions servies par le stock « Trends » : elles se distinguent a
+#: l oeil, en vert, du reste du panneau.
+_JB_CLES_TREND = frozenset({"trend", "trendcaption", "trendtemplate", "trendflash"})
+
 _JB_RANGEES = {
-    'name': 1, 'pseudo': 1, 'pp': 1, 'bio': 1,
+    'name': 1, 'pseudo': 1, 'pp': 1, 'bio': 1, 'brutchoix': 1,
     # Rangee 2 : les publications, puis le brut nu et sa version marquee.
     'story': 2, 'storycta': 2, 'post': 2, 'brute': 2, 'brutbanger': 2,
     # Rangee 3 : les CAPTIONS, de la version libre aux versions marquees, puis
@@ -6324,8 +6444,10 @@ _JB_RANGEES = {
     'reelcaption': 3, 'capbanger': 3, 'montagebanger': 3,
     'reelmonte': 3, 'templatebanger': 3,
     # Rangee 4 : la fin des templates, puis les Flash.
-    'templatebrut': 4, 'brutchoix': 4,
+    'templatebrut': 4,
     'templateflash': 4, 'templateflashbanger': 4, 'templateflashbrut': 4,
+    # Le degre au-dessus des ⭐ et des ⭐⭐ : il ferme le panneau.
+    'trend': 4,
     # Retire du menu, garde ici : un panneau DEJA poste porte encore ce bouton,
     # et sans rangee il retomberait sur le filet et atterrirait n'importe ou.
     'captionbrut': 3,
@@ -7152,9 +7274,15 @@ class JBActionButton(discord.ui.DynamicItem[discord.ui.Button],
         # toute la journee est le seul a garder les vieux emojis.
         # from_custom_id ne repasse pas d icone : ce chemin ne sert qu a
         # REPONDRE au clic, le rendu vient du message deja poste.
+        # Le vert isole les TRENDS du reste : ce sont les seules videos deja
+        # finies, et les confondre avec de la matiere premiere ferait poster du
+        # non-fini. Discord n offre que quatre couleurs — le vert est la seule
+        # libre ici, les autres portent deja un sens (bleu = action, rouge =
+        # destructif).
         _btn = discord.ui.Button(
             label=(_libelle_sans_emoji(lib) if icone is not None else lib),
-            style=discord.ButtonStyle.primary, row=row,
+            style=(discord.ButtonStyle.success if key in _JB_CLES_TREND
+                   else discord.ButtonStyle.primary), row=row,
             custom_id=f"jbus:a:{self.ident}:{self.key}:{self.qty}")
         if icone is not None:
             _btn.emoji = icone
