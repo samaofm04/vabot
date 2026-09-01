@@ -8058,6 +8058,136 @@ document.addEventListener('click', function(ev){
     showToast('Ouvre la vidéo depuis l onglet Trends pour la modifier', 'info');
 });
 
+// ==================== Add perfect : la video, puis ce qu on lui associe ====
+// Deux ecrans, clic par clic. On ne demande rien au clavier : tout ce qu il y
+// a a choisir existe deja quelque part, on le montre et on clique dessus.
+var pfState = {ident:'', famille:'', brute:'', bruteNom:'', genre:''};
+
+function pfEsc(s){
+  return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function pfClose(){
+  var m = document.getElementById('pf-modal');
+  if(m) m.style.display = 'none';
+}
+function pfAdd(famille, ident){
+  pfState = {ident:ident||'', famille:famille||'', brute:'', bruteNom:'', genre:''};
+  var m = document.getElementById('pf-modal');
+  if(!m){ if(typeof showToast==='function') showToast('Assistant introuvable','error'); return; }
+  m.style.display = 'flex';
+  pfEtape1();
+}
+function pfTitre(t, sous){
+  var a = document.getElementById('pf-titre'), b = document.getElementById('pf-sous');
+  if(a) a.textContent = t;
+  if(b) b.textContent = sous || '';
+}
+function pfGrille(html){
+  var g = document.getElementById('pf-grille');
+  if(g) g.innerHTML = html;
+}
+function pfChargement(){
+  pfGrille('<div style="grid-column:1/-1;padding:30px;text-align:center;color:#6b7280">Chargement…</div>');
+}
+function pfVide(msg){
+  pfGrille('<div style="grid-column:1/-1;padding:30px;text-align:center;color:#6b7280;line-height:1.6">'
+    + pfEsc(msg) + '</div>');
+}
+async function pfListe(genre){
+  var r = await fetch('/perfect/liste?identity=' + encodeURIComponent(pfState.ident)
+    + '&type=' + encodeURIComponent(genre), {credentials:'same-origin'});
+  return await r.json();
+}
+async function pfEtape1(){
+  pfTitre('Add perfect — 1. La vidéo', 'Choisis la brute de départ');
+  var b = document.getElementById('pf-suivant');
+  if(b) b.style.display = 'none';
+  pfChargement();
+  try{
+    var j = await pfListe('brutes');
+    var it = (j && j.items) || [];
+    if(!it.length){ pfVide('Aucune vidéo brute pour cette model. Dépose-en dans l onglet Vidéo brut.'); return; }
+    var h = '';
+    for(var i=0;i<it.length;i++){
+      h += '<button type="button" class="pf-card" data-pfbrute="' + pfEsc(it[i].id)
+        + '" data-pfnom="' + pfEsc(it[i].nom) + '">'
+        + '<img src="' + pfEsc(it[i].vignette) + '" loading="lazy" alt="">'
+        + '<span>' + pfEsc(it[i].nom) + '</span></button>';
+    }
+    pfGrille(h);
+  }catch(e){ pfVide('Chargement impossible : ' + e.message); }
+}
+function pfEtape2(){
+  pfTitre('Add perfect — 2. Ce qu on lui associe',
+          'Vidéo retenue : ' + pfState.bruteNom);
+  var b = document.getElementById('pf-suivant');
+  if(b) b.style.display = 'none';
+  pfGrille(
+    '<button type="button" class="pf-choix" data-pfgenre="captions">Caption'
+    + '<small>un texte incrusté sur la brute</small></button>'
+    + '<button type="button" class="pf-choix" data-pfgenre="templates">Template'
+    + '<small>un montage qui apporte son son</small></button>'
+    + '<button type="button" class="pf-choix" data-pfgenre="flash">Flash'
+    + '<small>un template au rythme rapide</small></button>');
+}
+async function pfEtape3(genre){
+  pfState.genre = genre;
+  var noms = {captions:'une caption', templates:'un template', flash:'un flash'};
+  pfTitre('Add perfect — 3. Choisis ' + (noms[genre] || genre),
+          'Vidéo retenue : ' + pfState.bruteNom);
+  pfChargement();
+  try{
+    var j = await pfListe(genre);
+    var it = (j && j.items) || [];
+    if(!it.length){ pfVide('Rien de disponible ici pour cette model.'); return; }
+    var h = '';
+    for(var i=0;i<it.length;i++){
+      if(genre === 'captions'){
+        h += '<button type="button" class="pf-card pf-txt" data-pfsource="cap:' + pfEsc(it[i].id)
+          + '" data-pfnom="' + pfEsc(it[i].texte) + '"><span>' + pfEsc(it[i].texte) + '</span></button>';
+      } else {
+        h += '<button type="button" class="pf-card" data-pfsource="' + pfEsc(it[i].id)
+          + '" data-pfnom="' + pfEsc(it[i].nom) + '">'
+          + '<img src="' + pfEsc(it[i].vignette) + '" loading="lazy" alt="">'
+          + '<span>' + pfEsc(it[i].nom) + '</span></button>';
+      }
+    }
+    pfGrille(h);
+  }catch(e){ pfVide('Chargement impossible : ' + e.message); }
+}
+document.addEventListener('click', function(ev){
+  var b = ev.target.closest ? ev.target.closest('[data-pfbrute]') : null;
+  if(b){
+    pfState.brute = b.getAttribute('data-pfbrute') || '';
+    pfState.bruteNom = b.getAttribute('data-pfnom') || '';
+    pfEtape2();
+    return;
+  }
+  var g = ev.target.closest ? ev.target.closest('[data-pfgenre]') : null;
+  if(g){ pfEtape3(g.getAttribute('data-pfgenre') || ''); return; }
+  var s = ev.target.closest ? ev.target.closest('[data-pfsource]') : null;
+  if(s){
+    var src = s.getAttribute('data-pfsource') || '';
+    pfClose();
+    // On passe la main a l editeur : c est lui qui assemble, et son bouton
+    // « ★★★ Valider comme trend » range le resultat. Reecrire un assembleur
+    // ici aurait fait deux moteurs a garder d accord.
+    if(src.indexOf('cap:') === 0){
+      if(typeof nxMontageOpen === 'function'){ nxMontageOpen(pfState.brute); }
+      var t = s.getAttribute('data-pfnom') || '';
+      setTimeout(function(){
+        var el = document.getElementById('nx-m-caption');
+        if(el){ el.value = t; }
+      }, 400);
+    } else if(typeof nxMontageOpen === 'function'){
+      nxMontageOpen(src);
+    }
+    if(typeof showToast === 'function')
+      showToast('Assemble, puis clique « ★★★ Valider comme trend »', 'info');
+  }
+});
+
 // ---- Nouvelle identité depuis la Bibliothèque (bouton ＋ des sidebars vault) ----
 var identEditCtx={ident:'',rename:false};
 document.addEventListener('click', function(ev){
@@ -12258,6 +12388,33 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
     </div>
   </div>
 </div>
+
+<!-- ===== Add perfect : la video, puis ce qu on lui associe ===== -->
+<div id="pf-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center" onclick="if(event.target===this)pfClose()">
+  <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:20px;width:min(860px,94vw);max-height:86vh;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
+    <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+      <div id="pf-titre" style="font-weight:800;font-size:16px">Add perfect</div>
+      <div id="pf-sous" style="font-size:12px;color:#8b8b96"></div>
+      <button type="button" onclick="pfClose()" style="margin-left:auto;background:transparent;border:1px solid #303036;color:#c4c4cc;border-radius:9px;padding:6px 12px;font-size:12px;cursor:pointer;font-family:inherit">Fermer</button>
+    </div>
+    <div id="pf-grille" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px;overflow:auto;padding:2px"></div>
+    <div id="pf-suivant" style="display:none"></div>
+  </div>
+</div>
+<style>
+.pf-card{background:#131316;border:1.5px solid #34343a;border-radius:10px;padding:0;cursor:pointer;overflow:hidden;display:flex;flex-direction:column;font-family:inherit;text-align:left}
+.pf-card:hover{border-color:#16a34a}
+.pf-card img{width:100%;aspect-ratio:9/16;object-fit:cover;display:block}
+.pf-card span{padding:7px 9px;font-size:11px;color:#c4c4cc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pf-card.pf-txt{min-height:96px}
+.pf-card.pf-txt span{white-space:normal;line-height:1.45;font-size:12px}
+.pf-choix{background:#131316;border:1.5px solid #34343a;border-radius:10px;padding:16px 14px;cursor:pointer;font-family:inherit;text-align:left;color:#e6e6ea;font-size:14px;font-weight:700;display:flex;flex-direction:column;gap:5px}
+.pf-choix:hover{border-color:#16a34a}
+.pf-choix small{font-weight:400;font-size:11.5px;color:#8b8b96}
+body.light .pf-card,body.light .pf-choix{background:#fff;border-color:#e6e8ec}
+body.light .pf-card span,body.light .pf-choix{color:#1c1c1e}
+body.light .pf-choix small{color:#5f5e5a}
+</style>
 
 <!-- ===== Nouvelle identité (bouton ＋ des sidebars de la Bibliothèque) ===== -->
 <div id="ident-new-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center" onclick="identNewClose()">
@@ -18667,7 +18824,8 @@ def _cloud_media_path(identity: str, subdir: str, filename: str):
 
 CLOUD_SUBDIRS = frozenset(
     {"videos", "posts", "stories", "storyctas", "profile_pics",
-     "brutes", "templates", "trends"} | set(_PRO_SUBDIR_OF.values())
+     "brutes", "templates", "trends",
+     "trends_caption", "trends_template"} | set(_PRO_SUBDIR_OF.values())
 )
 
 
@@ -20477,6 +20635,10 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         # non-fini au VA, et l inverse.
         "trends": ("trend", "Trend prête à poster", "Vidéo finie — le VA la poste telle quelle",
                    "Add trend"),
+        "trends_caption": ("trend", "Perfect — Caption",
+                           "Brute + texte, déjà assemblés et prêts à poster", "Add perfect"),
+        "trends_template": ("trend", "Perfect — Template",
+                            "Brute + son, Flash compris — prêts à poster", "Add perfect"),
         # Vault PRO : MÊMES panneaux d'upload, le champ caché « vault » (posé par
         # upPrefillIdentity) fait atterrir le fichier dans pro_* côté serveur.
         "pro_videos": ("reel", "Upload Reel — Vault PRO", "Vidéo clean + caption + description", "Add media"),
@@ -20505,6 +20667,20 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
             f"<svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M12 5v14M5 12h14'/></svg>"
             f"{_btn_lbl}</button>"
         )
+        if subdir in ("trends_caption", "trends_template"):
+            # « Add perfect » ne televerse pas : il ASSEMBLE. Meme precedent que
+            # les templates juste en dessous, qui remplacent aussi ce bouton.
+            _fam = "caption" if subdir.endswith("caption") else "template"
+            add_media_btn = (
+                "<button type='button' onclick=\"pfAdd('" + _fam + "','"
+                + str(selected) + "')\" "
+                "style='display:inline-flex;align-items:center;gap:8px;padding:9px 18px;"
+                "background:linear-gradient(135deg,#16a34a,#15803d);border:0;color:#fff;"
+                "border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;"
+                "font-family:inherit;letter-spacing:.01em'>"
+                "<svg viewBox='0 0 24 24' width='16' height='16' fill='none' "
+                "stroke='currentColor' stroke-width='2.5' stroke-linecap='round'>"
+                "<path d='M12 5v14M5 12h14'/></svg>Add perfect</button>")
         if subdir == "templates":
             # ↗ Partage des templates sélectionnés (cercles ⚪) à d'autres models
             # — même modale que « Appliquer ce montage à… », montage compris.
@@ -45889,6 +46065,8 @@ def create_app():
                 # charge ».
                 "cloudbrutes": ("brutes", VIDEO_EXTS, False),
                 "cloudtrends": ("trends", VIDEO_EXTS, False),
+                "perfectcaption": ("trends_caption", VIDEO_EXTS, False),
+                "perfecttemplate": ("trends_template", VIDEO_EXTS, False),
                 "cloudtemplates": ("templates", VIDEO_EXTS, False),
                 "cloudpps": None,   # PP a son propre producer
                 # Vault PRO : galeries generiques (les PP PRO aussi, contrairement
@@ -46009,8 +46187,10 @@ def create_app():
                 "cloudstoryctas": lambda: _render_cloud_content_html("storyctas", IMAGE_EXTS),
                 "cloudbrutes": lambda: _render_cloud_content_html("brutes", VIDEO_EXTS),
                 "cloudtrends": lambda: _render_cloud_content_html("trends", VIDEO_EXTS),
-                "perfectcaption": lambda: _render_perfect_html("caption"),
-                "perfecttemplate": lambda: _render_perfect_html("template"),
+                "perfectcaption": lambda: _render_cloud_content_html(
+                    "trends_caption", VIDEO_EXTS),
+                "perfecttemplate": lambda: _render_cloud_content_html(
+                    "trends_template", VIDEO_EXTS),
                 "cloudtemplates": lambda: _render_cloud_content_html("templates", VIDEO_EXTS),
                 # bilan : recalculé à chaque ouverture (suit les modifs Facture)
                 "bilan": _render_bilan_html,
@@ -47620,6 +47800,65 @@ def create_app():
             # Sans ce retrait, un assemblage qui échoue (ffmpeg, disque plein)
             # laisserait le reel bloqué « en cours » jusqu'au redémarrage du bot.
             _montage_gen_liberer(_mid_gen)
+
+    @app.route("/perfect/liste")
+    def perfect_liste():
+        """Ce qu on peut choisir a chaque etape de « Add perfect ».
+
+        Une seule route pour les quatre listes : la video de depart, puis le
+        template, le flash ou la caption qu on lui associe. Les separer aurait
+        fait quatre routes qui repondent la meme chose sous quatre formes.
+
+        Les FLASH ne sont pas un dossier a part : ce sont des templates portant
+        la marque flash. On lit donc le meme dossier et on partage sur le
+        registre — un template promu flash apparait au bon endroit sans qu on
+        ait rien a deplacer.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        identity = (request.args.get("identity") or "").strip().lower()
+        genre = (request.args.get("type") or "").strip().lower()
+        if identity not in (_list_identities() or []):
+            return jsonify({"ok": False, "error": "identité inconnue"})
+
+        if genre == "captions":
+            # Les captions sont des TEXTES, pas des fichiers : pas de vignette,
+            # c est le texte lui-meme qu on montre.
+            lib = _load_captions_lib().get(identity) or []
+            out = []
+            for i, c in enumerate(lib):
+                txt = c.get("text") if isinstance(c, dict) else c
+                txt = str(txt or "").strip()
+                if txt:
+                    out.append({"id": str(i), "texte": txt[:280]})
+            return jsonify({"ok": True, "type": genre, "items": out})
+
+        sous_dossier = {"brutes": "brutes", "templates": "templates",
+                        "flash": "templates"}.get(genre)
+        if not sous_dossier:
+            return jsonify({"ok": False, "error": "type inconnu : " + genre[:20]})
+        dossier = IDENTITIES_DIR / identity / sous_dossier
+        if not dossier.is_dir():
+            return jsonify({"ok": True, "type": genre, "items": []})
+
+        marques = _load_flash_trend() if genre in ("templates", "flash") else set()
+        out = []
+        for p in sorted(dossier.iterdir()):
+            if not (p.is_file() and p.suffix.lower() in VIDEO_EXTS):
+                continue
+            fid = f"{identity}|{sous_dossier}|{p.name}"
+            est_flash = fid in marques
+            if genre == "flash" and not est_flash:
+                continue
+            if genre == "templates" and est_flash:
+                continue
+            out.append({
+                "id": fid,
+                "nom": p.name,
+                "vignette": f"/cloud/thumb/{identity}/{sous_dossier}/{p.name}",
+            })
+        return jsonify({"ok": True, "type": genre, "items": out})
 
     @app.route("/noctus/montage_perfect", methods=["POST"])
     def noctus_montage_perfect():
