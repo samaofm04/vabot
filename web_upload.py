@@ -8195,6 +8195,11 @@ function pfPoserCaption(texte){
     if(el && pret && typeof nxMAddCap === 'function'){
       clearInterval(t);
       el.value = texte;
+      // Sur TOUTE la video, pas deux secondes au curseur. Le mode par defaut
+      // pose un segment de 2 s la ou est la tete de lecture : sur une brute de
+      // dix secondes, le texte disparaissait au bout de deux.
+      var rp = document.querySelector('input[name=nxmtime][value="perm"]');
+      if(rp){ rp.checked = true; try { nxMTimeToggle(); } catch(e){} }
       try { nxMAddCap(); } catch(e){}
       return;
     }
