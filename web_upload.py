@@ -4871,7 +4871,7 @@ function lbKeyboard(e){
   if(e.key === 'ArrowRight'){ lbNext(); e.preventDefault(); return; }
 }
 // ===== ▶ Montage : génère des variations d'un reel de la Bibliothèque + envoi Discord =====
-var nxMState = {fid:'', identity:'', model:'', caps:[], editIdx:-1};
+var nxMState = {fid:'', identity:'', model:'', caps:[], editIdx:-1, pourTrend:false};
 function nxMEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function nxMDur(){ var v=document.getElementById('nx-m-video'); return (v&&!isNaN(v.duration)&&v.duration>0)?v.duration:0; }
 function nxMFmt(t){ return (Math.round(t*100)/100).toFixed(2); }
@@ -6044,6 +6044,7 @@ function nxMBindResize(){
 async function nxMontageOpen(fid, exampleUrl){
   nxMBindResize();
   nxMState.fid=fid; nxMState.model=''; nxMState.caps=[]; nxMState.editIdx=-1;
+  nxMState.pourTrend=false;
   var parts=fid.split('|'); nxMState.identity=parts[0]||''; var name=parts[2]||'';
   var _pr=document.getElementById('nx-m-proj'); if(_pr) _pr.textContent=(name||'Mon reel').replace(/\.[^.]+$/,'');
   var vid=document.getElementById('nx-m-video');
@@ -6091,6 +6092,17 @@ function nxMontageGenBulk(){
 async function nxMontagePerfect(){
   var btn = document.getElementById('nx-m-perfect');
   if(btn && btn.disabled) return;
+  // Rien de genere encore : on lance la generation d UNE variante et on
+  // reprendra la main quand elle sera finie (voir nxMontagePoll). Sans ca il
+  // fallait cliquer « Download » d abord — une etape que personne ne devine,
+  // et qui deposait en plus la video sur le PC pour rien.
+  if(!nxMState.model){
+    nxMState.pourTrend = true;
+    if(typeof showToast === 'function')
+      showToast('Montage en cours, puis rangement dans les Trends...', 'info');
+    if(typeof nxMontageGen === 'function') nxMontageGen(1);
+    return;
+  }
   // La famille se deduit du montage lui-meme, comme le fait le moteur : un
   // point de coupe veut dire qu une brute s insere dans un template ; sans
   // coupe, c est un texte pose sur la brute.
@@ -6184,7 +6196,12 @@ async function nxMontagePoll(){
       // reste de la generation precedente (un rendu prend bien plus longtemps).
       // On l ignore au lieu d annoncer « aucune video produite » a tort.
       if(Date.now()-nxMState.genStart < 2500){ p.textContent='◌ démarrage…'; setTimeout(nxMontagePoll,1200); return; }
-      p.textContent='✓ Terminé'; nxMState.genStart=0; nxMontageResults();
+      p.textContent='✓ Terminé'; nxMState.genStart=0;
+      // Demande venue du bouton ⭐⭐⭐ : on RANGE la video au lieu de la
+      // deposer sur le PC. Telecharger puis rester a valider a la main
+      // aurait fait deux gestes pour un seul besoin.
+      if(nxMState.pourTrend){ nxMState.pourTrend = false; nxMontagePerfect(); return; }
+      nxMontageResults();
     }
     else if(s.state==='error'){ nxMGenFail((s.error||'erreur').toString().slice(0,180)); }
     else if(s.state==='idle'||s.state==='stopped'){ nxMGenFail('le rendu a été arrêté'); }
