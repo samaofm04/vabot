@@ -8164,6 +8164,31 @@ async function pfEtape3(genre){
 // modale arrete la propagation pour ne pas se fermer quand on clique dedans,
 // et un ecouteur pose plus haut ne voyait donc jamais ces clics — on cliquait
 // une video, il ne se passait rien.
+function pfPoserCaption(texte){
+  // Remplir le champ ne SUFFIT PAS : tant qu on n appelle pas nxMAddCap, le
+  // texte reste dans la case et n apparait pas sur la video. Et il faut
+  // attendre que la video soit chargee — la pose se cale sur sa duree, qui
+  // vaut zero tant que le lecteur n a pas ses metadonnees.
+  if(!texte) return;
+  var essais = 0;
+  var t = setInterval(function(){
+    essais++;
+    var el = document.getElementById('nx-m-caption');
+    var pret = (typeof nxMDur === 'function') && nxMDur() > 0;
+    if(el && pret && typeof nxMAddCap === 'function'){
+      clearInterval(t);
+      el.value = texte;
+      try { nxMAddCap(); } catch(e){}
+      return;
+    }
+    if(essais > 60){                 // ~12 s : au-dela, la video ne viendra pas
+      clearInterval(t);
+      if(el) el.value = texte;       // au moins le texte est pret a poser
+      if(typeof showToast === 'function')
+        showToast('Caption prete dans le champ — clique Ajouter', 'info');
+    }
+  }, 200);
+}
 function pfEcouter(){
   var g = document.getElementById('pf-grille');
   if(!g || g.dataset.pfbound === '1') return;
@@ -8210,11 +8235,7 @@ function pfClic(ev){
     // ici aurait fait deux moteurs a garder d accord.
     if(src.indexOf('cap:') === 0){
       if(typeof nxMontageOpen === 'function'){ nxMontageOpen(pfState.brute); }
-      var t = s.getAttribute('data-pfnom') || '';
-      setTimeout(function(){
-        var el = document.getElementById('nx-m-caption');
-        if(el){ el.value = t; }
-      }, 400);
+      pfPoserCaption(s.getAttribute('data-pfnom') || '');
     } else if(typeof nxMontageOpen === 'function'){
       nxMontageOpen(src);
     }
