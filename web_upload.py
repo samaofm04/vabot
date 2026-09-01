@@ -6089,6 +6089,23 @@ function nxMontageGenBulk(){
   var n=parseInt((document.getElementById('nx-m-bulkn')||{}).value)||5;
   nxMontageGen(Math.max(1,Math.min(10,n)));
 }
+function pfEtat(txt, couleur, duree){
+  // L etat s ecrit SUR le bouton : c est la seule chose que l oeil regarde
+  // quand on vient de cliquer. Une notification passagere se rate.
+  var b = document.getElementById('nx-m-perfect');
+  if(!b) return;
+  if(!b.dataset.pfbase) b.dataset.pfbase = b.textContent;
+  b.textContent = txt;
+  b.style.background = couleur || '';
+  b.style.color = couleur ? '#fff' : '';
+  if(b.__pfT) clearTimeout(b.__pfT);
+  if(duree){
+    b.__pfT = setTimeout(function(){
+      b.textContent = b.dataset.pfbase;
+      b.style.background = ''; b.style.color = '';
+    }, duree);
+  }
+}
 async function nxMontagePerfect(){
   var btn = document.getElementById('nx-m-perfect');
   if(btn && btn.disabled) return;
@@ -6098,11 +6115,13 @@ async function nxMontagePerfect(){
   // et qui deposait en plus la video sur le PC pour rien.
   if(!nxMState.model){
     nxMState.pourTrend = true;
+    pfEtat('◌ Montage en cours…', '#6366f1');
     if(typeof showToast === 'function')
       showToast('Montage en cours, puis rangement dans les Trends...', 'info');
     if(typeof nxMontageGen === 'function') nxMontageGen(1);
     return;
   }
+  pfEtat('◌ Rangement…', '#6366f1');
   // La famille se deduit du montage lui-meme, comme le fait le moteur : un
   // point de coupe veut dire qu une brute s insere dans un template ; sans
   // coupe, c est un texte pose sur la brute.
@@ -6117,8 +6136,7 @@ async function nxMontagePerfect(){
       showToast('Genere d abord le montage, puis valide-le', 'info');
     return;
   }
-  var vieux = btn ? btn.textContent : '';
-  if(btn){ btn.disabled = true; btn.textContent = '...'; }
+  if(btn){ btn.disabled = true; }
   var fd = new FormData();
   fd.set('model', nxMState.model);
   fd.set('identity', nxMState.identity || '');
@@ -6129,16 +6147,21 @@ async function nxMontagePerfect(){
   try {
     var r = await fetch('/noctus/montage_perfect', {method:'POST', body:fd, credentials:'same-origin'});
     var j = await r.json();
-    if(btn){ btn.disabled = false; btn.textContent = vieux; }
+    if(btn){ btn.disabled = false; }
     if(!j || !j.ok){
+      pfEtat('✕ ' + ((j && j.error) || 'Validation impossible'), '#ef4444', 8000);
       if(typeof showToast === 'function')
         showToast((j && j.error) || 'Validation impossible', 'error');
       return;
     }
+    // Le bouton le DIT, et longtemps : une pastille qui passe en deux secondes
+    // ne repond pas a « est-ce que c est enregistre ? ».
+    pfEtat('✓ Enregistrée dans les Trends de ' + j.identite, '#16a34a', 12000);
     if(typeof showToast === 'function')
-      showToast('Rangee dans les Trends de ' + j.identite + ' : ' + j.fichier, 'success');
+      showToast('Enregistree : ' + j.fichier + ' — visible dans Perfect', 'success');
   } catch(e){
-    if(btn){ btn.disabled = false; btn.textContent = vieux; }
+    if(btn){ btn.disabled = false; }
+    pfEtat('✕ Erreur réseau', '#ef4444', 8000);
     if(typeof showToast === 'function') showToast('Erreur reseau : ' + e.message, 'error');
   }
 }
@@ -8251,15 +8274,31 @@ function pfClic(ev){
   var s = ev.target.closest ? ev.target.closest('[data-pfsource]') : null;
   if(s){
     var src = s.getAttribute('data-pfsource') || '';
+    // On ne FERME PAS avant d etre sur que l editeur s ouvre. Fermer d abord,
+    // c est ce qui donnait « tout se ferme et il ne se passe rien » quand
+    // l ouverture echouait : plus de fenetre, plus d editeur, aucun message.
+    if(typeof nxMontageOpen !== 'function'){
+      pfVide('L editeur de montage n est pas disponible sur cette page. '
+             + 'Recharge la page (Ctrl+Shift+R) et reessaie.');
+      return;
+    }
+    var cible = (src.indexOf('cap:') === 0) ? pfState.brute : src;
+    if(!cible){
+      pfVide('Video de depart perdue — reprends a l ecran 1.');
+      return;
+    }
+    try {
+      nxMontageOpen(cible);
+    } catch(e){
+      pfVide('Ouverture de l editeur impossible : ' + e.message);
+      return;
+    }
     pfClose();
-    // On passe la main a l editeur : c est lui qui assemble, et son bouton
-    // « ★★★ Valider comme trend » range le resultat. Reecrire un assembleur
-    // ici aurait fait deux moteurs a garder d accord.
+    // C est l editeur qui assemble, et son bouton « ★★★ Valider comme trend »
+    // range le resultat. Reecrire un assembleur ici aurait fait deux moteurs a
+    // garder d accord.
     if(src.indexOf('cap:') === 0){
-      if(typeof nxMontageOpen === 'function'){ nxMontageOpen(pfState.brute); }
       pfPoserCaption(s.getAttribute('data-pfnom') || '');
-    } else if(typeof nxMontageOpen === 'function'){
-      nxMontageOpen(src);
     }
     if(typeof showToast === 'function')
       showToast('Assemble, puis clique « ★★★ Valider comme trend »', 'info');
