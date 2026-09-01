@@ -8112,8 +8112,9 @@ async function pfEtape1(){
     for(var i=0;i<it.length;i++){
       h += '<button type="button" class="pf-card" data-pfbrute="' + pfEsc(it[i].id)
         + '" data-pfnom="' + pfEsc(it[i].nom) + '">'
-        + '<img src="' + pfEsc(it[i].vignette) + '" loading="lazy" alt="">'
-        + '<span>' + pfEsc(it[i].nom) + '</span></button>';
+        + '<img src="' + pfEsc(it[i].vignette) + '" loading="lazy" alt="" '
+        + 'onerror="this.style.visibility=&#39;hidden&#39;">'
+        + '<span>' + pfEsc(it[i].nom || it[i].id || 'sans nom') + '</span></button>';
     }
     pfGrille(h);
   }catch(e){ pfVide('Chargement impossible : ' + e.message); }
@@ -12411,9 +12412,22 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
 .pf-choix{background:#131316;border:1.5px solid #34343a;border-radius:10px;padding:16px 14px;cursor:pointer;font-family:inherit;text-align:left;color:#e6e6ea;font-size:14px;font-weight:700;display:flex;flex-direction:column;gap:5px}
 .pf-choix:hover{border-color:#16a34a}
 .pf-choix small{font-weight:400;font-size:11.5px;color:#8b8b96}
-body.light .pf-card,body.light .pf-choix{background:#fff;border-color:#e6e8ec}
-body.light .pf-card span,body.light .pf-choix{color:#1c1c1e}
-body.light .pf-choix small{color:#5f5e5a}
+/* Le theme clair repeint les fonds sombres poses en style inline, avec des
+   regles !important. Une couleur de classe y perd : d ou la SPECIFICITE
+   (#pf-modal + classe) et le !important ici — sinon le nom de la video est
+   gris pale sur blanc, c est-a-dire invisible, et la carte n a plus l air que
+   d un trait. */
+body.light #pf-modal .pf-card,body.light #pf-modal .pf-choix{background:#fff!important;border-color:#d3d1c7!important}
+body.light #pf-modal .pf-card span{color:#1c1c1e!important}
+body.light #pf-modal .pf-choix{color:#1c1c1e!important}
+body.light #pf-modal .pf-choix small{color:#5f5e5a!important}
+body.light #pf-modal #pf-titre{color:#1c1c1e!important}
+/* Une carte se voit meme sans vignette : la miniature d une video se fabrique
+   au premier affichage, et pendant ce temps l image ne pese rien. Sans hauteur
+   minimale, la grille n etait qu une pile de traits. */
+.pf-card{min-height:112px}
+.pf-card img{background:#20202a;min-height:64px}
+body.light #pf-modal .pf-card img{background:#eceff3!important}
 </style>
 
 <!-- ===== Nouvelle identité (bouton ＋ des sidebars de la Bibliothèque) ===== -->
