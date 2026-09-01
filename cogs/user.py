@@ -1176,11 +1176,17 @@ def trends_for(identity, limit=3):
     plutot que de servir toujours les memes en tete de liste : deux VA qui
     cliquent a la minute recevraient sinon la meme video.
     """
-    dossier = IDENTITIES_DIR / identity / "trends"
-    if not dossier.is_dir():
-        return []
-    fichiers = sorted(p for p in dossier.iterdir()
-                      if p.is_file() and p.suffix.lower() in VIDEO_EXTS)
+    # TROIS dossiers, pas un : « trends » recoit les depots a la main, et
+    # « trends_caption » / « trends_template » ce qui sort des editeurs Perfect.
+    # N en lire qu un laissait le VA sans rien alors que le stock etait plein —
+    # rangé dans les deux autres.
+    base = IDENTITIES_DIR / identity
+    fichiers = []
+    for nom in ("trends", "trends_caption", "trends_template"):
+        d = base / nom
+        if d.is_dir():
+            fichiers.extend(p for p in sorted(d.iterdir())
+                            if p.is_file() and p.suffix.lower() in VIDEO_EXTS)
     if not fichiers:
         return []
     if limit and len(fichiers) > limit:

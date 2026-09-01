@@ -7792,6 +7792,87 @@ try:
 except Exception as _eTr:
     check("trends : testable", False, repr(_eTr)[:200])
 
+# ==============================================================================
+# Perfect, de bout en bout : de la brute proposee jusqu a ce que Discord la voie
+# ==============================================================================
+try:
+    import shutil as _shPf
+    import subprocess as _spPf
+    import web_upload as _wuPf
+    import noctus_web as _nwPf
+    import cogs.user as _cuPf
+    import pathlib as _plPf
+
+    _vraiUPf = _wuPf._load_web_users
+    _wuPf._load_web_users = lambda: {}
+    _idPf = (_wuPf._list_identities() or [""])[0]
+    _bdPf = _wuPf.IDENTITIES_DIR / _idPf / "brutes"
+    _midPf = _nwPf._safe("_tst_chaine_perfect")
+    _outPf = _nwPf._models_dir() / _midPf / "output" / _nwPf.V_FOLDERS[0]
+    # Un nom comme ceux du terrain : diese et espace. Dans une URL le « # »
+    # COUPE l adresse — c est ce qui laissait les cartes blanches.
+    _brPf = _bdPf / "_tst__#fyp perfect.mp4"
+    _tcPf = _wuPf.IDENTITIES_DIR / _idPf / "trends_caption"
+    try:
+        _bdPf.mkdir(parents=True, exist_ok=True)
+        _outPf.mkdir(parents=True, exist_ok=True)
+        _spPf.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i",
+                   "testsrc=size=180x320:rate=10:duration=1", "-c:v", "libx264",
+                   "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(_brPf)],
+                  capture_output=True, timeout=60)
+        if not _brPf.exists():
+            raise RuntimeError("ffmpeg indisponible pour le banc d essai")
+        _shPf.copy(str(_brPf), str(_outPf / "montee.mp4"))
+
+        _aPf = _wuPf.create_app()
+        _cPf = _aPf.test_client()
+        with _cPf.session_transaction() as _sPf:
+            _sPf["auth"] = True; _sPf["username"] = "admin"
+            _sPf["legacy_owner"] = True; _sPf["role"] = "owner"
+
+        _jPf = _cPf.get("/perfect/liste?identity=%s&type=brutes" % _idPf).get_json() or {}
+        _ePf = [x for x in (_jPf.get("items") or []) if "#fyp perfect" in (x.get("nom") or "")]
+        check("chaine : la brute est proposee a l assistant", bool(_ePf),
+              str([x.get("nom") for x in (_jPf.get("items") or [])])[:90])
+        if _ePf:
+            _ePf = _ePf[0]
+            check("chaine : le diese est encode dans l adresse",
+                  "#" not in _ePf["vignette"] and "%23" in _ePf["vignette"],
+                  _ePf["vignette"][:80])
+            check("chaine : la vignette et l apercu repondent",
+                  _cPf.get(_ePf["vignette"]).status_code == 200
+                  and _cPf.get(_ePf["fichier"]).status_code == 200)
+
+        _vPf = _cPf.post("/noctus/montage_perfect", data={
+            "model": _midPf, "identity": _idPf, "famille": "caption",
+            "brute": "_tst", "source": "_tst", "son": "Son du moment"}).get_json() or {}
+        check("chaine : la validation range la video", _vPf.get("ok") is True,
+              str(_vPf)[:110])
+        _fPf = _tcPf / (_vPf.get("fichier") or "_absent")
+        # Le dossier doit etre celui de la FAMILLE : range dans « trends », la
+        # video serait validee, copiee, et invisible des deux galeries.
+        check("chaine : dans le dossier de sa famille, avec sa fiche",
+              _fPf.exists() and _fPf.with_suffix(".perfect.json").exists())
+        check("chaine : et la consigne de son part avec elle",
+              _fPf.with_suffix(".txt").exists()
+              and "Son du moment" in _fPf.with_suffix(".txt").read_text(encoding="utf-8"))
+        _hPf = _cPf.get("/?lazy=perfectcaption&cloud_trends_caption_ident=" + _idPf,
+                        headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+        check("chaine : elle apparait dans la galerie Perfect",
+              (_vPf.get("fichier") or "zzz") in _hPf)
+        # Discord lit les TROIS dossiers : n en lire qu un laissait le VA sans
+        # rien alors que le stock etait plein, range dans les deux autres.
+        check("chaine : et Discord la sert au bouton ⭐⭐⭐",
+              (_vPf.get("fichier") or "zzz") in
+              [p.name for p in _cuPf.trends_for(_idPf, limit=9)])
+    finally:
+        _wuPf._load_web_users = _vraiUPf
+        _brPf.unlink(missing_ok=True)
+        _shPf.rmtree(_tcPf, ignore_errors=True)
+        _shPf.rmtree(_nwPf._models_dir() / _midPf, ignore_errors=True)
+except Exception as _ePf2:
+    check("chaine perfect : testable", False, repr(_ePf2)[:200])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

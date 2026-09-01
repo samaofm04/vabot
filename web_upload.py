@@ -8112,9 +8112,10 @@ async function pfEtape1(){
     var h = '';
     for(var i=0;i<it.length;i++){
       h += '<button type="button" class="pf-card" data-pfbrute="' + pfEsc(it[i].id)
-        + '" data-pfnom="' + pfEsc(it[i].nom) + '">'
-        + '<img src="' + pfEsc(it[i].vignette) + '" loading="lazy" alt="" '
-        + 'onerror="this.style.visibility=&#39;hidden&#39;">'
+        + '" data-pfnom="' + pfEsc(it[i].nom) + '" data-pfvid="'
+        + pfEsc(it[i].fichier || '') + '">'
+        + '<span class="pf-vis"><img src="' + pfEsc(it[i].vignette) + '" loading="lazy" alt="" '
+        + 'onerror="this.style.visibility=&#39;hidden&#39;"></span>'
         + '<span>' + pfEsc(it[i].nom || it[i].id || 'sans nom') + '</span></button>';
     }
     pfGrille(h);
@@ -8150,9 +8151,10 @@ async function pfEtape3(genre){
           + '" data-pfnom="' + pfEsc(it[i].texte) + '"><span>' + pfEsc(it[i].texte) + '</span></button>';
       } else {
         h += '<button type="button" class="pf-card" data-pfsource="' + pfEsc(it[i].id)
-          + '" data-pfnom="' + pfEsc(it[i].nom) + '">'
-          + '<img src="' + pfEsc(it[i].vignette) + '" loading="lazy" alt="">'
-          + '<span>' + pfEsc(it[i].nom) + '</span></button>';
+          + '" data-pfnom="' + pfEsc(it[i].nom) + '" data-pfvid="'
+          + pfEsc(it[i].fichier || '') + '">'
+          + '<span class="pf-vis"><img src="' + pfEsc(it[i].vignette) + '" loading="lazy" alt=""></span>'
+          + '<span>' + pfEsc(it[i].nom || it[i].id || 'sans nom') + '</span></button>';
       }
     }
     pfGrille(h);
@@ -8167,6 +8169,27 @@ function pfEcouter(){
   if(!g || g.dataset.pfbound === '1') return;
   g.dataset.pfbound = '1';
   g.addEventListener('click', pfClic);
+  // Apercu au survol. La video n est creee QUE sous la souris : en charger
+  // cinquante d un coup ferait ramer la page pour rien.
+  g.addEventListener('mouseover', function(ev){
+    var c = ev.target.closest ? ev.target.closest('[data-pfvid]') : null;
+    if(!c || c.querySelector('video')) return;
+    var u = c.getAttribute('data-pfvid') || '';
+    var w = c.querySelector('.pf-vis');
+    if(!u || !w) return;
+    var v = document.createElement('video');
+    v.src = u; v.muted = true; v.loop = true; v.playsInline = true;
+    v.setAttribute('preload', 'metadata');
+    v.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover';
+    w.appendChild(v);
+    try { v.play(); } catch(e){}
+  });
+  g.addEventListener('mouseout', function(ev){
+    var c = ev.target.closest ? ev.target.closest('[data-pfvid]') : null;
+    if(!c || (ev.relatedTarget && c.contains(ev.relatedTarget))) return;
+    var v = c.querySelector('video');
+    if(v) v.remove();
+  });
 }
 function pfClic(ev){
   var b = ev.target.closest ? ev.target.closest('[data-pfbrute]') : null;
@@ -12416,7 +12439,8 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
 <style>
 .pf-card{background:#131316;border:1.5px solid #34343a;border-radius:10px;padding:0;cursor:pointer;overflow:hidden;display:flex;flex-direction:column;font-family:inherit;text-align:left}
 .pf-card:hover{border-color:#16a34a}
-.pf-card img{width:100%;aspect-ratio:9/16;object-fit:cover;display:block}
+.pf-vis{position:relative;display:block;width:100%;aspect-ratio:9/16;overflow:hidden}
+.pf-card img{width:100%;height:100%;object-fit:cover;display:block}
 .pf-card span{padding:7px 9px;font-size:11px;color:#c4c4cc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pf-card.pf-txt{min-height:96px}
 .pf-card.pf-txt span{white-space:normal;line-height:1.45;font-size:12px}
@@ -47895,6 +47919,9 @@ def create_app():
                 # tel quel dans une adresse, le « # » la COUPE — la vignette
                 # n etait jamais demandee, et la carte restait blanche.
                 "vignette": f"/cloud/thumb/{identity}/{sous_dossier}/{_url_nom(p.name)}",
+                # Pour l apercu au survol : la video n est chargee que quand la
+                # souris s arrete dessus, jamais les cinquante d un coup.
+                "fichier": f"/cloud/file/{identity}/{sous_dossier}/{_url_nom(p.name)}",
             })
         return jsonify({"ok": True, "type": genre, "items": out})
 
@@ -47941,7 +47968,10 @@ def create_app():
                             "error": "aucune vidéo produite — génère d'abord le montage"})
         src = produits[0]
 
-        dossier = IDENTITIES_DIR / identity / "trends"
+        # Le dossier de SA famille, celui-la meme que lit la galerie Perfect.
+        # Ranger tout dans « trends » aurait fait disparaitre la video des deux
+        # onglets : validee, copiee, et invisible.
+        dossier = IDENTITIES_DIR / identity / ("trends_" + famille)
         try:
             dossier.mkdir(parents=True, exist_ok=True)
         except Exception as e:
