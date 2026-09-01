@@ -47883,13 +47883,22 @@ def create_app():
         if genre == "captions":
             # Les captions sont des TEXTES, pas des fichiers : pas de vignette,
             # c est le texte lui-meme qu on montre.
-            lib = _load_captions_lib().get(identity) or []
+            # captions.json[identite] est un DICT — font, style, global_pos et
+            # items — pas une liste. Le parcourir directement rendait ses
+            # CLES : l ecran proposait « font », « style », « items »… au lieu
+            # des captions ecrites.
+            bloc = _load_captions_lib().get(identity)
+            items = (bloc or {}).get("items") if isinstance(bloc, dict) else bloc
             out = []
-            for i, c in enumerate(lib):
+            for i, c in enumerate(items or []):
                 txt = c.get("text") if isinstance(c, dict) else c
                 txt = str(txt or "").strip()
-                if txt:
-                    out.append({"id": str(i), "texte": txt[:280]})
+                if not txt:
+                    continue
+                out.append({
+                    "id": str((c.get("id") if isinstance(c, dict) else None) or i),
+                    "texte": txt[:280],
+                })
             return jsonify({"ok": True, "type": genre, "items": out})
 
         sous_dossier = {"brutes": "brutes", "templates": "templates",
@@ -47901,9 +47910,18 @@ def create_app():
             return jsonify({"ok": True, "type": genre, "items": []})
 
         marques = _load_flash_trend() if genre in ("templates", "flash") else set()
+        # Une brute DESACTIVEE porte deja du texte incruste : la proposer ici
+        # reviendrait a en poser un second par-dessus. Le reste du site l ecarte
+        # partout, cet ecran doit faire pareil.
+        try:
+            import brutes_off as _off_pf
+        except Exception:
+            _off_pf = None
         out = []
         for p in sorted(dossier.iterdir()):
             if not (p.is_file() and p.suffix.lower() in VIDEO_EXTS):
+                continue
+            if _off_pf is not None and _off_pf.est_desactivee(p):
                 continue
             fid = f"{identity}|{sous_dossier}|{p.name}"
             est_flash = fid in marques

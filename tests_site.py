@@ -7865,6 +7865,44 @@ try:
         check("chaine : et Discord la sert au bouton ⭐⭐⭐",
               (_vPf.get("fichier") or "zzz") in
               [p.name for p in _cuPf.trends_for(_idPf, limit=9)])
+        # -- Ce que l assistant PROPOSE ------------------------------------------
+        # captions.json[identite] est un DICT (font, style, global_pos, items), pas
+        # une liste. Le parcourir directement rendait ses CLES : l ecran proposait
+        # « font », « style », « items »… au lieu des captions ecrites.
+        import brutes_off as _offPf
+        _libPf = _wuPf._load_captions_lib()
+        _savLibPf = dict(_libPf)
+        _okPf = _bdPf / "_tst_dispo.mp4"
+        _koPf = _bdPf / "_tst_eteinte.mp4"
+        try:
+            _libPf[_idPf] = {"font": "Strong", "style": {}, "global_pos": {},
+                             "items": [{"id": "c1", "text": "Texte de la premiere"},
+                                       {"id": "c2", "text": "Texte de la seconde"}]}
+            _wuPf._save_captions_lib(_libPf)
+            _jcPf = _cPf.get("/perfect/liste?identity=%s&type=captions" % _idPf).get_json() or {}
+            _txPf = [x.get("texte") for x in (_jcPf.get("items") or [])]
+            check("assistant : il propose les CAPTIONS, pas les cles de la structure",
+                  "Texte de la premiere" in _txPf
+                  and not any(t in ("font", "style", "global_pos", "items") for t in _txPf),
+                  str(_txPf)[:110])
+
+            # Une brute DESACTIVEE porte deja du texte incruste : la proposer
+            # reviendrait a en poser un second par-dessus.
+            _shPf.copy(str(_brPf), str(_okPf)) if _brPf.exists() else None
+            if _okPf.exists():
+                _shPf.copy(str(_okPf), str(_koPf))
+                _offPf.desactiver(_koPf, "banc d essai")
+                _nsPf = [x.get("nom") for x in
+                         (_cPf.get("/perfect/liste?identity=%s&type=brutes" % _idPf)
+                          .get_json() or {}).get("items", [])]
+                check("assistant : une brute desactivee n est pas proposee",
+                      "_tst_dispo.mp4" in _nsPf and "_tst_eteinte.mp4" not in _nsPf,
+                      str([n for n in _nsPf if n.startswith("_tst")]))
+        finally:
+            _wuPf._save_captions_lib(_savLibPf)
+            _okPf.unlink(missing_ok=True)
+            _koPf.unlink(missing_ok=True)
+            _koPf.with_suffix(_offPf.SUFFIXE).unlink(missing_ok=True)
     finally:
         _wuPf._load_web_users = _vraiUPf
         _brPf.unlink(missing_ok=True)
