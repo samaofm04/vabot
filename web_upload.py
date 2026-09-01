@@ -6088,6 +6088,48 @@ function nxMontageGenBulk(){
   var n=parseInt((document.getElementById('nx-m-bulkn')||{}).value)||5;
   nxMontageGen(Math.max(1,Math.min(10,n)));
 }
+async function nxMontagePerfect(){
+  var btn = document.getElementById('nx-m-perfect');
+  if(btn && btn.disabled) return;
+  // La famille se deduit du montage lui-meme, comme le fait le moteur : un
+  // point de coupe veut dire qu une brute s insere dans un template ; sans
+  // coupe, c est un texte pose sur la brute.
+  var famille = (nxMState.cut != null && nxMState.cut > 0.05) ? 'template' : 'caption';
+  var son = '';
+  try {
+    var el = document.getElementById('nx-m-son');
+    if(el) son = (el.value || '').trim();
+  } catch(e){}
+  if(!nxMState.model){
+    if(typeof showToast === 'function')
+      showToast('Genere d abord le montage, puis valide-le', 'info');
+    return;
+  }
+  var vieux = btn ? btn.textContent : '';
+  if(btn){ btn.disabled = true; btn.textContent = '...'; }
+  var fd = new FormData();
+  fd.set('model', nxMState.model);
+  fd.set('identity', nxMState.identity || '');
+  fd.set('famille', famille);
+  fd.set('brute', nxMState.fid || '');
+  fd.set('source', nxMState.fid || '');
+  if(son) fd.set('son', son);
+  try {
+    var r = await fetch('/noctus/montage_perfect', {method:'POST', body:fd, credentials:'same-origin'});
+    var j = await r.json();
+    if(btn){ btn.disabled = false; btn.textContent = vieux; }
+    if(!j || !j.ok){
+      if(typeof showToast === 'function')
+        showToast((j && j.error) || 'Validation impossible', 'error');
+      return;
+    }
+    if(typeof showToast === 'function')
+      showToast('Rangee dans les Trends de ' + j.identite + ' : ' + j.fichier, 'success');
+  } catch(e){
+    if(btn){ btn.disabled = false; btn.textContent = vieux; }
+    if(typeof showToast === 'function') showToast('Erreur reseau : ' + e.message, 'error');
+  }
+}
 function nxMGenBtns(dis){
   var a=document.getElementById('nx-m-gen'), b=document.getElementById('nx-m-bulk');
   if(a) a.disabled=dis; if(b) b.disabled=dis;
@@ -12395,6 +12437,7 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
       <button class="ce-btn accent" id="nx-m-gen" onclick="nxMontageGen(1)">⬇ Download</button>
       <input id="nx-m-bulkn" type="number" min="1" max="10" value="5" title="Nombre de variantes (1-10)" style="width:48px;height:30px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:7px;text-align:center;font-size:13px;box-sizing:border-box">
       <button class="ce-btn" id="nx-m-bulk" onclick="nxMontageGenBulk()">⬇ Download bulk</button>
+      <button class="ce-btn" id="nx-m-perfect" onclick="nxMontagePerfect()" title="Range CETTE vidéo dans les Trends de la model : elle partira telle quelle par les boutons ★★★ de Discord, sans être remontée. Génère d'abord le montage.">★★★ Valider comme trend</button>
       <button class="ce-btn" id="nx-m-approve" onclick="nxMontageApprove()" title="Marque ce reel « bon pour les VA » : ils le recevront MONTÉ (texte incrusté), généré à la demande — une variante unique par VA. Aucune génération maintenant.">↓ Dispo pour les VA</button>
       <button class="ce-x" onclick="nxMontageClose()">✕</button>
     </div>
@@ -47577,6 +47620,99 @@ def create_app():
             # Sans ce retrait, un assemblage qui échoue (ffmpeg, disque plein)
             # laisserait le reel bloqué « en cours » jusqu'au redémarrage du bot.
             _montage_gen_liberer(_mid_gen)
+
+    @app.route("/noctus/montage_perfect", methods=["POST"])
+    def noctus_montage_perfect():
+        """Range la video qui vient d etre montee dans les Trends de la model.
+
+        C est le geste qui manquait : l editeur savait fabriquer des variantes
+        et te les faire telecharger, mais rien ne les gardait. Ici la video
+        reste sur le serveur, dans le stock que les boutons ⭐⭐⭐ de Discord
+        servent — le VA la recoit prete, sans rien remonter.
+
+        UNE seule video, pas plusieurs variantes du meme couple : chaque envoi
+        Discord passe deja par brute_a_envoyer, qui lui donne une empreinte
+        differente a chaque fois. En fabriquer trois n aurait fait qu occuper
+        le disque.
+
+        La fiche part dans un fichier VOISIN (<stem>.perfect.json), comme le
+        reste des metadonnees de cette base. C est ce qui la fait apparaitre
+        dans la bonne galerie Perfect, et ce qui permet de retrouver de quelle
+        brute et de quelle source elle sort.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        import noctus_web
+        import shutil as _sh_pf
+        import time as _t_pf
+
+        model = noctus_web._safe(request.form.get("model") or "")
+        identity = (request.form.get("identity") or "").strip().lower()
+        famille = (request.form.get("famille") or "").strip().lower()
+        if famille not in _PERFECT_FAMILLES:
+            return jsonify({"ok": False,
+                            "error": "famille inconnue : " + famille[:30]})
+        if identity not in (_list_identities() or []):
+            return jsonify({"ok": False, "error": "identité inconnue"})
+        if not model:
+            return jsonify({"ok": False, "error": "aucun montage à valider"})
+
+        produits = noctus_web.output_paths(model)
+        if not produits:
+            return jsonify({"ok": False,
+                            "error": "aucune vidéo produite — génère d'abord le montage"})
+        src = produits[0]
+
+        dossier = IDENTITIES_DIR / identity / "trends"
+        try:
+            dossier.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"dossier trends : {e}"[:160]})
+
+        # Nom stable et lisible, et jamais d ecrasement : deux validations du
+        # meme couple doivent donner deux fichiers, pas une video qui remplace
+        # l autre en silence.
+        base = _safe_upload_name(f"{famille}_{src.stem}")[:60] or famille
+        cible = dossier / (base + src.suffix)
+        n = 2
+        while cible.exists():
+            cible = dossier / (f"{base}_{n}{src.suffix}")
+            n += 1
+        try:
+            _sh_pf.copy2(str(src), str(cible))
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"copie impossible : {e}"[:160]})
+
+        fiche = {
+            "famille": famille,
+            "brute": str(request.form.get("brute") or "")[:120],
+            "source": str(request.form.get("source") or "")[:120],
+            "model": model,
+            "cree": int(_t_pf.time()),
+        }
+        if not safe_json.write(cible.with_suffix(PERFECT_SUFFIXE), fiche, indent=2):
+            # La video est deja copiee : sans sa fiche elle serait invisible des
+            # galeries Perfect, donc autant ne pas la laisser trainer.
+            try:
+                cible.unlink()
+            except OSError:
+                pass
+            return jsonify({"ok": False, "error": "fiche non écrite — validation annulée"})
+
+        # La consigne / le son a utiliser, s il y en a un : meme fichier voisin
+        # que partout ailleurs, c est lui que Discord envoie avec la video.
+        consigne = (request.form.get("son") or "").strip()[:1800]
+        if consigne:
+            try:
+                cible.with_suffix(".txt").write_text(consigne, encoding="utf-8")
+            except Exception as e:                  # noqa: BLE001
+                log.warning(f"perfect: consigne non ecrite ({e})")
+
+        _invalidate_all_ttl_cache()
+        return jsonify({"ok": True, "fichier": cible.name, "identite": identity,
+                        "famille": famille,
+                        "onglet": "perfect" + famille})
 
     @app.route("/noctus/montage_send", methods=["POST"])
     def noctus_montage_send():
