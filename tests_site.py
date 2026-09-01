@@ -7762,6 +7762,31 @@ try:
         # differentes, et melanger les deux enverrait du non-fini au VA.
         check("trends : elle ne remplace pas la categorie brutes",
               'id="tab-cloudbrutes"' in _hTr and "brutes" in _wuTr.CLOUD_SUBDIRS)
+        # -- Chaque categorie doit CONNAITRE son onglet --------------------------
+        # Sans son entree dans la table, une categorie retombe sur un onglet qui
+        # n existe plus : les liens de la barre laterale ne menent nulle part, et
+        # la galerie affiche la premiere identite du marche au lieu de celle qu on
+        # vient de cliquer. Observe : la barre surlignait ibenhaastrup pendant que
+        # le contenu montrait alicia.
+        for _subTr, _ongTr in (("trends", "cloudtrends"),
+                               ("trends_caption", "perfectcaption"),
+                               ("trends_template", "perfecttemplate")):
+            _hTr2 = _cTr.get("/?lazy=" + _ongTr,
+                             headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+            _liensTr = _reTr.findall(r"\?tab=([a-z_]+)&cloud_" + _subTr
+                                     + r"_ident=[a-z0-9_.\-]+", _hTr2)
+            check("onglet : %s pointe sur %s" % (_subTr, _ongTr),
+                  bool(_liensTr) and all(_t == _ongTr for _t in _liensTr),
+                  str(sorted(set(_liensTr))[:3]))
+        # Et l identite demandee est bien CELLE qu on affiche.
+        _idTr2 = (_wuTr._list_identities() or [""])[0]
+        if _idTr2:
+            _hTr3 = _cTr.get("/?lazy=perfectcaption&cloud_trends_caption_ident=" + _idTr2,
+                             headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+            check("onglet : la galerie affiche l identite cliquee",
+                  ("@" + _idTr2) in _hTr3
+                  and ("vault-item-active' data-ident='" + _idTr2) in _hTr3,
+                  _idTr2)
     finally:
         _wuTr._load_web_users = _vraiTr
 except Exception as _eTr:

@@ -20358,6 +20358,15 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
                 # (chacun porte SON son) -> les 2 bibliotheques de Reel montage
                 "brutes": "cloudbrutes",
                 "templates": "cloudtemplates",
+                # Sans ces trois lignes, les liens de la barre laterale
+                # pointaient sur « cloudoverview » — un onglet qui n existe
+                # plus. La galerie retombait alors sur la premiere identite du
+                # marche au lieu de celle qu on venait de cliquer : la barre
+                # surlignait ibenhaastrup pendant que le contenu affichait
+                # alicia.
+                "trends": "cloudtrends",
+                "trends_caption": "perfectcaption",
+                "trends_template": "perfecttemplate",
                 # Vault PRO : mêmes galeries, dossiers pro_* separes
                 "pro_videos": "provaultreels", "pro_posts": "provaultposts",
                 "pro_stories": "provaultstories",
