@@ -8076,6 +8076,7 @@ function pfAdd(famille, ident){
   var m = document.getElementById('pf-modal');
   if(!m){ if(typeof showToast==='function') showToast('Assistant introuvable','error'); return; }
   m.style.display = 'flex';
+  pfEcouter();
   pfEtape1();
 }
 function pfTitre(t, sous){
@@ -8157,7 +8158,17 @@ async function pfEtape3(genre){
     pfGrille(h);
   }catch(e){ pfVide('Chargement impossible : ' + e.message); }
 }
-document.addEventListener('click', function(ev){
+// L ecoute est posee sur la GRILLE, pas sur le document : la boite de la
+// modale arrete la propagation pour ne pas se fermer quand on clique dedans,
+// et un ecouteur pose plus haut ne voyait donc jamais ces clics — on cliquait
+// une video, il ne se passait rien.
+function pfEcouter(){
+  var g = document.getElementById('pf-grille');
+  if(!g || g.dataset.pfbound === '1') return;
+  g.dataset.pfbound = '1';
+  g.addEventListener('click', pfClic);
+}
+function pfClic(ev){
   var b = ev.target.closest ? ev.target.closest('[data-pfbrute]') : null;
   if(b){
     pfState.brute = b.getAttribute('data-pfbrute') || '';
@@ -8165,8 +8176,8 @@ document.addEventListener('click', function(ev){
     pfEtape2();
     return;
   }
-  var g = ev.target.closest ? ev.target.closest('[data-pfgenre]') : null;
-  if(g){ pfEtape3(g.getAttribute('data-pfgenre') || ''); return; }
+  var g2 = ev.target.closest ? ev.target.closest('[data-pfgenre]') : null;
+  if(g2){ pfEtape3(g2.getAttribute('data-pfgenre') || ''); return; }
   var s = ev.target.closest ? ev.target.closest('[data-pfsource]') : null;
   if(s){
     var src = s.getAttribute('data-pfsource') || '';
@@ -8187,7 +8198,7 @@ document.addEventListener('click', function(ev){
     if(typeof showToast === 'function')
       showToast('Assemble, puis clique « ★★★ Valider comme trend »', 'info');
   }
-});
+}
 
 // ---- Nouvelle identité depuis la Bibliothèque (bouton ＋ des sidebars vault) ----
 var identEditCtx={ident:'',rename:false};
@@ -47879,7 +47890,11 @@ def create_app():
             out.append({
                 "id": fid,
                 "nom": p.name,
-                "vignette": f"/cloud/thumb/{identity}/{sous_dossier}/{p.name}",
+                # _url_nom, comme les galeries : ces fichiers portent des « # »
+                # et des espaces (ils viennent des legendes Instagram). Colle
+                # tel quel dans une adresse, le « # » la COUPE — la vignette
+                # n etait jamais demandee, et la carte restait blanche.
+                "vignette": f"/cloud/thumb/{identity}/{sous_dossier}/{_url_nom(p.name)}",
             })
         return jsonify({"ok": True, "type": genre, "items": out})
 
