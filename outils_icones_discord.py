@@ -26,7 +26,7 @@ Usage
 -----
     python outils_icones_discord.py
 
-Ecrit 13 PNG de 128x128 dans emojis/. Ils sont versionnes : le VPS n a
+Ecrit 19 PNG de 128x128 dans emojis/. Ils sont versionnes : le VPS n a
 donc besoin d aucune bibliotheque de rendu, il lit les fichiers.
 """
 from __future__ import annotations
@@ -131,6 +131,25 @@ class Icone:
         self._detourer(self._pts_etoile(cx, cy, r * 1.46))
         self.polygone(self._pts_etoile(cx, cy, r), couleur)
 
+    def _pts_eclair(self, cx, cy, h):
+        """Un eclair PLEIN et large. Un zigzag trace au trait devient une
+        simple barre a 22 px : c est la surface qui le rend lisible."""
+        l = h * 0.42
+        return [(cx + l * 0.30, cy - h * 0.50),
+                (cx - l * 1.00, cy + h * 0.10),
+                (cx - l * 0.10, cy + h * 0.10),
+                (cx - l * 0.30, cy + h * 0.50),
+                (cx + l * 1.00, cy - h * 0.12),
+                (cx + l * 0.10, cy - h * 0.12)]
+
+    def eclair(self, cx, cy, h, couleur=BLANC, creux=False):
+        """La marque des Flash. `creux` quand elle est posee SUR un trait."""
+        if creux:
+            pts = self._pts_eclair(cx, cy, h)
+            self._detourer([(cx + (x - cx) * 1.9, cy + (y - cy) * 1.5)
+                            for x, y in pts])
+        self.polygone(self._pts_eclair(cx, cy, h), couleur)
+
     def enregistrer(self, nom: str):
         DOSSIER.mkdir(parents=True, exist_ok=True)
         petite = self.im.resize((FINAL, FINAL), Image.LANCZOS)
@@ -139,7 +158,7 @@ class Icone:
         return chemin, chemin.stat().st_size
 
 
-# --- Les treize icones -------------------------------------------------
+# --- Les icones -------------------------------------------------
 # Chacune reprend une forme du site. Les commentaires disent laquelle, pour
 # qu on puisse les retrouver si le site change.
 
@@ -292,6 +311,84 @@ def i_templatebrut():
     return ic
 
 
+def i_templatebanger():
+    """Le Template (cadre + lecture) marque de l etoile : le ⭐ de reelmonte.
+
+    Surtout PAS la note de i_montagebanger : deux icones « note + etoile »
+    dans le meme menu sont deux boutons qu on confond. La variante marquee
+    reprend l icone de SA base, comme capbanger reprend la caption.
+    """
+    ic = Icone()
+    ic.rect(3, 5, 18, 14, 3.4)
+    ic.polygone([(10.2, 9.2), (10.2, 14.8), (15.2, 12)])
+    ic.etoile(19.4, 5.2, 4.4)
+    return ic
+
+
+def i_templateflash():
+    """Le Template dont la lecture devient un ECLAIR : le montage Flash.
+
+    L eclair est DANS le cadre, a la place du triangle. Pose dans un coin il
+    se lisait comme un eclat a 22 px, et il occupait justement le coin ou
+    l etoile doit venir pour la variante marquee.
+    """
+    ic = Icone()
+    ic.rect(3, 5, 18, 14, 3.4)
+    ic.eclair(12, 12, 9.6)
+    return ic
+
+
+def i_templateflashbanger():
+    """Le Flash, marque de l etoile — meme regle que capbanger et brutbanger."""
+    ic = Icone()
+    ic.rect(3, 5, 18, 14, 3.4)
+    ic.eclair(11.4, 12.2, 9.2)
+    ic.etoile(19.4, 5.2, 4.4)
+    return ic
+
+
+def i_templateflashbrut():
+    """Le Flash et la brute, chacun dans SA moitie — comme i_templatebrut."""
+    ic = Icone()
+    ic.rect(2.2, 2.8, 12.4, 9.6, 2.4, ep=2.0)
+    ic.eclair(8.4, 7.6, 6.6)
+    ic.rect(9.0, 14.8, 8.6, 6.6, 1.8, ep=2.0)
+    ic.polygone([(21.4, 15.9), (18.4, 18.1), (21.4, 20.3)])
+    return ic
+
+
+def i_trend():
+    """Les Trends : la courbe qui monte, et sa fleche.
+
+    Pas un empilement de trois etoiles : le bouton en porte deja trois dans
+    son libelle, et a 22 px elles ne feraient qu une tache.
+    """
+    ic = Icone()
+    ic.ligne([(3.2, 16.8), (9.2, 10.8), (13.2, 14.8), (19.4, 8.6)], ep=2.4)
+    ic.polygone([(21.0, 7.0), (21.0, 13.4), (14.6, 7.0)])
+    return ic
+
+
+def i_brutchoix():
+    """La brute qu on CHOISIT : la camera, et la coche qui la valide.
+
+    Chacune dans sa moitie, et la coche creuse son fond : posee sur le
+    boitier elle s y fondait, les deux formes etant blanches.
+    """
+    ic = Icone()
+    ic.rect(2.2, 5.0, 11.6, 9.2, 2.2)
+    ic.polygone([(18.4, 6.6), (14.2, 9.6), (18.4, 12.6)])
+    ic._detourer([(10.6, 22.0), (10.6, 13.2), (23.0, 13.2), (23.0, 22.0)])
+    ic.ligne([(13.0, 18.0), (15.8, 20.8), (21.4, 15.2)], ep=2.6)
+    return ic
+
+
+# vabrutbanger et vacaptionbrut MANQUENT ici, et c est su : elles ont ete
+# dessinees hors de ce fichier (commit b6fab02) et n ont jamais eu de
+# fonction. On ne les reconstruit pas de memoire : le rendu obtenu ne
+# retombait pas sur l existant (etoile et camera placees autrement), et
+# regenerer changerait deux icones deja televersees sur les serveurs, ou
+# Discord garde de toute facon l ancienne image.
 ICONES = {
     "vareelcaption": i_reelcaption,
     "vareelmonte": i_reelmonte,
@@ -306,6 +403,12 @@ ICONES = {
     "vacapbanger": i_capbanger,
     "vamontagebanger": i_montagebanger,
     "vatemplatebrut": i_templatebrut,
+    "vatemplatebanger": i_templatebanger,
+    "vatemplateflash": i_templateflash,
+    "vatemplateflashbanger": i_templateflashbanger,
+    "vatemplateflashbrut": i_templateflashbrut,
+    "vatrend": i_trend,
+    "vabrutchoix": i_brutchoix,
 }
 
 
