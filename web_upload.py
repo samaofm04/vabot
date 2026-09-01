@@ -7995,6 +7995,27 @@ document.addEventListener('DOMContentLoaded', function(){
   }
   document.querySelectorAll('.up-form select[name=identity]').forEach(enhance);
 });
+// ---- Perfect : composer un couple, puis le rouvrir ------------------------
+// Le bouton mene aux BRUTES de la model : une trend part toujours d une brute,
+// et l editeur de montage s ouvre depuis sa carte. Y aller directement evite de
+// demander « et maintenant, ou je clique ? ».
+document.addEventListener('click', function(ev){
+  var b = ev.target.closest ? ev.target.closest('[data-perfectnew]') : null;
+  if(!b) return;
+  var ident = b.getAttribute('data-ident') || '';
+  var url = '?tab=cloudbrutes&cloud_brutes_ident=' + encodeURIComponent(ident);
+  if(typeof vaultGoTo === 'function'){ vaultGoTo(ev, url); }
+  else { window.location.href = url; }
+});
+document.addEventListener('click', function(ev){
+  var b = ev.target.closest ? ev.target.closest('[data-perfectedit]') : null;
+  if(!b) return;
+  var fid = b.getAttribute('data-perfectedit') || '';
+  if(typeof nxMontageOpen === 'function'){ nxMontageOpen(fid); return; }
+  if(typeof showToast === 'function')
+    showToast('Ouvre la vidéo depuis l onglet Trends pour la modifier', 'info');
+});
+
 // ---- Nouvelle identité depuis la Bibliothèque (bouton ＋ des sidebars vault) ----
 var identEditCtx={ident:'',rename:false};
 document.addEventListener('click', function(ev){
@@ -9166,6 +9187,24 @@ document.addEventListener('click',function(e){
   </div>
 </div>
 
+<div class="group" id="grp-perfect">
+  <button class="group-head" onclick="toggleGroup('perfect')">
+    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+    <span class="label">Perfect</span>
+    <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+  </button>
+  <div class="items">
+    <button class="item" id="tab-perfectcaption" onclick="showTab('perfect','perfectcaption','Caption perfect','Des couples brute + texte figés — déjà prêts à poster')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 6.1H3"/><path d="M21 12.1H3"/><path d="M15.1 18H3"/></svg>
+      Caption
+    </button>
+    <button class="item" id="tab-perfecttemplate" onclick="showTab('perfect','perfecttemplate','Template perfect','Des couples brute + son figés, Flash compris — déjà prêts à poster')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+      Template
+    </button>
+  </div>
+</div>
+
 <div class="section-label">Management</div>
 
 <div class="group" id="grp-va">
@@ -9819,6 +9858,14 @@ document.addEventListener('click',function(e){
 <!-- TRENDS : videos finies, pretes a poster -->
 <div class="form-section" id="form-cloudtrends" style="display:none">
 {cloud_trends_html}
+</div>
+
+<!-- PERFECT : des couples brute + texte / brute + son, deja valides -->
+<div class="form-section" id="form-perfectcaption" style="display:none">
+{perfect_caption_html}
+</div>
+<div class="form-section" id="form-perfecttemplate" style="display:none">
+{perfect_template_html}
 </div>
 
 <!-- REEL MONTAGE : modeles CapCut -->
@@ -19868,6 +19915,141 @@ def _vault_core_html() -> str:
 
 
 _VAULT_CORE_CACHE = None
+
+
+#: Ce qu une trend « perfect » retient de sa fabrication. Fichier voisin de la
+#: video, comme les autres metadonnees de cette base (<stem>.txt, .montage.json)
+#: — ranger ca ailleurs obligerait a garder deux choses en phase, et une
+#: suppression de video laisserait l entree orpheline.
+PERFECT_SUFFIXE = ".perfect.json"
+
+#: Les deux familles du menu Perfect. Les FLASH sont rangees avec les templates :
+#: un flash EST un template, avec un rythme different — leur donner un onglet a
+#: part aurait fait chercher au mauvais endroit.
+_PERFECT_FAMILLES = {
+    "caption": ("Caption perfect", "brute + texte figés",
+                "Un couple précis : cette brute, ce texte. Pas de tirage au sort."),
+    "template": ("Template perfect", "brute + son figés, Flash compris",
+                 "Un couple précis : cette brute, ce template. Le son vient du template."),
+}
+
+
+def _perfect_lire(chemin) -> dict:
+    """Ce que dit le fichier voisin d une trend, ou {} s il n y en a pas."""
+    try:
+        d = safe_json.load(chemin.with_suffix("").with_suffix(PERFECT_SUFFIXE), default={})
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _perfect_liste(identity: str, famille: str) -> list:
+    """Les trends validees de cette identite, pour cette famille.
+
+    Une trend deposee A LA MAIN dans l onglet Trends n a pas de fichier voisin :
+    elle n apparait donc dans aucune des deux galeries Perfect, et c est voulu —
+    celles-ci ne montrent que ce qui a ete compose ici.
+    """
+    dossier = IDENTITIES_DIR / (identity or "").lower() / "trends"
+    if not dossier.is_dir():
+        return []
+    out = []
+    for p in sorted(dossier.iterdir()):
+        if not (p.is_file() and p.suffix.lower() in VIDEO_EXTS):
+            continue
+        meta = _perfect_lire(p)
+        if (meta.get("famille") or "") == famille:
+            out.append((p, meta))
+    return out
+
+
+def _render_perfect_html(famille: str) -> str:
+    """Galerie d une famille Perfect : ce qui est deja valide, et de quoi en
+    composer un nouveau.
+
+    Meme forme que les galeries de la Bibliotheque — barre d identites a
+    gauche, contenu a droite — pour qu on ne reapprenne rien.
+    """
+    from flask import request as _req
+    titre, sous_titre, explication = _PERFECT_FAMILLES.get(
+        famille, ("Perfect", "", ""))
+    identities = _marche_prefere(_list_identities() or [])
+    cle = f"perfect_{famille}_ident"
+    selected = (_req.args.get(cle) or "").strip().lower()
+    if selected not in (identities or []):
+        selected = identities[0] if identities else ""
+
+    cotes = []
+    for ident in (_list_identities() or []):
+        n = len(_perfect_liste(ident, famille))
+        actif = " vault-item-active" if ident == selected else ""
+        cotes.append(
+            f"<a href='?tab=perfect{famille}&{cle}={html_escape(ident)}' "
+            f"onclick='return vaultGoTo(event,this.href)' "
+            f"data-no-loader='1' class='vault-item{actif}' "
+            f"data-ident='{html_escape(ident)}' "
+            f"data-market='{identity_market(ident)}' "
+            f"style='{_marche_cache(ident, selected)}'>"
+            f"<div style='flex:1;min-width:0'>"
+            f"<div style='font-weight:700;font-size:14px;display:flex;"
+            f"align-items:center;gap:6px'>"
+            f"<span style='min-width:0;overflow:hidden;text-overflow:ellipsis;"
+            f"white-space:nowrap'>{html_escape(ident.title())}</span>"
+            f"{_market_flag_html(ident)}{_style_badges_html(ident, 11)}</div>"
+            f"</div>"
+            f"<span class='vault-count' style='background:rgba(34,197,94,.15);"
+            f"color:#22c55e;font-size:11px;font-weight:700;padding:2px 7px;"
+            f"border-radius:10px'>{n}</span></a>")
+
+    cartes = []
+    for p, meta in _perfect_liste(selected, famille):
+        fid = f"{selected}|trends|{p.name}"
+        source = html_escape(str(meta.get("source") or "")[:60])
+        brute = html_escape(str(meta.get("brute") or "")[:60])
+        cartes.append(
+            f"<div class='vt-card on' style='padding:0;overflow:hidden'>"
+            f"<img src='/cloud/thumb/{html_escape(selected)}/trends/"
+            f"{html_escape(p.name)}' loading='lazy' decoding='async' "
+            f"style='width:100%;aspect-ratio:9/16;object-fit:cover;display:block'"
+            f" onerror=\"this.style.display='none'\">"
+            f"<div style='padding:9px 11px'>"
+            f"<div style='font-size:12px;font-weight:700;overflow:hidden;"
+            f"text-overflow:ellipsis;white-space:nowrap'>{html_escape(p.name)}</div>"
+            f"<div style='font-size:10.5px;color:#6b7280;margin-top:3px;"
+            f"line-height:1.5'>brute : {brute or '—'}<br>source : {source or '—'}</div>"
+            f"<div style='display:flex;gap:6px;margin-top:8px'>"
+            f"<button type='button' class='ce-btn' data-perfectedit='{html_escape(fid)}' "
+            f"style='flex:1;font-size:11.5px;padding:6px'>✎ Rouvrir</button>"
+            f"</div></div></div>")
+
+    if not cartes:
+        cartes.append(
+            "<div style='grid-column:1/-1;padding:34px;text-align:center;"
+            "color:#6b7280;font-size:13px;line-height:1.6'>"
+            "Rien de validé pour cette model.<br>"
+            "Compose un couple dans l'éditeur, puis valide-le : il atterrira ici "
+            "et partira par le bouton ★★★ de Discord.</div>")
+
+    entete = (
+        f"<div style='display:flex;align-items:center;justify-content:space-between;"
+        f"flex-wrap:wrap;gap:12px;margin-bottom:14px'>"
+        f"<div><h2 style='margin:0 0 4px;font-size:20px;display:flex;"
+        f"align-items:center;gap:9px'>★★★ {html_escape(titre)}"
+        f"<span style='font-size:11px;background:#16a34a;color:#fff;padding:3px 9px;"
+        f"border-radius:8px;font-weight:800'>PRÊT À POSTER</span></h2>"
+        f"<p style='margin:0;color:#888;font-size:12.5px'>{html_escape(explication)}</p></div>"
+        f"<button type='button' class='ce-btn' data-perfectnew='{html_escape(famille)}' "
+        f"data-ident='{html_escape(selected)}' "
+        f"style='background:linear-gradient(135deg,#16a34a,#15803d);color:#fff;"
+        f"border:0;padding:10px 18px;border-radius:10px;font-weight:700;"
+        f"font-size:13px;cursor:pointer'>＋ Composer</button></div>")
+
+    return (
+        entete
+        + "<div class='vault-wrap'><div class='vault-sidebar'>"
+          "<div class='vault-list'>" + "".join(cotes) + "</div></div>"
+          "<div class='vault-main'><div class='vt-grid'>" + "".join(cartes)
+        + "</div></div></div>")
 
 
 def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
@@ -43408,7 +43590,8 @@ _PERM_KEY_TO_TABS = {
     "vault2": {"v2reels", "v2posts", "v2stories", "v2storyctas", "v2pps",
                "v2brutes", "v2drive"},
     # Reel montage = ses 3 bibliotheques (rushs bruts + modeles CapCut + captions)
-    "montage": {"cloudbrutes", "cloudtemplates", "cloudcaptions", "cloudtrends"},
+    "montage": {"cloudbrutes", "cloudtemplates", "cloudcaptions", "cloudtrends",
+                "perfectcaption", "perfecttemplate"},
     # "veille" n'est PAS un onglet de sidebar : c'est un sous-feed DANS la page
     # "Instagram Trends". Le set DOIT contenir "veille" lui-même, sinon
     # _g("veille", ...) affiche « Accès non autorisé » alors qu'on vient de
@@ -44530,6 +44713,8 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{cloud_reels_html}", _lazy("cloudreels"))
         .replace("{cloud_brutes_html}", _lazy("cloudbrutes"))
         .replace("{cloud_trends_html}", _lazy("cloudtrends"))
+        .replace("{perfect_caption_html}", _lazy("perfectcaption"))
+        .replace("{perfect_template_html}", _lazy("perfecttemplate"))
         .replace("{cloud_templates_html}", _lazy("cloudtemplates"))
         .replace("{cloud_captions_html}", _lazy("cloudcaptions"))
         .replace("{cloud_posts_html}", _lazy("cloudposts"))
@@ -45781,6 +45966,8 @@ def create_app():
                 "cloudstoryctas": lambda: _render_cloud_content_html("storyctas", IMAGE_EXTS),
                 "cloudbrutes": lambda: _render_cloud_content_html("brutes", VIDEO_EXTS),
                 "cloudtrends": lambda: _render_cloud_content_html("trends", VIDEO_EXTS),
+                "perfectcaption": lambda: _render_perfect_html("caption"),
+                "perfecttemplate": lambda: _render_perfect_html("template"),
                 "cloudtemplates": lambda: _render_cloud_content_html("templates", VIDEO_EXTS),
                 # bilan : recalculé à chaque ouverture (suit les modifs Facture)
                 "bilan": _render_bilan_html,
