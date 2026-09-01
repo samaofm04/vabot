@@ -1078,7 +1078,12 @@ try:
         return (80, {"FR": 80}) if _dtM.date.fromisoformat(a).day % 2 == 0 else (None, None)
     _gmsM.analytics_for_link = _mixed
     _reset_pay()
-    _pm = _wM._compute_va_pay_report("current")
+    # Sur la quinzaine EN COURS, ce cas depend du calendrier : le 1er du mois
+    # elle ne contient qu'un seul jour, le 1er, que `_mixed` declare illisible
+    # — plus aucun jour lu, donc money=0 et le test tombait un jour par mois.
+    # La quinzaine PRECEDENTE est toujours complete : elle porte forcement des
+    # jours pairs ET impairs, donc du lisible ET de l'illisible.
+    _pm = _wM._compute_va_pay_report("previous")
     _vm = _pm["categories"][0]["vas"][0]
     check("#1/#2 panne GMS -> payload partial=True", _pm["partial"] is True)
     check("#1/#2 jours illisibles comptés (missing>0)", _vm["missing"] > 0)
