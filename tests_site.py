@@ -7870,6 +7870,21 @@ try:
         check("chaine : et Discord la sert au bouton ⭐⭐⭐",
               (_vPf.get("fichier") or "zzz") in
               [p.name for p in _cuPf.trends_for(_idPf, limit=9)])
+
+        # -- Et on peut la LIRE ------------------------------------------------
+        # Les dossiers Trends manquaient a la liste des dossiers video : la
+        # visionneuse ouvrait la video finie dans une <img> et aucune miniature
+        # n etait extraite. A l ecran : « juste une photo bizarre ».
+        _nomPf = _vPf.get("fichier") or "zzz"
+        check("lecture : la carte ouvre la visionneuse en mode VIDEO",
+              ('openLightbox("/cloud/file/%s/trends_caption/%s",true'
+               % (_idPf, _nomPf)) in _hPf,
+              _hPf[max(0, _hPf.find("openLightbox")):][:90])
+        _tvPf = _cPf.get("/cloud/thumb/%s/trends_caption/%s" % (_idPf, _nomPf))
+        check("lecture : la miniature est une vraie image extraite",
+              _tvPf.status_code == 200
+              and "image" in (_tvPf.headers.get("Content-Type") or ""),
+              "%s %s" % (_tvPf.status_code, _tvPf.headers.get("Content-Type")))
         # -- Ce que l assistant PROPOSE ------------------------------------------
         # captions.json[identite] est un DICT (font, style, global_pos, items), pas
         # une liste. Le parcourir directement rendait ses CLES : l ecran proposait
@@ -7915,6 +7930,38 @@ try:
         _shPf.rmtree(_nwPf._models_dir() / _midPf, ignore_errors=True)
 except Exception as _ePf2:
     check("chaine perfect : testable", False, repr(_ePf2)[:200])
+
+# ==============================================================================
+# Une seule liste de dossiers video, et l assistant qui ne pose pas de question
+# inutile
+# ==============================================================================
+try:
+    import web_upload as _wuDv
+    _dvPf = _wuDv.DOSSIERS_VIDEO
+    check("dossiers video : les trois Trends en font partie",
+          {"trends", "trends_caption", "trends_template"} <= set(_dvPf),
+          str(sorted(_dvPf)))
+    # Y verser tout _PRO_SUBDIR_OF ferait passer les PHOTOS pour des videos :
+    # ffmpeg irait extraire une image d un JPEG, la visionneuse ouvrirait une
+    # photo dans un <video>.
+    check("dossiers video : les dossiers d images en sont exclus",
+          not ({"posts", "stories", "profile_pics", "storyctas",
+                "pro_posts", "pro_stories", "pro_profile_pics",
+                "pro_storyctas"} & set(_dvPf)),
+          str(sorted(_dvPf)))
+    _srcDv = open("web_upload.py", encoding="utf-8").read()
+    check("dossiers video : la liste ne vit plus en double",
+          _srcDv.count('subdir in ("videos", "brutes", "templates", "pro_videos")') == 0)
+
+    # L onglet dit deja la famille : dans Caption, un ecran « caption /
+    # template / flash » n avait qu une reponse possible.
+    check("assistant : Caption saute le choix de famille",
+          "if(pfState.famille === 'caption'){ pfEtape3('captions'); return; }" in _srcDv)
+    check("assistant : Template propose template ET flash, pas caption",
+          "Add perfect — 2. Template ou flash ?" in _srcDv
+          and _srcDv.count('data-pfgenre="captions"') == 0)
+except Exception as _eDv:
+    check("dossiers video : testable", False, repr(_eDv)[:200])
 
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")

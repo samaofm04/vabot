@@ -8161,15 +8161,19 @@ async function pfEtape1(){
     pfGrille(h);
   }catch(e){ pfVide('Chargement impossible : ' + e.message); }
 }
+// L onglet dit deja quelle famille on remplit : dans Caption, le choix
+// « caption / template / flash » n avait qu une seule reponse possible et
+// coutait un ecran pour rien. On y saute donc directement a la liste des
+// captions ; seul Template garde un choix, parce qu il en a deux — le
+// template classique et le flash.
 function pfEtape2(){
-  pfTitre('Add perfect — 2. Ce qu on lui associe',
+  if(pfState.famille === 'caption'){ pfEtape3('captions'); return; }
+  pfTitre('Add perfect — 2. Template ou flash ?',
           'Vidéo retenue : ' + pfState.bruteNom);
   var b = document.getElementById('pf-suivant');
   if(b) b.style.display = 'none';
   pfGrille(
-    '<button type="button" class="pf-choix" data-pfgenre="captions">Caption'
-    + '<small>un texte incrusté sur la brute</small></button>'
-    + '<button type="button" class="pf-choix" data-pfgenre="templates">Template'
+    '<button type="button" class="pf-choix" data-pfgenre="templates">Template'
     + '<small>un montage qui apporte son son</small></button>'
     + '<button type="button" class="pf-choix" data-pfgenre="flash">Flash'
     + '<small>un template au rythme rapide</small></button>');
@@ -8177,7 +8181,8 @@ function pfEtape2(){
 async function pfEtape3(genre){
   pfState.genre = genre;
   var noms = {captions:'une caption', templates:'un template', flash:'un flash'};
-  pfTitre('Add perfect — 3. Choisis ' + (noms[genre] || genre),
+  var rang = (pfState.famille === 'caption') ? '2. ' : '3. ';
+  pfTitre('Add perfect — ' + rang + 'Choisis ' + (noms[genre] || genre),
           'Vidéo retenue : ' + pfState.bruteNom);
   pfChargement();
   try{
@@ -18959,6 +18964,21 @@ CLOUD_SUBDIRS = frozenset(
      "trends_caption", "trends_template"} | set(_PRO_SUBDIR_OF.values())
 )
 
+# Les dossiers dont le contenu est une VIDEO. Cette liste vivait en double —
+# une copie decidait la vignette, l autre le lecteur — et les dossiers Trends
+# n avaient ete ajoutes ni a l une ni a l autre : la video finie s ouvrait
+# dans une <img>, donc « juste une photo ». Un seul endroit desormais.
+_BASES_VIDEO = ("videos", "brutes", "templates", "trends",
+                "trends_caption", "trends_template")
+DOSSIERS_VIDEO = frozenset(
+    set(_BASES_VIDEO)
+    # Leurs jumeaux PRO — et EUX SEULS. Prendre tout _PRO_SUBDIR_OF ferait
+    # passer pro_posts et pro_profile_pics pour des videos : ffmpeg irait
+    # extraire une image d un JPEG et la visionneuse ouvrirait une photo
+    # dans un <video>.
+    | {_PRO_SUBDIR_OF[b] for b in _BASES_VIDEO if b in _PRO_SUBDIR_OF}
+)
+
 
 def _vault_subdir(base: str, form=None) -> str:
     """Dossier de destination d'un upload selon le vault d'où il part.
@@ -20431,7 +20451,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         return "<p style='color:#888'>Aucune identité créée.</p>"
     identities = _apply_identity_order(identities)   # ordre custom (drag & drop)
     # Rendu : vignette + badge lecture pour tout dossier video.
-    is_video = subdir in ("videos", "brutes", "templates", "pro_videos")
+    is_video = subdir in DOSSIERS_VIDEO
     # Editeur CapCut (poser la caption) : Reels ET Templates de montage.
     # PAS sur « Video brut » — l'user veut des rushs nus, sans caption ni rien.
     can_montage = subdir in ("videos", "templates")
@@ -46629,7 +46649,7 @@ def create_app():
         rel_key = f"{safe_identity}/{subdir}/{filename}"
         # TOUS les dossiers video (reels, rushs bruts, templates, reels PRO) :
         # sinon la miniature n'est pas extraite et le fallback sert la VIDEO COMPLETE.
-        is_video = subdir in ("videos", "brutes", "templates", "pro_videos")
+        is_video = subdir in DOSSIERS_VIDEO
         thumb = _get_or_create_thumbnail(src, rel_key, is_video)
         if thumb is None or not thumb.exists():
             # Repli. Il servait le fichier ORIGINAL — pour une video, c'est
