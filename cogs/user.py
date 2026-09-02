@@ -5857,10 +5857,10 @@ class ChoixBrutesView(discord.ui.View):
         une autre sans tout recommencer.
     """
 
-    #: Discord plafonne un menu deroulant a 25 entrees, et une planche de plus
-    #: de douze cases devient illisible sur un telephone. C est la plus petite
-    #: des deux limites qui commande.
-    PAR_PAGE = 12
+    #: Aligne sur vignettes.PAR_PLANCHE : la page du menu et la planche
+    #: doivent montrer EXACTEMENT les memes brutes, sinon le numero lu sur
+    #: l image ne designe pas la ligne choisie dans le menu.
+    PAR_PAGE = 20
 
     #: Court, volontairement. Un menu laisse ouvert apres un changement de
     #: model continue de proposer les brutes de l ANCIENNE identite : le
@@ -5912,6 +5912,7 @@ class ChoixBrutesView(discord.ui.View):
         self.clear_items()
         tranche = self._tranche()
         options = []
+        depart = self.page * self.PAR_PAGE
         for i, b in enumerate(tranche, start=1):
             # Le libelle porte le NUMERO de la planche : c est par lui que le
             # VA fait le lien entre ce qu il voit et ce qu il choisit. Le nom
@@ -5921,7 +5922,7 @@ class ChoixBrutesView(discord.ui.View):
             if len(nom) > 60:
                 nom = nom[:57] + "..."
             options.append(discord.SelectOption(
-                label="%d — %s" % (i, nom[:90]), value=str(i - 1)))
+                label="%d — %s" % (depart + i, nom[:90]), value=str(i - 1)))
         if options:
             select = discord.ui.Select(
                 placeholder="Laquelle veux-tu ?", options=options, row=0)
@@ -5943,7 +5944,7 @@ class ChoixBrutesView(discord.ui.View):
         import vignettes
         tranche = self._tranche()
         vignettes.prechauffer(tranche)
-        image = vignettes.planche(tranche)
+        image = vignettes.planche(tranche, depart=self.page * self.PAR_PAGE)
         texte = ("⭐ **%d brute(s) étoilée(s)** pour `%s`"
                  % (len(self.brutes), self.identity))
         if self._pages() > 1:
@@ -5997,7 +5998,7 @@ class ChoixBrutesView(discord.ui.View):
         # prendre une autre — ou la meme avec un autre texte.
         await interaction.response.send_message(
             content=("🎥 Brute **%d** retenue.\nAvec quelle caption ?"
-                     % (rang + 1)),
+                     % (self.page * self.PAR_PAGE + rang + 1)),
             view=ChoixCaptionView(self.cog, self.identity, video),
             ephemeral=True)
 

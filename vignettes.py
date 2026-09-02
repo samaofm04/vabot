@@ -34,7 +34,15 @@ SUFFIXE = ".thumb.jpg"
 HAUTEUR = 240
 
 #: Au-delà, la planche devient illisible et il faut paginer.
-PAR_PLANCHE = 12
+#:
+#: Vingt plutôt que douze : les identités ont entre deux et six brutes
+#: étoilées, et paginer à douze ajoutait deux boutons de navigation qui ne
+#: servaient jamais. La pagination reste, en filet, pour l'identité qui
+#: étoilerait tout son stock — mais elle ne se déclenche plus en usage normal.
+#:
+#: Vingt-cinq est la vraie limite : c'est le nombre d'entrées qu'un menu
+#: déroulant Discord accepte. On reste dessous.
+PAR_PLANCHE = 20
 
 
 def chemin(video) -> Path:
@@ -100,7 +108,7 @@ def prechauffer(videos) -> dict:
     return {"faites": faites, "deja": deja, "ratees": ratees}
 
 
-def planche(videos, colonnes: int = 4) -> bytes | None:
+def planche(videos, colonnes: int = 4, depart: int = 0) -> bytes | None:
     """Assemble les vignettes en UNE image numérotée. Rend les octets JPEG.
 
     Les numéros comptent : ce sont eux que le VA retrouvera dans le menu
@@ -168,7 +176,10 @@ def planche(videos, colonnes: int = 4) -> bytes | None:
         # Le numéro, en blanc sur une pastille sombre : lisible sur une image
         # claire comme sur une image sombre, ce qu'un simple texte blanc n'est
         # pas.
-        etiquette = str(i + 1)
+        # `depart` decale la numerotation d une page a l autre : sans lui, la
+        # page 2 recommencait a 1 alors que la page 1 finissait a 20, et deux
+        # brutes differentes portaient le meme numero.
+        etiquette = str(depart + i + 1)
         try:
             gauche, haut, droite, bas = dessin.textbbox((0, 0), etiquette,
                                                         font=police)
