@@ -50545,6 +50545,30 @@ def create_app():
             return jsonify({"ok": False, "error": motif}), code
         return send_file(str(path), conditional=True)
 
+    @app.route("/api/rig/avatar/<identity>")
+    def rig_avatar(identity):
+        """L'avatar d'une identite, servi au poste.
+
+        Il ne vit pas dans un sous-dossier (data/identities/<ident>/avatar.png,
+        a la racine), donc /api/rig/file ne peut pas l'atteindre. Et
+        /identity/avatar/ demande une session, que le poste n'a pas. Sans
+        cette porte, le parc devait deviner une photo dans profile_pics et
+        affichait une autre tete que le site.
+        """
+        from flask import jsonify, send_file
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        safe = (identity or "").lower().strip()
+        if safe not in _list_identities():
+            return jsonify({"ok": False, "error": "identite inconnue"}), 404
+        chemin = _identity_avatar_path(safe)
+        if not chemin:
+            return jsonify({"ok": False, "error": "pas d avatar"}), 404
+        reponse = send_file(str(chemin), conditional=True)
+        reponse.headers["Cache-Control"] = "public, max-age=3600"
+        return reponse
+
     @app.route("/version")
     def version_du_site():
         """Quelle version du code ce serveur fait-il tourner ?
