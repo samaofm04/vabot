@@ -50599,13 +50599,19 @@ def create_app():
         decide pour les autres. Lire le fichier depuis le poste ne donnerait
         donc que deux identites sur vingt et un -- on rend le resultat de la
         regle, pas ses ingredients. Meme calcul que _markets_json().
+
+        LA MEME LISTE QUE LES PAGES CONTENU, pas _list_identities() : le parc
+        repartit des comptes Instagram reels, donc ni les identites reservees
+        a Jailbreak ni celles de la Bibliotheque 2 (des copies de travail).
+        Les proposer revenait a offrir d'attribuer trente conteneurs a
+        « v2_test ».
         """
         from flask import jsonify
         code = _rig_ok()
         if code != 200:
             return jsonify({"ok": False, "error": "jeton"}), code
         try:
-            marches = {i: identity_market(i) for i in _list_identities()}
+            marches = {i: identity_market(i) for i in _list_content_identities()}
         except Exception as e:
             return jsonify({"ok": False, "error": type(e).__name__}), 500
         return jsonify({"ok": True, "marches": marches})
