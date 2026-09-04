@@ -50562,12 +50562,34 @@ def create_app():
         safe = (identity or "").lower().strip()
         if safe not in _list_identities():
             return jsonify({"ok": False, "error": "identite inconnue"}), 404
+        # LA MEME REGLE QUE LE DASHBOARD, ET POUR LA MEME RAISON.
+        # _identity_avatar_url() en a DEUX : la photo deposee d'abord, sinon
+        # celle du createur MyPuls associe. N'en appliquer qu'une donnait au
+        # parc une autre tete que le site pour toute identite sans photo
+        # deposee -- ibenhaastrup, par exemple. Constate le 04/09/2026.
         chemin = _identity_avatar_path(safe)
-        if not chemin:
-            return jsonify({"ok": False, "error": "pas d avatar"}), 404
-        reponse = send_file(str(chemin), conditional=True)
-        reponse.headers["Cache-Control"] = "public, max-age=3600"
-        return reponse
+        if chemin:
+            reponse = send_file(str(chemin), conditional=True)
+            reponse.headers["Cache-Control"] = "public, max-age=3600"
+            return reponse
+
+        # Vault PRO : ces identites n'existent QUE sur le site, inutile
+        # d'interroger MyPuls (appel reseau qui bloquerait pour rien).
+        if not _is_v2(safe):
+            cid = _mypuls_creator_id_for_identity(safe)
+            if cid:
+                try:
+                    import mypuls
+                    res = mypuls.get_avatar_bytes(cid)
+                    if res.get("ok"):
+                        from flask import Response
+                        r = Response(res["content"],
+                                     mimetype=res.get("content_type", "image/jpeg"))
+                        r.headers["Cache-Control"] = "public, max-age=3600"
+                        return r
+                except Exception:
+                    pass
+        return jsonify({"ok": False, "error": "pas d avatar"}), 404
 
     @app.route("/api/rig/marches")
     def rig_marches():
