@@ -50616,6 +50616,47 @@ def create_app():
             return jsonify({"ok": False, "error": type(e).__name__}), 500
         return jsonify({"ok": True, "marches": marches})
 
+    #: Les actions qui ne PUBLIENT pas.
+    #:
+    #: Le menu Discord melange trois choses : monter un compte (name, pseudo,
+    #: photo, bio), le faire vivre (les reels, stories et posts), et un outil
+    #: de choix manuel. Seule la deuxieme se compte « par jour » -- demander
+    #: « combien de bios par jour » n'a pas de sens.
+    #:
+    #: Le defaut est PUBLICATION : une action ajoutee demain apparaitra donc
+    #: toute seule dans le choix du parc. L'oubli inverse -- la cacher --
+    #: serait invisible, et on chercherait longtemps pourquoi elle manque.
+    _RIG_IDENTITE = {"name", "pseudo", "pp", "bio"}
+    _RIG_OUTIL = {"brutchoix"}
+
+    @app.route("/api/rig/contenus")
+    def rig_contenus():
+        """Les types de contenu, tels que le menu Discord les propose.
+
+        POURQUOI LA SOURCE EST ICI. Le poste doit offrir les memes choix que
+        le menu que les VA utilisent -- « 2 Caption ⭐ et 1 Flash par jour ».
+        Recopier la liste la-bas en ferait une copie qui vieillit : un bouton
+        ajoute au menu manquerait au parc, un bouton retire y resterait
+        proposable, et rien ne le signalerait.
+
+        C'est _JB_ACTIONS_US qui fait foi : c'est la liste REELLEMENT affichee
+        dans les deux marches (voir le commentaire au-dessus d'elle).
+        """
+        from flask import jsonify
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        try:
+            from cogs.user import _JB_ACTIONS_US
+        except Exception as e:
+            return jsonify({"ok": False, "error": type(e).__name__}), 500
+        out = []
+        for cle, libelle, _cmd, _qte in _JB_ACTIONS_US:
+            famille = ("identite" if cle in _RIG_IDENTITE
+                       else "outil" if cle in _RIG_OUTIL else "publication")
+            out.append({"cle": cle, "nom": libelle, "famille": famille})
+        return jsonify({"ok": True, "contenus": out})
+
     @app.route("/version")
     def version_du_site():
         """Quelle version du code ce serveur fait-il tourner ?
