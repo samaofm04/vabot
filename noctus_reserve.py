@@ -46,12 +46,17 @@ import safe_json
 #: Racine du stock. Surchargée par les tests, jamais en production.
 RACINE = Path(os.environ.get("NOCTUS_RESERVE_DIR") or "data/noctus/reserve")
 
-#: Profondeur visée par identité et par famille. Se règle sans toucher au code.
+#: Profondeur visée par identité et par famille. Se règle sans toucher au code
+#: (NOCTUS_RESERVE_PROFONDEUR), mais la valeur par défaut est celle qui compte :
+#: le `.env` est dans le .gitignore, donc lui seul arrive jusqu'au VPS.
 #:
-#: Cinq suffit à rendre tout clic instantané : un clic livre au plus trois
-#: vidéos. Monter ce nombre n'accélère rien de plus — cela ne fait qu'allonger
-#: le temps de remplissage et vieillir le stock.
-PROFONDEUR = max(1, int(os.environ.get("NOCTUS_RESERVE_PROFONDEUR") or "5"))
+#: SIX depuis le 04/09/2026, demandé : « toujours 6 d'avance ». Un clic livre
+#: au plus trois vidéos, donc cinq suffisaient déjà à rendre tout clic
+#: instantané ; le sixième est une marge, pas une accélération. Ne pas monter
+#: beaucoup plus haut : le stock ne va pas plus vite, il vieillit — les
+#: templates et les captions changent tous les jours, et `purger_perimes()`
+#: jette ce qui ne correspond plus.
+PROFONDEUR = max(1, int(os.environ.get("NOCTUS_RESERVE_PROFONDEUR") or "6"))
 
 #: Les familles qui paient une génération. Les autres servent des fichiers
 #: existants et n'ont rien à gagner ici.
