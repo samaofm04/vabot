@@ -50569,6 +50569,25 @@ def create_app():
         reponse.headers["Cache-Control"] = "public, max-age=3600"
         return reponse
 
+    @app.route("/api/rig/marches")
+    def rig_marches():
+        """Le marche de chaque identite, pour le poste qui pilote le parc.
+
+        identity_market.json ne porte que les EXCEPTIONS ; une regle par defaut
+        decide pour les autres. Lire le fichier depuis le poste ne donnerait
+        donc que deux identites sur vingt et un -- on rend le resultat de la
+        regle, pas ses ingredients. Meme calcul que _markets_json().
+        """
+        from flask import jsonify
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        try:
+            marches = {i: identity_market(i) for i in _list_identities()}
+        except Exception as e:
+            return jsonify({"ok": False, "error": type(e).__name__}), 500
+        return jsonify({"ok": True, "marches": marches})
+
     @app.route("/version")
     def version_du_site():
         """Quelle version du code ce serveur fait-il tourner ?
