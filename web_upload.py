@@ -51145,6 +51145,100 @@ def create_app():
                                                 "limite": lim_b}},
         })
 
+    @app.route("/api/rig/clics_propositions")
+    def rig_clics_propositions():
+        """Une proposition d'association PAR GROUPE GetMySocial.
+
+        Chaque groupe est une personne. On rend ses liens, le ou les codes
+        qu'ils visent, ce que MyPuls dit de chacun, et LA proposition : le
+        code majoritaire du groupe. Un groupe dont tous les liens visent le
+        meme code (le cas courant) ne pose aucune question ; un groupe qui en
+        vise plusieurs est signale, c'est la qu'il faut trancher.
+
+        Lecture seule. Rien n'est enregistre ici.
+        """
+        from flask import jsonify
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        try:
+            import mypuls, gms, collections
+            from cogs.clickrecap import _code_suivi, _nom_propre
+        except Exception as e:
+            return jsonify({"ok": False, "error": "%s: %s" % (type(e).__name__, e)}), 500
+
+        suivis = mypuls.api_tracking_links() or []
+        par_code = {}
+        for t in suivis:
+            par_code.setdefault(t.get("code"), t)
+
+        try:
+            tous = gms.list_all_links(max_pages=50) or {}
+            liens = tous.get("links") or []
+            groupes = {str(g.get("id")): str(g.get("name") or "")
+                       for g in (gms.groups_via_api() or [])}
+        except Exception as e:
+            return jsonify({"ok": False,
+                            "error": "GetMySocial : %s" % type(e).__name__}), 502
+
+        filtre = (request.args.get("groupe") or "").strip().lower()
+        par_groupe = collections.OrderedDict()
+        for l in liens:
+            if not isinstance(l, dict):
+                continue
+            gid = str(l.get("group_id") or "")
+            gnom = groupes.get(gid, "")
+            if not gnom:
+                continue                      # « Ungrouped » : rien a proposer
+            if filtre and filtre not in gnom.lower():
+                continue
+            d = par_groupe.setdefault(gid, {"groupe": gnom, "liens": []})
+            dest = str(l.get("url") or "").strip()
+            d["liens"].append({
+                "nom": _nom_propre(l.get("display_name") or ""),
+                "shortcode": str(l.get("shortcode") or ""),
+                "destination": dest,
+                "code": _code_suivi(dest),
+                "actif": str(l.get("status") or "") == "active",
+            })
+
+        # Combien de groupes visent le meme code : c'est ce partage qui fait
+        # afficher les memes abonnes a plusieurs personnes.
+        vise_par = collections.defaultdict(set)
+        for gid, d in par_groupe.items():
+            for x in d["liens"]:
+                if x["code"]:
+                    vise_par[x["code"]].add(d["groupe"])
+
+        out = []
+        for gid, d in par_groupe.items():
+            codes = collections.Counter(x["code"] for x in d["liens"] if x["code"])
+            propose = codes.most_common(1)[0][0] if codes else ""
+            t = par_code.get(propose)
+            out.append({
+                "groupe_id": gid, "groupe": d["groupe"],
+                "nb_liens": len(d["liens"]),
+                "liens": d["liens"],
+                "codes_vus": sorted(codes),
+                "plusieurs_codes": len(codes) > 1,
+                "propose": propose,
+                "suivi": ({"code": t.get("code"), "nom": t.get("nom"),
+                           "abonnes": t.get("abonnes"), "nouveaux": t.get("nouveaux"),
+                           "visites": t.get("visites")} if t else None),
+                # Ce code sert-il deja a quelqu'un d'autre ? Si oui, les
+                # abonnes affiches ne sont pas ceux de cette personne seule.
+                "partage_avec": sorted(x for x in vise_par.get(propose, set())
+                                       if x != d["groupe"]),
+            })
+
+        out.sort(key=lambda x: (not x["plusieurs_codes"],
+                                not x["partage_avec"], x["groupe"].lower()))
+        return jsonify({
+            "ok": True, "groupes": len(out),
+            "a_trancher": sum(1 for x in out if x["plusieurs_codes"] or x["partage_avec"]),
+            "propositions": out,
+        })
+
     @app.route("/api/rig/clics_liaison")
     def rig_clics_liaison():
         """Qui est rattache a quel lien de suivi, et par quelle regle.
