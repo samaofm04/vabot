@@ -3178,6 +3178,13 @@ def api_tracking_links(force: bool = False) -> list:
             "code": code,
             "nom": str(it.get("name") or "").strip(),
             "creator_id": it.get("creator_id"),
+            # L'ADRESSE COMPLETE. Un code n'est unique QUE dans une creatrice :
+            # « c47 » designe cinq liens differents selon la modele, et prendre
+            # le premier venu collait des campagnes SFS aux VA. L'URL porte le
+            # pseudo -- « onlyfans.com/<pseudo>/c88 » -- soit exactement la
+            # forme d'une destination GetMySocial. Le rapprochement se fait
+            # donc sans table intermediaire, et sans ambiguite possible.
+            "url": str(it.get("url") or "").strip(),
             "abonnes": it.get("subscribers_total"),
             "abonnes_periode": it.get("subscribers_period"),
             "nouveaux": it.get("new_subscribers"),
