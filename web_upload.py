@@ -19537,20 +19537,23 @@ document.addEventListener('click', function(e){
       wrap.style.pointerEvents = '';
     });
 });
-// Pré-chauffe les autres périodes en arrière-plan -> les clics suivants sont instantanés
-setTimeout(function(){
-  if(!document.getElementById('home-dash-wrap')) return;
-  var periods = ['today', 'yesterday', 'month'];
-  var i = 0;
-  function warm(){
-    if(i >= periods.length) return;
-    var p = periods[i]; i++;
-    fetch('/home/overview?home_period=' + p)
-      .then(function(){ setTimeout(warm, 2500); })
-      .catch(function(){ setTimeout(warm, 2500); });
-  }
-  warm();
-}, 4000);
+/* LE PRÉ-CHAUFFAGE A ÉTÉ RETIRÉ. Il demandait /home/overview pour « today »,
+   « yesterday » et « month » quatre secondes après CHAQUE chargement de page,
+   sans condition — le div qu'il teste est écrit en dur dans la coquille, donc
+   toujours présent.
+
+   Chacune de ces trois périodes est une plage de dates différente : aucun
+   cache n'est partagé avec celle qui est affichée. Un rendu de tableau de
+   bord coûte 1 GET /creators + 16 GET stats + 16 GET revenue-by-day, soit
+   ~33 requêtes ; trois périodes de plus en font ~129 pour UNE visite, en
+   douze secondes. Le quota de l'API MyPuls est de 60 par minute (en-tête
+   x-ratelimit-limit, mesuré le 05/09/2026), et on l'a vu passer de 59 à 0 en
+   moins de 75 secondes sans que personne ne clique.
+
+   Ce qu'on perd : le premier clic sur une autre période attend son calcul.
+   Ce qu'on gagne : l'API répond encore quand on en a besoin — et, comme les
+   caches ne s'écrivaient pas en cas d'erreur, un seul 429 empêchait tout
+   cache de se former et la saturation s'entretenait elle-même. */
 
 async function pushAllReels(form){
   const slots = Array.from(form.querySelectorAll('#reel-slots-container .reel-slot'));
@@ -59927,12 +59930,19 @@ def start_in_thread():
                         pass
             except Exception as _e_wh:
                 print(f"[warm-home] {_e_wh}", flush=True)
-            # DOIT rester <= le TTL du dashboard home (_arg_cached 60 s) : sinon le
-            # cache expirait ~180 s avant la chauffe suivante et le 1er visiteur de
-            # chaque minute repayait l'appel. 55 s garde l'accueil (période par
-            # défaut) toujours chaud. Le rendu lit des données MyPuls déjà en cache,
-            # donc la chauffe ne déclenche pas d'appel réseau supplémentaire.
-            _t_wh.sleep(55)
+            # CETTE DERNIÈRE PHRASE ÉTAIT FAUSSE, et elle a coûté cher.
+            #
+            # « Le rendu lit des données MyPuls déjà en cache, donc la chauffe
+            # ne déclenche pas d'appel réseau supplémentaire » — les caches
+            # MyPuls durent CINQ minutes, la chauffe repassait toutes les 55 s :
+            # environ un tour sur trois retapait vraiment l'API, soit ~33
+            # requêtes (1 /creators + 16 stats + 16 revenue-by-day), 24 h/24,
+            # même sans un seul visiteur. Le quota est de 60 par minute.
+            #
+            # On s'aligne donc sur le TTL des données, pas sur celui du HTML.
+            # L'accueil peut avoir jusqu'à 5 minutes ; ses chiffres viennent
+            # de MyPuls, qui ne les rafraîchit pas plus vite de toute façon.
+            _t_wh.sleep(300)
     try:
         threading.Thread(target=_warm_home, daemon=True, name="warm-home").start()
         print("[warm-home] préchauffage de l'accueil armé", flush=True)

@@ -286,6 +286,20 @@ def api_revenue_by_day(creator_id, date_from: str = "", date_to: str = "") -> di
 _API_OVERVIEW_CACHE: Dict[str, Any] = {}
 _API_OVERVIEW_TTL = 300  # 5 min
 
+#: REPOS APRES UN AGREGAT PARTIEL.
+#:
+#: Un agregat ampute (une creatrice en 429 ou en timeout) n'etait PAS mis en
+#: cache, pour ne pas afficher un total partiel comme s'il etait complet. La
+#: precaution est juste, la consequence ne l'etait pas : sans cache, le rendu
+#: suivant relancait les trente-trois requetes, qui retombaient sur la meme
+#: minute saturee, qui produisait un nouvel agregat partiel. La saturation
+#: s'entretenait elle-meme, et le premier 429 suffisait a l'installer.
+#:
+#: On garde donc le resultat -- AVEC ses drapeaux `errors` et `stale`, que
+#: l'ecran affiche deja -- mais tres brievement : de quoi absorber la rafale
+#: de rendus d'une meme page sans figer une valeur incomplete.
+_API_PARTIEL_TTL = 45
+
 # OnlyFans marché US (ids MyPuls). Le reste des comptes OnlyFans = marché FR.
 OF_US_CREATOR_IDS = {3107, 3108}   # Jessye, Khloe
 
@@ -303,8 +317,13 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
     _excl = {re.sub(r"[^a-z0-9]", "", str(x).lower()) for x in (exclude or set())}
     key = f"{date_from}|{date_to}|{eur_usd}|{','.join(sorted(_excl))}"
     hit = _API_OVERVIEW_CACHE.get(key)
-    if hit and not force and (_t.time() - hit[0]) < _API_OVERVIEW_TTL:
-        return hit[1]
+    if hit and not force:
+        _age = _t.time() - hit[0]
+        _ttl = (_API_PARTIEL_TTL
+                if (hit[1].get("errors") or hit[1].get("stale"))
+                else _API_OVERVIEW_TTL)
+        if _age < _ttl:
+            return hit[1]
     if not api_configured():
         return {"ok": False, "error": "Token API MyPuls absent"}
     creators = api_creators_cached(force=force)
@@ -421,14 +440,14 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
            "types_hors": {"montant": round(hors_type["montant"], 2),
                           "libelles": hors_type["libelles"]},
            "creators": per_creator, "errors": errors, "stale": stale}
-    # un agrégat AMPUTÉ (créatrice en 429/timeout) n'est jamais mis en cache :
-    # sinon un total partiel s'affichait comme complet pendant 5 minutes.
-    # Pareil pour un agrégat contenant du STALE : on veut retenter vite les
-    # créatrices en erreur (leurs derniers relevés comblent en attendant).
-    if not errors and not stale:
-        _API_OVERVIEW_CACHE[key] = (_t.time(), out)
-        if len(_API_OVERVIEW_CACHE) > 40:
-            _API_OVERVIEW_CACHE.clear()
+    # UN AGRÉGAT AMPUTÉ EST GARDÉ, MAIS BRIÈVEMENT (45 s au lieu de 5 min).
+    # Ne rien garder du tout relançait les trente-trois requêtes au rendu
+    # suivant, sur la même minute saturée : la panne se réalimentait. Le
+    # résultat part avec ses drapeaux `errors` / `stale`, que l'écran affiche
+    # — un total partiel ne peut donc pas passer pour complet.
+    _API_OVERVIEW_CACHE[key] = (_t.time(), out)
+    if len(_API_OVERVIEW_CACHE) > 40:
+        _API_OVERVIEW_CACHE.clear()
     return out
 
 
@@ -448,8 +467,13 @@ def api_revenue_series(date_from: str, date_to: str, eur_usd: float = 1.14) -> d
     import time as _t
     key = f"{date_from}|{date_to}|{eur_usd}"
     hit = _API_SERIES_CACHE.get(key)
-    if hit and (_t.time() - hit[0]) < _API_SERIES_TTL:
-        return hit[1]
+    if hit:
+        # Même règle que l'agrégat : une série amputée ne vaut que 45 s, une
+        # série complète cinq minutes.
+        _ttl = (_API_PARTIEL_TTL if hit[1].get("error") or hit[1].get("errors")
+                else _API_SERIES_TTL)
+        if (_t.time() - hit[0]) < _ttl:
+            return hit[1]
     if not api_configured():
         return {"ok": False, "error": "Token API MyPuls absent"}
     creators = api_creators_cached()
@@ -494,13 +518,11 @@ def api_revenue_series(date_from: str, date_to: str, eur_usd: float = 1.14) -> d
            "errors": errors}
     if not days:
         out["error"] = "; ".join(errors) or "Aucune donnée"
-    # Jamais d'échec en cache — et jamais de série AMPUTÉE non plus : une
-    # créatrice en 429/timeout laissait `days` non vide, donc ok=True, donc la
-    # courbe partielle était servie 5 minutes comme si elle était complète.
-    # api_overview refuse déjà ce cas pour la même raison (« un total partiel
-    # s'affichait comme complet ») ; c'était un oubli, pas un compromis.
-    # Sans cache, l'appel suivant retente les créatrices manquantes.
-    if out["ok"] and not errors:
+    # Une série AMPUTÉE est gardée 45 s, pas 5 minutes : servir une courbe
+    # partielle comme si elle était complète serait faux, mais ne rien garder
+    # faisait retenter seize requêtes à chaque rendu, sur la minute même où
+    # l'API venait de refuser. Un échec franc, lui, n'est jamais mis en cache.
+    if out["ok"]:
         _API_SERIES_CACHE[key] = (_t.time(), out)
         if len(_API_SERIES_CACHE) > 40:
             _API_SERIES_CACHE.clear()
@@ -509,7 +531,14 @@ def api_revenue_series(date_from: str, date_to: str, eur_usd: float = 1.14) -> d
 
 SFS_INBOX_FILE = DATA_DIR / "sfs_inbox.json"
 _SFS_INBOX_CACHE: Dict[str, Any] = {}
-_SFS_INBOX_TTL = 120
+#: LE CACHE DOIT COUVRIR L'INTERVALLE DES DEMANDEURS, sinon il ne sert a rien.
+#: Le navigateur redemande l'inbox toutes les 180 s et le cache durait 120 s :
+#: il etait TOUJOURS expire a l'arrivee du poll, donc chaque onglet ouvert
+#: payait 16 requetes reelles toutes les trois minutes -- environ 5 par minute,
+#: en permanence, sur un quota de 60. Le collecteur de fond (force=True, toutes
+#: les 300 s) est le seul qui doive vraiment aller chercher ; les navigateurs
+#: lisent ce qu'il a rapporte.
+_SFS_INBOX_TTL = 300
 
 
 def api_sfs_inbox(force: bool = False) -> dict:
