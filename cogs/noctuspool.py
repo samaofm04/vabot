@@ -37,7 +37,14 @@ from discord.ext import commands, tasks
 
 import noctus_reserve as reserve
 
+import logging
 import os
+
+#: LE SILENCE ETAIT LE VRAI DEFAUT. Les deux `except Exception` de ce module
+#: sont voulus -- une panne de remplissage ne doit jamais tuer le bot -- mais
+#: taire l'erreur a laisse le remplisseur inerte sans que rien ne l'indique.
+#: On rend la main, ET on ecrit pourquoi.
+log = logging.getLogger("noctuspool")
 
 #: Par DEFAUT il tourne en permanence : le stock se reconstitue au fil de sa
 #: consommation, donc il n'est jamais vide au moment ou un VA clique. Un
@@ -302,9 +309,22 @@ class NoctusPool(commands.Cog):
             import noctus_web
             if not noctus_web.setup_ok():
                 return                       # ni Node ni ffmpeg : rien à faire
-            from cogs import user as u
-            identites = sorted(u._list_identities())
+            # LES IDENTITES VIENNENT DE web_upload, PAS DE cogs.user.
+            #
+            # `cogs.user._list_identities` n'a jamais existe : cette ligne
+            # levait AttributeError a chaque tour, l'`except` l'avalait, et le
+            # remplisseur rendait la main sans rien fabriquer. Il etait
+            # inerte, et rien ne le disait. Constate le 05/09/2026, apres
+            # l'avoir charge : la reserve restait a zero, moteur allume.
+            #
+            # `_list_content_identities` et pas `_list_identities` : les
+            # identites reservees a Jailbreak et les copies de travail (v2_)
+            # ne sont pas servies aux VA. Fabriquer six variantes pour
+            # « v2_test » couterait des heures de machine pour personne.
+            import web_upload
+            identites = sorted(web_upload._list_content_identities())
         except Exception:
+            log.exception("[noctuspool] impossible de lister les identites")
             return
         if not identites:
             return
@@ -328,7 +348,7 @@ class NoctusPool(commands.Cog):
                     ecartees.add(case)
                 await asyncio.sleep(REPOS_S)
         except Exception:
-            pass
+            log.exception("[noctuspool] tour de remplissage interrompu")
         finally:
             self._occupe = False
 

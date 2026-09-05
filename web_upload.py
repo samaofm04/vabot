@@ -50813,7 +50813,8 @@ def create_app():
         from cogs import user as u
         import brutes_off as _off
         sortie = {}
-        cibles = [identite] if identite else sorted(u._list_identities())
+        cibles = ([identite] if identite
+                  else sorted(_list_content_identities()))
         for i in cibles:
             def _n(f, *a, **k):
                 try:
