@@ -253,7 +253,11 @@ def compter(identite: str, famille: str, emp: str | None = None) -> int:
 #:
 #: Couper le remplisseur (MAIN_COGS) ne suffisait PAS : les cases déjà
 #: pleines auraient continué d'être servies. Il faut les deux robinets.
-ACTIF = False
+#:
+#: RALLUMEE le 05/09 une fois le chemin réparé (d0458d9) : le verdict
+#: d'assemblage voyage désormais avec la vidéo, donc une variante servie
+#: depuis le stock avertit le VA comme le ferait une génération fraîche.
+ACTIF = True
 
 
 def prendre(identite: str, famille: str, emp: str | None = None,
@@ -270,8 +274,12 @@ def prendre(identite: str, famille: str, emp: str | None = None,
     """
     if not ACTIF:
         return None, ""
+    # « repli » absent = fiche d'AVANT le correctif du 05/09 : on ignore si
+    # cette variante est un montage ou un template nu, donc on ne la sert pas.
+    # Une fiche ecrite depuis porte toujours la cle, meme a False.
     candidats = [(m, j, f) for m, j, f in _fiches_libres(identite, famille)
-                 if emp is None or f.get("empreinte") == emp]
+                 if (emp is None or f.get("empreinte") == emp)
+                 and "repli" in (f.get("recette") or {})]
     if not candidats:
         return None, ""
     random.shuffle(candidats)
