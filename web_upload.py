@@ -52896,24 +52896,40 @@ def create_app():
             # collé à la place, par exemple. Une clé fausse s'affichait donc
             # « OK », et ne se signalait qu'en cassant un appel sur deux, des
             # heures plus tard. On exige du JSON qui dit « authenticated ».
+            # UNE SEULE CHAINE DE DECISION, pas un « if » suivi d'un
+            # « elif » qui reparle du meme cas. Le premier jet posait le bon
+            # message sur un 200 non authentifie, puis un « elif not etat »
+            # final le remplacait par « HTTP 200 » -- un diagnostic qui ne dit
+            # rien, devant une cle dont on ne sait toujours pas ce qu'elle a.
             etat = False
-            if rep.status_code == 200:
-                try:
-                    _j = rep.json()
-                    etat = bool(isinstance(_j, dict) and _j.get("authenticated"))
-                except Exception:
-                    etat = False
-                if not etat:
-                    detail = ("réponse non-JSON — ce n'est pas un X-API-TOKEN "
-                              "(le jeton est dans ton profil MyPuls, pas dans les cookies)")
             if rep.status_code == 401:
-                detail = "clé refusée (401)"
+                detail = "clé refusée (401) — vérifie la copie, elle est peut-être tronquée"
             elif rep.status_code == 403:
                 detail = "hors périmètre (403) — il faut un compte owner ou team leader"
             elif rep.status_code == 429:
-                detail = "quota atteint au moment du test — la clé est peut-être bonne"
-            elif not etat:
+                detail = "quota atteint au moment du test — la clé est peut-être bonne, retente"
+            elif rep.status_code != 200:
                 detail = "HTTP %s" % rep.status_code
+            else:
+                corps = None
+                try:
+                    corps = rep.json()
+                except Exception:
+                    corps = None
+                if isinstance(corps, dict) and corps.get("authenticated"):
+                    etat = True
+                elif corps is None:
+                    # MyPuls a renvoye du HTML avec un code 200 : c'est sa page
+                    # de connexion. Le jeton n'en est pas un.
+                    detail = ("MyPuls a répondu par une page web, pas par l'API — "
+                              "ce n'est pas un X-API-TOKEN. Copie-le depuis ton "
+                              "profil MyPuls, champ « Votre Clé API », avec le "
+                              "bouton copier.")
+                else:
+                    # Du JSON, mais pas authentifie : la cle existe et n'est
+                    # pas acceptee. Ce n'est pas la meme chose qu'un cookie.
+                    detail = ("l'API a répondu sans authentifier la clé : %s"
+                              % str(corps)[:120])
         except Exception as e:
             detail = "injoignable : %s" % type(e).__name__
         mypuls._noter_cle(r.get("id"), ok=etat, erreur=("" if etat else detail))
@@ -52977,14 +52993,21 @@ def create_app():
                 code = 0
                 rep = None
             # Même exigence qu'à l'ajout : du JSON authentifié, pas un 200.
-            ok = False
+            # Même exigence, et le même soin à DIRE LAQUELLE des deux
+            # façons de rater : une page web n'est pas un JSON qui refuse.
+            ok, pourquoi = False, ""
             if code == 200:
                 try:
                     _j = rep.json()
-                    ok = bool(isinstance(_j, dict) and _j.get("authenticated"))
                 except Exception:
-                    ok = False
-            mot = ({200: "OK" if ok else "pas une clé d'API (page HTML)",
+                    _j = None
+                if isinstance(_j, dict) and _j.get("authenticated"):
+                    ok = True
+                elif _j is None:
+                    pourquoi = "page web, pas l'API"
+                else:
+                    pourquoi = "non authentifiée"
+            mot = ({200: "OK" if ok else pourquoi,
                     401: "refusée", 403: "hors périmètre",
                     429: "quota atteint", 0: "injoignable"}
                    .get(code, "HTTP %s" % code))
