@@ -347,6 +347,17 @@ def _call_tool_brut(tool_name: str, args: Optional[dict] = None,
     recrée et on réessaie UNE fois."""
     if not get_api_key():
         return {"ok": False, "error": "Clé API GetMySocial non configurée"}
+    _reste = pause_restante()
+    if _reste > 0:
+        # « Do not retry before then » : on n'ouvre meme pas la connexion.
+        # Continuer a cogner sur une porte fermee a fait exactement ca toute
+        # la journee - chaque ouverture de la page relancait quatre-vingt-douze
+        # appels, tous refuses, qui ne faisaient qu'entretenir le refus.
+        return {"ok": False,
+                "error": "Quota GetMySocial epuise — reprise vers %s (%d min)"
+                         % (time.strftime("%H:%M",
+                                          time.localtime(time.time() + _reste)),
+                            _reste // 60)}
     s = _get_session()
     if s is None:
         return {"ok": False, "error": "Impossible d'initialiser la session MCP"}
@@ -372,6 +383,11 @@ def _call_tool_brut(tool_name: str, args: Optional[dict] = None,
         # Depuis une PAGE : 1 seul retry court — une page qui attend 30 s par appel
         # gèle un thread du serveur web (cause du 524 « site down »).
         _gms_note_429()
+        _noter_refus(r.text or "")
+        if pause_restante() > 0:
+            # Budget du jour epuise : ni sommeil, ni reprise. Le message de
+            # l'API porte l'heure de retour, on la rend telle quelle.
+            return {"ok": False, "error": (r.text or "")[:300]}
         _max, _sleeps = (3, (2.0, 5.0, 9.0)) if _gms_is_bulk() else (1, (1.0,))
         if _429 < _max:
             time.sleep(_sleeps[_429])
@@ -430,6 +446,9 @@ def _call_tool_brut(tool_name: str, args: Optional[dict] = None,
 # Une cle qui echoue en SERIE sort donc de la rotation, et ce qui s'est passe
 # reste lisible.
 
+_re_quota = re.compile(r"retry after (\d+)\s*s", re.I)
+_re_jour = re.compile(r"today:\s*(\d+)", re.I)
+
 _SANTE = {}                      # cle -> {"echecs", "jusqu", "dernier", "quand"}
 _SANTE_LOCK = _threading.Lock()
 SEUIL_ECHECS = 3                 # echecs CONSECUTIFS avant mise a l'ecart
@@ -463,6 +482,76 @@ def noter_cle(cle: str, ok: bool, message: str = "") -> None:
 
 
 _REPLIS = {"n": 0, "quand": 0.0}    # dashboard reparti sur la cle de paie
+
+# ============ Le quota JOURNALIER ============
+#
+# On a longtemps cru a une limite par minute, et toute l'architecture est
+# batie la-dessus : rotation de cles, semaphores, backoff court. Le message
+# de refus dit autre chose, en toutes lettres :
+#
+#   Error 429 (rate_limit_exceeded): RATE_LIMITED: retry after 25794s.
+#   Do not retry before then. Requests remaining this minute: 117, today: 0.
+#
+# Cent dix-sept requetes disponibles cette minute-la, et ZERO pour la
+# journee. Ce n'est pas un pic a lisser, c'est un budget epuise pour sept
+# heures. Reessayer ne fait que garder la porte fermee : on obeit.
+_PAUSE = {"jusqu": 0.0, "raison": "", "restant_jour": None}
+
+
+def _noter_refus(message: str) -> None:
+    """Lit « retry after N » et « today: N » dans un refus, et se tait jusque-la.
+
+    Seules les longues pauses arment le disjoncteur : un « retry after 17s »
+    est un pic de debit, que le backoff existant absorbe tres bien. Au-dela de
+    deux minutes, c'est le budget du jour, et il n'y a rien a attendre.
+    """
+    txt = str(message or "")
+    m = _re_quota.search(txt)
+    if not m:
+        return
+    try:
+        secondes = int(m.group(1))
+    except Exception:
+        return
+    reste = None
+    mj = _re_jour.search(txt)
+    if mj:
+        try:
+            reste = int(mj.group(1))
+        except Exception:
+            reste = None
+    if secondes < 120:
+        return
+    with _SANTE_LOCK:
+        _PAUSE["jusqu"] = time.time() + min(secondes, 86400)
+        _PAUSE["raison"] = txt[:200]
+        _PAUSE["restant_jour"] = reste
+
+
+def pause_restante() -> int:
+    """Secondes avant de pouvoir rappeler. 0 = la voie est libre."""
+    with _SANTE_LOCK:
+        j = _PAUSE["jusqu"]
+    return max(0, int(j - time.time())) if j else 0
+
+
+def etat_quota() -> dict:
+    """De quoi l'AFFICHER : combien de temps encore, et ce qu'il restait."""
+    reste = pause_restante()
+    with _SANTE_LOCK:
+        raison, jour = _PAUSE["raison"], _PAUSE["restant_jour"]
+    return {"pause_s": reste,
+            "reprise": time.strftime("%H:%M", time.localtime(time.time() + reste))
+                       if reste else "",
+            "restant_jour": jour, "raison": raison}
+
+
+def _quota_libere() -> None:
+    """Un appel qui passe prouve que la pause est finie."""
+    with _SANTE_LOCK:
+        if _PAUSE["jusqu"]:
+            _PAUSE["jusqu"] = 0.0
+            _PAUSE["raison"] = ""
 
 
 def replis_principale() -> dict:
@@ -513,6 +602,10 @@ def _call_tool(tool_name: str, args: Optional[dict] = None, _retry: bool = True,
     cle = _effective_key()
     res = _call_tool_brut(tool_name, args, _retry=_retry, _429=_429)
     try:
+        if res.get("ok"):
+            _quota_libere()
+        else:
+            _noter_refus(res.get("error") or "")
         noter_cle(cle, bool(res.get("ok")), res.get("error") or "")
     except Exception:
         pass                     # l'instrumentation ne doit jamais casser l'appel

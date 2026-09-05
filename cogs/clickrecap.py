@@ -1018,8 +1018,20 @@ class ClickRecap(commands.Cog):
                 inline=False)
 
         if all_none:
+            # « ne repond pas » envoyait chercher un probleme reseau. Neuf
+            # fois sur dix c'est le budget du jour qui est epuise, et l'API
+            # dit elle-meme a quelle heure il revient.
+            _quota = ""
+            try:
+                _q = gms.etat_quota()
+                if _q.get("pause_s"):
+                    _quota = (" Daily quota exhausted — back around **%s**. "
+                              "Nothing to retry until then." % _q["reprise"])
+            except Exception:
+                pass
             emb.add_field(name="⚠️ No data",
-                          value="GetMySocial is not responding right now.",
+                          value=("GetMySocial is not responding right now.%s"
+                                 % _quota),
                           inline=False)
         elif not ids:
             # board OK mais 0 lien : groupe reellement vide OU config perimee.

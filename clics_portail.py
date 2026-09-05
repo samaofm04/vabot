@@ -760,7 +760,10 @@ def register(app, deps):
         hit = _CACHE.get((cle, vue))
         if hit and (time.time() - hit[0]) < TTL_RENDU:
             _noter_vue(jeton)
-            return Response(hit[1], mimetype="text/html; charset=utf-8")
+            # LE STATUT VOYAGE AVEC LA PAGE. Une page d'echec resservie en
+            # 200 dit « tout va bien » a tout ce qui ne lit pas le texte.
+            return Response(hit[1], status=(hit[2] if len(hit) > 2 else 200),
+                            mimetype="text/html; charset=utf-8")
 
         # `construire` rend (embed, donnees) — les donnees ne peuvent pas
         # voyager sur l'embed, discord.Embed declare __slots__.
@@ -778,11 +781,29 @@ def register(app, deps):
             # ON NE MONTRE PAS DE ZEROS. Une source injoignable rend un
             # tableau vide, qui se lit « personne n'a rien fait » — c'est
             # faux, et c'est pire que pas de page du tout.
-            return Response(
-                _page("Rapport indisponible",
-                      "La source n'a pas répondu. Réessaie dans quelques minutes.",
-                      [], time.strftime("%d/%m %H:%M")),
-                status=503, mimetype="text/html; charset=utf-8")
+            #
+            # MAIS ON DIT QUOI ATTENDRE. « Réessaie dans quelques minutes »
+            # invitait a rafraichir, et chaque rafraichissement relancait
+            # quatre-vingt-douze appels sur un quota deja epuise : la page
+            # entretenait la panne qu'elle annoncait.
+            _sous = "La source n'a pas répondu. Réessaie dans quelques minutes."
+            try:
+                import gms as _g
+                _q = _g.etat_quota()
+                if _q.get("pause_s"):
+                    _sous = ("Quota GetMySocial épuisé pour aujourd’hui. "
+                             "Les chiffres reviendront vers %s — inutile de "
+                             "rafraîchir d’ici là, chaque ouverture consomme "
+                             "du quota." % _q["reprise"])
+            except Exception:
+                pass
+            _echec = _page("Rapport indisponible", _sous, [],
+                           time.strftime("%d/%m %H:%M"))
+            # On garde CE rendu-la un moment : sans cache, dix ouvertures de
+            # la page relancaient dix rafales.
+            _CACHE[(cle, vue)] = (time.time(), _echec, 503)
+            return Response(_echec, status=503,
+                            mimetype="text/html; charset=utf-8")
 
         # LES DONNEES D'ABORD. Le texte du report reste en repli : mieux
         # vaut un tableau a chasse fixe que pas de page.
@@ -791,7 +812,7 @@ def register(app, deps):
                                  str(emb.description or "").replace("**", ""),
                                  _d, time.strftime("%d/%m %H:%M"),
                                  str(jeton), vue)
-            _CACHE[(cle, vue)] = (time.time(), page)
+            _CACHE[(cle, vue)] = (time.time(), page, 200)
             _noter_vue(jeton)
             return Response(page, mimetype="text/html; charset=utf-8")
 
@@ -816,7 +837,7 @@ def register(app, deps):
         page = _page(str(emb.title or "Clics"),
                      str(emb.description or "").replace("**", ""),
                      blocs, time.strftime("%d/%m %H:%M"))
-        _CACHE[(cle, vue)] = (time.time(), page)
+        _CACHE[(cle, vue)] = (time.time(), page, 200)
         _noter_vue(jeton)
         return Response(page, mimetype="text/html; charset=utf-8")
 
