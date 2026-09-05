@@ -1053,13 +1053,14 @@ def random_n_reels_for(identity, n: int):
     return [(v, *_video_meta(v)) for v in picked]
 
 
-def va_ready_montages_for(identity, n: int):
+def va_ready_montages_for(identity, n: int, ecartes=None):
     """Reels APPROUVES « Dispo pour les VA » d'une identite : ceux dont le brouillon de
     montage (<stem>.montage.json a cote de la video) a va_ready=true. La variante MONTEE
     est generee A LA DEMANDE (pas de fichier pre-genere) -> chaque VA une variante unique.
     Retourne n au hasard sans remise : [(video_path, draft_dict, description)]."""
     import json as _json
     ready = []
+    sans_montage = 0
     # videos/ ET templates/ : un template approuve est le cas NORMAL depuis
     # l'assemblage brute+template — ne scanner que videos/ le rendait
     # silencieusement invisible pour les VA.
@@ -1079,8 +1080,31 @@ def va_ready_montages_for(identity, n: int):
             continue
         if not (isinstance(draft, dict) and draft.get("va_ready")):
             continue
+        # NI COUPE, NI SEGMENTS : le moteur ne fait alors RIEN -- il recopie
+        # la source telle quelle. Et les sources scannees ici incluent
+        # videos/, c'est-a-dire le stock de reels DEJA FINIS : le VA recevait
+        # un reel fini sous l'etiquette « REEL MONTE ».
+        #
+        # Le point de coupe SEUL ne suffit pas comme critere : la commande
+        # annonce « Reels DEJA MONTES (texte incruste) », et un brouillon sans
+        # coupe mais AVEC des segments produit exactement cela. L'ecarter
+        # supprimerait un cas legitime -- c'est l'erreur de mon premier jet.
+        try:
+            _cut = float((draft or {}).get("cut_at") or 0)
+        except (TypeError, ValueError):
+            _cut = 0.0
+        _segs = (draft or {}).get("segments")
+        if _cut <= 0.05 and not (isinstance(_segs, list) and _segs):
+            sans_montage += 1
+            continue
         _cap, desc, _ex = _video_meta(v)
         ready.append((v, draft, desc))
+    # Le compte remonte a l'appelant : « approuve mais vide » et « aucun reel
+    # approuve » demandent deux gestes tres differents, et un print dans le
+    # journal du VPS n'est lu par personne. Dictionnaire FACULTATIF : les
+    # quatre appelants existants ne changent pas.
+    if isinstance(ecartes, dict):
+        ecartes["sans_montage"] = sans_montage
     if not ready:
         return []
     n = min(n, len(ready))
@@ -2473,6 +2497,12 @@ class UserCog(commands.Cog):
             except Exception:
                 fichier = None                # reserve illisible : on genere
 
+        # AVANT le try, et pas dedans : le chemin « deja pret » leve _DejaPret
+        # a la premiere ligne, sans jamais atteindre une initialisation qui
+        # serait plus bas -- et la lecture du rapport, elle, a lieu apres le
+        # try pour tous les chemins. Un dictionnaire vide dit « rien a
+        # signaler », ce qui est exactement vrai d'une video sortie du stock.
+        _rapport = {}
         try:
             if fichier is not None:
                 raise _DejaPret                # saute la generation
@@ -2485,7 +2515,8 @@ class UserCog(commands.Cog):
             _brutes = (Path(brutes_dir) if brutes_dir else
                        IDENTITIES_DIR / (identity or "").strip().lower() / "brutes")
             model = await asyncio.to_thread(
-                noctus_web.gen_from_draft, str(video), draft, ["V1"], None, _brutes)
+                noctus_web.gen_from_draft, str(video), draft, ["V1"], None, _brutes,
+                _rapport)
         except _DejaPret:
             model = "reserve"
         except Exception:
@@ -2518,10 +2549,25 @@ class UserCog(commands.Cog):
                 return
             fichier = outs[0]
         out = fichier
-        intro = (
-            f"{emoji} **{label} {idx}/{total}** → à poster sur ton **compte n°{idx}** (`{identity}`)\n"
-            f"📥 Poste cette vidéo **telle quelle** — le texte est **déjà incrusté** dessus."
-        )
+        # LE REPLI SE DIT. Une variante livree sans brute, c'est le template
+        # ENTIER : l'accroche appartient a une AUTRE creatrice, et « poste-la
+        # telle quelle » serait alors un mauvais conseil. Le moteur le sait
+        # depuis toujours et l'ecrit dans son rapport ; c'est la premiere fois
+        # qu'on l'ecoute.
+        _tete = (f"{emoji} **{label} {idx}/{total}** → à poster sur ton "
+                 f"**compte n°{idx}** (`{identity}`)")
+        if _rapport.get("repli"):
+            intro = (
+                _tete + "\n"
+                "⚠️ **NE POSTE PAS cette vidéo telle quelle.** Le montage n'a pas pu se faire : "
+                + (_rapport.get("message") or "aucune vidéo brute utilisable") + ".\n"
+                "Ce n'est pas la vidéo de la model — signale-le avant de publier."
+            )
+        else:
+            intro = (
+                _tete + "\n"
+                "📥 Poste cette vidéo **telle quelle** — le texte est **déjà incrusté** dessus."
+            )
         try:
             await interaction.followup.send(
                 content=intro, file=discord.File(str(out), filename=f"{prefixe_fichier}_{idx}.mp4"))
@@ -2539,7 +2585,11 @@ class UserCog(commands.Cog):
                     _res2.solder(de_la_reserve)
                 except Exception:
                     pass
-        if description:
+        # Pas de legende derriere un « ne poste pas ». Le message precedent
+        # vient d'interdire la publication ; enchainer sur « a coller dans le
+        # champ legende » decrit la marche a suivre de ce qu'on interdit, et
+        # c'est la consigne la plus recente qui est suivie.
+        if description and not _rapport.get("repli"):
             await interaction.followup.send(
                 f"📄 **DESCRIPTION {label} {idx}/{total}** (à coller dans le **champ légende**) :")
             await interaction.followup.send(description)
@@ -3282,11 +3332,25 @@ class UserCog(commands.Cog):
                 ephemeral=True,
             )
             return
-        ready = va_ready_montages_for(identity, nombre)
+        _ecartes = {}
+        ready = va_ready_montages_for(identity, nombre, _ecartes)
         if not ready:
+            # Deux causes, deux gestes differents. Les confondre envoyait
+            # refaire un geste deja fait.
+            _vides = _ecartes.get("sans_montage") or 0
+            if _vides:
+                _detail = (
+                    f"_({_vides} reel(s) sont bien marqués « 📥 Dispo pour les VA », mais leur "
+                    "montage est **vide** : ni point de coupe, ni texte. Servis tels quels, ce "
+                    "serait la vidéo d'origine. Un admin doit les rouvrir dans l'éditeur Montage "
+                    "et poser un texte ou une coupe.)_"
+                )
+            else:
+                _detail = ("_(Un admin doit ouvrir un reel dans l'éditeur Montage du site "
+                           "et cliquer « 📥 Dispo pour les VA ».)_")
             await interaction.response.send_message(
                 f"Aucun **reel monté** dispo pour ton identité `{identity}` pour l'instant.\n"
-                "_(Un admin doit ouvrir un reel dans l'éditeur Montage du site et cliquer « 📥 Dispo pour les VA ».)_",
+                + _detail,
                 ephemeral=True,
             )
             return

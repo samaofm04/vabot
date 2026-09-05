@@ -48010,8 +48010,24 @@ def create_app():
         identity = target_dir.parent.name  # IDENTITIES_DIR/<identity>/videos
         if identity not in _list_identities():   # bloque tout file_id qui sortirait de IDENTITIES_DIR
             return jsonify({"ok": False, "error": "identité invalide"})
+        # L'empreinte porte le chemin COMPLET -- identite, SOUS-DOSSIER et nom
+        # avec son extension : c'est elle qui garantit l'unicite, le prefixe
+        # lisible n'etant la que pour reconnaitre le dossier a l'oeil.
+        #
+        # Le sous-dossier n'est pas un detail : `identity` vient de
+        # target_dir.parent.name, donc il vaut « emma » pour videos/ comme pour
+        # templates/ ou trends/. Sans lui, emma/videos/promo1.mp4 et
+        # emma/templates/promo1.mp4 partageaient le meme dossier de travail --
+        # le second refuse de partir (« une generation est deja en cours sur ce
+        # reel ») et efface les sorties du premier. C'est exactement le defaut
+        # qu'on corrige ici, une case plus loin.
+        import hashlib as _hl
+        _plein = f"{identity}/{target_dir.name}/{src.name}"
+        _signature = _hl.sha1(_plein.encode("utf-8")).hexdigest()[:8]
         stem = _re.sub(r"[^a-zA-Z0-9_\-]", "", src.stem)[:28]
-        model = _re.sub(r"[^a-zA-Z0-9_\-]", "", f"reel-{identity}-{stem}")[:40]
+        # 31 + 1 + 8 = 40, la limite de _safe() : rien n'est retronque apres.
+        _lisible = _re.sub(r"[^a-zA-Z0-9_\-]", "", f"reel-{identity}-{stem}")[:31]
+        model = f"{_lisible}-{_signature}"
         # L'identifiant du modèle ne dépend que du reel : deux générations
         # lancées en même temps (double-clic, deux onglets) partageraient le
         # même dossier et la seconde effacerait input/ et output/ de la
