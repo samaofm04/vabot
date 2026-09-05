@@ -128,6 +128,12 @@ def api_keys(masquer: bool = True) -> list:
         tok = (c.get("token") or "").strip()
         e = {"id": c.get("id") or ("k%d" % (i + 1)),
              "label": c.get("label") or ("Clé %d" % (i + 1)),
+             # A QUEL COMPTE elle appartient. Un numero ne dit rien : « Clé 2 »
+             # se confond avec « Clé 3 », et la clé migree portait « Clé 1 »
+             # alors qu'elle vient du compte principal — de quoi renommer tout
+             # le trousseau pour retomber sur ses pieds. L'API donne l'adresse
+             # du proprietaire, on la garde.
+             "compte": c.get("compte") or "",
              "ok": bool(c.get("ok")),
              "derniere_erreur": c.get("derniere_erreur") or "",
              "au_repos": max(0, int((c.get("repos_jusqua") or 0) - _t.time())),
@@ -150,6 +156,7 @@ def save_api_keys(cles: list) -> None:
             continue
         propres.append({"id": str(c.get("id") or "k%d" % (i + 1))[:20],
                         "label": str(c.get("label") or "Clé %d" % (i + 1))[:40],
+                        "compte": str(c.get("compte") or "")[:80],
                         "token": tok,
                         "ok": bool(c.get("ok")),
                         "derniere_erreur": str(c.get("derniere_erreur") or "")[:120],
@@ -212,7 +219,7 @@ _COMPTEURS_PERIODE = 60.0
 
 
 def _noter_cle(cle_id: str, ok: bool = None, repos_s: float = 0,
-               erreur: str = "", compter: bool = False) -> None:
+               erreur: str = "", compter: bool = False, compte: str = "") -> None:
     """Met a jour l'etat d'une cle sans reecrire les autres.
 
     Un simple comptage n'ecrit rien : il s'accumule et part avec la prochaine
@@ -223,7 +230,7 @@ def _noter_cle(cle_id: str, ok: bool = None, repos_s: float = 0,
         _COMPTEURS[cle_id] = _COMPTEURS.get(cle_id, 0) + 1
     # Rien d'autre a dire, et l'heure d'ecrire n'est pas venue : on s'arrete
     # la. C'est le cas de l'immense majorite des appels.
-    if (ok is None and repos_s <= 0 and not erreur
+    if (ok is None and repos_s <= 0 and not erreur and not compte
             and (_t.time() - _COMPTEURS_TS[0]) < _COMPTEURS_PERIODE):
         return
     with _VERROU_CLES:
@@ -234,6 +241,8 @@ def _noter_cle(cle_id: str, ok: bool = None, repos_s: float = 0,
                 continue
             if ok is not None:
                 c["ok"] = bool(ok)
+            if compte:
+                c["compte"] = compte[:80]
             if repos_s > 0:
                 c["repos_jusqua"] = _t.time() + repos_s
             if erreur:

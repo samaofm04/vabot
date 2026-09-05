@@ -43709,6 +43709,7 @@ def _render_mypuls_cookies_settings() -> str:
             "onchange='this.form.submit()' "
             "class='mp-cle-nom'>"
             "<span style='color:#6b7280;font-weight:400;font-family:monospace;font-size:12px'>%s</span>"
+            "%s"
             "</form>"
             "%s</div>"
             "<div style='font-size:11.5px;color:#8a91a8'>%d appel(s)</div>"
@@ -43720,8 +43721,10 @@ def _render_mypuls_cookies_settings() -> str:
             "color:#8a91a8;cursor:pointer;font-size:15px;padding:2px 4px'>✕</button>"
             "</form>"
             "</div>" % (html_escape(k["id"]), html_escape(k["label"]),
-                        html_escape(k["apercu"]), err, k["appels"],
-                        pastille, html_escape(k["id"]))
+                        html_escape(k["apercu"]),
+                        ("<span style='color:#8a91a8;font-size:11.5px'>· %s</span>"
+                         % html_escape(k["compte"])) if k.get("compte") else "",
+                        err, k["appels"], pastille, html_escape(k["id"]))
         )
 
     trousseau = "".join(_ligne_cle(k) for k in _cles) if _cles else (
@@ -52886,7 +52889,7 @@ def create_app():
         # Le test porte sur CETTE clé, pas sur le trousseau : la rotation
         # aurait pu interroger une autre et déclarer bonne une clé fausse.
         import requests as _rq
-        etat, detail = False, ""
+        etat, detail, _compte = False, "", ""
         try:
             rep = _rq.get("%s/api/v1/session" % mypuls.BASE_URL,
                           headers={"X-API-TOKEN": tok, "Accept": "application/json"},
@@ -52918,6 +52921,7 @@ def create_app():
                     corps = None
                 if isinstance(corps, dict) and corps.get("authenticated"):
                     etat = True
+                    _compte = str(corps.get("email") or "").strip()
                 elif corps is None:
                     # MyPuls a renvoye du HTML avec un code 200 : c'est sa page
                     # de connexion. Le jeton n'en est pas un.
@@ -52932,13 +52936,15 @@ def create_app():
                               % str(corps)[:120])
         except Exception as e:
             detail = "injoignable : %s" % type(e).__name__
-        mypuls._noter_cle(r.get("id"), ok=etat, erreur=("" if etat else detail))
+        mypuls._noter_cle(r.get("id"), ok=etat, erreur=("" if etat else detail),
+                          compte=_compte)
         if etat:
             # TEXTE SIMPLE, PAS DE HTML. Le bandeau rend les messages avec
             # textContent — par choix : ils portent des données venues du
             # serveur. Une balise <b> s'y affichait donc en clair.
-            return _success("✓ Clé ajoutée et validée — %d clé(s) dans le "
-                            "trousseau." % r.get("total", 1))
+            return _success("✓ Clé ajoutée et validée%s — %d clé(s) dans le "
+                            "trousseau." % ((" (compte %s)" % _compte) if _compte else "",
+                                            r.get("total", 1)))
         return _success("⚠ Clé ajoutée mais NON validée : %s"
                         % (detail or "réponse inattendue"))
 
@@ -52995,7 +53001,7 @@ def create_app():
             # Même exigence qu'à l'ajout : du JSON authentifié, pas un 200.
             # Même exigence, et le même soin à DIRE LAQUELLE des deux
             # façons de rater : une page web n'est pas un JSON qui refuse.
-            ok, pourquoi = False, ""
+            ok, pourquoi, compte = False, "", ""
             if code == 200:
                 try:
                     _j = rep.json()
@@ -53003,6 +53009,7 @@ def create_app():
                     _j = None
                 if isinstance(_j, dict) and _j.get("authenticated"):
                     ok = True
+                    compte = str(_j.get("email") or "").strip()
                 elif _j is None:
                     pourquoi = "page web, pas l'API"
                 else:
@@ -53019,9 +53026,11 @@ def create_app():
                 r_m = rep.headers.get("x-ratelimit-limit")
                 if r_l is not None:
                     reste = " — quota restant %s/%s" % (r_l, r_m or "?")
-            mypuls._noter_cle(k["id"], ok=ok, erreur=("" if ok else mot))
-            lignes.append("%s (%s) : %s%s"
-                          % (k["label"], k["apercu"], mot, reste))
+            mypuls._noter_cle(k["id"], ok=ok, erreur=("" if ok else mot),
+                              compte=compte)
+            lignes.append("%s (%s%s) : %s%s"
+                          % (k["label"], k["apercu"],
+                             (" · " + compte) if compte else "", mot, reste))
             _t.sleep(1.0)
         if not lignes:
             return _error("✕ Aucune clé dans le trousseau.")
