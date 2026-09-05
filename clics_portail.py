@@ -227,6 +227,7 @@ tr.tetes2 th{border-bottom:1px solid var(--bordure)}
 .li .c{font-family:var(--chiffres);font-size:12.5px;font-weight:600;
        font-variant-numeric:tabular-nums;flex:none}
 .li .ab{width:84px;text-align:right;color:var(--attenue);font-size:12px;flex:none}
+h2 .note{font:400 12px/1 var(--sans);color:var(--attenue)}
 h2 .tout{float:right;font:600 11.5px/1 var(--sans);color:var(--accent);
          text-decoration:none;background:var(--accent-doux);
          border-radius:999px;padding:6px 12px;text-transform:none;letter-spacing:0}
@@ -468,6 +469,10 @@ def _palmares(rangs: list, jeton: str) -> str:
     """
     if not rangs:
         return ""
+    # Quand AUCUN lien n a de clics connus, le classement ne porte plus que
+    # sur les abonnes : on le dit dans le titre, au lieu de laisser croire
+    # que ce sont les clics qui l ordonnent.
+    sans_clics = all(r.get("clics") is None for r in rangs)
     lignes = []
     for i, r in enumerate(rangs[:8]):
         lignes.append(
@@ -476,18 +481,26 @@ def _palmares(rangs: list, jeton: str) -> str:
             "<span class='ab'>%s</span></div>"
             % (" podium" if i < 3 else "", i + 1,
                html.escape(str(r.get("lien") or "")),
-               _num(r.get("clics")),
+               "—" if r.get("clics") is None else _num(r.get("clics")),
                ("%s abonné%s" % (_num(r.get("abonnes")),
                                  "s" if int(r.get("abonnes") or 0) > 1 else ""))
                if r.get("abonnes") else "—"))
     tout = ("<a class='tout' href='%s/%s/liens'>Tout voir</a>"
             % (RACINE, html.escape(str(jeton)))) if jeton else ""
-    return ("<section><h2>Top liens%s</h2><div class='top'>%s</div></section>"
-            % (tout, "".join(lignes)))
+    return ("<section><h2>Top liens%s%s</h2><div class='top'>%s</div></section>"
+            % (" <span class='note'>— par abonnés, clics indisponibles</span>"
+               if sans_clics else "", tout, "".join(lignes)))
 
 
 def _rangs(d: dict) -> list:
-    """Clics et abonnes de la quinzaine, par lien, du plus fort au plus faible."""
+    """Clics et abonnes de la quinzaine, par lien, du plus fort au plus faible.
+
+    UN CLIC INCONNU RESTE None, il ne devient pas 0. Vu en ligne : la source
+    des clics par lien s etait tue, chaque lien est ressorti a « 0 clic », et
+    le palmares affichait un classement parfaitement lisible et entierement
+    faux. Un tableau qui dit « — » a cote d un palmares qui dit « 0 », c est
+    le second qu on croit.
+    """
     ab = {str(r.get("lien") or ""): r for r in (d.get("abonnes") or [])}
     out = []
     for r in (d.get("par_lien") or []):
@@ -496,14 +509,18 @@ def _rangs(d: dict) -> list:
         # La quinzaine, pas aujourd hui : un classement sur une seule journee
         # change tous les matins et ne dit rien de qui travaille.
         v = per[2] if len(per) > 2 else None
-        clics = 0
+        clics = None
         if isinstance(v, dict):
             clics = v.get("marche")
             if clics is None:
-                clics = v.get("total") or 0
-        out.append({"lien": nom, "clics": int(clics or 0),
+                clics = v.get("total")
+        out.append({"lien": nom,
+                    "clics": None if clics is None else int(clics),
                     "abonnes": int((ab.get(nom) or {}).get("quinz") or 0)})
-    out.sort(key=lambda r: (-r["clics"], -r["abonnes"]))
+    # Les liens dont on connait les clics passent devant ceux dont on ne sait
+    # rien : sinon un inconnu se glisse au milieu du classement comme s il
+    # valait zero.
+    out.sort(key=lambda r: (r["clics"] is None, -(r["clics"] or 0), -r["abonnes"]))
     return [r for r in out if r["clics"] or r["abonnes"]]
 
 
