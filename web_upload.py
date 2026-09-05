@@ -50793,6 +50793,11 @@ def create_app():
                             "page_en_echec": r.get("page_en_echec")})
         ventes = r["ventes"]
 
+        # LES DEUX CHAMPS, cote a cote. « net » et « amount » different sur
+        # OnlyFans (20 % de commission) et pas sur MyM : seule la comparaison
+        # avec ce que MyPuls AFFICHE dit lequel a toujours servi de base aux
+        # parts des chatteurs. Se tromper de champ change toutes les paies.
+        par_devise_brut = {}
         par_devise, par_kind, par_type = {}, {}, {}
         nb_par_kind = {}
         chatteurs, createurs, sans_chatteur = set(), set(), 0
@@ -50801,6 +50806,11 @@ def create_app():
             l = mypuls._vente_api_vers_ligne(v)
             cur = mypuls._norm_currency(l["currency"])
             par_devise[cur] = round(par_devise.get(cur, 0.0) + l["amount"], 2)
+            try:
+                _b = float(v.get("amount") or 0)
+            except (TypeError, ValueError):
+                _b = 0.0
+            par_devise_brut[cur] = round(par_devise_brut.get(cur, 0.0) + _b, 2)
             k = str(v.get("kind") or "?")
             par_kind[k] = round(par_kind.get(k, 0.0) + l["amount"], 2)
             nb_par_kind[k] = nb_par_kind.get(k, 0) + 1
@@ -50828,6 +50838,7 @@ def create_app():
             "ventes": {"lues": len(ventes), "total_annonce": r.get("total_annonce"),
                        "pages": r.get("pages"), "tronque": r.get("tronque")},
             "montant_par_devise": par_devise,
+            "montant_par_devise_champ_amount": par_devise_brut,
             "montant_par_kind": par_kind, "nb_par_kind": nb_par_kind,
             "libelles_de_type": sorted(par_type.keys()),
             "familles": familles, "libelles_inconnus": inconnus,
