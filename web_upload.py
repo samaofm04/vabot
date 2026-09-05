@@ -52865,7 +52865,21 @@ def create_app():
             rep = _rq.get("%s/api/v1/session" % mypuls.BASE_URL,
                           headers={"X-API-TOKEN": tok, "Accept": "application/json"},
                           timeout=15)
-            etat = (rep.status_code == 200)
+            # UN 200 NE PROUVE RIEN. MyPuls sert sa page de connexion en HTML
+            # avec un code 200 quand le jeton n'en est pas un — un cookie
+            # collé à la place, par exemple. Une clé fausse s'affichait donc
+            # « OK », et ne se signalait qu'en cassant un appel sur deux, des
+            # heures plus tard. On exige du JSON qui dit « authenticated ».
+            etat = False
+            if rep.status_code == 200:
+                try:
+                    _j = rep.json()
+                    etat = bool(isinstance(_j, dict) and _j.get("authenticated"))
+                except Exception:
+                    etat = False
+                if not etat:
+                    detail = ("réponse non-JSON — ce n'est pas un X-API-TOKEN "
+                              "(le jeton est dans ton profil MyPuls, pas dans les cookies)")
             if rep.status_code == 401:
                 detail = "clé refusée (401)"
             elif rep.status_code == 403:
@@ -52914,9 +52928,18 @@ def create_app():
             except Exception as e:
                 code = 0
                 rep = None
-            ok = (code == 200)
-            mot = {200: "OK", 401: "refusée", 403: "hors périmètre",
-                   429: "quota atteint", 0: "injoignable"}.get(code, "HTTP %s" % code)
+            # Même exigence qu'à l'ajout : du JSON authentifié, pas un 200.
+            ok = False
+            if code == 200:
+                try:
+                    _j = rep.json()
+                    ok = bool(isinstance(_j, dict) and _j.get("authenticated"))
+                except Exception:
+                    ok = False
+            mot = ({200: "OK" if ok else "pas une clé d'API (page HTML)",
+                    401: "refusée", 403: "hors périmètre",
+                    429: "quota atteint", 0: "injoignable"}
+                   .get(code, "HTTP %s" % code))
             # Le quota restant, quand MyPuls le dit : c'est la mesure qui
             # tranche si les clés partagent un budget ou en ont chacune un.
             reste = ""
