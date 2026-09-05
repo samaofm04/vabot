@@ -243,6 +243,19 @@ def compter(identite: str, famille: str, emp: str | None = None) -> int:
                if emp is None or f.get("empreinte") == emp)
 
 
+#: La réserve sert-elle ? Coupée le 05/09/2026 à la demande du propriétaire,
+#: le temps d'écarter tout doute pendant qu'on cherchait un mélange
+#: d'identités sur Discord.
+#:
+#: ELLE EST DANS LE CODE, PAS DANS LE .env : celui-ci est gitignoré et
+#: n'arrive jamais jusqu'au VPS. Remettre True rallume tout, le stock est
+#: resté intact — rien n'a été effacé.
+#:
+#: Couper le remplisseur (MAIN_COGS) ne suffisait PAS : les cases déjà
+#: pleines auraient continué d'être servies. Il faut les deux robinets.
+ACTIF = False
+
+
 def prendre(identite: str, famille: str, emp: str | None = None,
             demandeur: str = "") -> tuple:
     """Sort UNE variante du stock. Rend (chemin, description) ou (None, "").
@@ -250,7 +263,13 @@ def prendre(identite: str, famille: str, emp: str | None = None,
     C'est le renommage qui garantit l'unicité, pas le verrou : le noyau ne
     laisse qu'un seul appelant réussir `os.replace`. Le perdant reçoit
     FileNotFoundError et passe au candidat suivant.
+
+    Rend (None, "") quand la réserve est coupée : c'est exactement ce que
+    rend un stock vide, donc chaque appelant repart en génération à la
+    demande sans qu'une seule ligne de plus soit nécessaire ailleurs.
     """
+    if not ACTIF:
+        return None, ""
     candidats = [(m, j, f) for m, j, f in _fiches_libres(identite, famille)
                  if emp is None or f.get("empreinte") == emp]
     if not candidats:

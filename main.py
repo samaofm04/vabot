@@ -30,7 +30,7 @@ PREFIX = os.getenv("PREFIX", "!")
 #
 # L'etat des deux applications se lit sur youl4b.com/version : serveurs,
 # commandes sur 100, cogs charges, et les cogs en echec avec leur erreur.
-MAIN_COGS = ["welcome", "onboarding", "autopost", "general", "user", "cta_reminder", "noctustest", "clickrecap", "sheetssync", "telechargement", "reportcomptes", "noctuspool"]
+MAIN_COGS = ["welcome", "onboarding", "autopost", "general", "user", "cta_reminder", "noctustest", "clickrecap", "sheetssync", "telechargement", "reportcomptes"]   # « noctuspool » retire le 05/09 : reserve coupee, voir noctus_reserve.ACTIF
 ADMIN_COGS = ["admin", "geelark", "vaactivity", "vasort", "tgrouter", "numeros"]
 
 logging.basicConfig(

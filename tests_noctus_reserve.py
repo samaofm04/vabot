@@ -40,6 +40,14 @@ def main():
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         import noctus_reserve as nr
 
+        # La reserve est COUPEE en production depuis le 05/09
+        # (noctus_reserve.ACTIF = False). Ces tests eprouvent le
+        # mecanisme, pas l interrupteur : sans cette ligne, prendre()
+        # rendrait (None, "") et toute la suite tomberait sans que
+        # rien ne soit casse. Le jour ou la reserve est rallumee,
+        # cette ligne devient inutile mais reste juste.
+        nr.ACTIF = True
+
         atelier = Path(tmp) / "atelier"
         atelier.mkdir()
 
