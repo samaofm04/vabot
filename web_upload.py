@@ -51537,6 +51537,49 @@ def create_app():
             })
         return jsonify({"ok": True, "reports": out})
 
+    @app.route("/api/rig/clics_lien", methods=["GET", "POST"])
+    def rig_clics_lien():
+        """Creer, lister ou revoquer un lien public de report.
+
+        La meme chose que le bouton de Settings, atteignable avec le jeton du
+        parc. Utile quand le lien doit etre pose sans ouvrir le dashboard.
+
+        POST ?team_id=&nom=&marche=  cree (ou retrouve) le lien d'un espace
+        POST ?cle=                   cree celui d'un report Discord configure
+        POST ?revoquer=<jeton>       le coupe
+        GET                          liste ce qui existe
+        """
+        from flask import jsonify
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        import clics_portail
+        a = request.args
+
+        if request.method == "POST" and (a.get("revoquer") or "").strip():
+            return jsonify({"ok": clics_portail.revoquer(a["revoquer"].strip())})
+
+        if request.method == "POST":
+            tm = (a.get("team_id") or "").strip()
+            cle = (a.get("cle") or "").strip()
+            nom = (a.get("nom") or "").strip()
+            marche = (a.get("marche") or "tout").strip().lower()
+            if tm:
+                j = clics_portail.creer("gms:" + tm, nom or tm,
+                                        {"team_id": tm, "nom": nom,
+                                         "marche": marche})
+            elif cle:
+                j = clics_portail.creer(cle, nom)
+            else:
+                return jsonify({"ok": False,
+                                "error": "team_id ou cle attendu"}), 400
+            return jsonify({"ok": True, "jeton": j,
+                            "url": "%s/clics/%s" % (_adresse_publique(), j)})
+
+        return jsonify({"ok": True, "liens": [
+            {**x, "url": "%s/clics/%s" % (_adresse_publique(), x["jeton"])}
+            for x in clics_portail.liste()]})
+
     @app.route("/api/rig/clics_liaison")
     def rig_clics_liaison():
         """Ce que le report rattachera desormais, lien par lien.
