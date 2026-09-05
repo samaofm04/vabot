@@ -829,6 +829,12 @@ class ClickRecap(commands.Cog):
         # chiffre US qu'on n'a pas mesure serait pire que de ne rien dire.
         _premiere_moitie = cyc_s.day == 1
         lignes_resume = []
+        # LES MEMES CHIFFRES, EN BRUT. La page web ne peut pas relire un
+        # tableau a chasse fixe sans le reanalyser ; on lui donne les valeurs
+        # telles qu'elles sortent du calcul, et personne ne recalcule rien.
+        _donnees = {"marche": libelle if pays_marche else "",
+                    "drapeau": drapeau if pays_marche else "🌍",
+                    "resume": [], "abonnes": [], "par_lien": []}
         for etiquette, marche_v, total_v in (
                 ("Today", cumul[0], c_today),
                 ("Yesterday", cumul[1], c_yest),
@@ -837,6 +843,10 @@ class ClickRecap(commands.Cog):
                  cumul[3] if _premiere_moitie else None, c_p1),
                 (f"{_en(p2s)} 16–{p2e.day}",
                  None if _premiere_moitie else cumul[3], c_p2)):
+            _donnees["resume"].append(
+                {"quand": etiquette,
+                 "marche": marche_v if (pays_marche and marche_v is not None) else None,
+                 "total": total_v})
             if pays_marche and marche_v is not None:
                 lignes_resume.append(
                     f"`{etiquette:<12}` {drapeau} **{_n(marche_v)}**"
@@ -915,6 +925,11 @@ class ClickRecap(commands.Cog):
                 # range a A. Le numero de telephone suit le nom, donc
                 # « (BO7) 1 » precede « (BO7) 2 » sans rien de special.
                 _cle_tri = lambda t: re.sub(r"^[^0-9A-Za-z]+", "", str(t)).lower()
+                _donnees["par_lien"] = [
+                    {"lien": _nom_propre(lab),
+                     "periodes": [{"marche": p[i][0], "total": p[i][1]}
+                                  for i in (0, 1, 3)]}
+                    for lab, p in sorted(rows, key=lambda x: _cle_tri(x[0]))]
                 lignes_plates = [
                     f"{_nom_propre(lab)[:17]:<18}"
                     + "".join(_duo_col(p[i]) for i in (0, 1, 3))
@@ -999,6 +1014,11 @@ class ClickRecap(commands.Cog):
                 # A, pas avant tout le monde. Le numero de telephone suit le
                 # nom, donc « (BO7) 1 » precede « (BO7) 2 » naturellement.
                 _assoc.sort(key=lambda x: re.sub(r"^[^0-9A-Za-z]+", "", x[0]).lower())
+                _donnees["abonnes"] = [
+                    {"lien": _n2, "auj": _a1, "quinz": _a2, "prec": _a3}
+                    for _n2, _adr2, _a1, _a2, _a3 in _assoc]
+                _donnees["quinzaine"] = "%s→%s" % (_fr(_q_deb), _fr(_q_fin))
+                _donnees["precedente"] = "%s→%s" % (_fr(_p_deb), _fr(_p_fin))
                 _e = (f"{'LINK':<18}{'AUJ':>5}{'QUINZ':>7}{'PRÉC':>7}")
 
                 # UN CHAMP DISCORD TIENT 1024 CARACTERES, et on ne tronque
@@ -1028,6 +1048,14 @@ class ClickRecap(commands.Cog):
                         name=(_t1 if _i == 0 else f"👥 Subscribers ({_i + 1}/{_nb})"),
                         value="```\n" + _e + "\n" + "\n".join(_pg) + "\n```",
                         inline=False)
+
+            # ACCROCHE A L'EMBED. Discord ignore les attributs qu'il ne
+            # connait pas ; la page web y trouve de quoi faire de vraies
+            # tables sans reanalyser du texte a chasse fixe.
+            try:
+                emb.donnees_clics = _donnees
+            except Exception:
+                pass
 
             _titre = (f"📋 Per link — {drapeau} {libelle} vs 🌍 global"
                       if pays_marche else "📋 Per link — 🌍 global")
