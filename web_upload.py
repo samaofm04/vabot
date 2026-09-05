@@ -51024,6 +51024,98 @@ def create_app():
                         "octets": len(r.text), "nb_tables": len(tables),
                         "tables": vues, "onglets_dans_le_html": onglets})
 
+    @app.route("/api/rig/mypuls_quota_partage")
+    def rig_mypuls_quota_partage():
+        """Le quota de 60/min est-il compte par cle, ou par compte / par IP ?
+
+        L EXPERIENCE. On epuise volontairement la premiere cle jusqu au 429,
+        puis on appelle IMMEDIATEMENT avec la seconde :
+          - la seconde repond 200  -> chaque cle a son budget, elles
+            s additionnent ;
+          - la seconde repond 429  -> le budget est commun (compte ou IP), et
+            ajouter des cles n apporte rien.
+
+        Aucune deduction ne remplace cette mesure : l en-tete
+        x-ratelimit-limit annonce 60 sans dire de QUOI, et MyPuls ne
+        documente pas la portee.
+
+        ELLE CONSOMME EXPRES. C est la seule facon de savoir, mais ca reste
+        une minute de quota brule : il faut le demander explicitement
+        (?go=1), et deux cles au minimum. Le site n en souffre pas -- il
+        utilise environ une requete par minute depuis le 05/09 -- et si le
+        quota est bien par cle, la rotation le protege pendant le test.
+        """
+        from flask import jsonify
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        if (request.args.get("go") or "") != "1":
+            return jsonify({"ok": False,
+                            "error": "mesure destructrice : ajouter ?go=1",
+                            "cout": "environ 60 requetes sur la premiere cle, "
+                                    "qui sera au repos une minute"})
+        try:
+            import mypuls
+        except Exception as e:
+            return jsonify({"ok": False, "error": type(e).__name__}), 500
+        cles = mypuls.api_keys(masquer=False)
+        if len(cles) < 2:
+            return jsonify({"ok": False,
+                            "error": "il faut au moins deux cles dans le trousseau"})
+
+        import requests as _rq
+        import time as _t
+
+        def _appel(tok):
+            r = _rq.get("%s/api/v1/session" % mypuls.BASE_URL,
+                        headers={"X-API-TOKEN": tok, "Accept": "application/json"},
+                        timeout=15)
+            return (r.status_code,
+                    r.headers.get("x-ratelimit-remaining"),
+                    r.headers.get("x-ratelimit-limit"))
+
+        a, b = cles[0], cles[1]
+        depart_a = _appel(a["token"])
+        depart_b = _appel(b["token"])
+
+        # On epuise A. Plafond dur : on ne tourne pas sans fin si le 429
+        # n arrive jamais (quota plus large qu annonce, ou compte autrement).
+        brules, code_a, reste_a = 0, 200, None
+        for _ in range(75):
+            code_a, reste_a, _lim = _appel(a["token"])
+            brules += 1
+            if code_a == 429:
+                break
+            _t.sleep(0.05)
+
+        # LA QUESTION, posee dans la seconde qui suit.
+        code_b, reste_b, lim_b = _appel(b["token"])
+
+        if code_a != 429:
+            verdict = ("indetermine : la premiere cle n a pas atteint le quota "
+                       "en %d appels" % brules)
+        elif code_b == 200:
+            verdict = ("PAR CLE : la seconde repond encore alors que la "
+                       "premiere est saturee — les budgets s additionnent")
+        elif code_b == 429:
+            verdict = ("PARTAGE : la seconde est saturee elle aussi — le quota "
+                       "est compte par compte ou par IP, ajouter des cles "
+                       "n apporte rien")
+        else:
+            verdict = "indetermine : la seconde a repondu HTTP %s" % code_b
+
+        return jsonify({
+            "ok": True, "verdict": verdict,
+            "cle_a": {"label": a["label"], "apercu": a["apercu"],
+                      "au_depart": {"code": depart_a[0], "restant": depart_a[1]},
+                      "appels_brules": brules,
+                      "a_la_fin": {"code": code_a, "restant": reste_a}},
+            "cle_b": {"label": b["label"], "apercu": b["apercu"],
+                      "au_depart": {"code": depart_b[0], "restant": depart_b[1]},
+                      "apres_saturation_de_a": {"code": code_b, "restant": reste_b,
+                                                "limite": lim_b}},
+        })
+
     @app.route("/api/rig/mypuls_limite")
     def rig_mypuls_limite():
         """Le quota annonce par MyPuls, lu en un appel. En-tetes seulement."""

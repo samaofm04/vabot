@@ -198,10 +198,35 @@ def renommer_api_key(cle_id: str, label: str) -> dict:
     return {"ok": True}
 
 
+#: Les appels comptes mais pas encore ecrits, et la derniere ecriture.
+#:
+#: COMPTER NE DOIT PAS COUTER UNE ECRITURE DISQUE. La premiere version
+#: enregistrait le fichier de configuration a CHAQUE requete reussie : sept
+#: pages de ventes faisaient sept lectures + sept ecritures d'un fichier qui
+#: porte aussi les cookies de session. On accumule en memoire et on ne pose
+#: sur disque que de temps en temps -- un compteur d'appels perdu au
+#: redemarrage n'a aucune consequence, contrairement a un fichier malmene.
+_COMPTEURS: Dict[str, int] = {}
+_COMPTEURS_TS = [0.0]
+_COMPTEURS_PERIODE = 60.0
+
+
 def _noter_cle(cle_id: str, ok: bool = None, repos_s: float = 0,
                erreur: str = "", compter: bool = False) -> None:
-    """Met a jour l'etat d'une cle sans reecrire les autres."""
+    """Met a jour l'etat d'une cle sans reecrire les autres.
+
+    Un simple comptage n'ecrit rien : il s'accumule et part avec la prochaine
+    ecriture utile, ou au bout d'une minute.
+    """
     import time as _t
+    if compter:
+        _COMPTEURS[cle_id] = _COMPTEURS.get(cle_id, 0) + 1
+    # Rien d'autre a dire, et l'heure d'ecrire n'est pas venue : on s'arrete
+    # la. C'est le cas de l'immense majorite des appels.
+    if (ok is None and repos_s <= 0 and not erreur
+            and (_t.time() - _COMPTEURS_TS[0]) < _COMPTEURS_PERIODE):
+        return
+    _COMPTEURS_TS[0] = _t.time()
     cles = _cles_brutes()
     for c in cles:
         if c.get("id") != cle_id:
@@ -214,8 +239,12 @@ def _noter_cle(cle_id: str, ok: bool = None, repos_s: float = 0,
             c["derniere_erreur"] = erreur[:120]
         elif ok:
             c["derniere_erreur"] = ""
-        if compter:
-            c["appels"] = int(c.get("appels") or 0) + 1
+    # Les comptages en attente, pour TOUTES les cles : la prochaine ecriture
+    # les emporte, quelle qu'en soit la raison.
+    for c in cles:
+        n = _COMPTEURS.pop(c.get("id"), 0)
+        if n:
+            c["appels"] = int(c.get("appels") or 0) + n
     save_api_keys(cles)
 
 
