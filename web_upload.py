@@ -50650,12 +50650,160 @@ def create_app():
             from cogs.user import _JB_ACTIONS_US
         except Exception as e:
             return jsonify({"ok": False, "error": type(e).__name__}), 500
+        try:
+            import noctus_reserve as _res
+        except Exception:
+            _res = None
         out = []
         for cle, libelle, _cmd, _qte in _JB_ACTIONS_US:
             famille = ("identite" if cle in _RIG_IDENTITE
                        else "outil" if cle in _RIG_OUTIL else "publication")
-            out.append({"cle": cle, "nom": libelle, "famille": famille})
+            # Ce que le parc peut REELLEMENT obtenir. Neuf boutons exigent un
+            # montage : sans reserve, le parc n'a aucune porte pour eux, et il
+            # vaut mieux qu'il le sache en lisant la liste qu'en echouant a
+            # l'envoi. « reserve » vaut null pour tous les autres.
+            out.append({"cle": cle, "nom": libelle, "famille": famille,
+                        "reserve": _res.famille_de(cle) if _res else None})
         return jsonify({"ok": True, "contenus": out})
+
+    # -- LA RESERVE, OUVERTE AU PARC ------------------------------------
+    #
+    # Neuf boutons du menu livrent une video MONTEE. Le montage tourne en
+    # Node+ffmpeg lance depuis Flask, et rien ne le declenchait par HTTP : la
+    # seule porte etait le bouton Discord, que le parc ne peut pas cliquer.
+    # Son reglage « 2 Caption etoilees par jour » restait donc une intention.
+    #
+    # ON NE FABRIQUE PAS A LA DEMANDE ICI. Un montage prend 15 a 30 secondes,
+    # parfois trois minutes ; une route qui attendrait ca tiendrait un fil
+    # Flask ouvert et ferait patienter le parc pour rien. La reserve existe
+    # deja pour cette raison exacte (cogs/noctuspool la remplit d'avance) :
+    # on la SERT, on ne double pas son travail.
+    #
+    # PRENDRE, TELECHARGER, SOLDER -- trois temps, parce qu'un telechargement
+    # peut echouer. « prendre » sort la variante du stock par un renommage (le
+    # noyau garantit qu'un seul appelant gagne, donc jamais deux comptes avec
+    # la meme video) ; elle attend ensuite dans « servi » qu'on la recupere ;
+    # « solder » l'efface. Une variante sortie ne revient JAMAIS au stock,
+    # meme si le parc disparait entre-temps : un doublon coute un shadowban,
+    # une variante perdue coute vingt-cinq secondes de calcul.
+    _RIG_MOT = re.compile(r"^[a-z0-9_.-]{1,60}$")
+
+    def _rig_reserve_chemin(identity, famille, jeton):
+        """Le fichier sorti, ou None si un morceau du chemin est douteux.
+
+        Trois segments viennent de l'appelant et finissent dans un chemin :
+        on les VALIDE au lieu de les nettoyer, parce qu'un nom nettoye reste
+        un nom invente, et qu'aucun appel legitime n'en a besoin.
+        """
+        import noctus_reserve as _res
+        for v in (identity, famille, jeton):
+            if not _RIG_MOT.match(str(v or "")):
+                return None
+        if famille not in _res.FAMILLES:
+            return None
+        d = _res._dossier(identity, famille, "servi")
+        try:
+            f = (d / (jeton + ".mp4")).resolve()
+            if not str(f).startswith(str(d.resolve())):
+                return None
+        except Exception:
+            return None
+        return f
+
+    @app.route("/api/rig/reserve")
+    def rig_reserve_etat():
+        """Ce qui attend en reserve, et si le moteur est capable d'en refaire.
+
+        LES DEUX ENSEMBLE, VOLONTAIREMENT. Une reserve vide ne dit pas la
+        meme chose selon que le moteur tourne (elle se remplit) ou non (elle
+        ne se remplira jamais). Le parc doit pouvoir distinguer « pas encore »
+        de « jamais » sans avoir a se connecter au VPS.
+        """
+        from flask import jsonify
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        try:
+            import noctus_reserve as _res
+        except Exception as e:
+            return jsonify({"ok": False, "error": type(e).__name__}), 500
+        try:
+            import noctus_web as _nw
+            moteur = bool(_nw.setup_ok())
+        except Exception:
+            moteur = False
+        ident = (request.args.get("identity") or "").strip().lower()
+        etat = _res.etat()
+        if ident:
+            etat = {k: v for k, v in etat.items() if k.split("/")[0] == ident}
+        return jsonify({"ok": True, "moteur": moteur,
+                        "profondeur": _res.PROFONDEUR,
+                        "familles": list(_res.FAMILLES),
+                        "par_action": _res.FAMILLE_PAR_ACTION,
+                        "etat": etat})
+
+    @app.route("/api/rig/reserve/prendre", methods=["POST"])
+    def rig_reserve_prendre():
+        """Sort UNE variante du stock, pour une identite et un bouton."""
+        from flask import jsonify
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        import noctus_reserve as _res
+        corps = request.get_json(force=True, silent=True) or {}
+        ident = str(corps.get("identity") or "").strip().lower()
+        action = str(corps.get("action") or "").strip().lower()
+        famille = _res.famille_de(action) or (
+            action if action in _res.FAMILLES else None)
+        if not _RIG_MOT.match(ident):
+            return jsonify({"ok": False, "error": "identite"}), 400
+        if not famille:
+            # On distingue « ce bouton n'a pas de reserve » d'un stock vide :
+            # le premier ne se resoudra jamais en attendant.
+            return jsonify({"ok": False, "error": "sans_reserve",
+                            "detail": "%s ne passe pas par la reserve"
+                                      % action}), 400
+        chemin, desc = _res.prendre(ident, famille, demandeur="rig")
+        if not chemin:
+            return jsonify({"ok": False, "error": "vide",
+                            "identite": ident, "famille": famille}), 404
+        f = Path(chemin)
+        return jsonify({"ok": True, "identite": ident, "famille": famille,
+                        "jeton": f.stem, "nom": f.name, "desc": desc,
+                        "octets": f.stat().st_size if f.is_file() else 0,
+                        "url": "/api/rig/reserve/fichier/%s/%s/%s"
+                               % (ident, famille, f.stem)})
+
+    @app.route("/api/rig/reserve/fichier/<identity>/<famille>/<jeton>")
+    def rig_reserve_fichier(identity, famille, jeton):
+        """Le fichier deja sorti. Rejouable : un telechargement peut rater."""
+        from flask import jsonify, send_file
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        f = _rig_reserve_chemin(identity, famille, jeton)
+        if f is None or not f.is_file():
+            return jsonify({"ok": False, "error": "introuvable"}), 404
+        return send_file(str(f), mimetype="video/mp4",
+                         as_attachment=True, download_name=f.name,
+                         conditional=True)
+
+    @app.route("/api/rig/reserve/solder", methods=["POST"])
+    def rig_reserve_solder():
+        """Efface une variante recuperee. A appeler APRES le telechargement."""
+        from flask import jsonify
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        import noctus_reserve as _res
+        corps = request.get_json(force=True, silent=True) or {}
+        f = _rig_reserve_chemin(str(corps.get("identity") or "").lower(),
+                                str(corps.get("famille") or ""),
+                                str(corps.get("jeton") or ""))
+        if f is None:
+            return jsonify({"ok": False, "error": "chemin"}), 400
+        _res.solder(f, motif="envoye_rig")
+        return jsonify({"ok": True})
 
     @app.route("/version")
     def version_du_site():

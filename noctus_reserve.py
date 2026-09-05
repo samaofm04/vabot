@@ -60,8 +60,42 @@ PROFONDEUR = max(1, int(os.environ.get("NOCTUS_RESERVE_PROFONDEUR") or "6"))
 
 #: Les familles qui paient une génération. Les autres servent des fichiers
 #: existants et n'ont rien à gagner ici.
-FAMILLES = ("caption", "montage", "template", "template_brut",
+FAMILLES = ("caption", "montage", "reelmonte", "template", "template_brut",
             "flash", "flash_banger", "flash_brut")
+
+#: Quel BOUTON du menu est servi par quelle famille de la réserve.
+#:
+#: Les deux vocabulaires existaient déjà, chacun juste de son côté : le menu
+#: parle en boutons (« ⭐⭐ Flash + Brut »), la réserve range par recette
+#: (`flash_brut`). Tant que personne d'autre que Discord ne servait ces
+#: vidéos, la traduction se faisait dans le corps de chaque bouton et n'avait
+#: pas besoin d'exister ailleurs.
+#:
+#: Elle existe ici parce que le PARC demande maintenant « un capbanger pour
+#: emma » sans passer par Discord, et qu'il ne peut pas deviner que cela se
+#: range sous `caption`. Relevé bouton par bouton depuis cogs/user.py
+#: (les `famille=` passés à _gen_and_send*), pas supposé.
+#:
+#: « 💬 Caption » (reelcaption) N'Y EST PAS, et ce n'est pas un oubli : son
+#: bouton appelle la génération avec `famille=""` (cogs/user.py:3491), donc
+#: rien n'est jamais mis en réserve pour lui. Le dire par une absence plutôt
+#: que par une entrée vide : l'appelant qui ne trouve rien sait qu'il doit
+#: générer, au lieu d'attendre un stock qui ne viendra pas.
+FAMILLE_PAR_ACTION = {
+    "capbanger": "caption",              # ⭐ Caption
+    "montagebanger": "montage",          # ⭐⭐ Caption + Vidéo brut
+    "reelmonte": "reelmonte",            # 🎞️ Template
+    "templatebanger": "template",        # ⭐ Template
+    "templatebrut": "template_brut",     # ⭐⭐ Template + Brut
+    "templateflash": "flash",            # ⚡ Flash
+    "templateflashbanger": "flash_banger",   # ⭐ Flash
+    "templateflashbrut": "flash_brut",   # ⭐⭐ Flash + Brut
+}
+
+
+def famille_de(action: str):
+    """La famille de réserve d'un bouton du menu, ou None s'il n'en a pas."""
+    return FAMILLE_PAR_ACTION.get(str(action or "").strip().lower())
 
 #: Le renommage suffit à l'unicité ; ce verrou évite seulement que deux fils
 #: se disputent systématiquement le même candidat, et garde le déplacement
