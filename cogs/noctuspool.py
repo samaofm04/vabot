@@ -223,6 +223,10 @@ class NoctusPool(commands.Cog):
         # Une brute imposee passe par un dossier ne contenant qu elle : sans ce
         # detour, le moteur en tire une au hasard parmi toutes celles de
         # l identite, et l etoile de la brute ne servirait a rien.
+        # Le verdict d'assemblage, rempli sur place par le moteur. Il est
+        # range dans la fiche : une video servie des semaines plus tard doit
+        # pouvoir dire qu'elle est un template nu.
+        _rap = {}
         dossier_brutes, tmp = None, None
         if r.get("brute_imposee") is not None:
             tmp = _tf.mkdtemp(prefix="reserve-brute-")
@@ -239,7 +243,8 @@ class NoctusPool(commands.Cog):
                 modele = await asyncio.to_thread(
                     noctus_web.gen_from_draft, str(r["video"]), r["draft"],
                     ["V1"], None,
-                    Path(dossier_brutes) if dossier_brutes else None)
+                    Path(dossier_brutes) if dossier_brutes else None,
+                    _rap)
             except Exception:
                 modele = None
             if not modele:
@@ -268,7 +273,9 @@ class NoctusPool(commands.Cog):
             pose = reserve.deposer(
                 identite, famille, sorties[0], emp, desc=r.get("desc") or "",
                 recette={"source": str(r["video"]),
-                         "imposees": list(r.get("imposees") or ())})
+                         "imposees": list(r.get("imposees") or ()),
+                         "repli": bool(_rap.get("repli")),
+                         "message": str(_rap.get("message") or "")})
             if pose is None:
                 return False
         finally:

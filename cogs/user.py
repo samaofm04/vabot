@@ -2479,6 +2479,10 @@ class UserCog(commands.Cog):
         # « ce template avec n'importe quelle brute » : toute variante deja
         # produite pour ce template convient.
         fichier, de_la_reserve = None, None
+        # Pose AVANT la reserve : une video sortie du stock apporte son propre
+        # verdict, et il doit survivre a la suite. Le poser plus bas
+        # l'ecraserait juste apres l'avoir rempli.
+        _rapport = {}
         if famille:
             try:
                 import noctus_reserve as _res
@@ -2489,20 +2493,23 @@ class UserCog(commands.Cog):
                         _imposees = (str(_lst[0]),)
                 emp = _res.empreinte(identity, famille, video,
                                      brutes=_imposees, draft=draft)
+                _fiche = {}
                 pris, _d = _res.prendre(
                     identity, famille, emp,
-                    demandeur=str(getattr(interaction.user, "id", "")))
+                    demandeur=str(getattr(interaction.user, "id", "")),
+                    fiche_out=_fiche)
                 if pris is not None:
                     fichier, de_la_reserve = pris, pris
+                    # Le remplisseur fabrique des templates NUS pour
+                    # reelmonte / flash / flash_banger (brutes_dir=None) : sans
+                    # cette reprise, le stock rendait muet l'avertissement.
+                    _rec = _fiche.get("recette") or {}
+                    if _rec.get("repli"):
+                        _rapport = {"repli": True,
+                                    "message": str(_rec.get("message") or "")}
             except Exception:
                 fichier = None                # reserve illisible : on genere
 
-        # AVANT le try, et pas dedans : le chemin « deja pret » leve _DejaPret
-        # a la premiere ligne, sans jamais atteindre une initialisation qui
-        # serait plus bas -- et la lecture du rapport, elle, a lieu apres le
-        # try pour tous les chemins. Un dictionnaire vide dit « rien a
-        # signaler », ce qui est exactement vrai d'une video sortie du stock.
-        _rapport = {}
         try:
             if fichier is not None:
                 raise _DejaPret                # saute la generation

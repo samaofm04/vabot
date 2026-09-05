@@ -257,7 +257,7 @@ ACTIF = False
 
 
 def prendre(identite: str, famille: str, emp: str | None = None,
-            demandeur: str = "") -> tuple:
+            demandeur: str = "", fiche_out=None) -> tuple:
     """Sort UNE variante du stock. Rend (chemin, description) ou (None, "").
 
     C'est le renommage qui garantit l'unicité, pas le verrou : le noyau ne
@@ -294,6 +294,13 @@ def prendre(identite: str, famille: str, emp: str | None = None,
             _noter({"acte": "sorti", "identite": identite, "famille": famille,
                     "jeton": mp4.stem, "empreinte": fiche.get("empreinte"),
                     "demandeur": demandeur})
+            # La fiche part avec la vidéo : elle porte le verdict d'assemblage
+            # calculé à la fabrication. Sans lui, l'appelant ne peut pas
+            # distinguer un montage réussi d'un template nu, et servirait le
+            # second en disant « poste-la telle quelle ».
+            if isinstance(fiche_out, dict):
+                fiche_out.clear()
+                fiche_out.update(fiche)
             return cible, str(fiche.get("desc") or "")
     return None, ""
 
