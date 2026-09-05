@@ -50759,6 +50759,19 @@ def create_app():
             return None
         return f
 
+    @app.route("/api/rig/mypuls_limite")
+    def rig_mypuls_limite():
+        """Le quota annonce par MyPuls, lu en un appel. En-tetes seulement."""
+        from flask import jsonify
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        try:
+            import mypuls
+        except Exception as e:
+            return jsonify({"ok": False, "error": type(e).__name__}), 500
+        return jsonify(mypuls.limite_api())
+
     @app.route("/api/rig/mypuls_discover")
     def rig_mypuls_discover():
         """La forme de l'API MyPuls, derriere le jeton du parc.

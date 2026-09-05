@@ -1311,6 +1311,42 @@ def decouvrir_api(jours: int = 6) -> dict:
             "droits_du_jeton": droits, "periode": [debut, fin]}
 
 
+def limite_api() -> dict:
+    """Ce que MyPuls dit de son quota, en UN seul appel.
+
+    POURQUOI PAS UNE RAFALE. La question « combien d'appels avant 429 » se
+    mesure en tapant jusqu'au refus -- et cette mesure-la degrade ce qui
+    marche : la premiere passe de decouverte (30 appels) a fait tomber en 429
+    les deux endpoints dont le tableau de bord depend. Les en-tetes de
+    reponse portent presque toujours la meme information, gratuitement.
+
+    LA QUESTION DERRIERE. Si le quota est compte PAR CLE, plusieurs jetons
+    multiplient le debit. S'il est compte par compte, par IP ou par
+    abonnement, ils ne changent rien -- et on aurait cree des comptes pour
+    rien. Les en-tetes le disent parfois explicitement.
+
+    Ne rend que des EN-TETES : aucun contenu de reponse.
+    """
+    if not api_configured():
+        return {"ok": False, "error": "Aucun token API MyPuls"}
+    try:
+        r = requests.get("%s/api/v1/session" % BASE_URL,
+                         headers={"X-API-TOKEN": api_token(),
+                                  "Accept": "application/json"}, timeout=15)
+    except Exception as e:
+        return {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
+
+    interessants = {}
+    for k, v in (r.headers or {}).items():
+        kb = k.lower()
+        if ("ratelimit" in kb or "rate-limit" in kb or kb == "retry-after"
+                or kb.startswith("x-") or kb in ("server", "via")):
+            interessants[k] = v[:120]
+    return {"ok": True, "code": r.status_code,
+            "entetes": interessants,
+            "tous_les_noms": sorted((r.headers or {}).keys())}
+
+
 # ============ Fetch + parse ============
 
 def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool = True) -> Dict[str, Any]:
