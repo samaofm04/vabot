@@ -50759,6 +50759,90 @@ def create_app():
             return None
         return f
 
+    @app.route("/api/rig/mypuls_team")
+    def rig_mypuls_team():
+        """Ce que /team/money rend sur une periode, en AGREGAT.
+
+        POURQUOI AVANT DE BASCULER. La page des chatteurs decide qui est paye
+        combien. La faire passer du scraping a l API sans confronter les deux
+        reviendrait a changer la base de calcul de la paie sur la foi d une
+        documentation. On compare donc les totaux a ce que MyPuls affiche
+        lui-meme en haut de sa page (ventes, montant net EUR, montant net
+        USD, repartition PPV / pourboires) avant de toucher a l ecran.
+
+        Ne rend AUCUNE ligne : des comptes, des sommes, et la liste des
+        LIBELLES de type rencontres -- ces libelles sont ce qui decide du
+        classement en familles, et une valeur inconnue doit se voir.
+        """
+        from flask import jsonify
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        try:
+            import mypuls
+        except Exception as e:
+            return jsonify({"ok": False, "error": type(e).__name__}), 500
+        from datetime import date as _d, timedelta as _td
+        debut = (request.args.get("from")
+                 or (_d.today() - _td(days=29)).isoformat()).strip()
+        fin = (request.args.get("to") or _d.today().isoformat()).strip()
+
+        r = mypuls.api_team_money(debut, fin)
+        if not r.get("ok"):
+            return jsonify({"ok": False, "error": r.get("error"),
+                            "page_en_echec": r.get("page_en_echec")})
+        ventes = r["ventes"]
+
+        par_devise, par_kind, par_type = {}, {}, {}
+        nb_par_kind = {}
+        chatteurs, createurs, sans_chatteur = set(), set(), 0
+        exemple_champs = sorted(ventes[0].keys()) if ventes else []
+        for v in ventes:
+            l = mypuls._vente_api_vers_ligne(v)
+            cur = mypuls._norm_currency(l["currency"])
+            par_devise[cur] = round(par_devise.get(cur, 0.0) + l["amount"], 2)
+            k = str(v.get("kind") or "?")
+            par_kind[k] = round(par_kind.get(k, 0.0) + l["amount"], 2)
+            nb_par_kind[k] = nb_par_kind.get(k, 0) + 1
+            par_type[l["type"]] = par_type.get(l["type"], 0) + 1
+            if l["chatter"]:
+                chatteurs.add(l["chatter"].lower())
+            else:
+                sans_chatteur += 1
+            if l["creator"]:
+                createurs.add(l["creator"].lower())
+
+        # Les familles, avec la MEME regle que la paie : un libelle inconnu
+        # doit apparaitre, jamais disparaitre dans un total.
+        familles, inconnus = {}, []
+        for lib in par_type:
+            f = mypuls.categorie_transaction(lib)
+            if f:
+                familles.setdefault(f, []).append(lib)
+            else:
+                inconnus.append(lib)
+
+        stats = mypuls.api_team_messages_stats(debut, fin)
+        return jsonify({
+            "ok": True, "periode": [debut, fin],
+            "ventes": {"lues": len(ventes), "total_annonce": r.get("total_annonce"),
+                       "pages": r.get("pages"), "tronque": r.get("tronque")},
+            "montant_par_devise": par_devise,
+            "montant_par_kind": par_kind, "nb_par_kind": nb_par_kind,
+            "libelles_de_type": sorted(par_type.keys()),
+            "familles": familles, "libelles_inconnus": inconnus,
+            "nb_chatteurs": len(chatteurs), "nb_createurs": len(createurs),
+            "ventes_sans_chatteur": sans_chatteur,
+            "champs_dune_vente": exemple_champs,
+            "messages_stats": {
+                "ok": stats.get("ok"), "error": stats.get("error"),
+                "nb_chatteurs": len(stats.get("par_chatteur") or []),
+                "champs": sorted((stats.get("par_chatteur") or [{}])[0].keys())
+                          if stats.get("par_chatteur") else [],
+                "messages_non_attribues": stats.get("non_attribues"),
+            },
+        })
+
     @app.route("/api/rig/mypuls_tables")
     def rig_mypuls_tables():
         """La STRUCTURE de la page MyPuls, derriere le jeton du parc.
@@ -51041,6 +51125,92 @@ def create_app():
             return jsonify({"ok": False, "error": "chemin"}), 400
         _res.solder(f, motif="envoye_rig")
         return jsonify({"ok": True})
+
+    @app.route("/api/rig/insta_etat", methods=["POST"])
+    def rig_insta_etat():
+        """Ce qu Instagram repond pour une liste de pseudos, sans telephone.
+
+        POURQUOI CETTE ROUTE. Le parc doit decider quels conteneurs valent la
+        peine d etre ouverts sur l iPhone -- trois a cinq minutes chacun,
+        quarante conteneurs, deux a trois heures. Demander a Instagram si le
+        compte existe encore coute une requete et zero cle : c est
+        _scrape_via_ig_public, deja ecrit, deja protege contre les 429.
+
+        CE QUE CE VERDICT NE PROUVE PAS, et c est le plus important :
+
+          - 404 ne veut pas dire « banni ». Un compte RENOMME rend 404 lui
+            aussi, et il est bien vivant. Le code du site le classe « banni »
+            volontairement (« un compte renomme est perdu pour nous ») -- c est
+            juste pour la paie des VA, pas pour decider d une suppression.
+          - 200 ne veut pas dire « utilisable ». Un compte en verification
+            humaine reste parfaitement visible de l exterieur.
+
+        Ce verdict SERT donc a trier, jamais a supprimer. Le parc s en sert
+        pour savoir qui ouvrir en premier ; ce qu il voit a l ecran tranche.
+
+        LE CACHE D ABORD. `sonder` a faux ne rend que ce qu on sait deja, sans
+        une seule requete sortante. Un balayage complet en mode force brule
+        les quotas et attire les 429 : on le limite a 25 pseudos par appel, et
+        c est l appelant qui redemande.
+        """
+        from flask import jsonify
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+
+        corps = request.get_json(force=True, silent=True) or {}
+        demandes, vus = [], set()
+        for x in (corps.get("pseudos") or [])[:200]:
+            h = str(x or "").strip().lstrip("@").lower()
+            if h and h not in vus and re.match(r"^[a-z0-9._]{1,60}$", h):
+                vus.add(h)
+                demandes.append(h)
+        if not demandes:
+            return jsonify({"ok": False, "error": "aucun pseudo"}), 400
+
+        sonder = bool(corps.get("sonder"))
+        PLAFOND = 25
+
+        cache = _load_insta_3_stats_cache()
+        maintenant = int(time.time())
+        sortie, sondes = {}, 0
+        for h in demandes:
+            c = cache.get(h) or {}
+            frais = c and (maintenant - int(c.get("scraped_at") or 0)) < 86400
+            if not c and sonder and sondes < PLAFOND:
+                sondes += 1
+                try:
+                    c = _scrape_via_ig_public(h)
+                    c["scraped_at"] = maintenant
+                    cache[h] = c
+                except Exception as e:
+                    c = {"error": "sonde: %s" % type(e).__name__}
+                frais = True
+            if not c:
+                sortie[h] = {"connu": False}
+                continue
+            prof = (c.get("profile") or {}) if isinstance(c.get("profile"), dict) else c
+            sortie[h] = {
+                "connu": True,
+                # « introuvable » et pas « banni » : le mot compte, parce que
+                # c est aussi ce que rend un compte renomme.
+                "introuvable": bool(c.get("banned")),
+                "erreur": c.get("error") or "",
+                "followers": prof.get("followers") or prof.get("follower_count"),
+                "posts": prof.get("posts_count") or prof.get("media_count"),
+                "prive": bool(prof.get("is_private")),
+                "vu_le": int(c.get("scraped_at") or 0),
+                "frais": bool(frais),
+            }
+        if sondes:
+            try:
+                _save_insta_3_stats_cache(cache)
+            except Exception:
+                pass                      # le cache n est pas la verite, tant pis
+        return jsonify({"ok": True, "etats": sortie, "sondes": sondes,
+                        "plafond": PLAFOND,
+                        "restants": max(0, len([h for h in demandes
+                                                if not (cache.get(h))]))})
 
     @app.route("/version")
     def version_du_site():

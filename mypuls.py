@@ -1040,6 +1040,23 @@ def _parse_amount(s: str) -> float:
         return 0.0
 
 
+def _premier_nombre(brut: str) -> int:
+    """Le premier entier d'une case, ou 0. Pour les COMPTES, pas les montants.
+
+    La nouvelle page ecrit « 33 (+13) » : trente-trois ventes, treize de plus
+    que la periode d'avant. _parse_amount rend 0 la-dessus -- un compte faux
+    qui ressemble a un compte vrai, et le seul symptome serait un tableau ou
+    tout le monde a zero vente.
+    """
+    m = re.search(r"-?\d[\d\s.,]*", str(brut or ""))
+    if not m:
+        return 0
+    try:
+        return int(float(re.sub(r"[^\d-]", "", m.group(0)) or 0))
+    except Exception:
+        return 0
+
+
 def _montant_illisible(brut: str) -> bool:
     """Vrai quand la case porte quelque chose et que rien n'a pu en etre lu.
 
@@ -1152,6 +1169,142 @@ def _table_par_entetes(tables, *exigences) -> int:
         if all(_colonne(entetes, *variantes) >= 0 for variantes in exigences):
             return i
     return -1
+
+
+# ---------------------------------------------------------------------------
+# L'EQUIPE PAR L'API — ce que le scraping faisait, en mieux
+#
+# /team/money rend le journal des ventes AVEC l'attribution chatteur, et
+# /team/messages/stats les agregats par chatteur. C'est exactement ce que la
+# page « messaging money team » affichait, et que nous lisions en grattant son
+# HTML -- avec trois avantages : la devise est un champ, le type de vente est
+# normalise (« ppv » / « tip » au lieu d'un libelle a interpreter), et une
+# colonne ajoutee chez eux ne casse plus rien.
+#
+# CES ROUTES EXISTAIENT DEPUIS LE DEBUT. Elles n'avaient pas ete trouvees
+# parce qu'on avait sonde « team », « transactions », « chatters » -- des
+# chemins qui n'existent pas -- et que MyPuls repond 403 la ou d'autres
+# repondraient 404. Un mauvais chemin ressemble donc a un refus de droits.
+# Lecon : lire /api/doc avant de deduire quoi que ce soit d'un code HTTP.
+#
+# PAGINATION ET QUOTA. 60 requetes par minute, et une page de ventes en
+# contient `per_page`. Sur quinze jours a 1392 ventes, per_page=50 demande 28
+# requetes -- presque la moitie du quota d'une minute pour un seul affichage.
+# On demande donc de grandes pages, et on s'arrete net a une limite de
+# securite plutot que de tourner sans fin si `has_more` restait vrai.
+# ---------------------------------------------------------------------------
+
+#: Grandes pages : moins de requetes pour la meme donnee. Si l'API plafonne
+#: en dessous, elle rend simplement moins d'elements et la pagination suit.
+PAGE_TEAM = 500
+
+#: Garde-fou : au-dela, on prefere une reponse incomplete ET SIGNALEE a une
+#: boucle qui viderait le quota.
+MAX_PAGES_TEAM = 40
+
+
+def api_team_money(start: str, end: str, creator: str = "all",
+                   chatter: str = "all", type_vente: str = "all") -> dict:
+    """Toutes les ventes attribuees de la periode. Suit la pagination.
+
+    Rend {ok, ventes:[...], pages, tronque, total_annonce} ou {ok: False}.
+    `tronque` dit qu'on s'est arrete au garde-fou : le total serait faux, et
+    l'appelant doit le SAVOIR plutot que de croire avoir tout lu.
+    """
+    ventes, page, total, tronque = [], 1, None, False
+    while page <= MAX_PAGES_TEAM:
+        r = api_get("team/money", {"start": start, "end": end,
+                                   "creator": creator, "chatter": chatter,
+                                   "type": type_vente,
+                                   "page": page, "per_page": PAGE_TEAM})
+        if not r.get("ok"):
+            # Une page perdue au milieu rend le total FAUX : on le dit, on ne
+            # rend pas un sous-ensemble qui ressemble a un tout.
+            return {"ok": False, "error": r.get("error"),
+                    "page_en_echec": page, "ventes": ventes}
+        d = r.get("data") or {}
+        lot = d.get("data") if isinstance(d, dict) else None
+        if not isinstance(lot, list):
+            return {"ok": False, "error": "Format inattendu sur team/money"}
+        ventes.extend(lot)
+        pg = (d.get("pagination") or {}) if isinstance(d, dict) else {}
+        if total is None:
+            total = pg.get("total")
+        if not pg.get("has_more"):
+            break
+        page += 1
+    else:
+        tronque = True
+    return {"ok": True, "ventes": ventes, "pages": page,
+            "total_annonce": total, "tronque": tronque}
+
+
+def api_team_messages_stats(start: str, end: str, creator: str = "all") -> dict:
+    """Agregats par chatteur : messages, mots, fans, PPV proposes/vendus.
+
+    C'est ce qui remplace « Presence / Reactivite / Propose / Vendu / Taux
+    conv. », colonnes que la nouvelle page ne porte plus.
+    """
+    r = api_get("team/messages/stats", {"start": start, "end": end,
+                                        "creator": creator, "chatter": "all",
+                                        "type": "all"})
+    if not r.get("ok"):
+        return {"ok": False, "error": r.get("error")}
+    d = r.get("data") or {}
+    lignes = d.get("data") if isinstance(d, dict) else None
+    return {"ok": True, "par_chatteur": lignes if isinstance(lignes, list) else [],
+            "non_attribues": (d or {}).get("unattributed_messages")}
+
+
+def api_users() -> dict:
+    """Les membres de l'equipe : relie un attributed_user_id a un nom."""
+    r = api_get("users")
+    if not r.get("ok"):
+        return {"ok": False, "error": r.get("error")}
+    d = r.get("data") or {}
+    lignes = d.get("data") if isinstance(d, dict) else (d if isinstance(d, list) else [])
+    return {"ok": True, "membres": lignes if isinstance(lignes, list) else []}
+
+
+def _vente_api_vers_ligne(v: dict) -> dict:
+    """Une vente de l'API mise a la forme que le site attend deja.
+
+    ON GARDE LE VOCABULAIRE DU SITE. Tout ce qui consomme fetch_team_stats
+    parle de creator / chatter / fan / amount / currency / type / date : le
+    traduire ici plutot que partout ailleurs evite de reecrire la moitie des
+    pages -- et de casser la paie en le faisant.
+
+    `net` PLUTOT QUE `amount` : c'est ce que la page affichait (« Montant
+    net »), donc ce sur quoi les parts des chatteurs ont toujours ete
+    calculees. Prendre `amount` gonflerait toutes les remunerations sans que
+    personne ne comprenne pourquoi.
+    """
+    net = v.get("net")
+    if net is None:
+        net = v.get("amount")
+    try:
+        net = float(net or 0)
+    except (TypeError, ValueError):
+        net = 0.0
+    # Le libelle lisible, pour que categorie_transaction s'applique comme
+    # avant. `kind` est normalise (ppv / tip), `type` est le libelle brut.
+    kind = str(v.get("kind") or "").strip().lower()
+    libelle = str(v.get("type") or "").strip()
+    if not libelle:
+        libelle = {"ppv": "Média privé", "tip": "Pourboires"}.get(kind, kind)
+    return {
+        "creator": str(v.get("creator") or ""),
+        "chatter": str(v.get("attributed_user") or ""),
+        "fan": str(v.get("fan") or ""),
+        "amount": net,
+        "currency": str(v.get("currency") or "EUR"),
+        "type": libelle,
+        "date": str(v.get("date") or ""),
+        "context": "",
+        # Ce que le scraping ne donnait pas, et qui sert a rapprocher.
+        "payment_id": v.get("payment_id"),
+        "attributed_user_id": v.get("attributed_user_id"),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1422,14 +1575,31 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
     # performances dans autre chose. On garde le rang comme dernier recours,
     # pour ne rien casser si les en-tetes disparaissent.
     _COLS_LOG = (("fan",), ("montant net", "montant", "net", "amount"))
-    _COLS_PERF = (("presence",), ("ca total", "total"))
     i_log = _table_par_entetes(tables, *_COLS_LOG)
-    i_perf = _table_par_entetes(tables, *_COLS_PERF)
-    entetes_manquants = (i_log < 0 or i_perf < 0)
+
+    # LES TABLEAUX PAR CHATTEUR : ceux qui portent un chatteur ET un montant,
+    # mais PAS de colonne « Fan » (sinon on prendrait le log lui-meme).
+    #
+    # Il y en a PLUSIEURS : depuis la refonte, MyPuls sort un tableau PAR
+    # DEVISE (« EUR · 34 chatteurs classes », puis un bloc USD). C'est une
+    # bonne nouvelle -- l'ancienne colonne « CA Total » empilait les euros MyM
+    # et les dollars OnlyFans, ce que ce fichier signalait deja comme un
+    # montant « dans aucune devise ». On les lit tous.
+    #
+    # Un tableau vide est ECARTE : la page garde la coquille de l'ancien
+    # tableau de performance (huit en-tetes, une seule colonne, aucune
+    # donnee). La prendre pour la source ferait tout tomber a zero.
+    i_perfs = [i for i, (ent, lig) in enumerate(tables)
+               if i != i_log
+               and _colonne(ent, "chatter", "chatteur") >= 0
+               and _colonne(ent, "montant net", "ca total", "montant") >= 0
+               and _largeur(lig) >= 3]
+    entetes_manquants = (i_log < 0 or not i_perfs)
     if i_log < 0:
         i_log = 0
-    if i_perf < 0:
-        i_perf = 1 if len(tables) > 1 else 0
+    if not i_perfs:
+        i_perfs = [1] if len(tables) > 1 else [0]
+    i_perf = i_perfs[0]
 
     e_log = tables[i_log][0]
     # Table du log : Créateur | User (chatter) | Fan | Montant net | Devise |
@@ -1506,62 +1676,122 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
         def _est_non_attribue(_n):
             return False
 
-    # Table des performances : Chatter | Présence | Réactivité | Proposé |
-    #                          Vendu | Taux conv. | CA PPV | CA Tips | CA Total
-    e_perf = tables[i_perf][0]
-    p_name = _colonne(e_perf, "chatter", "chatteur", "user", "utilisateur")
-    p_pres = _colonne(e_perf, "presence")
-    p_reac = _colonne(e_perf, "reactivite", "reactivity")
-    p_prop = _colonne(e_perf, "propose", "proposed")
-    p_vend = _colonne(e_perf, "vendu", "sold")
-    p_conv = _colonne(e_perf, "taux conv", "conversion", "conv")
-    p_ppv = _colonne(e_perf, "ca ppv", "ppv")
-    p_tips = _colonne(e_perf, "ca tips", "tips", "pourboires")
-    p_tot = _colonne(e_perf, "ca total", "total")
-    _lp = _largeur(tables[i_perf][1])
-    if _lp:
-        p_name, p_pres, p_reac, p_prop, p_vend, p_conv, p_ppv, p_tips, p_tot = [
-            (i if i < _lp else -1) for i in
-            (p_name, p_pres, p_reac, p_prop, p_vend, p_conv, p_ppv, p_tips, p_tot)]
-    colonnes_perf_manquantes = [n for n, i in (
-        ("chatteur", p_name), ("ca ppv", p_ppv), ("ca tips", p_tips),
-        ("ca total", p_tot)) if i < 0]
-    # Repli sur les positions historiques, colonne par colonne.
-    if p_name < 0: p_name = 0
-    if p_pres < 0: p_pres = 1
-    if p_reac < 0: p_reac = 2
-    if p_prop < 0: p_prop = 3
-    if p_vend < 0: p_vend = 4
-    if p_conv < 0: p_conv = 5
-    if p_ppv < 0: p_ppv = 6
-    if p_tips < 0: p_tips = 7
-    if p_tot < 0: p_tot = 8
-
+    # LES CHATTEURS, DEUX FORMES POSSIBLES.
+    #
+    # Nouvelle (05/09/2026) : « # | Chatter | Ventes | Medias prives |
+    # Pourboires | Montant net | Periode prec. | Evolution | Rang », un
+    # tableau par devise.
+    # Ancienne : « Chatter | Presence | Reactivite | Propose | Vendu |
+    # Taux conv. | CA PPV | CA Tips | CA Total ».
+    #
+    # ATTENTION AU CHANGEMENT DE NATURE. Dans la nouvelle, « Medias prives »
+    # et « Pourboires » sont des COMPTES (12 medias, 21 pourboires), pas des
+    # euros. Les brancher sur ca_ppv / ca_tips afficherait « 21 € » pour 21
+    # pourboires : un chiffre faux qui a l'air vrai. Les montants par famille
+    # sont donc recalcules depuis le LOG, qui porte le type de chaque vente.
     chatters: List[Dict[str, Any]] = []
     chatters_illisibles = 0
-    _mini_perf = max(p_name, p_ppv, p_tips, p_tot) + 1
-    for row in tables[i_perf][1]:
-        if len(row) < _mini_perf:
-            if any((c or "").strip() for c in row):
-                chatters_illisibles += 1
-            continue
-        # « Indetermine (Creatrice) » n'est pas quelqu'un : MyPuls met ce
-        # libelle quand la vente n'est rattachee a aucun chatteur. On le
-        # MARQUE sans le retirer — l'argent a bien ete encaisse, il doit
-        # rester dans le CA ; c'est la PART A PAYER qui doit l'ignorer.
-        _nom = _cellule(row, p_name)
-        chatters.append({
-            "non_attribue": _est_non_attribue(_nom),
-            "name": _nom,
-            "presence": _cellule(row, p_pres),
-            "reactivity": _cellule(row, p_reac),
-            "proposed": _parse_amount(_cellule(row, p_prop)) if _cellule(row, p_prop) else 0,
-            "sold": _parse_amount(_cellule(row, p_vend)) if _cellule(row, p_vend) else 0,
-            "conv_rate": _cellule(row, p_conv),
-            "ca_ppv": _parse_amount(_cellule(row, p_ppv)),
-            "ca_tips": _parse_amount(_cellule(row, p_tips)),
-            "ca_total": _parse_amount(_cellule(row, p_tot)),
-        })
+    colonnes_perf_manquantes: List[str] = []
+    _par_nom: Dict[str, Dict[str, Any]] = {}
+    _ordre: List[str] = []
+
+    for _ip in i_perfs:
+        e_perf, l_perf = tables[_ip][0], tables[_ip][1]
+        largeur = _largeur(l_perf)
+        p_name = _colonne(e_perf, "chatter", "chatteur", "user", "utilisateur")
+        p_tot = _colonne(e_perf, "montant net", "ca total")
+        p_nb_ventes = _colonne(e_perf, "ventes", "sales")
+        p_nb_ppv = _colonne(e_perf, "medias prives", "media prive", "ppv")
+        p_nb_tips = _colonne(e_perf, "pourboires", "tips")
+        # Les colonnes de l'ANCIENNE forme : absentes de la nouvelle, et ce
+        # n'est pas une anomalie -- elles valent alors vide, jamais un chiffre
+        # invente.
+        p_pres = _colonne(e_perf, "presence")
+        p_reac = _colonne(e_perf, "reactivite", "reactivity")
+        p_prop = _colonne(e_perf, "propose", "proposed")
+        p_vend = _colonne(e_perf, "vendu", "sold")
+        p_conv = _colonne(e_perf, "taux conv", "conversion")
+        p_ppv_eur = _colonne(e_perf, "ca ppv")
+        p_tips_eur = _colonne(e_perf, "ca tips")
+        if largeur:
+            (p_name, p_tot, p_nb_ventes, p_nb_ppv, p_nb_tips, p_pres, p_reac,
+             p_prop, p_vend, p_conv, p_ppv_eur, p_tips_eur) = [
+                (x if x < largeur else -1) for x in
+                (p_name, p_tot, p_nb_ventes, p_nb_ppv, p_nb_tips, p_pres,
+                 p_reac, p_prop, p_vend, p_conv, p_ppv_eur, p_tips_eur)]
+        for nom, idx in (("chatteur", p_name), ("montant net", p_tot)):
+            if idx < 0 and nom not in colonnes_perf_manquantes:
+                colonnes_perf_manquantes.append(nom)
+        if p_name < 0 or p_tot < 0:
+            continue                        # ce tableau ne dit rien d'utile
+
+        for row in l_perf:
+            if len(row) <= max(p_name, p_tot):
+                if any((c or "").strip() for c in row):
+                    chatters_illisibles += 1
+                continue
+            nom = _cellule(row, p_name).strip()
+            if not nom:
+                continue
+            cle = nom.lower()
+            c = _par_nom.get(cle)
+            if c is None:
+                # « Indetermine (Creatrice) » n'est pas quelqu'un : MyPuls met
+                # ce libelle quand la vente n'est rattachee a aucun chatteur.
+                # On le MARQUE sans le retirer — l'argent a bien ete encaisse,
+                # il doit rester dans le CA ; c'est la PART A PAYER qui doit
+                # l'ignorer.
+                c = {"non_attribue": _est_non_attribue(nom), "name": nom,
+                     "presence": "", "reactivity": "", "proposed": 0,
+                     "sold": 0, "conv_rate": "",
+                     "ca_ppv": 0.0, "ca_tips": 0.0, "ca_total": 0.0,
+                     "nb_ventes": 0, "nb_medias_prives": 0, "nb_pourboires": 0}
+                _par_nom[cle] = c
+                _ordre.append(cle)
+            # Le montant s'ADDITIONNE entre les tableaux de devise : la
+            # ventilation propre vient de ca_eur / ca_usd, poses plus bas
+            # depuis le log.
+            c["ca_total"] += _parse_amount(_cellule(row, p_tot))
+            for champ, idx in (("nb_ventes", p_nb_ventes),
+                               ("nb_medias_prives", p_nb_ppv),
+                               ("nb_pourboires", p_nb_tips)):
+                if idx >= 0:
+                    c[champ] += _premier_nombre(_cellule(row, idx))
+            for champ, idx in (("presence", p_pres), ("reactivity", p_reac),
+                               ("conv_rate", p_conv)):
+                if idx >= 0 and not c[champ]:
+                    c[champ] = _cellule(row, idx)
+            for champ, idx in (("proposed", p_prop), ("sold", p_vend)):
+                if idx >= 0:
+                    c[champ] += _parse_amount(_cellule(row, idx)) or 0
+            # Ancienne forme : les montants par famille etaient donnes.
+            if p_ppv_eur >= 0:
+                c["ca_ppv"] += _parse_amount(_cellule(row, p_ppv_eur))
+            if p_tips_eur >= 0:
+                c["ca_tips"] += _parse_amount(_cellule(row, p_tips_eur))
+
+    chatters = [_par_nom[k] for k in _ordre]
+
+    # LES MONTANTS PAR FAMILLE VIENNENT DU LOG quand la page ne les donne
+    # plus. Le log porte le type de chaque vente (« Media prive »,
+    # « Pourboires »...) et categorie_transaction sait le classer -- c'est la
+    # meme regle que partout ailleurs, pas une seconde definition.
+    if not any(c["ca_ppv"] or c["ca_tips"] for c in chatters):
+        _fam: Dict[str, Dict[str, float]] = {}
+        for t in transactions:
+            cle = (t.get("chatter") or "").strip().lower()
+            if not cle:
+                continue
+            f = categorie_transaction(t.get("type"))
+            d = _fam.setdefault(cle, {"Messages": 0.0, "Tips": 0.0})
+            if f in d:
+                d[f] += float(t.get("amount") or 0)
+        for c in chatters:
+            d = _fam.get((c["name"] or "").strip().lower())
+            if d:
+                c["ca_ppv"] = round(d["Messages"], 2)
+                c["ca_tips"] = round(d["Tips"], 2)
+
     # CA par DEVISE et par CHATTEUR, reconstruit depuis le log de transactions
     # (la table perf additionne EUR MyM et USD OnlyFans dans la même colonne :
     # payer là-dessus en convertissant tout comme des EUR surpaie les ventes OF).
@@ -1692,6 +1922,10 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
         # colonnes avaient bouge. Une capture d'ecran de moins a demander.
         "entetes_log": list(tables[i_log][0] or []),
         "entetes_perf": list(tables[i_perf][0] or []),
+        # Un tableau par devise depuis la refonte : on dit combien on en a
+        # lu, sinon « 34 chatteurs classes » cote MyPuls et 34 chez nous
+        # peuvent cacher un bloc USD entier laisse de cote.
+        "tables_chatteurs": list(i_perfs),
         "colonnes_manquantes": colonnes_log_manquantes + colonnes_perf_manquantes,
         "tables_reconnues": not entetes_manquants,
         "nb_tables": len(tables),
