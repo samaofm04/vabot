@@ -50759,6 +50759,91 @@ def create_app():
             return None
         return f
 
+    @app.route("/api/rig/mypuls_tables")
+    def rig_mypuls_tables():
+        """La STRUCTURE de la page MyPuls, derriere le jeton du parc.
+
+        POURQUOI. Leur page a ete refaite : onglets « Ventes de synthese /
+        Detail des ventes / Resume chatter », une colonne « # » en tete, des
+        tableaux separes par devise, et des colonnes qui ont change de NATURE
+        -- « Pourboires » compte des pourboires la ou l ancienne « CA Tips »
+        portait des euros. Mapper a l aveugle ferait afficher « 21 € » pour
+        21 pourboires : un chiffre faux qui a l air vrai.
+
+        CE QU ELLE NE REND PAS : aucune valeur de cellule, aucun nom de
+        chatteur, aucun montant. Seulement les en-tetes, le nombre de lignes
+        et de colonnes, et -- pour les seules cellules de la premiere ligne --
+        leur FORME (« nombre », « montant EUR », « texte »), jamais leur
+        contenu. C est ce qu il faut pour mapper, et rien de plus.
+        """
+        from flask import jsonify
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        try:
+            import mypuls
+        except Exception as e:
+            return jsonify({"ok": False, "error": type(e).__name__}), 500
+        from datetime import date as _d, timedelta as _td
+        fin = (request.args.get("to") or _d.today().isoformat()).strip()
+        debut = (request.args.get("from")
+                 or (_d.today() - _td(days=29)).isoformat()).strip()
+
+        s_ = mypuls._make_session()
+        if s_ is None:
+            return jsonify({"ok": False, "error": "cookies_absents"})
+        try:
+            fin_excl = (_d.fromisoformat(fin) + _td(days=1)).isoformat()
+        except Exception:
+            fin_excl = fin
+        url = "%s/creator/messaging-money-team?start=%s&end=%s" % (
+            mypuls.BASE_URL, debut, fin_excl)
+        try:
+            r = s_.get(url, timeout=mypuls.TIMEOUT)
+        except Exception as e:
+            return jsonify({"ok": False, "error": "reseau: %s" % type(e).__name__})
+        if r.status_code != 200:
+            return jsonify({"ok": False, "error": "http_%s" % r.status_code})
+        if mypuls._detect_login_redirect(r.text):
+            return jsonify({"ok": False, "error": "cookies_expires"})
+
+        def _forme(c):
+            """La NATURE d'une cellule, jamais son contenu."""
+            t = (c or "").strip()
+            if not t:
+                return "vide"
+            if re.search(r"[0-9]", t):
+                if re.search(r"(?i)(eur|usd|[€$])", t):
+                    return "montant"
+                if re.fullmatch(r"[\d\s.,]+", t):
+                    return "nombre"
+                if "%" in t:
+                    return "pourcentage"
+                return "texte+chiffres"
+            return "texte"
+
+        tables = mypuls._extract_tables(r.text)
+        vues = []
+        for i, (entetes, lignes) in enumerate(tables):
+            vues.append({
+                "table": i,
+                "entetes": entetes,
+                "nb_entetes": len(entetes),
+                "nb_lignes": len(lignes),
+                "nb_colonnes": mypuls._largeur(lignes),
+                "formes_1re_ligne": [_forme(c) for c in (lignes[0] if lignes else [])],
+            })
+        # Les onglets sont-ils DANS le HTML, ou charges par le navigateur ?
+        # S ils sont charges apres coup, le scraping ne verra jamais que le
+        # premier -- et « Detail des ventes » (le journal) manquerait.
+        bas = r.text.lower()
+        onglets = {mot: (mot in bas) for mot in
+                   ("ventes de synth", "detail des ventes", "d\u00e9tail des ventes",
+                    "resume chatter", "r\u00e9sum\u00e9 chatter")}
+        return jsonify({"ok": True, "periode": [debut, fin],
+                        "octets": len(r.text), "nb_tables": len(tables),
+                        "tables": vues, "onglets_dans_le_html": onglets})
+
     @app.route("/api/rig/mypuls_limite")
     def rig_mypuls_limite():
         """Le quota annonce par MyPuls, lu en un appel. En-tetes seulement."""
