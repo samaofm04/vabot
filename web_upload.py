@@ -51145,6 +51145,108 @@ def create_app():
                                                 "limite": lim_b}},
         })
 
+    @app.route("/api/rig/clics_liaison")
+    def rig_clics_liaison():
+        """Qui est rattache a quel lien de suivi, et par quelle regle.
+
+        Pour chaque lien GetMySocial : sa destination, le code de suivi qu'on
+        en tire (.../c85), ce que MyPuls dit de CE code, et ce que le
+        rapprochement PAR LE NOM donnerait. Quand les deux ne designent pas la
+        meme ligne, c'est signale — c'est exactement la ou le report peut
+        afficher les chiffres de quelqu'un d'autre.
+
+        Lecture seule : aucun reglage n'est modifie.
+        """
+        from flask import jsonify
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        try:
+            import mypuls
+            import gms
+            from cogs.clickrecap import (_code_suivi, _cle_nom,
+                                         _personne_du_lien, _nom_propre)
+        except Exception as e:
+            return jsonify({"ok": False, "error": "%s: %s" % (type(e).__name__, e)}), 500
+
+        # 1. Les liens de suivi MyPuls, une fois pour tous.
+        suivis = mypuls.api_tracking_links() or []
+        par_code = {}
+        par_nom = {}
+        for t in suivis:
+            par_code.setdefault(t.get("code"), t)
+            par_nom.setdefault(_cle_nom(t.get("nom")), t)
+
+        # 2. Les liens GetMySocial, filtres si un groupe est demande.
+        groupe = (request.args.get("groupe") or "").strip().lower()
+        try:
+            tous = gms.list_all_links(max_pages=50) or {}
+        except Exception as e:
+            return jsonify({"ok": False,
+                            "error": "GetMySocial : %s" % type(e).__name__}), 502
+        liens = tous.get("links") if isinstance(tous, dict) else tous
+        if not isinstance(liens, list):
+            return jsonify({"ok": False, "error": "format inattendu de GetMySocial"}), 502
+
+        # LES NOMS DE GROUPE, pour pouvoir filtrer sur « jessye ». Un lien ne
+        # porte que son group_id ; sans cette table on ne saurait pas de quelle
+        # categorie il releve.
+        try:
+            groupes = {str(g.get("id")): str(g.get("name") or "")
+                       for g in (gms.groups_via_api() or [])}
+        except Exception:
+            groupes = {}
+
+        lignes, sans_code, desaccords = [], 0, 0
+        for l in liens:
+            if not isinstance(l, dict):
+                continue
+            # LES VRAIS CHAMPS : « display_name » (« (ANDRY) 1 ») et « url »
+            # (« https://onlyfans.com/<pseudo>/c87 »). Le premier jet cherchait
+            # « name » et « destination », qui n'existent pas — la table
+            # serait sortie vide sans rien dire.
+            brut = _nom_propre(l.get("display_name") or "")
+            nom = _personne_du_lien(brut) or brut
+            grp = groupes.get(str(l.get("group_id") or ""), "")
+            if groupe and groupe not in grp.lower():
+                continue
+            dest = str(l.get("url") or "").strip()
+            cd = _code_suivi(dest)
+            par_le_code = par_code.get(cd) if cd else None
+            par_le_nom = par_nom.get(_cle_nom(nom))
+            if not cd:
+                sans_code += 1
+            accord = (par_le_code is not None and par_le_nom is not None
+                      and par_le_code.get("code") == par_le_nom.get("code"))
+            if par_le_code is not None and par_le_nom is not None and not accord:
+                desaccords += 1
+            lignes.append({
+                "lien": brut, "personne": nom, "groupe": grp,
+                "destination": dest[-60:],
+                "code": cd,
+                "par_le_code": ({"code": par_le_code.get("code"),
+                                 "nom": par_le_code.get("nom"),
+                                 "abonnes": par_le_code.get("abonnes"),
+                                 "visites": par_le_code.get("visites")}
+                                if par_le_code else None),
+                "par_le_nom": ({"code": par_le_nom.get("code"),
+                                "nom": par_le_nom.get("nom"),
+                                "abonnes": par_le_nom.get("abonnes"),
+                                "visites": par_le_nom.get("visites")}
+                               if par_le_nom else None),
+                "desaccord": bool(par_le_code is not None and par_le_nom is not None
+                                  and not accord),
+            })
+
+        lignes.sort(key=lambda x: (not x["desaccord"], x["lien"].lower()))
+        return jsonify({
+            "ok": True, "groupe_demande": groupe or "(tous)",
+            "liens_gms": len(lignes), "liens_suivi_mypuls": len(suivis),
+            "sans_code_de_suivi": sans_code,
+            "desaccords_nom_vs_code": desaccords,
+            "lignes": lignes[:200],
+        })
+
     @app.route("/api/rig/mypuls_limite")
     def rig_mypuls_limite():
         """Le quota annonce par MyPuls, lu en un appel. En-tetes seulement."""
