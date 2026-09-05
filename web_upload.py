@@ -35552,14 +35552,22 @@ def _render_gmsdash_html() -> str:
         _has_k2 = bool(gms.get_dash_key())
     except Exception:
         _has_k2 = False
+    # LE BADGE COMPTE LES CLES QUI REPONDENT, pas celles qui sont ecrites
+    # dans la config. Pendant les dix minutes ou tout le pool etait a
+    # l'ecart, il annoncait « 8 cles dediees actives » : pas seulement muet,
+    # faux, et c'est le seul endroit du site qui parle du pool.
+    _n_hs = 0
     try:
-        _n_k2 = len(gms.get_dash_keys())
+        _pool_k2 = gms.get_dash_keys()
+        _n_k2 = gms.cles_saines()
+        _n_hs = len(_pool_k2) - _n_k2
     except Exception:
         _n_k2 = 1 if _has_k2 else 0
     _pl_k2 = "s" if _n_k2 > 1 else ""
     key2_html = (f"<span id='gd-key2wrap' style='font-size:11px;color:#4ade80;font-weight:700;"
                  "display:inline-flex;align-items:center;gap:8px'>🔑 "
-                 f"{_n_k2} clé{_pl_k2} dédiée{_pl_k2} active{_pl_k2} "
+                 f"{_n_k2} clé{_pl_k2} dédiée{_pl_k2} active{_pl_k2}"
+                 + (f" · {_n_hs} en repli" if _n_hs else "") + " "
                  "<button class='gd-sel' style='min-width:auto;cursor:pointer;font-size:11px;padding:5px 9px' "
                  "onclick='gdChangeKey()' title='Remplacer la clé dédiée'>changer</button></span>"
                  if _has_k2 else
@@ -35716,7 +35724,7 @@ function gdChangeKey(){
   fetch('/gmsdash/keys', {credentials:'same-origin'}).then(function(r){ return r.json(); }).then(function(d){
     if(!d || !d.ok){ panel.innerHTML = ''; return; }
     var rows = gdKeyRow('main', '🏛 Clé PRINCIPALE — report horaire + paie', d.main);
-    for(var i = 1; i <= 4; i++){
+    for(var i = 1; i <= 8; i++){
       rows += gdKeyRow('k' + i, '↓ Clé dédiée ' + i + ' — dashboard', (d.pool || [])[i - 1] || '');
     }
     panel.innerHTML = '<div style="background:#0f1116;border:1px solid #23262f;border-radius:14px;padding:16px 18px;margin-bottom:14px">'
@@ -35740,7 +35748,7 @@ function gdKeyRow(id, label, cur){
 }
 function gdSaveKeys(){
   var fd = new FormData();
-  ['main', 'k1', 'k2', 'k3', 'k4'].forEach(function(f){
+  ['main', 'k1', 'k2', 'k3', 'k4', 'k5', 'k6', 'k7', 'k8'].forEach(function(f){
     var el = document.getElementById('gd-kf-' + f);
     fd.append(f, (el && el.value || '').trim());
   });
@@ -48486,7 +48494,10 @@ def create_app():
         import gms
         cur_pool = gms.get_dash_keys()
         new_pool = []
-        for i in range(4):
+        # HUIT emplacements et non quatre : le quota GetMySocial est PAR
+        # CLE, et quatre voies ne suffisaient plus - la rafale du report
+        # saturait le pool et les clics par lien disparaissaient.
+        for i in range(8):
             v = (request.form.get(f"k{i + 1}") or "").strip()
             if v == "-":
                 continue
@@ -48497,6 +48508,13 @@ def create_app():
             if not v.startswith("gms_"):
                 return jsonify({"ok": False, "error": f"clé dédiée {i + 1} invalide (gms_…)"})
             new_pool.append(v)
+        # LES CLES AU-DELA DES EMPLACEMENTS AFFICHES SONT CONSERVEES. Le
+        # panneau n'en montre que huit : sans ce report, une neuvieme clé
+        # configurée à la main disparaissait au premier enregistrement, et
+        # la réponse annonçait un succès.
+        _au_dela = cur_pool[8:]
+        if _au_dela:
+            new_pool.extend(_au_dela)
         main_v = (request.form.get("main") or "").strip()
         if main_v and main_v != "-":
             if not main_v.startswith("gms_") or len(main_v) < 20:
@@ -48509,7 +48527,8 @@ def create_app():
                 ping_ok = bool((gms.ping() or {}).get("ok"))
             except Exception:
                 ping_ok = False
-        return jsonify({"ok": True, "pool_count": len(new_pool), "main_ping": ping_ok})
+        return jsonify({"ok": True, "pool_count": len(new_pool),
+                        "hors_panneau": len(_au_dela), "main_ping": ping_ok})
 
     @app.route("/gmsdash/set_main_key", methods=["POST"])
     def gmsdash_set_main_key():

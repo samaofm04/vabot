@@ -540,7 +540,7 @@ def _alerte_clics(d: dict) -> str:
     distinguer ca d une journee sans le moindre clic.
     """
     hs = d.get("clics_hs")
-    if not isinstance(hs, dict) or not hs.get("echecs"):
+    if not isinstance(hs, dict) or not (hs.get("echecs") or hs.get("partiels")):
         return ""
     ech, tot = int(hs.get("echecs") or 0), int(hs.get("appels") or 0)
     detail = ""
@@ -551,11 +551,25 @@ def _alerte_clics(d: dict) -> str:
                          html.escape(str(k.get("echecs") or "?")),
                          html.escape(str(k.get("dernier") or "?"))[:120]))
             break
+    part = int(hs.get("partiels") or 0)
+    # Un total de periode LAISSE VIDE est une information a part : le tableau
+    # peut etre presque complet et le total du marche rester inconnu, parce
+    # qu'un total n a de sens que complet.
+    mot_part = ("<div class='d'>%s total%s de période laissé%s vide : une "
+                "lecture partielle n’est pas un total.</div>"
+                % (_num(part), "s" if part > 1 else "", "s" if part > 1 else "")
+                ) if part else ""
+    if not ech:
+        return ("<div class='alerte'><div class='t'>Total de marché incomplet"
+                "</div>Le détail par lien est lu, mais au moins une période "
+                "n’a pas pu être totalisée en entier : son chiffre de marché "
+                "affiche « — ».%s%s</div>"
+                % (mot_part, ("<div class='d'>%s</div>" % detail) if detail else ""))
     return ("<div class='alerte'><div class='t'>Clics par lien indisponibles</div>"
             "%s appel%s d’analytics sur %s ont échoué. Les colonnes de clics "
             "affichent « — » : cela veut dire <b>non lu</b>, pas zéro. "
-            "Les abonnés, eux, sont justes.%s</div>"
-            % (_num(ech), "s" if ech > 1 else "", _num(tot),
+            "Les abonnés, eux, sont justes.%s%s</div>"
+            % (_num(ech), "s" if ech > 1 else "", _num(tot), mot_part,
                ("<div class='d'>%s</div>" % detail) if detail else ""))
 
 

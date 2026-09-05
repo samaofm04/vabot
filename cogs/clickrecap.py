@@ -52,6 +52,24 @@ def _analytics_reparti(gms, lid, a, b):
         return _tagged_analytics(gms, lid, a, b)
 
 
+def _lot_reparti(gms, ids, a, b):
+    """analytics_for_links sur une cle du POOL, meme rotation que le detail."""
+    try:
+        with gms.use_key(gms.next_dash_key()):
+            return _tagged_lot(gms, ids, a, b)
+    except AttributeError:
+        return _tagged_lot(gms, ids, a, b)
+
+
+def _tagged_lot(gms, ids, a, b):
+    """Le releve d'un LOT de liens, etiquete 'report'."""
+    try:
+        with gms.api_tag("report"):
+            return gms.analytics_for_links(ids, a, b)
+    except AttributeError:
+        return gms.analytics_for_links(ids, a, b)
+
+
 def _tagged_analytics(gms, lid, a, b):
     """analytics_for_link étiqueté 'report' (instrumentation gms.api_usage)."""
     try:
@@ -766,7 +784,9 @@ class ClickRecap(commands.Cog):
         _MAX_PER_LIEN = 60
         cyc_s, cyc_e = _pay_period(today)
         rows, cumul, detail_ok = [], [None, None, None, None], False
-        _appels, _echoues = 0, 0
+        _appels, _echoues = 0, 0         # le DETAIL par lien
+        _lot_appels, _lot_echoues = 0, 0  # le total hebdomadaire, en lot
+        _partiels, _tronque_lot = 0, 0
         # Le nom affiche ne porte pas la destination : on la garde a part pour
         # en tirer le code de suivi MyPuls (…/c85) plus bas.
         _dest_par_nom = {}
@@ -774,12 +794,17 @@ class ClickRecap(commands.Cog):
             # analytics_for_link plutot que clicks_for_link : MEME appel reseau,
             # mais il rend aussi le detail par pays. Les clics du marche sortent
             # donc gratuitement — les demander a part aurait double la facture.
+            # « Cette semaine » ne sert QU'AU total du resume, jamais au
+            # detail par lien : la demander lien par lien coutait trente
+            # appels pour une colonne que personne n'affiche. Elle est
+            # demandee en LOT, plus bas — un appel par paquet.
             _plages = [
                 (today, today),          # today
                 (yest, yest),            # yesterday
-                (week_start, today),     # this week
                 (cyc_s, cyc_e),          # current pay period
             ]
+            # Ou chaque plage atterrit dans `cumul`, qui garde ses 4 cases.
+            _vers_cumul = (0, 1, 3)
             # Concurrence BORNEE. Sans elle, 20 liens x 4 periodes partaient en
             # 80 appels simultanes : GetMySocial en laissait tomber la moitie,
             # et le tableau se remplissait de « — » alors que les memes appels,
@@ -818,16 +843,73 @@ class ClickRecap(commands.Cog):
                            if not (isinstance(c, tuple) and c[0] is not None))
 
             cumul = [0, 0, 0, 0]
+            _lus = [0, 0, 0, 0]          # combien de liens ont repondu, par periode
+            _partiels = 0                # periodes rendues inconnues faute d'etre completes
             for m, quatre in zip([m for m in metas if m.get("id")], per):
                 label = m.get("display_name") or m.get("shortcode") or "?"
                 paires = [_duo_de(c) for c in quatre]
                 for i, (u, _t) in enumerate(paires):
                     if u is not None:
-                        cumul[i] += u
+                        cumul[_vers_cumul[i]] += u
+                        _lus[_vers_cumul[i]] += 1
                 rows.append((label, paires))
                 _dest_par_nom[str(label)] = m.get("destination") or ""
             rows.sort(key=lambda r: (-((r[1][0][1]) or 0), -((r[1][2][1]) or 0),
-                                     -((r[1][3][1]) or 0), str(r[0])))
+                                     str(r[0])))
+
+            # UNE LECTURE PARTIELLE N'EST PAS UN TOTAL.
+            #
+            # Premiere version : on n'annulait `cumul` que si AUCUN lien
+            # n'avait repondu. Vingt-neuf liens sur trente qui tombent
+            # laissaient donc passer le chiffre du trentieme, affiche comme
+            # le total du marche — un total faux d'un facteur trente, et
+            # d'autant plus credible qu'il n'a pas l'air d'un zero.
+            #
+            # Un total n'a de sens que complet : des qu'un lien manque, la
+            # periode est inconnue.
+            _attendus = len([m for m in metas if m.get("id")])
+            for _i in (0, 1, 3):
+                if _lus[_i] < _attendus:
+                    cumul[_i] = None
+                    _partiels += 1
+
+            # « Cette semaine », en LOT. GetMySocial refuse les paquets trop
+            # gros (400 « link_id must contain at least one value » a trente),
+            # d'ou le decoupage par quinze. Un paquet qui tombe rend la
+            # periode entiere inconnue plutot qu'amputee.
+            cumul[2] = None
+            if pays_marche:
+                _ids_lot = [m["id"] for m in metas if m.get("id")]
+                _paquets = [_ids_lot[i:i + 15]
+                            for i in range(0, len(_ids_lot), 15)]
+                _sem_res = await asyncio.gather(*[
+                    asyncio.to_thread(_lot_reparti, gms, _pq,
+                                      week_start.isoformat(), today.isoformat())
+                    for _pq in _paquets])
+                if _sem_res and all(isinstance(x, tuple) and x[0] is not None
+                                    for x in _sem_res):
+                    # LE TOP PAYS EST PLAFONNE (~10 entrees). Sur un paquet de
+                    # quinze liens, un pays du marche peut tomber hors du top
+                    # et compter pour zero — un chiffre ampute, presente comme
+                    # lu. On le DETECTE : GetMySocial rend aussi le total, donc
+                    # la part couverte par le top se mesure. En dessous de 95 %,
+                    # la traine est trop grosse pour qu'on affirme quoi que ce
+                    # soit.
+                    _somme, _sur = 0, True
+                    for _t, _pays in _sem_res:
+                        _couvert = sum((_pays or {}).values())
+                        if _t and _couvert < 0.95 * _t:
+                            _sur = False
+                            break
+                        _somme += sum(v for k, v in (_pays or {}).items()
+                                      if k in pays_marche)
+                    if _sur:
+                        cumul[2] = _somme
+                    else:
+                        _tronque_lot += 1
+                _lot_appels += len(_paquets)
+                _lot_echoues += sum(1 for x in _sem_res
+                                    if not (isinstance(x, tuple) and x[0] is not None))
             detail_ok = True
 
         # ---- L'embed ---------------------------------------------------------
@@ -868,7 +950,7 @@ class ClickRecap(commands.Cog):
                     "team_id": c.get("team_id") or "",
                     "group_id": c.get("group_id") or "",
                     "resume": [], "abonnes": [], "par_lien": []}
-        if _echoues:
+        if _echoues or _partiels:
             # La page en fera une banniere : « — » partout doit s'expliquer.
             try:
                 _cles_hs = gms.sante_cles()
@@ -876,6 +958,7 @@ class ClickRecap(commands.Cog):
                 _cles_hs = []
             _donnees["clics_hs"] = {
                 "echecs": _echoues, "appels": _appels,
+                "partiels": _partiels,
                 "cles": [k for k in _cles_hs if k.get("ecartee") or k.get("echecs")],
             }
         for etiquette, marche_v, total_v in (
@@ -898,7 +981,22 @@ class ClickRecap(commands.Cog):
                 lignes_resume.append(f"`{etiquette:<12}` 🌍 **{_n(total_v)}**")
         emb.add_field(name="​", value="\n".join(lignes_resume), inline=False)
 
-        if _echoues:
+        if _lot_echoues or _tronque_lot:
+            # A NE PAS CONFONDRE avec l'echec du detail : ici le tableau par
+            # lien est INTACT, seul le total hebdomadaire du marche manque.
+            # La premiere version versait ces echecs dans `_echoues` et
+            # accusait des colonnes qui allaient parfaitement bien.
+            emb.add_field(
+                name="⚠️ Weekly market total unavailable",
+                value=("The per-link table below is complete. Only the "
+                       "**This week** market figure could not be established "
+                       "(%s). It shows as `—`."
+                       % ("%d/%d batch call(s) failed" % (_lot_echoues, _lot_appels)
+                          if _lot_echoues else
+                          "country breakdown truncated beyond reliable reading")),
+                inline=False)
+
+        if _echoues or _partiels:
             _det = ""
             try:
                 _k = [k for k in gms.sante_cles() if k.get("ecartee")]
@@ -912,8 +1010,11 @@ class ClickRecap(commands.Cog):
             emb.add_field(
                 name="⚠️ Per-link clicks unavailable",
                 value=("%d/%d analytics calls failed — the click columns show "
-                       "`—`, which means **not read**, not zero.%s"
-                       % (_echoues, _appels, _det)),
+                       "`—`, which means **not read**, not zero.%s%s"
+                       % (_echoues, _appels,
+                          ("\n%d period total(s) left blank: a partial read is "
+                           "not a total." % _partiels) if _partiels else "",
+                          _det)),
                 inline=False)
 
         if all_none:
@@ -988,11 +1089,11 @@ class ClickRecap(commands.Cog):
                 _donnees["par_lien"] = [
                     {"lien": _nom_propre(lab),
                      "periodes": [{"marche": p[i][0], "total": p[i][1]}
-                                  for i in (0, 1, 3)]}
+                                  for i in (0, 1, 2)]}
                     for lab, p in sorted(rows, key=lambda x: _cle_tri(x[0]))]
                 lignes_plates = [
                     f"{_nom_propre(lab)[:17]:<18}"
-                    + "".join(_duo_col(p[i]) for i in (0, 1, 3))
+                    + "".join(_duo_col(p[i]) for i in (0, 1, 2))
                     for lab, p in sorted(rows, key=lambda x: _cle_tri(x[0]))
                 ]
 

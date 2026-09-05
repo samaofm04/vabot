@@ -89,6 +89,16 @@ def next_dash_key() -> str:
         # principale plutot que d'insister sur des voies mortes. C'est ce
         # repli qui manquait : sans lui, un pool hors service emportait la
         # totalite des clics par lien.
+        #
+        # Mais un repli MUET serait le meme travers d'un cran plus loin : le
+        # trafic du dashboard part alors sur la cle du report et de la PAIE,
+        # et le soir la paie prend des 429 sans que rien n'explique pourquoi.
+        # On le compte. Sans pool configure, en revanche, il n'y a rien a
+        # signaler : c'est le fonctionnement normal.
+        if get_dash_keys():
+            with _SANTE_LOCK:
+                _REPLIS["n"] += 1
+                _REPLIS["quand"] = time.time()
         return ""
     with _GMS_GATE_LOCK:
         i = _DASH_RR[0]
@@ -452,6 +462,28 @@ def noter_cle(cle: str, ok: bool, message: str = "") -> None:
             e["jusqu"] = time.time() + DUREE_ECART
 
 
+_REPLIS = {"n": 0, "quand": 0.0}    # dashboard reparti sur la cle de paie
+
+
+def replis_principale() -> dict:
+    """Combien d'appels sont partis sur la cle principale faute de pool sain.
+
+    A regarder quand la paie se met a echouer sans raison apparente : si ce
+    compteur monte, c'est le dashboard qui occupe sa voie.
+    """
+    with _SANTE_LOCK:
+        n, q = _REPLIS["n"], _REPLIS["quand"]
+    return {"n": n, "depuis_s": int(time.time() - q) if q else None}
+
+
+def cles_saines() -> int:
+    """Combien de cles dediees repondent encore. Le panneau affichait le
+    nombre de cles CONFIGUREES : pendant les dix minutes ou les huit voies
+    etaient mortes, il annoncait « 8 cles dediees actives ». Pas seulement
+    muet : faux."""
+    return sum(1 for k in get_dash_keys() if not cle_ecartee(k))
+
+
 def cle_ecartee(cle: str) -> bool:
     with _SANTE_LOCK:
         e = _SANTE.get(str(cle or ""))
@@ -720,14 +752,14 @@ def clicks_for_link(link_id: str, start_date: str, end_date: str) -> Optional[in
         return None  # payload illisible -> « indispo » (—), pas un faux 0 (sous-paie)
 
 
-def analytics_for_link(link_id: str, start_date: str, end_date: str):
-    """(total_clicks, {country_code: count}) pour UN lien sur une periode.
-    Le detail pays vient de `top_countries` (top ~10 -> un pays eligible hors du
-    top peut manquer = leger sous-comptage, cote "on ne surpaye pas").
-    Retourne (None, None) si l'appel echoue."""
-    if not link_id:
-        return None, None
-    res = get_analytics_overview(start_date, end_date, link_ids=[link_id])
+def _lire_analytics(res):
+    """(total_clicks, {country_code: count}) depuis une reponse d'overview.
+
+    Le detail pays vient de `top_countries` (top ~10 -> un pays eligible hors
+    du top peut manquer = leger sous-comptage, cote "on ne surpaye pas").
+    Rend (None, None) si l'appel a echoue - surtout pas (0, {}), qui se
+    lirait « personne n'a clique ».
+    """
     if not res.get("ok"):
         return None, None
     d = res.get("data")
@@ -747,6 +779,81 @@ def analytics_for_link(link_id: str, start_date: str, end_date: str):
         except Exception:
             pass
     return total, countries
+
+
+_ANA_CACHE = {}
+_ANA_LOCK = _threading.Lock()
+TTL_ANALYTICS = 180      # periode CLOSE : elle ne changera plus
+TTL_OUVERT = 90          # periode en cours : elle bouge encore
+
+
+def _analytics_cachee(ids, start_date: str, end_date: str):
+    """Le releve d'un lien (ou d'un lot), servi depuis une memoire courte.
+
+    Le report horaire et la page publique calculent EXACTEMENT la meme chose,
+    chacun de son cote : quatre-vingt-dix appels a une minute d'intervalle
+    pour un resultat identique, sur un quota qui ne suit deja pas. Trois
+    minutes de memoire n'en font qu'un.
+
+    HYPOTHESE ASSUMEE : toutes les cles configurees appartiennent au MEME
+    compte GetMySocial et voient donc les memes chiffres. C'est ce qui permet
+    au releve pris par le pool de servir a la voie principale, et c'est tout
+    l'interet de ce cache. Une cle d'un autre compte rendrait ici des chiffres
+    qui ne sont pas ceux de l'espace — le panneau n'accepte que des cles du
+    compte, mais l'hypothese merite d'etre dite.
+
+    UN ECHEC N'EST JAMAIS MIS EN CACHE. Geler un 429 pendant trois minutes
+    transformerait une secousse passagere en panne franche, et la page
+    afficherait « non lu » longtemps apres que la source soit revenue.
+    """
+    # LE JOUR COURANT ENTRE DANS LA CLE. Un releve de « aujourd hui » pris a
+    # 23h59 restait servi a 00h01 pour ce qui etait devenu « hier », ampute
+    # de sa derniere minute et fige comme definitif. Changer de jour vide de
+    # fait les entrees de la veille.
+    aujourdhui = time.strftime("%Y-%m-%d")
+    cle = (tuple(ids), str(start_date), str(end_date), aujourdhui)
+    maintenant = time.time()
+    # Une periode ENCORE OUVERTE (elle se termine aujourd hui ou plus tard)
+    # bouge a chaque clic : on la garde moins longtemps qu'une periode close,
+    # qui, elle, ne changera plus jamais.
+    ttl = TTL_ANALYTICS if str(end_date) < aujourdhui else TTL_OUVERT
+    with _ANA_LOCK:
+        v = _ANA_CACHE.get(cle)
+        if v and (maintenant - v[0]) < ttl:
+            return v[1]
+    res = _lire_analytics(
+        get_analytics_overview(start_date, end_date, link_ids=list(ids)))
+    if res[0] is not None:
+        with _ANA_LOCK:
+            _ANA_CACHE[cle] = (maintenant, res)
+            if len(_ANA_CACHE) > 4000:
+                # Borne dure : on ne garde pas la memoire de tous les liens de
+                # tous les jours. Les plus vieux partent en premier.
+                for k in sorted(_ANA_CACHE, key=lambda x: _ANA_CACHE[x][0])[:1000]:
+                    _ANA_CACHE.pop(k, None)
+    return res
+
+
+def analytics_for_link(link_id: str, start_date: str, end_date: str):
+    """(total_clicks, {country_code: count}) pour UN lien sur une periode."""
+    if not link_id:
+        return None, None
+    return _analytics_cachee((link_id,), start_date, end_date)
+
+
+def analytics_for_links(link_ids, start_date: str, end_date: str):
+    """Le meme releve pour un LOT de liens, en UN SEUL appel.
+
+    Le total d'un groupe se tirait jusqu'ici en additionnant les relevés
+    lien par lien : trente appels la ou l'API en accepte un, et un resultat
+    MOINS juste - chaque lien ne rend que son top ~10 de pays, si bien que la
+    somme des tops perdait la traine. Ici le top est calcule par GetMySocial
+    sur l'ensemble.
+    """
+    ids = [i for i in (link_ids or []) if i]
+    if not ids:
+        return None, None
+    return _analytics_cachee(tuple(ids), start_date, end_date)
 
 
 def time_series_for_link(link_id: str, start_date: str, end_date: str,
