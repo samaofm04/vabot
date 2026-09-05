@@ -50921,7 +50921,12 @@ def create_app():
             "lecture_par_le_site": lecture,
             "ok": True, "periode": [debut, fin],
             "ventes": {"lues": len(ventes), "total_annonce": r.get("total_annonce"),
-                       "pages": r.get("pages"), "tronque": r.get("tronque")},
+                       "pages": r.get("pages"), "tronque": r.get("tronque"),
+                       # Le parallelisme s'enclenche-t-il vraiment ? Il depend
+                       # du nombre de cles SAINES : le croire sur parole,
+                       # c'est risquer de mesurer une acceleration qui n'a
+                       # jamais eu lieu.
+                       "parallele": r.get("parallele"), "fils": r.get("fils")},
             "montant_par_devise": par_devise,
             "montant_par_devise_champ_amount": par_devise_brut,
             "montant_par_kind": par_kind, "nb_par_kind": nb_par_kind,
@@ -52892,10 +52897,13 @@ def create_app():
             detail = "injoignable : %s" % type(e).__name__
         mypuls._noter_cle(r.get("id"), ok=etat, erreur=("" if etat else detail))
         if etat:
-            return _success("✓ Clé ajoutée et <b>validée</b> — "
-                            "%d clé(s) dans le trousseau." % r.get("total", 1))
-        return _success("⚠ Clé ajoutée mais <b>non validée</b> : %s"
-                        % html_escape(detail or "réponse inattendue"))
+            # TEXTE SIMPLE, PAS DE HTML. Le bandeau rend les messages avec
+            # textContent — par choix : ils portent des données venues du
+            # serveur. Une balise <b> s'y affichait donc en clair.
+            return _success("✓ Clé ajoutée et validée — %d clé(s) dans le "
+                            "trousseau." % r.get("total", 1))
+        return _success("⚠ Clé ajoutée mais NON validée : %s"
+                        % (detail or "réponse inattendue"))
 
     @app.route("/mypuls/keys/remove", methods=["POST"])
     def mypuls_keys_remove():
@@ -52949,18 +52957,12 @@ def create_app():
                 if r_l is not None:
                     reste = " — quota restant %s/%s" % (r_l, r_m or "?")
             mypuls._noter_cle(k["id"], ok=ok, erreur=("" if ok else mot))
-            lignes.append("<li><b>%s</b> <code>%s</code> : %s%s</li>"
-                          % (html_escape(k["label"]), html_escape(k["apercu"]),
-                             mot, html_escape(reste)))
+            lignes.append("%s (%s) : %s%s"
+                          % (k["label"], k["apercu"], mot, reste))
             _t.sleep(1.0)
         if not lignes:
             return _error("✕ Aucune clé dans le trousseau.")
-        return _success("<b>Test des clés</b><ul style='margin:8px 0 0 18px'>%s</ul>"
-                        "<div style='margin-top:8px;font-size:12px;color:#8a91a8'>"
-                        "Si le quota restant diminue de la même façon sur toutes les clés, "
-                        "il est compté par compte ou par IP — plusieurs clés n'apportent "
-                        "alors rien. S'il est indépendant, elles s'additionnent.</div>"
-                        % "".join(lignes))
+        return _success("Test des clés — " + " · ".join(lignes))
 
     @app.route("/mypuls/save_api_token", methods=["POST"])
     def mypuls_save_api_token():
