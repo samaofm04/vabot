@@ -43849,8 +43849,25 @@ def _render_mypuls_cookies_settings() -> str:
         import clics_portail
         from cogs.clickrecap import _load_report_cfg, _reports_configures
         _deja = {x["cle"]: x for x in clics_portail.liste()}
-        for _k, _c in _reports_configures(_load_report_cfg()):
-            _nom = str(_c.get("group_name") or _k)
+        # LES DEUX SOURCES. Les reports deja configures sur Discord, ET les
+        # espaces GetMySocial qui n'en ont pas : c'est justement pour ceux-la
+        # que ce lien existe — une equipe qui doit lire des chiffres sans
+        # qu'on installe le bot chez elle.
+        _entrees = [(_k, str(_c.get("group_name") or _k), None)
+                    for _k, _c in _reports_configures(_load_report_cfg())]
+        try:
+            import gms as _gms_p
+            _vus = {e[1].lower() for e in _entrees}
+            for _e in (_gms_p.teams_via_api() or []):
+                _tn = str(_e.get("name") or "").strip()
+                if not _tn or _tn.lower() in _vus:
+                    continue          # deja couvert par un report Discord
+                _entrees.append(("gms:" + str(_e.get("id") or ""), _tn,
+                                 {"team_id": str(_e.get("id") or "")}))
+        except Exception:
+            pass
+
+        for _k, _nom, _gms in _entrees:
             _j = _deja.get(_k)
             if _j:
                 _url = "%s/clics/%s" % (_adresse_publique(), _j["jeton"])
@@ -43870,14 +43887,32 @@ def _render_mypuls_cookies_settings() -> str:
                                  html_escape(_j["jeton"]))
                 )
             else:
+                # Le MARCHE se choisit a la creation : un espace Twitter US et
+                # un espace francais ne se lisent pas avec les memes pays, et
+                # deviner reviendrait a afficher une colonne qui ne veut rien
+                # dire. Il est fige dans le jeton, comme le reste.
+                _sel = ""
+                if _gms:
+                    _sel = (
+                        "<select name='marche' style='padding:6px 8px;background:#0b0e15;"
+                        "border:1px solid #2a3245;color:#e8eaf2;border-radius:7px;"
+                        "font-size:11.5px'>"
+                        "<option value='tout'>🌍 Tous pays</option>"
+                        "<option value='us'>🇺🇸 US</option>"
+                        "<option value='fr'>🇫🇷 FR</option>"
+                        "</select>"
+                        "<input type='hidden' name='team_id' value='%s'>"
+                        % html_escape(_gms.get("team_id") or ""))
                 _act = (
-                    "<form method='POST' action='/clics/lien/creer' style='margin:0'>"
+                    "<form method='POST' action='/clics/lien/creer' "
+                    "style='margin:0;display:flex;gap:7px;align-items:center'>"
                     "<input type='hidden' name='cle' value='%s'>"
                     "<input type='hidden' name='libelle' value='%s'>"
+                    "%s"
                     "<button type='submit' style='padding:7px 13px;background:rgba(99,102,241,.16);"
                     "border:1px solid rgba(99,102,241,.5);color:#818cf8;border-radius:7px;"
                     "font-size:12px;font-weight:600;cursor:pointer'>Créer le lien</button>"
-                    "</form>" % (html_escape(_k), html_escape(_nom))
+                    "</form>" % (html_escape(_k), html_escape(_nom), _sel)
                 )
             _rep_lignes.append(
                 "<div style='display:flex;align-items:center;gap:9px;padding:8px 11px;"
@@ -53438,7 +53473,16 @@ def create_app():
         lib = (request.form.get("libelle") or "").strip()
         if not cle:
             return _error("✕ Report non précisé.")
-        j = clics_portail.creer(cle, lib)
+        # Un espace GetMySocial n'a pas de salon Discord : sa portee voyage
+        # dans le formulaire, et elle est RECOPIEE dans le jeton — un espace
+        # renomme ne doit pas changer ce qu'une adresse deja envoyee affiche.
+        portee = None
+        if (request.form.get("team_id") or "").strip():
+            portee = {"team_id": (request.form.get("team_id") or "").strip(),
+                      "group_id": (request.form.get("group_id") or "").strip(),
+                      "nom": lib,
+                      "marche": (request.form.get("marche") or "tout").strip()}
+        j = clics_portail.creer(cle, lib, portee)
         return _success("✓ Lien prêt : %s/clics/%s" % (_adresse_publique(), j))
 
     @app.route("/clics/lien/revoquer", methods=["POST"])
@@ -60737,20 +60781,37 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         try:
             import clics_portail
 
-            def _construire_report(cle):
+            def _construire_report(cle, portee=None):
                 """Le MEME report que Discord, pas un second calcul.
 
                 Deux chemins de calcul finiraient par diverger, et le jour ou
                 ils divergent c'est le chiffre affiche a l'equipe qui devient
                 faux sans que personne ne le voie.
+
+                `portee` sert quand le lien vise un espace GetMySocial pour
+                lequel aucun salon Discord n'est configure : on fabrique la
+                meme structure de configuration que celle qu'aurait posee
+                /setreportclick, et on appelle la meme fonction.
                 """
                 import asyncio as _aio
                 from cogs.clickrecap import (ClickRecap, _load_report_cfg,
                                              _reports_configures)
+
+                class _Faux:
+                    """_build_group_report n'appelle aucun self.*"""
+
+                if portee:
+                    c = {"team_id": portee.get("team_id") or None,
+                         "group_id": portee.get("group_id") or None,
+                         "identity": portee.get("identity") or None,
+                         "group_name": portee.get("nom") or "Groupe",
+                         "marche": portee.get("marche") or "tout",
+                         # Sans group_id, c'est TOUT l'espace qu'on veut.
+                         "tout": not portee.get("group_id")}
+                    return _aio.run(ClickRecap._build_group_report(_Faux(), c))
+
                 for k, c in _reports_configures(_load_report_cfg()):
                     if k == cle:
-                        class _Faux:
-                            """_build_group_report n'appelle aucun self.*"""
                         return _aio.run(ClickRecap._build_group_report(_Faux(), c))
                 return None
 

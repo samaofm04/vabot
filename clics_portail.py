@@ -83,18 +83,36 @@ def liste() -> list:
                                key=lambda x: -(x[1] or {}).get("cree", 0))]
 
 
-def creer(cle: str, libelle: str = "") -> str:
-    """Un jeton pour un report (`serveur:salon`). Rend le jeton."""
+def creer(cle: str, libelle: str = "", portee: dict | None = None) -> str:
+    """Un jeton pour un report, ou pour un ESPACE GetMySocial. Rend le jeton.
+
+    DEUX PORTEES POSSIBLES, et la seconde n'est pas un raffinement :
+
+    - un report deja configure sur Discord (`serveur:salon`) ;
+    - un espace GetMySocial DIRECTEMENT (`{team_id, group_id, marche...}`).
+
+    Le second cas existe parce qu'une equipe peut avoir besoin de lire des
+    chiffres sans qu'on ait configure de salon pour eux — c'est meme la
+    raison d'etre de ce module : ne pas installer le bot ailleurs. Exiger un
+    report Discord prealable aurait remis exactement la dependance qu'on
+    voulait retirer.
+
+    UN SEUL jeton par portee : en creer un second ne ferait que semer des
+    adresses qui montrent la meme chose, sans moyen de savoir laquelle a ete
+    envoyee a qui.
+    """
     d = _charger()
-    # UN SEUL jeton par report : en creer un second ne ferait que semer des
-    # adresses qui montrent la meme chose, sans moyen de savoir laquelle a
-    # ete envoyee a qui.
     for j, v in d.items():
         if isinstance(v, dict) and v.get("cle") == cle:
             return j
     jeton = secrets.token_urlsafe(18)
     d[jeton] = {"cle": str(cle), "libelle": str(libelle or "")[:80],
                 "cree": int(time.time()), "vues": 0}
+    if portee:
+        # La portee est RECOPIEE dans le jeton, pas relue ailleurs : un espace
+        # renomme ou un salon reconfigure ne doit pas changer ce qu'une
+        # adresse deja envoyee affiche.
+        d[jeton]["portee"] = {k: str(v)[:60] for k, v in portee.items() if v}
     _ecrire(d)
     return jeton
 
@@ -168,7 +186,9 @@ def register(app, deps):
     """Branche `/clics/<jeton>`.
 
     `deps` doit fournir :
-        construire(cle) -> embed | None    le MEME report que Discord
+        construire(cle, portee) -> embed | None   le MEME report que Discord.
+        `portee` est None pour un report configure, ou le descripteur d'un
+        espace GetMySocial.
     """
     from flask import Response
 
@@ -184,13 +204,14 @@ def register(app, deps):
                             mimetype="text/plain; charset=utf-8")
 
         cle = str(d.get("cle") or "")
+        portee = d.get("portee") if isinstance(d.get("portee"), dict) else None
         hit = _CACHE.get(cle)
         if hit and (time.time() - hit[0]) < TTL_RENDU:
             _noter_vue(jeton)
             return Response(hit[1], mimetype="text/html; charset=utf-8")
 
         try:
-            emb = construire(cle)
+            emb = construire(cle, portee)
         except Exception as e:                       # noqa: BLE001
             emb = None
             print("[clics-portail] %s: %s" % (type(e).__name__, e), flush=True)
