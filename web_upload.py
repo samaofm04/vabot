@@ -51317,6 +51317,64 @@ def create_app():
             "propositions": out,
         })
 
+    @app.route("/api/rig/report_essai")
+    def rig_report_essai():
+        """Le report tel qu'il sera poste, sans le poster.
+
+        POURQUOI CETTE PORTE. Le report part sur Discord toutes les heures ;
+        pour verifier une modification, on attendait le tour suivant et on
+        regardait le salon — c'est-a-dire qu'on testait EN PRODUCTION, devant
+        l'equipe. `_build_group_report` n'utilise aucun etat du bot : on peut
+        donc la faire tourner ici et lire ce qu'elle rend.
+
+        ?cle=<serveur:salon> pour n'en construire qu'un ; sinon tous les
+        reports configures. Rien n'est ecrit, rien n'est envoye.
+        """
+        from flask import jsonify
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        import asyncio as _aio
+        try:
+            from cogs.clickrecap import (ClickRecap, _load_report_cfg,
+                                         _reports_configures)
+        except Exception as e:
+            return jsonify({"ok": False, "error": "%s: %s" % (type(e).__name__, e)}), 500
+
+        voulue = (request.args.get("cle") or "").strip()
+        configs = _reports_configures(_load_report_cfg())
+        if voulue:
+            configs = [(k, c) for k, c in configs if k == voulue]
+        if not configs:
+            return jsonify({"ok": False, "error": "aucun report configure",
+                            "cles": [k for k, _ in _reports_configures(_load_report_cfg())]})
+
+        class _Faux:
+            """`_build_group_report` n'appelle aucun self.* — un objet vide
+            suffit, et rien du bot n'est touche."""
+
+        out = []
+        for cle, c in configs[:4]:
+            try:
+                emb = _aio.run(ClickRecap._build_group_report(_Faux(), c))
+            except Exception as e:
+                out.append({"cle": cle, "erreur": "%s: %s" % (type(e).__name__, e)})
+                continue
+            if emb is None:
+                out.append({"cle": cle, "erreur": "GetMySocial injoignable (None)"})
+                continue
+            champs = [{"nom": f.name, "taille": len(f.value or ""),
+                       "trop_long": len(f.value or "") > 1024,
+                       "valeur": f.value} for f in (emb.fields or [])]
+            out.append({
+                "cle": cle, "groupe": c.get("group_name"),
+                "titre": emb.title, "description": emb.description,
+                "nb_champs": len(champs),
+                "champs_trop_longs": sum(1 for x in champs if x["trop_long"]),
+                "champs": champs,
+            })
+        return jsonify({"ok": True, "reports": out})
+
     @app.route("/api/rig/clics_liaison")
     def rig_clics_liaison():
         """Ce que le report rattachera desormais, lien par lien.
