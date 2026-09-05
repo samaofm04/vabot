@@ -43698,8 +43698,18 @@ def _render_mypuls_cookies_settings() -> str:
             "<div style='display:flex;align-items:center;gap:10px;padding:9px 12px;"
             "background:#0b0e15;border:1px solid #2a3245;border-radius:9px;margin-bottom:7px'>"
             "<div style='flex:1;min-width:0'>"
-            "<div style='font-weight:650;font-size:13px'>%s "
-            "<span style='color:#6b7280;font-weight:400;font-family:monospace'>%s</span></div>"
+            # LE NOM SE CORRIGE SUR PLACE. Un champ qui ressemble à du texte
+            # tant qu'on ne le touche pas : pas de bouton « modifier », pas
+            # d'écran de plus. Entrée ou clic ailleurs enregistre.
+            "<form method='POST' action='/mypuls/keys/rename' style='margin:0;display:flex;"
+            "align-items:center;gap:7px'>"
+            "<input type='hidden' name='id' value='%s'>"
+            "<input type='text' name='label' value='%s' maxlength='40' "
+            "title='Clique pour renommer' "
+            "onchange='this.form.submit()' "
+            "class='mp-cle-nom'>"
+            "<span style='color:#6b7280;font-weight:400;font-family:monospace;font-size:12px'>%s</span>"
+            "</form>"
             "%s</div>"
             "<div style='font-size:11.5px;color:#8a91a8'>%d appel(s)</div>"
             "%s"
@@ -43709,7 +43719,8 @@ def _render_mypuls_cookies_settings() -> str:
             "<button type='submit' title='Retirer' style='background:none;border:0;"
             "color:#8a91a8;cursor:pointer;font-size:15px;padding:2px 4px'>✕</button>"
             "</form>"
-            "</div>" % (html_escape(k["label"]), html_escape(k["apercu"]), err, k["appels"],
+            "</div>" % (html_escape(k["id"]), html_escape(k["label"]),
+                        html_escape(k["apercu"]), err, k["appels"],
                         pastille, html_escape(k["id"]))
         )
 
@@ -43718,6 +43729,16 @@ def _render_mypuls_cookies_settings() -> str:
         "Aucune clé enregistrée.</div>")
     # --- Bloc API officielle (X-API-TOKEN) : source complète (posts inclus) ---
     api_block = (
+        # Le nom d'une clé s'édite sur place : discret au repos, encadré dès
+        # qu'on le touche. En CSS et pas en attribut onfocus — du JavaScript
+        # dans un attribut demande d'imbriquer des apostrophes, et il en
+        # suffit d'une de trop pour fermer l'attribut au milieu.
+        "<style>"
+        ".mp-cle-nom{font-weight:650;font-size:13px;color:inherit;background:transparent;"
+        "border:1px solid transparent;border-radius:6px;padding:2px 6px;width:170px}"
+        ".mp-cle-nom:hover{border-color:#2a3245}"
+        ".mp-cle-nom:focus{border-color:#3b82f6;background:#0f1320;outline:none}"
+        "</style>"
         "<div class='box' style='border:2px solid #22c55e;margin-bottom:16px'>"
         "<h3 style='margin-top:0'>🔑 API MyPuls "
         + ("<span style='background:#22c55e;color:#fff;padding:2px 9px;border-radius:5px;font-size:11px'>CONNECTÉE</span>"
@@ -52904,6 +52925,25 @@ def create_app():
                             "trousseau." % r.get("total", 1))
         return _success("⚠ Clé ajoutée mais NON validée : %s"
                         % (detail or "réponse inattendue"))
+
+    @app.route("/mypuls/keys/rename", methods=["POST"])
+    def mypuls_keys_rename():
+        """Renomme une clé. Le nom est le SEUL moyen de les distinguer.
+
+        Quatre caractères de fin ne disent pas à quoi une clé sert. Avec dix
+        clés au trousseau, « Clé 7 » ne se différencie de « Clé 8 » que par ce
+        qu'on écrit dessus : le compte auquel elle appartient, le traitement
+        qu'elle sert. Sans ça, retirer la bonne relève du pari.
+        """
+        if not is_auth():
+            return redirect("/")
+        import mypuls
+        cle_id = (request.form.get("id") or "").strip()
+        label = (request.form.get("label") or "").strip()
+        if not label:
+            return _error("✕ Un nom vide ne distingue rien.")
+        mypuls.renommer_api_key(cle_id, label)
+        return _success("✓ Clé renommée : %s" % label)
 
     @app.route("/mypuls/keys/remove", methods=["POST"])
     def mypuls_keys_remove():
