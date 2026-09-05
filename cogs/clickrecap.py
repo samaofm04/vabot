@@ -713,7 +713,8 @@ class ClickRecap(commands.Cog):
     async def _before_report(self):
         await self.bot.wait_until_ready()
 
-    async def _build_group_report(self, c: dict, permettre_vide: bool = True):
+    async def _build_group_report(self, c: dict, permettre_vide: bool = True,
+                                  sortie: dict | None = None):
         """Construit l'embed du report d'un groupe : aujourd'hui / hier / semaine
         / période 1–15 / période 16–fin. None si le module GMS est indispo."""
         import gms
@@ -1067,13 +1068,17 @@ class ClickRecap(commands.Cog):
                         value="```\n" + _e + "\n" + "\n".join(_pg) + "\n```",
                         inline=False)
 
-            # ACCROCHE A L'EMBED. Discord ignore les attributs qu'il ne
-            # connait pas ; la page web y trouve de quoi faire de vraies
-            # tables sans reanalyser du texte a chasse fixe.
-            try:
-                emb.donnees_clics = _donnees
-            except Exception:
-                pass
+            # RENDUES A L'APPELANT PAR `sortie`, pas accrochees a l'embed.
+            #
+            # Premier essai : `emb.donnees_clics = _donnees`. discord.Embed
+            # declare __slots__ — l'affectation leve AttributeError, mon
+            # try/except l'avalait, et la page web retombait en silence sur le
+            # rendu texte. Elle marchait « presque », ce qui est le pire etat.
+            #
+            # Un parametre de sortie est explicite : l'appelant qui veut les
+            # donnees passe un dict, les autres ne changent rien.
+            if sortie is not None:
+                sortie.update(_donnees)
 
             _titre = (f"📋 Per link — {drapeau} {libelle} vs 🌍 global"
                       if pays_marche else "📋 Per link — 🌍 global")

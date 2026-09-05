@@ -60843,6 +60843,7 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                 class _Faux:
                     """_build_group_report n'appelle aucun self.*"""
 
+                donnees = {}
                 if portee:
                     c = {"team_id": portee.get("team_id") or None,
                          "group_id": portee.get("group_id") or None,
@@ -60851,11 +60852,15 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                          "marche": portee.get("marche") or "tout",
                          # Sans group_id, c'est TOUT l'espace qu'on veut.
                          "tout": not portee.get("group_id")}
-                    return _aio.run(ClickRecap._build_group_report(_Faux(), c))
+                    e = _aio.run(ClickRecap._build_group_report(
+                        _Faux(), c, sortie=donnees))
+                    return (e, donnees) if e is not None else None
 
                 for k, c in _reports_configures(_load_report_cfg()):
                     if k == cle:
-                        return _aio.run(ClickRecap._build_group_report(_Faux(), c))
+                        e = _aio.run(ClickRecap._build_group_report(
+                            _Faux(), c, sortie=donnees))
+                        return (e, donnees) if e is not None else None
                 return None
 
             clics_portail.register(app, {"construire": _construire_report})

@@ -421,8 +421,15 @@ def register(app, deps):
             _noter_vue(jeton)
             return Response(hit[1], mimetype="text/html; charset=utf-8")
 
+        # `construire` rend (embed, donnees) — les donnees ne peuvent pas
+        # voyager sur l'embed, discord.Embed declare __slots__.
+        emb, _d = None, None
         try:
-            emb = construire(cle, portee)
+            r = construire(cle, portee)
+            if isinstance(r, tuple):
+                emb, _d = r
+            else:
+                emb = r
         except Exception as e:                       # noqa: BLE001
             emb = None
             print("[clics-portail] %s: %s" % (type(e).__name__, e), flush=True)
@@ -438,7 +445,6 @@ def register(app, deps):
 
         # LES DONNEES D'ABORD. Le texte du report reste en repli : mieux
         # vaut un tableau a chasse fixe que pas de page.
-        _d = getattr(emb, "donnees_clics", None)
         if isinstance(_d, dict) and (_d.get("resume") or _d.get("abonnes")):
             page = _page_donnees(str(emb.title or "Clics"),
                                  str(emb.description or "").replace("**", ""),
