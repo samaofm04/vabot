@@ -889,84 +889,49 @@ class ClickRecap(commands.Cog):
                     return f"{_c(t):>12}"
                 return f"{_c(u):>5}{_c(t):>7}"
 
-            # Regroupement par PERSONNE : une meme personne tient plusieurs
-            # telephones, ses lignes doivent se suivre et porter un sous-total.
-            # Sans ca, « ( BO7 ) 1 » a 4 et « ( BO7 ) 3 » a 12 se retrouvent a
-            # dix lignes d'ecart et on ne voit jamais ce que BO7 rapporte.
-            _paquets = {}
-            for lab, p in rows:
-                pers = _personne_du_lien(lab)
-                # Sans personne identifiable, la ligne reste seule : la cle
-                # porte le nom complet, elle ne peut donc se confondre.
-                # La cle est un COUPLE, pas une chaine bricolee : aucun nom de
-                # personne ne peut lui ressembler par accident.
-                cle = pers if pers else ("__seul__", str(lab))
-                _paquets.setdefault(cle, {"nom": pers, "lignes": []})
-                _paquets[cle]["lignes"].append((lab, p))
+            # LE REGROUPEMENT PAR PERSONNE A ETE RETIRE, avec ses sous-totaux
+            # et son classement par chiffres. Une ligne par lien, par ordre
+            # alphabetique : c'est ce que le proprietaire lit tous les jours,
+            # et un tableau qui se reordonne a chaque heure ne se parcourt pas
+            # du regard. Les sous-totaux, eux, additionnaient des lignes qu'il
+            # veut voir separement -- « c'est deux trucs differents ».
 
-            def _somme(lignes, periode, indice):
-                """Sous-total d'une personne. None si aucune valeur lisible."""
-                vus = [p[periode][indice] for _lab, p in lignes
-                       if p[periode][indice] is not None]
-                return sum(vus) if vus else None
-
-            # On classe sur le MARCHE quand il y en a un — c est ce que le
-            # proprietaire regarde — sinon sur le total.
-            _tri = 0 if pays_marche else 1
+            # (« classer sur le marche ou sur le total » n'a plus lieu
+            #  d'etre : on classe par NOM.)
 
             def _tableau():
-                # Les personnes qui cliquent le plus en premier ; a egalite,
-                # par nom, pour que l'ordre ne danse pas d'un rafraichissement
-                # a l'autre.
-                ordre = sorted(
-                    _paquets.values(),
-                    key=lambda g: (-(_somme(g["lignes"], 0, _tri) or 0),
-                                   -(_somme(g["lignes"], 3, _tri) or 0),
-                                   str(g["nom"] or g["lignes"][0][0]).lower()))
-                # Un paquet de lignes PAR personne : la coupure en plusieurs
-                # champs se fait ensuite entre les paquets, jamais au milieu.
-                # Voir une personne dont la moitie des telephones est passee
-                # dans le bloc suivant n'a aucun sens.
-                paquets_lignes = []
-                for g in ordre:
-                    lignes = []
-                    membres = g["lignes"]
-                    if g["nom"] and len(membres) > 1:
-                        lignes.append(
-                            f"{(g['nom'] + ' (' + str(len(membres)) + ')')[:17]:<18}"
-                            # (0, 1, 3) = aujourd'hui, hier, quinzaine. La
-                            # semaine (2) reste calculee pour le resume du haut,
-                            # mais n'a plus de colonne : trois par ligne, pas
-                            # plus, sinon le tableau deborde sur telephone.
-                            + "".join(
-                                _duo_col((_somme(membres, i, 0),
-                                          _somme(membres, i, 1)))
-                                for i in (0, 1, 3)))
-                        prefixe = "  "
-                    else:
-                        prefixe = ""
-                    for lab, p in sorted(membres, key=lambda x: str(x[0])):
-                        etiquette = (prefixe + _nom_propre(lab))[:17]
-                        lignes.append(
-                            f"{etiquette:<18}"
-                            + "".join(_duo_col(p[i]) for i in (0, 1, 3)))
-                    paquets_lignes.append(lignes)
+                # AUCUN REGROUPEMENT. Une ligne par lien, dans l'ordre
+                # alphabetique, un point c'est tout.
+                #
+                # On empilait les telephones d'une meme personne sous un
+                # sous-total, et on classait par nombre de clics. Deux defauts
+                # pour le prix d'un : le sous-total additionnait des lignes que
+                # le proprietaire veut voir separement (« c'est deux trucs
+                # differents »), et un classement par chiffres change d'ordre a
+                # chaque heure -- on cherche quelqu'un et il a bouge de six
+                # lignes.
+                #
+                # La parenthese de tete est ignoree au tri : « (ANDRY) 1 » se
+                # range a A. Le numero de telephone suit le nom, donc
+                # « (BO7) 1 » precede « (BO7) 2 » sans rien de special.
+                _cle_tri = lambda t: re.sub(r"^[^0-9A-Za-z]+", "", str(t)).lower()
+                lignes_plates = [
+                    f"{_nom_propre(lab)[:17]:<18}"
+                    + "".join(_duo_col(p[i]) for i in (0, 1, 3))
+                    for lab, p in sorted(rows, key=lambda x: _cle_tri(x[0]))
+                ]
 
-                # Remplissage par paquets. Un champ Discord plafonne a 1024
-                # signes ; on garde de la marge pour l'en-tete, qui est repete
-                # dans CHAQUE bloc — sans lui, le second n'a plus de titres de
-                # colonnes et ses chiffres ne veulent plus rien dire.
-                blocs, courant = [], []
-                for paq in paquets_lignes:
-                    sep = 1 if courant and len(paq) > 1 else 0
-                    taille = sum(len(x) + 1 for x in courant) + \
-                        sum(len(x) + 1 for x in paq) + sep
-                    if courant and taille > 820:
+                # Un champ Discord plafonne a 1024 signes ; on garde de la
+                # marge pour l'en-tete, repete dans CHAQUE bloc — sans lui, le
+                # second n'a plus de titres de colonnes et ses chiffres ne
+                # veulent plus rien dire.
+                blocs, courant, taille = [], [], 0
+                for ligne in lignes_plates:
+                    if courant and taille + len(ligne) + 1 > 820:
                         blocs.append("\n".join(courant))
-                        courant = []
-                    elif sep:
-                        courant.append("")     # separe les groupes a l'oeil
-                    courant.extend(paq)
+                        courant, taille = [], 0
+                    courant.append(ligne)
+                    taille += len(ligne) + 1
                 if courant:
                     blocs.append("\n".join(courant))
                 return blocs
