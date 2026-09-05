@@ -1154,6 +1154,110 @@ def _table_par_entetes(tables, *exigences) -> int:
     return -1
 
 
+# ---------------------------------------------------------------------------
+# DECOUVRIR CE QUE L'API SERT VRAIMENT
+#
+# Sans jeton, MyPuls repond 401 a TOUT chemin sous /api/v1 -- meme a un nom
+# invente (verifie le 05/09/2026 : /api/v1/zzz-nexiste-pas-du-tout -> 401).
+# Leur authentification passe avant le routage : sonder de l'exterieur ne
+# distingue donc pas « existe » de « n'existe pas ». Avec le jeton, 200 et
+# 404 redeviennent lisibles.
+#
+# ON NE REND QUE LA FORME : chemin, code HTTP, noms des champs. Jamais un
+# montant, jamais un nom de personne, jamais le jeton. C'est ce qui permet
+# d'exposer cette lecture derriere le jeton du parc sans elargir ce qui est
+# accessible : on apprend la STRUCTURE de l'API, pas les donnees.
+# ---------------------------------------------------------------------------
+
+def _forme_reponse(d) -> dict:
+    """Les cles d'une reponse, sans son contenu."""
+    f = {}
+    if isinstance(d, dict):
+        f["cles"] = sorted(d.keys())[:15]
+        inner = d.get("data")
+        if isinstance(inner, list):
+            f["data"] = "liste de %d" % len(inner)
+            if inner and isinstance(inner[0], dict):
+                f["champs"] = sorted(inner[0].keys())[:30]
+        elif isinstance(inner, dict):
+            f["data"] = "objet"
+            f["champs"] = sorted(inner.keys())[:30]
+    elif isinstance(d, list):
+        f["cles"] = "liste de %d" % len(d)
+        if d and isinstance(d[0], dict):
+            f["champs"] = sorted(d[0].keys())[:30]
+    return f
+
+
+def decouvrir_api(jours: int = 6) -> dict:
+    """Quels endpoints l'API sert, et avec quels champs. Forme seulement."""
+    if not api_configured():
+        return {"ok": False, "error": "Aucun token API MyPuls (Settings > MyPuls)"}
+
+    fin = date.today().isoformat()
+    debut = (date.today() - timedelta(days=max(0, jours))).isoformat()
+    periode = {"from": debut, "to": fin, "start": debut, "end": fin}
+
+    # Un createur REEL : un id invente rendrait 404 pour la mauvaise raison.
+    cid = ""
+    try:
+        crs = api_creators_cached()
+        cid = str((crs[0] or {}).get("id") or "") if crs else ""
+    except Exception:
+        pass
+
+    candidats = [
+        ("session", None), ("creators", None),
+        ("team", None), ("teams", None), ("team/members", None),
+        ("chatters", periode), ("chatter", None), ("chatters/stats", periode),
+        ("users", None), ("employees", None), ("staff", None),
+        ("transactions", periode), ("sales", periode), ("earnings", periode),
+        ("messages", periode), ("messaging-money", periode),
+        ("messaging-money-team", periode),
+        ("payouts", periode), ("statistics", periode), ("stats", periode),
+        ("performance", periode), ("performances", periode),
+        ("tracking-links", None), ("subscribers", periode),
+    ]
+    if cid:
+        candidats += [
+            ("creators/%s" % cid, None),
+            ("creators/%s/stats" % cid, periode),
+            ("creators/%s/revenue-by-day" % cid, periode),
+            ("creators/%s/transactions" % cid, periode),
+            ("creators/%s/sales" % cid, periode),
+            ("creators/%s/chatters" % cid, periode),
+            ("creators/%s/messages" % cid, periode),
+            ("creators/%s/earnings" % cid, periode),
+        ]
+
+    tok = api_token()
+    servis, absents, autres = [], [], []
+    for chemin, params in candidats:
+        url = "%s/api/v1/%s" % (BASE_URL, chemin)
+        try:
+            r = requests.get(url, headers={"X-API-TOKEN": tok,
+                                           "Accept": "application/json"},
+                             params=params or {}, timeout=15)
+        except Exception as e:
+            autres.append({"chemin": chemin, "erreur": type(e).__name__})
+            continue
+        if r.status_code == 404:
+            absents.append(chemin)
+            continue
+        if r.status_code != 200:
+            autres.append({"chemin": chemin, "code": r.status_code})
+            continue
+        try:
+            forme = _forme_reponse(r.json())
+        except Exception:
+            forme = {"cles": "reponse non-JSON"}
+        servis.append({"chemin": chemin, **forme})
+
+    return {"ok": True, "createur_teste": cid or "(aucun)",
+            "servis": servis, "absents": absents, "autres": autres,
+            "periode": [debut, fin]}
+
+
 # ============ Fetch + parse ============
 
 def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool = True) -> Dict[str, Any]:

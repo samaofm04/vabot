@@ -50759,6 +50759,30 @@ def create_app():
             return None
         return f
 
+    @app.route("/api/rig/mypuls_discover")
+    def rig_mypuls_discover():
+        """La forme de l'API MyPuls, derriere le jeton du parc.
+
+        POURQUOI CETTE PORTE. Migrer la page des chatteurs du scraping vers
+        l'API demande de savoir quels endpoints existent et quels champs ils
+        portent -- une question qu'on se repose a chaque etape. La poser par
+        l'interface obligeait a recopier un JSON a la main a chaque fois.
+
+        CE QU'ELLE NE REND PAS : aucun montant, aucun nom de personne, aucun
+        jeton. Seulement des chemins, des codes HTTP et des NOMS de champs.
+        C'est ce qui permet de l'ouvrir au jeton du parc sans elargir ce qui
+        est lisible : on apprend la structure de l'API, pas les donnees.
+        """
+        from flask import jsonify
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        try:
+            import mypuls
+        except Exception as e:
+            return jsonify({"ok": False, "error": type(e).__name__}), 500
+        return jsonify(mypuls.decouvrir_api())
+
     @app.route("/api/rig/reserve")
     def rig_reserve_etat():
         """Ce qui attend en reserve, et si le moteur est capable d'en refaire.
@@ -52390,26 +52414,9 @@ def create_app():
     def mypuls_api_discover():
         """Quels endpoints l'API MyPuls sert-elle REELLEMENT ?
 
-        POURQUOI IL FAUT LE JETON POUR LE SAVOIR. Sans jeton, MyPuls repond
-        401 a TOUT chemin sous /api/v1 -- meme a un nom invente : leur
-        authentification passe avant le routage. Sonder de l'exterieur ne
-        distingue donc pas « existe » de « n'existe pas », et croire le
-        contraire fait conclure qu'une route est en place alors qu'elle n'a
-        jamais existe. Mesure du 05/09/2026 :
-            /api/v1/zzz-nexiste-pas-du-tout  ->  401
-
-        Avec le jeton, la difference redevient lisible : 200 = servi,
-        404 = absent.
-
-        LA QUESTION QU'ON POSE. Le tableau de bord des revenus passe par
-        l'API ; la page des chatteurs et le registre des ventes passent
-        encore par le scraping HTML avec cookies. Si l'API sait rendre les
-        transactions et les performances par chatteur, cette moitie-la peut
-        quitter les cookies -- et cesser de casser a chaque changement de
-        page chez eux.
-
-        Aucune donnee personnelle n'est rendue : seulement le code HTTP et
-        les CLES de premier niveau de la reponse.
+        La logique vit dans mypuls.decouvrir_api : elle est servie ici pour
+        toi, et derriere le jeton du parc pour l'outillage. Deux copies
+        divergeraient, et on ne saurait plus laquelle dit vrai.
         """
         from flask import jsonify
         if not is_auth():
@@ -52418,95 +52425,7 @@ def create_app():
             import mypuls
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
-        if not mypuls.api_configured():
-            return jsonify({"ok": False,
-                            "error": "Aucun token API MyPuls (Settings › MyPuls)"})
-
-        from datetime import date as _d, timedelta as _td
-        fin = _d.today().isoformat()
-        debut = (_d.today() - _td(days=6)).isoformat()
-        periode = {"from": debut, "to": fin, "start": debut, "end": fin}
-
-        # Un createur reel : plusieurs endroits sont par createur, et un id
-        # invente rendrait 404 pour une raison qui n'est pas la bonne.
-        cid = ""
-        try:
-            crs = mypuls.api_creators_cached()
-            cid = str((crs[0] or {}).get("id") or "") if crs else ""
-        except Exception:
-            pass
-
-        candidats = [
-            ("session", None), ("creators", None),
-            ("team", None), ("teams", None),
-            ("chatters", periode), ("chatter", None),
-            ("users", None), ("employees", None), ("staff", None),
-            ("transactions", periode), ("sales", periode),
-            ("messages", periode), ("messaging-money", periode),
-            ("messaging-money-team", periode),
-            ("payouts", periode), ("statistics", periode), ("stats", periode),
-            ("performance", periode), ("performances", periode),
-            ("tracking-links", None),
-        ]
-        if cid:
-            candidats += [
-                ("creators/%s/stats" % cid, periode),
-                ("creators/%s/revenue-by-day" % cid, periode),
-                ("creators/%s/transactions" % cid, periode),
-                ("creators/%s/sales" % cid, periode),
-                ("creators/%s/chatters" % cid, periode),
-                ("creators/%s/messages" % cid, periode),
-            ]
-
-        import requests as _rq
-        tok = mypuls.api_token()
-        servis, absents, autres = [], [], []
-        for chemin, params in candidats:
-            url = "%s/api/v1/%s" % (mypuls.BASE_URL, chemin)
-            try:
-                r = _rq.get(url, headers={"X-API-TOKEN": tok,
-                                          "Accept": "application/json"},
-                            params=params or {}, timeout=15)
-            except Exception as e:
-                autres.append({"chemin": chemin, "erreur": type(e).__name__})
-                continue
-            if r.status_code == 404:
-                absents.append(chemin)
-                continue
-            if r.status_code != 200:
-                autres.append({"chemin": chemin, "code": r.status_code})
-                continue
-            # 200 : on ne rend QUE la forme, jamais le contenu.
-            forme = {}
-            try:
-                d = r.json()
-                if isinstance(d, dict):
-                    forme["cles"] = sorted(d.keys())[:15]
-                    inner = d.get("data")
-                    if isinstance(inner, list):
-                        forme["data"] = "liste de %d" % len(inner)
-                        if inner and isinstance(inner[0], dict):
-                            forme["champs"] = sorted(inner[0].keys())[:25]
-                    elif isinstance(inner, dict):
-                        forme["data"] = "objet"
-                        forme["champs"] = sorted(inner.keys())[:25]
-                elif isinstance(d, list):
-                    forme["cles"] = "liste de %d" % len(d)
-                    if d and isinstance(d[0], dict):
-                        forme["champs"] = sorted(d[0].keys())[:25]
-            except Exception:
-                forme["cles"] = "reponse non-JSON"
-            servis.append({"chemin": chemin, **forme})
-
-        return jsonify({
-            "ok": True,
-            "createur_teste": cid or "(aucun)",
-            "servis": servis,
-            "absents": absents,
-            "autres": autres,
-            "note": "404 = absent. Sans jeton, MyPuls rend 401 partout : "
-                    "seul cet appel authentifie distingue les deux.",
-        })
+        return jsonify(mypuls.decouvrir_api())
 
     @app.route("/mypuls/tables_probe")
     def mypuls_tables_probe():
