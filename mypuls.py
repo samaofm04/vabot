@@ -1231,31 +1231,84 @@ def decouvrir_api(jours: int = 6) -> dict:
         ]
 
     tok = api_token()
-    servis, absents, autres = [], [], []
-    for chemin, params in candidats:
+
+    # LA LIMITE DE DEBIT EST REELLE. Une premiere passe a une trentaine
+    # d'appels d'affilee a rendu 429 sur trois endpoints -- dont les deux que
+    # le tableau de bord utilise vraiment. Sonder ne doit pas degrader ce qui
+    # marche : on espace, et on REESSAIE les 429 apres une pause, sinon on
+    # les prendrait pour des refus.
+    import time as _t
+
+    def _appel(chemin, params):
         url = "%s/api/v1/%s" % (BASE_URL, chemin)
-        try:
-            r = requests.get(url, headers={"X-API-TOKEN": tok,
-                                           "Accept": "application/json"},
-                             params=params or {}, timeout=15)
-        except Exception as e:
-            autres.append({"chemin": chemin, "erreur": type(e).__name__})
-            continue
+        return requests.get(url, headers={"X-API-TOKEN": tok,
+                                          "Accept": "application/json"},
+                            params=params or {}, timeout=15)
+
+    servis, absents, autres, a_reessayer = [], [], [], []
+
+    def _ranger(chemin, r):
         if r.status_code == 404:
             absents.append(chemin)
-            continue
+            return
+        if r.status_code == 429:
+            a_reessayer.append(chemin)
+            return
         if r.status_code != 200:
             autres.append({"chemin": chemin, "code": r.status_code})
-            continue
+            return
         try:
             forme = _forme_reponse(r.json())
         except Exception:
             forme = {"cles": "reponse non-JSON"}
         servis.append({"chemin": chemin, **forme})
 
+    par_chemin = dict(candidats)
+    for chemin, params in candidats:
+        try:
+            _ranger(chemin, _appel(chemin, params))
+        except Exception as e:
+            autres.append({"chemin": chemin, "erreur": type(e).__name__})
+        _t.sleep(0.4)
+
+    if a_reessayer:
+        _t.sleep(8)
+        encore = list(a_reessayer)
+        a_reessayer = []
+        for chemin in encore:
+            try:
+                r = _appel(chemin, par_chemin.get(chemin))
+                if r.status_code == 429:
+                    autres.append({"chemin": chemin, "code": 429,
+                                   "note": "limite de debit, deux fois"})
+                else:
+                    _ranger(chemin, r)
+            except Exception as e:
+                autres.append({"chemin": chemin, "erreur": type(e).__name__})
+            _t.sleep(1.0)
+
+    # LES DROITS DU JETON, pas ses donnees. Un 403 partout a deux lectures
+    # opposees : MyPuls n'expose pas ces routes, ou ce jeton-ci n'a pas la
+    # portee. `roles` tranche, et ce n'est ni un montant ni un nom.
+    droits = {}
+    try:
+        se = api_get("session")
+        if se.get("ok"):
+            d = se.get("data") or {}
+            d = d.get("data") if isinstance(d.get("data"), dict) else d
+            droits = {
+                "roles": d.get("roles"),
+                "creators_count": d.get("creators_count"),
+                "nb_creator_ids": len(d.get("creator_ids") or [])
+                                  if isinstance(d.get("creator_ids"), list) else None,
+                "authenticated": d.get("authenticated"),
+            }
+    except Exception:
+        pass
+
     return {"ok": True, "createur_teste": cid or "(aucun)",
             "servis": servis, "absents": absents, "autres": autres,
-            "periode": [debut, fin]}
+            "droits_du_jeton": droits, "periode": [debut, fin]}
 
 
 # ============ Fetch + parse ============
