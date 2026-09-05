@@ -176,6 +176,34 @@ h1{font-size:22px;font-weight:700;margin:0;letter-spacing:-.01em}
 th.grp{text-align:center;color:#8891a8;border-bottom:1px solid #232936;
        padding-bottom:5px;font-size:10px}
 th.sub{padding-top:4px;font-size:9.5px;color:#5f6779}
+
+/* --- L'audience ------------------------------------------------------- */
+.kpis{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+      margin-bottom:14px}
+.kpi{background:#121722;border:1px solid #1f2634;border-radius:13px;padding:14px 16px}
+.kpi .q{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;
+        color:#7c8398;font-weight:700;margin-bottom:6px}
+.kpi .v{font-size:26px;font-weight:750;letter-spacing:-.025em;line-height:1.05}
+.kpi .s{font-size:11.5px;color:#6d7488;margin-top:4px}
+.kpi.a .v{color:#7fb2ff}.kpi.b .v{color:#34d399}.kpi.c .v{color:#c084fc}
+
+.graph{padding:6px 16px 16px}
+.graph svg{display:block;width:100%;height:auto}
+
+/* Trois listes cote a cote : pays, appareils, provenance. */
+.trio{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
+      margin-bottom:18px}
+.trio section{margin:0}
+.barres{padding:2px 16px 14px}
+.br{display:flex;align-items:center;gap:10px;margin:9px 0;font-size:13px}
+.br .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+       color:#c3cadb}
+.br .j{width:88px;height:6px;background:#1b2231;border-radius:99px;overflow:hidden;
+       flex:none}
+.br .j i{display:block;height:100%;border-radius:99px;
+         background:linear-gradient(90deg,#3b82f6,#8b5cf6)}
+.br .c{width:52px;text-align:right;font-variant-numeric:tabular-nums;
+       font-weight:650;color:#e7eaf3;flex:none}
 tr.tetes2 th{border-bottom:1px solid #1f2634}
 
 section{background:#121722;border:1px solid #1f2634;border-radius:14px;
@@ -262,6 +290,100 @@ def _evolution(courant, precedent) -> str:
             % ("up" if d > 0 else "dn", "+" if d > 0 else "−", _num(abs(d))))
 
 
+def _courbe(points: list) -> str:
+    """Une aire, dessinee en SVG COTE SERVEUR.
+
+    Pas de bibliotheque de graphiques : la page ne charge aucun script, et
+    c'est ce qui lui permet de s'ouvrir partout, y compris la ou le
+    JavaScript est bloque. Un <svg> est du HTML, il ne demande rien a
+    personne.
+    """
+    vals = [max(0, int(p.get("v") or 0)) for p in points]
+    if not vals or max(vals) == 0:
+        return ""
+    L, H, m = 720.0, 150.0, 8.0
+    hi = float(max(vals))
+    n = len(vals)
+    pas = (L - 2 * m) / max(1, n - 1)
+    pts = [(m + i * pas, H - m - (v / hi) * (H - 2 * m)) for i, v in enumerate(vals)]
+    ligne = " ".join("%.1f,%.1f" % xy for xy in pts)
+    aire = "%s %.1f,%.1f %.1f,%.1f" % (ligne, pts[-1][0], H - m, pts[0][0], H - m)
+    # Les reperes : le plus haut, et le dernier. Deux chiffres suffisent a
+    # lire une courbe ; une grille complete ferait du bruit pour rien.
+    i_hi = vals.index(max(vals))
+    reperes = "".join(
+        "<circle cx='%.1f' cy='%.1f' r='3.5' fill='#7fb2ff'/>"
+        "<text x='%.1f' y='%.1f' fill='#8ab4ff' font-size='11' font-weight='700'"
+        " text-anchor='middle'>%s</text>"
+        % (pts[i][0], pts[i][1], pts[i][0], max(12, pts[i][1] - 9), _num(vals[i]))
+        for i in {i_hi, n - 1})
+    etiq = "".join(
+        "<text x='%.1f' y='%.1f' fill='#5f6779' font-size='9.5' text-anchor='%s'>%s</text>"
+        % (pts[i][0], H - 1, "start" if i == 0 else "end",
+           html.escape(str(points[i].get("j") or "")))
+        for i in (0, n - 1) if n > 1)
+    return (
+        "<div class='graph'><svg viewBox='0 0 %d %d' preserveAspectRatio='none'"
+        " role='img' aria-label='Évolution'>"
+        "<defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'>"
+        "<stop offset='0' stop-color='#3b82f6' stop-opacity='.32'/>"
+        "<stop offset='1' stop-color='#3b82f6' stop-opacity='0'/>"
+        "</linearGradient></defs>"
+        "<polygon points='%s' fill='url(#g)'/>"
+        "<polyline points='%s' fill='none' stroke='#5b9cff' stroke-width='2'"
+        " stroke-linejoin='round' stroke-linecap='round'/>%s%s</svg></div>"
+        % (int(L), int(H), aire, ligne, reperes, etiq))
+
+
+def _barres(titre: str, lignes: list) -> str:
+    """Une liste avec sa jauge. `lignes` = [(libelle, compte)]."""
+    if not lignes:
+        return ""
+    hi = max((int(c or 0) for _l, c in lignes), default=0) or 1
+    corps = "".join(
+        "<div class='br'><div class='n'>%s</div>"
+        "<div class='j'><i style='width:%.0f%%'></i></div>"
+        "<div class='c'>%s</div></div>"
+        % (html.escape(str(l)[:34]), 100.0 * int(c or 0) / hi, _num(c))
+        for l, c in lignes[:6])
+    return ("<section><h2>%s</h2><div class='barres'>%s</div></section>"
+            % (html.escape(titre), corps))
+
+
+def _audience(a: dict) -> str:
+    """Les cartes, la courbe et les trois listes. '' si rien n'est venu."""
+    if not isinstance(a, dict) or not a:
+        return ""
+    out = []
+    vues = int(a.get("pages_vues") or 0)
+    clics = int(a.get("clics") or 0)
+    uniques = int(a.get("visiteurs") or 0)
+    taux = (100.0 * clics / vues) if vues else 0.0
+    out.append(
+        "<div class='kpis'>"
+        "<div class='kpi a'><div class='q'>Pages vues</div><div class='v'>%s</div>"
+        "<div class='s'>%s</div></div>"
+        "<div class='kpi b'><div class='q'>Visiteurs uniques</div><div class='v'>%s</div>"
+        "<div class='s'>%s%% de la période</div></div>"
+        "<div class='kpi c'><div class='q'>Taux de clic</div><div class='v'>%.1f%%</div>"
+        "<div class='s'>%s clic(s)</div></div>"
+        "</div>"
+        % (_num(vues), html.escape(str(a.get("periode") or "")),
+           _num(uniques), ("%.0f" % (100.0 * uniques / vues)) if vues else "—",
+           taux, _num(clics)))
+    c = _courbe(a.get("serie") or [])
+    if c:
+        out.append("<section><h2>Trafic jour par jour</h2>%s</section>" % c)
+    trio = "".join([
+        _barres("Pays", a.get("pays") or []),
+        _barres("Appareils", a.get("appareils") or []),
+        _barres("Provenance", a.get("referrers") or []),
+    ])
+    if trio:
+        out.append("<div class='trio'>%s</div>" % trio)
+    return "".join(out)
+
+
 def _page_donnees(titre: str, sous: str, d: dict, quand: str) -> str:
     """La page, batie sur les DONNEES et non sur du texte deja mis en forme.
 
@@ -286,6 +408,11 @@ def _page_donnees(titre: str, sous: str, d: dict, quand: str) -> str:
                dr if m is not None else "🌍", val, sous_l))
     if cartes:
         corps.append("<div class='cartes'>%s</div>" % "".join(cartes))
+
+    # L'audience vient de GetMySocial, pas du report : elle repond a une
+    # autre question — d'ou vient le trafic, et converti-t-il — la ou le
+    # report dit qui a clique.
+    corps.append(_audience(d.get("audience") or {}))
 
     # --- UNE SEULE TABLE : clics ET abonnes, par lien --------------------
     #

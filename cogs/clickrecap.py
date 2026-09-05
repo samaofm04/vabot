@@ -854,6 +854,11 @@ class ClickRecap(commands.Cog):
         # telles qu'elles sortent du calcul, et personne ne recalcule rien.
         _donnees = {"marche": libelle if pays_marche else "",
                     "drapeau": drapeau if pays_marche else "🌍",
+                    # L'espace GetMySocial, pour que la page publique puisse
+                    # aller chercher ses propres statistiques d'audience.
+                    # Discord n'en fait rien.
+                    "team_id": c.get("team_id") or "",
+                    "group_id": c.get("group_id") or "",
                     "resume": [], "abonnes": [], "par_lien": []}
         for etiquette, marche_v, total_v in (
                 ("Today", cumul[0], c_today),

@@ -60824,6 +60824,54 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         try:
             import clics_portail
 
+            def _audience_gms(team_id, jours=13):
+                """L'audience d'un espace GetMySocial : cartes, courbe, tops.
+
+                Le report Discord dit QUI a clique ; ces chiffres-la disent
+                D'OU vient le trafic et s'il convertit. Deux questions
+                differentes, deux sources — on ne melange pas.
+
+                Rend {} si l'API ne repond pas : la page affiche alors le
+                tableau seul, ce qui reste utile. Mieux vaut une page amputee
+                et juste qu'une page complete et fausse.
+                """
+                import datetime as _dt
+                if not team_id:
+                    return {}
+                fin = _dt.date.today()
+                deb = fin - _dt.timedelta(days=max(1, jours))
+                A = {"start_date": deb.isoformat(), "end_date": fin.isoformat(),
+                     "team_id": str(team_id)}
+                try:
+                    import gms as _g
+                    o = (_g._call_tool("get_analytics_overview", A) or {}).get("data") or {}
+                    ts = (_g._call_tool("get_time_series", A) or {}).get("data") or {}
+                except Exception:
+                    return {}
+                if not isinstance(o, dict):
+                    return {}
+
+                def _tops(cle_liste, cle_nom):
+                    return [(x.get(cle_nom), x.get("count"))
+                            for x in (o.get(cle_liste) or [])
+                            if isinstance(x, dict) and x.get(cle_nom)]
+
+                serie = []
+                for x in (ts.get("data") or []) if isinstance(ts, dict) else []:
+                    b = str(x.get("bucket") or "")[:10]
+                    serie.append({"j": b[8:10] + "/" + b[5:7] if len(b) == 10 else b,
+                                  "v": x.get("pageviews") or x.get("clicks") or 0})
+                return {
+                    "periode": "%s → %s" % (deb.strftime("%d/%m"), fin.strftime("%d/%m")),
+                    "pages_vues": o.get("total_pageviews"),
+                    "clics": o.get("total_clicks"),
+                    "visiteurs": o.get("unique_visitors"),
+                    "serie": serie,
+                    "pays": _tops("top_countries", "country"),
+                    "appareils": _tops("top_devices", "device"),
+                    "referrers": _tops("top_referrers", "referrer"),
+                }
+
             def _construire_report(cle, portee=None):
                 """Le MEME report que Discord, pas un second calcul.
 
@@ -60854,13 +60902,19 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
                          "tout": not portee.get("group_id")}
                     e = _aio.run(ClickRecap._build_group_report(
                         _Faux(), c, sortie=donnees))
-                    return (e, donnees) if e is not None else None
+                    if e is None:
+                        return None
+                    donnees["audience"] = _audience_gms(donnees.get("team_id"))
+                    return (e, donnees)
 
                 for k, c in _reports_configures(_load_report_cfg()):
                     if k == cle:
                         e = _aio.run(ClickRecap._build_group_report(
                             _Faux(), c, sortie=donnees))
-                        return (e, donnees) if e is not None else None
+                        if e is None:
+                            return None
+                        donnees["audience"] = _audience_gms(donnees.get("team_id"))
+                        return (e, donnees)
                 return None
 
             clics_portail.register(app, {"construire": _construire_report})
