@@ -280,6 +280,21 @@ def _cle_disponible():
         return None, ""
     maintenant = _t.time()
     libres = [c for c in cles if float(c.get("repos_jusqua") or 0) <= maintenant]
+
+    # LES CLES FAUTIVES PASSENT EN DERNIER, elles ne sont pas retirees.
+    #
+    # Une cle refusee (401) ou qui rend du HTML n'est pas « en attente » : elle
+    # ne se reparera pas toute seule. Continuer a la servir une fois sur dix
+    # ferait echouer une page au hasard, et le diagnostic serait « ca marche
+    # parfois » -- le pire des symptomes. On la garde a l'ecart tant qu'une
+    # autre repond, sans l'effacer : c'est a l'ecran de la montrer et a
+    # quelqu'un de la remplacer.
+    _FAUTIF = ("refusée", "non-JSON")
+    saines = [c for c in libres
+              if not any(m in str(c.get("derniere_erreur") or "") for m in _FAUTIF)]
+    if saines:
+        libres = saines
+
     if libres:
         with _VERROU_CLES:
             _ROTATION["i"] = (_ROTATION["i"] + 1) % len(libres)
@@ -345,16 +360,34 @@ def api_get(path: str, params: dict = None, _essai: int = 0) -> dict:
         _noter_cle(cle_id, ok=(r.status_code == 403),
                    erreur=("clé refusée (401)" if r.status_code == 401
                            else "hors périmètre (403)"))
+        # UNE CLE FAUTIVE NE DOIT PAS FAIRE TOMBER L'APPEL. Avec dix cles au
+        # trousseau, la rotation finit forcement par tomber sur celle qui a
+        # ete mal collee ; sans reprise, une page entiere echouerait une fois
+        # sur dix, au hasard, et le diagnostic serait « ca marche parfois ».
+        if r.status_code == 401 and _essai == 0 and len(_cles_brutes()) > 1:
+            return api_get(path, params, _essai=1)
         return {"ok": False, "error": f"Token API refusé (HTTP {r.status_code})"}
     if r.status_code == 404:
         return {"ok": False, "error": f"Endpoint introuvable : {url}"}
     if r.status_code != 200:
         return {"ok": False, "error": f"HTTP {r.status_code} : {r.text[:200]}"}
-    _noter_cle(cle_id, ok=True, compter=True)
     try:
-        return {"ok": True, "data": r.json()}
+        d = r.json()
     except Exception:
-        return {"ok": False, "error": f"Réponse non-JSON : {r.text[:150]}"}
+        # DU HTML A LA PLACE DU JSON, c'est MyPuls qui sert sa page de
+        # connexion : le jeton n'en est pas un (un cookie colle a la place
+        # d'une cle d'API, par exemple). Mesure du 05/09/2026, apres l'ajout
+        # de plusieurs cles d'un coup. Meme traitement qu'un 401 : on marque
+        # la cle et on laisse une autre repondre.
+        _noter_cle(cle_id, ok=False,
+                   erreur="réponse non-JSON (ce n'est pas une clé d'API)")
+        if _essai == 0 and len(_cles_brutes()) > 1:
+            return api_get(path, params, _essai=1)
+        return {"ok": False,
+                "error": "Réponse non-JSON — cette clé n'est pas un X-API-TOKEN "
+                         "(Settings › MyPuls › Tester chaque clé)"}
+    _noter_cle(cle_id, ok=True, compter=True)
+    return {"ok": True, "data": d}
 
 
 def api_session() -> dict:
