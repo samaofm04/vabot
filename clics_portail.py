@@ -359,18 +359,36 @@ def _audience(a: dict) -> str:
     clics = int(a.get("clics") or 0)
     uniques = int(a.get("visiteurs") or 0)
     taux = (100.0 * clics / vues) if vues else 0.0
+    # LA TROISIEME CARTE DEPEND DE CE QUE LES CHIFFRES PERMETTENT DE DIRE.
+    #
+    # Sur un espace de liens DIRECTS, chaque page vue est un clic : le taux
+    # vaut 100 % tous les jours et n'apprend rien. (Le 40 % du tableau de
+    # bord de GetMySocial porte sur tout le compte, pages d'atterrissage
+    # comprises — ce n'est pas la meme population.) On montre alors les clics
+    # par visiteur, qui dit quelque chose : au-dessus de 1, des gens
+    # reviennent.
+    if vues and clics and abs(vues - clics) > max(1, vues * 0.02):
+        troisieme = ("<div class='q'>Taux de clic</div><div class='v'>%.1f%%</div>"
+                     "<div class='s'>%s clic(s)</div>" % (taux, _num(clics)))
+    elif uniques:
+        troisieme = ("<div class='q'>Clics par visiteur</div>"
+                     "<div class='v'>%.2f</div>"
+                     "<div class='s'>%s clic(s) · liens directs</div>"
+                     % (clics / uniques, _num(clics)))
+    else:
+        troisieme = ("<div class='q'>Clics</div><div class='v'>%s</div>"
+                     "<div class='s'>sur la période</div>" % _num(clics))
     out.append(
         "<div class='kpis'>"
         "<div class='kpi a'><div class='q'>Pages vues</div><div class='v'>%s</div>"
         "<div class='s'>%s</div></div>"
         "<div class='kpi b'><div class='q'>Visiteurs uniques</div><div class='v'>%s</div>"
         "<div class='s'>%s%% de la période</div></div>"
-        "<div class='kpi c'><div class='q'>Taux de clic</div><div class='v'>%.1f%%</div>"
-        "<div class='s'>%s clic(s)</div></div>"
+        "<div class='kpi c'>%s</div>"
         "</div>"
         % (_num(vues), html.escape(str(a.get("periode") or "")),
            _num(uniques), ("%.0f" % (100.0 * uniques / vues)) if vues else "—",
-           taux, _num(clics)))
+           troisieme))
     c = _courbe(a.get("serie") or [])
     if c:
         out.append("<section><h2>Trafic jour par jour</h2>%s</section>" % c)
