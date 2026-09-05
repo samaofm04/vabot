@@ -51375,7 +51375,7 @@ def create_app():
             "lignes": lignes,
         })
 
-    @app.route("/api/rig/mypuls_limite")    @app.route("/api/rig/mypuls_limite")
+    @app.route("/api/rig/mypuls_limite")
     def rig_mypuls_limite():
         """Le quota annonce par MyPuls, lu en un appel. En-tetes seulement."""
         from flask import jsonify
