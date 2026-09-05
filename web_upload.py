@@ -13448,6 +13448,27 @@ def _styles_choix_json() -> str:
         return "[]"
 
 
+def _adresse_publique() -> str:
+    """L'adresse du site telle que le NAVIGATEUR la voit.
+
+    Derriere le proxy du VPS, Flask ne voit que du http : une adresse
+    fabriquee ici en http serait recopiee telle quelle dans un lien qu'on
+    envoie, et le lien passerait en clair. On force https hors local — c'est
+    bien ce que le navigateur enverra.
+    """
+    base = "https://youl4b.com"
+    try:
+        from flask import request as _rq
+        base = _rq.url_root.rstrip("/")
+        hote = (_rq.host or "").split(":")[0].lower()
+        local = hote in ("127.0.0.1", "localhost") or hote.startswith("192.168.")
+        if not local and base.startswith("http://"):
+            base = "https://" + base[len("http://"):]
+    except Exception:
+        pass
+    return base
+
+
 def _gdrive_redirect_uri() -> str:
     """URI de retour OAuth. DOIT être identique dans la console Google, sur la
     page et dans la route — sinon « redirect_uri_mismatch ». Derrière le proxy
@@ -14885,6 +14906,51 @@ def _scrape_via_ig_public(handle: str) -> dict:
     return {"profile": profile, "reels": reels}
 
 
+def _fusionner_jours(out: dict, cached) -> dict:
+    """Recolle l'historique par jour du relevé précédent sur le nouveau.
+
+    POURQUOI FUSIONNER. L'API publique ne rend que ~12 posts : remplacer
+    post_days / reel_days à chaque scrape effaçait les jours plus anciens, la
+    courbe 30 j s'érodait, et l'assiduité des périodes de paie PASSÉES
+    devenait fausse.
+
+    ON FUSIONNE MÊME DEPUIS UNE ENTRÉE EN ERREUR, et c'est la correction du
+    05/09/2026. Quand un scrape échoue, on recopie déjà l'entrée précédente et
+    on y pose le drapeau `error` — précisément pour ne pas perdre l'historique
+    (le commentaire de ce chemin dit : « une erreur passagère effaçait tout
+    l'historique [...] et inventait des oublis dans la paie »). Mais la fusion
+    refusait ensuite de lire une entrée portant ce drapeau. Résultat, la suite
+    succès → échec → succès ramenait reel_days aux ~12 derniers posts : les
+    jours plus anciens disparaissaient, et l'assiduité les comptait comme des
+    OUBLIS. Sur un relevé de seize comptes, huit portaient une erreur — ce
+    n'est pas un cas limite, et ces oublis se traduisent en retenues de paie.
+
+    Le drapeau dit « CE relevé-ci a raté », jamais « ces jours passés sont
+    faux ». Les jours d'une entrée en erreur viennent d'un scrape qui, lui,
+    avait réussi.
+
+    On garde la plus grande valeur connue par jour : un scrape qui ne voit
+    qu'une partie des posts d'un jour ne doit pas faire baisser un compte
+    déjà relevé.
+    """
+    if not isinstance(cached, dict):
+        return out
+    import datetime as _dt_h
+    _floor = (_dt_h.date.today() - _dt_h.timedelta(days=30)).isoformat()
+    for _key in ("post_days", "reel_days"):
+        _merged = dict(out.get(_key) or {})
+        for _d, _v in (cached.get(_key) or {}).items():
+            if str(_d) < _floor:
+                continue                         # au-delà de 30 j : on purge
+            try:
+                _n = int(_v or 0)
+            except (TypeError, ValueError):
+                continue                         # une valeur illisible n'écrase rien
+            _merged[_d] = max(_n, int(_merged.get(_d) or 0))
+        out[_key] = _merged
+    return out
+
+
 def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
     """Pour un handle IG, retourne {daily, weekly, biweekly, followers, profile_pic_url, ...}.
 
@@ -15106,16 +15172,7 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
     # reel_days à chaque scrape effaçait les jours plus anciens -> la courbe 30 j
     # s'érodait et l'assiduité des périodes de paie PASSÉES devenait fausse.
     # On FUSIONNE (en gardant la plus grande valeur connue par jour).
-    if isinstance(cached, dict) and not cached.get("error"):
-        import datetime as _dt_h
-        _floor = (_dt_h.date.today() - _dt_h.timedelta(days=30)).isoformat()
-        for _key in ("post_days", "reel_days"):
-            _merged = dict(out.get(_key) or {})
-            for _d, _v in (cached.get(_key) or {}).items():
-                if str(_d) < _floor:
-                    continue                     # au-delà de 30 j : on purge
-                _merged[_d] = max(int(_v or 0), int(_merged.get(_d) or 0))
-            out[_key] = _merged
+    out = _fusionner_jours(out, cached)
     # Premier post connu : lu dans la liste BRUTE des posts, pas dans post_days
     # (qui n'enregistre rien de plus vieux que 30 jours et ne peut donc pas
     # remonter jusque-là). Voir _premier_post pour la question de l'exactitude.
@@ -43781,6 +43838,70 @@ def _render_mypuls_cookies_settings() -> str:
         "</div>"
         "</div>"
     )
+    # ── LE REPORT DES CLICS, LISIBLE PAR UN LIEN ─────────────────────────
+    #
+    # Une deuxieme equipe (celle de Twitter, sur un autre serveur) doit
+    # pouvoir lire le report sans qu'on installe le bot chez elle : de
+    # nouvelles permissions, une deuxieme configuration a tenir et un bot de
+    # plus a surveiller, pour de la LECTURE, c'est cher paye.
+    _rep_lignes = []
+    try:
+        import clics_portail
+        from cogs.clickrecap import _load_report_cfg, _reports_configures
+        _deja = {x["cle"]: x for x in clics_portail.liste()}
+        for _k, _c in _reports_configures(_load_report_cfg()):
+            _nom = str(_c.get("group_name") or _k)
+            _j = _deja.get(_k)
+            if _j:
+                _url = "%s/clics/%s" % (_adresse_publique(), _j["jeton"])
+                _act = (
+                    "<input type='text' readonly value='%s' onclick='this.select()' "
+                    "style='flex:1;min-width:220px;padding:7px 9px;background:#0b0e15;"
+                    "border:1px solid #2a3245;color:#8ab4ff;border-radius:7px;"
+                    "font-size:11.5px;font-family:monospace'>"
+                    "<span style='font-size:11.5px;color:#8a91a8'>%d vue(s)</span>"
+                    "<form method='POST' action='/clics/lien/revoquer' style='margin:0'"
+                    " onsubmit='return confirm(\"Couper ce lien ? L adresse deja "
+                    "envoyee cessera de fonctionner.\")'>"
+                    "<input type='hidden' name='jeton' value='%s'>"
+                    "<button type='submit' style='background:none;border:0;color:#8a91a8;"
+                    "cursor:pointer;font-size:15px;padding:2px 4px' title='Révoquer'>✕</button>"
+                    "</form>" % (html_escape(_url), int(_j.get("vues") or 0),
+                                 html_escape(_j["jeton"]))
+                )
+            else:
+                _act = (
+                    "<form method='POST' action='/clics/lien/creer' style='margin:0'>"
+                    "<input type='hidden' name='cle' value='%s'>"
+                    "<input type='hidden' name='libelle' value='%s'>"
+                    "<button type='submit' style='padding:7px 13px;background:rgba(99,102,241,.16);"
+                    "border:1px solid rgba(99,102,241,.5);color:#818cf8;border-radius:7px;"
+                    "font-size:12px;font-weight:600;cursor:pointer'>Créer le lien</button>"
+                    "</form>" % (html_escape(_k), html_escape(_nom))
+                )
+            _rep_lignes.append(
+                "<div style='display:flex;align-items:center;gap:9px;padding:8px 11px;"
+                "background:#0b0e15;border:1px solid #2a3245;border-radius:9px;"
+                "margin-bottom:7px;flex-wrap:wrap'>"
+                "<div style='font-weight:650;font-size:12.5px;min-width:150px'>%s</div>"
+                "%s</div>" % (html_escape(_nom), _act))
+    except Exception:
+        _rep_lignes = []
+
+    lien_block = (
+        "<div class='box' style='border:1px solid #2a3245;margin-bottom:16px'>"
+        "<h3 style='margin-top:0'>🔗 Report des clics par lien</h3>"
+        "<small style='color:#8a91a8'>La même page que sur Discord, dans un "
+        "navigateur. Envoie l'adresse à qui doit la lire — pas de compte, pas de "
+        "mot de passe, et rien à installer sur son serveur. Lecture seule.</small>"
+        "<div style='margin-top:12px'>%s</div>"
+        "</div>"
+        % ("".join(_rep_lignes) or
+           "<div style='font-size:12.5px;color:#8a91a8'>Aucun report configuré "
+           "(voir <code>/setreportclick</code> sur Discord).</div>")
+    )
+    api_block = api_block + lien_block
+
     if configured:
         status = (
             "<div style='padding:12px 16px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.3);"
@@ -46058,6 +46179,12 @@ def create_app():
         # manager au rôle restreint l'ouvrait depuis le navigateur où il est
         # connecté — une porte qui se ferme parce qu'on est identifié.
         if path.startswith("/mes-comptes/"):
+            return None
+        # Report des clics par lien : meme principe que le portail VA, et
+        # meme raison. La page est en LECTURE SEULE et son autorisation tient
+        # dans l'adresse ; la gater sur la session la fermerait a ceux a qui
+        # on l'envoie, qui n'ont pas de compte — c'est tout l'interet.
+        if path.startswith("/clics/"):
             return None
         is_write = request.method in ("POST", "PUT", "PATCH", "DELETE")
         if not is_write:
@@ -53295,6 +53422,33 @@ def create_app():
                                             r.get("total", 1)))
         return _success("⚠ Clé ajoutée mais NON validée : %s"
                         % (detail or "réponse inattendue"))
+
+    @app.route("/clics/lien/creer", methods=["POST"])
+    def clics_lien_creer():
+        """Cree (ou retrouve) le lien public d'un report.
+
+        UN SEUL lien par report : en creer un second ne ferait que semer des
+        adresses qui montrent la meme chose, sans moyen de savoir laquelle a
+        ete envoyee a qui.
+        """
+        if not is_auth():
+            return redirect("/")
+        import clics_portail
+        cle = (request.form.get("cle") or "").strip()
+        lib = (request.form.get("libelle") or "").strip()
+        if not cle:
+            return _error("✕ Report non précisé.")
+        j = clics_portail.creer(cle, lib)
+        return _success("✓ Lien prêt : %s/clics/%s" % (_adresse_publique(), j))
+
+    @app.route("/clics/lien/revoquer", methods=["POST"])
+    def clics_lien_revoquer():
+        """Coupe un lien. L'adresse deja envoyee cesse de fonctionner."""
+        if not is_auth():
+            return redirect("/")
+        import clics_portail
+        ok = clics_portail.revoquer((request.form.get("jeton") or "").strip())
+        return _success("✓ Lien révoqué." if ok else "✕ Lien inconnu.")
 
     @app.route("/mypuls/keys/rename", methods=["POST"])
     def mypuls_keys_rename():
@@ -60578,6 +60732,33 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
     # ces quatre fonctions, et lire les comptes que par `jailbreak`.
     try:
         import va_portal
+        # Report des clics, lisible par un simple lien : une deuxieme equipe
+        # peut le consulter sans qu'on installe le bot sur son serveur.
+        try:
+            import clics_portail
+
+            def _construire_report(cle):
+                """Le MEME report que Discord, pas un second calcul.
+
+                Deux chemins de calcul finiraient par diverger, et le jour ou
+                ils divergent c'est le chiffre affiche a l'equipe qui devient
+                faux sans que personne ne le voie.
+                """
+                import asyncio as _aio
+                from cogs.clickrecap import (ClickRecap, _load_report_cfg,
+                                             _reports_configures)
+                for k, c in _reports_configures(_load_report_cfg()):
+                    if k == cle:
+                        class _Faux:
+                            """_build_group_report n'appelle aucun self.*"""
+                        return _aio.run(ClickRecap._build_group_report(_Faux(), c))
+                return None
+
+            clics_portail.register(app, {"construire": _construire_report})
+            log.info("clics_portail branché")
+        except Exception as _cp_e:
+            log.error(f"clics_portail register échoué: {_cp_e}")
+
         va_portal.register(app, {
             "pseudo_instagram": _pseudo_instagram,
             "normalize_handle": _normalize_insta_handle,
