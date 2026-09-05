@@ -4592,6 +4592,63 @@ try:
           "permettre_vide=not c.get(\"message_id\")" in _srcCl
           or "permettre_vide" in _srcCl, "_post_or_update_report")
 
+    # -- historique par jour : il survit a un scrape rate ---------------------
+    #
+    # C EST DE L ARGENT. L assiduite se calcule sur reel_days ; un jour qui
+    # disparait de l historique devient un OUBLI, et un oubli devient une
+    # retenue de paie.
+    #
+    # Le chemin d echec recopie deja l entree precedente et y pose le drapeau
+    # « error » -- expressement pour ne pas perdre l historique. Mais la
+    # fusion refusait ensuite de lire une entree portant ce drapeau : la suite
+    # succes -> echec -> succes ramenait reel_days aux ~12 derniers posts. Sur
+    # un relevé de seize comptes, huit portaient une erreur.
+    import web_upload as _wuF
+    _fjWU = _wuF._fusionner_jours
+    import datetime as _dtF
+    _hierF = (_dtF.date.today() - _dtF.timedelta(days=3)).isoformat()
+    _avantF = (_dtF.date.today() - _dtF.timedelta(days=10)).isoformat()
+
+    # 1. Un scrape reussi, puis un echec : l entree en erreur GARDE les jours.
+    _bonF = {"reel_days": {_avantF: 2, _hierF: 1}}
+    _rateF = dict(_bonF)
+    _rateF["error"] = "HTTP 429"
+
+    # 2. Le scrape suivant ne voit que le jour recent (l API rend ~12 posts).
+    _neufF = {"reel_days": {_hierF: 1}}
+    _apresF = _fjWU(dict(_neufF), _rateF)
+    check("insta : l historique survit a un scrape en erreur",
+          _apresF["reel_days"].get(_avantF) == 2,
+          repr(_apresF["reel_days"]))
+
+    # 3. Sans le drapeau, rien ne change : le correctif n a pas casse le cas sain.
+    _sainF = _fjWU(dict(_neufF), _bonF)
+    check("insta : la fusion normale marche toujours",
+          _sainF["reel_days"].get(_avantF) == 2 and _sainF["reel_days"].get(_hierF) == 1,
+          repr(_sainF["reel_days"]))
+
+    # 4. On garde la PLUS GRANDE valeur : un scrape partiel ne fait pas baisser
+    #    un jour deja releve.
+    _partielF = _fjWU({"reel_days": {_hierF: 0}}, {"reel_days": {_hierF: 3}})
+    check("insta : un scrape partiel ne fait pas baisser un jour connu",
+          _partielF["reel_days"].get(_hierF) == 3, repr(_partielF["reel_days"]))
+
+    # 5. Au-dela de 30 jours, on purge : la fenetre ne doit pas gonfler sans fin.
+    _vieuxF = (_dtF.date.today() - _dtF.timedelta(days=40)).isoformat()
+    _purgeF = _fjWU({"reel_days": {}}, {"reel_days": {_vieuxF: 5, _hierF: 1}})
+    check("insta : au-dela de 30 jours, l historique est purge",
+          _vieuxF not in _purgeF["reel_days"] and _purgeF["reel_days"].get(_hierF) == 1,
+          repr(_purgeF["reel_days"]))
+
+    # 6. Une valeur illisible n efface pas un jour connu.
+    _saleF = _fjWU({"reel_days": {_hierF: 2}}, {"reel_days": {_hierF: "x"}})
+    check("insta : une valeur illisible n ecrase rien",
+          _saleF["reel_days"].get(_hierF) == 2, repr(_saleF["reel_days"]))
+
+    # 7. Pas d entree precedente : on rend le neuf tel quel, sans lever.
+    check("insta : sans releve precedent, rien ne casse",
+          _fjWU(dict(_neufF), None)["reel_days"] == _neufF["reel_days"])
+
     # -- rattachement aux liens de suivi : par l ADRESSE COMPLETE -------------
     #
     # Le code n est unique QUE dans une creatrice : « c47 » designe cinq liens
