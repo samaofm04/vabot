@@ -1203,6 +1203,23 @@ PAGE_TEAM = 500
 MAX_PAGES_TEAM = 40
 
 
+def _borne_jour(v: str, fin: bool) -> str:
+    """« 2026-08-31 » -> « 2026-08-31T23:59:59 » pour une fin de periode.
+
+    UNE JOURNEE ENTIERE SE PERD SANS CA. La page de MyPuls va de 12:00 AM a
+    11:59 PM ; l'API, elle, prend une date nue au debut du jour. Mesure du
+    05/09/2026 sur le 16-31 aout : 1291 ventes rendues contre 1392 affichees,
+    soit 101 ventes et 4 807 $ evapores -- le dernier jour, en entier. Aucune
+    erreur, aucun avertissement : juste un total plus petit.
+
+    Une valeur qui porte deja une heure est laissee telle quelle.
+    """
+    t = str(v or "").strip()
+    if not t or "T" in t or " " in t:
+        return t
+    return t + ("T23:59:59" if fin else "T00:00:00")
+
+
 def api_team_money(start: str, end: str, creator: str = "all",
                    chatter: str = "all", type_vente: str = "all") -> dict:
     """Toutes les ventes attribuees de la periode. Suit la pagination.
@@ -1213,7 +1230,8 @@ def api_team_money(start: str, end: str, creator: str = "all",
     """
     ventes, page, total, tronque = [], 1, None, False
     while page <= MAX_PAGES_TEAM:
-        r = api_get("team/money", {"start": start, "end": end,
+        r = api_get("team/money", {"start": _borne_jour(start, False),
+                                   "end": _borne_jour(end, True),
                                    "creator": creator, "chatter": chatter,
                                    "type": type_vente,
                                    "page": page, "per_page": PAGE_TEAM})
@@ -1245,7 +1263,8 @@ def api_team_messages_stats(start: str, end: str, creator: str = "all") -> dict:
     C'est ce qui remplace « Presence / Reactivite / Propose / Vendu / Taux
     conv. », colonnes que la nouvelle page ne porte plus.
     """
-    r = api_get("team/messages/stats", {"start": start, "end": end,
+    r = api_get("team/messages/stats", {"start": _borne_jour(start, False),
+                                        "end": _borne_jour(end, True),
                                         "creator": creator, "chatter": "all",
                                         "type": "all"})
     if not r.get("ok"):
