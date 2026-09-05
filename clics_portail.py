@@ -309,8 +309,15 @@ def _page_donnees(titre: str, sous: str, d: dict, quand: str) -> str:
         # clics puis coller les autres a la fin remettait exactement le
         # defaut qu'on venait de corriger : quelqu'un qu'on cherche n'est pas
         # ou on l'attend. La parenthese de tete est ignoree, comme ailleurs.
-        _tri = lambda t: re.sub(r"^[^0-9A-Za-z]+", "", str(t)).lower()
-        noms = sorted(set(clics) | set(ab), key=_tri)
+        # LA MEME CLE QUE LE REPORT, importee et non recopiee : « VA 10 »
+        # doit se ranger apres « VA 2 » des deux cotes, et deux copies d'une
+        # regle de tri finissent toujours par diverger d'un caractere.
+        try:
+            from cogs.clickrecap import _cle_tri
+        except Exception:
+            def _cle_tri(n):
+                return (str(n or "").lower(),)
+        noms = sorted(set(clics) | set(ab), key=_cle_tri)
 
         lignes = []
         for nom in noms:

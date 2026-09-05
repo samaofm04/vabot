@@ -358,6 +358,25 @@ def _personne_du_lien(nom) -> str:
     return re.sub(r"\s+", " ", m.group(1)).strip()
 
 
+def _cle_tri(nom) -> tuple:
+    """La cle de tri d'un nom de lien : NATUREL, pas alphabetique.
+
+    « VA 10 » se rangeait avant « VA 2 » — la comparaison de chaines lit
+    « 1 » puis « 0 » et s'arrete au premier caractere. Sur une liste ou tout
+    le monde s'appelle « VA <n> », l'ordre devient illisible.
+
+    On decoupe en morceaux et on compare les nombres COMME des nombres. Les
+    morceaux sont etiquetes (0 pour un nombre, 1 pour du texte) : sans ca,
+    Python refuse de comparer un entier a une chaine des que deux noms
+    divergent sur la nature du morceau.
+
+    La ponctuation de tete est ignoree : « (ANDRY) 1 » se range a A.
+    """
+    t = re.sub(r"^[^0-9A-Za-z]+", "", str(nom or "")).lower()
+    return tuple((0, int(m), "") if m.isdigit() else (1, 0, m)
+                 for m in re.findall(r"\d+|\D+", t))
+
+
 def _nom_propre(nom) -> str:
     """Le nom d'un lien, espaces normalises : « ( BO7 )  1 » -> « (BO7) 1 ».
 
@@ -924,7 +943,6 @@ class ClickRecap(commands.Cog):
                 # La parenthese de tete est ignoree au tri : « (ANDRY) 1 » se
                 # range a A. Le numero de telephone suit le nom, donc
                 # « (BO7) 1 » precede « (BO7) 2 » sans rien de special.
-                _cle_tri = lambda t: re.sub(r"^[^0-9A-Za-z]+", "", str(t)).lower()
                 _donnees["par_lien"] = [
                     {"lien": _nom_propre(lab),
                      "periodes": [{"marche": p[i][0], "total": p[i][1]}
@@ -1013,7 +1031,7 @@ class ClickRecap(commands.Cog):
                 # La parenthese de tete est ignoree : « (ANDRY) 1 » se range a
                 # A, pas avant tout le monde. Le numero de telephone suit le
                 # nom, donc « (BO7) 1 » precede « (BO7) 2 » naturellement.
-                _assoc.sort(key=lambda x: re.sub(r"^[^0-9A-Za-z]+", "", x[0]).lower())
+                _assoc.sort(key=lambda x: _cle_tri(x[0]))
                 _donnees["abonnes"] = [
                     {"lien": _n2, "auj": _a1, "quinz": _a2, "prec": _a3}
                     for _n2, _adr2, _a1, _a2, _a3 in _assoc]
