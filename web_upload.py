@@ -52386,6 +52386,102 @@ def create_app():
             pass
         return jsonify(out)
 
+    @app.route("/mypuls/tables_probe")
+    def mypuls_tables_probe():
+        """La FORME des tableaux de MyPuls, telle qu'elle arrive aujourd'hui.
+
+        POURQUOI CETTE PAGE EXISTE. Le 05/09/2026, le CA est tombe a zero et
+        les noms de modeles sont devenus de petits nombres. Les deux tableaux
+        etaient lus par POSITION : une colonne inseree chez eux decale tout,
+        et rien ne leve d'erreur -- une case de nom lue comme un montant rend
+        simplement 0. Il n'existait aucun moyen de voir ce que MyPuls envoie
+        sans ouvrir leur page a la main et compter les colonnes.
+
+        Elle ne montre AUCUN montant : seulement les en-tetes, le nombre de
+        colonnes, et ou chaque champ a ete trouve.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        try:
+            import mypuls
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)})
+        from datetime import date as _d, timedelta as _td
+        fin = (request.args.get("to") or _d.today().isoformat()).strip()
+        debut = (request.args.get("from")
+                 or (_d.today() - _td(days=29)).isoformat()).strip()
+
+        s_ = mypuls._make_session()
+        if s_ is None:
+            return jsonify({"ok": False, "error": "Cookies MyPuls non configurés"})
+        try:
+            fin_excl = (_d.fromisoformat(fin) + _td(days=1)).isoformat()
+        except Exception:
+            fin_excl = fin
+        url = "%s/creator/messaging-money-team?start=%s&end=%s" % (
+            mypuls.BASE_URL, debut, fin_excl)
+        try:
+            r = s_.get(url, timeout=mypuls.TIMEOUT)
+        except Exception as e:
+            return jsonify({"ok": False, "error": "Réseau : %s" % e})
+        if r.status_code != 200:
+            return jsonify({"ok": False, "error": "HTTP %s" % r.status_code})
+        if mypuls._detect_login_redirect(r.text):
+            return jsonify({"ok": False,
+                            "error": "Cookies expirés — Settings › MyPuls"})
+
+        tables = mypuls._extract_tables(r.text)
+        vues = []
+        for i, (entetes, lignes) in enumerate(tables):
+            vues.append({
+                "table": i,
+                "entetes": entetes,
+                "nb_entetes": len(entetes),
+                "nb_lignes": len(lignes),
+                "nb_colonnes_ligne": mypuls._largeur(lignes),
+            })
+
+        # Ou chaque champ est trouve AUJOURD'HUI. -1 = introuvable, donc lu
+        # par repli sur son ancienne position -- c'est ce qui casse en
+        # silence, et c'est ce qu'on veut voir en premier.
+        i_log = mypuls._table_par_entetes(
+            tables, ("fan",), ("montant net", "montant", "net", "amount"))
+        i_perf = mypuls._table_par_entetes(
+            tables, ("presence",), ("ca total", "total"))
+        ou = {}
+        if i_log >= 0:
+            e = tables[i_log][0]
+            ou["log"] = {"table": i_log, "colonnes": {
+                "createur": mypuls._colonne(e, "createur", "creator", "modele", "model"),
+                "chatteur": mypuls._colonne(e, "user", "chatter", "chatteur", "utilisateur"),
+                "fan": mypuls._colonne(e, "fan", "client"),
+                "montant": mypuls._colonne(e, "montant net", "montant", "net", "amount"),
+                "devise": mypuls._colonne(e, "devise", "currency"),
+                "type": mypuls._colonne(e, "type", "categorie"),
+                "date": mypuls._colonne(e, "date"),
+            }}
+        if i_perf >= 0:
+            e = tables[i_perf][0]
+            ou["perf"] = {"table": i_perf, "colonnes": {
+                "chatteur": mypuls._colonne(e, "chatter", "chatteur", "user"),
+                "ca_ppv": mypuls._colonne(e, "ca ppv", "ppv"),
+                "ca_tips": mypuls._colonne(e, "ca tips", "tips", "pourboires"),
+                "ca_total": mypuls._colonne(e, "ca total", "total"),
+            }}
+
+        st = mypuls.fetch_team_stats(debut, fin, use_cache=False)
+        return jsonify({
+            "ok": True, "periode": [debut, fin],
+            "tables": vues, "ou_sont_les_colonnes": ou,
+            "lecture": {"ok": st.get("ok"), "error": st.get("error"),
+                        "diagnostic": st.get("diagnostic"),
+                        "totaux": {k: v for k, v in (st.get("totals") or {}).items()
+                                   if k in ("ca_total", "ca_ppv", "ca_tips",
+                                            "nb_transactions", "nb_chatters",
+                                            "active_chatters")}},
+        })
+
     @app.route("/mypuls/api_stats_test")
     def mypuls_api_stats_test():
         """Voir le FORMAT des revenus renvoyés par l'API pour une créatrice.

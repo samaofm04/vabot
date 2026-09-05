@@ -1072,6 +1072,88 @@ def _extract_tables(html: str) -> List[Tuple[List[str], List[List[str]]]]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# LIRE PAR EN-TETE, PAS PAR POSITION
+#
+# Les deux tableaux etaient lus par index : row[0] le createur, row[3] le
+# montant, row[8] le CA total. Ca tient tant que MyPuls ne touche a rien.
+# Le 05/09/2026 il a touche : le CA total est tombe a 0 alors que CA PPV et
+# CA Tips se lisaient encore, et les noms de modeles sont devenus de petits
+# nombres (1 a 15 pour 23 ventes) -- soit une colonne inseree en tete du log
+# et une autre avant le total.
+#
+# Rien ne le signalait, parce qu'une colonne decalee ne LEVE pas d'erreur :
+# elle rend un nom la ou on attendait un montant, et _parse_amount rend 0.0.
+# Le CA s'effondre en silence, et le classement des chatteurs se vide.
+#
+# On lit donc les <th>. Une colonne ajoutee, deplacee ou renommee dans une
+# forme qu'on reconnait ne casse plus rien ; une colonne qu'on ne reconnait
+# PAS est signalee dans le diagnostic au lieu de valoir zero.
+# ---------------------------------------------------------------------------
+
+def _norm_entete(t: str) -> str:
+    """Un en-tete comparable : sans accents, sans ponctuation, en minuscules."""
+    import unicodedata
+    t = unicodedata.normalize("NFKD", str(t or ""))
+    t = "".join(c for c in t if not unicodedata.combining(c))
+    t = t.lower().replace("'", " ").replace("-", " ")
+    t = re.sub(r"[^a-z0-9 ]+", " ", t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _largeur(rows: List[List[str]]) -> int:
+    """Le nombre de colonnes que les LIGNES portent vraiment.
+
+    Les <th> ne suffisent pas : une page peut en compter plus que ses cellules
+    (deux rangees d'en-tete, un <th> dans le corps). Un index tire des seuls
+    en-tetes tomberait alors au-dela de la ligne, et `_cellule` rendrait le
+    defaut -- c'est-a-dire zero, sans un mot. On confronte donc les deux.
+    """
+    return max((len(r) for r in (rows or [])), default=0)
+
+
+def _colonne(entetes: List[str], *mots: str) -> int:
+    """L'index de la premiere colonne dont l'en-tete correspond, sinon -1.
+
+    On compare sur l'en-tete NORMALISE, en exigeant un mot entier ou un
+    prefixe : « ca total » ne doit pas etre trouve par « total », qui
+    designerait aussi bien « total propose ». L'ordre des `mots` est celui de
+    la preference.
+    """
+    normes = [_norm_entete(e) for e in (entetes or [])]
+    for m in mots:
+        m = _norm_entete(m)
+        if not m:
+            continue
+        for i, e in enumerate(normes):
+            if e == m:
+                return i
+        for i, e in enumerate(normes):
+            if e.startswith(m + " ") or e.endswith(" " + m) or (" " + m + " ") in " %s " % e:
+                return i
+    return -1
+
+
+def _cellule(row: List[str], i: int, defaut: str = "") -> str:
+    """La cellule d'index i, ou `defaut` — un index absent ne doit pas lever."""
+    if i is None or i < 0 or i >= len(row):
+        return defaut
+    return row[i]
+
+
+def _table_par_entetes(tables, *exigences) -> int:
+    """L'index du tableau qui porte TOUTES ces colonnes, sinon -1.
+
+    Identifier les tableaux par leur contenu plutot que par leur rang : un
+    tableau ajoute a la page decalait « tables[1] » et faisait lire les
+    performances dans autre chose.
+    """
+    for i, (entetes, _rows) in enumerate(tables or []):
+        if all(_colonne(entetes, *variantes) >= 0 for variantes in exigences):
+            return i
+    return -1
+
+
 # ============ Fetch + parse ============
 
 def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool = True) -> Dict[str, Any]:
@@ -1142,8 +1224,57 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
     if len(tables) < 2:
         return {"ok": False, "error": f"Format de page inattendu (seulement {len(tables)} tableaux trouvés)"}
 
-    # Table 0 = transactions log
-    # Headers: Créateur | User (chatter) | Fan | Montant net | Devise | Type | Date | Contexte | Action
+    # LES DEUX TABLEAUX SE RECONNAISSENT A LEURS COLONNES, pas a leur rang :
+    # une table ajoutee a la page decalait tables[1] et faisait lire les
+    # performances dans autre chose. On garde le rang comme dernier recours,
+    # pour ne rien casser si les en-tetes disparaissent.
+    _COLS_LOG = (("fan",), ("montant net", "montant", "net", "amount"))
+    _COLS_PERF = (("presence",), ("ca total", "total"))
+    i_log = _table_par_entetes(tables, *_COLS_LOG)
+    i_perf = _table_par_entetes(tables, *_COLS_PERF)
+    entetes_manquants = (i_log < 0 or i_perf < 0)
+    if i_log < 0:
+        i_log = 0
+    if i_perf < 0:
+        i_perf = 1 if len(tables) > 1 else 0
+
+    e_log = tables[i_log][0]
+    # Table du log : Créateur | User (chatter) | Fan | Montant net | Devise |
+    #                Type | Date | Contexte | Action
+    c_creator = _colonne(e_log, "createur", "creator", "modele", "model")
+    c_chatter = _colonne(e_log, "user", "chatter", "chatteur", "utilisateur")
+    c_fan = _colonne(e_log, "fan", "client")
+    c_amount = _colonne(e_log, "montant net", "montant", "net", "amount")
+    c_cur = _colonne(e_log, "devise", "currency")
+    c_type = _colonne(e_log, "type", "categorie")
+    c_date = _colonne(e_log, "date")
+    c_ctx = _colonne(e_log, "contexte", "context")
+    # Repli sur les positions HISTORIQUES quand un en-tete manque : mieux vaut
+    # l'ancienne lecture que rien. Les colonnes reellement introuvables sont
+    # comptees plus bas — c'est ce compte qui doit alerter, pas un CA a zero.
+    # Un index tire des en-tetes mais introuvable dans les lignes ne vaut
+    # rien : on le traite comme absent, pour qu'il tombe sur le repli et soit
+    # COMPTE, au lieu de rendre une case vide a chaque ligne.
+    _lg = _largeur(tables[i_log][1])
+    if _lg:
+        c_creator, c_chatter, c_fan, c_amount, c_cur, c_type, c_date, c_ctx = [
+            (i if i < _lg else -1) for i in
+            (c_creator, c_chatter, c_fan, c_amount, c_cur, c_type, c_date, c_ctx)]
+    _defauts_log = {"creator": 0, "chatter": 1, "fan": 2, "amount": 3,
+                    "cur": 4, "type": 5, "date": 6, "ctx": 7}
+    colonnes_log_manquantes = [n for n, i in (
+        ("createur", c_creator), ("chatteur", c_chatter), ("fan", c_fan),
+        ("montant", c_amount), ("devise", c_cur), ("type", c_type),
+        ("date", c_date)) if i < 0]
+    if c_creator < 0: c_creator = _defauts_log["creator"]
+    if c_chatter < 0: c_chatter = _defauts_log["chatter"]
+    if c_fan < 0: c_fan = _defauts_log["fan"]
+    if c_amount < 0: c_amount = _defauts_log["amount"]
+    if c_cur < 0: c_cur = _defauts_log["cur"]
+    if c_type < 0: c_type = _defauts_log["type"]
+    if c_date < 0: c_date = _defauts_log["date"]
+    if c_ctx < 0: c_ctx = _defauts_log["ctx"]
+
     transactions: List[Dict[str, Any]] = []
     # Lignes du tableau qu'on n'a pas su lire (moins de colonnes que prevu).
     # Avant, elles disparaissaient en silence : une vente ecartee ici
@@ -1153,22 +1284,23 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
     # elles valent 0.0, ce qui se confond avec une vente a zero. On les compte,
     # sinon le seul symptome est un CA trop bas que rien n'explique.
     montants_illisibles = 0
-    for row in tables[0][1]:
-        if len(row) < 7:
+    _mini = max(c_creator, c_chatter, c_fan, c_amount, c_date) + 1
+    for row in tables[i_log][1]:
+        if len(row) < _mini:
             if any((c or "").strip() for c in row):
                 lignes_illisibles += 1
             continue
-        if _montant_illisible(row[3]):
+        if _montant_illisible(_cellule(row, c_amount)):
             montants_illisibles += 1
         transactions.append({
-            "creator": row[0],
-            "chatter": row[1],
-            "fan": row[2],
-            "amount": _parse_amount(row[3]),
-            "currency": row[4] if len(row) > 4 else "EUR",
-            "type": row[5] if len(row) > 5 else "",
-            "date": row[6] if len(row) > 6 else "",
-            "context": row[7] if len(row) > 7 else "",
+            "creator": _cellule(row, c_creator),
+            "chatter": _cellule(row, c_chatter),
+            "fan": _cellule(row, c_fan),
+            "amount": _parse_amount(_cellule(row, c_amount)),
+            "currency": _cellule(row, c_cur, "EUR") or "EUR",
+            "type": _cellule(row, c_type),
+            "date": _cellule(row, c_date),
+            "context": _cellule(row, c_ctx),
         })
 
     # Table 1 = chatter performance
@@ -1181,10 +1313,42 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
         def _est_non_attribue(_n):
             return False
 
+    # Table des performances : Chatter | Présence | Réactivité | Proposé |
+    #                          Vendu | Taux conv. | CA PPV | CA Tips | CA Total
+    e_perf = tables[i_perf][0]
+    p_name = _colonne(e_perf, "chatter", "chatteur", "user", "utilisateur")
+    p_pres = _colonne(e_perf, "presence")
+    p_reac = _colonne(e_perf, "reactivite", "reactivity")
+    p_prop = _colonne(e_perf, "propose", "proposed")
+    p_vend = _colonne(e_perf, "vendu", "sold")
+    p_conv = _colonne(e_perf, "taux conv", "conversion", "conv")
+    p_ppv = _colonne(e_perf, "ca ppv", "ppv")
+    p_tips = _colonne(e_perf, "ca tips", "tips", "pourboires")
+    p_tot = _colonne(e_perf, "ca total", "total")
+    _lp = _largeur(tables[i_perf][1])
+    if _lp:
+        p_name, p_pres, p_reac, p_prop, p_vend, p_conv, p_ppv, p_tips, p_tot = [
+            (i if i < _lp else -1) for i in
+            (p_name, p_pres, p_reac, p_prop, p_vend, p_conv, p_ppv, p_tips, p_tot)]
+    colonnes_perf_manquantes = [n for n, i in (
+        ("chatteur", p_name), ("ca ppv", p_ppv), ("ca tips", p_tips),
+        ("ca total", p_tot)) if i < 0]
+    # Repli sur les positions historiques, colonne par colonne.
+    if p_name < 0: p_name = 0
+    if p_pres < 0: p_pres = 1
+    if p_reac < 0: p_reac = 2
+    if p_prop < 0: p_prop = 3
+    if p_vend < 0: p_vend = 4
+    if p_conv < 0: p_conv = 5
+    if p_ppv < 0: p_ppv = 6
+    if p_tips < 0: p_tips = 7
+    if p_tot < 0: p_tot = 8
+
     chatters: List[Dict[str, Any]] = []
     chatters_illisibles = 0
-    for row in tables[1][1]:
-        if len(row) < 9:
+    _mini_perf = max(p_name, p_ppv, p_tips, p_tot) + 1
+    for row in tables[i_perf][1]:
+        if len(row) < _mini_perf:
             if any((c or "").strip() for c in row):
                 chatters_illisibles += 1
             continue
@@ -1192,17 +1356,18 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
         # libelle quand la vente n'est rattachee a aucun chatteur. On le
         # MARQUE sans le retirer — l'argent a bien ete encaisse, il doit
         # rester dans le CA ; c'est la PART A PAYER qui doit l'ignorer.
+        _nom = _cellule(row, p_name)
         chatters.append({
-            "non_attribue": _est_non_attribue(row[0]),
-            "name": row[0],
-            "presence": row[1],
-            "reactivity": row[2],
-            "proposed": _parse_amount(row[3]) if row[3] else 0,
-            "sold": _parse_amount(row[4]) if row[4] else 0,
-            "conv_rate": row[5],
-            "ca_ppv": _parse_amount(row[6]),
-            "ca_tips": _parse_amount(row[7]),
-            "ca_total": _parse_amount(row[8]),
+            "non_attribue": _est_non_attribue(_nom),
+            "name": _nom,
+            "presence": _cellule(row, p_pres),
+            "reactivity": _cellule(row, p_reac),
+            "proposed": _parse_amount(_cellule(row, p_prop)) if _cellule(row, p_prop) else 0,
+            "sold": _parse_amount(_cellule(row, p_vend)) if _cellule(row, p_vend) else 0,
+            "conv_rate": _cellule(row, p_conv),
+            "ca_ppv": _parse_amount(_cellule(row, p_ppv)),
+            "ca_tips": _parse_amount(_cellule(row, p_tips)),
+            "ca_total": _parse_amount(_cellule(row, p_tot)),
         })
     # CA par DEVISE et par CHATTEUR, reconstruit depuis le log de transactions
     # (la table perf additionne EUR MyM et USD OnlyFans dans la même colonne :
@@ -1329,6 +1494,14 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
     # affiche et la somme des ventes n'a aucune explication consultable.
     _sans_nom = [t for t in transactions if not (t.get("chatter") or "").strip()]
     diagnostic = {
+        # CE QUE MYPULS A ENVOYE, mot pour mot. C'est ce qui manquait le
+        # 05/09 : le CA etait a zero et rien ne permettait de voir que les
+        # colonnes avaient bouge. Une capture d'ecran de moins a demander.
+        "entetes_log": list(tables[i_log][0] or []),
+        "entetes_perf": list(tables[i_perf][0] or []),
+        "colonnes_manquantes": colonnes_log_manquantes + colonnes_perf_manquantes,
+        "tables_reconnues": not entetes_manquants,
+        "nb_tables": len(tables),
         "lignes_illisibles": lignes_illisibles,
         "montants_illisibles": montants_illisibles,
         "chatters_illisibles": chatters_illisibles,
