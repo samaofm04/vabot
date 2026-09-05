@@ -50062,6 +50062,23 @@ def create_app():
         else:
             cibles = list(identites)
 
+        # LE FILTRE ETOILE. « ⭐ Video brut » n'est pas le dossier brutes,
+        # c'est son sous-ensemble marque dans fav_brutes.json. Rendre le
+        # dossier entier reviendrait a poster n'importe quelle brute la ou
+        # une brute CHOISIE etait demandee -- et rien ne le signalerait.
+        etoilees = None
+        if (request.args.get("banger") or "").strip() in ("1", "true", "oui"):
+            try:
+                from cogs.user import fav_brutes_for
+                etoilees = set()
+                for ident in cibles:
+                    for f in fav_brutes_for(ident, limit=10000):
+                        etoilees.add((ident, Path(f).name))
+            except Exception as e:
+                return jsonify({"ok": False,
+                                "error": "etoiles illisibles: %s"
+                                         % type(e).__name__}), 500
+
         # « Ne jamais ecarter en silence » : ce qui n'est pas rendu est
         # compte ET motive, sinon un media manquant reste inexplicable.
         items, ecartes = [], []
@@ -50072,6 +50089,9 @@ def create_app():
                 continue
             for f in sorted(dossier.iterdir()):
                 if not f.is_file():
+                    continue
+                if etoilees is not None and (ident, f.name) not in etoilees:
+                    ecartes.append({"fichier": f.name, "pourquoi": "pas etoilee"})
                     continue
                 if f.suffix.lower() not in exts:
                     ecartes.append({"fichier": f.name, "identite": ident,
@@ -50629,6 +50649,29 @@ def create_app():
     _RIG_IDENTITE = {"name", "pseudo", "pp", "bio"}
     _RIG_OUTIL = {"brutchoix"}
 
+    #: D OU vient le fichier de chaque bouton, quand il vient d un dossier.
+    #:
+    #: Trois provenances possibles, et il faut les distinguer, sinon le parc
+    #: promet ce qu il ne peut pas livrer :
+    #:   - « dossier » : le fichier existe deja, /api/rig/media le liste ;
+    #:   - « reserve » : il faut un montage, mais il est fabrique d avance ;
+    #:   - « aucune »  : il faut un montage et rien ne le fabrique d avance
+    #:                   (« Caption » genere avec famille="") ou ce n est pas
+    #:                   un fichier (les textes, le choix manuel).
+    #:
+    #: « banger » marque ce qui n est pas le dossier entier mais son
+    #: sous-ensemble etoile : le rendre entier reviendrait a poster n importe
+    #: quelle brute la ou une brute CHOISIE etait demandee.
+    _RIG_DOSSIER = {
+        "story": ("stories", False),
+        "storycta": ("storyctas", False),
+        "post": ("posts", False),
+        "pp": ("profile_pics", False),
+        "brute": ("brutes", False),
+        "brutbanger": ("brutes", True),
+        "trend": ("trends", False),
+    }
+
     @app.route("/api/rig/contenus")
     def rig_contenus():
         """Les types de contenu, tels que le menu Discord les propose.
@@ -50662,8 +50705,14 @@ def create_app():
             # montage : sans reserve, le parc n'a aucune porte pour eux, et il
             # vaut mieux qu'il le sache en lisant la liste qu'en echouant a
             # l'envoi. « reserve » vaut null pour tous les autres.
+            res = _res.famille_de(cle) if _res else None
+            dos = _RIG_DOSSIER.get(cle)
             out.append({"cle": cle, "nom": libelle, "famille": famille,
-                        "reserve": _res.famille_de(cle) if _res else None})
+                        "reserve": res,
+                        "source": ("dossier" if dos else
+                                   "reserve" if res else "aucune"),
+                        "subdir": dos[0] if dos else None,
+                        "banger": bool(dos and dos[1])})
         return jsonify({"ok": True, "contenus": out})
 
     # -- LA RESERVE, OUVERTE AU PARC ------------------------------------
