@@ -226,32 +226,48 @@ def _noter_cle(cle_id: str, ok: bool = None, repos_s: float = 0,
     if (ok is None and repos_s <= 0 and not erreur
             and (_t.time() - _COMPTEURS_TS[0]) < _COMPTEURS_PERIODE):
         return
-    _COMPTEURS_TS[0] = _t.time()
-    cles = _cles_brutes()
-    for c in cles:
-        if c.get("id") != cle_id:
-            continue
-        if ok is not None:
-            c["ok"] = bool(ok)
-        if repos_s > 0:
-            c["repos_jusqua"] = _t.time() + repos_s
-        if erreur:
-            c["derniere_erreur"] = erreur[:120]
-        elif ok:
-            c["derniere_erreur"] = ""
-    # Les comptages en attente, pour TOUTES les cles : la prochaine ecriture
-    # les emporte, quelle qu'en soit la raison.
-    for c in cles:
-        n = _COMPTEURS.pop(c.get("id"), 0)
-        if n:
-            c["appels"] = int(c.get("appels") or 0) + n
-    save_api_keys(cles)
+    with _VERROU_CLES:
+        _COMPTEURS_TS[0] = _t.time()
+        cles = _cles_brutes()
+        for c in cles:
+            if c.get("id") != cle_id:
+                continue
+            if ok is not None:
+                c["ok"] = bool(ok)
+            if repos_s > 0:
+                c["repos_jusqua"] = _t.time() + repos_s
+            if erreur:
+                c["derniere_erreur"] = erreur[:120]
+            elif ok:
+                c["derniere_erreur"] = ""
+        # Les comptages en attente, pour TOUTES les cles : la prochaine
+        # ecriture les emporte, quelle qu'en soit la raison.
+        for c in cles:
+            n = _COMPTEURS.pop(c.get("id"), 0)
+            if n:
+                c["appels"] = int(c.get("appels") or 0) + n
+        save_api_keys(cles)
 
 
 #: Ou en est la rotation. En memoire : deux processus tourneraient chacun sur
 #: sa propre position, ce qui reste correct -- l'ordre importe peu, seul le
 #: fait de ne pas taper toujours la meme cle compte.
 _ROTATION = {"i": 0}
+
+#: UN VERROU, parce que le trousseau est maintenant lu et ecrit par PLUSIEURS
+#: FILS a la fois.
+#:
+#: `_noter_cle` fait lire-modifier-ecrire sur un fichier partage. Tant que les
+#: appels etaient en serie, la sequence ne pouvait pas s'entrelacer. Des que
+#: plusieurs fils tirent des pages en parallele, deux mises au repos
+#: simultanees se marchent dessus : la seconde relit l'etat d'AVANT la
+#: premiere et la reecrit par-dessus -- une cle saturee redevient disponible,
+#: on la retape, elle rend 429, et on ne comprend pas pourquoi.
+#:
+#: Le meme verrou protege l'avance de la rotation : sans lui, deux fils
+#: peuvent lire le meme index et partir sur la MEME cle, ce qui annule
+#: exactement ce qu'on cherche a faire.
+_VERROU_CLES = _th.Lock()
 
 
 def _cle_disponible():
@@ -265,8 +281,9 @@ def _cle_disponible():
     maintenant = _t.time()
     libres = [c for c in cles if float(c.get("repos_jusqua") or 0) <= maintenant]
     if libres:
-        _ROTATION["i"] = (_ROTATION["i"] + 1) % len(libres)
-        c = libres[_ROTATION["i"]]
+        with _VERROU_CLES:
+            _ROTATION["i"] = (_ROTATION["i"] + 1) % len(libres)
+            c = libres[_ROTATION["i"]]
         return c.get("id"), (c.get("token") or "").strip()
     # Toutes au repos : on prend celle qui se reveille le plus tot. Elle
     # rendra peut-etre 429, et c'est mieux que de ne rien tenter -- l'appelant
@@ -1485,33 +1502,91 @@ def api_team_money(start: str, end: str, creator: str = "all",
     `tronque` dit qu'on s'est arrete au garde-fou : le total serait faux, et
     l'appelant doit le SAVOIR plutot que de croire avoir tout lu.
     """
-    ventes, page, total, tronque = [], 1, None, False
-    while page <= MAX_PAGES_TEAM:
-        r = api_get("team/money", {"start": _borne_jour(start, False),
-                                   "end": _borne_jour(end, True),
-                                   "creator": creator, "chatter": chatter,
-                                   "type": type_vente,
-                                   "page": page, "per_page": PAGE_TEAM})
+    base = {"start": _borne_jour(start, False), "end": _borne_jour(end, True),
+            "creator": creator, "chatter": chatter, "type": type_vente,
+            "per_page": PAGE_TEAM}
+
+    def _page(n):
+        """Une page, ou une erreur qui dit LAQUELLE."""
+        r = api_get("team/money", dict(base, page=n))
         if not r.get("ok"):
-            # Une page perdue au milieu rend le total FAUX : on le dit, on ne
-            # rend pas un sous-ensemble qui ressemble a un tout.
-            return {"ok": False, "error": r.get("error"),
-                    "page_en_echec": page, "ventes": ventes}
+            return {"ok": False, "page": n, "error": r.get("error")}
         d = r.get("data") or {}
         lot = d.get("data") if isinstance(d, dict) else None
         if not isinstance(lot, list):
-            return {"ok": False, "error": "Format inattendu sur team/money"}
-        ventes.extend(lot)
-        pg = (d.get("pagination") or {}) if isinstance(d, dict) else {}
-        if total is None:
-            total = pg.get("total")
-        if not pg.get("has_more"):
-            break
-        page += 1
+            return {"ok": False, "page": n,
+                    "error": "Format inattendu sur team/money"}
+        return {"ok": True, "page": n, "lot": lot,
+                "pagination": (d.get("pagination") or {}) if isinstance(d, dict) else {}}
+
+    # La PREMIERE page dit combien il y en a. Sans elle on ne saurait pas
+    # quoi paralleliser -- et la demander seule coute une requete, pas plus.
+    p1 = _page(1)
+    if not p1["ok"]:
+        return {"ok": False, "error": p1["error"], "page_en_echec": 1, "ventes": []}
+    pg = p1["pagination"]
+    total = pg.get("total")
+    total_pages = int(pg.get("total_pages") or (1 if not pg.get("has_more") else 0))
+    if total_pages <= 0:
+        # L API n annonce pas le nombre de pages : on retombe sur la lecture
+        # en serie, guidee par has_more. Deviner ferait rater des ventes.
+        ventes, page, tronque = list(p1["lot"]), 1, False
+        while pg.get("has_more") and page < MAX_PAGES_TEAM:
+            page += 1
+            r = _page(page)
+            if not r["ok"]:
+                return {"ok": False, "error": r["error"],
+                        "page_en_echec": page, "ventes": ventes}
+            ventes.extend(r["lot"])
+            pg = r["pagination"]
+        return {"ok": True, "ventes": ventes, "pages": page,
+                "total_annonce": total,
+                "tronque": bool(pg.get("has_more")), "parallele": False}
+
+    tronque = total_pages > MAX_PAGES_TEAM
+    dernieres = min(total_pages, MAX_PAGES_TEAM)
+
+    # LE PARALLELISME NE SERT QU AVEC PLUSIEURS CLES. Avec une seule, lancer
+    # dix requetes a la fois ne fait qu atteindre son quota dix fois plus
+    # vite : on reste en serie. Avec N cles, N fils -- chacun demande sa cle a
+    # la rotation, donc les budgets se repartissent tout seuls.
+    fils = max(1, min(len(_cles_brutes()), 8))
+    pages = list(range(2, dernieres + 1))
+    resultats = {1: p1["lot"]}
+    echec = None
+
+    if pages and fils > 1:
+        from concurrent.futures import ThreadPoolExecutor as _Pool
+        with _Pool(max_workers=fils) as pool:
+            for r in pool.map(_page, pages):
+                if not r["ok"]:
+                    # On garde la PREMIERE page en echec : c est celle qui
+                    # explique, les suivantes ne font que la repeter.
+                    if echec is None or r["page"] < echec["page"]:
+                        echec = r
+                    continue
+                resultats[r["page"]] = r["lot"]
     else:
-        tronque = True
-    return {"ok": True, "ventes": ventes, "pages": page,
-            "total_annonce": total, "tronque": tronque}
+        for n in pages:
+            r = _page(n)
+            if not r["ok"]:
+                echec = r
+                break
+            resultats[n] = r["lot"]
+
+    if echec is not None:
+        # Une page perdue au milieu rend le total FAUX : on le dit, on ne rend
+        # pas un sous-ensemble qui ressemble a un tout.
+        return {"ok": False, "error": echec["error"],
+                "page_en_echec": echec["page"],
+                "ventes": [v for n in sorted(resultats) for v in resultats[n]]}
+
+    # REMISES DANS L ORDRE : les fils rendent dans le desordre, et le journal
+    # est lu comme une suite chronologique ailleurs.
+    ventes = [v for n in sorted(resultats) for v in resultats[n]]
+    return {"ok": True, "ventes": ventes, "pages": dernieres,
+            "total_annonce": total, "tronque": tronque,
+            "parallele": bool(pages and fils > 1), "fils": fils}
 
 
 def api_team_messages_stats(start: str, end: str, creator: str = "all") -> dict:
