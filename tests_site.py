@@ -4592,38 +4592,34 @@ try:
           "permettre_vide=not c.get(\"message_id\")" in _srcCl
           or "permettre_vide" in _srcCl, "_post_or_update_report")
 
-    # -- rattachement aux liens de suivi : le NOM d abord, le code ensuite ----
-    # Plusieurs destinations GetMySocial trainent : « Gerome » vise c80
-    # (« VA 4 Geelark ») alors qu un lien « Gérôme » existe en c94. Lire le
-    # code lui attribuerait 12 715 visites qui ne sont pas les siennes.
-    _nomsCl = {"bo7": {"code": "c85", "nom": "Bo07", "abonnes": 0},
-               "gerome": {"code": "c94", "nom": "Gérôme", "abonnes": 0},
-               "safidy": {"code": "c84", "nom": "Safidy", "abonnes": 1}}
-    _codesCl = {"c80": {"code": "c80", "nom": "VA 4 Geelark", "abonnes": 683},
-                "c85": {"code": "c85", "nom": "Bo07", "abonnes": 0},
-                "c47": {"code": "c47", "nom": "VA 4 JB", "abonnes": 3766}}
-    _tCl2, _ecCl = _crCl._suivi_de("Gerome", "c80", _nomsCl, _codesCl)
-    check("clics : le nom prime sur une destination perimee",
-          _tCl2 and _tCl2["code"] == "c94" and _ecCl == "",
-          str(_tCl2))
-    _tCl2, _ecCl = _crCl._suivi_de("VA 1 Noum", "c47", _nomsCl, _codesCl)
-    check("clics : sans lien a son nom, on retombe sur le code",
-          _tCl2 and _tCl2["code"] == "c47", str(_tCl2))
-    # L ecart de nom se DIT : « Bryan » lisant les chiffres de « Jaurel » peut
-    # etre voulu, mais ne doit pas passer inapercu.
-    check("clics : un nom qui ne correspond pas est signale",
-          _crCl._suivi_de("VA 1 Noum", "c47", _nomsCl, _codesCl)[1] == "VA 4 JB")
-    check("clics : aucun rattachement possible -> rien, pas un faux zero",
-          _crCl._suivi_de("Inconnu", "cXX", _nomsCl, _codesCl)[0] is None)
-    # « BO7 » cote GetMySocial, « Bo07 » cote MyPuls : sans mise a plat des
-    # noms, aucun rapprochement ne tient.
-    for _aCl, _bCl in (("BO7", "Bo07"), ("PAMPAM", "Pam Pam"),
-                       ("Gerome", "Gérôme"), ("Safidy", "Safidy")):
-        check("clics : « %s » et « %s » se rejoignent" % (_aCl, _bCl),
-              _crCl._cle_nom(_aCl) == _crCl._cle_nom(_bCl),
-              "%r vs %r" % (_crCl._cle_nom(_aCl), _crCl._cle_nom(_bCl)))
-    check("clics : deux personnes differentes ne se rejoignent PAS",
-          _crCl._cle_nom("Mike") != _crCl._cle_nom("Mykey"))
+    # -- rattachement aux liens de suivi : par l ADRESSE COMPLETE -------------
+    #
+    # Le code n est unique QUE dans une creatrice : « c47 » designe cinq liens
+    # differents selon la modele — « VA 4 JB » chez Jessye, « peaky »
+    # ailleurs, une campagne SFS ailleurs encore. Le rapprochement se faisait
+    # sur le code seul et prenait le premier venu : des campagnes SFS se
+    # retrouvaient collees aux VA, et les memes abonnes s affichaient a six
+    # personnes. Mesure du 05/09/2026 sur la categorie Jessye : 1660 abonnes
+    # affiches pour 720 reels, soit 940 en double.
+    #
+    # L adresse porte le pseudo ET le code, des deux cotes.
+    for _uCl, _attCl in (
+            ("https://onlyfans.com/jessyewdiference/c88", "jessyewdiference/c88"),
+            ("onlyfans.com/jessyewdiference/c110", "jessyewdiference/c110"),
+            ("https://onlyfans.com/jessyewdiference/c88/", "jessyewdiference/c88"),
+            ("https://getmysocial.com/knstjessye", ""),   # pas une destination OF
+            ("", ""),
+            (None, "")):
+        check("clics : adresse de suivi %r -> %r" % (str(_uCl)[:44], _attCl),
+              _crCl._cle_adresse(_uCl) == _attCl,
+              repr(_crCl._cle_adresse(_uCl)))
+    check("clics : le MEME code chez deux creatrices ne se confond pas",
+          _crCl._cle_adresse("https://onlyfans.com/jessyewdiference/c88")
+          != _crCl._cle_adresse("https://onlyfans.com/khloecute/c88"))
+    # La fonction qui rattachait par le nom a ete RETIREE : chercher
+    # « Roucham » parmi 500 liens ramenait des campagnes SFS au prenom proche.
+    check("clics : plus de rattachement par le nom",
+          not hasattr(_crCl, "_suivi_de"))
 
     # -- code de suivi MyPuls -------------------------------------------------
     # Les liens GetMySocial pointent vers onlyfans.com/<pseudo>/c85 : « c85 »

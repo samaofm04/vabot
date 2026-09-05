@@ -269,19 +269,30 @@ def _code_suivi(destination) -> str:
     return m.group(1) if m else ""
 
 
-def _cle_nom(texte) -> str:
-    """Une forme comparable d'un nom : minuscules, sans accents ni ponctuation.
+def _cle_adresse(url) -> str:
+    """« onlyfans.com/jessyewdiference/c88 » -> « jessyewdiference/c88 ».
 
-    Le meme compte s'ecrit « BO7 » cote GetMySocial et « Bo07 » cote MyPuls,
-    « PAMPAM » et « Pam Pam », « Gerome » et « Gérôme ». Sans cette mise a plat,
-    aucun rapprochement ne tient. Les zeros de tete d'un nombre sautent aussi :
-    « bo07 » et « bo7 » doivent se rejoindre.
+    LE CODE SEUL NE SUFFIT PAS. Il n'est unique que dans une creatrice :
+    « c47 » designe cinq liens differents selon la modele — « VA 4 JB » chez
+    Jessye, « peaky » ailleurs, une campagne SFS ailleurs encore. Rapprocher
+    sur le code seul prenait le premier venu, d'ou des campagnes SFS collees
+    aux VA et les memes abonnes affiches a six personnes.
+
+    L'adresse, elle, porte le pseudo ET le code, des deux cotes : la
+    destination d'un lien GetMySocial et l'URL d'un lien de suivi MyPuls ont
+    la meme forme. Le rapprochement devient exact.
+
+    Rend '' si l'adresse n'a pas cette forme — mieux vaut ne rien rattacher
+    que rattacher au hasard.
     """
-    import unicodedata as _ud
-    t = _ud.normalize("NFKD", str(texte or ""))
-    t = "".join(c for c in t if not _ud.combining(c)).lower()
-    t = re.sub(r"[^a-z0-9]+", "", t)
-    return re.sub(r"0+(\d)", r"\1", t)
+    m = re.search(r"([^/]+)/([A-Za-z]+\d+)/?$", str(url or "").strip())
+    return ("%s/%s" % (m.group(1), m.group(2))).lower() if m else ""
+
+
+# _cle_nom a ete RETIRE avec _suivi_de : il servait a rapprocher « BO7 » de
+# « Bo07 ». On ne rapproche plus par le nom du tout — l'adresse complete
+# (pseudo + code) ne peut pas se tromper de personne, la ou un prenom ramenait
+# des campagnes SFS.
 
 
 async def _liens_suivi() -> list:
@@ -300,29 +311,12 @@ async def _liens_suivi() -> list:
         return []
 
 
-def _suivi_de(personne, code, par_nom, par_code):
-    """Le lien de suivi d'une personne : par le NOM d'abord, le code ensuite.
-
-    Le nom prime parce que les destinations GetMySocial trainent : plusieurs
-    pointent encore vers d'anciens liens Geelark alors qu'un lien nominatif a
-    ete cree depuis. « Gerome » vise c80 (« VA 4 Geelark ») alors que « Gérôme »
-    existe en c94 — c'est ce dernier qu'il faut lire, sans quoi on lui
-    attribuerait 12 715 visites qui ne sont pas les siennes.
-
-    Le code sert de secours pour ceux qui n'ont pas de lien a leur nom : les
-    trois « Noum » pointent vers VA 4 / 8 / 9 JB, ce que le proprietaire a
-    confirme.
-    """
-    t = par_nom.get(_cle_nom(personne))
-    if t is not None:
-        return t, ""
-    t = par_code.get(code or "")
-    if t is None:
-        return None, ""
-    # Le nom ne correspond pas : ce n'est pas forcement une erreur (les « Noum »
-    # sont legitimes), mais ca se signale plutot que de se taire.
-    ecart = "" if _cle_nom(t.get("nom")) == _cle_nom(personne) else t.get("nom") or ""
-    return t, ecart
+# _suivi_de a ete RETIRE. Il rattachait par le NOM d'abord (« Gerome » ->
+# « Gérôme »), le code en secours, parce qu'on croyait des destinations
+# perimees. La vraie cause etait ailleurs : le code etait cherche SANS la
+# creatrice, et tombait sur le premier « c47 » venu. Avec l'adresse complete
+# le rapprochement est exact, et chercher par le nom ne fait plus que ramener
+# des campagnes SFS qui portent un prenom proche.
 
 
 async def _abonnes_par_code(codes) -> dict:
@@ -1008,39 +1002,54 @@ class ClickRecap(commands.Cog):
             # convertit. Un VA a 500 clics et 0 abonne ne se voyait nulle part.
             _tous = await _liens_suivi()
             if _tous:
-                # Deux index : par nom (prioritaire) et par code (secours).
-                _par_nom, _par_code = {}, {}
+                # UN LIEN, UN CODE, UNE LIGNE.
+                #
+                # On regroupait par PERSONNE et on ne gardait qu'un code par
+                # personne — « le premier suffit, les telephones partagent un
+                # code ». C'est faux : « (Roucham) 1 » vise c88 et
+                # « (Roucham) 1SPAM » vise c110, ce sont deux liens
+                # differents avec chacun son audience. Garder le premier
+                # jetait le second en silence ; les additionner melangerait
+                # deux choses distinctes. Confirme par le proprietaire le
+                # 05/09 : « faut pas additionner, c'est deux trucs
+                # differents ».
+                #
+                # ET LE CODE SEUL DECIDE. Le rapprochement par le NOM cherchait
+                # « Roucham » parmi 500 liens de suivi et tombait sur des
+                # campagnes SFS qui n'ont rien a voir. Le code, lui, est ecrit
+                # dans la destination du lien : il ne peut pas se tromper de
+                # personne. « Bryan » lit ainsi les chiffres de « Jaurel »,
+                # et c'est correct — le proprietaire l'a confirme.
+                # PAR ADRESSE COMPLETE, pas par code : « c47 » designe cinq
+                # liens differents selon la creatrice, et prendre le premier
+                # venu collait des campagnes SFS aux VA.
+                _par_adresse = {}
                 for _t in _tous:
-                    _par_nom.setdefault(_cle_nom(_t.get("nom")), _t)
-                    _par_code.setdefault(_t.get("code"), _t)
+                    _a = _cle_adresse(_t.get("url"))
+                    if _a:
+                        _par_adresse.setdefault(_a, _t)
 
                 _assoc = []
-                for _cle_p, _g in _paquets.items():
-                    _nom = _g["nom"] or _nom_propre(_g["lignes"][0][0])
-                    # Les telephones d'une meme personne partagent un code : le
-                    # premier suffit, les abonnes sont par personne.
-                    _cd = ""
-                    for _lab, _p in _g["lignes"]:
-                        _cd = _code_suivi(_dest_par_nom.get(str(_lab), ""))
-                        if _cd:
-                            break
-                    _t, _ecart = _suivi_de(_nom, _cd, _par_nom, _par_code)
+                for lab, _p in rows:
+                    _dest = _dest_par_nom.get(str(lab), "")
+                    _t = _par_adresse.get(_cle_adresse(_dest))
                     if _t is not None:
-                        _assoc.append((_nom, _t, _ecart))
+                        _assoc.append((_nom_propre(lab), _t.get("code"), _t))
 
-                _assoc.sort(key=lambda x: -(x[1].get("abonnes") or 0))
+                _assoc.sort(key=lambda x: -(x[2].get("abonnes") or 0))
                 _l = []
-                for _nom, _t, _ecart in _assoc[:22]:
-                    # L'ecart de nom se DIT : « Bryan » lit les chiffres de
-                    # « Jaurel », c'est peut-etre voulu, mais ca ne doit pas
-                    # passer inapercu.
-                    _sfx = f"  ({_ecart})" if _ecart else ""
+                for _nom, _cd, _t in _assoc[:22]:
+                    # Le nom du lien de suivi est RAPPELE : c'est ce qui
+                    # permet de voir qu'un lien vise une campagne SFS plutot
+                    # qu'un lien a soi, sans avoir a ouvrir MyPuls.
                     _l.append(
-                        f"{str(_nom)[:17]:<18}{str(_t.get('abonnes') or 0):>7}"
-                        f"{str(_t.get('nouveaux') or 0):>7}"
-                        f"{str(_t.get('visites') or 0):>9}{_sfx}")
+                        f"{str(_nom)[:16]:<17}{str(_cd):>5}"
+                        f"{str(_t.get('abonnes') or 0):>6}"
+                        f"{str(_t.get('nouveaux') or 0):>6}"
+                        f"{str(_t.get('visites') or 0):>8}  {str(_t.get('nom') or '')[:18]}")
                 if _l:
-                    _e = f"{'PERSON':<18}{'SUBS':>7}{'NEW':>7}{'VISITS':>9}"
+                    _e = (f"{'LINK':<17}{'CODE':>5}{'SUBS':>6}{'NEW':>6}"
+                          f"{'VISITS':>8}  {'MYPULS'}")
                     emb.add_field(
                         name="👥 Subscribers (MyPuls)",
                         value="```\n" + _e + "\n" + "\n".join(_l) + "\n```",
