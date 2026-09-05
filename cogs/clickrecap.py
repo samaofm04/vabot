@@ -766,6 +766,7 @@ class ClickRecap(commands.Cog):
         _MAX_PER_LIEN = 60
         cyc_s, cyc_e = _pay_period(today)
         rows, cumul, detail_ok = [], [None, None, None, None], False
+        _appels, _echoues = 0, 0
         # Le nom affiche ne porte pas la destination : on la garde a part pour
         # en tirer le code de suivi MyPuls (…/c85) plus bas.
         _dest_par_nom = {}
@@ -808,6 +809,13 @@ class ClickRecap(commands.Cog):
                 if not pays_marche:
                     return None, total
                 return sum(v for k, v in (pays or {}).items() if k in pays_marche), total
+
+            # COMBIEN SONT TOMBES. Sans ce comptage, un pool de cles hors
+            # service rendait 120 echecs sur 120, le tableau se remplissait de
+            # « — », et rien ne distinguait ca d'un jour sans clic.
+            _appels = sum(len(q) for q in per)
+            _echoues = sum(1 for q in per for c in q
+                           if not (isinstance(c, tuple) and c[0] is not None))
 
             cumul = [0, 0, 0, 0]
             for m, quatre in zip([m for m in metas if m.get("id")], per):
@@ -860,6 +868,16 @@ class ClickRecap(commands.Cog):
                     "team_id": c.get("team_id") or "",
                     "group_id": c.get("group_id") or "",
                     "resume": [], "abonnes": [], "par_lien": []}
+        if _echoues:
+            # La page en fera une banniere : « — » partout doit s'expliquer.
+            try:
+                _cles_hs = gms.sante_cles()
+            except Exception:
+                _cles_hs = []
+            _donnees["clics_hs"] = {
+                "echecs": _echoues, "appels": _appels,
+                "cles": [k for k in _cles_hs if k.get("ecartee") or k.get("echecs")],
+            }
         for etiquette, marche_v, total_v in (
                 ("Today", cumul[0], c_today),
                 ("Yesterday", cumul[1], c_yest),
@@ -879,6 +897,24 @@ class ClickRecap(commands.Cog):
             else:
                 lignes_resume.append(f"`{etiquette:<12}` 🌍 **{_n(total_v)}**")
         emb.add_field(name="​", value="\n".join(lignes_resume), inline=False)
+
+        if _echoues:
+            _det = ""
+            try:
+                _k = [k for k in gms.sante_cles() if k.get("ecartee")]
+                if _k:
+                    _det = ("\nDedicated key **%s** sidelined after %d failures — "
+                            "last: `%s`"
+                            % (_k[0]["cle"], _k[0]["echecs"],
+                               str(_k[0].get("dernier") or "?")[:80]))
+            except Exception:
+                pass
+            emb.add_field(
+                name="⚠️ Per-link clicks unavailable",
+                value=("%d/%d analytics calls failed — the click columns show "
+                       "`—`, which means **not read**, not zero.%s"
+                       % (_echoues, _appels, _det)),
+                inline=False)
 
         if all_none:
             emb.add_field(name="⚠️ No data",

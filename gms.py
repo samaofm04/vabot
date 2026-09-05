@@ -83,8 +83,12 @@ def next_dash_key() -> str:
     """Clé dédiée suivante (round-robin sur le POOL) : chaque appel du dashboard
     part sur une voie différente -> N clés = ~N fois plus vite. '' si aucun pool
     (use_key('') est un no-op -> clé principale)."""
-    ks = get_dash_keys()
+    ks = [k for k in get_dash_keys() if not cle_ecartee(k)]
     if not ks:
+        # TOUTES ecartees (ou aucune configuree) : on retombe sur la cle
+        # principale plutot que d'insister sur des voies mortes. C'est ce
+        # repli qui manquait : sans lui, un pool hors service emportait la
+        # totalite des clics par lien.
         return ""
     with _GMS_GATE_LOCK:
         i = _DASH_RR[0]
@@ -326,8 +330,8 @@ def _gms_gate():
         time.sleep(min(wait, 2.0))
 
 
-def _call_tool(tool_name: str, args: Optional[dict] = None, _retry: bool = True,
-               _429: int = 0) -> Dict[str, Any]:
+def _call_tool_brut(tool_name: str, args: Optional[dict] = None,
+                    _retry: bool = True, _429: int = 0) -> Dict[str, Any]:
     """Appelle un outil MCP. Retourne {'ok': bool, 'data': ..., 'error': ...}.
     Réutilise une session MCP cachée ; si elle a expiré (réseau / 4xx), on la
     recrée et on réessaie UNE fois."""
@@ -351,7 +355,7 @@ def _call_tool(tool_name: str, args: Optional[dict] = None, _retry: bool = True,
         _api_note(0)
         if _retry:  # session peut-être morte -> on la recrée et on réessaie
             _reset_session()
-            return _call_tool(tool_name, args, _retry=False, _429=_429)
+            return _call_tool_brut(tool_name, args, _retry=False, _429=_429)
         return {"ok": False, "error": f"Erreur réseau : {e}"}
     if r.status_code == 429:
         # Rate-limit GMS. En LOT : backoff patient (le chiffre doit finir juste).
@@ -361,12 +365,12 @@ def _call_tool(tool_name: str, args: Optional[dict] = None, _retry: bool = True,
         _max, _sleeps = (3, (2.0, 5.0, 9.0)) if _gms_is_bulk() else (1, (1.0,))
         if _429 < _max:
             time.sleep(_sleeps[_429])
-            return _call_tool(tool_name, args, _retry=_retry, _429=_429 + 1)
+            return _call_tool_brut(tool_name, args, _retry=_retry, _429=_429 + 1)
         return {"ok": False, "error": "HTTP 429 (rate-limit GetMySocial)"}
     if r.status_code in (400, 401, 404) and _retry:
         # session MCP probablement expirée -> on la recrée et on réessaie 1×
         _reset_session()
-        return _call_tool(tool_name, args, _retry=False, _429=_429)
+        return _call_tool_brut(tool_name, args, _retry=False, _429=_429)
     if r.status_code != 200:
         return {"ok": False, "error": f"HTTP {r.status_code} : {r.text[:300]}"}
     data = _parse_sse(r.text)
@@ -403,6 +407,85 @@ def _call_tool(tool_name: str, args: Optional[dict] = None, _retry: bool = True,
 
 
 # ============ Wrappers haut-niveau ============
+
+# ============ Sante des cles ============
+#
+# Constate en production : une cle dediee du pool ne repondait plus, et comme
+# `use_key` n'a aucun repli, TOUS les appels du report partaient dessus et
+# echouaient. `analytics_for_link` transformait chaque echec en (None, None),
+# et le tableau se remplissait de « — » — exactement ce que produirait un
+# lien sur lequel personne n'a clique. Deux jours durant, personne n'a pu
+# faire la difference.
+#
+# Une cle qui echoue en SERIE sort donc de la rotation, et ce qui s'est passe
+# reste lisible.
+
+_SANTE = {}                      # cle -> {"echecs", "jusqu", "dernier", "quand"}
+_SANTE_LOCK = _threading.Lock()
+SEUIL_ECHECS = 3                 # echecs CONSECUTIFS avant mise a l'ecart
+DUREE_ECART = 600                # secondes : on retente au bout de 10 min
+
+
+def _masque(cle: str) -> str:
+    cle = str(cle or "")
+    return (cle[:12] + "…" + cle[-4:]) if len(cle) > 18 else (cle[:6] + "…")
+
+
+def noter_cle(cle: str, ok: bool, message: str = "") -> None:
+    """Un succes efface l'ardoise ; trois echecs de suite mettent la cle a
+    l'ecart. CONSECUTIFS et pas cumules : une cle saine qui prend un 429
+    isole ne doit pas etre condamnee pour autant."""
+    cle = str(cle or "")
+    if not cle:
+        return
+    with _SANTE_LOCK:
+        e = _SANTE.setdefault(cle, {"echecs": 0, "jusqu": 0.0,
+                                    "dernier": "", "quand": 0.0})
+        if ok:
+            e["echecs"] = 0
+            e["jusqu"] = 0.0
+            return
+        e["echecs"] += 1
+        e["dernier"] = str(message or "")[:200]
+        e["quand"] = time.time()
+        if e["echecs"] >= SEUIL_ECHECS:
+            e["jusqu"] = time.time() + DUREE_ECART
+
+
+def cle_ecartee(cle: str) -> bool:
+    with _SANTE_LOCK:
+        e = _SANTE.get(str(cle or ""))
+        return bool(e and e["jusqu"] > time.time())
+
+
+def sante_cles() -> list:
+    """Ce que les cles ont vecu recemment, pour l'afficher : [{cle, echecs,
+    ecartee, dernier}]. Masquee : une cle ne se lit pas dans un rapport."""
+    out = []
+    now = time.time()
+    with _SANTE_LOCK:
+        for cle, e in _SANTE.items():
+            if not e["echecs"] and not e["jusqu"]:
+                continue
+            out.append({"cle": _masque(cle), "echecs": e["echecs"],
+                        "ecartee": e["jusqu"] > now,
+                        "dernier": e["dernier"],
+                        "depuis_s": int(now - e["quand"]) if e["quand"] else None})
+    out.sort(key=lambda r: -r["echecs"])
+    return out
+
+
+def _call_tool(tool_name: str, args: Optional[dict] = None, _retry: bool = True,
+               _429: int = 0) -> Dict[str, Any]:
+    """Le vrai appel, plus la tenue du registre de sante de la cle employee."""
+    cle = _effective_key()
+    res = _call_tool_brut(tool_name, args, _retry=_retry, _429=_429)
+    try:
+        noter_cle(cle, bool(res.get("ok")), res.get("error") or "")
+    except Exception:
+        pass                     # l'instrumentation ne doit jamais casser l'appel
+    return res
+
 
 def ping() -> Dict[str, Any]:
     """Test de connectivité + auth. Retourne {ok, user_id, error}."""

@@ -228,6 +228,14 @@ tr.tetes2 th{border-bottom:1px solid var(--bordure)}
        font-variant-numeric:tabular-nums;flex:none}
 .li .ab{width:84px;text-align:right;color:var(--attenue);font-size:12px;flex:none}
 h2 .note{font:400 12px/1 var(--sans);color:var(--attenue)}
+
+/* L'AVERTISSEMENT. Un tableau plein de « — » se lit comme un jour sans
+   clic : il faut dire, a l'endroit ou on le lit, que la donnee n'a pas pu
+   etre lue. */
+.alerte{background:var(--accent-doux);border:1px solid var(--accent);
+        border-radius:12px;padding:14px 17px;margin:0 0 22px;font-size:13.5px}
+.alerte .t{font-weight:600;color:var(--accent);margin-bottom:4px}
+.alerte .d{color:var(--attenue);font-size:12.5px;margin-top:6px}
 h2 .tout{float:right;font:600 11.5px/1 var(--sans);color:var(--accent);
          text-decoration:none;background:var(--accent-doux);
          border-radius:999px;padding:6px 12px;text-transform:none;letter-spacing:0}
@@ -524,6 +532,33 @@ def _rangs(d: dict) -> list:
     return [r for r in out if r["clics"] or r["abonnes"]]
 
 
+def _alerte_clics(d: dict) -> str:
+    """« — » veut dire NON LU, jamais zero. Encore faut-il l ecrire.
+
+    Vu en production : le pool de cles GetMySocial ne repondait plus, les
+    trente lignes affichaient « — », et rien sur la page ne permettait de
+    distinguer ca d une journee sans le moindre clic.
+    """
+    hs = d.get("clics_hs")
+    if not isinstance(hs, dict) or not hs.get("echecs"):
+        return ""
+    ech, tot = int(hs.get("echecs") or 0), int(hs.get("appels") or 0)
+    detail = ""
+    for k in (hs.get("cles") or [])[:2]:
+        if k.get("ecartee"):
+            detail = ("Clé dédiée %s écartée après %s échec(s) — dernier : %s"
+                      % (html.escape(str(k.get("cle") or "?")),
+                         html.escape(str(k.get("echecs") or "?")),
+                         html.escape(str(k.get("dernier") or "?"))[:120]))
+            break
+    return ("<div class='alerte'><div class='t'>Clics par lien indisponibles</div>"
+            "%s appel%s d’analytics sur %s ont échoué. Les colonnes de clics "
+            "affichent « — » : cela veut dire <b>non lu</b>, pas zéro. "
+            "Les abonnés, eux, sont justes.%s</div>"
+            % (_num(ech), "s" if ech > 1 else "", _num(tot),
+               ("<div class='d'>%s</div>" % detail) if detail else ""))
+
+
 def _onglets(jeton: str, vue: str) -> str:
     """Deux liens, aucun script. Le lien de la vue courante reste cliquable :
     le desactiver casserait le rafraichissement d une page ouverte."""
@@ -549,6 +584,10 @@ def _page_donnees(titre: str, sous: str, d: dict, quand: str,
     dr = d.get("drapeau") or "🌍"
     corps = []
     ensemble = (vue != "liens")
+
+    # En tete des DEUX vues : les tirets sont dans le tableau, mais le
+    # palmares de la vue d ensemble souffre du meme trou.
+    corps.append(_alerte_clics(d))
 
     # --- Le resume, en cartes -------------------------------------------
     cartes = []
