@@ -1024,10 +1024,16 @@ class ClickRecap(commands.Cog):
                     _assoc.append((_nom_propre(lab), _adr,
                                    _n(_iJ, _adr), _n(_iQ, _adr), _n(_iP, _adr)))
 
-                # On classe sur la quinzaine EN COURS : c'est la periode qu'on
-                # regarde pour payer, et un tableau classe sur le cumul
-                # remonterait des liens qui ne rapportent plus rien.
-                _assoc.sort(key=lambda x: (-x[3], -x[2]))
+                # PAR ORDRE ALPHABETIQUE. Un classement par chiffres change
+                # d'ordre a chaque heure : on cherche quelqu'un et il a
+                # bouge de six lignes. Un tableau qu'on lit tous les jours se
+                # parcourt du regard, et pour ca il faut que chacun soit
+                # TOUJOURS au meme endroit.
+                #
+                # La parenthese de tete est ignoree : « (ANDRY) 1 » se range a
+                # A, pas avant tout le monde. Le numero de telephone suit le
+                # nom, donc « (BO7) 1 » precede « (BO7) 2 » naturellement.
+                _assoc.sort(key=lambda x: re.sub(r"^[^0-9A-Za-z]+", "", x[0]).lower())
                 _e = (f"{'LINK':<18}{'AUJ':>5}{'QUINZ':>7}{'PRÉC':>7}")
 
                 # UN CHAMP DISCORD TIENT 1024 CARACTERES, et on ne tronque
