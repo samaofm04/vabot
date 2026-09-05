@@ -317,6 +317,19 @@ def api_configured() -> bool:
     return bool(api_token())
 
 
+def _reprises_possibles() -> int:
+    """Combien de fois on peut retenter avec une AUTRE cle.
+
+    Une seule reprise suffisait tant qu'une cle fautive etait l'exception.
+    Avec dix cles collees d'un coup, plusieurs peuvent etre mauvaises : la
+    reprise unique retombait sur une autre mauvaise et l'appel echouait quand
+    meme. On s'autorise autant d'essais qu'il y a de cles -- la rotation en
+    sert une differente a chaque fois -- plafonne a cinq, parce qu'au-dela
+    ce n'est plus une cle fautive, c'est le trousseau entier.
+    """
+    return max(0, min(5, len(_cles_brutes()) - 1))
+
+
 def api_get(path: str, params: dict = None, _essai: int = 0) -> dict:
     """GET sur l'API MyPuls. Retourne {ok, data} ou {ok: False, error}.
 
@@ -348,8 +361,8 @@ def api_get(path: str, params: dict = None, _essai: int = 0) -> dict:
             repos = 60.0
         _noter_cle(cle_id, repos_s=max(1.0, min(300.0, repos)),
                    erreur="quota atteint (429)")
-        if _essai == 0 and len(_cles_brutes()) > 1:
-            return api_get(path, params, _essai=1)
+        if _essai < _reprises_possibles():
+            return api_get(path, params, _essai=_essai + 1)
         return {"ok": False, "error": "Quota MyPuls atteint (429), "
                                       "réessai dans %ds" % int(repos)}
 
@@ -364,8 +377,8 @@ def api_get(path: str, params: dict = None, _essai: int = 0) -> dict:
         # trousseau, la rotation finit forcement par tomber sur celle qui a
         # ete mal collee ; sans reprise, une page entiere echouerait une fois
         # sur dix, au hasard, et le diagnostic serait « ca marche parfois ».
-        if r.status_code == 401 and _essai == 0 and len(_cles_brutes()) > 1:
-            return api_get(path, params, _essai=1)
+        if r.status_code == 401 and _essai < _reprises_possibles():
+            return api_get(path, params, _essai=_essai + 1)
         return {"ok": False, "error": f"Token API refusé (HTTP {r.status_code})"}
     if r.status_code == 404:
         return {"ok": False, "error": f"Endpoint introuvable : {url}"}
@@ -381,8 +394,8 @@ def api_get(path: str, params: dict = None, _essai: int = 0) -> dict:
         # la cle et on laisse une autre repondre.
         _noter_cle(cle_id, ok=False,
                    erreur="réponse non-JSON (ce n'est pas une clé d'API)")
-        if _essai == 0 and len(_cles_brutes()) > 1:
-            return api_get(path, params, _essai=1)
+        if _essai < _reprises_possibles():
+            return api_get(path, params, _essai=_essai + 1)
         return {"ok": False,
                 "error": "Réponse non-JSON — cette clé n'est pas un X-API-TOKEN "
                          "(Settings › MyPuls › Tester chaque clé)"}
@@ -1895,7 +1908,11 @@ def limite_api() -> dict:
             interessants[k] = v[:120]
     return {"ok": True, "code": r.status_code,
             "entetes": interessants,
-            "tous_les_noms": sorted((r.headers or {}).keys())}
+            "tous_les_noms": sorted((r.headers or {}).keys()),
+            # L'ETAT DU TROUSSEAU avec la mesure : quand un appel echoue une
+            # fois sur trois, la premiere question est « laquelle des dix ? ».
+            # Masque, evidemment -- quatre caracteres par cle.
+            "cles": api_keys()}
 
 
 def _team_stats_par_api(start_date: str, end_date: str) -> Dict[str, Any]:
