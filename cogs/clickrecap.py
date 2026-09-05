@@ -201,6 +201,17 @@ def _pay_period(d: datetime.date):
     return d.replace(day=16), d.replace(day=last)
 
 
+def _quinzaine_precedente(d: datetime.date):
+    """La quinzaine qui precede celle de d : (debut, fin).
+
+    Le 1er-15 est precede du 16-fin du mois d'avant ; le 16-fin est precede
+    du 1er-15 du meme mois. Passer par « la veille du debut » evite d'avoir a
+    traiter janvier a part : le mois d'avant se deduit tout seul.
+    """
+    debut, _fin = _pay_period(d)
+    return _pay_period(debut - datetime.timedelta(days=1))
+
+
 #: Marches proposes au report. La cle est ce qu'on ecrit dans la config ; la
 #: valeur est (libelle, drapeau, pays comptes). Un ensemble vide = « tout », on
 #: n'affiche alors que le total.
@@ -295,65 +306,28 @@ def _cle_adresse(url) -> str:
 # des campagnes SFS.
 
 
-async def _liens_suivi() -> list:
-    """Tous les liens de suivi MyPuls. [] si l'API ne repond pas.
+async def _liens_suivi_periode(debut, fin) -> list:
+    """Les liens de suivi sur UNE periode. [] si l'API ne repond pas.
 
-    UN SEUL appel pour les ~468 lignes, mis en cache dix minutes cote module :
-    l'API limite le debit, et un appel par personne serait le plus sur moyen de
-    la faire tomber — une sonde a deja pris un 429 suivi de 403 sur tout le
-    reste, et ces 403 avaient failli passer pour « ces adresses n'existent pas ».
+    `subscribers_period` est le differentiel GAGNE sur la fenetre demandee —
+    c'est ce qu'on veut dire par « aujourd'hui » ou « cette quinzaine », et
+    non le cumul depuis toujours.
     """
     try:
         import mypuls
-        return await asyncio.to_thread(mypuls.api_tracking_links) or []
+        return await asyncio.to_thread(
+            mypuls.api_tracking_links, False,
+            debut.isoformat(), fin.isoformat()) or []
     except Exception as e:
-        print(f"[reportclick] liens de suivi MyPuls indisponibles : {e}")
+        print(f"[reportclick] liens de suivi {debut}..{fin} : {e}")
         return []
 
 
-# _suivi_de a ete RETIRE. Il rattachait par le NOM d'abord (« Gerome » ->
-# « Gérôme »), le code en secours, parce qu'on croyait des destinations
-# perimees. La vraie cause etait ailleurs : le code etait cherche SANS la
-# creatrice, et tombait sur le premier « c47 » venu. Avec l'adresse complete
-# le rapprochement est exact, et chercher par le nom ne fait plus que ramener
-# des campagnes SFS qui portent un prenom proche.
-
-
-async def _abonnes_par_code(codes) -> dict:
-    """{code: {abonnes, nouveaux, visites, nom}} pour les codes demandes.
-
-    UN SEUL appel MyPuls pour tout le monde, mis en cache dix minutes cote
-    module : l'API limite le debit, et un appel par personne serait le plus sur
-    moyen de la faire tomber — une sonde a deja pris un 429 suivi de 403 sur
-    tout le reste.
-
-    Rend {} si MyPuls ne repond pas : l'appelant n'affiche alors rien, plutot
-    que des zeros qui se liraient « personne ne s'abonne ».
-    """
-    if not codes:
-        return {}
-    try:
-        import mypuls
-    except Exception:
-        return {}
-    try:
-        tous = await asyncio.to_thread(mypuls.api_tracking_links)
-    except Exception as e:
-        print(f"[reportclick] liens de suivi MyPuls indisponibles : {e}")
-        return {}
-    voulus = set(codes)
-    out = {}
-    for t in tous or []:
-        c = t.get("code")
-        if c in voulus:
-            # Un code n'est unique qu'a l'interieur d'une creatrice. On garde
-            # le PREMIER vu et on note le doublon plutot que d'ecraser en
-            # silence : deux modeles se voleraient leurs abonnes.
-            if c in out:
-                out[c]["ambigu"] = True
-                continue
-            out[c] = dict(t)
-    return out
+# _liens_suivi et _abonnes_par_code ont ete RETIRES : plus aucun appelant.
+# Le report demande desormais une PERIODE precise (_liens_suivi_periode),
+# parce que le cumul depuis toujours ne dit rien de ce qui vient de se
+# passer -- un lien a 4 000 abonnes depuis un an ressemble a un lien qui
+# marche, meme sans rien avoir rapporte depuis trois semaines.
 
 
 def _personne_du_lien(nom) -> str:
@@ -1000,59 +974,88 @@ class ClickRecap(commands.Cog):
             # ---- Abonnes MyPuls, par personne ------------------------------
             # Les clics disent qui envoie du trafic ; les abonnes disent qui le
             # convertit. Un VA a 500 clics et 0 abonne ne se voyait nulle part.
-            _tous = await _liens_suivi()
-            if _tous:
-                # UN LIEN, UN CODE, UNE LIGNE.
-                #
-                # On regroupait par PERSONNE et on ne gardait qu'un code par
-                # personne — « le premier suffit, les telephones partagent un
-                # code ». C'est faux : « (Roucham) 1 » vise c88 et
-                # « (Roucham) 1SPAM » vise c110, ce sont deux liens
-                # differents avec chacun son audience. Garder le premier
-                # jetait le second en silence ; les additionner melangerait
-                # deux choses distinctes. Confirme par le proprietaire le
-                # 05/09 : « faut pas additionner, c'est deux trucs
-                # differents ».
-                #
-                # ET LE CODE SEUL DECIDE. Le rapprochement par le NOM cherchait
-                # « Roucham » parmi 500 liens de suivi et tombait sur des
-                # campagnes SFS qui n'ont rien a voir. Le code, lui, est ecrit
-                # dans la destination du lien : il ne peut pas se tromper de
-                # personne. « Bryan » lit ainsi les chiffres de « Jaurel »,
-                # et c'est correct — le proprietaire l'a confirme.
-                # PAR ADRESSE COMPLETE, pas par code : « c47 » designe cinq
-                # liens differents selon la creatrice, et prendre le premier
-                # venu collait des campagnes SFS aux VA.
-                _par_adresse = {}
-                for _t in _tous:
-                    _a = _cle_adresse(_t.get("url"))
-                    if _a:
-                        _par_adresse.setdefault(_a, _t)
+            # ---- Abonnes MyPuls, par lien ---------------------------------
+            #
+            # DEUX INFORMATIONS, PAS PLUS : ce qui est arrive aujourd'hui, et
+            # les deux dernieres quinzaines. Le cumul depuis toujours ne dit
+            # rien de ce qui vient de se passer -- un lien a 4 000 abonnes
+            # depuis un an ressemble a un lien qui marche, meme s'il n'a rien
+            # rapporte depuis trois semaines.
+            #
+            # `subscribers_period` est le differentiel GAGNE sur la fenetre
+            # demandee, d'ou trois appels : le jour, la quinzaine en cours,
+            # celle d'avant. C'est trois requetes sur les soixante du quota,
+            # et le trousseau en couvre largement le cout.
+            _q_deb, _q_fin = _pay_period(today)
+            _p_deb, _p_fin = _quinzaine_precedente(today)
+            _jour, _quinz, _prec = await asyncio.gather(
+                _liens_suivi_periode(today, today),
+                _liens_suivi_periode(_q_deb, _q_fin),
+                _liens_suivi_periode(_p_deb, _p_fin))
+
+            if _jour or _quinz or _prec:
+                def _index(liste):
+                    """{adresse: lien}, l'adresse portant le pseudo ET le code.
+
+                    Le code n'est unique QUE dans une creatrice : « c47 »
+                    designe cinq liens differents selon la modele. Indexer sur
+                    le code seul collait des campagnes SFS aux VA.
+                    """
+                    d = {}
+                    for _t in liste or []:
+                        _a = _cle_adresse(_t.get("url"))
+                        if _a:
+                            d.setdefault(_a, _t)
+                    return d
+
+                _iJ, _iQ, _iP = _index(_jour), _index(_quinz), _index(_prec)
+
+                def _n(idx, adr):
+                    _t = idx.get(adr)
+                    return (_t or {}).get("abonnes_periode") or 0
 
                 _assoc = []
                 for lab, _p in rows:
-                    _dest = _dest_par_nom.get(str(lab), "")
-                    _t = _par_adresse.get(_cle_adresse(_dest))
-                    if _t is not None:
-                        _assoc.append((_nom_propre(lab), _t.get("code"), _t))
+                    _adr = _cle_adresse(_dest_par_nom.get(str(lab), ""))
+                    if not _adr:
+                        continue
+                    if _adr not in _iJ and _adr not in _iQ and _adr not in _iP:
+                        continue
+                    _assoc.append((_nom_propre(lab), _adr,
+                                   _n(_iJ, _adr), _n(_iQ, _adr), _n(_iP, _adr)))
 
-                _assoc.sort(key=lambda x: -(x[2].get("abonnes") or 0))
-                _l = []
-                for _nom, _cd, _t in _assoc[:22]:
-                    # Le nom du lien de suivi est RAPPELE : c'est ce qui
-                    # permet de voir qu'un lien vise une campagne SFS plutot
-                    # qu'un lien a soi, sans avoir a ouvrir MyPuls.
-                    _l.append(
-                        f"{str(_nom)[:16]:<17}{str(_cd):>5}"
-                        f"{str(_t.get('abonnes') or 0):>6}"
-                        f"{str(_t.get('nouveaux') or 0):>6}"
-                        f"{str(_t.get('visites') or 0):>8}  {str(_t.get('nom') or '')[:18]}")
-                if _l:
-                    _e = (f"{'LINK':<17}{'CODE':>5}{'SUBS':>6}{'NEW':>6}"
-                          f"{'VISITS':>8}  {'MYPULS'}")
+                # On classe sur la quinzaine EN COURS : c'est la periode qu'on
+                # regarde pour payer, et un tableau classe sur le cumul
+                # remonterait des liens qui ne rapportent plus rien.
+                _assoc.sort(key=lambda x: (-x[3], -x[2]))
+                _e = (f"{'LINK':<18}{'AUJ':>5}{'QUINZ':>7}{'PRÉC':>7}")
+
+                # UN CHAMP DISCORD TIENT 1024 CARACTERES, et on ne tronque
+                # pas : on DECOUPE. Un plafond en LIGNES est un pari sur la
+                # longueur des noms — 22 lignes faisaient 1199 caracteres le
+                # 05/09, et Discord refuse alors le MESSAGE ENTIER.
+                _PLAFOND = 1024 - 10
+                _pages, _cour, _taille = [], [], len(_e)
+                for _nom, _adr, _a1, _a2, _a3 in _assoc:
+                    _ligne = (f"{str(_nom)[:17]:<18}{_a1:>5}{_a2:>7}{_a3:>7}")
+                    if _cour and _taille + 1 + len(_ligne) > _PLAFOND:
+                        _pages.append(_cour)
+                        _cour, _taille = [], len(_e)
+                    _cour.append(_ligne)
+                    _taille += 1 + len(_ligne)
+                if _cour:
+                    _pages.append(_cour)
+
+                _restant = sum(len(x) for x in _pages[3:])
+                for _i, _pg in enumerate(_pages[:3]):
+                    if _i == 2 and _restant:
+                        _pg = list(_pg) + [f"… +{_restant} de plus"]
+                    _nb = min(len(_pages), 3)
+                    _t1 = (f"👥 Subscribers — {_fr(_q_deb)}→{_fr(_q_fin)} "
+                           f"vs {_fr(_p_deb)}→{_fr(_p_fin)}")
                     emb.add_field(
-                        name="👥 Subscribers (MyPuls)",
-                        value="```\n" + _e + "\n" + "\n".join(_l) + "\n```",
+                        name=(_t1 if _i == 0 else f"👥 Subscribers ({_i + 1}/{_nb})"),
+                        value="```\n" + _e + "\n" + "\n".join(_pg) + "\n```",
                         inline=False)
 
             _titre = (f"📋 Per link — {drapeau} {libelle} vs 🌍 global"

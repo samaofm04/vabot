@@ -3146,7 +3146,7 @@ _TRACKING_CACHE: Dict[str, Any] = {}     # {"t": ts, "v": [...]}
 _TRACKING_TTL = 600                      # 10 min
 
 
-def api_tracking_links(force: bool = False) -> list:
+def api_tracking_links(force: bool = False, debut: str = "", fin: str = "") -> list:
     """Les liens de suivi, normalises. [] si l'API refuse.
 
     UN SEUL appel pour les ~468 lignes, garde 10 minutes. L'API MyPuls limite
@@ -3154,14 +3154,24 @@ def api_tracking_links(force: bool = False) -> list:
     Un appel par personne serait le plus sur moyen de tout faire tomber.
     """
     import time as _t
-    hit = _TRACKING_CACHE.get("v")
-    if hit is not None and not force and (_t.time() - _TRACKING_CACHE.get("t", 0)) < _TRACKING_TTL:
+    # LE CACHE EST PAR PERIODE. Sans la periode dans la cle, demander « ce
+    # mois » puis « aujourd'hui » rendait deux fois le meme resultat : la
+    # seconde question recevait la reponse de la premiere, et les chiffres du
+    # jour valaient ceux du mois.
+    cle = "%s|%s" % (debut or "", fin or "")
+    hit = _TRACKING_CACHE.get(cle)
+    if hit is not None and not force and (_t.time() - _TRACKING_CACHE.get("t|" + cle, 0)) < _TRACKING_TTL:
         return hit
-    res = api_get("tracking-links", {"per_page": 500})
+    _params = {"per_page": 500}
+    if debut:
+        _params["from"] = debut
+    if fin:
+        _params["to"] = fin
+    res = api_get("tracking-links", _params)
     if not res.get("ok"):
         # On ne met PAS en cache un echec : la prochaine tentative doit
         # reessayer, pas servir une liste vide pendant dix minutes.
-        return _TRACKING_CACHE.get("v") or []
+        return _TRACKING_CACHE.get(cle) or []
     d = res.get("data")
     items = d if isinstance(d, list) else None
     if items is None and isinstance(d, dict):
@@ -3192,7 +3202,8 @@ def api_tracking_links(force: bool = False) -> list:
             "visites_periode": it.get("visits_period"),
             "actif": bool(it.get("active", True)),
         })
-    _TRACKING_CACHE.update({"t": _t.time(), "v": out})
+    _TRACKING_CACHE[cle] = out
+    _TRACKING_CACHE["t|" + cle] = _t.time()
     return out
 
 
