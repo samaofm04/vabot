@@ -1068,6 +1068,10 @@ class ClickRecap(commands.Cog):
                         value="```\n" + _e + "\n" + "\n".join(_pg) + "\n```",
                         inline=False)
 
+            _titre = (f"📋 Per link — {drapeau} {libelle} vs 🌍 global"
+                      if pays_marche else "📋 Per link — 🌍 global")
+            _blocs = _tableau()
+
             # RENDUES A L'APPELANT PAR `sortie`, pas accrochees a l'embed.
             #
             # Premier essai : `emb.donnees_clics = _donnees`. discord.Embed
@@ -1075,14 +1079,13 @@ class ClickRecap(commands.Cog):
             # try/except l'avalait, et la page web retombait en silence sur le
             # rendu texte. Elle marchait « presque », ce qui est le pire etat.
             #
-            # Un parametre de sortie est explicite : l'appelant qui veut les
-            # donnees passe un dict, les autres ne changent rien.
+            # ET APRES `_tableau()`, PAS AVANT. Le detail par lien est rempli
+            # DANS cette fonction : recopier le dictionnaire plus haut rendait
+            # une colonne « clics » entierement vide, avec des tirets sur
+            # trente lignes — la page s'affichait, et il manquait la moitie de
+            # ce qu'on venait d'y mettre.
             if sortie is not None:
                 sortie.update(_donnees)
-
-            _titre = (f"📋 Per link — {drapeau} {libelle} vs 🌍 global"
-                      if pays_marche else "📋 Per link — 🌍 global")
-            _blocs = _tableau()
             for i, b in enumerate(_blocs):
                 # L'en-tete est repete partout : un bloc de suite sans titres
                 # de colonnes n'est qu'une grille de chiffres.
