@@ -51145,6 +51145,28 @@ def create_app():
                                                 "limite": lim_b}},
         })
 
+    @app.route("/api/rig/suivi_codes")
+    def rig_suivi_codes():
+        """Ce que valent des codes de suivi precis. Lecture seule.
+
+        Sert a trancher un cas litigieux sans ouvrir MyPuls : « c80 est-il
+        encore un vieux lien Geelark, ou le lien de la personne ? »
+        """
+        from flask import jsonify
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        import mypuls
+        voulus = [c.strip() for c in (request.args.get("codes") or "").split(",") if c.strip()]
+        motif = (request.args.get("nom") or "").strip().lower()
+        tous = mypuls.api_tracking_links() or []
+        out = []
+        for t in tous:
+            if (voulus and t.get("code") in voulus) or (motif and motif in str(t.get("nom") or "").lower()):
+                out.append({k: t.get(k) for k in
+                            ("code", "nom", "abonnes", "nouveaux", "visites")})
+        return jsonify({"ok": True, "total_liens_suivi": len(tous), "trouves": out})
+
     @app.route("/api/rig/clics_propositions")
     def rig_clics_propositions():
         """Une proposition d'association PAR GROUPE GetMySocial.
