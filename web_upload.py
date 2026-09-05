@@ -50785,11 +50785,76 @@ def create_app():
         etat = _res.etat()
         if ident:
             etat = {k: v for k, v in etat.items() if k.split("/")[0] == ident}
-        return jsonify({"ok": True, "moteur": moteur,
-                        "profondeur": _res.PROFONDEUR,
-                        "familles": list(_res.FAMILLES),
-                        "par_action": _res.FAMILLE_PAR_ACTION,
-                        "etat": etat})
+        reponse = {"ok": True, "moteur": moteur,
+                   "profondeur": _res.PROFONDEUR,
+                   "familles": list(_res.FAMILLES),
+                   "par_action": _res.FAMILLE_PAR_ACTION,
+                   "etat": etat}
+        if (request.args.get("diagnostic") or "").strip() in ("1", "true", "oui"):
+            reponse["vivier"] = _rig_vivier(ident)
+        return jsonify(reponse)
+
+    def _rig_vivier(identite=""):
+        """Ce qu'il FAUT pour fabriquer, identite par identite et famille par
+        famille.
+
+        POURQUOI CA VAUT UNE ROUTE. Une case de reserve qui reste a zero a
+        deux explications opposees : la machine n'a pas encore eu le temps,
+        ou elle ne pourra JAMAIS -- il manque un ingredient. Rien ne les
+        distinguait : le remplisseur ecarte silencieusement une case dont la
+        recette rend None, et on attendait des heures un stock impossible.
+        Mesure du 05/09/2026 : emma a 39 brutes et zero brute etoilee, donc
+        trois familles sur huit lui sont hors d'atteinte.
+
+        LES MEMES CONDITIONS QUE LA RECETTE, pas des conditions ressemblantes
+        (voir cogs/noctuspool._recette). Un diagnostic qui juge autrement que
+        le fabricant est pire que pas de diagnostic : il rassure a tort.
+        """
+        from cogs import user as u
+        import brutes_off as _off
+        sortie = {}
+        cibles = [identite] if identite else sorted(u._list_identities())
+        for i in cibles:
+            def _n(f, *a, **k):
+                try:
+                    r = f(*a, **k)
+                    return len(r[0]) if isinstance(r, tuple) else len(r)
+                except Exception:
+                    return 0
+            # La recette ne garde que les captions qui portent un TEXTE :
+            # une caption etoilee mais vide ne fabrique rien, et la compter
+            # ferait annoncer « possible » une case qui ne l'est pas.
+            try:
+                caps = len([c for c in u.fav_captions_for(i)
+                            if str(c.get("text") or "").strip()])
+            except Exception:
+                caps = 0
+            fav_brutes = _n(u.fav_brutes_for, i)
+            toutes_brutes = _n(_off.lister, u.IDENTITIES_DIR / i / "brutes",
+                               extensions=u.VIDEO_EXTS)
+            tpl = _n(u.fav_templates_for, i)
+            flash = _n(u.flash_templates_for, i, exiger_banger=False)
+            flash_b = _n(u.flash_templates_for, i, exiger_banger=True)
+            prets = _n(u.va_ready_montages_for, i, 1)
+            sortie[i] = {
+                "captions_etoilees": caps, "brutes_etoilees": fav_brutes,
+                "brutes": toutes_brutes, "templates_etoiles": tpl,
+                "flash": flash, "flash_etoiles": flash_b,
+                "montages_prets": prets,
+                # Possible ou non, famille par famille -- exactement les
+                # conditions de _recette, dans le meme ordre.
+                "possible": {
+                    "caption": bool(caps and toutes_brutes),
+                    "montage": bool(caps and fav_brutes),
+                    "reelmonte": bool(prets),
+                    "template": bool(tpl),
+                    "template_brut": bool(tpl and fav_brutes),
+                    "flash": bool(flash),
+                    "flash_banger": bool(flash_b),
+                    "flash_brut": bool(flash_b and fav_brutes),
+                },
+            }
+        return sortie
 
     @app.route("/api/rig/reserve/prendre", methods=["POST"])
     def rig_reserve_prendre():
