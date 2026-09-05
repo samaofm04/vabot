@@ -4592,6 +4592,32 @@ try:
           "permettre_vide=not c.get(\"message_id\")" in _srcCl
           or "permettre_vide" in _srcCl, "_post_or_update_report")
 
+    # -- montage : une caption ne se dessine jamais deux fois ----------------
+    #
+    # Le moteur superpose un PNG par segment ; deux segments portant le meme
+    # texte sur le meme intervalle produisent DEUX rendus simultanes, a des
+    # positions et des tailles legerement differentes. A l ecran, la caption
+    # apparait ecrite en double — constate le 05/09/2026 sur un reel livre.
+    import noctus_web as _nwM
+    _dM = {"font": "Strong", "style": "{}", "segments":
+           '[{"text":"POV: you mixed drinks","start":0,"end":5,"y":0.30},'
+           ' {"text":"POV: you mixed drinks","start":0,"end":5,"y":0.42},'
+           ' {"text":"autre","start":5,"end":8}]'}
+    _eM, _fM = _nwM.build_montage_caps(_dM, "t_dedup")
+    check("montage : le meme texte sur la meme fenetre ne sort qu une fois",
+          _eM and len(_eM["captions"]) == 2,
+          repr([c["text"] for c in (_eM or {}).get("captions", [])]))
+    check("montage : le segment different est conserve",
+          _eM and _eM["captions"][1]["text"] == "autre")
+    # Le meme texte a un AUTRE moment reste deux segments : c est une
+    # repetition voulue, pas un doublon.
+    _dM2 = {"font": "Strong", "style": "{}", "segments":
+            '[{"text":"go","start":0,"end":2},{"text":"go","start":4,"end":6}]'}
+    _eM2, _ = _nwM.build_montage_caps(_dM2, "t_dedup2")
+    check("montage : le meme texte a un autre moment est garde",
+          _eM2 and len(_eM2["captions"]) == 2,
+          repr(_eM2))
+
     # -- historique par jour : il survit a un scrape rate ---------------------
     #
     # C EST DE L ARGENT. L assiduite se calcule sur reel_days ; un jour qui

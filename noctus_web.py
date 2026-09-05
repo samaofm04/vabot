@@ -744,6 +744,30 @@ def build_montage_caps(draft, label):
             except Exception:
                 pass
             segments.append(seg)
+    # UN MEME TEXTE NE SE DESSINE PAS DEUX FOIS SUR LA MEME FENETRE.
+    #
+    # Le moteur superpose un PNG par segment ; deux segments portant le meme
+    # texte sur le meme intervalle produisent DEUX rendus simultanes, a des
+    # positions et des tailles legerement differentes (chaque PNG est ajuste
+    # a son propre texte). A l'ecran, la caption apparait ecrite en double,
+    # decalee — constate le 05/09/2026 sur un « reel monte » livre a un VA.
+    #
+    # Le doublon vient d'AVANT ce point (l'enregistrement du brouillon
+    # remplace, il n'ajoute pas — la cause est cote editeur). On le neutralise
+    # ici parce que c'est le dernier endroit traverse par TOUS les chemins :
+    # bouton VA, reserve, editeur web. Un texte dessine deux fois au meme
+    # instant n'est jamais voulu.
+    #
+    # La cle est (texte, debut, fin) : deux segments identiques mais places
+    # differemment restent un doublon — c'est justement le cas observe.
+    _vus, _uniques = set(), []
+    for _sg in segments:
+        _k = (_sg.get("text"), _sg.get("start"), _sg.get("end"))
+        if _k in _vus:
+            continue
+        _vus.add(_k)
+        _uniques.append(_sg)
+    segments = _uniques
     if segments:
         return {"label": label, "font": font, "captions": segments}, font
     return None, font
