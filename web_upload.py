@@ -51145,6 +51145,49 @@ def create_app():
                                                 "limite": lim_b}},
         })
 
+    @app.route("/api/rig/suivi_periode")
+    def rig_suivi_periode():
+        """Les liens de suivi sur une periode, avec les sommes.
+
+        Sert a confronter l API a ce que le tableau de bord de MyPuls affiche
+        lui-meme : si les deux ne disent pas la meme chose, c est notre
+        lecture qui est fausse, et mieux vaut le savoir avant de payer
+        quelqu un dessus.
+        """
+        from flask import jsonify
+        code = _rig_ok()
+        if code != 200:
+            return jsonify({"ok": False, "error": "jeton"}), code
+        import mypuls
+        debut = (request.args.get("from") or "").strip()
+        fin = (request.args.get("to") or "").strip()
+        liens = mypuls.api_tracking_links(debut=debut, fin=fin) or []
+        def _s(cle):
+            return sum(int(x.get(cle) or 0) for x in liens)
+        actifs = [x for x in liens if x.get("actif")]
+        return jsonify({
+            "ok": True, "periode": [debut, fin],
+            "liens": len(liens), "liens_actifs": len(actifs),
+            "sommes": {
+                "visites_periode": _s("visites_periode"),
+                "abonnes_periode": _s("abonnes_periode"),
+                "nouveaux": _s("nouveaux"),
+                "visites_total": _s("visites"),
+                "abonnes_total": _s("abonnes"),
+            },
+            "sommes_actifs": {
+                "visites_periode": sum(int(x.get("visites_periode") or 0) for x in actifs),
+                "abonnes_periode": sum(int(x.get("abonnes_periode") or 0) for x in actifs),
+                "nouveaux": sum(int(x.get("nouveaux") or 0) for x in actifs),
+                "visites_total": sum(int(x.get("visites") or 0) for x in actifs),
+                "abonnes_total": sum(int(x.get("abonnes") or 0) for x in actifs),
+            },
+            "liens": [{k: x.get(k) for k in
+                       ("code", "nom", "url", "actif", "visites_periode",
+                        "abonnes_periode", "nouveaux", "visites", "abonnes")}
+                      for x in liens],
+        })
+
     @app.route("/api/rig/suivi_codes")
     def rig_suivi_codes():
         """Ce que valent des codes de suivi precis. Lecture seule.
