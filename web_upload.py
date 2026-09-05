@@ -43665,6 +43665,7 @@ def _render_mypuls_cookies_settings() -> str:
     """
     configured = False
     api_on = False
+    _cles = []
     try:
         import mypuls
         cfg = mypuls.load_config()
@@ -43672,8 +43673,49 @@ def _render_mypuls_cookies_settings() -> str:
         # « connectée » = token présent ET validé par MyPuls (pas juste enregistré)
         api_on = bool(cfg.get("api_token")) and bool(cfg.get("api_token_ok"))
         api_saved_ko = bool(cfg.get("api_token")) and not api_on
+        _cles = mypuls.api_keys()
     except Exception:
         api_saved_ko = False
+
+    # LE TROUSSEAU. Une ligne par clé : son nom, ses quatre derniers
+    # caractères (assez pour la reconnaître, pas assez pour s'en servir), son
+    # état, et de quoi la retirer. Le jeton lui-même ne ressort JAMAIS.
+    def _ligne_cle(k):
+        if k["au_repos"]:
+            pastille = ("<span style='background:#f59e0b;color:#111;padding:2px 8px;"
+                        "border-radius:5px;font-size:11px;font-weight:700'>"
+                        "au repos %ds</span>" % k["au_repos"])
+        elif k["ok"]:
+            pastille = ("<span style='background:#22c55e;color:#fff;padding:2px 8px;"
+                        "border-radius:5px;font-size:11px;font-weight:700'>OK</span>")
+        else:
+            pastille = ("<span style='background:#6b7280;color:#fff;padding:2px 8px;"
+                        "border-radius:5px;font-size:11px;font-weight:700'>"
+                        "jamais testée</span>")
+        err = ("<div style='font-size:11.5px;color:#f87171;margin-top:3px'>%s</div>"
+               % html_escape(k["derniere_erreur"])) if k["derniere_erreur"] else ""
+        return (
+            "<div style='display:flex;align-items:center;gap:10px;padding:9px 12px;"
+            "background:#0b0e15;border:1px solid #2a3245;border-radius:9px;margin-bottom:7px'>"
+            "<div style='flex:1;min-width:0'>"
+            "<div style='font-weight:650;font-size:13px'>%s "
+            "<span style='color:#6b7280;font-weight:400;font-family:monospace'>%s</span></div>"
+            "%s</div>"
+            "<div style='font-size:11.5px;color:#8a91a8'>%d appel(s)</div>"
+            "%s"
+            "<form method='POST' action='/mypuls/keys/remove' style='margin:0'"
+            " onsubmit='return confirm(\"Retirer cette clé du trousseau ?\")'>"
+            "<input type='hidden' name='id' value='%s'>"
+            "<button type='submit' title='Retirer' style='background:none;border:0;"
+            "color:#8a91a8;cursor:pointer;font-size:15px;padding:2px 4px'>✕</button>"
+            "</form>"
+            "</div>" % (html_escape(k["label"]), html_escape(k["apercu"]), err, k["appels"],
+                        pastille, html_escape(k["id"]))
+        )
+
+    trousseau = "".join(_ligne_cle(k) for k in _cles) if _cles else (
+        "<div style='font-size:12.5px;color:#8a91a8;padding:8px 0'>"
+        "Aucune clé enregistrée.</div>")
     # --- Bloc API officielle (X-API-TOKEN) : source complète (posts inclus) ---
     api_block = (
         "<div class='box' style='border:2px solid #22c55e;margin-bottom:16px'>"
@@ -43687,14 +43729,32 @@ def _render_mypuls_cookies_settings() -> str:
         "<small style='color:#8a91a8'>L'API officielle donne <b>tous</b> les revenus — y compris les "
         "<b>Publications (posts)</b> que le tableau des ventes ne contient pas. Ton token est dans "
         "ton <b>profil MyPuls</b>. Il est stocké sur ton serveur, il n'est jamais affiché ensuite.</small>"
-        "<form method='POST' action='/mypuls/save_api_token' style='display:flex;gap:8px;margin-top:12px;flex-wrap:wrap'>"
-        "<input type='password' name='api_token' required placeholder='Colle ton X-API-TOKEN ici' "
-        "style='flex:1;min-width:240px;padding:10px;background:#0b0e15;border:1px solid #2a3245;color:#e8eaf2;border-radius:8px'>"
+        "<div style='margin-top:14px;font-size:12px;color:#8a91a8;text-transform:uppercase;"
+        "letter-spacing:.05em;font-weight:700'>Trousseau de clés</div>"
+        "<div style='font-size:11.5px;color:#6b7280;margin:4px 0 9px'>"
+        "Les appels tournent sur ces clés à tour de rôle. Une clé qui atteint le quota "
+        "(<code>429</code>) est mise au repos le temps que MyPuls indique, et la suivante prend "
+        "le relais.<br><b>Ajoute une clé seulement si tu veux isoler un gros traitement</b> — "
+        "le quota est de 60 requêtes/minute et le site en utilise environ une."
+        "</div>"
+        + trousseau +
+        "<form method='POST' action='/mypuls/keys/add' style='display:flex;gap:8px;margin-top:10px;flex-wrap:wrap'>"
+        "<input type='text' name='label' placeholder='Nom (ex : Rattrapage)' maxlength='40' "
+        "style='width:170px;padding:10px;background:#0b0e15;border:1px solid #2a3245;color:#e8eaf2;border-radius:8px'>"
+        "<input type='password' name='token' required placeholder='Colle un X-API-TOKEN' "
+        "autocomplete='new-password' "
+        "style='flex:1;min-width:220px;padding:10px;background:#0b0e15;border:1px solid #2a3245;color:#e8eaf2;border-radius:8px'>"
         "<button type='submit' style='padding:10px 18px;background:linear-gradient(135deg,#22c55e,#15803d);"
-        "border:0;color:#fff;border-radius:8px;font-weight:700;cursor:pointer'>Enregistrer</button>"
+        "border:0;color:#fff;border-radius:8px;font-weight:700;cursor:pointer'>Ajouter</button>"
         "</form>"
-        "<div style='margin-top:10px'><a href='/mypuls/api_test' target='_blank' "
-        "style='color:#3b82f6;font-size:12.5px'>🔎 Tester la connexion API</a></div>"
+        "<div style='margin-top:10px;display:flex;gap:14px;flex-wrap:wrap'>"
+        "<a href='/mypuls/api_test' target='_blank' style='color:#3b82f6;font-size:12.5px'>"
+        "🔎 Tester la connexion API</a>"
+        "<a href='/mypuls/keys/test' style='color:#3b82f6;font-size:12.5px'>"
+        "🔑 Tester chaque clé</a>"
+        "<a href='/mypuls/api_discover' target='_blank' style='color:#3b82f6;font-size:12.5px'>"
+        "📋 Ce que l'API sert</a>"
+        "</div>"
         "</div>"
     )
     if configured:
@@ -52687,6 +52747,106 @@ def create_app():
 
     # ============ MYPULS ============
 
+    @app.route("/mypuls/keys/add", methods=["POST"])
+    def mypuls_keys_add():
+        """Ajoute une clé au trousseau, et la teste dans la foulée.
+
+        ON TESTE TOUT DE SUITE. Une clé enregistrée mais jamais validée ne
+        se signale qu'au moment où elle sert — c'est-à-dire au milieu d'un
+        calcul, sous la forme d'un total qui manque. Mieux vaut le savoir
+        maintenant, avec la clé encore sous les yeux.
+        """
+        if not is_auth():
+            return redirect("/")
+        import mypuls
+        tok = (request.form.get("token") or "").strip()
+        label = (request.form.get("label") or "").strip()
+        r = mypuls.ajouter_api_key(tok, label)
+        if not r.get("ok"):
+            return _error("✕ %s" % r.get("error"))
+
+        # Le test porte sur CETTE clé, pas sur le trousseau : la rotation
+        # aurait pu interroger une autre et déclarer bonne une clé fausse.
+        import requests as _rq
+        etat, detail = False, ""
+        try:
+            rep = _rq.get("%s/api/v1/session" % mypuls.BASE_URL,
+                          headers={"X-API-TOKEN": tok, "Accept": "application/json"},
+                          timeout=15)
+            etat = (rep.status_code == 200)
+            if rep.status_code == 401:
+                detail = "clé refusée (401)"
+            elif rep.status_code == 403:
+                detail = "hors périmètre (403) — il faut un compte owner ou team leader"
+            elif rep.status_code == 429:
+                detail = "quota atteint au moment du test — la clé est peut-être bonne"
+            elif not etat:
+                detail = "HTTP %s" % rep.status_code
+        except Exception as e:
+            detail = "injoignable : %s" % type(e).__name__
+        mypuls._noter_cle(r.get("id"), ok=etat, erreur=("" if etat else detail))
+        if etat:
+            return _success("✓ Clé ajoutée et <b>validée</b> — "
+                            "%d clé(s) dans le trousseau." % r.get("total", 1))
+        return _success("⚠ Clé ajoutée mais <b>non validée</b> : %s"
+                        % html_escape(detail or "réponse inattendue"))
+
+    @app.route("/mypuls/keys/remove", methods=["POST"])
+    def mypuls_keys_remove():
+        if not is_auth():
+            return redirect("/")
+        import mypuls
+        r = mypuls.retirer_api_key((request.form.get("id") or "").strip())
+        return _success("✓ Clé retirée — %d restante(s)." % r.get("total", 0))
+
+    @app.route("/mypuls/keys/test")
+    def mypuls_keys_test():
+        """Teste CHAQUE clé, une par une, et met à jour leur état.
+
+        Une seconde entre deux appels : le test lui-même ne doit pas déclencher
+        le quota qu'il cherche à mesurer.
+        """
+        if not is_auth():
+            return redirect("/")
+        import mypuls
+        import requests as _rq
+        import time as _t
+        lignes = []
+        for k in mypuls.api_keys(masquer=False):
+            tok = k.get("token") or ""
+            try:
+                rep = _rq.get("%s/api/v1/session" % mypuls.BASE_URL,
+                              headers={"X-API-TOKEN": tok,
+                                       "Accept": "application/json"}, timeout=15)
+                code = rep.status_code
+            except Exception as e:
+                code = 0
+                rep = None
+            ok = (code == 200)
+            mot = {200: "OK", 401: "refusée", 403: "hors périmètre",
+                   429: "quota atteint", 0: "injoignable"}.get(code, "HTTP %s" % code)
+            # Le quota restant, quand MyPuls le dit : c'est la mesure qui
+            # tranche si les clés partagent un budget ou en ont chacune un.
+            reste = ""
+            if rep is not None:
+                r_l = rep.headers.get("x-ratelimit-remaining")
+                r_m = rep.headers.get("x-ratelimit-limit")
+                if r_l is not None:
+                    reste = " — quota restant %s/%s" % (r_l, r_m or "?")
+            mypuls._noter_cle(k["id"], ok=ok, erreur=("" if ok else mot))
+            lignes.append("<li><b>%s</b> <code>%s</code> : %s%s</li>"
+                          % (html_escape(k["label"]), html_escape(k["apercu"]),
+                             mot, html_escape(reste)))
+            _t.sleep(1.0)
+        if not lignes:
+            return _error("✕ Aucune clé dans le trousseau.")
+        return _success("<b>Test des clés</b><ul style='margin:8px 0 0 18px'>%s</ul>"
+                        "<div style='margin-top:8px;font-size:12px;color:#8a91a8'>"
+                        "Si le quota restant diminue de la même façon sur toutes les clés, "
+                        "il est compté par compte ou par IP — plusieurs clés n'apportent "
+                        "alors rien. S'il est indépendant, elles s'additionnent.</div>"
+                        % "".join(lignes))
+
     @app.route("/mypuls/save_api_token", methods=["POST"])
     def mypuls_save_api_token():
         if not is_auth():
@@ -52698,7 +52858,12 @@ def create_app():
         tok = (request.form.get("api_token") or "").strip()
         if len(tok) < 10:
             return _error("✕ Token trop court", tab="smypuls")
-        mypuls.save_api_token(tok)
+        # ELLE ALIMENTE LE TROUSSEAU, pas un champ isolé : sinon enregistrer
+        # ici écraserait silencieusement les clés ajoutées à côté.
+        try:
+            mypuls.ajouter_api_key(tok, "Clé principale")
+        except Exception:
+            mypuls.save_api_token(tok)
         ok = mypuls.api_session()
         mypuls.set_api_token_ok(bool(ok.get("ok")))
         if ok.get("ok"):

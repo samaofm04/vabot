@@ -80,17 +80,195 @@ def set_api_token_ok(ok: bool) -> None:
     save_config(cfg)
 
 
+# ---------------------------------------------------------------------------
+# LE TROUSSEAU — plusieurs cles, une seule interface
+#
+# POURQUOI PLUSIEURS. Le quota de MyPuls est de 60 requetes par minute. Si ce
+# compte est tenu PAR CLE, plusieurs cles multiplient le debit ; s'il est tenu
+# par compte ou par IP, elles ne changent rien. L'en-tete
+# `x-ratelimit-limit` ne dit pas lequel, et personne ne le sait sans essayer.
+#
+# La rotation TRANCHE LA QUESTION toute seule : si le quota est par cle, une
+# cle au repos laisse la place a une autre et le debit monte ; sinon rien ne
+# se casse, on retombe simplement sur le meme plafond. Dans les deux cas le
+# code est correct -- c'est ce qui permet d'ajouter des cles sans avoir a
+# demontrer quoi que ce soit d'abord.
+#
+# CE N'EST PAS UNE SOLUTION A LA CONSOMMATION. Le site brulait 129 requetes
+# par chargement de page ; multiplier le budget aurait cache le defaut au lieu
+# de l'eteindre. Le trousseau sert a ISOLER (un gros rattrapage sur sa propre
+# cle, pour qu'il ne fasse pas tomber le tableau de bord) et a encaisser une
+# pointe, pas a se dispenser de compter.
+#
+# UNE CLE AU REPOS N'EST PAS UNE CLE MORTE. Un 429 porte `Retry-After` : on
+# note l'heure de reveil et on passe a la suivante. Sans ca, on reessaierait
+# la meme cle en boucle pendant qu'une autre attend, inutilisee.
+# ---------------------------------------------------------------------------
+
+def _cles_brutes() -> list:
+    """Le trousseau tel qu'il est range, en migrant l'ancienne cle unique."""
+    cfg = load_config()
+    cles = cfg.get("api_keys")
+    if isinstance(cles, list) and cles:
+        return [c for c in cles if isinstance(c, dict) and (c.get("token") or "").strip()]
+    # Migration douce : la cle unique historique devient la premiere du
+    # trousseau, sans que personne n'ait a la recoller.
+    seul = (cfg.get("api_token") or "").strip()
+    if seul:
+        return [{"id": "k1", "label": "Clé 1", "token": seul,
+                 "ok": bool(cfg.get("api_token_ok"))}]
+    return []
+
+
+def api_keys(masquer: bool = True) -> list:
+    """Les cles, pretes a afficher. Le jeton n'en sort JAMAIS en entier."""
+    import time as _t
+    out = []
+    for i, c in enumerate(_cles_brutes()):
+        tok = (c.get("token") or "").strip()
+        e = {"id": c.get("id") or ("k%d" % (i + 1)),
+             "label": c.get("label") or ("Clé %d" % (i + 1)),
+             "ok": bool(c.get("ok")),
+             "derniere_erreur": c.get("derniere_erreur") or "",
+             "au_repos": max(0, int((c.get("repos_jusqua") or 0) - _t.time())),
+             "appels": int(c.get("appels") or 0)}
+        # Quatre caracteres suffisent a reconnaitre une cle sans la divulguer.
+        e["apercu"] = ("…" + tok[-4:]) if len(tok) >= 4 else "…"
+        if not masquer:
+            e["token"] = tok
+        out.append(e)
+    return out
+
+
+def save_api_keys(cles: list) -> None:
+    """Range le trousseau. La premiere cle reste `api_token` pour compat."""
+    cfg = load_config()
+    propres = []
+    for i, c in enumerate(cles or []):
+        tok = str((c or {}).get("token") or "").strip()
+        if not tok:
+            continue
+        propres.append({"id": str(c.get("id") or "k%d" % (i + 1))[:20],
+                        "label": str(c.get("label") or "Clé %d" % (i + 1))[:40],
+                        "token": tok,
+                        "ok": bool(c.get("ok")),
+                        "derniere_erreur": str(c.get("derniere_erreur") or "")[:120],
+                        "repos_jusqua": float(c.get("repos_jusqua") or 0),
+                        "appels": int(c.get("appels") or 0)})
+    cfg["api_keys"] = propres
+    # TOUT CE QUI LIT `api_token` CONTINUE DE MARCHER. Une bascule d'un seul
+    # tenant aurait demande de reprendre chaque appelant en meme temps ; ici
+    # l'ancien champ suit le trousseau, et on migre au rythme qu'on veut.
+    cfg["api_token"] = propres[0]["token"] if propres else ""
+    cfg["api_token_ok"] = bool(propres[0]["ok"]) if propres else False
+    save_config(cfg)
+
+
+def ajouter_api_key(token: str, label: str = "") -> dict:
+    """Ajoute une cle. Refuse un doublon : deux fois la meme ne double rien."""
+    tok = (token or "").strip()
+    if not tok:
+        return {"ok": False, "error": "Jeton vide"}
+    cles = _cles_brutes()
+    if any((c.get("token") or "").strip() == tok for c in cles):
+        return {"ok": False, "error": "Cette clé est déjà dans le trousseau"}
+    n = len(cles) + 1
+    ids = {c.get("id") for c in cles}
+    i = n
+    while ("k%d" % i) in ids:
+        i += 1
+    cles.append({"id": "k%d" % i, "label": (label or "").strip() or ("Clé %d" % n),
+                 "token": tok, "ok": False})
+    save_api_keys(cles)
+    return {"ok": True, "id": "k%d" % i, "total": len(cles)}
+
+
+def retirer_api_key(cle_id: str) -> dict:
+    cles = [c for c in _cles_brutes() if c.get("id") != (cle_id or "")]
+    save_api_keys(cles)
+    return {"ok": True, "total": len(cles)}
+
+
+def renommer_api_key(cle_id: str, label: str) -> dict:
+    cles = _cles_brutes()
+    for c in cles:
+        if c.get("id") == cle_id:
+            c["label"] = (label or "").strip()[:40] or c.get("label")
+    save_api_keys(cles)
+    return {"ok": True}
+
+
+def _noter_cle(cle_id: str, ok: bool = None, repos_s: float = 0,
+               erreur: str = "", compter: bool = False) -> None:
+    """Met a jour l'etat d'une cle sans reecrire les autres."""
+    import time as _t
+    cles = _cles_brutes()
+    for c in cles:
+        if c.get("id") != cle_id:
+            continue
+        if ok is not None:
+            c["ok"] = bool(ok)
+        if repos_s > 0:
+            c["repos_jusqua"] = _t.time() + repos_s
+        if erreur:
+            c["derniere_erreur"] = erreur[:120]
+        elif ok:
+            c["derniere_erreur"] = ""
+        if compter:
+            c["appels"] = int(c.get("appels") or 0) + 1
+    save_api_keys(cles)
+
+
+#: Ou en est la rotation. En memoire : deux processus tourneraient chacun sur
+#: sa propre position, ce qui reste correct -- l'ordre importe peu, seul le
+#: fait de ne pas taper toujours la meme cle compte.
+_ROTATION = {"i": 0}
+
+
+def _cle_disponible():
+    """La prochaine cle utilisable : (id, jeton), ou (None, "") si toutes au
+    repos. Rend la MOINS longtemps au repos en dernier recours, pour ne
+    jamais bloquer completement."""
+    import time as _t
+    cles = _cles_brutes()
+    if not cles:
+        return None, ""
+    maintenant = _t.time()
+    libres = [c for c in cles if float(c.get("repos_jusqua") or 0) <= maintenant]
+    if libres:
+        _ROTATION["i"] = (_ROTATION["i"] + 1) % len(libres)
+        c = libres[_ROTATION["i"]]
+        return c.get("id"), (c.get("token") or "").strip()
+    # Toutes au repos : on prend celle qui se reveille le plus tot. Elle
+    # rendra peut-etre 429, et c'est mieux que de ne rien tenter -- l'appelant
+    # saura que le quota est atteint au lieu de recevoir « pas de cle ».
+    c = min(cles, key=lambda x: float(x.get("repos_jusqua") or 0))
+    return c.get("id"), (c.get("token") or "").strip()
+
+
 def api_token() -> str:
-    return (load_config().get("api_token") or "").strip()
+    """La cle a utiliser MAINTENANT. Une seule cle : c'est elle, comme avant."""
+    _id, tok = _cle_disponible()
+    return tok
 
 
 def api_configured() -> bool:
     return bool(api_token())
 
 
-def api_get(path: str, params: dict = None) -> dict:
-    """GET sur l'API MyPuls. Retourne {ok, data} ou {ok: False, error}."""
-    tok = api_token()
+def api_get(path: str, params: dict = None, _essai: int = 0) -> dict:
+    """GET sur l'API MyPuls. Retourne {ok, data} ou {ok: False, error}.
+
+    TOURNE SUR LE TROUSSEAU. Une cle qui prend un 429 est mise au repos
+    pendant la duree que MyPuls annonce (`Retry-After`), et l'appel est
+    RETENTE avec la suivante. Sans cette reprise, la rotation ne servirait a
+    rien : on rendrait l'erreur alors qu'une autre cle attend, inutilisee.
+
+    Une seule reprise : au-dela, soit toutes les cles sont saturees -- et le
+    quota est manifestement compte ailleurs que par cle -- soit le probleme
+    n'est pas le quota. Insister ferait tourner la boucle sans rien apprendre.
+    """
+    cle_id, tok = _cle_disponible()
     if not tok:
         return {"ok": False, "error": "Aucun token API MyPuls (Settings → MyPuls)"}
     import requests
@@ -100,12 +278,33 @@ def api_get(path: str, params: dict = None) -> dict:
                          params=params or {}, timeout=TIMEOUT)
     except Exception as e:
         return {"ok": False, "error": f"Connexion API impossible : {e}"}
+
+    if r.status_code == 429:
+        # MyPuls dit quand revenir : on le croit, plutot que de deviner.
+        try:
+            repos = float(r.headers.get("Retry-After") or 60)
+        except (TypeError, ValueError):
+            repos = 60.0
+        _noter_cle(cle_id, repos_s=max(1.0, min(300.0, repos)),
+                   erreur="quota atteint (429)")
+        if _essai == 0 and len(_cles_brutes()) > 1:
+            return api_get(path, params, _essai=1)
+        return {"ok": False, "error": "Quota MyPuls atteint (429), "
+                                      "réessai dans %ds" % int(repos)}
+
     if r.status_code in (401, 403):
+        # 401 = la cle est mauvaise ; 403 = elle est bonne mais n'a pas la
+        # portee. On ne les confond pas : la premiere se remplace, la
+        # seconde demande un compte owner / team leader.
+        _noter_cle(cle_id, ok=(r.status_code == 403),
+                   erreur=("clé refusée (401)" if r.status_code == 401
+                           else "hors périmètre (403)"))
         return {"ok": False, "error": f"Token API refusé (HTTP {r.status_code})"}
     if r.status_code == 404:
         return {"ok": False, "error": f"Endpoint introuvable : {url}"}
     if r.status_code != 200:
         return {"ok": False, "error": f"HTTP {r.status_code} : {r.text[:200]}"}
+    _noter_cle(cle_id, ok=True, compter=True)
     try:
         return {"ok": True, "data": r.json()}
     except Exception:
