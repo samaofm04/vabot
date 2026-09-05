@@ -1293,18 +1293,31 @@ def _vente_api_vers_ligne(v: dict) -> dict:
     traduire ici plutot que partout ailleurs evite de reecrire la moitie des
     pages -- et de casser la paie en le faisant.
 
-    `net` PLUTOT QUE `amount` : c'est ce que la page affichait (« Montant
-    net »), donc ce sur quoi les parts des chatteurs ont toujours ete
-    calculees. Prendre `amount` gonflerait toutes les remunerations sans que
-    personne ne comprenne pourquoi.
+    `amount` ET PAS `net`, MESURE PLUTOT QUE DEDUIT. La colonne s'appelle
+    « Montant net » sur leur page, ce qui invite a prendre le champ `net` --
+    c'est faux. Confrontation du 05/09/2026 sur le 16-31 aout :
+
+        champ « net »     EUR 12 817,14   USD 16 605,80
+        champ « amount »  EUR 12 817,14   USD 20 757,10
+        page MyPuls       EUR 12 817,14   USD 20 757,10
+
+    Les deux champs sont identiques sur MyM et differents de 20 % sur
+    OnlyFans : `net` retire deja la commission de la plateforme. Le prendre
+    ferait fondre toutes les remunerations OnlyFans d'un cinquieme, sans une
+    erreur nulle part. Le site applique lui-meme ces frais plus loin (OF 20 %,
+    MyM 26 %) : les retirer ici les compterait deux fois.
+
+    `net` reste rendu a part, pour qui voudra le montant apres commission
+    sans le recalculer.
     """
-    net = v.get("net")
-    if net is None:
-        net = v.get("amount")
     try:
-        net = float(net or 0)
+        montant = float(v.get("amount") or 0)
     except (TypeError, ValueError):
-        net = 0.0
+        montant = 0.0
+    try:
+        apres_frais = float(v.get("net") or 0)
+    except (TypeError, ValueError):
+        apres_frais = 0.0
     # Le libelle lisible, pour que categorie_transaction s'applique comme
     # avant. `kind` est normalise (ppv / tip), `type` est le libelle brut.
     kind = str(v.get("kind") or "").strip().lower()
@@ -1315,7 +1328,8 @@ def _vente_api_vers_ligne(v: dict) -> dict:
         "creator": str(v.get("creator") or ""),
         "chatter": str(v.get("attributed_user") or ""),
         "fan": str(v.get("fan") or ""),
-        "amount": net,
+        "amount": montant,
+        "net_apres_frais": apres_frais,
         "currency": str(v.get("currency") or "EUR"),
         "type": libelle,
         "date": str(v.get("date") or ""),
@@ -1519,7 +1533,263 @@ def limite_api() -> dict:
             "tous_les_noms": sorted((r.headers or {}).keys())}
 
 
+def _team_stats_par_api(start_date: str, end_date: str) -> Dict[str, Any]:
+    """Les memes renseignements que la page, depuis /team/money.
+
+    RENDRE EXACTEMENT LA MEME FORME que le scraping n'est pas de la
+    politesse : une trentaine d'endroits lisent transactions / chatters /
+    totals / chart. Changer la forme ici obligerait a les reecrire tous, et
+    a casser la paie en le faisant.
+
+    CE QUI CHANGE EN MIEUX :
+      - la devise est un champ, plus une colonne a deviner ;
+      - le type est normalise (« ppv » / « tip »), plus un libelle a
+        interpreter ;
+      - les montants par famille sont exacts, calcules vente par vente au
+        lieu d'etre lus dans un tableau qui ne les porte plus ;
+      - « Presence / Reactivite / Propose / Vendu », disparus de leur page,
+        reviennent par /team/messages/stats (messages, mots, fans distincts,
+        PPV proposes / vendus).
+    """
+    r = api_team_money(start_date, end_date)
+    if not r.get("ok"):
+        return {"ok": False, "error": r.get("error") or "team/money indisponible"}
+
+    transactions = [_vente_api_vers_ligne(v) for v in r.get("ventes") or []]
+
+    # Les agregats par chatteur. Absents ? On continue : ils enrichissent,
+    # ils ne conditionnent rien -- et perdre le CA parce qu'un agregat manque
+    # serait un mauvais echange.
+    st = api_team_messages_stats(start_date, end_date)
+    par_membre = {}
+    if st.get("ok"):
+        for m in st.get("par_chatteur") or []:
+            nom = str(m.get("user") or "").strip()
+            if nom:
+                par_membre[nom.lower()] = m
+
+    try:
+        from ventes_export import est_non_attribue as _est_non_attribue
+    except Exception:
+        def _est_non_attribue(_n):
+            return False
+
+    # UN CHATTEUR PAR NOM, monte depuis les ventes. La page en donnait un
+    # tableau tout fait ; ici on le construit, ce qui a l'avantage de ne
+    # jamais diverger du journal qu'on affiche a cote.
+    par_nom: Dict[str, Dict[str, Any]] = {}
+    ordre: List[str] = []
+    for t in transactions:
+        nom = (t.get("chatter") or "").strip()
+        cle = nom.lower()
+        c = par_nom.get(cle)
+        if c is None:
+            c = {"non_attribue": (not nom) or _est_non_attribue(nom),
+                 "name": nom or "(non attribué)",
+                 "presence": "", "reactivity": "", "proposed": 0, "sold": 0,
+                 "conv_rate": "", "ca_ppv": 0.0, "ca_tips": 0.0,
+                 "ca_total": 0.0, "nb_ventes": 0,
+                 "nb_medias_prives": 0, "nb_pourboires": 0}
+            par_nom[cle] = c
+            ordre.append(cle)
+        montant = float(t.get("amount") or 0)
+        c["ca_total"] += montant
+        c["nb_ventes"] += 1
+        famille = categorie_transaction(t.get("type"))
+        if famille == "Messages":
+            c["ca_ppv"] += montant
+            c["nb_medias_prives"] += 1
+        elif famille == "Tips":
+            c["ca_tips"] += montant
+            c["nb_pourboires"] += 1
+
+    for cle, c in par_nom.items():
+        for champ in ("ca_total", "ca_ppv", "ca_tips"):
+            c[champ] = round(c[champ], 2)
+        m = par_membre.get(cle)
+        if m:
+            # « Propose » et « Vendu » redeviennent mesurables : ce sont les
+            # PPV envoyes et ceux qui ont trouve preneur.
+            c["proposed"] = int(m.get("ppv_messages") or 0)
+            c["sold"] = int(m.get("ppv_sold") or 0)
+            c["messages"] = int(m.get("total_messages") or 0)
+            c["mots"] = int(m.get("total_words") or 0)
+            c["fans"] = int(m.get("distinct_fans") or 0)
+            if c["proposed"]:
+                c["conv_rate"] = "%.0f%%" % (100.0 * c["sold"] / c["proposed"])
+
+    chatters = [par_nom[k] for k in ordre]
+    chatters.sort(key=lambda c: c["ca_total"], reverse=True)
+
+    diagnostic = {
+        "source": "api",
+        "ventes_lues": len(transactions),
+        "total_annonce": r.get("total_annonce"),
+        "pages": r.get("pages"),
+        # Une reponse tronquee rend un total FAUX : il faut que ca se voie.
+        "tronque": r.get("tronque"),
+        "lignes_illisibles": 0, "montants_illisibles": 0,
+        "chatters_illisibles": 0,
+        "agregats_chatteurs": st.get("ok"),
+        "agregats_erreur": st.get("error"),
+        "ventes_sans_chatteur": sum(1 for t in transactions
+                                    if not (t.get("chatter") or "").strip()),
+        "montant_sans_chatteur": round(
+            sum(float(t.get("amount") or 0) for t in transactions
+                if not (t.get("chatter") or "").strip()), 2),
+    }
+    return _assembler_stats(transactions, chatters, start_date, end_date,
+                            diagnostic)
+
+
 # ============ Fetch + parse ============
+
+def _assembler_stats(transactions, chatters, start_date, end_date,
+                     diagnostic):
+    """Les totaux, la ventilation par devise et le graphique.
+
+    LES DEUX CHEMINS PASSENT ICI. L'API et le scraping produisent les
+    memes deux listes ; tout le reste -- split par devise, familles de
+    vente, series par jour -- est identique. Le laisser en double
+    garantirait qu'une correction n'aille que d'un cote, et c'est de
+    l'argent.
+    """
+    # CA par DEVISE et par CHATTEUR, reconstruit depuis le log de transactions
+    # (la table perf additionne EUR MyM et USD OnlyFans dans la même colonne :
+    # payer là-dessus en convertissant tout comme des EUR surpaie les ventes OF).
+    _by_chatter_cur: Dict[str, Dict[str, float]] = {}
+    for t in transactions:
+        key = (t.get("chatter") or "").strip().lower()
+        if not key:
+            continue
+        cs = str(t.get("currency") or "").upper()
+        cur = "USD" if ("USD" in cs or "$" in cs) else "EUR"
+        d2 = _by_chatter_cur.setdefault(key, {"EUR": 0.0, "USD": 0.0})
+        d2[cur] += float(t.get("amount") or 0)
+    for c in chatters:
+        split = _by_chatter_cur.get((c.get("name") or "").strip().lower())
+        c["ca_eur"] = round(split["EUR"], 2) if split else None
+        c["ca_usd"] = round(split["USD"], 2) if split else None
+    # Tri par CA Total décroissant
+    chatters.sort(key=lambda c: c["ca_total"], reverse=True)
+
+    # Taux du jour, deja mis en cache 24 h dans la config : sert a rendre le CA
+    # dans UNE seule devise. Sans lui on retombe sur la valeur de repli, jamais
+    # sur un melange silencieux.
+    try:
+        _taux_eur_usd = float(get_eur_usd_rate()["rate"]) or 1.14
+    except Exception:
+        _taux_eur_usd = 1.14
+    _par_devise = _ca_by_currency(transactions)
+    _cat_usd, _hors_cat = ca_par_categorie_usd(transactions, _taux_eur_usd)
+
+    # Totaux
+    totals = {
+        # ATTENTION : somme BRUTE de la colonne « CA Total » de MyPuls, qui
+        # empile des euros MyM et des dollars OnlyFans. Elle n'est dans aucune
+        # devise — l'afficher suivie d'un « € » surevalue la part OnlyFans
+        # d'environ 6,5 %. Pour un montant affichable : "ca_total_usd".
+        "ca_total": round(sum(c["ca_total"] for c in chatters), 2),
+        "ca_ppv": round(sum(c["ca_ppv"] for c in chatters), 2),
+        "ca_tips": round(sum(c["ca_tips"] for c in chatters), 2),
+        # Part du CA que MyPuls n'a rattachee a personne. Elle compte dans le
+        # chiffre d'affaires — elle ne doit compter dans aucune remuneration.
+        "ca_non_attribue": round(
+            sum(c["ca_total"] for c in chatters if c.get("non_attribue")), 2),
+        "nb_non_attribue": sum(1 for c in chatters if c.get("non_attribue")),
+        # CA ventilé PAR DEVISE (depuis les transactions, seule table qui la porte).
+        # EUR = MyM, USD = OnlyFans -> permet de convertir proprement et
+        # d'appliquer les frais OF, au lieu d'additionner des € et des $.
+        "ca_by_currency": _par_devise,
+        # Le meme CA, mais dans UNE devise : chaque chatteur est converti avec
+        # sa propre ventilation (ca_usd_chatteur), pas le total en bloc. C'est
+        # ce montant-la qui peut etre affiche avec un symbole.
+        "ca_total_usd": round(sum(ca_usd_chatteur(c, _taux_eur_usd)
+                                  for c in chatters), 2),
+        "eur_usd": _taux_eur_usd,
+        # Les deux parts, telles que le log les porte : EUR = MyM, USD = OF.
+        "ca_eur": round(_par_devise.get("EUR", 0.0), 2),
+        "ca_usd": round(_par_devise.get("USD", 0.0), 2),
+        # Ventilation par famille de vente, en dollars, issue du LOG (la table
+        # de performance ne donne ni la devise ni le detail par type).
+        # "ca_hors_categorie" recense ce qu'aucune famille ne reconnait :
+        # tant qu'il vaut 0, les familles recoupent le CA du log.
+        "ca_categories_usd": _cat_usd,
+        "ca_hors_categorie": _hors_cat,
+        "nb_transactions": len(transactions),
+        "nb_chatters": len(chatters),
+        # Compte des PERSONNES : les lignes « Indetermine (Creatrice) » sont
+        # des ventes orphelines, pas des chatteurs de plus.
+        "active_chatters": sum(1 for c in chatters
+                               if c["ca_total"] > 0 and not c.get("non_attribue")),
+        "period_start": start_date,
+        "period_end": end_date,
+    }
+
+    # Aggrégation pour graphique : revenus par jour ET par créateur
+    # Convertit la date "29/05/2026 05:36" -> "2026-05-29"
+    def _to_iso(date_str: str) -> str:
+        try:
+            d, _, _ = date_str.partition(" ")  # "29/05/2026"
+            parts = d.split("/")
+            if len(parts) == 3:
+                return f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
+        except Exception:
+            pass
+        return ""
+
+    # Liste de tous les jours dans la période
+    try:
+        start_dt = date.fromisoformat(start_date)
+        end_dt_inc = date.fromisoformat(end_date)
+        days_list: List[str] = []
+        cur = start_dt
+        while cur <= end_dt_inc:
+            days_list.append(cur.isoformat())
+            cur += timedelta(days=1)
+    except Exception:
+        days_list = []
+
+    # Total par créateur (pour ranking) + par (jour, créateur)
+    creator_totals: Dict[str, float] = {}
+    by_day_creator: Dict[Tuple[str, str], float] = {}
+    for tx in transactions:
+        iso = _to_iso(tx["date"])
+        creator = tx["creator"] or "?"
+        amt = tx["amount"]
+        creator_totals[creator] = creator_totals.get(creator, 0) + amt
+        if iso:
+            by_day_creator[(iso, creator)] = by_day_creator.get((iso, creator), 0) + amt
+
+    # Top créateurs par CA (limite à 10 pour le graphique lisible)
+    top_creators = sorted(creator_totals.items(), key=lambda x: x[1], reverse=True)[:10]
+    top_creator_names = [c[0] for c in top_creators]
+
+    # Datasets : un par créateur, valeurs par jour
+    datasets = []
+    for name in top_creator_names:
+        data_points = [round(by_day_creator.get((d, name), 0), 2) for d in days_list]
+        datasets.append({
+            "label": name,
+            "data": data_points,
+            "total": round(creator_totals[name], 2),
+        })
+
+    result = {
+        "ok": True,
+        "transactions": transactions,
+        "chatters": chatters,
+        "diagnostic": diagnostic,
+        "totals": totals,
+        "chart": {
+            "days": days_list,
+            "datasets": datasets,
+            "all_creators_total": round(sum(creator_totals.values()), 2),
+        },
+    }
+    # Mettre en cache pour accélérer les prochains chargements
+    return result
+
 
 def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool = True) -> Dict[str, Any]:
     """Récupère les stats de l'équipe (transactions + chatteurs) sur une période.
@@ -1536,9 +1806,6 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
     Retourne : {ok, transactions, chatters, daily, totals, error}
     """
     import time as _t
-    s = _make_session()
-    if s is None:
-        return {"ok": False, "error": "Cookies MyPuls non configurés"}
 
     # Période par défaut : 30 derniers jours (inclusif)
     today = date.today()
@@ -1565,6 +1832,29 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
         _STATS_CACHE.setdefault(cache_key, {"ts": 0, "data": None})["neg"] = {
             "ts": _t.time(), "data": out}
         return out
+
+    # ── L'API D'ABORD ────────────────────────────────────────────────────
+    #
+    # /team/money rend le meme journal que la page, mais en JSON : la devise
+    # est un champ, le type est normalise, et une colonne ajoutee chez eux ne
+    # casse plus rien. Le scraping reste dessous, en repli -- il a fallu deux
+    # pannes silencieuses pour comprendre qu'une page tierce ne se lit pas
+    # par position, et rien ne garantit que l'API soit toujours joignable.
+    #
+    # LE REPLI EST DIT, jamais devine : le diagnostic porte la source, sinon
+    # on ne saurait pas d'ou vient le chiffre qu'on regarde.
+    if api_configured():
+        _api = _team_stats_par_api(start_date, end_date)
+        if _api.get("ok"):
+            _STATS_CACHE[cache_key] = {"ts": int(_t.time()), "data": _api}
+            return _api
+        _err_api = _api.get("error") or "API indisponible"
+    else:
+        _err_api = "aucun token API"
+
+    s = _make_session()
+    if s is None:
+        return _fail_ts("Pas de token API (%s) et pas de cookies MyPuls" % _err_api)
 
     # Convertir end inclusif (UI) → end exclusif (MyPuls)
     try:
@@ -1811,126 +2101,6 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
                 c["ca_ppv"] = round(d["Messages"], 2)
                 c["ca_tips"] = round(d["Tips"], 2)
 
-    # CA par DEVISE et par CHATTEUR, reconstruit depuis le log de transactions
-    # (la table perf additionne EUR MyM et USD OnlyFans dans la même colonne :
-    # payer là-dessus en convertissant tout comme des EUR surpaie les ventes OF).
-    _by_chatter_cur: Dict[str, Dict[str, float]] = {}
-    for t in transactions:
-        key = (t.get("chatter") or "").strip().lower()
-        if not key:
-            continue
-        cs = str(t.get("currency") or "").upper()
-        cur = "USD" if ("USD" in cs or "$" in cs) else "EUR"
-        d2 = _by_chatter_cur.setdefault(key, {"EUR": 0.0, "USD": 0.0})
-        d2[cur] += float(t.get("amount") or 0)
-    for c in chatters:
-        split = _by_chatter_cur.get((c.get("name") or "").strip().lower())
-        c["ca_eur"] = round(split["EUR"], 2) if split else None
-        c["ca_usd"] = round(split["USD"], 2) if split else None
-    # Tri par CA Total décroissant
-    chatters.sort(key=lambda c: c["ca_total"], reverse=True)
-
-    # Taux du jour, deja mis en cache 24 h dans la config : sert a rendre le CA
-    # dans UNE seule devise. Sans lui on retombe sur la valeur de repli, jamais
-    # sur un melange silencieux.
-    try:
-        _taux_eur_usd = float(get_eur_usd_rate()["rate"]) or 1.14
-    except Exception:
-        _taux_eur_usd = 1.14
-    _par_devise = _ca_by_currency(transactions)
-    _cat_usd, _hors_cat = ca_par_categorie_usd(transactions, _taux_eur_usd)
-
-    # Totaux
-    totals = {
-        # ATTENTION : somme BRUTE de la colonne « CA Total » de MyPuls, qui
-        # empile des euros MyM et des dollars OnlyFans. Elle n'est dans aucune
-        # devise — l'afficher suivie d'un « € » surevalue la part OnlyFans
-        # d'environ 6,5 %. Pour un montant affichable : "ca_total_usd".
-        "ca_total": round(sum(c["ca_total"] for c in chatters), 2),
-        "ca_ppv": round(sum(c["ca_ppv"] for c in chatters), 2),
-        "ca_tips": round(sum(c["ca_tips"] for c in chatters), 2),
-        # Part du CA que MyPuls n'a rattachee a personne. Elle compte dans le
-        # chiffre d'affaires — elle ne doit compter dans aucune remuneration.
-        "ca_non_attribue": round(
-            sum(c["ca_total"] for c in chatters if c.get("non_attribue")), 2),
-        "nb_non_attribue": sum(1 for c in chatters if c.get("non_attribue")),
-        # CA ventilé PAR DEVISE (depuis les transactions, seule table qui la porte).
-        # EUR = MyM, USD = OnlyFans -> permet de convertir proprement et
-        # d'appliquer les frais OF, au lieu d'additionner des € et des $.
-        "ca_by_currency": _par_devise,
-        # Le meme CA, mais dans UNE devise : chaque chatteur est converti avec
-        # sa propre ventilation (ca_usd_chatteur), pas le total en bloc. C'est
-        # ce montant-la qui peut etre affiche avec un symbole.
-        "ca_total_usd": round(sum(ca_usd_chatteur(c, _taux_eur_usd)
-                                  for c in chatters), 2),
-        "eur_usd": _taux_eur_usd,
-        # Les deux parts, telles que le log les porte : EUR = MyM, USD = OF.
-        "ca_eur": round(_par_devise.get("EUR", 0.0), 2),
-        "ca_usd": round(_par_devise.get("USD", 0.0), 2),
-        # Ventilation par famille de vente, en dollars, issue du LOG (la table
-        # de performance ne donne ni la devise ni le detail par type).
-        # "ca_hors_categorie" recense ce qu'aucune famille ne reconnait :
-        # tant qu'il vaut 0, les familles recoupent le CA du log.
-        "ca_categories_usd": _cat_usd,
-        "ca_hors_categorie": _hors_cat,
-        "nb_transactions": len(transactions),
-        "nb_chatters": len(chatters),
-        # Compte des PERSONNES : les lignes « Indetermine (Creatrice) » sont
-        # des ventes orphelines, pas des chatteurs de plus.
-        "active_chatters": sum(1 for c in chatters
-                               if c["ca_total"] > 0 and not c.get("non_attribue")),
-        "period_start": start_date,
-        "period_end": end_date,
-    }
-
-    # Aggrégation pour graphique : revenus par jour ET par créateur
-    # Convertit la date "29/05/2026 05:36" -> "2026-05-29"
-    def _to_iso(date_str: str) -> str:
-        try:
-            d, _, _ = date_str.partition(" ")  # "29/05/2026"
-            parts = d.split("/")
-            if len(parts) == 3:
-                return f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
-        except Exception:
-            pass
-        return ""
-
-    # Liste de tous les jours dans la période
-    try:
-        start_dt = date.fromisoformat(start_date)
-        end_dt_inc = date.fromisoformat(end_date)
-        days_list: List[str] = []
-        cur = start_dt
-        while cur <= end_dt_inc:
-            days_list.append(cur.isoformat())
-            cur += timedelta(days=1)
-    except Exception:
-        days_list = []
-
-    # Total par créateur (pour ranking) + par (jour, créateur)
-    creator_totals: Dict[str, float] = {}
-    by_day_creator: Dict[Tuple[str, str], float] = {}
-    for tx in transactions:
-        iso = _to_iso(tx["date"])
-        creator = tx["creator"] or "?"
-        amt = tx["amount"]
-        creator_totals[creator] = creator_totals.get(creator, 0) + amt
-        if iso:
-            by_day_creator[(iso, creator)] = by_day_creator.get((iso, creator), 0) + amt
-
-    # Top créateurs par CA (limite à 10 pour le graphique lisible)
-    top_creators = sorted(creator_totals.items(), key=lambda x: x[1], reverse=True)[:10]
-    top_creator_names = [c[0] for c in top_creators]
-
-    # Datasets : un par créateur, valeurs par jour
-    datasets = []
-    for name in top_creator_names:
-        data_points = [round(by_day_creator.get((d, name), 0), 2) for d in days_list]
-        datasets.append({
-            "label": name,
-            "data": data_points,
-            "total": round(creator_totals[name], 2),
-        })
 
     # Ce que la lecture a laisse de cote : sans ca, un ecart entre le CA
     # affiche et la somme des ventes n'a aucune explication consultable.
@@ -1939,6 +2109,9 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
         # CE QUE MYPULS A ENVOYE, mot pour mot. C'est ce qui manquait le
         # 05/09 : le CA etait a zero et rien ne permettait de voir que les
         # colonnes avaient bouge. Une capture d'ecran de moins a demander.
+        # D'OU VIENT LE CHIFFRE. Deux chemins mènent ici, l'API et le
+        # scraping ; sans ce mot, on ne sait pas lequel a parlé.
+        "source": "scraping",
         "entetes_log": list(tables[i_log][0] or []),
         "entetes_perf": list(tables[i_perf][0] or []),
         # Un tableau par devise depuis la refonte : on dit combien on en a
@@ -1956,21 +2129,11 @@ def fetch_team_stats(start_date: str = "", end_date: str = "", use_cache: bool =
         "montant_sans_chatteur": round(sum(t.get("amount") or 0 for t in _sans_nom), 2),
     }
 
-    result = {
-        "ok": True,
-        "transactions": transactions,
-        "chatters": chatters,
-        "diagnostic": diagnostic,
-        "totals": totals,
-        "chart": {
-            "days": days_list,
-            "datasets": datasets,
-            "all_creators_total": round(sum(creator_totals.values()), 2),
-        },
-    }
+    _res = _assembler_stats(transactions, chatters, start_date, end_date,
+                            diagnostic)
     # Mettre en cache pour accélérer les prochains chargements
-    _STATS_CACHE[cache_key] = {"ts": int(_t.time()), "data": result}
-    return result
+    _STATS_CACHE[cache_key] = {"ts": int(_t.time()), "data": _res}
+    return _res
 
 
 def invalidate_cache():
