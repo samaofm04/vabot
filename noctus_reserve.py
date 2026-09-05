@@ -237,10 +237,27 @@ def _fiches_libres(identite: str, famille: str):
     return sortie
 
 
+def _servable(fiche: dict) -> bool:
+    """Cette variante peut-elle être servie à un VA ?
+
+    NON si sa fiche ne porte pas de verdict d'assemblage (clé « repli » dans
+    la recette). C'est le cas de tout ce qui a été fabriqué avant le 05/09 :
+    on ignore si c'est un montage ou un template nu, et servir un template nu
+    en disant « poste-la telle quelle » est précisément le défaut corrigé ce
+    jour-là. Une fiche écrite depuis porte toujours la clé, même à False.
+
+    Cette question se pose aux TROIS endroits — compter, servir, purger — et
+    elle doit y recevoir la même réponse : une variante comptée mais jamais
+    servie rendrait la réserve morte au lieu de vide, sans que rien ne le
+    signale.
+    """
+    return "repli" in ((fiche or {}).get("recette") or {})
+
+
 def compter(identite: str, famille: str, emp: str | None = None) -> int:
-    """Combien de variantes attendent. Avec `emp`, seulement celles à jour."""
+    """Combien de variantes SERVABLES attendent. Avec `emp`, celles à jour."""
     return sum(1 for _m, _j, f in _fiches_libres(identite, famille)
-               if emp is None or f.get("empreinte") == emp)
+               if (emp is None or f.get("empreinte") == emp) and _servable(f))
 
 
 #: La réserve sert-elle ? Coupée le 05/09/2026 à la demande du propriétaire,
@@ -274,12 +291,8 @@ def prendre(identite: str, famille: str, emp: str | None = None,
     """
     if not ACTIF:
         return None, ""
-    # « repli » absent = fiche d'AVANT le correctif du 05/09 : on ignore si
-    # cette variante est un montage ou un template nu, donc on ne la sert pas.
-    # Une fiche ecrite depuis porte toujours la cle, meme a False.
     candidats = [(m, j, f) for m, j, f in _fiches_libres(identite, famille)
-                 if (emp is None or f.get("empreinte") == emp)
-                 and "repli" in (f.get("recette") or {})]
+                 if (emp is None or f.get("empreinte") == emp) and _servable(f)]
     if not candidats:
         return None, ""
     random.shuffle(candidats)
@@ -338,7 +351,10 @@ def purger_perimes(identite: str, famille: str, emp_courante: str) -> int:
     """
     jetes = 0
     for mp4, fiche_json, fiche in _fiches_libres(identite, famille):
-        if fiche.get("empreinte") == emp_courante:
+        # Une variante inservable est perimee par nature : la laisser
+        # attendrait un changement de template pour la voir partir, et elle
+        # occuperait le disque pour rien pendant ce temps.
+        if fiche.get("empreinte") == emp_courante and _servable(fiche):
             continue
         for f in (mp4, fiche_json):
             try:
