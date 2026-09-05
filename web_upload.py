@@ -52889,11 +52889,27 @@ def create_app():
         # Le test porte sur CETTE clé, pas sur le trousseau : la rotation
         # aurait pu interroger une autre et déclarer bonne une clé fausse.
         import requests as _rq
+        import time as _t
         etat, detail, _compte = False, "", ""
         try:
-            rep = _rq.get("%s/api/v1/session" % mypuls.BASE_URL,
-                          headers={"X-API-TOKEN": tok, "Accept": "application/json"},
-                          timeout=15)
+            # ON REESSAIE AVANT DE CONCLURE. MyPuls est derriere un
+            # repartiteur qui sert parfois sa page web a la place de l'API,
+            # avec un code 200, pour une cle valide. Trancher sur une seule
+            # reponse rejetait de bonnes cles -- constate le 05/09, « des fois
+            # ca me dit que ce n'est pas une cle alors que c'en est une ».
+            # Trois essais espacés : un hoquet ne passe pas trois fois.
+            for _n in range(3):
+                rep = _rq.get("%s/api/v1/session" % mypuls.BASE_URL,
+                              headers={"X-API-TOKEN": tok,
+                                       "Accept": "application/json"},
+                              timeout=15)
+                try:
+                    _ok_json = isinstance(rep.json(), dict)
+                except Exception:
+                    _ok_json = False
+                if _ok_json or rep.status_code in (401, 403):
+                    break          # une reponse claire : inutile d'insister
+                _t.sleep(1.5)
             # UN 200 NE PROUVE RIEN. MyPuls sert sa page de connexion en HTML
             # avec un code 200 quand le jeton n'en est pas un — un cookie
             # collé à la place, par exemple. Une clé fausse s'affichait donc
@@ -52923,12 +52939,15 @@ def create_app():
                     etat = True
                     _compte = str(corps.get("email") or "").strip()
                 elif corps is None:
-                    # MyPuls a renvoye du HTML avec un code 200 : c'est sa page
-                    # de connexion. Le jeton n'en est pas un.
-                    detail = ("MyPuls a répondu par une page web, pas par l'API — "
-                              "ce n'est pas un X-API-TOKEN. Copie-le depuis ton "
-                              "profil MyPuls, champ « Votre Clé API », avec le "
-                              "bouton copier.")
+                    # Trois fois de suite une page web : ce n'est plus le
+                    # repartiteur, c'est la clé. On le dit sans certitude
+                    # excessive — la clé est gardée, elle sera réessayée.
+                    detail = ("MyPuls a répondu par une page web au lieu de l'API, "
+                              "3 fois de suite. Soit ce n'est pas un X-API-TOKEN "
+                              "(copie-le depuis ton profil MyPuls, champ « Votre "
+                              "Clé API », bouton copier), soit leur serveur est "
+                              "encombré — la clé est gardée, retente avec "
+                              "« Tester chaque clé ».")
                 else:
                     # Du JSON, mais pas authentifie : la cle existe et n'est
                     # pas acceptee. Ce n'est pas la meme chose qu'un cookie.
@@ -52991,9 +53010,20 @@ def create_app():
         for k in mypuls.api_keys(masquer=False):
             tok = k.get("token") or ""
             try:
-                rep = _rq.get("%s/api/v1/session" % mypuls.BASE_URL,
-                              headers={"X-API-TOKEN": tok,
-                                       "Accept": "application/json"}, timeout=15)
+                # Meme patience qu'a l'ajout : une page web n'est pas un
+                # verdict, c'est peut-etre leur repartiteur.
+                for _n in range(3):
+                    rep = _rq.get("%s/api/v1/session" % mypuls.BASE_URL,
+                                  headers={"X-API-TOKEN": tok,
+                                           "Accept": "application/json"},
+                                  timeout=15)
+                    try:
+                        _clair = isinstance(rep.json(), dict)
+                    except Exception:
+                        _clair = False
+                    if _clair or rep.status_code in (401, 403):
+                        break
+                    _t.sleep(1.5)
                 code = rep.status_code
             except Exception as e:
                 code = 0
@@ -53011,7 +53041,7 @@ def create_app():
                     ok = True
                     compte = str(_j.get("email") or "").strip()
                 elif _j is None:
-                    pourquoi = "page web, pas l'API"
+                    pourquoi = "page web x3 (serveur encombré ou clé invalide)"
                 else:
                     pourquoi = "non authentifiée"
             mot = ({200: "OK" if ok else pourquoi,

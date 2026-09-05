@@ -134,6 +134,7 @@ def api_keys(masquer: bool = True) -> list:
              # le trousseau pour retomber sur ses pieds. L'API donne l'adresse
              # du proprietaire, on la garde.
              "compte": c.get("compte") or "",
+             "html_suite": int(c.get("html_suite") or 0),
              "ok": bool(c.get("ok")),
              "derniere_erreur": c.get("derniere_erreur") or "",
              "au_repos": max(0, int((c.get("repos_jusqua") or 0) - _t.time())),
@@ -157,6 +158,7 @@ def save_api_keys(cles: list) -> None:
         propres.append({"id": str(c.get("id") or "k%d" % (i + 1))[:20],
                         "label": str(c.get("label") or "Clé %d" % (i + 1))[:40],
                         "compte": str(c.get("compte") or "")[:80],
+                        "html_suite": int(c.get("html_suite") or 0),
                         "token": tok,
                         "ok": bool(c.get("ok")),
                         "derniere_erreur": str(c.get("derniere_erreur") or "")[:120],
@@ -219,7 +221,8 @@ _COMPTEURS_PERIODE = 60.0
 
 
 def _noter_cle(cle_id: str, ok: bool = None, repos_s: float = 0,
-               erreur: str = "", compter: bool = False, compte: str = "") -> None:
+               erreur: str = "", compter: bool = False, compte: str = "",
+               html: bool = None) -> None:
     """Met a jour l'etat d'une cle sans reecrire les autres.
 
     Un simple comptage n'ecrit rien : il s'accumule et part avec la prochaine
@@ -231,6 +234,7 @@ def _noter_cle(cle_id: str, ok: bool = None, repos_s: float = 0,
     # Rien d'autre a dire, et l'heure d'ecrire n'est pas venue : on s'arrete
     # la. C'est le cas de l'immense majorite des appels.
     if (ok is None and repos_s <= 0 and not erreur and not compte
+            and html is None
             and (_t.time() - _COMPTEURS_TS[0]) < _COMPTEURS_PERIODE):
         return
     with _VERROU_CLES:
@@ -243,6 +247,17 @@ def _noter_cle(cle_id: str, ok: bool = None, repos_s: float = 0,
                 c["ok"] = bool(ok)
             if compte:
                 c["compte"] = compte[:80]
+            # LA PAGE WEB N'EST PAS UNE PREUVE. MyPuls est derriere un
+            # repartiteur de charge (en-tete x-iplb-instance) qui sert parfois
+            # sa page a la place de l'API, avec un code 200, pour une cle
+            # parfaitement valide -- constate le 05/09 apres plusieurs milliers
+            # d'appels. Condamner sur une seule reponse HTML rejetait de
+            # bonnes cles. On compte les fois CONSECUTIVES ; une seule reponse
+            # correcte remet le compteur a zero.
+            if html is True:
+                c["html_suite"] = int(c.get("html_suite") or 0) + 1
+            elif html is False:
+                c["html_suite"] = 0
             if repos_s > 0:
                 c["repos_jusqua"] = _t.time() + repos_s
             if erreur:
@@ -298,9 +313,13 @@ def _cle_disponible():
     # parfois » -- le pire des symptomes. On la garde a l'ecart tant qu'une
     # autre repond, sans l'effacer : c'est a l'ecran de la montrer et a
     # quelqu'un de la remplacer.
-    _FAUTIF = ("refusée", "non-JSON")
+    # Une cle REFUSEE (401) est fautive tout de suite : elle ne se reparera
+    # pas. Une cle qui rend du HTML ne l'est qu'apres SEUIL_HTML fois de
+    # suite -- en deca, c'est le repartiteur de MyPuls qui hoquette, pas la
+    # cle qui est mauvaise.
     saines = [c for c in libres
-              if not any(m in str(c.get("derniere_erreur") or "") for m in _FAUTIF)]
+              if "refusée" not in str(c.get("derniere_erreur") or "")
+              and int(c.get("html_suite") or 0) < SEUIL_HTML]
     if saines:
         libres = saines
 
@@ -401,14 +420,15 @@ def api_get(path: str, params: dict = None, _essai: int = 0) -> dict:
         # d'une cle d'API, par exemple). Mesure du 05/09/2026, apres l'ajout
         # de plusieurs cles d'un coup. Meme traitement qu'un 401 : on marque
         # la cle et on laisse une autre repondre.
-        _noter_cle(cle_id, ok=False,
-                   erreur="réponse non-JSON (ce n'est pas une clé d'API)")
+        _noter_cle(cle_id, html=True,
+                   erreur="MyPuls a répondu par une page web (répartiteur ?)")
         if _essai < _reprises_possibles():
             return api_get(path, params, _essai=_essai + 1)
         return {"ok": False,
                 "error": "Réponse non-JSON — cette clé n'est pas un X-API-TOKEN "
                          "(Settings › MyPuls › Tester chaque clé)"}
-    _noter_cle(cle_id, ok=True, compter=True)
+    # Une reponse correcte efface la suite de HTML : la cle va bien.
+    _noter_cle(cle_id, ok=True, compter=True, html=False)
     return {"ok": True, "data": d}
 
 
@@ -1522,6 +1542,11 @@ def _table_par_entetes(tables, *exigences) -> int:
 # On demande donc de grandes pages, et on s'arrete net a une limite de
 # securite plutot que de tourner sans fin si `has_more` restait vrai.
 # ---------------------------------------------------------------------------
+
+#: Combien de reponses HTML d'affilee avant de tenir une cle pour mauvaise.
+#: Trois : une seule est un hoquet du repartiteur, trois de suite n'arrivent
+#: pas par hasard.
+SEUIL_HTML = 3
 
 #: Grandes pages : moins de requetes pour la meme donnee. Si l'API plafonne
 #: en dessous, elle rend simplement moins d'elements et la pagination suit.
