@@ -51165,7 +51165,19 @@ def create_app():
             if (voulus and t.get("code") in voulus) or (motif and motif in str(t.get("nom") or "").lower()):
                 out.append({k: t.get(k) for k in
                             ("code", "nom", "abonnes", "nouveaux", "visites")})
-        return jsonify({"ok": True, "total_liens_suivi": len(tous), "trouves": out})
+        # Les creatrices, pour relier le pseudo d'une destination
+        # (onlyfans.com/<pseudo>/c88) au creator_id des liens de suivi : c'est
+        # ce couple qui rend un code unique.
+        crs = []
+        if (request.args.get("creatrices") or "") == "1":
+            try:
+                crs = [{"id": c.get("id"), "pseudo": c.get("pseudo"),
+                        "platform": c.get("platform")}
+                       for c in (mypuls.api_creators_cached() or [])]
+            except Exception:
+                crs = []
+        return jsonify({"ok": True, "total_liens_suivi": len(tous),
+                        "trouves": out, "creatrices": crs})
 
     @app.route("/api/rig/clics_propositions")
     def rig_clics_propositions():
