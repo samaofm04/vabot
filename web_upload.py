@@ -51097,7 +51097,7 @@ def create_app():
 
         def _appel(tok):
             r = _rq.get("%s/api/v1/session" % mypuls.BASE_URL,
-                        headers={"X-API-TOKEN": tok, "Accept": "application/json"},
+                        headers=mypuls._entetes_api(tok),
                         timeout=15)
             return (r.status_code,
                     r.headers.get("x-ratelimit-remaining"),
@@ -52900,9 +52900,7 @@ def create_app():
             # Trois essais espacés : un hoquet ne passe pas trois fois.
             for _n in range(3):
                 rep = _rq.get("%s/api/v1/session" % mypuls.BASE_URL,
-                              headers={"X-API-TOKEN": tok,
-                                       "Accept": "application/json"},
-                              timeout=15)
+                              headers=mypuls._entetes_api(tok), timeout=15)
                 try:
                     _ok_json = isinstance(rep.json(), dict)
                 except Exception:
@@ -53014,9 +53012,7 @@ def create_app():
                 # verdict, c'est peut-etre leur repartiteur.
                 for _n in range(3):
                     rep = _rq.get("%s/api/v1/session" % mypuls.BASE_URL,
-                                  headers={"X-API-TOKEN": tok,
-                                           "Accept": "application/json"},
-                                  timeout=15)
+                                  headers=mypuls._entetes_api(tok), timeout=15)
                     try:
                         _clair = isinstance(rep.json(), dict)
                     except Exception:

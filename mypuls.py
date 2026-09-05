@@ -345,6 +345,26 @@ def api_configured() -> bool:
     return bool(api_token())
 
 
+#: LES EN-TETES DE TOUT APPEL A L'API.
+#:
+#: Le scraping annonce un navigateur depuis toujours ; l'API, elle, partait
+#: avec « python-requests/2.32.5 ». Un repartiteur qui filtre les robots sert
+#: exactement ce qu'on observait : sa page web, avec un code 200, par
+#: intermittence et d'autant plus volontiers que le debit monte. Une bonne
+#: cle passait alors pour mauvaise.
+#:
+#: On annonce donc la meme chose que le reste du site. Ce n'est pas un
+#: deguisement : l'appel reste authentifie par X-API-TOKEN, et MyPuls
+#: documente cette API pour des outils comme le notre.
+_UA_API = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+           "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
+
+
+def _entetes_api(token: str) -> dict:
+    return {"X-API-TOKEN": token, "Accept": "application/json",
+            "User-Agent": _UA_API}
+
+
 def _reprises_possibles() -> int:
     """Combien de fois on peut retenter avec une AUTRE cle.
 
@@ -376,7 +396,7 @@ def api_get(path: str, params: dict = None, _essai: int = 0) -> dict:
     import requests
     url = f"{BASE_URL}/api/v1/{path.lstrip('/')}"
     try:
-        r = requests.get(url, headers={"X-API-TOKEN": tok, "Accept": "application/json"},
+        r = requests.get(url, headers=_entetes_api(tok),
                          params=params or {}, timeout=TIMEOUT)
     except Exception as e:
         return {"ok": False, "error": f"Connexion API impossible : {e}"}
@@ -1839,8 +1859,7 @@ def decouvrir_api(jours: int = 6) -> dict:
 
     def _appel(chemin, params):
         url = "%s/api/v1/%s" % (BASE_URL, chemin)
-        return requests.get(url, headers={"X-API-TOKEN": tok,
-                                          "Accept": "application/json"},
+        return requests.get(url, headers=_entetes_api(tok),
                             params=params or {}, timeout=15)
 
     servis, absents, autres, a_reessayer = [], [], [], []
@@ -1929,8 +1948,7 @@ def limite_api() -> dict:
         return {"ok": False, "error": "Aucun token API MyPuls"}
     try:
         r = requests.get("%s/api/v1/session" % BASE_URL,
-                         headers={"X-API-TOKEN": api_token(),
-                                  "Accept": "application/json"}, timeout=15)
+                         headers=_entetes_api(api_token()), timeout=15)
     except Exception as e:
         return {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
 
