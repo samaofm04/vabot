@@ -383,7 +383,7 @@ def _audience(a: dict) -> str:
         "<div class='kpi a'><div class='q'>Pages vues</div><div class='v'>%s</div>"
         "<div class='s'>%s</div></div>"
         "<div class='kpi b'><div class='q'>Visiteurs uniques</div><div class='v'>%s</div>"
-        "<div class='s'>%s%% de la période</div></div>"
+        "<div class='s'>%s%% des pages vues</div></div>"
         "<div class='kpi c'>%s</div>"
         "</div>"
         % (_num(vues), html.escape(str(a.get("periode") or "")),
