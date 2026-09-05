@@ -50836,7 +50836,29 @@ def create_app():
                 inconnus.append(lib)
 
         stats = mypuls.api_team_messages_stats(debut, fin)
+        # LE CHEMIN COMPLET, pas seulement l'appel brut : c'est
+        # fetch_team_stats que la page utilise, et c'est lui qui doit dire
+        # « source: api ». Sans ca on verifierait l'API sans verifier la
+        # bascule.
+        try:
+            _ft = mypuls.fetch_team_stats(debut, fin, use_cache=False)
+        except Exception as _e:
+            _ft = {"ok": False, "error": "%s: %s" % (type(_e).__name__, _e)}
+        _dg = (_ft.get("diagnostic") or {}) if isinstance(_ft, dict) else {}
+        _tt = (_ft.get("totals") or {}) if isinstance(_ft, dict) else {}
+        lecture = {
+            "ok": _ft.get("ok"), "error": _ft.get("error"),
+            "source": _dg.get("source"), "ventes_lues": _dg.get("ventes_lues"),
+            "tronque": _dg.get("tronque"),
+            "agregats_chatteurs": _dg.get("agregats_chatteurs"),
+            "ca_total": _tt.get("ca_total"), "ca_ppv": _tt.get("ca_ppv"),
+            "ca_tips": _tt.get("ca_tips"), "ca_eur": _tt.get("ca_eur"),
+            "ca_usd": _tt.get("ca_usd"),
+            "nb_chatters": _tt.get("nb_chatters"),
+            "active_chatters": _tt.get("active_chatters"),
+        }
         return jsonify({
+            "lecture_par_le_site": lecture,
             "ok": True, "periode": [debut, fin],
             "ventes": {"lues": len(ventes), "total_annonce": r.get("total_annonce"),
                        "pages": r.get("pages"), "tronque": r.get("tronque")},
