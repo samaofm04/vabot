@@ -5545,6 +5545,52 @@ async def _fermer_menu_brutes(user_id):
         pass
 
 
+#: Le dernier panneau Jailbreak ouvert par chaque personne.
+#:
+#: MEME DEFAUT QUE LE MENU DES BRUTES, ET IL AVAIT ETE CORRIGE LA SEULEMENT.
+#: Choisir une model POSTE un nouveau panneau ephemere ; un ephemere ne
+#: disparait pas quand on en ouvre un autre. Les panneaux s'empilaient donc
+#: dans le salon, tous cliquables, chacun gardant SA model et SA quantite --
+#: et un clic sur un ancien servait l'ancienne identite. C'est le melange
+#: d'identites constate le 05/09/2026.
+_DERNIER_PANNEAU_JB = {}
+
+
+async def _fermer_panneau_jb(user_id):
+    """Efface le panneau Jailbreak encore ouvert par cette personne.
+
+    Ne leve jamais : le message a peut-etre deja ete rejete a la main, ou son
+    jeton d'interaction a expire. Dans les deux cas il n'y a plus rien a
+    fermer, et echouer ici empecherait d'ouvrir le nouveau.
+    """
+    ancien = _DERNIER_PANNEAU_JB.pop(int(user_id or 0), None)
+    if ancien is None:
+        return
+    try:
+        await ancien.delete()
+    except Exception:
+        pass
+
+
+async def _poser_panneau_jb(interaction, view):
+    """Ouvre un panneau Jailbreak en fermant le precedent.
+
+    Le handle du message est garde pour pouvoir l'eteindre : un ephemere
+    envoye par send_message ne rend rien, il faut le redemander par
+    original_response().
+    """
+    await _fermer_panneau_jb(interaction.user.id)
+    await interaction.response.send_message(
+        embed=view._embed(), view=view, ephemeral=True)
+    try:
+        view.message = await interaction.original_response()
+        _DERNIER_PANNEAU_JB[int(interaction.user.id)] = view.message
+    except Exception:
+        # Sans handle on ne pourra pas l'eteindre, mais le panneau fonctionne.
+        # Mieux vaut un panneau non eteignable qu'une commande qui echoue.
+        view.message = None
+
+
 def _vers_content(interaction):
     """Rend une interaction dont les envois partent dans le salon -content.
 
@@ -6757,12 +6803,39 @@ class JailbreakActionsView(discord.ui.View):
     us=True -> liste US (Reel caption au lieu du Reel brut)."""
     def __init__(self, cog, model, quantity=3, us=False, icones=None):
         self.icones = icones or {}
-        super().__init__(timeout=600)
+        # 180 s et non 600 : un panneau laisse ouvert apres un changement de
+        # model sert l'ANCIENNE identite. Meme duree que le menu des brutes,
+        # pour la meme raison.
+        super().__init__(timeout=180)
         self.cog = cog
         self.model = model
         self.quantity = quantity
         self.us = us
+        self.message = None      # pose par _poser_panneau_jb, pour l'eteindre
         self._build()
+
+    async def on_timeout(self):
+        """Eteint le panneau au lieu de le laisser mentir.
+
+        Un ephemere ne disparait pas tout seul : sans ca, celui d'une model
+        abandonnee reste cliquable et sert ses medias a la place de ceux de
+        la model en cours.
+        """
+        for item in self.children:
+            item.disabled = True
+        for cle, msg in list(_DERNIER_PANNEAU_JB.items()):
+            if msg is self.message:
+                _DERNIER_PANNEAU_JB.pop(cle, None)
+        try:
+            if self.message is not None:
+                await self.message.edit(
+                    embed=discord.Embed(
+                        title="⏳ Panneau expiré (model `%s`)" % self.model,
+                        description="Rouvre le menu Jailbreak pour en obtenir un à jour.",
+                        color=discord.Color.dark_grey()),
+                    view=self)
+        except Exception:
+            pass
 
     def _build(self):
         self.clear_items()
@@ -7044,8 +7117,7 @@ class _JailbreakModelSelect(discord.ui.Select):
         view = JailbreakActionsView(
             self.cog, model, us=(marche_du_membre(interaction.user) != "fr"),
             icones=icones_actions(interaction.guild))
-        await interaction.response.send_message(
-            embed=view._embed(), view=view, ephemeral=True)
+        await _poser_panneau_jb(interaction, view)
 
 
 class JailbreakMenuView(discord.ui.View):
@@ -7128,8 +7200,7 @@ class JBModelButton(discord.ui.DynamicItem[discord.ui.Button],
         if not us:
             view = JailbreakActionsView(cog, self.ident, us=(_marche != "fr"),
                                         icones=icones_actions(interaction.guild))
-            await interaction.response.send_message(
-                embed=view._embed(), view=view, ephemeral=True)
+            await _poser_panneau_jb(interaction, view)
             return
         # Serveur US : on met a jour le PANNEAU PERMANENT du salon au lieu
         # d'envoyer un message ephemere qui disparait au rafraichissement.
