@@ -51176,18 +51176,32 @@ def create_app():
         sortie, sondes = {}, 0
         for h in demandes:
             c = cache.get(h) or {}
-            frais = c and (maintenant - int(c.get("scraped_at") or 0)) < 86400
+            # UNE ENTREE EN ERREUR N EST PAS UNE REPONSE. Le cache en garde --
+            # les autres appelants savent les ignorer -- mais ici les rendre
+            # « connues » ferait passer un rate-limit pour un verdict.
+            if c.get("error"):
+                c = {}
+            frais = bool(c) and (maintenant - int(c.get("scraped_at") or 0)) < 86400
+            echec = ""
             if not c and sonder and sondes < PLAFOND:
                 sondes += 1
                 try:
-                    c = _scrape_via_ig_public(h)
-                    c["scraped_at"] = maintenant
-                    cache[h] = c
+                    r = _scrape_via_ig_public(h)
                 except Exception as e:
-                    c = {"error": "sonde: %s" % type(e).__name__}
-                frais = True
+                    r = {"error": "sonde: %s" % type(e).__name__}
+                # 404 EST une reponse : le compte n est pas la. Un 429 ou une
+                # panne reseau n en est pas une, et l ecrire dans le cache
+                # ferait croire demain qu on a regarde. Mesure du 05/09/2026 :
+                # six sondes sur six ont rendu 429 depuis le VPS -- son adresse
+                # est filtree par Instagram sur cet endpoint.
+                if "error" not in r or r.get("banned"):
+                    r["scraped_at"] = maintenant
+                    cache[h] = r
+                    c, frais = r, True
+                else:
+                    echec = str(r.get("error") or "")
             if not c:
-                sortie[h] = {"connu": False}
+                sortie[h] = {"connu": False, "echec": echec}
                 continue
             prof = (c.get("profile") or {}) if isinstance(c.get("profile"), dict) else c
             sortie[h] = {
@@ -51209,8 +51223,8 @@ def create_app():
                 pass                      # le cache n est pas la verite, tant pis
         return jsonify({"ok": True, "etats": sortie, "sondes": sondes,
                         "plafond": PLAFOND,
-                        "restants": max(0, len([h for h in demandes
-                                                if not (cache.get(h))]))})
+                        "restants": len([h for h in demandes
+                                         if not sortie[h].get("connu")])})
 
     @app.route("/version")
     def version_du_site():
