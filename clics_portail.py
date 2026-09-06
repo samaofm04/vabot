@@ -278,6 +278,9 @@ tbody tr:hover td:first-child{background:var(--accent-doux)}
 td.n{font-family:var(--chiffres);font-size:12.5px;font-weight:600;
      font-variant-numeric:tabular-nums}
 td.z{color:var(--faible);font-weight:400}     /* un zero ne doit pas crier */
+td.na{color:var(--faible);font-weight:400}    /* avant son arrivee : pas a lui */
+.depuis{display:block;font-size:10.5px;color:var(--faible);font-weight:400;
+        margin-top:1px}
 td.g{color:var(--attenue);font-weight:400}    /* la colonne globale, en retrait */
 .gr{border-left:1px solid var(--bordure)}
 
@@ -300,6 +303,12 @@ def _num(v) -> str:
         return "—"
 
 
+def _fr_court(iso: str) -> str:
+    """« 2026-08-12 » -> « 12/08 ». La date d'arrivee tient sous un nom."""
+    p = str(iso or "").split("-")
+    return "%s/%s" % (p[2], p[1]) if len(p) == 3 else str(iso or "")
+
+
 def _case(v, doux: bool = False) -> str:
     """Une cellule de chiffre. Un ZERO s'efface au lieu de crier.
 
@@ -307,6 +316,11 @@ def _case(v, doux: bool = False) -> str:
     chiffres qui comptent — on les met en gris, et l'oeil va tout seul la ou
     il se passe quelque chose.
     """
+    # « · » : la periode precede l'arrivee de la personne sur ce lien. Ce
+    # n'est ni un zero (elle n'a pas rien fait) ni un tiret (la donnee a bien
+    # ete lue) : c'est du travail qui appartient a quelqu'un d'autre.
+    if v == "NA":
+        return "<td class='n na' title='Avant son arrivée sur ce lien'>·</td>"
     n = 0
     try:
         n = int(v or 0)
@@ -645,6 +659,8 @@ def _page_donnees(titre: str, sous: str, d: dict, quand: str,
         # L'ordre vient des clics (tous les liens y sont) ; un lien qui
         # n'aurait que des abonnes est ajoute a la fin plutot qu'oublie.
         clics = {str(r.get("lien") or ""): (r.get("periodes") or []) for r in pl}
+        _depuis_par_lien = {str(r.get("lien") or ""): str(r.get("depuis") or "")
+                            for r in pl if r.get("depuis")}
         # ORDRE ALPHABETIQUE, sur la liste FUSIONNEE. Reprendre l'ordre des
         # clics puis coller les autres a la fin remettait exactement le
         # defaut qu'on venait de corriger : quelqu'un qu'on cherche n'est pas
@@ -672,9 +688,13 @@ def _page_donnees(titre: str, sous: str, d: dict, quand: str,
                 return v.get("marche") if avec_marche and v.get("marche") is not None \
                     else v.get("total")
 
+            _dep = _depuis_par_lien.get(nom, "")
+            _nom_html = html.escape(nom) + (
+                "<span class='depuis'>depuis le %s</span>"
+                % html.escape(_fr_court(_dep)) if _dep else "")
             lignes.append(
                 "<tr><td>%s</td>%s%s%s%s%s%s</tr>"
-                % (html.escape(nom),
+                % (_nom_html,
                    _case(_clic(0)), _case(a.get("auj")),
                    _case(_clic(2), doux=True), _case(a.get("quinz")),
                    _case(a.get("prec"), doux=True),

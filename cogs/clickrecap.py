@@ -787,6 +787,8 @@ class ClickRecap(commands.Cog):
         _appels, _echoues = 0, 0         # le DETAIL par lien
         _lot_appels, _lot_echoues = 0, 0  # le total hebdomadaire, en lot
         _partiels, _tronque_lot = 0, 0
+        _hors_periode = 0                 # cases « avant son arrivee »
+        _dep_par_lab = {}                 # nom affiche -> date d'arrivee
         # Le nom affiche ne porte pas la destination : on la garde a part pour
         # en tirer le code de suivi MyPuls (…/c85) plus bas.
         _dest_par_nom = {}
@@ -796,15 +798,43 @@ class ClickRecap(commands.Cog):
             # donc gratuitement — les demander a part aurait double la facture.
             # « Cette semaine » ne sert QU'AU total du resume, jamais au
             # detail par lien : la demander lien par lien coutait trente
-            # appels pour une colonne que personne n'affiche. Elle est
-            # demandee en LOT, plus bas — un appel par paquet.
+            # appels pour une colonne que personne n'affiche. Les totaux du
+            # resume sont demandes en LOT, plus bas.
             _plages = [
                 (today, today),          # today
                 (yest, yest),            # yesterday
                 (cyc_s, cyc_e),          # current pay period
             ]
-            # Ou chaque plage atterrit dans `cumul`, qui garde ses 4 cases.
-            _vers_cumul = (0, 1, 3)
+            _avec_id = [m for m in metas if m.get("id")]
+
+            # DEPUIS QUAND CE LIEN EST-IL A LUI.
+            #
+            # Les liens de suivi survivent aux personnes : quand un VA part,
+            # le suivant herite du lien ET de tout son historique. Il lisait
+            # donc comme siens des clics et des abonnes gagnes par un autre.
+            # La date d'arrivee coupe chaque periode ; une periode entierement
+            # anterieure ne vaut pas zero, elle ne le concerne pas.
+            try:
+                import clics_arrivees as _arr
+                _depuis = _arr.toutes()
+                # Le panneau de reglage a besoin de la liste des liens. La
+                # redemander a GetMySocial couterait du quota pour afficher un
+                # formulaire : le report passe deja devant, il la depose ici.
+                _arr.enregistrer_liens(
+                    [{"id": m["id"],
+                      "nom": m.get("display_name") or m.get("shortcode") or ""}
+                     for m in _avec_id], str(team_id or ""))
+            except Exception as _e_arr:
+                print("[clickrecap] dates d'arrivee illisibles : %s: %s"
+                      % (type(_e_arr).__name__, _e_arr), flush=True)
+                _arr, _depuis = None, {}
+
+            def _plages_de(lid):
+                if not _arr:
+                    return [(str(s), str(e)) for (s, e) in _plages]
+                d = _depuis.get(str(lid) or "", "")
+                return [_arr.couper(pl, d) for pl in _plages]
+
             # Concurrence BORNEE. Sans elle, 20 liens x 4 periodes partaient en
             # 80 appels simultanes : GetMySocial en laissait tomber la moitie,
             # et le tableau se remplissait de « — » alors que les memes appels,
@@ -812,22 +842,41 @@ class ClickRecap(commands.Cog):
             # Meme borne que _fetch_daily_stats, qui a deja tranche la question.
             _sem = asyncio.Semaphore(6)
 
-            async def _un(lid, s, e):
+            async def _un(lid, plage):
+                if plage is None:
+                    # Rien a demander : la periode precede son arrivee. On
+                    # economise l'appel ET on garde l'information, qui n'est
+                    # pas la meme qu'un echec.
+                    return "NA"
                 async with _sem:
                     return await asyncio.to_thread(_analytics_reparti, gms, lid,
-                                                   s.isoformat(), e.isoformat())
+                                                   plage[0], plage[1])
 
+            # Le nom AFFICHE porte la date : c'est par lui que les abonnes
+            # retrouvent leur lien, ils n'ont pas l'identifiant.
+            _dep_par_lab = {
+                str(m.get("display_name") or m.get("shortcode") or "?"):
+                    _depuis.get(str(m.get("id")), "")
+                for m in _avec_id}
+
+            _plages_lien = [_plages_de(m["id"]) for m in _avec_id]
             per = await asyncio.gather(*[
-                asyncio.gather(*[_un(m["id"], s, e) for (s, e) in _plages])
-                for m in metas if m.get("id")
+                asyncio.gather(*[_un(m["id"], pl) for pl in pls])
+                for m, pls in zip(_avec_id, _plages_lien)
             ])
 
             def _duo_de(couple):
-                """(clics du marche, total). (None, None) si l'appel a echoue.
+                """(clics du marche, total).
 
-                Surtout pas (0, 0), qui se lirait « personne n'a clique » alors
-                qu'on n'a rien su lire.
+                Trois sorties, et elles ne se confondent pas :
+                  (nombre, nombre)  ce qui a ete lu
+                  (None, None)      l'appel a echoue : on ne sait pas
+                  ("NA", "NA")      avant son arrivee : ce n'est pas a lui
+                Ecrire 0 pour l'un des deux derniers se lirait « personne n'a
+                clique », ce qui est faux dans les deux cas.
                 """
+                if couple == "NA":
+                    return "NA", "NA"
                 total, pays = couple if isinstance(couple, tuple) else (None, None)
                 if total is None:
                     return None, None
@@ -838,65 +887,71 @@ class ClickRecap(commands.Cog):
             # COMBIEN SONT TOMBES. Sans ce comptage, un pool de cles hors
             # service rendait 120 echecs sur 120, le tableau se remplissait de
             # « — », et rien ne distinguait ca d'un jour sans clic.
-            _appels = sum(len(q) for q in per)
+            # Les cases « avant arrivee » ne sont PAS des appels : les compter
+            # comme tels ferait baisser le taux d'echec a chaque nouveau VA.
+            _appels = sum(1 for q in per for c in q if c != "NA")
             _echoues = sum(1 for q in per for c in q
-                           if not (isinstance(c, tuple) and c[0] is not None))
+                           if c != "NA" and not (isinstance(c, tuple)
+                                                 and c[0] is not None))
+            _hors_periode = sum(1 for q in per for c in q if c == "NA")
 
-            cumul = [0, 0, 0, 0]
-            _lus = [0, 0, 0, 0]          # combien de liens ont repondu, par periode
-            _partiels = 0                # periodes rendues inconnues faute d'etre completes
-            for m, quatre in zip([m for m in metas if m.get("id")], per):
+            for m, trio in zip(_avec_id, per):
                 label = m.get("display_name") or m.get("shortcode") or "?"
-                paires = [_duo_de(c) for c in quatre]
-                for i, (u, _t) in enumerate(paires):
-                    if u is not None:
-                        cumul[_vers_cumul[i]] += u
-                        _lus[_vers_cumul[i]] += 1
-                rows.append((label, paires))
+                rows.append((label, [_duo_de(c) for c in trio]))
                 _dest_par_nom[str(label)] = m.get("destination") or ""
-            rows.sort(key=lambda r: (-((r[1][0][1]) or 0), -((r[1][2][1]) or 0),
+
+            def _rang(v):
+                """Pour le tri : « — » et « · » ne sont pas des nombres."""
+                return v if isinstance(v, (int, float)) else 0
+
+            rows.sort(key=lambda r: (-_rang(r[1][0][1]), -_rang(r[1][2][1]),
                                      str(r[0])))
 
-            # UNE LECTURE PARTIELLE N'EST PAS UN TOTAL.
+            # LES TOTAUX DU RESUME VIENNENT DU LOT, PAS DE LA SOMME DES LIENS.
             #
-            # Premiere version : on n'annulait `cumul` que si AUCUN lien
-            # n'avait repondu. Vingt-neuf liens sur trente qui tombent
-            # laissaient donc passer le chiffre du trentieme, affiche comme
-            # le total du marche — un total faux d'un facteur trente, et
-            # d'autant plus credible qu'il n'a pas l'air d'un zero.
+            # Ils decrivent l'ESPACE, pas une personne : les couper aux dates
+            # d'arrivee les rendrait faux. Et les tirer de la somme des relevés
+            # par lien les rendait dependants de trente appels dont un seul
+            # manquant suffisait a fausser le total.
             #
-            # Un total n'a de sens que complet : des qu'un lien manque, la
-            # periode est inconnue.
-            _attendus = len([m for m in metas if m.get("id")])
-            for _i in (0, 1, 3):
-                if _lus[_i] < _attendus:
-                    cumul[_i] = None
-                    _partiels += 1
-
-            # « Cette semaine », en LOT. GetMySocial refuse les paquets trop
-            # gros (400 « link_id must contain at least one value » a trente),
-            # d'ou le decoupage par quinze. Un paquet qui tombe rend la
-            # periode entiere inconnue plutot qu'amputee.
-            cumul[2] = None
+            # Quatre periodes, un appel par paquet de quinze liens :
+            # GetMySocial refuse les paquets trop gros (400 « link_id must
+            # contain at least one value » a trente).
+            cumul = [None, None, None, None]
+            _partiels = 0
             if pays_marche:
-                _ids_lot = [m["id"] for m in metas if m.get("id")]
+                _ids_lot = [m["id"] for m in _avec_id]
                 _paquets = [_ids_lot[i:i + 15]
                             for i in range(0, len(_ids_lot), 15)]
-                _sem_res = await asyncio.gather(*[
-                    asyncio.to_thread(_lot_reparti, gms, _pq,
-                                      week_start.isoformat(), today.isoformat())
-                    for _pq in _paquets])
-                if _sem_res and all(isinstance(x, tuple) and x[0] is not None
-                                    for x in _sem_res):
+                _plages_resume = [(today, today), (yest, yest),
+                                  (week_start, today), (cyc_s, cyc_e)]
+
+                async def _total_marche(_s, _e):
+                    res = await asyncio.gather(*[
+                        asyncio.to_thread(_lot_reparti, gms, _pq,
+                                          _s.isoformat(), _e.isoformat())
+                        for _pq in _paquets])
+                    return res
+
+                for _i, (_s, _e) in enumerate(_plages_resume):
+                    _res = await _total_marche(_s, _e)
+                    _lot_appels += len(_paquets)
+                    _lot_echoues += sum(1 for x in _res
+                                        if not (isinstance(x, tuple)
+                                                and x[0] is not None))
+                    if not (_res and all(isinstance(x, tuple) and x[0] is not None
+                                         for x in _res)):
+                        _partiels += 1
+                        continue
                     # LE TOP PAYS EST PLAFONNE (~10 entrees). Sur un paquet de
                     # quinze liens, un pays du marche peut tomber hors du top
                     # et compter pour zero — un chiffre ampute, presente comme
                     # lu. On le DETECTE : GetMySocial rend aussi le total, donc
-                    # la part couverte par le top se mesure. En dessous de 95 %,
-                    # la traine est trop grosse pour qu'on affirme quoi que ce
-                    # soit.
+                    # la part couverte par le top se mesure. En dessous de
+                    # 95 %, la traine est trop grosse pour affirmer quoi que
+                    # ce soit.
                     _somme, _sur = 0, True
-                    for _t, _pays in _sem_res:
+                    for _t, _pays in _res:
                         _couvert = sum((_pays or {}).values())
                         if _t and _couvert < 0.95 * _t:
                             _sur = False
@@ -904,12 +959,10 @@ class ClickRecap(commands.Cog):
                         _somme += sum(v for k, v in (_pays or {}).items()
                                       if k in pays_marche)
                     if _sur:
-                        cumul[2] = _somme
+                        cumul[_i] = _somme
                     else:
                         _tronque_lot += 1
-                _lot_appels += len(_paquets)
-                _lot_echoues += sum(1 for x in _sem_res
-                                    if not (isinstance(x, tuple) and x[0] is not None))
+                        _partiels += 1
             detail_ok = True
 
         # ---- L'embed ---------------------------------------------------------
@@ -1062,8 +1115,14 @@ class ClickRecap(commands.Cog):
                    else f"{'GLOB':>12}" * 3))
 
             def _c(v):
-                # « — » veut dire « pas su lire », JAMAIS « zero ». Ecrire 0
-                # a la place d'un echec serait un mensonge qu'on ne verrait pas.
+                # TROIS ETATS, TROIS SIGNES.
+                #   un nombre  ce qui a ete lu
+                #   « — »      pas su lire : JAMAIS ecrire 0 a la place
+                #   « · »      avant son arrivee : ce n'est pas a lui
+                # Le dernier ressortait en chiffre : le nouveau VA heritait
+                # des clics de celui qu'il remplace.
+                if v == "NA":
+                    return "·"
                 return "—" if v is None else str(v)
 
             def _duo_col(paire):
@@ -1098,8 +1157,19 @@ class ClickRecap(commands.Cog):
                 # La parenthese de tete est ignoree au tri : « (ANDRY) 1 » se
                 # range a A. Le numero de telephone suit le nom, donc
                 # « (BO7) 1 » precede « (BO7) 2 » sans rien de special.
+                # `depuis` voyage avec la ligne : la page l'affiche a cote du
+                # nom, sinon un « · » ne s'explique pas.
+                _dep_par_nom = {}
+                try:
+                    for _m in _avec_id:
+                        _dep_par_nom[_nom_propre(
+                            _m.get("display_name") or _m.get("shortcode") or "?"
+                        )] = _depuis.get(str(_m.get("id")), "")
+                except Exception:
+                    _dep_par_nom = {}
                 _donnees["par_lien"] = [
                     {"lien": _nom_propre(lab),
+                     "depuis": _dep_par_nom.get(_nom_propre(lab), ""),
                      "periodes": [{"marche": p[i][0], "total": p[i][1]}
                                   for i in (0, 1, 2)]}
                     for lab, p in sorted(rows, key=lambda x: _cle_tri(x[0]))]
@@ -1167,6 +1237,48 @@ class ClickRecap(commands.Cog):
                     _t = idx.get(adr)
                     return (_t or {}).get("abonnes_periode") or 0
 
+                # LES ABONNES S'ARRETENT AUSSI A LA DATE D'ARRIVEE.
+                #
+                # « Abonnés — quinzaine précédente » est la colonne la plus
+                # exposee : elle montre telle quelle le travail de celui qui
+                # tenait le lien avant. Trois cas, et le troisieme coute un
+                # appel :
+                #   periode entierement avant  -> « · », ce n'est pas a lui
+                #   periode entierement apres  -> le chiffre tel quel
+                #   arrivee AU MILIEU          -> on redemande la periode
+                #                                 raccourcie, sinon on lui
+                #                                 compte les jours d'avant
+                #
+                # Un seul appel par date d'arrivee distincte, et seulement
+                # pour les dates qui tombent dans une periode affichee : en
+                # regime normal, zero.
+                _sup = {}
+                for _pn, _deb_p, _fin_p in (("q", _q_deb, _q_fin),
+                                            ("p", _p_deb, _p_fin)):
+                    _dedans = sorted({
+                        _d for _d in _dep_par_lab.values()
+                        if _d and _deb_p.isoformat() < _d <= _fin_p.isoformat()})
+                    for _d in _dedans:
+                        try:
+                            _sup[(_pn, _d)] = _index(await _liens_suivi_periode(
+                                datetime.date.fromisoformat(_d), _fin_p))
+                        except Exception as _e_sup:
+                            print("[reportclick] periode raccourcie %s %s : %s"
+                                  % (_pn, _d, _e_sup), flush=True)
+
+                def _ab(_pn, _idx, _adr, _deb_p, _fin_p, _dep):
+                    if not _dep:
+                        return _n(_idx, _adr)
+                    if _fin_p.isoformat() < _dep:
+                        return "NA"          # avant son arrivee
+                    if _deb_p.isoformat() < _dep:
+                        _i2 = _sup.get((_pn, _dep))
+                        # Pas de releve raccourci : on ne sait pas ce qui lui
+                        # revient. Rendre le chiffre entier lui attribuerait
+                        # les jours d'avant.
+                        return _n(_i2, _adr) if _i2 is not None else None
+                    return _n(_idx, _adr)
+
                 _assoc = []
                 for lab, _p in rows:
                     _adr = _cle_adresse(_dest_par_nom.get(str(lab), ""))
@@ -1174,8 +1286,15 @@ class ClickRecap(commands.Cog):
                         continue
                     if _adr not in _iJ and _adr not in _iQ and _adr not in _iP:
                         continue
-                    _assoc.append((_nom_propre(lab), _adr,
-                                   _n(_iJ, _adr), _n(_iQ, _adr), _n(_iP, _adr)))
+                    _dep_l = _dep_par_lab.get(str(lab), "")
+                    _assoc.append((
+                        _nom_propre(lab), _adr,
+                        # « Aujourd'hui » ne se coupe pas : arriver dans la
+                        # journee donne droit a la journee entiere.
+                        "NA" if (_dep_l and today.isoformat() < _dep_l)
+                        else _n(_iJ, _adr),
+                        _ab("q", _iQ, _adr, _q_deb, _q_fin, _dep_l),
+                        _ab("p", _iP, _adr, _p_deb, _p_fin, _dep_l)))
 
                 # PAR ORDRE ALPHABETIQUE. Un classement par chiffres change
                 # d'ordre a chaque heure : on cherche quelqu'un et il a
@@ -1200,8 +1319,17 @@ class ClickRecap(commands.Cog):
                 # 05/09, et Discord refuse alors le MESSAGE ENTIER.
                 _PLAFOND = 1024 - 10
                 _pages, _cour, _taille = [], [], len(_e)
+                def _fa(v):
+                    # `f"{None:>5}"` LEVE une exception, et « NA » n'est pas un
+                    # nombre : on convertit avant d'aligner, sinon le report
+                    # entier tombait des qu'un VA avait une date d'arrivee.
+                    if v == "NA":
+                        return "·"
+                    return "—" if v is None else str(v)
+
                 for _nom, _adr, _a1, _a2, _a3 in _assoc:
-                    _ligne = (f"{str(_nom)[:17]:<18}{_a1:>5}{_a2:>7}{_a3:>7}")
+                    _ligne = (f"{str(_nom)[:17]:<18}"
+                              f"{_fa(_a1):>5}{_fa(_a2):>7}{_fa(_a3):>7}")
                     if _cour and _taille + 1 + len(_ligne) > _PLAFOND:
                         _pages.append(_cour)
                         _cour, _taille = [], len(_e)

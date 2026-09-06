@@ -35734,6 +35734,8 @@ function gdChangeKey(){
       + '<div style="display:flex;gap:8px;margin-top:14px;align-items:center">'
       + '<button class="gd-sel" style="min-width:auto;cursor:pointer;color:#4ade80;font-weight:700" onclick="gdSaveKeys()">💾 Enregistrer</button>'
       + '<button class="gd-sel" style="min-width:auto;cursor:pointer" onclick="gdCloseKeys()">Fermer</button>'
+      + '</div><div style="margin-top:12px;font-size:12px">'
+      + '<a href="/gmsdash/arrivees" style="color:#d97757;text-decoration:none">Dates d’arrivée des VA →</a>'
       + '</div></div>';
     var f = document.getElementById('gd-kf-main'); if(f) f.focus();
   }).catch(function(){ panel.innerHTML = ''; });
@@ -48471,6 +48473,92 @@ def create_app():
     def _gd_mask(k):
         k = k or ""
         return (k[:12] + "…" + k[-4:]) if len(k) > 18 else (k[:6] + "…") if k else ""
+
+    @app.route("/gmsdash/arrivees", methods=["GET", "POST"])
+    def gmsdash_arrivees():
+        """Depuis quand chaque lien appartient a la personne qui le porte.
+
+        POURQUOI CE PANNEAU. Les liens de suivi survivent aux personnes :
+        quand un VA part, le suivant herite du lien ET de son historique. Il
+        lisait comme siens des clics et des abonnes gagnes par un autre, et
+        pouvait de bonne foi s'en prevaloir. Une date par lien, et le report
+        cesse de compter ce qui precede.
+
+        ICI ET PAS SUR LA PAGE PUBLIQUE : /clics/<jeton> se partage sans mot
+        de passe. Un reglage pose la-bas laisserait n'importe quel porteur du
+        lien changer les chiffres attribues a chacun.
+
+        Aucun script, un formulaire natif : cette page se contente d'ecrire
+        un fichier, elle n'a rien a animer.
+        """
+        from flask import request as _rq
+        if not is_auth():
+            return _render_login()
+        import clics_arrivees as _arr
+        msg = ""
+        if _rq.method == "POST":
+            _n_ok, _n_ko = 0, 0
+            for _k, _v in _rq.form.items():
+                if not _k.startswith("d_"):
+                    continue
+                if _arr.definir(_k[2:], (_v or "").strip()):
+                    _n_ok += 1
+                else:
+                    _n_ko += 1
+            # On DIT combien de dates ont ete refusees : une date mal saisie
+            # qui disparaissait en silence laissait croire au reglage.
+            msg = ("%d date(s) enregistrée(s)" % _n_ok) + (
+                " — %d refusée(s) (format attendu : AAAA-MM-JJ)" % _n_ko
+                if _n_ko else "")
+
+        lignes = []
+        for r in _arr.liste():
+            lignes.append(
+                "<tr><td class='n'>%s</td>"
+                "<td><input type='date' name='d_%s' value='%s'></td>"
+                "<td class='id'>%s</td></tr>"
+                % (html_escape(str(r["nom"])), html_escape(str(r["id"])),
+                   html_escape(str(r["depuis"] or "")), html_escape(str(r["id"]))))
+        corps = ("<p class='v'>Aucun lien connu pour l’instant. La liste se "
+                 "remplit toute seule au premier report — elle vient de là, "
+                 "pour ne pas dépenser du quota GetMySocial rien que pour "
+                 "afficher ce formulaire.</p>") if not lignes else (
+            "<form method='post'><table>"
+            "<thead><tr><th>Lien</th><th>Compté à partir du</th>"
+            "<th>Identifiant</th></tr></thead><tbody>%s</tbody></table>"
+            "<button type='submit'>Enregistrer</button></form>" % "".join(lignes))
+
+        return ("<!doctype html><html lang='fr'><head><meta charset='utf-8'>"
+                "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+                "<title>Dates d’arrivée</title><style>"
+                "body{margin:0;background:#0f1116;color:#e8eaf0;"
+                "font:14px/1.6 ui-sans-serif,-apple-system,'Segoe UI',sans-serif}"
+                ".w{max-width:760px;margin:0 auto;padding:28px 18px 60px}"
+                "h1{font-size:20px;margin:0 0 6px}"
+                "p.s{color:#828a98;font-size:13px;margin:0 0 22px}"
+                "p.v{color:#828a98}"
+                "table{width:100%%;border-collapse:collapse;margin-bottom:18px}"
+                "th{text-align:left;font-size:10.5px;text-transform:uppercase;"
+                "letter-spacing:.06em;color:#828a98;padding:8px 10px;"
+                "border-bottom:1px solid #23272f}"
+                "td{padding:7px 10px;border-bottom:1px solid #1a1d24}"
+                "td.n{font-weight:600}"
+                "td.id{color:#5d6472;font-size:11px;font-family:ui-monospace,monospace}"
+                "input{background:#15181e;border:1px solid #23272f;border-radius:8px;"
+                "color:#e8eaf0;padding:6px 9px;font:inherit}"
+                "button{background:#d97757;border:0;border-radius:8px;color:#fff;"
+                "font:600 14px/1 inherit;padding:11px 18px;cursor:pointer}"
+                ".ok{background:rgba(217,119,87,.14);border:1px solid #d97757;"
+                "border-radius:10px;padding:10px 14px;margin-bottom:18px}"
+                "</style></head><body><div class='w'>"
+                "<h1>Dates d’arrivée</h1>"
+                "<p class='s'>Les liens de suivi restent, les personnes changent. "
+                "Ce qui précède la date saisie n’est plus compté pour celui qui "
+                "porte le lien aujourd’hui : la page affiche «&nbsp;·&nbsp;» au "
+                "lieu d’un chiffre. Laisser vide = tout compter, comme avant.</p>"
+                "%s%s</div></body></html>"
+                % (("<div class='ok'>%s</div>" % html_escape(msg)) if msg else "",
+                   corps))
 
     @app.route("/gmsdash/keys")
     def gmsdash_keys():
