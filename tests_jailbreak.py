@@ -1558,7 +1558,7 @@ try:
     _objMort = _obR.objectif_de("jessye", "Fatou X9")
     _obR.renommer_fiche = _vraiRen
     check("renommage : sans migration, le passe est efface (test non vide)",
-          (_bMort["q1_tenus"], _bMort["q1_notes"]) == (0, 0) and _objMort == 30,
+          (_bMort["q1_tenus"], _bMort["q1_notes"]) == (0, 0) and _objMort == 20,
           (_bMort["q1_notes"], _objMort))
 
     # ---- 3. renommer une IDENTITE emporte toutes ses fiches ----------------
@@ -1819,6 +1819,74 @@ except Exception as _eTr2:
 
 print("\n" + "=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
+
+print()
+print("=" * 70)
+print("PAIE MERITEE : 75 $ la quinzaine, au prorata des comptes qui publient")
+print("=" * 70)
+try:
+    import json as _jp, tempfile as _tp, datetime as _dp, pathlib as _pp
+    import jb_objectifs as _obp
+
+    _JP = "2026-09-07"                       # 7e jour d'une quinzaine de 15
+    _d0, _d1 = _obp.quinzaine(_JP)
+
+    def _histo(serie, jour=None):
+        """Ecrit un historique bidon et branche le module dessus.
+
+        `jour` decide OU s'arrete le calcul : la fonction ne compte que les
+        journees ecoulees, donc une quinzaine « parfaite » lue le 7 ne vaut
+        que 7 jours. Deux de ces tests l'ont appris a leurs depens.
+        """
+        j = {}
+        for i, v in enumerate(serie):
+            if v is None:
+                continue
+            k = (_dp.date.fromisoformat(_d0) + _dp.timedelta(days=i)).isoformat()
+            j[k] = {"publie": v, "atteint": v >= 16}
+        f = _pp.Path(_tp.mkdtemp()) / "h.json"
+        f.write_text(_jp.dumps({_obp.cle("id", "va"): {"jours": j}}), encoding="utf-8")
+        _obp.HISTO_FILE = f
+        return _obp.paie_quinzaine("id", "va", jour or _JP)
+
+    _vrai = _obp.HISTO_FILE
+    check("paie : la quinzaine de septembre fait bien 15 jours",
+          _histo([20])["jours_quinzaine"] == 15)
+    check("paie : une journee vaut 75 $ / 15 = 5 $",
+          abs(_histo([20])["par_jour"] - 5.0) < 0.001)
+    # LA REGLE DU PROPRIETAIRE, mot pour mot : cinq comptes sur vingt, c'est
+    # un quart de la journee.
+    _q = _histo([5])
+    check("paie : 5 comptes sur 20 = un quart de la journee",
+          abs(_q["gagne"] - 1.25) < 0.001, str(_q["gagne"]))
+    check("paie : le denominateur est 20, pas l objectif de la fiche",
+          _obp.BASE_COMPTES == 20)
+    # Le plafond : une fiche de 30 comptes ne doit pas depasser les 75 $.
+    check("paie : 25 comptes sur 20 ne rapportent pas plus que la journee",
+          abs(_histo([25])["gagne"] - 5.0) < 0.001, str(_histo([25])["gagne"]))
+    # Lue le DERNIER jour de la quinzaine : lue avant, elle ne vaut que les
+    # journees deja vecues, et c'est voulu.
+    check("paie : une quinzaine parfaite rapporte exactement 75 $",
+          abs(_histo([20] * 15, "2026-09-15")["gagne"] - 75.0) < 0.01,
+          str(_histo([20] * 15, "2026-09-15")["gagne"]))
+    check("paie : zero publication ne rapporte rien",
+          _histo([0, 0, 0])["gagne"] == 0.0)
+    # Une panne de report n est PAS une journee a zero : elle se compte a part.
+    _t = _histo([10, 10, None, 10, 10, 10, 10])
+    check("paie : un jour sans releve est compte a part, pas comme un zero",
+          _t["jours_non_mesures"] == 1 and _t["jours_mesures"] == 6, str(_t))
+    check("paie : et le projete extrapole sur le rythme mesure",
+          _t["projete"] > _t["gagne"], str(_t["projete"]))
+    check("paie : sans aucun releve, on annonce zero sans planter",
+          _histo([None, None])["gagne"] == 0.0)
+    # Les jours a venir ne sont pas pre-remplis : on ne reproche a personne de
+    # ne pas avoir encore vecu.
+    check("paie : la quinzaine s arrete a aujourd hui",
+          _histo([20] * 15)["jours_ecoules"] == 7)
+    _obp.HISTO_FILE = _vrai
+except Exception as _epa:
+    check("paie : testable", False, repr(_epa)[:200])
+
 if FAILS:
     print("ECHECS :")
     for f in FAILS:

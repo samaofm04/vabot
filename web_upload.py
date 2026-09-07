@@ -31138,6 +31138,39 @@ def _render_jailbreak_html() -> str:
                             f"🎯 {_eo['actifs']}/{_eo['objectif']} tournent "
                             f"({int(round(_eo['pct']))} %)</span>"
                         )
+                        # CE QUE LE VA A MERITE, EN ARGENT.
+                        # La pastille voisine dit si la journee est tenue ;
+                        # celle-ci dit ce que la quinzaine vaut. Le calcul vit
+                        # dans jb_objectifs, comme le reste : une deuxieme
+                        # implementation de la paie serait la premiere chose
+                        # contestee le jour du virement.
+                        try:
+                            _pa = _ob.paie_quinzaine(ident_lc, va_name)
+                            _pcls = "ok" if _pa["pct"] >= 80 else (
+                                "warn" if _pa["pct"] >= 50 else "ban")
+                            _trou = ""
+                            if _pa["jours_non_mesures"]:
+                                # Un trou de releve ne doit pas se lire comme
+                                # une journee a zero : on le DIT, au lieu de
+                                # laisser le montant baisser sans explication.
+                                _trou = (f" {_pa['jours_non_mesures']} jour(s) sans "
+                                         f"relevé ne rapportent rien et ne sont "
+                                         f"la faute de personne.")
+                            scrape_pill += (
+                                f"<span class='jb-acc-pill {_pcls}' "
+                                f"title=\"Mérité depuis le {_pa['debut']} : "
+                                f"{_pa['base']:.0f} $ pour la quinzaine, soit "
+                                f"{_pa['par_jour']:.2f} $ par jour, acquis à hauteur "
+                                f"des comptes qui publient sur {_pa['sur_comptes']}. "
+                                f"{_pa['jours_mesures']} jour(s) relevé(s) sur "
+                                f"{_pa['jours_ecoules']} écoulés.{_trou} "
+                                f"Au même rythme jusqu'au {_pa['fin']} : "
+                                f"{_pa['projete']:.2f} $.\">"
+                                f"💵 {_pa['gagne']:.2f} $ / {_pa['base']:.0f}</span>"
+                            )
+                        except Exception as _e_pa:
+                            print(f"[paie] pastille non rendue : {_e_pa}", flush=True)
+
                         # Le warm-up ne se cache pas dans le compte principal :
                         # ce sont des comptes qui n'ont encore rien publié.
                         if _eo["warmup"]:

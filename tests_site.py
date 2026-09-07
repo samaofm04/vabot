@@ -6738,7 +6738,7 @@ try:
               _eOb["publie"] == 1, _eOb["publie"])
         check("objectif : « ajoutés aujourd hui » aussi",
               _eOb["ajoutes"] == 1, _eOb["ajoutes"])
-        check("objectif : le défaut est 30", _eOb["objectif"] == 30, _eOb["objectif"])
+        check("objectif : le défaut est 20", _eOb["objectif"] == 20, _eOb["objectif"])
 
         # Le seuil s arrondit au SUPERIEUR : accepter 15 sur un objectif de 19
         # reviendrait a valider 78,9 %, c est-a-dire moins que les 80 % annonces.
@@ -6755,12 +6755,12 @@ try:
         # Zero serait TOUJOURS atteint : la pastille deviendrait muette sans
         # que personne le remarque. On revient au defaut.
         check("objectif : zéro remet au défaut, il ne pose pas zéro",
-              _obT.fixer_objectif("jessye", "VA NOUM 1X1", 0) == 30
-              and _obT.objectif_de("jessye", "VA NOUM 1X1") == 30)
+              _obT.fixer_objectif("jessye", "VA NOUM 1X1", 0) == 20
+              and _obT.objectif_de("jessye", "VA NOUM 1X1") == 20)
         check("objectif : une saisie absurde est bornée",
               _obT.fixer_objectif("jessye", "VA NOUM 1X1", 99999) == 999)
         check("objectif : du texte ne casse rien",
-              _obT.fixer_objectif("jessye", "VA NOUM 1X1", "beaucoup") == 30)
+              _obT.fixer_objectif("jessye", "VA NOUM 1X1", "beaucoup") == 20)
         # La casse du nom ne doit pas fabriquer une deuxieme fiche : il se
         # ressaisit a la main, a la commande Discord comme au dashboard.
         _obT.fixer_objectif("jessye", "VA NOUM 1X1", 17)
@@ -6831,7 +6831,7 @@ try:
               "\n" not in _txtOb, repr(_txtOb[:120]))
         check("report : elle nomme la fiche", "VA NOUM 1X1" in _txtOb, _txtOb)
         check("report : elle donne les comptes qui tournent sur l objectif",
-              "4/30" in _txtOb, _txtOb)
+              "4/20" in _txtOb, _txtOb)
         check("report : elle donne le nombre total de comptes",
               "6 comptes" in _txtOb, _txtOb)
         check("report : elle dit les oublis", "1 oubli" in _txtOb, _txtOb)

@@ -53,11 +53,27 @@ HISTO_FILE = DATA_DIR / "jb_report_comptes.json"
 _LOCK = threading.RLock()
 
 #: Ce qu'on attend d'un telephone tant que personne n'a dit autre chose.
-OBJECTIF_DEFAUT = 30
+#: Trente pendant longtemps, VINGT depuis le 07/09/2026 : le proprietaire a
+#: constate que ses VA n'y arrivaient pas et prefere une cible tenable a une
+#: cible que personne n'atteint - un objectif jamais atteint ne pilote plus
+#: rien, il se lit comme du bruit.
+OBJECTIF_DEFAUT = 20
 
 #: Part de l'objectif a partir de laquelle la journee est consideree tenue.
-#: 80 % de trente font vingt-quatre.
+#: 80 % de vingt font seize.
 SEUIL_REUSSITE = 0.80
+
+# --- La paie meritee ------------------------------------------------------
+# Un VA touche 75 $ pour une quinzaine complete.
+PAIE_QUINZAINE = 75.0
+
+# LE DENOMINATEUR EST FIGE A VINGT, ET CE N'EST PAS L'OBJECTIF DE LA FICHE.
+# L'objectif sert a dire si la journee est tenue ; il vaut trente par defaut
+# et se regle fiche par fiche. La paie, elle, se calcule toujours sur vingt :
+# le proprietaire a constate que ses VA ne tiennent pas trente comptes, et il
+# ne veut pas qu'un objectif releve sur une fiche fasse mecaniquement baisser
+# la paie de ce VA-la. Deux questions differentes, deux nombres differents.
+BASE_COMPTES = 20
 
 #: Au-dela de ce nombre de jours d'historique, on oublie. Deux quinzaines
 #: pleines plus une marge : de quoi rendre le bilan en cours et le precedent.
@@ -504,6 +520,71 @@ def bilan_quinzaine(identite: str, va: str, jour: str = "") -> dict:
         "pct": round(100.0 * tenus / notes, 1) if notes else 0.0,
         "pastille": pastille(tenus, notes),
         "suite": suite,
+    }
+
+
+def paie_quinzaine(identite: str, va: str, jour: str = "") -> dict:
+    """Ce que la fiche a MERITE depuis le debut de la quinzaine.
+
+    La regle, telle que le proprietaire l'a posee : une quinzaine complete
+    vaut 75 $. Une journee vaut donc 75 $ divises par le nombre de jours de
+    la quinzaine — quinze, seize, ou treize en fevrier. Et chaque journee
+    n'est acquise qu'a hauteur des comptes qui ont publie ce jour-la, sur
+    vingt : cinq comptes sur vingt, c'est un quart de la journee.
+
+    LE PLAFOND A CENT POUR CENT EST VOLONTAIRE. Une fiche qui porte trente
+    comptes peut en faire publier vingt-cinq dans la journee ; sans plafond,
+    elle gagnerait 125 % d'une journee et la quinzaine depasserait les 75 $
+    annonces. On ne paie pas plus que ce qui est promis.
+
+    LES JOURNEES SANS RELEVE NE RAPPORTENT RIEN MAIS SONT COMPTEES A PART.
+    Un report qui n'a pas tourne — redemarrage, panne — laisse un trou. Le
+    faire passer pour une journee a zero ferait payer au VA une coupure dont
+    il n'est pas responsable ; c'est deja la regle de `bilan_quinzaine`, et
+    elle vaut a plus forte raison quand il y a de l'argent au bout. Le trou
+    est donc rendu dans `jours_non_mesures`, et `projete` dit ce que le meme
+    rythme donnerait sur la quinzaine entiere.
+    """
+    jour = jour or aujourdhui()
+    debut, fin = quinzaine(jour)
+    d0 = _dt.date.fromisoformat(debut)
+    d1 = _dt.date.fromisoformat(fin)
+    n_jours = (d1 - d0).days + 1
+    par_jour = (PAIE_QUINZAINE / n_jours) if n_jours else 0.0
+
+    rec = _load(HISTO_FILE).get(cle(identite, va)) or {}
+    jours = rec.get("jours") if isinstance(rec.get("jours"), dict) else {}
+
+    lignes, gagne, mesures = [], 0.0, 0
+    d = d0
+    stop = min(d1, _dt.date.fromisoformat(jour))
+    while d <= stop:
+        k = d.isoformat()
+        v = jours.get(k)
+        if isinstance(v, dict):
+            publie = int(v.get("publie") or 0)
+            part = min(1.0, publie / BASE_COMPTES) if BASE_COMPTES else 0.0
+            montant = part * par_jour
+            gagne += montant
+            mesures += 1
+            lignes.append({"jour": k, "publie": publie, "part": round(part, 4),
+                           "montant": round(montant, 2), "mesure": True})
+        else:
+            lignes.append({"jour": k, "publie": None, "part": None,
+                           "montant": 0.0, "mesure": False})
+        d += _dt.timedelta(days=1)
+
+    ecoules = len(lignes)
+    return {
+        "debut": debut, "fin": fin,
+        "base": PAIE_QUINZAINE, "sur_comptes": BASE_COMPTES,
+        "jours_quinzaine": n_jours, "par_jour": round(par_jour, 4),
+        "jours_ecoules": ecoules, "jours_mesures": mesures,
+        "jours_non_mesures": ecoules - mesures,
+        "gagne": round(gagne, 2),
+        "projete": round(gagne / mesures * n_jours, 2) if mesures else 0.0,
+        "pct": round(100.0 * gagne / PAIE_QUINZAINE, 1) if PAIE_QUINZAINE else 0.0,
+        "lignes": lignes,
     }
 
 
