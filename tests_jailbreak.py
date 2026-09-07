@@ -1909,6 +1909,16 @@ try:
     check("paie : la quinzaine s arrete a aujourd hui",
           _histo([20] * 15)["jours_ecoules"] == 7)
 
+    # La veille du premier jour tombe dans la quinzaine PRECEDENTE : c'est
+    # comme ca que le portail du VA remonte d'une quinzaine.
+    for _j, _attendu in (("2026-09-07", ("2026-08-16", "2026-08-31")),
+                         ("2026-09-20", ("2026-09-01", "2026-09-15")),
+                         ("2026-03-05", ("2026-02-16", "2026-02-28"))):
+        _d0, _ = _obp.quinzaine(_j)
+        _av = (_dp.date.fromisoformat(_d0) - _dp.timedelta(days=1)).isoformat()
+        check("paie : la quinzaine d avant %s est %s" % (_j, _attendu[0]),
+              _obp.quinzaine(_av) == _attendu, str(_obp.quinzaine(_av)))
+
     # --- Le tarif et le nombre de comptes, fiche par fiche ---------------
     _vraiObj = _obp.OBJECTIFS_FILE
     _obp.OBJECTIFS_FILE = _pp.Path(_tp.mkdtemp()) / "obj.json"

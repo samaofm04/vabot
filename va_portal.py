@@ -603,6 +603,25 @@ body{margin:0;background:var(--fond);color:var(--texte);
 .pill.ok{background:rgba(22,163,74,.14);color:var(--vert)}
 .pill.ban{background:rgba(220,38,38,.14);color:var(--rouge)}
 .pill.warn{background:rgba(234,88,12,.14);color:var(--orange)}
+.pill.paie{background:rgba(22,163,74,.14);color:var(--vert)}
+
+/* --- La paie, vue par le VA ------------------------------------------- */
+.paie-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;
+  padding:14px 18px 6px}
+.paie-h h2{margin:0;font-size:15px;font-weight:800;letter-spacing:-.2px}
+.paie-h .sur{color:var(--doux);font-size:12.5px}
+.paie-tot{font-size:24px;font-weight:800;letter-spacing:-.5px;color:var(--vert)}
+.paie-note{color:var(--doux);font-size:12px;padding:0 18px 12px;line-height:1.5}
+.paie-j{width:100%;border-collapse:collapse;font-size:13px}
+.paie-j th{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--tres-doux);font-weight:700;text-align:right;padding:6px 18px}
+.paie-j th:first-child{text-align:left}
+.paie-j td{padding:7px 18px;text-align:right;border-top:1px solid var(--bord);
+  font-variant-numeric:tabular-nums}
+.paie-j td:first-child{text-align:left;color:var(--doux)}
+.paie-j td.gain{font-weight:700}
+.paie-j tr.rien td{color:var(--tres-doux)}
+.paie-j tr.vide td{color:var(--tres-doux);font-style:italic}
 .compteur{margin-left:auto;text-align:right}
 .compteur b{display:block;font-size:24px;font-weight:800;color:var(--accent);line-height:1}
 .compteur span{font-size:10px;letter-spacing:1px;color:var(--tres-doux)}
@@ -1406,6 +1425,18 @@ def register(app, deps):
             if etat["oublies"]:
                 out.append(f"<span class='pill warn' title=\"Aucune publication depuis "
                            f"plus de 48 h.\">🕒 {etat['oublies']} à relancer</span>")
+            # Ce qu'il a gagne, a cote de ce qu'on lui demande.
+            try:
+                import jb_objectifs as _obp
+                _pa = _obp.paie_quinzaine(identite, va)
+                out.append(
+                    f"<span class='pill paie' title=\"Quinzaine en cours. "
+                    f"Chaque journée vaut {_pa['par_jour']:.2f} $, gagnée à "
+                    f"hauteur des comptes qui publient sur "
+                    f"{_pa['sur_comptes']}. Le détail est plus bas.\">"
+                    f"💵 {_pa['gagne']:.2f} $ / {_pa['base']:.0f}</span>")
+            except Exception as e:                  # noqa: BLE001
+                log.warning("va_portal: pastille paie (%s)", e)
             return "".join(out)
         # Repli : le module d'objectifs est indisponible. On dit au moins ce
         # qu'on sait plutot que de laisser un bandeau vide.
@@ -1416,6 +1447,67 @@ def register(app, deps):
         if r["oubli"]:
             out.append(f"<span class='pill warn'>🕒 {r['oubli']} à relancer</span>")
         return "".join(out)
+
+    def _paie_html(identite: str, va: str) -> str:
+        """Ce que le VA a merite, quinzaine en cours ET precedente.
+
+        IL VOIT LE MEME CALCUL QUE LE PATRON, jour par jour. Un montant sans
+        son detail se conteste ; avec le detail, la discussion porte sur les
+        journees, pas sur le chiffre. C'est exactement pour ca que les jours
+        sans releve sont ecrits en clair au lieu d'etre comptes comme des
+        zeros : le VA doit pouvoir dire « ce jour-la, ce n'est pas moi ».
+        """
+        if not (identite and va):
+            return ""
+        try:
+            import datetime as _dt
+            import jb_objectifs as _ob
+        except Exception as e:                      # noqa: BLE001
+            log.warning("va_portal: paie indisponible (%s)", e)
+            return ""
+
+        def _bloc(jour, titre):
+            r = _ob.paie_quinzaine(identite, va, jour)
+            lignes = []
+            for l in r["lignes"]:
+                jj = l["jour"][8:10] + "/" + l["jour"][5:7]
+                if not l["mesure"]:
+                    lignes.append(
+                        f"<tr class='vide'><td>{jj}</td><td colspan='2'>"
+                        f"pas de relevé ce jour-là</td><td>—</td></tr>")
+                    continue
+                cls = " class='rien'" if not l["publie"] else ""
+                lignes.append(
+                    f"<tr{cls}><td>{jj}</td>"
+                    f"<td>{l['publie']}/{r['sur_comptes']}</td>"
+                    f"<td>{int(round(l['part'] * 100))} %</td>"
+                    f"<td class='gain'>{l['montant']:.2f} $</td></tr>")
+            trou = ""
+            if r["jours_non_mesures"]:
+                trou = (f" {r['jours_non_mesures']} journée(s) n'ont pas été "
+                        f"relevées : elles ne rapportent rien, et ce n'est pas "
+                        f"de ta faute.")
+            return (
+                f"<div class='paie-h'><h2>{_esc(titre)}</h2>"
+                f"<span class='sur'>du {r['debut'][8:10]}/{r['debut'][5:7]} "
+                f"au {r['fin'][8:10]}/{r['fin'][5:7]}</span>"
+                f"<span style='flex:1'></span>"
+                f"<span class='paie-tot'>{r['gagne']:.2f} $</span>"
+                f"<span class='sur'>sur {r['base']:.0f} $</span></div>"
+                f"<div class='paie-note'>Chaque journée vaut "
+                f"{r['par_jour']:.2f} $, gagnée à hauteur des comptes qui "
+                f"publient sur {r['sur_comptes']}.{trou}</div>"
+                f"<table class='paie-j'><thead><tr><th>Jour</th>"
+                f"<th>Ont publié</th><th>Part</th><th>Gagné</th></tr></thead>"
+                f"<tbody>{''.join(lignes)}</tbody></table>")
+
+        aujourd = _ob.aujourdhui()
+        debut, _f = _ob.quinzaine(aujourd)
+        # La veille du premier jour tombe forcement dans la quinzaine d'avant.
+        avant = (_dt.date.fromisoformat(debut) - _dt.timedelta(days=1)).isoformat()
+        return ("<div class='carte'>" + _bloc(aujourd, "Ta quinzaine en cours")
+                + "</div><div class='carte'>"
+                + _bloc(avant, "La quinzaine précédente") + "</div>")
 
     def _liste_html(comptes: List[dict], jeton: str = "") -> str:
         stats = stats_cache() or {}
@@ -1535,6 +1627,10 @@ def register(app, deps):
             "</div>"
             "<div id='liste'>" + _liste_html(comptes, jeton) + "</div>"
             "</div>"
+            # La paie APRES la liste des comptes : on lui montre d'abord son
+            # travail, ensuite ce qu'il vaut. L'inverse ferait de la page une
+            # fiche de paie, alors que c'est d'abord son outil de travail.
+            + _paie_html(identite, va) +
             # Hors de la carte, donc hors de la liste : celle-ci est refaite
             # entiere a chaque action.
             "<div class='voile' id='mod-voile'>"
