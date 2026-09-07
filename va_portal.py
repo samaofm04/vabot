@@ -622,6 +622,12 @@ body{margin:0;background:var(--fond);color:var(--texte);
 .paie-j td.gain{font-weight:700}
 .paie-j tr.rien td{color:var(--tres-doux)}
 .paie-j tr.vide td{color:var(--tres-doux);font-style:italic}
+.paie-j td.manque{color:var(--orange);font-weight:700}
+.paie-qui{padding:10px 18px 16px}
+.paie-qui b{display:block;font-size:12.5px;margin-bottom:7px}
+.paie-qui .h{display:inline-block;background:rgba(234,88,12,.12);color:var(--orange);
+  border-radius:8px;padding:3px 9px;margin:0 5px 5px 0;font-size:12px;font-weight:600}
+.paie-qui .rien{color:var(--vert);font-weight:700;font-size:12.5px}
 .compteur{margin-left:auto;text-align:right}
 .compteur b{display:block;font-size:24px;font-weight:800;color:var(--accent);line-height:1}
 .compteur span{font-size:10px;letter-spacing:1px;color:var(--tres-doux)}
@@ -1448,7 +1454,8 @@ def register(app, deps):
             out.append(f"<span class='pill warn'>🕒 {r['oubli']} à relancer</span>")
         return "".join(out)
 
-    def _paie_html(identite: str, va: str) -> str:
+    def _paie_html(identite: str, va: str,
+                   comptes: Optional[List[dict]] = None) -> str:
         """Ce que le VA a merite, quinzaine en cours ET precedente.
 
         IL VOIT LE MEME CALCUL QUE LE PATRON, jour par jour. Un montant sans
@@ -1477,10 +1484,12 @@ def register(app, deps):
                         f"pas de relevé ce jour-là</td><td>—</td></tr>")
                     continue
                 cls = " class='rien'" if not l["publie"] else ""
+                manque = max(0, r["sur_comptes"] - l["publie"])
+                perdu = manque * (r["par_jour"] / r["sur_comptes"]) if r["sur_comptes"] else 0.0
                 lignes.append(
                     f"<tr{cls}><td>{jj}</td>"
                     f"<td>{l['publie']}/{r['sur_comptes']}</td>"
-                    f"<td>{int(round(l['part'] * 100))} %</td>"
+                    f"<td class='manque'>{('−%d  (−%.2f $)' % (manque, perdu)) if manque else '—'}</td>"
                     f"<td class='gain'>{l['montant']:.2f} $</td></tr>")
             trou = ""
             if r["jours_non_mesures"]:
@@ -1495,17 +1504,51 @@ def register(app, deps):
                 f"<span class='paie-tot'>{r['gagne']:.2f} $</span>"
                 f"<span class='sur'>sur {r['base']:.0f} $</span></div>"
                 f"<div class='paie-note'>Chaque journée vaut "
-                f"{r['par_jour']:.2f} $, gagnée à hauteur des comptes qui "
-                f"publient sur {r['sur_comptes']}.{trou}</div>"
+                f"{r['par_jour']:.2f} $, partagée entre {r['sur_comptes']} "
+                f"comptes : <b>chaque compte qui ne publie pas te coûte "
+                f"{(r['par_jour'] / r['sur_comptes']) if r['sur_comptes'] else 0:.2f} $ "
+                f"ce jour-là</b>.{trou}</div>"
                 f"<table class='paie-j'><thead><tr><th>Jour</th>"
-                f"<th>Ont publié</th><th>Part</th><th>Gagné</th></tr></thead>"
+                f"<th>Ont publié</th><th>Manquants</th><th>Gagné</th></tr></thead>"
                 f"<tbody>{''.join(lignes)}</tbody></table>")
+
+        # QUI, pas seulement COMBIEN. « 14 sur 20 » ne dit pas quoi relancer ;
+        # sans les noms, le VA ne peut rien faire de l'information et la page
+        # se contente de lui annoncer qu'il gagne peu.
+        def _manquants():
+            if not comptes:
+                return ""
+            try:
+                st = stats_cache() or {}
+                lignes = [_ob.etat_compte(c, st, time.time(), _ob.aujourdhui(),
+                                          *_ob._regles())
+                          for c in comptes if isinstance(c, dict)]
+            except Exception as e:                  # noqa: BLE001
+                log.warning("va_portal: manquants du jour (%s)", e)
+                return ""
+            # Un compte banni ne se relance pas : le citer ici enverrait le VA
+            # perdre son temps. Il a deja sa pastille ⛔.
+            muets = [x for x in lignes
+                     if not x["publie_aujourdhui"] and not x["banni"]
+                     and not x["warmup"]]
+            if not muets:
+                return ("<div class='paie-qui'><span class='rien'>✅ Tous tes "
+                        "comptes ont publié aujourd'hui.</span></div>")
+            puces = "".join(f"<span class='h'>@{_esc(x['handle'])}</span>"
+                            for x in muets[:40])
+            reste = ("" if len(muets) <= 40
+                     else f" … et {len(muets) - 40} autre(s).")
+            return (f"<div class='paie-qui'><b>Aujourd'hui, ces "
+                    f"{len(muets)} compte(s) n'ont pas encore publié — "
+                    f"c'est ce qui te fait perdre de l'argent :</b>"
+                    f"{puces}{reste}</div>")
 
         aujourd = _ob.aujourdhui()
         debut, _f = _ob.quinzaine(aujourd)
         # La veille du premier jour tombe forcement dans la quinzaine d'avant.
         avant = (_dt.date.fromisoformat(debut) - _dt.timedelta(days=1)).isoformat()
         return ("<div class='carte'>" + _bloc(aujourd, "Ta quinzaine en cours")
+                + _manquants()
                 + "</div><div class='carte'>"
                 + _bloc(avant, "La quinzaine précédente") + "</div>")
 
@@ -1630,7 +1673,7 @@ def register(app, deps):
             # La paie APRES la liste des comptes : on lui montre d'abord son
             # travail, ensuite ce qu'il vaut. L'inverse ferait de la page une
             # fiche de paie, alors que c'est d'abord son outil de travail.
-            + _paie_html(identite, va) +
+            + _paie_html(identite, va, comptes) +
             # Hors de la carte, donc hors de la liste : celle-ci est refaite
             # entiere a chaque action.
             "<div class='voile' id='mod-voile'>"
