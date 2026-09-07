@@ -2058,6 +2058,139 @@ body.apple ::selection{background:rgba(0,122,255,.22)}
 /* Focus clavier visible (accessibilité) sans anneau permanent à la souris */
 body.apple :focus-visible{outline:3px solid rgba(0,122,255,.45);outline-offset:2px;border-radius:8px}
 
+/* --- CLAUDE : clair et chaud, creme et terracotta, titres en serif.
+   Comme Apple, il s'applique EN PLUS de body.light : on herite du theme
+   clair et on ne repeint que la personnalite. La ou Apple joue le verre
+   translucide et le bleu systeme, celui-ci joue le papier : un fond creme
+   legerement degrade, des cartes blanches a filet chaud, un seul accent
+   terracotta, et des titres en serif - c'est le serif qui le rend
+   reconnaissable au premier coup d'oeil, pas la couleur. --- */
+body.light.claude{background:linear-gradient(180deg,#faf9f5 0%,#f6f3ec 100%)!important;
+  background-attachment:fixed!important;color:#1f1e1d!important;
+  font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif!important;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+body.light.claude .main{background:transparent!important}
+/* La barre laterale est un peu plus dense que le fond : c'est ce qui donne
+   la sensation de deux feuilles posees l'une sur l'autre. */
+body.light.claude .sidebar{background:linear-gradient(180deg,#f4f1e8,#efebe0)!important;
+  border-right-color:#e5e0d3!important}
+body.light.claude .box,body.light.claude .stat,body.light.claude .reel-card,body.light.claude .cloud-card{
+  background:#fff!important;border-color:#e8e3d7!important;border-radius:12px!important;
+  box-shadow:0 1px 2px rgba(31,30,29,.05),0 8px 24px -10px rgba(31,30,29,.10)!important}
+/* LES TITRES EN SERIF. C'est la signature du theme ; sans elle il ne serait
+   qu'un theme clair beige de plus. Le corps de texte reste en sans : du
+   serif partout serait illisible dans un tableau de chiffres. */
+body.light.claude h1,body.light.claude h2,body.light.claude h3,body.light.claude .title{
+  font-family:ui-serif,Georgia,"Iowan Old Style","Times New Roman",serif!important;
+  letter-spacing:-.012em!important;font-weight:600!important}
+body.light.claude h1,body.light.claude .title{line-height:1.15!important}
+body.light.claude .subtitle,body.light.claude small,body.light.claude label{color:#6f6b60!important}
+/* Accent terracotta — memes points d'accroche que les autres themes */
+body.light.claude [style*="background:#3b82f6"]{background:#d97757!important}
+body.light.claude [style*="color:#3b82f6"]{color:#c2603f!important}
+body.light.claude .btn,body.light.claude button[type=submit],body.light.claude .lb-btn-primary,body.light.claude .badge,body.light.claude .vac-btn-active,body.light.claude .vpm-kind-btn.active,body.light.claude .vpm-save,body.light.claude .cur-toggle button.active,body.light.claude .exp-submit,body.light.claude .sel-cb:checked + .sel-circle,body.light.claude .txt-sel-cb:checked + .sel-circle,body.light.claude .sidebar .group .item .badge,body.light.claude .up-step .up-dot{
+  background:linear-gradient(180deg,#e08b6b,#d97757)!important;border-color:#cf6a48!important;color:#fff!important}
+body.light.claude .btn,body.light.claude button[type=submit],body.light.claude .lb-btn-primary,body.light.claude .vpm-save,body.light.claude .exp-submit,body.light.claude .up-submit{
+  border-radius:10px!important;font-weight:600!important;
+  box-shadow:0 1px 2px rgba(31,30,29,.10)!important}
+body.light.claude a,body.light.claude .subtab.active,body.light.claude .sidebar .item.active,body.light.claude .sidebar .group .item.active,body.light.claude .sidebar .group .item.active svg,body.light.claude .sidebar .solo-item.active,body.light.claude .sidebar .group-head.active svg.lead,body.light.claude .vlm-dup{
+  color:#c2603f!important}
+body.light.claude .vlm-dup{border-color:#d97757!important}
+body.light.claude .sidebar .solo-item.active,body.light.claude .sidebar .group .item.active{
+  background:linear-gradient(135deg,rgba(217,119,87,.16),rgba(217,119,87,.06))!important}
+body.light.claude input,body.light.claude select,body.light.claude textarea,body.light.claude .up-input{
+  background:#fff!important;border-color:#ddd7c8!important;border-radius:10px!important;color:#1f1e1d!important}
+body.light.claude input:focus,body.light.claude select:focus,body.light.claude textarea:focus{
+  border-color:#d97757!important;box-shadow:0 0 0 3.5px rgba(217,119,87,.18)!important}
+body.light.claude .btn:active,body.light.claude button:active,body.light.claude .theme-card:active,body.light.claude .up-submit:active,body.light.claude .sidebar .solo-item:active,body.light.claude .sidebar .group .item:active{
+  transform:scale(.98);transition:transform .1s ease-out}
+html.rail body.light.claude .sidebar .group:hover > .items{background:#fff;border-color:#e8e3d7;
+  border-radius:12px;box-shadow:0 18px 44px rgba(31,30,29,.14)}
+@media (prefers-reduced-motion:reduce){
+  body.light.claude .btn:active,body.light.claude button:active,body.light.claude .theme-card:active,body.light.claude .up-submit:active,body.light.claude .sidebar .solo-item:active,body.light.claude .sidebar .group .item:active{transform:none!important}}
+
+/* --- CLAUDE, 2e couche : les COMPOSANTS --- */
+body.light.claude svg[stroke]:not([preserveAspectRatio]){stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+body.light.claude .sidebar svg[stroke]{stroke-width:1.75}
+/* L'interrupteur SFW reprend le terracotta plutot que le vert : un seul
+   accent dans tout le theme, sinon la page part en arlequin. */
+body.light.claude #sfw-floating{background:rgba(255,255,255,.86)!important;border-color:#e8e3d7!important;
+  border-radius:99px!important;box-shadow:0 1px 2px rgba(31,30,29,.06),0 8px 24px -10px rgba(31,30,29,.12)!important}
+body.light.claude #sfw-floating .sfw-switch{width:44px!important;height:26px!important;border-radius:99px!important;
+  background:#e2ddd0!important;box-shadow:none!important}
+body.light.claude #sfw-floating .sfw-thumb{width:22px!important;height:22px!important;
+  box-shadow:0 2px 5px rgba(31,30,29,.18)!important}
+body.light.claude.sfw-on #sfw-floating .sfw-switch{background:#d97757!important;box-shadow:none!important}
+body.light.claude.sfw-on #sfw-floating .sfw-thumb{transform:translateX(18px)!important}
+body.light.claude.sfw-on #sfw-floating span:last-child{color:#c2603f!important}
+/* Controle segmente : rail creme, segment actif blanc et ombre */
+body.light.claude .media-type-pills{background:#efebe0;border-radius:99px;padding:3px;gap:2px}
+body.light.claude .media-pill{border-radius:99px!important;border-color:transparent!important;
+  background:transparent!important;color:#6f6b60!important;font-weight:600!important}
+body.light.claude .media-pill-active{background:#fff!important;color:#1f1e1d!important;
+  box-shadow:0 1px 3px rgba(31,30,29,.10)!important}
+/* Boutons secondaires : creme plein, libelle terracotta, pas de contour dur */
+body.light.claude .btn-secondary,body.light.claude .btn.secondary,body.light.claude .vac-btn:not(.vac-btn-active){
+  background:#f0ece1!important;border-color:transparent!important;color:#c2603f!important;
+  border-radius:10px!important;box-shadow:none!important}
+body.light.claude .modal,body.light.claude .modal-content,body.light.claude .nxm-modal,body.light.claude .vpm-modal,body.light.claude #reel-details-modal > div{
+  border-radius:16px!important;border-color:#e8e3d7!important;background:#fffdf9!important;
+  box-shadow:0 12px 48px rgba(31,30,29,.18),0 2px 8px rgba(31,30,29,.06)!important}
+body.light.claude .toast{border-radius:12px!important;background:#fffdf9!important;border-color:#e8e3d7!important;
+  box-shadow:0 8px 32px rgba(31,30,29,.16)!important}
+body.light.claude table th,body.light.claude table td,body.light.claude .row-sep,body.light.claude hr{border-color:#eae5da!important}
+body.light.claude table th{color:#6f6b60!important;font-weight:600!important}
+body.light.claude .sidebar .section-label{color:#8a8477!important;font-weight:600!important;letter-spacing:.04em!important}
+/* Les chiffres alignes : dans un tableau, c'est ce qui rend une colonne
+   lisible du haut en bas. */
+body.light.claude table td,body.light.claude .stat,body.light.claude .stat *{font-variant-numeric:tabular-nums}
+body.light.claude ::-webkit-scrollbar{width:9px;height:9px}
+body.light.claude ::-webkit-scrollbar-track{background:transparent}
+body.light.claude ::-webkit-scrollbar-thumb{background:#d9d3c4;border-radius:99px;border:2px solid transparent;background-clip:content-box}
+body.light.claude ::-webkit-scrollbar-thumb:hover{background:#c3bcaa;background-clip:content-box}
+body.light.claude{scrollbar-width:thin;scrollbar-color:#d9d3c4 transparent}
+body.light.claude ::selection{background:rgba(217,119,87,.24)}
+body.light.claude :focus-visible{outline:3px solid rgba(217,119,87,.45);outline-offset:2px;border-radius:8px}
+
+/* --- CLAUDE, 3e couche : LES BLEUS QUI RESTAIENT.
+   Le site peint en #3b82f6 a 99 endroits, dont beaucoup en rgba() DANS des
+   classes - le remap [style*="background:#3b82f6"] ne les voit pas, il ne
+   lit que le style inline. Sans cette couche, le tableau de bord gardait sa
+   carte de revenus bleu lavande et ses onglets de periode bleus au milieu du
+   creme. Reperes en regardant la page rendue, pas en lisant le CSS. --- */
+body.light.claude .home-hero-card{background:rgba(217,119,87,.07)!important;
+  border-color:rgba(217,119,87,.28)!important}
+body.light.claude .home-hero-icon{background:linear-gradient(135deg,#e08b6b,#cf6a48)!important}
+body.light.claude .home-period-row{background:#efebe0!important}
+body.light.claude .home-period-active{background:rgba(217,119,87,.14)!important;color:#c2603f!important}
+body.light.claude .stat .v,body.light.claude .rank-amount,body.light.claude .vault-sort-active{color:#c2603f!important}
+body.light.claude .vault-sort-active .vault-radio{border-color:#d97757!important;background:#d97757!important}
+body.light.claude .vault-item-active{background:linear-gradient(90deg,rgba(217,119,87,.18),rgba(217,119,87,.06))!important}
+body.light.claude tbody tr:hover td,body.light.claude .jb-row:hover,body.light.claude .gd-row:hover,body.light.claude .ja-row:hover,body.light.claude .av-row:hover,body.light.claude .sfs-ident-row.active{
+  background:rgba(217,119,87,.07)!important}
+body.light.claude .toast.info{border-left-color:#d97757!important}
+body.light.claude .card-edit-btn:hover{border-color:#d97757!important;color:#c2603f!important}
+body.light.claude #page-loader .pl-ring{border-top-color:#d97757!important;
+  border-right-color:rgba(217,119,87,.15)!important;border-bottom-color:rgba(217,119,87,.15)!important}
+body.light.claude input[type=file]::file-selector-button,
+body.light.claude input[type=file]::-webkit-file-upload-button{
+  background:linear-gradient(135deg,#e08b6b,#cf6a48)!important;border-color:#cf6a48!important}
+body.light.claude button[type=submit]:hover,body.light.claude .btn:hover{
+  box-shadow:0 6px 16px -6px rgba(217,119,87,.45)!important}
+body.light.claude .sfs-day.selected{box-shadow:inset 0 0 0 2px #d97757!important}
+body.light.claude .mypuls-export{background:rgba(217,119,87,.10)!important;color:#c2603f!important}
+body.light.claude .sidebar .item.active{background:rgba(217,119,87,.12)!important}
+body.light.claude .sidebar .item.active svg,body.light.claude .sidebar .group .item.active svg{color:#c2603f!important}
+/* La bordure bleue du bandeau d'alerte MyPuls et les encadres d'info */
+/* Les trois derniers bleus, trouves en regardant la page rendue : le filtre
+   de marche, le fuseau horaire a cote du titre, et l etiquette du total. Ils
+   n ont pas de classe propre, il faut les viser par leur contexte. */
+body.light.claude #market-floating button[data-on]{background:rgba(217,119,87,.16)!important}
+body.light.claude .home-overview-title small{background:rgba(217,119,87,.10)!important}
+body.light.claude .home-hero-label{color:#c2603f!important;border-color:rgba(217,119,87,.35)!important}
+body.light.claude [style*="border:1px solid #3b82f6"],body.light.claude [style*="border-color:#3b82f6"]{
+  border-color:#d97757!important}
+
 /* --- APPLE, 3e couche : le MOUVEMENT ---------------------------------------
    Courbe unique cubic-bezier(.32,.72,0,1) : c'est le ressort critiquement
    amorti des transitions iOS — il part vite, s'arrête net, ne rebondit pas.
@@ -2596,8 +2729,8 @@ code{background:#0f0f0f;padding:2px 6px;border-radius:4px;font-size:13px}
 /* Les 4 themes colores repeignent button[type=submit] en !important (obsidian
    #8b9cf7, violet #a855f7, gold #d9b74a, apple #007aff) : sans ces deux lignes
    a (0,2,2), un bouton Supprimer y garde la couleur de l accent. */
-body.obsidian button.danger-btn,body.violet button.danger-btn,body.gold button.danger-btn,body.apple button.danger-btn{background:#ef4444!important;border-color:#ef4444!important;color:#fff!important}
-body.obsidian button.danger-btn:hover,body.violet button.danger-btn:hover,body.gold button.danger-btn:hover,body.apple button.danger-btn:hover{background:#dc2626!important}
+body.obsidian button.danger-btn,body.violet button.danger-btn,body.gold button.danger-btn,body.apple button.danger-btn,body.claude button.danger-btn{background:#ef4444!important;border-color:#ef4444!important;color:#fff!important}
+body.obsidian button.danger-btn:hover,body.violet button.danger-btn:hover,body.gold button.danger-btn:hover,body.apple button.danger-btn:hover,body.claude button.danger-btn:hover{background:#dc2626!important}
 .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px}
 .stat{background:#1a1a1a;padding:16px;border-radius:10px;border:1px solid #2a2a2a}
 .stat .v{font-size:28px;font-weight:700;color:#3b82f6}
@@ -2800,13 +2933,13 @@ document.addEventListener('click', function(e){
 // === THEME (dark / light / obsidian / violet / gold) ===
 var VABOT_DARK_VARIANTS = ['obsidian','violet','gold'];
 function _vabotThemeLabel(t){
-  return ({dark:'sombre',light:'clair',apple:'Apple',obsidian:'Obsidian glass',violet:'Neo luxe violet',gold:'Midnight gold'})[t] || t;
+  return ({dark:'sombre',light:'clair',apple:'Apple',claude:'Claude',obsidian:'Obsidian glass',violet:'Neo luxe violet',gold:'Midnight gold'})[t] || t;
 }
 function setTheme(theme){
   var de = document.documentElement, b = document.body;
   // On repart propre : on enlève TOUTES les classes de thème possibles
-  b.classList.remove('light','apple','obsidian','violet','gold');
-  de.classList.remove('light-pre','pre-light','pre-apple','pre-obsidian','pre-violet','pre-gold');
+  b.classList.remove('light','apple','claude','obsidian','violet','gold');
+  de.classList.remove('light-pre','pre-light','pre-apple','pre-claude','pre-obsidian','pre-violet','pre-gold');
   if(theme === 'light'){
     b.classList.add('light');
     de.classList.add('light-pre'); de.classList.add('pre-light');
@@ -2814,6 +2947,12 @@ function setTheme(theme){
     // Apple = le theme clair + sa surcouche iOS : les DEUX classes
     b.classList.add('light'); b.classList.add('apple');
     de.classList.add('light-pre'); de.classList.add('pre-apple');
+  } else if(theme === 'claude'){
+    // Meme montage qu'Apple : le theme clair sert de socle, « claude » ne
+    // repeint que sa personnalite. Sans body.light, tous les textes du site
+    // restent ceux du theme sombre et deviennent illisibles sur le creme.
+    b.classList.add('light'); b.classList.add('claude');
+    de.classList.add('light-pre'); de.classList.add('pre-claude');
   } else if(VABOT_DARK_VARIANTS.indexOf(theme) !== -1){
     b.classList.add(theme);
   }
@@ -2851,12 +2990,13 @@ function setTheme(theme){
           + ';path=/;max-age=31536000;samesite=lax';
       }
     }catch(e){}
-    if(saved === 'light' || saved === 'apple'){
+    if(saved === 'light' || saved === 'apple' || saved === 'claude'){
       document.documentElement.classList.add('pre-light');
     }
     document.addEventListener('DOMContentLoaded', function(){
       if(saved === 'light') document.body.classList.add('light');
       else if(saved === 'apple'){ document.body.classList.add('light'); document.body.classList.add('apple'); }
+      else if(saved === 'claude'){ document.body.classList.add('light'); document.body.classList.add('claude'); }
       else if(darkVariants.indexOf(saved) !== -1) document.body.classList.add(saved);
       document.querySelectorAll('.theme-card[data-theme="'+saved+'"]').forEach(function(c){
         c.style.outline = '3px solid #6aa8ff';
@@ -6144,6 +6284,14 @@ async function nxMontagePerfect(){
   fd.set('brute', nxMState.fid || '');
   fd.set('source', nxMState.fid || '');
   if(son) fd.set('son', son);
+  // La description part AUSSI. Sans cette ligne, le champ « DESCRIPTION DU
+  // POST » etait rempli, promis « part avec la video », et perdu a la
+  // validation : la trend arrivait au VA sans legende.
+  try {
+    var _d = document.getElementById('nx-m-desc');
+    var _dv = _d ? String(_d.value || '').trim() : '';
+    if(_dv) fd.set('desc', _dv.slice(0, 1000));
+  } catch(e){}
   try {
     var r = await fetch('/noctus/montage_perfect', {method:'POST', body:fd, credentials:'same-origin'});
     var j = await r.json();
@@ -9109,6 +9257,17 @@ window.upClearPrefill = function(utab){
         'html.pre-apple .sidebar{background:rgba(255,255,255,.72) !important;border-right-color:rgba(60,60,67,.13) !important}'+
         'html.pre-apple .box,html.pre-apple .stat{background:#fff !important;border-color:rgba(60,60,67,.10) !important;border-radius:14px !important}';
       document.head.appendChild(sa);
+    } else if(theme === 'claude'){
+      // Creme peint AVANT le 1er rendu, sinon on voit un flash blanc puis le
+      // fond chaud arrive apres coup.
+      document.documentElement.classList.add('light-pre');
+      document.documentElement.classList.add('pre-claude');
+      var sc = document.createElement('style');
+      sc.textContent = 'html.pre-claude,html.pre-claude body{background:#faf9f5 !important;color:#1f1e1d !important}'+
+        'html.pre-claude .main{background:transparent !important}'+
+        'html.pre-claude .sidebar{background:#f4f1e8 !important;border-right-color:#e5e0d3 !important}'+
+        'html.pre-claude .box,html.pre-claude .stat{background:#fff !important;border-color:#e8e3d7 !important;border-radius:12px !important}';
+      document.head.appendChild(sc);
     } else if(theme === 'obsidian' || theme === 'violet' || theme === 'gold'){
       // Thèmes sombres premium : on teinte le fond/sidebar/cartes AVANT le 1er paint
       var PAL = {obsidian:['#0b0d12','#0a0c11','#14171f','rgba(150,170,235,.14)'],
@@ -12151,6 +12310,16 @@ document.addEventListener('keydown', function(e){
     </div>
     <div style="font-size:12.5px;font-weight:600;color:#1c1c1e;letter-spacing:-.01em">Apple</div>
   </div>
+  <div onclick="setTheme('claude')" class="theme-card" data-theme="claude" style="background:#faf9f5;border:2px solid #e8e3d7;border-radius:12px;padding:12px;cursor:pointer;text-align:center">
+    <div style="display:flex;gap:5px;height:52px;border-radius:8px;overflow:hidden;margin-bottom:10px;border:1px solid #e8e3d7">
+      <div style="width:20px;background:#f4f1e8"></div>
+      <div style="flex:1;background:#faf9f5;padding:7px;display:flex;flex-direction:column;gap:5px;justify-content:center">
+        <div style="height:6px;width:82%;background:#e6e1d4;border-radius:4px"></div>
+        <div style="height:6px;width:52%;background:#d97757;border-radius:4px"></div>
+      </div>
+    </div>
+    <div style="font-size:12.5px;font-weight:600;color:#1f1e1d">Claude</div>
+  </div>
   <div onclick="setTheme('obsidian')" class="theme-card" data-theme="obsidian" style="background:#0b0d12;border:2px solid #1b2130;border-radius:12px;padding:12px;cursor:pointer;text-align:center">
     <div style="display:flex;gap:5px;height:52px;border-radius:8px;overflow:hidden;margin-bottom:10px;border:1px solid #1b2130">
       <div style="width:20px;background:#0a0c11"></div>
@@ -12779,6 +12948,8 @@ body.light #pf-modal .pf-card img{background:#eceff3!important}
           <textarea id="nx-m-caption" placeholder="Texte de la caption…  (l'aperçu se met à jour en direct)" class="nxm-ta" oninput="nxMCaptionLive()"></textarea>
           <div style="font-size:10px;font-weight:700;color:#8b8b95;letter-spacing:.08em;margin-top:8px">📄 DESCRIPTION DU POST (OPTIONNEL — PART AVEC LA VIDÉO)</div>
           <textarea id="nx-m-desc" placeholder="Vide = pas de description" class="nxm-ta" style="min-height:44px"></textarea>
+          <div style="font-size:10px;font-weight:700;color:#8b8b95;letter-spacing:.08em;margin-top:8px">🎵 SON / CONSIGNE (OPTIONNEL — POUR UNE TREND ★★★)</div>
+          <input id="nx-m-son" type="text" placeholder="Ex. : poste sur le son « ... »" class="nxm-ta" style="min-height:0;height:30px">
           <div class="nxm-row">
             <span class="nxm-lbl">Préréglage</span>
             <button type="button" id="nxp-outline" class="nxm-preset" onclick="nxMStylePreset('outline')" title="Blanc + contour noir"><span style="color:#fff;-webkit-text-stroke:1.2px #000;paint-order:stroke fill;font-weight:800;font-style:italic">Aa</span></button>
@@ -45303,12 +45474,15 @@ def _render_upload_inner(msg=None, error=None):
         _th = (_rq.cookies.get("va_theme") or "").strip().lower()
     except Exception:
         _th = ""
-    if _th not in ("light", "apple", "dark", "obsidian", "violet", "gold"):
+    if _th not in ("light", "apple", "claude", "dark", "obsidian",
+                   "violet", "gold"):
         _th = "light"          # defaut du site
     _pre = {"light": "light-pre pre-light", "apple": "light-pre pre-apple",
+            "claude": "light-pre pre-claude",
             "dark": "", "obsidian": "pre-obsidian", "violet": "pre-violet",
             "gold": "pre-gold"}[_th]
-    _bod = {"light": "light", "apple": "light apple", "dark": "",
+    _bod = {"light": "light", "apple": "light apple",
+            "claude": "light claude", "dark": "",
             "obsidian": "obsidian", "violet": "violet", "gold": "gold"}[_th]
 
     html = (
@@ -48410,6 +48584,19 @@ def create_app():
                 cible.with_suffix(".txt").write_text(consigne, encoding="utf-8")
             except Exception as e:                  # noqa: BLE001
                 log.warning(f"perfect: consigne non ecrite ({e})")
+
+        # La DESCRIPTION (legende du post). Elle etait saisie dans l editeur,
+        # annoncee « part avec la video »… et jamais recopiee ici : la trend
+        # arrivait au VA sans legende, alors que la brute, elle, n en porte
+        # pas — ce sont justement le template, la caption et le flash qui en
+        # ont une. Meme voisin que partout ailleurs.
+        description = (request.form.get("desc") or "").strip()[:1800]
+        if description:
+            try:
+                cible.with_suffix(".desc.txt").write_text(
+                    description, encoding="utf-8")
+            except Exception as e:                  # noqa: BLE001
+                log.warning(f"perfect: description non ecrite ({e})")
 
         _invalidate_all_ttl_cache()
         return jsonify({"ok": True, "fichier": cible.name, "identite": identity,

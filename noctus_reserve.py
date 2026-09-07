@@ -368,6 +368,62 @@ def purger_perimes(identite: str, famille: str, emp_courante: str) -> int:
     return jetes
 
 
+# Familles dont le brouillon porte un point de coupe : leur variante DOIT
+# contenir une brute de la model. Les deux familles a caption incrustee n en
+# sont pas — leur support EST deja la brute.
+_FAMILLES_A_MONTER = ("template", "template_brut", "flash", "flash_banger",
+                      "flash_brut", "reelmonte")
+
+
+def purger_template_nu() -> int:
+    """Vide, UNE FOIS, le stock fabrique sans jamais monter de brute.
+
+    Le remplisseur passait `brutes_dir=None` au moteur pour toutes les
+    familles sans brute imposee. Ce n est pas « tire une brute au hasard »,
+    c est « aucun dossier de brutes » : le moteur recopiait le template
+    ENTIER, et comme aucune brute n avait ete essayee, le rapport sortait
+    repli=False. Les fiches deposees affirment donc « montage reussi » sur
+    des videos ou la model n apparait pas — le VA lisait « poste cette video
+    telle quelle » sur l accroche d une autre creatrice.
+
+    Ces variantes sont indetectables apres coup : rien dans la fiche ne les
+    distingue d un vrai montage. On jette donc tout le stock des familles
+    concernees, une seule fois, et le remplisseur le refait correctement.
+    Un temoin sur le disque garantit qu on ne le refait pas a chaque
+    demarrage.
+    """
+    temoin = RACINE / "_purge_template_nu.fait"
+    if temoin.exists():
+        return 0
+    jetes = 0
+    try:
+        RACINE.mkdir(parents=True, exist_ok=True)
+        for dossier in RACINE.glob("*"):
+            if not dossier.is_dir() or dossier.name.startswith("_"):
+                continue
+            for famille in _FAMILLES_A_MONTER:
+                libre = dossier / famille / "libre"
+                if not libre.is_dir():
+                    continue
+                for f in list(libre.glob("*")):
+                    try:
+                        f.unlink()
+                        if f.suffix == ".json":
+                            jetes += 1
+                    except Exception:
+                        pass
+    except Exception:
+        return 0
+    try:
+        temoin.write_text("purge du stock fabrique sans montage",
+                          encoding="utf-8")
+    except Exception:
+        pass
+    if jetes:
+        _noter({"acte": "purge_template_nu", "combien": jetes})
+    return jetes
+
+
 def manque(identite: str, famille: str, emp: str,
            profondeur: int | None = None) -> int:
     """Combien de variantes il reste à fabriquer pour atteindre la cible."""

@@ -7929,7 +7929,8 @@ try:
 
         _vPf = _cPf.post("/noctus/montage_perfect", data={
             "model": _midPf, "identity": _idPf, "famille": "caption",
-            "brute": "_tst", "source": "_tst", "son": "Son du moment"}).get_json() or {}
+            "brute": "_tst", "source": "_tst", "son": "Son du moment",
+            "desc": "Legende du post a coller"}).get_json() or {}
         check("chaine : la validation range la video", _vPf.get("ok") is True,
               str(_vPf)[:110])
         _fPf = _tcPf / (_vPf.get("fichier") or "_absent")
@@ -7940,6 +7941,12 @@ try:
         check("chaine : et la consigne de son part avec elle",
               _fPf.with_suffix(".txt").exists()
               and "Son du moment" in _fPf.with_suffix(".txt").read_text(encoding="utf-8"))
+        # La description etait saisie dans l editeur, annoncee « part avec la
+        # video »… et jamais recopiee : la trend arrivait au VA sans legende.
+        check("chaine : et la description aussi",
+              _fPf.with_suffix(".desc.txt").exists()
+              and "Legende du post" in
+                  _fPf.with_suffix(".desc.txt").read_text(encoding="utf-8"))
         _hPf = _cPf.get("/?lazy=perfectcaption&cloud_trends_caption_ident=" + _idPf,
                         headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
         check("chaine : elle apparait dans la galerie Perfect",
@@ -8009,6 +8016,104 @@ try:
         _shPf.rmtree(_nwPf._models_dir() / _midPf, ignore_errors=True)
 except Exception as _ePf2:
     check("chaine perfect : testable", False, repr(_ePf2)[:200])
+
+# ==============================================================================
+# Ce que le VA lit sous une video : description, son, et le montage promis
+# ==============================================================================
+try:
+    import inspect as _insRl
+    import pathlib as _plRl
+    import shutil as _shRl
+    import tempfile as _tfRl
+    import cogs.user as _cuRl
+    import noctus_reserve as _nrRl
+    import web_upload as _wuRl
+
+    # -- 1. La reserve fabriquait le TEMPLATE NU ------------------------------
+    # brutes_dir=None ne veut pas dire « tire une brute au hasard » mais
+    # « aucun dossier de brutes » : le moteur recopiait le template entier, le
+    # rapport sortait repli=False faute d avoir rien essaye, et le VA lisait
+    # « poste cette video telle quelle » sur l accroche d une autre creatrice.
+    _srcRl = io.open("cogs/noctuspool.py", encoding="utf-8").read()
+    check("reserve : une variante sans brute imposee recoit quand meme le dossier de brutes",
+          'dossier_brutes = u.IDENTITIES_DIR' in _srcRl
+          and _srcRl.count("dossier_brutes, tmp = None, None") == 1)
+    check("reserve : un template nu est range comme tel, pas comme un montage reussi",
+          '_nu = (_cut > 0.05 and not _rap.get("montage_demande"))' in _srcRl
+          and 'bool(_rap.get("repli")) or _nu' in _srcRl)
+    check("reserve : le stock deja fabrique sans montage est purge une fois",
+          hasattr(_nrRl, "purger_template_nu")
+          and "reserve.purger_template_nu()" in _srcRl)
+    # La purge ne doit toucher QUE les familles dont le brouillon coupe : les
+    # deux familles a caption incrustee ont la brute pour support, pas de
+    # montage a faire, et leur stock est bon.
+    check("reserve : la purge epargne les familles a caption incrustee",
+          "caption" not in _nrRl._FAMILLES_A_MONTER
+          and "montage" not in _nrRl._FAMILLES_A_MONTER
+          and {"flash", "flash_banger", "template", "reelmonte"}
+              <= set(_nrRl._FAMILLES_A_MONTER),
+          str(_nrRl._FAMILLES_A_MONTER))
+
+    # -- 2. Une legende reprise d un AUTRE compte ne part pas -----------------
+    _dRl = _plRl.Path(_tfRl.mkdtemp(prefix="descrl-"))
+    try:
+        _vRl = _dRl / "t.mp4"
+        _vRl.write_bytes(b"x")
+        _vRl.with_suffix(".desc.txt").write_text(
+            "Abonne toi @autrecreatrice", encoding="utf-8")
+        check("legende : sans marqueur de relecture, elle part normalement",
+              _cuRl._video_meta(_vRl)[1] is not None)
+        _vRl.with_suffix(".acheck.txt").write_text("a relire", encoding="utf-8")
+        check("legende : reprise d un post ET portant un @ etranger, elle est retenue",
+              _cuRl.desc_retenue(_vRl) and _cuRl._video_meta(_vRl)[1] is None)
+        _vRl.with_suffix(".desc.txt").write_text(
+            "Regarde ici https://exemple.test", encoding="utf-8")
+        check("legende : un lien compte aussi comme identifiant etranger",
+              _cuRl.desc_retenue(_vRl))
+        # Retenir TOUTES les descriptions non relues assecherait les legendes
+        # sans rapport avec le probleme signale.
+        _vRl.with_suffix(".desc.txt").write_text(
+            "Une accroche toute simple", encoding="utf-8")
+        check("legende : une accroche non relue mais sans @ ni lien part quand meme",
+              not _cuRl.desc_retenue(_vRl)
+              and _cuRl._video_meta(_vRl)[1] == "Une accroche toute simple")
+    finally:
+        _shRl.rmtree(_dRl, ignore_errors=True)
+
+    _srcURl = io.open("cogs/user.py", encoding="utf-8").read()
+    check("legende : le VA apprend POURQUOI elle ne part pas",
+          _srcURl.count("elif desc_retenue(") == 2, "ne jamais ecarter en silence")
+
+    # -- 3. Discord refuse au-dela de 2000 caracteres -------------------------
+    # L editeur de la Bibliotheque laisse ecrire jusqu a 2200 : l envoi brut
+    # levait HTTPException et emportait les envois suivants de la boucle.
+    check("texte : plus rien ne part brut vers Discord",
+          _srcURl.count("followup.send(description)")
+          + _srcURl.count("followup.send(caption)")
+          + _srcURl.count("followup.send(desc)") == 0)
+    _bRl = _cuRl._morceaux_discord("x" * 2500)
+    check("texte : un texte de 2500 caracteres est decoupe sous la limite",
+          len(_bRl) == 2 and all(len(x) < 2000 for x in _bRl),
+          str([len(x) for x in _bRl]))
+    check("texte : la coupe suit les sauts de ligne",
+          [len(x) for x in _cuRl._morceaux_discord(("a" * 1000 + chr(10)) * 3)]
+          == [1000, 1000, 1001])
+    check("texte : un texte vide n envoie aucun message",
+          _cuRl._morceaux_discord("   ") == [])
+
+    # -- 4. Une trend validee emporte son texte -------------------------------
+    # Le champ « son » etait lu sur un element qui n existait dans AUCUNE page,
+    # et la description n etait meme pas envoyee : la trend arrivait muette.
+    _srcWRl = io.open("web_upload.py", encoding="utf-8").read()
+    check("trend : le champ SON existe vraiment dans la page",
+          'id="nx-m-son"' in _srcWRl)
+    check("trend : la validation envoie aussi la description",
+          "fd.set('desc', _dv.slice(0, 1000))" in _srcWRl)
+    check("trend : la route ecrit le voisin .desc.txt",
+          'cible.with_suffix(".desc.txt").write_text(' in _srcWRl)
+except Exception as _eRl:
+    check("ce que le VA lit : testable", False, repr(_eRl)[:200])
+
 
 # ==============================================================================
 # Une seule liste de dossiers video, et l assistant qui ne pose pas de question

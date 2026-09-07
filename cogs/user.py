@@ -1016,6 +1016,72 @@ def _list_clean_videos(identity):
     ]
 
 
+def _morceaux_discord(texte, taille=1900):
+    """Decoupe un texte pour Discord, qui refuse au-dela de 2000 caracteres.
+
+    Ces textes partaient BRUTS : « await _envoyer_texte(interaction, description) ».
+    Or l editeur de la Bibliotheque laisse ecrire jusqu a 2200 caracteres, et
+    une legende reprise d un post Instagram en fait souvent autant. Discord
+    levait alors HTTPException : le VA recevait la video, puis plus rien —
+    pas meme un message d erreur, puisque l exception remontait au-dessus de
+    la boucle et emportait les envois suivants.
+
+    On coupe aux sauts de ligne quand c est possible : une legende coupee au
+    milieu d un mot se recolle mal a la main.
+    """
+    texte = str(texte or "")
+    if not texte.strip():
+        return []
+    out = []
+    while len(texte) > taille:
+        coupe = texte.rfind("\n", 0, taille)
+        if coupe < taille // 2:          # pas de saut de ligne exploitable
+            coupe = texte.rfind(" ", 0, taille)
+        if coupe < taille // 2:
+            coupe = taille
+        out.append(texte[:coupe])
+        texte = texte[coupe:].lstrip("\n")
+    if texte.strip():
+        out.append(texte)
+    return out
+
+
+async def _envoyer_texte(interaction, texte):
+    """Envoie un texte au VA, en autant de messages que Discord l exige."""
+    for bout in _morceaux_discord(texte):
+        await interaction.followup.send(bout)
+
+
+_ETRANGER = re.compile(r"(?:^|[^\w@])@[A-Za-z0-9._]{3,}|https?://|\bwww\.")
+
+
+def desc_retenue(video):
+    """La description est-elle une legende REPRISE d un autre compte ?
+
+    Quand un template ou une brute est importe par lien sans description
+    saisie, le site recopie la LEGENDE DU POST D ORIGINE dans <stem>.desc.txt
+    et pose a cote <stem>.acheck.txt — « reprise du post, a relire ». Ce
+    marqueur n avait jamais ete lu ailleurs que par le site : la legende
+    partait telle quelle au VA, sous « a coller dans le champ legende », avec
+    le @ et les liens d une AUTRE creatrice. C est ce que le proprietaire
+    voyait arriver sous ses flash : « des id rien a voir ».
+
+    On ne retient QUE le cas nuisible : marqueur present ET identifiant
+    etranger dedans (@compte ou lien). Une accroche relue, ou une accroche
+    sans @ ni lien, continue de partir — retenir toutes les descriptions non
+    relues assecherait les legendes sans rapport avec le probleme.
+    """
+    try:
+        if not video.with_suffix(".acheck.txt").exists():
+            return False
+        d = video.with_suffix(".desc.txt")
+        if not d.exists():
+            return False
+        return bool(_ETRANGER.search(d.read_text(encoding="utf-8")))
+    except Exception:
+        return False
+
+
 def _video_meta(video):
     """Retourne (caption, description, example_path) pour une video donnee."""
     caption_path = video.with_suffix(".txt")
@@ -1027,7 +1093,7 @@ def _video_meta(video):
             caption = caption_path.read_text(encoding="utf-8").strip().replace("\\n", "\n")
         except Exception:
             pass
-    if desc_path.exists():
+    if desc_path.exists() and not desc_retenue(video):
         try:
             description = desc_path.read_text(encoding="utf-8").strip().replace("\\n", "\n")
         except Exception:
@@ -2310,12 +2376,12 @@ class UserCog(commands.Cog):
                     await interaction.followup.send(
                         f"📝 **CAPTION {kind_label.upper()}{num}** (à écrire **PAR-DESSUS la photo**) :"
                     )
-                    await interaction.followup.send(caption)
+                    await _envoyer_texte(interaction, caption)
                 if description:
                     await interaction.followup.send(
                         f"📄 **DESCRIPTION {kind_label.upper()}{num}** (à coller dans le **champ légende**) :"
                     )
-                    await interaction.followup.send(description)
+                    await _envoyer_texte(interaction, description)
             finally:
                 if tmp_dir:
                     try:
@@ -2400,7 +2466,7 @@ class UserCog(commands.Cog):
                     await interaction.followup.send(f"Erreur d'envoi : {e}", ephemeral=True)
                     continue
                 if caption:
-                    await interaction.followup.send(caption)
+                    await _envoyer_texte(interaction, caption)
             finally:
                 if tmp_dir:
                     try:
@@ -2445,11 +2511,11 @@ class UserCog(commands.Cog):
             if caption:
                 await interaction.followup.send(
                     f"📝 **CAPTION {label} {idx}** (à mettre **PAR-DESSUS la vidéo** dans l'éditeur Insta) :")
-                await interaction.followup.send(caption)
+                await _envoyer_texte(interaction, caption)
             if description:
                 await interaction.followup.send(
                     f"📄 **DESCRIPTION {label} {idx}** (à coller dans le **champ légende** du post) :")
-                await interaction.followup.send(description)
+                await _envoyer_texte(interaction, description)
             if delete_after:
                 try:
                     video.unlink(missing_ok=True)
@@ -2599,7 +2665,16 @@ class UserCog(commands.Cog):
         if description and not _rapport.get("repli"):
             await interaction.followup.send(
                 f"📄 **DESCRIPTION {label} {idx}/{total}** (à coller dans le **champ légende**) :")
-            await interaction.followup.send(description)
+            await _envoyer_texte(interaction, description)
+        elif desc_retenue(video) and not _rapport.get("repli"):
+            # RETENUE, PAS PERDUE. Se taire ferait croire que ce montage n a
+            # pas de legende ; le VA en inventerait une. On dit qu elle
+            # existe, pourquoi elle ne part pas, et qui peut la debloquer.
+            await interaction.followup.send(
+                f"ℹ️ _Pas de description pour ce {label.lower()} : "
+                "celle du template est la **légende du post d'origine** et "
+                "porte le **@ d'un autre compte**. Un admin la relit sur le "
+                "site (**À relire**) et elle repartira._")
 
     async def _send_banger_reels(self, interaction):
         """Bouton '💥 Reels Banger' : envoie au VA ses reels marques ⭐ banger (dans la
@@ -3501,6 +3576,14 @@ class UserCog(commands.Cog):
                         await interaction.followup.send(
                             "📄 **DESCRIPTION** (champ légende) :\n```\n"
                             + str(_desc)[:1800] + "\n```")
+                    elif desc_retenue(v):
+                        # RETENUE, PAS ABSENTE. Se taire ferait croire que
+                        # ce fichier n a pas de legende.
+                        await interaction.followup.send(
+                            "ℹ️ _Pas de description ici : celle du fichier est "
+                            "la **legende du post d'origine** et porte le **@ "
+                            "d'un autre compte**. Un admin la relit sur le site "
+                            "(**A relire**)._")
 
     @app_commands.command(
         name="reelcaption",
@@ -3643,7 +3726,7 @@ class UserCog(commands.Cog):
         if desc:
             await interaction.followup.send(
                 f"📄 **DESCRIPTION {label} {idx}/{total}** (à coller dans le **champ légende**) :")
-            await interaction.followup.send(desc)
+            await _envoyer_texte(interaction, desc)
 
     async def cog_load(self):
         # Vue persistante : les boutons du menu marchent meme apres un redemarrage du bot

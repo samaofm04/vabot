@@ -209,6 +209,7 @@ class NoctusPool(commands.Cog):
         import shutil as _sh
         import tempfile as _tf
         import noctus_web
+        from cogs import user as u
 
         r = self._recette(identite, famille)
         if r is None:
@@ -236,6 +237,19 @@ class NoctusPool(commands.Cog):
             except Exception:
                 _sh.copy2(str(r["brute_imposee"]), str(cible))
             dossier_brutes = tmp
+        else:
+            # SANS CECI, LA RESERVE FABRIQUAIT LE TEMPLATE NU. Passer None au
+            # moteur ne veut pas dire « tire une brute au hasard » : cela veut
+            # dire AUCUN dossier de brutes, donc aucun montage (noctus_web
+            # montage_demande = bool(brutes_dir) and cut > 0.05). Le moteur
+            # recopiait le template entier — l accroche d une AUTRE creatrice —
+            # et le rapport sortait repli=False parce que rien n avait ete
+            # tente : la fiche partait « montage reussi » et le VA lisait
+            # « poste cette video telle quelle » sur une video ou sa model n
+            # apparait pas. Le bouton, lui, a toujours passe ce dossier
+            # (cogs/user.py, _gen_and_send_montaged) ; la reserve doit servir
+            # exactement la meme chose que lui.
+            dossier_brutes = u.IDENTITIES_DIR / (identite or "").strip().lower() / "brutes"
 
         debut = time.monotonic()
         try:
@@ -270,12 +284,24 @@ class NoctusPool(commands.Cog):
             if not sorties:
                 return False
 
+            # Le verdict qu on range doit etre VRAI des semaines plus tard.
+            # `repli` seul ne suffit pas : il ne compte que les brutes
+            # essayees puis perdues, et vaut donc False quand le montage n a
+            # meme pas ete tente. Un brouillon qui porte un point de coupe et
+            # qui ressort « sans_montage » est un template nu : on le dit.
+            try:
+                _cut = float((r.get("draft") or {}).get("cut_at") or 0)
+            except Exception:
+                _cut = 0.0
+            _nu = (_cut > 0.05 and not _rap.get("montage_demande"))
             pose = reserve.deposer(
                 identite, famille, sorties[0], emp, desc=r.get("desc") or "",
                 recette={"source": str(r["video"]),
                          "imposees": list(r.get("imposees") or ()),
-                         "repli": bool(_rap.get("repli")),
-                         "message": str(_rap.get("message") or "")})
+                         "repli": bool(_rap.get("repli")) or _nu,
+                         "message": str(_rap.get("message") or "")
+                                    or ("aucune video brute n a pu etre montee"
+                                        if _nu else "")})
             if pose is None:
                 return False
         finally:
@@ -312,6 +338,18 @@ class NoctusPool(commands.Cog):
     async def remplir(self):
         if self._occupe or not _dans_le_creneau():
             return
+        # Le stock d'avant le correctif contient des templates NUS ranges
+        # comme des montages reussis. Rien dans leur fiche ne les trahit :
+        # on le vide une fois, ici, avant de refabriquer. La fonction pose
+        # son propre temoin, donc ce tour-ci est le seul a faire du travail.
+        try:
+            jetes = reserve.purger_template_nu()
+            if jetes:
+                log.warning("[noctuspool] %d variante(s) fabriquee(s) sans "
+                            "montage jetees : elles auraient ete servies au "
+                            "VA comme des montages reussis", jetes)
+        except Exception:
+            log.exception("[noctuspool] purge du stock sans montage")
         try:
             import noctus_web
             if not noctus_web.setup_ok():
