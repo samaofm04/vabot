@@ -1869,6 +1869,31 @@ try:
     check("paie : une quinzaine parfaite rapporte exactement 75 $",
           abs(_histo([20] * 15, "2026-09-15")["gagne"] - 75.0) < 0.01,
           str(_histo([20] * 15, "2026-09-15")["gagne"]))
+    # LA JOURNEE VAUT 5 $ PARTOUT. Le calendrier donne des quinzaines de 13 a
+    # 16 jours ; la paie n'en tient pas compte - « tous les mois font trente
+    # jours ». Une quinzaine de seize jours ne verse donc pas 80 $.
+    def _pleine(jour_fin):
+        _d0, _d1 = _obp.quinzaine(jour_fin)
+        _n = (_dp.date.fromisoformat(_d1) - _dp.date.fromisoformat(_d0)).days + 1
+        _j = {}
+        for _i in range(_n):
+            _k = (_dp.date.fromisoformat(_d0) + _dp.timedelta(days=_i)).isoformat()
+            _j[_k] = {"publie": 20, "atteint": True}
+        _f = _pp.Path(_tp.mkdtemp()) / "h.json"
+        _f.write_text(_jp.dumps({_obp.cle("id", "va"): {"jours": _j}}), encoding="utf-8")
+        _obp.HISTO_FILE = _f
+        return _obp.paie_quinzaine("id", "va", jour_fin)
+
+    check("paie : la journee vaut 5 $ tout rond", _obp.PAIE_JOUR == 5.0)
+    check("paie : une quinzaine de 16 jours ne verse pas 80 $",
+          abs(_pleine("2026-10-31")["gagne"] - 75.0) < 0.01,
+          str(_pleine("2026-10-31")["gagne"]))
+    # Consequence assumee : fevrier n'a que treize jours du 16 au 28.
+    check("paie : fevrier 16-28 plafonne a 65 $ (13 jours reels)",
+          abs(_pleine("2026-02-28")["gagne"] - 65.0) < 0.01,
+          str(_pleine("2026-02-28")["gagne"]))
+    check("paie : un seul compte qui publie vaut 25 centimes",
+          abs(_histo([1])["gagne"] - 0.25) < 0.001, str(_histo([1])["gagne"]))
     check("paie : zero publication ne rapporte rien",
           _histo([0, 0, 0])["gagne"] == 0.0)
     # Une panne de report n est PAS une journee a zero : elle se compte a part.
@@ -1883,6 +1908,38 @@ try:
     # ne pas avoir encore vecu.
     check("paie : la quinzaine s arrete a aujourd hui",
           _histo([20] * 15)["jours_ecoules"] == 7)
+
+    # --- Le tarif et le nombre de comptes, fiche par fiche ---------------
+    _vraiObj = _obp.OBJECTIFS_FILE
+    _obp.OBJECTIFS_FILE = _pp.Path(_tp.mkdtemp()) / "obj.json"
+    check("paie : sans reglage, la fiche prend les defauts",
+          _obp.reglage_paie("id", "va") == (5.0, 20))
+    _obp.fixer_paie("id", "va", paie_jour=8, base_comptes=10)
+    check("paie : le tarif et le nombre de comptes se reglent par fiche",
+          _obp.reglage_paie("id", "va") == (8.0, 10),
+          str(_obp.reglage_paie("id", "va")))
+    # LE PIEGE : fixer_objectif ecrasait tout l'enregistrement de la fiche.
+    _obp.fixer_objectif("id", "va", 25)
+    check("paie : changer l objectif n efface pas le tarif",
+          _obp.reglage_paie("id", "va") == (8.0, 10),
+          str(_obp.reglage_paie("id", "va")))
+    check("paie : et l objectif est bien pose", _obp.objectif_de("id", "va") == 25)
+    _obp.fixer_paie("id", "va", paie_jour=0, base_comptes=0)
+    check("paie : zero remet au defaut, il ne pose pas zero",
+          _obp.reglage_paie("id", "va") == (5.0, 20))
+    check("paie : et l objectif survit a la remise a zero du tarif",
+          _obp.objectif_de("id", "va") == 25)
+    # Un tarif nul paierait tout le monde a rien, un denominateur nul
+    # diviserait par zero : les deux doivent retomber sur le defaut.
+    _obp.fixer_paie("id", "va", paie_jour="n importe quoi")
+    check("paie : un tarif illisible ne casse rien",
+          _obp.reglage_paie("id", "va")[0] == 5.0)
+    _obp.fixer_paie("id", "va", paie_jour=99999)
+    check("paie : un tarif aberrant est plafonne",
+          _obp.reglage_paie("id", "va")[0] == 1000.0,
+          str(_obp.reglage_paie("id", "va")[0]))
+    _obp.OBJECTIFS_FILE = _vraiObj
+
     _obp.HISTO_FILE = _vrai
 except Exception as _epa:
     check("paie : testable", False, repr(_epa)[:200])

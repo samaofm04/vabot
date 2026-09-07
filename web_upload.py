@@ -31158,6 +31158,10 @@ def _render_jailbreak_html() -> str:
                                          f"la faute de personne.")
                             scrape_pill += (
                                 f"<span class='jb-acc-pill {_pcls}' "
+                                f"data-identity='{ident_safe}' data-va-name='{va_attr}' "
+                                f"data-tarif='{_pa['par_jour']}' "
+                                f"data-base='{_pa['sur_comptes']}' "
+                                f"onclick='jbOuvrePaie(this)' style='cursor:pointer' "
                                 f"title=\"Mérité depuis le {_pa['debut']} : "
                                 f"{_pa['base']:.0f} $ pour la quinzaine, soit "
                                 f"{_pa['par_jour']:.2f} $ par jour, acquis à hauteur "
@@ -31165,7 +31169,8 @@ def _render_jailbreak_html() -> str:
                                 f"{_pa['jours_mesures']} jour(s) relevé(s) sur "
                                 f"{_pa['jours_ecoules']} écoulés.{_trou} "
                                 f"Au même rythme jusqu'au {_pa['fin']} : "
-                                f"{_pa['projete']:.2f} $.\">"
+                                f"{_pa['projete']:.2f} $."
+                                f" Clique pour changer le tarif ou le nombre de comptes.\">"
                                 f"💵 {_pa['gagne']:.2f} $ / {_pa['base']:.0f}</span>"
                             )
                         except Exception as _e_pa:
@@ -31908,6 +31913,36 @@ def _render_jailbreak_html() -> str:
         "     }"
         "     if(typeof showToast === 'function')"
         "       showToast('Objectif : ' + j.objectif + ' (journee tenue a ' + j.seuil + ')', 'success');"
+        "     jbSoftRefresh();"
+        "   });"
+        "}"
+        "function jbOuvrePaie(el){"
+        "  var d = (el && el.dataset) || {};"
+        "  var t = prompt('Tarif d une journee pour ' + (d.vaName || 'cette fiche')"
+        "                 + ' ?\\n\\nEn dollars. Quinze journees font la quinzaine.'"
+        "                 + '\\nLaisse vide ou mets 0 pour revenir au defaut.', d.tarif || '5');"
+        "  if(t === null) return;"
+        "  var b = prompt('Sur combien de comptes doit-il publier chaque jour ?'"
+        "                 + '\\n\\nCest le denominateur : sur 20, cinq comptes qui publient'"
+        "                 + ' valent un quart de la journee.\\nVide ou 0 = defaut.', d.base || '20');"
+        "  if(b === null) return;"
+        "  var fd = new FormData();"
+        "  fd.append('identity', d.identity || '');"
+        "  fd.append('va_name', d.vaName || '');"
+        "  fd.append('paie_jour', t);"
+        "  fd.append('base_comptes', b);"
+        "  fd.append('ajax', '1');"
+        "  fetch('/jailbreak/objectif', {method:'POST', body:fd})"
+        "   .then(_jbJsonOrAuth)"
+        "   .then(function(j){"
+        "     if(!j) return;"
+        "     if(!j.ok){"
+        "       if(typeof showToast === 'function') showToast(j.error || 'Echec', 'error');"
+        "       return;"
+        "     }"
+        "     if(typeof showToast === 'function')"
+        "       showToast('Paie : ' + j.paie_jour + ' $/jour sur ' + j.base_comptes"
+        "                 + ' comptes (' + (j.paie_jour * 15).toFixed(2) + ' $ la quinzaine)', 'success');"
         "     jbSoftRefresh();"
         "   });"
         "}"
@@ -56436,6 +56471,17 @@ def create_app():
         va_name = (request.form.get("va_name") or "").strip()
         if not identity or not va_name:
             return jsonify({"ok": False, "error": "Identité ou nom du VA manquant"})
+        # LE MEME POINT D'ENTREE SERT AU TARIF. Il est deja hors de
+        # l'allow-list des roles restreints, donc reserve au proprietaire :
+        # exactement ce qu'il faut pour un reglage de paie. Une seconde route
+        # aurait demande la meme protection, et c'est le genre d'oubli qui
+        # ouvre une porte sans que personne le voie.
+        if (request.form.get("paie_jour") is not None
+                or request.form.get("base_comptes") is not None):
+            _tarif, _base = ob.fixer_paie(identity, va_name,
+                                          request.form.get("paie_jour"),
+                                          request.form.get("base_comptes"))
+            return jsonify({"ok": True, "paie_jour": _tarif, "base_comptes": _base})
         n = ob.fixer_objectif(identity, va_name, request.form.get("objectif"))
         return jsonify({"ok": True, "objectif": n, "seuil": ob._seuil(n)})
 

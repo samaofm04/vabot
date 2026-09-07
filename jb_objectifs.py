@@ -64,8 +64,15 @@ OBJECTIF_DEFAUT = 20
 SEUIL_REUSSITE = 0.80
 
 # --- La paie meritee ------------------------------------------------------
-# Un VA touche 75 $ pour une quinzaine complete.
-PAIE_QUINZAINE = 75.0
+# CINQ DOLLARS LA JOURNEE, QUINZE JOURS LA QUINZAINE, SOIXANTE-QUINZE AU BOUT.
+# Le calendrier reel donne des quinzaines de treize a seize jours, donc des
+# journees a 4,69 $, 5,00 $ ou 5,77 $ selon le mois : trois chiffres a
+# expliquer a un VA pour une paie identique. Le proprietaire a tranche - « on
+# part du principe que tous les mois font trente jours ». Le modele de paie
+# compte donc quinze jours partout, et le calendrier ne le regarde plus.
+PAIE_JOUR = 5.0
+JOURS_QUINZAINE = 15
+PAIE_QUINZAINE = PAIE_JOUR * JOURS_QUINZAINE      # 75 $
 
 # LE DENOMINATEUR EST FIGE A VINGT, ET CE N'EST PAS L'OBJECTIF DE LA FICHE.
 # L'objectif sert a dire si la journee est tenue ; il vaut trente par defaut
@@ -177,11 +184,23 @@ def fixer_objectif(identite: str, va: str, objectif) -> int:
     n = max(0, min(n, 999))
     with _LOCK:
         d = _load(OBJECTIFS_FILE)
+        # ON FUSIONNE, ON N'ECRASE PAS. La fiche porte aussi le tarif du VA et
+        # son nombre de comptes a servir : ecrire l'objectif d'un bloc, comme
+        # avant, les aurait effaces sans un mot - et personne ne remarque une
+        # paie revenue au defaut avant le virement.
+        rec = d.get(k) if isinstance(d.get(k), dict) else {}
         if n <= 0:
-            d.pop(k, None)
+            rec.pop("objectif", None)
+            if rec:
+                rec["modifie"] = int(time.time())
+                d[k] = rec
+            else:
+                d.pop(k, None)
             _save(OBJECTIFS_FILE, d)
             return OBJECTIF_DEFAUT
-        d[k] = {"objectif": n, "modifie": int(time.time())}
+        rec["objectif"] = n
+        rec["modifie"] = int(time.time())
+        d[k] = rec
         _save(OBJECTIFS_FILE, d)
         return n
 
@@ -523,14 +542,85 @@ def bilan_quinzaine(identite: str, va: str, jour: str = "") -> dict:
     }
 
 
+def reglage_paie(identite: str, va: str) -> tuple:
+    """(tarif d'une journee, nombre de comptes a servir) pour cette fiche.
+
+    Les deux valeurs sont reglables FICHE PAR FICHE et changent quand on veut.
+    Sans reglage, les defauts du module s'appliquent : 5 $ et vingt comptes.
+    Un VA paye plus cher, ou charge de dix comptes seulement, se decrit ici
+    et nulle part ailleurs.
+    """
+    rec = _load(OBJECTIFS_FILE).get(cle(identite, va))
+    jour_, base_ = PAIE_JOUR, BASE_COMPTES
+    if isinstance(rec, dict):
+        try:
+            v = float(rec.get("paie_jour") or 0)
+            if v > 0:
+                jour_ = v
+        except Exception:
+            pass
+        try:
+            n = int(rec.get("base_comptes") or 0)
+            if n > 0:
+                base_ = n
+        except Exception:
+            pass
+    return jour_, base_
+
+
+def fixer_paie(identite: str, va: str, paie_jour=None, base_comptes=None) -> tuple:
+    """Regle le tarif et/ou le nombre de comptes. Rend le couple retenu.
+
+    Vide ou zero REMET AU DEFAUT plutot que de poser zero : un tarif nul
+    paierait tout le monde a rien, et un nombre de comptes nul ferait une
+    division par zero — deux facons silencieuses de casser la paie.
+    """
+    k = cle(identite, va)
+    with _LOCK:
+        d = _load(OBJECTIFS_FILE)
+        rec = d.get(k) if isinstance(d.get(k), dict) else {}
+
+        if paie_jour is not None:
+            try:
+                v = float(str(paie_jour).replace(",", ".").strip() or 0)
+            except Exception:
+                v = 0.0
+            # Plafond de bon sens : au-dela c'est une faute de frappe.
+            v = max(0.0, min(v, 1000.0))
+            if v > 0:
+                rec["paie_jour"] = round(v, 2)
+            else:
+                rec.pop("paie_jour", None)
+
+        if base_comptes is not None:
+            try:
+                n = int(str(base_comptes).strip() or 0)
+            except Exception:
+                n = 0
+            n = max(0, min(n, 999))
+            if n > 0:
+                rec["base_comptes"] = n
+            else:
+                rec.pop("base_comptes", None)
+
+        if rec:
+            rec["modifie"] = int(time.time())
+            d[k] = rec
+        else:
+            d.pop(k, None)
+        _save(OBJECTIFS_FILE, d)
+    return reglage_paie(identite, va)
+
+
 def paie_quinzaine(identite: str, va: str, jour: str = "") -> dict:
     """Ce que la fiche a MERITE depuis le debut de la quinzaine.
 
-    La regle, telle que le proprietaire l'a posee : une quinzaine complete
-    vaut 75 $. Une journee vaut donc 75 $ divises par le nombre de jours de
-    la quinzaine — quinze, seize, ou treize en fevrier. Et chaque journee
-    n'est acquise qu'a hauteur des comptes qui ont publie ce jour-la, sur
-    vingt : cinq comptes sur vingt, c'est un quart de la journee.
+    La regle, telle que le proprietaire l'a posee : la journee vaut 5 $, et
+    elle n'est acquise qu'a hauteur des comptes qui ont publie ce jour-la,
+    sur vingt. Un seul compte qui publie, c'est 25 centimes ; cinq comptes,
+    un quart de la journee, soit 1,25 $. Quinze journees font les 75 $ de la
+    quinzaine — tous les mois sont comptes a trente jours, le calendrier reel
+    ne change ni la journee ni le total.
 
     LE PLAFOND A CENT POUR CENT EST VOLONTAIRE. Une fiche qui porte trente
     comptes peut en faire publier vingt-cinq dans la journee ; sans plafond,
@@ -550,7 +640,7 @@ def paie_quinzaine(identite: str, va: str, jour: str = "") -> dict:
     d0 = _dt.date.fromisoformat(debut)
     d1 = _dt.date.fromisoformat(fin)
     n_jours = (d1 - d0).days + 1
-    par_jour = (PAIE_QUINZAINE / n_jours) if n_jours else 0.0
+    par_jour, base_comptes = reglage_paie(identite, va)
 
     rec = _load(HISTO_FILE).get(cle(identite, va)) or {}
     jours = rec.get("jours") if isinstance(rec.get("jours"), dict) else {}
@@ -563,7 +653,7 @@ def paie_quinzaine(identite: str, va: str, jour: str = "") -> dict:
         v = jours.get(k)
         if isinstance(v, dict):
             publie = int(v.get("publie") or 0)
-            part = min(1.0, publie / BASE_COMPTES) if BASE_COMPTES else 0.0
+            part = min(1.0, publie / base_comptes) if base_comptes else 0.0
             montant = part * par_jour
             gagne += montant
             mesures += 1
@@ -575,15 +665,22 @@ def paie_quinzaine(identite: str, va: str, jour: str = "") -> dict:
         d += _dt.timedelta(days=1)
 
     ecoules = len(lignes)
+    # Le 31 d'un mois existe au calendrier mais pas dans le modele de paie :
+    # quinze journees a 5 $ font les 75 $ promis, et on ne verse pas plus que
+    # ce qui est annonce.
+    plafond = round(par_jour * JOURS_QUINZAINE, 2)
+    gagne = min(gagne, plafond)
     return {
         "debut": debut, "fin": fin,
-        "base": PAIE_QUINZAINE, "sur_comptes": BASE_COMPTES,
+        "base": plafond, "sur_comptes": base_comptes,
+        "jours_payes": JOURS_QUINZAINE,
         "jours_quinzaine": n_jours, "par_jour": round(par_jour, 4),
         "jours_ecoules": ecoules, "jours_mesures": mesures,
         "jours_non_mesures": ecoules - mesures,
         "gagne": round(gagne, 2),
-        "projete": round(gagne / mesures * n_jours, 2) if mesures else 0.0,
-        "pct": round(100.0 * gagne / PAIE_QUINZAINE, 1) if PAIE_QUINZAINE else 0.0,
+        "projete": round(min(plafond, gagne / mesures * JOURS_QUINZAINE), 2)
+                   if mesures else 0.0,
+        "pct": round(100.0 * gagne / plafond, 1) if plafond else 0.0,
         "lignes": lignes,
     }
 
