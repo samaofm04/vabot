@@ -36712,6 +36712,37 @@ def _render_jbanalyse_html() -> str:
     css = """
 <style>
 #ja-root{max-width:1180px}
+/* --- Analyse des comptes : ce qui a ete PUBLIE, pas ce qui a ete vu ---- */
+#ja-posts{margin-top:18px;background:#0f0f13;border:1px solid #1d2027;
+  border-radius:14px;overflow:hidden}
+#ja-posts .jp-h{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;
+  padding:14px 16px 4px}
+#ja-posts .jp-h b{font-size:14px}
+#ja-posts .jp-h span{color:#6b7280;font-size:12px}
+#ja-posts .jp-kpis{display:flex;gap:10px;flex-wrap:wrap;padding:8px 16px 12px}
+#ja-posts .jp-k{background:#15161c;border:1px solid #23262f;border-radius:11px;
+  padding:9px 13px;min-width:120px}
+#ja-posts .jp-k .q{font-size:10px;text-transform:uppercase;letter-spacing:.06em;
+  color:#6b7280;font-weight:700}
+#ja-posts .jp-k .v{font-size:20px;font-weight:800;margin-top:2px}
+#ja-posts table{width:100%;border-collapse:collapse;font-size:13px}
+#ja-posts th{font-size:10px;text-transform:uppercase;letter-spacing:.05em;
+  color:#6b7280;font-weight:700;text-align:left;padding:7px 16px;
+  border-bottom:1px solid #1d2027}
+#ja-posts td{padding:8px 16px;border-top:1px solid #16181e;vertical-align:middle}
+#ja-posts td.n{font-variant-numeric:tabular-nums;font-weight:700;width:64px}
+#ja-posts td.j{color:#9aa1b0;width:88px;font-variant-numeric:tabular-nums}
+#ja-posts tr.zero td{color:#4b5563}
+#ja-posts tr.zero td.n{color:#6b7280;font-weight:400}
+#ja-posts .jp-bar{width:120px;height:7px;background:#1b1d24;border-radius:99px;
+  overflow:hidden;display:inline-block;vertical-align:middle}
+#ja-posts .jp-bar i{display:block;height:100%;border-radius:99px;background:#8b5cf6}
+#ja-posts .jp-qui i{display:inline-block;background:#191b22;border:1px solid #23262f;
+  border-radius:7px;padding:2px 7px;margin:0 5px 3px 0;font-style:normal;
+  font-size:11.5px;color:#c3cadb}
+#ja-posts .jp-qui i b{color:#e7eaf3}
+#ja-posts .jp-note{color:#6b7280;font-size:11.5px;padding:10px 16px 14px;
+  line-height:1.5}
 .ja-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
 .ja-seg{display:inline-flex;background:#0f0f13;border:1px solid #23262f;border-radius:10px;overflow:hidden}
 .ja-seg button{background:transparent;border:0;color:#9ca3af;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer}
@@ -36795,6 +36826,7 @@ def _render_jbanalyse_html() -> str:
   <div class="ja-chartbox"><div id="ja-chart"><div class="ja-msg loading">Chargement&hellip;</div></div></div>
   <div style="background:#0f0f13;border:1px solid #1d2027;border-radius:14px;overflow:hidden" id="ja-tbl"></div>
   <div id="ja-insights"></div>
+  <div id="ja-posts"></div>
 </div>
 <script>
 window.__jaData = null;
@@ -37287,6 +37319,78 @@ function jaInsights(){
   h += '</div>';
   el.innerHTML = h;
 }
+function jaPosts(){
+  var box = document.getElementById('ja-posts');
+  if(!box) return;
+  var d = window.__jaData || {};
+  var days = d.days || [];
+  var gs = jaGroups();
+  var r = jaRangeIdx();
+  if(!days.length || r[1] < r[0]){ box.innerHTML = ''; return; }
+
+  // Une ligne par JOUR, du plus recent au plus ancien : la question posee
+  // est « combien de posts le 8 ? », elle se lit du haut de la page.
+  var rows = [], total = 0, max = 0, best = null, actifs = 0;
+  for(var i = r[1]; i >= r[0]; i--){
+    var n = 0, qui = [];
+    for(var k = 0; k < gs.length; k++){
+      var v = (gs[k].reels || [])[i] || 0;
+      if(v > 0){ qui.push({n: gs[k].name, v: v}); n += v; }
+    }
+    qui.sort(function(a, b){ return b.v - a.v; });
+    total += n;
+    if(n > max) max = n;
+    if(n > 0) actifs++;
+    if(!best || n > best.v) best = {j: days[i], v: n};
+    rows.push({j: days[i], n: n, qui: qui});
+  }
+  var nb = r[1] - r[0] + 1;
+  var moy = nb ? (total / nb) : 0;
+
+  var corps = rows.map(function(x){
+    var det = x.qui.slice(0, 5).map(function(q){
+      return '<i>' + jaEsc(q.n) + ' <b>' + jaNum(q.v) + '</b></i>';
+    }).join('');
+    if(x.qui.length > 5) det += '<i>+' + (x.qui.length - 5) + ' autre(s)</i>';
+    if(!x.qui.length) det = '<i>personne</i>';
+    var w = max ? Math.round(100 * x.n / max) : 0;
+    return '<tr' + (x.n ? '' : ' class="zero"') + '>'
+      + '<td class="j">' + jaFrD(x.j) + '</td>'
+      + '<td class="n">' + jaNum(x.n) + '</td>'
+      + '<td style="width:132px"><span class="jp-bar"><i style="width:' + w + '%"></i></span></td>'
+      + '<td class="jp-qui">' + det + '</td></tr>';
+  }).join('');
+
+  // Le releve ne remonte que les ~12 derniers posts de chaque compte : au-dela
+  // d'environ deux semaines, un compte tres actif a deja pousse ses vieux
+  // posts hors de la fenetre et le compte du jour parait plus bas qu'il ne
+  // l'etait. On le DIT plutot que de laisser lire une baisse qui n'a pas eu
+  // lieu.
+  var note = (nb > 14)
+    ? '<div class="jp-note">&#9888; Au-del&agrave; de deux semaines, les chiffres '
+      + 'sont sous-estim&eacute;s : Instagram ne rend que les ~12 derniers posts '
+      + 'de chaque compte, donc les plus anciens sont d&eacute;j&agrave; sortis '
+      + 'de la fen&ecirc;tre. Les 14 derniers jours sont fiables.</div>'
+    : '<div class="jp-note">Compte les reels publi&eacute;s, m&ecirc;me &agrave; '
+      + '0 vue &mdash; c&rsquo;est ce qui distingue &laquo;&nbsp;rien post&eacute;'
+      + '&nbsp;&raquo; de &laquo;&nbsp;post&eacute; mais pas encore vu&nbsp;&raquo;.</div>';
+
+  box.innerHTML =
+    '<div class="jp-h"><b>&#128221; Analyse des comptes</b>'
+    + '<span>ce qui a &eacute;t&eacute; PUBLI&Eacute; sur la p&eacute;riode &mdash; '
+    + (window.__jaView === 'va' ? 'par VA' : 'par identit&eacute;') + '</span></div>'
+    + '<div class="jp-kpis">'
+    + '<div class="jp-k"><div class="q">Posts</div><div class="v">' + jaNum(total) + '</div></div>'
+    + '<div class="jp-k"><div class="q">Par jour</div><div class="v">' + moy.toFixed(1) + '</div></div>'
+    + '<div class="jp-k"><div class="q">Jours avec post</div><div class="v">'
+      + jaNum(actifs) + '/' + jaNum(nb) + '</div></div>'
+    + (best && best.v ? '<div class="jp-k"><div class="q">Meilleur jour</div><div class="v">'
+      + jaFrD(best.j) + ' &middot; ' + jaNum(best.v) + '</div></div>' : '')
+    + '</div>'
+    + '<table><thead><tr><th>Jour</th><th>Posts</th><th></th><th>Qui a publi&eacute;</th>'
+    + '</tr></thead><tbody>' + corps + '</tbody></table>'
+    + note;
+}
 function jaRender(){
   if(!window.__jaData) return;
   jaScopeFill();
@@ -37295,6 +37399,7 @@ function jaRender(){
   jaChart();
   jaTable();
   jaInsights();
+  jaPosts();
 }
 function jaLoad(force){
   fetch('/jbanalyse/data')
