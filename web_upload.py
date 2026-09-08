@@ -14731,8 +14731,15 @@ def _run_daily_insta_refresh():
 
 
 # Heures de refresh Insta automatique (heure locale serveur).
-# 2x/jour (00h/12h) : compromis fraicheur des vues / quota RapidAPI.
-_INSTA_REFRESH_HOURS = [0, 12]      # 2 scrapes/jour (quota RapidAPI)
+# 6x/jour, toutes les 4 h. On tournait a 2x/jour (00h/12h) pour menager le
+# quota RapidAPI ; le proprietaire a tranche pour la fraicheur. Ce que ca
+# change vraiment : « a-t-il publie aujourd'hui ? » se met a jour six fois
+# dans la journee au lieu de deux, et c'est ce chiffre-la qui decide de la
+# paie du VA. Deux passages laissaient une demi-journee d'angle mort.
+# Cout : environ trois fois plus d'appels. Le scraper essaie d'abord
+# l'endpoint public gratuit d'Instagram, donc la facture RapidAPI reelle est
+# plus basse que le triplement brut.
+_INSTA_REFRESH_HOURS = [0, 4, 8, 12, 16, 20]      # 6 scrapes/jour
 
 
 def _next_insta_refresh_dt(now):
