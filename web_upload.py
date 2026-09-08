@@ -37357,6 +37357,7 @@ def _vaact_cfg_load() -> dict:
         d = {}
     d.setdefault("vas", {})
     d.setdefault("warmup_days", 5)
+    d.setdefault("silence_heures", 48)
     return d
 
 
@@ -37658,6 +37659,7 @@ def _vaact_payload(period: str = "14") -> dict:
     under_quota = sum(1 for v in out_vas if v["alert"])
     return {"ok": True, "period": period, "label": lab, "payable": bool(payable),
             "days": day_iso, "vas": out_vas, "warmup_days": warmup,
+            "silence_heures": int(cfg.get("silence_heures") or 48),
             "tot": {"oublis": tot_oublis, "deduction": round(tot_ded, 2),
                     "vas": len(out_vas), "late_today": late_today,
                     "warm": n_warm_tot, "under_quota": under_quota,
@@ -37752,6 +37754,11 @@ def _render_jbactivite_html() -> str:
     </div>
     <label>Retenue par jour d&#39;oubli ($)</label>
     <input type="number" id="av-m-malus" min="0" step="0.5">
+    <label>Silence tol&eacute;r&eacute; avant &laquo;&nbsp;en sommeil&nbsp;&raquo; (heures)</label>
+    <input type="number" id="av-m-silence" min="1" max="240" step="1" placeholder="48">
+    <div class="av-hint" style="margin-top:3px">R&egrave;gle GLOBALE, valable pour
+      tous les VA. Un compte qui n&#39;a rien publi&eacute; depuis plus longtemps
+      passe &laquo;&nbsp;en sommeil&nbsp;&raquo; et ne compte plus dans la journ&eacute;e.</div>
     <label>Comptes actifs &agrave; maintenir (objectif &mdash; 0 = aucun)</label>
     <div style="display:flex;gap:8px">
       <input type="number" id="av-m-quota" min="0" step="1" style="flex:2" placeholder="ex : 60">
@@ -37854,6 +37861,7 @@ function avCfgOpen(idx){
   document.getElementById('av-m-base').value = v.base || 0;
   document.getElementById('av-m-cadence').value = (v.cadence === 'm') ? 'm' : 'q';
   document.getElementById('av-m-malus').value = v.malus || 0;
+  document.getElementById('av-m-silence').value = (window.AV_DATA && AV_DATA.silence_heures) || 48;
   document.getElementById('av-m-quota').value = v.quota || 0;
   document.getElementById('av-m-quotapct').value = v.quota_pct || 100;
   var box = document.getElementById('av-m-repos');
@@ -37869,6 +37877,7 @@ function avCfgSave(){
   fd.append('base', document.getElementById('av-m-base').value || '0');
   fd.append('cadence', document.getElementById('av-m-cadence').value || 'q');
   fd.append('malus', document.getElementById('av-m-malus').value || '0');
+  fd.append('silence_h', document.getElementById('av-m-silence').value || '');
   fd.append('quota', document.getElementById('av-m-quota').value || '0');
   fd.append('quota_pct', document.getElementById('av-m-quotapct').value || '100');
   var ks = [];
@@ -56299,6 +56308,15 @@ def create_app():
         except Exception:
             quota_pct = 100
         cfg = _vaact_cfg_load()
+        # Le seuil de silence est une regle GLOBALE, pas un reglage de VA :
+        # il vit a la racine du fichier, pas sous « vas ». Le champ n'est
+        # envoye que si le proprietaire y a touche.
+        _sh = (request.form.get("silence_h") or "").strip()
+        if _sh:
+            try:
+                cfg["silence_heures"] = int(max(1.0, min(float(_sh), 240.0)))
+            except Exception:
+                pass
         cadence = "m" if (request.form.get("cadence") or "q").strip() == "m" else "q"
         cfg.setdefault("vas", {})[va] = {"base": base, "malus": malus,
                                          "repos": repos, "quota": quota,

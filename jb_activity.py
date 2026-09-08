@@ -22,7 +22,31 @@ ACT_FILE = DATA_DIR / "jb_activity.json"
 PEN_FILE = DATA_DIR / "jb_va_penalties.json"
 SCAN_MARK = DATA_DIR / "jb_activity_lastscan.txt"
 
-SILENCE_SEC = 48 * 3600         # >48 h sans poster = en faute
+SILENCE_SEC = 48 * 3600         # >48 h sans poster = en faute (defaut)
+
+
+def silence_sec() -> int:
+    """Le seuil de silence EFFECTIF, en secondes.
+
+    Reglable depuis l'ecran Activite VA ; 48 h tant que personne n'y touche.
+    Tout le produit doit passer par ici : le badge « En sommeil » du portail,
+    le compte des oublis, et le calcul des comptes qui tournent. Deux seuils
+    differents dans deux ecrans, c'est la contestation assuree le jour de la
+    paie — et c'est deja la raison pour laquelle jb_objectifs relit cette
+    valeur au lieu d'en garder une copie.
+    """
+    try:
+        import json as _j
+        from pathlib import Path as _P
+        cfg = _j.loads((_P("data") / "va_activity_cfg.json").read_text(encoding="utf-8"))
+        h = float((cfg or {}).get("silence_heures") or 0)
+        if h > 0:
+            # Borne de bon sens : moins d'une heure rendrait tout le monde
+            # fautif en permanence, plus de dix jours ne mesure plus rien.
+            return int(max(1.0, min(h, 240.0)) * 3600)
+    except Exception:
+        pass
+    return SILENCE_SEC
 WEEKS2_SEC = 14 * 24 * 3600     # fenêtre "vues 14 jours"
 _BAN_FILE = DATA_DIR / "va_insta_3_stats_cache.json"   # {handle: {banned: true}}
 _lock = threading.Lock()
@@ -81,7 +105,7 @@ def _acct_state(username: str, info: dict, now: float, banned: set) -> str:
     last = info.get("last_post_ts") or 0
     if not last:                 # a des reels mais aucun timestamp exploitable
         return "nodata"
-    return "silent" if (now - last) > SILENCE_SEC else "ok"
+    return "silent" if (now - last) > silence_sec() else "ok"
 
 
 # ---------- SCAN (dernier post + vues par compte) ----------

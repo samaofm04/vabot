@@ -106,7 +106,12 @@ def _regles() -> tuple:
     silence, warmup = 48 * 3600, 5
     try:
         import jb_activity as _ja
-        silence = int(getattr(_ja, "SILENCE_SEC", silence) or silence)
+        # La FONCTION d'abord : c'est elle qui lit le reglage. La constante
+        # ne sert que si une vieille version du module traine encore.
+        if callable(getattr(_ja, "silence_sec", None)):
+            silence = int(_ja.silence_sec() or silence)
+        else:
+            silence = int(getattr(_ja, "SILENCE_SEC", silence) or silence)
     except Exception:
         pass
     try:
