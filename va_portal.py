@@ -544,6 +544,25 @@ def _fmt_count(n) -> str:
     return str(n)
 
 
+def _silence_sec(valeur) -> Optional[float]:
+    """Depuis combien de SECONDES ce compte n'a-t-il rien publie ?
+
+    None quand on ne sait pas — jamais zero : un compte dont on ignore la
+    date du dernier post ne doit pas passer pour un compte qui vient de
+    publier. Meme lecture que `_age_reel`, pour que le badge et le libelle
+    « il y a 3j » ne puissent pas se contredire.
+    """
+    if not valeur:
+        return None
+    try:
+        d = _dt.datetime.fromisoformat(str(valeur).replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=_dt.timezone.utc)
+        return (_dt.datetime.now(_dt.timezone.utc) - d).total_seconds()
+    except Exception:
+        return None
+
+
 def _age_reel(valeur) -> tuple:
     """(libelle, date courte) pour un horodatage de dernier reel."""
     if not valeur:
@@ -628,6 +647,9 @@ body{margin:0;background:var(--fond);color:var(--texte);
 .paie-qui .h{display:inline-block;background:rgba(234,88,12,.12);color:var(--orange);
   border-radius:8px;padding:3px 9px;margin:0 5px 5px 0;font-size:12px;font-weight:600}
 .paie-qui .rien{color:var(--vert);font-weight:700;font-size:12.5px}
+.paie-tot.creux{color:var(--tres-doux)}
+.paie-h .creuse{background:rgba(234,88,12,.14);color:var(--orange);font-size:11px;
+  font-weight:700;padding:2px 9px;border-radius:20px}
 .compteur{margin-left:auto;text-align:right}
 .compteur b{display:block;font-size:24px;font-weight:800;color:var(--accent);line-height:1}
 .compteur span{font-size:10px;letter-spacing:1px;color:var(--tres-doux)}
@@ -690,6 +712,7 @@ input:focus,textarea:focus{outline:2px solid rgba(236,72,153,.35);outline-offset
 .badge.banni{background:rgba(220,38,38,.14);color:var(--rouge)}
 .badge.attente{background:rgba(120,130,150,.16);color:var(--doux)}
 .badge.echec{background:rgba(234,88,12,.14);color:var(--orange)}
+.badge.dort{background:rgba(234,88,12,.16);color:var(--orange)}
 .num{text-align:right;font-weight:700;font-size:13px}
 .num.v{color:var(--vert)}
 .reel{font-size:11px}
@@ -1121,7 +1144,27 @@ def _ligne_compte(a: dict, stats: dict, normaliser, base_pp: str = "") -> str:
     elif s.get("error"):
         badge = "<span class='badge echec'>Échec</span>"
     else:
+        # ENTRE « ACTIF » ET « BANNI », IL MANQUAIT UN MOT.
+        # Un compte muet depuis trois jours s'affichait « Actif », en vert :
+        # le VA le voyait bon et ne comprenait pas pourquoi sa paie ne montait
+        # pas. « En sommeil » dit ce qui se passe — le compte va bien, il ne
+        # publie plus — sans accuser le compte d'etre mort.
         badge = "<span class='badge actif'>Actif</span>"
+        _sil = _silence_sec(s.get("last_reel_at") or s.get("last_post_at"))
+        try:
+            import jb_objectifs as _obs
+            _seuil_sil = float(_obs._regles()[0])
+        except Exception:
+            _seuil_sil = 48 * 3600.0
+        if _sil is not None and _sil > _seuil_sil:
+            _j = int(_sil // 86400)
+            _depuis = (f"{_j} jour{'s' if _j > 1 else ''}" if _j >= 1
+                       else f"{int(_sil // 3600)} h")
+            badge = (f"<span class='badge dort' title=\"Ce compte n'est PAS "
+                     f"banni : il fonctionne, mais il n'a rien publié depuis "
+                     f"{_depuis}. Tant qu'il dort, il ne compte pas dans ta "
+                     f"journée et il ne te rapporte rien. Poste dessus pour "
+                     f"le réveiller.\">En sommeil</span>")
 
     if ok:
         foll = _fmt_count(s.get("followers"))
@@ -1476,13 +1519,30 @@ def register(app, deps):
         def _bloc(jour, titre):
             r = _ob.paie_quinzaine(identite, va, jour)
             lignes = []
+            # LES TROUS SE REGROUPENT. Quatorze lignes « pas de relevé » a la
+            # suite noient les deux journees qui, elles, portent un chiffre :
+            # on ne voit plus l'information, on voit le vide.
+            trous = []
+
+            def _vider():
+                if not trous:
+                    return
+                if len(trous) == 1:
+                    quoi = trous[0]
+                else:
+                    quoi = trous[0] + " → " + trous[-1]
+                lignes.append(
+                    f"<tr class='vide'><td>{quoi}</td><td colspan='2'>"
+                    f"pas de relevé ({len(trous)} jour"
+                    f"{'s' if len(trous) > 1 else ''})</td><td>—</td></tr>")
+                trous.clear()
+
             for l in r["lignes"]:
                 jj = l["jour"][8:10] + "/" + l["jour"][5:7]
                 if not l["mesure"]:
-                    lignes.append(
-                        f"<tr class='vide'><td>{jj}</td><td colspan='2'>"
-                        f"pas de relevé ce jour-là</td><td>—</td></tr>")
+                    trous.append(jj)
                     continue
+                _vider()
                 cls = " class='rien'" if not l["publie"] else ""
                 manque = max(0, r["sur_comptes"] - l["publie"])
                 perdu = manque * (r["par_jour"] / r["sur_comptes"]) if r["sur_comptes"] else 0.0
@@ -1491,6 +1551,21 @@ def register(app, deps):
                     f"<td>{l['publie']}/{r['sur_comptes']}</td>"
                     f"<td class='manque'>{('−%d  (−%.2f $)' % (manque, perdu)) if manque else '—'}</td>"
                     f"<td class='gain'>{l['montant']:.2f} $</td></tr>")
+            _vider()
+            # QUAND LA MOITIE DES JOURS MANQUE, LE TOTAL N'EST PAS UNE PAIE.
+            # Vu en ligne : une quinzaine dont quatorze jours sur seize n'ont
+            # jamais ete releves affichait « 0,75 $ sur 75 » en gros et en
+            # vert. Ca se lit « ce VA n'a rien fait », alors que c'est nous
+            # qui ne mesurions pas encore. Le chiffre reste, il perd sa
+            # couleur, et l'etiquette dit pourquoi.
+            maigre = r["jours_mesures"] * 2 < r["jours_ecoules"]
+            creuse = ""
+            if maigre:
+                creuse = (f"<span class='creuse'>⚠ {r['jours_mesures']} jour"
+                          f"{'s' if r['jours_mesures'] > 1 else ''} relevé"
+                          f"{'s' if r['jours_mesures'] > 1 else ''} sur "
+                          f"{r['jours_ecoules']} — total non représentatif"
+                          f"</span>")
             trou = ""
             if r["jours_non_mesures"]:
                 trou = (f" {r['jours_non_mesures']} journée(s) n'ont pas été "
@@ -1501,8 +1576,10 @@ def register(app, deps):
                 f"<span class='sur'>du {r['debut'][8:10]}/{r['debut'][5:7]} "
                 f"au {r['fin'][8:10]}/{r['fin'][5:7]}</span>"
                 f"<span style='flex:1'></span>"
-                f"<span class='paie-tot'>{r['gagne']:.2f} $</span>"
-                f"<span class='sur'>sur {r['base']:.0f} $</span></div>"
+                + creuse
+                + f"<span class='paie-tot{' creux' if maigre else ''}'>"
+                  f"{r['gagne']:.2f} $</span>"
+                  f"<span class='sur'>sur {r['base']:.0f} $</span></div>"
                 f"<div class='paie-note'>Chaque journée vaut "
                 f"{r['par_jour']:.2f} $, partagée entre {r['sur_comptes']} "
                 f"comptes : <b>chaque compte qui ne publie pas te coûte "
