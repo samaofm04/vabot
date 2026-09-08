@@ -14923,7 +14923,21 @@ def _remove_external_insta(handle: str) -> bool:
 # ============ Stats Insta 3 (RapidAPI + cache 1h) ============
 
 VA_INSTA_3_STATS_FILE = DATA_DIR / "va_insta_3_stats_cache.json"
-_INSTA_3_STATS_TTL = 11 * 3600  # 11h (refresh auto 2x/jour : 00h / 12h)
+# LE CACHE NE DOIT PAS SURVIVRE A DEUX PASSAGES. Il valait 11 h, calibre sur
+# l'ancien ecart de 12 h. Avec six passages par jour, 11 h laissait passer
+# pour « frais » des chiffres vieux de deux cycles entiers — et c'est sur ces
+# chiffres-la qu'on decide si un compte a publie aujourd'hui, donc ce qu'un VA
+# gagne. On prend un peu moins que l'ecart reel, pour qu'un passage un peu
+# tardif ne trouve pas le cache encore valide et ne saute pas son tour.
+def _ttl_stats_insta() -> int:
+    hrs = sorted(_INSTA_REFRESH_HOURS) or [0, 12]
+    if len(hrs) < 2:
+        return 11 * 3600
+    ecarts = [(b - a) for a, b in zip(hrs, hrs[1:])] + [24 - hrs[-1] + hrs[0]]
+    return int(max(1, min(ecarts)) * 3600 * 0.9)
+
+
+_INSTA_3_STATS_TTL = _ttl_stats_insta()
 
 
 def _load_insta_3_stats_cache() -> dict:
@@ -30431,7 +30445,14 @@ def _render_jailbreak_html() -> str:
         "</div>"
         "<div style='margin:-6px 0 16px;color:#666;font-size:11px;display:flex;align-items:center;gap:6px'>"
         "<span style='display:inline-block;width:7px;height:7px;border-radius:50%;background:#22c55e;box-shadow:0 0 5px rgba(34,197,94,.5)'></span>"
-        "Stats Insta rafraîchies automatiquement <b style='color:#aaa'>2×/jour</b> (00h / 12h) — les comptes bannis seulement le 1er et le 15. "
+        # LA PHRASE EST CALCULEE, PAS RECOPIEE. Elle annoncait « 2×/jour
+        # (00h / 12h) » longtemps apres le passage a six passages : une
+        # legende ecrite en dur ment des le premier changement, et c'est
+        # exactement ce qui s'est produit.
+        f"Stats Insta rafraîchies automatiquement <b style='color:#aaa'>"
+        f"{len(_INSTA_REFRESH_HOURS)}×/jour</b> "
+        f"({', '.join('%02dh' % h for h in sorted(_INSTA_REFRESH_HOURS))}) — "
+        f"les comptes bannis seulement le 1er et le 15. "
         "Le point vert = compte déjà scrapé, gris = en attente."
         "</div>"
         # Barre de progression du scrape (masquée tant qu'aucun scrape ne tourne)
