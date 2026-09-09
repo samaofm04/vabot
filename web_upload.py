@@ -36579,6 +36579,11 @@ def _jbanalyse_payload() -> dict:
 
     idents: dict = {}
     vas: dict = {}
+    # LES VA D'UNE IDENTITE. Les deux regroupements ci-dessus repondent a
+    # « quelles identites » et « quels VA, tous confondus » ; aucun ne repond
+    # a « qui a poste pour jessye ». Le meme nom de VA peut exister sous deux
+    # identites, d'ou la cle composee.
+    vaidents: dict = {}
     tot = _blank()
     has_days = False
     cov = 0            # comptes actifs déjà re-scrapés AVEC post_days (couverture courbe)
@@ -36597,7 +36602,8 @@ def _jbanalyse_payload() -> dict:
             st = cache.get(h) or {}
             newest_scrape = max(newest_scrape, int(st.get("scraped_at") or 0))
             groups = (idents.setdefault(ident, _blank()),
-                      vas.setdefault(va, _blank()), tot)
+                      vas.setdefault(va, _blank()),
+                      vaidents.setdefault(ident + "\u0000" + va, _blank()), tot)
             for g in groups:
                 g["n"] += 1
             if not st or st.get("error"):
@@ -36616,13 +36622,13 @@ def _jbanalyse_payload() -> dict:
             for dk, vv in (st.get("post_days") or {}).items():
                 if dk in dayset:
                     has_days = True
-                    for g in groups[:2]:
+                    for g in groups[:3]:
                         g["points"][dk] = g["points"].get(dk, 0) + int(vv or 0)
             # Nb de reels PUBLIÉS par jour (même à 0 vue) : distingue « 0 vue
             # car rien posté » de « posté mais pas encore de vues »
             for dk, vv in (st.get("reel_days") or {}).items():
                 if dk in dayset:
-                    for g in groups[:2]:
+                    for g in groups[:3]:
                         g["rc"][dk] = g["rc"].get(dk, 0) + int(vv or 0)
 
     def _ser(dmap):
@@ -36697,8 +36703,19 @@ def _jbanalyse_payload() -> dict:
     except Exception:
         fhist = fhist or {}
     _fh_days = sorted(fhist.keys())[-14:]
+    # Chaque ligne porte son identite : le front peut alors montrer « qui a
+    # poste » pour une seule creatrice, VA par VA.
+    _vi = []
+    for _k, _g in vaidents.items():
+        _id, _va = _k.split("\u0000", 1)
+        _row = {"name": _va, "ident": _id, "n": _g["n"], "active": _g["active"],
+                "reels": [int(_g["rc"].get(d) or 0) for d in days],
+                "points": [int(_g["points"].get(d) or 0) for d in days]}
+        _vi.append(_row)
+    _vi.sort(key=lambda r: (r["ident"], -sum(r["reels"]), r["name"]))
     tot.pop("points", None)
     return {"ok": True, "days": days, "idents": _ser(idents), "vas": _ser(vas),
+            "vaidents": _vi,
             "tot": tot, "has_days": has_days, "cov": cov, "clicks7": clicks7,
             "fhist": {d: fhist[d] for d in _fh_days if not str(d).startswith("_")},
             "fhist0": {d: fh_first[d] for d in sorted(fh_first.keys())[-2:]},
@@ -37319,14 +37336,29 @@ function jaInsights(){
   h += '</div>';
   el.innerHTML = h;
 }
+function jpIdent(v){
+  window.__jpIdent = v || '';
+  jaPosts();
+}
 function jaPosts(){
   var box = document.getElementById('ja-posts');
   if(!box) return;
   var d = window.__jaData || {};
   var days = d.days || [];
-  var gs = jaGroups();
   var r = jaRangeIdx();
   if(!days.length || r[1] < r[0]){ box.innerHTML = ''; return; }
+
+  // Le choix d'une identite change la QUESTION posee : « qui a poste » ne
+  // veut plus dire « quelle creatrice » mais « quel VA de cette creatrice ».
+  // Sans lui, impossible de repondre a « qui a poste pour jessye » : les
+  // deux regroupements du reste de la page melangent tout le monde.
+  var choix = window.__jpIdent || '';
+  var gs;
+  if(choix){
+    gs = (d.vaidents || []).filter(function(x){ return x.ident === choix; });
+  } else {
+    gs = jaGroups();
+  }
 
   // Une ligne par JOUR, du plus recent au plus ancien : la question posee
   // est « combien de posts le 8 ? », elle se lit du haut de la page.
@@ -37348,10 +37380,13 @@ function jaPosts(){
   var moy = nb ? (total / nb) : 0;
 
   var corps = rows.map(function(x){
-    var det = x.qui.slice(0, 5).map(function(q){
+    // Sur une seule identite, on veut la liste COMPLETE de ses VA : c'est
+    // precisement ce qu'on est venu chercher. Sur toutes, on abrege.
+    var lim = choix ? 30 : 5;
+    var det = x.qui.slice(0, lim).map(function(q){
       return '<i>' + jaEsc(q.n) + ' <b>' + jaNum(q.v) + '</b></i>';
     }).join('');
-    if(x.qui.length > 5) det += '<i>+' + (x.qui.length - 5) + ' autre(s)</i>';
+    if(x.qui.length > lim) det += '<i>+' + (x.qui.length - lim) + ' autre(s)</i>';
     if(!x.qui.length) det = '<i>personne</i>';
     var w = max ? Math.round(100 * x.n / max) : 0;
     return '<tr' + (x.n ? '' : ' class="zero"') + '>'
@@ -37378,7 +37413,15 @@ function jaPosts(){
   box.innerHTML =
     '<div class="jp-h"><b>&#128221; Analyse des comptes</b>'
     + '<span>ce qui a &eacute;t&eacute; PUBLI&Eacute; sur la p&eacute;riode &mdash; '
-    + (window.__jaView === 'va' ? 'par VA' : 'par identit&eacute;') + '</span></div>'
+    + (choix ? 'les VA de ' + jaEsc(choix) : (window.__jaView === 'va' ? 'par VA' : 'par identit&eacute;'))
+    + '</span><span style="flex:1"></span>'
+    + '<select id="jp-ident" class="ja-refresh" style="padding:6px 9px" '
+    + 'onchange="jpIdent(this.value)"><option value="">Toutes les identit&eacute;s</option>'
+    + (d.idents || []).map(function(g){
+        return '<option value="' + jaEsc(g.name) + '"'
+             + (g.name === choix ? ' selected' : '') + '>' + jaEsc(g.name)
+             + ' &mdash; ses VA</option>'; }).join('')
+    + '</select></div>'
     + '<div class="jp-kpis">'
     + '<div class="jp-k"><div class="q">Posts</div><div class="v">' + jaNum(total) + '</div></div>'
     + '<div class="jp-k"><div class="q">Par jour</div><div class="v">' + moy.toFixed(1) + '</div></div>'
@@ -37387,7 +37430,8 @@ function jaPosts(){
     + (best && best.v ? '<div class="jp-k"><div class="q">Meilleur jour</div><div class="v">'
       + jaFrD(best.j) + ' &middot; ' + jaNum(best.v) + '</div></div>' : '')
     + '</div>'
-    + '<table><thead><tr><th>Jour</th><th>Posts</th><th></th><th>Qui a publi&eacute;</th>'
+    + '<table><thead><tr><th>Jour</th><th>Posts</th><th></th><th>'
+    + (choix ? 'Quel VA de ' + jaEsc(choix) : 'Qui a publi&eacute;') + '</th>'
     + '</tr></thead><tbody>' + corps + '</tbody></table>'
     + note;
 }
