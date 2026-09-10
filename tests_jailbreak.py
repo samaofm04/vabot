@@ -1985,6 +1985,73 @@ try:
 except Exception as _epa:
     check("paie : testable", False, repr(_epa)[:200])
 
+
+print()
+print("=" * 70)
+print("PERIMETRE DU SCRAPE : ne jamais juger ce qu on ne mesure plus")
+print("=" * 70)
+try:
+    import json as _jsu, time as _tsu
+    import jb_objectifs as _obs
+
+    _fsu = _obs.SCRAPE_IDENTS_FILE
+    _fsu.parent.mkdir(parents=True, exist_ok=True)
+    _sauve = _fsu.read_text(encoding="utf-8") if _fsu.exists() else None
+
+    def _perimetre(actives):
+        if actives is None:
+            _fsu.unlink(missing_ok=True)
+            _fsu.with_suffix(".json.prev").unlink(missing_ok=True)
+        else:
+            _fsu.write_text(_jsu.dumps({"actives": actives}), encoding="utf-8")
+
+    _cs = [{"username": "z%d" % i, "created_at": _tsu.time() - 40 * 86400}
+           for i in range(4)]
+    _st = {c["username"]: {"scraped_at": _tsu.time() - 5 * 86400, "reel_days": {}}
+           for c in _cs}
+    try:
+        # SANS REGLAGE, TOUT EST SUIVI : deployer ne doit rien eteindre.
+        _perimetre(None)
+        check("perimetre : sans fichier, tout est suivi", _obs.suivi_actif("jessye"))
+        _e = _obs.etat_fiche("jessye", "VA Z", _cs, _st)
+        check("perimetre : suivie, les muets sont des oublis",
+              _e["oublies"] == 4 and _e["non_mesures"] == 0, str(_e["oublies"]))
+
+        _perimetre(["autre"])
+        check("perimetre : eteinte, suivi_actif est faux",
+              not _obs.suivi_actif("jessye"))
+        _e2 = _obs.etat_fiche("jessye", "VA Z", _cs, _st)
+        check("perimetre : eteinte, plus AUCUN oubli reproche",
+              _e2["oublies"] == 0, str(_e2["oublies"]))
+        check("perimetre : eteinte, les comptes sont NON MESURES",
+              _e2["non_mesures"] == 4, str(_e2["non_mesures"]))
+        check("perimetre : la fiche porte son etat de suivi",
+              _e2["suivi"] is False)
+        # LE POINT QUI COUTE DE L ARGENT : aucune journee a zero ne doit
+        # entrer dans le fichier qui sert a payer.
+        check("perimetre : aucune journee gravee pour une fiche non suivie",
+              _obs.enregistrer_jour([_e2], _obs.aujourdhui()) == 0)
+        _perimetre(["jessye"])
+        check("perimetre : rallumee, elle redevient mesurable",
+              _obs.suivi_actif("jessye")
+              and _obs.etat_fiche("jessye", "VA Z", _cs, _st)["non_mesures"] == 0)
+    finally:
+        if _sauve is None:
+            _fsu.unlink(missing_ok=True)
+            _fsu.with_suffix(".json.prev").unlink(missing_ok=True)
+        else:
+            _fsu.write_text(_sauve, encoding="utf-8")
+
+    # Les ecrans doivent le DIRE, pas afficher un zero.
+    _srcW = pathlib.Path("web_upload.py").read_text(encoding="utf-8")
+    _srcV = pathlib.Path("va_portal.py").read_text(encoding="utf-8")
+    check("perimetre : le dashboard dit « non suivie »", "non suivie" in _srcW)
+    check("perimetre : le portail dit « suivi en pause »", "suivi en pause" in _srcV)
+    check("perimetre : le portail n affiche AUCUN montant sans mesure",
+          "ta paie ne" in _srcV.lower())
+except Exception as _esu:
+    check("perimetre : testable", False, repr(_esu)[:200])
+
 if FAILS:
     print("ECHECS :")
     for f in FAILS:

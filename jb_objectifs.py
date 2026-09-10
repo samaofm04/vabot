@@ -94,6 +94,30 @@ HISTO_JOURS = 70
 VA_ACT_CFG = DATA_DIR / "va_activity_cfg.json"
 
 
+#: Le perimetre du scrape, ecrit par l'ecran Jailbreak.
+SCRAPE_IDENTS_FILE = DATA_DIR / "scrape_identites.json"
+
+
+def suivi_actif(identite: str) -> bool:
+    """Les comptes de cette identite sont-ils encore scrapes ?
+
+    On relit le fichier plutot que d'importer web_upload : ce module est
+    appele DEPUIS web_upload, et le report de minuit tourne sans lui. Meme
+    motif que `_regles`, qui relit deja la configuration de l'Activite VA.
+
+    Sans fichier, tout est suivi — c'est l'etat d'avant le reglage, et il ne
+    faut surtout pas que son absence eteigne tout le monde.
+    """
+    try:
+        d = safe_json.load(SCRAPE_IDENTS_FILE, default=None)
+        if isinstance(d, dict) and isinstance(d.get("actives"), list):
+            return str(identite or "").strip().lower() in {
+                str(x).strip().lower() for x in d["actives"]}
+    except Exception:
+        pass
+    return True
+
+
 def _regles() -> tuple:
     """(secondes de silence tolerees, jours de warm-up).
 
@@ -240,7 +264,8 @@ def aujourdhui() -> str:
 
 
 def etat_compte(compte: dict, stats: dict, maintenant: float,
-                jour: str, silence_sec: int, warmup_jours: int) -> dict:
+                jour: str, silence_sec: int, warmup_jours: int,
+                suivi: bool = True) -> dict:
     """Ce qu'on sait d'UN compte aujourd'hui.
 
     Rend {actif, banni, warmup, publie_aujourdhui, cree_aujourdhui, oublie}.
@@ -288,9 +313,22 @@ def etat_compte(compte: dict, stats: dict, maintenant: float,
     # simplement pas encore commence. Un banni non plus — il n'y a plus
     # personne derriere.
     oublie = (not banni) and (not en_warmup) and (not recent)
+    # « NON MESURE » : L'ETAT QUI MANQUAIT.
+    # Un compte etait actif ou il ne l'etait pas ; il n'existait pas d'etat
+    # « on ne sait pas ». Des qu'on cesse de scraper une identite, sa date de
+    # dernier post cesse d'avancer : quarante-huit heures plus tard, TOUS ses
+    # comptes basculent en « oublie » — un mot qui accuse le VA — et sa paie
+    # tombe a zero. Personne n'a rien fait de mal : on a arrete de regarder.
+    #
+    # Un compte non mesure n'est ni actif, ni oublie. Il sort du calcul.
+    non_mesure = (not banni) and (not suivi)
+    if non_mesure:
+        actif = False
+        oublie = False
     return {
         "handle": h,
         "actif": actif,
+        "non_mesure": non_mesure,
         "banni": banni,
         "warmup": en_warmup,
         "publie_aujourdhui": publie,
@@ -313,7 +351,9 @@ def etat_fiche(identite: str, va: str, comptes: List[dict],
     jour = jour or _jour_paris(maintenant)
     silence_sec, warmup_jours = _regles()
 
-    lignes = [etat_compte(c, stats, maintenant, jour, silence_sec, warmup_jours)
+    suivi = suivi_actif(identite)
+    lignes = [etat_compte(c, stats, maintenant, jour, silence_sec, warmup_jours,
+                          suivi)
               for c in (comptes or []) if isinstance(c, dict)]
 
     objectif = objectif_de(identite, va)
@@ -331,6 +371,10 @@ def etat_fiche(identite: str, va: str, comptes: List[dict],
         "ajoutes": sum(1 for x in lignes if x["cree_aujourdhui"]),
         "oublies": sum(1 for x in lignes if x["oublie"]),
         "jamais_scrapes": sum(1 for x in lignes if x["jamais_scrape"]),
+        "non_mesures": sum(1 for x in lignes if x.get("non_mesure")),
+        # `suivi` voyage avec la mesure : sans lui, l'ecran qui affiche ces
+        # chiffres ne peut pas savoir s'ils valent quelque chose.
+        "suivi": suivi,
         "objectif": objectif,
         "seuil": seuil,
         "pct": round(100.0 * actifs / objectif, 1) if objectif else 0.0,
@@ -377,6 +421,30 @@ def enregistrer_jour(etats: List[dict], jour: str = "") -> int:
     journee au lieu de la compter deux fois.
     """
     jour = jour or aujourdhui()
+    if not etats:
+        return 0
+    # ON NE GRAVE PAS UNE JOURNEE QU'ON N'A PAS REGARDEE.
+    #
+    # Une fiche dont l'identite n'est plus scrapee produirait une journee
+    # « 0 publie, tout le monde oublie », indiscernable d'une vraie journee a
+    # zero une fois ecrite — et c'est ce fichier qui sert a PAYER. Pire : la
+    # purge garde les soixante-dix derniers jours, donc ces faux zeros
+    # finiraient par chasser les vraies journees du fichier.
+    #
+    # L'absence, elle, est deja traitee honnetement partout : `bilan_quinzaine`
+    # ne compte que les journees notees, `paie_quinzaine` les range dans
+    # « jours_non_mesures » et le portail du VA ecrit « pas de releve ce
+    # jour-la ». On laisse donc un TROU, qui dit la verite.
+    gardes, ignores = [], []
+    for e in etats:
+        if isinstance(e, dict) and e.get("suivi") is False:
+            ignores.append(str(e.get("identite") or "") + "|" + str(e.get("va") or ""))
+        else:
+            gardes.append(e)
+    if ignores:
+        print("[objectifs] %d fiche(s) non gravee(s) — identite non suivie : %s"
+              % (len(ignores), ", ".join(sorted(set(ignores))[:8])), flush=True)
+    etats = gardes
     if not etats:
         return 0
     with _LOCK:

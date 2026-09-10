@@ -14537,6 +14537,11 @@ def fixer_identites_suivies(actives) -> set:
     return set(vals)
 
 
+class _SuiviEteint(Exception):
+    """Signal interne : l'identite n'est pas scrapee, on n'affiche pas de
+    chiffre qui pretendrait la mesurer."""
+
+
 def _suivi_pastilles_html(identities) -> str:
     """Une pastille par identite : allumee = scrapee, eteinte = ignoree."""
     noms = sorted({str(x or "").strip().lower() for x in (identities or []) if str(x or "").strip()})
@@ -31253,6 +31258,20 @@ def _render_jailbreak_html() -> str:
                         import jb_objectifs as _ob
                         _eo = _ob.etat_fiche(ident_lc, va_name, va_accts, ig_stats_cache)
                         _ocls2 = "ok" if _eo["atteint"] else "warn"
+                        if not _eo.get("suivi", True):
+                            # NE PAS JUGER CE QU'ON NE MESURE PLUS. Sans ca,
+                            # eteindre une identite affichait « 0/20 tournent »
+                            # en orange sur des fiches dont tous les comptes
+                            # publient peut-etre — et payait leurs VA a zero.
+                            scrape_pill += (
+                                f"<span class='jb-acc-pill quiet' title=\"Le scrape "
+                                f"est éteint pour cette identité : ses chiffres ne "
+                                f"sont plus mis à jour. Ni ses comptes ni son VA ne "
+                                f"sont en cause. Rallume-la dans « Périmètre du "
+                                f"scrape », en haut de la page.\">"
+                                f"⏸ non suivie — {_eo['non_mesures']} compte(s) "
+                                f"non mesuré(s)</span>")
+                            raise _SuiviEteint()
                         # « Qui tournent », le mot du propriétaire. « Actifs »
                         # désignait déjà autre chose sur cette ligne, et le
                         # jargon lui a fait perdre confiance dans la pastille.
@@ -31318,6 +31337,8 @@ def _render_jailbreak_html() -> str:
                                 f"pas à un compte neuf de ne pas encore poster.'>"
                                 f"🌱 {_eo['warmup']} en warm-up</span>"
                             )
+                    except _SuiviEteint:
+                        pass          # identite eteinte : rien d'autre a dire
                     except Exception as _e_ob:
                         print(f"[objectif] pastille non rendue : {_e_ob}", flush=True)
                     if _n_ban:

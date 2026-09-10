@@ -1473,6 +1473,16 @@ def register(app, deps):
                 etat = _ob.etat_fiche(identite, va, comptes, stats)
             except Exception as e:                  # noqa: BLE001
                 log.warning("va_portal: objectif indisponible (%s)", e)
+        if etat is not None and not etat.get("suivi", True):
+            # LE VA N'EST PAS EN CAUSE. Sans ca, sa page lui annoncait
+            # « 0/20 qui tournent », « 39 a relancer » et « 0,00 $ » parce que
+            # le patron avait eteint le scrape de sa creatrice.
+            out.append(
+                "<span class='pill' title=\"Le suivi Instagram est en pause "
+                "pour cette créatrice : tes chiffres ne sont plus mis à jour. "
+                "Ce n'est pas toi. Continue à poster normalement.\">"
+                "⏸ suivi en pause</span>")
+            return "".join(out)
         if etat is not None:
             cls = "ok" if etat["atteint"] else "warn"
             out.append(
@@ -1638,6 +1648,19 @@ def register(app, deps):
                     f"{len(muets)} compte(s) n'ont pas encore publié — "
                     f"c'est ce qui te fait perdre de l'argent :</b>"
                     f"{puces}{reste}</div>")
+
+        # PAS DE MONTANT SANS MESURE. Le bloc entier disparait au profit
+        # d'une explication : afficher « 0,00 $ sur 75 » a quelqu'un dont on a
+        # simplement cesse de regarder le travail, c'est l'accuser.
+        if not _ob.suivi_actif(identite):
+            return ("<div class='carte'><div class='paie-h'>"
+                    "<h2>Ta paie</h2></div><div class='paie-note'>"
+                    "Le suivi Instagram est en pause pour cette créatrice : "
+                    "tes publications ne sont plus relevées, donc ta paie ne "
+                    "peut pas être calculée pour l'instant. "
+                    "<b>Ce n'est pas toi, et rien n'est perdu</b> — continue à "
+                    "poster normalement, parles-en à ton manager."
+                    "</div></div>")
 
         aujourd = _ob.aujourdhui()
         debut, _f = _ob.quinzaine(aujourd)
