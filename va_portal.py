@@ -512,6 +512,25 @@ def journaliser(jeton: str, action: str, cibles: List[str], ip: str = "") -> Non
         log.warning("va_portal: journal non ecrit (%s)", e)
 
 
+def _sans_secret(ligne: str) -> str:
+    """La ligne refusee, privee de ce qui pourrait etre un mot de passe.
+
+    Les VA collent souvent « pseudo:motdepasse » ou « pseudo mdp123 ». On veut
+    garder la trace de ce qu'ils ont tape — sinon personne ne saura jamais
+    pourquoi l'ajout echoue — mais surement pas ecrire leur mot de passe dans
+    un journal. On coupe donc au premier separateur et on dit qu'il y avait
+    une suite, au lieu de la recopier.
+    """
+    t = str(ligne or "").strip()
+    for sep in (":", "|", ";", "\t", " "):
+        if sep in t:
+            tete, _, reste = t.partition(sep)
+            if reste.strip():
+                return (tete.strip()[:40] + " […]")
+            t = tete.strip()
+    return t[:40]
+
+
 def _marquer_ouverture(jeton: str) -> None:
     try:
         with _LOCK:
@@ -1879,6 +1898,17 @@ def register(app, deps):
             return jsonify({"ok": False, "error": f"Ajout impossible : {e}"[:200]})
 
         ajoutes = res.get("added_usernames") or []
+        # DEUX DOUBLONS TRES DIFFERENTS, UN SEUL MESSAGE.
+        # « deja present » couvrait aussi bien « il est deja dans ta liste,
+        # regarde plus bas » que « il est sur la fiche d un autre VA de cette
+        # creatrice, tu ne l auras jamais ». Le premier se resout tout seul,
+        # le second demande un manager — et le VA ressaisissait indefiniment
+        # sans comprendre. On ne nomme pas le voisin, on dit juste ou chercher.
+        _miens = {str(c.get("username") or "").strip().lower()
+                  for c in _comptes_de(identite, va)}
+        _dups = [str(u).strip() for u in (res.get("skipped_dups") or [])]
+        dup_ici = [u for u in _dups if u.lower() in _miens]
+        dup_ailleurs = [u for u in _dups if u.lower() not in _miens]
         if ajoutes and callable(kick_scrape):
             try:
                 kick_scrape(ajoutes, label="va-portail")
@@ -1891,18 +1921,34 @@ def register(app, deps):
                 log.warning("va_portal: push Sheet non lance (%s)", e)
 
         morceaux = [f"{res.get('added', 0)} compte(s) ajouté(s)"]
-        if res.get("skipped_dup"):
-            # Volontairement muet sur QUI est le doublon : le dire nommerait un
-            # compte qui peut appartenir a une autre fiche de la meme identite,
-            # et cette page ne doit rien laisser deviner des voisins.
-            morceaux.append(f"{res['skipped_dup']} déjà présent(s)")
+        if dup_ici:
+            # Nommer ceux-la ne revele rien : ils sont deja affiches juste
+            # dessous, dans sa propre liste.
+            morceaux.append(f"{len(dup_ici)} déjà dans ta liste ("
+                            + ", ".join(dup_ici[:3]) + ")")
+        if dup_ailleurs:
+            # On ne dit PAS chez qui : cette page ne doit rien laisser deviner
+            # des voisins. Mais on dit que ce n'est pas la peine de reessayer.
+            morceaux.append(f"{len(dup_ailleurs)} déjà suivi(s) sur une autre "
+                            f"fiche de cette créatrice — vois avec ton manager, "
+                            f"le ressaisir ne changera rien")
         if res.get("skipped_invalid"):
             morceaux.append(f"{res['skipped_invalid']} invalide(s)")
         if doublons:
             morceaux.append(f"{doublons} doublon(s) dans le collage")
         if ecartes:
+            # LA TRACE. Sans elle, personne ne saura jamais ce que les VA
+            # tapent quand « ca ne marche pas » : le message part dans un
+            # toast que le VA ne lit pas, et l information est perdue. Le
+            # journal de la fiche la garde, sans le mot de passe eventuel.
+            journaliser(jeton, "refus",
+                        [_sans_secret(x) for x in ecartes], _ip())
             morceaux.append(f"{len(ecartes)} ligne(s) non reconnue(s) : "
-                            + ", ".join(ecartes[:3]))
+                            + ", ".join(ecartes[:3])
+                            + " — un pseudo Instagram ne contient que lettres, "
+                              "chiffres, point et tiret bas. Colle le pseudo "
+                              "seul, ou le lien du profil ; pas le mot de passe "
+                              "sur la même ligne")
         # Deux troncatures differentes, deux nombres differents : le collage
         # trop long, et le plafond du jour. Elles etaient additionnees dans un
         # unique « 1 ligne laissee de cote » qui pouvait en cacher quatre-vingt-dix-neuf.

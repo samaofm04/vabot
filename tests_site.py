@@ -312,6 +312,33 @@ check("modif de l'onglet identité non annulée", _a["u1"]["password"] == "NOUVE
 st = _mk()
 _merge({"lola": [{"username": "u1", "password": "SECRET1", "email": "a@x.io", "two_fa": "KEY1",
                   "va": "Andry", "notes": "n1", "__cols__": C_FULL}]}, st)
+# --- Portail VA : ce que le VA COMPREND quand son ajout echoue -----------
+try:
+    import va_portal as _vpA
+    # Le mot de passe colle sur la meme ligne ne doit JAMAIS entrer au journal.
+    check("refus : le mot de passe colle n entre pas au journal",
+          _vpA._sans_secret("jessy.mael:MonMotDePasse123") == "jessy.mael […]",
+          _vpA._sans_secret("jessy.mael:MonMotDePasse123"))
+    check("refus : un pseudo seul reste intact",
+          _vpA._sans_secret("jessy.mael") == "jessy.mael")
+    check("refus : l espace aussi separe (pseudo mdp)",
+          _vpA._sans_secret("jessy mael azerty") == "jessy […]",
+          _vpA._sans_secret("jessy mael azerty"))
+    check("refus : le lien de profil passe entier",
+          _vpA._sans_secret("instagram.com/jessy.mael") == "instagram.com/jessy.mael")
+    # Le message distingue les deux doublons : c est tout l enjeu.
+    _srcA = pathlib.Path("va_portal.py").read_text(encoding="utf-8")
+    check("doublon : « deja dans ta liste » existe",
+          "déjà dans ta liste" in _srcA)
+    check("doublon : « autre fiche de cette créatrice » existe",
+          "fiche de cette créatrice" in _srcA)
+    check("doublon : on ne nomme jamais le voisin",
+          "dup_ailleurs[:3]" not in _srcA and "join(dup_ailleurs" not in _srcA)
+    check("refus : la trace est ecrite dans le journal de la fiche",
+          'journaliser(jeton, "refus"' in _srcA)
+except Exception as _eA:
+    check("portail VA : ajout testable", False, repr(_eA)[:160])
+
 check("suppression volontaire toujours appliquée",
       [x["username"] for x in st["lola"]["accounts"]] == ["u1"],
       [x["username"] for x in st["lola"]["accounts"]])
