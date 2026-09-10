@@ -14485,6 +14485,87 @@ def _set_refresh_status(**kw):
     _save_refresh_state(s)
 
 
+#: Quelles identites sont SUIVIES par le scrape Instagram.
+#: Le fichier ne contient que la liste des actives ; tout ce qui n'y figure
+#: pas n'est pas scrape. C'est volontairement le sens le plus econome : une
+#: identite ajoutee demain ne se met pas a bruler du quota toute seule.
+SCRAPE_IDENTS_FILE = DATA_DIR / "scrape_identites.json"
+
+
+def identites_suivies() -> set:
+    """Les identites dont les comptes sont scrapes. Vide = aucune.
+
+    ATTENTION AU SENS : « pas dans la liste » veut dire « on ne REGARDE plus »,
+    jamais « rien ne se passe ». Tout ecran qui lit le cache d'une identite non
+    suivie doit le dire au lieu d'afficher un zero — c'est le salaire des VA
+    qui se lit sur ces chiffres.
+    """
+    try:
+        d = safe_json.load(SCRAPE_IDENTS_FILE, default=None)
+        if isinstance(d, dict) and isinstance(d.get("actives"), list):
+            return {str(x).strip().lower() for x in d["actives"] if str(x).strip()}
+    except Exception:
+        pass
+    # PREMIER DEMARRAGE : aucun fichier. On ne coupe PAS tout le monde en
+    # silence — ce serait faire tomber la paie de chaque VA le jour du
+    # deploiement. Sans fichier, tout reste suivi comme avant ; c'est la
+    # premiere ecriture depuis l'ecran qui fait basculer dans le mode choisi.
+    return _TOUTES_IDENTITES
+
+
+#: Sentinelle : « le reglage n'existe pas encore, tout est suivi ».
+_TOUTES_IDENTITES = frozenset({"*"})
+
+
+def identite_suivie(ident: str) -> bool:
+    """Cette identite est-elle scrapee ?"""
+    a = identites_suivies()
+    if a is _TOUTES_IDENTITES or "*" in a:
+        return True
+    return str(ident or "").strip().lower() in a
+
+
+def fixer_identites_suivies(actives) -> set:
+    """Ecrit la liste. La premiere ecriture fait quitter le mode « tout »."""
+    vals = sorted({str(x).strip().lower() for x in (actives or []) if str(x).strip()})
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        safe_json.write(SCRAPE_IDENTS_FILE, {"actives": vals,
+                                             "modifie": int(time.time())})
+    except Exception as e:                          # noqa: BLE001
+        print(f"[scrape-idents] ecriture impossible : {e}", flush=True)
+    return set(vals)
+
+
+def _suivi_pastilles_html(identities) -> str:
+    """Une pastille par identite : allumee = scrapee, eteinte = ignoree."""
+    noms = sorted({str(x or "").strip().lower() for x in (identities or []) if str(x or "").strip()})
+    if not noms:
+        return ""
+    suivies = identites_suivies()
+    tout = (suivies is _TOUTES_IDENTITES) or ("*" in suivies)
+    n_on = len(noms) if tout else sum(1 for n in noms if n in suivies)
+    puces = []
+    for n in noms:
+        on = tout or (n in suivies)
+        puces.append(
+            f"<button type='button' class='sv-pill{' on' if on else ''}' "
+            f"data-ident='{html_escape(n)}' data-on='{1 if on else 0}' "
+            f"onclick='jbSuivi(this)' "
+            f"title=\"{'Suivi : ses comptes sont scrapés' if on else 'Ignoré : aucun appel, aucun crédit dépensé'}\">"
+            f"{'●' if on else '○'} {html_escape(n)}</button>")
+    etat = ("<b>Tout est suivi</b> — aucune restriction posée"
+            if tout else
+            f"<b>{n_on}/{len(noms)}</b> identité(s) suivie(s)")
+    return (
+        "<div class='sv-box'>"
+        "<div class='sv-h'>🎯 Périmètre du scrape — " + etat +
+        ". Une identité éteinte garde ses comptes ; on cesse seulement de les "
+        "interroger, et ses chiffres cessent d'être à jour.</div>"
+        "<div class='sv-pills'>" + "".join(puces) + "</div>"
+        "</div>")
+
+
 def _all_tracked_handles() -> set:
     """Tous les handles Insta tracked dans le bot (VAs + externals + jailbreak).
 
@@ -14505,8 +14586,15 @@ def _all_tracked_handles() -> set:
     # Jailbreak : tous les usernames de tous les comptes, toutes identites
     try:
         import jailbreak as _jb_h
-        for _ident_data in _jb_h.list_all().values():
+        _suivies = identites_suivies()
+        _tout = (_suivies is _TOUTES_IDENTITES) or ("*" in _suivies)
+        for _ident_nom, _ident_data in _jb_h.list_all().items():
             if not isinstance(_ident_data, dict):
+                continue
+            # LE FILTRE. Une identite non suivie ne consomme plus un seul
+            # appel : c'est tout l'objet du reglage. Ses comptes restent dans
+            # le referentiel, ils ne sont simplement plus regardes.
+            if not _tout and str(_ident_nom or "").strip().lower() not in _suivies:
                 continue
             for _acc in (_ident_data.get("accounts") or []):
                 if not isinstance(_acc, dict):
@@ -14719,8 +14807,17 @@ def _run_daily_insta_refresh():
     import datetime as _dt_dr
     handles = sorted(_all_tracked_handles())
     day = _dt_dr.datetime.now().day
-    if day in (1, 15):
-        return _do_refresh(handles, label="daily+bannis")
+    # QUAND LE PERIMETRE EST CHOISI, ON SCRAPE TOUT — bannis compris.
+    # La regle du 1er et du 15 existait pour ne pas bruler du quota sur des
+    # comptes morts quand on passait sur les 994. Des lors que le proprietaire
+    # a restreint le suivi a quelques identites, l economie est deja faite
+    # ailleurs, et savoir CHAQUE JOUR si un banni est revenu vaut mieux que
+    # l apprendre deux fois par mois.
+    _suivies = identites_suivies()
+    _restreint = not ((_suivies is _TOUTES_IDENTITES) or ("*" in _suivies))
+    if _restreint or day in (1, 15):
+        return _do_refresh(handles, label=("daily+bannis" if _restreint
+                                           else "daily+bannis"))
     banned = _banned_handles()
     todo = [h for h in handles if (h or "").strip().lower() not in banned]
     skipped = len(handles) - len(todo)
@@ -30455,6 +30552,13 @@ def _render_jailbreak_html() -> str:
         f"les comptes bannis seulement le 1er et le 15. "
         "Le point vert = compte déjà scrapé, gris = en attente."
         "</div>"
+        # LE PERIMETRE DU SCRAPE, EN CLAIR ET CLIQUABLE.
+        # Le quota RapidAPI se depense par compte scrape : suivre une identite
+        # qu'on ne regarde jamais coute sans rien rapporter. Les identites
+        # eteintes gardent leurs comptes, on cesse simplement de les
+        # interroger — et tout ecran qui lit leurs chiffres doit le DIRE au
+        # lieu d'afficher un zero.
+        + _suivi_pastilles_html(identities) +
         # Barre de progression du scrape (masquée tant qu'aucun scrape ne tourne)
         "<div id='jb-scrape-prog' style='display:none;margin:0 0 16px;background:#0f1116;"
         "border:1px solid #23262f;border-radius:12px;padding:12px 16px'>"
@@ -31971,6 +32075,26 @@ def _render_jailbreak_html() -> str:
         "     if(typeof showToast === 'function')"
         "       showToast('Paie : ' + j.paie_jour + ' $/jour sur ' + j.base_comptes"
         "                 + ' comptes (' + (j.paie_jour * 15).toFixed(2) + ' $ la quinzaine)', 'success');"
+        "     jbSoftRefresh();"
+        "   });"
+        "}"
+        "function jbSuivi(el){"
+        "  var on = el.dataset.on === '1' ? '0' : '1';"
+        "  var fd = new FormData();"
+        "  fd.append('identity', el.dataset.ident || '');"
+        "  fd.append('on', on);"
+        "  el.disabled = true;"
+        "  fetch('/jailbreak/suivi', {method:'POST', body:fd})"
+        "   .then(_jbJsonOrAuth)"
+        "   .then(function(j){"
+        "     el.disabled = false;"
+        "     if(!j) return;"
+        "     if(!j.ok){"
+        "       if(typeof showToast === 'function') showToast(j.error || 'Echec', 'error');"
+        "       return;"
+        "     }"
+        "     if(typeof showToast === 'function')"
+        "       showToast(j.suivies + ' identite(s) suivie(s) — ' + (j.on ? 'active' : 'eteinte'), 'success');"
         "     jbSoftRefresh();"
         "   });"
         "}"
@@ -36729,6 +36853,27 @@ def _render_jbanalyse_html() -> str:
     css = """
 <style>
 #ja-root{max-width:1180px}
+/* --- Perimetre du scrape ---------------------------------------------- */
+.sv-box{background:#0f0f13;border:1px solid #1d2027;border-radius:12px;
+  padding:11px 14px;margin:-4px 0 16px}
+.sv-h{color:#8b93a1;font-size:11.5px;line-height:1.5;margin-bottom:8px}
+.sv-h b{color:#e7eaf3}
+.sv-pills{display:flex;gap:6px;flex-wrap:wrap}
+.sv-pill{background:#15161c;border:1px solid #23262f;color:#6b7280;
+  border-radius:999px;padding:4px 11px;font-size:12px;font-weight:600;
+  cursor:pointer;font-family:inherit}
+.sv-pill:hover{border-color:#3a3f4b;color:#c3cadb}
+.sv-pill.on{background:rgba(34,197,94,.14);border-color:rgba(34,197,94,.35);
+  color:#4ade80}
+/* Contrepartie claire, sinon le bandeau est du blanc sur du blanc : le vert
+   #4ade80 tombe a 1,7 de contraste sur fond clair, et le texte a 1,2. */
+body.light .sv-box{background:#fff;border-color:#e5e7eb}
+body.light .sv-h{color:#6b7280}
+body.light .sv-h b{color:#111827}
+body.light .sv-pill{background:#f3f4f6;border-color:#e5e7eb;color:#6b7280}
+body.light .sv-pill:hover{border-color:#d1d5db;color:#111827}
+body.light .sv-pill.on{background:rgba(22,163,74,.12);
+  border-color:rgba(22,163,74,.38);color:#15803d}
 /* --- Analyse des comptes : ce qui a ete PUBLIE, pas ce qui a ete vu ---- */
 #ja-posts{margin-top:18px;background:#0f0f13;border:1px solid #1d2027;
   border-radius:14px;overflow:hidden}
@@ -56645,6 +56790,40 @@ def create_app():
         except Exception as e:
             return jsonify({"ok": False, "error": f"Envoi échoué : {e}"[:200]})
         return jsonify({"ok": True, "salons": salons, **(res or {})})
+
+    @app.route("/jailbreak/suivi", methods=["POST"])
+    def jailbreak_suivi():
+        """Allume ou eteint le scrape d'une identite.
+
+        Hors allow-list des roles restreints, comme les autres reglages qui
+        coutent de l'argent : seul le proprietaire decide ou part le quota.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "auth": True,
+                            "error": "Session expirée — la page va se recharger"}), 401
+        ident = (request.form.get("identity") or "").strip().lower()
+        if not ident:
+            return jsonify({"ok": False, "error": "Identité manquante"})
+        veut = (request.form.get("on") or "") == "1"
+        # PREMIERE BASCULE : le reglage n'existe pas encore et tout est suivi.
+        # On part donc de la liste COMPLETE, sinon eteindre une identite
+        # eteindrait toutes les autres du meme coup.
+        actuelles = identites_suivies()
+        if (actuelles is _TOUTES_IDENTITES) or ("*" in actuelles):
+            try:
+                import jailbreak as _jbs
+                actuelles = {str(k).strip().lower() for k in _jbs.list_all().keys()}
+            except Exception:
+                actuelles = {ident}
+        actuelles = set(actuelles)
+        if veut:
+            actuelles.add(ident)
+        else:
+            actuelles.discard(ident)
+        finales = fixer_identites_suivies(actuelles)
+        return jsonify({"ok": True, "on": veut, "suivies": len(finales),
+                        "actives": sorted(finales)})
 
     @app.route("/jailbreak/objectif", methods=["POST"])
     def jailbreak_objectif():
