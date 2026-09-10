@@ -257,10 +257,14 @@ def _mk():
     return {"lola": {"vas": [{"name": "Andry", "discord_username": ""},
                              {"name": "Bo7", "discord_username": ""}],
             "accounts": [
+                # `vu_sheet` : ces comptes portent mot de passe, e-mail et 2FA,
+                # c est-a-dire qu ils VIENNENT du Sheet. Sans la marque, la
+                # regle « jamais vu, jamais supprime » les protegerait et le
+                # banc ne testerait plus la suppression.
                 {"id": 1, "username": "u1", "va": "Andry", "password": "SECRET1",
-                 "email": "a@x.io", "two_fa": "KEY1", "notes": "n1"},
+                 "email": "a@x.io", "two_fa": "KEY1", "notes": "n1", "vu_sheet": 1},
                 {"id": 2, "username": "u2", "va": "Andry", "password": "SECRET2",
-                 "email": "b@x.io", "two_fa": "KEY2", "notes": "n2"}]}}
+                 "email": "b@x.io", "two_fa": "KEY2", "notes": "n2", "vu_sheet": 1}]}}
 
 
 def _merge(sheet, state):
@@ -730,18 +734,34 @@ try:
           "tout.neuf" in _restentGr(30), _restentGr(30))
     check("grace : idem apres trois minutes (deux cycles de pull)",
           "tout.neuf" in _restentGr(180), _restentGr(180))
-    # La grace a une FIN, et c est voulu : supprimer une ligne dans le Sheet
-    # doit continuer de supprimer sur le site. Sans cette borne, on aurait
-    # repare la disparition en cassant la suppression.
-    check("grace : passe la fenetre, une absence du Sheet supprime toujours",
-          "tout.neuf" not in _restentGr(_ss.GRACE_AJOUT + 300),
-          _restentGr(_ss.GRACE_AJOUT + 300))
-    # Non vide : sans la grace, le compte de 30 s disparait.
+    # UNE SUPPRESSION A UNE HISTOIRE : le compte etait dans le Sheet, quelqu un
+    # a retire sa ligne. Un compte que le Sheet n a JAMAIS vu n a ete supprime
+    # par personne — son absence ne prouve que l echec du push, et il survit
+    # desormais indefiniment. C est la demande du proprietaire : ce qu un VA
+    # saisit doit rester.
+    check("jamais vu du Sheet : il survit meme longtemps apres la grace",
+          "tout.neuf" in _restentGr(_ss.GRACE_AJOUT + 86400),
+          _restentGr(_ss.GRACE_AJOUT + 86400))
+
+    # La suppression, elle, marche toujours — sur un compte que le Sheet A vu.
+    def _restentVu(age_s):
+        _j = _jbGr(age_s)
+        for _a in _j._data["jessye"]["accounts"]:
+            _a["vu_sheet"] = _nowGr - 86400      # le Sheet le connaissait
+        _ss._merge_sheet_into_data(_classeurGr(), _j, force_delete=False)
+        return [a["username"] for a in _j._data["jessye"]["accounts"]]
+
+    check("vu puis retire du Sheet : la suppression s applique toujours",
+          "tout.neuf" not in _restentVu(_ss.GRACE_AJOUT + 300),
+          _restentVu(_ss.GRACE_AJOUT + 300))
+    check("vu du Sheet mais dans la grace : encore protege",
+          "tout.neuf" in _restentVu(30), _restentVu(30))
+    # Non vide : sans la grace, le compte vu et absent du Sheet disparait.
     _svGr = _ss.GRACE_AJOUT
     try:
         _ss.GRACE_AJOUT = 0
         check("grace : sans elle, le compte tout neuf disparait (test non vide)",
-              "tout.neuf" not in _restentGr(30), _restentGr(30))
+              "tout.neuf" not in _restentVu(30), _restentVu(30))
     finally:
         _ss.GRACE_AJOUT = _svGr
     # Les comptes d avant le champ `created_at` : leur identifiant EST leur

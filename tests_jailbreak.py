@@ -266,6 +266,25 @@ jb.add_va(IDENT, "Sync")
 for i in range(10):
     jb.add_account(IDENT, f"s{i}", va="Sync")
 ss.is_paused = lambda: False
+# UNE SUPPRESSION A UNE HISTOIRE. Un compte que le Sheet n a jamais vu n a ete
+# supprime par personne : son absence ne prouve que l echec du push. Il faut
+# donc d abord que le Sheet le VOIE, sinon rien ne peut le supprimer — c est la
+# protection qui empeche les comptes ajoutes par les VA de disparaitre.
+ss.pull_all = lambda: {f"{IDENT} Sync": [{"username": f"s{i}"} for i in range(10)]}
+ss.pull_and_merge()
+check("le Sheet voit d abord les comptes", len(accounts()) == 10, unames())
+check("jamais vu -> jamais supprime : la marque est posee",
+      all(a.get("vu_sheet") for a in accounts()),
+      [a.get("username") for a in accounts() if not a.get("vu_sheet")])
+# Les comptes doivent aussi avoir passe la grace de 15 min, sinon leur jeunesse
+# les protege quoi qu il arrive. On les vieillit d une heure.
+# `accounts()` rend une COPIE : la muter ne change rien sur le disque, et
+# `jb._save(jb._load())` relit le fichier puis le reecrit tel quel. Il faut
+# charger UNE fois, modifier cet objet-la, et sauvegarder celui-la.
+_dd = jb._load()
+for _a in _dd[IDENT]["accounts"]:
+    _a["created_at"] = int(__import__("time").time()) - 3600
+jb._save(_dd)
 # a) le Sheet garde 4 comptes sur 10 -> 6 suppressions appliquées
 ss.pull_all = lambda: {f"{IDENT} Sync": [{"username": f"s{i}"} for i in range(4)]}
 ch, summ = ss.pull_and_merge()
@@ -274,6 +293,18 @@ check("suppressions du Sheet appliquées", sorted(unames()) == [f"s{i}" for i in
 ss.pull_all = lambda: {f"{IDENT} Sync": []}
 ss.pull_and_merge()
 check("onglet vide n'efface rien", len(accounts()) == 4, unames())
+# c) un compte AJOUTE sur le site et jamais pousse ne doit PAS disparaitre.
+#    C est le scenario rapporte : « tres souvent, ca ne met pas le compte ».
+jb.add_account(IDENT, "ajoute_par_le_va", va="Sync")
+_dd = jb._load()
+for _a in _dd[IDENT]["accounts"]:
+    if _a.get("username") == "ajoute_par_le_va":
+        _a["created_at"] = int(__import__("time").time()) - 3600   # hors grace
+jb._save(_dd)
+ss.pull_all = lambda: {f"{IDENT} Sync": [{"username": f"s{i}"} for i in range(4)]}
+ss.pull_and_merge()
+check("un compte que le Sheet n a jamais vu survit au pull",
+      "ajoute_par_le_va" in unames(), unames())
 # c) ajouts depuis le Sheet
 ss.pull_all = lambda: {f"{IDENT} Sync": [{"username": f"s{i}"} for i in range(4)] +
                        [{"username": "nouveau1"}, {"username": "nouveau2"}]}

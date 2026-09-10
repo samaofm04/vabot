@@ -1282,6 +1282,8 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False,
     conflits = 0        # valeurs du Sheet ignorées (le site a bougé depuis)
     proteges = 0        # comptes créés pendant la lecture, sauvés de la suppression
     neufs = 0           # comptes trop jeunes pour que leur absence du Sheet vaille suppression
+    jamais_vus = 0      # comptes que le Sheet n'a jamais vus : il ne peut pas les supprimer
+    marques = 0         # premieres marques « vu dans le Sheet » posees ce cycle
     disparus = 0        # lignes du Sheet non ré-ajoutées (compte supprimé/renommé depuis)
     for identity in list(data.keys()):
         entry = data[identity]
@@ -1359,6 +1361,30 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False,
             gone = missing_id or missing_va
             if gone and u and (u in (id_present or set()) or u in seen_in_va):
                 gone = False     # present ailleurs dans le classeur : on ne supprime pas
+            # LE SHEET NE PEUT PAS SUPPRIMER CE QU IL N A JAMAIS VU.
+            #
+            # La grace de quinze minutes ne couvrait qu une course rapide. Si
+            # le push echoue plus longtemps — quota Google, classeur renomme,
+            # onglet absent, droits du compte de service — le compte ajoute par
+            # un VA n arrive jamais dans le Sheet, et le pull suivant l efface.
+            # Le VA le voit disparaitre sans un mot et le ressaisit ; il
+            # disparait encore. C est le « tres souvent, ca ne met pas le
+            # compte » rapporte par le proprietaire.
+            #
+            # Une suppression legitime a une histoire : le compte etait dans le
+            # Sheet, quelqu un a retire sa ligne. Un compte qui n y a JAMAIS
+            # figure n a ete supprime par personne — son absence ne prouve que
+            # la panne du push. On marque donc chaque compte reellement vu dans
+            # un onglet, et on ne supprime que ceux-la.
+            _present = bool(u) and ((id_present is not None and u in id_present)
+                                    or (u in seen_in_va))
+            if _present:
+                if not a.get("vu_sheet"):
+                    a["vu_sheet"] = int(_now_t)
+                    marques += 1
+            elif gone and not a.get("vu_sheet") and not force_delete:
+                gone = False
+                jamais_vus += 1
             # TROP JEUNE POUR ETRE SUPPRIME. Le push vers le Sheet est
             # asynchrone et silencieux quand il echoue : un compte ajoute a
             # l instant peut tres bien ne pas encore y figurer. Son absence ne
@@ -1537,7 +1563,13 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False,
             have.add(va.lower())
 
     changed = bool(added or updated or removed)
-    if changed:
+    # LA MARQUE DOIT SURVIVRE AU REDEMARRAGE, sinon elle ne protege rien.
+    # Elle etait posee en memoire puis jetee : rien n'etait sauvegarde quand le
+    # Sheet n'apportait aucune modification, c'est-a-dire dans la quasi-totalite
+    # des cycles. `changed` reste faux — une marque n'est pas une modification a
+    # annoncer — mais elle declenche l'ecriture. Elle n'est posee qu'une fois par
+    # compte, donc ces ecritures s'arretent d'elles-memes.
+    if changed or marques:
         jb._save(data)  # -> push_all_async régénère tous les onglets (converge)
     _extra = f" · {len(skipped_tomb)} bloqué(s) (supprimés sur le site il y a < 15 min — réessaie dans quelques minutes)" if skipped_tomb else ""
     if conflits:
@@ -1564,10 +1596,12 @@ def _merge_sheet_into_data(sheet: dict, jb, force_delete: bool = False,
     # PULL_SIGNALE force l'appelant à remonter ses compteurs au lieu de
     # répondre « rien de nouveau » (constaté : les trois compteurs n'arrivaient
     # ni à l'écran ni au journal).
-    retenus = (conflits + proteges + neufs + disparus + blocked_del + len(skipped_tomb))
+    retenus = (conflits + proteges + neufs + jamais_vus + disparus
+               + blocked_del + len(skipped_tomb))
     outcome = PULL_APPLIQUE if changed else (PULL_SIGNALE if retenus else PULL_RIEN)
     return PullResult(changed,
                       f"+{added} ajout(s) · {updated} modif(s) · -{removed} suppr.{_extra}",
                       outcome, details=_extra,
                       conflits=conflits, proteges=proteges, neufs=neufs, disparus=disparus,
+                      jamais_vus=jamais_vus, marques=marques,
                       retenues=blocked_del, tombstones=len(skipped_tomb))
