@@ -2612,6 +2612,30 @@ body.light.apple .va-loading::before{border-color:rgba(60,60,67,.18);border-top-
 .rank-amount{font-size:14px;color:#3b82f6;font-weight:700;font-variant-numeric:tabular-nums}
 body.light .rank-row{border-bottom-color:rgba(60,60,67,.10)}
 body.light .rank-badge-off{background:#f2f2f7;color:#3c3c43}
+/* --- Classement des clics par VA --------------------------------------
+   DEUX classes dans le selecteur, et c'est voulu : « .home-row » est
+   redefini plus BAS dans la page (feuille de l'accueil, injectee dans le
+   corps). A specificite egale, c'est la derniere regle qui gagne — une
+   regle « .home-row-pleine » seule se serait fait ecraser par le 1fr 1fr. */
+.home-row.home-row-pleine{grid-template-columns:1fr}
+.cr-emo{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-size:15px;line-height:1;background:#1a1b21;flex-shrink:0}
+.cr-nom{font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cr-sous{font-size:11px;color:#7f8796;margin-top:2px;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.cr-clics{font-size:14px;font-weight:700;color:#22c55e;white-space:nowrap;
+  font-variant-numeric:tabular-nums}
+.cr-clics.muet{color:#7f8796}
+.cr-note{font-size:11px;color:#7f8796;margin-top:12px;line-height:1.5}
+.cr-vide{color:#7f8796;font-size:13px;padding:16px 0;text-align:center}
+body.light .cr-emo{background:#f2f2f7}
+body.light .cr-nom{color:#111827}
+body.light .cr-sous{color:#6b7280}
+body.light .cr-note{color:#6b7280}
+body.light .cr-vide{color:#6b7280}
+body.light .cr-clics{color:#15803d}
+body.light .cr-clics.muet{color:#6b7280}
+body.light.claude .cr-clics{color:#c2603f}
 body.light.apple .rank-amount{color:#007aff}
 
 /* Le tri du classement : c'etait un simple texte, c'est un vrai bouton */
@@ -27532,10 +27556,24 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
             f"<div class='home-row'>{top_creators_html}{top_chatters_html}</div>"
             if top_creators_html or top_chatters_html else ""
         )
+        # Le classement des clics tient sa propre ligne, pleine largeur : les
+        # sous-titres y nomment les liens reunis sous chaque pseudo, et une
+        # demi-colonne les aurait tous coupes.
+        + _clicrank_carte_html()
     )
 
 
 @_arg_cached(seconds=180, key_args=("mp_start", "mp_end"))
+def _clicrank_carte_html() -> str:
+    """La carte des clics, enrobee : une panne ici n'efface pas l'accueil."""
+    try:
+        corps = _render_clicrank_html()
+    except Exception as e:                      # noqa: BLE001
+        print(f"[clicrank] carte non rendue : {e}", flush=True)
+        return ""
+    return f"<div class='home-row home-row-pleine'>{corps}</div>" if corps else ""
+
+
 def _render_mypuls_section_html() -> str:
     """Section MyPuls en haut de la page Revenus.
 
@@ -36759,6 +36797,11 @@ def _gmsdash_compute(team: str, period: str, progress_key: str = None, store_cb=
         for c, n in (r.get("countries") or {}).items():
             countries[c] = countries.get(c, 0) + int(n or 0)
         r.pop("countries", None)
+        # QUI n'a pas ete lu, pas seulement COMBIEN. `failed` compte les echecs
+        # sans dire lesquels : sur un tableau on s'en accommode, sur un
+        # CLASSEMENT non -- la ligne aplatie a 0 tombe derniere, et on lit
+        # « ce VA n'a rien rapporte » la ou il faut lire « on n'a pas su lire ».
+        r["lu"] = r["clicks"] is not None
         if r["clicks"] is None:
             r["clicks"] = 0                    # affichage seulement (cf. `failed`)
     # --- Courbe : clics JOUR PAR JOUR pour les meilleurs liens ---------------
@@ -37151,6 +37194,241 @@ def _start_gmsdash_warm():
     import threading as _th_w
     _th_w.Thread(target=_gmsdash_warm_loop, daemon=True, name="gmsdash-warm").start()
     print("[gmsdash-warm] démon démarré (pré-calcul toutes les 30 min)", flush=True)
+
+
+# ---------- Classement des clics par VA : le retour de GetMySocial ----------
+# UNE SEULE creatrice est regardee ici, et c'est une consigne, pas une limite
+# technique : « les clics et les liens de suivi, tu ne regardes que Jessye ».
+# L'espace GetMySocial est deja declare dans GMSDASH_TEAMS sous ce nom.
+CLICRANK_TEAM = "tm_6a0e4739bfa0c238f20a8bf5"      # « JESSY LE RETOUR »
+
+#: Un emoji par personne, tire de son pseudo. Deux regles :
+#: pas de drapeaux -- Windows ne dessine pas les indicateurs regionaux, ils
+#: sortent en « us » -- et pas de sequences ZWJ, qui se cassent en deux dessins
+#: sur les polices anciennes. Que des emoji d'un seul point de code.
+_CR_EMOJIS = ("\U0001F98A", "\U0001F43C", "\U0001F981", "\U0001F42F",
+              "\U0001F428", "\U0001F438", "\U0001F435", "\U0001F989",
+              "\U0001F985", "\U0001F43A", "\U0001F98B", "\U0001F419",
+              "\U0001F988", "\U0001F42C", "\U0001F984", "\U0001F41D",
+              "\U0001F407", "\U0001F98C", "\U0001F994", "\U0001F999",
+              "\U0001F996", "\U0001F992", "\U0001F410", "\U0001F433",
+              "\U0001F41E", "\U0001F422", "\U0001F9A9", "\U0001F426")
+
+
+def _clicrank_emoji(cle: str) -> str:
+    """Toujours le meme emoji pour le meme pseudo, d'un mois sur l'autre.
+
+    crc32 et pas hash() : le hash des chaines est SALE a chaque demarrage de
+    Python, l'emoji de chacun aurait change a chaque redemarrage du bot.
+    """
+    import zlib as _z
+    return _CR_EMOJIS[_z.crc32(str(cle or "").encode("utf-8")) % len(_CR_EMOJIS)]
+
+
+_CR_ESPACES = re.compile(r"\s+")
+_CR_PAREN = re.compile(r"\(([^()]*)\)")
+_CR_TETE_VA = re.compile(r"^va\s*\d*\s*[:.\-]?\s*", re.IGNORECASE)
+_CR_QUEUE_NUM = re.compile(r"\s+\d+$")
+_CR_QUEUE_X = re.compile(r"\s*x\s*\d+$", re.IGNORECASE)
+#: « TEMPLATE », et les quatre facons de l'ecrire de travers qu'on trouve dans
+#: les noms de liens reels (temaplte, tempalte, teamplte). Ce ne sont pas des
+#: personnes : ce sont les gabarits dont on duplique les liens.
+_CR_GABARITS = ("templ", "tempal", "temapl", "teampl")
+
+
+def _clicrank_propre(nom) -> str:
+    """« ( BO7 )  1 » -> « (BO7) 1 » : les noms sont tapes a la main."""
+    n = _CR_ESPACES.sub(" ", str(nom or "")).strip()
+    return n.replace("( ", "(").replace(" )", ")")
+
+
+def _clicrank_pseudo(nom: str) -> str:
+    """La PERSONNE derriere un nom de lien, en minuscules, ou "" si anonyme.
+
+    Les liens de Jessye s'appellent « VA 12 (Roucham) », « VA 13 Gerome »,
+    « VA 4 (VA 1 Noum) ». Le numero de tete est celui du LIEN, pas de la
+    personne ; ce qui reste est le pseudo.
+
+    DIVERGENCE ASSUMEE avec cogs/clickrecap._personne_du_lien. Celui-la garde
+    « VA 1 Noum » et « VA 2 Noum » separes, sur la foi d'un commentaire du
+    23/08 qui les dit trois personnes differentes. Le proprietaire a tranche
+    l'inverse le 12/09 : « meme pseudo c'est meme personne, y a pas de x1 x2 ».
+    On fusionne donc -- et la carte AFFICHE les liens reunis sous chaque nom,
+    pour que l'erreur, s'il y en a une, se voie du premier coup d'oeil au lieu
+    de se cacher dans un total.
+
+    Ne renvoie jamais un pseudo pour un lien gabarit ni pour « VA 9 » tout nu :
+    mieux vaut une ligne anonyme qu'un regroupement invente. Dans certains
+    espaces, cinq liens s'appellent « VA 1 » sans etre la meme personne.
+    """
+    n = _clicrank_propre(nom)
+    if not n:
+        return ""
+    bas = n.lower()
+    if any(g in bas for g in _CR_GABARITS):
+        return ""
+    if bas.startswith("va_"):                  # « va_@pseudo » : le pseudo suit
+        return bas[3:].lstrip("@ ").strip()
+    m = _CR_PAREN.search(n)
+    if m and m.group(1).strip():
+        n = m.group(1).strip()
+    # « VA 4 (VA 1 Noum) » : deux etages de numerotation, on pele les deux.
+    avant_ = None
+    while avant_ != n:
+        avant_ = n
+        n = _CR_TETE_VA.sub("", n).strip()
+        n = _CR_QUEUE_NUM.sub("", n).strip()
+    return _CR_QUEUE_X.sub("", n).strip().lower()
+
+
+def _clicrank_quinzaine():
+    """La quinzaine EN COURS, a l'heure de Paris : (cle gmsdash, libelle).
+
+    L'heure de Paris et pas celle du serveur : il travaille la nuit, et entre
+    minuit et deux heures le serveur est encore la veille -- le 16 du mois,
+    la carte aurait montre la quinzaine precedente.
+    """
+    return (("q1", "quinzaine 1-15") if _paris_now_web().day <= 15
+            else ("q2", "quinzaine 16-fin"))
+
+
+def _clicrank_cache(periode: str):
+    """Le releve DEJA calcule, ou None. NE DECLENCHE AUCUN APPEL.
+
+    L'accueil est rendu a chaque chargement du site et rappele par un demon :
+    y brancher GetMySocial ferait partir des centaines d'appels par jour sans
+    que personne regarde. Le demon du Dashboard clics (_gmsdash_warm_loop)
+    calcule deja cette categorie toutes les 30 minutes et l'ecrit sur disque ;
+    on se contente de lire ce qu'il a laisse. Rien en cache = la carte le dit.
+    """
+    try:
+        with _GMSDASH_LOCK:
+            hit = _GMSDASH_MEM.get(f"{CLICRANK_TEAM}|{periode}")
+        if hit and (hit.get("payload") or {}).get("links"):
+            return hit
+    except Exception:
+        pass
+    return None
+
+
+def _clicrank_rangs(payload: dict) -> list:
+    """Les personnes, de la plus forte a la plus faible.
+
+    UN CLIC NON LU N'EST PAS UN ZERO. Le cache du Dashboard aplatit les
+    lectures ratees a 0 pour son tableau ; sur un classement, ce 0 enverrait
+    en derniere position quelqu'un qui a peut-etre travaille. Les personnes
+    dont AUCUN lien n'a ete lu sortent donc du classement par les chiffres et
+    passent en fin de liste avec « — ».
+    """
+    try:
+        import clics_arrivees as _ca
+        arrivees = _ca.toutes()
+    except Exception:
+        arrivees = {}
+    debut = str(payload.get("start") or "")
+    gens = {}
+    for l in (payload.get("links") or []):
+        nom = _clicrank_propre(l.get("name"))
+        if not nom:
+            continue
+        bas = nom.lower()
+        if any(g in bas for g in _CR_GABARITS):
+            continue                          # un gabarit n'est pas une personne
+        ps = _clicrank_pseudo(nom)
+        # Sans pseudo, CHAQUE lien garde sa ligne : « VA 5 » et « VA 9 » ne
+        # sont pas la meme personne sous pretexte qu'aucun des deux n'est nomme.
+        cle = ps or ("\x00" + bas)
+        g = gens.setdefault(cle, {"pseudo": ps, "titre": ps.title() if ps else nom,
+                                  "clics": 0, "liens": [], "non_lus": 0,
+                                  "tard": ""})
+        g["liens"].append(nom)
+        if l.get("lu") is False:
+            g["non_lus"] += 1
+        else:
+            g["clics"] += int(l.get("clicks") or 0)
+        # Un lien repris d'un VA parti porte les clics de son predecesseur. La
+        # date d'arrivee est le seul garde-fou, et elle est par lien.
+        d = str(arrivees.get(str(l.get("id") or "")) or "")
+        if d and debut and d > debut and d > g["tard"]:
+            g["tard"] = d
+    out = list(gens.values())
+    for g in out:
+        g["muet"] = g["non_lus"] >= len(g["liens"])
+    out.sort(key=lambda g: (g["muet"], -g["clics"], g["titre"]))
+    return out
+
+
+def _render_clicrank_html() -> str:
+    """La carte « Classement clics » de l'accueil, a cote du Sales ranking."""
+    try:
+        per, lib = _clicrank_quinzaine()
+        hit = _clicrank_cache(per)
+    except Exception:
+        return ""
+    tete = ("<div class='home-card-header'>\U0001F517 Classement clics "
+            "\u2014 VA de Jessye</div>")
+    if not hit:
+        return ("<div class='home-card'>" + tete +
+                "<div class='cr-vide'>En attente du premier relev\u00e9 "
+                "GetMySocial \u2014 le calcul tourne en fond, la carte se "
+                "remplira toute seule.</div></div>")
+    payload = hit.get("payload") or {}
+    rangs = _clicrank_rangs(payload)
+    if not rangs:
+        return ("<div class='home-card'>" + tete +
+                "<div class='cr-vide'>Aucun lien de suivi sur cette "
+                "quinzaine.</div></div>")
+    fonds = {1: "#14b8a6", 2: "#10b981", 3: "#34d399"}
+    lignes = []
+    for i, g in enumerate(rangs, start=1):
+        bg = fonds.get(i)
+        badge = (f"<div class='rank-badge' style='background:{bg}'>{i}</div>"
+                 if bg else f"<div class='rank-badge rank-badge-off'>{i}</div>")
+        emo = _clicrank_emoji(g["pseudo"]) if g["pseudo"] else "\u2754"
+        # La fusion se VOIT : on nomme les liens reunis sous ce pseudo. Si deux
+        # personnes se retrouvaient sous le meme nom, ca saute aux yeux ici.
+        notes = []
+        if len(g["liens"]) > 1:
+            notes.append("%d liens : %s" % (len(g["liens"]),
+                                            ", ".join(g["liens"][:3])))
+        if not g["pseudo"]:
+            notes.append("pseudo absent du nom du lien")
+        if g["tard"]:
+            notes.append("arriv\u00e9 le %s \u2014 la quinzaine n'est pas "
+                         "enti\u00e8rement \u00e0 lui" % _fr_jour_court(g["tard"]))
+        if g["non_lus"] and not g["muet"]:
+            notes.append("%d lien(s) non lu(s) \u2014 total incomplet"
+                         % g["non_lus"])
+        sous = ("<div class='cr-sous'>" + html_escape(" \u00b7 ".join(notes))
+                + "</div>") if notes else ""
+        val = ("\u2014" if g["muet"] else format(g["clics"], ",d").replace(",", "\u202f"))
+        lignes.append(
+            "<div class='rank-row'>" + badge +
+            "<div class='cr-emo'>" + emo + "</div>"
+            "<div style='flex:1;min-width:0'>"
+            "<div class='cr-nom'>" + html_escape(g["titre"]) + "</div>" + sous +
+            "</div>"
+            "<div class='cr-clics" + (" muet" if g["muet"] else "") + "'>"
+            + val + "</div></div>")
+    age = int(payload.get("age_min") or
+              max(0, (int(time.time()) - int(hit.get("ts") or 0)) // 60))
+    note = "%s \u00b7 %s \u00b7 relev\u00e9 il y a %d min" % (
+        html_escape(str(payload.get("label") or lib)),
+        "clics GetMySocial", age)
+    if payload.get("partial") and not any(g["non_lus"] for g in rangs):
+        # Vieux relevé, d'avant le marquage par lien : on sait qu'il manque
+        # des lectures, on ne sait pas lesquelles. On le dit quand meme.
+        note += " \u00b7 \u26a0 relev\u00e9 incomplet"
+    return ("<div class='home-card'>" + tete +
+            "<div style='display:flex;flex-direction:column'>"
+            + "".join(lignes) +
+            "</div><div class='cr-note'>" + note + "</div></div>")
+
+
+def _fr_jour_court(iso: str) -> str:
+    """« 2026-09-03 » -> « 03/09 »."""
+    t = str(iso or "")
+    return ("%s/%s" % (t[8:10], t[5:7])) if len(t) >= 10 else t
 
 
 def _render_gmsdash_html() -> str:
@@ -39842,7 +40120,13 @@ def _render_sessions_html() -> str:
                 "<span class='se-jeton %s' title='%s'>%s</span>"
                 % (classe, e(_sessions_duree(g.get("secondes", 0))), e(g["nom"]))
                 for g in gens_[:40])
-        if sess["attendus_connus"]:
+        if not sess.get("surveillee", True):
+            # Meme regle que dans le bilan Discord : une session d avant le
+            # suivi n a pas ete desertee, elle n a pas ete regardee.
+            bloc_abs = ("<div class='se-l se-note'>Session non surveillée — le "
+                        "suivi ne tournait pas encore. Aucun absent ne peut en "
+                        "être déduit.</div>")
+        elif sess["attendus_connus"]:
             bloc_abs = ("<div class='se-l'><b><span>Absents</span> (%d)</b> %s</div>"
                         % (len(sess["absents"]), _liste(sess["absents"], "se-rouge")))
         else:

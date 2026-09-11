@@ -470,6 +470,32 @@ def pointer(membres, secondes: int = 60, ts: Optional[float] = None) -> Optional
     return s
 
 
+def premier_releve() -> Optional[float]:
+    """Le tout premier instant ou quelqu'un a ete vu. None si le registre est vide.
+
+    Sert a ne pas juger l'avant. Une session terminee avant cet instant n'a
+    pas ete desertee : elle n'a pas ete REGARDEE -- le cog n'existait pas, ou
+    le bot etait arrete. Sans cette borne, le premier bilan accuse tout le
+    monde d'avoir manque les sessions de la veille, et c'est la premiere chose
+    que le proprietaire aurait lue.
+    """
+    plus_tot = None
+    for jours in _charger().values():
+        if not isinstance(jours, dict):
+            continue
+        for fiches in jours.values():
+            if not isinstance(fiches, dict):
+                continue
+            for f in fiches.values():
+                try:
+                    t = float((f or {}).get("premiere"))
+                except (TypeError, ValueError):
+                    continue
+                if plus_tot is None or t < plus_tot:
+                    plus_tot = t
+    return plus_tot
+
+
 def presences(jour: str, session_id: str = "") -> dict:
     """Ce qui est enregistre pour ce jour (et cette session si precisee)."""
     j = _charger().get(jour) or {}
@@ -581,8 +607,13 @@ def resume_jour(jour: str, attendus=None) -> dict:
     cfg = config()
     attendus = list(attendus or [])
     index_attendus = {str(a["id"]): a for a in attendus if isinstance(a, dict) and a.get("id")}
+    # DEPUIS QUAND ON REGARDE. Tout ce qui s'est termine avant est hors de
+    # notre portee : on ne peut pas dire qui y etait, encore moins qui n'y
+    # etait pas.
+    depuis = premier_releve()
     lignes = []
     for s in sessions_du_jour(jour):
+        surveillee = depuis is None or float(s["fin"]) >= float(depuis)
         brut = presences(jour, s["id"])
         presents, partiels = [], []
         for mid, fiche in brut.items():
@@ -596,8 +627,10 @@ def resume_jour(jour: str, attendus=None) -> dict:
         presents.sort(key=lambda x: -x["secondes"])
         partiels.sort(key=lambda x: -x["secondes"])
         vus = {p["id"] for p in presents} | {p["id"] for p in partiels}
-        absents = [dict(a, id=str(a["id"])) for a in attendus
-                   if str(a["id"]) not in vus]
+        # AUCUN ABSENT SUR UNE SESSION QU'ON NE REGARDAIT PAS. La liste serait
+        # complete -- tout le monde -- et entierement fausse.
+        absents = ([dict(a, id=str(a["id"])) for a in attendus
+                    if str(a["id"]) not in vus] if surveillee else [])
         lignes.append({
             "id": s["id"], "nom": s["nom"],
             "heure": "%02d:%02d" % (s["heure"], s["minute"]),
@@ -606,8 +639,9 @@ def resume_jour(jour: str, attendus=None) -> dict:
             "presents": presents, "partiels": partiels, "absents": absents,
             # Sans liste d'attendus, « absents » est vide et ne veut RIEN
             # dire : l'ecran doit pouvoir le distinguer d'un « personne ne
-            # manquait ».
-            "attendus_connus": bool(attendus),
+            # manquait ». Idem pour une session non surveillee.
+            "attendus_connus": bool(attendus) and surveillee,
+            "surveillee": surveillee,
         })
     return {"jour": jour, "fuseau": cfg["fuseau"], "sessions": lignes}
 
@@ -619,9 +653,13 @@ def resume_par_personne(jour: str, attendus=None) -> list:
     elle qui doit servir de base a toute consequence -- pas une impression.
     """
     r = resume_jour(jour, attendus)
-    total = len(r["sessions"])
+    # « 1 sur 4 » n'a de sens que si les quatre ont ete regardees. Compter une
+    # session non surveillee au denominateur fabrique une assiduite fausse,
+    # et c'est le chiffre sur lequel on juge quelqu'un.
+    surveillees = [x for x in r["sessions"] if x.get("surveillee", True)]
+    total = len(surveillees)
     gens = {}
-    for s in r["sessions"]:
+    for s in surveillees:
         for p in s["presents"]:
             g = gens.setdefault(p["id"], {"id": p["id"], "nom": p["nom"],
                                           "presentes": 0, "secondes": 0,

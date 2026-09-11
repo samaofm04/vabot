@@ -9466,9 +9466,13 @@ try:
         # LA VUE PAR PERSONNE : c est elle qui sert a dire « il n est jamais la ».
         _pp = {g["id"]: g for g in _sv.resume_par_personne(
             J, attendus=[{"id": "1", "nom": "Ana"}, {"id": "4", "nom": "Dia"}])}
-        check("sessions : par personne, 1 session sur 4 pour celui qui est venu une fois",
-              _pp["1"]["presentes"] == 1 and _pp["1"]["sur"] == 4
-              and _pp["1"]["manquees"] == 3, str(_pp.get("1")))
+        # « SUR 3 » ET NON « SUR 4 » : la session de 2 h du matin s est
+        # terminee AVANT le premier releve de ce jeu d essai. On ne compte au
+        # denominateur que ce qu on a regarde, sinon l assiduite affichee est
+        # fausse -- et c est le chiffre sur lequel on juge quelqu un.
+        check("sessions : par personne, 1 session sur 3 pour celui qui est venu une fois",
+              _pp["1"]["presentes"] == 1 and _pp["1"]["sur"] == 3
+              and _pp["1"]["manquees"] == 2, str(_pp.get("1")))
         check("sessions : un attendu jamais vu apparait quand meme, a zero",
               _pp["4"]["presentes"] == 0 and _pp["4"]["nom"] == "Dia")
 
@@ -9479,6 +9483,47 @@ try:
         _sjSe.write(_sv.FICHIER_PRESENCE, _d2)
         check("sessions : les vieilles journees sont purgees",
               _sv.purger(30) == 1 and "2020-01-01" not in _sv._charger())
+
+        # ON N ACCUSE PERSONNE D AVOIR MANQUE CE QU ON NE REGARDAIT PAS.
+        # Le suivi a demarre le 11/09 vers 22 h ; les sessions de la journee
+        # deja terminees n ont pas ete desertees, elles n ont pas ete vues. Le
+        # premier bilan aurait liste TOUS les VA comme absents a deux
+        # sessions, et c est la premiere chose qu il aurait lue.
+        _sv.ecrire_config({})
+        _presS = _sv.FICHIER_PRESENCE
+        _sv.FICHIER_PRESENCE = _dirSe / "surv.json"
+        check("sessions : sans releve, on ne sait pas depuis quand on regarde",
+              _sv.premier_releve() is None)
+        for _i in range(20):
+            _sv.pointer([{"id": "1", "nom": "Ana"}], 60, _t(J, 22, 10) + _i * 60)
+        check("sessions : le premier releve borne ce qu on peut juger",
+              _sv.premier_releve() is not None)
+        _ATT = [{"id": "1", "nom": "Ana"}, {"id": "2", "nom": "Bob"}]
+        _rS = _sv.resume_jour(J, attendus=_ATT)
+        _parId = {x["id"]: x for x in _rS["sessions"]}
+        check("sessions : une session terminee avant le suivi est dite non surveillee",
+              _parId["s1"]["surveillee"] is False and _parId["s4"]["surveillee"] is False,
+              str({k: v["surveillee"] for k, v in _parId.items()}))
+        check("sessions : et elle n accuse ABSOLUMENT personne",
+              _parId["s1"]["absents"] == [] and _parId["s4"]["absents"] == [])
+        check("sessions : celles qu on a vraiment vues gardent leurs absents",
+              len(_parId["s2"]["absents"]) == 1 and len(_parId["s3"]["absents"]) == 2,
+              str([len(_parId[k]["absents"]) for k in ("s2", "s3")]))
+        # « 1 sur 4 » serait faux : deux sessions n ont pas ete regardees.
+        _pp2 = {g["id"]: g for g in _sv.resume_par_personne(J, attendus=_ATT)}
+        check("sessions : le denominateur ne compte que les sessions surveillees",
+              _pp2["1"]["sur"] == 2 and _pp2["1"]["presentes"] == 1,
+              "%s sur %s" % (_pp2["1"]["presentes"], _pp2["1"]["sur"]))
+        # Et l ecran doit le DIRE : « Presents (0) » se lirait comme une
+        # desertion generale.
+        import pathlib as _plS2
+        _srcCog2 = _plS2.Path("cogs/sessionsvoc.py").read_text(encoding="utf-8")
+        _srcW2 = _plS2.Path("web_upload.py").read_text(encoding="utf-8")
+        check("sessions : le bilan Discord dit « non surveillee »",
+              "Session non surveillée" in _srcCog2)
+        check("sessions : la page le dit aussi",
+              "Session non surveillée" in _srcW2)
+        _sv.FICHIER_PRESENCE = _presS
 
         # LE CHOIX DES SALONS. Un seul salon pour toutes les sessions, ou un
         # par session : les deux doivent marcher sans rien changer, parce que

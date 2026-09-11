@@ -365,6 +365,14 @@ class SessionsVoc(commands.Cog):
             if hl.get("MG"):
                 entete += "  (BJ %s · MG %s)" % (hl.get("BJ", "?"), hl["MG"])
             lignes = []
+            if not s.get("surveillee", True):
+                # ON NE REGARDAIT PAS. « Presents (0) » se lirait comme une
+                # desertion generale ; c est le bot qui n etait pas la.
+                e.add_field(name=entete,
+                            value="*Session non surveillée — le suivi ne tournait "
+                                  "pas encore. Aucun absent ne peut en être déduit.*",
+                            inline=False)
+                continue
             if s["presents"]:
                 lignes.append("**Présents (%d)** : %s" % (
                     len(s["presents"]),
