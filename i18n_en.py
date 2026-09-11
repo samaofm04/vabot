@@ -201,6 +201,15 @@ ETATS = {
     "Aucun": "None",
     "Aucune": "None",
     "Tout": "All",
+    # LE BANDEAU QUI DIT QUE LES CHIFFRES SONT FAUX restait en francais --
+    # c'est justement celui qu'il ne faut pas rater. _traduire_html cherche
+    # le texte ENTRE deux balises : le <b> coupe la phrase en deux, il faut
+    # donc les deux morceaux.
+    "⚠ MyPuls indisponible — chiffres temps réel non chargés "
+    "(ce n'est PAS un vrai 0€). Vérifie/rafraîchis tes cookies dans":
+        "⚠ MyPuls unavailable — live figures not loaded (this is NOT a real "
+        "$0). Check/refresh your cookies in",
+    "Settings → Cookies MyPuls": "Settings → MyPuls cookies",
     "Total revenus": "Total earnings",
     "Aperçu des revenus créateur": "Creator earnings overview",
     "Abonnements": "Subscriptions",
