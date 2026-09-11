@@ -838,6 +838,30 @@ try:
         _tiN._CACHE.update(sig=None, data={})
         check("nature Discord : jessye reste une model quoi qu on ecrive",
               _emN("jessye") is True)
+        # LE MARCHE PAR DEFAUT EST FR depuis le 11/09/2026. Il etait « us » :
+        # une entree creee sans choix partait sur le serveur americain, celui
+        # que voient les VA US, avec un drapeau que personne n avait pose.
+        import marche as _mkN
+        _fMkN = _plN.Path("data/identity_market.json")
+        _savMkN = _fMkN.read_text(encoding="utf-8") if _fMkN.exists() else None
+        try:
+            _sjN.write(_fMkN, {})
+            _mkN._CACHE.update(sig=None, data={})
+            check("marche : sans choix explicite, une entree reste en FR",
+                  _mkN.de("zzzjamaisvue") == "fr" and _mkN.de("") == "fr")
+            _sjN.write(_fMkN, {"zzzchoisie": "us"})
+            _mkN._CACHE.update(sig=None, data={})
+            check("marche : un choix explicite l emporte toujours",
+                  _mkN.de("zzzchoisie") == "us")
+        finally:
+            if _savMkN is None:
+                try:
+                    _fMkN.unlink()
+                except Exception:
+                    pass
+            else:
+                _sjN.write_text(_fMkN, _savMkN)
+            _mkN._CACHE.update(sig=None, data={})
     finally:
         if _savN is None:
             try:

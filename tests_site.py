@@ -2885,13 +2885,20 @@ try:
         # defaut : la repartition historique, des deux cotes
         check("marche : julia FR par defaut (site + bot)",
               _wMk.identity_market("julia") == "fr" and _uMk._market_of("julia") == "fr")
-        check("marche : une identite inconnue est US (site + bot)",
-              _wMk.identity_market("_tst_us") == "us" and _uMk._market_of("_tst_us") == "us")
-        # bascule US -> FR : elle doit TENIR (un simple 'pop' retombait sur US)
-        _wMk._set_identity_market("_tst_us", "fr")
-        _wMk._invalidate_json_cache(_wMk.MARKET_FILE)
-        check("marche : bascule US -> FR conservee (site + bot)",
+        # LE DEFAUT A CHANGE LE 11/09/2026 : il etait « us », il est « fr ».
+        # Une entree creee sans choix explicite partait sur le serveur
+        # americain -- celui que voient les VA US -- avec un drapeau que
+        # personne n avait pose. Le site et le bot doivent basculer ENSEMBLE,
+        # sinon la meme identite n est pas sur le meme serveur selon qui
+        # regarde.
+        check("marche : une identite inconnue est FR par defaut (site + bot)",
               _wMk.identity_market("_tst_us") == "fr" and _uMk._market_of("_tst_us") == "fr")
+        # bascule explicite : elle doit TENIR (un simple 'pop' retombait sur
+        # le defaut, quel qu il soit)
+        _wMk._set_identity_market("_tst_us", "us")
+        _wMk._invalidate_json_cache(_wMk.MARKET_FILE)
+        check("marche : un choix explicite tient contre le defaut (site + bot)",
+              _wMk.identity_market("_tst_us") == "us" and _uMk._market_of("_tst_us") == "us")
         # bascule FR -> US
         _wMk._set_identity_market("julia", "us")
         _wMk._invalidate_json_cache(_wMk.MARKET_FILE)
@@ -2902,8 +2909,8 @@ try:
         check("marche : ecriture atomique (pas de .tmp residuel)",
               _fMk.exists() and not list(_fMk.parent.glob("identity_market.json.tmp*")))
         # drapeau : SVG et pas emoji (Windows n a pas de police de drapeaux)
-        _flFr = _wMk._market_flag_html("_tst_us")      # bascule en FR juste avant
-        _flUs = _wMk._market_flag_html("julia")        # bascule en US juste avant
+        _flFr = _wMk._market_flag_html("_tst_sans_choix")  # aucun choix -> defaut FR
+        _flUs = _wMk._market_flag_html("julia")            # bascule en US juste avant
         check("drapeau : SVG (pas d emoji, illisible sous Windows)",
               _flFr.startswith("<svg") and "\U0001f1eb" not in _flFr)
         check("drapeau FR : bleu blanc rouge",

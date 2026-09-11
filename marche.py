@@ -46,12 +46,24 @@ def _table() -> dict:
 
 
 def de(identity: str) -> str:
-    """« fr » ou « us »."""
+    """« fr » ou « us ».
+
+    LE DEFAUT EST « FR » DEPUIS LE 11/09/2026, a la demande du proprietaire.
+    Il etait « us » : toute entree creee sans choix explicite partait donc sur
+    le serveur americain, celui que voient les VA US, avec un drapeau qu on
+    n avait pas choisi. Le marche se regle dans « Modifier », a cote de la
+    nature ; tant qu il n est pas pose, l entree reste du cote francais --
+    celui ou le proprietaire travaille.
+
+    FR_DEFAUT ne sert donc plus qu a documenter la repartition historique :
+    la regle rend « fr » avec ou sans elle. On la garde pour que la liste
+    reste lisible, et parce qu un jour le defaut peut rechanger.
+    """
     idl = (identity or "").strip().lower()
     v = _table().get(idl)
     if v in ("fr", "us"):
         return v
-    return "fr" if idl in FR_DEFAUT else "us"
+    return "fr"
 
 
 def definir(identity: str, marche: str) -> bool:
