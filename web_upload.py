@@ -15168,28 +15168,36 @@ def _tri_nature_html() -> str:
         nv, nc = _effectif_identite(n)
         # Ce que l'entree PORTE, a cote de la case : c'est ce chiffre qui
         # permet de trancher sans ouvrir autre chose.
-        porte = (f"{nv} VA · {nc} compte(s)" if (nv or nc) else "aucun VA, aucun compte")
+        # DEUX NOEUDS DE TEXTE, PAS UN. _traduire_html cherche la chaine
+        # ENTIERE entre deux balises : « 3 VA · 12 compte(s) » ne peut pas
+        # figurer dans un dictionnaire, mais « compte(s) » oui. On separe le
+        # chiffre du mot, sinon la ligne reste francaise dans une page
+        # anglaise -- c'est deja ce qui est arrive au titre du panneau.
+        porte = (f"<span>{nv} VA · {nc}</span> <span>compte(s)</span>"
+                 if (nv or nc) else "<span>aucun VA, aucun compte</span>")
+        porte_nu = (f"{nv} VA, {nc} compte(s)" if (nv or nc)
+                    else "aucun VA, aucun compte")
         lignes.append(
             f"<label class='tn-l{' tn-verr' if verrou else ''}' "
-            f"title=\"{'Reste une modele : source du menu US' if verrou else porte}\">"
+            f"title=\"{'Reste une modele : source du menu US' if verrou else porte_nu}\">"
             f"<input type='checkbox' data-tnid='{html_escape(n)}'"
             f"{' checked' if est_m else ''}{' disabled' if verrou else ''}>"
             f"<span class='tn-n'>{html_escape(n)}</span>"
-            f"<span class='tn-p'>{html_escape(porte)}</span></label>")
+            f"<span class='tn-p'>{porte}</span></label>")
     n_m = sum(1 for n in noms if _type_identite(n) == "modele")
     return (
         "<details class='tn-box'><summary class='tn-sum'>"
-        f"⚖ Trier mod&egrave;les et identit&eacute;s &mdash; <b>{n_m}/{len(noms)}</b> "
-        "mod&egrave;le(s)</summary>"
-        "<div class='tn-aide'>Coch&eacute; = <b>mod&egrave;le</b> (une cr&eacute;atrice : "
-        "elle reste ici, dans le scrape et dans les menus VA). D&eacute;coch&eacute; = "
-        "<b>identit&eacute;</b> (un dossier de montage : il quitte cette page et les "
-        "menus, et garde toute la Biblioth&egrave;que). Rien n&rsquo;est perdu, "
-        "&ccedil;a se recoche.</div>"
+        "<span class='tn-fl'>▸</span>"
+        "<span>Trier modèles et identités</span>"
+        f"<span class='tn-cpt'>{n_m}/{len(noms)}</span></summary>"
+        "<div class='tn-aide'><span>Coché = une créatrice : elle reste ici, dans "
+        "le scrape et dans les menus VA. Décoché = un dossier de montage : il "
+        "quitte cette page et les menus, et garde toute la Bibliothèque.</span> "
+        "<span>Rien n'est perdu, ça se recoche.</span></div>"
         "<div class='tn-grille'>" + "".join(lignes) + "</div>"
         "<div class='tn-pied'>"
         "<button type='button' class='sv-pill' onclick='tnTout(1)'>Tout cocher</button>"
-        "<button type='button' class='sv-pill' onclick='tnTout(0)'>Tout d&eacute;cocher</button>"
+        "<button type='button' class='sv-pill' onclick='tnTout(0)'>Tout décocher</button>"
         "<button type='button' class='sv-pill tn-go' id='tn-go' onclick='tnEnregistrer()'>"
         "Enregistrer</button>"
         "<span class='tn-msg' id='tn-msg'></span>"
@@ -37945,9 +37953,24 @@ def _render_jbanalyse_html() -> str:
    qu'on regarde. Ouvert, il montre TOUTES les entrees -- y compris celles
    deja rangees en identite, qui ne figurent plus dans les pastilles. */
 .tn-box{margin-top:10px;border-top:1px solid rgba(255,255,255,.07);padding-top:9px}
-.tn-sum{cursor:pointer;font-size:12px;color:#8b93a4;user-select:none;list-style:none}
+/* IL FAUT QUE CA SE VOIE. La premiere version etait une ligne grise de
+   douze pixels, sans triangle (je l'avais retire) et sans cadre : rien n'y
+   disait qu'on pouvait cliquer. Le proprietaire l'a cherchee sans la
+   trouver, puis a demande « et ca a rien, ca ? ». Un reglage qu'on ne fait
+   qu'une fois doit rester discret ; invisible, il n'existe pas. */
+.tn-sum{cursor:pointer;font-size:12.5px;color:#cbd5e1;user-select:none;
+  list-style:none;display:inline-flex;align-items:center;gap:8px;
+  background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);
+  border-radius:20px;padding:7px 14px;font-weight:600;transition:all .12s ease}
 .tn-sum::-webkit-details-marker{display:none}
-.tn-sum:hover{color:#cbd5e1}
+.tn-sum:hover{color:#fff;background:rgba(255,255,255,.10);border-color:rgba(255,255,255,.22)}
+.tn-fl{display:inline-block;transition:transform .15s ease;font-size:10px;opacity:.8}
+.tn-box[open] .tn-fl{transform:rotate(90deg)}
+.tn-cpt{background:rgba(59,130,246,.18);color:#7aa2ff;border-radius:20px;
+  padding:1px 8px;font-size:11px;font-weight:700}
+body.light .tn-sum{background:#eceef2;border-color:#d8dae0;color:#374151}
+body.light .tn-sum:hover{background:#e1e4ea;color:#111827}
+body.light .tn-cpt{background:rgba(59,130,246,.14);color:#1d4ed8}
 .tn-aide{font-size:11px;color:#75757f;line-height:1.5;margin:8px 0 9px;max-width:78ch}
 .tn-grille{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:5px}
 .tn-l{display:flex;align-items:center;gap:7px;padding:6px 9px;border-radius:8px;

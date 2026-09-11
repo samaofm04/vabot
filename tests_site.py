@@ -6532,6 +6532,27 @@ try:
                                            _srcT.index("def _tri_nature_html") + 2200])
     check("tri : les couleurs du panneau ont leur version claire",
           "body.light .tn-l{" in _srcT and "body.light .tn-sum{" in _srcT)
+    # IL FAUT QUE CA SE VOIE. La premiere version etait une ligne grise sans
+    # cadre ni triangle : le proprietaire l a cherchee sans la trouver.
+    check("tri : le titre a l air d un bouton, pas d une ligne de texte",
+          ".tn-sum{" in _srcT and "border-radius:20px" in _srcT[_srcT.index(".tn-sum{"):
+                                                                _srcT.index(".tn-sum{") + 400]
+          and "tn-fl" in _srcT)
+    # ET QUE CA SE TRADUISE. Ecrit en entites HTML (&egrave;), le panneau
+    # restait francais dans une page anglaise : la traduction cherche la
+    # chaine exacte, et « mod&egrave;les » ne figure dans aucun dictionnaire.
+    _dTn = _srcT.index("def _tri_nature_html")
+    _fTn = _srcT.index(chr(10) + "def ", _dTn + 40)
+    _tnSrc = _srcT[_dTn:_fTn]
+    check("tri : aucune entite HTML accentuee dans les libelles",
+          not _reI.search(r"&(egrave|eacute|agrave|ccedil|ecirc|rsquo|mdash);", _tnSrc),
+          "la traduction ne peut pas les reconnaitre")
+    import i18n_en as _i18T
+    _mqT = [m for m in ("Trier modèles et identités", "Tout cocher",
+                        "Tout décocher", "aucun VA, aucun compte", "compte(s)")
+            if m not in _i18T.TRADUCTIONS]
+    check("tri : chaque libelle du panneau a sa traduction",
+          not _mqT, ", ".join(_mqT))
     # CE QUE L ENTREE PORTE, sous les yeux au moment de decider. Decider
     # « modele ou identite » de memoire, sur vingt-quatre entrees, personne
     # ne le fait.
