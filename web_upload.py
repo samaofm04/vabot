@@ -2065,6 +2065,26 @@ body.apple :focus-visible{outline:3px solid rgba(0,122,255,.45);outline-offset:2
    legerement degrade, des cartes blanches a filet chaud, un seul accent
    terracotta, et des titres en serif - c'est le serif qui le rend
    reconnaissable au premier coup d'oeil, pas la couleur. --- */
+/* LA PALETTE DU THEME, EN SEPT ROLES ET UN SEUL ENDROIT.
+   Elle etait eparpillee en valeurs ecrites a la main dans cent trente-trois
+   selecteurs : impossible de savoir quelle couleur servait a quoi, et le
+   blanc pur s'y etait glisse sur pres de la moitie de l'ecran.
+
+   --c-fond      le papier, le fond de page
+   --c-surface   la carte posee dessus. CREME TRES CLAIR, PAS BLANC PUR :
+                 le blanc pur sur du creme ne se lit pas comme une carte mais
+                 comme un trou dans la page. C'est la question posee, et c'est
+                 la reponse.
+   --c-creux     le rail, la tuile secondaire, ce qui est EN DESSOUS
+   --c-bordure   le filet entre deux surfaces
+   --c-texte     l'encre
+   --c-attenue   l'encre pale, les legendes
+   --c-accent    la terracotta, une seule et unique */
+body.light.claude{
+  --c-fond:#faf9f5; --c-surface:#fffdf9; --c-creux:#f4f2ea;
+  --c-bordure:#e6e2d7; --c-texte:#1f1e1d; --c-attenue:#6f6b60;
+  --c-accent:#d97757;
+}
 body.light.claude{background:linear-gradient(180deg,#faf9f5 0%,#f6f3ec 100%)!important;
   background-attachment:fixed!important;color:#1f1e1d!important;
   font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif!important;
@@ -2075,7 +2095,7 @@ body.light.claude .main{background:transparent!important}
 body.light.claude .sidebar{background:linear-gradient(180deg,#f4f1e8,#efebe0)!important;
   border-right-color:#e5e0d3!important}
 body.light.claude .box,body.light.claude .stat,body.light.claude .reel-card,body.light.claude .cloud-card{
-  background:#fff!important;border-color:#e8e3d7!important;border-radius:12px!important;
+  background:var(--c-surface)!important;border-color:var(--c-bordure)!important;border-radius:12px!important;
   box-shadow:0 1px 2px rgba(31,30,29,.05),0 8px 24px -10px rgba(31,30,29,.10)!important}
 /* LES TITRES EN SERIF. C'est la signature du theme ; sans elle il ne serait
    qu'un theme clair beige de plus. Le corps de texte reste en sans : du
@@ -2099,7 +2119,7 @@ body.light.claude .vlm-dup{border-color:#d97757!important}
 body.light.claude .sidebar .solo-item.active,body.light.claude .sidebar .group .item.active{
   background:linear-gradient(135deg,rgba(217,119,87,.16),rgba(217,119,87,.06))!important}
 body.light.claude input,body.light.claude select,body.light.claude textarea,body.light.claude .up-input{
-  background:#fff!important;border-color:#ddd7c8!important;border-radius:10px!important;color:#1f1e1d!important}
+  background:var(--c-surface)!important;border-color:#ddd7c8!important;border-radius:10px!important;color:#1f1e1d!important}
 body.light.claude input:focus,body.light.claude select:focus,body.light.claude textarea:focus{
   border-color:#d97757!important;box-shadow:0 0 0 3.5px rgba(217,119,87,.18)!important}
 body.light.claude .btn:active,body.light.claude button:active,body.light.claude .theme-card:active,body.light.claude .up-submit:active,body.light.claude .sidebar .solo-item:active,body.light.claude .sidebar .group .item:active{
@@ -2114,7 +2134,7 @@ body.light.claude svg[stroke]:not([preserveAspectRatio]){stroke-width:1.7;stroke
 body.light.claude .sidebar svg[stroke]{stroke-width:1.75}
 /* L'interrupteur SFW reprend le terracotta plutot que le vert : un seul
    accent dans tout le theme, sinon la page part en arlequin. */
-body.light.claude #sfw-floating{background:rgba(255,255,255,.86)!important;border-color:#e8e3d7!important;
+body.light.claude #sfw-floating{background:rgba(255,255,255,.86)!important;border-color:var(--c-bordure)!important;
   border-radius:99px!important;box-shadow:0 1px 2px rgba(31,30,29,.06),0 8px 24px -10px rgba(31,30,29,.12)!important}
 body.light.claude #sfw-floating .sfw-switch{width:44px!important;height:26px!important;border-radius:99px!important;
   background:#e2ddd0!important;box-shadow:none!important}
@@ -2124,19 +2144,19 @@ body.light.claude.sfw-on #sfw-floating .sfw-switch{background:#d97757!important;
 body.light.claude.sfw-on #sfw-floating .sfw-thumb{transform:translateX(18px)!important}
 body.light.claude.sfw-on #sfw-floating span:last-child{color:#c2603f!important}
 /* Controle segmente : rail creme, segment actif blanc et ombre */
-body.light.claude .media-type-pills{background:#efebe0;border-radius:99px;padding:3px;gap:2px}
+body.light.claude .media-type-pills{background:var(--c-creux);border-radius:99px;padding:3px;gap:2px}
 body.light.claude .media-pill{border-radius:99px!important;border-color:transparent!important;
   background:transparent!important;color:#6f6b60!important;font-weight:600!important}
-body.light.claude .media-pill-active{background:#fff!important;color:#1f1e1d!important;
+body.light.claude .media-pill-active{background:var(--c-surface)!important;color:#1f1e1d!important;
   box-shadow:0 1px 3px rgba(31,30,29,.10)!important}
 /* Boutons secondaires : creme plein, libelle terracotta, pas de contour dur */
 body.light.claude .btn-secondary,body.light.claude .btn.secondary,body.light.claude .vac-btn:not(.vac-btn-active){
-  background:#f0ece1!important;border-color:transparent!important;color:#c2603f!important;
+  background:var(--c-creux)!important;border-color:transparent!important;color:#c2603f!important;
   border-radius:10px!important;box-shadow:none!important}
 body.light.claude .modal,body.light.claude .modal-content,body.light.claude .nxm-modal,body.light.claude .vpm-modal,body.light.claude #reel-details-modal > div{
-  border-radius:16px!important;border-color:#e8e3d7!important;background:#fffdf9!important;
+  border-radius:16px!important;border-color:var(--c-bordure)!important;background:var(--c-surface)!important;
   box-shadow:0 12px 48px rgba(31,30,29,.18),0 2px 8px rgba(31,30,29,.06)!important}
-body.light.claude .toast{border-radius:12px!important;background:#fffdf9!important;border-color:#e8e3d7!important;
+body.light.claude .toast{border-radius:12px!important;background:var(--c-surface)!important;border-color:var(--c-bordure)!important;
   box-shadow:0 8px 32px rgba(31,30,29,.16)!important}
 body.light.claude table th,body.light.claude table td,body.light.claude .row-sep,body.light.claude hr{border-color:#eae5da!important}
 body.light.claude table th{color:#6f6b60!important;font-weight:600!important}
@@ -2161,7 +2181,7 @@ body.light.claude :focus-visible{outline:3px solid rgba(217,119,87,.45);outline-
 body.light.claude .home-hero-card{background:rgba(217,119,87,.07)!important;
   border-color:rgba(217,119,87,.28)!important}
 body.light.claude .home-hero-icon{background:linear-gradient(135deg,#e08b6b,#cf6a48)!important}
-body.light.claude .home-period-row{background:#efebe0!important}
+body.light.claude .home-period-row{background:var(--c-creux)!important}
 body.light.claude .home-period-active{background:rgba(217,119,87,.14)!important;color:#c2603f!important}
 body.light.claude .stat .v,body.light.claude .rank-amount,body.light.claude .vault-sort-active{color:#c2603f!important}
 body.light.claude .vault-sort-active .vault-radio{border-color:#d97757!important;background:#d97757!important}
@@ -2188,6 +2208,24 @@ body.light.claude .sidebar .item.active svg,body.light.claude .sidebar .group .i
 body.light.claude #market-floating button[data-on]{background:rgba(217,119,87,.16)!important}
 body.light.claude .home-overview-title small{background:rgba(217,119,87,.10)!important}
 body.light.claude .home-hero-label{color:#c2603f!important;border-color:rgba(217,119,87,.35)!important}
+/* LES FUITES MESUREES SUR LA PAGE RENDUE, pas devinees : 392 k px2 de blanc
+   pur sur .home-overview, 107 k de gris clair sur .home-stat, et les cartes
+   de marche que le theme clair repeint en blanc depuis leur fond sombre
+   inline. C'est ce blanc-la qu'on voyait, et aucune regle du theme ne le
+   couvrait. */
+body.light.claude .home-overview,
+body.light.claude .home-hero-card,
+body.light.claude [style*="background:#12151f"],
+body.light.claude #market-floating,
+body.light.claude #market-floating button{
+  background:var(--c-surface)!important;border-color:var(--c-bordure)!important}
+body.light.claude .home-stat,
+body.light.claude .home-period-row,
+body.light.claude .media-type-pills{
+  background:var(--c-creux)!important;border-color:var(--c-bordure)!important}
+/* Le liseré de couleur des cartes de marche : il vient d un fond bleu inline
+   que le theme clair laisse passer. */
+body.light.claude [style*="border-left:3px solid"]{border-left-color:var(--c-accent)!important}
 body.light.claude [style*="border:1px solid #3b82f6"],body.light.claude [style*="border-color:#3b82f6"]{
   border-color:#d97757!important}
 
