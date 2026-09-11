@@ -41,6 +41,7 @@ import safe_json
 
 FICHIER_CFG = Path("data") / "sessions_cfg.json"
 FICHIER_PRESENCE = Path("data") / "sessions_presence.json"
+FICHIER_DIRECT = Path("data") / "sessions_direct.json"
 
 #: Le fuseau de reference des horaires affiches dans les noms de salons.
 #: Le Benin ne change pas d'heure : une session a midi y est a midi toute
@@ -140,17 +141,31 @@ def _completer(brut: dict) -> dict:
         # jour ou le salon est deplace hors de la categorie, plus personne
         # n'est compte, et rien ne le dit.
         "motif_salon": str(brut.get("motif_salon") or "session"),
+        # OU VONT LES DEUX MESSAGES. Deux salons, deux roles, et deux motifs
+        # qui ne peuvent pas se confondre : le direct va dans un salon qui
+        # porte « session » SANS « bilan », le bilan dans celui qui porte
+        # « bilan ». Un seul motif pour les deux aurait poste le direct dans
+        # le bilan des que le proprietaire a cree « session-bilan ».
+        "salon_direct": str(brut.get("salon_direct") or "session"),
+        "salon_bilan": str(brut.get("salon_bilan") or "bilan"),
+        "direct_actif": bool(brut.get("direct_actif", True)),
+        # Toutes les combien de minutes le message en direct est reecrit.
+        # Discord limite les editions ; quatre minutes est le rythme demande,
+        # et il reste tres loin des plafonds.
+        "maj_minutes": _entier(brut.get("maj_minutes"), 4, 1, 60),
         "presence_min_secondes": _entier(brut.get("presence_min_secondes"),
                                          PRESENCE_MIN_SECONDES_DEFAUT, 0, 7200),
-        # Salon ou poster le resume du jour, par convention de nom.
-        "salon_resume": str(brut.get("salon_resume") or "session"),
         # LE RESUME AUTOMATIQUE EST ETEINT TANT QU'ON NE L'ALLUME PAS.
         # Poster chaque matin dans un salon, c'est ecrire chez le
         # proprietaire, devant ses VA, une liste de qui n'etait pas la. Ca ne
         # se met pas en route tout seul parce qu'un reglage avait « True » par
         # defaut. Le bouton « Poster le resume sur Discord » permet de l'
         # essayer a la main autant qu'on veut avant de l'automatiser.
-        "resume_actif": bool(brut.get("resume_actif", False)),
+        # LE BILAN PART TOUT SEUL, depuis qu'il a SON salon. Ce qui le
+        # retenait n'etait pas le principe mais la destination : poster la
+        # liste des absents dans le salon ou tout le monde parle n'est pas la
+        # meme chose que la poser dans un salon fait pour ca.
+        "resume_actif": bool(brut.get("resume_actif", True)),
         # Heure du resume, dans le fuseau de reference.
         "resume_heure": _entier(brut.get("resume_heure"), 8, 0, 23),
     }
@@ -304,6 +319,65 @@ def _charger() -> dict:
     return d if isinstance(d, dict) else {}
 
 
+def direct_charger() -> dict:
+    """Les messages « en direct » deja postes : {« jour:session »: fiche}.
+
+    Persiste sur disque et pas en memoire : le bot redemarre, et un message
+    qu'on ne retrouve plus est un message qu'on reposte. Le proprietaire
+    verrait alors deux comptes rendus de la meme session, dont un fige a
+    mi-parcours.
+    """
+    d = safe_json.load(FICHIER_DIRECT, default={}) or {}
+    return d if isinstance(d, dict) else {}
+
+
+def direct_poser(cle: str, fiche: dict) -> None:
+    d = direct_charger()
+    d[str(cle)] = dict(fiche)
+    FICHIER_DIRECT.parent.mkdir(parents=True, exist_ok=True)
+    safe_json.write(FICHIER_DIRECT, d)
+
+
+def direct_cle(session: dict) -> str:
+    return "%s:%s" % (session.get("jour"), session.get("id"))
+
+
+def direct_a_figer(ts) -> list:
+    """Les sessions terminees dont le message bouge encore.
+
+    « Quand c'est fini, ca ne modifie plus » : on repasse une DERNIERE fois
+    pour que le message porte le compte definitif, puis on le marque fige et
+    on n'y touche plus jamais. Sans ce dernier passage, le message resterait
+    sur le releve d'il y a trois minutes -- c'est-a-dire faux, et pour
+    toujours.
+    """
+    out = []
+    for cle, fiche in direct_charger().items():
+        if not isinstance(fiche, dict) or fiche.get("fige"):
+            continue
+        try:
+            if float(fiche.get("fin") or 0) <= float(ts):
+                out.append((cle, fiche))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def direct_purger(jours_gardes: int = 30) -> int:
+    """Oublie les vieux messages figes : leur id ne sert plus a rien."""
+    import time as _t
+    limite = (_dt.datetime.fromtimestamp(_t.time(), _tz()).date()
+              - _dt.timedelta(days=max(1, int(jours_gardes)))).isoformat()
+    d = direct_charger()
+    vieux = [k for k in d if str(k).split(":")[0] < limite]
+    if not vieux:
+        return 0
+    for k in vieux:
+        d.pop(k, None)
+    safe_json.write(FICHIER_DIRECT, d)
+    return len(vieux)
+
+
 def pointer(membres, secondes: int = 60, ts: Optional[float] = None) -> Optional[dict]:
     """Ajoute `secondes` de presence a chacun. Rend la session touchee, ou None.
 
@@ -364,6 +438,24 @@ def sans_accent(t: str) -> str:
     import unicodedata
     return "".join(c for c in unicodedata.normalize("NFD", str(t or ""))
                    if unicodedata.category(c) != "Mn").lower().replace("_", "-")
+
+
+def salon_texte_ok(nom: str, motif: str, exclure: str = "") -> bool:
+    """Ce salon TEXTE porte-t-il `motif` sans porter `exclure` ?
+
+    L'exclusion n'est pas theorique : des que « session-bilan » existe, il
+    porte AUSSI « session ». Sans elle, le message en direct de chaque
+    session irait s'empiler dans le salon du bilan.
+
+    Fonction PURE : un discord.TextChannel ne s'instancie pas, donc la
+    decision doit pouvoir se tester sans lui.
+    """
+    n = sans_accent(nom)
+    m = sans_accent(motif or "")
+    x = sans_accent(exclure or "")
+    if not m or m not in n:
+        return False
+    return not (x and x in n)
 
 
 def salon_suivi(salon_id, nom: str = "", nom_categorie: str = "", cfg=None) -> bool:

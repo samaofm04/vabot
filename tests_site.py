@@ -8981,6 +8981,37 @@ try:
               and _sv.salon_suivi(99, "BJ 12 h 00", "session") is False,
               "un id explicite doit ignorer la convention de nom")
 
+        # LES DEUX SALONS TEXTE. Des que « session-bilan » existe, il porte
+        # AUSSI « session » : sans exclusion, le message en direct de chaque
+        # session irait s empiler dans le salon du bilan.
+        check("sessions : le direct evite le salon du bilan",
+              _sv.salon_texte_ok("session", "session", "bilan") is True
+              and _sv.salon_texte_ok("📊・session-bilan", "session", "bilan") is False,
+              "le salon du bilan porte aussi le mot « session »")
+        check("sessions : le bilan va bien dans le salon « bilan »",
+              _sv.salon_texte_ok("📊・session-bilan", "bilan") is True
+              and _sv.salon_texte_ok("session", "bilan") is False)
+        check("sessions : un salon sans rapport ne recoit rien",
+              _sv.salon_texte_ok("general", "session", "bilan") is False
+              and _sv.salon_texte_ok("general", "bilan") is False)
+
+        # LE MESSAGE EN DIRECT : pose une fois, reecrit, puis FIGE.
+        _sv.FICHIER_DIRECT = _dirSe / "direct.json"
+        _sv.direct_poser("2026-09-11:s1", {"salon": 1, "message": 2,
+                                           "fin": _t(J, 14, 0), "maj": 0, "fige": False})
+        check("sessions : une session encore en cours n est pas figee",
+              _sv.direct_a_figer(_t(J, 13, 0)) == [],
+              "elle finit a 14 h")
+        _af = _sv.direct_a_figer(_t(J, 14, 30))
+        check("sessions : une session terminee demande un dernier passage",
+              len(_af) == 1 and _af[0][0] == "2026-09-11:s1", str(_af))
+        _sv.direct_poser("2026-09-11:s1", dict(_af[0][1], fige=True))
+        check("sessions : une fois figee, elle ne bouge PLUS jamais",
+              _sv.direct_a_figer(_t(J, 20, 0)) == [],
+              "« quand c est fini ca ne modifie plus »")
+        check("sessions : la cle d un direct est bien jour:session",
+              _sv.direct_cle({"jour": J, "id": "s2"}) == J + ":s2")
+
         # LE COG : zero commande slash, sinon il ne se charge pas DU TOUT.
         import re as _reSe
         _srcCog = _plSe.Path("cogs/sessionsvoc.py").read_text(encoding="utf-8")

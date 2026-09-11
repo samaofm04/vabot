@@ -87,6 +87,10 @@ class SessionsVoc(commands.Cog):
         except Exception as e:                       # noqa: BLE001
             print(f"[sessions] pointage : {e}", flush=True)
         try:
+            await self._direct()
+        except Exception as e:                       # noqa: BLE001
+            print(f"[sessions] direct : {e}", flush=True)
+        try:
             await self._resume_si_lheure()
         except Exception as e:                       # noqa: BLE001
             print(f"[sessions] resume : {e}", flush=True)
@@ -143,16 +147,154 @@ class SessionsVoc(commands.Cog):
             except Exception as e:                   # noqa: BLE001
                 print(f"[sessions] envoi resume : {e}", flush=True)
 
-    def _salons_resume(self) -> list:
-        """Les salons TEXTE ou poster, par convention de nom."""
-        prefixe = _sans_accent(sv.config().get("salon_resume") or "session")
+    def _salons_texte(self, motif: str, exclure: str = "") -> list:
+        """Les salons TEXTE dont le nom porte `motif` (et pas `exclure`).
+
+        L'exclusion n'est pas une precaution theorique : des que le
+        proprietaire cree « session-bilan », ce salon porte AUSSI « session ».
+        Sans l'exclure, le message en direct de chaque session irait
+        s'empiler dans le salon du bilan.
+        """
         out = []
         for c in self.bot.get_all_channels():
             if not isinstance(c, discord.TextChannel):
                 continue
-            if _sans_accent(getattr(c, "name", "")).startswith(prefixe):
+            if sv.salon_texte_ok(getattr(c, "name", ""), motif, exclure):
                 out.append(c)
         return out
+
+    def _salons_resume(self) -> list:
+        """Ou va le BILAN de la journee."""
+        return self._salons_texte(sv.config().get("salon_bilan") or "bilan")
+
+    def _salons_direct(self) -> list:
+        """Ou va le message EN DIRECT — jamais dans le salon du bilan."""
+        cfg = sv.config()
+        return self._salons_texte(cfg.get("salon_direct") or "session",
+                                  exclure=cfg.get("salon_bilan") or "bilan")
+
+    def embed_direct(self, session: dict, fige: bool = False) -> discord.Embed:
+        """Ce qui s'affiche pendant la session, et ce qui reste apres.
+
+        Le MEME message sert aux deux : tant que la session tourne il est
+        reecrit, et au dernier passage il devient le compte rendu definitif.
+        Deux messages -- un « en cours » puis un « bilan » -- auraient laisse
+        le premier mentir pour toujours dans l'historique du salon.
+        """
+        import time as _tD
+        jour, sid = session["jour"], session["id"]
+        brut = sv.presences(jour, sid)
+        gens = sorted(
+            ({"id": k, "nom": v.get("nom") or k,
+              "secondes": int(v.get("secondes") or 0)} for k, v in brut.items()),
+            key=lambda g: -g["secondes"])
+        seuil = sv.config()["presence_min_secondes"]
+        presents = [g for g in gens if g["secondes"] >= seuil]
+        partiels = [g for g in gens if g["secondes"] < seuil]
+        hl = sv.heures_locales(session)
+        e = discord.Embed(
+            title="%s — %02d:%02d" % (session["nom"], session["heure"], session["minute"]),
+            color=0x9AA0A6 if fige else 0x22C55E)
+        e.description = ("Terminée." if fige else "En cours…") + \
+            "  ·  BJ %s · MG %s" % (hl.get("BJ", "?"), hl.get("MG", "?"))
+        if presents:
+            e.add_field(
+                name="Présents (%d)" % len(presents),
+                value="\n".join("• %s — %d min" % (g["nom"], g["secondes"] // 60)
+                                for g in presents[:25])[:1020],
+                inline=False)
+        else:
+            e.add_field(name="Présents (0)", value="*personne pour l'instant*",
+                        inline=False)
+        if partiels:
+            e.add_field(
+                name="Passés vite (%d)" % len(partiels),
+                value=", ".join(g["nom"] for g in partiels[:25])[:1020],
+                inline=False)
+        if fige:
+            att = self._attendus_enrichis()
+            if att:
+                vus = {g["id"] for g in gens}
+                absents = [a["nom"] for a in att if str(a["id"]) not in vus]
+                e.add_field(name="Absents (%d)" % len(absents),
+                            value=(", ".join(absents[:30]) or "aucun")[:1020],
+                            inline=False)
+            e.set_footer(text="Compte définitif — ce message ne bouge plus.")
+        else:
+            e.set_footer(text="Mis à jour toutes les %d min."
+                              % sv.config()["maj_minutes"])
+        return e
+
+    async def _direct(self):
+        """Poser le message, le reecrire, puis le figer. Dans cet ordre.
+
+        Le gel passe AVANT la mise a jour : une session qui vient de se
+        terminer doit recevoir son dernier compte, meme si une autre commence
+        dans la foulee.
+        """
+        import time as _tD
+        cfg = sv.config()
+        if not cfg.get("direct_actif"):
+            return
+        maintenant = _tD.time()
+
+        # --- ce qui est termine : un dernier passage, puis plus jamais -----
+        for cle, fiche in sv.direct_a_figer(maintenant):
+            msg = await self._retrouver(fiche)
+            jour, sid = str(cle).split(":", 1)
+            sess = next((x for x in sv.sessions_du_jour(jour) if x["id"] == sid), None)
+            if msg is not None and sess is not None:
+                try:
+                    await msg.edit(embed=self.embed_direct(sess, fige=True))
+                except Exception as e:               # noqa: BLE001
+                    print(f"[sessions] gel : {e}", flush=True)
+            sv.direct_poser(cle, dict(fiche, fige=True, maj=maintenant))
+
+        # --- ce qui tourne : poser, ou reecrire si l'heure est venue ------
+        sess = sv.session_a(maintenant)
+        if sess is None:
+            return
+        cle = sv.direct_cle(sess)
+        fiche = sv.direct_charger().get(cle)
+        if fiche is None:
+            for salon in self._salons_direct():
+                try:
+                    msg = await salon.send(embed=self.embed_direct(sess))
+                except Exception as e:               # noqa: BLE001
+                    print(f"[sessions] pose direct : {e}", flush=True)
+                    continue
+                sv.direct_poser(cle, {"salon": salon.id, "message": msg.id,
+                                      "fin": sess["fin"], "maj": maintenant,
+                                      "fige": False})
+                break                                 # un seul message, pas un par salon
+            return
+        if fiche.get("fige"):
+            return
+        if (maintenant - float(fiche.get("maj") or 0)) < cfg["maj_minutes"] * 60:
+            return
+        msg = await self._retrouver(fiche)
+        if msg is None:
+            return
+        try:
+            await msg.edit(embed=self.embed_direct(sess))
+            sv.direct_poser(cle, dict(fiche, maj=maintenant))
+        except Exception as e:                       # noqa: BLE001
+            print(f"[sessions] maj direct : {e}", flush=True)
+
+    async def _retrouver(self, fiche: dict):
+        """Le message deja poste, ou None s'il a ete supprime.
+
+        Supprimer le message a la main est un droit : on ne le reposte pas,
+        on laisse la session sans direct. Le registre des presences, lui,
+        continue de compter -- l'affichage n'est pas la mesure.
+        """
+        try:
+            salon = self.bot.get_channel(int(fiche.get("salon") or 0))
+            if salon is None:
+                return None
+            return await salon.fetch_message(int(fiche.get("message") or 0))
+        except Exception:                            # noqa: BLE001
+            return None
 
     def embed_resume(self, jour: str) -> discord.Embed:
         """Le resume d'une journee, lisible d'un coup d'oeil.
