@@ -15432,6 +15432,19 @@ def _do_refresh(handles: list, label: str = "manual") -> dict:
             _jbanalyse_payload()
         except Exception:
             pass
+        # NOTE LES ABONNES DU JOUR. Le cache ne porte que la valeur ACTUELLE :
+        # sans ce relevé, on peut dire « ce compte a 4 210 abonnés », jamais
+        # « il en a gagné 300 cette semaine » -- alors que c'est la seule des
+        # deux phrases qui dise si le travail des VA sert a quelque chose. Une
+        # courbe ne s'invente pas apres coup : tant qu'on n'enregistre pas, il
+        # n'y aura toujours rien a tracer dans un mois.
+        try:
+            import abonnes_histo as _ab_h
+            _n_ab = _ab_h.enregistrer(_load_insta_3_stats_cache())
+            if _n_ab:
+                print(f"[abonnes] {_n_ab} compte(s) releves pour aujourd hui", flush=True)
+        except Exception as _e_ab:
+            print(f"[abonnes] releve : {_e_ab}", flush=True)
         return summary
     except Exception as e:
         _set_refresh_status(status="idle", in_progress_since=None, error=str(e))

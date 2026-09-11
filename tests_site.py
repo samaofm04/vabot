@@ -9051,6 +9051,50 @@ except Exception as _eId:
 
 print()
 print("=" * 70)
+print("ABONNES : une courbe ne s invente pas apres coup")
+print("=" * 70)
+try:
+    import abonnes_histo as _ahA
+    import tempfile as _tpA, pathlib as _plA
+    _savA = _ahA.FICHIER
+    _ahA.FICHIER = _plA.Path(_tpA.mkdtemp()) / "a.json"
+    try:
+        # Trois jours, avec un compte muet le deuxieme.
+        _ahA.enregistrer({"a": {"followers": 1000}, "b": {"followers": 500},
+                          "c": {"error": "echec"}}, "2026-09-10")
+        _ahA.enregistrer({"a": {"followers": 1100}, "b": {"error": "echec"}}, "2026-09-11")
+        _ahA.enregistrer({"a": {"followers": 1250}, "b": {"followers": 560}}, "2026-09-12")
+        check("abonnes : la valeur du jour est notee par compte",
+              _ahA.serie("a") == {"2026-09-10": 1000, "2026-09-11": 1100,
+                                  "2026-09-12": 1250}, str(_ahA.serie("a")))
+        # UN ECHEC N EST PAS UN ZERO. Ecrire zero pour un scrape rate
+        # inventerait une chute a zero, le pire des faux signaux.
+        check("abonnes : un compte jamais mesure n a pas de ligne",
+              _ahA.serie("c") == {})
+        _t = _ahA.total_par_jour()
+        check("abonnes : le total ne chute pas quand un compte ne repond pas",
+              _t["2026-09-11"] == 1600, str(_t))
+        check("abonnes : et il remonte avec la vraie valeur au releve suivant",
+              _t["2026-09-12"] == 1810, str(_t))
+        _g, _d = _ahA.variation(jours=7)
+        check("abonnes : la variation se calcule sur la periode",
+              _g == 310 and _d == "2026-09-10", "%s depuis %s" % (_g, _d))
+        # « Pas encore d historique » n est pas « zero gagne ».
+        _ahA.FICHIER = _plA.Path(_tpA.mkdtemp()) / "vide.json"
+        check("abonnes : sans historique, on rend None et pas zero",
+              _ahA.variation(jours=7) == (None, ""))
+        # Le relevé doit etre BRANCHE, sinon rien ne s accumule jamais.
+        import pathlib as _plA2
+        _srcA = _plA2.Path("web_upload.py").read_text(encoding="utf-8")
+        check("abonnes : le releve est branche sur le scrape",
+              "_ab_h.enregistrer(_load_insta_3_stats_cache())" in _srcA)
+    finally:
+        _ahA.FICHIER = _savA
+except Exception as _eA:
+    check("abonnes : testable", False, repr(_eA)[:200])
+
+print()
+print("=" * 70)
 print("MARCHE : le defaut FR ne repeint pas les anciennes identites")
 print("=" * 70)
 try:
