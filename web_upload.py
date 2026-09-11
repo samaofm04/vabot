@@ -39429,10 +39429,58 @@ def _render_sessions_html() -> str:
             + "<div class='se-grille'>" + "".join(cartes) + "</div>"
             + "<div class='se-bloc'><div class='se-bloc-t'>Assiduité du jour</div>"
             + "".join(lignes) + "</div>"
+            + _sessions_reglages_html(cfg)
             + "<div class='se-pied'><span>Heures de référence</span> : %s. "
               "<span>Une présence compte à partir de</span> %s "
               "<span>passées dans le salon.</span></div>"
               % (e(cfg["fuseau"]), _sessions_duree(cfg["presence_min_secondes"])))
+
+
+def _sessions_reglages_html(cfg) -> str:
+    """Les horaires, reglables ici plutot que dans un fichier.
+
+    UNE SESSION SE DIT « DE 12 H A 15 H ». Le code manipule une duree en
+    minutes -- une duree ne se trompe jamais de jour -- mais personne ne pense
+    en minutes : on saisit donc un debut et une fin, et la conversion se fait
+    en dessous. 23 h -> 1 h vaut deux heures, pas moins vingt-deux.
+    """
+    import html as _hR
+    lignes = []
+    for x in cfg["sessions"]:
+        lignes.append(
+            "<div class='se-reg-l' data-sid='%s'>"
+            "<input class='se-in se-in-nom' type='text' value='%s' maxlength='30'>"
+            "<span class='se-de'>de</span>"
+            "<input class='se-in se-in-h' type='time' value='%02d:%02d'>"
+            "<span class='se-de'>à</span>"
+            "<input class='se-in se-in-f' type='time' value='%02d:%02d'>"
+            "<button type='button' class='se-x' title='Retirer cette session'>✕</button>"
+            "</div>"
+            % (_hR.escape(x["id"]), _hR.escape(x["nom"]),
+               x["heure"], x["minute"], x["fin_heure"], x["fin_minute"]))
+    return (
+        "<details class='se-reg'><summary>Réglages</summary>"
+        "<div class='se-reg-c'>"
+        "<div class='se-reg-t'>Horaires des sessions</div>"
+        "<div id='se-reg-liste'>" + "".join(lignes) + "</div>"
+        "<button type='button' class='se-add' onclick='sessionsAjouter()'>＋ Ajouter une session</button>"
+        "<div class='se-reg-t'>Réglages généraux</div>"
+        "<div class='se-reg-g'>"
+        "<label>Marge d'avance"
+        "<input id='se-avant' class='se-in' type='number' min='0' max='240' value='%d'></label>"
+        "<label>Présence minimale"
+        "<input id='se-seuil' class='se-in' type='number' min='0' max='120' value='%d'></label>"
+        "<label>Heure du bilan"
+        "<input id='se-bilan' class='se-in' type='number' min='0' max='23' value='%d'></label>"
+        "</div>"
+        "<div class='se-reg-n'>Marge d'avance et présence minimale en minutes. "
+        "L'heure du bilan est dans le fuseau de référence.</div>"
+        "<button type='button' class='se-save' onclick='sessionsEnregistrer()'>Enregistrer</button>"
+        "<span class='se-msg' id='se-reg-msg'></span>"
+        "</div></details>"
+        % (int(cfg["sessions"][0]["avant_min"]) if cfg["sessions"] else 15,
+           int(cfg["presence_min_secondes"]) // 60,
+           int(cfg["resume_heure"])))
 
 
 #: Le style de la page. Les regles CLAIRES sont ecrites EN MEME TEMPS que les
@@ -39479,6 +39527,31 @@ _SESSIONS_CSS = """<style>
 .se-row-c{flex:0 0 46px;text-align:right;font-weight:700}
 .se-row-t{flex:0 0 66px;text-align:right;color:#8b8b96}
 .se-pied{font-size:11.5px;color:#75757f;margin-top:12px}
+.se-reg{margin-top:14px;background:#0f1116;border:1px solid #2a2a2a;border-radius:12px}
+.se-reg summary{padding:12px 14px;cursor:pointer;font-size:13px;font-weight:700;list-style:none}
+.se-reg summary::-webkit-details-marker{display:none}
+.se-reg summary:before{content:"\25B8 ";color:#75757f}
+.se-reg[open] summary:before{content:"\25BE "}
+.se-reg-c{padding:0 14px 14px}
+.se-reg-t{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#75757f;font-weight:700;margin:12px 0 7px}
+.se-reg-l{display:flex;align-items:center;gap:7px;margin-bottom:7px;flex-wrap:wrap}
+.se-de{font-size:12px;color:#75757f}
+.se-in{background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;padding:7px 9px;font-size:12.5px;font-family:inherit}
+.se-in-nom{flex:1;min-width:110px}
+.se-x{background:transparent;border:1px solid #34343a;color:#8b8b96;border-radius:8px;padding:6px 9px;cursor:pointer;font-family:inherit}
+.se-x:hover{border-color:#ef4444;color:#ef4444}
+.se-add{background:transparent;border:1.5px dashed #34343a;color:#8b98ab;border-radius:9px;padding:8px 12px;font-size:12px;cursor:pointer;font-family:inherit;margin-top:4px}
+.se-reg-g{display:flex;gap:12px;flex-wrap:wrap}
+.se-reg-g label{display:flex;flex-direction:column;gap:5px;font-size:11.5px;color:#8b8b96}
+.se-reg-g .se-in{width:110px}
+.se-reg-n{font-size:11px;color:#75757f;margin-top:8px;line-height:1.5}
+.se-save{background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:9px;padding:9px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;margin-top:12px}
+body.light .se-reg{background:#fff;border-color:#e5e7eb}
+body.light .se-in{background:#f9fafb;border-color:#e5e7eb;color:#1f2937}
+body.light .se-de,body.light .se-reg-t,body.light .se-reg-n{color:#6b7280}
+body.light .se-reg-g label{color:#4b5563}
+body.light .se-x,body.light .se-add{border-color:#e5e7eb;color:#6b7280}
+body.light.claude .se-reg{background:var(--c-surface)!important;border-color:var(--c-bordure)!important}
 body.light .se-hero,body.light .se-card,body.light .se-bloc{background:#fff;border-color:#e5e7eb}
 body.light .se-hero-d,body.light .se-l,body.light .se-msg,body.light .se-row-t{color:#6b7280}
 body.light .se-h,body.light .se-nav{color:#4b5563}
@@ -39491,6 +39564,75 @@ body.light .se-orange{color:#b45309}
 body.light.claude .se-hero,body.light.claude .se-card,body.light.claude .se-bloc{background:var(--c-surface)!important;border-color:var(--c-bordure)!important}
 </style>
 <script>
+function sessionsAjouter(){
+  /* ON CONSTRUIT PAR LE DOM, PAS PAR innerHTML. Ce script vit dans une
+     chaine Python : un guillemet echappe y est relu par Python AVANT
+     d arriver au navigateur, et l echappement disparait. Le bloc entier
+     devient alors du JavaScript invalide -- silencieusement, et c est toute
+     la page qui cesse de repondre. Sans guillemets a echapper, le piege
+     n existe plus. */
+  var l = document.getElementById("se-reg-liste"); if(!l) return;
+  var d = document.createElement("div");
+  d.className = "se-reg-l";
+  d.setAttribute("data-sid", "s" + (l.children.length + 1));
+  function champ(cls, type, val, max){
+    var i = document.createElement("input");
+    i.className = "se-in " + cls; i.type = type; i.value = val;
+    if(max) i.maxLength = max;
+    return i;
+  }
+  function mot(t){
+    var sp = document.createElement("span"); sp.className = "se-de";
+    sp.textContent = t; return sp;
+  }
+  d.appendChild(champ("se-in-nom", "text", "Nouvelle session", 30));
+  d.appendChild(mot("de"));
+  d.appendChild(champ("se-in-h", "time", "12:00"));
+  d.appendChild(mot("à"));
+  d.appendChild(champ("se-in-f", "time", "14:00"));
+  var b = document.createElement("button");
+  b.type = "button"; b.className = "se-x"; b.textContent = "✕";
+  d.appendChild(b);
+  l.appendChild(d);
+}
+/* Le retrait passe par DELEGATION : les lignes ajoutees apres coup n auraient
+   pas eu de gestionnaire, et leur croix n aurait rien fait. */
+document.addEventListener("click", function(ev){
+  var b = ev.target.closest ? ev.target.closest(".se-x") : null;
+  if(!b) return;
+  var l = b.closest(".se-reg-l"); if(l) l.remove();
+});
+function sessionsEnregistrer(){
+  var m = document.getElementById("se-reg-msg");
+  var av = parseInt((document.getElementById("se-avant")||{}).value||"15", 10);
+  var sessions = [];
+  Array.prototype.forEach.call(document.querySelectorAll("#se-reg-liste .se-reg-l"), function(l){
+    var nom = (l.querySelector(".se-in-nom")||{}).value || "";
+    var h = ((l.querySelector(".se-in-h")||{}).value || "").split(":");
+    var fin = ((l.querySelector(".se-in-f")||{}).value || "").split(":");
+    if(h.length < 2) return;
+    sessions.push({id: l.getAttribute("data-sid") || "", nom: nom,
+                   heure: parseInt(h[0],10), minute: parseInt(h[1],10),
+                   fin_heure: fin.length > 1 ? parseInt(fin[0],10) : null,
+                   fin_minute: fin.length > 1 ? parseInt(fin[1],10) : null,
+                   avant_min: av});
+  });
+  if(!sessions.length){ if(m) m.textContent = "au moins une session"; return; }
+  if(m) m.textContent = "enregistrement...";
+  var fd = new FormData();
+  fd.set("cfg", JSON.stringify({
+    sessions: sessions,
+    presence_min_secondes: Math.max(0, parseInt((document.getElementById("se-seuil")||{}).value||"5",10)) * 60,
+    resume_heure: parseInt((document.getElementById("se-bilan")||{}).value||"8", 10)
+  }));
+  fetch("/sessions/config", {method:"POST", body: fd, credentials:"same-origin"})
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if(j && j.ok){ if(m) m.textContent = "enregistre"; setTimeout(function(){ location.reload(); }, 500); }
+      else if(m) m.textContent = (j && j.error) || "echec";
+    })
+    .catch(function(){ if(m) m.textContent = "echec"; });
+}
 function sessionsResume(){
   var m=document.getElementById('se-msg'); if(m) m.textContent='envoi...';
   fetch('/sessions/resume_now',{method:'POST',credentials:'same-origin'})
@@ -50786,6 +50928,42 @@ def create_app():
             return jsonify({"ok": False, "error": "écriture impossible"})
         _invalidate_all_ttl_cache()
         return jsonify({"ok": True, "identity": ident, "market": market})
+
+    @app.route("/sessions/config", methods=["POST"])
+    def sessions_config_set():
+        """Les horaires des sessions, regles depuis la page.
+
+        Tout passe par sessions_voc.ecrire_config(), qui BORNE et complete :
+        une heure impossible est ecartee, une fin avant le debut passe minuit,
+        un reglage absent reprend son defaut. La route ne valide rien de son
+        cote -- deux validations, c'est deux comportements le jour ou l'une
+        des deux change.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        import json as _jsSe
+        import sessions_voc as _svSe
+        try:
+            brut = _jsSe.loads(request.form.get("cfg") or "{}")
+        except Exception:
+            return jsonify({"ok": False, "error": "réglages illisibles"})
+        if not isinstance(brut, dict) or not brut.get("sessions"):
+            return jsonify({"ok": False, "error": "au moins une session"})
+        # Les reglages qu'on n'affiche pas dans le panneau (salons suivis,
+        # fuseau, motifs) sont REPRIS de l'existant : enregistrer les horaires
+        # ne doit pas remettre a zero ce qui n'etait pas a l'ecran.
+        garde = _svSe.config()
+        for cle in ("fuseau", "salons", "categorie", "motif_salon",
+                    "salon_direct", "salon_bilan", "direct_actif",
+                    "resume_actif", "maj_minutes"):
+            brut.setdefault(cle, garde.get(cle))
+        try:
+            propre = _svSe.ecrire_config(brut)
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)[:160]})
+        _invalidate_all_ttl_cache()
+        return jsonify({"ok": True, "sessions": len(propre["sessions"])})
 
     @app.route("/sessions/resume_now", methods=["POST"])
     def sessions_resume_now():

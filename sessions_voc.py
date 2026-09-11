@@ -119,12 +119,26 @@ def _completer(brut: dict) -> dict:
             continue
         if not (0 <= h <= 23 and 0 <= m <= 59):
             continue
+        # UNE SESSION SE DIT « DE 12 H A 15 H ». C'est ainsi que le
+        # proprietaire la pense et l'annonce a ses VA ; « 12 h pendant 180
+        # minutes » est une facon de parler d'horloger. On accepte donc une
+        # heure de FIN, et on en deduit la duree -- qui reste ce que le reste
+        # du code manipule, parce qu'une duree ne se trompe jamais de jour.
+        duree = _duree_depuis_fin(h, m, s.get("fin_heure"), s.get("fin_minute"))
+        if duree is None:
+            duree = _entier(s.get("duree_min"), DUREE_MIN_DEFAUT, 5, 720)
+        _fh, _fm = _fin_depuis_duree(h, m, duree)
         propres.append({
             "id": str(s.get("id") or "s%d" % (i + 1)),
             "nom": str(s.get("nom") or "Session %d" % (i + 1)),
             "heure": h,
             "minute": m,
-            "duree_min": _entier(s.get("duree_min"), DUREE_MIN_DEFAUT, 5, 720),
+            "duree_min": duree,
+            # La fin est RECALCULEE et rendue avec le reste : l'ecran affiche
+            # « de ... a ... » sans avoir a refaire le calcul de son cote, et
+            # sans risque que les deux ne disent pas la meme chose.
+            "fin_heure": _fh,
+            "fin_minute": _fm,
             "avant_min": _entier(s.get("avant_min"), AVANT_MIN_DEFAUT, 0, 240),
         })
     propres.sort(key=lambda s: (s["heure"], s["minute"]))
@@ -169,6 +183,34 @@ def _completer(brut: dict) -> dict:
         # Heure du resume, dans le fuseau de reference.
         "resume_heure": _entier(brut.get("resume_heure"), 8, 0, 23),
     }
+
+
+def _duree_depuis_fin(h, m, fin_h, fin_m) -> Optional[int]:
+    """Minutes entre le debut et la fin. None si la fin n'est pas donnee.
+
+    UNE SESSION QUI FINIT « AVANT » SON DEBUT PASSE MINUIT : 23 h -> 1 h fait
+    deux heures, pas moins vingt-deux. C'est le cas normal ici, la moitie des
+    sessions se tiennent la nuit.
+    """
+    if fin_h is None or str(fin_h).strip() == "":
+        return None
+    try:
+        fh = int(fin_h)
+        fm = int(fin_m or 0)
+    except (TypeError, ValueError):
+        return None
+    if not (0 <= fh <= 23 and 0 <= fm <= 59):
+        return None
+    d = (fh * 60 + fm) - (int(h) * 60 + int(m))
+    if d <= 0:
+        d += 24 * 60
+    return max(5, min(720, d))
+
+
+def _fin_depuis_duree(h, m, duree) -> tuple:
+    """L'heure de fin, pour l'afficher sans la recalculer ailleurs."""
+    t = (int(h) * 60 + int(m) + int(duree)) % (24 * 60)
+    return t // 60, t % 60
 
 
 def _entier(v, defaut: int, mini: int, maxi: int) -> int:
