@@ -246,12 +246,41 @@ def list_identities():
 JAILBREAK_ONLY_IDENTITIES = {"jessye"}
 
 
+def est_une_model(nom) -> bool:
+    """Cette entrée est-elle une CRÉATRICE, ou un simple dossier de montage ?
+
+    Le site distingue les deux depuis le panneau « Modifier » (bloc Nature) ;
+    le bot, lui, ne connaissait que « des dossiers ». Un dossier ouvert pour
+    produire des vidéos pouvait donc être attribué à un vrai VA, qui recevait
+    un salon pour une identité qui n'a ni compte Instagram ni revenus.
+
+    Le repli est VRAI, comme is_identity_active juste au-dessus : si le module
+    manque ou si le fichier est illisible, on se comporte exactement comme
+    avant. Un menu de trop est sans conséquence ; un VA privé de son identité
+    parce qu'un fichier n'a pas pu être lu, non.
+    """
+    try:
+        import type_identite as _ti
+        return _ti.est_modele(nom)
+    except Exception:
+        return True
+
+
 def list_active_identities():
-    """Seulement les identités activées (utilisées pour les nouvelles assignations).
-    Exclut les identités jailbreak-only (jamais assignées aux VAs Discord)."""
+    """Seulement les identités activées (utilisées pour les NOUVELLES assignations).
+
+    Exclut les identités jailbreak-only (jamais assignées aux VAs Discord) et,
+    depuis le 11/09/2026, celles que le propriétaire a rangées en « identité »
+    plutôt qu'en « modèle » : ce sont des dossiers de montage, il n'y a
+    personne derrière.
+
+    Ne filtre QUE la rotation : un VA déjà rattaché à une identité garde son
+    salon et ses accès, ils ne se relisent pas dans cette liste.
+    """
     jb = {x.lower() for x in JAILBREAK_ONLY_IDENTITIES}
     return [n for n in list_identities()
-            if is_identity_active(n) and n.strip().lower() not in jb]
+            if is_identity_active(n) and n.strip().lower() not in jb
+            and est_une_model(n)]
 
 
 def pick_next_identity():

@@ -6862,12 +6862,18 @@ def marche_du_membre(member) -> str:
 
 def _jb_models_marche(marche="us"):
     """Models d'un marche donne : c'est le drapeau de l'identite qui tranche
-    (data/identity_market.json), la meme source que le site."""
+    (data/identity_market.json), la meme source que le site.
+
+    Et c'est bien une MODEL : les dossiers ouverts pour produire des videos
+    remontaient dans ce menu comme les creatrices, alors qu'ils n'ont ni
+    compte ni contenu a servir. Meme repli que est_une_model : si la nature
+    ne peut pas etre lue, on se comporte comme avant."""
     try:
-        from cogs.welcome import list_identities, is_identity_active
+        from cogs.welcome import list_identities, is_identity_active, est_une_model
         return [n for n in list_identities()
                 if is_identity_active(n)
                 and n.strip().lower() not in EXCLURE_MENU
+                and est_une_model(n)
                 and _market_of(n) == marche]
     except Exception:
         return []
@@ -6878,10 +6884,14 @@ EXCLURE_MENU = {"jessye"}
 
 
 def _jb_us_models():
+    """Les models du serveur US. Meme regle que _jb_models_marche : une
+    entree rangee en « identite » est un dossier de montage, pas une model a
+    proposer aux VA."""
     try:
-        from cogs.welcome import list_identities, is_identity_active
+        from cogs.welcome import list_identities, is_identity_active, est_une_model
         return [n for n in list_identities()
-                if is_identity_active(n) and _market_of(n) == "us"]
+                if is_identity_active(n) and est_une_model(n)
+                and _market_of(n) == "us"]
     except Exception:
         return []
 

@@ -795,6 +795,81 @@ except Exception as _eQ:
 print()
 print("=" * 70)
 print("ICONES DES BOUTONS DISCORD (style du site)")
+print()
+print("=" * 70)
+print("NATURE COTE DISCORD : un dossier de montage n est pas une model")
+print("=" * 70)
+try:
+    import pathlib as _plN, safe_json as _sjN
+    import type_identite as _tiN
+    from cogs.welcome import (list_identities as _liN,
+                              list_active_identities as _laN,
+                              est_une_model as _emN)
+    import cogs.user as _cuN
+    _fN = _plN.Path("data/identity_type.json")
+    _savN = _fN.read_text(encoding="utf-8") if _fN.exists() else None
+    _dossiers = _liN()
+    try:
+        # Defaut « modele » : tant que rien n est coche, RIEN ne disparait.
+        _sjN.write(_fN, {})
+        _tiN._CACHE.update(sig=None, data={})
+        check("nature Discord : sans reglage, la rotation ne perd personne",
+              set(_laN()) == set(n for n in _dossiers if n != "jessye"),
+              str(_laN())[:90])
+        if _dossiers:
+            _cible = next((n for n in _dossiers if n != "jessye"), None)
+        else:
+            _cible = None
+        if _cible:
+            _sjN.write(_fN, {_cible: "identite"})
+            _tiN._CACHE.update(sig=None, data={})
+            check("nature Discord : une identite sort de la rotation des VA",
+                  _cible not in _laN(), str(_laN())[:90])
+            check("nature Discord : elle sort aussi des menus par marche",
+                  _cible not in _cuN._jb_models_marche("fr")
+                  and _cible not in _cuN._jb_models_marche("us")
+                  and _cible not in _cuN._jb_us_models())
+            check("nature Discord : elle reste dans la liste BRUTE des dossiers",
+                  _cible in _liN(), "sinon les salons existants seraient perdus")
+        else:
+            check("nature Discord : une identite sort de la rotation", True, "(aucun dossier local)")
+        # Jessye ne sort jamais.
+        _sjN.write(_fN, {"jessye": "identite"})
+        _tiN._CACHE.update(sig=None, data={})
+        check("nature Discord : jessye reste une model quoi qu on ecrive",
+              _emN("jessye") is True)
+    finally:
+        if _savN is None:
+            try:
+                _fN.unlink()
+            except Exception:
+                pass
+        else:
+            _sjN.write_text(_fN, _savN)
+        _tiN._CACHE.update(sig=None, data={})
+    # LE REPLI EST « MODELE ». Un fichier illisible ne doit pas priver un VA.
+    import builtins as _biN
+    _vraiN = _biN.__import__
+    def _fauxN(nom, *a, **k):
+        if nom == "type_identite":
+            raise ImportError("simule")
+        return _vraiN(nom, *a, **k)
+    _biN.__import__ = _fauxN
+    try:
+        check("nature Discord : module absent -> comportement d avant",
+              _emN("nimporte") is True)
+    finally:
+        _biN.__import__ = _vraiN
+    # Le filtre ne doit PAS toucher ce qui maintient les acces existants.
+    _srcN = _plN.Path("cogs/welcome.py").read_text(encoding="utf-8")
+    _d1 = _srcN.index("def sync_general_channel_access")
+    _f1 = _srcN.index(chr(10) + "def ", _d1 + 40)
+    check("nature Discord : la synchro des acces ne consulte pas le filtre",
+          "est_une_model" not in _srcN[_d1:_f1],
+          "un VA en place perdrait ses salons")
+except Exception as _eN:
+    check("nature Discord : testable", False, repr(_eN)[:200])
+
 print("=" * 70)
 try:
     import re as _reIc

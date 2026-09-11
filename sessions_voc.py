@@ -61,12 +61,12 @@ FUSEAUX_PAYS = {
 #: LES FENETRES SONT OUVERTES AU MAXIMUM, choix du proprietaire le
 #: 11/09/2026 : chaque session court jusqu'au debut de la suivante, pour
 #: qu'un VA qui passe a n'importe quelle heure soit compte quelque part.
-#: Deux bornes posees a la main : celle de midi ouvre des HUIT heures, celle
+#: Deux bornes posees a la main : celle de midi ouvre a DIX heures, celle
 #: de deux heures ferme a CINQ. Il reste donc une seule zone morte, de 5 h a
-#: 8 h -- et c'est voulu : sans elle, la session de deux heures du matin
+#: 10 h -- et c'est voulu : sans elle, la session de deux heures du matin
 #: avalerait toute la matinee.
 SESSIONS_DEFAUT = [
-    {"id": "s1", "nom": "Session 1", "heure": 8, "minute": 0,
+    {"id": "s1", "nom": "Session 1", "heure": 10, "minute": 0,
      "fin_heure": 17, "fin_minute": 0},
     {"id": "s2", "nom": "Session 2", "heure": 17, "minute": 0,
      "fin_heure": 23, "fin_minute": 0},
