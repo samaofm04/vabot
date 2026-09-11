@@ -6129,6 +6129,87 @@ except Exception as _eGd:
 
 print()
 print("=" * 70)
+print("MODELE OU IDENTITE : un dossier de montage n est pas une creatrice")
+print("=" * 70)
+try:
+    import type_identite as _tiT
+    import web_upload as _wT
+    import pathlib as _plT
+    _fT = _plT.Path("data/identity_type.json")
+    _savT = _fT.read_text(encoding="utf-8") if _fT.exists() else None
+    try:
+        # La Bibliotheque 2 n est JAMAIS une modele : son propre commentaire
+        # la dit invisible du Jailbreak.
+        check("nature : une entree v2_ ne peut pas etre une modele",
+              _tiT.de("v2_beta") == "identite" and not _tiT.est_modele("v2_zzz"))
+        # Le choix explicite l emporte sur la regle de repli, dans les deux sens.
+        _tiT.definir("zzz_essai", "modele")
+        check("nature : le choix du proprietaire l emporte (modele)",
+              _tiT.de("zzz_essai") == "modele" and _tiT.choisi("zzz_essai"))
+        _tiT.definir("zzz_essai", "identite")
+        check("nature : et dans l autre sens (identite)",
+              _tiT.de("zzz_essai") == "identite")
+        check("nature : une entree jamais reglee n est pas dite « choisie »",
+              not _tiT.choisi("zzz_jamais_vue"))
+        # Un nom vide ne doit pas devenir une modele par accident.
+        check("nature : un nom vide n est pas une modele", not _tiT.est_modele(""))
+        # Le filtre garde l ordre recu.
+        _tiT.definir("zzz_a", "modele")
+        _tiT.definir("zzz_b", "identite")
+        _tiT.definir("zzz_c", "modele")
+        check("nature : le filtre garde l ordre et ne garde que les modeles",
+              _tiT.filtrer_modeles(["zzz_c", "zzz_b", "zzz_a"]) == ["zzz_c", "zzz_a"],
+              str(_tiT.filtrer_modeles(["zzz_c", "zzz_b", "zzz_a"])))
+        # La route refuse ce qui n est ni l un ni l autre.
+        _aT = _wT.create_app(); _aT.testing = True
+        _svT = _wT._load_web_users
+        _wT._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"}}
+        try:
+            _cT = _aT.test_client()
+            with _cT.session_transaction() as _sT:
+                _sT["auth"] = True; _sT["username"] = "boss"; _sT["role"] = "owner"
+            _jT = (_cT.post("/identity/type",
+                            data={"identity": "zzz_a", "type": "chose"}).get_json() or {})
+            check("nature : la route refuse un type inconnu", _jT.get("ok") is not True)
+            _jT2 = (_cT.post("/identity/type",
+                             data={"identity": "zzz_inexistante",
+                                   "type": "modele"}).get_json() or {})
+            check("nature : la route refuse une identite inconnue",
+                  _jT2.get("ok") is not True)
+        finally:
+            _wT._load_web_users = _svT
+    finally:
+        if _savT is not None:
+            _wT.safe_json.write_text(_fT, _savT)
+        else:
+            try:
+                _fT.unlink()
+            except Exception:
+                pass
+        _tiT._CACHE.update(sig=None, data={})
+
+    # Le cablage : une seule liste decide, pour l ecran comme pour l ecriture.
+    _srcT = _plT.Path("web_upload.py").read_text(encoding="utf-8")
+    _dJ = _srcT.index("def _render_jailbreak_html")
+    _fJ = _srcT.index(chr(10) + "def ", _dJ + 40)
+    _jbSrc = _srcT[_dJ:_fJ]
+    check("nature : la page Jailbreak ne liste que les modeles",
+          "identities = _identites_modeles()" in _jbSrc
+          and "identities = _list_identities()" not in _jbSrc)
+    check("nature : « Tout allumer » ecrit la meme liste qu il affiche",
+          "_noms = {str(k).strip().lower() for k in _identites_modeles()}" in _srcT)
+    check("nature : la modale recoit la nature servie par le serveur",
+          "data-type='{_type_identite(selected)}'" in _srcT)
+    check("nature : les deux boutons existent dans le panneau Modifier",
+          "ident-edit-modele" in _srcT and "ident-edit-identite" in _srcT
+          and "function identEditType(" in _srcT)
+    check("nature : enregistrer n envoie la nature que si elle a change",
+          "identEditCtx.type !== identEditCtx.type0" in _srcT)
+except Exception as _eT:
+    check("nature : testable", False, repr(_eT)[:200])
+
+print()
+print("=" * 70)
 print("REVENUS : l argent ne disparait plus entre le total et les cartes")
 print("=" * 70)
 try:

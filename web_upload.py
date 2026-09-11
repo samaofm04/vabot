@@ -8705,6 +8705,8 @@ document.addEventListener('click', function(ev){
   if(nw) nw.style.display = identEditCtx.rename ? 'flex' : 'none';
   var n=document.getElementById('ident-edit-name'); if(n) n.value=lbl;
   var a=document.getElementById('ident-edit-avatar'); if(a) a.value='';
+  identEditCtx.type0 = b.getAttribute('data-type') || 'modele';
+  identEditType(identEditCtx.type0);
   identEditCtx.market0 = b.getAttribute('data-market') || 'fr';
   identEditMarket(identEditCtx.market0);
   identEditCtx.styles0 = identStylesDe(identEditCtx.ident);
@@ -8757,6 +8759,27 @@ function identEditStylesPeindre(){
     box.appendChild(b);
   });
 }
+function identEditType(v){
+  identEditCtx.type = v;
+  [['modele','ident-edit-modele'],['identite','ident-edit-identite']].forEach(function(p){
+    var b=document.getElementById(p[1]); if(!b) return;
+    var on = (p[0] === v);
+    b.style.borderColor = on ? '#a855f7' : '#34343a';
+    b.style.background  = on ? 'rgba(168,85,247,.14)' : '#131316';
+    b.style.color       = on ? '#c9a4ff' : '#e6e6ea';
+  });
+  /* Le marche ne veut rien dire pour un dossier de montage : on le grise
+     plutot que de le retirer, pour que son reglage reste visible si on
+     repasse en modele. */
+  ['ident-edit-fr','ident-edit-us'].forEach(function(id){
+    var b=document.getElementById(id); if(!b) return;
+    b.style.opacity = (v === 'modele') ? '1' : '.45';
+  });
+  var h=document.getElementById('ident-edit-thint');
+  if(h) h.textContent = (v === 'modele')
+    ? "Mod\u00e8le : une cr\u00e9atrice r\u00e9elle. Elle appara\u00eet dans Jailbreak, dans le p\u00e9rim\u00e8tre de scrape et dans les menus des VA."
+    : "Identit\u00e9 : un dossier pour produire des vid\u00e9os. Elle reste dans la Biblioth\u00e8que, et dispara\u00eet de Jailbreak, du scrape et des menus VA.";
+}
 function identEditMarket(v){
   identEditCtx.market = v;
   [['fr','ident-edit-fr'],['us','ident-edit-us']].forEach(function(p){
@@ -8786,6 +8809,14 @@ async function identEditSave(){
                           if(go){go.disabled=false;go.textContent='Enregistrer';} return; }
         cible=j1.identity; fait=true;
       }
+    }
+    if(identEditCtx.type && identEditCtx.type !== identEditCtx.type0){
+      var ft=new FormData(); ft.set('identity',cible); ft.set('type',identEditCtx.type);
+      var rt=await fetch('/identity/type',{method:'POST',body:ft,credentials:'same-origin'});
+      var jt=await rt.json();
+      if(!(jt&&jt.ok)){ if(err) err.textContent=(jt&&jt.error)||('Erreur '+rt.status);
+                        if(go){go.disabled=false;go.textContent='Enregistrer';} return; }
+      fait=true;
     }
     if(identEditCtx.market && identEditCtx.market !== identEditCtx.market0){
       var fm=new FormData(); fm.set('identity',cible); fm.set('market',identEditCtx.market);
@@ -12893,6 +12924,17 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
     <label style="font-size:12px;color:#c4c4cc;display:flex;flex-direction:column;gap:6px">Photo de profil
       <input id="ident-edit-avatar" type="file" accept="image/*"
              style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:8px;font-size:12px;font-family:inherit;box-sizing:border-box"></label>
+    <!-- CE QUE CETTE ENTREE EST. Pose avant le marche : savoir si c'est une
+         creatrice ou un dossier de montage commande tout le reste. -->
+    <div style="font-size:12px;color:#c4c4cc;display:flex;flex-direction:column;gap:6px">Nature
+      <div style="display:flex;gap:8px">
+        <button type="button" id="ident-edit-modele" onclick="identEditType('modele')"
+                style="flex:1;background:#131316;border:1.5px solid #34343a;color:#e6e6ea;border-radius:9px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">&#128131; Mod&egrave;le</button>
+        <button type="button" id="ident-edit-identite" onclick="identEditType('identite')"
+                style="flex:1;background:#131316;border:1.5px solid #34343a;color:#e6e6ea;border-radius:9px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">&#127916; Identit&eacute;</button>
+      </div>
+      <div id="ident-edit-thint" style="font-size:11px;color:#75757f;line-height:1.45"></div>
+    </div>
     <div style="font-size:12px;color:#c4c4cc;display:flex;flex-direction:column;gap:6px">Marché
       <div style="display:flex;gap:8px">
         <button type="button" id="ident-edit-fr" onclick="identEditMarket('fr')"
@@ -13657,6 +13699,34 @@ def _list_content_identities():
 
 
 import marche as _marche_mod
+import type_identite as _type_mod
+
+
+def _type_identite(ident) -> str:
+    """« modele » ou « identite ». Un seul point de lecture dans tout le site."""
+    try:
+        return _type_mod.de(ident)
+    except Exception:
+        # Se tromper en montrant une entrée de trop est sans conséquence ;
+        # se tromper en cachant une vraie modèle lui coûterait son scrape.
+        return "modele"
+
+
+def _identites_modeles(identites=None) -> list:
+    """Les CRÉATRICES, sans les dossiers de montage.
+
+    Un seul point de passage, utilisé par la page Jailbreak, le périmètre de
+    scrape et les menus. Deux listes calculées séparément finissaient
+    toujours par diverger : « Tout allumer » écrivait les identités du
+    référentiel Jailbreak alors que les pastilles étaient dessinées depuis
+    les dossiers — on rallumait donc des pastilles qu'on n'affichait pas, et
+    le compteur ne tombait jamais sur N/N.
+    """
+    base = _list_identities() if identites is None else list(identites)
+    try:
+        return _type_mod.filtrer_modeles(base)
+    except Exception:
+        return base
 
 # Avancement du nettoyage des doublons du Drive (tache de fond)
 _DDRIVE: dict = {"etat": "repos"}
@@ -21679,6 +21749,10 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         # ✎ Modifier : photo de l'identité (partout) + son nom (Vault PRO)
         f"<button type='button' data-identedit='{selected}' data-canrename='{'1' if vault2 else ''}' "
         f"data-market='{identity_market(selected)}' "
+        # La nature sert la modale : sans elle, le panneau s'ouvrirait
+        # toujours sur « Modèle » et un clic sur Enregistrer transformerait
+        # une identité vidéo en modèle sans que personne l'ait demandé.
+        f"data-type='{_type_identite(selected)}' "
         f"title='Changer la photo{' ou le nom' if vault2 else ''} de cette identité' "
         "style='display:inline-flex;align-items:center;gap:7px;padding:9px 14px;background:#1a1a1f;"
         "border:1px solid #303036;color:#c4c4cc;border-radius:10px;font-size:13px;font-weight:600;"
@@ -31057,7 +31131,19 @@ def _render_jailbreak_html() -> str:
         import jailbreak as jb
     except Exception as e:
         return f"<p style='color:#f99'>Module jailbreak indispo : {e}</p>"
-    identities = _list_identities() if callable(_list_identities) else []
+    # SEULES LES MODELES ENTRENT ICI. C'etait _list_identities(), donc TOUS
+    # les dossiers de data/identities : chaque identite ouverte pour produire
+    # des videos gagnait sa section dans la colonne de gauche (depliee, avec
+    # « Aucun VA — commence par en ajouter un »), sa pastille dans le
+    # perimetre de scrape, sa ligne dans le menu deroulant, et gonflait le
+    # denominateur du compteur « X/N identites ». Les entrees v2_ de la
+    # Bibliotheque 2 y remontaient aussi, alors que leur propre commentaire
+    # les dit « invisibles du Jailbreak ».
+    #
+    # La nature se regle dans « Modifier », a cote du marche. Une entree
+    # rangee par erreur se corrige en deux clics depuis la Bibliotheque, qui
+    # continue de tout afficher : aucun cul-de-sac.
+    identities = _identites_modeles() if callable(_list_identities) else []
     all_accounts = jb.list_all()
     stats = jb.stats()
 
@@ -50185,6 +50271,35 @@ def create_app():
         _invalidate_all_ttl_cache()
         return jsonify({"ok": True, "identity": ident, "market": market})
 
+    @app.route("/identity/type", methods=["POST"])
+    def identity_type_set():
+        """MODELE ou IDENTITE : la difference que le proprietaire fait.
+
+        Une modele est une creatrice reelle — des VA, des comptes Instagram,
+        des revenus. Une identite n'est qu'un dossier ouvert pour produire des
+        videos. Le site ne connaissait que « des dossiers », si bien que
+        chaque identite video s'ajoutait a la colonne Jailbreak, au perimetre
+        de scrape, aux menus Discord et a la rotation des VA.
+
+        Le choix se pose ici, a la main, parce qu'aucun nom ne dit ce qu'une
+        entree est. Voir type_identite.py pour la regle de repli tant que
+        personne n'a tranche.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        ident = (request.form.get("identity") or "").strip().lower()
+        if ident not in _list_identities():
+            return jsonify({"ok": False, "error": "identité inconnue"})
+        valeur = (request.form.get("type") or "").strip().lower()
+        if valeur not in ("modele", "identite"):
+            return jsonify({"ok": False, "error": "type inconnu"})
+        import type_identite as _ti
+        if not _ti.definir(ident, valeur):
+            return jsonify({"ok": False, "error": "écriture impossible"})
+        _invalidate_all_ttl_cache()
+        return jsonify({"ok": True, "identity": ident, "type": valeur})
+
     @app.route("/identity/styles", methods=["POST"])
     def identity_styles_set():
         """Ce qui MARCHE pour une identité : caption / brut / montage / flash.
@@ -57521,7 +57636,16 @@ def create_app():
         if _tout in ("0", "1"):
             try:
                 import jailbreak as _jbt
-                _noms = {str(k).strip().lower() for k in _jbt.list_all().keys()}
+                # LA MEME LISTE QUE LES PASTILLES, SINON LE BOUTON MENT.
+                # Les pastilles sont dessinees depuis les identites affichees ;
+                # ce bouton ecrivait, lui, les cles de jailbreak.json. Les deux
+                # ensembles ne coincidaient pas : on cliquait « Tout allumer »
+                # et, au rechargement, des pastilles restaient grises — le
+                # compteur ne tombait jamais sur N/N, et le bouton passait pour
+                # casse.
+                _noms = {str(k).strip().lower() for k in _identites_modeles()}
+                _noms |= {str(k).strip().lower() for k in _jbt.list_all().keys()
+                          if _type_identite(k) == "modele"}
             except Exception:
                 _noms = set()
             finales = fixer_identites_suivies(_noms if _tout == "1" else [])
