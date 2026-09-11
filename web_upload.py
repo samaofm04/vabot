@@ -19796,17 +19796,48 @@ def _vignette_valide(chemin: Path) -> bool:
     la carte restait noire pour toujours, et seul un changement de
     THUMB_RECETTE purgeait. C est ce qui explique les « corrige puis
     re-casse » du passage en v2.
+
+    LE PLANCHER DE 512 OCTETS ETAIT UN MAUVAIS SUBSTITUT. Il repondait a
+    « est-elle assez grosse ? » en esperant que ca veuille dire « est-elle
+    complete ? ». Une vignette de 96 px sur un fond uni pese 341 octets et
+    etait donc declaree TRONQUEE. Consequences mesurees le 12/09/2026 : elle
+    se regenerait a CHAQUE affichage -- jamais jugee valable -- et, quand la
+    regeneration echouait, la route servait l'original 320 px, c'est-a-dire
+    exactement ce que la vignette existe pour eviter.
+
+    On pose donc la vraie question : le fichier se TERMINE-t-il comme une
+    image complete ? Un JPEG finit par FF D9, un PNG par son chunk IEND. Un
+    ffmpeg interrompu s'arrete au milieu : il garde son en-tete, jamais sa
+    fin. C'est un controle plus sur que la taille, et il ne punit pas les
+    images qui se compressent bien.
+
+    On tolere quelques octets apres la marque de fin : certains encodeurs
+    ajoutent des metadonnees en queue, et exiger les deux DERNIERS octets
+    rejetterait des images parfaitement valides.
     """
     try:
-        if chemin.stat().st_size < 512:
+        taille = chemin.stat().st_size
+        if taille < 64:          # plus petit qu un en-tete : rien a lire
             return False
         with open(chemin, "rb") as f:
             tete = f.read(12)
+            f.seek(max(0, taille - 64))
+            queue = f.read(64)
     except OSError:
         return False
-    return (tete[:2] == bytes((0xFF, 0xD8))                  # JPEG
-            or tete[:4] == bytes((0x89, 0x50, 0x4E, 0x47))   # PNG
-            or (tete[:4] == b"RIFF" and tete[8:12] == b"WEBP"))
+    if tete[:2] == bytes((0xFF, 0xD8)):                       # JPEG
+        return bytes((0xFF, 0xD9)) in queue
+    if tete[:4] == bytes((0x89, 0x50, 0x4E, 0x47)):           # PNG
+        return b"IEND" in queue
+    if tete[:4] == b"RIFF" and tete[8:12] == b"WEBP":
+        # WEBP porte sa longueur dans l en-tete : si le fichier est plus court
+        # que ce qu il annonce, il a ete coupe.
+        try:
+            annonce = int.from_bytes(tete[4:8], "little") + 8
+        except Exception:
+            return False
+        return taille >= annonce
+    return False
 
 
 def _get_or_create_thumbnail(src: Path, rel_key: str, is_video: bool) -> Path:
@@ -51205,8 +51236,32 @@ def create_app():
                                 _im_pp.thumbnail((96, 96), _Im_pp.LANCZOS)
                                 _im_pp.save(_tmp_pp, "JPEG", quality=72, optimize=True)
                             os.replace(str(_tmp_pp), str(petite))   # ecriture atomique
-            except Exception:
-                petite = p        # jamais de compte sans photo : on sert l original
+            except Exception as _e_pp:
+                # UNE VIGNETTE PERIMEE VAUT MIEUX QUE L ORIGINAL.
+                #
+                # On retombait sur `p` des que la REGENERATION echouait, sans
+                # regarder si une vignette existait deja. Or servir 320 px est
+                # exactement le probleme que cette vignette resout : avec ~800
+                # comptes, c est 328 Mo de bitmaps decodes dans le navigateur,
+                # et l onglet qui se fige. Une photo de profil vieille de
+                # quelques secondes ne gene personne ; une page qui se fige,
+                # si.
+                #
+                # L echec est REEL et courant : os.replace() refuse d ecraser
+                # un fichier encore ouvert par une reponse en cours (WinError
+                # 32). Mesure du 12/09/2026 : un tour sur deux en rafale.
+                #
+                # On ne retombe donc sur l original que s il n y a VRAIMENT
+                # aucune vignette -- le premier affichage d un compte.
+                if not _vignette_valide(petite):
+                    petite = p
+                # Et on ne l ecarte pas en silence : sans cette ligne, une
+                # vignette qui ne se regenere plus du tout (disque plein,
+                # droits) ne se voit nulle part.
+                print("[pp] vignette %s non regeneree (%s) : %s"
+                      % (p.stem, type(_e_pp).__name__,
+                         "ancienne servie" if petite is not p else "original servi"),
+                      flush=True)
             resp = send_file(str(petite), mimetype="image/jpeg", conditional=True)
             resp.headers["Cache-Control"] = "public, max-age=86400"
             return resp

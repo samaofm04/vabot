@@ -4123,8 +4123,19 @@ try:
                     ("vide", b"", False),
                     ("tronque", bytes((0xFF, 0xD8)) + b"x" * 42, False),
                     ("texte", b"<html>pas une image</html>" + b" " * 600, False),
-                    ("jpeg", bytes((0xFF, 0xD8, 0xFF, 0xE0)) + b"\x00" * 3000, True),
-                    ("png", bytes((0x89, 0x50, 0x4E, 0x47)) + b"\x00" * 3000, True)):
+                    # UN EN-TETE SUIVI DE 3000 ZEROS N EST PAS UNE IMAGE :
+                    # c est exactement ce que laisse un ffmpeg interrompu,
+                    # donc ce que cette fonction doit REFUSER. Ces deux cas
+                    # passaient parce que l ancien controle ne regardait que
+                    # la TAILLE (>= 512 o) et l en-tete. On leur donne donc
+                    # une vraie fin de fichier, et on ajoute le cas qu ils
+                    # manquaient : l en-tete sans la fin.
+                    ("jpeg", bytes((0xFF, 0xD8, 0xFF, 0xE0)) + b"\x00" * 3000
+                     + bytes((0xFF, 0xD9)), True),
+                    ("jpeg sans fin", bytes((0xFF, 0xD8, 0xFF, 0xE0)) + b"\x00" * 3000, False),
+                    ("png", bytes((0x89, 0x50, 0x4E, 0x47)) + b"\x00" * 3000
+                     + b"IEND" + bytes((0xAE, 0x42, 0x60, 0x82)), True),
+                    ("png sans fin", bytes((0x89, 0x50, 0x4E, 0x47)) + b"\x00" * 3000, False)):
                 _fAp = _dAp / "x.jpg"
                 _fAp.write_bytes(_octets)
                 check("apercus : une vignette « %s » est jugee %s"
@@ -6853,6 +6864,51 @@ except Exception as _eJs:
 
 print()
 print("=" * 70)
+print("VIGNETTE VALIDE : « assez grosse » n est pas « complete »")
+print("=" * 70)
+try:
+    import tempfile as _tpV, pathlib as _plV
+    import web_upload as _wV
+    from PIL import Image as _ImV
+    _dV = _plV.Path(_tpV.mkdtemp())
+
+    def _jpgV(nom, taille):
+        _p = _dV / nom
+        _ImV.new("RGB", taille, (200, 60, 120)).save(_p, "JPEG", quality=72, optimize=True)
+        return _p
+
+    _petiteV = _jpgV("petite.jpg", (96, 96))
+    _grosseV = _jpgV("grosse.jpg", (320, 320))
+    _tronqV = _dV / "tronq.jpg"
+    _tronqV.write_bytes(_grosseV.read_bytes()[:len(_grosseV.read_bytes()) // 2])
+    _videV = _dV / "vide.jpg"; _videV.write_bytes(b"")
+    _pngV = _dV / "a.png"; _ImV.new("RGB", (96, 96)).save(_pngV, "PNG")
+    _pngtV = _dV / "t.png"
+    _pngtV.write_bytes(_pngV.read_bytes()[:len(_pngV.read_bytes()) // 2])
+
+    # UNE VIGNETTE DE 341 OCTETS EST VALIDE. L ancien plancher de 512 la
+    # rejetait, ce qui la faisait regenerer a chaque affichage.
+    check("vignette : une petite image bien compressee est valide",
+          _wV._vignette_valide(_petiteV) is True,
+          "%d octets" % _petiteV.stat().st_size)
+    check("vignette : une image normale reste valide",
+          _wV._vignette_valide(_grosseV) is True)
+    # ET LA VRAIE QUESTION EST BIEN POSEE : un fichier coupe est refuse, meme
+    # s il est plus GROS que celui qu on vient d accepter.
+    check("vignette : un JPEG tronque est refuse, meme plus gros qu un valide",
+          _wV._vignette_valide(_tronqV) is False
+          and _tronqV.stat().st_size > _petiteV.stat().st_size,
+          "%d o tronque contre %d o valide"
+          % (_tronqV.stat().st_size, _petiteV.stat().st_size))
+    check("vignette : un fichier vide est refuse", _wV._vignette_valide(_videV) is False)
+    check("vignette : un PNG complet est valide", _wV._vignette_valide(_pngV) is True)
+    check("vignette : un PNG tronque est refuse", _wV._vignette_valide(_pngtV) is False)
+    _shCa.rmtree(_dV, ignore_errors=True)
+except Exception as _eV:
+    check("vignette : testable", False, repr(_eV)[:200])
+
+print()
+print("=" * 70)
 print("PHOTOS DE PROFIL : servies a la taille affichee, 404 mis en cache")
 print("=" * 70)
 try:
@@ -6879,6 +6935,23 @@ try:
         if _rPp.status_code == 200:
             _szPp = _ImPp.open(_ioPp.BytesIO(_rPp.data)).size
             check("pp : servie reduite, pas en 320 px", max(_szPp) <= 96, _szPp)
+        # LE TEST ETAIT INSTABLE, ET IL AVAIT RAISON DE L ETRE : il attrapait
+        # un VRAI defaut, un affichage sur deux. Deux causes, mesurees le
+        # 12/09/2026 :
+        #   1. une vignette 96 px sur fond uni pese 341 octets, et
+        #      _vignette_valide exigeait 512 : elle etait declaree tronquee,
+        #      donc regeneree a CHAQUE affichage ;
+        #   2. os.replace() refuse d ecraser un fichier encore ouvert par une
+        #      reponse en cours (WinError 32), et la route retombait alors sur
+        #      l original 320 px -- ce que la vignette existe pour eviter.
+        _petites = []
+        for _iPp in range(6):
+            _ImPp.new("RGB", (320, 320), (200, 60, 120)).save(_fPp, "JPEG", quality=92)
+            _r2 = _cPp.get("/insta/pp/_tst_pp_perf")
+            if _r2.status_code == 200:
+                _petites.append(max(_ImPp.open(_ioPp.BytesIO(_r2.data)).size))
+        check("pp : reduite a CHAQUE appel, pas une fois sur deux",
+              _petites and all(x <= 96 for x in _petites), str(_petites))
         # Un 404 sans duree de vie etait redemande a CHAQUE affichage : un
         # compte sans copie locale coutait une requete par rendu, pour rien.
         # Le hook de cache force « no-store » sur tout le text/html, d ou le
