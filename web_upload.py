@@ -48054,6 +48054,16 @@ def create_app():
                   % _n_mig, flush=True)
     except Exception as _e_mig:
         print("[marche] migration historique : %s" % _e_mig, flush=True)
+    # ET LA CORRECTION QUI SUIT. La migration ci-dessus a fige Jessye en
+    # « fr » parce que l'ancienne regle la rangeait la ; elle est US, comme
+    # OF_US_MODELS et OF_US_CREATOR_IDS le disent depuis toujours. Un passage,
+    # une fois, avec son propre marqueur.
+    try:
+        _n_cor = _marche_mod.corriger_us()
+        if _n_cor:
+            print("[marche] %d identite(s) remise(s) cote US" % _n_cor, flush=True)
+    except Exception as _e_cor:
+        print("[marche] correction US : %s" % _e_cor, flush=True)
     def _web_secret_persistent():
         # Clé de session STABLE entre redémarrages : avant, chaque deploy
         # (auto-restart VPS ~1×/jour) régénérait une clé aléatoire -> tout le

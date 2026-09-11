@@ -853,6 +853,19 @@ try:
             _mkN._CACHE.update(sig=None, data={})
             check("marche : un choix explicite l emporte toujours",
                   _mkN.de("zzzchoisie") == "us")
+            # JESSYE EST US, et deux endroits du depot le savaient deja :
+            # OF_US_MODELS (web_upload) et OF_US_CREATOR_IDS (mypuls) la
+            # comptent cote americain. Seul marche.py disait FR.
+            _sjN.write(_fMkN, {})
+            _mkN._CACHE.update(sig=None, data={})
+            check("marche : jessye est US par defaut, comme cote revenus",
+                  _mkN.de("jessye") == "us" and _mkN.de("khloe") == "us")
+            check("marche : les autres restent FR",
+                  _mkN.de("julia") == "fr" and _mkN.de("amelia") == "fr")
+            _sjN.write(_fMkN, {"jessye": "fr"})
+            _mkN._CACHE.update(sig=None, data={})
+            check("marche : un choix pose l emporte meme sur jessye",
+                  _mkN.de("jessye") == "fr")
         finally:
             if _savMkN is None:
                 try:

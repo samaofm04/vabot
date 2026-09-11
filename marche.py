@@ -23,10 +23,22 @@ import safe_json
 
 FICHIER = Path("data") / "identity_market.json"
 
-# Répartition historique, appliquée tant qu'aucun choix n'a été enregistré.
-# Jessye en fait partie : elle n'est pas une model du menu US, elle en est la
-# SOURCE (pseudo et name).
-FR_DEFAUT = {"julia", "emma", "lola", "sarah", "amelia", "alicia", "jessye"}
+# Répartition historique. Elle ne sert plus de règle depuis que le défaut est
+# « fr » (voir `de`) : on la garde parce qu'elle documente qui venait d'où.
+FR_DEFAUT = {"julia", "emma", "lola", "sarah", "amelia", "alicia"}
+
+#: CELLES QUI SONT US, MEME SANS CHOIX EXPLICITE.
+#:
+#: Jessye figurait dans FR_DEFAUT, avec ce commentaire : « elle n'est pas une
+#: model du menu US, elle en est la SOURCE ». C'est vrai — et ça ne dit rien
+#: de son MARCHÉ, qui est américain. Deux autres endroits du dépôt le savaient
+#: déjà et la comptaient du bon côté : `OF_US_MODELS = {"jessye", "khloe"}`
+#: dans web_upload.py, et `OF_US_CREATOR_IDS = {3107, 3108}  # Jessye, Khloe`
+#: dans mypuls.py. Ses revenus étaient donc rangés en « OnlyFans US » pendant
+#: que son drapeau disait FR — le proprietaire l'a releve le 12/09/2026.
+#:
+#: Un choix pose dans « Modifier » l'emporte toujours sur cette liste.
+US_DEFAUT = {"jessye", "khloe"}
 
 _CACHE: dict = {"sig": None, "data": {}}
 
@@ -65,7 +77,7 @@ def de(identity: str) -> str:
     v = _table().get(idl)
     if v in ("fr", "us"):
         return v
-    return "fr"
+    return "us" if idl in US_DEFAUT else "fr"
 
 
 #: Marqueur pose dans le fichier lui-meme : aucune identite ne peut porter ce
@@ -107,6 +119,41 @@ def migrer_historique(identites) -> int:
     safe_json.write(FICHIER, d)
     _CACHE.update(sig=None, data={})
     return poses
+
+
+_CLE_CORRECTION_US = "__correction_us_2026_09_12__"
+
+
+def corriger_us() -> int:
+    """Repare ce que la migration historique a fige de travers pour Jessye.
+
+    `migrer_historique` ecrit EXACTEMENT ce que l'ancienne regle rendait --
+    c'est sa force, et ici c'etait sa limite : l'ancienne regle mettait
+    Jessye dans FR_DEFAUT, elle a donc ete gravee « fr » sur tous les postes
+    ou la migration avait deja tourne. Or elle est US, et deux autres
+    endroits du depot le savaient depuis toujours (`OF_US_MODELS` dans
+    web_upload.py, `OF_US_CREATOR_IDS` dans mypuls.py, qui rangent ses
+    revenus en « OnlyFans US »). Le proprietaire l'a releve le 12/09/2026.
+
+    Une correction ponctuelle, avec son propre marqueur : elle ne passe
+    qu'une fois. Apres quoi, un choix pose dans « Modifier » fait loi --
+    y compris pour la remettre en FR si jamais c'etait l'inverse.
+
+    Rend le nombre d'entrees corrigees.
+    """
+    d = dict(_table())
+    if d.get(_CLE_CORRECTION_US):
+        return 0
+    n = 0
+    for nom in US_DEFAUT:
+        if d.get(nom) == "fr":
+            d[nom] = "us"
+            n += 1
+    d[_CLE_CORRECTION_US] = "1"
+    FICHIER.parent.mkdir(parents=True, exist_ok=True)
+    safe_json.write(FICHIER, d)
+    _CACHE.update(sig=None, data={})
+    return n
 
 
 def migrer_depuis_dossier(dossier=None) -> int:

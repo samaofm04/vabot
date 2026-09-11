@@ -9063,14 +9063,22 @@ try:
         _IDS = ["jessye", "julia", "lola", "emma", "e30princesss", "br1anna91"]
         # AVANT : tout retombe sur le defaut, donc tout est francais. C est
         # exactement le symptome signale -- le filtre US n affichait plus rien.
+        # JESSYE EST L EXCEPTION, et elle est DITE : le defaut est FR pour
+        # tout le monde SAUF celles de US_DEFAUT. Elle y est entree le
+        # 12/09/2026 -- OF_US_MODELS et OF_US_CREATOR_IDS la rangeaient deja
+        # cote americain, seul marche.py disait FR.
         check("marche : sans reglage, le defaut est bien FR",
-              all(_mkM.de(n) == "fr" for n in _IDS))
+              all(_mkM.de(n) == "fr" for n in _IDS if n not in _mkM.US_DEFAUT))
+        check("marche : sauf celles qui sont US de naissance",
+              all(_mkM.de(n) == "us" for n in _mkM.US_DEFAUT))
         _n = _mkM.migrer_historique(_IDS)
         check("marche : la migration fige toutes les entrees d un coup",
               _n == len(_IDS), "%d au lieu de %d" % (_n, len(_IDS)))
         # APRES : chacune retrouve ce que l ANCIENNE regle rendait.
         check("marche : les identites historiquement FR le restent",
-              all(_mkM.de(n) == "fr" for n in ("jessye", "julia", "lola", "emma")))
+              all(_mkM.de(n) == "fr" for n in ("julia", "lola", "emma")))
+        check("marche : jessye, elle, est figee en US par la migration",
+              _mkM.de("jessye") == "us", "l ancienne regle la mettait a tort en FR")
         check("marche : celles qui etaient US le redeviennent",
               all(_mkM.de(n) == "us" for n in ("e30princesss", "br1anna91")),
               "c est le drapeau qui avait disparu")
@@ -9085,6 +9093,17 @@ try:
         # changement de defaut, il ne doit pas etre annule.
         check("marche : une identite nouvelle part toujours en FR",
               _mkM.de("zzz_creee_apres") == "fr")
+        # LA CORRECTION PONCTUELLE. La premiere migration a grave « fr » pour
+        # Jessye sur tous les postes ou elle avait deja tourne : la regle
+        # corrigee ne suffit pas, il faut repasser une fois.
+        _mkM.definir("jessye", "fr")
+        check("correction US : elle remet jessye du bon cote",
+              _mkM.corriger_us() >= 1 and _mkM.de("jessye") == "us")
+        check("correction US : elle ne passe qu une fois",
+              _mkM.corriger_us() == 0)
+        _mkM.definir("jessye", "fr")
+        check("correction US : un choix POSTERIEUR fait loi",
+              _mkM.de("jessye") == "fr" and _mkM.corriger_us() == 0)
         # Le declenchement au demarrage, sinon rien ne se passe sur le VPS.
         import pathlib as _plM2
         _srcM = _plM2.Path("web_upload.py").read_text(encoding="utf-8")
