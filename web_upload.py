@@ -10234,6 +10234,10 @@ document.addEventListener('click',function(e){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/></svg>
       Analyse vues
     </button>
+    <button class="item" id="tab-jbglobal" onclick="showTab('jailbreak','jbglobal','Analyse globale','Les totaux du parc : abonnes, publications, vues, et le comparatif par identite')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+      Analyse globale
+    </button>
     <button class="item" id="tab-jbactivite" onclick="showTab('jailbreak','jbactivite','Activité VA','Assiduité : 1 reel / 48 h par compte, warm-up 5 j, jours de repos, retenues sur paie')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="m9 16 2 2 4-4"/></svg>
       Activité VA
@@ -12495,6 +12499,11 @@ document.addEventListener('keydown', function(e){
 <!-- JAILBREAK - Analyse vues Instagram -->
 <div class="form-section" id="form-jbanalyse" style="display:none">
 {jbanalyse_html}
+</div>
+
+<!-- JAILBREAK - Analyse globale (les totaux du parc) -->
+<div class="form-section" id="form-jbglobal" style="display:none">
+{jbglobal_html}
 </div>
 
 <!-- JAILBREAK - Activité VA (assiduité) -->
@@ -38003,6 +38012,191 @@ def _jbanalyse_payload() -> dict:
             "scraped_at": newest_scrape, "generated_at": int(_t_a.time())}
 
 
+
+# ==============================================================================
+# ANALYSE GLOBALE : les totaux du parc, et qui pese quoi
+# ==============================================================================
+
+def _jbglobal_donnees() -> dict:
+    """Ce qu'on sait du parc, agrege par identite.
+
+    TOUT VIENT DU CACHE DE SCRAPE, donc d'une mesure, jamais d'une saisie. Un
+    compte qu'on n'a pas pu lire n'est pas compte comme vide : il est compte
+    comme NON MESURE, et l'ecran le dit. Confondre les deux ferait passer une
+    panne de scrape pour une baisse de resultats.
+    """
+    import jailbreak as _jb_g
+    cache = _load_insta_3_stats_cache() or {}
+    ref = _jb_g._load() or {}
+    lignes, vus = [], set()
+    for ident in sorted(ref):
+        entree = ref.get(ident)
+        comptes = entree.get("accounts") if isinstance(entree, dict) else entree
+        n_comptes = n_mesures = n_bannis = n_verif = 0
+        abonnes = posts = vues7 = 0
+        handles = []
+        for a in (comptes or []):
+            if not isinstance(a, dict):
+                continue
+            n_comptes += 1
+            try:
+                h = _normalize_insta_handle(a.get("username") or "")
+            except Exception:
+                h = str(a.get("username") or "").strip().lower().lstrip("@")
+            if not h:
+                continue
+            handles.append(h)
+            vus.add(h)
+            e = cache.get(h) or {}
+            if e.get("banned"):
+                n_bannis += 1
+                continue
+            if e.get("a_verifier"):
+                n_verif += 1
+            f = e.get("followers")
+            if isinstance(f, int) and f > 0:
+                abonnes += f
+                n_mesures += 1
+            p = e.get("posts_count")
+            if isinstance(p, int) and p > 0:
+                posts += p
+            w = e.get("weekly")
+            if isinstance(w, (int, float)) and w > 0:
+                vues7 += int(w)
+        if not n_comptes:
+            continue
+        lignes.append({"identite": ident, "comptes": n_comptes,
+                       "mesures": n_mesures, "bannis": n_bannis,
+                       "a_verifier": n_verif, "abonnes": abonnes,
+                       "posts": posts, "vues7": vues7, "handles": handles})
+    lignes.sort(key=lambda x: -x["abonnes"])
+    gagnes = depuis = None
+    try:
+        import abonnes_histo as _ab_g
+        gagnes, depuis = _ab_g.variation(sorted(vus), jours=7)
+    except Exception:
+        pass
+    return {"lignes": lignes, "gagnes7": gagnes, "depuis": depuis,
+            "total_comptes": sum(x["comptes"] for x in lignes),
+            "total_mesures": sum(x["mesures"] for x in lignes),
+            "total_bannis": sum(x["bannis"] for x in lignes),
+            "total_verif": sum(x["a_verifier"] for x in lignes),
+            "total_abonnes": sum(x["abonnes"] for x in lignes),
+            "total_posts": sum(x["posts"] for x in lignes),
+            "total_vues7": sum(x["vues7"] for x in lignes)}
+
+
+def _render_jbglobal_html() -> str:
+    """Les totaux du parc et le comparatif par identite."""
+    import html as _hG
+    d = _jbglobal_donnees()
+    e = _hG.escape
+
+    def _n(v):
+        return "{:,}".format(int(v or 0)).replace(",", " ")
+
+    # La variation d'abonnes n'existe que si on a du recul. « Pas encore de
+    # recul » et « zero gagne » ne sont pas la meme chose : l'ecran doit
+    # pouvoir dire le premier, sinon il ment par omission.
+    if d["gagnes7"] is None:
+        chip = ("<span class='gl-chip gl-attente'>historique en cours de "
+                "constitution — la variation apparaitra dans quelques jours</span>")
+    else:
+        signe = "+" if d["gagnes7"] >= 0 else ""
+        cls = "gl-vert" if d["gagnes7"] >= 0 else "gl-rouge"
+        chip = ("<span class='gl-chip %s'>%s%s abonnés depuis le %s</span>"
+                % (cls, signe, _n(abs(d["gagnes7"])) if d["gagnes7"] < 0 else _n(d["gagnes7"]),
+                   e(d["depuis"] or "")))
+
+    non_mesures = d["total_comptes"] - d["total_mesures"] - d["total_bannis"]
+    avert = ""
+    if non_mesures > 0:
+        avert = ("<div class='gl-avert'>%d compte(s) n'ont pas pu être mesurés : "
+                 "leurs abonnés et leurs publications ne sont PAS dans les totaux "
+                 "ci-dessous. Ce n'est pas une baisse, c'est une absence de mesure."
+                 "</div>" % non_mesures)
+
+    cartes = "".join(
+        "<div class='gl-k'><div class='gl-k-v'>%s</div><div class='gl-k-l'>%s</div></div>" % (v, l)
+        for v, l in (
+            (_n(d["total_abonnes"]), "Abonnés"),
+            (_n(d["total_posts"]), "Publications"),
+            (_n(d["total_vues7"]), "Vues (7 j)"),
+            (_n(d["total_comptes"]), "Comptes"),
+            (_n(d["total_bannis"]), "Bannis"),
+            (_n(d["total_verif"]), "À vérifier"),
+        ))
+
+    lignes = []
+    plus_gros = max([x["abonnes"] for x in d["lignes"]] or [1]) or 1
+    for x in d["lignes"]:
+        part = int(100 * x["abonnes"] / plus_gros) if plus_gros else 0
+        etat = []
+        if x["bannis"]:
+            etat.append("<span class='gl-b'>%d banni(s)</span>" % x["bannis"])
+        if x["a_verifier"]:
+            etat.append("<span class='gl-v'>%d à vérifier</span>" % x["a_verifier"])
+        lignes.append(
+            "<div class='gl-r'>"
+            "<div class='gl-r-n'>%s</div>"
+            "<div class='gl-r-b'><i style='width:%d%%'></i></div>"
+            "<div class='gl-r-c'>%s</div><div class='gl-r-c'>%s</div>"
+            "<div class='gl-r-c'>%s</div><div class='gl-r-c'>%s</div>"
+            "<div class='gl-r-e'>%s</div></div>"
+            % (e(x["identite"]), part, _n(x["abonnes"]), _n(x["posts"]),
+               _n(x["vues7"]), _n(x["comptes"]), " ".join(etat)))
+    if not lignes:
+        lignes = ["<div class='gl-vide'>Aucun compte dans le référentiel.</div>"]
+
+    return (_JBGLOBAL_CSS
+            + "<div class='gl-head'><div class='gl-t'>Analyse globale</div>" + chip + "</div>"
+            + avert
+            + "<div class='gl-kpis'>" + cartes + "</div>"
+            + "<div class='gl-tab'>"
+              "<div class='gl-r gl-th'><div class='gl-r-n'>Identité</div>"
+              "<div class='gl-r-b'></div><div class='gl-r-c'>Abonnés</div>"
+              "<div class='gl-r-c'>Publications</div><div class='gl-r-c'>Vues 7 j</div>"
+              "<div class='gl-r-c'>Comptes</div><div class='gl-r-e'></div></div>"
+            + "".join(lignes) + "</div>"
+            + "<div class='gl-pied'>Les publications sont le total porté par "
+              "Instagram sur chaque compte. Les vues sont celles des sept "
+              "derniers jours, relevées au scrape.</div>")
+
+
+_JBGLOBAL_CSS = """<style>
+.gl-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.gl-t{font-size:17px;font-weight:800;letter-spacing:-.01em}
+.gl-chip{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:20px}
+.gl-vert{background:rgba(34,197,94,.14);color:#22c55e}
+.gl-rouge{background:rgba(239,68,68,.13);color:#ef4444}
+.gl-attente{background:rgba(148,163,184,.14);color:#8b98ab;font-weight:600}
+.gl-avert{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);
+  color:#d98a0b;border-radius:10px;padding:11px 14px;font-size:12.5px;margin-bottom:14px}
+.gl-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:10px;margin-bottom:16px}
+.gl-k{background:#0f1116;border:1px solid #2a2a2a;border-radius:12px;padding:14px}
+.gl-k-v{font-size:21px;font-weight:800;letter-spacing:-.02em}
+.gl-k-l{font-size:11px;color:#8b8b96;margin-top:3px}
+.gl-tab{background:#0f1116;border:1px solid #2a2a2a;border-radius:12px;padding:8px 14px 14px}
+.gl-r{display:grid;grid-template-columns:1.3fr 1fr .8fr .9fr .8fr .6fr 1fr;
+  gap:10px;align-items:center;padding:7px 0;font-size:12.5px}
+.gl-th{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:#75757f;font-weight:700}
+.gl-r-n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.gl-r-b{background:rgba(148,163,184,.13);height:7px;border-radius:4px;overflow:hidden}
+.gl-r-b i{display:block;height:100%;background:#3b82f6;border-radius:4px}
+.gl-r-c{text-align:right;font-variant-numeric:tabular-nums}
+.gl-r-e{font-size:11px;text-align:right}
+.gl-b{color:#ef4444;font-weight:600}
+.gl-v{color:#d98a0b;font-weight:600}
+.gl-vide{font-size:12.5px;color:#75757f;padding:10px 0}
+.gl-pied{font-size:11.5px;color:#75757f;margin-top:12px;line-height:1.55}
+body.light .gl-k,body.light .gl-tab{background:#fff;border-color:#e5e7eb}
+body.light .gl-k-l,body.light .gl-pied,body.light .gl-vide,body.light .gl-th{color:#6b7280}
+body.light .gl-attente{color:#64748b}
+body.light .gl-v{color:#b45309}
+body.light.claude .gl-k,body.light.claude .gl-tab{background:var(--c-surface)!important;border-color:var(--c-bordure)!important}
+</style>"""
+
+
 def _render_jbanalyse_html() -> str:
     """Page « Analyse vues Instagram » : cartes de totaux, pilules par identité
     (avatar) / par VA, courbe 14 jours (vues par jour de publication) et tableau.
@@ -46375,6 +46569,7 @@ ROLE_MENU_STRUCTURE = [
         # trop de choses »). Maintenant chaque page se coche séparément.
         {"key": "jailbreak", "name": "Social Analytics — Comptes par identité", "perms": ["view", "edit"]},
         {"key": "jbanalyse", "name": "Jailbreak — Analyse vues", "perms": ["view"]},
+        {"key": "jbglobal", "name": "Jailbreak — Analyse globale", "perms": ["view"]},
         {"key": "jbactivite", "name": "Jailbreak — Activité VA (assiduité, paie)", "perms": ["view", "edit"]},
     ]},
     {"section": "Finances", "items": [
@@ -47596,6 +47791,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{geelark_html}", _lazy("geelark"))
         .replace("{jailbreak_html}", _lazy("jailbreak"))
         .replace("{jbanalyse_html}", _g("jbanalyse", _render_jbanalyse_html))
+        .replace("{jbglobal_html}", _lazy("jbglobal"))
         .replace("{jbactivite_html}", _g("jbactivite", _render_jbactivite_html))
         .replace("{gms_html}", _lazy("gms"))
         .replace("{linkscale_html}", _lazy("linkscale"))
@@ -48826,6 +49022,7 @@ def create_app():
                 "jailbreak": _render_jailbreak_html,
                 "gmsdash": _render_gmsdash_html,
                 "jbanalyse": _render_jbanalyse_html,
+                "jbglobal": _render_jbglobal_html,
                 "jbactivite": _render_jbactivite_html,
                 "facture": _render_facture_html,
                 # Remote 2 : la coquille est inerte sans /parc/app.js, donc

@@ -9051,6 +9051,73 @@ except Exception as _eId:
 
 print()
 print("=" * 70)
+print("ANALYSE GLOBALE : les totaux, sans confondre zero et non mesure")
+print("=" * 70)
+try:
+    import web_upload as _wG
+    import jailbreak as _jbG
+    _svCG, _svRG = _wG._load_insta_3_stats_cache, _jbG._load
+    try:
+        _wG._load_insta_3_stats_cache = lambda: {
+            "a1": {"followers": 12000, "posts_count": 340, "weekly": 90000},
+            "a2": {"followers": 4300, "posts_count": 120, "weekly": 15000},
+            "a3": {"banned": True},
+            "b1": {"followers": 2200, "posts_count": 80, "weekly": 5000},
+            "b2": {"a_verifier": True, "error": "IG n a pas repondu"},
+            "b3": {"error": "echec"}}
+        _jbG._load = lambda: {
+            "jessye": {"accounts": [{"username": "a1"}, {"username": "a2"},
+                                    {"username": "a3"}]},
+            "julia": {"accounts": [{"username": "b1"}, {"username": "b2"},
+                                   {"username": "b3"}]}}
+        _dG = _wG._jbglobal_donnees()
+        check("globale : les abonnes s additionnent sur les comptes mesures",
+              _dG["total_abonnes"] == 18500, str(_dG["total_abonnes"]))
+        check("globale : publications et vues suivent la meme regle",
+              _dG["total_posts"] == 540 and _dG["total_vues7"] == 110000,
+              "%s / %s" % (_dG["total_posts"], _dG["total_vues7"]))
+        # UN BANNI NE COMPTE NI DANS LES ABONNES NI DANS LES MESURES : sinon
+        # son dernier chiffre connu gonflerait un total qui ne vit plus.
+        check("globale : un banni est compte a part, pas dans les abonnes",
+              _dG["total_bannis"] == 1 and _dG["total_comptes"] == 6)
+        check("globale : un compte « a verifier » est signale",
+              _dG["total_verif"] == 1)
+        # LE POINT QUI COMPTE : deux comptes n ont pas pu etre lus. Ils ne
+        # valent pas zero, ils valent « on ne sait pas », et l ecran le DIT.
+        _non = _dG["total_comptes"] - _dG["total_mesures"] - _dG["total_bannis"]
+        check("globale : les comptes non mesures sont comptes a part",
+              _non == 2, str(_non))
+        _hG2 = _wG._render_jbglobal_html()
+        check("globale : l ecran dit qu une absence de mesure n est pas une baisse",
+              "absence de mesure" in _hG2 and "2 compte(s)" in _hG2)
+        check("globale : sans recul, la variation ne s affiche pas comme zero",
+              "historique en cours de constitution" in _hG2)
+        # Le comparatif par identite, trie du plus gros au plus petit.
+        check("globale : chaque identite a sa ligne, la plus grosse en tete",
+              [l["identite"] for l in _dG["lignes"]] == ["jessye", "julia"],
+              str([l["identite"] for l in _dG["lignes"]]))
+        check("globale : une identite porte ses propres chiffres",
+              _dG["lignes"][0]["abonnes"] == 16300
+              and _dG["lignes"][1]["abonnes"] == 2200)
+    finally:
+        _wG._load_insta_3_stats_cache, _jbG._load = _svCG, _svRG
+    # Le cablage : sans ces cinq points, l onglet reste sur « Loading... ».
+    import pathlib as _plG
+    _srcG = _plG.Path("web_upload.py").read_text(encoding="utf-8")
+    _cab = [("menu", 'id="tab-jbglobal"'), ("panneau", 'id="form-jbglobal"'),
+            ("branchement", '.replace("{jbglobal_html}", _lazy("jbglobal"))'),
+            ("producteur", '"jbglobal": _render_jbglobal_html'),
+            ("permission", '{"key": "jbglobal"')]
+    _abs = [n for n, m in _cab if m not in _srcG]
+    check("globale : les cinq points de cablage de l onglet sont poses",
+          not _abs, "manque : " + ", ".join(_abs))
+    check("globale : les couleurs de l ecran ont leur version claire",
+          "body.light .gl-k," in _srcG and "body.light .gl-attente{" in _srcG)
+except Exception as _eG:
+    check("globale : testable", False, repr(_eG)[:200])
+
+print()
+print("=" * 70)
 print("ABONNES : une courbe ne s invente pas apres coup")
 print("=" * 70)
 try:
