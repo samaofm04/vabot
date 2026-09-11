@@ -14542,6 +14542,21 @@ class _SuiviEteint(Exception):
     chiffre qui pretendrait la mesurer."""
 
 
+def _suivi_bouton_html(ident: str) -> str:
+    """Le petit interrupteur de scrape, pour la ligne d'une identite."""
+    n = str(ident or "").strip().lower()
+    if not n:
+        return ""
+    suivies = identites_suivies()
+    on = (suivies is _TOUTES_IDENTITES) or ("*" in suivies) or (n in suivies)
+    return (
+        f"<span class='jb-suivi{' on' if on else ''}' role='button' tabindex='0' "
+        f"data-ident='{html_escape(n)}' data-on='{1 if on else 0}' "
+        f"onclick='event.stopPropagation();jbSuivi(this)' "
+        f"title=\"{'Scrape ACTIF — ses comptes sont interrogés. Clique pour éteindre.' if on else 'Scrape ÉTEINT — aucun appel, aucun crédit. Clique pour rallumer.'}\">"
+        f"{'●' if on else '○'}</span>")
+
+
 def _suivi_pastilles_html(identities) -> str:
     """Une pastille par identite : allumee = scrapee, eteinte = ignoree."""
     noms = sorted({str(x or "").strip().lower() for x in (identities or []) if str(x or "").strip()})
@@ -14568,6 +14583,14 @@ def _suivi_pastilles_html(identities) -> str:
         ". Une identité éteinte garde ses comptes ; on cesse seulement de les "
         "interroger, et ses chiffres cessent d'être à jour.</div>"
         "<div class='sv-pills'>" + "".join(puces) + "</div>"
+        # La bascule en masse : eteindre vingt-quatre identites une par une
+        # demandait vingt-quatre clics, et on en oubliait une.
+        "<div class='sv-tout'>"
+        "<button type='button' class='sv-pill' onclick='jbSuiviTout(0)'>"
+        "○ Tout éteindre</button>"
+        "<button type='button' class='sv-pill' onclick='jbSuiviTout(1)'>"
+        "● Tout allumer</button>"
+        "</div>"
         "</div>")
 
 
@@ -31503,6 +31526,11 @@ def _render_jailbreak_html() -> str:
                 f"{avatar_img}"
                 f"<span class='jb-side-id-name'>@{ident_safe}</span>"
                 f"{_market_flag_html(ident_safe, 9)}"
+                # L'INTERRUPTEUR LA OU ON REGARDE. Les pastilles du haut
+                # obligeaient a chercher le nom dans une liste de vingt-quatre ;
+                # ici il est sur la ligne qu'on a sous les yeux. Les deux
+                # commandent le meme reglage.
+                f"{_suivi_bouton_html(ident_lc)}"
                 f"<span class='jb-side-id-count'>{n_vas_section}</span>"
                 f"<span class='jb-side-id-arrow'>"
                 f"<svg viewBox='0 0 24 24' width='11' height='11' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'>"
@@ -32096,6 +32124,25 @@ def _render_jailbreak_html() -> str:
         "     if(typeof showToast === 'function')"
         "       showToast('Paie : ' + j.paie_jour + ' $/jour sur ' + j.base_comptes"
         "                 + ' comptes (' + (j.paie_jour * 15).toFixed(2) + ' $ la quinzaine)', 'success');"
+        "     jbSoftRefresh();"
+        "   });"
+        "}"
+        "function jbSuiviTout(on){"
+        "  var q = on ? 'Rallumer le scrape sur TOUTES les identites ?'"
+        "            : 'Eteindre le scrape sur TOUTES les identites ?\\n\\nPlus aucun chiffre ne sera mis a jour, et la paie des VA ne pourra plus etre calculee. Reversible en un clic.';"
+        "  if(!confirm(q)) return;"
+        "  var fd = new FormData();"
+        "  fd.append('tout', on ? '1' : '0');"
+        "  fetch('/jailbreak/suivi', {method:'POST', body:fd})"
+        "   .then(_jbJsonOrAuth)"
+        "   .then(function(j){"
+        "     if(!j) return;"
+        "     if(!j.ok){"
+        "       if(typeof showToast === 'function') showToast(j.error || 'Echec', 'error');"
+        "       return;"
+        "     }"
+        "     if(typeof showToast === 'function')"
+        "       showToast(j.suivies + ' identite(s) suivie(s)', 'success');"
         "     jbSoftRefresh();"
         "   });"
         "}"
@@ -36895,6 +36942,17 @@ body.light .sv-pill{background:#f3f4f6;border-color:#e5e7eb;color:#6b7280}
 body.light .sv-pill:hover{border-color:#d1d5db;color:#111827}
 body.light .sv-pill.on{background:rgba(22,163,74,.12);
   border-color:rgba(22,163,74,.38);color:#15803d}
+.sv-tout{display:flex;gap:6px;margin-top:8px}
+/* L interrupteur de la ligne : discret quand il est allume — c est l etat
+   normal — et franchement eteint quand il ne l est pas. */
+.jb-suivi{flex-shrink:0;width:18px;height:18px;display:inline-flex;
+  align-items:center;justify-content:center;border-radius:50%;font-size:10px;
+  cursor:pointer;color:#3f4653;background:rgba(255,255,255,.04)}
+.jb-suivi:hover{background:rgba(255,255,255,.10);color:#9aa1b0}
+.jb-suivi.on{color:#22c55e;background:rgba(34,197,94,.12)}
+body.light .jb-suivi{color:#9ca3af;background:#f3f4f6}
+body.light .jb-suivi:hover{background:#e5e7eb;color:#4b5563}
+body.light .jb-suivi.on{color:#16a34a;background:rgba(22,163,74,.12)}
 /* --- Analyse des comptes : ce qui a ete PUBLIE, pas ce qui a ete vu ---- */
 #ja-posts{margin-top:18px;background:#0f0f13;border:1px solid #1d2027;
   border-radius:14px;overflow:hidden}
@@ -56823,6 +56881,19 @@ def create_app():
         if not is_auth():
             return jsonify({"ok": False, "auth": True,
                             "error": "Session expirée — la page va se recharger"}), 401
+        # BASCULE EN MASSE. « tout=0 » eteint tout, « tout=1 » rallume tout.
+        # On part de la liste reelle des identites, pas de la liste courante :
+        # rallumer doit pouvoir rattraper une identite creee depuis.
+        _tout = request.form.get("tout")
+        if _tout in ("0", "1"):
+            try:
+                import jailbreak as _jbt
+                _noms = {str(k).strip().lower() for k in _jbt.list_all().keys()}
+            except Exception:
+                _noms = set()
+            finales = fixer_identites_suivies(_noms if _tout == "1" else [])
+            return jsonify({"ok": True, "on": _tout == "1",
+                            "suivies": len(finales), "actives": sorted(finales)})
         ident = (request.form.get("identity") or "").strip().lower()
         if not ident:
             return jsonify({"ok": False, "error": "Identité manquante"})
