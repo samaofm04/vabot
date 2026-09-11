@@ -48038,6 +48038,22 @@ def _start_auto_scrape_daemon():
 def create_app():
     from flask import Flask, request, session, redirect, make_response
     app = Flask(__name__)
+    # FIGER LA REPARTITION FR/US D'AVANT LE CHANGEMENT DE DEFAUT.
+    # Le defaut est passe de « us » a « fr » pour que les identites NOUVELLES
+    # ne partent plus toutes seules sur le serveur americain. Mais la regle
+    # s'appliquait aussi aux anciennes : celles qui n'avaient jamais ete
+    # reglees a la main ont bascule en francais du jour au lendemain, le
+    # filtre US n'affichait plus rien, et des comptes portaient un drapeau
+    # qu'ils n'ont jamais eu. On ecrit donc UNE FOIS ce que l'ancienne regle
+    # rendait, pour les identites qui existent. Idempotent, et sans effet sur
+    # un marche choisi explicitement.
+    try:
+        _n_mig = _marche_mod.migrer_historique(_list_identities())
+        if _n_mig:
+            print("[marche] repartition historique figee sur %d identite(s)"
+                  % _n_mig, flush=True)
+    except Exception as _e_mig:
+        print("[marche] migration historique : %s" % _e_mig, flush=True)
     def _web_secret_persistent():
         # Clé de session STABLE entre redémarrages : avant, chaque deploy
         # (auto-restart VPS ~1×/jour) régénérait une clé aléatoire -> tout le

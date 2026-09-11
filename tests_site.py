@@ -9051,6 +9051,53 @@ except Exception as _eId:
 
 print()
 print("=" * 70)
+print("MARCHE : le defaut FR ne repeint pas les anciennes identites")
+print("=" * 70)
+try:
+    import marche as _mkM
+    import tempfile as _tpM, pathlib as _plM
+    _savM = _mkM.FICHIER
+    _mkM.FICHIER = _plM.Path(_tpM.mkdtemp()) / "m.json"
+    _mkM._CACHE.update(sig=None, data={})
+    try:
+        _IDS = ["jessye", "julia", "lola", "emma", "e30princesss", "br1anna91"]
+        # AVANT : tout retombe sur le defaut, donc tout est francais. C est
+        # exactement le symptome signale -- le filtre US n affichait plus rien.
+        check("marche : sans reglage, le defaut est bien FR",
+              all(_mkM.de(n) == "fr" for n in _IDS))
+        _n = _mkM.migrer_historique(_IDS)
+        check("marche : la migration fige toutes les entrees d un coup",
+              _n == len(_IDS), "%d au lieu de %d" % (_n, len(_IDS)))
+        # APRES : chacune retrouve ce que l ANCIENNE regle rendait.
+        check("marche : les identites historiquement FR le restent",
+              all(_mkM.de(n) == "fr" for n in ("jessye", "julia", "lola", "emma")))
+        check("marche : celles qui etaient US le redeviennent",
+              all(_mkM.de(n) == "us" for n in ("e30princesss", "br1anna91")),
+              "c est le drapeau qui avait disparu")
+        check("marche : relancer la migration ne change plus rien",
+              _mkM.migrer_historique(_IDS) == 0)
+        # Un choix POSE A LA MAIN ne se fait jamais ecraser.
+        _mkM.definir("e30princesss", "fr")
+        _mkM.migrer_historique(_IDS)
+        check("marche : un marche choisi a la main est preserve",
+              _mkM.de("e30princesss") == "fr")
+        # Et une identite creee APRES part bien en FR : c est le but du
+        # changement de defaut, il ne doit pas etre annule.
+        check("marche : une identite nouvelle part toujours en FR",
+              _mkM.de("zzz_creee_apres") == "fr")
+        # Le declenchement au demarrage, sinon rien ne se passe sur le VPS.
+        import pathlib as _plM2
+        _srcM = _plM2.Path("web_upload.py").read_text(encoding="utf-8")
+        check("marche : la migration est branchee au demarrage du site",
+              "_marche_mod.migrer_historique(_list_identities())" in _srcM)
+    finally:
+        _mkM.FICHIER = _savM
+        _mkM._CACHE.update(sig=None, data={})
+except Exception as _eM:
+    check("marche : testable", False, repr(_eM)[:200])
+
+print()
+print("=" * 70)
 print("SESSIONS VOCALES : le calendrier, et qui y etait")
 print("=" * 70)
 try:

@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pathlib
+
 import safe_json
 
 FICHIER = Path("data") / "identity_market.json"
@@ -64,6 +66,62 @@ def de(identity: str) -> str:
     if v in ("fr", "us"):
         return v
     return "fr"
+
+
+#: Marqueur pose dans le fichier lui-meme : aucune identite ne peut porter ce
+#: nom, et il voyage avec les donnees qu'il decrit -- un fichier temoin a part
+#: se perd le jour d'une restauration.
+_CLE_MIGRE = "__repartition_historique_figee__"
+
+
+def migrer_historique(identites) -> int:
+    """Fige la repartition d'AVANT le changement de defaut. Une seule fois.
+
+    LE PROBLEME QU'ELLE REPARE. Le defaut est passe de « us » a « fr » le
+    11/09/2026, pour qu'une identite nouvellement creee ne parte plus toute
+    seule sur le serveur americain. Mais la regle ne s'applique pas qu'aux
+    nouvelles : toutes celles qui n'avaient jamais ete reglees A LA MAIN
+    dependaient du defaut, et sont passees en francais du jour au lendemain.
+    Le filtre US n'affichait plus rien, et des comptes comme e30princesss
+    portaient un drapeau francais qu'ils n'ont jamais eu.
+
+    Ce qu'on ecrit ici n'est pas une devinette : c'est EXACTEMENT ce que
+    l'ancienne regle rendait (`fr` si le nom est dans FR_DEFAUT, `us` sinon),
+    appliquee aux identites qui existent aujourd'hui. Une fois ecrite, la
+    repartition ne depend plus d'un defaut qui peut rechanger.
+
+    Rend le nombre d'entrees figees. Zero si c'est deja fait.
+    """
+    d = dict(_table())
+    if d.get(_CLE_MIGRE):
+        return 0
+    poses = 0
+    for nom in (identites or []):
+        idl = str(nom or "").strip().lower()
+        if not idl or idl in d:
+            continue                      # un choix explicite ne se touche pas
+        d[idl] = "fr" if idl in FR_DEFAUT else "us"
+        poses += 1
+    d[_CLE_MIGRE] = "1"
+    FICHIER.parent.mkdir(parents=True, exist_ok=True)
+    safe_json.write(FICHIER, d)
+    _CACHE.update(sig=None, data={})
+    return poses
+
+
+def migrer_depuis_dossier(dossier=None) -> int:
+    """Meme chose, en lisant les identites sur le disque.
+
+    marche.py n'importe pas web_upload -- l'inverse est deja vrai, et un
+    cycle d'imports casse les deux. On lit donc le dossier directement, comme
+    le fait `_list_identities` de son cote.
+    """
+    dossier = pathlib.Path(dossier) if dossier else (pathlib.Path("data") / "identities")
+    try:
+        noms = sorted(p.name for p in dossier.iterdir() if p.is_dir())
+    except OSError:
+        return 0
+    return migrer_historique(noms)
 
 
 def definir(identity: str, marche: str) -> bool:
