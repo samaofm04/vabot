@@ -35,6 +35,40 @@ STYLES = (
     ("flash",   "⚡", "Template", "#facc15",
      "Les comptes marchent avec les templates / flash reels"),
 )
+
+#: LE MEME STYLE, DESSINE. L'emoji ci-dessus part sur Discord, qui ne sait
+#: afficher que ca ; le SITE, lui, dessine tout le reste de son interface en
+#: SVG (viewBox 24x24, trait 2, bouts arrondis), et une pastille en emoji au
+#: milieu d'icones tracees se voit tout de suite.
+#:
+#: Les deux vivent cote a cote plutot que l'un a la place de l'autre : Discord
+#: ne peut pas afficher de SVG, et le site n'a aucune raison de se contenter
+#: d'un emoji. La CLE reste la seule chose qui compte pour les donnees.
+TRACES = {
+    # Une bulle de dialogue : la caption incrustee.
+    "caption": ("<path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14"
+                "a2 2 0 0 1 2 2z'/>"),
+    # Une camera : la video brute, telle quelle.
+    "brut": ("<rect x='2' y='6' width='13' height='12' rx='2'/>"
+             "<path d='M22 8.5v7L15.5 12z'/>"),
+    # Un clap : le montage.
+    "montage": ("<path d='M3 7.5h18v12a1.5 1.5 0 0 1-1.5 1.5h-15"
+                "A1.5 1.5 0 0 1 3 19.5z'/><path d='M3 7.5 5.4 3h13.2L21 7.5'/>"
+                "<path d='M8.4 3 10.8 7.5'/><path d='M14.4 3l2.4 4.5'/>"),
+    # Un eclair : les templates flash.
+    "flash": "<path d='M13 2 4 14h7l-1 8 9-12h-7z'/>",
+}
+
+
+def trace(cle: str) -> str:
+    """Le trace SVG d'un style, ou une chaine vide s'il n'en a pas encore.
+
+    Rendre vide plutot que lever : un style ajoute demain sans dessin doit
+    s'afficher quand meme, avec son emoji, pas faire tomber la page.
+    """
+    return TRACES.get(str(cle or "").strip().lower(), "")
+
+
 CLES = tuple(c for c, _e, _l, _co, _t in STYLES)
 _PAR_CLE = {c: (e, lab, co, t) for c, e, lab, co, t in STYLES}
 
@@ -106,5 +140,6 @@ def table_json() -> list:
     """La table, pour le navigateur. Le sélecteur du site se dessine depuis
     ELLE : une deuxième liste en dur côté JS, et un style ajouté n'apparaîtrait
     que d'un seul côté."""
-    return [{"cle": c, "emoji": e, "label": lab, "couleur": co, "titre": t}
+    return [{"cle": c, "emoji": e, "label": lab, "couleur": co, "titre": t,
+             "trace": trace(c)}
             for c, e, lab, co, t in STYLES]

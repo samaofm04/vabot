@@ -8833,12 +8833,22 @@ function identEditStylesPeindre(){
     b.type='button';
     b.title=s.titre;
     b.setAttribute('data-style',s.cle);
-    b.textContent=s.emoji+' '+s.label;
+    /* Le trace sert quand il existe, l emoji sinon : c est la table du
+       serveur qui decide, jamais une copie ecrite ici. */
+    if(s.trace){
+      b.innerHTML = "<svg viewBox='0 0 24 24' width='13' height='13' fill='none' "
+        + "stroke='currentColor' stroke-width='2' stroke-linecap='round' "
+        + "stroke-linejoin='round' style='flex-shrink:0'>" + s.trace + "</svg>";
+      b.appendChild(document.createTextNode(' ' + s.label));
+    } else {
+      b.textContent = s.emoji + ' ' + s.label;
+    }
     b.style.cssText='background:'+(on?'rgba(255,255,255,.10)':'#131316')
       +';border:1.5px solid '+(on?s.couleur:'#34343a')
       +';color:'+(on?s.couleur:'#9a9aa6')
       +';border-radius:9px;padding:7px 10px;font-size:12px;font-weight:700;'
-      +'cursor:pointer;font-family:inherit;flex:1 1 auto';
+      +'cursor:pointer;font-family:inherit;flex:1 1 auto;'
+      +'display:inline-flex;align-items:center;justify-content:center;gap:5px';
     b.addEventListener('click',function(){
       var i=identEditCtx.styles.indexOf(s.cle);
       if(i>=0){ identEditCtx.styles.splice(i,1); } else { identEditCtx.styles.push(s.cle); }
@@ -13045,7 +13055,7 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
       <img id="ident-edit-pp" class="ie-pp" alt="" referrerpolicy="no-referrer"
            onerror="this.style.visibility='hidden'">
       <div style="min-width:0">
-        <div style="font-weight:800;font-size:15px">✎ Modifier <span id="ident-edit-who" style="color:#8b9cf7"></span></div>
+        <div style="font-weight:800;font-size:15px;display:flex;align-items:center;gap:7px"><svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' style='flex-shrink:0'><path d='M12 20h9'/><path d='M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z'/></svg><span>Modifier <span id="ident-edit-who" style="color:#8b9cf7"></span></span></div>
         <div id="ident-edit-porte" class="ie-porte"></div>
       </div>
     </div>
@@ -13057,16 +13067,16 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
          ou un dossier de montage commande tout le reste du panneau. -->
     <div class="ie-sec"><span class="ie-lbl">Nature</span>
       <div class="ie-duo">
-        <button type="button" id="ident-edit-modele" class="ie-btn" onclick="identEditType('modele')">&#128131; Mod&egrave;le</button>
-        <button type="button" id="ident-edit-identite" class="ie-btn" onclick="identEditType('identite')">&#127916; Identit&eacute;</button>
+        <button type="button" id="ident-edit-modele" class="ie-btn" onclick="identEditType('modele')"><svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' style='flex-shrink:0'><path d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'/><circle cx='12' cy='7' r='4'/></svg> Mod&egrave;le</button>
+        <button type="button" id="ident-edit-identite" class="ie-btn" onclick="identEditType('identite')"><svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' style='flex-shrink:0'><path d='M3 7.5h18v12a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 19.5z'/><path d='M3 7.5 5.4 3h13.2L21 7.5'/><path d='M8.4 3 10.8 7.5'/><path d='M14.4 3l2.4 4.5'/></svg> Identit&eacute;</button>
       </div>
       <div id="ident-edit-thint" class="ie-hint"></div>
     </div>
 
     <div class="ie-sec"><span class="ie-lbl">March&eacute;</span>
       <div class="ie-duo">
-        <button type="button" id="ident-edit-fr" class="ie-btn" onclick="identEditMarket('fr')">&#127467;&#127479; FR</button>
-        <button type="button" id="ident-edit-us" class="ie-btn" onclick="identEditMarket('us')">&#127482;&#127480; US</button>
+        <button type="button" id="ident-edit-fr" class="ie-btn" onclick="identEditMarket('fr')"><svg viewBox='0 0 3 2' width='17' height='11' preserveAspectRatio='none' style='border-radius:2px;flex-shrink:0;box-shadow:0 0 0 1px rgba(255,255,255,.22)'><rect width='1' height='2' fill='#0055a4'/><rect x='1' width='1' height='2' fill='#fff'/><rect x='2' width='1' height='2' fill='#ef4135'/></svg> FR</button>
+        <button type="button" id="ident-edit-us" class="ie-btn" onclick="identEditMarket('us')"><svg viewBox='0 0 19 10' width='19' height='10' preserveAspectRatio='none' style='border-radius:2px;flex-shrink:0;box-shadow:0 0 0 1px rgba(255,255,255,.22)'><rect width='19' height='10' fill='#fff'/><rect x='0' y='0.000' width='19' height='0.769' fill='#b22234'/><rect x='0' y='1.538' width='19' height='0.769' fill='#b22234'/><rect x='0' y='3.077' width='19' height='0.769' fill='#b22234'/><rect x='0' y='4.615' width='19' height='0.769' fill='#b22234'/><rect x='0' y='6.154' width='19' height='0.769' fill='#b22234'/><rect x='0' y='7.692' width='19' height='0.769' fill='#b22234'/><rect x='0' y='9.231' width='19' height='0.769' fill='#b22234'/><rect width='7.6' height='5.385' fill='#3c3b6e'/></svg> US</button>
       </div>
       <div id="ident-edit-mhint" class="ie-hint"></div>
     </div>
@@ -13086,7 +13096,7 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
          n'a pas ete retape. -->
     <div class="ie-sec" id="ident-edit-dangerwrap" style="border-top:1px solid #26262c;padding-top:11px">
       <button type="button" id="ident-edit-retirer" class="ie-btn" onclick="identEditRetirerOuvre()"
-              style="border-color:#4a2a2a;color:#d98a8a">&#9998; Retirer cette identit&eacute;&hellip;</button>
+              style="border-color:#4a2a2a;color:#d98a8a"><svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' style='flex-shrink:0'><path d='M3 6h18'/><path d='M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2'/><path d='M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6'/><path d='M10 11v6M14 11v6'/></svg> Retirer cette identit&eacute;&hellip;</button>
       <div id="ident-edit-danger" style="display:none;flex-direction:column;gap:7px">
         <div id="ident-edit-dangerquoi" class="ie-hint"></div>
         <input id="ident-edit-dangernom" type="text" autocomplete="off" data-lpignore="true"
@@ -14101,9 +14111,21 @@ def _style_badges_html(ident: str, taille: int = 12) -> str:
     bouts = []
     for c in poses:
         emoji, lab, _coul, titre = par_cle[c]
+        # DESSINE PLUTOT QU'EN EMOJI. Le reste du site est en SVG ; une
+        # pastille en emoji au milieu se repere au premier coup d'oeil, et
+        # son rendu change d'une machine a l'autre. L'emoji reste le repli
+        # pour un style qui n'aurait pas encore de trace, et il continue de
+        # partir tel quel sur Discord, qui ne sait afficher que ca.
+        _tr = _styles_mod.trace(c)
+        _corps = (f"<svg viewBox='0 0 24 24' width='{taille}' height='{taille}' "
+                  f"fill='none' stroke='{_coul}' stroke-width='2' "
+                  f"stroke-linecap='round' stroke-linejoin='round' "
+                  f"style='display:block'>{_tr}</svg>"
+                  if _tr else
+                  f"<span style='font-size:{taille}px;line-height:1'>{emoji}</span>")
         bouts.append(
             f"<span title='{html_escape(lab)} — {html_escape(titre)}' "
-            f"style='font-size:{taille}px;line-height:1'>{emoji}</span>"
+            f"style='display:inline-flex;line-height:1'>{_corps}</span>"
         )
     return (f"<span class='ident-styles' data-styles='{','.join(poses)}' "
             f"style='display:inline-flex;align-items:center;gap:2px;flex-shrink:0'>"
@@ -37840,6 +37862,7 @@ def _render_jbanalyse_html() -> str:
   padding:9px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;
   display:inline-flex;align-items:center;justify-content:center;gap:6px;transition:all .12s ease}
 .ie-btn:hover:not(:disabled){border-color:#4a4a52}
+.ie-btn svg{pointer-events:none}
 .ie-tete{display:flex;align-items:center;gap:11px}
 .ie-pp{width:42px;height:42px;border-radius:50%;object-fit:cover;border:1.5px solid #34343a;flex-shrink:0;background:#131316}
 .ie-porte{font-size:11.5px;color:#8b8b96;margin-top:2px}

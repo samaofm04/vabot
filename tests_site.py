@@ -6245,6 +6245,27 @@ try:
           "/identity/apercu" in _srcA)
     check("interface : ce que le renommage n a pas suivi remonte a l ecran",
           "j1.impossible" in _srcA and "j1.echecs" in _srcA)
+    # LES EMOJI PASSENT AU JEU D ICONES DU SITE. Le depot le dit deja pour
+    # les drapeaux : « Windows n embarque aucune police de drapeaux, 🇫🇷 s y
+    # afficherait "FR" en petites lettres ». Le panneau en posait.
+    import re as _reI
+    _dM = _srcA.index('<div id="ident-edit-modal"')
+    _fM = _srcA.index("<!-- ===== Add perfect", _dM)
+    _modale = _srcA[_dM:_fM]
+    _emojis = _reI.findall(r"[🇦-🇿🌀-🫿]", _modale)
+    check("icones : plus un seul emoji dans le panneau Modifier",
+          not _emojis, "".join(_emojis[:8]))
+    check("icones : les drapeaux sont dessines, pas ecrits",
+          "#0055a4" in _modale and "#b22234" in _modale)
+    check("icones : les boutons portent le trait du site (24x24, stroke 2)",
+          _modale.count("viewBox='0 0 24 24'") >= 3)
+    import identity_styles as _isI
+    _sansTrace = [c for c in _isI.CLES if not _isI.trace(c)]
+    check("icones : chaque style a son trace", not _sansTrace, ", ".join(_sansTrace))
+    check("icones : l emoji reste disponible pour Discord",
+          all(e for _c, e, _l, _co, _t in _isI.STYLES))
+    check("icones : la table servie au navigateur porte le trace",
+          all("trace" in x for x in _isI.table_json()))
 except Exception as _eA:
     check("renommer / retirer : testable", False, repr(_eA)[:220])
 

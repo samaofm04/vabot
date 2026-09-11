@@ -134,7 +134,12 @@ def _completer(brut: dict) -> dict:
         # categorie correspond a `motif_salon` / `categorie`.
         "salons": [int(x) for x in (brut.get("salons") or []) if str(x).strip().isdigit()],
         "categorie": str(brut.get("categorie") or "session"),
-        "motif_salon": str(brut.get("motif_salon") or ""),
+        # LE NOM SUFFIT, LA CATEGORIE AUSSI. Le salon est reconnu s'il porte
+        # « session » dans SON nom OU dans celui de sa categorie. Exiger les
+        # deux ferait dependre le suivi d'un rangement Discord qui bouge : le
+        # jour ou le salon est deplace hors de la categorie, plus personne
+        # n'est compte, et rien ne le dit.
+        "motif_salon": str(brut.get("motif_salon") or "session"),
         "presence_min_secondes": _entier(brut.get("presence_min_secondes"),
                                          PRESENCE_MIN_SECONDES_DEFAUT, 0, 7200),
         # Salon ou poster le resume du jour, par convention de nom.
