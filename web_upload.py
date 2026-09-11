@@ -1935,6 +1935,34 @@ body.obsidian .vlm-dup{border-color:#8b9cf7!important}
 body.obsidian .sidebar .solo-item.active{background:linear-gradient(135deg,rgba(139,156,247,.16),rgba(103,232,249,.10))!important}
 body.obsidian input:focus,body.obsidian select:focus,body.obsidian textarea:focus{border-color:#8b9cf7!important;box-shadow:0 0 0 3px rgba(139,156,247,.2)!important}
 
+/* --- INFLOWW DARK (le gris neutre et le bleu royal du CRM) ---
+   Huitieme theme, batie sur le meme moule que les trois autres variantes
+   sombres : aucune classe sur <html> a part la pre-peinture, et des remaps
+   [style*=...] parce que ce fichier pose ses couleurs en style inline. Le
+   proprietaire passe ses journees dans Infloww ; retrouver le meme gris et
+   le meme bleu ici evite de changer de repere entre deux onglets.
+
+   LES VALEURS SONT RELEVEES, PAS ESTIMEES. Il les a prises a l ecran :
+   #151515 la surface la plus sombre, #242424 la carte, #444444 le filet,
+   #4B4B4B le gris des barres, #D9D9D9 le texte, et DEUX bleus -- #1677FF
+   pour ce qui reagit au clic, #2344A8 pour ce qui est rempli. Mes premieres
+   valeurs, estimees a l oeil sur une capture, tiraient vers le froid ; ses
+   gris sont strictement neutres. */
+body.infloww{background:#151515!important}
+body.infloww .sidebar{background:#151515!important;border-right-color:#444444!important}
+body.infloww .box,body.infloww .stat,body.infloww .reel-card,body.infloww .cloud-card{background:#242424!important;border-color:#444444!important}
+body.infloww input,body.infloww select,body.infloww textarea,body.infloww [style*="background:#0f0f0f"]{background:#151515!important;border-color:#444444!important}
+body.infloww [style*="background:#1a1a1a"]{background:#242424!important}
+body.infloww [style*="background:#0a0a0a"]{background:#151515!important}
+body.infloww [style*="border:1px solid #2a2a2a"],body.infloww [style*="border:1px solid #1a1a1a"]{border-color:#444444!important}
+body.infloww [style*="background:#3b82f6"]{background:#1677FF!important}
+body.infloww [style*="color:#3b82f6"]{color:#1677FF!important}
+body.infloww .btn,body.infloww button[type=submit],body.infloww .lb-btn-primary,body.infloww .badge,body.infloww .vac-btn-active,body.infloww .vpm-kind-btn.active,body.infloww .vpm-save,body.infloww .cur-toggle button.active,body.infloww .exp-submit,body.infloww .sel-cb:checked + .sel-circle,body.infloww .txt-sel-cb:checked + .sel-circle,body.infloww .sidebar .group .item .badge,body.infloww .up-step .up-dot{background:#1677FF!important;border-color:#1677FF!important}
+body.infloww a,body.infloww .subtab.active,body.infloww .sidebar .item.active,body.infloww .sidebar .group .item.active,body.infloww .sidebar .group .item.active svg,body.infloww .sidebar .solo-item.active,body.infloww .sidebar .group-head.active svg.lead,body.infloww .vlm-dup{color:#1677FF!important}
+body.infloww .vlm-dup{border-color:#1677FF!important}
+body.infloww .sidebar .solo-item.active{background:rgba(22,119,255,.16)!important}
+body.infloww input:focus,body.infloww select:focus,body.infloww textarea:focus{border-color:#1677FF!important;box-shadow:0 0 0 3px rgba(22,119,255,.2)!important}
+
 /* --- NEO LUXE VIOLET (violet électrique + rose) --- */
 body.violet{background:#0b0713!important}
 body.violet .sidebar{background:#0c0817!important;border-right-color:#1c1330!important}
@@ -3222,15 +3250,15 @@ document.addEventListener('DOMContentLoaded', vabotMenuDort);
 setTimeout(vabotMenuDort, 1200);
 
 // === THEME (dark / light / obsidian / violet / gold) ===
-var VABOT_DARK_VARIANTS = ['obsidian','violet','gold'];
+var VABOT_DARK_VARIANTS = ['obsidian','violet','gold','infloww'];
 function _vabotThemeLabel(t){
-  return ({dark:'sombre',light:'clair',apple:'Apple',claude:'Claude',obsidian:'Obsidian glass',violet:'Neo luxe violet',gold:'Midnight gold'})[t] || t;
+  return ({dark:'sombre',light:'clair',apple:'Apple',claude:'Claude',obsidian:'Obsidian glass',violet:'Neo luxe violet',gold:'Midnight gold',infloww:'Infloww dark'})[t] || t;
 }
 function setTheme(theme){
   var de = document.documentElement, b = document.body;
   // On repart propre : on enlève TOUTES les classes de thème possibles
-  b.classList.remove('light','apple','claude','obsidian','violet','gold');
-  de.classList.remove('light-pre','pre-light','pre-apple','pre-claude','pre-obsidian','pre-violet','pre-gold');
+  b.classList.remove('light','apple','claude','obsidian','violet','gold','infloww');
+  de.classList.remove('light-pre','pre-light','pre-apple','pre-claude','pre-obsidian','pre-violet','pre-gold','pre-infloww');
   if(theme === 'light'){
     b.classList.add('light');
     de.classList.add('light-pre'); de.classList.add('pre-light');
@@ -3273,7 +3301,7 @@ function setTheme(theme){
 (function(){
   try{
     var saved = localStorage.getItem('vabot_theme') || 'light';
-    var darkVariants = ['obsidian','violet','gold'];
+    var darkVariants = ['obsidian','violet','gold','infloww'];
     // premiere visite depuis cette version : on sème le cookie tout de suite
     try{
       if(document.cookie.indexOf('va_theme=') === -1){
@@ -9715,11 +9743,12 @@ window.upClearPrefill = function(utab){
         'html.pre-claude .sidebar{background:#f4f1e8 !important;border-right-color:#e5e0d3 !important}'+
         'html.pre-claude .box,html.pre-claude .stat{background:#fff !important;border-color:#e8e3d7 !important;border-radius:12px !important}';
       document.head.appendChild(sc);
-    } else if(theme === 'obsidian' || theme === 'violet' || theme === 'gold'){
+    } else if(theme === 'obsidian' || theme === 'violet' || theme === 'gold' || theme === 'infloww'){
       // Thèmes sombres premium : on teinte le fond/sidebar/cartes AVANT le 1er paint
       var PAL = {obsidian:['#0b0d12','#0a0c11','#14171f','rgba(150,170,235,.14)'],
                  violet:['#0b0713','#0c0817','#160e26','#2d1b4e'],
-                 gold:['#0a0908','#0b0a07','#15130f','#2c2619']}[theme];
+                 gold:['#0a0908','#0b0a07','#15130f','#2c2619'],
+                 infloww:['#151515','#151515','#242424','#444444']}[theme];
       document.documentElement.classList.add('pre-'+theme);
       var s2 = document.createElement('style');
       s2.textContent = 'html.pre-'+theme+' body{background:'+PAL[0]+' !important}'+
@@ -12800,6 +12829,16 @@ document.addEventListener('keydown', function(e){
       </div>
     </div>
     <div style="font-size:12.5px;font-weight:600;color:#e6eaf2">Obsidian glass</div>
+  </div>
+  <div onclick="setTheme('infloww')" class="theme-card" data-theme="infloww" style="background:#151515;border:2px solid #444444;border-radius:12px;padding:12px;cursor:pointer;text-align:center">
+    <div style="display:flex;gap:5px;height:52px;border-radius:8px;overflow:hidden;margin-bottom:10px;border:1px solid #444444">
+      <div style="width:20px;background:#151515"></div>
+      <div style="flex:1;background:#242424;padding:7px;display:flex;flex-direction:column;gap:5px;justify-content:center">
+        <div style="height:6px;width:82%;background:#4B4B4B;border-radius:4px"></div>
+        <div style="height:6px;width:52%;background:#2344A8;border-radius:4px"></div>
+      </div>
+    </div>
+    <div style="font-size:12.5px;font-weight:600;color:#D9D9D9">Infloww dark</div>
   </div>
   <div onclick="setTheme('violet')" class="theme-card" data-theme="violet" style="background:#0b0713;border:2px solid #2d1b4e;border-radius:12px;padding:12px;cursor:pointer;text-align:center">
     <div style="display:flex;gap:5px;height:52px;border-radius:8px;overflow:hidden;margin-bottom:10px;border:1px solid #2d1b4e">
@@ -37212,17 +37251,39 @@ _CR_EMOJIS = ("\U0001F98A", "\U0001F43C", "\U0001F981", "\U0001F42F",
               "\U0001F988", "\U0001F42C", "\U0001F984", "\U0001F41D",
               "\U0001F407", "\U0001F98C", "\U0001F994", "\U0001F999",
               "\U0001F996", "\U0001F992", "\U0001F410", "\U0001F433",
-              "\U0001F41E", "\U0001F422", "\U0001F9A9", "\U0001F426")
+              "\U0001F41E", "\U0001F422", "\U0001F9A9", "\U0001F426",
+              "\U0001F437", "\U0001F434", "\U0001F42E", "\U0001F414",
+              "\U0001F987", "\U0001F98E", "\U0001F420", "\U0001F980",
+              "\U0001F982", "\U0001F40C", "\U0001F995", "\U0001F998")
 
 
-def _clicrank_emoji(cle: str) -> str:
-    """Toujours le meme emoji pour le meme pseudo, d'un mois sur l'autre.
+def _clicrank_emojis(pseudos) -> dict:
+    """Un emoji par pseudo, et DEUX PSEUDOS N'ONT JAMAIS LE MEME.
 
-    crc32 et pas hash() : le hash des chaines est SALE a chaque demarrage de
-    Python, l'emoji de chacun aurait change a chaque redemarrage du bot.
+    Tire au sort par le pseudo -- crc32, et surtout pas hash() : le hash des
+    chaines est sale a chaque demarrage de Python, l'emoji de chacun aurait
+    change a chaque redemarrage du bot.
+
+    Quand deux pseudos tombent sur le meme dessin, le second prend le suivant
+    libre. Un classement ou trois lignes portent le meme papillon ne sert plus
+    a rien : c'est exactement ce que l'emoji est cense eviter.
+
+    Le parcours suit l'ordre ALPHABETIQUE des pseudos, jamais le classement :
+    sinon l'emoji de chacun changerait des que les positions bougent.
     """
     import zlib as _z
-    return _CR_EMOJIS[_z.crc32(str(cle or "").encode("utf-8")) % len(_CR_EMOJIS)]
+    pris, out = set(), {}
+    for ps in sorted({str(x) for x in pseudos if x}):
+        d = _z.crc32(ps.encode("utf-8")) % len(_CR_EMOJIS)
+        choix = _CR_EMOJIS[d]
+        for k in range(len(_CR_EMOJIS)):
+            e = _CR_EMOJIS[(d + k) % len(_CR_EMOJIS)]
+            if e not in pris:
+                choix = e
+                break
+        pris.add(choix)
+        out[ps] = choix
+    return out
 
 
 _CR_ESPACES = re.compile(r"\s+")
@@ -37352,8 +37413,12 @@ def _clicrank_rangs(payload: dict) -> list:
         if d and debut and d > debut and d > g["tard"]:
             g["tard"] = d
     out = list(gens.values())
+    emos = _clicrank_emojis([g["pseudo"] for g in out])
     for g in out:
         g["muet"] = g["non_lus"] >= len(g["liens"])
+        # Le point d interrogation est reserve aux liens que personne n a
+        # nommes : il DOIT rester distinct des emoji de personnes.
+        g["emo"] = emos.get(g["pseudo"]) or "\u2754"
     out.sort(key=lambda g: (g["muet"], -g["clics"], g["titre"]))
     return out
 
@@ -37384,7 +37449,7 @@ def _render_clicrank_html() -> str:
         bg = fonds.get(i)
         badge = (f"<div class='rank-badge' style='background:{bg}'>{i}</div>"
                  if bg else f"<div class='rank-badge rank-badge-off'>{i}</div>")
-        emo = _clicrank_emoji(g["pseudo"]) if g["pseudo"] else "\u2754"
+        emo = g["emo"]
         # La fusion se VOIT : on nomme les liens reunis sous ce pseudo. Si deux
         # personnes se retrouvaient sous le meme nom, ca saute aux yeux ici.
         notes = []
@@ -37396,7 +37461,13 @@ def _render_clicrank_html() -> str:
         if g["tard"]:
             notes.append("arriv\u00e9 le %s \u2014 la quinzaine n'est pas "
                          "enti\u00e8rement \u00e0 lui" % _fr_jour_court(g["tard"]))
-        if g["non_lus"] and not g["muet"]:
+        if g["muet"]:
+            # LE TIRET DOIT S EXPLIQUER. Un « — » nu se lit comme une panne de
+            # la page ; ici il veut dire « GetMySocial n a pas repondu pour ce
+            # lien », ce qui n est surtout pas la meme chose que zero clic.
+            notes.append("non lu \u2014 GetMySocial n a pas r\u00e9pondu pour "
+                         "ce lien, ce n est PAS z\u00e9ro clic")
+        elif g["non_lus"]:
             notes.append("%d lien(s) non lu(s) \u2014 total incomplet"
                          % g["non_lus"])
         sous = ("<div class='cr-sous'>" + html_escape(" \u00b7 ".join(notes))

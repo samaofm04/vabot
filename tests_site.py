@@ -9291,6 +9291,56 @@ except Exception as _eA:
 
 print()
 print("=" * 70)
+print("THEME INFLOWW : les couleurs sont RELEVEES, pas estimees")
+print("=" * 70)
+try:
+    import pathlib as _plI
+    _srcI = _plI.Path("web_upload.py").read_text(encoding="utf-8")
+    # LES SEPT VALEURS QUE LE PROPRIETAIRE A PRISES A L ECRAN. Mes premieres,
+    # estimees a l oeil sur une capture, tiraient vers le gris froid ; les
+    # siennes sont strictement neutres, et il y a DEUX bleus.
+    _PAL = {"#151515": "la surface la plus sombre", "#242424": "la carte",
+            "#444444": "le filet", "#4B4B4B": "le gris des barres",
+            "#1677FF": "le bleu interactif", "#2344A8": "le bleu rempli",
+            "#D9D9D9": "le texte"}
+    _absents = [v for v in _PAL if v not in _srcI]
+    check("infloww : les sept couleurs relevees sont dans le fichier",
+          not _absents, ", ".join(_absents))
+    _estimes = [v for v in ("#121214", "#0d0d0f", "#1b1c1f", "#151619",
+                            "#2c2e33", "#3b6ff5", "#2f3238", "#e8eaee")
+                if v in _srcI]
+    check("infloww : plus une seule de mes couleurs estimees",
+          not _estimes, ", ".join(_estimes))
+    # Le theme doit etre declare PARTOUT, sinon il se choisit sans s appliquer
+    # (ou s applique sans pouvoir etre quitte).
+    for _ou, _quoi in (
+            ("body.infloww{", "la regle de fond"),
+            ("'obsidian','violet','gold','infloww'", "la liste des variantes"),
+            ("'pre-obsidian','pre-violet','pre-gold','pre-infloww'", "le nettoyage"),
+            ("theme === 'infloww'", "la pre-peinture"),
+            ("infloww:'Infloww dark'", "son nom affiche"),
+            ('data-theme="infloww"', "sa carte dans les reglages")):
+        check("infloww : %s est declaree" % _quoi, _ou in _srcI)
+    # La vignette du selecteur reproduit SA capture : barre grise #4B4B4B,
+    # barre bleue REMPLIE #2344A8.
+    _dV = _srcI.index('data-theme="infloww"')
+    _vign = _srcI[_dV:_dV + 900]
+    check("infloww : la vignette reprend les deux barres de sa capture",
+          "#4B4B4B" in _vign and "#2344A8" in _vign, _vign[:80])
+    # Un theme sombre ne doit PAS poser body.light : sinon tous les textes
+    # basculent et deviennent illisibles sur le gris.
+    _dS = _srcI.index("function setTheme(theme){")
+    _fS = _srcI.index("localStorage.setItem('vabot_theme'", _dS)
+    _branche = _srcI[_srcI.index("VABOT_DARK_VARIANTS.indexOf(theme)"):]
+    _branche = _branche[:_branche.index("}")]
+    check("infloww : la branche des variantes sombres ne pose QUE la classe",
+          "b.classList.add(theme)" in _branche
+          and "light" not in _branche, _branche.strip()[:90])
+except Exception as _eI:
+    check("infloww : testable", False, repr(_eI)[:200])
+
+print()
+print("=" * 70)
 print("MARCHE : le defaut FR ne repeint pas les anciennes identites")
 print("=" * 70)
 try:
