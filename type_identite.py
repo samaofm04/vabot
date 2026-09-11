@@ -58,6 +58,19 @@ IDENTITE = "identite"
 #: web_upload importe ce module, l'inverse creerait un cycle.
 _PREFIXE_V2 = "v2_"
 
+#: CELLES QU'ON NE PEUT PAS SORTIR, MEME PAR ERREUR DE CLIC.
+#:
+#: Jessye n'est ni tout a fait une modele ni une identite : c'est « un truc a
+#: part », dit le proprietaire — elle est la SOURCE du menu US (pseudo et
+#: name), et marche.py le note deja de son cote. Elle doit rester dans les
+#: comptes par identite a cent pour cent.
+#:
+#: Le verrou est ici, dans la fonction qui REPOND, et pas seulement dans le
+#: bouton : un bouton grise se contourne depuis la console, et une regle qui
+#: ne vit que dans l'ecran n'en est pas une. Pour en proteger une autre :
+#: ajouter son nom (en minuscules).
+TOUJOURS_MODELE = {"jessye"}
+
 _CACHE: dict = {"sig": None, "data": {}}
 
 
@@ -85,6 +98,8 @@ def de(identity: str) -> str:
     idl = (identity or "").strip().lower()
     if not idl:
         return IDENTITE
+    if idl in TOUJOURS_MODELE:
+        return MODELE
     if idl.startswith(_PREFIXE_V2):
         return IDENTITE
     v = _table().get(idl)
@@ -105,9 +120,16 @@ def choisi(identity: str) -> bool:
     return _table().get((identity or "").strip().lower()) in (MODELE, IDENTITE)
 
 
+def verrouillee(identity: str) -> bool:
+    """Cette entree refuse-t-elle qu'on la sorte des modeles ?"""
+    return (identity or "").strip().lower() in TOUJOURS_MODELE
+
+
 def definir(identity: str, valeur: str) -> bool:
     idl = (identity or "").strip().lower()
     if not idl:
+        return False
+    if idl in TOUJOURS_MODELE and str(valeur).strip().lower() != MODELE:
         return False
     d = dict(_table())
     d[idl] = MODELE if str(valeur).strip().lower() == MODELE else IDENTITE

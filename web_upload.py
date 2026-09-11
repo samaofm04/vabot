@@ -8706,6 +8706,7 @@ document.addEventListener('click', function(ev){
   var n=document.getElementById('ident-edit-name'); if(n) n.value=lbl;
   var a=document.getElementById('ident-edit-avatar'); if(a) a.value='';
   identEditCtx.type0 = b.getAttribute('data-type') || 'modele';
+  identEditCtx.typelock = !!b.getAttribute('data-typelock');
   identEditType(identEditCtx.type0);
   identEditCtx.market0 = b.getAttribute('data-market') || 'fr';
   identEditMarket(identEditCtx.market0);
@@ -8760,6 +8761,10 @@ function identEditStylesPeindre(){
   });
 }
 function identEditType(v){
+  /* Certaines ne peuvent pas sortir des modeles (Jessye : source du menu US).
+     Le serveur refuse deja ; ici on evite juste de proposer un clic qui
+     echouera. */
+  if(identEditCtx.typelock) v = 'modele';
   identEditCtx.type = v;
   [['modele','ident-edit-modele'],['identite','ident-edit-identite']].forEach(function(p){
     var b=document.getElementById(p[1]); if(!b) return;
@@ -8775,7 +8780,17 @@ function identEditType(v){
     var b=document.getElementById(id); if(!b) return;
     b.style.opacity = (v === 'modele') ? '1' : '.45';
   });
+  var bi=document.getElementById('ident-edit-identite');
+  if(bi){
+    bi.disabled = !!identEditCtx.typelock;
+    bi.style.opacity = identEditCtx.typelock ? '.35' : '1';
+    bi.style.cursor  = identEditCtx.typelock ? 'not-allowed' : 'pointer';
+  }
   var h=document.getElementById('ident-edit-thint');
+  if(identEditCtx.typelock){
+    if(h) h.textContent = "Celle-ci reste une modèle : elle sert de source au menu US.";
+    return;
+  }
   if(h) h.textContent = (v === 'modele')
     ? "Mod\u00e8le : une cr\u00e9atrice r\u00e9elle. Elle appara\u00eet dans Jailbreak, dans le p\u00e9rim\u00e8tre de scrape et dans les menus des VA."
     : "Identit\u00e9 : un dossier pour produire des vid\u00e9os. Elle reste dans la Biblioth\u00e8que, et dispara\u00eet de Jailbreak, du scrape et des menus VA.";
@@ -13641,23 +13656,60 @@ function ventesSheetSync(){
 # Cache mtime-based de la liste des identités. _list_identities() est appelé
 # ~30x par page-load ; chaque appel faisait un iterdir()+is_dir() sur le disque.
 # On garde le resultat tant que le mtime de IDENTITIES_DIR n'a pas change (=
-# aucun dossier d'identite ajoute/supprime). Zero staleness : creer/supprimer
-# une identite change le mtime du dossier -> refresh immediat au prochain appel.
-_IDENTITIES_CACHE = {"mtime": None, "v": []}
+# aucun dossier d'identite ajoute/supprime). ATTENTION : le mtime d'un
+# dossier ne suffit PAS a detecter une creation (voir _list_identities).
+_IDENTITIES_CACHE = {"mtime": None, "v": [], "ts": 0.0}
+
+#: Combien de temps une liste peut rester servie sans etre recontrolee, meme
+#: si le mtime n'a pas bouge. C'est le filet pour les ecritures qui ne
+#: passent pas par nos routes : la synchro Drive, une copie a la main, un
+#: autre processus. Deux secondes ne se voient pas a l'ecran et bornent la
+#: fenetre pendant laquelle une identite peut rester invisible.
+_IDENTITIES_TTL = 2.0
+
+
+def _oublier_identites():
+    """Force la relecture du dossier au prochain appel.
+
+    Appelee par _invalidate_all_ttl_cache(), donc par TOUTES les routes qui
+    creent, renomment ou suppriment une identite -- elles l'appellent deja.
+    """
+    _IDENTITIES_CACHE.update(mtime=None, v=[], ts=0.0)
 
 
 def _list_identities():
+    """Les dossiers de data/identities, en cache court.
+
+    LE COMMENTAIRE PRECEDENT AFFIRMAIT « ZERO STALENESS : creer ou supprimer
+    une identite change le mtime du dossier ». C'EST FAUX, et mesure : sur
+    Windows la date de modification d'un dossier avance par paliers d'un
+    demi-milliseconde, et creer un sous-dossier a l'interieur d'un meme palier
+    ne la change pas du tout. Sur trente creations d'affilee, vingt-cinq sont
+    restees INVISIBLES pour cette fonction -- donc pour la Bibliotheque, pour
+    les menus et pour toute route qui valide un nom d'identite, qui repondait
+    « identite inconnue » sur une identite qui venait d'etre creee.
+
+    Deux garde-fous plutot qu'un :
+      - les mutations previennent explicitement (_oublier_identites) ;
+      - et rien n'est servi plus de _IDENTITIES_TTL secondes sans recontrole,
+        pour ce qui ecrit le dossier sans passer par nous.
+
+    On garde le cache : le listage coute ~0,3 ms avec vingt-cinq identites, et
+    certaines pages l'appellent un millier de fois.
+    """
     if not IDENTITIES_DIR.exists():
         return []
+    import time as _t_li
     try:
         mt = IDENTITIES_DIR.stat().st_mtime_ns
     except Exception:
         mt = None
-    if mt is not None and mt == _IDENTITIES_CACHE["mtime"]:
+    _now = _t_li.monotonic()
+    if (mt is not None and mt == _IDENTITIES_CACHE["mtime"]
+            and (_now - _IDENTITIES_CACHE["ts"]) < _IDENTITIES_TTL):
         return list(_IDENTITIES_CACHE["v"])
     v = sorted(p.name for p in IDENTITIES_DIR.iterdir() if p.is_dir())
-    _IDENTITIES_CACHE["mtime"] = mt
-    _IDENTITIES_CACHE["v"] = v
+    _IDENTITIES_CACHE.update(mtime=mt, v=v, ts=_now)
     return list(v)
 
 
@@ -14391,6 +14443,10 @@ def ttl_cache(seconds: int = 30, max_entries: int = 256):
 def _invalidate_all_ttl_cache():
     """Vide tout le cache TTL (a appeler apres une mutation importante)."""
     global _TTL_EPOCH
+    # La liste des identites a son propre cache, qui ne passe pas par _TTL_CACHE.
+    # Sans cette ligne, une identite creee restait introuvable pour les routes
+    # qui valident un nom -- le mtime du dossier ne suffit pas a le dire.
+    _oublier_identites()
     with _TTL_CACHE_LOCK:
         _TTL_CACHE.clear()
         _TTL_EPOCH += 1   # un refresh/compute en vol (toute fonction) ne réécrira
@@ -21753,6 +21809,9 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         # toujours sur « Modèle » et un clic sur Enregistrer transformerait
         # une identité vidéo en modèle sans que personne l'ait demandé.
         f"data-type='{_type_identite(selected)}' "
+        # Verrou servi au panneau : le bouton « Identité » se grise pour
+        # celles qui ne peuvent pas sortir des modèles.
+        f"data-typelock='{'1' if _type_mod.verrouillee(selected) else ''}' "
         f"title='Changer la photo{' ou le nom' if vault2 else ''} de cette identité' "
         "style='display:inline-flex;align-items:center;gap:7px;padding:9px 14px;background:#1a1a1f;"
         "border:1px solid #303036;color:#c4c4cc;border-radius:10px;font-size:13px;font-weight:600;"
@@ -50289,12 +50348,24 @@ def create_app():
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
         ident = (request.form.get("identity") or "").strip().lower()
-        if ident not in _list_identities():
-            return jsonify({"ok": False, "error": "identité inconnue"})
         valeur = (request.form.get("type") or "").strip().lower()
         if valeur not in ("modele", "identite"):
             return jsonify({"ok": False, "error": "type inconnu"})
         import type_identite as _ti
+        # LE VERROU SE LIT AVANT L'EXISTENCE, et ce n'est pas un detail :
+        # Jessye est une fiche du referentiel Jailbreak qui n'a pas
+        # forcement de dossier dans data/identities. Controler le dossier
+        # d'abord repondait « identité inconnue » — un message qui ressemble
+        # a une panne alors que la vraie raison est un refus deliberé.
+        if _ti.verrouillee(ident) and valeur != "modele":
+            # Refuser sans dire pourquoi ferait passer le verrou pour une
+            # panne. Jessye est la source du menu US : elle reste dans les
+            # comptes par identité, quoi qu'on clique.
+            return jsonify({"ok": False,
+                            "error": f"@{ident} reste une modèle : "
+                                     "elle sert de source au menu US."})
+        if ident not in _list_identities() and not _ti.verrouillee(ident):
+            return jsonify({"ok": False, "error": "identité inconnue"})
         if not _ti.definir(ident, valeur):
             return jsonify({"ok": False, "error": "écriture impossible"})
         _invalidate_all_ttl_cache()

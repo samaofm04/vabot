@@ -6158,6 +6158,19 @@ try:
               and _tiT.est_modele("zzz_encore_une_autre"))
         # Un nom vide ne doit pas devenir une modele par accident.
         check("nature : un nom vide n est pas une modele", not _tiT.est_modele(""))
+        # JESSYE RESTE DANS LES COMPTES PAR IDENTITE, QUOI QU ON CLIQUE.
+        # Elle est la source du menu US ; le proprietaire l a demandee
+        # « a cent pour cent ». Le verrou est dans la fonction qui REPOND,
+        # pas seulement dans le bouton : un bouton grise se contourne.
+        check("nature : jessye est verrouillee en modele",
+              _tiT.verrouillee("jessye") and _tiT.de("jessye") == "modele")
+        check("nature : on ne peut PAS la passer en identite",
+              _tiT.definir("jessye", "identite") is False
+              and _tiT.de("jessye") == "modele")
+        check("nature : la reposer en modele reste accepte",
+              _tiT.definir("jessye", "modele") is True)
+        check("nature : le filtre ne la laisse jamais tomber",
+              "jessye" in _tiT.filtrer_modeles(["jessye", "zzz_b"]))
         # Le filtre garde l ordre recu.
         _tiT.definir("zzz_a", "modele")
         _tiT.definir("zzz_b", "identite")
@@ -6181,6 +6194,13 @@ try:
                                    "type": "modele"}).get_json() or {})
             check("nature : la route refuse une identite inconnue",
                   _jT2.get("ok") is not True)
+            # Et elle DIT pourquoi : un refus muet passerait pour une panne.
+            _jT3 = (_cT.post("/identity/type",
+                             data={"identity": "jessye",
+                                   "type": "identite"}).get_json() or {})
+            check("nature : la route explique le verrou au lieu de refuser en silence",
+                  _jT3.get("ok") is not True and "menu US" in str(_jT3.get("error")),
+                  str(_jT3)[:110])
         finally:
             _wT._load_web_users = _svT
     finally:
@@ -6210,6 +6230,8 @@ try:
           and "function identEditType(" in _srcT)
     check("nature : enregistrer n envoie la nature que si elle a change",
           "identEditCtx.type !== identEditCtx.type0" in _srcT)
+    check("nature : le verrou voyage jusqu au panneau",
+          "data-typelock=" in _srcT and "identEditCtx.typelock" in _srcT)
 except Exception as _eT:
     check("nature : testable", False, repr(_eT)[:200])
 
@@ -8616,6 +8638,182 @@ try:
           and _srcDv.count('data-pfgenre="captions"') == 0)
 except Exception as _eDv:
     check("dossiers video : testable", False, repr(_eDv)[:200])
+
+print()
+print("=" * 70)
+print("CACHE DES IDENTITES : une identite creee doit etre visible tout de suite")
+print("=" * 70)
+try:
+    import shutil as _shId
+    import web_upload as _wId
+    # LE DEFAUT MESURE : sur Windows le mtime d un dossier avance par paliers
+    # d un demi-milliseconde ; creer un sous-dossier dans le meme palier ne le
+    # change pas. 25 creations sur 30 restaient invisibles, et les routes
+    # repondaient « identite inconnue » sur une identite qui venait d etre
+    # creee. C est ce qui rendait cette suite instable.
+    _invis = 0
+    _noms = []
+    try:
+        for _i in range(25):
+            _n = "_tst_cacheid_%d" % _i
+            _noms.append(_n)
+            _wId._list_identities()                  # remplit le cache
+            (_wId.IDENTITIES_DIR / _n).mkdir(exist_ok=True)
+            _wId._invalidate_all_ttl_cache()         # ce que font les routes
+            if _n not in _wId._list_identities():
+                _invis += 1
+        check("cache identites : une identite creee est visible immediatement",
+              _invis == 0, "%d invisibles sur 25" % _invis)
+        # Le filet de temps, pour ce qui ecrit le dossier sans nous prevenir
+        # (synchro Drive, copie a la main, autre processus).
+        check("cache identites : rien n est servi indefiniment sans recontrole",
+              0 < _wId._IDENTITIES_TTL <= 5, str(_wId._IDENTITIES_TTL))
+        check("cache identites : l invalidation generale oublie aussi la liste",
+              "_oublier_identites()" in _plTrR.Path("web_upload.py").read_text(
+                  encoding="utf-8").split("def _invalidate_all_ttl_cache")[1][:400]
+              if True else False)
+    finally:
+        for _n in _noms:
+            _shId.rmtree(_wId.IDENTITIES_DIR / _n, ignore_errors=True)
+        _wId._invalidate_all_ttl_cache()
+except Exception as _eId:
+    check("cache identites : testable", False, repr(_eId)[:200])
+
+print()
+print("=" * 70)
+print("SESSIONS VOCALES : le calendrier, et qui y etait")
+print("=" * 70)
+try:
+    import datetime as _dtSe
+    import pathlib as _plSe
+    import tempfile as _tpSe
+    import sessions_voc as _sv
+
+    # On travaille sur des fichiers jetables : le registre reel ne doit jamais
+    # etre touche par la suite de tests.
+    _dirSe = _plSe.Path(_tpSe.mkdtemp())
+    _cfgSav, _preSav = _sv.FICHIER_CFG, _sv.FICHIER_PRESENCE
+    _sv.FICHIER_CFG = _dirSe / "cfg.json"
+    _sv.FICHIER_PRESENCE = _dirSe / "presence.json"
+    _sv._CACHE.update(sig=None, data=None)
+    try:
+        _c = _sv.config()
+        check("sessions : sans fichier, le calendrier de depart s affiche quand meme",
+              len(_c["sessions"]) == 4 and _c["fuseau"] == "Africa/Porto-Novo",
+              str(len(_c["sessions"])))
+        check("sessions : les sessions sont rangees dans l ordre des heures",
+              [x["heure"] for x in _c["sessions"]] == sorted(x["heure"] for x in _c["sessions"]))
+
+        _tz = _sv._tz()
+
+        def _t(jour, h, m=0):
+            _d = _dtSe.date.fromisoformat(jour)
+            return _dtSe.datetime(_d.year, _d.month, _d.day, h, m, tzinfo=_tz).timestamp()
+
+        J = "2026-09-11"
+        VEILLE = "2026-09-10"
+        check("sessions : midi tombe dans la session de midi",
+              (_sv.session_a(_t(J, 12, 30)) or {}).get("id") == "s1")
+        check("sessions : dix minutes AVANT l heure, on est deja dedans",
+              (_sv.session_a(_t(J, 11, 50)) or {}).get("id") == "s1",
+              "la marge d avance ne compte pas")
+        check("sessions : en dehors des creneaux, aucune session",
+              _sv.session_a(_t(J, 15, 0)) is None)
+        # LA NUIT. Une presence a 00h30 appartient a la session de 23 h de LA
+        # VEILLE : c est la seule lecture qui ne fabrique pas de faux absents.
+        _nuit = _sv.session_a(_t(J, 0, 30))
+        check("sessions : minuit et demi appartient a la session de 23 h de la veille",
+              _nuit and _nuit["id"] == "s3" and _nuit["jour"] == VEILLE,
+              str(_nuit and (_nuit["id"], _nuit["jour"])))
+        check("sessions : 3 h du matin appartient bien a la session de 2 h",
+              (_sv.session_a(_t(J, 3, 0)) or {}).get("id") == "s4")
+
+        # CHEVAUCHEMENT : la session la plus PROCHE gagne, pas la premiere
+        # trouvee -- sinon on place des gens a une session ou ils n etaient pas.
+        _sv.ecrire_config({"sessions": [
+            {"id": "a", "nom": "A", "heure": 12, "minute": 0, "duree_min": 240},
+            {"id": "b", "nom": "B", "heure": 14, "minute": 0, "duree_min": 240},
+        ]})
+        check("sessions : quand deux creneaux se chevauchent, le plus proche gagne",
+              (_sv.session_a(_t(J, 13, 0)) or {}).get("id") == "a"
+              and (_sv.session_a(_t(J, 15, 0)) or {}).get("id") == "b",
+              str([(h, (_sv.session_a(_t(J, h, 0)) or {}).get("id")) for h in (13, 15)]))
+
+        # LES HEURES LOCALES. « BJ 12 h » ne veut rien dire pour un VA malgache.
+        _sv.ecrire_config({})
+        _s1 = [x for x in _sv.sessions_du_jour(J) if x["id"] == "s1"][0]
+        _hl = _sv.heures_locales(_s1)
+        check("sessions : midi au Benin, c est quatorze heures a Madagascar",
+              _hl.get("BJ") == "12:00" and _hl.get("MG") == "14:00",
+              str(_hl))
+
+        # LE POINTAGE. On compte du temps reellement passe, minute par minute.
+        _sv.FICHIER_PRESENCE.unlink(missing_ok=True)
+        _hors = _sv.pointer([{"id": "1", "nom": "Ana"}], 60, _t(J, 15, 0))
+        check("sessions : hors creneau, rien n est enregistre", _hors is None
+              and not _sv.presences(J))
+        for _ in range(10):
+            _sv.pointer([{"id": "1", "nom": "Ana"}, {"id": "2", "nom": "Bob"}],
+                        60, _t(J, 12, 10))
+        for _ in range(2):
+            _sv.pointer([{"id": "3", "nom": "Cid"}], 60, _t(J, 12, 20))
+        _pr = _sv.presences(J, "s1")
+        check("sessions : dix minutes de presence font dix minutes",
+              _pr.get("1", {}).get("secondes") == 600, str(_pr.get("1")))
+        check("sessions : le nom vu en dernier est garde",
+              _pr.get("2", {}).get("nom") == "Bob")
+
+        # DEUX MINUTES DANS LE SALON N EST PAS Y AVOIR ASSISTE.
+        _r = _sv.resume_jour(J, attendus=[{"id": "1", "nom": "Ana"},
+                                          {"id": "2", "nom": "Bob"},
+                                          {"id": "3", "nom": "Cid"},
+                                          {"id": "4", "nom": "Dia"}])
+        _s = [x for x in _r["sessions"] if x["id"] == "s1"][0]
+        check("sessions : sous le seuil, on est « partiel », pas « present »",
+              [p["id"] for p in _s["presents"]] == ["1", "2"]
+              and [p["id"] for p in _s["partiels"]] == ["3"],
+              str(([p["id"] for p in _s["presents"]], [p["id"] for p in _s["partiels"]])))
+        check("sessions : celui qu on attendait et qui n est jamais venu est absent",
+              [a["id"] for a in _s["absents"]] == ["4"],
+              str([a["id"] for a in _s["absents"]]))
+        # SANS LISTE D ATTENDUS, « aucun absent » NE VEUT RIEN DIRE.
+        _r0 = _sv.resume_jour(J)
+        _s0 = [x for x in _r0["sessions"] if x["id"] == "s1"][0]
+        check("sessions : sans liste d attendus, l ecran sait qu il ne sait pas",
+              _s0["absents"] == [] and _s0["attendus_connus"] is False)
+        check("sessions : avec la liste, l ecran sait qu il sait",
+              _s["attendus_connus"] is True)
+
+        # LA VUE PAR PERSONNE : c est elle qui sert a dire « il n est jamais la ».
+        _pp = {g["id"]: g for g in _sv.resume_par_personne(
+            J, attendus=[{"id": "1", "nom": "Ana"}, {"id": "4", "nom": "Dia"}])}
+        check("sessions : par personne, 1 session sur 4 pour celui qui est venu une fois",
+              _pp["1"]["presentes"] == 1 and _pp["1"]["sur"] == 4
+              and _pp["1"]["manquees"] == 3, str(_pp.get("1")))
+        check("sessions : un attendu jamais vu apparait quand meme, a zero",
+              _pp["4"]["presentes"] == 0 and _pp["4"]["nom"] == "Dia")
+
+        # LA PURGE : le registre ne doit pas grossir sans fin.
+        _d2 = _sv._charger()
+        _d2["2020-01-01"] = {"s1": {}}
+        import safe_json as _sjSe
+        _sjSe.write(_sv.FICHIER_PRESENCE, _d2)
+        check("sessions : les vieilles journees sont purgees",
+              _sv.purger(30) == 1 and "2020-01-01" not in _sv._charger())
+
+        # Les bornes : une heure impossible ne doit pas passer.
+        _sv.ecrire_config({"sessions": [{"id": "x", "nom": "X", "heure": 99, "minute": 0},
+                                        {"id": "y", "nom": "Y", "heure": 9, "minute": 0}]})
+        check("sessions : une heure impossible est ecartee, pas acceptee",
+              [x["id"] for x in _sv.config()["sessions"]] == ["y"],
+              str([x["id"] for x in _sv.config()["sessions"]]))
+    finally:
+        _sv.FICHIER_CFG, _sv.FICHIER_PRESENCE = _cfgSav, _preSav
+        _sv._CACHE.update(sig=None, data=None)
+        import shutil as _shSe
+        _shSe.rmtree(_dirSe, ignore_errors=True)
+except Exception as _eSe:
+    check("sessions : testable", False, repr(_eSe)[:220])
 
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
