@@ -6129,6 +6129,60 @@ except Exception as _eGd:
 
 print()
 print("=" * 70)
+print("REVENUS : l argent ne disparait plus entre le total et les cartes")
+print("=" * 70)
+try:
+    import mypuls as _mpR
+    # Le classement des libelles. C est lui qui laissait « Abonnements » a
+    # zero pendant que 7 058 $ manquaient a l appel.
+    _attendus = {
+        "subscription": "Subscriptions", "Subscriptions": "Subscriptions",
+        "SUB": "Subscriptions", "rebill": "Subscriptions",
+        "Renewal": "Subscriptions", "Abonnement": "Subscriptions",
+        "message": "Messages", "ppv": "Messages", "Média privé": "Messages",
+        "unlock": "Messages", "tip": "Tips", "Pourboire": "Tips",
+        "post": "Posts", "Publication": "Posts", "stream": "Streams",
+        "referral": "Referrals", "Parrainage": "Referrals",
+    }
+    _faux = ["%s->%s" % (k, _mpR.famille_api(k)) for k, v in _attendus.items()
+             if _mpR.famille_api(k) != v]
+    check("revenus : chaque libelle connu tombe dans la bonne carte",
+          not _faux, ", ".join(_faux[:6]))
+    check("revenus : un libelle inconnu n est PAS range de force",
+          _mpR.famille_api("chose_totalement_inconnue") == ""
+          and _mpR.famille_api("") == "")
+    # La carte « Non classe » doit exister dans le rendu, et seulement quand
+    # il reste quelque chose.
+    _srcR = _plTrR = None
+    import pathlib as _plR
+    _srcR = _plR.Path("web_upload.py").read_text(encoding="utf-8")
+    check("revenus : le dashboard lit le bac hors categorie de l API",
+          '_ov.get("types_hors")' in _srcR)
+    check("revenus : la carte « Non classe » ne s affiche que s il reste quelque chose",
+          'if float(_hors_cat.get("montant") or 0) > 0.005' in _srcR)
+    check("revenus : les libelles bruts sont mis sous les yeux, pas devines",
+          "Libellés que MyPuls renvoie" in _srcR)
+    # Plus un seul montant en euros ecrit en dur dans le tableau de bord.
+    _d0 = _srcR.index("def _render_home_dashboard_html")
+    _f0 = _srcR.index(chr(10) + "def ", _d0 + 40)
+    _dash = _srcR[_d0:_f0]
+    import re as _reR
+    _eurs = _reR.findall(r"\{[^{}]{0,40}\}€", _dash)
+    check("revenus : aucun montant du tableau de bord n est suffixe d un euro",
+          not _eurs, ", ".join(_eurs[:5]))
+    # Et tout montant affiche doit savoir basculer de devise.
+    _figes = _reR.findall(r"<div class='rank-amount'>", _dash)
+    check("revenus : le classement des chatteurs bascule avec la devise",
+          not _figes and "rank-amount fx-amt" in _dash)
+    check("revenus : le classement des modeles bascule aussi",
+          "_tot_usd_par_createur" in _dash and "ca_usd_chatteur" in _dash)
+    check("revenus : les modeles ecartees le sont AUSSI dans le classement",
+          "_model_match(_nom_c, EXCLUDED_MODELS)" in _dash)
+except Exception as _eR:
+    check("revenus : testable", False, repr(_eR)[:200])
+
+print()
+print("=" * 70)
 print("ONGLETS DIFFERES : le fragment est traduit comme la page")
 print("=" * 70)
 try:

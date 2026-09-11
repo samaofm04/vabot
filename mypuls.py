@@ -687,11 +687,6 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
         t = str(k)
         if t not in hors_type["libelles"] and len(hors_type["libelles"]) < 12:
             hors_type["libelles"].append(t)
-    _MAP = {  # libellés API -> cartes du dashboard
-        "message": "Messages", "post": "Posts", "tip": "Tips",
-        "subscription": "Subscriptions", "sub": "Subscriptions",
-        "stream": "Streams", "referral": "Referrals",
-    }
     def _retenue(c) -> bool:
         """Créatrice à compter. Un seul point de décision : le préchargement et
         la boucle doivent porter EXACTEMENT sur le même ensemble."""
@@ -738,7 +733,7 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
         else:
             seg["mym"] += total_usd
         for k, v in (rev.get("by_type") or {}).items():
-            bucket = _MAP.get(str(k).strip().lower())
+            bucket = famille_api(k)
             try:
                 _amt = float(v or 0) * rate
             except (TypeError, ValueError):
@@ -1294,6 +1289,47 @@ def categorie_transaction(libelle: str) -> str:
         return "Streams"
     if "referral" in ty or "parrain" in ty:
         return "Referrals"
+    return ""
+
+
+_MAP_API = {  # libellés API -> cartes du dashboard, correspondance EXACTE
+    "message": "Messages", "post": "Posts", "tip": "Tips",
+    "subscription": "Subscriptions", "sub": "Subscriptions",
+    "stream": "Streams", "referral": "Referrals",
+}
+
+def famille_api(libelle) -> str:
+    """La carte où ranger un libellé, du plus sûr au plus tolérant.
+
+    _MAP seul comparait en ÉGALITÉ STRICTE. Le moindre écart chez MyPuls
+    — un pluriel, un préfixe, un renouvellement d'abonnement — tombait
+    donc dans « hors type », et comme cette catégorie n'était affichée
+    nulle part, l'argent disparaissait de l'écran : six cartes qui
+    totalisaient 5 411 $ sous un total de 12 469 $, dont « Abonnements »
+    à zéro pour une agence dont c'est le premier revenu.
+
+    Trois passes : l'égalité stricte, puis categorie_transaction() (qui
+    teste des sous-chaînes et connaît le français), puis les formes que
+    ni l'une ni l'autre n'attrape. Ce qui échappe encore aux trois
+    atterrit dans « hors type » AVEC son libellé — et la carte « Non
+    classé » du dashboard l'affiche désormais, au lieu de l'engloutir.
+    """
+    k = _sans_accent(str(libelle or "")).strip().lower()
+    if not k:
+        return ""
+    if k in _MAP_API:
+        return _MAP_API[k]
+    f2 = categorie_transaction(libelle)
+    if f2:
+        return f2
+    # Les abonnements sont l'essentiel du revenu OF et changent souvent de
+    # nom : renouvellement, reconduction, pluriel.
+    if "sub" in k or "rebill" in k or "renew" in k or "recurring" in k:
+        return "Subscriptions"
+    if "unlock" in k or "ppv" in k:
+        return "Messages"
+    if "tip" in k or "donat" in k:
+        return "Tips"
     return ""
 
 

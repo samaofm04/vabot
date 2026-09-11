@@ -26381,103 +26381,11 @@ def _render_home_dashboard_html() -> str:
         + "</div>"
     )
 
-    # Top créateurs (depuis le chart datasets)
-    top_creators_html = ""
-    if chart_data.get("datasets"):
-        creators_map = {}
-        try:
-            cr_res = mypuls.list_creators()
-            if cr_res.get("ok"):
-                creators_map = cr_res.get("creators") or {}
-        except Exception:
-            pass
-        items = []
-        for i, ds in enumerate([d for d in chart_data["datasets"] if float(d.get("total", 0) or 0) > 0][:5]):
-            cid = creators_map.get(ds["label"])
-            avatar = (
-                f"<img src='/mypuls/avatar/{cid}' loading='lazy' decoding='async' style='width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a'>"
-                if cid else
-                f"<div style='width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700'>{ds['label'][:1].upper()}</div>"
-            )
-            pct = (ds["total"] / chart_data.get("all_creators_total", 1) * 100) if chart_data.get("all_creators_total") else 0
-            items.append(
-                f"<div style='display:flex;align-items:center;gap:12px;padding:10px 14px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px'>"
-                f"{avatar}"
-                f"<div style='flex:1;min-width:0'>"
-                f"<div style='font-weight:600;font-size:14px'>{ds['label']}</div>"
-                f"<div style='display:flex;align-items:center;gap:8px;margin-top:4px'>"
-                f"<div style='flex:1;background:#0f0f0f;height:5px;border-radius:3px;overflow:hidden'><div style='width:{pct:.1f}%;height:100%;background:linear-gradient(90deg,#22c55e,#3b82f6)'></div></div>"
-                f"<div style='font-size:11px;color:#888;font-weight:600;min-width:60px;text-align:right'>{ds['total']:.0f}€</div>"
-                f"</div>"
-                f"</div>"
-                f"</div>"
-            )
-        top_creators_html = (
-            "<div class='home-card'>"
-            "<div class='home-card-header'>Top modèles</div>"
-            "<div style='display:flex;flex-direction:column;gap:8px'>"
-            + "".join(items)
-            + "</div></div>"
-        )
-
-    # Sales ranking chatteurs (façon Infloww) : filtre les lignes à 0€, badges 1/2/3
-    top_chatters_html = ""
-    # On écarte les lignes « Indéterminé (Créatrice) » : ce sont des ventes
-    # sans chatteur, les classer reviendrait à décerner un rang à personne et
-    # à repousser un vrai vendeur hors du podium.
-    ranked = [c for c in chatters
-              if float(c.get("ca_total", 0) or 0) > 0 and not c.get("non_attribue")]
-    if ranked:
-        items = []
-        badge_bg = {1: "#14b8a6", 2: "#10b981", 3: "#34d399"}
-        for i, c in enumerate(ranked[:8], start=1):
-            bg = badge_bg.get(i)
-            # Classes plutot que styles en dur : le fond des rangs 4+ et le
-            # trait de separation restaient NOIRS en theme clair.
-            badge = (f"<div class='rank-badge' style='background:{bg}'>{i}</div>"
-                     if bg else f"<div class='rank-badge rank-badge-off'>{i}</div>")
-            items.append(
-                f"<div class='rank-row'>"
-                f"{badge}"
-                f"<div style='flex:1;min-width:0;font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{c['name']}</div>"
-                f"<div class='rank-amount'>{c['ca_total']:,.2f}€</div>"
-                f"</div>"
-            )
-        top_chatters_html = (
-            "<div class='home-card'>"
-            "<div class='home-card-header' style='display:flex;justify-content:space-between;align-items:center'>Sales ranking "
-            "<button type='button' id='rank-sort-btn' onclick='rankToggleSort()' "
-            "title='Inverser l&#39;ordre du classement'>Décroissant"
-            "<svg viewBox='0 0 24 24' width='11' height='11' fill='none' stroke='currentColor' "
-            "stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'>"
-            "<polyline points='6 9 12 15 18 9'/></svg></button></div>"
-            "<div style='display:flex;flex-direction:column'>"
-            + "".join(items)
-            + "</div></div>"
-        )
-    elif chatters:
-        top_chatters_html = (
-            "<div class='home-card'><div class='home-card-header'>Sales ranking</div>"
-            "<div style='color:#888;font-size:13px;padding:16px 0;text-align:center'>Aucune vente sur la période</div></div>"
-        )
-
-    if not mp_configured:
-        warning = (
-            "<div style='padding:14px 16px;background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);border-radius:10px;margin-bottom:18px;font-size:13px;color:#fbbf24'>"
-            "💡 Configure MyPuls (Business → Revenus) pour voir tes ventes en temps réel."
-            "</div>"
-        )
-    elif mp_error:
-        # cookies expirés / API KO : distinguer « data indispo » d'un vrai 0€
-        warning = (
-            "<div style='padding:14px 16px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:10px;margin-bottom:18px;font-size:13px;color:#ef4444'>"
-            "⚠ MyPuls indisponible — chiffres temps réel non chargés (ce n'est PAS un vrai 0€). "
-            "Vérifie/rafraîchis tes cookies dans <b>Settings → Cookies MyPuls</b>."
-            "</div>"
-        )
-    else:
-        warning = ""
-
+    # LES OUTILS DE CONVERSION REMONTES ICI, ET POURQUOI.
+    # Ils etaient definis plus bas, APRES les deux classements -- qui
+    # affichaient donc des montants bruts, non convertis, suivis d un « € »
+    # ecrit en dur. Le proprietaire basculait en dollars : ces montants-la
+    # restaient en euros, parce qu ils n avaient jamais ete des euros.
     # Breakdown par type de revenu (matching Infloww layout)
     # --- Devises : MyPuls renvoie du BRUT, en EUR (MyM) ou USD (OnlyFans).
     # On ramène TOUT en USD : OnlyFans net (frais 20 % déduits), MyM converti.
@@ -26525,6 +26433,140 @@ def _render_home_dashboard_html() -> str:
             if nn and (c == nn or c.startswith(nn)):
                 return True
         return False
+
+
+    # Top créateurs (depuis le chart datasets)
+    top_creators_html = ""
+    if chart_data.get("datasets"):
+        creators_map = {}
+        try:
+            cr_res = mypuls.list_creators()
+            if cr_res.get("ok"):
+                creators_map = cr_res.get("creators") or {}
+        except Exception:
+            pass
+        items = []
+        # LE CLASSEMENT ADDITIONNAIT DES EUROS ET DES DOLLARS.
+        # chart["datasets"][i]["total"] est une somme BRUTE de tx["amount"],
+        # sans conversion : MyM rend des euros, OnlyFans des dollars, et le
+        # total etait affiche suivi d un « € ». On recalcule par creatrice
+        # avec _tx_usd -- la meme fonction que le total de la page -- et on
+        # applique la meme exclusion de modeles, qui manquait ici : une
+        # creatrice ecartee du total pouvait encore figurer au classement.
+        _tot_usd_par_createur = {}
+        for _t_c in (mp_data.get("transactions", []) or []):
+            _nom_c = _t_c.get("creator") or "?"
+            if _model_match(_nom_c, EXCLUDED_MODELS):
+                continue
+            _tot_usd_par_createur[_nom_c] = (_tot_usd_par_createur.get(_nom_c, 0.0)
+                                             + _tx_usd(_t_c.get("amount", 0), _t_c.get("currency")))
+        _classement = sorted(
+            ({"label": _n, "total": _v} for _n, _v in _tot_usd_par_createur.items() if _v > 0),
+            key=lambda d: -d["total"])[:5]
+        _somme_visible = sum(d["total"] for d in _classement) or 1.0
+        _tous = sum(_tot_usd_par_createur.values()) or _somme_visible
+        for i, ds in enumerate(_classement):
+            cid = creators_map.get(ds["label"])
+            avatar = (
+                f"<img src='/mypuls/avatar/{cid}' loading='lazy' decoding='async' style='width:40px;height:40px;border-radius:50%;object-fit:cover;border:2px solid #2a2a2a'>"
+                if cid else
+                f"<div style='width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700'>{ds['label'][:1].upper()}</div>"
+            )
+            # La part se calcule sur le meme ensemble que le classement,
+            # en dollars : « all_creators_total » etait, lui aussi, une somme
+            # de devises melangees.
+            pct = (ds["total"] / _tous * 100) if _tous else 0
+            items.append(
+                f"<div style='display:flex;align-items:center;gap:12px;padding:10px 14px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px'>"
+                f"{avatar}"
+                f"<div style='flex:1;min-width:0'>"
+                f"<div style='font-weight:600;font-size:14px'>{ds['label']}</div>"
+                f"<div style='display:flex;align-items:center;gap:8px;margin-top:4px'>"
+                f"<div style='flex:1;background:#0f0f0f;height:5px;border-radius:3px;overflow:hidden'><div style='width:{pct:.1f}%;height:100%;background:linear-gradient(90deg,#22c55e,#3b82f6)'></div></div>"
+                f"<div class='fx-amt' data-usd='{ds['total']:.2f}' style='font-size:11px;color:#888;font-weight:600;min-width:60px;text-align:right'>${ds['total']:,.0f}</div>"
+                f"</div>"
+                f"</div>"
+                f"</div>"
+            )
+        top_creators_html = (
+            "<div class='home-card'>"
+            "<div class='home-card-header'>Top modèles</div>"
+            "<div style='display:flex;flex-direction:column;gap:8px'>"
+            + "".join(items)
+            + "</div></div>"
+        )
+
+    # Sales ranking chatteurs (façon Infloww) : filtre les lignes à 0€, badges 1/2/3
+    top_chatters_html = ""
+    # On écarte les lignes « Indéterminé (Créatrice) » : ce sont des ventes
+    # sans chatteur, les classer reviendrait à décerner un rang à personne et
+    # à repousser un vrai vendeur hors du podium.
+    # « ca_total » N EST DANS AUCUNE DEVISE, et mypuls.py le dit en toutes
+    # lettres : c est la colonne « CA Total » de MyPuls, qui empile les euros
+    # MyM et les dollars OnlyFans. L afficher suivi d un « € » surevalue la
+    # part OnlyFans d environ 6,5 % -- et le montant ne bougeait pas quand on
+    # basculait en dollars, puisqu il n avait jamais ete converti.
+    # ca_usd_chatteur() convertit chatteur par chatteur, avec SA propre
+    # ventilation par devise. C est le montant que mypuls.py designe comme
+    # « celui qui peut etre affiche avec un symbole ».
+    for _c_r in chatters:
+        try:
+            _c_r["_usd"] = mypuls.ca_usd_chatteur(_c_r, _eur_usd)
+        except Exception:
+            _c_r["_usd"] = float(_c_r.get("ca_total") or 0) * _eur_usd
+    ranked = [c for c in chatters
+              if float(c.get("_usd", 0) or 0) > 0 and not c.get("non_attribue")]
+    ranked.sort(key=lambda c: -float(c.get("_usd") or 0))
+    if ranked:
+        items = []
+        badge_bg = {1: "#14b8a6", 2: "#10b981", 3: "#34d399"}
+        for i, c in enumerate(ranked[:8], start=1):
+            bg = badge_bg.get(i)
+            # Classes plutot que styles en dur : le fond des rangs 4+ et le
+            # trait de separation restaient NOIRS en theme clair.
+            badge = (f"<div class='rank-badge' style='background:{bg}'>{i}</div>"
+                     if bg else f"<div class='rank-badge rank-badge-off'>{i}</div>")
+            items.append(
+                f"<div class='rank-row'>"
+                f"{badge}"
+                f"<div style='flex:1;min-width:0;font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{c['name']}</div>"
+                f"<div class='rank-amount fx-amt' data-usd='{c['_usd']:.2f}'>${c['_usd']:,.2f}</div>"
+                f"</div>"
+            )
+        top_chatters_html = (
+            "<div class='home-card'>"
+            "<div class='home-card-header' style='display:flex;justify-content:space-between;align-items:center'>Sales ranking "
+            "<button type='button' id='rank-sort-btn' onclick='rankToggleSort()' "
+            "title='Inverser l&#39;ordre du classement'>Décroissant"
+            "<svg viewBox='0 0 24 24' width='11' height='11' fill='none' stroke='currentColor' "
+            "stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'>"
+            "<polyline points='6 9 12 15 18 9'/></svg></button></div>"
+            "<div style='display:flex;flex-direction:column'>"
+            + "".join(items)
+            + "</div></div>"
+        )
+    elif chatters:
+        top_chatters_html = (
+            "<div class='home-card'><div class='home-card-header'>Sales ranking</div>"
+            "<div style='color:#888;font-size:13px;padding:16px 0;text-align:center'>Aucune vente sur la période</div></div>"
+        )
+
+    if not mp_configured:
+        warning = (
+            "<div style='padding:14px 16px;background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);border-radius:10px;margin-bottom:18px;font-size:13px;color:#fbbf24'>"
+            "💡 Configure MyPuls (Business → Revenus) pour voir tes ventes en temps réel."
+            "</div>"
+        )
+    elif mp_error:
+        # cookies expirés / API KO : distinguer « data indispo » d'un vrai 0€
+        warning = (
+            "<div style='padding:14px 16px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:10px;margin-bottom:18px;font-size:13px;color:#ef4444'>"
+            "⚠ MyPuls indisponible — chiffres temps réel non chargés (ce n'est PAS un vrai 0€). "
+            "Vérifie/rafraîchis tes cookies dans <b>Settings → Cookies MyPuls</b>."
+            "</div>"
+        )
+    else:
+        warning = ""
 
     type_totals = {"Subscriptions": 0.0, "Posts": 0.0, "Messages": 0.0,
                    "Tips": 0.0, "Referrals": 0.0, "Streams": 0.0}
@@ -26610,6 +26652,31 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
             f"</div>"
         )
 
+    def _stat_hors(hors):
+        """La carte « Non classé » : ce que la somme des six autres ne dit pas.
+
+        Elle porte les libellés bruts renvoyés par MyPuls dans son infobulle.
+        Sans eux, un revenu qui change de nom chez eux disparaît de l'écran
+        sans laisser de trace — c'est ainsi que « Média privé » s'était
+        évaporé une première fois.
+        """
+        _m = float(hors.get("montant") or 0)
+        _lbl = [str(x) for x in (hors.get("libelles") or [])][:12]
+        _titre = html_escape(
+            "Libellés que MyPuls renvoie et qu'aucune carte ne reconnaît : "
+            + (", ".join(_lbl) if _lbl else "inconnus")
+            + ". Ce montant EST compté dans le total.")
+        return (
+            "<div class='home-stat' style='border-color:rgba(245,158,11,.35)'"
+            f" title='{_titre}'>"
+            "<div class='home-stat-icon' style='background:rgba(245,158,11,.15);color:#f59e0b'>"
+            "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' "
+            "stroke-width='2'><circle cx='12' cy='12' r='10'/><path d='M12 16v-4M12 8h.01'/></svg>"
+            "</div><div>"
+            f"<div class='home-stat-value fx-amt' data-usd='{_m:.2f}'>${_m:,.2f}</div>"
+            "<div class='home-stat-label'>Non classé</div>"
+            "</div></div>")
+
     # Revenus manuels (Business) : saisis en EUR -> convertis, avant ils étaient
     # ajoutés tels quels à un total en USD
     _manual_usd = float(manual_total or 0) * _eur_usd
@@ -26654,6 +26721,14 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
     # elle remplace entièrement les chiffres issus du scraping.
     _api_src = False
     _types_brut = {}          # brut par type (rempli seulement en source API)
+    # L ARGENT QU AUCUNE CARTE NE RECONNAIT. api_overview le calcule depuis
+    # toujours, AVEC les libelles en clair, et son commentaire dit : « tant
+    # que montant vaut 0, la somme des cartes recoupe total_usd ». Personne ne
+    # l affichait. Resultat : un total de 12 469 $ au-dessus de six cartes qui
+    # en totalisent 5 411, et rien a l ecran pour expliquer les 7 058 $
+    # manquants -- le proprietaire en a conclu, logiquement, que tout etait
+    # faux. Le total, lui, etait juste.
+    _hors_cat = {"montant": 0.0, "libelles": []}
     try:
         import mypuls as _mp_api
         if _mp_api.api_configured():
@@ -26661,6 +26736,7 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
                                        exclude=EXCLUDED_MODELS)
             if _ov.get("ok"):
                 type_totals = {k: float(_ov["types"].get(k, 0.0)) for k in type_totals}
+                _hors_cat = _ov.get("types_hors") or {"montant": 0.0, "libelles": []}
                 _seg = {k: float(_ov["segments"].get(k, 0.0)) for k in _seg}
                 _total_usd = float(_ov.get("total_usd") or 0) + _manual_usd
                 _of_unknown = set()      # l'API donne la plateforme : plus d'inconnue
@@ -26770,6 +26846,11 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
                 "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='2'><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M23 21v-2a4 4 0 0 0-3-3.87'/><path d='M16 3.13a4 4 0 0 1 0 7.75'/></svg>")
         + _stat("Streams", type_totals["Streams"], "#3b82f6", "rgba(59,130,246,.15)",
                 "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='2'><line x1='8' y1='6' x2='21' y2='6'/><line x1='8' y1='12' x2='21' y2='12'/><line x1='8' y1='18' x2='21' y2='18'/><line x1='3' y1='6' x2='3.01' y2='6'/><line x1='3' y1='12' x2='3.01' y2='12'/><line x1='3' y1='18' x2='3.01' y2='18'/></svg>")
+        # LA CARTE QUI EMPECHE L ARGENT DE DISPARAITRE. Elle ne s affiche
+        # que s il reste quelque chose : tant que tout est classe, l ecran ne
+        # change pas. Les libelles bruts sont dans l infobulle -- c est avec
+        # eux qu on corrige la regle de classement, au lieu de deviner.
+        + (_stat_hors(_hors_cat) if float(_hors_cat.get("montant") or 0) > 0.005 else "")
         + "</div>"
         + segments_html
         + "</div>"

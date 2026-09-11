@@ -210,6 +210,8 @@ ETATS = {
         "⚠ MyPuls unavailable — live figures not loaded (this is NOT a real "
         "$0). Check/refresh your cookies in",
     "Settings → Cookies MyPuls": "Settings → MyPuls cookies",
+    "Non classé": "Unclassified",
+    "Top modèles": "Top models",
     "Total revenus": "Total earnings",
     "Aperçu des revenus créateur": "Creator earnings overview",
     "Abonnements": "Subscriptions",
