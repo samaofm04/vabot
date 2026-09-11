@@ -58,6 +58,31 @@ def _dire(ligne):
         print(ligne.encode(enc, "replace").decode(enc, "replace"))
 
 
+
+# ─────────────────────────────────────────────────────────────────────────
+# INTEGRITE DES GROS FICHIERS, AVANT TOUT LE RESTE
+#
+# Le 11/09/2026, web_upload.py s'est retrouve a ZERO octet en plein travail.
+# La suite a repondu par CENT echecs — « 0 trouve(s) », « substring not
+# found », « list index out of range » — repartis sur quarante sujets sans
+# rapport. Il a fallu plusieurs minutes pour comprendre qu'aucun de ces
+# tests n'etait casse : ils lisaient tous un fichier vide.
+#
+# Un fichier tronque doit le DIRE, en une ligne, avant que quoi que ce soit
+# d'autre ne tourne. Les seuils sont volontairement bas — on detecte une
+# amputation, pas une variation.
+for _nomG, _miniG in (("web_upload.py", 40000), ("tests_site.py", 3000),
+                      ("mypuls.py", 1500), ("jailbreak.py", 300)):
+    try:
+        _nG = len(pathlib.Path(_nomG).read_text(encoding="utf-8").split(chr(10)))
+    except Exception as _eG:
+        _nG, _miniG = 0, 1
+        _dire("FAIL integrite : %s illisible (%r)" % (_nomG, _eG))
+    check("integrite : %s n est pas tronque" % _nomG, _nG >= _miniG,
+          "%d ligne(s), attendu au moins %d — RIEN D AUTRE N EST FIABLE "
+          "TANT QUE CE FICHIER EST AMPUTE" % (_nG, _miniG))
+
+
 def galerie(client, url):
     """Le HTML d'une galerie Bibliotheque, comme le navigateur l'obtient.
 
@@ -6456,6 +6481,57 @@ try:
           "identEditCtx.type !== identEditCtx.type0" in _srcT)
     check("nature : le verrou voyage jusqu au panneau",
           "data-typelock=" in _srcT and "identEditCtx.typelock" in _srcT)
+    # LE TRI EN MASSE. Vingt-quatre modales, on en oublie une.
+    _fT2 = _plT.Path("data/identity_type.json")
+    _savT2 = _fT2.read_text(encoding="utf-8") if _fT2.exists() else None
+    _aT2 = _wT.create_app(); _aT2.testing = True
+    _svT2 = _wT._load_web_users
+    _wT._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"}}
+    try:
+        _cT2 = _aT2.test_client()
+        with _cT2.session_transaction() as _sT2:
+            _sT2["auth"] = True; _sT2["username"] = "boss"; _sT2["role"] = "owner"
+        _tous = _wT._list_identities()
+        # Tout decocher : tout passe en identite, SAUF les verrouillees.
+        _j = (_cT2.post("/identity/types", data={"modeles": "[]"}).get_json() or {})
+        check("tri : une seule ecriture range tout", _j.get("ok") is True, str(_j)[:90])
+        check("tri : une verrouillee est refusee, et NOMMEE",
+              all(_tiT.est_modele(n) for n in _tiT.TOUJOURS_MODELE if n in _tous)
+              or not [n for n in _tiT.TOUJOURS_MODELE if n in _tous])
+        check("tri : il previent quand il ne reste plus AUCUNE modele",
+              (_j.get("modeles") == 0) == bool(_j.get("alerte")),
+              str({k: _j.get(k) for k in ("modeles", "alerte")})[:100])
+        # Tout recocher : rien n est perdu, ca se recoche.
+        _j2 = (_cT2.post("/identity/types",
+                         data={"modeles": _jsCa.dumps(list(_tous))}).get_json() or {})
+        check("tri : tout se recoche, rien n est perdu",
+              _j2.get("ok") is True and all(_tiT.est_modele(n) for n in _tous),
+              str(_j2)[:90])
+        check("tri : re-enregistrer a l identique ne change rien",
+              (_cT2.post("/identity/types",
+                         data={"modeles": _jsCa.dumps(list(_tous))}).get_json()
+               or {}).get("change") == 0)
+        check("tri : une liste illisible est refusee",
+              (_cT2.post("/identity/types",
+                         data={"modeles": "pas du json"}).get_json() or {}).get("ok") is not True)
+    finally:
+        _wT._load_web_users = _svT2
+        if _savT2 is None:
+            try:
+                _fT2.unlink()
+            except Exception:
+                pass
+        else:
+            _wT.safe_json.write_text(_fT2, _savT2)
+        _tiT._CACHE.update(sig=None, data={})
+    check("tri : le panneau liste TOUTES les entrees, meme deja rangees",
+          "_list_identities()" in _srcT[_srcT.index("def _tri_nature_html"):
+                                        _srcT.index("def _tri_nature_html") + 1400])
+    check("tri : chaque ligne montre ce que l entree porte",
+          "_effectif_identite(n)" in _srcT[_srcT.index("def _tri_nature_html"):
+                                           _srcT.index("def _tri_nature_html") + 2200])
+    check("tri : les couleurs du panneau ont leur version claire",
+          "body.light .tn-l{" in _srcT and "body.light .tn-sum{" in _srcT)
     # CE QUE L ENTREE PORTE, sous les yeux au moment de decider. Decider
     # « modele ou identite » de memoire, sur vingt-quatre entrees, personne
     # ne le fait.

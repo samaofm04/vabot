@@ -1152,6 +1152,29 @@ async def setup_va_ticket(guild, member, bot=None):
         if not identity:
             identity = pick_next_identity()
         if not identity:
+            # LE TRI « MODELE / IDENTITE » ORIENTE LA ROTATION, IL NE DOIT
+            # JAMAIS L'ASSECHER.
+            #
+            # pick_next_identity() ne tire que parmi les modeles. Le jour ou
+            # le proprietaire range presque tout en « identite » -- et c'est
+            # exactement ce que le tri en masse permet de faire en trente
+            # secondes -- cette liste devient vide, et un VA qui arrive
+            # repart sans salon, sans ticket, sans rien. Un VA pose sur un
+            # dossier de montage se corrige en un clic ; un VA qu'on n'a pas
+            # accueilli se perd.
+            #
+            # cogs/admin.py pose deja ce repli (« _pool = list_active_identities()
+            # or identities »). On le recopie ici, au seul endroit qui ne
+            # pouvait pas rendre les mains vides.
+            _jb_only = {x.lower() for x in JAILBREAK_ONLY_IDENTITIES}
+            _brut = [n for n in list_identities()
+                     if is_identity_active(n) and n.strip().lower() not in _jb_only]
+            if _brut:
+                identity = _brut[0]
+                log.warning("[ticket] aucune model disponible : repli sur "
+                            "« %s ». Range au moins une identite en « Modele ».",
+                            identity)
+        if not identity:
             return None, "Aucune identité disponible. Préviens un admin."
 
     # Creer le salon
@@ -1605,6 +1628,24 @@ class Welcome(commands.Cog):
                                 pass
 
                     # 3) Remove l'overwrite des VAs qui ne sont pas/plus sur cette identite
+                    #
+                    # UN SALON QUE PERSONNE NE RECLAME NE PURGE RIEN.
+                    #
+                    # `expected` vide ne veut pas dire « plus aucun VA sur
+                    # cette identite » : ca veut surtout dire que le suffixe
+                    # du salon ne correspond a aucune fiche. Un salon renomme,
+                    # une identite renommee, un champ `identity` vide -- et
+                    # cette etape retirait l'acces de TOUS les membres non
+                    # staff du salon, en silence, puis le refaisait toutes les
+                    # dix minutes. Le cout d'une purge a tort (un VA coupe de
+                    # ses salons sans un mot) est sans commune mesure avec
+                    # celui d'une purge oubliee (un ancien VA qui voit encore
+                    # un salon).
+                    if not expected:
+                        log.warning("[auto-secure] %s : aucune fiche VA ne "
+                                    "reclame « %s » — purge ignoree.",
+                                    ch.name, suffix)
+                        continue
                     for target, ow in list(ch.overwrites.items()):
                         if not isinstance(target, discord.Member):
                             continue

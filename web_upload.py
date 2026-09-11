@@ -15134,7 +15134,66 @@ def _suivi_pastilles_html(identities) -> str:
         "<button type='button' class='sv-pill' onclick='jbSuiviTout(1)'>"
         "● Tout allumer</button>"
         "</div>"
+        + _tri_nature_html() +
         "</div>")
+
+
+def _tri_nature_html() -> str:
+    """Trier modeles et identites en UNE fois.
+
+    Le reglage vit dans « Modifier », une entree a la fois : c'est la bonne
+    place pour une decision isolee, et la mauvaise pour vingt-quatre. Le
+    proprietaire a vingt-quatre dossiers dont trois quarts sont des dossiers
+    de montage -- vingt-quatre ouvertures de modale, et on en oublie une.
+
+    CE PANNEAU LISTE TOUT, y compris ce qui est deja range en « identite » :
+    les pastilles du perimetre, elles, ne montrent que les modeles. Sans cette
+    liste complete, une entree rangee par erreur ne pourrait plus jamais
+    revenir depuis cette page.
+    """
+    try:
+        noms = sorted(_list_identities())
+    except Exception:
+        return ""
+    if not noms:
+        return ""
+    lignes = []
+    for n in noms:
+        est_m = _type_identite(n) == "modele"
+        verrou = False
+        try:
+            verrou = _type_mod.verrouillee(n)
+        except Exception:
+            pass
+        nv, nc = _effectif_identite(n)
+        # Ce que l'entree PORTE, a cote de la case : c'est ce chiffre qui
+        # permet de trancher sans ouvrir autre chose.
+        porte = (f"{nv} VA · {nc} compte(s)" if (nv or nc) else "aucun VA, aucun compte")
+        lignes.append(
+            f"<label class='tn-l{' tn-verr' if verrou else ''}' "
+            f"title=\"{'Reste une modele : source du menu US' if verrou else porte}\">"
+            f"<input type='checkbox' data-tnid='{html_escape(n)}'"
+            f"{' checked' if est_m else ''}{' disabled' if verrou else ''}>"
+            f"<span class='tn-n'>{html_escape(n)}</span>"
+            f"<span class='tn-p'>{html_escape(porte)}</span></label>")
+    n_m = sum(1 for n in noms if _type_identite(n) == "modele")
+    return (
+        "<details class='tn-box'><summary class='tn-sum'>"
+        f"⚖ Trier mod&egrave;les et identit&eacute;s &mdash; <b>{n_m}/{len(noms)}</b> "
+        "mod&egrave;le(s)</summary>"
+        "<div class='tn-aide'>Coch&eacute; = <b>mod&egrave;le</b> (une cr&eacute;atrice : "
+        "elle reste ici, dans le scrape et dans les menus VA). D&eacute;coch&eacute; = "
+        "<b>identit&eacute;</b> (un dossier de montage : il quitte cette page et les "
+        "menus, et garde toute la Biblioth&egrave;que). Rien n&rsquo;est perdu, "
+        "&ccedil;a se recoche.</div>"
+        "<div class='tn-grille'>" + "".join(lignes) + "</div>"
+        "<div class='tn-pied'>"
+        "<button type='button' class='sv-pill' onclick='tnTout(1)'>Tout cocher</button>"
+        "<button type='button' class='sv-pill' onclick='tnTout(0)'>Tout d&eacute;cocher</button>"
+        "<button type='button' class='sv-pill tn-go' id='tn-go' onclick='tnEnregistrer()'>"
+        "Enregistrer</button>"
+        "<span class='tn-msg' id='tn-msg'></span>"
+        "</div></details>")
 
 
 def _all_tracked_handles() -> set:
@@ -33059,6 +33118,34 @@ def _render_jailbreak_html() -> str:
         "     jbSoftRefresh();"
         "   });"
         "}"
+        "/* LE TRI EN MASSE. Les cases vivent dans un <details> replie :"
+        "   on les lit au moment d enregistrer, pas avant. */"
+        "function tnTout(on){"
+        "  document.querySelectorAll('[data-tnid]').forEach(function(c){"
+        "    if(!c.disabled) c.checked = !!on;"
+        "  });"
+        "}"
+        "function tnEnregistrer(){"
+        "  var go = document.getElementById('tn-go');"
+        "  var msg = document.getElementById('tn-msg');"
+        "  var m = [];"
+        "  document.querySelectorAll('[data-tnid]').forEach(function(c){"
+        "    if(c.checked) m.push(c.getAttribute('data-tnid'));"
+        "  });"
+        "  if(go){ go.disabled = true; go.textContent = 'Enregistrement...'; }"
+        "  var fd = new FormData(); fd.append('modeles', JSON.stringify(m));"
+        "  fetch('/identity/types', {method:'POST', body:fd, credentials:'same-origin'})"
+        "   .then(_jbJsonOrAuth)"
+        "   .then(function(j){"
+        "     if(go){ go.disabled = false; go.textContent = 'Enregistrer'; }"
+        "     if(!j) return;"
+        "     if(!j.ok){ if(msg) msg.textContent = j.error || 'Echec'; return; }"
+        "     if(j.alerte && typeof showToast === 'function') showToast(j.alerte, 'error');"
+        "     if(msg) msg.textContent = j.change ? (j.change + ' changement(s)') : 'rien a changer';"
+        "     if(j.change) setTimeout(function(){ location.reload(); }, 600);"
+        "   })"
+        "   .catch(function(){ if(go){ go.disabled=false; go.textContent='Enregistrer'; } });"
+        "}"
         "function jbSuiviTout(on){"
         "  var q = on ? 'Rallumer le scrape sur TOUTES les identites ?'"
         "            : 'Eteindre le scrape sur TOUTES les identites ?\\n\\nPlus aucun chiffre ne sera mis a jour, et la paie des VA ne pourra plus etre calculee. Reversible en un clic.';"
@@ -37853,6 +37940,31 @@ def _render_jbanalyse_html() -> str:
     css = """
 <style>
 #ja-root{max-width:1180px}
+/* --- Tri en masse « modele / identite » -------------------------------
+   Replie par defaut : c'est un geste qu'on fait une fois, pas un reglage
+   qu'on regarde. Ouvert, il montre TOUTES les entrees -- y compris celles
+   deja rangees en identite, qui ne figurent plus dans les pastilles. */
+.tn-box{margin-top:10px;border-top:1px solid rgba(255,255,255,.07);padding-top:9px}
+.tn-sum{cursor:pointer;font-size:12px;color:#8b93a4;user-select:none;list-style:none}
+.tn-sum::-webkit-details-marker{display:none}
+.tn-sum:hover{color:#cbd5e1}
+.tn-aide{font-size:11px;color:#75757f;line-height:1.5;margin:8px 0 9px;max-width:78ch}
+.tn-grille{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:5px}
+.tn-l{display:flex;align-items:center;gap:7px;padding:6px 9px;border-radius:8px;
+  background:rgba(255,255,255,.03);cursor:pointer;font-size:12px}
+.tn-l:hover{background:rgba(255,255,255,.07)}
+.tn-verr{opacity:.55;cursor:not-allowed}
+.tn-n{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tn-p{margin-left:auto;font-size:10.5px;color:#75757f;white-space:nowrap}
+.tn-pied{display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap}
+.tn-go{border-color:#3b82f6!important;color:#7aa2ff!important}
+body.light .tn-go{color:#1d4ed8!important}
+.tn-msg{font-size:11.5px;color:#75757f}
+body.light .tn-l{background:#f4f4f6}
+body.light .tn-l:hover{background:#e9e9ee}
+body.light .tn-sum{color:#6b7280}
+body.light .tn-aide,body.light .tn-p,body.light .tn-msg{color:#6b7280}
+
 /* --- Panneau « Modifier » d'une identite ------------------------------
    Il empilait cinq blocs de meme poids, chacun avec son paragraphe
    d'explication : on ne voyait plus ce qui etait un REGLAGE et ce qui etait
@@ -51001,6 +51113,40 @@ def create_app():
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)[:160]})
         return jsonify({"ok": True, "salons": int(n or 0), "jour": jour})
+
+    @app.route("/identity/types", methods=["POST"])
+    def identity_types_set():
+        """Le tri en masse : une seule ecriture pour toutes les entrees."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        import type_identite as _ti
+        try:
+            modeles = {str(x).strip().lower() for x in
+                       (json.loads(request.form.get("modeles") or "[]") or [])}
+        except Exception:
+            return jsonify({"ok": False, "error": "liste illisible"})
+        connues = set(_list_identities())
+        change, refuses = 0, []
+        for nom in sorted(connues):
+            veut = "modele" if nom in modeles else "identite"
+            if _ti.verrouillee(nom) and veut != "modele":
+                refuses.append(nom)
+                continue
+            if _ti.de(nom) == veut and _ti.choisi(nom):
+                continue
+            if _ti.definir(nom, veut):
+                change += 1
+        _invalidate_all_ttl_cache()
+        restants = [n for n in connues if _ti.est_modele(n)]
+        # PERSONNE NE DOIT POUVOIR TOUT ETEINDRE SANS LE SAVOIR : sans une
+        # seule modele, la rotation Discord n a plus rien a donner a un VA
+        # qui arrive. Le bot a un repli, mais le proprietaire doit le savoir.
+        return jsonify({"ok": True, "change": change, "refuses": refuses,
+                        "modeles": len(restants),
+                        "alerte": ("Aucune modele : un nouveau VA n aura plus "
+                                   "d identite a recevoir."
+                                   if not restants else "")})
 
     @app.route("/identity/type", methods=["POST"])
     def identity_type_set():
