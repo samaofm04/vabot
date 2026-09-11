@@ -26300,7 +26300,25 @@ def _render_home_dashboard_html() -> str:
     from flask import request as flask_request
 
     period = flask_request.args.get("home_period", "week") if hasattr(flask_request, "args") else "week"
-    today = _dt.date.today()
+    # « AUJOURD HUI » EST CELUI DU PROPRIETAIRE, PAS CELUI DU SERVEUR.
+    #
+    # date.today() rend la date LOCALE du serveur -- et le serveur est en UTC
+    # (l entete de cette page affichait « UTC+00:00 »). Entre minuit et deux
+    # heures du matin a Paris, il est encore la veille en UTC : « Today »
+    # montrait donc la journee precedente, et « Yesterday » celle d avant.
+    # Le proprietaire travaille la nuit : il tombait dans cette fenetre
+    # presque chaque soir, et lisait des chiffres decales d un jour sans que
+    # rien ne l en avertisse.
+    #
+    # Le reste de l application decoupe deja ses journees a Paris
+    # (_jour_paris, l analyse des vues, l activite des VA). Le tableau de bord
+    # s aligne.
+    try:
+        from zoneinfo import ZoneInfo as _Zi_h
+        _tz_maison = _Zi_h("Europe/Paris")
+    except Exception:
+        _tz_maison = None
+    today = (_dt.datetime.now(_tz_maison) if _tz_maison else _dt.datetime.now()).date()
 
     # Calculer la période
     if period == "today":
@@ -26803,12 +26821,18 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
            if _of_unknown else "")
     )
 
+    _decalage = (_dt.datetime.now(_tz_maison) if _tz_maison
+                 else _dt.datetime.now().astimezone()).strftime("%z") or "+0000"
+
     # 6 stat cards comme Infloww
     overview_html = (
         "<div class='home-overview'>"
         "<div class='home-overview-head'>"
         f"<div class='home-overview-title'>Aperçu des revenus créateur "
-        f"<small>UTC{_dt.datetime.now().astimezone().strftime('%z')[:3]}:{_dt.datetime.now().astimezone().strftime('%z')[3:]}</small>"
+        # L etiquette dit le fuseau REELLEMENT utilise pour decouper les
+        # journees -- avant, elle disait celui du serveur (UTC), qui n etait
+        # pas celui du calcul.
+        f"<small title='Les journées sont découpées à cette heure-là'>UTC{_decalage[:3]}:{_decalage[3:]}</small>"
         "</div>"
         + f"<button id='fx-cur-toggle' data-rate='{_eur_usd}' onclick='fxToggleCur()' "
           f"title='Basculer entre dollars et euros' "

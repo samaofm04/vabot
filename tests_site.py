@@ -6178,6 +6178,14 @@ try:
           "_tot_usd_par_createur" in _dash and "ca_usd_chatteur" in _dash)
     check("revenus : les modeles ecartees le sont AUSSI dans le classement",
           "_model_match(_nom_c, EXCLUDED_MODELS)" in _dash)
+    # LA JOURNEE EST CELLE DU PROPRIETAIRE. Le serveur tourne en UTC : entre
+    # minuit et 2 h a Paris, date.today() rendait encore la veille, et
+    # « Aujourd hui » montrait la journee precedente. Il travaille la nuit.
+    check("revenus : « aujourd hui » se decoupe a Paris, pas au fuseau du serveur",
+          'Europe/Paris' in _dash and "today = _dt.date.today()" not in _dash,
+          "date.today() encore present" if "today = _dt.date.today()" in _dash else "")
+    check("revenus : l etiquette annonce le fuseau REELLEMENT utilise",
+          "_decalage" in _dash and "now().astimezone().strftime" not in _dash)
 except Exception as _eR:
     check("revenus : testable", False, repr(_eR)[:200])
 
