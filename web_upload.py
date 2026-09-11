@@ -10296,6 +10296,17 @@ document.addEventListener('click',function(e){
   </button>
 </div>
 
+<div class="group" id="grp-sessions">
+  <!-- id="tab-sessions" LOAD-BEARING, comme pour les 24 autres onglets
+       paresseux : le restaurateur d'onglet (?tab=sessions apres un F5) et le
+       garde RBAC cherchent tous deux getElementById('tab-'+nom) avant de se
+       rabattre sur « .item ». Sans l'id, la section reste sur « Loading... ». -->
+  <button class="group-head" id="tab-sessions" onclick="showTab('sessions','sessions','Sessions','Qui etait present aux sessions vocales, session par session')">
+    <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+    <span class="label">Sessions</span>
+  </button>
+</div>
+
 <div class="section-label">Settings</div>
 
 <div class="group" id="grp-settings">
@@ -12203,6 +12214,10 @@ function remoteParc(){
      NB en ecrivant ce commentaire : ne JAMAIS y mettre trois guillemets
      doubles a la suite — ca ferme UPLOAD_HTML et casse tout le fichier.
      Onglet LOURD -> _lazy() : il n'est fabrique qu'au premier clic. -->
+<div class="form-section" id="form-sessions" style="display:none">
+{sessions_html}
+</div>
+
 <div class="form-section" id="form-remote2" style="display:none">
 {remote2_html}
 </div>
@@ -39226,6 +39241,248 @@ def _render_facture_html() -> str:
         return f"<div style='padding:24px;color:#f99'>Module « Facture » indisponible : {type(e).__name__}: {e}</div>"
 
 
+
+# ==============================================================================
+# SESSIONS VOCALES : qui etait present aux appels
+# ==============================================================================
+
+def _sessions_cog():
+    """Le cog Discord, s'il tourne. None sinon -- ce n'est pas une erreur.
+
+    La page doit rester lisible quand le bot est arrete : le registre des
+    presences est un fichier, il se lit sans Discord. Seul le bandeau « en ce
+    moment » a besoin du cog, et il sait le dire quand il ne l'a pas.
+    """
+    try:
+        if _BOT_REF is None:
+            return None
+        return _BOT_REF.get_cog("SessionsVoc")
+    except Exception:
+        return None
+
+
+def _sessions_duree(secondes) -> str:
+    """« 1 h 05 » plutot que « 3900 s »."""
+    try:
+        m = max(0, int(secondes)) // 60
+    except (TypeError, ValueError):
+        return "0 min"
+    return ("%d h %02d" % (m // 60, m % 60)) if m >= 60 else ("%d min" % m)
+
+
+def _render_sessions_html() -> str:
+    """Presence des VA aux sessions vocales : en cours, du jour, par personne."""
+    import html as _hSe
+    import time as _tSe
+    import sessions_voc as _sv
+    from flask import request as _rqSe
+
+    try:
+        jour = (_rqSe.args.get("jour") or "").strip()
+    except Exception:
+        jour = ""
+    try:
+        import datetime as _dSe
+        _dSe.date.fromisoformat(jour)
+    except Exception:
+        jour = _sv.jour_de(_tSe.time())
+
+    cfg = _sv.config()
+    attendus = _sv.attendus()
+    resume = _sv.resume_jour(jour, attendus=attendus)
+    gens = _sv.resume_par_personne(jour, attendus=attendus)
+    cog = _sessions_cog()
+    direct = None
+    if cog is not None:
+        try:
+            direct = cog.etat_direct()
+        except Exception:
+            direct = None
+
+    e = _hSe.escape
+
+    # --- Le bandeau du haut : ce qui se passe MAINTENANT -------------------
+    s_now = _sv.en_cours()
+    if s_now:
+        hl = _sv.heures_locales(s_now)
+        combien = (direct or {}).get("total")
+        qui = ""
+        if direct and direct.get("salons"):
+            noms = [g["nom"] for sa in direct["salons"] for g in sa["gens"]]
+            qui = ", ".join(e(n) for n in noms[:14])
+        titre = "Session en cours"
+        detail = ("%s — %s (BJ %s · MG %s)"
+                  % (e(s_now["nom"]), "%02d:%02d" % (s_now["heure"], s_now["minute"]),
+                     hl.get("BJ", "?"), hl.get("MG", "?")))
+        if combien is None:
+            # Le bot est arrete : on ne sait pas qui est dans le salon. Le
+            # dire vaut mieux qu'afficher un zero qu'on prendra pour « personne ».
+            pastille = "<span class='se-pastille se-gris'>bot arrêté — présence non mesurée</span>"
+        else:
+            pastille = ("<span class='se-pastille se-vert'>%d dans le salon</span>" % combien
+                        + ("<div class='se-qui'>%s</div>" % qui if qui else
+                           "<div class='se-qui'>personne pour l'instant</div>"))
+    else:
+        prochaine = _sv.prochaine()
+        titre = "Aucune session en cours"
+        if prochaine:
+            hl = _sv.heures_locales(prochaine)
+            detail = ("<span>Prochaine</span> : %s à %s (BJ %s · MG %s)"
+                      % (e(prochaine["nom"]),
+                         "%02d:%02d" % (prochaine["heure"], prochaine["minute"]),
+                         hl.get("BJ", "?"), hl.get("MG", "?")))
+        else:
+            detail = "Aucune session au calendrier."
+        pastille = ""
+
+    bandeau = ("<div class='se-hero'>"
+               "<div class='se-hero-t'>%s</div>"
+               "<div class='se-hero-d'>%s</div>%s</div>" % (titre, detail, pastille))
+
+    # --- Les sessions du jour ---------------------------------------------
+    cartes = []
+    for sess in resume["sessions"]:
+        hl = sess.get("heures_locales") or {}
+        def _liste(gens_, classe):
+            if not gens_:
+                return "<span class='se-vide'>—</span>"
+            return "".join(
+                "<span class='se-jeton %s' title='%s'>%s</span>"
+                % (classe, e(_sessions_duree(g.get("secondes", 0))), e(g["nom"]))
+                for g in gens_[:40])
+        if sess["attendus_connus"]:
+            bloc_abs = ("<div class='se-l'><b><span>Absents</span> (%d)</b> %s</div>"
+                        % (len(sess["absents"]), _liste(sess["absents"], "se-rouge")))
+        else:
+            # SANS LISTE D'ATTENDUS, « aucun absent » SERAIT UN MENSONGE.
+            bloc_abs = ("<div class='se-l se-note'>Liste des VA attendus inconnue : "
+                        "impossible de dire qui manquait.</div>")
+        cartes.append(
+            "<div class='se-card'>"
+            "<div class='se-card-h'><b>%s</b><span class='se-h'>%s</span>"
+            "<span class='se-tz'>BJ %s · MG %s</span></div>"
+            "<div class='se-l'><b><span>Présents</span> (%d)</b> %s</div>"
+            "%s%s</div>"
+            % (e(sess["nom"]), e(sess["heure"]), hl.get("BJ", "?"), hl.get("MG", "?"),
+               len(sess["presents"]), _liste(sess["presents"], "se-vert-j"),
+               ("<div class='se-l'><b><span>Passés vite</span></b> %s</div>"
+                % _liste(sess["partiels"], "se-orange")) if sess["partiels"] else "",
+               bloc_abs))
+
+    # --- Le resume par personne -------------------------------------------
+    lignes = []
+    for g in gens:
+        part = (g["presentes"] * 100 // g["sur"]) if g["sur"] else 0
+        couleur = "se-vert-j" if part >= 75 else ("se-orange" if part >= 40 else "se-rouge")
+        lignes.append(
+            "<div class='se-row'><div class='se-row-n'>%s</div>"
+            "<div class='se-row-b'><i class='%s' style='width:%d%%'></i></div>"
+            "<div class='se-row-c'>%d/%d</div>"
+            "<div class='se-row-t'>%s</div></div>"
+            % (e(g["nom"]), couleur, part, g["presentes"], g["sur"],
+               _sessions_duree(g["secondes"])))
+    if not lignes:
+        lignes = ["<div class='se-vide'>Aucun relevé pour cette journée.</div>"]
+
+    hier = (__import__("datetime").date.fromisoformat(jour)
+            - __import__("datetime").timedelta(days=1)).isoformat()
+    demain = (__import__("datetime").date.fromisoformat(jour)
+              + __import__("datetime").timedelta(days=1)).isoformat()
+
+    avert = ""
+    if not attendus:
+        avert = ("<div class='se-avert'>Aucun VA connu dans le registre : "
+                 "la page ne peut montrer que les présents, jamais les absents.</div>")
+
+    return (_SESSIONS_CSS + bandeau + avert
+            + "<div class='se-barre'>"
+              "<a class='se-nav' href='?tab=sessions&jour=%s'>← %s</a>"
+              "<span class='se-jour'>%s</span>"
+              "<a class='se-nav' href='?tab=sessions&jour=%s'>%s →</a>"
+              "<button type='button' class='se-btn' onclick='sessionsResume()'>"
+              "Poster le résumé sur Discord</button>"
+              "<span class='se-msg' id='se-msg'></span>"
+              "</div>" % (hier, hier, jour, demain, demain)
+            + "<div class='se-grille'>" + "".join(cartes) + "</div>"
+            + "<div class='se-bloc'><div class='se-bloc-t'>Assiduité du jour</div>"
+            + "".join(lignes) + "</div>"
+            + "<div class='se-pied'><span>Heures de référence</span> : %s. "
+              "<span>Une présence compte à partir de</span> %s "
+              "<span>passées dans le salon.</span></div>"
+              % (e(cfg["fuseau"]), _sessions_duree(cfg["presence_min_secondes"])))
+
+
+#: Le style de la page. Les regles CLAIRES sont ecrites EN MEME TEMPS que les
+#: sombres : le theme servi par defaut est le clair, et « rattraper plus tard »
+#: revient a livrer une page illisible.
+_SESSIONS_CSS = """<style>
+.se-hero{background:#12151f;border:1px solid #2a2a2a;border-radius:14px;padding:18px 20px;margin-bottom:14px}
+.se-hero-t{font-size:17px;font-weight:800;letter-spacing:-.01em}
+.se-hero-d{font-size:13px;color:#8b8b96;margin-top:4px}
+.se-pastille{display:inline-block;margin-top:10px;font-size:12px;font-weight:700;padding:4px 11px;border-radius:20px}
+.se-vert{background:rgba(34,197,94,.14);color:#22c55e}
+.se-gris{background:rgba(148,163,184,.14);color:#8b98ab}
+.se-qui{font-size:12px;color:#8b8b96;margin-top:7px}
+.se-barre{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.se-nav{font-size:12px;color:#8b98ab;text-decoration:none;padding:6px 10px;border:1px solid #2a2a2a;border-radius:8px}
+.se-nav:hover{color:#e6e6ea}
+.se-jour{font-size:14px;font-weight:700}
+.se-btn{background:#1a1a1f;border:1px solid #303036;color:#c4c4cc;border-radius:9px;padding:7px 13px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;margin-left:auto}
+.se-btn:hover{border-color:#3b82f6;color:#e6e6ea}
+.se-msg{font-size:12px;color:#8b8b96}
+.se-grille{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+.se-card{background:#0f1116;border:1px solid #2a2a2a;border-radius:12px;padding:14px}
+.se-card-h{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin-bottom:9px}
+.se-h{font-size:13px;color:#8b98ab;font-weight:700}
+.se-tz{font-size:11px;color:#75757f;margin-left:auto}
+.se-l{font-size:12px;color:#8b8b96;margin-top:7px;line-height:1.9}
+.se-l b{color:#c4c4cc;margin-right:5px}
+.se-note{font-style:italic;color:#75757f}
+.se-jeton{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px;margin:0 4px 4px 0}
+.se-vert-j{background:rgba(34,197,94,.14);color:#22c55e}
+.se-orange{background:rgba(245,158,11,.14);color:#d98a0b}
+.se-rouge{background:rgba(239,68,68,.13);color:#ef4444}
+.se-vide{font-size:12px;color:#75757f}
+.se-avert{background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);color:#d98a0b;border-radius:10px;padding:11px 14px;font-size:12.5px;margin-bottom:14px}
+.se-bloc{background:#0f1116;border:1px solid #2a2a2a;border-radius:12px;padding:14px;margin-top:14px}
+.se-bloc-t{font-size:14px;font-weight:700;margin-bottom:10px}
+.se-row{display:flex;align-items:center;gap:11px;padding:5px 0;font-size:12.5px}
+.se-row-n{flex:0 0 160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.se-row-b{flex:1;background:rgba(148,163,184,.13);height:7px;border-radius:4px;overflow:hidden;min-width:60px}
+.se-row-b i{display:block;height:100%;border-radius:4px}
+.se-row-b i.se-vert-j{background:#22c55e}
+.se-row-b i.se-orange{background:#d98a0b}
+.se-row-b i.se-rouge{background:#ef4444}
+.se-row-c{flex:0 0 46px;text-align:right;font-weight:700}
+.se-row-t{flex:0 0 66px;text-align:right;color:#8b8b96}
+.se-pied{font-size:11.5px;color:#75757f;margin-top:12px}
+body.light .se-hero,body.light .se-card,body.light .se-bloc{background:#fff;border-color:#e5e7eb}
+body.light .se-hero-d,body.light .se-l,body.light .se-msg,body.light .se-row-t{color:#6b7280}
+body.light .se-h,body.light .se-nav{color:#4b5563}
+body.light .se-tz,body.light .se-vide,body.light .se-note,body.light .se-pied{color:#9ca3af}
+body.light .se-l b,body.light .se-nav:hover{color:#1f2937}
+body.light .se-nav,body.light .se-btn{border-color:#e5e7eb}
+body.light .se-btn{background:#f9fafb;color:#4b5563}
+body.light .se-gris{color:#64748b}
+body.light .se-orange{color:#b45309}
+body.light.claude .se-hero,body.light.claude .se-card,body.light.claude .se-bloc{background:var(--c-surface)!important;border-color:var(--c-bordure)!important}
+</style>
+<script>
+function sessionsResume(){
+  var m=document.getElementById('se-msg'); if(m) m.textContent='envoi...';
+  fetch('/sessions/resume_now',{method:'POST',credentials:'same-origin'})
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      if(!m) return;
+      if(j && j.ok) m.textContent = j.salons ? ('posté dans '+j.salons+' salon(s)')
+                                             : "aucun salon ne porte ce nom";
+      else m.textContent = (j && j.error) || 'échec';
+    })
+    .catch(function(){ if(m) m.textContent='échec'; });
+}
+</script>"""
+
+
 def _render_remote2_html() -> str:
     """Onglet « Remote 2 » : poste de pilotage du parc, isolé dans parc_web.py.
 
@@ -45770,6 +46027,9 @@ ROLE_MENU_STRUCTURE = [
         # cocher la case donne la surveillance, jamais la commande.
         {"key": "remote2", "name": "Remote 2 — poste de pilotage du parc (lecture)",
          "perms": ["view"]},
+        # Cle == nom d'onglet reel : rien a ajouter dans _PERM_KEY_TO_TABS.
+        {"key": "sessions", "name": "Sessions — presence des VA aux appels (lecture)",
+         "perms": ["view"]},
     ]},
 ]
 
@@ -46982,6 +47242,7 @@ def _render_upload_inner(msg=None, error=None):
         # Remote 2 : onglet lourd (style + coquille + un .js de 84 Ko) — on ne
         # le fabrique qu'au premier clic, comme les galeries.
         .replace("{remote2_html}", _lazy("remote2"))
+        .replace("{sessions_html}", _lazy("sessions"))
         .replace("{account_section_html}", _g("saccount", _render_account_section_html))
         .replace("{security_sessions_html}", _g("ssecurity", _render_security_sessions_html))
         .replace("{mypuls_cookies_html}", _g("smypuls", _render_mypuls_cookies_settings))
@@ -47698,6 +47959,7 @@ def create_app():
         "/facture/", "/business/", "/jailbreak/", "/jbactivite/", "/jbanalyse/",
         "/gmsdash/", "/gms/", "/linkscale/", "/settings/role", "/admin/",
         "/sheets", "/external/list", "/va/get_insta",
+        "/sessions/",
         # Le jeton de synchro ouvre la Bibliotheque 2 en lecture, en
         # enumeration et en ECRITURE, sans cookie : /sync/list et /sync/file
         # n'exigent que lui. Un compte restreint pouvait donc le recopier et
@@ -47778,6 +48040,7 @@ def create_app():
         # Remote 2 : un rôle à qui on accorde l'onglet peut LIRE le parc
         # (surveillance de nuit) ; toute écriture reste admin-only.
         "/parc/": "remote2",
+        "/sessions/": "sessions",
     }
 
     @app.before_request
@@ -48167,6 +48430,7 @@ def create_app():
                 # ré-injectable telle quelle par le chargeur paresseux (le JS
                 # se re-exécute sur un #parc-root neuf et se rebranche seul).
                 "remote2": _render_remote2_html,
+                "sessions": _render_sessions_html,
                 "paievas": _render_paievas_html,
                 "veille": _render_veille_feed_html,
                 # Onglet TikTok Trends : rendu delegue a veille_tiktok_ui.py
@@ -50499,6 +50763,37 @@ def create_app():
             return jsonify({"ok": False, "error": "écriture impossible"})
         _invalidate_all_ttl_cache()
         return jsonify({"ok": True, "identity": ident, "market": market})
+
+    @app.route("/sessions/resume_now", methods=["POST"])
+    def sessions_resume_now():
+        """Poste le resume du jour dans Discord, a la demande.
+
+        Meme patron que /jailbreak/report_comptes_now : le site et le bot
+        tournent dans le MEME processus, on passe donc par la boucle asyncio
+        du bot. Chaque garde dit ce qui manque plutot que d'echouer en
+        silence -- « 0 salon » n'est pas un succes.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        if _BOT_REF is None:
+            return jsonify({"ok": False, "error": "Le bot Discord n'est pas démarré."})
+        cog = _BOT_REF.get_cog("SessionsVoc")
+        if cog is None:
+            return jsonify({"ok": False, "error": "Le cog Sessions n'est pas chargé."})
+        loop = getattr(_BOT_REF, "loop", None)
+        if loop is None or not loop.is_running():
+            return jsonify({"ok": False, "error": "La boucle du bot ne tourne pas."})
+        import asyncio as _aioSe
+        import sessions_voc as _svSe
+        import time as _tSeR
+        jour = (request.form.get("jour") or "").strip() or _svSe.jour_de(_tSeR.time())
+        try:
+            fut = _aioSe.run_coroutine_threadsafe(cog.poster_resume(jour), loop)
+            n = fut.result(timeout=25)
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)[:160]})
+        return jsonify({"ok": True, "salons": int(n or 0), "jour": jour})
 
     @app.route("/identity/type", methods=["POST"])
     def identity_type_set():

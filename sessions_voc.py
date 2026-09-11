@@ -139,7 +139,13 @@ def _completer(brut: dict) -> dict:
                                          PRESENCE_MIN_SECONDES_DEFAUT, 0, 7200),
         # Salon ou poster le resume du jour, par convention de nom.
         "salon_resume": str(brut.get("salon_resume") or "session"),
-        "resume_actif": bool(brut.get("resume_actif", True)),
+        # LE RESUME AUTOMATIQUE EST ETEINT TANT QU'ON NE L'ALLUME PAS.
+        # Poster chaque matin dans un salon, c'est ecrire chez le
+        # proprietaire, devant ses VA, une liste de qui n'etait pas la. Ca ne
+        # se met pas en route tout seul parce qu'un reglage avait « True » par
+        # defaut. Le bouton « Poster le resume sur Discord » permet de l'
+        # essayer a la main autant qu'on veut avant de l'automatiser.
+        "resume_actif": bool(brut.get("resume_actif", False)),
         # Heure du resume, dans le fuseau de reference.
         "resume_heure": _entier(brut.get("resume_heure"), 8, 0, 23),
     }
