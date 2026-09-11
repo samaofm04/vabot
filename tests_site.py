@@ -9051,6 +9051,62 @@ except Exception as _eId:
 
 print()
 print("=" * 70)
+print("MENU : une icone muette ne dit pas ce qu elle est")
+print("=" * 70)
+try:
+    import re as _reI, shutil as _shI, subprocess as _spI
+    import web_upload as _wI
+    _svI = _wI._load_web_users
+    _wI._load_web_users = lambda: {"admin": {"role": "owner", "password": "x"}}
+    try:
+        _cI = _appRg.test_client()
+        with _cI.session_transaction() as _sI:
+            _sI["auth"] = True; _sI["username"] = "admin"; _sI["role"] = "owner"
+        _hI = _cI.get("/?tab=remote").get_data(as_text=True)
+    finally:
+        _wI._load_web_users = _svI
+    check("menu : le tableau de bord se rend (sinon rien n est teste)",
+          len(_hI) > 100000, "%d octets" % len(_hI))
+    # LE CONSTAT MESURE : en mode rail le libelle est masque, et seuls les
+    # groupes qui ONT un sous-menu montrent un flyout au survol. Les autres --
+    # Remote, Remote 2, Sessions, et toutes les entrees solo -- etaient des
+    # icones MUETTES. Zero infobulle sur les 81 entrees, le 12/09/2026.
+    check("menu : la pose des infobulles est dans la page",
+          "function vabotInfobulles(" in _hI)
+    check("menu : elle repasse apres le premier rendu (onglets differes)",
+          _hI.count("setTimeout(vabotInfobulles") >= 1)
+    # ET SURTOUT CE QU ELLE FAIT. Se parser ne prouve rien : on l execute sur
+    # un faux menu et on regarde les infobulles obtenues.
+    _node = _shI.which("node")
+    if _node:
+        _mI = _reI.search(r"function vabotInfobulles\(\)\{.*?" + chr(10) + r"\}",
+                          _hI, _reI.S)
+        check("menu : la fonction est extractible du rendu", bool(_mI))
+        if _mI:
+            _fI = TMP / "infobulles.js"
+            _fI.write_text('function El(c,l,t){this.cls=c;this._label=l;this._title=t||null;this.textContent=l;this.getAttribute=function(k){return k==="title"?this._title:null;};this.setAttribute=function(k,v){if(k==="title")this._title=v;};this.querySelector=function(s){return s===".label"&&this._label!==null?{textContent:this._label}:null;};}var E=[new El("group-head","Sessions"),new El("solo-item","  Dashboard "+String.fromCharCode(10)+" "),new El("item","Analyse globale"),new El("group-head","Deja","Ne pas ecraser")];globalThis.document={querySelectorAll:function(){return E;},addEventListener:function(){}};globalThis.setTimeout=function(){return 0;};' + chr(10) + _mI.group(0) + chr(10)
+                           + "var n=vabotInfobulles();"
+                           + "console.log(JSON.stringify(E.map(function(e){"
+                           + "return e.getAttribute('title');}))+'|'+n);",
+                           encoding="utf-8")
+            _rI = _spI.run([_node, str(_fI)], capture_output=True, text=True, timeout=60)
+            _so = (_rI.stdout or "").strip()
+            check("menu : chaque entree recoit le texte de son libelle",
+                  _so.startswith('["Sessions","Dashboard","Analyse globale"'),
+                  _so[:130] or (_rI.stderr or "")[:130])
+            check("menu : les espaces et retours a la ligne sont nettoyes",
+                  '"Dashboard"' in _so, _so[:130])
+            check("menu : une infobulle deja posee n est jamais ecrasee",
+                  '"Ne pas ecraser"' in _so and _so.endswith("|3"), _so[:150])
+    else:
+        # Ne jamais ecarter en silence : dire que la verification n a pas eu
+        # lieu vaut mieux qu un OK trompeur.
+        print("     (node absent : le comportement des infobulles n a pas ete verifie)")
+except Exception as _eI:
+    check("menu : infobulles testables", False, repr(_eI)[:200])
+
+print()
+print("=" * 70)
 print("ANALYSE GLOBALE : les totaux, sans confondre zero et non mesure")
 print("=" * 70)
 try:
