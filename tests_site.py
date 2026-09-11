@@ -8954,7 +8954,8 @@ try:
               (_sv.session_a(_t(J, 11, 50)) or {}).get("id") == "s1",
               "la marge d avance ne compte pas")
         check("sessions : en dehors des creneaux, aucune session",
-              _sv.session_a(_t(J, 15, 0)) is None)
+              _sv.session_a(_t(J, 6, 30)) is None,
+              "la seule zone morte est 05 h - 08 h")
         # LA NUIT. Une presence a 00h30 appartient a la session de 23 h de LA
         # VEILLE : c est la seule lecture qui ne fabrique pas de faux absents.
         _nuit = _sv.session_a(_t(J, 0, 30))
@@ -8979,13 +8980,15 @@ try:
         _sv.ecrire_config({})
         _s1 = [x for x in _sv.sessions_du_jour(J) if x["id"] == "s1"][0]
         _hl = _sv.heures_locales(_s1)
-        check("sessions : midi au Benin, c est quatorze heures a Madagascar",
-              _hl.get("BJ") == "12:00" and _hl.get("MG") == "14:00",
-              str(_hl))
+        _bj = int(_hl["BJ"][:2]); _mg = int(_hl["MG"][:2])
+        check("sessions : Madagascar est deux heures devant le Benin",
+              (_mg - _bj) % 24 == 2, str(_hl))
+        check("sessions : l heure du Benin est bien celle du calendrier",
+              _hl.get("BJ") == "%02d:%02d" % (_s1["heure"], _s1["minute"]), str(_hl))
 
         # LE POINTAGE. On compte du temps reellement passe, minute par minute.
         _sv.FICHIER_PRESENCE.unlink(missing_ok=True)
-        _hors = _sv.pointer([{"id": "1", "nom": "Ana"}], 60, _t(J, 15, 0))
+        _hors = _sv.pointer([{"id": "1", "nom": "Ana"}], 60, _t(J, 6, 30))
         check("sessions : hors creneau, rien n est enregistre", _hors is None
               and not _sv.presences(J))
         for _ in range(10):

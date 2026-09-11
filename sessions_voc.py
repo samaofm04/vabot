@@ -58,11 +58,22 @@ FUSEAUX_PAYS = {
 
 #: Le calendrier de depart, repris des salons existants (« BJ 12 h 00 au
 #: Benin », 17 h, 23 h, 2 h). Il se change dans la page Sessions, pas ici.
+#: LES FENETRES SONT OUVERTES AU MAXIMUM, choix du proprietaire le
+#: 11/09/2026 : chaque session court jusqu'au debut de la suivante, pour
+#: qu'un VA qui passe a n'importe quelle heure soit compte quelque part.
+#: Deux bornes posees a la main : celle de midi ouvre des HUIT heures, celle
+#: de deux heures ferme a CINQ. Il reste donc une seule zone morte, de 5 h a
+#: 8 h -- et c'est voulu : sans elle, la session de deux heures du matin
+#: avalerait toute la matinee.
 SESSIONS_DEFAUT = [
-    {"id": "s1", "nom": "Session 1", "heure": 12, "minute": 0},
-    {"id": "s2", "nom": "Session 2", "heure": 17, "minute": 0},
-    {"id": "s3", "nom": "Session 3", "heure": 23, "minute": 0},
-    {"id": "s4", "nom": "Session 4", "heure": 2, "minute": 0},
+    {"id": "s1", "nom": "Session 1", "heure": 8, "minute": 0,
+     "fin_heure": 17, "fin_minute": 0},
+    {"id": "s2", "nom": "Session 2", "heure": 17, "minute": 0,
+     "fin_heure": 23, "fin_minute": 0},
+    {"id": "s3", "nom": "Session 3", "heure": 23, "minute": 0,
+     "fin_heure": 2, "fin_minute": 0},
+    {"id": "s4", "nom": "Session 4", "heure": 2, "minute": 0,
+     "fin_heure": 5, "fin_minute": 0},
 ]
 
 #: Combien de temps une session dure, et a partir de quand on compte quelqu'un
