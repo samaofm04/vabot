@@ -3127,6 +3127,43 @@ document.addEventListener('click', function(e){
     g.removeEventListener('mouseleave', h);
   });
 });
+// === ENTREES DE MENU QUI DORMENT ===
+// Une seule liste : le jour ou une section reprend du service, on retire son
+// identifiant d ici et rien d autre ne bouge. Elles restent CLIQUABLES — la
+// route fonctionne toujours, et cacher une page qu on croyait morte est le
+// meilleur moyen de la chercher pendant une heure.
+//
+// Ce code vit dans le script GLOBAL, pas dans celui d un onglet : le menu est
+// present sur toutes les pages, et un premier essai place dans le JS de
+// l onglet Jailbreak ne s executait sur aucune autre.
+var VABOT_MENU_DORT = {
+  'tab-remote2': 'Remote 2 — pas utilisé en ce moment',
+  'tab-gmsdash': 'Dashboard clics — pas utilisé en ce moment',
+  'grp-vault2': 'Bibliothèque 2 — pas utilisée en ce moment'
+};
+function vabotMenuDort(){
+  Object.keys(VABOT_MENU_DORT).forEach(function(id){
+    var e = document.getElementById(id);
+    if(!e) return;
+    var cible = e.classList.contains('group') ? e.querySelector('.group-head') : e;
+    if(!cible || cible.classList.contains('menu-dort')) return;
+    cible.classList.add('menu-dort');
+    cible.title = VABOT_MENU_DORT[id];
+    // Le cadenas est POSE, pas dessine en CSS : « Dashboard clics » n a pas
+    // de <span class="label"> autour de son texte, contrairement aux autres
+    // entrees, et le ::after ne s y accrochait pas. Un badge ajoute ici
+    // marche quelle que soit la structure du bouton.
+    if(!cible.querySelector('.menu-cadenas')){
+      var c = document.createElement('span');
+      c.className = 'menu-cadenas';
+      c.textContent = '🔒';
+      cible.appendChild(c);
+    }
+  });
+}
+document.addEventListener('DOMContentLoaded', vabotMenuDort);
+setTimeout(vabotMenuDort, 1200);
+
 // === THEME (dark / light / obsidian / violet / gold) ===
 var VABOT_DARK_VARIANTS = ['obsidian','violet','gold'];
 function _vabotThemeLabel(t){
@@ -37118,6 +37155,15 @@ def _render_jbanalyse_html() -> str:
     css = """
 <style>
 #ja-root{max-width:1180px}
+/* --- Entrees de menu en sommeil --------------------------------------
+   Elles ne sont pas RETIREES : les routes vivent toujours, et une section
+   qu'on croit morte se rouvre parfois. Elles sont juste rendues discretes,
+   pour que le menu dise ce qui sert aujourd'hui. Un clic les ouvre
+   normalement. */
+.menu-dort{opacity:.42}
+.menu-dort:hover{opacity:.72}
+.menu-cadenas{font-size:9px;margin-left:6px;opacity:.85;flex:none}
+.menu-dort .badge{display:none}
 /* --- Perimetre du scrape ---------------------------------------------- */
 .sv-box{background:#0f0f13;border:1px solid #1d2027;border-radius:12px;
   padding:11px 14px;margin:-4px 0 16px}
