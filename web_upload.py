@@ -3103,6 +3103,39 @@ function comingSoon(){
   showToast('🚧 Pas encore implémenté — viendra bientôt', 'warning');
 }
 // === SIDEBAR RAIL (menu réduit en icônes avec flyouts) ===
+// === UNE INFOBULLE SUR CHAQUE ENTREE DU MENU ===
+// Menu reduit en rail : le libelle est masque (html.rail .label{display:none})
+// et seuls les groupes qui ONT un sous-menu montrent un flyout au survol. Les
+// autres -- Remote, Remote 2, Sessions -- et toutes les entrees solo sont donc
+// des icones MUETTES : ni libelle, ni flyout, ni infobulle. Mesure du
+// 12/09/2026 : zero infobulle sur les 81 entrees du menu.
+//
+// On les pose ICI plutot que dans les 81 balises : une entree ajoutee demain
+// en herite sans que personne y pense, et le libelle reste la SEULE source du
+// texte -- deux endroits a tenir finiraient par diverger.
+function vabotInfobulles(){
+  var sel = ".sidebar .group-head, .sidebar .solo-item, .sidebar .items .item";
+  var n = 0;
+  Array.prototype.forEach.call(document.querySelectorAll(sel), function(b){
+    if(b.getAttribute("title")) return;
+    var l = b.querySelector(".label");
+    var t = (l ? l.textContent : b.textContent) || "";
+    // Pas de regex : une classe de caracteres contient un antislash, et un
+    // antislash dans ce fichier est relu par Python, pas par le navigateur.
+    t = t.split(String.fromCharCode(10)).join(" ");
+    t = t.split(String.fromCharCode(9)).join(" ");
+    t = t.split(" ").filter(function(x){ return x; }).join(" ");
+    if(t){ b.setAttribute("title", t); n++; }
+  });
+  return n;
+}
+document.addEventListener("DOMContentLoaded", vabotInfobulles);
+// Le menu se complete APRES le premier rendu : les onglets differes arrivent
+// en AJAX, et certaines entrees sont posees par du JavaScript. Un seul passage
+// au chargement en manquerait la moitie.
+setTimeout(vabotInfobulles, 1200);
+setTimeout(vabotInfobulles, 4000);
+
 function toggleSidebarRail(){
   var on = document.documentElement.classList.toggle('rail');
   try{ localStorage.setItem('vabot_rail', on ? '1' : '0'); }catch(e){}
