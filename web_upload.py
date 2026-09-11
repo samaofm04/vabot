@@ -15100,6 +15100,31 @@ def _suivi_bouton_html(ident: str) -> str:
         f"{'●' if on else '○'}</span>")
 
 
+def _scrape_ident_html(ident: str) -> str:
+    """« Scraper cette identité, maintenant » — un clic, toutes ses fiches.
+
+    Il existait deux gestes et pas celui-la : le gros bouton du haut, qui
+    prend tout le perimetre, et « ↻ Scraper ce bloc », qui prend UN VA.
+    Pour ne relancer qu'une creatrice, il fallait donc soit restreindre le
+    perimetre pour de bon, soit cliquer une fois par VA -- trois fois pour
+    Jessye, et en oublier un ne se voit pas.
+
+    Un <span role=button> et pas un <button> : la ligne entiere EST deja un
+    bouton (elle replie la section), et imbriquer deux boutons est invalide.
+    C'est la meme parade que l'interrupteur juste a cote.
+    """
+    n = str(ident or "").strip().lower()
+    if not n:
+        return ""
+    return (
+        f"<span class='jb-scrape-id' role='button' tabindex='0' "
+        f"data-ident='{html_escape(n)}' "
+        f"onclick='event.stopPropagation();jbScrapeIdent(this)' "
+        f"title=\"Scraper MAINTENANT tous les comptes de @{html_escape(n)}, "
+        f"tous VA confondus (bannis compris). Ne touche pas au périmètre.\">"
+        f"↻</span>")
+
+
 def _suivi_pastilles_html(identities) -> str:
     """Une pastille par identite : allumee = scrapee, eteinte = ignoree."""
     noms = sorted({str(x or "").strip().lower() for x in (identities or []) if str(x or "").strip()})
@@ -32530,6 +32555,7 @@ def _render_jailbreak_html() -> str:
                 # ici il est sur la ligne qu'on a sous les yeux. Les deux
                 # commandent le meme reglage.
                 f"{_suivi_bouton_html(ident_lc)}"
+                f"{_scrape_ident_html(ident_lc)}"
                 f"<span class='jb-side-id-count'>{n_vas_section}</span>"
                 f"<span class='jb-side-id-arrow'>"
                 f"<svg viewBox='0 0 24 24' width='11' height='11' fill='none' stroke='currentColor' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'>"
@@ -33834,6 +33860,29 @@ def _render_jailbreak_html() -> str:
         "  });"
         "}"
         # Affiche/alimente la barre de progression du scrape (done/total du state serveur)
+        "/* UN CLIC = UNE CREATRICE, TOUS VA CONFONDUS. La route accepte"
+        "   deja une identite sans VA ; il manquait juste le geste. */"
+        "function jbScrapeIdent(el){"
+        "  if(!el || el.dataset.busy === '1') return;"
+        "  var ident = el.dataset.ident || '';"
+        "  if(!ident) return;"
+        "  el.dataset.busy = '1'; el.classList.add('va');"
+        "  var fd = new FormData(); fd.append('identity', ident);"
+        "  fetch('/insta/refresh_now', {method:'POST', body:fd})"
+        "   .then(function(r){ return r.json(); }).then(function(d){"
+        "     el.dataset.busy = ''; el.classList.remove('va');"
+        "     if(d && d.ok){"
+        "       if(typeof showToast==='function') showToast("
+        "         '↻ Scrape de @' + ident + ' — ' + (d.handles||0) + ' compte(s)', 'success', 4000);"
+        "       jbPollScrape(null, null, null);"
+        "     } else if(typeof showToast==='function'){"
+        "       showToast('⚠ ' + ((d&&d.error)||'Erreur'), 'error', 3500);"
+        "     }"
+        "   }).catch(function(e){"
+        "     el.dataset.busy = ''; el.classList.remove('va');"
+        "     if(typeof showToast==='function') showToast('⚠ Réseau : ' + e, 'error', 3500);"
+        "   });"
+        "}"
         "function jbScrapeScope(btn, identity, va){"
         "  if(btn && btn.disabled) return;"
         "  if(btn){ btn.disabled=true; btn.textContent='◌ Scrape…'; }"
@@ -38052,6 +38101,14 @@ body.light .sv-pill.on{background:rgba(22,163,74,.12);
   align-items:center;justify-content:center;border-radius:50%;font-size:10px;
   cursor:pointer;color:#3f4653;background:rgba(255,255,255,.04)}
 .jb-suivi:hover{background:rgba(255,255,255,.10);color:#9aa1b0}
+.jb-scrape-id{display:inline-flex;align-items:center;justify-content:center;
+  width:19px;height:19px;border-radius:6px;font-size:11px;cursor:pointer;
+  color:#8b93a4;background:rgba(255,255,255,.05);flex-shrink:0;margin-left:2px;
+  transition:all .12s ease}
+.jb-scrape-id:hover{background:rgba(59,130,246,.18);color:#7aa2ff}
+.jb-scrape-id.va{animation:jbSpin 1s linear infinite;color:#7aa2ff}
+body.light .jb-scrape-id{color:#6b7280;background:#eceef2}
+body.light .jb-scrape-id:hover{background:rgba(59,130,246,.14);color:#1d4ed8}
 .jb-suivi.on{color:#22c55e;background:rgba(34,197,94,.12)}
 body.light .jb-suivi{color:#9ca3af;background:#f3f4f6}
 body.light .jb-suivi:hover{background:#e5e7eb;color:#4b5563}

@@ -6553,6 +6553,25 @@ try:
             if m not in _i18T.TRADUCTIONS]
     check("tri : chaque libelle du panneau a sa traduction",
           not _mqT, ", ".join(_mqT))
+    # UN CLIC = UNE CREATRICE. Il y avait le gros bouton (tout le perimetre)
+    # et « Scraper ce bloc » (UN VA) ; pour ne relancer que Jessye il fallait
+    # cliquer une fois par VA — trois fois — et en oublier un ne se voit pas.
+    check("scrape : la ligne d une identite porte son propre bouton",
+          "def _scrape_ident_html" in _srcT and "jb-scrape-id" in _srcT
+          and "_scrape_ident_html(ident_lc)" in _srcT)
+    check("scrape : il n imbrique pas un bouton dans un bouton",
+          "<span class='jb-scrape-id' role='button'" in _srcT,
+          "la ligne entiere est deja un <button>")
+    check("scrape : il envoie l identite SANS va (donc toutes ses fiches)",
+          "fd.append(\'identity\', ident);" in _srcT
+          and "function jbScrapeIdent(el){" in _srcT)
+    check("scrape : sa couleur a une version claire",
+          "body.light .jb-scrape-id{" in _srcT)
+    # La route accepte bien une identite seule.
+    _dRt = _srcT.index('@app.route("/insta/refresh_now"')
+    _fRt = _srcT.index("@app.route", _dRt + 40)
+    check("scrape : la route sait scraper une identite entiere",
+          "_jb_handles_for(ident_q, va_q)" in _srcT[_dRt:_fRt])
     # CE QUE L ENTREE PORTE, sous les yeux au moment de decider. Decider
     # « modele ou identite » de memoire, sur vingt-quatre entrees, personne
     # ne le fait.
