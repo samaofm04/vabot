@@ -184,9 +184,12 @@ class SessionsVoc(commands.Cog):
         import time as _tD
         jour, sid = session["jour"], session["id"]
         brut = sv.presences(jour, sid)
+        maintenant = _tD.time()
         gens = sorted(
             ({"id": k, "nom": v.get("nom") or k,
-              "secondes": int(v.get("secondes") or 0)} for k, v in brut.items()),
+              "secondes": int(v.get("secondes") or 0),
+              "premiere": v.get("premiere"), "derniere": v.get("derniere")}
+             for k, v in brut.items()),
             key=lambda g: -g["secondes"])
         seuil = sv.config()["presence_min_secondes"]
         presents = [g for g in gens if g["secondes"] >= seuil]
@@ -200,16 +203,21 @@ class SessionsVoc(commands.Cog):
         if presents:
             e.add_field(
                 name="Présents (%d)" % len(presents),
-                value="\n".join("• %s — %d min" % (g["nom"], g["secondes"] // 60)
+                value="\n".join(self._ligne_presence(g, maintenant, fige)
                                 for g in presents[:25])[:1020],
                 inline=False)
         else:
             e.add_field(name="Présents (0)", value="*personne pour l'instant*",
                         inline=False)
         if partiels:
+            # LE TEMPS AUSSI, ICI. Une liste de noms nus laisse croire que
+            # tous ont fait la meme chose : deux minutes et quarante secondes
+            # ne se valent pas, et c'est ce chiffre qui dit s'il faut leur en
+            # parler.
             e.add_field(
                 name="Passés vite (%d)" % len(partiels),
-                value=", ".join(g["nom"] for g in partiels[:25])[:1020],
+                value=", ".join("%s (%d min)" % (g["nom"], g["secondes"] // 60)
+                                for g in partiels[:25])[:1020],
                 inline=False)
         if fige:
             att = self._attendus_enrichis()
@@ -224,6 +232,45 @@ class SessionsVoc(commands.Cog):
             e.set_footer(text="Mis à jour toutes les %d min."
                               % sv.config()["maj_minutes"])
         return e
+
+    def _ligne_presence(self, g, maintenant: float, fige: bool = False) -> str:
+        """« Ana · arrivé 23:12 · 47 min » — et « parti 00:05 » s'il est sorti.
+
+        TROIS FAITS, PAS UN. Le pseudo seul ne dit pas si quelqu'un a fait
+        acte de presence ou s'il a tenu la session ; la duree seule ne dit pas
+        s'il etait la au debut ou s'il est arrive a la fin. Et sans l'heure de
+        SORTIE, un message fige laisserait croire que tout le monde etait
+        encore la quand il s'est arrete.
+
+        « Encore la » se lit sur le dernier relevé : le pointage passe chaque
+        minute, donc au-dela de deux minutes sans etre vu, la personne est
+        partie. On ne se fie pas a un evenement de deconnexion, qui se perd.
+        """
+        import datetime as _dL
+        tz = sv._tz()
+
+        def _h(ts):
+            try:
+                return _dL.datetime.fromtimestamp(float(ts), tz).strftime("%H:%M")
+            except (TypeError, ValueError):
+                return "?"
+
+        bouts = ["**%s**" % g["nom"]]
+        if g.get("premiere"):
+            bouts.append("arrivé %s" % _h(g["premiere"]))
+        minutes = int(g.get("secondes") or 0) // 60
+        bouts.append("%d min" % minutes if minutes < 60
+                     else "%d h %02d" % (minutes // 60, minutes % 60))
+        derniere = g.get("derniere")
+        try:
+            parti = derniere is not None and (maintenant - float(derniere)) > 120
+        except (TypeError, ValueError):
+            parti = False
+        if parti or fige:
+            bouts.append("parti %s" % _h(derniere))
+        else:
+            bouts.append("**encore là**")
+        return "• " + " · ".join(bouts)
 
     async def _direct(self):
         """Poser le message, le reecrire, puis le figer. Dans cet ordre.
