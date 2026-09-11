@@ -7468,6 +7468,17 @@ try:
           "instagram ne publie pas" in _bEx.lower(), _bEx[-90:])
 
     # Le calcul lui-meme, sur la liste BRUTE des posts.
+    # LE JOUR ATTENDU SE CALCULE AVEC LA MEME REGLE QUE LA FONCTION.
+    # _premier_post convertit l horodatage dans le fuseau qu on lui passe ; en
+    # lui passant None, elle rend le jour UTC. Le test comparait ce jour-la a
+    # date.today(), qui est le jour LOCAL : les deux ne coincident pas entre
+    # minuit et deux heures a Paris -- c est-a-dire pile aux heures ou le
+    # proprietaire travaille, et une fois par nuit la suite devenait rouge
+    # sans qu aucun code n ait bouge. La production, elle, passe bien
+    # _tz_paris (web_upload.py:16265) : c etait le test qui melangeait deux
+    # horloges, pas la fonction.
+    _jourUtc = lambda _n: _dtVtk.datetime.fromtimestamp(
+        _nowAg - _n * 86400, _dtVtk.timezone.utc).date().isoformat()
     _f = _wAg._premier_post
     _pAg = lambda _n: {"taken_at": _nowAg - _n * 86400, "is_video": True}
     check("premier post : rien a partir de rien", _f([], {}, 0, None)[0] == "")
@@ -7475,7 +7486,7 @@ try:
     # LE point : post_days n enregistre QUE les posts de moins de 30 jours, donc
     # il ne pouvait structurellement pas remonter a un post de 200 jours.
     check("premier post : un post de 200 jours est bien remonte",
-          _j == _jourAg(200), f"{_j} au lieu de {_jourAg(200)}")
+          _j == _jourUtc(200), f"{_j} au lieu de {_jourUtc(200)}")
     check("premier post : feed complet (2 posts vus / 2 au total) -> exact", _e is True)
     check("premier post : feed partiel -> pas exact",
           _f([_pAg(40), _pAg(1)], {}, 214, None)[1] is False)
@@ -7489,7 +7500,7 @@ try:
     check("premier post : une date exacte connue ne se degrade jamais",
           _eS is True and _jS == "2026-01-02", f"{_jS} / {_eS}")
     check("premier post : un horodatage illisible est ignore, pas fatal",
-          _f([{"taken_at": "n importe quoi"}, _pAg(30)], {}, 1, None)[0] == _jourAg(30))
+          _f([{"taken_at": "n importe quoi"}, _pAg(30)], {}, 1, None)[0] == _jourUtc(30))
     check("premier post : l ancien champ, plus faible, sert de candidat",
           _f([_pAg(3)], {"premier_jour_connu": "2026-05-01"}, 99, None)[0] == "2026-05-01")
 except Exception as _eAg:
