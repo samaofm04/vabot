@@ -640,8 +640,56 @@ _API_OVERVIEW_TTL = 300  # 5 min
 #: de rendus d'une meme page sans figer une valeur incomplete.
 _API_PARTIEL_TTL = 45
 
+#: SERVIR D ABORD, RAFRAICHIR ENSUITE.
+#:
+#: Un agregat coute une trentaine d appels HTTP -- un par creatrice, jusqu a
+#: trente secondes chacun au pire. Tant que le cache etait frais, la page
+#: sortait en quelques millisecondes ; des qu il expirait, le clic suivant
+#: repayait la note entiere, et le proprietaire voyait son tableau de bord
+#: « toujours en train de calculer ». Cinq periodes, cinq caches : la
+#: probabilite de tomber sur une expiration etait forte.
+#:
+#: On rend desormais la valeur perimee TOUT DE SUITE, et on lance le calcul
+#: en tache de fond. La page est instantanee des le deuxieme affichage, les
+#: chiffres ont au pire quelques minutes -- l ecran le dit -- et le nombre
+#: d appels reste le meme qu avant : un rafraichissement par fenetre de TTL,
+#: jamais deux en parallele sur la meme periode.
+_API_OVERVIEW_EN_COURS: set = set()
+_API_OVERVIEW_LOCK = _th.Lock()
+#: Au-dela, une valeur perimee n est plus resservie : mieux vaut attendre que
+#: de montrer les revenus d il y a une heure.
+_API_OVERVIEW_PERIME_MAX = 3600
+
 # OnlyFans marché US (ids MyPuls). Le reste des comptes OnlyFans = marché FR.
 OF_US_CREATOR_IDS = {3107, 3108}   # Jessye, Khloe
+
+
+def _relancer_overview(key, date_from, date_to, eur_usd, exclude):
+    """Recalcule un agregat perime en tache de fond, une seule fois a la fois.
+
+    Le verrou n'est pas une precaution theorique : cinq onglets ouverts sur la
+    meme periode lanceraient cinq fois trente requetes sur la meme minute, ce
+    qui est exactement la rafale que MyPuls repond par des 429.
+    """
+    with _API_OVERVIEW_LOCK:
+        if key in _API_OVERVIEW_EN_COURS:
+            return
+        _API_OVERVIEW_EN_COURS.add(key)
+
+    def _tourner():
+        try:
+            api_overview(date_from, date_to, eur_usd, force=True, exclude=exclude)
+        except Exception:
+            pass
+        finally:
+            with _API_OVERVIEW_LOCK:
+                _API_OVERVIEW_EN_COURS.discard(key)
+
+    try:
+        _th.Thread(target=_tourner, name="mypuls-overview", daemon=True).start()
+    except Exception:
+        with _API_OVERVIEW_LOCK:
+            _API_OVERVIEW_EN_COURS.discard(key)
 
 
 def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
@@ -663,7 +711,12 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
                 if (hit[1].get("errors") or hit[1].get("stale"))
                 else _API_OVERVIEW_TTL)
         if _age < _ttl:
-            return hit[1]
+            return dict(hit[1], age_s=int(_age))
+        # PERIME MAIS EXPLOITABLE : on le rend tel quel, et on recalcule
+        # derriere. L appelant n attend rien ; l ecran affiche l age.
+        if _age < _API_OVERVIEW_PERIME_MAX:
+            _relancer_overview(key, date_from, date_to, eur_usd, exclude)
+            return dict(hit[1], age_s=int(_age), rafraichissement=True)
     if not api_configured():
         return {"ok": False, "error": "Token API MyPuls absent"}
     creators = api_creators_cached(force=force)

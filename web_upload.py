@@ -26635,6 +26635,12 @@ body.light .home-period-row{background:#fff;border-color:rgba(60,60,67,.12)}
 .home-stat-icon{position:absolute;top:18px;right:18px;width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center}
 .home-stat-value{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.1}
 .home-stat-label{font-size:12px;color:#888;margin-top:5px;font-weight:500}
+/* Depuis quand le releve date. Sa couleur a une contrepartie claire : sur le
+   fond creme du theme Claude, le gris ardoise du theme sombre tombe a 2,56 de
+   contraste -- illisible, et c'est le genre de detail qu'on ne voit jamais
+   parce qu'on relit rarement une page dans les deux themes. */
+.home-fresh-chip{margin-left:6px;background:rgba(148,163,184,.14);color:#8b98ab}
+body.light .home-fresh-chip{background:rgba(71,85,105,.10);color:#475569}
 .home-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
 @media(max-width:768px){.home-row{grid-template-columns:1fr}}
 .home-card{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:18px 20px}
@@ -26738,6 +26744,8 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
     # et elle renvoie déjà du NET (aucune déduction à appliquer). Si elle répond,
     # elle remplace entièrement les chiffres issus du scraping.
     _api_src = False
+    _age_releve = 0
+    _en_rafraichissement = False
     _types_brut = {}          # brut par type (rempli seulement en source API)
     # L ARGENT QU AUCUNE CARTE NE RECONNAIT. api_overview le calcule depuis
     # toujours, AVEC les libelles en clair, et son commentaire dit : « tant
@@ -26755,6 +26763,11 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
             if _ov.get("ok"):
                 type_totals = {k: float(_ov["types"].get(k, 0.0)) for k in type_totals}
                 _hors_cat = _ov.get("types_hors") or {"montant": 0.0, "libelles": []}
+                # Age du releve : la page est instantanee parce qu elle peut
+                # servir un agregat perime pendant qu il se recalcule. Le dire
+                # est la contrepartie honnete de cette rapidite.
+                _age_releve = int(_ov.get("age_s") or 0)
+                _en_rafraichissement = bool(_ov.get("rafraichissement"))
                 _seg = {k: float(_ov["segments"].get(k, 0.0)) for k in _seg}
                 _total_usd = float(_ov.get("total_usd") or 0) + _manual_usd
                 _of_unknown = set()      # l'API donne la plateforme : plus d'inconnue
@@ -26821,6 +26834,22 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
            if _of_unknown else "")
     )
 
+    def _chip_fraicheur(age_s, en_cours):
+        """Depuis quand ces chiffres datent. Rien a afficher s'ils sont frais.
+
+        Le tableau de bord sert volontairement un relevé périmé pendant qu'il
+        se recalcule — c'est ce qui le rend instantané. Taire l'âge
+        reviendrait à faire passer un chiffre de dix minutes pour du direct.
+        """
+        if age_s < 90 and not en_cours:
+            return ""
+        _min = max(1, int(age_s // 60))
+        _txt = ("actualisation en cours…" if en_cours
+                else f"relevé d'il y a {_min} min")
+        return ("<small class='home-fresh-chip' title='Les chiffres sont "
+                "resservis pendant leur recalcul, pour que la page reste "
+                f"instantanée'>{_txt}</small>")
+
     _decalage = (_dt.datetime.now(_tz_maison) if _tz_maison
                  else _dt.datetime.now().astimezone()).strftime("%z") or "+0000"
 
@@ -26833,7 +26862,8 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
         # journees -- avant, elle disait celui du serveur (UTC), qui n etait
         # pas celui du calcul.
         f"<small title='Les journées sont découpées à cette heure-là'>UTC{_decalage[:3]}:{_decalage[3:]}</small>"
-        "</div>"
+        + _chip_fraicheur(_age_releve, _en_rafraichissement)
+        + "</div>"
         + f"<button id='fx-cur-toggle' data-rate='{_eur_usd}' onclick='fxToggleCur()' "
           f"title='Basculer entre dollars et euros' "
           f"style='margin-left:auto;margin-right:10px;padding:7px 13px;background:#161a26;border:1px solid #2a2a2a;"

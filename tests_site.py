@@ -6184,6 +6184,50 @@ try:
     check("revenus : « aujourd hui » se decoupe a Paris, pas au fuseau du serveur",
           'Europe/Paris' in _dash and "today = _dt.date.today()" not in _dash,
           "date.today() encore present" if "today = _dt.date.today()" in _dash else "")
+    # SERVIR D ABORD, RAFRAICHIR ENSUITE. Un agregat coute une trentaine
+    # d appels HTTP : quand le cache expirait, le clic suivant repayait la
+    # note entiere et la page « calculait » pendant des secondes.
+    import time as _tSw
+    _clesAv = dict(_mpR._API_OVERVIEW_CACHE)
+    _vraiCr = _mpR.api_creators_cached
+    _appels = []
+    try:
+        _mpR.api_creators_cached = lambda force=False: (_appels.append(1) or [])
+        _cle = "2026-01-01|2026-01-02|1.14|"
+        _vieux = {"ok": True, "total_usd": 42.0, "segments": {}, "types": {},
+                  "types_hors": {"montant": 0.0, "libelles": []},
+                  "creators": [], "errors": [], "stale": []}
+        # Une entree PERIMEE (10 min) mais exploitable.
+        _mpR._API_OVERVIEW_CACHE[_cle] = (_tSw.time() - 600, _vieux)
+        _vraiConf = _mpR.api_configured
+        _mpR.api_configured = lambda: True
+        _r = _mpR.api_overview("2026-01-01", "2026-01-02", 1.14)
+        check("perf : un releve perime est rendu TOUT DE SUITE",
+              _r.get("total_usd") == 42.0 and _r.get("rafraichissement") is True,
+              str({k: _r.get(k) for k in ("total_usd", "rafraichissement")}))
+        check("perf : la page sait depuis quand le releve date",
+              int(_r.get("age_s") or 0) >= 590, str(_r.get("age_s")))
+        # Et le rendu ne doit pas avoir attendu le recalcul.
+        _t0 = _tSw.time()
+        _mpR.api_overview("2026-01-01", "2026-01-02", 1.14)
+        check("perf : le deuxieme appel ne relance pas un second calcul",
+              (_tSw.time() - _t0) < 0.5)
+        # Trop vieux : on ne ressert plus, on recalcule pour de bon.
+        _mpR._API_OVERVIEW_CACHE[_cle] = (_tSw.time() - 7200, _vieux)
+        _r2 = _mpR.api_overview("2026-01-01", "2026-01-02", 1.14)
+        check("perf : un releve d il y a deux heures n est PAS resservi",
+              not _r2.get("rafraichissement"), str(_r2)[:90])
+    finally:
+        _mpR.api_creators_cached = _vraiCr
+        try:
+            _mpR.api_configured = _vraiConf
+        except Exception:
+            pass
+        _mpR._API_OVERVIEW_CACHE.clear()
+        _mpR._API_OVERVIEW_CACHE.update(_clesAv)
+    check("perf : la fraicheur est dite a l ecran, pas tue",
+          "_chip_fraicheur" in _dash and "actualisation en cours" in _dash)
+
     check("revenus : l etiquette annonce le fuseau REELLEMENT utilise",
           "_decalage" in _dash and "now().astimezone().strftime" not in _dash)
 except Exception as _eR:
