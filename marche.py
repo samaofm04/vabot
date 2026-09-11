@@ -37,6 +37,17 @@ FR_DEFAUT = {"julia", "emma", "lola", "sarah", "amelia", "alicia"}
 #: dans mypuls.py. Ses revenus étaient donc rangés en « OnlyFans US » pendant
 #: que son drapeau disait FR — le proprietaire l'a releve le 12/09/2026.
 #:
+#: KHLOE N'EST PAS UNE IDENTITE DU SITE, et c'est voulu qu'elle soit quand
+#: meme ici. Elle existe cote REVENUS (MyPuls la connait, OF_US_CREATOR_IDS
+#: porte son identifiant) mais elle n'a pas de dossier ni de VA : le
+#: proprietaire l'a dit le 12/09/2026, « tant que j'ai pas donne de VA, il
+#: n'y a pas Khloe sur le site ». La ligne ne fait donc rien aujourd'hui --
+#: `de()` n'est jamais appelee sur un nom qui n'existe pas. Elle servira le
+#: jour ou elle sera creee, pour qu'elle ne parte pas en FR par accident.
+#:
+#: Ne pas lire cette liste comme « les identites qui existent » : c'est
+#: « celles qui, si elles existent, sont americaines ».
+#:
 #: Un choix pose dans « Modifier » l'emporte toujours sur cette liste.
 US_DEFAUT = {"jessye", "khloe"}
 
