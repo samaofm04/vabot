@@ -339,6 +339,172 @@ try:
 except Exception as _eA:
     check("portail VA : ajout testable", False, repr(_eA)[:160])
 
+# --- FAUX BANNIS : « je ne sais pas » ne doit jamais s ecrire « banni » ----
+try:
+    import web_upload as _wB
+    _vrai_pub = _wB._scrape_via_ig_public
+    _vrai_ver = _wB._verify_ig_profile_exists
+    _vrai_cache = _wB._load_insta_3_stats_cache
+    _vrai_put = _wB._cache_put_stats
+    _memB = {}
+    _wB._load_insta_3_stats_cache = lambda: dict(_memB)
+    _wB._cache_put_stats = lambda h, o: _memB.__setitem__(h, o)
+    # Le scrape echoue en annoncant « introuvable » : c est le chemin qui
+    # condamnait. Ce qui decide, c est la VERIFICATION qui suit.
+    _wB._scrape_via_ig_public = lambda h: {"error": "not found"}
+    import insta_scraper as _isB
+    _vrai_rapid = _isB.scrape_profile
+    _isB.scrape_profile = lambda h, limit=50: {"error": "not found"}
+
+    _appels = []
+
+    def _verdict(reponse_verif, handle):
+        def _v(h):
+            _appels.append(h)
+            return reponse_verif
+        _wB._verify_ig_profile_exists = _v
+        _memB.pop(handle, None)
+        del _appels[:]
+        return _wB._compute_insta_3_stats(handle, force=True)
+
+    _r = _verdict(False, "mortb")
+    check("faux bannis : page introuvable CONFIRMEE -> banni",
+          _r.get("banned") is True, str(_r.get("banned")))
+    _r = _verdict(None, "douteb")
+    check("faux bannis : verdict INDETERMINE -> PAS banni",
+          not _r.get("banned"), str(_r.get("error"))[:80])
+    check("faux bannis : l indetermine est marque « a verifier »",
+          _r.get("a_verifier") is True and _r.get("doutes") == 1, str(_r)[:120])
+    check("faux bannis : un seul passage = UNE seule question a Instagram",
+          len(_appels) == 1, "%d appels" % len(_appels))
+    _r = _verdict(True, "vivantb")
+    check("faux bannis : profil PROUVE vivant -> pas banni",
+          not _r.get("banned"))
+    # Le doute s accumule mais ne condamne JAMAIS, meme apres plusieurs fois.
+    _wB._verify_ig_profile_exists = lambda h: None
+    for _i in range(6):
+        _r = _wB._compute_insta_3_stats("douteb", force=True)
+    check("faux bannis : six doutes d affilee ne condamnent toujours pas",
+          not _r.get("banned") and _r.get("doutes") >= 6, str(_r.get("doutes")))
+    # Et un scrape qui reussit efface le doute.
+    _wB._scrape_via_ig_public = lambda h: {"followers": 10, "posts_count": 3, "items": []}
+    _r = _wB._compute_insta_3_stats("douteb", force=True)
+    check("faux bannis : un scrape reussi efface le doute",
+          not _r.get("a_verifier") and not _r.get("banned"), str(_r.get("a_verifier")))
+
+    # --- LA SOURCE : une requete anonyme ne condamne plus ------------------
+    class _Rep:
+        def __init__(self, code, corps="", js=None):
+            self.status_code = code
+            self.text = corps
+            self._js = js
+        def json(self):
+            if self._js is None:
+                raise ValueError("pas de json")
+            return self._js
+    # `requests` est importe DANS la fonction : c est donc le module lui-meme
+    # qu il faut detourner, pas un attribut de web_upload.
+    import requests as _rqB
+    _vrai_get = _rqB.get
+    class _FauxRq:
+        reponse = None
+    try:
+        _rqB.get = lambda url, headers=None, timeout=None, **k: _FauxRq.reponse
+        _wB._scrape_via_ig_public = _vrai_pub      # on teste la VRAIE fonction
+        _FauxRq.reponse = _Rep(404)
+        _r404 = _wB._scrape_via_ig_public("peuimporte")
+        check("source : un 404 anonyme ne pose PLUS le drapeau banni",
+              not _r404.get("banned") and "introuvable" in str(_r404.get("error")).lower(),
+              str(_r404)[:110])
+        _FauxRq.reponse = _Rep(200, corps="<html>mur de connexion</html>", js={"data": {}})
+        _r200 = _wB._scrape_via_ig_public("peuimporte")
+        check("source : un 200 sans profil ne pose PLUS le drapeau banni",
+              not _r200.get("banned"), str(_r200)[:110])
+        check("source : le corps recu est garde pour pouvoir trancher apres coup",
+              "mur de connexion" in str(_r200.get("error")), str(_r200)[:140])
+    finally:
+        _rqB.get = _vrai_get
+
+    # Le repli RapidAPI tourne maintenant sur « introuvable » : une deuxieme
+    # source qui rend le profil PROUVE que le compte est vivant.
+    _wB._scrape_via_ig_public = lambda h: {"error": "⊘ Compte introuvable (@x) — HTTP 404"}
+    _isB.scrape_profile = lambda h, limit=50: {"followers": 42, "posts_count": 7, "items": []}
+    _memB.pop("secours", None)
+    _rS = _wB._compute_insta_3_stats("secours", force=True)
+    check("source : le repli interroge RapidAPI meme sur un « introuvable »",
+          not _rS.get("banned") and (_rS.get("followers") == 42), str(_rS)[:110])
+
+    # --- LE CLIQUET : deux echecs d affilee n effacent plus rien ----------
+    _wB._scrape_via_ig_public = lambda h: {"followers": 1200, "posts_count": 30, "items": []}
+    _isB.scrape_profile = lambda h, limit=50: {"error": "quota"}
+    _memB.pop("cliquet", None)
+    _wB._compute_insta_3_stats("cliquet", force=True)
+    _memB["cliquet"]["reel_days"] = {"2026-09-10": 2}
+    _wB._scrape_via_ig_public = lambda h: {"error": "Instagram rate-limit (429)."}
+    _c1 = _wB._compute_insta_3_stats("cliquet", force=True)
+    _c2 = _wB._compute_insta_3_stats("cliquet", force=True)
+    _c3 = _wB._compute_insta_3_stats("cliquet", force=True)
+    check("cliquet : trois echecs d affilee gardent les abonnes",
+          _c3.get("followers") == 1200, str(_c3)[:110])
+    check("cliquet : ... et les journees de publication qui font la paie",
+          (_c3.get("reel_days") or {}).get("2026-09-10") == 2, str(_c3.get("reel_days")))
+    check("cliquet : la date du dernier BON releve ne glisse pas a chaque echec",
+          _c3.get("stale_since") == _c1.get("stale_since"),
+          "%s vs %s" % (_c1.get("stale_since"), _c3.get("stale_since")))
+    check("cliquet : le compte ne redevient pas « jamais vu vivant »",
+          not _c3.get("banned") and bool(_c2.get("followers")))
+
+    # --- COUPE-CIRCUIT DE LOT ---------------------------------------------
+    _vrai_calc = _wB._compute_insta_3_stats
+    _vrai_statut = _wB._set_refresh_status
+    _vrai_payload = _wB._jbanalyse_payload
+    try:
+        _wB._set_refresh_status = lambda **k: None
+        _wB._jbanalyse_payload = lambda *a, **k: None
+        _lot = ["lot%02d" % i for i in range(10)]
+        for _h in _lot:
+            _memB.pop(_h, None)
+        _wB._compute_insta_3_stats = lambda h, force=False: (
+            _memB.__setitem__(h, {"banned": True, "error": "⊘ introuvable", "scraped_at": 1})
+            or _memB[h])
+        _res = _wB._do_refresh(list(_lot), label="test")
+        _apres = [(_memB.get(h) or {}) for h in _lot]
+        check("coupe-circuit : un lot qui condamne tout le monde est annule",
+              all(not e.get("banned") for e in _apres), str(_apres[0])[:100])
+        check("coupe-circuit : les comptes annules passent en « a verifier »",
+              all(e.get("a_verifier") for e in _apres), str(_apres[0])[:100])
+        check("coupe-circuit : le resume dit combien de bans etaient NEUFS",
+              _res.get("bans_neufs") == 10, str(_res.get("bans_neufs")))
+        # Un seul ban dans un gros lot, lui, doit passer : c est la vie normale
+        # du parc, et l annuler rendrait l indicateur inutile.
+        _lot2 = ["net%02d" % i for i in range(10)]
+        for _h in _lot2:
+            _memB.pop(_h, None)
+        def _un_seul(h, force=False):
+            _memB[h] = ({"banned": True, "error": "⊘ introuvable", "scraped_at": 1}
+                        if h == "net00" else {"followers": 5, "scraped_at": 1})
+            return _memB[h]
+        _wB._compute_insta_3_stats = _un_seul
+        _wB._do_refresh(list(_lot2), label="test")
+        check("coupe-circuit : un ban isole dans un lot sain est CONSERVE",
+              (_memB.get("net00") or {}).get("banned") is True,
+              str(_memB.get("net00"))[:100])
+    finally:
+        _wB._compute_insta_3_stats = _vrai_calc
+        _wB._set_refresh_status = _vrai_statut
+        _wB._jbanalyse_payload = _vrai_payload
+except Exception as _eB:
+    check("faux bannis : testable", False, repr(_eB)[:200])
+finally:
+    try:
+        _wB._scrape_via_ig_public = _vrai_pub
+        _wB._verify_ig_profile_exists = _vrai_ver
+        _wB._load_insta_3_stats_cache = _vrai_cache
+        _wB._cache_put_stats = _vrai_put
+        _isB.scrape_profile = _vrai_rapid
+    except Exception:
+        pass
+
 check("suppression volontaire toujours appliquée",
       [x["username"] for x in st["lola"]["accounts"]] == ["u1"],
       [x["username"] for x in st["lola"]["accounts"]])

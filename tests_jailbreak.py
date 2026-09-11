@@ -1885,6 +1885,34 @@ try:
           _histo([20])["jours_quinzaine"] == 15)
     check("paie : une journee vaut 75 $ / 15 = 5 $",
           abs(_histo([20])["par_jour"] - 5.0) < 0.001)
+    # --- Un doute d Instagram ne se facture pas au VA -------------------------
+    try:
+        import jb_objectifs as _oD
+        import time as _tD_t, datetime as _tD_dt
+        _tD = _tD_t.time()
+        _vieux = _tD_dt.datetime.fromtimestamp(_tD - 5 * 86400, _tD_dt.timezone.utc).isoformat()
+        _cD = [{"username": "doute1"}]
+        _sD = {"doute1": {"error": "IG n a pas repondu", "a_verifier": True,
+                          "doutes": 2, "last_reel_at": _vieux}}
+        _eD = _oD.etat_compte(_cD[0], _sD, _tD, _oD._jour_paris(_tD), 48 * 3600, 3)
+        check("doute : un compte « a verifier » n est PAS un oubli",
+              not _eD["oublie"] and _eD["non_mesure"] and not _eD["banni"], str(_eD)[:120])
+        # Mais s il a poste il y a deux heures, le doute ne l efface pas :
+        # le dernier bon releve dit qu il tourne.
+        _frais = _tD_dt.datetime.fromtimestamp(_tD - 7200, _tD_dt.timezone.utc).isoformat()
+        _sD["doute1"]["last_reel_at"] = _frais
+        _eD2 = _oD.etat_compte(_cD[0], _sD, _tD, _oD._jour_paris(_tD), 48 * 3600, 3)
+        check("doute : un compte qui a publie recemment reste actif malgre le doute",
+              _eD2["actif"] and not _eD2["non_mesure"], str(_eD2)[:120])
+        # Et un compte normal, silencieux, reste bien un oubli : la nouvelle
+        # regle ne doit pas amnistier tout le monde.
+        _sN = {"doute1": {"last_reel_at": _vieux}}
+        _eN = _oD.etat_compte(_cD[0], _sN, _tD, _oD._jour_paris(_tD), 48 * 3600, 3)
+        check("doute : un silence SANS doute reste un oubli",
+              _eN["oublie"] and not _eN["non_mesure"], str(_eN)[:120])
+    except Exception as _eDx:
+        check("doute : testable", False, repr(_eDx)[:200])
+
     # LA REGLE DU PROPRIETAIRE, mot pour mot : cinq comptes sur vingt, c'est
     # un quart de la journee.
     _q = _histo([5])

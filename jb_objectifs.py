@@ -321,7 +321,17 @@ def etat_compte(compte: dict, stats: dict, maintenant: float,
     # tombe a zero. Personne n'a rien fait de mal : on a arrete de regarder.
     #
     # Un compte non mesure n'est ni actif, ni oublie. Il sort du calcul.
-    non_mesure = (not banni) and (not suivi)
+    #
+    # LE DOUTE COMPTE COMME UNE ABSENCE DE MESURE, PAS COMME UN OUBLI.
+    # Quand Instagram refuse de trancher sur un compte (429, mur de connexion),
+    # sa date de dernier post cesse d'avancer. Passe le seuil de silence il
+    # basculait en « oublie » — un mot qui accuse le VA — et lui coutait sa
+    # journee, alors que c'est NOUS qui n'avons pas pu regarder. S'il a publie
+    # recemment d'apres le dernier bon releve, il reste actif ; sinon on ne
+    # sait pas, et « on ne sait pas » ne se facture a personne.
+    doute = bool(s.get("a_verifier"))
+    non_mesure = (not banni) and ((not suivi)
+                                  or (doute and not recent and not en_warmup))
     if non_mesure:
         actif = False
         oublie = False

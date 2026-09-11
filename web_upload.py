@@ -14918,6 +14918,15 @@ def _do_refresh(handles: list, label: str = "manual") -> dict:
         print(f"[insta-refresh:{label}] starting parallel for {total} handles", flush=True)
         ok = banned = err = 0
         done = 0
+        # Qui etait DEJA banni avant ce passage. Sans cette photo, impossible
+        # de distinguer « vingt bannis dans le lot » (normal, ils le sont
+        # depuis des semaines) de « vingt comptes condamnes a l instant »
+        # (anormal, et c est exactement ce qu on cherche a rattraper).
+        try:
+            _deja_bannis = _banned_handles()
+        except Exception:
+            _deja_bannis = set()
+        _neufs = []
         fails = []            # [{handle, why}] -> pourquoi chaque compte a échoué
         _last_write = [0.0]   # throttle : 1 écriture/s max (sinon 695 écritures disque)
         def _scrape_one(h):
@@ -14934,6 +14943,8 @@ def _do_refresh(handles: list, label: str = "manual") -> dict:
                     fails.append({"handle": h, "why": f"{type(exc).__name__}: {exc}"[:160]})
                 elif res.get("banned"):
                     banned += 1
+                    if (h or "").strip().lower() not in _deja_bannis:
+                        _neufs.append(h)
                 elif res.get("error"):
                     err += 1
                     fails.append({"handle": h, "why": str(res.get("error"))[:160]})
@@ -14950,6 +14961,40 @@ def _do_refresh(handles: list, label: str = "manual") -> dict:
                                             in_progress_fails=fails[-25:])
                     except Exception:
                         pass
+        # ── COUPE-CIRCUIT DE LOT ────────────────────────────────────────
+        # Des comptes meurent un par un, pas par paquets de trente le meme
+        # matin. Quand un passage condamne une part invraisemblable du parc,
+        # l explication est du cote d Instagram (adresse filtree, mur de
+        # connexion, panne d endpoint), jamais du cote des comptes. Ce lot est
+        # donc annule EN BLOC et repasse en « a verifier ».
+        #
+        # Pourquoi ca compte plus qu une pastille : la regle de l agence
+        # autorise a detruire le conteneur Crane d un compte mort. Un
+        # verdict de masse errone coute du materiel, pas un chiffre.
+        _seuil_lot = max(3, int(total * 0.20))
+        if len(_neufs) > _seuil_lot:
+            _annules = 0
+            for _hn in _neufs:
+                try:
+                    _e = dict((_load_insta_3_stats_cache().get(_hn) or {}))
+                    if not _e.get("banned"):
+                        continue
+                    _e["banned"] = False
+                    _e["a_verifier"] = True
+                    _e["doutes"] = int(_e.get("doutes") or 0) + 1
+                    _e["error"] = ("❓ Verdict annulé : ce passage a condamné "
+                                   f"{len(_neufs)} comptes d'un coup ({total} scannés) — "
+                                   "c'est Instagram qui n'a pas répondu, pas les comptes. "
+                                   "À vérifier à la main.")
+                    _cache_put_stats(_hn, _e)
+                    _annules += 1
+                except Exception:
+                    pass
+            print(f"[insta-refresh:{label}] COUPE-CIRCUIT : {_annules} ban(s) "
+                  f"annule(s) sur {total} comptes — trop de condamnations d un coup",
+                  flush=True)
+            banned -= _annules
+            err += _annules
         dt_s = _t_dr.time() - t0
         # Regroupe les motifs d'échec (quota, session, profil introuvable…) pour
         # afficher « pourquoi » au lieu d'un simple compteur.
@@ -14959,6 +15004,7 @@ def _do_refresh(handles: list, label: str = "manual") -> dict:
             by_reason[key] = by_reason.get(key, 0) + 1
         summary = {
             "ok": ok, "banned": banned, "err": err,
+            "bans_neufs": len(_neufs),
             "duration_s": round(dt_s, 1), "total": total, "label": label,
             "finished_at": int(_t_dr.time()),
             "fails": fails[:100],
@@ -15077,7 +15123,16 @@ def _run_daily_insta_refresh():
     # l apprendre deux fois par mois.
     _suivies = identites_suivies()
     _restreint = not ((_suivies is _TOUTES_IDENTITES) or ("*" in _suivies))
-    if _restreint or day in (1, 15):
+    # ET MEME SANS PERIMETRE RESTREINT : UNE FOIS PAR JOUR, PAS DEUX FOIS PAR
+    # MOIS. Un drapeau « banni » pose par erreur ne pouvait se lever qu au 1er
+    # ou au 15 — jusqu a quinze jours pendant lesquels le compte sort de la
+    # paie du VA et figure sur la liste des conteneurs a recycler. Le
+    # re-controle se fait donc au premier passage de la journee : un sixieme
+    # du cout de l ancienne regle « tout, tout le temps », et l erreur ne dure
+    # plus qu une journee.
+    _heures = sorted(_INSTA_REFRESH_HOURS or [0])
+    _premiere_du_jour = _dt_dr.datetime.now().hour <= (_heures[0] + 1)
+    if _restreint or _premiere_du_jour or day in (1, 15):
         return _do_refresh(handles, label=("daily+bannis" if _restreint
                                            else "daily+bannis"))
     banned = _banned_handles()
@@ -15085,7 +15140,7 @@ def _run_daily_insta_refresh():
     skipped = len(handles) - len(todo)
     if skipped:
         print(f"[insta-refresh:daily] {skipped} compte(s) banni(s) ignoré(s) "
-              f"(re-vérifiés le 1er et le 15)", flush=True)
+              f"(re-vérifiés au premier passage de la journée)", flush=True)
     return _do_refresh(todo, label="daily")
 
 
@@ -15417,7 +15472,24 @@ def _scrape_via_ig_public(handle: str) -> dict:
     if r is None:
         return {"error": "reseau IG public: pas de reponse"}
     if r.status_code == 404:
-        return {"error": f"⊘ Compte banni ou supprimé (@{handle})", "banned": True}
+        # UNE REQUETE ANONYME NE CONDAMNE PLUS UN COMPTE.
+        #
+        # C'etait LA source des faux bannis, et elle sautait tous les
+        # garde-fous d'un coup : poser « banned » ici coupe le repli RapidAPI
+        # (`... and not res.get("banned")`) ET les deux verifications
+        # d'existence (`if not is_banned`). Un compte vivant etait donc
+        # condamne sur UN appel sans cookie ni cle, depuis une IP dont ce
+        # fichier documente lui-meme qu'Instagram la filtre (« six sondes sur
+        # six ont rendu 429 depuis le VPS »).
+        #
+        # Ce que rend vraiment un 404 sur cet endpoint : un compte supprime,
+        # mais aussi un compte renomme, un profil qu'Instagram reserve aux
+        # connectes, ou un simple refus de servir une adresse de datacentre.
+        #
+        # On dit donc « introuvable » — le mot est dans `_gone`, la suite de
+        # la chaine le reconnait, interroge RapidAPI puis la page publique, et
+        # SEULE une page confirmee introuvable ecrira « banni ».
+        return {"error": f"⊘ Compte introuvable (@{handle}) — HTTP 404 sur l'API publique"}
     if r.status_code == 429:
         return {"error": "Instagram rate-limit (429). Réessaie dans qq minutes."}
     if r.status_code != 200:
@@ -15428,7 +15500,14 @@ def _scrape_via_ig_public(handle: str) -> dict:
         return {"error": "Reponse non-JSON"}
     user = (d.get("data") or {}).get("user") or {}
     if not user:
-        return {"error": f"⊘ Compte banni ou introuvable (@{handle})", "banned": True}
+        # MEME REGLE. Un 200 sans profil n'est pas un acte de deces : c'est
+        # aussi ce que rend un throttle doux, une page de consentement, un
+        # challenge, ou un profil qu'Instagram refuse de servir a un appelant
+        # anonyme. On garde un extrait du corps recu : sans lui, impossible de
+        # trancher apres coup sur ce qui s'est vraiment passe.
+        _apercu = " ".join((r.text or "")[:160].split())
+        return {"error": f"⊘ Compte introuvable (@{handle}) — réponse IG sans profil "
+                         f"(blocage probable) · {_apercu}"}
     profile = {
         "username": user.get("username") or handle,
         "full_name": user.get("full_name") or "",
@@ -15523,8 +15602,13 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
         return cached
     # 1) Public IG d abord
     res = _scrape_via_ig_public(h)
-    # 2) Fallback RapidAPI si l API publique echoue (sauf si banned : pas la
-    #    peine de re-tenter, le compte n existe pas)
+    # 2) Repli RapidAPI si l API publique echoue.
+    #    IL TOURNE MAINTENANT SUR « INTROUVABLE » AUSSI. Avant, le drapeau
+    #    `banned` pose par l API publique coupait cette ligne : la deuxieme
+    #    source n etait jamais interrogee sur les comptes qu on s appretait a
+    #    condamner -- c est-a-dire exactement ceux ou une contre-verification
+    #    valait quelque chose. Une seconde source qui rend le profil PROUVE
+    #    que le compte est vivant.
     if "error" in res and not res.get("banned"):
         try:
             import insta_scraper as _ig_s
@@ -15539,6 +15623,25 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
     if "error" in res:
         err_msg = res["error"]
         is_banned = bool(res.get("banned"))
+        # Combien de fois d'affilee Instagram a refuse de trancher sur ce
+        # compte. Remis a zero des qu'un scrape reussit (le chemin de succes
+        # reconstruit l'entree sans ce champ). Sert a montrer « a verifier »
+        # plutot qu'a condamner : aucun seuil ne declenche un ban.
+        _doutes = int((cached or {}).get("doutes") or 0) if isinstance(cached, dict) else 0
+        # UN PASSAGE NE COMPTE QU'UN SEUL DOUTE, et ne pose qu'UNE SEULE
+        # question a Instagram. Les deux controles ci-dessous (« handle
+        # introuvable » puis « jamais vu vivant ») se declenchent tous les deux
+        # sur le meme compte au meme tour : le compteur affichait « 2 fois de
+        # suite » des la premiere mauvaise journee, et surtout on interrogeait
+        # deux fois de suite l'endpoint qui nous limite deja. Plus on demande,
+        # plus on se fait limiter, plus on doute : exactement la spirale qui a
+        # fait apparaitre les faux bannis.
+        _reponse_ig = {}
+        def _existe_ig():
+            if "r" not in _reponse_ig:
+                _reponse_ig["r"] = _verify_ig_profile_exists(h)
+            return _reponse_ig["r"]
+        _indetermine = False
         # Handle qui n'existe plus (RENOMMÉ, supprimé ou banni) -> on vérifie en HTTP
         # direct puis on le compte comme BANNI (pas comme une simple erreur) : un compte
         # renommé est perdu pour nous, il doit sortir des comptes actifs.
@@ -15546,14 +15649,31 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
                  "does not exist", "profilenotexists", "supprimé", "user not found")
         _lm = err_msg.lower()
         if not is_banned and any(m in _lm for m in _gone):
-            exists = _verify_ig_profile_exists(h)
+            exists = _existe_ig()
             if exists is True:
                 err_msg = f"Compte @{h} existe mais RapidAPI ne l'indexe pas (trop nouveau / petit)."
-            else:
-                # False = confirmé. None = indéterminé, MAIS l'API dit déjà
-                # « introuvable » : dans la vraie vie c'est un ban -> on classe banni.
+            elif exists is False:
+                # PAGE INTROUVABLE CONFIRMEE. C'est le seul cas qui condamne.
                 err_msg = f"⊘ Compte introuvable (@{h}) — banni (ou supprimé/renommé)"
                 is_banned = True
+            else:
+                # « JE NE SAIS PAS » NE S'ECRIT PLUS « BANNI ».
+                #
+                # _verify_ig_profile_exists rend None sur un 429, un mur de
+                # connexion (que Instagram sert souvent en code 200), un
+                # timeout, ou une page sans donnees. Le code en concluait au
+                # ban, en assumant que « dans la vraie vie c'en est un ». C'est
+                # faux, et ca l'est devenu massivement depuis le passage a six
+                # scrapes par jour sur neuf cents comptes : plus on sollicite
+                # Instagram, plus il limite, plus on condamne des comptes
+                # vivants. Le proprietaire ne pouvait plus se fier a l'ecran.
+                #
+                # Un vrai compte mort finit par rendre un 404 ou la page
+                # « cette page n'est pas disponible » : il sera condamne au
+                # passage suivant. Le doute, lui, ne coute qu'un jour.
+                _indetermine = True
+                err_msg = (f"❓ Compte @{h} : Instagram n'a pas repondu clairement "
+                           f"({_doutes + 1} fois de suite) — NI vivant NI banni, a verifier")
         # « Échec » générique sur un compte qui n'a JAMAIS donné de stats : c'est
         # très souvent un compte banni que l'erreur empêche de classifier. On
         # vérifie son existence (max 1x/20h par compte) : page « introuvable »
@@ -15565,27 +15685,74 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
             _last_chk = int(_prev.get("exist_check_ts") or 0)
             if _never_ok and (now_ts - _last_chk) > 20 * 3600:
                 _chk_ts = now_ts
-                _lm2 = str(err_msg).lower()
-                _transient = any(k in _lm2 for k in
-                                 ("429", "quota", "rate", "timeout", "réseau", "reseau", "network"))
-                _ex = _verify_ig_profile_exists(h)
-                # Compte JAMAIS vu vivant + erreur non transitoire + pas de preuve
-                # d'existence -> banni (l'expérience : ces « Échec » sont des bans).
-                if _ex is False or (_ex is None and not _transient):
+                _ex = _existe_ig()
+                # MEME REGLE ICI : seule une page introuvable CONFIRMEE
+                # condamne. Le « _ex is None and not _transient » d'avant
+                # reposait sur le message d'erreur pour deviner si la panne
+                # etait passagere — or un mur de connexion d'Instagram ne dit
+                # ni « 429 » ni « timeout », il rend une page en 200. Des
+                # comptes neufs, jamais encore indexes, tombaient donc
+                # directement en « banni » des leur premiere mauvaise journee.
+                if _ex is False:
                     is_banned = True
                     err_msg = f"⊘ Compte introuvable (@{h}) — banni ou supprimé (vérifié)"
+                elif _ex is None:
+                    _indetermine = True
+                    err_msg = (f"❓ Compte @{h} : Instagram n'a pas repondu clairement "
+                               f"({_doutes + 1} fois de suite) — a verifier a la main")
             else:
                 _chk_ts = _last_chk
         # On CONSERVE les données du dernier bon scrape (abonnés, vues, PP,
         # post_days/reel_days) : une erreur passagère effaçait tout l'historique,
         # ce qui faisait ensuite considérer le compte comme « jamais vu vivant »
         # (donc banni à tort) et inventait des oublis dans la paie.
-        _prev_ok = cached if (isinstance(cached, dict) and cached and not cached.get("error")) else {}
+        # LE CLIQUET, ET POURQUOI IL FABRIQUAIT DES BANNIS.
+        #
+        # Cette ligne ne gardait les donnees que si l entree precedente etait
+        # PARFAITE. Au premier echec on conservait tout ; au DEUXIEME echec
+        # d affilee, l entree portait deja `error`, la condition tombait, et
+        # l historique du compte etait efface : abonnes, apercu, post_days et
+        # reel_days — c est-a-dire les journees de publication sur lesquelles
+        # la paie des VA est calculee.
+        #
+        # Et l effacement se retournait contre le compte : `_never_ok` se lit
+        # sur ces memes champs. Un compte vide devient « jamais vu vivant »,
+        # donc eligible a la branche qui condamne. Deux mauvaises journees
+        # d Instagram suffisaient a transformer un compte actif depuis des
+        # mois en candidat au ban, avec sa paie remise a zero au passage.
+        #
+        # On garde donc le dernier bon releve TANT QU IL PORTE DES DONNEES,
+        # meme a travers une suite d echecs — en laissant tomber les champs de
+        # verdict, qui doivent etre recalcules a chaque passage.
+        _JUGEMENTS = ("error", "banned", "a_verifier", "doutes", "stale",
+                      "stale_since", "scraped_at")
+        _prev_ok, _depuis = {}, None
+        if isinstance(cached, dict) and cached:
+            if not cached.get("error"):
+                _prev_ok = cached
+                _depuis = cached.get("scraped_at")
+            elif any(cached.get(k) for k in
+                     ("followers", "posts_count", "preview", "reel_days", "post_days")):
+                _prev_ok = {k: v for k, v in cached.items() if k not in _JUGEMENTS}
+                # La date affichee reste celle du dernier VRAI releve, pas
+                # celle du dernier echec.
+                _depuis = cached.get("stale_since") or cached.get("scraped_at")
         out = dict(_prev_ok)
         out.update({"error": err_msg, "banned": is_banned, "scraped_at": now_ts})
+        # « A VERIFIER » EST UN ETAT A PART, ni vivant ni mort. Il dit au
+        # proprietaire quoi regarder a la main, sans qu'un conteneur soit
+        # detruit sur la foi d'un doute.
+        if _indetermine:
+            _doutes += 1
+        if _doutes and not is_banned:
+            out["doutes"] = _doutes
+            out["a_verifier"] = True
+        else:
+            out.pop("doutes", None)
+            out.pop("a_verifier", None)
         if _prev_ok:
             out["stale"] = True
-            out["stale_since"] = _prev_ok.get("scraped_at")
+            out["stale_since"] = _depuis or _prev_ok.get("scraped_at")
         if _chk_ts:
             out["exist_check_ts"] = _chk_ts
         _cache_put_stats(h, out)
@@ -31050,6 +31217,12 @@ def _render_jailbreak_html() -> str:
         ".jb-row .va-ig3-row-lab,.jb-row .va-ig3-row-last-lab{display:none}"
         ".jb-stale-badge{display:inline-flex;align-items:center;gap:5px;background:rgba(251,146,60,.13);color:#fb923c;font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;border:1px solid rgba(251,146,60,.3);white-space:nowrap;flex-shrink:0}"
         ".jb-stale-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#fb923c;flex-shrink:0}"
+        # UN DOUTE N'EST PAS UN VERDICT. Ambre, entre le vert de l'actif et le
+        # rouge du banni : Instagram n'a pas repondu, le compte est peut-etre
+        # parfaitement vivant. Surtout, il ne faut PAS supprimer son conteneur
+        # sur la foi de cette pastille.
+        ".jb-doute-badge{display:inline-flex;align-items:center;gap:5px;background:rgba(245,158,11,.14);color:#fbbf24;font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;border:1px solid rgba(245,158,11,.32);white-space:nowrap;flex-shrink:0}"
+        "body.light .jb-doute-badge{color:#b45309}"
         ".jb-fail-badge{display:inline-flex;align-items:center;gap:5px;background:rgba(239,68,68,.13);color:#f87171;font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;border:1px solid rgba(239,68,68,.3);white-space:nowrap;flex-shrink:0}"
         ".jb-fail-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#ef4444;flex-shrink:0}"
         ".jb-row-not-scraped{opacity:.85;background:#0a0c11 !important}"
@@ -31254,6 +31427,15 @@ def _render_jailbreak_html() -> str:
             status_badge = f"<span class='va-ig3-ban-badge' title='{_why_ban}'>Banni</span>"
         elif is_not_scraped:
             status_badge = "<span class='jb-not-scraped-badge' title='Compte pas encore scrape (stats non disponibles)'>Non scrapé</span>"
+        elif s.get("a_verifier"):
+            # NI VIVANT NI BANNI. Instagram n'a pas tranche (429, mur de
+            # connexion, timeout) : on ne condamne pas, on demande un coup
+            # d'oeil a la main. Cette pastille remplace les faux « Banni » qui
+            # ont fait douter le proprietaire de tout son tableau.
+            _why_dt = html_escape(str(s.get("error") or "")[:140])
+            status_badge = (f"<span class='jb-doute-badge' title='{_why_dt} — "
+                            f"ne supprime PAS le conteneur sur cette seule pastille'>"
+                            f"À vérifier</span>")
         elif s.get("error"):
             # Scrape en échec : surtout PAS « Actif » (on n'a aucune donnée fraîche)
             _why_err = html_escape(str(s.get("error"))[:130])
@@ -37284,8 +37466,8 @@ body.light .jb-suivi.on{color:#16a34a;background:rgba(22,163,74,.12)}
     <select id="ja-scope" class="ja-refresh" style="padding:7px 10px" title="Limiter le scrape &agrave; une identit&eacute;">
       <option value="">Toutes les identit&eacute;s</option>
     </select>
-    <label class="ja-hint" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer" title="Saute les comptes bannis connus (&eacute;conomie de quota &mdash; ils restent v&eacute;rifi&eacute;s les 1er et 15)">
-      <input type="checkbox" id="ja-actifs" checked> actifs seulement
+    <label class="ja-hint" style="display:inline-flex;align-items:center;gap:5px;cursor:pointer" title="Saute les comptes marqu&eacute;s bannis. D&Eacute;COCH&Eacute; PAR D&Eacute;FAUT&nbsp;: un &laquo;&nbsp;banni&nbsp;&raquo; peut &ecirc;tre un compte vivant qu&rsquo;Instagram a refus&eacute; de servir ce jour-l&agrave;, et le sauter l&rsquo;emp&ecirc;che de revenir.">
+      <input type="checkbox" id="ja-actifs"> actifs seulement
     </label>
     <button class="ja-refresh" id="ja-scrape" onclick=jaScrape() title="Lance le scrape (m&ecirc;me quota que la page Jailbreak &mdash; les 2 pages partagent le M&Ecirc;ME cache)">&#128260; Scraper</button>
     <span class="ja-hint" id="ja-upd"></span>
@@ -52978,14 +53160,30 @@ def create_app():
                 # ferait croire demain qu on a regarde. Mesure du 05/09/2026 :
                 # six sondes sur six ont rendu 429 depuis le VPS -- son adresse
                 # est filtree par Instagram sur cet endpoint.
-                if "error" not in r or r.get("banned"):
+                # LA SONDE DU PARC N ECRIT PLUS DE VERDICT DANS LE CACHE.
+                # Elle ecrivait `cache[h] = r` en REMPLACANT l entree entiere,
+                # y compris quand r valait « banni » : une seule requete
+                # anonyme, depuis l adresse dont le commentaire ci-dessus dit
+                # qu Instagram la filtre, s ecrivait dans le fichier qui decide
+                # de la paie des VA et de la pastille « Banni ». Le docstring
+                # de cette route dit pourtant, en toutes lettres, que son
+                # verdict sert a TRIER et jamais a supprimer.
+                #
+                # Desormais : seul un profil VRAIMENT ramene entre dans le
+                # cache. Un « introuvable » repart au parc dans la reponse,
+                # comme indice de tri, sans rien graver.
+                if "error" not in r:
                     r["scraped_at"] = maintenant
                     cache[h] = r
                     c, frais = r, True
                 else:
                     echec = str(r.get("error") or "")
             if not c:
-                sortie[h] = {"connu": False, "echec": echec}
+                # « introuvable_sonde » : ce que la sonde a cru voir a
+                # l instant, sans deuxieme source ni contre-verification. A
+                # lire comme un ordre de passage, pas comme un acte de deces.
+                sortie[h] = {"connu": False, "echec": echec,
+                             "introuvable_sonde": "introuvable" in echec.lower()}
                 continue
             prof = (c.get("profile") or {}) if isinstance(c.get("profile"), dict) else c
             sortie[h] = {

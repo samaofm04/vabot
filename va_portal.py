@@ -731,6 +731,7 @@ input:focus,textarea:focus{outline:2px solid rgba(236,72,153,.35);outline-offset
 .badge.banni{background:rgba(220,38,38,.14);color:var(--rouge)}
 .badge.attente{background:rgba(120,130,150,.16);color:var(--doux)}
 .badge.echec{background:rgba(234,88,12,.14);color:var(--orange)}
+.badge.verif{background:rgba(245,158,11,.16);color:#b45309}
 .badge.dort{background:rgba(234,88,12,.16);color:var(--orange)}
 .num{text-align:right;font-weight:700;font-size:13px}
 .num.v{color:var(--vert)}
@@ -1160,6 +1161,12 @@ def _ligne_compte(a: dict, stats: dict, normaliser, base_pp: str = "") -> str:
         badge = "<span class='badge banni'>Banni</span>"
     elif jamais:
         badge = "<span class='badge attente'>Non scrapé</span>"
+    elif s.get("a_verifier"):
+        # Le VA doit savoir que ce compte n'est PAS condamne : Instagram n'a
+        # pas repondu, c'est tout. Sans ce mot, il lisait « Banni » et
+        # abandonnait un compte qui marchait.
+        badge = ("<span class='badge verif' title=\"Instagram n'a pas repondu clairement : "
+                 "ni actif ni banni. A verifier a la main.\">À vérifier</span>")
     elif s.get("error"):
         badge = "<span class='badge echec'>Échec</span>"
     else:
