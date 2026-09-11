@@ -6184,6 +6184,34 @@ try:
     check("revenus : « aujourd hui » se decoupe a Paris, pas au fuseau du serveur",
           'Europe/Paris' in _dash and "today = _dt.date.today()" not in _dash,
           "date.today() encore present" if "today = _dt.date.today()" in _dash else "")
+    # LA COURBE. Elle se sous-titrait avec la periode CLIQUEE alors qu elle
+    # elargit a sept jours quand la periode est trop courte : on cliquait
+    # « Aujourd hui » et on lisait une semaine sous ce mot.
+    _dS = _srcR.index("def _home_sales_svg")
+    _fS = _srcR.index(chr(10) + "def ", _dS + 40)
+    _svgSrc = _srcR[_dS:_fS]
+    check("courbe : le sous-titre dit ce qui est TRACE, pas ce qui est clique",
+          '_c_sous = ("7 derniers jours" if _c_elargie else period_label)' in _dash,
+          "sous-titre encore cale sur la periode" if "_c_sous = period_label" in _dash else "")
+    check("courbe : « quelle mesure » et « quelle devise » sont deux drapeaux",
+          "en_usd=None" in _svgSrc and "_usd = api_src if en_usd is None" in _svgSrc)
+    check("courbe : plus aucun euro en dur dans le trace",
+          "if _usd else" in _svgSrc and "if api_src else f\"{gval:.0f}" not in _svgSrc)
+    check("courbe : le repli convertit au lieu d additionner des devises",
+          "_tx_usd(_txc.get(\"amount\", 0), _txc.get(\"currency\"))" in _dash)
+    check("courbe : le repli ecarte les memes modeles que le total",
+          "_model_match(_txc.get(\"creator\"), EXCLUDED_MODELS)" in _dash)
+    check("courbe : le repli garde son titre (ventes) sans se dire revenus",
+          "_chart_usd = bool(chart_labels)" in _dash and "_chart_api = True" not in _dash)
+    check("courbe : le sous-titre est scinde pour etre traduisible",
+          "<span>toutes créatrices</span>" in _svgSrc)
+    import i18n_en as _i18S
+    _manquants = [m for m in ("Revenus par jour", "Ventes par jour",
+                              "toutes créatrices", "7 derniers jours")
+                  if m not in _i18S.TRADUCTIONS]
+    check("courbe : chaque libelle de la courbe a sa traduction",
+          not _manquants, ", ".join(_manquants))
+
     # SERVIR D ABORD, RAFRAICHIR ENSUITE. Un agregat coute une trentaine
     # d appels HTTP : quand le cache expirait, le clic suivant repayait la
     # note entiere et la page « calculait » pendant des secondes.

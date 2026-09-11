@@ -26198,8 +26198,16 @@ def _render_depenses_html() -> str:
 
 
 def _home_sales_svg(labels, vals, eur_usd: float = 1.14, api_src: bool = False,
-                    vals_brut=None, periode: str = "") -> str:
+                    vals_brut=None, periode: str = "", en_usd=None) -> str:
     """Courbe revenus/ventes par jour en SVG PUR généré côté serveur.
+
+    DEUX DRAPEAUX, ET C'EST VOULU. `api_src` dit QUELLE MESURE on trace :
+    l'API rend le revenu total net (abonnements et posts compris), le
+    scraping les seules ventes chatting -- le titre change en consequence.
+    `en_usd` dit dans QUELLE DEVISE les valeurs arrivent deja. Les deux
+    etaient confondus dans un seul drapeau : convertir la voie de repli en
+    dollars l'aurait du meme coup rebaptisee « Revenus par jour », c'est-a-
+    dire menti sur ce qu'on regarde. Par defaut, `en_usd` suit `api_src`.
 
     Zéro dépendance (Chart.js pouvait être bloqué côté client -> carte vide),
     rendu instantané, tooltip au survol des points via le handler global .hsc-dot.
@@ -26209,6 +26217,8 @@ def _home_sales_svg(labels, vals, eur_usd: float = 1.14, api_src: bool = False,
     vals_brut : série BRUTE alignée sur labels -> un 2e SVG caché (#hsc-brut),
     le bouton Net/Brut bascule l'affichage entre les deux.
     """
+    _usd = api_src if en_usd is None else bool(en_usd)
+
     def _svg(serie, svg_id, hidden):
         W, H = 720.0, 240.0
         ml, mr, mt, mb = 46.0, 14.0, 14.0, 30.0
@@ -26243,8 +26253,8 @@ def _home_sales_svg(labels, vals, eur_usd: float = 1.14, api_src: bool = False,
         for k in range(5):
             gy = mt + ih * k / 4
             gval = ymax * (4 - k) / 4
-            ylab = f"${gval:.0f}" if api_src else f"{gval:.0f}€"
-            ydata = f" class='hsc-ylab' data-usd='{gval:.2f}'" if api_src else ""
+            ylab = f"${gval:.0f}" if _usd else f"{gval:.0f}€"
+            ydata = f" class='hsc-ylab' data-usd='{gval:.2f}'" if _usd else ""
             grid += (f"<line x1='{ml}' y1='{gy:.1f}' x2='{W - mr}' y2='{gy:.1f}' stroke='rgba(136,136,136,.14)' stroke-width='1'/>"
                      f"<text{ydata} x='{ml - 8}' y='{gy + 3.5:.1f}' text-anchor='end' font-size='10' fill='#888'>{ylab}</text>")
         # Labels X
@@ -26255,8 +26265,8 @@ def _home_sales_svg(labels, vals, eur_usd: float = 1.14, api_src: bool = False,
         # Points : data-usd + data-lb -> tooltip reformaté par le toggle $/€
         dots = ""
         for (x, y), lb, v in zip(pts, labels, serie):
-            tip = f"{lb}\n${v:,.2f}" if api_src else f"{lb}\n{v:.2f} €"
-            extra = f" data-usd='{v:.2f}' data-lb='{lb}'" if api_src else ""
+            tip = f"{lb}\n${v:,.2f}" if _usd else f"{lb}\n{v:.2f} €"
+            extra = f" data-usd='{v:.2f}' data-lb='{lb}'" if _usd else ""
             dots += (f"<circle class='hsc-dot' cx='{x:.1f}' cy='{y:.1f}' r='4.5' fill='#0f1116' stroke='#3b82f6' stroke-width='2.5' "
                      f"style='cursor:pointer'{extra} data-tip='{tip}'/>")
         style = "width:100%;height:auto;" + ("display:none" if hidden else "display:block")
@@ -26273,8 +26283,14 @@ def _home_sales_svg(labels, vals, eur_usd: float = 1.14, api_src: bool = False,
             + "</svg>")
 
     titre = "Revenus par jour" if api_src else "Ventes par jour"
-    sous = ((periode or "7 derniers jours") + " · toutes créatrices" if api_src
-            else "7 derniers jours")
+    # DEUX TEXTES, DEUX BALISES. _traduire_html remplace le texte ENTRE deux
+    # balises, en cherchant la chaine ENTIERE dans le dictionnaire : collees,
+    # « Cette semaine » et « toutes créatrices » formaient une cle unique qui
+    # n'y figurait pas, et le sous-titre restait francais dans une page
+    # anglaise. Separees, chacune se traduit.
+    _periode_txt = periode or "7 derniers jours"
+    sous = (f"<span>{_periode_txt}</span> · <span>toutes créatrices</span>"
+            if api_src else "<span>7 derniers jours</span>")
     body = _svg(vals, "hsc-net", False)
     if api_src and vals_brut:
         body += _svg(vals_brut, "hsc-brut", True)
@@ -26916,9 +26932,17 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
     # dessous. Sur une periode d'un ou deux jours, un graphique n'aurait qu'un
     # ou deux points : on elargit alors a 7 jours finissant a la date choisie.
     _c_debut, _c_fin = start, end
+    _c_elargie = False
     if (_c_fin - _c_debut).days < 2:
+        # Une courbe a un seul point ne dit rien : on elargit a sept jours.
         _c_debut = _c_fin - _dt.timedelta(days=6)
-    _c_sous = period_label
+        _c_elargie = True
+    # LE SOUS-TITRE DOIT DIRE CE QUE LA COURBE TRACE, PAS CE QU ON A CLIQUE.
+    # Il reprenait le libelle de la periode : on cliquait « Aujourd hui », les
+    # cartes montraient la journee, et juste dessous une courbe intitulee
+    # « Aujourd hui » tracait sept jours. Deux mesures differentes sous un
+    # meme mot -- de quoi croire que l un des deux chiffres est faux.
+    _c_sous = ("7 derniers jours" if _c_elargie else period_label)
     # PRIORITÉ API : toutes les créatrices (le scraping tronquait au top 10),
     # conversion EUR->USD par devise (le scraping additionnait EUR et USD bruts),
     # et la courbe s'affiche MÊME cookies morts (hors du gate mp_configured).
@@ -26927,6 +26951,7 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
     sales_chart_html = ""
     chart_labels, chart_vals, chart_brut = [], [], []
     _chart_api = False
+    _chart_usd = False
     try:
         if mypuls.api_configured():
             sres = mypuls.api_revenue_series(_c_debut.isoformat(), _c_fin.isoformat(), _eur_usd)
@@ -26948,33 +26973,57 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
     except Exception as _e:
         log.warning("home chart API: %s", _e)
     if not chart_labels and mp_configured and not mp_error:
+        # LE REPLI TRACAIT DES EUROS ET DES DOLLARS ADDITIONNES.
+        #
+        # Il sommait chart["datasets"], c est-a-dire des tx["amount"] bruts :
+        # MyM rend des euros, OnlyFans des dollars, et l axe etait gradue en
+        # « € ». Selon que l API repondait ou non, la MEME courbe affichait
+        # donc « $1 200 » ou « 1200€ », avec des valeurs differentes et sans
+        # un mot d explication -- et en repli le bouton de devise ne faisait
+        # plus rien, puisque ces montants n avaient pas de data-usd.
+        #
+        # On repart des TRANSACTIONS, seule table qui porte la devise, avec
+        # la meme conversion et la meme exclusion de modeles que le total de
+        # la page. La courbe et le total mesurent enfin la meme chose.
         try:
             wres = mypuls.fetch_team_stats(_c_debut.isoformat(), _c_fin.isoformat(), use_cache=True)
             if wres.get("ok"):
-                wch = wres.get("chart") or {}
-                days = wch.get("days") or []
-                sums = [0.0] * len(days)
-                for ds in wch.get("datasets") or []:
-                    for i, v in enumerate(ds.get("data") or []):
-                        if i < len(sums):
-                            try:
-                                sums[i] += float(v or 0)
-                            except Exception:
-                                pass
-                for d_iso, s in zip(days, sums):
+                def _jour_iso(brut):
+                    t = str(brut or "")[:10]
                     try:
-                        dd = _dt.date.fromisoformat(d_iso)
+                        j, m, an = t.split("/")
+                        return f"{an}-{m}-{j}"
+                    except ValueError:
+                        return t
+                _par_jour = {}
+                for _txc in (wres.get("transactions") or []):
+                    if _model_match(_txc.get("creator"), EXCLUDED_MODELS):
+                        continue
+                    _j = _jour_iso(_txc.get("date"))
+                    if not _j:
+                        continue
+                    _par_jour[_j] = (_par_jour.get(_j, 0.0)
+                                     + _tx_usd(_txc.get("amount", 0), _txc.get("currency")))
+                _jours = (wres.get("chart") or {}).get("days") or sorted(_par_jour)
+                for d_iso in _jours:
+                    try:
+                        dd = _dt.date.fromisoformat(str(d_iso)[:10])
                         chart_labels.append(f"{dd.day:02d}/{dd.month:02d}")
                     except Exception:
-                        chart_labels.append(d_iso)
-                    chart_vals.append(round(s, 2))
+                        chart_labels.append(str(d_iso))
+                    chart_vals.append(round(_par_jour.get(str(d_iso)[:10], 0.0), 2))
+                # Converties : l axe et l infobulle disent « $ » et obeissent
+                # au bouton de devise. Le TITRE, lui, reste « Ventes par jour »
+                # -- le repli ne mesure que le chatting, pas le revenu total.
+                _chart_usd = bool(chart_labels)
         except Exception:
             pass
     if chart_labels:
         sales_chart_html = _home_sales_svg(chart_labels, chart_vals,
                                            eur_usd=_eur_usd, api_src=_chart_api,
                                            vals_brut=chart_brut if _chart_api else None,
-                                           periode=_c_sous)
+                                           periode=_c_sous,
+                                           en_usd=_chart_api or _chart_usd)
 
     return (
         css
