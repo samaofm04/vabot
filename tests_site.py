@@ -6129,6 +6129,127 @@ except Exception as _eGd:
 
 print()
 print("=" * 70)
+print("RENOMMER / RETIRER : le nom est une CLE, pas une etiquette")
+print("=" * 70)
+try:
+    import identite_admin as _iaR
+    import shutil as _shR, json as _jsR, pathlib as _plR
+    import web_upload as _wR
+    _N, _NEUF = "zzz_ren_src", "zzz_ren_dst"
+    _FICHS = ("identity_market.json", "identity_type.json", "identity_styles.json",
+              "identity_order.json", "fav_brutes.json", "scrape_identites.json")
+    _sauv = {}
+    for _f in _FICHS:
+        _pp = _plR.Path("data") / _f
+        _sauv[_f] = _pp.read_text(encoding="utf-8") if _pp.exists() else None
+    try:
+        for _n in (_N, _NEUF):
+            _shR.rmtree(_iaR.IDENTITES / _n, ignore_errors=True)
+        (_iaR.IDENTITES / _N / "reels").mkdir(parents=True, exist_ok=True)
+        (_iaR.IDENTITES / _N / "reels" / "a.mp4").write_bytes(b"x")
+        _wR.safe_json.write(_plR.Path("data/identity_market.json"), {_N: "fr"})
+        _wR.safe_json.write(_plR.Path("data/identity_type.json"), {_N: "modele"})
+        _wR.safe_json.write(_plR.Path("data/identity_order.json"), [_N, "autre"])
+        _wR.safe_json.write(_plR.Path("data/fav_brutes.json"), {_N + "|reels|a.mp4": 1})
+
+        # L apercu annonce ce qui sera touche, AVANT d agir.
+        _ap = _iaR.apercu(_N)
+        _ou = {e["ou"] for e in _ap["emplacements"]}
+        check("renommer : l apercu annonce les emplacements reels",
+              len(_ou) >= 4 and _ap["existe"] and _ap["impossible"],
+              str(sorted(_ou))[:110])
+
+        _r = _iaR.renommer(_N, _NEUF)
+        check("renommer : le dossier suit", _r["ok"]
+              and (_iaR.IDENTITES / _NEUF / "reels" / "a.mp4").exists()
+              and not (_iaR.IDENTITES / _N).exists())
+        check("renommer : les cles de premier niveau suivent",
+              _jsR.loads(_plR.Path("data/identity_market.json").read_text(encoding="utf-8")).get(_NEUF) == "fr")
+        check("renommer : les listes suivent, sans perdre l ordre",
+              _jsR.loads(_plR.Path("data/identity_order.json").read_text(encoding="utf-8")) == [_NEUF, "autre"])
+        # Le piege : le nom est le PREMIER SEGMENT des identifiants de fichiers.
+        check("renommer : les identifiants « nom|dossier|fichier » suivent aussi",
+              (_NEUF + "|reels|a.mp4") in _jsR.loads(
+                  _plR.Path("data/fav_brutes.json").read_text(encoding="utf-8")))
+        check("renommer : aucun echec silencieux", _r["echecs"] == [], str(_r["echecs"]))
+        check("renommer : ce qui ne peut pas etre suivi est DIT",
+              any("Discord" in x for x in _r["impossible"]))
+        check("renommer : un nom deja pris est refuse",
+              _iaR.renommer(_NEUF, _NEUF) .get("ok") is True
+              and _iaR.renommer("autre_zzz_absent", _NEUF).get("ok") is not True)
+        check("renommer : un nom vide ou invalide est refuse",
+              _iaR.renommer(_NEUF, "!!!").get("ok") is not True
+              and _iaR.renommer(_NEUF, "").get("ok") is not True)
+
+        # Retirer : rien n est efface.
+        _a = _iaR.archiver(_NEUF)
+        check("retirer : le dossier part dans la corbeille, il n est pas efface",
+              _a["ok"] and _plR.Path(_a["corbeille"], "media", "reels", "a.mp4").exists()
+              and not (_iaR.IDENTITES / _NEUF).exists())
+        _fiche = _jsR.loads(_plR.Path(_a["corbeille"], "_fiche.json").read_text(encoding="utf-8"))
+        check("retirer : la fiche garde ce qu on savait d elle",
+              _fiche["identite"] == _NEUF and _fiche["sources"].get("identity_market.json") == "fr",
+              str(_fiche.get("sources"))[:90])
+        check("retirer : elle sort bien des listes",
+              _NEUF not in _jsR.loads(
+                  _plR.Path("data/identity_order.json").read_text(encoding="utf-8")))
+        check("retirer : une identite inconnue est refusee",
+              _iaR.archiver("zzz_jamais_existe").get("ok") is not True)
+
+        # Les routes : verrou, confirmation retapee.
+        _aR = _wR.create_app(); _aR.testing = True
+        _svR = _wR._load_web_users
+        _wR._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"}}
+        try:
+            _cR = _aR.test_client()
+            with _cR.session_transaction() as _sR:
+                _sR["auth"] = True; _sR["username"] = "boss"; _sR["role"] = "owner"
+            _j1 = (_cR.post("/identity/rename",
+                            data={"identity": "jessye", "new_name": "autre"}).get_json() or {})
+            check("routes : jessye ne se renomme pas",
+                  _j1.get("ok") is not True and "menu US" in str(_j1.get("error")))
+            _j2 = (_cR.post("/identity/archive",
+                            data={"identity": "jessye", "confirme": "jessye"}).get_json() or {})
+            check("routes : jessye ne se retire pas",
+                  _j2.get("ok") is not True and "menu US" in str(_j2.get("error")))
+            _j3 = (_cR.post("/identity/archive",
+                            data={"identity": "julia", "confirme": "pas le bon"}).get_json() or {})
+            check("routes : sans le nom retape, on ne retire rien",
+                  _j3.get("ok") is not True and "Retape" in str(_j3.get("error")),
+                  str(_j3)[:90])
+            _j4 = (_cR.post("/identity/apercu", data={"identity": "julia"}).get_json() or {})
+            check("routes : l apercu repond sans rien modifier",
+                  _j4.get("ok") is True and "impossible" in _j4)
+        finally:
+            _wR._load_web_users = _svR
+    finally:
+        for _f, _v in _sauv.items():
+            _pp = _plR.Path("data") / _f
+            if _v is None:
+                try:
+                    _pp.unlink()
+                except Exception:
+                    pass
+            else:
+                _wR.safe_json.write_text(_pp, _v)
+        for _n in (_N, _NEUF):
+            _shR.rmtree(_iaR.IDENTITES / _n, ignore_errors=True)
+        _shR.rmtree(_iaR.CORBEILLE, ignore_errors=True)
+
+    _srcA = _plR.Path("web_upload.py").read_text(encoding="utf-8")
+    check("interface : le nom s edite pour toutes, sauf les verrouillees",
+          "identEditCtx.rename = !b.getAttribute('data-typelock')" in _srcA)
+    check("interface : le retrait se fait en deux temps",
+          "identEditRetirerOuvre" in _srcA and "ident-edit-dangernom" in _srcA)
+    check("interface : le recapitulatif est demande au serveur, pas devine",
+          "/identity/apercu" in _srcA)
+    check("interface : ce que le renommage n a pas suivi remonte a l ecran",
+          "j1.impossible" in _srcA and "j1.echecs" in _srcA)
+except Exception as _eA:
+    check("renommer / retirer : testable", False, repr(_eA)[:220])
+
+print()
+print("=" * 70)
 print("MODELE OU IDENTITE : un dossier de montage n est pas une creatrice")
 print("=" * 70)
 try:
@@ -8849,15 +8970,33 @@ try:
               "sessionsvoc" in _plSe.Path("main.py").read_text(encoding="utf-8"))
         # Le filtre des salons ne doit PAS se fier a hasattr(c, "send") : en
         # discord.py 2.x un salon vocal en a un aussi.
+        import ast as _astSe
+        _arbre = _astSe.parse(_srcCog)
+        _doc_lignes = set()
+        for _n in _astSe.walk(_arbre):
+            if not isinstance(_n, (_astSe.Module, _astSe.ClassDef,
+                                   _astSe.FunctionDef, _astSe.AsyncFunctionDef)):
+                continue
+            _corps = getattr(_n, "body", None) or []
+            if (_corps and isinstance(_corps[0], _astSe.Expr)
+                    and isinstance(_corps[0].value, _astSe.Constant)
+                    and isinstance(_corps[0].value.value, str)):
+                _doc_lignes.update(range(_corps[0].lineno,
+                                         (_corps[0].end_lineno or _corps[0].lineno) + 1))
+        _lignes_code = [l for i, l in enumerate(_srcCog.split(chr(10)), 1)
+                        if (i not in _doc_lignes and l.strip()
+                            and not l.strip().startswith("#"))]
         check("sessions : les salons sont filtres par isinstance, pas par « send »",
-              "isinstance(c, (discord.VoiceChannel" in _srcCog
-              and 'hasattr(c, "send")' not in _srcCog)
+              any("isinstance(c, (discord.VoiceChannel" in l for l in _lignes_code)
+              and not any('hasattr(c, "send")' in l for l in _lignes_code),
+              "le code, pas la docstring qui explique le piege")
 
         # LE POINTAGE DU COG : ni les bots, ni les sourds, ni les doublons.
         import types as _tySe
         from cogs.sessionsvoc import SessionsVoc as _Cog
         _sv.ecrire_config({})
-        _sv.FICHIER_PRESENCE.unlink(missing_ok=True)
+        _presSav = _sv.FICHIER_PRESENCE
+        _sv.FICHIER_PRESENCE = _dirSe / "presence_cog.json"
 
         def _m(i, n, bot=False, deaf=False):
             return _tySe.SimpleNamespace(id=i, display_name=n, bot=bot,
@@ -8885,6 +9024,7 @@ try:
               _pr2.get("1", {}).get("secondes") == 60, str(_pr2.get("1")))
         check("sessions : les autres presents sont bien comptes",
               sorted(_pr2) == ["1", "4"], str(sorted(_pr2)))
+        _sv.FICHIER_PRESENCE = _presSav
 
         # LES ATTENDUS : jamais les entrees « manual_* », qui ne sont pas des
         # comptes Discord et ressortiraient absentes tous les jours.

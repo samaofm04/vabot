@@ -8698,7 +8698,12 @@ document.addEventListener('click', function(ev){
   var b=ev.target.closest?ev.target.closest('[data-identedit]'):null;
   if(!b) return;
   identEditCtx.ident=b.getAttribute('data-identedit')||'';
-  identEditCtx.rename=!!b.getAttribute('data-canrename');
+  /* LE NOM S EDITE MAINTENANT POUR TOUTES. Il etait reserve a la
+     Bibliotheque 2 parce que personne n avait fait la liste des endroits ou
+     le nom sert de cle ; identite_admin.py la tient, et le renommage rend le
+     compte de ce qu il a touche. Seules les verrouillees (Jessye, source du
+     menu US) gardent leur nom fige. */
+  identEditCtx.rename = !b.getAttribute('data-typelock');
   var lbl=identEditCtx.ident.replace(/^v2_/,'');
   var who=document.getElementById('ident-edit-who'); if(who) who.textContent='@'+lbl;
   var nw=document.getElementById('ident-edit-namewrap');
@@ -8720,6 +8725,11 @@ document.addEventListener('click', function(ev){
   if(al) al.firstChild.nodeValue='Choisir une image\u2026';
     identEditCtx.type0 = b.getAttribute('data-type') || 'modele';
   identEditCtx.typelock = !!b.getAttribute('data-typelock');
+  /* Une identite verrouillee ne se retire pas davantage qu elle ne se
+     renomme : on ne lui propose meme pas le bouton. */
+  var dw=document.getElementById('ident-edit-dangerwrap');
+  if(dw) dw.style.display = identEditCtx.typelock ? 'none' : 'flex';
+  identEditRetirerFerme();
   identEditType(identEditCtx.type0);
   identEditCtx.market0 = b.getAttribute('data-market') || 'fr';
   identEditMarket(identEditCtx.market0);
@@ -8737,6 +8747,62 @@ function identEditAvChoisi(inp){
   var l=document.getElementById('ident-edit-avlbl'); if(!l) return;
   var f=(inp&&inp.files&&inp.files[0])?inp.files[0].name:'';
   l.firstChild.nodeValue = f ? ('\u2713 '+f) : 'Choisir une image\u2026';
+}
+async function identEditRetirerOuvre(){
+  /* ON MONTRE D ABORD CE QUE CA TOUCHE. Une confirmation qui n annonce pas
+     ce qu elle engage n en est pas une : le serveur rend la liste des
+     emplacements reellement concernes, et de ce qu aucun code ne peut
+     suivre (les salons Discord). */
+  var z=document.getElementById('ident-edit-danger');
+  var q=document.getElementById('ident-edit-dangerquoi');
+  var b=document.getElementById('ident-edit-retirer');
+  if(!z||!q) return;
+  if(b) b.style.display='none';
+  z.style.display='flex';
+  q.textContent='Lecture\u2026';
+  try{
+    var fd=new FormData(); fd.set('identity', identEditCtx.ident);
+    var r=await fetch('/identity/apercu',{method:'POST',body:fd,credentials:'same-origin'});
+    var j=await r.json();
+    var l=(j&&j.emplacements)||[];
+    var txt = l.length
+      ? ('Sera d\u00e9plac\u00e9 dans la corbeille : ' + l.map(function(e){
+          return e.ou + (e.detail?(' (' + e.detail + ')'):''); }).join(', ') + '.')
+      : 'Rien de stock\u00e9 sous ce nom.';
+    if(j&&j.impossible&&j.impossible.length)
+      txt += ' \u2014 ' + j.impossible[0];
+    q.textContent = txt + ' Rien n\u2019est effac\u00e9 : tout part dans data/_corbeille_identites.';
+  }catch(e){ q.textContent='Impossible de lire ce que \u00e7a touche.'; }
+  var n=document.getElementById('ident-edit-dangernom'); if(n){ n.value=''; n.focus(); }
+}
+function identEditRetirerFerme(){
+  var z=document.getElementById('ident-edit-danger');
+  var b=document.getElementById('ident-edit-retirer');
+  if(z) z.style.display='none';
+  if(b) b.style.display='';
+}
+async function identEditRetirer(){
+  var err=document.getElementById('ident-edit-err');
+  var go=document.getElementById('ident-edit-dangergo');
+  var n=document.getElementById('ident-edit-dangernom');
+  if(go){ go.disabled=true; go.textContent='\u25cc'; }
+  try{
+    var fd=new FormData();
+    fd.set('identity', identEditCtx.ident);
+    fd.set('confirme', String((n&&n.value)||'').trim().toLowerCase());
+    var r=await fetch('/identity/archive',{method:'POST',body:fd,credentials:'same-origin'});
+    var j=await r.json();
+    if(!(j&&j.ok)){
+      if(err) err.textContent=(j&&j.error)||('Erreur '+r.status);
+      if(go){ go.disabled=false; go.textContent='Retirer'; }
+      return;
+    }
+    identEditClose();
+    window.location.reload();
+  }catch(e){
+    if(err) err.textContent=String(e);
+    if(go){ go.disabled=false; go.textContent='Retirer'; }
+  }
 }
 function identEditClose(){ var m=document.getElementById('ident-edit-modal'); if(m) m.style.display='none'; }
 // ---- « Ce qui marche » : caption / brut / montage / flash -------------------
@@ -8843,7 +8909,14 @@ async function identEditSave(){
         var j1=await r1.json();
         if(!(j1&&j1.ok)){ if(err) err.textContent=(j1&&j1.error)||('Erreur '+r1.status);
                           if(go){go.disabled=false;go.textContent='Enregistrer';} return; }
-        cible=j1.identity; fait=true;
+        cible=j1.identite||j1.identity; fait=true;
+        /* CE QUE LE RENOMMAGE N A PAS PU SUIVRE. Le taire serait exactement
+           la « casse en silence » que l ancien refus voulait eviter. */
+        if(j1.impossible && j1.impossible.length && typeof showToast==='function')
+          showToast(j1.impossible[0], 'info');
+        if(j1.echecs && j1.echecs.length && typeof showToast==='function')
+          showToast('A reprendre a la main : ' + j1.echecs.map(function(e){
+            return e.ou; }).join(', '), 'error');
       }
     }
     if(identEditCtx.type && identEditCtx.type !== identEditCtx.type0){
@@ -12991,6 +13064,25 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
     <div class="ie-sec"><span class="ie-lbl">Photo de profil</span>
       <label class="ie-fichier" id="ident-edit-avlbl">Choisir une image&hellip;
         <input id="ident-edit-avatar" type="file" accept="image/*" onchange="identEditAvChoisi(this)"></label>
+    </div>
+    <!-- RETIRER. Volontairement en bas, volontairement discret, et
+         volontairement en deux temps : le premier clic ne fait qu'OUVRIR le
+         recapitulatif de ce qui sera deplace. Rien ne part tant que le nom
+         n'a pas ete retape. -->
+    <div class="ie-sec" id="ident-edit-dangerwrap" style="border-top:1px solid #26262c;padding-top:11px">
+      <button type="button" id="ident-edit-retirer" class="ie-btn" onclick="identEditRetirerOuvre()"
+              style="border-color:#4a2a2a;color:#d98a8a">&#9998; Retirer cette identit&eacute;&hellip;</button>
+      <div id="ident-edit-danger" style="display:none;flex-direction:column;gap:7px">
+        <div id="ident-edit-dangerquoi" class="ie-hint"></div>
+        <input id="ident-edit-dangernom" type="text" autocomplete="off" data-lpignore="true"
+               placeholder="retape le nom pour confirmer"
+               style="background:#131316;border:1px solid #4a2a2a;color:#e6e6ea;border-radius:9px;padding:9px;font-size:13px;font-family:inherit;box-sizing:border-box">
+        <div class="ie-duo">
+          <button type="button" class="ie-btn" onclick="identEditRetirerFerme()">Annuler</button>
+          <button type="button" id="ident-edit-dangergo" class="ie-btn" onclick="identEditRetirer()"
+                  style="border-color:#7f1d1d;background:rgba(127,29,29,.25);color:#fca5a5">Retirer</button>
+        </div>
+      </div>
     </div>
     <div id="ident-edit-err" style="color:#f87171;font-size:12px;min-height:15px"></div>
     <div style="display:flex;gap:8px">
@@ -50493,66 +50585,91 @@ def create_app():
                         "badges": _style_badges_html(ident, 11),
                         "menus_discord": menus})
 
-    @app.route("/identity/rename", methods=["POST"])
-    def identity_rename():
-        """Renomme une identité de la BIBLIOTHÈQUE 2 (dossier + ses textes).
+    @app.route("/identity/apercu", methods=["POST"])
+    def identity_apercu():
+        """Ce qu'une action sur cette identité toucherait. Ne modifie rien.
 
-        Volontairement limité à ces identités : celles de la Bibliothèque sont
-        référencées par leur NOM un peu partout (fiches VA Discord, marques
-        banger, plannings…) — les renommer casserait ces liens en silence."""
+        Une confirmation qui ne dit pas ce qu'elle engage n'est pas une
+        confirmation : avant de renommer ou de retirer, l'écran montre les
+        emplacements réellement concernés, et ceux qu'aucun code ne peut
+        suivre.
+        """
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
-        import re as _re
+        import identite_admin as _ia
+        ident = (request.form.get("identity") or "").strip().lower()
+        return jsonify(dict(_ia.apercu(ident), ok=True))
+
+    @app.route("/identity/rename", methods=["POST"])
+    def identity_rename():
+        """Renomme une identité PARTOUT où son nom est une clé.
+
+        C'ÉTAIT RÉSERVÉ À LA BIBLIOTHÈQUE 2, et le commentaire disait pourquoi :
+        « celles de la Bibliothèque sont référencées par leur NOM un peu
+        partout — les renommer casserait ces liens en silence ». Le refus
+        était juste tant que personne n'avait fait la liste. identite_admin.py
+        la tient désormais, et rend le compte de chaque emplacement touché,
+        plus celui de ce qu'aucun code ne peut suivre (les salons Discord).
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        import identite_admin as _ia
+        import type_identite as _ti
         old = (request.form.get("identity") or "").strip().lower()
         raw = (request.form.get("new_name") or "").strip()
-        if old not in _list_identities():
-            return jsonify({"ok": False, "error": "identité inconnue"})
-        if not _is_v2(old):
-            return jsonify({"ok": False, "error":
-                            "Renommage réservé à le Vault PRO (une identité "
-                            "de la Bibliothèque est liée aux VAs Discord)."})
-        base = _re.sub(r"[^a-z0-9_\-]", "", raw.lower())[:26]
+        if _ti.verrouillee(old):
+            return jsonify({"ok": False,
+                            "error": f"@{old} ne se renomme pas : elle sert de "
+                                     "source au menu US."})
+        base = _ia.normaliser(raw)
         if not base:
-            return jsonify({"ok": False, "error": "Nom invalide (lettres, chiffres, _ ou -)"})
-        new = V2_PREFIX + base
-        if new == old:
-            return jsonify({"ok": True, "identity": old, "label": _v2_label(old)})
-        if new in _list_identities():
-            return jsonify({"ok": False, "error": f"« {base} » existe déjà"})
-        try:
-            (IDENTITIES_DIR / old).rename(IDENTITIES_DIR / new)
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"Renommage impossible : {e}"})
-        # Suivre le nom dans les textes (bios/CTA/…), les captions et l'ordre
-        try:
-            import text_pool as _tp
-            _d = _tp._load() if hasattr(_tp, "_load") else None
-            if isinstance(_d, dict):
-                for _cat, _items in _d.items():
-                    if isinstance(_items, list):
-                        for _e in _items:
-                            if isinstance(_e, dict) and str(_e.get("identity") or "").lower() == old:
-                                _e["identity"] = new
-                if hasattr(_tp, "_save"):
-                    _tp._save(_d)
-        except Exception:
-            pass
-        try:
-            lib = _load_captions_lib()
-            if old in lib:
-                lib[new] = lib.pop(old)
-                _save_captions_lib(lib)
-        except Exception:
-            pass
-        try:
-            order = _load_identity_order()
-            if old in order:
-                _save_identity_order([new if x == old else x for x in order])
-        except Exception:
-            pass
-        _invalidate_all_ttl_cache()
-        return jsonify({"ok": True, "identity": new, "label": _v2_label(new)})
+            return jsonify({"ok": False,
+                            "error": "Nom invalide (lettres, chiffres, _ ou -)"})
+        # Une identité de la Bibliothèque 2 garde son préfixe technique : il
+        # n'apparaît jamais à l'écran, mais c'est lui qui la rend invisible
+        # du Jailbreak et des menus Discord.
+        new = (V2_PREFIX + base) if _is_v2(old) else base
+        r = _ia.renommer(old, new)
+        if r.get("ok"):
+            _invalidate_all_ttl_cache()
+            r["label"] = _v2_label(r.get("identite") or new)
+        return jsonify(r)
+
+    @app.route("/identity/archive", methods=["POST"])
+    def identity_archive():
+        """Retire une identité de la circulation. N'efface RIEN.
+
+        Le dossier part dans data/_corbeille_identites/, avec une fiche qui
+        garde son référentiel Jailbreak — VA et comptes Instagram, bannis
+        compris. La règle de l'agence est que les comptes bannis ne se
+        suppriment jamais : ils disent comment et pourquoi un compte meurt.
+        Les effacer ici reviendrait à contourner cette règle par la porte de
+        derrière.
+
+        Le nom doit être retapé pour confirmer. Un bouton qui retire
+        vingt-quatre dossiers de médias sur un clic mal placé n'est pas un
+        bouton, c'est un piège.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        import identite_admin as _ia
+        import type_identite as _ti
+        ident = (request.form.get("identity") or "").strip().lower()
+        confirme = (request.form.get("confirme") or "").strip().lower()
+        if _ti.verrouillee(ident):
+            return jsonify({"ok": False,
+                            "error": f"@{ident} ne se retire pas : elle sert de "
+                                     "source au menu US."})
+        if confirme != ident:
+            return jsonify({"ok": False,
+                            "error": "Retape le nom exact pour confirmer."})
+        r = _ia.archiver(ident)
+        if r.get("ok"):
+            _invalidate_all_ttl_cache()
+        return jsonify(r)
 
     @app.route("/identity/reorder", methods=["POST"])
     def identity_reorder():
