@@ -348,6 +348,71 @@ def a_assiste(fiche: dict) -> bool:
         return False
 
 
+def sans_accent(t: str) -> str:
+    """« Session », « sessions » et « SESSION » sont le meme mot."""
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", str(t or ""))
+                   if unicodedata.category(c) != "Mn").lower().replace("_", "-")
+
+
+def salon_suivi(salon_id, nom: str = "", nom_categorie: str = "", cfg=None) -> bool:
+    """Ce salon vocal fait-il partie des sessions ?
+
+    Trois designations, de la plus precise a la plus souple : une liste
+    d'identifiants, une categorie, un motif de nom. Le proprietaire hesitait
+    entre « un salon par session » et « un seul salon pour toutes » : les deux
+    marchent sans rien changer, parce que c'est l'HORLOGE qui decide de la
+    session, jamais le salon.
+
+    Fonction PURE : elle ne recoit que des chaines et un identifiant, donc
+    elle se teste sans Discord -- un vrai VoiceChannel ne s'instancie pas.
+    """
+    cfg = cfg if isinstance(cfg, dict) else config()
+    ids = set(cfg.get("salons") or [])
+    if ids:
+        try:
+            return int(salon_id) in ids
+        except (TypeError, ValueError):
+            return False
+    cat = sans_accent(cfg.get("categorie") or "")
+    motif = sans_accent(cfg.get("motif_salon") or "")
+    if cat and cat in sans_accent(nom_categorie):
+        return True
+    return bool(motif) and motif in sans_accent(nom)
+
+
+FICHIER_USERS = Path("data") / "users.json"
+
+
+def attendus() -> list:
+    """Les VA qu'on attend aux sessions : [{id, nom, identite}].
+
+    La source est users.json, le registre que le bot tient deja de ses VA.
+    On ne garde que les identifiants NUMERIQUES : ce fichier contient aussi
+    des entrees « manual_... » qui ne sont pas des comptes Discord et qui,
+    mises dans la liste des attendus, ressortiraient absentes tous les jours
+    de leur vie -- un reproche adresse a quelqu'un qui n'existe pas.
+
+    Le nom rendu ici n'est qu'un repli : le cog Discord connait le vrai
+    pseudo affiche et le recrit au passage.
+    """
+    d = safe_json.load(FICHIER_USERS, default={}) or {}
+    if not isinstance(d, dict):
+        return []
+    out = []
+    for uid, fiche in d.items():
+        if not str(uid).isdigit():
+            continue
+        f = fiche if isinstance(fiche, dict) else {}
+        out.append({
+            "id": str(uid),
+            "nom": str(f.get("username") or uid),
+            "identite": str(f.get("identity") or f.get("identite") or ""),
+        })
+    out.sort(key=lambda x: x["nom"].lower())
+    return out
+
+
 def resume_jour(jour: str, attendus=None) -> dict:
     """Qui etait la, qui ne l'etait pas, session par session.
 

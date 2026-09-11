@@ -6232,6 +6232,24 @@ try:
           "identEditCtx.type !== identEditCtx.type0" in _srcT)
     check("nature : le verrou voyage jusqu au panneau",
           "data-typelock=" in _srcT and "identEditCtx.typelock" in _srcT)
+    # CE QUE L ENTREE PORTE, sous les yeux au moment de decider. Decider
+    # « modele ou identite » de memoire, sur vingt-quatre entrees, personne
+    # ne le fait.
+    check("panneau : l effectif est servi au bouton Modifier",
+          "data-vas=" in _srcT and "data-comptes=" in _srcT
+          and "def _effectif_identite" in _srcT)
+    _nv, _nc = _wT._effectif_identite("jessye")
+    check("panneau : l effectif se lit dans le referentiel",
+          isinstance(_nv, int) and isinstance(_nc, int) and _nv >= 0 and _nc >= 0,
+          "%s VA / %s comptes" % (_nv, _nc))
+    check("panneau : une identite inconnue rend (0, 0) sans lever",
+          _wT._effectif_identite("zzz_pas_la") == (0, 0))
+    check("panneau : les sections ont un intitule, les aides sont en petit",
+          ".ie-lbl{" in _srcT and ".ie-hint{" in _srcT and "ie-sec" in _srcT)
+    check("panneau : le champ fichier nu est remplace par une etiquette",
+          "identEditAvChoisi" in _srcT and ".ie-fichier input{display:none}" in _srcT)
+    check("panneau : chaque couleur du panneau a sa version claire",
+          "body.light .ie-btn{" in _srcT and "body.light .ie-fichier{" in _srcT)
 except Exception as _eT:
     check("nature : testable", False, repr(_eT)[:200])
 
@@ -8668,10 +8686,11 @@ try:
         # (synchro Drive, copie a la main, autre processus).
         check("cache identites : rien n est servi indefiniment sans recontrole",
               0 < _wId._IDENTITIES_TTL <= 5, str(_wId._IDENTITIES_TTL))
+        import pathlib as _plId
+        _srcId = _plId.Path("web_upload.py").read_text(encoding="utf-8")
         check("cache identites : l invalidation generale oublie aussi la liste",
-              "_oublier_identites()" in _plTrR.Path("web_upload.py").read_text(
-                  encoding="utf-8").split("def _invalidate_all_ttl_cache")[1][:400]
-              if True else False)
+              "_oublier_identites()" in
+              _srcId.split("def _invalidate_all_ttl_cache")[1][:500])
     finally:
         for _n in _noms:
             _shId.rmtree(_wId.IDENTITIES_DIR / _n, ignore_errors=True)
@@ -8800,6 +8819,87 @@ try:
         _sjSe.write(_sv.FICHIER_PRESENCE, _d2)
         check("sessions : les vieilles journees sont purgees",
               _sv.purger(30) == 1 and "2020-01-01" not in _sv._charger())
+
+        # LE CHOIX DES SALONS. Un seul salon pour toutes les sessions, ou un
+        # par session : les deux doivent marcher sans rien changer, parce que
+        # c est l HORLOGE qui decide de la session, jamais le salon.
+        _sv.ecrire_config({})
+        check("sessions : par defaut, on suit la categorie « session »",
+              _sv.salon_suivi(1, "BJ 12 h 00 au Benin", "session") is True
+              and _sv.salon_suivi(2, "General", "Salons vocaux") is False)
+        check("sessions : accents et majuscules ne changent rien",
+              _sv.salon_suivi(3, "x", "SESSIONS") is True)
+        _sv.ecrire_config({"categorie": "", "motif_salon": "bj "})
+        check("sessions : un motif de nom marche aussi",
+              _sv.salon_suivi(4, "bj 17 h 00", "") is True
+              and _sv.salon_suivi(5, "General", "") is False)
+        _sv.ecrire_config({"salons": [42], "categorie": "session"})
+        check("sessions : une liste d identifiants l emporte sur le nom",
+              _sv.salon_suivi(42, "n importe quoi", "rien") is True
+              and _sv.salon_suivi(99, "BJ 12 h 00", "session") is False,
+              "un id explicite doit ignorer la convention de nom")
+
+        # LE COG : zero commande slash, sinon il ne se charge pas DU TOUT.
+        import re as _reSe
+        _srcCog = _plSe.Path("cogs/sessionsvoc.py").read_text(encoding="utf-8")
+        check("sessions : le cog ne declare AUCUNE commande slash",
+              not _reSe.findall(r"@(?:app_commands|commands)\.(?:command|hybrid_command)", _srcCog),
+              "le plafond des 100 commandes ferait echouer tout le cog")
+        check("sessions : le cog est enregistre dans MAIN_COGS",
+              "sessionsvoc" in _plSe.Path("main.py").read_text(encoding="utf-8"))
+        # Le filtre des salons ne doit PAS se fier a hasattr(c, "send") : en
+        # discord.py 2.x un salon vocal en a un aussi.
+        check("sessions : les salons sont filtres par isinstance, pas par « send »",
+              "isinstance(c, (discord.VoiceChannel" in _srcCog
+              and 'hasattr(c, "send")' not in _srcCog)
+
+        # LE POINTAGE DU COG : ni les bots, ni les sourds, ni les doublons.
+        import types as _tySe
+        from cogs.sessionsvoc import SessionsVoc as _Cog
+        _sv.ecrire_config({})
+        _sv.FICHIER_PRESENCE.unlink(missing_ok=True)
+
+        def _m(i, n, bot=False, deaf=False):
+            return _tySe.SimpleNamespace(id=i, display_name=n, bot=bot,
+                                         voice=_tySe.SimpleNamespace(deaf=deaf))
+
+        _ch1 = _tySe.SimpleNamespace(name="v1", id=1, members=[
+            _m(1, "Ana"), _m(2, "RoboBot", bot=True), _m(3, "Sourd", deaf=True)])
+        _ch2 = _tySe.SimpleNamespace(name="v2", id=2, members=[_m(1, "Ana"), _m(4, "Zoe")])
+        _cog = _Cog.__new__(_Cog)
+        _cog.bot, _cog._resumes_faits = None, {}
+        _cog._vocaux = lambda: [_ch1, _ch2]
+        import time as _tiSe
+        _vrai_time = _tiSe.time
+        try:
+            _tiSe.time = lambda: _t(J, 12, 30)
+            _cog._pointer()
+        finally:
+            _tiSe.time = _vrai_time
+        _pr2 = _sv.presences(J, "s1")
+        check("sessions : un bot n est pas un participant",
+              "2" not in _pr2, str(sorted(_pr2)))
+        check("sessions : quelqu un de sourd cote serveur n assiste a rien",
+              "3" not in _pr2)
+        check("sessions : present dans deux salons ne compte qu une fois",
+              _pr2.get("1", {}).get("secondes") == 60, str(_pr2.get("1")))
+        check("sessions : les autres presents sont bien comptes",
+              sorted(_pr2) == ["1", "4"], str(sorted(_pr2)))
+
+        # LES ATTENDUS : jamais les entrees « manual_* », qui ne sont pas des
+        # comptes Discord et ressortiraient absentes tous les jours.
+        _usSav = _sv.FICHIER_USERS
+        _sv.FICHIER_USERS = _dirSe / "users.json"
+        import safe_json as _sjU
+        _sjU.write(_sv.FICHIER_USERS, {
+            "123456789": {"username": "ana", "identity": "jessye"},
+            "manual_42": {"username": "faux", "identity": "jessye"},
+            "987654321": {"username": "zoe", "identity": "lola"}})
+        _att = _sv.attendus()
+        check("sessions : seuls les vrais comptes Discord sont attendus",
+              [a["id"] for a in _att] == ["123456789", "987654321"],
+              str([a["id"] for a in _att]))
+        _sv.FICHIER_USERS = _usSav
 
         # Les bornes : une heure impossible ne doit pas passer.
         _sv.ecrire_config({"sessions": [{"id": "x", "nom": "X", "heure": 99, "minute": 0},

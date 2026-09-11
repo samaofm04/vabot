@@ -8705,7 +8705,20 @@ document.addEventListener('click', function(ev){
   if(nw) nw.style.display = identEditCtx.rename ? 'flex' : 'none';
   var n=document.getElementById('ident-edit-name'); if(n) n.value=lbl;
   var a=document.getElementById('ident-edit-avatar'); if(a) a.value='';
-  identEditCtx.type0 = b.getAttribute('data-type') || 'modele';
+  var pp=document.getElementById('ident-edit-pp');
+  if(pp){ pp.style.visibility='visible'; pp.src='/identity/avatar/'+encodeURIComponent(identEditCtx.ident); }
+  /* CE QUE L ENTREE PORTE, avant tout reglage : trois VA et douze comptes,
+     c est une creatrice ; zero et zero, c est un dossier de montage. Sans ce
+     chiffre il fallait s en souvenir, ou aller le chercher ailleurs. */
+  var nv=parseInt(b.getAttribute('data-vas')||'0',10)||0;
+  var nc=parseInt(b.getAttribute('data-comptes')||'0',10)||0;
+  var po=document.getElementById('ident-edit-porte');
+  if(po) po.textContent = (nv||nc)
+    ? (nv + ' VA \u00b7 ' + nc + ' compte' + (nc>1?'s':'') + ' Instagram')
+    : 'Aucun VA, aucun compte Instagram';
+  var al=document.getElementById('ident-edit-avlbl');
+  if(al) al.firstChild.nodeValue='Choisir une image\u2026';
+    identEditCtx.type0 = b.getAttribute('data-type') || 'modele';
   identEditCtx.typelock = !!b.getAttribute('data-typelock');
   identEditType(identEditCtx.type0);
   identEditCtx.market0 = b.getAttribute('data-market') || 'fr';
@@ -8717,6 +8730,14 @@ document.addEventListener('click', function(ev){
   var g=document.getElementById('ident-edit-go'); if(g){ g.disabled=false; g.textContent='Enregistrer'; }
   var m=document.getElementById('ident-edit-modal'); if(m) m.style.display='flex';
 });
+function identEditAvChoisi(inp){
+  /* Un <input type=file> nu affiche « No file chosen » en anglais et ne se
+     met pas au theme. On le cache derriere son etiquette, qui porte le nom du
+     fichier choisi -- sinon on ne sait plus si le clic a pris. */
+  var l=document.getElementById('ident-edit-avlbl'); if(!l) return;
+  var f=(inp&&inp.files&&inp.files[0])?inp.files[0].name:'';
+  l.firstChild.nodeValue = f ? ('\u2713 '+f) : 'Choisir une image\u2026';
+}
 function identEditClose(){ var m=document.getElementById('ident-edit-modal'); if(m) m.style.display='none'; }
 // ---- « Ce qui marche » : caption / brut / montage / flash -------------------
 // Les pastilles se dessinent depuis la table servie par le serveur, jamais
@@ -12932,36 +12953,44 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
 <!-- ===== Modifier une identité : photo (partout) + nom (Vault PRO) ===== -->
 <div id="ident-edit-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center" onclick="identEditClose()">
   <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:20px;width:340px;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
-    <div style="font-weight:800;font-size:15px">✎ Modifier <span id="ident-edit-who" style="color:#8b9cf7"></span></div>
-    <label id="ident-edit-namewrap" style="font-size:12px;color:#c4c4cc;display:flex;flex-direction:column;gap:6px">Nom
+    <div class="ie-tete">
+      <img id="ident-edit-pp" class="ie-pp" alt="" referrerpolicy="no-referrer"
+           onerror="this.style.visibility='hidden'">
+      <div style="min-width:0">
+        <div style="font-weight:800;font-size:15px">✎ Modifier <span id="ident-edit-who" style="color:#8b9cf7"></span></div>
+        <div id="ident-edit-porte" class="ie-porte"></div>
+      </div>
+    </div>
+    <label id="ident-edit-namewrap" class="ie-sec"><span class="ie-lbl">Nom</span>
       <input id="ident-edit-name" type="text" autocomplete="off" data-lpignore="true"
              style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:10px;font-size:13px;font-family:inherit;box-sizing:border-box"></label>
-    <label style="font-size:12px;color:#c4c4cc;display:flex;flex-direction:column;gap:6px">Photo de profil
-      <input id="ident-edit-avatar" type="file" accept="image/*"
-             style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:8px;font-size:12px;font-family:inherit;box-sizing:border-box"></label>
-    <!-- CE QUE CETTE ENTREE EST. Pose avant le marche : savoir si c'est une
-         creatrice ou un dossier de montage commande tout le reste. -->
-    <div style="font-size:12px;color:#c4c4cc;display:flex;flex-direction:column;gap:6px">Nature
-      <div style="display:flex;gap:8px">
-        <button type="button" id="ident-edit-modele" onclick="identEditType('modele')"
-                style="flex:1;background:#131316;border:1.5px solid #34343a;color:#e6e6ea;border-radius:9px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">&#128131; Mod&egrave;le</button>
-        <button type="button" id="ident-edit-identite" onclick="identEditType('identite')"
-                style="flex:1;background:#131316;border:1.5px solid #34343a;color:#e6e6ea;border-radius:9px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">&#127916; Identit&eacute;</button>
+
+    <!-- CE QUE CETTE ENTREE EST. En premier : savoir si c'est une creatrice
+         ou un dossier de montage commande tout le reste du panneau. -->
+    <div class="ie-sec"><span class="ie-lbl">Nature</span>
+      <div class="ie-duo">
+        <button type="button" id="ident-edit-modele" class="ie-btn" onclick="identEditType('modele')">&#128131; Mod&egrave;le</button>
+        <button type="button" id="ident-edit-identite" class="ie-btn" onclick="identEditType('identite')">&#127916; Identit&eacute;</button>
       </div>
-      <div id="ident-edit-thint" style="font-size:11px;color:#75757f;line-height:1.45"></div>
+      <div id="ident-edit-thint" class="ie-hint"></div>
     </div>
-    <div style="font-size:12px;color:#c4c4cc;display:flex;flex-direction:column;gap:6px">Marché
-      <div style="display:flex;gap:8px">
-        <button type="button" id="ident-edit-fr" onclick="identEditMarket('fr')"
-                style="flex:1;background:#131316;border:1.5px solid #34343a;color:#e6e6ea;border-radius:9px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">🇫🇷 FR</button>
-        <button type="button" id="ident-edit-us" onclick="identEditMarket('us')"
-                style="flex:1;background:#131316;border:1.5px solid #34343a;color:#e6e6ea;border-radius:9px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">🇺🇸 US</button>
+
+    <div class="ie-sec"><span class="ie-lbl">March&eacute;</span>
+      <div class="ie-duo">
+        <button type="button" id="ident-edit-fr" class="ie-btn" onclick="identEditMarket('fr')">&#127467;&#127479; FR</button>
+        <button type="button" id="ident-edit-us" class="ie-btn" onclick="identEditMarket('us')">&#127482;&#127480; US</button>
       </div>
-      <div id="ident-edit-mhint" style="font-size:11px;color:#75757f;line-height:1.45"></div>
+      <div id="ident-edit-mhint" class="ie-hint"></div>
     </div>
-    <div style="font-size:12px;color:#c4c4cc;display:flex;flex-direction:column;gap:6px">Ce qui marche
+
+    <div class="ie-sec"><span class="ie-lbl">Ce qui marche</span>
       <div id="ident-edit-styles" style="display:flex;gap:6px;flex-wrap:wrap"></div>
-      <div style="font-size:11px;color:#75757f;line-height:1.45">Coche ce qui prend pour cette model. Les pastilles apparaissent a cote de son nom dans toute la Bibliotheque. On peut en cocher plusieurs, ou aucune.</div>
+      <div class="ie-hint">Ces pastilles suivent son nom dans toute la Biblioth&egrave;que. Plusieurs, ou aucune.</div>
+    </div>
+
+    <div class="ie-sec"><span class="ie-lbl">Photo de profil</span>
+      <label class="ie-fichier" id="ident-edit-avlbl">Choisir une image&hellip;
+        <input id="ident-edit-avatar" type="file" accept="image/*" onchange="identEditAvChoisi(this)"></label>
     </div>
     <div id="ident-edit-err" style="color:#f87171;font-size:12px;min-height:15px"></div>
     <div style="display:flex;gap:8px">
@@ -13762,6 +13791,25 @@ def _type_identite(ident) -> str:
         # Se tromper en montrant une entrée de trop est sans conséquence ;
         # se tromper en cachant une vraie modèle lui coûterait son scrape.
         return "modele"
+
+
+def _effectif_identite(ident) -> tuple:
+    """(nombre de VA, nombre de comptes Instagram) pour une identité.
+
+    Sert au panneau « Modifier » : le propriétaire doit voir ce qu'une entrée
+    PORTE avant de décider si c'est une modèle ou un dossier de montage. Sans
+    ce chiffre, il fallait se souvenir, ou aller le chercher dans une autre
+    page — et se souvenir de vingt-quatre entrées, personne ne le fait.
+    """
+    try:
+        import jailbreak as _jb_e
+        entree = (_jb_e._load() or {}).get(str(ident or "").strip().lower())
+    except Exception:
+        return (0, 0)
+    if not isinstance(entree, dict):
+        # Ancienne forme : l'entrée EST la liste de comptes.
+        return (0, len(entree or []))
+    return (len(entree.get("vas") or []), len(entree.get("accounts") or []))
 
 
 def _identites_modeles(identites=None) -> list:
@@ -21812,6 +21860,10 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         # Verrou servi au panneau : le bouton « Identité » se grise pour
         # celles qui ne peuvent pas sortir des modèles.
         f"data-typelock='{'1' if _type_mod.verrouillee(selected) else ''}' "
+        # Ce que l'entrée porte, servi au panneau : décider « modèle ou
+        # identité » sans ce chiffre revient à décider de mémoire.
+        f"data-vas='{_effectif_identite(selected)[0]}' "
+        f"data-comptes='{_effectif_identite(selected)[1]}' "
         f"title='Changer la photo{' ou le nom' if vault2 else ''} de cette identité' "
         "style='display:inline-flex;align-items:center;gap:7px;padding:9px 14px;background:#1a1a1f;"
         "border:1px solid #303036;color:#c4c4cc;border-radius:10px;font-size:13px;font-weight:600;"
@@ -37666,6 +37718,32 @@ def _render_jbanalyse_html() -> str:
     css = """
 <style>
 #ja-root{max-width:1180px}
+/* --- Panneau « Modifier » d'une identite ------------------------------
+   Il empilait cinq blocs de meme poids, chacun avec son paragraphe
+   d'explication : on ne voyait plus ce qui etait un REGLAGE et ce qui etait
+   un commentaire. Les sections portent maintenant un intitule court en
+   capitales, les aides passent en petit, et l'entete dit d'abord ce que
+   l'entree PORTE — trois VA, douze comptes — parce que c'est ce chiffre qui
+   permet de decider si c'est une modele ou un dossier de montage. */
+.ie-sec{display:flex;flex-direction:column;gap:7px}
+.ie-lbl{font-size:10px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:#75757f}
+.ie-hint{font-size:11px;color:#75757f;line-height:1.45}
+.ie-duo{display:flex;gap:8px}
+.ie-btn{flex:1;background:#131316;border:1.5px solid #34343a;color:#e6e6ea;border-radius:9px;
+  padding:9px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;transition:all .12s ease}
+.ie-btn:hover:not(:disabled){border-color:#4a4a52}
+.ie-tete{display:flex;align-items:center;gap:11px}
+.ie-pp{width:42px;height:42px;border-radius:50%;object-fit:cover;border:1.5px solid #34343a;flex-shrink:0;background:#131316}
+.ie-porte{font-size:11.5px;color:#8b8b96;margin-top:2px}
+.ie-fichier{display:block;background:#131316;border:1px dashed #3a3a42;border-radius:9px;
+  padding:9px 11px;font-size:12px;color:#9a9aa6;cursor:pointer;text-align:center}
+.ie-fichier:hover{border-color:#8b9cf7;color:#c4c4cc}
+.ie-fichier input{display:none}
+body.light .ie-lbl,body.light .ie-hint,body.light .ie-porte{color:#6b7280}
+body.light .ie-btn{background:#fff;border-color:#d8d8de;color:#1f2937}
+body.light .ie-fichier{background:#fff;border-color:#d8d8de;color:#6b7280}
+
 /* --- Entrees de menu en sommeil --------------------------------------
    Elles ne sont pas RETIREES : les routes vivent toujours, et une section
    qu'on croit morte se rouvre parfois. Elles sont juste rendues discretes,
