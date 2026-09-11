@@ -8769,6 +8769,12 @@ async function identEditRetirerOuvre(){
       ? ('Sera d\u00e9plac\u00e9 dans la corbeille : ' + l.map(function(e){
           return e.ou + (e.detail?(' (' + e.detail + ')'):''); }).join(', ') + '.')
       : 'Rien de stock\u00e9 sous ce nom.';
+    /* CE QUI EST ENCORE VIVANT SE DIT EN PREMIER. Un dossier de montage
+       vide et une creatrice avec trois VA et douze comptes s archivaient
+       jusqu ici d un clic identique. */
+    if(j && (j.vas || j.comptes))
+      txt = '⚠ ' + j.vas + ' VA et ' + j.comptes + ' compte(s) Instagram '
+          + 'y sont encore rattachés. ' + txt;
     if(j&&j.impossible&&j.impossible.length)
       txt += ' \u2014 ' + j.impossible[0];
     q.textContent = txt + ' Rien n\u2019est effac\u00e9 : tout part dans data/_corbeille_identites.';

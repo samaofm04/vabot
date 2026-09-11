@@ -3110,6 +3110,33 @@ try:
         # eu lieu vaut mieux qu un OK trompeur.
         print("     (node absent : le JS rendu n a pas ete verifie)")
 
+    # LES FRAGMENTS DIFFERES AUSSI. Le controle ci-dessus ne voit que la page
+    # principale : le JavaScript des ~40 onglets charges en AJAX n y figure
+    # pas, et il tombe dans le MEME piege -- un guillemet echappe dans une
+    # chaine Python est relu par Python AVANT d atteindre le navigateur, et
+    # l echappement disparait. Le bloc devient invalide en silence, et
+    # l onglet cesse de repondre sans la moindre erreur. Vu sur l onglet
+    # Sessions le 11/09/2026 : « Unexpected identifier ».
+    if _node:
+        _fragsJs = ["sessions"]
+        _casses = []
+        for _nomF in _fragsJs:
+            _hF = _cJs.get("/?lazy=%s&tab=%s" % (_nomF, _nomF),
+                           headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+            _bF = _reJs.findall(r"<script(?![^>]*src=)([^>]*)>(.*?)</script>",
+                                _hF, _reJs.S)
+            _cF = [c for a2, c in _bF if "json" not in a2.lower()]
+            if not _cF:
+                continue
+            _fF = TMP / ("frag_%s.js" % _nomF)
+            _fF.write_text((chr(10) + ";" + chr(10)).join(_cF), encoding="utf-8")
+            _rF = _spJs.run([_node, "--check", str(_fF)],
+                            capture_output=True, text=True, timeout=90)
+            if _rF.returncode != 0:
+                _casses.append("%s : %s" % (_nomF, (_rF.stderr or "")[:120]))
+        check("fragments : leur JavaScript passe aussi node --check",
+              not _casses, " | ".join(_casses))
+
     # --- l editeur de scenarios ------------------------------------------
     # Le catalogue d actions est declare par le poste : sans lui l editeur
     # ne peut proposer que des noms devines, et une action inventee fait
@@ -6135,9 +6162,11 @@ try:
     import identite_admin as _iaR
     import shutil as _shR, json as _jsR, pathlib as _plR
     import web_upload as _wR
-    _N, _NEUF = "zzz_ren_src", "zzz_ren_dst"
+    _N, _NEUF = "zzzrensrc", "zzzrendst"
     _FICHS = ("identity_market.json", "identity_type.json", "identity_styles.json",
-              "identity_order.json", "fav_brutes.json", "scrape_identites.json")
+              "identity_order.json", "fav_brutes.json", "scrape_identites.json",
+              "captions.json", "gdrive_sync_state.json", "jailbreak.json",
+              "banger_marks.json")
     _sauv = {}
     for _f in _FICHS:
         _pp = _plR.Path("data") / _f
@@ -6151,6 +6180,19 @@ try:
         _wR.safe_json.write(_plR.Path("data/identity_type.json"), {_N: "modele"})
         _wR.safe_json.write(_plR.Path("data/identity_order.json"), [_N, "autre"])
         _wR.safe_json.write(_plR.Path("data/fav_brutes.json"), {_N + "|reels|a.mp4": 1})
+        # Les cinq trous que la cartographie a trouves apres coup.
+        _wR.safe_json.write(_plR.Path("data/captions.json"), {_N: ["une caption"]})
+        _wR.safe_json.write(_plR.Path("data/scrape_identites.json"),
+                            {"actives": [_N, "jessye"], "modifie": 1})
+        _wR.safe_json.write(_plR.Path("data/gdrive_sync_state.json"),
+                            {"uploaded": {"Biblio/FR/%s/reels/a.mp4" % _N.capitalize(): {"size": 1}},
+                             "folders": {"root/%s" % _N.capitalize(): "id1"},
+                             "imported": {}})
+        _jbR = _jsR.loads((_plR.Path("data/jailbreak.json").read_text(encoding="utf-8")
+                           if _plR.Path("data/jailbreak.json").exists() else "{}"))
+        _jbR[_N] = {"vas": [{"name": "Bob"}], "accounts": [{"username": "x"}]}
+        _wR.safe_json.write(_plR.Path("data/jailbreak.json"), _jbR)
+        (_plR.Path("data/thumbnails/v3") / _N).mkdir(parents=True, exist_ok=True)
 
         # L apercu annonce ce qui sera touche, AVANT d agir.
         _ap = _iaR.apercu(_N)
@@ -6172,6 +6214,30 @@ try:
               (_NEUF + "|reels|a.mp4") in _jsR.loads(
                   _plR.Path("data/fav_brutes.json").read_text(encoding="utf-8")))
         check("renommer : aucun echec silencieux", _r["echecs"] == [], str(_r["echecs"]))
+        # LE REFERENTIEL PASSE PAR SA PROPRE FONCTION : elle prend le verrou du
+        # module et deplace l historique de paie, en annulant si ca ne suit pas.
+        import jailbreak as _jbMod
+        check("renommer : le referentiel Jailbreak suit",
+              _NEUF in (_jbMod._load() or {}) and _N not in (_jbMod._load() or {}))
+        check("renommer : il passe par rename_identity_in_storage, pas a la main",
+              "jailbreak.json" not in [x[0] for x in _iaR._CLES]
+              and "rename_identity_in_storage" in _plR.Path("identite_admin.py").read_text(encoding="utf-8"))
+        # scrape_identites.json est un DICT, pas une liste : il etait saute.
+        check("renommer : le perimetre du scrape suit (c est un dict, pas une liste)",
+              _NEUF in _jsR.loads(_plR.Path("data/scrape_identites.json")
+                                  .read_text(encoding="utf-8"))["actives"])
+        check("renommer : les captions suivent (l ancienne route le faisait deja)",
+              _NEUF in _jsR.loads(_plR.Path("data/captions.json").read_text(encoding="utf-8")))
+        # Le plus couteux : sans ca, la synchro recopie TOUTE la bibliotheque.
+        _dr = _jsR.loads(_plR.Path("data/gdrive_sync_state.json").read_text(encoding="utf-8"))
+        check("renommer : l etat Google Drive suit, malgre la casse differente",
+              all(_NEUF in k for k in _dr["uploaded"]) and all(_NEUF in k for k in _dr["folders"]),
+              str(_dr)[:110])
+        check("renommer : les vignettes suivent, au lieu de rester orphelines",
+              (_plR.Path("data/thumbnails/v3") / _NEUF).is_dir())
+        check("renommer : un nom a tiret ou souligne est refuse (le bot tronque au separateur)",
+              _iaR.normaliser("marie-lou") == "marielou"
+              and _iaR.normaliser("lola_us") == "lolaus")
         check("renommer : ce qui ne peut pas etre suivi est DIT",
               any("Discord" in x for x in _r["impossible"]))
         check("renommer : un nom deja pris est refuse",
@@ -6194,7 +6260,9 @@ try:
               _NEUF not in _jsR.loads(
                   _plR.Path("data/identity_order.json").read_text(encoding="utf-8")))
         check("retirer : une identite inconnue est refusee",
-              _iaR.archiver("zzz_jamais_existe").get("ok") is not True)
+              _iaR.archiver("zzzjamaisexiste").get("ok") is not True)
+        check("retirer : l apercu annonce ce qui est encore VIVANT",
+              "vas" in _iaR.apercu("jessye") and "comptes" in _iaR.apercu("jessye"))
 
         # Les routes : verrou, confirmation retapee.
         _aR = _wR.create_app(); _aR.testing = True
@@ -6234,6 +6302,7 @@ try:
                 _wR.safe_json.write_text(_pp, _v)
         for _n in (_N, _NEUF):
             _shR.rmtree(_iaR.IDENTITES / _n, ignore_errors=True)
+            _shR.rmtree(_plR.Path("data/thumbnails/v3") / _n, ignore_errors=True)
         _shR.rmtree(_iaR.CORBEILLE, ignore_errors=True)
 
     _srcA = _plR.Path("web_upload.py").read_text(encoding="utf-8")
@@ -6245,6 +6314,12 @@ try:
           "/identity/apercu" in _srcA)
     check("interface : ce que le renommage n a pas suivi remonte a l ecran",
           "j1.impossible" in _srcA and "j1.echecs" in _srcA)
+    check("interface : la confirmation annonce les VA et comptes encore rattaches",
+          "y sont encore rattach" in _srcA and "j.vas || j.comptes" in _srcA)
+    check("interface : l avertissement nomme la boucle qui retire l acces des VA",
+          any("dix minutes" in x for x in _iaR.IMPOSSIBLE))
+    check("interface : il nomme aussi la page publique /bio",
+          any("/bio/" in x for x in _iaR.IMPOSSIBLE))
     # LES EMOJI PASSENT AU JEU D ICONES DU SITE. Le depot le dit deja pour
     # les drapeaux : « Windows n embarque aucune police de drapeaux, 🇫🇷 s y
     # afficherait "FR" en petites lettres ». Le panneau en posait.
