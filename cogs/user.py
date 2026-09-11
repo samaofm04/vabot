@@ -7113,7 +7113,20 @@ _ICONES_ACTIONS = {
     "templateflashbanger": "vatemplateflashbanger",
     "templateflashbrut": "vatemplateflashbrut",
     "brutbanger": "vabrutbanger",
-    "captionbrut": "vacaptionbrut",
+    # Les trois dernieres du panneau : la variante marquee du Template, les
+    # Trends, et « Choisir ma brute ». Leurs dessins existaient dans
+    # outils_icones_discord.py depuis leur ajout au menu, mais la table ne les
+    # citait pas : les boutons gardaient donc leur emoji standard, et
+    # personne ne le voyait — un emoji standard n'a pas l'air d'un oubli.
+    "templatebanger": "vatemplatebanger",
+    "trend": "vatrend",
+    "brutchoix": "vabrutchoix",
+    # « captionbrut » est parti d'ici : le bouton a quitte le menu le
+    # 21/08 (il envoyait le meme couple brute ⭐ + caption ⭐ que « Montage »,
+    # mais la caption en texte a recopier). Seules restent la commande
+    # /captionbrut et sa rangee de repli, qui n'ont pas besoin d'icone. Le
+    # fichier vacaptionbrut.png est GARDE : il a ete dessine a la main hors
+    # du generateur et ne se reconstruit pas.
 }
 
 
