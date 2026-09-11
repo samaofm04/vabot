@@ -25,14 +25,19 @@ Un nom ne dit pas ce qu'une entree est. Le reglage se pose donc a la main,
 dans « Modifier », a cote du marche -- au meme endroit et de la meme facon
 que FR/US, parce que c'est la meme nature de decision.
 
-LE DEFAUT, TANT QUE RIEN N'EST CHOISI
+LE DEFAUT : MODELE
 
-On ne peut pas laisser vingt-quatre entrees sans reponse. La regle de repli
-s'appuie sur le seul fait verifiable : une modele a des VA ou des comptes
-Instagram dans le referentiel Jailbreak. Une identite video n'en a jamais.
-Elle se trompera parfois -- une creatrice toute neuve, pas encore montee,
-passera pour une identite -- et c'est precisement pour ca que le reglage
-existe : deux clics dans « Modifier » et c'est corrige, definitivement.
+Choix du proprietaire, le 11/09/2026 : « de base laisse-les toutes en modele
+et je selectionne ». Tant qu'il n'a pas tranche pour une entree, elle reste
+donc une modele et rien ne disparait de son ecran.
+
+Une regle de repli plus maligne avait ete ecrite d'abord -- « modele si elle
+a des VA ou des comptes dans le referentiel Jailbreak » -- et elle a ete
+retiree. Elle avait pourtant l'air juste, mais elle DEVINE : une creatrice
+toute neuve, pas encore montee, serait passee pour un dossier de montage et
+aurait disparu de Social Analytics sans que personne ait rien demande. Un
+defaut qui efface est un mauvais defaut ; celui qui garde ne coute qu'une
+liste trop longue, le temps qu'il fasse le tri.
 
 Les entrees de la Bibliotheque 2 (prefixe v2_) ne sont JAMAIS des modeles :
 leur propre commentaire dans web_upload.py dit qu'elles sont « invisibles de
@@ -75,28 +80,6 @@ def _table() -> dict:
     return _CACHE["data"]
 
 
-def _a_un_referentiel(identity: str) -> bool:
-    """La regle de repli : cette entree a-t-elle des VA ou des comptes ?
-
-    Best-effort : si le referentiel est illisible, on repond « oui ». Se
-    tromper en montrant une entree de trop est sans consequence ; se tromper
-    en cachant une vraie modele lui ferait perdre sa paie et son scrape.
-    """
-    try:
-        import jailbreak as _jb
-        entree = (_jb._load() or {}).get((identity or "").strip().lower())
-    except Exception:
-        return True
-    if entree is None:
-        return False
-    comptes = entree.get("accounts") if isinstance(entree, dict) else entree
-    if comptes:
-        return True
-    # Une fiche ouverte sans compte encore ajoute compte quand meme : quelqu'un
-    # l'a creee expres dans Jailbreak.
-    return isinstance(entree, dict) and bool(entree.get("vas") or entree)
-
-
 def de(identity: str) -> str:
     """« modele » ou « identite ». Jamais autre chose."""
     idl = (identity or "").strip().lower()
@@ -107,7 +90,7 @@ def de(identity: str) -> str:
     v = _table().get(idl)
     if v in (MODELE, IDENTITE):
         return v
-    return MODELE if _a_un_referentiel(idl) else IDENTITE
+    return MODELE
 
 
 def est_modele(identity: str) -> bool:

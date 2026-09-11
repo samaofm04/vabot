@@ -6151,6 +6151,11 @@ try:
               _tiT.de("zzz_essai") == "identite")
         check("nature : une entree jamais reglee n est pas dite « choisie »",
               not _tiT.choisi("zzz_jamais_vue"))
+        # LE DEFAUT EST « MODELE », a la demande du proprietaire : rien ne
+        # disparait de son ecran tant qu il n a pas fait le tri lui-meme.
+        check("nature : tant que rien n est choisi, c est une modele",
+              _tiT.de("zzz_jamais_vue") == "modele"
+              and _tiT.est_modele("zzz_encore_une_autre"))
         # Un nom vide ne doit pas devenir une modele par accident.
         check("nature : un nom vide n est pas une modele", not _tiT.est_modele(""))
         # Le filtre garde l ordre recu.
