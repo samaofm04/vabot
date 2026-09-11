@@ -54610,7 +54610,15 @@ def create_app():
         if not is_auth():
             return "", 401
         try:
-            return _render_home_dashboard_html()
+                # LA LANGUE S ARRETAIT A LA PAGE. _traduire_html n est
+                # applique que dans _render_upload() et dans les onglets
+                # differes : un fragment charge en AJAX repartait donc en
+                # FRANCAIS alors que l anglais est la langue par defaut. Le
+                # proprietaire voyait son tableau de bord en anglais, cliquait
+                # sur une periode, et la moitie de l ecran basculait en
+                # francais sous ses yeux.
+            _frag = _render_home_dashboard_html()
+            return _traduire_html(_frag) if _langue_courante() == "en" else _frag
         except Exception as e:
             return f"<div style='color:#f87171;padding:20px'>Erreur : {e}</div>"
 
@@ -57516,7 +57524,10 @@ def create_app():
         if not is_auth():
             return "", 401
         try:
-            return _render_textpool_html()
+            # Meme raison qu au-dessus : un fragment AJAX doit traverser la
+            # traduction, sinon il ramene le francais dans une page anglaise.
+            _frag = _render_textpool_html()
+            return _traduire_html(_frag) if _langue_courante() == "en" else _frag
         except Exception as e:
             return f"<div style='color:#f99'>Erreur : {e}</div>", 500
 
@@ -57786,7 +57797,9 @@ def create_app():
         if not is_auth():
             return "", 401
         try:
-            return _render_onboarding_html()
+            # Meme raison qu au-dessus.
+            _frag = _render_onboarding_html()
+            return _traduire_html(_frag) if _langue_courante() == "en" else _frag
         except Exception as e:
             return f"<div style='color:#f99;padding:14px'>Erreur render onboarding : {type(e).__name__}: {e}</div>", 500
 

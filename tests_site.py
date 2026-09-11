@@ -6155,6 +6155,43 @@ try:
         check("differe : un libelle francais ne survit pas en langue par defaut",
               ("Décroissant" in _frTr) and ("Décroissant" not in _enTr),
               "FR:%s EN:%s" % ("Décroissant" in _frTr, "Décroissant" in _enTr))
+        # LE MEME TROU, AILLEURS. Les onglets differes ont ete rattrapes ;
+        # /home/overview, /textpool/render et /onboarding/render, non. Le
+        # tableau de bord s affichait en anglais, et basculait en francais des
+        # qu on cliquait sur une periode -- parce que le fragment AJAX
+        # court-circuitait _traduire_html.
+        _cTr.set_cookie("va_lang", "fr")
+        _txtFr = _cTr.get("/home/overview").get_data(as_text=True)
+        _cTr.delete_cookie("va_lang")
+        _txtEn = _cTr.get("/home/overview").get_data(as_text=True)
+        check("apercu : le fragment de periode est traduit comme la page",
+              bool(_txtFr) and _txtFr != _txtEn)
+        check("apercu : aucun libelle de periode francais en langue par defaut",
+              not any(m in _txtEn for m in ("Aujourd'hui", "Cette semaine",
+                                            "Pourboires", "Abonnements")),
+              [m for m in ("Aujourd'hui", "Cette semaine", "Pourboires",
+                           "Abonnements") if m in _txtEn])
+        # LA REGLE, pour toute la classe : une route qui rend un fragment
+        # _render_*_html doit le faire passer par la traduction. Sans ce
+        # garde-fou, le prochain fragment AJAX repartira en francais et
+        # personne ne le verra -- c est arrive deux fois.
+        import re as _reTr
+        import pathlib as _plTr
+        _srcTr = _plTr.Path("web_upload.py").read_text(encoding="utf-8")
+        _lgTr = _srcTr.split(chr(10))
+        _oublis = []
+        for _i, _l in enumerate(_lgTr):
+            _m = _reTr.match(r"\s*@app\.route\(\"([^\"]+)\"", _l)
+            if not _m:
+                continue
+            _corps = chr(10).join(_lgTr[_i:_i + 60])
+            _fin = _corps.find("@app.route", 12)
+            if _fin > 0:
+                _corps = _corps[:_fin]
+            if _reTr.search(r"return\s+_render_[a-z0-9_]*html\(", _corps)                     and "_traduire_html" not in _corps:
+                _oublis.append(_m.group(1))
+        check("fragments : toute route qui rend un _render_*_html le traduit",
+              not _oublis, ", ".join(_oublis))
     finally:
         _wTr._load_web_users = _svTr
 except Exception as _eTr:
