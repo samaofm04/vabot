@@ -1417,7 +1417,15 @@ body.light.inflowwlight .sel-cb:checked + .sel-circle::after,body.light.inflowwl
    « Cle IA » -- sont coupes et inatteignables au doigt. */
 .subtabs{display:flex;gap:4px;margin:0 0 18px;padding:0 0 2px;
   border-bottom:1px solid #26262c;overflow-x:auto;-webkit-overflow-scrolling:touch}
-.subtab{flex:0 0 auto}
+.subtab{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px}
+/* Le logo du service, a la taille du texte qui le suit. Pose en
+   ligne (pas en pastille) : cote a cote, huit pastilles de couleur
+   feraient une guirlande. */
+.lgi{width:1.15em;height:1.15em;flex:0 0 auto;vertical-align:-.2em;
+  margin-right:6px}
+/* Dans la barre de sous-onglets, c'est le gap du flex qui espace :
+   deux ecarts cumules decollaient le logo de son libelle. */
+.subtab .lgi{margin-right:0}
 .subtab{background:none;border:0;border-bottom:2px solid transparent;
   color:#8b8b96;font-weight:600;font-size:12.5px;font-family:inherit;
   padding:9px 13px;cursor:pointer;border-radius:8px 8px 0 0;margin-bottom:-1px}
@@ -10031,6 +10039,12 @@ document.addEventListener('DOMContentLoaded', function(){
 </script>
 {vault_core_html}
 </head><body class="{theme_body_class}">
+<!-- LES LOGOS DES SERVICES, poses une seule fois et rappeles par
+     <use> : les memes 9 Ko de chemins partaient sinon deux fois par
+     page. Discord, Instagram, Telegram, Claude et Rapid viennent de
+     simple-icons ; MyPuls, Getatext et Apify sont dessines d'apres
+     leurs icones. -->
+<svg style="position:absolute;width:0;height:0" aria-hidden="true"><symbol id="lg-discord" viewBox="0 0 24 24"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" fill="#5865F2"/></symbol><symbol id="lg-instagram" viewBox="0 0 24 24"><defs><linearGradient id="lgGrad-ig" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#FFDD55"/><stop offset=".35" stop-color="#FF543E"/><stop offset=".7" stop-color="#C837AB"/><stop offset="1" stop-color="#3771C8"/></linearGradient></defs><path d="M7.0301.084c-1.2768.0602-2.1487.264-2.911.5634-.7888.3075-1.4575.72-2.1228 1.3877-.6652.6677-1.075 1.3368-1.3802 2.127-.2954.7638-.4956 1.6365-.552 2.914-.0564 1.2775-.0689 1.6882-.0626 4.947.0062 3.2586.0206 3.6671.0825 4.9473.061 1.2765.264 2.1482.5635 2.9107.308.7889.72 1.4573 1.388 2.1228.6679.6655 1.3365 1.0743 2.1285 1.38.7632.295 1.6361.4961 2.9134.552 1.2773.056 1.6884.069 4.9462.0627 3.2578-.0062 3.668-.0207 4.9478-.0814 1.28-.0607 2.147-.2652 2.9098-.5633.7889-.3086 1.4578-.72 2.1228-1.3881.665-.6682 1.0745-1.3378 1.3795-2.1284.2957-.7632.4966-1.636.552-2.9124.056-1.2809.0692-1.6898.063-4.948-.0063-3.2583-.021-3.6668-.0817-4.9465-.0607-1.2797-.264-2.1487-.5633-2.9117-.3084-.7889-.72-1.4568-1.3876-2.1228C21.2982 1.33 20.628.9208 19.8378.6165 19.074.321 18.2017.1197 16.9244.0645 15.6471.0093 15.236-.005 11.977.0014 8.718.0076 8.31.0215 7.0301.0839m.1402 21.6932c-1.17-.0509-1.8053-.2453-2.2287-.408-.5606-.216-.96-.4771-1.3819-.895-.422-.4178-.6811-.8186-.9-1.378-.1644-.4234-.3624-1.058-.4171-2.228-.0595-1.2645-.072-1.6442-.079-4.848-.007-3.2037.0053-3.583.0607-4.848.05-1.169.2456-1.805.408-2.2282.216-.5613.4762-.96.895-1.3816.4188-.4217.8184-.6814 1.3783-.9003.423-.1651 1.0575-.3614 2.227-.4171 1.2655-.06 1.6447-.072 4.848-.079 3.2033-.007 3.5835.005 4.8495.0608 1.169.0508 1.8053.2445 2.228.408.5608.216.96.4754 1.3816.895.4217.4194.6816.8176.9005 1.3787.1653.4217.3617 1.056.4169 2.2263.0602 1.2655.0739 1.645.0796 4.848.0058 3.203-.0055 3.5834-.061 4.848-.051 1.17-.245 1.8055-.408 2.2294-.216.5604-.4763.96-.8954 1.3814-.419.4215-.8181.6811-1.3783.9-.4224.1649-1.0577.3617-2.2262.4174-1.2656.0595-1.6448.072-4.8493.079-3.2045.007-3.5825-.006-4.848-.0608M16.953 5.5864A1.44 1.44 0 1 0 18.39 4.144a1.44 1.44 0 0 0-1.437 1.4424M5.8385 12.012c.0067 3.4032 2.7706 6.1557 6.173 6.1493 3.4026-.0065 6.157-2.7701 6.1506-6.1733-.0065-3.4032-2.771-6.1565-6.174-6.1498-3.403.0067-6.156 2.771-6.1496 6.1738M8 12.0077a4 4 0 1 1 4.008 3.9921A3.9996 3.9996 0 0 1 8 12.0077" fill="url(#lgGrad-ig)"/></symbol><symbol id="lg-mypuls" viewBox="0 0 24 24"><path d="M12 20.6 3.9 12.5a5.2 5.2 0 0 1 0-7.4 5.2 5.2 0 0 1 7.4 0l.7.7.7-.7a5.2 5.2 0 0 1 7.4 0 5.2 5.2 0 0 1 0 7.4z" fill="none" stroke="#C6F24E" stroke-width="2.1" stroke-linejoin="round"/><rect x="7.6" y="9.3" width="1.9" height="3.6" rx=".5" fill="#C6F24E"/><rect x="11.05" y="7.6" width="1.9" height="5.3" rx=".5" fill="#C6F24E"/><rect x="14.5" y="10.4" width="1.9" height="2.5" rx=".5" fill="#C6F24E"/></symbol><symbol id="lg-telegram" viewBox="0 0 24 24"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" fill="#26A5E4"/></symbol><symbol id="lg-getatext" viewBox="0 0 24 24"><defs><linearGradient id="lgGrad-sim" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#24417E"/><stop offset="1" stop-color="#5B9BD5"/></linearGradient></defs><path d="M4.4 1.9h8.2l6.9 6.4v12.9a1.8 1.8 0 0 1-1.8 1.8H4.4a1.8 1.8 0 0 1-1.8-1.8V3.7a1.8 1.8 0 0 1 1.8-1.8z" fill="url(#lgGrad-sim)"/><rect x="5.9" y="8.6" width="10.2" height="9.4" rx="2.6" fill="#F5D525"/><path d="M5.9 13.3h10.2M11 8.6v9.4" stroke="#24417E" stroke-width="1.15"/></symbol><symbol id="lg-claude" viewBox="0 0 24 24"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z" fill="#D97757"/></symbol><symbol id="lg-rapid" viewBox="0 0 24 24"><path d="M16.028 15.798c-.212-.065-.228-.359.017-.457 4.216-1.993 3.938-6.519 3.938-6.519C19.967 4.232 16.6-.016 11.158 0 5.112.033 1.468 4.787 1.5 10.407 1.55 20.26 9.067 24.017 11.42 24l-.016-3.905c0-.62 0-1.11.375-1.11 0 0 2.42 2.434 5.116 2.417 4.183-.016 5.605-3.529 5.605-3.529zm-4.837-3.006a3.86 3.86 0 0 1-3.89-3.855 3.86 3.86 0 0 1 3.857-3.889 3.86 3.86 0 0 1 3.89 3.856c0 2.14-1.716 3.888-3.857 3.888z" fill="#0055DA"/></symbol><symbol id="lg-apify" viewBox="0 0 24 24"><path d="M1.2 1.6h9.1L1.2 14.9z" fill="#21A24A" stroke="#21A24A" stroke-width="1.6" stroke-linejoin="round"/><path d="M13.7 1.6h9.1v13.3z" fill="#2563F2" stroke="#2563F2" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 11.4 22.6 22.4H1.4z" fill="#F4661C" stroke="#F4661C" stroke-width="1.6" stroke-linejoin="round"/></symbol></svg>
 <!-- Temoin des analyses de montage : masque tant qu'il n'y a rien a dire. -->
 <a id="va-analyse-temoin" href="/a-relire" title="Analyses de montage"
    style="display:none;position:fixed;top:12px;right:16px;z-index:9999;
@@ -12806,18 +12820,18 @@ document.addEventListener('keydown', function(e){
      chargement differe remplace des morceaux de section, et quatre des six
      pages sont differees. -->
 <div id="api-bar" class="subtabs" style="display:none">
-  <button type="button" class="subtab" id="tab-stoken" data-api="stoken" data-titre="Token bot admin" data-sous="Token du 2e bot Discord">Token bot admin</button>
-  <button type="button" class="subtab" id="tab-sinsta" data-api="sinsta" data-titre="Cookies Instagram" data-sous="Auth scraper Instagram">Cookies Instagram</button>
-  <button type="button" class="subtab" id="tab-smypuls" data-api="smypuls" data-titre="Cookies MyPuls" data-sous="Session mypuls.app — sync revenus chatteurs et push planning">Cookies MyPuls</button>
-  <button type="button" class="subtab" id="tab-vtg" data-api="vtg" data-titre="Veille Telegram" data-sous="Bot Telegram pour la veille reels">Veille Telegram</button>
-  <button type="button" class="subtab" id="tab-snumgen" data-api="snumgen" data-titre="Générateurs SMS" data-sous="Pays des numéros et des mails — 0 = Russie, cause du « aucun numéro dispo »">Générateurs SMS</button>
-  <button type="button" class="subtab" id="tab-saikey" data-api="saikey" data-titre="Clé IA" data-sous="Lecture du texte sur les vidéos + bios IA">Clé IA</button>
+  <button type="button" class="subtab" id="tab-stoken" data-api="stoken" data-titre="Token bot admin" data-sous="Token du 2e bot Discord"><svg class="lgi"><use href="#lg-discord"/></svg>Token bot admin</button>
+  <button type="button" class="subtab" id="tab-sinsta" data-api="sinsta" data-titre="Cookies Instagram" data-sous="Auth scraper Instagram"><svg class="lgi"><use href="#lg-instagram"/></svg>Cookies Instagram</button>
+  <button type="button" class="subtab" id="tab-smypuls" data-api="smypuls" data-titre="Cookies MyPuls" data-sous="Session mypuls.app — sync revenus chatteurs et push planning"><svg class="lgi"><use href="#lg-mypuls"/></svg>Cookies MyPuls</button>
+  <button type="button" class="subtab" id="tab-vtg" data-api="vtg" data-titre="Veille Telegram" data-sous="Bot Telegram pour la veille reels"><svg class="lgi"><use href="#lg-telegram"/></svg>Veille Telegram</button>
+  <button type="button" class="subtab" id="tab-snumgen" data-api="snumgen" data-titre="Générateurs SMS" data-sous="Pays des numéros et des mails — 0 = Russie, cause du « aucun numéro dispo »"><svg class="lgi"><use href="#lg-getatext"/></svg>Générateurs SMS</button>
+  <button type="button" class="subtab" id="tab-saikey" data-api="saikey" data-titre="Clé IA" data-sous="Lecture du texte sur les vidéos + bios IA"><svg class="lgi"><use href="#lg-claude"/></svg>Clé IA</button>
 </div>
 
 <!-- SETTINGS - TOKEN -->
 <div class="form-section" id="form-stoken" style="display:none">
 <form method="POST" action="/settings/admin_token" class="box">
-<h3 style="margin-top:0">🤖 Token du bot Admin (2e bot)</h3>
+<h3 style="margin-top:0"><svg class="lgi"><use href="#lg-discord"/></svg>Token du bot Admin (2e bot)</h3>
 <small>Statut actuel : <b>{admin_token_status}</b></small>
 <label>Token Discord du bot admin</label>
 <input type="password" name="token" placeholder="MTU... (colle le token Discord)" required>
@@ -12914,7 +12928,7 @@ document.addEventListener('keydown', function(e){
 
 <!-- RapidAPI - méthode recommandée -->
 <form method="POST" action="/settings/insta_rapidapi" class="box" style="border:2px solid #00d68f">
-<h3 style="margin-top:0">🚀 RapidAPI <span style="background:#00d68f;color:#000;padding:2px 8px;border-radius:4px;font-size:11px;margin-left:8px">RECOMMANDÉ</span></h3>
+<h3 style="margin-top:0"><svg class="lgi"><use href="#lg-rapid"/></svg>RapidAPI <span style="background:#00d68f;color:#000;padding:2px 8px;border-radius:4px;font-size:11px;margin-left:8px">RECOMMANDÉ</span></h3>
 <small>Méthode <b>fiable + illimitée</b> (~30€/mois) — pas de rate-limit, pas besoin de cookies, pas de risque ban.</small>
 <details style="margin-top:12px;margin-bottom:14px"><summary style="cursor:pointer;color:#7289da;font-size:14px;font-weight:600">📖 Comment souscrire ?</summary>
 <div style="padding:14px;background:#0f0f0f;border-radius:6px;margin-top:8px;font-size:13px;line-height:1.7;color:#aaa">
@@ -12958,7 +12972,7 @@ document.addEventListener('keydown', function(e){
 </form>
 
 <form method="POST" action="/settings/insta_auth" class="box">
-<h3 style="margin-top:0">🔧 Saisie manuelle des cookies</h3>
+<h3 style="margin-top:0"><svg class="lgi"><use href="#lg-instagram"/></svg>Saisie manuelle des cookies</h3>
 <small>Statut : <b>{insta_auth_status}</b></small>
 <details style="margin-top:14px;margin-bottom:14px"><summary style="cursor:pointer;color:#7289da;font-size:14px;font-weight:600">📖 Comment récupérer mes cookies ?</summary>
 <div style="padding:14px;background:#0f0f0f;border-radius:6px;margin-top:8px;font-size:13px;line-height:1.6;color:#aaa">
@@ -13063,7 +13077,7 @@ document.addEventListener('keydown', function(e){
 <!-- SETTINGS - COOKIES MYPULS -->
 <div class="form-section" id="form-smypuls" style="display:none">
 <div class="box">
-<h3 style="margin-top:0">🍪 Cookies MyPuls</h3>
+<h3 style="margin-top:0"><svg class="lgi"><use href="#lg-mypuls"/></svg>Cookies MyPuls</h3>
 <small>Session mypuls.app — utilisée pour la sync des revenus chatteurs et le push planning</small>
 <div style="margin-top:14px">{mypuls_cookies_html}</div>
 </div>
@@ -13072,7 +13086,7 @@ document.addEventListener('keydown', function(e){
 <!-- SETTINGS - GÉNÉRATEURS SMS (pays + service ; les clés restent dans /smskey) -->
 <div class="form-section" id="form-snumgen" style="display:none">
 <div class="box">
-<h3 style="margin-top:0">📱 Générateurs de numéros et de mails</h3>
+<h3 style="margin-top:0"><svg class="lgi"><use href="#lg-getatext"/></svg>Générateurs de numéros et de mails</h3>
 <small>Le pays décide de ce que les fournisseurs peuvent te donner. Ce réglage n'existait que dans Discord — il est ici pour que le site s'en sorte seul.</small>
 <div style="margin-top:14px">{numgen_html}</div>
 </div>
@@ -13081,7 +13095,7 @@ document.addEventListener('keydown', function(e){
 <!-- SETTINGS - CLÉ IA (Anthropic) -->
 <div class="form-section" id="form-saikey" style="display:none">
 <div class="box">
-<h3 style="margin-top:0">🧠 Clé IA (Anthropic)</h3>
+<h3 style="margin-top:0"><svg class="lgi"><use href="#lg-claude"/></svg>Clé IA (Anthropic)</h3>
 <small>Sert à : lire le texte incrusté sur les vidéos de veille (Telegram) + générer les bios IA. Une seule clé pour les deux.</small>
 <div style="margin-top:14px">{aikey_html}</div>
 </div>
@@ -36324,7 +36338,7 @@ def _render_vtg_html() -> str:
 
     return (
         "<div style='max-width:680px'>"
-        "<h2 style='margin:0 0 6px;font-size:20px'>↗ Veille Telegram</h2>"
+        "<h2 style='margin:0 0 6px;font-size:20px'><svg class='lgi'><use href='#lg-telegram'/></svg>Veille Telegram</h2>"
         "<p style='margin:0 0 18px;color:#888;font-size:13px'>"
         "Configure ton bot Telegram pour envoyer les reels intéressants au groupe de veille en 1 clic. "
         "Le serveur télécharge la vidéo IG et l'upload directement comme fichier vidéo (comme un bot downloader Discord)."
@@ -46396,7 +46410,7 @@ def _render_apify_settings() -> str:
     )
     return (
         "<div style='margin-top:22px;border-top:1px solid #26263a;padding-top:18px'>"
-        "<div style='font-weight:800;font-size:14px;margin-bottom:10px'>▶ Apify — téléchargement des reels</div>"
+        "<div style='font-weight:800;font-size:14px;margin-bottom:10px'><svg class='lgi'><use href='#lg-apify'/></svg>Apify — téléchargement des reels</div>"
         + status
         + "<form method='POST' action='/settings/apify_token' style='display:flex;flex-direction:column;gap:8px'>"
         "<label style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em'>Token API Apify (apify_api_…)</label>"
