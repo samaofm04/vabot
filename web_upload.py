@@ -15234,6 +15234,66 @@ def _scrape_ident_html(ident: str) -> str:
         f"↻</span>")
 
 
+def _bangers_encart_html() -> str:
+    """Le reglage du seuil, et ou en est l'archive.
+
+    Aucune classe nouvelle : on reprend .sv-box / .sv-h / .sv-pill du bandeau
+    voisin, qui ont deja leur contrepartie en theme clair. Une classe coloree
+    de plus serait une classe de plus a repeindre en clair, et le banc d'essai
+    du depot la refuserait — a juste titre.
+    """
+    try:
+        import bangers as _bg_h
+        b = _bg_h.bilan()
+    except Exception:                                         # noqa: BLE001
+        return ""
+    if b["total"]:
+        etat = (f"<b>{b['total']}</b> reel(s) archivé(s) — {b['avec_video']} avec "
+                f"la vidéo, {b['en_attente']} en attente")
+        if b["perdues"]:
+            etat += f", {b['perdues']} sans vidéo (lien gardé)"
+        if b["muets"]:
+            etat += f" · {b['muets']} trop ancien(s) pour être annoncé(s)"
+    else:
+        etat = "<b>Rien pour l'instant</b> — le prochain reel qui dépassera le seuil"
+    return (
+        "<div class='sv-box'>"
+        "<div class='sv-h'>🔥 Bangers — " + etat +
+        ". Un reel qui passe le seuil part dans le salon Discord « banger », et "
+        "surtout il est <b>gardé ici</b> : le lien, la vidéo et la description. "
+        "Le jour où le compte tombe, c'est tout ce qu'il en reste.</div>"
+        "<div class='sv-pills'>"
+        "<span class='sv-pill' style='cursor:default'>Seuil</span>"
+        f"<input id='bg-seuil' class='sv-pill' type='number' min='{_bangers_min()}' "
+        f"max='{_bangers_max()}' step='500' value='{b['seuil']}' "
+        "style='width:96px;text-align:right' "
+        "title='À partir de combien de vues un reel est un banger'>"
+        "<span class='sv-pill' style='cursor:default'>vues</span>"
+        "<button type='button' class='sv-pill' onclick='bgSeuil(this)'>"
+        "Enregistrer</button>"
+        "<button type='button' class='sv-pill' onclick='bgCycle(this)' "
+        "title='Télécharge ce qui manque et envoie les annonces en attente, "
+        "sans attendre le prochain passage'>⟳ Traiter maintenant</button>"
+        "</div>"
+        "</div>")
+
+
+def _bangers_min() -> int:
+    try:
+        import bangers as _b
+        return int(_b.SEUIL_MIN)
+    except Exception:                                         # noqa: BLE001
+        return 1000
+
+
+def _bangers_max() -> int:
+    try:
+        import bangers as _b
+        return int(_b.SEUIL_MAX)
+    except Exception:                                         # noqa: BLE001
+        return 1000000
+
+
 def _suivi_pastilles_html(identities) -> str:
     """Une pastille par identite : allumee = scrapee, eteinte = ignoree."""
     noms = sorted({str(x or "").strip().lower() for x in (identities or []) if str(x or "").strip()})
@@ -16421,6 +16481,15 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
     if _pp_jour:
         out["premier_post_at"] = _pp_jour
         out["premier_post_exact"] = bool(_pp_exact)
+    # VEILLE DES BANGERS. C'est le seul endroit du site ou la liste BRUTE des
+    # reels existe, avec leurs vues : plus loin il ne reste que des agregats
+    # (« preview » ne garde que 6 vignettes, sans legende ni lien video).
+    #
+    # Posee APRES le garde-fou « scrape vide suspect » : celui-ci sort par
+    # `return kept` quelques lignes plus haut, avec des reels qui viennent du
+    # releve PRECEDENT. Detecter la-dessus ferait ressortir d'anciens reels a
+    # chaque passage rate d'Instagram.
+    _banger_examiner(h, reels)
     _cache_put_stats(h, out)
     return out
 
@@ -31791,7 +31860,8 @@ def _render_jailbreak_html() -> str:
         # eteintes gardent leurs comptes, on cesse simplement de les
         # interroger — et tout ecran qui lit leurs chiffres doit le DIRE au
         # lieu d'afficher un zero.
-        + _suivi_pastilles_html(identities) +
+        + _suivi_pastilles_html(identities)
+        + _bangers_encart_html() +
         # Barre de progression du scrape (masquée tant qu'aucun scrape ne tourne)
         "<div id='jb-scrape-prog' style='display:none;margin:0 0 16px;background:#0f1116;"
         "border:1px solid #23262f;border-radius:12px;padding:12px 16px'>"
@@ -33392,6 +33462,48 @@ def _render_jailbreak_html() -> str:
         "     }"
         "     if(typeof showToast === 'function')"
         "       showToast(j.suivies + ' identite(s) suivie(s)', 'success');"
+        "     jbSoftRefresh();"
+        "   });"
+        "}"
+        "function bgSeuil(btn){"
+        "  var i = document.getElementById('bg-seuil');"
+        "  if(!i) return;"
+        "  var fd = new FormData();"
+        "  fd.append('seuil', i.value || '');"
+        "  var v = btn.textContent;"
+        "  btn.disabled = true; btn.textContent = '...';"
+        "  fetch('/jailbreak/bangers', {method:'POST', body:fd})"
+        "   .then(_jbJsonOrAuth)"
+        "   .then(function(j){"
+        "     btn.disabled = false; btn.textContent = v;"
+        "     if(!j) return;"
+        "     if(!j.ok){"
+        "       if(typeof showToast === 'function') showToast(j.error || 'Echec', 'error');"
+        "       return;"
+        "     }"
+        "     i.value = j.seuil;"
+        "     if(typeof showToast === 'function')"
+        "       showToast('Seuil : ' + j.seuil + ' vues', 'success');"
+        "   });"
+        "}"
+        "function bgCycle(btn){"
+        "  var v = btn.textContent;"
+        "  btn.disabled = true; btn.textContent = '... traitement';"
+        "  var fd = new FormData();"
+        "  fd.append('cycle', '1');"
+        "  fetch('/jailbreak/bangers', {method:'POST', body:fd})"
+        "   .then(_jbJsonOrAuth)"
+        "   .then(function(j){"
+        "     btn.disabled = false; btn.textContent = v;"
+        "     if(!j) return;"
+        "     if(!j.ok){"
+        "       if(typeof showToast === 'function') showToast(j.error || 'Echec', 'error');"
+        "       return;"
+        "     }"
+        "     var c = j.cycle || {};"
+        "     if(typeof showToast === 'function')"
+        "       showToast(( c.annonces || 0 ) + ' annonce(s), ' + ( c.telecharges || 0 )"
+        "                 + ' video(s), ' + ( c.reeditions || 0 ) + ' mise(s) a jour', 'success');"
         "     jbSoftRefresh();"
         "   });"
         "}"
@@ -48624,6 +48736,345 @@ def _download_reel_video(shortcode: str, video_url: str) -> bool:
         return False
 
 
+# ===================== VEILLE DES BANGERS ==================================
+# Un reel d'un de NOS comptes qui depasse le seuil est annonce dans le salon
+# Discord « banger », et surtout ARCHIVE : lien, video, description. Le jour ou
+# le compte tombe, c'est tout ce qui reste — et c'est la seule raison d'etre de
+# cette fonctionnalite ; l'annonce n'est qu'un confort.
+#
+# Le registre vit dans bangers.py (testable sans Flask ni Discord). Ici on ne
+# fait que les trois choses qu'il ne peut pas faire : savoir a qui appartient un
+# compte, telecharger, et parler a Discord.
+
+#: Memo handle -> (identite, va). jailbreak.list_all() relit un JSON ; sans ce
+#: cache il serait relu par chacun des 4 workers pour chacun des ~700 comptes.
+_BANGER_QUI: dict = {"ts": 0.0, "table": {}}
+_BANGER_QUI_LOCK = threading.Lock()
+_BANGER_QUI_TTL = 300.0
+
+
+def _banger_table_proprietaires() -> dict:
+    """{handle normalise: (identite, nom du VA)} pour tous les comptes connus."""
+    import time as _t_bq
+    with _BANGER_QUI_LOCK:
+        if _BANGER_QUI["table"] and (_t_bq.time() - _BANGER_QUI["ts"]) < _BANGER_QUI_TTL:
+            return _BANGER_QUI["table"]
+    table = {}
+    try:
+        import jailbreak as _jb_bq
+        for ident, data in (_jb_bq.list_all() or {}).items():
+            if not isinstance(data, dict):
+                continue
+            for acc in (data.get("accounts") or []):
+                h = _normalize_insta_handle(str((acc or {}).get("username") or ""))
+                if h:
+                    table[h] = (str(ident or "").strip().lower(),
+                                str((acc or {}).get("va") or "").strip())
+    except Exception as e:                                    # noqa: BLE001
+        log.warning(f"[bangers] table des proprietaires : {e}")
+    with _BANGER_QUI_LOCK:
+        _BANGER_QUI["table"] = table
+        _BANGER_QUI["ts"] = _t_bq.time()
+    return table
+
+
+def _banger_examiner(handle: str, reels) -> None:
+    """Appele a CHAQUE scrape de compte, depuis _compute_insta_3_stats.
+
+    Ne fait que consigner : aucun appel reseau, aucune attente. Le telechargement
+    et l'annonce sont faits par _banger_cycle(), dans le demon de fond — ce code
+    tourne dans un pool de 4 threads ou une seconde perdue est une seconde
+    perdue 700 fois.
+
+    Tout est sous try/except : une exception ici remonterait dans _scrape_one et
+    ferait compter le compte comme un echec de scrape. Une veille qui casse le
+    scrape serait bien pire que pas de veille du tout.
+    """
+    try:
+        if not reels:
+            return
+        import bangers as _bg
+        ident, va = _banger_table_proprietaires().get(handle or "", ("", ""))
+        _bg.examiner(handle, reels, identite=ident, va=va)
+    except Exception as e:                                    # noqa: BLE001
+        log.warning(f"[bangers] examen @{handle} : {e}")
+
+
+def _banger_recuperer(shortcode: str, url: str) -> tuple:
+    """Descend la video et la description d'un banger. Rend (ok, description, raison).
+
+    L'ORDRE EST CELUI DEMANDE PAR LE PROPRIETAIRE : l'API d'abord pour le lien
+    et la description (la meme qu'on utilise pour les Trends), puis les cookies
+    pour le fichier. Et si le fichier ne descend pas — cookies perimes, reel
+    restreint, yt-dlp absent — on garde le lien et on passe : une fiche sans
+    video vaut infiniment mieux qu'un banger perdu.
+
+    Le fichier atterrit dans data/bangers/, PAS dans data/insta/videos/ que le
+    demon purge a 31 jours. Un banger d'il y a deux mois doit encore etre la.
+    """
+    import bangers as _bg
+    sc = str(shortcode or "").strip()
+    if not sc:
+        return False, "", "shortcode_vide"
+    purl = url or f"https://www.instagram.com/reel/{sc}/"
+    desc, raison, octets = "", "", None
+
+    # 1) L'API (Apify) : elle rend le lien direct ET la legende complete, la ou
+    #    le scrape public ne donne aucune des deux et le scrape RapidAPI tronque
+    #    la legende a 280 signes.
+    try:
+        import apify_reels as _ap
+        if _ap.configured():
+            res = _ap.fetch_video_urls([purl], timeout=90) or {}
+            d = res.get(sc) or (list(res.values())[0] if res else None)
+            if isinstance(d, dict):
+                if d.get("caption"):
+                    desc = str(d["caption"])
+                if d.get("video_url"):
+                    import veille_telegram as _vt_a
+                    octets = _vt_a.download_video_bytes(d["video_url"], timeout=60)
+        else:
+            raison = "apify_non_configure"
+    except Exception as e:                                    # noqa: BLE001
+        raison = f"apify:{type(e).__name__}"
+
+    # 2) La page publique, sans cle ni cookie.
+    if not octets:
+        try:
+            pub = _scrape_ig_page_for_video(sc)
+            if pub:
+                import veille_telegram as _vt_b
+                octets = _vt_b.download_video_bytes(pub, timeout=60)
+        except Exception as e:                                # noqa: BLE001
+            raison = raison or f"page:{type(e).__name__}"
+
+    # 3) yt-dlp AVEC les cookies. C'est la methode qui marche sur les reels que
+    #    le public ne sert pas. Elle consomme le cookie Instagram : on ne
+    #    l'emploie qu'ici, sur les quelques reels qui le meritent, jamais en
+    #    masse. `info['reason']` dira « login_requis_cookies » le jour ou le
+    #    cookie expire — c'est ce qu'il faut lire avant d'accuser Instagram.
+    if not octets:
+        try:
+            import veille_telegram as _vt_c
+            info: dict = {}
+            octets = _vt_c.download_via_ytdlp(purl, timeout=90, info=info,
+                                              use_cookies=True)
+            if info.get("description") and len(str(info["description"])) > len(desc):
+                desc = str(info["description"])
+            if not octets and info.get("reason"):
+                raison = str(info["reason"])
+        except Exception as e:                                # noqa: BLE001
+            raison = raison or f"ytdlp:{type(e).__name__}"
+
+    if not octets:
+        return False, desc, (raison or "aucune_source")
+
+    # Ecriture atomique : un redemarrage du VPS en plein telechargement ne doit
+    # pas laisser un mp4 tronque qui passerait ensuite pour une archive valide.
+    try:
+        _bg.DOSSIER.mkdir(parents=True, exist_ok=True)
+        cible = _bg.chemin_video(sc)
+        tampon = cible.with_suffix(".mp4.part")
+        tampon.write_bytes(octets)
+        os.replace(str(tampon), str(cible))
+        if desc:
+            _bg.chemin_description(sc).write_text(desc, encoding="utf-8")
+        return True, desc, ""
+    except Exception as e:                                    # noqa: BLE001
+        return False, desc, f"ecriture:{type(e).__name__}"
+
+
+def _banger_texte(f: dict) -> str:
+    """Le message Discord. Le meme a l'envoi et a la re-edition."""
+    vues = int(f.get("vues") or 0)
+    qui = "@" + str(f.get("compte") or "?")
+    if f.get("va"):
+        qui += f" · {f['va']}"
+    if f.get("identite"):
+        qui += f" ({f['identite']})"
+    lignes = [f"🔥 **BANGER** — {qui}",
+              f"👁 **{vues:,}".replace(",", " ") + " vues**"]
+    det = int(f.get("vues_detection") or 0)
+    if det and vues > det:
+        lignes[-1] += f" — repéré à {det:,}".replace(",", " ")
+    lignes.append(str(f.get("url") or ""))
+    etat = []
+    if f.get("video") == "ok":
+        etat.append("🎬 vidéo archivée")
+    elif f.get("video") == "perdue":
+        etat.append("🎬 vidéo non récupérable (" + str(f.get("raison_video") or "?") + ")")
+    else:
+        etat.append("🎬 téléchargement en attente")
+    if f.get("description"):
+        etat.append("📝 description gardée")
+    lignes.append(" · ".join(etat))
+    desc = str(f.get("description") or "").strip()
+    if desc:
+        lignes.append("```" + desc[:900].replace("```", "ʼʼʼ") + "```")
+    return "\n".join(lignes)[:1900]
+
+
+def _banger_salon_et_envoi(f: dict, fichier) -> tuple:
+    """Poste l'annonce. Rend (ok, channel_id, message_id, info).
+
+    OU ? D'abord un salon nomme simplement « banger » (celui du proprietaire),
+    n'importe ou sur les serveurs ; a defaut, le salon « banger-<identite> »
+    dans la categorie de l'identite, comme le fait deja l'etoile de la
+    Bibliotheque. L'ordre est celui-la et pas l'inverse : les salons par
+    identite servent a POUSSER du contenu a reposter, pas a signaler ce qui a
+    explose — melanger les deux rendrait les deux illisibles.
+    """
+    import asyncio
+    if _BOT_REF is None:
+        return False, 0, 0, "bot pas initialise"
+    loop = getattr(_BOT_REF, "loop", None)
+    if loop is None or not loop.is_running():
+        return False, 0, 0, "loop bot non actif"
+    texte = _banger_texte(f)
+    ident = str(f.get("identite") or "")
+
+    async def _envoyer():
+        import discord
+        salon = None
+        # 1) Un salon « banger » global (pas suffixe d'une identite).
+        for guild in _BOT_REF.guilds:
+            for c in guild.text_channels:
+                n = "".join(ch for ch in c.name.lower() if ch.isalnum())
+                if n == "banger" or n == "bangers":
+                    salon = c
+                    break
+            if salon:
+                break
+        # 2) Repli : le salon banger de l'identite.
+        if salon is None and ident:
+            for guild in _BOT_REF.guilds:
+                cat = _find_identity_category(guild, ident)
+                if cat is None:
+                    continue
+                for c in cat.channels:
+                    if isinstance(c, discord.TextChannel) and "banger" in c.name.lower():
+                        salon = c
+                        break
+                if salon:
+                    break
+        if salon is None:
+            return False, 0, 0, "aucun salon 'banger' trouvé"
+        # La video n'est jointe que si Discord l'accepte. Trop grosse, elle
+        # reste sur le disque du VPS et le message ne porte que le lien : on ne
+        # renonce PAS a l'annonce pour une histoire de taille.
+        octets = None
+        try:
+            limite = getattr(salon.guild, "filesize_limit", 26214400) or 26214400
+            if fichier is not None and fichier.exists() and fichier.stat().st_size <= limite:
+                octets = fichier.read_bytes()
+        except Exception:
+            octets = None
+        try:
+            if octets:
+                import io as _io_b
+                m = await salon.send(
+                    content=texte,
+                    file=discord.File(_io_b.BytesIO(octets), filename=fichier.name))
+            else:
+                m = await salon.send(content=texte)
+            return True, salon.id, m.id, f"#{salon.name}"
+        except Exception as e:                                # noqa: BLE001
+            return False, 0, 0, f"envoi: {e}"
+
+    try:
+        fut = asyncio.run_coroutine_threadsafe(_envoyer(), loop)
+        return fut.result(timeout=120)
+    except Exception as e:                                    # noqa: BLE001
+        return False, 0, 0, f"timeout / erreur: {e}"
+
+
+def _banger_reediter(channel_id: int, message_id: int, texte: str) -> bool:
+    """Re-ecrit une annonce deja postee (le compteur de vues a bouge).
+
+    Meme patron que le report des clics : fetch_message puis edit, depuis le
+    thread Flask via le loop du bot. Un message supprime a la main leve
+    NotFound — on ne le recree pas, le proprietaire l'a enleve expres.
+    """
+    import asyncio
+    if _BOT_REF is None or not channel_id or not message_id:
+        return False
+    loop = getattr(_BOT_REF, "loop", None)
+    if loop is None or not loop.is_running():
+        return False
+
+    async def _editer():
+        ch = _BOT_REF.get_channel(int(channel_id))
+        if ch is None:
+            return False
+        try:
+            m = await ch.fetch_message(int(message_id))
+            await m.edit(content=texte)
+            return True
+        except Exception:
+            return False
+
+    try:
+        return bool(asyncio.run_coroutine_threadsafe(_editer(), loop).result(timeout=60))
+    except Exception:
+        return False
+
+
+#: Un seul cycle bangers a la fois : le demon tourne toutes les heures et un
+#: telechargement peut durer plus longtemps que prevu.
+_BANGER_CYCLE = {"en_cours": False, "ts": 0.0, "dernier": {}}
+
+
+def _banger_cycle() -> dict:
+    """Telecharge ce qui manque, annonce ce qui ne l'est pas, remet a jour les
+    compteurs. Appele par le demon de fond, et par le bouton du site."""
+    import bangers as _bg
+    import time as _t_bc
+    if _BANGER_CYCLE["en_cours"]:
+        return {"en_cours": True}
+    _BANGER_CYCLE["en_cours"] = True
+    bilan = {"telecharges": 0, "echecs": 0, "annonces": 0, "reeditions": 0}
+    try:
+        # 1) LES FICHIERS D'ABORD. Une annonce qui porte la video vaut mieux que
+        #    deux messages, et l'archive est le vrai but.
+        for f in _bg.a_telecharger(limite=8):
+            sc = f["shortcode"]
+            ok, desc, raison = _banger_recuperer(sc, f.get("url") or "")
+            _bg.noter_telechargement(sc, ok, description=desc, raison=raison)
+            bilan["telecharges" if ok else "echecs"] += 1
+        # 2) LES ANNONCES, plafonnees : au premier demarrage la file est pleine
+        #    et six passages par jour l'ecoulent sans noyer le salon.
+        for f in _bg.a_annoncer():
+            sc = f["shortcode"]
+            f = _bg.fiche(sc) or f
+            f["shortcode"] = sc
+            fichier = _bg.chemin_video(sc) if _bg.video_presente(sc) else None
+            ok, cid, mid, info = _banger_salon_et_envoi(f, fichier)
+            if ok:
+                _bg.noter_annonce(sc, cid, mid, vues=int(f.get("vues") or 0))
+                bilan["annonces"] += 1
+            else:
+                log.warning(f"[bangers] annonce {sc} : {info}")
+                break        # salon absent / bot HS : inutile d'insister
+        # 3) LES COMPTEURS. « elle est a 50 000 maintenant » : on re-ecrit le
+        #    message existant plutot que d'en poster un second.
+        for f in _bg.a_reediter():
+            sc = f["shortcode"]
+            a = f.get("annonce") or {}
+            if _banger_reediter(a.get("channel_id"), a.get("message_id"),
+                                _banger_texte(f)):
+                _bg.noter_annonce(sc, a.get("channel_id"), a.get("message_id"),
+                                  vues=int(f.get("vues") or 0))
+                bilan["reeditions"] += 1
+    except Exception as e:                                    # noqa: BLE001
+        log.error(f"[bangers] cycle : {e}")
+        bilan["erreur"] = str(e)[:160]
+    finally:
+        _BANGER_CYCLE["en_cours"] = False
+        _BANGER_CYCLE["ts"] = _t_bc.time()
+        _BANGER_CYCLE["dernier"] = dict(bilan)
+    return bilan
+
+
 def _start_auto_scrape_daemon():
     """Background daemon : scrape toutes les watchlist Instagram toutes les 3h
     + telecharge les fichiers mp4 sur disque.
@@ -48671,6 +49122,18 @@ def _start_auto_scrape_daemon():
                         log.info(f"[insta-bg-scrape] retirés (injoignables 7 j+): {_dead}")
                 except Exception as _e:
                     log.warning(f"[insta-bg-scrape] purge: {_e}")
+                # LA VEILLE DES BANGERS TOURNE TOUJOURS, elle. Tout le bloc qui
+                # suit est conditionne a la watchlist Trends — une liste de
+                # comptes CONCURRENTS, sans rapport avec nos bangers. S'y
+                # accrocher les aurait eteints en silence le jour ou cette
+                # liste se vide (elle est vide sur ce poste, par exemple).
+                try:
+                    _bcy = _banger_cycle()
+                    if any(_bcy.get(_k) for _k in
+                           ("telecharges", "annonces", "reeditions", "echecs")):
+                        log.info(f"[bangers] cycle : {_bcy}")
+                except Exception as _e_bg2:
+                    log.warning(f"[bangers] cycle : {_e_bg2}")
                 wl = load_watchlist() or []
                 if wl:
                     # 1) SCRAPE : on passe par la fonction PARTAGEE (verrou +
@@ -59334,6 +59797,40 @@ def create_app():
         except Exception as e:
             return jsonify({"ok": False, "error": f"Envoi échoué : {e}"[:200]})
         return jsonify({"ok": True, "salons": salons, **(res or {})})
+
+    @app.route("/jailbreak/bangers", methods=["POST"])
+    def jailbreak_bangers():
+        """Le seuil des bangers, et le traitement a la demande.
+
+        Hors allow-list des roles restreints, comme le perimetre du scrape :
+        le cycle consomme du quota Apify et le cookie Instagram.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "auth": True,
+                            "error": "Session expirée — la page va se recharger"}), 401
+        try:
+            import bangers as _bg_r
+        except Exception as e:                                # noqa: BLE001
+            return jsonify({"ok": False, "error": f"module bangers : {e}"})
+        if request.form.get("cycle") == "1":
+            # SYNCHRONE, et c'est voulu : le bouton doit dire ce qui s'est
+            # passe. Le cycle est plafonne (8 telechargements, 12 annonces), et
+            # un second clic pendant qu'il tourne rend simplement « en cours ».
+            return jsonify({"ok": True, "cycle": _banger_cycle(),
+                            "bilan": _bg_r.bilan()})
+        brut = (request.form.get("seuil") or "").strip()
+        if not brut:
+            return jsonify({"ok": False, "error": "Seuil manquant"})
+        try:
+            demande = int(float(brut))
+        except Exception:
+            return jsonify({"ok": False, "error": "Seuil illisible"})
+        pose = _bg_r.fixer_seuil(demande)
+        # On rend la valeur REELLEMENT enregistree : taper 50 et voir 1000
+        # s'afficher explique la borne mieux qu'un message d'erreur.
+        return jsonify({"ok": True, "seuil": pose, "demande": demande,
+                        "borne": pose != demande})
 
     @app.route("/jailbreak/suivi", methods=["POST"])
     def jailbreak_suivi():

@@ -9787,6 +9787,17 @@ except Exception as _eSe:
 try:
     import web_upload as _wc
 
+    # LE SOURCE SE LIT UNE FOIS, ICI. inspect.getsource() relit le fichier a
+    # la demande et le numerote : quand une autre session ecrit web_upload.py
+    # pendant le banc d essai, il rend les mauvaises lignes ou leve OSError.
+    # Quatre tests viraient au rouge une fois sur deux sans rien prouver.
+    _srcW = pathlib.Path("web_upload.py").read_text(encoding="utf-8")
+
+    def _corps_de(nom):
+        """Le texte d une fonction de web_upload.py, de son def au suivant."""
+        i = _srcW.index("def %s(" % nom)
+        return _srcW[i:_srcW.index(chr(10) + "def ", i + 40)]
+
     _CAS = [("VA 12 (Roucham)", "roucham"),
             ("VA 2  ( Safidy )", "safidy"),
             ("VA 13 Gerome", "gerome"),          # le pseudo hors parentheses
@@ -9864,27 +9875,26 @@ try:
     check("clics VA : le meme pseudo garde son emoji",
           _wc._clicrank_emojis(["mike"])["mike"]
           == _wc._clicrank_emojis(["mike", "zoe"])["mike"])
-    import inspect as _insC
     # hash() est SALE a chaque demarrage de Python : l emoji de chacun aurait
     # change a chaque redemarrage du bot. On regarde le CODE, pas la docstring
     # -- qui parle justement de hash() pour dire de ne pas s en servir.
-    _srcE = _insC.getsource(_wc._clicrank_emojis).split(chr(34) * 3)[-1]
+    _srcE = _corps_de("_clicrank_emojis").split(chr(34) * 3)[-1]
     check("clics VA : l emoji survit a un redemarrage (crc32, pas hash)",
           "crc32" in _srcE and "hash(" not in _srcE, _srcE[:120])
 
     # L accueil est rendu a chaque chargement du site ET rappele par un demon :
     # un appel GetMySocial ici partirait des centaines de fois par jour.
-    _srcC = _insC.getsource(_wc._clicrank_cache)
+    _srcC = _corps_de("_clicrank_cache")
     check("clics VA : l accueil ne declenche AUCUN appel GetMySocial",
           "_gmsdash_get" not in _srcC and "gms." not in _srcC
           and "_GMSDASH_MEM" in _srcC)
-    _srcK = _insC.getsource(_wc._clicrank_carte_html)
+    _srcK = _corps_de("_clicrank_carte_html")
     check("clics VA : une panne de la carte n efface pas l accueil",
           "except Exception" in _srcK and "return \"\"" in _srcK)
 
     # Le marquage par lien doit etre pose AVANT l aplatissement a zero,
     # sinon l information est perdue pour toujours.
-    _srcG = _insC.getsource(_wc._gmsdash_compute)
+    _srcG = _corps_de("_gmsdash_compute")
     check("clics VA : le releve retient QUI n a pas ete lu",
           _srcG.index('r["lu"] = r["clicks"] is not None')
           < _srcG.index('r["clicks"] = 0'))
@@ -9901,7 +9911,6 @@ try:
         _caT.toutes = _vraiT
 
     # La carte vit sur l accueil, et son style doit suivre le theme clair.
-    _srcW = pathlib.Path("web_upload.py").read_text(encoding="utf-8")
     check("clics VA : la carte est bien posee sur le tableau de bord",
           "+ _clicrank_carte_html()" in _srcW)
     _sansClair = [c for c in ("cr-clics", "cr-sous", "cr-note", "cr-vide", "cr-emo")
@@ -9920,6 +9929,153 @@ try:
           not _sansTrad, ", ".join(_sansTrad))
 except Exception as _eC:
     check("clics VA : classement testable", False, repr(_eC)[:220])
+
+# --- Veille des bangers -------------------------------------------------
+# Le but de cette fonctionnalite n est PAS l alerte, c est l archive : le jour
+# ou un compte tombe, le lien, la video et la description doivent survivre.
+# Les tests qui suivent protegent ca en priorite.
+try:
+    import tempfile as _tfB, pathlib as _plB, inspect as _inB
+    import bangers as _bg
+    _tmpB = _plB.Path(_tfB.mkdtemp(prefix="bangers_test_"))
+    _savFB, _savDB = _bg.FICHIER, _bg.DOSSIER
+    try:
+        _bg.FICHIER = _tmpB / "bangers.json"
+        _bg.DOSSIER = _tmpB / "videos"
+        _nowB = 1789000000.0
+        _recentB = _nowB - 2 * 86400
+        _vieuxB = _nowB - 40 * 86400
+
+        _rB = _bg.examiner("jessy.mael", [
+            {"shortcode": "AAAAA1", "is_video": True, "views": 12400,
+             "taken_at": _recentB, "caption": "court"},
+            {"shortcode": "BBBBB2", "is_video": True, "views": 800,
+             "taken_at": _recentB},
+            {"shortcode": "CCCCC3", "is_video": True, "views": 90000,
+             "taken_at": _vieuxB},
+        ], identite="jessye", va="Safidy", maintenant=_nowB)
+
+        check("bangers : un reel sous le seuil n entre pas au registre",
+              not _bg.fiche("BBBBB2"), str(_bg.fiche("BBBBB2"))[:120])
+        check("bangers : un reel au-dessus du seuil est enregistre",
+              _bg.fiche("AAAAA1").get("vues") == 12400)
+        check("bangers : le compte, le VA et l identite sont retenus",
+              (_bg.fiche("AAAAA1").get("compte"),
+               _bg.fiche("AAAAA1").get("va"),
+               _bg.fiche("AAAAA1").get("identite")) == ("jessy.mael", "Safidy", "jessye"))
+        # Le jour du deploiement le registre est vide : TOUS les vieux reels
+        # ressemblent a des nouveautes. Sans cette regle, le salon recoit des
+        # mois de trafic d un coup et devient inutilisable des le premier jour.
+        check("bangers : un reel trop vieux est archive mais PAS annonce",
+              _bg.fiche("CCCCC3").get("muet") is True
+              and "CCCCC3" not in [f["shortcode"] for f in _bg.a_annoncer()])
+        check("bangers : le reel recent, lui, part en annonce",
+              "AAAAA1" in [f["shortcode"] for f in _bg.a_annoncer()])
+
+        # Instagram rend regulierement 0 vue pour un reel qui en a 90 000.
+        # Prendre la derniere valeur ferait retomber le banger sous le seuil,
+        # donc le ferait RE-annoncer au passage suivant.
+        _bg.examiner("jessy.mael", [
+            {"shortcode": "CCCCC3", "is_video": True, "views": 0,
+             "taken_at": _vieuxB}], identite="jessye", maintenant=_nowB + 14400)
+        check("bangers : les vues ne redescendent jamais",
+              _bg.fiche("CCCCC3").get("vues") == 90000,
+              str(_bg.fiche("CCCCC3").get("vues")))
+
+        # Une absence de la liste ne prouve rien : l endpoint public ne rend
+        # qu une douzaine de posts recents, un reel de trois semaines en sort
+        # tout seul. Aucun verdict de disparition ne doit etre prononce.
+        _srcEx = _inB.getsource(_bg.examiner)
+        check("bangers : aucune disparition n est deduite d une absence",
+              "disparu" not in _srcEx and "supprime" not in _srcEx.lower(),
+              _srcEx[:120])
+
+        # Un echec de telechargement ne doit RIEN effacer : c est tout l interet
+        # d avoir separe le registre du fichier video.
+        for _i in range(_bg.ESSAIS_VIDEO_MAX):
+            _bg.noter_telechargement("AAAAA1", False, raison="login_requis_cookies")
+        _fA = _bg.fiche("AAAAA1")
+        check("bangers : une video qui ne descend pas garde le lien",
+              _fA.get("video") == "perdue" and _fA.get("url", "").startswith("http"),
+              str(_fA)[:160])
+        check("bangers : la raison de l echec est retenue (cookie ou reel mort)",
+              _fA.get("raison_video") == "login_requis_cookies")
+        check("bangers : on cesse de reessayer apres N echecs",
+              "AAAAA1" not in [f["shortcode"] for f in _bg.a_telecharger()])
+        # La legende du scrape est tronquee a 280 signes ; celle du
+        # telechargeur est entiere. On garde la plus longue.
+        _bg.noter_telechargement("AAAAA1", True, description="x" * 400)
+        check("bangers : la description la plus complete l emporte",
+              len(_bg.fiche("AAAAA1").get("description") or "") == 400)
+
+        # Re-editer a chaque vue couterait un appel Discord par reel et par
+        # passage pour un chiffre qui n a pas bouge a l oeil.
+        _bg.noter_annonce("AAAAA1", 11, 22, vues=12400)
+        check("bangers : un compteur fige ne declenche aucune re-edition",
+              not _bg.a_reediter())
+        _bg.examiner("jessy.mael", [
+            {"shortcode": "AAAAA1", "is_video": True, "views": 51000,
+             "taken_at": _recentB}], identite="jessye", maintenant=_nowB + 28800)
+        check("bangers : un compteur qui bondit declenche la re-edition",
+              [f["shortcode"] for f in _bg.a_reediter()] == ["AAAAA1"])
+
+        check("bangers : le seuil est borne des deux cotes",
+              (_bg.fixer_seuil(5), _bg.fixer_seuil(10 ** 9)) == (_bg.SEUIL_MIN, _bg.SEUIL_MAX))
+        check("bangers : baisser le seuil ne ressuscite pas le passe",
+              _bg.fiche("CCCCC3").get("muet") is True)
+    finally:
+        _bg.FICHIER, _bg.DOSSIER = _savFB, _savDB
+
+    # LE PIEGE QUI COUTERAIT LA FONCTIONNALITE ENTIERE : data/insta/videos est
+    # purge de tout mp4 de plus de 31 jours par cleanup_old_videos(). Y ranger
+    # l archive reviendrait a l effacer exactement quand elle devient
+    # irremplacable -- un compte banni depuis plus d un mois.
+    check("bangers : l archive n est PAS dans le dossier purge a 31 jours",
+          "insta" not in str(_savDB).replace("\\", "/").lower().split("data/")[-1],
+          str(_savDB))
+    check("bangers : le registre passe par safe_json (ecriture atomique)",
+          "safe_json.write" in _inB.getsource(_bg._ecrire))
+
+    import web_upload as _wB
+    _srcB = _plB.Path("web_upload.py").read_text(encoding="utf-8")
+    # La detection doit vivre la ou la liste BRUTE des reels existe, et APRES
+    # le garde-fou « scrape vide suspect » -- sinon elle tourne sur les reels
+    # du releve precedent a chaque passage rate d Instagram.
+    _srcCI = _inB.getsource(_wB._compute_insta_3_stats)
+    check("bangers : la detection est branchee dans le scrape",
+          "_banger_examiner(h, reels)" in _srcCI)
+    check("bangers : la detection est posee APRES le garde-fou anti-ecrasement",
+          _srcCI.index("_banger_examiner") > _srcCI.index("suspect and isinstance"))
+    # Une exception ici remonterait dans _scrape_one et ferait compter le
+    # compte comme un echec de scrape : la veille casserait la mesure.
+    check("bangers : un incident de la veille ne casse pas le scrape",
+          "except Exception" in _inB.getsource(_wB._banger_examiner))
+    # Le proprietaire l a demande explicitement : cookies pour la video.
+    check("bangers : les cookies servent bien a telecharger la video",
+          "use_cookies=True" in _inB.getsource(_wB._banger_recuperer))
+    check("bangers : l API sert au lien et a la description, comme les Trends",
+          "apify_reels" in _inB.getsource(_wB._banger_recuperer))
+    check("bangers : le fichier est ecrit de facon atomique (.part puis replace)",
+          ".part" in _inB.getsource(_wB._banger_recuperer)
+          and "os.replace" in _inB.getsource(_wB._banger_recuperer))
+    # Le bloc voisin du demon est conditionne a la watchlist Trends, qui peut
+    # etre vide : s y accrocher eteindrait la veille en silence.
+    _srcD = _inB.getsource(_wB._start_auto_scrape_daemon)
+    check("bangers : le cycle tourne meme quand la watchlist Trends est vide",
+          _srcD.index("_banger_cycle()") < _srcD.index("wl = load_watchlist() or []"))
+    check("bangers : l encart n invente aucune classe (il reprend .sv-*)",
+          "class='sv-box'" in _inB.getsource(_wB._bangers_encart_html)
+          and "bg-" not in _inB.getsource(_wB._bangers_encart_html).replace("bg-seuil", ""))
+    # Le cycle consomme le quota Apify ET le cookie Instagram : il ne doit pas
+    # etre a la portee d un role restreint. L allow-list est la liste BLANCHE
+    # des ecritures permises a ces roles -- ne pas y figurer suffit.
+    _allowB = _srcB.split("_RESTRICTED_WRITE_ALLOW", 1)[-1].split(")", 1)[0]
+    check("bangers : le reglage reste hors allow-list des roles restreints",
+          "/jailbreak/bangers" not in _allowB, _allowB[:200])
+    check("bangers : la route exige une session authentifiee",
+          "is_auth()" in _srcB.split("def jailbreak_bangers", 1)[-1][:900])
+except Exception as _eB:
+    check("bangers : veille testable", False, repr(_eB)[:220])
 
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
