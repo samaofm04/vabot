@@ -1964,6 +1964,38 @@ body.infloww [style*="color:#888"],body.infloww [style*="color:#aaa"],body.inflo
 body.infloww .sidebar .solo-item.active{background:rgba(22,119,255,.16)!important}
 body.infloww input:focus,body.infloww select:focus,body.infloww textarea:focus{border-color:#1677FF!important;box-shadow:0 0 0 3px rgba(22,119,255,.2)!important}
 
+/* --- INFLOWW LIGHT (le meme CRM, mais de jour) ---
+   Monte exactement comme Apple et Claude : body.light sert de socle et
+   « inflowwlight » ne repeint que la personnalite. Sans body.light, tous
+   les textes resteraient ceux du theme sombre sur du blanc.
+
+   TROIS DE SES COULEURS SONT LES SIENNES, relevees a l ecran sur Infloww :
+   le bleu interactif #1677FF, le bleu rempli #2344A8, et #D9D9D9 -- qui
+   etait le TEXTE en mode sombre et devient ici le GRIS DES BARRES. Les
+   surfaces, elles, ne sont pas le theme sombre retourne : une interface
+   claire n est pas une interface sombre inversee (#151515 inverse donne un
+   gris sale). Fond #F5F5F5, cartes et rail blancs, filet #E0E0E0, encre
+   #151515 -- sa surface la plus sombre devient son encre -- et #666666
+   pour l encre pale, complement exact de son gris secondaire #999999.
+   S il releve les vraies valeurs comme il l a fait pour le sombre, seules
+   ces quatre-la bougent. */
+body.light.inflowwlight{background:#F5F5F5!important;color:#151515!important}
+body.light.inflowwlight .main{background:#F5F5F5!important}
+body.light.inflowwlight .sidebar{background:#FFFFFF!important;border-right-color:#E0E0E0!important}
+body.light.inflowwlight .box,body.light.inflowwlight .stat,body.light.inflowwlight .reel-card,body.light.inflowwlight .cloud-card{background:#FFFFFF!important;border-color:#E0E0E0!important}
+body.light.inflowwlight input,body.light.inflowwlight select,body.light.inflowwlight textarea,body.light.inflowwlight .up-input{background:#FFFFFF!important;border-color:#E0E0E0!important}
+body.light.inflowwlight input:focus,body.light.inflowwlight select:focus,body.light.inflowwlight textarea:focus{border-color:#1677FF!important;box-shadow:0 0 0 3px rgba(22,119,255,.2)!important}
+body.light.inflowwlight [style*="background:#3b82f6"]{background:#1677FF!important}
+body.light.inflowwlight [style*="color:#3b82f6"]{color:#1677FF!important}
+body.light.inflowwlight .btn,body.light.inflowwlight button[type=submit],body.light.inflowwlight .lb-btn-primary,body.light.inflowwlight .badge,body.light.inflowwlight .vac-btn-active,body.light.inflowwlight .vpm-kind-btn.active,body.light.inflowwlight .vpm-save,body.light.inflowwlight .cur-toggle button.active,body.light.inflowwlight .exp-submit,body.light.inflowwlight .sel-cb:checked + .sel-circle,body.light.inflowwlight .txt-sel-cb:checked + .sel-circle,body.light.inflowwlight .sidebar .group .item .badge,body.light.inflowwlight .up-step .up-dot{background:#1677FF!important;border-color:#1677FF!important}
+body.light.inflowwlight a,body.light.inflowwlight .subtab.active,body.light.inflowwlight .sidebar .item.active,body.light.inflowwlight .sidebar .item.active svg,body.light.inflowwlight .sidebar .group .item.active,body.light.inflowwlight .sidebar .group .item.active svg,body.light.inflowwlight .sidebar .solo-item.active,body.light.inflowwlight .sidebar .group-head.active svg.lead,body.light.inflowwlight .vlm-dup{color:#1677FF!important}
+body.light.inflowwlight .vlm-dup{border-color:#1677FF!important}
+body.light.inflowwlight .sidebar .item.active,body.light.inflowwlight .sidebar .solo-item.active,body.light.inflowwlight .sidebar .group .item.active{background:rgba(22,119,255,.10)!important}
+/* L encre pale : le theme clair de base la met a #6b7280, un gris legerement
+   bleute. Celui d Infloww est neutre, comme tout le reste de sa palette. */
+body.light.inflowwlight small,body.light.inflowwlight label,body.light.inflowwlight .subtitle{color:#666666!important}
+body.light.inflowwlight [style*="color:#888"],body.light.inflowwlight [style*="color:#aaa"],body.light.inflowwlight [style*="color:#75757f"],body.light.inflowwlight [style*="color:#8b8b96"]{color:#666666!important}
+
 /* --- NEO LUXE VIOLET (violet électrique + rose) --- */
 body.violet{background:#0b0713!important}
 body.violet .sidebar{background:#0c0817!important;border-right-color:#1c1330!important}
@@ -2641,6 +2673,9 @@ body.light.apple .va-loading::before{border-color:rgba(60,60,67,.18);border-top-
 .rank-amount{font-size:14px;color:#3b82f6;font-weight:700;font-variant-numeric:tabular-nums}
 body.light .rank-row{border-bottom-color:rgba(60,60,67,.10)}
 body.light .rank-badge-off{background:#f2f2f7;color:#3c3c43}
+/* La medaille se suffit : pas de pastille derriere, et une taille qui
+   la met au niveau des chiffres de la ligne. */
+.rank-badge.rank-medaille{background:transparent;font-size:17px;line-height:1}
 /* --- Classement des clics par VA --------------------------------------
    DEUX classes dans le selecteur, et c'est voulu : « .home-row » est
    redefini plus BAS dans la page (feuille de l'accueil, injectee dans le
@@ -3253,13 +3288,13 @@ setTimeout(vabotMenuDort, 1200);
 // === THEME (dark / light / obsidian / violet / gold) ===
 var VABOT_DARK_VARIANTS = ['infloww'];
 function _vabotThemeLabel(t){
-  return ({dark:'sombre',light:'clair',apple:'Apple',claude:'Claude',infloww:'Infloww dark'})[t] || t;
+  return ({dark:'sombre',light:'clair',apple:'Apple',claude:'Claude',infloww:'Infloww dark',inflowwlight:'Infloww light'})[t] || t;
 }
 function setTheme(theme){
   var de = document.documentElement, b = document.body;
   // On repart propre : on enlève TOUTES les classes de thème possibles
-  b.classList.remove('light','apple','claude','obsidian','violet','gold','infloww');
-  de.classList.remove('light-pre','pre-light','pre-apple','pre-claude','pre-obsidian','pre-violet','pre-gold','pre-infloww');
+  b.classList.remove('light','apple','claude','obsidian','violet','gold','infloww','inflowwlight');
+  de.classList.remove('light-pre','pre-light','pre-apple','pre-claude','pre-obsidian','pre-violet','pre-gold','pre-infloww','pre-inflowwlight');
   if(theme === 'light'){
     b.classList.add('light');
     de.classList.add('light-pre'); de.classList.add('pre-light');
@@ -3273,6 +3308,11 @@ function setTheme(theme){
     // restent ceux du theme sombre et deviennent illisibles sur le creme.
     b.classList.add('light'); b.classList.add('claude');
     de.classList.add('light-pre'); de.classList.add('pre-claude');
+  } else if(theme === 'inflowwlight'){
+    // Meme montage qu'Apple et Claude : le clair est le socle, « inflowwlight »
+    // ne pose que sa personnalite par-dessus.
+    b.classList.add('light'); b.classList.add('inflowwlight');
+    de.classList.add('light-pre'); de.classList.add('pre-inflowwlight');
   } else if(VABOT_DARK_VARIANTS.indexOf(theme) !== -1){
     b.classList.add(theme);
   }
@@ -3301,7 +3341,7 @@ function setTheme(theme){
 // Appliquer le thème au plus tôt (avant render) - défaut : clair
 (function(){
   try{
-    var saved = localStorage.getItem('vabot_theme') || 'light';
+    var saved = localStorage.getItem('vabot_theme') || 'inflowwlight';
     /* Les themes retires du selecteur (obsidian, violet, gold) restent
        dans la feuille de style, mis de cote. Celui qui en avait un
        bascule sur SOMBRE -- le renvoyer au defaut « clair » lui
@@ -3318,13 +3358,14 @@ function setTheme(theme){
           + ';path=/;max-age=31536000;samesite=lax';
       }
     }catch(e){}
-    if(saved === 'light' || saved === 'apple' || saved === 'claude'){
+    if(saved === 'light' || saved === 'apple' || saved === 'claude' || saved === 'inflowwlight'){
       document.documentElement.classList.add('pre-light');
     }
     document.addEventListener('DOMContentLoaded', function(){
       if(saved === 'light') document.body.classList.add('light');
       else if(saved === 'apple'){ document.body.classList.add('light'); document.body.classList.add('apple'); }
       else if(saved === 'claude'){ document.body.classList.add('light'); document.body.classList.add('claude'); }
+      else if(saved === 'inflowwlight'){ document.body.classList.add('light'); document.body.classList.add('inflowwlight'); }
       else if(darkVariants.indexOf(saved) !== -1) document.body.classList.add(saved);
       document.querySelectorAll('.theme-card[data-theme="'+saved+'"]').forEach(function(c){
         c.style.outline = '3px solid #6aa8ff';
@@ -9725,7 +9766,7 @@ window.upClearPrefill = function(utab){
 // === Theme sync (AVANT le premier paint pour éviter le flash sombre) ===
 (function(){
   try{
-    var theme = localStorage.getItem('vabot_theme') || 'light';
+    var theme = localStorage.getItem('vabot_theme') || 'inflowwlight';
     if(theme === 'light'){
       // Ajouter la classe sur <html> tout de suite + CSS critique
       document.documentElement.classList.add('light-pre');
@@ -9735,6 +9776,17 @@ window.upClearPrefill = function(utab){
         'html.light-pre .box,html.light-pre .stat{background:#fff !important;border-color:#e5e7eb !important}'+
         'html.light-pre .main{background:#f9fafb !important}';
       document.head.appendChild(s);
+    } else if(theme === 'inflowwlight'){
+      // Le gris tres clair d'Infloww peint AVANT le 1er rendu : sans ca on
+      // voit le #f9fafb du theme clair de base, puis le sien par-dessus.
+      document.documentElement.classList.add('light-pre');
+      document.documentElement.classList.add('pre-inflowwlight');
+      var sil = document.createElement('style');
+      sil.textContent = 'html.pre-inflowwlight,html.pre-inflowwlight body{background:#F5F5F5 !important;color:#151515 !important}'+
+        'html.pre-inflowwlight .main{background:#F5F5F5 !important}'+
+        'html.pre-inflowwlight .sidebar{background:#FFFFFF !important;border-right-color:#E0E0E0 !important}'+
+        'html.pre-inflowwlight .box,html.pre-inflowwlight .stat{background:#FFFFFF !important;border-color:#E0E0E0 !important}';
+      document.head.appendChild(sil);
     } else if(theme === 'apple'){
       // Fond iOS peint AVANT le 1er rendu (sinon flash blanc puis gris)
       document.documentElement.classList.add('light-pre');
@@ -12793,25 +12845,25 @@ document.addEventListener('keydown', function(e){
 <h3 style="margin-top:0">🎨 Affichage</h3>
 <small>Choisis l'apparence de ton dashboard — le choix est mémorisé sur cet appareil</small>
 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:12px;margin-top:14px">
-  <div onclick="setTheme('dark')" class="theme-card" data-theme="dark" style="background:#0c0c0c;border:2px solid #262626;border-radius:12px;padding:12px;cursor:pointer;text-align:center">
-    <div style="display:flex;gap:5px;height:52px;border-radius:8px;overflow:hidden;margin-bottom:10px;border:1px solid #262626">
-      <div style="width:20px;background:#0b0b0b"></div>
-      <div style="flex:1;background:#101012;padding:7px;display:flex;flex-direction:column;gap:5px;justify-content:center">
-        <div style="height:6px;width:82%;background:#1c1c1e;border-radius:4px"></div>
-        <div style="height:6px;width:52%;background:#4a90ff;border-radius:4px"></div>
+  <div onclick="setTheme('inflowwlight')" class="theme-card" data-theme="inflowwlight" style="background:#FFFFFF;border:2px solid #E0E0E0;border-radius:12px;padding:12px;cursor:pointer;text-align:center">
+    <div style="display:flex;gap:5px;height:52px;border-radius:8px;overflow:hidden;margin-bottom:10px;border:1px solid #E0E0E0">
+      <div style="width:20px;background:#FFFFFF"></div>
+      <div style="flex:1;background:#F5F5F5;padding:7px;display:flex;flex-direction:column;gap:5px;justify-content:center">
+        <div style="height:6px;width:82%;background:#D9D9D9;border-radius:4px"></div>
+        <div style="height:6px;width:52%;background:#2344A8;border-radius:4px"></div>
       </div>
     </div>
-    <div style="font-size:12.5px;font-weight:600;color:#fafafa">Sombre</div>
+    <div style="font-size:12.5px;font-weight:600;color:#151515">Infloww light</div>
   </div>
-  <div onclick="setTheme('light')" class="theme-card" data-theme="light" style="background:#ffffff;border:2px solid #e5e7eb;border-radius:12px;padding:12px;cursor:pointer;text-align:center">
-    <div style="display:flex;gap:5px;height:52px;border-radius:8px;overflow:hidden;margin-bottom:10px;border:1px solid #e5e7eb">
-      <div style="width:20px;background:#ffffff"></div>
-      <div style="flex:1;background:#f7f8fa;padding:7px;display:flex;flex-direction:column;gap:5px;justify-content:center">
-        <div style="height:6px;width:82%;background:#eceef2;border-radius:4px"></div>
-        <div style="height:6px;width:52%;background:#4a90ff;border-radius:4px"></div>
+  <div onclick="setTheme('infloww')" class="theme-card" data-theme="infloww" style="background:#151515;border:2px solid #444444;border-radius:12px;padding:12px;cursor:pointer;text-align:center">
+    <div style="display:flex;gap:5px;height:52px;border-radius:8px;overflow:hidden;margin-bottom:10px;border:1px solid #444444">
+      <div style="width:20px;background:#151515"></div>
+      <div style="flex:1;background:#242424;padding:7px;display:flex;flex-direction:column;gap:5px;justify-content:center">
+        <div style="height:6px;width:82%;background:#4B4B4B;border-radius:4px"></div>
+        <div style="height:6px;width:52%;background:#2344A8;border-radius:4px"></div>
       </div>
     </div>
-    <div style="font-size:12.5px;font-weight:600;color:#111827">Clair</div>
+    <div style="font-size:12.5px;font-weight:600;color:#D9D9D9">Infloww dark</div>
   </div>
   <div onclick="setTheme('apple')" class="theme-card" data-theme="apple" style="background:#f2f2f7;border:2px solid #d8d8de;border-radius:12px;padding:12px;cursor:pointer;text-align:center">
     <div style="display:flex;gap:5px;height:52px;border-radius:8px;overflow:hidden;margin-bottom:10px;border:1px solid #dcdce2">
@@ -12832,16 +12884,6 @@ document.addEventListener('keydown', function(e){
       </div>
     </div>
     <div style="font-size:12.5px;font-weight:600;color:#1f1e1d">Claude</div>
-  </div>
-    <div onclick="setTheme('infloww')" class="theme-card" data-theme="infloww" style="background:#151515;border:2px solid #444444;border-radius:12px;padding:12px;cursor:pointer;text-align:center">
-    <div style="display:flex;gap:5px;height:52px;border-radius:8px;overflow:hidden;margin-bottom:10px;border:1px solid #444444">
-      <div style="width:20px;background:#151515"></div>
-      <div style="flex:1;background:#242424;padding:7px;display:flex;flex-direction:column;gap:5px;justify-content:center">
-        <div style="height:6px;width:82%;background:#4B4B4B;border-radius:4px"></div>
-        <div style="height:6px;width:52%;background:#2344A8;border-radius:4px"></div>
-      </div>
-    </div>
-    <div style="font-size:12.5px;font-weight:600;color:#D9D9D9">Infloww dark</div>
   </div>
     </div>
 </div>
@@ -37594,12 +37636,14 @@ def _render_clicrank_html() -> str:
         return ("<div class='home-card'>" + tete +
                 "<div class='cr-vide'>Aucun lien de suivi sur cette "
                 "quinzaine.</div></div>")
-    fonds = {1: "#14b8a6", 2: "#10b981", 3: "#34d399"}
     lignes = []
     for i, g in enumerate(rangs, start=1):
-        bg = fonds.get(i)
-        badge = (f"<div class='rank-badge' style='background:{bg}'>{i}</div>"
-                 if bg else f"<div class='rank-badge rank-badge-off'>{i}</div>")
+        # LE PODIUM PORTE SA MEDAILLE, les autres leur numero. Le fond
+        # colore disparait sous la medaille : un rond vert derriere un dessin
+        # dore faisait deux taches l une sur l autre.
+        _med = _cp.medaille(i - 1)
+        badge = (f"<div class='rank-badge rank-medaille'>{_med}</div>" if _med
+                 else f"<div class='rank-badge rank-badge-off'>{i}</div>")
         emo = g["emoji"]
         # La fusion se VOIT : on nomme les liens reunis sous ce pseudo. Si deux
         # personnes se retrouvaient sous le meme nom, ca saute aux yeux ici.
@@ -40281,7 +40325,21 @@ def _render_sessions_html() -> str:
         jour = _sv.jour_de(_tSe.time())
 
     cfg = _sv.config()
-    attendus = _sv.attendus()
+    # LA LISTE DES ATTENDUS VIENT DU BOT QUAND IL TOURNE. Lui seul sait quels
+    # salons va- existent encore et quel surnom porte chaque membre sur SON
+    # serveur. Le repli lit users.json en entier -- 179 personnes, patrons et
+    # testeurs compris : c'est ce qui a produit un bilan accusant tout le
+    # monde. On s'en sert donc seulement faute de mieux, et l'ecran le dit.
+    _cog_att = _sessions_cog()
+    attendus, _att_fiable = [], False
+    if _cog_att is not None:
+        try:
+            attendus = _cog_att._attendus_enrichis()
+            _att_fiable = True
+        except Exception:
+            attendus = []
+    if not attendus:
+        attendus = _sv.attendus()
     resume = _sv.resume_jour(jour, attendus=attendus)
     gens = _sv.resume_par_personne(jour, attendus=attendus)
     cog = _sessions_cog()
@@ -40399,6 +40457,11 @@ def _render_sessions_html() -> str:
               + __import__("datetime").timedelta(days=1)).isoformat()
 
     avert = ""
+    if attendus and not _att_fiable:
+        avert = ("<div class='se-avert'>Le bot est arrêté : la liste des VA "
+                 "attendus est lue brute dans le registre et contient des "
+                 "personnes qui ne sont pas des VA. Les absents affichés ne "
+                 "sont pas fiables tant qu'il n'a pas redémarré.</div>")
     if not attendus:
         avert = ("<div class='se-avert'>Aucun VA connu dans le registre : "
                  "la page ne peut montrer que les présents, jamais les absents.</div>")
@@ -48314,13 +48377,19 @@ def _render_upload_inner(msg=None, error=None):
     # les porte encore bascule sur SOMBRE, pas sur le defaut clair.
     if _th in ("obsidian", "violet", "gold"):
         _th = "dark"
-    if _th not in ("light", "apple", "claude", "dark", "infloww"):
-        _th = "light"          # defaut du site
+    if _th not in ("light", "apple", "claude", "dark", "infloww", "inflowwlight"):
+        # LE DEFAUT A SUIVI LE SELECTEUR. « clair » n'y est plus : le laisser
+        # comme defaut donnait la seule apparence que personne ne peut plus
+        # choisir. Il doit valoir celui des deux scripts du navigateur, sinon
+        # le serveur peint une page et le JavaScript une autre.
+        _th = "inflowwlight"   # defaut du site
     _pre = {"light": "light-pre pre-light", "apple": "light-pre pre-apple",
             "claude": "light-pre pre-claude",
+            "inflowwlight": "light-pre pre-inflowwlight",
             "dark": "", "infloww": "pre-infloww"}[_th]
     _bod = {"light": "light", "apple": "light apple",
             "claude": "light claude", "dark": "",
+            "inflowwlight": "light inflowwlight",
             "infloww": "infloww"}[_th]
 
     html = (

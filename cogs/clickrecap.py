@@ -348,6 +348,132 @@ async def _liens_suivi_periode(debut, fin) -> list:
 # marche, meme sans rien avoir rapporte depuis trois semaines.
 
 
+#: Combien de lignes par classement. Un champ Discord tient 1024 signes et
+#: l'embed entier 6000 : dix lignes laissent la place au tableau par lien,
+#: qui reste la piece maitresse du report.
+_RANG_MAX = 10
+
+
+def _rang_puce(i: int) -> str:
+    """La medaille du podium, sinon le numero. Definies une seule fois, dans
+    clics_personnes : l'or doit etre le meme sur Discord et sur la page web."""
+    import clics_personnes as _cp
+    return _cp.medaille(i) or ("`%2d`" % (i + 1))
+
+
+def _lignes_classement(gens, valeur, suffixe, detail=None) -> list:
+    """Les lignes d'un classement, pretes pour un champ d'embed.
+
+    HORS BLOC DE CODE, volontairement. Le tableau par lien est en chasse fixe
+    parce que ses colonnes doivent s'aligner ; un classement, lui, porte un
+    emoji par personne -- et un emoji dans un bloc de code Discord ne fait pas
+    la largeur d'un caractere, il decale tout ce qui suit. En texte normal, le
+    gras porte le podium et rien n'a besoin de s'aligner.
+    """
+    out = []
+    for i, g in enumerate(gens[:_RANG_MAX]):
+        v = valeur(g)
+        # PAS DE « 0 » QUAND ON N'A PAS SU LIRE. Et pas un tiret non plus : la
+        # ligne en porte deja un comme separateur, les deux se confondaient
+        # (« VA 9 — — clicks »). On ecrit ce que ca veut dire.
+        txt = ("_not read_" if v is None
+               else "{:,}".format(int(v)).replace(",", " ") + suffixe)
+        nom = g["titre"]
+        if i < 3:
+            nom = "**%s**" % nom
+        bout = " · ".join(x for x in [detail(g) if detail else ""] if x)
+        out.append("%s %s %s — %s%s"
+                   % (_rang_puce(i), g["emoji"], nom, txt,
+                      (" · " + bout) if bout else ""))
+    reste = len(gens) - _RANG_MAX
+    if reste > 0:
+        out.append("_… +%d more_" % reste)
+    return out
+
+
+def _champs_classements(donnees: dict) -> list:
+    """[(titre, valeur)] : les deux classements, ou [] s'il n'y a rien.
+
+    LES DEUX REPONDENT A DEUX QUESTIONS DIFFERENTES. Les clics disent qui
+    envoie du trafic ; les abonnes disent qui en fait quelque chose. Quelqu'un
+    a 500 clics et 0 abonne ne se voyait nulle part. On ne les additionne pas :
+    ce sont deux unites, et un score qui les melangerait sans dire comment
+    serait moins lisible que deux classements cote a cote.
+
+    LE TABLEAU PAR LIEN N'EST PAS TOUCHE. Il reste alphabetique, une ligne par
+    lien : c'est ce qui se lit tous les jours, et un tableau qui se reordonne
+    a chaque heure ne se parcourt pas du regard. Les classements s'AJOUTENT a
+    cote, comme le palmares de la page web.
+    """
+    try:
+        import clics_personnes as _cp
+    except Exception as _e:                      # noqa: BLE001
+        print("[reportclick] classements indisponibles : %s" % _e, flush=True)
+        return []
+    entrees = _cp.depuis_report(donnees, "quinz")
+    if not entrees:
+        return []
+    quinz = str(donnees.get("quinzaine") or "").strip()
+    champs = []
+
+    gens = _cp.par_clics(entrees)
+    if gens:
+        champs.append((
+            ("\U0001F3C6 Clicks ranking — %s" % quinz) if quinz
+            else "\U0001F3C6 Clicks ranking",
+            "\n".join(_lignes_classement(
+                gens, lambda g: g["clics"], " clicks",
+                lambda g: ("%d links" % len(g["liens"])) if len(g["liens"]) > 1 else ""))))
+
+    # Le second classement n'a de sens que si MyPuls a repondu : sans abonnes,
+    # il recopierait l'ordre du premier avec des tirets partout.
+    # ABSENT DE `abonnes` NE VEUT PAS DIRE ZERO ABONNE : ca veut dire que le
+    # lien n'est rattache a aucun lien de suivi MyPuls (une destination sans
+    # « pseudo/code »), donc qu'on ne peut RIEN dire de sa conversion. Ces
+    # personnes sortent du classement et sont comptees a part, plutot que
+    # d'occuper le bas du tableau avec une rangee de tirets.
+    _tous = _cp.par_abonnes(entrees)
+    conv = [g for g in _tous if not g["abonnes_muets"]]
+    hors = len(_tous) - len(conv)
+    if conv:
+        _l = _lignes_classement(
+            conv, lambda g: g["abonnes"], " subs",
+            lambda g: " · ".join(x for x in [
+                ("%s clicks" % g["clics"]) if g["clics"] is not None else "",
+                ("%s%%" % g["taux"]) if g["taux"] is not None else ""] if x))
+        if hors:
+            _l.append("_(+%d not linked to a MyPuls tracking link)_" % hors)
+        champs.append(("\u2B50 Subs ranking — who converts",
+                       "\n".join(_l)))
+    return champs
+
+
+def _tenir_dans_embed(emb, plafond: int = 5900) -> None:
+    """Retire des champs de la FIN tant que l'embed depasse le plafond.
+
+    Sans cette garde, un report trop long faisait lever msg.edit, l'exception
+    etait avalee plus haut (« edit transitoire echoue, ancien garde ») et le
+    message epingle se FIGEAIT sur sa derniere version valide, a chaque cycle
+    de 30 minutes, sans que personne ne soit prevenu. Un chiffre faux que
+    personne ne voit est exactement ce qu'on cherche a eviter partout ailleurs.
+
+    On coupe par la fin -- les derniers blocs du tableau par lien -- et on le
+    DIT dans un champ final, au lieu de tronquer en silence.
+    """
+    try:
+        coupes = 0
+        while len(emb) > plafond and len(emb.fields) > 2:
+            emb.remove_field(len(emb.fields) - 1)
+            coupes += 1
+        if coupes:
+            emb.add_field(name="\u26A0\uFE0F Truncated",
+                          value="_(%d field(s) removed — the report exceeded "
+                                "Discord's 6000-character limit.)_" % coupes,
+                          inline=False)
+    except Exception as _e:                      # noqa: BLE001
+        print("[reportclick] garde de taille : %s" % _e, flush=True)
+
+
 def _personne_du_lien(nom) -> str:
     """La PERSONNE derriere un nom de lien, ou '' si on ne peut pas la nommer.
 
@@ -1368,6 +1494,18 @@ class ClickRecap(commands.Cog):
             # ce qu'on venait d'y mettre.
             if sortie is not None:
                 sortie.update(_donnees)
+
+            # LES CLASSEMENTS PASSENT DEVANT LE DETAIL. On les calcule ici,
+            # parce que _donnees n'est complet qu'apres _tableau(), mais on
+            # les INSERE en deuxieme position : c'est la reponse a « qui
+            # porte ? », et elle ne se lit pas apres trente lignes de tableau.
+            try:
+                for _ic, (_nc, _vc) in enumerate(_champs_classements(_donnees)):
+                    emb.insert_field_at(1 + _ic, name=_nc, value=_vc,
+                                        inline=False)
+            except Exception as _e_rang:         # noqa: BLE001
+                print("[reportclick] classements non poses : %s" % _e_rang,
+                      flush=True)
             for i, b in enumerate(_blocs):
                 # L'en-tete est repete partout : un bloc de suite sans titres
                 # de colonnes n'est qu'une grille de chiffres.
@@ -1381,6 +1519,8 @@ class ClickRecap(commands.Cog):
                 name="📋 Per link",
                 value=f"_({len(ids)} links — too many to detail, totals above.)_",
                 inline=False)
+
+        _tenir_dans_embed(emb)
 
         # Pas de drapeau dans le PIED de page : Discord y rend les emoji en
         # toutes petites lettres, « 🇺🇸 US » se lisait « us US ».

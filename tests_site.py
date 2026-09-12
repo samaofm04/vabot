@@ -9519,10 +9519,16 @@ try:
         # dans l autre. C est exactement l ecran blanc au rechargement.
         _dSrv = _srcTh2.split("# defaut du site")[0].rsplit('_th = "', 1)[-1].split('"')[0]
         _mot = "localStorage.getItem('vabot_theme') || '"
-        _dCli = set(p.split("'")[0] for p in _srcTh2.split(_mot)[1:])
+        # Le repli VIDE ne compte pas : un troisieme lecteur du theme ne
+        # cherche pas le defaut, il demande seulement « est-ce Apple ? »
+        # pour poser les icones iOS.
+        _dCli = set(p.split("'")[0] for p in _srcTh2.split(_mot)[1:]) - {""}
         check("themes : le serveur et le navigateur ont le MEME defaut",
               _dCli == {_dSrv},
               "serveur %s, navigateur %s" % (_dSrv, sorted(_dCli)))
+        check("themes : les deux scripts du navigateur declarent ce defaut",
+              _srcTh2.count(_mot + _dSrv) == 2,
+              "%d script(s) au lieu de 2" % _srcTh2.count(_mot + _dSrv))
         check("themes : et ce defaut se trouve dans le selecteur",
               ("setTheme('%s')" % _dSrv) in _srcTh2,
               "defaut %s : personne ne peut le rechoisir" % _dSrv)
@@ -10111,6 +10117,9 @@ try:
         _wc._GMSDASH_MEM[_wc.CLICRANK_TEAM + "|q2"] = \
             _wc._GMSDASH_MEM[_wc.CLICRANK_TEAM + "|q1"]
     _htmlC = _wc._clicrank_carte_html()
+    check("clics VA : le premier porte une medaille, pas une pastille verte",
+          "rank-badge rank-medaille'>\U0001F947<" in _htmlC,
+          _htmlC[:260])
     check("clics VA : la carte affiche un tiret, pas un zero",
           "cr-clics muet'>\u2014<" in _htmlC,
           _htmlC[-300:] if _htmlC else "carte vide")
@@ -10486,7 +10495,7 @@ try:
     # apparie rang par rang. Un dictionnaire indexe par nom aurait perdu un
     # telephone entier des que deux liens portent le meme libelle.
     check("classements : un lien sans abonnes n herite pas de ceux du voisin",
-          _eD[5]["nom"] == "VA 3 (Laboule)" and _eD[5]["abonnes"] is None,
+          "Laboule" in _eD[5]["nom"] and _eD[5]["abonnes"] is None,
           str(_eD[5]))
     _srcJ = pathlib.Path("clics_personnes.py").read_text(encoding="utf-8")
     check("classements : la jointure n indexe PAS les abonnes par nom",
@@ -10519,10 +10528,19 @@ try:
           len(_champs) == 2, str([n for n, _v in _champs]))
     _txt0 = _champs[0][1] if _champs else ""
     _txt1 = _champs[1][1] if len(_champs) > 1 else ""
+    check("classements : les medailles sont definies UNE fois",
+          _cpD.medaille(0) == "\U0001F947" and _cpD.medaille(2) == "\U0001F949"
+          and _cpD.medaille(3) == "")
     check("report : le podium porte trois medailles",
           _txt0.count("\U0001F947") == 1 and _txt0.count("\U0001F949") == 1)
+    _ligne9 = [x for x in _txt0.split(chr(10)) if "VA 9" in x]
     check("report : un lien non lu le DIT au lieu d afficher zero",
-          "_not read_" in _txt0 and "\u2014 0 clicks" not in _txt0, _txt0[-80:])
+          _ligne9 and "_not read_" in _ligne9[0] and "0" not in _ligne9[0],
+          str(_ligne9))
+    # ... et un VRAI zero reste un zero : Laboule a bien fait zero clic.
+    _ligneL = [x for x in _txt0.split(chr(10)) if "Laboule" in x]
+    check("report : un vrai zero s ecrit toujours zero",
+          _ligneL and "0 clicks" in _ligneL[0], str(_ligneL))
     # Absent de MyPuls ne veut pas dire zero abonne : ces personnes sortent
     # du classement et sont COMPTEES, jamais effacees.
     check("report : les non rattaches a MyPuls sont comptes, pas effaces",
@@ -10560,6 +10578,8 @@ try:
                                  jeton="abc", vue="ensemble")
     check("portail : les deux classements sont sur la page",
           "Classement clics" in _pageD and "Qui convertit" in _pageD)
+    check("portail : le podium porte ses medailles",
+          _pageD.count("\U0001F947") == 2, str(_pageD.count("\U0001F947")))
     check("portail : la fusion est affichee, pas seulement appliquee",
           "2 liens : VA 8 (VA 2 Noum), VA 4 (VA 1 Noum)" in _pageD)
     check("portail : un non lu affiche un tiret, jamais un zero",

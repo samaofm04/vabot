@@ -154,7 +154,11 @@ _CSS = """
   --ombre:0 1px 2px rgba(31,30,29,.05), 0 6px 18px -8px rgba(31,30,29,.10);
   --serif:ui-serif,Georgia,"Iowan Old Style","Times New Roman",serif,
          "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji";
-  --sans:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  /* Les replis emoji sont sur les DEUX familles, pas seulement la serif :
+     les classements portent un dessin par personne, et ils sont ecrits
+     dans la police du corps. */
+  --sans:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif,
+        "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji";
   --chiffres:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
 }
 @media(prefers-color-scheme:dark){:root{
@@ -222,11 +226,21 @@ tr.tetes2 th{border-bottom:1px solid var(--bordure)}
 .li .r{width:28px;height:22px;flex:none;display:inline-flex;align-items:center;
        justify-content:center;font-size:11px;font-weight:600;color:var(--attenue);
        background:var(--surface-2);border-radius:999px}
-.li.podium .r{background:var(--accent-doux);color:var(--accent)}
+.li.podium .r{background:transparent;font-size:17px;line-height:1}
+/* La medaille remplace la pastille : un rond colore DERRIERE un dessin
+   en couleur faisait deux taches l une sur l autre. */
 .li .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .li .c{font-family:var(--chiffres);font-size:12.5px;font-weight:600;
        font-variant-numeric:tabular-nums;flex:none}
-.li .ab{width:84px;text-align:right;color:var(--attenue);font-size:12px;flex:none}
+.li .ab{width:120px;text-align:right;color:var(--attenue);font-size:12px;flex:none}
+/* Un dessin par personne : c est ce qui permet de retrouver quelqu un
+   d un classement a l autre sans relire les noms. */
+.li .emo{flex:none;font-size:16px;line-height:1;width:22px;text-align:center}
+/* La sous-ligne dit ce qu il faut savoir AVANT de croire le chiffre :
+   les liens reunis sous un pseudo, une arrivee en cours de periode. */
+.sous{padding:0 0 10px 40px;margin-top:-8px;font-size:11.5px;
+      color:var(--faible);border-top:none}
+.reste{padding:10px 0 0;font-size:11.5px;color:var(--faible)}
 h2 .note{font:400 12px/1 var(--sans);color:var(--attenue)}
 
 /* L'AVERTISSEMENT. Un tableau plein de « — » se lit comme un jour sans
@@ -483,67 +497,117 @@ def _audience(a: dict, intercale: str = "") -> str:
     return "".join(out)
 
 
-def _palmares(rangs: list, jeton: str) -> str:
-    """Les huit liens qui portent le trafic, classes.
+def _emo(g) -> str:
+    """L'emoji d'une personne, avec un indice quand il est partage."""
+    return html.escape(g.get("emoji") or "")
 
-    Le tableau complet dit tout mais ne HIERARCHISE rien : sur trente lignes,
-    on ne voit pas qui tire. C est la question de la vue d ensemble.
-    """
-    if not rangs:
-        return ""
-    # Quand AUCUN lien n a de clics connus, le classement ne porte plus que
-    # sur les abonnes : on le dit dans le titre, au lieu de laisser croire
-    # que ce sont les clics qui l ordonnent.
-    sans_clics = all(r.get("clics") is None for r in rangs)
-    lignes = []
-    for i, r in enumerate(rangs[:8]):
-        lignes.append(
-            "<div class='li%s'><span class='r'>%d</span>"
+
+def _ligne_rang(i: int, g: dict, valeur, droite: str) -> str:
+    """Une ligne de classement. « — » veut dire NON LU, jamais zero."""
+    import clics_personnes as _cpm
+    v = valeur(g)
+    # LE PODIUM PORTE SA MEDAILLE. Le numero reste dessous pour les autres :
+    # trois dessins se reperent d'un coup d'oeil, trente ne se distinguent
+    # plus les uns des autres.
+    _m = _cpm.medaille(i)
+    return ("<div class='li%s'><span class='r'>%s</span>"
+            "<span class='emo'>%s</span>"
             "<span class='n'>%s</span><span class='c'>%s</span>"
             "<span class='ab'>%s</span></div>"
-            % (" podium" if i < 3 else "", i + 1,
-               html.escape(str(r.get("lien") or "")),
-               "—" if r.get("clics") is None else _num(r.get("clics")),
-               ("%s abonné%s" % (_num(r.get("abonnes")),
-                                 "s" if int(r.get("abonnes") or 0) > 1 else ""))
-               if r.get("abonnes") else "—"))
+            % (" podium" if i < 3 else "", _m or str(i + 1), _emo(g),
+               html.escape(str(g.get("titre") or "")),
+               "—" if v is None else _num(v), droite))
+
+
+def _sous_ligne(g: dict) -> str:
+    """Ce qu'il faut savoir sur une ligne avant de la croire."""
+    bouts = []
+    liens = g.get("liens") or []
+    if len(liens) > 1:
+        # LA FUSION SE VOIT. « Meme pseudo, meme personne » est une regle du
+        # proprietaire, pas une evidence : si elle reunit deux personnes a
+        # tort, il faut que ca saute aux yeux au lieu de se cacher dans un
+        # total.
+        bouts.append("%d liens : %s" % (len(liens), ", ".join(liens[:3])))
+    if not g.get("pseudo"):
+        bouts.append("pseudo absent du nom du lien")
+    if g.get("depuis"):
+        bouts.append("arrivé le %s" % _fr_court(g["depuis"]))
+    if g.get("clics_na") or g.get("abonnes_na"):
+        bouts.append("une partie de la période est antérieure à son arrivée")
+    if g.get("emoji_partage"):
+        bouts.append("emoji partagé — plus de personnes que de dessins")
+    return ("<div class='sous'>%s</div>" % html.escape(" · ".join(bouts))) if bouts else ""
+
+
+def _classements(d: dict, jeton: str) -> str:
+    """Les deux classements, par PERSONNE.
+
+    DEUX QUESTIONS, DEUX CLASSEMENTS. Les clics disent qui envoie du trafic ;
+    les abonnes disent qui en fait quelque chose — quelqu'un a 500 clics et
+    0 abonne ne se voyait nulle part. On ne les additionne pas : ce sont deux
+    unites, et un score qui les melangerait sans dire comment serait moins
+    lisible que deux listes cote a cote.
+
+    LE TABLEAU PAR LIEN N'EST PAS TOUCHE : il reste alphabetique, dans l'autre
+    vue. Un tableau qu'on lit tous les jours doit garder chacun a la meme
+    place ; le classement, lui, est fait pour bouger.
+    """
+    try:
+        import clics_personnes as cp
+    except Exception:
+        return ""
+    entrees = cp.depuis_report(d, "quinz")
+    if not entrees:
+        return ""
+    quinz = html.escape(str(d.get("quinzaine") or "la quinzaine"))
     tout = ("<a class='tout' href='%s/%s/liens'>Tout voir</a>"
             % (RACINE, html.escape(str(jeton)))) if jeton else ""
-    return ("<section><h2>Top liens%s%s</h2><div class='top'>%s</div></section>"
-            % (" <span class='note'>— par abonnés, clics indisponibles</span>"
-               if sans_clics else "", tout, "".join(lignes)))
-
-
-def _rangs(d: dict) -> list:
-    """Clics et abonnes de la quinzaine, par lien, du plus fort au plus faible.
-
-    UN CLIC INCONNU RESTE None, il ne devient pas 0. Vu en ligne : la source
-    des clics par lien s etait tue, chaque lien est ressorti a « 0 clic », et
-    le palmares affichait un classement parfaitement lisible et entierement
-    faux. Un tableau qui dit « — » a cote d un palmares qui dit « 0 », c est
-    le second qu on croit.
-    """
-    ab = {str(r.get("lien") or ""): r for r in (d.get("abonnes") or [])}
     out = []
-    for r in (d.get("par_lien") or []):
-        nom = str(r.get("lien") or "")
-        per = r.get("periodes") or []
-        # La quinzaine, pas aujourd hui : un classement sur une seule journee
-        # change tous les matins et ne dit rien de qui travaille.
-        v = per[2] if len(per) > 2 else None
-        clics = None
-        if isinstance(v, dict):
-            clics = v.get("marche")
-            if clics is None:
-                clics = v.get("total")
-        out.append({"lien": nom,
-                    "clics": None if clics is None else int(clics),
-                    "abonnes": int((ab.get(nom) or {}).get("quinz") or 0)})
-    # Les liens dont on connait les clics passent devant ceux dont on ne sait
-    # rien : sinon un inconnu se glisse au milieu du classement comme s il
-    # valait zero.
-    out.sort(key=lambda r: (r["clics"] is None, -(r["clics"] or 0), -r["abonnes"]))
-    return [r for r in out if r["clics"] or r["abonnes"]]
+
+    # --- Qui envoie du trafic -------------------------------------------
+    gens = cp.par_clics(entrees)
+    if gens:
+        lignes = []
+        for i, g in enumerate(gens[:10]):
+            droite = ("%s abonné%s" % (_num(g["abonnes"]),
+                                       "s" if (g["abonnes"] or 0) > 1 else "")
+                      if g.get("abonnes") is not None else "—")
+            lignes.append(_ligne_rang(i, g, lambda x: x["clics"], droite))
+            sous = _sous_ligne(g)
+            if sous:
+                lignes.append(sous)
+        reste = max(0, len(gens) - 10)
+        out.append(
+            "<section><h2>Classement clics <span class='note'>— %s</span>%s</h2>"
+            "<div class='top'>%s</div>%s</section>"
+            % (quinz, tout, "".join(lignes),
+               "<div class='reste'>+%d autre(s)</div>" % reste if reste else ""))
+
+    # --- Qui convertit ---------------------------------------------------
+    # Absent de la liste des abonnes ne veut PAS dire zero abonne : cela veut
+    # dire que le lien n'est rattache a aucun lien de suivi MyPuls, donc qu'on
+    # ne peut rien dire de sa conversion. Ces personnes sont comptees a part.
+    tous = cp.par_abonnes(entrees)
+    conv = [g for g in tous if not g["abonnes_muets"]]
+    hors = len(tous) - len(conv)
+    if conv:
+        lignes = []
+        for i, g in enumerate(conv[:10]):
+            droite = ("%s clic%s · %s" % (
+                _num(g["clics"]), "s" if (g["clics"] or 0) > 1 else "",
+                ("%s %%" % g["taux"]) if g.get("taux") is not None else "—")
+                if g.get("clics") is not None else "—")
+            lignes.append(_ligne_rang(i, g, lambda x: x["abonnes"], droite))
+        if hors:
+            lignes.append(
+                "<div class='reste'>+%d personne(s) sans lien de suivi MyPuls "
+                "— leur conversion est inconnue, pas nulle</div>" % hors)
+        out.append(
+            "<section><h2>Qui convertit <span class='note'>— abonnés gagnés, "
+            "%s</span></h2><div class='top'>%s</div></section>"
+            % (quinz, "".join(lignes)))
+    return "".join(out)
 
 
 def _alerte_clics(d: dict) -> str:
@@ -639,7 +703,7 @@ def _page_donnees(titre: str, sous: str, d: dict, quand: str,
         # trois listes : place a la suite, il tombait sous « Provenance »,
         # loin de la question qu il eclaire.
         corps.append(_audience(d.get("audience") or {},
-                               _palmares(_rangs(d), jeton)))
+                               _classements(d, jeton)))
 
     # --- UNE SEULE TABLE : clics ET abonnes, par lien --------------------
     #

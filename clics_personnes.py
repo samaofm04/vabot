@@ -53,6 +53,17 @@ _POINTS = (
 )
 EMOJIS = tuple(chr(c) for c in _POINTS)
 
+#: LE PODIUM. Trois medailles, pas plus : au-dela, un dessin de plus
+#: n'ajoute rien et encombre la ligne — le numero suffit. Elles sont ici et
+#: pas dans chacun des trois ecrans, pour que l'or reste l'or partout.
+MEDAILLES = ("\U0001F947", "\U0001F948", "\U0001F949")
+
+
+def medaille(i: int) -> str:
+    """La medaille du rang i (0 = premier), ou "" au-dela du podium."""
+    return MEDAILLES[i] if 0 <= i < len(MEDAILLES) else ""
+
+
 #: Le dessin des lignes que personne n'a nommees. Il ne fait PAS partie de la
 #: palette : il doit rester reconnaissable au milieu des autres.
 EMOJI_ANONYME = "❔"
