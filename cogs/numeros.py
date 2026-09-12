@@ -9,6 +9,7 @@ Sur chaque activation : 🔄 Redemander un code (même numéro/mail) et ❌ Annu
 Tout est ÉPHÉMÈRE (visible du seul demandeur) sauf le panneau lui-même.
 """
 import asyncio
+import functools
 import logging
 
 import discord
@@ -794,14 +795,15 @@ class NumerosCog(commands.Cog):
 
     @app_commands.command(
         name="soldes",
-        description="Solde des générateurs (numéros GetAText + mails SMSBower)")
+        description="Solde des générateurs (GetAText, SMSBower, SMSPool)")
     async def soldes(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
         b = await asyncio.to_thread(numgen.balances)
         await interaction.followup.send(
             "💰 **Soldes**\n"
             f"• 📱 Numéros (GetAText) : **{b['sms']}**\n"
-            f"• 📧 Mails (SMSBower) : **{b['mail']}**", ephemeral=True)
+            f"• 📧 Mails (SMSBower) : **{b['mail']}**\n"
+            f"• 🏊 SMSPool : **{b.get('smspool', '—')}**", ephemeral=True)
 
 
 class _KeysModal(discord.ui.Modal, title="🔑 Clés des générateurs"):
@@ -811,6 +813,9 @@ class _KeysModal(discord.ui.Modal, title="🔑 Clés des générateurs"):
     smsbower = discord.ui.TextInput(
         label="Clé SMSBower (mails)", required=False, max_length=120,
         placeholder="laisse vide pour ne pas changer")
+    smspool = discord.ui.TextInput(
+        label="Clé SMSPool (solde seul)", required=False, max_length=120,
+        placeholder="laisse vide pour ne pas changer")
     pays = discord.ui.TextInput(
         label="Pays par défaut (0 = RU, 187 = USA)", required=False, max_length=6,
         placeholder="187")
@@ -818,15 +823,18 @@ class _KeysModal(discord.ui.Modal, title="🔑 Clés des générateurs"):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True, thinking=True)
         s = await asyncio.to_thread(
-            numgen.set_keys,
-            str(self.getatext.value).strip() or None,
-            str(self.smsbower.value).strip() or None,
-            str(self.pays.value).strip() or None)
+            functools.partial(
+                numgen.set_keys,
+                str(self.getatext.value).strip() or None,
+                str(self.smsbower.value).strip() or None,
+                str(self.pays.value).strip() or None,
+                smspool=str(self.smspool.value).strip() or None))
         b = await asyncio.to_thread(numgen.balances)
         await interaction.followup.send(
             f"✅ **Enregistré**\n"
             f"• 📱 GetAText : {s['getatext'] or '❌ absente'} — solde **{b['sms']}**\n"
             f"• 📧 SMSBower : {s['smsbower'] or '❌ absente'} — solde **{b['mail']}**\n"
+            f"• 🏊 SMSPool : {s.get('smspool') or '❌ absente'} — solde **{b.get('smspool', '—')}**\n"
             f"• 🌍 Pays par défaut : `{s['country']}`", ephemeral=True)
 
 

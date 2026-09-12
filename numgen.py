@@ -21,6 +21,9 @@ _FILE = pathlib.Path(__file__).resolve().parent / "data" / "numgen.json"
 GETATEXT_URL = "https://getatext.com/stubs/handler_api.php"
 SMSBOWER_STUBS_URL = "https://smsbower.app/stubs/handler_api.php"
 MAIL_BASE = "https://smsbower.page/api/mail"
+# SMSPool ne parle pas « stubs » : son API est du JSON, la cle dans
+# l'URL. Seul le solde est branche ici -- voir l'en-tete du module.
+SMSPOOL_BALANCE_URL = "https://api.smspool.net/request/balance"
 MAIL_DOMAIN = "gmail.com"
 
 # Codes service -> nom attendu par chaque fournisseur (GetAText veut le nom long)
@@ -73,7 +76,12 @@ def smsbower_key() -> str:
     return _key("smsbower_api_key")
 
 
-def set_keys(getatext=None, smsbower=None, country=None, service=None) -> dict:
+def smspool_key() -> str:
+    return _key("smspool_api_key")
+
+
+def set_keys(getatext=None, smsbower=None, country=None, service=None,
+             smspool=None) -> dict:
     c = _cfg()
     if getatext is not None:
         c["getatext_api_key"] = str(getatext).strip()
@@ -83,6 +91,8 @@ def set_keys(getatext=None, smsbower=None, country=None, service=None) -> dict:
         c["country"] = str(country).strip()
     if service is not None:
         c["service"] = str(service).strip().lower()
+    if smspool is not None:
+        c["smspool_api_key"] = str(smspool).strip()
     try:
         _FILE.parent.mkdir(parents=True, exist_ok=True)
         safe_json.write(_FILE, c, indent=2)
@@ -99,10 +109,14 @@ def status() -> dict:
     return {
         "getatext": _m(getatext_key()),
         "smsbower": _m(smsbower_key()),
+        "smspool": _m(smspool_key()),
         "country": str(c.get("country") or PAYS_DEFAUT),
         "service": str(c.get("service") or "ig"),
         "sms_ok": bool(getatext_key() or smsbower_key()),
         "mail_ok": bool(smsbower_key()),
+        # Volontairement HORS de sms_ok : celui-la allume le bouton
+        # « Obtenir un numero », et SMSPool ne sait pas acheter d'ici.
+        "smspool_ok": bool(smspool_key()),
     }
 
 
@@ -133,8 +147,8 @@ def stock(service="ig") -> dict:
 
 
 def balances() -> dict:
-    """Soldes des 2 fournisseurs, prêts à afficher ('12.34 $' ou '—')."""
-    out = {"sms": "—", "mail": "—"}
+    """Soldes des 3 fournisseurs, prêts à afficher ('12.34 $' ou '—')."""
+    out = {"sms": "—", "mail": "—", "smspool": "—"}
     if getatext_key():
         t = _get(GETATEXT_URL, {"api_key": getatext_key(), "action": "getBalance"})
         if t.startswith("ACCESS_BALANCE:"):
@@ -147,7 +161,35 @@ def balances() -> dict:
             out["mail"] = t.split(":", 1)[1].strip() + " $"
         else:
             out["mail"] = _human(t)
+    if smspool_key():
+        out["smspool"] = _solde_smspool(
+            _get(SMSPOOL_BALANCE_URL, {"key": smspool_key()}))
     return out
+
+
+def _solde_smspool(txt: str) -> str:
+    """Le solde SMSPool, ou la raison du refus.
+
+    DEUX PIEGES, tous les deux releves en production par le Parc :
+    un refus arrive avec un code HTTP 200 -- on lit donc le CORPS, et
+    pas le statut ; et « errors » est un TABLEAU d'objets, qui affiche
+    « [object Object] » si on le passe tel quel.
+    """
+    import json as _js
+    try:
+        j = _js.loads(txt)
+    except Exception:
+        return _human(txt)
+    if not isinstance(j, dict):
+        return "réponse illisible"
+    try:
+        return "%.2f $" % float(j.get("balance"))
+    except (TypeError, ValueError):
+        pass
+    e = j.get("errors")
+    if isinstance(e, list) and e and isinstance(e[0], dict):
+        e = e[0].get("message") or e[0].get("description")
+    return str(j.get("message") or e or j.get("error") or "clé refusée")[:60]
 
 
 def _get(url, params, timeout=20):

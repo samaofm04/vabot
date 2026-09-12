@@ -9568,6 +9568,71 @@ except Exception as _eP:
 
 print()
 print("=" * 70)
+print("GENERATEURS : trois fournisseurs, pas deux")
+print("=" * 70)
+try:
+    import numgen as _ngS
+    import pathlib as _plS
+
+    # LE TROISIEME EXISTE. Il servait deja au Parc ; le site ne savait ni
+    # ranger sa cle ni lire son solde.
+    _stS = _ngS.status()
+    for _c in ("smspool", "smspool_ok"):
+        check("generateurs : status() porte %s" % _c, _c in _stS)
+
+    # ET IL N ALLUME PAS LE BOUTON. « sms_ok » gouverne « Obtenir un
+    # numero » ; SMSPool n achete pas depuis le site (son API ne parle pas
+    # le protocole des deux autres, et ses identifiants de pays sont les
+    # siens). Une cle SMSPool posee ne doit donc pas allumer un bouton qui
+    # ne rendrait rien.
+    _srcN = _plS.Path("numgen.py").read_text(encoding="utf-8")
+    _dN = _srcN.index('"sms_ok"')
+    check("generateurs : SMSPool n allume pas le bouton d achat",
+          "smspool" not in _srcN[_dN:_srcN.index(chr(10), _dN)],
+          "smspool est entre dans sms_ok")
+
+    # LE REFUS ARRIVE AVEC UN CODE 200, et « errors » est un TABLEAU
+    # d objets : le passer tel quel a l affichage ecrit « [object Object] ».
+    # Les deux lecons viennent du Parc, qui les a payees en production.
+    check("generateurs : un refus SMSPool se lit dans le corps",
+          _ngS._solde_smspool(
+              '{"success":0,"errors":[{"message":"Invalid API key"}]}')
+          == "Invalid API key")
+    check("generateurs : et un solde se lit en dollars",
+          _ngS._solde_smspool('{"balance":"12.34"}') == "12.34 $")
+    check("generateurs : une page HTML ne passe pas pour un solde",
+          "$" not in _ngS._solde_smspool("<html>maintenance</html>"))
+
+    # LES TROIS LIGNES DU PANNEAU, chacune avec sa marque.
+    import web_upload as _wS3
+    _hS = _wS3._numgen_fournisseurs_html(
+        True, True, False, {"sms": "1 $", "mail": "2 $", "smspool": "3 $"})
+    for _n in ("GetAText", "SMSBower", "SMSPool"):
+        check("generateurs : %s est sur le panneau" % _n, _n in _hS)
+    for _l in ("getatext", "smsbower", "smspool"):
+        check("generateurs : la marque %s est posee" % _l,
+              ("#lg-%s" % _l) in _hS)
+    _srcW3 = _plS.Path("web_upload.py").read_text(encoding="utf-8")
+    for _l in ("getatext", "smsbower", "smspool"):
+        check("generateurs : la marque %s est declaree" % _l,
+              ('<symbol id="lg-%s"' % _l) in _srcW3)
+    # Et la ligne DIT que SMSPool n achete pas : sans ca, on cherche
+    # pourquoi le bouton ne s en sert pas.
+    check("generateurs : la ligne SMSPool dit qu elle ne sert qu au solde",
+          "solde seul" in _hS)
+
+    # LA CLE SE POSE DANS DISCORD, jamais par le site. Un fournisseur sans
+    # champ dans le formulaire reste « AUCUNE CLE » pour toujours.
+    _srcC = _plS.Path("cogs/numeros.py").read_text(encoding="utf-8")
+    check("generateurs : le formulaire des cles a son champ SMSPool",
+          "smspool = discord.ui.TextInput" in _srcC)
+    check("generateurs : et /soldes le montre",
+          "SMSPool" in _srcC.split("async def soldes")[1][:600])
+except Exception as _eS3:
+    check("generateurs : testable", False, repr(_eS3)[:200])
+
+print()
+print("=" * 70)
 print("INTEGRATIONS : six reglages replies dans un sous-menu")
 print("=" * 70)
 try:
