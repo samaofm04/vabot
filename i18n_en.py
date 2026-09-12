@@ -244,6 +244,9 @@ ETATS = {
     "Aucune session en cours": "No session running",
     "Assiduité du jour": "Attendance today",
     "Poster le résumé sur Discord": "Post the summary to Discord",
+    "Poster le résumé du jour affiché": "Post the summary for the day shown",
+    "Session non surveillée — le suivi ne tournait pas encore. Aucun absent ne peut en être déduit.":
+        "Session not monitored — tracking was not running yet. No absence can be inferred from it.",
     "Passés vite": "Dropped in briefly",
     "personne pour l'instant": "nobody yet",
     "bot arrêté — présence non mesurée": "bot offline — presence not measured",
