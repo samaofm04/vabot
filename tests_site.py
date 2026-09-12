@@ -11541,6 +11541,103 @@ try:
 except Exception as _eA2:
     check("discord : rattachement testable", False, repr(_eA2)[:220])
 
+# --- Un report qui ne part pas DIT pourquoi ------------------------------
+# Vu le 12/09 : /setreportclick a repondu « ✅ activé dans #ranking » et rien
+# n est jamais apparu dans le salon. Toutes les sorties d echec etaient
+# muettes ou n ecrivaient que dans le journal du VPS, que personne ne lit.
+# Une commande qui dit « OK » alors que rien n est parti est pire qu une
+# commande qui echoue.
+try:
+    import asyncio as _aioP, tempfile as _tmpP, discord as _dcP
+    from cogs import clickrecap as _crP
+
+    class _PermP:
+        def __init__(s, v=True, e=True, se=True):
+            s.view_channel, s.embed_links, s.send_messages = v, e, se
+
+    class _GuildP:
+        def __init__(s):
+            s.me = object()
+
+    class _ChP:
+        def __init__(s, perm, boum=None):
+            s.id, s.guild, s._p, s._boum = 22, _GuildP(), perm, boum
+
+        def permissions_for(s, m):
+            return s._p
+
+        async def send(s, **kw):
+            if s._boum:
+                raise s._boum
+
+            class _M:
+                id = 1
+
+                async def pin(s2):
+                    pass
+            return _M()
+
+    class _BotP:
+        def __init__(s, ch):
+            s._ch = ch
+
+        def get_channel(s, i):
+            return s._ch
+
+    class _CogP:
+        def __init__(s, ch):
+            s.bot = _BotP(ch)
+        _post_or_update_report = _crP.ClickRecap._post_or_update_report
+
+        async def _build_group_report(s, c, permettre_vide=True, sortie=None):
+            _e = _dcP.Embed(title="t")
+            _e.add_field(name="a", value="b", inline=False)
+            return _e
+
+    _sauveP = _crP._REPORT_CFG_FILE
+
+    def _poseP(ch):
+        _crP._REPORT_CFG_FILE = pathlib.Path(_tmpP.mkdtemp()) / "r.json"
+        _crP._save_report_cfg({"77:22": {"channel_id": 22, "team_id": "t",
+                                         "marche": "tout"}})
+        return _aioP.run(_CogP(ch)._post_or_update_report("77:22"))
+
+    try:
+        check("pose : quand tout va bien, aucune plainte",
+              _poseP(_ChP(_PermP())) == "")
+        # LES PERMISSIONS SONT NOMMEES : sans ca, on cherche pendant une heure.
+        _r1 = _poseP(_ChP(_PermP(se=False)))
+        check("pose : le droit d ecrire manquant est NOMME",
+              "Envoyer des messages" in _r1, _r1)
+        _r2 = _poseP(_ChP(_PermP(e=False)))
+        check("pose : les liens integres aussi",
+              "Liens integres" in _r2, _r2)
+        _r3 = _poseP(_ChP(_PermP(v=False)))
+        check("pose : et le droit de voir le salon",
+              "Voir le salon" in _r3, _r3)
+        # Un refus de Discord au moment de l envoi remonte avec son type.
+        _r4 = _poseP(_ChP(_PermP(), RuntimeError("boum")))
+        check("pose : un refus de Discord remonte avec sa raison",
+              "envoi refuse" in _r4 and "boum" in _r4, _r4)
+    finally:
+        _crP._REPORT_CFG_FILE = _sauveP
+
+    # Aucune sortie muette ne doit subsister.
+    _srcP = pathlib.Path("cogs/clickrecap.py").read_text(encoding="utf-8")
+    _dP = _srcP.index("async def _post_or_update_report")
+    _fP = _srcP.index(chr(10) + "    # ---------- Coeur ----------", _dP)
+    _muettesP = [l.strip() for l in _srcP[_dP:_fP].split(chr(10))
+                 if l.strip() == "return"]
+    check("pose : plus une seule sortie muette",
+          not _muettesP, "%d return nus" % len(_muettesP))
+    # Et la commande ne dit plus « active » quand rien n est parti.
+    check("pose : la commande montre la raison au lieu de dire « active »",
+          "Report enregistré, mais le message n'a pas pu être posté" in _srcP)
+    check("pose : le bouton Rafraichir aussi",
+          "Rien n'a pu être mis à jour" in _srcP)
+except Exception as _eP:
+    check("pose : testable", False, repr(_eP)[:220])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

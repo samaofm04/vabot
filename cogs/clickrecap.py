@@ -785,9 +785,17 @@ class ReportRefreshView(discord.ui.View):
         _REFRESH_DERNIER[cid] = time.time()
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
+            _soucis = []
             for cle in vises:
-                await cog._post_or_update_report(cle)
-            await interaction.followup.send("🔄 Report mis à jour.", ephemeral=True)
+                _r = await cog._post_or_update_report(cle)
+                if _r:
+                    _soucis.append(_r)
+            # « Report mis a jour » alors que rien n'est parti, c'est le
+            # message le plus trompeur qu'on puisse afficher.
+            await interaction.followup.send(
+                ("⚠️ Rien n'a pu être mis à jour :\n**"
+                 + "**\n**".join(_soucis[:3]) + "**")
+                if _soucis else "🔄 Report mis à jour.", ephemeral=True)
         except Exception as e:
             # Le compteur est relache : l'essai n'a rien coute en quota, la
             # personne ne doit pas attendre une minute pour retenter.
@@ -927,9 +935,11 @@ class ClickRecap(commands.Cog):
         cfg = _load_report_cfg()
         for cle, _c in _reports_configures(cfg):
             try:
-                await self._post_or_update_report(cle)
+                _r = await self._post_or_update_report(cle)
+                if _r:
+                    print(f"[reportclick] {cle} non publie : {_r}", flush=True)
             except Exception as e:
-                print(f"[reportclick] update {cle} echoue : {e}")
+                print(f"[reportclick] update {cle} echoue : {e}", flush=True)
             await asyncio.sleep(1)
 
     async def _poser_ranking_auto(self) -> bool:
@@ -1774,23 +1784,48 @@ class ClickRecap(commands.Cog):
         return emb
 
     async def _post_or_update_report(self, guild_id: str):
-        """Édite le message live de report du serveur, ou le poste (1re fois)."""
+        """Édite le message live de report du serveur, ou le poste (1re fois).
+
+        REND LA RAISON DE SON ECHEC, ou "" quand tout s'est bien passe.
+
+        Vu le 12/09 : /setreportclick a repondu « activé dans #ranking » et
+        rien n'est jamais apparu dans le salon. Toutes les sorties d'echec
+        etaient muettes ou n'ecrivaient que dans le journal du serveur — que
+        le proprietaire ne lit pas. Une commande qui dit « OK » alors que rien
+        n'est parti est pire qu'une commande qui echoue.
+        """
         cfg = _load_report_cfg()
         c = cfg.get(guild_id)
         if not c:
-            return
+            return "aucune configuration pour ce salon"
         ch = self.bot.get_channel(int(c["channel_id"]))
         if ch is None:
             try:
                 ch = await self.bot.fetch_channel(int(c["channel_id"]))
-            except Exception:
-                return
+            except Exception as e:
+                return f"salon introuvable ({e})"[:180]
+        # LES PERMISSIONS, AVANT D'ESSAYER. Sans « Envoyer des messages » ou
+        # « Liens integres », l'envoi leve une Forbidden qu'on attrapait plus
+        # bas sans la montrer. Les nommer permet de corriger en dix secondes.
+        try:
+            _moi = getattr(getattr(ch, "guild", None), "me", None)
+            if _moi is not None:
+                _pp = ch.permissions_for(_moi)
+                _manque = [n for n, ok in (
+                    ("Voir le salon", _pp.view_channel),
+                    ("Envoyer des messages", _pp.send_messages),
+                    ("Liens integres", _pp.embed_links)) if not ok]
+                if _manque:
+                    return ("le bot n'a pas ces droits dans le salon : "
+                            + ", ".join(_manque))
+        except Exception:
+            pass
         # Un message existe deja -> on refuse un report vide, pour ne pas
         # remplacer de bons chiffres par « No data ».
         emb = await self._build_group_report(
             c, permettre_vide=not c.get("message_id"))
         if emb is None:
-            return
+            return "GetMySocial n'a rien renvoye (module indisponible ou quota)"
         # Timer dynamique : Discord rend <t:…:R> en « dans X min » qui décompte
         # tout seul côté client (pas besoin d'éditer pour le voir bouger).
         ts = _next_demi_heure_unix()
@@ -1802,20 +1837,22 @@ class ClickRecap(commands.Cog):
                 msg = await ch.fetch_message(int(mid))
             except discord.NotFound:
                 msg = None  # message vraiment supprimé -> on en reposte un
-            except Exception:
-                return  # erreur transitoire (5xx/perm) -> on garde l'ancien
+            except Exception as e:
+                # Erreur transitoire (5xx/perm) : on garde l'ancien message,
+                # mais on dit pourquoi on ne l'a pas rafraichi.
+                return f"message existant illisible ({e})"[:180]
         if msg is not None:
             try:
                 await msg.edit(content=content, embed=emb,
                                view=ReportRefreshView(self))
-                return
+                return ""
             except discord.NotFound:
                 pass  # supprimé entre fetch et edit -> repost ci-dessous
             except Exception as e:
                 # 5xx / perte de perm / 429 : on NE reposte PAS (sinon doublons
                 # de messages épinglés qui s'accumulent) -> on garde l'ancien.
                 print(f"[reportclick] edit transitoire échoué, ancien gardé : {e}")
-                return
+                return f"edition refusee ({e})"[:180]
         try:
             m = await ch.send(content=content, embed=emb,
                               view=ReportRefreshView(self))
@@ -1831,8 +1868,10 @@ class ClickRecap(commands.Cog):
             if guild_id in fresh:
                 fresh[guild_id]["message_id"] = m.id
                 _save_report_cfg(fresh)
+            return ""
         except Exception as e:
-            print(f"[reportclick] post initial échoué : {e}")
+            print(f"[reportclick] post initial échoué : {e}", flush=True)
+            return f"envoi refuse par Discord ({type(e).__name__} : {e})"[:180]
 
     # ---------- Coeur ----------
     async def _links(self):
@@ -2722,7 +2761,14 @@ class ClickRecap(commands.Cog):
         _save_report_cfg(cfg)
         gid = cle          # tout ce qui suit publie ce report-là
         self._report_creneau = _creneau_30(_paris_now())  # evite un double post immediat par la boucle
-        await self._post_or_update_report(gid)
+        _souci = await self._post_or_update_report(gid)
+        if _souci:
+            # ON NE DIT PAS « active » QUAND RIEN N'EST PARTI.
+            await interaction.followup.send(
+                f"⚠️ Report enregistré, mais le message n'a pas pu être posté "
+                f"dans {interaction.channel.mention} :\n**{_souci}**\n"
+                f"Corrige, puis relance `/reportclicknow`.", ephemeral=True)
+            return
         await interaction.followup.send(
             f"✅ Report des clics **{data['group_name']}** {_marche_de(new_c)[2]} "
             f"(workspace **{data['ws']}**, "
