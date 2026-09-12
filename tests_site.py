@@ -9291,6 +9291,57 @@ except Exception as _eA:
 
 print()
 print("=" * 70)
+print("PARTAGE : le filtre marche suit, et FR passe avant US")
+print("=" * 70)
+try:
+    import pathlib as _plP, subprocess as _spP, tempfile as _tpP, shutil as _shP
+    _srcP = _plP.Path("web_upload.py").read_text(encoding="utf-8")
+    _dP = _srcP.index("function mkRowsMarche(rows){")
+    _fP = _srcP.index(chr(10) + "function marketCur(){", _dP)
+    _fnP = _srcP[_dP:_fP]
+    check("partage : la regle est posee aux QUATRE modales",
+          _srcP.count("? mkRowsMarche(rows) : rows;") == 4,
+          "%d appel(s)" % _srcP.count("? mkRowsMarche(rows) : rows;"))
+    # Et surtout : elle est appelee AVANT le controle « liste vide », sinon
+    # un filtre qui ne laisse personne ouvrirait une modale vide.
+    check("partage : elle passe avant le controle de liste vide",
+          all(_srcP.index("? mkRowsMarche(rows) : rows;", _i) <
+              _srcP.index("if(!rows.length)", _i)
+              for _i in [_srcP.index("? mkRowsMarche(rows) : rows;")]))
+    _nodeP = _shP.which("node")
+    if not _nodeP:
+        check("partage : comportement verifiable (node absent)", True, "node introuvable")
+    else:
+        _essai = ("var __mk='';function marketCur(){return __mk;}"
+                  'var MAP={"alicia":"fr","amelia":"fr","lola":"fr",'
+                  '"lillaroseconlon":"us","themikkiangel":"us","zezatwins":"us"};'
+                  "function mkMarketOf(n){return MAP[n]||'';}"
+                  + _fnP +
+                  "var R=[{name:'lillaroseconlon'},{name:'alicia'},{name:'themikkiangel'},"
+                  "{name:'amelia'},{name:'zezatwins'},{name:'lola'}];"
+                  "function N(r){return r.map(function(o){return o.name;}).join(',');}"
+                  "var out={};"
+                  "__mk='';out.tout=N(mkRowsMarche(R.slice()));"
+                  "__mk='us';out.us=N(mkRowsMarche(R.slice()));"
+                  "__mk='fr';out.fr=N(mkRowsMarche(R.slice()));"
+                  "console.log(JSON.stringify(out));")
+        _fP2 = _plP.Path(_tpP.mkdtemp()) / "e.js"
+        _fP2.write_text(_essai, encoding="utf-8")
+        _rP = _spP.run([_nodeP, str(_fP2)], capture_output=True, text=True, timeout=30)
+        _outP = _jsCa.loads(_rP.stdout.strip() or "{}") if _rP.returncode == 0 else {}
+        check("partage : sans filtre, les FR passent avant les US",
+              _outP.get("tout") == "alicia,amelia,lola,lillaroseconlon,themikkiangel,zezatwins",
+              _outP.get("tout") or _rP.stderr[:120])
+        check("partage : en US, aucune FR ne remonte",
+              _outP.get("us") == "lillaroseconlon,themikkiangel,zezatwins",
+              _outP.get("us"))
+        check("partage : en FR, aucune US ne remonte",
+              _outP.get("fr") == "alicia,amelia,lola", _outP.get("fr"))
+except Exception as _eP:
+    check("partage : testable", False, repr(_eP)[:200])
+
+print()
+print("=" * 70)
 print("THEME INFLOWW : les couleurs sont RELEVEES, pas estimees")
 print("=" * 70)
 try:
@@ -9569,6 +9620,14 @@ try:
         import pathlib as _plS2
         _srcCog2 = _plS2.Path("cogs/sessionsvoc.py").read_text(encoding="utf-8")
         _srcW2 = _plS2.Path("web_upload.py").read_text(encoding="utf-8")
+        # LE BOUTON POSTE LE JOUR AFFICHE, pas « aujourd hui ». A deux heures
+        # du matin la journee vient de commencer : son bilan est vide, et
+        # celui qu on veut voir est celui de la veille.
+        _srcW3 = _plS2.Path("web_upload.py").read_text(encoding="utf-8")
+        check("sessions : le bouton du bilan porte le jour affiche",
+              "data-jour='%s'" in _srcW3 and 'fd.set("jour", j)' in _srcW3)
+        check("sessions : et la route accepte ce jour",
+              'request.form.get("jour")' in _srcW3)
         check("sessions : le bilan Discord dit « non surveillee »",
               "Session non surveillée" in _srcCog2)
         check("sessions : la page le dit aussi",

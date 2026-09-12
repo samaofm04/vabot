@@ -7073,6 +7073,7 @@ function txtShareOpen(){
     var img=a.querySelector('img');
     rows.push({name:n, pp:img?img.getAttribute('src'):null, sub:'', warn:false});
   });
+  rows = (typeof mkRowsMarche === 'function') ? mkRowsMarche(rows) : rows;
   if(!rows.length){
     if(typeof showToast==='function') showToast('Aucune autre model dans la liste de gauche','warning');
     return;
@@ -7152,6 +7153,7 @@ function ppApplyOpen(){
     var img=a.querySelector('img');
     rows.push({name:n, pp:img?img.getAttribute('src'):null, sub:sub, warn:nb===0});
   });
+  rows = (typeof mkRowsMarche === 'function') ? mkRowsMarche(rows) : rows;
   if(!rows.length){ if(typeof showToast==='function') showToast('Aucune autre model','warning'); return; }
   nxModelPicker({
     title:'Partager ces PP à…',
@@ -7196,6 +7198,7 @@ function tplShareOpen(){
     rows.push({name:n, pp:img?img.getAttribute('src'):null,
                sub:(nb==null)?'':(nb+' template'+(nb>1?'s':'')), warn:false});
   });
+  rows = (typeof mkRowsMarche === 'function') ? mkRowsMarche(rows) : rows;
   if(!rows.length){ if(typeof showToast==='function') showToast('Aucune autre model','warning'); return; }
   nxModelPicker({
     title:'Partager ces templates à…',
@@ -7547,6 +7550,7 @@ function capShareOpen(){
     rows.push({name:n, pp:img?img.getAttribute('src'):null,
                sub:(nb==null)?'':(nb+' caption'+(nb>1?'s':'')), warn:false});
   });
+  rows = (typeof mkRowsMarche === 'function') ? mkRowsMarche(rows) : rows;
   if(!rows.length){
     if(typeof showToast==='function')
       showToast('Aucune autre model trouvée dans la liste de gauche','warning');
@@ -21183,6 +21187,35 @@ function mkMarketOf(ident){
       + n.replace(/[^a-z0-9_.\-]/g, '') + "']");
     return el ? (el.getAttribute('data-market') || '') : '';
   }catch(e){ return ''; }
+}
+// Les listes des modales « Partager a... » : meme filtre, meme ordre que
+// la barre laterale.
+//
+// Elles se construisent en parcourant les cartes .vault-item. Le filtre
+// FR/US ne les RETIRE pas, il les MASQUE : sans ce passage, on proposait de
+// partager a des models que le proprietaire venait d'ecarter de son ecran.
+// Et l'ordre du DOM melangeait les drapeaux -- quelques FR, quelques US,
+// encore des FR. Ici : le marche courant filtre, puis FR d'abord, US
+// ensuite, le reste a la fin, alphabetique dans chaque groupe.
+//
+// Le marche est RELU pour chaque ligne et recopie dans l'objet : la modale
+// s'en sert pour dessiner le drapeau, et le lire deux fois de deux facons
+// differentes est le debut d'une divergence.
+function mkRowsMarche(rows){
+  var voulu = (typeof marketCur === 'function') ? marketCur() : '';
+  var gardees = (rows || []).filter(function(o){
+    var m = o.market || ((typeof mkMarketOf === 'function') ? mkMarketOf(o.name) : '');
+    o.market = m;
+    return !voulu || m === voulu;
+  });
+  var RANG = {fr: 0, us: 1};
+  gardees.sort(function(x, y){
+    var rx = (RANG[x.market] === undefined) ? 2 : RANG[x.market];
+    var ry = (RANG[y.market] === undefined) ? 2 : RANG[y.market];
+    if(rx !== ry) return rx - ry;
+    return String(x.name || '').localeCompare(String(y.name || ''));
+  });
+  return gardees;
 }
 function marketCur(){
   try{ return localStorage.getItem('vault_market') || ''; }catch(e){ return ''; }
@@ -40246,10 +40279,17 @@ def _render_sessions_html() -> str:
               "<a class='se-nav' href='?tab=sessions&jour=%s'>← %s</a>"
               "<span class='se-jour'>%s</span>"
               "<a class='se-nav' href='?tab=sessions&jour=%s'>%s →</a>"
-              "<button type='button' class='se-btn' onclick='sessionsResume()'>"
-              "Poster le résumé sur Discord</button>"
+              # LE BOUTON POSTE LE JOUR QU ON REGARDE, pas « aujourd hui ».
+              # A deux heures du matin, la journee vient de commencer : le
+              # bilan du jour est vide, et celui qu on veut voir est celui
+              # d hier. Puisque la page a deja une navigation par jour,
+              # c est elle qui doit decider -- sinon il faut un second
+              # selecteur pour dire la meme chose.
+              "<button type='button' class='se-btn' data-jour='%s' "
+              "onclick='sessionsResume(this)'>"
+              "Poster le résumé du jour affiché</button>"
               "<span class='se-msg' id='se-msg'></span>"
-              "</div>" % (hier, hier, jour, demain, demain)
+              "</div>" % (hier, hier, jour, demain, demain, jour)
             + "<div class='se-grille'>" + "".join(cartes) + "</div>"
             + "<div class='se-bloc'><div class='se-bloc-t'>Assiduité du jour</div>"
             + "".join(lignes) + "</div>"
@@ -40457,14 +40497,18 @@ function sessionsEnregistrer(){
     })
     .catch(function(){ if(m) m.textContent = "echec"; });
 }
-function sessionsResume(){
+function sessionsResume(btn){
   var m=document.getElementById('se-msg'); if(m) m.textContent='envoi...';
-  fetch('/sessions/resume_now',{method:'POST',credentials:'same-origin'})
+  var fd=new FormData();
+  var j=btn && btn.getAttribute ? btn.getAttribute("data-jour") : "";
+  if(j) fd.set("jour", j);
+  fetch('/sessions/resume_now',{method:'POST',body:fd,credentials:'same-origin'})
     .then(function(r){ return r.json(); })
     .then(function(j){
       if(!m) return;
-      if(j && j.ok) m.textContent = j.salons ? ('posté dans '+j.salons+' salon(s)')
-                                             : "aucun salon ne porte ce nom";
+      if(j && j.ok) m.textContent = j.salons
+        ? ('posté dans '+j.salons+' salon(s) : '+(j.jour||''))
+        : "aucun salon ne porte « bilan » dans son nom";
       else m.textContent = (j && j.error) || 'échec';
     })
     .catch(function(){ if(m) m.textContent='échec'; });
