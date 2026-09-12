@@ -272,6 +272,20 @@ def _cle_report(guild_id, channel_id) -> str:
     return "%s:%s" % (guild_id, channel_id)
 
 
+#: Les noms de salon ou le classement s'installe tout seul. On compare en
+#: minuscules et en « contient » : Discord laisse mettre des emoji et des
+#: tirets dans un nom de salon (« 🏆・ranking »), et exiger l'egalite stricte
+#: aurait fait echouer la pose sans rien dire.
+_SALONS_RANKING = ("ranking", "classement")
+
+#: La cle, dans la config, ou l'on retient les salons DEJA poses. Ce n'est pas
+#: un report : _reports_configures l'ignore, puisqu'elle n'a pas de
+#: « channel_id ». Sans cette memoire, couper le report d'un salon ranking le
+#: verrait revenir tout seul au cycle suivant -- et on ne pourrait plus s'en
+#: debarrasser.
+_CLE_AUTO_RANKING = "_auto_ranking"
+
+
 def _reports_configures(cfg: dict) -> list:
     """[(cle, config)] de tous les reports, anciens formats compris.
 
@@ -882,6 +896,12 @@ class ClickRecap(commands.Cog):
         if self._report_creneau == creneau:
             return
         self._report_creneau = creneau
+        # Un salon « ranking » ouvert entre deux cycles s'equipe tout seul.
+        # On relit la config APRES : la pose vient d'y ajouter une entree.
+        try:
+            await self._poser_ranking_auto()
+        except Exception as e:
+            print(f"[reportclick] pose auto du classement : {e}", flush=True)
         cfg = _load_report_cfg()
         for cle, _c in _reports_configures(cfg):
             try:
@@ -889,6 +909,62 @@ class ClickRecap(commands.Cog):
             except Exception as e:
                 print(f"[reportclick] update {cle} echoue : {e}")
             await asyncio.sleep(1)
+
+    async def _poser_ranking_auto(self) -> bool:
+        """Installe le classement dans un salon « ranking », sans commande.
+
+        Le proprietaire a ouvert le salon et demande que ca s'y mette tout
+        seul. ON NE DEVINE RIEN POUR AUTANT : on reprend le groupe
+        GetMySocial du report de clics DEJA configure sur ce serveur. S'il n'y
+        a pas de report, on ne fait rien -- poster dans un salon que personne
+        n'a designe serait une invention, et ce message-la est epingle.
+
+        UNE SEULE FOIS PAR SALON, meme si le report est ensuite coupe : la
+        liste des salons deja poses est gardee dans la config. Sans elle, un
+        /reportclick_off sur ce salon serait defait au cycle suivant.
+
+        Rend True si quelque chose a ete pose (l'appelant doit relire la
+        config avant de publier).
+        """
+        cfg = _load_report_cfg()
+        deja = {str(x) for x in (cfg.get(_CLE_AUTO_RANKING) or [])}
+        avant = set(deja)
+        pose = False
+        for cle, c in _reports_configures(cfg):
+            # Un salon de classement ne sert pas de modele a un autre.
+            if str(c.get("contenu") or "").strip().lower() == "classement":
+                continue
+            gid = str(cle).split(":")[0]
+            if not gid.isdigit():
+                continue
+            g = self.bot.get_guild(int(gid))
+            if g is None:
+                continue
+            for ch in getattr(g, "text_channels", []) or []:
+                nom = str(getattr(ch, "name", "")).lower()
+                if not any(m in nom for m in _SALONS_RANKING):
+                    continue
+                if str(ch.id) in deja:
+                    continue
+                deja.add(str(ch.id))
+                k = _cle_report(gid, ch.id)
+                if k in cfg:
+                    continue              # deja configure a la main
+                # Le MEME groupe, le MEME marche : seul le contenu change.
+                # message_id est retire, sinon on editerait le message d'un
+                # autre salon.
+                neuf = dict(c)
+                neuf.pop("message_id", None)
+                neuf["channel_id"] = ch.id
+                neuf["contenu"] = "classement"
+                cfg[k] = neuf
+                pose = True
+                print("[reportclick] classement pose automatiquement dans "
+                      "#%s (%s)" % (nom, k), flush=True)
+        if pose or deja != avant:
+            cfg[_CLE_AUTO_RANKING] = sorted(deja)
+            _save_report_cfg(cfg)
+        return pose
 
     @hourly_report.before_loop
     async def _before_report(self):
@@ -1272,12 +1348,30 @@ class ClickRecap(commands.Cog):
             # UN seul tableau, deux colonnes par periode : le marche et le
             # total, cote a cote sur la meme ligne. Deux tableaux separes
             # obligeaient a chercher la meme personne deux fois pour comparer.
+            # DEUX COLONNES PAR PERIODE, OU UNE SEULE.
+            #
+            # Le marche et le total ne meritent d'etre separes que s'ils
+            # DIFFERENT quelque part. Sur un espace ou tout le trafic vient
+            # deja du marche, on recopiait deux fois le meme chiffre — et
+            # cette largeur-la, sur un telephone, fait deborder le bloc :
+            # « les mecs sur telephone, ca leur montre pas le bon truc ».
+            #
+            # 54 signes de large avant, 31 quand les deux colonnes disent la
+            # meme chose. Un bloc de code Discord tient environ 34 signes sur
+            # un telephone en portrait.
+            _duo = bool(pays_marche) and any(
+                _p[_i][0] != _p[_i][1]
+                for _lab_d, _p in rows for _i in (0, 1, 2))
+            _larg_nom = 14 if _duo else 16
             _m = libelle if pays_marche else ""
             entete = (
-                f"{'':<18}{'TODAY':^12}{'YESTERDAY':^12}{'PERIOD':^12}\n"
-                f"{'LINK':<18}"
-                + (f"{_m:>5}{'GLOB':>7}" * 3 if pays_marche
-                   else f"{'GLOB':>12}" * 3))
+                (f"{'':<{_larg_nom}}"
+                 + "".join(f"{_t:^9}" for _t in ("TODAY", "YESTER", "PERIOD"))
+                 + "\n" + f"{'LINK':<{_larg_nom}}"
+                 + f"{_m:>4}{'GLOB':>5}" * 3)
+                if _duo else
+                (f"{'LINK':<{_larg_nom}}"
+                 + "".join(f"{_t:>5}" for _t in ("AUJ", "HIER", "PER"))))
 
             def _c(v):
                 # TROIS ETATS, TROIS SIGNES.
@@ -1291,11 +1385,13 @@ class ClickRecap(commands.Cog):
                 return "—" if v is None else str(v)
 
             def _duo_col(paire):
-                """« marche  total » d'une periode, en deux colonnes alignees."""
+                """La periode : « marche total » quand les deux different,
+                sinon le seul total — la colonne en double ne servait qu'a
+                repeter le meme chiffre, et a faire deborder les telephones."""
                 u, t = paire
-                if not pays_marche:
-                    return f"{_c(t):>12}"
-                return f"{_c(u):>5}{_c(t):>7}"
+                if not _duo:
+                    return f"{_c(t):>5}"
+                return f"{_c(u):>4}{_c(t):>5}"
 
             # LE REGROUPEMENT PAR PERSONNE A ETE RETIRE, avec ses sous-totaux
             # et son classement par chiffres. Une ligne par lien, par ordre
@@ -1338,10 +1434,39 @@ class ClickRecap(commands.Cog):
                      "periodes": [{"marche": p[i][0], "total": p[i][1]}
                                   for i in (0, 1, 2)]}
                     for lab, p in sorted(rows, key=lambda x: _cle_tri(x[0]))]
+                # CE QUI NE DIT RIEN SORT DU TABLEAU, MAIS EST NOMME.
+                #
+                # Sur la capture du proprietaire, quarante lignes sur
+                # cinquante n'etaient que des « — » et des « 0 » : on lisait
+                # le vide, et les trois liens qui travaillent se perdaient
+                # dedans. On les sort donc du tableau — et on les NOMME juste
+                # en dessous, parce qu'un lien qu'on retire en silence est un
+                # lien que personne ne va plus jamais regarder.
+                #
+                # Deux sorts differents, et ils ne veulent pas dire la meme
+                # chose : « zero clic » est un fait, « pas su lire » est une
+                # panne. Les melanger ferait passer une panne pour un resultat.
+                def _sort(p):
+                    tot = [p[i][1] for i in (0, 1, 2)]
+                    if all(v is None for v in tot):
+                        return "muet"
+                    if any(isinstance(v, int) and v > 0 for v in tot):
+                        return ""
+                    return "zero"
+
+                _triees = sorted(rows, key=lambda x: _cle_tri(x[0]))
+                _actifs = [(l, p) for l, p in _triees if not _sort(p)]
+                _zeros = [_nom_propre(l) for l, p in _triees if _sort(p) == "zero"]
+                _muets = [_nom_propre(l) for l, p in _triees if _sort(p) == "muet"]
+                # Tout est vide : on montre quand meme le tableau, sinon le
+                # message ne porterait plus que deux phrases de resume.
+                if not _actifs:
+                    _actifs, _zeros, _muets = [(l, p) for l, p in _triees], [], []
+                _donnees["ecartes"] = {"zero": _zeros, "muet": _muets}
                 lignes_plates = [
-                    f"{_nom_propre(lab)[:17]:<18}"
+                    f"{_nom_propre(lab)[:_larg_nom - 1]:<{_larg_nom}}"
                     + "".join(_duo_col(p[i]) for i in (0, 1, 2))
-                    for lab, p in sorted(rows, key=lambda x: _cle_tri(x[0]))
+                    for lab, p in _actifs
                 ]
 
                 # Un champ Discord plafonne a 1024 signes ; on garde de la
@@ -1553,6 +1678,36 @@ class ClickRecap(commands.Cog):
                 emb.add_field(name=nom_champ,
                               value=f"```\n{entete}\n{b}\n```",
                               inline=False)
+
+            # CE QU'ON A RETIRE DU TABLEAU, EN TOUTES LETTRES.
+            #
+            # Un lien qu'on ecarte en silence est un lien que plus personne ne
+            # regarde. Les deux cas sont separes parce qu'ils n'appellent pas
+            # la meme reaction : « zero clic » se discute avec le VA, « pas su
+            # lire » se discute avec GetMySocial.
+            _ec = _donnees.get("ecartes") or {}
+            _lig_ec = []
+            for _cle_ec, _titre_ec in (("zero", "\u26AA No click this period"),
+                                       ("muet", "\u2753 Not read (GMS did not answer)")):
+                _noms_ec = _ec.get(_cle_ec) or []
+                if not _noms_ec:
+                    continue
+                _txt_ec = ", ".join(_noms_ec)
+                # Un champ Discord tient 1024 signes : on coupe la LISTE, pas
+                # le compte, et on dit combien manquent a l'appel.
+                if len(_txt_ec) > 380:
+                    _gardes_ec, _long_ec = [], 0
+                    for _n_ec in _noms_ec:
+                        if _long_ec + len(_n_ec) + 2 > 360:
+                            break
+                        _gardes_ec.append(_n_ec)
+                        _long_ec += len(_n_ec) + 2
+                    _txt_ec = (", ".join(_gardes_ec)
+                               + " … +%d" % (len(_noms_ec) - len(_gardes_ec)))
+                _lig_ec.append("**%s** (%d) — %s" % (_titre_ec, len(_noms_ec), _txt_ec))
+            if _lig_ec:
+                emb.add_field(name="\U0001F4A4 Out of the table",
+                              value="\n".join(_lig_ec)[:1024], inline=False)
         elif ids and not all_none and len(ids) > _MAX_PER_LIEN:
             emb.add_field(
                 name="📋 Per link",
