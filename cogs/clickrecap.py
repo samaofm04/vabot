@@ -419,8 +419,11 @@ def _champs_classements(donnees: dict) -> list:
     gens = _cp.par_clics(entrees)
     if gens:
         champs.append((
-            ("\U0001F3C6 Clicks ranking — %s" % quinz) if quinz
-            else "\U0001F3C6 Clicks ranking",
+            # « in progress » : le report ne mesure que la quinzaine EN
+            # COURS. Le classement bouge donc a chaque cycle, et il ne faut
+            # pas le lire comme un solde arrete.
+            ("\U0001F3C6 Clicks ranking — %s · in progress" % quinz) if quinz
+            else "\U0001F3C6 Clicks ranking — in progress",
             "\n".join(_lignes_classement(
                 gens, lambda g: g["clics"], " clicks",
                 lambda g: ("%d links" % len(g["liens"])) if len(g["liens"]) > 1 else ""))))
@@ -443,7 +446,7 @@ def _champs_classements(donnees: dict) -> list:
                 ("%s%%" % g["taux"]) if g["taux"] is not None else ""] if x))
         if hors:
             _l.append("_(+%d not linked to a MyPuls tracking link)_" % hors)
-        champs.append(("\u2B50 Subs ranking — who converts",
+        champs.append(("\u2B50 Subs ranking — who converts · in progress",
                        "\n".join(_l)))
     return champs
 

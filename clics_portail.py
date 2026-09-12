@@ -560,6 +560,10 @@ def _classements(d: dict, jeton: str) -> str:
     entrees = cp.depuis_report(d, "quinz")
     if not entrees:
         return ""
+    # Le report ne mesure QUE la quinzaine en cours : ses trois periodes sont
+    # aujourd'hui, hier et la quinzaine qui contient aujourd'hui. Le
+    # classement est donc toujours en cours ici -- on le dit, au lieu de
+    # laisser croire a un solde arrete.
     quinz = html.escape(str(d.get("quinzaine") or "la quinzaine"))
     tout = ("<a class='tout' href='%s/%s/liens'>Tout voir</a>"
             % (RACINE, html.escape(str(jeton)))) if jeton else ""
@@ -579,7 +583,8 @@ def _classements(d: dict, jeton: str) -> str:
                 lignes.append(sous)
         reste = max(0, len(gens) - 10)
         out.append(
-            "<section><h2>Classement clics <span class='note'>— %s</span>%s</h2>"
+            "<section><h2>Classement clics <span class='note'>— %s, en cours"
+            "</span>%s</h2>"
             "<div class='top'>%s</div>%s</section>"
             % (quinz, tout, "".join(lignes),
                "<div class='reste'>+%d autre(s)</div>" % reste if reste else ""))
@@ -605,7 +610,7 @@ def _classements(d: dict, jeton: str) -> str:
                 "— leur conversion est inconnue, pas nulle</div>" % hors)
         out.append(
             "<section><h2>Qui convertit <span class='note'>— abonnés gagnés, "
-            "%s</span></h2><div class='top'>%s</div></section>"
+            "%s, en cours</span></h2><div class='top'>%s</div></section>"
             % (quinz, "".join(lignes)))
     return "".join(out)
 

@@ -27773,9 +27773,13 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
     )
 
 
-@_arg_cached(seconds=180, key_args=("mp_start", "mp_end"))
 def _clicrank_carte_html() -> str:
-    """La carte des clics, enrobee : une panne ici n'efface pas l'accueil."""
+    """La carte des clics, enrobee : une panne ici n'efface pas l'accueil.
+
+    PAS DE CACHE ICI, et c'est voulu : _clicrank_cache lit deja un releve
+    tenu en memoire, le rendu ne coute rien. Un cache de plus n'aurait fait
+    que retarder l'affichage du nouveau relevé.
+    """
     try:
         corps = _render_clicrank_html()
     except Exception as e:                      # noqa: BLE001
@@ -27784,6 +27788,7 @@ def _clicrank_carte_html() -> str:
     return f"<div class='home-row home-row-pleine'>{corps}</div>" if corps else ""
 
 
+@_arg_cached(seconds=180, key_args=("mp_start", "mp_end"))
 def _render_mypuls_section_html() -> str:
     """Section MyPuls en haut de la page Revenus.
 
@@ -29131,6 +29136,37 @@ def _pay_daycache_save():
         pass
 
 
+def _fin_journee_paris_ts(iso_day: str) -> int:
+    """L'instant ou la journee `iso_day` se termine, en HEURE DE PARIS.
+
+    Sert a repondre a une seule question, mais la plus importante du dossier :
+    ce releve a-t-il ete pris APRES la fin de la periode qu'il decrit ? Si
+    oui, il est definitif ; sinon il est partiel et devra etre refait.
+
+    Paris et pas le fuseau du serveur : les clics GetMySocial sont comptes en
+    heure de Paris, et un VPS en avance figeait une journee encore en cours.
+    Sans zoneinfo (absent sous Windows, non garanti sur le VPS) : on derive
+    l'offset d'ete a la main.
+
+    Rend 0 si la date est illisible -- et 0 ne rend jamais rien definitif.
+    """
+    try:
+        import datetime as _dt_f, calendar as _cal_f
+        _nd = _dt_f.date.fromisoformat(str(iso_day)[:10]) + _dt_f.timedelta(days=1)
+        _y = _nd.year
+        _dst0 = _dt_f.date(_y, 3, _last_sunday_web(_y, 3))
+        _dst1 = _dt_f.date(_y, 10, _last_sunday_web(_y, 10))
+        # Bornes DECALEES : minuit du dimanche de bascule de mars est encore
+        # CET (le DST demarre a 02:00), donc on exclut la borne de mars et on
+        # inclut celle d'octobre. Sans ca, un jour partiel etait fige la
+        # veille du passage a l'heure d'ete, une fois par an.
+        _off = 2 if (_dst0 < _nd <= _dst1) else 1
+        _naive = _dt_f.datetime(_nd.year, _nd.month, _nd.day) - _dt_f.timedelta(hours=_off)
+        return int(_cal_f.timegm(_naive.timetuple()))
+    except Exception:
+        return 0
+
+
 def _pay_day_stats(gms_mod, lid: str, iso_day: str, is_past: bool):
     """(total, eligible) pour un lien sur UN jour. Jours passés cachés à vie
     (persistés sur disque), aujourd'hui re-fetch après 120s."""
@@ -29141,27 +29177,7 @@ def _pay_day_stats(gms_mod, lid: str, iso_day: str, is_past: bool):
     # Un jour n'est DÉFINITIF que s'il a été relevé APRÈS sa fin. Avant ce
     # correctif, consulter la page à 14 h figeait à vie les clics partiels du
     # jour (donc sous-paiement de tous les VAs, proportionnel à l'heure).
-    try:
-        # La fin de journee doit etre calculee en HEURE DE PARIS (les clics GMS
-        # sont comptes en heure Paris), pas dans le fuseau du serveur : sinon un
-        # VPS en avance sur Paris figeait un jour encore en cours -> sous-paiement.
-        # SANS zoneinfo/tzdata (absent sous Windows, non garanti sur le VPS) : on
-        # derive l offset DST a la main, exactement comme _paris_now_web. Un
-        # fallback zoneinfo=0 aurait re-fige les jours partiels -> on l evite.
-        import datetime as _dt_pd, calendar as _cal_pd
-        _nd = _dt_pd.date.fromisoformat(iso_day) + _dt_pd.timedelta(days=1)
-        _y = _nd.year
-        _dst0 = _dt_pd.date(_y, 3, _last_sunday_web(_y, 3))
-        _dst1 = _dt_pd.date(_y, 10, _last_sunday_web(_y, 10))
-        # Bornes DÉCALÉES : minuit du dimanche de bascule de mars est encore CET
-        # (le DST démarre à 02:00), donc _nd == _dst0 doit rester +1 -> on exclut
-        # la borne de mars et on inclut celle d'octobre. Sans ça, un jour partiel
-        # était figé la veille du passage à l'heure d'été (sous-paiement 1x/an).
-        _off = 2 if (_dst0 < _nd <= _dst1) else 1     # CEST(+2) l ete, CET(+1) l hiver
-        _naive_utc = _dt_pd.datetime(_nd.year, _nd.month, _nd.day) - _dt_pd.timedelta(hours=_off)
-        day_end_ts = _cal_pd.timegm(_naive_utc.timetuple())
-    except Exception:
-        day_end_ts = 0
+    day_end_ts = _fin_journee_paris_ts(iso_day)
     if c:
         _ts = float(c[2] if len(c) > 2 else 0)
         if (is_past and _ts >= day_end_ts) or (not is_past and now - _ts < 120):
@@ -37417,6 +37433,33 @@ def _gmsdash_kick(team: str, period: str, force: bool = False) -> bool:
     return True
 
 
+def _gmsdash_definitif(hit) -> bool:
+    """Ce releve porte-t-il une periode CLOSE, lue APRES sa fin ?
+
+    « Quand la quinzaine est finie, elle ne bouge plus. » Une quinzaine
+    terminee est un constat, pas une mesure en cours : la recalculer tous les
+    quarts d'heure ne peut que faire varier un chiffre sur lequel on paie,
+    au gre des humeurs de GetMySocial — et depenser du quota pour ca.
+
+    DEUX CONDITIONS, ET LA SECONDE COMPTE AUTANT QUE LA PREMIERE : la periode
+    doit etre finie, ET le releve doit avoir ete pris apres cette fin. Un
+    releve pris le 12 a 14 h decrit une quinzaine encore en cours ; le figer
+    parce qu'on le regarde le 20 gelerait des chiffres incomplets. C'est
+    exactement la regle de la paie (_pay_day_stats).
+    """
+    try:
+        pl = (hit or {}).get("payload") or {}
+        fin = str(pl.get("end") or "")
+        if not fin:
+            return False
+        fin_ts = _fin_journee_paris_ts(fin)
+        if not fin_ts or time.time() < fin_ts:
+            return False                      # la periode n'est pas finie
+        return int((hit or {}).get("ts") or 0) >= fin_ts
+    except Exception:
+        return False
+
+
 def _gmsdash_get(team: str, period: str, force: bool = False) -> dict:
     """INSTANTANÉ, toujours : sert ce qu'on a (même vieux) et lance le recalcul en
     arrière-plan si besoin. S'il n'y a encore RIEN, renvoie {loading, progress}
@@ -37431,7 +37474,8 @@ def _gmsdash_get(team: str, period: str, force: bool = False) -> dict:
     # sert quand même (instantané) mais on relance le calcul tout de suite au
     # lieu d'attendre le cycle 30 min du démon.
     fresh = (has and (hit.get("payload") or {}).get("ver") == GMSDASH_PAYLOAD_VER
-             and (int(_t_g.time()) - int(hit.get("ts", 0))) < _GMSDASH_TTL)
+             and ((int(_t_g.time()) - int(hit.get("ts", 0))) < _GMSDASH_TTL
+                  or _gmsdash_definitif(hit)))
     retry_in = 0
     if force or not fresh:
         # Cooldown après un échec : sans ça, chaque poll (2 s) relançait un calcul
@@ -37500,8 +37544,12 @@ def _gmsdash_warm_loop():
                         hit = _GMSDASH_MEM.get(key)
                     if (hit and (hit.get("payload") or {}).get("links")
                             and (hit.get("payload") or {}).get("ver") == GMSDASH_PAYLOAD_VER
-                            and (_t_w.time() - int(hit.get("ts", 0))) < 25 * 60):
-                        continue          # frais ET au bon format -> pas de recalcul
+                            and ((_t_w.time() - int(hit.get("ts", 0))) < 25 * 60
+                                 or _gmsdash_definitif(hit))):
+                        # Frais ET au bon format -> pas de recalcul. Ou bien
+                        # DEFINITIF : une quinzaine close ne se remesure pas,
+                        # et son quota n'a plus de raison d'etre depense.
+                        continue
                     try:
                         _res_w = _gmsdash_compute(tid, per)
                         if _res_w.get("ok"):
@@ -37691,9 +37739,16 @@ def _render_clicrank_html() -> str:
             + val + "</div></div>")
     age = int(payload.get("age_min") or
               max(0, (int(time.time()) - int(hit.get("ts") or 0)) // 60))
-    note = "%s \u00b7 %s \u00b7 relev\u00e9 il y a %d min" % (
+    # DEUX ETATS, ET ILS NE VEULENT PAS DIRE LA MEME CHOSE. Tant que la
+    # quinzaine court, le classement se remesure et peut changer d'ordre ;
+    # une fois close, c'est un constat qui ne bougera plus -- et c'est sur ce
+    # constat-la que la paie se decide.
+    fige = _gmsdash_definitif(hit)
+    note = "%s \u00b7 clics GetMySocial \u00b7 %s" % (
         html_escape(str(payload.get("label") or lib)),
-        "clics GetMySocial", age)
+        ("quinzaine close \u2014 chiffres d\u00e9finitifs, ils ne bougeront plus"
+         if fige else
+         "quinzaine en cours \u2014 relev\u00e9 il y a %d min, se met \u00e0 jour tout seul" % age))
     if payload.get("partial") and not any(g["clics_non_lus"] for g in rangs):
         # Vieux relevé, d'avant le marquage par lien : on sait qu'il manque
         # des lectures, on ne sait pas lesquelles. On le dit quand meme.
