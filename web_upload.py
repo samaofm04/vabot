@@ -10581,6 +10581,16 @@ document.addEventListener('click',function(e){
   </div>
 </div>
 
+<!-- Jailbreak 2 : lien EXTERNE (meme pattern que Remote) -- ouvre l'app Phone
+     Farm (pilotage iPhones) dans un onglet a part. nginx proxifie /phone-farm
+     vers le service node, protege par la session youl4b (auth_request). -->
+<div class="group" id="grp-jailbreak2">
+  <a class="item solo-item" id="tab-jb2" href="/phone-farm" target="_blank" rel="noopener" style="text-decoration:none">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>
+    Jailbreak 2
+  </a>
+</div>
+
 <!-- 'Profil public' (Bio Links + GetMySocial) retire de la sidebar : l user
      dit les utiliser deja au niveau VA. Les routes backend (/biolinks/*,
      /gms/*) et les form-sections (form-biolinks, form-gms) restent intactes
@@ -12860,7 +12870,6 @@ document.addEventListener('keydown', function(e){
 <div class="form-section" id="form-jbactivite" style="display:none">
 {jbactivite_html}
 </div>
-
 <!-- SETTINGS - TOKEN -->
 <div class="form-section" id="form-stoken" style="display:none">
 <form method="POST" action="/settings/admin_token" class="box">
@@ -47629,6 +47638,7 @@ ROLE_MENU_STRUCTURE = [
         {"key": "jbanalyse", "name": "Jailbreak — Analyse vues", "perms": ["view"]},
         {"key": "jbglobal", "name": "Jailbreak — Analyse globale", "perms": ["view"]},
         {"key": "jbactivite", "name": "Jailbreak — Activité VA (assiduité, paie)", "perms": ["view", "edit"]},
+        {"key": "jb2", "name": "Jailbreak 2", "perms": ["view"]},
     ]},
     {"section": "Finances", "items": [
         # « Dépenses » ne correspondait à AUCUNE page : la case ne faisait rien.
@@ -47783,7 +47793,9 @@ def _role_gate_script(allowed) -> str:
         #    partage dans le DOM, sinon des pages autorisees (ex: Jailbreak) perdent
         #    leur style. + ouvrir l'onglet autorise par defaut.
         "document.querySelectorAll('.form-section').forEach(function(s){var id=s.id||'';if(id.indexOf('form-')===0&&!ok[id.slice(5)])s.style.display='none';});"
-        "for(var di=0;di<A.length;di++){var db=findBtn(A[di]);if(db){db.click();break;}}"
+        # (les <a target=_blank> type Jailbreak 2 sont sautes : un .click()
+        #  au chargement ouvrirait un onglet externe au lieu d'une page du site)
+        "for(var di=0;di<A.length;di++){var db=findBtn(A[di]);if(db&&db.tagName!=='A'){db.click();break;}}"
         "}"
         "if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',run);}else{run();}"
         "})();</script>"
@@ -60182,6 +60194,46 @@ def create_app():
             return jsonify({"ok": False, "error": f"module indispo: {e}"})
         wid = (request.form.get("watcher_id") or "").strip()
         return jsonify({"ok": gv.delete_watcher(wid)})
+
+    # ============ JAILBREAK 2 : Phone Farm (app node proxifiee) ============
+    def _jb2_allowed():
+        """True si la session courante a le droit « Jailbreak 2 » (cle jb2)."""
+        if not is_auth():
+            return None            # pas connecte
+        try:
+            _al = _role_allowed_tabs(_live_role())
+        except Exception:
+            _al = None
+        return _al is None or "jb2" in _al
+
+    @app.route("/auth/jb2")
+    def auth_jb2():
+        """Sous-requete nginx (auth_request) devant l'app Phone Farm.
+        204 + en-tete X-PF-Gate (secret partage) si la session youl4b est
+        valide ET la case « Jailbreak 2 » accordee ; 401/403 sinon. nginx
+        recopie le secret vers le service node, seule preuve qu'on est bien
+        passe par le portail. Le secret n'est jamais renvoye au navigateur
+        (l'en-tete d'une sous-requete auth_request n'atteint pas le client)."""
+        from flask import Response
+        ok = _jb2_allowed()
+        if ok is None:
+            return ("", 401)
+        if not ok:
+            return ("", 403)
+        try:
+            with open("/etc/phonefarm/gate.secret") as _f:
+                secret = _f.read().strip()
+        except Exception:
+            # Secret illisible -> on refuse plutot que d'ouvrir sans preuve.
+            return ("", 503)
+        r = Response("", status=204)
+        r.headers["X-PF-Gate"] = secret
+        return r
+
+    @app.route("/jailbreak2")
+    def jailbreak2_page():
+        """Ancien chemin : redirige vers l'app Phone Farm (nouveau nom du lien)."""
+        return redirect("/phone-farm")
 
     # ============ JAILBREAK : comptes manuels par identite ============
     @app.route("/jailbreak/create_identity", methods=["POST"])
