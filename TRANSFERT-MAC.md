@@ -21,6 +21,38 @@ C'est la seule partie irrattrapable. Tout le reste se re-télécharge.
 | **`.env` du Parc** | `Downloads/youlab-phone-farm/.env` | 148 o | |
 | **`.env` du bot** | `VA AUTO/bot/.env` | 96 o | `DISCORD_TOKEN` + `PREFIX`. |
 | **Les scénarios du rig** | `Downloads/RIG-INSTAGRAM/` | 38 Mo | **N'est pas un dépôt git.** Il n'existe nulle part ailleurs. |
+| **Les deux clés SSH** | `C:\Users\Administrator\.ssh\` | 5 Ko | `iphone` ouvre le téléphone jailbreaké, `vps_youl4b` ouvre le serveur. |
+| **Le jeton GitHub** | `bot/.github-token` | 93 o | |
+| **Les réglages Claude Code** | `~/.claude/settings.json` | 508 o | |
+
+### Les clés SSH, en particulier
+
+`iphone` est celle qui ne se régénère pas toute seule : sa publique est
+déposée **à la main** dans `/var/jb/var/root/.ssh` du téléphone, propriétaire
+root obligatoire. La reperdre, c'est refaire cette manip sur le téléphone.
+
+Une fois remises dans `~/.ssh/` sur le Mac :
+
+```bash
+chmod 700 ~/.ssh && chmod 600 ~/.ssh/iphone ~/.ssh/vps_youl4b
+```
+
+**Sans ce `chmod`, ssh refuse la clé** (« permissions are too open ») — et
+c'est le genre de message qu'on ne relie pas tout de suite à une copie de
+fichiers.
+
+### Les clés d'API
+
+Celles des fournisseurs du Parc sont dans `data/admin/api-keys.json`
+(GeeLark, SMSPool, Getatext, SMSBower, rotation IP). Celles du bot sont dans
+`bot/data/` : `numgen.json`, `gms_config.json`, `mypuls_config.json`,
+`linkscale_config.json`, `web_admin_users.json`.
+
+**Mais pas toutes.** Le `.env` de ce PC ne porte que le token Discord ; les
+clés de **RapidAPI, Anthropic, Gemini et Apify** vivent dans le `.env` **du
+VPS**, parce que c'est lui qui fait tourner le site. Elles se récupèrent
+là-bas, ou se reposent depuis les pages Réglages du site — qui écrivent
+directement sur le serveur.
 
 **L'essentiel tient dans 2 Mo** (tout sauf RIG-INSTAGRAM). Ce qui pèse dans
 `data/admin` — `phone-farm-shots` (31 Mo de captures) et `cache-site`
