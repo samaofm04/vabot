@@ -9303,27 +9303,41 @@ try:
     check("menu : la table des rangees existe", "VABOT_MENU_RANGE = {" in _srcR2)
     _dR2 = _srcR2.index("var VABOT_MENU_RANGE = {")
     _tableR2 = _srcR2[_dR2:_srcR2.index("};", _dR2)]
-    for _id in ("tab-remote", "tab-sessions", "tab-valist",
+    for _id in ("tab-remote", "tab-remote2", "tab-sessions", "tab-valist",
                 "tab-onboarding", "tab-paievas", "tab-gmsdash", "grp-vault2"):
         check("menu : %s est range" % _id, "'%s'" % _id in _tableR2)
-    # LE PARC, LUI, RESTE OUVRABLE. « Remote 2 » ne disait pas ce qu il y
-    # avait derriere ; le proprietaire a nomme la rubrique « phone farm » et
-    # dit ce qu elle ouvre : « le parc ». Range par erreur, le seul poste de
-    # pilotage du parc devenait inaccessible.
-    check("menu : le parc n est PAS range", "'tab-remote2'" not in _tableR2)
-    check("menu : la rubrique s appelle Phone farm",
+    # LA RUBRIQUE « PHONE FARM » NE POINTE PAS SUR REMOTE 2. J avais suppose
+    # que « le parc » designait le poste de pilotage interne ; le
+    # proprietaire a donne l adresse : c est YouLab Phone Farm, une appli qui
+    # tourne sur SON PC (127.0.0.1:3001). Le site, lui, tourne sur le VPS :
+    # aucune route serveur ne peut la joindre, donc c est un lien, pas un
+    # onglet.
+    check("parc : la rubrique s appelle Phone farm",
           '<div class="section-label">Phone farm</div>' in _srcR2)
-    check("menu : l entree s appelle Le parc",
-          '<span class="label">Le parc</span>' in _srcR2
-          and '<span class="label">Remote 2</span>' not in _srcR2)
-    check("menu : le titre de la page suit le libelle",
-          "showTab('remote2','remote2','Le parc'," in _srcR2)
+    check("parc : elle porte un lien vers l appli locale",
+          'id="lien-parc"' in _srcR2 and 'href="http://127.0.0.1:3001"' in _srcR2)
+    check("parc : il s ouvre a cote, sans quitter le tableau de bord",
+          'target="_blank"' in _srcR2[_srcR2.index('id="lien-parc"'):
+                                      _srcR2.index('id="lien-parc"') + 400]
+          and 'rel="noopener"' in _srcR2[_srcR2.index('id="lien-parc"'):
+                                         _srcR2.index('id="lien-parc"') + 400])
+    check("parc : le lien s appelle Le parc",
+          '<span class="label">Le parc</span>' in _srcR2)
+    # LE GARDE RBAC masque le menu puis ne revele que des « .item ». Sans
+    # cette classe, un role restreint verrait le lien -- et la rubrique
+    # au-dessus, que le garde reaffiche des qu un bloc reste visible dessous.
+    check("parc : le lien est un .item, donc masque par le garde de roles",
+          'class="item solo-item" id="lien-parc"' in _srcR2)
+    check("parc : et il vit dans un solo-group, masque lui aussi",
+          'id="grp-parc"' in _srcR2)
     # L ICONE EST INDEXEE PAR LE TEXTE : vaAppliquerIcones lit .label puis
-    # VA_ICONES_APPLE[nom]. Renommer sans suivre la table efface l icone.
-    check("menu : l icone suit le nouveau nom",
-          '"Le parc": "<rect' in _srcR2 and '"Remote 2": "<rect' not in _srcR2,
+    # VA_ICONES_APPLE[nom]. Sans entree, le lien perd son icone sous Apple.
+    check("parc : l icone existe sous le nom affiche",
+          '"Le parc": "<rect' in _srcR2,
           "sinon l entree perd son icone des que le theme Apple est actif")
-    check("menu : le nom francais est traduit",
+    check("parc : un lien de menu n est pas souligne",
+          ".sidebar a.item{text-decoration:none}" in _srcR2)
+    check("parc : le nom francais est traduit",
           '"Le parc": "The farm",' in
           _plR2.Path("i18n_en.py").read_text(encoding="utf-8"),
           "le site est rendu en anglais par defaut")
@@ -11456,6 +11470,76 @@ try:
         _crM._REPORT_CFG_FILE = _sauveM
 except Exception as _eM:
     check("mobile : testable", False, repr(_eM)[:220])
+
+# --- Le classement nomme les VA sur Discord -----------------------------
+# « Le classement, c est le classement des mecs sur Discord ET GetMySocial. »
+# L enjeu : rattacher la mauvaise personne, c est afficher le Discord de
+# quelqu un en face des clics d un autre — et ces chiffres servent a payer.
+try:
+    import clics_personnes as _cpA
+
+    # Les deux cotes doivent se normaliser PAREIL, sinon on rattache au hasard.
+    check("discord : le nom de fiche et le libelle de lien se rejoignent",
+          _cpA.norme_fiche("BO7 X2") == _cpA.pseudo("(BO7) 3") == "bo7"
+          and _cpA.norme_fiche("  VA 2   Noum ") == _cpA.pseudo("(VA 2 Noum) 1"),
+          "%s / %s" % (_cpA.norme_fiche("BO7 X2"), _cpA.pseudo("(BO7) 3")))
+    # LA FRONTIERE D IDENTITE NE SE FRANCHIT PAS : le meme nom de fiche sous
+    # deux creatrices designe deux personnes differentes.
+    check("discord : sans identite, aucun annuaire",
+          _cpA.annuaire_va("") == {} and _cpA.annuaire_va(None) == {})
+
+    _annuA = {"roucham": "roucham_mg", "va 2 noum": "noum2_x"}
+    _entA = [{"nom": "(Roucham) 1", "clics": 130, "abonnes": 0},
+             {"nom": "(Roucham) 2", "clics": 20, "abonnes": 0},
+             {"nom": "(VA 2 Noum) 1", "clics": 61, "abonnes": 0},
+             {"nom": "(VA 1 Noum) 1", "clics": 12, "abonnes": 0},
+             {"nom": "va_@priscah0908", "clics": 40, "abonnes": 0},
+             {"nom": "EUD", "clics": 1, "abonnes": 0}]
+    _parA = {g["titre"]: g for g in _cpA.par_clics(_entA, _annuA)}
+    check("discord : une fiche du meme nom donne son compte",
+          _parA["Roucham"]["discord"] == "roucham_mg")
+    # « va_@pseudo » PORTE deja le compte : aucun rapprochement, donc aucune
+    # erreur possible — et ca marche meme sans annuaire.
+    check("discord : « va_@pseudo » se lit sans annuaire",
+          _parA["priscah0908"]["discord"] == "priscah0908"
+          and {g["titre"]: g for g in _cpA.par_clics(_entA)}["priscah0908"]["discord"]
+          == "priscah0908")
+    # CE QU ON NE SAIT PAS, ON NE L INVENTE PAS.
+    check("discord : sans fiche connue, aucun compte n est invente",
+          _parA["VA 1 Noum"]["discord"] == "" and _parA["EUD"]["discord"] == "")
+    check("discord : « VA 2 Noum » ne prend pas le compte de « VA 1 Noum »",
+          _parA["VA 2 Noum"]["discord"] == "noum2_x")
+
+    # SUR DISCORD : des backticks, jamais une mention. « <@id> » ferait sonner
+    # la personne a chaque edition du message, toutes les 30 minutes.
+    _srcA = pathlib.Path("cogs/clickrecap.py").read_text(encoding="utf-8")
+    _debA = _srcA.index("def _lignes_classement")
+    _finA = _srcA.index(chr(10) + "def ", _debA + 40)
+    _codeA = chr(10).join(l for l in _srcA[_debA:_finA].split(chr(10))
+                          if not l.strip().startswith("#"))
+    check("discord : le report ne mentionne personne (pas de ping)",
+          "<@" not in _codeA and "@%s" in _codeA, _codeA[-160:])
+    # Ce qu on n a pas su rattacher se DIT : sinon personne ne remplit la fiche.
+    check("discord : les fiches sans compte sont comptees et dites",
+          "without a Discord account" in _srcA)
+
+    # LA PAGE /clics EST PUBLIQUE : elle s ouvre avec un jeton, sans mot de
+    # passe, et son adresse s envoie a qui doit la lire.
+    import clics_portail as _cpoA
+    _pageA = _cpoA._page_donnees(
+        "T", "s", {"drapeau": "\U0001F30D", "quinzaine": "q", "resume": [],
+                   "par_lien": [{"lien": "(Safidy) 1", "depuis": "",
+                                 "periodes": [{}, {}, {"marche": None, "total": 95}]}],
+                   "abonnes": []},
+        "x", jeton="abc", vue="ensemble")
+    check("discord : aucun pseudo ne fuit sur la page publique",
+          "@" not in _pageA.split("Classement clics")[1].split("</section>")[0],
+          "un @ dans le classement public")
+    check("discord : et c est ecrit dans le code, pas seulement constate",
+          "AUCUN ANNUAIRE ICI" in
+          pathlib.Path("clics_portail.py").read_text(encoding="utf-8"))
+except Exception as _eA2:
+    check("discord : rattachement testable", False, repr(_eA2)[:220])
 
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")

@@ -560,6 +560,10 @@ def _classements(d: dict, jeton: str) -> str:
     entrees = cp.depuis_report(d, "quinz")
     if not entrees:
         return ""
+    # AUCUN ANNUAIRE ICI, ET C'EST VOLONTAIRE. Cette page s'ouvre avec un
+    # simple jeton, sans mot de passe, et son adresse s'envoie a qui doit la
+    # lire. Les pseudos Discord des VA n'ont rien a y faire : ils sont dans le
+    # report Discord et sur le tableau de bord, tous deux fermes.
     # Le report ne mesure QUE la quinzaine en cours : ses trois periodes sont
     # aujourd'hui, hier et la quinzaine qui contient aujourd'hui. Le
     # classement est donc toujours en cours ici -- on le dit, au lieu de

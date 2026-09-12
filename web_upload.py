@@ -1491,6 +1491,7 @@ position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto;overscr
 .sidebar .solo-group{padding:0 12px 8px;margin-bottom:4px;border-bottom:1px solid #1a1a1a}
 .sidebar .solo-item{display:flex;align-items:center;gap:12px;width:100%;padding:11px 14px;background:transparent;border:0;color:#aaa;font-size:14px;font-weight:600;cursor:pointer;border-radius:8px;font-family:inherit;text-align:left;letter-spacing:-.01em;margin-bottom:4px}
 .sidebar .solo-item svg{width:18px;height:18px;flex-shrink:0}
+.sidebar a.item{text-decoration:none}
 .sidebar .solo-item:hover{background:rgba(255,255,255,.05);color:#fff}
 .sidebar .solo-item.active{background:linear-gradient(135deg,rgba(59,130,246,.15),rgba(168,85,247,.1));color:#3b82f6;box-shadow:0 0 0 1px rgba(59,130,246,.2) inset}
 body.light .sidebar .solo-item{color:#4b5563}
@@ -2708,6 +2709,8 @@ body.light .cr-sous{color:#6b7280}
 body.light .cr-note{color:#6b7280}
 body.light .cr-vide{color:#6b7280}
 body.light .cr-clics{color:#15803d}
+.cr-at{margin-left:7px;font-weight:500;font-size:11.5px;color:#7f8796}
+body.light .cr-at{color:#6b7280}
 body.light .cr-clics.muet{color:#6b7280}
 body.light.claude .cr-clics{color:#c2603f}
 body.light.apple .rank-amount{color:#007aff}
@@ -3284,6 +3287,7 @@ document.addEventListener('click', function(e){
 // retirer son identifiant d'ici.
 var VABOT_MENU_RANGE = {
   'tab-remote':     'Remote',
+  'tab-remote2':    'Remote 2',
   'tab-sessions':   'Sessions',
   'tab-valist':     'Délégations VA',
   'tab-onboarding': 'Onboarding',
@@ -10564,6 +10568,27 @@ document.addEventListener('click',function(e){
 
 <div class="section-label">Phone farm</div>
 
+<!-- LE PARC. C'est un LIEN, pas un onglet, et ca ne peut pas etre autre
+     chose : YouLab Phone Farm tourne sur le PC du proprietaire
+     (http://127.0.0.1:3001) tandis que ce site tourne sur le VPS. Le serveur
+     ne peut ni joindre ni lancer cette appli ; seul le navigateur du
+     proprietaire resout 127.0.0.1. Depuis un autre poste, le lien ne
+     repondra pas -- c'etait deja la regle des anciens raccourcis Remote.
+
+     class="item" volontairement : le garde RBAC masque tout le menu puis ne
+     revele que les onglets autorises, en cherchant des « .item ». Sans cette
+     classe, un role restreint verrait le lien ET la rubrique au-dessus (le
+     garde reaffiche un intitule des qu'un bloc reste visible dessous). -->
+<div class="solo-group" id="grp-parc">
+  <a class="item solo-item" id="lien-parc" href="http://127.0.0.1:3001"
+     target="_blank" rel="noopener"
+     title="Ouvre YouLab Phone Farm, l'application locale du PC, dans un nouvel onglet">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
+    <span class="label">Le parc</span>
+    <svg class="ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;margin-left:auto;opacity:.5"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+  </a>
+</div>
+
 <!-- REMOTE : raccourcis vers les outils qui pilotent l'iPhone. Ce sont des
      adresses LOCALES (127.0.0.1) : elles ne repondent que depuis le PC ou
      tournent services.py et start.py. Ouvertes dans un onglet a part pour ne
@@ -10590,9 +10615,9 @@ document.addEventListener('click',function(e){
        (2) findBtn() du garde RBAC cherche le meme id avant de se rabattre
        sur « .item » : sans l'id, un role n'ayant que remote2 ne voyait
        aucune entree de menu. Les 24 autres onglets paresseux ont cet id. -->
-  <button class="group-head" id="tab-remote2" onclick="showTab('remote2','remote2','Le parc','Le parc de téléphones : conteneurs, règles, garde-fous, journal')">
+  <button class="group-head" id="tab-remote2" onclick="showTab('remote2','remote2','Remote 2','Le parc de téléphones : conteneurs, règles, garde-fous, journal')">
     <svg class="lead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>
-    <span class="label">Le parc</span>
+    <span class="label">Remote 2</span>
   </button>
 </div>
 
@@ -37891,7 +37916,14 @@ def _clicrank_rangs(payload: dict) -> list:
             cle = _cp.pseudo(nom) or nom.lower()
             if d > tard.get(cle, ""):
                 tard[cle] = d
-    out = _cp.par_clics(entrees)
+    # L'annuaire des fiches VA : c'est lui qui met un @ Discord en face d'une
+    # ligne. Il est lu par IDENTITE — le meme nom de fiche sous deux
+    # creatrices designe deux personnes differentes.
+    try:
+        annu = _cp.annuaire_va(_cp.IDENTITE_RANKING)
+    except Exception:
+        annu = {}
+    out = _cp.par_clics(entrees, annu)
     for g in out:
         g["tard"] = tard.get(g["pseudo"] or g["titre"].lower(), "")
     return out
@@ -37934,6 +37966,11 @@ def _render_clicrank_html() -> str:
                                             ", ".join(g["liens"][:3])))
         if not g["pseudo"]:
             notes.append("pseudo absent du nom du lien")
+        elif not g.get("discord"):
+            # Un « @ » manquant n'est pas une panne : c'est une fiche VA dont
+            # personne n'a rempli le pseudo Discord. Tant que ca ne se voit
+            # pas, personne ne le remplit.
+            notes.append("aucun compte Discord sur sa fiche VA")
         if g["tard"]:
             notes.append("arriv\u00e9 le %s \u2014 la quinzaine n'est pas "
                          "enti\u00e8rement \u00e0 lui" % _fr_jour_court(g["tard"]))
@@ -37954,7 +37991,10 @@ def _render_clicrank_html() -> str:
             "<div class='rank-row'>" + badge +
             "<div class='cr-emo'>" + emo + "</div>"
             "<div style='flex:1;min-width:0'>"
-            "<div class='cr-nom'>" + html_escape(g["titre"]) + "</div>" + sous +
+            "<div class='cr-nom'>" + html_escape(g["titre"])
+            + ("<span class='cr-at'>@" + html_escape(g["discord"]) + "</span>"
+               if g.get("discord") else "")
+            + "</div>" + sous +
             "</div>"
             "<div class='cr-clics" + (" muet" if g["clics_muets"] else "") + "'>"
             + val + "</div></div>")
@@ -47541,7 +47581,7 @@ ROLE_MENU_STRUCTURE = [
         # Clé == nom d'onglet réel : rien à ajouter dans _PERM_KEY_TO_TABS.
         # « view » seul : l'écriture est admin-only (_ADMIN_ONLY_WRITE), donc
         # cocher la case donne la surveillance, jamais la commande.
-        {"key": "remote2", "name": "Phone farm — le parc de telephones (lecture)",
+        {"key": "remote2", "name": "Remote 2 — poste de pilotage du parc (lecture)",
          "perms": ["view"]},
         # Cle == nom d'onglet reel : rien a ajouter dans _PERM_KEY_TO_TABS.
         {"key": "sessions", "name": "Sessions — presence des VA aux appels (lecture)",

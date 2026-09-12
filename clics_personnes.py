@@ -40,6 +40,10 @@ import zlib
 # differentes sous le meme titre.
 ESPACE_RANKING = "tm_6a0e4739bfa0c238f20a8bf5"
 NOM_ESPACE_RANKING = "JESSY LE RETOUR"
+#: L'identite du site correspondante : c'est par elle qu'on retrouve les
+#: fiches VA, et donc les comptes Discord. Elle ne se devine pas depuis
+#: l'identifiant GetMySocial.
+IDENTITE_RANKING = "jessye"
 
 
 # --- Un emoji par personne --------------------------------------------------
@@ -194,6 +198,54 @@ def pseudo(nom) -> str:
     return etiquette(nom).lower()
 
 
+# --- Le compte Discord derriere une ligne -----------------------------------
+def norme_fiche(nom) -> str:
+    """Le nom d'une fiche VA, sous la meme forme que `pseudo()`.
+
+    C'est ce qui rend les deux cotes comparables : « BO7 X2 » sur la fiche et
+    « (BO7) 3 » sur le lien donnent tous deux « bo7 ». La regle est celle de
+    fusion_vas._norm, a la lettre -- si elles divergeaient, on rattacherait
+    des gens au hasard.
+    """
+    return _QUEUE_X.sub("", _ESPACES.sub(" ", str(nom or "").strip().lower())).strip()
+
+
+def annuaire_va(identite: str = "") -> dict:
+    """{nom de fiche normalise: pseudo Discord} pour UNE identite.
+
+    LA FRONTIERE D'IDENTITE NE SE FRANCHIT PAS : le meme nom de fiche sous
+    deux creatrices designe deux personnes differentes, fusion_vas le dit en
+    toutes lettres et refuse deja de regrouper au-dela. Sans identite, on rend
+    un annuaire VIDE plutot que de melanger tout le monde.
+
+    Le pseudo n'est renseigne QUE quand quelqu'un l'a saisi a la main : une
+    fiche nee d'un compte, d'une migration ou du Google Sheet arrive avec une
+    chaine vide. Ces fiches-la ne rattachent personne, et c'est tres bien : un
+    rattachement absent se voit, un rattachement faux se paie.
+    """
+    ident = str(identite or "").strip().lower()
+    if not ident:
+        return {}
+    try:
+        import jailbreak as _jb
+        fiches = _jb.list_vas_for_identity(ident)
+    except Exception:
+        return {}
+    out = {}
+    for v in fiches or []:
+        if not isinstance(v, dict):
+            continue
+        cle = norme_fiche(v.get("name"))
+        pseudo_d = str(v.get("discord_username") or "").strip().lstrip("@")
+        if cle and pseudo_d:
+            # PREMIER ARRIVE, PREMIER SERVI, et on ne remplace jamais : rien
+            # n'interdit a deux fiches de porter le meme nom normalise (add_va
+            # ne verifie que le nom brut). Ecraser reviendrait a attribuer la
+            # ligne au dernier lu, c'est-a-dire au hasard du fichier.
+            out.setdefault(cle, pseudo_d)
+    return out
+
+
 # --- Le regroupement --------------------------------------------------------
 def _ajouter(somme: dict, champ: str, v) -> None:
     """Verse une valeur dans un total, en retenant ce qu'elle VALAIT.
@@ -215,7 +267,7 @@ def _ajouter(somme: dict, champ: str, v) -> None:
     somme[champ + "_lus"] += 1
 
 
-def grouper(entrees) -> list:
+def grouper(entrees, annuaire=None) -> list:
     """Regroupe des liens par personne.
 
     `entrees` : [{"nom": str, "clics": int|None|"NA",
@@ -230,6 +282,7 @@ def grouper(entrees) -> list:
     fonction ne coupe rien : elle additionne ce qu'on lui donne et transmet
     `depuis` pour que l'ecran puisse le dire.
     """
+    annu = annuaire or {}
     gens = {}
     for e in entrees or []:
         nom = propre((e or {}).get("nom"))
@@ -245,12 +298,20 @@ def grouper(entrees) -> list:
             # Le titre garde la casse du LIEN : « .title() » rendait
             # « Va 2 Noum » la ou le lien dit « VA 2 Noum ».
             g = gens[cle] = {
-                "pseudo": ps, "titre": etiquette(nom) or nom,
+                "pseudo": ps, "titre": etiquette(nom) or nom, "discord": "",
                 "liens": [], "depuis": "",
                 "clics": None, "clics_lus": 0, "clics_non_lus": 0, "clics_na": 0,
                 "abonnes": None, "abonnes_lus": 0, "abonnes_non_lus": 0,
                 "abonnes_na": 0}
         g["liens"].append(nom)
+        if not g["discord"]:
+            # DEUX CHEMINS, ET LE PREMIER NE DEMANDE RIEN A PERSONNE.
+            # Un lien nomme « va_@pseudo » PORTE deja le compte Discord : il
+            # n'y a pas de rapprochement a faire, donc pas d'erreur possible.
+            # Sinon on cherche une fiche VA du MEME nom, chez la MEME
+            # creatrice -- et on laisse vide au moindre doute.
+            g["discord"] = (ps if nom.lower().startswith("va_")
+                            else annu.get(norme_fiche(ps), ""))
         _ajouter(g, "clics", e.get("clics"))
         _ajouter(g, "abonnes", e.get("abonnes"))
         d = str(e.get("depuis") or "")
@@ -272,14 +333,14 @@ def grouper(entrees) -> list:
     return out
 
 
-def par_clics(entrees) -> list:
+def par_clics(entrees, annuaire=None) -> list:
     """Qui envoie du trafic. Les non-lus sortent en fin de liste, pas a zero."""
-    out = grouper(entrees)
+    out = grouper(entrees, annuaire)
     out.sort(key=lambda g: (g["clics_muets"], -(g["clics"] or 0), g["titre"]))
     return out
 
 
-def par_abonnes(entrees) -> list:
+def par_abonnes(entrees, annuaire=None) -> list:
     """Qui CONVERTIT ce trafic.
 
     Les clics disent qui envoie du monde, les abonnes disent qui en fait
@@ -291,7 +352,7 @@ def par_abonnes(entrees) -> list:
     A egalite d'abonnes, celui qui a depense MOINS de clics passe devant :
     c'est lui qui convertit le mieux.
     """
-    out = grouper(entrees)
+    out = grouper(entrees, annuaire)
     out.sort(key=lambda g: (g["abonnes_muets"], -(g["abonnes"] or 0),
                             g["clics"] if g["clics"] is not None else 10 ** 9,
                             g["titre"]))

@@ -395,6 +395,14 @@ def _lignes_classement(gens, valeur, suffixe, detail=None) -> list:
         nom = g["titre"]
         if i < 3:
             nom = "**%s**" % nom
+        # LE COMPTE DISCORD, EN BACKTICKS ET PAS EN MENTION.
+        #
+        # « <@id> » ferait sonner la personne a CHAQUE edition du message,
+        # c'est-a-dire toutes les 30 minutes, nuit comprise. Le bilan de
+        # quinzaine a deja tranche ainsi : le pseudo entre backticks, et rien
+        # du tout quand on ne le connait pas.
+        if g.get("discord"):
+            nom += " `@%s`" % g["discord"]
         bout = " · ".join(x for x in [detail(g) if detail else ""] if x)
         out.append("%s %s %s — %s%s"
                    % (_rang_puce(i), g["emoji"], nom, txt,
@@ -439,7 +447,7 @@ def _garder_que_les_classements(emb) -> None:
         print("[reportclick] filtre classement : %s" % e, flush=True)
 
 
-def _champs_classements(donnees: dict) -> list:
+def _champs_classements(donnees: dict, identite: str = "") -> list:
     """[(titre, valeur)] : les deux classements, ou [] s'il n'y a rien.
 
     LES DEUX REPONDENT A DEUX QUESTIONS DIFFERENTES. Les clics disent qui
@@ -461,10 +469,16 @@ def _champs_classements(donnees: dict) -> list:
     entrees = _cp.depuis_report(donnees, "quinz")
     if not entrees:
         return []
+    # L'annuaire des fiches VA de CETTE creatrice : le meme nom sous deux
+    # creatrices designe deux personnes differentes.
+    try:
+        annu = _cp.annuaire_va(identite or donnees.get("identity") or "")
+    except Exception:
+        annu = {}
     quinz = str(donnees.get("quinzaine") or "").strip()
     champs = []
 
-    gens = _cp.par_clics(entrees)
+    gens = _cp.par_clics(entrees, annu)
     if gens:
         champs.append((
             # « in progress » : le report ne mesure que la quinzaine EN
@@ -483,7 +497,7 @@ def _champs_classements(donnees: dict) -> list:
     # « pseudo/code »), donc qu'on ne peut RIEN dire de sa conversion. Ces
     # personnes sortent du classement et sont comptees a part, plutot que
     # d'occuper le bas du tableau avec une rangee de tirets.
-    _tous = _cp.par_abonnes(entrees)
+    _tous = _cp.par_abonnes(entrees, annu)
     conv = [g for g in _tous if not g["abonnes_muets"]]
     hors = len(_tous) - len(conv)
     if conv:
@@ -496,6 +510,14 @@ def _champs_classements(donnees: dict) -> list:
             _l.append("_(+%d not linked to a MyPuls tracking link)_" % hors)
         champs.append(("\u2B50 Subs ranking — who converts · in progress",
                        "\n".join(_l)))
+    # CE QU'ON N'A PAS SU RATTACHER SE DIT. Un « @ » manquant n'est pas une
+    # panne : c'est une fiche VA dont personne n'a rempli le pseudo Discord.
+    # Tant que ca ne se voit pas, personne ne le remplit.
+    _sans = sum(1 for g in gens if not g.get("discord"))
+    if champs and _sans:
+        _n0, _v0 = champs[0]
+        champs[0] = (_n0, (_v0 + "\n_(%d without a Discord account on their "
+                                 "VA card)_" % _sans)[:1024])
     return champs
 
 
@@ -1685,7 +1707,8 @@ class ClickRecap(commands.Cog):
             # les INSERE en deuxieme position : c'est la reponse a « qui
             # porte ? », et elle ne se lit pas apres trente lignes de tableau.
             try:
-                for _ic, (_nc, _vc) in enumerate(_champs_classements(_donnees)):
+                for _ic, (_nc, _vc) in enumerate(
+                        _champs_classements(_donnees, c.get("identity") or "")):
                     emb.insert_field_at(1 + _ic, name=_nc, value=_vc,
                                         inline=False)
             except Exception as _e_rang:         # noqa: BLE001
