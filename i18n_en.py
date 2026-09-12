@@ -53,6 +53,7 @@ MENU = {
     "Finances": "Finances",
     "REMOTE": "REMOTE",
     "Remote": "Remote",
+    "Le parc": "The farm",
     "SETTINGS": "SETTINGS",
     "Settings": "Settings",
     "Mon compte": "My account",
