@@ -32001,6 +32001,83 @@ async function glDeleteWatcher(id, btn){
     return header_html + upcoming_block + schedules_block + watchers_block + history_block + ext_inline_css + ext_section + ext_modal_html + js
 
 
+#: Cinq jours sans poster, et le compte descend chez les silencieux quoi qu il
+#: ait fait par ailleurs. C est le seuil demande (« cinq jours, sept jours »),
+#: et le plus severe des deux : un compte muet cinq jours n a plus sa place au
+#: milieu de ceux qui postent.
+JB_SILENCE_S = 5 * 86400
+
+#: Les paliers de fraicheur, en secondes depuis le dernier post. Au-dela du
+#: dernier, on est chez les silencieux.
+JB_PALIERS = (86400, 2 * 86400, JB_SILENCE_S)
+
+
+def _jb_age_post(st: dict, maintenant: float):
+    """Secondes depuis le dernier post, ou None si on ne sait pas.
+
+    Le scrape range la date en ISO 8601 avec son fuseau. Une date sans
+    fuseau est lue en UTC plutot que rejetee : mieux vaut un age a deux
+    heures pres qu un compte traite comme s il n avait jamais poste.
+    """
+    brut = str((st or {}).get("last_post_at") or (st or {}).get("last_reel_at") or "").strip()
+    if not brut:
+        return None
+    try:
+        import datetime as _dtc
+        d = _dtc.datetime.fromisoformat(brut.replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=_dtc.timezone.utc)
+        return max(0.0, float(maintenant) - d.timestamp())
+    except Exception:
+        return None
+
+
+def _jb_rang_compte(st: dict, gain24, maintenant: float) -> tuple:
+    """Ou se range un compte dans le bloc de son VA. Petit = en haut.
+
+    LA FRAICHEUR DU DERNIER POST DECIDE D ABORD, par paliers ; le gain
+    d abonnes sur 24 h classe A L INTERIEUR d un palier. Les deux regles
+    demandees se contredisent des qu un compte muet performe bien -- « le
+    mieux performe en tete » et « pas poste depuis cinq jours, tout en
+    bas ». Le palier tranche, le gain classe.
+
+    Trier par NOMBRE D ABONNES, comme avant, donnait un ordre qui ne
+    bougeait jamais : c est un stock, pas une performance. Et la date du
+    dernier post n entrait nulle part, d ou des comptes muets depuis trois
+    jours colles a des comptes qui venaient de poster.
+
+    CHEZ LES SILENCIEUX, c est la DATE qui classe, le plus recent d abord :
+    leur gain sur 24 h ne veut plus rien dire.
+
+    Apres les comptes vivants viennent, dans l ordre : les stats gardees d un
+    ancien scrape, les jamais scrapes, les echecs, les bannis.
+    """
+    st = st or {}
+    if st.get("banned"):
+        return (4, 0, 0.0, 0, 0)
+    if not st:
+        return (2, 0, 0.0, 0, 0)
+    if st.get("error"):
+        return (3, 0, 0.0, 0, 0)
+    if st.get("stale"):
+        return (1, 0, 0.0, 0, 0)
+    age = _jb_age_post(st, maintenant)
+    if age is None:
+        palier = len(JB_PALIERS)      # jamais vu poster : avec les muets
+    else:
+        palier = len(JB_PALIERS)
+        for i, seuil in enumerate(JB_PALIERS):
+            if age < seuil:
+                palier = i
+                break
+    if palier >= len(JB_PALIERS):
+        cle = float(age if age is not None else 10 ** 12)
+    else:
+        cle = -float(gain24 or 0)
+    return (0, palier, cle,
+            -(st.get("daily") or 0), -(st.get("followers") or 0))
+
+
 def _render_jailbreak_html() -> str:
     """Page Jailbreak : gestion manuelle des comptes par identite.
     Layout style VAs : search + filter + groupes pliables par identite.
@@ -32242,6 +32319,15 @@ def _render_jailbreak_html() -> str:
         ".jb-no-stats{background:rgba(120,120,120,.08);color:#666;padding:1px 6px;border-radius:5px;font-size:10px;font-weight:600}"
         # Boutons Edit / × en fin de row (style va-ig3 compact)
         ".jb-row{transition:background .12s}"
+        # Le gain d abonnes des 24 h, colle au nombre : c est LUI qui classe
+        # le bloc, il doit se lire sans quitter la ligne des yeux.
+        ".jb-gain{margin-left:5px;font-size:10.5px;font-weight:700;color:#22c55e;vertical-align:top}"
+        ".jb-gain.neg{color:#f87171}"
+        # SUR BLANC, CES DEUX-LA NE SE LISENT PLUS : le vert tombe a 2,40 de
+        # contraste et le rouge a 2,56, sous le seuil que le site s impose.
+        # Les memes couleurs, en plus sombre, pour le theme clair.
+        "body.light .jb-gain{color:#15803d}"
+        "body.light .jb-gain.neg{color:#dc2626}"
         # Pastille BANNI : le CSS global .va-ig3-ban-badge vit dans le bloc de la page
         # Trends -> sans ça, « Banni » s'affichait en texte brut sur la page Jailbreak.
         ".va-ig3-ban-badge{display:inline-flex;align-items:center;gap:5px;margin-left:8px;background:rgba(248,113,113,.14);color:#f87171;border:1px solid rgba(248,113,113,.32);font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;vertical-align:middle;white-space:nowrap}"
@@ -32443,30 +32529,30 @@ def _render_jailbreak_html() -> str:
         "</div>"
     )
 
-    # === Tri des comptes : actifs -> stats gardées -> jamais scrapé -> échec -> bannis ===
+    # Les gains d abonnes du jour, releves UNE SEULE FOIS pour toute la page :
+    # serie() relit le fichier a chaque appel, et un bloc en compte vingt.
+    try:
+        import abonnes_histo as _ab_cl
+        _gains24 = _ab_cl.gains_par_compte(1)
+    except Exception:
+        _gains24 = {}
+
+    # === Classement des comptes d un bloc ===
+    #
+    # La regle vit au niveau du module (_jb_rang_compte) : dans une fermeture,
+    # aucun test ne pouvait l appeler sans fabriquer une page entiere.
     def _jb_sort_accounts(accts: list) -> list:
+        _now = time.time()
+
         def _rank(a):
             raw = str(a.get("username", ""))
             try:
                 hn = _normalize_insta_handle(raw) if callable(_normalize_insta_handle) else raw.lower().lstrip("@")
             except Exception:
                 hn = raw.lower().lstrip("@")
-            st = ig_stats_cache.get(hn) or {}
-            if st.get("banned"):
-                return (4, 0)
-            if not st:
-                return (2, 0)                      # jamais scrapé
-            if st.get("error"):
-                return (3, 0)                      # échec (souvent des bannis pas encore confirmés)
-            # actif : le plus d'ABONNÉS en premier (meilleur compte en tête),
-            # égalité départagée par les vues de la semaine
-            if st.get("stale"):
-                return (1, 0, 0)
-            return (0, -(st.get("followers") or 0), -(st.get("weekly") or 0))
-        def _rank3(a):
-            r = _rank(a)
-            return r if len(r) == 3 else (r[0], r[1], 0)
-        return sorted(accts, key=_rank3)
+            return _jb_rang_compte(ig_stats_cache.get(hn) or {},
+                                   _gains24.get(hn), _now)
+        return sorted(accts, key=_rank)
 
     # === Helper rendu compte (utilise globalement) ===
     def _render_account_row(a: dict, ident_lc_arg: str) -> str:
@@ -32626,6 +32712,16 @@ def _render_jailbreak_html() -> str:
             f"</div>"
         )
 
+        # LE CHIFFRE QUI CLASSE DOIT SE VOIR. Le bloc est range sur le gain
+        # d abonnes des dernieres 24 h ; sans lui a l ecran, l ordre a l air
+        # tire au sort. Absent quand l historique ne remonte pas assez loin :
+        # on n ecrit pas « +0 » pour dire « on ne sait pas encore ».
+        _g24 = _gains24.get(handle_norm)
+        _gain_html = ""
+        if isinstance(_g24, int) and _g24:
+            _gain_html = ("<span class='jb-gain%s'>%+d</span>"
+                          % ("" if _g24 > 0 else " neg", _g24))
+
         return (
             f"<div class='va-ig3-row jb-row{row_extra_cls}' data-handle='{html_escape(handle_norm)}' "
             f"data-username='{username}' data-va='{html_escape(va_name)}'>"
@@ -32640,7 +32736,7 @@ def _render_jailbreak_html() -> str:
             f"</div>"
             f"<div class='va-ig3-row-platform'>Instagram{(' · ' + cred_html) if cred_html else ''}</div>"
             f"</div>"
-            f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num'>{foll}</div><div class='va-ig3-row-lab'>abonnés</div></div>"
+            f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num'>{foll}{_gain_html}</div><div class='va-ig3-row-lab'>abonnés</div></div>"
             f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{d_v}</div><div class='va-ig3-row-lab'>vues 24h</div></div>"
             f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{w_v}</div><div class='va-ig3-row-lab'>vues sem</div></div>"
             f"<div class='va-ig3-row-metric'><div class='va-ig3-row-num va-ig3-green'>{bw_v}</div><div class='va-ig3-row-lab'>vues 2 sem</div></div>"

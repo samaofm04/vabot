@@ -131,6 +131,34 @@ def total_par_jour(handles=None) -> dict:
     return out
 
 
+def gains_par_compte(jours: int = 1) -> dict:
+    """{handle: abonnes gagnes sur la periode}, compte par compte.
+
+    serie() relit le fichier a CHAQUE appel : le demander pour les cent
+    comptes d'une page en ferait cent lectures. Ici on charge une fois.
+
+    UN COMPTE DONT L'HISTORIQUE NE REMONTE PAS ASSEZ LOIN EST ABSENT du
+    resultat -- il n'y figure pas avec un zero. « N'a rien gagne » et « on
+    ne sait pas encore » ne se rangent pas au meme endroit dans un
+    classement, et le second ne doit pas passer pour le premier.
+    """
+    out = {}
+    for handle, jrs in _charger().items():
+        if not isinstance(jrs, dict) or len(jrs) < 2:
+            continue
+        js = sorted(jrs)
+        cible = (_dt.date.fromisoformat(js[-1])
+                 - _dt.timedelta(days=int(jours))).isoformat()
+        anciens = [j for j in js if j <= cible]
+        if not anciens:
+            continue
+        try:
+            out[str(handle)] = int(jrs[js[-1]]) - int(jrs[anciens[-1]])
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def variation(handles=None, jours: int = 7) -> tuple:
     """(gagnes, depuis_le_jour) sur la periode. (None, "") si trop court.
 

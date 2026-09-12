@@ -9572,6 +9572,99 @@ except Exception as _eP:
 
 print()
 print("=" * 70)
+print("CLASSEMENT DES COMPTES : la performance en haut, le silence en bas")
+print("=" * 70)
+try:
+    import time as _tCl, datetime as _dtCl
+    import web_upload as _wCl
+
+    _nowCl = _tCl.time()
+
+    def _isoCl(h):
+        return _dtCl.datetime.fromtimestamp(
+            _nowCl - h * 3600, _dtCl.timezone.utc).isoformat()
+
+    def _rgCl(st, gain=None):
+        return _wCl._jb_rang_compte(st, gain, _nowCl)
+
+    # LE CAS QU IL A DECRIT, mot pour mot : un compte muet depuis trois jours
+    # ne doit pas se retrouver colle a un compte qui vient de poster il y a
+    # onze heures -- meme si le premier a gagne bien plus d abonnes.
+    _frais = _rgCl({"last_post_at": _isoCl(11), "followers": 10}, 3)
+    _vieux = _rgCl({"last_post_at": _isoCl(72), "followers": 9000}, 200)
+    check("classement : trois jours de silence passent DERRIERE onze heures",
+          _frais < _vieux, "%s vs %s" % (_frais, _vieux))
+
+    # Et a fraicheur egale, c est la PRISE D ABONNES des 24 h qui classe --
+    # pas le stock d abonnes, qui ne bouge pas d un jour a l autre et donnait
+    # toujours le meme ordre.
+    _fort = _rgCl({"last_post_at": _isoCl(11), "followers": 10}, 40)
+    _faible = _rgCl({"last_post_at": _isoCl(11), "followers": 100000}, 3)
+    check("classement : a fraicheur egale, le gain d abonnes decide",
+          _fort < _faible, "%s vs %s" % (_fort, _faible))
+
+    # CINQ JOURS SANS POSTER : tout en bas, quoi qu il ait fait.
+    _muet = _rgCl({"last_post_at": _isoCl(6 * 24), "followers": 8000,
+                   "daily": 700}, 500)
+    _mou = _rgCl({"last_post_at": _isoCl(100), "followers": 1}, 0)
+    check("classement : cinq jours de silence envoient tout en bas",
+          _mou < _muet, "%s vs %s" % (_mou, _muet))
+
+    # Entre silencieux, la DATE informe -- leur gain ne veut plus rien dire.
+    _m6 = _rgCl({"last_post_at": _isoCl(6 * 24), "followers": 10}, 0)
+    _m20 = _rgCl({"last_post_at": _isoCl(20 * 24), "followers": 99999}, 900)
+    check("classement : entre silencieux, le plus recent d abord",
+          _m6 < _m20, "%s vs %s" % (_m6, _m20))
+
+    # Un compte dont on n a jamais vu de post se range avec les muets, pas
+    # en tete : l absence de date n est pas une fraicheur.
+    _sansDate = _rgCl({"followers": 5000, "daily": 900}, 300)
+    check("classement : sans date de post, on ne passe pas devant",
+          _rgCl({"last_post_at": _isoCl(11), "followers": 1}, 0) < _sansDate)
+
+    # L ordre des etats ne bouge pas : vivants, stats gardees, jamais
+    # scrapes, echecs, bannis.
+    _etats = [_rgCl({"last_post_at": _isoCl(11)}, 1),
+              _rgCl({"stale": True}), _rgCl({}),
+              _rgCl({"error": "x"}), _rgCl({"banned": True})]
+    check("classement : les bannis et les echecs restent en dernier",
+          _etats == sorted(_etats), str(_etats))
+    # Toutes les cles ont la MEME longueur : une comparaison entre tuples de
+    # tailles differentes leve des que deux prefixes sont egaux.
+    check("classement : toutes les cles ont la meme forme",
+          len({len(x) for x in _etats}) == 1, str([len(x) for x in _etats]))
+
+    # LE GAIN QUI CLASSE S AFFICHE : un ordre fonde sur un chiffre invisible
+    # a l air tire au sort.
+    _srcCl = pathlib.Path("web_upload.py").read_text(encoding="utf-8")
+    check("classement : le gain d abonnes s affiche sur la ligne",
+          "jb-gain" in _srcCl and "_gain_html" in _srcCl)
+    check("classement : et il a sa couleur, gain comme perte",
+          ".jb-gain{" in _srcCl and ".jb-gain.neg{" in _srcCl)
+
+    # « ON NE SAIT PAS ENCORE » N EST PAS « ZERO ». Un compte dont
+    # l historique ne remonte pas a 24 h est absent du resultat.
+    import abonnes_histo as _ahCl
+    _sauvCl = _ahCl.FICHIER
+    import tempfile as _tpCl
+    _ahCl.FICHIER = pathlib.Path(_tpCl.mkdtemp()) / "ab.json"
+    try:
+        _ahCl.safe_json.write(_ahCl.FICHIER, {
+            "vieux": {"2026-09-10": 100, "2026-09-11": 140},
+            "neuf": {"2026-09-11": 50},
+        }, indent=2)
+        _g = _ahCl.gains_par_compte(1)
+        check("classement : le gain sur 24 h se calcule", _g.get("vieux") == 40,
+              str(_g))
+        check("classement : un historique trop court ne vaut pas zero",
+              "neuf" not in _g, str(_g))
+    finally:
+        _ahCl.FICHIER = _sauvCl
+except Exception as _eCl:
+    check("classement : testable", False, repr(_eCl)[:200])
+
+print()
+print("=" * 70)
 print("ADD PERFECT : l assistant ne perd plus son choix")
 print("=" * 70)
 try:
