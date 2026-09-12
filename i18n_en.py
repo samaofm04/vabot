@@ -219,6 +219,19 @@ ETATS = {
     "30 derniers jours": "Last 30 days",
     "Sales ranking": "Sales ranking",
     "Aucune vente sur la période": "No sales in this period",
+    # Classement des clics des VA. La traduction se fait sur le NOEUD DE TEXTE
+    # entier (cf. _traduire_html) : les lignes qui melangent un libelle et un
+    # chiffre -- « 2 liens : ... », « relevé il y a 11 min » -- ne peuvent pas
+    # etre traduites ainsi et restent en francais. Elles sont lues par le
+    # proprietaire, pas par les VA.
+    "🔗 Classement clics — VA de Jessye": "🔗 Clicks ranking — Jessye's VAs",
+    "Aucun lien de suivi sur cette quinzaine.":
+        "No tracking link in this fortnight.",
+    "En attente du premier relevé GetMySocial — le calcul tourne en fond, "
+    "la carte se remplira toute seule.":
+        "Waiting for the first GetMySocial reading — it is running in the "
+        "background, this card will fill in by itself.",
+    "pseudo absent du nom du lien": "no handle in the link name",
     "Décroissant": "Descending",
     "Sessions": "Sessions",
     "Prochaine": "Next",

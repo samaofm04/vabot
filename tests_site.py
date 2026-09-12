@@ -9720,6 +9720,148 @@ try:
 except Exception as _eSe:
     check("sessions : testable", False, repr(_eSe)[:220])
 
+# --- Classement des clics par VA (accueil) ------------------------------
+# Ce qui se joue ici : des CHIFFRES DE TRAVAIL affiches en rang. Une fusion
+# de trop reunit deux personnes sous un seul nom, une lecture ratee prise
+# pour un zero envoie quelqu un en derniere place, et un emoji partage rend
+# le classement illisible. Les trois se verifient sans reseau.
+try:
+    import web_upload as _wc
+
+    _CAS = [("VA 12 (Roucham)", "roucham"),
+            ("VA 2  ( Safidy )", "safidy"),
+            ("VA 13 Gerome", "gerome"),          # le pseudo hors parentheses
+            ("VA 8 (VA 2 Noum)", "noum"),        # deux etages de numerotation
+            ("VA 4 ( VA 1 Noum )", "noum"),
+            ("VA 9", ""),                        # nu : on ne nomme personne
+            ("VA 1", ""),
+            ("TEMPLATE MYM EMMA (Copy)", ""),    # un gabarit n est pas quelqu un
+            ("jaurel 10", "jaurel"),             # liens en masse des VA jailbreak
+            ("bo7 7", "bo7"),                    # un pseudo peut finir par un chiffre
+            ("va_@priscah0908", "priscah0908"),  # lien nomme par le pseudo Discord
+            ("Roucham X2", "roucham")]           # « meme pseudo, meme personne »
+    _mauvais = ["%s -> %r (attendu %r)" % (n, _wc._clicrank_pseudo(n), v)
+                for n, v in _CAS if _wc._clicrank_pseudo(n) != v]
+    check("clics VA : le pseudo se lit dans le nom du lien",
+          not _mauvais, " | ".join(_mauvais[:4]))
+
+    def _payloadC(lignes, debut="2026-09-01"):
+        return {"ok": True, "start": debut, "end": "2026-09-12",
+                "label": "quinzaine 1-15", "links": lignes,
+                "failed": sum(1 for l in lignes if l.get("lu") is False),
+                "partial": any(l.get("lu") is False for l in lignes)}
+
+    def _lC(i, nom, clics, lu=True):
+        return {"id": "lnk_%d" % i, "shortcode": "sc%d" % i, "name": nom,
+                "clicks": clics, "lu": lu}
+
+    _r = _wc._clicrank_rangs(_payloadC([
+        _lC(1, "VA 8 (VA 2 Noum)", 12), _lC(2, "VA 4 ( VA 1 Noum )", 61),
+        _lC(3, "VA 12 (Roucham)", 130), _lC(4, "VA 9", 0, lu=False),
+        _lC(5, "VA 5", 3), _lC(6, "VA 1", 44)]))
+    _par_nom = {g["titre"]: g for g in _r}
+    check("clics VA : les deux telephones d une meme personne s additionnent",
+          "Noum" in _par_nom and _par_nom["Noum"]["clics"] == 73,
+          str(sorted(_par_nom)))
+    check("clics VA : la fusion se VOIT, les liens reunis sont nommes",
+          len((_par_nom.get("Noum") or {}).get("liens") or []) == 2)
+    # Deux liens sans pseudo ne sont PAS la meme personne : dans certains
+    # espaces, cinq liens s appellent « VA 1 » sans rien avoir en commun.
+    check("clics VA : deux liens anonymes restent deux lignes",
+          "VA 5" in _par_nom and "VA 1" in _par_nom)
+    check("clics VA : le plus fort est premier",
+          _r[0]["titre"] == "Roucham", _r[0]["titre"])
+    # LE COEUR DU SUJET. Le cache du Dashboard aplatit une lecture ratee a 0
+    # pour son tableau ; sur un classement, ce 0 relegue en derniere place
+    # quelqu un qui a peut-etre travaille.
+    _muet = _par_nom.get("VA 9") or {}
+    check("clics VA : un lien NON LU ne vaut pas zero", _muet.get("muet") is True)
+    check("clics VA : les non lus sortent du classement par les chiffres",
+          _r[-1]["titre"] == "VA 9", _r[-1]["titre"])
+    # Rendu reel : on amorce le cache du Dashboard a la main, la carte doit
+    # sortir un tiret pour le lien non lu -- et DIRE pourquoi.
+    import time as _tC
+    with _wc._GMSDASH_LOCK:
+        _wc._GMSDASH_MEM[_wc.CLICRANK_TEAM + "|q1"] = {
+            "ts": int(_tC.time()),
+            "payload": _payloadC([_lC(3, "VA 12 (Roucham)", 130),
+                                  _lC(4, "VA 9", 0, lu=False)])}
+        _wc._GMSDASH_MEM[_wc.CLICRANK_TEAM + "|q2"] = \
+            _wc._GMSDASH_MEM[_wc.CLICRANK_TEAM + "|q1"]
+    _htmlC = _wc._clicrank_carte_html()
+    check("clics VA : la carte affiche un tiret, pas un zero",
+          "cr-clics muet'>\u2014<" in _htmlC,
+          _htmlC[-300:] if _htmlC else "carte vide")
+    check("clics VA : le tiret s explique au lieu de ressembler a une panne",
+          "GetMySocial n a pas r\u00e9pondu" in _htmlC)
+    check("clics VA : aucun montant fige de devise n est recopie",
+          "rank-amount" not in _htmlC)
+
+    # Un emoji partage entre deux personnes annule tout l interet de l emoji.
+    _emos = _wc._clicrank_emojis(["roucham", "mike", "noum", "abdoul", "gerome",
+                                  "safidy", "gaspacio", "kylmich", "laboule"])
+    check("clics VA : deux pseudos n ont jamais le meme emoji",
+          len(set(_emos.values())) == len(_emos), str(_emos))
+    check("clics VA : le meme pseudo garde son emoji",
+          _wc._clicrank_emojis(["mike"])["mike"]
+          == _wc._clicrank_emojis(["mike", "zoe"])["mike"])
+    import inspect as _insC
+    # hash() est SALE a chaque demarrage de Python : l emoji de chacun aurait
+    # change a chaque redemarrage du bot. On regarde le CODE, pas la docstring
+    # -- qui parle justement de hash() pour dire de ne pas s en servir.
+    _srcE = _insC.getsource(_wc._clicrank_emojis).split(chr(34) * 3)[-1]
+    check("clics VA : l emoji survit a un redemarrage (crc32, pas hash)",
+          "crc32" in _srcE and "hash(" not in _srcE, _srcE[:120])
+
+    # L accueil est rendu a chaque chargement du site ET rappele par un demon :
+    # un appel GetMySocial ici partirait des centaines de fois par jour.
+    _srcC = _insC.getsource(_wc._clicrank_cache)
+    check("clics VA : l accueil ne declenche AUCUN appel GetMySocial",
+          "_gmsdash_get" not in _srcC and "gms." not in _srcC
+          and "_GMSDASH_MEM" in _srcC)
+    _srcK = _insC.getsource(_wc._clicrank_carte_html)
+    check("clics VA : une panne de la carte n efface pas l accueil",
+          "except Exception" in _srcK and "return \"\"" in _srcK)
+
+    # Le marquage par lien doit etre pose AVANT l aplatissement a zero,
+    # sinon l information est perdue pour toujours.
+    _srcG = _insC.getsource(_wc._gmsdash_compute)
+    check("clics VA : le releve retient QUI n a pas ete lu",
+          _srcG.index('r["lu"] = r["clicks"] is not None')
+          < _srcG.index('r["clicks"] = 0'))
+
+    # Un lien repris d un VA parti porte les clics de son predecesseur.
+    import clics_arrivees as _caT
+    _vraiT = _caT.toutes
+    try:
+        _caT.toutes = lambda: {"lnk_3": "2026-09-07"}
+        _rT = _wc._clicrank_rangs(_payloadC([_lC(3, "VA 12 (Roucham)", 130)]))
+        check("clics VA : un lien arrive en cours de quinzaine est signale",
+              _rT and _rT[0]["tard"] == "2026-09-07", str(_rT[:1]))
+    finally:
+        _caT.toutes = _vraiT
+
+    # La carte vit sur l accueil, et son style doit suivre le theme clair.
+    _srcW = pathlib.Path("web_upload.py").read_text(encoding="utf-8")
+    check("clics VA : la carte est bien posee sur le tableau de bord",
+          "+ _clicrank_carte_html()" in _srcW)
+    _sansClair = [c for c in ("cr-clics", "cr-sous", "cr-note", "cr-vide", "cr-emo")
+                  if ("body.light .%s" % c) not in _srcW]
+    check("clics VA : chaque classe de la carte a sa regle en theme clair",
+          not _sansClair, ", ".join(_sansClair))
+    # « .home-row » est redefini PLUS BAS dans la page : a specificite egale,
+    # la derniere regle gagne et la pleine largeur serait perdue.
+    check("clics VA : la pleine largeur resiste au « .home-row » de l accueil",
+          ".home-row.home-row-pleine{" in _srcW)
+    import i18n_en as _i18C
+    _sansTrad = [t for t in ("Aucun lien de suivi sur cette quinzaine.",
+                             "pseudo absent du nom du lien")
+                 if t not in _i18C.TRADUCTIONS]
+    check("clics VA : les libelles fixes de la carte sont traduits",
+          not _sansTrad, ", ".join(_sansTrad))
+except Exception as _eC:
+    check("clics VA : classement testable", False, repr(_eC)[:220])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
