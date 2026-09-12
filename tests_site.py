@@ -10138,14 +10138,17 @@ try:
 
         # Un echec de telechargement ne doit RIEN effacer : c est tout l interet
         # d avoir separe le registre du fichier video.
+        # « audience_restreinte » est imputable AU REEL : c est ce genre
+        # d echec, et lui seul, qui doit epuiser les tentatives. Un cookie
+        # perime est teste plus bas, et ne doit surtout pas les consommer.
         for _i in range(_bg.ESSAIS_VIDEO_MAX):
-            _bg.noter_telechargement("AAAAA1", False, raison="login_requis_cookies")
+            _bg.noter_telechargement("AAAAA1", False, raison="audience_restreinte")
         _fA = _bg.fiche("AAAAA1")
         check("bangers : une video qui ne descend pas garde le lien",
               _fA.get("video") == "perdue" and _fA.get("url", "").startswith("http"),
               str(_fA)[:160])
         check("bangers : la raison de l echec est retenue (cookie ou reel mort)",
-              _fA.get("raison_video") == "login_requis_cookies")
+              _fA.get("raison_video") == "audience_restreinte")
         check("bangers : on cesse de reessayer apres N echecs",
               "AAAAA1" not in [f["shortcode"] for f in _bg.a_telecharger()])
         # ... mais on n attend pas indefiniment : deux tentatives ratees et

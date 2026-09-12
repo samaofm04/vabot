@@ -78,6 +78,16 @@ PLAFOND_ANNONCES = 12
 #: privé, ou non servi en public. La fiche reste, avec son lien et ses vues.
 ESSAIS_VIDEO_MAX = 6
 
+#: ÉCHECS QUI NE COMPTENT PAS. Ceux-là ne disent rien du reel — ils disent que
+#: NOTRE configuration est en panne : cookies absents ou refusés, yt-dlp pas
+#: installé, jeton Apify manquant. Les décompter serait une mécanique perverse :
+#: le cycle tourne toutes les heures, donc un cookie périmé un dimanche soir
+#: aurait brûlé les six tentatives avant le lundi matin et condamné pour
+#: toujours des bangers parfaitement téléchargeables. On réessaie tant que la
+#: panne est de notre côté ; c'est la réparer qui débloque tout d'un coup.
+RAISONS_DE_NOTRE_FAUTE = ("login_requis_cookies", "ytdlp_absent",
+                          "apify_non_configure", "aucune_source")
+
 _SC_OK = re.compile(r"^[A-Za-z0-9_-]{5,30}$")
 
 
@@ -287,7 +297,8 @@ def a_telecharger(limite: int = 20) -> List[dict]:
 
 
 def noter_telechargement(shortcode: str, reussi: bool,
-                         description: str = "", raison: str = "") -> bool:
+                         description: str = "", raison: str = "",
+                         trace=None) -> bool:
     """Enregistre le résultat d'une tentative de téléchargement.
 
     Un échec n'efface rien : la fiche garde son lien, ses vues et sa
@@ -302,7 +313,16 @@ def noter_telechargement(shortcode: str, reussi: bool,
     f = (d.get("reels") or {}).get(sc)
     if not isinstance(f, dict):
         return False
-    f["essais_video"] = _entier(f.get("essais_video")) + 1
+    # UN ÉCHEC DE NOTRE CÔTÉ NE CONSOMME PAS D'ESSAI (cf. RAISONS_DE_NOTRE_FAUTE).
+    notre_faute = (not reussi) and str(raison or "") in RAISONS_DE_NOTRE_FAUTE
+    if not notre_faute:
+        f["essais_video"] = _entier(f.get("essais_video")) + 1
+    f["essais_bloques"] = _entier(f.get("essais_bloques")) + (1 if notre_faute else 0)
+    # LA TRACE, ETAPE PAR ETAPE. Une raison unique ne dit pas si l'API n'était
+    # pas branchée, si la page publique a rendu vide, ou si ce sont les
+    # cookies : trois pannes différentes qui n'ont pas la même réparation.
+    if trace:
+        f["trace_video"] = [str(x)[:70] for x in list(trace)[:8]]
     if reussi:
         f["video"] = "ok"
         f["video_le"] = int(time.time())
@@ -345,10 +365,46 @@ def a_annoncer(limite: int = PLAFOND_ANNONCES) -> List[dict]:
     for f in toutes():
         if f.get("muet") or (f.get("annonce") or {}).get("message_id"):
             continue
-        if not video_presente(f["shortcode"]) and _entier(f.get("essais_video")) < 2:
+        # Les essais BLOQUÉS comptent ici, alors qu'ils ne comptent pas comme
+        # tentatives : sinon des cookies périmés empêcheraient l'annonce
+        # ÉTERNELLEMENT, et on ne saurait même pas qu'un reel a explosé. La
+        # vidéo, elle, sera envoyée en réponse dès qu'elle descendra
+        # (cf. a_completer).
+        tentatives = _entier(f.get("essais_video")) + _entier(f.get("essais_bloques"))
+        if not video_presente(f["shortcode"]) and tentatives < 2:
             continue                      # laisse au téléchargeur le temps
         out.append(f)
     return out[:max(0, int(limite or 0))]
+
+
+def a_completer() -> List[dict]:
+    """Les bangers annoncés SANS la vidéo, dont le fichier existe maintenant.
+
+    Le message Discord est la sauvegarde. Quand l'annonce est partie sans
+    pièce jointe — cookies périmés ce jour-là — et que le fichier finit par
+    descendre, il faut le poster, sinon la seule copie reste sur le VPS et
+    toute la fonctionnalité rate son but.
+    """
+    out = []
+    for f in toutes():
+        a = f.get("annonce") or {}
+        if not a.get("message_id") or a.get("avec_video"):
+            continue
+        if video_presente(f["shortcode"]):
+            out.append(f)
+    return out
+
+
+def noter_video_envoyee(shortcode: str) -> bool:
+    """La vidéo a rejoint son annonce : ne plus la renvoyer."""
+    sc = str(shortcode or "")
+    d = charger()
+    f = (d.get("reels") or {}).get(sc)
+    if not isinstance(f, dict) or not isinstance(f.get("annonce"), dict):
+        return False
+    f["annonce"]["avec_video"] = True
+    _ecrire(d)
+    return True
 
 
 def forcer(compte: str, reel: dict, identite: str = "", va: str = "") -> dict:
@@ -412,17 +468,23 @@ def a_reediter(ecart_mini: float = 0.25) -> List[dict]:
     return out
 
 
-def noter_annonce(shortcode: str, channel_id, message_id, vues: int = 0) -> bool:
+def noter_annonce(shortcode: str, channel_id, message_id, vues: int = 0,
+                  avec_video: bool = None) -> bool:
     """Retient OÙ l'annonce a été postée, pour pouvoir l'éditer plus tard."""
     sc = str(shortcode or "")
     d = charger()
     f = (d.get("reels") or {}).get(sc)
     if not isinstance(f, dict):
         return False
+    ancienne = f.get("annonce") if isinstance(f.get("annonce"), dict) else {}
     f["annonce"] = {
         "channel_id": int(channel_id or 0),
         "message_id": int(message_id or 0),
         "vues_affichees": _entier(vues) or _entier(f.get("vues")),
+        # Une ré-édition du compteur ne doit pas faire oublier que la vidéo
+        # avait déjà été envoyée — sinon on la reposte à chaque mise à jour.
+        "avec_video": bool(ancienne.get("avec_video")) if avec_video is None
+                      else bool(avec_video),
         "le": int(time.time()),
     }
     _ecrire(d)
