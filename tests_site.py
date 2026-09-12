@@ -9636,6 +9636,13 @@ try:
     check("integrations : ouvrir un onglet deplie son sous-menu",
           "closest('.subgroup')" in _sT)
 
+    # Le logo GetMySocial sur le report des clics : sa marque est decoupee
+    # dans le logotype fourni (le mot ecrit en toutes lettres est jete) et
+    # elle vit dans le meme sprite que les autres.
+    check("integrations : le logo GetMySocial est declare et pose",
+          '<symbol id="lg-gms"' in _srcG and _srcG.count("#lg-gms") == 1,
+          "%d rappel(s)" % _srcG.count("#lg-gms"))
+
     # La traduction : l anglais est la langue par DEFAUT du site.
     import i18n_en as _i18G
     _nonTrad = [m for m in ("Int\u00e9grations", "G\u00e9n\u00e9rateurs SMS",
