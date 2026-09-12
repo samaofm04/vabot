@@ -1046,9 +1046,123 @@ def _morceaux_discord(texte, taille=1900):
     return out
 
 
-async def _envoyer_texte(interaction, texte):
-    """Envoie un texte au VA, en autant de messages que Discord l exige."""
-    for bout in _morceaux_discord(texte):
+class _Progression:
+    """La barre bleue qui avance pendant que les reels se fabriquent.
+
+    POURQUOI. Entre « je les genere pour toi » et le premier fichier, il se
+    passe une minute pendant laquelle le salon ne dit RIEN. Le VA ne sait pas
+    si ca travaille, si c est bloque, ni combien de temps il lui reste : il
+    relance la commande, ce qui refabrique tout et allonge encore l attente.
+
+    CE QU ELLE MESURE, ELLE NE L INVENTE PAS. Le moteur ecrit deja son
+    avancement (`pct`) dans son fichier d etat ; on le lit. La part globale,
+    c est « reels finis + avancement de celui en cours », divisee par le
+    total. Une barre qui avancerait a l horloge serait une barre qui ment le
+    jour ou le rendu se bloque — exactement le jour ou on la regarde.
+
+    UN MESSAGE, EDITE. Pas une pluie de messages : la barre remplace son
+    propre contenu. Discord limite les editions, d ou le delai minimum entre
+    deux — sans lui, une generation de trois reels declenche une centaine
+    d editions et le bot se fait taire par Discord.
+    """
+
+    #: Discord tolere mal plus d une edition toutes les quelques secondes.
+    DELAI_MINI = 4.0
+
+    def __init__(self, interaction, total, titre="Génération des reels"):
+        self.interaction = interaction
+        self.total = max(1, int(total or 1))
+        self.titre = titre
+        self.message = None
+        self.faits = 0
+        self._dernier = 0.0
+        self._fini = False
+
+    @staticmethod
+    def _barre(part):
+        """Douze cases. Bleu pour ce qui est fait, gris pour le reste."""
+        part = max(0.0, min(1.0, float(part or 0.0)))
+        pleines = int(round(part * 12))
+        return "🟦" * pleines + "⬜" * (12 - pleines)
+
+    def _corps(self, part, detail=""):
+        lignes = [self._barre(part) + f"  **{int(round(part * 100))} %**",
+                  f"Reel **{min(self.faits + 1, self.total)}/{self.total}**"
+                  if not self._fini else f"**{self.total}/{self.total}** — terminé"]
+        if detail:
+            lignes.append(detail)
+        return "\n".join(lignes)
+
+    async def demarrer(self):
+        try:
+            import discord as _d
+            emb = _d.Embed(title="⏳ " + self.titre,
+                           description=self._corps(0.0, "démarrage…"),
+                           color=_d.Color.blurple())
+            self.message = await self.interaction.followup.send(embed=emb, wait=True)
+        except Exception:
+            self.message = None            # jamais bloquant : c est un confort
+
+    async def poser(self, part, detail="", force=False):
+        """Met la barre a `part` (0..1). Silencieux si trop tot, sauf `force`."""
+        import time as _t
+        if self.message is None:
+            return
+        if not force and (_t.time() - self._dernier) < self.DELAI_MINI:
+            return
+        self._dernier = _t.time()
+        try:
+            import discord as _d
+            emb = _d.Embed(
+                title=("✅ " if self._fini else "⏳ ") + self.titre,
+                description=self._corps(part, detail),
+                color=(_d.Color.green() if self._fini else _d.Color.blurple()))
+            await self.message.edit(embed=emb)
+        except Exception:
+            pass
+
+    async def un_de_plus(self):
+        """Un reel est parti : on avance d un cran, tout de suite."""
+        self.faits += 1
+        self._fini = self.faits >= self.total
+        await self.poser(self.faits / float(self.total),
+                         "" if self._fini else "reel suivant…", force=True)
+
+    def part_courante(self, pct_en_cours):
+        """La part globale : les reels finis, plus l avancement du courant."""
+        try:
+            p = max(0.0, min(100.0, float(pct_en_cours or 0)))
+        except Exception:
+            p = 0.0
+        return (self.faits + p / 100.0) / float(self.total)
+
+
+async def _envoyer_texte(interaction, texte, copiable=True):
+    """Envoie un texte au VA, en autant de messages que Discord l exige.
+
+    EN BLOC DE CODE, et pour deux raisons.
+
+    La premiere est confort : Discord pose un bouton « copier » sur les blocs
+    de code. Le VA n a plus a selectionner la legende au doigt sur telephone,
+    ce qui rate une ligne sur deux.
+
+    La seconde est une CORRECTION. Un texte nu est interprete en Markdown par
+    Discord : « @mon_compte_perso » perd ses underscores et s affiche en
+    italique, « 3*5 » mange ses etoiles, et c est CE texte deforme que le VA
+    copiait pour le coller en legende Instagram. Le bloc de code n interprete
+    rien : ce qu il lit est ce qui a ete ecrit.
+
+    Une legende qui contient elle-meme trois accents graves fermerait le bloc
+    par le milieu et le reste sortirait deforme. Ce cas-la repart en texte nu :
+    mieux vaut perdre le bouton que livrer une legende fausse.
+    """
+    t = str(texte or "")
+    if copiable and "```" not in t:
+        # -12 : la cloture du bloc compte dans les 2000 signes de Discord.
+        for bout in _morceaux_discord(t, taille=1880):
+            await interaction.followup.send("```\n" + bout + "\n```")
+        return
+    for bout in _morceaux_discord(t):
         await interaction.followup.send(bout)
 
 
@@ -2529,7 +2643,7 @@ class UserCog(commands.Cog):
     async def _gen_and_send_montaged(self, interaction, video, draft, description, idx,
                                      total, identity, label="REEL MONTÉ", emoji="🎞️",
                                      prefixe_fichier="reel_monte", brutes_dir=None,
-                                     famille=""):
+                                     famille="", suivi=None):
         """Génère À LA DEMANDE une variante MONTÉE (texte incrusté) du reel `video` via le
         pipeline Noctus (draft = son .montage.json), puis l'envoie à poster telle quelle +
         la description. Chaque appel = une variante UNIQUE (uniquification iPhone). Lent
@@ -2596,14 +2710,34 @@ class UserCog(commands.Cog):
             model = None
         if not model:
             await interaction.followup.send(f"⚠️ {label} {idx}/{total} : génération impossible.")
+            # La barre avance QUAND MEME : plantee a 33 % alors que la commande
+            # est finie, elle laisse croire que ca travaille encore.
+            if suivi is not None:
+                await suivi.un_de_plus()
             return
         state = "done" if fichier is not None else "running"
         for _ in range(0 if fichier is not None else 90):   # ~3 min max
             await asyncio.sleep(2)
             try:
-                state = noctus_web.status(model).get("state", "running")
+                _st = noctus_web.status(model)
+                state = _st.get("state", "running")
             except Exception:
-                state = "running"
+                _st, state = {}, "running"
+            # LA BARRE AVANCE SUR LE CHIFFRE DU MOTEUR, pas sur l'horloge. Le
+            # pipeline ecrit deja son « pct » (et son « eta ») dans son fichier
+            # d'etat : une barre calquee sur le temps ecoule continuerait de
+            # grimper pendant un rendu bloque -- justement le moment ou on la
+            # regarde. On l'edite au plus une fois toutes les quelques
+            # secondes, sinon Discord fait taire le bot.
+            if suivi is not None and state == "running":
+                _eta = _st.get("eta")
+                _det = "rendu en cours"
+                try:
+                    if _eta:
+                        _det += f" · ~{int(float(_eta))} s"
+                except Exception:
+                    pass
+                await suivi.poser(suivi.part_courante(_st.get("pct")), _det)
             if state in ("done", "error", "stopped"):
                 break
         if state != "done":
@@ -2614,11 +2748,15 @@ class UserCog(commands.Cog):
                 pass
             await interaction.followup.send(
                 f"⚠️ {label} {idx}/{total} : génération échouée ({state}) {err}".strip())
+            if suivi is not None:
+                await suivi.un_de_plus()
             return
         if fichier is None:
             outs = noctus_web.output_paths(model)
             if not outs:
                 await interaction.followup.send(f"⚠️ {label} {idx}/{total} : aucun fichier produit.")
+                if suivi is not None:
+                    await suivi.un_de_plus()
                 return
             fichier = outs[0]
         out = fichier
@@ -2647,6 +2785,8 @@ class UserCog(commands.Cog):
         except discord.HTTPException as e:
             await interaction.followup.send(
                 f"⚠️ {label} {idx}/{total} : envoi impossible (trop lourd) : {e}")
+            if suivi is not None:
+                await suivi.un_de_plus()
             return
         finally:
             # Sortie de la reserve = effacee, quoi qu il arrive. Elle n y
@@ -2658,6 +2798,8 @@ class UserCog(commands.Cog):
                     _res2.solder(de_la_reserve)
                 except Exception:
                     pass
+        if suivi is not None:
+            await suivi.un_de_plus()
         # Pas de legende derriere un « ne poste pas ». Le message precedent
         # vient d'interdire la publication ; enchainer sur « a coller dans le
         # champ legende » decrit la marche a suivre de ce qu'on interdit, et
@@ -3459,10 +3601,15 @@ class UserCog(commands.Cog):
                 f"ℹ️ Seulement **{total}** reel(s) monté(s) approuvé(s) pour `{identity}` "
                 f"(tu en as demandé {nombre})."
             )
+        # LA BARRE. Entre ce message et le premier fichier il se passe une
+        # minute pendant laquelle le salon ne disait RIEN : le VA relancait la
+        # commande, ce qui refabriquait tout et allongeait encore l attente.
+        suivi = _Progression(interaction, total, "Génération des reels")
+        await suivi.demarrer()
         for idx, (video, draft, description) in enumerate(ready, start=1):
             await self._gen_and_send_montaged(
                 interaction, video, draft, description, idx, total, identity,
-                famille="reelmonte")
+                famille="reelmonte", suivi=suivi)
 
     @app_commands.command(
         name="videobrut",
@@ -7323,15 +7470,23 @@ def _libelle_model(ident, libelles=None) -> str:
     base = (libelles or {}).get(ident) or str(ident).capitalize()
     try:
         import identity_styles as _ist
-        past = _ist.emojis(ident)
+        # EN TOUTES LETTRES, PAS EN PASTILLES. « 💬⚡ » arrive nu dans un menu
+        # Discord, sans la legende qui l'accompagne sur le site : le
+        # proprietaire l'a dit, « les emojis, ils n'arrivent pas a
+        # comprendre ». « Template + Caption » se lit sans avoir appris un
+        # code.
+        past = _ist.mots(ident)
     except Exception:
         past = ""
     if not past:
         return base[:80]
-    place = 80 - len(past) - 1
+    # Le libelle d'un bouton Discord est plafonne a 80 caracteres. On coupe le
+    # NOM, jamais les styles : la coupe emporterait precisement ce qu'on vient
+    # de rendre lisible.
+    place = 80 - len(past) - 3
     if len(base) > place:
         base = base[:max(1, place - 1)] + "…"
-    return f"{base} {past}"
+    return f"{base} — {past}"
 
 
 class JBModelButton(discord.ui.DynamicItem[discord.ui.Button],

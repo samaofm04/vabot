@@ -9291,6 +9291,154 @@ except Exception as _eA:
 
 print()
 print("=" * 70)
+print("SYNCHRO DE MARCHE : une base, et tout le marche la recopie")
+print("=" * 70)
+try:
+    import web_upload as _wS
+    import pathlib as _plS, shutil as _shS, json as _jsS
+    _SRC, _C1, _C2, _HORS = "zzzbase", "zzzcible1", "zzzcible2", "zzzautremarche"
+    _TOUS = (_SRC, _C1, _C2, _HORS)
+    _fMS = _plS.Path("data/identity_market.json")
+    _fTS = _plS.Path("data/identity_type.json")
+    _fDS = _plS.Path("data/disabled_reels.json")
+    _sauvS = {}
+    for _f in (_fMS, _fTS, _fDS):
+        _sauvS[_f] = _f.read_text(encoding="utf-8") if _f.exists() else None
+    try:
+        for _n in _TOUS:
+            _shS.rmtree(_wS.IDENTITIES_DIR / _n, ignore_errors=True)
+            (_wS.IDENTITIES_DIR / _n / "templates").mkdir(parents=True, exist_ok=True)
+        # La base porte deux montages, chacun avec ses voisins.
+        _tplS = _wS.IDENTITIES_DIR / _SRC / "templates"
+        for _nom in ("un.mp4", "deux.mp4"):
+            (_tplS / _nom).write_bytes(b"video" + _nom.encode())
+            (_tplS / (_nom[:-4] + ".txt")).write_text("caption " + _nom, encoding="utf-8")
+            (_tplS / (_nom[:-4] + ".desc.txt")).write_text("desc " + _nom, encoding="utf-8")
+            _wS.safe_json.write(_tplS / (_nom[:-4] + ".montage.json"),
+                                {"segments": '[{"t":"' + _nom + '"}]', "font": "Strong",
+                                 "style": "{}"}, indent=None)
+        # Un troisieme, DESACTIVE a la source : il ne doit pas partir.
+        (_tplS / "eteint.mp4").write_bytes(b"video eteinte")
+        try:
+            _dejaS = _jsS.loads(_fDS.read_text(encoding="utf-8")) if _fDS.exists() else []
+        except Exception:
+            _dejaS = []
+        _wS.safe_json.write(_fDS, sorted(set(_dejaS if isinstance(_dejaS, list) else [])
+                                         | {_SRC + "|templates|eteint.mp4"}))
+        _wS._invalidate_json_cache(_wS.DISABLED_REELS_FILE)
+        # Marches : la base et deux cibles en US, une quatrieme en FR.
+        def _fusionner(_f, _ajout):
+            try:
+                _base = _jsS.loads(_f.read_text(encoding="utf-8")) if _f.exists() else {}
+            except Exception:
+                _base = {}
+            if not isinstance(_base, dict):
+                _base = {}
+            _base.update(_ajout)
+            _wS.safe_json.write(_f, _base)
+        _fusionner(_fMS, {_SRC: "us", _C1: "us", _C2: "us", _HORS: "fr"})
+        _fusionner(_fTS, {_SRC: "modele", _C1: "modele", _C2: "modele",
+                          _HORS: "modele"})
+        import marche as _mkS, type_identite as _tiS
+        _mkS._CACHE.update(sig=None, data={})
+        _tiS._CACHE.update(sig=None, data={})
+        _wS._oublier_identites()
+
+        _cibles = _wS._identites_du_marche(_SRC)
+        check("sync : les cibles sont les models du MEME marche",
+              sorted(_cibles) == sorted([_C1, _C2]), str(_cibles))
+        check("sync : une identite de l autre marche n est pas touchee",
+              _HORS not in _cibles)
+
+        _wS._sync_marche_travail(_SRC)
+        _e = _wS._SYNC_MARCHE
+        check("sync : elle va au bout sans erreur", not _e["erreurs"], str(_e["erreurs"])[:120])
+        check("sync : elle compte deux montages, pas trois",
+              _e["total"] == 2, "%s (le desactive doit etre saute)" % _e["total"])
+        check("sync : elle annonce quatre copies (2 montages x 2 models)",
+              _e["copies"] == 4, str(_e["copies"]))
+
+        for _c in (_C1, _C2):
+            _d = _wS.IDENTITIES_DIR / _c / "templates"
+            check("sync : %s a recu les deux videos" % _c,
+                  (_d / "un.mp4").exists() and (_d / "deux.mp4").exists())
+            check("sync : %s a recu les voisins" % _c,
+                  (_d / "un.txt").read_text(encoding="utf-8") == "caption un.mp4"
+                  and (_d / "un.desc.txt").exists())
+            check("sync : %s a recu le brouillon de montage" % _c,
+                  _jsS.loads((_d / "un.montage.json").read_text(encoding="utf-8"))
+                  .get("segments") == '[{"t":"un.mp4"}]')
+            check("sync : le montage DESACTIVE a la source n est pas parti chez %s" % _c,
+                  not (_d / "eteint.mp4").exists())
+        check("sync : les brutes ne sont jamais touchees",
+              not (_wS.IDENTITIES_DIR / _C1 / "brutes").exists())
+
+        # UNE CORRECTION A LA SOURCE REPART. C'est tout l interet du bouton.
+        _wS.safe_json.write(_tplS / "un.montage.json",
+                            {"segments": '[{"t":"CORRIGE"}]', "font": "Strong",
+                             "style": "{}"}, indent=None)
+        (_tplS / "un.txt").write_text("caption corrigee", encoding="utf-8")
+        _wS._sync_marche_travail(_SRC)
+        _d1 = _wS.IDENTITIES_DIR / _C1 / "templates"
+        check("sync : une correction du montage repart chez les cibles",
+              _jsS.loads((_d1 / "un.montage.json").read_text(encoding="utf-8"))
+              .get("segments") == '[{"t":"CORRIGE"}]')
+        check("sync : une caption corrigee repart aussi",
+              (_d1 / "un.txt").read_text(encoding="utf-8") == "caption corrigee")
+        check("sync : rejouer ne cree pas de doublon",
+              not (_d1 / "un_2.mp4").exists()
+              and len([f for f in _d1.iterdir() if f.suffix == ".mp4"]) == 2,
+              str(sorted(f.name for f in _d1.iterdir())))
+    finally:
+        for _f, _v in _sauvS.items():
+            if _v is None:
+                try:
+                    _f.unlink()
+                except Exception:
+                    pass
+            else:
+                _wS.safe_json.write_text(_f, _v)
+        for _n in _TOUS:
+            _shS.rmtree(_wS.IDENTITIES_DIR / _n, ignore_errors=True)
+        _wS._invalidate_json_cache(_wS.DISABLED_REELS_FILE)
+        _wS._oublier_identites()
+        import marche as _mkS2, type_identite as _tiS2
+        _mkS2._CACHE.update(sig=None, data={})
+        _tiS2._CACHE.update(sig=None, data={})
+    # LE CABLAGE. Une synchro qui existe sans bouton ne sert personne, et un
+    # bouton sans route ment.
+    _srcSy = _plS.Path("web_upload.py").read_text(encoding="utf-8")
+    check("sync : la copie est EXTRAITE, pas recopiee",
+          "def _copier_template_vers(" in _srcSy
+          and _srcSy.count("_sh.copy2(str(src), str(dst))") == 1,
+          "deux implementations de la meme copie divergeront")
+    check("sync : le bouton Partager appelle la meme fonction",
+          "done, errs = _copier_template_vers(" in _srcSy)
+    for _ou, _quoi in (('@app.route("/noctus/sync_marche", methods=["POST"])', "la route"),
+                       ('@app.route("/noctus/sync_marche/etat")', "l etat"),
+                       ("data-syncident=", "le bouton"),
+                       ("function syncMarcheOuvre(", "son JS"),
+                       ("function syncMarcheSuivre(", "le suivi de progression")):
+        check("sync : %s est en place" % _quoi, _ou in _srcSy)
+    # Elle tourne EN FOND : vingt-et-un montages vers quinze models ne tient
+    # pas dans une requete HTTP.
+    check("sync : elle tourne en tache de fond",
+          "_th_mod.Thread(target=_sync_marche_travail" in _srcSy)
+    check("sync : une seule a la fois",
+          "_SYNC_MARCHE_VERROU" in _srcSy and "Une synchronisation est déjà en cours" in _srcSy)
+    # Et elle ne supprime RIEN : c'est la garantie qui permet de cliquer sans
+    # relire ce qu'on va casser.
+    _dSy = _srcSy.index("def _sync_marche_travail(")
+    _fSy = _srcSy.index(chr(10) + "def ", _dSy + 40)
+    _corpsSy = _srcSy[_dSy:_fSy]
+    check("sync : elle ne supprime jamais rien",
+          "unlink" not in _corpsSy and "rmtree" not in _corpsSy,
+          "un bouton qui efface chez quinze models est un piege")
+except Exception as _eS:
+    check("sync : testable", False, repr(_eS)[:220])
+
+print()
+print("=" * 70)
 print("PARTAGE : le filtre marche suit, et FR passe avant US")
 print("=" * 70)
 try:
@@ -10655,6 +10803,199 @@ try:
     check("portail : « NA » ne fait plus tomber la vue d ensemble", True)
 except Exception as _eD2:
     check("classements : testables", False, repr(_eD2)[:220])
+
+# --- Une quinzaine close ne bouge plus ----------------------------------
+# « Quand la quinzaine est finie, elle ne bouge plus, c est juste un report. »
+# Une quinzaine terminee est un CONSTAT : la remesurer tous les quarts
+# d heure ne peut que faire varier le chiffre sur lequel la paie se decide,
+# au gre des humeurs de GetMySocial — et depenser du quota pour ca.
+try:
+    import web_upload as _wG
+    import datetime as _dtG, calendar as _calG, time as _tG
+
+    # Le calcul de fin de journee a ete SORTI de _pay_day_stats pour servir
+    # aux deux. Il doit rendre exactement ce que rendait la copie en ligne,
+    # bascules d heure d ete comprises.
+    def _ancienG(iso):
+        _nd = _dtG.date.fromisoformat(iso) + _dtG.timedelta(days=1)
+        _y = _nd.year
+        _d0 = _dtG.date(_y, 3, _wG._last_sunday_web(_y, 3))
+        _d1 = _dtG.date(_y, 10, _wG._last_sunday_web(_y, 10))
+        _off = 2 if (_d0 < _nd <= _d1) else 1
+        return _calG.timegm((_dtG.datetime(_nd.year, _nd.month, _nd.day)
+                             - _dtG.timedelta(hours=_off)).timetuple())
+
+    _divG, _dG = [], _dtG.date(2026, 1, 1)
+    while _dG < _dtG.date(2027, 1, 1):
+        if _wG._fin_journee_paris_ts(_dG.isoformat()) != _ancienG(_dG.isoformat()):
+            _divG.append(_dG.isoformat())
+        _dG += _dtG.timedelta(days=1)
+    check("gel : la fin de journee sortie de la paie n a rien change",
+          not _divG, ", ".join(_divG[:4]))
+    # 0 ne rend JAMAIS rien definitif : une date illisible doit laisser le
+    # releve se refaire, pas le figer par accident.
+    check("gel : une date illisible ne fige rien",
+          _wG._fin_journee_paris_ts("nawak") == 0)
+    check("gel : la paie se sert de la meme fonction",
+          "day_end_ts = _fin_journee_paris_ts(iso_day)" in
+          pathlib.Path("web_upload.py").read_text(encoding="utf-8"))
+
+    _finG = "2026-09-05"
+    _apresG = _wG._fin_journee_paris_ts(_finG) + 3600
+    _avantG = _wG._fin_journee_paris_ts(_finG) - 3600
+    check("gel : periode close et relevee APRES sa fin -> definitive",
+          _wG._gmsdash_definitif({"ts": _apresG, "payload": {"end": _finG}}) is True)
+    # LA SECONDE CONDITION COMPTE AUTANT QUE LA PREMIERE : un releve pris le
+    # 12 a 14 h decrit une quinzaine encore en cours. Le figer parce qu on le
+    # regarde le 20 gelerait des chiffres incomplets — donc un sous-paiement.
+    check("gel : relevee AVANT sa fin, elle se refait",
+          _wG._gmsdash_definitif({"ts": _avantG, "payload": {"end": _finG}}) is False)
+    check("gel : une periode encore en cours n est jamais definitive",
+          _wG._gmsdash_definitif({"ts": int(_tG.time()),
+                                  "payload": {"end": "2026-12-31"}}) is False)
+    check("gel : sans date de fin, rien n est fige",
+          _wG._gmsdash_definitif({"ts": int(_tG.time()), "payload": {}}) is False
+          and _wG._gmsdash_definitif(None) is False)
+
+    _srcG2 = pathlib.Path("web_upload.py").read_text(encoding="utf-8")
+    check("gel : le demon ne remesure plus une quinzaine close",
+          "or _gmsdash_definitif(hit))):" in _srcG2)
+    check("gel : la lecture sert le definitif sans relancer de calcul",
+          "or _gmsdash_definitif(hit)))" in _srcG2)
+
+    # Ce que l ecran en DIT : les deux etats ne veulent pas dire la meme
+    # chose, et le lecteur doit savoir lequel il a sous les yeux.
+    def _payG(fin, ts):
+        return {"ts": ts, "payload": {
+            "ok": True, "label": "quinzaine 1-15", "start": "2026-09-01",
+            "end": fin, "failed": 0, "partial": False,
+            "links": [{"id": "l1", "shortcode": "sc", "name": "VA 2 (Safidy)",
+                       "clicks": 12, "lu": True}]}}
+
+    # ON REMPLACE LA SOURCE DU RELEVE, pas le cache global : les blocs de
+    # test precedents posent leurs propres entrees sur la meme cle, et le
+    # dernier ecrivain gagnait -- la carte relisait leur releve, pas le mien.
+    _vraiCacheG = _wG._clicrank_cache
+    try:
+        for _etat, _hitG, _attendu in (
+                ("close", _payG(_finG, _apresG), "définitifs"),
+                ("en cours", _payG("2026-12-31", int(_tG.time())),
+                 "se met à jour")):
+            _wG._clicrank_cache = (lambda _h: (lambda _per: _h))(_hitG)
+            _hG = _wG._clicrank_carte_html()
+            check("gel : la carte dit « %s »" % _etat, _attendu in _hG,
+                  _hG[-200:] if _hG else "carte vide")
+    finally:
+        _wG._clicrank_cache = _vraiCacheG
+
+    from cogs import clickrecap as _crG
+    _champsG = _crG._champs_classements({
+        "quinzaine": "1 sept\u219215 sept",
+        "par_lien": [{"lien": "VA 2 (Safidy)", "depuis": "",
+                      "periodes": [{}, {}, {"marche": None, "total": 12}]}],
+        "abonnes": []})
+    # Le report ne mesure QUE la quinzaine en cours : son classement bouge a
+    # chaque cycle, et ne doit pas se lire comme un solde arrete.
+    check("gel : le report Discord annonce un classement en cours",
+          _champsG and "in progress" in _champsG[0][0], str(_champsG[:1])[:120])
+    # UNE FONCTION GLISSEE JUSTE AVANT UNE AUTRE PEUT LUI VOLER SON
+    # DECORATEUR. C'est arrive : _clicrank_carte_html s'est intercalee entre
+    # @_arg_cached et _render_mypuls_section_html. La carte se retrouvait
+    # cachee 180 s sur une cle qui ne la concerne pas, et la section MyPuls
+    # -- dont la docstring promet un cache -- refaisait son scraping a chaque
+    # chargement de la page Revenus. Rien ne plantait, rien ne rougissait.
+    import ast as _astD
+    _arbreD = _astD.parse(pathlib.Path("web_upload.py").read_text(encoding="utf-8"))
+    _decoD = {n.name: [_astD.unparse(d) for d in n.decorator_list]
+              for n in _astD.walk(_arbreD) if isinstance(n, _astD.FunctionDef)}
+    check("gel : la section MyPuls a bien garde son cache",
+          any("_arg_cached" in d for d in _decoD.get("_render_mypuls_section_html", [])),
+          str(_decoD.get("_render_mypuls_section_html")))
+    check("gel : la carte des clics n a PAS vole ce cache",
+          not _decoD.get("_clicrank_carte_html"),
+          str(_decoD.get("_clicrank_carte_html")))
+    # La regle generale : toute fonction dont la docstring PROMET un cache
+    # doit en avoir un. C'est ce contrat-la qui avait ete rompu en silence.
+    _menteusesD = []
+    for _n in _astD.walk(_arbreD):
+        if not isinstance(_n, _astD.FunctionDef):
+            continue
+        _docD = (_astD.get_docstring(_n) or "").lower()
+        # Les fabriques de cache elles-memes parlent forcement de cache dans
+        # leur docstring, et n en portent evidemment pas.
+        if "cache" in _n.name.lower():
+            continue
+        if ("cache ttl" in _docD or "cache tll" in _docD) and not _n.decorator_list:
+            _menteusesD.append(_n.name)
+    check("gel : aucune fonction ne promet un cache qu elle n a pas",
+          not _menteusesD, ", ".join(_menteusesD[:5]))
+
+    check("gel : la page web aussi",
+          "en cours" in pathlib.Path("clics_portail.py").read_text(encoding="utf-8")
+          .split("Classement clics")[1][:200])
+except Exception as _eG3:
+    check("gel : testable", False, repr(_eG3)[:220])
+
+# --- Barre de progression + texte copiable (Discord) --------------------
+try:
+    import cogs.user as _cuPg
+    import inspect as _inPg, pathlib as _plPg
+    _B = _cuPg._Progression
+
+    check("barre : vide a 0 %, pleine a 100 %",
+          _B._barre(0.0) == "⬜" * 12 and _B._barre(1.0) == "\U0001f7e6" * 12,
+          _B._barre(0.0))
+    check("barre : toujours douze cases, quelle que soit la part",
+          all(len(_B._barre(x)) == 12 for x in (0, .07, .33, .5, .99, 1)),
+          str([len(_B._barre(x)) for x in (0, .07, .33, .5, .99, 1)]))
+    # Un pct aberrant du moteur ne doit pas produire une barre a rallonge.
+    check("barre : une part hors bornes est ramenee dans les clous",
+          _B._barre(-3) == _B._barre(0) and _B._barre(42) == _B._barre(1))
+
+    _pg = _B.__new__(_B)
+    _pg.total, _pg.faits = 3, 1
+    check("barre : la part globale = reels finis + avancement du courant",
+          abs(_pg.part_courante(50) - 0.5) < 1e-9, str(_pg.part_courante(50)))
+    # Le moteur peut rendre None, "" ou du texte : ca ne doit pas exploser.
+    check("barre : un avancement illisible vaut zero, il ne plante pas",
+          _pg.part_courante(None) == _pg.part_courante("zut") == 1 / 3.0)
+    # Sans ce delai, trois reels declenchent une centaine d editions et
+    # Discord fait taire le bot.
+    check("barre : un delai minimum separe deux editions",
+          float(getattr(_B, "DELAI_MINI", 0)) >= 2.0)
+
+    # Une barre plantee a 33 % alors que la commande est finie fait croire que
+    # ca travaille encore : CHAQUE sortie doit avancer le compteur.
+    _srcGen = _inPg.getsource(_cuPg.UserCog._gen_and_send_montaged)
+    check("barre : chaque sortie de la generation avance le compteur",
+          _srcGen.count("suivi.un_de_plus()") == _srcGen.count("            return")
+          or _srcGen.count("suivi.un_de_plus()") >= 5,
+          str(_srcGen.count("suivi.un_de_plus()")))
+    check("barre : l avancement vient du moteur, pas de l horloge",
+          '_st.get("pct")' in _srcGen and "time.time()" not in _srcGen)
+    # reelmonte est une commande app_commands : le code vit dans .callback,
+    # l objet Command lui-meme n est pas lisible par inspect.
+    _rm = getattr(_cuPg.UserCog.reelmonte, "callback", _cuPg.UserCog.reelmonte)
+    check("barre : reelmonte pose bien la barre",
+          "_Progression(interaction, total" in _inPg.getsource(_rm))
+
+    # LE TEXTE A COLLER. En bloc de code : Discord y pose un bouton « copier »,
+    # et surtout il n interprete plus le Markdown -- « @mon_compte_perso »
+    # perdait ses underscores et partait en italique dans la legende.
+    _srcTx = _inPg.getsource(_cuPg._envoyer_texte)
+    check("texte : la legende part en bloc de code (bouton copier)",
+          '"```' in _srcTx or "'```" in _srcTx)
+    check("texte : une legende contenant ``` repart en texte nu",
+          '"```" not in t' in _srcTx or "'```' not in t" in _srcTx,
+          _srcTx[:160])
+    # Le bloc ajoute 8 signes : sans marge, un texte de 1900 depasse les 2000
+    # que Discord refuse, et le VA ne recoit RIEN.
+    _bouts = _cuPg._morceaux_discord("a" * 5000, taille=1880)
+    check("texte : chaque bout tient dans Discord, cloture du bloc comprise",
+          all(len(b) + 8 <= 2000 for b in _bouts),
+          str([len(b) for b in _bouts]))
+except Exception as _ePg:
+    check("barre de progression : testable", False, repr(_ePg)[:220])
 
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
