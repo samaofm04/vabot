@@ -9527,6 +9527,14 @@ try:
               _srcTh2.count('onclick="setTheme(') == 4,
               "%d carte(s)" % _srcTh2.count('onclick="setTheme('))
 
+        # PAS DE PASTILLE AU CHANGEMENT DE THEME. Elle annoncait « Theme X
+        # active » par-dessus une page qui venait entierement de changer de
+        # couleur : elle n apprenait rien et recouvrait un coin de l ecran.
+        _sT = _srcTh2[_srcTh2.index("function setTheme(theme){"):
+                      _srcTh2.index("// PAS DE NOTIFICATION ICI")]
+        check("themes : changer de theme n affiche plus de notification",
+              "showToast" not in _sT, "la pastille est revenue")
+
         # LE DEFAUT DOIT ETRE LE MEME MOT DES DEUX COTES. Le serveur ecrit la
         # classe du body avant que le JavaScript tourne ; si les deux defauts
         # different, la page part dans une apparence puis se fait repeindre

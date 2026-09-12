@@ -3289,6 +3289,12 @@ setTimeout(vabotMenuDort, 1200);
 
 // === THEME (dark / light / obsidian / violet / gold) ===
 var VABOT_DARK_VARIANTS = ['infloww'];
+// LA LISTE DE REFERENCE DES THEMES. Plus personne ne l'appelle depuis que
+// la pastille du changement de theme a ete retiree, et elle reste quand
+// meme : c'est le seul endroit qui nomme TOUS les themes qui existent, y
+// compris ceux qu'on ne peut plus choisir mais qu'un vieux cookie porte
+// encore (sombre, clair). Le test de coherence la lit pour verifier que le
+// serveur les connait tous. La vider ferait passer ce test au vert a tort.
 function _vabotThemeLabel(t){
   return ({dark:'sombre',light:'clair',apple:'Apple',claude:'Claude',infloww:'Infloww dark',inflowwlight:'Infloww light'})[t] || t;
 }
@@ -3336,9 +3342,10 @@ function setTheme(theme){
       c.style.outline = '';
     }
   });
-  if(typeof showToast === 'function'){
-    showToast('🎨 Thème ' + _vabotThemeLabel(theme) + ' activé', 'info', 2000);
-  }
+  // PAS DE NOTIFICATION ICI, ET C'EST VOULU. Le changement de theme se voit
+  // tout seul : la page entiere change de couleur sous les yeux de celui qui
+  // vient de cliquer. Une pastille par-dessus pour le lui annoncer n'apprend
+  // rien et recouvre un coin de l'ecran pendant deux secondes.
 }
 // Appliquer le thème au plus tôt (avant render) - défaut : clair
 (function(){
@@ -12846,7 +12853,7 @@ document.addEventListener('keydown', function(e){
 <!-- SETTINGS - PRÉFÉRENCES -->
 <div class="form-section" id="form-sprefs" style="display:none">
 <div class="box">
-<h3 style="margin-top:0">🎨 Affichage</h3>
+<h3 style="margin-top:0">Affichage</h3>
 <small>Choisis l'apparence de ton dashboard — le choix est mémorisé sur cet appareil</small>
 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:12px;margin-top:14px">
   <div onclick="setTheme('inflowwlight')" class="theme-card" data-theme="inflowwlight" style="background:#FFFFFF;border:2px solid #E0E0E0;border-radius:12px;padding:12px;cursor:pointer;text-align:center">
@@ -12892,7 +12899,7 @@ document.addEventListener('keydown', function(e){
     </div>
 </div>
 <div class="box">
-<h3 style="margin-top:0">🌐 Langue</h3>
+<h3 style="margin-top:0">Langue</h3>
 <small>Langue de l'interface</small>
 <label style="margin-top:14px">Langue</label>
 <select id="va-lang-select" onchange="vaSetLangue(this.value)">
