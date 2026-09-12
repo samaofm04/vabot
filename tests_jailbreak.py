@@ -676,9 +676,12 @@ try:
     # n aurait rien decide.
     check("ordre : sans rangement, aucun numero n est affiche",
           _ioOr.etiqueter(["lola", "zoe"], []) == {"lola": "Lola", "zoe": "Zoe"})
-    check("ordre : avec rangement, les numeros partent de 1",
+    check("ordre : le podium remplace les numeros pour les trois premiers",
           _ioOr.etiqueter(["emma", "lola"], _ordOr)
-          == {"lola": "1. Lola", "emma": "2. Emma"})
+          == {"lola": "🥇 Lola", "emma": "🥈 Emma"},
+          str(_ioOr.etiqueter(["emma", "lola"], _ordOr)))
+    check("ordre : au-dela du podium, le rang reste un chiffre",
+          _ioOr.prefixe_rang(4) == "4." and _ioOr.prefixe_rang(14) == "14.")
     check("ordre : une identite non rangee reste sans numero",
           _ioOr.etiqueter(["lola", "zoe"], _ordOr)["zoe"] == "Zoe")
     check("ordre : un fichier absent ne fait pas tomber la lecture",
@@ -694,11 +697,12 @@ try:
     _usOr = ["zezatwins", "ibenhaastrup", "e30princesss"]
     _libUs = _ioOr.etiqueter(_usOr, _globalOr)
     check("ordre : un menu filtre numerote a partir de 1, pas du rang global",
-          _libUs["ibenhaastrup"] == "1. Ibenhaastrup",
+          _libUs["ibenhaastrup"] == "🥇 Ibenhaastrup",
           "obtenu : %r" % _libUs.get("ibenhaastrup"))
     check("ordre : le menu filtre garde l ordre choisi entre elles",
           [_libUs[m] for m in _ioOr.trier(_usOr, _globalOr)]
-          == ["1. Ibenhaastrup", "2. E30princesss", "3. Zezatwins"])
+          == ["🥇 Ibenhaastrup", "🥈 E30princesss",
+              "🥉 Zezatwins"])
 
     # Le site et le bot doivent trier PAREIL. Deux implementations finiraient
     # par diverger — le depot a deja paye ca avec les deux tables du Drive.
@@ -1026,7 +1030,7 @@ try:
         # Le libelle des menus Discord : rang + pastilles, en UN seul endroit.
         from cogs.user import _libelle_model
         _ist.definir("zz_style", ["caption", "flash"])
-        _attSt = "3. Zz_style " + _EMO_CAP + _EMO_FLASH
+        _attSt = "3. Zz_style — Caption + Template"
         check("styles : le libelle du menu porte le rang PUIS les pastilles",
               _libelle_model("zz_style", {"zz_style": "3. Zz_style"}) == _attSt,
               "%d caractere(s) rendus"
@@ -1040,9 +1044,15 @@ try:
         # vient d ajouter, et le bouton redeviendrait muet.
         _longSt = "9. " + ("Zoe" * 40)
         _labSt = _libelle_model("zz_style", {"zz_style": _longSt})
-        check("styles : un nom demesure est coupe, pas les pastilles",
-              len(_labSt) <= 80 and _labSt.endswith(_ist.emojis("zz_style")),
-              "len=%d" % len(_labSt))
+        check("styles : un nom demesure est coupe, pas les styles",
+              len(_labSt) <= 80 and _labSt.endswith(_ist.mots("zz_style")),
+              "len=%d, fin=%r" % (len(_labSt), _labSt[-24:]))
+        # Les emojis restent disponibles : le site les utilise ailleurs, et
+        # une table qui perd une de ses deux formes finit par diverger.
+        check("styles : les deux formes sortent de la MEME table",
+              _ist.emojis("zz_style") and _ist.mots("zz_style")
+              and len(_ist.de("zz_style")) == len(_ist.mots("zz_style").split(" + ")),
+              "%r / %r" % (_ist.emojis("zz_style"), _ist.mots("zz_style")))
 
         # Les DEUX menus qui listent des models doivent passer par ce seul
         # fabricant : sinon l un des deux garde les vieux libelles au premier

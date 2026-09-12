@@ -100,8 +100,33 @@ def phrase_classement(identites, ordre=None) -> str:
             "le mieux en ce moment — commence par le haut.")
 
 
-def etiqueter(identites, ordre=None, gabarit="{rang}. {nom}") -> dict:
-    """{identité: libellé} — « 1. Lola », « 2. Emma »… puis les non rangées.
+#: LE PODIUM SE LIT, LE NUMERO SE DECHIFFRE.
+#:
+#: Les rangs etaient « 1. », « 2. », « 3. »... Le proprietaire : « ils
+#: n'arrivent pas a capter le classement avec un, deux, trois ». Et il a
+#: raison : dans une liste de quinze boutons, un chiffre colle au nom ne se
+#: distingue pas du nom. Une medaille, si -- on la voit avant de lire.
+#:
+#: On s'arrete a trois. Au-dela, il n'existe pas d'emoji de rang lisible
+#: (les pastilles chiffrees s'arretent a dix et se confondent entre elles),
+#: et surtout le podium est ce qui porte l'information : « la n°1 est celle
+#: qui marche le mieux ». La quatrieme n'est pas une medaille, c'est un rang.
+MEDAILLES = ("\U0001F947", "\U0001F948", "\U0001F949")
+
+
+def prefixe_rang(n) -> str:
+    """« 🥇 » pour 1, « 🥈 » pour 2, « 🥉 » pour 3, puis « 4. »."""
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        return ""
+    if 1 <= n <= len(MEDAILLES):
+        return MEDAILLES[n - 1]
+    return "%d." % n
+
+
+def etiqueter(identites, ordre=None, gabarit="{rang} {nom}") -> dict:
+    """{identité: libellé} — « 🥇 Lola », « 🥈 Emma »… puis les non rangées.
 
     Le numéro est la position DANS LA LISTE AFFICHÉE, pas dans le fichier.
     Vérifié sur les vraies données : les six identités FR occupent les rangs
@@ -120,7 +145,10 @@ def etiqueter(identites, ordre=None, gabarit="{rang}. {nom}") -> dict:
         nom = str(ident).capitalize()
         if str(ident).lower() in connues:
             n += 1
-            sortie[ident] = gabarit.format(rang=n, nom=nom)
+            # `rang` arrive DEJA mis en forme : le gabarit par defaut colle
+            # simplement la medaille au nom, sans point apres -- « 🥇. Lola »
+            # se lirait comme une faute.
+            sortie[ident] = gabarit.format(rang=prefixe_rang(n), nom=nom)
         else:
             sortie[ident] = nom
     return sortie

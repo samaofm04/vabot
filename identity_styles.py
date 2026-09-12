@@ -113,6 +113,21 @@ def emojis(identity: str) -> str:
     return "".join(_PAR_CLE[c][0] for c in de(identity))
 
 
+def mots(identity: str, separateur: str = " + ") -> str:
+    """« Template + Caption », ou '' si rien n'est coché.
+
+    LES PASTILLES NE SE DEVINENT PAS. Sur le site elles sont accompagnees
+    d'une legende ; dans un menu Discord, « 💬⚡ » arrive nu, et le
+    proprietaire l'a dit : « les emojis, ils n'arrivent pas a comprendre ».
+    Un VA qui lit « Template + Caption » sait quoi faire sans avoir appris un
+    code.
+
+    C'est la MEME table que les emojis : un style ajoute apparait des deux
+    cotes, ou d'aucun.
+    """
+    return separateur.join(_PAR_CLE[c][1] for c in de(identity))
+
+
 def definir(identity: str, styles) -> bool:
     """Écrit les styles d'une identité. Liste vide = on retire l'entrée.
 
