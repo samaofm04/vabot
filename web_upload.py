@@ -3273,33 +3273,62 @@ document.addEventListener('click', function(e){
 // Ce code vit dans le script GLOBAL, pas dans celui d un onglet : le menu est
 // present sur toutes les pages, et un premier essai place dans le JS de
 // l onglet Jailbreak ne s executait sur aucune autre.
-var VABOT_MENU_DORT = {
-  'tab-remote2': 'Remote 2 — pas utilisé en ce moment',
-  'tab-gmsdash': 'Dashboard clics — pas utilisé en ce moment',
-  'grp-vault2': 'Bibliothèque 2 — pas utilisée en ce moment'
+// CE QUI EST RANGE, ET POURQUOI CE N'EST PLUS UN CADENAS.
+//
+// La premiere version grisait l'entree et y posait un cadenas, en la
+// laissant CLIQUABLE -- « cacher une page qu'on croyait morte est le
+// meilleur moyen de la chercher pendant une heure ». Le proprietaire a
+// tranche l'inverse le 12/09/2026 : « je veux pas pouvoir les ouvrir », « je
+// veux pas le voir au niveau de mon truc ».
+//
+// On les RETIRE donc du menu et on neutralise le clic. Pas seulement
+// l'apparence : un bouton grise reste un bouton, il se declenche encore au
+// clavier et par un script.
+//
+// Rien n'est supprime : les routes repondent toujours, et la ligne « Range »
+// posee en bas du menu dit ce qui dort. Pour en ramener une, il suffit de
+// retirer son identifiant d'ici.
+var VABOT_MENU_RANGE = {
+  'tab-remote':     'Remote',
+  'tab-remote2':    'Remote 2',
+  'tab-sessions':   'Sessions',
+  'tab-valist':     'Délégations VA',
+  'tab-onboarding': 'Onboarding',
+  'tab-paievas':    'Paie VAs',
+  'tab-gmsdash':    'Dashboard clics',
+  'grp-vault2':     'Bibliothèque 2'
 };
-function vabotMenuDort(){
-  Object.keys(VABOT_MENU_DORT).forEach(function(id){
+function vabotMenuRange(){
+  var ranges = [];
+  Object.keys(VABOT_MENU_RANGE).forEach(function(id){
     var e = document.getElementById(id);
     if(!e) return;
-    var cible = e.classList.contains('group') ? e.querySelector('.group-head') : e;
-    if(!cible || cible.classList.contains('menu-dort')) return;
-    cible.classList.add('menu-dort');
-    cible.title = VABOT_MENU_DORT[id];
-    // Le cadenas est POSE, pas dessine en CSS : « Dashboard clics » n a pas
-    // de <span class="label"> autour de son texte, contrairement aux autres
-    // entrees, et le ::after ne s y accrochait pas. Un badge ajoute ici
-    // marche quelle que soit la structure du bouton.
-    if(!cible.querySelector('.menu-cadenas')){
-      var c = document.createElement('span');
-      c.className = 'menu-cadenas';
-      c.textContent = '🔒';
-      cible.appendChild(c);
-    }
+    ranges.push(VABOT_MENU_RANGE[id]);
+    // Un groupe se range en entier : masquer sa seule tete laisserait ses
+    // enfants orphelins au milieu du menu.
+    var bloc = e.closest ? (e.closest('.group') || e) : e;
+    bloc.style.display = 'none';
+    // ET ON COUPE LE CLIC, pas juste la vue. Un display:none suffit a
+    // l'oeil ; il ne suffit pas a un raccourci clavier, a un ancien lien,
+    // ni a showTab appele depuis l'URL.
+    e.setAttribute('aria-hidden', 'true');
+    e.setAttribute('tabindex', '-1');
+    e.disabled = true;
+    e.onclick = null;
   });
+  if(!ranges.length) return;
+  var barre = document.querySelector('.sidebar');
+  if(!barre || document.getElementById('menu-range-note')) return;
+  var note = document.createElement('div');
+  note.id = 'menu-range-note';
+  note.className = 'menu-range-note';
+  note.textContent = 'Rangé : ' + ranges.join(', ');
+  note.title = 'Ces sections existent toujours, elles sont juste retirées du '
+             + 'menu. Dis-le si tu en veux une de retour.';
+  barre.appendChild(note);
 }
-document.addEventListener('DOMContentLoaded', vabotMenuDort);
-setTimeout(vabotMenuDort, 1200);
+document.addEventListener('DOMContentLoaded', vabotMenuRange);
+setTimeout(vabotMenuRange, 1200);
 
 // === THEME (dark / light / obsidian / violet / gold) ===
 var VABOT_DARK_VARIANTS = ['infloww'];
@@ -39171,10 +39200,12 @@ body.light .ie-fichier{background:#fff;border-color:#d8d8de;color:#6b7280}
    qu'on croit morte se rouvre parfois. Elles sont juste rendues discretes,
    pour que le menu dise ce qui sert aujourd'hui. Un clic les ouvre
    normalement. */
-.menu-dort{opacity:.42}
-.menu-dort:hover{opacity:.72}
-.menu-cadenas{font-size:9px;margin-left:6px;opacity:.85;flex:none}
-.menu-dort .badge{display:none}
+/* La ligne qui rappelle ce qui est range. Discrete, non cliquable : elle
+   n'est pas un menu, c'est un aide-memoire -- sans elle, on cherche une page
+   qu'on croit disparue. */
+.menu-range-note{margin:14px 12px 18px;padding:9px 11px;border-top:1px solid rgba(255,255,255,.07);
+  font-size:10.5px;line-height:1.5;color:#5f5f68;cursor:default;user-select:none}
+body.light .menu-range-note{color:#9095a0;border-top-color:rgba(0,0,0,.08)}
 /* --- Perimetre du scrape ---------------------------------------------- */
 .sv-box{background:#0f0f13;border:1px solid #1d2027;border-radius:12px;
   padding:11px 14px;margin:-4px 0 16px}

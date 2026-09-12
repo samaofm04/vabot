@@ -9291,6 +9291,41 @@ except Exception as _eA:
 
 print()
 print("=" * 70)
+print("MENU RANGE : ce qui ne sert plus ne s ouvre plus")
+print("=" * 70)
+try:
+    import pathlib as _plR2
+    _srcR2 = _plR2.Path("web_upload.py").read_text(encoding="utf-8")
+    # Le cadenas DECORATIF est mort : il grisait sans empecher d ouvrir.
+    check("menu : l ancien cadenas decoratif a disparu, CSS compris",
+          "VABOT_MENU_DORT" not in _srcR2 and "menu-dort" not in _srcR2
+          and "menu-cadenas" not in _srcR2)
+    check("menu : la table des rangees existe", "VABOT_MENU_RANGE = {" in _srcR2)
+    _dR2 = _srcR2.index("var VABOT_MENU_RANGE = {")
+    _tableR2 = _srcR2[_dR2:_srcR2.index("};", _dR2)]
+    for _id in ("tab-remote", "tab-remote2", "tab-sessions", "tab-valist",
+                "tab-onboarding", "tab-paievas", "tab-gmsdash", "grp-vault2"):
+        check("menu : %s est range" % _id, "'%s'" % _id in _tableR2)
+    _fnR2 = _srcR2[_srcR2.index("function vabotMenuRange(){"):]
+    _fnR2 = _fnR2[:_fnR2.index(chr(10) + "document.addEventListener")]
+    # LE CLIC EST COUPE, pas seulement la vue : un bouton grise reste un
+    # bouton, il part encore au clavier.
+    check("menu : le clic est coupe, pas seulement masque",
+          "e.disabled = true" in _fnR2 and "e.onclick = null" in _fnR2
+          and "tabindex" in _fnR2)
+    check("menu : un groupe se range en entier",
+          "closest('.group')" in _fnR2,
+          "masquer la seule tete laisserait ses enfants orphelins")
+    check("menu : une ligne rappelle ce qui dort",
+          "menu-range-note" in _fnR2 and "Rang" in _fnR2,
+          "sinon on cherche une page qu on croit disparue")
+    check("menu : cette ligne a sa version claire",
+          "body.light .menu-range-note{" in _srcR2)
+except Exception as _eR2:
+    check("menu range : testable", False, repr(_eR2)[:200])
+
+print()
+print("=" * 70)
 print("SYNCHRO DE MARCHE : une base, et tout le marche la recopie")
 print("=" * 70)
 try:
@@ -11215,6 +11250,144 @@ try:
           _srcR2.count("def _champs_classements") == 1)
 except Exception as _eR3:
     check("ranking : testable", False, repr(_eR3)[:220])
+
+# --- Le report des clics sur un telephone --------------------------------
+# Capture du proprietaire : un tableau de 54 signes de large, quarante lignes
+# sur cinquante ne portant que des « — » et des « 0 ». « Les mecs sur
+# telephone ca leur montre pas le bon truc. »
+try:
+    _srcM = pathlib.Path("cogs/clickrecap.py").read_text(encoding="utf-8")
+    from cogs.clickrecap import _cle_tri as _ctM, _nom_propre as _npM
+
+    # Les vrais libelles, releves sur la capture.
+    _NOMS_M = ["(Abdoul) 1", "(Abdoul) SPAM", "(ANDRY) 1", "(ANDRY) 2",
+               "(BO7) 1", "(BO7) 2", "(Bryan) 1", "(DOLAD) 1", "EUD",
+               "(Gerome) 1", "(Kylmich) 1", "(PAMPAM) 1 SPAM", "(Ricardo) 1",
+               "(Roucham) 1SPAM", "(Safidy) 1", "TWITTER", "(VA 1 Noum) 1",
+               "(VA 1 Noum) 2", "(VA 2 Noum) 1"]
+    _VAL_M = {"(ANDRY) 1": 0, "(ANDRY) 2": 0, "(DOLAD) 1": 0,
+              "(PAMPAM) 1 SPAM": 0, "(Safidy) 1": 12, "(BO7) 1": 4}
+    _rowsM = [(n, [(_VAL_M.get(n), _VAL_M.get(n))] * 3) for n in _NOMS_M]
+
+    def _renduM(pays_marche, libelle):
+        """Rejoue EXACTEMENT le calcul de largeur du cog."""
+        _duo = bool(pays_marche) and any(
+            p[i][0] != p[i][1] for _l, p in _rowsM for i in (0, 1, 2))
+        _lg = 14 if _duo else 16
+
+        def _c(v):
+            return "\u00b7" if v == "NA" else ("\u2014" if v is None else str(v))
+
+        def _col(pr):
+            u, t = pr
+            return ("%5s" % _c(t)) if not _duo else ("%4s%5s" % (_c(u), _c(t)))
+        ent = ((("%-*s" % (_lg, "")) + "".join("%*s%*s" % (5, t[:5], 4, "")
+                                               for t in ("TODAY", "YESTER", "PERIOD")))
+               if _duo else
+               (("%-*s" % (_lg, "LINK")) + "".join("%5s" % t
+                                                   for t in ("AUJ", "HIER", "PER"))))
+
+        def _sort(pp):
+            tot = [pp[i][1] for i in (0, 1, 2)]
+            if all(v is None for v in tot):
+                return "muet"
+            if any(isinstance(v, int) and v > 0 for v in tot):
+                return ""
+            return "zero"
+        _tri = sorted(_rowsM, key=lambda x: _ctM(x[0]))
+        _act = [(l, pp) for l, pp in _tri if not _sort(pp)]
+        _zer = [_npM(l) for l, pp in _tri if _sort(pp) == "zero"]
+        _mue = [_npM(l) for l, pp in _tri if _sort(pp) == "muet"]
+        _lig = [("%-*s" % (_lg, _npM(l)[:_lg - 1]))
+                + "".join(_col(pp[i]) for i in (0, 1, 2)) for l, pp in _act]
+        return _duo, ent, _lig, _zer, _mue
+
+    _duoM, _entM, _ligM, _zerM, _mueM = _renduM({"US"}, "US")
+    # UN BLOC DE CODE DISCORD TIENT ENVIRON 34 SIGNES sur un telephone en
+    # portrait. Au-dela, la ligne se coupe ou il faut la faire defiler.
+    _largM = max(len(x) for x in ([_entM] + _ligM))
+    check("mobile : le tableau tient dans la largeur d un telephone",
+          _largM <= 34, "%d signes" % _largM)
+    # La colonne en double ne s'ouvre que si le marche DIFFERE du total.
+    check("mobile : pas deux colonnes pour repeter le meme chiffre",
+          _duoM is False)
+    check("mobile : les lignes sans rien sortent du tableau",
+          len(_ligM) == 2 and len(_zerM) == 4, "%d lignes, %d zeros"
+          % (len(_ligM), len(_zerM)))
+    # ET ELLES SONT NOMMEES : un lien retire en silence est un lien que plus
+    # personne ne regarde.
+    check("mobile : les ecartes sont nommes, pas avales",
+          '_donnees["ecartes"]' in _srcM and "Out of the table" in _srcM)
+    # « zero clic » est un fait, « pas su lire » est une panne : les melanger
+    # ferait passer une panne pour un resultat.
+    check("mobile : zero clic et non lu restent separes",
+          "No click this period" in _srcM and "Not read" in _srcM)
+    check("mobile : tout vide -> on montre quand meme le tableau",
+          "if not _actifs:" in _srcM)
+
+    # ---- Le classement s installe tout seul --------------------------
+    import asyncio as _aioM, tempfile as _tmpM
+    from cogs import clickrecap as _crM
+
+    class _ChM:
+        def __init__(self, i, n):
+            self.id, self.name = i, n
+
+    class _GM:
+        def __init__(self, c):
+            self.text_channels = c
+
+    class _BotM:
+        def __init__(self, g):
+            self._g = g
+
+        def get_guild(self, i):
+            return self._g
+
+    class _CogM:
+        def __init__(self, b):
+            self.bot = b
+        _poser_ranking_auto = _crM.ClickRecap._poser_ranking_auto
+
+    _sauveM = _crM._REPORT_CFG_FILE
+    try:
+        _crM._REPORT_CFG_FILE = pathlib.Path(_tmpM.mkdtemp()) / "report_click.json"
+        _crM._save_report_cfg({"77:11": {
+            "channel_id": 11, "team_id": "tm_x", "group_id": "g",
+            "identity": "jessye", "group_name": "JESSY", "marche": "us",
+            "tout": True, "message_id": 999}})
+        _cogM = _CogM(_BotM(_GM([_ChM(11, "clics-us"),
+                                 _ChM(22, "\U0001F3C6\u30fbranking"),
+                                 _ChM(33, "general")])))
+        check("ranking auto : le salon est equipe au premier cycle",
+              _aioM.run(_cogM._poser_ranking_auto()) is True)
+        _cfgM = _crM._load_report_cfg()
+        _rM = _cfgM.get("77:22") or {}
+        check("ranking auto : il reprend le groupe du report existant",
+              _rM.get("team_id") == "tm_x" and _rM.get("marche") == "us")
+        check("ranking auto : il ne porte QUE les classements",
+              _rM.get("contenu") == "classement")
+        # Sans ca, on editerait le message d un AUTRE salon.
+        check("ranking auto : il ne reprend pas le message du voisin",
+              "message_id" not in _rM, str(sorted(_rM)))
+        check("ranking auto : il ne repose pas au cycle suivant",
+              _aioM.run(_cogM._poser_ranking_auto()) is False)
+        # Couper le report doit etre DEFINITIF : sans memoire des salons deja
+        # poses, il reviendrait tout seul et on ne pourrait plus s en defaire.
+        _cfgM = _crM._load_report_cfg()
+        _cfgM.pop("77:22")
+        _crM._save_report_cfg(_cfgM)
+        check("ranking auto : coupe une fois, il ne revient pas",
+              _aioM.run(_cogM._poser_ranking_auto()) is False
+              and "77:22" not in _crM._load_report_cfg())
+        # La memoire n est pas un report : elle n a pas de channel_id.
+        check("ranking auto : sa memoire n est pas prise pour un report",
+              [k for k, _v in _crM._reports_configures(_crM._load_report_cfg())]
+              == ["77:11"])
+    finally:
+        _crM._REPORT_CFG_FILE = _sauveM
+except Exception as _eM:
+    check("mobile : testable", False, repr(_eM)[:220])
 
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
