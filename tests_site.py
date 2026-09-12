@@ -10997,6 +10997,148 @@ try:
 except Exception as _ePg:
     check("barre de progression : testable", False, repr(_ePg)[:220])
 
+# --- Le scrape cale sur les sessions de posting -------------------------
+try:
+    import web_upload as _wSc, sessions_voc as _svSc
+    import datetime as _dtSc, inspect as _inSc
+
+    _bor = _wSc._scrape_bornes()
+    check("scrape : les bornes viennent des sessions, pas d une liste en dur",
+          _bor == sorted({(int(s["heure"]) % 24, int(s.get("minute") or 0) % 60)
+                          for s in (_svSc.config() or {}).get("sessions") or []}
+                         | {(int(s["fin_heure"]) % 24, int(s.get("fin_minute") or 0) % 60)
+                            for s in (_svSc.config() or {}).get("sessions") or []
+                            if s.get("fin_heure") is not None}),
+          str(_bor))
+    check("scrape : chaque debut de session a son releve",
+          all((int(s["heure"]) % 24, int(s.get("minute") or 0) % 60) in _bor
+              for s in (_svSc.config() or {}).get("sessions") or []),
+          str(_bor))
+    # La fin de la DERNIERE session ne recouvre aucun debut : sans elle, le
+    # petit matin n etait plus mesure du tout.
+    check("scrape : la fin de la derniere session garde son releve",
+          all((int(s["fin_heure"]) % 24, int(s.get("fin_minute") or 0) % 60) in _bor
+              for s in (_svSc.config() or {}).get("sessions") or []
+              if s.get("fin_heure") is not None))
+
+    # LE FUSEAU. Les sessions sont en heure du Benin (UTC+1 fixe), la boucle
+    # compare a datetime.now() qui est LOCAL. Poser l heure d une session
+    # telle quelle sur l horloge du serveur decalait tout le calendrier.
+    _tzSc = _wSc._scrape_fuseau()
+    check("scrape : le fuseau est bien celui des sessions",
+          str(_tzSc) == str(_svSc._tz()), str(_tzSc))
+    _srcNx = _inSc.getsource(_wSc._next_insta_refresh_dt)
+    check("scrape : le calcul passe par les horodatages, pas par replace(hour=)",
+          "timestamp()" in _srcNx and "replace(hour=" not in _srcNx)
+
+    # Vu de n importe quelle heure : toujours dans le futur, jamais un trou
+    # de plus de huit heures (une boucle qui dort trop est une mesure perdue).
+    _ecarts, _ok_futur = [], True
+    for _hh in range(24):
+        for _mm in (5, 35):
+            _faux = _dtSc.datetime(2026, 9, 12, _hh, _mm, tzinfo=_tzSc)
+            _loc = _dtSc.datetime.fromtimestamp(_faux.timestamp())
+            _nx = _wSc._next_insta_refresh_dt(_loc)
+            _d = _nx.timestamp() - _loc.timestamp()
+            if _d <= 0:
+                _ok_futur = False
+            _ecarts.append(_d)
+    check("scrape : le prochain releve est TOUJOURS dans le futur", _ok_futur)
+    check("scrape : jamais plus de 8 h sans releve",
+          max(_ecarts) <= 8 * 3600, "%.1f h" % (max(_ecarts) / 3600))
+
+    # Un calendrier illisible ne doit pas arreter la mesure : c est la paie
+    # des VA qui se lit sur ces chiffres.
+    _savCfg = _svSc.config
+    try:
+        _svSc.config = lambda: {}
+        check("scrape : sans calendrier, on retombe sur le repli (pas zero)",
+              _wSc._scrape_bornes() == [(h, 0) for h in sorted(_wSc._INSTA_REFRESH_HOURS)],
+              str(_wSc._scrape_bornes()))
+        _svSc.config = lambda: (_ for _ in ()).throw(ValueError("casse"))
+        check("scrape : un calendrier qui leve une erreur ne fait pas tomber le scrape",
+              len(_wSc._scrape_bornes()) > 0)
+    finally:
+        _svSc.config = _savCfg
+
+    # Le TTL suit les bornes : avec des ecarts irreguliers, prendre la moyenne
+    # laisserait passer un compte pour frais alors qu un scrape a deja eu lieu.
+    _mins = sorted({h * 60 + m for h, m in _bor})
+    _ec = [(b - a) for a, b in zip(_mins, _mins[1:])] + [1440 - _mins[-1] + _mins[0]]
+    check("scrape : le TTL vaut le PLUS COURT ecart entre deux releves",
+          _wSc._ttl_stats_insta() == int(max(60, min(_ec)) * 60 * 0.9),
+          str(_wSc._ttl_stats_insta()))
+
+    # Deux endroits qui decident la meme chose finissent par diverger : la
+    # banniere et le journal doivent lire les bornes, pas la liste de repli.
+    _srcW2 = _plPg.Path("web_upload.py").read_text(encoding="utf-8")
+    check("scrape : la banniere annonce les vraies bornes",
+          "len(_scrape_bornes())" in _srcW2 and "len(_INSTA_REFRESH_HOURS)" not in _srcW2)
+    check("scrape : le journal de demarrage aussi",
+          '"h / ".join' not in _srcW2)
+    # Le re-controle des bannis se juge dans le fuseau des sessions, sinon la
+    # fenetre tombe a cote d une heure.
+    check("scrape : le « premier passage du jour » se juge en heure de session",
+          "_dt_dr.datetime.now(_scrape_fuseau())" in _srcW2)
+except Exception as _eSc:
+    check("scrape cale sur les sessions : testable", False, repr(_eSc)[:220])
+
+# --- Le salon « ranking » : les classements, et rien d autre -------------
+try:
+    import discord as _dcR
+    from cogs import clickrecap as _crR
+
+    _embR = _dcR.Embed(title="t")
+    _embR.add_field(name="\u200b", value="resume", inline=False)
+    _embR.add_field(name="\U0001F3C6 Clicks ranking \u2014 1 sept", value="1. A", inline=False)
+    _embR.add_field(name="\U0001F44B Subscribers \u2014 x", value="tableau", inline=False)
+    _embR.add_field(name="\u2B50 Subs ranking \u2014 who converts", value="1. B", inline=False)
+    _embR.add_field(name="\U0001F4CB Per link", value="tableau", inline=False)
+    _crR._garder_que_les_classements(_embR)
+    check("ranking : seuls les deux classements restent",
+          len(_embR.fields) == 2
+          and _embR.fields[0].name.startswith("\U0001F3C6")
+          and _embR.fields[1].name.startswith("\u2B50"),
+          str([f.name[:20] for f in _embR.fields]))
+
+    # JAMAIS UN EMBED VIDE : Discord refuserait le message, l exception serait
+    # avalee par _post_or_update_report, et le salon resterait sur son dernier
+    # bon message sans que personne ne sache pourquoi il ne bouge plus.
+    _videR = _dcR.Embed(title="t")
+    _videR.add_field(name="\u200b", value="resume", inline=False)
+    _crR._garder_que_les_classements(_videR)
+    check("ranking : sans classement, le message ne part pas vide",
+          len(_videR.fields) == 1 and len(_videR) > 0,
+          str([f.name for f in _videR.fields]))
+
+    # PAS UNE COMMANDE DE PLUS. Le bot principal est a son plafond de 100
+    # commandes : une nouvelle mourrait en silence. On ajoute donc une OPTION
+    # a /setreportclick, pas une commande.
+    import inspect as _insR
+    _sigR = list(_insR.signature(_crR.ClickRecap.setreportclick.callback).parameters)
+    check("ranking : le choix passe par une option de /setreportclick",
+          "contenu" in _sigR, str(_sigR))
+    check("ranking : aucune commande slash n a ete ajoutee",
+          len(getattr(_crR.ClickRecap, "__cog_app_commands__", [])) == 11,
+          str(len(getattr(_crR.ClickRecap, "__cog_app_commands__", []))))
+
+    _srcR2 = pathlib.Path("cogs/clickrecap.py").read_text(encoding="utf-8")
+    check("ranking : le choix est retenu dans la config du salon",
+          chr(34) + "contenu" + chr(34) + ": (" in _srcR2)
+    check("ranking : le titre du message dit « Ranking »",
+          "Ranking \u2014 {name}" in _srcR2 or "Ranking — {name}" in _srcR2)
+    # Le filtre passe AVANT la garde de taille : inutile de couper un tableau
+    # qu on s apprete a retirer.
+    check("ranking : on filtre avant de couper",
+          _srcR2.index("_garder_que_les_classements(emb)")
+          < _srcR2.index("_tenir_dans_embed(emb)"))
+    # UN SEUL calcul : le report entier est construit, puis filtre. Un second
+    # chemin donnerait deux resultats a reconcilier.
+    check("ranking : aucun second chemin de calcul",
+          _srcR2.count("def _champs_classements") == 1)
+except Exception as _eR3:
+    check("ranking : testable", False, repr(_eR3)[:220])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

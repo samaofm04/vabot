@@ -391,6 +391,40 @@ def _lignes_classement(gens, valeur, suffixe, detail=None) -> list:
     return out
 
 
+#: Les deux titres commencent par ces dessins. UNE SEULE table : le filtre du
+#: salon « ranking » les reconnait par la, et une deuxieme liste de prefixes
+#: finirait par oublier celui qu'on ajoute demain.
+_PREFIXES_CLASSEMENT = ("\U0001F3C6", "\u2B50")
+
+
+def _garder_que_les_classements(emb) -> None:
+    """Ne laisse dans l'embed que les classements.
+
+    Le salon « ranking » ne veut pas les trente lignes du tableau par lien :
+    il veut savoir qui porte. On construit le report ENTIER quand meme -- les
+    classements en sortent, et refaire un second chemin de calcul pour ce
+    salon nous donnerait deux resultats a reconcilier -- puis on retire ce
+    qui n'est pas un classement.
+    """
+    try:
+        gardes = [f for f in list(emb.fields)
+                  if str(f.name or "").startswith(_PREFIXES_CLASSEMENT)]
+        emb.clear_fields()
+        for f in gardes:
+            emb.add_field(name=f.name, value=f.value, inline=False)
+        if not gardes:
+            # JAMAIS un embed vide : Discord refuserait le message, et
+            # l'exception serait avalee par _post_or_update_report -- le
+            # salon resterait sur son dernier bon message sans que personne
+            # ne sache pourquoi il ne bouge plus.
+            emb.add_field(
+                name="\u23F3 No ranking yet",
+                value="_(no link read on this period \u2014 nothing to rank.)_",
+                inline=False)
+    except Exception as e:                       # noqa: BLE001
+        print("[reportclick] filtre classement : %s" % e, flush=True)
+
+
 def _champs_classements(donnees: dict) -> list:
     """[(titre, valeur)] : les deux classements, ou [] s'il n'y a rien.
 
@@ -1102,8 +1136,10 @@ class ClickRecap(commands.Cog):
         else:
             color = discord.Color.dark_grey()
 
+        _rank_only = str(c.get("contenu") or "tout").strip().lower() == "classement"
         emb = discord.Embed(
-            title=f"{drapeau} Clicks — {name}",
+            title=(f"{drapeau} Ranking — {name}" if _rank_only
+                   else f"{drapeau} Clicks — {name}"),
             description=(
                 f"**{len(ids)}** link(s) tracked."
                 + (f"  ·  {libelle} = {MARCHE_DETAIL[_cle_m]}"
@@ -1523,6 +1559,11 @@ class ClickRecap(commands.Cog):
                 value=f"_({len(ids)} links — too many to detail, totals above.)_",
                 inline=False)
 
+        # Le salon « ranking » ne garde que les classements. Le filtre passe
+        # AVANT la garde de taille : inutile de couper un tableau qu'on
+        # s'apprete a retirer.
+        if str(c.get("contenu") or "tout").strip().lower() == "classement":
+            _garder_que_les_classements(emb)
         _tenir_dans_embed(emb)
 
         # Pas de drapeau dans le PIED de page : Discord y rend les emoji en
@@ -2415,15 +2456,21 @@ class ClickRecap(commands.Cog):
     @app_commands.describe(
         groupe="Workspace GetMySocial a suivre (choisis dans la liste)",
         marche="Quels clics mettre en avant : fr, us, ou tout (défaut : tout)",
+        contenu="Tout le report, ou seulement les classements (salon #ranking)",
     )
     @app_commands.choices(marche=[
         app_commands.Choice(name="🇫🇷 France (FR/BE/CH/LU/MC)", value="fr"),
         app_commands.Choice(name="🇺🇸 États-Unis", value="us"),
         app_commands.Choice(name="🌍 Tous pays", value="tout"),
     ])
+    @app_commands.choices(contenu=[
+        app_commands.Choice(name="📋 Tout le report", value="tout"),
+        app_commands.Choice(name="🏆 Classements seulement", value="classement"),
+    ])
     @app_commands.autocomplete(groupe=_ac_groupe)
     async def setreportclick(self, interaction: discord.Interaction,
-                             groupe: str = None, marche: str = None):
+                             groupe: str = None, marche: str = None,
+                             contenu: str = None):
         if not await self._is_owner(interaction.user.id):
             await interaction.response.send_message("Owner only.", ephemeral=True)
             return
@@ -2454,6 +2501,11 @@ class ClickRecap(commands.Cog):
             # Sans ce drapeau, un report de workspace repartirait chercher un
             # groupe au premier rafraichissement et ne trouverait plus rien.
             "tout": bool(data.get("tout")),
+            # « classement » = le salon #ranking : meme calcul, mais on ne
+            # garde que les deux classements dans le message.
+            "contenu": ("classement"
+                        if str(contenu or "").strip().lower() == "classement"
+                        else "tout"),
         }
         # Re-lancer dans le MÊME salon : on réutilise le message existant (sinon
         # on poste un doublon). On regarde AUSSI l'ancienne clé, rangée sous le
@@ -2476,7 +2528,10 @@ class ClickRecap(commands.Cog):
             f"✅ Report des clics **{data['group_name']}** {_marche_de(new_c)[2]} "
             f"(workspace **{data['ws']}**, "
             f"{data['n']} lien(s)) activé dans {interaction.channel.mention}.\n"
-            f"Message **édité toutes les 30 min** (aujourd'hui / hier / semaine / période 1–15 / 16–fin), "
+            + ("\n🏆 **Classements seulement** — ce salon ne porte que « qui envoie » "
+               "et « qui convertit », pas le tableau par lien.\n"
+               if new_c["contenu"] == "classement" else "\n")
+            + f"Message **édité toutes les 30 min** (aujourd'hui / hier / semaine / période 1–15 / 16–fin), "
             f"et un bouton **Rafraîchir** que n'importe qui peut cliquer. "
             f"Snapshot à la demande : `/reportclicknow`. Désactive : `/reportclick_off`.{data['ambig']}",
             ephemeral=True)
