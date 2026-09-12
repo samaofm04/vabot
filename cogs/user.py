@@ -1069,10 +1069,15 @@ class _Progression:
     #: Discord tolere mal plus d une edition toutes les quelques secondes.
     DELAI_MINI = 4.0
 
-    def __init__(self, interaction, total, titre="Génération des reels"):
+    def __init__(self, interaction, total, titre="Génération des reels",
+                 mot="Reel"):
         self.interaction = interaction
         self.total = max(1, int(total or 1))
         self.titre = titre
+        # LE MOT DE L ELEMENT. Le corps disait « Reel N/total » en dur :
+        # au-dessus d un TEMPLATE ou d un FLASH, il annoncait le mauvais
+        # objet. Le titre ne coiffe que l en-tete, pas les lignes.
+        self.mot = str(mot or "Reel")
         self.message = None
         self.faits = 0
         self._dernier = 0.0
@@ -1087,7 +1092,7 @@ class _Progression:
 
     def _corps(self, part, detail=""):
         lignes = [self._barre(part) + f"  **{int(round(part * 100))} %**",
-                  f"Reel **{min(self.faits + 1, self.total)}/{self.total}**"
+                  f"{self.mot} **{min(self.faits + 1, self.total)}/{self.total}**"
                   if not self._fini else f"**{self.total}/{self.total}** — terminé"]
         if detail:
             lignes.append(detail)
@@ -2715,6 +2720,13 @@ class UserCog(commands.Cog):
             if suivi is not None:
                 await suivi.un_de_plus()
             return
+        # SERVI PAR LE STOCK : il n y a AUCUN rendu a suivre, la boucle
+        # d attente ci-dessous ne tourne pas une seule fois. Sans ce mot, la
+        # barre semblait figee alors que tout allait bien -- et c est
+        # precisement ce que le proprietaire regarde.
+        if suivi is not None and fichier is not None:
+            await suivi.poser(suivi.part_courante(100), "servi depuis la réserve",
+                              force=True)
         state = "done" if fichier is not None else "running"
         for _ in range(0 if fichier is not None else 90):   # ~3 min max
             await asyncio.sleep(2)
@@ -2940,13 +2952,17 @@ class UserCog(commands.Cog):
         await interaction.followup.send(entete)
 
         used_b, used_c = set(), set()
+        suivi = _Progression(interaction, total, "Captions incrustées",
+                             mot="Caption")
+        await suivi.demarrer()
         for idx in range(1, total + 1):
             cap = _pick_fresh(utiles, used_c, key=lambda c: c.get("id"))
             vid = _pick_fresh(brutes, used_b, key=lambda p: str(p))
             await self._gen_and_send_caption(
                 interaction, vid, cap, block, idx, total, identity,
                 label="CAPTION BANGER", emoji="⭐",
-                prefixe_fichier="caption_banger", famille="caption")
+                prefixe_fichier="caption_banger", famille="caption",
+                suivi=suivi)
 
     async def _send_montage_bangers(self, interaction):
         """Bouton '🎬 Montage Banger' : une BRUTE favorite + une CAPTION favorite.
@@ -3010,13 +3026,17 @@ class UserCog(commands.Cog):
             f"⏳ Je les génère (≈15-30s chacun). Le texte est **incrusté** : "
             f"poste **tel quel**.")
         used_b, used_c = set(), set()
+        suivi = _Progression(interaction, total, "Montages caption + brut",
+                             mot="Montage")
+        await suivi.demarrer()
         for idx in range(1, total + 1):
             cap = _pick_fresh(caps, used_c, key=lambda c: c.get("id"))
             vid = _pick_fresh(brutes, used_b, key=lambda p: str(p))
             await self._gen_and_send_caption(
                 interaction, vid, cap, block, idx, total, identity,
                 label="MONTAGE BANGER", emoji="🎬",
-                prefixe_fichier="montage_banger", famille="montage")
+                prefixe_fichier="montage_banger", famille="montage",
+                suivi=suivi)
 
     async def _send_template_plus_brute(self, interaction, brute_favorite=True):
         """Bouton 'Template + Brut' : un template ⭐ ASSEMBLE avec une brute.
@@ -3103,6 +3123,9 @@ class UserCog(commands.Cog):
                       f"pas de point de coupe.")
         await interaction.followup.send(intro)
         used_t, used_b = set(), set()
+        suivi = _Progression(interaction, total, "Assemblage template + brut",
+                             mot="Template")
+        await suivi.demarrer()
         for idx in range(1, total + 1):
             tpl, draft = _pick_fresh(templates, used_t, key=lambda t: str(t[0]))
             vid = _pick_fresh(brutes, used_b, key=lambda p: str(p))
@@ -3120,7 +3143,8 @@ class UserCog(commands.Cog):
                     interaction, tpl, draft, desc, idx, total, identity,
                     label="TEMPLATE + BRUT", emoji="🎵",
                     prefixe_fichier="template_brut", brutes_dir=tmp,
-                    famille=("template_brut" if brute_favorite else "template"))
+                    famille=("template_brut" if brute_favorite else "template"),
+                    suivi=suivi)
             finally:
                 _sh.rmtree(tmp, ignore_errors=True)
 
@@ -3204,6 +3228,8 @@ class UserCog(commands.Cog):
         await interaction.followup.send(intro)
 
         used_t, used_b = set(), set()
+        suivi = _Progression(interaction, total, "Montages Flash", mot="Flash")
+        await suivi.demarrer()
         for idx in range(1, total + 1):
             tpl, draft = _pick_fresh(templates, used_t, key=lambda t: str(t[0]))
             _cap, desc, _ex = _video_meta(tpl)
@@ -3224,7 +3250,8 @@ class UserCog(commands.Cog):
                     label=libelle, emoji="\u26a1",
                     prefixe_fichier="flash", brutes_dir=tmp,
                     famille=("flash_brut" if brute_favorite else
-                             "flash_banger" if exiger_banger else "flash"))
+                             "flash_banger" if exiger_banger else "flash"),
+                    suivi=suivi)
             finally:
                 if tmp:
                     _sh.rmtree(tmp, ignore_errors=True)
@@ -3782,14 +3809,19 @@ class UserCog(commands.Cog):
             f"💬 **{total} reel(s) caption pour `{identity}`** — je les génère "
             f"(≈15-30s chacun ⏳). Le texte est **incrusté** : poste **tel quel**.")
         used_b, used_c = set(), set()
+        suivi = _Progression(interaction, total, "Captions incrustées",
+                             mot="Caption")
+        await suivi.demarrer()
         for idx in range(1, total + 1):
             cap = _pick_fresh(pool, used_c, key=lambda c: c.get("id"))
             vid = _pick_fresh(brutes, used_b, key=lambda p: str(p))
-            await self._gen_and_send_caption(interaction, vid, cap, block, idx, total, identity)
+            await self._gen_and_send_caption(interaction, vid, cap, block, idx,
+                                             total, identity, suivi=suivi)
 
     async def _gen_and_send_caption(self, interaction, video, cap, block, idx, total,
                                     identity, label="REEL CAPTION", emoji="💬",
-                                    prefixe_fichier="reel_caption", famille=""):
+                                    prefixe_fichier="reel_caption", famille="",
+                                    suivi=None):
         """Génère UNE vidéo brute + caption incrustée puis l'envoie (+ description).
 
         `label` sert au bouton « Montage Banger », qui emprunte exactement cette
@@ -3827,25 +3859,47 @@ class UserCog(commands.Cog):
                 model = None
             if not model:
                 await interaction.followup.send(f"⚠️ {label} {idx}/{total} : génération impossible.")
+                if suivi is not None:
+                    await suivi.un_de_plus()
                 return
             state = "running"
             for _ in range(90):                       # ~3 min max
                 await asyncio.sleep(2)
                 try:
-                    state = noctus_web.status(model).get("state", "running")
+                    _st = noctus_web.status(model)
+                    state = _st.get("state", "running")
                 except Exception:
-                    state = "running"
+                    _st, state = {}, "running"
+                # LE CHIFFRE DU MOTEUR, pas l horloge. Sans cette lecture, une
+                # barre branchee ici n avancerait que d un cran par element :
+                # exactement la barre-a-l-horloge qu on refuse ailleurs.
+                if suivi is not None and state == "running":
+                    _eta = _st.get("eta")
+                    _det = "rendu en cours"
+                    try:
+                        if _eta:
+                            _det += f" · ~{int(float(_eta))} s"
+                    except Exception:
+                        pass
+                    await suivi.poser(suivi.part_courante(_st.get("pct")), _det)
                 if state in ("done", "error", "stopped"):
                     break
             if state != "done":
                 await interaction.followup.send(
                     f"⚠️ {label} {idx}/{total} : génération échouée ({state}).")
+            if suivi is not None:
+                await suivi.un_de_plus()
                 return
             outs = noctus_web.output_paths(model)
             if not outs:
                 await interaction.followup.send(f"⚠️ {label} {idx}/{total} : aucun fichier produit.")
+                if suivi is not None:
+                    await suivi.un_de_plus()
                 return
             fichier = outs[0]
+        if suivi is not None and de_la_reserve is not None:
+            await suivi.poser(suivi.part_courante(100), "servi depuis la réserve",
+                              force=True)
         intro = (f"{emoji} **{label} {idx}/{total}** → à poster sur ton **compte n°{idx}** "
                  f"(`{identity}`)\n📥 Poste cette vidéo **telle quelle** — la caption est "
                  f"**déjà écrite** dessus.")
@@ -3856,6 +3910,8 @@ class UserCog(commands.Cog):
         except discord.HTTPException as e:
             await interaction.followup.send(
                 f"⚠️ {label} {idx}/{total} : envoi impossible (trop lourd) : {e}")
+            if suivi is not None:
+                await suivi.un_de_plus()
             return
         finally:
             # Une variante sortie de la reserve est effacee QUOI QU IL ARRIVE.
@@ -3869,6 +3925,8 @@ class UserCog(commands.Cog):
                     _res2.solder(de_la_reserve)
                 except Exception:
                     pass
+        if suivi is not None:
+            await suivi.un_de_plus()
         desc = str(cap.get("desc") or "").strip()
         if desc:
             await interaction.followup.send(
@@ -7562,7 +7620,12 @@ def _couper_discord(s: str, limite: int) -> str:
 
 
 def _libelle_model(ident, libelles=None) -> str:
-    """Le libelle d une model dans les menus : « 3. Lola 💬⚡ ».
+    """Le libelle d une model dans les menus : « 4️⃣ Lola — Caption + Template ».
+
+    Cette phrase annoncait « 3. Lola 💬⚡ » : les deux moities du format ont
+    change depuis (le rang porte un badge, les styles s ecrivent en toutes
+    lettres) et l exemple decrivait un menu que plus personne ne voit. Un
+    commentaire faux coute plus cher que pas de commentaire.
 
     Le rang vient de identites_ordre, les pastilles de identity_styles — la
     MEME table que celle des pastilles du site. Deux menus affichent des
@@ -7570,9 +7633,9 @@ def _libelle_model(ident, libelles=None) -> str:
     les deux par ici, sinon l un des deux garde les vieux libelles au premier
     style ajoute. tests_jailbreak compte les appels pour cette raison.
 
-    Le libelle d un bouton Discord est plafonne a 80 caracteres : on coupe le
-    NOM, jamais les pastilles, sinon la coupe emporte precisement ce qu on
-    vient d ajouter.
+    Le libelle d un bouton Discord est plafonne a 80 : on coupe le NOM,
+    jamais les styles, sinon la coupe emporte precisement ce qu on vient
+    d ajouter.
     """
     base = (libelles or {}).get(ident) or str(ident).capitalize()
     try:
@@ -7593,7 +7656,13 @@ def _libelle_model(ident, libelles=None) -> str:
     place = 80 - _long_discord(past) - 3
     if _long_discord(base) > place:
         base = _couper_discord(base, max(1, place - 1)) + "…"
-    return f"{base} — {past}"
+    # DERNIER FILET, et il n'est pas decoratif : quand `past` mange a lui seul
+    # les 80 unites, `place` tombe a zero ou moins et la ligne du dessus rend
+    # un libelle PLUS LONG que la limite -- Discord refuse alors tout le
+    # message du menu, sans rien afficher. Aujourd'hui `mots()` plafonne a
+    # quatre styles (~34 unites) et le cas ne se produit pas ; un cinquieme
+    # style suffirait a le declencher, et personne ne ferait le lien.
+    return _couper_discord(f"{base} — {past}", 80)
 
 
 class JBModelButton(discord.ui.DynamicItem[discord.ui.Button],
