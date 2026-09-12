@@ -838,9 +838,15 @@ try:
     # Un numero sans explication n est qu un numero : le VA doit lire QUE
     # c est un classement, sinon « 1. Lola » ne lui apprend rien.
     _phr = _ioOr.phrase_classement(["lola", "emma"], _ordOr)
-    check("ordre : le menu explique que les numeros sont un classement",
-          "classement" in _phr.lower() and "1" in _phr,
-          "phrase : %r" % _phr[:60])
+    # UN CLASSEMENT DONT ON IGNORE LE SENS NE SE LIT PAS, il se suppose --
+    # et une supposition sur deux est fausse. « Cette liste est un classement »
+    # laissait entiere la question : classement de quoi, du meilleur vers le
+    # pire ou l inverse ? Le proprietaire, en relisant le menu poste : « dis
+    # ici c est un classement des meilleures identites a la moins bonne ».
+    check("ordre : le menu dit que c est un classement, ET dans quel sens",
+          "classement" in _phr.lower() and "moins bonne" in _phr.lower()
+          and _ioOr.MEDAILLES[0] in _phr,
+          "phrase : %r" % _phr[:100])
     # Annoncer un classement qui n existe pas serait pire que se taire.
     check("ordre : rien n est annonce quand rien n est range",
           _ioOr.phrase_classement(["zoe", "anna"], _ordOr) == "")
@@ -1183,6 +1189,36 @@ try:
         check("styles : les deux menus passent par le meme fabricant",
               _srcSt.count("_libelle_model(m, ") == 2,
               "%d appel(s) sur 2" % _srcSt.count("_libelle_model(m, "))
+
+        # LA LEGENDE N EXPLIQUE QUE CE QU ON VOIT. « Genesaag — Caption » ne
+        # veut rien dire tant qu on n a pas appris que ce mot designe ce qui
+        # marche sur ce compte-la ; le proprietaire : « brut c est que cette
+        # identite marche plus avec du brut, caption avec de la caption ».
+        # Mais expliquer un mot que PERSONNE ne porte, c est une ligne de plus
+        # entre le VA et le bouton qu il cherche.
+        _ist.definir("zz_style", ["caption", "flash"])
+        _ist.definir("zz_autre", ["montage"])
+        _legSt = _ist.legende(["zz_style", "zz_autre"])
+        check("styles : la legende explique les styles PRESENTS, dans l ordre",
+              [_l for _l, _t in _legSt] == ["Caption", "Montage", "Template"],
+              str(_legSt))
+        check("styles : elle n explique pas un style que personne ne porte",
+              [_l for _l, _t in _ist.legende(["zz_autre"])] == ["Montage"],
+              str(_ist.legende(["zz_autre"])))
+        check("styles : sans aucun style, aucune legende",
+              _ist.legende(["zz_jamais_cochee"]) == [] and _ist.legende([]) == [])
+        check("styles : la legende dit vraiment ce que fait le style",
+              dict(_ist.legende(["zz_autre"]))["Montage"] == "un montage",
+              str(_ist.legende(["zz_autre"])))
+        # Un style ajoute demain sans forme courte disparaitrait de la legende
+        # SANS RIEN DIRE : c est precisement ce que le depot interdit.
+        check("styles : chaque style a sa forme courte",
+              set(_ist.CLES) == set(_ist.COURT),
+              "sans forme courte : %s" % (set(_ist.CLES) - set(_ist.COURT)))
+        check("styles : la legende est bien posee dans le menu",
+              "_ist.legende(models)" in _srcSt,
+              "le mot au bout de la ligne resterait a deviner")
+        _ist.definir("zz_autre", [])
 
         # Une seule table : le site ne doit pas en tenir une deuxieme.
         _srcWu = _plSt.Path("web_upload.py").read_text(encoding="utf-8")

@@ -69,6 +69,26 @@ def trace(cle: str) -> str:
     return TRACES.get(str(cle or "").strip().lower(), "")
 
 
+#: LA FORME COURTE, celle qui va dans un menu Discord.
+#:
+#: Le texte de STYLES est ecrit pour une infobulle du site : il se suffit a
+#: lui-meme (« Les comptes marchent avec une caption incrustee »). Empile
+#: quatre fois dans un embed, il devient un mur ou chaque ligne recommence par
+#: les memes trois mots -- et le proprietaire a deja dit que ses VA decrochent
+#: sur moins que ca.
+#:
+#: Ce n'est PAS une seconde source de verite : la cle reste celle de STYLES,
+#: et un test exige que chaque style ait sa forme courte. Si elle n'est pas
+#: rangee DANS le tuple, c'est que sa forme est depaquetee telle quelle
+#: (« for c, e, lab, co, t in STYLES ») par le site et par deux suites de
+#: tests : l'elargir casserait trois fichiers pour un libelle.
+COURT = {
+    "caption": "une caption incrustée",
+    "brut":    "la vidéo brute, telle quelle",
+    "montage": "un montage",
+    "flash":   "les templates / flash reels",
+}
+
 CLES = tuple(c for c, _e, _l, _co, _t in STYLES)
 _PAR_CLE = {c: (e, lab, co, t) for c, e, lab, co, t in STYLES}
 
@@ -126,6 +146,22 @@ def mots(identity: str, separateur: str = " + ") -> str:
     cotes, ou d'aucun.
     """
     return separateur.join(_PAR_CLE[c][1] for c in de(identity))
+
+
+def legende(identites) -> list:
+    """[(libellé, forme courte)] des styles PRÉSENTS dans cette liste.
+
+    On n'explique que ce qu'on affiche : détailler « Template » alors
+    qu'aucune model n'en porte, c'est du texte que le VA lit pour rien, et
+    une ligne de plus entre lui et le bouton qu'il cherche.
+
+    Ordre de STYLES, comme les pastilles : d'une identité à l'autre l'œil
+    retrouve le même sens, sinon il relit à chaque ligne.
+    """
+    vus = set()
+    for i in identites or []:
+        vus.update(de(i))
+    return [(_PAR_CLE[c][1], COURT[c]) for c in CLES if c in vus and c in COURT]
 
 
 def definir(identity: str, styles) -> bool:

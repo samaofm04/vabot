@@ -108,10 +108,19 @@ def phrase_classement(identites, ordre=None) -> str:
     classees = [i for i in identites if str(i).lower() in connues]
     if not classees:
         return ""
-    # Elle parlait des « numéros ». Il n'y en a plus : chaque ligne porte un
-    # badge. Une phrase qui décrit ce qu'on ne voit plus se relit deux fois.
-    return ("**Cette liste est un classement.** La n°1 est celle qui marche "
-            "le mieux en ce moment — commence par le haut.")
+    # ELLE DIT CE QUI EST CLASSE, ET DANS QUEL SENS. « Cette liste est un
+    # classement » laissait deviner le reste : classement de quoi, du meilleur
+    # vers le pire ou l'inverse ? Le propriétaire, en relisant le menu posté :
+    # « dis ici c'est un classement des meilleures identités à la moins
+    # bonne ». Un classement dont on ignore le sens ne se lit pas, il se
+    # suppose — et une supposition sur deux est fausse.
+    #
+    # Elle ne parle plus de « numéros » : il n'y en a plus, chaque ligne porte
+    # un badge. On montre donc la médaille elle-même, celle qu'il a sous les
+    # yeux à la première ligne.
+    return ("**C'est un classement : de la meilleure model à la moins bonne.**"
+            "\nCommence par le haut — la %s est celle qui marche le mieux en "
+            "ce moment." % MEDAILLES[0])
 
 
 #: LE RANG SE DESSINE, ET CA VAUT POUR TOUS -- PAS SEULEMENT LE PODIUM.

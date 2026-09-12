@@ -3964,6 +3964,23 @@ class UserCog(commands.Cog):
         # Elle est vide tant qu aucune model affichee n a ete rangee a la main.
         import identites_ordre as _io
         _clst = _io.phrase_classement(models)
+        # LE MOT AU BOUT DE LA LIGNE NE SE DEVINE PAS. « Genesaag — Caption »
+        # ne dit rien tant qu'on n'a pas appris que ce mot designe ce qui
+        # marche sur ce compte-la. Le proprietaire : « brut c'est que cette
+        # identite marche plus avec du brut, caption avec de la caption ».
+        # La legende ne liste QUE les styles presents dans ce menu : expliquer
+        # un mot que personne ne porte, c'est une ligne de plus entre le VA et
+        # le bouton qu'il cherche.
+        _leg = ""
+        try:
+            import identity_styles as _ist
+            _lignes = _ist.legende(models)
+        except Exception:
+            _lignes = []
+        if _lignes:
+            _leg = ("**Le mot après le tiret dit ce qui marche pour elle :**\n"
+                    + "\n".join("• **%s** — %s" % (lab, txt)
+                                for lab, txt in _lignes))
         emb = discord.Embed(
             title=("Menu Jailbreak FR — models FR" if marche == "fr"
                    else "Menu Jailbreak US — models US"),
@@ -3972,6 +3989,7 @@ class UserCog(commands.Cog):
                 "reel, reel monté, story, post, story CTA, pseudo, name, "
                 "bio ou pp.\n\n"
                 + (_clst + "\n\n" if _clst else "")
+                + (_leg + "\n\n" if _leg else "")
                 + "Ce menu est ouvert à tout le monde sur ce serveur."
             ),
             color=discord.Color.dark_red(),
