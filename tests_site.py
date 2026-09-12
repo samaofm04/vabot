@@ -3910,12 +3910,16 @@ try:
     check("marche : le serveur sait masquer les identites de l autre marche",
           "def _marche_cache(" in _srcMk)
     _posesMk = _srcMk.count("style='{_marche_cache(ident, selected)}'")
-    # Cinq depuis le 31/08 : la galerie « Perfect » en apporte une, partagee
-    # par ses deux onglets (Caption et Template). Le nombre n est qu un proxy —
-    # la regle, c est que TOUTE liste d identites masque celles de l autre
-    # marche, sinon on retrouve les 160 melangees pendant six secondes.
-    check("marche : les CINQ listes d identites appliquent le masquage",
-          _posesMk == 5, "%d liste(s) sur 5" % _posesMk)
+    # Quatre : la cinquieme etait la galerie « Perfect » de
+    # _render_perfect_html, supprimee — elle n avait aucun appelant et lisait
+    # le dossier « trends » au lieu de « trends_caption » / « trends_template »,
+    # donc ce masquage-la n a jamais ete rendu a personne. Les deux onglets
+    # Perfect passent par _render_cloud_content_html, deja compte ici.
+    # Le nombre n est qu un proxy — la regle, c est que TOUTE liste d identites
+    # masque celles de l autre marche, sinon on retrouve les 160 melangees
+    # pendant six secondes.
+    check("marche : les QUATRE listes d identites appliquent le masquage",
+          _posesMk == 4, "%d liste(s) sur 4" % _posesMk)
     check("marche : le choix est ecrit dans un cookie, lisible par le serveur",
           "va_market=" in _srcMk and "function marcheCookie(" in _srcMk,
           "sans cookie, le serveur ne peut pas rendre la bonne liste")

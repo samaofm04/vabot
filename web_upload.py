@@ -22063,6 +22063,11 @@ _PERFECT_FAMILLES = {
 }
 
 
+# Plus branchee : ses deux seules appelantes, _perfect_liste et
+# _render_perfect_html, ont ete supprimees — elles lisaient le dossier
+# « trends » (celui de l onglet Trends) alors que les perfects sont ranges
+# dans « trends_caption » / « trends_template », donc elles ne trouvaient
+# jamais rien. Les galeries Perfect passent par _render_cloud_content_html.
 def _perfect_lire(chemin) -> dict:
     """Ce que dit le fichier voisin d une trend, ou {} s il n y en a pas."""
     try:
@@ -22070,115 +22075,6 @@ def _perfect_lire(chemin) -> dict:
         return d if isinstance(d, dict) else {}
     except Exception:
         return {}
-
-
-def _perfect_liste(identity: str, famille: str) -> list:
-    """Les trends validees de cette identite, pour cette famille.
-
-    Une trend deposee A LA MAIN dans l onglet Trends n a pas de fichier voisin :
-    elle n apparait donc dans aucune des deux galeries Perfect, et c est voulu —
-    celles-ci ne montrent que ce qui a ete compose ici.
-    """
-    dossier = IDENTITIES_DIR / (identity or "").lower() / "trends"
-    if not dossier.is_dir():
-        return []
-    out = []
-    for p in sorted(dossier.iterdir()):
-        if not (p.is_file() and p.suffix.lower() in VIDEO_EXTS):
-            continue
-        meta = _perfect_lire(p)
-        if (meta.get("famille") or "") == famille:
-            out.append((p, meta))
-    return out
-
-
-def _render_perfect_html(famille: str) -> str:
-    """Galerie d une famille Perfect : ce qui est deja valide, et de quoi en
-    composer un nouveau.
-
-    Meme forme que les galeries de la Bibliotheque — barre d identites a
-    gauche, contenu a droite — pour qu on ne reapprenne rien.
-    """
-    from flask import request as _req
-    titre, sous_titre, explication = _PERFECT_FAMILLES.get(
-        famille, ("Perfect", "", ""))
-    identities = _marche_prefere(_list_identities() or [])
-    cle = f"perfect_{famille}_ident"
-    selected = (_req.args.get(cle) or "").strip().lower()
-    if selected not in (identities or []):
-        selected = identities[0] if identities else ""
-
-    cotes = []
-    for ident in (_list_identities() or []):
-        n = len(_perfect_liste(ident, famille))
-        actif = " vault-item-active" if ident == selected else ""
-        cotes.append(
-            f"<a href='?tab=perfect{famille}&{cle}={html_escape(ident)}' "
-            f"onclick='return vaultGoTo(event,this.href)' "
-            f"data-no-loader='1' class='vault-item{actif}' "
-            f"data-ident='{html_escape(ident)}' "
-            f"data-market='{identity_market(ident)}' "
-            f"style='{_marche_cache(ident, selected)}'>"
-            f"<div style='flex:1;min-width:0'>"
-            f"<div style='font-weight:700;font-size:14px;display:flex;"
-            f"align-items:center;gap:6px'>"
-            f"<span style='min-width:0;overflow:hidden;text-overflow:ellipsis;"
-            f"white-space:nowrap'>{html_escape(ident.title())}</span>"
-            f"{_market_flag_html(ident)}{_style_badges_html(ident, 11)}</div>"
-            f"</div>"
-            f"<span class='vault-count' style='background:rgba(34,197,94,.15);"
-            f"color:#22c55e;font-size:11px;font-weight:700;padding:2px 7px;"
-            f"border-radius:10px'>{n}</span></a>")
-
-    cartes = []
-    for p, meta in _perfect_liste(selected, famille):
-        fid = f"{selected}|trends|{p.name}"
-        source = html_escape(str(meta.get("source") or "")[:60])
-        brute = html_escape(str(meta.get("brute") or "")[:60])
-        cartes.append(
-            f"<div class='vt-card on' style='padding:0;overflow:hidden'>"
-            f"<img src='/cloud/thumb/{html_escape(selected)}/trends/"
-            f"{html_escape(p.name)}' loading='lazy' decoding='async' "
-            f"style='width:100%;aspect-ratio:9/16;object-fit:cover;display:block'"
-            f" onerror=\"this.style.display='none'\">"
-            f"<div style='padding:9px 11px'>"
-            f"<div style='font-size:12px;font-weight:700;overflow:hidden;"
-            f"text-overflow:ellipsis;white-space:nowrap'>{html_escape(p.name)}</div>"
-            f"<div style='font-size:10.5px;color:#6b7280;margin-top:3px;"
-            f"line-height:1.5'>brute : {brute or '—'}<br>source : {source or '—'}</div>"
-            f"<div style='display:flex;gap:6px;margin-top:8px'>"
-            f"<button type='button' class='ce-btn' data-perfectedit='{html_escape(fid)}' "
-            f"style='flex:1;font-size:11.5px;padding:6px'>✎ Rouvrir</button>"
-            f"</div></div></div>")
-
-    if not cartes:
-        cartes.append(
-            "<div style='grid-column:1/-1;padding:34px;text-align:center;"
-            "color:#6b7280;font-size:13px;line-height:1.6'>"
-            "Rien de validé pour cette model.<br>"
-            "Compose un couple dans l'éditeur, puis valide-le : il atterrira ici "
-            "et partira par le bouton ★★★ de Discord.</div>")
-
-    entete = (
-        f"<div style='display:flex;align-items:center;justify-content:space-between;"
-        f"flex-wrap:wrap;gap:12px;margin-bottom:14px'>"
-        f"<div><h2 style='margin:0 0 4px;font-size:20px;display:flex;"
-        f"align-items:center;gap:9px'>★★★ {html_escape(titre)}"
-        f"<span style='font-size:11px;background:#16a34a;color:#fff;padding:3px 9px;"
-        f"border-radius:8px;font-weight:800'>PRÊT À POSTER</span></h2>"
-        f"<p style='margin:0;color:#888;font-size:12.5px'>{html_escape(explication)}</p></div>"
-        f"<button type='button' class='ce-btn' data-perfectnew='{html_escape(famille)}' "
-        f"data-ident='{html_escape(selected)}' "
-        f"style='background:linear-gradient(135deg,#16a34a,#15803d);color:#fff;"
-        f"border:0;padding:10px 18px;border-radius:10px;font-weight:700;"
-        f"font-size:13px;cursor:pointer'>＋ Composer</button></div>")
-
-    return (
-        entete
-        + "<div class='vault-wrap'><div class='vault-sidebar'>"
-          "<div class='vault-list'>" + "".join(cotes) + "</div></div>"
-          "<div class='vault-main'><div class='vt-grid'>" + "".join(cartes)
-        + "</div></div></div>")
 
 
 def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
