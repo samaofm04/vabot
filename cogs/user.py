@@ -7499,6 +7499,50 @@ class JailbreakMenuView(discord.ui.View):
         self.add_item(_JailbreakModelSelect(cog, us=us, emojis=emojis))
 
 
+def _grappes_texte(s: str) -> list:
+    """Decoupe une chaine en DESSINS, pas en caracteres.
+
+    Une pastille chiffree vaut trois points de code (« 4 », le selecteur de
+    variante, la marque d'encadrement). Couper entre eux laisse un « 4 » nu
+    au bout du libelle -- exactement le chiffre nu qu'on vient de remplacer.
+    """
+    out = []
+    for ch in s:
+        colle = ch in "\uFE0F\u20E3\u200D" or (out and out[-1][-1] == "\u200D")
+        if out and colle:
+            out[-1] += ch
+        else:
+            out.append(ch)
+    return out
+
+
+def _long_discord(s: str) -> int:
+    """La longueur que DISCORD compte, pas celle que voit len().
+
+    Discord mesure en unites UTF-16 : une medaille, hors du plan de base, y
+    vaut DEUX alors que len() en compte une. Un libelle juste sous la limite
+    passait donc le controle ici et se faisait refuser la-bas -- et un seul
+    libelle refuse fait echouer TOUT le message du menu, sans rien afficher.
+    Le risque etait theorique tant que les rangs tenaient en un caractere ;
+    depuis que chaque ligne porte un badge de trois a six, il ne l'est plus.
+    """
+    return len(s.encode("utf-16-le")) // 2
+
+
+def _couper_discord(s: str, limite: int) -> str:
+    """Coupe a `limite` unites Discord, sans casser un dessin en deux."""
+    if _long_discord(s) <= limite:
+        return s
+    out, pris = [], 0
+    for g in _grappes_texte(s):
+        c = _long_discord(g)
+        if pris + c > limite:
+            break
+        out.append(g)
+        pris += c
+    return "".join(out)
+
+
 def _libelle_model(ident, libelles=None) -> str:
     """Le libelle d une model dans les menus : « 3. Lola 💬⚡ ».
 
@@ -7524,13 +7568,13 @@ def _libelle_model(ident, libelles=None) -> str:
     except Exception:
         past = ""
     if not past:
-        return base[:80]
-    # Le libelle d'un bouton Discord est plafonne a 80 caracteres. On coupe le
-    # NOM, jamais les styles : la coupe emporterait precisement ce qu'on vient
-    # de rendre lisible.
-    place = 80 - len(past) - 3
-    if len(base) > place:
-        base = base[:max(1, place - 1)] + "…"
+        return _couper_discord(base, 80)
+    # Le libelle d'un bouton Discord est plafonne a 80. On coupe le NOM,
+    # jamais les styles : la coupe emporterait precisement ce qu'on vient de
+    # rendre lisible. Les 3 retires sont le « — » et ses deux espaces.
+    place = 80 - _long_discord(past) - 3
+    if _long_discord(base) > place:
+        base = _couper_discord(base, max(1, place - 1)) + "…"
     return f"{base} — {past}"
 
 

@@ -24,6 +24,18 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+#: LE PODIUM EST DEFINI UNE SEULE FOIS, ET C'EST LA-BAS.
+#:
+#: Ce module en gardait sa propre copie, alors que clics_personnes annonce
+#: dans son commentaire etre le seul endroit « pour que l'or reste l'or
+#: partout ». Deux tuples identiques, c'est le defaut que le CLAUDE.md du
+#: depot decrit noir sur blanc : ils le restent jusqu'au jour ou l'un bouge.
+#:
+#: clics_personnes ne connait ni Flask, ni Discord, ni GetMySocial, ni le
+#: disque -- il est ecrit pour etre importe par les trois ecrans qui s'en
+#: servent, et il n'y a aucun cycle a craindre ici.
+from clics_personnes import MEDAILLES
+
 FICHIER = Path("data") / "identity_order.json"
 
 # Cache minuscule, pour le côté qui n'écrit pas (le bot) : on relit quand la
@@ -96,37 +108,57 @@ def phrase_classement(identites, ordre=None) -> str:
     classees = [i for i in identites if str(i).lower() in connues]
     if not classees:
         return ""
-    return ("**Les numéros sont un classement.** La n°1 est celle qui marche "
+    # Elle parlait des « numéros ». Il n'y en a plus : chaque ligne porte un
+    # badge. Une phrase qui décrit ce qu'on ne voit plus se relit deux fois.
+    return ("**Cette liste est un classement.** La n°1 est celle qui marche "
             "le mieux en ce moment — commence par le haut.")
 
 
-#: LE PODIUM SE LIT, LE NUMERO SE DECHIFFRE.
+#: LE RANG SE DESSINE, ET CA VAUT POUR TOUS -- PAS SEULEMENT LE PODIUM.
 #:
-#: Les rangs etaient « 1. », « 2. », « 3. »... Le proprietaire : « ils
-#: n'arrivent pas a capter le classement avec un, deux, trois ». Et il a
-#: raison : dans une liste de quinze boutons, un chiffre colle au nom ne se
-#: distingue pas du nom. Une medaille, si -- on la voit avant de lire.
+#: Premiere version : une medaille pour les trois premiers, un chiffre nu
+#: pour la suite. Le proprietaire, en relisant son menu : « je veux une
+#: medaille pour chacun ». C'est le meme constat qu'avant, applique aux
+#: lignes du bas : « 4. Genesaag » se lit comme un nom qui commencerait par
+#: un chiffre, « 4️⃣ Genesaag » se voit avant d'etre lu. S'arreter a trois,
+#: c'etait garder le probleme pour les douze lignes suivantes.
 #:
-#: On s'arrete a trois. Au-dela, il n'existe pas d'emoji de rang lisible
-#: (les pastilles chiffrees s'arretent a dix et se confondent entre elles),
-#: et surtout le podium est ce qui porte l'information : « la n°1 est celle
-#: qui marche le mieux ». La quatrieme n'est pas une medaille, c'est un rang.
-MEDAILLES = ("\U0001F947", "\U0001F948", "\U0001F949")
+#: Au-dela de dix il n'existe pas de pastille chiffree : on pose alors les
+#: CHIFFRES un par un, « 1️⃣2️⃣ » pour douze. Ce n'est pas elegant, c'est
+#: lisible -- et le menu US compte vingt-deux models.
+#:
+#: Rien que des sequences ANCIENNES et sans ZWJ, meme regle que la palette de
+#: clics_personnes : la pastille chiffree existe depuis Emoji 1.0, elle se
+#: dessine donc aussi sur les vieux telephones qui lisent ces menus.
+KEYCAPS = tuple(chr(0x30 + c) + "\uFE0F\u20E3" for c in range(10))
+DIX = "\U0001F51F"
 
 
 def prefixe_rang(n) -> str:
-    """« 🥇 » pour 1, « 🥈 » pour 2, « 🥉 » pour 3, puis « 4. »."""
+    """Le badge du rang : 1 → 🥇, 2 → 🥈, 3 → 🥉, 4 → 4️⃣, 10 → 🔟, 12 → 1️⃣2️⃣.
+
+    Jamais un chiffre nu, et jamais rien : une ligne sans badge au milieu de
+    lignes qui en portent un redeviendrait le cas particulier qu'on essaie
+    justement de supprimer.
+
+    Rend "" pour ce qui n'est PAS un rang (illisible, zero, negatif). Un
+    badge invente vaudrait un classement invente.
+    """
     try:
         n = int(n)
     except (TypeError, ValueError):
         return ""
-    if 1 <= n <= len(MEDAILLES):
+    if n < 1:
+        return ""
+    if n <= len(MEDAILLES):
         return MEDAILLES[n - 1]
-    return "%d." % n
+    if n == 10:
+        return DIX
+    return "".join(KEYCAPS[int(c)] for c in str(n))
 
 
 def etiqueter(identites, ordre=None, gabarit="{rang} {nom}") -> dict:
-    """{identité: libellé} — « 🥇 Lola », « 🥈 Emma »… puis les non rangées.
+    """{identité: libellé} — « 🥇 Lola », « 🥈 Emma », « 4️⃣ Nina »…
 
     Le numéro est la position DANS LA LISTE AFFICHÉE, pas dans le fichier.
     Vérifié sur les vraies données : les six identités FR occupent les rangs

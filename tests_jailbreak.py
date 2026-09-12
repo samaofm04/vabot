@@ -680,10 +680,73 @@ try:
           _ioOr.etiqueter(["emma", "lola"], _ordOr)
           == {"lola": "🥇 Lola", "emma": "🥈 Emma"},
           str(_ioOr.etiqueter(["emma", "lola"], _ordOr)))
-    check("ordre : au-dela du podium, le rang reste un chiffre",
-          _ioOr.prefixe_rang(4) == "4." and _ioOr.prefixe_rang(14) == "14.")
+    # AUCUNE LIGNE SANS BADGE. Le podium seul portait un dessin, le reste un
+    # chiffre nu (« 4. Genesaag »). Le proprietaire : « je veux une medaille
+    # pour chacun » -- dans un menu deroulant, un chiffre colle au nom se lit
+    # comme une partie du nom, et c'est vrai a la ligne 4 comme a la ligne 1.
+    check("ordre : au-dela du podium, le rang porte une pastille chiffree",
+          _ioOr.prefixe_rang(4) == "4\uFE0F\u20E3"
+          and _ioOr.prefixe_rang(9) == "9\uFE0F\u20E3",
+          repr(_ioOr.prefixe_rang(4)))
+    check("ordre : dix a son propre dessin",
+          _ioOr.prefixe_rang(10) == "\U0001F51F", repr(_ioOr.prefixe_rang(10)))
+    # Au-dela de dix il n'existe pas de pastille : on pose les CHIFFRES un par
+    # un. Le menu US compte vingt-deux models, la question se pose pour de bon.
+    check("ordre : au-dela de dix, les chiffres se posent un par un",
+          _ioOr.prefixe_rang(14) == "1\uFE0F\u20E3" + "4\uFE0F\u20E3"
+          and _ioOr.prefixe_rang(22) == "2\uFE0F\u20E3" + "2\uFE0F\u20E3",
+          repr(_ioOr.prefixe_rang(14)))
+    # AUCUN CHIFFRE NU NE SUBSISTE : c'etait toute la demande.
+    check("ordre : plus aucun rang ne s affiche en chiffre nu",
+          all(_ioOr.prefixe_rang(n) and not _ioOr.prefixe_rang(n)[0].isdigit()
+              or _ioOr.prefixe_rang(n).endswith("\u20E3")
+              for n in range(1, 30)),
+          str([_ioOr.prefixe_rang(n) for n in range(1, 6)]))
+    # Un badge invente vaudrait un classement invente.
+    check("ordre : ce qui n est pas un rang ne recoit aucun badge",
+          _ioOr.prefixe_rang(0) == "" and _ioOr.prefixe_rang(-3) == ""
+          and _ioOr.prefixe_rang("x") == "" and _ioOr.prefixe_rang(None) == "")
+    # LE PODIUM EST DEFINI UNE SEULE FOIS. Deux tuples identiques dans deux
+    # modules, c'est le defaut que le CLAUDE.md decrit : ils le restent
+    # jusqu'au jour ou l'un bouge, et l'or de l'un ne vaut plus l'or de
+    # l'autre.
+    import clics_personnes as _cpOr
+    check("ordre : le podium vient de clics_personnes, pas d une copie",
+          _ioOr.MEDAILLES is _cpOr.MEDAILLES,
+          "deux tuples separes redivergeront")
+    _srcOrd = pathlib.Path("identites_ordre.py").read_text(encoding="utf-8")
+    check("ordre : aucune seconde definition du podium",
+          _srcOrd.count("MEDAILLES = (") == 0,
+          "le tuple est recopie dans identites_ordre")
+    # Les rangs 10+ pesent six unites : la mesure du plafond Discord compte
+    # desormais pour de vrai.
+    import cogs.user as _uLg
+    check("ordre : la longueur se mesure en unites UTF-16, comme Discord",
+          _uLg._long_discord("\U0001F947") == 2
+          and _uLg._long_discord("4\uFE0F\u20E3") == 3
+          and _uLg._long_discord("Lola") == 4,
+          str(_uLg._long_discord("\U0001F947")))
+    check("ordre : une coupe ne casse jamais une pastille en deux",
+          _uLg._couper_discord("1\uFE0F\u20E3" + "4\uFE0F\u20E3" + " Nina", 4)
+          == "1\uFE0F\u20E3",
+          repr(_uLg._couper_discord("1\uFE0F\u20E3" + "4\uFE0F\u20E3" + " Nina", 4)))
+    check("ordre : un libelle trop long tient sous le plafond de Discord",
+          _uLg._long_discord(_uLg._libelle_model(
+              "z" * 90, {"z" * 90: _ioOr.prefixe_rang(14) + " " + "Z" * 90})) <= 80,
+          str(_uLg._long_discord(_uLg._libelle_model(
+              "z" * 90, {"z" * 90: _ioOr.prefixe_rang(14) + " " + "Z" * 90}))))
     check("ordre : une identite non rangee reste sans numero",
           _ioOr.etiqueter(["lola", "zoe"], _ordOr)["zoe"] == "Zoe")
+    # Et le badge arrive bien jusqu'au libelle, pas seulement dans la
+    # fonction : c'est ce que le VA lit.
+    _ord14 = ["n%02d" % i for i in range(1, 15)]
+    _lib14 = _ioOr.etiqueter(_ord14, _ord14)
+    check("ordre : le badge arrive dans le libelle, du premier au dernier",
+          _lib14["n01"] == "\U0001F947 N01"
+          and _lib14["n04"] == "4\uFE0F\u20E3 N04"
+          and _lib14["n10"] == "\U0001F51F N10"
+          and _lib14["n14"] == "1\uFE0F\u20E3" + "4\uFE0F\u20E3" + " N14",
+          str([_lib14[k] for k in ("n04", "n10", "n14")]))
     check("ordre : un fichier absent ne fait pas tomber la lecture",
           isinstance(_ioOr.lire(), list))
 
