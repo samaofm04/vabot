@@ -719,6 +719,8 @@ try:
         _noms = ["jessye", "julia", "ibenhaastrup"]
         _wMe.list_identities = lambda: _noms
         _wMe.is_identity_active = lambda n: True
+        # La nature dit « ce n est pas une model » : le menu s en moque
+        # depuis le 12/09/2026, on la laisse mentir pour le verifier.
         _wMe.est_une_model = lambda n: n != "ibenhaastrup"
         _uMe._market_of = lambda n: "us" if n == "jessye" else "fr"
         check("menu US : la garde voit EXACTEMENT ce que la vue affichera",
@@ -729,10 +731,20 @@ try:
         _diag = _uMe._jb_diagnostic_marche("us")
         check("menu US : quand c est vide, le message dit ou le filtre coupe",
               "jessye" in _diag and "0 affichable" in _diag, _diag[:150])
-        # Une model US normale doit evidemment passer.
+        # LE DRAPEAU DECIDE, ET LUI SEUL. ibenhaastrup est rangee en
+        # « identite » ; elle doit quand meme etre proposee, sinon on
+        # reproduit le menu vide du 12/09 -- le panneau de tri en masse range
+        # en « identite » tout ce qui n est pas coche, ce qui avait demote
+        # quinze entrees sur vingt-deux d un coup.
         _uMe._market_of = lambda n: "us"
-        check("menu US : une vraie model US est bien retenue",
-              _uMe._jb_us_models() == ["julia"], str(_uMe._jb_us_models()))
+        check("menu US : une entree rangee en « identite » reste proposee",
+              _uMe._jb_us_models() == ["julia", "ibenhaastrup"],
+              str(_uMe._jb_us_models()))
+        # Le diagnostic doit compter CE QUE LA LISTE FILTRE : s il comptait
+        # encore la nature, il annoncerait un chiffre que le menu dement.
+        _diag2 = _uMe._jb_diagnostic_marche("us")
+        check("menu US : le diagnostic compte ce que la liste retient",
+              "2 affichable" in _diag2 and "modele" not in _diag2, _diag2[:180])
     finally:
         _wMe.list_identities, _wMe.is_identity_active = _svLi, _svAc
         _wMe.est_une_model, _uMe._market_of = _svMo, _svMk
@@ -860,16 +872,21 @@ try:
         if _cible:
             _sjN.write(_fN, {_cible: "identite"})
             _tiN._CACHE.update(sig=None, data={})
-            check("nature Discord : une identite sort de la rotation des VA",
-                  _cible not in _laN(), str(_laN())[:90])
-            check("nature Discord : elle sort aussi des menus par marche",
-                  _cible not in _cuN._jb_models_marche("fr")
-                  and _cible not in _cuN._jb_models_marche("us")
-                  and _cible not in _cuN._jb_us_models())
+            # LA NATURE NE RETIRE PLUS PERSONNE COTE DISCORD. Le 11/09/2026
+            # elle filtrait la rotation et les menus ; le 12, le proprietaire
+            # a tranche -- « identite, modele, c est la meme ». Le panneau de
+            # tri en masse ecrit « identite » pour tout ce qui n est pas
+            # coche : une sauvegarde avait vide son menu US de quinze models.
+            check("nature Discord : une identite reste dans la rotation des VA",
+                  _cible in _laN(), str(_laN())[:90])
+            check("nature Discord : elle reste dans les menus par marche",
+                  _cible in (_cuN._jb_models_marche("fr")
+                             + _cuN._jb_models_marche("us")),
+                  str(_cuN._jb_models_marche("fr"))[:90])
             check("nature Discord : elle reste dans la liste BRUTE des dossiers",
                   _cible in _liN(), "sinon les salons existants seraient perdus")
         else:
-            check("nature Discord : une identite sort de la rotation", True, "(aucun dossier local)")
+            check("nature Discord : une identite reste dans la rotation", True, "(aucun dossier local)")
         # Jessye ne sort jamais.
         _sjN.write(_fN, {"jessye": "identite"})
         _tiN._CACHE.update(sig=None, data={})
@@ -934,6 +951,15 @@ try:
               _emN("nimporte") is True)
     finally:
         _biN.__import__ = _vraiN
+    # LE REGLAGE N EST PAS MORT POUR AUTANT : il a ete demande pour alleger
+    # Social Analytics (le perimetre de scrape), et il y sert toujours. Si ce
+    # point de passage disparaissait, le perimetre redeviendrait la liste
+    # entiere sans que personne ne le remarque.
+    _srcSA = _plN.Path("web_upload.py").read_text(encoding="utf-8")
+    check("nature : elle sert encore a restreindre Social Analytics",
+          "filtrer_modeles" in _srcSA,
+          "le perimetre de scrape ne se restreint plus")
+
     # Le filtre ne doit PAS toucher ce qui maintient les acces existants.
     _srcN = _plN.Path("cogs/welcome.py").read_text(encoding="utf-8")
     _d1 = _srcN.index("def sync_general_channel_access")

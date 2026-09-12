@@ -249,10 +249,13 @@ JAILBREAK_ONLY_IDENTITIES = {"jessye"}
 def est_une_model(nom) -> bool:
     """Cette entrée est-elle une CRÉATRICE, ou un simple dossier de montage ?
 
-    Le site distingue les deux depuis le panneau « Modifier » (bloc Nature) ;
-    le bot, lui, ne connaissait que « des dossiers ». Un dossier ouvert pour
-    produire des vidéos pouvait donc être attribué à un vrai VA, qui recevait
-    un salon pour une identité qui n'a ni compte Instagram ni revenus.
+    ELLE NE FILTRE PLUS RIEN DANS CE MODULE, et ce n'est pas un oubli : le
+    12/09/2026 le propriétaire a tranché « identité, modèle, c'est la même »,
+    donc ni la rotation des VA ni les menus ne la consultent. On la garde
+    parce que la distinction, elle, existe toujours côté site (le périmètre
+    de Social Analytics s'appuie dessus). Avant de la rebrancher ici : c'est
+    le panneau de tri en masse qui écrit « identité » pour tout ce qui n'est
+    pas coché, donc sa valeur ne veut PAS dire que quelqu'un l'a décidée.
 
     Le repli est VRAI, comme is_identity_active juste au-dessus : si le module
     manque ou si le fichier est illisible, on se comporte exactement comme
@@ -269,18 +272,22 @@ def est_une_model(nom) -> bool:
 def list_active_identities():
     """Seulement les identités activées (utilisées pour les NOUVELLES assignations).
 
-    Exclut les identités jailbreak-only (jamais assignées aux VAs Discord) et,
-    depuis le 11/09/2026, celles que le propriétaire a rangées en « identité »
-    plutôt qu'en « modèle » : ce sont des dossiers de montage, il n'y a
-    personne derrière.
+    Exclut les identités jailbreak-only (jamais assignées aux VAs Discord).
+
+    LA NATURE NE FILTRE PLUS, et c'est un retour en arrière assumé. Elle avait
+    été ajoutée ici le 11/09/2026 pour écarter de la rotation les dossiers
+    ouverts pour produire des vidéos. Le lendemain, le propriétaire a tranché :
+    « identité, modèle, c'est la même ». Et le panneau de tri en masse range en
+    « identité » tout ce qui n'est pas coché — une seule sauvegarde a suffi à
+    en démoter quinze sur vingt-deux, sans que rien ne le dise. Ce filtre-là
+    retirait donc de la rotation des créatrices bien réelles.
 
     Ne filtre QUE la rotation : un VA déjà rattaché à une identité garde son
     salon et ses accès, ils ne se relisent pas dans cette liste.
     """
     jb = {x.lower() for x in JAILBREAK_ONLY_IDENTITIES}
     return [n for n in list_identities()
-            if is_identity_active(n) and n.strip().lower() not in jb
-            and est_une_model(n)]
+            if is_identity_active(n) and n.strip().lower() not in jb]
 
 
 def pick_next_identity():

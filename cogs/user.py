@@ -7011,19 +7011,29 @@ def marche_du_membre(member) -> str:
 
 
 def _jb_models_marche(marche="us"):
-    """Models d'un marche donne : c'est le drapeau de l'identite qui tranche
-    (data/identity_market.json), la meme source que le site.
+    """Models d'un marche donne : c'est le DRAPEAU qui tranche, et lui seul.
 
-    Et c'est bien une MODEL : les dossiers ouverts pour produire des videos
-    remontaient dans ce menu comme les creatrices, alors qu'ils n'ont ni
-    compte ni contenu a servir. Meme repli que est_une_model : si la nature
-    ne peut pas etre lue, on se comporte comme avant."""
+    LA NATURE NE FILTRE PLUS CE MENU, et c'est un retour en arriere assume.
+    Elle avait ete ajoutee ici parce que le proprietaire voulait sortir des
+    ECRANS DE SUIVI les dossiers ouverts pour produire des videos. Applique
+    au menu des models, ce filtre a fait disparaitre quinze de ses vingt-deux
+    entrees d'un coup : le 12/09/2026, /menujailbreakus a poste un panneau
+    vide, et le diagnostic a montre « 22 identites -> 7 rangees en modele ».
+
+    Il a tranche : « identite, modele, c'est la meme ». Pour un VA qui vient
+    chercher du contenu, oui -- il lui faut TOUTES les models de son marche.
+    Le reglage garde son role la ou il a ete demande (Social Analytics, le
+    perimetre de scrape) ; il n'en a aucun ici.
+
+    CE QUI A RENDU L'ACCIDENT POSSIBLE : le panneau de tri en masse range en
+    « identite » tout ce qui n'est pas coche. Une seule sauvegarde suffit
+    donc a en demoter quinze sur vingt-deux, sans que rien ne le dise.
+    """
     try:
-        from cogs.welcome import list_identities, is_identity_active, est_une_model
+        from cogs.welcome import list_identities, is_identity_active
         return [n for n in list_identities()
                 if is_identity_active(n)
                 and n.strip().lower() not in EXCLURE_MENU
-                and est_une_model(n)
                 and _market_of(n) == marche]
     except Exception:
         return []
@@ -7058,17 +7068,18 @@ def _jb_diagnostic_marche(marche="us") -> str:
     On compte donc ce que chaque filtre retire, dans l'ordre ou il retire.
     """
     try:
-        from cogs.welcome import list_identities, is_identity_active, est_une_model
+        from cogs.welcome import list_identities, is_identity_active
     except Exception as e:                                   # noqa: BLE001
         return "impossible de lire les identites (%s)" % type(e).__name__
     toutes = list(list_identities() or [])
     actives = [n for n in toutes if is_identity_active(n)]
-    modeles = [n for n in actives if est_une_model(n)]
-    du_marche = [n for n in modeles if _market_of(n) == marche]
+    # LE DIAGNOSTIC COMPTE CE QUE LA LISTE FILTRE, pas autre chose. Il
+    # comptait la nature alors que la liste ne la regarde plus : deux
+    # comptages divergents, c'est le defaut qu'on vient de corriger.
+    du_marche = [n for n in actives if _market_of(n) == marche]
     retenues = [n for n in du_marche if n.strip().lower() not in EXCLURE_MENU]
     bouts = ["%d identite(s) au total" % len(toutes),
              "%d active(s)" % len(actives),
-             "%d rangee(s) en « modele »" % len(modeles),
              "%d sur le marche %s" % (len(du_marche), marche.upper())]
     exclues = [n for n in du_marche if n.strip().lower() in EXCLURE_MENU]
     if exclues:
