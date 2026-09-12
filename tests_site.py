@@ -10080,8 +10080,14 @@ try:
     _CAS = [("VA 12 (Roucham)", "roucham"),
             ("VA 2  ( Safidy )", "safidy"),
             ("VA 13 Gerome", "gerome"),          # le pseudo hors parentheses
-            ("VA 8 (VA 2 Noum)", "noum"),        # deux etages de numerotation
-            ("VA 4 ( VA 1 Noum )", "noum"),
+            # TROIS PERSONNES, PAS TROIS TELEPHONES. On ne pele rien a
+            # l interieur des parentheses : le proprietaire a confirme le
+            # 12/09 que « VA 1 Noum » et « VA 2 Noum » sont deux personnes.
+            ("VA 8 (VA 2 Noum)", "va 2 noum"),
+            ("VA 4 ( VA 1 Noum )", "va 1 noum"),
+            ("( BO7 ) 1", "bo7"),                # ca, c est un telephone
+            ("(BO7) 2", "bo7"),
+            ("vanessa 3", "vanessa"),            # « va » n est pas un prefixe
             ("VA 9", ""),                        # nu : on ne nomme personne
             ("VA 1", ""),
             ("TEMPLATE MYM EMMA (Copy)", ""),    # un gabarit n est pas quelqu un
@@ -10105,15 +10111,25 @@ try:
                 "clicks": clics, "lu": lu}
 
     _r = _wc._clicrank_rangs(_payloadC([
-        _lC(1, "VA 8 (VA 2 Noum)", 12), _lC(2, "VA 4 ( VA 1 Noum )", 61),
+        _lC(1, "( BO7 ) 1", 12), _lC(2, "(BO7) 2", 61),
         _lC(3, "VA 12 (Roucham)", 130), _lC(4, "VA 9", 0, lu=False),
-        _lC(5, "VA 5", 3), _lC(6, "VA 1", 44)]))
+        _lC(5, "VA 5", 3), _lC(6, "VA 1", 44),
+        _lC(7, "VA 8 (VA 2 Noum)", 20), _lC(8, "VA 4 (VA 1 Noum)", 30)]))
     _par_nom = {g["titre"]: g for g in _r}
+    # LE NOMBRE QUI SUIT LA PARENTHESE est un numero de telephone : « (BO7) 1 »
+    # et « (BO7) 2 » sont bien les deux appareils d une meme personne.
     check("clics VA : les deux telephones d une meme personne s additionnent",
-          "Noum" in _par_nom and _par_nom["Noum"]["clics"] == 73,
+          "BO7" in _par_nom and _par_nom["BO7"]["clics"] == 73,
           str(sorted(_par_nom)))
     check("clics VA : la fusion se VOIT, les liens reunis sont nommes",
-          len((_par_nom.get("Noum") or {}).get("liens") or []) == 2)
+          len((_par_nom.get("BO7") or {}).get("liens") or []) == 2)
+    # CE QUI EST DANS LA PARENTHESE, EN REVANCHE, N EST PAS UN NUMERO.
+    # Fusionner « VA 1 Noum » et « VA 2 Noum » aurait paye une personne pour
+    # le travail d une autre.
+    check("clics VA : « VA 1 Noum » et « VA 2 Noum » restent deux personnes",
+          "VA 1 Noum" in _par_nom and "VA 2 Noum" in _par_nom
+          and _par_nom["VA 1 Noum"]["clics"] == 30,
+          str(sorted(_par_nom)))
     # Deux liens sans pseudo ne sont PAS la meme personne : dans certains
     # espaces, cinq liens s appellent « VA 1 » sans rien avoir en commun.
     check("clics VA : deux liens anonymes restent deux lignes",
@@ -10525,18 +10541,26 @@ try:
 
     _cl = _cpD.par_clics(_eD)
     check("classements : clics, le plus fort devant",
-          [g["titre"] for g in _cl[:3]] == ["Roucham", "Mike", "Noum"],
+          [g["titre"] for g in _cl[:3]] == ["Roucham", "Mike", "VA 1 Noum"],
           str([g["titre"] for g in _cl]))
     check("classements : clics, le non lu ne vaut pas zero et sort en fin",
           _cl[-1]["titre"] == "VA 9" and _cl[-1]["clics"] is None)
     _ab = _cpD.par_abonnes(_eD)
     # A egalite d abonnes, celui qui a depense MOINS de clics passe devant :
     # c est lui qui convertit le mieux. Noum 4/73 devant Roucham 4/130.
-    check("classements : a egalite d abonnes, le meilleur convertisseur gagne",
-          [g["titre"] for g in _ab[:2]] == ["Noum", "Roucham"],
+    # Roucham 4 abonnes en 130 clics, VA 1 Noum 3 en 61 : le premier a plus
+    # d abonnes, il passe devant. A EGALITE seulement, le moins de clics gagne.
+    check("classements : abonnes, le plus fort devant",
+          _ab[0]["titre"] == "Roucham",
           str([(g["titre"], g["abonnes"], g["clics"]) for g in _ab[:3]]))
+    _eg = _cpD.par_abonnes([
+        {"nom": "(A) 1", "clics": 200, "abonnes": 4},
+        {"nom": "(B) 1", "clics": 50, "abonnes": 4}])
+    check("classements : a egalite d abonnes, le meilleur convertisseur gagne",
+          [g["titre"] for g in _eg] == ["B", "A"],
+          str([(g["titre"], g["clics"]) for g in _eg]))
     check("classements : le taux est calcule, pas devine",
-          _ab[0]["taux"] == 5.5, str(_ab[0]["taux"]))
+          _eg[0]["taux"] == 8.0, str(_eg[0]["taux"]))
     # « NA » = la periode precede son arrivee. Ni un zero, ni un tiret.
     _na = _cpD.grouper([{"nom": "VA 1 (Zed)", "clics": 10, "abonnes": "NA"}])
     check("classements : « NA » est compte a part, pas additionne",
@@ -10602,8 +10626,16 @@ try:
           "Classement clics" in _pageD and "Qui convertit" in _pageD)
     check("portail : le podium porte ses medailles",
           _pageD.count("\U0001F947") == 2, str(_pageD.count("\U0001F947")))
+    _dF = _donneesD()
+    _dF["par_lien"] += [
+        {"lien": "( BO7 ) 1", "depuis": "", "periodes": [{}, {}, {"marche": None, "total": 20}]},
+        {"lien": "(BO7) 2", "depuis": "", "periodes": [{}, {}, {"marche": None, "total": 30}]}]
+    _pageF = _cpoD._page_donnees("T", "s", _dF, "maintenant", jeton="abc", vue="ensemble")
     check("portail : la fusion est affichee, pas seulement appliquee",
-          "2 liens : VA 8 (VA 2 Noum), VA 4 (VA 1 Noum)" in _pageD)
+          "2 liens : (BO7) 1, (BO7) 2" in _pageF,
+          "fusion des telephones non montree")
+    check("portail : deux « Noum » restent deux lignes",
+          "VA 1 Noum" in _pageD and "VA 2 Noum" in _pageD)
     check("portail : un non lu affiche un tiret, jamais un zero",
           "<span class='c'>\u2014</span>" in _pageD)
     check("portail : une arrivee en cours de periode est signalee",

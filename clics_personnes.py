@@ -108,7 +108,9 @@ def emojis(pseudos) -> dict:
 # --- Le pseudo derriere un nom de lien --------------------------------------
 _ESPACES = re.compile(r"\s+")
 _PAREN = re.compile(r"\(([^()]*)\)")
-_TETE_VA = re.compile(r"^va\s*\d*\s*[:.\-]?\s*", re.IGNORECASE)
+#: Le « VA n » de TETE, et seulement au mot entier : sans la frontiere,
+#: « vanessa 3 » se faisait amputer de ses deux premieres lettres.
+_TETE_VA = re.compile(r"^va\b\s*\d*\s*[:.\-]?\s*", re.IGNORECASE)
 _QUEUE_NUM = re.compile(r"\s+\d+$")
 _QUEUE_X = re.compile(r"\s*x\s*\d+$", re.IGNORECASE)
 
@@ -134,41 +136,50 @@ def propre(nom) -> str:
     return n.replace("( ", "(").replace(" )", ")")
 
 
-def pseudo(nom) -> str:
-    """La PERSONNE derriere un nom de lien, en minuscules, ou "" si anonyme.
+def etiquette(nom) -> str:
+    """La PERSONNE derriere un nom de lien, dans sa casse d'origine.
 
-    Les liens de Jessye s'appellent « VA 12 (Roucham) », « VA 13 Gerome »,
-    « VA 4 (VA 1 Noum) ». Le numero de tete est celui du LIEN, pas de la
-    personne ; ce qui reste est le pseudo.
+    Les liens s'appellent « VA 12 (Roucham) », « VA 13 Gerome »,
+    « VA 8 (VA 2 Noum) », « (BO7) 2 ». Deux numerotations s'y melangent, et
+    elles ne veulent pas dire la meme chose :
 
-    DIVERGENCE ASSUMEE avec cogs/clickrecap._personne_du_lien. Celui-la garde
-    « VA 1 Noum » et « VA 2 Noum » separes, sur la foi d'un commentaire du
-    23/08 qui les dit trois personnes differentes. Le proprietaire a tranche
-    l'inverse le 12/09 : « meme pseudo c'est meme personne, y a pas de x1 x2 ».
-    On fusionne donc -- et les ecrans AFFICHENT les liens reunis sous chaque
-    nom, pour que l'erreur, s'il y en a une, se voie du premier coup d'oeil au
-    lieu de se cacher dans un total.
+        le « VA n » de TETE      le numero DU LIEN, jamais celui de quelqu'un
+        le nombre de QUEUE       le telephone : « (BO7) 1 » et « (BO7) 2 »
+                                 sont les deux appareils d'une meme personne
+        le suffixe « X<n> »      idem, ajoute a la main sur les fiches VA
 
-    Ne nomme jamais personne pour un gabarit ni pour « VA 9 » tout nu : mieux
-    vaut une ligne anonyme qu'un regroupement invente. Dans certains espaces,
-    cinq liens s'appellent « VA 1 » sans etre la meme personne.
+    LA PERSONNE EST TOUT CE QUI EST ENTRE PARENTHESES, ET ON N'Y PELE RIEN.
+    « VA 1 Noum », « VA 2 Noum » et « VA 3 Noum » sont TROIS personnes
+    differentes -- le proprietaire l'a confirme le 12/09/2026, apres qu'on les
+    a fusionnees a tort pendant une journee. Seul ce qui SUIT la parenthese
+    est un numero de telephone.
+
+    Sans parentheses, le « VA n » de tete et le nombre final se pelent une
+    fois chacun : « VA 13 Gerome » donne Gerome, « jaurel 10 » donne jaurel,
+    et « VA 9 » ne nomme personne.
+
+    Rendre "" plutot que deviner : mieux vaut une ligne anonyme qu'un
+    regroupement invente. Dans certains espaces, cinq liens s'appellent
+    « VA 1 » sans etre la meme personne.
     """
     n = propre(nom)
     if not n or est_gabarit(n):
         return ""
-    bas = n.lower()
-    if bas.startswith("va_"):                  # « va_@pseudo » : le pseudo suit
-        return bas[3:].lstrip("@ ").strip()
+    if n.lower().startswith("va_"):            # « va_@pseudo » : le pseudo suit
+        return n[3:].lstrip("@ ").strip()
     m = _PAREN.search(n)
     if m and m.group(1).strip():
-        n = m.group(1).strip()
-    # « VA 4 (VA 1 Noum) » : deux etages de numerotation, on pele les deux.
-    avant = None
-    while avant != n:
-        avant = n
-        n = _TETE_VA.sub("", n).strip()
-        n = _QUEUE_NUM.sub("", n).strip()
-    return _QUEUE_X.sub("", n).strip().lower()
+        # Rien n'est pele a l'interieur, sauf le suffixe « X<n> » : celui-la
+        # designe bien un telephone de plus, pas quelqu'un d'autre.
+        return _QUEUE_X.sub("", m.group(1).strip()).strip()
+    n = _TETE_VA.sub("", n).strip()
+    n = _QUEUE_NUM.sub("", n).strip()
+    return _QUEUE_X.sub("", n).strip()
+
+
+def pseudo(nom) -> str:
+    """La meme personne, en minuscules : c'est la cle de regroupement."""
+    return etiquette(nom).lower()
 
 
 # --- Le regroupement --------------------------------------------------------
@@ -219,8 +230,10 @@ def grouper(entrees) -> list:
         cle = ps or ("\x00" + nom.lower())
         g = gens.get(cle)
         if g is None:
+            # Le titre garde la casse du LIEN : « .title() » rendait
+            # « Va 2 Noum » la ou le lien dit « VA 2 Noum ».
             g = gens[cle] = {
-                "pseudo": ps, "titre": ps.title() if ps else nom,
+                "pseudo": ps, "titre": etiquette(nom) or nom,
                 "liens": [], "depuis": "",
                 "clics": None, "clics_lus": 0, "clics_non_lus": 0, "clics_na": 0,
                 "abonnes": None, "abonnes_lus": 0, "abonnes_non_lus": 0,
