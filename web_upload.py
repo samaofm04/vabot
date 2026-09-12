@@ -1105,6 +1105,7 @@ def _schedule_restart(delay_sec: float = 2.0):
         os._exit(0)
     threading.Thread(target=_do_exit, daemon=True).start()
 
+import threading as _th_mod
 VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".m4v"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
@@ -1410,6 +1411,19 @@ body.light.inflowwlight .sel-cb:checked + .sel-circle::after,body.light.inflowwl
 .sidebar .item:hover{padding-left:14px}
 
 /* Sub-tabs */
+/* Pas de retour a la ligne, mais un DEFILEMENT : .main porte
+   overflow-x:hidden sous 820 px, et six sous-onglets font environ 700 px
+   pour 300 de large. Sans ca, les deux derniers -- « Generateurs SMS » et
+   « Cle IA » -- sont coupes et inatteignables au doigt. */
+.subtabs{display:flex;gap:4px;margin:0 0 18px;padding:0 0 2px;
+  border-bottom:1px solid #26262c;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.subtab{flex:0 0 auto}
+.subtab{background:none;border:0;border-bottom:2px solid transparent;
+  color:#8b8b96;font-weight:600;font-size:12.5px;font-family:inherit;
+  padding:9px 13px;cursor:pointer;border-radius:8px 8px 0 0;margin-bottom:-1px}
+.subtab:hover{color:#e6e6ea;background:rgba(255,255,255,.05)}
+.subtab.active{color:#3b82f6;border-bottom-color:currentColor}
+body.light .subtab:hover{color:#111827;background:#f3f4f6}
 .subtab{transition:color .15s,border-color .15s}
 
 /* Boutons - hover lift */
@@ -7235,6 +7249,54 @@ function ppApplyOpen(){
 // ↗ Partage des TEMPLATES sélectionnés à d autres models (galerie Template
 // montage) — même modale, copie video + montage + description + exemple via
 // /noctus/montage_apply (le serveur reprend le brouillon enregistré).
+// La synchro d'un marche : deux temps, parce qu'elle ecrit chez quinze
+// models. Le premier clic ne fait que DEMANDER ce que ca va toucher ; rien
+// ne part avant le second.
+function syncMarcheOuvre(btn){
+  var ident = btn ? (btn.getAttribute('data-syncident') || '') : '';
+  if(!ident) return;
+  var fd = new FormData(); fd.set('identity', ident);
+  btn.disabled = true;
+  fetch('/noctus/sync_marche', {method:'POST', body:fd, credentials:'same-origin'})
+    .then(function(r){ return r.json(); })
+    .then(function(j){
+      btn.disabled = false;
+      if(!(j && j.ok)){
+        if(typeof showToast === 'function') showToast((j && j.error) || 'Erreur', 'error', 4000);
+        return;
+      }
+      if(typeof showToast === 'function')
+        showToast('Synchronisation lancee : ' + ident + ' vers ' + j.cibles
+                  + ' model(s) du marche ' + String(j.marche || '').toUpperCase(), 'success', 4000);
+      syncMarcheSuivre(btn);
+    })
+    .catch(function(e){
+      btn.disabled = false;
+      if(typeof showToast === 'function') showToast('Reseau : ' + e, 'error', 4000);
+    });
+}
+function syncMarcheSuivre(btn){
+  var lbl = btn ? btn.textContent : '';
+  var tour = function(){
+    fetch('/noctus/sync_marche/etat', {credentials:'same-origin'})
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if(!j || !j.ok) return;
+        if(j.en_cours){
+          if(btn) btn.textContent = 'Synchro ' + j.fait + '/' + j.total;
+          setTimeout(tour, 1500);
+          return;
+        }
+        if(btn) btn.textContent = lbl;
+        var msg = j.copies + ' copie(s) chez ' + j.cibles + ' model(s)';
+        if(j.erreurs && j.erreurs.length) msg += ' - ' + j.erreurs.length + ' erreur(s)';
+        if(typeof showToast === 'function')
+          showToast(msg, (j.erreurs && j.erreurs.length) ? 'warning' : 'success', 6000);
+      })
+      .catch(function(){});
+  };
+  setTimeout(tour, 1200);
+}
 function tplShareOpen(){
   var files=[];
   try{ selectedFiles.forEach(function(f){ if(String(f).indexOf("|templates|")>0) files.push(String(f)); }); }catch(e){}
@@ -9270,6 +9332,62 @@ function chargerOngletDiffere(sec){
       });
   });
 }
+
+// === LES SIX REGLAGES D'INTEGRATION, SOUS UNE SEULE ENTREE ==============
+// Ils gardent chacun leur onglet -- une quinzaine de routes renvoient vers
+// ?tab=smypuls ou ?tab=saikey apres un formulaire, et le bridage par role
+// est indexe par nom d'onglet cote serveur. Seule la BARRE a change.
+var API_ONGLETS = ['stoken','sinsta','smypuls','vtg','snumgen','saikey'];
+function apiOuvrir(id){
+  // Sans argument (clic sur l'entree de la barre laterale) : le premier
+  // sous-onglet ENCORE VISIBLE. Un role a qui on n'a accorde que « Cle IA »
+  // n'a pas a tomber sur « Token bot admin », qui lui est interdit.
+  if(!id){
+    var bs = document.querySelectorAll('#api-bar [data-api]');
+    for(var i=0;i<bs.length;i++){
+      if(bs[i].style.display !== 'none'){ id = bs[i].getAttribute('data-api'); break; }
+    }
+    if(!id) return;
+  }
+  var b = document.querySelector('#api-bar [data-api="' + id + '"]');
+  showTab('settings', id,
+          b ? b.getAttribute('data-titre') : 'Intégrations',
+          b ? b.getAttribute('data-sous') : '');
+}
+// La barre suit la section affichee. On la pose JUSTE AVANT elle, en
+// voisine : posee dedans, le chargement differe l'emporterait avec le
+// gabarit qu'il remplace.
+function apiPoserBarre(nom){
+  var bar = document.getElementById('api-bar');
+  if(!bar) return;
+  if(API_ONGLETS.indexOf(nom) === -1){ bar.style.display = 'none'; return; }
+  var sec = document.getElementById('form-' + nom);
+  if(!sec || !sec.parentNode) return;
+  if(bar.nextElementSibling !== sec) sec.parentNode.insertBefore(bar, sec);
+  bar.style.display = '';
+  var bs = bar.querySelectorAll('[data-api]');
+  for(var i=0;i<bs.length;i++){
+    if(bs[i].getAttribute('data-api') === nom) bs[i].classList.add('active');
+    else bs[i].classList.remove('active');
+  }
+  // showTab a marque #tab-<nom>, qui n'existe plus dans la barre laterale :
+  // c'est l'entree unique qui doit s'allumer.
+  var e = document.getElementById('nav-integrations');
+  if(e) e.classList.add('active');
+}
+document.addEventListener('click', function(ev){
+  var c = ev.target && ev.target.closest ? ev.target.closest('#api-bar [data-api]') : null;
+  if(c) apiOuvrir(c.getAttribute('data-api'));
+});
+// Arrive par l'URL (?tab=saikey, ou le retour d'un formulaire) : le
+// chargeur general cherche un bouton #tab-saikey dans la barre laterale et
+// n'en trouve plus. On ouvre nous-memes.
+document.addEventListener('DOMContentLoaded', function(){
+  try{
+    var t = new URLSearchParams(window.location.search).get('tab');
+    if(t && API_ONGLETS.indexOf(t) !== -1) apiOuvrir(t);
+  }catch(e){}
+});
 function showTab(group,name,title,subtitle){
   if(typeof igStopAllReels==="function") igStopAllReels();
   // Meme raison qu au changement d identite : la selection ne doit pas
@@ -9329,6 +9447,7 @@ function showTab(group,name,title,subtitle){
   }
   document.getElementById('page-title').textContent=title||'';
   document.getElementById('page-subtitle').textContent=subtitle||'';
+  if(typeof apiPoserBarre === 'function') apiPoserBarre(name);
   // Mettre à jour l'URL pour que le Referer soit conservé après POST
   try{
     if(window.history && window.history.replaceState){
@@ -10516,29 +10635,9 @@ document.addEventListener('click',function(e){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
       Manage employees
     </button>
-    <div class="sub-label" style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:1.5px;padding:10px 22px 4px;font-weight:700;border-top:1px solid #1a1a1a;margin-top:6px">Intégrations</div>
-    <button class="item" id="tab-stoken" onclick="showTab('settings','stoken','Token bot admin','Token du 2e bot Discord')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>
-      Token bot admin
-    </button>
-    <button class="item" id="tab-sinsta" onclick="showTab('settings','sinsta','Cookies Instagram','Auth scraper Instagram')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="20" x="2" y="2" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1.2" fill="currentColor"/></svg>
-      Cookies Instagram
-    </button>
-    <button class="item" id="tab-smypuls" onclick="showTab('settings','smypuls','Cookies MyPuls','Session mypuls.app — sync revenus chatteurs et push planning')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="8.5" cy="9.5" r="1" fill="currentColor"/><circle cx="14.5" cy="8.5" r="1" fill="currentColor"/><circle cx="10" cy="14.5" r="1" fill="currentColor"/><circle cx="15.5" cy="13.5" r="1" fill="currentColor"/></svg>
-      Cookies MyPuls
-    </button>
-    <button class="item" id="tab-vtg" onclick="showTab('settings','vtg','Veille Telegram','Bot Telegram pour la veille reels')">
-      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
-      Veille Telegram
-    </button>
-    <button class="item" id="tab-snumgen" onclick="showTab('settings','snumgen','Générateurs SMS','Pays des numéros et des mails — 0 = Russie, cause du « aucun numéro dispo »')">
-      <span class="ic">📱</span><span>Générateurs SMS</span>
-    </button>
-    <button class="item" id="tab-saikey" onclick="showTab('settings','saikey','Clé IA','Lecture du texte sur les vidéos + bios IA')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 0-7 7c0 3 2 4 2 6h10c0-2 2-3 2-6a7 7 0 0 0-7-7z"/><line x1="9" y1="21" x2="15" y2="21"/><line x1="10" y1="18" x2="14" y2="18"/></svg>
-      Clé IA
+    <button class="item" id="nav-integrations" onclick="apiOuvrir()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v7"/><path d="M15 2v7"/><path d="M6 9h12v2a6 6 0 0 1-12 0z"/><path d="M12 17v5"/></svg>
+      Intégrations
     </button>
   </div>
 </div>
@@ -12671,6 +12770,19 @@ document.addEventListener('keydown', function(e){
 <!-- JAILBREAK - Activité VA (assiduité) -->
 <div class="form-section" id="form-jbactivite" style="display:none">
 {jbactivite_html}
+</div>
+
+<!-- LA BARRE DES INTEGRATIONS. Un seul noeud, qu'un bout de JavaScript
+     deplace juste AVANT la section affichee. Jamais a l'interieur : le
+     chargement differe remplace des morceaux de section, et quatre des six
+     pages sont differees. -->
+<div id="api-bar" class="subtabs" style="display:none">
+  <button type="button" class="subtab" id="tab-stoken" data-api="stoken" data-titre="Token bot admin" data-sous="Token du 2e bot Discord">Token bot admin</button>
+  <button type="button" class="subtab" id="tab-sinsta" data-api="sinsta" data-titre="Cookies Instagram" data-sous="Auth scraper Instagram">Cookies Instagram</button>
+  <button type="button" class="subtab" id="tab-smypuls" data-api="smypuls" data-titre="Cookies MyPuls" data-sous="Session mypuls.app — sync revenus chatteurs et push planning">Cookies MyPuls</button>
+  <button type="button" class="subtab" id="tab-vtg" data-api="vtg" data-titre="Veille Telegram" data-sous="Bot Telegram pour la veille reels">Veille Telegram</button>
+  <button type="button" class="subtab" id="tab-snumgen" data-api="snumgen" data-titre="Générateurs SMS" data-sous="Pays des numéros et des mails — 0 = Russie, cause du « aucun numéro dispo »">Générateurs SMS</button>
+  <button type="button" class="subtab" id="tab-saikey" data-api="saikey" data-titre="Clé IA" data-sous="Lecture du texte sur les vidéos + bios IA">Clé IA</button>
 </div>
 
 <!-- SETTINGS - TOKEN -->
@@ -15781,8 +15893,15 @@ def _run_daily_insta_refresh():
     # re-controle se fait donc au premier passage de la journee : un sixieme
     # du cout de l ancienne regle « tout, tout le temps », et l erreur ne dure
     # plus qu une journee.
-    _heures = sorted(_INSTA_REFRESH_HOURS or [0])
-    _premiere_du_jour = _dt_dr.datetime.now().hour <= (_heures[0] + 1)
+    # Le « premier passage » se juge dans le fuseau des SESSIONS. Compare a
+    # l horloge du serveur (UTC), la fenetre tombait a cote d une heure : le
+    # re-controle des bannis se declenchait au mauvais passage, ou jamais.
+    _bornes_j = _scrape_bornes() or [(0, 0)]
+    try:
+        _h_ref = _dt_dr.datetime.now(_scrape_fuseau()).hour
+    except Exception:
+        _h_ref = _dt_dr.datetime.now().hour
+    _premiere_du_jour = _h_ref <= (_bornes_j[0][0] + 1)
     if _restreint or _premiere_du_jour or day in (1, 15):
         return _do_refresh(handles, label=("daily+bannis" if _restreint
                                            else "daily+bannis"))
@@ -15804,29 +15923,106 @@ def _run_daily_insta_refresh():
 # Cout : environ trois fois plus d'appels. Le scraper essaie d'abord
 # l'endpoint public gratuit d'Instagram, donc la facture RapidAPI reelle est
 # plus basse que le triplement brut.
-_INSTA_REFRESH_HOURS = [0, 4, 8, 12, 16, 20]      # 6 scrapes/jour
+#: LE REPLI SEULEMENT. Les vraies heures viennent des sessions de posting
+#: (cf. _scrape_bornes) : cette liste ne sert que si le calendrier des
+#: sessions est illisible ou vide. On la garde pour que le scrape tourne
+#: coute que coute -- un calendrier casse ne doit pas arreter la mesure,
+#: c est la paie des VA qui se lit sur ces chiffres.
+_INSTA_REFRESH_HOURS = [0, 4, 8, 12, 16, 20]      # repli : 6 scrapes/jour
+
+
+def _scrape_bornes():
+    """Les instants de scrape : les BORNES des sessions de posting.
+
+    POURQUOI PAS UNE LISTE D HEURES. Le scrape tournait a heures fixes
+    (00/04/08/12/16/20), sans aucun rapport avec le moment ou les VA postent.
+    Aucun releve ne tombait sur une frontiere de session : impossible de dire
+    ce qu une session avait produit, puisque la mesure coupait au milieu.
+
+    En se calant sur les bornes, chaque session est ENCADREE par deux
+    releves -- ce qui apparait entre les deux est le travail de cette
+    session-la.
+
+    UNE SEULE SOURCE. Les horaires se reglent dans la page Sessions ; on les
+    LIT, on ne les recopie pas. Recopier « 10, 17, 23, 2 » ici aurait produit
+    le classique de ce depot : deux endroits qui decident la meme chose, et
+    qui divergent le jour ou l un des deux change.
+
+    Rend une liste de (heure, minute) dans le FUSEAU DES SESSIONS -- le Benin,
+    qui ne change pas d heure. Surtout pas des heures « serveur » : le VPS
+    tourne en UTC, Paris change deux fois par an, et une conversion oubliee
+    aurait decale tout le calendrier d une heure six mois sur douze.
+    """
+    try:
+        import sessions_voc as _sv_b
+        bornes = set()
+        for s in ((_sv_b.config() or {}).get("sessions") or []):
+            try:
+                bornes.add((int(s["heure"]) % 24, int(s.get("minute") or 0) % 60))
+                # La FIN compte aussi. Les fenetres se touchent (chaque session
+                # court jusqu au debut de la suivante), donc les fins
+                # recouvrent les debuts -- sauf la derniere, dont la fin serait
+                # perdue : c est la borne du petit matin.
+                if s.get("fin_heure") is not None:
+                    bornes.add((int(s["fin_heure"]) % 24,
+                                int(s.get("fin_minute") or 0) % 60))
+            except Exception:
+                continue
+        if bornes:
+            return sorted(bornes)
+    except Exception as e:                                    # noqa: BLE001
+        print(f"[daily-insta] calendrier des sessions illisible : {e}", flush=True)
+    return [(h, 0) for h in sorted(_INSTA_REFRESH_HOURS)]
+
+
+def _scrape_fuseau():
+    """Le fuseau dans lequel les bornes ci-dessus sont exprimees."""
+    try:
+        import sessions_voc as _sv_f
+        return _sv_f._tz()
+    except Exception:                                         # noqa: BLE001
+        import datetime as _dt_f
+        return _dt_f.timezone.utc
 
 
 def _next_insta_refresh_dt(now):
-    """Retourne le prochain datetime de refresh parmi _INSTA_REFRESH_HOURS.
-    Cherche sur aujourd'hui + demain, retient le plus proche dans le futur."""
+    """Le prochain instant de scrape, en heure LOCALE DU SERVEUR.
+
+    L appelant compare a `datetime.now()`, qui est naif et local. On calcule
+    donc dans le fuseau des sessions, puis on retraduit -- jamais l inverse :
+    poser l heure d une session telle quelle sur l horloge du serveur est
+    exactement l erreur d une heure qu on veut eviter.
+    """
     import datetime as _dt_nx
-    candidates = []
-    for day_off in (0, 1):
-        base = (now + _dt_nx.timedelta(days=day_off)).replace(
-            minute=0, second=30, microsecond=0
-        )
-        for h in _INSTA_REFRESH_HOURS:
-            dt = base.replace(hour=h)
-            if dt > now:
-                candidates.append(dt)
-    return min(candidates) if candidates else (now + _dt_nx.timedelta(hours=8))
+    tz = _scrape_fuseau()
+    bornes = _scrape_bornes()
+    try:
+        maintenant_ts = now.timestamp()
+    except Exception:
+        maintenant_ts = _dt_nx.datetime.now().timestamp()
+    # Hier / aujourd hui / demain : une borne a 2 h du matin appartient au
+    # lendemain vu du soir, et la veille compte pour un serveur en retard.
+    aujourdhui = _dt_nx.datetime.fromtimestamp(maintenant_ts, tz).date()
+    futurs = []
+    for jour in (-1, 0, 1):
+        d = aujourdhui + _dt_nx.timedelta(days=jour)
+        for h, m in bornes:
+            try:
+                ts = _dt_nx.datetime(d.year, d.month, d.day, h, m, 30,
+                                     tzinfo=tz).timestamp()
+            except Exception:
+                continue
+            if ts > maintenant_ts:
+                futurs.append(ts)
+    if not futurs:
+        return now + _dt_nx.timedelta(hours=4)
+    return _dt_nx.datetime.fromtimestamp(min(futurs))
 
 
 def _daily_insta_loop():
     """Thread daemon : refresh initial au boot + refresh recurrent 2-3x/jour.
 
-    Tourne a chaque heure de _INSTA_REFRESH_HOURS (00h / 12h) pour que
+    Tourne aux BORNES DES SESSIONS de posting (cf. _scrape_bornes) pour que
     les vues 24h / semaine restent fraiches. Au boot, smart-refresh (skip les
     handles dont le cache est encore frais) pour ne pas hammerer IG."""
     import time as _t_dl
@@ -15897,7 +16093,7 @@ def _start_daily_insta_thread():
     import threading as _th
     t = _th.Thread(target=_daily_insta_loop, daemon=True, name="daily-insta-refresh")
     t.start()
-    _hrs = "h / ".join(str(h).zfill(2) for h in _INSTA_REFRESH_HOURS) + "h"
+    _hrs = " / ".join("%02dh%02d" % (h, m) for h, m in _scrape_bornes())
     print(f"[daily-insta] thread started — refresh {_hrs} (2x/jour)", flush=True)
 
 
@@ -15995,11 +16191,18 @@ VA_INSTA_3_STATS_FILE = DATA_DIR / "va_insta_3_stats_cache.json"
 # gagne. On prend un peu moins que l'ecart reel, pour qu'un passage un peu
 # tardif ne trouve pas le cache encore valide et ne saute pas son tour.
 def _ttl_stats_insta() -> int:
-    hrs = sorted(_INSTA_REFRESH_HOURS) or [0, 12]
-    if len(hrs) < 2:
+    """Duree de fraicheur d un releve : le PLUS COURT ecart entre deux scrapes.
+
+    Les bornes de session ne sont pas regulieres (7 h, 6 h, 3 h, 3 h, 5 h) :
+    prendre l ecart moyen laisserait passer un compte pour « frais » alors
+    qu un scrape a deja eu lieu depuis. On calcule en MINUTES, parce qu une
+    session peut tomber a la demie.
+    """
+    mins = sorted({h * 60 + m for h, m in _scrape_bornes()})
+    if len(mins) < 2:
         return 11 * 3600
-    ecarts = [(b - a) for a, b in zip(hrs, hrs[1:])] + [24 - hrs[-1] + hrs[0]]
-    return int(max(1, min(ecarts)) * 3600 * 0.9)
+    ecarts = [(b - a) for a, b in zip(mins, mins[1:])] + [1440 - mins[-1] + mins[0]]
+    return int(max(60, min(ecarts)) * 60 * 0.9)
 
 
 _INSTA_3_STATS_TTL = _ttl_stats_insta()
@@ -22350,6 +22553,21 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
                 "stroke-linecap='round' stroke-linejoin='round'><circle cx='18' cy='5' r='3'/><circle cx='6' cy='12' r='3'/>"
                 "<circle cx='18' cy='19' r='3'/><line x1='8.6' y1='10.6' x2='15.4' y2='6.4'/><line x1='8.6' y1='13.4' x2='15.4' y2='17.6'/></svg>"
                 "Partager</button>"
+                # LA SYNCHRO DU MARCHE, a cote du partage manuel et pas a sa
+                # place : « Partager » envoie une SELECTION a des models
+                # choisies, celui-ci envoie TOUT chez tout le marche. Deux
+                # gestes differents, deux boutons.
+                + (f"<button type='button' class='btn-partager' "
+                   f"data-syncident='{selected}' onclick='syncMarcheOuvre(this)' "
+                   f"title='Copier TOUS les montages de cette model chez toutes "
+                   f"les models de son marché — brutes exclues' "
+                   f"style='margin-right:8px'>"
+                   "<svg viewBox='0 0 24 24' width='15' height='15' fill='none' "
+                   "stroke='currentColor' stroke-width='2.2' stroke-linecap='round' "
+                   "stroke-linejoin='round'><path d='M21 2v6h-6'/>"
+                   "<path d='M3 12a9 9 0 0 1 15-6.7L21 8'/><path d='M3 22v-6h6'/>"
+                   "<path d='M21 12a9 9 0 0 1-15 6.7L3 16'/></svg>"
+                   "Synchroniser le marché</button>")
             ) + add_media_btn
         if subdir in ("brutes", "templates"):
             # Import par lien : le champ vit DANS le formulaire d'upload
@@ -31934,8 +32152,9 @@ def _render_jailbreak_html() -> str:
         # legende ecrite en dur ment des le premier changement, et c'est
         # exactement ce qui s'est produit.
         f"Stats Insta rafraîchies automatiquement <b style='color:#aaa'>"
-        f"{len(_INSTA_REFRESH_HOURS)}×/jour</b> "
-        f"({', '.join('%02dh' % h for h in sorted(_INSTA_REFRESH_HOURS))}) — "
+        f"{len(_scrape_bornes())}×/jour</b> "
+        f"({', '.join('%02dh%02d' % (h, m) for h, m in _scrape_bornes())}, "
+        f"heure des sessions) — "
         f"les comptes bannis seulement le 1er et le 15. "
         "Le point vert = compte déjà scrapé, gris = en attente."
         "</div>"
@@ -42126,7 +42345,7 @@ def _render_mypulslive_html() -> str:
             "<div style='background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);"
             "border-radius:10px;padding:18px;color:#f99;margin-top:14px'>"
             "<b>Cookies MyPuls non configures.</b><br>"
-            "Va dans <a href='?tab=mypuls' style='color:#3b82f6'>Settings → MyPuls</a> "
+            "Va dans <a href='?tab=smypuls' style='color:#3b82f6'>Settings → MyPuls</a> "
             "et colle tes cookies avant d utiliser le scheduler live."
             "</div></div>"
         )
@@ -42805,7 +43024,7 @@ span.flatpickr-weekday{color:#888!important;font-weight:600!important;background
   <div class='mpl-card'>
     <div class='mpl-card-header'>
       <span style='color:#888;font-size:12px;letter-spacing:1px;text-transform:uppercase'>MyPuls Live ↓</span>
-      <a href='?tab=mypuls' style='color:#888;text-decoration:none;font-size:12px'>⚙ Cookies</a>
+      <a href='?tab=smypuls' style='color:#888;text-decoration:none;font-size:12px'>⚙ Cookies</a>
     </div>
 
     <div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:8px'>
@@ -47438,6 +47657,21 @@ def _role_gate_script(allowed) -> str:
         "function findBtn(name){var b=document.getElementById('tab-'+name);if(b)return b;"
         "var all=sb.querySelectorAll('.item');for(var i=0;i<all.length;i++){if(nm(all[i])===name)return all[i];}return null;}"
         "A.forEach(function(name){var b=findBtn(name);if(b)reveal(b);});"
+        # LES SIX REGLAGES D'INTEGRATION SONT SOUS UNE SEULE ENTREE.
+        # Deux consequences, et le garde ne les voyait ni l'une ni l'autre :
+        #  - il revele les boutons PAR NOM D'ONGLET, et une entree unique
+        #    n'a qu'un nom : on la revele des qu'UNE des six est accordee ;
+        #  - il ne masque que ce qui vit dans .sidebar, et la barre de
+        #    sous-onglets vit dans la page. Non filtree, elle offrait a un
+        #    role restreint un bouton vers chacune des six pages -- et le
+        #    clic ROUVRAIT la section, parce que showTab repose un
+        #    display:block par-dessus le display:none du garde.
+        "var _SIX=['stoken','sinsta','smypuls','vtg','snumgen','saikey'];"
+        "var _un=document.getElementById('nav-integrations');"
+        "if(_un){var _y=false;_SIX.forEach(function(n){if(ok[n])_y=true;});"
+        "if(_y)reveal(_un);}"
+        "document.querySelectorAll('#api-bar [data-api]').forEach(function(b){"
+        "if(!ok[b.getAttribute('data-api')])b.style.display='none';});"
         # 3) reveler les labels de section qui precedent un bloc redevenu visible
         "Array.prototype.forEach.call(sb.children,function(c){"
         "if(c.classList&&c.classList.contains('section-label')){var n=c.nextElementSibling,v=false;"
@@ -49609,6 +49843,177 @@ def _start_auto_scrape_daemon():
     log.info("[insta-bg-scrape] daemon demarre (cycle 3h + DL top 30/compte)")
 
 
+#: L'etat de la synchro de marche. Une seule a la fois, et elle tourne en
+#: fond : vingt-et-un montages vers quinze models, c'est plusieurs centaines
+#: de copies de fichiers video. Une requete HTTP n'attend pas ca.
+_SYNC_MARCHE = {"en_cours": False, "fait": 0, "total": 0, "source": "",
+                "cibles": 0, "copies": 0, "erreurs": [], "fini_le": 0,
+                "message": ""}
+_SYNC_MARCHE_VERROU = _th_mod.Lock()
+
+
+def _identites_du_marche(source: str) -> list:
+    """Les identites du MEME marche que la source, sauf elle.
+
+    Meme regle que propager_tags_templates : « Un montage FR n'a rien a faire
+    chez une identite US ». On y ajoute ce que la synchro ne doit jamais
+    toucher -- les espaces volontairement independants (Bibliotheque 2,
+    Vault PRO) et les identites qui ne sont pas des models.
+    """
+    src = (source or "").strip().lower()
+    if not src:
+        return []
+    marche = identity_market(src)
+    out = []
+    for p in sorted(IDENTITIES_DIR.iterdir()):
+        n = p.name
+        if not p.is_dir() or n == src:
+            continue
+        if _is_v2(n) or n.startswith("pro_"):
+            continue
+        if identity_market(n) != marche:
+            continue
+        if _type_identite(n) != "modele":
+            # Un dossier de montage n'a pas de VA derriere : lui copier
+            # vingt-et-un templates ne sert personne et coute le disque.
+            continue
+        out.append(n)
+    return out
+
+
+def _sync_marche_travail(source: str):
+    """Recopie TOUS les montages de la source chez les models du marche.
+
+    CE QU'ELLE NE FAIT PAS, ET C'EST VOULU :
+      - elle ne supprime rien. Ce que le proprietaire retire chez la source
+        reste chez les autres : un bouton qui efface chez quinze models sur
+        un clic est un piege, pas un bouton ;
+      - elle ne touche pas aux BRUTES. C'est la demande explicite, et c'est
+        aussi ce que le partage suppose depuis toujours : « chaque model
+        garde ses propres brutes -> meme montage, contenus differents » ;
+      - elle saute les montages DESACTIVES chez la source. Les griser, c'est
+        les sortir de la rotation ; les propager quand meme reviendrait a
+        defaire le geste.
+
+    Un montage deja present chez une cible n'est pas recopie (meme taille),
+    mais sa caption, sa description, son exemple et son brouillon sont remis
+    a jour : c'est ce qui fait qu'une correction faite a la source se
+    retrouve partout.
+    """
+    import time as _t_sm
+    src = (source or "").strip().lower()
+    dossier = IDENTITIES_DIR / src / "templates"
+    cibles = _identites_du_marche(src)
+    eteints = _load_disabled_reels()
+    fichiers = sorted(
+        [f for f in dossier.iterdir()
+         if f.is_file() and f.suffix.lower() in VIDEO_EXTS
+         and f"{src}|templates|{f.name}" not in eteints]
+    ) if dossier.is_dir() else []
+
+    _SYNC_MARCHE.update(en_cours=True, fait=0, total=len(fichiers), source=src,
+                        cibles=len(cibles), copies=0, erreurs=[], message="")
+    tags_flash, tags_fav = set(), set()
+    flash = _load_flash_trend()
+    favs = _load_fav_brutes()
+    try:
+        for f in fichiers:
+            cle = f"{src}|templates|{f.name}"
+            draft = {"segments": "[]", "font": "Strong", "style": "{}"}
+            try:
+                _d = json.loads((dossier / f"{f.stem}.montage.json")
+                                .read_text(encoding="utf-8"))
+                if isinstance(_d, dict) and _d.get("segments") is not None:
+                    draft = _d
+            except Exception:
+                pass
+            try:
+                faits, errs = _copier_template_vers(
+                    dossier, f, cibles, draft, tags_flash, tags_fav,
+                    cle in flash, cle in favs)
+                _SYNC_MARCHE["copies"] += len(faits)
+                for e in errs[:3]:
+                    if len(_SYNC_MARCHE["erreurs"]) < 20:
+                        _SYNC_MARCHE["erreurs"].append(f"{f.name} -> {e}")
+            except Exception as e:
+                if len(_SYNC_MARCHE["erreurs"]) < 20:
+                    _SYNC_MARCHE["erreurs"].append(f"{f.name} : {e}")
+            _SYNC_MARCHE["fait"] += 1
+        # Les registres, une seule fois : les ecrire par montage reecrirait
+        # le fichier entier vingt-et-une fois.
+        try:
+            if tags_flash:
+                safe_json.write_text(FLASH_TREND_FILE, json.dumps(
+                    sorted(_load_flash_trend() | tags_flash), ensure_ascii=False))
+            if tags_fav:
+                safe_json.write_text(FAV_BRUTES_FILE, json.dumps(
+                    sorted(_load_fav_brutes() | tags_fav), ensure_ascii=False))
+        except Exception as e:
+            _SYNC_MARCHE["erreurs"].append("tags : %s" % str(e)[:120])
+        _invalidate_all_ttl_cache()
+    finally:
+        _SYNC_MARCHE.update(en_cours=False, fini_le=int(_t_sm.time()))
+
+
+
+def _copier_template_vers(src_dir, src, targets, draft,
+                          tags_flash, tags_fav, flash_src, fav_src):
+    """Copie UN montage chez plusieurs models. Rend (faits, erreurs).
+
+    Sortie de la vue /noctus/montage_apply SANS un changement de
+    comportement : c'est la seule facon qu'une synchro de marche rejoue
+    exactement ce que fait le bouton « Partager ». Deux implementations de
+    la meme copie, c'est deux comportements le jour ou l'une bouge.
+
+    Les deux ensembles de tags sont passes en PARAMETRE plutot que rendus :
+    une synchro enchaine des centaines de copies et n'ecrit les registres
+    qu'une fois, a la fin. Les ecrire ici reecrirait chaque fichier en
+    entier a chaque montage.
+    """
+    import shutil as _sh
+    done, errs = [], []
+    src_size = src.stat().st_size
+    for t in targets:
+        try:
+            dstdir = IDENTITIES_DIR / t / "templates"
+            dstdir.mkdir(parents=True, exist_ok=True)
+            dst = dstdir / src.name
+            # Collision de nom : même taille = même vidéo (on met juste le
+            # brouillon à jour) ; taille différente = un AUTRE template
+            # porte ce nom chez la cible -> on suffixe au lieu d'écraser.
+            if dst.exists() and dst.stat().st_size != src_size:
+                k = 2
+                while True:
+                    cand = dstdir / f"{src.stem}_{k}{src.suffix}"
+                    if not cand.exists() or cand.stat().st_size == src_size:
+                        dst = cand
+                        break
+                    k += 1
+            if not (dst.exists() and dst.stat().st_size == src_size):
+                _sh.copy2(str(src), str(dst))
+            # annexes : caption (.txt), description (.desc.txt), exemple
+            for suffix in (".txt", ".desc.txt"):
+                sp = src_dir / (src.stem + suffix)
+                if sp.exists():
+                    _sh.copy2(str(sp), str(dstdir / (dst.stem + suffix)))
+            for ex in src_dir.glob(src.stem + ".example.*"):
+                _sh.copy2(str(ex), str(dstdir / (dst.stem + ex.name[len(src.stem):])))
+            if not safe_json.write(dstdir / f"{dst.stem}.montage.json", draft, indent=None):
+                raise OSError("écriture du brouillon impossible")
+            # dst.name, PAS src.name : en cas de collision de nom la copie
+            # est suffixee (_2), et taguer le nom de depart poserait le tag
+            # sur un fichier qui n existe pas chez la cible.
+            if flash_src:
+                tags_flash.add(f"{t}|templates|{dst.name}")
+            if fav_src:
+                tags_fav.add(f"{t}|templates|{dst.name}")
+            done.append(t)
+        except Exception as e:
+            errs.append(f"{t} : {e}")
+
+    return done, errs
+
+
 def create_app():
     from flask import Flask, request, session, redirect, make_response
     app = Flask(__name__)
@@ -51590,6 +51995,44 @@ def create_app():
             out.append({"name": ident, "pp": pp, "brutes": nb})
         return jsonify({"ok": True, "identities": out})
 
+    @app.route("/noctus/sync_marche", methods=["POST"])
+    def noctus_sync_marche():
+        """Recopie tous les montages d'une identite chez son marche.
+
+        La SOURCE est l'identite ou l'on clique : pas de « base » a declarer
+        quelque part, pas de reglage a tenir a jour. Le proprietaire range
+        ses montages chez celle qui lui sert de reference, et le bouton fait
+        le reste.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        src = (request.form.get("identity") or "").strip().lower()
+        if src not in set(_list_identities()):
+            return jsonify({"ok": False, "error": "identité inconnue"})
+        with _SYNC_MARCHE_VERROU:
+            if _SYNC_MARCHE.get("en_cours"):
+                return jsonify({"ok": False,
+                                "error": "Une synchronisation est déjà en cours"})
+            cibles = _identites_du_marche(src)
+            if not cibles:
+                return jsonify({"ok": False,
+                                "error": "Aucune autre model sur ce marché"})
+            _SYNC_MARCHE.update(en_cours=True, fait=0, total=0, source=src,
+                                cibles=len(cibles), copies=0, erreurs=[])
+        _th_mod.Thread(target=_sync_marche_travail, args=(src,),
+                       name="sync-marche", daemon=True).start()
+        return jsonify({"ok": True, "source": src, "cibles": len(cibles),
+                        "marche": identity_market(src)})
+
+    @app.route("/noctus/sync_marche/etat")
+    def noctus_sync_marche_etat():
+        """Ou en est la synchro. Sans ca, le bouton ment pendant deux minutes."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        return jsonify(dict(_SYNC_MARCHE, ok=True))
+
     @app.route("/noctus/montage_apply", methods=["POST"])
     def noctus_montage_apply():
         """Applique un TEMPLATE à d'autres models : copie la vidéo (+ caption,
@@ -51649,46 +52092,9 @@ def create_app():
         _fav_src = _cle_src in _load_fav_brutes()
         _tags_flash, _tags_fav = set(), set()
 
-        done, errs = [], []
-        src_size = src.stat().st_size
-        for t in targets:
-            try:
-                dstdir = IDENTITIES_DIR / t / "templates"
-                dstdir.mkdir(parents=True, exist_ok=True)
-                dst = dstdir / src.name
-                # Collision de nom : même taille = même vidéo (on met juste le
-                # brouillon à jour) ; taille différente = un AUTRE template
-                # porte ce nom chez la cible -> on suffixe au lieu d'écraser.
-                if dst.exists() and dst.stat().st_size != src_size:
-                    k = 2
-                    while True:
-                        cand = dstdir / f"{src.stem}_{k}{src.suffix}"
-                        if not cand.exists() or cand.stat().st_size == src_size:
-                            dst = cand
-                            break
-                        k += 1
-                if not (dst.exists() and dst.stat().st_size == src_size):
-                    _sh.copy2(str(src), str(dst))
-                # annexes : caption (.txt), description (.desc.txt), exemple
-                for suffix in (".txt", ".desc.txt"):
-                    sp = src_dir / (src.stem + suffix)
-                    if sp.exists():
-                        _sh.copy2(str(sp), str(dstdir / (dst.stem + suffix)))
-                for ex in src_dir.glob(src.stem + ".example.*"):
-                    _sh.copy2(str(ex), str(dstdir / (dst.stem + ex.name[len(src.stem):])))
-                if not safe_json.write(dstdir / f"{dst.stem}.montage.json", draft, indent=None):
-                    raise OSError("écriture du brouillon impossible")
-                # dst.name, PAS src.name : en cas de collision de nom la copie
-                # est suffixee (_2), et taguer le nom de depart poserait le tag
-                # sur un fichier qui n existe pas chez la cible.
-                if _flash_src:
-                    _tags_flash.add(f"{t}|templates|{dst.name}")
-                if _fav_src:
-                    _tags_fav.add(f"{t}|templates|{dst.name}")
-                done.append(t)
-            except Exception as e:
-                errs.append(f"{t} : {e}")
-
+        done, errs = _copier_template_vers(
+            src_dir, src, targets, draft, _tags_flash, _tags_fav,
+            _flash_src, _fav_src)
         # Une seule ecriture par registre, apres la boucle : sauver a chaque
         # model reecrirait le fichier entier quarante fois pour rien.
         #

@@ -9304,6 +9304,10 @@ try:
     _sauvS = {}
     for _f in (_fMS, _fTS, _fDS):
         _sauvS[_f] = _f.read_text(encoding="utf-8") if _f.exists() else None
+    import tempfile as _tpS
+    _vraiDirS = _wS.IDENTITIES_DIR
+    _wS.IDENTITIES_DIR = _plS.Path(_tpS.mkdtemp()) / "identities"
+    _wS.IDENTITIES_DIR.mkdir(parents=True, exist_ok=True)
     try:
         for _n in _TOUS:
             _shS.rmtree(_wS.IDENTITIES_DIR / _n, ignore_errors=True)
@@ -9347,6 +9351,10 @@ try:
         _cibles = _wS._identites_du_marche(_SRC)
         check("sync : les cibles sont les models du MEME marche",
               sorted(_cibles) == sorted([_C1, _C2]), str(_cibles))
+        check("sync : le bac a sable est bien isole du vrai dossier",
+              "identities" in str(_wS.IDENTITIES_DIR)
+              and str(_wS.IDENTITIES_DIR) != str(_vraiDirS),
+              "un test qui ecrit chez une vraie identite ne se relance plus")
         check("sync : une identite de l autre marche n est pas touchee",
               _HORS not in _cibles)
 
@@ -9398,8 +9406,8 @@ try:
                     pass
             else:
                 _wS.safe_json.write_text(_f, _v)
-        for _n in _TOUS:
-            _shS.rmtree(_wS.IDENTITIES_DIR / _n, ignore_errors=True)
+        _shS.rmtree(_wS.IDENTITIES_DIR.parent, ignore_errors=True)
+        _wS.IDENTITIES_DIR = _vraiDirS
         _wS._invalidate_json_cache(_wS.DISABLED_REELS_FILE)
         _wS._oublier_identites()
         import marche as _mkS2, type_identite as _tiS2
@@ -9487,6 +9495,75 @@ try:
               _outP.get("fr") == "alicia,amelia,lola", _outP.get("fr"))
 except Exception as _eP:
     check("partage : testable", False, repr(_eP)[:200])
+
+print()
+print("=" * 70)
+print("INTEGRATIONS : six reglages, une seule entree de barre")
+print("=" * 70)
+try:
+    import pathlib as _plG
+    _srcG = _plG.Path("web_upload.py").read_text(encoding="utf-8")
+    _SIX = ("stoken", "sinsta", "smypuls", "vtg", "snumgen", "saikey")
+
+    # La barre laterale ne porte plus six lignes pour six reglages qu on
+    # ouvre trois fois par an.
+    _dG = _srcG.index('<div class="sidebar')
+    _fG = _srcG.index('<div class="spacer">', _dG)
+    _barre = _srcG[_dG:_fG]
+    _restes = sorted(t for t in _SIX if ('id="tab-%s"' % t) in _barre)
+    check("integrations : les six entrees ont quitte la barre laterale",
+          not _restes, "encore la : " + ", ".join(_restes))
+    check("integrations : une entree unique les remplace",
+          _barre.count('id="nav-integrations"') == 1)
+
+    # ELLE N INVENTE PAS D ONGLET. Un id « tab-xxx » suffit a faire entrer
+    # « xxx » dans la liste des pages que l editeur de permissions doit
+    # couvrir : une entree de barre qui n est pas une page y serait une
+    # case a cocher de plus, pointant sur rien.
+    check("integrations : l entree unique n invente pas d onglet",
+          'id="tab-sapi"' not in _srcG and 'id="tab-integrations"' not in _srcG)
+
+    # Et les six pages, elles, existent toujours -- sections ET identifiants.
+    # Une quinzaine de routes renvoient vers ?tab=smypuls ou ?tab=saikey
+    # apres un formulaire, et le bridage par role est indexe par ce nom-la.
+    _perdus = sorted(t for t in _SIX
+                     if ('id="form-%s"' % t) not in _srcG
+                     or ('id="tab-%s"' % t) not in _srcG)
+    check("integrations : les six pages gardent leur identifiant",
+          not _perdus, "perdu(s) : " + ", ".join(_perdus))
+    _sansOnglet = sorted(t for t in _SIX if ('data-api="%s"' % t) not in _srcG)
+    check("integrations : les six sont dans la barre de sous-onglets",
+          not _sansOnglet, "absent(s) : " + ", ".join(_sansOnglet))
+
+    # LE BRIDAGE PAR ROLE NE MASQUE QUE CE QUI VIT DANS .sidebar. La barre
+    # de sous-onglets vit dans la PAGE : sans ces deux lignes, un role
+    # restreint voyait un bouton vers chacune des six pages, et le clic
+    # ROUVRAIT la section que le garde venait de cacher (showTab repose un
+    # display:block par-dessus le display:none).
+    _dGa = _srcG.index("def _role_gate_script")
+    _garde = _srcG[_dGa:_srcG.index("def ", _dGa + 10)]
+    check("integrations : le garde des roles filtre la barre de sous-onglets",
+          "#api-bar [data-api]" in _garde)
+    check("integrations : et revele l entree des qu UNE des six est accordee",
+          "nav-integrations" in _garde and "_SIX" in _garde)
+
+    # Six sous-onglets font environ 700 px ; la zone utile d un telephone
+    # en fait 300, et .main porte overflow-x:hidden. Sans defilement, les
+    # deux derniers sont coupes et inatteignables.
+    _dS = _srcG.index(".subtabs{")
+    check("integrations : la barre defile au doigt sur telephone",
+          "overflow-x:auto" in _srcG[_dS:_dS + 260])
+
+    # La traduction : l anglais est la langue par DEFAUT du site.
+    import i18n_en as _i18G
+    _nonTrad = [m for m in ("Int\u00e9grations", "G\u00e9n\u00e9rateurs SMS",
+                            "Cl\u00e9 IA", "Token bot admin", "Cookies MyPuls",
+                            "Veille Telegram", "Cookies Instagram")
+                if m not in _i18G.TRADUCTIONS]
+    check("integrations : les sept libelles ont leur anglais",
+          not _nonTrad, "sans traduction : " + ", ".join(_nonTrad))
+except Exception as _eG:
+    check("integrations : testable", False, repr(_eG)[:200])
 
 print()
 print("=" * 70)
