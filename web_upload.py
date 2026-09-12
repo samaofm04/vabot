@@ -37485,105 +37485,21 @@ def _start_gmsdash_warm():
 # L'espace GetMySocial est deja declare dans GMSDASH_TEAMS sous ce nom.
 CLICRANK_TEAM = "tm_6a0e4739bfa0c238f20a8bf5"      # « JESSY LE RETOUR »
 
-#: Un emoji par personne, tire de son pseudo. Deux regles :
-#: pas de drapeaux -- Windows ne dessine pas les indicateurs regionaux, ils
-#: sortent en « us » -- et pas de sequences ZWJ, qui se cassent en deux dessins
-#: sur les polices anciennes. Que des emoji d'un seul point de code.
-_CR_EMOJIS = ("\U0001F98A", "\U0001F43C", "\U0001F981", "\U0001F42F",
-              "\U0001F428", "\U0001F438", "\U0001F435", "\U0001F989",
-              "\U0001F985", "\U0001F43A", "\U0001F98B", "\U0001F419",
-              "\U0001F988", "\U0001F42C", "\U0001F984", "\U0001F41D",
-              "\U0001F407", "\U0001F98C", "\U0001F994", "\U0001F999",
-              "\U0001F996", "\U0001F992", "\U0001F410", "\U0001F433",
-              "\U0001F41E", "\U0001F422", "\U0001F9A9", "\U0001F426",
-              "\U0001F437", "\U0001F434", "\U0001F42E", "\U0001F414",
-              "\U0001F987", "\U0001F98E", "\U0001F420", "\U0001F980",
-              "\U0001F982", "\U0001F40C", "\U0001F995", "\U0001F998")
+# LA REGLE VIT DANS clics_personnes.py, PAS ICI.
+#
+# Le meme classement s'affiche a trois endroits : cette carte, le report
+# epingle de Discord et sa page web /clics. Tant que la regle etait ecrite
+# ici, les deux autres n'avaient d'autre choix que de la recopier -- et deux
+# copies d'une regle finissent toujours par diverger d'un caractere, sauf que
+# celle-ci decide de ce qu'on paie.
+#
+# Les trois noms ci-dessous restent : ils sont appeles ailleurs dans ce
+# fichier, et les renommer partout n'apporterait rien.
+import clics_personnes as _cp
 
-
-def _clicrank_emojis(pseudos) -> dict:
-    """Un emoji par pseudo, et DEUX PSEUDOS N'ONT JAMAIS LE MEME.
-
-    Tire au sort par le pseudo -- crc32, et surtout pas hash() : le hash des
-    chaines est sale a chaque demarrage de Python, l'emoji de chacun aurait
-    change a chaque redemarrage du bot.
-
-    Quand deux pseudos tombent sur le meme dessin, le second prend le suivant
-    libre. Un classement ou trois lignes portent le meme papillon ne sert plus
-    a rien : c'est exactement ce que l'emoji est cense eviter.
-
-    Le parcours suit l'ordre ALPHABETIQUE des pseudos, jamais le classement :
-    sinon l'emoji de chacun changerait des que les positions bougent.
-    """
-    import zlib as _z
-    pris, out = set(), {}
-    for ps in sorted({str(x) for x in pseudos if x}):
-        d = _z.crc32(ps.encode("utf-8")) % len(_CR_EMOJIS)
-        choix = _CR_EMOJIS[d]
-        for k in range(len(_CR_EMOJIS)):
-            e = _CR_EMOJIS[(d + k) % len(_CR_EMOJIS)]
-            if e not in pris:
-                choix = e
-                break
-        pris.add(choix)
-        out[ps] = choix
-    return out
-
-
-_CR_ESPACES = re.compile(r"\s+")
-_CR_PAREN = re.compile(r"\(([^()]*)\)")
-_CR_TETE_VA = re.compile(r"^va\s*\d*\s*[:.\-]?\s*", re.IGNORECASE)
-_CR_QUEUE_NUM = re.compile(r"\s+\d+$")
-_CR_QUEUE_X = re.compile(r"\s*x\s*\d+$", re.IGNORECASE)
-#: « TEMPLATE », et les quatre facons de l'ecrire de travers qu'on trouve dans
-#: les noms de liens reels (temaplte, tempalte, teamplte). Ce ne sont pas des
-#: personnes : ce sont les gabarits dont on duplique les liens.
-_CR_GABARITS = ("templ", "tempal", "temapl", "teampl")
-
-
-def _clicrank_propre(nom) -> str:
-    """« ( BO7 )  1 » -> « (BO7) 1 » : les noms sont tapes a la main."""
-    n = _CR_ESPACES.sub(" ", str(nom or "")).strip()
-    return n.replace("( ", "(").replace(" )", ")")
-
-
-def _clicrank_pseudo(nom: str) -> str:
-    """La PERSONNE derriere un nom de lien, en minuscules, ou "" si anonyme.
-
-    Les liens de Jessye s'appellent « VA 12 (Roucham) », « VA 13 Gerome »,
-    « VA 4 (VA 1 Noum) ». Le numero de tete est celui du LIEN, pas de la
-    personne ; ce qui reste est le pseudo.
-
-    DIVERGENCE ASSUMEE avec cogs/clickrecap._personne_du_lien. Celui-la garde
-    « VA 1 Noum » et « VA 2 Noum » separes, sur la foi d'un commentaire du
-    23/08 qui les dit trois personnes differentes. Le proprietaire a tranche
-    l'inverse le 12/09 : « meme pseudo c'est meme personne, y a pas de x1 x2 ».
-    On fusionne donc -- et la carte AFFICHE les liens reunis sous chaque nom,
-    pour que l'erreur, s'il y en a une, se voie du premier coup d'oeil au lieu
-    de se cacher dans un total.
-
-    Ne renvoie jamais un pseudo pour un lien gabarit ni pour « VA 9 » tout nu :
-    mieux vaut une ligne anonyme qu'un regroupement invente. Dans certains
-    espaces, cinq liens s'appellent « VA 1 » sans etre la meme personne.
-    """
-    n = _clicrank_propre(nom)
-    if not n:
-        return ""
-    bas = n.lower()
-    if any(g in bas for g in _CR_GABARITS):
-        return ""
-    if bas.startswith("va_"):                  # « va_@pseudo » : le pseudo suit
-        return bas[3:].lstrip("@ ").strip()
-    m = _CR_PAREN.search(n)
-    if m and m.group(1).strip():
-        n = m.group(1).strip()
-    # « VA 4 (VA 1 Noum) » : deux etages de numerotation, on pele les deux.
-    avant_ = None
-    while avant_ != n:
-        avant_ = n
-        n = _CR_TETE_VA.sub("", n).strip()
-        n = _CR_QUEUE_NUM.sub("", n).strip()
-    return _CR_QUEUE_X.sub("", n).strip().lower()
+_clicrank_propre = _cp.propre
+_clicrank_pseudo = _cp.pseudo
+_clicrank_emojis = _cp.emojis
 
 
 def _clicrank_quinzaine():
@@ -37621,9 +37537,14 @@ def _clicrank_rangs(payload: dict) -> list:
 
     UN CLIC NON LU N'EST PAS UN ZERO. Le cache du Dashboard aplatit les
     lectures ratees a 0 pour son tableau ; sur un classement, ce 0 enverrait
-    en derniere position quelqu'un qui a peut-etre travaille. Les personnes
-    dont AUCUN lien n'a ete lu sortent donc du classement par les chiffres et
-    passent en fin de liste avec « — ».
+    en derniere position quelqu'un qui a peut-etre travaille. On restitue donc
+    le None a partir du marqueur `lu` avant de regrouper, et les personnes
+    dont AUCUN lien n'a ete lu passent en fin de liste avec « — ».
+
+    ICI, LES CLICS NE SONT PAS COUPES A LA DATE D'ARRIVEE, contrairement au
+    report Discord qui le fait dans le cog. Le releve du Dashboard interroge
+    la periode entiere ; on se contente donc de SIGNALER qu'une personne est
+    arrivee en cours de route, au lieu de faire croire que le total est a elle.
     """
     try:
         import clics_arrivees as _ca
@@ -37631,39 +37552,25 @@ def _clicrank_rangs(payload: dict) -> list:
     except Exception:
         arrivees = {}
     debut = str(payload.get("start") or "")
-    gens = {}
+    entrees, tard = [], {}
     for l in (payload.get("links") or []):
-        nom = _clicrank_propre(l.get("name"))
-        if not nom:
+        nom = _cp.propre(l.get("name"))
+        if not nom or _cp.est_gabarit(nom):
             continue
-        bas = nom.lower()
-        if any(g in bas for g in _CR_GABARITS):
-            continue                          # un gabarit n'est pas une personne
-        ps = _clicrank_pseudo(nom)
-        # Sans pseudo, CHAQUE lien garde sa ligne : « VA 5 » et « VA 9 » ne
-        # sont pas la meme personne sous pretexte qu'aucun des deux n'est nomme.
-        cle = ps or ("\x00" + bas)
-        g = gens.setdefault(cle, {"pseudo": ps, "titre": ps.title() if ps else nom,
-                                  "clics": 0, "liens": [], "non_lus": 0,
-                                  "tard": ""})
-        g["liens"].append(nom)
-        if l.get("lu") is False:
-            g["non_lus"] += 1
-        else:
-            g["clics"] += int(l.get("clicks") or 0)
+        entrees.append({"nom": nom,
+                        "clics": None if l.get("lu") is False else l.get("clicks"),
+                        "abonnes": None,        # le releve gmsdash n'en porte pas
+                        "depuis": ""})
         # Un lien repris d'un VA parti porte les clics de son predecesseur. La
         # date d'arrivee est le seul garde-fou, et elle est par lien.
         d = str(arrivees.get(str(l.get("id") or "")) or "")
-        if d and debut and d > debut and d > g["tard"]:
-            g["tard"] = d
-    out = list(gens.values())
-    emos = _clicrank_emojis([g["pseudo"] for g in out])
+        if d and debut and d > debut:
+            cle = _cp.pseudo(nom) or nom.lower()
+            if d > tard.get(cle, ""):
+                tard[cle] = d
+    out = _cp.par_clics(entrees)
     for g in out:
-        g["muet"] = g["non_lus"] >= len(g["liens"])
-        # Le point d interrogation est reserve aux liens que personne n a
-        # nommes : il DOIT rester distinct des emoji de personnes.
-        g["emo"] = emos.get(g["pseudo"]) or "\u2754"
-    out.sort(key=lambda g: (g["muet"], -g["clics"], g["titre"]))
+        g["tard"] = tard.get(g["pseudo"] or g["titre"].lower(), "")
     return out
 
 
@@ -37693,7 +37600,7 @@ def _render_clicrank_html() -> str:
         bg = fonds.get(i)
         badge = (f"<div class='rank-badge' style='background:{bg}'>{i}</div>"
                  if bg else f"<div class='rank-badge rank-badge-off'>{i}</div>")
-        emo = g["emo"]
+        emo = g["emoji"]
         # La fusion se VOIT : on nomme les liens reunis sous ce pseudo. Si deux
         # personnes se retrouvaient sous le meme nom, ca saute aux yeux ici.
         notes = []
@@ -37705,32 +37612,33 @@ def _render_clicrank_html() -> str:
         if g["tard"]:
             notes.append("arriv\u00e9 le %s \u2014 la quinzaine n'est pas "
                          "enti\u00e8rement \u00e0 lui" % _fr_jour_court(g["tard"]))
-        if g["muet"]:
+        if g["clics_muets"]:
             # LE TIRET DOIT S EXPLIQUER. Un « — » nu se lit comme une panne de
             # la page ; ici il veut dire « GetMySocial n a pas repondu pour ce
             # lien », ce qui n est surtout pas la meme chose que zero clic.
             notes.append("non lu \u2014 GetMySocial n a pas r\u00e9pondu pour "
                          "ce lien, ce n est PAS z\u00e9ro clic")
-        elif g["non_lus"]:
+        elif g["clics_non_lus"]:
             notes.append("%d lien(s) non lu(s) \u2014 total incomplet"
-                         % g["non_lus"])
+                         % g["clics_non_lus"])
         sous = ("<div class='cr-sous'>" + html_escape(" \u00b7 ".join(notes))
                 + "</div>") if notes else ""
-        val = ("\u2014" if g["muet"] else format(g["clics"], ",d").replace(",", "\u202f"))
+        val = ("\u2014" if g["clics_muets"]
+               else format(g["clics"] or 0, ",d").replace(",", "\u202f"))
         lignes.append(
             "<div class='rank-row'>" + badge +
             "<div class='cr-emo'>" + emo + "</div>"
             "<div style='flex:1;min-width:0'>"
             "<div class='cr-nom'>" + html_escape(g["titre"]) + "</div>" + sous +
             "</div>"
-            "<div class='cr-clics" + (" muet" if g["muet"] else "") + "'>"
+            "<div class='cr-clics" + (" muet" if g["clics_muets"] else "") + "'>"
             + val + "</div></div>")
     age = int(payload.get("age_min") or
               max(0, (int(time.time()) - int(hit.get("ts") or 0)) // 60))
     note = "%s \u00b7 %s \u00b7 relev\u00e9 il y a %d min" % (
         html_escape(str(payload.get("label") or lib)),
         "clics GetMySocial", age)
-    if payload.get("partial") and not any(g["non_lus"] for g in rangs):
+    if payload.get("partial") and not any(g["clics_non_lus"] for g in rangs):
         # Vieux relevé, d'avant le marquage par lien : on sait qu'il manque
         # des lectures, on ne sait pas lesquelles. On le dit quand meme.
         note += " \u00b7 \u26a0 relev\u00e9 incomplet"
