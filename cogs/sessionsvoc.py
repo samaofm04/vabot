@@ -344,51 +344,81 @@ class SessionsVoc(commands.Cog):
             return None
 
     def embed_resume(self, jour: str) -> discord.Embed:
-        """Le resume d'une journee, lisible d'un coup d'oeil.
+        """Le bilan d'une journee : une ligne par personne, une pastille.
 
-        Public : c'est ce que le proprietaire lit le matin. On dit les
-        presents, et on ne dit les absents QUE si on sait qui etait attendu --
-        sinon « aucun absent » serait un mensonge tranquille.
+        LE PREMIER BILAN ETAIT ILLISIBLE. Les absents arrivaient en une seule
+        phrase separee par des virgules -- cent soixante-dix-neuf noms colles,
+        qu'on ne pouvait ni parcourir ni compter. Le proprietaire a demande
+        des retours a la ligne et des pastilles ; c'est la bonne forme, parce
+        qu'on lit une liste de gens en la balayant, pas en la lisant.
+
+        Vert = present. Rouge = absent. Orange = passe sans rester.
         """
         att = self._attendus_enrichis()
         r = sv.resume_jour(jour, attendus=att)
         e = discord.Embed(
-            title=f"Sessions du {jour}",
-            description=(f"Heures en {r['fuseau']}. "
-                         f"{len(att)} VA attendu(s)." if att else
-                         f"Heures en {r['fuseau']}. Liste des VA attendus inconnue : "
-                         f"seuls les presents sont fiables."),
+            title="Sessions du %s" % jour,
+            description=("Heures en %s. %d VA attendu(s)." % (r["fuseau"], len(att))
+                         if att else
+                         "Heures en %s. Liste des VA attendus inconnue : seuls "
+                         "les presents sont fiables." % r["fuseau"]),
             color=0x5865F2)
-        for s in r["sessions"]:
-            hl = s.get("heures_locales") or {}
-            entete = "%s — %s" % (s["nom"], s["heure"])
+        for s2 in r["sessions"]:
+            hl = s2.get("heures_locales") or {}
+            entete = "%s — %s" % (s2["nom"], s2["heure"])
             if hl.get("MG"):
                 entete += "  (BJ %s · MG %s)" % (hl.get("BJ", "?"), hl["MG"])
-            lignes = []
-            if not s.get("surveillee", True):
-                # ON NE REGARDAIT PAS. « Presents (0) » se lirait comme une
-                # desertion generale ; c est le bot qui n etait pas la.
-                e.add_field(name=entete,
-                            value="*Session non surveillée — le suivi ne tournait "
-                                  "pas encore. Aucun absent ne peut en être déduit.*",
-                            inline=False)
-                continue
-            if s["presents"]:
-                lignes.append("**Présents (%d)** : %s" % (
-                    len(s["presents"]),
-                    ", ".join("%s (%d min)" % (p["nom"], p["secondes"] // 60)
-                              for p in s["presents"][:20])))
-            else:
-                lignes.append("*Personne*")
-            if s["partiels"]:
-                lignes.append("Passés vite : " + ", ".join(
-                    p["nom"] for p in s["partiels"][:12]))
-            if s["attendus_connus"]:
-                lignes.append("**Absents (%d)** : %s" % (
-                    len(s["absents"]),
-                    ", ".join(a["nom"] for a in s["absents"][:20]) or "aucun"))
-            e.add_field(name=entete, value="\n".join(lignes)[:1000], inline=False)
+            e.add_field(name=entete, value=self._corps_session(s2), inline=False)
         return e
+
+    def _corps_session(self, s2: dict) -> str:
+        """Le contenu d'une session : une personne par ligne, ou un mot.
+
+        Discord plafonne un champ a 1024 caracteres. On coupe donc, mais on
+        DIT combien de lignes manquent : une liste tronquee en silence se lit
+        comme une liste complete, et c'est elle qu'on croira.
+        """
+        if not s2.get("surveillee", True):
+            return ("*Session non surveillée — le suivi ne tournait pas encore. "
+                    "Aucun absent ne peut en être déduit.*")
+        if not s2.get("terminee", True):
+            # ELLE N'A PAS ENCORE EU LIEU, ou elle est en cours. Le premier
+            # bilan accusait 179 personnes d'avoir manque une session qui
+            # commencait huit heures plus tard.
+            if s2["presents"] or s2["partiels"]:
+                lignes = [self._ligne_pastille(g, "🟢") for g in s2["presents"]]
+                lignes += [self._ligne_pastille(g, "🟠") for g in s2["partiels"]]
+                return self._plafonner(["*En cours…*"] + lignes)
+            return "*Pas encore commencée.*"
+        lignes = [self._ligne_pastille(g, "🟢") for g in s2["presents"]]
+        lignes += [self._ligne_pastille(g, "🟠") for g in s2["partiels"]]
+        if s2.get("attendus_connus"):
+            lignes += ["🔴 %s" % a["nom"] for a in s2["absents"]]
+        if not lignes:
+            return "*Personne.*"
+        if not s2.get("attendus_connus"):
+            lignes.append("*Liste des VA attendus inconnue : les absents ne "
+                          "peuvent pas être établis.*")
+        return self._plafonner(lignes)
+
+    @staticmethod
+    def _ligne_pastille(g: dict, pastille: str) -> str:
+        m = int(g.get("secondes") or 0) // 60
+        duree = "%d min" % m if m < 60 else "%d h %02d" % (m // 60, m % 60)
+        return "%s %s — %s" % (pastille, g["nom"], duree)
+
+    @staticmethod
+    def _plafonner(lignes, limite: int = 1010) -> str:
+        """Colle les lignes sans depasser le champ, et dit ce qui manque."""
+        out, total = [], 0
+        for i, l in enumerate(lignes):
+            if total + len(l) + 1 > limite - 40:
+                reste = len(lignes) - i
+                out.append("*… et %d de plus (voir la page Sessions)*" % reste)
+                break
+            out.append(l)
+            total += len(l) + 1
+        return "\n".join(out)
 
     def _attendus_enrichis(self) -> list:
         """La liste des attendus, avec le vrai pseudo affiche sur Discord.

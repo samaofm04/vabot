@@ -611,9 +611,26 @@ def resume_jour(jour: str, attendus=None) -> dict:
     # notre portee : on ne peut pas dire qui y etait, encore moins qui n'y
     # etait pas.
     depuis = premier_releve()
+    import time as _t_rj
+    maintenant_ts = _t_rj.time()
     lignes = []
     for s in sessions_du_jour(jour):
-        surveillee = depuis is None or float(s["fin"]) >= float(depuis)
+        # REGISTRE VIDE = ON N'A JAMAIS RIEN VU, donc on ne juge rien. La
+        # version precedente disait « depuis is None or ... », c'est-a-dire
+        # « si on n'a aucun releve, tout est jugeable » -- et un registre vide
+        # produisait un bilan ou TOUT LE MONDE est absent partout. C'est
+        # exactement la situation d'un premier jour, ou d'un fichier efface.
+        surveillee = depuis is not None and float(s["fin"]) >= float(depuis)
+        # ET ELLE DOIT AVOIR EU LIEU. Le premier bilan poste a deux heures du
+        # matin listait 179 absents a la session de DIX heures -- qui ne
+        # commencait que dans huit heures. Le garde-fou ne regardait que le
+        # passe (« le suivi tournait-il deja ? ») et jamais l'avenir.
+        #
+        # Une session en cours ne se juge pas non plus : quelqu'un qui arrive
+        # a la trentieme minute n'est pas un absent, il n'est pas encore
+        # arrive.
+        terminee = float(s["fin"]) <= maintenant_ts
+        jugeable = surveillee and terminee
         brut = presences(jour, s["id"])
         presents, partiels = [], []
         for mid, fiche in brut.items():
@@ -627,10 +644,11 @@ def resume_jour(jour: str, attendus=None) -> dict:
         presents.sort(key=lambda x: -x["secondes"])
         partiels.sort(key=lambda x: -x["secondes"])
         vus = {p["id"] for p in presents} | {p["id"] for p in partiels}
-        # AUCUN ABSENT SUR UNE SESSION QU'ON NE REGARDAIT PAS. La liste serait
+        # AUCUN ABSENT SUR UNE SESSION QU'ON NE REGARDAIT PAS, NI SUR UNE
+        # SESSION QUI N'EST PAS FINIE. Dans les deux cas la liste serait
         # complete -- tout le monde -- et entierement fausse.
         absents = ([dict(a, id=str(a["id"])) for a in attendus
-                    if str(a["id"]) not in vus] if surveillee else [])
+                    if str(a["id"]) not in vus] if jugeable else [])
         lignes.append({
             "id": s["id"], "nom": s["nom"],
             "heure": "%02d:%02d" % (s["heure"], s["minute"]),
@@ -640,8 +658,10 @@ def resume_jour(jour: str, attendus=None) -> dict:
             # Sans liste d'attendus, « absents » est vide et ne veut RIEN
             # dire : l'ecran doit pouvoir le distinguer d'un « personne ne
             # manquait ». Idem pour une session non surveillee.
-            "attendus_connus": bool(attendus) and surveillee,
+            "attendus_connus": bool(attendus) and jugeable,
             "surveillee": surveillee,
+            "terminee": terminee,
+            "jugeable": jugeable,
         })
     return {"jour": jour, "fuseau": cfg["fuseau"], "sessions": lignes}
 
@@ -656,7 +676,7 @@ def resume_par_personne(jour: str, attendus=None) -> list:
     # « 1 sur 4 » n'a de sens que si les quatre ont ete regardees. Compter une
     # session non surveillee au denominateur fabrique une assiduite fausse,
     # et c'est le chiffre sur lequel on juge quelqu'un.
-    surveillees = [x for x in r["sessions"] if x.get("surveillee", True)]
+    surveillees = [x for x in r["sessions"] if x.get("jugeable", True)]
     total = len(surveillees)
     gens = {}
     for s in surveillees:

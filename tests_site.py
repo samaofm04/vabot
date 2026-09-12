@@ -9401,8 +9401,12 @@ try:
     # quels themes existent, et elle sert au selecteur.
     _mTh2 = _reTh2.search(r"return \(\{dark:'sombre'(.*?)\}\)\[t\]", _srcTh2, _reTh2.S)
     _tous = set(_reTh2.findall(r"(\w+):'", _mTh2.group(0))) if _mTh2 else set()
+    # Cinq depuis que trois ont ete mis de cote. Le seuil dit « au moins
+    # quatre » : il verifie que la table est LISIBLE, pas combien elle
+    # contient -- sinon chaque ajout ou retrait casse un test qui n'a rien
+    # a voir.
     check("themes : la table des libelles est lisible",
-          len(_tous) >= 7, str(sorted(_tous)))
+          len(_tous) >= 4, str(sorted(_tous)))
 
     # LE SERVEUR PEINT LA PAGE AVANT QUE LE JAVASCRIPT TOURNE. Un theme qu'il
     # ne reconnait pas retombe sur « light » : le navigateur affiche une page
@@ -9455,6 +9459,29 @@ try:
                 _faux.append("%s -> %s" % (_t, _cls or "(rien)"))
         check("themes : le cookie gouverne la classe du body, des le serveur",
               not _faux, " | ".join(_faux[:4]))
+        # MIS DE COTE, PAS EFFACES. Le proprietaire a retire trois themes du
+        # selecteur (« des themes a chier ») en demandant de les garder « sans
+        # les afficher ». Leur feuille de style reste donc dans le fichier :
+        # les remettre est une ligne, pas une reecriture.
+        _RETIRES = ("obsidian", "violet", "gold")
+        check("themes : les trois retires ne sont plus proposes",
+              not any(("setTheme('%s')" % t) in _srcTh2 for t in _RETIRES),
+              "encore dans le selecteur")
+        check("themes : mais leur feuille de style est GARDEE de cote",
+              all(("body.%s{" % t) in _srcTh2 for t in _RETIRES),
+              "effacee — les remettre demanderait de tout reecrire")
+        # Et celui qui en avait un ne doit pas se prendre un ecran blanc.
+        _blancs = []
+        for _t in _RETIRES:
+            _cTh3.set_cookie("va_theme", _t)
+            _hh = _cTh3.get("/").get_data(as_text=True)
+            _mb2 = _reTh2.search(r"<body[^>]*class=\"([^\"]*)\"", _hh)
+            if "light" in (_mb2.group(1) if _mb2 else ""):
+                _blancs.append(_t)
+        check("themes : un theme retire retombe sur SOMBRE, jamais sur clair",
+              not _blancs, "renvoyes au blanc : " + ", ".join(_blancs))
+        check("themes : le gris secondaire d Infloww est celui releve",
+              "color:#999999!important" in _srcTh2)
     finally:
         _wTh3._load_web_users = _svTh3
 except Exception as _eTh2:
@@ -9557,8 +9584,14 @@ try:
             _d = _dtSe.date.fromisoformat(jour)
             return _dtSe.datetime(_d.year, _d.month, _d.day, h, m, tzinfo=_tz).timestamp()
 
-        J = "2026-09-11"
-        VEILLE = "2026-09-10"
+        # LA JOURNEE D ESSAI EST TOUJOURS REVOLUE. Elle etait ecrite en dur
+        # (« 2026-09-11 ») : le jour ou l horloge a rattrape cette date, la
+        # session de 23 h n etait plus terminee, et trois tests basculaient
+        # sans qu une ligne de code ait bouge. Une date RELATIVE au jour
+        # courant donne le meme verdict a n importe quel moment.
+        J = (_dtSe.date.fromisoformat(_sv.jour_de(_sv._dt.datetime.now(
+            _sv._tz()).timestamp())) - _dtSe.timedelta(days=5)).isoformat()
+        VEILLE = (_dtSe.date.fromisoformat(J) - _dtSe.timedelta(days=1)).isoformat()
         check("sessions : midi tombe dans la session de midi",
               (_sv.session_a(_t(J, 12, 30)) or {}).get("id") == "s1")
         check("sessions : dix minutes AVANT l heure, on est deja dedans",
@@ -9690,6 +9723,44 @@ try:
         import pathlib as _plS2
         _srcCog2 = _plS2.Path("cogs/sessionsvoc.py").read_text(encoding="utf-8")
         _srcW2 = _plS2.Path("web_upload.py").read_text(encoding="utf-8")
+        # UNE SESSION QUI N A PAS EU LIEU N A PAS D ABSENTS. Le premier
+        # bilan, poste a 2 h du matin, listait 179 absents a la session de
+        # DIX heures -- qui commencait huit heures plus tard. Le garde-fou ne
+        # regardait que le passe (« le suivi tournait-il ? »), jamais l avenir.
+        _sv.ecrire_config({})
+        _presF = _sv.FICHIER_PRESENCE
+        _sv.FICHIER_PRESENCE = _dirSe / "futur.json"
+        _ATT2 = [{"id": "9", "nom": "Zoe"}]
+        # Registre VIDE : on n a jamais rien vu, on ne juge donc rien.
+        _rV = _sv.resume_jour(J, attendus=_ATT2)
+        check("sessions : registre vide, aucune session n est jugee",
+              all(not x["jugeable"] and not x["absents"] for x in _rV["sessions"]),
+              "sinon un premier jour accuse tout le monde partout")
+        # Un releve pose la borne : avant, on ne regardait pas.
+        for _i in range(5):
+            _sv.pointer([{"id": "1", "nom": "Ana"}], 60, _t(J, 22, 10) + _i * 60)
+        _rF = {x["id"]: x for x in _sv.resume_jour(J, attendus=_ATT2)["sessions"]}
+        check("sessions : une session d avant le suivi reste non surveillee",
+              _rF["s1"]["surveillee"] is False and _rF["s4"]["surveillee"] is False)
+        check("sessions : une session TERMINEE et surveillee est jugee",
+              _rF["s2"]["jugeable"] is True and len(_rF["s2"]["absents"]) == 1)
+        # s3 finit a 02:00 le lendemain : dans ce jeu d essai elle n est pas
+        # terminee au moment ou le test tourne, donc pas jugeable.
+        check("sessions : « terminee » et « surveillee » sont deux choses",
+              set(_rF["s2"].keys()) >= {"surveillee", "terminee", "jugeable"})
+        _sv.FICHIER_PRESENCE = _presF
+
+        # LE FORMAT DU BILAN : une ligne par personne, une pastille.
+        import pathlib as _plF
+        _srcCogF = _plF.Path("cogs/sessionsvoc.py").read_text(encoding="utf-8")
+        check("bilan : une pastille verte pour les presents, rouge pour les absents",
+              '"🟢"' in _srcCogF.replace("'", '"')
+              or "🟢" in _srcCogF or "🟢" in _srcCogF)
+        check("bilan : les noms sont sur des lignes separees",
+              "_ligne_pastille" in _srcCogF and "join(out)" in _srcCogF)
+        check("bilan : une liste trop longue DIT combien de lignes manquent",
+              "et %d de plus" in _srcCogF)
+
         # LE BOUTON POSTE LE JOUR AFFICHE, pas « aujourd hui ». A deux heures
         # du matin la journee vient de commencer : son bilan est vide, et
         # celui qu on veut voir est celui de la veille.
@@ -10084,6 +10155,46 @@ try:
               "AAAAA1" in [f["shortcode"] for f in _bg.a_annoncer()],
               str(_bg.fiche("AAAAA1").get("essais_video")))
 
+        # UN COOKIE PERIME NE DOIT PAS CONDAMNER UN BANGER. Le cycle tourne
+        # toutes les heures : en decomptant ces echecs, six heures suffiraient
+        # a marquer « perdue » une video parfaitement telechargeable le
+        # lendemain, une fois les cookies refaits.
+        _bg.forcer("jessy.mael", {"shortcode": "EEEEE5", "views": 5000,
+                                  "taken_at": _recentB})
+        for _i in range(12):
+            _bg.noter_telechargement("EEEEE5", False, raison="login_requis_cookies")
+        check("bangers : un cookie perime ne consomme AUCUNE tentative",
+              _bg.fiche("EEEEE5").get("essais_video") == 0
+              and _bg.fiche("EEEEE5").get("video") != "perdue",
+              str(_bg.fiche("EEEEE5").get("essais_video")))
+        check("bangers : on continue d essayer tant que la panne est chez nous",
+              "EEEEE5" in [f["shortcode"] for f in _bg.a_telecharger()])
+        # ... mais l annonce, elle, ne doit pas attendre les cookies : sinon on
+        # ignore qu un reel a explose.
+        check("bangers : l annonce part quand meme si la panne vient de nous",
+              "EEEEE5" in [f["shortcode"] for f in _bg.a_annoncer()])
+        # Un vrai probleme du reel, lui, consomme bien ses tentatives.
+        _bg.noter_telechargement("EEEEE5", False, raison="audience_restreinte")
+        check("bangers : un reel restreint, lui, consomme sa tentative",
+              _bg.fiche("EEEEE5").get("essais_video") == 1)
+
+        # Annoncee sans video : des que le fichier descend, il doit rejoindre
+        # l annonce -- c est la sauvegarde, elle ne peut pas rester sur le VPS.
+        _bg.noter_annonce("EEEEE5", 11, 99, vues=5000, avec_video=False)
+        check("bangers : sans fichier sur le disque, rien a completer",
+              "EEEEE5" not in [f["shortcode"] for f in _bg.a_completer()])
+        _bg.DOSSIER.mkdir(parents=True, exist_ok=True)
+        _bg.chemin_video("EEEEE5").write_bytes(b"x" * 2048)
+        check("bangers : la video en retard rejoint son annonce",
+              "EEEEE5" in [f["shortcode"] for f in _bg.a_completer()])
+        _bg.noter_video_envoyee("EEEEE5")
+        check("bangers : une fois jointe, la video n est pas repostee",
+              "EEEEE5" not in [f["shortcode"] for f in _bg.a_completer()])
+        # Une re-edition du compteur ne doit pas faire oublier l envoi.
+        _bg.noter_annonce("EEEEE5", 11, 99, vues=9999)
+        check("bangers : re-editer le compteur n oublie pas la video deja jointe",
+              "EEEEE5" not in [f["shortcode"] for f in _bg.a_completer()])
+
         # L essai a la demande : il doit ignorer le seuil ET l age, sans jamais
         # ecraser une fiche existante.
         _fE = _bg.forcer("jessy.mael", {"shortcode": "DDDDD4", "views": 312,
@@ -10174,6 +10285,34 @@ try:
           "_all_tracked_handles()" in _srcT)
     check("bangers : l essai dit combien de comptes il a laisses de cote",
           "tronque" in _srcT)
+
+    # « login_requis_cookies » sort aussi bien quand le fichier MANQUE que
+    # quand il est perime : la raison seule ne permet pas de trancher, et on
+    # re-exporte des cookies qui n avaient jamais ete deposes.
+    _srcCk = _inB.getsource(_wB._banger_etat_cookies)
+    check("bangers : l etat des cookies distingue absent / sans sessionid",
+          "sessionid" in _srcCk and "present" in _srcCk)
+    check("bangers : l etat des cookies ne fait AUCUN appel reseau",
+          "requests" not in _srcCk and "download_via_ytdlp" not in _srcCk)
+    _srcEc = _inB.getsource(_wB._banger_essai_cookies)
+    check("bangers : la verification fait un VRAI telechargement",
+          "download_via_ytdlp" in _srcEc and "use_cookies=True" in _srcEc)
+    check("bangers : un reel restreint n est pas impute aux cookies",
+          "audience_restreinte" in _srcEc)
+    # Trois pannes, trois reparations : API non branchee, page muette, cookies.
+    _srcRec = _inB.getsource(_wB._banger_recuperer)
+    for _et in ("api:", "page:", "cookies:", "ytdlp:"):
+        check("bangers : la trace nomme l etape « %s »" % _et.rstrip(":"),
+              '"' + _et in _srcRec or "'" + _et in _srcRec, _et)
+    check("bangers : le telechargeur rend bien un quadruplet (avec la trace)",
+          _srcRec.count("return False, desc") >= 1 and "trace" in _srcRec)
+    # Discord ne sait pas ajouter une piece jointe a un message existant : la
+    # video en retard part en REPONSE, pas par une edition.
+    _srcJv = _inB.getsource(_wB._banger_joindre_video)
+    check("bangers : la video en retard part en reponse au message",
+          ".reply(" in _srcJv and "filesize_limit" in _srcJv)
+    check("bangers : le rattrapage video est branche dans le cycle",
+          "_bg.a_completer()" in _inB.getsource(_wB._banger_cycle))
     # Le cycle consomme le quota Apify ET le cookie Instagram : il ne doit pas
     # etre a la portee d un role restreint. L allow-list est la liste BLANCHE
     # des ecritures permises a ces roles -- ne pas y figurer suffit.

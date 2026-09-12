@@ -1960,6 +1960,7 @@ body.infloww [style*="color:#3b82f6"]{color:#1677FF!important}
 body.infloww .btn,body.infloww button[type=submit],body.infloww .lb-btn-primary,body.infloww .badge,body.infloww .vac-btn-active,body.infloww .vpm-kind-btn.active,body.infloww .vpm-save,body.infloww .cur-toggle button.active,body.infloww .exp-submit,body.infloww .sel-cb:checked + .sel-circle,body.infloww .txt-sel-cb:checked + .sel-circle,body.infloww .sidebar .group .item .badge,body.infloww .up-step .up-dot{background:#1677FF!important;border-color:#1677FF!important}
 body.infloww a,body.infloww .subtab.active,body.infloww .sidebar .item.active,body.infloww .sidebar .group .item.active,body.infloww .sidebar .group .item.active svg,body.infloww .sidebar .solo-item.active,body.infloww .sidebar .group-head.active svg.lead,body.infloww .vlm-dup{color:#1677FF!important}
 body.infloww .vlm-dup{border-color:#1677FF!important}
+body.infloww [style*="color:#888"],body.infloww [style*="color:#aaa"],body.infloww [style*="color:#75757f"],body.infloww [style*="color:#8b8b96"]{color:#999999!important}
 body.infloww .sidebar .solo-item.active{background:rgba(22,119,255,.16)!important}
 body.infloww input:focus,body.infloww select:focus,body.infloww textarea:focus{border-color:#1677FF!important;box-shadow:0 0 0 3px rgba(22,119,255,.2)!important}
 
@@ -3250,9 +3251,9 @@ document.addEventListener('DOMContentLoaded', vabotMenuDort);
 setTimeout(vabotMenuDort, 1200);
 
 // === THEME (dark / light / obsidian / violet / gold) ===
-var VABOT_DARK_VARIANTS = ['obsidian','violet','gold','infloww'];
+var VABOT_DARK_VARIANTS = ['infloww'];
 function _vabotThemeLabel(t){
-  return ({dark:'sombre',light:'clair',apple:'Apple',claude:'Claude',obsidian:'Obsidian glass',violet:'Neo luxe violet',gold:'Midnight gold',infloww:'Infloww dark'})[t] || t;
+  return ({dark:'sombre',light:'clair',apple:'Apple',claude:'Claude',infloww:'Infloww dark'})[t] || t;
 }
 function setTheme(theme){
   var de = document.documentElement, b = document.body;
@@ -3301,7 +3302,15 @@ function setTheme(theme){
 (function(){
   try{
     var saved = localStorage.getItem('vabot_theme') || 'light';
-    var darkVariants = ['obsidian','violet','gold','infloww'];
+    /* Les themes retires du selecteur (obsidian, violet, gold) restent
+       dans la feuille de style, mis de cote. Celui qui en avait un
+       bascule sur SOMBRE -- le renvoyer au defaut « clair » lui
+       collerait un ecran blanc sans qu'il ait rien demande. */
+    if(['obsidian','violet','gold'].indexOf(saved) !== -1){
+      saved = 'dark';
+      try{ localStorage.setItem('vabot_theme','dark'); }catch(e){}
+    }
+    var darkVariants = ['infloww'];
     // premiere visite depuis cette version : on sème le cookie tout de suite
     try{
       if(document.cookie.indexOf('va_theme=') === -1){
@@ -9747,7 +9756,7 @@ window.upClearPrefill = function(utab){
         'html.pre-claude .sidebar{background:#f4f1e8 !important;border-right-color:#e5e0d3 !important}'+
         'html.pre-claude .box,html.pre-claude .stat{background:#fff !important;border-color:#e8e3d7 !important;border-radius:12px !important}';
       document.head.appendChild(sc);
-    } else if(theme === 'obsidian' || theme === 'violet' || theme === 'gold' || theme === 'infloww'){
+    } else if(theme === 'infloww'){
       // Thèmes sombres premium : on teinte le fond/sidebar/cartes AVANT le 1er paint
       var PAL = {obsidian:['#0b0d12','#0a0c11','#14171f','rgba(150,170,235,.14)'],
                  violet:['#0b0713','#0c0817','#160e26','#2d1b4e'],
@@ -12824,17 +12833,7 @@ document.addEventListener('keydown', function(e){
     </div>
     <div style="font-size:12.5px;font-weight:600;color:#1f1e1d">Claude</div>
   </div>
-  <div onclick="setTheme('obsidian')" class="theme-card" data-theme="obsidian" style="background:#0b0d12;border:2px solid #1b2130;border-radius:12px;padding:12px;cursor:pointer;text-align:center">
-    <div style="display:flex;gap:5px;height:52px;border-radius:8px;overflow:hidden;margin-bottom:10px;border:1px solid #1b2130">
-      <div style="width:20px;background:#0a0c11"></div>
-      <div style="flex:1;background:#0c0e14;padding:7px;display:flex;flex-direction:column;gap:5px;justify-content:center">
-        <div style="height:6px;width:82%;background:#161a23;border-radius:4px"></div>
-        <div style="height:6px;width:52%;background:#8b9cf7;border-radius:4px"></div>
-      </div>
-    </div>
-    <div style="font-size:12.5px;font-weight:600;color:#e6eaf2">Obsidian glass</div>
-  </div>
-  <div onclick="setTheme('infloww')" class="theme-card" data-theme="infloww" style="background:#151515;border:2px solid #444444;border-radius:12px;padding:12px;cursor:pointer;text-align:center">
+    <div onclick="setTheme('infloww')" class="theme-card" data-theme="infloww" style="background:#151515;border:2px solid #444444;border-radius:12px;padding:12px;cursor:pointer;text-align:center">
     <div style="display:flex;gap:5px;height:52px;border-radius:8px;overflow:hidden;margin-bottom:10px;border:1px solid #444444">
       <div style="width:20px;background:#151515"></div>
       <div style="flex:1;background:#242424;padding:7px;display:flex;flex-direction:column;gap:5px;justify-content:center">
@@ -12844,27 +12843,7 @@ document.addEventListener('keydown', function(e){
     </div>
     <div style="font-size:12.5px;font-weight:600;color:#D9D9D9">Infloww dark</div>
   </div>
-  <div onclick="setTheme('violet')" class="theme-card" data-theme="violet" style="background:#0b0713;border:2px solid #2d1b4e;border-radius:12px;padding:12px;cursor:pointer;text-align:center">
-    <div style="display:flex;gap:5px;height:52px;border-radius:8px;overflow:hidden;margin-bottom:10px;border:1px solid #2d1b4e">
-      <div style="width:20px;background:#0c0817"></div>
-      <div style="flex:1;background:#0d0819;padding:7px;display:flex;flex-direction:column;gap:5px;justify-content:center">
-        <div style="height:6px;width:82%;background:#17102a;border-radius:4px"></div>
-        <div style="height:6px;width:52%;background:#b06cff;border-radius:4px"></div>
-      </div>
     </div>
-    <div style="font-size:12.5px;font-weight:600;color:#ece3f7">Neo luxe violet</div>
-  </div>
-  <div onclick="setTheme('gold')" class="theme-card" data-theme="gold" style="background:#0a0908;border:2px solid #2c2619;border-radius:12px;padding:12px;cursor:pointer;text-align:center">
-    <div style="display:flex;gap:5px;height:52px;border-radius:8px;overflow:hidden;margin-bottom:10px;border:1px solid #2c2619">
-      <div style="width:20px;background:#0b0a07"></div>
-      <div style="flex:1;background:#0b0a08;padding:7px;display:flex;flex-direction:column;gap:5px;justify-content:center">
-        <div style="height:6px;width:82%;background:#17140f;border-radius:4px"></div>
-        <div style="height:6px;width:52%;background:#d9b74a;border-radius:4px"></div>
-      </div>
-    </div>
-    <div style="font-size:12.5px;font-weight:600;color:#f1ead9">Midnight gold</div>
-  </div>
-</div>
 </div>
 <div class="box">
 <h3 style="margin-top:0">🌐 Langue</h3>
@@ -15274,6 +15253,9 @@ def _bangers_encart_html() -> str:
         "<button type='button' class='sv-pill' onclick='bgCycle(this)' "
         "title='Télécharge ce qui manque et envoie les annonces en attente, "
         "sans attendre le prochain passage'>⟳ Traiter maintenant</button>"
+        "<button type='button' class='sv-pill' onclick='bgCookies(this)' "
+        "title=\"Tente un vrai téléchargement avec les cookies et dit ce "
+        "qu'Instagram a répondu\">🔑 Vérifier les cookies</button>"
         "<button type='button' class='sv-pill' onclick='bgEssai(this)' "
         "title=\"Prend les 5 reels les plus vus des dernières 24 h, quel que "
         "soit leur nombre de vues, et fait tourner toute la chaîne : "
@@ -15281,8 +15263,34 @@ def _bangers_encart_html() -> str:
         "Lecture publique et gratuite, aucun crédit dépensé.\">"
         "🧪 Essai — 5 reels des 24 h</button>"
         "</div>"
+        + _bangers_cookies_ligne() +
         "<div class='sv-h' id='bg-essai' style='margin:8px 0 0'></div>"
         "</div>")
+
+
+def _bangers_cookies_ligne() -> str:
+    """Une ligne d'etat sur les cookies, sans aucun appel reseau.
+
+    Sans elle, « la video ne descend pas » et « je crois que les cookies ne
+    sont plus bons » sont deux phrases qu'on ne peut pas departager.
+    """
+    try:
+        c = _banger_etat_cookies()
+    except Exception:                                         # noqa: BLE001
+        return ""
+    if not c.get("present"):
+        dit = ("🔑 <b>Aucun fichier de cookies</b> — les reels que le public ne "
+               "sert pas resteront sans vidéo. Settings → Instagram pour en "
+               "déposer un (extension « Get cookies.txt LOCALLY »).")
+    elif not c.get("sessionid"):
+        dit = ("🔑 <b>Cookies sans sessionid</b> — le fichier a le bon format "
+               "mais ne connecte personne : il a été exporté en étant "
+               "déconnecté d'Instagram. À refaire, connecté.")
+    else:
+        dit = (f"🔑 Cookies présents — <b>{c.get('jours')} jour(s)</b>, "
+               f"{c.get('lignes_ig')} ligne(s) Instagram. Instagram les fait "
+               "expirer sans prévenir : le bouton ci-dessus le dit vraiment.")
+    return "<div class='sv-h' style='margin:8px 0 0'>" + dit + "</div>"
 
 
 def _bangers_min() -> int:
@@ -33538,12 +33546,42 @@ def _render_jailbreak_html() -> str:
         "     (r.resultat || []).forEach(function(x){"
         "       l.push('\\u2022 @' + x.compte + ' \\u2014 ' + x.vues + ' vues \\u2014 video: '"
         "              + x.video + (x.raison ? ' (' + x.raison + ')' : '')"
+        "              + ((x.trace && x.trace.length) ? ' [' + x.trace.join(' > ') + ']' : '')"
         "              + ' \\u2014 ' + (x.poste ? 'poste sur Discord' : 'pas poste'));"
         "     });"
         "     if(!(r.resultat || []).length) l.push('Aucun reel a essayer sur cette fenetre.');"
         "     z.textContent = l.join(' | ');"
         "   })"
         "   .catch(function(){ if(btn) btn.disabled = false; });"
+        "}"
+        "function bgCookies(btn){"
+        "  var z = document.getElementById('bg-essai');"
+        "  var v = btn.textContent;"
+        "  btn.disabled = true; btn.textContent = '\\u25cc test...';"
+        "  if(z) z.textContent = '\\u25cc Tentative de telechargement avec les cookies...';"
+        "  var fd = new FormData();"
+        "  fd.append('cookies', '1');"
+        "  fetch('/jailbreak/bangers', {method:'POST', body:fd})"
+        "   .then(_jbJsonOrAuth)"
+        "   .then(function(j){"
+        "     btn.disabled = false; btn.textContent = v;"
+        "     if(!j || !j.ok){"
+        "       if(typeof showToast === 'function') showToast((j && j.error) || 'Echec', 'error');"
+        "       return;"
+        "     }"
+        "     var d = j.diag || {}, c = d.cookies || {};"
+        "     var l = [];"
+        "     l.push('\\ud83d\\udd11 ' + (d.verdict || '?'));"
+        "     l.push('fichier: ' + (c.present ? (c.octets + ' o, ' + c.jours + ' j, sessionid: '"
+        "            + (c.sessionid ? 'oui' : 'NON')) : 'absent'));"
+        "     if(d.shortcode) l.push('teste sur ' + d.shortcode);"
+        "     if(d.raison) l.push('reponse: ' + d.raison);"
+        "     if(z) z.textContent = l.join(' | ');"
+        "     if(typeof showToast === 'function')"
+        "       showToast(d.verdict || 'Verification faite',"
+        "                 (d.octets > 0) ? 'success' : 'error');"
+        "   })"
+        "   .catch(function(){ btn.disabled = false; btn.textContent = v; });"
         "}"
         "function bgEssai(btn){"
         "  if(!confirm('Essai : lire les comptes suivis, prendre les 5 reels les plus'"
@@ -40397,7 +40435,17 @@ def _render_sessions_html() -> str:
                 "<span class='se-jeton %s' title='%s'>%s</span>"
                 % (classe, e(_sessions_duree(g.get("secondes", 0))), e(g["nom"]))
                 for g in gens_[:40])
-        if not sess.get("surveillee", True):
+        if sess.get("terminee", True) is False:
+            # ELLE N'A PAS ENCORE EU LIEU, ou elle est en cours. Le premier
+            # bilan listait 179 absents a la session de dix heures, a deux
+            # heures du matin. On ne reproche pas une absence a quelqu'un qui
+            # n'est pas encore attendu.
+            bloc_abs = ("<div class='se-l se-note'>"
+                        + ("Session en cours — les absents ne seront établis "
+                           "qu'à la fin." if sess["presents"] or sess["partiels"]
+                           else "Pas encore commencée.")
+                        + "</div>")
+        elif not sess.get("surveillee", True):
             # Meme regle que dans le bilan Discord : une session d avant le
             # suivi n a pas ete desertee, elle n a pas ete regardee.
             bloc_abs = ("<div class='se-l se-note'>Session non surveillée — le "
@@ -48354,16 +48402,17 @@ def _render_upload_inner(msg=None, error=None):
     #
     # Un theme ajoute cote client et oublie ici repeint donc toute la page a
     # l'envers. Un test refuse desormais que les deux listes divergent.
-    if _th not in ("light", "apple", "claude", "dark", "obsidian",
-                   "violet", "gold", "infloww"):
+    # Retires du selecteur, gardes dans la feuille de style : un cookie qui
+    # les porte encore bascule sur SOMBRE, pas sur le defaut clair.
+    if _th in ("obsidian", "violet", "gold"):
+        _th = "dark"
+    if _th not in ("light", "apple", "claude", "dark", "infloww"):
         _th = "light"          # defaut du site
     _pre = {"light": "light-pre pre-light", "apple": "light-pre pre-apple",
             "claude": "light-pre pre-claude",
-            "dark": "", "obsidian": "pre-obsidian", "violet": "pre-violet",
-            "gold": "pre-gold", "infloww": "pre-infloww"}[_th]
+            "dark": "", "infloww": "pre-infloww"}[_th]
     _bod = {"light": "light", "apple": "light apple",
             "claude": "light claude", "dark": "",
-            "obsidian": "obsidian", "violet": "violet", "gold": "gold",
             "infloww": "infloww"}[_th]
 
     html = (
@@ -48874,7 +48923,11 @@ def _banger_examiner(handle: str, reels) -> None:
 
 
 def _banger_recuperer(shortcode: str, url: str) -> tuple:
-    """Descend la video et la description d'un banger. Rend (ok, description, raison).
+    """Descend la video et la description d'un banger.
+
+    Rend (ok, description, raison, trace) — la trace dit ce qu'a fait CHAQUE
+    etape, parce que « pas de video » a trois causes qui ne se reparent pas
+    pareil : API non branchee, page qui ne sert rien, cookies perimes.
 
     L'ORDRE EST CELUI DEMANDE PAR LE PROPRIETAIRE : l'API d'abord pour le lien
     et la description (la meme qu'on utilise pour les Trends), puis les cookies
@@ -48888,9 +48941,13 @@ def _banger_recuperer(shortcode: str, url: str) -> tuple:
     import bangers as _bg
     sc = str(shortcode or "").strip()
     if not sc:
-        return False, "", "shortcode_vide"
+        return False, "", "shortcode_vide", ["shortcode_vide"]
     purl = url or f"https://www.instagram.com/reel/{sc}/"
     desc, raison, octets = "", "", None
+    # TROIS ETAPES, TROIS PANNES POSSIBLES, TROIS REPARATIONS DIFFERENTES.
+    # Une raison unique laissait croire aux cookies alors que l'API n'etait
+    # simplement pas branchee. On note donc ce qu'a fait chaque etape.
+    trace = []
 
     # 1) L'API (Apify) : elle rend le lien direct ET la legende complete, la ou
     #    le scrape public ne donne aucune des deux et le scrape RapidAPI tronque
@@ -48906,10 +48963,14 @@ def _banger_recuperer(shortcode: str, url: str) -> tuple:
                 if d.get("video_url"):
                     import veille_telegram as _vt_a
                     octets = _vt_a.download_video_bytes(d["video_url"], timeout=60)
+            trace.append("api:" + ("video" if octets else
+                                   ("legende_seule" if desc else "vide")))
         else:
             raison = "apify_non_configure"
+            trace.append("api:non_configuree")
     except Exception as e:                                    # noqa: BLE001
         raison = f"apify:{type(e).__name__}"
+        trace.append(f"api:{type(e).__name__}")
 
     # 2) La page publique, sans cle ni cookie.
     if not octets:
@@ -48918,8 +48979,11 @@ def _banger_recuperer(shortcode: str, url: str) -> tuple:
             if pub:
                 import veille_telegram as _vt_b
                 octets = _vt_b.download_video_bytes(pub, timeout=60)
+            trace.append("page:" + ("ok" if octets else
+                                    ("lien_mort" if pub else "pas_de_lien")))
         except Exception as e:                                # noqa: BLE001
             raison = raison or f"page:{type(e).__name__}"
+            trace.append(f"page:{type(e).__name__}")
 
     # 3) yt-dlp AVEC les cookies. C'est la methode qui marche sur les reels que
     #    le public ne sert pas. Elle consomme le cookie Instagram : on ne
@@ -48936,11 +49000,18 @@ def _banger_recuperer(shortcode: str, url: str) -> tuple:
                 desc = str(info["description"])
             if not octets and info.get("reason"):
                 raison = str(info["reason"])
+            _ck = _banger_etat_cookies()
+            trace.append("cookies:" + ("absents" if not _ck["present"] else
+                                       ("sans_sessionid" if not _ck["sessionid"]
+                                        else f"{_ck['jours']}j")))
+            trace.append("ytdlp:" + ("ok" if octets else
+                                     (str(info.get("reason") or "vide"))))
         except Exception as e:                                # noqa: BLE001
             raison = raison or f"ytdlp:{type(e).__name__}"
+            trace.append(f"ytdlp:{type(e).__name__}")
 
     if not octets:
-        return False, desc, (raison or "aucune_source")
+        return False, desc, (raison or "aucune_source"), trace
 
     # Ecriture atomique : un redemarrage du VPS en plein telechargement ne doit
     # pas laisser un mp4 tronque qui passerait ensuite pour une archive valide.
@@ -48952,9 +49023,98 @@ def _banger_recuperer(shortcode: str, url: str) -> tuple:
         os.replace(str(tampon), str(cible))
         if desc:
             _bg.chemin_description(sc).write_text(desc, encoding="utf-8")
-        return True, desc, ""
+        trace.append(f"ecrit:{len(octets) // 1024} ko")
+        return True, desc, "", trace
     except Exception as e:                                    # noqa: BLE001
-        return False, desc, f"ecriture:{type(e).__name__}"
+        trace.append(f"ecriture:{type(e).__name__}")
+        return False, desc, f"ecriture:{type(e).__name__}", trace
+
+
+def _banger_etat_cookies() -> dict:
+    """Les cookies Instagram : presents ? frais ? complets ? — sans reseau.
+
+    « login_requis_cookies » est rendu par yt-dlp aussi bien quand le fichier
+    MANQUE que quand il est perime : la raison seule ne permet pas de trancher,
+    et on tourne en rond a re-exporter des cookies qui n ont jamais ete deposes.
+    Ce coup d oeil local repond a la moitie de la question tout de suite.
+    """
+    import time as _t_ck
+    out = {"present": False, "chemin": "", "octets": 0, "jours": None,
+           "sessionid": False, "lignes_ig": 0}
+    try:
+        import veille_telegram as _vt_ck
+        ch = _vt_ck._find_ig_cookies()
+    except Exception:                                         # noqa: BLE001
+        ch = None
+    if not ch:
+        return out
+    try:
+        p = Path(ch)
+        st = p.stat()
+        txt = p.read_text(encoding="utf-8", errors="replace")
+        out.update({
+            "present": True,
+            "chemin": str(p),
+            "octets": int(st.st_size),
+            "jours": round(max(0.0, _t_ck.time() - st.st_mtime) / 86400.0, 1),
+            # Sans sessionid, le fichier est au bon format mais ne connecte
+            # personne : c est le cas quand on exporte les cookies en etant
+            # deconnecte d Instagram.
+            "sessionid": "sessionid" in txt,
+            "lignes_ig": sum(1 for l in txt.splitlines()
+                             if "instagram.com" in l and not l.startswith("#")),
+        })
+    except Exception as e:                                    # noqa: BLE001
+        out["erreur"] = str(e)[:120]
+    return out
+
+
+def _banger_essai_cookies(shortcode: str = "") -> dict:
+    """Tente VRAIMENT un telechargement avec les cookies, et dit ce qu Instagram
+    a repondu. Le seul moyen honnete de savoir s ils sont encore valables.
+
+    On essaie sur un reel qu on a deja en registre — donc un reel a nous, qui
+    existe. Sans registre, on ne devine pas : on le dit.
+    """
+    import bangers as _bg_ck
+    etat = {"cookies": _banger_etat_cookies()}
+    sc = str(shortcode or "").strip()
+    if not sc:
+        for f in _bg_ck.toutes():
+            if not _bg_ck.video_presente(f["shortcode"]):
+                sc = f["shortcode"]
+                break
+        if not sc:
+            fs = _bg_ck.toutes()
+            sc = fs[0]["shortcode"] if fs else ""
+    if not sc:
+        etat["verdict"] = "aucun reel au registre pour tester"
+        return etat
+    etat["shortcode"] = sc
+    url = (_bg_ck.fiche(sc) or {}).get("url") or f"https://www.instagram.com/reel/{sc}/"
+    try:
+        import veille_telegram as _vt_ck2
+        info: dict = {}
+        octets = _vt_ck2.download_via_ytdlp(url, timeout=60, info=info,
+                                            use_cookies=True)
+        etat["octets"] = len(octets or b"")
+        etat["raison"] = str(info.get("reason") or "")
+        if octets:
+            etat["verdict"] = "cookies VALABLES — la vidéo est descendue"
+        elif etat["raison"] == "login_requis_cookies":
+            etat["verdict"] = ("cookies refusés par Instagram — à re-exporter"
+                               if etat["cookies"]["present"]
+                               else "aucun fichier cookies déposé")
+        elif etat["raison"] == "ytdlp_absent":
+            etat["verdict"] = "yt-dlp n'est pas installé sur le serveur"
+        elif etat["raison"] == "audience_restreinte":
+            etat["verdict"] = ("ce reel est restreint — les cookies ne sont "
+                               "pas forcément en cause, réessaie sur un autre")
+        else:
+            etat["verdict"] = "échec : " + (etat["raison"] or "raison inconnue")
+    except Exception as e:                                    # noqa: BLE001
+        etat["verdict"] = f"erreur : {type(e).__name__}"
+    return etat
 
 
 def _banger_texte(f: dict) -> str:
@@ -49061,6 +49221,47 @@ def _banger_salon_et_envoi(f: dict, fichier) -> tuple:
         return False, 0, 0, f"timeout / erreur: {e}"
 
 
+def _banger_joindre_video(channel_id, message_id, fichier) -> bool:
+    """Poste le mp4 EN REPONSE a l annonce deja publiee.
+
+    On repond au message plutot que d editer : Discord ne permet pas d ajouter
+    une piece jointe a un message existant. La reponse garde les deux ensemble
+    dans le fil, et c est elle qui fait office de sauvegarde.
+    """
+    import asyncio
+    if _BOT_REF is None or not channel_id or not message_id:
+        return False
+    loop = getattr(_BOT_REF, "loop", None)
+    if loop is None or not loop.is_running():
+        return False
+    try:
+        if not (fichier and fichier.exists() and fichier.stat().st_size > 1024):
+            return False
+    except Exception:                                         # noqa: BLE001
+        return False
+
+    async def _joindre():
+        import discord
+        ch = _BOT_REF.get_channel(int(channel_id))
+        if ch is None:
+            return False
+        try:
+            limite = getattr(ch.guild, "filesize_limit", 26214400) or 26214400
+            if fichier.stat().st_size > limite:
+                return False        # trop gros : le fichier reste sur le VPS
+            m = await ch.fetch_message(int(message_id))
+            await m.reply(content="🎬 la vidéo, pour l archive",
+                          file=discord.File(str(fichier), filename=fichier.name))
+            return True
+        except Exception:
+            return False
+
+    try:
+        return bool(asyncio.run_coroutine_threadsafe(_joindre(), loop).result(timeout=120))
+    except Exception:
+        return False
+
+
 def _banger_reediter(channel_id: int, message_id: int, texte: str) -> bool:
     """Re-ecrit une annonce deja postee (le compteur de vues a bouge).
 
@@ -49105,14 +49306,16 @@ def _banger_cycle() -> dict:
     if _BANGER_CYCLE["en_cours"]:
         return {"en_cours": True}
     _BANGER_CYCLE["en_cours"] = True
-    bilan = {"telecharges": 0, "echecs": 0, "annonces": 0, "reeditions": 0}
+    bilan = {"telecharges": 0, "echecs": 0, "annonces": 0, "reeditions": 0,
+             "videos_jointes": 0}
     try:
         # 1) LES FICHIERS D'ABORD. Une annonce qui porte la video vaut mieux que
         #    deux messages, et l'archive est le vrai but.
         for f in _bg.a_telecharger(limite=8):
             sc = f["shortcode"]
-            ok, desc, raison = _banger_recuperer(sc, f.get("url") or "")
-            _bg.noter_telechargement(sc, ok, description=desc, raison=raison)
+            ok, desc, raison, trace = _banger_recuperer(sc, f.get("url") or "")
+            _bg.noter_telechargement(sc, ok, description=desc, raison=raison,
+                                     trace=trace)
             bilan["telecharges" if ok else "echecs"] += 1
         # 2) LES ANNONCES, plafonnees : au premier demarrage la file est pleine
         #    et six passages par jour l'ecoulent sans noyer le salon.
@@ -49123,11 +49326,23 @@ def _banger_cycle() -> dict:
             fichier = _bg.chemin_video(sc) if _bg.video_presente(sc) else None
             ok, cid, mid, info = _banger_salon_et_envoi(f, fichier)
             if ok:
-                _bg.noter_annonce(sc, cid, mid, vues=int(f.get("vues") or 0))
+                _bg.noter_annonce(sc, cid, mid, vues=int(f.get("vues") or 0),
+                                  avec_video=bool(fichier))
                 bilan["annonces"] += 1
             else:
                 log.warning(f"[bangers] annonce {sc} : {info}")
                 break        # salon absent / bot HS : inutile d'insister
+        # 2 bis) LA VIDEO EN RETARD. Une annonce partie sans piece jointe
+        #    (cookies perimes ce jour-la) laisse la seule copie sur le VPS.
+        #    Des que le fichier descend, on le poste en reponse : c'est la
+        #    sauvegarde, elle ne peut pas rester sur un seul disque.
+        for f in _bg.a_completer():
+            sc = f["shortcode"]
+            a = f.get("annonce") or {}
+            if _banger_joindre_video(a.get("channel_id"), a.get("message_id"),
+                                     _bg.chemin_video(sc)):
+                _bg.noter_video_envoyee(sc)
+                bilan["videos_jointes"] = bilan.get("videos_jointes", 0) + 1
         # 3) LES COMPTEURS. « elle est a 50 000 maintenant » : on re-ecrit le
         #    message existant plutot que d'en poster un second.
         for f in _bg.a_reediter():
@@ -49240,9 +49455,12 @@ def _banger_test(heures: int = 24, combien: int = 5,
              "vues": x["vues"],
              "video": _bg_t.fiche(x["shortcode"]).get("video"),
              "raison": _bg_t.fiche(x["shortcode"]).get("raison_video") or "",
+             # L'etape qui a lache, pas seulement le dernier message d'erreur.
+             "trace": _bg_t.fiche(x["shortcode"]).get("trace_video") or [],
              "poste": bool((_bg_t.fiche(x["shortcode"]).get("annonce") or {})
                            .get("message_id"))}
             for x in fiches]
+        rapport["cookies"] = _banger_etat_cookies()
     except Exception as e:                                    # noqa: BLE001
         log.error(f"[bangers] essai : {e}")
         rapport["erreur"] = str(e)[:200]
@@ -59998,6 +60216,12 @@ def create_app():
             return jsonify({"ok": True, "en_cours": _BANGER_TEST["en_cours"],
                             "etape": _BANGER_TEST["etape"],
                             "rapport": _BANGER_TEST["rapport"]})
+        if request.form.get("cookies") == "1":
+            # Un VRAI telechargement, pas une lecture de fichier : seul
+            # Instagram sait si ses cookies sont encore acceptes.
+            return jsonify({"ok": True,
+                            "diag": _banger_essai_cookies(
+                                request.form.get("shortcode") or "")})
         if request.form.get("test") == "1":
             if _BANGER_TEST["en_cours"]:
                 return jsonify({"ok": True, "lance": False, "en_cours": True,

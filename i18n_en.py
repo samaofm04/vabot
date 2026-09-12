@@ -245,6 +245,8 @@ ETATS = {
     "Assiduité du jour": "Attendance today",
     "Poster le résumé sur Discord": "Post the summary to Discord",
     "Poster le résumé du jour affiché": "Post the summary for the day shown",
+    "Pas encore commencée.": "Not started yet.",
+    "Session en cours — les absents ne seront établis qu'à la fin.": "Session running — absences will only be established once it ends.",
     "Session non surveillée — le suivi ne tournait pas encore. Aucun absent ne peut en être déduit.":
         "Session not monitored — tracking was not running yet. No absence can be inferred from it.",
     "Passés vite": "Dropped in briefly",
