@@ -118,9 +118,23 @@ def phrase_classement(identites, ordre=None) -> str:
     # Elle ne parle plus de « numéros » : il n'y en a plus, chaque ligne porte
     # un badge. On montre donc la médaille elle-même, celle qu'il a sous les
     # yeux à la première ligne.
-    return ("**C'est un classement : de la meilleure model à la moins bonne.**"
-            "\nCommence par le haut — la %s est celle qui marche le mieux en "
-            "ce moment." % MEDAILLES[0])
+    phrase = ("**C'est un classement : de la meilleure model à la moins "
+              "bonne.**\nCommence par le haut — la %s est celle qui marche le "
+              "mieux en ce moment." % MEDAILLES[0])
+    # ET ON DIT CE QUI N'EN EST PAS. Le propriétaire a demandé « une médaille
+    # pour chacun » ; il en manque quand même une à toute identité qu'il n'a
+    # pas rangée à la main, parce qu'on refuse d'inventer un rang (voir
+    # `rang` : numéroter une liste alphabétique donnerait un faux classement,
+    # et le VA lirait « 1 » comme « celle qui marche le mieux »).
+    #
+    # Le taire, c'est le laisser chercher pourquoi trois lignes sont nues.
+    # Le dire, c'est lui donner le geste qui les remplit.
+    nues = [i for i in identites if str(i).lower() not in connues]
+    if nues:
+        phrase += ("\n*%d model(s) ne sont pas encore classées : elles suivent "
+                   "en bas, sans médaille. Range-les par glisser-déposer sur "
+                   "le site pour leur en donner une.*" % len(nues))
+    return phrase
 
 
 #: LE RANG SE DESSINE, ET CA VAUT POUR TOUS -- PAS SEULEMENT LE PODIUM.
@@ -136,9 +150,17 @@ def phrase_classement(identites, ordre=None) -> str:
 #: CHIFFRES un par un, « 1️⃣2️⃣ » pour douze. Ce n'est pas elegant, c'est
 #: lisible -- et le menu US compte vingt-deux models.
 #:
-#: Rien que des sequences ANCIENNES et sans ZWJ, meme regle que la palette de
-#: clics_personnes : la pastille chiffree existe depuis Emoji 1.0, elle se
-#: dessine donc aussi sur les vieux telephones qui lisent ces menus.
+#: UNE REGLE DE PALETTE EST ENFREINTE ICI, SCIEMMENT. clics_personnes
+#: n'accepte que des emoji d'UN SEUL point de code, parce qu'une sequence se
+#: casse en deux dessins sur les polices anciennes. Une pastille chiffree en
+#: compte trois (le chiffre, le selecteur de variante, la marque
+#: d'encadrement) : elle ne respecte donc PAS cette regle.
+#:
+#: On la prend quand meme, pour deux raisons. La sequence keycap est l'une
+#: des plus vieilles d'Unicode et Discord la dessine sur tous ses clients ; et
+#: surtout, si elle se cassait, ce qui reste a l'ecran est le CHIFFRE -- soit
+#: exactement l'ancien affichage. Le pire cas de ce choix, c'est l'etat
+#: d'avant. Aucun ZWJ en revanche, la regle qui compte vraiment.
 KEYCAPS = tuple(chr(0x30 + c) + "\uFE0F\u20E3" for c in range(10))
 DIX = "\U0001F51F"
 

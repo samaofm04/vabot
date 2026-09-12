@@ -730,11 +730,38 @@ try:
           _uLg._couper_discord("1\uFE0F\u20E3" + "4\uFE0F\u20E3" + " Nina", 4)
           == "1\uFE0F\u20E3",
           repr(_uLg._couper_discord("1\uFE0F\u20E3" + "4\uFE0F\u20E3" + " Nina", 4)))
-    check("ordre : un libelle trop long tient sous le plafond de Discord",
-          _uLg._long_discord(_uLg._libelle_model(
-              "z" * 90, {"z" * 90: _ioOr.prefixe_rang(14) + " " + "Z" * 90})) <= 80,
-          str(_uLg._long_discord(_uLg._libelle_model(
-              "z" * 90, {"z" * 90: _ioOr.prefixe_rang(14) + " " + "Z" * 90}))))
+    # CE TEST NE TRAVERSAIT PAS LA BRANCHE QU IL PRETENDAIT PROTEGER : une
+    # identite inventee n a aucun style, donc `past` restait vide et
+    # _libelle_model sortait par le chemin court. Il faut lui en donner pour
+    # atteindre la coupe qui menage les styles.
+    import identity_styles as _istLg
+    _istLg.definir("zz_plafond", ["caption", "brut", "montage", "flash"])
+    try:
+        _nomLg = "zz_plafond"
+        _brutLg = _ioOr.prefixe_rang(14) + " " + "Z" * 120
+        _labLg = _uLg._libelle_model(_nomLg, {_nomLg: _brutLg})
+        check("ordre : un libelle trop long tient sous le plafond de Discord",
+              _uLg._long_discord(_labLg) <= 80, "%d unite(s) : %r"
+              % (_uLg._long_discord(_labLg), _labLg[-30:]))
+        check("ordre : la coupe menage les styles, elle mange le nom",
+              _labLg.endswith(_istLg.mots(_nomLg)) and "…" in _labLg,
+              repr(_labLg))
+        check("ordre : le badge survit a la coupe, entier",
+              _labLg.startswith(_ioOr.prefixe_rang(14)), repr(_labLg[:12]))
+        # Le dernier filet : si les styles seuls devaient manger les 80
+        # unites, le libelle sortait PLUS LONG que la limite -- et Discord
+        # refuse alors tout le message, sans rien afficher.
+        _svMots = _istLg.mots
+        try:
+            _istLg.mots = lambda i, separateur=" + ": "S" * 120
+            _labX = _uLg._libelle_model(_nomLg, {_nomLg: _brutLg})
+            check("ordre : meme des styles demesures ne depassent pas 80",
+                  _uLg._long_discord(_labX) <= 80,
+                  "%d unite(s)" % _uLg._long_discord(_labX))
+        finally:
+            _istLg.mots = _svMots
+    finally:
+        _istLg.definir("zz_plafond", [])
     check("ordre : une identite non rangee reste sans numero",
           _ioOr.etiqueter(["lola", "zoe"], _ordOr)["zoe"] == "Zoe")
     # Et le badge arrive bien jusqu'au libelle, pas seulement dans la
@@ -850,6 +877,19 @@ try:
     # Annoncer un classement qui n existe pas serait pire que se taire.
     check("ordre : rien n est annonce quand rien n est range",
           _ioOr.phrase_classement(["zoe", "anna"], _ordOr) == "")
+    # UNE LIGNE NUE AU MILIEU DE LIGNES QUI PORTENT UN BADGE se remarque, et
+    # le proprietaire a demande « une medaille pour chacun ». On refuse
+    # toujours d inventer un rang pour une identite qu il n a pas rangee --
+    # mais on lui dit COMBIEN il en reste, et le geste qui les remplit.
+    _phrNu = _ioOr.phrase_classement(["lola", "emma", "zoe", "anna", "nina"],
+                                     _ordOr)
+    check("ordre : le menu compte les models sans badge et dit quoi faire",
+          "3 model" in _phrNu and "glisser" in _phrNu.lower(),
+          "phrase : %r" % _phrNu[-120:])
+    check("ordre : rien n est dit quand toutes portent leur badge",
+          "pas encore class" not in _ioOr.phrase_classement(["lola", "emma"],
+                                                            _ordOr),
+          _ioOr.phrase_classement(["lola", "emma"], _ordOr)[-80:])
     check("ordre : la phrase est bien posee dans le menu des models",
           "_io.phrase_classement(models)" in _srcBot,
           "les numeros s afficheraient sans etre expliques")
