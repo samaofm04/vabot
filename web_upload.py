@@ -1115,10 +1115,10 @@ LOGIN_HTML = """
 <html lang="fr"><head><meta charset="utf-8"><title>Connexion</title><meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Noto+Color+Emoji&display=swap">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif,'Apple Color Emoji','Noto Color Emoji','Segoe UI Emoji';
   background:#050813;color:#eef2ff;min-height:100vh;display:flex;align-items:center;justify-content:center;
   position:relative;overflow:hidden;
   -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;letter-spacing:-.01em}
@@ -1329,12 +1329,12 @@ UPLOAD_HTML = """
 <!-- Fonts NON bloquantes (media=print + onload) : le premier rendu n'attend
      plus fonts.googleapis.com — le texte s'affiche en police systeme puis
      bascule sur Inter (display=swap). -->
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" media="print" onload="this.media='all'">
-<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"></noscript>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Color+Emoji&display=swap" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Color+Emoji&display=swap"></noscript>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" defer></script>
 <style>
 *{box-sizing:border-box}
-body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;background:#0f0f0f;color:#eee;margin:0;padding:0;min-height:100vh;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;letter-spacing:-.01em}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',sans-serif,'Apple Color Emoji','Noto Color Emoji','Segoe UI Emoji';background:#0f0f0f;color:#eee;margin:0;padding:0;min-height:100vh;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;letter-spacing:-.01em}
 
 /* ============ PAGE LOADER GLOBAL (entre 2 navigations) ============ */
 #page-loader{position:fixed;inset:0;background:rgba(15,15,15,.92);z-index:99999;display:none;align-items:center;justify-content:center;backdrop-filter:blur(6px);animation:fadeIn .2s}
@@ -2045,7 +2045,7 @@ body.gold input:focus,body.gold select:focus,body.gold textarea:focus{border-col
    hérite des règles du thème clair et on ne surcharge que la personnalité
    iOS — palette systemBlue, surfaces, rayons, tracking. --- */
 body.apple{background:#f2f2f7!important;color:#1c1c1e!important;
-  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display",system-ui,"Segoe UI",Roboto,sans-serif!important;
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display",system-ui,"Segoe UI",Roboto,sans-serif,'Apple Color Emoji','Noto Color Emoji','Segoe UI Emoji'!important;
   -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 body.apple .main{background:#f2f2f7!important}
 /* Chrome translucide : le contenu défile DESSOUS la barre, il ne la recouvre pas */
@@ -2159,7 +2159,7 @@ body.light.claude{
 }
 body.light.claude{background:linear-gradient(180deg,#faf9f5 0%,#f6f3ec 100%)!important;
   background-attachment:fixed!important;color:#1f1e1d!important;
-  font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif!important;
+  font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif,'Apple Color Emoji','Noto Color Emoji','Segoe UI Emoji'!important;
   -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 body.light.claude .main{background:transparent!important}
 /* La barre laterale est un peu plus dense que le fond : c'est ce qui donne
@@ -2173,7 +2173,7 @@ body.light.claude .box,body.light.claude .stat,body.light.claude .reel-card,body
    qu'un theme clair beige de plus. Le corps de texte reste en sans : du
    serif partout serait illisible dans un tableau de chiffres. */
 body.light.claude h1,body.light.claude h2,body.light.claude h3,body.light.claude .title{
-  font-family:ui-serif,Georgia,"Iowan Old Style","Times New Roman",serif!important;
+  font-family:ui-serif,Georgia,"Iowan Old Style","Times New Roman",serif,'Apple Color Emoji','Noto Color Emoji','Segoe UI Emoji'!important;
   letter-spacing:-.012em!important;font-weight:600!important}
 body.light.claude h1,body.light.claude .title{line-height:1.15!important}
 body.light.claude .subtitle,body.light.claude small,body.light.claude label{color:#6f6b60!important}
@@ -30032,7 +30032,7 @@ def _render_bio_public_page(identity: str) -> str:
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>@{identity} — {display_name}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Color+Emoji&display=swap">
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{font-family:'Inter',-apple-system,sans-serif;background:{bg};min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:40px 20px;color:{text};-webkit-font-smoothing:antialiased}}
@@ -48563,7 +48563,7 @@ def _render_upload(msg=None, error=None):
         tb_safe = tb_text.replace("<", "&lt;").replace(">", "&gt;")
         return f"""<!DOCTYPE html>
 <html><head><title>Youlab — Erreur</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Color+Emoji&display=swap">
 <style>
 *{{box-sizing:border-box;margin:0;padding:0;font-family:'Inter',sans-serif}}
 body{{background:#0a0a0a;color:#eee;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:40px}}
@@ -49444,7 +49444,17 @@ def _banger_texte(f: dict) -> str:
     elif f.get("video") == "perdue":
         etat.append("🎬 vidéo non récupérable (" + str(f.get("raison_video") or "?") + ")")
     else:
-        etat.append("🎬 téléchargement en attente")
+        # « EN ATTENTE » NE DOIT PAS MENTIR. Hors de la fenetre de 24 h, la
+        # video ne descendra jamais : on ne telecharge que les meilleurs reels
+        # du jour, et le dire evite d'attendre un fichier qui ne vient pas.
+        _dansf = True
+        try:
+            import bangers as _bgf
+            _dansf = _bgf.dans_la_fenetre(f)
+        except Exception:
+            pass
+        etat.append("🎬 téléchargement en attente" if _dansf
+                    else "🎬 hors sélection du jour — pas de vidéo")
     if f.get("description"):
         etat.append("📝 description gardée")
     lignes.append(" · ".join(etat))

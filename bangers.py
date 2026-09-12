@@ -74,6 +74,19 @@ AGE_MAX_ANNONCE_SEC = 30 * 86400
 #: plafond, le premier démarrage poste des dizaines de messages d'affilée.
 PLAFOND_ANNONCES = 12
 
+#: LA FENÊTRE DU TÉLÉCHARGEMENT. On ne descend que ce qui vient d'être posté.
+#: Chaque vidéo coûte un appel Apify, et un reel d'avant-hier ne sera pas plus
+#: intéressant demain — il est déjà dans le registre avec son lien et ses vues.
+#: Sans cette borne, relancer le cycle repartait chercher des reels vieux de
+#: plusieurs jours, encore et encore : c'est ce que le propriétaire a vu brûler.
+FENETRE_VIDEO_SEC = 24 * 3600
+
+#: COMBIEN DE VIDÉOS PAR JOUR, AU MAXIMUM. « Juste les 10/15 meilleurs reels
+#: des 24 dernières heures, c'est tout. » Le plafond est GLISSANT (les
+#: dernières 24 h, pas « depuis minuit ») : un quota calé sur minuit se
+#: viderait d'un coup à 00h05 en six passages d'affilée.
+PLAFOND_VIDEOS_JOUR = 12
+
 #: Au-delà, on cesse de réessayer le téléchargement : le reel est supprimé,
 #: privé, ou non servi en public. La fiche reste, avec son lien et ses vues.
 ESSAIS_VIDEO_MAX = 6
@@ -277,23 +290,70 @@ def _entier(v) -> int:
 
 # ---------------------------------------------------------------- archivage --
 
-def a_telecharger(limite: int = 20) -> List[dict]:
-    """Les bangers dont la vidéo manque encore, les plus récents d'abord.
+def a_telecharger(limite: int = 0, maintenant: float = 0.0) -> List[dict]:
+    """Les MEILLEURS reels des dernières 24 h. Rien d'autre.
 
-    On passe les fiches qui ont déjà épuisé leurs essais : un reel supprimé ne
-    redeviendra pas téléchargeable, et réessayer six fois par jour pendant des
-    mois brûlerait du quota pour rien.
+    AVANT : toutes les fiches sans vidéo, les plus récemment DÉTECTÉES
+    d'abord, huit par passage et six passages par jour. Une fiche restait
+    candidate indéfiniment, donc relancer le cycle repartait chercher des
+    reels de l'avant-veille — et chaque essai coûte un appel Apify.
+
+    MAINTENANT, trois bornes :
+      la FENÊTRE   on ne regarde que ce qui a été POSTÉ dans les 24 h ;
+      le CLASSEMENT  on prend les plus VUS d'abord, pas les derniers aperçus ;
+      le PLAFOND   au maximum PLAFOND_VIDEOS_JOUR par 24 h glissantes, et ce
+                   qui a déjà été descendu pendant ces 24 h est DÉCOMPTÉ —
+                   sans ça, six passages par jour prendraient six fois le
+                   plafond.
+
+    Ce qui sort de la fenêtre sans avoir été descendu ne le sera jamais : la
+    fiche garde son lien, ses vues et sa description, seul le fichier manque.
+    C'est le prix demandé, et il est dit à l'écran (« hors sélection »).
+
+    `limite` ne sert qu'à demander MOINS que le plafond ; elle ne permet
+    jamais d'en prendre plus.
     """
-    out = []
+    now = float(maintenant or time.time())
+    depuis = now - FENETRE_VIDEO_SEC
+    deja, out = 0, []
     for f in toutes():
+        # Ce qui a ete descendu pendant la fenetre compte contre le plafond,
+        # que le fichier soit encore la ou non.
+        if _entier(f.get("video_le")) >= depuis:
+            deja += 1
         sc = f["shortcode"]
         if video_presente(sc):
             continue
         if _entier(f.get("essais_video")) >= ESSAIS_VIDEO_MAX:
             continue
+        if not dans_la_fenetre(f, now):
+            continue
         out.append(f)
-    out.sort(key=lambda f: -_entier(f.get("detecte_le")))
-    return out[:max(0, int(limite or 0))]
+    # LE MEILLEUR D'ABORD. Le tri par date de detection faisait descendre un
+    # reel a 10 001 vues avant un reel a 300 000 vues repere dix minutes plus
+    # tard : quand le plafond mord, c'est le second qu'on veut.
+    out.sort(key=lambda f: (-_entier(f.get("vues")),
+                            -_entier(f.get("poste_le"))))
+    reste = max(0, PLAFOND_VIDEOS_JOUR - deja)
+    if limite:
+        reste = min(reste, max(0, int(limite)))
+    return out[:reste]
+
+
+def dans_la_fenetre(f: dict, maintenant: float = 0.0) -> bool:
+    """Ce reel est-il assez récent pour mériter un téléchargement ?
+
+    On se cale sur la date de PUBLICATION : un reel repéré aujourd'hui mais
+    posté il y a trois jours n'a pas à coûter un appel.
+
+    REPLI SUR LA DÉTECTION quand la publication est inconnue. Toutes les
+    sources ne donnent pas `taken_at` ; exiger cette date aurait coupé TOUS
+    les téléchargements le jour où la source change, sans un mot. Un reel
+    découvert dans les dernières 24 h est de toute façon récent.
+    """
+    now = float(maintenant or time.time())
+    ref = _entier((f or {}).get("poste_le")) or _entier((f or {}).get("detecte_le"))
+    return bool(ref) and ref >= now - FENETRE_VIDEO_SEC
 
 
 def noter_telechargement(shortcode: str, reussi: bool,

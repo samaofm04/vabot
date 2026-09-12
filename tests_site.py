@@ -9637,7 +9637,7 @@ try:
           "closest('.subgroup')" in _sT)
 
     # Le logo GetMySocial sur le report des clics : sa marque est decoupee
-    # dans le logotype fourni (le mot ecrit en toutes lettres est jete) et
+    # dans le logotype fourni (le mot ecrit en toutes lettres est jete), et
     # elle vit dans le meme sprite que les autres.
     check("integrations : le logo GetMySocial est declare et pose",
           '<symbol id="lg-gms"' in _srcG and _srcG.count("#lg-gms") == 1,
@@ -10633,7 +10633,7 @@ try:
         check("bangers : la raison de l echec est retenue (cookie ou reel mort)",
               _fA.get("raison_video") == "audience_restreinte")
         check("bangers : on cesse de reessayer apres N echecs",
-              "AAAAA1" not in [f["shortcode"] for f in _bg.a_telecharger()])
+              "AAAAA1" not in [f["shortcode"] for f in _bg.a_telecharger(maintenant=_nowB)])
         # ... mais on n attend pas indefiniment : deux tentatives ratees et
         # l annonce part quand meme, avec le lien seul. Un banger dont personne
         # n entend parler ne vaut pas mieux qu un message sans video.
@@ -10646,7 +10646,7 @@ try:
         # a marquer « perdue » une video parfaitement telechargeable le
         # lendemain, une fois les cookies refaits.
         _bg.forcer("jessy.mael", {"shortcode": "EEEEE5", "views": 5000,
-                                  "taken_at": _recentB})
+                                  "taken_at": int(_nowB - 3600)})
         for _i in range(12):
             _bg.noter_telechargement("EEEEE5", False, raison="login_requis_cookies")
         check("bangers : un cookie perime ne consomme AUCUNE tentative",
@@ -10654,7 +10654,7 @@ try:
               and _bg.fiche("EEEEE5").get("video") != "perdue",
               str(_bg.fiche("EEEEE5").get("essais_video")))
         check("bangers : on continue d essayer tant que la panne est chez nous",
-              "EEEEE5" in [f["shortcode"] for f in _bg.a_telecharger()])
+              "EEEEE5" in [f["shortcode"] for f in _bg.a_telecharger(maintenant=_nowB)])
         # ... mais l annonce, elle, ne doit pas attendre les cookies : sinon on
         # ignore qu un reel a explose.
         check("bangers : l annonce part quand meme si la panne vient de nous",
@@ -11131,14 +11131,74 @@ try:
           float(getattr(_B, "DELAI_MINI", 0)) >= 2.0)
 
     # Une barre plantee a 33 % alors que la commande est finie fait croire que
-    # ca travaille encore : CHAQUE sortie doit avancer le compteur.
-    _srcGen = _inPg.getsource(_cuPg.UserCog._gen_and_send_montaged)
-    check("barre : chaque sortie de la generation avance le compteur",
-          _srcGen.count("suivi.un_de_plus()") == _srcGen.count("            return")
-          or _srcGen.count("suivi.un_de_plus()") >= 5,
-          str(_srcGen.count("suivi.un_de_plus()")))
+    # ca travaille encore : CHAQUE sortie doit avancer le compteur. On compte
+    # les sorties par l ARBRE, pas par des sous-chaines : l ancienne version
+    # comparait deux comptages textuels qui ne valaient deja plus la meme
+    # chose, et ne tenait que par une branche « ou >= 5 » toujours vraie.
+    import ast as _astPg
+
+    def _sortiesEtCrans(fn):
+        _a = _astPg.parse(_inPg.getsource(fn).lstrip())
+        _f = _a.body[0]
+        _ret = sum(1 for n in _astPg.walk(_f) if isinstance(n, _astPg.Return))
+        _cr = sum(1 for n in _astPg.walk(_f)
+                  if isinstance(n, _astPg.Call)
+                  and getattr(n.func, "attr", "") == "un_de_plus")
+        return _ret, _cr
+
+    for _fn, _nom in ((_cuPg.UserCog._gen_and_send_montaged, "montage"),
+                      (_cuPg.UserCog._gen_and_send_caption, "caption")):
+        _ret, _cr = _sortiesEtCrans(_fn)
+        check("barre : chaque sortie de la generation (%s) avance le compteur" % _nom,
+              _cr >= _ret, "%d cran(s) pour %d sortie(s)" % (_cr, _ret))
+
+    # L OUBLI D AUJOURD HUI, DETECTE AUTOMATIQUEMENT. Le proprietaire a du
+    # signaler lui-meme que « Template + Brut » n avait pas de barre : ce test
+    # le dira desormais avant lui. Deux exceptions NOMMEES : elles generent un
+    # seul element, une barre y serait du bruit.
+    _SANS_BARRE_OK = {"_caption_choisie", "on_submit"}
+    _arbreU = _astPg.parse(_plPg.Path("cogs/user.py").read_text(encoding="utf-8"))
+    _porteur = {}
+    for _n in _astPg.walk(_arbreU):
+        if isinstance(_n, (_astPg.FunctionDef, _astPg.AsyncFunctionDef)):
+            for _s2 in _astPg.walk(_n):
+                if isinstance(_s2, _astPg.Call):
+                    _porteur.setdefault(id(_s2), _n.name)
+    _oublis = []
+    for _n in _astPg.walk(_arbreU):
+        if not isinstance(_n, _astPg.Call):
+            continue
+        _nomf = getattr(_n.func, "attr", None) or getattr(_n.func, "id", None)
+        if _nomf not in ("_gen_and_send_montaged", "_gen_and_send_caption"):
+            continue
+        if any(k.arg == "suivi" for k in _n.keywords):
+            continue
+        _qui = _porteur.get(id(_n), "?")
+        if _qui not in _SANS_BARRE_OK:
+            _oublis.append("%s -> %s" % (_qui, _nomf))
+    check("barre : aucun flux generateur n est laisse sans barre",
+          not _oublis, ", ".join(_oublis))
+    # Le parametre doit rester OPTIONNEL : les deux cas 1/1 appellent sans lui.
+    for _fn, _nom in ((_cuPg.UserCog._gen_and_send_montaged, "montage"),
+                      (_cuPg.UserCog._gen_and_send_caption, "caption")):
+        _par = _inPg.signature(_fn).parameters.get("suivi")
+        check("barre : « suivi » existe et reste optionnel (%s)" % _nom,
+              _par is not None and _par.default is None)
+    # « Reel 2/3 » au-dessus d un TEMPLATE annonce le mauvais objet.
+    check("barre : le mot de l element n est plus « Reel » en dur",
+          "self.mot" in _inPg.getsource(_B._corps))
+    # Servi par le stock, la boucle d attente ne tourne pas : sans un mot, la
+    # barre parait figee alors que tout va bien.
+    for _fn, _nom in ((_cuPg.UserCog._gen_and_send_montaged, "montage"),
+                      (_cuPg.UserCog._gen_and_send_caption, "caption")):
+        check("barre : la reserve est annoncee, pas subie (%s)" % _nom,
+              "servi depuis la réserve" in _inPg.getsource(_fn))
+    # Sans lecture du pct, la barre caption n avancerait que d un cran par
+    # element : la barre-a-l-horloge qu on refuse ailleurs.
+    check("barre : la boucle caption suit le moteur (pct), pas l horloge",
+          '_st.get("pct")' in _inPg.getsource(_cuPg.UserCog._gen_and_send_caption))
     check("barre : l avancement vient du moteur, pas de l horloge",
-          '_st.get("pct")' in _srcGen and "time.time()" not in _srcGen)
+          '_st.get("pct")' in _inPg.getsource(_cuPg.UserCog._gen_and_send_montaged))
     # reelmonte est une commande app_commands : le code vit dans .callback,
     # l objet Command lui-meme n est pas lisible par inspect.
     _rm = getattr(_cuPg.UserCog.reelmonte, "callback", _cuPg.UserCog.reelmonte)
@@ -11644,6 +11704,87 @@ try:
           "Rien n'a pu être mis à jour" in _srcP)
 except Exception as _eP:
     check("pose : testable", False, repr(_eP)[:220])
+
+# --- Les videos de bangers coutent de l argent ---------------------------
+# « Vas-y avec Apify, je pense que la t es en train de cramer. Tu peux faire
+# juste chaque jour les 10/15 meilleurs reels des 24 dernieres heures, c est
+# tout. » Avant : toutes les fiches sans video, huit par passage, six passages
+# par jour, sans aucune limite d age -- relancer le cycle repartait chercher
+# des reels de l avant-veille.
+try:
+    import bangers as _bgF, time as _tF, tempfile as _tmpF
+
+    _savF = (_bgF.FICHIER, _bgF.DOSSIER)
+    try:
+        _dirF = pathlib.Path(_tmpF.mkdtemp())
+        _bgF.FICHIER, _bgF.DOSSIER = _dirF / "b.json", _dirF / "v"
+        _nF = _tF.time()
+        _regF = {}
+        for _i in range(20):                    # 20 reels dans la fenetre
+            _regF["recent%02d" % _i] = {
+                "compte": "c", "vues": 10000 + _i * 1000,
+                "poste_le": int(_nF - 3600), "detecte_le": int(_nF),
+                "video": "attente", "essais_video": 0, "annonce": {}}
+        for _i in range(30):                    # 30 reels d avant-hier
+            _regF["vieux%02d" % _i] = {
+                "compte": "c", "vues": 500000,
+                "poste_le": int(_nF - 86400 * 2), "detecte_le": int(_nF - 86400 * 2),
+                "video": "attente", "essais_video": 0, "annonce": {}}
+        _bgF._ecrire({"reels": _regF, "seuil": 10000})
+
+        _selF = _bgF.a_telecharger()
+        check("bangers : le plafond du jour est respecte",
+              len(_selF) == _bgF.PLAFOND_VIDEOS_JOUR, str(len(_selF)))
+        # LA FENETRE : c est elle qui arrete l hemorragie. Les vieux sont a
+        # 500 000 vues et passent quand meme a la trappe -- c est voulu.
+        check("bangers : plus aucun reel hors des 24 h",
+              not [f for f in _selF if f["shortcode"].startswith("vieux")],
+              str([f["shortcode"] for f in _selF if f["shortcode"].startswith("vieux")]))
+        # LE MEILLEUR D ABORD : quand le plafond mord, on veut le reel a
+        # 300 000 vues, pas celui a 10 001 repere dix minutes plus tot.
+        check("bangers : les plus VUS passent en premier",
+              [f["vues"] for f in _selF] == sorted((f["vues"] for f in _selF),
+                                                   reverse=True),
+              str([f["vues"] for f in _selF][:4]))
+
+        # CE QUI A DEJA ETE DESCENDU COMPTE : sans ca, six passages par jour
+        # prendraient six fois le plafond.
+        _dF = _bgF.charger()
+        for _i in range(_bgF.PLAFOND_VIDEOS_JOUR):
+            _dF["reels"]["recent%02d" % _i]["video_le"] = int(_nF - 3600)
+        _bgF._ecrire(_dF)
+        check("bangers : le plafond tient sur les six passages du jour",
+              _bgF.a_telecharger() == [])
+        # Et il se rouvre quand les telechargements sortent de la fenetre.
+        _dF = _bgF.charger()
+        for _i in range(_bgF.PLAFOND_VIDEOS_JOUR):
+            _dF["reels"]["recent%02d" % _i]["video_le"] = int(_nF - 86400 * 2)
+        _bgF._ecrire(_dF)
+        check("bangers : le lendemain, le quota repart",
+              len(_bgF.a_telecharger()) == _bgF.PLAFOND_VIDEOS_JOUR)
+        # `limite` ne sert qu a demander MOINS.
+        check("bangers : la limite d appel ne depasse jamais le plafond",
+              len(_bgF.a_telecharger(limite=3)) == 3
+              and len(_bgF.a_telecharger(limite=99)) == _bgF.PLAFOND_VIDEOS_JOUR)
+        # REPLI SUR LA DETECTION : toutes les sources ne donnent pas la date
+        # de publication. L exiger aurait coupe TOUS les telechargements le
+        # jour ou la source change, sans un mot.
+        check("bangers : sans date de publication, on se rabat sur la detection",
+              _bgF.dans_la_fenetre({"poste_le": 0, "detecte_le": int(_nF - 3600)})
+              and not _bgF.dans_la_fenetre({"poste_le": 0,
+                                            "detecte_le": int(_nF - 86400 * 3)}))
+        check("bangers : une fiche sans aucune date n est pas telechargee",
+              not _bgF.dans_la_fenetre({}))
+    finally:
+        _bgF.FICHIER, _bgF.DOSSIER = _savF
+
+    # « En attente » ne doit pas mentir : hors fenetre, la video ne viendra
+    # jamais, et l ecran doit le dire au lieu de laisser esperer.
+    check("bangers : l ecran distingue « en attente » de « hors selection »",
+          "hors s\u00e9lection du jour" in
+          pathlib.Path("web_upload.py").read_text(encoding="utf-8"))
+except Exception as _eF:
+    check("bangers : fenetre testable", False, repr(_eF)[:220])
 
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
