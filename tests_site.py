@@ -9392,6 +9392,76 @@ except Exception as _eI:
 
 print()
 print("=" * 70)
+print("THEMES : le serveur et le navigateur connaissent les MEMES")
+print("=" * 70)
+try:
+    import re as _reTh2, pathlib as _plTh2
+    _srcTh2 = _plTh2.Path("web_upload.py").read_text(encoding="utf-8")
+    # La table des LIBELLES est la liste de reference : c'est elle qui dit
+    # quels themes existent, et elle sert au selecteur.
+    _mTh2 = _reTh2.search(r"return \(\{dark:'sombre'(.*?)\}\)\[t\]", _srcTh2, _reTh2.S)
+    _tous = set(_reTh2.findall(r"(\w+):'", _mTh2.group(0))) if _mTh2 else set()
+    check("themes : la table des libelles est lisible",
+          len(_tous) >= 7, str(sorted(_tous)))
+
+    # LE SERVEUR PEINT LA PAGE AVANT QUE LE JAVASCRIPT TOURNE. Un theme qu'il
+    # ne reconnait pas retombe sur « light » : le navigateur affiche une page
+    # BLANCHE, cartes comprises, puis le script la repeint. C'est exactement
+    # ce qui est arrive a « infloww » -- declare partout cote client, oublie
+    # dans ces trois tables-la.
+    _d = _srcTh2.index("_th = \"light\"          # defaut du site")
+    _bloc = _srcTh2[_d - 400:_d + 700]
+    _manquants = sorted(t for t in _tous if ("\"%s\"" % t) not in _bloc)
+    check("themes : le serveur accepte tous les themes du selecteur",
+          not _manquants,
+          "absent(s) de la liste, du _pre ou du _bod : " + ", ".join(_manquants))
+
+    # Et cote client, les memes doivent figurer dans le nettoyage des classes,
+    # sinon deux themes se superposent au changement.
+    _mCl = _reTh2.search(r"b\.classList\.remove\(([^)]*)\)", _srcTh2)
+    _nett = set(_reTh2.findall(r"'(\w+)'", _mCl.group(1))) if _mCl else set()
+    _oubl = sorted(t for t in _tous if t != "dark" and t not in _nett)
+    check("themes : changer de theme nettoie toutes les classes",
+          not _oubl, "pas nettoye(s) : " + ", ".join(_oubl))
+
+    # La pre-peinture des variantes sombres a besoin de sa palette.
+    _mPal = _reTh2.search(r"var PAL = \{(.*?)\}\[theme\]", _srcTh2, _reTh2.S)
+    _pal = set(_reTh2.findall(r"(\w+):\[", _mPal.group(1))) if _mPal else set()
+    _mVar = _reTh2.search(r"VABOT_DARK_VARIANTS = \[([^\]]*)\]", _srcTh2)
+    _vars = set(_reTh2.findall(r"'(\w+)'", _mVar.group(1))) if _mVar else set()
+    check("themes : chaque variante sombre a sa palette de pre-peinture",
+          _vars and _vars <= _pal,
+          "sans palette : " + ", ".join(sorted(_vars - _pal)))
+
+    # Et la preuve par le rendu : le cookie doit gouverner la classe du body.
+    import web_upload as _wTh3
+    _aTh3 = _wTh3.create_app(); _aTh3.testing = True
+    _svTh3 = _wTh3._load_web_users
+    _wTh3._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"}}
+    try:
+        _cTh3 = _aTh3.test_client()
+        with _cTh3.session_transaction() as _sTh3:
+            _sTh3["auth"] = True; _sTh3["username"] = "boss"; _sTh3["role"] = "owner"
+        _faux = []
+        for _t in sorted(_tous):
+            _cTh3.set_cookie("va_theme", _t)
+            _h3 = _cTh3.get("/").get_data(as_text=True)
+            _mb = _reTh2.search(r"<body[^>]*class=\"([^\"]*)\"", _h3)
+            _cls = (_mb.group(1) if _mb else "")
+            if _t == "dark":
+                if _cls.strip():
+                    _faux.append("%s -> %s" % (_t, _cls))
+            elif _t not in _cls.split():
+                _faux.append("%s -> %s" % (_t, _cls or "(rien)"))
+        check("themes : le cookie gouverne la classe du body, des le serveur",
+              not _faux, " | ".join(_faux[:4]))
+    finally:
+        _wTh3._load_web_users = _svTh3
+except Exception as _eTh2:
+    check("themes : coherence testable", False, repr(_eTh2)[:200])
+
+print()
+print("=" * 70)
 print("MARCHE : le defaut FR ne repeint pas les anciennes identites")
 print("=" * 70)
 try:
