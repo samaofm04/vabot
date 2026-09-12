@@ -10039,8 +10039,13 @@ try:
         check("bangers : un reel trop vieux est archive mais PAS annonce",
               _bg.fiche("CCCCC3").get("muet") is True
               and "CCCCC3" not in [f["shortcode"] for f in _bg.a_annoncer()])
-        check("bangers : le reel recent, lui, part en annonce",
-              "AAAAA1" in [f["shortcode"] for f in _bg.a_annoncer()])
+        # LE MESSAGE DISCORD PORTE LE FICHIER, et c est la seule sauvegarde
+        # hors du VPS : data/ n est pas dans git et /admin/backup_data ecarte
+        # les .mp4. Annoncer avant d avoir telecharge posterait un message sans
+        # piece jointe, et la fiche serait marquee annoncee pour toujours.
+        check("bangers : rien n est annonce avant d avoir tente la video",
+              "AAAAA1" not in [f["shortcode"] for f in _bg.a_annoncer()],
+              str(_bg.a_annoncer())[:120])
 
         # Instagram rend regulierement 0 vue pour un reel qui en a 90 000.
         # Prendre la derniere valeur ferait retomber le banger sous le seuil,
@@ -10072,6 +10077,21 @@ try:
               _fA.get("raison_video") == "login_requis_cookies")
         check("bangers : on cesse de reessayer apres N echecs",
               "AAAAA1" not in [f["shortcode"] for f in _bg.a_telecharger()])
+        # ... mais on n attend pas indefiniment : deux tentatives ratees et
+        # l annonce part quand meme, avec le lien seul. Un banger dont personne
+        # n entend parler ne vaut pas mieux qu un message sans video.
+        check("bangers : apres deux echecs, l annonce part avec le lien seul",
+              "AAAAA1" in [f["shortcode"] for f in _bg.a_annoncer()],
+              str(_bg.fiche("AAAAA1").get("essais_video")))
+
+        # L essai a la demande : il doit ignorer le seuil ET l age, sans jamais
+        # ecraser une fiche existante.
+        _fE = _bg.forcer("jessy.mael", {"shortcode": "DDDDD4", "views": 312,
+                                        "taken_at": _recentB}, identite="jessye")
+        check("bangers : l essai entre un reel bien en dessous du seuil",
+              _fE.get("essai") is True and _bg.fiche("DDDDD4").get("vues") == 312)
+        check("bangers : l essai n ecrase jamais un banger deja connu",
+              _bg.forcer("autre", {"shortcode": "CCCCC3", "views": 1}).get("vues") == 90000)
         # La legende du scrape est tronquee a 280 signes ; celle du
         # telechargeur est entiere. On garde la plus longue.
         _bg.noter_telechargement("AAAAA1", True, description="x" * 400)
@@ -10133,9 +10153,27 @@ try:
     _srcD = _inB.getsource(_wB._start_auto_scrape_daemon)
     check("bangers : le cycle tourne meme quand la watchlist Trends est vide",
           _srcD.index("_banger_cycle()") < _srcD.index("wl = load_watchlist() or []"))
+    # Une classe coloree de plus serait une classe de plus a repeindre en theme
+    # clair, et le balayage du banc d essai la refuserait -- a juste titre. On
+    # verifie donc que l encart ne pose QUE des classes qui existent deja.
+    _srcEn = _inB.getsource(_wB._bangers_encart_html)
+    _clsEn = set()
+    for _m in _reTh.finditer(r"class='([^']+)'", _srcEn):
+        _clsEn.update(_m.group(1).split())
     check("bangers : l encart n invente aucune classe (il reprend .sv-*)",
-          "class='sv-box'" in _inB.getsource(_wB._bangers_encart_html)
-          and "bg-" not in _inB.getsource(_wB._bangers_encart_html).replace("bg-seuil", ""))
+          _clsEn and _clsEn <= {"sv-box", "sv-h", "sv-pills", "sv-pill"},
+          ", ".join(sorted(_clsEn)))
+    # L essai peut durer une minute : lance en thread, sinon Cloudflare rend un
+    # 522 et l ecran laisse croire a une panne alors qu il tourne encore.
+    check("bangers : l essai tourne en tache de fond, pas dans la requete",
+          "threading.Thread" in _srcB.split("def jailbreak_bangers", 1)[-1][:2200])
+    _srcT = _inB.getsource(_wB._banger_test)
+    check("bangers : l essai lit par l endpoint public (aucun credit depense)",
+          "_scrape_via_ig_public" in _srcT and "scrape_profile" not in _srcT)
+    check("bangers : l essai respecte le perimetre des identites suivies",
+          "_all_tracked_handles()" in _srcT)
+    check("bangers : l essai dit combien de comptes il a laisses de cote",
+          "tronque" in _srcT)
     # Le cycle consomme le quota Apify ET le cookie Instagram : il ne doit pas
     # etre a la portee d un role restreint. L allow-list est la liste BLANCHE
     # des ecritures permises a ces roles -- ne pas y figurer suffit.

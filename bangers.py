@@ -328,11 +328,70 @@ def noter_telechargement(shortcode: str, reussi: bool,
 def a_annoncer(limite: int = PLAFOND_ANNONCES) -> List[dict]:
     """Les bangers jamais annoncés, du plus vu au moins vu.
 
+    ON ATTEND LA VIDÉO. Le message Discord PORTE le fichier — c'est la
+    sauvegarde, il n'y en a pas d'autre : `data/` n'est pas dans git et
+    /admin/backup_data écarte les .mp4. Une annonce postée avant le
+    téléchargement partirait sans pièce jointe, et on ne la rattraperait
+    jamais : la fiche serait marquée annoncée, et la seule copie hors du VPS
+    n'existerait pas.
+
+    On laisse donc deux tentatives au téléchargeur avant d'annoncer quand
+    même. Deux, pas six : au-delà, mieux vaut un message avec le lien seul
+    qu'un banger dont personne n'entend jamais parler.
+
     Les fiches « muettes » (trop vieilles à la détection) n'en font pas partie.
     """
-    out = [f for f in toutes()
-           if not f.get("muet") and not (f.get("annonce") or {}).get("message_id")]
+    out = []
+    for f in toutes():
+        if f.get("muet") or (f.get("annonce") or {}).get("message_id"):
+            continue
+        if not video_presente(f["shortcode"]) and _entier(f.get("essais_video")) < 2:
+            continue                      # laisse au téléchargeur le temps
+        out.append(f)
     return out[:max(0, int(limite or 0))]
+
+
+def forcer(compte: str, reel: dict, identite: str = "", va: str = "") -> dict:
+    """Entre un reel au registre SANS regarder le seuil ni son âge.
+
+    Sert au bouton d'essai : on veut voir la chaîne complète tourner —
+    téléchargement, envoi Discord, pièce jointe — sur du contenu réel, sans
+    attendre qu'un reel atteigne dix mille vues. La fiche est marquée `essai`
+    pour qu'on puisse la distinguer plus tard d'une vraie détection.
+
+    Si le reel est DÉJÀ au registre, on ne touche à rien et on rend sa fiche :
+    un essai ne doit pas réinitialiser un banger authentique.
+    """
+    sc = str((reel or {}).get("shortcode") or "").strip()
+    if not _SC_OK.match(sc):
+        return {}
+    d = charger()
+    if sc in d["reels"]:
+        return dict(d["reels"][sc], shortcode=sc)
+    now = time.time()
+    vues = _entier((reel or {}).get("views"))
+    d["reels"][sc] = {
+        "compte": str(compte or "").strip().lstrip("@").lower(),
+        "identite": str(identite or "").strip().lower(),
+        "va": str(va or "").strip(),
+        "url": str((reel or {}).get("url") or "")
+               or f"https://www.instagram.com/p/{sc}/",
+        "miniature": str((reel or {}).get("thumbnail_url") or ""),
+        "vues": vues,
+        "vues_detection": vues,
+        "seuil_detection": 0,
+        "poste_le": _entier((reel or {}).get("taken_at")),
+        "detecte_le": int(now),
+        "dernier_vu": int(now),
+        "video": "attente",
+        "essais_video": 0,
+        "description": str((reel or {}).get("caption") or ""),
+        "muet": False,
+        "essai": True,
+        "annonce": {},
+    }
+    _ecrire(d)
+    return dict(d["reels"][sc], shortcode=sc)
 
 
 def a_reediter(ecart_mini: float = 0.25) -> List[dict]:

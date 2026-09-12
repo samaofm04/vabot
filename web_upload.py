@@ -15274,7 +15274,14 @@ def _bangers_encart_html() -> str:
         "<button type='button' class='sv-pill' onclick='bgCycle(this)' "
         "title='Télécharge ce qui manque et envoie les annonces en attente, "
         "sans attendre le prochain passage'>⟳ Traiter maintenant</button>"
+        "<button type='button' class='sv-pill' onclick='bgEssai(this)' "
+        "title=\"Prend les 5 reels les plus vus des dernières 24 h, quel que "
+        "soit leur nombre de vues, et fait tourner toute la chaîne : "
+        "téléchargement puis envoi dans le salon avec le fichier joint. "
+        "Lecture publique et gratuite, aucun crédit dépensé.\">"
+        "🧪 Essai — 5 reels des 24 h</button>"
         "</div>"
+        "<div class='sv-h' id='bg-essai' style='margin:8px 0 0'></div>"
         "</div>")
 
 
@@ -33507,6 +33514,60 @@ def _render_jailbreak_html() -> str:
         "     jbSoftRefresh();"
         "   });"
         "}"
+        "function bgEssaiEtat(btn){"
+        "  var z = document.getElementById('bg-essai');"
+        "  var fd = new FormData();"
+        "  fd.append('etat', '1');"
+        "  fetch('/jailbreak/bangers', {method:'POST', body:fd})"
+        "   .then(_jbJsonOrAuth)"
+        "   .then(function(j){"
+        "     if(!j || !j.ok) return;"
+        "     if(j.en_cours){"
+        "       if(z) z.textContent = '\\u25cc Essai en cours \\u2014 ' + (j.etape || '');"
+        "       setTimeout(function(){ bgEssaiEtat(btn); }, 3000);"
+        "       return;"
+        "     }"
+        "     if(btn){ btn.disabled = false; btn.textContent = '\\ud83e\\uddea Essai \\u2014 5 reels des 24 h'; }"
+        "     var r = j.rapport;"
+        "     if(!z) return;"
+        "     if(!r){ z.textContent = ''; return; }"
+        "     if(r.erreur){ z.textContent = '\\u26a0 ' + r.erreur; return; }"
+        "     var l = [];"
+        "     l.push(r.comptes_vus + ' compte(s) lu(s)' + (r.tronque ? ' sur ' + r.comptes_suivis : '')"
+        "            + ', ' + r.reels_recents + ' reel(s) de moins de ' + r.heures + ' h');"
+        "     (r.resultat || []).forEach(function(x){"
+        "       l.push('\\u2022 @' + x.compte + ' \\u2014 ' + x.vues + ' vues \\u2014 video: '"
+        "              + x.video + (x.raison ? ' (' + x.raison + ')' : '')"
+        "              + ' \\u2014 ' + (x.poste ? 'poste sur Discord' : 'pas poste'));"
+        "     });"
+        "     if(!(r.resultat || []).length) l.push('Aucun reel a essayer sur cette fenetre.');"
+        "     z.textContent = l.join(' | ');"
+        "   })"
+        "   .catch(function(){ if(btn) btn.disabled = false; });"
+        "}"
+        "function bgEssai(btn){"
+        "  if(!confirm('Essai : lire les comptes suivis, prendre les 5 reels les plus'"
+        "              + ' vus des 24 dernieres heures et les envoyer dans le salon'"
+        "              + ' banger avec la video ?\\n\\nLecture publique et gratuite.'"
+        "              + ' Le telechargement, lui, peut consommer Apify et le cookie'"
+        "              + ' Instagram.')) return;"
+        "  btn.disabled = true; btn.textContent = '\\u25cc essai...';"
+        "  var fd = new FormData();"
+        "  fd.append('test', '1');"
+        "  fd.append('heures', '24');"
+        "  fd.append('combien', '5');"
+        "  fetch('/jailbreak/bangers', {method:'POST', body:fd})"
+        "   .then(_jbJsonOrAuth)"
+        "   .then(function(j){"
+        "     if(!j || !j.ok){"
+        "       btn.disabled = false;"
+        "       if(typeof showToast === 'function') showToast((j && j.error) || 'Echec', 'error');"
+        "       return;"
+        "     }"
+        "     if(typeof showToast === 'function') showToast('Essai lance', 'success');"
+        "     bgEssaiEtat(btn);"
+        "   });"
+        "}"
         "function jbSuivi(el){"
         "  var on = el.dataset.on === '1' ? '0' : '1';"
         "  var fd = new FormData();"
@@ -49087,6 +49148,110 @@ def _banger_cycle() -> dict:
     return bilan
 
 
+#: L'essai a la demande : son etat, pour que la page puisse le suivre.
+_BANGER_TEST = {"en_cours": False, "etape": "", "rapport": None, "ts": 0.0}
+
+
+def _banger_test(heures: int = 24, combien: int = 5,
+                 max_comptes: int = 40) -> dict:
+    """Fait tourner la chaine COMPLETE sur du contenu reel, sans attendre.
+
+    Un reel poste dans les dernieres 24 heures n'a presque jamais dix mille
+    vues : attendre une vraie detection pour verifier que le telechargement,
+    la piece jointe et l'envoi Discord marchent, c'est attendre des jours. Cet
+    essai prend donc les `combien` reels les plus vus des `heures` dernieres
+    heures, QUEL QUE SOIT leur nombre de vues, et les pousse dans la chaine.
+
+    Les fiches creees portent `essai: True`. Si un reel etait deja au registre,
+    on n'y touche pas : un essai ne doit pas reinitialiser un vrai banger.
+
+    Le scrape utilise l'endpoint PUBLIC, gratuit : cet essai ne coute pas un
+    credit RapidAPI. Il est plafonne a `max_comptes` comptes — sur sept cents,
+    tout scraper prendrait un quart d'heure, et l'essai n'en a pas besoin.
+    """
+    import time as _t_bt
+    import bangers as _bg_t
+    from concurrent.futures import ThreadPoolExecutor
+    if _BANGER_TEST["en_cours"]:
+        return {"en_cours": True, "etape": _BANGER_TEST["etape"]}
+    _BANGER_TEST.update({"en_cours": True, "etape": "comptes", "rapport": None})
+    rapport = {"comptes_vus": 0, "reels_recents": 0, "retenus": 0,
+               "heures": int(heures), "plafond_comptes": int(max_comptes)}
+    try:
+        table = _banger_table_proprietaires()
+        handles = sorted(_all_tracked_handles() or [])
+        rapport["comptes_suivis"] = len(handles)
+        vises = handles[:max(1, int(max_comptes))]
+        rapport["tronque"] = len(handles) > len(vises)
+        limite_ts = _t_bt.time() - max(1, int(heures)) * 3600
+
+        _BANGER_TEST["etape"] = f"lecture de {len(vises)} compte(s)"
+        recents = []
+
+        def _un(h):
+            try:
+                res = _scrape_via_ig_public(h)
+                if not isinstance(res, dict) or res.get("error"):
+                    return h, []
+                sortie = []
+                for r in (res.get("reels") or []):
+                    if not isinstance(r, dict) or not r.get("is_video"):
+                        continue
+                    ta = r.get("taken_at") or 0
+                    if not ta or float(ta) < limite_ts:
+                        continue
+                    sortie.append(dict(r, _compte=h))
+                return h, sortie
+            except Exception:                                 # noqa: BLE001
+                return h, []
+
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            for h, trouves in ex.map(_un, vises):
+                rapport["comptes_vus"] += 1
+                recents.extend(trouves)
+        rapport["reels_recents"] = len(recents)
+
+        # Les plus vus d'abord : un essai sur les reels les plus regardes est
+        # aussi le plus representatif de ce que la veille attrapera vraiment.
+        recents.sort(key=lambda r: -int(r.get("views") or 0))
+        choisis = recents[:max(1, int(combien))]
+        _BANGER_TEST["etape"] = f"{len(choisis)} reel(s) retenu(s)"
+        fiches = []
+        for r in choisis:
+            cpt = r.get("_compte") or ""
+            ident, va = table.get(cpt, ("", ""))
+            f = _bg_t.forcer(cpt, r, identite=ident, va=va)
+            if f:
+                fiches.append({"shortcode": f.get("shortcode"),
+                               "compte": cpt, "vues": int(r.get("views") or 0),
+                               "deja_connu": not f.get("essai")})
+        rapport["retenus"] = len(fiches)
+        rapport["reels"] = fiches
+
+        # Le cycle fait le reste : telechargement (API -> page -> cookies),
+        # puis l'annonce AVEC le fichier joint.
+        _BANGER_TEST["etape"] = "telechargement et envoi"
+        rapport["cycle"] = _banger_cycle()
+        rapport["bilan"] = _bg_t.bilan()
+        # Ce qu'on a VRAIMENT obtenu, reel par reel : c'est ca qu'on veut lire.
+        rapport["resultat"] = [
+            {"shortcode": x["shortcode"],
+             "compte": x["compte"],
+             "vues": x["vues"],
+             "video": _bg_t.fiche(x["shortcode"]).get("video"),
+             "raison": _bg_t.fiche(x["shortcode"]).get("raison_video") or "",
+             "poste": bool((_bg_t.fiche(x["shortcode"]).get("annonce") or {})
+                           .get("message_id"))}
+            for x in fiches]
+    except Exception as e:                                    # noqa: BLE001
+        log.error(f"[bangers] essai : {e}")
+        rapport["erreur"] = str(e)[:200]
+    finally:
+        _BANGER_TEST.update({"en_cours": False, "etape": "terminé",
+                             "rapport": rapport, "ts": _t_bt.time()})
+    return rapport
+
+
 def _start_auto_scrape_daemon():
     """Background daemon : scrape toutes les watchlist Instagram toutes les 3h
     + telecharge les fichiers mp4 sur disque.
@@ -59825,6 +59990,29 @@ def create_app():
             import bangers as _bg_r
         except Exception as e:                                # noqa: BLE001
             return jsonify({"ok": False, "error": f"module bangers : {e}"})
+        # L'ESSAI. Il peut durer une minute (quarante comptes a lire) : on le
+        # lance dans un thread et la page vient demander ou il en est. Une
+        # requete Flask d'une minute finit en 522 derriere Cloudflare, et le
+        # proprietaire croirait l'essai casse alors qu'il tourne encore.
+        if request.form.get("etat") == "1":
+            return jsonify({"ok": True, "en_cours": _BANGER_TEST["en_cours"],
+                            "etape": _BANGER_TEST["etape"],
+                            "rapport": _BANGER_TEST["rapport"]})
+        if request.form.get("test") == "1":
+            if _BANGER_TEST["en_cours"]:
+                return jsonify({"ok": True, "lance": False, "en_cours": True,
+                                "etape": _BANGER_TEST["etape"]})
+            try:
+                _h_t = int(request.form.get("heures") or 24)
+                _n_t = int(request.form.get("combien") or 5)
+            except Exception:
+                _h_t, _n_t = 24, 5
+            threading.Thread(
+                target=_banger_test,
+                kwargs={"heures": max(1, min(168, _h_t)),
+                        "combien": max(1, min(20, _n_t))},
+                daemon=True, name="banger-essai").start()
+            return jsonify({"ok": True, "lance": True})
         if request.form.get("cycle") == "1":
             # SYNCHRONE, et c'est voulu : le bouton doit dire ce qui s'est
             # passe. Le cycle est plafonne (8 telechargements, 12 annonces), et
