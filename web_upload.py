@@ -1394,7 +1394,9 @@ body.light #page-loader,html.light-pre #page-loader{background:rgba(249,250,251,
 body.obsidian .sel-cb:checked + .sel-circle::after,body.obsidian .txt-sel-cb:checked + .sel-circle::after,
 body.violet .sel-cb:checked + .sel-circle::after,body.violet .txt-sel-cb:checked + .sel-circle::after,
 body.gold .sel-cb:checked + .sel-circle::after,body.gold .txt-sel-cb:checked + .sel-circle::after,
-body.apple .sel-cb:checked + .sel-circle::after,body.apple .txt-sel-cb:checked + .sel-circle::after{
+body.apple .sel-cb:checked + .sel-circle::after,body.apple .txt-sel-cb:checked + .sel-circle::after,
+body.infloww .sel-cb:checked + .sel-circle::after,body.infloww .txt-sel-cb:checked + .sel-circle::after,
+body.light.inflowwlight .sel-cb:checked + .sel-circle::after,body.light.inflowwlight .txt-sel-cb:checked + .sel-circle::after{
   border-left-color:#fff!important;border-bottom-color:#fff!important;background:none!important}
 /* Bouton edit crayon sur les cards — frosted white aussi */
 .card-edit-btn{background:rgba(255,255,255,.85);border:0;color:#1a1a1a;width:28px;height:28px;
@@ -3014,8 +3016,8 @@ code{background:#0f0f0f;padding:2px 6px;border-radius:4px;font-size:13px}
 /* Les 4 themes colores repeignent button[type=submit] en !important (obsidian
    #8b9cf7, violet #a855f7, gold #d9b74a, apple #007aff) : sans ces deux lignes
    a (0,2,2), un bouton Supprimer y garde la couleur de l accent. */
-body.obsidian button.danger-btn,body.violet button.danger-btn,body.gold button.danger-btn,body.apple button.danger-btn,body.claude button.danger-btn{background:#ef4444!important;border-color:#ef4444!important;color:#fff!important}
-body.obsidian button.danger-btn:hover,body.violet button.danger-btn:hover,body.gold button.danger-btn:hover,body.apple button.danger-btn:hover,body.claude button.danger-btn:hover{background:#dc2626!important}
+body.obsidian button.danger-btn,body.violet button.danger-btn,body.gold button.danger-btn,body.apple button.danger-btn,body.claude button.danger-btn,body.infloww button.danger-btn,body.light.inflowwlight button.danger-btn{background:#ef4444!important;border-color:#ef4444!important;color:#fff!important}
+body.obsidian button.danger-btn:hover,body.violet button.danger-btn:hover,body.gold button.danger-btn:hover,body.apple button.danger-btn:hover,body.claude button.danger-btn:hover,body.infloww button.danger-btn:hover,body.light.inflowwlight button.danger-btn:hover{background:#dc2626!important}
 .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px}
 .stat{background:#1a1a1a;padding:16px;border-radius:10px;border:1px solid #2a2a2a}
 .stat .v{font-size:28px;font-weight:700;color:#3b82f6}
@@ -11762,6 +11764,8 @@ body.gold #form-remote{--rmt:#d9b74a;--rmt-doux:rgba(217,183,74,.14);
   --rmt-trait:rgba(217,183,74,.40)}
 body.obsidian #form-remote{--rmt:#8b9cf7;--rmt-doux:rgba(139,156,247,.14);
   --rmt-trait:rgba(139,156,247,.40)}
+body.infloww #form-remote,body.light.inflowwlight #form-remote{--rmt:#1677FF;--rmt-doux:rgba(22,119,255,.14);
+  --rmt-trait:rgba(22,119,255,.40)}
 .rmt-etat{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
   padding:11px 15px;border:1px solid #26262c;border-radius:12px;
   background:#141418;margin-bottom:12px}
@@ -27354,6 +27358,7 @@ def _render_home_dashboard_html() -> str:
 .home-period-active{background:rgba(59,130,246,.12) !important;color:#3b82f6 !important;box-shadow:none}
 body.light .home-period-active{background:rgba(59,130,246,.10) !important;color:#3b82f6 !important}
 body.light.apple .home-period-active{background:rgba(0,122,255,.10) !important;color:#007aff !important}
+body.infloww .home-period-active,body.light.inflowwlight .home-period-active{background:rgba(22,119,255,.12) !important;color:#1677FF !important}
 body.light .home-period-row{background:#fff;border-color:rgba(60,60,67,.12)}
 .home-overview{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:24px;margin-bottom:18px}
 .home-overview-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;gap:14px;flex-wrap:wrap}

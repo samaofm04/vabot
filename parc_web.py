@@ -4666,6 +4666,8 @@ body.gold #parc-root{--r2:#d9b74a;--r2-doux:rgba(217,183,74,.14);
   --r2-trait:rgba(217,183,74,.40)}
 body.obsidian #parc-root{--r2:#8b9cf7;--r2-doux:rgba(139,156,247,.14);
   --r2-trait:rgba(139,156,247,.40)}
+body.infloww #parc-root,body.light.inflowwlight #parc-root{--r2:#1677FF;--r2-doux:rgba(22,119,255,.14);
+  --r2-trait:rgba(22,119,255,.40)}
 
 /* --- 2. LES SURFACES ET LES TROIS COULEURS DE VERDICT. Le vert, l'ambre
    et le rouge sont HORS theme : un rouge doit rester rouge dans les cinq

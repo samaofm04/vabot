@@ -9509,6 +9509,20 @@ try:
               "encore dans le selecteur")
         check("themes : mais le socle clair est toujours la",
               "body.light{" in _srcTh2)
+
+        # LES LISTES DE THEMES ECRITES A LA MAIN, LOIN DU BLOC DES THEMES.
+        # On ne les trouve pas en cherchant le nom de son theme : elles
+        # nomment les AUTRES. La plus importante remet le bouton Supprimer en
+        # ROUGE, theme par theme -- parce que chaque theme repeint tous les
+        # boutons en !important avec sa couleur d accent. Un theme oublie
+        # ici donne un bouton destructeur BLEU, indiscernable du bouton
+        # d action principale. Les deux Infloww y manquaient tous les deux.
+        _dbl = _srcTh2[_srcTh2.index("body.obsidian button.danger-btn"):]
+        _dbl = _dbl[:_dbl.index("}") + 1]
+        _bleus = sorted(t for t in _tous if t not in ("dark", "light")
+                        and ("." + t + " button.danger-btn") not in _dbl)
+        check("themes : le bouton Supprimer reste ROUGE dans chaque theme",
+              not _bleus, "il prend l accent (donc bleu) dans : " + ", ".join(_bleus))
         check("themes : quatre cartes dans le selecteur, pas une de plus",
               _srcTh2.count('onclick="setTheme(') == 4,
               "%d carte(s)" % _srcTh2.count('onclick="setTheme('))
