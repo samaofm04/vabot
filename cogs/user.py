@@ -4715,8 +4715,11 @@ class UserCog(commands.Cog):
             return
         models = _jb_us_models()
         if not models:
+            # ON DIT CE QUI MANQUE, PAS « ca n'a pas marche ». Un menu vide
+            # laisse chercher pendant une heure ; les compteurs par filtre
+            # designent la case a corriger sur le site.
             await interaction.response.send_message(
-                "⚠️ Aucune model US à afficher (toutes les identités actives sont FR ?).",
+                "⚠️ Aucune model US à afficher.\n" + _jb_diagnostic_marche("us"),
                 ephemeral=True)
             return
         await interaction.response.defer(thinking=True)
@@ -7031,16 +7034,47 @@ EXCLURE_MENU = {"jessye"}
 
 
 def _jb_us_models():
-    """Les models du serveur US. Meme regle que _jb_models_marche : une
-    entree rangee en « identite » est un dossier de montage, pas une model a
-    proposer aux VA."""
+    """Les models du serveur US — EXACTEMENT celles que la vue affichera.
+
+    ELLE DELEGUE, ELLE NE RECOPIE PLUS. Cette fonction gardait sa propre
+    copie des filtres, a un pres : elle oubliait EXCLURE_MENU. Le jour ou la
+    seule model US restante a ete Jessye -- qui est justement dans
+    EXCLURE_MENU, parce qu'elle est la SOURCE du menu et pas une model a
+    proposer -- la garde a compte « 1 model », laisse passer, et la vue a
+    poste un panneau SANS UN SEUL BOUTON.
+
+    C'est le defaut que le CLAUDE.md du depot decrit en toutes lettres :
+    « deux mappings valent deux comportements ». Ici les deux listes
+    decidaient la meme chose et divergeaient d'un element.
+    """
+    return _jb_models_marche("us")
+
+
+def _jb_diagnostic_marche(marche="us") -> str:
+    """Pourquoi la liste est vide. En une phrase, avec des chiffres.
+
+    Un menu vide ne dit rien de ce qui manque : le proprietaire voit un
+    panneau sans boutons et ne peut ni le reparer ni savoir quoi regarder.
+    On compte donc ce que chaque filtre retire, dans l'ordre ou il retire.
+    """
     try:
         from cogs.welcome import list_identities, is_identity_active, est_une_model
-        return [n for n in list_identities()
-                if is_identity_active(n) and est_une_model(n)
-                and _market_of(n) == "us"]
-    except Exception:
-        return []
+    except Exception as e:                                   # noqa: BLE001
+        return "impossible de lire les identites (%s)" % type(e).__name__
+    toutes = list(list_identities() or [])
+    actives = [n for n in toutes if is_identity_active(n)]
+    modeles = [n for n in actives if est_une_model(n)]
+    du_marche = [n for n in modeles if _market_of(n) == marche]
+    retenues = [n for n in du_marche if n.strip().lower() not in EXCLURE_MENU]
+    bouts = ["%d identite(s) au total" % len(toutes),
+             "%d active(s)" % len(actives),
+             "%d rangee(s) en « modele »" % len(modeles),
+             "%d sur le marche %s" % (len(du_marche), marche.upper())]
+    exclues = [n for n in du_marche if n.strip().lower() in EXCLURE_MENU]
+    if exclues:
+        bouts.append("%d exclue(s) du menu (%s)" % (len(exclues), ", ".join(sorted(exclues))))
+    bouts.append("**%d affichable(s)**" % len(retenues))
+    return " → ".join(bouts)
 
 
 class _JailbreakQtySelect(discord.ui.Select):

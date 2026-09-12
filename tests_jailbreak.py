@@ -704,6 +704,39 @@ try:
           == ["🥇 Ibenhaastrup", "🥈 E30princesss",
               "🥉 Zezatwins"])
 
+    # UN MENU NE SE POSTE PAS VIDE. Le 12/09/2026, /menujailbreakus a poste
+    # un panneau SANS UN SEUL BOUTON : la garde comptait les models avec sa
+    # propre copie des filtres -- a un pres, elle oubliait EXCLURE_MENU. La
+    # seule model US restante etant Jessye, qui est justement exclue du menu
+    # parce qu elle en est la SOURCE, la garde a laisse passer « 1 model » et
+    # la vue n en a affiche aucune.
+    import cogs.user as _uMe
+    import cogs.welcome as _wMe
+    _svLi, _svAc, _svMo = (_wMe.list_identities, _wMe.is_identity_active,
+                           _wMe.est_une_model)
+    _svMk = _uMe._market_of
+    try:
+        _noms = ["jessye", "julia", "ibenhaastrup"]
+        _wMe.list_identities = lambda: _noms
+        _wMe.is_identity_active = lambda n: True
+        _wMe.est_une_model = lambda n: n != "ibenhaastrup"
+        _uMe._market_of = lambda n: "us" if n == "jessye" else "fr"
+        check("menu US : la garde voit EXACTEMENT ce que la vue affichera",
+              _uMe._jb_us_models() == _uMe._jb_models_marche("us") == [],
+              str(_uMe._jb_us_models()))
+        # Et le vide s explique, chiffre par chiffre, au lieu de laisser
+        # chercher.
+        _diag = _uMe._jb_diagnostic_marche("us")
+        check("menu US : quand c est vide, le message dit ou le filtre coupe",
+              "jessye" in _diag and "0 affichable" in _diag, _diag[:150])
+        # Une model US normale doit evidemment passer.
+        _uMe._market_of = lambda n: "us"
+        check("menu US : une vraie model US est bien retenue",
+              _uMe._jb_us_models() == ["julia"], str(_uMe._jb_us_models()))
+    finally:
+        _wMe.list_identities, _wMe.is_identity_active = _svLi, _svAc
+        _wMe.est_une_model, _uMe._market_of = _svMo, _svMk
+
     # Le site et le bot doivent trier PAREIL. Deux implementations finiraient
     # par diverger — le depot a deja paye ca avec les deux tables du Drive.
     import web_upload as _wOr
