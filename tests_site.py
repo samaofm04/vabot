@@ -9568,6 +9568,79 @@ except Exception as _eP:
 
 print()
 print("=" * 70)
+print("ADD PERFECT : l assistant ne perd plus son choix")
+print("=" * 70)
+try:
+    import pathlib as _plP
+    _srcP = _plP.Path("web_upload.py").read_text(encoding="utf-8")
+
+    # LA FAMILLE VIENT DE L ASSISTANT. Elle etait DEVINEE au point de coupe :
+    # un perfect commence dans l onglet Template mais assemble sans trait de
+    # coupe partait dans Caption, et n apparaissait nulle part ou on le
+    # cherchait. C est « je l enregistre et je ne sais pas ou ca va ».
+    _dP = _srcP.index("async function nxMontagePerfect(){")
+    _fnP = _srcP[_dP:_srcP.index("/noctus/montage_perfect", _dP)]
+    check("add perfect : la famille vient de l assistant",
+          "pf ? pf.famille" in _fnP,
+          "elle est encore devinee au point de coupe")
+    check("add perfect : et la devinette ne sert plus que hors assistant",
+          "nxMState.cut" in _fnP, "le repli hors assistant a disparu")
+
+    # LA FICHE NOTE DEUX CHOSES DIFFERENTES. brute et source valaient toutes
+    # les deux le fichier ouvert dans l editeur : on ne pouvait plus savoir
+    # de quel couple le perfect sortait.
+    check("add perfect : la brute et la source ne sont plus le meme champ",
+          "(pf && pf.brute)" in _fnP and "(pf && pf.source)" in _fnP)
+
+    # L ASSISTANT POSE SON CONTEXTE APRES L OUVERTURE, jamais avant :
+    # nxMontageOpen remet l etat a neuf, et un contexte pose avant serait
+    # efface dans la foulee.
+    _dC = _srcP.index("function pfClic(ev)")
+    _fnC = _srcP[_dC:_srcP.index("// ---- Nouvelle identit", _dC)]
+    check("add perfect : l assistant transmet son choix a l editeur",
+          "nxMState.perfect = {famille: pfState.famille" in _fnC)
+    check("add perfect : et il le pose APRES avoir ouvert l editeur",
+          _fnC.index("nxMontageOpen(cible)") < _fnC.index("nxMState.perfect ="),
+          "pose avant l ouverture : l editeur l effacerait")
+
+    # UNE OUVERTURE EFFACE LE CONTEXTE PRECEDENT. Sans ca, un perfect
+    # commence puis abandonne collerait sa famille au montage suivant,
+    # ouvert depuis la Bibliotheque.
+    _dO = _srcP.index("async function nxMontageOpen(fid")
+    _fnO = _srcP[_dO:_dO + 1200]
+    check("add perfect : ouvrir un montage efface le contexte precedent",
+          "nxMState.perfect=null" in _fnO)
+
+    # LE BOUTON FINAL DIT CE QU IL TERMINE. Il s appelle « Valider comme
+    # trend » -- un nom qui parle des Trends, pas des perfects -- et a cote
+    # « Enregistrer » repond « Enregistre » sans rien ranger.
+    check("add perfect : le bouton final prend le nom de ce qu il termine",
+          "Terminer ce perfect" in _srcP)
+    check("add perfect : et il retrouve son nom hors assistant",
+          "Valider comme trend" in _srcP)
+    _dB = _srcP.index("function nxMPerfectBtn()")
+    check("add perfect : le libelle restaure est le nouveau",
+          "dataset.pfbase = b.textContent" in _srcP[_dB:_dB + 1600],
+          "pfEtat rendrait l ancien nom au bout de douze secondes")
+
+    # ET « ENREGISTRER » DIT CE QU IL RESTE A FAIRE.
+    _dS = _srcP.index("function nxMontageSave()")
+    check("add perfect : Enregistrer rappelle qu il reste a terminer",
+          "nxMState.perfect" in _srcP[_dS:_dS + 2200])
+
+    # Cote serveur, la famille reste verifiee : une valeur inconnue ne doit
+    # pas creer un dossier fantome.
+    check("add perfect : le serveur refuse une famille inconnue",
+          "famille not in _PERFECT_FAMILLES" in _srcP)
+    # Et le dossier ecrit est bien celui que la galerie lit.
+    check("add perfect : le dossier ecrit est celui de la galerie",
+          '("trends_" + famille)' in _srcP
+          and '"perfecttemplate": ("trends_template"' in _srcP)
+except Exception as _eP2:
+    check("add perfect : testable", False, repr(_eP2)[:200])
+
+print()
+print("=" * 70)
 print("GENERATEURS : trois fournisseurs, pas deux")
 print("=" * 70)
 try:

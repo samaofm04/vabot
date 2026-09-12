@@ -5453,7 +5453,11 @@ function lbKeyboard(e){
   if(e.key === 'ArrowRight'){ lbNext(); e.preventDefault(); return; }
 }
 // ===== ▶ Montage : génère des variations d'un reel de la Bibliothèque + envoi Discord =====
-var nxMState = {fid:'', identity:'', model:'', caps:[], editIdx:-1, pourTrend:false};
+// « perfect » : ce que l'assistant Add perfect a choisi avant d'ouvrir
+// l'editeur -- la famille, la brute, la source. Nul ailleurs : hors
+// assistant il vaut null, et le bouton final reprend son nom de Trends.
+var nxMState = {fid:'', identity:'', model:'', caps:[], editIdx:-1,
+                pourTrend:false, perfect:null};
 function nxMEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function nxMDur(){ var v=document.getElementById('nx-m-video'); return (v&&!isNaN(v.duration)&&v.duration>0)?v.duration:0; }
 function nxMFmt(t){ return (Math.round(t*100)/100).toFixed(2); }
@@ -6270,6 +6274,13 @@ function nxMontageSave(){
   fetch('/noctus/montage_save',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){return r.json();}).then(function(j){
     reset(j.ok?'✓ Enregistré !':'✕ Erreur');
     if(typeof showToast==='function') showToast(j.ok?'💾 Enregistré — ta caption + le style sont gardés':('Erreur : '+(j.error||'?')), j.ok?'success':'error');
+    // EN PLEIN ASSISTANT, « Enregistre » se lit comme « c est fini ». Ca ne
+    // l est pas : ce bouton garde la caption et le style, il ne range rien
+    // dans la galerie. On le dit, sinon on cherche le montage la ou il n est
+    // pas.
+    if(j.ok && nxMState.perfect && typeof showToast==='function')
+      showToast('Il reste à cliquer « ✓ Terminer ce perfect » pour qu il '
+                + 'apparaisse dans la galerie', 'info', 8000);
   }).catch(function(){ reset('✕ Erreur'); if(typeof showToast==='function') showToast('Erreur réseau','error'); });
 }
 // Recharge le brouillon enregistré (captions + style) à l'ouverture
@@ -6627,6 +6638,7 @@ async function nxMontageOpen(fid, exampleUrl){
   nxMBindResize();
   nxMState.fid=fid; nxMState.model=''; nxMState.caps=[]; nxMState.editIdx=-1;
   nxMState.pourTrend=false;
+  nxMState.perfect=null; nxMPerfectBtn();
   var parts=fid.split('|'); nxMState.identity=parts[0]||''; var name=parts[2]||'';
   var _pr=document.getElementById('nx-m-proj'); if(_pr) _pr.textContent=(name||'Mon reel').replace(/\.[^.]+$/,'');
   var vid=document.getElementById('nx-m-video');
@@ -6688,6 +6700,32 @@ function pfEtat(txt, couleur, duree){
     }, duree);
   }
 }
+function nxMPerfectBtn(){
+  // LE BOUTON FINAL PREND LE NOM DE CE QU IL TERMINE. « ★★★ Valider
+  // comme trend » parle des Trends ; dans l assistant Add perfect, il range
+  // un perfect. A cote, « Enregistrer » repond « Enregistre » et ne range
+  // rien -- c est celui qu on clique, et on cherche ensuite ou est passe le
+  // montage.
+  var b = document.getElementById('nx-m-perfect');
+  if(!b) return;
+  var pf = nxMState.perfect;
+  if(pf){
+    var nom = (pf.famille === 'caption') ? 'Caption' : 'Template';
+    b.textContent = '✓ Terminer ce perfect — ' + nom;
+    b.classList.add('accent');
+    b.title = 'Range le montage dans « ' + nom + ' perfect » de la model. '
+      + 'C est ce bouton qui termine l assistant Add perfect.';
+  } else {
+    b.textContent = '★★★ Valider comme trend';
+    b.classList.remove('accent');
+    b.title = 'Range CETTE video dans les Trends de la model : elle partira '
+      + 'telle quelle par les boutons ★★★ de Discord, sans etre '
+      + 'remontee. Genere d abord le montage.';
+  }
+  // pfEtat restaure ce libelle apres son message : il doit connaitre le
+  // NOUVEAU, sinon le bouton revient a l ancien nom au bout de douze secondes.
+  b.dataset.pfbase = b.textContent;
+}
 async function nxMontagePerfect(){
   var btn = document.getElementById('nx-m-perfect');
   if(btn && btn.disabled) return;
@@ -6704,10 +6742,15 @@ async function nxMontagePerfect(){
     return;
   }
   pfEtat('◌ Rangement…', '#6366f1');
-  // La famille se deduit du montage lui-meme, comme le fait le moteur : un
-  // point de coupe veut dire qu une brute s insere dans un template ; sans
-  // coupe, c est un texte pose sur la brute.
-  var famille = (nxMState.cut != null && nxMState.cut > 0.05) ? 'template' : 'caption';
+  // LA FAMILLE VIENT DE L ASSISTANT quand il y en a un : c est LUI qui sait
+  // dans quel onglet on a clique « Add perfect ». La deviner au point de
+  // coupe envoyait un perfect commence dans Template vers Caption des que le
+  // montage n avait pas de trait -- et il n apparaissait nulle part ou on le
+  // cherchait. Hors assistant, on devine encore : le bouton sert aussi a
+  // ranger un montage ouvert depuis la Bibliotheque.
+  var pf = nxMState.perfect || null;
+  var famille = pf ? pf.famille
+    : ((nxMState.cut != null && nxMState.cut > 0.05) ? 'template' : 'caption');
   var son = '';
   try {
     var el = document.getElementById('nx-m-son');
@@ -6723,8 +6766,11 @@ async function nxMontagePerfect(){
   fd.set('model', nxMState.model);
   fd.set('identity', nxMState.identity || '');
   fd.set('famille', famille);
-  fd.set('brute', nxMState.fid || '');
-  fd.set('source', nxMState.fid || '');
+  // Deux champs, deux choses : la brute de depart et ce qu on lui a
+  // associe. Ils valaient tous les deux le fichier ouvert dans l editeur --
+  // on ne pouvait plus savoir de quel couple le perfect sortait.
+  fd.set('brute', (pf && pf.brute) || nxMState.fid || '');
+  fd.set('source', (pf && pf.source) || nxMState.fid || '');
   if(son) fd.set('son', son);
   // La description part AUSSI. Sans cette ligne, le champ « DESCRIPTION DU
   // POST » etait rempli, promis « part avec la video », et perdu a la
@@ -8941,14 +8987,20 @@ function pfClic(ev){
       return;
     }
     pfClose();
-    // C est l editeur qui assemble, et son bouton « ★★★ Valider comme trend »
-    // range le resultat. Reecrire un assembleur ici aurait fait deux moteurs a
-    // garder d accord.
+    // CE QU ON VIENT DE CHOISIR SUIT DANS L EDITEUR. Sans ces trois valeurs,
+    // il redevinait la famille au point de coupe et notait deux fois le meme
+    // fichier dans la fiche. nxMontageOpen efface ce contexte a chaque
+    // ouverture : on le repose APRES, jamais avant.
+    nxMState.perfect = {famille: pfState.famille, brute: pfState.brute,
+                        source: (src.indexOf('cap:') === 0) ? '' : src};
+    if(typeof nxMPerfectBtn === 'function') nxMPerfectBtn();
+    // C est l editeur qui assemble, et son bouton final range le resultat.
+    // Reecrire un assembleur ici aurait fait deux moteurs a garder d accord.
     if(src.indexOf('cap:') === 0){
       pfPoserCaption(s.getAttribute('data-pfnom') || '');
     }
     if(typeof showToast === 'function')
-      showToast('Assemble, puis clique « ★★★ Valider comme trend »', 'info');
+      showToast('Assemble, puis clique « ✓ Terminer ce perfect »', 'info', 7000);
   }
 }
 
