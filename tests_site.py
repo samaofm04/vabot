@@ -9413,8 +9413,8 @@ try:
     # BLANCHE, cartes comprises, puis le script la repeint. C'est exactement
     # ce qui est arrive a « infloww » -- declare partout cote client, oublie
     # dans ces trois tables-la.
-    _d = _srcTh2.index("_th = \"light\"          # defaut du site")
-    _bloc = _srcTh2[_d - 400:_d + 700]
+    _d = _srcTh2.index("# defaut du site")
+    _bloc = _srcTh2[_d - 500:_d + 900]
     _manquants = sorted(t for t in _tous if ("\"%s\"" % t) not in _bloc)
     check("themes : le serveur accepte tous les themes du selecteur",
           not _manquants,
@@ -9482,6 +9482,50 @@ try:
               not _blancs, "renvoyes au blanc : " + ", ".join(_blancs))
         check("themes : le gris secondaire d Infloww est celui releve",
               "color:#999999!important" in _srcTh2)
+
+        # INFLOWW LIGHT : meme exigence que son jumeau sombre, un theme
+        # declare a moitie se choisit sans s appliquer.
+        for _ou, _quoi in (
+                ("body.light.inflowwlight{", "sa regle de fond"),
+                ("'pre-infloww','pre-inflowwlight'", "le nettoyage du html"),
+                ("theme === 'inflowwlight'", "sa pre-peinture"),
+                ("inflowwlight:'Infloww light'", "son nom affiche"),
+                ('data-theme="inflowwlight"', "sa carte dans les reglages")):
+            check("infloww light : %s est declaree" % _quoi, _ou in _srcTh2)
+        # Un theme CLAIR doit poser body.light : c est le socle. Sans lui,
+        # les textes restent ceux du theme sombre et s effacent sur le blanc.
+        check("infloww light : il se monte SUR le theme clair",
+              "b.classList.add('light'); b.classList.add('inflowwlight');" in _srcTh2)
+        # Ses couleurs a lui : le bleu rempli de sa capture dans la vignette,
+        # et le gris neutre plutot que le #6b7280 bleute du theme clair.
+        check("infloww light : l encre pale est le gris neutre d Infloww",
+              "color:#666666!important" in _srcTh2)
+
+        # SOMBRE et CLAIR ont quitte le SELECTEUR. Leur feuille de style, elle,
+        # ne peut pas partir : body.light est le socle d Apple, de Claude et
+        # d Infloww light, et « dark » est l absence de classe.
+        check("themes : sombre et clair ne sont plus proposes",
+              not any(("setTheme('%s')" % t) in _srcTh2 for t in ("dark", "light")),
+              "encore dans le selecteur")
+        check("themes : mais le socle clair est toujours la",
+              "body.light{" in _srcTh2)
+        check("themes : quatre cartes dans le selecteur, pas une de plus",
+              _srcTh2.count('onclick="setTheme(') == 4,
+              "%d carte(s)" % _srcTh2.count('onclick="setTheme('))
+
+        # LE DEFAUT DOIT ETRE LE MEME MOT DES DEUX COTES. Le serveur ecrit la
+        # classe du body avant que le JavaScript tourne ; si les deux defauts
+        # different, la page part dans une apparence puis se fait repeindre
+        # dans l autre. C est exactement l ecran blanc au rechargement.
+        _dSrv = _srcTh2.split("# defaut du site")[0].rsplit('_th = "', 1)[-1].split('"')[0]
+        _mot = "localStorage.getItem('vabot_theme') || '"
+        _dCli = set(p.split("'")[0] for p in _srcTh2.split(_mot)[1:])
+        check("themes : le serveur et le navigateur ont le MEME defaut",
+              _dCli == {_dSrv},
+              "serveur %s, navigateur %s" % (_dSrv, sorted(_dCli)))
+        check("themes : et ce defaut se trouve dans le selecteur",
+              ("setTheme('%s')" % _dSrv) in _srcTh2,
+              "defaut %s : personne ne peut le rechoisir" % _dSrv)
     finally:
         _wTh3._load_web_users = _svTh3
 except Exception as _eTh2:
@@ -9749,6 +9793,66 @@ try:
         check("sessions : « terminee » et « surveillee » sont deux choses",
               set(_rF["s2"].keys()) >= {"surveillee", "terminee", "jugeable"})
         _sv.FICHIER_PRESENCE = _presF
+
+        # QUI EST UN VA. La liste venait de users.json EN ENTIER : 179
+        # personnes, c est-a-dire tout ce qui a croise le bot -- patrons,
+        # testeurs, membres partis. Le projet avait deja sa definition
+        # operationnelle : une fiche avec un channel_id DONT LE SALON EXISTE
+        # ENCORE (_va_targets, cogs/user.py), la liste a qui le menu est
+        # pousse chaque nuit.
+        import types as _tyV
+        import safe_json as _sjV
+        from cogs.sessionsvoc import SessionsVoc as _CogV
+        _usV = _dirSe / "users_va.json"
+        _savUV = _sv.FICHIER_USERS
+        _sv.FICHIER_USERS = _usV
+        try:
+            _sjV.write(_usV, {
+                "111": {"channel_id": 11, "identity": "jessye", "username": "cx45"},
+                "222": {"channel_id": 22, "identity": "jessye"},   # staff
+                "333": {"identity": "jessye"},                     # sans salon
+                "manual_9": {"channel_id": 99},                    # pas Discord
+                "444": {"channel_id": 44}})                        # salon supprime
+
+            def _mV(i, surnom, staff=False):
+                return _tyV.SimpleNamespace(
+                    id=i, display_name=surnom, bot=False, roles=[],
+                    guild_permissions=_tyV.SimpleNamespace(
+                        administrator=staff, manage_guild=False, manage_channels=False))
+
+            class _GV:
+                def __init__(self, ms): self._m = {m.id: m for m in ms}
+                def get_member(self, i): return self._m.get(i)
+
+            _gV = _GV([_mV(111, "BO07 4 IPHONE X FIXE"), _mV(222, "LA BOULE", staff=True)])
+            _salV = {11: _tyV.SimpleNamespace(name="va-safidy", guild=_gV),
+                     22: _tyV.SimpleNamespace(name="va-laboule", guild=_gV),
+                     99: _tyV.SimpleNamespace(name="va-faux", guild=_gV)}
+            _cogV = _CogV.__new__(_CogV)
+            _cogV.bot = _tyV.SimpleNamespace(get_channel=lambda c: _salV.get(c))
+            _attV = _cogV._attendus_enrichis()
+            check("attendus : seul le VA qui a un salon vivant est attendu",
+                  [a["id"] for a in _attV] == ["111"],
+                  str([a["id"] for a in _attV]))
+            # LE NOM QUE LE PROPRIETAIRE A POSE, pas le pseudo Discord.
+            check("attendus : on affiche le surnom du serveur, pas le pseudo",
+                  _attV[0]["nom"] == "BO07 4 IPHONE X FIXE" if _attV else False,
+                  str(_attV[:1]))
+            check("attendus : le staff n est pas attendu a une session de VA",
+                  "222" not in [a["id"] for a in _attV])
+            # Membre introuvable : le pseudo du salon, JAMAIS 19 chiffres.
+            class _GVide:
+                def get_member(self, i): return None
+            _salV2 = {11: _tyV.SimpleNamespace(name="🟢🔗-va-safidy", guild=_GVide()),
+                      22: _tyV.SimpleNamespace(name="general", guild=_GVide())}
+            _cogV.bot = _tyV.SimpleNamespace(get_channel=lambda c: _salV2.get(c))
+            _attV2 = _cogV._attendus_enrichis()
+            check("attendus : membre introuvable -> le pseudo de son salon",
+                  [a["nom"] for a in _attV2] == ["safidy"], str(_attV2))
+            check("attendus : jamais un identifiant brut dans la liste",
+                  not any(a["nom"].isdigit() for a in _attV2))
+        finally:
+            _sv.FICHIER_USERS = _savUV
 
         # LE FORMAT DU BILAN : une ligne par personne, une pastille.
         import pathlib as _plF
@@ -10344,6 +10448,139 @@ try:
           "is_auth()" in _srcB.split("def jailbreak_bangers", 1)[-1][:900])
 except Exception as _eB:
     check("bangers : veille testable", False, repr(_eB)[:220])
+
+# --- Les DEUX classements : report Discord et page /clics ---------------
+# Le premier dit qui envoie du trafic, le second qui le convertit. Ils
+# s AJOUTENT au tableau par lien, qui reste alphabetique : un tableau qu on
+# lit tous les jours doit garder chacun a la meme place.
+try:
+    import clics_personnes as _cpD
+
+    def _donneesD():
+        return {
+            "quinzaine": "1 sept\u219215 sept",
+            "par_lien": [
+                {"lien": "VA 12 (Roucham)", "depuis": "",
+                 "periodes": [{}, {}, {"marche": None, "total": 130}]},
+                {"lien": "VA 6 (Mike)", "depuis": "",
+                 "periodes": [{}, {}, {"marche": None, "total": 95}]},
+                {"lien": "VA 8 (VA 2 Noum)", "depuis": "",
+                 "periodes": [{}, {}, {"marche": None, "total": 12}]},
+                {"lien": "VA 4 ( VA 1 Noum )", "depuis": "2026-09-07",
+                 "periodes": [{}, {}, {"marche": None, "total": 61}]},
+                {"lien": "VA 9", "depuis": "",
+                 "periodes": [{}, {}, {"marche": None, "total": None}]},
+                {"lien": "VA 3 ( Laboule )", "depuis": "",
+                 "periodes": [{}, {}, {"marche": None, "total": 0}]}],
+            "abonnes": [
+                {"lien": "VA 12 (Roucham)", "auj": 0, "quinz": 4, "prec": 2},
+                {"lien": "VA 6 (Mike)", "auj": 0, "quinz": 0, "prec": 1},
+                {"lien": "VA 8 (VA 2 Noum)", "auj": 1, "quinz": 1, "prec": 0},
+                {"lien": "VA 4 ( VA 1 Noum )", "auj": 0, "quinz": 3, "prec": "NA"}]}
+
+    _eD = _cpD.depuis_report(_donneesD(), "quinz")
+    check("classements : le report suffit, sans un appel de plus",
+          len(_eD) == 6 and _eD[0]["clics"] == 130 and _eD[0]["abonnes"] == 4,
+          str(_eD[:1]))
+    # `abonnes` est un SOUS-ENSEMBLE de `par_lien`, dans le meme ordre : on
+    # apparie rang par rang. Un dictionnaire indexe par nom aurait perdu un
+    # telephone entier des que deux liens portent le meme libelle.
+    check("classements : un lien sans abonnes n herite pas de ceux du voisin",
+          _eD[5]["nom"] == "VA 3 (Laboule)" and _eD[5]["abonnes"] is None,
+          str(_eD[5]))
+    _srcJ = pathlib.Path("clics_personnes.py").read_text(encoding="utf-8")
+    check("classements : la jointure n indexe PAS les abonnes par nom",
+          "for r in par_lien" in _srcJ and "{str(x.get" not in _srcJ)
+
+    _cl = _cpD.par_clics(_eD)
+    check("classements : clics, le plus fort devant",
+          [g["titre"] for g in _cl[:3]] == ["Roucham", "Mike", "Noum"],
+          str([g["titre"] for g in _cl]))
+    check("classements : clics, le non lu ne vaut pas zero et sort en fin",
+          _cl[-1]["titre"] == "VA 9" and _cl[-1]["clics"] is None)
+    _ab = _cpD.par_abonnes(_eD)
+    # A egalite d abonnes, celui qui a depense MOINS de clics passe devant :
+    # c est lui qui convertit le mieux. Noum 4/73 devant Roucham 4/130.
+    check("classements : a egalite d abonnes, le meilleur convertisseur gagne",
+          [g["titre"] for g in _ab[:2]] == ["Noum", "Roucham"],
+          str([(g["titre"], g["abonnes"], g["clics"]) for g in _ab[:3]]))
+    check("classements : le taux est calcule, pas devine",
+          _ab[0]["taux"] == 5.5, str(_ab[0]["taux"]))
+    # « NA » = la periode precede son arrivee. Ni un zero, ni un tiret.
+    _na = _cpD.grouper([{"nom": "VA 1 (Zed)", "clics": 10, "abonnes": "NA"}])
+    check("classements : « NA » est compte a part, pas additionne",
+          _na[0]["abonnes_na"] == 1 and _na[0]["abonnes"] is None,
+          str(_na[0]))
+
+    # ---- Le report Discord ---------------------------------------------
+    from cogs import clickrecap as _crD
+    _champs = _crD._champs_classements(_donneesD())
+    check("report : les deux classements sont poses",
+          len(_champs) == 2, str([n for n, _v in _champs]))
+    _txt0 = _champs[0][1] if _champs else ""
+    _txt1 = _champs[1][1] if len(_champs) > 1 else ""
+    check("report : le podium porte trois medailles",
+          _txt0.count("\U0001F947") == 1 and _txt0.count("\U0001F949") == 1)
+    check("report : un lien non lu le DIT au lieu d afficher zero",
+          "_not read_" in _txt0 and "\u2014 0 clicks" not in _txt0, _txt0[-80:])
+    # Absent de MyPuls ne veut pas dire zero abonne : ces personnes sortent
+    # du classement et sont COMPTEES, jamais effacees.
+    check("report : les non rattaches a MyPuls sont comptes, pas effaces",
+          "not linked to a MyPuls" in _txt1, _txt1[-90:])
+    check("report : les emoji restent hors des blocs de chasse fixe",
+          "```" not in _txt0 and "```" not in _txt1)
+    for _n, _v in _champs:
+        check("report : le champ « %s » tient dans un champ Discord" % _n[:22],
+              len(_v) <= 1024, str(len(_v)))
+    # LE TABLEAU PAR LIEN N EST PAS RETRIE : il reste alphabetique.
+    _srcD = pathlib.Path("cogs/clickrecap.py").read_text(encoding="utf-8")
+    check("report : le tableau par lien reste alphabetique",
+          "key=lambda x: _cle_tri(x[0])" in _srcD)
+    check("report : les classements sont INSERES avant le detail",
+          "emb.insert_field_at(1 + _ic" in _srcD)
+
+    # La garde de taille : sans elle, msg.edit levait, l exception etait
+    # avalee plus haut et le message epingle GELAIT toutes les 30 minutes.
+    import discord as _dcD
+    _embD = _dcD.Embed(title="t")
+    for _i in range(12):
+        _embD.add_field(name="bloc %d" % _i, value="x" * 900, inline=False)
+    _avant = len(_embD)
+    _crD._tenir_dans_embed(_embD)
+    check("report : un embed trop long est coupe, et le DIT",
+          len(_embD) <= 5900 < _avant
+          and "Truncated" in _embD.fields[-1].name,
+          "%d -> %d" % (_avant, len(_embD)))
+    check("report : la garde est bien branchee avant le pied de page",
+          "_tenir_dans_embed(emb)" in _srcD)
+
+    # ---- La page web ----------------------------------------------------
+    import clics_portail as _cpoD
+    _pageD = _cpoD._page_donnees("T", "s", _donneesD(), "maintenant",
+                                 jeton="abc", vue="ensemble")
+    check("portail : les deux classements sont sur la page",
+          "Classement clics" in _pageD and "Qui convertit" in _pageD)
+    check("portail : la fusion est affichee, pas seulement appliquee",
+          "2 liens : VA 8 (VA 2 Noum), VA 4 (VA 1 Noum)" in _pageD)
+    check("portail : un non lu affiche un tiret, jamais un zero",
+          "<span class='c'>\u2014</span>" in _pageD)
+    check("portail : une arrivee en cours de periode est signalee",
+          "arriv\u00e9 le 07/09" in _pageD)
+    # La police du CORPS doit savoir dessiner un emoji : seule la serif
+    # portait les replis, et les classements sont ecrits en --sans.
+    _srcPo = pathlib.Path("clics_portail.py").read_text(encoding="utf-8")
+    _sansPo = _srcPo[_srcPo.index("--sans:"):_srcPo.index("--chiffres:")]
+    check("portail : la police du corps a un repli emoji",
+          "Emoji" in _sansPo, _sansPo[:70])
+    # « NA » dans les abonnes faisait lever int() et rendait 500 sur la vue
+    # d ensemble, pendant que l onglet Liens continuait de servir.
+    _dNA = _donneesD()
+    _dNA["abonnes"][0]["quinz"] = "NA"
+    _dNA["par_lien"][0]["periodes"][2]["total"] = "NA"
+    _cpoD._page_donnees("T", "s", _dNA, "maintenant", jeton="abc", vue="ensemble")
+    check("portail : « NA » ne fait plus tomber la vue d ensemble", True)
+except Exception as _eD2:
+    check("classements : testables", False, repr(_eD2)[:220])
 
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")

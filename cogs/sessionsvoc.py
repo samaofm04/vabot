@@ -421,22 +421,80 @@ class SessionsVoc(commands.Cog):
         return "\n".join(out)
 
     def _attendus_enrichis(self) -> list:
-        """La liste des attendus, avec le vrai pseudo affiche sur Discord.
+        """Les VA qu'on attend, sous le nom que le proprietaire leur a donne.
 
-        users.json garde un nom qui peut dater. Le membre, lui, porte son nom
-        actuel : c'est celui-la qu'on veut lire dans le resume.
+        LA LISTE VENAIT DE users.json EN ENTIER : 179 personnes, c'est-a-dire
+        tout ce qui a un jour croise le bot -- des patrons, des testeurs, des
+        membres partis. Le premier bilan les a tous accuses d'absence.
+
+        Le projet avait DEJA sa definition d'un VA, et elle est operationnelle
+        depuis longtemps : `_va_targets` (cogs/user.py) prend les fiches qui
+        portent un `channel_id` DONT LE SALON EXISTE ENCORE -- c'est la liste
+        a qui le menu est pousse chaque nuit. Elle ecarte d'elle-meme tout ce
+        qui gonflait le compte : /assignall et /testas posent channel_id a
+        None, les fiches « manual_ » n'en ont pas, et le salon d'un ex-membre
+        a ete supprime.
+
+        On y ajoute un filtre : le STAFF n'est pas attendu a une session de
+        VA. Le patron figurant parmi les absents, c'est le genre de detail qui
+        fait cesser de lire un rapport.
+
+        LE NOM. `Member.display_name` vaut `nick or global_name or name` : le
+        surnom pose sur LE serveur passe donc en premier, c'est bien celui-la
+        qu'on veut (« BO07 4 IPHONE X FIXE » et pas « cx45 »). Encore faut-il
+        le lire sur la BONNE guilde -- le bot est sur trois serveurs, et la
+        version precedente prenait la premiere ou le membre existait. Ici on
+        lit la guilde DU SALON du VA, qui est par construction la bonne.
+
+        JAMAIS D'IDENTIFIANT BRUT. Un membre introuvable garde le pseudo de
+        son salon (« va-safidy » -> « safidy ») plutot qu'un nombre de dix-neuf
+        chiffres, que personne ne peut relier a quelqu'un.
         """
-        att = sv.attendus()
-        for a in att:
-            try:
-                for g in self.bot.guilds:
-                    m = g.get_member(int(a["id"]))
-                    if m is not None:
-                        a["nom"] = getattr(m, "display_name", None) or a["nom"]
-                        break
-            except Exception:                        # noqa: BLE001
-                pass
-        return att
+        try:
+            from cogs.user import _ch_handle_va, _is_staff_member
+        except Exception:                            # noqa: BLE001
+            _ch_handle_va = lambda n: ""             # noqa: E731
+            _is_staff_member = lambda m: False       # noqa: E731
+        try:
+            import safe_json as _sj
+            users = _sj.load(sv.FICHIER_USERS, default={}) or {}
+        except Exception:                            # noqa: BLE001
+            users = {}
+        if not isinstance(users, dict):
+            return []
+        out, vus = [], set()
+        for uid, fiche in users.items():
+            if not str(uid).isdigit() or uid in vus:
+                continue
+            f = fiche if isinstance(fiche, dict) else {}
+            cid = f.get("channel_id")
+            if not cid:
+                continue                              # pas de salon = pas un VA
+            salon = self.bot.get_channel(cid) if self.bot else None
+            if salon is None:
+                continue                              # salon supprime : VA parti
+            membre = None
+            guilde = getattr(salon, "guild", None)
+            if guilde is not None:
+                try:
+                    membre = guilde.get_member(int(uid))
+                except (TypeError, ValueError):
+                    membre = None
+            if membre is not None and _is_staff_member(membre):
+                continue                              # le staff n'est pas attendu
+            nom = (getattr(membre, "display_name", None)
+                   or _ch_handle_va(getattr(salon, "name", ""))
+                   or f.get("username") or "")
+            if not nom:
+                # Plutot que d'afficher dix-neuf chiffres, on n'attend pas
+                # quelqu'un qu'on ne sait pas nommer : il apparaitra des qu'il
+                # sera identifiable.
+                continue
+            vus.add(uid)
+            out.append({"id": str(uid), "nom": str(nom),
+                        "identite": str(f.get("identity") or "")})
+        out.sort(key=lambda x: x["nom"].lower())
+        return out
 
     async def poster_resume(self, jour: str = "") -> int:
         """Poste le resume sur demande (bouton du tableau de bord).
