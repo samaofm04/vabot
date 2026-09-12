@@ -30,6 +30,18 @@ from __future__ import annotations
 import re
 import zlib
 
+# --- L'espace GetMySocial du classement -------------------------------------
+#
+# UNE SEULE CREATRICE EST SUIVIE, et c'est une consigne du proprietaire, pas
+# une limite technique : « les clics et les liens de suivi, tu ne regardes que
+# Jessye ». L'identifiant est ecrit ici plutot que dans chacun des trois
+# ecrans -- la carte du tableau de bord, le report Discord et la page /clics
+# doivent parler du MEME espace, sinon ils classeront trois populations
+# differentes sous le meme titre.
+ESPACE_RANKING = "tm_6a0e4739bfa0c238f20a8bf5"
+NOM_ESPACE_RANKING = "JESSY LE RETOUR"
+
+
 # --- Un emoji par personne --------------------------------------------------
 #
 # Deux regles pour la palette :

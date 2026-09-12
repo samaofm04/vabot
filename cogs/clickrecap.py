@@ -930,10 +930,31 @@ class ClickRecap(commands.Cog):
         deja = {str(x) for x in (cfg.get(_CLE_AUTO_RANKING) or [])}
         avant = set(deja)
         pose = False
-        for cle, c in _reports_configures(cfg):
-            # Un salon de classement ne sert pas de modele a un autre.
-            if str(c.get("contenu") or "").strip().lower() == "classement":
-                continue
+        # QUEL ESPACE ? « Le ranking, c'est celui de JESSY LE RETOUR. »
+        #
+        # Plusieurs reports peuvent coexister sur un serveur (un FR, un US) :
+        # prendre le premier venu poserait dans #ranking le classement d'une
+        # AUTRE creatrice, sous le meme titre, et personne ne le verrait. On
+        # cherche donc d'abord le report de cet espace-la ; a defaut, on
+        # accepte le report unique du serveur ; sinon on ne fait rien et on le
+        # dit, plutot que de tirer au sort.
+        try:
+            import clics_personnes as _cp_r
+            _vise = _cp_r.ESPACE_RANKING
+        except Exception:
+            _vise = ""
+        _modeles = [(cle, c) for cle, c in _reports_configures(cfg)
+                    if str(c.get("contenu") or "").strip().lower() != "classement"]
+        _bons = [(cle, c) for cle, c in _modeles
+                 if _vise and str(c.get("team_id") or "") == _vise]
+        if _bons:
+            _modeles = _bons
+        elif len(_modeles) > 1:
+            print("[reportclick] pose auto annulee : %d reports sur ce serveur "
+                  "et aucun sur l'espace du classement" % len(_modeles),
+                  flush=True)
+            _modeles = []
+        for cle, c in _modeles:
             gid = str(cle).split(":")[0]
             if not gid.isdigit():
                 continue

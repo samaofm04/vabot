@@ -9303,9 +9303,30 @@ try:
     check("menu : la table des rangees existe", "VABOT_MENU_RANGE = {" in _srcR2)
     _dR2 = _srcR2.index("var VABOT_MENU_RANGE = {")
     _tableR2 = _srcR2[_dR2:_srcR2.index("};", _dR2)]
-    for _id in ("tab-remote", "tab-remote2", "tab-sessions", "tab-valist",
+    for _id in ("tab-remote", "tab-sessions", "tab-valist",
                 "tab-onboarding", "tab-paievas", "tab-gmsdash", "grp-vault2"):
         check("menu : %s est range" % _id, "'%s'" % _id in _tableR2)
+    # LE PARC, LUI, RESTE OUVRABLE. « Remote 2 » ne disait pas ce qu il y
+    # avait derriere ; le proprietaire a nomme la rubrique « phone farm » et
+    # dit ce qu elle ouvre : « le parc ». Range par erreur, le seul poste de
+    # pilotage du parc devenait inaccessible.
+    check("menu : le parc n est PAS range", "'tab-remote2'" not in _tableR2)
+    check("menu : la rubrique s appelle Phone farm",
+          '<div class="section-label">Phone farm</div>' in _srcR2)
+    check("menu : l entree s appelle Le parc",
+          '<span class="label">Le parc</span>' in _srcR2
+          and '<span class="label">Remote 2</span>' not in _srcR2)
+    check("menu : le titre de la page suit le libelle",
+          "showTab('remote2','remote2','Le parc'," in _srcR2)
+    # L ICONE EST INDEXEE PAR LE TEXTE : vaAppliquerIcones lit .label puis
+    # VA_ICONES_APPLE[nom]. Renommer sans suivre la table efface l icone.
+    check("menu : l icone suit le nouveau nom",
+          '"Le parc": "<rect' in _srcR2 and '"Remote 2": "<rect' not in _srcR2,
+          "sinon l entree perd son icone des que le theme Apple est actif")
+    check("menu : le nom francais est traduit",
+          '"Le parc": "The farm",' in
+          _plR2.Path("i18n_en.py").read_text(encoding="utf-8"),
+          "le site est rendu en anglais par defaut")
     _fnR2 = _srcR2[_srcR2.index("function vabotMenuRange(){"):]
     _fnR2 = _fnR2[:_fnR2.index(chr(10) + "document.addEventListener")]
     # LE CLIC EST COUPE, pas seulement la vue : un bouton grise reste un
@@ -11384,6 +11405,41 @@ try:
         check("ranking auto : sa memoire n est pas prise pour un report",
               [k for k, _v in _crM._reports_configures(_crM._load_report_cfg())]
               == ["77:11"])
+
+        # QUEL ESPACE ? « Le ranking, c est celui de JESSY LE RETOUR. »
+        #
+        # Plusieurs reports coexistent sur un serveur (un FR, un US). Prendre
+        # le premier venu poserait dans #ranking le classement d une AUTRE
+        # creatrice, sous le meme titre, et personne ne le verrait.
+        import clics_personnes as _cpE
+
+        def _essaiE(cfgE):
+            _crM._REPORT_CFG_FILE = pathlib.Path(_tmpM.mkdtemp()) / "r.json"
+            _crM._save_report_cfg(cfgE)
+            _c = _CogM(_BotM(_GM([_ChM(11, "clics-fr"), _ChM(12, "clics-us"),
+                                  _ChM(22, "ranking")])))
+            _p = _aioM.run(_c._poser_ranking_auto())
+            return _p, (_crM._load_report_cfg().get("77:22") or {}).get("team_id")
+
+        _FR = {"channel_id": 11, "team_id": "tm_6a1ea410d882dd2173b8a315",
+               "group_name": "marche francais", "marche": "fr", "tout": True}
+        _JE = {"channel_id": 12, "team_id": _cpE.ESPACE_RANKING,
+               "group_name": _cpE.NOM_ESPACE_RANKING, "marche": "us", "tout": True}
+        _pE, _tE = _essaiE({"77:11": dict(_FR), "77:12": dict(_JE)})
+        check("ranking auto : entre deux espaces, il prend celui du classement",
+              _pE is True and _tE == _cpE.ESPACE_RANKING, str(_tE))
+        _pE, _tE = _essaiE({"77:11": dict(_FR),
+                            "77:12": dict(_FR, channel_id=12)})
+        check("ranking auto : deux espaces etrangers -> il ne tire pas au sort",
+              _pE is False and _tE is None, str((_pE, _tE)))
+        _pE, _tE = _essaiE({"77:11": dict(_FR)})
+        check("ranking auto : un seul report, il s en contente",
+              _pE is True and _tE == _FR["team_id"], str(_tE))
+        # L espace est nomme UNE fois : les trois ecrans doivent parler du meme.
+        import web_upload as _wE
+        check("ranking auto : la carte d accueil vise le meme espace",
+              _wE.CLICRANK_TEAM == _cpE.ESPACE_RANKING,
+              "%s vs %s" % (_wE.CLICRANK_TEAM, _cpE.ESPACE_RANKING))
     finally:
         _crM._REPORT_CFG_FILE = _sauveM
 except Exception as _eM:
