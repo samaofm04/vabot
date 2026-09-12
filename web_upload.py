@@ -48282,16 +48282,28 @@ def _render_upload_inner(msg=None, error=None):
         _th = (_rq.cookies.get("va_theme") or "").strip().lower()
     except Exception:
         _th = ""
+    # LES TROIS TABLES CI-DESSOUS DOIVENT CONNAITRE TOUS LES THEMES.
+    #
+    # « infloww » manquait a la liste des noms acceptes : le serveur retombait
+    # donc sur « light » et envoyait la page avec <body class="light">. Le
+    # navigateur peignait un ecran BLANC -- cartes blanches comprises -- puis
+    # le JavaScript remettait le bon theme apres coup. D'ou un fond qui
+    # « devient blanc de temps en temps au rechargement » : ca depend de ce
+    # qu'on regarde, avant ou apres que le script ait tourne.
+    #
+    # Un theme ajoute cote client et oublie ici repeint donc toute la page a
+    # l'envers. Un test refuse desormais que les deux listes divergent.
     if _th not in ("light", "apple", "claude", "dark", "obsidian",
-                   "violet", "gold"):
+                   "violet", "gold", "infloww"):
         _th = "light"          # defaut du site
     _pre = {"light": "light-pre pre-light", "apple": "light-pre pre-apple",
             "claude": "light-pre pre-claude",
             "dark": "", "obsidian": "pre-obsidian", "violet": "pre-violet",
-            "gold": "pre-gold"}[_th]
+            "gold": "pre-gold", "infloww": "pre-infloww"}[_th]
     _bod = {"light": "light", "apple": "light apple",
             "claude": "light claude", "dark": "",
-            "obsidian": "obsidian", "violet": "violet", "gold": "gold"}[_th]
+            "obsidian": "obsidian", "violet": "violet", "gold": "gold",
+            "infloww": "infloww"}[_th]
 
     html = (
         UPLOAD_HTML
