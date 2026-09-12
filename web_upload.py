@@ -1411,27 +1411,13 @@ body.light.inflowwlight .sel-cb:checked + .sel-circle::after,body.light.inflowwl
 .sidebar .item:hover{padding-left:14px}
 
 /* Sub-tabs */
-/* Pas de retour a la ligne, mais un DEFILEMENT : .main porte
-   overflow-x:hidden sous 820 px, et six sous-onglets font environ 700 px
-   pour 300 de large. Sans ca, les deux derniers -- « Generateurs SMS » et
-   « Cle IA » -- sont coupes et inatteignables au doigt. */
-.subtabs{display:flex;gap:4px;margin:0 0 18px;padding:0 0 2px;
-  border-bottom:1px solid #26262c;overflow-x:auto;-webkit-overflow-scrolling:touch}
-.subtab{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px}
-/* Le logo du service, a la taille du texte qui le suit. Pose en
+/* Le logo d'un service, a la taille du texte qui le suit. Pose en
    ligne (pas en pastille) : cote a cote, huit pastilles de couleur
    feraient une guirlande. */
 .lgi{width:1.15em;height:1.15em;flex:0 0 auto;vertical-align:-.2em;
   margin-right:6px}
-/* Dans la barre de sous-onglets, c'est le gap du flex qui espace : deux
-   ecarts cumules decollaient le logo de son libelle. */
-.subtab .lgi{margin-right:0}
-.subtab{background:none;border:0;border-bottom:2px solid transparent;
-  color:#8b8b96;font-weight:600;font-size:12.5px;font-family:inherit;
-  padding:9px 13px;cursor:pointer;border-radius:8px 8px 0 0;margin-bottom:-1px}
-.subtab:hover{color:#e6e6ea;background:rgba(255,255,255,.05)}
-.subtab.active{color:#3b82f6;border-bottom-color:currentColor}
-body.light .subtab:hover{color:#111827;background:#f3f4f6}
+/* Dans le sous-menu, c'est l'ecart de l'entree qui espace. */
+.sidebar .sub-items .lgi{margin-right:0}
 .subtab{transition:color .15s,border-color .15s}
 
 /* Boutons - hover lift */
@@ -9393,61 +9379,6 @@ function chargerOngletDiffere(sec){
   });
 }
 
-// === LES SIX REGLAGES D'INTEGRATION, SOUS UNE SEULE ENTREE ==============
-// Ils gardent chacun leur onglet -- une quinzaine de routes renvoient vers
-// ?tab=smypuls ou ?tab=saikey apres un formulaire, et le bridage par role
-// est indexe par nom d'onglet cote serveur. Seule la BARRE a change.
-var API_ONGLETS = ['stoken','sinsta','smypuls','vtg','snumgen','saikey'];
-function apiOuvrir(id){
-  // Sans argument (clic sur l'entree de la barre laterale) : le premier
-  // sous-onglet ENCORE VISIBLE. Un role a qui on n'a accorde que « Cle IA »
-  // n'a pas a tomber sur « Token bot admin », qui lui est interdit.
-  if(!id){
-    var bs = document.querySelectorAll('#api-bar [data-api]');
-    for(var i=0;i<bs.length;i++){
-      if(bs[i].style.display !== 'none'){ id = bs[i].getAttribute('data-api'); break; }
-    }
-    if(!id) return;
-  }
-  var b = document.querySelector('#api-bar [data-api="' + id + '"]');
-  showTab('settings', id,
-          b ? b.getAttribute('data-titre') : 'Intégrations',
-          b ? b.getAttribute('data-sous') : '');
-}
-// La barre suit la section affichee. On la pose JUSTE AVANT elle, en
-// voisine : posee dedans, le chargement differe l'emporterait avec le
-// gabarit qu'il remplace.
-function apiPoserBarre(nom){
-  var bar = document.getElementById('api-bar');
-  if(!bar) return;
-  if(API_ONGLETS.indexOf(nom) === -1){ bar.style.display = 'none'; return; }
-  var sec = document.getElementById('form-' + nom);
-  if(!sec || !sec.parentNode) return;
-  if(bar.nextElementSibling !== sec) sec.parentNode.insertBefore(bar, sec);
-  bar.style.display = '';
-  var bs = bar.querySelectorAll('[data-api]');
-  for(var i=0;i<bs.length;i++){
-    if(bs[i].getAttribute('data-api') === nom) bs[i].classList.add('active');
-    else bs[i].classList.remove('active');
-  }
-  // showTab a marque #tab-<nom>, qui n'existe plus dans la barre laterale :
-  // c'est l'entree unique qui doit s'allumer.
-  var e = document.getElementById('nav-integrations');
-  if(e) e.classList.add('active');
-}
-document.addEventListener('click', function(ev){
-  var c = ev.target && ev.target.closest ? ev.target.closest('#api-bar [data-api]') : null;
-  if(c) apiOuvrir(c.getAttribute('data-api'));
-});
-// Arrive par l'URL (?tab=saikey, ou le retour d'un formulaire) : le
-// chargeur general cherche un bouton #tab-saikey dans la barre laterale et
-// n'en trouve plus. On ouvre nous-memes.
-document.addEventListener('DOMContentLoaded', function(){
-  try{
-    var t = new URLSearchParams(window.location.search).get('tab');
-    if(t && API_ONGLETS.indexOf(t) !== -1) apiOuvrir(t);
-  }catch(e){}
-});
 function showTab(group,name,title,subtitle){
   if(typeof igStopAllReels==="function") igStopAllReels();
   // Meme raison qu au changement d identite : la selection ne doit pas
@@ -9471,6 +9402,11 @@ function showTab(group,name,title,subtitle){
   var sec=document.getElementById('form-'+name);
   var head=grp?grp.querySelector('.group-head'):null;
   if(btn)btn.classList.add('active');
+  // Une entree logee dans un sous-menu (Trends, Integrations) : on le
+  // deplie. Sans ca, arriver par ?tab=saikey -- le retour de chaque
+  // formulaire -- ouvre la page sans montrer ou on se trouve.
+  if(btn && btn.closest){var sg = btn.closest('.subgroup');
+    if(sg) sg.classList.add('open');}
   if(head)head.classList.add('active');
   if(sec)sec.style.display='block';
   else {
@@ -9507,7 +9443,6 @@ function showTab(group,name,title,subtitle){
   }
   document.getElementById('page-title').textContent=title||'';
   document.getElementById('page-subtitle').textContent=subtitle||'';
-  if(typeof apiPoserBarre === 'function') apiPoserBarre(name);
   // Mettre à jour l'URL pour que le Referer soit conservé après POST
   try{
     if(window.history && window.history.replaceState){
@@ -10701,10 +10636,21 @@ document.addEventListener('click',function(e){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
       Manage employees
     </button>
-    <button class="item" id="nav-integrations" onclick="apiOuvrir()">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v7"/><path d="M15 2v7"/><path d="M6 9h12v2a6 6 0 0 1-12 0z"/><path d="M12 17v5"/></svg>
-      Intégrations
-    </button>
+    <div class="subgroup" id="sub-integrations">
+      <button class="subgroup-head" onclick="toggleSubGroup('integrations')">
+        <span class="brand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v7"/><path d="M15 2v7"/><path d="M6 9h12v2a6 6 0 0 1-12 0z"/><path d="M12 17v5"/></svg></span>
+        <span class="label">Int&eacute;grations</span>
+        <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div class="sub-items">
+        <button class="item" id="tab-stoken" onclick="showTab('settings','stoken','Token bot admin','Token du 2e bot Discord')"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg class="lgi"><use href="#lg-discord"/></svg>Token bot admin</span></button>
+        <button class="item" id="tab-sinsta" onclick="showTab('settings','sinsta','Cookies Instagram','Auth scraper Instagram')"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg class="lgi"><use href="#lg-instagram"/></svg>Cookies Instagram</span></button>
+        <button class="item" id="tab-smypuls" onclick="showTab('settings','smypuls','Cookies MyPuls','Session mypuls.app — sync revenus chatteurs et push planning')"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg class="lgi"><use href="#lg-mypuls"/></svg>Cookies MyPuls</span></button>
+        <button class="item" id="tab-vtg" onclick="showTab('settings','vtg','Veille Telegram','Bot Telegram pour la veille reels')"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg class="lgi"><use href="#lg-telegram"/></svg>Veille Telegram</span></button>
+        <button class="item" id="tab-snumgen" onclick="showTab('settings','snumgen','Générateurs SMS','Pays des numéros et des mails — 0 = Russie, cause du « aucun numéro dispo »')"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg class="lgi"><use href="#lg-sms"/></svg>Générateurs SMS</span></button>
+        <button class="item" id="tab-saikey" onclick="showTab('settings','saikey','Clé IA','Lecture du texte sur les vidéos + bios IA')"><span class="left" style="display:inline-flex;align-items:center;gap:8px"><svg class="lgi"><use href="#lg-claude"/></svg>Clé IA</span></button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -12836,19 +12782,6 @@ document.addEventListener('keydown', function(e){
 <!-- JAILBREAK - Activité VA (assiduité) -->
 <div class="form-section" id="form-jbactivite" style="display:none">
 {jbactivite_html}
-</div>
-
-<!-- LA BARRE DES INTEGRATIONS. Un seul noeud, qu'un bout de JavaScript
-     deplace juste AVANT la section affichee. Jamais a l'interieur : le
-     chargement differe remplace des morceaux de section, et quatre des six
-     pages sont differees. -->
-<div id="api-bar" class="subtabs" style="display:none">
-  <button type="button" class="subtab" id="tab-stoken" data-api="stoken" data-titre="Token bot admin" data-sous="Token du 2e bot Discord"><svg class="lgi"><use href="#lg-discord"/></svg>Token bot admin</button>
-  <button type="button" class="subtab" id="tab-sinsta" data-api="sinsta" data-titre="Cookies Instagram" data-sous="Auth scraper Instagram"><svg class="lgi"><use href="#lg-instagram"/></svg>Cookies Instagram</button>
-  <button type="button" class="subtab" id="tab-smypuls" data-api="smypuls" data-titre="Cookies MyPuls" data-sous="Session mypuls.app — sync revenus chatteurs et push planning"><svg class="lgi"><use href="#lg-mypuls"/></svg>Cookies MyPuls</button>
-  <button type="button" class="subtab" id="tab-vtg" data-api="vtg" data-titre="Veille Telegram" data-sous="Bot Telegram pour la veille reels"><svg class="lgi"><use href="#lg-telegram"/></svg>Veille Telegram</button>
-  <button type="button" class="subtab" id="tab-snumgen" data-api="snumgen" data-titre="Générateurs SMS" data-sous="Pays des numéros et des mails — 0 = Russie, cause du « aucun numéro dispo »"><svg class="lgi"><use href="#lg-sms"/></svg>Générateurs SMS</button>
-  <button type="button" class="subtab" id="tab-saikey" data-api="saikey" data-titre="Clé IA" data-sous="Lecture du texte sur les vidéos + bios IA"><svg class="lgi"><use href="#lg-claude"/></svg>Clé IA</button>
 </div>
 
 <!-- SETTINGS - TOKEN -->
@@ -47728,21 +47661,6 @@ def _role_gate_script(allowed) -> str:
         "function findBtn(name){var b=document.getElementById('tab-'+name);if(b)return b;"
         "var all=sb.querySelectorAll('.item');for(var i=0;i<all.length;i++){if(nm(all[i])===name)return all[i];}return null;}"
         "A.forEach(function(name){var b=findBtn(name);if(b)reveal(b);});"
-        # LES SIX REGLAGES D'INTEGRATION SONT SOUS UNE SEULE ENTREE.
-        # Deux consequences, et le garde ne les voyait ni l'une ni l'autre :
-        #  - il revele les boutons PAR NOM D'ONGLET, et une entree unique
-        #    n'a qu'un nom : on la revele des qu'UNE des six est accordee ;
-        #  - il ne masque que ce qui vit dans .sidebar, et la barre de
-        #    sous-onglets vit dans la page. Non filtree, elle offrait a un
-        #    role restreint un bouton vers chacune des six pages -- et le
-        #    clic ROUVRAIT la section, parce que showTab repose un
-        #    display:block par-dessus le display:none du garde.
-        "var _SIX=['stoken','sinsta','smypuls','vtg','snumgen','saikey'];"
-        "var _un=document.getElementById('nav-integrations');"
-        "if(_un){var _y=false;_SIX.forEach(function(n){if(ok[n])_y=true;});"
-        "if(_y)reveal(_un);}"
-        "document.querySelectorAll('#api-bar [data-api]').forEach(function(b){"
-        "if(!ok[b.getAttribute('data-api')])b.style.display='none';});"
         # 3) reveler les labels de section qui precedent un bloc redevenu visible
         "Array.prototype.forEach.call(sb.children,function(c){"
         "if(c.classList&&c.classList.contains('section-label')){var n=c.nextElementSibling,v=false;"

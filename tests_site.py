@@ -9554,61 +9554,73 @@ except Exception as _eP:
 
 print()
 print("=" * 70)
-print("INTEGRATIONS : six reglages, une seule entree de barre")
+print("INTEGRATIONS : six reglages replies dans un sous-menu")
 print("=" * 70)
 try:
     import pathlib as _plG
     _srcG = _plG.Path("web_upload.py").read_text(encoding="utf-8")
     _SIX = ("stoken", "sinsta", "smypuls", "vtg", "snumgen", "saikey")
 
-    # La barre laterale ne porte plus six lignes pour six reglages qu on
-    # ouvre trois fois par an.
     _dG = _srcG.index('<div class="sidebar')
     _fG = _srcG.index('<div class="spacer">', _dG)
     _barre = _srcG[_dG:_fG]
-    _restes = sorted(t for t in _SIX if ('id="tab-%s"' % t) in _barre)
-    check("integrations : les six entrees ont quitte la barre laterale",
-          not _restes, "encore la : " + ", ".join(_restes))
-    check("integrations : une entree unique les remplace",
-          _barre.count('id="nav-integrations"') == 1)
 
-    # ELLE N INVENTE PAS D ONGLET. Un id « tab-xxx » suffit a faire entrer
-    # « xxx » dans la liste des pages que l editeur de permissions doit
-    # couvrir : une entree de barre qui n est pas une page y serait une
-    # case a cocher de plus, pointant sur rien.
-    check("integrations : l entree unique n invente pas d onglet",
-          'id="tab-sapi"' not in _srcG and 'id="tab-integrations"' not in _srcG)
+    # LE SOUS-MENU, monte comme celui de Trends : un chapeau qui se deplie
+    # et six entrees dedans. La barre de sous-onglets posee dans la page,
+    # elle, n'existe plus -- six libelles y faisaient 700 px pour 300 de
+    # large, et l'ascenseur gris se voyait en travers de l'ecran.
+    check("integrations : le sous-menu existe",
+          '<div class="subgroup" id="sub-integrations">' in _barre)
+    check("integrations : il se deplie comme les autres",
+          "toggleSubGroup('integrations')" in _barre)
+    check("integrations : la barre de sous-onglets a disparu",
+          "api-bar" not in _srcG and "apiOuvrir" not in _srcG,
+          "il en reste quelque chose")
 
-    # Et les six pages, elles, existent toujours -- sections ET identifiants.
-    # Une quinzaine de routes renvoient vers ?tab=smypuls ou ?tab=saikey
-    # apres un formulaire, et le bridage par role est indexe par ce nom-la.
+    # Les six entrees sont DANS le sous-menu, pas ailleurs dans la barre.
+    _dS = _barre.index('id="sub-integrations"')
+    _fS = _barre.index("</div>", _barre.index("</span></button>", _dS))
+    _sous = _barre[_dS:_fS]
+    _dehors = sorted(t for t in _SIX if ('id="tab-%s"' % t) not in _sous)
+    check("integrations : les six entrees sont dans le sous-menu",
+          not _dehors, "hors du sous-menu : " + ", ".join(_dehors))
+    # Et chacune porte le logo de son service.
+    check("integrations : chaque entree porte un logo",
+          _sous.count('<use href="#lg-') == 6,
+          "%d logo(s)" % _sous.count('<use href="#lg-'))
+
+    # ELLES N'INVENTENT PAS D'ONGLET. Un id « tab-xxx » suffit a faire
+    # entrer « xxx » dans la liste des pages que l'editeur de permissions
+    # doit couvrir ; le chapeau du sous-menu n'en porte donc pas.
+    check("integrations : le chapeau du sous-menu n invente pas d onglet",
+          'id="tab-sapi"' not in _srcG and 'id="tab-integrations"' not in _srcG
+          and 'id="nav-integrations"' not in _srcG)
+
+    # Les six pages existent toujours, sections ET identifiants : une
+    # quinzaine de routes renvoient vers ?tab=smypuls ou ?tab=saikey apres
+    # un formulaire, et le bridage par role est indexe par ce nom-la.
     _perdus = sorted(t for t in _SIX
                      if ('id="form-%s"' % t) not in _srcG
                      or ('id="tab-%s"' % t) not in _srcG)
     check("integrations : les six pages gardent leur identifiant",
           not _perdus, "perdu(s) : " + ", ".join(_perdus))
-    _sansOnglet = sorted(t for t in _SIX if ('data-api="%s"' % t) not in _srcG)
-    check("integrations : les six sont dans la barre de sous-onglets",
-          not _sansOnglet, "absent(s) : " + ", ".join(_sansOnglet))
 
-    # LE BRIDAGE PAR ROLE NE MASQUE QUE CE QUI VIT DANS .sidebar. La barre
-    # de sous-onglets vit dans la PAGE : sans ces deux lignes, un role
-    # restreint voyait un bouton vers chacune des six pages, et le clic
-    # ROUVRAIT la section que le garde venait de cacher (showTab repose un
-    # display:block par-dessus le display:none).
+    # LE BRIDAGE PAR ROLE RETROUVE SA FORME NORMALE : il revele les boutons
+    # un par un, par leur nom d'onglet. Un role a qui on n'accorde que
+    # « Cle IA » voit « Cle IA », et rien d'autre.
     _dGa = _srcG.index("def _role_gate_script")
     _garde = _srcG[_dGa:_srcG.index("def ", _dGa + 10)]
-    check("integrations : le garde des roles filtre la barre de sous-onglets",
-          "#api-bar [data-api]" in _garde)
-    check("integrations : et revele l entree des qu UNE des six est accordee",
-          "nav-integrations" in _garde and "_SIX" in _garde)
+    check("integrations : le garde des roles n a plus de rustine",
+          "api-bar" not in _garde and "nav-integrations" not in _garde)
 
-    # Six sous-onglets font environ 700 px ; la zone utile d un telephone
-    # en fait 300, et .main porte overflow-x:hidden. Sans defilement, les
-    # deux derniers sont coupes et inatteignables.
-    _dS = _srcG.index(".subtabs{")
-    check("integrations : la barre defile au doigt sur telephone",
-          "overflow-x:auto" in _srcG[_dS:_dS + 260])
+    # Arriver par ?tab=saikey -- le retour de CHAQUE formulaire des six --
+    # doit deplier le sous-menu, sinon la page s'ouvre sans montrer ou on
+    # se trouve. Trends avait deja ce trou.
+    _dT = _srcG.index("function setTheme") if False else _srcG.index(
+        "function showTab(group,name,title,subtitle){")
+    _sT = _srcG[_dT:_srcG.index("page-subtitle", _dT)]
+    check("integrations : ouvrir un onglet deplie son sous-menu",
+          "closest('.subgroup')" in _sT)
 
     # La traduction : l anglais est la langue par DEFAUT du site.
     import i18n_en as _i18G
