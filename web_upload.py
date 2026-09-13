@@ -56454,12 +56454,26 @@ def create_app():
             toutes_brutes = _n(_off.lister, u.IDENTITIES_DIR / i / "brutes",
                                extensions=u.VIDEO_EXTS)
             tpl = _n(u.fav_templates_for, i)
+            # LES TOTAUX, PAS SEULEMENT LES ETOILES. Le diagnostic ne rendait
+            # que le compte des etoiles : impossible de savoir si une case vide
+            # venait d'un vivier pauvre ou d'un etoilage oublie. Mesure du
+            # 13/09/2026 : lillaroseconlon annoncait 2 captions etoilees, et
+            # rien ne disait s'il y en avait 2 ou 200 en tout.
+            tpl_tous = _n(u.tous_templates_for, i)
+            try:
+                caps_tous = len([c for c in (u._captions_block(i).get("items") or [])
+                                 if c.get("enabled", True)
+                                 and str(c.get("text") or "").strip()])
+            except Exception:
+                caps_tous = 0
             flash = _n(u.flash_templates_for, i, exiger_banger=False)
             flash_b = _n(u.flash_templates_for, i, exiger_banger=True)
             prets = _n(u.va_ready_montages_for, i, 1)
             sortie[i] = {
-                "captions_etoilees": caps, "brutes_etoilees": fav_brutes,
+                "captions_etoilees": caps, "captions": caps_tous,
+                "brutes_etoilees": fav_brutes,
                 "brutes": toutes_brutes, "templates_etoiles": tpl,
+                "templates": tpl_tous,
                 "flash": flash, "flash_etoiles": flash_b,
                 "montages_prets": prets,
                 # Possible ou non, famille par famille -- exactement les
@@ -56473,6 +56487,10 @@ def create_app():
                     "flash": bool(flash),
                     "flash_banger": bool(flash_b),
                     "flash_brut": bool(flash_b and fav_brutes),
+                    # La brute etoilee, la matiere au hasard.
+                    "caption_vid": bool(caps_tous and fav_brutes),
+                    "template_vid": bool(tpl_tous and fav_brutes),
+                    "flash_vid": bool(flash and fav_brutes),
                 },
             }
         return sortie

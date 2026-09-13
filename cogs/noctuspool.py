@@ -147,13 +147,22 @@ class NoctusPool(commands.Cog):
         from cogs import user as u
 
         # --- les deux familles a caption incrustee ------------------------
-        if famille in ("caption", "montage"):
+        if famille in ("caption", "montage", "caption_vid"):
             block = u._captions_block(identite)
-            caps = [c for c in u.fav_captions_for(identite)
-                    if str(c.get("text") or "").strip()]
+            if famille == "caption_vid":
+                # LA MATIERE AU HASARD, LA BRUTE ETOILEE. Ici l'etoile est sur
+                # la video, pas sur le texte : on prend donc TOUTES les captions
+                # actives, exactement comme le bouton « 💬 Caption », et non les
+                # seules etoilees. C'est le meme vivier que reelcaption.
+                caps = [c for c in (block.get("items") or [])
+                        if c.get("enabled", True)
+                        and str(c.get("text") or "").strip()]
+            else:
+                caps = [c for c in u.fav_captions_for(identite)
+                        if str(c.get("text") or "").strip()]
             if not caps:
                 return None
-            if famille == "montage":
+            if famille in ("montage", "caption_vid"):
                 brutes = u.fav_brutes_for(identite)
             else:
                 import brutes_off as _off
@@ -180,6 +189,13 @@ class NoctusPool(commands.Cog):
         # --- les templates et les Flash ------------------------------------
         if famille in ("template", "template_brut"):
             templates, _ecartes = u.fav_templates_for(identite)
+        elif famille == "template_vid":
+            # Tout le dossier, pas seulement les etoiles : c'est la brute qui
+            # porte l'etoile pour cette famille.
+            templates, _ecartes = u.tous_templates_for(identite)
+        elif famille == "flash_vid":
+            templates, _ecartes = u.flash_templates_for(
+                identite, exiger_banger=False)
         else:
             templates, _ecartes = u.flash_templates_for(
                 identite, exiger_banger=(famille != "flash"))
@@ -190,7 +206,8 @@ class NoctusPool(commands.Cog):
         # Ailleurs le moteur en tire une au hasard — c est le comportement du
         # bouton, et l imposer reduirait le stock sans rien trier de mieux.
         brute_imposee = None
-        if famille in ("template_brut", "flash_brut"):
+        if famille in ("template_brut", "flash_brut",
+                       "template_vid", "flash_vid"):
             brutes = u.fav_brutes_for(identite)
             if not brutes:
                 return None

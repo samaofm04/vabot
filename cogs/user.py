@@ -1461,6 +1461,53 @@ def fav_templates_for(identity, limit=15):
     return utilisables, sans_coupe
 
 
+def tous_templates_for(identity, limit=15):
+    """TOUS les templates exploitables d'une identite -> ([(Path, draft)], nb).
+
+    Meme contrat et MEME validation que fav_templates_for : un template sans
+    point de coupe est ecarte et compte, parce que le moteur le recopierait tel
+    quel et que la brute n'apparaitrait pas dans la video.
+
+    LA SEULE DIFFERENCE EST LE VIVIER. fav_templates_for part des noms etoiles
+    lus dans fav_brutes.json ; celle-ci part du DOSSIER. Elle sert la famille
+    « template_vid » (bouton ⭐ Brut + Template), ou c'est la brute qui porte
+    l'etoile et ou la matiere est prise au hasard.
+
+    Pourquoi elle n'existait pas : jusqu'ici aucune recette n'avait besoin d'un
+    template non etoile. L'etoile de la brute ne pouvait se combiner qu'avec
+    une matiere elle aussi etoilee -- voir le commentaire de FAMILLES dans
+    noctus_reserve.py.
+    """
+    import json as _json
+    tdir = IDENTITIES_DIR / (identity or "").lower().strip() / "templates"
+    if not tdir.is_dir():
+        return [], 0
+    utilisables, sans_coupe = [], 0
+    for p in sorted(tdir.iterdir()):
+        if not (p.is_file() and p.suffix.lower() in VIDEO_EXTS):
+            continue
+        mj = p.parent / f"{p.stem}.montage.json"
+        if not mj.exists():
+            sans_coupe += 1
+            continue
+        try:
+            draft = _json.loads(mj.read_text(encoding="utf-8"))
+        except Exception:
+            sans_coupe += 1
+            continue
+        try:
+            cut = float((draft or {}).get("cut_at") or 0)
+        except (TypeError, ValueError):
+            cut = 0.0
+        if cut <= 0.05:
+            sans_coupe += 1
+            continue
+        utilisables.append((p, draft))
+        if limit and len(utilisables) >= limit:
+            break
+    return utilisables, sans_coupe
+
+
 def flash_templates_for(identity, limit=15, exiger_banger=False):
     """Templates marques Flash Trend -> ([(Path, draft)], nb_sans_coupe).
 

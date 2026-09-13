@@ -31,7 +31,12 @@ PREFIX = os.getenv("PREFIX", "!")
 # L'etat des deux applications se lit sur youl4b.com/version : serveurs,
 # commandes sur 100, cogs charges, et les cogs en echec avec leur erreur.
 MAIN_COGS = ["welcome", "onboarding", "autopost", "general", "user", "cta_reminder", "noctustest", "clickrecap", "sheetssync", "telechargement", "reportcomptes", "noctuspool", "sessionsvoc"]
-ADMIN_COGS = ["admin", "geelark", "vaactivity", "vasort", "tgrouter", "numeros"]
+ADMIN_COGS = ["admin", "geelark", "vaactivity", "vasort", "tgrouter", "numeros",
+              # Banc d'essai des menus. Sur le bot ADMIN et pas le
+              # principal : celui-ci declare deja 101 commandes pour un
+              # plafond Discord de 100, une de plus ferait echouer la
+              # synchronisation de tout son arbre. Ici il reste 22 places.
+              "menutest"]
 
 logging.basicConfig(
     level=logging.INFO,

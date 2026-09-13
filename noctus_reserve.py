@@ -61,7 +61,23 @@ PROFONDEUR = max(1, int(os.environ.get("NOCTUS_RESERVE_PROFONDEUR") or "6"))
 #: Les familles qui paient une génération. Les autres servent des fichiers
 #: existants et n'ont rien à gagner ici.
 FAMILLES = ("caption", "montage", "reelmonte", "template", "template_brut",
-            "flash", "flash_banger", "flash_brut")
+            "flash", "flash_banger", "flash_brut",
+            # LA BRUTE ETOILEE AVEC UNE MATIERE AU HASARD.
+            #
+            # Les huit familles ci-dessus etoilent la MATIERE (caption,
+            # template, flash) et laissent la brute au hasard -- sauf les
+            # « + Brut », qui exigent les DEUX etoiles. Il manquait la
+            # symetrique : la brute etoilee, celle qui performe, avec
+            # n'importe quelle matiere par-dessus.
+            #
+            # POURQUOI ELLE MANQUAIT AU PARC. L'etoile de la brute ne servait
+            # qu'a se combiner avec une matiere elle aussi etoilee : les bonnes
+            # videos etaient enfermees derriere une seconde rarete. Mesure du
+            # 13/09/2026 sur lillaroseconlon -- 3 brutes etoilees, 1 seul flash
+            # etoile : la famille flash_brut ne disposait que de TROIS recettes
+            # possibles pour six variantes en stock. Elle ne pouvait
+            # structurellement pas eviter le doublon.
+            "caption_vid", "template_vid", "flash_vid")
 
 #: Quel BOUTON du menu est servi par quelle famille de la réserve.
 #:
@@ -90,6 +106,10 @@ FAMILLE_PAR_ACTION = {
     "templateflash": "flash",            # ⚡ Flash
     "templateflashbanger": "flash_banger",   # ⭐ Flash
     "templateflashbrut": "flash_brut",   # ⭐⭐ Flash + Brut
+    # La brute etoilee, la matiere au hasard. Voir FAMILLES.
+    "brutcaption": "caption_vid",        # ⭐ Brut + Caption
+    "bruttemplate": "template_vid",      # ⭐ Brut + Template
+    "brutflash": "flash_vid",            # ⭐ Brut + Flash
 }
 
 
