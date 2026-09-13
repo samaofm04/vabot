@@ -3034,7 +3034,33 @@ class UserCog(commands.Cog):
                 prefixe_fichier="caption_banger", famille="caption",
                 suivi=suivi)
 
-    async def _send_montage_bangers(self, interaction):
+    async def brutcaption(self, interaction):
+        """⭐ Brut + Caption : une brute ETOILEE, une caption au hasard.
+
+        Le symetrique de « ⭐ Caption », qui etoile le texte et tire la video au
+        hasard. Ici l'etoile est sur la VIDEO -- celle qui performe -- et le
+        texte vient du vivier complet. Mesure du 13/09/2026 : lillaroseconlon
+        avait 17 captions actives dont 4 etoilees ; les treize autres ne
+        servaient a aucun bouton.
+        """
+        await self._send_montage_bangers(interaction, caption_favorite=False)
+
+    async def bruttemplate(self, interaction):
+        """⭐ Brut + Template : une brute ETOILEE, un template au hasard."""
+        await self._send_template_plus_brute(interaction, brute_favorite=True,
+                                             template_favori=False)
+
+    async def brutflash(self, interaction):
+        """⭐ Brut + Flash : une brute ETOILEE, un flash au hasard.
+
+        Cette combinaison etait DEJA possible dans _send_template_flash --
+        exiger_banger=False avec brute_favorite=True -- mais aucun bouton ne
+        l'appelait.
+        """
+        await self._send_template_flash(interaction, exiger_banger=False,
+                                        brute_favorite=True)
+
+    async def _send_montage_bangers(self, interaction, caption_favorite=True):
         """Bouton '🎬 Montage Banger' : une BRUTE favorite + une CAPTION favorite.
 
         Meme recette que /reelcaption, restreinte aux favoris. PAS de template :
@@ -3052,7 +3078,13 @@ class UserCog(commands.Cog):
                 "Tu n'as pas d'identité assignée. Demande à un admin.", ephemeral=True)
             return
         brutes = fav_brutes_for(identity)
-        caps = fav_captions_for(identity)
+        # caption_favorite decide du VIVIER DE TEXTES, et rien d'autre :
+        #   True   les captions etoilees   -> « ⭐⭐ Caption + Vidéo brut »
+        #   False  toutes les captions     -> « ⭐ Brut + Caption »
+        # Dans le second cas l'etoile est sur la VIDEO, pas sur le texte.
+        caps = (fav_captions_for(identity) if caption_favorite else
+                [c for c in (_captions_block(identity).get("items") or [])
+                 if c.get("enabled", True) and str(c.get("text") or "").strip()])
         if not brutes or not caps:
             # Toujours nommer le nombre de l'AUTRE cote : c'est ca qui apprend
             # au VA — et au manager — ce qui manque reellement.
@@ -3105,10 +3137,12 @@ class UserCog(commands.Cog):
             await self._gen_and_send_caption(
                 interaction, vid, cap, block, idx, total, identity,
                 label="MONTAGE BANGER", emoji="🎬",
-                prefixe_fichier="montage_banger", famille="montage",
+                prefixe_fichier="montage_banger",
+                famille=("montage" if caption_favorite else "caption_vid"),
                 suivi=suivi)
 
-    async def _send_template_plus_brute(self, interaction, brute_favorite=True):
+    async def _send_template_plus_brute(self, interaction, brute_favorite=True,
+                                        template_favori=True):
         """Bouton 'Template + Brut' : un template ⭐ ASSEMBLE avec une brute.
 
         `brute_favorite` decide du STOCK de brutes, et rien d'autre :
@@ -3138,7 +3172,12 @@ class UserCog(commands.Cog):
             await interaction.response.send_message(
                 "Tu n'as pas d'identité assignée. Demande à un admin.", ephemeral=True)
             return
-        templates, sans_coupe = fav_templates_for(identity)
+        # template_favori decide du VIVIER DE TEMPLATES, comme brute_favorite
+        # decide de celui des brutes. Les deux a False n'aurait aucun sens --
+        # ce serait « n'importe quoi sur n'importe quoi » -- et aucun bouton ne
+        # le propose.
+        templates, sans_coupe = (fav_templates_for(identity) if template_favori
+                                 else tous_templates_for(identity))
         if brute_favorite:
             brutes = fav_brutes_for(identity)
         else:
@@ -3213,7 +3252,8 @@ class UserCog(commands.Cog):
                     interaction, tpl, draft, desc, idx, total, identity,
                     label="TEMPLATE + BRUT", emoji="🎵",
                     prefixe_fichier="template_brut", brutes_dir=tmp,
-                    famille=("template_brut" if brute_favorite else "template"),
+                    famille=("template_vid" if not template_favori else
+                             "template_brut" if brute_favorite else "template"),
                     suivi=suivi)
             finally:
                 _sh.rmtree(tmp, ignore_errors=True)
@@ -4019,7 +4059,10 @@ class UserCog(commands.Cog):
             self.bot.add_dynamic_items(JBModelButton)  # 1 bouton par model (menu US)
             # panneau d'actions permanent : l'etat vit dans le custom_id, donc
             # les boutons repondent encore apres un redemarrage
-            self.bot.add_dynamic_items(JBQtySelect, JBActionButton)
+            # JBQtySelect reste enregistree pour les panneaux DEJA postes :
+            # ils portent son custom_id, et sans elle leurs boutons
+            # deviendraient muets sans un mot.
+            self.bot.add_dynamic_items(JBQtyBouton, JBQtySelect, JBActionButton)
             # Panneau Trends : sans cet enregistrement, ses boutons ne
             # repondent plus apres un redemarrage — le message reste a
             # l ecran, les clics ne font rien, et rien ne le dit.
@@ -6895,14 +6938,22 @@ _JB_ACTIONS_US = [
     # Rangee 3 - CAPTIONS en entier, puis l'entree de la famille Template.
     ('reelcaption', '💬 Caption', 'reelcaption', True),
     ('capbanger', '⭐ Caption', 'captionbanger', False),
+    # LA BRUTE ETOILEE, LA MATIERE AU HASARD. Rangee derriere l'etoile simple
+    # dont elle est la variante : on lit la progression d'une meme matiere,
+    # pas un compte d'etoiles. Les trois n'ont pu entrer que parce que la
+    # quantite est passee du deroulant au bouton -- un Select mangeait une
+    # rangee entiere et le panneau plafonnait a vingt actions.
+    ('brutcaption', '⭐ Brut + Caption', 'brutcaption', False),
     ('montagebanger', '⭐⭐ Caption + Vidéo brut', 'montagebanger', False),
     ('reelmonte', '🎞️ Template', 'reelmonte', True),
     ('templatebanger', '⭐ Template', 'templatebanger', False),
+    ('bruttemplate', '⭐ Brut + Template', 'bruttemplate', False),
 
     # Rangee 4 - fin des TEMPLATES, puis les FLASH.
     ('templatebrut', '⭐⭐ Template + Brut', 'templatebrut', False),
     ('templateflash', '⚡ Flash', 'templateflash', False),
     ('templateflashbanger', '⭐ Flash', 'templateflashbanger', False),
+    ('brutflash', '⭐ Brut + Flash', 'brutflash', False),
     ('templateflashbrut', '⭐⭐ Flash + Brut', 'templateflashbrut', False),
 
     # Les TRENDS : des videos deja FINIES, a poster telles quelles. Une entree
@@ -6912,6 +6963,7 @@ _JB_ACTIONS_US = [
     # cinq places.
     ('trend', '⭐⭐⭐ Trends', 'trends', False),
     ('brutchoix', '🎛️ Choisir ma brute', 'choisirbrute', False),
+
 ]
 
 #: La rangee de chaque action : UNE rangee = UNE famille.
@@ -6933,9 +6985,16 @@ _JB_ACTIONS_US = [
 _JB_CLES_TREND = frozenset({"trend", "trendcaption", "trendtemplate", "trendflash"})
 
 _JB_RANGEES = {
-    'name': 1, 'pseudo': 1, 'pp': 1, 'bio': 1, 'trend': 1,
-    # Rangee 2 : les publications, puis le brut nu et sa version marquee.
-    'story': 2, 'storycta': 2, 'post': 2, 'brute': 2, 'brutbanger': 2,
+    # Rangee 0 : la quantite (un BOUTON depuis qu'elle a quitte le deroulant),
+    # puis l'identite. C'est ce passage qui a libere quatre places.
+    'name': 0, 'pseudo': 0, 'pp': 0, 'bio': 0,
+    # Rangee 1 : les trends et les publications simples.
+    'trend': 1,
+    'story': 1, 'storycta': 1, 'post': 1, 'brute': 1,
+    # Rangee 2 : le brut marque, puis les CAPTIONS en entier -- de la version
+    # libre a la double etoile, l'essai range DERRIERE la simple etoile dont il
+    # est la variante. On lit la progression, pas un compte d'etoiles.
+    'brutbanger': 2,
     # Rangee 3 : les CAPTIONS, de la version libre aux versions marquees, puis
     # les deux fusions. Rangee 4 : le BRUT et les TEMPLATES, meme progression.
     #
@@ -6945,11 +7004,13 @@ _JB_RANGEES = {
     # variante — on lisait le compte d'etoiles sans voir la parente.
     # Rangee 3 : les CAPTIONS en entier, puis l'entree de la famille Template.
     # Rangee 3 : les CAPTIONS en entier, puis l'entree de la famille Template.
-    'reelcaption': 3, 'capbanger': 3, 'montagebanger': 3,
-    'reelmonte': 3, 'templatebanger': 3,
-    # Rangee 4 : la fin des templates, puis les Flash.
-    'templatebrut': 4, 'brutchoix': 4,
-    'templateflash': 4, 'templateflashbanger': 4, 'templateflashbrut': 4,
+    'reelcaption': 2, 'capbanger': 2, 'brutcaption': 2, 'montagebanger': 2,
+    # Rangee 3 : les TEMPLATES, meme progression, puis l'outil.
+    'reelmonte': 3, 'templatebanger': 3, 'bruttemplate': 3,
+    'templatebrut': 3, 'brutchoix': 3,
+    # Rangee 4 : les FLASH, meme progression.
+    'templateflash': 4, 'templateflashbanger': 4, 'brutflash': 4,
+    'templateflashbrut': 4,
     # Retire du menu, garde ici : un panneau DEJA poste porte encore ce bouton,
     # et sans rangee il retomberait sur le filet et atterrirait n'importe ou.
     'captionbrut': 3,
@@ -7855,6 +7916,55 @@ def _jb_panel_set(channel_id, message_id):
         pass
 
 
+class JBQtyBouton(discord.ui.DynamicItem[discord.ui.Button],
+                  template=r"jbus:qb:(?P<ident>[a-z0-9_.\-]+):(?P<qty>\d+)"):
+    """La quantite, en BOUTON plutot qu'en menu deroulant.
+
+    POURQUOI. Un Select occupe une rangee Discord ENTIERE -- cinq places -- et
+    ne peut rien partager. Le panneau plafonnait donc a vingt actions, et il
+    etait plein : impossible d'en ajouter une seule sans en retirer une autre.
+    En bouton, la quantite ne coute plus qu'UNE place : quatre se liberent.
+
+    Le VA y perd le choix en un clic et y gagne la saisie libre : il tape le
+    nombre qu'il veut au lieu de le chercher dans une liste fermee, et la
+    valeur « Autre » du deroulant n'a plus de raison d'etre.
+
+    JBQtySelect est CONSERVEE et reste enregistree : les panneaux deja postes
+    dans les salons portent encore son custom_id, et sans sa classe leurs
+    boutons deviendraient muets sans un mot.
+    """
+
+    def __init__(self, ident, qty):
+        self.ident = (ident or "_").lower()
+        self.qty = int(qty)
+        super().__init__(discord.ui.Button(
+            label=f"📦 Quantité : {self.qty} — clique pour changer",
+            style=discord.ButtonStyle.secondary, row=0,
+            custom_id=f"jbus:qb:{self.ident}:{self.qty}"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match, /):
+        return cls(match["ident"], match["qty"])
+
+    async def callback(self, interaction: discord.Interaction):
+        if not _jb_can_use(interaction):
+            await interaction.response.send_message(
+                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).",
+                ephemeral=True)
+            return
+
+        async def _suite(inter, q):
+            emb2, vue2 = _jb_panel(inter.client.get_cog("UserCog"), self.ident,
+                                   q, guild=inter.guild,
+                                   marche=marche_du_membre(inter.user))
+            # edit_message depuis une soumission de Modal modifie bien le
+            # message d'origine : c'est ce qui evite de reposter un panneau en
+            # double dans le salon.
+            await inter.response.edit_message(embed=emb2, view=vue2)
+
+        await interaction.response.send_modal(_JBQtyModal(_suite))
+
+
 class JBQtySelect(discord.ui.DynamicItem[discord.ui.Select],
                   template=r"jbus:q:(?P<ident>[a-z0-9_.\-]+):(?P<qty>\d+)"):
     """Quantite du panneau permanent. La valeur choisie est recuite dans les
@@ -7987,7 +8097,7 @@ def _jb_panel(cog, ident, qty=3, marche="us", guild=None):
     le marche FR garde son Reel avec exemple, le marche US a Reel caption."""
     ident = (ident or "_").lower()
     view = discord.ui.View(timeout=None)
-    view.add_item(JBQtySelect(ident, qty))
+    view.add_item(JBQtyBouton(ident, qty))
     if ident != "_":
         # Meme liste pour tout le monde : « Reel caption », pas de Reel brut.
         _actions = _JB_ACTIONS_US
@@ -7999,7 +8109,7 @@ def _jb_panel(cog, ident, qty=3, marche="us", guild=None):
             title=f"🔓 {ident.capitalize()} — que veux-tu générer ?",
             description=(
                 f"📦 **Quantité : {qty} média par action** "
-                "_(change-la dans le menu déroulant ci-dessus)._\n"
+                "_(clique sur le bouton Quantité ci-dessus et tape le nombre)._\n"
                 "La quantité est **plafonnée au stock dispo** de la model.\n"
                 "ℹ️ *Pseudo* et *Name* en donnent toujours 5 (sans quantité).\n\n"
                 "Le contenu arrive dans ton salon **-content** 👇"
