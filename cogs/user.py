@@ -2925,7 +2925,22 @@ class UserCog(commands.Cog):
             f"📝 **CAPTION** = par-dessus la vidéo · **DESCRIPTION** = dans la légende du post.")
         await self._deliver_reels_loop(interaction, reels, identity, label="BANGER", delete_after=False)
 
-    async def _send_caption_bangers(self, interaction):
+    @staticmethod
+    def _note_plafond(demande, total, quoi):
+        """La phrase a ajouter quand le stock a rogne la quantite demandee.
+
+        Sans elle, demander sept et recevoir trois est indistinguable d'un
+        selecteur casse -- c'est exactement la plainte qui a mene ici. Le
+        plafond, lui, doit rester : au-dela des combinaisons reelles,
+        _pick_fresh recycle et le VA republie deux fois la meme video.
+        """
+        if not demande or total >= demande:
+            return ""
+        return (f"\n\u26a0\ufe0f Tu en as demande **{demande}**, il en part "
+                f"**{total}** : c'est tout ce que permet le stock ({quoi}). "
+                f"Au-dela, la meme video repartirait deux fois.")
+
+    async def _send_caption_bangers(self, interaction, nombre=3):
         """Bouton '⭐ Caption Banger' : les captions marquees favorites sur le site.
 
         Il rendait le TEXTE des captions, a copier-coller. Le VA devait alors
@@ -3010,15 +3025,25 @@ class UserCog(commands.Cog):
             return
 
         block = _captions_block(identity)
-        # Borne par les combinaisons REELLEMENT disponibles : sans elle,
-        # _pick_fresh recycle une fois le vivier epuise, et le VA recoit trois
-        # fois la meme video.
-        total = min(3, len(utiles), len(brutes))
+        # LA QUANTITE DU PANNEAU, PAS UN 3 EN DUR : le selecteur n'avait
+        # aucun effet ici, on demandait sept et on recevait trois sans un mot.
+        # Le plafond par les combinaisons REELLES reste -- au-dela, _pick_fresh
+        # recycle et le VA republie la meme video.
+        # ET CE PLAFOND EST LE PRODUIT, PAS LE PLUS PETIT DES DEUX TAS.
+        # min(len(utiles), len(brutes)) bornait a TROIS avec quatre captions
+        # et trois brutes, alors que douze paires existent -- et que
+        # _send_montage_bangers, qui assemble exactement de la meme facon,
+        # autorisait deja le produit. Une brute reservie sous une autre
+        # caption ne redonne pas la meme video : c'est le texte incruste qui
+        # change. Ce qu'il faut eviter, c'est la meme PAIRE deux fois.
+        total = min(nombre, len(utiles) * len(brutes))
         entete = (f"⭐ **{total} VIDÉO(S) À CAPTION BANGER pour `{identity}`** — "
                   f"tes meilleures captions, déjà incrustées.\n"
                   f"⏳ Je les génère (≈15-30s chacune). Poste **tel quel**.")
         if vides:
             entete += f"\n{vides} caption(s) favorite(s) écartée(s) : texte vide."
+        entete += self._note_plafond(
+            nombre, total, f"{len(utiles)} caption(s) ⭐, {len(brutes)} brute(s) ⭐")
         await interaction.followup.send(entete)
 
         used_b, used_c = set(), set()
@@ -3034,7 +3059,7 @@ class UserCog(commands.Cog):
                 prefixe_fichier="caption_banger", famille="caption",
                 suivi=suivi)
 
-    async def brutcaption(self, interaction):
+    async def brutcaption(self, interaction, nombre=3):
         """⭐ Brut + Caption : une brute ETOILEE, une caption au hasard.
 
         Le symetrique de « ⭐ Caption », qui etoile le texte et tire la video au
@@ -3043,14 +3068,15 @@ class UserCog(commands.Cog):
         avait 17 captions actives dont 4 etoilees ; les treize autres ne
         servaient a aucun bouton.
         """
-        await self._send_montage_bangers(interaction, caption_favorite=False)
+        await self._send_montage_bangers(interaction, caption_favorite=False,
+                                         nombre=nombre)
 
-    async def bruttemplate(self, interaction):
+    async def bruttemplate(self, interaction, nombre=3):
         """⭐ Brut + Template : une brute ETOILEE, un template au hasard."""
         await self._send_template_plus_brute(interaction, brute_favorite=True,
-                                             template_favori=False)
+                                             template_favori=False, nombre=nombre)
 
-    async def brutflash(self, interaction):
+    async def brutflash(self, interaction, nombre=3):
         """⭐ Brut + Flash : une brute ETOILEE, un flash au hasard.
 
         Cette combinaison etait DEJA possible dans _send_template_flash --
@@ -3058,9 +3084,10 @@ class UserCog(commands.Cog):
         l'appelait.
         """
         await self._send_template_flash(interaction, exiger_banger=False,
-                                        brute_favorite=True)
+                                        brute_favorite=True, nombre=nombre)
 
-    async def _send_montage_bangers(self, interaction, caption_favorite=True):
+    async def _send_montage_bangers(self, interaction, caption_favorite=True,
+                                    nombre=3):
         """Bouton '🎬 Montage Banger' : une BRUTE favorite + une CAPTION favorite.
 
         Meme recette que /reelcaption, restreinte aux favoris. PAS de template :
@@ -3118,15 +3145,19 @@ class UserCog(commands.Cog):
             return
         await interaction.response.defer()
         block = _captions_block(identity)
-        # Borne le nombre par les combinaisons REELLEMENT disponibles : sans
-        # elle, _pick_fresh recycle quand le pool est epuise, et 1 brute + 1
-        # caption produiraient trois fois la meme video.
-        total = min(3, len(brutes) * len(caps))
+        # LA QUANTITE DU PANNEAU, PAS UN 3 EN DUR : le selecteur n'avait
+        # aucun effet ici, on demandait sept et on recevait trois sans un mot.
+        # Le plafond par les combinaisons REELLES reste : sans lui, 1 brute +
+        # 1 caption sortiraient sept fois la meme video.
+        total = min(nombre, len(brutes) * len(caps))
         await interaction.followup.send(
             f"🎬 **{total} MONTAGE(S) BANGER pour `{identity}`** — tes meilleures "
             f"brutes avec tes meilleures captions.\n"
             f"⏳ Je les génère (≈15-30s chacun). Le texte est **incrusté** : "
-            f"poste **tel quel**.")
+            f"poste **tel quel**."
+            + self._note_plafond(
+                nombre, total,
+                f"{len(brutes)} brute(s) × {len(caps)} caption(s)"))
         used_b, used_c = set(), set()
         suivi = _Progression(interaction, total, "Montages caption + brut",
                              mot="Montage")
@@ -3142,7 +3173,7 @@ class UserCog(commands.Cog):
                 suivi=suivi)
 
     async def _send_template_plus_brute(self, interaction, brute_favorite=True,
-                                        template_favori=True):
+                                        template_favori=True, nombre=3):
         """Bouton 'Template + Brut' : un template ⭐ ASSEMBLE avec une brute.
 
         `brute_favorite` decide du STOCK de brutes, et rien d'autre :
@@ -3223,13 +3254,19 @@ class UserCog(commands.Cog):
                 "Préviens un admin.", ephemeral=True)
             return
         await interaction.response.defer()
-        total = min(3, len(templates) * len(brutes))
+        # LA QUANTITE DU PANNEAU, PAS UN 3 EN DUR. Le selecteur n'avait
+        # aucun effet sur ce bouton : on demandait sept, on recevait
+        # trois, sans un mot. Le plafond par les combinaisons reelles
+        # reste : au-dela, _pick_fresh recycle et on republie le meme.
+        total = min(nombre, len(templates) * len(brutes))
         intro = (f"🎵 **{total} TEMPLATE pour `{identity}`** — ton template "
                  + ("étoilé, monté avec ta brute étoilée." if brute_favorite else "étoilé, monté avec une de tes brutes.") + "\n"
                  f"⏳ Je les génère (≈15-30s chacun).")
         if sans_coupe:
             intro += (f"\nℹ️ {sans_coupe} template(s) étoilé(s) écarté(s) : "
                       f"pas de point de coupe.")
+        intro += self._note_plafond(
+            nombre, total, f"{len(templates)} template(s) × {len(brutes)} brute(s)")
         await interaction.followup.send(intro)
         used_t, used_b = set(), set()
         suivi = _Progression(interaction, total, "Assemblage template + brut",
@@ -3259,7 +3296,7 @@ class UserCog(commands.Cog):
                 _sh.rmtree(tmp, ignore_errors=True)
 
     async def _send_template_flash(self, interaction, exiger_banger=False,
-                                   brute_favorite=False):
+                                   brute_favorite=False, nombre=3):
         """Les trois boutons Flash, qui ne different que par ce qu ils exigent.
 
             Template Flash          template FLASH          brute au hasard
@@ -3324,7 +3361,11 @@ class UserCog(commands.Cog):
             return
 
         await interaction.response.defer()
-        total = min(3, len(templates) * (len(brutes) if brute_favorite else 1))
+        # LA QUANTITE DU PANNEAU, PAS UN 3 EN DUR. Le selecteur n'avait
+        # aucun effet sur ce bouton : on demandait sept, on recevait
+        # trois, sans un mot. Le plafond par les combinaisons reelles
+        # reste : au-dela, _pick_fresh recycle et on republie le meme.
+        total = min(nombre, len(templates) * (len(brutes) if brute_favorite else 1))
         libelle = ("FLASH BANGER + BRUT" if brute_favorite
                    else "TEMPLATE FLASH BANGER" if exiger_banger
                    else "TEMPLATE FLASH")
@@ -3335,6 +3376,10 @@ class UserCog(commands.Cog):
         if sans_coupe:
             intro += ("\n" + "\u2139\ufe0f " + str(sans_coupe)
                       + " montage(s) \u26a1 ecarte(s) : pas de point de coupe.")
+        intro += self._note_plafond(
+            nombre, total,
+            str(len(templates)) + " montage(s) \u26a1"
+            + (" \u00d7 " + str(len(brutes)) + " brute(s)" if brute_favorite else ""))
         await interaction.followup.send(intro)
 
         used_t, used_b = set(), set()
@@ -3373,9 +3418,11 @@ class UserCog(commands.Cog):
     # l autre.
     async def trends(self, interaction: discord.Interaction, count=None):
         """Le bouton ⭐⭐⭐ du menu : les videos deja finies de cette model."""
-        await self._send_trends(interaction)
+        # `count` arrivait ici et n'allait pas plus loin : le bouton demandait
+        # sept trends, il en recevait trois.
+        await self._send_trends(interaction, nombre=count)
 
-    async def _send_trends(self, interaction, famille=""):
+    async def _send_trends(self, interaction, famille="", nombre=None):
         """Boutons ⭐⭐⭐ : les videos deja FINIES, a poster telles quelles.
 
         Elles viennent de l onglet « Trends » du site, pas des brutes. Rien
@@ -3399,7 +3446,7 @@ class UserCog(commands.Cog):
                 "Tu n'as pas d'identité assignée. Demande à un admin.",
                 ephemeral=True)
             return
-        videos = trends_for(identity, limit=_TRENDS_PAR_ENVOI)
+        videos = trends_for(identity, limit=(nombre or _TRENDS_PAR_ENVOI))
         if not videos:
             await interaction.response.send_message(
                 f"⭐⭐⭐ Aucune **trend prête** pour `{identity}`.\n"
@@ -3568,20 +3615,23 @@ class UserCog(commands.Cog):
     @app_commands.command(
         name="captionbanger",
         description="Tes meilleures captions (marquees ⭐ sur le site)")
-    async def captionbanger(self, interaction: discord.Interaction):
-        await self._send_caption_bangers(interaction)
+    async def captionbanger(self, interaction: discord.Interaction,
+                            nombre: app_commands.Range[int, 1, 10] = 3):
+        await self._send_caption_bangers(interaction, nombre=nombre)
 
     @app_commands.command(
         name="montagebanger",
         description="Une video brute ⭐ + une caption ⭐, montees pour toi")
-    async def montagebanger(self, interaction: discord.Interaction):
-        await self._send_montage_bangers(interaction)
+    async def montagebanger(self, interaction: discord.Interaction,
+                            nombre: app_commands.Range[int, 1, 10] = 3):
+        await self._send_montage_bangers(interaction, nombre=nombre)
 
     @app_commands.command(
         name="templatebrut",
         description="Un template ⭐ assemble avec une video brute ⭐")
-    async def templatebrut(self, interaction: discord.Interaction):
-        await self._send_template_plus_brute(interaction)
+    async def templatebrut(self, interaction: discord.Interaction,
+                           nombre: app_commands.Range[int, 1, 10] = 3):
+        await self._send_template_plus_brute(interaction, nombre=nombre)
 
     @app_commands.command(
         name="choisirbrute",
@@ -3592,30 +3642,36 @@ class UserCog(commands.Cog):
     @app_commands.command(
         name="templatebanger",
         description="Un template ⭐ assemble avec une de tes brutes")
-    async def templatebanger(self, interaction: discord.Interaction):
+    async def templatebanger(self, interaction: discord.Interaction,
+                             nombre: app_commands.Range[int, 1, 10] = 3):
         # La brute n'a pas a etre etoilee : c'est ce qui distingue ce bouton
         # de /templatebrut, et ce qui le rend utilisable quand aucune brute
         # n'est marquee.
-        await self._send_template_plus_brute(interaction, brute_favorite=False)
+        await self._send_template_plus_brute(interaction, brute_favorite=False,
+                                             nombre=nombre)
 
     @app_commands.command(
         name="templateflash",
         description="Un montage Flash Trend, assemble avec une brute au hasard")
-    async def templateflash(self, interaction: discord.Interaction):
-        await self._send_template_flash(interaction)
+    async def templateflash(self, interaction: discord.Interaction,
+                            nombre: app_commands.Range[int, 1, 10] = 3):
+        await self._send_template_flash(interaction, nombre=nombre)
 
     @app_commands.command(
         name="templateflashbanger",
         description="Un montage Flash Trend ET etoile, avec une brute au hasard")
-    async def templateflashbanger(self, interaction: discord.Interaction):
-        await self._send_template_flash(interaction, exiger_banger=True)
+    async def templateflashbanger(self, interaction: discord.Interaction,
+                                  nombre: app_commands.Range[int, 1, 10] = 3):
+        await self._send_template_flash(interaction, exiger_banger=True,
+                                        nombre=nombre)
 
     @app_commands.command(
         name="templateflashbrut",
         description="Un montage Flash Trend ET etoile, avec ta brute etoilee")
-    async def templateflashbrut(self, interaction: discord.Interaction):
+    async def templateflashbrut(self, interaction: discord.Interaction,
+                                nombre: app_commands.Range[int, 1, 10] = 3):
         await self._send_template_flash(interaction, exiger_banger=True,
-                                        brute_favorite=True)
+                                        brute_favorite=True, nombre=nombre)
 
     @app_commands.command(
         name="brutbanger",
@@ -6954,31 +7010,31 @@ _JB_ACTIONS_US = [
 
     # Rangee 3 - CAPTIONS en entier, puis l'entree de la famille Template.
     ('reelcaption', '💬 Caption', 'reelcaption', True),
-    ('capbanger', '⭐ Caption', 'captionbanger', False),
+    ('capbanger', '⭐ Caption', 'captionbanger', True),
     # LA BRUTE ETOILEE, LA MATIERE AU HASARD. Rangee derriere l'etoile simple
     # dont elle est la variante : on lit la progression d'une meme matiere,
     # pas un compte d'etoiles. Les trois n'ont pu entrer que parce que la
     # quantite est passee du deroulant au bouton -- un Select mangeait une
     # rangee entiere et le panneau plafonnait a vingt actions.
-    ('brutcaption', '⭐ Brut + Caption', 'brutcaption', False),
-    ('montagebanger', '⭐⭐ Caption + Vidéo brut', 'montagebanger', False),
+    ('brutcaption', '⭐ Brut + Caption', 'brutcaption', True),
+    ('montagebanger', '⭐⭐ Caption + Vidéo brut', 'montagebanger', True),
     ('reelmonte', '🎞️ Template', 'reelmonte', True),
-    ('templatebanger', '⭐ Template', 'templatebanger', False),
-    ('bruttemplate', '⭐ Brut + Template', 'bruttemplate', False),
+    ('templatebanger', '⭐ Template', 'templatebanger', True),
+    ('bruttemplate', '⭐ Brut + Template', 'bruttemplate', True),
 
     # Rangee 4 - fin des TEMPLATES, puis les FLASH.
-    ('templatebrut', '⭐⭐ Template + Brut', 'templatebrut', False),
-    ('templateflash', '⚡ Flash', 'templateflash', False),
-    ('templateflashbanger', '⭐ Flash', 'templateflashbanger', False),
-    ('brutflash', '⭐ Brut + Flash', 'brutflash', False),
-    ('templateflashbrut', '⭐⭐ Flash + Brut', 'templateflashbrut', False),
+    ('templatebrut', '⭐⭐ Template + Brut', 'templatebrut', True),
+    ('templateflash', '⚡ Flash', 'templateflash', True),
+    ('templateflashbanger', '⭐ Flash', 'templateflashbanger', True),
+    ('brutflash', '⭐ Brut + Flash', 'brutflash', True),
+    ('templateflashbrut', '⭐⭐ Flash + Brut', 'templateflashbrut', True),
 
     # Les TRENDS : des videos deja FINIES, a poster telles quelles. Une entree
     # par famille, posee juste apres les etoiles dont elle est le degre
     # au-dessus. Elles tiennent parce que la quantite est passee en bouton :
     # le menu deroulant qu elle occupait mangeait une rangee entiere, soit
     # cinq places.
-    ('trend', '⭐⭐⭐ Trends', 'trends', False),
+    ('trend', '⭐⭐⭐ Trends', 'trends', True),
     ('brutchoix', '🎛️ Choisir ma brute', 'choisirbrute', False),
 
 ]
