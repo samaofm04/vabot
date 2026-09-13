@@ -296,6 +296,26 @@ def compter(identite: str, famille: str, emp: str | None = None) -> int:
 #: depuis le stock avertit le VA comme le ferait une génération fraîche.
 ACTIF = True
 
+#: LA RESERVE EST AU PARC, PAS AUX VA.
+#:
+#: Elle a d'abord servi de cache aux boutons Discord : une variante deja
+#: fabriquee partait tout de suite au lieu des 15 a 30 s de generation. La
+#: porte HTTP du parc a ete greffee ensuite, et les deux consommateurs se sont
+#: retrouves a puiser dans le meme stock.
+#:
+#: L'ASYMETRIE QUI A TRANCHE. Un VA qui trouve la case vide attend et obtient
+#: sa video : il a un repli, la generation a la demande. Le parc, lui, n'en a
+#: aucun -- une case vide et le telephone ne publie rien. Partager le stock
+#: penalisait donc le seul des deux qui ne peut pas s'en passer.
+#:
+#: Decision du proprietaire, 13/09/2026 : la reserve est reservee au parc. Les
+#: boutons des VA generent desormais toujours a la demande, comme avant
+#: qu'elle existe. Rien n'est perdu de leur cote : c'est le comportement
+#: d'origine, simplement plus lent que le cache.
+#:
+#: Remettre True rend le cache aux VA sans rien effacer.
+POUR_LES_VA = False
+
 
 def prendre(identite: str, famille: str, emp: str | None = None,
             demandeur: str = "", fiche_out=None) -> tuple:

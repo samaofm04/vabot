@@ -1560,6 +1560,25 @@ def flash_templates_for(identity, limit=15, exiger_banger=False):
     return utilisables, sans_coupe
 
 
+def _reserve_ouverte_aux_va() -> bool:
+    """La reserve sert-elle encore de cache aux boutons Discord ?
+
+    Elle a d'abord ete cela : une variante deja fabriquee partait tout de
+    suite au lieu des 15 a 30 s de generation. Depuis que le parc y puise
+    aussi, les deux se disputaient le meme stock -- et un VA qui trouve la
+    case vide genere et obtient sa video, quand le parc, lui, ne publie rien.
+
+    Decision du proprietaire, 13/09/2026 : le stock est au parc. On lit le
+    drapeau A CHAQUE APPEL et non a l'import, pour que le rallumer ne demande
+    pas de redemarrer le bot.
+    """
+    try:
+        import noctus_reserve as _res
+        return bool(getattr(_res, "POUR_LES_VA", True))
+    except Exception:
+        return False
+
+
 def fav_captions_for(identity):
     """Captions marquees ⭐ favorites ET encore dans le tirage -> [dict].
 
@@ -2715,7 +2734,11 @@ class UserCog(commands.Cog):
         # verdict, et il doit survivre a la suite. Le poser plus bas
         # l'ecraserait juste apres l'avoir rempli.
         _rapport = {}
-        if famille:
+        # LA RESERVE EST AU PARC, PAS AUX VA. Voir POUR_LES_VA dans
+        # noctus_reserve.py : un VA qui trouve la case vide genere et
+        # obtient sa video ; le parc, lui, n'a aucun repli. Partager le
+        # stock penalisait le seul des deux qui ne peut pas s'en passer.
+        if famille and _reserve_ouverte_aux_va():
             try:
                 import noctus_reserve as _res
                 _imposees = ()
@@ -3885,7 +3908,11 @@ class UserCog(commands.Cog):
         # elle est vide, on genere comme avant : la reserve accelere, elle ne
         # conditionne rien.
         fichier, de_la_reserve = None, None
-        if famille:
+        # LA RESERVE EST AU PARC, PAS AUX VA. Voir POUR_LES_VA dans
+        # noctus_reserve.py : un VA qui trouve la case vide genere et
+        # obtient sa video ; le parc, lui, n'a aucun repli. Partager le
+        # stock penalisait le seul des deux qui ne peut pas s'en passer.
+        if famille and _reserve_ouverte_aux_va():
             try:
                 import noctus_reserve as _res
                 emp = _res.empreinte(identity, famille, video, caption=cap,
