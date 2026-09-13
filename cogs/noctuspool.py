@@ -67,16 +67,20 @@ FIN_H = int(_FIN or "5")
 #: et donne a une demande de VA le temps de se declarer avant qu'on reparte.
 REPOS_S = 3
 
-#: Les sept familles de boutons qui paient une generation. Les autres servent
-#: des fichiers existants et n'ont rien a gagner ici.
+#: Les familles de boutons qui paient une generation. Les autres servent des
+#: fichiers existants et n'ont rien a gagner ici.
 #:
-#: Chaque nom dit ce que la famille EXIGE, pas ce qu'elle produit — c'est ce
+#: IMPORTEE, PLUS RECOPIEE. Ce fichier tenait sa PROPRE liste de huit familles,
+#: independante de celle de noctus_reserve. Les deux ont diverge des qu'on en a
+#: ajoute : le 13/09/2026, trois familles neuves (caption_vid, template_vid,
+#: flash_vid) ont ete declarees dans noctus_reserve, servies par l'API, listees
+#: par le diagnostic -- et le remplisseur ne les a jamais vues. Dix minutes de
+#: cron, zero variante fabriquee, aucune erreur nulle part.
+#:
+#: Chaque nom dit ce que la famille EXIGE, pas ce qu'elle produit : c'est ce
 #: qui rend une variante interchangeable avec une generation a la demande du
 #: meme bouton.
-FAMILLES = ("caption", "montage",           # une brute + une caption incrustee
-            "reelmonte",                    # un montage deja approuve
-            "template", "template_brut",    # un template assemble a une brute
-            "flash", "flash_banger", "flash_brut")
+FAMILLES = reserve.FAMILLES
 
 #: Au-delà, on considère que la génération est perdue et on passe à la suite.
 #: Le moteur a lui-même un plafond de 300 s sur l'export.
