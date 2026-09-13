@@ -35,11 +35,19 @@ IDENTITIES_DIR = BOT_DIR / "data" / "identities"
 
 #: Ce qu'on essaie, en plus de la production. UNE LIGNE PAR IDEE -- c'est le
 #: seul endroit a toucher pour ajouter une option au banc d'essai.
-#: Format identique a _JB_ACTIONS_US : (cle, libelle, commande, quantite).
+#:
+#: (cle, libelle, APRES_QUOI). Le troisieme champ est la cle de production
+#: derriere laquelle l'essai vient se ranger.
+#:
+#: POURQUOI PAS A LA FIN. Groupes en bas, les trois essais formaient une
+#: quatrieme famille qui n'existe pas. Le menu se lit par degre a l'interieur
+#: d'une meme matiere -- Caption, ⭐ Caption, ⭐ Brut + Caption, ⭐⭐ Caption +
+#: Brut -- et c'est cet ordre qui apprend au VA ce que chaque etoile designe.
+#: Un essai range ailleurs se compare a rien.
 _ESSAIS = [
-    ("brutcaption",  "⭐ Brut + Caption",  "brutcaption",  False),
-    ("bruttemplate", "⭐ Brut + Template", "bruttemplate", False),
-    ("brutflash",    "⭐ Brut + Flash",    "brutflash",    False),
+    ("brutcaption",  "⭐ Brut + Caption",  "capbanger"),
+    ("bruttemplate", "⭐ Brut + Template", "templatebanger"),
+    ("brutflash",    "⭐ Brut + Flash",    "templateflashbanger"),
 ]
 
 #: Vingt-cinq places : cinq rangees de cinq, selecteur de quantite en moins.
@@ -62,11 +70,20 @@ def _entrees():
             continue
         vues.add(cle)
         sortie.append((cle, libelle, False))
-    for cle, libelle, *_r in _ESSAIS:
+
+    # Chaque essai se glisse DERRIERE son ancre, pas a la fin. Une ancre
+    # introuvable -- production remaniee, essai adopte -- renvoie l'essai en
+    # queue plutot que de le faire disparaitre : mieux vaut mal range que
+    # perdu.
+    for cle, libelle, apres in _ESSAIS:
         if cle in vues:
             continue
         vues.add(cle)
-        sortie.append((cle, libelle, True))
+        pos = next((i for i, (k, _l, _e) in enumerate(sortie) if k == apres), None)
+        if pos is None:
+            sortie.append((cle, libelle, True))
+        else:
+            sortie.insert(pos + 1, (cle, libelle, True))
     return sortie
 
 
