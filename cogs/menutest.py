@@ -125,11 +125,12 @@ class _Bouton(discord.ui.Button):
     """
 
     def __init__(self, cle, libelle, essai, rangee):
-        super().__init__(
-            label=libelle[:80],
-            style=(discord.ButtonStyle.success if essai
-                   else discord.ButtonStyle.secondary),
-            row=rangee)
+        # TOUS LES BOUTONS SE RESSEMBLENT. Distinguer les essais en vert
+        # revenait a annoncer une difference que le VA n'a pas a connaitre :
+        # un bouton se juge sur ce qu'il rend, pas sur son anciennete.
+        super().__init__(label=libelle[:80],
+                         style=discord.ButtonStyle.secondary,
+                         row=rangee)
         self.cle = cle
 
     async def callback(self, interaction: discord.Interaction):
@@ -211,8 +212,7 @@ class _SelectModel(discord.ui.Select):
         # Un NOUVEAU message, pas une edition : on garde le selecteur en place
         # pour enchainer sur une autre model sans reposter le menu.
         await interaction.response.send_message(
-            "## 🧪 Que veux-tu generer ? — `%s`\n"
-            "Gris = production · **Vert = essai**%s" % (ident, avert),
+            "## 🧪 Que veux-tu generer ? — `%s`%s" % (ident, avert),
             view=vue)
 
 
@@ -231,7 +231,6 @@ def _embed(marche: str, nb: int) -> discord.Embed:
         description=(
             "Choisis une model dans le menu déroulant, puis l'action à "
             "essayer.\n\n"
-            "**Gris** = déjà en production · **Vert** = essai en cours.\n"
             "_Banc d'essai : le menu des VA n'est pas touché._"),
         color=discord.Color.green())
     emb.set_footer(text="%d model(s) — à reposter après un redémarrage du bot"
