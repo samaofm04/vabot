@@ -3999,10 +3999,27 @@ class UserCog(commands.Cog):
                 if state in ("done", "error", "stopped"):
                     break
             if state != "done":
+                # LE RETOUR APPARTIENT A L'ECHEC, PAS AU SUIVI.
+                #
+                # Il etait indente d'un cran de trop : sorti du « if state !=
+                # done », il s'executait des que `suivi` existait -- c'est-a-dire
+                # a CHAQUE appel des boutons par lot, reussite comprise. La
+                # fonction avancait donc la barre puis sortait, juste avant
+                # d'envoyer la video.
+                #
+                # Symptome, le 13/09/2026 a 23:55 sur montagebanger : « 3/3 —
+                # termine », aucun avertissement, et aucune video nulle part.
+                # Le bug dormait depuis longtemps : tant que la reserve servait
+                # les VA, le fichier venait du stock, _DejaPret sautait tout ce
+                # bloc, et ce retour n'etait jamais atteint. Fermer la reserve
+                # aux VA l'a reveille.
+                #
+                # La forme correcte est celle du « aucun fichier produit » juste
+                # en dessous : avertir, avancer le suivi, PUIS sortir.
                 await interaction.followup.send(
                     f"⚠️ {label} {idx}/{total} : génération échouée ({state}).")
-            if suivi is not None:
-                await suivi.un_de_plus()
+                if suivi is not None:
+                    await suivi.un_de_plus()
                 return
             outs = noctus_web.output_paths(model)
             if not outs:
