@@ -84,11 +84,15 @@ def _pourquoi_429(r) -> str:
             return "%d min" % (sec // 60)
         return "%d h" % (sec // 3600)
 
-    if p_n == 0:
-        return ("Quota MENSUEL RapidAPI epuise : 0 sur %s restantes, "
-                "recharge dans %s. Attendre ou changer de plan."
-                % (p_total or "?", _duree(p_reset)))
-    if d_n == 0:
+    # « <= 0 » et pas « == 0 » : RapidAPI passe le compteur en NEGATIF quand on
+    # depasse. Mesure du 17/09 : « Quota du mois : -3/200000 » -- avec un test
+    # d'egalite on retombait sur le message generique, celui qui ne nomme
+    # justement pas le plafond.
+    if p_n is not None and p_n <= 0:
+        return ("Quota MENSUEL RapidAPI epuise : %s sur %s restantes, "
+                "recharge dans %s. Attendre le reset ou changer de plan."
+                % (p_reste or "0", p_total or "?", _duree(p_reset)))
+    if d_n is not None and d_n <= 0:
         return ("Debit RapidAPI depasse : %s appels/min, plus rien pendant "
                 "%s. Le quota mensuel, lui, a encore %s appels. Baisse "
                 "rapidapi_rpm." % (d_total or "?", _duree(d_reset),
