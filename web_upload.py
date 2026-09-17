@@ -2898,7 +2898,17 @@ body.light .cap-prev{background:linear-gradient(160deg,#4a4a4f,#232327)!importan
 .rail-toggle svg{width:16px;height:16px;flex-shrink:0;transition:transform .25s}
 body.light .rail-toggle:hover{background:#f3f4f6;color:#111827}
 html.rail .rail-toggle svg{transform:rotate(180deg)}
-html.rail .sidebar{width:64px}
+/* Le panneau qui sort au survol est pose en left:100%, donc ENTIEREMENT
+   hors du rail. La regle de base .sidebar porte overflow-y:auto pour que le
+   menu deploye (~1560px) puisse defiler -- et en CSS, des qu'un axe n'est
+   pas visible, l'autre devient auto : le panneau etait donc coupe net a la
+   bordure droite. On ne voyait qu'une bande blanche, rien de cliquable.
+   Le defilement n'est retire QU'EN MODE RAIL, ou le contenu tient : 960px
+   mesures pour une fenetre de 996.
+   Le z-index est le second morceau : position:sticky cree toujours un
+   contexte d'empilement, donc le z-index:6000 du panneau reste prisonnier
+   de la barre et le contenu de la page se dessinait par-dessus. */
+html.rail .sidebar{width:64px;overflow:visible;z-index:100}
 html.rail .sidebar .section-label,html.rail .sidebar .label,html.rail .sidebar .group-head .arrow,html.rail .sidebar .subgroup-head .arrow{display:none}
 html.rail .sidebar .solo-item,html.rail .sidebar .logout-btn,html.rail .rail-toggle{font-size:0;gap:0;justify-content:center;padding:11px 0}
 html.rail .sidebar .group-head{justify-content:center;gap:0;padding:11px 0}
