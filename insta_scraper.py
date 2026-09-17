@@ -42,6 +42,67 @@ _RPM_CALLS = _deque()
 DEFAULT_RPM = 45                   # marge sous les 50/min du plan
 
 
+def _pourquoi_429(r) -> str:
+    """Dit LEQUEL des deux plafonds RapidAPI a saute.
+
+    RapidAPI en publie deux, sur chaque reponse, et un 429 peut venir de
+    l'un ou de l'autre :
+
+      x-ratelimit-requests-*    le quota du PLAN (mensuel). Epuise, il faut
+                                attendre le reset ou changer de plan.
+      x-ratelimit-rate-limit-*  le DEBIT par minute. Depasse, il suffit
+                                d'attendre une minute et de baisser
+                                rapidapi_rpm.
+
+    Le message disait « Upgrade ton plan ou attends » dans les deux cas :
+    il envoyait payer un plan superieur la ou soixante secondes suffisaient,
+    et inversement laissait attendre un quota mensuel qui ne reviendrait
+    qu'au 1er du mois. Les en-tetes sont la, on les lit.
+    """
+    def _lire(prefixe):
+        h = r.headers
+        reste = h.get("x-ratelimit-%s-remaining" % prefixe)
+        total = h.get("x-ratelimit-%s-limit" % prefixe)
+        reset = h.get("x-ratelimit-%s-reset" % prefixe)
+        try:
+            reste_n = int(reste) if reste is not None else None
+        except ValueError:
+            reste_n = None
+        return reste, total, reset, reste_n
+
+    p_reste, p_total, p_reset, p_n = _lire("requests")
+    d_reste, d_total, d_reset, d_n = _lire("rate-limit")
+
+    def _duree(sec):
+        try:
+            sec = int(sec)
+        except (TypeError, ValueError):
+            return "?"
+        if sec < 120:
+            return "%d s" % sec
+        if sec < 7200:
+            return "%d min" % (sec // 60)
+        return "%d h" % (sec // 3600)
+
+    if p_n == 0:
+        return ("Quota MENSUEL RapidAPI epuise : 0 sur %s restantes, "
+                "recharge dans %s. Attendre ou changer de plan."
+                % (p_total or "?", _duree(p_reset)))
+    if d_n == 0:
+        return ("Debit RapidAPI depasse : %s appels/min, plus rien pendant "
+                "%s. Le quota mensuel, lui, a encore %s appels. Baisse "
+                "rapidapi_rpm." % (d_total or "?", _duree(d_reset),
+                                   p_reste or "?"))
+    if p_reste is None and d_reste is None:
+        return ("HTTP 429 RapidAPI, et aucun en-tete de limite dans la "
+                "reponse : impossible de dire si c'est le quota du mois ou "
+                "le debit par minute.")
+    return ("HTTP 429 RapidAPI. Quota du mois : %s/%s. Debit : %s/%s, "
+            "recharge dans %s." % (p_reste or "?", p_total or "?",
+                                   d_reste or "?", d_total or "?",
+                                   _duree(d_reset)))
+
+
 def _rapid_rpm() -> int:
     try:
         v = int(load_auth().get("rapidapi_rpm") or DEFAULT_RPM)
@@ -752,7 +813,7 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
     if r.status_code == 401 or r.status_code == 403:
         return {"error": f"Clé RapidAPI invalide ou non-abonné (HTTP {r.status_code}). Vérifie sur RapidAPI."}
     if r.status_code == 429:
-        return {"error": "Quota RapidAPI épuisé (HTTP 429). Upgrade ton plan ou attends."}
+        return {"error": _pourquoi_429(r)}
     if r.status_code == 404:
         return {"error": f"Endpoint introuvable (HTTP 404). L'API a peut-être changé."}
     if r.status_code != 200:
