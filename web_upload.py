@@ -16123,7 +16123,7 @@ _INSTA_REFRESH_HOURS = [0, 4, 8, 12, 16, 20]      # repli : 6 scrapes/jour
 # qui n'a pas poste se voit le lendemain matin, plus dans l'heure.
 #
 # Remettre 5 ici restaure l'ancien comportement.
-PASSAGES_PAR_JOUR = 1
+PASSAGES_PAR_JOUR = 5
 
 
 def _garder_passages(bornes, cloture=None):
@@ -16201,7 +16201,7 @@ def _scrape_bornes():
                                     _seules[0] if _seules else None)
     except Exception as e:                                    # noqa: BLE001
         print(f"[daily-insta] calendrier des sessions illisible : {e}", flush=True)
-    return _garder_passages([(h, 0) for h in sorted(_INSTA_REFRESH_HOURS)])
+    return [(h, 0) for h in sorted(_INSTA_REFRESH_HOURS)]
 
 
 def _scrape_fuseau():
