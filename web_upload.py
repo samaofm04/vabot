@@ -16725,7 +16725,15 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
             and (now_ts - int(cached.get("scraped_at", 0))) < _INSTA_3_STATS_TTL):
         return cached
     import insta_scraper as _ig_s
-    pause = _ig_s.rapidapi_pause()
+
+    # SOURCE UNIQUE : on ne passe ni par la pause RapidAPI, ni par
+    # l'endpoint public d'Instagram. Ce dernier repond 429 depuis cette
+    # adresse et arme en prime un blocage de quinze minutes pour TOUS les
+    # comptes (_IG_PUBLIC_RETRY_AT) : l'essayer coutait un appel inutile et
+    # penalisait la suite du lot.
+    _source_unique = getattr(_ig_s, "SOURCE_UNIQUE", "") == "hiker"
+
+    pause = None if _source_unique else _ig_s.rapidapi_pause()
     if pause:
         # DEUX PAUSES QUI NE SE VALENT PAS.
         #
@@ -16743,8 +16751,12 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
         # propre plafond quotidien pour proteger le solde.
         if str(pause.get("reason") or "") != "monthly_quota":
             return {**(cached or {}), **pause, "banned": False}
-    # 1) Public IG d abord
-    res = _scrape_via_ig_public(h)
+    # 1) Public IG d abord — SAUF en source unique, ou il est saute : il
+    #    repond 429 depuis cette adresse et arme en prime un blocage de
+    #    quinze minutes pour TOUS les comptes (_IG_PUBLIC_RETRY_AT). Un
+    #    appel perdu qui penalise la suite du lot.
+    res = (_ig_s.scrape_profile(h, limit=50) if _source_unique
+           else _scrape_via_ig_public(h))
     # 2) Repli RapidAPI si l API publique echoue.
     #    IL TOURNE MAINTENANT SUR « INTROUVABLE » AUSSI. Avant, le drapeau
     #    `banned` pose par l API publique coupait cette ligne : la deuxieme
@@ -16752,7 +16764,7 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
     #    condamner -- c est-a-dire exactement ceux ou une contre-verification
     #    valait quelque chose. Une seconde source qui rend le profil PROUVE
     #    que le compte est vivant.
-    if "error" in res and not res.get("banned"):
+    if "error" in res and not res.get("banned") and not _source_unique:
         try:
             import insta_scraper as _ig_s
             res2 = _ig_s.scrape_profile(h, limit=50)

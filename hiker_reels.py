@@ -372,16 +372,29 @@ def scrape_profile(username: str, limit: int = 50) -> dict:
 
     data, err = _appel("/v1/user/clips", token, 60, user_id=pk)
     if err:
-        # Un pk devenu invalide (compte renomme) : on oublie le cache pour
-        # que le prochain passage reparte du pseudo plutot que de s'entetuer.
-        if "404" in err or "400" in err:
-            d = _pk_cache()
-            d.pop(username, None)
-            try:
-                safe_json.write_text(_PK_FILE, json.dumps(d, ensure_ascii=False))
-            except Exception:
-                pass
-        return {"error": "HikerAPI: " + err}
+        # UN COMPTE SANS REEL N'EST PAS UNE ERREUR.
+        #
+        # /v1/user/clips rend 404 « Entries not found » quand le compte
+        # existe mais n'a encore rien publie — le cas de tout compte neuf.
+        # Le traiter comme un echec affichait « collecte en pause » sur des
+        # comptes parfaitement sains, et empechait d'enregistrer leur
+        # nombre d'abonnes. Si le PROFIL a repondu, on rend simplement zero
+        # reel.
+        _vide = ("404" in err and "not found" in err.lower()
+                 and ("entries" in err.lower() or "no " in err.lower()))
+        if _vide and user:
+            data = []
+        else:
+            # Un pk devenu invalide (compte renomme) : on oublie le cache
+            # pour que le prochain passage reparte du pseudo.
+            if "404" in err or "400" in err:
+                d = _pk_cache()
+                d.pop(username, None)
+                try:
+                    safe_json.write_text(_PK_FILE, json.dumps(d, ensure_ascii=False))
+                except Exception:
+                    pass
+            return {"error": "HikerAPI: " + err}
 
     items = data if isinstance(data, list) else (
         (data or {}).get("items") or ((data or {}).get("response") or {}).get("items") or [])

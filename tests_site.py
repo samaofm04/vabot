@@ -411,9 +411,20 @@ try:
         _r = _wB._compute_insta_3_stats("douteb", force=True)
     check("faux bannis : six doutes d affilee ne condamnent toujours pas",
           not _r.get("banned") and _r.get("doutes") >= 6, str(_r.get("doutes")))
-    # Et un scrape qui reussit efface le doute.
+    # Et un scrape qui reussit efface le doute. On remplace LES DEUX
+    # sources : depuis SOURCE_UNIQUE, _compute_insta_3_stats appelle
+    # insta_scraper.scrape_profile et ne passe plus par l endpoint public.
+    # L intention du test est inchangee — c est la source qui a bouge.
     _wB._scrape_via_ig_public = lambda h: {"followers": 10, "posts_count": 3, "items": []}
-    _r = _wB._compute_insta_3_stats("douteb", force=True)
+    import insta_scraper as _iscB
+    _sav_spB = _iscB.scrape_profile
+    _iscB.scrape_profile = lambda h, limit=50: {
+        "profile": {"followers": 10, "posts_count": 3}, "reels": [],
+        "scraped_at": __import__("time").time()}
+    try:
+        _r = _wB._compute_insta_3_stats("douteb", force=True)
+    finally:
+        _iscB.scrape_profile = _sav_spB
     check("faux bannis : un scrape reussi efface le doute",
           not _r.get("a_verifier") and not _r.get("banned"), str(_r.get("a_verifier")))
 

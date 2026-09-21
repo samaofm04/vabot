@@ -1080,6 +1080,11 @@ def _scrape_via_web_api(username: str, limit: int) -> dict:
     return _write_cache(username, result)
 
 
+# Quelle source interroger. "hiker" = HikerAPI et rien d'autre : ni
+# RapidAPI, ni l'endpoint public d'Instagram, ni les chemins a cookies
+# qui engageraient des comptes de la ferme. "" restaure la cascade.
+SOURCE_UNIQUE = "hiker"
+
 HEALTH_FILE = INSTA_DIR / "watchlist_health.json"
 
 
@@ -1245,6 +1250,27 @@ def _scrape_profile_impl(username: str, limit: int = 50) -> dict:
         return {"error": "username vide"}
     auth = load_auth()
     errors = []
+
+    # ── SOURCE UNIQUE ─────────────────────────────────────────────────────
+    # Le proprietaire a tranche le 21/09/2026 : tout passe par HikerAPI.
+    #
+    # RapidAPI etait epuise depuis le 16/09 et ne revient que le 28 ; le
+    # chemin « Instagram public » repond 429 depuis cette adresse ; et les
+    # chemins a COOKIES (web, instaloader) engagent des comptes de la ferme
+    # — ce que le mode STRICT interdisait deja, a juste titre.
+    #
+    # Mettre SOURCE_UNIQUE a "" restaure l'ancienne cascade.
+    if SOURCE_UNIQUE == "hiker":
+        try:
+            import hiker_reels as _hk
+            if not _hk.configured():
+                return {"error": "HikerAPI: jeton absent (Settings)"}
+            res = _hk.scrape_profile(username, limit)
+            if "error" not in res:
+                return _write_cache(username, res)
+            return res
+        except Exception as e:
+            return {"error": "HikerAPI: %s" % str(e)[:160]}
 
     # Tentative 0 : RapidAPI (PRIORITAIRE si clé configurée)
     if auth.get("rapidapi_key"):
