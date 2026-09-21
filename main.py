@@ -2,9 +2,11 @@ import os
 import logging
 import traceback
 import asyncio
+import aiohttp
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
+from process_health import watch_health
 
 load_dotenv()
 
@@ -56,6 +58,35 @@ class VABot(commands.Bot):
         super().__init__(command_prefix=PREFIX, intents=make_intents())
         self._label = label
         self._cogs_to_load = cogs_to_load
+
+    async def connect(self, *, reconnect=True):
+        """Retry a failed first gateway handshake in discord.py 2.7.1.
+
+        Its reconnect path reads ws.sequence even when a first HTTP 503
+        left ws unset. Retry connect only, keeping loaded cogs and tasks.
+        """
+        delay = 5
+        while not self.is_closed():
+            try:
+                return await super().connect(reconnect=reconnect)
+            except AttributeError as exc:
+                initial_network_failure = (
+                    self.ws is None
+                    and exc.name == "sequence"
+                    and exc.obj is None
+                    and isinstance(exc.__context__, (
+                        aiohttp.ClientError, OSError, discord.HTTPException,
+                        discord.GatewayNotFound, asyncio.TimeoutError,
+                    ))
+                )
+                if not reconnect or self.is_closed() or not initial_network_failure:
+                    raise
+                log.warning(
+                    "[%s] Connexion Discord initiale interrompue ; nouvel essai dans %ss",
+                    self._label, delay,
+                )
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 60)
 
     async def setup_hook(self):
         # Les echecs sont GARDES, pas seulement journalises. Les journaux du
@@ -232,18 +263,23 @@ async def main_async():
 
     asyncio.create_task(_mypuls_extend_campaigns(), name="mypuls_extend_campaigns")
 
+    bot_states = {}
+
     async def _run_safe(bot, token, label):
         """Wrap bot.start dans un try/except pour qu'un bot qui crashe ne tue pas l'autre.
 
         Si l'admin bot crashe, on essaie de notifier l'owner via le main bot.
         """
         err_msg = None
+        bot_states[label] = "running"
         try:
             await bot.start(token)
         except discord.LoginFailure as e:
+            bot_states[label] = "blocked"
             err_msg = f"❌ **[{label.upper()}]** Token invalide. Refais `/setadmintoken` avec le bon token. ({e})"
             log.error(f"[{label}] Token invalide: {e}")
         except discord.PrivilegedIntentsRequired as e:
+            bot_states[label] = "blocked"
             err_msg = (
                 f"❌ **[{label.upper()}]** Privileged Intents requis. "
                 f"Va sur https://discord.com/developers/applications → ton bot → Bot → "
@@ -251,8 +287,12 @@ async def main_async():
             )
             log.error(f"[{label}] PRIVILEGED INTENTS: {e}")
         except Exception as e:
+            bot_states[label] = "failed"
             err_msg = f"❌ **[{label.upper()}]** Crash: {type(e).__name__}: {e}"
             log.error(f"[{label}] Bot crashe: {type(e).__name__}: {e}")
+        finally:
+            if bot_states[label] == "running":
+                bot_states[label] = "stopped"
         # Notifier le owner via le main bot si c'est l'admin qui crashe
         if err_msg and label == "admin":
             # Attendre que main_bot soit connecte pour pouvoir DM
@@ -262,14 +302,15 @@ async def main_async():
                     break
                 await asyncio.sleep(1)
 
-    tasks = [asyncio.create_task(_run_safe(main_bot, TOKEN, "main"), name="main_bot")]
+    bots = {"main": main_bot}
+    tasks = {"main": asyncio.create_task(_run_safe(main_bot, TOKEN, "main"), name="main_bot")}
     if admin_bot is not None:
-        tasks.append(
-            asyncio.create_task(_run_safe(admin_bot, ADMIN_TOKEN, "admin"), name="admin_bot")
-        )
+        bots["admin"] = admin_bot
+        tasks["admin"] = asyncio.create_task(_run_safe(admin_bot, ADMIN_TOKEN, "admin"), name="admin_bot")
 
-    # Les deux bots tournent independamment. Si l'un crashe, l'autre continue.
-    await asyncio.gather(*tasks, return_exceptions=True)
+    # Keep health reporting alive even if bot tasks end while web threads live.
+    # systemd recovers stopped tasks or an event loop that no longer responds.
+    await watch_health(bots, tasks, bot_states)
 
 
 if __name__ == "__main__":

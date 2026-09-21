@@ -10967,7 +10967,7 @@ try:
     check("bangers : la detection est branchee dans le scrape",
           "_banger_examiner(h, reels)" in _srcCI)
     check("bangers : la detection est posee APRES le garde-fou anti-ecrasement",
-          _srcCI.index("_banger_examiner") > _srcCI.index("suspect and isinstance"))
+          _srcCI.index("_banger_examiner") > _srcCI.index("if suspect"))
     # Une exception ici remonterait dans _scrape_one et ferait compter le
     # compte comme un echec de scrape : la veille casserait la mesure.
     check("bangers : un incident de la veille ne casse pas le scrape",

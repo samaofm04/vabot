@@ -40,6 +40,62 @@ PP_DIR = INSTA_DIR / "pp"          # photos de profil téléchargées (URL Insta
 _RPM_LOCK = _threading.Lock()
 _RPM_CALLS = _deque()
 DEFAULT_RPM = 45                   # marge sous les 50/min du plan
+RAPID_PAUSE_FILE = INSTA_DIR / "rapidapi_pause.json"
+_PAUSE_LOCK = _threading.RLock()
+
+
+def _rapid_key_id():
+    import hashlib
+    a = load_auth()
+    return hashlib.sha256((str(a.get("rapidapi_key", "")) + "|" +
+                           str(a.get("rapidapi_host", ""))).encode()).hexdigest()
+
+
+def rapidapi_pause() -> dict:
+    """Pause partagée entre workers/redémarrages, propre à la clé configurée."""
+    with _PAUSE_LOCK:
+        try:
+            p = json.loads(RAPID_PAUSE_FILE.read_text(encoding="utf-8"))
+            if p.get("key_id") == _rapid_key_id() and p.get("retry_at", 0) > time.time():
+                return {k: v for k, v in p.items() if k != "key_id"}
+        except (OSError, ValueError, TypeError):
+            pass
+    return {}
+
+
+def clear_rapidapi_pause():
+    """Réessai explicitement demandé après modification du quota/abonnement."""
+    with _PAUSE_LOCK:
+        safe_json.write(RAPID_PAUSE_FILE, {})
+
+
+def _remember_rapid_429(response):
+    h = response.headers
+    def number(name, default=None):
+        try:
+            return float(h.get(name))
+        except (ValueError, TypeError):
+            return default
+    monthly = number("x-ratelimit-requests-remaining", 1) <= 0
+    prefix = "requests" if monthly else "rate-limit"
+    delay = number("x-ratelimit-%s-reset" % prefix)
+    if delay is None:
+        delay = number("Retry-After", 3600 if monthly else 300)
+    # Ces en-têtes donnent un délai en secondes, pas un horodatage UNIX.
+    delay = max(60, min(delay, 32 * 86400))
+    p = {"provider_blocked": True, "reason": "monthly_quota" if monthly else "rate_limit",
+         "error": _pourquoi_429(response), "retry_at": int(time.time() + delay),
+         "key_id": _rapid_key_id()}
+    with _PAUSE_LOCK:
+        old = rapidapi_pause()
+        if old.get("retry_at", 0) > p["retry_at"]:
+            return old
+        safe_json.write(RAPID_PAUSE_FILE, p)
+    return {k: v for k, v in p.items() if k != "key_id"}
+
+
+class RapidAPIPaused(RuntimeError):
+    pass
 
 
 def _pourquoi_429(r) -> str:
@@ -119,6 +175,9 @@ def _rapid_gate():
     """Bloque jusqu'à ce qu'un créneau soit libre dans la fenêtre d'1 minute."""
     rpm = _rapid_rpm()
     while True:
+        pause = rapidapi_pause()
+        if pause:
+            raise RapidAPIPaused(pause["error"])
         with _RPM_LOCK:
             now = time.time()
             while _RPM_CALLS and (now - _RPM_CALLS[0]) >= 60.0:
@@ -602,6 +661,19 @@ def get_video_url_for_shortcode(shortcode: str, owner_username: str = "") -> dic
     return {"video_url": "", "source": "", "trace": trace}
 
 
+def _rapid_reels_page(payload):
+    """Accept both provider list responses and the usual dictionary wrappers."""
+    token = ""
+    for _ in range(5):
+        if isinstance(payload, list):
+            return [item for item in payload if isinstance(item, dict)], token
+        if not isinstance(payload, dict):
+            return [], token
+        token = payload.get("pagination_token") or payload.get("next_max_id") or token
+        payload = payload.get("reels") or payload.get("items") or payload.get("data") or []
+    return [], token
+
+
 def _scrape_via_rapidapi(username: str, limit: int) -> dict:
     """Scrape via RapidAPI : Instagram Scraper Stable API.
 
@@ -613,6 +685,9 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
     Param: username_or_url
     """
     import requests
+    pause = rapidapi_pause()
+    if pause:
+        return pause
     auth = load_auth()
     api_key = auth.get("rapidapi_key", "").strip()
     if not api_key:
@@ -653,6 +728,8 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
                 data={"username_or_url": username},
                 timeout=12,
             )
+            if _prof_box["resp"].status_code == 429:
+                _remember_rapid_429(_prof_box["resp"])
         except Exception as _e:
             _prof_box["exc"] = _e
 
@@ -667,6 +744,7 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
     max_pages = 2  # Limite max d'API calls par profil
     pagination_token = ""
     pages_fetched = 0
+    reels_error = None
     try:
         while pages_fetched < max_pages:
             _rapid_gate()
@@ -683,31 +761,35 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
             log.info(f"RapidAPI reels page {pages_fetched+1} HTTP {r.status_code} pour {username}")
             pages_fetched += 1
             if r.status_code != 200:
+                if r.status_code == 429:
+                    reels_error = _remember_rapid_429(r)
+                else:
+                    reels_error = {"error": f"RapidAPI reels HTTP {r.status_code}"}
                 log.warning(f"Reels HTTP {r.status_code}: {r.text[:200]}")
                 break
             posts_data = r.json()
-            items = posts_data.get("reels") or posts_data.get("items") or posts_data.get("data") or []
+            items, next_token = _rapid_reels_page(posts_data)
             if not items:
                 break
             oldest_taken_at_this_page = None
             # DEBUG : dump le premier item pour debugging
             if pages_fetched == 1 and items:
                 first = items[0]
-                log.info(f"[DEBUG_CAPTION] First reel structure for @{username}: keys={list(first.keys()) if isinstance(first, dict) else type(first).__name__}")
+                log.debug(f"[DEBUG_CAPTION] First reel structure for @{username}: keys={list(first.keys()) if isinstance(first, dict) else type(first).__name__}")
                 if isinstance(first, dict):
                     media_dbg = first.get("media") or first.get("node", {}).get("media") if isinstance(first.get("node"), dict) else first
                     if isinstance(media_dbg, dict):
-                        log.info(f"[DEBUG_CAPTION] media keys: {list(media_dbg.keys())[:30]}")
+                        log.debug(f"[DEBUG_CAPTION] media keys: {list(media_dbg.keys())[:30]}")
                         # Specifiquement, regarde la structure caption
                         cap_check = media_dbg.get("caption")
-                        log.info(f"[DEBUG_CAPTION] caption field: type={type(cap_check).__name__} value={repr(cap_check)[:200]}")
+                        log.debug(f"[DEBUG_CAPTION] caption field: type={type(cap_check).__name__} value={repr(cap_check)[:200]}")
             for it in items:
                 try:
                     node = it.get("node") if isinstance(it, dict) else None
                     if node and isinstance(node, dict):
                         media = node.get("media", node)
                     else:
-                        media = it.get("media") if isinstance(it, dict) else it
+                        media = (it.get("media") or it) if isinstance(it, dict) else it
                     if not isinstance(media, dict):
                         continue
                     shortcode = media.get("code") or media.get("shortcode") or ""
@@ -715,7 +797,7 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
                     caption = _extract_caption_robust(media)
                     # DEBUG : log les premieres captions trouvees ou pas
                     if not caption and shortcode:
-                        log.info(f"[DEBUG_CAPTION] @{username} {shortcode}: NO caption found. Top-level keys: {list(media.keys())[:20]}")
+                        log.debug(f"[DEBUG_CAPTION] @{username} {shortcode}: NO caption found. Top-level keys: {list(media.keys())[:20]}")
                     thumb = ""
                     iv2 = media.get("image_versions2", {})
                     candidates = iv2.get("candidates", []) if isinstance(iv2, dict) else []
@@ -795,7 +877,6 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
             if len(reels) >= limit:
                 break
             # Pagination : continuer si on n'a pas encore atteint 1 mois OU pas de token
-            next_token = posts_data.get("pagination_token") or posts_data.get("next_max_id") or ""
             if not next_token:
                 break  # plus de pages
             if oldest_taken_at_this_page and oldest_taken_at_this_page < one_month_ago:
@@ -804,9 +885,12 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
             time.sleep(0.3)  # petit délai entre les pages
     except Exception as e:
         log.warning(f"Fetch reels via RapidAPI: {e}")
+        reels_error = rapidapi_pause() or {"error": f"Reels indisponibles : {type(e).__name__}"}
 
     # Recupere le resultat du profil (lance en parallele) + validation/parse
     _prof_thread.join()
+    if reels_error:
+        return reels_error
     if _prof_box.get("exc") is not None:
         _pe = _prof_box["exc"]
         return {"error": f"Erreur fetch profil: {type(_pe).__name__}: {_pe}"}
@@ -817,7 +901,7 @@ def _scrape_via_rapidapi(username: str, limit: int) -> dict:
     if r.status_code == 401 or r.status_code == 403:
         return {"error": f"Clé RapidAPI invalide ou non-abonné (HTTP {r.status_code}). Vérifie sur RapidAPI."}
     if r.status_code == 429:
-        return {"error": _pourquoi_429(r)}
+        return _remember_rapid_429(r)
     if r.status_code == 404:
         return {"error": f"Endpoint introuvable (HTTP 404). L'API a peut-être changé."}
     if r.status_code != 200:
@@ -1058,7 +1142,7 @@ def _scrape_profile_impl(username: str, limit: int = 50) -> dict:
         # cookies Instagram (Web/instaloader). On renvoie l'erreur RapidAPI telle
         # quelle (ex: quota épuisé). L'utilisateur veut fonctionner SEULEMENT via
         # l'API payante. (Le scrape remarchera dès que la quota se recharge.)
-        return {"error": " | ".join(errors)}
+        return {**result, "error": " | ".join(errors)}
 
     if not auth.get("sessionid"):
         if errors:

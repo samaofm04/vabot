@@ -2,6 +2,8 @@
 dans le salon de chaque VA actif. Quand le VA se reveille, tout est deja la.
 """
 import asyncio
+from contextlib import contextmanager
+import fcntl
 import io
 import json
 import logging
@@ -23,6 +25,10 @@ DATA_DIR = Path("data")
 USERS_FILE = DATA_DIR / "users.json"
 IDENTITIES_DIR = DATA_DIR / "identities"
 AUTOPOST_CONFIG = DATA_DIR / "autopost_config.json"
+AUTOPOST_RUNS = DATA_DIR / "autopost_runs"
+AUTOPOST_MAX_ATTEMPTS = 3
+AUTOPOST_RETRY_SECONDS = 15 * 60
+AUTOPOST_KINDS = ("reel", "post", "story", "storycta")
 STORY_CTA_CAPTIONS_FILE = DATA_DIR / "story_cta_captions.txt"
 
 VIDEO_EXTS = {".mp4", ".mov", ".webm", ".mkv", ".m4v"}
@@ -55,7 +61,8 @@ def load_autopost_config():
 
 def save_autopost_config(cfg):
     AUTOPOST_CONFIG.parent.mkdir(parents=True, exist_ok=True)
-    safe_json.write_text(AUTOPOST_CONFIG, json.dumps(cfg, indent=2, ensure_ascii=False))
+    if not safe_json.write_text(AUTOPOST_CONFIG, json.dumps(cfg, indent=2, ensure_ascii=False)):
+        raise OSError("Impossible de sauvegarder la configuration Autopost")
 
 
 def load_users():
@@ -266,53 +273,246 @@ async def send_storycta(channel, identity):
                 pass
 
 
-async def run_autopost_for_all(bot):
-    """Iterate all VAs and post content for each."""
-    cfg = load_autopost_config()
-    users = load_users()
-    count = 0
-    errors = 0
-    vides = 0   # VAs cibles mais restes sans aucun media
-    for user_id_str, raw_data in users.items():
-        if isinstance(raw_data, str):
-            identity = raw_data
-            channel_id = None
-            auto_enabled = True
-        else:
-            identity = raw_data.get("identity")
-            channel_id = raw_data.get("channel_id")
-            auto_enabled = raw_data.get("auto_post", True)
-        if not auto_enabled or not channel_id or not identity:
-            continue
-        channel = bot.get_channel(channel_id)
-        if not channel:
-            log.warning(f"Autopost: channel {channel_id} introuvable pour user {user_id_str}")
-            continue
+async def resolve_autopost_channel(bot, channel_id):
+    """Un cache vide ne prouve pas que le salon a été supprimé."""
+    channel_id = int(channel_id)
+    channel = bot.get_channel(channel_id)
+    if channel is None:
+        channel = await asyncio.wait_for(bot.fetch_channel(channel_id), timeout=30)
+    if not callable(getattr(channel, "send", None)):
+        raise ValueError("Le salon ne permet pas l'envoi de messages")
+    return channel
+
+
+@contextmanager
+def _autopost_lock():
+    """Un seul passage à la fois, y compris après un rechargement du cog."""
+    AUTOPOST_RUNS.mkdir(parents=True, exist_ok=True)
+    with (AUTOPOST_RUNS / ".lock").open("a") as handle:
         try:
-            # send_* rend False quand l'identite n'a pas de media : compter le VA
-            # comme « traite » dans ce cas donnait un log rassurant (« 12 VAs
-            # traites ») alors que personne n'avait rien recu.
-            n_ok = 0
-            if cfg.get("post_reel", True):
-                n_ok += 1 if await send_reel(channel, identity) else 0
-            if cfg.get("post_post", True):
-                n_ok += 1 if await send_post(channel, identity) else 0
-            if cfg.get("post_story", True):
-                n_ok += 1 if await send_story(channel, identity) else 0
-            if cfg.get("post_storycta", True):
-                n_ok += 1 if await send_storycta(channel, identity) else 0
-            if n_ok:
-                count += 1
-            else:
-                vides += 1
-                log.warning(f"Autopost: rien envoye a {user_id_str} "
-                            f"(identite {identity} sans media ?)")
-        except Exception as e:
-            log.error(f"Autopost erreur pour user {user_id_str}: {e}")
-            errors += 1
-    if vides:
-        log.warning(f"Autopost: {vides} VA(s) n'ont RIEN recu (stock d'identite vide)")
-    return count, errors
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _load_autopost_run(day):
+    path = AUTOPOST_RUNS / f"{day}.json"
+    if not path.exists():
+        return None
+    # Ne jamais restaurer une ancienne copie de ce journal : elle pourrait
+    # faire oublier une livraison déjà réalisée et provoquer un doublon.
+    run = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(run, dict) or run.get("schema") != 1 or run.get("date") != day:
+        raise ValueError("Journal Autopost invalide")
+    if not isinstance(run.get("targets"), dict):
+        raise ValueError("Cibles Autopost invalides")
+    states = {"pending", "preparing", "sending", "retry", "sent", "failed", "uncertain", "cancelled"}
+    for target in run["targets"].values():
+        if not isinstance(target, dict) or not isinstance(target.get("items"), dict):
+            raise ValueError("Cible Autopost invalide")
+        for kind, item in target["items"].items():
+            if kind not in AUTOPOST_KINDS or not isinstance(item, dict):
+                raise ValueError("Contenu Autopost invalide")
+            if item.get("status") not in states or not isinstance(item.get("attempts"), int):
+                raise ValueError("État Autopost invalide")
+    return run
+
+
+class AutopostJournalError(OSError):
+    pass
+
+
+def _save_autopost_run(run):
+    if not safe_json.write(AUTOPOST_RUNS / f"{run['date']}.json", run, backup=False):
+        raise AutopostJournalError("Impossible de sauvegarder le suivi Autopost ; envois suspendus")
+
+
+def _autopost_target(raw):
+    if isinstance(raw, str):
+        return raw, None, True
+    if not isinstance(raw, dict):
+        raise ValueError("Fiche VA invalide")
+    channel_id = raw.get("channel_id")
+    try:
+        channel_id = int(channel_id) if channel_id else None
+    except (TypeError, ValueError):
+        channel_id = None
+    return raw.get("identity"), channel_id, raw.get("auto_post", True)
+
+
+def _new_autopost_run(day, cfg, users):
+    targets = {}
+    kinds = [kind for kind in AUTOPOST_KINDS if cfg.get(f"post_{kind}", True)]
+    for user_id, raw in users.items():
+        identity, channel_id, enabled = _autopost_target(raw)
+        if not enabled or not kinds:
+            continue
+        valid = bool(identity and channel_id)
+        targets[user_id] = {
+            "identity": identity, "channel_id": channel_id,
+            "items": {kind: {"status": "pending" if valid else "failed", "attempts": 0,
+                             "reason": "" if valid else "identity_or_channel_missing"}
+                      for kind in kinds},
+        }
+    return {"schema": 1, "date": day, "targets": targets}
+
+
+def _autopost_users_strict():
+    users = json.loads(USERS_FILE.read_text(encoding="utf-8"))
+    if not isinstance(users, dict):
+        raise ValueError("Base des VAs invalide")
+    return users
+
+
+class AutopostDeliveryUncertain(Exception):
+    """Discord a pu recevoir un message sans que le bot reçoive sa réponse."""
+
+
+class _TrackedAutopostChannel:
+    def __init__(self, channel, run, item):
+        self.channel, self.run, self.item = channel, run, item
+
+    async def send(self, *args, **kwargs):
+        self.item["status"] = "sending"
+        _save_autopost_run(self.run)  # obligatoirement AVANT l'appel Discord
+        try:
+            message = await self.channel.send(*args, **kwargs)
+        except discord.HTTPException as exc:
+            if 400 <= exc.status < 500:
+                # Rejet explicite : conserver le repli historique sans exemple
+                # lorsque Discord refuse la taille des pièces jointes du reel.
+                self.item["status"] = "sending" if self.item.get("message_ids") else "preparing"
+                raise
+            raise AutopostDeliveryUncertain("Réponse Discord incertaine") from exc
+        except Exception as exc:
+            raise AutopostDeliveryUncertain("Réponse Discord incertaine") from exc
+        self.item.setdefault("message_ids", []).append(str(message.id))
+        _save_autopost_run(self.run)
+        return message
+
+
+def _autopost_retry(item, reason, now):
+    item.update(status="retry" if item["attempts"] < AUTOPOST_MAX_ATTEMPTS else "failed",
+                reason=reason, retry_after=now.timestamp() + AUTOPOST_RETRY_SECONDS)
+
+
+def _autopost_summary(run):
+    served = errors = 0
+    states = {}
+    for target in run["targets"].values():
+        items = list(target["items"].values())
+        served += any(item["status"] == "sent" or item.get("message_ids") for item in items)
+        errors += any(item["status"] in {"failed", "uncertain", "retry"} for item in items)
+        for item in items:
+            state = item["status"]
+            states[state] = states.get(state, 0) + 1
+    return served, errors, states
+
+
+async def run_autopost_for_all(bot, *, now=None):
+    """Run du jour et reprise bornée des seuls contenus sans livraison possible."""
+    clock = (lambda: now) if now is not None else (lambda: datetime.now(timezone.utc))
+    now = clock()
+    cfg = load_autopost_config()
+    if not cfg.get("enabled", False) or not bot.is_ready():
+        return None
+    scheduled = now.replace(hour=int(cfg.get("hour_utc", 7)), minute=int(cfg.get("minute_utc", 0)),
+                            second=0, microsecond=0)
+    if now < scheduled:
+        return None
+    today = now.date().isoformat()
+    with _autopost_lock() as acquired:
+        if not acquired:
+            return None
+        run = _load_autopost_run(today)
+        if run is None and cfg.get("last_run_date") == today:
+            # Migration : cette journée a déjà été traitée sans journal détaillé.
+            # Ne pas la rejouer, même si certains anciens envois ont échoué.
+            return None
+        # Lecture stricte : une base illisible ne doit pas solder la journée à vide.
+        users = _autopost_users_strict()
+        if run is None:
+            run = _new_autopost_run(today, cfg, users)
+            _save_autopost_run(run)
+        if run.get("finished_at"):
+            return None
+        changed = False
+        for user_id, target in run["targets"].items():
+            channel = None
+            for kind, item in target["items"].items():
+                if item["status"] == "sending":
+                    item.update(status="uncertain", reason="interrupted_during_delivery")
+                    _save_autopost_run(run)
+                    changed = True
+                if item["status"] in {"sent", "failed", "uncertain", "cancelled"}:
+                    continue
+                # Arrêter aussi si le service est désactivé pendant un long run.
+                latest = load_autopost_config()
+                if not latest.get("enabled", False) or not bot.is_ready() or clock().date() != now.date():
+                    return _autopost_summary(run)[:2]
+                current = _autopost_target(_autopost_users_strict().get(user_id, {}))
+                if (not current[2] or current[:2] != (target["identity"], target["channel_id"])
+                        or not latest.get(f"post_{kind}", True)):
+                    item.update(status="cancelled", reason="configuration_changed")
+                    _save_autopost_run(run)
+                    changed = True
+                    continue
+                if item.get("retry_after", 0) > clock().timestamp():
+                    continue
+                if item["attempts"] >= AUTOPOST_MAX_ATTEMPTS:
+                    item.update(status="failed", reason="attempt_limit")
+                    _save_autopost_run(run)
+                    changed = True
+                    continue
+                changed = True
+                item.update(status="preparing", attempts=item["attempts"] + 1)
+                _save_autopost_run(run)
+                try:
+                    if channel is None:
+                        channel = await resolve_autopost_channel(bot, target["channel_id"])
+                except (discord.NotFound, discord.Forbidden, ValueError) as exc:
+                    item.update(status="failed", reason=type(exc).__name__)
+                    _save_autopost_run(run)
+                    continue
+                except Exception as exc:
+                    _autopost_retry(item, f"channel_{type(exc).__name__}", clock())
+                    _save_autopost_run(run)
+                    continue
+                tracked = _TrackedAutopostChannel(channel, run, item)
+                try:
+                    sender = globals()[f"send_{kind}"]
+                    ok = await asyncio.wait_for(sender(tracked, target["identity"]), timeout=300)
+                except AutopostJournalError:
+                    # Un journal non durable impose l'arrêt, pas un nouvel envoi.
+                    raise
+                except Exception as exc:
+                    if item["status"] == "sending" or item.get("message_ids"):
+                        item.update(status="uncertain", reason=type(exc).__name__)
+                    else:
+                        _autopost_retry(item, type(exc).__name__, clock())
+                else:
+                    if ok:
+                        item.update(status="sent", reason="")
+                    elif item.get("message_ids"):
+                        item.update(status="uncertain", reason="partial_delivery")
+                    else:
+                        _autopost_retry(item, "no_media_or_send_rejected", clock())
+                _save_autopost_run(run)
+        count, errors, states = _autopost_summary(run)
+        if not any(states.get(state) for state in ("pending", "preparing", "sending", "retry")):
+            run["finished_at"] = clock().isoformat()
+            _save_autopost_run(run)
+            latest = load_autopost_config()
+            latest["last_run_date"] = today
+            save_autopost_config(latest)
+        if changed or errors:
+            log.info("Autopost: %s VA(s) avec livraison, %s VA(s) en erreur ; contenus %s", count, errors, states)
+        return count, errors
 
 
 async def run_broadcast(
@@ -353,10 +553,12 @@ async def run_broadcast(
         # Filtre par identite si specifie (comparaison case-insensitive)
         if identity_filter and identity.lower() != identity_filter.lower():
             continue
-        channel = bot.get_channel(channel_id)
-        if not channel:
+        try:
+            channel = await resolve_autopost_channel(bot, channel_id)
+        except Exception as exc:
             sans_salon += 1
-            log.warning(f"Broadcast: channel {channel_id} introuvable pour {user_id_str}")
+            errors += 1
+            log.warning("Broadcast: salon %s inaccessible pour %s (%s)", channel_id, user_id_str, type(exc).__name__)
             continue
         try:
             n_ok = 0
@@ -376,6 +578,8 @@ async def run_broadcast(
                 vides[identity] = vides.get(identity, 0) + 1
                 log.warning(f"Broadcast: rien envoye a {user_id_str} "
                             f"(identite {identity} sans stock ?)")
+            if n_ok < n_reels + n_posts + n_stories + n_storyctas:
+                errors += 1
         except Exception as e:
             log.error(f"Broadcast erreur pour user {user_id_str}: {e}")
             errors += 1
@@ -422,22 +626,12 @@ class AutoPost(commands.Cog):
 
     @tasks.loop(minutes=1)
     async def check_autopost(self):
-        cfg = load_autopost_config()
-        if not cfg.get("enabled", False):
-            return
-        now = datetime.now(timezone.utc)
-        target_h = cfg.get("hour_utc", 7)
-        target_m = cfg.get("minute_utc", 0)
-        if now.hour != target_h or now.minute != target_m:
-            return
-        today = now.date().isoformat()
-        if cfg.get("last_run_date") == today:
-            return
-        log.info("Autopost: démarrage du run quotidien")
-        count, errors = await run_autopost_for_all(self.bot)
-        cfg["last_run_date"] = today
-        save_autopost_config(cfg)
-        log.info(f"Autopost: {count} VAs traités, {errors} erreurs")
+        try:
+            await run_autopost_for_all(self.bot)
+        except Exception:
+            # Une panne de stockage ou une configuration invalide ne doit pas
+            # tuer définitivement le planificateur de tous les jours suivants.
+            log.exception("Autopost: passage interrompu ; suivi conservé, prochain contrôle dans une minute")
 
     @check_autopost.before_loop
     async def before_check(self):
@@ -460,6 +654,17 @@ class AutoPost(commands.Cog):
             f"  • Story: {'✅' if cfg.get('post_story') else '❌'}\n"
             f"  • Story CTA: {'✅' if cfg.get('post_storycta') else '❌'}\n"
         )
+        try:
+            run = _load_autopost_run(datetime.now(timezone.utc).date().isoformat())
+            if run:
+                served, errors, states = _autopost_summary(run)
+                msg += (f"\n📋 Suivi du jour : {served} VA(s) avec livraison, {errors} en erreur.\n"
+                        f"Contenus confirmés : {states.get('sent', 0)} ; "
+                        f"à réessayer : {states.get('retry', 0)} ; "
+                        f"échecs : {states.get('failed', 0)} ; "
+                        f"à vérifier sans renvoi : {states.get('uncertain', 0)}.\n")
+        except Exception:
+            msg += "\n⚠️ Suivi du jour illisible : les envois automatiques sont suspendus.\n"
         await interaction.response.send_message(msg, ephemeral=True)
 
     @app_commands.command(name="autopostenable", description="Active/désactive l'auto-post quotidien")

@@ -1112,7 +1112,7 @@ IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
 LOGIN_HTML = """
 <!DOCTYPE html>
-<html lang="fr"><head><meta charset="utf-8"><title>Connexion</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="fr"><head><meta charset="utf-8"><title>Connexion</title><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="alternate icon" href="/favicon.ico" sizes="32x32"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Noto+Color+Emoji&display=swap">
@@ -1323,7 +1323,7 @@ input::placeholder{color:#5a6183}
 
 UPLOAD_HTML = """
 <!DOCTYPE html>
-<html class="{theme_pre_class}"><head><meta charset="utf-8"><title>Youlab Dashboard</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<html class="{theme_pre_class}"><head><meta charset="utf-8"><title>Youlab Dashboard</title><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="alternate icon" href="/favicon.ico" sizes="32x32"><link rel="apple-touch-icon" href="/apple-touch-icon.png"><meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <!-- Fonts NON bloquantes (media=print + onload) : le premier rendu n'attend
@@ -1605,9 +1605,8 @@ body.light .jb-ok-badge{color:#15803d}                          /* badges Actif,
    restaient noirs alors que leur texte suivait le theme clair et passait
    au fonce : 73 elements mesures en fonce sur fonce, dont la modale et le
    panneau de detail d un VA. Verifie a l ecran, un par un.
-   Ce qui n est PAS touche ici et qui l a ete verifie aussi : les boutons
-   d action roses (.jb-add-account-btn), les pastilles d etat vertes et la
-   poignee de glissement — ils posent leur propre couleur et tiennent. */
+   Les surfaces suivent le mode clair ; les actions utilisent les variables
+   communes du theme, les pastilles d etat gardent leur signification. */
 body.light .jb-sidebar,body.light .jb-va-group,body.light .jb-va-group-novote{
   background:#f9fafb!important;border-color:#e5e7eb!important}
 body.light .jb-section,body.light .jb-va-detail,body.light .jb-modal,
@@ -1646,8 +1645,9 @@ body.light .jb-acc-pill.warn{color:#c2410c}
 body.light .jb-acc-pill.ban{color:#b91c1c}
 body.light .jb-acc-pill.quiet{color:#4b5563}
 body.light .jb-detail-scrape-pill{color:#15803d}
+body.light .jb-scrape-one{color:var(--ui-accent-text)}
 body.light .jb-side-summary{color:#4b5563}
-body.light .jb-side-id-count{color:#be185d}
+body.light .jb-side-id-count{color:var(--ui-accent-text)}
 /* Survols qui passent le texte en BLANC sans poser de fond plein : sur une
    surface claire, le bouton se vide au passage de la souris. */
 body.light .jb-row-btn:hover,body.light .jb-section-toggle:hover{color:#1d4ed8}
@@ -1664,11 +1664,10 @@ body.light .sx-slot select.public{color:#15803d!important}
 body.light .sx-slot select.private{color:#7e22ce!important}
 body.light .sx-opt-title{color:#111827}
 body.light .sx-opt-sub,body.light .sx-slot-rm{color:#6b7280}
-/* Dernier lot du Jailbreak : des pastilles violettes a fond translucide,
-   entre 2,17 et 2,41 sur du blanc. Plus invisibles, mais faibles. On garde
-   le violet comme SIGNE (c est la couleur du module) en le foncant. */
+/* Les compteurs du module utilisent le meme accent que les autres onglets,
+   avec une couleur de texte adaptee au theme clair. */
 body.light .jb-side-va-count,body.light .jb-detail-count-badge,
-body.light .jb-detail-head-edit,body.light .jb-side-summary b{color:#7e22ce}
+body.light .jb-detail-head-edit,body.light .jb-side-summary b{color:var(--ui-accent-text)}
 body.light .va-ig3-ban-badge{color:#b91c1c}
 /* Un texte pose DANS un bouton bleu ne doit pas suivre le remap general
    des gris : le fond, lui, reste bleu. Le montant du bouton de periode des
@@ -1745,10 +1744,10 @@ body.light .ja-tip .d,body.light .ja-tip .r{color:#4b5563}
 body.light .vlm-pill{color:#3c3c43!important}
 /* !important obligatoire ici : sans lui la regle ci-dessus, elle importante,
    battrait ce survol malgre sa specificite superieure. */
-body.light .vlm-pill:hover{color:#7e22ce!important}
+body.light .vlm-pill:hover{color:var(--ui-accent-text)!important}
 /* Place APRES le survol : specificite egale (0,3,1), c est l ordre qui tranche. */
-body.light .vlm-pill.active,body.light .vlm-pill.active:hover{background:#a855f7!important;border-color:#a855f7!important;color:#fff!important}
-body.light .vim-open-btn:hover{background:#ec4899!important;border-color:#ec4899!important;color:#fff!important}
+body.light .vlm-pill.active,body.light .vlm-pill.active:hover{background:var(--ui-accent)!important;border-color:var(--ui-accent)!important;color:var(--ui-on-accent)!important}
+body.light .vim-open-btn:hover{background:var(--ui-accent)!important;border-color:var(--ui-accent)!important;color:var(--ui-on-accent)!important}
 /* Le theme peint en bleu plein TOUT bouton d action principale
    (button[type=submit], .btn, .badge, les bascules actives...) mais ne
    disait rien de leur texte. Mesure dans la page : 126 elements au fond
@@ -3037,8 +3036,8 @@ code{background:#0f0f0f;padding:2px 6px;border-radius:4px;font-size:13px}
 /* Les 4 themes colores repeignent button[type=submit] en !important (obsidian
    #8b9cf7, violet #a855f7, gold #d9b74a, apple #007aff) : sans ces deux lignes
    a (0,2,2), un bouton Supprimer y garde la couleur de l accent. */
-body.obsidian button.danger-btn,body.violet button.danger-btn,body.gold button.danger-btn,body.apple button.danger-btn,body.claude button.danger-btn,body.infloww button.danger-btn,body.light.inflowwlight button.danger-btn{background:#ef4444!important;border-color:#ef4444!important;color:#fff!important}
-body.obsidian button.danger-btn:hover,body.violet button.danger-btn:hover,body.gold button.danger-btn:hover,body.apple button.danger-btn:hover,body.claude button.danger-btn:hover,body.infloww button.danger-btn:hover,body.light.inflowwlight button.danger-btn:hover{background:#dc2626!important}
+body.obsidian button.danger-btn,body.violet button.danger-btn,body.gold button.danger-btn,body.apple button.danger-btn,body.light.claude button.danger-btn,body.infloww button.danger-btn,body.light.inflowwlight button.danger-btn{background:#ef4444!important;border-color:#ef4444!important;color:#fff!important}
+body.obsidian button.danger-btn:hover,body.violet button.danger-btn:hover,body.gold button.danger-btn:hover,body.apple button.danger-btn:hover,body.light.claude button.danger-btn:hover,body.infloww button.danger-btn:hover,body.light.inflowwlight button.danger-btn:hover{background:#dc2626!important}
 .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px}
 .stat{background:#1a1a1a;padding:16px;border-radius:10px;border:1px solid #2a2a2a}
 .stat .v{font-size:28px;font-weight:700;color:#3b82f6}
@@ -3189,6 +3188,81 @@ body.light .ja-seg,body.light .av-seg,body.light .gd-seg{background:#f3f4f6!impo
 body.light .ja-refresh,body.light .av-cfg{background:#fff!important;border-color:#e5e7eb!important;color:#374151}
 body.light .ja-share,body.light .av-share{background:#eef0f3!important}
 body.light .ja-note,body.light .av-note{background:#eff6ff!important;border-color:#bfdbfe!important;color:#1e40af!important}
+
+/* Shared action colors: modules inherit the selected theme instead of
+   choosing independent pink/purple accents. Geometry and status colors stay local. */
+body{--ui-accent:#3b82f6;--ui-accent-hover:#2563eb;--ui-accent-text:#60a5fa;
+  --ui-accent-rgb:59,130,246;--ui-on-accent:#fff}
+body.light{--ui-accent-text:#1d4ed8}
+body.infloww,body.light.inflowwlight{--ui-accent:#1677ff;--ui-accent-hover:#0958d9;
+  --ui-accent-text:#1677ff;--ui-accent-rgb:22,119,255}
+body.apple{--ui-accent:#007aff;--ui-accent-hover:#0062cc;
+  --ui-accent-text:#007aff;--ui-accent-rgb:0,122,255}
+body.light.claude{--ui-accent:var(--c-accent);--ui-accent-hover:#c46546;
+  --ui-accent-text:#a44f35;--ui-accent-rgb:217,119,87}
+body.obsidian{--ui-accent:#8b9cf7;--ui-accent-hover:#778ae9;
+  --ui-accent-text:#8b9cf7;--ui-accent-rgb:139,156,247}
+body.violet{--ui-accent:#a855f7;--ui-accent-hover:#9333ea;
+  --ui-accent-text:#c084fc;--ui-accent-rgb:168,85,247}
+body.gold{--ui-accent:#d9b74a;--ui-accent-hover:#c7a439;
+  --ui-accent-text:#e6c65e;--ui-accent-rgb:217,183,74;--ui-on-accent:#1c1600}
+
+/* These components include inline colors and late-loaded module CSS. Explicit
+   selectors keep theme colors stable before and after opening another tab. */
+body :is(.up-submit,.jb-add-account-btn,.jb-add-va-btn,.vim-save,.ig3-save,.vlm-save,
+  #ident-edit-go,#ident-new-go,#jb-scrape-now-btn,
+  button[style*="background:#a855f7"],button[style*="background:linear-gradient(135deg,#3b82f6,#a855f7)"]){
+  background:var(--ui-accent)!important;border-color:var(--ui-accent)!important;
+  color:var(--ui-on-accent)!important;box-shadow:0 2px 8px rgba(var(--ui-accent-rgb),.2)}
+body :is(.up-submit,.jb-add-account-btn,.jb-add-va-btn,.vim-save,.ig3-save,.vlm-save,
+  #ident-edit-go,#ident-new-go,#jb-scrape-now-btn,
+  button[style*="background:#a855f7"],button[style*="background:linear-gradient(135deg,#3b82f6,#a855f7)"]):hover{
+  background:var(--ui-accent-hover)!important;box-shadow:0 4px 12px rgba(var(--ui-accent-rgb),.25)}
+body :is(button[data-edit],.va-links-btn){color:var(--ui-accent-text)}
+body .card-edit-btn:hover{background:var(--ui-accent);color:var(--ui-on-accent)!important}
+/* Account counters are information, not an extra module-specific palette. */
+body #jb-kpi-comptes>div:first-child,body #jb-kpi-idents>div:first-child{color:var(--ui-accent-text)!important}
+body .jb-modal h3{color:inherit}
+body.light .jb-detail-head{border-bottom-color:#e5e7eb}
+body.light.inflowwlight .jb-detail-head{border-bottom-color:#e0e0e0}
+body.light .jb-fail-badge{color:#b91c1c}
+
+/* Quiet, consistent account statuses: the label stays readable and a small
+   colored dot carries the state. Avoid coloring the whole account row red. */
+body{--ui-status-bg:rgba(255,255,255,.06);--ui-status-text:#b8bdc7;
+  --ui-row-bg:#0f1116;--ui-row-border:#2a2a2a}
+body.light{--ui-status-bg:#f3f4f6;--ui-status-text:#525a66;
+  --ui-row-bg:#fff;--ui-row-border:#e5e7eb}
+body.infloww{--ui-status-bg:#303030;--ui-status-text:#bcbcbc;
+  --ui-row-bg:#242424;--ui-row-border:#444}
+body.light.inflowwlight{--ui-status-bg:#f1f2f4;--ui-status-text:#5b6068;
+  --ui-row-border:#e0e0e0}
+body.light.claude{--ui-status-bg:var(--c-creux);--ui-status-text:var(--c-attenue);
+  --ui-row-bg:var(--c-surface);--ui-row-border:var(--c-bordure)}
+body :is(.jb-ok-badge,.jb-not-scraped-badge,.va-ig3-ban-badge,.jb-stale-badge,
+  .jb-doute-badge,.jb-fail-badge,.jb-acc-pill,.jb-acc-pill.ok,.jb-acc-pill.ban,
+  .jb-acc-pill.warn,.jb-acc-pill.quiet,.jb-detail-scrape-pill.on,.jb-detail-scrape-pill.pending){
+  background:var(--ui-status-bg);color:var(--ui-status-text)!important;
+  border:0;border-radius:6px;font-size:11px;font-weight:500;line-height:1.4;
+  padding:3px 7px;letter-spacing:0;box-shadow:none}
+body :is(.jb-ok-badge,.jb-not-scraped-badge,.va-ig3-ban-badge,.jb-stale-badge,
+  .jb-doute-badge,.jb-fail-badge)::before{width:5px;height:5px;box-shadow:none}
+body .jb-acc-pill::before,body .jb-detail-scrape-pill::before{
+  content:'';width:5px;height:5px;border-radius:50%;background:#9aa0a6;flex-shrink:0}
+body .jb-acc-pill.ok::before,body .jb-detail-scrape-pill.on::before{background:#22c55e}
+body .jb-acc-pill.ban::before{background:#ef4444}
+body .jb-acc-pill.warn::before{background:#e6a23c}
+body .va-ig3-row-banned{background:var(--ui-row-bg)!important;border-color:var(--ui-row-border)!important}
+body .va-ig3-row-banned .va-ig3-row-handle{color:var(--ui-status-text)!important;text-decoration-color:currentColor}
+body :is(.jb-row-btn,.jb-detail-head-remove,.va-ig3-rm-btn){
+  border-color:transparent;color:var(--ui-status-text);background:transparent}
+body :is(.jb-row-btn,.jb-detail-head-remove,.va-ig3-rm-btn):hover{
+  background:var(--ui-status-bg);border-color:transparent}
+body :is(.jb-row-btn.jb-row-btn-danger,.jb-detail-head-remove,.va-ig3-rm-btn):hover{
+  color:#ef4444;background:rgba(239,68,68,.06)}
+body :is(.jb-bulk-btn,.jb-side-add-va){border-color:var(--ui-row-border);color:var(--ui-status-text)}
+body .jb-detail-actions{border-top-color:var(--ui-row-border)}
+body.light .jb-modal{box-shadow:0 12px 36px rgba(0,0,0,.12)}
 
 /* Filet de sécurité + accessibilité : si l'utilisateur préfère moins
    d'animations (réglage OS), on neutralise TOUT le mouvement du site. */
@@ -10152,6 +10226,24 @@ function fxApplyCur(){
     var usd = parseFloat((gross && el.dataset.brut) ? el.dataset.brut : (el.dataset.usd||'0'))||0;
     el.textContent = fmt(usd);
   });
+  // The platform proportions follow the displayed net/gross values.
+  document.querySelectorAll('.home-platform-breakdown').forEach(function(panel){
+    var rows=Array.from(panel.querySelectorAll('[data-platform-share]'));
+    var values=rows.map(function(row){
+      var amount=row.querySelector('.fx-amt');
+      return parseFloat((gross && amount.dataset.brut) ? amount.dataset.brut : amount.dataset.usd)||0;
+    });
+    var sum=values.reduce(function(a,b){return a+b;},0);
+    var nonnegative=values.every(function(value){return value>=0;});
+    rows.forEach(function(row,index){
+      var share=nonnegative && sum>0 ? values[index]/sum*100 : 0;
+      row.querySelector('.hpb-percentage').textContent=nonnegative ? share.toLocaleString('fr-FR',{minimumFractionDigits:1,maximumFractionDigits:1})+' %' : '—';
+      var bar=panel.querySelector('[data-platform-bar="'+row.dataset.platformShare+'"]');
+      if(bar){bar.style.flexGrow=String(share);bar.style.display=share>0?'':'none';}
+    });
+    var barContainer=panel.querySelector('.hpb-bar');
+    if(barContainer)barContainer.style.display=nonnegative && sum>0?'flex':'none';
+  });
   document.querySelectorAll('.fx-alt-hint').forEach(function(el){
     var net = parseFloat(el.dataset.net||'0')||0;
     var brut = parseFloat(el.dataset.brut||'0')||0;
@@ -10239,10 +10331,6 @@ document.addEventListener('click',function(e){
     <button class="item" id="tab-cloudbrutes" onclick="showTab('cloud','cloudbrutes','Vidéo brut','Tes rushs bruts par identité — la matière première des montages')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
       Vidéo brut
-    </button>
-    <button class="item" id="tab-cloudtrends" onclick="showTab('cloud','cloudtrends','Trends','Vidéos finies, prêtes à poster telles quelles — les meilleures')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-      Trends
     </button>
     <button class="item" id="tab-cloudbios" onclick="showTab('cloud','cloudbios','Bios','Tes bios par identité — ajout en liste + génération IA')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
@@ -14978,6 +15066,9 @@ def _invalidate_all_ttl_cache():
     # Sans cette ligne, une identite creee restait introuvable pour les routes
     # qui valident un nom -- le mtime du dossier ne suffit pas a le dire.
     _oublier_identites()
+    dashboard = globals().get('_render_home_dashboard_html')
+    if dashboard and hasattr(dashboard, 'invalidate'):
+        dashboard.invalidate()
     with _TTL_CACHE_LOCK:
         _TTL_CACHE.clear()
         _TTL_EPOCH += 1   # un refresh/compute en vol (toute fonction) ne réécrira
@@ -15474,83 +15565,57 @@ def _scrape_ident_html(ident: str) -> str:
 
 
 def _bangers_encart_html() -> str:
-    """Le reglage du seuil, et ou en est l'archive.
-
-    Aucune classe nouvelle : on reprend .sv-box / .sv-h / .sv-pill du bandeau
-    voisin, qui ont deja leur contrepartie en theme clair. Une classe coloree
-    de plus serait une classe de plus a repeindre en clair, et le banc d'essai
-    du depot la refuserait — a juste titre.
-    """
+    """Résumé daté ; les réglages et l'archive restent à portée d'un clic."""
     try:
-        import bangers as _bg_h
-        b = _bg_h.bilan()
-    except Exception:                                         # noqa: BLE001
-        return ""
-    if b["total"]:
-        etat = (f"<b>{b['total']}</b> reel(s) archivé(s) — {b['avec_video']} avec "
-                f"la vidéo, {b['en_attente']} en attente")
-        if b["perdues"]:
-            etat += f", {b['perdues']} sans vidéo (lien gardé)"
-        if b["muets"]:
-            etat += f" · {b['muets']} trop ancien(s) pour être annoncé(s)"
-    else:
-        etat = "<b>Rien pour l'instant</b> — le prochain reel qui dépassera le seuil"
+        import bangers as bg
+        import bangers as daily
+        b = bg.bilan()
+        e = daily.etat_quotidien(bg)
+        date = "/".join(reversed(e["jour"].split("-")))
+        statut = (f"{e['envoyes']} reel{'s' if e['envoyes'] > 1 else ''} envoyé{'s' if e['envoyes'] > 1 else ''} sur Discord" if e["envoyes"] else
+                  "Aucun reel au-dessus du seuil" if not e["total"] else
+                  f"{e['total']} reel{'s' if e['total'] > 1 else ''} sélectionné{'s' if e['total'] > 1 else ''}")
+        if e["a_verifier"]:
+            statut += f" · {e['a_verifier']} envoi(s) à vérifier"
+        if e.get("doublons"):
+            statut += f" · {e['doublons']} copie(s) identique(s) regroupée(s)"
+    except Exception:
+        return "<div class='sv-box sv-settings'>Bangers : état indisponible.</div>"
     return (
-        "<div class='sv-box'>"
-        "<div class='sv-h'>🔥 Bangers — " + etat +
-        ". Un reel qui passe le seuil part dans le salon Discord « banger », et "
-        "surtout il est <b>gardé ici</b> : le lien, la vidéo et la description. "
-        "Le jour où le compte tombe, c'est tout ce qu'il en reste.</div>"
-        "<div class='sv-pills'>"
-        "<span class='sv-pill' style='cursor:default'>Seuil</span>"
-        f"<input id='bg-seuil' class='sv-pill' type='number' min='{_bangers_min()}' "
-        f"max='{_bangers_max()}' step='500' value='{b['seuil']}' "
-        "style='width:96px;text-align:right' "
-        "title='À partir de combien de vues un reel est un banger'>"
-        "<span class='sv-pill' style='cursor:default'>vues</span>"
-        "<button type='button' class='sv-pill' onclick='bgSeuil(this)'>"
-        "Enregistrer</button>"
-        "<button type='button' class='sv-pill' onclick='bgCycle(this)' "
-        "title='Télécharge ce qui manque et envoie les annonces en attente, "
-        "sans attendre le prochain passage'>⟳ Traiter maintenant</button>"
-        "<button type='button' class='sv-pill' onclick='bgCookies(this)' "
-        "title=\"Tente un vrai téléchargement avec les cookies et dit ce "
-        "qu'Instagram a répondu\">🔑 Vérifier les cookies</button>"
-        "<button type='button' class='sv-pill' onclick='bgEssai(this)' "
-        "title=\"Prend les 5 reels les plus vus des dernières 24 h, quel que "
-        "soit leur nombre de vues, et fait tourner toute la chaîne : "
-        "téléchargement puis envoi dans le salon avec le fichier joint. "
-        "Lecture publique et gratuite, aucun crédit dépensé.\">"
-        "🧪 Essai — 5 reels des 24 h</button>"
-        "</div>"
+        "<div class='sv-box sv-settings'>"
+        "<div class='sv-heading'><b>Bangers</b>"
+        f"<span>Publications du {date}</span></div>"
+        f"<div class='sv-h sv-result'>{statut}</div>"
+        "<div class='sv-h'>Chaque matin à 9 h (Paris) · reels publiés la veille · Jessye</div>"
+        "<details class='sv-details'><summary>Réglages et archive</summary>"
+        "<div class='sv-controls'><label for='bg-seuil'>Seuil de vues</label>"
+        f"<input id='bg-seuil' type='number' min='{_bangers_min()}' "
+        f"max='{_bangers_max()}' step='500' value='{b['seuil']}'>"
+        "<button type='button' onclick='bgSeuil(this)'>Enregistrer</button></div>"
+        "<div class='sv-h'>Tous les reels qui atteignent le seuil, sans limite de nombre. "
+        "Les copies vidéo identiques sont regroupées quand le fichier est disponible.</div>"
+        f"<div class='sv-h'>"
+        f"Archive complète : {b['total']} reels, dont {b['avec_video']} avec vidéo.</div>"
         + _bangers_cookies_ligne() +
-        "<div class='sv-h' id='bg-essai' style='margin:8px 0 0'></div>"
-        "</div>")
+        "<div class='sv-controls'><button type='button' onclick='bgCycle(this)'>"
+        "Vérifier l’envoi du jour</button>"
+        "<button type='button' onclick='bgCookies(this)'>Vérifier la connexion Instagram</button>"
+        "</div><div class='sv-h' id='bg-essai' role='status'></div>"
+        "</details></div>")
 
 
 def _bangers_cookies_ligne() -> str:
-    """Une ligne d'etat sur les cookies, sans aucun appel reseau.
-
-    Sans elle, « la video ne descend pas » et « je crois que les cookies ne
-    sont plus bons » sont deux phrases qu'on ne peut pas departager.
-    """
+    """Diagnostic local sans exposer les cookies ni lancer de requête."""
     try:
         c = _banger_etat_cookies()
-    except Exception:                                         # noqa: BLE001
+    except Exception:
         return ""
-    if not c.get("present"):
-        dit = ("🔑 <b>Aucun fichier de cookies</b> — les reels que le public ne "
-               "sert pas resteront sans vidéo. Settings → Instagram pour en "
-               "déposer un (extension « Get cookies.txt LOCALLY »).")
-    elif not c.get("sessionid"):
-        dit = ("🔑 <b>Cookies sans sessionid</b> — le fichier a le bon format "
-               "mais ne connecte personne : il a été exporté en étant "
-               "déconnecté d'Instagram. À refaire, connecté.")
+    if not c.get("present") or not c.get("sessionid"):
+        dit = ("Connexion Instagram à renouveler pour récupérer certaines vidéos. "
+               "Les liens restent conservés.")
     else:
-        dit = (f"🔑 Cookies présents — <b>{c.get('jours')} jour(s)</b>, "
-               f"{c.get('lignes_ig')} ligne(s) Instagram. Instagram les fait "
-               "expirer sans prévenir : le bouton ci-dessus le dit vraiment.")
-    return "<div class='sv-h' style='margin:8px 0 0'>" + dit + "</div>"
+        dit = "Connexion Instagram enregistrée · à vérifier si une vidéo manque."
+    return "<div class='sv-h sv-cookie'>" + dit + "</div>"
 
 
 def _bangers_min() -> int:
@@ -15570,41 +15635,34 @@ def _bangers_max() -> int:
 
 
 def _suivi_pastilles_html(identities) -> str:
-    """Une pastille par identite : allumee = scrapee, eteinte = ignoree."""
+    """Une ligne de résumé, puis les interrupteurs dans Gérer."""
     noms = sorted({str(x or "").strip().lower() for x in (identities or []) if str(x or "").strip()})
     if not noms:
         return ""
     suivies = identites_suivies()
     tout = (suivies is _TOUTES_IDENTITES) or ("*" in suivies)
-    n_on = len(noms) if tout else sum(1 for n in noms if n in suivies)
-    puces = []
+    actifs = [n for n in noms if tout or n in suivies]
+    resume = (actifs[0].capitalize() + " uniquement" if len(actifs) == 1 else
+              "Aucune identité suivie" if not actifs else f"{len(actifs)} identités suivies")
+    lignes = []
     for n in noms:
-        on = tout or (n in suivies)
-        puces.append(
-            f"<button type='button' class='sv-pill{' on' if on else ''}' "
-            f"data-ident='{html_escape(n)}' data-on='{1 if on else 0}' "
-            f"onclick='jbSuivi(this)' "
-            f"title=\"{'Suivi : ses comptes sont scrapés' if on else 'Ignoré : aucun appel, aucun crédit dépensé'}\">"
-            f"{'●' if on else '○'} {html_escape(n)}</button>")
-    etat = ("<b>Tout est suivi</b> — aucune restriction posée"
-            if tout else
-            f"<b>{n_on}/{len(noms)}</b> identité(s) suivie(s)")
+        on = n in actifs
+        lignes.append(
+            f"<div class='sv-identity'><span>{html_escape(n.capitalize())}</span>"
+            f"<button type='button' role='switch' aria-checked='{str(on).lower()}' "
+            f"aria-label='Suivre {html_escape(n)}' data-ident='{html_escape(n)}' "
+            f"data-on='{1 if on else 0}' onclick='jbSuivi(this)'>"
+            f"{'Suivie' if on else 'En pause'}<span class='sv-switch' aria-hidden='true'></span>"
+            "</button></div>")
     return (
-        "<div class='sv-box'>"
-        "<div class='sv-h'>🎯 Périmètre du scrape — " + etat +
-        ". Une identité éteinte garde ses comptes ; on cesse seulement de les "
-        "interroger, et ses chiffres cessent d'être à jour.</div>"
-        "<div class='sv-pills'>" + "".join(puces) + "</div>"
-        # La bascule en masse : eteindre vingt-quatre identites une par une
-        # demandait vingt-quatre clics, et on en oubliait une.
-        "<div class='sv-tout'>"
-        "<button type='button' class='sv-pill' onclick='jbSuiviTout(0)'>"
-        "○ Tout éteindre</button>"
-        "<button type='button' class='sv-pill' onclick='jbSuiviTout(1)'>"
-        "● Tout allumer</button>"
-        "</div>"
-        + _tri_nature_html() +
-        "</div>")
+        "<details class='sv-box sv-settings sv-follow'>"
+        "<summary class='sv-heading'><b>Suivi Instagram</b>"
+        f"<span>{html_escape(resume)}</span><span class='sv-manage'>Gérer</span></summary>"
+        "<div class='sv-identities'>" + "".join(lignes) + "</div>"
+        "<div class='sv-h'>En pause : les comptes sont conservés, leurs statistiques ne sont plus actualisées.</div>"
+        "<div class='sv-controls'><button type='button' onclick='jbSuiviTout(1)'>Tout suivre</button>"
+        "<button type='button' onclick='jbSuiviTout(0)'>Tout mettre en pause</button></div>"
+        + _tri_nature_html() + "</details>")
 
 
 def _tri_nature_html() -> str:
@@ -15721,10 +15779,12 @@ def _classify_scrape_error(msg: str) -> str:
     """Traduit un message d'erreur de scrape en motif LISIBLE (et actionnable).
     Sert au récap « pourquoi ça a échoué » du dashboard."""
     m = (msg or "").lower()
+    if "mensuel" in m:
+        return "Quota mensuel RapidAPI épuisé — collecte en pause"
     if "429" in m or "quota" in m or "rate" in m or "too many" in m:
-        return "Quota/rate-limit atteint — attendre ou upgrader le plan RapidAPI"
+        return "Collecte limitée par le fournisseur — réessai différé"
     # RapidAPI d'abord : ses erreurs de clé sortent aussi en 401/403
-    if "rapidapi" in m or "non-abonné" in m or "subscribe" in m:
+    if "non-abonné" in m or "subscribe" in m or "clé rapidapi invalide" in m:
         return "Clé RapidAPI invalide ou abonnement inactif"
     if "401" in m or "403" in m or "login" in m or "session" in m or "checkpoint" in m:
         return "Session/cookies Instagram expirés — à reconnecter dans Settings"
@@ -15746,7 +15806,7 @@ def _do_refresh(handles: list, label: str = "manual") -> dict:
 
     Retourne {ok, banned, err, duration_s, total}.
     """
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
     import time as _t_dr
     if not _REFRESH_LOCK.acquire(blocking=False):
         return {"error": "Un refresh est deja en cours", "ok": 0, "banned": 0, "err": 0}
@@ -15763,6 +15823,7 @@ def _do_refresh(handles: list, label: str = "manual") -> dict:
         print(f"[insta-refresh:{label}] starting parallel for {total} handles", flush=True)
         ok = banned = err = 0
         done = 0
+        blocked = {}
         # Qui etait DEJA banni avant ce passage. Sans cette photo, impossible
         # de distinguer « vingt bannis dans le lot » (normal, ils le sont
         # depuis des semaines) de « vingt comptes condamnes a l instant »
@@ -15780,9 +15841,22 @@ def _do_refresh(handles: list, label: str = "manual") -> dict:
             except Exception as e:
                 return h, None, e
         with ThreadPoolExecutor(max_workers=4) as ex:
-            futures = [ex.submit(_scrape_one, h) for h in handles]
-            for fut in as_completed(futures):
+            remaining = iter(handles)
+            futures = set()
+            def fill_workers():
+                while not blocked and len(futures) < 4:
+                    h = next(remaining, None)
+                    if h is None:
+                        break
+                    futures.add(ex.submit(_scrape_one, h))
+            fill_workers()
+            while futures:
+                completed, _pending = wait(futures, return_when=FIRST_COMPLETED)
+                fut = next(iter(completed))
+                futures.remove(fut)
                 h, res, exc = fut.result()
+                if res and res.get("provider_blocked"):
+                    blocked = {k: res[k] for k in ("error", "reason", "retry_at") if k in res}
                 if exc is not None:
                     err += 1
                     fails.append({"handle": h, "why": f"{type(exc).__name__}: {exc}"[:160]})
@@ -15806,6 +15880,7 @@ def _do_refresh(handles: list, label: str = "manual") -> dict:
                                             in_progress_fails=fails[-25:])
                     except Exception:
                         pass
+                fill_workers()
         # ── COUPE-CIRCUIT DE LOT ────────────────────────────────────────
         # Des comptes meurent un par un, pas par paquets de trente le meme
         # matin. Quand un passage condamne une part invraisemblable du parc,
@@ -15854,6 +15929,8 @@ def _do_refresh(handles: list, label: str = "manual") -> dict:
             "finished_at": int(_t_dr.time()),
             "fails": fails[:100],
             "fail_reasons": sorted(by_reason.items(), key=lambda kv: -kv[1]),
+            "paused": bool(blocked), "provider_pause": blocked,
+            "skipped": total - done, "processed": done,
         }
         _set_refresh_status(
             status="idle",
@@ -15867,13 +15944,14 @@ def _do_refresh(handles: list, label: str = "manual") -> dict:
             in_progress_fails=None,
             last_run_at=int(_t_dr.time()),
             last_summary=summary,
-            error=None,
+            error=blocked.get("error"),
         )
         print(f"[insta-refresh:{label}] done in {dt_s:.1f}s — ok={ok} banned={banned} err={err}", flush=True)
         # Fige le relevé quotidien « Analyse vues » (baselines nouvelles vues /
         # nouveaux abonnés) — notamment celui de 00h, même si personne n'ouvre la page.
         try:
-            _jbanalyse_payload()
+            if ok:
+                _jbanalyse_payload()
         except Exception:
             pass
         # NOTE LES ABONNES DU JOUR. Le cache ne porte que la valeur ACTUELLE :
@@ -15884,7 +15962,7 @@ def _do_refresh(handles: list, label: str = "manual") -> dict:
         # n'y aura toujours rien a tracer dans un mois.
         try:
             import abonnes_histo as _ab_h
-            _n_ab = _ab_h.enregistrer(_load_insta_3_stats_cache())
+            _n_ab = _ab_h.enregistrer(_load_insta_3_stats_cache()) if ok else 0
             if _n_ab:
                 print(f"[abonnes] {_n_ab} compte(s) releves pour aujourd hui", flush=True)
         except Exception as _e_ab:
@@ -16195,6 +16273,8 @@ def _start_daily_insta_thread():
 def _render_refresh_status_text(st: dict) -> str:
     """Texte court à afficher dans le widget refresh."""
     import time as _t_r, datetime as _dt_r
+    if (st.get("last_summary") or {}).get("paused"):
+        return "Collecte en pause — dernières statistiques conservées"
     if st.get("status") == "in_progress":
         since = int(st.get("in_progress_since") or 0)
         elapsed = int(_t_r.time()) - since if since else 0
@@ -16216,7 +16296,43 @@ def _render_refresh_status_text(st: dict) -> str:
     extra = ""
     if summary:
         extra = f" · {summary.get('ok',0)}✓ {summary.get('banned',0)}⊘"
+    if summary.get("err") and not summary.get("ok"):
+        return f"Collecte en échec {ago} — dernières statistiques conservées"
     return f"✓ MAJ {ago}{extra}"
+
+
+def _stats_available(s):
+    """Un échec fournisseur n'efface pas les chiffres connus, y compris zéro."""
+    return isinstance(s, dict) and not s.get("banned") and any(
+        k in s for k in ("followers", "posts_count", "daily", "weekly", "preview"))
+
+
+def _stats_observed_label(s):
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+    stamp = s.get("stale_since") or s.get("scraped_at")
+    if not stamp:
+        return "date inconnue"
+    return dt.datetime.fromtimestamp(float(stamp), ZoneInfo("Europe/Paris")).strftime("%d/%m à %H:%M")
+
+
+def _render_collection_notice():
+    import insta_scraper
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+    p = insta_scraper.rapidapi_pause()
+    if not p:
+        return ""
+    date = dt.datetime.fromtimestamp(p["retry_at"], ZoneInfo("Europe/Paris")).strftime("%d/%m à %H:%M")
+    why = "Quota mensuel RapidAPI épuisé" if p.get("reason") == "monthly_quota" else "Limite de requêtes atteinte"
+    return ("<div id='jb-collection-notice' role='status' style='margin:0 0 16px;padding:16px;"
+            "border:1px solid var(--border,#64748b);border-radius:12px;color:inherit'>"
+            f"<b>Collecte en pause · {html_escape(why)}</b>"
+            "<div style='margin-top:6px'>Les derniers chiffres restent visibles avec leur date. "
+            "Cette limite ne signifie pas que les comptes sont bannis.</div>"
+            f"<div style='margin-top:6px'>Prochain réessai possible : {date} (Paris).</div>"
+            "<button type='button' style='margin-top:10px' onclick='jbRetryProvider(this)'>"
+            "Quota rechargé ? Réessayer</button></div>")
 
 
 # ============ Comptes Insta externes (non lies a un VA Discord) ============
@@ -16384,6 +16500,9 @@ def _verify_ig_profile_exists(handle: str):
     return None         # SPA sans données : indéterminé
 
 
+_IG_PUBLIC_RETRY_AT = 0.0
+
+
 def _scrape_via_ig_public(handle: str) -> dict:
     """Scrape un profil via l'endpoint public web_profile_info (free, no-auth).
 
@@ -16398,6 +16517,9 @@ def _scrape_via_ig_public(handle: str) -> dict:
     import requests
     import time as _t_sc
     import random as _rnd_sc
+    global _IG_PUBLIC_RETRY_AT
+    if _IG_PUBLIC_RETRY_AT > _t_sc.time():
+        return {"error": "Instagram public limité (429) — réessai différé"}
     # Jitter initial 0-1.2s : etale les departs des workers concurrents
     _t_sc.sleep(_rnd_sc.uniform(0.0, 1.2))
     _headers = {
@@ -16408,15 +16530,11 @@ def _scrape_via_ig_public(handle: str) -> dict:
     }
     _url = f"https://www.instagram.com/api/v1/users/web_profile_info/?username={handle}"
     r = None
-    for _attempt in range(2):  # 1 essai + 1 retry sur 429
+    for _attempt in range(1):  # Un 429 met le fournisseur au repos pour tous les comptes.
         try:
             r = requests.get(_url, headers=_headers, timeout=15)
         except Exception as e:
             return {"error": f"reseau IG public: {e}"}
-        if r.status_code == 429 and _attempt == 0:
-            # Backoff avant retry : 3-6s + jitter
-            _t_sc.sleep(_rnd_sc.uniform(3.0, 6.0))
-            continue
         break
     if r is None:
         return {"error": "reseau IG public: pas de reponse"}
@@ -16440,6 +16558,7 @@ def _scrape_via_ig_public(handle: str) -> dict:
         # SEULE une page confirmee introuvable ecrira « banni ».
         return {"error": f"⊘ Compte introuvable (@{handle}) — HTTP 404 sur l'API publique"}
     if r.status_code == 429:
+        _IG_PUBLIC_RETRY_AT = _t_sc.time() + 15 * 60
         return {"error": "Instagram rate-limit (429). Réessaie dans qq minutes."}
     if r.status_code != 200:
         return {"error": f"Instagram HTTP {r.status_code}"}
@@ -16549,6 +16668,12 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
             and not cached.get("error")
             and (now_ts - int(cached.get("scraped_at", 0))) < _INSTA_3_STATS_TTL):
         return cached
+    import insta_scraper as _ig_s
+    pause = _ig_s.rapidapi_pause()
+    if pause:
+        # Ne pas réécrire 700 caches et dater leurs chiffres d'aujourd'hui
+        # quand aucune requête n'a pu partir.
+        return {**(cached or {}), **pause, "banned": False}
     # 1) Public IG d abord
     res = _scrape_via_ig_public(h)
     # 2) Repli RapidAPI si l API publique echoue.
@@ -16566,7 +16691,7 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
                 res = res2
             else:
                 # On garde le plus parlant des 2 messages
-                res = {"error": f"IG public: {res['error']} | RapidAPI: {res2['error']}"}
+                res = {**res2, "error": f"IG public: {res['error']} | RapidAPI: {res2['error']}"}
         except Exception:
             pass
     if "error" in res:
@@ -16597,7 +16722,7 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
         _gone = ("invalid", "missing username", "introuvable", "not found", "404",
                  "does not exist", "profilenotexists", "supprimé", "user not found")
         _lm = err_msg.lower()
-        if not is_banned and any(m in _lm for m in _gone):
+        if not res.get("provider_blocked") and not is_banned and any(m in _lm for m in _gone):
             exists = _existe_ig()
             if exists is True:
                 err_msg = f"Compte @{h} existe mais RapidAPI ne l'indexe pas (trop nouveau / petit)."
@@ -16628,7 +16753,7 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
         # vérifie son existence (max 1x/20h par compte) : page « introuvable »
         # confirmée = banni ; rate-limit/réseau = on ne conclut PAS.
         _chk_ts = 0
-        if not is_banned:
+        if not is_banned and not res.get("provider_blocked"):
             _prev = cached if isinstance(cached, dict) else {}
             _never_ok = not (_prev.get("followers") or _prev.get("posts_count") or _prev.get("preview"))
             _last_chk = int(_prev.get("exist_check_ts") or 0)
@@ -16674,20 +16799,22 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
         # meme a travers une suite d echecs — en laissant tomber les champs de
         # verdict, qui doivent etre recalcules a chaque passage.
         _JUGEMENTS = ("error", "banned", "a_verifier", "doutes", "stale",
-                      "stale_since", "scraped_at")
+                      "stale_since", "scraped_at", "provider_blocked", "reason", "retry_at")
         _prev_ok, _depuis = {}, None
         if isinstance(cached, dict) and cached:
             if not cached.get("error"):
                 _prev_ok = cached
                 _depuis = cached.get("scraped_at")
-            elif any(cached.get(k) for k in
-                     ("followers", "posts_count", "preview", "reel_days", "post_days")):
+            elif _stats_available(cached):
                 _prev_ok = {k: v for k, v in cached.items() if k not in _JUGEMENTS}
                 # La date affichee reste celle du dernier VRAI releve, pas
                 # celle du dernier echec.
                 _depuis = cached.get("stale_since") or cached.get("scraped_at")
         out = dict(_prev_ok)
         out.update({"error": err_msg, "banned": is_banned, "scraped_at": now_ts})
+        if res.get("provider_blocked"):
+            out.update({k: res[k] for k in ("provider_blocked", "reason", "retry_at") if k in res})
+            _doutes = 0
         # « A VERIFIER » EST UN ETAT A PART, ni vivant ni mort. Il dit au
         # proprietaire quoi regarder a la main, sans qu'un conteneur soit
         # detruit sur la foi d'un doute.
@@ -16824,13 +16951,13 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
     looks_empty = (not followers) and (not posts_count) and not preview
     media_empty = (not preview) and (not post_days) and (not reel_days)
     suspect = looks_empty or (media_empty and posts_count > 0)
-    if suspect and isinstance(cached, dict) and cached and not cached.get("error"):
+    if suspect and _stats_available(cached):
         if (cached.get("followers") or cached.get("posts_count") or cached.get("preview")
                 or cached.get("reel_days") or cached.get("post_days")):
             kept = dict(cached)
             kept["scraped_at"] = now_ts          # on a bien retenté à cet instant
             kept["stale"] = True                 # affichage : données du dernier bon scrape
-            kept["stale_since"] = cached.get("scraped_at")
+            kept["stale_since"] = cached.get("stale_since") or cached.get("scraped_at")
             _cache_put_stats(h, kept)
             return kept
     if not profile_pic and isinstance(cached, dict) and cached.get("profile_pic_url"):
@@ -17741,7 +17868,7 @@ body.light .va-vlist-dot{border-color:#fff}
 .va-status-dot-on-avatar{position:absolute;bottom:0;right:0;width:13px;height:13px;border-radius:50%;background:#22c55e;border:2.5px solid #1a1a1a}
 .va-status-dot-off-avatar{position:absolute;bottom:0;right:0;width:13px;height:13px;border-radius:50%;background:#6b7280;border:2.5px solid #1a1a1a}
 /* Badge rose à droite avec icône (clicks ou salon) */
-.va-pink-badge{display:inline-flex;align-items:center;gap:5px;background:rgba(244,114,182,.12);color:#f472b6;font-size:12px;font-weight:700;padding:5px 11px;border-radius:14px;letter-spacing:-.01em;cursor:default;border:1px solid rgba(244,114,182,.2)}
+.va-pink-badge{display:inline-flex;align-items:center;gap:5px;background:rgba(var(--ui-accent-rgb),.12);color:var(--ui-accent-text);font-size:12px;font-weight:700;padding:5px 11px;border-radius:14px;letter-spacing:-.01em;cursor:default;border:1px solid rgba(var(--ui-accent-rgb),.2)}
 .va-pink-badge svg{flex-shrink:0}
 .va-actions{display:flex;align-items:center;gap:10px;justify-content:flex-end}
 body.light .va-status-dot-on-avatar,body.light .va-status-dot-off-avatar{border-color:#f9fafb}
@@ -17753,8 +17880,8 @@ body.light .va-status-dot-on-avatar,body.light .va-status-dot-off-avatar{border-
 .va-pay-btn:hover{background:currentColor;color:#fff !important}
 .va-pay-btn:hover .va-pay-label{color:#fff}
 .va-pay-label{overflow:hidden;text-overflow:ellipsis;font-size:11px;flex:1;text-align:left}
-.va-links-btn{background:rgba(168,85,247,.1);border:1px solid rgba(168,85,247,.3);color:#a855f7;padding:7px 11px;border-radius:7px;font-size:11px;cursor:pointer;font-weight:700;margin:0;font-family:inherit;display:inline-flex;align-items:center;gap:5px;width:140px;white-space:nowrap;justify-content:flex-start;height:34px;box-sizing:border-box}
-.va-links-btn:hover{background:rgba(168,85,247,.2)}
+.va-links-btn{background:rgba(var(--ui-accent-rgb),.1);border:1px solid rgba(var(--ui-accent-rgb),.3);color:var(--ui-accent-text);padding:7px 11px;border-radius:7px;font-size:11px;cursor:pointer;font-weight:700;margin:0;font-family:inherit;display:inline-flex;align-items:center;gap:5px;width:140px;white-space:nowrap;justify-content:flex-start;height:34px;box-sizing:border-box}
+.va-links-btn:hover{background:rgba(var(--ui-accent-rgb),.2)}
 .va-links-btn-label{font-family:'JetBrains Mono','SFMono-Regular',ui-monospace,monospace;font-size:11px;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;flex:1;display:inline-block;line-height:1;text-align:left}
 .va-mini-stat{width:170px;height:48px;box-sizing:border-box}
 .va-change-form{width:130px}
@@ -18514,32 +18641,32 @@ body.light .va-id{color:#6b7280}
 .vim-body{padding:18px 22px;display:flex;flex-direction:column;gap:4px}
 .vim-body label{font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
 .vim-body input{background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;padding:9px 12px;border-radius:8px;font-size:13px;font-family:'JetBrains Mono',ui-monospace,monospace;width:100%;box-sizing:border-box}
-.vim-body input:focus{border-color:#ec4899;outline:none;box-shadow:0 0 0 3px rgba(236,72,153,.15)}
+.vim-body input:focus{border-color:var(--ui-accent);outline:none;box-shadow:0 0 0 3px rgba(var(--ui-accent-rgb),.15)}
 .vim-open-btn{background:#1a1a1a;border:1px solid #2a2a2a;color:#aaa;padding:0 12px;border-radius:8px;display:flex;align-items:center;justify-content:center;text-decoration:none;flex-shrink:0;transition:all .15s}
-.vim-open-btn:hover{background:#ec4899;color:#fff;border-color:#ec4899}
+.vim-open-btn:hover{background:var(--ui-accent);color:var(--ui-on-accent);border-color:var(--ui-accent)}
 .vim-stats-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
 .vim-stat{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:10px 12px;text-align:center}
-.vim-stat-v{font-size:18px;font-weight:800;letter-spacing:-.02em;color:#ec4899}
+.vim-stat-v{font-size:18px;font-weight:800;letter-spacing:-.02em;color:var(--ui-accent-text)}
 .vim-stat-l{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-top:3px}
 .vim-foot{padding:14px 18px;border-top:1px solid #2a2a2a;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
 .vim-clear{background:transparent;border:1px solid rgba(239,68,68,.3);color:#ef4444;padding:9px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit;margin-right:auto}
 .vim-clear:hover{background:rgba(239,68,68,.1)}
 .vim-cancel{background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:9px 16px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit}
-.vim-scrape{background:transparent;border:1px solid #ec4899;color:#ec4899;padding:9px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;min-width:100px}
-.vim-scrape:hover{background:#ec4899;color:#fff}
+.vim-scrape{background:transparent;border:1px solid var(--ui-accent);color:var(--ui-accent-text);padding:9px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;min-width:100px}
+.vim-scrape:hover{background:var(--ui-accent);color:var(--ui-on-accent)}
 .vim-scrape.loading{opacity:.85;cursor:wait}
 .vim-scrape.loading .vim-scrape-label{display:none}
 .vim-scrape.loading .vim-scrape-spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite}
 .vim-scrape-spinner{display:none}
-.vim-save{background:#ec4899;color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit}
-.vim-save:hover{background:#db2777}
+.vim-save{background:var(--ui-accent);color:var(--ui-on-accent);border:0;padding:9px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit}
+.vim-save:hover{background:var(--ui-accent-hover)}
 body.light .vim-box{background:#fff;border-color:#e5e7eb}
 body.light .vim-head,body.light .vim-foot{border-color:#e5e7eb}
 body.light .vim-body input{background:#fff;border-color:#e5e7eb;color:#111}
 body.light .vim-stat{background:#f9fafb;border-color:#e5e7eb}
 /* IG3 Modal */
 .va-ig3-btn{display:inline-flex;align-items:center;gap:5px;background:transparent;border:1px solid #2a2a2a;padding:6px 10px;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;transition:all .12s}
-.va-ig3-btn:hover{background:rgba(236,72,153,.08)}
+.va-ig3-btn:hover{background:rgba(var(--ui-accent-rgb),.08)}
 .va-ig3-label{font-size:10px;opacity:.85}
 #va-ig3-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);z-index:9999;align-items:center;justify-content:center;padding:30px}
 #va-ig3-modal.show{display:flex}
@@ -18550,18 +18677,18 @@ body.light .vim-stat{background:#f9fafb;border-color:#e5e7eb}
 .ig3-close:hover{color:#fff}
 .ig3-body{padding:14px 18px;overflow-y:auto;display:flex;flex-direction:column;gap:14px}
 .ig3-slot{background:#16181f;border:1px solid #2a2a2a;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
-.ig3-slot-head{font-size:11px;font-weight:700;color:#ec4899;text-transform:uppercase;letter-spacing:.06em}
+.ig3-slot-head{font-size:11px;font-weight:700;color:var(--ui-accent-text);text-transform:uppercase;letter-spacing:.06em}
 .ig3-field{display:flex;flex-direction:column;gap:4px;position:relative}
 .ig3-field label{font-size:10px;color:#888;font-weight:600}
 .ig3-field input{background:#0f1116;border:1px solid #2a2a2a;color:#fff;padding:8px 11px;border-radius:7px;font-size:12px;font-family:inherit}
-.ig3-field input:focus{border-color:#ec4899;outline:none}
+.ig3-field input:focus{border-color:var(--ui-accent);outline:none}
 .ig3-pw-wrap input{padding-right:36px}
 .ig3-eye{position:absolute;right:6px;top:20px;background:transparent;border:0;color:#666;font-size:14px;cursor:pointer;padding:4px 8px}
-.ig3-eye:hover{color:#ec4899}
+.ig3-eye:hover{color:var(--ui-accent-text)}
 .ig3-foot{padding:14px 18px;border-top:1px solid #2a2a2a;display:flex;gap:10px;justify-content:flex-end}
 .ig3-cancel{background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:9px 16px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit}
-.ig3-save{background:#ec4899;color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit}
-.ig3-save:hover{background:#db2777}
+.ig3-save{background:var(--ui-accent);color:var(--ui-on-accent);border:0;padding:9px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit}
+.ig3-save:hover{background:var(--ui-accent-hover)}
 body.light .ig3-box{background:#fff;border-color:#e5e7eb}
 body.light .ig3-slot{background:#f9fafb;border-color:#e5e7eb}
 body.light .ig3-field input{background:#fff;border-color:#e5e7eb;color:#111}
@@ -18977,7 +19104,7 @@ function vaIg3TrkLoad(force){
 .va-ig3-row-empty{opacity:.4;cursor:default;grid-template-columns:36px 1fr}
 .va-ig3-row-pp{width:36px;height:36px;border-radius:50%;object-fit:cover;background:#16181f}
 .va-ig3-row-name{display:flex;flex-direction:column;gap:1px;min-width:0}
-.va-ig3-row-handle{font-weight:700;font-size:13px;color:#ec4899;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;text-decoration:none;cursor:pointer;display:block}
+.va-ig3-row-handle{font-weight:700;font-size:13px;color:var(--ui-accent-text);white-space:nowrap;text-overflow:ellipsis;overflow:hidden;text-decoration:none;cursor:pointer;display:block}
 .va-ig3-row-handle:hover{text-decoration:underline}
 .va-ig3-row-platform{font-size:10px;color:#888;font-weight:500}
 .va-ig3-row-metric{text-align:center;min-width:55px}
@@ -18988,7 +19115,7 @@ function vaIg3TrkLoad(force){
 .va-ig3-row-last-lab{font-size:9px;color:#666;text-transform:uppercase;font-weight:600}
 .va-ig3-row-last-val{font-size:11px;color:#aaa;font-weight:600;margin-top:1px}
 .va-ig3-row-open{color:#666;text-decoration:none;font-size:18px;font-weight:600;width:22px;height:22px;display:flex;align-items:center;justify-content:center}
-.va-ig3-row-open:hover{color:#ec4899}
+.va-ig3-row-open:hover{color:var(--ui-accent-text)}
 .va-ig3-row-last-date{font-size:9px;color:#666;font-weight:500;margin-top:1px}
 .va-ig3-row-err{grid-column:1 / -1;color:#ef4444;font-size:10px;font-weight:600;text-align:center;margin-top:6px;padding-top:6px;border-top:1px dashed #ef444430}
 .va-ig3-preview{grid-column:1 / -1;display:grid;grid-template-columns:repeat(3,1fr);gap:2px;margin-top:10px;padding-top:10px;border-top:1px dashed #2a2a2a;max-width:340px}
@@ -19006,7 +19133,7 @@ body.light #ext-sb-search,body.light #ext-sb-filter-model{background:#f9fafb;bor
 @media(max-width:900px){.ext-sb-layout{grid-template-columns:1fr;min-height:auto}}
 .ext-assign-row{grid-column:1 / -1;display:flex;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:1px dashed #2a2a2a;flex-wrap:wrap}
 .ext-mini-select,.ext-mini-input{background:#16181f;border:1px solid #2a2a2a;color:#fff;padding:5px 10px;border-radius:6px;font-size:11px;font-family:inherit;transition:border-color .3s}
-.ext-mini-select:focus,.ext-mini-input:focus{border-color:#ec4899;outline:none}
+.ext-mini-select:focus,.ext-mini-input:focus{border-color:var(--ui-accent);outline:none}
 .ext-mini-select{cursor:pointer}
 .ext-mini-input{min-width:140px}
 body.light .ext-mini-select,body.light .ext-mini-input{background:#fff;border-color:#e5e7eb;color:#111}
@@ -19396,12 +19523,12 @@ function vaPaySave(){
 .vlm-close{background:transparent;border:0;color:#888;font-size:22px;cursor:pointer;padding:0 6px;line-height:1}
 .vlm-close:hover{color:#fff}
 #vlm-search{margin:14px 18px 8px;padding:9px 14px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-size:13px;width:calc(100% - 36px)}
-#vlm-search:focus{border-color:#a855f7;outline:none}
+#vlm-search:focus{border-color:var(--ui-accent);outline:none}
 #vlm-pills{display:flex;gap:6px;flex-wrap:wrap;padding:0 18px 10px;border-bottom:1px solid #1a1a1a}
 .vlm-pill-wrap{display:inline-flex;align-items:center;gap:0}
 .vlm-pill{padding:6px 12px;background:#1a1a1a;border:1px solid #2a2a2a;color:#aaa;border-radius:999px 0 0 999px;font-size:12px;font-weight:600;cursor:pointer;transition:all .12s;display:inline-flex;align-items:center;gap:5px;border-right:0}
-.vlm-pill:hover{border-color:#a855f7;color:#fff}
-.vlm-pill.active{background:#a855f7;border-color:#a855f7;color:#fff}
+.vlm-pill:hover{border-color:var(--ui-accent);color:#fff}
+.vlm-pill.active{background:var(--ui-accent);border-color:var(--ui-accent);color:var(--ui-on-accent)}
 .vlm-pill-count{font-size:10px;opacity:.7;background:rgba(0,0,0,.2);padding:1px 5px;border-radius:999px}
 .vlm-pill.active .vlm-pill-count{background:rgba(0,0,0,.25)}
 .vlm-pill-prefix{font-size:10px;opacity:.8;background:rgba(34,197,94,.15);color:#22c55e;padding:1px 6px;border-radius:999px;font-weight:600}
@@ -19411,15 +19538,15 @@ function vaPaySave(){
 #vlm-list{flex:1;overflow-y:auto;padding:6px 14px 14px}
 .vlm-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;cursor:pointer;transition:background .12s;border:1px solid transparent}
 .vlm-item:hover{background:rgba(255,255,255,.04)}
-.vlm-item.checked{background:rgba(168,85,247,.1);border-color:rgba(168,85,247,.3)}
+.vlm-item.checked{background:rgba(var(--ui-accent-rgb),.1);border-color:rgba(var(--ui-accent-rgb),.3)}
 .vlm-cb{width:16px;height:16px;border-radius:4px;border:1.5px solid #444;background:transparent;flex-shrink:0;display:flex;align-items:center;justify-content:center}
-.vlm-item.checked .vlm-cb{background:#a855f7;border-color:#a855f7}
+.vlm-item.checked .vlm-cb{background:var(--ui-accent);border-color:var(--ui-accent)}
 .vlm-item.checked .vlm-cb svg{display:block}
 .vlm-cb svg{display:none;width:12px;height:12px}
 .vlm-info{flex:1;min-width:0}
 .vlm-name{font-weight:600;font-size:13px;letter-spacing:-.01em}
 .vlm-meta{font-size:11px;color:#888;font-family:monospace;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.vlm-badge{background:rgba(168,85,247,.15);color:#a855f7;font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px}
+.vlm-badge{background:rgba(var(--ui-accent-rgb),.15);color:var(--ui-accent-text);font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px}
 .vlm-foot{padding:14px 18px;border-top:1px solid #2a2a2a;display:flex;gap:10px;justify-content:flex-end}
 .vlm-cancel{background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:9px 16px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;font-family:inherit}
 .vlm-dup{background:transparent;border:1px solid #3b82f6;color:#3b82f6;padding:9px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-size:12px;font-family:inherit}
@@ -19435,8 +19562,8 @@ function vaPaySave(){
 .vlm-row-star.active{border-color:#fbbf24;color:#fbbf24;background:rgba(251,191,36,.08)}
 .vlm-star-badge{font-size:11px;margin-left:4px}
 .vlm-assigned-badge{display:inline-block;font-size:10px;font-weight:700;background:rgba(239,68,68,.15);color:#ef4444;padding:2px 7px;border-radius:5px;margin-left:8px;white-space:nowrap}
-.vlm-save{background:#a855f7;color:#fff;border:0;padding:9px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;font-family:inherit}
-.vlm-save:hover{background:#9333ea}
+.vlm-save{background:var(--ui-accent);color:var(--ui-on-accent);border:0;padding:9px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;font-family:inherit}
+.vlm-save:hover{background:var(--ui-accent-hover)}
 body.light .vlm-box{background:#fff;border-color:#e5e7eb}
 body.light .vlm-head,body.light .vlm-foot{border-color:#e5e7eb}
 body.light #vlm-search{background:#f9fafb;border-color:#e5e7eb;color:#111}
@@ -21273,51 +21400,89 @@ document.addEventListener('mouseout', function(e){
     if(tip) tip.style.display = 'none';
   }
 });
-// === Dashboard home : switch de période en AJAX (zéro rechargement = zéro freeze) ===
-document.addEventListener('click', function(e){
-  var a = e.target.closest ? e.target.closest('.home-period-btn') : null;
-  if(!a) return;
-  e.preventDefault();
-  var m = (a.getAttribute('href') || '').match(/home_period=([a-z]+)/);
-  var p = m ? m[1] : 'week';
-  var wrap = document.getElementById('home-dash-wrap');
-  if(!wrap) return;
-  wrap.style.opacity = '.45';
-  wrap.style.pointerEvents = 'none';
-  fetch('/home/overview?home_period=' + p)
-    .then(function(r){ return r.text(); })
-    .then(function(html){
-      wrap.innerHTML = html;
-      wrap.style.opacity = '1';
-      wrap.style.pointerEvents = '';
-      /* le fragment arrive rendu en USD / Net par defaut : re-appliquer les
-         modes memorises, sinon changer de periode faisait retomber tout
-         l'apercu sur dollars/Net sans toucher aux boutons */
-      try { if(typeof fxApplyCur === 'function') fxApplyCur(); } catch(e3){}
-      try { history.replaceState(null, '', '?tab=home&home_period=' + p); } catch(e2){}
-    })
-    .catch(function(){
-      wrap.style.opacity = '1';
-      wrap.style.pointerEvents = '';
+// Dashboard snapshots: only the requested selection refreshes; controls never lock.
+(function(){
+  var cache=new Map(), selected=null, serial=0, controller=null, timer=null, wrap=null;
+  function parisDay(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Paris',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());}
+  function key(s){return parisDay()+'|'+s.period+'|'+s.group;}
+  function parse(html){var box=document.createElement('div');box.innerHTML=html;return box.querySelector('.home-snapshot');}
+  function readSelection(params){return {period:['today','yesterday','week','month','trente'].includes(params.get('home_period'))?params.get('home_period'):'week',group:['all','mym','of_us','of_fr'].includes(params.get('home_group'))?params.get('home_group'):'all'};}
+  function query(s){return 'home_period='+encodeURIComponent(s.period)+'&home_group='+encodeURIComponent(s.group);}
+  function remember(html){var snap=parse(html);if(snap && !snap.hasAttribute('data-home-loading') && !['pending','error'].includes(snap.dataset.homeStatus) && snap.dataset.homeDay===parisDay() && snap.querySelector('.home-hero-value')){cache.set(key({period:snap.dataset.homePeriod,group:snap.dataset.homeGroup}),html);}}
+  function display(html){wrap.classList.remove('home-switch-loading');wrap.removeAttribute('aria-busy');wrap.innerHTML=html;try{fxApplyCur();}catch(e){}}
+  function schedule(delay, seq){clearTimeout(timer);timer=setTimeout(function(){if(seq===serial && selected) refresh(seq);},delay);}
+  async function refresh(seq){
+    if(seq!==serial || !selected || !wrap) return;
+    if(document.hidden || !wrap.getClientRects().length){schedule(15000,seq);return;}
+    var activeController=new AbortController();controller=activeController;
+    var timeout=setTimeout(function(){activeController.abort();},20000);
+    try{
+      var response=await fetch('/home/overview?'+query(selected),{signal:activeController.signal,cache:'no-store'});
+      if(!response.ok) throw new Error(response.status===401?'Session expirée. Reconnecte-toi.':'Chargement indisponible. Nouvelle tentative dans une minute.');
+      var html=await response.text();
+      if(seq!==serial)return;
+      var snap=parse(html);
+      if(!snap || snap.dataset.homePeriod!==selected.period || snap.dataset.homeGroup!==selected.group)throw new Error('Le relevé reçu ne correspond pas à la période.');
+      // A response started before midnight must never overwrite the new day.
+      if(snap.dataset.homeDay!==parisDay()){schedule(1000,seq);return;}
+      if(['pending','error'].includes(snap.dataset.homeStatus) && wrap.querySelector('.home-grid')){
+        setLoading(selected,snap.dataset.homeStatus==='error'?'Relevé indisponible · nouvelle tentative…':null);
+        var current=wrap.querySelector('.home-snapshot');if(current)Object.assign(current.dataset,snap.dataset);
+      }else{remember(html);display(html);}
+      schedule(['pending','refreshing'].includes(snap.dataset.homeStatus)?2500:60000,seq);
+    }catch(error){
+      if(seq!==serial)return;
+      var message=error.name==='AbortError'?'Actualisation en cours…':error.message;
+      if(wrap.classList.contains('home-switch-loading'))setLoading(selected,message);
+      else{
+        var note=wrap.querySelector('.home-loading-status');
+        if(!note){note=document.createElement('small');note.className='home-loading-status';note.setAttribute('role','status');(wrap.querySelector('.home-overview-title')||wrap).append(note);}
+        note.textContent=message;
+      }
+      schedule(60000,seq);
+    }finally{clearTimeout(timeout);}
+  }
+  function setLoading(s,message){
+    // Preserve layout and controls; mask old values until this exact selection arrives.
+    wrap.classList.add('home-switch-loading');wrap.setAttribute('aria-busy','true');
+    var snap=wrap.querySelector('.home-snapshot');
+    if(snap){snap.dataset.homeLoading='true';snap.dataset.homePeriod=s.period;snap.dataset.homeGroup=s.group;snap.dataset.homeDay=parisDay();snap.dataset.homeStatus='pending';delete snap.dataset.homeStart;delete snap.dataset.homeEnd;}
+    wrap.querySelectorAll('.home-grid,.home-platform-breakdown,.home-sales-card,.home-row').forEach(function(el){el.setAttribute('aria-hidden','true');});
+    wrap.querySelectorAll('.home-period-btn,.home-platform-btn').forEach(function(a){
+      var p=new URL(a.href,location.href).searchParams;
+      if(a.matches('.home-period-btn')){a.classList.toggle('home-period-active',p.get('home_period')===s.period);p.set('home_group',s.group);}
+      else{a.setAttribute('aria-pressed',String(p.get('home_group')===s.group));p.set('home_period',s.period);}
+      a.href='?'+p.toString();
     });
-});
-/* LE PRÉ-CHAUFFAGE A ÉTÉ RETIRÉ. Il demandait /home/overview pour « today »,
-   « yesterday » et « month » quatre secondes après CHAQUE chargement de page,
-   sans condition — le div qu'il teste est écrit en dur dans la coquille, donc
-   toujours présent.
-
-   Chacune de ces trois périodes est une plage de dates différente : aucun
-   cache n'est partagé avec celle qui est affichée. Un rendu de tableau de
-   bord coûte 1 GET /creators + 16 GET stats + 16 GET revenue-by-day, soit
-   ~33 requêtes ; trois périodes de plus en font ~129 pour UNE visite, en
-   douze secondes. Le quota de l'API MyPuls est de 60 par minute (en-tête
-   x-ratelimit-limit, mesuré le 05/09/2026), et on l'a vu passer de 59 à 0 en
-   moins de 75 secondes sans que personne ne clique.
-
-   Ce qu'on perd : le premier clic sur une autre période attend son calcul.
-   Ce qu'on gagne : l'API répond encore quand on en a besoin — et, comme les
-   caches ne s'écrivaient pas en cas d'erreur, un seul 429 empêchait tout
-   cache de se former et la saturation s'entretenait elle-même. */
+    var badge=wrap.querySelector('.home-loading-status');
+    if(!badge){badge=document.createElement('small');badge.className='home-loading-status';badge.setAttribute('role','status');(wrap.querySelector('.home-overview-title')||wrap).append(badge);}
+    badge.textContent=message||'Actualisation…';
+    var tip=document.getElementById('hsc-tip');if(tip)tip.style.display='none';
+  }
+  function choose(s, persist){
+    remember(wrap.innerHTML);selected=s;serial++;clearTimeout(timer);if(controller)controller.abort();
+    if(persist){try{sessionStorage.setItem('home-dashboard-selection',JSON.stringify(s));var url=new URL(location.href);url.searchParams.set('home_period',s.period);url.searchParams.set('home_group',s.group);history.replaceState(null,'',url);}catch(e){}}
+    var hit=cache.get(key(s));
+    if(hit)display(hit);
+    else{setLoading(s);}
+    refresh(serial);
+  }
+  document.addEventListener('click',function(event){var a=event.target.closest && event.target.closest('.home-period-btn,.home-platform-btn');if(!a || !wrap)return;event.preventDefault();choose(readSelection(new URL(a.href,location.href).searchParams),true);});
+  function init(){
+    wrap=document.getElementById('home-dash-wrap');if(!wrap)return;
+    var observer=new MutationObserver(adopt);
+    function adopt(){
+      var snap=wrap.querySelector('.home-snapshot');if(!snap)return;
+      observer.disconnect();remember(wrap.innerHTML);
+      var params=new URL(location.href).searchParams, s=readSelection(params);
+      if(!params.has('home_period') && !params.has('home_group')){try{var saved=JSON.parse(sessionStorage.getItem('home-dashboard-selection'));if(saved)s=readSelection(new URLSearchParams({home_period:saved.period,home_group:saved.group}));}catch(e){}}
+      if(s.period!==snap.dataset.homePeriod || s.group!==snap.dataset.homeGroup){choose(s,true);return;}
+      selected=s;serial++;schedule(['pending','refreshing'].includes(snap.dataset.homeStatus)?1200:60000,serial);
+    }
+    observer.observe(wrap,{childList:true,subtree:true});adopt();
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
+})();
 
 async function pushAllReels(form){
   const slots = Array.from(form.querySelectorAll('#reel-slots-container .reel-slot'));
@@ -27138,7 +27303,7 @@ def _render_depenses_html() -> str:
 
 
 def _home_sales_svg(labels, vals, eur_usd: float = 1.14, api_src: bool = False,
-                    vals_brut=None, periode: str = "", en_usd=None) -> str:
+                    vals_brut=None, periode: str = "", en_usd=None, groupe="toutes créatrices") -> str:
     """Courbe revenus/ventes par jour en SVG PUR généré côté serveur.
 
     DEUX DRAPEAUX, ET C'EST VOULU. `api_src` dit QUELLE MESURE on trace :
@@ -27195,30 +27360,33 @@ def _home_sales_svg(labels, vals, eur_usd: float = 1.14, api_src: bool = False,
             gval = ymax * (4 - k) / 4
             ylab = f"${gval:.0f}" if _usd else f"{gval:.0f}€"
             ydata = f" class='hsc-ylab' data-usd='{gval:.2f}'" if _usd else ""
-            grid += (f"<line x1='{ml}' y1='{gy:.1f}' x2='{W - mr}' y2='{gy:.1f}' stroke='rgba(136,136,136,.14)' stroke-width='1'/>"
-                     f"<text{ydata} x='{ml - 8}' y='{gy + 3.5:.1f}' text-anchor='end' font-size='10' fill='#888'>{ylab}</text>")
-        # Labels X
+            grid += (f"<line x1='{ml}' y1='{gy:.1f}' x2='{W - mr}' y2='{gy:.1f}' stroke='rgba(136,136,136,.32)' stroke-width='.8' stroke-dasharray='3 2'/>"
+                     f"<text{ydata} x='{ml - 8}' y='{gy + 3.5:.1f}' text-anchor='end' font-size='10' fill='#999'>{ylab}</text>")
+        # Keep every data point; thin the date labels on longer periods.
         xlbls = ""
         for i, lb in enumerate(labels):
+            stride = max(1, (len(labels) + 9) // 10)
+            if i % stride and i != len(labels) - 1:
+                continue
             x = ml + (iw * i / max(1, n - 1)) if n > 1 else ml + iw / 2
-            xlbls += f"<text x='{x:.1f}' y='{H - 8}' text-anchor='middle' font-size='10' fill='#888'>{lb}</text>"
+            xlbls += f"<text x='{x:.1f}' y='{H - 8}' text-anchor='middle' font-size='10' fill='#999'>{lb}</text>"
         # Points : data-usd + data-lb -> tooltip reformaté par le toggle $/€
         dots = ""
         for (x, y), lb, v in zip(pts, labels, serie):
             tip = f"{lb}\n${v:,.2f}" if _usd else f"{lb}\n{v:.2f} €"
             extra = f" data-usd='{v:.2f}' data-lb='{lb}'" if _usd else ""
-            dots += (f"<circle class='hsc-dot' cx='{x:.1f}' cy='{y:.1f}' r='4.5' fill='#0f1116' stroke='#3b82f6' stroke-width='2.5' "
+            dots += (f"<circle class='hsc-dot' cx='{x:.1f}' cy='{y:.1f}' r='4.2' fill='#fff' stroke='#3662ff' stroke-width='1.7' "
                      f"style='cursor:pointer'{extra} data-tip='{tip}'/>")
         style = "width:100%;height:auto;" + ("display:none" if hidden else "display:block")
         return (
             f"<svg id='{svg_id}' viewBox='0 0 {W:.0f} {H:.0f}' style='{style}' xmlns='http://www.w3.org/2000/svg'>"
             f"<defs><linearGradient id='{svg_id}-g' x1='0' y1='0' x2='0' y2='1'>"
-            "<stop offset='0%' stop-color='#3b82f6' stop-opacity='.26'/>"
-            "<stop offset='100%' stop-color='#3b82f6' stop-opacity='0'/>"
+            "<stop offset='0%' stop-color='#a6a6a6' stop-opacity='.15'/>"
+            "<stop offset='100%' stop-color='#a6a6a6' stop-opacity='.08'/>"
             "</linearGradient></defs>"
             + grid
             + (f"<path d='{area}' fill='url(#{svg_id}-g)'/>" if area else "")
-            + (f"<path d='{d}' fill='none' stroke='#3b82f6' stroke-width='2.5' stroke-linejoin='round' stroke-linecap='round'/>" if d else "")
+            + (f"<path d='{d}' fill='none' stroke='#3662ff' stroke-width='3.8' stroke-linejoin='round' stroke-linecap='round'/>" if d else "")
             + dots + xlbls
             + "</svg>")
 
@@ -27229,20 +27397,28 @@ def _home_sales_svg(labels, vals, eur_usd: float = 1.14, api_src: bool = False,
     # n'y figurait pas, et le sous-titre restait francais dans une page
     # anglaise. Separees, chacune se traduit.
     _periode_txt = periode or "7 derniers jours"
-    sous = (f"<span>{_periode_txt}</span> · <span>toutes créatrices</span>"
-            if api_src else "<span>7 derniers jours</span>")
+    sous = f"<span>{_periode_txt}</span> · <span>{groupe}</span>"
     body = _svg(vals, "hsc-net", False)
     if api_src and vals_brut:
         body += _svg(vals_brut, "hsc-brut", True)
     return (
-        "<div class='home-card' style='margin-top:18px'>"
+        "<style>body:not(.light) .home-card.home-sales-card{background:#252525;border-color:#252525;}"
+        ".home-card.home-sales-card{border-radius:16px;padding:22px 24px;margin-top:18px;}"
+        ".home-sales-card .home-card-header{margin-bottom:24px;font-size:16px;font-weight:600;}"
+        ".home-sales-card .hsc-dot:hover{stroke-width:2.5;}"
+        "@media(max-width:700px){.home-card.home-sales-card{padding:18px 12px;}"
+        ".home-sales-card .home-card-header{padding:0 6px;gap:8px;flex-wrap:wrap;}}"
+        "</style><div class='home-card home-sales-card'>"
         f"<div class='home-card-header' style='display:flex;justify-content:space-between;align-items:center'>{titre} "
         f"<span style='font-size:11px;color:#888;font-weight:500'>{sous}</span></div>"
         + body + "</div>"
     )
 
 
-@_arg_cached(seconds=60, key_args=("home_period",))
+from dashboard_cache import dashboard_cached
+
+
+@dashboard_cached
 def _render_home_dashboard_html() -> str:
     """Dashboard global affiché à la racine — synthèse de TOUS les revenus.
 
@@ -27250,12 +27426,17 @@ def _render_home_dashboard_html() -> str:
     - MyPuls (ventes chatteurs live) — cache 5min
     - Revenus manuels (module Business → Revenus)
     Avec sélecteur de période (Aujourd'hui / Hier / Cette semaine / Ce mois).
-    Cache TTL 60s keye sur home_period.
+    Relevés persistants, actualisés en arrière-plan pour la sélection demandée.
     """
     import datetime as _dt
     from flask import request as flask_request
 
     period = flask_request.args.get("home_period", "week") if hasattr(flask_request, "args") else "week"
+    from dashboard_platforms import valid_group, render_selector, filter_team_stats, in_group
+    from revenus_segments import creator_segments
+    home_group = valid_group(flask_request.args.get("home_group", "all"))
+    home_group_names = {"all": "toutes créatrices", "mym": "MYM", "of_us": "OF US", "of_fr": "OF FR"}
+    group_map = {}
     # « AUJOURD HUI » EST CELUI DU PROPRIETAIRE, PAS CELUI DU SERVEUR.
     #
     # date.today() rend la date LOCALE du serveur -- et le serveur est en UTC
@@ -27276,27 +27457,11 @@ def _render_home_dashboard_html() -> str:
         _tz_maison = None
     today = (_dt.datetime.now(_tz_maison) if _tz_maison else _dt.datetime.now()).date()
 
-    # Calculer la période
-    if period == "today":
-        start = today
-        end = today
-        period_label = "Aujourd'hui"
-    elif period == "yesterday":
-        start = end = today - _dt.timedelta(days=1)
-        period_label = "Hier"
-    elif period == "month":
-        start = today.replace(day=1)
-        end = today
-        period_label = "Ce mois"
-    elif period == "trente":
-        # 30 jours GLISSANTS (aujourd'hui inclus) — pas le mois calendaire
-        start = today - _dt.timedelta(days=29)
-        end = today
-        period_label = "30 derniers jours"
-    else:  # week
-        start = today - _dt.timedelta(days=today.weekday())
-        end = today
-        period_label = "Cette semaine"
+    if flask_request.environ.get('dashboard.day'):
+        today = _dt.date.fromisoformat(flask_request.environ['dashboard.day'])
+    from dashboard_cache import period_bounds, selection
+    period, home_group = selection(flask_request.args)
+    start, end, period_label = period_bounds(period, today)
 
     # Fetch MyPuls (cached)
     mp_configured = False
@@ -27308,7 +27473,13 @@ def _render_home_dashboard_html() -> str:
         if mp_configured:
             res = mypuls.fetch_team_stats(start.isoformat(), end.isoformat(), use_cache=True)
             if res.get("ok"):
-                mp_data = res
+                mp_data = res if home_group == "all" else {"totals": {}, "chatters": [], "transactions": [], "chart": {}}
+                if home_group != "all":
+                    known = mypuls.list_creators()
+                    accounts = mypuls.api_creators_cached() if mypuls.api_configured() else []
+                    group_map = {name.strip().casefold(): group for name, group in
+                                 creator_segments(known.get("creators") or {}, accounts).items()}
+                    mp_data = filter_team_stats(res, home_group, group_map, start.isoformat(), end.isoformat())
             else:
                 # cookies expirés / MyPuls KO : on ne montre PAS un faux 0€ crédible
                 mp_error = res.get("error") or "Données MyPuls indisponibles"
@@ -27330,6 +27501,8 @@ def _render_home_dashboard_html() -> str:
     except Exception:
         pass
 
+    if home_group != "all":
+        manual_total = 0.0
     totals = mp_data.get("totals", {}) or {}
     chatters = mp_data.get("chatters", []) or []
     chart_data = mp_data.get("chart", {}) or {}
@@ -27340,20 +27513,6 @@ def _render_home_dashboard_html() -> str:
     nb_tx = int(totals.get("nb_transactions", 0))
     active_chatters = int(totals.get("active_chatters", 0))
     grand_total = ca_total + manual_total
-
-    def _btn(p, label):
-        active = "home-period-active" if p == period else ""
-        return f"<a href='?tab=home&home_period={p}' class='home-period-btn {active}'>{label}</a>"
-
-    period_switcher = (
-        "<div class='home-period-row'>"
-        + _btn("today", "Aujourd'hui")
-        + _btn("yesterday", "Hier")
-        + _btn("week", "Cette semaine")
-        + _btn("month", "Ce mois")
-        + _btn("trente", "30 jours")
-        + "</div>"
-    )
 
     # LES OUTILS DE CONVERSION REMONTES ICI, ET POURQUOI.
     # Ils etaient definis plus bas, APRES les deux classements -- qui
@@ -27492,9 +27651,17 @@ def _render_home_dashboard_html() -> str:
               if float(c.get("_usd", 0) or 0) > 0 and not c.get("non_attribue")]
     ranked.sort(key=lambda c: -float(c.get("_usd") or 0))
     if ranked:
+        from revenus_names import chatter_display_names
+        # Exact team names, display only. Keep transaction and payment keys intact.
+        rank_names = chatter_display_names(mypuls.load_config().get("creators_cache") or {})
         items = []
         badge_bg = {1: "#14b8a6", 2: "#10b981", 3: "#34d399"}
         for i, c in enumerate(ranked[:8], start=1):
+            raw_name = str(c.get("name") or "").strip()
+            display_name = str(rank_names.get(raw_name.casefold()) or raw_name).strip()
+            if not display_name or "@" in display_name or display_name == "[email protected]":
+                display_name = "Nom à renseigner"
+            display_name = html_escape(display_name)
             bg = badge_bg.get(i)
             # Classes plutot que styles en dur : le fond des rangs 4+ et le
             # trait de separation restaient NOIRS en theme clair.
@@ -27503,7 +27670,7 @@ def _render_home_dashboard_html() -> str:
             items.append(
                 f"<div class='rank-row'>"
                 f"{badge}"
-                f"<div style='flex:1;min-width:0;font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{c['name']}</div>"
+                f"<div style='flex:1;min-width:0;font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'>{display_name}</div>"
                 f"<div class='rank-amount fx-amt' data-usd='{c['_usd']:.2f}'>${c['_usd']:,.2f}</div>"
                 f"</div>"
             )
@@ -27563,53 +27730,8 @@ def _render_home_dashboard_html() -> str:
         elif "referral" in ty or "parrain" in ty:
             type_totals["Referrals"] += amt
 
-    css = """
-<style>
-.home-period-row{display:flex;gap:0;background:rgba(255,255,255,.04);border:1px solid #2a2a2a;border-radius:10px;padding:4px;font-size:13px}
-.home-period-btn{background:transparent;border:0;color:#888;padding:8px 18px;border-radius:7px;font-weight:600;cursor:pointer;text-decoration:none;transition:all .15s;flex:1;text-align:center}
-.home-period-btn:hover{color:#fff}
-/* #0a84ff etait la seule occurrence de ce bleu dans tout le fichier : la
-   pastille de periode ne ressemblait a aucun autre element actif. On rejoint
-   le bleu d accent du site ; le theme Apple garde le sien. */
-.home-period-active{background:rgba(59,130,246,.12) !important;color:#3b82f6 !important;box-shadow:none}
-body.light .home-period-active{background:rgba(59,130,246,.10) !important;color:#3b82f6 !important}
-body.light.apple .home-period-active{background:rgba(0,122,255,.10) !important;color:#007aff !important}
-body.infloww .home-period-active,body.light.inflowwlight .home-period-active{background:rgba(22,119,255,.12) !important;color:#1677FF !important}
-body.light .home-period-row{background:#fff;border-color:rgba(60,60,67,.12)}
-.home-overview{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:24px;margin-bottom:18px}
-.home-overview-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;gap:14px;flex-wrap:wrap}
-.home-overview-title{font-size:16px;font-weight:700;letter-spacing:-.01em;display:flex;align-items:center;gap:8px}
-.home-overview-title small{font-size:11px;font-weight:400;color:#888;background:rgba(59,130,246,.1);padding:3px 8px;border-radius:5px}
-.home-grid{display:grid;grid-template-columns:280px 1fr 1fr 1fr;gap:14px}
-@media(max-width:1100px){.home-grid{grid-template-columns:1fr 1fr 1fr}}
-@media(max-width:760px){.home-grid{grid-template-columns:1fr 1fr}}
-.home-hero-card{background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.25);border-radius:14px;padding:22px;grid-row:span 2;display:flex;flex-direction:column;justify-content:space-between;min-height:180px;position:relative;overflow:hidden}
-.home-hero-card::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 80% 20%,rgba(59,130,246,.15),transparent 60%);pointer-events:none}
-.home-hero-icon{width:48px;height:48px;border-radius:12px;background:linear-gradient(135deg,#3b82f6,#2563eb);display:flex;align-items:center;justify-content:center;color:#fff;box-shadow:0 6px 20px rgba(59,130,246,.4);position:relative}
-.home-hero-label{font-size:13px;color:#3b82f6;font-weight:600;margin-top:32px;position:relative}
-.home-hero-value{font-size:36px;font-weight:800;letter-spacing:-.03em;margin-top:6px;position:relative}
-.home-stat{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:14px;padding:18px 20px;position:relative;display:flex;flex-direction:column;justify-content:space-between;min-height:88px}
-.home-stat-icon{position:absolute;top:18px;right:18px;width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center}
-.home-stat-value{font-size:22px;font-weight:800;letter-spacing:-.02em;line-height:1.1}
-.home-stat-label{font-size:12px;color:#888;margin-top:5px;font-weight:500}
-/* Depuis quand le releve date. Sa couleur a une contrepartie claire : sur le
-   fond creme du theme Claude, le gris ardoise du theme sombre tombe a 2,56 de
-   contraste -- illisible, et c'est le genre de detail qu'on ne voit jamais
-   parce qu'on relit rarement une page dans les deux themes. */
-.home-fresh-chip{margin-left:6px;background:rgba(148,163,184,.14);color:#8b98ab}
-body.light .home-fresh-chip{background:rgba(71,85,105,.10);color:#475569}
-.home-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
-@media(max-width:768px){.home-row{grid-template-columns:1fr}}
-.home-card{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:18px 20px}
-.home-card-header{font-size:14px;font-weight:700;margin-bottom:14px;letter-spacing:-.01em}
-body.light .home-period-row{background:#f3f4f6;border-color:#e5e7eb}
-body.light .home-period-btn{color:#1c1c1e}          /* inactifs en noir, pas en bleu */
-body.light .home-period-btn:hover{color:#000}
-body.light .home-overview{background:#fff;border-color:#e5e7eb}
-body.light .home-stat{background:#f9fafb;border-color:#e5e7eb}
-body.light .home-card{background:#fff;border-color:#e5e7eb}
-</style>
-"""
+    from dashboard_layout import STYLE, CATEGORIES, render_header
+    css = STYLE
 
     # libellé FR des cartes -> clé interne des types (pour retrouver le brut)
     label_key_map = {"Abonnements": "Subscriptions", "Posts": "Posts",
@@ -27673,7 +27795,7 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
     # --- Répartition MyM / OF FR / OF US -------------------------------------
     # EUR = MyM. USD = OnlyFans, réparti par MODÈLE (listes explicites).
     # Pour ajouter une modèle plus tard, il suffit de la mettre dans la bonne liste.
-    OF_US_MODELS = {"jessye", "khloe"}
+    OF_US_MODELS = {"jessye", "khloe", "emy"}
     OF_FR_MODELS = {"amelia", "julia", "lola"}   # lola : pas encore dans MyPuls
     _seg = {"mym": 0.0, "of_fr": 0.0, "of_us": 0.0}
     _of_unknown = set()
@@ -27716,7 +27838,7 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
         import mypuls as _mp_api
         if _mp_api.api_configured():
             _ov = _mp_api.api_overview(start.isoformat(), end.isoformat(), _eur_usd,
-                                       exclude=EXCLUDED_MODELS)
+                                       exclude=EXCLUDED_MODELS, segment=home_group)
             if _ov.get("ok"):
                 type_totals = {k: float(_ov["types"].get(k, 0.0)) for k in type_totals}
                 _hors_cat = _ov.get("types_hors") or {"montant": 0.0, "libelles": []}
@@ -27765,26 +27887,9 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
                    + (_seg["of_fr"] + _seg["of_us"]) / (1 - OF_FEE)
                    + _manual_usd)
 
-    def _seg_card(label, value, color, fee=0.0):
-        # data-brut = net / (1 - commission) : OF 20 %, MyM 26 %. Pas de
-        # sous-ligne (épuré à la demande) : le bouton Net/Brut bascule la valeur.
-        brut_attr = f" data-brut='{value / (1 - fee):.2f}'" if fee else ""
-        return (
-            f"<div style='flex:1;min-width:150px;background:#12151f;border:1px solid #1e2430;"
-            f"border-left:3px solid {color};"
-            f"border-radius:12px;padding:12px 14px'>"
-            f"<div style='font-size:10.5px;color:#8a91a8;text-transform:uppercase;letter-spacing:.07em;font-weight:700'>{label}</div>"
-            # montant en couleur de texte normale, comme les six cartes du
-            # dessus : seul un liseré rappelle la plateforme
-            f"<div class='fx-amt' data-usd='{value:.2f}'{brut_attr} style='font-size:19px;font-weight:800;margin-top:3px'>"
-            f"${value:,.2f}</div></div>")
-
+    from dashboard_platforms import render_breakdown
     segments_html = (
-        "<div style='display:flex;gap:10px;flex-wrap:wrap;margin-top:12px'>"
-        + _seg_card("MyM", _seg["mym"], "#a855f7", fee=MYM_FEE)
-        + _seg_card("OnlyFans FR", _seg["of_fr"], "#3b82f6", fee=OF_FEE)
-        + _seg_card("OnlyFans US", _seg["of_us"], "#22c55e", fee=OF_FEE)
-        + "</div>"
+        render_breakdown(_seg, MYM_FEE, OF_FEE)
         + (f"<div style='margin-top:7px;font-size:11.5px;color:#f59e0b'>"
            f"⚠️ Modèle(s) OnlyFans non classée(s), comptée(s) en FR : "
            f"<b>{html_escape(', '.join(sorted(_of_unknown)))}</b> — dis-moi si c'est FR ou US.</div>"
@@ -27810,80 +27915,39 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
     _decalage = (_dt.datetime.now(_tz_maison) if _tz_maison
                  else _dt.datetime.now().astimezone()).strftime("%z") or "+0000"
 
+    # A failed or incomplete API read cannot overwrite a complete saved snapshot.
+    _complete = (_api_src and not _ov.get("errors") and not _ov.get("stale")
+                 and not _en_rafraichissement) or (not mypuls.api_configured() and mp_configured and not mp_error)
     # 6 stat cards comme Infloww
     overview_html = (
-        "<div class='home-overview'>"
-        "<div class='home-overview-head'>"
-        f"<div class='home-overview-title'>Aperçu des revenus créateur "
-        # L etiquette dit le fuseau REELLEMENT utilise pour decouper les
-        # journees -- avant, elle disait celui du serveur (UTC), qui n etait
-        # pas celui du calcul.
-        f"<small title='Les journées sont découpées à cette heure-là'>UTC{_decalage[:3]}:{_decalage[3:]}</small>"
-        + _chip_fraicheur(_age_releve, _en_rafraichissement)
-        + "</div>"
-        + f"<button id='fx-cur-toggle' data-rate='{_eur_usd}' onclick='fxToggleCur()' "
-          f"title='Basculer entre dollars et euros' "
-          f"style='margin-left:auto;margin-right:10px;padding:7px 13px;background:#161a26;border:1px solid #2a2a2a;"
-          f"color:#cbd5e1;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer'>$ USD</button>"
-        # bouton Net / Brut : même style toggle que $/€, juste à gauche
-        # de « Aujourd'hui » (un <select> prenait toute la largeur et cassait la ligne)
-        + "<button id='fx-mode-toggle' onclick='fxToggleMode()' "
-          "title='Basculer entre revenus nets et bruts' "
-          "style='margin-right:10px;padding:7px 13px;background:#161a26;border:1px solid #2a2a2a;"
-          "color:#cbd5e1;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer'>Net</button>"
-        + period_switcher
-        + "</div>"
-        "<div class='home-grid'>"
+        f"<div class='home-overview' data-home-complete=\"{str(bool(_complete)).lower()}\">"
+        + render_header(period, home_group, _eur_usd, f"UTC{_decalage[:3]}:{_decalage[3:]}",
+                        _chip_fraicheur(_age_releve, _en_rafraichissement))
+        + render_selector(home_group, period)
+        + "<div class='home-grid'>"
         # Big hero card (Total earnings)
         "<div class='home-hero-card'>"
-        "<div class='home-hero-icon'>"
-        "<svg viewBox='0 0 24 24' width='26' height='26' fill='none' stroke='currentColor' stroke-width='2.5'><path d='M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6'/></svg>"
-        "</div>"
+        "<div class='home-hero-icon' aria-hidden='true'>$</div>"
         # épuré à la demande : pas de mention net/brut ni API ici, le bouton
         # Net/Brut de l'entête dit déjà dans quel mode on est
         f"<div><div class='home-hero-label'>Total revenus</div>"
         f"<div class='home-hero-value fx-amt' data-usd='{_total_usd:.2f}' data-brut='{_total_brut:.2f}'>${_total_usd:,.2f}</div></div>"
         "</div>"
-        # 6 small stat cards
-        + _stat("Abonnements", type_totals["Subscriptions"], "#22c55e", "rgba(34,197,94,.15)",
-                "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='2'><path d='M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z'/></svg>")
-        + _stat("Posts", type_totals["Posts"], "#10b981", "rgba(16,185,129,.15)",
-                "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='2'><path d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/><polyline points='14 2 14 8 20 8'/></svg>")
-        + _stat("Messages (PPV)", type_totals["Messages"], "#a855f7", "rgba(168,85,247,.15)",
-                "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='2'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/></svg>")
-        + _stat("Pourboires", type_totals["Tips"], "#f59e0b", "rgba(245,158,11,.15)",
-                "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='2'><path d='M9 18h6M10 22h4M15 14c0-3 4-3 4-7a7 7 0 0 0-14 0c0 4 4 4 4 7'/></svg>")
-        + _stat("Parrainage", type_totals["Referrals"], "#ec4899", "rgba(236,72,153,.15)",
-                "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='2'><path d='M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2'/><circle cx='9' cy='7' r='4'/><path d='M23 21v-2a4 4 0 0 0-3-3.87'/><path d='M16 3.13a4 4 0 0 1 0 7.75'/></svg>")
-        + _stat("Streams", type_totals["Streams"], "#3b82f6", "rgba(59,130,246,.15)",
-                "<svg viewBox='0 0 24 24' width='18' height='18' fill='none' stroke='currentColor' stroke-width='2'><line x1='8' y1='6' x2='21' y2='6'/><line x1='8' y1='12' x2='21' y2='12'/><line x1='8' y1='18' x2='21' y2='18'/><line x1='3' y1='6' x2='3.01' y2='6'/><line x1='3' y1='12' x2='3.01' y2='12'/><line x1='3' y1='18' x2='3.01' y2='18'/></svg>")
+        + "".join(_stat(label, type_totals[label_key_map[label]], color, bg, icon)
+                  for label, color, bg, icon in CATEGORIES)
         # LA CARTE QUI EMPECHE L ARGENT DE DISPARAITRE. Elle ne s affiche
         # que s il reste quelque chose : tant que tout est classe, l ecran ne
         # change pas. Les libelles bruts sont dans l infobulle -- c est avec
         # eux qu on corrige la regle de classement, au lieu de deviner.
         + (_stat_hors(_hors_cat) if float(_hors_cat.get("montant") or 0) > 0.005 else "")
         + "</div>"
-        + segments_html
+        + (segments_html if home_group == "all" else "")
         + "</div>"
     )
 
-    # ---- Courbe revenus par jour : elle SUIT la periode choisie ----
-    # Elle etait figee sur les 7 derniers jours : selectionner « Ce mois »
-    # affichait les chiffres du mois au-dessus, et une courbe de 7 jours en
-    # dessous. Sur une periode d'un ou deux jours, un graphique n'aurait qu'un
-    # ou deux points : on elargit alors a 7 jours finissant a la date choisie.
+    # The chart uses exactly the same dates as the selected revenue cards.
     _c_debut, _c_fin = start, end
-    _c_elargie = False
-    if (_c_fin - _c_debut).days < 2:
-        # Une courbe a un seul point ne dit rien : on elargit a sept jours.
-        _c_debut = _c_fin - _dt.timedelta(days=6)
-        _c_elargie = True
-    # LE SOUS-TITRE DOIT DIRE CE QUE LA COURBE TRACE, PAS CE QU ON A CLIQUE.
-    # Il reprenait le libelle de la periode : on cliquait « Aujourd hui », les
-    # cartes montraient la journee, et juste dessous une courbe intitulee
-    # « Aujourd hui » tracait sept jours. Deux mesures differentes sous un
-    # meme mot -- de quoi croire que l un des deux chiffres est faux.
-    _c_sous = ("7 derniers jours" if _c_elargie else period_label)
+    _c_sous = period_label
     # PRIORITÉ API : toutes les créatrices (le scraping tronquait au top 10),
     # conversion EUR->USD par devise (le scraping additionnait EUR et USD bruts),
     # et la courbe s'affiche MÊME cookies morts (hors du gate mp_configured).
@@ -27895,22 +27959,27 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
     _chart_usd = False
     try:
         if mypuls.api_configured():
-            sres = mypuls.api_revenue_series(_c_debut.isoformat(), _c_fin.isoformat(), _eur_usd)
+            sres = mypuls.api_revenue_series(_c_debut.isoformat(), _c_fin.isoformat(), _eur_usd, segment=home_group)
             if sres.get("ok"):
                 _s_of = sres.get("usd_of") or []
                 _s_mym = sres.get("usd_mym") or []
                 for i, (d_raw, s) in enumerate(zip(sres.get("days") or [], sres.get("usd") or [])):
                     try:
                         dd = _dt.date.fromisoformat(str(d_raw)[:10])
+                        if not start <= dd <= end:
+                            continue
                         chart_labels.append(f"{dd.day:02d}/{dd.month:02d}")
-                    except Exception:
-                        chart_labels.append(str(d_raw))
+                    except (ValueError, TypeError):
+                        continue
                     chart_vals.append(round(float(s or 0), 2))
                     # brut du jour : chaque plateforme remontée à son taux
                     _of = float(_s_of[i]) if i < len(_s_of) else 0.0
                     _my = float(_s_mym[i]) if i < len(_s_mym) else 0.0
                     chart_brut.append(round(_of / (1 - OF_FEE) + _my / (1 - MYM_FEE), 2))
                 _chart_api = bool(chart_labels)
+                if sres.get("errors"):
+                    _complete = False
+                    sales_chart_html = "<p class='home-snapshot-note'>Courbe partielle : certaines données sont temporairement indisponibles.</p>"
     except Exception as _e:
         log.warning("home chart API: %s", _e)
     if not chart_labels and mp_configured and not mp_error:
@@ -27938,6 +28007,8 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
                         return t
                 _par_jour = {}
                 for _txc in (wres.get("transactions") or []):
+                    if not in_group(_txc.get("creator"), home_group, group_map):
+                        continue
                     if _model_match(_txc.get("creator"), EXCLUDED_MODELS):
                         continue
                     _j = _jour_iso(_txc.get("date"))
@@ -27949,9 +28020,11 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
                 for d_iso in _jours:
                     try:
                         dd = _dt.date.fromisoformat(str(d_iso)[:10])
+                        if not start <= dd <= end:
+                            continue
                         chart_labels.append(f"{dd.day:02d}/{dd.month:02d}")
-                    except Exception:
-                        chart_labels.append(str(d_iso))
+                    except (ValueError, TypeError):
+                        continue
                     chart_vals.append(round(_par_jour.get(str(d_iso)[:10], 0.0), 2))
                 # Converties : l axe et l infobulle disent « $ » et obeissent
                 # au bouton de devise. Le TITRE, lui, reste « Ventes par jour »
@@ -27960,12 +28033,16 @@ body.light .home-card{background:#fff;border-color:#e5e7eb}
         except Exception:
             pass
     if chart_labels:
-        sales_chart_html = _home_sales_svg(chart_labels, chart_vals,
+        sales_chart_html += _home_sales_svg(chart_labels, chart_vals,
                                            eur_usd=_eur_usd, api_src=_chart_api,
                                            vals_brut=chart_brut if _chart_api else None,
-                                           periode=_c_sous,
+                                           periode=_c_sous, groupe=home_group_names[home_group],
                                            en_usd=_chart_api or _chart_usd)
 
+    if not chart_labels:
+        _complete = False
+    if not _complete:
+        overview_html = overview_html.replace('data-home-complete="true"', 'data-home-complete="false"')
     return (
         css
         + warning
@@ -27997,7 +28074,7 @@ def _clicrank_carte_html() -> str:
     return f"<div class='home-row home-row-pleine'>{corps}</div>" if corps else ""
 
 
-@_arg_cached(seconds=180, key_args=("mp_start", "mp_end"))
+@_arg_cached(seconds=180, key_args=("mp_start", "mp_end", "mp_period"))
 def _render_mypuls_section_html() -> str:
     """Section MyPuls en haut de la page Revenus.
 
@@ -28108,8 +28185,10 @@ body.light .mypuls-bar{background:#e5e7eb}
         return css + config_html
 
     # ============ Cookies configurés : afficher les données ============
-    # Période : défaut 30j
-    today = _dt.date.today()
+    # Calendar shortcuts follow Paris, including around midnight and DST.
+    from zoneinfo import ZoneInfo
+    from revenus_periods import render_period_presets
+    today = _dt.datetime.now(ZoneInfo("Europe/Paris")).date()
     default_start = (today - _dt.timedelta(days=29)).isoformat()
     default_end = today.isoformat()
     start_str = flask_request.args.get("mp_start", default_start) if hasattr(flask_request, "args") else default_start
@@ -28136,17 +28215,10 @@ body.light .mypuls-bar{background:#e5e7eb}
     transactions = res["transactions"]
     max_ca = chatters[0]["ca_total"] if chatters else 1
 
-    # Boutons période (presets + custom) avec loader au clic
-    def _preset_url(days):
-        s = (today - _dt.timedelta(days=days - 1)).isoformat()
-        e = today.isoformat()
-        active = "mypuls-period-btn-active" if start_str == s and end_str == e else ""
-        return f"<a href='?tab=revenus&mp_start={s}&mp_end={e}' onclick='mpShowPeriodLoader()' class='mypuls-period-btn {active}'>{days}j</a>"
-
+    # The rounded shortcuts are limited to Chatter earnings.
     period_html = (
         "<div class='mypuls-period'>"
-        "<span style='font-size:11px;color:#888;font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-right:6px'>Période :</span>"
-        + _preset_url(1) + _preset_url(7) + _preset_url(30) + _preset_url(90)
+        + render_period_presets(today, start_str, end_str, flask_request.args.get("mp_period", ""))
         + "<form method='GET' style='display:inline-flex;gap:6px;align-items:center;margin-left:6px' onsubmit='mpShowPeriodLoader()'>"
         + "<input type='hidden' name='tab' value='revenus'>"
         + f"<input type='date' name='mp_start' value='{start_str}' style='font-size:12px;padding:4px 8px;background:#1a1a1a;border:1px solid #2a2a2a;color:#fff;border-radius:5px;width:auto'>"
@@ -28189,9 +28261,10 @@ body.light .mypuls-bar{background:#e5e7eb}
     chart_days = chart_data["days"]
     chart_datasets = chart_data["datasets"]
 
-    # Palette de couleurs distinctes pour les créateurs
+    # Couleurs distinctes des courbes, comme sur le graphique initial.
     palette = ["#22c55e", "#3b82f6", "#a855f7", "#f59e0b", "#ec4899",
-               "#06b6d4", "#ef4444", "#84cc16", "#f97316", "#8b5cf6"]
+               "#06b6d4", "#ef4444", "#84cc16", "#f97316", "#8b5cf6",
+               "#14b8a6", "#eab308", "#60a5fa", "#f472b6"]
 
     # Format date pour l'axe X : "30 avr"
     import datetime as _dt2
@@ -28251,10 +28324,10 @@ body.light .mypuls-bar{background:#e5e7eb}
         ds_label_safe = ds_label.replace("'", "\\'")
         legend_items.append(
             f"<button type='button' onclick=\"mpToggleCreator('{ds_label_safe}')\" "
-            f"data-mp-legend='{ds_label}' "
+            f"data-mp-legend='{ds_label}' aria-pressed='true' class='mp-revenue-model-filter' "
             f"style='display:inline-flex;align-items:center;gap:6px;padding:3px 10px 3px 4px;background:{color}15;border:1px solid {color}40;border-radius:20px;font-size:11px;font-weight:600;color:inherit;cursor:pointer;font-family:inherit;transition:all .2s'>"
             f"{avatar_legend}"
-            f"{ds['label']} <span style='color:#888;font-weight:400'>{ds['total']:.0f}€</span>"
+            f"{ds['label']} <span class='mp-revenue-model-total'>{ds['total']:.0f} €</span>"
             f"</button>"
         )
 
@@ -28263,83 +28336,26 @@ body.light .mypuls-bar{background:#e5e7eb}
         if avatars_header else ""
     )
 
-    chart_json = _json.dumps({"labels": chart_labels, "datasets": chartjs_datasets}, ensure_ascii=False)
+    chart_json = (_json.dumps({"days": chart_days, "labels": chart_labels, "datasets": chartjs_datasets}, ensure_ascii=False)
+                  .replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"))
 
     if chart_datasets:
-        plural_s = "s" if len(chart_datasets) > 1 else ""
         chart_html = (
-            "<div style='background:#1a1a1a;border:1px solid #2a2a2a;border-radius:12px;padding:16px;margin-bottom:14px'>"
-            "<div style='display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px'>"
-            "<div style='display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px'>"
-            "<svg viewBox='0 0 24 24' width='16' height='16' fill='none' stroke='#22c55e' stroke-width='2.5'><polyline points='22 12 18 12 15 21 9 3 6 12 2 12'/></svg>"
-            "Évolution des revenus par modèle"
-            + avatars_header_html +
+            "<section class='mp-revenue-chart' aria-label='Revenus par modèle'>"
+            "<div class='mp-revenue-chart-heading'>"
+            "<h3><svg viewBox='0 0 24 24' width='17' height='17' fill='none' stroke='currentColor' stroke-width='2' aria-hidden='true'><polyline points='22 12 18 12 15 21 9 3 6 12 2 12'/></svg>Revenus par modèle<span class='mp-revenue-chart-avatars'></span></h3>"
+            "<span class='mp-revenue-chart-status'></span>"
             "</div>"
-            f"<div style='font-size:11px;color:#888'>{len(chart_datasets)} modèle{plural_s} actif{plural_s}</div>"
-            "</div>"
-            "<div style='display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px'>"
-            + "".join(legend_items) +
-            "</div>"
-            "<div style='position:relative;height:340px'>"
-            "<canvas id='mypuls-chart'></canvas>"
-            "</div>"
-            "</div>"
+            "<div class='mp-revenue-chart-filters' aria-label='Modèles affichés'>"
+            + "".join(legend_items) + "</div>"
+            "<p class='mp-revenue-chart-note'>Revenus par jour · heure de Paris</p>"
+            "<div class='mp-revenue-chart-canvas'>"
+            "<canvas id='mypuls-chart' role='img' aria-label='Revenus par modèle'></canvas>"
+            "</div></section>"
         )
-        # JS d'initialisation du chart (déclenché après le DOM)
-        chart_init_js = f"""
-<script>
-(function(){{
-  var data = {chart_json};
-  function initChart(){{
-    var canvas = document.getElementById('mypuls-chart');
-    if(!canvas || typeof Chart === 'undefined'){{ setTimeout(initChart, 100); return; }}
-    if(window.__mypulsChart){{ try{{ window.__mypulsChart.destroy(); }}catch(e){{}} }}
-    var isDark = !document.body.classList.contains('light');
-    var gridColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
-    var textColor = isDark ? '#888' : '#666';
-    window.__mypulsChart = new Chart(canvas, {{
-      type: 'line',
-      data: data,
-      options: {{
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: {{ mode: 'index', intersect: false }},
-        plugins: {{
-          legend: {{ display: false }},
-          tooltip: {{
-            backgroundColor: isDark ? '#0f1116' : '#fff',
-            titleColor: isDark ? '#fff' : '#111',
-            bodyColor: isDark ? '#aaa' : '#555',
-            borderColor: '#2a2a2a',
-            borderWidth: 1,
-            padding: 12,
-            callbacks: {{
-              label: function(ctx){{
-                return ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(2) + '€';
-              }}
-            }}
-          }}
-        }},
-        scales: {{
-          y: {{
-            beginAtZero: true,
-            grid: {{ color: gridColor }},
-            ticks: {{ color: textColor, callback: function(v){{ return v.toFixed(0)+'€'; }} }}
-          }},
-          x: {{
-            grid: {{ display: false }},
-            ticks: {{ color: textColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 }}
-          }}
-        }}
-      }}
-    }});
-  }}
-  initChart();
-}})();
-</script>
-"""
+        chart_init_js = f"<script>window.mpInitRevenueChart({chart_json});</script>"
     else:
-        chart_html = ""
+        chart_html = "<section class='mp-revenue-chart'><h3>Revenus par modèle</h3><p class='mp-revenue-chart-note'>Aucune vente sur la période sélectionnée.</p></section>"
         chart_init_js = ""
 
     # Helper pour insérer un nom comme arg JS dans un onclick="..." HTML.
@@ -28366,9 +28382,9 @@ body.light .mypuls-bar{background:#e5e7eb}
                 return round((ca_eur * eur_to_usd + ca_usd) * pct / 100.0, 2)
         return round(c["ca_total"] * pct / 100.0 * eur_to_usd, 2)
 
-    # Table chatteurs (top 30) — avec % commission, à payer en USD, screenshot crypto
+    # Table chatteurs (toutes les lignes pour les filtres plateforme) — avec % commission, à payer en USD, screenshot crypto
     chatters_rows = []
-    for i, c in enumerate(chatters[:30]):
+    for i, c in enumerate(chatters):
         bar_pct = (c["ca_total"] / max_ca * 100) if max_ca else 0
         name_esc = c["name"].replace("<", "&lt;").replace(">", "&gt;")
 
@@ -28620,7 +28636,7 @@ body.light .mypuls-bar{background:#e5e7eb}
             # Le CA orphelin reste affiché sous le total : il est exclu de la
             # paie, mais le masquer reviendrait à laisser 20 % du chiffre
             # s'évaporer sans que personne n'aille corriger l'attribution.
-            f"<div style='font-size:11px;color:#f87171;margin-top:3px' "
+            f"<div data-mp-stat='non_attribue' style='font-size:11px;color:#f87171;margin-top:3px' "
             f"title='Ventes que MyPuls n a rattachees a aucun chatteur'>"
             f"dont {_ca_orphelin:.2f}€ non attribué — non payé</div>"
             if _ca_orphelin > 0 else ""
@@ -28653,25 +28669,24 @@ body.light .mypuls-bar{background:#e5e7eb}
 
     # Exposer les transactions à JS pour le filtre client-side par modèle
     def _tx_hour(ds):
-        # "29/05/2026 05:36" -> 5 (heure, pour le filtre par shift)
-        try:
-            _, _, tm = (ds or "").partition(" ")
-            return int(tm.split(":")[0])
-        except Exception:
-            return -1
+        from revenus_ui import transaction_hour
+        return transaction_hour(ds)
     def _tx_is_usd(t):
         cs = str(t.get("currency") or "").upper()
         return 1 if ("USD" in cs or "$" in cs) else 0
     # "u": 1 = transaction en USD (OnlyFans) -> le recalcul client du « à payer »
     # ne doit PAS la convertir comme des EUR (même règle que _pay_usd serveur)
+    from revenus_dates import transaction_day
     transactions_js = _json_mod.dumps(
         [{"c": t["creator"], "h": t["chatter"], "a": t["amount"], "y": t["type"],
-          "t": _tx_hour(t.get("date", "")), "u": _tx_is_usd(t)} for t in transactions],
+          "t": _tx_hour(t.get("date", "")), "u": _tx_is_usd(t),
+          "d": t.get("date", ""), "day": transaction_day(t.get("date", "")), "f": t.get("fan", ""),
+          "currency": t.get("currency", "")} for t in transactions],
         ensure_ascii=False,
-    )
+    ).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
     # Liste des chatteurs avec leur présence/réactivité (stats non-recalculables côté client)
     chatters_base_js = _json_mod.dumps(
-        [{"name": c["name"], "presence": c["presence"], "conv_rate": c["conv_rate"]} for c in chatters[:50]],
+        [{"name": c["name"], "presence": c["presence"], "conv_rate": c["conv_rate"]} for c in chatters],
         ensure_ascii=False,
     )
     # CA de la TABLE DE PERFORMANCE, par chatteur. Indispensable au garde-fou
@@ -29181,7 +29196,14 @@ document.addEventListener('DOMContentLoaded', function(){
         + period_html + stats_html + chart_html + tabs_html + chatters_table + tx_table + keepalive_info
         + "</div>"
     )
-    return css + section + js + chart_init_js
+    from revenus_ui import render_revenus_ui
+    from revenus_segments import creator_segments
+    try:
+        _segment_accounts = mypuls.api_creators_cached()
+    except Exception:
+        _segment_accounts = []
+    from revenus_names import chatter_display_names
+    return css + section + js + render_revenus_ui(creators_map, creator_segments(creators_map, _segment_accounts), chatter_display_names(creators_map)) + chart_init_js
 
 
 def _render_revenus_html() -> str:
@@ -30877,12 +30899,12 @@ function gmsFilter(btn, cat){
 #: toutes deux « redeclarees ici »).
 _CSS_VA_IG3 = """
 .va-ig3-row{background:#0f1116;border:1px solid #2a2a2a;border-radius:10px;padding:10px 14px;display:grid;grid-template-columns:36px 1fr auto auto auto auto auto 22px 28px;gap:14px;align-items:center;position:relative;cursor:pointer;transition:all .12s}
-.va-ig3-row:hover{border-color:#ec489940}
+.va-ig3-row:hover{border-color:rgba(var(--ui-accent-rgb),.25)}
 .va-ig3-rm-btn{background:transparent;border:1px solid #2a2a2a;color:#888;width:28px;height:28px;border-radius:7px;font-size:18px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:inherit;font-weight:700;transition:all .12s;padding:0}
 .va-ig3-rm-btn:hover{background:rgba(239,68,68,.12);border-color:#ef4444;color:#ef4444}
 .va-ig3-row-pp{width:36px;height:36px;border-radius:50%;object-fit:cover;background:#16181f}
 .va-ig3-row-name{display:flex;flex-direction:column;gap:1px;min-width:0}
-.va-ig3-row-handle{font-weight:700;font-size:13px;color:#ec4899;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;text-decoration:none;cursor:pointer;display:block}
+.va-ig3-row-handle{font-weight:700;font-size:13px;color:var(--ui-accent-text);white-space:nowrap;text-overflow:ellipsis;overflow:hidden;text-decoration:none;cursor:pointer;display:block}
 .va-ig3-row-handle:hover{text-decoration:underline}
 .va-ig3-row-platform{font-size:10px;color:#888;font-weight:500}
 .va-ig3-row-metric{text-align:center;min-width:55px}
@@ -30894,7 +30916,7 @@ _CSS_VA_IG3 = """
 .va-ig3-row-last-val{font-size:11px;color:#aaa;font-weight:600;margin-top:1px}
 .va-ig3-row-last-date{font-size:9px;color:#666;font-weight:500;margin-top:1px}
 .va-ig3-row-open{color:#666;text-decoration:none;font-size:18px;font-weight:600;width:22px;height:22px;display:flex;align-items:center;justify-content:center}
-.va-ig3-row-open:hover{color:#ec4899}
+.va-ig3-row-open:hover{color:var(--ui-accent-text)}
 .va-ig3-row-err{grid-column:1 / -1;color:#ef4444;font-size:11px;font-weight:600;text-align:center;margin-top:6px;padding-top:6px;border-top:1px dashed #ef444430}
 .va-ig3-row-banned{background:rgba(239,68,68,.06) !important;border-color:rgba(239,68,68,.3) !important}
 .va-ig3-row-banned .va-ig3-row-handle{color:#ef4444;text-decoration:line-through;text-decoration-color:rgba(239,68,68,.4)}
@@ -30925,7 +30947,7 @@ body.light .va-ig3-thead{background:#f7f8fa;border-color:#e5e7eb;color:#6b7280}
    chiffres devenaient illisibles. La specificite (body.light + classe) prime
    sur la regle generale, comme l exige le theme clair du projet. */
 body.light .va-ig3-row{background:#fff;border-color:#e5e7eb}
-body.light .va-ig3-row:hover{border-color:#ec489966}
+body.light .va-ig3-row:hover{border-color:rgba(var(--ui-accent-rgb),.4)}
 body.light .va-ig3-row-num{color:#111}
 body.light .va-ig3-row-pp{background:#f3f4f6}
 body.light .va-ig3-preview{border-top-color:#e5e7eb}
@@ -32120,6 +32142,8 @@ def _render_jailbreak_html() -> str:
     identities = _identites_modeles() if callable(_list_identities) else []
     all_accounts = jb.list_all()
     stats = jb.stats()
+    import insta_scraper as _ig_health
+    collector_paused = bool(_ig_health.rapidapi_pause())
 
     # Accountability : on charge UNE fois les données d'activité, puis on compte
     # par (identité, VA) — surtout PAS par VA global : un même VA peut gérer des
@@ -32194,7 +32218,7 @@ def _render_jailbreak_html() -> str:
         "<div>"
         "<h2 style='margin:0 0 4px;font-size:22px;display:flex;align-items:center;gap:10px'>"
         "📊 Social Analytics"
-        "<span style='font-size:11px;background:#ec4899;color:#fff;padding:3px 10px;border-radius:8px;font-weight:800;letter-spacing:.5px'>COMPTES MANUELS</span></h2>"
+        "<span style='font-size:11px;background:var(--ui-accent);color:var(--ui-on-accent);padding:3px 10px;border-radius:8px;font-weight:800;letter-spacing:.5px'>COMPTES MANUELS</span></h2>"
         "<p style='margin:0;color:#888;font-size:13px'>Les comptes Instagram par identité — pas d'automation, juste un référentiel sécurisé.</p>"
         "</div>"
         f"<div style='display:flex;gap:14px;align-items:center'>"
@@ -32209,7 +32233,7 @@ def _render_jailbreak_html() -> str:
         f"padding:10px 16px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700'>"
         f"📊 Report des comptes</button>"
         f"<button type='button' onclick='jbOpenCreateIdentityModal()' style='background:#3b82f6;color:#fff;border:0;padding:10px 18px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(59,130,246,.35)'>+ Nouvelle identité</button>"
-        f"<div style='text-align:center' id='jb-kpi-comptes'><div style='font-size:22px;font-weight:800;color:#ec4899'>{stats['total_accounts']}</div><div style='font-size:9px;color:#888;letter-spacing:1px'>COMPTES</div></div>"
+        f"<div style='text-align:center' id='jb-kpi-comptes'><div style='font-size:22px;font-weight:800;color:var(--ui-accent-text)'>{stats['total_accounts']}</div><div style='font-size:9px;color:#888;letter-spacing:1px'>COMPTES</div></div>"
         f"<div style='text-align:center' id='jb-kpi-idents'><div style='font-size:22px;font-weight:800;color:#3b82f6'>{stats['identities_with_accounts']}/{len(identities) if identities else 0}</div><div style='font-size:9px;color:#888;letter-spacing:1px'>IDENTITÉS</div></div>"
         "</div>"
         "</div>"
@@ -32233,7 +32257,7 @@ def _render_jailbreak_html() -> str:
         # interroger — et tout ecran qui lit leurs chiffres doit le DIRE au
         # lieu d'afficher un zero.
         + _suivi_pastilles_html(identities)
-        + _bangers_encart_html() +
+        + _bangers_encart_html() + _render_collection_notice() +
         # Barre de progression du scrape (masquée tant qu'aucun scrape ne tourne)
         "<div id='jb-scrape-prog' style='display:none;margin:0 0 16px;background:#0f1116;"
         "border:1px solid #23262f;border-radius:12px;padding:12px 16px'>"
@@ -32269,21 +32293,21 @@ def _render_jailbreak_html() -> str:
         ".jb-section.jb-drag-over{border-color:#3b82f6;box-shadow:0 0 0 2px rgba(59,130,246,.3) inset}"
         # Drag handle style Inflow : pill verticale + dots qui s allument au hover
         ".jb-drag-handle{cursor:grab;display:flex;align-items:center;justify-content:center;flex-shrink:0;width:24px;height:36px;border-radius:7px;transition:all .18s ease;position:relative;background:transparent}"
-        ".jb-drag-handle:hover{background:linear-gradient(135deg,rgba(59,130,246,.10),rgba(168,85,247,.06));box-shadow:inset 0 0 0 1px rgba(255,255,255,.04)}"
+        ".jb-drag-handle:hover{background:linear-gradient(135deg,rgba(59,130,246,.10),rgba(var(--ui-accent-rgb),.06));box-shadow:inset 0 0 0 1px rgba(255,255,255,.04)}"
         ".jb-drag-handle:active{cursor:grabbing}"
         ".jb-drag-handle .jb-grip{display:flex;flex-direction:column;gap:3px;align-items:center;transition:transform .2s ease}"
         ".jb-drag-handle:hover .jb-grip{transform:scale(1.08)}"
         ".jb-drag-handle:active .jb-grip{transform:scale(.95)}"
         ".jb-drag-handle .jb-grip-row{display:flex;gap:3px}"
         ".jb-drag-handle .jb-grip-dot{width:3px;height:3px;border-radius:50%;background:#3a3a3a;transition:all .18s ease}"
-        ".jb-drag-handle:hover .jb-grip-dot{background:linear-gradient(135deg,#60a5fa,#c084fc);box-shadow:0 0 6px rgba(96,165,250,.4)}"
+        ".jb-drag-handle:hover .jb-grip-dot{background:linear-gradient(135deg,#60a5fa,var(--ui-accent));box-shadow:0 0 6px rgba(96,165,250,.4)}"
         ".jb-section.jb-dragging .jb-drag-handle .jb-grip-dot{background:#3b82f6}"
         ".jb-section-head{display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:8px}"
         ".jb-section-head-main{display:flex;align-items:center;gap:10px;flex:1;cursor:pointer;min-width:0;padding:2px 0}"
         ".jb-section-head-main img,.jb-section-head-main .jb-avatar-fb{width:30px;height:30px;border-radius:50%;flex-shrink:0;object-fit:cover}"
         ".jb-avatar-fb{display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:13px}"
         ".jb-section-name{flex:1;color:#fff;font-size:14px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
-        ".jb-section-count{background:rgba(236,72,153,.18);color:#f472b6;padding:2px 9px;border-radius:9px;font-size:11px;font-weight:800;flex-shrink:0}"
+        ".jb-section-count{background:rgba(var(--ui-accent-rgb),.18);color:var(--ui-accent-text);padding:2px 9px;border-radius:9px;font-size:11px;font-weight:800;flex-shrink:0}"
         ".jb-section-edit-btn,.jb-section-toggle{background:transparent;border:0;color:#888;width:30px;height:30px;border-radius:7px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;padding:0;transition:all .15s}"
         ".jb-section-edit-btn:hover{background:rgba(59,130,246,.1);color:#3b82f6}"
         ".jb-section-toggle:hover{background:rgba(255,255,255,.06);color:#fff}"
@@ -32293,35 +32317,35 @@ def _render_jailbreak_html() -> str:
         ".jb-section.collapsed .jb-section-body{max-height:0;opacity:0;padding-top:0;padding-bottom:0;pointer-events:none}"
         # Boutons en bas de chaque groupe VA
         ".jb-va-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}"
-        ".jb-add-account-btn{background:#ec4899;color:#fff;border:0;padding:7px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(236,72,153,.25)}"
-        ".jb-add-account-btn:hover{background:#db2777}"
+        ".jb-add-account-btn{background:var(--ui-accent);color:var(--ui-on-accent);border:0;padding:7px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(var(--ui-accent-rgb),.25)}"
+        ".jb-add-account-btn:hover{background:var(--ui-accent-hover)}"
         ".jb-bulk-btn{background:transparent;border:1px solid #232323;color:#aaa;padding:7px 12px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:all .15s}"
-        ".jb-bulk-btn:hover{border-color:#ec4899;color:#ec4899}"
+        ".jb-bulk-btn:hover{border-color:var(--ui-accent);color:var(--ui-accent-text)}"
         # Bouton + Ajouter un VA (en bas de la carte identite)
-        ".jb-add-va-btn{background:linear-gradient(135deg,#a855f7,#6366f1);color:#fff;border:0;padding:9px 16px;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(168,85,247,.3);align-self:flex-start;margin-top:8px;transition:all .15s}"
-        ".jb-add-va-btn:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(168,85,247,.4)}"
+        ".jb-add-va-btn{background:var(--ui-accent);color:var(--ui-on-accent);border:0;padding:9px 16px;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(var(--ui-accent-rgb),.3);align-self:flex-start;margin-top:8px;transition:all .15s}"
+        ".jb-add-va-btn:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(var(--ui-accent-rgb),.4)}"
         # Sous-section VA dans la carte identite
         ".jb-va-group{background:#0a0a0a;border:1px solid #1a1a1a;border-radius:11px;padding:10px 12px;display:flex;flex-direction:column;gap:5px;transition:border-color .15s}"
-        ".jb-va-group:hover{border-color:rgba(168,85,247,.25)}"
+        ".jb-va-group:hover{border-color:rgba(var(--ui-accent-rgb),.25)}"
         ".jb-va-group-novote{background:#0a0a0a}"
         ".jb-va-group-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px 2px;margin-bottom:3px}"
-        ".jb-va-group-name{display:flex;align-items:center;gap:7px;flex:1;min-width:0;font-size:12px;color:#c084fc;font-weight:600}"
+        ".jb-va-group-name{display:flex;align-items:center;gap:7px;flex:1;min-width:0;font-size:12px;color:var(--ui-accent-text);font-weight:600}"
         ".jb-va-group-name b{color:#fff;font-weight:700}"
         ".jb-va-icon{font-size:13px;flex-shrink:0}"
-        ".jb-va-avatar{width:28px;height:28px;border-radius:50%;object-fit:cover;flex-shrink:0;border:2px solid rgba(168,85,247,.3)}"
+        ".jb-va-avatar{width:28px;height:28px;border-radius:50%;object-fit:cover;flex-shrink:0;border:2px solid rgba(var(--ui-accent-rgb),.3)}"
         ".jb-va-avatar-fb{display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:12px}"
         ".jb-discord-pill{background:rgba(88,101,242,.15);color:#7c8eff;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:600;font-family:monospace}"
         # Badges 2FA : vert si validee, orange si juste rempli
         ".jb-2fa-badge{padding:1px 7px;border-radius:5px;font-size:10px;font-weight:700;letter-spacing:.02em}"
         ".jb-2fa-badge.jb-2fa-validated{background:rgba(34,197,94,.15);color:#22c55e;border:1px solid rgba(34,197,94,.25)}"
         ".jb-2fa-badge.jb-2fa-pending{background:rgba(251,146,60,.12);color:#fb923c;border:1px solid rgba(251,146,60,.22)}"
-        ".jb-va-group-count{background:rgba(168,85,247,.18);color:#c084fc;padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700}"
+        ".jb-va-group-count{background:rgba(var(--ui-accent-rgb),.18);color:var(--ui-accent-text);padding:2px 8px;border-radius:8px;font-size:10px;font-weight:700}"
         ".jb-va-remove-btn{background:transparent;border:1px solid #232323;color:#666;width:22px;height:22px;border-radius:6px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s;padding:0}"
         ".jb-va-remove-btn:hover{border-color:#ef4444;color:#ef4444}"
         # Ligne de compte (compact, style screenshot)
         ".jb-acct{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:9px;border:1px solid transparent;transition:all .12s}"
         ".jb-acct:hover{background:rgba(255,255,255,.03);border-color:#232323}"
-        ".jb-acct-icon{width:30px;height:30px;border-radius:8px;background:rgba(236,72,153,.12);color:#ec4899;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:13px}"
+        ".jb-acct-icon{width:30px;height:30px;border-radius:8px;background:rgba(var(--ui-accent-rgb),.12);color:var(--ui-accent-text);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:13px}"
         # PP Instagram (rond) - taille legerement plus grosse pour bien voir
         ".jb-acct-pp{width:32px;height:32px;border-radius:50%;object-fit:cover;flex-shrink:0;border:1.5px solid rgba(255,255,255,.08)}"
         ".jb-acct-main{flex:1;min-width:0}"
@@ -32368,7 +32392,7 @@ def _render_jailbreak_html() -> str:
         ".jb-row-btn:hover{border-color:#3b82f6;color:#fff;background:rgba(59,130,246,.08)}"
         ".jb-row-btn-danger{font-size:16px;font-weight:700;line-height:1}"
         ".jb-row-btn-danger:hover{border-color:#ef4444;color:#ef4444;background:rgba(239,68,68,.08)}"
-        ".jb-va-pill{background:rgba(168,85,247,.15);color:#c084fc;padding:1px 7px;border-radius:6px;font-size:10px;font-weight:700}"
+        ".jb-va-pill{background:rgba(var(--ui-accent-rgb),.15);color:var(--ui-accent-text);padding:1px 7px;border-radius:6px;font-size:10px;font-weight:700}"
         ".jb-acct-btn{background:transparent;border:1px solid #232323;color:#aaa;padding:4px 9px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600;flex-shrink:0}"
         ".jb-acct-btn:hover{border-color:#3b82f6;color:#fff}"
         ".jb-acct-btn.danger:hover{border-color:#ef4444;color:#ef4444}"
@@ -32381,7 +32405,7 @@ def _render_jailbreak_html() -> str:
         ".jb-modal h3{margin:0 0 16px;font-size:17px;color:#fff;font-weight:700}"
         ".jb-modal label{display:block;margin:10px 0 4px;color:#aaa;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}"
         ".jb-modal input,.jb-modal textarea{width:100%;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;padding:10px 12px;border-radius:8px;font-size:13px}"
-        ".jb-modal input:focus,.jb-modal textarea:focus{border-color:#ec4899;outline:none}"
+        ".jb-modal input:focus,.jb-modal textarea:focus{border-color:var(--ui-accent);outline:none}"
         ".jb-modal textarea{resize:vertical;min-height:60px}"
         # === Layout 2 colonnes (sidebar + main) ===
         ".jb-layout{display:flex;gap:14px;align-items:flex-start}"
@@ -32397,14 +32421,14 @@ def _render_jailbreak_html() -> str:
         ".jb-side-id-head img,.jb-side-id-head .jb-avatar-fb{width:26px;height:26px;border-radius:50%;object-fit:cover;flex-shrink:0}"
         ".jb-side-id-head .jb-avatar-fb{display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff}"
         ".jb-side-id-name{flex:1;text-align:left;color:#fff}"
-        ".jb-side-id-count{background:rgba(236,72,153,.18);color:#f472b6;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:800}"
+        ".jb-side-id-count{background:rgba(var(--ui-accent-rgb),.18);color:var(--ui-accent-text);padding:2px 8px;border-radius:10px;font-size:10px;font-weight:800}"
         ".jb-side-id-arrow{color:#666;transition:transform .15s}"
         ".jb-side-id.collapsed .jb-side-id-arrow{transform:rotate(-90deg)}"
         ".jb-side-id-body{padding:2px 0 6px;display:flex;flex-direction:column;gap:2px}"
         ".jb-side-va{display:flex;align-items:center;gap:8px;padding:7px 8px;background:transparent;border:0;border-radius:8px;cursor:pointer;width:calc(100% - 4px);margin:0 2px;text-align:left;color:#fff;font-size:11px;font-weight:600;position:relative}"
-        ".jb-side-va.jb-va-dragging{opacity:.35;outline:1px dashed rgba(168,85,247,.6)}"
+        ".jb-side-va.jb-va-dragging{opacity:.35;outline:1px dashed rgba(var(--ui-accent-rgb),.6)}"
         ".jb-side-va:hover{background:rgba(255,255,255,.04)}"
-        ".jb-side-va.active{background:linear-gradient(90deg,rgba(168,85,247,.18),rgba(168,85,247,.04));box-shadow:inset 2px 0 0 #a855f7}"
+        ".jb-side-va.active{background:linear-gradient(90deg,rgba(var(--ui-accent-rgb),.18),rgba(var(--ui-accent-rgb),.04));box-shadow:inset 2px 0 0 var(--ui-accent)}"
         ".jb-side-va-pp-wrap{position:relative;width:30px;height:30px;flex-shrink:0}"
         ".jb-side-va img,.jb-side-va .jb-side-va-fb{width:30px;height:30px;border-radius:50%;flex-shrink:0;object-fit:cover}"
         ".jb-side-va .jb-side-va-fb{display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff}"
@@ -32412,16 +32436,16 @@ def _render_jailbreak_html() -> str:
         ".jb-side-va-name{color:#fff;font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"
         ".jb-side-va-discord{color:#888;font-size:9.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"
         ".jb-side-va-discord.linked{color:#7289da}"
-        ".jb-side-va-count{background:rgba(168,85,247,.15);color:#c084fc;padding:1px 7px;border-radius:9px;font-size:9.5px;font-weight:800;flex-shrink:0}"
+        ".jb-side-va-count{background:rgba(var(--ui-accent-rgb),.15);color:var(--ui-accent-text);padding:1px 7px;border-radius:9px;font-size:9.5px;font-weight:800;flex-shrink:0}"
         # Status dot (overlay bottom-right de l avatar, style page VAs)
         ".jb-side-va-status{position:absolute;bottom:-1px;right:-1px;width:10px;height:10px;border-radius:50%;border:2px solid #0a0a0a;background:#6b7280;box-sizing:border-box}"
         ".jb-side-va-status.on{background:#22c55e;box-shadow:0 0 5px rgba(34,197,94,.55)}"
         ".jb-side-va-status.pending{background:#6b7280}"
         ".jb-side-va-status.banned{background:#ef4444;box-shadow:0 0 5px rgba(239,68,68,.5)}"
         ".jb-side-add-va{display:flex;align-items:center;justify-content:center;gap:4px;width:calc(100% - 4px);margin:4px 2px 2px;padding:6px;background:transparent;border:1px dashed #2a2a2a;border-radius:8px;color:#888;cursor:pointer;font-size:10.5px;font-weight:600}"
-        ".jb-side-add-va:hover{border-color:#a855f7;color:#c084fc}"
-        ".jb-side-summary{margin-top:10px;padding:10px 12px;background:rgba(168,85,247,.06);border:1px solid rgba(168,85,247,.18);border-radius:10px;color:#aaa;font-size:11px;line-height:1.5}"
-        ".jb-side-summary b{color:#c084fc}"
+        ".jb-side-add-va:hover{border-color:var(--ui-accent);color:var(--ui-accent-text)}"
+        ".jb-side-summary{margin-top:10px;padding:10px 12px;background:rgba(var(--ui-accent-rgb),.06);border:1px solid rgba(var(--ui-accent-rgb),.18);border-radius:10px;color:#aaa;font-size:11px;line-height:1.5}"
+        ".jb-side-summary b{color:var(--ui-accent-text)}"
         ".jb-main-pane{flex:1;min-width:0}"
         ".jb-va-detail{display:none;background:#0f0f0f;border:1px solid #1a1a1a;border-radius:14px;padding:18px;animation:jbFadeIn .15s ease-out}"
         ".jb-va-detail.active{display:block}"
@@ -32443,15 +32467,15 @@ def _render_jailbreak_html() -> str:
         ".jb-acc-pill.ban{background:rgba(248,113,113,.12);color:#f87171}"
         ".jb-acc-pill.warn{background:rgba(251,146,60,.14);color:#fb923c}"
         ".jb-acc-pill.quiet{background:rgba(107,114,128,.15);color:#9ca3af}"
-        ".jb-scrape-one{background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.35);color:#4ade80;padding:5px 11px;border-radius:8px;cursor:pointer;font-size:11px;font-weight:700;flex-shrink:0;margin-right:6px;white-space:nowrap;font-family:inherit}"
-        ".jb-scrape-one:hover{background:rgba(34,197,94,.2)}"
+        ".jb-scrape-one{background:rgba(var(--ui-accent-rgb),.12);border:1px solid rgba(var(--ui-accent-rgb),.35);color:var(--ui-accent-text);padding:5px 11px;border-radius:8px;cursor:pointer;font-size:11px;font-weight:700;flex-shrink:0;margin-right:6px;white-space:nowrap;font-family:inherit}"
+        ".jb-scrape-one:hover{background:rgba(var(--ui-accent-rgb),.2)}"
         ".jb-scrape-one[disabled]{opacity:.6;cursor:wait}"
         ".jb-detail-head-info{flex:1;min-width:0}"
         ".jb-detail-head-name{display:flex;align-items:center;gap:8px;font-size:17px;font-weight:700;color:#fff;margin-bottom:3px}"
         ".jb-detail-head-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11px;color:#888}"
-        ".jb-detail-head-pill{background:rgba(236,72,153,.12);color:#ec4899;padding:2px 9px;border-radius:8px;font-size:10px;font-weight:700;display:inline-flex;align-items:center;gap:4px}"
+        ".jb-detail-head-pill{background:rgba(var(--ui-accent-rgb),.12);color:var(--ui-accent-text);padding:2px 9px;border-radius:8px;font-size:10px;font-weight:700;display:inline-flex;align-items:center;gap:4px}"
         ".jb-detail-head-pill.discord{background:rgba(114,137,218,.16);color:#7289da}"
-        ".jb-detail-count-badge{background:rgba(168,85,247,.16);color:#c084fc;padding:4px 11px;border-radius:9px;font-size:11px;font-weight:800}"
+        ".jb-detail-count-badge{background:rgba(var(--ui-accent-rgb),.16);color:var(--ui-accent-text);padding:4px 11px;border-radius:9px;font-size:11px;font-weight:800}"
         ".jb-detail-head-remove{background:transparent;border:1px solid #2a2a2a;color:#888;width:30px;height:30px;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}"
         ".jb-detail-head-remove:hover{border-color:#ef4444;color:#ef4444}"
         ".jb-detail-accounts{display:flex;flex-direction:column;gap:8px}"
@@ -32481,10 +32505,10 @@ def _render_jailbreak_html() -> str:
         ".jb-fail-badge{display:inline-flex;align-items:center;gap:5px;background:rgba(239,68,68,.13);color:#f87171;font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;border:1px solid rgba(239,68,68,.3);white-space:nowrap;flex-shrink:0}"
         ".jb-fail-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:#ef4444;flex-shrink:0}"
         ".jb-row-not-scraped{opacity:.85;background:#0a0c11 !important}"
-        ".jb-row-not-scraped .va-ig3-row-handle{color:#a78bfa}"
+        ".jb-row-not-scraped .va-ig3-row-handle{color:var(--ui-accent-text)}"
         ".jb-row-not-scraped:hover{opacity:1}"
-        # Hover row : bordure rose plus prononcee
-        ".jb-row:hover{background:#13161d;border-color:#ec4899 !important;box-shadow:0 4px 14px rgba(236,72,153,.08)}"
+        # Hover row : accent du theme
+        ".jb-row:hover{background:#13161d;border-color:var(--ui-accent) !important;box-shadow:0 4px 14px rgba(var(--ui-accent-rgb),.08)}"
         ".jb-detail-actions{display:flex;gap:8px;margin-top:14px;padding-top:12px;border-top:1px dashed #1f1f1f}"
         ".jb-no-selection{background:#0f0f0f;border:1px dashed #232323;border-radius:14px;padding:80px 40px;text-align:center;color:#666}"
         ".jb-no-selection-icon{font-size:42px;margin-bottom:12px;opacity:.5}"
@@ -32590,7 +32614,9 @@ def _render_jailbreak_html() -> str:
         # Lookup stats Insta : normalise le handle (lowercase, strip @)
         handle_norm = _normalize_insta_handle(raw_username) if callable(_normalize_insta_handle) else raw_username.lower().lstrip("@")
         s = ig_stats_cache.get(handle_norm) or {}
-        has_stats = bool(s) and not s.get("error")
+        has_stats = _stats_available(s)
+        observed_label = _stats_observed_label(s) if has_stats else ""
+        old_stats = has_stats and bool(s.get("stale") or s.get("error"))
         is_banned = bool(s.get("banned"))
         is_not_scraped = not s  # aucune entree cache du tout
         pp_url = s.get("profile_pic_url") or ""
@@ -32682,6 +32708,11 @@ def _render_jailbreak_html() -> str:
             status_badge = f"<span class='va-ig3-ban-badge' title='{_why_ban}'>Banni</span>"
         elif is_not_scraped:
             status_badge = "<span class='jb-not-scraped-badge' title='Compte pas encore scrape (stats non disponibles)'>Non scrapé</span>"
+        elif old_stats:
+            status_badge = (f"<span class='jb-stale-badge' title='Dernier relevé valable — "
+                            f"les vues correspondent à cette date'>Relevé du {html_escape(observed_label)}</span>")
+        elif s.get("provider_blocked") or collector_paused:
+            status_badge = "<span class='jb-not-scraped-badge'>Collecte en pause</span>"
         elif s.get("a_verifier"):
             # NI VIVANT NI BANNI. Instagram n'a pas tranche (429, mur de
             # connexion, timeout) : on ne condamne pas, on demande un coup
@@ -32737,7 +32768,7 @@ def _render_jailbreak_html() -> str:
         # on n ecrit pas « +0 » pour dire « on ne sait pas encore ».
         _g24 = _gains24.get(handle_norm)
         _gain_html = ""
-        if isinstance(_g24, int) and _g24:
+        if not old_stats and isinstance(_g24, int) and _g24:
             _gain_html = ("<span class='jb-gain%s'>%+d</span>"
                           % ("" if _g24 > 0 else " neg", _g24))
 
@@ -32786,7 +32817,7 @@ def _render_jailbreak_html() -> str:
             st = ig_stats_cache.get(hn) or {}
             if st.get("banned"):
                 n_banned += 1
-            elif st and not st.get("error"):
+            elif st and not st.get("error") and not st.get("stale"):
                 n_ok += 1
         if n_ok > 0:
             cls = "on"
@@ -32933,9 +32964,9 @@ def _render_jailbreak_html() -> str:
 
                 # Scrape pill dans le header detail (X/Y scrapés)
                 if health_cls == "on":
-                    scrape_pill = f"<span class='jb-detail-scrape-pill on'>● {n_ok}/{n_tot} scrapés</span>"
+                    scrape_pill = f"<span class='jb-detail-scrape-pill on'>{n_ok}/{n_tot} scrapés</span>"
                 elif health_cls == "pending":
-                    scrape_pill = "<span class='jb-detail-scrape-pill pending'>● en attente de scrape</span>"
+                    scrape_pill = f"<span class='jb-detail-scrape-pill pending'>{'Collecte en pause' if collector_paused else 'En attente de scrape'}</span>"
                 else:
                     scrape_pill = ""
 
@@ -32975,6 +33006,9 @@ def _render_jailbreak_html() -> str:
                                 f"scrape », en haut de la page.\">"
                                 f"⏸ non suivie — {_eo['non_mesures']} compte(s) "
                                 f"non mesuré(s)</span>")
+                            raise _SuiviEteint()
+                        if collector_paused:
+                            scrape_pill += "<span class='jb-acc-pill quiet'>Activité non mesurable · collecte en pause</span>"
                             raise _SuiviEteint()
                         # « Qui tournent », le mot du propriétaire. « Actifs »
                         # désignait déjà autre chose sur cette ligne, et le
@@ -33048,25 +33082,25 @@ def _render_jailbreak_html() -> str:
                     if _n_ban:
                         scrape_pill += (
                             f"<span class='jb-acc-pill ban' title='Comptes bannis / renommés (introuvables sur Instagram)'>"
-                            f"⛔ {_n_ban} banni{'s' if _n_ban > 1 else ''}</span>"
+                            f"{_n_ban} banni{'s' if _n_ban > 1 else ''}</span>"
                         )
                     _n_fail = _sm.get("fail", 0)
                     if _n_fail:
                         scrape_pill += (
                             f"<span class='jb-acc-pill warn' title='Scrape en échec ou jamais scrapé — "
-                            f"relance « Scraper ce bloc » pour connaître la raison'>"
-                            f"⚠ {_n_fail} non scrapé{'s' if _n_fail > 1 else ''}</span>"
+                            f"consulte l'état de la collecte en haut de page'>"
+                            f"{_n_fail} relevé{'s' if _n_fail > 1 else ''} indisponible{'s' if _n_fail > 1 else ''}</span>"
                         )
                     _ocls = "warn" if _n_oubli else "quiet"
                     scrape_pill += (
                         f"<span class='jb-acc-pill {_ocls}' title=\"Comptes sans post depuis plus de 48 h\">"
-                        f"🕒 {_n_oubli} oubli{'s' if _n_oubli > 1 else ''} 48h</span>"
+                        f"{_n_oubli} oubli{'s' if _n_oubli > 1 else ''} 48h</span>"
                     )
                     _mcls = "warn" if _n_mois else "quiet"
                     scrape_pill += (
                         f"<span class='jb-acc-pill {_mcls}' title=\"Oublis du mois : 1 par JOUR où au moins un "
                         f"compte est resté muet plus de 48 h (10 comptes le même jour = 1 seul oubli)\">"
-                        f"▤ {_n_mois} oubli{'s' if _n_mois > 1 else ''} ce mois</span>"
+                        f"{_n_mois} oubli{'s' if _n_mois > 1 else ''} ce mois</span>"
                     )
 
                 detail_cards_html.append(
@@ -33099,7 +33133,7 @@ def _render_jailbreak_html() -> str:
                     f"data-identity='{ident_safe}' data-va-name='{va_attr}' "
                     f"data-va-discord='{html_escape(discord_username)}' "
                     f"onclick='jbOpenEditVaModal(this)' title='Modifier ce VA (blaze / Discord — la PP se resync)' "
-                    f"style='background:rgba(168,85,247,.12);border:1px solid rgba(168,85,247,.35);color:#c084fc;"
+                    f"style='background:rgba(var(--ui-accent-rgb),.12);border:1px solid rgba(var(--ui-accent-rgb),.35);color:var(--ui-accent-text);"
                     f"width:28px;height:28px;border-radius:8px;cursor:pointer;font-size:13px;flex-shrink:0;margin-right:6px'>✎</button>"
                     f"<button type='button' class='jb-detail-head-remove' "
                     f"onclick=\"jbRemoveVa('{ident_safe}','{va_attr}')\" title='Retirer ce VA'>×</button>"
@@ -33331,7 +33365,7 @@ def _render_jailbreak_html() -> str:
         "<div id='jb-bulk-count' style='margin-top:8px;font-size:12px;color:#888'></div>"
         "<div style='display:flex;gap:10px;justify-content:flex-end;margin-top:18px'>"
         "<button type='button' onclick='jbCloseBulkModal()' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:10px 18px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600'>Annuler</button>"
-        "<button type='submit' style='background:#ec4899;color:#fff;border:0;padding:10px 22px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700'>Ajouter tout</button>"
+        "<button type='submit' style='background:var(--ui-accent);color:var(--ui-on-accent);border:0;padding:10px 22px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700'>Ajouter tout</button>"
         "</div>"
         "</form>"
         "</div></div></div>"
@@ -33357,7 +33391,7 @@ def _render_jailbreak_html() -> str:
         "</small>"
         "<div style='display:flex;gap:10px;justify-content:flex-end;margin-top:18px'>"
         "<button type='button' onclick='jbCloseAddVaModal()' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:10px 18px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600'>Annuler</button>"
-        "<button type='submit' style='background:linear-gradient(135deg,#a855f7,#6366f1);color:#fff;border:0;padding:10px 22px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700'>Ajouter</button>"
+        "<button type='submit' style='background:var(--ui-accent);color:var(--ui-on-accent);border:0;padding:10px 22px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700'>Ajouter</button>"
         "</div>"
         "</form>"
         "</div></div></div>"
@@ -33385,7 +33419,7 @@ def _render_jailbreak_html() -> str:
         "</small>"
         "<div style='display:flex;gap:10px;justify-content:flex-end;margin-top:18px'>"
         "<button type='button' onclick='jbCloseEditVaModal()' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:10px 18px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600'>Annuler</button>"
-        "<button type='submit' style='background:linear-gradient(135deg,#a855f7,#6366f1);color:#fff;border:0;padding:10px 22px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700'>Enregistrer</button>"
+        "<button type='submit' style='background:var(--ui-accent);color:var(--ui-on-accent);border:0;padding:10px 22px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700'>Enregistrer</button>"
         "</div>"
         "</form>"
         "</div></div></div>"
@@ -33482,7 +33516,7 @@ def _render_jailbreak_html() -> str:
         "<textarea name='notes' id='jb-modal-notes' maxlength='500' placeholder='Notes libres (optionnel)'></textarea>"
         "<div style='display:flex;gap:10px;justify-content:flex-end;margin-top:18px'>"
         "<button type='button' onclick='jbCloseModal()' style='background:transparent;border:1px solid #2a2a2a;color:#aaa;padding:10px 18px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600'>Annuler</button>"
-        "<button type='submit' style='background:#ec4899;color:#fff;border:0;padding:10px 22px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700'>Sauvegarder</button>"
+        "<button type='submit' style='background:var(--ui-accent);color:var(--ui-on-accent);border:0;padding:10px 22px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:700'>Sauvegarder</button>"
         "</div>"
         "</form>"
         "</div></div></div>"
@@ -33891,10 +33925,8 @@ def _render_jailbreak_html() -> str:
         "       if(typeof showToast === 'function') showToast(j.error || 'Echec', 'error');"
         "       return;"
         "     }"
-        "     var c = j.cycle || {};"
         "     if(typeof showToast === 'function')"
-        "       showToast(( c.annonces || 0 ) + ' annonce(s), ' + ( c.telecharges || 0 )"
-        "                 + ' video(s), ' + ( c.reeditions || 0 ) + ' mise(s) a jour', 'success');"
+        "       showToast('Vérification lancée pour la veille. Envoi à partir de 9 h (Paris).', 'success');"
         "     jbSoftRefresh();"
         "   });"
         "}"
@@ -34621,6 +34653,15 @@ def _render_jailbreak_html() -> str:
         "      if(typeof showToast === 'function') showToast('Erreur réseau — réessaie', 'error', 2500); });"
         "}"
         # === Scraper maintenant : declenche /insta/refresh_now puis poll l etat ===
+        "function jbRetryProvider(btn){"
+        "  if(btn)btn.disabled=true;"
+        "  fetch('/insta/refresh_now?retry_provider=1',{method:'POST'})"
+        "  .then(function(r){return r.json();}).then(function(d){"
+        "    if(d.ok)jbPollScrape(null,null,null);"
+        "    else if(typeof showToast==='function')showToast(d.error||'Réessai impossible','error');"
+        "  }).catch(function(){if(typeof showToast==='function')showToast('Erreur réseau','error');})"
+        "  .finally(function(){if(btn)btn.disabled=false;});"
+        "}"
         "function jbScrapeNow(btn){"
         "  if(btn && btn.dataset.busy === '1') return;"
         "  var ico = document.getElementById('jb-scrape-now-ico');"
@@ -34719,7 +34760,7 @@ def _render_jailbreak_html() -> str:
         "  var txt=document.getElementById('jb-scrape-prog-txt');"
         "  var sub=document.getElementById('jb-scrape-prog-sub');"
         "  if(bar) bar.style.width='100%';"
-        "  if(txt) txt.textContent='Terminé ✓';"
+        "  if(txt) txt.textContent=(st&&st.last_summary&&st.last_summary.paused)?'Collecte en pause':'Terminé';"
         "  if(box){ var sp=box.querySelector('.jb-prog-spin'); if(sp) sp.style.display='none'; }"
         # Récap final : POURQUOI ça a échoué, regroupé par motif
         "  var sm = (st && st.last_summary) ? st.last_summary : null;"
@@ -34733,6 +34774,11 @@ def _render_jailbreak_html() -> str:
         "        h += '<div style=\"color:#fbbf24;font-size:11px;margin-top:3px\">• ' + rs[i][1]"
         "          + ' × ' + jbEsc(rs[i][0]) + '</div>';"
         "      }"
+        "    }"
+        "    if(sm.paused){"
+        "      h='<b>Collecte en pause</b> · '+jbEsc((sm.provider_pause||{}).error||'Limite fournisseur')"
+        "        +'<div>'+(sm.skipped||0)+' comptes non interrogés. Derniers chiffres conservés.</div>';"
+        "      if(bar)bar.style.width=(sm.total?Math.round((sm.processed||0)*100/sm.total):0)+'%';"
         "    }"
         "    sub.innerHTML = h;"
         "  }"
@@ -34766,8 +34812,9 @@ def _render_jailbreak_html() -> str:
         "      if(stt === 'idle' && tries > 1){"
         "        clearInterval(iv);"
         "        jbProgDone(s && s.state);"
-        "        if(lbl) lbl.textContent='Terminé ✓';"
-        "        if(typeof showToast === 'function') showToast('✓ Scrape terminé — rechargement…', 'success', 2000);"
+        "        var paused=!!(s.state.last_summary&&s.state.last_summary.paused);"
+        "        if(lbl)lbl.textContent=paused?'Collecte en pause':'Collecte terminée';"
+        "        if(typeof showToast==='function')showToast(paused?'Quota épuisé — chiffres conservés':'Collecte terminée',paused?'info':'success',3000);"
         "        setTimeout(function(){ location.reload(); }, (s && s.state && s.state.last_summary && s.state.last_summary.err) ? 9000 : 1500);"
         "      } else if(tries > 3600){"  # ~2h max (695 comptes a 45 req/min = ~46 min)
         "        clearInterval(iv);"
@@ -39304,6 +39351,39 @@ body.light .sv-pill:hover{border-color:#d1d5db;color:#111827}
 body.light .sv-pill.on{background:rgba(22,163,74,.12);
   border-color:rgba(22,163,74,.38);color:#15803d}
 .sv-tout{display:flex;gap:6px;margin-top:8px}
+
+/* Réglages Instagram compacts, mêmes surfaces que le thème du site. */
+.sv-settings{padding:16px 18px}
+.sv-heading{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;list-style:none}
+.sv-heading b{color:var(--ui-text,#e7eaf3);font-weight:650}
+.sv-heading>span{color:var(--ui-muted,#939aaa);font-size:12px}
+.sv-heading::-webkit-details-marker{display:none}
+.sv-follow>summary{cursor:pointer}
+.sv-heading .sv-manage{margin-left:auto;color:var(--ui-text,#e7eaf3)}
+.sv-settings .sv-h{font-size:12px;margin:8px 0 0}
+.sv-settings .sv-result{color:var(--ui-text,#e7eaf3);margin-top:12px}
+.sv-details{margin-top:14px;border-top:1px solid var(--ui-border,#23262f);padding-top:12px}
+.sv-details>summary{font-size:12px;cursor:pointer;color:var(--ui-muted,#939aaa)}
+.sv-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:12px 0;font-size:12px}
+.sv-controls button,.sv-controls input{font:inherit;color:var(--ui-text,#e7eaf3);background:transparent;
+border:1px solid var(--ui-border,#303440);border-radius:7px;padding:7px 10px}
+.sv-controls button{cursor:pointer}
+.sv-controls input{width:100px;max-width:100%;box-sizing:border-box}
+.sv-controls button:disabled{opacity:.6;cursor:wait}
+.sv-identities{margin:12px 0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 24px}
+.sv-identity{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;
+border-bottom:1px solid var(--ui-border,#23262f);font-size:12px;color:var(--ui-text,#e7eaf3)}
+.sv-identity button{display:flex;align-items:center;gap:8px;font:inherit;color:var(--ui-muted,#939aaa);
+background:none;border:0;padding:3px 0;cursor:pointer}
+.sv-switch{display:inline-block;width:26px;height:16px;border-radius:20px;background:var(--ui-border,#444);padding:2px;box-sizing:border-box}
+.sv-switch:after{content:'';display:block;width:12px;height:12px;background:#fff;border-radius:50%}
+[aria-checked=true] .sv-switch{background:var(--ui-accent,#3b82f6)}
+[aria-checked=true] .sv-switch:after{margin-left:10px}
+.sv-settings .tn-box{margin-top:12px;border:0;background:none}
+.sv-settings .tn-sum{border:0;border-radius:0;background:none;padding:6px 0;font-size:12px}
+.sv-settings .tn-cpt{background:none;color:inherit}
+body.light .sv-settings{--ui-text:#17202f;--ui-muted:#687181;--ui-border:#e3e5eb}
+@media(max-width:580px){.sv-identities{grid-template-columns:1fr}.sv-heading .sv-manage{margin-left:auto}}
 /* L interrupteur de la ligne : discret quand il est allume — c est l etat
    normal — et franchement eteint quand il ne l est pas. */
 .jb-suivi{flex-shrink:0;width:18px;height:18px;display:inline-flex;
@@ -40718,23 +40798,18 @@ def _render_sessions_html() -> str:
         jour = _sv.jour_de(_tSe.time())
 
     cfg = _sv.config()
-    # LA LISTE DES ATTENDUS VIENT DU BOT QUAND IL TOURNE. Lui seul sait quels
-    # salons va- existent encore et quel surnom porte chaque membre sur SON
-    # serveur. Le repli lit users.json en entier -- 179 personnes, patrons et
-    # testeurs compris : c'est ce qui a produit un bilan accusant tout le
-    # monde. On s'en sert donc seulement faute de mieux, et l'ecran le dit.
+    # Jessye / Youl4b uniquement. Un bot absent ou un cache incomplet ne
+    # justifie jamais de réintroduire le registre global users.json.
     _cog_att = _sessions_cog()
     attendus, _att_fiable = [], False
     if _cog_att is not None:
         try:
             attendus = _cog_att._attendus_enrichis()
-            _att_fiable = True
+            _att_fiable = bool(attendus)
         except Exception:
             attendus = []
-    if not attendus:
-        attendus = _sv.attendus()
-    resume = _sv.resume_jour(jour, attendus=attendus)
-    gens = _sv.resume_par_personne(jour, attendus=attendus)
+    resume = _sv.resume_jour(jour, attendus=attendus, limiter_aux_attendus=True)
+    gens = _sv.resume_par_personne(jour, attendus=attendus, limiter_aux_attendus=True)
     cog = _sessions_cog()
     direct = None
     if cog is not None:
@@ -40850,14 +40925,10 @@ def _render_sessions_html() -> str:
               + __import__("datetime").timedelta(days=1)).isoformat()
 
     avert = ""
-    if attendus and not _att_fiable:
-        avert = ("<div class='se-avert'>Le bot est arrêté : la liste des VA "
-                 "attendus est lue brute dans le registre et contient des "
-                 "personnes qui ne sont pas des VA. Les absents affichés ne "
-                 "sont pas fiables tant qu'il n'a pas redémarré.</div>")
-    if not attendus:
-        avert = ("<div class='se-avert'>Aucun VA connu dans le registre : "
-                 "la page ne peut montrer que les présents, jamais les absents.</div>")
+    if not _att_fiable:
+        avert = ("<div class='se-avert'>La liste Jessye US / Youl4b n'est pas "
+                 "disponible ou aucun VA n'a pu être relié. Aucun absent "
+                 "n'est calculé tant que la correspondance n'est pas vérifiée.</div>")
 
     return (_SESSIONS_CSS + bandeau + avert
             + "<div class='se-barre'>"
@@ -49527,7 +49598,9 @@ def _banger_texte(f: dict) -> str:
         qui += f" · {f['va']}"
     if f.get("identite"):
         qui += f" ({f['identite']})"
-    lignes = [f"🔥 **BANGER** — {qui}",
+    jour = str(f.get("jour_bilan") or "")
+    titre = "Banger du " + "/".join(reversed(jour.split("-"))) if jour else "Banger"
+    lignes = [f"**{titre}** — {qui}",
               f"👁 **{vues:,}".replace(",", " ") + " vues**"]
     det = int(f.get("vues_detection") or 0)
     if det and vues > det:
@@ -49537,7 +49610,7 @@ def _banger_texte(f: dict) -> str:
     if f.get("video") == "ok":
         etat.append("🎬 vidéo archivée")
     elif f.get("video") == "perdue":
-        etat.append("🎬 vidéo non récupérable (" + str(f.get("raison_video") or "?") + ")")
+        etat.append("Vidéo indisponible · lien conservé")
     else:
         # « EN ATTENTE » NE DOIT PAS MENTIR. Hors de la fenetre de 24 h, la
         # video ne descendra jamais : on ne telecharge que les meilleurs reels
@@ -49560,15 +49633,7 @@ def _banger_texte(f: dict) -> str:
 
 
 def _banger_salon_et_envoi(f: dict, fichier) -> tuple:
-    """Poste l'annonce. Rend (ok, channel_id, message_id, info).
-
-    OU ? D'abord un salon nomme simplement « banger » (celui du proprietaire),
-    n'importe ou sur les serveurs ; a defaut, le salon « banger-<identite> »
-    dans la categorie de l'identite, comme le fait deja l'etoile de la
-    Bibliotheque. L'ordre est celui-la et pas l'inverse : les salons par
-    identite servent a POUSSER du contenu a reposter, pas a signaler ce qui a
-    explose — melanger les deux rendrait les deux illisibles.
-    """
+    """Poste dans le salon banger de Youl4b uniquement."""
     import asyncio
     if _BOT_REF is None:
         return False, 0, 0, "bot pas initialise"
@@ -49580,30 +49645,11 @@ def _banger_salon_et_envoi(f: dict, fichier) -> tuple:
 
     async def _envoyer():
         import discord
-        salon = None
-        # 1) Un salon « banger » global (pas suffixe d'une identite).
-        for guild in _BOT_REF.guilds:
-            for c in guild.text_channels:
-                n = "".join(ch for ch in c.name.lower() if ch.isalnum())
-                if n == "banger" or n == "bangers":
-                    salon = c
-                    break
-            if salon:
-                break
-        # 2) Repli : le salon banger de l'identite.
-        if salon is None and ident:
-            for guild in _BOT_REF.guilds:
-                cat = _find_identity_category(guild, ident)
-                if cat is None:
-                    continue
-                for c in cat.channels:
-                    if isinstance(c, discord.TextChannel) and "banger" in c.name.lower():
-                        salon = c
-                        break
-                if salon:
-                    break
-        if salon is None:
-            return False, 0, 0, "aucun salon 'banger' trouvé"
+        import bangers as daily
+        salon = _BOT_REF.get_channel(daily.CHANNEL_ID)
+        if (salon is None or getattr(getattr(salon, "guild", None), "id", None)
+                != daily.GUILD_ID):
+            return False, 0, 0, "salon Youl4b indisponible"
         # La video n'est jointe que si Discord l'accepte. Trop grosse, elle
         # reste sur le disque du VPS et le message ne porte que le lien : on ne
         # renonce PAS a l'annonce pour une histoire de taille.
@@ -49618,10 +49664,10 @@ def _banger_salon_et_envoi(f: dict, fichier) -> tuple:
             if octets:
                 import io as _io_b
                 m = await salon.send(
-                    content=texte,
+                    content=texte, allowed_mentions=discord.AllowedMentions.none(),
                     file=discord.File(_io_b.BytesIO(octets), filename=fichier.name))
             else:
-                m = await salon.send(content=texte)
+                m = await salon.send(content=texte, allowed_mentions=discord.AllowedMentions.none())
             return True, salon.id, m.id, f"#{salon.name}"
         except Exception as e:                                # noqa: BLE001
             return False, 0, 0, f"envoi: {e}"
@@ -49711,71 +49757,45 @@ _BANGER_CYCLE = {"en_cours": False, "ts": 0.0, "dernier": {}}
 
 
 def _banger_cycle() -> dict:
-    """Telecharge ce qui manque, annonce ce qui ne l'est pas, remet a jour les
-    compteurs. Appele par le demon de fond, et par le bouton du site."""
-    import bangers as _bg
-    import time as _t_bc
-    if _BANGER_CYCLE["en_cours"]:
-        return {"en_cours": True}
-    _BANGER_CYCLE["en_cours"] = True
-    bilan = {"telecharges": 0, "echecs": 0, "annonces": 0, "reeditions": 0,
-             "videos_jointes": 0}
-    try:
-        # 1) LES FICHIERS D'ABORD. Une annonce qui porte la video vaut mieux que
-        #    deux messages, et l'archive est le vrai but.
-        for f in _bg.a_telecharger(limite=8):
-            sc = f["shortcode"]
-            ok, desc, raison, trace = _banger_recuperer(sc, f.get("url") or "")
-            _bg.noter_telechargement(sc, ok, description=desc, raison=raison,
-                                     trace=trace)
-            bilan["telecharges" if ok else "echecs"] += 1
-        # 2) LES ANNONCES, plafonnees : au premier demarrage la file est pleine
-        #    et six passages par jour l'ecoulent sans noyer le salon.
-        for f in _bg.a_annoncer():
-            sc = f["shortcode"]
-            f = _bg.fiche(sc) or f
-            f["shortcode"] = sc
-            fichier = _bg.chemin_video(sc) if _bg.video_presente(sc) else None
-            ok, cid, mid, info = _banger_salon_et_envoi(f, fichier)
-            if ok:
-                _bg.noter_annonce(sc, cid, mid, vues=int(f.get("vues") or 0),
-                                  avec_video=bool(fichier))
-                bilan["annonces"] += 1
+    """À 9 h Paris : toutes les fiches de la veille, puis le récapitulatif."""
+    import asyncio
+    import bangers as bg
+    import time as clock
+    jour, _, _, pret = bg.fenetre_veille()
+    suivi = identites_suivies()
+    bilan = {"jour": jour, "annonces": 0}
+    if not ("*" in suivi or bg.IDENTITE in suivi):
+        bilan["attente"] = "Identité désactivée"
+    elif not (_BOT_REF and _BOT_REF.is_ready()):
+        bilan["attente"] = "Bot indisponible"
+    elif not pret:
+        bilan["attente"] = "Envoi à partir de 9 h, heure de Paris"
+    else:
+        try:
+            journal = bg._lire_journee(jour)
+            if journal and journal.get("termine") and journal.get("format") == bg.FORMAT_DISCORD:
+                bilan.update(termine=True, total=len(journal["reels"]))
             else:
-                log.warning(f"[bangers] annonce {sc} : {info}")
-                break        # salon absent / bot HS : inutile d'insister
-        # 2 bis) LA VIDEO EN RETARD. Une annonce partie sans piece jointe
-        #    (cookies perimes ce jour-la) laisse la seule copie sur le VPS.
-        #    Des que le fichier descend, on le poste en reponse : c'est la
-        #    sauvegarde, elle ne peut pas rester sur un seul disque.
-        for f in _bg.a_completer():
-            sc = f["shortcode"]
-            a = f.get("annonce") or {}
-            if _banger_joindre_video(a.get("channel_id"), a.get("message_id"),
-                                     _bg.chemin_video(sc)):
-                _bg.noter_video_envoyee(sc)
-                bilan["videos_jointes"] = bilan.get("videos_jointes", 0) + 1
-        # 3) LES COMPTEURS. « elle est a 50 000 maintenant » : on re-ecrit le
-        #    message existant plutot que d'en poster un second.
-        for f in _bg.a_reediter():
-            sc = f["shortcode"]
-            a = f.get("annonce") or {}
-            if _banger_reediter(a.get("channel_id"), a.get("message_id"),
-                                _banger_texte(f)):
-                _bg.noter_annonce(sc, a.get("channel_id"), a.get("message_id"),
-                                  vues=int(f.get("vues") or 0))
-                bilan["reeditions"] += 1
-    except Exception as e:                                    # noqa: BLE001
-        log.error(f"[bangers] cycle : {e}")
-        bilan["erreur"] = str(e)[:160]
-    finally:
-        _BANGER_CYCLE["en_cours"] = False
-        _BANGER_CYCLE["ts"] = _t_bc.time()
-        _BANGER_CYCLE["dernier"] = dict(bilan)
+                loop = _BOT_REF.loop
+                def attendre(coro, timeout=180):
+                    return asyncio.run_coroutine_threadsafe(coro, loop).result(timeout=timeout)
+                channel, gerants = attendre(bg.contexte_publication(_BOT_REF), timeout=60)
+                def preparer(fiches):
+                    resultat = bg.preparer_fiches(fiches)
+                    for f in resultat.values():
+                        f['discord_id'] = gerants.get(f.get('va'), '')
+                    return resultat
+                bilan = bg.publier_journee(jour, preparer,
+                    lambda f, it: attendre(bg.publier_fiche_discord(_BOT_REF, channel, f, it)),
+                    lambda j, i, page: attendre(bg.publier_recap_discord(_BOT_REF, channel, j, i, page)),
+                    strict_veille=True)
+        except Exception as e:
+            log.error(f"[bangers] journée interrompue : {type(e).__name__}")
+            bilan = {"jour": jour, "erreur": "Envoi interrompu : vérifier le journal du jour"}
+    _BANGER_CYCLE.update(ts=clock.time(), dernier=bilan)
     return bilan
 
 
-#: L'essai a la demande : son etat, pour que la page puisse le suivre.
 _BANGER_TEST = {"en_cours": False, "etape": "", "rapport": None, "ts": 0.0}
 
 
@@ -49972,6 +49992,18 @@ def _start_auto_scrape_daemon():
                 log.error(f"[insta-bg-scrape] cycle err: {e}")
             _t.sleep(SCRAPE_INTERVAL_SEC)
 
+    def bangers_matin():
+        _t.sleep(60)
+        while True:
+            try:
+                result = _banger_cycle()
+                if any(result.get(k) for k in ("annonces", "telecharges", "echecs")):
+                    log.info(f"[bangers] sélection du matin : {result}")
+            except Exception as e:
+                log.error(f"[bangers] réveil du matin : {e}")
+            _t.sleep(60)
+
+    threading.Thread(target=bangers_matin, daemon=True, name="bangers-matin").start()
     t = threading.Thread(target=loop, daemon=True, name="insta-bg-scrape")
     t.start()
     log.info("[insta-bg-scrape] daemon demarre (cycle 3h + DL top 30/compte)")
@@ -50352,6 +50384,37 @@ def create_app():
         safe_json.write_text(DATA_DIR / "revoked_sessions.json",
                              json.dumps(sorted(cur)[-500:], ensure_ascii=False))
 
+    # ── FAVICON ──────────────────────────────────────────────────────
+    # Servi SANS authentification, et c'est volontaire : le navigateur
+    # reclame l'icone sur la page de CONNEXION aussi, souvent avant
+    # d'avoir le moindre cookie. Aucune de ces trois routes n'appelle
+    # is_auth() — c'est ce qui les rend publiques. Elles ne servent que
+    # quatre fichiers d'image fixes, aucune donnee.
+    _MARQUE = str((Path("brand")).resolve())
+
+    @app.route("/favicon.svg")
+    def _favicon_svg():
+        from flask import send_from_directory
+        return send_from_directory(_MARQUE, "favicon.svg",
+                                   mimetype="image/svg+xml")
+
+    @app.route("/favicon.ico")
+    def _favicon_ico():
+        # Les navigateurs reclament /favicon.ico tout seuls, a la racine,
+        # pour TOUTE page du domaine — y compris les pages d'erreur qui
+        # n'ont pas de <link>. On y sert le PNG : aucun navigateur actuel
+        # ne regarde l'extension, tous lisent le type MIME.
+        from flask import send_from_directory
+        return send_from_directory(_MARQUE, "favicon-32.png",
+                                   mimetype="image/png")
+
+    @app.route("/apple-touch-icon.png")
+    @app.route("/apple-touch-icon-precomposed.png")
+    def _favicon_apple():
+        from flask import send_from_directory
+        return send_from_directory(_MARQUE, "favicon-180.png",
+                                   mimetype="image/png")
+
     def is_auth():
         """Authentifié ET toujours autorisé : un compte supprimé/désactivé ou
         une session révoquée perd l'accès IMMÉDIATEMENT (avant : jusqu'à 30
@@ -50387,14 +50450,15 @@ def create_app():
             if uname and not session.get("legacy_owner"):
                 users = _load_web_users() or {}
                 rec = users.get(uname)
-                if users and rec is None:
+                if not isinstance(rec, dict):
                     session.clear()        # compte supprimé
                     return False
                 if isinstance(rec, dict) and (rec.get("disabled") or rec.get("actif") is False):
                     session.clear()        # compte désactivé
                     return False
         except Exception:
-            pass
+            session.clear()
+            return False
         return True
 
     def _is_admin():
@@ -50462,6 +50526,7 @@ def create_app():
         "/gmsdash/", "/gms/", "/linkscale/", "/settings/role", "/admin/",
         "/sheets", "/external/list", "/va/get_insta",
         "/sessions/",
+        "/mypulslive/", "/mypuls/keys/test",
         # Le jeton de synchro ouvre la Bibliotheque 2 en lecture, en
         # enumeration et en ECRITURE, sans cookie : /sync/list et /sync/file
         # n'exigent que lui. Un compte restreint pouvait donc le recopier et
@@ -50543,6 +50608,7 @@ def create_app():
         # (surveillance de nuit) ; toute écriture reste admin-only.
         "/parc/": "remote2",
         "/sessions/": "sessions",
+        "/mypulslive/": "mypulslive",
     }
 
     @app.before_request
@@ -58094,7 +58160,8 @@ def create_app():
                 # sur une periode, et la moitie de l ecran basculait en
                 # francais sous ses yeux.
             _frag = _render_home_dashboard_html()
-            return _traduire_html(_frag) if _langue_courante() == "en" else _frag
+            html = _traduire_html(_frag) if _langue_courante() == "en" else _frag
+            return html, 200, {"Cache-Control": "private, no-store"}
         except Exception as e:
             return f"<div style='color:#f87171;padding:20px'>Erreur : {e}</div>"
 
@@ -60865,26 +60932,10 @@ def create_app():
                             "diag": _banger_essai_cookies(
                                 request.form.get("shortcode") or "")})
         if request.form.get("test") == "1":
-            if _BANGER_TEST["en_cours"]:
-                return jsonify({"ok": True, "lance": False, "en_cours": True,
-                                "etape": _BANGER_TEST["etape"]})
-            try:
-                _h_t = int(request.form.get("heures") or 24)
-                _n_t = int(request.form.get("combien") or 5)
-            except Exception:
-                _h_t, _n_t = 24, 5
-            threading.Thread(
-                target=_banger_test,
-                kwargs={"heures": max(1, min(168, _h_t)),
-                        "combien": max(1, min(20, _n_t))},
-                daemon=True, name="banger-essai").start()
-            return jsonify({"ok": True, "lance": True})
+            return jsonify({"ok": False, "error": "Utilise l’envoi du jour : uniquement les publications de la veille."}), 400
         if request.form.get("cycle") == "1":
-            # SYNCHRONE, et c'est voulu : le bouton doit dire ce qui s'est
-            # passe. Le cycle est plafonne (8 telechargements, 12 annonces), et
-            # un second clic pendant qu'il tourne rend simplement « en cours ».
-            return jsonify({"ok": True, "cycle": _banger_cycle(),
-                            "bilan": _bg_r.bilan()})
+            threading.Thread(target=_banger_cycle, daemon=True, name="banger-manuel").start()
+            return jsonify({"ok": True, "lance": True})
         brut = (request.form.get("seuil") or "").strip()
         if not brut:
             return jsonify({"ok": False, "error": "Seuil manquant"})
@@ -65533,9 +65584,13 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         import threading as _th2
         def _bg():
             try:
+                if retry_provider:
+                    import insta_scraper
+                    insta_scraper.clear_rapidapi_pause()
                 _do_refresh(handles, label=f"manual:{scope}")
             except Exception as e:
                 print(f"[insta-refresh:manual] crash: {e}", flush=True)
+        retry_provider = request.args.get("retry_provider") == "1"
         t = _th2.Thread(target=_bg, daemon=True, name="insta-refresh-manual")
         t.start()
         return jsonify({"ok": True, "started": True, "handles": len(handles), "scope": scope})

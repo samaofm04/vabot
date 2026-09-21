@@ -661,10 +661,10 @@ _API_OVERVIEW_LOCK = _th.Lock()
 _API_OVERVIEW_PERIME_MAX = 3600
 
 # OnlyFans marché US (ids MyPuls). Le reste des comptes OnlyFans = marché FR.
-OF_US_CREATOR_IDS = {3107, 3108}   # Jessye, Khloe
+OF_US_CREATOR_IDS = {3107, 3108, 3352}   # Jessye, Khloe, Emy
 
 
-def _relancer_overview(key, date_from, date_to, eur_usd, exclude):
+def _relancer_overview(key, date_from, date_to, eur_usd, exclude, segment="all"):
     """Recalcule un agregat perime en tache de fond, une seule fois a la fois.
 
     Le verrou n'est pas une precaution theorique : cinq onglets ouverts sur la
@@ -678,7 +678,7 @@ def _relancer_overview(key, date_from, date_to, eur_usd, exclude):
 
     def _tourner():
         try:
-            api_overview(date_from, date_to, eur_usd, force=True, exclude=exclude)
+            api_overview(date_from, date_to, eur_usd, force=True, exclude=exclude, segment=segment)
         except Exception:
             pass
         finally:
@@ -693,7 +693,7 @@ def _relancer_overview(key, date_from, date_to, eur_usd, exclude):
 
 
 def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
-                 force: bool = False, exclude=None) -> dict:
+                 force: bool = False, exclude=None, segment="all") -> dict:
     """Revenus agrégés via l'API officielle, sur une période.
 
     IMPORTANT : l'API renvoie déjà du NET (frais plateforme déduits) — on
@@ -703,7 +703,7 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
     import time as _t
     # modèles écartées (ex bella) : mêmes règles de match que le chemin scraping
     _excl = {re.sub(r"[^a-z0-9]", "", str(x).lower()) for x in (exclude or set())}
-    key = f"{date_from}|{date_to}|{eur_usd}|{','.join(sorted(_excl))}"
+    key = f"{date_from}|{date_to}|{eur_usd}|{','.join(sorted(_excl))}|{segment}"
     hit = _API_OVERVIEW_CACHE.get(key)
     if hit and not force:
         _age = _t.time() - hit[0]
@@ -715,7 +715,7 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
         # PERIME MAIS EXPLOITABLE : on le rend tel quel, et on recalcule
         # derriere. L appelant n attend rien ; l ecran affiche l age.
         if _age < _API_OVERVIEW_PERIME_MAX:
-            _relancer_overview(key, date_from, date_to, eur_usd, exclude)
+            _relancer_overview(key, date_from, date_to, eur_usd, exclude, segment)
             return dict(hit[1], age_s=int(_age), rafraichissement=True)
     if not api_configured():
         return {"ok": False, "error": "Token API MyPuls absent"}
@@ -744,6 +744,9 @@ def api_overview(date_from: str, date_to: str, eur_usd: float = 1.14,
         """Créatrice à compter. Un seul point de décision : le préchargement et
         la boucle doivent porter EXACTEMENT sur le même ensemble."""
         if not c.get("active"):
+            return False
+        from revenus_segments import creator_segment
+        if segment != "all" and creator_segment(c.get("id"), c.get("platform")) != segment:
             return False
         _ps = re.sub(r"[^a-z0-9]", "", str(c.get("pseudo") or "").lower())
         # modèle écartée (le scraping l'excluait, l'API doit aussi)
@@ -843,7 +846,7 @@ _API_SERIES_CACHE: Dict[str, Any] = {}
 _API_SERIES_TTL = 300
 
 
-def api_revenue_series(date_from: str, date_to: str, eur_usd: float = 1.14) -> dict:
+def api_revenue_series(date_from: str, date_to: str, eur_usd: float = 1.14, segment="all") -> dict:
     """Série journalière AGRÉGÉE toutes créatrices actives, en USD (API officielle).
 
     Somme les /creators/{id}/revenue-by-day de chaque créatrice active, converti
@@ -853,7 +856,7 @@ def api_revenue_series(date_from: str, date_to: str, eur_usd: float = 1.14) -> d
     Retourne {ok, days:[...], usd:[...], errors:[...]}.
     """
     import time as _t
-    key = f"{date_from}|{date_to}|{eur_usd}"
+    key = f"{date_from}|{date_to}|{eur_usd}|{segment}"
     hit = _API_SERIES_CACHE.get(key)
     if hit:
         # Même règle que l'agrégat : une série amputée ne vaut que 45 s, une
@@ -872,7 +875,10 @@ def api_revenue_series(date_from: str, date_to: str, eur_usd: float = 1.14) -> d
     sums_mym: Dict[str, float] = {}   # dashboard de calculer un BRUT par jour
     order: List[str] = []          # ordre des jours du 1er retour OK (même
     errors = []                    # période partout -> mêmes labels)
+    from revenus_segments import creator_segment
     for c in creators:
+        if segment != "all" and creator_segment(c.get("id"), c.get("platform")) != segment:
+            continue
         if not c.get("active"):
             continue
         r = api_revenue_by_day(c["id"], date_from, date_to)
@@ -2249,22 +2255,19 @@ def _assembler_stats(transactions, chatters, start_date, end_date,
         "period_end": end_date,
     }
 
-    # Aggrégation pour graphique : revenus par jour ET par créateur
-    # Convertit la date "29/05/2026 05:36" -> "2026-05-29"
-    def _to_iso(date_str: str) -> str:
-        try:
-            d, _, _ = date_str.partition(" ")  # "29/05/2026"
-            parts = d.split("/")
-            if len(parts) == 3:
-                return f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
-        except Exception:
-            pass
-        return ""
+    # API ISO timestamps and legacy dates use the same Paris calendar days.
+    from revenus_dates import transaction_day as _to_iso
 
     # Liste de tous les jours dans la période
     try:
         start_dt = date.fromisoformat(start_date)
         end_dt_inc = date.fromisoformat(end_date)
+        # "Tout" still fetches all history; avoid decades of empty chart points.
+        from revenus_periods import ALL_HISTORY_START
+        if start_date == ALL_HISTORY_START:
+            observed_days = [_to_iso(tx.get("date", "")) for tx in transactions]
+            observed_days = [day for day in observed_days if day and start_date <= day <= end_date]
+            start_dt = date.fromisoformat(min(observed_days)) if observed_days else end_dt_inc
         days_list: List[str] = []
         cur = start_dt
         while cur <= end_dt_inc:
@@ -2284,8 +2287,8 @@ def _assembler_stats(transactions, chatters, start_date, end_date,
         if iso:
             by_day_creator[(iso, creator)] = by_day_creator.get((iso, creator), 0) + amt
 
-    # Top créateurs par CA (limite à 10 pour le graphique lisible)
-    top_creators = sorted(creator_totals.items(), key=lambda x: x[1], reverse=True)[:10]
+    # Tous les comptes restent disponibles quand on choisit MYM / OF US / OF FR.
+    top_creators = sorted(creator_totals.items(), key=lambda x: x[1], reverse=True)
     top_creator_names = [c[0] for c in top_creators]
 
     # Datasets : un par créateur, valeurs par jour

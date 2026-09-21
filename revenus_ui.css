@@ -1,0 +1,146 @@
+/* Shared visual theme for revenue totals, chart and expandable table. */
+.mp-revenue-section,#mp-tab-chatters {
+  --mpr-surface:#1c1e20;--mpr-detail:#232527;--mpr-head:#2c2e30;
+  --mpr-border:#373a3f;--mpr-text:#eef0f3;--mpr-muted:#a5aab3;--mpr-accent:#8eb4ff;
+}
+body.light .mp-revenue-section,body.light #mp-tab-chatters {
+  --mpr-surface:#fff;--mpr-detail:#f7f8fa;--mpr-head:#f0f2f5;
+  --mpr-border:#e3e6ec;--mpr-text:#20252e;--mpr-muted:#687280;--mpr-accent:#2864de;
+}
+.mp-revenue-section.mypuls-section{border-color:var(--mpr-border);background:var(--mpr-surface);color:var(--mpr-text)}
+.mp-revenue-section .mypuls-stats-grid{grid-template-columns:repeat(5,minmax(0,1fr));gap:0;border:1px solid var(--mpr-border);border-radius:9px;background:var(--mpr-surface);overflow:hidden;margin:16px 0}
+.mp-revenue-section .mypuls-stats-grid>.mypuls-export{display:none}
+.mp-revenue-section .mypuls-stat{border:0;border-right:1px solid var(--mpr-border);border-radius:0;background:transparent!important;padding:15px 12px;display:flex;flex-direction:column-reverse;gap:7px}
+.mp-revenue-section .mypuls-stat:last-child{border-right:0}
+.mp-revenue-section .mypuls-stat .v{font-size:19px;font-weight:600;letter-spacing:-.4px;color:var(--mpr-text)!important}
+.mp-revenue-section .mypuls-stat:first-child .v{color:#23ac82!important}
+.mp-revenue-section .mypuls-stat .l{font-size:11px;font-weight:400;letter-spacing:0;text-transform:none;margin:0;color:var(--mpr-muted)}
+.mp-revenue-section .mypuls-period{gap:8px;margin-top:15px}
+.mp-revenue-section .mp-revenue-period-presets{display:flex;align-items:center;justify-content:space-between;gap:5px;width:max-content;max-width:100%;box-sizing:border-box;overflow-x:auto;padding:6px;border:1px solid var(--mpr-border);border-radius:999px;background:var(--mpr-detail);margin:0 0 6px;flex:0 0 auto;scrollbar-width:thin}
+.mp-revenue-section .mypuls-period:has(.mp-revenue-period-presets){display:flex;flex-wrap:wrap}
+.mp-revenue-section .mp-revenue-period-presets{flex-basis:100%;width:100%}
+body .mp-revenue-section .mp-revenue-period-presets .mp-period-preset{position:relative;flex:0 0 auto;display:flex;align-items:center;justify-content:center;min-height:42px;box-sizing:border-box;padding:10px 19px;border:0!important;border-radius:999px!important;background:transparent!important;color:var(--mpr-muted)!important;font-family:inherit;font-weight:600;font-size:14px;line-height:1.3;text-decoration:none;white-space:nowrap;box-shadow:none!important}
+body .mp-revenue-section .mp-revenue-period-presets .mp-period-preset[aria-current=date]{background:var(--mpr-head)!important;color:var(--mpr-text)!important}
+body .mp-revenue-section .mp-revenue-period-presets .mp-period-preset:hover{color:var(--mpr-text)!important;background:var(--mpr-head)!important}
+.mp-revenue-section .mp-period-preset:focus-visible{outline:2px solid var(--mpr-accent);outline-offset:-2px}
+.mp-revenue-section .mp-period-divider:before{content:"";position:absolute;left:-3px;top:25%;height:50%;width:1px;background:var(--mpr-border)}
+@media(max-width:700px){body .mp-revenue-section .mp-revenue-period-presets .mp-period-preset{padding:9px 13px;min-height:38px;font-size:12px}}
+.mp-revenue-segments{display:inline-flex;align-items:center;gap:5px;padding:5px;background:var(--mpr-surface);border:1px solid var(--mpr-border);border-radius:999px;margin:16px 0 0;max-width:100%;flex-wrap:wrap}
+body .mp-revenue-section button.mp-revenue-segment{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 17px;min-height:40px;border:0!important;border-radius:999px!important;background:transparent!important;color:var(--mpr-muted)!important;font-size:14px;font-weight:600;line-height:1.25;box-shadow:none!important;cursor:pointer}
+body .mp-revenue-section button.mp-revenue-segment[aria-pressed=true]{background:linear-gradient(115deg,#176bef,#6442c9)!important;color:#fff!important}
+body .mp-revenue-section button.mp-revenue-segment:focus-visible{outline:2px solid var(--mpr-accent);outline-offset:2px}
+.mp-revenue-platform-icon{width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;font-weight:700;font-size:10px;color:#fff;flex-shrink:0}
+.mp-platform-mym{background:#347dff;font-size:13px}
+.mp-platform-of{background:#00afe8}
+.mp-revenue-section [hidden]{display:none!important}
+.mp-revenue-section #mp-avert-filtre{background:var(--mpr-detail)!important;color:var(--mpr-muted)!important;border-color:var(--mpr-border)!important;font-size:11px!important}
+.mp-revenue-section .mypuls-period-btn{border-color:var(--mpr-border);color:var(--mpr-muted);background:var(--mpr-surface);font-weight:500;font-size:12px;padding:7px 10px}
+.mp-revenue-section .mypuls-period-btn-active{background:var(--mpr-detail);color:var(--mpr-accent);border-color:var(--mpr-accent)}
+.mp-revenue-section .mypuls-period input,.mp-revenue-section .mypuls-period select{color:var(--mpr-text)!important;background:var(--mpr-surface)!important;border-color:var(--mpr-border)!important}
+body .mp-revenue-section .mp-revenue-chart{background:var(--mpr-surface)!important;border:1px solid var(--mpr-border)!important;border-radius:9px!important;padding:18px;margin:0 0 18px;color:var(--mpr-text)}
+.mp-revenue-chart-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+body .mp-revenue-section .mp-revenue-chart h3{font-size:14px;font-weight:600;letter-spacing:0;line-height:1.4;margin:0;color:var(--mpr-text)!important}
+body .mp-revenue-section .mp-revenue-chart h3{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.mp-revenue-chart h3>svg{color:var(--mpr-accent);flex-shrink:0}
+.mp-revenue-chart-avatars{display:inline-flex;align-items:center;padding-left:5px;margin-left:8px}
+body .mp-revenue-section .mp-revenue-chart-avatars button{display:block;border:0!important;background:transparent!important;border-radius:50%!important;padding:0!important;margin-left:-6px;width:29px;height:29px;box-shadow:0 0 0 2px var(--mpr-surface)!important;cursor:pointer}
+.mp-revenue-chart-avatars img{width:100%;height:100%;border-radius:50%;object-fit:cover;border:2px solid var(--mp-series-color,transparent);box-sizing:border-box}
+.mp-revenue-chart-avatars button[aria-pressed=false]{filter:grayscale(1);opacity:.42}
+.mp-revenue-chart-avatars button:focus-visible{outline:2px solid var(--mpr-accent);outline-offset:3px}
+.mp-revenue-chart-tooltip{position:absolute;z-index:5;pointer-events:none;min-width:190px;max-width:calc(100% - 8px);padding:11px 13px;background:var(--mpr-surface);color:var(--mpr-text);border:1px solid var(--mpr-border);border-radius:9px;box-shadow:0 8px 24px #0004}
+.mp-revenue-chart-tooltip small{display:block;font-size:11px;color:var(--mpr-muted);margin-bottom:7px}
+.mp-revenue-chart-tooltip-model{display:flex;align-items:center;gap:9px;font-size:12px;white-space:nowrap}
+.mp-revenue-chart-tooltip-model img{width:30px;height:30px;border-radius:50%;object-fit:cover;flex-shrink:0}
+.mp-revenue-chart-tooltip-model strong{margin-left:auto;font-variant-numeric:tabular-nums}
+.mp-revenue-chart-tooltip-model+.mp-revenue-chart-tooltip-model{margin-top:6px}
+.mp-revenue-chart-status,.mp-revenue-chart-note{font-size:11px;color:var(--mpr-muted);line-height:1.5}
+.mp-revenue-chart-note{margin:12px 0 14px;min-height:17px}
+.mp-revenue-chart-filters{display:flex;flex-wrap:wrap;gap:7px}
+body .mp-revenue-section .mp-revenue-chart button.mp-revenue-model-filter{display:inline-flex;align-items:center;gap:7px;background:var(--mpr-detail)!important;color:var(--mpr-text)!important;border:1px solid var(--mpr-border)!important;border-radius:6px!important;padding:6px 9px!important;box-shadow:none!important;font-family:inherit;font-weight:500;font-size:11px;line-height:1.4;min-height:32px;cursor:pointer;transition:opacity .15s}
+body .mp-revenue-section .mp-revenue-chart button.mp-revenue-model-filter:hover{border-color:var(--mpr-accent)!important}
+body .mp-revenue-section .mp-revenue-chart button.mp-revenue-model-filter:focus-visible{outline:2px solid var(--mpr-accent);outline-offset:2px}
+body .mp-revenue-section .mp-revenue-chart button.mp-revenue-model-filter[aria-pressed=false]{opacity:.45;background:transparent!important}
+body .mp-revenue-section .mp-revenue-chart button.mp-revenue-model-filter[hidden]{display:none!important}
+body .mp-revenue-section .mp-revenue-chart .mp-revenue-model-filter img{width:22px!important;height:22px!important;border-radius:50%;object-fit:cover}
+.mp-revenue-model-total{font-size:11px;font-weight:400;color:var(--mpr-muted);font-variant-numeric:tabular-nums}
+.mp-revenue-chart-canvas{position:relative;height:240px;min-width:0}
+#mp-tab-chatters .mp-revenue-payout{padding:15px 17px!important;background:var(--mpr-surface)!important;border-color:var(--mpr-border)!important;border-radius:9px!important;margin-bottom:16px!important}
+#mp-tab-chatters .mp-revenue-payout [data-mp-stat=total_pay_usd]{color:var(--mpr-text)!important;font-size:23px!important;font-weight:600!important}
+#mp-tab-chatters .mp-revenue-table {display:block;width:100%;border:1px solid var(--mpr-border);border-radius:10px;background:var(--mpr-surface);overflow:hidden;color:var(--mpr-text)}
+#mp-tab-chatters .mp-revenue-table>thead,#mp-tab-chatters .mp-revenue-table>tbody {display:block}
+#mp-tab-chatters .mp-revenue-table>thead>tr,#mp-tab-chatters .mp-revenue-table>tbody>.mp-chatter-row {display:grid;grid-template-columns:minmax(145px,1.45fr) minmax(100px,1.15fr) repeat(3,minmax(76px,1fr)) 62px;align-items:center}
+#mp-tab-chatters .mp-revenue-table>thead th {background:var(--mpr-head);color:var(--mpr-muted);font-size:11px;text-transform:none;font-weight:500;letter-spacing:0;text-align:right;padding:13px 12px;border:0}
+#mp-tab-chatters .mp-revenue-table>thead th:nth-child(-n+2){text-align:left}
+#mp-tab-chatters .mp-revenue-table>tbody>.mp-chatter-row {border-top:1px solid var(--mpr-border);background:var(--mpr-surface)}
+#mp-tab-chatters .mp-revenue-table>tbody>.mp-chatter-row:first-child {border-top:0}
+#mp-tab-chatters .mp-revenue-table>tbody>.mp-chatter-row>td {display:block;border:0;padding:16px 12px;text-align:right;min-width:0;color:var(--mpr-text)!important;background:transparent!important;font-variant-numeric:tabular-nums;font-size:13px}
+#mp-tab-chatters .mp-revenue-table>tbody>.mp-chatter-row>td:nth-child(-n+2){text-align:left}
+#mp-tab-chatters .mp-revenue-table .mp-row-open {background:var(--mpr-detail)!important}
+#mp-tab-chatters .mp-revenue-table .mp-chatter-row.mp-paid{opacity:1}
+#mp-tab-chatters .mp-revenue-table .mp-chatter-row.mp-paid td{text-decoration:none}
+#mp-tab-chatters .mp-revenue-table .mp-revenue-toggle {display:flex;align-items:center;gap:10px;width:100%;min-height:36px;padding:0;border:0;background:transparent!important;color:var(--mpr-text);font:inherit;text-align:left;cursor:pointer;box-shadow:none}
+#mp-tab-chatters .mp-revenue-toggle .mp-revenue-chevron {width:9px;height:9px;border-right:1.5px solid var(--mpr-muted);border-bottom:1.5px solid var(--mpr-muted);transform:rotate(-45deg);flex-shrink:0;margin:0 3px}
+#mp-tab-chatters .mp-revenue-toggle[aria-expanded=true] .mp-revenue-chevron{transform:rotate(45deg)}
+#mp-tab-chatters .mp-revenue-name{font-size:14px;font-weight:600;overflow-wrap:anywhere}
+#mp-tab-chatters .mp-revenue-models {display:flex;align-items:center;flex-wrap:wrap;padding-left:3px;gap:4px 0}
+#mp-tab-chatters .mp-revenue-avatar {display:inline-flex;width:34px;height:34px;border-radius:50%;flex-shrink:0;align-items:center;justify-content:center;background:var(--mpr-head);color:var(--mpr-muted);font-size:11px;font-weight:500;overflow:hidden;box-shadow:0 0 0 2px var(--mpr-surface)}
+#mp-tab-chatters .mp-revenue-avatar img{width:100%;height:100%;object-fit:cover;display:block}
+#mp-tab-chatters .mp-revenue-models .mp-revenue-avatar+.mp-revenue-avatar{margin-left:-10px}
+#mp-tab-chatters .mp-revenue-more{margin-left:8px;font-size:11px;color:var(--mpr-muted)}
+#mp-tab-chatters .mp-revenue-table>tbody>.mp-chatter-row>.mp-revenue-meta {grid-column:1/-1;padding:0 15px 14px 36px;text-align:left}
+#mp-tab-chatters .mp-revenue-meta-line {display:flex;align-items:center;flex-wrap:wrap;gap:9px 20px;font-size:11px;color:var(--mpr-muted);font-variant-numeric:tabular-nums}
+#mp-tab-chatters .mp-revenue-meta-item {display:inline-flex;align-items:center;gap:6px;min-width:0}
+#mp-tab-chatters .mp-revenue-meta-item>span:last-child {color:var(--mpr-text)}
+#mp-tab-chatters .mp-revenue-meta-item input[type=number]{background:var(--mpr-surface)!important;color:var(--mpr-text)!important;border-color:var(--mpr-border)!important;width:54px!important}
+#mp-tab-chatters .mp-revenue-meta-item .mypuls-pill{background:transparent!important;padding:0;font-size:11px;color:var(--mpr-text)!important;font-weight:500}
+#mp-tab-chatters .mp-revenue-meta-item .mp-cell-pay{color:var(--mpr-text)!important;font-weight:600;font-size:12px}
+#mp-tab-chatters .mp-revenue-details-row{display:block;background:var(--mpr-detail);border-top:1px solid var(--mpr-border);border-left:2px solid var(--mpr-accent)}
+#mp-tab-chatters .mp-revenue-details-row>td {display:block;padding:17px 19px;border:0;background:transparent!important;color:var(--mpr-text)}
+#mp-tab-chatters .mp-revenue-crypto {display:flex;align-items:center;gap:14px;padding:0 0 16px;margin:0 0 16px;border-bottom:1px solid var(--mpr-border);flex-wrap:wrap}
+#mp-tab-chatters .mp-revenue-crypto-label{font-size:12px;color:var(--mpr-muted);min-width:46px}
+#mp-tab-chatters .mp-revenue-crypto>div:last-child {min-width:0;max-width:100%}
+#mp-tab-chatters .mp-revenue-crypto .mp-crypto-thumb img{width:48px!important;height:48px!important;border-color:var(--mpr-border)!important}
+#mp-tab-chatters .mp-revenue-photo-button{display:block;padding:0;border:0;background:transparent!important;box-shadow:none;cursor:zoom-in}
+#mp-tab-chatters .mp-revenue-crypto button{color:var(--mpr-text)!important;border-color:var(--mpr-border)!important}
+#mp-tab-chatters .mp-revenue-crypto button:last-child{min-height:30px}
+#mp-tab-chatters .mp-revenue-detail-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+#mp-tab-chatters .mp-revenue-detail-tabs{display:inline-flex;gap:3px;padding:3px;background:var(--mpr-head);border:1px solid var(--mpr-border);border-radius:7px}
+#mp-tab-chatters .mp-revenue-detail-tab{border:0;background:transparent;color:var(--mpr-muted);border-radius:4px;padding:6px 12px;font:inherit;font-size:12px;cursor:pointer;box-shadow:none}
+#mp-tab-chatters .mp-revenue-detail-tab[aria-selected=true]{background:var(--mpr-surface);color:var(--mpr-text);font-weight:600}
+#mp-tab-chatters .mp-revenue-note{font-size:11px;color:var(--mpr-muted);margin:9px 0;line-height:1.5}
+#mp-tab-chatters .mp-revenue-ledger {width:100%;border-collapse:collapse;table-layout:fixed}
+#mp-tab-chatters .mp-revenue-ledger th {background:transparent;color:var(--mpr-muted);text-transform:none;font-weight:500;font-size:11px;letter-spacing:0;padding:8px 4px;border-bottom:1px solid var(--mpr-border);text-align:left}
+#mp-tab-chatters .mp-revenue-ledger th:first-child{width:40%}
+#mp-tab-chatters .mp-revenue-ledger td {padding:11px 4px;border-bottom:1px solid var(--mpr-border);background:transparent!important;color:var(--mpr-text);font-size:12px;overflow-wrap:anywhere}
+#mp-tab-chatters .mp-revenue-ledger th:last-child,#mp-tab-chatters .mp-revenue-ledger td:last-child{text-align:right}
+#mp-tab-chatters .mp-revenue-sale-person{display:flex;gap:10px;align-items:center;min-width:0}
+#mp-tab-chatters .mp-revenue-sale-label {display:block;font-weight:500}
+#mp-tab-chatters .mp-revenue-sale-type{display:block;color:var(--mpr-muted);font-size:11px;margin-top:3px}
+#mp-tab-chatters .mp-revenue-money{font-variant-numeric:tabular-nums;white-space:nowrap;font-weight:600}
+#mp-tab-chatters .mp-revenue-currency{display:block}
+#mp-tab-chatters .mp-revenue-load-more {margin:12px 0 0;padding:8px 12px;background:var(--mpr-surface);border:1px solid var(--mpr-border);border-radius:6px;color:var(--mpr-text);cursor:pointer;font:inherit;font-size:12px}
+.mp-revenue-section #mp-revenue-tx-more{margin:12px 0;padding:8px 12px;background:var(--mpr-surface);border:1px solid var(--mpr-border);border-radius:6px;color:var(--mpr-text);cursor:pointer}
+#mp-tab-chatters .mp-revenue-table>.mp-edit-row,#mp-tab-chatters .mp-revenue-table .mp-edit-row>td{background:var(--mpr-detail)!important}
+#mp-tab-chatters .mp-revenue-table .mp-edit-row>td{display:block;color:var(--mpr-text);padding:18px}
+#mp-tab-chatters .mp-revenue-table .mp-edit-row input,#mp-tab-chatters .mp-revenue-table .mp-edit-row select{background:var(--mpr-surface);color:var(--mpr-text);border-color:var(--mpr-border)}
+#mp-tab-chatters .mp-revenue-table [hidden]{display:none!important}
+@media(max-width:700px){
+ .mp-revenue-section .mypuls-stats-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+ .mp-revenue-section .mypuls-stat{border:0}
+ #mp-tab-chatters .mp-revenue-table>thead>tr,#mp-tab-chatters .mp-revenue-table>tbody>.mp-chatter-row{grid-template-columns:minmax(110px,1.3fr) minmax(66px,1fr) repeat(3,minmax(64px,1fr)) 44px}
+ #mp-tab-chatters .mp-revenue-table>thead th,#mp-tab-chatters .mp-revenue-table>tbody>.mp-chatter-row>td{padding:12px 7px;font-size:11px}
+ #mp-tab-chatters .mp-revenue-name{font-size:12px}
+ #mp-tab-chatters .mp-revenue-avatar{width:29px;height:29px}
+ #mp-tab-chatters .mp-revenue-table>tbody>.mp-chatter-row>.mp-revenue-meta{padding:0 10px 13px}
+ #mp-tab-chatters .mp-revenue-meta-line{gap:9px 13px}
+}
+@media(max-width:520px){
+ #mp-tab-chatters .mp-revenue-table>thead>tr,#mp-tab-chatters .mp-revenue-table>tbody>.mp-chatter-row{grid-template-columns:minmax(102px,1.1fr) minmax(60px,.8fr) minmax(82px,1fr)}
+ #mp-tab-chatters .mp-revenue-table>thead th:nth-child(n+4),#mp-tab-chatters .mp-revenue-table>tbody>.mp-chatter-row>td:nth-child(4),#mp-tab-chatters .mp-revenue-table>tbody>.mp-chatter-row>td:nth-child(5),#mp-tab-chatters .mp-revenue-table>tbody>.mp-chatter-row>td:nth-child(6){display:none}
+ #mp-tab-chatters .mp-revenue-details-row>td{padding:12px 10px}
+ #mp-tab-chatters .mp-revenue-ledger th:first-child{width:46%}
+ #mp-tab-chatters .mp-revenue-ledger th:nth-child(3),#mp-tab-chatters .mp-revenue-ledger td:nth-child(3){display:none}
+ #mp-tab-chatters .mp-revenue-ledger.mp-revenue-by-model th:nth-child(3),#mp-tab-chatters .mp-revenue-ledger.mp-revenue-by-model td:nth-child(3){display:table-cell}
+ #mp-tab-chatters .mp-revenue-sale-person{gap:7px}
+ #mp-tab-chatters .mp-edit-row>td>div{grid-template-columns:1fr!important}
+}

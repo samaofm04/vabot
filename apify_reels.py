@@ -58,6 +58,54 @@ def configured() -> bool:
     return bool(get_token())
 
 
+def fetch_reel_details(reel_urls, timeout=240, diag=None):
+    """Un résultat par lien, y compris les reels indisponibles, sans perte des zéros."""
+    urls = list(dict.fromkeys(u for u in reel_urls if u))
+    token = get_token()
+    if diag is None:
+        diag = {}
+    diag.update(status=None, error="", sent=len(urls))
+    if not token or not urls:
+        diag["error"] = "token_ou_liens_absents"
+        return {}
+    try:
+        response = requests.post(
+            f"{BASE}/acts/{ACTOR}/run-sync-get-dataset-items",
+            headers={"Authorization": "Bearer " + token},
+            json={"directUrls": urls, "resultsType": "reels",
+                  "resultsLimit": len(urls), "addParentData": False}, timeout=timeout)
+        diag["status"] = response.status_code
+        if response.status_code not in (200, 201):
+            diag["error"] = "apify_http_" + str(response.status_code)
+            return {}
+        items = response.json()
+        if not isinstance(items, list):
+            raise ValueError("format_invalide")
+        wanted = {_shortcode(u) for u in urls}
+        result = {}
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            sc = item.get("shortCode") or item.get("shortcode") or _shortcode(
+                item.get("url") or item.get("inputUrl") or "")
+            # Never assign a shuffled/error result to a different input by position.
+            if sc not in wanted:
+                continue
+            result[sc] = {
+                "video_url": item.get("videoUrl") or item.get("video_url") or "",
+                "description": item.get("caption") or "",
+                "likes": item.get("likesCount"), "commentaires": item.get("commentsCount"),
+                "vues_actuelles": item.get("videoPlayCount") if item.get("videoPlayCount") is not None
+                                  else item.get("videoViewCount"),
+                "publication_apify": item.get("timestamp"),
+                "erreur_apify": item.get("error") or "",
+            }
+        return result
+    except Exception as error:
+        diag["error"] = type(error).__name__
+        return {}
+
+
 def _shortcode(url: str) -> str:
     m = re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', url or "")
     return m.group(1) if m else ""

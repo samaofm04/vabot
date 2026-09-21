@@ -26,6 +26,8 @@ quelqu'un « present » indefiniment. Relever la liste chaque minute mesure du
 temps reellement passe, et se repare tout seul au tour suivant.
 """
 import datetime as _dt
+import json
+from pathlib import Path
 import time as _t
 
 import discord
@@ -38,6 +40,140 @@ import sessions_voc as sv
 # c'est deux comportements le jour ou l'une des deux change.
 _sans_accent = sv.sans_accent
 
+FICHIER_APERCUS = Path("data") / "sessions_apercus.json"
+
+
+class SessionAbsentsView(discord.ui.View):
+    """Bouton persistant des essais de mise en page, liés à un message précis.
+
+    Les identifiants sont figés avec le bilan : un clic ne recalcule jamais
+    les absences historiques avec la liste des VA du jour.
+    """
+
+    def __init__(self, count=None):
+        super().__init__(timeout=None)
+        if count is not None:
+            self.absents.label = "Voir les %d absents" % count
+
+    @discord.ui.button(label="Voir les absents", style=discord.ButtonStyle.secondary,
+                       custom_id="sessions:absents:v1")
+    async def absents(self, interaction: discord.Interaction, button):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            data = json.loads(FICHIER_APERCUS.read_text(encoding="utf-8"))
+            message = interaction.message
+            record = data["messages"][str(message.id)]
+            ids = record["absent_ids"]
+            valide = (
+                data.get("schema") == 1
+                and interaction.guild_id == sv.SUIVI_GUILD_ID
+                and str(interaction.guild_id) == record["guild_id"]
+                and str(interaction.channel_id) == record["channel_id"]
+                and str(message.author.id) == record["author_id"]
+                and message.author.id == interaction.client.user.id
+                and isinstance(ids, list) and len(ids) <= 100
+                and all(isinstance(uid, str) and uid.isdigit() and 16 <= len(uid) <= 20 for uid in ids)
+                and len(ids) == len(set(ids))
+            )
+            if not valide:
+                raise ValueError("Contexte du bilan invalide")
+            titre = str(record["session"])[:100]
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            await interaction.followup.send(
+                "La liste de ce bilan est indisponible pour le moment.",
+                ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+            return
+        embed = discord.Embed(title="Absents · %s" % titre, color=0x9AA0A6)
+        SessionsVoc._ajouter_lignes(embed, "%d absent(s)" % len(ids),
+                                   ["<@%s>" % uid for uid in ids] or ["Aucun"])
+        embed.set_footer(text="Jessye US · Youl4b")
+        await interaction.followup.send(embed=embed, ephemeral=True,
+                                        allowed_mentions=discord.AllowedMentions.none())
+        print("[sessions] détail des absents affiché : message %s, %d personnes"
+              % (message.id, len(ids)), flush=True)
+
+
+class SessionBilanView(discord.ui.View):
+    """Quatre boutons persistants, avec les détails figés du bilan affiché."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @staticmethod
+    def detail_embed(record, sid):
+        if record.get("kind") != "bilan" or sid not in {"s1", "s2", "s3", "s4"}:
+            raise ValueError("Type de bilan invalide")
+        jour = _dt.date.fromisoformat(record["jour"])
+        session = record["sessions"][sid]
+        heure = _dt.time.fromisoformat(session["heure"]).strftime("%H:%M")
+        presents, partiels, absents = (session[k] for k in ("presents", "partiels", "absent_ids"))
+        if not all(isinstance(rows, list) for rows in (presents, partiels, absents)):
+            raise ValueError("Listes invalides")
+        ids = [row["id"] for row in presents + partiels] + absents
+        if (len(ids) > 100 or len(ids) != len(set(ids)) or
+                not all(isinstance(uid, str) and uid.isdigit() and 16 <= len(uid) <= 20 for uid in ids)):
+            raise ValueError("Identifiants invalides")
+        for row in presents + partiels:
+            if type(row["minutes"]) is not int or not 0 <= row["minutes"] <= 1440:
+                raise ValueError("Durée invalide")
+
+        def ligne(row):
+            minutes = row["minutes"]
+            duree = "%d min" % minutes if minutes < 60 else "%d h %02d" % divmod(minutes, 60)
+            return "<@%s> — **%s**" % (row["id"], duree)
+
+        embed = discord.Embed(title="Session %s · %s" % (sid[1:], heure),
+            description="%s · heure du Bénin" % jour.strftime("%d/%m/%Y"), color=0x9AA0A6)
+        SessionsVoc._ajouter_lignes(embed, "Présents (%d)" % len(presents),
+                                   [ligne(row) for row in presents] or ["Aucun"])
+        if partiels:
+            SessionsVoc._ajouter_lignes(embed, "Passages courts (%d)" % len(partiels),
+                                       [ligne(row) for row in partiels])
+        SessionsVoc._ajouter_lignes(embed, "Absents (%d)" % len(absents),
+                                   ["<@%s>" % uid for uid in absents] or ["Aucun"])
+        embed.set_footer(text="Jessye US · Youl4b · bilan définitif")
+        if len(embed) > 6000 or len(embed.fields) > 25:
+            raise ValueError("Bilan trop long")
+        return embed
+
+    async def _afficher(self, interaction, sid):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            data = json.loads(FICHIER_APERCUS.read_text(encoding="utf-8"))
+            message = interaction.message
+            record = data["messages"][str(message.id)]
+            if not (data.get("schema") == 1
+                    and interaction.guild_id == sv.SUIVI_GUILD_ID
+                    and str(interaction.guild_id) == record["guild_id"]
+                    and str(interaction.channel_id) == record["channel_id"]
+                    and str(message.author.id) == record["author_id"]
+                    and message.author.id == interaction.client.user.id):
+                raise ValueError("Contexte du bilan invalide")
+            embed = self.detail_embed(record, sid)
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            await interaction.followup.send("Les détails de cette session sont indisponibles pour le moment.",
+                ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+            return
+        await interaction.followup.send(embed=embed, ephemeral=True,
+                                        allowed_mentions=discord.AllowedMentions.none())
+        print("[sessions] détail du bilan affiché : message %s, %s" % (message.id, sid), flush=True)
+
+    @discord.ui.button(label="Session 1", style=discord.ButtonStyle.secondary, custom_id="sessions:bilan:v1:s1")
+    async def session1(self, interaction, button):
+        await self._afficher(interaction, "s1")
+
+    @discord.ui.button(label="Session 2", style=discord.ButtonStyle.secondary, custom_id="sessions:bilan:v1:s2")
+    async def session2(self, interaction, button):
+        await self._afficher(interaction, "s2")
+
+    @discord.ui.button(label="Session 3", style=discord.ButtonStyle.secondary, custom_id="sessions:bilan:v1:s3")
+    async def session3(self, interaction, button):
+        await self._afficher(interaction, "s3")
+
+    @discord.ui.button(label="Session 4", style=discord.ButtonStyle.secondary, custom_id="sessions:bilan:v1:s4")
+    async def session4(self, interaction, button):
+        await self._afficher(interaction, "s4")
+
 
 class SessionsVoc(commands.Cog):
     """Pointage des sessions vocales. Zero commande slash."""
@@ -49,8 +185,20 @@ class SessionsVoc(commands.Cog):
         self._resumes_faits = {}
         self.boucle.start()
 
+    async def cog_load(self):
+        self._absents_view = SessionAbsentsView()
+        self.bot.add_view(self._absents_view)
+        self._bilan_view = SessionBilanView()
+        self.bot.add_view(self._bilan_view)
+        print("[sessions] bouton des absents enregistré", flush=True)
+        print("[sessions] boutons du bilan enregistrés", flush=True)
+
     def cog_unload(self):
         self.boucle.cancel()
+        if getattr(self, "_absents_view", None) is not None:
+            self._absents_view.stop()
+        if getattr(self, "_bilan_view", None) is not None:
+            self._bilan_view.stop()
 
     # ------------------------------------------------------------------ #
     # Les salons suivis
@@ -72,6 +220,8 @@ class SessionsVoc(commands.Cog):
         for c in self.bot.get_all_channels():
             if not isinstance(c, (discord.VoiceChannel, discord.StageChannel)):
                 continue
+            if getattr(getattr(c, "guild", None), "id", None) != sv.SUIVI_GUILD_ID:
+                continue
             if sv.salon_suivi(c.id, getattr(c, "name", ""),
                               getattr(getattr(c, "category", None), "name", ""), cfg):
                 out.append(c)
@@ -82,6 +232,8 @@ class SessionsVoc(commands.Cog):
     # ------------------------------------------------------------------ #
     @tasks.loop(minutes=1)
     async def boucle(self):
+        if not self.bot.is_ready():
+            return  # Le cache vocal déconnecté ne constitue pas une présence.
         try:
             self._pointer()
         except Exception as e:                       # noqa: BLE001
@@ -98,6 +250,7 @@ class SessionsVoc(commands.Cog):
     @boucle.before_loop
     async def _avant(self):
         await self.bot.wait_until_ready()
+        self._attendus_enrichis()
 
     def _pointer(self):
         """Une minute de presence pour chacun de ceux qui sont la.
@@ -109,17 +262,18 @@ class SessionsVoc(commands.Cog):
         """
         if sv.session_a(_t.time()) is None:
             return                                    # hors creneau : rien a noter
+        attendus = {a["id"]: a for a in self._attendus_enrichis()}
         vus, deja = [], set()
         for ch in self._vocaux():
             for m in getattr(ch, "members", []) or []:
-                if getattr(m, "bot", False) or m.id in deja:
+                if getattr(m, "bot", False) or m.id in deja or str(m.id) not in attendus:
                     continue
                 etat = getattr(m, "voice", None)
                 if etat is not None and getattr(etat, "deaf", False):
                     continue
                 deja.add(m.id)
                 vus.append({"id": str(m.id),
-                            "nom": getattr(m, "display_name", None) or str(m)})
+                            "nom": attendus[str(m.id)]["nom"]})
         if vus:
             sv.pointer(vus, 60)
 
@@ -142,6 +296,17 @@ class SessionsVoc(commands.Cog):
             if self._resumes_faits.get(cle):
                 continue
             try:
+                # Un redémarrage pendant l'heure du bilan vide la mémoire.
+                # Retrouver le message déjà publié avant d'en créer un autre.
+                deja_publie = False
+                async for msg in salon.history(limit=20):
+                    if msg.author.id == self.bot.user.id and any(
+                            e.title == "Sessions du %s" % hier for e in msg.embeds):
+                        deja_publie = True
+                        break
+                if deja_publie:
+                    self._resumes_faits[cle] = True
+                    continue
                 await salon.send(embed=self.embed_resume(hier))
                 self._resumes_faits[cle] = True
             except Exception as e:                   # noqa: BLE001
@@ -158,6 +323,8 @@ class SessionsVoc(commands.Cog):
         out = []
         for c in self.bot.get_all_channels():
             if not isinstance(c, discord.TextChannel):
+                continue
+            if getattr(getattr(c, "guild", None), "id", None) != sv.SUIVI_GUILD_ID:
                 continue
             if sv.salon_texte_ok(getattr(c, "name", ""), motif, exclure):
                 out.append(c)
@@ -184,12 +351,14 @@ class SessionsVoc(commands.Cog):
         import time as _tD
         jour, sid = session["jour"], session["id"]
         brut = sv.presences(jour, sid)
+        att = self._attendus_enrichis()
+        noms = {a["id"]: a["nom"] for a in att}
         maintenant = _tD.time()
         gens = sorted(
-            ({"id": k, "nom": v.get("nom") or k,
+            ({"id": k, "nom": noms[k],
               "secondes": int(v.get("secondes") or 0),
               "premiere": v.get("premiere"), "derniere": v.get("derniere")}
-             for k, v in brut.items()),
+             for k, v in brut.items() if k in noms),
             key=lambda g: -g["secondes"])
         seuil = sv.config()["presence_min_secondes"]
         presents = [g for g in gens if g["secondes"] >= seuil]
@@ -201,11 +370,8 @@ class SessionsVoc(commands.Cog):
         e.description = ("Terminée." if fige else "En cours…") + \
             "  ·  BJ %s · MG %s" % (hl.get("BJ", "?"), hl.get("MG", "?"))
         if presents:
-            e.add_field(
-                name="Présents (%d)" % len(presents),
-                value="\n".join(self._ligne_presence(g, maintenant, fige)
-                                for g in presents[:25])[:1020],
-                inline=False)
+            self._ajouter_lignes(e, "Présents (%d)" % len(presents),
+                                 [self._ligne_presence(g, maintenant, fige) for g in presents])
         else:
             e.add_field(name="Présents (0)", value="*personne pour l'instant*",
                         inline=False)
@@ -214,19 +380,15 @@ class SessionsVoc(commands.Cog):
             # tous ont fait la meme chose : deux minutes et quarante secondes
             # ne se valent pas, et c'est ce chiffre qui dit s'il faut leur en
             # parler.
-            e.add_field(
-                name="Passés vite (%d)" % len(partiels),
-                value=", ".join("%s (%d min)" % (g["nom"], g["secondes"] // 60)
-                                for g in partiels[:25])[:1020],
-                inline=False)
+            self._ajouter_lignes(e, "Passés vite (%d)" % len(partiels),
+                                 ["%s (%d min)" % (self._personne(g), g["secondes"] // 60)
+                                  for g in partiels])
         if fige:
-            att = self._attendus_enrichis()
             if att:
                 vus = {g["id"] for g in gens}
-                absents = [a["nom"] for a in att if str(a["id"]) not in vus]
-                e.add_field(name="Absents (%d)" % len(absents),
-                            value=(", ".join(absents[:30]) or "aucun")[:1020],
-                            inline=False)
+                absents = [a for a in att if str(a["id"]) not in vus]
+                self._ajouter_lignes(e, "Absents (%d)" % len(absents),
+                                     [self._personne(a) for a in absents] or ["aucun"])
             e.set_footer(text="Compte définitif — ce message ne bouge plus.")
         else:
             e.set_footer(text="Mis à jour toutes les %d min."
@@ -255,7 +417,7 @@ class SessionsVoc(commands.Cog):
             except (TypeError, ValueError):
                 return "?"
 
-        bouts = ["**%s**" % g["nom"]]
+        bouts = [self._personne(g)]
         if g.get("premiere"):
             bouts.append("arrivé %s" % _h(g["premiere"]))
         minutes = int(g.get("secondes") or 0) // 60
@@ -287,6 +449,9 @@ class SessionsVoc(commands.Cog):
 
         # --- ce qui est termine : un dernier passage, puis plus jamais -----
         for cle, fiche in sv.direct_a_figer(maintenant):
+            salon = self.bot.get_channel(int(fiche.get("salon") or 0))
+            if getattr(getattr(salon, "guild", None), "id", None) != sv.SUIVI_GUILD_ID:
+                continue
             msg = await self._retrouver(fiche)
             jour, sid = str(cle).split(":", 1)
             sess = next((x for x in sv.sessions_du_jour(jour) if x["id"] == sid), None)
@@ -337,7 +502,7 @@ class SessionsVoc(commands.Cog):
         """
         try:
             salon = self.bot.get_channel(int(fiche.get("salon") or 0))
-            if salon is None:
+            if salon is None or getattr(getattr(salon, "guild", None), "id", None) != sv.SUIVI_GUILD_ID:
                 return None
             return await salon.fetch_message(int(fiche.get("message") or 0))
         except Exception:                            # noqa: BLE001
@@ -355,10 +520,10 @@ class SessionsVoc(commands.Cog):
         Vert = present. Rouge = absent. Orange = passe sans rester.
         """
         att = self._attendus_enrichis()
-        r = sv.resume_jour(jour, attendus=att)
+        r = sv.resume_jour(jour, attendus=att, limiter_aux_attendus=True)
         e = discord.Embed(
             title="Sessions du %s" % jour,
-            description=("Heures en %s. %d VA attendu(s)." % (r["fuseau"], len(att))
+            description=("Jessye US · Youl4b. Heures en %s. %d VA attendu(s)." % (r["fuseau"], len(att))
                          if att else
                          "Heures en %s. Liste des VA attendus inconnue : seuls "
                          "les presents sont fiables." % r["fuseau"]),
@@ -368,10 +533,10 @@ class SessionsVoc(commands.Cog):
             entete = "%s — %s" % (s2["nom"], s2["heure"])
             if hl.get("MG"):
                 entete += "  (BJ %s · MG %s)" % (hl.get("BJ", "?"), hl["MG"])
-            e.add_field(name=entete, value=self._corps_session(s2), inline=False)
+            self._ajouter_lignes(e, entete, self._corps_session(s2, complet=True).splitlines())
         return e
 
-    def _corps_session(self, s2: dict) -> str:
+    def _corps_session(self, s2: dict, complet=False) -> str:
         """Le contenu d'une session : une personne par ligne, ou un mot.
 
         Discord plafonne un champ a 1024 caracteres. On coupe donc, mais on
@@ -388,24 +553,46 @@ class SessionsVoc(commands.Cog):
             if s2["presents"] or s2["partiels"]:
                 lignes = [self._ligne_pastille(g, "🟢") for g in s2["presents"]]
                 lignes += [self._ligne_pastille(g, "🟠") for g in s2["partiels"]]
-                return self._plafonner(["*En cours…*"] + lignes)
+                return "\n".join(["*En cours…*"] + lignes) if complet else self._plafonner(["*En cours…*"] + lignes)
             return "*Pas encore commencée.*"
         lignes = [self._ligne_pastille(g, "🟢") for g in s2["presents"]]
         lignes += [self._ligne_pastille(g, "🟠") for g in s2["partiels"]]
         if s2.get("attendus_connus"):
-            lignes += ["🔴 %s" % a["nom"] for a in s2["absents"]]
+            lignes += ["🔴 %s" % self._personne(a) for a in s2["absents"]]
         if not lignes:
             return "*Personne.*"
         if not s2.get("attendus_connus"):
             lignes.append("*Liste des VA attendus inconnue : les absents ne "
                           "peuvent pas être établis.*")
-        return self._plafonner(lignes)
+        return "\n".join(lignes) if complet else self._plafonner(lignes)
+
+    @staticmethod
+    def _personne(g: dict) -> str:
+        nom = discord.utils.escape_mentions(discord.utils.escape_markdown(str(g.get("nom") or "")))
+        uid = str(g.get("id") or "")
+        return "%s · <@%s>" % (nom, uid) if uid.isdigit() else nom
+
+    @staticmethod
+    def _ajouter_lignes(embed, titre, lignes):
+        """Découpe entre les personnes : une mention n'est jamais tronquée."""
+        morceaux, courant = [], []
+        for ligne in lignes:
+            if len(ligne) > 1024:
+                raise ValueError("Une ligne du bilan dépasse la limite Discord")
+            if courant and len("\n".join(courant + [ligne])) > 1024:
+                morceaux.append("\n".join(courant))
+                courant = []
+            courant.append(ligne)
+        if courant:
+            morceaux.append("\n".join(courant))
+        for i, texte in enumerate(morceaux):
+            embed.add_field(name=titre if i == 0 else titre + " (suite)", value=texte, inline=False)
 
     @staticmethod
     def _ligne_pastille(g: dict, pastille: str) -> str:
         m = int(g.get("secondes") or 0) // 60
         duree = "%d min" % m if m < 60 else "%d h %02d" % (m // 60, m % 60)
-        return "%s %s — %s" % (pastille, g["nom"], duree)
+        return "%s %s — %s" % (pastille, SessionsVoc._personne(g), duree)
 
     @staticmethod
     def _plafonner(lignes, limite: int = 1010) -> str:
@@ -421,80 +608,18 @@ class SessionsVoc(commands.Cog):
         return "\n".join(out)
 
     def _attendus_enrichis(self) -> list:
-        """Les VA qu'on attend, sous le nom que le proprietaire leur a donne.
-
-        LA LISTE VENAIT DE users.json EN ENTIER : 179 personnes, c'est-a-dire
-        tout ce qui a un jour croise le bot -- des patrons, des testeurs, des
-        membres partis. Le premier bilan les a tous accuses d'absence.
-
-        Le projet avait DEJA sa definition d'un VA, et elle est operationnelle
-        depuis longtemps : `_va_targets` (cogs/user.py) prend les fiches qui
-        portent un `channel_id` DONT LE SALON EXISTE ENCORE -- c'est la liste
-        a qui le menu est pousse chaque nuit. Elle ecarte d'elle-meme tout ce
-        qui gonflait le compte : /assignall et /testas posent channel_id a
-        None, les fiches « manual_ » n'en ont pas, et le salon d'un ex-membre
-        a ete supprime.
-
-        On y ajoute un filtre : le STAFF n'est pas attendu a une session de
-        VA. Le patron figurant parmi les absents, c'est le genre de detail qui
-        fait cesser de lire un rapport.
-
-        LE NOM. `Member.display_name` vaut `nick or global_name or name` : le
-        surnom pose sur LE serveur passe donc en premier, c'est bien celui-la
-        qu'on veut (« BO07 4 IPHONE X FIXE » et pas « cx45 »). Encore faut-il
-        le lire sur la BONNE guilde -- le bot est sur trois serveurs, et la
-        version precedente prenait la premiere ou le membre existait. Ici on
-        lit la guilde DU SALON du VA, qui est par construction la bonne.
-
-        JAMAIS D'IDENTIFIANT BRUT. Un membre introuvable garde le pseudo de
-        son salon (« va-safidy » -> « safidy ») plutot qu'un nombre de dix-neuf
-        chiffres, que personne ne peut relier a quelqu'un.
-        """
-        try:
-            from cogs.user import _ch_handle_va, _is_staff_member
-        except Exception:                            # noqa: BLE001
-            _ch_handle_va = lambda n: ""             # noqa: E731
-            _is_staff_member = lambda m: False       # noqa: E731
-        try:
-            import safe_json as _sj
-            users = _sj.load(sv.FICHIER_USERS, default={}) or {}
-        except Exception:                            # noqa: BLE001
-            users = {}
-        if not isinstance(users, dict):
+        """Les personnes de Jessye, nommées comme sur le site, sur Youl4b."""
+        if self.bot is None or not self.bot.is_ready():
             return []
-        out, vus = [], set()
-        for uid, fiche in users.items():
-            if not str(uid).isdigit() or uid in vus:
-                continue
-            f = fiche if isinstance(fiche, dict) else {}
-            cid = f.get("channel_id")
-            if not cid:
-                continue                              # pas de salon = pas un VA
-            salon = self.bot.get_channel(cid) if self.bot else None
-            if salon is None:
-                continue                              # salon supprime : VA parti
-            membre = None
-            guilde = getattr(salon, "guild", None)
-            if guilde is not None:
-                try:
-                    membre = guilde.get_member(int(uid))
-                except (TypeError, ValueError):
-                    membre = None
-            if membre is not None and _is_staff_member(membre):
-                continue                              # le staff n'est pas attendu
-            nom = (getattr(membre, "display_name", None)
-                   or _ch_handle_va(getattr(salon, "name", ""))
-                   or f.get("username") or "")
-            if not nom:
-                # Plutot que d'afficher dix-neuf chiffres, on n'attend pas
-                # quelqu'un qu'on ne sait pas nommer : il apparaitra des qu'il
-                # sera identifiable.
-                continue
-            vus.add(uid)
-            out.append({"id": str(uid), "nom": str(nom),
-                        "identite": str(f.get("identity") or "")})
-        out.sort(key=lambda x: x["nom"].lower())
-        return out
+        guilde = self.bot.get_guild(sv.SUIVI_GUILD_ID)
+        if guilde is None or not guilde.chunked:
+            return []  # Ne pas établir une liste avec un cache incomplet.
+        attendus = sv.attendus_jessye(guilde.members)
+        signature = tuple((a["id"], a["nom"]) for a in attendus)
+        if signature != getattr(self, "_roster_signature", None):
+            self._roster_signature = signature
+            print("[sessions] Jessye US / Youl4b : %d personnes attendues" % len(attendus), flush=True)
+        return attendus
 
     async def poster_resume(self, jour: str = "") -> int:
         """Poste le resume sur demande (bouton du tableau de bord).
@@ -521,11 +646,12 @@ class SessionsVoc(commands.Cog):
         ne peut pas dire « en ce moment ».
         """
         salons = []
+        noms = {a["id"]: a["nom"] for a in self._attendus_enrichis()}
         for ch in self._vocaux():
-            gens = [{"id": str(m.id),
-                     "nom": getattr(m, "display_name", None) or str(m)}
+            gens = [{"id": str(m.id), "nom": noms[str(m.id)]}
                     for m in (getattr(ch, "members", []) or [])
-                    if not getattr(m, "bot", False)]
+                    if str(m.id) in noms and not getattr(m, "bot", False)
+                    and not getattr(getattr(m, "voice", None), "deaf", False)]
             salons.append({"salon": getattr(ch, "name", "?"),
                            "id": ch.id, "gens": gens})
         s = sv.en_cours()

@@ -195,6 +195,7 @@ ETATS = {
     "Hier": "Yesterday",
     "Cette semaine": "This week",
     "Ce mois": "This month",
+    "Mois dernier": "Last month",
     "30 jours": "30 days",
     "14 jours": "14 days",
     "7 jours": "7 days",

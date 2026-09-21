@@ -42,6 +42,44 @@ import safe_json
 FICHIER_CFG = Path("data") / "sessions_cfg.json"
 FICHIER_PRESENCE = Path("data") / "sessions_presence.json"
 FICHIER_DIRECT = Path("data") / "sessions_direct.json"
+FICHIER_JAILBREAK = Path("data") / "jailbreak.json"
+SUIVI_GUILD_ID = 1535758943324999711  # Youl4b uniquement
+SUIVI_IDENTITE = "jessye"
+
+
+def attendus_jessye(membres) -> list:
+    """Fiches Jessye reliées exactement aux membres actuels de Youl4b.
+
+    Une personne peut avoir plusieurs fiches X1/X2 : son identifiant Discord
+    ne figure qu'une fois. Aucun rapprochement par surnom ou nom approchant.
+    Sans source lisible, aucune absence ne peut être déduite.
+    """
+    data = safe_json.load(FICHIER_JAILBREAK, default={}) or {}
+    entry = data.get(SUIVI_IDENTITE, {}) if isinstance(data, dict) else {}
+    vas = entry.get("vas", []) if isinstance(entry, dict) else []
+    handles = {}
+    for membre in membres:
+        if getattr(membre, "bot", False):
+            continue
+        handle = str(getattr(membre, "name", "")).strip().casefold()
+        if handle:
+            handles.setdefault(handle, []).append(membre)
+    grouped = {}
+    for va in vas if isinstance(vas, list) else []:
+        if not isinstance(va, dict):
+            continue
+        nom = str(va.get("name") or "").strip()
+        handle = str(va.get("discord_username") or "").strip().lstrip("@").casefold()
+        matches = handles.get(handle, [])
+        if not nom or len(matches) != 1:
+            continue
+        uid = str(matches[0].id)
+        row = grouped.setdefault(uid, {"id": uid, "noms_site": [],
+                                       "identite": SUIVI_IDENTITE})
+        if nom not in row["noms_site"]:
+            row["noms_site"].append(nom)
+    out = [dict(row, nom=" / ".join(row["noms_site"])) for row in grouped.values()]
+    return sorted(out, key=lambda row: row["nom"].casefold())
 
 #: Le fuseau de reference des horaires affiches dans les noms de salons.
 #: Le Benin ne change pas d'heure : une session a midi y est a midi toute
@@ -595,7 +633,7 @@ def attendus() -> list:
     return out
 
 
-def resume_jour(jour: str, attendus=None) -> dict:
+def resume_jour(jour: str, attendus=None, *, limiter_aux_attendus=False) -> dict:
     """Qui etait la, qui ne l'etait pas, session par session.
 
     `attendus` est la liste des VA qu'on attendait -- [{id, nom}] . Sans elle,
@@ -634,8 +672,11 @@ def resume_jour(jour: str, attendus=None) -> dict:
         brut = presences(jour, s["id"])
         presents, partiels = [], []
         for mid, fiche in brut.items():
+            if limiter_aux_attendus and mid not in index_attendus:
+                continue
+            nom_site = (index_attendus.get(mid) or {}).get("nom") if limiter_aux_attendus else None
             item = {"id": mid,
-                    "nom": fiche.get("nom") or (index_attendus.get(mid) or {}).get("nom") or mid,
+                    "nom": nom_site or fiche.get("nom") or (index_attendus.get(mid) or {}).get("nom") or mid,
                     "secondes": int(fiche.get("secondes") or 0),
                     "premiere": fiche.get("premiere"),
                     "derniere": fiche.get("derniere"),
@@ -666,13 +707,13 @@ def resume_jour(jour: str, attendus=None) -> dict:
     return {"jour": jour, "fuseau": cfg["fuseau"], "sessions": lignes}
 
 
-def resume_par_personne(jour: str, attendus=None) -> list:
+def resume_par_personne(jour: str, attendus=None, *, limiter_aux_attendus=False) -> list:
     """Le meme jour, vu par VA : combien de sessions sur combien.
 
     C'est cette vue-la qu'on lit pour dire « untel n'est jamais la », et c'est
     elle qui doit servir de base a toute consequence -- pas une impression.
     """
-    r = resume_jour(jour, attendus)
+    r = resume_jour(jour, attendus, limiter_aux_attendus=limiter_aux_attendus)
     # « 1 sur 4 » n'a de sens que si les quatre ont ete regardees. Compter une
     # session non surveillee au denominateur fabrique une assiduite fausse,
     # et c'est le chiffre sur lequel on juge quelqu'un.

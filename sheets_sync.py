@@ -434,6 +434,37 @@ def _rows_hash(rows) -> str:
     return hashlib.md5(json.dumps(rows, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
+def _ws_replace(ws, rows) -> None:
+    """Replace values atomically: a refused write must not leave an empty sheet."""
+    def cell(value):
+        if value is None:
+            return {}
+        kind = ('boolValue' if isinstance(value, bool) else
+                'numberValue' if isinstance(value, (int, float)) else 'stringValue')
+        return {'userEnteredValue': {kind: value if kind != 'stringValue' else str(value)}}
+
+    requests = []
+    nrows = len(rows)
+    ncols = max((len(row) for row in rows), default=1)
+    for dimension, needed, current in (
+        ('ROWS', nrows, ws.row_count), ('COLUMNS', ncols, ws.col_count),
+    ):
+        if needed > current:
+            requests.append({'appendDimension': {
+                'sheetId': ws.id, 'dimension': dimension, 'length': needed - current,
+            }})
+    requests.append({'repeatCell': {
+        'range': {'sheetId': ws.id}, 'cell': {}, 'fields': 'userEnteredValue',
+    }})
+    if rows:
+        requests.append({'updateCells': {
+            'start': {'sheetId': ws.id, 'rowIndex': 0, 'columnIndex': 0},
+            'rows': [{'values': [cell(value) for value in row]} for row in rows],
+            'fields': 'userEnteredValue',
+        }})
+    ws.spreadsheet.batch_update({'requests': requests})
+
+
 # ---------- Vues LECTURE SEULE : 1 onglet par (identité, VA), nom "identité va" ----------
 _VIEW_HEADER = ["username", "password", "email", "two_fa", "notes", "statut"]
 
@@ -506,8 +537,7 @@ def _push_va_views(sh, existing: dict, data: dict, force: bool, save_cfg: bool =
             existing[key] = ws
             changed = True
         if force or _last_hash.get(title) != h:
-            ws.clear()
-            _ws_write(ws, full)
+            _ws_replace(ws, full)
             _last_hash[title] = h
         wanted[key] = ws
     # Vues obsolètes -> supprimées. 3 sources : la liste de suivi en config,
@@ -681,8 +711,7 @@ def _push_one_identity_book(gc, cfg, identity, entry, accts, force, all_views):
         except Exception:
             pass
     rows = [HEADER] + [_acct_row(a) for a in accts]
-    ws.clear()
-    _ws_write(ws, rows)
+    _ws_replace(ws, rows)
     tab_ncols = {ws.id: len(HEADER)}   # onglet principal = 7 colonnes
     # + 1 ONGLET PAR VA dans CE classeur (ex 'julia Jaurel') — accumulé
     # pour la config (pas d'écrasement entre classeurs).
@@ -832,8 +861,7 @@ def _push_all_single(data: dict, force: bool = False) -> bool:
                                           rows=max(len(accts) + 10, 20), cols=len(HEADER))
                     existing[str(identity).strip().lower()] = ws
                 rows = [HEADER] + [_acct_row(a) for a in accts]
-                ws.clear()
-                _ws_write(ws, rows)
+                _ws_replace(ws, rows)
                 _last_hash[identity] = h
             # Vues lecture seule par VA (onglets 👤 Nom)
             _push_va_views(sh, existing, data, force)
