@@ -64444,8 +64444,17 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         u = (request.form.get("username") or "").strip()
         if not u:
             return jsonify({"ok": False, "error": "username vide"})
-        added = add_to_watchlist(u)
+        # NETTOYER AVANT D'AJOUTER. L'ordre inverse enregistrait le texte
+        # brut dans la watchlist : un lien colle avec ses parametres de
+        # suivi devenait un « compte » qui ne pouvait jamais etre scrape,
+        # et qui restait a 0 abonne / 0 reel dans la liste.
         clean = _clean_username(u)
+        if not clean:
+            return jsonify({"ok": False,
+                            "error": "« %s » n'est pas un pseudo Instagram. "
+                                     "Colle le pseudo seul, ou le lien du "
+                                     "profil." % u[:60]})
+        added = add_to_watchlist(clean)
         if not is_auth_configured():
             return jsonify({
                 "ok": True,

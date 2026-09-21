@@ -3,6 +3,7 @@ Stocke watchlist + cache des reels dans data/insta/.
 """
 import os
 import json
+import re
 import time
 import logging
 import threading as _threading
@@ -385,8 +386,46 @@ def remove_from_watchlist(username: str) -> bool:
     return True
 
 
+# Un pseudo Instagram : lettres, chiffres, point et tiret bas, 30 au plus.
+_PSEUDO_VALIDE = re.compile(r"^[a-z0-9._]{1,30}$")
+
+# Ces segments appartiennent a Instagram, pas a un compte. Coller le lien
+# d'un POST (instagram.com/p/ABC/) donnait sinon un « compte » nomme « p »,
+# aussi invisible et inutile qu'un pseudo mal colle.
+_SEGMENTS_RESERVES = {
+    "p", "reel", "reels", "tv", "stories", "story", "explore", "accounts",
+    "direct", "challenge", "about", "developer", "legal", "privacy",
+    "terms", "help", "api", "web", "s", "invites", "create",
+}
+
+
 def _clean_username(u: str) -> str:
-    return (u or "").lower().strip().replace("@", "").rstrip("/").split("/")[-1]
+    """Extrait le pseudo d'un lien colle, ou rend "" si ce n'en est pas un.
+
+    L'ancienne version faisait `.rstrip("/").split("/")[-1]`, ce qui laissait
+    passer deux formes tres courantes :
+      - « instagram.com/lea.tacine?stkn=mwron3jxyjl » : le ? n'etait jamais
+        coupe, le pseudo devenait « lea.tacine?stkn=... » et le compte
+        restait a 0 abonne, 0 reel, « dernier scrape : jamais » ;
+      - « instagram.com/lea.tacine/reel/ABC » : prendre le DERNIER segment
+        rendait le code du reel au lieu du pseudo.
+    On prend donc le PREMIER segment du chemin, apres avoir coupe les
+    parametres de suivi et l'ancre.
+
+    Rend "" plutot qu'un pseudo douteux : l'appelant doit pouvoir REFUSER,
+    pas enregistrer n'importe quoi dans la watchlist.
+    """
+    s = (u or "").strip().lower()
+    s = s.split("?", 1)[0].split("#", 1)[0]      # ?stkn=..., #truc
+    s = re.sub(r"^[a-z]+://", "", s)             # https://
+    s = re.sub(r"^(?:www\.)?instagram\.com/", "", s)
+    s = re.sub(r"^(?:www\.)?instagr\.am/", "", s)
+    s = s.strip("/").lstrip("@")
+    s = s.split("/", 1)[0]                       # le PREMIER segment
+    s = s.replace("@", "")
+    if s in _SEGMENTS_RESERVES:
+        return ""
+    return s if _PSEUDO_VALIDE.match(s) else ""
 
 
 # Instagram epoch en millisecondes (2011-08-24 21:07:01 UTC)
