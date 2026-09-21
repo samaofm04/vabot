@@ -1150,6 +1150,19 @@ def comptes_injoignables(min_jours: float = 0.0) -> list:
         depuis = fiche.get("failed_since")
         if not depuis:
             continue
+        motif = str(fiche.get("last_error") or fiche.get("why") or "")
+        # UN QUOTA EPUISE N EST PAS UN COMPTE MORT.
+        #
+        # Mesure du 21/09/2026 : un compte tout juste ajoute apparaissait
+        # « injoignable » apres UN echec, parce que le quota RapidAPI etait
+        # a sec. Proposer sa suppression aurait fait perdre un compte sain,
+        # et c est precisement ce que ce bouton doit empecher. On ne retient
+        # donc que ce qui accuse LE COMPTE, jamais la source de donnees.
+        _m = motif.lower()
+        if any(t in _m for t in ("quota", "rate limit", "429", "timeout",
+                                 "reseau", "réseau", "network", "connection",
+                                 "solde", "enveloppe", "plafond", "pause")):
+            continue
         jours = (maintenant - float(depuis)) / 86400.0
         if jours < min_jours:
             continue
@@ -1157,8 +1170,7 @@ def comptes_injoignables(min_jours: float = 0.0) -> list:
             "pseudo": u,
             "jours": round(jours, 1),
             "depuis": int(float(depuis)),
-            "motif": str(fiche.get("last_error") or fiche.get("why") or
-                         "injoignable")[:160],
+            "motif": (motif or "injoignable")[:160],
         })
     out.sort(key=lambda d: -d["jours"])
     return out
