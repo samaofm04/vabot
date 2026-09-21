@@ -152,6 +152,12 @@ def fetch_video_urls(reel_urls: List[str], timeout: int = 240,
         if diag is not None:
             diag["error"] = "jeton ou liens absents"
         return {}
+    if not _consommer(len(codes)):
+        e = budget_du_jour()
+        if diag is not None:
+            diag["error"] = ("enveloppe du jour epuisee (%d/%d)"
+                             % (e["utilise"], e["plafond"]))
+        return {}
 
     # Le timeout recu vaut pour TOUT le lot chez Apify (un run batch). Ici
     # chaque reel est un appel : on le repartit, avec un plancher pour ne
@@ -194,3 +200,209 @@ def test_token() -> dict:
     if r.status_code == 402:
         return {"ok": False, "error": "solde HikerAPI epuise"}
     return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:120]}"}
+
+
+# ── SCRAPE D'UN PROFIL ENTIER ─────────────────────────────────────────────
+# Sert de REPLI quand RapidAPI tombe (quota epuise, panne). Rend exactement
+# la meme forme que _scrape_via_rapidapi : {profile, reels, scraped_at}.
+# Sans ce repli, une seule source epuisee arretait toute la collecte — c'est
+# ce qui a rendu le parc aveugle 19 jours en septembre 2026.
+
+_PK_FILE = DATA_DIR / "hiker_pk.json"
+_BUDGET_FILE = DATA_DIR / "hiker_budget.json"
+
+# ENVELOPPE QUOTIDIENNE, en requetes.
+#
+# HikerAPI se paie sur un solde prepaye : rien ne s'arrete tout seul quand
+# on depense trop, le solde descend jusqu'a zero et la collecte meurt d'un
+# coup. C'est exactement ce qui est arrive avec le quota RapidAPI, brule en
+# neuf jours pour trois semaines d'aveuglement.
+#
+# 1500 requetes par jour = 1,50 $/jour = ~45 $/mois : un solde de 130 $ tient
+# pres de trois mois. La veille (59 comptes une fois par jour) en consomme 59,
+# le reste sert de repli quand RapidAPI tombe.
+#
+# Ce plafond n'est PAS une optimisation, c'est un garde-fou : au-dela, on
+# refuse et on le DIT, plutot que de vider le solde en silence.
+PLAFOND_JOUR = 1500
+
+
+def _aujourdhui() -> str:
+    import datetime as _dt
+    return _dt.date.today().isoformat()
+
+
+def budget_du_jour() -> dict:
+    """{jour, utilise, plafond, restant} — lisible pour l'afficher."""
+    try:
+        d = safe_json.load_or_prev(_BUDGET_FILE)
+        d = d if isinstance(d, dict) else {}
+    except Exception:
+        d = {}
+    jour = _aujourdhui()
+    utilise = int(d.get("utilise") or 0) if d.get("jour") == jour else 0
+    return {"jour": jour, "utilise": utilise, "plafond": PLAFOND_JOUR,
+            "restant": max(0, PLAFOND_JOUR - utilise)}
+
+
+def _consommer(combien: int) -> bool:
+    """Reserve `combien` requetes. Faux si l'enveloppe du jour est epuisee.
+
+    On reserve AVANT d'appeler, pas apres : compter apres coup laisserait
+    passer une rafale entiere avant que le compteur ne s'en apercoive.
+    """
+    etat = budget_du_jour()
+    if etat["restant"] < combien:
+        return False
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        safe_json.write_text(_BUDGET_FILE, json.dumps(
+            {"jour": etat["jour"], "utilise": etat["utilise"] + combien},
+            ensure_ascii=False))
+    except Exception:
+        pass
+    return True
+
+
+def _pk_cache() -> dict:
+    try:
+        d = safe_json.load_or_prev(_PK_FILE)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _pk_retenir(username: str, pk) -> None:
+    """L'identifiant numerique d'un compte ne change JAMAIS.
+
+    Le retenir supprime un appel sur deux : /v1/user/clips veut un user_id,
+    pas un pseudo. A 774 comptes deux fois par jour, c'est 46 000 requetes
+    economisees par mois.
+    """
+    if not username or not pk:
+        return
+    d = _pk_cache()
+    if str(d.get(username) or "") == str(pk):
+        return
+    d[username] = str(pk)
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        safe_json.write_text(_PK_FILE, json.dumps(d, ensure_ascii=False))
+    except Exception:
+        pass
+
+
+def _horodatage(valeur) -> int:
+    """taken_at arrive en ISO 8601 ; taken_at_ts en secondes. Les deux existent."""
+    if valeur is None:
+        return 0
+    if isinstance(valeur, (int, float)):
+        return int(valeur)
+    try:
+        import datetime as _dt
+        return int(_dt.datetime.fromisoformat(
+            str(valeur).replace("Z", "+00:00")).timestamp())
+    except Exception:
+        return 0
+
+
+def _appel(chemin: str, token: str, timeout: int, **params):
+    try:
+        r = requests.get(BASE + chemin,
+                         headers={"x-access-key": token, "Accept": "application/json"},
+                         params=params, timeout=timeout)
+    except Exception as e:
+        return None, str(e)[:160]
+    if r.status_code != 200:
+        return None, "HTTP %s: %s" % (r.status_code, r.text[:140])
+    try:
+        return r.json(), ""
+    except ValueError:
+        return None, "reponse non-JSON"
+
+
+def scrape_profile(username: str, limit: int = 50) -> dict:
+    """Profil + reels recents. Meme contrat que _scrape_via_rapidapi."""
+    token = get_token()
+    username = (username or "").strip().lstrip("@").lower()
+    if not token:
+        return {"error": "HikerAPI: jeton absent"}
+    if not username:
+        return {"error": "HikerAPI: username vide"}
+
+    pk = _pk_cache().get(username) or ""
+    # Deux appels si le pk est inconnu (pseudo -> pk, puis reels), un seul
+    # ensuite : le pk d'un compte ne change jamais.
+    if not _consommer(1 if pk else 2):
+        e = budget_du_jour()
+        return {"error": "HikerAPI: enveloppe du jour epuisee (%d/%d requetes). "
+                         "Le solde est preserve ; la collecte reprend demain."
+                         % (e["utilise"], e["plafond"])}
+    user = {}
+    if not pk:
+        data, err = _appel("/v1/user/by/username", token, 45, username=username)
+        if err:
+            return {"error": "HikerAPI: " + err}
+        user = data.get("user") if isinstance(data.get("user"), dict) else (data or {})
+        pk = user.get("pk") or user.get("id") or ""
+        if not pk:
+            return {"error": "HikerAPI: compte sans identifiant (introuvable ?)"}
+        _pk_retenir(username, pk)
+
+    data, err = _appel("/v1/user/clips", token, 60, user_id=pk)
+    if err:
+        # Un pk devenu invalide (compte renomme) : on oublie le cache pour
+        # que le prochain passage reparte du pseudo plutot que de s'entetuer.
+        if "404" in err or "400" in err:
+            d = _pk_cache()
+            d.pop(username, None)
+            try:
+                safe_json.write_text(_PK_FILE, json.dumps(d, ensure_ascii=False))
+            except Exception:
+                pass
+        return {"error": "HikerAPI: " + err}
+
+    items = data if isinstance(data, list) else (
+        (data or {}).get("items") or ((data or {}).get("response") or {}).get("items") or [])
+
+    reels = []
+    for it in items[:limit]:
+        m = it.get("media") if isinstance(it.get("media"), dict) else it
+        if not isinstance(m, dict):
+            continue
+        code = m.get("code") or m.get("shortcode") or ""
+        vues = m.get("play_count")
+        if vues is None:
+            vues = m.get("view_count")
+        reels.append({
+            "shortcode": code,
+            "is_video": True,          # /v1/user/clips ne rend que des videos
+            "views": vues,
+            "likes": m.get("like_count") or 0,
+            "comments": m.get("comment_count") or 0,
+            "caption": _legende(m)[:280],
+            "thumbnail_url": m.get("thumbnail_url") or "",
+            "video_url": _url_video(m),
+            "taken_at": _horodatage(m.get("taken_at_ts") or m.get("taken_at")),
+            "date": "",
+            "url": "https://www.instagram.com/p/%s/" % code if code else "",
+        })
+
+    # Le profil n'est interroge que si son pk n'etait pas deja connu. Quand il
+    # l'est, on garde les chiffres du reel le plus recent plutot que de payer
+    # un appel de plus : l'appelant fusionne avec ce qu'il a deja en cache.
+    profil = {
+        "username": user.get("username") or username,
+        "full_name": user.get("full_name") or "",
+        "followers": user.get("follower_count") or 0,
+        "following": user.get("following_count") or 0,
+        "posts_count": user.get("media_count") or 0,
+        "profile_pic_url": (user.get("profile_pic_url_hd")
+                            or user.get("profile_pic_url") or ""),
+        "biography": (user.get("biography") or "")[:300],
+        "is_private": bool(user.get("is_private")),
+        "is_verified": bool(user.get("is_verified")),
+    }
+
+    import time as _t
+    return {"profile": profil, "reels": reels, "scraped_at": _t.time()}

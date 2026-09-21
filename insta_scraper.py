@@ -1138,10 +1138,32 @@ def _scrape_profile_impl(username: str, limit: int = 50) -> dict:
             return result
         errors.append(f"RapidAPI: {result['error']}")
         log.warning(f"RapidAPI échoué pour {username}: {result['error']}")
-        # Mode RapidAPI STRICT : la clé est configurée -> on NE bascule PAS sur les
-        # cookies Instagram (Web/instaloader). On renvoie l'erreur RapidAPI telle
-        # quelle (ex: quota épuisé). L'utilisateur veut fonctionner SEULEMENT via
-        # l'API payante. (Le scrape remarchera dès que la quota se recharge.)
+
+        # REPLI SUR UNE SECONDE API PAYANTE — pas sur des cookies.
+        #
+        # Le mode STRICT ci-dessous existe pour ne JAMAIS risquer les comptes
+        # de la ferme sur un scrape par cookies. Il ne dit pas « une seule
+        # source » : il dit « pas de cookies ». HikerAPI est une API payante
+        # au meme titre que RapidAPI, avec un solde prepaye qui n'expire pas,
+        # et n'engage aucun compte du parc.
+        #
+        # Sans ce repli, un quota epuise arretait TOUTE la collecte : en
+        # septembre 2026 le parc est reste aveugle 19 jours pour cette seule
+        # raison, alors qu'une seconde source aurait pris le relais.
+        try:
+            import hiker_reels as _hk
+            if _hk.configured():
+                _repli = _hk.scrape_profile(username, limit)
+                if "error" not in _repli:
+                    log.info(f"HikerAPI a pris le relais pour {username}")
+                    return _write_cache(username, _repli)
+                errors.append(str(_repli.get("error") or "HikerAPI: echec"))
+        except Exception as _e_hk:
+            errors.append(f"HikerAPI: {str(_e_hk)[:120]}")
+
+        # Mode STRICT maintenu pour les COOKIES : ni Web ni instaloader.
+        # L'erreur rendue porte desormais les deux sources essayees, pour que
+        # le tableau de bord dise laquelle a manque.
         return {**result, "error": " | ".join(errors)}
 
     if not auth.get("sessionid"):
