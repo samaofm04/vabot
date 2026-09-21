@@ -331,20 +331,31 @@ def scrape_profile(username: str, limit: int = 50) -> dict:
         return {"error": "HikerAPI: username vide"}
 
     pk = _pk_cache().get(username) or ""
-    # Deux appels si le pk est inconnu (pseudo -> pk, puis reels), un seul
-    # ensuite : le pk d'un compte ne change jamais.
-    if not _consommer(1 if pk else 2):
+    # DEUX APPELS, TOUJOURS.
+    #
+    # J'avais d'abord saute l'appel profil quand le pk etait deja connu,
+    # pour economiser une requete. C'etait faux : le profil ne porte pas
+    # que le pk, il porte les ABONNES, la PHOTO DE PROFIL et la bio. Sans
+    # lui le scrape rendait {followers: 0, profile_pic_url: ""} et les
+    # cartes s'affichaient sans avatar. _write_cache rattrapait en gardant
+    # l'ancienne valeur, mais un compte jamais releve restait vide, et le
+    # compteur d'abonnes de tous les autres cessait d'etre mis a jour.
+    if not _consommer(2):
         e = budget_du_jour()
         return {"error": "HikerAPI: enveloppe du jour epuisee (%d/%d requetes). "
                          "Le solde est preserve ; la collecte reprend demain."
                          % (e["utilise"], e["plafond"])}
-    user = {}
-    if not pk:
-        data, err = _appel("/v1/user/by/username", token, 45, username=username)
-        if err:
+
+    data, err = _appel("/v1/user/by/username", token, 45, username=username)
+    if err:
+        # Un pk deja connu permet de tenter les reels quand meme : mieux
+        # vaut des vues sans compteur d'abonnes que rien du tout.
+        if not pk:
             return {"error": "HikerAPI: " + err}
+        user = {}
+    else:
         user = data.get("user") if isinstance(data.get("user"), dict) else (data or {})
-        pk = user.get("pk") or user.get("id") or ""
+        pk = user.get("pk") or user.get("id") or pk
         if not pk:
             return {"error": "HikerAPI: compte sans identifiant (introuvable ?)"}
         _pk_retenir(username, pk)
@@ -388,9 +399,6 @@ def scrape_profile(username: str, limit: int = 50) -> dict:
             "url": "https://www.instagram.com/p/%s/" % code if code else "",
         })
 
-    # Le profil n'est interroge que si son pk n'etait pas deja connu. Quand il
-    # l'est, on garde les chiffres du reel le plus recent plutot que de payer
-    # un appel de plus : l'appelant fusionne avec ce qu'il a deja en cache.
     profil = {
         "username": user.get("username") or username,
         "full_name": user.get("full_name") or "",
