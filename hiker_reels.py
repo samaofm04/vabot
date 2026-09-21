@@ -30,7 +30,10 @@ import requests
 
 import safe_json
 
-DATA_DIR = Path("data")
+# Chemin ABSOLU. Avec Path("data") relatif, tout lancement depuis un
+# autre repertoire (script manuel, cron, maintenance) repartait d'un
+# compteur neuf : le plafond etait double sans que rien ne le signale.
+DATA_DIR = Path(__file__).resolve().parent / "data"
 CONFIG_FILE = DATA_DIR / "hiker_config.json"
 BASE = "https://api.hikerapi.com"
 
@@ -224,7 +227,7 @@ _BUDGET_FILE = DATA_DIR / "hiker_budget.json"
 #
 # Ce plafond n'est PAS une optimisation, c'est un garde-fou : au-dela, on
 # refuse et on le DIT, plutot que de vider le solde en silence.
-PLAFOND_JOUR = 1500
+PLAFOND_JOUR = 2500
 
 
 def _aujourdhui() -> str:
@@ -259,8 +262,15 @@ def _consommer(combien: int) -> bool:
         safe_json.write_text(_BUDGET_FILE, json.dumps(
             {"jour": etat["jour"], "utilise": etat["utilise"] + combien},
             ensure_ascii=False))
-    except Exception:
-        pass
+    except Exception as e:
+        # FAIL-CLOSED. Avant, un echec d'ecriture (disque plein sur un VPS
+        # qui telecharge des videos, permission, dossier absent) rendait
+        # True : le plafond devenait inerte et le solde se vidait en
+        # silence. Un garde-fou qui s'autorise tout seul quand ca va mal
+        # n'est pas un garde-fou. On refuse, et on le dit.
+        print("[hiker] compteur non ecrit, appel REFUSE par securite : %s"
+              % str(e)[:120], flush=True)
+        return False
     return True
 
 

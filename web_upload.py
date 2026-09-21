@@ -16104,6 +16104,54 @@ def _run_daily_insta_refresh():
 _INSTA_REFRESH_HOURS = [0, 4, 8, 12, 16, 20]      # repli : 6 scrapes/jour
 
 
+# COMBIEN DE RELEVES PAR JOUR.
+#
+# Les bornes des sessions en donnent cinq (02h, 05h, 10h, 17h, 23h). C'etait
+# un choix de FRAICHEUR : voir dans la journee meme qu'une VA n'a pas poste.
+# Mais chaque releve coute 780 comptes x 2 appels, et cinq par jour
+# demandaient 241 800 appels par mois pour un plan qui en donne 200 000 :
+# le quota partait en dix-sept jours et le parc restait aveugle le reste.
+#
+# Ce qui decide la paie n'est pas le nombre de releves, c'est une question
+# JOURNALIERE : « a-t-il publie aujourd'hui ? » (web_upload.py, « Un oubli
+# = 1 par JOUR »). Les reels portent leur date, et _fusionner_jours accumule
+# par jour : un seul releve quotidien compte donc la journee aussi
+# exactement que cinq.
+#
+# CE QU'ON PERD, et il faut le savoir : l'attribution PAR SESSION (quelle
+# session a produit quel reel) et la fraicheur en cours de journee. Une VA
+# qui n'a pas poste se voit le lendemain matin, plus dans l'heure.
+#
+# Remettre 5 ici restaure l'ancien comportement.
+PASSAGES_PAR_JOUR = 1
+
+
+def _garder_passages(bornes, cloture=None):
+    """Reduit les bornes des sessions au nombre de releves voulu.
+
+    LA BORNE A GARDER N'EST PAS LA DERNIERE PAR ORDRE NUMERIQUE. Les
+    sessions font le tour de minuit : 10h->17h->23h->02h->05h. Trier
+    numeriquement met 23h en dernier, alors que deux sessions se deroulent
+    APRES elle — un releve a 23h manquerait toute la nuit, et les VA de
+    nuit passeraient pour n'avoir rien publie.
+
+    La bonne borne est celle qui FERME le cycle : la seule fin de session
+    qui ne soit pas aussi un debut. Le commentaire de _scrape_bornes la
+    nomme deja « la borne du petit matin ». Ici c'est 05h.
+    """
+    if PASSAGES_PAR_JOUR <= 0 or len(bornes) <= PASSAGES_PAR_JOUR:
+        return bornes
+    if PASSAGES_PAR_JOUR == 1 and cloture in bornes:
+        return [cloture]
+    gardees = [cloture] if cloture in bornes else []
+    # Les autres, etalees dans le cycle a partir de la cloture, pour ne pas
+    # entasser deux releves dans la meme heure.
+    restantes = [b for b in bornes if b not in gardees]
+    pas = max(1, len(restantes) // max(1, PASSAGES_PAR_JOUR - len(gardees)))
+    gardees += restantes[::pas][:PASSAGES_PAR_JOUR - len(gardees)]
+    return sorted(set(gardees))
+
+
 def _scrape_bornes():
     """Les instants de scrape : les BORNES des sessions de posting.
 
@@ -16129,8 +16177,13 @@ def _scrape_bornes():
     try:
         import sessions_voc as _sv_b
         bornes = set()
+        debuts, fins = set(), set()
         for s in ((_sv_b.config() or {}).get("sessions") or []):
             try:
+                debuts.add((int(s["heure"]) % 24, int(s.get("minute") or 0) % 60))
+                if s.get("fin_heure") is not None:
+                    fins.add((int(s["fin_heure"]) % 24,
+                              int(s.get("fin_minute") or 0) % 60))
                 bornes.add((int(s["heure"]) % 24, int(s.get("minute") or 0) % 60))
                 # La FIN compte aussi. Les fenetres se touchent (chaque session
                 # court jusqu au debut de la suivante), donc les fins
@@ -16142,10 +16195,13 @@ def _scrape_bornes():
             except Exception:
                 continue
         if bornes:
-            return sorted(bornes)
+            # La cloture : la seule fin qui ne soit pas aussi un debut.
+            _seules = sorted(fins - debuts)
+            return _garder_passages(sorted(bornes),
+                                    _seules[0] if _seules else None)
     except Exception as e:                                    # noqa: BLE001
         print(f"[daily-insta] calendrier des sessions illisible : {e}", flush=True)
-    return [(h, 0) for h in sorted(_INSTA_REFRESH_HOURS)]
+    return _garder_passages([(h, 0) for h in sorted(_INSTA_REFRESH_HOURS)])
 
 
 def _scrape_fuseau():
@@ -16671,9 +16727,22 @@ def _compute_insta_3_stats(handle: str, force: bool = False) -> dict:
     import insta_scraper as _ig_s
     pause = _ig_s.rapidapi_pause()
     if pause:
-        # Ne pas réécrire 700 caches et dater leurs chiffres d'aujourd'hui
-        # quand aucune requête n'a pu partir.
-        return {**(cached or {}), **pause, "banned": False}
+        # DEUX PAUSES QUI NE SE VALENT PAS.
+        #
+        # « rate_limit » est passager : quelques minutes plus tard RapidAPI
+        # repond. On court-circuite, on garde le cache, on ne reecrit pas
+        # 780 fiches en datant d'aujourd'hui des chiffres qui n'ont pas
+        # bouge. C'est la raison d'etre de ce court-circuit.
+        #
+        # « monthly_quota » est une panne de FOND : elle dure des semaines.
+        # Court-circuiter la aussi, c'est ce qui a rendu le parc aveugle du
+        # 16 au 21 septembre 2026 — et c'est ce qui rendait le repli
+        # HikerAPI inutilisable, puisqu'on sortait avant de l'atteindre.
+        # On laisse donc passer : scrape_profile essaiera RapidAPI (qui
+        # refusera sans reseau, via _rapid_gate) puis HikerAPI, qui a son
+        # propre plafond quotidien pour proteger le solde.
+        if str(pause.get("reason") or "") != "monthly_quota":
+            return {**(cached or {}), **pause, "banned": False}
     # 1) Public IG d abord
     res = _scrape_via_ig_public(h)
     # 2) Repli RapidAPI si l API publique echoue.
