@@ -425,7 +425,20 @@ def api_get(path: str, params: dict = None, _essai: int = 0) -> dict:
         # trousseau, la rotation finit forcement par tomber sur celle qui a
         # ete mal collee ; sans reprise, une page entiere echouerait une fois
         # sur dix, au hasard, et le diagnostic serait « ca marche parfois ».
-        if r.status_code == 401 and _essai < _reprises_possibles():
+        # ON RETENTE AUSSI SUR 403, et c'est un changement de raisonnement.
+        #
+        # Le commentaire ci-dessus supposait qu'un 403 vaut pour tout le
+        # trousseau : « la portee demande un compte owner ». Vrai quand
+        # toutes les cles couvrent le meme perimetre ; faux ici. Mesure du
+        # 21/09/2026 sur la creatrice 3673 (Lola), chaque cle testee une par
+        # une : HUIT des onze rendent 200, trois rendent 403. Une creatrice
+        # ajoutee sur un compte n'est visible que par les cles de ce compte.
+        #
+        # Sans reprise, elle apparaissait ou disparaissait selon la cle tiree
+        # au hasard — le « ca marche parfois » que ce fichier dit justement
+        # vouloir eviter. Le nombre d'essais reste borne : si AUCUNE cle n'a
+        # le droit, on rend la meme erreur, juste un peu plus tard.
+        if r.status_code in (401, 403) and _essai < _reprises_possibles():
             return api_get(path, params, _essai=_essai + 1)
         return {"ok": False, "error": f"Token API refusé (HTTP {r.status_code})"}
     if r.status_code == 404:
