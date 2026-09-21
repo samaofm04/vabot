@@ -50087,14 +50087,23 @@ def _start_auto_scrape_daemon():
         _t.sleep(60)  # wait bot init
         while True:
             try:
-                from insta_scraper import load_watchlist, scrape_profile, purge_dead_watchlist
-                # comptes « profil introuvable » depuis > 7 jours : retirés
-                try:
-                    _dead = purge_dead_watchlist(7)
-                    if _dead:
-                        log.info(f"[insta-bg-scrape] retirés (injoignables 7 j+): {_dead}")
-                except Exception as _e:
-                    log.warning(f"[insta-bg-scrape] purge: {_e}")
+                from insta_scraper import load_watchlist, scrape_profile
+                # PURGE AUTOMATIQUE DEBRANCHEE (21/09/2026).
+                #
+                # purge_dead_watchlist(7) retirait tout seul les comptes
+                # injoignables depuis plus de sept jours. Elle supprimait
+                # sans rien demander, et sans distinguer un compte disparu
+                # d'une panne de la source : pendant la panne de quota du
+                # 16 au 21 septembre, tout compte ajoute puis rate une fois
+                # partait au bout d'une semaine. Le proprietaire voyait sa
+                # watchlist maigrir sans savoir pourquoi.
+                #
+                # Le retrait passe desormais par le bouton « Comptes
+                # introuvables » de l'onglet Trends : la liste est affichee
+                # avec le motif et l'anciennete de chaque echec, et seuls
+                # les comptes VALIDES a l'ecran sont retires.
+                # Les fonctions restent disponibles pour un usage manuel :
+                # comptes_injoignables() et retirer_de_la_watchlist().
                 # LA VEILLE DES BANGERS TOURNE TOUJOURS, elle. Tout le bloc qui
                 # suit est conditionne a la watchlist Trends — une liste de
                 # comptes CONCURRENTS, sans rapport avec nos bangers. S'y
