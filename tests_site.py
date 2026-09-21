@@ -2668,7 +2668,7 @@ try:
         _vtCa.download_via_ytdlp = _sav_dl
         _wCa._linkimp_fetch = _sav_fetch
     check("import lien : chaine Veille pour Instagram (Apify -> scrape -> yt-dlp public)",
-          "apify_reels" in _plCa.Path("web_upload.py").read_text(encoding="utf-8")
+          "reels_source" in _plCa.Path("web_upload.py").read_text(encoding="utf-8")
           and "use_cookies=False" in _plCa.Path("web_upload.py").read_text(encoding="utf-8"))
 
     # -- Google Drive sync (copie seule) --------------------------------------
@@ -10976,7 +10976,7 @@ try:
     check("bangers : les cookies servent bien a telecharger la video",
           "use_cookies=True" in _inB.getsource(_wB._banger_recuperer))
     check("bangers : l API sert au lien et a la description, comme les Trends",
-          "apify_reels" in _inB.getsource(_wB._banger_recuperer))
+          "reels_source" in _inB.getsource(_wB._banger_recuperer))
     check("bangers : le fichier est ecrit de facon atomique (.part puis replace)",
           ".part" in _inB.getsource(_wB._banger_recuperer)
           and "os.replace" in _inB.getsource(_wB._banger_recuperer))

@@ -720,7 +720,7 @@ def send_video_from_url(video_url: str, caption: str = "",
     #     source fiable pour la veille — évite le yt-dlp qui se fait jeter (429).
     if not video_bytes and fallback_url:
         try:
-            import apify_reels as _ap
+            import reels_source as _ap
             if _ap.configured():
                 _ar = _ap.fetch_video_urls([fallback_url], timeout=90)
                 _ad = _ar.get(_sc) or (list(_ar.values())[0] if _ar else None)

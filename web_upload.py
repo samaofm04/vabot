@@ -23054,7 +23054,7 @@ def _linkimp_fetch(u: str, inf: dict):
     _steps = []   # raison PAR ÉTAPE (affichée si tout échoue)
     # 1) Apify : LA source fiable de la Veille (zéro cookie, pas de 429)
     try:
-        import apify_reels as _ap
+        import reels_source as _ap
         if _ap.configured():
             _ar = _ap.fetch_video_urls([u], timeout=90) or {}
             _ad = _ar.get(sc) or (list(_ar.values())[0] if _ar else None)
@@ -46528,7 +46528,7 @@ def _render_apify_settings() -> str:
     """Token Apify (Instagram Reel Downloader) : télécharge les vidéos des reels
     via un service tiers, SANS jamais utiliser le compte Instagram."""
     try:
-        import apify_reels as _ap
+        import reels_source as _ap
         ok = _ap.configured()
     except Exception:
         ok = False
@@ -49082,7 +49082,7 @@ def _predownload_missing(max_workers: int = 4) -> dict:
     _apify_total = {"n": 0}
 
     try:
-        import apify_reels as _ap
+        import reels_source as _ap
     except Exception:
         _ap = None
 
@@ -49178,7 +49178,7 @@ def _ensure_video_worker(sc: str, url: str):
         # public. Si tout echoue, le reel est marque indisponible.
         vb = None
         try:
-            import apify_reels as _ap
+            import reels_source as _ap
             if _ap.configured():
                 _res = _ap.fetch_video_urls([purl], timeout=90)
                 _d = _res.get(sc) or (list(_res.values())[0] if _res else None)
@@ -49429,7 +49429,7 @@ def _banger_recuperer(shortcode: str, url: str) -> tuple:
     #    le scrape public ne donne aucune des deux et le scrape RapidAPI tronque
     #    la legende a 280 signes.
     try:
-        import apify_reels as _ap
+        import reels_source as _ap
         if _ap.configured():
             res = _ap.fetch_video_urls([purl], timeout=90) or {}
             d = res.get(sc) or (list(res.values())[0] if res else None)
@@ -58895,7 +58895,7 @@ def create_app():
         if not is_auth():
             return jsonify({"ok": False}), 401
         try:
-            import apify_reels as _ap
+            import reels_source as _ap
             from insta_scraper import get_all_cached_reels, load_watchlist
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
@@ -61827,7 +61827,7 @@ def create_app():
         ap_reason = ""
         if not (res and res.get("ok")):
             try:
-                import apify_reels as _ap
+                import reels_source as _ap
                 if _ap.configured():
                     _apdiag = {}
                     _ar = _ap.fetch_video_urls([reel.get("url", "")], timeout=120, diag=_apdiag)
