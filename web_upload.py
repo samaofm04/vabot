@@ -49036,6 +49036,15 @@ def _ensure_video_state(sc: str) -> dict:
 _PREDL_STATE = {"running": False, "done": 0, "total": 0, "ts": 0}
 
 
+# Sous ce nombre de vues, un reel de la veille n'est pas telecharge.
+# Le disque, la bande passante et les requetes de resolution d'URL sont
+# tous consommes par des videos que personne ne regardera : un reel a
+# 300 vues n'apprend rien sur ce qui marche. Le seuil ne cache rien pour
+# autant — les reels ecartes restent visibles dans Trends, ils n'ont
+# simplement pas leur mp4 sur le serveur.
+MIN_VUES_TELECHARGEMENT = 10000
+
+
 def _predownload_missing(max_workers: int = 4) -> dict:
     """Télécharge EN PARALLÈLE (sans cookie) les mp4 manquants des reels vidéo
     des 7 derniers jours déjà scrapés. Réutilisé par le démon ET le bouton
@@ -49053,6 +49062,7 @@ def _predownload_missing(max_workers: int = 4) -> dict:
     wl = {str(u or "").lower().strip().lstrip("@") for u in (load_watchlist() or [])}
     cutoff = _t2.time() - 7 * 86400
     todo = []
+    sous_seuil = 0          # reels ecartes faute de vues : remonte dans le bilan
     for r in get_all_cached_reels():
         if not r.get("is_video"):
             continue
@@ -49060,6 +49070,13 @@ def _predownload_missing(max_workers: int = 4) -> dict:
             continue
         ta = r.get("taken_at") or 0
         if ta and ta < cutoff:
+            continue
+        # SEUIL DE VUES. On compte les ecartes plutot que de les jeter en
+        # silence : sans ce compteur, un seuil mal regle ferait disparaitre
+        # la moitie de la veille sans que rien ne le signale.
+        _v = r.get("views")
+        if _v is not None and int(_v or 0) < MIN_VUES_TELECHARGEMENT:
+            sous_seuil += 1
             continue
         m = re.search(r'/(?:p|reel|reels)/([A-Za-z0-9_-]+)', r.get("url") or "")
         if not m:
@@ -49160,7 +49177,8 @@ def _predownload_missing(max_workers: int = 4) -> dict:
                 list(ex.map(lambda it: _one(it, apify_map.get(it[0], "")), batch))
     finally:
         _PREDL_STATE["running"] = False
-    return {"downloaded_attempt": len(todo), "apify_resolved": _apify_total["n"]}
+    return {"downloaded_attempt": len(todo), "apify_resolved": _apify_total["n"],
+            "sous_seuil_vues": sous_seuil}
 
 
 def _ensure_video_worker(sc: str, url: str):
