@@ -25139,7 +25139,10 @@ def _paris_now_web():
     return u + _dt.timedelta(hours=offset)
 
 
-_INSTA_TRENDS_SCRAPE_HOURS = [0, 12]   # 00h et 12h Paris
+_INSTA_TRENDS_SCRAPE_HOURS = [0]      # 00h Paris, une seule fois par jour
+# UN SEUL passage quotidien. Un compte concurrent qui publie trois fois
+# par jour tient largement dans les ~12 reels d'une page : deux creneaux
+# ne rapportaient aucune donnee de plus, ils doublaient juste la facture.
 _insta_trends_last_slot = None
 _INSTA_TRENDS_SCHED_STARTED = False
 
@@ -49903,8 +49906,10 @@ def _banger_test(heures: int = 24, combien: int = 5,
 
 
 def _start_auto_scrape_daemon():
-    """Background daemon : scrape toutes les watchlist Instagram toutes les 3h
-    + telecharge les fichiers mp4 sur disque.
+    """Background daemon : telecharge chaque heure les mp4 manquants.
+
+    Il ne scrape plus (le planificateur de 00h s'en charge) : il ne fait que
+    transformer en fichiers sur disque les reels deja connus du cache.
 
     Une fois telecharge, un reel reste lisible POUR TOUJOURS (plus de
     "Vidéo expirée" possible). User clique -> served depuis le disque.
@@ -49969,16 +49974,15 @@ def _start_auto_scrape_daemon():
                     #    plus du planificateur 00h/12h : la quota RapidAPI
                     #    (payante) partait x24 pour des donnees identiques.
                     ok = fail = 0
-                    try:
-                        _res_bg = run_insta_watchlist_scrape(
-                            limit=200, label="bg-hourly", skip_fresh_hours=11.0,
-                            delay=DELAY_BETWEEN_PROFILES)
-                        ok = int(_res_bg.get("scraped") or 0)
-                        _sk = int(_res_bg.get("skipped") or 0)
-                        log.info(f"[insta-bg-scrape] scrape={ok} frais_ignores={_sk} "
-                                 f"({_res_bg.get('reason') or 'ok'})")
-                    except Exception as _e_bg:
-                        log.warning(f"[insta-bg-scrape] scrape partage: {_e_bg}")
+                    # CETTE BOUCLE NE SCRAPE PLUS. Elle tournait toutes les
+                    # heures et relançait un scrape de toute la watchlist, en
+                    # plus du planificateur — pour des donnees identiques, un
+                    # compte ne publiant pas douze fois par heure. Le scrape
+                    # appartient desormais au seul planificateur de 00h
+                    # (_insta_trends_scheduler_loop). Ici on ne garde que le
+                    # TELECHARGEMENT, qui lui doit rester continu : il ne coute
+                    # rien (GET sur le CDN, sans cle ni cookie) et il rattrape
+                    # au fil de l'eau les mp4 manquants des reels deja scrapes.
                     # 2) TELECHARGEMENT PARALLELE (4 en meme temps, sans cookie)
                     #    des mp4 manquants des 7 derniers jours -> bien plus rapide
                     #    que l'ancienne boucle sequentielle avec sleep.
