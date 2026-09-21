@@ -3913,6 +3913,55 @@ window.igRefreshDlBar = function(){
       });
     }).catch(function(){});
 };
+// NETTOYAGE DES COMPTES INJOIGNABLES : on MONTRE d abord, on retire apres.
+// Le demon sait deja purger tout seul au bout de sept jours, mais il le fait
+// en silence : un compte renomme, passe en prive, ou victime d une panne de
+// la source disparaissait de la liste sans que personne ne l ait decide.
+// Ici l utilisateur lit la liste et valide, et on ne retire QUE ce qu il a vu.
+window.igNettoyerInjoignables = function(btn){
+  var txt0 = btn ? btn.textContent : "";
+  if(btn){ btn.disabled = true; btn.textContent = "◌ …"; }
+  var rendre = function(){ if(btn){ btn.disabled = false; btn.textContent = txt0; } };
+  fetch("/insta/watchlist_injoignables", {credentials:"same-origin"})
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      rendre();
+      if(!d || !d.ok){
+        if(typeof showToast === "function") showToast((d && d.error) || "Erreur", "error");
+        return;
+      }
+      var liste = d.comptes || [];
+      if(!liste.length){
+        if(typeof showToast === "function") showToast("Aucun compte injoignable", "success");
+        return;
+      }
+      var lignes = liste.map(function(c){
+        return "  @" + c.pseudo + "  (" + c.jours + " j)  " + (c.motif || "");
+      }).join("\n");
+      var msg = "Retirer " + liste.length + " compte(s) injoignable(s) de la watchlist ?\n\n"
+              + lignes + "\n\nCette action ne touche ni aux videos deja telechargees,"
+              + "\nni aux reels deja enregistres.";
+      if(!window.confirm(msg)) return;
+      var fd = new FormData();
+      fd.append("pseudos", liste.map(function(c){ return c.pseudo; }).join(","));
+      if(btn){ btn.disabled = true; btn.textContent = "◌ …"; }
+      fetch("/insta/watchlist_retirer", {method:"POST", body:fd, credentials:"same-origin"})
+        .then(function(r){ return r.json(); })
+        .then(function(e){
+          rendre();
+          if(e && e.ok){
+            if(typeof showToast === "function")
+              showToast((e.retires || []).length + " compte(s) retire(s), "
+                        + e.restants + " restant(s)", "success");
+            setTimeout(function(){ location.reload(); }, 1200);
+          } else if(typeof showToast === "function"){
+            showToast((e && e.error) || "Erreur", "error");
+          }
+        })
+        .catch(function(){ rendre(); });
+    })
+    .catch(function(){ rendre(); });
+};
 window.igDownloadNow = function(btn){
   if(btn){ btn.disabled = true; btn.style.opacity = '.5'; btn.textContent = '◌ …'; }
   fetch('/insta/download_now', {method:'POST', credentials:'same-origin'})
@@ -25350,6 +25399,11 @@ def _render_insta_trends_grid_html() -> str:
         "<button type='button' id='ig-dl-now' onclick='igDownloadNow(this)' "
         "title='Télécharger maintenant toutes les vidéos manquantes (en fond)' "
         "style='background:#3b82f6;color:#fff;border:0;padding:6px 12px;border-radius:8px;cursor:pointer;font-size:11.5px;font-weight:700;white-space:nowrap'>↓ Télécharger</button>"
+        "<button type='button' id='ig-clean-dead' onclick='igNettoyerInjoignables(this)' "
+        "title='Lister les comptes qu Instagram ne rend plus, et les retirer apres validation' "
+        "style='background:#1f2937;color:#cbd5e1;border:1px solid #374151;padding:6px 12px;"
+        "border-radius:8px;cursor:pointer;font-size:11.5px;font-weight:700;white-space:nowrap;"
+        "margin-left:6px'>⌫ Comptes introuvables</button>"
         "</div>",
         "<div style='display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-top:14px'>"]
     for r in reels[:1000]:
@@ -64430,6 +64484,44 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             "username": username,
         })
         return _success("✓ Cookies Instagram sauvegardés")
+
+    @app.route("/insta/watchlist_injoignables", methods=["GET"])
+    def insta_watchlist_injoignables():
+        """La liste des comptes qu'Instagram ne rend plus. NE RETIRE RIEN."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            from insta_scraper import comptes_injoignables
+            liste = comptes_injoignables()
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)[:200]})
+        return jsonify({"ok": True, "comptes": liste, "total": len(liste)})
+
+    @app.route("/insta/watchlist_retirer", methods=["POST"])
+    def insta_watchlist_retirer():
+        """Retire les comptes VALIDES par l'utilisateur, et eux seuls.
+
+        On recoit la liste explicite plutot qu'un « retire les injoignables » :
+        entre l'affichage et la validation, un compte a pu redevenir
+        joignable, et il ne doit pas disparaitre pour autant.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        try:
+            from insta_scraper import retirer_de_la_watchlist
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"module indispo: {e}"})
+        brut = (request.form.get("pseudos") or "").strip()
+        pseudos = [x.strip() for x in brut.split(",") if x.strip()]
+        if not pseudos:
+            return jsonify({"ok": False, "error": "aucun compte selectionne"})
+        try:
+            res = retirer_de_la_watchlist(pseudos)
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)[:200]})
+        return jsonify({"ok": True, **res})
 
     @app.route("/insta/add_account", methods=["POST"])
     def insta_add_account():

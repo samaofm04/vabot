@@ -1128,6 +1128,70 @@ def record_scrape_result(username: str, result: dict):
     _save_health(h)
 
 
+def comptes_injoignables(min_jours: float = 0.0) -> list:
+    """Les comptes de la watchlist qu'Instagram ne rend plus, SANS EN RETIRER.
+
+    purge_dead_watchlist, juste en dessous, supprime tout seul au bout de
+    sept jours. C'est pratique et c'est aveugle : un compte peut etre
+    injoignable parce qu'il a ete renomme, mis en prive, ou parce que la
+    source de donnees etait en panne — et il disparait de la liste sans que
+    personne ne l'ait decide. Cette fonction-ci ne fait que REGARDER ; le
+    retrait est une action separee, validee a la main.
+
+    Rend une liste triee du plus ancien echec au plus recent :
+      [{pseudo, jours, depuis, motif}]
+    """
+    h = _load_health()
+    wl = load_watchlist() or []
+    maintenant = time.time()
+    out = []
+    for u in wl:
+        fiche = h.get(u) or {}
+        depuis = fiche.get("failed_since")
+        if not depuis:
+            continue
+        jours = (maintenant - float(depuis)) / 86400.0
+        if jours < min_jours:
+            continue
+        out.append({
+            "pseudo": u,
+            "jours": round(jours, 1),
+            "depuis": int(float(depuis)),
+            "motif": str(fiche.get("last_error") or fiche.get("why") or
+                         "injoignable")[:160],
+        })
+    out.sort(key=lambda d: -d["jours"])
+    return out
+
+
+def retirer_de_la_watchlist(pseudos: list) -> dict:
+    """Retire EXACTEMENT les pseudos demandes. Rien d'autre.
+
+    On ne recalcule pas la liste des injoignables ici : entre le moment ou
+    l'utilisateur a vu la liste et celui ou il valide, un compte a pu
+    redevenir joignable. Retirer « tous les injoignables » supprimerait
+    alors un compte que l'ecran ne montrait pas.
+    """
+    demandes = {str(u or "").strip().lstrip("@").lower() for u in (pseudos or [])}
+    demandes.discard("")
+    if not demandes:
+        return {"retires": [], "absents": [], "restants": len(load_watchlist() or [])}
+    wl = load_watchlist() or []
+    presents = {str(u).strip().lower() for u in wl}
+    retires = sorted(demandes & presents)
+    absents = sorted(demandes - presents)
+    if retires:
+        save_watchlist([u for u in wl if str(u).strip().lower() not in demandes])
+        h = _load_health()
+        for u in retires:
+            h.pop(u, None)
+        _save_health(h)
+        log.info("watchlist : %d compte(s) retire(s) a la main : %s"
+                 % (len(retires), retires))
+    return {"retires": retires, "absents": absents,
+            "restants": len(load_watchlist() or [])}
+
+
 def purge_dead_watchlist(days: int = 7) -> list:
     """Retire de la watchlist les comptes injoignables depuis plus de `days`
     jours (marqués par record_scrape_result). Retourne les retirés."""
