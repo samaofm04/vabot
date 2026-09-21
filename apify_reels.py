@@ -135,7 +135,14 @@ def fetch_video_urls(reel_urls: List[str], timeout: int = 240,
     pour le diagnostic — l'appelant retombe sur ses autres méthodes en cas d'échec.
     """
     tok = get_token()
-    urls = [u for u in (reel_urls or []) if u]
+    # DEDOUBLONNAGE OBLIGATOIRE. L'actor Apify refuse le lot ENTIER en
+    # HTTP 400 des qu'une URL apparait deux fois : « Field
+    # input.directUrls must NOT have duplicate items ». Un seul doublon
+    # et les 18 videos du lot restent bloquees en « en cours » sans
+    # jamais aboutir. fetch_reel_details, juste au-dessus, deduplique
+    # deja de cette facon — cette fonction-ci ne l'avait jamais recu.
+    # dict.fromkeys preserve l'ordre, contrairement a set().
+    urls = list(dict.fromkeys(u for u in (reel_urls or []) if u))
     if diag is not None:
         diag.update({"sent": len(urls), "status": None, "resolved": 0, "error": ""})
     if not tok or not urls:
