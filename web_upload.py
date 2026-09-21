@@ -41541,6 +41541,54 @@ def _render_chatplanning_html() -> str:
             f"border-radius:6px;font-size:12px;width:120px'>"
         )
 
+    def _discord_cell(r):
+        """Pseudo Discord du chatteur, VERIFIE contre les membres du serveur.
+
+        Le champ seul ne prouve rien : une faute de frappe se stocke aussi
+        bien qu un vrai pseudo, et le rattachement paraitrait fait alors
+        qu il ne l est pas. On resout donc le handle a chaque rendu (cache
+        120 s) et on montre le resultat.
+
+        TROIS etats, jamais deux. Le bot hors ligne ne peut RIEN verifier :
+        afficher « introuvable » dans ce cas accuserait des pseudos
+        parfaitement corrects, et c est ce faux negatif qui ferait perdre
+        confiance a l ecran entier.
+        """
+        handle = (r.get("discord_username") or "").strip()
+        info = _resolve_discord_user_by_handle(handle) if handle else None
+        pastille = ""
+        if not handle:
+            bord, titre = "#2a2a2a", "Pseudo Discord du chatteur"
+        elif info:
+            bord = "#22c55e"
+            titre = "Rattache a " + (info.get("display_name") or handle)
+            av = info.get("avatar_url") or ""
+            if av:
+                pastille = (f"<img src='{html_escape(av)}' alt='' "
+                            f"style='width:18px;height:18px;border-radius:50%;"
+                            f"vertical-align:middle;margin-right:5px'>")
+        elif _BOT_REF is None:
+            bord = "#2a2a2a"
+            titre = "Bot Discord hors ligne : rattachement non verifiable"
+            pastille = ("<span style='color:#666;margin-right:5px' "
+                        "title='non verifiable'>•</span>")
+        else:
+            bord = "#f97316"
+            titre = "Aucun membre du Discord ne porte ce pseudo"
+            pastille = "<span style='color:#f97316;margin-right:5px'>⚠</span>"
+        largeur = 100 if pastille else 120
+        return (
+            f"<td style='padding:4px 6px;white-space:nowrap' title='{html_escape(titre)}'>"
+            f"{pastille}"
+            f"<input type='text' class='chat-cell' data-row='{r['id']}' "
+            f"data-field='discord_username' "
+            f"value='{handle.replace(chr(39), chr(39) + chr(39))}' placeholder='@discord' "
+            f"onchange='saveCell(this)' "
+            f"style='background:#1a1a1a;color:#fff;border:1px solid {bord};"
+            f"padding:6px 8px;border-radius:6px;font-size:12px;width:{largeur}px'>"
+            f"</td>"
+        )
+
     body_rows = []
     # Ordre de tri par statut : Ancien (N1) -> Nouveau (N2) -> Support (N3)
     _STATUT_ORDER = {"Ancien": 0, "Nouveau": 1, "Support": 2}
@@ -41549,6 +41597,7 @@ def _render_chatplanning_html() -> str:
         """Cellules d'une ligne APRES la 1re colonne (créneau OU horaire) —
         identiques pour chatteurs et managers."""
         pseudo_cell = f"<td style='padding:4px 6px'>{_input_cell(r['id'], 'pseudo', r.get('pseudo', ''), 'Pseudo')}</td>"
+        discord_cell = _discord_cell(r)
         sc = statut_colors.get(r.get("statut", "Nouveau"), statut_colors["Nouveau"])
         statut_cell = f"<td style='padding:4px 6px'>{_select_cell(r['id'], 'statut', r.get('statut', 'Nouveau'), statut_opts(r.get('statut', 'Nouveau')), sc['bg'], sc['fg'], 90)}</td>"
         current_mod = r.get('modele', '')
@@ -41586,7 +41635,7 @@ def _render_chatplanning_html() -> str:
             f"<button type='button' onclick='deleteRow(\"{r['id']}\")' style='background:transparent;border:0;color:#666;font-size:16px;cursor:pointer;padding:0 6px'>×</button>"
             f"</td>"
         )
-        return pseudo_cell + statut_cell + modele_cell + off_cell + day_cells + retards_cell + absences_cell + del_btn
+        return pseudo_cell + discord_cell + statut_cell + modele_cell + off_cell + day_cells + retards_cell + absences_cell + del_btn
 
     # === Board MANAGERS : liste plate, 1re colonne = HORAIRE libre (texte) ===
     if is_mgr:
@@ -41651,6 +41700,7 @@ def _render_chatplanning_html() -> str:
                 first = False
             # Pseudo
             pseudo_cell = f"<td style='padding:4px 6px'>{_input_cell(r['id'], 'pseudo', r.get('pseudo', ''), 'Pseudo')}</td>"
+            discord_cell = _discord_cell(r)
             # Statut
             sc = statut_colors.get(r.get("statut", "Nouveau"), statut_colors["Nouveau"])
             statut_cell = f"<td style='padding:4px 6px'>{_select_cell(r['id'], 'statut', r.get('statut', 'Nouveau'), statut_opts(r.get('statut', 'Nouveau')), sc['bg'], sc['fg'], 90)}</td>"
@@ -41695,7 +41745,7 @@ def _render_chatplanning_html() -> str:
                 f"</td>"
             )
             body_rows.append(
-                f"<tr data-rowid='{r['id']}' data-creneau='{creneau}' data-statut='{html_escape((r.get('statut') or '').strip())}'>{cre_cell}{pseudo_cell}{statut_cell}{modele_cell}{off_cell}{day_cells}{retards_cell}{absences_cell}{del_btn}</tr>"
+                f"<tr data-rowid='{r['id']}' data-creneau='{creneau}' data-statut='{html_escape((r.get('statut') or '').strip())}'>{cre_cell}{pseudo_cell}{discord_cell}{statut_cell}{modele_cell}{off_cell}{day_cells}{retards_cell}{absences_cell}{del_btn}</tr>"
             )
         # Bouton "+ ajouter ligne" sous chaque creneau (AJAX, no reload)
         body_rows.append(
@@ -41719,6 +41769,7 @@ def _render_chatplanning_html() -> str:
         "<thead><tr>"
         f"<th style='background:#0a0a0a;color:#3b82f6;font-weight:700;padding:10px 6px;font-size:12px;border-right:2px solid #0a0a0a;width:80px'>{'Horaire' if is_mgr else 'Creneau'}</th>"
         "<th style='background:#1a1a1a;color:#3b82f6;font-weight:700;padding:10px 6px;font-size:12px'>Pseudo</th>"
+        "<th style='background:#1a1a1a;color:#5865f2;font-weight:700;padding:10px 6px;font-size:12px' title='Pseudo Discord du chatteur — rempli = rattachement valide'>Discord</th>"
         "<th style='background:#1a1a1a;color:#3b82f6;font-weight:700;padding:10px 6px;font-size:12px'>Statut</th>"
         "<th style='background:#1a1a1a;color:#3b82f6;font-weight:700;padding:10px 6px;font-size:12px'>Modele</th>"
         "<th style='background:#1a1a1a;color:#3b82f6;font-weight:700;padding:10px 6px;font-size:12px'>OFF</th>"
@@ -42262,6 +42313,7 @@ async function addChatRow(creneau){
   tr.dataset.rowid = rid;
   tr.innerHTML = creCellHtml
     + '<td style=padding:4px><input type=text class=chat-cell data-row='+rid+' data-field=pseudo value=\"\" placeholder=Pseudo onchange=saveCell(this) style=\"background:#1a1a1a;color:#fff;border:1px solid #2a2a2a;padding:6px 8px;border-radius:6px;font-size:12px;width:120px\"></td>'
+    + '<td style=padding:4px><input type=text class=chat-cell data-row='+rid+' data-field=discord_username value=\"\" placeholder=@discord onchange=saveCell(this) style=\"background:#1a1a1a;color:#fff;border:1px solid #2a2a2a;padding:6px 8px;border-radius:6px;font-size:12px;width:120px\"></td>'
     + '<td style=padding:4px>'+statutSel+'</td>'
     + '<td style=padding:4px>'+modeleSel+'</td>'
     + '<td style=padding:4px>'+offSel+'</td>'

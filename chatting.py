@@ -237,6 +237,11 @@ def add_row(edt_id: str, creneau: str = "02h-08h") -> Optional[Dict[str, Any]]:
                 "id": f"row_{uuid.uuid4().hex[:10]}",
                 "creneau": cre,
                 "pseudo": "",
+                # Le pseudo Discord du chatteur. C'est le SEUL identifiant qui
+                # le relie a une vraie personne : « pseudo » est un texte libre
+                # saisi a la main, qui ne correspond a rien d'autre dans le
+                # systeme. Rempli = rattachement valide ; vide = a verifier.
+                "discord_username": "",
                 "statut": "Nouveau",
                 "modele": "",
                 "off": "",
@@ -260,10 +265,23 @@ def delete_row(edt_id: str, row_id: str) -> bool:
     return False
 
 
+def _norm_discord(v) -> str:
+    """Un pseudo Discord, tel qu'il sert de cle.
+
+    On accepte ce que l'utilisateur colle — « @Mariamos », « Mariamos »,
+    un espace en trop — et on range toujours la meme forme : sans arobase,
+    sans espace, en minuscules. Discord est lui-meme passe aux pseudos en
+    minuscules, et deux orthographes pour une personne, c'est exactement le
+    « deux endroits decident la meme chose » que ce depot paie cher.
+    """
+    t = str(v or "").strip().lstrip("@").strip()
+    return t.lower()[:40]
+
+
 def update_cell(edt_id: str, row_id: str, field: str, value: str,
                 week_start: str = "") -> bool:
     """Update une cellule.
-    field = pseudo / statut / modele / off / creneau (permanent)
+    field = pseudo / discord_username / statut / modele / off / creneau
           | lun/mar/.../dim (pour la semaine donnee)
     """
     data = _load()
@@ -273,7 +291,9 @@ def update_cell(edt_id: str, row_id: str, field: str, value: str,
         for r in e["rows"]:
             if r["id"] != row_id:
                 continue
-            if field in ("pseudo", "statut", "modele", "off", "creneau"):
+            if field == "discord_username":
+                r[field] = _norm_discord(value)
+            elif field in ("pseudo", "statut", "modele", "off", "creneau"):
                 r[field] = value
             elif field in DAYS:
                 ws = parse_week_start(week_start or current_week_start())
