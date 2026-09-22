@@ -6011,6 +6011,50 @@ try:
           _txtOQ.startswith("Marion a décidé\n") and "<" not in _txtOQ)
     check("le lien de suivi SFS est extrait",
           _mpOQ._OF_LINK_RE.findall(_txtOQ) == ["https://onlyfans.com/itsmariion/c134"])
+    _histOQ, _annOQ = _mpOQ._of_normalise_history([
+        {"id": 1, "date": "2026-09-19T17:03:34+00:00", "rawText": "omggg ma pote Violette @violette",
+         "text": "<p>omggg ma pote Violette @violette</p>", "sentCount": 8545, "viewedCount": 864,
+         "isCanceled": False},
+        {"id": 2, "date": "2026-09-18T17:00:00+00:00", "rawText": "annule sans envoi", "sentCount": 0,
+         "viewedCount": 0, "isCanceled": True},
+        {"id": 3, "date": "2026-09-17T17:00:00+00:00", "rawText": "parti puis retire @amie",
+         "sentCount": 8000, "viewedCount": 50, "isCanceled": True},
+        "pas un dict"])
+    _h1OQ = next((_x for _x in _histOQ if _x["id"] == 1), {})
+    check("messages envoyes : garde, marque envoye, envoyes/vus conserves, heure de Paris",
+          len(_histOQ) == 2 and _h1OQ.get("sent") is True and _h1OQ.get("sent_count") == 8545
+          and _h1OQ.get("viewed_count") == 864 and not _h1OQ.get("unsent")
+          and (_h1OQ.get("date"), _h1OQ.get("time")) == ("2026-09-19", "19:03"))
+    check("parti puis retire (isCanceled AVEC envois) : reste un SFS fait, marque retire",
+          any(_x["id"] == 3 and _x.get("sent") and _x.get("unsent") for _x in _histOQ))
+    check("annule SANS aucun envoi : pas un SFS fait, ecarte ET compte", _annOQ == 1)
+    # OF ignore `offset` et sert 100 messages par appel : la page suivante se
+    # demande par la date du plus ancien recu. Session simulee : 2 pages, le
+    # message frontiere revient dans les deux (borne incluse) sans doublon.
+    class _RepOQ:
+        def __init__(self, body): self.status_code = 200; self._b = body
+        def json(self): return self._b
+    class _SessOQ:
+        def __init__(self): self.urls = []
+        def get(self, url, headers=None, timeout=None):
+            self.urls.append(url)
+            if "endDate=2026-09-30%2023%3A59%3A59" in url:
+                return _RepOQ({"hasMore": True, "items": [
+                    {"id": 100 - i, "date": "2026-09-%02dT10:00:00+00:00" % (30 - i // 4),
+                     "rawText": "m%d @x" % i, "sentCount": 5, "viewedCount": 1} for i in range(100)]})
+            if "endDate=2026-09-06%2010%3A00%3A00" in url:
+                return _RepOQ({"hasMore": False, "items": [
+                    {"id": 1, "date": "2026-09-06T10:00:00+00:00", "rawText": "m99 @x", "sentCount": 5, "viewedCount": 1},
+                    {"id": 0, "date": "2026-09-05T09:00:00+00:00", "rawText": "vieux @x", "sentCount": 5, "viewedCount": 1}]})
+            return _RepOQ({"hasMore": False, "items": []})
+    _sessOQ = _SessOQ()
+    _walkOQ = _mpOQ._of_history_fetch(_sessOQ, "2026-09-01", "2026-09-30")
+    check("pagination par la date : 2 appels, 101 messages uniques, borne incluse sans doublon",
+          _walkOQ.get("ok") and _walkOQ.get("pages") == 2 and len(_walkOQ["items"]) == 101
+          and not _walkOQ.get("truncated"), str(_walkOQ)[:120])
+    check("... le 2e appel demande bien jusqu a la date du plus ancien recu (UTC, %20 et %3A)",
+          len(_sessOQ.urls) == 2 and "endDate=2026-09-06%2010%3A00%3A00" in _sessOQ.urls[1]
+          and "offset" not in _sessOQ.urls[1])
     # -- 2) la route : memoire 30 min, echecs nommes, releve conserve
     _appOQ = _wOQ.create_app()
     _appOQ.config["TESTING"] = True
@@ -6044,14 +6088,18 @@ try:
     _AOQ = [_itOQ("2026-09-23", "Amelia", 3106, "https://onlyfans.com/elodiemouvin/c190")]
     _LOQ = [_itOQ("2026-09-23", "Lola", 3673, "https://onlyfans.com/itsmariion/c134"),
             _itOQ("2026-09-24", "Lola", 3673, "https://onlyfans.com/mindymnp/c105")]
+    _SOQ = dict(_itOQ("2026-09-19", "Lola", 3673, "https://onlyfans.com/violette/c9"),
+                sent=True, sent_count=8545, viewed_count=864)
     _mpOQ.of_queue_all = lambda: _payOQ(
-        _AOQ + _LOQ,
-        [{"creator": "Amelia", "creator_id": 3106, "count": 1},
-         {"creator": "Lola", "creator_id": 3673, "count": 2}],
+        _AOQ + _LOQ + [_SOQ],
+        [{"creator": "Amelia", "creator_id": 3106, "count": 1, "sent": 0},
+         {"creator": "Lola", "creator_id": 3673, "count": 2, "sent": 1}],
         ["Julia: accès OF indisponible (HTTP 500)"])
     _jOQ = _cOQ.get("/sfssetup/of_queue").get_json()
-    check("releve live : 3 messages sur 2 dates",
-          _jOQ.get("ok") and _jOQ.get("items") == 3 and _jOQ.get("dates") == 2, str(_jOQ)[:160])
+    check("releve live : 3 a venir + 1 envoye, sur 3 dates",
+          _jOQ.get("ok") and _jOQ.get("items") == 4 and _jOQ.get("dates") == 3, str(_jOQ)[:160])
+    check("l envoye traverse la route avec sa marque et ses compteurs",
+          any(_x.get("sent") and _x.get("sent_count") == 8545 for _x in _jOQ["data"]["items"]))
     check("une creatrice en echec est NOMMEE, pas ecartee en silence",
           any(_e.startswith("Julia:") for _e in _jOQ["errors"]))
     check("le fichier que la page lit est ecrit (source live)",
@@ -6059,25 +6107,41 @@ try:
     _mpOQ.of_queue_all = lambda: (_ for _ in ()).throw(AssertionError("appel live interdit < 30 min"))
     _j2OQ = _cOQ.get("/sfssetup/of_queue").get_json()
     check("relecture < 30 min : memoire, zero appel MyPuls",
-          _j2OQ["ok"] and _j2OQ.get("cached") and _j2OQ["items"] == 3)
+          _j2OQ["ok"] and _j2OQ.get("cached") and _j2OQ["items"] == 4)
     _mpOQ.of_queue_all = lambda: _payOQ(
         _AOQ, [{"creator": "Amelia", "creator_id": 3106, "count": 1}],
         ["Lola: switch-creator: timeout"])
     _j3OQ = _cOQ.get("/sfssetup/of_queue?refresh=1").get_json()
     _lolaOQ = [_x for _x in _j3OQ["data"]["items"] if _x["creator"] == "Lola"]
-    check("creatrice en panne : son dernier releve reste, marque ancien",
-          len(_lolaOQ) == 2 and all(_x.get("stale") for _x in _lolaOQ))
+    check("creatrice en panne : son dernier releve reste (3 msgs), marque ancien",
+          len(_lolaOQ) == 3 and all(_x.get("stale") for _x in _lolaOQ))
+    # seule l une des deux lectures a rate : ce qui est deja dans le releve
+    # frais ne doit PAS revenir en double depuis l ancien
+    _mpOQ.of_queue_all = lambda: _payOQ(
+        _AOQ + [_SOQ], [{"creator": "Amelia", "creator_id": 3106, "count": 1, "sent": 0},
+                        {"creator": "Lola", "creator_id": 3673, "count": 0, "sent": 1}],
+        ["Lola: file d'attente HTTP 500"])
+    _j3bOQ = _cOQ.get("/sfssetup/of_queue?refresh=1").get_json()
+    _lolaBOQ = [_x for _x in _j3bOQ["data"]["items"] if _x["creator"] == "Lola"]
+    check("lecture partielle : l envoye frais n est pas double par l ancien releve",
+          len(_lolaBOQ) == 3 and sum(1 for _x in _lolaBOQ if _x.get("sent")) == 1
+          and sum(1 for _x in _lolaBOQ if _x.get("stale")) == 2)
     check("... et le calendrier le dit", any("conserv" in _e for _e in _j3OQ["errors"]))
     _mpOQ.of_queue_all = lambda: {"ok": True, "items": [], "counters": {}, "creators": [],
                                   "errors": ["Amelia: x", "Lola: y"]}
     _j4OQ = _cOQ.get("/sfssetup/of_queue?refresh=1").get_json()
     check("tout en panne : dernier bon etat resservi, signale perime",
-          _j4OQ["ok"] and _j4OQ.get("stale") and _j4OQ["items"] == 3)
+          _j4OQ["ok"] and _j4OQ.get("stale") and _j4OQ["items"] == 4)
     _htmlOQ = _cOQ.get("/").get_data(as_text=True)
     check("la page SFS embarque le releve ET le recharge en direct a l ouverture",
           '"source": "live"' in _htmlOQ and "loadOfQueue(false)" in _htmlOQ)
     check("un message avec lien onlyfans.com compte comme SFS meme sans @",
           "/onlyfans\\.com\\//i.test(d)" in _htmlOQ)
+    check("le Bilan SFS lit aussi OnlyFans, et se propose sur l onglet OF",
+          "sfsBilanBlock('OnlyFans'" in _htmlOQ
+          and "if(bBil)bBil.style.display='flex'; if(bOf)bOf.style.display='flex'" in _htmlOQ)
+    check("seuls les messages ENVOYES comptent dans le bilan OF (pas la file a venir)",
+          "if(!it.sent||!it.date||!isSfsPush(it.text)) return;" in _htmlOQ)
     # -- 3) securite : meme filet que les push MyM (ce sont les pushs des modeles)
     check("401 sans session", _appOQ.test_client().get("/sfssetup/of_queue").status_code == 401)
     _cChatOQ = _appOQ.test_client()

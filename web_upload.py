@@ -26998,7 +26998,7 @@ function refreshSfsDayPanel(){{
           + 'onmouseover="this.style.background=&quot;#191922&quot;" onmouseout="this.style.background=&quot;#0f0f0f&quot;">'
           + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
           + '<div style="flex:1"><div style="font-weight:700;font-size:12px;color:#0099ff">'+String(p.creator||'OnlyFans').replace(/</g,"&lt;")+(p.of_username?(' <span style="color:#667;font-weight:500">@'+String(p.of_username).replace(/</g,"&lt;")+'</span>'):'')+'</div>'
-          + '<div style="font-size:11px;color:#888">' + (p.time||'?') + (p.sent?(' &middot; <span style="color:#22c55e">envoyé</span> à '+(p.sent_count||0)+' &middot; vus '+(p.viewed_count||0)):(' &middot; programmé'+(p.lists?(' &middot; '+String(p.lists).replace(/</g,"&lt;")):''))) + (p.stale?' &middot; <span style="color:#f59e0b">ancien relevé</span>':'') + '</div></div>'
+          + '<div style="font-size:11px;color:#888">' + (p.time||'?') + (p.sent?(' &middot; <span style="color:#22c55e">envoyé</span> à '+(p.sent_count||0)+' &middot; vus '+(p.viewed_count||0)+(p.unsent?' &middot; <span style="color:#f59e0b">retiré ensuite</span>':'')):(' &middot; programmé'+(p.lists?(' &middot; '+String(p.lists).replace(/</g,"&lt;")):''))) + (p.stale?' &middot; <span style="color:#f59e0b">ancien relevé</span>':'') + '</div></div>'
           + '<div style="color:#556;font-size:15px">✎</div></div>'
           + '<div style="font-size:12px;color:#ddd;white-space:pre-wrap">'+String(p.text||'').replace(/</g,"&lt;")+'</div>'
           + (lk?('<div style="font-size:11px;margin-top:6px;word-break:break-all">'+lk+'</div>'):'')
