@@ -50924,6 +50924,9 @@ def create_app():
         # chaque appel sans cache. C'est la page SFS Planning qui s'en sert :
         # mappé à son onglet ci-dessous, donc un rôle SFS légitime garde tout.
         "/sfssetup/mypuls_pushes",
+        # Même chose côté OnlyFans : la file d'attente (messages programmés des
+        # modèles, liens de suivi SFS) lue via l'accès OF de MyPuls.
+        "/sfssetup/of_queue",
         # Pages STANDALONE (hors système d'onglets) : elles échappaient au filet
         # car aucun préfixe ne les couvrait. « /jbactivity » (orthographe -y) ne
         # commence pas par « /jbactivite/ » (-e), d'où le trou.
@@ -50960,6 +50963,7 @@ def create_app():
         # Même page (SFS Planning, #form-sfs) : c'est elle qui remplit le
         # calendrier au chargement.
         "/sfssetup/mypuls_pushes": "sfs",
+        "/sfssetup/of_queue": "sfs",
         # Bibliothèque captions : lisible par un rôle qui a l'onglet Caption
         # (permission « montage ») ; l'écriture reste admin-only (deny par défaut).
         "/captions/": "cloudcaptions",
