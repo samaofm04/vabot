@@ -221,13 +221,22 @@ _BUDGET_FILE = DATA_DIR / "hiker_budget.json"
 # coup. C'est exactement ce qui est arrive avec le quota RapidAPI, brule en
 # neuf jours pour trois semaines d'aveuglement.
 #
-# 1500 requetes par jour = 1,50 $/jour = ~45 $/mois : un solde de 130 $ tient
-# pres de trois mois. La veille (59 comptes une fois par jour) en consomme 59,
-# le reste sert de repli quand RapidAPI tombe.
+# LE PLAFOND DOIT COUVRIR UNE JOURNEE NORMALE, sinon il devient la panne.
+# Mesure du 22/09/2026 : HikerAPI est la SEULE source (SOURCE_UNIQUE), un
+# passage du suivi des comptes coute 800 comptes x 2 appels = 1 600 requetes,
+# et il y en a 5 par jour (les bornes des sessions) = 8 000, plus la veille
+# (~66 comptes x 2) et les videos. A 2 500, le plafond tombait des le 2e
+# passage : 714 comptes sur 800 en « enveloppe du jour epuisee » pendant
+# que le solde, lui, restait a 124,71 $ — l Analytique etait aveugle pour
+# rien.
 #
-# Ce plafond n'est PAS une optimisation, c'est un garde-fou : au-dela, on
-# refuse et on le DIT, plutot que de vider le solde en silence.
-PLAFOND_JOUR = 2500
+# 10 000 = une journee normale (~8 000) + la marge des redemarrages. Cout :
+# ~8 $/jour, ~15 jours pour un solde de 125 $ — a recharger, ou a alleger
+# (RapidAPI rechargee le 28/09, profil lu une fois par jour au lieu de cinq).
+#
+# Ce plafond reste un garde-fou contre l emballement (une boucle, un bug) :
+# au-dela, on refuse et on le DIT, plutot que de vider le solde en silence.
+PLAFOND_JOUR = 10000
 
 
 def _aujourdhui() -> str:

@@ -16436,6 +16436,14 @@ def _daily_insta_loop():
             _t_dl.sleep(300)
 
 
+def _erreur_transitoire_ig(motif) -> bool:
+    try:
+        from insta_scraper import erreur_transitoire
+        return erreur_transitoire(motif)
+    except Exception:
+        return False
+
+
 def _run_daily_insta_refresh_smart():
     """Skip les handles dont le cache est encore frais (< _INSTA_3_STATS_TTL,
     soit 8h pour aligner le refresh 3x/jour).
@@ -16452,6 +16460,14 @@ def _run_daily_insta_refresh_smart():
         # (sinon la couverture reste bloquée jusqu'au prochain 00h/12h).
         or (("post_days" not in cache.get(h, {}) or "reel_days" not in cache.get(h, {}))
             and not cache.get(h, {}).get("error"))
+        # UN ECHEC DE LA SOURCE N EST PAS UN RELEVE FRAIS. Un passage rate
+        # pour « enveloppe du jour epuisee » posait quand meme scraped_at :
+        # le compte passait pour frais 8 h, et le redemarrage suivant disait
+        # « 0 stale, 800 frais » juste apres un passage a 800 echecs
+        # (mesure du 22/09/2026). Un quota, un reseau, un plafond : on
+        # retente au redemarrage — c est gratuit si la source est encore a
+        # sec, le plafond refuse AVANT l appel.
+        or _erreur_transitoire_ig(cache.get(h, {}).get("error"))
     )]
     skipped = len(all_h) - len(todo)
     print(f"[insta-refresh:boot] {len(todo)} stale, {skipped} frais", flush=True)

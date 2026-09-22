@@ -12141,6 +12141,47 @@ try:
 except Exception as _eF:
     check("bangers : fenetre testable", False, repr(_eF)[:220])
 
+print()
+print("=" * 70)
+print("HikerAPI : le plafond couvre une journee, un echec de la source est retente")
+print("=" * 70)
+try:
+    import hiker_reels as _hkP
+    import insta_scraper as _isP
+    import web_upload as _wP
+    # une journee normale : 5 passages x ~800 comptes x 2 appels (profil + reels)
+    check("plafond HikerAPI >= une journee de suivi (5 x 800 x 2 = 8 000)",
+          _hkP.PLAFOND_JOUR >= 8000, str(_hkP.PLAFOND_JOUR))
+    check("plafond HikerAPI : reste un garde-fou (pas illimite)", _hkP.PLAFOND_JOUR <= 20000)
+    check("enveloppe epuisee = echec de la SOURCE",
+          _isP.erreur_transitoire("HikerAPI: enveloppe du jour epuisee (2500/2500 requetes)."))
+    check("rate-limit Instagram = echec de la source",
+          _isP.erreur_transitoire("Instagram rate-limit (429). Réessaie dans qq minutes."))
+    check("compte introuvable = echec du COMPTE (pas retente en boucle)",
+          not _isP.erreur_transitoire("Compte introuvable — renommé/supprimé"))
+    check("pas d erreur = pas transitoire", not _isP.erreur_transitoire(None))
+    # au redemarrage : un compte en echec transitoire est « stale », pas « frais »
+    import time as _tP
+    _savCacheP, _savAllP, _savRefP = _wP._load_insta_3_stats_cache, _wP._all_tracked_handles, _wP._do_refresh
+    _vuP = {}
+    try:
+        _now = int(_tP.time())
+        _wP._load_insta_3_stats_cache = lambda: {
+            "a_ok": {"scraped_at": _now, "post_days": {}, "reel_days": {}},
+            "b_quota": {"scraped_at": _now, "post_days": {}, "reel_days": {},
+                        "error": "HikerAPI: enveloppe du jour epuisee (2500/2500 requetes)."},
+            "c_mort": {"scraped_at": _now, "post_days": {}, "reel_days": {},
+                       "error": "Compte introuvable — renommé/supprimé"}}
+        _wP._all_tracked_handles = lambda: {"a_ok", "b_quota", "c_mort"}
+        _wP._do_refresh = lambda todo, label="": _vuP.update(todo=list(todo)) or {"ok": 0}
+        _wP._run_daily_insta_refresh_smart()
+        check("redemarrage : le compte en « enveloppe epuisee » est retente, pas le compte sain ni le mort",
+              _vuP.get("todo") == ["b_quota"], str(_vuP.get("todo")))
+    finally:
+        _wP._load_insta_3_stats_cache, _wP._all_tracked_handles, _wP._do_refresh = _savCacheP, _savAllP, _savRefP
+except Exception as _eP:
+    check("HikerAPI plafond / rattrapage : testable", False, repr(_eP)[:200])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

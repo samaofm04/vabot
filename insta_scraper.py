@@ -1085,6 +1085,21 @@ def _scrape_via_web_api(username: str, limit: int) -> dict:
 # qui engageraient des comptes de la ferme. "" restaure la cascade.
 SOURCE_UNIQUE = "hiker"
 
+
+# Les motifs d echec qui accusent la SOURCE de donnees (quota, enveloppe du
+# jour, reseau), jamais le compte. UNE liste, lue par deux endroits : la
+# liste des comptes injoignables (un quota a sec ne condamne pas un compte)
+# et le rattrapage au redemarrage du site (web_upload, releve « stale »).
+_MOTIFS_TRANSITOIRES = ("quota", "rate limit", "rate-limit", "429", "timeout",
+                        "reseau", "réseau", "network", "connection",
+                        "solde", "enveloppe", "plafond", "pause")
+
+
+def erreur_transitoire(motif) -> bool:
+    """Vrai si l echec vient de la source (a retenter), pas du compte."""
+    m = str(motif or "").lower()
+    return bool(m) and any(t in m for t in _MOTIFS_TRANSITOIRES)
+
 HEALTH_FILE = INSTA_DIR / "watchlist_health.json"
 
 
@@ -1163,10 +1178,7 @@ def comptes_injoignables(min_jours: float = 0.0) -> list:
         # a sec. Proposer sa suppression aurait fait perdre un compte sain,
         # et c est precisement ce que ce bouton doit empecher. On ne retient
         # donc que ce qui accuse LE COMPTE, jamais la source de donnees.
-        _m = motif.lower()
-        if any(t in _m for t in ("quota", "rate limit", "429", "timeout",
-                                 "reseau", "réseau", "network", "connection",
-                                 "solde", "enveloppe", "plafond", "pause")):
+        if erreur_transitoire(motif):
             continue
         jours = (maintenant - float(depuis)) / 86400.0
         if jours < min_jours:
