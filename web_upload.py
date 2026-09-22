@@ -26147,9 +26147,16 @@ def _render_sfs_html() -> str:
         "title='Qui respecte la règle 1 SFS (@) tous les 2 jours — par modèle et au global' "
         "style='display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:transparent;border:0;color:#93c5fd;padding:9px 12px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;margin:0' "
         "onmouseover='this.style.background=\"#26263a\"' onmouseout='this.style.background=\"transparent\"'>▥ Bilan SFS</button>"
-        "<button type='button' id='sfs-of-import' onclick='toggleSfsActions();ofHarPick()' "
+        # File d'attente OnlyFans lue EN DIRECT via l'accès OF de MyPuls
+        # (mypuls.of_queue_all) : plus besoin d'exporter un HAR à la main.
+        "<button type='button' id='sfs-of-import' onclick='toggleSfsActions();loadOfQueue(true)' "
+        "title='Relire la file d’attente OnlyFans (messages programmés) de toutes les créatrices OF' "
         "style='display:none;align-items:center;gap:8px;width:100%;text-align:left;background:transparent;border:0;color:#7dd3fc;padding:9px 12px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;margin:0' "
-        "onmouseover='this.style.background=\"#26263a\"' onmouseout='this.style.background=\"transparent\"'>↓ Importer HAR OnlyFans</button>"
+        "onmouseover='this.style.background=\"#26263a\"' onmouseout='this.style.background=\"transparent\"'>↻ Sync file d’attente OnlyFans</button>"
+        "<button type='button' id='sfs-of-har-btn' onclick='toggleSfsActions();ofHarPick()' "
+        "title='Secours si l’accès OF de MyPuls est en panne : importer un HAR onlyfans.com' "
+        "style='display:none;align-items:center;gap:8px;width:100%;text-align:left;background:transparent;border:0;color:#7dd3fc;padding:9px 12px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;margin:0' "
+        "onmouseover='this.style.background=\"#26263a\"' onmouseout='this.style.background=\"transparent\"'>↓ Importer HAR OnlyFans (secours)</button>"
         "<div style='height:1px;background:#2e2e3e;margin:5px 8px'></div>"
         "<button type='button' id='sfs-mym-har' onclick='toggleSfsActions();mypulsHarPick()' title='Rafraîchir les cookies MyPuls depuis un HAR (DevTools → Network → Export HAR)' "
         "style='display:flex;align-items:center;gap:8px;width:100%;text-align:left;background:transparent;border:0;color:#86efac;padding:9px 12px;border-radius:7px;cursor:pointer;font-size:13px;font-weight:600;margin:0' "
@@ -26193,7 +26200,7 @@ def _render_sfs_html() -> str:
         "<script>"
         "window.__sfsPushCache=null;"
         "window.__sfsShowAll=false;"
-        "function isSfsPush(d){ d=(d||''); return /mym\\.fans/i.test(d) || /@[a-z0-9_.]/i.test(d); }"
+        "function isSfsPush(d){ d=(d||''); return /mym\\.fans/i.test(d) || /onlyfans\\.com\\//i.test(d) || /@[a-z0-9_.]/i.test(d); }"
         "function sfsEsc(s){ var d=document.createElement('div'); d.textContent=String(s==null?'':s); return d.innerHTML; }"
         "function toggleSfsActions(){"
         "  var m=document.getElementById('sfs-actions-menu'); if(!m) return;"
@@ -26351,9 +26358,9 @@ def _render_sfs_html() -> str:
         "  if(panel) panel.style.display=onPlat?'':'none';"
         "  if(typeof renderSfsInbox==='function') renderSfsInbox();"
         # titre fixe « SFS Planning » (plus de renommage par onglet)
-        "  var bMym=document.getElementById('sfs-mym-sync'); var bOf=document.getElementById('sfs-of-import'); var bMaj=document.getElementById('sfs-maj-btn'); var bBil=document.getElementById('sfs-bilan-btn');"
-        "  if(plat==='OF'){ if(bMym)bMym.style.display='none'; if(bMaj)bMaj.style.display='none'; if(bBil)bBil.style.display='none'; if(bOf)bOf.style.display='flex'; }"
-        "  else if(plat==='MYM'){ if(bMym)bMym.style.display='flex'; if(bMaj)bMaj.style.display='flex'; if(bBil)bBil.style.display='flex'; if(bOf)bOf.style.display='none'; }"
+        "  var bMym=document.getElementById('sfs-mym-sync'); var bOf=document.getElementById('sfs-of-import'); var bOfHar=document.getElementById('sfs-of-har-btn'); var bMaj=document.getElementById('sfs-maj-btn'); var bBil=document.getElementById('sfs-bilan-btn');"
+        "  if(plat==='OF'){ if(bMym)bMym.style.display='none'; if(bMaj)bMaj.style.display='none'; if(bBil)bBil.style.display='none'; if(bOf)bOf.style.display='flex'; if(bOfHar)bOfHar.style.display='flex'; }"
+        "  else if(plat==='MYM'){ if(bMym)bMym.style.display='flex'; if(bMaj)bMaj.style.display='flex'; if(bBil)bBil.style.display='flex'; if(bOf)bOf.style.display='none'; if(bOfHar)bOfHar.style.display='none'; }"
         "  if(!onPlat) return;"
         "  if(plat==='OF'){ if(typeof renderOfPushes==='function') renderOfPushes(); return; }"
         "  const ps=window.__sfsPushCache; if(!ps) return;"
@@ -26489,8 +26496,13 @@ def _render_sfs_html() -> str:
         # Filtre SFS / hors-SFS : même règle que l'onglet MyM, pilotée par la case
         # « Afficher aussi les push hors-SFS » (avant, la branche OF sortait AVANT
         # le filtre : la case n'avait aucun effet ici).
+        # Filtre identité : même règle que l'onglet MyM (identité exacte, profil
+        # mappé, ou préfixe du pseudo). Les messages sans compte (vieil import
+        # HAR) restent visibles quel que soit le filtre.
+        "  var fIdent=window.__currentSfsIdent; var fModel=(fIdent && window.__sfsIdentModel)?(window.__sfsIdentModel[String(fIdent).toLowerCase()]||''):''; var fi=(fIdent||'').toLowerCase();"
+        "  function ofMatch(it){ if(!fIdent || !it.creator) return true; var cre=String(it.creator).toLowerCase(); if(it.identity===fIdent) return true; if(fModel && cre===String(fModel).toLowerCase()) return true; return (cre.indexOf(fi)===0 || cre.replace(/[^a-z0-9]/g,'').indexOf(fi.replace(/[^a-z0-9]/g,''))===0); }"
         "  var items=[], nonSfs=0;"
-        "  all.forEach(function(it){ if(!window.__sfsShowAll && !isSfsPush(it.text)){ nonSfs++; return; } items.push(it); });"
+        "  all.forEach(function(it){ if(!ofMatch(it)) return; if(!window.__sfsShowAll && !isSfsPush(it.text)){ nonSfs++; return; } items.push(it); });"
         "  var byDate={}, undated=[];"
         "  items.forEach(function(it){ if(it.date){ (byDate[it.date]=byDate[it.date]||[]).push(it); } else { undated.push(it); } });"
         # même style compact que MyM : UNE barre bleue avec le compte par jour
@@ -26498,11 +26510,11 @@ def _render_sfs_html() -> str:
         "    var cell=cells[d]; if(!cell) return; var bars=cell.querySelector('.sfs-day-bars'); if(!bars) return;"
         "    var list=byDate[d];"
         "    var bar=document.createElement('div'); bar.className='sfs-push-bar';"
-        "    bar.title=list.length+' message(s) programmé(s) — '+list.map(function(x){ return x.time||''; }).slice(0,5).join(' · ');"
+        "    bar.title=list.length+' message(s) programmé(s) — '+list.map(function(x){ return (x.time||'')+(x.creator?(' '+x.creator):''); }).slice(0,5).join(' · ')+(list.length>5?' …':'');"
         "    bar.style.cssText='background:#0099ff;color:#04121f;font-size:10px;font-weight:800;padding:2px 6px;border-radius:4px;display:flex;align-items:center;gap:5px;cursor:pointer';"
         "    var n=document.createElement('span'); n.style.cssText='background:rgba(0,0,0,.5);color:#7dd3fc;border-radius:3px;padding:0 5px;line-height:14px'; n.textContent=list.length;"
         "    bar.appendChild(n);"
-        "    (function(D,L){ bar.onclick=function(e){ e.stopPropagation(); addSfsFromOf(D, L[0]); }; })(d,list);"
+        "    (function(D){ bar.onclick=function(e){ e.stopPropagation(); if(typeof selectSfsDay==='function') selectSfsDay(D); }; })(d);"
         "    bars.appendChild(bar);"
         "  });"
         # Jours à compteur sans détail : juste le badge « ▤ N programmés ».
@@ -26511,7 +26523,7 @@ def _render_sfs_html() -> str:
         # comptait chaque doublon. Ils sont maintenant listés une seule fois
         # sous le statut, plus bas.)
         "  for(var cd in counters){"
-        "    if(byDate[cd]) continue; var cc=cells[cd]; if(!cc) continue; var cb=cc.querySelector('.sfs-day-bars'); if(!cb) continue;"
+        "    if(fIdent || byDate[cd]) continue; var cc=cells[cd]; if(!cc) continue; var cb=cc.querySelector('.sfs-day-bars'); if(!cb) continue;"
         "    var b2=document.createElement('div'); b2.className='sfs-push-bar';"
         "    b2.title=counters[cd]+' programmé'+(counters[cd]>1?'s':'');"
         "    b2.style.cssText='background:rgba(0,153,255,.35);color:#bfe6ff;font-size:10px;font-weight:800;padding:2px 6px;border-radius:4px;display:flex;align-items:center;gap:5px';"
@@ -26534,14 +26546,38 @@ def _render_sfs_html() -> str:
         "    } else { box.style.display='none'; }"
         "  }"
         "}"
+        # Lecture live de la file d'attente OF (toutes créatrices) : au chargement
+        # (cache serveur 30 min) et via ⚙ Actions (force). Les erreurs par
+        # créatrice sont affichées, jamais avalées.
+        "async function loadOfQueue(force){"
+        "  var box=document.getElementById('sfs-pushs-list');"
+        "  if(force && box){ box.style.display=''; box.innerHTML='◌ Lecture de la file OnlyFans (via MyPuls)…'; }"
+        "  try{"
+        "    var r=await fetch('/sfssetup/of_queue'+(force?'?refresh=1':'')); var j=await r.json();"
+        "    if(!j.ok){ if(force && box){ box.style.display=''; box.innerHTML='✕ '+(j.error||'Erreur'); } return; }"
+        "    window.__ofPushData=j.data||window.__ofPushData;"
+        "    if(typeof renderSfsPushes==='function') renderSfsPushes();"
+        "    if(typeof selectSfsDay==='function' && window.__selectedSfsDate && window.__currentSfsPlatform==='OF') selectSfsDay(window.__selectedSfsDate);"
+        "    var errs=j.errors||[];"
+        "    if(box && (force || errs.length || j.stale)){"
+        "      var per=(j.creators||[]).map(function(c){ return c.creator+' '+c.count; }).join(' · ');"
+        "      box.style.display='';"
+        "      box.innerHTML=(j.stale?'⚠ Relevé OnlyFans périmé (dernier bon état resservi)':('✓ '+(j.items||0)+' message(s) OnlyFans programmé(s)'+(per?(' — '+per):'')))"
+        "        +(errs.length?('<div style=\"color:#f59e0b;margin-top:4px\">'+errs.map(sfsEsc).join('<br>')+'</div>'):'');"
+        "    }"
+        "  }catch(err){ if(force && box){ box.style.display=''; box.innerHTML='✕ '+err; } }"
+        "}"
+        "function sfsOfCardClick(i){ var l=window.__sfsDayOfPushes||[]; if(l[i]) addSfsFromOf(window.__selectedSfsDate||l[i].date, l[i]); }"
         "function addSfsFromOf(date, it){"
         "  if(typeof openSfsModal!=='function') return;"
         "  openSfsModal(date);"
         "  var f=document.getElementById('sfs-form'); if(f && it && it.time){ var t=f.querySelector('[name=time]'); if(t) t.value=it.time; }"
+        "  var idSel=document.getElementById('sfs-modal-identity'); var who=it?(it.identity||it.creator||''):'';"
+        "  if(idSel && who){ var cl=String(who).toLowerCase(); for(var i=0;i<idSel.options.length;i++){ var ov=idSel.options[i].value.toLowerCase(); if(ov===cl || cl.indexOf(ov)===0 || ov.indexOf(cl)===0){ idSel.value=idSel.options[i].value; break; } } }"
         "  var ex=document.getElementById('sfs-modal-existing');"
         "  if(ex && it){"
         "    var bx=document.createElement('div'); bx.style.cssText='background:#0b1a2a;border:1px solid #0099ff;border-radius:10px;padding:12px;margin-bottom:8px';"
-        "    var h=document.createElement('div'); h.style.cssText='color:#0099ff;font-weight:700;font-size:12px;margin-bottom:4px'; h.textContent='📨 Message OnlyFans programmé'+(it.time?(' · '+it.time):''); bx.appendChild(h);"
+        "    var h=document.createElement('div'); h.style.cssText='color:#0099ff;font-weight:700;font-size:12px;margin-bottom:4px'; h.textContent='📨 Message OnlyFans programmé'+(it.creator?(' · '+it.creator):'')+(it.time?(' · '+it.time):''); bx.appendChild(h);"
         "    var b=document.createElement('div'); b.style.cssText='font-size:12px;color:#ddd;white-space:pre-wrap'; b.textContent=it.text||''; bx.appendChild(b);"
         "    ex.insertBefore(bx, ex.firstChild);"
         "  }"
@@ -26553,6 +26589,7 @@ def _render_sfs_html() -> str:
         "  sfsShowAllLabel();"
         "  if(typeof renderSfsPushes==='function') renderSfsPushes();"
         "  if(typeof loadSfsPushes==='function') loadSfsPushes(false);"
+        "  if(typeof loadOfQueue==='function') loadOfQueue(false);"
         "  if(typeof loadSfsInbox==='function'){"
         "    loadSfsInbox(false);"
         "    setInterval(function(){ loadSfsInbox(false); }, 180000);"
@@ -26833,6 +26870,42 @@ function refreshSfsDayPanel(){{
           + '<div style="font-size:11px;color:#888">' + (p.time||'?') + ' &middot; ' + typ + '</div></div>'
           + '<div style="color:#556;font-size:15px">✎</div></div>'
           + '<div style="font-size:12px;color:#ddd;white-space:pre-wrap">'+String(p.desc).replace(/</g,"&lt;")+'</div>'
+          + '</div>';
+      }});
+      pushHtml += '</div>';
+    }}
+  }}
+  // File d'attente OnlyFans de ce jour (messages programmés = pushs SFS OF) :
+  // heure + compte + texte + lien de suivi. Même filtre identité que MyM.
+  if(platform === 'OF' && window.__ofPushData){{
+    var fModelOf=(ident && window.__sfsIdentModel)?(window.__sfsIdentModel[String(ident).toLowerCase()]||''):'';
+    var fiOf=(ident||'').toLowerCase();
+    var dayOf=[];
+    (window.__ofPushData.items||[]).forEach(function(it){{
+      if(it.date!==date) return;
+      if(ident && it.creator){{
+        var cre=String(it.creator).toLowerCase();
+        var okFuzzy=(cre.indexOf(fiOf)===0 || cre.replace(/[^a-z0-9]/g,'').indexOf(fiOf.replace(/[^a-z0-9]/g,''))===0);
+        if(it.identity!==ident && !(fModelOf && cre===String(fModelOf).toLowerCase()) && !okFuzzy) return;
+      }}
+      if(!window.__sfsShowAll && typeof isSfsPush==='function' && !isSfsPush(it.text)) return;
+      dayOf.push(it);
+    }});
+    dayOf.sort(function(a,b){{ return (a.time||'').localeCompare(b.time||''); }});
+    window.__sfsDayOfPushes = dayOf;
+    if(dayOf.length){{
+      pushHtml += '<div style="margin-top:10px"><div style="font-size:11px;color:#0099ff;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Messages OnlyFans programmés (' + dayOf.length + ')</div>';
+      dayOf.forEach(function(p, pi){{
+        var lk=(p.links||[]).map(function(u){{ return '<a href="'+u+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#7dd3fc">'+String(u).replace(/</g,"&lt;")+'</a>'; }}).join(' ');
+        pushHtml += '<div onclick="sfsOfCardClick('+pi+')" title="Créer / modifier un SFS depuis ce message" '
+          + 'style="background:#0f0f0f;border:1px solid #2a2a2a;border-left:3px solid #0099ff;border-radius:8px;padding:10px;margin-bottom:8px;cursor:pointer;transition:background .15s" '
+          + 'onmouseover="this.style.background=&quot;#191922&quot;" onmouseout="this.style.background=&quot;#0f0f0f&quot;">'
+          + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
+          + '<div style="flex:1"><div style="font-weight:700;font-size:12px;color:#0099ff">'+String(p.creator||'OnlyFans').replace(/</g,"&lt;")+(p.of_username?(' <span style="color:#667;font-weight:500">@'+String(p.of_username).replace(/</g,"&lt;")+'</span>'):'')+'</div>'
+          + '<div style="font-size:11px;color:#888">' + (p.time||'?') + (p.lists?(' &middot; '+String(p.lists).replace(/</g,"&lt;")):'') + (p.stale?' &middot; <span style="color:#f59e0b">ancien relevé</span>':'') + '</div></div>'
+          + '<div style="color:#556;font-size:15px">✎</div></div>'
+          + '<div style="font-size:12px;color:#ddd;white-space:pre-wrap">'+String(p.text||'').replace(/</g,"&lt;")+'</div>'
+          + (lk?('<div style="font-size:11px;margin-top:6px;word-break:break-all">'+lk+'</div>'):'')
           + '</div>';
       }});
       pushHtml += '</div>';
@@ -42124,7 +42197,24 @@ async function saveCell(el){
     el.style.background = STA_COL[el.value][0];
     el.style.color = STA_COL[el.value][1];
   }
-  await fetch('/chatting/update_cell', {method:'POST', body:fd});
+  const rep = await fetch('/chatting/update_cell', {method:'POST', body:fd});
+  // Le pseudo suit le Discord : la route renvoie le surnom serveur, on le
+  // pose dans la case Pseudo de la MEME ligne sans rechargement. La bordure
+  // dit tout de suite si le handle existe (vert), n existe pas (orange), ou
+  // n a pas pu etre verifie (gris) -- avant, il fallait rafraichir pour le voir.
+  if(el.dataset.field === 'discord_username'){
+    let j = null;
+    try{ j = await rep.json(); }catch(e){ j = null; }
+    const tr = el.closest('tr[data-rowid]');
+    if(j && j.pseudo && tr){
+      const ps = tr.querySelector("input[data-field='pseudo']");
+      if(ps){ ps.value = j.pseudo; }
+    }
+    if(!el.value){ el.style.borderColor = '#2a2a2a'; }
+    else if(j && j.rattache){ el.style.borderColor = '#22c55e'; }
+    else if(j && j.verifiable === false){ el.style.borderColor = '#2a2a2a'; }
+    else { el.style.borderColor = '#f97316'; }
+  }
   // Update counts + memorise la valeur courante (utile pour 'Diviser')
   if(['lun','mar','mer','jeu','ven','sam','dim'].includes(el.dataset.field)){
     el.dataset.cur = el.value;
@@ -60117,6 +60207,73 @@ def create_app():
                         "dates": len(parsed.get("counters", {})),
                         "data": {"items": parsed.get("items", []), "counters": parsed.get("counters", {})}})
 
+    @app.route("/sfssetup/of_queue", methods=["GET"])
+    def sfssetup_of_queue():
+        """File d'attente OnlyFans EN DIRECT : les messages programmés (= les
+        push SFS OF) des créatrices OnlyFans, lus via l'accès OF de MyPuls
+        (mypuls.of_queue_all). Remplace l'import HAR manuel comme source de
+        data/of_pushs.json — le HAR reste un secours et écrit le même fichier.
+
+        MÉMOIRE : même règle que les push MyM — dernier relevé resservi < 30 min,
+        ?refresh=1 force la lecture live. Une créatrice en échec garde ses
+        messages du relevé précédent (marqués `stale`) plutôt que de disparaître
+        du calendrier sans prévenir ; l'échec est nommé dans `errors`."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+
+        def _reply(blob, **extra):
+            out = {"ok": True, "items": len(blob.get("items") or []),
+                   "dates": len(blob.get("counters") or {}),
+                   "data": {"items": blob.get("items") or [],
+                            "counters": blob.get("counters") or {}},
+                   "creators": blob.get("creators") or [],
+                   "errors": blob.get("errors") or []}
+            out.update(extra)
+            return jsonify(out)
+
+        prev = _load_of_pushs()
+        if not request.args.get("refresh"):
+            if prev.get("source") == "live" and \
+                    time.time() - float(prev.get("imported_at") or 0) < 1800:
+                return _reply(prev, cached=True)
+        try:
+            import mypuls
+            res = mypuls.of_queue_all()
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"Erreur : {e}"})
+        if not res.get("ok"):
+            return jsonify({"ok": False, "error": res.get("error") or "lecture OF impossible"})
+        items = list(res.get("items") or [])
+        errors = list(res.get("errors") or [])
+        if not items and errors and prev.get("items"):
+            # tout a échoué (cookies morts ?) -> dernier bon état, signalé périmé
+            return _reply(prev, cached=True, stale=True, errors=errors)
+        # créatrices en échec : leur dernier relevé reste affiché (marqué),
+        # plutôt que de les faire disparaître du calendrier sans prévenir
+        failed = {e.split(":", 1)[0].strip() for e in errors if ":" in e}
+        counters = dict(res.get("counters") or {})
+        kept = 0
+        for it in prev.get("items") or []:
+            if it.get("creator") in failed:
+                it2 = dict(it)
+                it2["stale"] = True
+                items.append(it2)
+                kept += 1
+                if it2.get("date") and it2.get("type") == "chat":
+                    counters[it2["date"]] = counters.get(it2["date"], 0) + 1
+        if kept:
+            errors.append(f"{kept} message(s) d'un relevé précédent conservé(s)")
+        blob = {"items": items, "counters": counters, "imported_at": int(time.time()),
+                "source": "live", "creators": res.get("creators") or [],
+                "errors": errors, "start": res.get("start"), "end": res.get("end")}
+        try:
+            OF_PUSHS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            safe_json.write_text(OF_PUSHS_FILE, json.dumps(blob, ensure_ascii=False, indent=2))
+        except Exception as e:
+            errors.append(f"cache non écrit : {e}")
+        return _reply(blob)
+
     @app.route("/sfssetup/sfs_inbox", methods=["GET"])
     def sfssetup_sfs_inbox():
         """Messages SFS REÇUS (DM entrants des fans/partenaires) via l'API.
@@ -63255,14 +63412,30 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             return jsonify({"ok": False}), 401
         import chatting
         from flask import jsonify
+        edt_id = (request.form.get("edt_id") or "").strip()
+        row_id = (request.form.get("row_id") or "").strip()
+        field = (request.form.get("field") or "").strip()
+        value = (request.form.get("value") or "").strip()
         ok = chatting.update_cell(
-            (request.form.get("edt_id") or "").strip(),
-            (request.form.get("row_id") or "").strip(),
-            (request.form.get("field") or "").strip(),
-            (request.form.get("value") or "").strip(),
+            edt_id, row_id, field, value,
             week_start=(request.form.get("week_start") or "").strip(),
         )
-        return jsonify({"ok": ok})
+        rep = {"ok": ok}
+        # Le pseudo SUIT le Discord. Le proprietaire ne veut saisir que le
+        # handle : le nom affiche est alors le SURNOM donne sur le serveur
+        # (« Daniel OF 8 14H »), pas le pseudo technique (« daniel_2.0 »).
+        # Un handle qui ne resout pas ne touche pas au pseudo : on ne
+        # remplace jamais un nom par du vide ou par une coquille.
+        if ok and field == "discord_username":
+            info = _resolve_discord_user_by_handle(value) if value else None
+            rep["rattache"] = bool(info)
+            rep["verifiable"] = _discord_observable()
+            if info:
+                surnom = (info.get("display_name") or info.get("username") or "").strip()
+                if surnom and chatting.update_cell(edt_id, row_id, "pseudo", surnom):
+                    rep["pseudo"] = surnom
+                rep["avatar"] = info.get("avatar_url") or ""
+        return jsonify(rep)
 
     @app.route("/chatting/import", methods=["POST"])
     def chatting_import():

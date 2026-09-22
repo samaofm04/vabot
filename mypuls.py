@@ -3197,6 +3197,192 @@ def list_pushs(creator_id: int, max_pages: int = 1, days: int = 0) -> Dict[str, 
     return {"ok": True, "pushs": pushs}
 
 
+# ============ File d'attente OnlyFans (via « Accès OnlyFans (Direct) ») ============
+#
+# MyPuls sert l'interface OnlyFans sous SON domaine : /of/proxy charge le front
+# OF, et chaque appel API repart vers mypuls.app/of-nav/api2/v2/... . C'est
+# MyPuls qui porte la session OnlyFans et signe les requêtes : nos cookies
+# MyPuls (PHPSESSID + REMEMBERME) suffisent, on ne touche JAMAIS à une session
+# OnlyFans. Le compte OF servi est celui de la créatrice sélectionnée
+# (/switch-creator/{id}), exactement comme pour les pushs MyM.
+#
+# /schedules rend la FILE D'ATTENTE : messages (type "chat") et posts
+# programmés, donc l'avenir uniquement — une plage passée rend une liste vide,
+# pas une erreur. `limit` n'est PAS une pagination : limit=5 et limit=100
+# rendent la même liste complète de la plage (mesuré le 22/09/2026). Il faut
+# l'en-tête Accept: application/json, sinon HTTP 400 « Accept header must be
+# application/json ».
+#
+# Mesure du 22/09/2026 : 6 comptes OF, tous répondent — Amelia 15 messages
+# programmés, Julia 14, Lola 14, Jessye 1, Khloe 0, Emy 0. Tous « 2 lists »
+# (envoi de masse à des listes) : ce sont les pushs SFS, avec leur lien de
+# suivi (https://onlyfans.com/<partenaire>/c<n>).
+
+OF_QUEUE_TZ = "Europe/Paris"
+_OF_LINK_RE = re.compile(r"https?://onlyfans\.com/[A-Za-z0-9_.\-]+(?:/c\d+)?")
+_OF_MENTION_RE = re.compile(r"@([A-Za-z0-9_.]{2,})")
+
+
+def _of_html_to_text(html: str) -> str:
+    """<p>/<br> -> retours à la ligne, balises retirées, entités décodées.
+    On part du HTML et pas de rawText : rawText colle les paragraphes
+    (« ...avec l'abo 😏24 ans... »)."""
+    t = re.sub(r"</p\s*>|<br\s*/?>", "\n", html or "", flags=re.I)
+    t = re.sub(r"<[^>]+>", "", t)
+    t = unescape(t)
+    t = re.sub(r"[ \t]+", " ", t)
+    return re.sub(r"\n{3,}", "\n\n", t).strip()
+
+
+def _of_local_datetime(iso: str) -> Tuple[str, str]:
+    """'2026-09-23T17:00:00+00:00' -> ('2026-09-23', '19:00') en heure de Paris.
+    OF parle en UTC ; le planning SFS, lui, est en heure locale — 17h UTC
+    affiché tel quel aurait décalé chaque push de 2 h."""
+    from datetime import datetime as _dt
+    try:
+        d = _dt.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except Exception:
+        return "", ""
+    try:
+        from zoneinfo import ZoneInfo
+        if d.tzinfo is not None:
+            d = d.astimezone(ZoneInfo(OF_QUEUE_TZ))
+    except Exception:
+        pass
+    return d.strftime("%Y-%m-%d"), d.strftime("%H:%M")
+
+
+def of_queue(creator_id: int, start: str, end: str,
+             session: Optional[requests.Session] = None) -> Dict[str, Any]:
+    """File d'attente OnlyFans d'une créatrice entre `start` et `end` (AAAA-MM-JJ).
+
+    Lecture seule. Retourne {ok, of_user:{id, username, name},
+    items:[{id, type, date, time, text, links, mentions, lists}], error}.
+    """
+    s = session or _make_session()
+    if s is None:
+        return {"ok": False, "error": "Cookies MyPuls non configurés"}
+    H = {"Accept": "application/json"}
+    try:
+        s.get(f"{BASE_URL}/switch-creator/{int(creator_id)}?from=app_pushs",
+              timeout=TIMEOUT, allow_redirects=True)
+    except Exception as e:
+        return {"ok": False, "error": f"switch-creator: {e}"}
+    # Qui est réellement servi ? Si le switch n'a pas pris, on lirait la file
+    # de la créatrice PRÉCÉDENTE en la mettant au nom de celle-ci — d'où ce
+    # contrôle avant toute lecture.
+    try:
+        me = s.get(f"{BASE_URL}/of-nav/api2/v2/users/me", headers=H, timeout=TIMEOUT)
+    except Exception as e:
+        return {"ok": False, "error": f"accès OF: {e}"}
+    if me.status_code != 200:
+        return {"ok": False, "error": f"accès OF indisponible (HTTP {me.status_code})"}
+    try:
+        mj = me.json()
+    except Exception:
+        return {"ok": False, "error": "accès OF : réponse illisible"}
+    of_user = {"id": mj.get("id"), "username": mj.get("username") or "",
+               "name": mj.get("name") or ""}
+    if not of_user["id"]:
+        return {"ok": False, "error": "accès OF : pas de compte OnlyFans relié"}
+    try:
+        r = s.get(f"{BASE_URL}/of-nav/api2/v2/schedules", headers=H, timeout=TIMEOUT,
+                  params={"limit": 500, "filter[publishDate]": start,
+                          "filter[publishDateEnd]": end, "filter[timeZone]": OF_QUEUE_TZ})
+    except Exception as e:
+        return {"ok": False, "error": f"file d'attente: {e}", "of_user": of_user}
+    if r.status_code != 200:
+        return {"ok": False, "error": f"file d'attente HTTP {r.status_code}", "of_user": of_user}
+    try:
+        lst = r.json().get("list") or []
+    except Exception:
+        return {"ok": False, "error": "file d'attente : réponse illisible", "of_user": of_user}
+    items: List[Dict[str, Any]] = []
+    for it in lst:
+        if not isinstance(it, dict):
+            continue
+        ent = it.get("entity") or {}
+        text = _of_html_to_text(ent.get("text") or "") or (ent.get("rawText") or "").strip()
+        d, tm = _of_local_datetime(ent.get("scheduledAt") or it.get("publishDateTime") or "")
+        items.append({
+            "id": ent.get("id") or it.get("id"),
+            "type": it.get("type") or ent.get("responseType") or "",
+            "date": d,
+            "time": tm,
+            "text": text[:1200],
+            "links": list(dict.fromkeys(_OF_LINK_RE.findall(text))),
+            "mentions": list(dict.fromkeys(_OF_MENTION_RE.findall(text))),
+            "lists": ent.get("sentRulesExtra") or "",
+        })
+    items.sort(key=lambda x: (x["date"], x["time"]))
+    return {"ok": True, "of_user": of_user, "items": items}
+
+
+def of_queue_all(days_ahead: int = 62) -> Dict[str, Any]:
+    """File d'attente OnlyFans de TOUTES les créatrices OF actives (API MyPuls),
+    d'aujourd'hui à +`days_ahead` jours.
+
+    Rien n'est écarté en silence : chaque créatrice en échec est nommée dans
+    `errors`, et deux créatrices renvoyant le MÊME compte OF (switch qui n'a
+    pas pris) sont signalées au lieu d'être comptées deux fois.
+
+    Retourne {ok, items:[... + creator, creator_id, of_username],
+    counters:{date: n messages}, creators:[{creator, creator_id, of_username,
+    count}], errors:[str], start, end}.
+    """
+    if not is_configured():
+        return {"ok": False, "error": "Cookies MyPuls non configurés"}
+    if not api_configured():
+        return {"ok": False, "error": "API MyPuls non configurée (liste des créatrices OF)"}
+    creators = [c for c in api_creators_cached()
+                if c.get("active") and c.get("platform") == "onlyfans" and c.get("id")]
+    if not creators:
+        return {"ok": False, "error": "Aucune créatrice OnlyFans active côté MyPuls"}
+    s = _make_session()
+    if s is None:
+        return {"ok": False, "error": "Session MyPuls indisponible"}
+    today = date.today()
+    start = today.strftime("%Y-%m-%d")
+    end = (today + timedelta(days=max(1, int(days_ahead)))).strftime("%Y-%m-%d")
+    items: List[Dict[str, Any]] = []
+    counters: Dict[str, int] = {}
+    per: List[Dict[str, Any]] = []
+    errors: List[str] = []
+    seen_of: Dict[Any, str] = {}   # id OF -> pseudo déjà servi
+    for c in sorted(creators, key=lambda c: str(c.get("pseudo") or "").lower()):
+        pseudo = c.get("pseudo") or str(c.get("id"))
+        res = of_queue(c["id"], start, end, session=s)
+        if not res.get("ok"):
+            errors.append(f"{pseudo}: {res.get('error') or 'échec'}")
+            continue
+        ou = res.get("of_user") or {}
+        if ou.get("id") in seen_of:
+            errors.append(f"{pseudo}: même compte OF que {seen_of[ou['id']]} "
+                          f"(@{ou.get('username')}) — sélection non prise, ignorée")
+            continue
+        seen_of[ou.get("id")] = pseudo
+        n = 0
+        for it in res.get("items") or []:
+            it2 = dict(it)
+            it2["creator"] = pseudo
+            it2["creator_id"] = c.get("id")
+            it2["of_username"] = ou.get("username") or ""
+            items.append(it2)
+            n += 1
+            if it2.get("date") and it2.get("type") == "chat":
+                counters[it2["date"]] = counters.get(it2["date"], 0) + 1
+        per.append({"creator": pseudo, "creator_id": c.get("id"),
+                    "of_username": ou.get("username") or "", "count": n})
+    try:
+        _save_rotated_cookies(s)
+    except Exception:
+        pass
+    items.sort(key=lambda x: (x.get("date") or "", x.get("time") or "",
+                              str(x.get("creator") or "")))
+    return {"ok": True, "items": items, "counters": counters, "creators": per,
+            "errors": errors, "start": start, "end": end}
+
+
 def get_avatar_bytes(creator_id: int) -> Dict[str, Any]:
     """Proxy : récupère l'image avatar d'un créateur MyPuls.
 
