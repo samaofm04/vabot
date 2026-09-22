@@ -5991,6 +5991,115 @@ except Exception as _eC4:
 
 print()
 print("=" * 70)
+print("24) SFS OnlyFans : la file d attente se lit en direct via MyPuls")
+print("=" * 70)
+try:
+    import tempfile as _tfOQ
+    import json as _jsOQ
+    import pathlib as _plOQ
+    import web_upload as _wOQ
+    import mypuls as _mpOQ
+    # -- 1) conversions pures (aucun reseau)
+    check("heure OF UTC -> Paris (17:00Z = 19:00, l heure que voit l equipe)",
+          _mpOQ._of_local_datetime("2026-09-23T17:00:00+00:00") == ("2026-09-23", "19:00"))
+    check("date illisible -> vide, pas d exception",
+          _mpOQ._of_local_datetime("n importe quoi") == ("", ""))
+    _txtOQ = _mpOQ._of_html_to_text(
+        "<p>Marion a d&eacute;cid&eacute;</p><p>100% gratuit 👉 "
+        "<a href=\"https://onlyfans.com/itsmariion/c134\">https://onlyfans.com/itsmariion/c134</a></p>")
+    check("HTML OF -> texte : paragraphes separes, entites decodees, zero balise",
+          _txtOQ.startswith("Marion a décidé\n") and "<" not in _txtOQ)
+    check("le lien de suivi SFS est extrait",
+          _mpOQ._OF_LINK_RE.findall(_txtOQ) == ["https://onlyfans.com/itsmariion/c134"])
+    # -- 2) la route : memoire 30 min, echecs nommes, releve conserve
+    _appOQ = _wOQ.create_app()
+    _appOQ.config["TESTING"] = True
+    _savFileOQ = _wOQ.OF_PUSHS_FILE
+    _wOQ.OF_PUSHS_FILE = _plOQ.Path(_tfOQ.mkdtemp()) / "of_pushs.json"
+    _savAllOQ = _mpOQ.of_queue_all
+    # comptes connus de la session : une section precedente peut avoir laisse
+    # un autre jeu d utilisateurs, on fixe le notre (et on le restaure)
+    _savUsersOQ = _wOQ._load_web_users
+    _wOQ._load_web_users = lambda: {"admin": {"role": "admin", "password": "x"},
+                                    "chat": {"role": "chatter", "password": "x"}}
+    _cOQ = _appOQ.test_client()
+    with _cOQ.session_transaction() as _sOQ:
+        _sOQ["auth"] = True
+        _sOQ["username"] = "admin"
+        _sOQ["role"] = "admin"
+        _sOQ["sid"] = "OQ"
+
+    def _itOQ(d, cre, cid, link):
+        return {"id": abs(hash((d, cre))) % 10**6, "type": "chat", "date": d, "time": "19:00",
+                "text": "SFS " + link, "links": [link], "mentions": [], "lists": "2 lists",
+                "creator": cre, "creator_id": cid, "of_username": cre.lower()}
+
+    def _payOQ(items, creators, errors):
+        _ctr = {}
+        for _x in items:
+            _ctr[_x["date"]] = _ctr.get(_x["date"], 0) + 1
+        return {"ok": True, "items": items, "counters": _ctr, "creators": creators,
+                "errors": errors, "start": "2026-09-22", "end": "2026-11-23"}
+
+    _AOQ = [_itOQ("2026-09-23", "Amelia", 3106, "https://onlyfans.com/elodiemouvin/c190")]
+    _LOQ = [_itOQ("2026-09-23", "Lola", 3673, "https://onlyfans.com/itsmariion/c134"),
+            _itOQ("2026-09-24", "Lola", 3673, "https://onlyfans.com/mindymnp/c105")]
+    _mpOQ.of_queue_all = lambda: _payOQ(
+        _AOQ + _LOQ,
+        [{"creator": "Amelia", "creator_id": 3106, "count": 1},
+         {"creator": "Lola", "creator_id": 3673, "count": 2}],
+        ["Julia: accès OF indisponible (HTTP 500)"])
+    _jOQ = _cOQ.get("/sfssetup/of_queue").get_json()
+    check("releve live : 3 messages sur 2 dates",
+          _jOQ.get("ok") and _jOQ.get("items") == 3 and _jOQ.get("dates") == 2, str(_jOQ)[:160])
+    check("une creatrice en echec est NOMMEE, pas ecartee en silence",
+          any(_e.startswith("Julia:") for _e in _jOQ["errors"]))
+    check("le fichier que la page lit est ecrit (source live)",
+          _jsOQ.loads(_wOQ.OF_PUSHS_FILE.read_text(encoding="utf-8")).get("source") == "live")
+    _mpOQ.of_queue_all = lambda: (_ for _ in ()).throw(AssertionError("appel live interdit < 30 min"))
+    _j2OQ = _cOQ.get("/sfssetup/of_queue").get_json()
+    check("relecture < 30 min : memoire, zero appel MyPuls",
+          _j2OQ["ok"] and _j2OQ.get("cached") and _j2OQ["items"] == 3)
+    _mpOQ.of_queue_all = lambda: _payOQ(
+        _AOQ, [{"creator": "Amelia", "creator_id": 3106, "count": 1}],
+        ["Lola: switch-creator: timeout"])
+    _j3OQ = _cOQ.get("/sfssetup/of_queue?refresh=1").get_json()
+    _lolaOQ = [_x for _x in _j3OQ["data"]["items"] if _x["creator"] == "Lola"]
+    check("creatrice en panne : son dernier releve reste, marque ancien",
+          len(_lolaOQ) == 2 and all(_x.get("stale") for _x in _lolaOQ))
+    check("... et le calendrier le dit", any("conserv" in _e for _e in _j3OQ["errors"]))
+    _mpOQ.of_queue_all = lambda: {"ok": True, "items": [], "counters": {}, "creators": [],
+                                  "errors": ["Amelia: x", "Lola: y"]}
+    _j4OQ = _cOQ.get("/sfssetup/of_queue?refresh=1").get_json()
+    check("tout en panne : dernier bon etat resservi, signale perime",
+          _j4OQ["ok"] and _j4OQ.get("stale") and _j4OQ["items"] == 3)
+    _htmlOQ = _cOQ.get("/").get_data(as_text=True)
+    check("la page SFS embarque le releve ET le recharge en direct a l ouverture",
+          '"source": "live"' in _htmlOQ and "loadOfQueue(false)" in _htmlOQ)
+    check("un message avec lien onlyfans.com compte comme SFS meme sans @",
+          "/onlyfans\\.com\\//i.test(d)" in _htmlOQ)
+    # -- 3) securite : meme filet que les push MyM (ce sont les pushs des modeles)
+    check("401 sans session", _appOQ.test_client().get("/sfssetup/of_queue").status_code == 401)
+    _cChatOQ = _appOQ.test_client()
+    with _cChatOQ.session_transaction() as _sOQ:
+        _sOQ["auth"] = True
+        _sOQ["username"] = "chat"
+        _sOQ["role"] = "chatter"
+    check("role restreint bloque en lecture : /sfssetup/of_queue",
+          _cChatOQ.get("/sfssetup/of_queue").status_code == 403)
+    _srcOQ = _plOQ.Path("web_upload.py").read_text(encoding="utf-8")
+    _mapOQ = _srcOQ[_srcOQ.find("_READ_PREFIX_TO_TAB = {"):]
+    _mapOQ = _mapOQ[:_mapOQ.find("}")]
+    check("lecture OF mappee a l onglet sfs (pas de sur-blocage)",
+          '"/sfssetup/of_queue": "sfs"' in _mapOQ)
+    _wOQ._load_web_users = _savUsersOQ
+    _mpOQ.of_queue_all = _savAllOQ
+    _wOQ.OF_PUSHS_FILE = _savFileOQ
+except Exception as _eOQ:
+    check("SFS OnlyFans en direct : testable", False, repr(_eOQ)[:160])
+
+print()
+print("=" * 70)
 print("Filtres etoile des galeries (portee + etat)")
 print("=" * 70)
 # F3 : deux defauts a l ecran, tous deux invisibles en lecture.
