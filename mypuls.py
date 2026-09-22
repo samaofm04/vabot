@@ -3384,7 +3384,7 @@ def _of_queue_fetch(s: requests.Session, start: str, end: str) -> Dict[str, Any]
 # soit 8 × 10). On avance donc par la DATE : la page suivante est demandée
 # jusqu'à la date du plus ancien message reçu (borne incluse, dédoublonnée
 # par id pour ne rien perdre à la seconde près). 10 pages = 1 000 messages :
-# sur 31 j une créatrice en a ~150 (Lola : 68 en 14 j), soit 2 pages.
+# sur 92 j une créatrice en a ~370 (Amelia : 1 483 sur un an), soit 4 pages.
 _OF_HIST_PAGE = 100
 _OF_HIST_PAGES_MAX = 10
 
@@ -3496,13 +3496,14 @@ def of_mass_history(creator_id: int, start: str, end: str,
     return r
 
 
-def of_queue_all(days_ahead: int = 62, days_back: int = 31) -> Dict[str, Any]:
+def of_queue_all(days_ahead: int = 62, days_back: int = 92) -> Dict[str, Any]:
     """Pour TOUTES les créatrices OF actives (API MyPuls) : la file d'attente
     (d'aujourd'hui à +`days_ahead`) ET les messages de masse déjà envoyés
-    (−`days_back` à aujourd'hui, marqués `sent`). 31 jours et pas 92 comme
-    les pushs MyM : OF sert 100 messages par page et une créatrice en envoie
-    ~150 par mois — 92 jours coûteraient ~40 pages par créatrice à chaque
-    relevé, pour un Bilan SFS qui lit 14 jours.
+    (−`days_back` à aujourd'hui, marqués `sent`). 92 jours comme les pushs
+    MyM : le calendrier remonte trois mois des deux côtés. OF garde un an
+    d'historique (mesuré le 22/09/2026 : Lola 1 515 messages dont 119 SFS
+    depuis octobre 2025) ; une créatrice en envoie ~120 par mois, soit 4 à
+    5 pages de 100 pour 92 jours.
 
     Rien n'est écarté en silence : CHAQUE créatrice a sa ligne dans
     `creators`, même en échec (`queue_ok` / `history_ok` / `error`), pour que
