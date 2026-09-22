@@ -3221,6 +3221,13 @@ def list_pushs(creator_id: int, max_pages: int = 1, days: int = 0) -> Dict[str, 
 OF_QUEUE_TZ = "Europe/Paris"
 _OF_LINK_RE = re.compile(r"https?://onlyfans\.com/[A-Za-z0-9_.\-]+(?:/c\d+)?")
 _OF_MENTION_RE = re.compile(r"@([A-Za-z0-9_.]{2,})")
+try:
+    from zoneinfo import ZoneInfo as _ZoneInfo
+    _OF_TZ = _ZoneInfo(OF_QUEUE_TZ)
+except Exception:
+    # tzdata absente : les heures resteront en UTC — of_queue_all le DIT dans
+    # `errors`, au lieu de décaler chaque push de 2 h en silence
+    _OF_TZ = None
 
 
 def _of_html_to_text(html: str) -> str:
@@ -3243,36 +3250,28 @@ def _of_local_datetime(iso: str) -> Tuple[str, str]:
         d = _dt.fromisoformat(str(iso).replace("Z", "+00:00"))
     except Exception:
         return "", ""
-    try:
-        from zoneinfo import ZoneInfo
-        if d.tzinfo is not None:
-            d = d.astimezone(ZoneInfo(OF_QUEUE_TZ))
-    except Exception:
-        pass
+    if d.tzinfo is not None and _OF_TZ is not None:
+        d = d.astimezone(_OF_TZ)
     return d.strftime("%Y-%m-%d"), d.strftime("%H:%M")
 
 
-def of_queue(creator_id: int, start: str, end: str,
-             session: Optional[requests.Session] = None) -> Dict[str, Any]:
-    """File d'attente OnlyFans d'une créatrice entre `start` et `end` (AAAA-MM-JJ).
+_OF_JSON = {"Accept": "application/json"}
 
-    Lecture seule. Retourne {ok, of_user:{id, username, name},
-    items:[{id, type, date, time, text, links, mentions, lists}], error}.
+
+def _of_select(creator_id: int, s: requests.Session) -> Dict[str, Any]:
+    """Sélectionne la créatrice côté MyPuls et rend le compte OF réellement servi.
+
+    Si le switch n'a pas pris, on lirait la file de la créatrice PRÉCÉDENTE en
+    la mettant au nom de celle-ci — d'où ce contrôle avant toute lecture.
+    Retourne {ok, of_user:{id, username, name}} ou {ok: False, error}.
     """
-    s = session or _make_session()
-    if s is None:
-        return {"ok": False, "error": "Cookies MyPuls non configurés"}
-    H = {"Accept": "application/json"}
     try:
         s.get(f"{BASE_URL}/switch-creator/{int(creator_id)}?from=app_pushs",
               timeout=TIMEOUT, allow_redirects=True)
     except Exception as e:
         return {"ok": False, "error": f"switch-creator: {e}"}
-    # Qui est réellement servi ? Si le switch n'a pas pris, on lirait la file
-    # de la créatrice PRÉCÉDENTE en la mettant au nom de celle-ci — d'où ce
-    # contrôle avant toute lecture.
     try:
-        me = s.get(f"{BASE_URL}/of-nav/api2/v2/users/me", headers=H, timeout=TIMEOUT)
+        me = s.get(f"{BASE_URL}/of-nav/api2/v2/users/me", headers=_OF_JSON, timeout=TIMEOUT)
     except Exception as e:
         return {"ok": False, "error": f"accès OF: {e}"}
     if me.status_code != 200:
@@ -3285,50 +3284,241 @@ def of_queue(creator_id: int, start: str, end: str,
                "name": mj.get("name") or ""}
     if not of_user["id"]:
         return {"ok": False, "error": "accès OF : pas de compte OnlyFans relié"}
+    return {"ok": True, "of_user": of_user}
+
+
+def _of_get_json(s: requests.Session, path: str, query: str, what: str,
+                 key: str = "") -> Dict[str, Any]:
+    """GET mypuls.app/of-nav/api2/v2/<path>?<query> -> {ok, json} ou {ok: False, error}.
+
+    La query est passée telle quelle : OF veut « 2026-09-08 00:00:00 » avec
+    l'espace en %20, là où `params=` de requests l'encoderait en « + ».
+    `key` : clé attendue dans la réponse — un 200 qui n'a pas la forme prévue
+    (liste, objet d'erreur) est une ERREUR, pas « 0 message »."""
     try:
-        r = s.get(f"{BASE_URL}/of-nav/api2/v2/schedules", headers=H, timeout=TIMEOUT,
-                  params={"limit": 500, "filter[publishDate]": start,
-                          "filter[publishDateEnd]": end, "filter[timeZone]": OF_QUEUE_TZ})
+        r = s.get(f"{BASE_URL}/of-nav/api2/v2/{path}?{query}", headers=_OF_JSON, timeout=TIMEOUT)
     except Exception as e:
-        return {"ok": False, "error": f"file d'attente: {e}", "of_user": of_user}
+        return {"ok": False, "error": f"{what}: {e}"}
     if r.status_code != 200:
-        return {"ok": False, "error": f"file d'attente HTTP {r.status_code}", "of_user": of_user}
+        return {"ok": False, "error": f"{what} HTTP {r.status_code}"}
     try:
-        lst = r.json().get("list") or []
+        j = r.json()
     except Exception:
-        return {"ok": False, "error": "file d'attente : réponse illisible", "of_user": of_user}
+        return {"ok": False, "error": f"{what} : réponse illisible"}
+    if key and (not isinstance(j, dict) or key not in j):
+        forme = type(j).__name__ if not isinstance(j, dict) else f"objet sans « {key} »"
+        return {"ok": False, "error": f"{what} : forme inattendue ({forme})"}
+    return {"ok": True, "json": j}
+
+
+def _of_item(ident, typ: str, when: str, text: str) -> Dict[str, Any]:
+    d, tm = _of_local_datetime(when)
+    return {"id": ident, "type": typ, "date": d, "time": tm, "text": text[:1200],
+            "links": list(dict.fromkeys(_OF_LINK_RE.findall(text))),
+            "mentions": list(dict.fromkeys(_OF_MENTION_RE.findall(text)))}
+
+
+def _of_text(ent: dict) -> str:
+    return _of_html_to_text(ent.get("text") or "") or (ent.get("rawText") or "").strip()
+
+
+def _of_normalise_queue(lst) -> List[Dict[str, Any]]:
+    """Entrées de /schedules -> items du planning (À VENIR)."""
     items: List[Dict[str, Any]] = []
-    for it in lst:
+    for it in lst or []:
         if not isinstance(it, dict):
             continue
         ent = it.get("entity") or {}
-        text = _of_html_to_text(ent.get("text") or "") or (ent.get("rawText") or "").strip()
-        d, tm = _of_local_datetime(ent.get("scheduledAt") or it.get("publishDateTime") or "")
-        items.append({
-            "id": ent.get("id") or it.get("id"),
-            "type": it.get("type") or ent.get("responseType") or "",
-            "date": d,
-            "time": tm,
-            "text": text[:1200],
-            "links": list(dict.fromkeys(_OF_LINK_RE.findall(text))),
-            "mentions": list(dict.fromkeys(_OF_MENTION_RE.findall(text))),
-            "lists": ent.get("sentRulesExtra") or "",
-        })
+        row = _of_item(ent.get("id") or it.get("id"),
+                       it.get("type") or ent.get("responseType") or "",
+                       ent.get("scheduledAt") or it.get("publishDateTime") or "",
+                       _of_text(ent))
+        row["lists"] = ent.get("sentRulesExtra") or ""
+        items.append(row)
     items.sort(key=lambda x: (x["date"], x["time"]))
-    return {"ok": True, "of_user": of_user, "items": items}
+    return items
 
 
-def of_queue_all(days_ahead: int = 62) -> Dict[str, Any]:
-    """File d'attente OnlyFans de TOUTES les créatrices OF actives (API MyPuls),
-    d'aujourd'hui à +`days_ahead` jours.
+def _of_normalise_history(lst) -> Tuple[List[Dict[str, Any]], int]:
+    """Entrées de /users/me/stats/messages/group (messages de masse ENVOYÉS)
+    -> items du planning marqués `sent`, avec envoyés / vus.
 
-    Rien n'est écarté en silence : chaque créatrice en échec est nommée dans
-    `errors`, et deux créatrices renvoyant le MÊME compte OF (switch qui n'a
-    pas pris) sont signalées au lieu d'être comptées deux fois.
+    `isCanceled` chez OF ne veut PAS dire « jamais parti » : mesure du
+    22/09/2026 chez Lola, 59 des 68 messages de masse des 14 derniers jours
+    sont marqués annulés avec ~8 500 envois et des vues — des messages
+    ENVOYÉS puis retirés des conversations (les sextos du jour), et aucun SFS
+    parmi eux. Ce qui fait foi, c'est le nombre d'envois : un message parti
+    compte comme parti (gardé, marqué `unsent` s'il a été retiré) ; un
+    message à 0 envoi — annulé avant envoi, ou encore en cours — n'est pas
+    un SFS fait : écarté ET compté, le compte remonte à l'appelant."""
+    items: List[Dict[str, Any]] = []
+    never_sent = 0
+    for it in lst or []:
+        if not isinstance(it, dict):
+            continue
+        sent_count = int(it.get("sentCount") or 0)
+        if sent_count <= 0:
+            never_sent += 1
+            continue
+        row = _of_item(it.get("id"), "chat", it.get("date") or "", _of_text(it))
+        row.update({"sent": True, "lists": "", "sent_count": sent_count,
+                    "viewed_count": int(it.get("viewedCount") or 0),
+                    "unsent": bool(it.get("isCanceled"))})
+        items.append(row)
+    items.sort(key=lambda x: (x["date"], x["time"]))
+    return items, never_sent
+
+
+def _of_queue_fetch(s: requests.Session, start: str, end: str) -> Dict[str, Any]:
+    q = (f"limit=500&filter[publishDate]={start}&filter[publishDateEnd]={end}"
+         f"&filter[timeZone]={OF_QUEUE_TZ.replace('/', '%2F')}")
+    r = _of_get_json(s, "schedules", q, "file d'attente", key="list")
+    if not r.get("ok"):
+        return r
+    return {"ok": True, "items": _of_normalise_queue(r["json"].get("list"))}
+
+
+# OF sert 100 messages par appel quel que soit `limit` (limit=500 en rend 100
+# avec hasMore=true) et IGNORE `offset` : dix appels offset=0..900 rendaient
+# dix fois la même page (mesuré le 22/09/2026 — Julia sortait à « 80 SFS »,
+# soit 8 × 10). On avance donc par la DATE : la page suivante est demandée
+# jusqu'à la date du plus ancien message reçu (borne incluse, dédoublonnée
+# par id pour ne rien perdre à la seconde près). 10 pages = 1 000 messages :
+# sur 92 j une créatrice en a ~370 (Amelia : 1 483 sur un an), soit 4 pages.
+_OF_HIST_PAGE = 100
+_OF_HIST_PAGES_MAX = 10
+
+
+def _of_utc_cursor(iso: str) -> str:
+    """'2026-08-31T13:02:10+00:00' -> '2026-08-31%2013%3A02%3A10' (UTC, encodé
+    comme le front OF l'envoie). Vide si la date est illisible."""
+    from datetime import datetime as _dt, timezone as _tz
+    from urllib.parse import quote
+    try:
+        d = _dt.fromisoformat(str(iso).replace("Z", "+00:00"))
+    except Exception:
+        return ""
+    if d.tzinfo is not None:
+        d = d.astimezone(_tz.utc)
+    return quote(d.strftime("%Y-%m-%d %H:%M:%S"))
+
+
+def _of_history_fetch(s: requests.Session, start: str, end: str) -> Dict[str, Any]:
+    """Messages de masse envoyés entre start et end, page par page (cf. ci-dessus).
+
+    Toute sortie AVANT la fin réelle est dite : `truncated` + `reason`
+    (page resservie à l'identique, curseur de date bloqué, plafond de pages,
+    page en erreur après des pages réussies). Sans ça, une créatrice à
+    10 messages/jour n'aurait que ses 10 derniers jours et sortirait « en
+    retard » au Bilan sans aucune trace. Les messages sans date sont comptés
+    (`sans_date`) : ils ne peuvent pas servir de curseur."""
+    raw: List[Dict[str, Any]] = []
+    seen: set = set()
+    cursor = f"{end}%2023%3A59%3A59"
+    truncated, reason = False, ""
+    sans_date = 0
+    pages = 0
+    for _ in range(_OF_HIST_PAGES_MAX):
+        q = f"startDate={start}%2000%3A00%3A00&endDate={cursor}&limit={_OF_HIST_PAGE}"
+        r = _of_get_json(s, "users/me/stats/messages/group", q, "messages envoyés", key="items")
+        pages += 1
+        if not r.get("ok"):
+            if raw:
+                # des pages ont déjà répondu : rendre ce qu'on a, en le disant
+                truncated, reason = True, f"page {pages} en erreur ({r.get('error')})"
+                break
+            return r
+        j = r["json"]
+        page_items = [it for it in (j.get("items") or []) if isinstance(it, dict)]
+        new = [it for it in page_items if it.get("id") not in seen]
+        for it in new:
+            seen.add(it.get("id"))
+            raw.append(it)
+        if not j.get("hasMore") or not page_items:
+            break
+        if not new:
+            truncated, reason = True, "OF ressert la même page"
+            break
+        dated = [it.get("date") for it in page_items if it.get("date")]
+        sans_date += len(page_items) - len(dated)
+        nxt = _of_utc_cursor(min(dated, default=""))
+        if not nxt or nxt == cursor:
+            truncated, reason = True, "curseur de date bloqué"
+            break
+        cursor = nxt
+    else:
+        truncated, reason = True, f"plus de {_OF_HIST_PAGES_MAX} pages"
+    items, never_sent = _of_normalise_history(raw)
+    out: Dict[str, Any] = {"ok": True, "items": items, "canceled": never_sent,
+                           "pages": pages, "sans_date": sans_date}
+    if truncated:
+        out["truncated"] = True
+        out["reason"] = reason
+    return out
+
+
+def of_queue(creator_id: int, start: str, end: str,
+             session: Optional[requests.Session] = None) -> Dict[str, Any]:
+    """File d'attente OnlyFans (À VENIR) d'une créatrice entre `start` et `end`
+    (AAAA-MM-JJ). Lecture seule. Retourne {ok, of_user:{id, username, name},
+    items:[{id, type, date, time, text, links, mentions, lists}], error}.
+    """
+    s = session or _make_session()
+    if s is None:
+        return {"ok": False, "error": "Cookies MyPuls non configurés"}
+    sel = _of_select(creator_id, s)
+    if not sel.get("ok"):
+        return sel
+    r = _of_queue_fetch(s, start, end)
+    r["of_user"] = sel["of_user"]
+    return r
+
+
+def of_mass_history(creator_id: int, start: str, end: str,
+                    session: Optional[requests.Session] = None) -> Dict[str, Any]:
+    """Messages de masse ENVOYÉS par une créatrice entre `start` et `end`
+    (AAAA-MM-JJ) — la source du Bilan SFS côté OnlyFans. C'est l'écran
+    Statistiques > Engagement > Messages > « Messages de masse » d'OF
+    (/users/me/stats/messages/group : date, texte, envoyés, vus).
+
+    Mesure du 22/09/2026 sur 14 jours : Lola 68 messages dont 8 SFS, Amelia
+    59 / 6, Julia 49 / 8, Jessye 67 / 2. Retourne {ok, of_user, items (marqués
+    sent, avec sent_count / viewed_count), canceled, error}.
+    """
+    s = session or _make_session()
+    if s is None:
+        return {"ok": False, "error": "Cookies MyPuls non configurés"}
+    sel = _of_select(creator_id, s)
+    if not sel.get("ok"):
+        return sel
+    r = _of_history_fetch(s, start, end)
+    r["of_user"] = sel["of_user"]
+    return r
+
+
+def of_queue_all(days_ahead: int = 62, days_back: int = 92) -> Dict[str, Any]:
+    """Pour TOUTES les créatrices OF actives (API MyPuls) : la file d'attente
+    (d'aujourd'hui à +`days_ahead`) ET les messages de masse déjà envoyés
+    (−`days_back` à aujourd'hui, marqués `sent`). 92 jours comme les pushs
+    MyM : le calendrier remonte trois mois des deux côtés. OF garde un an
+    d'historique (mesuré le 22/09/2026 : Lola 1 515 messages dont 119 SFS
+    depuis octobre 2025) ; une créatrice en envoie ~120 par mois, soit 4 à
+    5 pages de 100 pour 92 jours.
+
+    Rien n'est écarté en silence : CHAQUE créatrice a sa ligne dans
+    `creators`, même en échec (`queue_ok` / `history_ok` / `error`), pour que
+    le Bilan la montre « lecture en échec » et non « jamais » ; deux
+    créatrices renvoyant le MÊME compte OF (switch qui n'a pas pris) sont
+    signalées au lieu d'être comptées deux fois ; un historique tronqué, des
+    messages sans date, des messages à 0 envoi, un fuseau absent : nommés.
+
+    `counters` ne compte que la FILE (à venir) : les envoyés sur les jours
+    passés ne sont pas des « programmés ».
 
     Retourne {ok, items:[... + creator, creator_id, of_username],
-    counters:{date: n messages}, creators:[{creator, creator_id, of_username,
-    count}], errors:[str], start, end}.
+    counters:{date: n à venir}, creators:[{creator, creator_id, of_username,
+    count (à venir), sent (envoyés), canceled (0 envoi), queue_ok,
+    history_ok, error?}], errors:[str], start, end}.
     """
     if not is_configured():
         return {"ok": False, "error": "Cookies MyPuls non configurés"}
@@ -3344,35 +3534,67 @@ def of_queue_all(days_ahead: int = 62) -> Dict[str, Any]:
     today = date.today()
     start = today.strftime("%Y-%m-%d")
     end = (today + timedelta(days=max(1, int(days_ahead)))).strftime("%Y-%m-%d")
+    back = (today - timedelta(days=max(1, int(days_back)))).strftime("%Y-%m-%d")
     items: List[Dict[str, Any]] = []
     counters: Dict[str, int] = {}
     per: List[Dict[str, Any]] = []
     errors: List[str] = []
+    if _OF_TZ is None:
+        errors.append("fuseau Europe/Paris indisponible sur ce serveur : heures laissées en UTC")
     seen_of: Dict[Any, str] = {}   # id OF -> pseudo déjà servi
-    for c in sorted(creators, key=lambda c: str(c.get("pseudo") or "").lower()):
-        pseudo = c.get("pseudo") or str(c.get("id"))
-        res = of_queue(c["id"], start, end, session=s)
-        if not res.get("ok"):
-            errors.append(f"{pseudo}: {res.get('error') or 'échec'}")
-            continue
-        ou = res.get("of_user") or {}
-        if ou.get("id") in seen_of:
-            errors.append(f"{pseudo}: même compte OF que {seen_of[ou['id']]} "
-                          f"(@{ou.get('username')}) — sélection non prise, ignorée")
-            continue
-        seen_of[ou.get("id")] = pseudo
+
+    def _garder(pseudo, cid, ou, rows, compter):
         n = 0
-        for it in res.get("items") or []:
+        for it in rows:
             it2 = dict(it)
             it2["creator"] = pseudo
-            it2["creator_id"] = c.get("id")
+            it2["creator_id"] = cid
             it2["of_username"] = ou.get("username") or ""
             items.append(it2)
             n += 1
-            if it2.get("date") and it2.get("type") == "chat":
+            if compter and it2.get("date") and it2.get("type") == "chat":
                 counters[it2["date"]] = counters.get(it2["date"], 0) + 1
-        per.append({"creator": pseudo, "creator_id": c.get("id"),
-                    "of_username": ou.get("username") or "", "count": n})
+        return n
+
+    for c in sorted(creators, key=lambda c: str(c.get("pseudo") or "").lower()):
+        pseudo = c.get("pseudo") or str(c.get("id"))
+        row: Dict[str, Any] = {"creator": pseudo, "creator_id": c.get("id"), "of_username": "",
+                               "count": 0, "sent": 0, "canceled": 0,
+                               "queue_ok": False, "history_ok": False}
+        per.append(row)
+        sel = _of_select(c["id"], s)
+        if not sel.get("ok"):
+            row["error"] = sel.get("error") or "échec"
+            errors.append(f"{pseudo}: {row['error']}")
+            continue
+        ou = sel["of_user"]
+        row["of_username"] = ou.get("username") or ""
+        if ou.get("id") in seen_of:
+            row["error"] = (f"même compte OF que {seen_of[ou['id']]} "
+                            f"(@{ou.get('username')}) — sélection non prise, ignorée")
+            errors.append(f"{pseudo}: {row['error']}")
+            continue
+        seen_of[ou.get("id")] = pseudo
+        rq = _of_queue_fetch(s, start, end)
+        if rq.get("ok"):
+            row["count"] = _garder(pseudo, c.get("id"), ou, rq["items"], compter=True)
+            row["queue_ok"] = True
+        else:
+            row["error"] = rq.get("error")
+            errors.append(f"{pseudo}: {rq.get('error')}")
+        rh = _of_history_fetch(s, back, start)
+        if rh.get("ok"):
+            row["sent"] = _garder(pseudo, c.get("id"), ou, rh["items"], compter=False)
+            row["history_ok"] = True
+            row["canceled"] = rh.get("canceled") or 0
+            if rh.get("truncated"):
+                errors.append(f"{pseudo}: historique envoyé incomplet — {rh.get('reason')} "
+                              f"({row['sent']} messages lus sur {days_back} j)")
+            if rh.get("sans_date"):
+                errors.append(f"{pseudo}: {rh['sans_date']} message(s) envoyé(s) sans date")
+        else:
+            row["error"] = ((row.get("error") + " ; ") if row.get("error") else "") + str(rh.get("error"))
+            errors.append(f"{pseudo}: {rh.get('error')}")
     try:
         _save_rotated_cookies(s)
     except Exception:
@@ -3380,7 +3602,7 @@ def of_queue_all(days_ahead: int = 62) -> Dict[str, Any]:
     items.sort(key=lambda x: (x.get("date") or "", x.get("time") or "",
                               str(x.get("creator") or "")))
     return {"ok": True, "items": items, "counters": counters, "creators": per,
-            "errors": errors, "start": start, "end": end}
+            "errors": errors, "start": back, "end": end}
 
 
 def get_avatar_bytes(creator_id: int) -> Dict[str, Any]:
