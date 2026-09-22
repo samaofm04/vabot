@@ -72,6 +72,29 @@ OFF_OPTIONS = ["FULLTIME", "Lundi", "Mardi", "Mercredi", "Jeudi",
                "Vendredi", "Samedi", "Dimanche", "PAS DE REPONSE"]
 PRESENCE_VALUES = ["Present", "Absent", "Retard", "Coupure", "OFF"]
 
+#: LE JOUR DE REPOS, TRADUIT UNE SEULE FOIS. La colonne « off » porte des
+#: noms COMPLETS (« Dimanche ») tandis que les cases de jour portent trois
+#: lettres (« dim ») : aucune correspondance n existait, et quiconque en
+#: aurait eu besoin en aurait invente une deuxieme — le piege « deux
+#: mappings valent deux comportements » que ce depot a deja paye cher.
+#:
+#: Sans elle, un pointage automatique marquerait « Absent » le jour de repos
+#: declare de quelqu un. Les donnees reelles montrent que la contradiction
+#: existe deja a la main : quatre lignes declarent un repos et disent
+#: « Present » ce jour-la.
+JOUR_DE_REPOS = {nom: cle for nom, cle in zip(DAYS_FULL, DAYS)}
+
+
+def jour_de_repos(row: Dict[str, Any]) -> str:
+    """La cle de jour ou cette personne ne travaille pas, ou "".
+
+    "" veut dire « aucun repos connu » — FULLTIME, PAS DE REPONSE, ou une
+    valeur qu on ne comprend pas. C est un etat distinct de « repos le
+    lundi » et il ne doit pas se confondre avec lui : sur une valeur
+    inconnue on s abstient, on ne devine pas.
+    """
+    return JOUR_DE_REPOS.get((row.get("off") or "").strip(), "")
+
 
 def creneau_lisible(creneau: str) -> str:
     """« 02h-08h » -> « 02h - 08h », pour l en-tete de colonne.
@@ -431,11 +454,98 @@ def update_cell(edt_id: str, row_id: str, field: str, value: str,
                 if not _valid_day_value(value):
                     value = "Present"
                 r["presence_by_week"][ws][field] = value
+                # Une saisie humaine se signe. C est ce qui permettra a un
+                # pointage automatique de ne JAMAIS ecraser une correction :
+                # sans origine, le robot re-accuse en boucle et la
+                # contestation devient insoluble.
+                _marquer_origine(r, ws, field, "main", "")
             else:
                 return False
             _save(data)
             return True
     return False
+
+
+# ==================== Origine d une case ====================
+#
+# L origine ne peut PAS vivre dans la valeur du jour. Deux filtres la
+# detruisent en silence : update_cell coerce toute valeur inconnue en
+# « Present » a l ecriture, et row_presence refait le meme menage a la
+# lecture. « Retard#auto » devient donc « Present » — l accusation se
+# transforme en presence. Le seul rangement non destructif est une cle
+# soeur, parallele a presence_by_week.
+
+def _marquer_origine(row: Dict[str, Any], ws: str, jour: str,
+                     src: str, motif: str) -> None:
+    src_par_sem = row.setdefault("presence_src_by_week", {})
+    src_par_sem.setdefault(ws, {})[jour] = {
+        "src": src,
+        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "motif": motif or "",
+    }
+
+
+def origine_case(row: Dict[str, Any], week_start: str, jour: str) -> Dict[str, Any]:
+    """Qui a ecrit cette case, et pourquoi. {} si personne ne l a jamais fait.
+
+    {} n est pas « ecrit a la main » : c est « jamais touchee ». Les deux ne
+    doivent pas se confondre, parce qu une case jamais touchee se lit
+    « Present » par defaut — ce qui ressemble a une presence CONSTATEE alors
+    que personne n a rien constate.
+    """
+    src = row.get("presence_src_by_week") or {}
+    sem = src.get(week_start) or src.get(parse_week_start(week_start)) or {}
+    v = sem.get(jour)
+    return dict(v) if isinstance(v, dict) else {}
+
+
+def poser_auto(edt_id: str, row_id: str, week_start: str, jour: str,
+               valeur: str, motif: str) -> Dict[str, Any]:
+    """Ecrit UNE case au nom du robot, ou dit precisement pourquoi il s abstient.
+
+    Rend {"ok": bool, "raison": str}. Jamais un booleen nu : un refus muet
+    est indistinguable d un succes, et c est exactement le silence dont ce
+    projet s est deja mordu les doigts.
+
+    Trois interdits, chacun ne d une mesure :
+
+    1. NE MATERIALISER QUE LE JOUR VISE. update_cell cree la semaine avec
+       sept « Present » quand elle n existe pas. Un robot qui passerait par
+       la affirmerait la presence de six autres jours, jours FUTURS compris.
+    2. NE JAMAIS ECRASER UNE SAISIE HUMAINE. Une correction du proprietaire
+       gele la case definitivement : sans ca, le robot la re-ecrase au
+       passage suivant et la correction ne tient pas une minute.
+    3. NE JAMAIS TOUCHER AU JOUR DE REPOS DECLARE.
+    """
+    if not _valid_day_value(valeur):
+        return {"ok": False, "raison": "valeur refusee : %r" % valeur}
+    if jour not in DAYS:
+        return {"ok": False, "raison": "jour inconnu : %r" % jour}
+    ws = parse_week_start(week_start)
+    data = _load()
+    for e in data["edts"]:
+        if e["id"] != edt_id:
+            continue
+        for r in e["rows"]:
+            if r["id"] != row_id:
+                continue
+            if jour_de_repos(r) == jour:
+                return {"ok": False, "raison": "jour de repos declare"}
+            orig = origine_case(r, ws, jour)
+            if orig.get("src") == "main":
+                return {"ok": False, "raison": "saisie a la main, gelee"}
+            pbw = r.setdefault("presence_by_week", {})
+            # setdefault({}) et NON _empty_presence() : les six autres jours
+            # restent reellement vides.
+            sem = pbw.setdefault(ws, {})
+            if sem.get(jour) == valeur and orig.get("src") == "auto":
+                return {"ok": False, "raison": "deja pose"}
+            sem[jour] = valeur
+            _marquer_origine(r, ws, jour, "auto", motif)
+            _save(data)
+            return {"ok": True, "raison": motif}
+        return {"ok": False, "raison": "ligne introuvable"}
+    return {"ok": False, "raison": "EDT introuvable"}
 
 
 # ==================== Presence helpers ====================
@@ -445,7 +555,14 @@ def row_presence(row: Dict[str, Any], week_start: str) -> Dict[str, str]:
     Defaut a 'Present' pour tous les jours si non renseigne.
     """
     pbw = row.get("presence_by_week", {})
-    p = pbw.get(week_start)
+    # NORMALISER COMME LES ECRIVAINS. update_cell, import_week et
+    # fill_row_week passent tous les trois par parse_week_start ; cette
+    # lecture-ci faisait un acces BRUT. Une semaine rangee sous son lundi
+    # « 2026-09-21 » et relue avec « 2026-09-22 » rendait donc sept
+    # « Present » et perdait l incident, sans un mot. Un automate qui lirait
+    # avec date.today() ecrirait sous le lundi et relirait du vide : il
+    # reposerait le meme verdict a chaque passage.
+    p = pbw.get(week_start) or pbw.get(parse_week_start(week_start))
     if not p:
         return _empty_presence()
     out = _empty_presence()
