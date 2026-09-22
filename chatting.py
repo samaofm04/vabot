@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 import safe_json
@@ -40,6 +40,30 @@ DATA_DIR = Path("data")
 PLANNING_FILE = DATA_DIR / "chatting_planning.json"
 
 CRENEAUX = ["02h-08h", "08h-14h", "14h-20h", "20h-02h"]
+
+#: LE FUSEAU DES CRENEAUX. Jusqu ici « 08h-14h » ne voulait rien dire : les
+#: quatre creneaux etaient des chaines jamais converties en heures, et
+#: personne n avait eu a decider de quelle horloge il s agissait. Le
+#: proprietaire pose ses shifts a SON horloge (choix du 22/09/2026), donc
+#: Paris -- et Paris change d heure deux fois par an, ce qui se paie
+#: exactement sur ces creneaux :
+#:   - 29/03/2026 : 02h00 N EXISTE PAS, l horloge saute a 03h00, et le
+#:     creneau 02h-08h ne dure que 5 heures reelles.
+#:   - 25/10/2026 : 02h00 arrive DEUX fois, et il en dure 7.
+#: Les deux cas sont traites, pas esperes. Et toute duree se calcule sur
+#: .timestamp() : soustraire deux datetime portant le meme tzinfo rend la
+#: difference d horloge murale et ignore le fuseau.
+FUSEAU_CRENEAUX = "Europe/Paris"
+
+#: Les creneaux, avec enfin des heures. UNE SEULE table : un second parsing
+#: ailleurs, c est deux comportements le jour ou l un des deux change.
+#: fin <= debut veut dire que le shift franchit minuit.
+CRENEAUX_HORAIRES = {
+    "02h-08h": (2, 8),
+    "08h-14h": (8, 14),
+    "14h-20h": (14, 20),
+    "20h-02h": (20, 2),
+}
 DAYS = ["lun", "mar", "mer", "jeu", "ven", "sam", "dim"]
 DAYS_FULL = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
 DAYS_SHORT = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
@@ -93,6 +117,97 @@ def models_for_edt(edt_name: str) -> List[str]:
 
 
 # ==================== Week helpers ====================
+
+def creneau_franchit_minuit(creneau: str) -> bool:
+    """Ce creneau passe-t-il de l autre cote de minuit ?"""
+    h = CRENEAUX_HORAIRES.get((creneau or "").strip())
+    return bool(h) and h[1] <= h[0]
+
+
+def _zone():
+    from zoneinfo import ZoneInfo
+    return ZoneInfo(FUSEAU_CRENEAUX)
+
+
+def _instant_mural(jour: date, heure: int):
+    """Une heure MURALE de Paris -> un instant reel, et ce qu elle avait de tordu.
+
+    Rend (datetime aware, anomalie) ou anomalie vaut "" (cas normal),
+    "inexistante" (l horloge a saute par-dessus cette heure-la) ou
+    "ambigue" (cette heure arrive deux fois cette nuit).
+
+    Python ne previent d aucun des deux : datetime(2026,3,29,2,0, tz=Paris)
+    ne leve rien et rend un instant qui se relit 03:00. On le DETECTE en
+    relisant l heure murale apres un aller-retour par UTC, au lieu de
+    l esperer. fold=0 donne le bon instant dans les deux cas -- l instant du
+    saut pour une heure inexistante, la PREMIERE occurrence pour une heure
+    ambigue -- et la premiere est bien celle ou le shift commence : prendre
+    la seconde declarerait en retard quelqu un qui est a l heure.
+    """
+    z = _zone()
+    dt = datetime(jour.year, jour.month, jour.day, heure, 0, tzinfo=z)
+    relu = dt.astimezone(timezone.utc).astimezone(z)
+    if relu.hour != heure:
+        return dt, "inexistante"
+    if dt.utcoffset() != dt.replace(fold=1).utcoffset():
+        return dt, "ambigue"
+    return dt, ""
+
+
+def fenetre_shift(creneau: str, jour_debut) -> Optional[Dict[str, Any]]:
+    """Les deux instants qui bornent un shift, et sa duree REELLE.
+
+    `jour_debut` est le jour ou le shift COMMENCE (date ou 'AAAA-MM-JJ').
+    Rend None si le creneau est inconnu : inconnu veut dire inconnu, pas
+    « on suppose ». L intervalle est demi-ouvert [debut, fin) -- sans ca,
+    02h00 appartiendrait a la fois au shift 20h-02h qui finit et au 02h-08h
+    qui commence, et une personne tenant les deux serait jugee deux fois
+    pour la meme minute.
+    """
+    h = CRENEAUX_HORAIRES.get((creneau or "").strip())
+    if not h:
+        return None
+    if isinstance(jour_debut, str):
+        try:
+            jour_debut = datetime.strptime(jour_debut, "%Y-%m-%d").date()
+        except ValueError:
+            return None
+    debut, anom_d = _instant_mural(jour_debut, h[0])
+    jour_fin = jour_debut + timedelta(days=1) if h[1] <= h[0] else jour_debut
+    fin, anom_f = _instant_mural(jour_fin, h[1])
+    duree = int(fin.timestamp() - debut.timestamp())   # jamais fin - debut
+    anomalies = [a for a in (anom_d, anom_f) if a]
+    return {"creneau": creneau, "jour": jour_debut.isoformat(),
+            "debut": debut, "fin": fin, "duree_s": duree,
+            "franchit_minuit": h[1] <= h[0],
+            "anomalie": " + ".join(anomalies)}
+
+
+def shift_a(instant) -> Optional[Dict[str, Any]]:
+    """Quel shift couvre cet instant, et surtout QUEL JOUR il porte.
+
+    C est la regle qui manquait partout. Le planning range par jour de
+    calendrier : une minute de 00h45 tombait donc dans la colonne du
+    LENDEMAIN alors que le proprietaire l a cochee la veille, et le dimanche
+    soir basculait carrement dans la semaine suivante. On rattache au jour
+    de DEBUT du shift -- sessions_voc fait deja exactement ca pour les
+    sessions nocturnes des VA.
+
+    `instant` doit etre un datetime aware. Rend None hors de tout shift
+    (ce qui n arrive pas aujourd hui : les quatre creneaux couvrent 24 h,
+    mais un creneau retire demain ne doit pas rendre un verdict au hasard).
+    """
+    if instant.tzinfo is None:
+        raise ValueError("shift_a exige un datetime aware")
+    ici = instant.astimezone(_zone())
+    # La veille aussi : un shift de nuit commence hier et couvre ce matin.
+    for jour in (ici.date() - timedelta(days=1), ici.date()):
+        for creneau in CRENEAUX:
+            f = fenetre_shift(creneau, jour)
+            if f and f["debut"].timestamp() <= instant.timestamp() < f["fin"].timestamp():
+                return f
+    return None
+
 
 def week_start_for(d: date) -> date:
     """Retourne le lundi de la semaine de la date donnee."""
