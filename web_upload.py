@@ -232,6 +232,67 @@ def _discord_observable() -> bool:
         return False
 
 
+def _titre_colonne_discord(nb: int, tronque: bool) -> str:
+    """Ce que dit l en-tete Discord, selon ce qu on a pu relever.
+
+    « Ne jamais ecarter en silence » : une liste absente et une liste vide
+    ne veulent pas dire la meme chose, et un plafond qui mord doit se voir.
+    """
+    if not nb:
+        return ("Pseudo Discord du chatteur. Liste des membres indisponible "
+                "(bot Discord injoignable) : saisie libre.")
+    if tronque:
+        return ("Pseudo Discord du chatteur — choisis dans la liste. "
+                "%d membres, seuls les 600 premiers sont proposes." % nb)
+    return ("Pseudo Discord du chatteur — choisis dans la liste des %d membres "
+            "du serveur. Rempli et vert = rattachement valide." % nb)
+
+
+def _membres_discord_pour_liste():
+    """Les membres des serveurs du bot, pour la liste de choix du planning.
+
+    Sans elle, rattacher un chatteur veut dire taper de memoire un pseudo
+    comme « charbel022_31423 » : personne ne le connait par coeur, et une
+    faute de frappe se stocke aussi bien qu un vrai pseudo. Avec elle, le
+    proprietaire choisit un nom qui EXISTE.
+
+    Rend (options_html, nb_membres, tronque). Muet quand Discord ne repond
+    pas : une liste vide qui se presenterait comme complete ferait croire
+    que le serveur est vide.
+    """
+    if not _discord_observable():
+        return "", 0, False
+    vus = {}
+    try:
+        for g in _BOT_REF.guilds:
+            try:
+                for m in g.members:
+                    if getattr(m, "bot", False):
+                        continue
+                    ident = getattr(m, "name", "") or ""
+                    if not ident or m.id in vus:
+                        continue
+                    affiche = (getattr(m, "nick", "") or getattr(m, "global_name", "")
+                               or getattr(m, "display_name", "") or ident)
+                    vus[m.id] = (ident, affiche)
+            except Exception:
+                continue
+    except Exception:
+        return "", 0, False
+    # Tri sur le nom AFFICHE : c est celui que le proprietaire connait, pas
+    # le pseudo technique.
+    tous = sorted(vus.values(), key=lambda t: t[1].lower())
+    # Un plafond, parce qu un serveur qui grossit ne doit pas alourdir la
+    # page en silence — et s il mord, on le DIT (voir l en-tete de colonne).
+    PLAFOND = 600
+    tronque = len(tous) > PLAFOND
+    options = "".join(
+        "<option value='%s'>%s</option>"
+        % (html_escape(ident, quote=True), html_escape(affiche))
+        for ident, affiche in tous[:PLAFOND])
+    return options, len(tous), tronque
+
+
 def _resolve_discord_user_by_handle(handle: str):
     """Cherche un user Discord par username/handle (ex: 'safidy0356_08105' ou 'safidy').
 
@@ -41332,6 +41393,10 @@ def _render_chatplanning_html() -> str:
     #   retards, absences, actions                              -> 3
     NB_COLONNES = 6 + len(chatting.DAYS) + 3
 
+    # Les membres du serveur, releves UNE fois pour tout le tableau : un
+    # appel par ligne rescannerait les guildes 37 fois pour le meme resultat.
+    _dl_opts, _dl_nb, _dl_tronque = _membres_discord_pour_liste()
+
     # Si pas d EDT, propose les 2 presets + custom
     if not edts:
         return (
@@ -41621,6 +41686,7 @@ def _render_chatplanning_html() -> str:
             f"data-field='discord_username' "
             f"value='{handle.replace(chr(39), chr(39) + chr(39))}' placeholder='@discord' "
             f"onchange='saveCell(this)' "
+            f"{" list='dl-discord'" if _dl_opts else ""}"
             f"style='background:#1a1a1a;color:#fff;border:1px solid {bord};"
             f"padding:6px 8px;border-radius:6px;font-size:12px;width:{largeur}px'>"
             f"</td>"
@@ -41806,7 +41872,8 @@ def _render_chatplanning_html() -> str:
         "<thead><tr>"
         f"<th style='background:#0a0a0a;color:#3b82f6;font-weight:700;padding:10px 6px;font-size:12px;border-right:2px solid #0a0a0a;width:80px'>{'Horaire' if is_mgr else 'Creneau'}</th>"
         "<th style='background:#1a1a1a;color:#3b82f6;font-weight:700;padding:10px 6px;font-size:12px'>Pseudo</th>"
-        "<th style='background:#1a1a1a;color:#5865f2;font-weight:700;padding:10px 6px;font-size:12px' title='Pseudo Discord du chatteur — rempli = rattachement valide'>Discord</th>"
+        f"<th style='background:#1a1a1a;color:#5865f2;font-weight:700;padding:10px 6px;font-size:12px' "
+        f"title='{html_escape(_titre_colonne_discord(_dl_nb, _dl_tronque))}'>Discord</th>"
         "<th style='background:#1a1a1a;color:#3b82f6;font-weight:700;padding:10px 6px;font-size:12px'>Statut</th>"
         "<th style='background:#1a1a1a;color:#3b82f6;font-weight:700;padding:10px 6px;font-size:12px'>Modele</th>"
         "<th style='background:#1a1a1a;color:#3b82f6;font-weight:700;padding:10px 6px;font-size:12px'>OFF</th>"
@@ -41817,7 +41884,8 @@ def _render_chatplanning_html() -> str:
         "</tr></thead>"
     )
     table = (
-        f"<div style='overflow-x:auto;background:#0a0a0a;border:1px solid #1a1a1a;border-radius:12px'>"
+        (f"<datalist id='dl-discord'>{_dl_opts}</datalist>" if _dl_opts else "")
+        + f"<div style='overflow-x:auto;background:#0a0a0a;border:1px solid #1a1a1a;border-radius:12px'>"
         f"<table style='width:100%;border-collapse:separate;border-spacing:0;font-size:12px'>"
         f"{header}<tbody>{''.join(body_rows)}</tbody></table></div>"
     )
