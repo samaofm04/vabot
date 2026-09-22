@@ -6019,6 +6019,8 @@ try:
          "viewedCount": 0, "isCanceled": True},
         {"id": 3, "date": "2026-09-17T17:00:00+00:00", "rawText": "parti puis retire @amie",
          "sentCount": 8000, "viewedCount": 50, "isCanceled": True},
+        {"id": 4, "date": "2026-09-22T10:00:00+00:00", "rawText": "en cours, 0 envoi @amie",
+         "sentCount": 0, "viewedCount": 0, "isCanceled": False},
         "pas un dict"])
     _h1OQ = next((_x for _x in _histOQ if _x["id"] == 1), {})
     check("messages envoyes : garde, marque envoye, envoyes/vus conserves, heure de Paris",
@@ -6027,7 +6029,27 @@ try:
           and (_h1OQ.get("date"), _h1OQ.get("time")) == ("2026-09-19", "19:03"))
     check("parti puis retire (isCanceled AVEC envois) : reste un SFS fait, marque retire",
           any(_x["id"] == 3 and _x.get("sent") and _x.get("unsent") for _x in _histOQ))
-    check("annule SANS aucun envoi : pas un SFS fait, ecarte ET compte", _annOQ == 1)
+    check("0 envoi (annule avant, ou encore en cours) : pas un SFS fait, ecarte ET compte",
+          _annOQ == 2 and not any(_x["id"] == 4 for _x in _histOQ))
+    # une reponse 200 qui n a pas la forme attendue est une ERREUR, pas 0 message
+    class _Rep200OQ:
+        def __init__(self, body): self.status_code = 200; self._b = body
+        def json(self): return self._b
+    class _SessListeOQ:
+        def get(self, url, headers=None, timeout=None): return _Rep200OQ([])
+    _formeOQ = _mpOQ._of_get_json(_SessListeOQ(), "schedules", "x=1", "file d attente", key="list")
+    check("200 avec un corps liste : erreur nommee « forme inattendue », pas un releve vide",
+          not _formeOQ.get("ok") and "forme inattendue" in (_formeOQ.get("error") or ""))
+    # OF ressert la meme page (ce qu il fait pour offset) : dit, pas avale
+    class _SessMemePageOQ:
+        def get(self, url, headers=None, timeout=None):
+            return _Rep200OQ({"hasMore": True, "items": [
+                {"id": i, "date": "2026-09-%02dT10:00:00+00:00" % (20 - i // 10), "rawText": "@x",
+                 "sentCount": 5, "viewedCount": 1} for i in range(100)]})
+    _memeOQ = _mpOQ._of_history_fetch(_SessMemePageOQ(), "2026-09-01", "2026-09-30")
+    check("meme page resservie avec hasMore : historique marque incomplet, avec la raison",
+          _memeOQ.get("ok") and _memeOQ.get("truncated") and "même page" in (_memeOQ.get("reason") or "")
+          and len(_memeOQ["items"]) == 100)
     # OF ignore `offset` et sert 100 messages par appel : la page suivante se
     # demande par la date du plus ancien recu. Session simulee : 2 pages, le
     # message frontiere revient dans les deux (borne incluse) sans doublon.
@@ -6090,10 +6112,13 @@ try:
             _itOQ("2026-09-24", "Lola", 3673, "https://onlyfans.com/mindymnp/c105")]
     _SOQ = dict(_itOQ("2026-09-19", "Lola", 3673, "https://onlyfans.com/violette/c9"),
                 sent=True, sent_count=8545, viewed_count=864)
+    _okOQ = {"queue_ok": True, "history_ok": True}
     _mpOQ.of_queue_all = lambda: _payOQ(
         _AOQ + _LOQ + [_SOQ],
-        [{"creator": "Amelia", "creator_id": 3106, "count": 1, "sent": 0},
-         {"creator": "Lola", "creator_id": 3673, "count": 2, "sent": 1}],
+        [dict({"creator": "Amelia", "creator_id": 3106, "count": 1, "sent": 0}, **_okOQ),
+         dict({"creator": "Lola", "creator_id": 3673, "count": 2, "sent": 1}, **_okOQ),
+         {"creator": "Julia", "creator_id": 3109, "count": 0, "sent": 0, "queue_ok": False,
+          "history_ok": False, "error": "accès OF indisponible (HTTP 500)"}],
         ["Julia: accès OF indisponible (HTTP 500)"])
     _jOQ = _cOQ.get("/sfssetup/of_queue").get_json()
     check("releve live : 3 a venir + 1 envoye, sur 3 dates",
@@ -6109,29 +6134,49 @@ try:
     check("relecture < 30 min : memoire, zero appel MyPuls",
           _j2OQ["ok"] and _j2OQ.get("cached") and _j2OQ["items"] == 4)
     _mpOQ.of_queue_all = lambda: _payOQ(
-        _AOQ, [{"creator": "Amelia", "creator_id": 3106, "count": 1}],
+        _AOQ, [dict({"creator": "Amelia", "creator_id": 3106, "count": 1, "sent": 0}, **_okOQ),
+               {"creator": "Lola", "creator_id": 3673, "count": 0, "sent": 0, "queue_ok": False,
+                "history_ok": False, "error": "switch-creator: timeout"}],
         ["Lola: switch-creator: timeout"])
     _j3OQ = _cOQ.get("/sfssetup/of_queue?refresh=1").get_json()
+    check("la creatrice en echec reste dans la liste, avec son erreur (le Bilan la montre ⚠, pas « jamais »)",
+          any(_c.get("creator") == "Lola" and _c.get("error") for _c in _j3OQ["creators"]))
     _lolaOQ = [_x for _x in _j3OQ["data"]["items"] if _x["creator"] == "Lola"]
     check("creatrice en panne : son dernier releve reste (3 msgs), marque ancien",
           len(_lolaOQ) == 3 and all(_x.get("stale") for _x in _lolaOQ))
     # seule l une des deux lectures a rate : ce qui est deja dans le releve
     # frais ne doit PAS revenir en double depuis l ancien
     _mpOQ.of_queue_all = lambda: _payOQ(
-        _AOQ + [_SOQ], [{"creator": "Amelia", "creator_id": 3106, "count": 1, "sent": 0},
-                        {"creator": "Lola", "creator_id": 3673, "count": 0, "sent": 1}],
+        _AOQ + [_SOQ], [dict({"creator": "Amelia", "creator_id": 3106, "count": 1, "sent": 0}, **_okOQ),
+                        {"creator": "Lola", "creator_id": 3673, "count": 0, "sent": 1,
+                         "queue_ok": False, "history_ok": True, "error": "file d'attente HTTP 500"}],
         ["Lola: file d'attente HTTP 500"])
     _j3bOQ = _cOQ.get("/sfssetup/of_queue?refresh=1").get_json()
     _lolaBOQ = [_x for _x in _j3bOQ["data"]["items"] if _x["creator"] == "Lola"]
-    check("lecture partielle : l envoye frais n est pas double par l ancien releve",
+    check("lecture partielle : seule la FILE ratee revient de l ancien releve, l envoye frais fait foi",
           len(_lolaBOQ) == 3 and sum(1 for _x in _lolaBOQ if _x.get("sent")) == 1
-          and sum(1 for _x in _lolaBOQ if _x.get("stale")) == 2)
+          and sum(1 for _x in _lolaBOQ if _x.get("stale") and not _x.get("sent")) == 2)
+    # l inverse : seul l HISTORIQUE a rate -> la file fraiche (vide) fait foi,
+    # les anciens programmes ne reviennent pas ; les anciens envoyes, si
+    _mpOQ.of_queue_all = lambda: _payOQ(
+        _AOQ, [dict({"creator": "Amelia", "creator_id": 3106, "count": 1, "sent": 0}, **_okOQ),
+               {"creator": "Lola", "creator_id": 3673, "count": 0, "sent": 0,
+                "queue_ok": True, "history_ok": False, "error": "messages envoyés HTTP 500"}],
+        ["Lola: messages envoyés HTTP 500"])
+    _j3cOQ = _cOQ.get("/sfssetup/of_queue?refresh=1").get_json()
+    _lolaCOQ = [_x for _x in _j3cOQ["data"]["items"] if _x["creator"] == "Lola"]
+    check("historique rate seul : un programme supprime depuis ne ressuscite pas, l envoye ancien reste",
+          len(_lolaCOQ) == 1 and _lolaCOQ[0].get("sent") and _lolaCOQ[0].get("stale"))
     check("... et le calendrier le dit", any("conserv" in _e for _e in _j3OQ["errors"]))
     _mpOQ.of_queue_all = lambda: {"ok": True, "items": [], "counters": {}, "creators": [],
                                   "errors": ["Amelia: x", "Lola: y"]}
     _j4OQ = _cOQ.get("/sfssetup/of_queue?refresh=1").get_json()
     check("tout en panne : dernier bon etat resservi, signale perime",
-          _j4OQ["ok"] and _j4OQ.get("stale") and _j4OQ["items"] == 4)
+          _j4OQ["ok"] and _j4OQ.get("stale") and _j4OQ["items"] >= 1)
+    _mpOQ.of_queue_all = lambda: (_ for _ in ()).throw(AssertionError("l echec doit etre memorise 30 min"))
+    _j4bOQ = _cOQ.get("/sfssetup/of_queue").get_json()
+    check("l echec est memorise : pas de nouvelle lecture live a l ouverture suivante",
+          _j4bOQ["ok"] and _j4bOQ.get("cached") and _j4bOQ.get("stale"))
     _htmlOQ = _cOQ.get("/").get_data(as_text=True)
     check("la page SFS embarque le releve ET le recharge en direct a l ouverture",
           '"source": "live"' in _htmlOQ and "loadOfQueue(false)" in _htmlOQ)
@@ -6140,6 +6185,18 @@ try:
     check("le Bilan SFS lit aussi OnlyFans, et se propose sur l onglet OF",
           "sfsBilanBlock('OnlyFans'" in _htmlOQ
           and "if(bBil)bBil.style.display='flex'; if(bOf)bOf.style.display='flex'" in _htmlOQ)
+    check("UNE regle SFS pour le Bilan MyM, la meme que le calendrier (isSfsPush)",
+          "if(!isSfsPush(x.description||'')) return;" in _htmlOQ)
+    check("le Bilan compte en jours calendaires (pas en millisecondes)",
+          "function sfsDayNum(" in _htmlOQ and "today-dn<14" in _htmlOQ)
+    check("la page n embarque pas les messages OF (compteurs et creatrices seulement), et protege </",
+          '"items": []' in _htmlOQ and ".replace(\"</\", \"<\\\\/\")" in _plOQ.Path("web_upload.py").read_text(encoding="utf-8"))
+    check("la ligne de statut OF est reposee par le rendu, pas effacee",
+          "box.innerHTML=window.__ofStatusHtml||'';" in _htmlOQ)
+    # cache illisible : dit, pas avale (en dernier : la page ci-dessus lit ce fichier)
+    _wOQ.OF_PUSHS_FILE.write_text("[1, 2, 3]", encoding="utf-8")
+    check("cache OF illisible : nomme dans cache_error, et un dict est quand meme rendu",
+          isinstance(_wOQ._load_of_pushs(), dict) and _wOQ._load_of_pushs().get("cache_error"))
     check("seuls les messages ENVOYES comptent dans le bilan OF (pas la file a venir)",
           "if(!it.sent||!it.date||!isSfsPush(it.text)) return;" in _htmlOQ)
     # -- 3) securite : meme filet que les push MyM (ce sont les pushs des modeles)
@@ -6161,6 +6218,71 @@ try:
     _wOQ.OF_PUSHS_FILE = _savFileOQ
 except Exception as _eOQ:
     check("SFS OnlyFans en direct : testable", False, repr(_eOQ)[:160])
+
+print()
+print("=" * 70)
+print("25) Planning SFS a jour sans clic (cycle de fond + page qui se rafraichit)")
+print("=" * 70)
+try:
+    import tempfile as _tfLV
+    import json as _jsLV
+    import pathlib as _plLV
+    import time as _tmLV
+    import web_upload as _wLV
+    import mypuls as _mpLV
+    _srcLV = _plLV.Path("web_upload.py").read_text(encoding="utf-8")
+    # -- 1) un seul endroit decide de ce qui remplit le calendrier
+    check("la route MyM delegue a _collecter_pushs_mym",
+          "return jsonify(_collecter_pushs_mym(force=bool(request.args.get(\"refresh\"))))" in _srcLV)
+    check("la route OF delegue a _collecter_file_of",
+          "return jsonify(_collecter_file_of(force=bool(request.args.get(\"refresh\"))))" in _srcLV)
+    check("le cycle de fond appelle les MEMES collecteurs (pas une 2e copie)",
+          "_collecter_pushs_mym(force=True)" in _srcLV and "_collecter_file_of(force=True)" in _srcLV)
+    check("le bouton manuel « MAJ profils » fait le meme tour que le demon",
+          _srcLV.count("_sfs_live_cycle()") >= 2)
+    check("le demon est arme au demarrage, le job nocturne ne l est plus",
+          "_start_sfs_live_daemon()" in _srcLV and "start_pushs_refresh_daily(" not in _srcLV)
+    check("un seul demon par processus (2e appel refuse)", _wLV._start_sfs_live_daemon() is False)
+    # -- 2) memoire : un cache frais est servi sans toucher MyPuls
+    _savCacheLV = _wLV.SFS_PUSHS_CACHE
+    _wLV.SFS_PUSHS_CACHE = _plLV.Path(_tfLV.mkdtemp()) / "sfs_pushs_cache.json"
+    _savListLV = _mpLV.list_creators
+    _mpLV.list_creators = lambda *a, **k: (_ for _ in ()).throw(AssertionError("MyPuls ne doit pas etre lu"))
+    _wLV.SFS_PUSHS_CACHE.write_text(_jsLV.dumps({"ts": _tmLV.time() - 60, "pushs": [
+        {"id": 1, "creator": "Amelia_xoxo", "sentAt": "20/09/2026 19:00", "description": "@x"}]}), encoding="utf-8")
+    _rLV = _wLV._collecter_pushs_mym(False)
+    check("cache < 30 min : servi tel quel, avec l heure du releve",
+          _rLV.get("ok") and _rLV.get("cached") and len(_rLV.get("pushs") or []) == 1 and _rLV.get("ts"))
+    _wLV.SFS_PUSHS_CACHE.write_text(_jsLV.dumps({"ts": _tmLV.time() - 4000, "pushs": [{"id": 1}]}), encoding="utf-8")
+    _savConfLV = _mpLV.is_configured
+    _mpLV.is_configured = lambda: False
+    _r2LV = _wLV._collecter_pushs_mym(False)
+    check("cache perime sans cookies : l erreur est dite, pas un calendrier vide muet",
+          not _r2LV.get("ok") and "cookies" in (_r2LV.get("error") or "").lower())
+    _cyLV = _wLV._sfs_live_cycle()
+    check("sans cookies, le tour de fond s arrete tout de suite et le dit", _cyLV.get("erreur"))
+    _mpLV.is_configured = _savConfLV
+    _mpLV.list_creators = _savListLV
+    _wLV.SFS_PUSHS_CACHE = _savCacheLV
+    # -- 3) la page (is_auth exige un compte connu : on fixe le jeu d utilisateurs)
+    _appLV = _wLV.create_app()
+    _appLV.config["TESTING"] = True
+    _savUsersLV = _wLV._load_web_users
+    _wLV._load_web_users = lambda: {"admin": {"role": "admin", "password": "x"}}
+    _cLV = _appLV.test_client()
+    with _cLV.session_transaction() as _sLV:
+        _sLV["auth"] = True
+        _sLV["username"] = "admin"
+        _sLV["role"] = "admin"
+    _htmlLV = _cLV.get("/").get_data(as_text=True)
+    check("la page affiche l heure du releve MyPuls", "id='sfs-maj-info'" in _htmlLV and "function sfsMajInfo(" in _htmlLV)
+    check("la page relit le serveur toutes les 5 min (MyM et OF)",
+          "loadOfQueue(false); }, 300000);" in _htmlLV)
+    check("le Bilan ouvert se met a jour quand les pushs MyM arrivent",
+          "sfsMajInfo('MYM', j.ts);" in _htmlLV and _htmlLV.count("renderSfsBilan();") >= 2)
+    _wLV._load_web_users = _savUsersLV
+except Exception as _eLV:
+    check("planning SFS a jour sans clic : testable", False, repr(_eLV)[:160])
 
 print()
 print("=" * 70)

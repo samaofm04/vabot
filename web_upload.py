@@ -25790,12 +25790,23 @@ OF_PUSHS_FILE = DATA_DIR / "of_pushs.json"
 
 
 def _load_of_pushs() -> dict:
-    """Charge les SFS/messages OF importés via HAR (lecture seule, jamais d'appel OnlyFans)."""
+    """Charge le relevé OnlyFans (file + envoyés, écrit par _collecter_file_of ;
+    ou par l'import HAR de secours).
+
+    Un fichier illisible n'est PAS « pas de fichier » : le calendrier OF
+    s'ouvrirait vide sans qu'on sache pourquoi, et le filet « dernier bon
+    état » n'aurait rien à resservir. On le dit (journal + `cache_error`,
+    que la route remonte dans `errors`)."""
     try:
         if OF_PUSHS_FILE.exists():
-            return json.loads(OF_PUSHS_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        pass
+            d = json.loads(OF_PUSHS_FILE.read_text(encoding="utf-8"))
+            if not isinstance(d, dict):
+                raise ValueError(f"forme inattendue : {type(d).__name__}")
+            return d
+    except Exception as e:
+        print(f"[of_queue] cache {OF_PUSHS_FILE} illisible : {e}", flush=True)
+        return {"items": [], "counters": {}, "imported_at": 0,
+                "cache_error": f"cache OF illisible : {str(e)[:120]}"}
     return {"items": [], "counters": {}, "imported_at": 0}
 
 
@@ -25846,6 +25857,278 @@ def _parse_of_har(har: dict) -> dict:
                     "text": txt[:600],
                 })
     return {"items": items, "counters": counters}
+
+
+SFS_PUSHS_CACHE = DATA_DIR / "sfs_pushs_cache.json"
+
+
+def _collecter_pushs_mym(force: bool = False) -> dict:
+    """Push MyPuls (messages de masse) des modèles SFS MyM, pour le calendrier.
+    Source : /pushs/page/N par créatrice, paginé jusqu'à couvrir ~3 mois (le
+    calendrier permet de remonter les mois).
+
+    MÉMOIRE : le dernier résultat est persisté (SFS_PUSHS_CACHE) et resservi
+    < 30 min ; `force` relit MyPuls. La route /sfssetup/mypuls_pushes ET le
+    cycle de fond (_sfs_live_cycle) appellent CETTE fonction : un seul
+    endroit décide de ce qui remplit le calendrier.
+
+    Rend le dict que la route sert tel quel : {ok, pushs, cached?, stale?,
+    note?, truncated?, ts, error?} — `ts` = heure du relevé servi."""
+    _cache_f = SFS_PUSHS_CACHE
+    if not force:
+        try:
+            _blob = json.loads(_cache_f.read_text(encoding="utf-8"))
+            if time.time() - float(_blob.get("ts") or 0) < 1800:
+                return {"ok": True, "pushs": _blob.get("pushs") or [],
+                        "cached": True, "ts": _blob.get("ts")}
+        except Exception:
+            pass
+    try:
+        import mypuls
+    except Exception as e:
+        return {"ok": False, "error": f"Module indispo : {e}"}
+    try:
+        if not mypuls.is_configured():
+            return {"ok": False, "error": "MyPuls non configuré (cookies)"}
+        cr = mypuls.list_creators()
+        creators = cr.get("creators") or {}  # {name: id}
+        name_to_id = {str(k).lower().strip(): v for k, v in creators.items()}
+        idents = _sfssetup_identities("mym")
+        targets, seen = [], set()  # [(ident, label, cid)]
+        for ident in idents:
+            model = (mypuls.get_model_for_identity(ident) or ident).strip()
+            cid = name_to_id.get(model.lower()) or name_to_id.get(ident.lower().strip())
+            if cid is None or cid in seen:
+                continue
+            seen.add(cid)
+            targets.append((ident, model or ident, cid))
+        if not targets:
+            return {"ok": True, "pushs": [], "ts": time.time(),
+                    "note": "Aucun créateur MyPuls résolu pour les identités SFS"}
+        # au passage : compteurs d'abonnés du Setup rafraîchis si périmés
+        # (TTL interne) — le tri par abonnés de la sidebar reste à jour
+        # sans que l'utilisateur clique quoi que ce soit
+        try:
+            import sfs_setup as _sfs_auto
+            _sfs_auto.autofill_mypuls_if_stale()
+        except Exception:
+            pass
+        all_pushs = []
+        for ident, label, cid in targets:
+            # Avant : max_pages=1 -> seulement la 1re page (les plus recents),
+            # les jours plus anciens du mois restaient VIDES sans prevenir.
+            # Desormais on pagine jusqu'a couvrir 92 jours (mois courant + 2),
+            # borne de securite a 25 pages par creatrice.
+            res = mypuls.list_pushs(cid, max_pages=25, days=92)
+            if not res.get("ok"):
+                continue
+            for p in res.get("pushs", []):
+                p2 = dict(p)
+                p2["creator"] = label
+                p2["identity"] = ident
+                # tronque : 2000 pushs x descriptions longues feraient sauter
+                # le quota sessionStorage cote navigateur (~5 Mo)
+                p2["description"] = (p2.get("description") or "")[:600]
+                all_pushs.append(p2)
+        import datetime as _dt
+
+        def _key(p):
+            try:
+                return _dt.datetime.strptime(p.get("sentAt", ""), "%d/%m/%Y %H:%M")
+            except Exception:
+                return _dt.datetime.min
+
+        all_pushs.sort(key=_key, reverse=True)
+        # 2000 et pas 200 : a 200 on ETAIT au plafond (l'ecran affichait
+        # pile '200 push au total') et les plus anciens etaient jetes.
+        if not all_pushs:
+            # collecte vide (cookies morts ?) -> ressert la dernière bonne
+            # version plutôt qu'un calendrier soudainement vide
+            try:
+                _blob = json.loads(_cache_f.read_text(encoding="utf-8"))
+                if _blob.get("pushs"):
+                    return {"ok": True, "pushs": _blob["pushs"], "cached": True,
+                            "stale": True, "ts": _blob.get("ts")}
+            except Exception:
+                pass
+        else:
+            try:
+                safe_json.write_text(_cache_f, json.dumps(
+                    {"ts": time.time(), "pushs": all_pushs[:2000]},
+                    ensure_ascii=False))
+            except Exception:
+                pass
+        return {"ok": True, "pushs": all_pushs[:2000], "ts": time.time(),
+                "truncated": len(all_pushs) > 2000}
+    except Exception as e:
+        return {"ok": False, "error": f"Erreur : {e}"}
+
+
+def _collecter_file_of(force: bool = False) -> dict:
+    """File d'attente + messages de masse envoyés OnlyFans (= les push SFS OF)
+    des créatrices OnlyFans, lus via l'accès OF de MyPuls (mypuls.of_queue_all).
+    Remplace l'import HAR manuel comme source de data/of_pushs.json — le HAR
+    reste un secours et écrit le même fichier (source « har »).
+
+    MÉMOIRE : même règle que les push MyM — dernier relevé resservi < 30 min,
+    `force` relit en direct. Un échec total est mémorisé lui aussi
+    (`last_attempt`) : sinon, cookies morts, chaque ouverture de page
+    relançait 6 × (switch + users/me) sur MyPuls.
+
+    Une créatrice en échec garde ses messages du relevé précédent (marqués
+    `stale`) — mais seulement ceux de la LECTURE ratée (file ou envoyés) :
+    si seul l'historique a échoué, sa file fraîche fait foi et un message
+    qu'elle a supprimé depuis ne revient pas. Rien n'est écrasé par du vide :
+    un relevé vide alors qu'un bon existait est resservi périmé, et dit.
+    La route /sfssetup/of_queue ET le cycle de fond appellent cette fonction."""
+
+    def _reply(blob, **extra):
+        errs = list(blob.get("errors") or [])
+        if blob.get("cache_error"):
+            errs.append(blob["cache_error"])
+        out = {"ok": True, "items": len(blob.get("items") or []),
+               "dates": len(blob.get("counters") or {}),
+               "data": {"items": blob.get("items") or [],
+                        "counters": blob.get("counters") or {}},
+               "creators": blob.get("creators") or [],
+               "errors": errs,
+               "ts": blob.get("imported_at")}
+        out.update(extra)
+        return out
+
+    prev = _load_of_pushs()
+    if not force:
+        frais = max(float(prev.get("imported_at") or 0), float(prev.get("last_attempt") or 0))
+        if prev.get("source") in ("live", "har") and time.time() - frais < 1800:
+            return _reply(prev, cached=True, stale=bool(prev.get("last_attempt")))
+    try:
+        import mypuls
+        res = mypuls.of_queue_all()
+    except Exception as e:
+        res = {"ok": False, "error": f"Erreur : {e}"}
+    if not res.get("ok"):
+        # échec global : mémorisé pour 30 min, et le dernier bon état resservi
+        if prev.get("items"):
+            prev["last_attempt"] = int(time.time())
+            prev.setdefault("errors", [])
+            try:
+                safe_json.write_text(OF_PUSHS_FILE, json.dumps(prev, ensure_ascii=False, indent=2))
+            except Exception:
+                pass
+            return _reply(prev, cached=True, stale=True,
+                          errors=[str(res.get("error") or "lecture OF impossible")])
+        return {"ok": False, "error": res.get("error") or "lecture OF impossible"}
+    items = list(res.get("items") or [])
+    errors = list(res.get("errors") or [])
+    rows = list(res.get("creators") or [])
+    if not items and prev.get("items"):
+        # tout a échoué (cookies morts ?) ou relevé vide : dernier bon état,
+        # signalé périmé — jamais un calendrier vidé d'un coup sans un mot
+        prev["last_attempt"] = int(time.time())
+        try:
+            safe_json.write_text(OF_PUSHS_FILE, json.dumps(prev, ensure_ascii=False, indent=2))
+        except Exception:
+            pass
+        if not errors:
+            errors.append(f"relevé vide pour {len(rows)} créatrice(s) : dernier bon état conservé")
+        return _reply(prev, cached=True, stale=True, errors=errors)
+    # créatrices en échec : le dernier relevé de la LECTURE ratée reste
+    # affiché (marqué), plutôt que de disparaître du calendrier sans prévenir
+    failed_queue = {r.get("creator") for r in rows if not r.get("queue_ok")}
+    failed_hist = {r.get("creator") for r in rows if not r.get("history_ok")}
+    counters = dict(res.get("counters") or {})
+    kept = 0
+    have = {(it.get("creator"), it.get("id")) for it in items}
+    for it in prev.get("items") or []:
+        c = it.get("creator")
+        ratee = (c in failed_hist) if it.get("sent") else (c in failed_queue)
+        if ratee and (c, it.get("id")) not in have:
+            it2 = dict(it)
+            it2["stale"] = True
+            items.append(it2)
+            kept += 1
+            if not it2.get("sent") and it2.get("date") and it2.get("type") == "chat":
+                counters[it2["date"]] = counters.get(it2["date"], 0) + 1
+    if kept:
+        errors.append(f"{kept} message(s) d'un relevé précédent conservé(s)")
+    blob = {"items": items, "counters": counters, "imported_at": int(time.time()),
+            "source": "live", "creators": rows,
+            "errors": errors, "start": res.get("start"), "end": res.get("end")}
+    try:
+        OF_PUSHS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        safe_json.write_text(OF_PUSHS_FILE, json.dumps(blob, ensure_ascii=False, indent=2))
+    except Exception as e:
+        errors.append(f"cache non écrit : {e}")
+    return _reply(blob)
+
+
+def _sfs_live_cycle() -> dict:
+    """Un tour de mise à jour du planning SFS, sans clic :
+    1. « MAJ » MyPuls pour chaque créatrice — MyPuls resynchronise depuis
+       MyM, sans ça il sert des pushs figés tant qu'on ne clique pas ;
+    2. 150 s d'attente, le temps que MyPuls finisse ;
+    3. recollecte des pushs MyM et de la file + envoyés OnlyFans dans les
+       caches que la page lit (les mêmes fonctions que les routes) ;
+    4. SFS reçus (DM entrants).
+    Rend un bilan chiffré, imprimé dans le journal."""
+    import mypuls
+    bilan = {"maj": None, "mym": None, "of": None, "inbox": None}
+    if not mypuls.is_configured():
+        bilan["erreur"] = "Cookies MyPuls non configurés"
+        print("[sfs-live] pas de cookies MyPuls : tour sauté", flush=True)
+        return bilan
+    try:
+        r = mypuls.refresh_all_pushs()
+        bilan["maj"] = f"{r.get('reussites')}/{r.get('total')}"
+    except Exception as e:
+        bilan["maj"] = f"échec : {type(e).__name__}: {e}"
+    time.sleep(150)
+    m = _collecter_pushs_mym(force=True)
+    bilan["mym"] = len(m.get("pushs") or []) if m.get("ok") else f"échec : {m.get('error')}"
+    o = _collecter_file_of(force=True)
+    bilan["of"] = (f"{o.get('items')} messages, {len(o.get('errors') or [])} erreur(s)"
+                   if o.get("ok") else f"échec : {o.get('error')}")
+    try:
+        if mypuls.api_configured():
+            i = mypuls.api_sfs_inbox(force=True)
+            bilan["inbox"] = "ok" if i.get("ok") else f"échec : {i.get('error')}"
+    except Exception as e:
+        bilan["inbox"] = f"échec : {type(e).__name__}: {e}"
+    print(f"[sfs-live] MAJ MyPuls {bilan['maj']} · pushs MyM {bilan['mym']} · "
+          f"OnlyFans {bilan['of']} · reçus {bilan['inbox']}", flush=True)
+    return bilan
+
+
+SFS_LIVE_INTERVAL_S = 30 * 60
+
+
+def _start_sfs_live_daemon(interval_s: int = SFS_LIVE_INTERVAL_S) -> bool:
+    """Toutes les 30 min, un _sfs_live_cycle : le calendrier SFS est à jour
+    sans que personne ne clique « MAJ profils » puis « Sync ».
+
+    Remplace le job nocturne de 00h05 (mypuls.start_pushs_refresh_daily),
+    qui ne faisait qu'un tour par jour : le reste de la journée MyPuls servait
+    des pushs figés et la page un cache d'une demi-heure — d'où « faut tout
+    le temps mettre à jour ». Premier tour 90 s après le démarrage, le temps
+    que le site se lève. Un seul démon par processus."""
+    import threading
+    if getattr(_start_sfs_live_daemon, "_started", False):
+        return False
+    _start_sfs_live_daemon._started = True
+
+    def _loop():
+        time.sleep(90)
+        while True:
+            try:
+                _sfs_live_cycle()
+            except Exception as e:
+                print(f"[sfs-live] {type(e).__name__}: {e}", flush=True)
+            time.sleep(max(300, int(interval_s)))
+
+    threading.Thread(target=_loop, daemon=True, name="sfs-live").start()
+    print(f"[sfs-live] mise à jour automatique du planning SFS armée "
+          f"(toutes les {int(interval_s) // 60} min)", flush=True)
+    return True
 
 
 def _render_sfs_html() -> str:
@@ -25956,7 +26239,15 @@ def _render_sfs_html() -> str:
         pass
     ident_model_of_json = _json.dumps(_ident_model_of)
     # SFS OnlyFans importés via HAR (lecture seule)
-    of_pushs_json = _json.dumps(_load_of_pushs())
+    # Le relevé est incrusté SANS ses messages : compteurs, créatrices, heure
+    # et erreurs suffisent au premier rendu, loadOfQueue(false) apporte les
+    # messages depuis la mémoire serveur (~50 ms). Avant, ~900 messages × 600
+    # caractères partaient dans CHAQUE page du tableau de bord, puis étaient
+    # retéléchargés aussitôt. Et « </ » est protégé : un message OF contenant
+    # </script> fermerait le script de toute la page SFS (piège n°1 du projet).
+    _of_blob = dict(_load_of_pushs())
+    _of_blob["items"] = []
+    of_pushs_json = _json.dumps(_of_blob).replace("</", "<\\/")
 
     # Lire le mois depuis l'URL (?sfs_month=YYYY-MM) ou prendre le mois courant
     from flask import request as flask_request
@@ -26184,6 +26475,11 @@ def _render_sfs_html() -> str:
         "<div id='sfs-pushs-panel' style='background:#161616;border:1px solid #232323;border-radius:14px;padding:16px;margin-bottom:18px'>"
         "<div style='display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap'>"
         "<h3 id='sfs-pushs-title' style='margin:0;font-size:15px;font-weight:800'>SFS Planning</h3>"
+        # heure du relevé MyPuls servi : la page se rafraîchit toute seule (le
+        # serveur relit MyPuls toutes les 30 min, la page relit le serveur
+        # toutes les 5 min) — sans cette heure, impossible de savoir si ce
+        # qu'on regarde est à jour
+        "<span id='sfs-maj-info' title='Heure du dernier relevé MyPuls servi. Mis à jour tout seul : MyPuls toutes les 30 min, la page toutes les 5 min.' style='font-size:11px;color:#667;margin-left:10px'></span>"
         # Un SEUL bouton « Actions » -> menu déroulant avec toutes les commandes
         # (Sync, MAJ profils, cookies HAR, import OF) : demande utilisateur,
         # la rangée de 3 boutons prenait trop de place
@@ -26308,65 +26604,79 @@ def _render_sfs_html() -> str:
         "  else if(dmy.length===3){ d=new Date(+dmy[2],+dmy[1]-1,+dmy[0]); }"
         "  return (d && !isNaN(d.getTime()))?d:null;"
         "}"
-        # Une ligne par compte : n SFS sur 14 j + ancienneté du dernier.
-        # `names` = tous les comptes de la plateforme, pour qu'un compte SANS
-        # aucun SFS sorte en rouge au lieu de disparaître.
-        "function sfsBilanRows(names, entries){"
+        # numéro de jour calendaire : compter en jours, pas en millisecondes —
+        # à la bascule d'heure d'octobre, 2 jours faisaient « 3 » et un SFS
+        # sortait de la fenêtre pendant une heure chaque soir
+        "function sfsDayNum(d){ return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())/86400000); }"
+        # Une ligne par compte : n SFS sur 14 jours calendaires + ancienneté du
+        # dernier. `names` = tous les comptes de la plateforme, pour qu'un
+        # compte SANS aucun SFS sorte en rouge au lieu de disparaître ;
+        # `failed` = {compte: erreur} dont la LECTURE a échoué : ligne ⚠, pas
+        # « jamais » (on ne sait pas, ce n'est pas la même chose).
+        "function sfsBilanRows(names, entries, failed){"
         "  var stats={}; (names||[]).forEach(function(n){ stats[n]={n14:0,last:null}; });"
-        "  var now=new Date(); var cut=new Date(now.getTime()-14*86400000);"
+        "  var today=sfsDayNum(new Date());"
         "  entries.forEach(function(e){"
         "    var c=e.c||'?'; if(!stats[c]) stats[c]={n14:0,last:null};"
-        "    if(e.d>=cut) stats[c].n14++;"
-        "    if(!stats[c].last||e.d>stats[c].last) stats[c].last=e.d;"
+        "    var dn=sfsDayNum(e.d); if(today-dn>=0 && today-dn<14) stats[c].n14++;"
+        "    if(stats[c].last===null||dn>stats[c].last) stats[c].last=dn;"
         "  });"
         "  var rows=Object.keys(stats).map(function(c){"
         "    var v=stats[c];"
-        "    var since=v.last?Math.floor((now-v.last)/86400000):null;"
-        "    var etat=(since===null||since>4)?2:(since>2?1:0);"
-        "    return {c:c,n:v.n14,since:since,etat:etat};"
+        "    var since=(v.last===null)?null:Math.max(0,today-v.last);"
+        "    var err=(failed&&failed[c])||'';"
+        "    var etat=err?3:((since===null||since>4)?2:(since>2?1:0));"
+        "    return {c:c,n:v.n14,since:since,etat:etat,err:err};"
         "  });"
         "  rows.sort(function(a,b){ return (b.etat-a.etat)||((b.since===null?999:b.since)-(a.since===null?999:a.since))||(a.n-b.n); });"
         "  return rows;"
         "}"
-        "function sfsBilanBlock(title, color, rows){"
+        "function sfsBilanBlock(title, color, rows, notes){"
         "  var TARGET=7;"
         "  var okN=rows.filter(function(r){ return r.etat===0; }).length;"
         "  var totalSfs=rows.reduce(function(s,r){ return s+r.n; },0);"
-        "  var retards=rows.filter(function(r){ return r.etat>0; });"
+        "  var retards=rows.filter(function(r){ return r.etat===1||r.etat===2; });"
+        "  var echecs=rows.filter(function(r){ return r.etat===3; });"
         "  var h='<div style=\"display:flex;align-items:center;gap:8px;margin:4px 0 8px\"><span style=\"width:9px;height:9px;border-radius:50%;background:'+color+';display:inline-block\"></span><b style=\"color:#dde;font-size:13px\">'+title+'</b><span style=\"color:#667;font-size:11px\">'+rows.length+' compte(s)</span></div>';"
         "  h+='<div style=\"display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px\">'"
         "    +'<div style=\"background:#101018;border:1px solid #262636;border-radius:9px;padding:9px 14px\"><b style=\"font-size:16px;color:'+(retards.length?'#ef4444':'#22c55e')+'\">'+retards.length+'</b> <span style=\"color:#889\">compte(s) en retard</span></div>'"
         "    +'<div style=\"background:#101018;border:1px solid #262636;border-radius:9px;padding:9px 14px\"><b style=\"font-size:16px;color:#22c55e\">'+okN+'</b> <span style=\"color:#889\">dans les clous</span></div>'"
-        "    +'<div style=\"background:#101018;border:1px solid #262636;border-radius:9px;padding:9px 14px\"><b style=\"font-size:16px;color:#93c5fd\">'+totalSfs+'</b> <span style=\"color:#889\">SFS sur 14 j · objectif '+(TARGET*rows.length)+'</span></div>'"
+        "    +'<div style=\"background:#101018;border:1px solid #262636;border-radius:9px;padding:9px 14px\"><b style=\"font-size:16px;color:#93c5fd\">'+totalSfs+'</b> <span style=\"color:#889\">SFS sur 14 j · objectif '+(TARGET*(rows.length-echecs.length))+'</span></div>'"
+        "    +(echecs.length?('<div style=\"background:#101018;border:1px solid #262636;border-radius:9px;padding:9px 14px\"><b style=\"font-size:16px;color:#f59e0b\">'+echecs.length+'</b> <span style=\"color:#889\">lecture(s) en échec</span></div>'):'')"
         "    +'</div>';"
+        "  (notes||[]).forEach(function(n){ h+='<div style=\"color:#f59e0b;font-size:11.5px;margin:0 0 8px\">⚠ '+sfsEsc(n)+'</div>'; });"
         "  rows.forEach(function(r){"
-        "    var ic=r.etat===0?'🟢':(r.etat===1?'🟠':'🔴');"
+        "    var ic=r.etat===0?'🟢':(r.etat===1?'🟠':(r.etat===2?'🔴':'⚠'));"
         "    var lastTxt=(r.since===null)?'jamais':(r.since===0?'aujourd hui':('il y a '+r.since+' j'));"
         "    var defi=Math.max(0,TARGET-r.n);"
         "    h+='<div style=\"display:flex;align-items:center;gap:10px;background:#101018;border:1px solid #232330;border-left:3px solid '+color+';border-radius:8px;padding:8px 12px;margin-bottom:6px\">'"
         "      +'<span>'+ic+'</span>'"
         "      +'<span style=\"font-weight:700;color:#dde;min-width:130px\">'+sfsEsc(r.c)+'</span>'"
-        "      +'<span style=\"color:#889\">dernier SFS : <b style=\"color:'+(r.etat===0?'#22c55e':(r.etat===1?'#f59e0b':'#ef4444'))+'\">'+lastTxt+'</b></span>'"
-        "      +'<span style=\"margin-left:auto;color:#889\">'+r.n+'/'+TARGET+' sur 14 j'+(defi?(' · <b style=\"color:#f59e0b\">−'+defi+'</b>'):'')+'</span>'"
+        "      +(r.etat===3?('<span style=\"color:#f59e0b\">lecture en échec : '+sfsEsc(r.err)+'</span>')"
+        "        :('<span style=\"color:#889\">dernier SFS : <b style=\"color:'+(r.etat===0?'#22c55e':(r.etat===1?'#f59e0b':'#ef4444'))+'\">'+lastTxt+'</b></span>'"
+        "          +'<span style=\"margin-left:auto;color:#889\">'+r.n+'/'+TARGET+' sur 14 j'+(defi?(' · <b style=\"color:#f59e0b\">−'+defi+'</b>'):'')+'</span>'))"
         "      +'</div>';"
         "  });"
         "  return h;"
         "}"
-        # MyM : pushs MyPuls (sentAt JJ/MM/AAAA, règle historique « un @ »).
-        # OnlyFans : messages de masse ENVOYÉS (marqués sent, date déjà en
-        # heure de Paris) ; un lien onlyfans.com compte comme un @. La file à
-        # venir ne compte pas : un SFS programmé n'est pas un SFS fait.
+        # MyM : pushs MyPuls (sentAt JJ/MM/AAAA). OnlyFans : messages de masse
+        # ENVOYÉS (marqués sent, date déjà en heure de Paris). UNE règle pour
+        # les deux, la même que le calendrier et le panneau du jour :
+        # isSfsPush (un @ ou un lien mym.fans / onlyfans.com). La file à venir
+        # ne compte pas : un SFS programmé n'est pas un SFS fait.
         "function renderSfsBilan(){"
         "  var out=document.getElementById('sfs-bilan-content'); if(!out) return;"
         "  var ps=window.__sfsPushCache||[];"
         "  var mym=[];"
         "  ps.forEach(function(x){"
-        "    if(!/@[a-z0-9_.]/i.test(x.description||'')) return;"
+        "    if(!isSfsPush(x.description||'')) return;"
         "    var d=sfsParseDmy(x.sentAt); if(!d) return;"
         "    mym.push({c:x.creator||'?', d:d});"
         "  });"
         "  var od=window.__ofPushData||{};"
         "  var ofNames=(od.creators||[]).map(function(c){ return c.creator; }).filter(Boolean);"
+        "  var ofFailed={}; (od.creators||[]).forEach(function(c){ if(c.error && c.creator) ofFailed[c.creator]=c.error; });"
+        "  var ofNotes=(od.errors||[]).filter(function(e){ var p=String(e).split(':')[0].trim(); return !ofFailed[p]; });"
         "  var of=[];"
         "  (od.items||[]).forEach(function(it){"
         "    if(!it.sent||!it.date||!isSfsPush(it.text)) return;"
@@ -26374,9 +26684,9 @@ def _render_sfs_html() -> str:
         "    of.push({c:it.creator||'?', d:new Date(+p[0],+p[1]-1,+p[2])});"
         "  });"
         "  var h='';"
-        "  if(ps.length){ h+=sfsBilanBlock('MyM', '#f59e0b', sfsBilanRows(window.__mypulsCreators||[], mym)); }"
+        "  if(ps.length){ h+=sfsBilanBlock('MyM', '#f59e0b', sfsBilanRows(window.__mypulsCreators||[], mym, {}), []); }"
         "  else { h+='<div style=\"color:#889;margin-bottom:12px\">MyM : aucune donnée — fais un ↻ Sync MyPuls (menu ⚙ Actions).</div>'; }"
-        "  if(ofNames.length||of.length){ h+=sfsBilanBlock('OnlyFans', '#0099ff', sfsBilanRows(ofNames, of)); }"
+        "  if(ofNames.length||of.length){ h+=sfsBilanBlock('OnlyFans', '#0099ff', sfsBilanRows(ofNames, of, ofFailed), ofNotes); }"
         "  else { h+='<div style=\"color:#889\">OnlyFans : aucune donnée — fais un ↻ Sync file d’attente OnlyFans (menu ⚙ Actions).</div>'; }"
         "  out.innerHTML=h;"
         "}"
@@ -26539,6 +26849,13 @@ def _render_sfs_html() -> str:
         "  var hint=zone.querySelector('.proof-hint'); if(hint){ hint.textContent='✓ '+input.files[0].name; hint.style.color='#22c55e'; }"
         "  zone.classList.add('filled'); zone.style.borderColor='#22c55e';"
         "}"
+        "function sfsMajInfo(plat, ts){"
+        "  window.__sfsMaj=window.__sfsMaj||{}; if(ts) window.__sfsMaj[plat]=ts;"
+        "  var el=document.getElementById('sfs-maj-info'); if(!el) return;"
+        "  function hm(t){ var d=new Date(t*1000); return (d.getHours()<10?'0':'')+d.getHours()+':'+(d.getMinutes()<10?'0':'')+d.getMinutes(); }"
+        "  var parts=[]; if(window.__sfsMaj.MYM) parts.push('MyM '+hm(window.__sfsMaj.MYM)); if(window.__sfsMaj.OF) parts.push('OnlyFans '+hm(window.__sfsMaj.OF));"
+        "  el.textContent=parts.length?('relevé MyPuls : '+parts.join(' · ')):'';"
+        "}"
         "async function loadSfsPushes(force){"
         "  const box=document.getElementById('sfs-pushs-list'); if(!box) return;"
         "  if(force){ box.style.display=''; box.innerHTML='◌ Synchro MyPuls…'; }"
@@ -26551,6 +26868,8 @@ def _render_sfs_html() -> str:
         "    window.__sfsPushCache=ps;"
         "    try{ sessionStorage.setItem('sfsPushCache', JSON.stringify(ps)); }catch(e){}"
         "    renderSfsPushes();"
+        "    sfsMajInfo('MYM', j.ts);"
+        "    var bp2=document.getElementById('sfs-bilan-panel'); if(bp2 && bp2.style.display==='block' && typeof renderSfsBilan==='function') renderSfsBilan();"
         # succès : pas de phrase de recap, la ligne de statut se replie
         "    if(force && !ps.length && j.note){ box.style.display=''; box.innerHTML=j.note; }"
         "  }catch(err){ if(force){ box.style.display=''; box.innerHTML='✕ '+err; } }"
@@ -26576,9 +26895,11 @@ def _render_sfs_html() -> str:
         "  try{"
         "    var r=await fetch('/sfssetup/import_of_har',{method:'POST',body:fd}); var j=await r.json();"
         "    if(!j.ok){ if(box) box.innerHTML='✕ '+(j.error||'Erreur'); return; }"
-        "    window.__ofPushData=j.data||window.__ofPushData;"
+        "    if(j.data){ window.__ofPushData=Object.assign({}, window.__ofPushData||{}, j.data, {creators:j.creators||(window.__ofPushData||{}).creators||[], errors:j.errors||[]}); }"
+        "    window.__ofStatusHtml='✓ Import OK : '+j.items+' message(s) importé(s).';"
         "    if(typeof renderSfsPushes==='function') renderSfsPushes();"
-        "    if(box){ box.style.display=''; box.innerHTML='✓ Import OK : '+j.items+' message(s) importé(s).'; }"
+        "    var bph=document.getElementById('sfs-bilan-panel'); if(bph && bph.style.display==='block' && typeof renderSfsBilan==='function') renderSfsBilan();"
+        "    sfsMajInfo('OF', j.ts);"
         "  }catch(e){ if(box) box.innerHTML='✕ '+e; }"
         "}"
         "function renderOfPushes(){"
@@ -26602,7 +26923,7 @@ def _render_sfs_html() -> str:
         "    var cell=cells[d]; if(!cell) return; var bars=cell.querySelector('.sfs-day-bars'); if(!bars) return;"
         "    var list=byDate[d];"
         "    var bar=document.createElement('div'); bar.className='sfs-push-bar';"
-        "    bar.title=list.length+' message(s) programmé(s) — '+list.map(function(x){ return (x.sent?'✓ ':'')+(x.time||'')+(x.creator?(' '+x.creator):''); }).slice(0,5).join(' · ')+(list.length>5?' …':'');"
+        "    bar.title=list.length+' message(s) (✓ = envoyé) — '+list.map(function(x){ return (x.sent?'✓ ':'')+(x.time||'')+(x.creator?(' '+x.creator):''); }).slice(0,5).join(' · ')+(list.length>5?' …':'');"
         "    bar.style.cssText='background:#0099ff;color:#04121f;font-size:10px;font-weight:800;padding:2px 6px;border-radius:4px;display:flex;align-items:center;gap:5px;cursor:pointer';"
         "    var n=document.createElement('span'); n.style.cssText='background:rgba(0,0,0,.5);color:#7dd3fc;border-radius:3px;padding:0 5px;line-height:14px'; n.textContent=list.length;"
         "    bar.appendChild(n);"
@@ -26624,44 +26945,48 @@ def _render_sfs_html() -> str:
         "  }"
         # ligne de statut : rien hors synchro ; seuls les messages SANS date
         # restent listés (sinon ils seraient invisibles)
+        # la ligne de statut porte les erreurs par créatrice et « relevé
+        # périmé » : le rendu la REPOSE (window.__ofStatusHtml) au lieu de
+        # l'effacer — sinon le rendu MyM, lancé en même temps toutes les
+        # 5 min, la faisait disparaître avant qu'on l'ait lue
         "  var box=document.getElementById('sfs-pushs-list');"
         "  if(box){"
-        "    box.innerHTML='';"
+        "    box.innerHTML=window.__ofStatusHtml||'';"
         "    if(undated.length){"
         "      box.style.display='';"
         "      undated.forEach(function(u){"
         "        var d2=document.createElement('div'); d2.style.cssText='margin-top:6px;background:rgba(0,153,255,.1);border-left:3px solid #0099ff;border-radius:4px;padding:5px 8px;font-size:11px;color:#9fd3ff;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';"
         "        d2.textContent='📨 (sans date'+(u.time?(' · '+u.time):'')+') '+(u.text||''); d2.title=u.text||'';"
-        "        d2.onclick=function(){ addSfsFromOf(new Date().toISOString().slice(0,10), u); };"
+        "        d2.onclick=function(){ addSfsFromOf(sfsLocalDay(), u); };"
         "        box.appendChild(d2);"
         "      });"
-        "    } else { box.style.display='none'; }"
+        "    } else { box.style.display=box.innerHTML?'':'none'; }"
         "  }"
         "}"
         # Lecture live de la file d'attente OF (toutes créatrices) : au chargement
         # (cache serveur 30 min) et via ⚙ Actions (force). Les erreurs par
         # créatrice sont affichées, jamais avalées.
+        "function sfsLocalDay(){ var n=new Date(); return n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0')+'-'+String(n.getDate()).padStart(2,'0'); }"
         "async function loadOfQueue(force){"
         "  var box=document.getElementById('sfs-pushs-list');"
         "  if(force && box){ box.style.display=''; box.innerHTML='◌ Lecture de la file OnlyFans (via MyPuls)…'; }"
         "  try{"
         "    var r=await fetch('/sfssetup/of_queue'+(force?'?refresh=1':'')); var j=await r.json();"
-        "    if(!j.ok){ if(force && box){ box.style.display=''; box.innerHTML='✕ '+(j.error||'Erreur'); } return; }"
+        # échec global : dit aussi hors clic (sinon la page gardait un relevé
+        # embarqué vieux de plusieurs jours sans un mot)
+        "    if(!j.ok){ window.__ofStatusHtml='✕ OnlyFans : '+sfsEsc(j.error||'Erreur'); if(typeof renderSfsPushes==='function') renderSfsPushes(); return; }"
         # j.data = {items, counters} ; la liste des créatrices voyage à part et
         # le Bilan SFS en a besoin (une créatrice sans aucun SFS doit sortir en
-        # rouge, pas disparaître)
-        "    if(j.data){ window.__ofPushData=Object.assign({}, j.data, {creators:j.creators||[], errors:j.errors||[]}); }"
-        "    if(typeof renderSfsPushes==='function') renderSfsPushes();"
-        "    var bp=document.getElementById('sfs-bilan-panel'); if(bp && bp.style.display==='block' && typeof renderSfsBilan==='function') renderSfsBilan();"
-        "    if(typeof selectSfsDay==='function' && window.__selectedSfsDate && window.__currentSfsPlatform==='OF') selectSfsDay(window.__selectedSfsDate);"
+        # rouge, une créatrice en échec de lecture en ⚠, pas disparaître)
+        "    if(j.data){ window.__ofPushData=Object.assign({}, j.data, {creators:j.creators||[], errors:j.errors||[], ts:j.ts||0}); }"
         "    var errs=j.errors||[];"
-        "    if(box && (force || errs.length || j.stale)){"
-        "      var per=(j.creators||[]).map(function(c){ return c.creator+' '+c.count+' à venir / '+(c.sent||0)+' envoyés'+(c.canceled?(' ('+c.canceled+' annulés)'):''); }).join(' · ');"
-        "      box.style.display='';"
-        "      box.innerHTML=(j.stale?'⚠ Relevé OnlyFans périmé (dernier bon état resservi)':('✓ '+(j.items||0)+' message(s) OnlyFans programmé(s)'+(per?(' — '+per):'')))"
-        "        +(errs.length?('<div style=\"color:#f59e0b;margin-top:4px\">'+errs.map(sfsEsc).join('<br>')+'</div>'):'');"
-        "    }"
-        "  }catch(err){ if(force && box){ box.style.display=''; box.innerHTML='✕ '+err; } }"
+        "    var per=(j.creators||[]).map(function(c){ return (c.error?'⚠ ':'')+c.creator+' '+c.count+' à venir / '+(c.sent||0)+' envoyés'+(c.canceled?(' ('+c.canceled+' à 0 envoi)'):''); }).join(' · ');"
+        "    window.__ofStatusHtml=(force||errs.length||j.stale)?((j.stale?'⚠ Relevé OnlyFans périmé (dernier bon état resservi)':('✓ '+(j.items||0)+' message(s) OnlyFans'+(per?(' — '+per):'')))+(errs.length?('<div style=\"color:#f59e0b;margin-top:4px\">'+errs.map(sfsEsc).join('<br>')+'</div>'):'')):'';"
+        "    if(typeof renderSfsPushes==='function') renderSfsPushes();"
+        "    if(typeof selectSfsDay==='function' && window.__selectedSfsDate && window.__currentSfsPlatform==='OF') selectSfsDay(window.__selectedSfsDate);"
+        "    var bp=document.getElementById('sfs-bilan-panel'); if(bp && bp.style.display==='block' && typeof renderSfsBilan==='function') renderSfsBilan();"
+        "    sfsMajInfo('OF', j.ts);"
+        "  }catch(err){ window.__ofStatusHtml='✕ OnlyFans : '+sfsEsc(String(err)); if(typeof renderSfsPushes==='function') renderSfsPushes(); }"
         "}"
         "function sfsOfCardClick(i){ var l=window.__sfsDayOfPushes||[]; if(l[i]) addSfsFromOf(window.__selectedSfsDate||l[i].date, l[i]); }"
         "function addSfsFromOf(date, it){"
@@ -26686,6 +27011,10 @@ def _render_sfs_html() -> str:
         "  if(typeof renderSfsPushes==='function') renderSfsPushes();"
         "  if(typeof loadSfsPushes==='function') loadSfsPushes(false);"
         "  if(typeof loadOfQueue==='function') loadOfQueue(false);"
+        # la page relit le serveur toutes les 5 min (mémoire 30 min côté
+        # serveur, elle-même rafraîchie par le cycle de fond) : plus besoin
+        # de recharger la page pour voir un push arrivé entre-temps
+        "  setInterval(function(){ if(typeof loadSfsPushes==='function') loadSfsPushes(false); if(typeof loadOfQueue==='function') loadOfQueue(false); }, 300000);"
         "  if(typeof loadSfsInbox==='function'){"
         "    loadSfsInbox(false);"
         "    setInterval(function(){ loadSfsInbox(false); }, 180000);"
@@ -50723,13 +51052,14 @@ def create_app():
         _mp_inbox.start_sfs_inbox_poller(300)
     except Exception as _e:
         log.warning(f"sfs-inbox poller non démarré: {_e}")
-    # Chaque nuit à 00h05 : « clic » MAJ des pushs MyPuls pour chaque créatrice
-    # (sans ça, MyPuls sert des pushs figés tant qu'on ne clique pas le bouton)
+    # Toutes les 30 min : « clic » MAJ MyPuls pour chaque créatrice, puis
+    # recollecte MyM + OnlyFans + SFS reçus — le planning SFS est à jour sans
+    # clic. Avant : un seul tour par nuit (00h05), et le reste de la journée
+    # MyPuls servait des pushs figés.
     try:
-        import mypuls as _mp_rf
-        _mp_rf.start_pushs_refresh_daily(0, 5)
+        _start_sfs_live_daemon()
     except Exception as _e:
-        log.warning(f"refresh-pushs nocturne non démarré: {_e}")
+        log.warning(f"sfs-live non démarré: {_e}")
     # Ventes des chatteurs -> Google Sheet, toutes les 5 min. Ne fait rien
     # tant qu'aucun classeur n'est configure : la boucle verifie a chaque tour.
     try:
@@ -59242,23 +59572,17 @@ def create_app():
         import threading
 
         def _run():
+            # le même tour que le démon de 30 min : MAJ, attente, recollecte
+            # MyM + OF, SFS reçus — la page se met à jour toute seule ensuite
             try:
-                import mypuls
-                r = mypuls.refresh_all_pushs()
-                print(f"[refresh-pushs] manuel: {r.get('reussites')}/{r.get('total')} "
-                      f"détail={r.get('detail')}", flush=True)
-                import time as _t
-                _t.sleep(120)
-                if mypuls.api_configured():
-                    mypuls.api_sfs_inbox(force=True)
+                _sfs_live_cycle()
             except Exception as e:
                 print(f"[refresh-pushs] manuel: {e}", flush=True)
 
         threading.Thread(target=_run, daemon=True).start()
         return jsonify({"ok": True,
                         "message": "Rafraîchissement lancé pour toutes les créatrices "
-                                   "(~1 min). Vérifie l'heure « MAJ » sur MyPuls dans "
-                                   "2-3 min, puis relance un Sync MyPuls sur la page SFS."})
+                                   "(~3 min) ; le calendrier se met à jour tout seul."})
 
     @app.route("/mypuls/calendar_probe")
     def mypuls_calendar_probe():
@@ -60262,8 +60586,12 @@ def create_app():
 
     @app.route("/sfssetup/import_of_har", methods=["POST"])
     def sfssetup_import_of_har():
-        """Import HAR OnlyFans (lecture seule, zéro appel OF) : extrait les messages
-        programmés OF et les stocke pour affichage dans le calendrier SFS OF."""
+        """Import HAR OnlyFans de SECOURS (lecture seule, zéro appel OF) : la
+        file programmée lue dans un HAR onlyfans.com remplace la file du
+        relevé ; les messages ENVOYÉS et la liste des créatrices du dernier
+        relevé live sont conservés — sinon le Bilan OF retombait à « aucune
+        donnée » précisément quand le live est en panne. Source « har »,
+        servie 30 min comme un relevé live."""
         if not is_auth():
             from flask import jsonify
             return jsonify({"ok": False, "error": "unauth"}), 401
@@ -60278,84 +60606,33 @@ def create_app():
             return jsonify({"ok": False, "error": f"HAR illisible : {e}"})
         try:
             parsed = _parse_of_har(data)
-            parsed["imported_at"] = int(time.time())
+            prev = _load_of_pushs()
+            envoyes = [it for it in (prev.get("items") or []) if it.get("sent")]
+            blob = {"items": list(parsed.get("items") or []) + envoyes,
+                    "counters": parsed.get("counters") or {},
+                    "imported_at": int(time.time()), "source": "har",
+                    "creators": prev.get("creators") or [],
+                    "errors": ["import HAR : file à venir remplacée, "
+                               f"{len(envoyes)} message(s) envoyé(s) du dernier relevé live conservé(s)"]}
             OF_PUSHS_FILE.parent.mkdir(parents=True, exist_ok=True)
-            safe_json.write_text(OF_PUSHS_FILE, json.dumps(parsed, ensure_ascii=False, indent=2))
+            safe_json.write_text(OF_PUSHS_FILE, json.dumps(blob, ensure_ascii=False, indent=2))
         except Exception as e:
             return jsonify({"ok": False, "error": f"Erreur : {e}"})
         return jsonify({"ok": True, "items": len(parsed.get("items", [])),
                         "dates": len(parsed.get("counters", {})),
-                        "data": {"items": parsed.get("items", []), "counters": parsed.get("counters", {})}})
+                        "data": {"items": blob["items"], "counters": blob["counters"]},
+                        "creators": blob["creators"], "errors": blob["errors"],
+                        "ts": blob["imported_at"]})
 
     @app.route("/sfssetup/of_queue", methods=["GET"])
     def sfssetup_of_queue():
-        """File d'attente OnlyFans EN DIRECT : les messages programmés (= les
-        push SFS OF) des créatrices OnlyFans, lus via l'accès OF de MyPuls
-        (mypuls.of_queue_all). Remplace l'import HAR manuel comme source de
-        data/of_pushs.json — le HAR reste un secours et écrit le même fichier.
-
-        MÉMOIRE : même règle que les push MyM — dernier relevé resservi < 30 min,
-        ?refresh=1 force la lecture live. Une créatrice en échec garde ses
-        messages du relevé précédent (marqués `stale`) plutôt que de disparaître
-        du calendrier sans prévenir ; l'échec est nommé dans `errors`."""
+        """File d'attente + messages envoyés OnlyFans pour le calendrier et le
+        Bilan SFS. La collecte (mémoire 30 min, ?refresh=1, relevé précédent
+        conservé) vit dans _collecter_file_of, partagée avec le cycle de fond."""
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
-
-        def _reply(blob, **extra):
-            out = {"ok": True, "items": len(blob.get("items") or []),
-                   "dates": len(blob.get("counters") or {}),
-                   "data": {"items": blob.get("items") or [],
-                            "counters": blob.get("counters") or {}},
-                   "creators": blob.get("creators") or [],
-                   "errors": blob.get("errors") or []}
-            out.update(extra)
-            return jsonify(out)
-
-        prev = _load_of_pushs()
-        if not request.args.get("refresh"):
-            if prev.get("source") == "live" and \
-                    time.time() - float(prev.get("imported_at") or 0) < 1800:
-                return _reply(prev, cached=True)
-        try:
-            import mypuls
-            res = mypuls.of_queue_all()
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"Erreur : {e}"})
-        if not res.get("ok"):
-            return jsonify({"ok": False, "error": res.get("error") or "lecture OF impossible"})
-        items = list(res.get("items") or [])
-        errors = list(res.get("errors") or [])
-        if not items and errors and prev.get("items"):
-            # tout a échoué (cookies morts ?) -> dernier bon état, signalé périmé
-            return _reply(prev, cached=True, stale=True, errors=errors)
-        # créatrices en échec : leur dernier relevé reste affiché (marqué),
-        # plutôt que de les faire disparaître du calendrier sans prévenir
-        failed = {e.split(":", 1)[0].strip() for e in errors if ":" in e}
-        counters = dict(res.get("counters") or {})
-        kept = 0
-        # une créatrice peut n'avoir raté qu'une des deux lectures (file /
-        # envoyés) : on ne remet que ce qui n'est pas déjà dans le relevé frais
-        have = {(it.get("creator"), it.get("id")) for it in items}
-        for it in prev.get("items") or []:
-            if it.get("creator") in failed and (it.get("creator"), it.get("id")) not in have:
-                it2 = dict(it)
-                it2["stale"] = True
-                items.append(it2)
-                kept += 1
-                if it2.get("date") and it2.get("type") == "chat":
-                    counters[it2["date"]] = counters.get(it2["date"], 0) + 1
-        if kept:
-            errors.append(f"{kept} message(s) d'un relevé précédent conservé(s)")
-        blob = {"items": items, "counters": counters, "imported_at": int(time.time()),
-                "source": "live", "creators": res.get("creators") or [],
-                "errors": errors, "start": res.get("start"), "end": res.get("end")}
-        try:
-            OF_PUSHS_FILE.parent.mkdir(parents=True, exist_ok=True)
-            safe_json.write_text(OF_PUSHS_FILE, json.dumps(blob, ensure_ascii=False, indent=2))
-        except Exception as e:
-            errors.append(f"cache non écrit : {e}")
-        return _reply(blob)
+        return jsonify(_collecter_file_of(force=bool(request.args.get("refresh"))))
 
     @app.route("/sfssetup/sfs_inbox", methods=["GET"])
     def sfssetup_sfs_inbox():
@@ -60373,105 +60650,13 @@ def create_app():
 
     @app.route("/sfssetup/mypuls_pushes", methods=["GET"])
     def sfssetup_mypuls_pushes():
-        """Lecture seule : liste les push (messages de masse) envoyés sur MyPuls
-        pour les modèles SFS MyM. Source : /pushs/page/N par créateur, paginé
-        jusqu'à couvrir ~3 mois (le calendrier permet de remonter les mois).
-
-        MÉMOIRE : le dernier résultat est persisté sur disque et resservi
-        instantanément (< 30 min, ou ?refresh=1 pour forcer le live) — le
-        calendrier se remplit à l'ouverture du site sans cliquer Sync."""
-        if not is_auth():
-            from flask import jsonify
-            return jsonify({"ok": False, "error": "unauth"}), 401
+        """Lecture seule : les push MyPuls des modèles SFS MyM pour le
+        calendrier. La collecte (et sa mémoire 30 min, ?refresh=1 pour forcer)
+        vit dans _collecter_pushs_mym, partagée avec le cycle de fond."""
         from flask import jsonify
-        _cache_f = DATA_DIR / "sfs_pushs_cache.json"
-        if not request.args.get("refresh"):
-            try:
-                _blob = json.loads(_cache_f.read_text(encoding="utf-8"))
-                if time.time() - float(_blob.get("ts") or 0) < 1800:
-                    return jsonify({"ok": True, "pushs": _blob.get("pushs") or [],
-                                    "cached": True})
-            except Exception:
-                pass
-        try:
-            import mypuls
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"Module indispo : {e}"})
-        try:
-            if not mypuls.is_configured():
-                return jsonify({"ok": False, "error": "MyPuls non configuré (cookies)"})
-            cr = mypuls.list_creators()
-            creators = cr.get("creators") or {}  # {name: id}
-            name_to_id = {str(k).lower().strip(): v for k, v in creators.items()}
-            idents = _sfssetup_identities("mym")
-            targets, seen = [], set()  # [(ident, label, cid)]
-            for ident in idents:
-                model = (mypuls.get_model_for_identity(ident) or ident).strip()
-                cid = name_to_id.get(model.lower()) or name_to_id.get(ident.lower().strip())
-                if cid is None or cid in seen:
-                    continue
-                seen.add(cid)
-                targets.append((ident, model or ident, cid))
-            if not targets:
-                return jsonify({"ok": True, "pushs": [],
-                                "note": "Aucun créateur MyPuls résolu pour les identités SFS"})
-            # au passage : compteurs d'abonnés du Setup rafraîchis si périmés
-            # (TTL interne) — le tri par abonnés de la sidebar reste à jour
-            # sans que l'utilisateur clique quoi que ce soit
-            try:
-                import sfs_setup as _sfs_auto
-                _sfs_auto.autofill_mypuls_if_stale()
-            except Exception:
-                pass
-            all_pushs = []
-            for ident, label, cid in targets:
-                # Avant : max_pages=1 -> seulement la 1re page (les plus recents),
-                # les jours plus anciens du mois restaient VIDES sans prevenir.
-                # Desormais on pagine jusqu'a couvrir 92 jours (mois courant + 2),
-                # borne de securite a 25 pages par creatrice.
-                res = mypuls.list_pushs(cid, max_pages=25, days=92)
-                if not res.get("ok"):
-                    continue
-                for p in res.get("pushs", []):
-                    p2 = dict(p)
-                    p2["creator"] = label
-                    p2["identity"] = ident
-                    # tronque : 2000 pushs x descriptions longues feraient sauter
-                    # le quota sessionStorage cote navigateur (~5 Mo)
-                    p2["description"] = (p2.get("description") or "")[:600]
-                    all_pushs.append(p2)
-            import datetime as _dt
-
-            def _key(p):
-                try:
-                    return _dt.datetime.strptime(p.get("sentAt", ""), "%d/%m/%Y %H:%M")
-                except Exception:
-                    return _dt.datetime.min
-
-            all_pushs.sort(key=_key, reverse=True)
-            # 2000 et pas 200 : a 200 on ETAIT au plafond (l'ecran affichait
-            # pile '200 push au total') et les plus anciens etaient jetes.
-            if not all_pushs:
-                # collecte vide (cookies morts ?) -> ressert la dernière bonne
-                # version plutôt qu'un calendrier soudainement vide
-                try:
-                    _blob = json.loads(_cache_f.read_text(encoding="utf-8"))
-                    if _blob.get("pushs"):
-                        return jsonify({"ok": True, "pushs": _blob["pushs"],
-                                        "cached": True, "stale": True})
-                except Exception:
-                    pass
-            else:
-                try:
-                    safe_json.write_text(_cache_f, json.dumps(
-                        {"ts": time.time(), "pushs": all_pushs[:2000]},
-                        ensure_ascii=False))
-                except Exception:
-                    pass
-            return jsonify({"ok": True, "pushs": all_pushs[:2000],
-                            "truncated": len(all_pushs) > 2000})
-        except Exception as e:
-            return jsonify({"ok": False, "error": f"Erreur : {e}"})
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        return jsonify(_collecter_pushs_mym(force=bool(request.args.get("refresh"))))
 
     @app.route("/debug/reel_raw", methods=["GET"])
     def debug_reel_raw():
