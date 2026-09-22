@@ -208,6 +208,30 @@ def _norm_handle(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", (s or "").lower())
 
 
+def _discord_observable() -> bool:
+    """Le bot peut-il REELLEMENT repondre « ce pseudo existe / n existe pas » ?
+
+    Tester `_BOT_REF is None` ne suffit pas, et c est un piege verifie :
+    main.py appelle set_bot_ref(main_bot) a la ligne 194, AVANT bot.start()
+    a la ligne 276. La reference n est donc jamais nulle en production --
+    l etat « bot hors ligne » ne se declenchait jamais, et pendant une
+    reconnexion (guilds vide) chaque pseudo passait « introuvable ».
+
+    Trois conditions, parce qu il y a trois facons d etre muet : pas de
+    reference, gateway pas encore prete, ou cache de guildes vide apres une
+    reconnexion.
+    """
+    b = _BOT_REF
+    if b is None:
+        return False
+    try:
+        if not b.is_ready():
+            return False
+        return bool(b.guilds)
+    except Exception:
+        return False
+
+
 def _resolve_discord_user_by_handle(handle: str):
     """Cherche un user Discord par username/handle (ex: 'safidy0356_08105' ou 'safidy').
 
@@ -215,7 +239,9 @@ def _resolve_discord_user_by_handle(handle: str):
     Match case-insensitive contre user.name, user.global_name et member.display_name
     dans toutes les guilds connues du bot.
     """
-    if not handle or _BOT_REF is None:
+    if not handle or not _discord_observable():
+        # Sortie AVANT le cache : memoriser « introuvable » alors qu on n a
+        # rien pu regarder figerait le faux negatif pour 120 s.
         return None
     handle_lc = str(handle).strip().lower().lstrip("@")
     if not handle_lc:
@@ -41295,6 +41321,17 @@ def _render_chatplanning_html() -> str:
     week_lbl = chatting.week_label(active_week)
     iso_w = chatting.iso_week_number(active_week)
 
+    # Largeur du tableau, DERIVEE de l en-tete au lieu d etre recopiee.
+    # Les lignes « + ajouter » et les placeholders portaient colspan=14 et 13
+    # pour un tableau qui en comptait 15, puis 16 quand la colonne Discord est
+    # arrivee : ils ne couvraient pas toute la largeur et le fond s arretait
+    # avant le bord. Un nombre ecrit a la main ne suit jamais une colonne
+    # ajoutee — celui-ci si.
+    #   creneau/horaire, pseudo, discord, statut, modele, off  -> 6
+    #   les jours de la semaine                                 -> 7
+    #   retards, absences, actions                              -> 3
+    NB_COLONNES = 6 + len(chatting.DAYS) + 3
+
     # Si pas d EDT, propose les 2 presets + custom
     if not edts:
         return (
@@ -41567,7 +41604,7 @@ def _render_chatplanning_html() -> str:
                 pastille = (f"<img src='{html_escape(av)}' alt='' "
                             f"style='width:18px;height:18px;border-radius:50%;"
                             f"vertical-align:middle;margin-right:5px'>")
-        elif _BOT_REF is None:
+        elif not _discord_observable():
             bord = "#2a2a2a"
             titre = "Bot Discord hors ligne : rattachement non verifiable"
             pastille = ("<span style='color:#666;margin-right:5px' "
@@ -41643,7 +41680,7 @@ def _render_chatplanning_html() -> str:
                           key=lambda r: _STATUT_ORDER.get((r.get("statut") or "").strip(), 9))
         if not mgr_rows:
             body_rows.append(
-                "<tr><td colspan='14' style='padding:18px;color:#444;text-align:center;font-size:12px;font-style:italic'>"
+                f"<tr><td colspan='{NB_COLONNES}' style='padding:18px;color:#444;text-align:center;font-size:12px;font-style:italic'>"
                 "aucun manager — clique ci-dessous pour ajouter</td></tr>"
             )
         for r in mgr_rows:
@@ -41658,7 +41695,7 @@ def _render_chatplanning_html() -> str:
                 f"{horaire_cell}{_row_cells_html(r, counts, pres_for_row)}</tr>"
             )
         body_rows.append(
-            "<tr id='addrow-'><td colspan='14' style='padding:6px;background:#0d0d0d;border-top:1px solid #1a1a1a'>"
+            f"<tr id='addrow-'><td colspan='{NB_COLONNES}' style='padding:6px;background:#0d0d0d;border-top:1px solid #1a1a1a'>"
             "<button type='button' onclick='addChatRow(\"\")' "
             "style='background:transparent;border:1px dashed #2a2a2a;color:#666;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;width:100%;font-family:inherit'>"
             "+ ajouter un manager</button></td></tr>"
@@ -41681,7 +41718,7 @@ def _render_chatplanning_html() -> str:
             body_rows.append(
                 f"<tr class='chat-empty-placeholder' data-creneau='{creneau}'>"
                 f"{cre_only_cell}"
-                f"<td colspan='13' style='padding:14px;color:#444;text-align:center;font-size:12px;font-style:italic'>aucune ligne — clique ci-dessous</td>"
+                f"<td colspan='{NB_COLONNES}' style='padding:14px;color:#444;text-align:center;font-size:12px;font-style:italic'>aucune ligne — clique ci-dessous</td>"
                 f"</tr>"
             )
         first = True
@@ -41749,7 +41786,7 @@ def _render_chatplanning_html() -> str:
             )
         # Bouton "+ ajouter ligne" sous chaque creneau (AJAX, no reload)
         body_rows.append(
-            f"<tr id='addrow-{creneau}'><td colspan='14' style='padding:6px;background:#0d0d0d;border-top:1px solid #1a1a1a'>"
+            f"<tr id='addrow-{creneau}'><td colspan='{NB_COLONNES}' style='padding:6px;background:#0d0d0d;border-top:1px solid #1a1a1a'>"
             f"<button type='button' onclick='addChatRow(\"{creneau}\")' "
             f"style='background:transparent;border:1px dashed #2a2a2a;color:#666;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:12px;width:100%;font-family:inherit'>"
             f"+ ajouter une ligne sur {creneau}</button>"
