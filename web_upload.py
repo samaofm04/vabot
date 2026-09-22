@@ -248,7 +248,61 @@ def _titre_colonne_discord(nb: int, tronque: bool) -> str:
             "du serveur. Rempli et vert = rattachement valide." % nb)
 
 
-def _membres_discord_pour_liste():
+#: Le serveur ou vivent les chatteurs. Le bot est sur TROIS serveurs, mais le
+#: planning chatteurs ne concerne que celui-ci (choix du proprietaire, le
+#: 22/09/2026). Chercher dans les trois proposait des VA et des manageuses
+#: dans la liste de choix, et prononcait « introuvable » apres avoir fouille
+#: des serveurs qui n ont rien a voir avec le chatting.
+#:
+#: La comparaison est EXACTE, jamais un prefixe : « YouLab AGENCY THREADS »
+#: commence par le meme texte et ramenerait ses membres avec.
+GUILDE_CHATTEURS = "YouLab AGENCY"
+
+
+def _etat_discord(handle: str, nb_membres: int = 0, guilde: str = ""):
+    """L etat d un pseudo Discord : couleur de bordure, explication, pastille.
+
+    UNE SEULE redaction du verdict, pour les DEUX rendus : le serveur peint
+    la cellule au chargement, la route la repeint apres une saisie. Deux
+    formulations du meme jugement finissent toujours par diverger -- c est le
+    « deux endroits decident la meme chose » que ce depot a deja paye cher.
+
+    Rend (bordure, titre, pastille_html).
+    """
+    handle = (handle or "").strip()
+    if not handle:
+        return ("#2a2a2a", "Pseudo Discord du chatteur", "")
+    info = _resolve_discord_user_by_handle(handle, guilde)
+    if info:
+        av = info.get("avatar_url") or ""
+        pastille = (f"<img src='{html_escape(av)}' alt='' "
+                    f"style='width:18px;height:18px;border-radius:50%;"
+                    f"vertical-align:middle;margin-right:5px'>") if av else ""
+        return ("#22c55e",
+                "Rattache a " + (info.get("display_name") or handle),
+                pastille)
+    if not _discord_observable():
+        # Muet n est pas « introuvable » : accuser ici serait un faux negatif.
+        return ("#2a2a2a",
+                "Bot Discord hors ligne : rattachement non verifiable",
+                "<span style='color:#666;margin-right:5px' title='non verifiable'>•</span>")
+    # DIRE POURQUOI, ET QUOI FAIRE. « Aucun membre du Discord » se lisait
+    # comme une panne du site : le proprietaire a signale « ca marche
+    # toujours pas » devant un avertissement qui, lui, disait vrai. Nommer
+    # le nombre de membres reellement fouilles transforme un reproche opaque
+    # en constat verifiable.
+    ou = guilde or "tes serveurs"
+    titre = ("Aucun des %d membre%s de %s ne porte « %s ». Cette personne n y "
+             "est pas : fais-la rejoindre, ou invite le bot sur le serveur ou "
+             "elle se trouve." % (nb_membres, "s" if nb_membres > 1 else "",
+                                  ou, handle)
+             ) if nb_membres else (
+             "« %s » n a ete trouve sur %s." % (handle, ou))
+    return ("#f97316", titre,
+            "<span style='color:#f97316;margin-right:5px'>⚠</span>")
+
+
+def _membres_discord_pour_liste(guilde: str = ""):
     """Les membres des serveurs du bot, pour la liste de choix du planning.
 
     Sans elle, rattacher un chatteur veut dire taper de memoire un pseudo
@@ -265,6 +319,8 @@ def _membres_discord_pour_liste():
     vus = {}
     try:
         for g in _BOT_REF.guilds:
+            if guilde and (getattr(g, "name", "") or "") != guilde:
+                continue          # nom EXACT (cf. GUILDE_CHATTEURS)
             try:
                 for m in g.members:
                     if getattr(m, "bot", False):
@@ -293,7 +349,7 @@ def _membres_discord_pour_liste():
     return options, len(tous), tronque
 
 
-def _resolve_discord_user_by_handle(handle: str):
+def _resolve_discord_user_by_handle(handle: str, guilde: str = ""):
     """Cherche un user Discord par username/handle (ex: 'safidy0356_08105' ou 'safidy').
 
     Retourne un dict {id, username, display_name, avatar_url} si trouve, sinon None.
@@ -307,10 +363,15 @@ def _resolve_discord_user_by_handle(handle: str):
     handle_lc = str(handle).strip().lower().lstrip("@")
     if not handle_lc:
         return None
+    # La portee fait PARTIE de la cle. Sans elle, une recherche restreinte a
+    # un serveur serait servie par le resultat d une recherche faite sur les
+    # trois — et l inverse : le rattachement d un chatteur dependrait de qui
+    # a consulte la page en premier.
+    _cle = (handle_lc, guilde or "")
     # Cache hit (TTL 120s)
     import time as _t_dr
     _now_dr = _t_dr.time()
-    _hit = _DISCORD_RESOLVE_CACHE.get(handle_lc)
+    _hit = _DISCORD_RESOLVE_CACHE.get(_cle)
     if _hit is not None and (_now_dr - _hit[0]) < 120:
         return _hit[1]
     def _scan(target: str):
@@ -320,6 +381,8 @@ def _resolve_discord_user_by_handle(handle: str):
         seen_ids = set()
         try:
             for g in _BOT_REF.guilds:
+                if guilde and (getattr(g, "name", "") or "") != guilde:
+                    continue      # nom EXACT : « ... THREADS » n est pas « ... »
                 try:
                     for m in g.members:
                         if m.id in seen_ids:
@@ -359,7 +422,7 @@ def _resolve_discord_user_by_handle(handle: str):
             _result = _scan(_base)
     # Memoize (succes ET echec) pour 120s
     try:
-        _DISCORD_RESOLVE_CACHE[handle_lc] = (_now_dr, _result)
+        _DISCORD_RESOLVE_CACHE[_cle] = (_now_dr, _result)
         if len(_DISCORD_RESOLVE_CACHE) > 512:
             _DISCORD_RESOLVE_CACHE.clear()
     except Exception:
@@ -26189,7 +26252,7 @@ def _render_sfs_html() -> str:
         "<div id='sfs-bilan-panel' style='display:none;background:#161616;border:1px solid #232323;border-radius:14px;padding:16px;margin-bottom:18px'>"
         "<div style='display:flex;align-items:center;gap:8px;margin-bottom:12px'>"
         "<h3 style='margin:0;font-size:15px;font-weight:800'>Bilan SFS</h3>"
-        "<span style='font-size:11px;color:#778'>objectif : 1 SFS (@) tous les 2 jours · fenêtre 14 jours</span>"
+        "<span style='font-size:11px;color:#778'>objectif : 1 SFS (@ ou lien) tous les 2 jours · fenêtre 14 jours · MyM + OnlyFans</span>"
         "<button type='button' onclick='toggleSfsBilan()' "
         "style='margin-left:auto;background:#26263a;border:1px solid #3a3a4e;color:#cbd5e1;cursor:pointer;font-size:12px;font-weight:700;padding:6px 12px;border-radius:8px'>✕ Fermer le bilan</button>"
         "</div>"
@@ -26239,27 +26302,23 @@ def _render_sfs_html() -> str:
         "  if(p.style.display==='block'){ p.style.display='none'; }"
         "  else { renderSfsBilan(); p.style.display='block'; p.scrollIntoView({behavior:'smooth',block:'start'}); }"
         "}"
-        "function renderSfsBilan(){"
-        "  var out=document.getElementById('sfs-bilan-content'); if(!out) return;"
-        "  var ps=window.__sfsPushCache||[];"
-        "  if(!ps.length){ out.innerHTML='Aucune donnée — fais un ↻ Sync MyPuls d abord (menu ⚙ Actions).'; return; }"
-        "  var stats={};"
-        "  (window.__mypulsCreators||[]).forEach(function(n){ stats[n]={n14:0,last:null}; });"
+        "function sfsParseDmy(s){"
+        "  var parts=(s||'').trim().split(/[ T]/); var dmy=(parts[0]||'').split(/[\\/.-]/); var d=null;"
+        "  if(dmy.length===3 && dmy[0].length===4){ d=new Date(+dmy[0],+dmy[1]-1,+dmy[2]); }"
+        "  else if(dmy.length===3){ d=new Date(+dmy[2],+dmy[1]-1,+dmy[0]); }"
+        "  return (d && !isNaN(d.getTime()))?d:null;"
+        "}"
+        # Une ligne par compte : n SFS sur 14 j + ancienneté du dernier.
+        # `names` = tous les comptes de la plateforme, pour qu'un compte SANS
+        # aucun SFS sorte en rouge au lieu de disparaître.
+        "function sfsBilanRows(names, entries){"
+        "  var stats={}; (names||[]).forEach(function(n){ stats[n]={n14:0,last:null}; });"
         "  var now=new Date(); var cut=new Date(now.getTime()-14*86400000);"
-        "  ps.forEach(function(x){"
-        "    if(!/@[a-z0-9_.]/i.test(x.description||'')) return;"
-        "    var parts=(x.sentAt||'').trim().split(/[ T]/);"
-        "    var dmy=(parts[0]||'').split(/[\\/.-]/);"
-        "    var d=null;"
-        "    if(dmy.length===3 && dmy[0].length===4){ d=new Date(+dmy[0],+dmy[1]-1,+dmy[2]); }"
-        "    else if(dmy.length===3){ d=new Date(+dmy[2],+dmy[1]-1,+dmy[0]); }"
-        "    if(!d||isNaN(d.getTime())) return;"
-        "    var c=x.creator||'?';"
-        "    if(!stats[c]) stats[c]={n14:0,last:null};"
-        "    if(d>=cut) stats[c].n14++;"
-        "    if(!stats[c].last||d>stats[c].last) stats[c].last=d;"
+        "  entries.forEach(function(e){"
+        "    var c=e.c||'?'; if(!stats[c]) stats[c]={n14:0,last:null};"
+        "    if(e.d>=cut) stats[c].n14++;"
+        "    if(!stats[c].last||e.d>stats[c].last) stats[c].last=e.d;"
         "  });"
-        "  var TARGET=7;"
         "  var rows=Object.keys(stats).map(function(c){"
         "    var v=stats[c];"
         "    var since=v.last?Math.floor((now-v.last)/86400000):null;"
@@ -26267,25 +26326,58 @@ def _render_sfs_html() -> str:
         "    return {c:c,n:v.n14,since:since,etat:etat};"
         "  });"
         "  rows.sort(function(a,b){ return (b.etat-a.etat)||((b.since===null?999:b.since)-(a.since===null?999:a.since))||(a.n-b.n); });"
+        "  return rows;"
+        "}"
+        "function sfsBilanBlock(title, color, rows){"
+        "  var TARGET=7;"
         "  var okN=rows.filter(function(r){ return r.etat===0; }).length;"
         "  var totalSfs=rows.reduce(function(s,r){ return s+r.n; },0);"
         "  var retards=rows.filter(function(r){ return r.etat>0; });"
-        "  var h='<div style=\"display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px\">'"
+        "  var h='<div style=\"display:flex;align-items:center;gap:8px;margin:4px 0 8px\"><span style=\"width:9px;height:9px;border-radius:50%;background:'+color+';display:inline-block\"></span><b style=\"color:#dde;font-size:13px\">'+title+'</b><span style=\"color:#667;font-size:11px\">'+rows.length+' compte(s)</span></div>';"
+        "  h+='<div style=\"display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px\">'"
         "    +'<div style=\"background:#101018;border:1px solid #262636;border-radius:9px;padding:9px 14px\"><b style=\"font-size:16px;color:'+(retards.length?'#ef4444':'#22c55e')+'\">'+retards.length+'</b> <span style=\"color:#889\">compte(s) en retard</span></div>'"
         "    +'<div style=\"background:#101018;border:1px solid #262636;border-radius:9px;padding:9px 14px\"><b style=\"font-size:16px;color:#22c55e\">'+okN+'</b> <span style=\"color:#889\">dans les clous</span></div>'"
-        "    +'<div style=\"background:#101018;border:1px solid #262636;border-radius:9px;padding:9px 14px\"><b style=\"font-size:16px;color:#93c5fd\">'+totalSfs+'</b> <span style=\"color:#889\">SFS (@) sur 14 j · objectif '+(TARGET*rows.length)+'</span></div>'"
+        "    +'<div style=\"background:#101018;border:1px solid #262636;border-radius:9px;padding:9px 14px\"><b style=\"font-size:16px;color:#93c5fd\">'+totalSfs+'</b> <span style=\"color:#889\">SFS sur 14 j · objectif '+(TARGET*rows.length)+'</span></div>'"
         "    +'</div>';"
         "  rows.forEach(function(r){"
         "    var ic=r.etat===0?'🟢':(r.etat===1?'🟠':'🔴');"
         "    var lastTxt=(r.since===null)?'jamais':(r.since===0?'aujourd hui':('il y a '+r.since+' j'));"
         "    var defi=Math.max(0,TARGET-r.n);"
-        "    h+='<div style=\"display:flex;align-items:center;gap:10px;background:#101018;border:1px solid #232330;border-radius:8px;padding:8px 12px;margin-bottom:6px\">'"
+        "    h+='<div style=\"display:flex;align-items:center;gap:10px;background:#101018;border:1px solid #232330;border-left:3px solid '+color+';border-radius:8px;padding:8px 12px;margin-bottom:6px\">'"
         "      +'<span>'+ic+'</span>'"
         "      +'<span style=\"font-weight:700;color:#dde;min-width:130px\">'+sfsEsc(r.c)+'</span>'"
         "      +'<span style=\"color:#889\">dernier SFS : <b style=\"color:'+(r.etat===0?'#22c55e':(r.etat===1?'#f59e0b':'#ef4444'))+'\">'+lastTxt+'</b></span>'"
         "      +'<span style=\"margin-left:auto;color:#889\">'+r.n+'/'+TARGET+' sur 14 j'+(defi?(' · <b style=\"color:#f59e0b\">−'+defi+'</b>'):'')+'</span>'"
         "      +'</div>';"
         "  });"
+        "  return h;"
+        "}"
+        # MyM : pushs MyPuls (sentAt JJ/MM/AAAA, règle historique « un @ »).
+        # OnlyFans : messages de masse ENVOYÉS (marqués sent, date déjà en
+        # heure de Paris) ; un lien onlyfans.com compte comme un @. La file à
+        # venir ne compte pas : un SFS programmé n'est pas un SFS fait.
+        "function renderSfsBilan(){"
+        "  var out=document.getElementById('sfs-bilan-content'); if(!out) return;"
+        "  var ps=window.__sfsPushCache||[];"
+        "  var mym=[];"
+        "  ps.forEach(function(x){"
+        "    if(!/@[a-z0-9_.]/i.test(x.description||'')) return;"
+        "    var d=sfsParseDmy(x.sentAt); if(!d) return;"
+        "    mym.push({c:x.creator||'?', d:d});"
+        "  });"
+        "  var od=window.__ofPushData||{};"
+        "  var ofNames=(od.creators||[]).map(function(c){ return c.creator; }).filter(Boolean);"
+        "  var of=[];"
+        "  (od.items||[]).forEach(function(it){"
+        "    if(!it.sent||!it.date||!isSfsPush(it.text)) return;"
+        "    var p=it.date.split('-'); if(p.length!==3) return;"
+        "    of.push({c:it.creator||'?', d:new Date(+p[0],+p[1]-1,+p[2])});"
+        "  });"
+        "  var h='';"
+        "  if(ps.length){ h+=sfsBilanBlock('MyM', '#f59e0b', sfsBilanRows(window.__mypulsCreators||[], mym)); }"
+        "  else { h+='<div style=\"color:#889;margin-bottom:12px\">MyM : aucune donnée — fais un ↻ Sync MyPuls (menu ⚙ Actions).</div>'; }"
+        "  if(ofNames.length||of.length){ h+=sfsBilanBlock('OnlyFans', '#0099ff', sfsBilanRows(ofNames, of)); }"
+        "  else { h+='<div style=\"color:#889\">OnlyFans : aucune donnée — fais un ↻ Sync file d’attente OnlyFans (menu ⚙ Actions).</div>'; }"
         "  out.innerHTML=h;"
         "}"
         "async function majAllPushs(){"
@@ -26359,7 +26451,7 @@ def _render_sfs_html() -> str:
         "  if(typeof renderSfsInbox==='function') renderSfsInbox();"
         # titre fixe « SFS Planning » (plus de renommage par onglet)
         "  var bMym=document.getElementById('sfs-mym-sync'); var bOf=document.getElementById('sfs-of-import'); var bOfHar=document.getElementById('sfs-of-har-btn'); var bMaj=document.getElementById('sfs-maj-btn'); var bBil=document.getElementById('sfs-bilan-btn');"
-        "  if(plat==='OF'){ if(bMym)bMym.style.display='none'; if(bMaj)bMaj.style.display='none'; if(bBil)bBil.style.display='none'; if(bOf)bOf.style.display='flex'; if(bOfHar)bOfHar.style.display='flex'; }"
+        "  if(plat==='OF'){ if(bMym)bMym.style.display='none'; if(bMaj)bMaj.style.display='none'; if(bBil)bBil.style.display='flex'; if(bOf)bOf.style.display='flex'; if(bOfHar)bOfHar.style.display='flex'; }"
         "  else if(plat==='MYM'){ if(bMym)bMym.style.display='flex'; if(bMaj)bMaj.style.display='flex'; if(bBil)bBil.style.display='flex'; if(bOf)bOf.style.display='none'; if(bOfHar)bOfHar.style.display='none'; }"
         "  if(!onPlat) return;"
         "  if(plat==='OF'){ if(typeof renderOfPushes==='function') renderOfPushes(); return; }"
@@ -26510,7 +26602,7 @@ def _render_sfs_html() -> str:
         "    var cell=cells[d]; if(!cell) return; var bars=cell.querySelector('.sfs-day-bars'); if(!bars) return;"
         "    var list=byDate[d];"
         "    var bar=document.createElement('div'); bar.className='sfs-push-bar';"
-        "    bar.title=list.length+' message(s) programmé(s) — '+list.map(function(x){ return (x.time||'')+(x.creator?(' '+x.creator):''); }).slice(0,5).join(' · ')+(list.length>5?' …':'');"
+        "    bar.title=list.length+' message(s) programmé(s) — '+list.map(function(x){ return (x.sent?'✓ ':'')+(x.time||'')+(x.creator?(' '+x.creator):''); }).slice(0,5).join(' · ')+(list.length>5?' …':'');"
         "    bar.style.cssText='background:#0099ff;color:#04121f;font-size:10px;font-weight:800;padding:2px 6px;border-radius:4px;display:flex;align-items:center;gap:5px;cursor:pointer';"
         "    var n=document.createElement('span'); n.style.cssText='background:rgba(0,0,0,.5);color:#7dd3fc;border-radius:3px;padding:0 5px;line-height:14px'; n.textContent=list.length;"
         "    bar.appendChild(n);"
@@ -26555,12 +26647,16 @@ def _render_sfs_html() -> str:
         "  try{"
         "    var r=await fetch('/sfssetup/of_queue'+(force?'?refresh=1':'')); var j=await r.json();"
         "    if(!j.ok){ if(force && box){ box.style.display=''; box.innerHTML='✕ '+(j.error||'Erreur'); } return; }"
-        "    window.__ofPushData=j.data||window.__ofPushData;"
+        # j.data = {items, counters} ; la liste des créatrices voyage à part et
+        # le Bilan SFS en a besoin (une créatrice sans aucun SFS doit sortir en
+        # rouge, pas disparaître)
+        "    if(j.data){ window.__ofPushData=Object.assign({}, j.data, {creators:j.creators||[], errors:j.errors||[]}); }"
         "    if(typeof renderSfsPushes==='function') renderSfsPushes();"
+        "    var bp=document.getElementById('sfs-bilan-panel'); if(bp && bp.style.display==='block' && typeof renderSfsBilan==='function') renderSfsBilan();"
         "    if(typeof selectSfsDay==='function' && window.__selectedSfsDate && window.__currentSfsPlatform==='OF') selectSfsDay(window.__selectedSfsDate);"
         "    var errs=j.errors||[];"
         "    if(box && (force || errs.length || j.stale)){"
-        "      var per=(j.creators||[]).map(function(c){ return c.creator+' '+c.count; }).join(' · ');"
+        "      var per=(j.creators||[]).map(function(c){ return c.creator+' '+c.count+' à venir / '+(c.sent||0)+' envoyés'+(c.canceled?(' ('+c.canceled+' annulés)'):''); }).join(' · ');"
         "      box.style.display='';"
         "      box.innerHTML=(j.stale?'⚠ Relevé OnlyFans périmé (dernier bon état resservi)':('✓ '+(j.items||0)+' message(s) OnlyFans programmé(s)'+(per?(' — '+per):'')))"
         "        +(errs.length?('<div style=\"color:#f59e0b;margin-top:4px\">'+errs.map(sfsEsc).join('<br>')+'</div>'):'');"
@@ -26894,7 +26990,7 @@ function refreshSfsDayPanel(){{
     dayOf.sort(function(a,b){{ return (a.time||'').localeCompare(b.time||''); }});
     window.__sfsDayOfPushes = dayOf;
     if(dayOf.length){{
-      pushHtml += '<div style="margin-top:10px"><div style="font-size:11px;color:#0099ff;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Messages OnlyFans programmés (' + dayOf.length + ')</div>';
+      pushHtml += '<div style="margin-top:10px"><div style="font-size:11px;color:#0099ff;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Messages OnlyFans (' + dayOf.length + ')</div>';
       dayOf.forEach(function(p, pi){{
         var lk=(p.links||[]).map(function(u){{ return '<a href="'+u+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#7dd3fc">'+String(u).replace(/</g,"&lt;")+'</a>'; }}).join(' ');
         pushHtml += '<div onclick="sfsOfCardClick('+pi+')" title="Créer / modifier un SFS depuis ce message" '
@@ -26902,7 +26998,7 @@ function refreshSfsDayPanel(){{
           + 'onmouseover="this.style.background=&quot;#191922&quot;" onmouseout="this.style.background=&quot;#0f0f0f&quot;">'
           + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
           + '<div style="flex:1"><div style="font-weight:700;font-size:12px;color:#0099ff">'+String(p.creator||'OnlyFans').replace(/</g,"&lt;")+(p.of_username?(' <span style="color:#667;font-weight:500">@'+String(p.of_username).replace(/</g,"&lt;")+'</span>'):'')+'</div>'
-          + '<div style="font-size:11px;color:#888">' + (p.time||'?') + (p.lists?(' &middot; '+String(p.lists).replace(/</g,"&lt;")):'') + (p.stale?' &middot; <span style="color:#f59e0b">ancien relevé</span>':'') + '</div></div>'
+          + '<div style="font-size:11px;color:#888">' + (p.time||'?') + (p.sent?(' &middot; <span style="color:#22c55e">envoyé</span> à '+(p.sent_count||0)+' &middot; vus '+(p.viewed_count||0)):(' &middot; programmé'+(p.lists?(' &middot; '+String(p.lists).replace(/</g,"&lt;")):''))) + (p.stale?' &middot; <span style="color:#f59e0b">ancien relevé</span>':'') + '</div></div>'
           + '<div style="color:#556;font-size:15px">✎</div></div>'
           + '<div style="font-size:12px;color:#ddd;white-space:pre-wrap">'+String(p.text||'').replace(/</g,"&lt;")+'</div>'
           + (lk?('<div style="font-size:11px;margin-top:6px;word-break:break-all">'+lk+'</div>'):'')
@@ -41468,7 +41564,7 @@ def _render_chatplanning_html() -> str:
 
     # Les membres du serveur, releves UNE fois pour tout le tableau : un
     # appel par ligne rescannerait les guildes 37 fois pour le meme resultat.
-    _dl_opts, _dl_nb, _dl_tronque = _membres_discord_pour_liste()
+    _dl_opts, _dl_nb, _dl_tronque = _membres_discord_pour_liste(GUILDE_CHATTEURS)
 
     # Si pas d EDT, propose les 2 presets + custom
     if not edts:
@@ -41717,40 +41813,15 @@ def _render_chatplanning_html() -> str:
         )
 
     def _discord_cell(r):
-        """Pseudo Discord du chatteur, VERIFIE contre les membres du serveur.
+        """La cellule du pseudo Discord, peinte par _etat_discord.
 
         Le champ seul ne prouve rien : une faute de frappe se stocke aussi
         bien qu un vrai pseudo, et le rattachement paraitrait fait alors
-        qu il ne l est pas. On resout donc le handle a chaque rendu (cache
-        120 s) et on montre le resultat.
-
-        TROIS etats, jamais deux. Le bot hors ligne ne peut RIEN verifier :
-        afficher « introuvable » dans ce cas accuserait des pseudos
-        parfaitement corrects, et c est ce faux negatif qui ferait perdre
-        confiance a l ecran entier.
+        qu il ne l est pas. Le verdict est donc calcule a chaque rendu
+        (cache 120 s) et montre.
         """
         handle = (r.get("discord_username") or "").strip()
-        info = _resolve_discord_user_by_handle(handle) if handle else None
-        pastille = ""
-        if not handle:
-            bord, titre = "#2a2a2a", "Pseudo Discord du chatteur"
-        elif info:
-            bord = "#22c55e"
-            titre = "Rattache a " + (info.get("display_name") or handle)
-            av = info.get("avatar_url") or ""
-            if av:
-                pastille = (f"<img src='{html_escape(av)}' alt='' "
-                            f"style='width:18px;height:18px;border-radius:50%;"
-                            f"vertical-align:middle;margin-right:5px'>")
-        elif not _discord_observable():
-            bord = "#2a2a2a"
-            titre = "Bot Discord hors ligne : rattachement non verifiable"
-            pastille = ("<span style='color:#666;margin-right:5px' "
-                        "title='non verifiable'>•</span>")
-        else:
-            bord = "#f97316"
-            titre = "Aucun membre du Discord ne porte ce pseudo"
-            pastille = "<span style='color:#f97316;margin-right:5px'>⚠</span>"
+        bord, titre, pastille = _etat_discord(handle, _dl_nb, GUILDE_CHATTEURS)
         largeur = 100 if pastille else 120
         return (
             f"<td style='padding:4px 6px;white-space:nowrap' title='{html_escape(titre)}'>"
@@ -42210,10 +42281,15 @@ async function saveCell(el){
       const ps = tr.querySelector("input[data-field='pseudo']");
       if(ps){ ps.value = j.pseudo; }
     }
-    if(!el.value){ el.style.borderColor = '#2a2a2a'; }
-    else if(j && j.rattache){ el.style.borderColor = '#22c55e'; }
-    else if(j && j.verifiable === false){ el.style.borderColor = '#2a2a2a'; }
+    // La bordure ET l explication viennent du serveur : le client ne
+    // rejuge rien, il applique. Avant, il ne repeignait que la bordure et
+    // l infobulle restait celle du chargement -- elle disait donc l inverse
+    // de la couleur jusqu au prochain rafraichissement.
+    if(j && j.bord){ el.style.borderColor = j.bord; }
+    else if(!el.value){ el.style.borderColor = '#2a2a2a'; }
     else { el.style.borderColor = '#f97316'; }
+    const cell = el.closest('td');
+    if(cell && j && j.titre){ cell.title = j.titre; }
   }
   // Update counts + memorise la valeur courante (utile pour 'Diviser')
   if(['lun','mar','mer','jeu','ven','sam','dim'].includes(el.dataset.field)){
@@ -60258,8 +60334,11 @@ def create_app():
         failed = {e.split(":", 1)[0].strip() for e in errors if ":" in e}
         counters = dict(res.get("counters") or {})
         kept = 0
+        # une créatrice peut n'avoir raté qu'une des deux lectures (file /
+        # envoyés) : on ne remet que ce qui n'est pas déjà dans le relevé frais
+        have = {(it.get("creator"), it.get("id")) for it in items}
         for it in prev.get("items") or []:
-            if it.get("creator") in failed:
+            if it.get("creator") in failed and (it.get("creator"), it.get("id")) not in have:
                 it2 = dict(it)
                 it2["stale"] = True
                 items.append(it2)
@@ -63431,9 +63510,16 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
         # Un handle qui ne resout pas ne touche pas au pseudo : on ne
         # remplace jamais un nom par du vide ou par une coquille.
         if ok and field == "discord_username":
-            info = _resolve_discord_user_by_handle(value) if value else None
+            info = _resolve_discord_user_by_handle(value, GUILDE_CHATTEURS) if value else None
             rep["rattache"] = bool(info)
             rep["verifiable"] = _discord_observable()
+            # Le verdict RENVOYE vient de la meme fonction que le rendu
+            # serveur. Sans ca, la cellule repeinte apres une saisie et la
+            # meme cellule apres rechargement finiraient par dire deux
+            # choses differentes du meme pseudo.
+            rep["bord"], rep["titre"], _ = _etat_discord(
+                value, _membres_discord_pour_liste(GUILDE_CHATTEURS)[1],
+                GUILDE_CHATTEURS)
             if info:
                 surnom = (info.get("display_name") or info.get("username") or "").strip()
                 if surnom and chatting.update_cell(edt_id, row_id, "pseudo", surnom):
