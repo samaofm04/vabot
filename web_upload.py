@@ -41712,7 +41712,7 @@ def _render_chatplanning_html() -> str:
                 f"<td class='chat-cre-cell' data-creneau='{creneau}' rowspan='1' "
                 f"style='background:{cre_color};color:#fff;font-weight:700;text-align:center;"
                 f"font-size:13px;padding:8px;border-right:2px solid #0a0a0a'>"
-                f"{creneau.replace('h-', 'h - ').replace('-', ' - ')}h"
+                f"{chatting.creneau_lisible(creneau)}"
                 f"</td>"
             )
             body_rows.append(
@@ -41731,7 +41731,7 @@ def _render_chatplanning_html() -> str:
                     f"<td class='chat-cre-cell' data-creneau='{creneau}' rowspan='{len(rows_in)}' "
                     f"style='background:{cre_color};color:#fff;font-weight:700;text-align:center;"
                     f"font-size:13px;padding:8px;writing-mode:initial;border-right:2px solid #0a0a0a'>"
-                    f"{creneau.replace('h-', 'h - ').replace('-', ' - ')}h"
+                    f"{chatting.creneau_lisible(creneau)}"
                     f"</td>"
                 )
                 first = False

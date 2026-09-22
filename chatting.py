@@ -49,6 +49,18 @@ OFF_OPTIONS = ["FULLTIME", "Lundi", "Mardi", "Mercredi", "Jeudi",
 PRESENCE_VALUES = ["Present", "Absent", "Retard", "Coupure", "OFF"]
 
 
+def creneau_lisible(creneau: str) -> str:
+    """« 02h-08h » -> « 02h - 08h », pour l en-tete de colonne.
+
+    Le rendu faisait .replace('h-', 'h - ').replace('-', ' - ') puis ajoutait
+    un « h » : la deuxieme substitution retouchait le tiret deja espace et le
+    « h » final doublait celui de la chaine. L ecran affichait « 02h  -  08hh ».
+    Le calcul vivait a DEUX endroits identiques dans web_upload ; il n y en a
+    plus qu un, ici, avec le reste du vocabulaire des creneaux.
+    """
+    return str(creneau or "").replace("-", " - ")
+
+
 def _day_parts(v):
     """Une case de jour peut contenir 1 OU 2 valeurs separees par '+' (case
     divisee, ex: 'Present+Coupure'). Retourne la liste des valeurs valides."""
