@@ -32,7 +32,16 @@ PREFIX = os.getenv("PREFIX", "!")
 #
 # L'etat des deux applications se lit sur youl4b.com/version : serveurs,
 # commandes sur 100, cogs charges, et les cogs en echec avec leur erreur.
-MAIN_COGS = ["welcome", "onboarding", "autopost", "general", "user", "cta_reminder", "noctustest", "clickrecap", "sheetssync", "telechargement", "reportcomptes", "noctuspool", "sessionsvoc"]
+MAIN_COGS = ["welcome", "onboarding", "autopost", "general", "user", "cta_reminder", "noctustest", "clickrecap", "sheetssync", "telechargement", "reportcomptes", "noctuspool", "sessionsvoc",
+             # Releve qui est en vocal pendant son shift de chatting. Il
+             # declare ZERO commande slash : le bot en porte deja 101 pour
+             # un plafond de 100, et un cog qui en ajouterait une ferait
+             # echouer la synchronisation de tout l arbre. Il n ecrit rien
+             # sur le planning tant que presence_shift ne dit pas
+             # ecrire=true ; en attendant il ne fait que construire la
+             # couverture, qui est ce qui permettra de juger sans accuser
+             # a tort.
+             "presenceshift"]
 ADMIN_COGS = ["admin", "geelark", "vaactivity", "vasort", "tgrouter", "numeros",
               # Banc d'essai des menus. Sur le bot ADMIN et pas le
               # principal : celui-ci declare deja 101 commandes pour un
