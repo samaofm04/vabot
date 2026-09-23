@@ -13116,6 +13116,59 @@ try:
 except Exception as _eQ:
     check("quetes : testable", False, repr(_eQ)[:200])
 
+# ---------------------------------------------------------------- 28. Copier
+print()
+print("=" * 70)
+print("Bouton Copier : une caption se reprend sans la selectionner a la main")
+print("=" * 70)
+try:
+    import copie_discord as _cp
+    from pathlib import Path as _plC
+
+    _bt = _cp.bouton()
+    check("le bouton est une rangee avec un seul bouton",
+          len(_bt) == 1 and _bt[0]["type"] == 1 and len(_bt[0]["components"]) == 1)
+    check("le bouton porte l identifiant attendu",
+          _bt[0]["components"][0]["custom_id"] == _cp.IDENTIFIANT == "copie")
+
+    _rep = _cp.traiter({"type": 3, "data": {"custom_id": "copie"},
+                        "message": {"content": "reply only there \u2192"}})
+    check("un clic rend la caption dans un bloc de code",
+          _rep["data"]["content"] == "```\nreply only there \u2192\n```")
+    check("la reponse n est visible que de celui qui clique",
+          _rep["data"]["flags"] == 64)
+
+    check("un bouton qui n est pas le notre est laisse aux autres modules",
+          _cp.traiter({"type": 3, "data": {"custom_id": "quete:go:1"}}) is None)
+    check("une commande n est pas prise pour un bouton",
+          _cp.traiter({"type": 2, "data": {"name": "quetes"}}) is None)
+    check("un ping Discord passe son chemin", _cp.traiter({"type": 1}) is None)
+
+    # une caption vide n est pas une caption : le dire, ne pas rendre du vide
+    _vide = _cp.traiter({"type": 3, "data": {"custom_id": "copie"},
+                         "message": {"content": "   "}})
+    check("un message sans texte est signale, pas rendu vide",
+          "pas de texte" in _vide["data"]["content"] and _vide["data"]["flags"] == 64)
+
+    # trois accents graves dans la caption fermeraient le bloc en plein milieu
+    check("des accents graves dans la caption ne cassent pas le bloc",
+          _cp._bloc("avant ``` apres").count("```") == 2)
+    check("une caption trop longue tient dans la limite Discord",
+          len(_cp._bloc("x" * 5000)) <= 2000)
+
+    _srcC = _plC("web_upload.py").read_text(encoding="utf-8")
+    check("le bouton Copier est branche sur la route Discord",
+          "_cp.traiter(charge)" in _srcC)
+    check("il passe apres les quetes et avant la verification",
+          _srcC.find("_q.traiter(charge)") < _srcC.find("_cp.traiter(charge)")
+          < _srcC.find("_vd.traiter_interaction(charge)"))
+
+    _srcE = _plC("discord_ecrire.py").read_text(encoding="utf-8")
+    check("l outil local reprend la definition du bouton, il n en refait pas une",
+          "from copie_discord import bouton" in _srcE)
+except Exception as _eC:
+    check("copie : testable", False, repr(_eC)[:200])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

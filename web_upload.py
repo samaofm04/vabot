@@ -51209,6 +51209,15 @@ def create_app():
                 return jsonify(_rep_q)
         except Exception as _e_q:
             print(f"[quetes] route : {type(_e_q).__name__}: {_e_q}", flush=True)
+        # Le bouton « Copier » posé sous les captions : même principe, il rend
+        # None quand ce n'est pas son bouton.
+        try:
+            import copie_discord as _cp
+            _rep_cp = _cp.traiter(charge)
+            if _rep_cp is not None:
+                return jsonify(_rep_cp)
+        except Exception as _e_cp:
+            print(f"[copie] route : {type(_e_cp).__name__}: {_e_cp}", flush=True)
         return jsonify(_vd.traiter_interaction(charge))
 
     @app.route("/verif/<jeton>", methods=["GET"])
