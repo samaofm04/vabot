@@ -54,6 +54,8 @@ LIENS_CACHE = DATA_DIR / "gmsdash_links.json"
 
 SALON_PODIUM = "─│🏆┤-podium"
 SALON_SUBS = "─│📊┤-subs"
+SALON_BONUS = "─│💸┤-bonus-journalier"
+PRIMES_JOUR = [7.50, 5.00, 3.50]
 ALLTIME_FICHIER = DATA_DIR / "podium_alltime.json"
 ALLTIME_DEPUIS = "2024-01-01"     # avant les premiers liens : « depuis toujours »
 EQUIPE_VA = "tm_6a0e4739bfa0c238f20a8bf5"   # l'espace GetMySocial des liens VA
@@ -469,6 +471,85 @@ def a_rafraichir_subs(gid: str, maintenant: Optional[float] = None) -> bool:
     if garde.get("saison") != saison_en_cours()[0].isoformat():
         return True
     minutes = int(_config().get("minutes_subs") or _config().get("minutes") or MINUTES_LIVE)
+    return (maintenant or time.time()) - float(garde.get("vu") or 0) >= minutes * 60
+
+
+def embed_bonus(cl: Dict[str, Any], jour: dt.date) -> Dict[str, Any]:
+    """Le bonus du jour : les trois premiers de la JOURNÉE, et ce qu'ils gagnent."""
+    lignes = cl["lignes"]
+    c = [f'📅 Journée du **{jour.strftime("%d/%m/%Y")}** · clics **US** '
+         f'· **{len(lignes)}** comptes suivis', ""]
+    for i in range(3):
+        x = lignes[i] if i < len(lignes) else None
+        if x is None:
+            c.append(f'{MEDAILLES[i]} **—** · **{PRIMES_JOUR[i]:.2f}$**')
+        else:
+            c.append(f'{MEDAILLES[i]} **{x["va"]}** — **{x["clics"]}** subs '
+                     f'→ **{PRIMES_JOUR[i]:.2f}$**')
+    # tout le monde a zéro : le dire, sinon un podium de zéros ressemble à un bug
+    if lignes and not any(x["clics"] for x in lignes[:3]):
+        c += ["", "_Personne n'a encore de sub aujourd'hui — le classement bouge "
+                  "dès le premier._"]
+    c += ["", "————————————",
+          "🎁 **Pour recevoir ton bonus :** envoie un message à **@SEVEN** dans "
+          "**ton espace perso** avec **ton rang du jour (top 1, 2 ou 3)** et "
+          "**ton adresse USDC (réseau Solana)**.",
+          "Un seul prix par personne · payé à la main après vérification"]
+    if cl["illisibles"]:
+        c += ["", "⚠️ Sans relevé aujourd'hui : " + ", ".join(cl["illisibles"])
+                  + " — à confirmer avant de payer."]
+    if not cl["frais"]:
+        c += ["", "⚠️ _Liste des liens non rafraîchie : des comptes peuvent manquer._"]
+    return {"title": f'💸 Bonus subs du jour — {jour.strftime("%d/%m/%Y")}',
+            "color": 0x22C55E,
+            "description": "\n".join(c)[:4096],
+            "footer": {"text": "YOULAB • Marché US · comptes VA, sans pseudo · mis à jour "
+                               + _maintenant().strftime("%d/%m à %Hh%M")}}
+
+
+def rafraichir_bonus(gid: str, jour: Optional[dt.date] = None) -> str:
+    """Met à jour (ou crée) le bonus du jour. Un message NEUF par journée."""
+    gid = str(gid)
+    j = jour or _aujourdhui()
+    d = _etat()
+    vivants = d.setdefault("bonus", {})
+    garde = vivants.get(gid) or {}
+    salon = _salon(gid, _config().get("salon_bonus") or SALON_BONUS)
+    if not salon:
+        print(f"[podium] salon {SALON_BONUS} introuvable sur {gid}", flush=True)
+        return ""
+    cl = classement(j, j)
+    if not cl["lignes"] and not cl["illisibles"]:
+        print("[podium] aucun relevé, bonus du jour laissé tel quel", flush=True)
+        return str(garde.get("message") or "")
+    corps = {"embeds": [embed_bonus(cl, j)]}
+
+    mid = str(garde.get("message") or "")
+    if mid and garde.get("jour") == j.isoformat():
+        code, rep = _api("PATCH", f"/channels/{salon}/messages/{mid}", json=corps)
+        if code == 200:
+            garde["vu"] = time.time()
+            vivants[gid] = garde
+            _ecrire(d)
+            return mid
+        print(f"[podium] édition bonus refusée (HTTP {code}), nouveau message", flush=True)
+    code, rep = _api("POST", f"/channels/{salon}/messages", json=corps)
+    if code != 200 or not rep.get("id"):
+        print(f"[podium] envoi bonus refusé (HTTP {code}) {str(rep)[:160]}", flush=True)
+        return ""
+    vivants[gid] = {"jour": j.isoformat(), "message": str(rep["id"]), "vu": time.time()}
+    _ecrire(d)
+    print(f'[podium] bonus du jour {j} : {len(cl["lignes"])} comptes', flush=True)
+    return str(rep["id"])
+
+
+def a_rafraichir_bonus(gid: str, maintenant: Optional[float] = None) -> bool:
+    if _pause_gms():
+        return False
+    garde = (_etat().get("bonus") or {}).get(str(gid)) or {}
+    if garde.get("jour") != _aujourdhui().isoformat():
+        return True
+    minutes = int(_config().get("minutes_bonus") or _config().get("minutes") or MINUTES_LIVE)
     return (maintenant or time.time()) - float(garde.get("vu") or 0) >= minutes * 60
 
 

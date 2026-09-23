@@ -13507,6 +13507,31 @@ try:
           "all-time" in _pd.pages_subs(_cl30, _dtP.date(2026, 9, 16), _dtP.date(2026, 9, 30),
                                        {"VA 1": 4242})[0]["description"])
 
+    # --- le bonus du jour
+    _clB = {"lignes": [{"va": "VA 2", "numero": 2, "clics": 9, "liens": 1, "spam": False},
+                       {"va": "VA 4", "numero": 4, "clics": 6, "liens": 1, "spam": False},
+                       {"va": "VA 11", "numero": 11, "clics": 4, "liens": 1, "spam": False}],
+            "illisibles": [], "frais": True, "entites": 3, "liens": 3}
+    _eB = _pd.embed_bonus(_clB, _dtP.date(2026, 9, 24))
+    check("le bonus du jour porte les trois primes 7.50 / 5.00 / 3.50",
+          all(f"{m:.2f}$" in _eB["description"] for m in _pd.PRIMES_JOUR))
+    check("le bonus nomme les trois premiers du JOUR",
+          "VA 2" in _eB["description"] and "VA 11" in _eB["description"])
+
+    # moins de trois comptes : on ne laisse pas une place vide sans le dire
+    _eB2 = _pd.embed_bonus({"lignes": _clB["lignes"][:1], "illisibles": [], "frais": True,
+                            "entites": 1, "liens": 1}, _dtP.date(2026, 9, 24))
+    check("une place sans personne reste visible avec son montant",
+          _eB2["description"].count("$") >= 3 and "**—**" in _eB2["description"])
+
+    # tout le monde a zero : un podium de zeros ressemble a une panne
+    _zero = [{"va": f"VA {i}", "numero": i, "clics": 0, "liens": 1, "spam": False}
+             for i in (1, 2, 3)]
+    check("un jour sans aucun sub est explique, pas laisse tel quel",
+          "n'a encore de sub" in _pd.embed_bonus(
+              {"lignes": _zero, "illisibles": [], "frais": True, "entites": 3, "liens": 3},
+              _dtP.date(2026, 9, 24))["description"])
+
     # le VPS tourne en UTC : sans heure de Paris, « lundi 09h » tombait a 11h
     check("les dates du podium sont a l heure de Paris, pas celle du serveur",
           abs((_pd._maintenant() - _dtP.datetime.utcnow()).total_seconds()) >= 3000)

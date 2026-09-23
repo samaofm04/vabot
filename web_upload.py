@@ -50748,6 +50748,9 @@ def _start_podium_semaine_daemon() -> bool:
                     # le classement de la quinzaine, TOUS les comptes
                     if _p.a_rafraichir_subs(gid):
                         _p.rafraichir_subs(gid)
+                    # et le bonus du jour : les trois premiers de la journee
+                    if _p.a_rafraichir_bonus(gid):
+                        _p.rafraichir_bonus(gid)
             except Exception as e:
                 print(f"[podium] boucle : {type(e).__name__}: {e}", flush=True)
             _t_p.sleep(600)
