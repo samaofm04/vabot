@@ -13400,6 +13400,65 @@ try:
         _gmsP.analytics_for_links = _sauv_afl
         _pd.liens_bruts = _sauv_liens
 
+    # --- le message vivant : reedite, jamais reposte
+    check("la semaine en cours s arrete AUJOURD HUI, pas au dimanche a venir",
+          _pd.semaine_en_cours(_dtP.date(2026, 9, 24))
+          == (_dtP.date(2026, 9, 21), _dtP.date(2026, 9, 24)))
+
+    _savE, _savS, _savL = _pd.ETAT_FICHIER, _pd._salon, _pd.liens_bruts
+    _savA, _savP = _gmsP.analytics_for_links, _pd._pause_gms
+    _appelsP = []
+    try:
+        import tempfile as _tf2
+        _pd.ETAT_FICHIER = _plP(_tf2.mkdtemp()) / "podium.json"
+        _pd._salon = lambda gid: "sal"
+        _pd._pause_gms = lambda: False
+        _pd.liens_bruts = lambda: ([{"id": "a", "display_name": "( BO7 ) 1"}], True)
+        _gmsP.analytics_for_links = lambda ids, d0, d1: (9, {"US": 9})
+        _savApi = _pd._api
+
+        def _faux_api(methode, chemin, **kw):
+            _appelsP.append((methode, chemin))
+            return 200, {"id": "M1"}
+        _pd._api = _faux_api
+
+        check("sans message, le premier passage en CREE un",
+              _pd.rafraichir("g1") == "M1" and _appelsP[-1][0] == "POST")
+        _appelsP.clear()
+        check("le passage suivant EDITE, il ne reposte pas",
+              _pd.rafraichir("g1") == "M1" and _appelsP[-1][0] == "PATCH")
+        check("juste apres un passage, il n y a rien a refaire",
+              _pd.a_rafraichir("g1") is False)
+        check("passe l heure, il refait un tour",
+              _pd.a_rafraichir("g1", maintenant=__import__("time").time() + 3700) is True)
+
+        # une semaine nouvelle veut un message neuf : l ancien devient l archive
+        _appelsP.clear()
+        _pd.rafraichir("g1", jour=_dtP.date(2026, 10, 5))
+        check("une semaine nouvelle cree un message neuf",
+              _appelsP[-1][0] == "POST")
+
+        # GetMySocial nous a dit de nous calmer : on ne lui vole pas ses appels
+        _pd._pause_gms = lambda: True
+        check("quand GetMySocial est en pause, on saute le tour",
+              _pd.a_rafraichir("g1", maintenant=__import__("time").time() + 9999) is False)
+        _pd._pause_gms = lambda: False
+
+        # aucun releve : on ne remplace pas un classement correct par du vide
+        _appelsP.clear()
+        _pd.liens_bruts = lambda: ([], True)
+        _pd.rafraichir("g1", jour=_dtP.date(2026, 10, 5))
+        check("sans aucun releve, le message en place n est pas ecrase",
+              not [x for x in _appelsP if x[0] in ("POST", "PATCH")])
+    finally:
+        _pd.ETAT_FICHIER, _pd._salon, _pd.liens_bruts = _savE, _savS, _savL
+        _gmsP.analytics_for_links, _pd._pause_gms = _savA, _savP
+        _pd._api = _savApi
+
+    check("le message vivant se distingue de l annonce du lundi",
+          "SEMAINE EN COURS" in _pd.embed_podium({"lignes": [], "illisibles": [], "frais": True},
+                                                 _dtP.date(2026, 9, 21), _dtP.date(2026, 9, 24),
+                                                 en_cours=True)["title"])
     check("les trois primes sont 10 / 5 / 3", _pd.PRIMES == [10.0, 5.0, 3.0])
     _srcP = _plP("web_upload.py").read_text(encoding="utf-8")
     check("le podium est arme au demarrage du site",

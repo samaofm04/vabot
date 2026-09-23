@@ -50682,12 +50682,16 @@ def _start_quete_du_jour_daemon() -> bool:
 
 
 def _start_podium_semaine_daemon() -> bool:
-    """Poste le podium de la semaine chaque lundi, à partir de 09h.
+    """Tient le podium à jour, et fige la semaine écoulée chaque lundi à 09h.
 
-    Même réveil toutes les 10 minutes que la quête du jour : le déploiement
-    redémarre plusieurs fois par jour, et un long sommeil jusqu'au lundi
-    suivant aurait fait sauter le podium. poster_podium refuse de poster deux
-    fois la même semaine, donc repasser souvent ne coûte rien.
+    Deux choses dans la même boucle : le message VIVANT de la semaine en cours,
+    réédité sur place toutes les heures, et l'annonce du lundi qui fige la
+    semaine finie avec @everyone.
+
+    Réveil toutes les 10 minutes plutôt qu'un long sommeil : le déploiement
+    redémarre plusieurs fois par jour, et un sommeil jusqu'au lundi suivant
+    aurait fait sauter le podium. Les deux fonctions savent refuser de
+    repasser, donc se réveiller souvent ne coûte rien.
     """
     import threading as _th_p
     if getattr(_start_podium_semaine_daemon, "_on", False):
@@ -50701,9 +50705,15 @@ def _start_podium_semaine_daemon() -> bool:
             try:
                 import podium_discord as _p
                 import verif_discord as _vd_p
-                if _p.a_poster():
-                    for gid in _vd_p.SERVEURS_EXTRA:
+                for gid in _vd_p.SERVEURS_EXTRA:
+                    # le lundi : on fige la semaine ecoulee, une fois, avec
+                    # @everyone. Le message vivant repart a neuf ensuite.
+                    if _p.a_poster():
                         _p.poster_podium(gid)
+                    # et le reste du temps : le classement en cours, reedite
+                    # sur place (une edition ne notifie personne)
+                    if _p.a_rafraichir(gid):
+                        _p.rafraichir(gid)
             except Exception as e:
                 print(f"[podium] boucle : {type(e).__name__}: {e}", flush=True)
             _t_p.sleep(600)

@@ -59,6 +59,7 @@ PRIMES = [10.0, 5.0, 3.0]
 MEDAILLES = ["🥇", "🥈", "🥉"]
 COMBIEN_AFFICHES = 15
 HEURE_POST = 9          # lundi, heure française
+MINUTES_LIVE = 60       # entre deux rafraîchissements du message vivant
 
 # Les numéros que GetMySocial portait avant d'être renommé. Ils sont repris
 # tels quels : quelqu'un qui était VA 12 reste VA 12.
@@ -94,6 +95,17 @@ def _api(methode: str, chemin: str, **kw):
 
 
 # ─── la semaine ──────────────────────────────────────────────────────────
+def semaine_en_cours(jour: Optional[dt.date] = None) -> Tuple[dt.date, dt.date]:
+    """Le lundi de la semaine où l'on est, et AUJOURD'HUI.
+
+    La fin n'est pas le dimanche à venir : demander des clics sur des jours
+    qui n'existent pas encore ne rend rien de plus, et afficher « au 28/09 »
+    un mardi laisserait croire que la semaine est finie.
+    """
+    j = jour or dt.date.today()
+    return j - dt.timedelta(days=j.weekday()), j
+
+
 def semaine_passee(jour: Optional[dt.date] = None) -> Tuple[dt.date, dt.date]:
     """Le lundi et le dimanche de la semaine QUI VIENT DE FINIR.
 
@@ -205,10 +217,17 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3) -> Dict[str, An
 
 
 # ─── le message ──────────────────────────────────────────────────────────
-def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date) -> Dict[str, Any]:
+def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
+                 en_cours: bool = False) -> Dict[str, Any]:
     lignes = cl["lignes"]
-    c = [f'🗓️ Semaine du **{debut.strftime("%d/%m")}** au **{fin.strftime("%d/%m/%Y")}**',
-         "Abonnements via Twitter 🐦 — clics **US**", ""]
+    if en_cours:
+        c = [f'🗓️ **Semaine en cours** — depuis le **{debut.strftime("%d/%m")}**, '
+             f'arrêté au **{fin.strftime("%d/%m")}**',
+             "Abonnements via Twitter 🐦 — clics **US**",
+             "🔴 _Mis à jour tout seul, plusieurs fois par jour. Rien n'est joué._", ""]
+    else:
+        c = [f'🗓️ Semaine du **{debut.strftime("%d/%m")}** au **{fin.strftime("%d/%m/%Y")}**',
+             "Abonnements via Twitter 🐦 — clics **US**", ""]
     for i, x in enumerate(lignes[:COMBIEN_AFFICHES]):
         if i < 3:
             c.append(f'{MEDAILLES[i]} **{x["va"]}** — **{x["clics"]}** subs '
@@ -232,15 +251,21 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date) -> Dict[str, 
 
     if cl["illisibles"]:
         c += ["", "⚠️ **Classement incomplet** : " + ", ".join(cl["illisibles"])
-                  + " — relevé indisponible, à confirmer avant de payer."]
+                  + " — relevé indisponible"
+                  + (", il remontera au prochain passage." if en_cours
+                     else ", à confirmer avant de payer.")]
     if not cl["frais"]:
         c += ["", "⚠️ _Liste des liens non rafraîchie (GetMySocial injoignable) : "
                   "des comptes peuvent manquer._"]
 
-    return {"title": "🏆 PODIUM SUBS DE LA SEMAINE",
-            "color": 0xF1C40F,
+    pied = "YOULAB • Marché US · comptes VA, sans pseudo"
+    if en_cours:
+        pied += " · mis à jour " + dt.datetime.now().strftime("%d/%m à %Hh%M")
+    return {"title": ("🔴 PODIUM SUBS — SEMAINE EN COURS" if en_cours
+                      else "🏆 PODIUM SUBS DE LA SEMAINE"),
+            "color": 0xE67E22 if en_cours else 0xF1C40F,
             "description": "\n".join(c)[:4096],
-            "footer": {"text": "YOULAB • Marché US · comptes VA, sans pseudo"}}
+            "footer": {"text": pied}}
 
 
 def _salon(gid: str) -> str:
@@ -278,11 +303,86 @@ def poster_podium(gid: str, jour: Optional[dt.date] = None,
         print(f"[podium] envoi refusé (HTTP {code}) {str(rep)[:160]}", flush=True)
         return ""
     postes[cle] = str(rep["id"])
+    # le message vivant de la semaine ecoulee a fini son office : le prochain
+    # rafraichissement en creera un neuf pour la semaine qui commence
+    (d.setdefault("vivants", {})).pop(gid, None)
     _ecrire(d)
     print(f'[podium] {debut} → {fin} postée dans {gid} : {len(cl["lignes"])} entités, '
           f'{len(cl["illisibles"])} illisible(s), liste {"fraîche" if cl["frais"] else "du cache"}',
           flush=True)
     return str(rep["id"])
+
+
+def rafraichir(gid: str, jour: Optional[dt.date] = None) -> str:
+    """Met à jour (ou crée) le message VIVANT de la semaine en cours.
+
+    Le message est RÉÉDITÉ, jamais reposté : un classement qui s'empile vingt
+    fois par jour noierait le salon, et Discord ne notifie pas une édition —
+    personne n'est dérangé pour trois clics de plus.
+
+    Une semaine nouvelle veut un message neuf : celui de la semaine d'avant
+    reste en place, il est devenu l'archive.
+    """
+    gid = str(gid)
+    debut, fin = semaine_en_cours(jour)
+    d = _etat()
+    vivants = d.setdefault("vivants", {})
+    garde = vivants.get(gid) or {}
+    salon = _salon(gid)
+    if not salon:
+        print(f"[podium] salon {SALON_PODIUM} introuvable sur {gid}", flush=True)
+        return ""
+    cl = classement(debut, fin)
+    if not cl["lignes"] and not cl["illisibles"]:
+        # aucun relevé du tout : on ne remplace pas un classement correct par du vide
+        print("[podium] aucun relevé, message vivant laissé tel quel", flush=True)
+        return str(garde.get("message") or "")
+    corps = {"embeds": [embed_podium(cl, debut, fin, en_cours=True)]}
+
+    mid = str(garde.get("message") or "")
+    if mid and garde.get("semaine") == debut.isoformat():
+        code, rep = _api("PATCH", f"/channels/{salon}/messages/{mid}", json=corps)
+        if code == 200:
+            garde["vu"] = time.time()
+            vivants[gid] = garde
+            _ecrire(d)
+            return mid
+        # le message a pu être supprimé à la main : on en refait un plutôt
+        # que de rester muet jusqu'à la semaine prochaine
+        print(f"[podium] édition refusée (HTTP {code}), nouveau message", flush=True)
+
+    code, rep = _api("POST", f"/channels/{salon}/messages", json=corps)
+    if code != 200 or not rep.get("id"):
+        print(f"[podium] envoi refusé (HTTP {code}) {str(rep)[:160]}", flush=True)
+        return ""
+    vivants[gid] = {"semaine": debut.isoformat(), "message": str(rep["id"]), "vu": time.time()}
+    _ecrire(d)
+    print(f'[podium] message vivant {debut} → {fin} : {len(cl["lignes"])} entités', flush=True)
+    return str(rep["id"])
+
+
+def a_rafraichir(gid: str, maintenant: Optional[float] = None) -> bool:
+    """Vrai quand le message vivant a passé l'âge, ou n'existe pas encore."""
+    if _pause_gms():
+        return False
+    garde = (_etat().get("vivants") or {}).get(str(gid)) or {}
+    if garde.get("semaine") != semaine_en_cours()[0].isoformat():
+        return True
+    minutes = int(_config().get("minutes") or MINUTES_LIVE)
+    return (maintenant or time.time()) - float(garde.get("vu") or 0) >= minutes * 60
+
+
+def _pause_gms() -> bool:
+    """GetMySocial nous a dit de nous calmer : on saute ce tour.
+
+    Sans ça, le rafraîchissement tapait dans un quota déjà épuisé et volait
+    les appels du tableau de bord, qui sert de vraies pages à de vraies gens.
+    """
+    try:
+        import gms
+        return int(gms.pause_restante() or 0) > 0
+    except Exception:
+        return False
 
 
 def a_poster(maintenant: Optional[dt.datetime] = None) -> bool:
