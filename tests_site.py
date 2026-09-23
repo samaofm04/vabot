@@ -12451,8 +12451,13 @@ try:
               _vd.decider(dict(_base, hors_cloudflare=True), {})["etat"] == "attente")
         # -- interactions
         check("PING de Discord : repondu", _vd.traiter_interaction({"type": 1}) == {"type": 1})
+        check("deja « Suspect » : pas de nouveau lien, on attend le responsable",
+              "responsable" in _vd.traiter_interaction({"type": 3, "guild_id": _vd.GUILD_ID, "data": {"custom_id": "verif:start"},
+                                                        "member": {"user": {"id": "123456789012345678"}, "roles": [_vd.ROLE_SUSPECT]}})["data"]["content"])
+        check("page : un Francais lit « en attente d un responsable », jamais « refuse »",
+              "refus" not in _vd.PAGE_HTML and "validée à la main" in open(_vd.__file__, encoding="utf-8").read())
         check("deja « En attente » : pas de nouveau lien (chaque essai reposterait une alerte)",
-              "manager" in _vd.traiter_interaction({"type": 3, "guild_id": _vd.GUILD_ID, "data": {"custom_id": "verif:start"},
+              "responsable" in _vd.traiter_interaction({"type": 3, "guild_id": _vd.GUILD_ID, "data": {"custom_id": "verif:start"},
                                                     "member": {"user": {"id": "123456789012345678"}, "roles": [_vd.ROLE_ATTENTE]}})["data"]["content"])
         _startV = _vd.traiter_interaction({"type": 3, "guild_id": _vd.GUILD_ID, "data": {"custom_id": "verif:start"},
                                            "member": {"user": {"id": "123456789012345678", "username": "va"}, "roles": []}})
@@ -12476,8 +12481,8 @@ try:
         _vd.infos_ip = lambda ip: {"ok": True, "pays": "FR", "pays_nom": "France", "fai": "Orange", "vpn": False, "type": ""}
         _jFR = _vd.creer_jeton("111111111111111111")
         _rFR = _vd.verifier(_jFR, {"t0": _tmV.time() - 10, "fuseau": "Europe/Paris", "canvas": "c"}, "90.1.1.1", True)
-        check("parcours : IP francaise bloquee, alerte dans #suspicions, role Suspect, jamais Verifie",
-              _rFR["etat"] == "bloque" and any(c == f"/channels/{_vd.SALON_SUSPICIONS}/messages" for _, c, _j in _poses)
+        check("parcours : IP francaise -> alerte dans #suspicions, role Suspect, jamais Verifie",
+              _rFR["etat"] == "attente" and any(c == f"/channels/{_vd.SALON_SUSPICIONS}/messages" for _, c, _j in _poses)
               and any(m == "PUT" and c.endswith("/roles/" + _vd.ROLE_SUSPECT) for m, c, _j in _poses)
               and not any(c.endswith("/roles/" + _vd.ROLE_VERIFIE) for _, c, _j in _poses))
         check("parcours : le meme lien ne sert qu une fois",

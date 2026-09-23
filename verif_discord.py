@@ -12,8 +12,10 @@ LE PARCOURS
   3. Discord ne donne JAMAIS l'IP d'un membre a un bot : c'est la page web
      qui la voit. Elle releve aussi une empreinte de l'appareil.
   4. Decision (decider) :
-       - IP hors Bénin / Madagascar                              -> BLOQUE,
-         role 🚩 Suspect, alerte « fraude » dans #🚩┃suspicions ;
+       - IP hors Bénin / Madagascar                              -> SUSPECT :
+         role 🚩 Suspect, alerte « fraude » dans #🚩┃suspicions ; le
+         membre, lui, lit « en attente » : un responsable peut l'accepter
+         a la main (demande du proprietaire, 23/09/2026) ;
          (un VPN n'est pas interdit : il est signale, le pays de l'IP decide)
        - meme appareil qu'un autre compte                        -> EN ATTENTE,
          role ⏳ En attente, alerte avec boutons Accepter / Refuser
@@ -394,7 +396,7 @@ def decider(fiche: Dict[str, Any], autres: Dict[str, Any]) -> Dict[str, Any]:
 
 # ─── Alertes staff ────────────────────────────────────────────────────────
 _COULEUR = {"ok": 0x57F287, "attente": 0xF59E0B, "bloque": 0xED4245}
-_TITRE = {"ok": "✅ Entrée vérifiée", "attente": "⏳ En attente d'un manager", "bloque": "🚨 Alerte fraude — accès bloqué"}
+_TITRE = {"ok": "✅ Entrée vérifiée", "attente": "⏳ En attente d'un manager", "bloque": "🚨 Alerte fraude — hors Bénin/Madagascar, à valider à la main"}
 
 
 def embed_alerte(fiche: Dict[str, Any], d: Dict[str, Any]) -> Dict[str, Any]:
@@ -567,8 +569,11 @@ def _conclure(uid, nonce, now, donnees, ip, ip_garantie, hors_cloudflare, infos,
     if d["etat"] == "ok":
         return {"etat": "ok", "message": "✅ Vérification réussie ! Retourne sur Discord : tout le serveur est maintenant ouvert."}
     if d["etat"] == "attente":
-        return {"etat": "attente", "message": "⏳ Ta vérification doit être validée par un manager. Tu seras prévenu sur Discord."}
-    return {"etat": "bloque", "message": "⛔ Accès refusé. Ce serveur est réservé aux candidats du Bénin et de Madagascar."}
+        return {"etat": "attente", "message": "⏳ Ta demande d'accès doit être validée à la main par un responsable. Tu seras prévenu sur Discord dès que c'est fait."}
+    # Pas de « refuse » a l'ecran : un Francais peut etre un vrai VA, un
+    # responsable tranche avec les boutons de l'alerte.
+    return {"etat": "attente", "message": "⏳ Ta demande d'accès doit être validée à la main par un responsable. "
+                                          "Tu seras prévenu sur Discord dès que c'est fait."}
 
 
 # ─── Interactions Discord (bouton « Se vérifier », boutons manager) ───────
@@ -612,10 +617,10 @@ def traiter_interaction(p: Dict[str, Any]) -> Dict[str, Any]:
         roles = membre.get("roles") or []
         if ROLE_VERIFIE and ROLE_VERIFIE in roles:
             return _ephemere("✅ Tu es déjà vérifié.")
-        if ROLE_ATTENTE and ROLE_ATTENTE in roles:
+        if any(r and r in roles for r in (ROLE_ATTENTE, ROLE_SUSPECT)):
             # un nouvel essai finirait de toute facon en attente, et reposterait
             # une alerte a chaque clic
-            return _ephemere("⏳ Ta vérification attend la validation d'un manager. Tu seras prévenu ici dès que c'est fait.")
+            return _ephemere("⏳ Ta demande d'accès attend la validation d'un responsable. Tu seras mentionné dans #bienvenue dès que c'est fait.")
         lien = f"{SITE}/verif/{creer_jeton(uid)}"
         return _ephemere(
             "🔐 **Vérification anti-fraude**\n"
