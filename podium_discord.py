@@ -123,7 +123,11 @@ def liens_bruts() -> Tuple[List[Dict[str, Any]], bool]:
     equipe = _config().get("equipe") or EQUIPE_VA
     try:
         import gms
-        r = gms.list_links_team(equipe) or {}
+        # force_refresh : la liste est mise en cache deux minutes cote gms, et
+        # un lien renomme ou cree la veille doit apparaitre dans le podium du
+        # lundi — ce releve n'a lieu qu'une fois par semaine, il peut payer
+        # le vrai appel.
+        r = gms.list_links_team(equipe, force_refresh=True) or {}
         vivants = r.get("links") or r.get("data") or []
         if r.get("ok") is not False and vivants:
             return [l for l in vivants if isinstance(l, dict) and l.get("id")], True
