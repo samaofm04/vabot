@@ -12861,6 +12861,18 @@ try:
         _dAil = _vd.decider(dict(_base, user_id="31", guild_id=_TW), {"31": dict(_base, user_id="31", etat="banni")}, manuel=True)
         check("banni sur Entretien, il arrive sur TWITTER : le manager le sait",
               _dAil["etat"] == "attente" and any("autre serveur" in r for r in _dAil["raisons"]))
+        _dAilFR = _vd.decider(dict(_base, user_id="32", pays="FR", pays_nom="France", vpn=True),
+                              {f"{_TW}:32": dict(_base, user_id="32", guild_id=_TW, etat="refuse")})
+        check("refuse sur TWITTER, revient sur Entretien par un VPN francais : bloque ET le manager le sait",
+              _dAilFR["etat"] == "bloque" and any("autre serveur" in r for r in _dAilFR["raisons"]))
+        _toutesQ = {"50": dict(_base, user_id="50", pseudo="cinquante", etat="ok"),
+                    f"{_TW}:50": dict(_base, user_id="50", guild_id=_TW, etat="banni")}
+        _qV = _vd._qui("50", _toutesQ)
+        check("compte lie verifie sur Entretien mais banni sur TWITTER : « banni » affiche en premier, avec le serveur",
+              _qV.index("banni") < _qV.index("vérifié") and "YouLab TWITTER" in _qV and "cinquante" in _qV)
+        check("compte lie present sur un seul serveur : son etat, sans nom de serveur",
+              "**en attente**" in _vd._qui("51", {"51": dict(_base, user_id="51", etat="attente")})
+              and "(" not in _vd._qui("51", {"51": dict(_base, user_id="51", etat="attente")}).split("`51`")[1])
         _vd.infos_ip = _savInfosTW
         # -- routes publiques du site
         _appV = _wV.create_app()

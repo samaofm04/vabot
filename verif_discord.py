@@ -561,6 +561,7 @@ def _hash_ip(ip: str) -> str:
 
 # ─── Decision ─────────────────────────────────────────────────────────────
 _ETAT_LISIBLE = {"bloque": "bloqué", "attente": "en attente", "refuse": "refusé", "banni": "banni", "ok": "vérifié"}
+_GRAVITE = {"banni": 0, "refuse": 1, "bloque": 2, "attente": 3, "ok": 4}
 
 
 def decider(fiche: Dict[str, Any], autres: Dict[str, Any], manuel: bool = False) -> Dict[str, Any]:
@@ -629,9 +630,6 @@ def decider(fiche: Dict[str, Any], autres: Dict[str, Any], manuel: bool = False)
             etat = "attente"
             etats = sorted({_ETAT_LISIBLE.get(v.get("etat"), "?") for v in douteux})
             raisons.append(f"même modèle d'appareil qu'un compte {' / '.join(etats)}")
-        if ailleurs:
-            etat = "attente"
-            raisons.append(f"déjà {' / '.join(ailleurs)} sur l'autre serveur YouLab")
         if meme_tel:
             etat = "attente"
             raisons.append("même numéro de téléphone qu'un autre compte")
@@ -646,6 +644,12 @@ def decider(fiche: Dict[str, Any], autres: Dict[str, Any], manuel: bool = False)
         if fiche.get("pays") in FUSEAUX_ATTENDUS and fz and fz not in FUSEAUX_ATTENDUS[fiche["pays"]]:
             etat = "attente"
             raisons.append(f"fuseau du téléphone incohérent : {fz} pour une IP {PAYS_AUTORISES.get(fiche['pays'])}")
+    if ailleurs:
+        # hors du bloc « pas bloque » : c'est justement le banni qui revient
+        # par VPN — une IP etrangere — que le manager doit reconnaitre avant
+        # de cliquer Accepter dans #suspicions
+        etat = "bloque" if etat == "bloque" else "attente"
+        raisons.append(f"déjà {' / '.join(ailleurs)} sur l'autre serveur YouLab")
     if etat == "bloque" and fiche.get("telephone") and not pays_du_tel(fiche["telephone"]):
         raisons.append(f"numéro hors Bénin/Madagascar ({fiche['telephone'][:4]}…)")
     if manuel and etat == "ok":
@@ -679,13 +683,26 @@ def _qui(x: str, toutes: Optional[Dict[str, Any]]) -> str:
     """Un compte lie, lisible meme s'il a quitte le serveur (une mention
     <@id> d'un absent s'affiche « @utilisateur inconnu ») : pseudo, id et
     ce qu'il est devenu — banni ou refuse, c'est tout ce qui compte."""
-    f = (toutes or {}).get(x) or next((v for v in (toutes or {}).values() if str(v.get("user_id")) == x), {})
+    # Une fiche par serveur : lire la premiere montrait « verifie » (Entretien)
+    # pour un compte banni sur TWITTER. On les montre toutes, la plus grave
+    # d'abord, avec leur serveur quand il y en a plusieurs.
+    fs = [v for k, v in (toutes or {}).items() if str(v.get("user_id", k)) == x]
+    fs.sort(key=lambda v: _GRAVITE.get(v.get("etat"), 9))
     morceaux = [f"<@{x}>"]
-    if f.get("pseudo"):
-        morceaux.append(f"`{_propre(f['pseudo'], 30)}`")
+    pseudo = next((v["pseudo"] for v in fs if v.get("pseudo")), "")
+    if pseudo:
+        morceaux.append(f"`{_propre(pseudo, 30)}`")
     morceaux.append(f"`{x}`")
-    if f.get("etat"):
-        morceaux.append(f"**{_ETAT_LISIBLE.get(f['etat'], f['etat'])}**")
+    etats = []
+    for v in fs:
+        if not v.get("etat"):
+            continue
+        txt = f"**{_ETAT_LISIBLE.get(v['etat'], v['etat'])}**"
+        if len(fs) > 1:
+            txt += f" ({(serveur(v.get('guild_id')) or {}).get('nom', '?')})"
+        etats.append(txt)
+    if etats:
+        morceaux.append(" · ".join(etats))
     return " ".join(morceaux)
 
 
