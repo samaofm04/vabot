@@ -106,6 +106,7 @@ LIENS = DATA_DIR / "verif_liens.json"   # le lien actif de chaque membre (et de 
 _VERROU = threading.Lock()
 _EN_COURS: set = set()        # jetons en cours de verification (la geolocalisation prend du temps)
 _UIDS_EN_COURS: set = set()   # un membre = une verification a la fois, quel que soit le nombre de liens
+_DECISIONS_EN_COURS: set = set()  # un membre = une decision de manager a la fois
 
 
 def _en_fond(f):
@@ -337,7 +338,8 @@ def infos_ip(ip: str) -> Dict[str, Any]:
     r = dict(b)
     r.update({k: v for k, v in a.items() if v not in (None, "")})
     r["vpn"] = bool(a.get("vpn") or b.get("vpn"))
-    r["type"] = a.get("type") or b.get("type") or ""
+    r["type"] = (a.get("type") if a.get("vpn") else "") or \
+        (((b.get("type") or "proxy") + " selon ip-api.com") if b.get("vpn") else "")
     r["mobile"] = b.get("mobile")
     if a.get("pays") and b.get("pays") and a["pays"] != b["pays"]:
         r["pays_autre"] = f"{b.get('pays_nom') or b['pays']} selon ip-api.com"
@@ -407,13 +409,16 @@ def _message_unique(uid: str, token: str, nonce: Optional[str] = None):
 
 
 def _clore_lien(uid: str, nonce: str, texte: str):
-    """Le lien a servi : son message ephemere affiche le resultat, sans bouton."""
+    """Le lien a servi : son message ephemere affiche le resultat, sans bouton.
+    L'entree RESTE (marquee utilisee) : l'effacer rendait valables les liens
+    qu'il avait remplaces, et le message de resultat n'etait plus efface au
+    clic suivant — deux messages sous le bouton."""
     with _VERROU:
         liens = _liens()
         actif = liens.get(uid) or {}
         if actif.get("nonce") != nonce:
             return
-        liens.pop(uid, None)
+        liens[uid] = dict(actif, utilise=True)
         _ecrire_liens(liens)
     token, ts = actif.get("token"), float(actif.get("ts") or 0)
     if token and time.time() - ts < 14 * 60:
@@ -443,10 +448,13 @@ INDICATIFS = {"229": "BJ", "261": "MG"}
 def normaliser_tel(brut: Any) -> str:
     """'+229 01 23-45.67 89' -> '+2290123456789' ; '' si inexploitable.
     L'indicatif est exige : sans lui, impossible de savoir le pays."""
-    t = re.sub(r"[\s.\-()/]", "", str(brut or ""))[:30]
+    # Un numero copie depuis WhatsApp ou les contacts porte des marques de
+    # direction invisibles (U+202A…) : sans ce menage, il etait refuse en boucle.
+    t = re.sub(r"[\s.\-()/\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff\u2010-\u2015]", "", str(brut or ""))[:30]
     if t.startswith("00"):
         t = "+" + t[2:]
-    return t if re.fullmatch(r"\+\d{8,15}", t) else ""
+    # aucun indicatif ne commence par 0 : « +01 97… » est un numero local
+    return t if re.fullmatch(r"\+[1-9]\d{7,14}", t) else ""
 
 
 def pays_du_tel(tel: str) -> str:
@@ -461,11 +469,14 @@ def resume_appareil(ua: str) -> str:
     iOS 17.5 · Safari'. Chrome masque le modele exact depuis 2023."""
     ua = str(ua or "")
     os_ = ""
-    m = re.search(r"Android ([\d.]+)(?:; ([^;)]+))?", ua)
+    m = re.search(r"Android ([\d.]+)(?:; (?:[a-z]{2}[-_][A-Za-z]{2}; )?([^;)]+))?", ua)
     if m:
         modele = re.sub(r"\s*Build/.*$", "", (m.group(2) or ""))
         modele = re.sub(r"[^A-Za-z0-9 ._+-]", "", modele).strip()[:40]
-        os_ = f"Android {m.group(1)}" + (f" ({modele})" if modele and modele != "K" else "")
+        # Chrome et Samsung Internet envoient « Android 10; K » quel que soit
+        # le telephone : version et modele y sont faux, on ne les montre pas.
+        reduit = modele == "K"
+        os_ = ("Android" if reduit else f"Android {m.group(1)}") + (f" ({modele})" if modele and not reduit else "")
     elif "iPhone" in ua or "iPad" in ua:
         m = re.search(r"OS (\d+[_\d]*)", ua)
         os_ = ("iPad" if "iPad" in ua else "iPhone") + (f" iOS {m.group(1).replace('_', '.')}" if m else "")
@@ -516,9 +527,12 @@ def decider(fiche: Dict[str, Any], autres: Dict[str, Any]) -> Dict[str, Any]:
                             and fiche.get("appareil") and v.get("appareil") == fiche.get("appareil")})
     meme_modele_et_ip = sorted((set(meme_empreinte) & set(meme_ip)) - set(meme_appareil))
     # La navigation privee change l'identifiant, pas l'empreinte : un compte
-    # refuse ou banni qui revient ainsi doit passer par un humain.
+    # refuse ou banni qui revient ainsi doit passer par un humain. « bloque »
+    # n'en est pas : c'est l'etat automatique d'une IP etrangere pas encore
+    # jugee, et l'empreinte ne designe qu'un MODELE de telephone — tous les
+    # Tecno du meme modele tombaient en attente a cause d'un seul inconnu.
     empreinte_douteuse = sorted(k for k in meme_empreinte
-                                if (autres.get(k) or {}).get("etat") in ("banni", "refuse", "bloque"))
+                                if (autres.get(k) or {}).get("etat") in ("banni", "refuse"))
     meme_tel = sorted({k for k, v in autres.items() if k != uid and fiche.get("telephone")
                        and v.get("telephone") == fiche.get("telephone")})
     precedent = (autres.get(uid) or {}).get("etat") if uid else None
@@ -578,7 +592,8 @@ _TITRE = {"ok": "✅ Entrée vérifiée", "attente": "⏳ En attente d'un manage
 def _propre(x: Any, n: int = 80) -> str:
     """Texte venu du membre ou d'un service : sans accent grave ni
     mention, sinon il casserait la mise en forme de l'alerte."""
-    return str(x or "").replace("`", "'").replace("@", "@\u200b")[:n]
+    return (str(x or "").replace("`", "'").replace("@", "@\u200b")
+            .replace("[", "(").replace("]", ")").replace("\n", " "))[:n]
 
 
 def lien_maps(fiche: Dict[str, Any]) -> str:
@@ -608,7 +623,10 @@ def embed_alerte(fiche: Dict[str, Any], d: Dict[str, Any], toutes: Optional[Dict
     lignes_liens = []
 
     def liste(ids):
-        return "\n".join("  " + _qui(x, toutes) for x in ids[:8])
+        lignes = ["  " + _qui(x, toutes) for x in ids[:6]]
+        if len(ids) > 6:
+            lignes.append(f"  … et {len(ids) - 6} autre(s)")
+        return "\n".join(lignes)
     if d.get("meme_appareil"):
         lignes_liens.append("📱 **Même appareil** (même navigateur) que :\n" + liste(d["meme_appareil"]))
     if d.get("meme_tel"):
@@ -647,7 +665,17 @@ def embed_alerte(fiche: Dict[str, Any], d: Dict[str, Any], toutes: Optional[Dict
     if d.get("raisons"):
         champs.append({"name": "Pourquoi", "value": "\n".join("• " + r for r in d["raisons"])[:1000], "inline": False})
     if lignes_liens:
-        champs.append({"name": "Liens avec d'autres comptes", "value": "\n".join(lignes_liens)[:1020], "inline": False})
+        # par blocs entiers : une coupe a 1020 caracteres tombait au milieu
+        # d'une ligne et faisait disparaitre les dernieres listes sans le dire
+        garde, reste = [], 0
+        for i, bloc in enumerate(lignes_liens):
+            if len("\n".join(garde + [bloc])) > 980:
+                reste = len(lignes_liens) - i
+                break
+            garde.append(bloc)
+        if reste:
+            garde.append(f"… {reste} autre(s) liste(s) non affichée(s) : voir data/verif_membres.json")
+        champs.append({"name": "Liens avec d'autres comptes", "value": "\n".join(garde)[:1024], "inline": False})
     return {"title": _TITRE[d["etat"]], "color": _COULEUR[d["etat"]], "fields": champs,
             "footer": {"text": "YouLab • Vérification" + (f" • {fiche['source_ip']}" if fiche.get("source_ip") else "")},
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
@@ -680,25 +708,34 @@ def _poster_alerte(fiche, d, toutes: Optional[Dict[str, Any]] = None) -> str:
     return str(rep.get("id") or "")
 
 
-def _role(methode: str, uid: str, role: str) -> bool:
+def _role_code(methode: str, uid: str, role: str) -> int:
     if not role:
-        return False
+        return 0
     code, _ = api(methode, f"/guilds/{GUILD_ID}/members/{uid}/roles/{role}")
-    return code in (200, 204)
+    return code
+
+
+def _role(methode: str, uid: str, role: str) -> bool:
+    return _role_code(methode, uid, role) in (200, 204)
 
 
 def donner_role(uid: str) -> bool:
     return _role("PUT", uid, ROLE_VERIFIE)
 
 
-def ouvrir(uid: str) -> bool:
-    """Role Vérifié, retire En attente / Suspect, et bienvenue publique."""
-    ok = donner_role(uid)
-    if ok:
+def _ouvrir(uid: str) -> int:
+    """Role Vérifié, retire En attente / Suspect, et bienvenue publique.
+    Rend le code HTTP de la pose du role (404 : il a quitte le serveur)."""
+    code = _role_code("PUT", uid, ROLE_VERIFIE)
+    if code in (200, 204):
         _role("DELETE", uid, ROLE_ATTENTE)
         _role("DELETE", uid, ROLE_SUSPECT)
         poster_bienvenue(uid)
-    return ok
+    return code
+
+
+def ouvrir(uid: str) -> bool:
+    return _ouvrir(uid) in (200, 204)
 
 
 def poster_bienvenue(uid: str) -> str:
@@ -778,14 +815,22 @@ def verifier(jeton: str, donnees: Dict[str, Any], ip: str, ip_garantie: bool,
         code_m, membre = api("GET", f"/guilds/{GUILD_ID}/members/{uid}")
         if code_m == 404:
             return {"etat": "erreur", "message": "Tu n'es plus sur le serveur YouLab. Rejoins-le puis clique à nouveau « Se vérifier »."}
-        membre = membre if code_m == 200 and isinstance(membre, dict) else {}
+        if code_m != 200 or not isinstance(membre, dict):
+            # Sans ses roles, impossible de savoir s'il est deja passe : on
+            # rejouerait bienvenue ou alerte. Le lien n'est pas consomme.
+            print(f"[verif] lecture du membre {uid} impossible : HTTP {code_m}", flush=True)
+            return {"etat": "erreur", "message": "Discord ne répond pas pour le moment. Réessaie dans une minute."}
         roles = membre.get("roles") or []
         # Un vieux lien ouvert apres coup ne doit ni reposter une bienvenue,
         # ni coller une alerte fraude a quelqu'un qui est deja passe.
         if ROLE_VERIFIE and ROLE_VERIFIE in roles:
-            return {"etat": "ok", "message": "✅ Tu es déjà vérifié : tout le serveur t'est ouvert."}
+            res = {"etat": "ok", "message": "✅ Tu es déjà vérifié : tout le serveur t'est ouvert."}
+            _clore_lien(uid, nonce, res["message"])
+            return res
         if any(r and r in roles for r in (ROLE_ATTENTE, ROLE_SUSPECT)):
-            return {"etat": "attente", "message": "⏳ Ta demande d'accès attend déjà la validation d'un responsable."}
+            res = {"etat": "attente", "message": "⏳ Ta demande d'accès attend déjà la validation d'un responsable."}
+            _clore_lien(uid, nonce, res["message"])
+            return res
         u = membre.get("user") or {}
         infos = infos_ip(ip)
         res = _conclure(uid, nonce, now, donnees, ip, ip_garantie, hors_cloudflare, infos,
@@ -860,7 +905,12 @@ def _conclure(uid, nonce, now, donnees, ip, ip_garantie, hors_cloudflare, infos,
         # En attente / Suspect : il peut recliquer, et l'alerte repartira.
         return {"etat": "attente", "message": "⏳ Ta demande est enregistrée, mais l'équipe n'a pas pu être prévenue "
                                               "automatiquement. Reclique « Se vérifier » sur Discord dans quelques minutes."}
-    _role("PUT", uid, ROLE_ATTENTE if d["etat"] == "attente" else ROLE_SUSPECT)
+    role = ROLE_ATTENTE if d["etat"] == "attente" else ROLE_SUSPECT
+    code_r = _role_code("PUT", uid, role)
+    if code_r not in (200, 204):
+        # Sans ce role, il peut recliquer et reposter une alerte (3 par jour
+        # au plus) : on le dit, pour que les managers ne s'en etonnent pas.
+        print(f"[verif] role {d['etat']} NON pose pour {uid} : HTTP {code_r} (alerte {alerte})", flush=True)
     # Pas de « refuse » a l'ecran, meme pour une IP etrangere : un Francais
     # peut etre un vrai VA, un responsable tranche avec les boutons.
     return {"etat": "attente", "message": "⏳ Ta demande d'accès doit être validée à la main par un responsable. "
@@ -894,9 +944,20 @@ def _action_manager(p: Dict[str, Any], action: str, cible: str, qui: str):
     appels REST (et une attente sur limite de debit) depassaient parfois
     les 3 s, Discord affichait « echec » alors que le role etait pose, et
     un second clic reposait une bienvenue."""
+    garder = None                                   # boutons a laisser si l'action n'aboutit pas
     if action == "ok":
-        reussi = ouvrir(cible)
-        fait, etat = ("✅ accepté", "ok") if reussi else ("échec de l'acceptation (rôle non posé) — réessaie", "")
+        code = _ouvrir(cible)
+        reussi = code in (200, 204)
+        etat = "ok"
+        if reussi:
+            fait = "✅ accepté"
+        elif code == 404:
+            # parti : reessayer n'y changera rien ; Bannir reste possible
+            fait = "il a quitté le serveur — rien à accepter (tu peux encore le bannir)"
+            garder = [dict(r, components=[b for b in r.get("components", []) if not str(b.get("custom_id", "")).startswith("verif:ok:")])
+                      for r in ((p.get("message") or {}).get("components") or [])]
+        else:
+            fait = f"échec de l'acceptation (HTTP {code}) — réessaie"
     elif action == "kick":
         code, _ = api("DELETE", f"/guilds/{GUILD_ID}/members/{cible}")
         reussi = code in (200, 204, 404)             # 404 : deja parti, le refus tient
@@ -923,9 +984,12 @@ def _action_manager(p: Dict[str, Any], action: str, cible: str, qui: str):
         embeds[0]["footer"] = {"text": f"YouLab • Vérification — {fait} par {qui}"}
     # En cas d'echec les boutons RESTENT : sans eux, le membre garde son role
     # En attente, « Se verifier » lui est refuse, et plus personne ne peut agir.
-    api("PATCH", f"/webhooks/{APP_ID}/{p.get('token')}/messages/@original",
-        json={"embeds": embeds, "components": [] if reussi else (message.get("components") or []),
-              "allowed_mentions": {"parse": []}})
+    code_maj, _ = api("PATCH", f"/webhooks/{APP_ID}/{p.get('token')}/messages/@original",
+                      json={"embeds": embeds,
+                            "components": [] if reussi else (garder if garder is not None else (message.get("components") or [])),
+                            "allowed_mentions": {"parse": []}})
+    if code_maj != 200:
+        print(f"[verif] alerte non mise a jour apres « {fait} » sur {cible} : HTTP {code_maj}", flush=True)
 
 
 def traiter_interaction(p: Dict[str, Any]) -> Dict[str, Any]:
@@ -944,6 +1008,8 @@ def traiter_interaction(p: Dict[str, Any]) -> Dict[str, Any]:
         uid = str(user.get("id") or "")
         if not uid.isdigit():
             return _ephemere("Compte introuvable.")
+        if uid in _UIDS_EN_COURS:
+            return _ephemere("⏳ Ta vérification est en cours, patiente quelques secondes.")
         if not configure():
             print("[verif] clic « Se verifier » refuse : bot SEVEN non configure (token ?)", flush=True)
             return _ephemere("⚠️ Vérification momentanément indisponible. Réessaie dans quelques minutes.")
@@ -971,7 +1037,22 @@ def traiter_interaction(p: Dict[str, Any]) -> Dict[str, Any]:
         if not _est_manager(membre):
             return _ephemere("Réservé aux managers.")
         qui = _propre(user.get("username") or "?", 40)
-        _EN_FOND(lambda: _action_manager(p, m.group(1), m.group(2), qui))
+        action, cible = m.group(1), m.group(2)
+        # Apres un type 6, le bouton reste cliquable sans rien montrer tant que
+        # le travail n'est pas fini : un double clic postait deux bienvenues,
+        # et « Accepter » puis « Bannir » d'un autre manager laissait un banni
+        # avec une bienvenue et une fiche « ok ».
+        with _VERROU:
+            if cible in _DECISIONS_EN_COURS:
+                return _ephemere("⏳ Une décision est déjà en cours pour ce membre.")
+            _DECISIONS_EN_COURS.add(cible)
+
+        def tache():
+            try:
+                _action_manager(p, action, cible, qui)
+            finally:
+                _DECISIONS_EN_COURS.discard(cible)
+        _EN_FOND(tache)
         return {"type": 6}                                  # « je m'en occupe » : le message sera mis a jour
 
     return _ephemere("Action inconnue.")
@@ -1019,9 +1100,9 @@ button:disabled{opacity:.6}.res{margin-top:16px;padding:12px;border-radius:10px;
     if (!v) { v = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2)); localStorage.setItem(k, v); } return v; } catch (e) { return ''; } }
   var bouton = document.getElementById('go'), res = document.getElementById('res');
   bouton.onclick = function(){
-    var tel = (document.getElementById('tel').value || '').replace(/[\\s.\\-()\\/]/g, '');
+    var tel = (document.getElementById('tel').value || '').replace(/[\\s.\\-()\\/\\u200b-\\u200f\\u202a-\\u202e\\u2066-\\u2069\\ufeff\\u2010-\\u2015]/g, '');
     if (tel.indexOf('00') === 0) { tel = '+' + tel.slice(2); }
-    if (!/^\\+\\d{8,15}$/.test(tel)) {
+    if (!/^\\+[1-9]\\d{7,14}$/.test(tel)) {
       res.className = 'res erreur'; res.style.display = 'block';
       res.textContent = "Écris ton numéro avec l'indicatif : +229… (Bénin) ou +261… (Madagascar).";
       return;

@@ -12502,29 +12502,65 @@ try:
         _nonV = _vd.traiter_interaction({"type": 3, "guild_id": _vd.GUILD_ID, "data": {"custom_id": "verif:ok:123456789012345678"},
                                          "member": {"user": {"id": "5", "username": "x"}, "roles": [], "permissions": "0"}})
         check("boutons Accepter/Refuser : reserves aux managers", "managers" in _nonV["data"]["content"])
-        _ouiV = _vd.traiter_interaction({"type": 3, "guild_id": _vd.GUILD_ID, "token": "tokM", "data": {"custom_id": "verif:ok:123456789012345678"},
-                                         "member": {"user": {"id": "5", "username": "boss"}, "roles": [_vd.ROLE_MANAGER], "permissions": "0"},
-                                         "message": {"embeds": [{"title": "t"}], "components": [{"type": 1}]}})
+        _cibleM = "123456789012345678"
+        _fsM = _vd._fiches()
+        _fsM[_cibleM] = dict(_base, user_id=_cibleM, ts=_tmV.time(), etat="attente")
+        _vd._ecrire_fiches(_fsM)
+        _MGR = {"user": {"id": "5", "username": "boss"}, "roles": [_vd.ROLE_MANAGER], "permissions": "0"}
+
+        def _clicM(action, token):
+            return _vd.traiter_interaction({
+                "type": 3, "guild_id": _vd.GUILD_ID, "token": token, "member": _MGR,
+                "data": {"custom_id": f"verif:{action}:{_cibleM}"},
+                "message": {"embeds": [{"title": "t"}], "components": [{"type": 1, "components": [
+                    {"type": 2, "custom_id": f"verif:ok:{_cibleM}"}, {"type": 2, "custom_id": f"verif:ban:{_cibleM}"}]}]}})
+        _fileM = []
+        _vd._EN_FOND = _fileM.append              # la tache est gardee : on l execute a la main
+        _ouiV = _clicM("ok", "tokM")
+        _avantM = list(_appelsM)
+        _doubleM = _clicM("ok", "tokM2")
+        check("manager : reponse immediate, AUCUN appel Discord avant la reponse (limite des 3 s)",
+              _ouiV == {"type": 6} and _avantM == [] and len(_fileM) == 1)
+        check("manager : double clic pendant le traitement -> refuse, une seule decision",
+              "déjà en cours" in _doubleM["data"]["content"] and len(_fileM) == 1)
+        _fileM.pop()()
+        _vd._EN_FOND = lambda f: f()
         _majM = [j for m, c, j in _appelsM if m == "PATCH" and c.endswith("/tokM/messages/@original")]
-        check("manager qui accepte : reponse immediate (3 s), puis alerte mise a jour sans boutons",
-              _ouiV == {"type": 6} and len(_majM) == 1 and _majM[0]["components"] == []
+        check("manager qui accepte : role pose sur LE MEMBRE, une bienvenue, fiche « ok », boutons retires",
+              ("PUT", f"/guilds/{_vd.GUILD_ID}/members/{_cibleM}/roles/{_vd.ROLE_VERIFIE}") in [(m, c) for m, c, _ in _appelsM]
+              and sum(1 for _, c, _j in _appelsM if c == f"/channels/{_vd.SALON_BIENVENUE}/messages") == 1
+              and _vd._fiches()[_cibleM]["etat"] == "ok"
+              and len(_majM) == 1 and _majM[0]["components"] == []
               and "accepté par boss" in _majM[0]["embeds"][0]["footer"]["text"])
+        check("manager : apres la decision, un nouveau clic est de nouveau possible", _cibleM not in _vd._DECISIONS_EN_COURS)
+        _appelsM.clear()
+        _clicM("ban", "tokB")
+        check("manager « Bannir » : vrai bannissement, fiche « banni »",
+              ("PUT", f"/guilds/{_vd.GUILD_ID}/bans/{_cibleM}") in [(m, c) for m, c, _ in _appelsM]
+              and _vd._fiches()[_cibleM]["etat"] == "banni")
         _appelsM.clear()
         _vd.api = lambda m, c, **k: (_appelsM.append((m, c, k.get("json"))) or ((403, {}) if m == "PUT" else (204, {})))
-        _vd.traiter_interaction({"type": 3, "guild_id": _vd.GUILD_ID, "token": "tokE", "data": {"custom_id": "verif:ok:123456789012345678"},
-                                 "member": {"user": {"id": "5", "username": "boss"}, "roles": [_vd.ROLE_MANAGER], "permissions": "0"},
-                                 "message": {"embeds": [{"title": "t"}], "components": [{"type": 1, "components": ["b"]}]}})
+        _clicM("ok", "tokE")
         _majE = [j for m, c, j in _appelsM if c.endswith("/tokE/messages/@original")]
         check("manager : si l action echoue, les boutons RESTENT pour reessayer",
-              len(_majE) == 1 and _majE[0]["components"] and "échec" in _majE[0]["embeds"][0]["footer"]["text"])
-        _vd.api = lambda m, c, **k: (_appelsM.append((m, c, k.get("json"))) or ((404, {}) if m == "DELETE" else (204, {})))
+              len(_majE) == 1 and len(_majE[0]["components"][0]["components"]) == 2
+              and "échec" in _majE[0]["embeds"][0]["footer"]["text"] and _vd._fiches()[_cibleM]["etat"] == "banni")
         _appelsM.clear()
-        _vd.traiter_interaction({"type": 3, "guild_id": _vd.GUILD_ID, "token": "tokK", "data": {"custom_id": "verif:kick:123456789012345678"},
-                                 "member": {"user": {"id": "5", "username": "boss"}, "roles": [_vd.ROLE_MANAGER], "permissions": "0"},
-                                 "message": {"embeds": [{"title": "t"}], "components": [{"type": 1}]}})
+        _vd.api = lambda m, c, **k: (_appelsM.append((m, c, k.get("json")))
+                                     or ((404, {}) if m == "PUT" and "/roles/" in c else (204, {})))
+        _clicM("ok", "tokP")
+        _majP = [j for m, c, j in _appelsM if c.endswith("/tokP/messages/@original")]
+        check("« Accepter » un membre parti : le dit, sans « reessaie », retire Accepter et garde Bannir",
+              len(_majP) == 1 and "quitté" in _majP[0]["embeds"][0]["footer"]["text"]
+              and "réessaie" not in _majP[0]["embeds"][0]["footer"]["text"]
+              and [b["custom_id"] for b in _majP[0]["components"][0]["components"]] == [f"verif:ban:{_cibleM}"])
+        _appelsM.clear()
+        _vd.api = lambda m, c, **k: (_appelsM.append((m, c, k.get("json"))) or ((404, {}) if m == "DELETE" else (204, {})))
+        _clicM("kick", "tokK")
         _majK = [j for m, c, j in _appelsM if c.endswith("/tokK/messages/@original")]
-        check("manager « Refuser » sur un membre deja parti (404) : compte comme fait",
-              len(_majK) == 1 and _majK[0]["components"] == [] and "déjà quitté" in _majK[0]["embeds"][0]["footer"]["text"])
+        check("manager « Refuser » sur un membre deja parti (404) : compte comme fait, fiche « refuse »",
+              len(_majK) == 1 and _majK[0]["components"] == [] and "déjà quitté" in _majK[0]["embeds"][0]["footer"]["text"]
+              and _vd._fiches()[_cibleM]["etat"] == "refuse")
         # -- parcours complet par la page, reseau simule
         _poses = []
         _vd.api = lambda m, chemin, **k: (_poses.append((m, chemin, k.get("json"))) or (200, {"id": "999"}))
@@ -12533,7 +12569,8 @@ try:
         _rFR = _vd.verifier(_jFR, {"t0": _tmV.time() - 10, "fuseau": "Europe/Paris", "canvas": "c",
                                    "telephone": "+33 6 12 34 56 78"}, "90.1.1.1", True)
         check("parcours : IP francaise -> alerte dans #suspicions, role Suspect, jamais Verifie",
-              _rFR["etat"] == "attente" and any(c == f"/channels/{_vd.SALON_SUSPICIONS}/messages" for _, c, _j in _poses)
+              _rFR["etat"] == "attente" and "refus" not in _rFR["message"]
+              and any(c == f"/channels/{_vd.SALON_SUSPICIONS}/messages" for _, c, _j in _poses)
               and any(m == "PUT" and c.endswith("/roles/" + _vd.ROLE_SUSPECT) for m, c, _j in _poses)
               and not any(c.endswith("/roles/" + _vd.ROLE_VERIFIE) for _, c, _j in _poses))
         check("parcours : le meme lien ne sert qu une fois",
@@ -12592,7 +12629,54 @@ try:
         _clos = [j for m, c, j in _appelsC if m == "PATCH" and c.endswith("/tokC/messages/@original")]
         check("lien utilise : son message sur Discord affiche le resultat et perd son bouton",
               _rC["etat"] == "ok" and len(_clos) == 1 and _clos[0]["components"] == [] and "réussie" in _clos[0]["content"]
-              and "141414141414141414" not in _jsV.loads(_vd.LIENS.read_text(encoding="utf-8")))
+              and (_jsV.loads(_vd.LIENS.read_text(encoding="utf-8")).get("141414141414141414") or {}).get("utilise") is True)
+        _appelsC.clear()
+        _vd.traiter_interaction({"type": 3, "guild_id": _vd.GUILD_ID, "token": "tokC2", "data": {"custom_id": "verif:start"},
+                                 "member": {"user": {"id": "141414141414141414"}, "roles": [_vd.ROLE_VERIFIE]}})
+        check("clic suivant : le message de resultat est efface lui aussi (un seul message)",
+              ("DELETE", f"/webhooks/{_vd.APP_ID}/tokC/messages/@original", None) in _appelsC)
+        # un lien remplace reste mort, meme apres usage du suivant et meme si Discord flanche
+        _vd.api = lambda m, c, **k: (200, {"id": "9"})
+        _x1 = _vd.traiter_interaction({"type": 3, "guild_id": _vd.GUILD_ID, "token": "tX1", "data": {"custom_id": "verif:start"},
+                                       "member": {"user": {"id": "181818181818181818"}, "roles": []}})
+        _x2 = _vd.traiter_interaction({"type": 3, "guild_id": _vd.GUILD_ID, "token": "tX2", "data": {"custom_id": "verif:start"},
+                                       "member": {"user": {"id": "181818181818181818"}, "roles": []}})
+        _lX1 = _x1["data"]["components"][0]["components"][0]["url"].rsplit("/", 1)[1]
+        _lX2 = _x2["data"]["components"][0]["components"][0]["url"].rsplit("/", 1)[1]
+        _vd.verifier(_lX2, {"duree": 10, "telephone": "+2290161001818", "fuseau": "Africa/Porto-Novo"}, "41.85.160.18", True)
+        _vd.api = lambda m, c, **k: (503, {}) if m == "GET" else (200, {"id": "9"})
+        check("lien remplace : toujours refuse apres usage du suivant, meme si Discord ne repond plus",
+              "remplacé" in _vd.verifier(_lX1, {"duree": 10, "telephone": "+2290161001818"}, "41.85.160.18", True)["message"])
+        _jG = _vd.creer_jeton("191919191919191919")
+        _rG = _vd.verifier(_jG, {"duree": 10, "telephone": "+2290161001919"}, "41.85.160.19", True)
+        _vd.api = lambda m, c, **k: (200, {"id": "9"})
+        check("Discord muet sur le membre : on ne devine pas ses roles, le lien reste utilisable",
+              _rG["etat"] == "erreur" and "Discord" in _rG["message"]
+              and _vd.verifier(_jG, {"duree": 10, "telephone": "+2290161001919"}, "41.85.160.19", True)["etat"] != "erreur")
+        # une verification a la fois par membre, et pas de nouveau lien pendant
+        import threading as _thV
+        _feuV, _dansV = _thV.Event(), _thV.Event()
+        _sav_infos = _vd.infos_ip
+        def _infos_lent(ip):
+            _dansV.set()
+            _feuV.wait(5)
+            return {"ok": True, "pays": "BJ", "pays_nom": "Benin", "fai": "MTN", "vpn": False, "type": ""}
+        _vd.infos_ip = _infos_lent
+        _resV = {}
+        _tV = _thV.Thread(target=lambda: _resV.update(a=_vd.verifier(_vd.creer_jeton("202020202020202020"),
+                                                                     {"duree": 10, "telephone": "+2290161002020"},
+                                                                     "41.85.160.20", True)))
+        _tV.start()
+        _dansV.wait(5)
+        _enCoursV = _vd.verifier(_vd.creer_jeton("202020202020202020"), {"duree": 10, "telephone": "+2290161002020"}, "41.85.160.20", True)
+        _clicEnCours = _vd.traiter_interaction({"type": 3, "guild_id": _vd.GUILD_ID, "token": "tEC", "data": {"custom_id": "verif:start"},
+                                                "member": {"user": {"id": "202020202020202020"}, "roles": []}})
+        _feuV.set()
+        _tV.join(10)
+        _vd.infos_ip = _sav_infos
+        check("deux liens du meme membre en meme temps : le second attend (pas d alerte en double)",
+              "déjà en cours" in _enCoursV["message"] and (_resV.get("a") or {}).get("etat") == "ok")
+        check("clic « Se verifier » pendant sa verification : pas de nouveau lien", "en cours" in _clicEnCours["data"]["content"])
         _vd.api = lambda m, chemin, **k: (200, {"id": "9"})
         _rH = _vd.verifier(_vd.creer_jeton("151515151515151515"), {"t0": _tmV.time() + 3600, "duree": 20,
                                                                   "telephone": "+2290161001515"}, "41.85.160.15", True)
@@ -12637,6 +12721,26 @@ try:
         _dTel = _vd.decider(dict(_base, telephone="+2290161000009"),
                             {"9": dict(_base, user_id="9", telephone="+2290161000009", empreinte="w", appareil="w", ip_hash="w", etat="ok")})
         check("meme numero de telephone qu un autre compte : EN ATTENTE", _dTel["etat"] == "attente" and _dTel["meme_tel"] == ["9"])
+        check("IP beninoise mais numero francais : EN ATTENTE",
+              _vd.decider(dict(_base, telephone="+33612345678"), {})["etat"] == "attente")
+        _dRef = _vd.decider(dict(_base, appareil="n2", ip_hash="i2"), {"r": dict(_base, user_id="r", appareil="v", ip_hash="v", etat="refuse")})
+        check("empreinte d un compte REFUSE : EN ATTENTE", _dRef["etat"] == "attente")
+        _dBlo = _vd.decider(dict(_base, appareil="n3", ip_hash="i3"), {"x": dict(_base, user_id="x", appareil="v", ip_hash="v", etat="bloque")})
+        check("empreinte d un compte seulement « bloque » (IP etrangere pas encore jugee) : OK, mais signale",
+              _dBlo["etat"] == "ok" and _dBlo["meme_empreinte"] == ["x"])
+        check("numero colle depuis WhatsApp (marques invisibles) : accepte",
+              _vd.normaliser_tel("\u202a+229 01 97 12 34 56\u202c") == "+2290197123456")
+        _jZ = _vd.creer_jeton("212121212121212121")
+        _rZ = _vd.verifier(_jZ, {"duree": 10, "telephone": "+01 97 12 34 56"}, "41.85.160.21", True)
+        check("« +01 97… » (numero local avec un +) : refuse, lien reutilisable pour corriger",
+              _rZ["etat"] == "erreur" and "indicatif" in _rZ["message"]
+              and _vd.verifier(_jZ, {"duree": 10, "telephone": "+229 01 97 00 21 21"}, "41.85.160.21", True)["etat"] != "erreur")
+        _rUa = _vd.verifier(_vd.creer_jeton("222222222222222229"),
+                            {"duree": 10, "telephone": "+2290161002229",
+                             "ua": "Mozilla/5.0 (Linux; Android 13; [Valider](https://ev.il/x Build/TP1A) Chrome/129"},
+                            "41.85.160.22", True)
+        _fUa = _jsV.loads(_vd.FICHES.read_text(encoding="utf-8"))["222222222222222229"]["appareil_resume"]
+        check("modele de telephone piege (lien masque dans l UA) : neutralise", "[" not in _fUa and "](" not in _fUa)
         # -- fiche staff : ce qu on sait, sans casser la mise en forme
         _eV = _vd.embed_alerte(dict(_base, ip="41.85.160.10", pseudo="a`b@everyone", telephone="+2290161000002",
                                     ville="Cotonou", region="Littoral", lat=6.3654, lon=2.4183, fai="MTN Benin",
@@ -12650,6 +12754,16 @@ try:
         check("fiche staff : un pseudo piege ne casse rien (pas d accent grave, pas de @everyone actif)",
               "a'b@\u200beveryone" in _txtV and len(_txtV) < 6000 and len(_eV["fields"]) <= 25
               and all(len(f["value"]) <= 1024 for f in _eV["fields"]))
+        _idsL = [str(100000000000000000 + i) for i in range(12)]
+        _toutesL = {x: {"pseudo": "x`y@everyone" + "z" * 20, "etat": "banni"} for x in _idsL}
+        _eL = _vd.embed_alerte(dict(_base, ip="1.2.3.4"), {"etat": "attente", "raisons": ["r" * 60] * 12,
+                                                          "meme_appareil": _idsL, "meme_tel": _idsL,
+                                                          "meme_empreinte": _idsL, "meme_ip": _idsL}, _toutesL)
+        _totL = len(_eL["title"]) + len(_eL["footer"]["text"]) + sum(len(f["name"]) + len(f["value"]) for f in _eL["fields"])
+        _lienL = next(f["value"] for f in _eL["fields"] if f["name"].startswith("Liens"))
+        check("fiche staff avec 12 comptes lies : limites Discord tenues, et ce qui est cache est annonce",
+              all(len(f["value"]) <= 1024 for f in _eL["fields"]) and _totL <= 6000 and "autre(s)" in _lienL
+              and "`y@everyone" not in _lienL)
         _savGet = _vd.requests.get
         class _RepV:
             def __init__(self, d): self._d = d
@@ -12668,6 +12782,36 @@ try:
         check("infos IP : les deux services fusionnes (pays et ville de proxycheck, mobile d ip-api)",
               _iV["ok"] and _iV["pays"] == "BJ" and _iV["ville"] == "Cotonou" and _iV["mobile"] is True
               and _iV["source"] == "proxycheck.io + ip-api.com" and not _iV.get("pays_autre"))
+
+        class _RepHtml:
+            def json(self):
+                raise ValueError("page HTML")
+        _PC_BJ = {"41.85.160.10": {"isocode": "BJ", "country": "Benin", "provider": "MTN", "proxy": "no", "type": "Wireless"}}
+        _IA_BJ = {"status": "success", "countryCode": "BJ", "country": "Benin", "isp": "MTN", "mobile": True}
+
+        def _infos_avec(pc, ia):
+            def _get(url, **k):
+                src = pc if "proxycheck" in url else ia
+                if isinstance(src, Exception):
+                    raise src
+                return _RepHtml() if src == "HTML" else _RepV(src)
+            _vd.requests.get = _get
+            try:
+                return _savV[4]("41.85.160.10")
+            finally:
+                _vd.requests.get = _savGet
+        _i1 = _infos_avec("HTML", _IA_BJ)
+        _i2 = _infos_avec(_PC_BJ, ConnectionError("coupe"))
+        _i3 = _infos_avec(ConnectionError("x"), "HTML")
+        _i4 = _infos_avec(_PC_BJ, dict(_IA_BJ, countryCode="FR", country="France"))
+        _i5 = _infos_avec(_PC_BJ, dict(_IA_BJ, hosting=True))
+        check("infos IP : un service qui renvoie du HTML ou coupe -> l autre suffit, sans exception",
+              _i1["ok"] and _i1["source"] == "ip-api.com" and _i2["ok"] and _i2["source"] == "proxycheck.io")
+        check("infos IP : les deux muets -> ok=False avec la raison (la decision passe a un humain)",
+              _i3["ok"] is False and _i3.get("erreur"))
+        check("infos IP : les services ne donnent pas le meme pays -> dit au staff", _i4["pays"] == "BJ" and "France" in _i4.get("pays_autre", ""))
+        check("infos IP : hebergeur selon ip-api seulement -> signale, et le libelle dit qui l affirme",
+              _i5["vpn"] is True and "ip-api" in _i5["type"])
         # -- routes publiques du site
         _appV = _wV.create_app()
         _appV.config["TESTING"] = True
@@ -12699,6 +12843,31 @@ try:
         check("page /verif avec un lien valide : servie, previent le membre, non indexee",
               _gV.status_code == 200 and "adresse IP" in _gV.get_data(as_text=True) and "no-store" in (_gV.headers.get("Cache-Control") or "")
               and _gV.headers.get("X-Robots-Tag") == "noindex")
+        import re as _reV2, shutil as _shV2, subprocess as _spV2
+        _hV2 = _gV.get_data(as_text=True)
+        _jsV2 = "\n".join(_reV2.findall(r"<script>(.*?)</script>", _hV2, _reV2.S))
+        _idsV2 = set(_reV2.findall(r"getElementById\('([^']+)'\)", _jsV2))
+        check("page /verif : chaque element cherche par le script existe dans la page",
+              _idsV2 and all(f'id="{x}"' in _hV2 for x in _idsV2), sorted(x for x in _idsV2 if f'id="{x}"' not in _hV2))
+        if _shV2.which("node"):
+            _fV2 = _dV / "verif_page.js"
+            _fV2.write_text(_jsV2, encoding="utf-8")
+            _nV2 = _spV2.run([_shV2.which("node"), "--check", str(_fV2)], capture_output=True, text=True, timeout=60)
+            check("page /verif : le JavaScript rendu passe node --check", _nV2.returncode == 0, (_nV2.stderr or "")[:200])
+        else:
+            print("     (node absent : le JS de la page /verif n a pas ete verifie)")
+        # POST reel par la route : CF-Ray present / absent
+        _savInfosR = _vd.infos_ip
+        _vd.infos_ip = lambda ip: {"ok": True, "pays": "BJ", "pays_nom": "Benin", "fai": "MTN", "vpn": False, "type": ""}
+        _vd.api = lambda m, c, **k: (200, {"id": "9"})
+        for _uidR, _hdrR in (("232323232323232323", {"CF-Ray": "abc", "CF-Connecting-IP": "41.85.160.23"}),
+                             ("242424242424242424", {"CF-Connecting-IP": "41.85.160.24"})):
+            _cV.post("/verif/" + _vd.creer_jeton(_uidR), json={"duree": 10, "telephone": "+2290161" + _uidR[:6]}, headers=_hdrR)
+        _vd.infos_ip = _savInfosR
+        _fR = _jsV.loads(_vd.FICHES.read_text(encoding="utf-8"))
+        check("route /verif : sans CF-Ray (serveur vise en direct) -> marque hors Cloudflare, EN ATTENTE",
+              _fR["232323232323232323"]["hors_cloudflare"] is False and _fR["242424242424242424"]["hors_cloudflare"] is True
+              and _fR["242424242424242424"]["etat"] == "attente")
     finally:
         (_vd.DATA_DIR, _vd.FICHES, _vd.SECRET_FILE, _vd.CLE_PUBLIQUE_APP, _vd.infos_ip, _vd.api, _vd.LIENS, _vd._EN_FOND) = _savV
         if _savTokV is None:
