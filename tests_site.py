@@ -12812,16 +12812,16 @@ try:
         check("infos IP : les services ne donnent pas le meme pays -> dit au staff", _i4["pays"] == "BJ" and "France" in _i4.get("pays_autre", ""))
         check("infos IP : hebergeur selon ip-api seulement -> signale, et le libelle dit qui l affirme",
               _i5["vpn"] is True and "ip-api" in _i5["type"])
-        # -- second serveur : YouLab TWITTER, chaque entree a la main
-        _TW = _vd.TWITTER_ID
+        # -- second serveur : YouLab THREADS, chaque entree a la main
+        _TW = _vd.THREADS_ID
         _cfgTW = _vd.serveur(_TW)
         _jTW = _vd.creer_jeton("303030303030303030", gid=_TW)
-        check("jeton TWITTER : il porte son serveur ; un jeton sans serveur reste Entretien",
+        check("jeton THREADS : il porte son serveur ; un jeton sans serveur reste Entretien",
               (_vd.lire_jeton(_jTW) or {}).get("guild_id") == _TW
               and (_vd.lire_jeton(_vd.creer_jeton("303030303030303030")) or {}).get("guild_id") == _vd.GUILD_ID)
         _aTW, _bTW = _jTW.split(".", 1)
         _fauxTW = _vd._b64(_vd._unb64(_aTW).replace(_TW.encode(), _vd.GUILD_ID.encode())) + "." + _bTW
-        check("jeton TWITTER reecrit vers Entretien : refuse (le serveur est signe)", _vd.lire_jeton(_fauxTW) is None)
+        check("jeton THREADS reecrit vers Entretien : refuse (le serveur est signe)", _vd.lire_jeton(_fauxTW) is None)
         check("jeton pour un serveur non gere : refuse", _vd.lire_jeton(_vd.creer_jeton("3", gid="999")) is None)
         _appelsTW = []
         _vd.api = lambda m, c, **k: (_appelsTW.append((m, c, k.get("json"))) or (200, {"id": "9"}))
@@ -12833,16 +12833,16 @@ try:
         _donTW = {"duree": 10, "telephone": "+2290161003030", "fuseau": "Africa/Porto-Novo", "appareil": "dev-tw", "canvas": "c-tw"}
         _rTW = _vd.verifier(_lTW, dict(_donTW), "41.85.160.30", True)
         _fTW = _jsV.loads(_vd.FICHES.read_text(encoding="utf-8")).get(f"{_TW}:303030303030303030") or {}
-        check("TWITTER : meme un candidat parfait (Benin, rien a signaler) attend un manager",
+        check("THREADS : meme un candidat parfait (Benin, rien a signaler) attend un manager",
               _rTW["etat"] == "attente" and _fTW.get("etat") == "attente" and _fTW.get("guild_id") == _TW
               and any("à la main" in r for r in _fTW.get("raisons", [])))
         _mcTW = [(m, c) for m, c, _ in _appelsTW]
-        check("TWITTER : tout se passe sur SON serveur (membre lu, alerte, role En attente), rien sur Entretien",
+        check("THREADS : tout se passe sur SON serveur (membre lu, alerte, role En attente), rien sur Entretien",
               ("GET", f"/guilds/{_TW}/members/303030303030303030") in _mcTW
               and ("POST", f"/channels/{_cfgTW['salon_attente']}/messages") in _mcTW
               and ("PUT", f"/guilds/{_TW}/members/303030303030303030/roles/{_cfgTW['role_attente']}") in _mcTW
               and not any(_vd.GUILD_ID in c for _, c in _mcTW))
-        check("TWITTER : le role Manager d Entretien ne donne aucun droit sur TWITTER",
+        check("THREADS : le role Manager d Entretien ne donne aucun droit sur THREADS",
               "managers" in _vd.traiter_interaction({"type": 3, "guild_id": _TW, "data": {"custom_id": "verif:ok:303030303030303030"},
                                                      "member": {"user": {"id": "5"}, "roles": [_vd.ROLE_MANAGER], "permissions": "0"}})["data"]["content"])
         _appelsTW.clear()
@@ -12850,26 +12850,26 @@ try:
                                  "member": {"user": {"id": "5", "username": "boss"}, "roles": [_cfgTW["role_manager"]], "permissions": "0"},
                                  "message": {"embeds": [{"title": "t"}], "components": [{"type": 1}]}})
         _mcTW = [(m, c) for m, c, _ in _appelsTW]
-        check("TWITTER : un manager de TWITTER accepte -> role Verifie de TWITTER, bienvenue dans SON salon, fiche « ok »",
+        check("THREADS : un manager de THREADS accepte -> role Verifie de THREADS, bienvenue dans SON salon, fiche « ok »",
               ("PUT", f"/guilds/{_TW}/members/303030303030303030/roles/{_cfgTW['role_verifie']}") in _mcTW
               and ("POST", f"/channels/{_cfgTW['salon_bienvenue']}/messages") in _mcTW
               and _vd._fiches()[f"{_TW}:303030303030303030"]["etat"] == "ok")
         _rE2 = _vd.verifier(_vd.creer_jeton("303030303030303030"), dict(_donTW), "41.85.160.30", True)
         _fE2 = _jsV.loads(_vd.FICHES.read_text(encoding="utf-8")).get("303030303030303030") or {}
-        check("la meme personne sur Entretien apres TWITTER : pas un « double compte », elle passe seule",
+        check("la meme personne sur Entretien apres THREADS : pas un « double compte », elle passe seule",
               _rE2["etat"] == "ok" and not any("même" in r for r in _fE2.get("raisons", [])))
         _dAil = _vd.decider(dict(_base, user_id="31", guild_id=_TW), {"31": dict(_base, user_id="31", etat="banni")}, manuel=True)
-        check("banni sur Entretien, il arrive sur TWITTER : le manager le sait",
+        check("banni sur Entretien, il arrive sur THREADS : le manager le sait",
               _dAil["etat"] == "attente" and any("autre serveur" in r for r in _dAil["raisons"]))
         _dAilFR = _vd.decider(dict(_base, user_id="32", pays="FR", pays_nom="France", vpn=True),
                               {f"{_TW}:32": dict(_base, user_id="32", guild_id=_TW, etat="refuse")})
-        check("refuse sur TWITTER, revient sur Entretien par un VPN francais : bloque ET le manager le sait",
+        check("refuse sur THREADS, revient sur Entretien par un VPN francais : bloque ET le manager le sait",
               _dAilFR["etat"] == "bloque" and any("autre serveur" in r for r in _dAilFR["raisons"]))
         _toutesQ = {"50": dict(_base, user_id="50", pseudo="cinquante", etat="ok"),
                     f"{_TW}:50": dict(_base, user_id="50", guild_id=_TW, etat="banni")}
         _qV = _vd._qui("50", _toutesQ)
-        check("compte lie verifie sur Entretien mais banni sur TWITTER : « banni » affiche en premier, avec le serveur",
-              _qV.index("banni") < _qV.index("vérifié") and "YouLab TWITTER" in _qV and "cinquante" in _qV)
+        check("compte lie verifie sur Entretien mais banni sur THREADS : « banni » affiche en premier, avec le serveur",
+              _qV.index("banni") < _qV.index("vérifié") and "YouLab THREADS" in _qV and "cinquante" in _qV)
         check("compte lie present sur un seul serveur : son etat, sans nom de serveur",
               "**en attente**" in _vd._qui("51", {"51": dict(_base, user_id="51", etat="attente")})
               and "(" not in _vd._qui("51", {"51": dict(_base, user_id="51", etat="attente")}).split("`51`")[1])

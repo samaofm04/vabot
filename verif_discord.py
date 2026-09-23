@@ -32,9 +32,9 @@ LE PARCOURS
          une ligne dans #✅┃entrées (avec l'IP) pour le staff.
 
 PLUSIEURS SERVEURS
-  Entretien (le premier) et YouLab TWITTER passent par le meme bouton, la
+  Entretien (le premier) et YouLab THREADS passent par le meme bouton, la
   meme page et les memes fiches ; chacun a ses roles et ses salons
-  (serveur()). Sur TWITTER, « auto » est faux : meme parfaite, une entree
+  (serveur()). Sur THREADS, « auto » est faux : meme parfaite, une entree
   attend un manager (demande du proprietaire, 23/09/2026). La meme
   personne verifiee sur les deux n'est pas un double compte ; refusee ou
   bannie sur l'un, elle est signalee sur l'autre.
@@ -96,10 +96,10 @@ SITE = "https://youl4b.com"
 
 # Serveurs geres en plus d'Entretien. « auto » faux : chaque entree attend
 # un manager, meme depuis le Benin ou Madagascar.
-TWITTER_ID = "1445108485090971710"
+THREADS_ID = "1445108485090971710"
 SERVEURS_EXTRA: Dict[str, Dict[str, Any]] = {
-    TWITTER_ID: {
-        "nom": "YouLab TWITTER", "auto": False,
+    THREADS_ID: {
+        "nom": "YouLab THREADS", "auto": False,
         "role_verifie": "1552192933690744883", "role_manager": "1552192935100026881",
         "role_attente": "1552192936597520466", "role_suspect": "1552192939051188316",
         "salon_entrees": "1552192947766960158", "salon_attente": "1552192949851525131",
@@ -567,7 +567,7 @@ _GRAVITE = {"banni": 0, "refuse": 1, "bloque": 2, "attente": 3, "ok": 4}
 def decider(fiche: Dict[str, Any], autres: Dict[str, Any], manuel: bool = False) -> Dict[str, Any]:
     """{etat: ok|attente|bloque, raisons:[...], meme_appareil:[ids], meme_ip:[ids]}.
 
-    manuel : serveur ou aucune entree ne passe seule (YouLab TWITTER).
+    manuel : serveur ou aucune entree ne passe seule (YouLab THREADS).
     Pure (aucun appel reseau) : c'est elle que les tests eprouvent."""
     raisons, etat = [], "ok"
     uid = str(fiche.get("user_id") or "")
@@ -684,7 +684,7 @@ def _qui(x: str, toutes: Optional[Dict[str, Any]]) -> str:
     <@id> d'un absent s'affiche « @utilisateur inconnu ») : pseudo, id et
     ce qu'il est devenu — banni ou refuse, c'est tout ce qui compte."""
     # Une fiche par serveur : lire la premiere montrait « verifie » (Entretien)
-    # pour un compte banni sur TWITTER. On les montre toutes, la plus grave
+    # pour un compte banni sur THREADS. On les montre toutes, la plus grave
     # d'abord, avec leur serveur quand il y en a plusieurs.
     fs = [v for k, v in (toutes or {}).items() if str(v.get("user_id", k)) == x]
     fs.sort(key=lambda v: _GRAVITE.get(v.get("etat"), 9))
