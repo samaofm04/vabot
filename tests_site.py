@@ -12423,7 +12423,11 @@ try:
         check("Madagascar : OK", _vd.decider(dict(_base, pays="MG", fuseau="Indian/Antananarivo"), {})["etat"] == "ok")
         check("IP en France : BLOQUE", _vd.decider(dict(_base, pays="FR", pays_nom="France", fuseau="Europe/Paris"), {})["etat"] == "bloque")
         check("tout autre pays (ex. Cote d Ivoire) : BLOQUE", _vd.decider(dict(_base, pays="CI"), {})["etat"] == "bloque")
-        check("VPN meme avec IP beninoise : BLOQUE", _vd.decider(dict(_base, vpn=True, type="VPN"), {})["etat"] == "bloque")
+        _dVpn = _vd.decider(dict(_base, vpn=True, type="VPN"), {})
+        check("VPN autorise : IP beninoise sous VPN -> OK, mais signale au staff",
+              _dVpn["etat"] == "ok" and any("VPN" in r for r in _dVpn["raisons"]))
+        check("VPN qui sort en France : c est le pays de l IP qui decide -> BLOQUE",
+              _vd.decider(dict(_base, vpn=True, pays="FR", pays_nom="France"), {})["etat"] == "bloque")
         _autres = {"2": dict(_base, user_id="2", empreinte="e1", appareil="zz", etat="ok")}
         _dMA = _vd.decider(dict(_base), _autres)
         check("meme appareil qu un compte verifie : EN ATTENTE manager", _dMA["etat"] == "attente" and _dMA["meme_appareil"] == ["2"])

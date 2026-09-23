@@ -12,8 +12,9 @@ LE PARCOURS
   3. Discord ne donne JAMAIS l'IP d'un membre a un bot : c'est la page web
      qui la voit. Elle releve aussi une empreinte de l'appareil.
   4. Decision (decider) :
-       - IP hors Bénin / Madagascar, ou VPN / proxy / hebergeur  -> BLOQUE,
+       - IP hors Bénin / Madagascar                              -> BLOQUE,
          role 🚩 Suspect, alerte « fraude » dans #🚩┃suspicions ;
+         (un VPN n'est pas interdit : il est signale, le pays de l'IP decide)
        - meme appareil qu'un autre compte                        -> EN ATTENTE,
          role ⏳ En attente, alerte avec boutons Accepter / Refuser
          pour un manager dans #⏳┃en-attente ;
@@ -364,8 +365,10 @@ def decider(fiche: Dict[str, Any], autres: Dict[str, Any]) -> Dict[str, Any]:
             etat = "bloque"
             raisons.append(f"IP hors Bénin/Madagascar : {fiche.get('pays_nom') or fiche.get('pays') or '?'}")
         if fiche.get("vpn"):
-            etat = "bloque"
-            raisons.append(f"VPN / proxy / hébergeur détecté ({fiche.get('type') or 'masquage'})")
+            # Le VPN n'est pas interdit (demande du proprietaire, 23/09/2026) :
+            # il est signale au staff, et c'est le pays de l'IP qui decide.
+            raisons.append(f"VPN / proxy détecté ({fiche.get('type') or 'masquage'}) — autorisé, "
+                           "l'IP affichée est celle du VPN")
     if fiche.get("hors_cloudflare"):
         # le site passe toujours par Cloudflare : une requete qui arrive sans
         # a vise le serveur en direct, la ou les en-tetes IP s'inventent
@@ -565,7 +568,7 @@ def _conclure(uid, nonce, now, donnees, ip, ip_garantie, hors_cloudflare, infos,
         return {"etat": "ok", "message": "✅ Vérification réussie ! Retourne sur Discord : tout le serveur est maintenant ouvert."}
     if d["etat"] == "attente":
         return {"etat": "attente", "message": "⏳ Ta vérification doit être validée par un manager. Tu seras prévenu sur Discord."}
-    return {"etat": "bloque", "message": "⛔ Accès refusé. Ce serveur est réservé aux candidats du Bénin et de Madagascar, sans VPN."}
+    return {"etat": "bloque", "message": "⛔ Accès refusé. Ce serveur est réservé aux candidats du Bénin et de Madagascar."}
 
 
 # ─── Interactions Discord (bouton « Se vérifier », boutons manager) ───────
@@ -616,7 +619,7 @@ def traiter_interaction(p: Dict[str, Any]) -> Dict[str, Any]:
         lien = f"{SITE}/verif/{creer_jeton(uid)}"
         return _ephemere(
             "🔐 **Vérification anti-fraude**\n"
-            "Ouvre ce lien **sur ton téléphone ou ton ordinateur habituel**, sans VPN. "
+            "Ouvre ce lien **sur ton téléphone ou ton ordinateur habituel**. "
             "Il est personnel et valable **15 minutes**.",
             [{"type": 1, "components": [{"type": 2, "style": 5, "label": "Ouvrir la vérification", "url": lien}]}])
 
