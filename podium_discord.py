@@ -89,6 +89,21 @@ def _config() -> Dict[str, Any]:
     return _lire(CONFIG_FICHIER, {})
 
 
+# Le VPS tourne en UTC, le Mac en heure de Paris : sans cela, « lundi 09h »
+# tombait a 11h francaise, et la semaine basculait le lundi a 02h. Tout ce qui
+# touche aux dates passe par ici.
+def _maintenant() -> dt.datetime:
+    try:
+        from zoneinfo import ZoneInfo
+        return dt.datetime.now(ZoneInfo("Europe/Paris")).replace(tzinfo=None)
+    except Exception:
+        return dt.datetime.now()
+
+
+def _aujourdhui() -> dt.date:
+    return _maintenant().date()
+
+
 def _api(methode: str, chemin: str, **kw):
     from verif_discord import api
     return api(methode, chemin, **kw)
@@ -102,7 +117,7 @@ def semaine_en_cours(jour: Optional[dt.date] = None) -> Tuple[dt.date, dt.date]:
     qui n'existent pas encore ne rend rien de plus, et afficher « au 28/09 »
     un mardi laisserait croire que la semaine est finie.
     """
-    j = jour or dt.date.today()
+    j = jour or _aujourdhui()
     return j - dt.timedelta(days=j.weekday()), j
 
 
@@ -112,7 +127,7 @@ def semaine_passee(jour: Optional[dt.date] = None) -> Tuple[dt.date, dt.date]:
     Un lundi, rend la semaine d'avant. Un autre jour, la dernière semaine
     complète : un rattrapage à la main donne alors le même message.
     """
-    j = jour or dt.date.today()
+    j = jour or _aujourdhui()
     lundi = j - dt.timedelta(days=j.weekday() + 7)
     return lundi, lundi + dt.timedelta(days=6)
 
@@ -260,7 +275,7 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
 
     pied = "YOULAB • Marché US · comptes VA, sans pseudo"
     if en_cours:
-        pied += " · mis à jour " + dt.datetime.now().strftime("%d/%m à %Hh%M")
+        pied += " · mis à jour " + _maintenant().strftime("%d/%m à %Hh%M")
     return {"title": ("🔴 PODIUM SUBS — SEMAINE EN COURS" if en_cours
                       else "🏆 PODIUM SUBS DE LA SEMAINE"),
             "color": 0xE67E22 if en_cours else 0xF1C40F,
@@ -387,5 +402,5 @@ def _pause_gms() -> bool:
 
 def a_poster(maintenant: Optional[dt.datetime] = None) -> bool:
     """Vrai un lundi, passé l'heure de publication."""
-    n = maintenant or dt.datetime.now()
+    n = maintenant or _maintenant()
     return n.weekday() == 0 and n.hour >= int(_config().get("heure") or HEURE_POST)

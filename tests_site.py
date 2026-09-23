@@ -13459,6 +13459,12 @@ try:
           "SEMAINE EN COURS" in _pd.embed_podium({"lignes": [], "illisibles": [], "frais": True},
                                                  _dtP.date(2026, 9, 21), _dtP.date(2026, 9, 24),
                                                  en_cours=True)["title"])
+    # le VPS tourne en UTC : sans heure de Paris, « lundi 09h » tombait a 11h
+    check("les dates du podium sont a l heure de Paris, pas celle du serveur",
+          abs((_pd._maintenant() - _dtP.datetime.utcnow()).total_seconds()) >= 3000)
+    check("aucune date naive ne reste dans le module",
+          _plP("podium_discord.py").read_text(encoding="utf-8").count("dt.date.today()") == 0)
+
     check("les trois primes sont 10 / 5 / 3", _pd.PRIMES == [10.0, 5.0, 3.0])
     _srcP = _plP("web_upload.py").read_text(encoding="utf-8")
     check("le podium est arme au demarrage du site",
