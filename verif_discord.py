@@ -827,6 +827,14 @@ def _ouvrir(uid: str, cfg: Optional[Dict[str, Any]] = None) -> int:
         _role("DELETE", uid, cfg["role_attente"], cfg["id"])
         _role("DELETE", uid, cfg["role_suspect"], cfg["id"])
         poster_bienvenue(uid, cfg)
+        # Le nouveau est confié à un manager, qui reçoit son salon perso.
+        # Sous try/except et à la toute fin : une vérification réussie ne
+        # doit jamais échouer parce qu un salon n a pas pu être créé.
+        try:
+            import tickets_discord
+            tickets_discord.ouvrir_ticket(uid, cfg)
+        except Exception as e:
+            print(f'[ticket] {uid} : {type(e).__name__}: {e}', flush=True)
     return code
 
 

@@ -12944,6 +12944,91 @@ except Exception as _eV:
     import traceback as _tbV
     check("verification Discord : testable", False, repr(_eV)[:200] + " " + _tbV.format_exc()[-300:])
 
+print()
+print("=" * 70)
+print("Tickets : un nouveau verifie est confie a un manager")
+print("=" * 70)
+try:
+    import json as _jsTK
+    import pathlib as _plTK
+    import tempfile as _tfTK
+    import tickets_discord as _tk
+    # noms decores : la categorie doit rester lisible
+    check("nom de categorie : « 🎯│𝑴𝑶𝑨𝑵 » -> MOAN, « samuel.0314 » -> SAMUEL",
+          [_tk._nom_court({"nick": n, "user": {"id": "1"}})
+           for n in ("🎯│𝑴𝑶𝑨𝑵", "samuel.0314", "moan_ofm")] == ["MOAN", "SAMUEL", "MOAN"])
+    check("un surnom sans lettre garde l identifiant, jamais un nom vide",
+          _tk._nom_court({"nick": "✨✨", "user": {"id": "77"}}) == "77")
+    _dTK = _plTK.Path(_tfTK.mkdtemp())
+    _savTK = (_tk.ETAT_FICHIER, _tk.CONFIG_FICHIER, _tk._api, dict(_tk._CACHE))
+    try:
+        _tk.ETAT_FICHIER = _dTK / "tickets.json"
+        _tk.CONFIG_FICHIER = _dTK / "tickets_config.json"
+        _tk._CACHE.clear()
+        _MGR = [{"user": {"id": "10"}, "nick": "Alpha"}, {"user": {"id": "20"}, "nick": "Beta"}]
+        _appels = []
+
+        def _faux(methode, chemin, **kw):
+            _appels.append((methode, chemin, kw))
+            if chemin.endswith("/roles"):
+                return 200, [{"id": "r-mgr", "name": "🛡️ Manager"}]
+            if chemin.endswith("/members"):
+                return 403, {"message": "Missing Access"}      # l autorisation manque
+            if "/members/search" in chemin:
+                q = (kw.get("params") or {}).get("query")
+                return 200, ([dict(_MGR[0], roles=["r-mgr"])] if q == "a"
+                             else [dict(_MGR[1], roles=["r-mgr"])] if q == "b" else [])
+            if chemin.startswith("/guilds/") and chemin.endswith("/channels") and methode == "GET":
+                return 200, []
+            if chemin.endswith("/channels") and methode == "POST":
+                return 201, {"id": "cat-1" if (kw.get("json") or {}).get("type") == 4 else "sal-1"}
+            if chemin.startswith("/guilds/") and "/members/" in chemin:
+                return 200, {"nick": "Nouveau", "user": {"id": "99", "username": "nouveau"}}
+            if chemin.startswith("/channels/") and methode == "GET":
+                return 404, {}
+            return 200, {"id": "m-1"}
+
+        _tk._api = _faux
+        _msTK = _tk.managers("g1")
+        check("managers : la liste refusee (403) bascule sur la recherche, 2 trouves",
+              [m["user"]["id"] for m in _msTK] == ["10", "20"], str(_msTK)[:120])
+        check("tour de role : un manager sur deux, jamais deux fois de suite",
+              [_tk._prochain("g1", _msTK)["user"]["id"] for _ in range(4)] == ["10", "20", "10", "20"])
+        _appels.clear()
+        _sal = _tk.ouvrir_ticket("99", {"id": "g1"})
+        check("ticket cree", _sal == "sal-1", _sal)
+        _creation = next((k for m, c, k in _appels
+                          if m == "POST" and c == "/guilds/g1/channels"
+                          and (k.get("json") or {}).get("type") == 0), None)
+        _droits = {o["id"]: o for o in ((_creation or {}).get("json") or {}).get("permission_overwrites", [])}
+        check("le salon est prive : @everyone ne le voit pas",
+              _droits.get("g1", {}).get("deny") == str(_tk.VOIR))
+        check("le nouveau peut y ecrire, le manager aussi",
+              _droits.get("99", {}).get("allow") == str(_tk.MEMBRE)
+              and _droits.get("r-mgr", {}).get("allow") == str(_tk.MANAGER))
+        check("le manager du tour est nomme dans les droits", "10" in _droits or "20" in _droits)
+        check("le salon est range dans la categorie du manager",
+              ((_creation or {}).get("json") or {}).get("parent_id") == "cat-1")
+        _tk._api = lambda m, c, **k: (200, {"id": _sal}) if c.startswith("/channels/") and m == "GET" else _faux(m, c, **k)
+        _appels.clear()
+        check("deuxieme verification du meme membre : pas de second salon",
+              _tk.ouvrir_ticket("99", {"id": "g1"}) == _sal
+              and not [1 for m, c, k in _appels if m == "POST" and c.endswith("/channels")])
+        # un echec Discord ne doit jamais remonter a la verification
+        _tk._api = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("Discord injoignable"))
+        check("Discord injoignable : rend « », ne leve pas — la verification aboutit quand meme",
+              _tk.ouvrir_ticket("1234", {"id": "g1"}) == "")
+    finally:
+        _tk.ETAT_FICHIER, _tk.CONFIG_FICHIER, _tk._api = _savTK[0], _savTK[1], _savTK[2]
+        _tk._CACHE.clear(); _tk._CACHE.update(_savTK[3])
+    _srcTK = _plTK.Path("verif_discord.py").read_text(encoding="utf-8")
+    _iTK = _srcTK.find("def _ouvrir(")
+    _blocTK = _srcTK[_iTK:_iTK + 900]
+    check("l ouverture du ticket est branchee a la fin d une verification reussie",
+          "tickets_discord.ouvrir_ticket" in _blocTK and "except Exception" in _blocTK)
+except Exception as _eTK:
+    check("tickets : testable", False, repr(_eTK)[:200])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
