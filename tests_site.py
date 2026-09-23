@@ -12532,7 +12532,7 @@ try:
               and _vd._fiches()[_cibleM]["etat"] == "ok"
               and len(_majM) == 1 and _majM[0]["components"] == []
               and "accepté par boss" in _majM[0]["embeds"][0]["footer"]["text"])
-        check("manager : apres la decision, un nouveau clic est de nouveau possible", _cibleM not in _vd._DECISIONS_EN_COURS)
+        check("manager : apres la decision, un nouveau clic est de nouveau possible", not _vd._DECISIONS_EN_COURS)
         _appelsM.clear()
         _clicM("ban", "tokB")
         check("manager « Bannir » : vrai bannissement, fiche « banni »",
@@ -12812,6 +12812,56 @@ try:
         check("infos IP : les services ne donnent pas le meme pays -> dit au staff", _i4["pays"] == "BJ" and "France" in _i4.get("pays_autre", ""))
         check("infos IP : hebergeur selon ip-api seulement -> signale, et le libelle dit qui l affirme",
               _i5["vpn"] is True and "ip-api" in _i5["type"])
+        # -- second serveur : YouLab TWITTER, chaque entree a la main
+        _TW = _vd.TWITTER_ID
+        _cfgTW = _vd.serveur(_TW)
+        _jTW = _vd.creer_jeton("303030303030303030", gid=_TW)
+        check("jeton TWITTER : il porte son serveur ; un jeton sans serveur reste Entretien",
+              (_vd.lire_jeton(_jTW) or {}).get("guild_id") == _TW
+              and (_vd.lire_jeton(_vd.creer_jeton("303030303030303030")) or {}).get("guild_id") == _vd.GUILD_ID)
+        _aTW, _bTW = _jTW.split(".", 1)
+        _fauxTW = _vd._b64(_vd._unb64(_aTW).replace(_TW.encode(), _vd.GUILD_ID.encode())) + "." + _bTW
+        check("jeton TWITTER reecrit vers Entretien : refuse (le serveur est signe)", _vd.lire_jeton(_fauxTW) is None)
+        check("jeton pour un serveur non gere : refuse", _vd.lire_jeton(_vd.creer_jeton("3", gid="999")) is None)
+        _appelsTW = []
+        _vd.api = lambda m, c, **k: (_appelsTW.append((m, c, k.get("json"))) or (200, {"id": "9"}))
+        _savInfosTW = _vd.infos_ip
+        _vd.infos_ip = lambda ip: {"ok": True, "pays": "BJ", "pays_nom": "Benin", "fai": "MTN", "vpn": False, "type": ""}
+        _sTW = _vd.traiter_interaction({"type": 3, "guild_id": _TW, "token": "tTW", "data": {"custom_id": "verif:start"},
+                                        "member": {"user": {"id": "303030303030303030"}, "roles": []}})
+        _lTW = _sTW["data"]["components"][0]["components"][0]["url"].rsplit("/", 1)[1]
+        _donTW = {"duree": 10, "telephone": "+2290161003030", "fuseau": "Africa/Porto-Novo", "appareil": "dev-tw", "canvas": "c-tw"}
+        _rTW = _vd.verifier(_lTW, dict(_donTW), "41.85.160.30", True)
+        _fTW = _jsV.loads(_vd.FICHES.read_text(encoding="utf-8")).get(f"{_TW}:303030303030303030") or {}
+        check("TWITTER : meme un candidat parfait (Benin, rien a signaler) attend un manager",
+              _rTW["etat"] == "attente" and _fTW.get("etat") == "attente" and _fTW.get("guild_id") == _TW
+              and any("à la main" in r for r in _fTW.get("raisons", [])))
+        _mcTW = [(m, c) for m, c, _ in _appelsTW]
+        check("TWITTER : tout se passe sur SON serveur (membre lu, alerte, role En attente), rien sur Entretien",
+              ("GET", f"/guilds/{_TW}/members/303030303030303030") in _mcTW
+              and ("POST", f"/channels/{_cfgTW['salon_attente']}/messages") in _mcTW
+              and ("PUT", f"/guilds/{_TW}/members/303030303030303030/roles/{_cfgTW['role_attente']}") in _mcTW
+              and not any(_vd.GUILD_ID in c for _, c in _mcTW))
+        check("TWITTER : le role Manager d Entretien ne donne aucun droit sur TWITTER",
+              "managers" in _vd.traiter_interaction({"type": 3, "guild_id": _TW, "data": {"custom_id": "verif:ok:303030303030303030"},
+                                                     "member": {"user": {"id": "5"}, "roles": [_vd.ROLE_MANAGER], "permissions": "0"}})["data"]["content"])
+        _appelsTW.clear()
+        _vd.traiter_interaction({"type": 3, "guild_id": _TW, "token": "tTWm", "data": {"custom_id": "verif:ok:303030303030303030"},
+                                 "member": {"user": {"id": "5", "username": "boss"}, "roles": [_cfgTW["role_manager"]], "permissions": "0"},
+                                 "message": {"embeds": [{"title": "t"}], "components": [{"type": 1}]}})
+        _mcTW = [(m, c) for m, c, _ in _appelsTW]
+        check("TWITTER : un manager de TWITTER accepte -> role Verifie de TWITTER, bienvenue dans SON salon, fiche « ok »",
+              ("PUT", f"/guilds/{_TW}/members/303030303030303030/roles/{_cfgTW['role_verifie']}") in _mcTW
+              and ("POST", f"/channels/{_cfgTW['salon_bienvenue']}/messages") in _mcTW
+              and _vd._fiches()[f"{_TW}:303030303030303030"]["etat"] == "ok")
+        _rE2 = _vd.verifier(_vd.creer_jeton("303030303030303030"), dict(_donTW), "41.85.160.30", True)
+        _fE2 = _jsV.loads(_vd.FICHES.read_text(encoding="utf-8")).get("303030303030303030") or {}
+        check("la meme personne sur Entretien apres TWITTER : pas un « double compte », elle passe seule",
+              _rE2["etat"] == "ok" and not any("même" in r for r in _fE2.get("raisons", [])))
+        _dAil = _vd.decider(dict(_base, user_id="31", guild_id=_TW), {"31": dict(_base, user_id="31", etat="banni")}, manuel=True)
+        check("banni sur Entretien, il arrive sur TWITTER : le manager le sait",
+              _dAil["etat"] == "attente" and any("autre serveur" in r for r in _dAil["raisons"]))
+        _vd.infos_ip = _savInfosTW
         # -- routes publiques du site
         _appV = _wV.create_app()
         _appV.config["TESTING"] = True

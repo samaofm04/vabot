@@ -31,6 +31,14 @@ LE PARCOURS
          ✅ Vérifié pose, bienvenue dans #bienvenue (il est mentionne), et
          une ligne dans #✅┃entrées (avec l'IP) pour le staff.
 
+PLUSIEURS SERVEURS
+  Entretien (le premier) et YouLab TWITTER passent par le meme bouton, la
+  meme page et les memes fiches ; chacun a ses roles et ses salons
+  (serveur()). Sur TWITTER, « auto » est faux : meme parfaite, une entree
+  attend un manager (demande du proprietaire, 23/09/2026). La meme
+  personne verifiee sur les deux n'est pas un double compte ; refusee ou
+  bannie sur l'un, elle est signalee sur l'autre.
+
 POURQUOI L'IP SEULE NE FAIT PAS UN DOUBLE COMPTE
   Au Bénin et a Madagascar, beaucoup de gens sortent sur Internet par la
   meme IP (reseau mobile, cybercafe). Bloquer sur l'IP refuserait de vrais
@@ -86,6 +94,20 @@ SALONS_ETAPES = {"info": "1552159098600955924", "explication": "1552159099796328
                  "threads": "1552159910454624296", "twitter": "1552159110244470825"}
 SITE = "https://youl4b.com"
 
+# Serveurs geres en plus d'Entretien. « auto » faux : chaque entree attend
+# un manager, meme depuis le Benin ou Madagascar.
+TWITTER_ID = "1445108485090971710"
+SERVEURS_EXTRA: Dict[str, Dict[str, Any]] = {
+    TWITTER_ID: {
+        "nom": "YouLab TWITTER", "auto": False,
+        "role_verifie": "1552192933690744883", "role_manager": "1552192935100026881",
+        "role_attente": "1552192936597520466", "role_suspect": "1552192939051188316",
+        "salon_entrees": "1552192947766960158", "salon_attente": "1552192949851525131",
+        "salon_suspicions": "1552192951600545843", "salon_bienvenue": "1552192944944058408",
+        "etapes": {},
+    },
+}
+
 PAYS_AUTORISES = {"BJ": "Bénin", "MG": "Madagascar"}
 # Fuseaux attendus pour ces deux pays. Un telephone beninois peut annoncer
 # Africa/Lagos (meme heure, reglage Android courant).
@@ -127,6 +149,29 @@ _CLOUDFLARE = [ipaddress.ip_network(n) for n in (
     "104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22",
     "2400:cb00::/32", "2606:4700::/32", "2803:f800::/32", "2405:b500::/32",
     "2405:8100::/32", "2a06:98c0::/29", "2c0f:f248::/32")]
+
+
+def serveur(gid: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """La configuration d'un serveur gere, ou None. Celle d'Entretien est
+    relue dans les constantes a chaque appel : verif_config.json peut les
+    avoir changees."""
+    gid = str(gid or GUILD_ID)
+    if gid == GUILD_ID:
+        return {"id": GUILD_ID, "nom": "YouLab - Entretien", "auto": True,
+                "role_verifie": ROLE_VERIFIE, "role_manager": ROLE_MANAGER,
+                "role_attente": ROLE_ATTENTE, "role_suspect": ROLE_SUSPECT,
+                "salon_entrees": SALON_ALERTES, "salon_attente": SALON_ATTENTE,
+                "salon_suspicions": SALON_SUSPICIONS, "salon_bienvenue": SALON_BIENVENUE,
+                "etapes": SALONS_ETAPES}
+    c = SERVEURS_EXTRA.get(gid)
+    return dict(c, id=gid) if c else None
+
+
+def _cle(gid: Optional[str], uid: str) -> str:
+    """Cle d'une fiche ou d'un lien. Entretien garde la cle historique (l'uid
+    seul) : ses fiches deja ecrites restent lues."""
+    gid = str(gid or GUILD_ID)
+    return uid if gid == GUILD_ID else f"{gid}:{uid}"
 
 
 def _charger_config():
@@ -228,27 +273,35 @@ def _unb64(s: str) -> bytes:
     return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
 
 
-def creer_jeton(user_id: str, maintenant: Optional[float] = None) -> str:
+def creer_jeton(user_id: str, maintenant: Optional[float] = None, gid: Optional[str] = None) -> str:
     t = int(maintenant if maintenant is not None else time.time())
-    charge = f"{user_id}.{t + DUREE_LIEN_S}.{secrets.token_hex(8)}".encode()
+    charge = f"{user_id}.{t + DUREE_LIEN_S}.{secrets.token_hex(8)}"
+    if gid and str(gid) != GUILD_ID:
+        charge += f".{gid}"                      # signe avec le reste : on ne change pas de serveur
+    charge = charge.encode()
     sig = hmac.new(_secret(), charge, hashlib.sha256).digest()[:20]
     return _b64(charge) + "." + _b64(sig)
 
 
 def lire_jeton(jeton: str, maintenant: Optional[float] = None) -> Optional[Dict[str, Any]]:
-    """{user_id, expire, nonce} si le jeton est authentique et pas expire."""
+    """{user_id, expire, nonce, guild_id} si le jeton est authentique, pas
+    expire, et pour un serveur gere. Sans serveur : Entretien (liens d'avant)."""
     try:
         a, b = jeton.split(".", 1)
         charge, sig = _unb64(a), _unb64(b)
         attendu = hmac.new(_secret(), charge, hashlib.sha256).digest()[:20]
         if not hmac.compare_digest(sig, attendu):
             return None
-        uid, exp, nonce = charge.decode().split(".")
-        if not uid.isdigit():
+        morceaux = charge.decode().split(".")
+        if len(morceaux) not in (3, 4):
+            return None
+        uid, exp, nonce = morceaux[:3]
+        gid = morceaux[3] if len(morceaux) == 4 else GUILD_ID
+        if not uid.isdigit() or not serveur(gid):
             return None
         if int(exp) < int(maintenant if maintenant is not None else time.time()):
             return None
-        return {"user_id": uid, "expire": int(exp), "nonce": nonce}
+        return {"user_id": uid, "expire": int(exp), "nonce": nonce, "guild_id": gid}
     except Exception:
         return None
 
@@ -395,30 +448,32 @@ def _effacer_message(token: str, ts: float):
         _EN_FOND(lambda: api("DELETE", f"/webhooks/{APP_ID}/{token}/messages/@original"))
 
 
-def _message_unique(uid: str, token: str, nonce: Optional[str] = None):
+def _message_unique(uid: str, token: str, nonce: Optional[str] = None, gid: Optional[str] = None):
     """UN seul message « Se verifier » visible a la fois, quelle que soit la
     reponse (lien, « deja verifie », « en attente ») : on retient celui qui
     part et on efface le precedent. Sans nonce, le lien actif reste le meme."""
+    cle = _cle(gid, uid)
     with _VERROU:
         liens = _liens()
-        ancien = liens.get(uid) or {}
-        liens[uid] = {"nonce": ancien.get("nonce", "") if nonce is None else nonce,
+        ancien = liens.get(cle) or {}
+        liens[cle] = {"nonce": ancien.get("nonce", "") if nonce is None else nonce,
                       "token": str(token or ""), "ts": time.time()}
         _ecrire_liens(liens)
     _effacer_message(ancien.get("token", ""), ancien.get("ts", 0))
 
 
-def _clore_lien(uid: str, nonce: str, texte: str):
+def _clore_lien(uid: str, nonce: str, texte: str, gid: Optional[str] = None):
     """Le lien a servi : son message ephemere affiche le resultat, sans bouton.
     L'entree RESTE (marquee utilisee) : l'effacer rendait valables les liens
     qu'il avait remplaces, et le message de resultat n'etait plus efface au
     clic suivant — deux messages sous le bouton."""
+    cle = _cle(gid, uid)
     with _VERROU:
         liens = _liens()
-        actif = liens.get(uid) or {}
+        actif = liens.get(cle) or {}
         if actif.get("nonce") != nonce:
             return
-        liens[uid] = dict(actif, utilise=True)
+        liens[cle] = dict(actif, utilise=True)
         _ecrire_liens(liens)
     token, ts = actif.get("token"), float(actif.get("ts") or 0)
     if token and time.time() - ts < 14 * 60:
@@ -508,34 +563,44 @@ def _hash_ip(ip: str) -> str:
 _ETAT_LISIBLE = {"bloque": "bloqué", "attente": "en attente", "refuse": "refusé", "banni": "banni", "ok": "vérifié"}
 
 
-def decider(fiche: Dict[str, Any], autres: Dict[str, Any]) -> Dict[str, Any]:
+def decider(fiche: Dict[str, Any], autres: Dict[str, Any], manuel: bool = False) -> Dict[str, Any]:
     """{etat: ok|attente|bloque, raisons:[...], meme_appareil:[ids], meme_ip:[ids]}.
 
+    manuel : serveur ou aucune entree ne passe seule (YouLab TWITTER).
     Pure (aucun appel reseau) : c'est elle que les tests eprouvent."""
     raisons, etat = [], "ok"
-    uid = fiche.get("user_id")
-    # Tous les etats comptent : un compte refuse ou banni qui revient sous
-    # un autre nom avec le meme telephone est exactement ce qu'on cherche.
-    meme_ip = sorted({k for k, v in autres.items() if k != uid and fiche.get("ip_hash")
-                      and v.get("ip_hash") == fiche.get("ip_hash")})
-    meme_empreinte = sorted({k for k, v in autres.items() if k != uid and fiche.get("empreinte")
-                             and v.get("empreinte") == fiche.get("empreinte")})
+    uid = str(fiche.get("user_id") or "")
+    cle = _cle(fiche.get("guild_id"), uid) if uid else None
+    # Les AUTRES comptes : on compare l'identifiant Discord, pas la cle des
+    # fiches — la meme personne verifiee sur deux serveurs YouLab n'est pas
+    # un double compte. Tous les etats comptent : un compte refuse ou banni
+    # qui revient sous un autre nom est exactement ce qu'on cherche.
+    autres_comptes = [v for k, v in autres.items() if str(v.get("user_id", k)) != uid]
+
+    def ids(test):
+        return sorted({str(v.get("user_id")) for v in autres_comptes if test(v)})
+
+    def pareil(v, champ):
+        return bool(fiche.get(champ)) and v.get(champ) == fiche.get(champ)
+    meme_ip = ids(lambda v: pareil(v, "ip_hash"))
+    meme_empreinte = ids(lambda v: pareil(v, "empreinte"))
     # Meme appareil = meme identifiant garde par le navigateur : certain.
     # Meme empreinte ET meme IP = probable, mais deux amis au meme Tecno sur
     # le meme partage de connexion donnent la meme chose : on le dit tel quel.
-    meme_appareil = sorted({k for k, v in autres.items() if k != uid
-                            and fiche.get("appareil") and v.get("appareil") == fiche.get("appareil")})
-    meme_modele_et_ip = sorted((set(meme_empreinte) & set(meme_ip)) - set(meme_appareil))
+    meme_appareil = ids(lambda v: pareil(v, "appareil"))
+    meme_modele_et_ip = sorted(set(ids(lambda v: pareil(v, "empreinte") and pareil(v, "ip_hash"))) - set(meme_appareil))
     # La navigation privee change l'identifiant, pas l'empreinte : un compte
     # refuse ou banni qui revient ainsi doit passer par un humain. « bloque »
     # n'en est pas : c'est l'etat automatique d'une IP etrangere pas encore
     # jugee, et l'empreinte ne designe qu'un MODELE de telephone — tous les
     # Tecno du meme modele tombaient en attente a cause d'un seul inconnu.
-    empreinte_douteuse = sorted(k for k in meme_empreinte
-                                if (autres.get(k) or {}).get("etat") in ("banni", "refuse"))
-    meme_tel = sorted({k for k, v in autres.items() if k != uid and fiche.get("telephone")
-                       and v.get("telephone") == fiche.get("telephone")})
-    precedent = (autres.get(uid) or {}).get("etat") if uid else None
+    douteux = [v for v in autres_comptes if pareil(v, "empreinte") and v.get("etat") in ("banni", "refuse")]
+    empreinte_douteuse = sorted({str(v.get("user_id")) for v in douteux})
+    meme_tel = ids(lambda v: pareil(v, "telephone"))
+    precedent = (autres.get(cle) or {}).get("etat") if cle else None
+    # le MEME compte, sur l'autre serveur YouLab
+    ailleurs = sorted({_ETAT_LISIBLE.get(v.get("etat"), "?") for k, v in autres.items()
+                       if str(v.get("user_id", k)) == uid and k != cle and v.get("etat") in ("banni", "refuse")})
     if not fiche.get("ip_ok"):
         etat = "attente"
         raisons.append(fiche.get("ip_erreur") or "pays de l'IP inconnu")
@@ -562,8 +627,11 @@ def decider(fiche: Dict[str, Any], autres: Dict[str, Any]) -> Dict[str, Any]:
             raisons.append("même modèle de téléphone ET même connexion qu'un autre compte (peut être une coïncidence)")
         if empreinte_douteuse:
             etat = "attente"
-            etats = sorted({_ETAT_LISIBLE.get((autres.get(k) or {}).get("etat"), "?") for k in empreinte_douteuse})
+            etats = sorted({_ETAT_LISIBLE.get(v.get("etat"), "?") for v in douteux})
             raisons.append(f"même modèle d'appareil qu'un compte {' / '.join(etats)}")
+        if ailleurs:
+            etat = "attente"
+            raisons.append(f"déjà {' / '.join(ailleurs)} sur l'autre serveur YouLab")
         if meme_tel:
             etat = "attente"
             raisons.append("même numéro de téléphone qu'un autre compte")
@@ -580,6 +648,9 @@ def decider(fiche: Dict[str, Any], autres: Dict[str, Any]) -> Dict[str, Any]:
             raisons.append(f"fuseau du téléphone incohérent : {fz} pour une IP {PAYS_AUTORISES.get(fiche['pays'])}")
     if etat == "bloque" and fiche.get("telephone") and not pays_du_tel(fiche["telephone"]):
         raisons.append(f"numéro hors Bénin/Madagascar ({fiche['telephone'][:4]}…)")
+    if manuel and etat == "ok":
+        etat = "attente"
+        raisons.append("validation à la main : sur ce serveur, chaque entrée passe par un manager")
     return {"etat": etat, "raisons": raisons, "meme_appareil": meme_appareil, "meme_ip": meme_ip,
             "meme_tel": meme_tel, "meme_empreinte": [k for k in meme_empreinte if k not in meme_appareil]}
 
@@ -608,7 +679,7 @@ def _qui(x: str, toutes: Optional[Dict[str, Any]]) -> str:
     """Un compte lie, lisible meme s'il a quitte le serveur (une mention
     <@id> d'un absent s'affiche « @utilisateur inconnu ») : pseudo, id et
     ce qu'il est devenu — banni ou refuse, c'est tout ce qui compte."""
-    f = (toutes or {}).get(x) or {}
+    f = (toutes or {}).get(x) or next((v for v in (toutes or {}).values() if str(v.get("user_id")) == x), {})
     morceaux = [f"<@{x}>"]
     if f.get("pseudo"):
         morceaux.append(f"`{_propre(f['pseudo'], 30)}`")
@@ -689,12 +760,13 @@ def boutons_manager(uid: str) -> List[Dict[str, Any]]:
     ]}]
 
 
-def _salon_alerte(etat: str) -> str:
-    return {"attente": SALON_ATTENTE, "bloque": SALON_SUSPICIONS}.get(etat) or SALON_ALERTES
+def _salon_alerte(etat: str, cfg: Optional[Dict[str, Any]] = None) -> str:
+    cfg = cfg or serveur()
+    return {"attente": cfg["salon_attente"], "bloque": cfg["salon_suspicions"]}.get(etat) or cfg["salon_entrees"]
 
 
-def _poster_alerte(fiche, d, toutes: Optional[Dict[str, Any]] = None) -> str:
-    salon = _salon_alerte(d["etat"])
+def _poster_alerte(fiche, d, toutes: Optional[Dict[str, Any]] = None, cfg: Optional[Dict[str, Any]] = None) -> str:
+    salon = _salon_alerte(d["etat"], cfg)
     if not salon:
         return ""
     corps = {"embeds": [embed_alerte(fiche, d, toutes)], "allowed_mentions": {"parse": []}}
@@ -708,42 +780,54 @@ def _poster_alerte(fiche, d, toutes: Optional[Dict[str, Any]] = None) -> str:
     return str(rep.get("id") or "")
 
 
-def _role_code(methode: str, uid: str, role: str) -> int:
+def _role_code(methode: str, uid: str, role: str, gid: Optional[str] = None) -> int:
     if not role:
         return 0
-    code, _ = api(methode, f"/guilds/{GUILD_ID}/members/{uid}/roles/{role}")
+    code, _ = api(methode, f"/guilds/{gid or GUILD_ID}/members/{uid}/roles/{role}")
     return code
 
 
-def _role(methode: str, uid: str, role: str) -> bool:
-    return _role_code(methode, uid, role) in (200, 204)
+def _role(methode: str, uid: str, role: str, gid: Optional[str] = None) -> bool:
+    return _role_code(methode, uid, role, gid) in (200, 204)
 
 
-def donner_role(uid: str) -> bool:
-    return _role("PUT", uid, ROLE_VERIFIE)
+def donner_role(uid: str, cfg: Optional[Dict[str, Any]] = None) -> bool:
+    cfg = cfg or serveur()
+    return _role("PUT", uid, cfg["role_verifie"], cfg["id"])
 
 
-def _ouvrir(uid: str) -> int:
+def _ouvrir(uid: str, cfg: Optional[Dict[str, Any]] = None) -> int:
     """Role Vérifié, retire En attente / Suspect, et bienvenue publique.
     Rend le code HTTP de la pose du role (404 : il a quitte le serveur)."""
-    code = _role_code("PUT", uid, ROLE_VERIFIE)
+    cfg = cfg or serveur()
+    code = _role_code("PUT", uid, cfg["role_verifie"], cfg["id"])
     if code in (200, 204):
-        _role("DELETE", uid, ROLE_ATTENTE)
-        _role("DELETE", uid, ROLE_SUSPECT)
-        poster_bienvenue(uid)
+        _role("DELETE", uid, cfg["role_attente"], cfg["id"])
+        _role("DELETE", uid, cfg["role_suspect"], cfg["id"])
+        poster_bienvenue(uid, cfg)
     return code
 
 
-def ouvrir(uid: str) -> bool:
-    return _ouvrir(uid) in (200, 204)
+def ouvrir(uid: str, cfg: Optional[Dict[str, Any]] = None) -> bool:
+    return _ouvrir(uid, cfg) in (200, 204)
 
 
-def poster_bienvenue(uid: str) -> str:
+def poster_bienvenue(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
     """Le nouveau est MENTIONNE : Discord le notifie et l'amene dans
-    #bienvenue, avec les etapes et le choix de sa plateforme."""
-    if not SALON_BIENVENUE:
+    #bienvenue, avec les etapes et le choix de sa plateforme (quand le
+    serveur en a)."""
+    cfg = cfg or serveur()
+    salon = cfg.get("salon_bienvenue")
+    if not salon:
         return ""
-    s = SALONS_ETAPES
+    s = cfg.get("etapes") or {}
+    if not s:
+        e = {"title": f"👋 Bienvenue sur {cfg['nom']} !", "color": 0x5865F2,
+             "description": f"<@{uid}> vient d'arriver — validé ✅",
+             "footer": {"text": "YouLab • Bienvenue dans l'équipe !"}}
+        code, rep = api("POST", f"/channels/{salon}/messages",
+                        json={"content": f"<@{uid}>", "embeds": [e], "allowed_mentions": {"users": [uid]}})
+        return str(rep.get("id") or "") if code == 200 else ""
     e = {"title": "👋 Bienvenue dans l'agence YouLab !", "color": 0x5865F2,
          "description": (f"<@{uid}> vient d'arriver — vérifié ✅\n\n"
                          "**📋 Par où commencer :**\n"
@@ -755,7 +839,7 @@ def poster_bienvenue(uid: str) -> str:
                          f"🧵 Threads 👉 <#{s['threads']}>\n"
                          f"🐦 Twitter (X) 👉 <#{s['twitter']}>"),
          "footer": {"text": "YouLab • Bienvenue dans l'équipe !"}}
-    code, rep = api("POST", f"/channels/{SALON_BIENVENUE}/messages",
+    code, rep = api("POST", f"/channels/{salon}/messages",
                     json={"content": f"<@{uid}>", "embeds": [e], "allowed_mentions": {"users": [uid]}})
     return str(rep.get("id") or "") if code == 200 else ""
 
@@ -794,12 +878,14 @@ def verifier(jeton: str, donnees: Dict[str, Any], ip: str, ip_garantie: bool,
         return {"etat": "erreur", "message": "Vérification momentanément indisponible. Réessaie dans quelques minutes."}
     donnees = dict(donnees, telephone=tel)
     uid, nonce = j["user_id"], j["nonce"]
+    cfg = serveur(j["guild_id"])
+    cle = _cle(cfg["id"], uid)
     with _VERROU:
-        actif = _liens().get(uid) or {}
+        actif = _liens().get(cle) or {}
         if actif.get("nonce") and actif["nonce"] != nonce:
             return {"etat": "erreur", "message": "Ce lien a été remplacé par une demande plus récente : "
                                                  "utilise le dernier lien reçu sur Discord."}
-        deja = _fiches().get(uid) or {}
+        deja = _fiches().get(cle) or {}
         if nonce in (deja.get("jetons_utilises") or []) or nonce in _EN_COURS:
             return {"etat": "erreur", "message": "Ce lien a déjà servi. Clique à nouveau « Se vérifier » sur Discord."}
         if uid in _UIDS_EN_COURS:
@@ -812,7 +898,7 @@ def verifier(jeton: str, donnees: Dict[str, Any], ip: str, ip_garantie: bool,
     try:
         # Hors du verrou : la geolocalisation peut prendre 10 s, les autres
         # membres n'ont pas a l'attendre. Le jeton est reserve dans _EN_COURS.
-        code_m, membre = api("GET", f"/guilds/{GUILD_ID}/members/{uid}")
+        code_m, membre = api("GET", f"/guilds/{cfg['id']}/members/{uid}")
         if code_m == 404:
             return {"etat": "erreur", "message": "Tu n'es plus sur le serveur YouLab. Rejoins-le puis clique à nouveau « Se vérifier »."}
         if code_m != 200 or not isinstance(membre, dict):
@@ -823,20 +909,20 @@ def verifier(jeton: str, donnees: Dict[str, Any], ip: str, ip_garantie: bool,
         roles = membre.get("roles") or []
         # Un vieux lien ouvert apres coup ne doit ni reposter une bienvenue,
         # ni coller une alerte fraude a quelqu'un qui est deja passe.
-        if ROLE_VERIFIE and ROLE_VERIFIE in roles:
+        if cfg["role_verifie"] and cfg["role_verifie"] in roles:
             res = {"etat": "ok", "message": "✅ Tu es déjà vérifié : tout le serveur t'est ouvert."}
-            _clore_lien(uid, nonce, res["message"])
+            _clore_lien(uid, nonce, res["message"], cfg["id"])
             return res
-        if any(r and r in roles for r in (ROLE_ATTENTE, ROLE_SUSPECT)):
+        if any(r and r in roles for r in (cfg["role_attente"], cfg["role_suspect"])):
             res = {"etat": "attente", "message": "⏳ Ta demande d'accès attend déjà la validation d'un responsable."}
-            _clore_lien(uid, nonce, res["message"])
+            _clore_lien(uid, nonce, res["message"], cfg["id"])
             return res
         u = membre.get("user") or {}
         infos = infos_ip(ip)
         res = _conclure(uid, nonce, now, donnees, ip, ip_garantie, hors_cloudflare, infos,
-                        str(u.get("global_name") or u.get("username") or "")[:40])
+                        str(u.get("global_name") or u.get("username") or "")[:40], cfg)
         if res["etat"] != "erreur":
-            _clore_lien(uid, nonce, res["message"])
+            _clore_lien(uid, nonce, res["message"], cfg["id"])
         return res
     finally:
         _EN_COURS.discard(nonce)
@@ -850,15 +936,18 @@ def _nettoyer(x: Any, garder: str, n: int) -> str:
     return re.sub(garder, "", str(x or ""))[:n]
 
 
-def _conclure(uid, nonce, now, donnees, ip, ip_garantie, hors_cloudflare, infos, pseudo) -> Dict[str, Any]:
+def _conclure(uid, nonce, now, donnees, ip, ip_garantie, hors_cloudflare, infos, pseudo,
+              cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    cfg = cfg or serveur()
+    cle = _cle(cfg["id"], uid)
     with _VERROU:
         toutes = _fiches()
-        deja = toutes.get(uid) or {}
+        deja = toutes.get(cle) or {}
         # relu SOUS le verrou : calcule avant la geolocalisation, deux
         # verifications simultanees n'en comptaient qu'une
         essais = [t for t in (deja.get("essais") or []) if now - t < 86400]
         fiche = {
-            "user_id": uid, "pseudo": pseudo or deja.get("pseudo") or "",
+            "user_id": uid, "guild_id": cfg["id"], "pseudo": pseudo or deja.get("pseudo") or "",
             "ts": int(now), "ip": ip, "ip_hash": _hash_ip(ip), "ip_garantie": ip_garantie,
             "hors_cloudflare": bool(hors_cloudflare), "essais": essais + [int(now)],
             "ip_ok": infos.get("ok", False), "ip_erreur": infos.get("erreur", ""),
@@ -877,15 +966,15 @@ def _conclure(uid, nonce, now, donnees, ip, ip_garantie, hors_cloudflare, infos,
             "age_compte": age_compte_jours(uid),
             "jetons_utilises": ((deja.get("jetons_utilises") or []) + [nonce])[-10:],
         }
-        d = decider(fiche, toutes)
+        d = decider(fiche, toutes, manuel=not cfg.get("auto", True))
         fiche["etat"] = d["etat"]
         fiche["raisons"] = d["raisons"]
-        toutes[uid] = fiche
+        toutes[cle] = fiche
         if not _ecrire_fiches(toutes):
             # rien n'est fait tant que la fiche n'est pas gardee : sinon le
             # meme lien se rejouait (bienvenue et alertes en double)
             return {"etat": "erreur", "message": "Erreur technique. Réessaie dans quelques minutes."}
-    if d["etat"] == "ok" and not ouvrir(uid):
+    if d["etat"] == "ok" and not ouvrir(uid, cfg):
         # Role refuse par Discord (role au-dessus de celui du bot, panne) :
         # le membre a reussi, mais il resterait enferme sans que personne
         # le sache. Il passe en attente, avec les boutons pour un manager.
@@ -894,10 +983,10 @@ def _conclure(uid, nonce, now, donnees, ip, ip_garantie, hors_cloudflare, infos,
         d["raisons"].append("vérification réussie mais le bot n'a pas pu poser le rôle ✅ Vérifié")
         with _VERROU:
             fs = _fiches()
-            if uid in fs:
-                fs[uid].update(etat="attente", raisons=d["raisons"])
+            if cle in fs:
+                fs[cle].update(etat="attente", raisons=d["raisons"])
                 _ecrire_fiches(fs)
-    alerte = _poster_alerte(fiche, d, toutes)
+    alerte = _poster_alerte(fiche, d, toutes, cfg)
     if d["etat"] == "ok":
         return {"etat": "ok", "message": "✅ Vérification réussie ! Retourne sur Discord : tout le serveur est maintenant ouvert."}
     if not alerte:
@@ -905,8 +994,8 @@ def _conclure(uid, nonce, now, donnees, ip, ip_garantie, hors_cloudflare, infos,
         # En attente / Suspect : il peut recliquer, et l'alerte repartira.
         return {"etat": "attente", "message": "⏳ Ta demande est enregistrée, mais l'équipe n'a pas pu être prévenue "
                                               "automatiquement. Reclique « Se vérifier » sur Discord dans quelques minutes."}
-    role = ROLE_ATTENTE if d["etat"] == "attente" else ROLE_SUSPECT
-    code_r = _role_code("PUT", uid, role)
+    role = cfg["role_attente"] if d["etat"] == "attente" else cfg["role_suspect"]
+    code_r = _role_code("PUT", uid, role, cfg["id"])
     if code_r not in (200, 204):
         # Sans ce role, il peut recliquer et reposter une alerte (3 par jour
         # au plus) : on le dit, pour que les managers ne s'en etonnent pas.
@@ -925,11 +1014,12 @@ def _permissions(membre: Dict[str, Any]) -> int:
         return 0
 
 
-def _est_manager(membre: Dict[str, Any]) -> bool:
+def _est_manager(membre: Dict[str, Any], cfg: Optional[Dict[str, Any]] = None) -> bool:
     p = _permissions(membre)
     if p & 0x8 or p & 0x10000000:              # administrateur ou gestion des roles
         return True
-    return bool(ROLE_MANAGER and ROLE_MANAGER in (membre.get("roles") or []))
+    role = (cfg or serveur())["role_manager"]
+    return bool(role and role in (membre.get("roles") or []))
 
 
 def _ephemere(texte: str, composants: Optional[list] = None) -> Dict[str, Any]:
@@ -939,14 +1029,15 @@ def _ephemere(texte: str, composants: Optional[list] = None) -> Dict[str, Any]:
     return {"type": 4, "data": data}
 
 
-def _action_manager(p: Dict[str, Any], action: str, cible: str, qui: str):
+def _action_manager(p: Dict[str, Any], action: str, cible: str, qui: str, cfg: Optional[Dict[str, Any]] = None):
     """Le travail d'un bouton manager, APRES la reponse a Discord : quatre
     appels REST (et une attente sur limite de debit) depassaient parfois
     les 3 s, Discord affichait « echec » alors que le role etait pose, et
     un second clic reposait une bienvenue."""
+    cfg = cfg or serveur()
     garder = None                                   # boutons a laisser si l'action n'aboutit pas
     if action == "ok":
-        code = _ouvrir(cible)
+        code = _ouvrir(cible, cfg)
         reussi = code in (200, 204)
         etat = "ok"
         if reussi:
@@ -959,22 +1050,23 @@ def _action_manager(p: Dict[str, Any], action: str, cible: str, qui: str):
         else:
             fait = f"échec de l'acceptation (HTTP {code}) — réessaie"
     elif action == "kick":
-        code, _ = api("DELETE", f"/guilds/{GUILD_ID}/members/{cible}")
+        code, _ = api("DELETE", f"/guilds/{cfg['id']}/members/{cible}")
         reussi = code in (200, 204, 404)             # 404 : deja parti, le refus tient
         fait = ("⛔ refusé et expulsé" if code != 404 else "⛔ refusé (il avait déjà quitté)") if reussi \
             else f"échec de l'expulsion (HTTP {code}) — réessaie"
         etat = "refuse"
     else:
-        code, _ = api("PUT", f"/guilds/{GUILD_ID}/bans/{cible}", json={"delete_message_seconds": 0})
+        code, _ = api("PUT", f"/guilds/{cfg['id']}/bans/{cible}", json={"delete_message_seconds": 0})
         reussi = code in (200, 204)
         fait = "🔨 banni" if reussi else f"échec du bannissement (HTTP {code}) — réessaie"
         etat = "banni"
     if reussi:
         with _VERROU:
             toutes = _fiches()
-            if cible in toutes:
-                toutes[cible]["etat"] = etat
-                toutes[cible]["decision_manager"] = f"{fait} par {qui}"
+            cle = _cle(cfg["id"], cible)
+            if cle in toutes:
+                toutes[cle]["etat"] = etat
+                toutes[cle]["decision_manager"] = f"{fait} par {qui}"
                 _ecrire_fiches(toutes)
     else:
         print(f"[verif] action manager {action} sur {cible} par {qui} : {fait}", flush=True)
@@ -998,8 +1090,10 @@ def traiter_interaction(p: Dict[str, Any]) -> Dict[str, Any]:
         return {"type": 1}
     if p.get("type") != 3:
         return _ephemere("Action inconnue.")
-    if str(p.get("guild_id") or "") != GUILD_ID:
-        return _ephemere("Ce bouton ne fonctionne que sur le serveur YouLab.")
+    gid = str(p.get("guild_id") or "")
+    cfg = serveur(gid) if gid else None
+    if not cfg:
+        return _ephemere("Ce bouton ne fonctionne que sur les serveurs YouLab.")
     membre = p.get("member") or {}
     user = membre.get("user") or {}
     cid = ((p.get("data") or {}).get("custom_id") or "")
@@ -1014,17 +1108,17 @@ def traiter_interaction(p: Dict[str, Any]) -> Dict[str, Any]:
             print("[verif] clic « Se verifier » refuse : bot SEVEN non configure (token ?)", flush=True)
             return _ephemere("⚠️ Vérification momentanément indisponible. Réessaie dans quelques minutes.")
         roles = membre.get("roles") or []
-        if ROLE_VERIFIE and ROLE_VERIFIE in roles:
-            _message_unique(uid, p.get("token"))
+        if cfg["role_verifie"] and cfg["role_verifie"] in roles:
+            _message_unique(uid, p.get("token"), gid=gid)
             return _ephemere("✅ Tu es déjà vérifié.")
-        if any(r and r in roles for r in (ROLE_ATTENTE, ROLE_SUSPECT)):
+        if any(r and r in roles for r in (cfg["role_attente"], cfg["role_suspect"])):
             # un nouvel essai finirait de toute facon en attente, et reposterait
             # une alerte a chaque clic
-            _message_unique(uid, p.get("token"))
+            _message_unique(uid, p.get("token"), gid=gid)
             return _ephemere("⏳ Ta demande d'accès attend la validation d'un responsable. Tu seras mentionné dans #bienvenue dès que c'est fait.")
-        jeton = creer_jeton(uid)
+        jeton = creer_jeton(uid, gid=gid)
         # le nouveau lien remplace l'ancien, qui ne sert plus
-        _message_unique(uid, p.get("token"), (lire_jeton(jeton) or {}).get("nonce", ""))
+        _message_unique(uid, p.get("token"), (lire_jeton(jeton) or {}).get("nonce", ""), gid=gid)
         return _ephemere(
             "🔐 **Vérification anti-fraude**\n"
             "Ouvre ce lien **sur ton téléphone ou ton ordinateur habituel**. "
@@ -1034,24 +1128,25 @@ def traiter_interaction(p: Dict[str, Any]) -> Dict[str, Any]:
 
     m = re.fullmatch(r"verif:(ok|kick|ban):(\d{5,25})", cid)
     if m:
-        if not _est_manager(membre):
+        if not _est_manager(membre, cfg):
             return _ephemere("Réservé aux managers.")
         qui = _propre(user.get("username") or "?", 40)
         action, cible = m.group(1), m.group(2)
+        verrou = f"{gid}:{cible}"
         # Apres un type 6, le bouton reste cliquable sans rien montrer tant que
         # le travail n'est pas fini : un double clic postait deux bienvenues,
         # et « Accepter » puis « Bannir » d'un autre manager laissait un banni
         # avec une bienvenue et une fiche « ok ».
         with _VERROU:
-            if cible in _DECISIONS_EN_COURS:
+            if verrou in _DECISIONS_EN_COURS:
                 return _ephemere("⏳ Une décision est déjà en cours pour ce membre.")
-            _DECISIONS_EN_COURS.add(cible)
+            _DECISIONS_EN_COURS.add(verrou)
 
         def tache():
             try:
-                _action_manager(p, action, cible, qui)
+                _action_manager(p, action, cible, qui, cfg)
             finally:
-                _DECISIONS_EN_COURS.discard(cible)
+                _DECISIONS_EN_COURS.discard(verrou)
         _EN_FOND(tache)
         return {"type": 6}                                  # « je m'en occupe » : le message sera mis a jour
 
