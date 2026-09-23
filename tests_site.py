@@ -13459,6 +13459,41 @@ try:
           "SEMAINE EN COURS" in _pd.embed_podium({"lignes": [], "illisibles": [], "frais": True},
                                                  _dtP.date(2026, 9, 21), _dtP.date(2026, 9, 24),
                                                  en_cours=True)["title"])
+    # --- le classement de la quinzaine : TOUT LE MONDE, pas les dix premiers
+    check("la quinzaine va du 1er au 15, ou du 16 a la fin du mois",
+          _pd.saison_en_cours(_dtP.date(2026, 9, 24))
+          == (_dtP.date(2026, 9, 16), _dtP.date(2026, 9, 30))
+          and _pd.saison_en_cours(_dtP.date(2026, 9, 15))
+          == (_dtP.date(2026, 9, 1), _dtP.date(2026, 9, 15))
+          and _pd.saison_en_cours(_dtP.date(2026, 2, 20))[1] == _dtP.date(2026, 2, 28))
+
+    _cl30 = {"lignes": [{"va": f"VA {i}", "numero": i, "clics": 100 - i,
+                         "liens": 1, "spam": False} for i in range(1, 31)],
+             "illisibles": [], "frais": True}
+    _e30, _coupes30 = _pd.embed_subs(_cl30, _dtP.date(2026, 9, 16), _dtP.date(2026, 9, 30), {})
+    import re as _reP
+    # les trois premiers sont en gras (**VA 1**), les autres non : on cherche
+    # le numero suivi de tout SAUF d un chiffre, sinon « VA 1 » trouve « VA 10 »
+    _manquants = [i for i in range(1, 31)
+                  if not _reP.search(rf"VA {i}(?!\d)", _e30["description"])]
+    check("les 30 comptes sont TOUS la, pas seulement les dix premiers",
+          not _manquants and _coupes30 == 0, f"manquants : {_manquants}")
+    check("le nombre de comptes classes est annonce en tete",
+          "**30** comptes classés" in _e30["description"])
+
+    # une liste trop longue est coupee par Discord : il faut le DIRE
+    _clGros = {"lignes": [{"va": f"VA {i}", "numero": i, "clics": 1,
+                           "liens": 1, "spam": False} for i in range(1, 400)],
+               "illisibles": [], "frais": True}
+    _eG, _coupesG = _pd.embed_subs(_clGros, _dtP.date(2026, 9, 16), _dtP.date(2026, 9, 30), {})
+    check("une liste trop longue est coupee ET annoncee, jamais en silence",
+          _coupesG > 0 and "ne tiennent pas" in _eG["description"]
+          and len(_eG["description"]) <= 4096)
+
+    check("le all-time apparait quand on l a",
+          "all-time" in _pd.embed_subs(_cl30, _dtP.date(2026, 9, 16), _dtP.date(2026, 9, 30),
+                                       {"VA 1": 4242})[0]["description"])
+
     # le VPS tourne en UTC : sans heure de Paris, « lundi 09h » tombait a 11h
     check("les dates du podium sont a l heure de Paris, pas celle du serveur",
           abs((_pd._maintenant() - _dtP.datetime.utcnow()).total_seconds()) >= 3000)

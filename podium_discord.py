@@ -53,6 +53,9 @@ NUMEROS_FICHIER = DATA_DIR / "podium_numeros.json"
 LIENS_CACHE = DATA_DIR / "gmsdash_links.json"
 
 SALON_PODIUM = "─│🏆┤-podium"
+SALON_SUBS = "─│📊┤-subs"
+ALLTIME_FICHIER = DATA_DIR / "podium_alltime.json"
+ALLTIME_DEPUIS = "2024-01-01"     # avant les premiers liens : « depuis toujours »
 EQUIPE_VA = "tm_6a0e4739bfa0c238f20a8bf5"   # l'espace GetMySocial des liens VA
 
 PRIMES = [10.0, 5.0, 3.0]
@@ -110,6 +113,19 @@ def _api(methode: str, chemin: str, **kw):
 
 
 # ─── la semaine ──────────────────────────────────────────────────────────
+def saison_en_cours(jour: Optional[dt.date] = None) -> Tuple[dt.date, dt.date]:
+    """La quinzaine : du 1er au 15, ou du 16 à la fin du mois.
+
+    Même découpage que les rangs et les quêtes — un seul calendrier dans la
+    tête des VA, sinon « la saison » ne veut plus rien dire.
+    """
+    j = jour or _aujourdhui()
+    if j.day <= 15:
+        return j.replace(day=1), j.replace(day=15)
+    fin = (j.replace(day=28) + dt.timedelta(days=4)).replace(day=1) - dt.timedelta(days=1)
+    return j.replace(day=16), fin
+
+
 def semaine_en_cours(jour: Optional[dt.date] = None) -> Tuple[dt.date, dt.date]:
     """Le lundi de la semaine où l'on est, et AUJOURD'HUI.
 
@@ -231,6 +247,37 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3) -> Dict[str, An
             "entites": len(ents), "liens": len(liens)}
 
 
+def alltime() -> Dict[str, int]:
+    """Le total « depuis toujours » par entité, recalculé une fois par jour.
+
+    Ce chiffre ne bouge presque pas d'une heure à l'autre : le redemander à
+    chaque rafraîchissement doublait le nombre d'appels pour rien, et volait
+    le quota du tableau de bord.
+    """
+    cache = _lire(ALLTIME_FICHIER, {})
+    if cache.get("jour") == _aujourdhui().isoformat() and cache.get("totaux"):
+        return {k: int(v) for k, v in cache["totaux"].items()}
+    import gms
+    liens, _ = liens_bruts()
+    ents = entites(liens)
+    table = numeros(list(ents.keys()))
+    fin = _aujourdhui().isoformat()
+    totaux = dict(cache.get("totaux") or {})
+    for cle, e in ents.items():
+        try:
+            _, pays = gms.analytics_for_links(e["ids"], ALLTIME_DEPUIS, fin)
+        except Exception:
+            pays = None
+        if pays is not None:
+            # un relevé raté garde l'ancien total plutôt que de l'effacer
+            totaux[f'VA {table.get(cle, 0)}'] = int((pays or {}).get("US") or 0)
+        time.sleep(0.3)
+    safe_json.write_text(ALLTIME_FICHIER,
+                         json.dumps({"jour": fin, "totaux": totaux},
+                                    ensure_ascii=False, indent=2, sort_keys=True))
+    return {k: int(v) for k, v in totaux.items()}
+
+
 # ─── le message ──────────────────────────────────────────────────────────
 def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
                  en_cours: bool = False) -> Dict[str, Any]:
@@ -283,11 +330,111 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
             "footer": {"text": pied}}
 
 
-def _salon(gid: str) -> str:
+def embed_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
+               totaux: Dict[str, int]) -> Tuple[Dict[str, Any], int]:
+    """Le classement de la quinzaine, avec TOUT LE MONDE.
+
+    Rend aussi le nombre de lignes qui n'ont pas tenu : Discord coupe une
+    description à 4096 caractères, et une liste tronquée sans le dire ferait
+    croire à quelqu'un qu'il n'existe pas.
+    """
+    lignes = cl["lignes"]
+    tete = [f'🗓️ Période **{debut.strftime("%d/%m")} → {fin.strftime("%d/%m/%Y")}** '
+            f'· depuis le {debut.strftime("%d/%m")} à 00h00',
+            f'Clics **US** · **{len(lignes)}** comptes classés', ""]
+    corps = []
+    for i, x in enumerate(lignes):
+        at = totaux.get(x["va"])
+        suffixe = f' · 🌐 {at} all-time' if at is not None else ""
+        if i < 3:
+            corps.append(f'{MEDAILLES[i]} **{x["va"]}** — **{x["clics"]}** subs{suffixe}')
+        else:
+            corps.append(f'{i + 1}. {x["va"]} — {x["clics"]} subs{suffixe}')
+    pied = []
+    if cl["illisibles"]:
+        pied = ["", "⚠️ Sans relevé cette fois : " + ", ".join(cl["illisibles"])
+                    + " — ils remonteront au prochain passage."]
+    if not cl["frais"]:
+        pied += ["", "⚠️ _Liste des liens non rafraîchie : des comptes peuvent manquer._"]
+
+    coupes = 0
+    while True:
+        fin_txt = ([] if not coupes
+                   else ["", f"… _{coupes} ligne(s) de plus ne tiennent pas dans un message Discord._"])
+        texte = "\n".join(tete + corps[:len(corps) - coupes] + fin_txt + pied)
+        if len(texte) <= 4000 or coupes >= len(corps):
+            break
+        coupes += 1
+    return ({"title": "📊 Classement subs — la quinzaine",
+             "color": 0x3B82F6,
+             "description": texte,
+             "footer": {"text": "YOULAB • Marché US · comptes VA, sans pseudo · mis à jour "
+                                + _maintenant().strftime("%d/%m à %Hh%M")}},
+            coupes)
+
+
+def rafraichir_subs(gid: str, jour: Optional[dt.date] = None) -> str:
+    """Met à jour (ou crée) le classement vivant de la quinzaine."""
+    gid = str(gid)
+    debut, fin_saison = saison_en_cours(jour)
+    aujourd = jour or _aujourdhui()
+    d = _etat()
+    vivants = d.setdefault("subs", {})
+    garde = vivants.get(gid) or {}
+    salon = _salon(gid, _config().get("salon_subs") or SALON_SUBS)
+    if not salon:
+        print(f"[podium] salon {SALON_SUBS} introuvable sur {gid}", flush=True)
+        return ""
+    # on s'arrête à aujourd'hui : demander des jours qui n'existent pas encore
+    # ne rend rien de plus, et laisserait croire que la quinzaine est finie
+    cl = classement(debut, min(aujourd, fin_saison))
+    if not cl["lignes"] and not cl["illisibles"]:
+        print("[podium] aucun relevé, classement subs laissé tel quel", flush=True)
+        return str(garde.get("message") or "")
+    try:
+        totaux = alltime()
+    except Exception as e:
+        print(f"[podium] all-time indisponible : {type(e).__name__}: {e}", flush=True)
+        totaux = {}
+    corps_e, coupes = embed_subs(cl, debut, fin_saison, totaux)
+    if coupes:
+        print(f"[podium] classement subs : {coupes} ligne(s) coupée(s) faute de place", flush=True)
+    corps = {"embeds": [corps_e]}
+
+    mid = str(garde.get("message") or "")
+    if mid and garde.get("saison") == debut.isoformat():
+        code, rep = _api("PATCH", f"/channels/{salon}/messages/{mid}", json=corps)
+        if code == 200:
+            garde["vu"] = time.time()
+            vivants[gid] = garde
+            _ecrire(d)
+            return mid
+        print(f"[podium] édition subs refusée (HTTP {code}), nouveau message", flush=True)
+    code, rep = _api("POST", f"/channels/{salon}/messages", json=corps)
+    if code != 200 or not rep.get("id"):
+        print(f"[podium] envoi subs refusé (HTTP {code}) {str(rep)[:160]}", flush=True)
+        return ""
+    vivants[gid] = {"saison": debut.isoformat(), "message": str(rep["id"]), "vu": time.time()}
+    _ecrire(d)
+    print(f'[podium] classement subs {debut} → {fin_saison} : {len(cl["lignes"])} comptes', flush=True)
+    return str(rep["id"])
+
+
+def a_rafraichir_subs(gid: str, maintenant: Optional[float] = None) -> bool:
+    if _pause_gms():
+        return False
+    garde = (_etat().get("subs") or {}).get(str(gid)) or {}
+    if garde.get("saison") != saison_en_cours()[0].isoformat():
+        return True
+    minutes = int(_config().get("minutes_subs") or _config().get("minutes") or MINUTES_LIVE)
+    return (maintenant or time.time()) - float(garde.get("vu") or 0) >= minutes * 60
+
+
+def _salon(gid: str, voulu: str = "") -> str:
     code, rep = _api("GET", f"/guilds/{gid}/channels")
     if code != 200 or not isinstance(rep, list):
         return ""
-    voulu = _config().get("salon") or SALON_PODIUM
+    voulu = voulu or _config().get("salon") or SALON_PODIUM
     for x in rep:
         if x.get("name") == voulu:
             return str(x["id"])
