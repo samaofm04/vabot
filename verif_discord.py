@@ -393,6 +393,19 @@ def _effacer_message(token: str, ts: float):
         _EN_FOND(lambda: api("DELETE", f"/webhooks/{APP_ID}/{token}/messages/@original"))
 
 
+def _message_unique(uid: str, token: str, nonce: Optional[str] = None):
+    """UN seul message « Se verifier » visible a la fois, quelle que soit la
+    reponse (lien, « deja verifie », « en attente ») : on retient celui qui
+    part et on efface le precedent. Sans nonce, le lien actif reste le meme."""
+    with _VERROU:
+        liens = _liens()
+        ancien = liens.get(uid) or {}
+        liens[uid] = {"nonce": ancien.get("nonce", "") if nonce is None else nonce,
+                      "token": str(token or ""), "ts": time.time()}
+        _ecrire_liens(liens)
+    _effacer_message(ancien.get("token", ""), ancien.get("ts", 0))
+
+
 def _clore_lien(uid: str, nonce: str, texte: str):
     """Le lien a servi : son message ephemere affiche le resultat, sans bouton."""
     with _VERROU:
@@ -936,21 +949,16 @@ def traiter_interaction(p: Dict[str, Any]) -> Dict[str, Any]:
             return _ephemere("⚠️ Vérification momentanément indisponible. Réessaie dans quelques minutes.")
         roles = membre.get("roles") or []
         if ROLE_VERIFIE and ROLE_VERIFIE in roles:
+            _message_unique(uid, p.get("token"))
             return _ephemere("✅ Tu es déjà vérifié.")
         if any(r and r in roles for r in (ROLE_ATTENTE, ROLE_SUSPECT)):
             # un nouvel essai finirait de toute facon en attente, et reposterait
             # une alerte a chaque clic
+            _message_unique(uid, p.get("token"))
             return _ephemere("⏳ Ta demande d'accès attend la validation d'un responsable. Tu seras mentionné dans #bienvenue dès que c'est fait.")
         jeton = creer_jeton(uid)
-        nonce = (lire_jeton(jeton) or {}).get("nonce", "")
-        # Un seul lien a la fois : le nouveau remplace l'ancien, dont le
-        # message est efface.
-        with _VERROU:
-            liens = _liens()
-            ancien = liens.get(uid) or {}
-            liens[uid] = {"nonce": nonce, "token": str(p.get("token") or ""), "ts": time.time()}
-            _ecrire_liens(liens)
-        _effacer_message(ancien.get("token", ""), ancien.get("ts", 0))
+        # le nouveau lien remplace l'ancien, qui ne sert plus
+        _message_unique(uid, p.get("token"), (lire_jeton(jeton) or {}).get("nonce", ""))
         return _ephemere(
             "🔐 **Vérification anti-fraude**\n"
             "Ouvre ce lien **sur ton téléphone ou ton ordinateur habituel**. "

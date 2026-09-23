@@ -12480,6 +12480,14 @@ try:
         check("nouveau clic « Se verifier » : l ancien message est efface (un seul a la fois)",
               ("DELETE", f"/webhooks/{_vd.APP_ID}/tok1/messages/@original") in _appelsS
               and not any("tok2" in c for _, c in _appelsS))
+        _appelsS.clear()
+        _vd.traiter_interaction({"type": 3, "guild_id": _vd.GUILD_ID, "token": "tok3", "data": {"custom_id": "verif:start"},
+                                 "member": {"user": {"id": "424242424242424242"}, "roles": [_vd.ROLE_SUSPECT]}})
+        _vd.traiter_interaction({"type": 3, "guild_id": _vd.GUILD_ID, "token": "tok4", "data": {"custom_id": "verif:start"},
+                                 "member": {"user": {"id": "424242424242424242"}, "roles": [_vd.ROLE_VERIFIE]}})
+        check("reponses « en attente » / « deja verifie » : chacune efface aussi la precedente",
+              [c for m, c in _appelsS if m == "DELETE"] == [f"/webhooks/{_vd.APP_ID}/tok2/messages/@original",
+                                                           f"/webhooks/{_vd.APP_ID}/tok3/messages/@original"])
         check("nouveau clic : l ancien lien est remplace, il ne sert plus",
               "remplacé" in _vd.verifier(_l1, {"duree": 10, "telephone": "+2290161004242"}, "41.85.160.42", True)["message"])
         _startV = _vd.traiter_interaction({"type": 3, "guild_id": _vd.GUILD_ID, "data": {"custom_id": "verif:start"},
