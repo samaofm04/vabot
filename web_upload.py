@@ -50681,6 +50681,39 @@ def _start_quete_du_jour_daemon() -> bool:
     return True
 
 
+def _start_podium_semaine_daemon() -> bool:
+    """Poste le podium de la semaine chaque lundi, à partir de 09h.
+
+    Même réveil toutes les 10 minutes que la quête du jour : le déploiement
+    redémarre plusieurs fois par jour, et un long sommeil jusqu'au lundi
+    suivant aurait fait sauter le podium. poster_podium refuse de poster deux
+    fois la même semaine, donc repasser souvent ne coûte rien.
+    """
+    import threading as _th_p
+    if getattr(_start_podium_semaine_daemon, "_on", False):
+        return False
+    _start_podium_semaine_daemon._on = True
+
+    def _boucle():
+        import time as _t_p
+        _t_p.sleep(90)                      # laisser le site se lever
+        while True:
+            try:
+                import podium_discord as _p
+                import verif_discord as _vd_p
+                if _p.a_poster():
+                    for gid in _vd_p.SERVEURS_EXTRA:
+                        _p.poster_podium(gid)
+            except Exception as e:
+                print(f"[podium] boucle : {type(e).__name__}: {e}", flush=True)
+            _t_p.sleep(600)
+
+    _th_p.Thread(target=_boucle, daemon=True, name="podium-semaine").start()
+    print("[podium] podium de la semaine armé (lundi 09h, vérifié toutes les 10 min)",
+          flush=True)
+    return True
+
+
 def _start_auto_scrape_daemon():
     """Background daemon : telecharge chaque heure les mp4 manquants.
 
@@ -51075,6 +51108,11 @@ def create_app():
         _start_quete_du_jour_daemon()
     except Exception as _e:
         log.warning(f"quête du jour non démarrée: {_e}")
+    # Chaque lundi à 09h : le podium des subs de la semaine écoulée.
+    try:
+        _start_podium_semaine_daemon()
+    except Exception as _e:
+        log.warning(f"podium de la semaine non démarré: {_e}")
     # Collecte AUTO des SFS reçus (DM entrants) toutes les 5 min via l'API
     # MyPuls — sans elle, un message lu vite par un chatteur serait raté
     try:

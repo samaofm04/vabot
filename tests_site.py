@@ -13312,6 +13312,101 @@ try:
 except Exception as _eV:
     check("vider : testable", False, repr(_eV)[:200])
 
+# ------------------------------------------------ 30. Podium de la semaine
+print()
+print("=" * 70)
+print("Podium de la semaine : chaque lundi, sur des chiffres qu on peut payer")
+print("=" * 70)
+try:
+    import datetime as _dtP
+    import podium_discord as _pd
+    from pathlib import Path as _plP
+
+    # --- la semaine racontee est toujours CELLE QUI EST FINIE
+    check("un lundi, on recapitule la semaine d avant",
+          _pd.semaine_passee(_dtP.date(2026, 9, 28))
+          == (_dtP.date(2026, 9, 21), _dtP.date(2026, 9, 27)))
+    check("un jeudi, on rend la derniere semaine COMPLETE (jamais celle en cours)",
+          _pd.semaine_passee(_dtP.date(2026, 9, 24))
+          == (_dtP.date(2026, 9, 14), _dtP.date(2026, 9, 20)))
+    check("un dimanche soir, la semaine en cours n est pas encore racontee",
+          _pd.semaine_passee(_dtP.date(2026, 9, 27))[1] == _dtP.date(2026, 9, 20))
+
+    check("il ne poste qu un lundi, et pas avant l heure",
+          _pd.a_poster(_dtP.datetime(2026, 9, 28, 9, 5))
+          and not _pd.a_poster(_dtP.datetime(2026, 9, 28, 8, 59))
+          and not _pd.a_poster(_dtP.datetime(2026, 9, 29, 9, 5)))
+
+    # --- qui est qui
+    check("le nom de la personne se lit entre les parentheses",
+          [_pd.personne(x) for x in ["( BO7 ) 1", "(Gerome) SPAM", "(PAMPAM) 1 SPAM", "EUD"]]
+          == [("BO7", False), ("Gerome", True), ("PAMPAM", True), ("EUD", False)])
+    check("un lien SPAM compte comme quelqu un d autre",
+          _pd.cle_entite("Gerome", True) != _pd.cle_entite("Gerome", False))
+
+    _liens = [{"id": "a", "display_name": "( BO7 ) 1"}, {"id": "b", "display_name": "( BO7 ) 2"},
+              {"id": "c", "display_name": "(Gerome) 1"}, {"id": "d", "display_name": "(Gerome) SPAM"}]
+    _ents = _pd.entites(_liens)
+    check("les liens d une meme personne sont regroupes, pas eclates",
+          sorted(_ents["BO7"]["ids"]) == ["a", "b"] and len(_ents) == 3)
+    check("le lien SPAM a sa propre entite", _ents["Gerome SPAM"]["ids"] == ["d"])
+
+    # --- les numeros ne bougent jamais
+    _savN = _pd.NUMEROS_FICHIER
+    try:
+        import tempfile as _tf
+        _pd.NUMEROS_FICHIER = _plP(_tf.mkdtemp()) / "num.json"
+        _t1 = _pd.numeros(["BO7", "Safidy", "Zorro"])
+        check("les anciens numeros de GetMySocial sont repris tels quels",
+              _t1["BO7"] == 1 and _t1["Safidy"] == 2)
+        # le 3 est celui de Laboule, dont le lien a ete supprime : il reste pris,
+        # personne n herite de son numero. Le premier libre est donc 14.
+        check("un numero deja reserve n est pas redonne a quelqu un d autre",
+              _t1["Zorro"] == 14 and _t1.get("Laboule") == 3)
+        _t2 = _pd.numeros(["BO7", "Safidy", "Zorro", "Alpha"])
+        check("ajouter quelqu un ne deplace personne",
+              _t2["BO7"] == 1 and _t2["Zorro"] == _t1["Zorro"] and _t2["Alpha"] != _t1["Zorro"])
+    finally:
+        _pd.NUMEROS_FICHIER = _savN
+
+    # --- un releve rate n est pas un zero
+    _savG = _pd.__dict__.get("gms")
+    import gms as _gmsP
+    _sauv_afl = _gmsP.analytics_for_links
+    _sauv_liens = _pd.liens_bruts
+    try:
+        _pd.liens_bruts = lambda: ([{"id": "a", "display_name": "( BO7 ) 1"},
+                                    {"id": "c", "display_name": "(Gerome) 1"}], True)
+        _gmsP.analytics_for_links = lambda ids, d0, d1: (
+            (None, None) if ids == ["c"] else (10, {"US": 7, "FR": 3}))
+        _cl = _pd.classement(_dtP.date(2026, 9, 14), _dtP.date(2026, 9, 20), pause=0)
+        check("un releve illisible n est PAS compte comme zero",
+              len(_cl["lignes"]) == 1 and _cl["lignes"][0]["clics"] == 7
+              and len(_cl["illisibles"]) == 1)
+        _e = _pd.embed_podium(_cl, _dtP.date(2026, 9, 14), _dtP.date(2026, 9, 20))
+        check("le message DIT que le classement est incomplet",
+              "incomplet" in _e["description"] and "avant de payer" in _e["description"])
+        check("seuls les clics US comptent, pas le total",
+              "clics **US**" in _e["description"])
+
+        # la liste des liens vient d en haut : le cache perime avait coute le vrai n°1
+        _pd.liens_bruts = lambda: ([{"id": "a", "display_name": "( BO7 ) 1"}], False)
+        _gmsP.analytics_for_links = lambda ids, d0, d1: (10, {"US": 7})
+        _cl2 = _pd.classement(_dtP.date(2026, 9, 14), _dtP.date(2026, 9, 20), pause=0)
+        _e2 = _pd.embed_podium(_cl2, _dtP.date(2026, 9, 14), _dtP.date(2026, 9, 20))
+        check("se rabattre sur le cache est ANNONCE, pas silencieux",
+              not _cl2["frais"] and "non rafraichie" in _e2["description"].replace("î", "i"))
+    finally:
+        _gmsP.analytics_for_links = _sauv_afl
+        _pd.liens_bruts = _sauv_liens
+
+    check("les trois primes sont 10 / 5 / 3", _pd.PRIMES == [10.0, 5.0, 3.0])
+    _srcP = _plP("web_upload.py").read_text(encoding="utf-8")
+    check("le podium est arme au demarrage du site",
+          "_start_podium_semaine_daemon()" in _srcP and "podium-semaine" in _srcP)
+except Exception as _eP:
+    check("podium : testable", False, repr(_eP)[:200])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
