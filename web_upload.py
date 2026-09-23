@@ -51447,6 +51447,12 @@ def create_app():
         # on l'envoie, qui n'ont pas de compte — c'est tout l'interet.
         if path.startswith("/clics/"):
             return None
+        # Verification Discord : meme principe. Un chatteur connecte au
+        # dashboard qui ouvrait son lien de verification dans le meme
+        # navigateur prenait un 403, et la page bouclait sur « Connexion
+        # impossible » sans qu'aucune alerte parte. Le jeton signe suffit.
+        if path.startswith("/verif/"):
+            return None
         is_write = request.method in ("POST", "PUT", "PATCH", "DELETE")
         if not is_write:
             # LECTURE : bloquer uniquement les API de DONNÉES sensibles. Les
