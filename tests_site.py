@@ -13244,7 +13244,67 @@ try:
     finally:
         _de.api = _sauv_api
 
+    # --- photos en masse : une par message, ou appariee a sa caption
+    _sauv_api2, _sauv_fic = _de.api, _de.api_fichiers
+    _envois = []
+    try:
+        _de.api = lambda me, ch, co=None, pa=None: (_envois.append(("json", ch, co)) or (200, {"id": "1"}))
+        _de.api_fichiers = lambda me, ch, co, fi: (_envois.append(("fichier", ch, co, fi)) or (200, {"id": "1"}))
+        import base64 as _b64
+        _png = _b64.b64encode(b"\x89PNG\r\n\x1a\n" + b"x" * 40).decode()
+
+        _envois.clear(); _sorties.clear()
+        _h._lot({"salon": "s1", "copier": True, "messages": [
+            {"texte": "", "image": {"nom": "a.png", "b64": _png}},
+            {"texte": "sa caption", "image": {"nom": "b.png", "b64": _png}},
+            "juste du texte"]})
+        check("une photo part en piece jointe, pas en JSON",
+              [e[0] for e in _envois] == ["fichier", "fichier", "json"])
+        check("une photo SANS legende n a pas de bouton Copier (rien a copier)",
+              "components" not in _envois[0][2])
+        check("une photo AVEC legende garde son bouton Copier",
+              "components" in _envois[1][2])
+        check("la piece jointe est declaree, sinon Discord ne l affiche pas",
+              _envois[0][2]["attachments"] == [{"id": 0, "filename": "a.png"}])
+        check("les trois messages sont comptes", _sorties[-1]["envoyes"] == 3)
+
+        # une photo illisible ne doit pas arreter les suivantes, ni disparaitre
+        _envois.clear(); _sorties.clear()
+        _h._lot({"salon": "s1", "depart": 10, "messages": [
+            {"texte": "", "image": {"nom": "casse.png", "b64": "pas du base64 !!"}},
+            "le suivant passe"]})
+        check("une photo illisible est nommee, et les suivantes partent quand meme",
+              _sorties[-1]["envoyes"] == 1
+              and _sorties[-1]["echecs"][0]["erreur"] == "photo illisible"
+              and _sorties[-1]["echecs"][0]["apercu"] == "casse.png")
+        check("la numerotation suit la tranche, pour retrouver le rate dans le collage",
+              _sorties[-1]["echecs"][0]["n"] == 11)
+
+        # Discord refuse au-dela de 9 Mo : on le dit avant qu il le refuse
+        _envois.clear(); _sorties.clear()
+        _h._lot({"salon": "s1", "messages": [
+            {"texte": "", "image": {"nom": "lourde.png",
+                                    "b64": _b64.b64encode(b"x" * (10 * 1024 * 1024)).decode()}}]})
+        check("une photo de plus de 9 Mo est refusee AVANT l envoi, et dite",
+              not _envois and "9 Mo" in _sorties[-1]["echecs"][0]["erreur"])
+    finally:
+        _de.api, _de.api_fichiers = _sauv_api2, _sauv_fic
+
     _srcE2 = _plC("discord_ecrire.py").read_text(encoding="utf-8")
+    check("les photos gardent l ordre des noms : la place est reservee avant la lecture",
+          "place = {nom: f.name" in _srcE2 and "photos.push(place)" in _srcE2)
+    check("un dossier depose est parcouru, il ne donne pas de fichiers tout seul",
+          "webkitGetAsEntry" in _srcE2 and "fichiersDeEntree" in _srcE2)
+    check("les fichiers qui ne sont ni photo ni video sont comptes, pas avales",
+          "ni photo ni video" in _srcE2)
+    check("on ne poste pas une photo dont la lecture n est pas finie",
+          "encore en lecture" in _srcE2)
+    check("une photo se colle au clavier, pas seulement en la glissant",
+          "collerImages" in _srcE2 and "'paste'" in _srcE2)
+    check("coller du TEXTE reste un collage de texte (on ne bloque que les fichiers)",
+          "if(!fichiers.length) return false" in _srcE2)
+    check("une photo collee est numerotee : sinon elles s appellent toutes image.png",
+          "colle-" in _srcE2 and "nColle++" in _srcE2)
     check("la page demande DEUX confirmations avant de vider",
           _srcE2.count("if(!confirm(") >= 2 and "sera vide" in _srcE2)
     check("le bouton Vider est separe des autres boutons",

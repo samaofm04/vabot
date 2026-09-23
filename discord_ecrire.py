@@ -238,6 +238,11 @@ button:disabled{opacity:.5;cursor:default}
 .bout .x{background:transparent;border:0;color:var(--faible);cursor:pointer;font-size:14px;padding:0 4px}
 .bout .x:hover{color:var(--rouge)}
 .bout.trop{border-left-color:var(--rouge)}
+.bout .mini{width:44px;height:44px;object-fit:cover;border-radius:6px;flex:none;
+            background:#000}
+.bout.photo{border-left-color:#22c55e}
+.lien{background:transparent;border:0;color:var(--bleu);font-size:12px;padding:0;
+      text-decoration:underline;cursor:pointer;width:auto}
 .liste-bouts{max-height:420px;overflow:auto;margin-top:10px}
 .case{display:flex;align-items:center;gap:8px;margin-top:11px;color:var(--faible);
       font-size:12px;text-transform:none;letter-spacing:0;cursor:pointer}
@@ -296,6 +301,12 @@ button:disabled{opacity:.5;cursor:default}
       <label>Colle tout ici <span style="text-transform:none">&mdash; un message par morceau, poste dans l'ordre</span></label>
       <textarea id="brut" placeholder="Colle tes captions, tes liens, tes bios&hellip;"></textarea>
       <div class="compte" id="comptelot"></div>
+      <div class="depot" id="depotlot">Glisse tes photos ici, colle-les au clavier (Cmd+V),
+        ou clique pour les choisir <span style="opacity:.6">(Cmd+A pour tout prendre)</span>
+        &middot; une photo = un message &middot; jusqu'a 300 &middot; 9 Mo chacune
+        <div style="margin-top:7px"><button type="button" id="dossier" class="lien">ou choisir un dossier entier</button></div></div>
+      <input type="file" id="fichierslot" accept="image/*,video/*" multiple style="display:none">
+      <input type="file" id="fichiersdoss" webkitdirectory directory multiple style="display:none">
       <label class="case"><input type="checkbox" id="copier" checked>
         <span>Poser un bouton <b>Copier</b> sous chaque message</span></label>
       <div class="liste-bouts" id="bouts"></div>
@@ -370,7 +381,9 @@ document.addEventListener('dragover', function(e){ e.preventDefault(); });
 document.addEventListener('drop', function(e){
   e.preventDefault();
   if(e.target.closest && e.target.closest('#depot')) return;
-  if(e.dataTransfer && e.dataTransfer.files.length) ajouter(e.dataTransfer.files);
+  if(e.target.closest && e.target.closest('#depotlot')) return;
+  if(!e.dataTransfer) return;
+  deposer(e, modeLot);
 });
 
 function etat(txt, classe){ var e = E('etat'); e.textContent = txt; e.className = 'etat ' + (classe || ''); }
@@ -463,39 +476,127 @@ function decouper(t, mode, perso){
           .filter(function(x){ return x.length; });
 }
 
+var photos = [];      // les photos du mode masse : {nom, b64, url}
+var apparie = false;  // une caption sous chaque photo, ou chacun son message
+
+// Une photo et une caption vont ensemble quand il y en a autant des deux :
+// c'est le cas du contenu legende. Sinon on ne devine pas, on met les textes
+// puis les photos, et on le DIT au-dessus de l'apercu.
+function composer(){
+  var textes = decouper(E('brut').value, E('sep').value, E('sepperso').value);
+  var items = [];
+  apparie = photos.length > 0 && textes.length === photos.length;
+  if(apparie){
+    photos.forEach(function(p, i){ items.push({texte: textes[i], photo: p}); });
+  } else {
+    textes.forEach(function(t){ items.push({texte: t, photo: null}); });
+    photos.forEach(function(p){ items.push({texte: '', photo: p}); });
+  }
+  return items;
+}
+
+var MEDIA = /\.(jpe?g|png|gif|webp|heic|heif|bmp|mp4|mov|m4v|webm)$/i;
+
+function ajouterLot(liste){
+  var tous = Array.prototype.slice.call(liste);
+  // un dossier apporte des .DS_Store, des .txt, des miniatures : on les ecarte,
+  // mais on DIT combien, sinon on cherche pourquoi il en manque
+  var gardes = tous.filter(function(f){ return MEDIA.test(f.name) && f.size > 0; });
+  var ecartes = tous.length - gardes.length;
+  var restant = 300 - photos.length;
+  var refuses = [];
+  gardes.sort(function(a, b){ return a.name.localeCompare(b.name, 'fr', {numeric: true}); });
+  gardes.forEach(function(f, i){
+    if(i >= restant){ refuses.push(f.name); return; }
+    // La place est prise TOUT DE SUITE, dans l'ordre des noms : les lectures
+    // finissent dans le desordre, et une caption se retrouvait sous la photo
+    // d'a cote. On remplit la case reservee quand la lecture arrive.
+    var place = {nom: f.name, b64: '', url: '', octets: f.size, pret: false};
+    photos.push(place);
+    var lect = new FileReader();
+    lect.onload = function(){
+      var s = String(lect.result);
+      place.b64 = s.slice(s.indexOf(',') + 1);
+      place.url = s;
+      place.pret = true;
+      rendreLot();
+    };
+    lect.onerror = function(){
+      place.pret = 'erreur';
+      rendreLot();
+    };
+    lect.readAsDataURL(f);
+  });
+  rendreLot();
+  var dits = [];
+  if(ecartes) dits.push(ecartes + ' fichier(s) ecarte(s) : ni photo ni video');
+  if(refuses.length) dits.push(refuses.length + ' en trop (300 au maximum)');
+  if(dits.length) etat(gardes.length - refuses.length + ' photo(s) prise(s) · '
+                       + dits.join(' · '), refuses.length ? 'ko' : '');
+}
+
 function rendreLot(recalculer){
-  if(recalculer !== false)
-    lot = decouper(E('brut').value, E('sep').value, E('sepperso').value);
+  if(recalculer !== false) lot = composer();
   var z = E('bouts'); z.innerHTML = '';
   lot.forEach(function(m, i){
     var d = document.createElement('div');
-    d.className = 'bout' + (m.length > 2000 ? ' trop' : '');
+    d.className = 'bout' + (m.texte.length > 2000 ? ' trop' : '')
+                + (m.photo && !m.texte ? ' photo' : '');
     var n = document.createElement('div'); n.className = 'n'; n.textContent = (i + 1) + '.';
-    var c = document.createElement('div'); c.className = 'c'; c.textContent = m;
+    d.appendChild(n);
+    if(m.photo && m.photo.url){
+      var im = document.createElement('img'); im.className = 'mini'; im.src = m.photo.url;
+      d.appendChild(im);
+    } else if(m.photo){
+      var at = document.createElement('div'); at.className = 'mini';
+      at.style.cssText += ';display:flex;align-items:center;justify-content:center;'
+                        + 'color:var(--faible);font-size:10px';
+      at.textContent = m.photo.pret === 'erreur' ? '✕' : '…';
+      d.appendChild(at);
+    }
+    var c = document.createElement('div'); c.className = 'c';
+    c.textContent = m.texte || (m.photo ? m.photo.nom : '');
+    if(!m.texte && m.photo) c.style.color = 'var(--faible)';
     var x = document.createElement('button'); x.className = 'x'; x.textContent = '✕';
     x.title = 'Ne pas envoyer celui-la';
-    x.onclick = function(){ lot.splice(i, 1); rendreLot(false); };
-    d.appendChild(n); d.appendChild(c); d.appendChild(x);
+    x.onclick = function(){
+      // on retire aussi la photo de la reserve, sinon elle revient au recalcul
+      if(m.photo){ var k = photos.indexOf(m.photo); if(k >= 0) photos.splice(k, 1); }
+      lot.splice(i, 1); rendreLot(false);
+    };
+    d.appendChild(c); d.appendChild(x);
     z.appendChild(d);
   });
   var e = E('comptelot');
   if(!lot.length){ e.textContent = E('brut').value.trim() ? 'Rien a decouper.' : ''; e.style.color = ''; return; }
-  var m = E('sep').value === 'auto' ? detecter(E('brut').value) : E('sep').value;
-  var trop = lot.filter(function(x){ return x.length > 2000; }).length;
-  var txt = lot.length + ' message' + (lot.length > 1 ? 's' : '') + ' · coupe sur : ' + (NOMS[m] || m)
-          + ' · environ ' + Math.ceil(lot.length * 1.1) + ' s d envoi';
+  var avecTexte = lot.filter(function(x){ return x.texte; }).length;
+  var avecPhoto = lot.filter(function(x){ return x.photo; }).length;
+  var trop = lot.filter(function(x){ return x.texte.length > 2000; }).length;
+  var lourdes = photos.filter(function(p){ return p.octets > 9 * 1024 * 1024; });
+  var secondes = Math.ceil(lot.length * 1.1 + avecPhoto * 0.4);
+  var txt = lot.length + ' message' + (lot.length > 1 ? 's' : '');
+  if(avecTexte){
+    var m = E('sep').value === 'auto' ? detecter(E('brut').value) : E('sep').value;
+    txt += ' · coupe sur : ' + (NOMS[m] || m);
+    if(m === 'lien') txt += ' (seules les URL sont gardees)';
+  }
+  if(avecPhoto) txt += ' · ' + avecPhoto + ' photo(s) triee(s) par nom, ' +
+    (apparie ? 'chacune avec la caption en face' : 'une par message');
+  txt += ' · environ ' + secondes + ' s d envoi';
   if(remisAPlat) txt += ' · ' + remisAPlat + ' lien(s) [..](..) remis a plat pour rester cliquables';
   if(nettoyes) txt += ' · ' + nettoyes + ' morceau(x) nettoye(s) : puce, numero, guillemets, espaces en trop';
-  if(m === 'lien') txt += ' · seules les URL sont gardees';
   if(trop) txt += ' · ' + trop + ' depasse(nt) 2000 caracteres, le surplus sera coupe';
+  if(lourdes.length) txt += ' · ' + lourdes.length + ' photo(s) de plus de 9 Mo seront refusee(s) par Discord : '
+                          + lourdes.slice(0, 2).map(function(p){ return p.nom; }).join(', ');
   if(lot.length > 300) txt += ' · trop d un coup : 300 au maximum';
   e.textContent = txt;
-  e.style.color = (trop || lot.length > 300) ? '#ef4444' : '';
+  e.style.color = (trop || lourdes.length || lot.length > 300) ? '#ef4444' : '';
 }
 
 function basculer(versLot){
   modeLot = versLot;
   nouveau();
+  if(!versLot){ photos = []; lot = []; }
   E('onglet-lot').className = versLot ? 'actif' : '';
   E('onglet-un').className  = versLot ? '' : 'actif';
   E('zone-lot').style.display   = versLot ? '' : 'none';
@@ -562,24 +663,67 @@ function nouveau(){
   etat(''); apercu(); vignettes();
 }
 
+// Une photo encodee pese un tiers de plus que le fichier : tout envoyer dans
+// une seule requete bloquait la page sans rien afficher. On decoupe en
+// tranches d'environ 20 Mo, ce qui donne aussi l'avancement au fil de l'eau.
+function tranches(items){
+  var out = [], cour = [], poids = 0;
+  items.forEach(function(it){
+    var p = it.photo ? it.photo.b64.length : it.texte.length;
+    if(cour.length && (poids + p > 20 * 1024 * 1024 || cour.length >= 25)){
+      out.push(cour); cour = []; poids = 0;
+    }
+    cour.push(it); poids += p;
+  });
+  if(cour.length) out.push(cour);
+  return out;
+}
+
 async function envoyerLot(bouton){
-  if(!lot.length){ etat('Rien a envoyer : colle ton texte au-dessus.', 'ko'); return; }
+  if(!lot.length){ etat('Rien a envoyer : colle ton texte ou depose des photos.', 'ko'); return; }
   if(lot.length > 300){ etat(lot.length + ' messages : trop d un coup (300 au maximum).', 'ko'); return; }
-  if(!confirm('Poster ' + lot.length + ' messages, un par un, dans ce salon ?')) return;
+  var pasPretes = lot.filter(function(x){ return x.photo && !x.photo.b64; });
+  if(pasPretes.length){
+    var casse = pasPretes.filter(function(x){ return x.photo.pret === 'erreur'; });
+    etat(casse.length
+         ? casse.length + ' photo(s) illisible(s) : ' + casse.slice(0,3).map(function(x){ return x.photo.nom; }).join(', ')
+           + ' — retire-les avec la croix.'
+         : pasPretes.length + ' photo(s) encore en lecture — attends une seconde.',
+         casse.length ? 'ko' : '');
+    return;
+  }
+  var nbPhotos = lot.filter(function(x){ return x.photo; }).length;
+  if(!confirm('Poster ' + lot.length + ' messages'
+              + (nbPhotos ? ' (dont ' + nbPhotos + ' avec photo)' : '')
+              + ', un par un, dans ce salon ?')) return;
   bouton.disabled = true;
-  etat('Envoi de ' + lot.length + ' messages… laisse la page ouverte (~'
-       + Math.ceil(lot.length * 1.1) + ' s).');
-  var j = await demander('/poster_lot', {salon: E('salon').value, messages: lot,
-                                        copier: E('copier').checked});
+  var paquets = tranches(lot), envoyes = 0, echecs = [], fait = 0;
+  for(var t = 0; t < paquets.length; t++){
+    etat('Envoi… ' + fait + ' / ' + lot.length + ' — laisse la page ouverte.');
+    var j = await demander('/poster_lot', {
+      salon: E('salon').value, copier: E('copier').checked, depart: fait,
+      messages: paquets[t].map(function(it){
+        return {texte: it.texte,
+                image: it.photo ? {nom: it.photo.nom, b64: it.photo.b64} : null};
+      })});
+    if(j.error && !j.envoyes){
+      // la tranche entiere a echoue : on s arrete plutot que de continuer en aveugle
+      etat('✕ ' + j.error + ' — arrete a ' + envoyes + ' / ' + lot.length, 'ko');
+      bouton.disabled = false; chargerMessages(); return;
+    }
+    envoyes += (j.envoyes || 0);
+    echecs = echecs.concat(j.echecs || []);
+    fait += paquets[t].length;
+  }
   bouton.disabled = false;
-  if(j.error && !j.envoyes){ etat('✕ ' + j.error, 'ko'); return; }
-  if((j.echecs || []).length){
+  if(echecs.length){
     // on nomme les rates : le reste est parti, il ne faut surtout pas tout reposter
-    etat('⚠ ' + j.envoyes + ' / ' + j.total + ' postes. Rates : '
-         + j.echecs.map(function(x){ return '#' + x.n + ' (' + x.erreur + ')'; }).join(' · '), 'ko');
+    etat('⚠ ' + envoyes + ' / ' + lot.length + ' postes. Rates : '
+         + echecs.slice(0, 8).map(function(x){ return '#' + x.n + ' (' + x.erreur + ')'; }).join(' · ')
+         + (echecs.length > 8 ? ' · et ' + (echecs.length - 8) + ' autre(s)' : ''), 'ko');
   } else {
-    etat('✓ ' + j.envoyes + ' messages postes.', 'ok');
-    E('brut').value = ''; rendreLot();
+    etat('✓ ' + envoyes + ' messages postes.', 'ok');
+    E('brut').value = ''; photos = []; rendreLot();
   }
   chargerMessages();
 }
@@ -637,6 +781,96 @@ E('vider').onclick = async function(){
 E('onglet-un').onclick  = function(){ basculer(false); };
 E('onglet-lot').onclick = function(){ basculer(true); };
 E('brut').oninput = function(){ rendreLot(); };
+E('depotlot').onclick = function(ev){
+  if(ev.target.id === 'dossier') return;     // le dossier a son propre champ
+  E('fichierslot').click();
+};
+E('dossier').onclick = function(ev){ ev.stopPropagation(); E('fichiersdoss').click(); };
+E('fichierslot').onchange = function(){ ajouterLot(this.files); this.value = ''; };
+E('fichiersdoss').onchange = function(){ ajouterLot(this.files); this.value = ''; };
+['dragenter','dragover'].forEach(function(e){
+  E('depotlot').addEventListener(e, function(ev){ ev.preventDefault(); this.classList.add('survol'); });
+});
+['dragleave','drop'].forEach(function(e){
+  E('depotlot').addEventListener(e, function(ev){ ev.preventDefault(); this.classList.remove('survol'); });
+});
+E('depotlot').addEventListener('drop', function(ev){ deposer(ev, true); });
+E('brut').addEventListener('paste', function(ev){ collerImages(ev, true); });
+E('texte').addEventListener('paste', function(ev){ collerImages(ev, false); });
+// coller n'importe ou dans la page marche aussi, pas seulement dans la zone
+document.addEventListener('paste', function(ev){
+  var t = ev.target;
+  if(t && (t.id === 'brut' || t.id === 'texte')) return;   // deja traite au-dessus
+  collerImages(ev, modeLot);
+});
+
+// Glisser un DOSSIER ne remplit pas `files` : le navigateur ne donne qu'une
+// entree, qu'il faut parcourir. Sans ca, deposer un dossier ne faisait rien
+// du tout — pas d'erreur, pas de photo, on croyait que l'outil etait casse.
+async function fichiersDeEntree(entree){
+  if(!entree) return [];
+  if(entree.isFile){
+    return [await new Promise(function(r){ entree.file(r, function(){ r(null); }); })];
+  }
+  var lect = entree.createReader(), tout = [], paquet;
+  do {
+    paquet = await new Promise(function(r){ lect.readEntries(r, function(){ r([]); }); });
+    for(var i = 0; i < paquet.length; i++) tout = tout.concat(await fichiersDeEntree(paquet[i]));
+  } while(paquet.length);
+  return tout;
+}
+
+var nColle = 0;
+
+// Une photo collee au clavier arrive sans nom, ou toujours sous le meme
+// ("image.png"). Comme l'ordre des photos est celui des noms, elles se
+// seraient toutes bousculees : on numerote dans l'ordre du collage.
+function collerImages(ev, versLot){
+  var dt = ev.clipboardData;
+  if(!dt) return false;
+  var fichiers = [];
+  var items = dt.items || [];
+  for(var i = 0; i < items.length; i++){
+    if(items[i].kind !== 'file') continue;
+    var f = items[i].getAsFile();
+    if(f && /^(image|video)\//.test(f.type || '')) fichiers.push(f);
+  }
+  if(!fichiers.length) return false;        // du texte : collage normal
+  ev.preventDefault();
+  fichiers = fichiers.map(function(f){
+    nColle++;
+    var ext = String(f.type).split('/')[1] || 'png';
+    if(ext === 'jpeg') ext = 'jpg';
+    var nom = 'colle-' + ('000' + nColle).slice(-3) + '.' + ext;
+    try { return new File([f], nom, {type: f.type}); }
+    catch(e){ return f; }                   // vieux navigateur : on garde tel quel
+  });
+  if(versLot) ajouterLot(fichiers); else ajouter(fichiers);
+  return true;
+}
+
+async function deposer(ev, versLot){
+  var dt = ev.dataTransfer;
+  var entrees = [];
+  if(dt.items && dt.items.length && dt.items[0].webkitGetAsEntry){
+    for(var i = 0; i < dt.items.length; i++){
+      var e = dt.items[i].webkitGetAsEntry && dt.items[i].webkitGetAsEntry();
+      if(e) entrees.push(e);
+    }
+  }
+  var fichiers = [];
+  if(entrees.length){
+    etat('Lecture du dossier…');
+    for(var k = 0; k < entrees.length; k++)
+      fichiers = fichiers.concat(await fichiersDeEntree(entrees[k]));
+    fichiers = fichiers.filter(Boolean);
+    etat('');
+  } else {
+    fichiers = Array.prototype.slice.call(dt.files || []);
+  }
+  if(!fichiers.length){ etat('Rien de lisible dans ce depot.', 'ko'); return; }
+  if(versLot) ajouterLot(fichiers); else ajouter(fichiers);
+}
 E('sepperso').oninput = function(){ rendreLot(); };
 E('sep').onchange = function(){
   E('sepperso').disabled = this.value !== 'perso';
@@ -766,6 +1000,10 @@ class Poste(BaseHTTPRequestHandler):
     def _lot(self, d):
         """Poste une liste de messages, un par un, dans l'ordre.
 
+        Un élément est un texte, une photo, ou les deux. La page envoie le
+        collage par tranches : une photo pèse lourd une fois encodée, et tout
+        faire tenir dans une seule requête bloquait la page sans rien afficher.
+
         Discord accepte environ 5 messages par 5 secondes dans un salon : on
         laisse une seconde entre chaque et on respecte le délai qu'il demande
         quand il dit stop (429). Un envoi raté n'arrête pas les suivants — le
@@ -775,26 +1013,63 @@ class Poste(BaseHTTPRequestHandler):
         salon = str(d.get("salon") or "")
         titre = str(d.get("titre") or "")
         couleur = str(d.get("couleur") or "")
-        messages = [str(x or "").strip() for x in (d.get("messages") or [])]
-        messages = [m for m in messages if m]
-        if not salon or not messages:
+        depart = int(d.get("depart") or 0)        # numéro du premier de la tranche
+
+        elements = []
+        for x in (d.get("messages") or []):
+            if isinstance(x, dict):
+                elements.append((str(x.get("texte") or "").strip(), x.get("image")))
+            else:
+                elements.append((str(x or "").strip(), None))
+        elements = [e for e in elements if e[0] or e[1]]
+
+        if not salon or not elements:
             return self._envoyer({"ok": False, "error": "Salon vide ou aucun message"})
-        if len(messages) > 300:
+        if len(elements) > 300:
             return self._envoyer({"ok": False,
-                                  "error": f"{len(messages)} messages : trop d'un coup "
+                                  "error": f"{len(elements)} messages : trop d'un coup "
                                            "(300 au maximum). Coupe le collage en deux."})
         copier = bool(d.get("copier")) and BOUTON_COPIE is not None
         if d.get("copier") and BOUTON_COPIE is None:
             return self._envoyer({"ok": False,
                                   "error": "copie_discord.py est introuvable : "
                                            "pas de bouton Copier possible."})
+
         envoyes, echecs = 0, []
-        for i, texte in enumerate(messages):
+        for i, (texte, image) in enumerate(elements):
+            n = depart + i + 1
+            apercu = texte[:60] or (str((image or {}).get("nom") or "")[:60])
+
+            fichier = None
+            if image:
+                try:
+                    octets = base64.b64decode(str(image.get("b64") or ""), validate=True)
+                except Exception:
+                    octets = b""
+                if not octets:
+                    echecs.append({"n": n, "apercu": apercu,
+                                   "erreur": "photo illisible"})
+                    continue
+                if len(octets) > 9 * 1024 * 1024:
+                    echecs.append({"n": n, "apercu": apercu,
+                                   "erreur": f"{len(octets)//(1024*1024)} Mo : "
+                                             "trop lourd pour Discord (9 Mo max)"})
+                    continue
+                fichier = [(str(image.get("nom") or "image.png"), octets)]
+
             corps = corps_message(texte, titre, couleur, bool(titre))
-            if copier:
+            # un bouton Copier sous une photo sans légende n'aurait rien à copier
+            if copier and texte:
                 corps["components"] = BOUTON_COPIE()
+            if fichier:
+                corps["attachments"] = [{"id": 0, "filename": fichier[0][0]}]
+
             for essai in range(3):
-                code, rep = api("POST", f"/channels/{salon}/messages", corps)
+                if fichier:
+                    code, rep = api_fichiers("POST", f"/channels/{salon}/messages",
+                                             corps, fichier)
+                else:
+                    code, rep = api("POST", f"/channels/{salon}/messages", corps)
                 if code == 429:
                     time.sleep(float(rep.get("retry_after") or 1) + 0.3)
                     continue
@@ -802,12 +1077,12 @@ class Poste(BaseHTTPRequestHandler):
             if code == 200:
                 envoyes += 1
             else:
-                echecs.append({"n": i + 1,
-                               "apercu": texte[:60],
+                echecs.append({"n": n, "apercu": apercu,
                                "erreur": str(rep.get("message") or f"HTTP {code}")[:120]})
-            time.sleep(1.0)
+            # une photo met plus longtemps à monter : on laisse respirer davantage
+            time.sleep(1.3 if fichier else 1.0)
         return self._envoyer({"ok": not echecs, "envoyes": envoyes,
-                              "total": len(messages), "echecs": echecs})
+                              "total": len(elements), "echecs": echecs})
 
     def _vider(self, d):
         """Efface les messages d'un salon — en deux temps, jamais à l'aveugle.
