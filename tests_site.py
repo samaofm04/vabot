@@ -12379,6 +12379,164 @@ try:
 except Exception as _eOA:
     check("Setup SFS OF remplissage auto : testable", False, repr(_eOA)[:200])
 
+print()
+print("=" * 70)
+print("Verification Discord : anti-fraude, Benin/Madagascar seulement, doubles comptes")
+print("=" * 70)
+try:
+    import json as _jsV
+    import tempfile as _tfV
+    import pathlib as _plV
+    import time as _tmV
+    import verif_discord as _vd
+    import web_upload as _wV
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey as _EdV
+    _dV = _plV.Path(_tfV.mkdtemp())
+    _savV = (_vd.DATA_DIR, _vd.FICHES, _vd.SECRET_FILE, _vd.CLE_PUBLIQUE_APP, _vd.infos_ip, _vd.api)
+    try:
+        _vd.DATA_DIR, _vd.FICHES, _vd.SECRET_FILE = _dV, _dV / "verif_membres.json", _dV / "verif_secret"
+        # -- signature Ed25519 des interactions
+        _kV = _EdV.generate()
+        _pubV = _kV.public_key().public_bytes_raw().hex()
+        _corpsV = b'{"type":1}'
+        _sigV = _kV.sign(b"1700000000" + _corpsV).hex()
+        check("signature Discord valide acceptee", _vd.signature_valide(_corpsV, _sigV, "1700000000", _pubV))
+        check("corps modifie : signature refusee", not _vd.signature_valide(b'{"type":3}', _sigV, "1700000000", _pubV))
+        check("sans signature : refuse", not _vd.signature_valide(_corpsV, "", "", _pubV))
+        # -- lien personnel signe
+        _jV = _vd.creer_jeton("123456789012345678", maintenant=1000)
+        check("lien personnel : lu avec le bon membre", (_vd.lire_jeton(_jV, maintenant=1001) or {}).get("user_id") == "123456789012345678")
+        check("lien expire au bout de 15 min", _vd.lire_jeton(_jV, maintenant=1000 + 15 * 60 + 1) is None)
+        _a, _b = _jV.split(".", 1)
+        _faux = _vd._b64(_vd._unb64(_a).replace(b"123456789012345678", b"999999999999999999")) + "." + _b
+        check("lien falsifie (autre membre) : refuse", _vd.lire_jeton(_faux, maintenant=1001) is None)
+        # -- IP : CF-Connecting-IP n est garantie que si nginx atteste Cloudflare
+        check("IP garantie quand la connexion vient de Cloudflare",
+              _vd.ip_du_visiteur({"CF-Connecting-IP": "41.85.160.10", "X-Real-IP": "172.68.1.1"}, "127.0.0.1") == ("41.85.160.10", True))
+        check("CF-Connecting-IP ecrit a la main (hors Cloudflare) : non garantie",
+              _vd.ip_du_visiteur({"CF-Connecting-IP": "41.85.160.10", "X-Real-IP": "82.64.1.1"}, "127.0.0.1") == ("41.85.160.10", False))
+        check("en-tete IP invalide : ignore", _vd.ip_du_visiteur({"CF-Connecting-IP": "pas-une-ip"}, "10.0.0.2") == ("10.0.0.2", False))
+        # -- decision
+        _base = {"user_id": "1", "ip_ok": True, "pays": "BJ", "pays_nom": "Benin", "vpn": False,
+                 "fuseau": "Africa/Porto-Novo", "empreinte": "e1", "appareil": "a1", "ip_hash": "h1", "ip_garantie": True}
+        check("Benin, sans VPN, appareil neuf : OK", _vd.decider(dict(_base), {})["etat"] == "ok")
+        check("Madagascar : OK", _vd.decider(dict(_base, pays="MG", fuseau="Indian/Antananarivo"), {})["etat"] == "ok")
+        check("IP en France : BLOQUE", _vd.decider(dict(_base, pays="FR", pays_nom="France", fuseau="Europe/Paris"), {})["etat"] == "bloque")
+        check("tout autre pays (ex. Cote d Ivoire) : BLOQUE", _vd.decider(dict(_base, pays="CI"), {})["etat"] == "bloque")
+        check("VPN meme avec IP beninoise : BLOQUE", _vd.decider(dict(_base, vpn=True, type="VPN"), {})["etat"] == "bloque")
+        _autres = {"2": dict(_base, user_id="2", empreinte="e1", appareil="zz", etat="ok")}
+        _dMA = _vd.decider(dict(_base), _autres)
+        check("meme appareil qu un compte verifie : EN ATTENTE manager", _dMA["etat"] == "attente" and _dMA["meme_appareil"] == ["2"])
+        _dIP = _vd.decider(dict(_base, empreinte="e9", appareil="a9"), {"3": dict(_base, user_id="3", empreinte="x", appareil="y", etat="ok")})
+        check("meme IP seule (reseau partage) : OK, mais signale", _dIP["etat"] == "ok" and _dIP["meme_ip"] == ["3"])
+        check("telephone en Europe/Paris derriere une IP beninoise : EN ATTENTE",
+              _vd.decider(dict(_base, fuseau="Europe/Paris"), {})["etat"] == "attente")
+        check("pays introuvable (services muets) : EN ATTENTE, jamais ouvert a l aveugle",
+              _vd.decider(dict(_base, ip_ok=False, ip_erreur="muet"), {})["etat"] == "attente")
+        _dEmp = _vd.decider(dict(_base, ip_hash="h2", appareil="a2"), {"4": dict(_base, user_id="4", appareil="a4", etat="ok")})
+        check("meme modele de telephone, autre IP : OK (deux Tecno identiques), mais signale",
+              _dEmp["etat"] == "ok" and _dEmp["meme_empreinte"] == ["4"] and not _dEmp["meme_appareil"])
+        check("meme navigateur (identifiant garde), tout le reste different : EN ATTENTE",
+              _vd.decider(dict(_base, empreinte="e7", ip_hash="h7"), {"5": dict(_base, user_id="5", empreinte="z", ip_hash="z", etat="ok")})["etat"] == "attente")
+        check("le telephone d un compte BANNI qui revient : EN ATTENTE",
+              _vd.decider(dict(_base), {"6": dict(_base, user_id="6", etat="banni", empreinte="q", ip_hash="q")})["etat"] == "attente")
+        _dPrec = _vd.decider(dict(_base), {"1": dict(_base, etat="bloque")})
+        check("deja bloque une fois, revient propre : EN ATTENTE (pas d essais jusqu a passer)",
+              _dPrec["etat"] == "attente" and "bloqué" in " ".join(_dPrec["raisons"]))
+        check("requete arrivee hors Cloudflare (IP inventable) : EN ATTENTE",
+              _vd.decider(dict(_base, hors_cloudflare=True), {})["etat"] == "attente")
+        # -- interactions
+        check("PING de Discord : repondu", _vd.traiter_interaction({"type": 1}) == {"type": 1})
+        check("deja « En attente » : pas de nouveau lien (chaque essai reposterait une alerte)",
+              "manager" in _vd.traiter_interaction({"type": 3, "guild_id": _vd.GUILD_ID, "data": {"custom_id": "verif:start"},
+                                                    "member": {"user": {"id": "123456789012345678"}, "roles": [_vd.ROLE_ATTENTE]}})["data"]["content"])
+        _startV = _vd.traiter_interaction({"type": 3, "guild_id": _vd.GUILD_ID, "data": {"custom_id": "verif:start"},
+                                           "member": {"user": {"id": "123456789012345678", "username": "va"}, "roles": []}})
+        _url = (((_startV.get("data") or {}).get("components") or [{}])[0].get("components") or [{}])[0].get("url", "")
+        check("« Se verifier » : lien personnel, visible par lui seul, sans pseudo dans l URL",
+              _startV.get("data", {}).get("flags") == 64 and "/verif/" in _url and "?" not in _url)
+        check("bouton sur un autre serveur : refuse",
+              "YouLab" in _vd.traiter_interaction({"type": 3, "guild_id": "1", "data": {"custom_id": "verif:start"}, "member": {}})["data"]["content"])
+        _vd.api = lambda *a, **k: (204, {})
+        _nonV = _vd.traiter_interaction({"type": 3, "guild_id": _vd.GUILD_ID, "data": {"custom_id": "verif:ok:123456789012345678"},
+                                         "member": {"user": {"id": "5", "username": "x"}, "roles": [], "permissions": "0"}})
+        check("boutons Accepter/Refuser : reserves aux managers", "managers" in _nonV["data"]["content"])
+        _ouiV = _vd.traiter_interaction({"type": 3, "guild_id": _vd.GUILD_ID, "data": {"custom_id": "verif:ok:123456789012345678"},
+                                         "member": {"user": {"id": "5", "username": "boss"}, "roles": [_vd.ROLE_MANAGER], "permissions": "0"},
+                                         "message": {"embeds": [{"title": "t"}]}})
+        check("manager qui accepte : alerte mise a jour, boutons retires",
+              _ouiV["type"] == 7 and _ouiV["data"]["components"] == [] and "accepté par boss" in _ouiV["data"]["embeds"][0]["footer"]["text"])
+        # -- parcours complet par la page, reseau simule
+        _poses = []
+        _vd.api = lambda m, chemin, **k: (_poses.append((m, chemin, k.get("json"))) or (200, {"id": "999"}))
+        _vd.infos_ip = lambda ip: {"ok": True, "pays": "FR", "pays_nom": "France", "fai": "Orange", "vpn": False, "type": ""}
+        _jFR = _vd.creer_jeton("111111111111111111")
+        _rFR = _vd.verifier(_jFR, {"t0": _tmV.time() - 10, "fuseau": "Europe/Paris", "canvas": "c"}, "90.1.1.1", True)
+        check("parcours : IP francaise bloquee, alerte dans #suspicions, role Suspect, jamais Verifie",
+              _rFR["etat"] == "bloque" and any(c == f"/channels/{_vd.SALON_SUSPICIONS}/messages" for _, c, _j in _poses)
+              and any(m == "PUT" and c.endswith("/roles/" + _vd.ROLE_SUSPECT) for m, c, _j in _poses)
+              and not any(c.endswith("/roles/" + _vd.ROLE_VERIFIE) for _, c, _j in _poses))
+        check("parcours : le meme lien ne sert qu une fois",
+              _vd.verifier(_jFR, {"t0": _tmV.time() - 10}, "90.1.1.1", True)["etat"] == "erreur")
+        _poses.clear()
+        _vd.infos_ip = lambda ip: {"ok": True, "pays": "BJ", "pays_nom": "Benin", "fai": "MTN", "vpn": False, "type": ""}
+        _rBJ = _vd.verifier(_vd.creer_jeton("222222222222222222"),
+                            {"t0": _tmV.time() - 10, "fuseau": "Africa/Porto-Novo", "canvas": "unique-bj", "appareil": "dev-bj"},
+                            "41.85.160.10", True)
+        check("parcours : Benin -> role Verifie pose + ligne dans #entrees pour le staff",
+              _rBJ["etat"] == "ok" and any(m == "PUT" and c.endswith("/roles/" + _vd.ROLE_VERIFIE) for m, c, _j in _poses)
+              and any(c == f"/channels/{_vd.SALON_ALERTES}/messages" for _, c, _j in _poses))
+        _bienV = [j for _, c, j in _poses if c == f"/channels/{_vd.SALON_BIENVENUE}/messages"]
+        check("parcours : bienvenue dans #bienvenue, le nouveau est mentionne (et lui seul)",
+              len(_bienV) == 1 and _bienV[0]["allowed_mentions"] == {"users": ["222222222222222222"]}
+              and "<@222222222222222222>" in _bienV[0]["content"]
+              and all(("<#" + x + ">") in _bienV[0]["embeds"][0]["description"] for x in _vd.SALONS_ETAPES.values()))
+        _poses.clear()
+        _vd.api = lambda m, chemin, **k: (_poses.append((m, chemin, k.get("json")))
+                                          or ((403, {}) if chemin.endswith("/roles/" + _vd.ROLE_VERIFIE) else (200, {"id": "9"})))
+        _rRole = _vd.verifier(_vd.creer_jeton("555555555555555555"),
+                              {"t0": _tmV.time() - 10, "fuseau": "Africa/Porto-Novo", "canvas": "c5", "appareil": "d5"}, "41.85.160.55", True)
+        check("parcours : role refuse par Discord -> EN ATTENTE avec boutons, jamais enferme en silence",
+              _rRole["etat"] == "attente" and any(c == f"/channels/{_vd.SALON_ATTENTE}/messages" and j.get("components")
+                                                   for _, c, j in _poses))
+        _vd.api = lambda m, chemin, **k: (404, {}) if m == "GET" else (200, {"id": "9"})
+        check("parcours : parti du serveur entre-temps -> rien n est ecrit",
+              "plus sur le serveur" in _vd.verifier(_vd.creer_jeton("666666666666666666"), {"t0": _tmV.time() - 10},
+                                                    "41.85.160.66", True)["message"]
+              and "666666666666666666" not in _jsV.loads(_vd.FICHES.read_text(encoding="utf-8")))
+        _vd.api = lambda m, chemin, **k: (200, {"id": "9"})
+        _essV = [_vd.verifier(_vd.creer_jeton("777777777777777777"), {"t0": _tmV.time() - 10, "appareil": "d7-%d" % i},
+                              "41.85.160.77", True)["etat"] for i in range(4)]
+        check("parcours : 3 essais par 24 h, le 4e est refuse", _essV[3] == "erreur" and "erreur" not in _essV[:3])
+        check("parcours : clic trop rapide (script) refuse",
+              _vd.verifier(_vd.creer_jeton("333333333333333333"), {"t0": _tmV.time()}, "41.85.160.10", True)["etat"] == "erreur")
+        _fiV = _jsV.loads(_vd.FICHES.read_text(encoding="utf-8"))
+        check("fiche : l IP est gardee pour le staff, l empreinte aussi", _fiV["222222222222222222"]["ip"] == "41.85.160.10"
+              and _fiV["222222222222222222"]["empreinte"])
+        # -- routes publiques du site
+        _appV = _wV.create_app()
+        _appV.config["TESTING"] = True
+        _cV = _appV.test_client()
+        check("route interactions : sans signature -> 401", _cV.post("/discord/interactions", data=b"{}").status_code == 401)
+        _vd.CLE_PUBLIQUE_APP = _pubV
+        _savCharger = _vd._charger_config
+        _vd._charger_config = lambda: None
+        _sigP = _kV.sign(b"1700000001" + b'{"type":1}').hex()
+        _rP = _cV.post("/discord/interactions", data=b'{"type":1}',
+                       headers={"X-Signature-Ed25519": _sigP, "X-Signature-Timestamp": "1700000001"})
+        check("route interactions : PING signe -> {type:1}", _rP.status_code == 200 and _rP.get_json() == {"type": 1})
+        _vd._charger_config = _savCharger
+        check("page /verif avec un lien invalide : 410", _cV.get("/verif/nimportequoi").status_code == 410)
+        _gV = _cV.get("/verif/" + _vd.creer_jeton("444444444444444444"))
+        check("page /verif avec un lien valide : servie, previent le membre, non indexee",
+              _gV.status_code == 200 and "adresse IP" in _gV.get_data(as_text=True) and "no-store" in (_gV.headers.get("Cache-Control") or "")
+              and _gV.headers.get("X-Robots-Tag") == "noindex")
+    finally:
+        (_vd.DATA_DIR, _vd.FICHES, _vd.SECRET_FILE, _vd.CLE_PUBLIQUE_APP, _vd.infos_ip, _vd.api) = _savV
+except Exception as _eV:
+    import traceback as _tbV
+    check("verification Discord : testable", False, repr(_eV)[:200] + " " + _tbV.format_exc()[-300:])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

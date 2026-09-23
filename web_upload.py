@@ -51137,6 +51137,58 @@ def create_app():
         safe_json.write_text(DATA_DIR / "revoked_sessions.json",
                              json.dumps(sorted(cur)[-500:], ensure_ascii=False))
 
+    # ── VERIFICATION DISCORD (serveur « YouLab - Entretien ») ─────────
+    # Publiques par construction (aucun appel a is_auth) : un candidat qui
+    # arrive sur le Discord n'a pas de compte sur ce site. La securite est
+    # ailleurs : l'URL des interactions n'accepte que ce que Discord a
+    # SIGNE (Ed25519), et la page n'ouvre rien sans un jeton personnel,
+    # signe, a usage unique et valable 15 minutes. Voir verif_discord.py.
+    @app.route("/discord/interactions", methods=["POST"])
+    def discord_interactions():
+        from flask import jsonify
+        import verif_discord as _vd
+        _vd._charger_config()
+        corps = request.get_data(cache=False) or b""
+        if not _vd.signature_valide(corps, request.headers.get("X-Signature-Ed25519", ""),
+                                    request.headers.get("X-Signature-Timestamp", "")):
+            return ("signature invalide", 401)
+        try:
+            charge = json.loads(corps.decode("utf-8"))
+        except Exception:
+            return ("corps illisible", 400)
+        return jsonify(_vd.traiter_interaction(charge))
+
+    @app.route("/verif/<jeton>", methods=["GET"])
+    def verif_page(jeton):
+        from flask import Response
+        import verif_discord as _vd
+        if not _vd.lire_jeton(jeton):
+            return Response("<!doctype html><meta charset=utf-8><body style='font-family:sans-serif;"
+                            "background:#0b0b10;color:#e8e8f0;padding:30px'>Lien expiré ou invalide. "
+                            "Retourne sur Discord et clique à nouveau « Se vérifier ».</body>",
+                            status=410, mimetype="text/html")
+        r = Response(_vd.PAGE_HTML, mimetype="text/html")
+        r.headers["Cache-Control"] = "no-store"
+        r.headers["Referrer-Policy"] = "no-referrer"
+        r.headers["X-Robots-Tag"] = "noindex"
+        return r
+
+    @app.route("/verif/<jeton>", methods=["POST"])
+    def verif_envoi(jeton):
+        from flask import jsonify
+        import verif_discord as _vd
+        try:
+            donnees = request.get_json(force=True, silent=True) or {}
+        except Exception:
+            donnees = {}
+        if not isinstance(donnees, dict):
+            donnees = {}
+        ip, garantie = _vd.ip_du_visiteur(request.headers, request.remote_addr or "")
+        # Tout visiteur de youl4b.com passe par Cloudflare, qui pose CF-Ray :
+        # son absence veut dire qu'on a vise le serveur en direct.
+        return jsonify(_vd.verifier(jeton, donnees, ip, garantie,
+                                    hors_cloudflare=not request.headers.get("CF-Ray")))
+
     # ── FAVICON ──────────────────────────────────────────────────────
     # Servi SANS authentification, et c'est volontaire : le navigateur
     # reclame l'icone sur la page de CONNEXION aussi, souvent avant
