@@ -13469,29 +13469,42 @@ try:
 
     _cl30 = {"lignes": [{"va": f"VA {i}", "numero": i, "clics": 100 - i,
                          "liens": 1, "spam": False} for i in range(1, 31)],
-             "illisibles": [], "frais": True}
-    _e30, _coupes30 = _pd.embed_subs(_cl30, _dtP.date(2026, 9, 16), _dtP.date(2026, 9, 30), {})
+             "illisibles": [], "frais": True, "entites": 30, "liens": 30}
+    _p30 = _pd.pages_subs(_cl30, _dtP.date(2026, 9, 16), _dtP.date(2026, 9, 30), {})
+    _txt30 = "\n".join(x["description"] for x in _p30)
     import re as _reP
     # les trois premiers sont en gras (**VA 1**), les autres non : on cherche
     # le numero suivi de tout SAUF d un chiffre, sinon « VA 1 » trouve « VA 10 »
     _manquants = [i for i in range(1, 31)
-                  if not _reP.search(rf"VA {i}(?!\d)", _e30["description"])]
+                  if not _reP.search(rf"VA {i}(?!\d)", _txt30)]
     check("les 30 comptes sont TOUS la, pas seulement les dix premiers",
-          not _manquants and _coupes30 == 0, f"manquants : {_manquants}")
+          not _manquants and len(_p30) == 1, f"manquants : {_manquants}")
     check("le nombre de comptes classes est annonce en tete",
-          "**30** comptes classés" in _e30["description"])
+          "**30** comptes classés" in _p30[0]["description"])
+    check("le total de la periode est ecrit, et il est juste",
+          f"**{sum(100 - i for i in range(1, 31))}** subs" in _p30[-1]["description"]
+          and "Total période" in _p30[-1]["description"])
 
-    # une liste trop longue est coupee par Discord : il faut le DIRE
+    # une liste trop longue part en PAGES, elle n est plus tronquee
     _clGros = {"lignes": [{"va": f"VA {i}", "numero": i, "clics": 1,
                            "liens": 1, "spam": False} for i in range(1, 400)],
-               "illisibles": [], "frais": True}
-    _eG, _coupesG = _pd.embed_subs(_clGros, _dtP.date(2026, 9, 16), _dtP.date(2026, 9, 30), {})
-    check("une liste trop longue est coupee ET annoncee, jamais en silence",
-          _coupesG > 0 and "ne tiennent pas" in _eG["description"]
-          and len(_eG["description"]) <= 4096)
+               "illisibles": [], "frais": True, "entites": 399, "liens": 399}
+    _pG = _pd.pages_subs(_clGros, _dtP.date(2026, 9, 16), _dtP.date(2026, 9, 30), {})
+    _txtG = "\n".join(x["description"] for x in _pG)
+    _manqG = [i for i in range(1, 400) if not _reP.search(rf"VA {i}(?!\d)", _txtG)]
+    check("399 comptes tiennent sur plusieurs pages, aucun n est perdu",
+          len(_pG) > 1 and not _manqG, f"manquants : {_manqG[:5]}")
+    check("chaque page tient dans la limite Discord",
+          all(len(x["description"]) <= 4096 for x in _pG))
+    check("les pages sont numerotees, sinon on ne sait pas s il en manque",
+          all(f"page {n}/{len(_pG)}" in _pG[n - 1]["footer"]["text"]
+              for n in range(1, len(_pG) + 1)))
+    check("le total n est ecrit qu une fois, sur la derniere page",
+          sum("Total période" in x["description"] for x in _pG) == 1
+          and "Total période" in _pG[-1]["description"])
 
     check("le all-time apparait quand on l a",
-          "all-time" in _pd.embed_subs(_cl30, _dtP.date(2026, 9, 16), _dtP.date(2026, 9, 30),
+          "all-time" in _pd.pages_subs(_cl30, _dtP.date(2026, 9, 16), _dtP.date(2026, 9, 30),
                                        {"VA 1": 4242})[0]["description"])
 
     # le VPS tourne en UTC : sans heure de Paris, « lundi 09h » tombait a 11h
@@ -13504,6 +13517,24 @@ try:
     _srcP = _plP("web_upload.py").read_text(encoding="utf-8")
     check("le podium est arme au demarrage du site",
           "_start_podium_semaine_daemon()" in _srcP and "podium-semaine" in _srcP)
+    # le 23/09 la quete du jour est partie DEUX FOIS : le poste de dev et le VPS
+    # armaient chacun le demon, chacun avec son propre data/
+    check("les demons Discord ne s arment que sur la machine de production",
+          "_machine_proprietaire" in _srcP and "VA_MACHINE_PROD" in _srcP
+          and _srcP.count("if not _machine_proprietaire(") >= 2)
+    check("une machine qui n arme pas le DIT, elle ne se tait pas",
+          "NON arme ici" in _srcP)
+
+    _nomsP = {n: _pd.personne(n)[0] for n in
+              ["( BO7 ) 1", "BO7", "VA 9", "VA 1", "EUD", "va_@priscah0908"]}
+    check("un nom qui finit par un chiffre n est PAS ampute (BO7 restait BO)",
+          _nomsP["BO7"] == "BO7" and _nomsP["va_@priscah0908"] == "va_@priscah0908")
+    check("deux liens anonymes du cache de repli ne fondent pas en un seul",
+          _nomsP["VA 9"] != _nomsP["VA 1"])
+    check("les parentheses restent la source du nom",
+          _nomsP["( BO7 ) 1"] == "BO7" and _pd.personne("(PAMPAM) 1 SPAM") == ("PAMPAM", True))
+    check("SPAM colle sans parentheses est retire du nom",
+          _pd.personne("Gerome SPAM") == ("Gerome", True))
 except Exception as _eP:
     check("podium : testable", False, repr(_eP)[:200])
 

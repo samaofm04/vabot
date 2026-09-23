@@ -50645,6 +50645,33 @@ def _banger_test(heures: int = 24, combien: int = 5,
     return rapport
 
 
+def _machine_proprietaire(quoi: str) -> bool:
+    """Vrai sur LA machine qui a le droit de poster sur Discord.
+
+    create_app() tourne aussi sur le poste de dev : rendre une page avec le
+    client de test Flask, ce que le projet recommande, armait les demons avec
+    le vrai jeton. Chaque machine ayant son propre data/, chacune croyait
+    n'avoir rien poste -- et le 23/09 la quete du jour est partie DEUX FOIS
+    dans le meme salon, a huit minutes d'ecart.
+
+    La variable n'est posee que dans le .env du VPS. On imprime dans les deux
+    cas : un demon silencieusement desarme serait pire que le doublon.
+    """
+    import os as _os_m
+    if _os_m.environ.get("VA_MACHINE_PROD") == "1":
+        return True
+    # une fois par demon et par processus : create_app() est appele des
+    # dizaines de fois dans les tests, la ligne noyait tout le reste
+    _dits = getattr(_machine_proprietaire, "_dits", None)
+    if _dits is None:
+        _dits = _machine_proprietaire._dits = set()
+    if quoi not in _dits:
+        _dits.add(quoi)
+        print(f"[{quoi}] machine non proprietaire (VA_MACHINE_PROD absent) : "
+              f"{quoi} NON arme ici", flush=True)
+    return False
+
+
 def _start_quete_du_jour_daemon() -> bool:
     """Poste la quête du jour à 00h01, chaque nuit, sur le serveur THREADS.
 
@@ -50654,6 +50681,8 @@ def _start_quete_du_jour_daemon() -> bool:
     de poster deux fois le même jour, donc repasser souvent ne coûte rien.
     """
     import threading as _th_q
+    if not _machine_proprietaire("quetes"):
+        return False
     if getattr(_start_quete_du_jour_daemon, "_on", False):
         return False
     _start_quete_du_jour_daemon._on = True
@@ -50694,6 +50723,8 @@ def _start_podium_semaine_daemon() -> bool:
     repasser, donc se réveiller souvent ne coûte rien.
     """
     import threading as _th_p
+    if not _machine_proprietaire("podium"):
+        return False
     if getattr(_start_podium_semaine_daemon, "_on", False):
         return False
     _start_podium_semaine_daemon._on = True

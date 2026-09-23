@@ -153,7 +153,15 @@ def personne(nom_du_lien: str) -> Tuple[str, bool]:
     """« (Gerome) SPAM » → (« Gerome », True). « ( BO7 ) 1 » → (« BO7 », False)."""
     n = str(nom_du_lien or "").strip()
     dedans = re.search(r"\(([^)]*)\)", n)
-    base = (dedans.group(1) if dedans else re.sub(r"\s*\d+\s*$", "", n)).strip()
+    if dedans:
+        base = dedans.group(1).strip()
+    else:
+        # PAS de rognage du chiffre final. « BO7 » devenait « BO » : une entite
+        # fantome, un numero de VA gaspille a vie, et les clics du vrai BO7
+        # coupes en deux. Et rogner « VA 9 » aurait donne « VA », ce qui fond
+        # en un seul compte tous les liens du cache de repli. Sans parentheses,
+        # le nom est pris tel quel.
+        base = re.sub(r"\s+SPAM\s*$", "", n, flags=re.IGNORECASE).strip()
     return (base or n), ("SPAM" in n.upper())
 
 
@@ -330,51 +338,73 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
             "footer": {"text": pied}}
 
 
-def embed_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
-               totaux: Dict[str, int]) -> Tuple[Dict[str, Any], int]:
-    """Le classement de la quinzaine, avec TOUT LE MONDE.
+def pages_subs(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
+               totaux: Dict[str, int]) -> List[Dict[str, Any]]:
+    """Le classement de la quinzaine, découpé en autant de messages qu'il faut.
 
-    Rend aussi le nombre de lignes qui n'ont pas tenu : Discord coupe une
-    description à 4096 caractères, et une liste tronquée sans le dire ferait
-    croire à quelqu'un qu'il n'existe pas.
+    Discord coupe une description à 4096 caractères. Plutôt que de tronquer —
+    ce qui ferait croire à quelqu'un du bas de tableau qu'il n'existe pas —, on
+    répartit sur plusieurs messages, numérotés « page 2/3 ». Le total de la
+    période va sur la dernière page : c'est là qu'on le cherche.
     """
     lignes = cl["lignes"]
-    tete = [f'🗓️ Période **{debut.strftime("%d/%m")} → {fin.strftime("%d/%m/%Y")}** '
-            f'· depuis le {debut.strftime("%d/%m")} à 00h00',
-            f'Clics **US** · **{len(lignes)}** comptes classés', ""]
-    corps = []
+    tete = (f'🗓️ Période **{debut.strftime("%d/%m")} → {fin.strftime("%d/%m/%Y")}** '
+            f'· depuis le {debut.strftime("%d/%m")} à 00h00\n'
+            f'Clics **US** · **{len(lignes)}** comptes classés\n')
+
+    rangs = []
     for i, x in enumerate(lignes):
         at = totaux.get(x["va"])
         suffixe = f' · 🌐 {at} all-time' if at is not None else ""
-        if i < 3:
-            corps.append(f'{MEDAILLES[i]} **{x["va"]}** — **{x["clics"]}** subs{suffixe}')
-        else:
-            corps.append(f'{i + 1}. {x["va"]} — {x["clics"]} subs{suffixe}')
-    pied = []
-    if cl["illisibles"]:
-        pied = ["", "⚠️ Sans relevé cette fois : " + ", ".join(cl["illisibles"])
-                    + " — ils remonteront au prochain passage."]
-    if not cl["frais"]:
-        pied += ["", "⚠️ _Liste des liens non rafraîchie : des comptes peuvent manquer._"]
+        rangs.append(f'{MEDAILLES[i]} **{x["va"]}** — **{x["clics"]}** subs{suffixe}'
+                     if i < 3 else
+                     f'{i + 1}. {x["va"]} — {x["clics"]} subs{suffixe}')
+    if not rangs:
+        rangs = ["_Aucun relevé pour cette période._"]
 
-    coupes = 0
-    while True:
-        fin_txt = ([] if not coupes
-                   else ["", f"… _{coupes} ligne(s) de plus ne tiennent pas dans un message Discord._"])
-        texte = "\n".join(tete + corps[:len(corps) - coupes] + fin_txt + pied)
-        if len(texte) <= 4000 or coupes >= len(corps):
-            break
-        coupes += 1
-    return ({"title": "📊 Classement subs — la quinzaine",
-             "color": 0x3B82F6,
-             "description": texte,
-             "footer": {"text": "YOULAB • Marché US · comptes VA, sans pseudo · mis à jour "
-                                + _maintenant().strftime("%d/%m à %Hh%M")}},
-            coupes)
+    total = sum(int(x["clics"]) for x in lignes)
+    queue = [f'\n👥 **Total période**\n**{total}** subs']
+    if cl["illisibles"]:
+        queue.append("\n⚠️ Sans relevé cette fois : " + ", ".join(cl["illisibles"])
+                     + " — ils remonteront au prochain passage.")
+    if not cl["frais"]:
+        queue.append("\n⚠️ _Liste des liens non rafraîchie : des comptes peuvent manquer._")
+    bas = "\n".join(queue)
+
+    # on remplit page par page, en gardant de la place pour l'en-tête ; la
+    # dernière doit aussi loger le total, d'où la marge plus large
+    MARGE = 3600
+    pages: List[List[str]] = [[]]
+    taille = len(tete)
+    for r in rangs:
+        if taille + len(r) + 1 > MARGE and pages[-1]:
+            pages.append([])
+            taille = len(tete)
+        pages[-1].append(r)
+        taille += len(r) + 1
+    # le total ne tient plus sur la dernière page : il prend la sienne
+    if len("\n".join([tete] + pages[-1])) + len(bas) > 4000:
+        pages.append([])
+
+    out = []
+    for n, page in enumerate(pages, start=1):
+        corps = tete + "\n" + "\n".join(page)
+        if n == len(pages):
+            corps += "\n" + bas
+        pied = ("YOULAB • Marché US · comptes VA, sans pseudo · mis à jour "
+                + _maintenant().strftime("%d/%m à %Hh%M"))
+        if len(pages) > 1:
+            pied = f"page {n}/{len(pages)} · " + pied
+        out.append({"title": ("📊 Classement subs — la quinzaine"
+                              + (f" ({n}/{len(pages)})" if len(pages) > 1 else "")),
+                    "color": 0x3B82F6,
+                    "description": corps[:4096],
+                    "footer": {"text": pied}})
+    return out
 
 
 def rafraichir_subs(gid: str, jour: Optional[dt.date] = None) -> str:
-    """Met à jour (ou crée) le classement vivant de la quinzaine."""
+    """Met à jour (ou crée) le classement vivant de la quinzaine, sur N pages."""
     gid = str(gid)
     debut, fin_saison = saison_en_cours(jour)
     aujourd = jour or _aujourdhui()
@@ -390,34 +420,46 @@ def rafraichir_subs(gid: str, jour: Optional[dt.date] = None) -> str:
     cl = classement(debut, min(aujourd, fin_saison))
     if not cl["lignes"] and not cl["illisibles"]:
         print("[podium] aucun relevé, classement subs laissé tel quel", flush=True)
-        return str(garde.get("message") or "")
+        return str((garde.get("messages") or [""])[0])
     try:
         totaux = alltime()
     except Exception as e:
         print(f"[podium] all-time indisponible : {type(e).__name__}: {e}", flush=True)
         totaux = {}
-    corps_e, coupes = embed_subs(cl, debut, fin_saison, totaux)
-    if coupes:
-        print(f"[podium] classement subs : {coupes} ligne(s) coupée(s) faute de place", flush=True)
-    corps = {"embeds": [corps_e]}
+    pages = pages_subs(cl, debut, fin_saison, totaux)
 
-    mid = str(garde.get("message") or "")
-    if mid and garde.get("saison") == debut.isoformat():
-        code, rep = _api("PATCH", f"/channels/{salon}/messages/{mid}", json=corps)
-        if code == 200:
-            garde["vu"] = time.time()
-            vivants[gid] = garde
-            _ecrire(d)
-            return mid
-        print(f"[podium] édition subs refusée (HTTP {code}), nouveau message", flush=True)
-    code, rep = _api("POST", f"/channels/{salon}/messages", json=corps)
-    if code != 200 or not rep.get("id"):
-        print(f"[podium] envoi subs refusé (HTTP {code}) {str(rep)[:160]}", flush=True)
+    # `message` (au singulier) est l'ancien format : un seul identifiant
+    ids = list(garde.get("messages") or ([garde["message"]] if garde.get("message") else []))
+    if garde.get("saison") != debut.isoformat():
+        ids = []                      # quinzaine nouvelle : messages neufs
+    neufs: List[str] = []
+    for i, page in enumerate(pages):
+        corps = {"embeds": [page]}
+        if i < len(ids):
+            code, rep = _api("PATCH", f"/channels/{salon}/messages/{ids[i]}", json=corps)
+            if code == 200:
+                neufs.append(ids[i])
+                continue
+            # supprimé à la main : on en refait un plutôt que de rester muet
+            print(f"[podium] page {i + 1} inéditable (HTTP {code}), reposte", flush=True)
+        code, rep = _api("POST", f"/channels/{salon}/messages", json=corps)
+        if code != 200 or not rep.get("id"):
+            print(f"[podium] page {i + 1} refusée (HTTP {code}) {str(rep)[:140]}", flush=True)
+            continue
+        neufs.append(str(rep["id"]))
+
+    # la liste a raccourci : les pages en trop diraient n'importe quoi
+    for surplus in ids[len(pages):]:
+        c, _r = _api("DELETE", f"/channels/{salon}/messages/{surplus}")
+        print(f"[podium] page en trop {surplus} retirée (HTTP {c})", flush=True)
+
+    if not neufs:
         return ""
-    vivants[gid] = {"saison": debut.isoformat(), "message": str(rep["id"]), "vu": time.time()}
+    vivants[gid] = {"saison": debut.isoformat(), "messages": neufs, "vu": time.time()}
     _ecrire(d)
-    print(f'[podium] classement subs {debut} → {fin_saison} : {len(cl["lignes"])} comptes', flush=True)
-    return str(rep["id"])
+    print(f'[podium] classement subs {debut} → {fin_saison} : {len(cl["lignes"])} comptes, '
+          f'{len(neufs)} page(s)', flush=True)
+    return neufs[0]
 
 
 def a_rafraichir_subs(gid: str, maintenant: Optional[float] = None) -> bool:
@@ -456,6 +498,14 @@ def poster_podium(gid: str, jour: Optional[dt.date] = None,
         print(f"[podium] salon {SALON_PODIUM} introuvable sur {gid}", flush=True)
         return ""
     cl = classement(debut, fin)
+    if not cl["lignes"]:
+        # GetMySocial muet un lundi matin : sans cela on publiait un podium VIDE
+        # avec @everyone, et la semaine etait marquee comme faite POUR TOUJOURS.
+        # On ne note rien : le tour suivant, dans dix minutes, reessaiera.
+        print(f'[podium] {debut} → {fin} : aucun releve payable '
+              f'({cl["entites"]} entites, {len(cl["illisibles"])} illisible(s)) — '
+              "rien poste, nouvel essai au prochain tour", flush=True)
+        return ""
     corps: Dict[str, Any] = {"embeds": [embed_podium(cl, debut, fin)]}
     if mentionner:
         corps["content"] = "@everyone 🏆 Podium subs de la semaine !"
@@ -465,9 +515,13 @@ def poster_podium(gid: str, jour: Optional[dt.date] = None,
         print(f"[podium] envoi refusé (HTTP {code}) {str(rep)[:160]}", flush=True)
         return ""
     postes[cle] = str(rep["id"])
-    # le message vivant de la semaine ecoulee a fini son office : le prochain
-    # rafraichissement en creera un neuf pour la semaine qui commence
-    (d.setdefault("vivants", {})).pop(gid, None)
+    # Le message vivant de la semaine ecoulee a fini son office. Mais le lundi
+    # a 09h il montre deja la semaine QUI COMMENCE (elle a bascule a 00h) :
+    # le jeter sans regarder laissait un « SEMAINE EN COURS » orphelin fige
+    # dans le salon, et en faisait creer un second juste apres.
+    _v = d.setdefault("vivants", {})
+    if (_v.get(gid) or {}).get("semaine") == debut.isoformat():
+        _v.pop(gid, None)
     _ecrire(d)
     print(f'[podium] {debut} → {fin} postée dans {gid} : {len(cl["lignes"])} entités, '
           f'{len(cl["illisibles"])} illisible(s), liste {"fraîche" if cl["frais"] else "du cache"}',
