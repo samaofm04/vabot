@@ -3947,6 +3947,7 @@ window.addEventListener('DOMContentLoaded', function(){
   // Activer l'onglet depuis query string ?tab=
   var params = new URLSearchParams(window.location.search);
   var tabName = params.get('tab');
+  if(tabName && (window.__TAB_ALIAS || {})[tabName]) tabName = window.__TAB_ALIAS[tabName];
   if(tabName){
     var btn = document.getElementById('tab-' + tabName);
     if(!btn){
@@ -9675,6 +9676,8 @@ function showTab(group,name,title,subtitle){
   // traverser un changement d ONGLET non plus. Des fichiers coches dans les
   // Reels partaient sinon avec une suppression declenchee depuis les Posts.
   if(typeof clearSelection === "function") clearSelection();
+  // Onglet renomme (ex. Setup SFS OF -> deux pages FR / US) : voir __TAB_ALIAS.
+  if((window.__TAB_ALIAS || {})[name]) name = window.__TAB_ALIAS[name];
   // (Revenus chatteurs : pas de rechargement au clic d'onglet -> ouverture instantanée.
   //  La tranche de dates est restaurée seulement après un VRAI reload, via le script HEAD.)
   // Retirer le style initial injecté en HEAD (pour le pre-paint)
@@ -10245,6 +10248,11 @@ window.upClearPrefill = function(utab){
     }
   }catch(e){}
 })();
+// Onglets renommes : l ancien nom (lien ?tab=, favori, page ouverte avant un
+// deploiement) mene au nouveau. UNE table, lue par showTab, ce script, le
+// chargement differe et l activation par ?tab= — quatre copies d un meme if
+// finissaient par diverger (la 4e manquait deja a la premiere version).
+window.__TAB_ALIAS = window.__TAB_ALIAS || {sfssetupof: 'sfssetupoffr'};
 // Run AVANT le premier rendu : cache form-home et affiche le bon form-<tab>
 (function(){
   try{
@@ -10260,6 +10268,7 @@ window.upClearPrefill = function(utab){
         if(_ab[0] && _ab[1]){ location.replace('?tab=revenus&mp_start=' + encodeURIComponent(_ab[0]) + '&mp_end=' + encodeURIComponent(_ab[1])); return; }
       }
     }
+    if(t && window.__TAB_ALIAS[t]) t = window.__TAB_ALIAS[t];
     if(t && t !== 'home' && /^[a-zA-Z0-9_]{1,30}$/.test(t)){
       var s = document.createElement('style');
       s.id = '__initial-tab-css';
@@ -10279,6 +10288,7 @@ document.addEventListener('DOMContentLoaded', function(){
   try{
     var t = new URLSearchParams(window.location.search).get('tab');
     if(!t || !/^[a-zA-Z0-9_]{1,30}$/.test(t)) t = 'home';
+    if((window.__TAB_ALIAS || {})[t]) t = window.__TAB_ALIAS[t];
     if(typeof chargerOngletDiffere === 'function'){
       chargerOngletDiffere(document.getElementById('form-' + t));
     }
@@ -10774,9 +10784,13 @@ document.addEventListener('click',function(e){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
       Setup SFS MYM
     </button>
-    <button class="item" id="tab-sfssetupof" onclick="showTab('sfs','sfssetupof','Setup SFS OF','Infos modeles OnlyFans - genere un message a copier-coller')">
+    <button class="item" id="tab-sfssetupoffr" onclick="showTab('sfs','sfssetupoffr','Setup SFS OF FR','Modeles OnlyFans du marche FR - genere un message a copier-coller')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
-      Setup SFS OF
+      Setup SFS OF FR
+    </button>
+    <button class="item" id="tab-sfssetupofus" onclick="showTab('sfs','sfssetupofus','Setup SFS OF US','Modeles OnlyFans du marche US - genere un message a copier-coller')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
+      Setup SFS OF US
     </button>
   </div>
 </div>
@@ -13189,9 +13203,13 @@ document.addEventListener('keydown', function(e){
 {sfssetupmym_html}
 </div>
 
-<!-- BUSINESS - SETUP SFS OF -->
-<div class="form-section" id="form-sfssetupof" style="display:none">
-{sfssetupof_html}
+<!-- BUSINESS - SETUP SFS OF (une page par marche : les partenaires FR et US
+     ne recoivent pas le meme message) -->
+<div class="form-section" id="form-sfssetupoffr" style="display:none">
+{sfssetupoffr_html}
+</div>
+<div class="form-section" id="form-sfssetupofus" style="display:none">
+{sfssetupofus_html}
 </div>
 
 <!-- BUSINESS - MYPULS LIVE PUSH -->
@@ -36855,67 +36873,143 @@ def _render_vtg_html() -> str:
     )
 
 
-def _sfssetup_identities(platform: str) -> list:
-    """Retourne la liste d identites a afficher / utiliser pour Setup SFS.
+def _norme_setup(nom: str) -> str:
+    """« Lola ღ » -> « lola », « Khloe 💕 » -> « khloe » : lettres et chiffres.
+    Meme forme que le rapprochement identite -> profil du planning SFS."""
+    return re.sub(r"[^a-z0-9]", "", (nom or "").lower())
 
-    MyM : SEULEMENT les creators MyPuls (Amelia_xoxo, Lolatacrush, ...).
-          Les noms courts stored (amelia, lola, ...) sont des legacy d'anciens
-          tests et sont filtres pour eviter les doublons.
-    OF  : identites locales + cles stored.
-    """
-    if platform == "mym":
+
+def _cle_setup(pseudo: str, stockees: set) -> str:
+    """Cle sous laquelle sfs_setup range un modele.
+
+    Le nom MyPuls porte parfois un symbole (« Lola ღ », « Emy ♡ ») absent de
+    la cle deja remplie a la main (« lola ») — ou l inverse, si MyPuls
+    retire le symbole (« Khloe 💕 » -> « Khloe »). On compare donc les
+    DEUX cotes sous la meme forme reduite et on reprend la cle existante :
+    sinon une fiche vide apparaissait a cote de l ancienne, et les chiffres
+    saisis disparaissaient du message — c est le doublon « lola » /
+    « Lola ღ » mesure le 23/09/2026. Plusieurs cles pour la meme forme :
+    on ne devine pas, on garde le nom tel quel."""
+    brut = (pseudo or "").strip()
+    if brut.lower() in stockees:
+        return brut
+    n = _norme_setup(brut)
+    if not n:
+        return brut
+    candidates = [k for k in stockees if _norme_setup(k) == n]
+    return candidates[0] if len(candidates) == 1 else brut
+
+
+def _sfssetup_models(platform: str, marche: str = "", notes: list = None) -> list:
+    """[(cle, id MyPuls)] des modeles REELS d une plateforme, d apres l API MyPuls.
+
+    Avant, OnlyFans melangeait les identites locales, les cles deja stockees
+    et l API : 30 lignes pour 6 vraies modeles (des comptes de test,
+    `v2_beta`, des comptes Trends, « lola » et « Lola ღ » en double).
+    Desormais seules les creatrices ACTIVES de la plateforme comptent.
+
+    `marche` (« fr » / « us ») ne vaut que pour OnlyFans. La regle est celle
+    des revenus (revenus_segments.creator_segment, par identifiant MyPuls) —
+    celle qui retombe au centime sur les montants OF US — et pas celle des
+    identites Discord (marche.py), qui classe encore « Emy ♡ » en FR.
+
+    API indisponible : liste vide, et la page le DIT. Retomber sur les
+    identites locales ramenait exactement les lignes parasites.
+
+    `notes` (liste) recoit ce qui a ete ecarte : creatrices non classees
+    dans le repli, fiches remplies sans modele actif, doublons de cle."""
+    notes = notes if notes is not None else []
+    try:
+        import mypuls
+        import sfs_setup
+        from revenus_segments import creator_segment
+    except Exception:
+        return []
+    plateforme_api = "mym" if platform == "mym" else "onlyfans"
+    creatrices = []
+    try:
+        if mypuls.api_configured():
+            creatrices = [c for c in mypuls.api_creators_cached()
+                          if c.get("active") and c.get("platform") == plateforme_api
+                          and (c.get("pseudo") or "").strip()]
+    except Exception:
+        creatrices = []
+    if not creatrices and platform == "mym":
+        # Repli historique (scraping de /creators) quand l API ne repond pas.
+        # Le scraping ne distingue pas les plateformes : on garde les
+        # creatrices MyM CONNUES, et on NOMME les autres plutot que de les
+        # faire disparaitre (une MyM toute neuve n est pas encore connue).
         try:
-            import mypuls
-            # L'API donne la PLATEFORME de chaque créatrice : l'onglet MyM ne
-            # liste plus les modèles OnlyFans (Jessye, Khloe, Amelia/Julia côté
-            # OF) — le scraping, lui, ne sait pas les distinguer et mettait
-            # tout le monde dans MyM.
-            if mypuls.api_configured():
-                api = sorted((c.get("pseudo") or "").strip()
-                             for c in mypuls.api_creators_cached()
-                             if c.get("active") and c.get("platform") == "mym"
-                             and (c.get("pseudo") or "").strip())
-                if api:
-                    return sorted(api, key=str.lower)
             if mypuls.is_configured():
                 res = mypuls.list_creators()
-                if res.get("ok"):
-                    creators = res.get("creators", {})
-                    if creators:
-                        return sorted(creators.keys(), key=str.lower)
+                inconnues = []
+                for nom, cid in (res.get("creators") or {}).items():
+                    seg = creator_segment(cid)
+                    if seg == "mym":
+                        creatrices.append({"pseudo": nom, "id": cid})
+                    elif seg == "other":
+                        inconnues.append(str(nom))
+                if inconnues:
+                    notes.append("API MyPuls muette : plateforme inconnue pour "
+                                 + ", ".join(sorted(inconnues)) + " — non affichee(s)")
         except Exception:
             pass
-
-    # OF (ou MyM si MyPuls indispo) : identites locales + cles stored
-    identities: list = []
+    if platform != "mym" and marche in ("fr", "us"):
+        creatrices = [c for c in creatrices
+                      if creator_segment(c.get("id"), "onlyfans") == "of_" + marche]
     try:
-        identities = sorted(_list_identities())
+        infos = sfs_setup.all_info(platform)
     except Exception:
-        identities = []
+        infos = {}
+    stockees = set(infos.keys())
+    out, vues = [], {}
+    for c in sorted(creatrices, key=lambda c: str(c.get("pseudo")).lower()):
+        pseudo = c.get("pseudo") or ""
+        cle = _cle_setup(pseudo, stockees)
+        if cle.lower() in vues:
+            notes.append(f"« {pseudo} » ecartee : meme fiche que « {vues[cle.lower()]} »")
+            continue
+        vues[cle.lower()] = pseudo
+        out.append((cle, c.get("id")))
+    if not marche:
+        # Fiches REMPLIES qui ne correspondent plus a aucune creatrice active
+        # (desactivee, renommee au-dela du rapprochement) : dites, pas perdues.
+        try:
+            champs = sfs_setup.fields_for(platform)
+            orphelines = sorted(k for k, v in infos.items()
+                                if k not in vues and any(str((v or {}).get(f) or "").strip()
+                                                        for f in champs))
+            if orphelines:
+                notes.append("Fiche(s) remplie(s) sans modele MyPuls actif : " + ", ".join(orphelines))
+        except Exception:
+            pass
+    return out
+
+
+def _sfssetup_exclus(platform: str, identities: list) -> list:
+    """Les modeles de la page qui ne sortiront PAS dans le message, avec la
+    raison. generate_message les saute sans rien dire : « Inclure » decoche,
+    ou aucun champ rempli. Sur la page OF US, deux modeles sur trois etaient
+    decoches depuis l ancienne page mixte — le message sortait vide."""
     try:
         import sfs_setup
-        stored = list(sfs_setup.all_info(platform).keys())
-        existing_lower = {x.lower() for x in identities}
-        for s in stored:
-            if s.lower() not in existing_lower:
-                identities.append(s)
+        infos = sfs_setup.all_info(platform)
+        champs = sfs_setup.fields_for(platform)
     except Exception:
-        pass
-    if platform == "of":
-        # + les créatrices OnlyFans vues par l'API MyPuls (Jessye, Khloe,
-        # Amelia/Julia côté OF) : elles étaient rangées à tort dans MyM
-        try:
-            import mypuls
-            if mypuls.api_configured():
-                existing_lower = {x.lower() for x in identities}
-                for c in mypuls.api_creators_cached():
-                    nm = (c.get("pseudo") or "").strip()
-                    if (c.get("active") and c.get("platform") == "onlyfans"
-                            and nm and nm.lower() not in existing_lower):
-                        identities.append(nm)
-        except Exception:
-            pass
-    return identities
+        return []
+    out = []
+    for ident in identities:
+        info = infos.get(ident.lower().strip(), {}) or {}
+        if info and not info.get("enabled", True):
+            out.append({"modele": ident, "raison": "Inclure décoché"})
+        elif not any(str(info.get(f) or "").strip() for f in champs):
+            out.append({"modele": ident, "raison": "aucun champ rempli"})
+    return out
+
+
+def _sfssetup_identities(platform: str, marche: str = "") -> list:
+    """Les modeles a afficher / utiliser pour Setup SFS (voir _sfssetup_models)."""
+    return [cle for cle, _ in _sfssetup_models(platform, marche)]
 
 
 def _mypuls_creators_map() -> dict:
@@ -36932,17 +37026,25 @@ def _mypuls_creators_map() -> dict:
         return {}
 
 
-def _render_sfssetup_html(platform: str = "mym") -> str:
+def _render_sfssetup_html(page: str = "mym") -> str:
     """Setup SFS : form par identite pour generer un message a copier-coller.
 
-    platform : "mym" ou "of"
+    page : « mym », « offr » ou « ofus ». Les deux pages OF partagent le
+    stockage (plateforme « of ») mais pas les modeles : FR et US n envoient
+    pas leur message aux memes partenaires. `page` nomme les ids DOM et les
+    fonctions JS : les deux pages OF vivent dans le MEME document, avec
+    « of » des deux cotes leurs fonctions s ecrasaient.
     """
     try:
         import sfs_setup
     except Exception as e:
         return f"<p style='color:#f99'>Module sfs_setup indispo : {e}</p>"
 
-    platform_label = "MyM" if platform == "mym" else "OnlyFans"
+    if page not in ("mym", "offr", "ofus"):
+        page = "offr" if page == "of" else "mym"
+    platform = "mym" if page == "mym" else "of"
+    marche = {"offr": "fr", "ofus": "us"}.get(page, "")
+    platform_label = {"mym": "MyM", "offr": "OnlyFans FR", "ofus": "OnlyFans US"}[page]
     platform_color = "#a855f7" if platform == "mym" else "#0099ff"
 
     # Auto-fill MyPuls a chaque ouverture de la page MyM (cache 5min)
@@ -36952,13 +37054,23 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         except Exception:
             pass
 
-    identities = _sfssetup_identities(platform)
+    _notes = []
+    _modeles = _sfssetup_models(platform, marche, _notes)
+    identities = [cle for cle, _ in _modeles]
+    _cid_de = {cle.lower(): cid for cle, cid in _modeles if cid}
+    # les fiches orphelines ne se mesurent que sur l ensemble de la plateforme
+    if marche:
+        _toutes = []
+        _sfssetup_models(platform, "", _toutes)
+        _notes += [n for n in _toutes if n.startswith("Fiche")]
 
     if not identities:
         return (
             "<div style='max-width:680px'>"
             f"<h2 style='margin:0 0 6px;font-size:20px'>Setup SFS {platform_label}</h2>"
-            "<p style='color:#888;font-size:13px'>Aucune identite. Cree-en dans Management -> VAs.</p>"
+            "<p style='color:#888;font-size:13px'>Aucun modele actif sur MyPuls pour cette page — "
+            "ou l API MyPuls ne repond pas (Settings → MyPuls). La liste vient de MyPuls : "
+            "seuls les modeles qui existent vraiment y figurent.</p>"
             "</div>"
         )
 
@@ -36984,8 +37096,11 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         return n
     identities = sorted(identities, key=lambda x: (-_abonnes_num(x), x.lower()))
 
-    # Pre-charge la map MyPuls pour les avatars MyM
-    mypuls_map = _mypuls_creators_map() if platform == "mym" else {}
+    # Avatars : l identifiant MyPuls vient de l API (MyM ET OF) ; le scraping
+    # ne sert plus que de repli pour MyM
+    mypuls_map = dict(_cid_de)
+    if platform == "mym" and not mypuls_map:
+        mypuls_map = _mypuls_creators_map()
 
     # Apercu auto : message SFS pre-genere (affiche direct, sans cliquer sur Generer)
     try:
@@ -37001,17 +37116,22 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         emoji = info.get("emoji") or sfs_setup.DEFAULT_EMOJIS[i % len(sfs_setup.DEFAULT_EMOJIS)]
         enabled = info.get("enabled", True)
         # Avatar : MyPuls en priorite si MyM, fallback local sinon
-        avatar_url = ""
-        if platform == "mym":
-            cid = mypuls_map.get(ident.lower().strip())
-            if cid:
-                avatar_url = f"/mypuls/avatar/{cid}"
-        if not avatar_url:
-            avatar_url = _identity_avatar_url(ident)
+        # Photo : celle de MyPuls pour MyM (comme avant), la photo televersee
+        # d abord pour OnlyFans (comme avant) ; l autre en repli. L avatar
+        # MyPuls passe par les COOKIES : morts, l image casse -> onerror
+        # rend l initiale au lieu d une icone brisee.
+        _cid = mypuls_map.get(ident.lower().strip())
+        _mp = f"/mypuls/avatar/{_cid}" if _cid else ""
+        _loc = _identity_avatar_url(ident) or ""
+        avatar_url = (_mp or _loc) if platform == "mym" else (_loc or _mp)
+        _initiale = (
+            f"<div style='width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:{'none' if avatar_url else 'flex'};align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px'>{ident[:1].upper()}</div>"
+        )
         avatar = (
-            f"<img src='{avatar_url}' loading='lazy' decoding='async' style='width:40px;height:40px;border-radius:50%;object-fit:cover'>"
-            if avatar_url else
-            f"<div style='width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#a855f7);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px'>{ident[:1].upper()}</div>"
+            (f"<img src='{avatar_url}' loading='lazy' decoding='async' "
+             "onerror=\"this.style.display='none';if(this.nextElementSibling)this.nextElementSibling.style.display='flex'\" "
+             "style='width:40px;height:40px;border-radius:50%;object-fit:cover'>" if avatar_url else "")
+            + _initiale
         )
         # Inputs - QUE les champs valides pour cette plateforme
         fields_html = ""
@@ -37068,7 +37188,7 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
     # Bulk apply : 1 input par champ bulk-eligible de la plateforme
     # MyM = niche / age / abonnement | OF = abonnement / last_30d
     mypuls_btn = (
-        f"<button type='button' onclick='fetchMyPulsSubs_{platform}()' "
+        f"<button type='button' onclick='fetchMyPulsSubs_{page}()' "
         f"style='background:transparent;border:1px solid #a855f7;color:#a855f7;padding:10px 18px;border-radius:8px;cursor:pointer;font-weight:700;font-size:13px;white-space:nowrap'>"
         f"↻ Auto-fill abonnes depuis MyPuls</button>"
     ) if platform == "mym" else ""
@@ -37087,7 +37207,7 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
             f"<div>"
             f"<label style='display:block;font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;font-weight:700;margin-bottom:4px'>"
             f"{meta['icon']} {meta['label']}</label>"
-            f"<input type='text' id='setup-bulk-{f}-{platform}' placeholder='{meta['placeholder']}' "
+            f"<input type='text' id='setup-bulk-{f}-{page}' placeholder='{meta['placeholder']}' "
             f"style='width:100%;padding:9px 12px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:8px;font-family:inherit;font-size:13px'>"
             f"</div>"
         )
@@ -37106,7 +37226,7 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         + f"</div>"
         # Boutons
         f"<div style='display:flex;gap:10px;flex-wrap:wrap;margin-top:12px'>"
-        f"<button type='button' onclick='applyBulk_{platform}()' "
+        f"<button type='button' onclick='applyBulk_{page}()' "
         f"style='background:#3b82f6;color:#fff;border:0;padding:10px 18px;border-radius:8px;cursor:pointer;font-weight:700;font-size:13px;white-space:nowrap'>"
         f"↓ Appliquer à tous</button>"
         + mypuls_btn
@@ -37122,36 +37242,59 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         f"Remplis les infos pour chaque modele {platform_label}. Au final clique <b>Générer le message</b> "
         f"→ tu obtiens un texte prêt à copier-coller (format Discord/Telegram).</p>"
         + bulk_html
+        # Ce qui a ete ecarte de la liste : dit, jamais silencieux
+        + ("".join(
+            "<div style='background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.35);color:#f59e0b;"
+            "border-radius:10px;padding:9px 12px;margin-bottom:12px;font-size:12.5px'>⚠ "
+            + n.replace("&", "&amp;").replace("<", "&lt;") + "</div>" for n in _notes))
         # Cards
         + cards_html
         # Bouton generate + output (avec id specifique a la plateforme)
         + "<div style='background:#161616;border:1px solid #232323;border-radius:14px;padding:18px;margin-top:18px'>"
         f"<div style='display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap'>"
-        f"<button type='button' onclick='setupGenerate_{platform}()' "
+        f"<button type='button' onclick='setupGenerate_{page}()' "
         f"style='background:linear-gradient(135deg,#3b82f6,{platform_color});color:#fff;border:0;padding:12px 22px;border-radius:10px;cursor:pointer;font-weight:800;font-size:14px;box-shadow:0 6px 18px rgba(59,130,246,.3)'>"
         f"✧ Générer le message {platform_label}</button>"
-        f"<button type='button' onclick='setupCopy_{platform}()' id='setup-copy-btn-{platform}' "
+        f"<button type='button' onclick='setupCopy_{page}()' id='setup-copy-btn-{page}' "
         f"style='background:#22c55e;color:#000;border:0;padding:12px 18px;border-radius:10px;cursor:pointer;font-weight:800;font-size:13px;display:{'inline-flex' if _gen_msg else 'none'}'>"
         f"⧉ Copier</button>"
-        f"<small id='setup-save-status-{platform}' style='color:#666;margin-left:auto;font-size:12px'></small>"
+        f"<small id='setup-save-status-{page}' class='setup-save-status' style='color:#666;margin-left:auto;font-size:12px'></small>"
         f"</div>"
-        f"<textarea id='setup-output-{platform}' rows='14' placeholder='Le message généré apparaîtra ici...' "
+        + (f"<div id='setup-exclus-{page}' style='color:#f59e0b;font-size:12.5px;margin:0 0 10px'>"
+           + ("Hors du message : " + " · ".join(
+               (e["modele"] + " (" + e["raison"] + ")").replace("&", "&amp;").replace("<", "&lt;")
+               for e in _sfssetup_exclus(platform, identities)) if _sfssetup_exclus(platform, identities) else "")
+           + "</div>")
+        + f"<textarea id='setup-output-{page}' rows='14' placeholder='Le message généré apparaîtra ici...' "
         f"style='width:100%;padding:14px;background:#0f0f0f;border:1px solid #2a2a2a;color:#fff;border-radius:10px;font-family:monospace;font-size:13px;line-height:1.6;resize:vertical'>{_gen_msg_esc}</textarea>"
         f"</div>"
 
         # JS - utilise le panel parent pour scoper les querySelectors
         + "<script>"
-        f"window.__sfs_platform_{platform} = '{platform}';"
+        f"window.__sfs_platform_{page} = '{platform}';"
+        # Une sauvegarde en attente PAR case (identite + champ). Avec un seul
+        # minuteur global, taper dans SUB Total puis passer vite (< 400 ms) a
+        # Last 30 Day annulait l envoi de SUB Total : l ecran montrait la
+        # valeur, le fichier gardait l ancienne, et « Generer » sortait
+        # l ancienne. setupFlush envoie tout ce qui attend (avant Generer).
+        "window.__setupPend = window.__setupPend || {};"
+        "function setupSend(p){"
+        "  const fd=new FormData(); fd.set('platform', p.platform); fd.set('identity',p.ident); fd.set('field',p.field); fd.set('value',p.value);"
+        "  return fetch('/sfssetup/save',{method:'POST',body:fd}).then(r=>r.json()).then(j=>{"
+        "    const sec=p.el.closest('.form-section'); const s=sec?sec.querySelector('.setup-save-status'):null;"
+        "    if(s){ s.textContent=(j&&j.ok)?'✓ Sauve':'✕ Non sauve'; s.style.color=(j&&j.ok)?'#22c55e':'#ef4444'; setTimeout(()=>{s.textContent='';}, 1500); }"
+        "  }).catch(()=>{});"
+        "}"
         "function setupDirty(el){"
-        "  const ident=el.dataset.ident, field=el.dataset.field, value=el.value, platform=el.dataset.platform || 'mym';"
-        "  clearTimeout(window.__setupSaveTimer);"
-        "  window.__setupSaveTimer = setTimeout(function(){"
-        "    const fd=new FormData(); fd.set('platform', platform); fd.set('identity',ident); fd.set('field',field); fd.set('value',value);"
-        "    fetch('/sfssetup/save',{method:'POST',body:fd}).then(r=>r.json()).then(j=>{"
-        f"      const s=document.querySelector('#form-sfssetup{platform} #setup-save-status-{platform}');"
-        "      if(s){ s.textContent='✓ Sauve'; s.style.color='#22c55e'; setTimeout(()=>{s.textContent='';}, 1500); }"
-        "    });"
-        "  }, 400);"
+        "  const p={el:el, ident:el.dataset.ident, field:el.dataset.field, value:el.value, platform:el.dataset.platform || 'mym'};"
+        "  const k=p.platform+'|'+p.ident+'|'+p.field;"
+        "  if(window.__setupPend[k]) clearTimeout(window.__setupPend[k].t);"
+        "  p.t=setTimeout(function(){ delete window.__setupPend[k]; setupSend(p); }, 400);"
+        "  window.__setupPend[k]=p;"
+        "}"
+        "function setupFlush(){"
+        "  const ps=Object.keys(window.__setupPend).map(function(k){ const p=window.__setupPend[k]; clearTimeout(p.t); delete window.__setupPend[k]; return setupSend(p); });"
+        "  return Promise.all(ps);"
         "}"
         "function setupToggle(cb){"
         "  const card=cb.closest('.sfssetup-card');"
@@ -37159,29 +37302,33 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         "  const fd=new FormData(); fd.set('platform', cb.dataset.platform || 'mym'); fd.set('identity',cb.dataset.ident); fd.set('field','enabled'); fd.set('value',cb.checked?'1':'0');"
         "  fetch('/sfssetup/save',{method:'POST',body:fd});"
         "}"
-        f"async function setupGenerate_{platform}(){{"
-        f"  const r=await fetch('/sfssetup/generate?platform={platform}');"
+        f"async function setupGenerate_{page}(){{"
+        f"  await setupFlush();"
+        f"  const r=await fetch('/sfssetup/generate?platform={platform}&marche={marche}');"
         f"  const j=await r.json();"
-        f"  const ta=document.getElementById('setup-output-{platform}');"
+        f"  const ta=document.getElementById('setup-output-{page}');"
+        f"  const ex=document.getElementById('setup-exclus-{page}');"
+        f"  if(!j.ok){{ if(ex) ex.textContent='✕ '+(j.error||'Erreur'); return; }}"
+        f"  if(ex) ex.textContent=(j.exclus&&j.exclus.length)?('Hors du message : '+j.exclus.map(function(e){{ return e.modele+' ('+e.raison+')'; }}).join(' · ')):'';"
         f"  if(ta) ta.value = j.message || '';"
-        f"  const btn=document.getElementById('setup-copy-btn-{platform}');"
+        f"  const btn=document.getElementById('setup-copy-btn-{page}');"
         f"  if(btn) btn.style.display = j.message ? 'inline-flex' : 'none';"
         f"}}"
-        f"function setupCopy_{platform}(){{"
-        f"  const ta=document.getElementById('setup-output-{platform}');"
+        f"function setupCopy_{page}(){{"
+        f"  const ta=document.getElementById('setup-output-{page}');"
         f"  if(!ta) return; ta.select(); document.execCommand('copy');"
-        f"  const btn=document.getElementById('setup-copy-btn-{platform}');"
+        f"  const btn=document.getElementById('setup-copy-btn-{page}');"
         f"  const orig=btn.innerHTML; btn.innerHTML='✓ Copié !';"
         f"  setTimeout(()=>{{ btn.innerHTML=orig; }}, 1500);"
         f"}}"
         # Bulk apply - champs eligibles dependent de la plateforme
-        f"async function applyBulk_{platform}(){{"
-        f"  const sec=document.getElementById('form-sfssetup{platform}');"
+        f"async function applyBulk_{page}(){{"
+        f"  const sec=document.getElementById('form-sfssetup{page}');"
         f"  if(!sec) return;"
         f"  const fields={json.dumps(list(sfs_setup.bulk_fields_for(platform)))};"
         f"  const values={{}};"
         f"  for(const f of fields){{"
-        f"    const inp=document.getElementById('setup-bulk-'+f+'-{platform}');"
+        f"    const inp=document.getElementById('setup-bulk-'+f+'-{page}');"
         f"    const v=(inp?inp.value:'').trim();"
         f"    if(v) values[f]=v;"
         f"  }}"
@@ -37204,7 +37351,7 @@ def _render_sfssetup_html(platform: str = "mym") -> str:
         f"  alert('Appliqué sur '+count+' modèles : '+summary);"
         f"}}"
         # MyPuls fetch subs (stub pour le moment, attend impl serveur)
-        f"async function fetchMyPulsSubs_{platform}(){{"
+        f"async function fetchMyPulsSubs_{page}(){{"
         f"  const r=await fetch('/sfssetup/fetch_mypuls_subs');"
         f"  const j=await r.json();"
         f"  if(!j.ok){{ alert('Erreur: '+(j.error||'?')); return; }}"
@@ -48131,7 +48278,9 @@ ROLE_MENU_STRUCTURE = [
     {"section": "Outils — SFS", "items": [
         {"key": "sfs", "name": "SFS — Planning", "perms": ["view", "create", "edit"]},
         {"key": "sfssetupmym", "name": "Setup SFS MYM", "perms": ["view"]},
-        {"key": "sfssetupof", "name": "Setup SFS OF", "perms": ["view"]},
+        # Une case pour les DEUX pages OF (FR et US) : les roles deja coches
+        # gardent leur acces (meme regle que « textpool » plus bas).
+        {"key": "sfssetupof", "name": "Setup SFS OF (FR + US)", "perms": ["view"]},
     ]},
     {"section": "Outils — Autres", "items": [
         {"key": "geelark", "name": "GeeLark — Cloud phones", "perms": ["view", "create"]},
@@ -48220,6 +48369,9 @@ _PERM_KEY_TO_TABS = {
     # les 2 nouveaux onglets (rétro-compat des rôles déjà cochés) + l'ancienne
     # page (deep-link ?tab=textpool).
     "textpool": {"cloudbios", "cloudctas", "textpool"},
+    # Setup SFS OF scinde par marche (23/09/2026) : la case historique ouvre
+    # les deux pages, un role deja coche ne perd rien.
+    "sfssetupof": {"sfssetupoffr", "sfssetupofus"},
 }
 
 # Fallback pour un rôle SANS permissions définies (rétro-compat chatter).
@@ -49390,7 +49542,8 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{linkscale_html}", _lazy("linkscale"))
         .replace("{schedule_html}", _lazy("schedule"))
         .replace("{sfssetupmym_html}", _lazy("sfssetupmym"))
-        .replace("{sfssetupof_html}", _lazy("sfssetupof"))
+        .replace("{sfssetupoffr_html}", _lazy("sfssetupoffr"))
+        .replace("{sfssetupofus_html}", _lazy("sfssetupofus"))
         .replace("{vtg_html}", _lazy("vtg"))
         .replace("{veille_feed_html}", _lazy("veille"))
         .replace("{tiktok_trends_html}", _lazy("tktrends"))
@@ -51420,6 +51573,9 @@ def create_app():
         # On renvoie UNIQUEMENT le fragment du producer (pas toute la page ~1.4MB).
         if request.headers.get("X-Tab-Ajax") and request.args.get("lazy"):
             _name = request.args.get("lazy")
+            # Meme table que window.__TAB_ALIAS : une page ouverte avant le
+            # deploiement demande encore l ancien nom.
+            _name = {"sfssetupof": "sfssetupoffr"}.get(_name, _name)
             # gms + linkscale uniquement : revenus/mypulslive ont des charts en
             # DOMContentLoaded (ne se ré-initialiseraient pas après injection AJAX).
             _prods = {
@@ -51502,7 +51658,8 @@ def create_app():
                     show_sync=False, vault_label="Bibliothèque 2", vault2=True),
                 "geelark": _render_geelark_html,
                 "sfssetupmym": lambda: _render_sfssetup_html("mym"),
-                "sfssetupof": lambda: _render_sfssetup_html("of"),
+                "sfssetupoffr": lambda: _render_sfssetup_html("offr"),
+                "sfssetupofus": lambda: _render_sfssetup_html("ofus"),
                 "vtg": _render_vtg_html,
                 "semp": _render_employees_table_html,
                 "schedule": _render_schedule_html,
@@ -60271,10 +60428,16 @@ def create_app():
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
         platform = (request.args.get("platform") or "mym").strip().lower()
+        marche = (request.args.get("marche") or "").strip().lower()
+        if platform != "mym" and marche not in ("fr", "us"):
+            # Sans marche, OnlyFans rendait FR et US melanges dans un seul
+            # message — exactement ce que la separation des pages evite.
+            return jsonify({"ok": False, "error": "Marche FR ou US requis — recharge la page"}), 400
         # Memes identites que la page rendue (cards) - fix bug "Abonnement: free" vide
-        idents = _sfssetup_identities(platform)
+        idents = _sfssetup_identities(platform, marche)
         msg = sfs_setup.generate_message(platform, idents)
-        return jsonify({"ok": True, "message": msg})
+        return jsonify({"ok": True, "message": msg,
+                        "exclus": _sfssetup_exclus(platform, idents)})
 
     @app.route("/sfssetup/import_of_har", methods=["POST"])
     def sfssetup_import_of_har():

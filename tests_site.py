@@ -12182,6 +12182,112 @@ try:
 except Exception as _eP:
     check("HikerAPI plafond / rattrapage : testable", False, repr(_eP)[:200])
 
+print()
+print("=" * 70)
+print("Setup SFS : seulement les modeles reels, OnlyFans scinde FR / US")
+print("=" * 70)
+try:
+    import re as _reSU
+    import mypuls as _mpSU
+    import sfs_setup as _ssSU
+    import web_upload as _wSU
+    _CRE_SU = [(769, "mym", "Amelia_xoxo"), (1116, "mym", "Lolatacrush"),
+               (3106, "onlyfans", "Amelia"), (3109, "onlyfans", "Julia"),
+               (3673, "onlyfans", "Lola ღ"), (3107, "onlyfans", "Jessye"),
+               (3108, "onlyfans", "Khloe 💕"), (3352, "onlyfans", "Emy ♡"),
+               (9999, "onlyfans", "Ancienne")]
+    _savSU = (_mpSU.api_configured, _mpSU.api_creators_cached, _ssSU.all_info,
+              _mpSU.is_configured, _wSU._load_web_users)
+    try:
+        _mpSU.api_configured = lambda: True
+        _mpSU.api_creators_cached = lambda force=False: [
+            {"id": i, "platform": pl, "pseudo": n, "active": n != "Ancienne"} for i, pl, n in _CRE_SU]
+        # une fiche deja remplie sous « lola » (sans le symbole du nom MyPuls)
+        _ssSU.all_info = lambda platform: ({"lola": {"sub_total": "8K4"}, "_tst_textecheck": {},
+                                            "v2_beta": {}, "br1annag1": {}} if platform == "of" else {})
+        check("OF FR : Amelia, Julia, Lola — rien d autre",
+              sorted(x.lower() for x in _wSU._sfssetup_identities("of", "fr")) == ["amelia", "julia", "lola"],
+              str(_wSU._sfssetup_identities("of", "fr")))
+        check("OF US : Emy, Jessye, Khloe (la regle des revenus, par identifiant MyPuls)",
+              sorted(_wSU._sfssetup_identities("of", "us")) == ["Emy ♡", "Jessye", "Khloe 💕"],
+              str(_wSU._sfssetup_identities("of", "us")))
+        _tousSU = _wSU._sfssetup_identities("of")
+        check("OF : ni test, ni compte Trends, ni creatrice inactive",
+              not any(x in _tousSU for x in ("_tst_textecheck", "v2_beta", "br1annag1", "Ancienne")), str(_tousSU))
+        check("« Lola ღ » reprend la fiche deja remplie « lola » (pas de doublon vide)",
+              "lola" in _tousSU and "Lola ღ" not in _tousSU)
+        check("MyM : seulement les creatrices MyM", _wSU._sfssetup_identities("mym") == ["Amelia_xoxo", "Lolatacrush"])
+        _mpSU.api_creators_cached = lambda force=False: []
+        _mpSU.is_configured = lambda: False
+        check("API MyPuls muette : liste vide (plus de repli sur les identites locales)",
+              _wSU._sfssetup_identities("of", "fr") == [] and _wSU._sfssetup_identities("mym") == [])
+        _mpSU.api_creators_cached = lambda force=False: [
+            {"id": i, "platform": pl, "pseudo": n, "active": n != "Ancienne"} for i, pl, n in _CRE_SU]
+        _appSU = _wSU.create_app()
+        _appSU.config["TESTING"] = True
+        _wSU._load_web_users = lambda: {"admin": {"role": "admin", "password": "x"}}
+        _cSU = _appSU.test_client()
+        with _cSU.session_transaction() as _sSU:
+            _sSU["auth"] = True
+            _sSU["username"] = "admin"
+            _sSU["role"] = "admin"
+        _frSU = _cSU.get("/?lazy=sfssetupoffr", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+        _usSU = _cSU.get("/?lazy=sfssetupofus", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+        _cartes = lambda h: _reSU.findall(r"class='sfssetup-card' data-ident='([^']*)'", h)
+        check("page OF FR : les cartes FR seulement", sorted(_cartes(_frSU)) == ["Amelia", "Julia", "lola"],
+              str(_cartes(_frSU)))
+        check("page OF US : les cartes US seulement", sorted(_cartes(_usSU)) == ["Emy ♡", "Jessye", "Khloe 💕"],
+              str(_cartes(_usSU)))
+        _fnSU = lambda h: set(_reSU.findall(r"function (\w+)\(", h)) - {"setupDirty", "setupToggle", "setupSend", "setupFlush"}
+        check("les deux pages OF vivent dans le meme document sans s ecraser leurs fonctions",
+              _fnSU(_frSU) and not (_fnSU(_frSU) & _fnSU(_usSU)))
+        check("chaque page OF genere le message de SON marche",
+              "generate?platform=of&marche=fr" in _frSU and "generate?platform=of&marche=us" in _usSU)
+        _homeSU = _cSU.get("/").get_data(as_text=True)
+        check("menu : Setup SFS OF FR et OF US, plus l ancienne entree unique",
+              'id="tab-sfssetupoffr"' in _homeSU and 'id="tab-sfssetupofus"' in _homeSU
+              and 'id="tab-sfssetupof"' not in _homeSU)
+        # UNE table d alias, lue par les QUATRE lecteurs d un nom d onglet —
+        # dont l activation par ?tab=, la seule qui clique vraiment le bouton
+        check("ancien lien ?tab=sfssetupof : une seule table d alias vers la page FR",
+              "{sfssetupof: 'sfssetupoffr'}" in _homeSU and _homeSU.count("__TAB_ALIAS") >= 5)
+        check("... lue par l activation ?tab= (celle qui clique le bouton), pas seulement showTab",
+              "if(tabName && (window.__TAB_ALIAS || {})[tabName]) tabName = window.__TAB_ALIAS[tabName];" in _homeSU)
+        check("... et par le chargement differe cote serveur (page ouverte avant le deploiement)",
+              bool(_reSU.findall(r"class='sfssetup-card' data-ident='", _cSU.get(
+                  "/?lazy=sfssetupof", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True))))
+        check("une saisie en attente par case, envoyee avant « Generer »",
+              "function setupFlush(" in _frSU and "await setupFlush();" in _frSU
+              and "__setupSaveTimer" not in _frSU)
+        check("un role deja coche « Setup SFS OF » garde les deux pages",
+              _wSU._PERM_KEY_TO_TABS.get("sfssetupof") == {"sfssetupoffr", "sfssetupofus"})
+        _genSU = _cSU.get("/sfssetup/generate?platform=of&marche=fr").get_json()
+        check("la route de generation suit le marche", _genSU.get("ok") is True)
+        _rSansSU = _cSU.get("/sfssetup/generate?platform=of")
+        check("OnlyFans sans marche : refus (400), pas un message FR + US melange",
+              _rSansSU.status_code == 400 and not _rSansSU.get_json().get("ok"))
+        _ssSU.all_info = lambda platform: ({"jessye": {"enabled": False, "sub_total": "20K"},
+                                            "khloe 💕": {"sub_total": "9K"}} if platform == "of" else {})
+        _exSU = {e["modele"]: e["raison"] for e in _cSU.get(
+            "/sfssetup/generate?platform=of&marche=us").get_json().get("exclus") or []}
+        check("les modeles hors du message sont DITS, avec la raison",
+              _exSU.get("Jessye") == "Inclure décoché" and _exSU.get("Emy ♡") == "aucun champ rempli"
+              and "khloe 💕" not in _exSU, str(_exSU))
+        _usSU2 = _cSU.get("/?lazy=sfssetupofus", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+        check("... et la page les annonce avant meme de cliquer",
+              "Hors du message : " in _usSU2 and "Inclure décoché" in _usSU2)
+        check("renommage MyPuls « Khloe 💕 » -> « Khloe » : la fiche remplie est retrouvee",
+              _wSU._cle_setup("Khloe", {"khloe 💕"}) == "khloe 💕"
+              and _wSU._cle_setup("Lola ღ", {"lola"}) == "lola"
+              and _wSU._cle_setup("Nouvelle", {"lola"}) == "Nouvelle")
+        check("deux fiches pour la meme forme : on ne devine pas",
+              _wSU._cle_setup("Lola", {"lola ღ", "lola 💕"}) == "Lola")
+    finally:
+        (_mpSU.api_configured, _mpSU.api_creators_cached, _ssSU.all_info,
+         _mpSU.is_configured, _wSU._load_web_users) = _savSU
+except Exception as _eSU:
+    check("Setup SFS FR / US : testable", False, repr(_eSU)[:200])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
