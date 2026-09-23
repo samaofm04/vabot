@@ -105,6 +105,11 @@ SERVEURS_EXTRA: Dict[str, Dict[str, Any]] = {
         "salon_entrees": "1552192947766960158", "salon_attente": "1552192949851525131",
         "salon_suspicions": "1552192951600545843", "salon_bienvenue": "1552192944944058408",
         "etapes": {},
+        # ce que la bienvenue montre, dans l'ordre (salons de base du 23/09/2026)
+        "parcours": [("📋 Lis les règles", "1552353723768901692"),
+                     ("💰 Comment tu es payé", "1552353733357215754"),
+                     ("📚 Les formations", "1552353730387644426"),
+                     ("❓ Tes questions", "1552353726910431253")],
     },
 }
 
@@ -839,8 +844,12 @@ def poster_bienvenue(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
         return ""
     s = cfg.get("etapes") or {}
     if not s:
+        chiffres = ("1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣")
+        etapes = "".join(f"\n{chiffres[i]} {txt} 👉 <#{cid}>"
+                         for i, (txt, cid) in enumerate((cfg.get("parcours") or [])[:6]))
         e = {"title": f"👋 Bienvenue sur {cfg['nom']} !", "color": 0x5865F2,
-             "description": f"<@{uid}> vient d'arriver — validé ✅",
+             "description": f"<@{uid}> vient d'arriver — validé ✅"
+                            + (f"\n\n**📋 Par où commencer :**{etapes}" if etapes else ""),
              "footer": {"text": "YouLab • Bienvenue dans l'équipe !"}}
         code, rep = api("POST", f"/channels/{salon}/messages",
                         json={"content": f"<@{uid}>", "embeds": [e], "allowed_mentions": {"users": [uid]}})

@@ -12850,6 +12850,10 @@ try:
                                  "member": {"user": {"id": "5", "username": "boss"}, "roles": [_cfgTW["role_manager"]], "permissions": "0"},
                                  "message": {"embeds": [{"title": "t"}], "components": [{"type": 1}]}})
         _mcTW = [(m, c) for m, c, _ in _appelsTW]
+        _bienTW = [j for m, c, j in _appelsTW if m == "POST" and c == f"/channels/{_cfgTW['salon_bienvenue']}/messages"]
+        check("THREADS : la bienvenue mentionne le nouveau et l envoie vers les salons de base (regles, paiements, formation, FAQ)",
+              len(_bienTW) == 1 and _bienTW[0]["allowed_mentions"] == {"users": ["303030303030303030"]}
+              and all(f"<#{cid}>" in _bienTW[0]["embeds"][0]["description"] for _, cid in _cfgTW["parcours"]))
         check("THREADS : un manager de THREADS accepte -> role Verifie de THREADS, bienvenue dans SON salon, fiche « ok »",
               ("PUT", f"/guilds/{_TW}/members/303030303030303030/roles/{_cfgTW['role_verifie']}") in _mcTW
               and ("POST", f"/channels/{_cfgTW['salon_bienvenue']}/messages") in _mcTW
