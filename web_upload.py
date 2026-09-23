@@ -50645,6 +50645,42 @@ def _banger_test(heures: int = 24, combien: int = 5,
     return rapport
 
 
+def _start_quete_du_jour_daemon() -> bool:
+    """Poste la quête du jour à 00h01, chaque nuit, sur le serveur THREADS.
+
+    Réveil toutes les 10 minutes plutôt qu'un long sommeil jusqu'à minuit :
+    un redémarrage en cours de journée (le déploiement en fait plusieurs par
+    jour) repartait sinon pour 24 h, et la quête sautait. poster_quete refuse
+    de poster deux fois le même jour, donc repasser souvent ne coûte rien.
+    """
+    import threading as _th_q
+    if getattr(_start_quete_du_jour_daemon, "_on", False):
+        return False
+    _start_quete_du_jour_daemon._on = True
+
+    def _boucle():
+        import datetime as _dt_q
+        import time as _t_q
+        _t_q.sleep(60)                      # laisser le site se lever
+        while True:
+            try:
+                import quetes_discord as _q
+                import verif_discord as _vd_q
+                maintenant = _dt_q.datetime.now()
+                # On ne poste qu'après 00h01, et jamais deux fois (l'état sur
+                # disque fait foi) : la quête d'hier ne réapparaît pas.
+                if (maintenant.hour, maintenant.minute) >= (0, 1):
+                    for gid in _vd_q.SERVEURS_EXTRA:
+                        _q.poster_quete(gid, maintenant.date())
+            except Exception as e:
+                print(f"[quetes] boucle : {type(e).__name__}: {e}", flush=True)
+            _t_q.sleep(600)
+
+    _th_q.Thread(target=_boucle, daemon=True, name="quete-du-jour").start()
+    print("[quetes] quête du jour armée (00h01, vérifiée toutes les 10 min)", flush=True)
+    return True
+
+
 def _start_auto_scrape_daemon():
     """Background daemon : telecharge chaque heure les mp4 manquants.
 
@@ -51034,6 +51070,11 @@ def create_app():
         jb_activity.start_daily()
     except Exception as _e:
         log.warning(f"jb_activity daily non démarré: {_e}")
+    # Chaque nuit à 00h01 : la quête du jour sur le serveur Twitter/THREADS.
+    try:
+        _start_quete_du_jour_daemon()
+    except Exception as _e:
+        log.warning(f"quête du jour non démarrée: {_e}")
     # Collecte AUTO des SFS reçus (DM entrants) toutes les 5 min via l'API
     # MyPuls — sans elle, un message lu vite par un chatteur serait raté
     try:
@@ -51156,6 +51197,18 @@ def create_app():
             charge = json.loads(corps.decode("utf-8"))
         except Exception:
             return ("corps illisible", 400)
+        # Les quêtes ont leurs propres boutons et la commande /quetes. Elles
+        # répondent en premier et rendent None quand ce n'est pas pour elles :
+        # une seule route Discord, deux modules, aucun mélange. Sous
+        # try/except, pour qu'un défaut des quêtes ne casse pas la
+        # vérification, qui passe par la même porte.
+        try:
+            import quetes_discord as _q
+            _rep_q = _q.traiter(charge)
+            if _rep_q is not None:
+                return jsonify(_rep_q)
+        except Exception as _e_q:
+            print(f"[quetes] route : {type(_e_q).__name__}: {_e_q}", flush=True)
         return jsonify(_vd.traiter_interaction(charge))
 
     @app.route("/verif/<jeton>", methods=["GET"])

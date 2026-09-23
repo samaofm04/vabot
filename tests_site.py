@@ -13029,6 +13029,93 @@ try:
 except Exception as _eTK:
     check("tickets : testable", False, repr(_eTK)[:200])
 
+print()
+print("=" * 70)
+print("Quetes du jour : une mission, une recompense, un manager qui tranche")
+print("=" * 70)
+try:
+    import datetime as _dtQ
+    import pathlib as _plQ
+    import tempfile as _tfQ
+    import quetes_discord as _q
+    import tickets_discord as _tkQ
+    check("saison = la quinzaine, comme le classement des subs",
+          (_q.saison(_dtQ.date(2026, 9, 5)), _q.saison(_dtQ.date(2026, 9, 16))) == ("2026-09-A", "2026-09-B"))
+    _j = _dtQ.date(2026, 9, 23)
+    check("la quete derive de la DATE : deux appels le meme jour donnent la meme",
+          _q.quete_du_jour(_j)["id"] == _q.quete_du_jour(_j)["id"])
+    _suite = [_q.quete_du_jour(_j + _dtQ.timedelta(days=i))["id"] for i in range(len(_q.catalogue()))]
+    check("aucune quete ne revient tant qu il en reste d autres",
+          len(set(_suite)) == len(_q.catalogue()), str(_suite))
+    _dQ = _plQ.Path(_tfQ.mkdtemp())
+    _savQ = (_q.ETAT_FICHIER, _q._api, _tkQ.ticket_de, _tkQ.role_manager)
+    try:
+        _q.ETAT_FICHIER = _dQ / "quetes.json"
+        _envois = []
+
+        def _fauxQ(methode, chemin, **kw):
+            _envois.append((methode, chemin, kw))
+            return 200, {"id": "msg-1"}
+
+        _q._api = _fauxQ
+        _tkQ.role_manager = lambda gid: "r-mgr"
+        _tkQ.ticket_de = lambda gid, uid: ""
+        def _clic(uid, jour="2026-09-23", roles=None, cid=None):
+            return _q.traiter({"type": 3, "guild_id": "g1",
+                               "member": {"user": {"id": uid}, "roles": roles or []},
+                               "data": {"custom_id": cid or f"quete:go:{jour}"}})
+        # ce qui n est pas une quete doit passer la main a verif_discord
+        check("un bouton de verification n est pas intercepte (rend None)",
+              _q.traiter({"type": 3, "guild_id": "g1", "member": {"user": {"id": "9"}},
+                          "data": {"custom_id": "verif:start"}}) is None)
+        check("le PING de Discord n est pas intercepte", _q.traiter({"type": 1}) is None)
+        _r = _clic("99")
+        check("sans espace perso : on le DIT au membre, on n avale pas le clic",
+              "espace perso" in (_r or {}).get("data", {}).get("content", ""))
+        _tkQ.ticket_de = lambda gid, uid: "tick-1"
+        _envois.clear()
+        _r = _clic("99")
+        check("la demande part dans l espace perso du membre",
+              any(c == "/channels/tick-1/messages" for m, c, k in _envois if m == "POST"))
+        _boutons = next((k["json"]["components"] for m, c, k in _envois
+                         if m == "POST" and "components" in (k.get("json") or {})), [])
+        _ids = [b["custom_id"] for r in _boutons for b in r["components"]]
+        check("le manager a un Valider et un Refuser",
+              _ids == ["quete:ok:99:2026-09-23", "quete:no:99:2026-09-23"], str(_ids))
+        _envois.clear()
+        _r = _clic("99")
+        check("deuxieme clic du membre : rien n est reposte, on lui rappelle",
+              not _envois and "déjà partie" in (_r or {}).get("data", {}).get("content", ""))
+        _r = _clic("77", roles=[], cid="quete:ok:99:2026-09-23")
+        check("un non-manager ne peut pas valider",
+              "Manager" in (_r or {}).get("data", {}).get("content", ""))
+        check("gains a zero tant que rien n est valide", _q.gains("g1", "99")["montant"] == 0)
+        _montant = _q.quete_du_jour(_j)["montant"]
+        _r = _clic("10", roles=["r-mgr"], cid="quete:ok:99:2026-09-23")
+        _g = _q.gains("g1", "99")
+        check("le manager valide : la recompense est creditee",
+              _g["montant"] == round(_montant, 2) and _g["quetes"] == 1, str(_g))
+        _r = _clic("10", roles=["r-mgr"], cid="quete:ok:99:2026-09-23")
+        check("un second verdict est refuse : pas de double paiement",
+              "déjà" in (_r or {}).get("data", {}).get("content", "")
+              and _q.gains("g1", "99")["montant"] == round(_montant, 2))
+        _r = _q.traiter({"type": 2, "guild_id": "g1", "member": {"user": {"id": "99"}},
+                         "data": {"name": "quetes"}})
+        check("/quetes montre le total de la saison",
+              f"{_montant:.2f}$" in (_r or {}).get("data", {}).get("content", ""))
+        check("les gains d une AUTRE saison ne comptent pas",
+              _q.gains("g1", "99", "2026-08-A")["montant"] == 0)
+    finally:
+        _q.ETAT_FICHIER, _q._api, _tkQ.ticket_de, _tkQ.role_manager = _savQ
+    _srcQ = _plQ.Path("web_upload.py").read_text(encoding="utf-8")
+    check("les quetes sont branchees sur la route Discord, avant verif_discord",
+          _srcQ.find("_q.traiter(charge)") < _srcQ.find("_vd.traiter_interaction(charge)")
+          and "_q.traiter(charge)" in _srcQ)
+    check("la quete du jour est postee automatiquement a 00h01",
+          "_start_quete_du_jour_daemon()" in _srcQ and "quete-du-jour" in _srcQ)
+except Exception as _eQ:
+    check("quetes : testable", False, repr(_eQ)[:200])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
