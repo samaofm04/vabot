@@ -29,6 +29,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -240,11 +241,19 @@ button:disabled{opacity:.5;cursor:default}
 .liste-bouts{max-height:420px;overflow:auto;margin-top:10px}
 .case{display:flex;align-items:center;gap:8px;margin-top:11px;color:var(--faible);
       font-size:12px;text-transform:none;letter-spacing:0;cursor:pointer}
-.case input{width:auto;margin:0}
+.case input{width:auto;margin:0;flex:none}
+.case span{flex:1}
 .case b{color:var(--texte)}
+.danger{display:flex;align-items:center;gap:10px;margin-top:16px;padding-top:14px;
+        border-top:1px solid var(--bord);flex-wrap:wrap}
+.danger span{color:var(--faible);font-size:11px;line-height:1.45}
+.danger button{background:transparent;border:1px solid var(--rouge);color:var(--rouge);
+               font-size:12px;padding:7px 13px;white-space:nowrap}
+.danger button:hover{background:var(--rouge);color:#fff}
 </style></head><body>
 <h1>Écrire dans un salon Discord</h1>
-<p class="sous">Le message est posté par <b>SEVEN</b>. Tout se passe sur ta machine — rien n'est déployé.</p>
+<p class="sous">Le message est posté par <b>SEVEN</b>. Tout se passe sur ta machine — rien n'est déployé.
+<span style="opacity:.55">· outil du __DATE__</span></p>
 <div class="grille">
   <div class="carte">
     <div class="onglets">
@@ -288,7 +297,7 @@ button:disabled{opacity:.5;cursor:default}
       <textarea id="brut" placeholder="Colle tes captions, tes liens, tes bios&hellip;"></textarea>
       <div class="compte" id="comptelot"></div>
       <label class="case"><input type="checkbox" id="copier" checked>
-        Poser un bouton <b>Copier</b> sous chaque message</label>
+        <span>Poser un bouton <b>Copier</b> sous chaque message</span></label>
       <div class="liste-bouts" id="bouts"></div>
     </div>
 
@@ -296,6 +305,10 @@ button:disabled{opacity:.5;cursor:default}
       <button class="envoyer" id="envoyer">Poster</button>
       <button class="gris" id="annuler" style="display:none">Nouveau message</button>
       <button class="rouge" id="supprimer" style="display:none">Supprimer</button>
+    </div>
+    <div class="danger">
+      <button class="rouge" id="vider">Vider ce salon</button>
+      <span>efface TOUS les messages du salon choisi — il te dit combien avant</span>
     </div>
     <div class="etat" id="etat"></div>
   </div>
@@ -597,6 +610,30 @@ E('supprimer').onclick = async function(){
   etat('✓ Message supprimé.', 'ok'); nouveau(); chargerMessages();
 };
 
+E('vider').onclick = async function(){
+  var nom = E('salon').options[E('salon').selectedIndex];
+  nom = nom ? nom.textContent : '(ce salon)';
+  // premier appel : on ne fait que compter. Rien n'est efface a l'aveugle.
+  var q = await demander('/vider', {salon: E('salon').value});
+  if(!q.ok){ etat('✕ ' + (q.error || 'Erreur'), 'ko'); return; }
+  if(!q.compte){ etat('Ce salon est deja vide.', ''); return; }
+  var combien = q.compte + (q.encore ? ' (au moins, il y en a plus de 100)' : '');
+  if(!confirm('Effacer ' + combien + ' message(s) dans ' + nom + ' ?\n\n'
+              + (q.apercu || []).map(function(x){ return '  • ' + x; }).join('\n')
+              + '\n\nC est definitif : Discord n a pas de corbeille.')) return;
+  if(!confirm('Vraiment ? ' + nom + ' sera vide.')) return;
+  this.disabled = true;
+  etat('Effacement en cours… laisse la page ouverte.');
+  var j = await demander('/vider', {salon: E('salon').value, confirme: true});
+  this.disabled = false;
+  var txt = (j.efface || 0) + ' message(s) efface(s)'
+          + (j.un_par_un ? ' (dont ' + j.un_par_un + ' un par un, trop vieux pour le lot)' : '');
+  if(j.arrete) txt += ' · arrete par securite, il en reste : reclique';
+  if((j.echecs || []).length) txt += ' · rates : ' + j.echecs.join(' | ');
+  etat((j.ok ? '✓ ' : '⚠ ') + txt, j.ok ? 'ok' : 'ko');
+  chargerMessages();
+};
+
 E('onglet-un').onclick  = function(){ basculer(false); };
 E('onglet-lot').onclick = function(){ basculer(true); };
 E('brut').oninput = function(){ rendreLot(); };
@@ -642,7 +679,10 @@ class Poste(BaseHTTPRequestHandler):
         chemin, _, requete = self.path.partition("?")
         q = urllib.parse.parse_qs(requete)
         if chemin == "/":
-            brut = PAGE.encode("utf-8")
+            # la date du fichier, pas celle du démarrage : on voit d'un coup
+            # d'œil qu'un vieil exemplaire tourne encore
+            quand = datetime.fromtimestamp(Path(__file__).stat().st_mtime)
+            brut = PAGE.replace("__DATE__", quand.strftime("%d/%m %Hh%M")).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(brut)))
@@ -671,6 +711,8 @@ class Poste(BaseHTTPRequestHandler):
                                   "error": "" if code in (200, 204) else f"HTTP {code}"})
         if self.path == "/poster_lot":
             return self._lot(d)
+        if self.path == "/vider":
+            return self._vider(d)
         if self.path != "/poster":
             return self._envoyer({"error": "inconnu"}, 404)
         texte = str(d.get("texte") or "")
@@ -767,6 +809,66 @@ class Poste(BaseHTTPRequestHandler):
         return self._envoyer({"ok": not echecs, "envoyes": envoyes,
                               "total": len(messages), "echecs": echecs})
 
+    def _vider(self, d):
+        """Efface les messages d'un salon — en deux temps, jamais à l'aveugle.
+
+        Sans `confirme`, on rend seulement le nombre : la page peut alors
+        demander « vider les 52 messages ? » avec le vrai chiffre sous les yeux.
+        Discord refuse d'effacer en lot un message de plus de 14 jours : ceux-là
+        partent un par un, plus lentement, et sont comptés à part pour que le
+        compte rendu colle à ce qui s'est vraiment passé.
+        """
+        salon = str(d.get("salon") or "")
+        if not salon:
+            return self._envoyer({"ok": False, "error": "Aucun salon"})
+        code, msgs = api("GET", f"/channels/{salon}/messages", params={"limit": "100"})
+        if code != 200:
+            return self._envoyer({"ok": False,
+                                  "error": str((msgs or {}).get("message") or f"HTTP {code}")})
+        if not d.get("confirme"):
+            aperçu = [(x.get("content") or "")[:60] for x in msgs[:3]]
+            return self._envoyer({"ok": True, "compte": len(msgs), "apercu": aperçu,
+                                  "encore": len(msgs) == 100})
+
+        efface, un_par_un, echecs, tours = 0, 0, [], 0
+        while msgs and tours < 20:
+            tours += 1
+            # l'heure de création est dans l'identifiant lui-même
+            recents = [x["id"] for x in msgs
+                       if (int(x["id"]) >> 22) + 1420070400000 > (time.time() - 13.5 * 86400) * 1000]
+            vieux = [x["id"] for x in msgs if x["id"] not in set(recents)]
+            if len(recents) >= 2:
+                c, rep = api("POST", f"/channels/{salon}/messages/bulk-delete",
+                             {"messages": recents[:100]})
+                if c in (200, 204):
+                    efface += len(recents[:100])
+                else:
+                    echecs.append(str((rep or {}).get("message") or f"lot : HTTP {c}")[:120])
+                    vieux = recents + vieux        # le lot a echoue : un par un
+            elif recents:
+                vieux = recents + vieux
+            for mid in vieux:
+                for _ in range(3):
+                    c, rep = api("DELETE", f"/channels/{salon}/messages/{mid}")
+                    if c == 429:
+                        time.sleep(float((rep or {}).get("retry_after") or 1) + 0.3)
+                        continue
+                    break
+                if c in (200, 204):
+                    efface += 1
+                    un_par_un += 1
+                else:
+                    echecs.append(f"{mid} : " + str((rep or {}).get("message") or f"HTTP {c}")[:80])
+                time.sleep(1.1)
+            time.sleep(0.6)
+            code, msgs = api("GET", f"/channels/{salon}/messages", params={"limit": "100"})
+            if code != 200:
+                echecs.append(f"relecture : HTTP {code}")
+                break
+        return self._envoyer({"ok": not echecs, "efface": efface, "un_par_un": un_par_un,
+                              "reste": len(msgs), "echecs": echecs[:10],
+                              "arrete": tours >= 20 and bool(msgs)})
+
     def log_message(self, *a):
         pass          # le terminal reste lisible
 
@@ -778,7 +880,18 @@ def main():
               "ou la variable SEVEN_BOT_TOKEN.", file=sys.stderr)
         return 1
     # 127.0.0.1 et pas 0.0.0.0 : la page n'est pas joignable depuis le réseau.
-    srv = ThreadingHTTPServer(("127.0.0.1", PORT), Poste)
+    try:
+        srv = ThreadingHTTPServer(("127.0.0.1", PORT), Poste)
+    except OSError as e:
+        if getattr(e, "errno", None) not in (48, 98):   # EADDRINUSE mac / linux
+            raise
+        # sans ce message, l'ancien exemplaire continuait de servir sa vieille
+        # page et on cherchait la correction pendant dix minutes
+        print(f"Le port {PORT} est déjà pris : un autre exemplaire tourne.\n"
+              "Fais Ctrl+C dans sa fenêtre, ou : pkill -f discord_ecrire.py\n"
+              "Attention, celui-là sert peut-être une version plus ancienne.",
+              file=sys.stderr)
+        return 1
     url = f"http://127.0.0.1:{PORT}"
     print(f"Écrire dans un salon Discord : {url}\nCtrl+C pour arrêter.")
     try:

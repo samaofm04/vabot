@@ -13169,6 +13169,89 @@ try:
 except Exception as _eC:
     check("copie : testable", False, repr(_eC)[:200])
 
+# ----------------------------------------------- 29. Vider un salon (outil local)
+print()
+print("=" * 70)
+print("Outil local : vider un salon ne part jamais a l aveugle")
+print("=" * 70)
+try:
+    import importlib.util as _iu
+    _spec = _iu.spec_from_file_location("_de_test", "discord_ecrire.py")
+    _de = _iu.module_from_spec(_spec); _spec.loader.exec_module(_de)
+
+    def _faux_salon(n, jours=0):
+        # l heure de creation est dans l identifiant : on la fabrique
+        ms = int((_tm.time() - jours * 86400) * 1000) - 1420070400000
+        return [{"id": str((ms << 22) + i)} for i in range(n)]
+
+    import time as _tm
+    _appels = []
+
+    def _api(methode, chemin, corps=None, params=None):
+        _appels.append((methode, chemin, corps))
+        if methode == "GET" and "/messages" in chemin:
+            return (200, _etat_msgs.pop(0) if _etat_msgs else [])
+        return (204, {})
+
+    _h = _de.Poste.__new__(_de.Poste)
+    _sorties = []
+    _h._envoyer = lambda data, code=200: _sorties.append(data)
+    _sauv_api = _de.api
+    try:
+        _de.api = _api
+
+        # 1. sans confirmation : on compte, on n efface RIEN
+        _etat_msgs = [[{"id": "1", "content": "bio une"}, {"id": "2", "content": "bio deux"}]]
+        _appels.clear(); _sorties.clear()
+        _h._vider({"salon": "s1"})
+        check("sans confirmation, il compte et n efface rien",
+              _sorties[-1]["compte"] == 2
+              and not any(a[0] in ("DELETE", "POST") for a in _appels))
+        check("il rend un apercu pour que la question ait du sens",
+              _sorties[-1]["apercu"] == ["bio une", "bio deux"])
+
+        # 2. avec confirmation : un lot pour les messages recents
+        _etat_msgs = [_faux_salon(52), []]
+        _appels.clear(); _sorties.clear()
+        _h._vider({"salon": "s1", "confirme": True})
+        check("52 messages recents partent en UN lot",
+              sum(1 for a in _appels if a[0] == "POST" and "bulk-delete" in a[1]) == 1
+              and _sorties[-1]["efface"] == 52)
+        check("aucun effacement un par un quand le lot suffit",
+              _sorties[-1]["un_par_un"] == 0)
+
+        # 3. Discord refuse le lot au-dela de 14 jours : ceux-la partent un par un
+        _etat_msgs = [_faux_salon(3, jours=30), []]
+        _appels.clear(); _sorties.clear()
+        _h._vider({"salon": "s1", "confirme": True})
+        check("un message de plus de 14 jours part un par un, pas en lot",
+              _sorties[-1]["un_par_un"] == 3
+              and not any("bulk-delete" in a[1] for a in _appels if a[0] == "POST"))
+
+        # 4. un salon sans identifiant ne declenche rien
+        _appels.clear(); _sorties.clear()
+        _h._vider({"confirme": True})
+        check("sans salon, rien n est appele", not _appels and not _sorties[-1]["ok"])
+
+        # 5. un echec de lecture est dit, pas avale
+        def _api_ko(methode, chemin, corps=None, params=None):
+            return (403, {"message": "Missing Access"})
+        _de.api = _api_ko
+        _sorties.clear()
+        _h._vider({"salon": "s1"})
+        check("un salon illisible est signale, pas ecarte en silence",
+              _sorties[-1]["ok"] is False and "Missing Access" in _sorties[-1]["error"])
+    finally:
+        _de.api = _sauv_api
+
+    _srcE2 = _plC("discord_ecrire.py").read_text(encoding="utf-8")
+    check("la page demande DEUX confirmations avant de vider",
+          _srcE2.count("if(!confirm(") >= 2 and "sera vide" in _srcE2)
+    check("le bouton Vider est separe des autres boutons",
+          'class="danger"' in _srcE2 and 'id="vider"' in _srcE2)
+except Exception as _eV:
+    check("vider : testable", False, repr(_eV)[:200])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
