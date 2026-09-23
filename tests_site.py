@@ -12197,8 +12197,11 @@ try:
                (3108, "onlyfans", "Khloe 💕"), (3352, "onlyfans", "Emy ♡"),
                (9999, "onlyfans", "Ancienne")]
     _savSU = (_mpSU.api_configured, _mpSU.api_creators_cached, _ssSU.all_info,
-              _mpSU.is_configured, _wSU._load_web_users)
+              _mpSU.is_configured, _wSU._load_web_users, _wSU._sfssetup_autofill_of_fond)
     try:
+        # ouvrir une page OF lance le releve OnlyFans en fond : jamais de vrai
+        # appel MyPuls depuis les tests (et le verrou resterait pris)
+        _wSU._sfssetup_autofill_of_fond = lambda: False
         _mpSU.api_configured = lambda: True
         _mpSU.api_creators_cached = lambda force=False: [
             {"id": i, "platform": pl, "pseudo": n, "active": n != "Ancienne"} for i, pl, n in _CRE_SU]
@@ -12284,9 +12287,97 @@ try:
               _wSU._cle_setup("Lola", {"lola ღ", "lola 💕"}) == "Lola")
     finally:
         (_mpSU.api_configured, _mpSU.api_creators_cached, _ssSU.all_info,
-         _mpSU.is_configured, _wSU._load_web_users) = _savSU
+         _mpSU.is_configured, _wSU._load_web_users, _wSU._sfssetup_autofill_of_fond) = _savSU
 except Exception as _eSU:
     check("Setup SFS FR / US : testable", False, repr(_eSU)[:200])
+
+print()
+print("=" * 70)
+print("Setup SFS OF : SUB Total et Last 30 Day relus depuis OnlyFans")
+print("=" * 70)
+try:
+    import json as _jsOA
+    import tempfile as _tfOA
+    import pathlib as _plOA
+    import mypuls as _mpOA
+    import sfs_setup as _ssOA
+    import web_upload as _wOA
+    check("notation SUB Total : 8800 -> 8K8, 17969 -> 17K9, 1851 -> 1K8, 599 -> 599",
+          [_wOA._of_sub_total(n) for n in (8800, 17969, 1851, 599)] == ["8K8", "17K9", "1K8", "599"])
+    _dOA = _plOA.Path(_tfOA.mkdtemp())
+    _savOA = (_ssOA.SETUP_FILE, _wOA.SFS_OF_AUTOFILL_FILE, _mpOA.api_configured, _mpOA.api_creators_cached,
+              _mpOA.of_fans_stats, _mpOA._make_session, _mpOA._save_rotated_cookies, _wOA._load_web_users)
+    try:
+        _ssOA.SETUP_FILE = _dOA / "sfs_setup.json"
+        _wOA.SFS_OF_AUTOFILL_FILE = _dOA / "sfs_of_autofill.json"
+        # etat de depart du serveur : fiches FR remplies a la main, Jessye decochee
+        _ssOA.SETUP_FILE.write_text(_jsOA.dumps({"platforms": {"mym": {"identities": {}}, "of": {"identities": {
+            "amelia": {"sub_total": "5K1", "last_30d": "500", "abonnement": "free", "enabled": True},
+            "jessye": {"enabled": False}}}}}), encoding="utf-8")
+        _mpOA.api_configured = lambda: True
+        _mpOA.api_creators_cached = lambda force=False: [
+            {"id": 3106, "platform": "onlyfans", "pseudo": "Amelia", "active": True},
+            {"id": 3107, "platform": "onlyfans", "pseudo": "Jessye", "active": True},
+            {"id": 3352, "platform": "onlyfans", "pseudo": "Emy ♡", "active": True},
+            {"id": 3108, "platform": "onlyfans", "pseudo": "Khloe 💕", "active": True}]
+        _mpOA._make_session = lambda: object()
+        _mpOA._save_rotated_cookies = lambda s: None
+        _STATS_OA = {3106: {"ok": True, "of_user": {"id": 1}, "abonnes": 5750, "nouveaux_30j": 480},
+                     3107: {"ok": True, "of_user": {"id": 2}, "abonnes": 17969, "nouveaux_30j": 1203},
+                     3352: {"ok": True, "of_user": {"id": 3}, "abonnes": 1851, "nouveaux_30j": None},
+                     3108: {"ok": False, "error": "accès OF indisponible (HTTP 500)"}}
+        _mpOA.of_fans_stats = lambda cid, session=None: _STATS_OA[cid]
+        _rOA = _wOA._sfssetup_autofill_of(force=True)
+        _am = _ssOA.get_identity("of", "Amelia")
+        _je = _ssOA.get_identity("of", "Jessye")
+        _em = _ssOA.get_identity("of", "Emy ♡")
+        check("SUB Total et Last 30 Day remplis depuis OnlyFans",
+              (_am["sub_total"], _am["last_30d"]) == ("5K7", "480")
+              and (_je["sub_total"], _je["last_30d"]) == ("17K9", "1203"), str((_am, _je)))
+        check("Last 30 Day illisible : ancienne valeur gardee, et c est DIT",
+              _em["sub_total"] == "1K8" and not _em["last_30d"]
+              and any("Emy" in e and "Last 30 Day" in e for e in _rOA.get("erreurs") or []))
+        check("une creatrice en echec est nommee, pas ecartee en silence",
+              any(e.startswith("Khloe") and "HTTP 500" in e for e in _rOA.get("erreurs") or []))
+        check("les modeles US decoches du temps de la page mixte sont recoches, une fois",
+              _je["enabled"] is True and "Jessye" in (_rOA.get("reactivation_us") or {}).get("modeles", []))
+        _ssOA.save_identity("of", "Jessye", {}, enabled=False)
+        _wOA._sfssetup_autofill_of(force=True)
+        check("... et decoche de nouveau ensuite, il le reste",
+              _ssOA.get_identity("of", "Jessye")["enabled"] is False)
+        _STATS_OA[3352] = {"ok": True, "of_user": {"id": 2}, "abonnes": 1, "nouveaux_30j": 1}
+        _r2OA = _wOA._sfssetup_autofill_of(force=True)
+        # Emy (lue en premier, ordre alphabetique) et Jessye rendent le meme
+        # compte OF : la seconde n est PAS ecrasee avec les chiffres de l autre
+        check("deux creatrices sur le meme compte OF (switch non pris) : ignore et dit",
+              any(e.startswith("Jessye") and "même compte OF" in e for e in _r2OA.get("erreurs") or [])
+              and _ssOA.get_identity("of", "Jessye")["sub_total"] == "17K9")
+        _mpOA.of_fans_stats = lambda cid, session=None: (_ for _ in ()).throw(AssertionError("releve < 6 h"))
+        check("releve de moins de 6 h : pas de nouvel appel", _wOA._sfssetup_autofill_of().get("cached") is True)
+        _wOA._load_web_users = lambda: {"admin": {"role": "admin", "password": "x"},
+                                        "chat": {"role": "chatter", "password": "x"}}
+        _appOA = _wOA.create_app()
+        _appOA.config["TESTING"] = True
+        _cOA = _appOA.test_client()
+        with _cOA.session_transaction() as _sOA:
+            _sOA["auth"] = True
+            _sOA["username"] = "admin"
+            _sOA["role"] = "admin"
+        _usOA = _cOA.get("/?lazy=sfssetupofus", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+        check("page OF : bouton « Chiffres depuis OnlyFans » et heure du releve",
+              "fetchOfStats_ofus()" in _usOA and "Chiffres OnlyFans relevés le" in _usOA)
+        _cChOA = _appOA.test_client()
+        with _cChOA.session_transaction() as _sOA:
+            _sOA["auth"] = True
+            _sOA["username"] = "chat"
+            _sOA["role"] = "chatter"
+        check("role restreint : /sfssetup/fetch_of_stats refuse (un GET qui ecrit)",
+              _cChOA.get("/sfssetup/fetch_of_stats").status_code == 403)
+    finally:
+        (_ssOA.SETUP_FILE, _wOA.SFS_OF_AUTOFILL_FILE, _mpOA.api_configured, _mpOA.api_creators_cached,
+         _mpOA.of_fans_stats, _mpOA._make_session, _mpOA._save_rotated_cookies, _wOA._load_web_users) = _savOA
+except Exception as _eOA:
+    check("Setup SFS OF remplissage auto : testable", False, repr(_eOA)[:200])
 
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")

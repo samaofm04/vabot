@@ -3511,3 +3511,56 @@ def tracking_par_code(creator_id=None) -> dict:
             continue
         out[t["code"]] = t
     return out
+
+
+# ============ Abonnes OnlyFans (Setup SFS OF) ============
+
+def of_fans_stats(creator_id: int, session: Optional[requests.Session] = None) -> Dict[str, Any]:
+    """Abonnes OnlyFans d une creatrice, lus via l acces OF de MyPuls (lecture seule).
+
+    Retourne {ok, of_user:{id, username}, abonnes, nouveaux_30j, error}.
+
+    - abonnes : users/me.subscribersCount = abonnes ACTIFS. C est le « SUB
+      Total » du Setup SFS OF — verifie le 23/09/2026 : Lola 8 800, Amelia
+      5 750, Julia 3 218, pour 8K4, 5K1 et 2K9 saisis a la main un mois
+      plus tot.
+    - nouveaux_30j : stats/overview?by=fans -> fans.subscribers.total, les
+      nouveaux abonnes sur 30 jours (« Last 30 Day » ; Lola : 599). None si
+      OnlyFans ne le rend pas : l appelant garde alors l ancienne valeur.
+
+    Le compte OF reellement servi est verifie (users/me) : un switch qui n a
+    pas pris renverrait sinon les chiffres de la creatrice precedente.
+    """
+    s = session or _make_session()
+    if s is None:
+        return {"ok": False, "error": "Cookies MyPuls non configurés"}
+    H = {"Accept": "application/json"}
+    try:
+        s.get(f"{BASE_URL}/switch-creator/{int(creator_id)}?from=app_pushs",
+              timeout=TIMEOUT, allow_redirects=True)
+        me = s.get(f"{BASE_URL}/of-nav/api2/v2/users/me", headers=H, timeout=TIMEOUT)
+    except Exception as e:
+        return {"ok": False, "error": f"accès OF: {e}"}
+    if me.status_code != 200:
+        return {"ok": False, "error": f"accès OF indisponible (HTTP {me.status_code})"}
+    try:
+        mj = me.json()
+    except Exception:
+        return {"ok": False, "error": "accès OF : réponse illisible"}
+    abonnes = mj.get("subscribersCount") if isinstance(mj, dict) else None
+    if not isinstance(mj, dict) or not mj.get("id") or not isinstance(abonnes, int):
+        return {"ok": False, "error": "accès OF : compte ou nombre d abonnés absent"}
+    fin = date.today()
+    debut = fin - timedelta(days=30)
+    nouveaux = None
+    try:
+        r = s.get(f"{BASE_URL}/of-nav/api2/v2/users/me/stats/overview"
+                  f"?startDate={debut}%2000%3A00%3A00&endDate={fin}%2023%3A59%3A59&by=fans",
+                  headers=H, timeout=TIMEOUT)
+        if r.status_code == 200:
+            t = ((r.json() or {}).get("fans") or {}).get("subscribers", {}).get("total")
+            nouveaux = t if isinstance(t, int) else None
+    except Exception:
+        nouveaux = None
+    return {"ok": True, "of_user": {"id": mj.get("id"), "username": mj.get("username") or ""},
+            "abonnes": abonnes, "nouveaux_30j": nouveaux}

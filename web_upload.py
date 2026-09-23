@@ -36986,6 +36986,115 @@ def _sfssetup_models(platform: str, marche: str = "", notes: list = None) -> lis
     return out
 
 
+SFS_OF_AUTOFILL_FILE = DATA_DIR / "sfs_of_autofill.json"
+# Les chiffres d abonnes bougent a la journee, pas a la minute : un releve
+# toutes les 6 h au plus (18 appels MyPuls pour 6 creatrices).
+SFS_OF_AUTOFILL_TTL = 6 * 3600
+_SFS_OF_AUTOFILL_LOCK = threading.Lock()
+
+
+def _of_sub_total(n) -> str:
+    """8800 -> « 8K8 », 17969 -> « 17K9 » : la notation deja utilisee a la
+    main dans le Setup SFS OF (8K4, 5K1, 2K9)."""
+    n = int(n)
+    return str(n) if n < 1000 else f"{n // 1000}K{(n % 1000) // 100}"
+
+
+def _sfssetup_autofill_of_etat() -> dict:
+    try:
+        d = safe_json.load(SFS_OF_AUTOFILL_FILE, default={})
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _sfssetup_autofill_of(force: bool = False) -> dict:
+    """Remplit SUB Total et Last 30 Day des modeles OnlyFans (FR et US) depuis
+    OnlyFans, via l acces OF de MyPuls (mypuls.of_fans_stats).
+
+    Avant, ces deux champs se tapaient a la main — et la page US sortait un
+    message vide. Rien n est ecarte en silence : chaque echec est nomme dans
+    `erreurs`, et un Last 30 Day illisible garde l ancienne valeur en le disant.
+
+    Une seule fois (drapeau reactivation_us) : les modeles US decoches du
+    temps de l ancienne page OF unique, qui melangeait FR et US, sont
+    recoches. Decoches de nouveau ensuite, ils le restent.
+    """
+    etat = _sfssetup_autofill_of_etat()
+    if not force and time.time() - float(etat.get("ts") or 0) < SFS_OF_AUTOFILL_TTL:
+        return dict(etat, cached=True)
+    if not _SFS_OF_AUTOFILL_LOCK.acquire(blocking=False):
+        return dict(etat, ok=False, error="relevé OnlyFans déjà en cours")
+    try:
+        import mypuls
+        import sfs_setup
+        modeles = _sfssetup_models("of")
+        if not modeles:
+            return dict(etat, ok=False, error="aucun modèle OnlyFans actif (API MyPuls muette ?)")
+        s = mypuls._make_session()
+        champs_of = sfs_setup.fields_for("of")
+        remplis, erreurs, vus = [], [], {}
+        for cle, cid in modeles:
+            if not cid:
+                erreurs.append(f"{cle} : pas d identifiant MyPuls")
+                continue
+            r = mypuls.of_fans_stats(cid, session=s)
+            if not r.get("ok"):
+                erreurs.append(f"{cle} : {r.get('error')}")
+                continue
+            oid = (r.get("of_user") or {}).get("id")
+            if oid in vus:
+                erreurs.append(f"{cle} : même compte OF que {vus[oid]} — sélection non prise, ignoré")
+                continue
+            vus[oid] = cle
+            cur = sfs_setup.get_identity("of", cle)
+            champs = {f: cur.get(f, "") for f in champs_of}
+            champs["sub_total"] = _of_sub_total(r["abonnes"])
+            if r.get("nouveaux_30j") is not None:
+                champs["last_30d"] = str(r["nouveaux_30j"])
+            else:
+                erreurs.append(f"{cle} : nouveaux abonnés sur 30 j illisibles (Last 30 Day inchangé)")
+            sfs_setup.save_identity("of", cle, champs, emoji=cur.get("emoji", ""),
+                                    enabled=cur.get("enabled", True))
+            remplis.append(f"{cle} {champs['sub_total']} / {champs.get('last_30d') or '?'}")
+        try:
+            mypuls._save_rotated_cookies(s)
+        except Exception:
+            pass
+        etat.update(ts=int(time.time()), ok=bool(remplis), remplis=remplis, erreurs=erreurs)
+        etat.pop("error", None)
+        if remplis and not etat.get("reactivation_us"):
+            recoches = []
+            for cle, _cid in _sfssetup_models("of", "us"):
+                cur = sfs_setup.get_identity("of", cle)
+                if not cur.get("enabled", True):
+                    sfs_setup.save_identity("of", cle, {f: cur.get(f, "") for f in champs_of},
+                                            emoji=cur.get("emoji", ""), enabled=True)
+                    recoches.append(cle)
+            etat["reactivation_us"] = {"ts": int(time.time()), "modeles": recoches}
+        try:
+            safe_json.write_text(SFS_OF_AUTOFILL_FILE, json.dumps(etat, ensure_ascii=False))
+        except Exception as e:
+            erreurs.append(f"état non écrit : {e}")
+        return dict(etat)
+    except Exception as e:
+        return dict(etat, ok=False, error=f"{type(e).__name__}: {e}")
+    finally:
+        _SFS_OF_AUTOFILL_LOCK.release()
+
+
+def _sfssetup_autofill_of_fond() -> bool:
+    """Lance le releve en tache de fond s il date de plus de 6 h. Vrai si lance.
+    La page s ouvre tout de suite avec les chiffres en place ; 18 appels
+    MyPuls en ligne l auraient bloquee ~15 s."""
+    if time.time() - float(_sfssetup_autofill_of_etat().get("ts") or 0) < SFS_OF_AUTOFILL_TTL:
+        return False
+    if _SFS_OF_AUTOFILL_LOCK.locked():
+        return True
+    threading.Thread(target=_sfssetup_autofill_of, daemon=True, name="sfs-of-autofill").start()
+    return True
+
+
 def _sfssetup_exclus(platform: str, identities: list) -> list:
     """Les modeles de la page qui ne sortiront PAS dans le message, avec la
     raison. generate_message les saute sans rien dire : « Inclure » decoche,
@@ -37053,6 +37162,13 @@ def _render_sfssetup_html(page: str = "mym") -> str:
             sfs_setup.autofill_mypuls_if_stale()
         except Exception:
             pass
+    # OnlyFans : SUB Total / Last 30 Day relus depuis OnlyFans (6 h), en fond
+    _of_releve_lance = False
+    if platform == "of":
+        try:
+            _of_releve_lance = _sfssetup_autofill_of_fond()
+        except Exception:
+            _of_releve_lance = False
 
     _notes = []
     _modeles = _sfssetup_models(platform, marche, _notes)
@@ -37191,7 +37307,29 @@ def _render_sfssetup_html(page: str = "mym") -> str:
         f"<button type='button' onclick='fetchMyPulsSubs_{page}()' "
         f"style='background:transparent;border:1px solid #a855f7;color:#a855f7;padding:10px 18px;border-radius:8px;cursor:pointer;font-weight:700;font-size:13px;white-space:nowrap'>"
         f"↻ Auto-fill abonnes depuis MyPuls</button>"
-    ) if platform == "mym" else ""
+    ) if platform == "mym" else (
+        f"<button type='button' id='setup-of-btn-{page}' onclick='fetchOfStats_{page}()' "
+        f"title='Relit SUB Total (abonnés actifs) et Last 30 Day (nouveaux abonnés sur 30 j) depuis OnlyFans' "
+        f"style='background:transparent;border:1px solid #0099ff;color:#0099ff;padding:10px 18px;border-radius:8px;cursor:pointer;font-weight:700;font-size:13px;white-space:nowrap'>"
+        f"↻ Chiffres depuis OnlyFans</button>"
+    )
+
+    # Ligne d etat du releve OnlyFans : quand, quoi, et ce qui a echoue
+    of_info_html = ""
+    if platform == "of":
+        _e = _sfssetup_autofill_of_etat()
+        if _e.get("ts"):
+            _quand = time.strftime("%d/%m à %H:%M", time.localtime(int(_e["ts"])))
+            of_info_html = (f"Chiffres OnlyFans relevés le {_quand} (heure du serveur) — "
+                            "SUB Total = abonnés actifs, Last 30 Day = nouveaux abonnés sur 30 jours.")
+        else:
+            of_info_html = "Chiffres OnlyFans : premier relevé en cours…"
+        if _of_releve_lance and _e.get("ts"):
+            of_info_html += " Mise à jour en cours — recharge dans une minute."
+        of_info_html = (f"<div style='color:#7dd3fc;font-size:12.5px;margin:0 0 12px'>{of_info_html}</div>"
+                        + "".join("<div style='color:#f59e0b;font-size:12px;margin:-6px 0 10px'>⚠ "
+                                  + str(x).replace("&", "&amp;").replace("<", "&lt;") + "</div>"
+                                  for x in (_e.get("erreurs") or [])))
 
     bulk_meta = {
         "niche":      {"icon": "◎", "label": "Niche",       "placeholder": "ex: CAISSE"},
@@ -37242,6 +37380,7 @@ def _render_sfssetup_html(page: str = "mym") -> str:
         f"Remplis les infos pour chaque modele {platform_label}. Au final clique <b>Générer le message</b> "
         f"→ tu obtiens un texte prêt à copier-coller (format Discord/Telegram).</p>"
         + bulk_html
+        + of_info_html
         # Ce qui a ete ecarte de la liste : dit, jamais silencieux
         + ("".join(
             "<div style='background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.35);color:#f59e0b;"
@@ -37351,6 +37490,16 @@ def _render_sfssetup_html(page: str = "mym") -> str:
         f"  alert('Appliqué sur '+count+' modèles : '+summary);"
         f"}}"
         # MyPuls fetch subs (stub pour le moment, attend impl serveur)
+        f"async function fetchOfStats_{page}(){{"
+        f"  const b=document.getElementById('setup-of-btn-{page}');"
+        f"  if(b){{ b.disabled=true; b.textContent='↻ Lecture OnlyFans…'; }}"
+        f"  try{{"
+        f"    const r=await fetch('/sfssetup/fetch_of_stats'); const j=await r.json();"
+        f"    if(!j.ok){{ alert('Erreur : '+(j.error||'?')); }}"
+        f"    else {{ alert((j.remplis||[]).length+' modele(s) mis a jour depuis OnlyFans'+((j.erreurs||[]).length?(' — '+j.erreurs.join(' ; ')):'')); location.reload(); return; }}"
+        f"  }}catch(e){{ alert('Erreur : '+e); }}"
+        f"  if(b){{ b.disabled=false; b.textContent='↻ Chiffres depuis OnlyFans'; }}"
+        f"}}"
         f"async function fetchMyPulsSubs_{page}(){{"
         f"  const r=await fetch('/sfssetup/fetch_mypuls_subs');"
         f"  const j=await r.json();"
@@ -51147,7 +51296,7 @@ def create_app():
         # affiche le nombre de ventes, la liste NOMINATIVE des ecarts et le lien
         # du classeur. Les deux autres ecrivent des fichiers de configuration
         # alors que tous les POST equivalents sont deja reserves.
-        "/ventes-sheet", "/sfssetup/fetch_mypuls_subs",
+        "/ventes-sheet", "/sfssetup/fetch_mypuls_subs", "/sfssetup/fetch_of_stats",
         "/mypulslive/refresh_creators",
         # revenus GLOBAUX et rapport de PAIE des VAs : jamais un onglet d'un
         # role restreint (le chatter n'a que sa propre page revenus, servie
@@ -60393,6 +60542,17 @@ def create_app():
         else:
             return jsonify({"ok": False, "error": f"unknown field: {field}"})
         return jsonify({"ok": True})
+
+    @app.route("/sfssetup/fetch_of_stats", methods=["GET"])
+    def sfssetup_fetch_of_stats():
+        """Bouton « ↻ Chiffres depuis OnlyFans » : relit SUB Total et Last 30 Day
+        de tous les modeles OF tout de suite (le releve de fond, lui, a 6 h)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        r = _sfssetup_autofill_of(force=True)
+        return jsonify({"ok": bool(r.get("ok")), "error": r.get("error"),
+                        "remplis": r.get("remplis") or [], "erreurs": r.get("erreurs") or []})
 
     @app.route("/sfssetup/fetch_mypuls_subs", methods=["GET"])
     def sfssetup_fetch_mypuls_subs():
