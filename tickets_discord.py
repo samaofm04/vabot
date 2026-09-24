@@ -439,6 +439,7 @@ def _creer_lien(gid: str, uid: str, par: str, p: Dict[str, Any]) -> Dict[str, An
     def travail():
         r = liens_va.creer_pour(gid, uid, pseudo, par=par)
         if r.get("ok"):
+            _poser_lien_dans_accueil(gid, uid, salon, r)
             note = ("\n⚠️ Destination provisoire (celle du gabarit) : le tracking "
                     "link MyPuls reste à créer et à rattacher."
                     if r.get("provisoire") else "")
@@ -456,6 +457,45 @@ def _creer_lien(gid: str, uid: str, par: str, p: Dict[str, Any]) -> Dict[str, An
 
     _EN_FOND(travail)
     return _differer()
+
+
+def _poser_lien_dans_accueil(gid: str, uid: str, salon: str, r: Dict[str, Any]) -> None:
+    """Écrit le lien DANS l'accueil épinglé, et retire le bouton devenu inutile.
+
+    Un message de plus se serait enfoui sous la conversation en trois jours.
+    L'accueil, lui, est épinglé : le VA y retrouve son lien à vie.
+    """
+    fiche = (_etat().get("tickets") or {}).get(f"{gid}:{uid}") or {}
+    mid = str(fiche.get("accueil") or "")
+    if not mid:
+        # ticket ouvert avant qu'on garde l'identifiant : on le retrouve parmi
+        # les épinglés plutôt que d'abandonner
+        code, pins = _api("GET", f"/channels/{salon}/pins")
+        items = pins.get("items") if isinstance(pins, dict) else pins
+        for x in (items or []):
+            m = x.get("message") if isinstance(x, dict) and "message" in x else x
+            if str(((m.get("embeds") or [{}])[0].get("title")) or "").startswith("👋"):
+                mid = str(m.get("id") or "")
+                break
+    if not mid:
+        print(f"[lien] accueil introuvable dans {salon} : lien non épinglé", flush=True)
+        return
+    code, msg = _api("GET", f"/channels/{salon}/messages/{mid}")
+    if code != 200:
+        print(f"[lien] accueil illisible (HTTP {code}) : lien non épinglé", flush=True)
+        return
+    embeds = msg.get("embeds") or [{}]
+    d = str(embeds[0].get("description") or "")
+    if r["public_url"] not in d:
+        bas = (f'\n\n🔗 **Ton lien** — celui que tu postes sur Twitter :\n'
+               f'{r["public_url"]}\n_Il compte tes subs pour le podium._')
+        if r.get("provisoire"):
+            bas += "\n_(destination provisoire, à rattacher côté MyPuls)_"
+        embeds[0]["description"] = (d.rstrip() + bas)[:4096]
+    confirme = bool(fiche.get("confirme"))
+    _api("PATCH", f"/channels/{salon}/messages/{mid}",
+         json={"embeds": embeds,
+               "components": boutons_va(uid, confirme=confirme, a_un_lien=True)})
 
 
 def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
@@ -553,7 +593,11 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
                       f"{str(rep_p)[:100]}", flush=True)
 
         fiches[cle] = {"salon": salon, "manager": mid, "ouvert": int(time.time()),
-                       "essai": bool(en_essai)}
+                       "essai": bool(en_essai),
+                       # l'identifiant de l'accueil epingle : c'est LUI qu'on
+                       # completera avec le lien, pour que le VA l'ait toujours
+                       # sous les yeux au lieu de le chercher dans l'historique
+                       "accueil": str(rep_m.get("id") or "")}
         _ecrire_etat(etat)
         print(f"[ticket] {uid} -> salon {salon}"
               + (f", manager {mid}" if mid else ", aucun manager trouvé"), flush=True)

@@ -13176,6 +13176,49 @@ try:
     check("un epinglage rate n annule pas le ticket",
           _srcT.index("accueil non épinglé") < _srcT.index('fiches[cle] = {"salon"'))
 
+    # --- le lien atterrit DANS l accueil epingle, pas dans un message perdu
+    _msgs = {"M1": {"id": "M1", "embeds": [{"title": "👋 Bienvenue", "description": "bla"}]}}
+    _patchs = []
+    _savApi4, _savEtat4 = _tkP._api, _tkP.ETAT_FICHIER
+    try:
+        import tempfile as _tf4, json as _js4
+        _tkP.ETAT_FICHIER = _plT(_tf4.mkdtemp()) / "t.json"
+        _tkP.ETAT_FICHIER.write_text(_js4.dumps(
+            {"tickets": {"g1:99": {"salon": "sal", "accueil": "M1"}}}), encoding="utf-8")
+
+        def _api4(me, ch, **kw):
+            if me == "GET" and ch.endswith("/messages/M1"):
+                return 200, _msgs["M1"]
+            if me == "PATCH":
+                _patchs.append(kw.get("json") or {})
+            return 200, {}
+        _tkP._api = _api4
+        _tkP._poser_lien_dans_accueil("g1", "99", "sal",
+                                      {"public_url": "https://getmysocial.com/emycute",
+                                       "provisoire": True})
+        _desc = (_patchs[-1]["embeds"][0]["description"] if _patchs else "")
+        check("le lien est ecrit DANS l accueil epingle",
+              "getmysocial.com/emycute" in _desc and "Ton lien" in _desc)
+        check("la destination provisoire est dite au VA aussi",
+              "provisoire" in _desc)
+        _btns = [b["custom_id"] for r in (_patchs[-1]["components"] or [])
+                 for b in r["components"]]
+        check("le bouton « Creer son lien » disparait une fois le lien cree",
+              not [x for x in _btns if x.startswith("lien:new:")])
+
+        # deux clics ne doivent pas ecrire le lien deux fois
+        _msgs["M1"]["embeds"][0]["description"] = _desc
+        _patchs.clear()
+        _tkP._poser_lien_dans_accueil("g1", "99", "sal",
+                                      {"public_url": "https://getmysocial.com/emycute"})
+        check("le lien n est pas ecrit deux fois",
+              _patchs[-1]["embeds"][0]["description"].count("getmysocial.com/emycute") == 1)
+    finally:
+        _tkP._api, _tkP.ETAT_FICHIER = _savApi4, _savEtat4
+
+    check("l accueil garde son identifiant pour etre complete plus tard",
+          '"accueil": str(rep_m.get("id")' in _srcT)
+
     _srcW2 = _plT("web_upload.py").read_text(encoding="utf-8")
     check("le bouton Confirmer est branche sur la route Discord",
           "_tk.traiter(charge)" in _srcW2
