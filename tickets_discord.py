@@ -52,7 +52,20 @@ GERER_MSG = 1 << 13       # 8192     MANAGE_MESSAGES
 MEMBRE = VOIR | ECRIRE | LIENS | FICHIERS | HISTORIQUE
 MANAGER = MEMBRE | GERER_MSG
 
-PREFIXE = "─│"      # « ─│ » : Discord retire « -| » d'un nom de salon texte
+PREFIXE = "─│"
+# Discord RETIRE l'arobase d'un nom de salon (et le point) : « va-@moan_ofm »
+# revenait « va-moan_ofm ». Le sosie pleine chasse, lui, passe intact — la même
+# ruse que ─ │ ┤, vérifiée en créant un salon jetable.
+AROBASE = "\uff20"
+
+# Le parcours à manager + salon perso ne vaut que pour YouLab TWITTER. Le
+# serveur Entretien doit rester tel qu'il était : on n'y ouvre aucun ticket.
+SERVEURS_TICKETS = {"1445108485090971710"}
+
+# Tout nouveau arrivant est en essai, sans exception : le role est pose en
+# meme temps que son salon. Ce qui le fera passer « confirme » viendra plus
+# tard ; en attendant, personne n'est confirme par defaut.
+ROLE_ESSAI_NOM = "🧪 Essai"      # « ─│ » : Discord retire « -| » d'un nom de salon texte
 BARRE = "┤"              # « ┤ »
 
 
@@ -210,6 +223,38 @@ def _pseudo(gid: str, uid: str) -> str:
     return f"membre-{uid[-6:]}"
 
 
+def role_essai(gid: str) -> str:
+    """L'identifiant du rôle « en essai » du serveur, ou « » s'il n'existe pas.
+
+    On ne le CRÉE pas ici : créer un rôle au vol depuis une vérification, c'est
+    risquer d'en semer un par serveur inconnu. Absent, on le dit et on continue
+    — le salon vaut mieux que rien.
+    """
+    code, rep = _api("GET", f"/guilds/{gid}/roles")
+    if code != 200 or not isinstance(rep, list):
+        return ""
+    voulu = str(_config().get("role_essai") or ROLE_ESSAI_NOM)
+    for r in rep:
+        if str(r.get("name") or "").strip() == voulu:
+            return str(r["id"])
+    return ""
+
+
+def poser_essai(gid: str, uid: str) -> bool:
+    """Met le nouveau en essai. Rend Faux si le rôle manque ou si Discord refuse."""
+    rid = role_essai(gid)
+    if not rid:
+        print(f"[ticket] rôle « {ROLE_ESSAI_NOM} » introuvable sur {gid} : "
+              f"{uid} n'est PAS marqué en essai", flush=True)
+        return False
+    code, rep = _api("PUT", f"/guilds/{gid}/members/{uid}/roles/{rid}")
+    if code not in (200, 204):
+        print(f"[ticket] essai refusé pour {uid} (HTTP {code}) {str(rep)[:120]}",
+              flush=True)
+        return False
+    return True
+
+
 def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
     """Confie le nouveau à un manager et lui ouvre son salon privé.
 
@@ -224,6 +269,13 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
         uid = str(uid)
         if not gid or not uid:
             return ""
+        permis = set(_config().get("serveurs") or SERVEURS_TICKETS)
+        if gid not in permis:
+            # on le DIT : un ticket qui ne s'ouvre pas sans un mot dans les
+            # journaux passerait pour une panne le jour où on l'attend
+            print(f"[ticket] {gid} hors périmètre : aucun salon ouvert pour {uid}",
+                  flush=True)
+            return ""
 
         # Déjà un ticket ouvert : on ne le double pas (une deuxième
         # vérification du même membre ne doit pas créer un second salon).
@@ -233,6 +285,9 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
         deja = fiches.get(cle) or {}
         if deja.get("salon") and _salon_existe(deja["salon"]):
             return str(deja["salon"])
+
+        # avant le salon : s'il rate, le membre est quand même en essai
+        en_essai = poser_essai(gid, uid)
 
         liste = managers(gid)
         choisi = _prochain(gid, liste)
@@ -248,7 +303,7 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
                            "type": 1, "allow": str(MANAGER), "deny": "0"})
 
         corps: Dict[str, Any] = {
-            "name": f'{PREFIXE}🔵{BARRE}-va-{_pseudo(gid, uid)}',
+            "name": f'{PREFIXE}🔵{BARRE}-va-{AROBASE}{_pseudo(gid, uid)}',
             "type": 0, "permission_overwrites": droits,
             "topic": "Ton espace perso : questions, preuves, bonus. "
                      "Ton manager te répond ici.",
@@ -273,7 +328,9 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
                 "• tes questions,\n"
                 "• tes preuves et tes captures,\n"
                 "• la réclamation de tes bonus et de tes quêtes.\n\n"
-                "Personne d'autre que toi et les managers ne voit ce salon."),
+                + ("🧪 **Tu démarres en essai.** Tout le monde commence là — "
+                   "ton manager te dira ce qu'il attend de toi.\n\n" if en_essai else "")
+                + "Personne d'autre que toi et les managers ne voit ce salon."),
             "footer": {"text": "YouLab • Ton manager te répond ici"},
         }
         mentions = {"users": [uid] + ([mid] if mid else [])}
@@ -283,7 +340,8 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
              json={"content": f"<@{uid}> {qui}", "embeds": [embed],
                    "allowed_mentions": mentions})
 
-        fiches[cle] = {"salon": salon, "manager": mid, "ouvert": int(time.time())}
+        fiches[cle] = {"salon": salon, "manager": mid, "ouvert": int(time.time()),
+                       "essai": bool(en_essai)}
         _ecrire_etat(etat)
         print(f"[ticket] {uid} -> salon {salon}"
               + (f", manager {mid}" if mid else ", aucun manager trouvé"), flush=True)

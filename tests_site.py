@@ -12995,7 +12995,14 @@ try:
         check("tour de role : un manager sur deux, jamais deux fois de suite",
               [_tk._prochain("g1", _msTK)["user"]["id"] for _ in range(4)] == ["10", "20", "10", "20"])
         _appels.clear()
-        _sal = _tk.ouvrir_ticket("99", {"id": "g1"})
+        # « g1 » est un serveur de test : le perimetre reel ne contient que
+        # YouLab TWITTER, on l ouvre le temps de verifier la creation
+        _savPer = set(_tk.SERVEURS_TICKETS)
+        _tk.SERVEURS_TICKETS.add("g1")
+        try:
+            _sal = _tk.ouvrir_ticket("99", {"id": "g1"})
+        finally:
+            _tk.SERVEURS_TICKETS.clear(); _tk.SERVEURS_TICKETS.update(_savPer)
         check("ticket cree", _sal == "sal-1", _sal)
         _creation = next((k for m, c, k in _appels
                           if m == "POST" and c == "/guilds/g1/channels"
@@ -13011,8 +13018,13 @@ try:
               ((_creation or {}).get("json") or {}).get("parent_id") == "cat-1")
         _tk._api = lambda m, c, **k: (200, {"id": _sal}) if c.startswith("/channels/") and m == "GET" else _faux(m, c, **k)
         _appels.clear()
+        _tk.SERVEURS_TICKETS.add("g1")
+        try:
+            _redite = _tk.ouvrir_ticket("99", {"id": "g1"})
+        finally:
+            _tk.SERVEURS_TICKETS.discard("g1")
         check("deuxieme verification du meme membre : pas de second salon",
-              _tk.ouvrir_ticket("99", {"id": "g1"}) == _sal
+              _redite == _sal
               and not [1 for m, c, k in _appels if m == "POST" and c.endswith("/channels")])
         # un echec Discord ne doit jamais remonter a la verification
         _tk._api = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("Discord injoignable"))
@@ -13028,6 +13040,65 @@ try:
           "tickets_discord.ouvrir_ticket" in _blocTK and "except Exception" in _blocTK)
 except Exception as _eTK:
     check("tickets : testable", False, repr(_eTK)[:200])
+
+# ------------------------------------- 31. Perimetre et nom des salons de VA
+print()
+print("=" * 70)
+print("Salon de VA : sur Twitter seulement, et avec l arobase")
+print("=" * 70)
+try:
+    import tickets_discord as _tkP
+    from pathlib import Path as _plT
+
+    check("le serveur Entretien n est PAS dans le perimetre des tickets",
+          "1552152470464110703" not in _tkP.SERVEURS_TICKETS)
+    check("YouLab TWITTER, lui, y est",
+          "1445108485090971710" in _tkP.SERVEURS_TICKETS)
+
+    _appelsT = []
+    _savT = _tkP._api
+    try:
+        _tkP._api = lambda me, ch, **kw: (_appelsT.append((me, ch)) or (200, {}))
+        _horsT = _tkP.ouvrir_ticket("42", {"id": "1552152470464110703"})
+        check("hors perimetre, AUCUN salon n est cree",
+              _horsT == "" and not [a for a in _appelsT if a[0] == "POST"])
+    finally:
+        _tkP._api = _savT
+
+    # Discord retire l arobase d un nom de salon : c est un sosie qui passe
+    check("l arobase du nom de salon est le sosie pleine chasse",
+          _tkP.AROBASE == "\uff20" and _tkP.AROBASE != "@")
+    _srcT = _plT("tickets_discord.py").read_text(encoding="utf-8")
+    check("le nom du salon porte bien l arobase",
+          "-va-{AROBASE}{_pseudo(gid, uid)}" in _srcT)
+
+    # --- tout nouveau arrivant est en essai, sans exception
+    _roles = [{"id": "r-essai", "name": "🧪 Essai"}, {"id": "r-autre", "name": "BOSS"}]
+    _posT = []
+    _savT2 = _tkP._api
+    try:
+        def _apiE(me, ch, **kw):
+            _posT.append((me, ch))
+            if me == "GET" and ch.endswith("/roles"):
+                return 200, _roles
+            return 204, {}
+        _tkP._api = _apiE
+        check("le role d essai est trouve par son nom",
+              _tkP.role_essai("g1") == "r-essai")
+        _posT.clear()
+        check("le nouveau est mis en essai",
+              _tkP.poser_essai("g1", "99") is True
+              and ("PUT", "/guilds/g1/members/99/roles/r-essai") in _posT)
+        # le role absent ne doit pas faire echouer la vérification
+        _roles = [{"id": "r-autre", "name": "BOSS"}]
+        check("role d essai absent : on le DIT et on continue",
+              _tkP.poser_essai("g1", "99") is False)
+    finally:
+        _tkP._api = _savT2
+    check("personne n est confirme par defaut : l essai est pose avant le salon",
+          _srcT.index("en_essai = poser_essai") < _srcT.index("liste = managers(gid)"))
+except Exception as _eT2:
+    check("perimetre tickets : testable", False, repr(_eT2)[:200])
 
 print()
 print("=" * 70)
