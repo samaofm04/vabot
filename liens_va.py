@@ -367,6 +367,34 @@ def creer_pour(gid: str, uid: str, pseudo: str, par: str = "",
             "provisoire": not mypuls_actif(), "erreur": ""}
 
 
+def supprimer(gid: str, uid: str) -> Dict[str, Any]:
+    """Efface le lien GetMySocial d'un VA. Rend {ok, url, erreur}.
+
+    On efface d'abord chez GetMySocial, on oublie ensuite. Dans l'autre sens,
+    un echec aurait laisse un lien vivant que plus personne ne rattache a
+    quelqu'un — invisible, donc jamais nettoye.
+    """
+    import gms
+    l = lien_de(gid, uid)
+    if not l.get("shortcode"):
+        return {"ok": False, "erreur": "ce VA n'a pas de lien"}
+    equipe = str(config().get("equipe") or EQUIPE_VA)
+    lid = str(l.get("link_id") or "") or _id_du_lien(equipe, l["shortcode"])
+    if not lid:
+        return {"ok": False, "erreur": "lien introuvable chez GetMySocial — "
+                                       "déjà supprimé ? La fiche est laissée en place."}
+    try:
+        r = gms.delete_link(lid)
+    except Exception as e:
+        return {"ok": False, "erreur": f"{type(e).__name__}: {str(e)[:100]}"}
+    if not r.get("ok"):
+        return {"ok": False, "erreur": str(r.get("error") or "refus GetMySocial")[:140]}
+    d = _etat()
+    (d.get("liens") or {}).pop(f"{gid}:{uid}", None)
+    _ecrire(d)
+    return {"ok": True, "url": l.get("public_url", ""), "erreur": ""}
+
+
 # ─── synchronisation : la catégorie Discord fait foi ─────────────────────
 def nom_dans_categorie(nom_categorie: str) -> str:
     """« 🔵┤ Manager YAZID ├🔵 » → « YAZID ». « » si ce n'est pas une catégorie de manager."""

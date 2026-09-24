@@ -13219,6 +13219,80 @@ try:
     finally:
         _tkP._api, _tkP.ETAT_FICHIER = _savApi4, _savEtat4
 
+    # --- supprimer le lien : deux clics, et l accueil redevient comme avant
+    check("le bouton rouge n apparait QUE si le VA a un lien",
+          "lien:del:9" in str(_tkP.boutons_va("9", a_un_lien=True))
+          and "lien:del:9" not in str(_tkP.boutons_va("9")))
+
+    import liens_va as _lv
+    # « g1 » est un serveur de test : le garde-fou n autorise les liens que sur
+    # YouLab TWITTER, on l ouvre le temps du test
+    _lv.SERVEURS.add("g1")
+    _savSup, _savApi5, _savEt5 = _lv.supprimer, _tkP._api, _tkP.ETAT_FICHIER
+    try:
+        import tempfile as _tf6, json as _js6
+        _tkP.ETAT_FICHIER = _plT(_tf6.mkdtemp()) / "t.json"
+        _tkP.ETAT_FICHIER.write_text(_js6.dumps(
+            {"tickets": {"g1:99": {"salon": "sal", "accueil": "M1"}}}), encoding="utf-8")
+        _savLien = _lv.lien_de
+        _lv.lien_de = lambda g, u: {"public_url": "https://getmysocial.com/emycute",
+                                    "shortcode": "emycute"}
+        _dem = _tkP.traiter({"type": 3, "guild_id": "g1",
+                             "data": {"custom_id": "lien:del:99"},
+                             "member": {"roles": [], "permissions": str(0x8),
+                                        "user": {"id": "m"}}})
+        check("le premier clic ne supprime RIEN : il demande confirmation",
+              _dem["data"]["flags"] == 64
+              and "lien:delok:99" in str(_dem["data"]["components"]))
+        check("il montre l adresse exacte qui va sauter, et previent",
+              "emycute" in _dem["data"]["content"]
+              and "publique" in _dem["data"]["content"])
+
+        _patchs = []
+        _msg = {"id": "M1", "embeds": [{"title": "👋", "description":
+                "bla\n\n🔗 **Ton lien** — celui que tu postes :\nhttps://x/y"}]}
+
+        def _api5(me, ch, **kw):
+            if me == "GET" and ch.endswith("/messages/M1"):
+                return 200, _msg
+            if me == "PATCH":
+                _patchs.append(kw.get("json") or {})
+            return 200, {}
+        _tkP._api = _api5
+        _lv.supprimer = lambda g, u: {"ok": True, "url": "https://getmysocial.com/emycute"}
+        _ok = _tkP.traiter({"type": 3, "guild_id": "g1", "channel_id": "sal",
+                            "data": {"custom_id": "lien:delok:99"},
+                            "member": {"roles": [], "permissions": str(0x8),
+                                       "user": {"id": "m"}}})
+        check("le second clic supprime et le dit", "supprimé" in _ok["data"]["content"])
+        _d = _patchs[-1]["embeds"][0]["description"]
+        check("le bloc du lien disparait de l accueil epingle",
+              "Ton lien" not in _d and _d.strip() == "bla")
+        _btns = [b["custom_id"] for r in _patchs[-1]["components"] for b in r["components"]]
+        check("le bouton « Creer son lien » revient",
+              any(x.startswith("lien:new:") for x in _btns)
+              and not [x for x in _btns if x.startswith("lien:del:")])
+
+        _lv.supprimer = lambda g, u: {"ok": False, "erreur": "GetMySocial a refusé"}
+        _patchs.clear()
+        _ko = _tkP.traiter({"type": 3, "guild_id": "g1", "channel_id": "sal",
+                            "data": {"custom_id": "lien:delok:99"},
+                            "member": {"roles": [], "permissions": str(0x8),
+                                       "user": {"id": "m"}}})
+        check("un echec est dit, et l accueil n est PAS touche",
+              "refusé" in _ko["data"]["content"] and not _patchs)
+
+        _refus = _tkP.traiter({"type": 3, "guild_id": "g1",
+                               "data": {"custom_id": "lien:del:99"},
+                               "member": {"roles": [], "permissions": "0",
+                                          "user": {"id": "x"}}})
+        check("un non-manager ne peut pas supprimer un lien",
+              "managers" in _refus["data"]["content"])
+        _lv.lien_de = _savLien
+    finally:
+        _lv.supprimer, _tkP._api, _tkP.ETAT_FICHIER = _savSup, _savApi5, _savEt5
+        _lv.SERVEURS.discard("g1")
+
     check("l accueil garde son identifiant pour etre complete plus tard",
           '"accueil": str(rep_m.get("id")' in _srcT)
 

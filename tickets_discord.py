@@ -296,6 +296,11 @@ def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,
     if not a_un_lien and lien_possible:
         rang.append({"type": 2, "style": 1, "label": "Créer son lien",
                      "custom_id": f"lien:new:{uid}", "emoji": {"name": "🔗"}})
+    elif a_un_lien:
+        # rouge, et il demande confirmation : l'adresse est publique sur
+        # Twitter, la supprimer casse les posts deja publies
+        rang.append({"type": 2, "style": 4, "label": "Supprimer le lien",
+                     "custom_id": f"lien:del:{uid}", "emoji": {"name": "🗑️"}})
     return [{"type": 1, "components": rang}] if rang else []
 
 
@@ -381,7 +386,8 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if p.get("type") != 3:
         return None
     cid = str(((p.get("data") or {}).get("custom_id")) or "")
-    if not (cid.startswith("essai:ok:") or cid.startswith("lien:new:")):
+    if not (cid.startswith("essai:ok:") or cid.startswith("lien:new:")
+            or cid.startswith("lien:del:") or cid.startswith("lien:delok:")):
         return None
     gid = str(p.get("guild_id") or "")
     uid = cid.split(":", 2)[2]
@@ -396,6 +402,10 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
     if cid.startswith("lien:new:"):
         return _creer_lien(gid, uid, qui, p)
+    if cid.startswith("lien:del:"):
+        return _demander_suppression(gid, uid)
+    if cid.startswith("lien:delok:"):
+        return _supprimer_lien(gid, uid, p)
 
     fiche = (_etat().get("tickets") or {}).get(f"{gid}:{uid}") or {}
     if fiche.get("confirme"):
@@ -424,6 +434,62 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                                 "content": (msg.get("content") or "")
                                            + f"\n⭐ Confirmé par <@{qui}>." + alerte,
                                 "allowed_mentions": {"parse": []}}}
+
+
+def _demander_suppression(gid: str, uid: str) -> Dict[str, Any]:
+    """Premier clic : on montre CE QU'ON VA casser, et on attend un second clic.
+
+    L'adresse est publique sur Twitter : la supprimer casse les posts déjà
+    publiés. Un clic de trop ne doit pas suffire.
+    """
+    import liens_va
+    l = liens_va.lien_de(gid, uid)
+    if not l.get("public_url"):
+        return _ephemere("Ce VA n'a pas de lien à supprimer.")
+    return {"type": 4, "data": {"flags": 64,
+            "content": f'Supprimer **{l["public_url"]}** de <@{uid}> ?\n'
+                       "⚠️ Cette adresse est publique : ses posts Twitter "
+                       "cesseront de fonctionner. C'est définitif.",
+            "allowed_mentions": {"parse": []},
+            "components": [{"type": 1, "components": [
+                {"type": 2, "style": 4, "label": "Oui, supprimer",
+                 "custom_id": f"lien:delok:{uid}", "emoji": {"name": "🗑️"}}]}]}}
+
+
+def _supprimer_lien(gid: str, uid: str, p: Dict[str, Any]) -> Dict[str, Any]:
+    """Second clic : on supprime, et l'accueil épinglé redevient comme avant."""
+    import liens_va
+    salon = str(p.get("channel_id") or "")
+    r = liens_va.supprimer(gid, uid)
+    if not r.get("ok"):
+        return {"type": 7, "data": {"content": "✕ " + str(r.get("erreur") or "échec"),
+                                    "components": []}}
+    _retirer_lien_de_accueil(gid, uid, salon)
+    return {"type": 7, "data": {"content": f'🗑️ Lien supprimé : {r.get("url") or ""}\n'
+                                           "Le bouton « Créer son lien » est revenu.",
+                                "components": []}}
+
+
+def _retirer_lien_de_accueil(gid: str, uid: str, salon: str) -> None:
+    """Enlève le bloc du lien de l'accueil épinglé et remet le bouton."""
+    fiche = (_etat().get("tickets") or {}).get(f"{gid}:{uid}") or {}
+    mid = str(fiche.get("accueil") or "")
+    if not (mid and salon):
+        return
+    code, msg = _api("GET", f"/channels/{salon}/messages/{mid}")
+    if code != 200:
+        print(f"[lien] accueil illisible (HTTP {code}) : bloc du lien non retiré",
+              flush=True)
+        return
+    embeds = msg.get("embeds") or [{}]
+    d = str(embeds[0].get("description") or "")
+    i = d.find("🔗 **Ton lien**")
+    if i >= 0:
+        embeds[0]["description"] = d[:i].rstrip()
+    _api("PATCH", f"/channels/{salon}/messages/{mid}",
+         json={"embeds": embeds,
+               "components": boutons_va(uid, confirme=bool(fiche.get("confirme")),
+                                        a_un_lien=False, gid=gid)})
 
 
 def _creer_lien(gid: str, uid: str, par: str, p: Dict[str, Any]) -> Dict[str, Any]:
