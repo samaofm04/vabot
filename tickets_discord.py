@@ -213,6 +213,22 @@ def categorie_du_manager(gid: str, m: Dict[str, Any]) -> str:
     return str(rep.get("id")) if code == 201 and rep.get("id") else ""
 
 
+def identifiant(gid: str, uid: str) -> str:
+    """Le VRAI identifiant Discord : « abdoul_9684 », pas « Abdoul ».
+
+    Le nom affiche se change d'un clic et n'est pas unique : deux « Abdoul »
+    auraient eu le meme salon et le meme lien. L'identifiant, lui, ne bouge
+    pas — c'est lui qui nomme le salon et le lien du VA.
+    """
+    code, rep = _api("GET", f"/guilds/{gid}/members/{uid}")
+    if code == 200 and isinstance(rep, dict):
+        brut = ((rep.get("user") or {}).get("username") or "").strip()
+        propre = re.sub(r"[^a-z0-9._-]+", "-", brut.lower()).strip("-")
+        if propre:
+            return propre[:60]
+    return _pseudo(gid, uid)
+
+
 def _pseudo(gid: str, uid: str) -> str:
     code, rep = _api("GET", f"/guilds/{gid}/members/{uid}")
     if code == 200 and isinstance(rep, dict):
@@ -418,12 +434,16 @@ def _creer_lien(gid: str, uid: str, par: str, p: Dict[str, Any]) -> Dict[str, An
 
     jeton = str(p.get("token") or "")
     salon = str(p.get("channel_id") or "")
-    pseudo = _pseudo(gid, uid)
+    pseudo = identifiant(gid, uid)
 
     def travail():
         r = liens_va.creer_pour(gid, uid, pseudo, par=par)
         if r.get("ok"):
-            _suite(jeton, f'✅ Lien créé pour <@{uid}> : {r["public_url"]}')
+            note = ("\n⚠️ Destination provisoire (celle du gabarit) : le tracking "
+                    "link MyPuls reste à créer et à rattacher."
+                    if r.get("provisoire") else "")
+            _suite(jeton, f'✅ VA {r.get("numero")} — lien créé pour <@{uid}> : '
+                          f'{r["public_url"]}{note}')
             if salon:
                 _api("POST", f"/channels/{salon}/messages",
                      json={"content": f'🔗 <@{uid}>, voici **ton lien** : {r["public_url"]}\n'
@@ -486,7 +506,7 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
                            "type": 1, "allow": str(MANAGER), "deny": "0"})
 
         corps: Dict[str, Any] = {
-            "name": f'{PREFIXE}🔵{BARRE}-va-{AROBASE}{_pseudo(gid, uid)}',
+            "name": f'{PREFIXE}🔵{BARRE}-va-{AROBASE}{identifiant(gid, uid)}',
             "type": 0, "permission_overwrites": droits,
             "topic": "Ton espace perso : questions, preuves, bonus. "
                      "Ton manager te répond ici.",

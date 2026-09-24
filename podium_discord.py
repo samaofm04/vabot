@@ -160,6 +160,13 @@ def semaine_passee(jour: Optional[dt.date] = None) -> Tuple[dt.date, dt.date]:
 def personne(nom_du_lien: str) -> Tuple[str, bool]:
     """« (Gerome) SPAM » → (« Gerome », True). « ( BO7 ) 1 » → (« BO7 », False)."""
     n = str(nom_du_lien or "").strip()
+    # « Twitter VA 1 @abdoul », « va_@abdoul » : quand le nom porte une
+    # arobase, c'est le pseudo qui suit qui designe la personne. Sans cette
+    # regle, le nom entier devenait la cle — un numero de VA par libelle, et
+    # « Twitter VA 1 @abdoul » n'aurait rien eu a voir avec « abdoul ».
+    arobase = re.search(r"@\s*([A-Za-z0-9._-]{2,32})", n)
+    if arobase:
+        return arobase.group(1).strip("._-"), ("SPAM" in n.upper())
     dedans = re.search(r"\(([^)]*)\)", n)
     if dedans:
         base = dedans.group(1).strip()

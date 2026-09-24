@@ -13069,8 +13069,10 @@ try:
     check("l arobase du nom de salon est le sosie pleine chasse",
           _tkP.AROBASE == "\uff20" and _tkP.AROBASE != "@")
     _srcT = _plT("tickets_discord.py").read_text(encoding="utf-8")
-    check("le nom du salon porte bien l arobase",
-          "-va-{AROBASE}{_pseudo(gid, uid)}" in _srcT)
+    check("le nom du salon porte bien l arobase et l identifiant Discord",
+          "-va-{AROBASE}{identifiant(gid, uid)}" in _srcT)
+    check("c est l identifiant unique qui nomme, pas le nom affiche",
+          '(rep.get("user") or {}).get("username")' in _srcT)
 
     # --- tout nouveau arrivant est en essai, sans exception
     _roles = [{"id": "r-essai", "name": "🧪 Essai"}, {"id": "r-autre", "name": "BOSS"}]
@@ -13464,6 +13466,79 @@ try:
 except Exception as _eV:
     check("vider : testable", False, repr(_eV)[:200])
 
+# ------------------------------------------- 32. Le lien d un VA (GMS seul)
+print()
+print("=" * 70)
+print("Lien d un VA : GetMySocial fait, MyPuls attend un feu vert")
+print("=" * 70)
+try:
+    import liens_va as _lv
+    from pathlib import Path as _plL
+    import tempfile as _tfL, json as _jsL
+
+    check("les shortcodes ressemblent a un compte, pas a un tirage",
+          [_lv.mots_doux("emy", i) for i in range(3)] == ["emycute", "emylovee", "emybaby"])
+    check("au-dela de la liste, on numerote au lieu de rendre illisible",
+          _lv.mots_doux("emy", 29) == "emycute2")
+    check("une base sale est nettoyee", _lv.mots_doux("Emy ♡ 2") == "emy2cute"
+          and _lv.mots_doux("") == "emycute")
+
+    _savC, _savE = _lv.CONFIG_FICHIER, _lv.ETAT_FICHIER
+    _d = _plL(_tfL.mkdtemp())
+    try:
+        _lv.CONFIG_FICHIER, _lv.ETAT_FICHIER = _d / "cfg.json", _d / "etat.json"
+        _lv.CONFIG_FICHIER.write_text(_jsL.dumps(
+            {"creator_id": 3352, "modele": "emy", "equipe": "tm_x", "gabarit": "lnk_x"}),
+            encoding="utf-8")
+        check("sans feu vert, MyPuls n est pas sollicite", _lv.mypuls_actif() is False)
+        check("et il ne manque rien pour la part GetMySocial", _lv.manque() == "")
+
+        _faits = []
+        _savT, _savG, _savN = _lv.creer_tracking, _lv.creer_gms, _lv.numero_de
+        try:
+            _lv.creer_tracking = lambda *a, **k: (_faits.append("mypuls")
+                                                  or {"ok": True, "url": "u", "code": "c9"})
+            _lv.creer_gms = lambda nom, url: (_faits.append(("gms", nom, url))
+                                              or {"ok": True, "shortcode": "emycute",
+                                                  "url": "https://getmysocial.com/emycute"})
+            _lv.numero_de = lambda ps: 1
+            _r = _lv.creer_pour("g1", "99", "abdoul", par="mgr")
+            check("aucun tracking link MyPuls n est cree",
+                  "mypuls" not in _faits and _r["ok"] is True)
+            check("le lien GetMySocial porte « Twitter VA 1 @abdoul »",
+                  _faits[0][1] == "Twitter VA 1 @abdoul")
+            check("sans MyPuls, le duplicata garde la destination du gabarit",
+                  _faits[0][2] == "")
+            check("le resultat DIT que la destination est provisoire",
+                  _r.get("provisoire") is True)
+
+            _faits.clear()
+            _r2 = _lv.creer_pour("g1", "99", "abdoul")
+            check("un VA qui a deja son lien n en recoit pas un second",
+                  _r2["ok"] is False and _r2.get("deja") is True and not _faits)
+        finally:
+            _lv.creer_tracking, _lv.creer_gms, _lv.numero_de = _savT, _savG, _savN
+
+        # feu vert donne : MyPuls redevient obligatoire, et son echec arrete tout
+        _lv.CONFIG_FICHIER.write_text(_jsL.dumps(
+            {"creator_id": 3352, "gabarit": "lnk_x", "mypuls_actif": True}), encoding="utf-8")
+        _lv.ETAT_FICHIER = _d / "etat2.json"
+        _savT2, _savG2, _savN2 = _lv.creer_tracking, _lv.creer_gms, _lv.numero_de
+        try:
+            _lv.creer_tracking = lambda *a, **k: {"ok": False, "erreur": "403"}
+            _lv.creer_gms = lambda *a, **k: {"ok": True}
+            _lv.numero_de = lambda ps: 2
+            _r3 = _lv.creer_pour("g1", "77", "gerome")
+            check("MyPuls en echec : aucun lien GetMySocial n est cree derriere",
+                  _r3["ok"] is False and "MyPuls" in _r3["erreur"])
+        finally:
+            _lv.creer_tracking, _lv.creer_gms, _lv.numero_de = _savT2, _savG2, _savN2
+    finally:
+        _lv.CONFIG_FICHIER, _lv.ETAT_FICHIER = _savC, _savE
+except Exception as _eL:
+    check("lien VA : testable", False, repr(_eL)[:200])
+
+
 # ------------------------------------------------ 30. Podium de la semaine
 print()
 print("=" * 70)
@@ -13728,6 +13803,16 @@ try:
         _pd.NUMEROS_FICHIER = _savN2
         _gmsP.list_links_team = _savGms
 
+    # le nom porte desormais l arobase : « Twitter VA 1 @abdoul »
+    check("le pseudo derriere l arobase designe la personne",
+          _pd.personne("Twitter VA 1 @abdoul") == ("abdoul", False)
+          and _pd.personne("va_@achille04340") == ("achille04340", False))
+    check("un lien SPAM garde sa nature meme avec l arobase",
+          _pd.personne("Twitter VA 7 @moan_ofm SPAM") == ("moan_ofm", True))
+    check("l ancienne forme entre parentheses marche toujours",
+          _pd.personne("( BO7 ) 1") == ("BO7", False)
+          and _pd.personne("(Gerome) SPAM") == ("Gerome", True))
+
     check("les trois primes sont 10 / 5 / 3", _pd.PRIMES == [10.0, 5.0, 3.0])
     _srcP = _plP("web_upload.py").read_text(encoding="utf-8")
     check("le podium est arme au demarrage du site",
@@ -13743,7 +13828,11 @@ try:
     _nomsP = {n: _pd.personne(n)[0] for n in
               ["( BO7 ) 1", "BO7", "VA 9", "VA 1", "EUD", "va_@priscah0908"]}
     check("un nom qui finit par un chiffre n est PAS ampute (BO7 restait BO)",
-          _nomsP["BO7"] == "BO7" and _nomsP["va_@priscah0908"] == "va_@priscah0908")
+          _nomsP["BO7"] == "BO7")
+    # depuis que l arobase designe la personne, « va_@priscah0908 » rend le
+    # pseudo, et non plus le libelle entier : c est le but
+    check("un nom en va_@pseudo rend le pseudo",
+          _nomsP["va_@priscah0908"] == "priscah0908")
     check("deux liens anonymes du cache de repli ne fondent pas en un seul",
           _nomsP["VA 9"] != _nomsP["VA 1"])
     check("les parentheses restent la source du nom",

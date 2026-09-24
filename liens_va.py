@@ -31,7 +31,27 @@ DATA_DIR = Path(__file__).resolve().parent / "data"
 CONFIG_FICHIER = DATA_DIR / "liens_va_config.json"
 ETAT_FICHIER = DATA_DIR / "liens_va.json"
 
-EQUIPE_VA = "tm_6a0e4739bfa0c238f20a8bf5"
+EQUIPE_VA = "tm_6ab46ebb11a0232c11211b1a"     # EMY TWITTER
+
+# Un lien GetMySocial est lu par des gens sur Twitter : il doit ressembler au
+# compte, pas a une reference interne. D'ou des mots doux plutot qu'un tirage
+# au hasard. La base vient de la modele (« emy »), le reste de cette liste.
+MOTS_DOUX = ("cute", "lovee", "baby", "angel", "honey", "sweet", "bby", "doll",
+             "cherry", "peachy", "bunny", "kitty", "candy", "lovely", "sugar",
+             "dreamy", "starr", "pearl", "cutie", "babe", "kisses", "sweetie",
+             "princess", "lil", "berry", "bloom", "glow", "velvet", "coco")
+
+
+def mots_doux(base: str, essai: int = 0) -> str:
+    """« emycute », « emylovee »… Un shortcode qui a l'air d'un vrai compte.
+
+    Au-dela de la liste, on recommence avec un chiffre : « emycute2 ». Mieux
+    vaut un chiffre qu'un tirage illisible — le lien se lit a voix haute.
+    """
+    base = re.sub(r"[^a-z0-9]+", "", str(base or "emy").lower())[:12] or "emy"
+    mot = MOTS_DOUX[essai % len(MOTS_DOUX)]
+    tour = essai // len(MOTS_DOUX)
+    return f"{base}{mot}" + (str(tour + 1) if tour else "")
 
 
 def _lire(chemin: Path, defaut):
@@ -54,10 +74,20 @@ def _ecrire(d: Dict[str, Any]) -> None:
     safe_json.write_text(ETAT_FICHIER, json.dumps(d, ensure_ascii=False, indent=2))
 
 
+def mypuls_actif() -> bool:
+    """La création du tracking link chez MyPuls est-elle autorisée ?
+
+    Fermée par défaut, et par choix : MyPuls ne sait pas supprimer un tracking
+    link. Tant que l'interrupteur est fermé, on ne crée que le lien
+    GetMySocial, qui se défait, lui.
+    """
+    return bool(config().get("mypuls_actif"))
+
+
 def manque() -> str:
     """Ce qui empêche de créer un lien aujourd'hui, en une phrase. « » si tout va."""
     c = config()
-    if not c.get("creator_id"):
+    if mypuls_actif() and not c.get("creator_id"):
         return ("aucune créatrice choisie : le tracking link serait créé chez "
                 "n'importe qui. À poser dans data/liens_va_config.json "
                 "(creator_id, modele).")
@@ -140,24 +170,46 @@ def _tracking_de(session, html: str):
 
 # ─── GetMySocial : le lien court ─────────────────────────────────────────
 def creer_gms(nom: str, url: str) -> Dict[str, Any]:
-    """Duplique le gabarit vers un lien neuf pointant sur `url`."""
+    """Duplique le gabarit vers un lien neuf pointant sur `url`.
+
+    Le duplicata garde les boutons, les pixels et le design du gabarit, et
+    reste dans le meme espace : seules la destination et le nom changent.
+    """
     import gms
     c = config()
     gabarit = str(c.get("gabarit") or "")
     equipe = str(c.get("equipe") or EQUIPE_VA)
+    base = str(c.get("base_shortcode") or c.get("modele") or "emy")
     if not gabarit:
         return {"ok": False, "erreur": "aucun gabarit GetMySocial"}
-    for _ in range(5):
-        sc = gms.generate_random_prefix(4) + "va"
+    for essai in range(12):
+        sc = mots_doux(base, essai)
         r = gms.duplicate_link(gabarit, sc, nom, url, equipe)
         if r.get("ok"):
             lien = r.get("link") or {}
             return {"ok": True, "shortcode": sc,
                     "url": f"{gms.PUBLIC_LINK_DOMAIN}/{sc}",
                     "id": str(lien.get("id") or ""), "erreur": ""}
+        # « shortcode deja pris » est le seul echec qu'on repasse : tout le
+        # reste (droits, gabarit absent) se repeterait a l'identique
         if "shortcode" not in str(r.get("error") or "").lower():
             return {"ok": False, "erreur": str(r.get("error") or "refus GetMySocial")[:140]}
-    return {"ok": False, "erreur": "cinq shortcodes tirés, tous pris"}
+    return {"ok": False, "erreur": "douze noms essayés, tous pris"}
+
+
+def numero_de(pseudo: str) -> int:
+    """Le numero de VA, pris dans la table du podium — une seule source.
+
+    Reserve avant la creation, parce que le nom du tracking link le porte
+    (« Twitter VA 1 @abdoul »). Un second essai pour le meme pseudo retombe
+    sur le meme numero : la table est indexee par le pseudo.
+    """
+    try:
+        import podium_discord as pod
+        return int(pod.numeros([pseudo], attribuer=True).get(pseudo) or 0)
+    except Exception as e:
+        print(f"[lien] numero de VA indisponible : {type(e).__name__}: {e}", flush=True)
+        return 0
 
 
 # ─── la chaîne ───────────────────────────────────────────────────────────
@@ -180,22 +232,36 @@ def creer_pour(gid: str, uid: str, pseudo: str, par: str = "") -> Dict[str, Any]
     if empeche:
         return {"ok": False, "erreur": empeche}
 
-    nom = f"VA @{pseudo}"[:60]
-    t = creer_tracking(nom)
-    if not t.get("ok"):
-        return {"ok": False, "erreur": "MyPuls : " + t.get("erreur", "")}
-    g = creer_gms(f"va_@{pseudo}"[:60], t["url"])
+    n = numero_de(pseudo)
+    if not n:
+        return {"ok": False, "erreur": "numéro de VA indisponible : rien n'a été créé"}
+
+    # Le meme nom des deux cotes : « Twitter VA 1 @abdoul ». Le podium
+    # retrouve la personne derriere l'arobase, donc rien a reconcilier.
+    t = {"ok": True, "url": "", "code": ""}
+    if mypuls_actif():
+        t = creer_tracking(f"Twitter VA {n} @{pseudo}"[:60])
+        if not t.get("ok"):
+            return {"ok": False, "erreur": "MyPuls : " + t.get("erreur", "")}
+    # sans URL, le duplicata garde la destination du gabarit : le lien marche
+    # et ses clics sont comptes a part, mais l'abonne n'est pas encore
+    # rattache a CE VA chez MyPuls. C'est dit au manager, pas cache.
+    g = creer_gms(f"Twitter VA {n} @{pseudo}"[:60], t["url"])
     if not g.get("ok"):
-        # le tracking link est créé et ne peut pas être défait : on le DIT,
-        # pour qu'il soit repris à la main plutôt que perdu
-        return {"ok": False, "tracking": t["url"],
-                "erreur": f'GetMySocial : {g.get("erreur")} — le tracking link '
-                          f'{t["code"]} existe déjà chez MyPuls, à réutiliser.'}
+        if t.get("url"):
+            # le tracking link est créé et ne peut pas être défait : on le DIT,
+            # pour qu'il soit repris à la main plutôt que perdu
+            return {"ok": False, "tracking": t["url"],
+                    "erreur": f'GetMySocial : {g.get("erreur")} — le tracking link '
+                              f'{t["code"]} existe déjà chez MyPuls, à réutiliser.'}
+        return {"ok": False, "erreur": "GetMySocial : " + str(g.get("erreur") or "")}
     d = _etat()
     (d.setdefault("liens", {}))[f"{gid}:{uid}"] = {
-        "pseudo": pseudo, "public_url": g["url"], "shortcode": g["shortcode"],
+        "pseudo": pseudo, "numero": n,
+        "public_url": g["url"], "shortcode": g["shortcode"],
         "tracking": t["url"], "code": t["code"], "par": str(par),
         "quand": int(_t.time())}
     _ecrire(d)
-    return {"ok": True, "public_url": g["url"], "shortcode": g["shortcode"],
-            "tracking": t["url"], "erreur": ""}
+    return {"ok": True, "numero": n, "public_url": g["url"],
+            "shortcode": g["shortcode"], "tracking": t["url"],
+            "provisoire": not mypuls_actif(), "erreur": ""}
