@@ -13987,6 +13987,12 @@ try:
           _pd.personne("( BO7 ) 1") == ("BO7", False)
           and _pd.personne("(Gerome) SPAM") == ("Gerome", True))
 
+    # le bot s appelle Siri pour les membres : les renvoyer vers « @SEVEN »,
+    # c est les envoyer chercher quelqu un qui n existe pas
+    _srcNom = _plP("podium_discord.py").read_text(encoding="utf-8")
+    check("les primes renvoient vers @Siri, le nom que les membres voient",
+          "**@Siri**" in _srcNom and "**@SEVEN**" not in _srcNom)
+
     check("les trois primes sont 10 / 5 / 3", _pd.PRIMES == [10.0, 5.0, 3.0])
     _srcP = _plP("web_upload.py").read_text(encoding="utf-8")
     check("le podium est arme au demarrage du site",

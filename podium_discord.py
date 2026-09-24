@@ -71,6 +71,8 @@ EQUIPE_VA = EQUIPES_VA[0]                      # garde l'ancien nom lisible
 SERVEURS = {"1445108485090971710"}             # YouLab TWITTER
 
 PRIMES = [10.0, 5.0, 3.0]
+# Le bot s'appelle « Siri » pour les membres (son application s'appelle SEVEN
+# dans le portail Discord). Un VA qu'on envoie chercher « @SEVEN » ne le trouve pas.
 MEDAILLES = ["🥇", "🥈", "🥉"]
 COMBIEN_AFFICHES = 15
 HEURE_POST = 9          # lundi, heure française
@@ -361,7 +363,7 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     c += ["", "🎁 **Les 3 meilleurs de la semaine touchent une prime :**"]
     for i, p in enumerate(PRIMES):
         c.append(f'{MEDAILLES[i]} {i + 1}{"er" if i == 0 else "e"} → **{p:.0f}$**')
-    c += ["", "💸 **Pour recevoir ta prime :** envoie un message à **@SEVEN** dans "
+    c += ["", "💸 **Pour recevoir ta prime :** envoie un message à **@Siri** dans "
               "**ton espace perso** avec **ton rang de la semaine** et **ton adresse "
               "USDC (réseau Solana)**.",
           "Un seul prix par personne · payé à la main après vérification",
@@ -540,7 +542,7 @@ def embed_bonus(cl: Dict[str, Any], jour: dt.date) -> Dict[str, Any]:
         c += ["", "_Personne n'a encore de sub aujourd'hui — le classement bouge "
                   "dès le premier._"]
     c += ["", "————————————",
-          "🎁 **Pour recevoir ton bonus :** envoie un message à **@SEVEN** dans "
+          "🎁 **Pour recevoir ton bonus :** envoie un message à **@Siri** dans "
           "**ton espace perso** avec **ton rang du jour (top 1, 2 ou 3)** et "
           "**ton adresse USDC (réseau Solana)**.",
           "Un seul prix par personne · payé à la main après vérification"]

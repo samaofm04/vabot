@@ -47,7 +47,8 @@ try:
 except Exception:
     BOUTON_COPIE = None
 
-SERVEURS = ["1445108485090971710",       # YouLab TWITTER / THREADS
+SERVEURS = ["1445108485090971710",       # YouLab TWITTER
+            "1498948161039896586",       # YouLab THREADS
             "1552152470464110703"]       # YouLab - Entretien
 
 
@@ -257,7 +258,7 @@ button:disabled{opacity:.5;cursor:default}
 .danger button:hover{background:var(--rouge);color:#fff}
 </style></head><body>
 <h1>Écrire dans un salon Discord</h1>
-<p class="sous">Le message est posté par <b>SEVEN</b>. Tout se passe sur ta machine — rien n'est déployé.
+<p class="sous">Le message est posté par <b>Siri</b>. Tout se passe sur ta machine — rien n'est déployé.
 <span style="opacity:.55">· outil du __DATE__</span></p>
 <div class="grille">
   <div class="carte">
