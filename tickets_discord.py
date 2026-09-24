@@ -321,19 +321,30 @@ def _differer() -> Dict[str, Any]:
     return {"type": 5, "data": {"flags": 64}}
 
 
-def _suite(jeton: str, texte: str) -> None:
-    """Complète la réponse différée, visible du seul manager qui a cliqué."""
+def _suite(jeton: str, texte: str, p: Optional[Dict[str, Any]] = None) -> None:
+    """Complète la réponse différée, visible du seul manager qui a cliqué.
+
+    Sous l'application qui a REÇU le clic (p["application_id"]) : le jeton
+    d'interaction est à elle. Un APP_ID en dur répondait au nom de Siri à un
+    clic reçu par le bot Threads, et Discord refusait — « réfléchit… » à vie.
+    """
     try:
-        from verif_discord import APP_ID
-    except Exception:
+        from verif_discord import app_de_reponse
+    except Exception as e:
+        print(f"[ticket] réponse différée perdue : {type(e).__name__}: {e}", flush=True)
         return
-    _api("PATCH", f"/webhooks/{APP_ID}/{jeton}/messages/@original",
+    _api("PATCH", f"/webhooks/{app_de_reponse(p)}/{jeton}/messages/@original",
          json={"content": texte[:1900]})
 
 
 def _en_fond(f):
+    """Le fil emporte une copie du contexte : un fil neuf part d'un contexte
+    vide, et le travail d'un clic sur Threads perdait son serveur courant —
+    ses appels seraient partis avec le bot par défaut (Siri)."""
+    import contextvars
     import threading
-    threading.Thread(target=f, daemon=True).start()
+    ctx = contextvars.copy_context()
+    threading.Thread(target=ctx.run, args=(f,), daemon=True).start()
 
 
 _EN_FOND = _en_fond
@@ -570,7 +581,7 @@ def _creer_lien(gid: str, uid: str, par: str, p: Dict[str, Any]) -> Dict[str, An
                     if r.get("provisoire") else "")
             rang = f' · rangé dans **{r["groupe"]}**' if r.get("groupe") else ""
             _suite(jeton, f'✅ VA {r.get("numero")} — lien créé pour <@{uid}> : '
-                          f'{r["public_url"]}{rang}{note}')
+                          f'{r["public_url"]}{rang}{note}', p)
             if salon:
                 _api("POST", f"/channels/{salon}/messages",
                      json={"content": f'🔗 <@{uid}>, voici **ton lien** : {r["public_url"]}\n'
@@ -579,7 +590,7 @@ def _creer_lien(gid: str, uid: str, par: str, p: Dict[str, Any]) -> Dict[str, An
                            "allowed_mentions": {"users": [uid]}})
         else:
             sup = f'\n⚠️ Tracking link déjà créé : {r["tracking"]}' if r.get("tracking") else ""
-            _suite(jeton, "✕ " + str(r.get("erreur") or "échec") + sup)
+            _suite(jeton, "✕ " + str(r.get("erreur") or "échec") + sup, p)
 
     _EN_FOND(travail)
     return _differer()

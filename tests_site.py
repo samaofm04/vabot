@@ -12697,7 +12697,9 @@ try:
                            "41.85.160.10", True)["etat"] == "erreur")
         _tokSav = os.environ.pop("SEVEN_BOT_TOKEN")
         _savTokFile = _vd._token
-        _vd._token = lambda: ""
+        # _token prend desormais le serveur (un jeton par bot) : le bouchon
+        # accepte tout argument et reste vide pour TOUS les serveurs
+        _vd._token = lambda *a, **k: ""
         check("token du bot absent : « indisponible », rien n est ecrit ni promis",
               "indisponible" in _vd.verifier(_vd.creer_jeton("171717171717171717"), {"duree": 10, "telephone": "+2290161001717"},
                                              "41.85.160.17", True)["message"]
@@ -14272,6 +14274,434 @@ try:
           "if gid not in _p.SERVEURS:" in _srcWT)
 except Exception as _eT3:
     check("threads : testable", False, repr(_eT3)[:200])
+
+# ------------------------------------------- 34. Deux bots : Siri et Threads
+print()
+print("=" * 70)
+print("Deux bots : Threads ne passe JAMAIS par Siri une fois son bot pret")
+print("=" * 70)
+try:
+    import contextlib as _clB
+    import io as _ioB
+    import re as _reB
+    import types as _tyB
+    import verif_discord as _vdB
+    import tickets_discord as _tkB
+    import quetes_discord as _qB
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey as _EdB
+    _TWI_B, _THR_B, _ENT_B = _vdB.TWITTER_ID, _vdB.THREADS_ID, _vdB.GUILD_ID
+    _APP_TH = "1560000000000000001"            # application du bot Threads (fictive)
+    _dB = pathlib.Path(tempfile.mkdtemp())
+    _savB = {k: getattr(_vdB, k) for k in (
+        "DATA_DIR", "FICHES", "LIENS", "SECRET_FILE", "requests", "THREADS_APP_ID",
+        "THREADS_CLE_PUBLIQUE", "CLE_PUBLIQUE_APP", "_EN_FOND", "infos_ip", "api",
+        "_charger_config", "traiter_interaction", "verifier")}
+    _savTkB = (_tkB.ETAT_FICHIER, _tkB.CONFIG_FICHIER, _tkB._EN_FOND)
+    _savCacheB = (dict(_vdB._SALON_SERVEUR), dict(_vdB._SALON_INCONNU), dict(_vdB._ANNONCES))
+    _savEnvB = {k: os.environ.get(k) for k in ("SEVEN_BOT_TOKEN", "THREADS_BOT_TOKEN")}
+
+    # Faux Discord : Siri est sur les trois serveurs (comme aujourd hui),
+    # le bot Threads seulement sur Threads. Chaque requete est notee avec
+    # le jeton qui l a portee.
+    _salonsB = {"9101": _THR_B, "9201": _TWI_B}
+    _membresB = {"jeton-siri": {_TWI_B, _ENT_B, _THR_B}, "jeton-threads": {_THR_B}}
+    _journalB = []
+
+    class _RepB:
+        def __init__(self, code, corps):
+            self.status_code, self._c = code, corps
+            self.text = json.dumps(corps)
+
+        def json(self):
+            return self._c
+
+    def _reqB(methode, url, headers=None, timeout=None, **kw):
+        tok = str((headers or {}).get("Authorization", "")).split(" ", 1)[-1]
+        chemin = url[len(_vdB.API):]
+        _journalB.append((methode, chemin, tok, dict(kw)))
+        m = _reB.fullmatch(r"/channels/(\d+)", chemin)
+        if methode == "GET" and m:
+            g = _salonsB.get(m.group(1))
+            if g and g in _membresB.get(tok, set()):
+                return _RepB(200, {"id": m.group(1), "guild_id": g, "type": 0})
+            return _RepB(403 if g else 404, {"message": "Missing Access"})
+        m = _reB.fullmatch(r"/guilds/(\d+)/channels", chemin)
+        if methode == "GET" and m:
+            return _RepB(200, [{"id": "7001", "type": 0}, {"id": "7002", "type": 4}])
+        return _RepB(200, {"id": "1"})
+
+    def _jetons(depuis=0, sauf_sondes=False):
+        return [t for m, c, t, k in _journalB[depuis:]
+                if not (sauf_sondes and m == "GET" and _reB.fullmatch(r"/channels/\d+", c))]
+
+    def _dernier():
+        return _journalB[-1] if _journalB else (None, None, None, None)
+
+    def _config_threads(**v):
+        safe_json.write(_dB / "bots_config.json", v)
+
+    def _jeton_threads(t):
+        f = _dB / "threads_bot_token"
+        if t:
+            safe_json.write_text(f, t)
+        elif f.exists():
+            f.unlink()
+
+    _kSiri, _kThr, _kAutre = _EdB.generate(), _EdB.generate(), _EdB.generate()
+    _pubSiri = _kSiri.public_key().public_bytes_raw().hex()
+    _pubThr = _kThr.public_key().public_bytes_raw().hex()
+    try:
+        _vdB.DATA_DIR = _dB
+        _vdB.FICHES, _vdB.LIENS, _vdB.SECRET_FILE = _dB / "verif_membres.json", _dB / "verif_liens.json", _dB / "verif_secret"
+        _vdB.requests = _tyB.SimpleNamespace(request=_reqB)
+        _vdB.THREADS_APP_ID, _vdB.THREADS_CLE_PUBLIQUE = "", ""
+        _vdB.CLE_PUBLIQUE_APP = _pubSiri
+        _vdB._charger_config = lambda: None
+        _vdB.infos_ip = lambda ip: {"ok": True, "pays": "BJ", "pays_nom": "Benin", "fai": "MTN", "vpn": False, "type": ""}
+        _tkB.ETAT_FICHIER, _tkB.CONFIG_FICHIER = _dB / "tickets.json", _dB / "tickets_config.json"
+        os.environ["SEVEN_BOT_TOKEN"] = "jeton-siri"
+        os.environ.pop("THREADS_BOT_TOKEN", None)
+        _vdB._SALON_SERVEUR.clear(); _vdB._SALON_INCONNU.clear(); _vdB._ANNONCES.clear()
+
+        # -- AVANT : le second bot n existe pas, Siri garde Threads
+        _outB = _ioB.StringIO()
+        with _clB.redirect_stdout(_outB):
+            _bsB = _vdB.bots()
+            _vdB.bots()
+            _vdB.bots()
+        check("second bot absent : YouLab THREADS reste servi par Siri",
+              _vdB.bot_du_serveur(_THR_B)["id"] == "siri" and _THR_B in _bsB[0]["serveurs"]
+              and _bsB[1]["pret"] is False)
+        check("le repli est DIT dans le journal, une seule fois (pas a chaque appel)",
+              _outB.getvalue().count("reste servi par Siri") == 1, _outB.getvalue()[:200])
+        check("le registre est lisible tel quel : verif_discord.BOTS",
+              [b["id"] for b in _vdB.BOTS] == ["siri", "threads"]
+              and all({"nom", "app_id", "cle_publique", "fichier_jeton", "variable_env", "serveurs"} <= set(b)
+                      for b in _vdB.BOTS))
+        _vdB.api("POST", f"/guilds/{_THR_B}/roles")
+        check("avant : un appel pour Threads part avec le jeton de Siri, comme aujourd hui",
+              _dernier()[2] == "jeton-siri")
+        _journalB.clear()
+        _vdB.api("POST", "/channels/9101/messages", json={"content": "x"})
+        check("avant : un salon inconnu ne declenche aucune sonde (un seul bot sert tout)",
+              [(m, t) for m, c, t, k in _journalB] == [("POST", "jeton-siri")])
+        check("avant : on repond aux clics de Threads au nom de Siri",
+              _vdB.app_de_reponse({"guild_id": _THR_B}) == _vdB.APP_ID)
+        # a moitie configure : application et cle posees, jeton pas encore la
+        _config_threads(threads_app_id=_APP_TH, threads_cle_publique=_pubThr)
+        check("application + cle sans jeton : pas pret, Siri garde Threads",
+              _vdB.bots()[1]["manque"] == ["jeton"] and _vdB.bot_du_serveur(_THR_B)["id"] == "siri")
+        _jeton_threads("jeton-siri")
+        check("meme jeton que Siri : refuse (deux bots n en feraient qu un)",
+              any("identique" in x for x in _vdB.bots()[1]["manque"])
+              and _vdB.bot_du_serveur(_THR_B)["id"] == "siri")
+        _config_threads(threads_app_id=_vdB.APP_ID, threads_cle_publique=_pubThr)
+        _jeton_threads("jeton-threads")
+        check("meme application que Siri : refuse",
+              any("identique" in x for x in _vdB.bots()[1]["manque"]))
+        _config_threads(threads_app_id=_APP_TH, threads_cle_publique=_pubThr[:40])
+        check("cle publique tronquee : refusee, pas acceptee en silence",
+              "cle publique invalide" in _vdB.bots()[1]["manque"])
+
+        # -- APRES : application, cle et jeton poses -> le bot Threads prend Threads
+        _config_threads(threads_app_id=_APP_TH, threads_cle_publique=_pubThr)
+        _outB = _ioB.StringIO()
+        with _clB.redirect_stdout(_outB):
+            _bsB = _vdB.bots()
+        check("bot Threads pret : il sert Threads, et Siri ne le sert plus",
+              _bsB[1]["pret"] and _vdB.bot_du_serveur(_THR_B)["id"] == "threads"
+              and _THR_B not in _bsB[0]["serveurs"]
+              and _vdB.bot_du_serveur(_TWI_B)["id"] == "siri" and _vdB.bot_du_serveur(_ENT_B)["id"] == "siri")
+        check("le passage au bot Threads est dit dans le journal",
+              "propre bot" in _outB.getvalue())
+        check("jeton_de lit le bon fichier pour chaque bot",
+              _vdB.jeton_de(_bsB[0]) == "jeton-siri" and _vdB.jeton_de(_bsB[1]) == "jeton-threads")
+        # routage par le chemin
+        _vdB.api("GET", f"/guilds/{_THR_B}/members/5")
+        _tThr = _dernier()[2]
+        _vdB.api("GET", f"/guilds/{_TWI_B}/members/5")
+        _tTwi = _dernier()[2]
+        _vdB.api("GET", f"/guilds/{_ENT_B}/members/5")
+        _tEnt = _dernier()[2]
+        check("chemin /guilds/<id> : le bot de ce serveur",
+              (_tThr, _tTwi, _tEnt) == ("jeton-threads", "jeton-siri", "jeton-siri"))
+        _vdB.api("POST", f"/applications/{_APP_TH}/guilds/{_THR_B}/commands", json={})
+        _a1 = _dernier()[2]
+        _vdB.api("POST", f"/applications/{_vdB.APP_ID}/guilds/{_TWI_B}/commands", json={})
+        check("chemin /applications/<app>/guilds/<id> : le bot du serveur",
+              (_a1, _dernier()[2]) == ("jeton-threads", "jeton-siri"))
+        _vdB.api("PATCH", f"/webhooks/{_APP_TH}/tokW/messages/@original", json={})
+        _w1 = _dernier()[2]
+        _vdB.api("PATCH", f"/webhooks/{_vdB.APP_ID}/tokW2/messages/@original", json={})
+        check("chemin /webhooks/<app> : le bot de cette application",
+              (_w1, _dernier()[2]) == ("jeton-threads", "jeton-siri"))
+        # salons : cache rempli par une interaction, par la liste des salons, puis sonde
+        _journalB.clear()
+        _vdB.noter_interaction({"guild_id": _THR_B, "channel_id": "8001"})
+        _vdB.api("POST", "/channels/8001/messages", json={})
+        check("salon vu dans un clic : le bot de son serveur, sans rien demander a Discord",
+              [(m, t) for m, c, t, k in _journalB] == [("POST", "jeton-threads")])
+        _vdB.api("GET", f"/guilds/{_THR_B}/channels")
+        _journalB.clear()
+        _vdB.api("POST", "/channels/7001/messages", json={})
+        check("salon appris par GET /guilds/<id>/channels : pas de sonde non plus",
+              [(m, t) for m, c, t, k in _journalB] == [("POST", "jeton-threads")])
+        _journalB.clear()
+        _vdB.api("POST", "/channels/9101/messages", json={})
+        _premier = list(_journalB)
+        _journalB.clear()
+        _vdB.api("POST", "/channels/9101/messages", json={})
+        check("salon inconnu : on sonde, le serveur trouve donne le bot, puis c est garde",
+              _premier[-1][0] == "POST" and _premier[-1][2] == "jeton-threads"
+              and any(m == "GET" and c == "/channels/9101" for m, c, t, k in _premier)
+              and [(m, t) for m, c, t, k in _journalB] == [("POST", "jeton-threads")])
+        _journalB.clear()
+        _vdB.api("POST", "/channels/9201/messages", json={})
+        check("salon de Twitter sonde : il part avec Siri",
+              _journalB[-1][0] == "POST" and _journalB[-1][2] == "jeton-siri")
+        _journalB.clear()
+        _outB = _ioB.StringIO()
+        with _clB.redirect_stdout(_outB):
+            _vdB.api("POST", "/channels/9999/messages", json={})
+            _vdB.api("POST", "/channels/9999/messages", json={})
+        check("salon que personne ne voit : Siri par defaut, DIT, et pas resonde a chaque appel",
+              _journalB[-1][2] == "jeton-siri" and "9999" in _outB.getvalue()
+              and sum(1 for m, c, t, k in _journalB if c == "/channels/9999" and m == "GET") == 2)
+        # serveur courant (ContextVar) : prioritaire sur le chemin
+        with _vdB.sur_serveur(_TWI_B):
+            with _clB.redirect_stdout(_ioB.StringIO()):
+                _vdB.api("GET", f"/guilds/{_THR_B}/members/5")
+            _c1 = _dernier()[2]
+            _vdB.api("POST", "/channels/9101/messages", json={})
+            _c2 = _dernier()[2]
+            check("serveur courant visible dedans", _vdB.serveur_courant() == _TWI_B)
+        check("serveur courant prioritaire sur le chemin (/guilds, /channels)",
+              (_c1, _c2) == ("jeton-siri", "jeton-siri"))
+        check("hors du bloc, le serveur courant est retire", _vdB.serveur_courant() is None)
+        with _vdB.sur_serveur(_THR_B):
+            with _vdB.sur_serveur(""):
+                _vide = _vdB.serveur_courant()
+        check("sur_serveur sans serveur (PING) ne change pas le contexte en place", _vide == _THR_B)
+        # gid explicite : prioritaire sur tout, et jamais transmis a Discord
+        with _vdB.sur_serveur(_TWI_B):
+            _vdB.api("GET", f"/guilds/{_TWI_B}/members/5", gid=_THR_B, params={"a": 1})
+        check("gid explicite prioritaire sur le contexte et le chemin",
+              _dernier()[2] == "jeton-threads")
+        check("gid n est pas envoye a Discord (les autres arguments, si)",
+              "gid" not in _dernier()[3] and _dernier()[3].get("params") == {"a": 1})
+
+        # -- la regle d or : aucun croisement de jetons
+        _depuis = len(_journalB)
+        with _vdB.sur_serveur(_TWI_B):
+            _vdB.api("POST", "/channels/9201/messages", json={})
+            _vdB.api("PATCH", f"/webhooks/{_vdB.APP_ID}/t/messages/@original", json={})
+        _vdB.api("PUT", f"/guilds/{_TWI_B}/members/5/roles/6")
+        _vdB.api("POST", f"/applications/{_vdB.APP_ID}/guilds/{_TWI_B}/commands", json={})
+        _vdB.api("DELETE", f"/guilds/{_ENT_B}/members/5")
+        _vdB.api("GET", "/x", gid=_TWI_B)
+        _qB.enregistrer_commande(_TWI_B)
+        check("un appel pour Twitter (ou Entretien) n utilise JAMAIS le jeton du bot Threads",
+              _jetons(_depuis) and set(_jetons(_depuis)) == {"jeton-siri"}, str(set(_jetons(_depuis))))
+        _depuis = len(_journalB)
+        with _vdB.sur_serveur(_THR_B):
+            _vdB.api("POST", "/channels/9101/messages", json={})
+            _vdB.api("POST", "/channels/9201/messages", json={})       # meme un salon d un autre serveur
+            _vdB.api("PATCH", f"/webhooks/{_APP_TH}/t/messages/@original", json={})
+        _vdB.api("PUT", f"/guilds/{_THR_B}/members/5/roles/6")
+        _vdB.api("GET", "/x", gid=_THR_B)
+        _qB.enregistrer_commande(_THR_B)
+        check("un appel pour Threads (bot pret) n utilise JAMAIS le jeton de Siri",
+              _jetons(_depuis) and set(_jetons(_depuis)) == {"jeton-threads"}, str(set(_jetons(_depuis))))
+        # un vieux message de Siri sur Threads : le clic arrive a Siri, sa
+        # reponse vise l application de Siri. Le jeton d interaction suffit a
+        # Discord : on n y joint aucun jeton de bot, surtout pas celui de Siri.
+        with _vdB.sur_serveur(_THR_B):
+            with _clB.redirect_stdout(_ioB.StringIO()):
+                _vdB.api("PATCH", f"/webhooks/{_vdB.APP_ID}/tV/messages/@original", json={})
+        check("reponse a un clic recu par Siri sur Threads : envoyee SANS jeton de bot",
+              _dernier()[1] == f"/webhooks/{_vdB.APP_ID}/tV/messages/@original" and _dernier()[2] == "")
+        with _vdB.sur_serveur(_TWI_B):
+            _vdB.api("PATCH", f"/webhooks/{_vdB.APP_ID}/tV2/messages/@original", json={})
+        check("reponse a un clic de Siri sur Twitter : avec le jeton de Siri, comme aujourd hui",
+              _dernier()[2] == "jeton-siri")
+        check("/quetes est declaree sous l application du bot de chaque serveur",
+              any(c == f"/applications/{_APP_TH}/guilds/{_THR_B}/commands" for m, c, t, k in _journalB)
+              and any(c == f"/applications/{_vdB.APP_ID}/guilds/{_TWI_B}/commands" for m, c, t, k in _journalB))
+
+        # -- les clics : l application vient de la charge
+        _vdB._EN_FOND = lambda f: f()
+        _MGR_B = {"user": {"id": "5", "username": "boss"}, "roles": [_vdB.serveur(_THR_B)["role_manager"]],
+                  "permissions": "0"}
+        _journalB.clear()
+        _vdB.traiter_interaction({"type": 3, "guild_id": _THR_B, "application_id": _APP_TH, "token": "tkK",
+                                  "member": _MGR_B, "data": {"custom_id": "verif:kick:515151515151515151"},
+                                  "message": {"embeds": [{"title": "t"}], "components": []}})
+        check("bouton manager sur Threads : le message est mis a jour sous l application du clic",
+              ("PATCH", f"/webhooks/{_APP_TH}/tkK/messages/@original") in [(m, c) for m, c, t, k in _journalB]
+              and ("DELETE", f"/guilds/{_THR_B}/members/515151515151515151") in [(m, c) for m, c, t, k in _journalB]
+              and set(_jetons()) == {"jeton-threads"})
+        _journalB.clear()
+        _vdB.traiter_interaction({"type": 3, "guild_id": _THR_B, "application_id": _vdB.APP_ID, "token": "tkK2",
+                                  "member": _MGR_B, "data": {"custom_id": "verif:kick:525252525252525252"},
+                                  "message": {"embeds": [{"title": "t"}], "components": []}})
+        check("clic sur un vieux message de Siri : on repond a Siri (son jeton d interaction), bot Threads aux commandes",
+              ("PATCH", f"/webhooks/{_vdB.APP_ID}/tkK2/messages/@original") in [(m, c) for m, c, t, k in _journalB]
+              and "jeton-siri" not in _jetons() and "jeton-threads" in _jetons(), str(_jetons()))
+        _journalB.clear()
+        _clicS = {"type": 3, "guild_id": _THR_B, "application_id": _APP_TH, "data": {"custom_id": "verif:start"},
+                  "member": {"user": {"id": "535353535353535353"}, "roles": []}}
+        _s1B = _vdB.traiter_interaction(dict(_clicS, token="tkS1"))
+        _vdB.traiter_interaction(dict(_clicS, token="tkS2"))
+        check("nouveau clic « Se verifier » : l ancien message est efface sous l application qui l avait recu",
+              ("DELETE", f"/webhooks/{_APP_TH}/tkS1/messages/@original") in [(m, c) for m, c, t, k in _journalB]
+              and set(_jetons()) == {"jeton-threads"})
+        check("le lien donne au membre porte le serveur Threads",
+              (_vdB.lire_jeton(_s1B["data"]["components"][0]["components"][0]["url"].rsplit("/", 1)[1]) or {})
+              .get("guild_id") == _THR_B)
+        # Le bouton « Se verifier » de Threads a ete poste par Siri : ses clics
+        # arrivent a Siri. L application gardee avec le jeton est la sienne,
+        # quel que soit le bot qui sert Threads au moment ou le lien sert.
+        _journalB.clear()
+        _s3B = _vdB.traiter_interaction(dict(_clicS, token="tkS3", application_id=_vdB.APP_ID))
+        check("clic suivant venu de Siri : le message precedent (bot Threads) est efface sous SON application",
+              ("DELETE", f"/webhooks/{_APP_TH}/tkS2/messages/@original") in [(m, c) for m, c, t, k in _journalB])
+        _jB = _s3B["data"]["components"][0]["components"][0]["url"].rsplit("/", 1)[1]
+        _journalB.clear()
+        with _clB.redirect_stdout(_ioB.StringIO()):
+            _rB = _vdB.verifier(_jB, {"duree": 10, "telephone": "+2290161005353", "fuseau": "Africa/Porto-Novo"},
+                                "41.85.160.53", True)
+        check("une verification complete sur Threads : pas un seul appel avec le jeton de Siri",
+              _rB["etat"] == "attente" and "jeton-threads" in _jetons() and "jeton-siri" not in _jetons(),
+              str(set(_jetons())))
+        check("lien utilise : son message est clos sous l application qui a recu le clic (gardee avec le jeton)",
+              ("PATCH", f"/webhooks/{_vdB.APP_ID}/tkS3/messages/@original") in [(m, c) for m, c, t, k in _journalB])
+        # tickets : la reponse differee
+        _journalB.clear()
+        _tkB._suite("tkT", "ok", {"application_id": _APP_TH, "guild_id": _THR_B})
+        _tkB._suite("tkT2", "ok", {"guild_id": _TWI_B})
+        _tkB._suite("tkT3", "ok", {"guild_id": _THR_B})
+        _chB = [c for m, c, t, k in _journalB]
+        check("tickets : la reponse differee va a l application de la charge, sinon au bot du serveur",
+              _chB == [f"/webhooks/{_APP_TH}/tkT/messages/@original",
+                       f"/webhooks/{_vdB.APP_ID}/tkT2/messages/@original",
+                       f"/webhooks/{_APP_TH}/tkT3/messages/@original"], str(_chB))
+        _srcTkB = pathlib.Path("tickets_discord.py").read_text(encoding="utf-8")
+        _srcVdB = pathlib.Path("verif_discord.py").read_text(encoding="utf-8")
+        check("plus aucun /webhooks/{APP_ID} en dur (verif_discord, tickets_discord)",
+              "webhooks/{APP_ID}" not in _srcTkB and "webhooks/{APP_ID}" not in _srcVdB
+              and "_suite(jeton, \"✕ \" + str(r.get(\"erreur\") or \"échec\") + sup, p)" in _srcTkB)
+
+        # -- le travail en fond garde son serveur
+        for _nomF, _enFond in (("verif_discord", _savB["_EN_FOND"]), ("tickets_discord", _savTkB[2])):
+            _vuF, _evF = [], threading.Event()
+            with _vdB.sur_serveur(_THR_B):
+                _enFond(lambda: (_vuF.append(_vdB.serveur_courant()), _evF.set()))
+            _evF.wait(5)
+            check(f"{_nomF}._en_fond : le fil emporte le serveur courant", _vuF == [_THR_B], str(_vuF))
+        _vuF, _evF = [], threading.Event()
+        _savB["_EN_FOND"](lambda: (_vuF.append(_vdB.serveur_courant()), _evF.set()))
+        _evF.wait(5)
+        check("_en_fond hors de tout serveur : aucun serveur invente", _vuF == [None], str(_vuF))
+
+        # -- signature : la cle de l un OU de l autre bot, jamais une autre
+        _corpsB = b'{"type":1}'
+        _sigS = _kSiri.sign(b"1700000009" + _corpsB).hex()
+        _sigT = _kThr.sign(b"1700000009" + _corpsB).hex()
+        _sigA = _kAutre.sign(b"1700000009" + _corpsB).hex()
+        check("signature de Siri acceptee", _vdB.signature_valide(_corpsB, _sigS, "1700000009"))
+        check("signature du bot Threads acceptee", _vdB.signature_valide(_corpsB, _sigT, "1700000009"))
+        check("signature d une cle inconnue refusee", not _vdB.signature_valide(_corpsB, _sigA, "1700000009"))
+        check("cle explicite : seule celle-la compte (comportement d avant)",
+              not _vdB.signature_valide(_corpsB, _sigT, "1700000009", _pubSiri)
+              and _vdB.signature_valide(_corpsB, _sigS, "1700000009", _pubSiri))
+        check("signature valide pour Siri mais corps modifie : refusee",
+              not _vdB.signature_valide(b'{"type":3}', _sigS, "1700000009"))
+
+        # -- la route pose le serveur du clic, la page /verif celui du lien
+        import web_upload as _wB
+        _appB = _wB.create_app()
+        _appB.config["TESTING"] = True
+        _cB = _appB.test_client()
+        _vusB = []
+        _vdB.traiter_interaction = lambda p: (_vusB.append(_vdB.serveur_courant()) or {"type": 4, "data": {"content": "x"}})
+        _corpsR = json.dumps({"type": 3, "guild_id": _THR_B, "channel_id": "8123", "application_id": _APP_TH,
+                              "data": {"custom_id": "rien:du:tout"}, "member": {"user": {"id": "9"}}}).encode()
+        _rR = _cB.post("/discord/interactions", data=_corpsR,
+                       headers={"X-Signature-Ed25519": _kThr.sign(b"1700000010" + _corpsR).hex(),
+                                "X-Signature-Timestamp": "1700000010"})
+        check("route des interactions : un clic signe par le bot Threads est accepte, traite sur Threads",
+              _rR.status_code == 200 and _vusB == [_THR_B] and _vdB._SALON_SERVEUR.get("8123") == _THR_B,
+              f"{_rR.status_code} {_vusB}")
+        _rR2 = _cB.post("/discord/interactions", data=_corpsR,
+                        headers={"X-Signature-Ed25519": _kAutre.sign(b"1700000010" + _corpsR).hex(),
+                                 "X-Signature-Timestamp": "1700000010"})
+        check("route des interactions : une cle inconnue -> 401", _rR2.status_code == 401)
+        check("apres la requete, plus de serveur courant", _vdB.serveur_courant() is None)
+        _vusV = []
+        _vdB.verifier = lambda *a, **k: (_vusV.append(_vdB.serveur_courant()) or {"etat": "erreur", "message": "x"})
+        _cB.post("/verif/" + _vdB.creer_jeton("545454545454545454", gid=_THR_B), json={})
+        _cB.post("/verif/" + _vdB.creer_jeton("545454545454545454"), json={})
+        check("route /verif : le serveur du lien est pose pendant la verification",
+              _vusV == [_THR_B, _ENT_B], str(_vusV))
+        _srcWB = pathlib.Path("web_upload.py").read_text(encoding="utf-8")
+        _iQ = _srcWB.find("def _start_quete_du_jour_daemon")
+        _iP = _srcWB.find("def _start_podium_semaine_daemon")
+        check("demons : quete du jour et podium travaillent serveur par serveur, chacun avec son bot",
+              "with _vd_q.sur_serveur(gid):" in _srcWB[_iQ:_iQ + 2500]
+              and "with _vd_p.sur_serveur(gid):" in _srcWB[_iP:_iP + 3000])
+    finally:
+        for _kS, _vS in _savB.items():
+            setattr(_vdB, _kS, _vS)
+        _tkB.ETAT_FICHIER, _tkB.CONFIG_FICHIER, _tkB._EN_FOND = _savTkB
+        _vdB._SALON_SERVEUR.clear(); _vdB._SALON_SERVEUR.update(_savCacheB[0])
+        _vdB._SALON_INCONNU.clear(); _vdB._SALON_INCONNU.update(_savCacheB[1])
+        _vdB._ANNONCES.clear(); _vdB._ANNONCES.update(_savCacheB[2])
+        for _kE, _vE in _savEnvB.items():
+            if _vE is None:
+                os.environ.pop(_kE, None)
+            else:
+                os.environ[_kE] = _vE
+except Exception as _eB:
+    import traceback as _tbB
+    check("deux bots : testable", False, repr(_eB)[:200] + " " + _tbB.format_exc()[-400:])
+
+# --------------------------------- 35. Verdict de quete sur un message d un autre bot
+print()
+print("=" * 70)
+print("Quete : le verdict remplace la demande meme postee par l autre bot")
+print("=" * 70)
+try:
+    import quetes_discord as _qV
+    import tempfile as _tfV, json as _jsV
+    from pathlib import Path as _plV
+    _savV = (_qV.ETAT_FICHIER, _qV._api)
+    try:
+        _qV.ETAT_FICHIER = _plV(_tfV.mkdtemp()) / "q.json"
+        def _poser():
+            _qV.ETAT_FICHIER.write_text(_jsV.dumps({"demandes": {"g1:7:2026-09-24": {
+                "etat": "attente", "salon": "s1", "message": "555", "montant": 2.0,
+                "titre": "Faire 5 subs", "saison": "2026-09-B"}}}), encoding="utf-8")
+        _appV = []
+        _qV._api = lambda me, ch, **kw: (_appV.append((me, ch)) or (403, {"code": 50005}))
+        _poser()
+        _rV = _qV._trancher("g1", "7", "2026-09-24", True, "mgr",
+                            {"message": {"id": "555"}})
+        check("clic sur la demande : c est la reponse au clic qui la remplace",
+              _rV["type"] == 7 and _rV["data"]["components"] == []
+              and "validée" in _rV["data"]["embeds"][0]["title"])
+        check("et aucun PATCH avec le jeton du bot (il serait refuse)",
+              not [1 for m, c in _appV if m == "PATCH"])
+        _appV.clear(); _poser()
+        import io as _ioV, contextlib as _clV
+        _buf = _ioV.StringIO()
+        with _clV.redirect_stdout(_buf):
+            _qV._trancher("g1", "7", "2026-09-24", False, "mgr", {"message": {"id": "999"}})
+        check("clic venu d ailleurs : PATCH, et son refus est ECRIT au journal",
+              [1 for m, c in _appV if m == "PATCH"] and "non mis a jour" in _buf.getvalue())
+    finally:
+        _qV.ETAT_FICHIER, _qV._api = _savV
+except Exception as _eV2:
+    check("verdict quete : testable", False, repr(_eV2)[:200])
 
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")

@@ -50700,7 +50700,10 @@ def _start_quete_du_jour_daemon() -> bool:
                 # disque fait foi) : la quête d'hier ne réapparaît pas.
                 if (maintenant.hour, maintenant.minute) >= (0, 1):
                     for gid in _vd_q.SERVEURS_EXTRA:
-                        _q.poster_quete(gid, maintenant.date())
+                        # chaque serveur avec SON bot : la quete de Threads
+                        # ne doit pas partir sous le bot de Twitter
+                        with _vd_q.sur_serveur(gid):
+                            _q.poster_quete(gid, maintenant.date())
             except Exception as e:
                 print(f"[quetes] boucle : {type(e).__name__}: {e}", flush=True)
             _t_q.sleep(600)
@@ -50784,24 +50787,26 @@ def _start_podium_semaine_daemon() -> bool:
                     # rien des VA Threads
                     if gid not in _p.SERVEURS:
                         continue
-                    # le lundi : on fige la semaine ecoulee, une fois, avec
-                    # @everyone. Le message vivant repart a neuf ensuite.
-                    if _p.a_poster():
-                        _p.poster_podium(gid)
-                    # et le reste du temps : le classement en cours, reedite
-                    # sur place (une edition ne notifie personne)
-                    if _p.a_rafraichir(gid):
-                        _p.rafraichir(gid)
-                    # le classement de la quinzaine, TOUS les comptes
-                    if _p.a_rafraichir_subs(gid):
-                        _p.rafraichir_subs(gid)
-                    # et le bonus du jour : les trois premiers de la journee
-                    if _p.a_rafraichir_bonus(gid):
-                        _p.rafraichir_bonus(gid)
-                    # GetMySocial suit Discord : un manager neuf recoit son
-                    # groupe, un VA deplace a la main voit son lien suivre
-                    _sync_liens_va(gid)
-                    _suivi_va(gid)
+                    # tout ce qui suit agit sur CE serveur, avec son bot
+                    with _vd_p.sur_serveur(gid):
+                        # le lundi : on fige la semaine ecoulee, une fois, avec
+                        # @everyone. Le message vivant repart a neuf ensuite.
+                        if _p.a_poster():
+                            _p.poster_podium(gid)
+                        # et le reste du temps : le classement en cours, reedite
+                        # sur place (une edition ne notifie personne)
+                        if _p.a_rafraichir(gid):
+                            _p.rafraichir(gid)
+                        # le classement de la quinzaine, TOUS les comptes
+                        if _p.a_rafraichir_subs(gid):
+                            _p.rafraichir_subs(gid)
+                        # et le bonus du jour : les trois premiers de la journee
+                        if _p.a_rafraichir_bonus(gid):
+                            _p.rafraichir_bonus(gid)
+                        # GetMySocial suit Discord : un manager neuf recoit son
+                        # groupe, un VA deplace a la main voit son lien suivre
+                        _sync_liens_va(gid)
+                        _suivi_va(gid)
             except Exception as e:
                 print(f"[podium] boucle : {type(e).__name__}: {e}", flush=True)
             _t_p.sleep(600)
@@ -51322,10 +51327,11 @@ def create_app():
     # signe, a usage unique et valable 15 minutes. Voir verif_discord.py.
     @app.route("/discord/interactions", methods=["POST"])
     def discord_interactions():
-        from flask import jsonify
         import verif_discord as _vd
         _vd._charger_config()
         corps = request.get_data(cache=False) or b""
+        # Siri et le bot Threads envoient leurs clics ici tous les deux : la
+        # signature est acceptee pour la cle de l'un OU de l'autre.
         if not _vd.signature_valide(corps, request.headers.get("X-Signature-Ed25519", ""),
                                     request.headers.get("X-Signature-Timestamp", "")):
             return ("signature invalide", 401)
@@ -51333,6 +51339,19 @@ def create_app():
             charge = json.loads(corps.decode("utf-8"))
         except Exception:
             return ("corps illisible", 400)
+        if not isinstance(charge, dict):
+            return ("corps illisible", 400)
+        # Tout ce que ce clic declenche agit sur SON serveur, avec le bot de
+        # ce serveur — travail differe compris (_en_fond emporte le contexte).
+        # Sans ca, un appel vers /channels/... partait avec le bot par defaut,
+        # quel que soit le serveur du clic.
+        _vd.noter_interaction(charge)
+        with _vd.sur_serveur(str(charge.get("guild_id") or "")):
+            return _discord_repondre(charge)
+
+    def _discord_repondre(charge):
+        from flask import jsonify
+        import verif_discord as _vd
         # Les quêtes ont leurs propres boutons et la commande /quetes. Elles
         # répondent en premier et rendent None quand ce n'est pas pour elles :
         # une seule route Discord, deux modules, aucun mélange. Sous
@@ -51390,10 +51409,14 @@ def create_app():
         if not isinstance(donnees, dict):
             donnees = {}
         ip, garantie = _vd.ip_du_visiteur(request.headers, request.remote_addr or "")
+        # Le lien porte son serveur, signe : la verification (role, alerte,
+        # ticket) part avec le bot de CE serveur, jamais celui d'un autre.
+        _srv = (_vd.lire_jeton(jeton) or {}).get("guild_id")
         # Tout visiteur de youl4b.com passe par Cloudflare, qui pose CF-Ray :
         # son absence veut dire qu'on a vise le serveur en direct.
-        return jsonify(_vd.verifier(jeton, donnees, ip, garantie,
-                                    hors_cloudflare=not request.headers.get("CF-Ray")))
+        with _vd.sur_serveur(_srv):
+            return jsonify(_vd.verifier(jeton, donnees, ip, garantie,
+                                        hors_cloudflare=not request.headers.get("CF-Ray")))
 
     # ── FAVICON ──────────────────────────────────────────────────────
     # Servi SANS authentification, et c'est volontaire : le navigateur

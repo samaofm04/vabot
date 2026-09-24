@@ -326,31 +326,52 @@ def _trancher(gid: str, uid: str, jour: str, accepte: bool,
     _ecrire(d)
 
     # Le message perd ses boutons : impossible de revenir dessus par mégarde.
-    if v.get("message"):
-        couleur = 0x22C55E if accepte else 0x6B7280
-        texte = (f'✅ Validée par <@{par}> — **{v["montant"]:.2f}$** pour <@{uid}>.'
-                 if accepte else f'✖️ Refusée par <@{par}>.')
-        _api("PATCH", f'/channels/{v["salon"]}/messages/{v["message"]}',
-             json={"embeds": [{"title": "🎯 Quête " + ("validée" if accepte else "refusée"),
-                               "color": couleur,
-                               "description": f'**{v["titre"]}**\n📅 {jour}\n\n{texte}',
-                               "footer": {"text": f'YOULAB • saison {v.get("saison")}'}}],
-                   "components": []})
+    couleur = 0x22C55E if accepte else 0x6B7280
+    texte = (f'✅ Validée par <@{par}> — **{v["montant"]:.2f}$** pour <@{uid}>.'
+             if accepte else f'✖️ Refusée par <@{par}>.')
+    verdict = {"title": "🎯 Quête " + ("validée" if accepte else "refusée"),
+               "color": couleur,
+               "description": f'**{v["titre"]}**\n📅 {jour}\n\n{texte}',
+               "footer": {"text": f'YOULAB • saison {v.get("saison")}'}}
+    # Quand le clic vient du message de la demande, c'est la REPONSE au clic
+    # qui le remplace (type 7), avec le jeton du clic. Un PATCH classique part
+    # avec le jeton du bot en service : si la demande a ete postee par un
+    # autre bot (Siri, avant la bascule de Threads), Discord le refuse — et le
+    # message gardait ses boutons Valider/Refuser apres le verdict.
+    clique = str(((p or {}).get("message") or {}).get("id") or "")
+    par_le_clic = bool(v.get("message")) and clique == str(v["message"])
+    if v.get("message") and not par_le_clic:
+        code_m, rep_m = _api("PATCH", f'/channels/{v["salon"]}/messages/{v["message"]}',
+                             json={"embeds": [verdict], "components": []})
+        if code_m != 200:
+            print(f"[quetes] demande {cle} : message non mis a jour (HTTP {code_m}) "
+                  f"{str(rep_m)[:100]}", flush=True)
     if accepte:
         g = gains(gid, uid, v.get("saison"))
         _api("POST", f'/channels/{v["salon"]}/messages',
              json={"content": f'<@{uid}> 🎉 Quête validée : **+{v["montant"]:.2f}$**. '
                               f'Total de la saison : **{g["montant"]:.2f}$**.',
                    "allowed_mentions": {"users": [uid]}})
+        if par_le_clic:
+            return {"type": 7, "data": {"embeds": [verdict], "components": [],
+                                        "allowed_mentions": {"parse": []}}}
         return _ephemere(f'✅ Validée. +{v["montant"]:.2f}$ pour <@{uid}>.')
+    if par_le_clic:
+        return {"type": 7, "data": {"embeds": [verdict], "components": [],
+                                    "allowed_mentions": {"parse": []}}}
     return _ephemere("✖️ Refusée.")
 
 
 # ─── la commande /quetes ─────────────────────────────────────────────────
 def enregistrer_commande(gid: str) -> bool:
-    """Déclare /quetes sur le serveur. À lancer une fois ; Discord la garde."""
-    from verif_discord import APP_ID
-    code, rep = _api("POST", f"/applications/{APP_ID}/guilds/{gid}/commands",
+    """Déclare /quetes sur le serveur. À lancer une fois ; Discord la garde.
+
+    Sous l'application du bot de CE serveur : déclarée sous Siri sur
+    Threads, la commande serait partie vers Siri, et non vers le bot Threads.
+    À relancer quand le bot Threads prend le relais."""
+    from verif_discord import bot_du_serveur
+    app = bot_du_serveur(gid)["app_id"]
+    code, rep = _api("POST", f"/applications/{app}/guilds/{gid}/commands",
                      json={"name": "quetes", "type": 1,
                            "description": "Voir l'argent gagné avec les quêtes cette saison"})
     ok = code in (200, 201)

@@ -1,5 +1,5 @@
 """verif_discord.py — Verification anti-fraude a l'entree du serveur Discord
-« YouLab - Entretien (Réglement) », via le bot SEVEN.
+« YouLab - Entretien (Réglement) », via le bot Siri (ex-SEVEN).
 
 LE PARCOURS
   1. Un nouveau ne voit qu'un salon, #🔐┃vérification, avec le bouton
@@ -53,14 +53,25 @@ DONNEES
   fuseau, empreinte). Purgee au-dela de 90 jours. La page previent le
   membre avant de relever quoi que ce soit.
 
+DEUX BOTS (24/09/2026)
+  Siri (ex-SEVEN) sert Twitter et Entretien. YouLab THREADS aura son propre
+  bot : un bot absent d'un serveur ne peut rien y ecrire, donc un defaut de
+  code ne pourra plus poster chez Threads ce qui etait pour Twitter. Tant que
+  ce second bot n'est pas pret (application + cle publique + jeton), Siri
+  continue de servir Threads, comme avant. Voir « Les bots » plus bas : tout
+  appel passe par api(), qui choisit le bot du serveur vise.
+
 Aucun secret dans ce fichier : les identifiants Discord et la cle PUBLIQUE
-de l'application ne sont pas des secrets. Le token du bot est lu dans
-SEVEN_BOT_TOKEN ou data/seven_bot_token ; la cle de signature des liens est
-creee au premier usage dans data/verif_secret.
+de l'application ne sont pas des secrets. Le jeton de Siri est lu dans
+SEVEN_BOT_TOKEN ou data/seven_bot_token, celui du bot Threads dans
+THREADS_BOT_TOKEN ou data/threads_bot_token ; la cle de signature des liens
+est creee au premier usage dans data/verif_secret.
 """
 from __future__ import annotations
 
 import base64
+import contextlib
+import contextvars
 import hashlib
 import hmac
 import ipaddress
@@ -158,8 +169,13 @@ _DECISIONS_EN_COURS: set = set()  # un membre = une decision de manager a la foi
 
 def _en_fond(f):
     """Travail apres la reponse a Discord (3 s maximum pour repondre).
-    Remplacee par un appel direct dans les tests."""
-    threading.Thread(target=f, daemon=True).start()
+    Remplacee par un appel direct dans les tests.
+
+    Le fil emporte une COPIE du contexte : un fil neuf part d'un contexte
+    vide, et le travail differe d'un clic sur Threads perdait son serveur
+    courant (sur_serveur) — il serait parti avec le bot par defaut."""
+    ctx = contextvars.copy_context()
+    threading.Thread(target=ctx.run, args=(f,), daemon=True).start()
 
 
 _EN_FOND = _en_fond
@@ -216,27 +232,292 @@ def _charger_config():
     SALON_SUSPICIONS = c.get("salon_suspicions") or SALON_SUSPICIONS
 
 
-# ─── Discord REST (token du bot SEVEN) ────────────────────────────────────
-def _token() -> str:
-    t = (os.environ.get("SEVEN_BOT_TOKEN") or "").strip()
+# ─── Les bots : Siri, et celui de YouLab THREADS ──────────────────────────
+# Le second bot n'existe pas encore. Quand son application sera creee, il
+# suffira de renseigner ces deux valeurs (ici, ou « threads_app_id » et
+# « threads_cle_publique » dans data/bots_config.json, qui l'emporte) et de
+# deposer son jeton dans data/threads_bot_token (ou THREADS_BOT_TOKEN). Rien
+# d'autre : tant qu'il manque l'une des trois, Siri garde Threads.
+THREADS_APP_ID = ""
+THREADS_CLE_PUBLIQUE = ""
+BOTS_CONFIG = "bots_config.json"          # dans DATA_DIR
+
+# Le serveur pour lequel on travaille : pose par la route des interactions,
+# la page /verif et les demons (sur_serveur). Une ContextVar et pas une
+# globale : le site sert plusieurs requetes a la fois, sur plusieurs fils.
+_SERVEUR_COURANT: contextvars.ContextVar = contextvars.ContextVar("serveur_discord_courant", default=None)
+_SALON_SERVEUR: Dict[str, str] = {}       # salon -> serveur, appris au fil des reponses
+_SALON_INCONNU: Dict[str, float] = {}     # salon qu'aucun bot n'a trouve -> quand
+_SALON_INCONNU_S = 600                    # on ne resonde pas a chaque appel
+_ANNONCES: Dict[str, str] = {}            # sujet -> dernier etat imprime
+_RE_GUILDE = re.compile(r"^/(?:applications/\d+/)?guilds/(\d+)(?:[/?]|$)")
+_RE_APPLI = re.compile(r"^/(?:webhooks|applications)/(\d+)(?:[/?]|$)")
+_RE_SALON = re.compile(r"^/channels/(\d+)(?:[/?]|$)")
+_RE_REPONSE = re.compile(r"^/webhooks/(\d+)/[^/?]+")     # /webhooks/<app>/<jeton d'interaction>…
+
+
+def _annoncer(sujet: str, etat: str, texte: str) -> None:
+    """Imprime une fois par changement d'etat : a chaque appel, le journal
+    serait noye ; jamais, et personne ne saurait quel bot sert Threads."""
+    if _ANNONCES.get(sujet) != etat:
+        _ANNONCES[sujet] = etat
+        print(texte, flush=True)
+
+
+def _lire_jeton(variable_env: str, fichier: Path) -> str:
+    t = (os.environ.get(variable_env) or "").strip()
     if t:
         return t
     try:
-        return (DATA_DIR / "seven_bot_token").read_text(encoding="utf-8").strip()
+        return Path(fichier).read_text(encoding="utf-8").strip()
     except Exception:
         return ""
 
 
-def configure() -> bool:
+def jeton_de(bot: Dict[str, Any]) -> str:
+    return _lire_jeton(bot["variable_env"], bot["fichier_jeton"])
+
+
+def _config_bots() -> Dict[str, Any]:
+    chemin = DATA_DIR / BOTS_CONFIG
+    try:
+        c = safe_json.load(chemin, default={}) or {}
+    except Exception as e:
+        _annoncer("config", f"illisible:{type(e).__name__}",
+                  f"[discord] data/{BOTS_CONFIG} illisible ({type(e).__name__}) : second bot ignore")
+        return {}
+    if not isinstance(c, dict):
+        _annoncer("config", "pas-un-objet", f"[discord] data/{BOTS_CONFIG} n'est pas un objet JSON : ignore")
+        return {}
+    return c
+
+
+def _manque(b: Dict[str, Any]) -> List[str]:
+    """Ce qui empeche un bot de servir. Une valeur mal copiee compte comme
+    absente : une cle tronquee aurait fait refuser chaque clic sans dire
+    pourquoi."""
+    m = []
+    if not b["app_id"]:
+        m.append("app_id")
+    elif not re.fullmatch(r"\d{15,21}", b["app_id"]):
+        m.append("app_id invalide")
+    if not b["cle_publique"]:
+        m.append("cle publique")
+    elif not re.fullmatch(r"[0-9a-f]{64}", b["cle_publique"]):
+        m.append("cle publique invalide")
+    if not jeton_de(b):
+        m.append("jeton")
+    return m
+
+
+def bots() -> List[Dict[str, Any]]:
+    """Le registre des bots, Siri en premier (le bot par defaut).
+
+    {id, nom, app_id, cle_publique, fichier_jeton, variable_env, serveurs,
+    pret, manque}. Relu a chaque appel : la cle de Siri peut venir de
+    verif_config.json, et le second bot devient pret quand on depose son
+    jeton — sans redemarrer."""
+    c = _config_bots()
+    siri = {"id": "siri", "nom": "Siri", "app_id": str(APP_ID or "").strip(),
+            "cle_publique": str(CLE_PUBLIQUE_APP or "").strip().lower(),
+            "fichier_jeton": DATA_DIR / "seven_bot_token", "variable_env": "SEVEN_BOT_TOKEN",
+            "serveurs": {TWITTER_ID, GUILD_ID}}
+    second = {"id": "threads", "nom": "Threads",
+              "app_id": str(c.get("threads_app_id") or THREADS_APP_ID or "").strip(),
+              "cle_publique": str(c.get("threads_cle_publique") or THREADS_CLE_PUBLIQUE or "").strip().lower(),
+              "fichier_jeton": DATA_DIR / "threads_bot_token", "variable_env": "THREADS_BOT_TOKEN",
+              "serveurs": {THREADS_ID}}
+    for b in (siri, second):
+        b["manque"] = _manque(b)
+    # Les deux garde-fous qui comptent : la meme application ou le meme jeton
+    # des deux cotes, et « deux bots » n'en ferait qu'un — sans le dire.
+    if second["app_id"] and second["app_id"] == siri["app_id"]:
+        second["manque"].append("app_id identique a celui de Siri")
+    jeton_second = jeton_de(second)
+    if jeton_second and jeton_second == jeton_de(siri):
+        second["manque"].append("jeton identique a celui de Siri")
+    for b in (siri, second):
+        b["pret"] = not b["manque"]
+    if second["pret"]:
+        _annoncer("threads", "separe", f"[discord] YouLab THREADS servi par son propre bot "
+                                       f"(application {second['app_id']}) : Siri n'y agit plus")
+    else:
+        # repli EXPLICITE : Threads reste a Siri, et le journal dit pourquoi
+        siri["serveurs"].add(THREADS_ID)
+        _annoncer("threads", "repli:" + ",".join(second["manque"]),
+                  "[discord] second bot pas pret (manque : " + ", ".join(second["manque"])
+                  + ") : YouLab THREADS reste servi par Siri")
+    return [siri, second]
+
+
+def __getattr__(nom: str):
+    # verif_discord.BOTS : le registre, toujours a jour (voir bots())
+    if nom == "BOTS":
+        return bots()
+    raise AttributeError(nom)
+
+
+def bot_du_serveur(gid: Optional[str] = None, _bots: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """Le bot qui agit sur ce serveur. Un bot pret d'abord ; sinon celui qui
+    le sert quand meme (api dira « jeton absent » plutot que d'en prendre un
+    autre) ; un serveur inconnu revient a Siri."""
+    bs = _bots or bots()
+    g = str(gid or "")
+    for b in bs:
+        if g in b["serveurs"] and b["pret"]:
+            return b
+    for b in bs:
+        if g in b["serveurs"]:
+            return b
+    return bs[0]
+
+
+def bot_de_app(app_id: Any, _bots: Optional[List[Dict[str, Any]]] = None) -> Optional[Dict[str, Any]]:
+    a = str(app_id or "").strip()
+    return next((b for b in (_bots or bots()) if a and b["app_id"] == a), None)
+
+
+def app_de_reponse(p: Optional[Dict[str, Any]] = None, gid: Optional[str] = None) -> str:
+    """L'application sous laquelle repondre a une interaction.
+
+    Le jeton d'une interaction appartient a l'application qui a recu le clic
+    (charge : application_id). Un APP_ID en dur repondait au nom de Siri a un
+    clic recu par le bot Threads : Discord refuse, le message reste fige."""
+    a = str((p or {}).get("application_id") or "").strip()
+    if a.isdigit():
+        return a
+    g = gid or (p or {}).get("guild_id") or _SERVEUR_COURANT.get()
+    return bot_du_serveur(g)["app_id"] or str(APP_ID)
+
+
+def serveur_courant() -> Optional[str]:
+    return _SERVEUR_COURANT.get()
+
+
+@contextlib.contextmanager
+def sur_serveur(gid: Optional[str]):
+    """with sur_serveur(gid): … — tout appel Discord fait dedans (et dans le
+    travail differe, voir _en_fond) part avec le bot de ce serveur. Sans
+    serveur (PING, message prive), le contexte en place ne change pas."""
+    if not gid:
+        yield
+        return
+    jeton = _SERVEUR_COURANT.set(str(gid))
+    try:
+        yield
+    finally:
+        _SERVEUR_COURANT.reset(jeton)
+
+
+def noter_interaction(p: Dict[str, Any]) -> None:
+    """Le salon d'un clic et son serveur : un appel /channels/<id> qui suit
+    saura quel bot prendre sans sonder Discord."""
+    p = p or {}
+    g = str(p.get("guild_id") or "")
+    if not g.isdigit():
+        return
+    for cid in (p.get("channel_id"), (p.get("channel") or {}).get("id"),
+                (p.get("message") or {}).get("channel_id")):
+        if cid and str(cid).isdigit():
+            _SALON_SERVEUR[str(cid)] = g
+
+
+def serveur_du_salon(cid: str, _bots: Optional[List[Dict[str, Any]]] = None) -> Optional[str]:
+    """Le serveur d'un salon : le cache, sinon on demande a chaque bot pret
+    (le premier qui le voit donne son serveur). Un GET ne peut rien casser :
+    le bot qui n'est pas sur ce serveur recoit juste un refus."""
+    cid = str(cid)
+    if cid in _SALON_SERVEUR:
+        return _SALON_SERVEUR[cid]
+    bs = _bots or bots()
+    prets = [b for b in bs if b["pret"]]
+    if not [b for b in prets if b is not bs[0]]:
+        return None               # un seul bot en service : il sert tout, rien a demander
+    if time.time() - _SALON_INCONNU.get(cid, 0) < _SALON_INCONNU_S:
+        return None
+    for b in prets:
+        code, rep = _http(b, "GET", f"/channels/{cid}")
+        if code == 200 and isinstance(rep, dict) and rep.get("guild_id"):
+            _SALON_SERVEUR[cid] = str(rep["guild_id"])
+            return _SALON_SERVEUR[cid]
+    _SALON_INCONNU[cid] = time.time()
+    print(f"[discord] salon {cid} introuvable par les bots "
+          f"({', '.join(b['nom'] for b in prets)}) : Siri par defaut", flush=True)
+    return None
+
+
+def choisir_bot(chemin: str, gid: Optional[str] = None) -> Tuple[Dict[str, Any], str]:
+    """(bot, pourquoi). Dans l'ordre : le serveur donne explicitement, le
+    serveur courant, le serveur du chemin, l'application du chemin (jeton
+    d'interaction), le serveur du salon, puis Siri.
+
+    Le serveur courant passe AVANT le chemin : c'est le serveur du clic ou
+    de la tache en cours, et seul son bot doit agir. Un appel vers un autre
+    serveur part donc avec ce bot-la — qui, absent de l'autre serveur, se
+    fait refuser. C'est la separation voulue."""
+    bs = bots()
+    if gid:
+        return bot_du_serveur(gid, bs), "serveur donne"
+    m = _RE_GUILDE.match(chemin)
+    vise = m.group(1) if m else ""
+    courant = _SERVEUR_COURANT.get()
+    if courant:
+        if vise and vise != courant:
+            _annoncer(f"croise:{courant}:{vise}", "vu",
+                      f"[discord] appel vers le serveur {vise} pendant un travail pour {courant} : "
+                      f"bot de {courant} utilise ({chemin.split('?')[0][:80]})")
+        return bot_du_serveur(courant, bs), "serveur courant"
+    if vise:
+        return bot_du_serveur(vise, bs), "chemin"
+    m = _RE_APPLI.match(chemin)
+    if m:
+        b = bot_de_app(m.group(1), bs)
+        if b and b["pret"]:
+            return b, "application"
+    m = _RE_SALON.match(chemin)
+    if m:
+        g = serveur_du_salon(m.group(1), bs)
+        if g:
+            return bot_du_serveur(g, bs), "salon"
+    return bs[0], "defaut"
+
+
+def _retenir_salons(methode: str, chemin: str, code: int, corps: Any) -> None:
+    """Remplit le cache salon -> serveur avec ce que Discord vient de dire."""
+    if code not in (200, 201):
+        return
+    base = chemin.split("?", 1)[0]
+    m = re.fullmatch(r"/guilds/(\d+)/channels", base)
+    if m:
+        items = corps if isinstance(corps, list) else [corps]
+        for c in items:
+            if isinstance(c, dict) and c.get("id"):
+                _SALON_SERVEUR[str(c["id"])] = m.group(1)
+        return
+    m = re.fullmatch(r"/channels/(\d+)", base)
+    if m and methode == "GET" and isinstance(corps, dict) and corps.get("guild_id"):
+        _SALON_SERVEUR[m.group(1)] = str(corps["guild_id"])
+
+
+# ─── Discord REST ─────────────────────────────────────────────────────────
+def _token(gid: Optional[str] = None) -> str:
+    """Le jeton du bot de ce serveur (a defaut : du serveur courant, puis Siri)."""
+    return jeton_de(bot_du_serveur(gid or _SERVEUR_COURANT.get()))
+
+
+def configure(gid: Optional[str] = None) -> bool:
     _charger_config()
-    return bool(_token() and CLE_PUBLIQUE_APP and ROLE_VERIFIE and SALON_ALERTES)
+    bot = bot_du_serveur(gid or _SERVEUR_COURANT.get())
+    return bool(_token(gid) and bot["cle_publique"] and ROLE_VERIFIE and SALON_ALERTES)
 
 
-def api(methode: str, chemin: str, **kw) -> Tuple[int, Any]:
-    tok = _token()
-    if not tok:
-        return 0, {"message": "token du bot SEVEN absent"}
-    h = {"Authorization": f"Bot {tok}", "User-Agent": "DiscordBot (youl4b-verif, 1.0)"}
+def _http(bot: Dict[str, Any], methode: str, chemin: str, _sans_jeton: bool = False, **kw) -> Tuple[int, Any]:
+    tok = "" if _sans_jeton else jeton_de(bot)
+    if not tok and not _sans_jeton:
+        return 0, {"message": f"jeton du bot {bot['nom']} absent"}
+    h = {"User-Agent": "DiscordBot (youl4b-verif, 1.0)"}
+    if tok:
+        h["Authorization"] = f"Bot {tok}"
     for _ in range(4):
         try:
             r = requests.request(methode, API + chemin, headers=h, timeout=20, **kw)
@@ -252,25 +533,61 @@ def api(methode: str, chemin: str, **kw) -> Tuple[int, Any]:
             corps = r.json() if r.text else {}
         except Exception:
             corps = {"message": r.text[:200]}
+        if r.status_code == 401 and tok:
+            # jeton revoque ou mal copie : sans cette ligne, chaque appel
+            # echouait et rien ne disait lequel des deux bots etait en cause
+            _annoncer(f"401:{bot['id']}", tok[-6:], f"[discord] jeton du bot {bot['nom']} REFUSE par Discord (401)")
         return r.status_code, corps
     return 429, {"message": "limite Discord"}
 
 
+def api(methode: str, chemin: str, **kw) -> Tuple[int, Any]:
+    """Appel REST avec le bot du serveur vise (voir choisir_bot). gid=… force
+    le serveur ; il n'est pas transmis a Discord."""
+    gid = kw.pop("gid", None)
+    bot, _pourquoi = choisir_bot(chemin, gid)
+    # Reponse a un clic recu par UNE AUTRE application que le bot en service
+    # (un vieux message de Siri sur Threads, une fois le bot Threads en
+    # place) : le jeton d'interaction dans l'adresse suffit a Discord. On
+    # n'y joint aucun jeton de bot plutot que celui d'une autre application.
+    m = _RE_REPONSE.match(chemin)
+    croise = bool(m and m.group(1) != bot["app_id"])
+    if croise:
+        _annoncer(f"reponse:{m.group(1)}:{bot['id']}", "vu",
+                  f"[discord] reponse a un clic recu par l'application {m.group(1)} pendant un travail "
+                  f"du bot {bot['nom']} : envoyee sans jeton de bot")
+    code, corps = _http(bot, methode, chemin, _sans_jeton=croise, **kw)
+    _retenir_salons(methode, chemin, code, corps)
+    return code, corps
+
+
 # ─── Signature des interactions (Ed25519) ─────────────────────────────────
+def cles_publiques() -> List[str]:
+    """La cle de chaque bot qui en a une : les deux applications envoient
+    leurs clics a la meme adresse."""
+    return [b["cle_publique"] for b in bots() if b["cle_publique"]]
+
+
 def signature_valide(corps: bytes, signature_hex: str, horodatage: str,
                      cle_publique_hex: Optional[str] = None) -> bool:
     """Discord signe chaque interaction : sans cette verification, n'importe
-    qui pourrait appeler l'URL et se faire donner le role Vérifié."""
-    cle = cle_publique_hex or CLE_PUBLIQUE_APP
-    if not (cle and signature_hex and horodatage):
+    qui pourrait appeler l'URL et se faire donner le role Vérifié. Sans cle
+    donnee, toute cle d'un bot configure est acceptee — et seulement elles."""
+    cles = [cle_publique_hex] if cle_publique_hex else cles_publiques()
+    if not (cles and signature_hex and horodatage):
         return False
     try:
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-        Ed25519PublicKey.from_public_bytes(bytes.fromhex(cle)).verify(
-            bytes.fromhex(signature_hex), horodatage.encode() + corps)
-        return True
+        sig = bytes.fromhex(signature_hex)
     except Exception:
         return False
+    for cle in cles:
+        try:
+            Ed25519PublicKey.from_public_bytes(bytes.fromhex(cle)).verify(sig, horodatage.encode() + corps)
+            return True
+        except Exception:
+            continue
+    return False
 
 
 # ─── Liens personnels signes ──────────────────────────────────────────────
@@ -465,26 +782,31 @@ def _ecrire_liens(d: Dict[str, Any]) -> bool:
     return bool(safe_json.write_text(LIENS, json.dumps(d, ensure_ascii=False)))
 
 
-def _effacer_message(token: str, ts: float):
+def _effacer_message(token: str, ts: float, app: str = "", gid: Optional[str] = None):
     """Efface le message ephemere d'un ancien clic. Discord le permet avec
     le jeton d'interaction, valable 15 minutes : au-dela, le lien est mort
-    de toute facon et le message disparait au prochain rechargement."""
+    de toute facon et le message disparait au prochain rechargement.
+    app : l'application qui a recu ce clic-la (gardee avec le jeton)."""
     if token and time.time() - float(ts or 0) < 14 * 60:
-        _EN_FOND(lambda: api("DELETE", f"/webhooks/{APP_ID}/{token}/messages/@original"))
+        chemin = f"/webhooks/{app or app_de_reponse(gid=gid)}/{token}/messages/@original"
+        _EN_FOND(lambda: api("DELETE", chemin))
 
 
-def _message_unique(uid: str, token: str, nonce: Optional[str] = None, gid: Optional[str] = None):
+def _message_unique(uid: str, token: str, nonce: Optional[str] = None, gid: Optional[str] = None,
+                    app: str = ""):
     """UN seul message « Se verifier » visible a la fois, quelle que soit la
     reponse (lien, « deja verifie », « en attente ») : on retient celui qui
-    part et on efface le precedent. Sans nonce, le lien actif reste le meme."""
+    part et on efface le precedent. Sans nonce, le lien actif reste le meme.
+    L'application du clic est gardee avec son jeton : c'est sous elle, et
+    elle seule, que Discord laissera effacer ou modifier ce message."""
     cle = _cle(gid, uid)
     with _VERROU:
         liens = _liens()
         ancien = liens.get(cle) or {}
         liens[cle] = {"nonce": ancien.get("nonce", "") if nonce is None else nonce,
-                      "token": str(token or ""), "ts": time.time()}
+                      "token": str(token or ""), "ts": time.time(), "app": str(app or "")}
         _ecrire_liens(liens)
-    _effacer_message(ancien.get("token", ""), ancien.get("ts", 0))
+    _effacer_message(ancien.get("token", ""), ancien.get("ts", 0), ancien.get("app", ""), gid)
 
 
 def _clore_lien(uid: str, nonce: str, texte: str, gid: Optional[str] = None):
@@ -502,7 +824,8 @@ def _clore_lien(uid: str, nonce: str, texte: str, gid: Optional[str] = None):
         _ecrire_liens(liens)
     token, ts = actif.get("token"), float(actif.get("ts") or 0)
     if token and time.time() - ts < 14 * 60:
-        _EN_FOND(lambda: api("PATCH", f"/webhooks/{APP_ID}/{token}/messages/@original",
+        chemin = f"/webhooks/{actif.get('app') or app_de_reponse(gid=gid)}/{token}/messages/@original"
+        _EN_FOND(lambda: api("PATCH", chemin,
                              json={"content": texte, "components": [], "allowed_mentions": {"parse": []}}))
 
 
@@ -908,6 +1231,14 @@ def verifier(jeton: str, donnees: Dict[str, Any], ip: str, ip_garantie: bool,
     j = lire_jeton(jeton, maintenant)
     if not j:
         return {"etat": "erreur", "message": "Lien expiré ou invalide. Retourne sur Discord et clique à nouveau « Se vérifier »."}
+    # Le serveur est signe dans le lien : tout ce qui suit (membre lu, role,
+    # alerte, ticket, message clos en fond) part avec le bot de CE serveur.
+    with sur_serveur(j["guild_id"]):
+        return _verifier(j, donnees, ip, ip_garantie, maintenant, hors_cloudflare)
+
+
+def _verifier(j: Dict[str, Any], donnees: Dict[str, Any], ip: str, ip_garantie: bool,
+              maintenant: Optional[float], hors_cloudflare: bool) -> Dict[str, Any]:
     now = maintenant if maintenant is not None else time.time()
     if donnees.get("site_web"):          # champ piege : un humain ne le voit pas
         return {"etat": "erreur", "message": "Vérification refusée."}
@@ -925,10 +1256,11 @@ def verifier(jeton: str, donnees: Dict[str, Any], ip: str, ip_garantie: bool,
         # le lien n'est pas consomme : il corrige et renvoie
         return {"etat": "erreur", "message": "Numéro invalide : écris-le avec l'indicatif, par exemple +229 01 23 45 67 89 "
                                              "(Bénin) ou +261 34 12 345 67 (Madagascar)."}
-    if not _token():
+    if not _token(j["guild_id"]):
         # sans token : ni role, ni alerte — le membre resterait « en attente »
         # d'un responsable que personne n'a prevenu
-        print("[verif] token du bot SEVEN absent : verification suspendue", flush=True)
+        print(f"[verif] jeton du bot {bot_du_serveur(j['guild_id'])['nom']} absent : "
+              "verification suspendue", flush=True)
         return {"etat": "erreur", "message": "Vérification momentanément indisponible. Réessaie dans quelques minutes."}
     donnees = dict(donnees, telephone=tel)
     uid, nonce = j["user_id"], j["nonce"]
@@ -1130,7 +1462,7 @@ def _action_manager(p: Dict[str, Any], action: str, cible: str, qui: str, cfg: O
         embeds[0]["footer"] = {"text": f"YouLab • Vérification — {fait} par {qui}"}
     # En cas d'echec les boutons RESTENT : sans eux, le membre garde son role
     # En attente, « Se verifier » lui est refuse, et plus personne ne peut agir.
-    code_maj, _ = api("PATCH", f"/webhooks/{APP_ID}/{p.get('token')}/messages/@original",
+    code_maj, _ = api("PATCH", f"/webhooks/{app_de_reponse(p, cfg['id'])}/{p.get('token')}/messages/@original",
                       json={"embeds": embeds,
                             "components": [] if reussi else (garder if garder is not None else (message.get("components") or [])),
                             "allowed_mentions": {"parse": []}})
@@ -1139,6 +1471,13 @@ def _action_manager(p: Dict[str, Any], action: str, cible: str, qui: str, cfg: O
 
 
 def traiter_interaction(p: Dict[str, Any]) -> Dict[str, Any]:
+    # La route pose deja le serveur du clic ; le reposer ici garde la
+    # separation des bots pour tout autre appelant (les tests, un script).
+    with sur_serveur(str((p or {}).get("guild_id") or "")):
+        return _traiter_interaction(p)
+
+
+def _traiter_interaction(p: Dict[str, Any]) -> Dict[str, Any]:
     _charger_config()
     if p.get("type") == 1:                                  # PING de validation de Discord
         return {"type": 1}
@@ -1158,21 +1497,23 @@ def traiter_interaction(p: Dict[str, Any]) -> Dict[str, Any]:
             return _ephemere("Compte introuvable.")
         if uid in _UIDS_EN_COURS:
             return _ephemere("⏳ Ta vérification est en cours, patiente quelques secondes.")
-        if not configure():
-            print("[verif] clic « Se verifier » refuse : bot SEVEN non configure (token ?)", flush=True)
+        app = app_de_reponse(p, gid)          # l'application qui a recu CE clic
+        if not configure(gid):
+            print(f"[verif] clic « Se verifier » refuse : bot {bot_du_serveur(gid)['nom']} non configure (jeton ?)",
+                  flush=True)
             return _ephemere("⚠️ Vérification momentanément indisponible. Réessaie dans quelques minutes.")
         roles = membre.get("roles") or []
         if cfg["role_verifie"] and cfg["role_verifie"] in roles:
-            _message_unique(uid, p.get("token"), gid=gid)
+            _message_unique(uid, p.get("token"), gid=gid, app=app)
             return _ephemere("✅ Tu es déjà vérifié.")
         if any(r and r in roles for r in (cfg["role_attente"], cfg["role_suspect"])):
             # un nouvel essai finirait de toute facon en attente, et reposterait
             # une alerte a chaque clic
-            _message_unique(uid, p.get("token"), gid=gid)
+            _message_unique(uid, p.get("token"), gid=gid, app=app)
             return _ephemere("⏳ Ta demande d'accès attend la validation d'un responsable. Tu seras mentionné dans #bienvenue dès que c'est fait.")
         jeton = creer_jeton(uid, gid=gid)
         # le nouveau lien remplace l'ancien, qui ne sert plus
-        _message_unique(uid, p.get("token"), (lire_jeton(jeton) or {}).get("nonce", ""), gid=gid)
+        _message_unique(uid, p.get("token"), (lire_jeton(jeton) or {}).get("nonce", ""), gid=gid, app=app)
         return _ephemere(
             "🔐 **Vérification anti-fraude**\n"
             "Ouvre ce lien **sur ton téléphone ou ton ordinateur habituel**. "
