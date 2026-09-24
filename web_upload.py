@@ -51294,6 +51294,14 @@ def create_app():
                 return jsonify(_rep_q)
         except Exception as _e_q:
             print(f"[quetes] route : {type(_e_q).__name__}: {_e_q}", flush=True)
+        # Le bouton « Confirmer le VA » posé sous l'accueil de son salon perso.
+        try:
+            import tickets_discord as _tk
+            _rep_tk = _tk.traiter(charge)
+            if _rep_tk is not None:
+                return jsonify(_rep_tk)
+        except Exception as _e_tk:
+            print(f"[ticket] route : {type(_e_tk).__name__}: {_e_tk}", flush=True)
         # Le bouton « Copier » posé sous les captions : même principe, il rend
         # None quand ce n'est pas son bouton.
         try:

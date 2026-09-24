@@ -65,7 +65,8 @@ SERVEURS_TICKETS = {"1445108485090971710"}
 # Tout nouveau arrivant est en essai, sans exception : le role est pose en
 # meme temps que son salon. Ce qui le fera passer « confirme » viendra plus
 # tard ; en attendant, personne n'est confirme par defaut.
-ROLE_ESSAI_NOM = "🧪 Essai"      # « ─│ » : Discord retire « -| » d'un nom de salon texte
+ROLE_ESSAI_NOM = "🧪 Essai"
+ROLE_CONFIRME_NOM = "⭐ Confirmé"      # « ─│ » : Discord retire « -| » d'un nom de salon texte
 BARRE = "┤"              # « ┤ »
 
 
@@ -255,6 +256,105 @@ def poser_essai(gid: str, uid: str) -> bool:
     return True
 
 
+def bouton_confirmer(uid: str) -> List[Dict[str, Any]]:
+    """Le bouton que SEUL un manager peut actionner."""
+    return [{"type": 1, "components": [
+        {"type": 2, "style": 3, "label": "Confirmer le VA",
+         "custom_id": f"essai:ok:{uid}", "emoji": {"name": "⭐"}}]}]
+
+
+def _role_nomme(gid: str, nom: str) -> str:
+    code, rep = _api("GET", f"/guilds/{gid}/roles")
+    if code != 200 or not isinstance(rep, list):
+        return ""
+    for r in rep:
+        if str(r.get("name") or "").strip() == nom:
+            return str(r["id"])
+    return ""
+
+
+def role_confirme(gid: str) -> str:
+    return _role_nomme(gid, str(_config().get("role_confirme") or ROLE_CONFIRME_NOM))
+
+
+def confirmer(gid: str, uid: str, par: str = "") -> Dict[str, Any]:
+    """Fait passer un VA d'essai à confirmé. Rend {ok, erreur}.
+
+    On POSE d'abord, on RETIRE ensuite : si le retrait échoue, le VA est
+    confirmé avec un badge d'essai en trop — visible, rattrapable. L'inverse
+    l'aurait laissé sans rien, et personne ne s'en serait aperçu.
+    """
+    rc = role_confirme(gid)
+    if not rc:
+        return {"ok": False, "erreur": f"rôle « {ROLE_CONFIRME_NOM} » introuvable sur ce serveur"}
+    code, rep = _api("PUT", f"/guilds/{gid}/members/{uid}/roles/{rc}")
+    if code not in (200, 204):
+        return {"ok": False, "erreur": f"Discord a refusé le rôle (HTTP {code}) "
+                                       f"{str(rep.get('message') or '')[:80]}"}
+    re_ = role_essai(gid)
+    reste_essai = False
+    if re_:
+        c2, _r = _api("DELETE", f"/guilds/{gid}/members/{uid}/roles/{re_}")
+        reste_essai = c2 not in (200, 204)
+        if reste_essai:
+            print(f"[ticket] {uid} confirmé mais l'essai n'a pas pu être retiré "
+                  f"(HTTP {c2})", flush=True)
+    etat = _etat()
+    fiche = (etat.setdefault("tickets", {})).setdefault(f"{gid}:{uid}", {})
+    fiche["essai"] = False
+    fiche["confirme"] = {"par": str(par), "quand": int(time.time())}
+    _ecrire_etat(etat)
+    return {"ok": True, "erreur": "", "reste_essai": reste_essai}
+
+
+def _ephemere(txt: str) -> Dict[str, Any]:
+    return {"type": 4, "data": {"content": txt, "flags": 64}}
+
+
+def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Le bouton « Confirmer le VA ». Rend None quand ce n'est pas le nôtre."""
+    p = p or {}
+    if p.get("type") != 3:
+        return None
+    cid = str(((p.get("data") or {}).get("custom_id")) or "")
+    if not cid.startswith("essai:ok:"):
+        return None
+    gid = str(p.get("guild_id") or "")
+    uid = cid.split(":", 2)[2]
+    membre = p.get("member") or {}
+    qui = str(((membre.get("user") or {}).get("id")) or "")
+
+    rid = role_manager(gid)
+    permissions = int(str(membre.get("permissions") or "0") or 0)
+    admin = bool(permissions & 0x8)
+    if not (admin or (rid and rid in (membre.get("roles") or []))):
+        return _ephemere("Seuls les managers peuvent confirmer un VA.")
+
+    fiche = (_etat().get("tickets") or {}).get(f"{gid}:{uid}") or {}
+    if fiche.get("confirme"):
+        return _ephemere("Ce VA est déjà confirmé.")
+
+    res = confirmer(gid, uid, par=qui)
+    if not res["ok"]:
+        return _ephemere("✕ " + res["erreur"])
+
+    msg = (p.get("message") or {})
+    embeds = msg.get("embeds") or []
+    if embeds:
+        d = embeds[0].get("description") or ""
+        # l'encart perd sa ligne d'essai et garde la trace de qui a tranche
+        d = "\n".join(l for l in d.split("\n") if "démarres en essai" not in l)
+        embeds[0]["description"] = (d.rstrip() + f"\n\n⭐ **VA confirmé** par <@{qui}>.")
+        embeds[0]["color"] = 0x22C55E
+    alerte = ("\n⚠️ Le badge 🧪 Essai n'a pas pu être retiré — à enlever à la main."
+              if res.get("reste_essai") else "")
+    # type 7 : on remplace le message cliqué, le bouton disparaît avec
+    return {"type": 7, "data": {"embeds": embeds, "components": [],
+                                "content": (msg.get("content") or "")
+                                           + f"\n⭐ Confirmé par <@{qui}>." + alerte,
+                                "allowed_mentions": {"parse": []}}}
+
+
 def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
     """Confie le nouveau à un manager et lui ouvre son salon privé.
 
@@ -338,6 +438,7 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
             mentions["roles"] = [rid]
         _api("POST", f"/channels/{salon}/messages",
              json={"content": f"<@{uid}> {qui}", "embeds": [embed],
+                   "components": bouton_confirmer(uid) if en_essai else [],
                    "allowed_mentions": mentions})
 
         fiches[cle] = {"salon": salon, "manager": mid, "ouvert": int(time.time()),

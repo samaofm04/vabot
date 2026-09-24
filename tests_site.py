@@ -13097,6 +13097,78 @@ try:
         _tkP._api = _savT2
     check("personne n est confirme par defaut : l essai est pose avant le salon",
           _srcT.index("en_essai = poser_essai") < _srcT.index("liste = managers(gid)"))
+
+    # --- le bouton « Confirmer le VA » : les managers, et eux seuls
+    import tempfile as _tfT
+    _savEtat, _savApi3 = _tkP.ETAT_FICHIER, _tkP._api
+    try:
+        _tkP.ETAT_FICHIER = _plT(_tfT.mkdtemp()) / "tickets.json"
+        _rolesC = [{"id": "r-mgr", "name": "🛡️ Manager"},
+                   {"id": "r-conf", "name": "⭐ Confirmé"},
+                   {"id": "r-essai", "name": "🧪 Essai"}]
+        _faits = []
+
+        def _apiC(me, ch, **kw):
+            _faits.append((me, ch))
+            if me == "GET" and ch.endswith("/roles"):
+                return 200, _rolesC
+            return 204, {}
+        _tkP._api = _apiC
+
+        def _clic(roles, perms="0", uid="99"):
+            return _tkP.traiter({"type": 3, "guild_id": "g1",
+                                 "data": {"custom_id": f"essai:ok:{uid}"},
+                                 "member": {"roles": roles, "permissions": perms,
+                                            "user": {"id": "mgr-1"}},
+                                 "message": {"content": "x", "embeds": [
+                                     {"description": "bla\n🧪 Tu démarres en essai. suite",
+                                      "color": 1}]}})
+
+        _refus = _clic([])
+        check("un non-manager ne peut PAS confirmer",
+              _refus["data"]["flags"] == 64 and "managers" in _refus["data"]["content"])
+        check("le refus n a touche aucun role",
+              not [1 for m, c in _faits if m in ("PUT", "DELETE") and "/roles/" in c])
+
+        _faits.clear()
+        _ok = _clic(["r-mgr"])
+        check("un manager confirme d un clic",
+              _ok["type"] == 7 and _ok["data"]["components"] == [])
+        check("le role Confirme est POSE et l essai RETIRE",
+              ("PUT", "/guilds/g1/members/99/roles/r-conf") in _faits
+              and ("DELETE", "/guilds/g1/members/99/roles/r-essai") in _faits)
+        check("on pose AVANT de retirer : un retrait rate laisse un badge en trop, pas un VA sans rien",
+              _faits.index(("PUT", "/guilds/g1/members/99/roles/r-conf"))
+              < _faits.index(("DELETE", "/guilds/g1/members/99/roles/r-essai")))
+        check("la ligne d essai disparait de l encart",
+              "démarres en essai" not in _ok["data"]["embeds"][0]["description"]
+              and "VA confirmé" in _ok["data"]["embeds"][0]["description"])
+        check("qui a confirme est ecrit, et personne n est ping",
+              "mgr-1" in _ok["data"]["content"]
+              and _ok["data"]["allowed_mentions"]["parse"] == [])
+
+        _deja = _clic(["r-mgr"])
+        check("un second clic ne refait rien : deja confirme",
+              _deja["data"]["flags"] == 64 and "déjà confirmé" in _deja["data"]["content"])
+
+        # un administrateur passe aussi, meme sans le role
+        _tkP.ETAT_FICHIER = _plT(_tfT.mkdtemp()) / "tickets.json"
+        check("un administrateur peut confirmer sans porter le role Manager",
+              _clic([], perms=str(0x8))["type"] == 7)
+
+        # le role manquant est DIT, pas avale
+        _rolesC = [{"id": "r-mgr", "name": "🛡️ Manager"}]
+        _tkP.ETAT_FICHIER = _plT(_tfT.mkdtemp()) / "tickets.json"
+        _sans = _clic(["r-mgr"])
+        check("role Confirme absent : on le dit au manager",
+              _sans["data"]["flags"] == 64 and "introuvable" in _sans["data"]["content"])
+    finally:
+        _tkP.ETAT_FICHIER, _tkP._api = _savEtat, _savApi3
+
+    _srcW2 = _plT("web_upload.py").read_text(encoding="utf-8")
+    check("le bouton Confirmer est branche sur la route Discord",
+          "_tk.traiter(charge)" in _srcW2
+          and _srcW2.index("_tk.traiter(charge)") < _srcW2.index("_vd.traiter_interaction(charge)"))
 except Exception as _eT2:
     check("perimetre tickets : testable", False, repr(_eT2)[:200])
 
