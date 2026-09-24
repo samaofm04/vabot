@@ -350,6 +350,9 @@ def creer_pour(gid: str, uid: str, pseudo: str, par: str = "",
     d = _etat()
     (d.setdefault("liens", {}))[f"{gid}:{uid}"] = {
         "pseudo": pseudo, "numero": n, "groupe": groupe, "manager": manager,
+        # garde l'identifiant GetMySocial : le deplacement s'en sert, et le
+        # retrouver par shortcode coute une liste entiere a chaque fois
+        "link_id": g.get("id", ""),
         "public_url": g["url"], "shortcode": g["shortcode"],
         "tracking": t["url"], "code": t["code"], "par": str(par),
         "quand": int(_t.time())}
@@ -357,3 +360,93 @@ def creer_pour(gid: str, uid: str, pseudo: str, par: str = "",
     return {"ok": True, "numero": n, "public_url": g["url"], "groupe": groupe,
             "shortcode": g["shortcode"], "tracking": t["url"],
             "provisoire": not mypuls_actif(), "erreur": ""}
+
+
+# ─── synchronisation : la catégorie Discord fait foi ─────────────────────
+def nom_dans_categorie(nom_categorie: str) -> str:
+    """« 🔵┤ Manager YAZID ├🔵 » → « YAZID ». « » si ce n'est pas une catégorie de manager."""
+    m = re.search(r"Manager\s+(.+?)\s*├", str(nom_categorie or ""))
+    return m.group(1).strip() if m else ""
+
+
+def synchroniser(gid: str) -> Dict[str, Any]:
+    """Aligne GetMySocial sur Discord. Rend un compte rendu de ce qui a bougé.
+
+    DEUX CHOSES, et la seconde est la raison d'être de la première :
+
+    1. Chaque manager a son groupe, même sans un seul VA. Un groupe vide dit
+       « ce manager existe et n'a personne » — ce qui se voit, alors qu'un
+       groupe absent ne se voit pas.
+    2. Un VA dont le salon a été déplacé dans la catégorie d'un AUTRE manager
+       voit son lien suivre. La catégorie Discord fait foi : c'est là qu'on
+       déplace les gens à la main, donc c'est elle qui a raison.
+    """
+    import tickets_discord as tk
+    gid = str(gid)
+    equipe = str(config().get("equipe") or EQUIPE_VA)
+    bilan = {"groupes_crees": [], "deplaces": [], "sans_categorie": [], "rates": []}
+
+    connus = groupes(equipe)
+    if connus is None:
+        bilan["rates"].append("groupes GetMySocial illisibles : rien touché")
+        return bilan
+
+    # 1. un groupe par manager, même à zéro VA
+    for m in (tk.managers(gid) or []):
+        nom = tk._nom_court(m)
+        if not nom or nom.lower() in connus:
+            continue
+        if groupe_manager(equipe, nom):
+            bilan["groupes_crees"].append(nom)
+            connus = groupes(equipe) or connus
+
+    # 2. les salons déplacés à la main
+    code, salons = tk._api("GET", f"/guilds/{gid}/channels")
+    if code != 200 or not isinstance(salons, list):
+        bilan["rates"].append(f"salons Discord illisibles (HTTP {code})")
+        return bilan
+    categorie = {str(c["id"]): nom_dans_categorie(c.get("name"))
+                 for c in salons if c.get("type") == 4}
+    parent = {str(c["id"]): str(c.get("parent_id") or "")
+              for c in salons if c.get("type") == 0}
+
+    etat = _etat()
+    liens = etat.setdefault("liens", {})
+    fiches = (tk._etat().get("tickets") or {})
+    change = False
+    for cle, l in liens.items():
+        if not cle.startswith(f"{gid}:") or not l.get("shortcode"):
+            continue
+        salon = str((fiches.get(cle) or {}).get("salon") or "")
+        voulu = categorie.get(parent.get(salon, ""), "")
+        if not voulu:
+            bilan["sans_categorie"].append(l.get("pseudo") or cle)
+            continue
+        if voulu.lower() == str(l.get("groupe") or "").lower():
+            continue
+        lid = l.get("link_id") or _id_du_lien(equipe, l["shortcode"])
+        if not lid:
+            bilan["rates"].append(f'{l.get("pseudo")} : lien introuvable chez GetMySocial')
+            continue
+        if ranger(equipe, lid, voulu):
+            l["groupe"], l["manager"], l["link_id"] = voulu, voulu, lid
+            bilan["deplaces"].append(f'{l.get("pseudo")} → {voulu}')
+            change = True
+        else:
+            bilan["rates"].append(f'{l.get("pseudo")} : rangement refusé')
+    if change:
+        _ecrire(etat)
+    return bilan
+
+
+def _id_du_lien(equipe: str, shortcode: str) -> str:
+    """Retrouve l'identifiant GetMySocial d'un lien par son shortcode."""
+    try:
+        import gms
+        r = gms.list_links_team(equipe, force_refresh=True) or {}
+        for l in (r.get("links") or r.get("data") or []):
+            if str(l.get("shortcode") or "") == shortcode:
+                return str(l.get("id") or "")
+    except Exception as e:
+        print(f"[lien] recherche de {shortcode} : {type(e).__name__}: {e}", flush=True)
+    return ""

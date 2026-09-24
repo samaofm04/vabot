@@ -13569,6 +13569,80 @@ try:
     finally:
         _gmsL._call_tool, _gmsL.assign_link_to_group = _savGC, _savAS
 
+    # --- la synchronisation : la categorie Discord fait foi
+    check("le nom du manager se lit dans le nom de la categorie",
+          _lv.nom_dans_categorie("🔵┤ Manager YAZID ├🔵") == "YAZID"
+          and _lv.nom_dans_categorie("<<< 📚RESOURCES >>>") == "")
+
+    import tickets_discord as _tkS
+    _savS = (_gmsL._call_tool, _gmsL.assign_link_to_group, _tkS._api,
+             _tkS.managers, _tkS._etat, _lv.ETAT_FICHIER)
+    try:
+        import tempfile as _tf5, json as _js5
+        _lv.ETAT_FICHIER = _plL(_tf5.mkdtemp()) / "l.json"
+        _lv.ETAT_FICHIER.write_text(_js5.dumps({"liens": {
+            "g1:99": {"pseudo": "abdoul_9684", "shortcode": "emycute",
+                      "link_id": "lnk_1", "groupe": "YAZID"}}}), encoding="utf-8")
+        _grp = [{"id": "g-yazid", "name": "YAZID"}]
+        _crees, _assigs = [], []
+
+        def _outil(nom, args):
+            if nom == "list_groups":
+                return {"ok": True, "data": {"data": list(_grp)}}
+            if nom == "create_group":
+                _crees.append(args["name"])
+                _grp.append({"id": "g-" + args["name"].lower(), "name": args["name"]})
+                return {"ok": True, "data": {"id": "g-" + args["name"].lower()}}
+            return {"ok": False, "error": "?"}
+        _gmsL._call_tool = _outil
+        _gmsL.assign_link_to_group = lambda lid, gid, **k: (_assigs.append((lid, gid))
+                                                            or {"ok": True})
+        _tkS.managers = lambda g, force=False: [
+            {"user": {"id": "1", "username": "yazid"}},
+            {"user": {"id": "2", "username": "moan"}}]
+        _tkS._etat = lambda: {"tickets": {"g1:99": {"salon": "sal-99"}}}
+        # le salon d abdoul est maintenant sous la categorie de MOAN
+        _tkS._api = lambda me, ch, **kw: (200, [
+            {"id": "cat-y", "type": 4, "name": "🔵┤ Manager YAZID ├🔵"},
+            {"id": "cat-m", "type": 4, "name": "🔵┤ Manager MOAN ├🔵"},
+            {"id": "sal-99", "type": 0, "parent_id": "cat-m"}])
+
+        _b = _lv.synchroniser("g1")
+        check("un manager sans aucun VA recoit quand meme son groupe",
+              _crees == ["MOAN"] and "MOAN" in _b["groupes_crees"])
+        check("un VA deplace dans Discord voit son lien suivre",
+              _b["deplaces"] == ["abdoul_9684 → MOAN"]
+              and _assigs[-1] == ("lnk_1", "g-moan"))
+        check("le nouveau groupe est retenu",
+              _lv.lien_de("g1", "99")["groupe"] == "MOAN")
+
+        _assigs.clear()
+        _b2 = _lv.synchroniser("g1")
+        check("rien ne rebouge quand tout est deja en place",
+              not _b2["deplaces"] and not _assigs)
+
+        # un salon hors categorie de manager : on le SIGNALE, on ne devine pas
+        _tkS._api = lambda me, ch, **kw: (200, [
+            {"id": "cat-y", "type": 4, "name": "🔵┤ Manager YAZID ├🔵"},
+            {"id": "sal-99", "type": 0, "parent_id": ""}])
+        _b3 = _lv.synchroniser("g1")
+        check("un VA hors categorie de manager est signale, pas deplace au hasard",
+              _b3["sans_categorie"] == ["abdoul_9684"] and not _b3["deplaces"])
+
+        # groupes illisibles : on ne touche a RIEN
+        _gmsL._call_tool = lambda nom, args: {"ok": False, "error": "boom"}
+        _assigs.clear()
+        _b4 = _lv.synchroniser("g1")
+        check("groupes illisibles : la synchro ne touche a rien",
+              not _assigs and _b4["rates"] and "illisibles" in _b4["rates"][0])
+    finally:
+        (_gmsL._call_tool, _gmsL.assign_link_to_group, _tkS._api,
+         _tkS.managers, _tkS._etat, _lv.ETAT_FICHIER) = _savS
+
+    _srcWs = _plL("web_upload.py").read_text(encoding="utf-8")
+    check("la synchro tourne dans la boucle du site, pas plus d une fois par demi-heure",
+          "_sync_liens_va(gid)" in _srcWs and "minutes: int = 30" in _srcWs)
+
     check("les shortcodes ressemblent a un compte, pas a un tirage",
           [_lv.mots_doux("emy", i) for i in range(3)] == ["emycute", "emylovee", "emybaby"])
     check("au-dela de la liste, on numerote au lieu de rendre illisible",

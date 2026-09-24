@@ -50710,6 +50710,28 @@ def _start_quete_du_jour_daemon() -> bool:
     return True
 
 
+_SYNC_LIENS_VU = {}
+
+
+def _sync_liens_va(gid: str, minutes: int = 30) -> None:
+    """Realigne GetMySocial sur Discord, au plus une fois par demi-heure.
+
+    Plus souvent ne servirait a rien : un manager se cree une fois, et un VA
+    se deplace a la main. Et l outil GetMySocial est limite en debit.
+    """
+    import time as _t_s
+    if _t_s.time() - float(_SYNC_LIENS_VU.get(gid) or 0) < minutes * 60:
+        return
+    _SYNC_LIENS_VU[gid] = _t_s.time()
+    try:
+        import liens_va as _lv
+        b = _lv.synchroniser(gid)
+        if any(b.get(k) for k in ("groupes_crees", "deplaces", "rates")):
+            print(f"[lien] synchro {gid} : {b}", flush=True)
+    except Exception as e:
+        print(f"[lien] synchro {gid} : {type(e).__name__}: {e}", flush=True)
+
+
 def _start_podium_semaine_daemon() -> bool:
     """Tient le podium à jour, et fige la semaine écoulée chaque lundi à 09h.
 
@@ -50751,6 +50773,9 @@ def _start_podium_semaine_daemon() -> bool:
                     # et le bonus du jour : les trois premiers de la journee
                     if _p.a_rafraichir_bonus(gid):
                         _p.rafraichir_bonus(gid)
+                    # GetMySocial suit Discord : un manager neuf recoit son
+                    # groupe, un VA deplace a la main voit son lien suivre
+                    _sync_liens_va(gid)
             except Exception as e:
                 print(f"[podium] boucle : {type(e).__name__}: {e}", flush=True)
             _t_p.sleep(600)
