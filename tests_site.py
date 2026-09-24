@@ -14703,6 +14703,31 @@ try:
 except Exception as _eV2:
     check("verdict quete : testable", False, repr(_eV2)[:200])
 
+# ------------------------------------------ 36. Outil local : un jeton par serveur
+print()
+print("=" * 70)
+print("Outil local : Threads parle avec Jarvis, le reste avec Siri")
+print("=" * 70)
+try:
+    import importlib.util as _iuJ
+    _spJ = _iuJ.spec_from_file_location("_de_jarvis", "discord_ecrire.py")
+    _deJ = _iuJ.module_from_spec(_spJ); _spJ.loader.exec_module(_deJ)
+    _deJ.TOKEN, _deJ.TOKEN_JARVIS = "jeton-siri", "jeton-jarvis"
+    _deJ._SALON_SERVEUR.clear(); _deJ._SALON_SERVEUR["777"] = _deJ.THREADS_ID
+    check("un chemin vers Threads prend le jeton de Jarvis",
+          _deJ._jeton_pour(f"/guilds/{_deJ.THREADS_ID}/channels") == "jeton-jarvis")
+    check("un salon de Threads prend le jeton de Jarvis",
+          _deJ._jeton_pour("/channels/777/messages") == "jeton-jarvis")
+    check("Twitter et Entretien gardent le jeton de Siri",
+          _deJ._jeton_pour("/guilds/1445108485090971710/channels") == "jeton-siri"
+          and _deJ._jeton_pour("/guilds/1552152470464110703") == "jeton-siri")
+    check("un salon inconnu retombe sur Siri, pas sur Jarvis",
+          _deJ._jeton_pour("/channels/999/messages") == "jeton-siri")
+    check("l outil liste bien les trois serveurs",
+          _deJ.THREADS_ID in _deJ.SERVEURS and len(_deJ.SERVEURS) == 3)
+except Exception as _eJ:
+    check("outil local jarvis : testable", False, repr(_eJ)[:200])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

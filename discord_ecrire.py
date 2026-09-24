@@ -69,6 +69,43 @@ def jeton() -> str:
 
 TOKEN = jeton()
 
+# YouLab THREADS a son propre bot, Jarvis, et Siri n'y est plus : avec le seul
+# jeton de Siri, l'outil se ferait refuser tout ce qui touche Threads. Chaque
+# serveur parle donc avec le bot qui y est.
+THREADS_ID = "1498948161039896586"
+
+
+def jeton_jarvis() -> str:
+    t = (os.environ.get("THREADS_BOT_TOKEN") or "").strip()
+    if t:
+        return t
+    for p in (Path.home() / ".config" / "threads_bot_token",
+              Path(__file__).resolve().parent / "data" / "threads_bot_token"):
+        try:
+            v = p.read_text(encoding="utf-8").strip()
+            if v:
+                return v
+        except Exception:
+            pass
+    return ""
+
+
+TOKEN_JARVIS = jeton_jarvis()
+_SALON_SERVEUR = {}          # salon -> serveur, appris en listant les salons
+
+
+def _jeton_pour(chemin: str) -> str:
+    """Le jeton du bot qui est sur le serveur que vise ce chemin."""
+    import re as _re
+    m = _re.match(r"^/guilds/(\d+)", chemin)
+    gid = m.group(1) if m else ""
+    if not gid:
+        m = _re.match(r"^/channels/(\d+)", chemin)
+        gid = _SALON_SERVEUR.get(m.group(1), "") if m else ""
+    if gid == THREADS_ID and TOKEN_JARVIS:
+        return TOKEN_JARVIS
+    return TOKEN
+
 
 def api(methode: str, chemin: str, corps=None, params=None):
     """(code, données). Ne lève jamais : la page affiche l'erreur."""
@@ -76,8 +113,12 @@ def api(methode: str, chemin: str, corps=None, params=None):
     if params:
         url += "?" + urllib.parse.urlencode(params)
     data = json.dumps(corps).encode() if corps is not None else None
+    if data is None and methode in ("DELETE", "PUT", "PATCH", "POST"):
+        # annonce en JSON sans contenu : Discord repond « invalid JSON » (vu en
+        # faisant quitter un serveur a Siri). Un corps vide passe partout.
+        data = b"{}"
     req = urllib.request.Request(url, data=data, method=methode, headers={
-        "Authorization": "Bot " + TOKEN, "Content-Type": "application/json",
+        "Authorization": "Bot " + _jeton_pour(chemin), "Content-Type": "application/json",
         "User-Agent": "DiscordBot (youl4b-local, 1.0)"})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
@@ -122,7 +163,7 @@ def api_fichiers(methode: str, chemin: str, payload: dict, fichiers):
     """Comme api(), mais avec des pièces jointes."""
     corps, type_contenu = _multipart(payload, fichiers)
     req = urllib.request.Request(API + chemin, data=corps, method=methode, headers={
-        "Authorization": "Bot " + TOKEN, "Content-Type": type_contenu,
+        "Authorization": "Bot " + _jeton_pour(chemin), "Content-Type": type_contenu,
         "User-Agent": "DiscordBot (youl4b-local, 1.0)"})
     try:
         with urllib.request.urlopen(req, timeout=120) as r:
@@ -143,6 +184,8 @@ def salons(gid: str):
     code, rep = api("GET", f"/guilds/{gid}/channels")
     if code != 200 or not isinstance(rep, list):
         return []
+    for c in rep:
+        _SALON_SERVEUR[str(c["id"])] = str(gid)
     cats = {c["id"]: c.get("name") or "" for c in rep if c.get("type") == 4}
     textes = [c for c in rep if c.get("type") in (0, 5)]
     textes.sort(key=lambda c: (cats.get(c.get("parent_id"), "~"), c.get("position", 0)))
