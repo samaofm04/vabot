@@ -197,6 +197,57 @@ def creer_gms(nom: str, url: str) -> Dict[str, Any]:
     return {"ok": False, "erreur": "douze noms essayés, tous pris"}
 
 
+def groupe_manager(equipe: str, nom: str) -> str:
+    """L'identifiant du groupe GetMySocial au nom du manager, créé s'il manque.
+
+    Ranger les liens par manager, c'est retrouver d'un coup d'œil qui suit qui
+    — et repérer celui qui n'a plus personne. Le groupe est cherché par son
+    nom avant d'être créé : deux groupes « YAZID » seraient pires que zéro.
+    """
+    import gms
+    nom = str(nom or "").strip()[:40]
+    if not nom:
+        return ""
+    try:
+        deja = gms.group_id_by_name(equipe, nom)
+        if deja:
+            return str(deja)
+        r = gms._call_tool("create_group", {"name": nom, "team_id": equipe})
+        if not r.get("ok"):
+            print(f"[lien] groupe « {nom} » non créé : {str(r.get('error'))[:100]}",
+                  flush=True)
+            return ""
+        d = r.get("data") or {}
+        if isinstance(d, dict):
+            g = d.get("group") if isinstance(d.get("group"), dict) else d
+            gid = g.get("id") or g.get("_id") or g.get("groupId") or ""
+            if gid:
+                return str(gid)
+        # créé mais identifiant illisible : on relit plutôt que d'abandonner
+        return str(gms.group_id_by_name(equipe, nom) or "")
+    except Exception as e:
+        print(f"[lien] groupe « {nom} » : {type(e).__name__}: {e}", flush=True)
+        return ""
+
+
+def ranger(equipe: str, link_id: str, nom_groupe: str) -> str:
+    """Range un lien dans le groupe du manager. Rend le nom rangé, ou « »."""
+    import gms
+    if not (link_id and nom_groupe):
+        return ""
+    gid = groupe_manager(equipe, nom_groupe)
+    if not gid:
+        return ""
+    try:
+        r = gms.assign_link_to_group(link_id, gid, team_id=equipe)
+        if r.get("ok"):
+            return nom_groupe
+        print(f"[lien] rangement refusé : {str(r.get('error'))[:100]}", flush=True)
+    except Exception as e:
+        print(f"[lien] rangement : {type(e).__name__}: {e}", flush=True)
+    return ""
+
+
 def numero_de(pseudo: str) -> int:
     """Le numero de VA, pris dans la table du podium — une seule source.
 
@@ -217,7 +268,8 @@ def lien_de(gid: str, uid: str) -> Dict[str, Any]:
     return (_etat().get("liens") or {}).get(f"{gid}:{uid}") or {}
 
 
-def creer_pour(gid: str, uid: str, pseudo: str, par: str = "") -> Dict[str, Any]:
+def creer_pour(gid: str, uid: str, pseudo: str, par: str = "",
+               manager: str = "") -> Dict[str, Any]:
     """Toute la chaîne pour un VA. Rend {ok, public_url, tracking, erreur}.
 
     Refuse si ce VA en a déjà un : MyPuls ne sait pas supprimer, un doublon
@@ -255,13 +307,16 @@ def creer_pour(gid: str, uid: str, pseudo: str, par: str = "") -> Dict[str, Any]
                     "erreur": f'GetMySocial : {g.get("erreur")} — le tracking link '
                               f'{t["code"]} existe déjà chez MyPuls, à réutiliser.'}
         return {"ok": False, "erreur": "GetMySocial : " + str(g.get("erreur") or "")}
+    # rangé au nom du manager : un lien perdu dans « Ungrouped » n'apprend rien
+    groupe = ranger(str(config().get("equipe") or EQUIPE_VA), g.get("id", ""), manager)
+
     d = _etat()
     (d.setdefault("liens", {}))[f"{gid}:{uid}"] = {
-        "pseudo": pseudo, "numero": n,
+        "pseudo": pseudo, "numero": n, "groupe": groupe, "manager": manager,
         "public_url": g["url"], "shortcode": g["shortcode"],
         "tracking": t["url"], "code": t["code"], "par": str(par),
         "quand": int(_t.time())}
     _ecrire(d)
-    return {"ok": True, "numero": n, "public_url": g["url"],
+    return {"ok": True, "numero": n, "public_url": g["url"], "groupe": groupe,
             "shortcode": g["shortcode"], "tracking": t["url"],
             "provisoire": not mypuls_actif(), "erreur": ""}

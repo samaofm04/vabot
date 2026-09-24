@@ -437,14 +437,16 @@ def _creer_lien(gid: str, uid: str, par: str, p: Dict[str, Any]) -> Dict[str, An
     pseudo = identifiant(gid, uid)
 
     def travail():
-        r = liens_va.creer_pour(gid, uid, pseudo, par=par)
+        r = liens_va.creer_pour(gid, uid, pseudo, par=par,
+                                manager=nom_manager(gid, uid))
         if r.get("ok"):
             _poser_lien_dans_accueil(gid, uid, salon, r)
             note = ("\n⚠️ Destination provisoire (celle du gabarit) : le tracking "
                     "link MyPuls reste à créer et à rattacher."
                     if r.get("provisoire") else "")
+            rang = f' · rangé dans **{r["groupe"]}**' if r.get("groupe") else ""
             _suite(jeton, f'✅ VA {r.get("numero")} — lien créé pour <@{uid}> : '
-                          f'{r["public_url"]}{note}')
+                          f'{r["public_url"]}{rang}{note}')
             if salon:
                 _api("POST", f"/channels/{salon}/messages",
                      json={"content": f'🔗 <@{uid}>, voici **ton lien** : {r["public_url"]}\n'
@@ -457,6 +459,20 @@ def _creer_lien(gid: str, uid: str, par: str, p: Dict[str, Any]) -> Dict[str, An
 
     _EN_FOND(travail)
     return _differer()
+
+
+def nom_manager(gid: str, uid: str) -> str:
+    """« YAZID » : le manager du VA, tel qu'il nomme sa catégorie Discord.
+
+    Le même nom court des deux côtés — la catégorie Discord et le groupe
+    GetMySocial. Deux écritures différentes auraient donné deux rangements.
+    """
+    fiche = (_etat().get("tickets") or {}).get(f"{gid}:{uid}") or {}
+    mid = str(fiche.get("manager") or "")
+    if not mid:
+        return ""
+    code, m = _api("GET", f"/guilds/{gid}/members/{mid}")
+    return _nom_court(m) if code == 200 and isinstance(m, dict) else ""
 
 
 def _poser_lien_dans_accueil(gid: str, uid: str, salon: str, r: Dict[str, Any]) -> None:

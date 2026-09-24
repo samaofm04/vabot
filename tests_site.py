@@ -13519,6 +13519,36 @@ try:
     from pathlib import Path as _plL
     import tempfile as _tfL, json as _jsL
 
+    # --- le lien est range dans le groupe du manager
+    import gms as _gmsL
+    _savGN, _savGC, _savAS = _gmsL.group_id_by_name, _gmsL._call_tool, _gmsL.assign_link_to_group
+    try:
+        _gmsL.group_id_by_name = lambda tid, nom: "g-yazid" if nom == "YAZID" else None
+        _appelsG = []
+        _gmsL.assign_link_to_group = lambda lid, gid, **k: (_appelsG.append((lid, gid))
+                                                            or {"ok": True})
+        check("un groupe qui existe deja n est PAS recree",
+              _lv.ranger("tm_x", "lnk_1", "YAZID") == "YAZID"
+              and _appelsG == [("lnk_1", "g-yazid")])
+
+        _cree = []
+        _gmsL._call_tool = lambda nom, args: (_cree.append(args)
+                                              or {"ok": True, "data": {"id": "g-moan"}})
+        _appelsG.clear()
+        check("un groupe absent est cree au nom du manager",
+              _lv.ranger("tm_x", "lnk_2", "MOAN") == "MOAN"
+              and _cree and _cree[0]["name"] == "MOAN"
+              and _appelsG == [("lnk_2", "g-moan")])
+
+        _gmsL._call_tool = lambda nom, args: {"ok": False, "error": "refus"}
+        check("un groupe qui ne se cree pas n empeche pas le lien d exister",
+              _lv.ranger("tm_x", "lnk_3", "INCONNU") == "")
+        check("sans manager connu, on ne range nulle part",
+              _lv.ranger("tm_x", "lnk_4", "") == "")
+    finally:
+        _gmsL.group_id_by_name, _gmsL._call_tool = _savGN, _savGC
+        _gmsL.assign_link_to_group = _savAS
+
     check("les shortcodes ressemblent a un compte, pas a un tirage",
           [_lv.mots_doux("emy", i) for i in range(3)] == ["emycute", "emylovee", "emybaby"])
     check("au-dela de la liste, on numerote au lieu de rendre illisible",
