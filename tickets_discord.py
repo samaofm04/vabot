@@ -274,7 +274,7 @@ def poser_essai(gid: str, uid: str) -> bool:
 
 
 def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,
-               gid: str = ""):
+               gid: str = "", lien_actif: bool = True):
     """La rangée de boutons de l'accueil. Seuls les managers peuvent s'en servir.
 
     Un bouton dont l'action est déjà faite disparaît : laisser « Confirmer »
@@ -297,10 +297,14 @@ def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,
         rang.append({"type": 2, "style": 1, "label": "Créer son lien",
                      "custom_id": f"lien:new:{uid}", "emoji": {"name": "🔗"}})
     elif a_un_lien:
-        # rouge, et il demande confirmation : l'adresse est publique sur
-        # Twitter, la supprimer casse les posts deja publies
-        rang.append({"type": 2, "style": 4, "label": "Supprimer le lien",
-                     "custom_id": f"lien:del:{uid}", "emoji": {"name": "🗑️"}})
+        # Couper, pas supprimer : le VA peut s'y remettre, son adresse est deja
+        # postee sur Twitter, et un lien coupe garde son historique de clics.
+        if lien_actif:
+            rang.append({"type": 2, "style": 4, "label": "Désactiver le lien",
+                         "custom_id": f"lien:off:{uid}", "emoji": {"name": "🚫"}})
+        else:
+            rang.append({"type": 2, "style": 3, "label": "Réactiver le lien",
+                         "custom_id": f"lien:on:{uid}", "emoji": {"name": "✅"}})
     return [{"type": 1, "components": rang}] if rang else []
 
 
@@ -387,7 +391,7 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
     cid = str(((p.get("data") or {}).get("custom_id")) or "")
     if not (cid.startswith("essai:ok:") or cid.startswith("lien:new:")
-            or cid.startswith("lien:del:") or cid.startswith("lien:delok:")):
+            or cid.startswith("lien:off:") or cid.startswith("lien:on:")):
         return None
     gid = str(p.get("guild_id") or "")
     uid = cid.split(":", 2)[2]
@@ -402,10 +406,8 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
     if cid.startswith("lien:new:"):
         return _creer_lien(gid, uid, qui, p)
-    if cid.startswith("lien:del:"):
-        return _demander_suppression(gid, uid)
-    if cid.startswith("lien:delok:"):
-        return _supprimer_lien(gid, uid, p)
+    if cid.startswith("lien:off:") or cid.startswith("lien:on:"):
+        return _basculer_lien(gid, uid, p, actif=cid.startswith("lien:on:"))
 
     fiche = (_etat().get("tickets") or {}).get(f"{gid}:{uid}") or {}
     if fiche.get("confirme"):
@@ -436,60 +438,47 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                                 "allowed_mentions": {"parse": []}}}
 
 
-def _demander_suppression(gid: str, uid: str) -> Dict[str, Any]:
-    """Premier clic : on montre CE QU'ON VA casser, et on attend un second clic.
-
-    L'adresse est publique sur Twitter : la supprimer casse les posts déjà
-    publiés. Un clic de trop ne doit pas suffire.
-    """
+def _basculer_lien(gid: str, uid: str, p: Dict[str, Any], actif: bool) -> Dict[str, Any]:
+    """Coupe ou remet en service le lien, et retourne le bouton en face."""
     import liens_va
-    l = liens_va.lien_de(gid, uid)
-    if not l.get("public_url"):
-        return _ephemere("Ce VA n'a pas de lien à supprimer.")
-    return {"type": 4, "data": {"flags": 64,
-            "content": f'Supprimer **{l["public_url"]}** de <@{uid}> ?\n'
-                       "⚠️ Cette adresse est publique : ses posts Twitter "
-                       "cesseront de fonctionner. C'est définitif.",
-            "allowed_mentions": {"parse": []},
-            "components": [{"type": 1, "components": [
-                {"type": 2, "style": 4, "label": "Oui, supprimer",
-                 "custom_id": f"lien:delok:{uid}", "emoji": {"name": "🗑️"}}]}]}}
-
-
-def _supprimer_lien(gid: str, uid: str, p: Dict[str, Any]) -> Dict[str, Any]:
-    """Second clic : on supprime, et l'accueil épinglé redevient comme avant."""
-    import liens_va
-    salon = str(p.get("channel_id") or "")
-    r = liens_va.supprimer(gid, uid)
+    r = liens_va.basculer(gid, uid, actif)
     if not r.get("ok"):
-        return {"type": 7, "data": {"content": "✕ " + str(r.get("erreur") or "échec"),
-                                    "components": []}}
-    _retirer_lien_de_accueil(gid, uid, salon)
-    return {"type": 7, "data": {"content": f'🗑️ Lien supprimé : {r.get("url") or ""}\n'
-                                           "Le bouton « Créer son lien » est revenu.",
-                                "components": []}}
+        return _ephemere("✕ " + str(r.get("erreur") or "échec"))
+    fiche = (_etat().get("tickets") or {}).get(f"{gid}:{uid}") or {}
+    _marquer_lien_dans_accueil(gid, uid, str(p.get("channel_id") or ""), actif)
+    mot = "remis en service" if actif else "coupé"
+    return _ephemere(f'{"✅" if actif else "🚫"} Lien {mot} : {r.get("url") or ""}\n'
+                     + ("Ses clics recomptent." if actif else
+                        "Il ne renvoie plus personne. Son historique de clics est gardé, "
+                        "tu peux le rallumer quand tu veux."))
 
 
-def _retirer_lien_de_accueil(gid: str, uid: str, salon: str) -> None:
-    """Enlève le bloc du lien de l'accueil épinglé et remet le bouton."""
+def _marquer_lien_dans_accueil(gid: str, uid: str, salon: str, actif: bool) -> None:
+    """Dit dans l'accueil épinglé que le lien est coupé, et retourne le bouton.
+
+    Le VA doit comprendre pourquoi son lien ne marche plus sans avoir à
+    demander : c'est écrit là où il regarde déjà.
+    """
     fiche = (_etat().get("tickets") or {}).get(f"{gid}:{uid}") or {}
     mid = str(fiche.get("accueil") or "")
     if not (mid and salon):
         return
     code, msg = _api("GET", f"/channels/{salon}/messages/{mid}")
     if code != 200:
-        print(f"[lien] accueil illisible (HTTP {code}) : bloc du lien non retiré",
+        print(f"[lien] accueil illisible (HTTP {code}) : etat du lien non affiché",
               flush=True)
         return
     embeds = msg.get("embeds") or [{}]
     d = str(embeds[0].get("description") or "")
-    i = d.find("🔗 **Ton lien**")
-    if i >= 0:
-        embeds[0]["description"] = d[:i].rstrip()
+    marque = "\n🚫 _Lien coupé par ton manager — il ne renvoie plus personne._"
+    d = d.replace(marque, "")
+    if not actif:
+        d = d.rstrip() + marque
+    embeds[0]["description"] = d[:4096]
     _api("PATCH", f"/channels/{salon}/messages/{mid}",
          json={"embeds": embeds,
                "components": boutons_va(uid, confirme=bool(fiche.get("confirme")),
-                                        a_un_lien=False, gid=gid)})
+                                        a_un_lien=True, gid=gid, lien_actif=actif)})
 
 
 def _creer_lien(gid: str, uid: str, par: str, p: Dict[str, Any]) -> Dict[str, Any]:

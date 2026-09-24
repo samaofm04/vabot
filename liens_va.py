@@ -367,6 +367,40 @@ def creer_pour(gid: str, uid: str, pseudo: str, par: str = "",
             "provisoire": not mypuls_actif(), "erreur": ""}
 
 
+def basculer(gid: str, uid: str, actif: bool) -> Dict[str, Any]:
+    """Coupe ou remet en service le lien d'un VA. Rend {ok, url, actif, erreur}.
+
+    Couper plutôt que supprimer : un VA qui ne bosse pas peut s'y remettre, et
+    son adresse est déjà postée sur Twitter. Un lien coupé garde son historique
+    de clics et se rallume d'un clic — un lien supprimé ne revient jamais.
+    """
+    import gms
+    l = lien_de(gid, uid)
+    if not l.get("shortcode"):
+        return {"ok": False, "erreur": "ce VA n'a pas de lien"}
+    equipe = str(config().get("equipe") or EQUIPE_VA)
+    lid = str(l.get("link_id") or "") or _id_du_lien(equipe, l["shortcode"])
+    if not lid:
+        return {"ok": False, "erreur": "lien introuvable chez GetMySocial"}
+    try:
+        r = gms.enable_link(lid) if actif else gms.disable_link(lid)
+    except Exception as e:
+        return {"ok": False, "erreur": f"{type(e).__name__}: {str(e)[:100]}"}
+    if not r.get("ok"):
+        return {"ok": False, "erreur": str(r.get("error") or "refus GetMySocial")[:140]}
+    d = _etat()
+    fiche = (d.setdefault("liens", {})).setdefault(f"{gid}:{uid}", {})
+    fiche["actif"] = bool(actif)
+    fiche["link_id"] = lid
+    _ecrire(d)
+    return {"ok": True, "url": l.get("public_url", ""), "actif": bool(actif), "erreur": ""}
+
+
+def est_actif(gid: str, uid: str) -> bool:
+    """Un lien est en service tant qu'on ne l'a pas coupé."""
+    return bool((lien_de(gid, uid) or {}).get("actif", True))
+
+
 def supprimer(gid: str, uid: str) -> Dict[str, Any]:
     """Efface le lien GetMySocial d'un VA. Rend {ok, url, erreur}.
 

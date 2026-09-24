@@ -13219,78 +13219,69 @@ try:
     finally:
         _tkP._api, _tkP.ETAT_FICHIER = _savApi4, _savEtat4
 
-    # --- supprimer le lien : deux clics, et l accueil redevient comme avant
-    check("le bouton rouge n apparait QUE si le VA a un lien",
-          "lien:del:9" in str(_tkP.boutons_va("9", a_un_lien=True))
-          and "lien:del:9" not in str(_tkP.boutons_va("9")))
-
+    # --- desactiver le lien d un VA qui ne bosse pas (et le rallumer)
     import liens_va as _lv
-    # « g1 » est un serveur de test : le garde-fou n autorise les liens que sur
-    # YouLab TWITTER, on l ouvre le temps du test
     _lv.SERVEURS.add("g1")
-    _savSup, _savApi5, _savEt5 = _lv.supprimer, _tkP._api, _tkP.ETAT_FICHIER
+    check("le bouton rouge n apparait QUE si le VA a un lien",
+          "lien:off:9" in str(_tkP.boutons_va("9", a_un_lien=True, gid="g1"))
+          and "lien:off:9" not in str(_tkP.boutons_va("9", gid="g1")))
+    check("un lien coupe montre « Reactiver », pas « Desactiver »",
+          "lien:on:9" in str(_tkP.boutons_va("9", a_un_lien=True, gid="g1",
+                                             lien_actif=False)))
+
+    _savB, _savApi5, _savEt5 = _lv.basculer, _tkP._api, _tkP.ETAT_FICHIER
     try:
         import tempfile as _tf6, json as _js6
         _tkP.ETAT_FICHIER = _plT(_tf6.mkdtemp()) / "t.json"
         _tkP.ETAT_FICHIER.write_text(_js6.dumps(
             {"tickets": {"g1:99": {"salon": "sal", "accueil": "M1"}}}), encoding="utf-8")
-        _savLien = _lv.lien_de
-        _lv.lien_de = lambda g, u: {"public_url": "https://getmysocial.com/emycute",
-                                    "shortcode": "emycute"}
-        _dem = _tkP.traiter({"type": 3, "guild_id": "g1",
-                             "data": {"custom_id": "lien:del:99"},
-                             "member": {"roles": [], "permissions": str(0x8),
-                                        "user": {"id": "m"}}})
-        check("le premier clic ne supprime RIEN : il demande confirmation",
-              _dem["data"]["flags"] == 64
-              and "lien:delok:99" in str(_dem["data"]["components"]))
-        check("il montre l adresse exacte qui va sauter, et previent",
-              "emycute" in _dem["data"]["content"]
-              and "publique" in _dem["data"]["content"])
-
         _patchs = []
         _msg = {"id": "M1", "embeds": [{"title": "👋", "description":
-                "bla\n\n🔗 **Ton lien** — celui que tu postes :\nhttps://x/y"}]}
+                "bla\n\n🔗 **Ton lien** :\nhttps://x/y"}]}
 
         def _api5(me, ch, **kw):
             if me == "GET" and ch.endswith("/messages/M1"):
                 return 200, _msg
             if me == "PATCH":
                 _patchs.append(kw.get("json") or {})
+                _msg["embeds"] = (kw.get("json") or {}).get("embeds") or _msg["embeds"]
             return 200, {}
         _tkP._api = _api5
-        _lv.supprimer = lambda g, u: {"ok": True, "url": "https://getmysocial.com/emycute"}
-        _ok = _tkP.traiter({"type": 3, "guild_id": "g1", "channel_id": "sal",
-                            "data": {"custom_id": "lien:delok:99"},
-                            "member": {"roles": [], "permissions": str(0x8),
-                                       "user": {"id": "m"}}})
-        check("le second clic supprime et le dit", "supprimé" in _ok["data"]["content"])
-        _d = _patchs[-1]["embeds"][0]["description"]
-        check("le bloc du lien disparait de l accueil epingle",
-              "Ton lien" not in _d and _d.strip() == "bla")
-        _btns = [b["custom_id"] for r in _patchs[-1]["components"] for b in r["components"]]
-        check("le bouton « Creer son lien » revient",
-              any(x.startswith("lien:new:") for x in _btns)
-              and not [x for x in _btns if x.startswith("lien:del:")])
+        _vus = []
+        _lv.basculer = lambda g, u, actif: (_vus.append(actif)
+                                            or {"ok": True, "url": "https://x/y",
+                                                "actif": actif})
 
-        _lv.supprimer = lambda g, u: {"ok": False, "erreur": "GetMySocial a refusé"}
+        def _clic(cid, perms=str(0x8)):
+            return _tkP.traiter({"type": 3, "guild_id": "g1", "channel_id": "sal",
+                                 "data": {"custom_id": cid},
+                                 "member": {"roles": [], "permissions": perms,
+                                            "user": {"id": "m"}}})
+        _off = _clic("lien:off:99")
+        check("un clic coupe le lien", _vus == [False] and "coupé" in _off["data"]["content"])
+        check("le message dit que l historique de clics est garde",
+              "historique" in _off["data"]["content"])
+        _d = _patchs[-1]["embeds"][0]["description"]
+        check("le VA lit dans son accueil que son lien est coupe",
+              "Lien coupé par ton manager" in _d)
+        _btns = [b["custom_id"] for r in _patchs[-1]["components"] for b in r["components"]]
+        check("le bouton devient « Reactiver »", any(x.startswith("lien:on:") for x in _btns))
+
+        _on = _clic("lien:on:99")
+        check("le second clic le rallume", _vus == [False, True] and "service" in _on["data"]["content"])
+        _d2 = _patchs[-1]["embeds"][0]["description"]
+        check("la mention « coupe » disparait, et n est pas ecrite deux fois",
+              "Lien coupé" not in _d2 and _d2.count("Ton lien") == 1)
+
+        _lv.basculer = lambda g, u, actif: {"ok": False, "erreur": "GetMySocial a refusé"}
         _patchs.clear()
-        _ko = _tkP.traiter({"type": 3, "guild_id": "g1", "channel_id": "sal",
-                            "data": {"custom_id": "lien:delok:99"},
-                            "member": {"roles": [], "permissions": str(0x8),
-                                       "user": {"id": "m"}}})
+        _ko = _clic("lien:off:99")
         check("un echec est dit, et l accueil n est PAS touche",
               "refusé" in _ko["data"]["content"] and not _patchs)
-
-        _refus = _tkP.traiter({"type": 3, "guild_id": "g1",
-                               "data": {"custom_id": "lien:del:99"},
-                               "member": {"roles": [], "permissions": "0",
-                                          "user": {"id": "x"}}})
-        check("un non-manager ne peut pas supprimer un lien",
-              "managers" in _refus["data"]["content"])
-        _lv.lien_de = _savLien
+        check("un non-manager ne peut pas couper un lien",
+              "managers" in _clic("lien:off:99", perms="0")["data"]["content"])
     finally:
-        _lv.supprimer, _tkP._api, _tkP.ETAT_FICHIER = _savSup, _savApi5, _savEt5
+        _lv.basculer, _tkP._api, _tkP.ETAT_FICHIER = _savB, _savApi5, _savEt5
         _lv.SERVEURS.discard("g1")
 
     check("l accueil garde son identifiant pour etre complete plus tard",
