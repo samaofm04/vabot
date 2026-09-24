@@ -367,6 +367,47 @@ def creer_pour(gid: str, uid: str, pseudo: str, par: str = "",
             "provisoire": not mypuls_actif(), "erreur": ""}
 
 
+def rebrancher(gid: str, uid: str) -> Dict[str, Any]:
+    """Donne son propre tracking link à un VA qui n'en avait pas.
+
+    Sert aux liens créés avant que MyPuls soit ouvert : ils pointaient sur
+    l'adresse générale de la modèle, donc leurs abonnés n'étaient rattachés à
+    personne. L'ADRESSE PUBLIQUE NE CHANGE PAS — seule la destination bouge —
+    donc ce que le VA a déjà posté sur Twitter continue de marcher.
+    """
+    import gms
+    l = lien_de(gid, uid)
+    if not l.get("shortcode"):
+        return {"ok": False, "erreur": "ce VA n'a pas de lien"}
+    if l.get("tracking"):
+        return {"ok": False, "erreur": "ce VA a déjà son tracking link : "
+                                       + str(l["tracking"])}
+    if not mypuls_actif():
+        return {"ok": False, "erreur": "la création MyPuls est fermée"}
+    equipe = str(config().get("equipe") or EQUIPE_VA)
+    lid = str(l.get("link_id") or "") or _id_du_lien(equipe, l["shortcode"])
+    if not lid:
+        return {"ok": False, "erreur": "lien introuvable chez GetMySocial"}
+
+    nom = f'Twitter VA {l.get("numero") or "?"} @{l.get("pseudo") or uid}'[:60]
+    t = creer_tracking(nom)
+    if not t.get("ok"):
+        return {"ok": False, "erreur": "MyPuls : " + t.get("erreur", "")}
+    r = gms._call_tool("update_link", {"link_id": lid, "url": t["url"],
+                                       "display_name": nom, "typeLink": "directlink"})
+    if not r.get("ok"):
+        # le tracking link existe et ne peut pas etre defait : on le nomme
+        return {"ok": False, "tracking": t["url"],
+                "erreur": f'GetMySocial : {str(r.get("error"))[:100]} — le tracking '
+                          f'link {t["code"]} est cree, a rebrancher a la main.'}
+    d = _etat()
+    fiche = (d.setdefault("liens", {})).setdefault(f"{gid}:{uid}", {})
+    fiche["tracking"], fiche["code"], fiche["link_id"] = t["url"], t["code"], lid
+    _ecrire(d)
+    return {"ok": True, "public_url": l.get("public_url", ""), "tracking": t["url"],
+            "code": t["code"], "erreur": ""}
+
+
 def basculer(gid: str, uid: str, actif: bool) -> Dict[str, Any]:
     """Coupe ou remet en service le lien d'un VA. Rend {ok, url, actif, erreur}.
 

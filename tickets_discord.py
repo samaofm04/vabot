@@ -569,12 +569,17 @@ def _poser_lien_dans_accueil(gid: str, uid: str, salon: str, r: Dict[str, Any]) 
         return
     embeds = msg.get("embeds") or [{}]
     d = str(embeds[0].get("description") or "")
-    if r["public_url"] not in d:
-        bas = (f'\n\n🔗 **Ton lien** — celui que tu postes sur Twitter :\n'
-               f'{r["public_url"]}\n_Il compte tes subs pour le podium._')
-        if r.get("provisoire"):
-            bas += "\n_(destination provisoire, à rattacher côté MyPuls)_"
-        embeds[0]["description"] = (d.rstrip() + bas)[:4096]
+    # on REFAIT le bloc au lieu de l'ajouter seulement s'il manque : un lien
+    # rebranché sur son propre tracking link gardait sinon la mention
+    # « destination provisoire » alors qu'elle n'était plus vraie
+    i = d.find("🔗 **Ton lien**")
+    if i >= 0:
+        d = d[:i].rstrip()
+    bas = (f'\n\n🔗 **Ton lien** — celui que tu postes sur Twitter :\n'
+           f'{r["public_url"]}\n_Il compte tes subs pour le podium._')
+    if r.get("provisoire"):
+        bas += "\n_(destination provisoire, à rattacher côté MyPuls)_"
+    embeds[0]["description"] = (d.rstrip() + bas)[:4096]
     confirme = bool(fiche.get("confirme"))
     _api("PATCH", f"/channels/{salon}/messages/{mid}",
          json={"embeds": embeds,

@@ -13216,6 +13216,17 @@ try:
                                       {"public_url": "https://getmysocial.com/emycute"})
         check("le lien n est pas ecrit deux fois",
               _patchs[-1]["embeds"][0]["description"].count("getmysocial.com/emycute") == 1)
+        # un lien rebranche sur son propre tracking link perd la mention
+        # « provisoire » : le bloc est REFAIT, pas seulement ajoute
+        _msgs["M1"]["embeds"][0]["description"] = (
+            "bla\n\n🔗 **Ton lien** :\nhttps://getmysocial.com/emycute\n"
+            "_(destination provisoire, à rattacher côté MyPuls)_")
+        _patchs.clear()
+        _tkP._poser_lien_dans_accueil("g1", "99", "sal",
+                                      {"public_url": "https://getmysocial.com/emycute"})
+        _dd = _patchs[-1]["embeds"][0]["description"]
+        check("la mention provisoire disparait quand elle n est plus vraie",
+              "provisoire" not in _dd and _dd.count("getmysocial.com/emycute") == 1)
     finally:
         _tkP._api, _tkP.ETAT_FICHIER = _savApi4, _savEtat4
 
