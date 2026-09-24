@@ -647,6 +647,15 @@ def poster_podium(gid: str, jour: Optional[dt.date] = None,
         print(f"[podium] envoi refusé (HTTP {code}) {str(rep)[:160]}", flush=True)
         return ""
     postes[cle] = str(rep["id"])
+    # le podium public reste anonyme ; le nom, le montant et l'adresse ne se
+    # disent que dans le salon prive du gagnant, son manager mentionne
+    try:
+        import suivi_va
+        b = suivi_va.annoncer_primes(gid, cl, debut, fin)
+        if any(b.values()):
+            print(f"[podium] primes annoncees : {b}", flush=True)
+    except Exception as e:
+        print(f"[podium] annonce des primes : {type(e).__name__}: {e}", flush=True)
     # Le message vivant de la semaine ecoulee a fini son office. Mais le lundi
     # a 09h il montre deja la semaine QUI COMMENCE (elle a bascule a 00h) :
     # le jeter sans regarder laissait un « SEMAINE EN COURS » orphelin fige

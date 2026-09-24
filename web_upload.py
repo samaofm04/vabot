@@ -50732,6 +50732,26 @@ def _sync_liens_va(gid: str, minutes: int = 30) -> None:
         print(f"[lien] synchro {gid} : {type(e).__name__}: {e}", flush=True)
 
 
+_SUIVI_VU = {}
+
+
+def _suivi_va(gid: str, heures: int = 24) -> None:
+    """Qui dort, qui a fini son essai. Une fois par jour : les clics d un VA ne
+    changent pas assez vite pour valoir un relevé toutes les dix minutes, et
+    chaque VA coute un appel a GetMySocial."""
+    import time as _t_v
+    if _t_v.time() - float(_SUIVI_VU.get(gid) or 0) < heures * 3600:
+        return
+    _SUIVI_VU[gid] = _t_v.time()
+    try:
+        import suivi_va as _sv
+        b = _sv.verifier(gid)
+        if any(b.values()):
+            print(f"[suivi] {gid} : {b}", flush=True)
+    except Exception as e:
+        print(f"[suivi] {gid} : {type(e).__name__}: {e}", flush=True)
+
+
 def _start_podium_semaine_daemon() -> bool:
     """Tient le podium à jour, et fige la semaine écoulée chaque lundi à 09h.
 
@@ -50781,6 +50801,7 @@ def _start_podium_semaine_daemon() -> bool:
                     # GetMySocial suit Discord : un manager neuf recoit son
                     # groupe, un VA deplace a la main voit son lien suivre
                     _sync_liens_va(gid)
+                    _suivi_va(gid)
             except Exception as e:
                 print(f"[podium] boucle : {type(e).__name__}: {e}", flush=True)
             _t_p.sleep(600)

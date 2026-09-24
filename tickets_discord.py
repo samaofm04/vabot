@@ -305,6 +305,9 @@ def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,
         else:
             rang.append({"type": 2, "style": 3, "label": "Réactiver le lien",
                          "custom_id": f"lien:on:{uid}", "emoji": {"name": "✅"}})
+    # celui-ci est pour le VA lui-meme, pas pour son manager
+    rang.append({"type": 2, "style": 2, "label": "Mon adresse USDC",
+                 "custom_id": f"usdc:set:{uid}", "emoji": {"name": "💳"}})
     return [{"type": 1, "components": rang}] if rang else []
 
 
@@ -387,16 +390,26 @@ def _ephemere(txt: str) -> Dict[str, Any]:
 def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Le bouton « Confirmer le VA ». Rend None quand ce n'est pas le nôtre."""
     p = p or {}
-    if p.get("type") != 3:
+    if p.get("type") not in (3, 5):
         return None
     cid = str(((p.get("data") or {}).get("custom_id")) or "")
+    if p.get("type") == 5:                      # une fenêtre de saisie renvoyée
+        return _recevoir_adresse(p)
     if not (cid.startswith("essai:ok:") or cid.startswith("lien:new:")
-            or cid.startswith("lien:off:") or cid.startswith("lien:on:")):
+            or cid.startswith("lien:off:") or cid.startswith("lien:on:")
+            or cid.startswith("usdc:set:")):
         return None
     gid = str(p.get("guild_id") or "")
     uid = cid.split(":", 2)[2]
     membre = p.get("member") or {}
     qui = str(((membre.get("user") or {}).get("id")) or "")
+
+    # L'adresse de paiement est la seule chose que le VA remplit lui-même :
+    # c'est la SIENNE, et personne d'autre ne doit pouvoir la changer.
+    if cid.startswith("usdc:set:"):
+        if qui != uid and not _est_manager_brut(gid, membre):
+            return _ephemere("Seul ce VA peut renseigner son adresse.")
+        return _fenetre_adresse(gid, uid)
 
     rid = role_manager(gid)
     permissions = int(str(membre.get("permissions") or "0") or 0)
@@ -436,6 +449,50 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                                 "content": (msg.get("content") or "")
                                            + f"\n⭐ Confirmé par <@{qui}>." + alerte,
                                 "allowed_mentions": {"parse": []}}}
+
+
+def _est_manager_brut(gid: str, membre: Dict[str, Any]) -> bool:
+    rid = role_manager(gid)
+    perms = int(str(membre.get("permissions") or "0") or 0)
+    return bool(perms & 0x8) or bool(rid and rid in (membre.get("roles") or []))
+
+
+def _fenetre_adresse(gid: str, uid: str) -> Dict[str, Any]:
+    """La fenêtre de saisie : SEVEN ne lit aucun message, c'est sa seule prise."""
+    import suivi_va
+    deja = suivi_va.adresse_de(gid, uid)
+    return {"type": 9, "data": {
+        "custom_id": f"usdc:form:{uid}",
+        "title": "Ton adresse USDC (réseau Solana)",
+        "components": [{"type": 1, "components": [{
+            "type": 4, "custom_id": "adresse", "style": 1,
+            "label": "Adresse Solana", "min_length": 32, "max_length": 44,
+            "required": True, "value": deja,
+            "placeholder": "C'est là que tes primes seront envoyées"}]}]}}
+
+
+def _recevoir_adresse(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """La fenêtre revient remplie."""
+    import suivi_va
+    cid = str(((p.get("data") or {}).get("custom_id")) or "")
+    if not cid.startswith("usdc:form:"):
+        return None
+    gid = str(p.get("guild_id") or "")
+    uid = cid.split(":", 2)[2]
+    qui = str((((p.get("member") or {}).get("user")) or {}).get("id") or "")
+    if qui != uid and not _est_manager_brut(gid, p.get("member") or {}):
+        return _ephemere("Seul ce VA peut renseigner son adresse.")
+    valeur = ""
+    for rang in ((p.get("data") or {}).get("components") or []):
+        for champ in (rang.get("components") or []):
+            if champ.get("custom_id") == "adresse":
+                valeur = str(champ.get("value") or "")
+    r = suivi_va.poser_adresse(gid, uid, valeur)
+    if not r.get("ok"):
+        return _ephemere("✕ " + r["erreur"])
+    a = r["adresse"]
+    return _ephemere(f"✅ Adresse enregistrée : `{a[:6]}…{a[-4:]}`\n"
+                     "Tes primes partiront là-dessus, sans avoir à la redemander.")
 
 
 def _basculer_lien(gid: str, uid: str, p: Dict[str, Any], actif: bool) -> Dict[str, Any]:

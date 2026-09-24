@@ -13588,6 +13588,129 @@ try:
 except Exception as _eV:
     check("vider : testable", False, repr(_eV)[:200])
 
+# ------------------------------------- 33. Suivi des VA (sommeil, essai, paie)
+print()
+print("=" * 70)
+print("Suivi des VA : qui dort, qui a fini son essai, qui touche sa prime")
+print("=" * 70)
+try:
+    import datetime as _dtS
+    import suivi_va as _sv
+    import liens_va as _lvS
+    import tickets_discord as _tkS2
+    import gms as _gmsS
+    from pathlib import Path as _plS
+    import tempfile as _tfS, json as _jsS
+
+    check("une adresse Solana valide est acceptee",
+          _sv.adresse_valide("7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU"))
+    check("le base58 exclut 0, O, I et l",
+          not _sv.adresse_valide("0OIl" + "x" * 40))
+    check("trop court est refuse", not _sv.adresse_valide("abc"))
+
+    _savS2 = (_sv.ETAT_FICHIER, _sv.clics_us, _tkS2._api, _tkS2._etat,
+              _tkS2.confirmer, _lvS._etat, _lvS.est_actif)
+    try:
+        _sv.ETAT_FICHIER = _plS(_tfS.mkdtemp()) / "s.json"
+        _r = _sv.poser_adresse("g1", "99", "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU")
+        check("l adresse est gardee et relue", _r["ok"]
+              and _sv.adresse_de("g1", "99").startswith("7xKX"))
+        check("une adresse invalide n ecrase pas la bonne",
+              _sv.poser_adresse("g1", "99", "nul")["ok"] is False
+              and _sv.adresse_de("g1", "99").startswith("7xKX"))
+
+        _lvS._etat = lambda: {"liens": {
+            "g1:99": {"pseudo": "dodo", "link_id": "lnk_d", "numero": 31},
+            "g1:88": {"pseudo": "bosseur", "link_id": "lnk_b", "numero": 32}}}
+        _tkS2._etat = lambda: {"tickets": {
+            "g1:99": {"salon": "sal99", "manager": "m1", "essai": False},
+            "g1:88": {"salon": "sal88", "manager": "m1", "essai": True}}}
+        _lvS.est_actif = lambda g, u: True
+        _postes = []
+        _tkS2._api = lambda me, ch, **kw: (_postes.append((me, ch, kw.get("json") or {}))
+                                           or (200, {}))
+        _confs = []
+        _tkS2.confirmer = lambda g, u, par="": (_confs.append(u) or {"ok": True})
+
+        # dodo n a aucun clic, bosseur en a 80 (objectif 50)
+        _sv.clics_us = lambda lid, d0, d1: 0 if lid == "lnk_d" else 80
+        _b = _sv.verifier("g1", jour=_dtS.date(2026, 9, 24))
+        check("le VA sans un seul clic est signale a son manager",
+              _b["dorment"] == ["dodo"])
+        check("son manager est mentionne dans SON salon",
+              any(c == "/channels/sal99/messages" and "m1" in str(j.get("content"))
+                  for m, c, j in _postes))
+        check("l essai est valide tout seul quand l objectif est atteint",
+              _confs == ["88"] and _b["confirmes"] == ["bosseur (80 clics)"])
+
+        # on ne redit pas la meme alerte le lendemain
+        _postes.clear()
+        _b2 = _sv.verifier("g1", jour=_dtS.date(2026, 9, 25))
+        check("une alerte ne se repete pas tous les jours", not _b2["dorment"])
+
+        # il se remet au travail : l alerte est oubliee
+        _sv.clics_us = lambda lid, d0, d1: 3
+        _b3 = _sv.verifier("g1", jour=_dtS.date(2026, 9, 26))
+        check("le VA qui se remet au travail est retire des alertes",
+              _b3["reveilles"] == ["dodo"])
+
+        # LE PIEGE : releve illisible. On n accuse personne sur un « je ne sais pas ».
+        _sv.clics_us = lambda lid, d0, d1: None
+        _postes.clear()
+        _b4 = _sv.verifier("g1", jour=_dtS.date(2026, 10, 10))
+        check("un releve illisible ne reveille personne et ne confirme rien",
+              not _b4["dorment"] and not _b4["confirmes"] and "dodo" in _b4["illisibles"]
+              and not [1 for m, c, j in _postes if m == "POST"])
+
+        # un lien deja coupe n a pas besoin qu on previenne
+        _sv.clics_us = lambda lid, d0, d1: 0
+        _lvS.est_actif = lambda g, u: False
+        _b5 = _sv.verifier("g1", jour=_dtS.date(2026, 11, 1))
+        check("un lien deja coupe ne declenche plus d alerte", not _b5["dorment"])
+    finally:
+        (_sv.ETAT_FICHIER, _sv.clics_us, _tkS2._api, _tkS2._etat,
+         _tkS2.confirmer, _lvS._etat, _lvS.est_actif) = _savS2
+    # --- la paie du lundi : nommee, mais seulement en prive
+    _savP2 = (_sv.ETAT_FICHIER, _tkS2._api, _tkS2._etat, _lvS._etat)
+    try:
+        _sv.ETAT_FICHIER = _plS(_tfS.mkdtemp()) / "p.json"
+        _lvS._etat = lambda: {"liens": {
+            "g1:99": {"pseudo": "premier", "numero": 31},
+            "g1:88": {"pseudo": "second", "numero": 32}}}
+        _tkS2._etat = lambda: {"tickets": {
+            "g1:99": {"salon": "sal99", "manager": "m1"},
+            "g1:88": {"salon": "sal88", "manager": "m2"}}}
+        _env = []
+        _tkS2._api = lambda me, ch, **kw: (_env.append((ch, kw.get("json") or {}))
+                                           or (200, {}))
+        _sv.poser_adresse("g1", "99", "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU")
+        _cl = {"lignes": [{"va": "VA 31", "clics": 900}, {"va": "VA 32", "clics": 400},
+                          {"va": "VA 99", "clics": 10}]}
+        _bp = _sv.annoncer_primes("g1", _cl, _dtS.date(2026, 9, 21), _dtS.date(2026, 9, 27))
+        check("le premier est prevenu dans SON salon, avec son montant",
+              "premier : 10.00$" in _bp["dits"]
+              and any(c == "/channels/sal99/messages" and "10.00$" in str(j) for c, j in _env))
+        check("son adresse est rappelee, pour que le manager paie sans redemander",
+              any("7xKXtg2CW8" in str(j) for c, j in _env))
+        check("celui qui n a pas d adresse est signale, et on le lui dit",
+              _bp["sans_adresse"] == ["second"]
+              and any(c == "/channels/sal88/messages" and "Aucune adresse" in str(j)
+                      for c, j in _env))
+        check("un numero de VA qu on ne relie a personne est compte, pas avale",
+              _bp["inconnus"] == ["VA 99"])
+        _env.clear()
+        _bp2 = _sv.annoncer_primes("g1", _cl, _dtS.date(2026, 9, 21), _dtS.date(2026, 9, 27))
+        check("la meme semaine n est pas annoncee deux fois", not _bp2["dits"] and not _env)
+    finally:
+        (_sv.ETAT_FICHIER, _tkS2._api, _tkS2._etat, _lvS._etat) = _savP2
+
+    _srcPo = _plS("podium_discord.py").read_text(encoding="utf-8")
+    check("le podium public reste anonyme : la paie part a cote, en prive",
+          "annoncer_primes" in _srcPo and "VA {" not in _srcPo.split("annoncer_primes")[0][-200:])
+except Exception as _eS:
+    check("suivi VA : testable", False, repr(_eS)[:200])
+
+
 # ------------------------------------------- 32. Le lien d un VA (GMS seul)
 print()
 print("=" * 70)
