@@ -256,11 +256,49 @@ def poser_essai(gid: str, uid: str) -> bool:
     return True
 
 
-def bouton_confirmer(uid: str) -> List[Dict[str, Any]]:
-    """Le bouton que SEUL un manager peut actionner."""
-    return [{"type": 1, "components": [
-        {"type": 2, "style": 3, "label": "Confirmer le VA",
-         "custom_id": f"essai:ok:{uid}", "emoji": {"name": "⭐"}}]}]
+def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False):
+    """La rangée de boutons de l'accueil. Seuls les managers peuvent s'en servir.
+
+    Un bouton dont l'action est déjà faite disparaît : laisser « Confirmer »
+    sous un VA confirmé invite à un clic qui ne fera rien, et on finit par
+    croire que le bouton est cassé.
+    """
+    rang: List[Dict[str, Any]] = []
+    if not confirme:
+        rang.append({"type": 2, "style": 3, "label": "Confirmer le VA",
+                     "custom_id": f"essai:ok:{uid}", "emoji": {"name": "⭐"}})
+    if not a_un_lien:
+        rang.append({"type": 2, "style": 1, "label": "Créer son lien",
+                     "custom_id": f"lien:new:{uid}", "emoji": {"name": "🔗"}})
+    return [{"type": 1, "components": rang}] if rang else []
+
+
+# compatibilité : l'ancien nom sert encore dans les rattrapages
+def bouton_confirmer(uid: str):
+    return boutons_va(uid)
+
+
+def _differer() -> Dict[str, Any]:
+    """« Je m'en occupe » : Discord n'attend que 3 s, la chaîne en prend plus."""
+    return {"type": 5, "data": {"flags": 64}}
+
+
+def _suite(jeton: str, texte: str) -> None:
+    """Complète la réponse différée, visible du seul manager qui a cliqué."""
+    try:
+        from verif_discord import APP_ID
+    except Exception:
+        return
+    _api("PATCH", f"/webhooks/{APP_ID}/{jeton}/messages/@original",
+         json={"content": texte[:1900]})
+
+
+def _en_fond(f):
+    import threading
+    threading.Thread(target=f, daemon=True).start()
+
+
+_EN_FOND = _en_fond
 
 
 def _role_nomme(gid: str, nom: str) -> str:
@@ -317,7 +355,7 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if p.get("type") != 3:
         return None
     cid = str(((p.get("data") or {}).get("custom_id")) or "")
-    if not cid.startswith("essai:ok:"):
+    if not (cid.startswith("essai:ok:") or cid.startswith("lien:new:")):
         return None
     gid = str(p.get("guild_id") or "")
     uid = cid.split(":", 2)[2]
@@ -328,7 +366,10 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     permissions = int(str(membre.get("permissions") or "0") or 0)
     admin = bool(permissions & 0x8)
     if not (admin or (rid and rid in (membre.get("roles") or []))):
-        return _ephemere("Seuls les managers peuvent confirmer un VA.")
+        return _ephemere("Seuls les managers peuvent se servir de ces boutons.")
+
+    if cid.startswith("lien:new:"):
+        return _creer_lien(gid, uid, qui, p)
 
     fiche = (_etat().get("tickets") or {}).get(f"{gid}:{uid}") or {}
     if fiche.get("confirme"):
@@ -349,10 +390,52 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     alerte = ("\n⚠️ Le badge 🧪 Essai n'a pas pu être retiré — à enlever à la main."
               if res.get("reste_essai") else "")
     # type 7 : on remplace le message cliqué, le bouton disparaît avec
-    return {"type": 7, "data": {"embeds": embeds, "components": [],
+    # le bouton « Créer son lien » reste : il n'a rien à voir avec l'essai
+    import liens_va as _lv
+    reste = boutons_va(uid, confirme=True,
+                       a_un_lien=bool(_lv.lien_de(gid, uid).get("public_url")))
+    return {"type": 7, "data": {"embeds": embeds, "components": reste,
                                 "content": (msg.get("content") or "")
                                            + f"\n⭐ Confirmé par <@{qui}>." + alerte,
                                 "allowed_mentions": {"parse": []}}}
+
+
+def _creer_lien(gid: str, uid: str, par: str, p: Dict[str, Any]) -> Dict[str, Any]:
+    """Le bouton « Créer son lien » : MyPuls puis GetMySocial, en différé.
+
+    Rien n'est créé tant que la configuration manque : MyPuls ne sait pas
+    supprimer un tracking link, un lien posé chez la mauvaise modèle resterait
+    là pour toujours.
+    """
+    import liens_va
+    deja = liens_va.lien_de(gid, uid)
+    if deja.get("public_url"):
+        return _ephemere(f'Ce VA a déjà son lien : {deja["public_url"]}\n'
+                         f'(destination : {deja.get("tracking") or "?"})')
+    empeche = liens_va.manque()
+    if empeche:
+        return _ephemere("Rien n'a été créé — " + empeche)
+
+    jeton = str(p.get("token") or "")
+    salon = str(p.get("channel_id") or "")
+    pseudo = _pseudo(gid, uid)
+
+    def travail():
+        r = liens_va.creer_pour(gid, uid, pseudo, par=par)
+        if r.get("ok"):
+            _suite(jeton, f'✅ Lien créé pour <@{uid}> : {r["public_url"]}')
+            if salon:
+                _api("POST", f"/channels/{salon}/messages",
+                     json={"content": f'🔗 <@{uid}>, voici **ton lien** : {r["public_url"]}\n'
+                                      "C'est celui-là que tu postes sur Twitter — il compte "
+                                      "tes subs pour le podium.",
+                           "allowed_mentions": {"users": [uid]}})
+        else:
+            sup = f'\n⚠️ Tracking link déjà créé : {r["tracking"]}' if r.get("tracking") else ""
+            _suite(jeton, "✕ " + str(r.get("erreur") or "échec") + sup)
+
+    _EN_FOND(travail)
+    return _differer()
 
 
 def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
@@ -438,7 +521,7 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
             mentions["roles"] = [rid]
         code_m, rep_m = _api("POST", f"/channels/{salon}/messages",
                              json={"content": f"<@{uid}> {qui}", "embeds": [embed],
-                                   "components": bouton_confirmer(uid) if en_essai else [],
+                                   "components": boutons_va(uid, confirme=not en_essai),
                                    "allowed_mentions": mentions})
         # Épinglé : le VA doit retrouver son accueil et son bouton des semaines
         # plus tard, sans remonter la conversation. Un échec d'épinglage ne

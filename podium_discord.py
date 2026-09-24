@@ -58,7 +58,13 @@ SALON_BONUS = "─│💸┤-bonus-journalier"
 PRIMES_JOUR = [7.50, 5.00, 3.50]
 ALLTIME_FICHIER = DATA_DIR / "podium_alltime.json"
 ALLTIME_DEPUIS = "2024-01-01"     # avant les premiers liens : « depuis toujours »
-EQUIPE_VA = "tm_6a0e4739bfa0c238f20a8bf5"   # l'espace GetMySocial des liens VA
+# Les espaces GetMySocial qui portent des liens de VA. Il y en a DEUX : les
+# anciens liens vivent dans « JESSY LE RETOUR », les nouveaux sont generes
+# dans « EMY TWITTER ». N'en lire qu'un rendait l'autre invisible au
+# classement — quelqu'un aurait travaille sans jamais apparaitre.
+EQUIPES_VA = ["tm_6a0e4739bfa0c238f20a8bf5",   # JESSY LE RETOUR
+              "tm_6ab46ebb11a0232c11211b1a"]   # EMY TWITTER
+EQUIPE_VA = EQUIPES_VA[0]                      # garde l'ancien nom lisible
 
 PRIMES = [10.0, 5.0, 3.0]
 MEDAILLES = ["🥇", "🥈", "🥉"]
@@ -172,22 +178,39 @@ def cle_entite(nom: str, spam: bool) -> str:
 
 
 def liens_bruts() -> Tuple[List[Dict[str, Any]], bool]:
-    """(liens, frais). `frais` est faux quand on a dû se rabattre sur le cache."""
-    equipe = _config().get("equipe") or EQUIPE_VA
-    try:
-        import gms
-        # force_refresh : la liste est mise en cache deux minutes cote gms, et
-        # un lien renomme ou cree la veille doit apparaitre dans le podium du
-        # lundi — ce releve n'a lieu qu'une fois par semaine, il peut payer
-        # le vrai appel.
-        r = gms.list_links_team(equipe, force_refresh=True) or {}
-        vivants = r.get("links") or r.get("data") or []
-        if r.get("ok") is not False and vivants:
-            return [l for l in vivants if isinstance(l, dict) and l.get("id")], True
-    except Exception as e:
-        print(f"[podium] liste des liens : {type(e).__name__}: {e}", flush=True)
-    cache = _lire(LIENS_CACHE, {}).get(equipe) or []
-    return [l for l in cache if isinstance(l, dict) and l.get("id")], False
+    """(liens, frais) sur TOUS les espaces de VA.
+
+    `frais` n'est vrai que si chaque espace a repondu. Un seul repli sur le
+    cache suffit a le rendre faux : le message le dira, plutot que de laisser
+    croire a une liste complete.
+    """
+    equipes = list(_config().get("equipes") or
+                   ([_config()["equipe"]] if _config().get("equipe") else EQUIPES_VA))
+    tout: List[Dict[str, Any]] = []
+    vus = set()
+    frais = True
+    for equipe in equipes:
+        liens = None
+        try:
+            import gms
+            # force_refresh : la liste est mise en cache deux minutes cote gms,
+            # et un lien cree la veille doit apparaitre des le lendemain.
+            r = gms.list_links_team(equipe, force_refresh=True) or {}
+            vivants = r.get("links") or r.get("data") or []
+            if r.get("ok") is not False and vivants:
+                liens = vivants
+        except Exception as e:
+            print(f"[podium] liste {equipe} : {type(e).__name__}: {e}", flush=True)
+        if liens is None:
+            frais = False
+            liens = _lire(LIENS_CACHE, {}).get(equipe) or []
+            print(f"[podium] espace {equipe} : repli sur le cache "
+                  f"({len(liens)} lien(s))", flush=True)
+        for l in liens:
+            if isinstance(l, dict) and l.get("id") and l["id"] not in vus:
+                vus.add(l["id"])
+                tout.append(l)
+    return tout, frais
 
 
 def entites(liens: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
@@ -201,7 +224,7 @@ def entites(liens: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     return out
 
 
-def numeros(cles: List[str]) -> Dict[str, int]:
+def numeros(cles: List[str], attribuer: bool = True) -> Dict[str, int]:
     """La table clé → numéro de VA, complétée et gardée sur disque.
 
     Un numéro déjà donné ne change plus. Les nouveaux sont attribués dans
@@ -212,6 +235,11 @@ def numeros(cles: List[str]) -> Dict[str, int]:
         table = {k: v for k, v in NUMEROS_HISTORIQUES.items()}
     pris = set(int(v) for v in table.values())
     neuf = False
+    if not attribuer:
+        # Liste non rafraichie : les noms viennent du cache, qui porte l'ANCIENNE
+        # convention (« VA 9 », « Gaspacio »). Leur donner un numero le graverait
+        # pour toujours, sur une panne passagere. On rend ce qu'on sait deja.
+        return {k: int(v) for k, v in table.items()}
     for c in sorted(cles):
         if c in table:
             continue
@@ -234,10 +262,16 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3) -> Dict[str, An
     d0, d1 = debut.isoformat(), fin.isoformat()
     liens, frais = liens_bruts()
     ents = entites(liens)
-    table = numeros(list(ents.keys()))
+    table = numeros(list(ents.keys()), attribuer=frais)
+    sans_numero = [c for c in ents if c not in table]
+    if sans_numero:
+        print(f"[podium] {len(sans_numero)} compte(s) sans numero, ecartes : "
+              + ", ".join(sorted(sans_numero)[:6]), flush=True)
     lignes: List[Dict[str, Any]] = []
     illisibles: List[str] = []
     for cle, e in ents.items():
+        if cle not in table:
+            continue
         try:
             _, pays = gms.analytics_for_links(e["ids"], d0, d1)
         except Exception:
@@ -254,7 +288,8 @@ def classement(debut: dt.date, fin: dt.date, pause: float = 0.3) -> Dict[str, An
     # rendre le même ordre, sinon le podium changerait tout seul d'un appel à l'autre
     lignes.sort(key=lambda x: (-x["clics"], x["numero"]))
     return {"lignes": lignes, "illisibles": sorted(illisibles), "frais": frais,
-            "entites": len(ents), "liens": len(liens)}
+            "entites": len(ents), "liens": len(liens),
+            "sans_numero": sorted(sans_numero)}
 
 
 def alltime() -> Dict[str, int]:
@@ -329,6 +364,9 @@ def embed_podium(cl: Dict[str, Any], debut: dt.date, fin: dt.date,
     if not cl["frais"]:
         c += ["", "⚠️ _Liste des liens non rafraîchie (GetMySocial injoignable) : "
                   "des comptes peuvent manquer._"]
+    if cl.get("sans_numero"):
+        c += [f'ℹ️ _{len(cl["sans_numero"])} compte(s) pas encore numéroté(s), '
+              "écarté(s) le temps que la liste revienne._"]
 
     pied = "YOULAB • Marché US · comptes VA, sans pseudo"
     if en_cours:

@@ -13132,8 +13132,12 @@ try:
 
         _faits.clear()
         _ok = _clic(["r-mgr"])
+        _restants = [b["custom_id"] for r in (_ok["data"]["components"] or [])
+                     for b in r["components"]]
         check("un manager confirme d un clic",
-              _ok["type"] == 7 and _ok["data"]["components"] == [])
+              _ok["type"] == 7 and not [x for x in _restants if x.startswith("essai:ok:")])
+        check("le bouton du lien survit a la confirmation : il n a rien a voir avec l essai",
+              any(x.startswith("lien:new:") for x in _restants))
         check("le role Confirme est POSE et l essai RETIRE",
               ("PUT", "/guilds/g1/members/99/roles/r-conf") in _faits
               and ("DELETE", "/guilds/g1/members/99/roles/r-essai") in _faits)
@@ -13685,6 +13689,44 @@ try:
           abs((_pd._maintenant() - _dtP.datetime.utcnow()).total_seconds()) >= 3000)
     check("aucune date naive ne reste dans le module",
           _plP("podium_discord.py").read_text(encoding="utf-8").count("dt.date.today()") == 0)
+
+    # --- DEUX espaces GetMySocial : n en lire qu un rendait l autre invisible
+    check("les deux espaces de VA sont lus",
+          len(_pd.EQUIPES_VA) == 2
+          and "tm_6ab46ebb11a0232c11211b1a" in _pd.EQUIPES_VA)
+
+    _savLB, _savN2 = _pd._lire, _pd.NUMEROS_FICHIER
+    _savGms = _gmsP.list_links_team
+    try:
+        import tempfile as _tf3
+        _pd.NUMEROS_FICHIER = _plP(_tf3.mkdtemp()) / "num.json"
+        _reponses = {
+            "tm_6a0e4739bfa0c238f20a8bf5": {"ok": True, "links": [
+                {"id": "a", "display_name": "( BO7 ) 1"}]},
+            "tm_6ab46ebb11a0232c11211b1a": {"ok": True, "links": [
+                {"id": "b", "display_name": "(Nouveau) 1"}]}}
+        _gmsP.list_links_team = lambda tid, force_refresh=False: _reponses.get(tid, {})
+        _l, _f = _pd.liens_bruts()
+        check("les liens des deux espaces sont reunis",
+              _f is True and sorted(x["id"] for x in _l) == ["a", "b"])
+
+        # un espace muet : on se rabat, mais on ne fait PLUS semblant d etre a jour
+        _reponses["tm_6ab46ebb11a0232c11211b1a"] = {"ok": False}
+        _l2, _f2 = _pd.liens_bruts()
+        check("un seul espace en panne suffit a dire que la liste n est pas fraiche",
+              _f2 is False)
+
+        # LE PIEGE : une liste du cache porte les ANCIENS noms. Leur donner un
+        # numero le graverait a vie, sur une panne passagere.
+        _avant = dict(_pd._lire(_pd.NUMEROS_FICHIER, {}))
+        _t1 = _pd.numeros(["Zorro", "Alpha"], attribuer=False)
+        check("liste non fraiche : AUCUN numero neuf n est attribue",
+              "Zorro" not in _t1 and dict(_pd._lire(_pd.NUMEROS_FICHIER, {})) == _avant)
+        _t2 = _pd.numeros(["Zorro"], attribuer=True)
+        check("liste fraiche : le numero est attribue normalement", "Zorro" in _t2)
+    finally:
+        _pd.NUMEROS_FICHIER = _savN2
+        _gmsP.list_links_team = _savGms
 
     check("les trois primes sont 10 / 5 / 3", _pd.PRIMES == [10.0, 5.0, 3.0])
     _srcP = _plP("web_upload.py").read_text(encoding="utf-8")
