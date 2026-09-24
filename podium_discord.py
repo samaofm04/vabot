@@ -66,6 +66,10 @@ EQUIPES_VA = ["tm_6a0e4739bfa0c238f20a8bf5",   # JESSY LE RETOUR
               "tm_6ab46ebb11a0232c11211b1a"]   # EMY TWITTER
 EQUIPE_VA = EQUIPES_VA[0]                      # garde l'ancien nom lisible
 
+# Les serveurs ou le podium, les subs et le bonus sont publies. Les chiffres
+# viennent des liens VA de Twitter : les afficher sur Threads serait faux.
+SERVEURS = {"1445108485090971710"}             # YouLab TWITTER
+
 PRIMES = [10.0, 5.0, 3.0]
 MEDAILLES = ["🥇", "🥈", "🥉"]
 COMBIEN_AFFICHES = 15

@@ -33,6 +33,11 @@ ETAT_FICHIER = DATA_DIR / "liens_va.json"
 
 EQUIPE_VA = "tm_6ab46ebb11a0232c11211b1a"     # EMY TWITTER
 
+# Les serveurs Discord dont les VA ont un lien dans cet espace. YouLab THREADS
+# n'y est pas : ses liens vivront ailleurs, et les ranger ici les melangerait
+# aux liens Twitter — dans le podium comme dans la paie.
+SERVEURS = {"1445108485090971710"}             # YouLab TWITTER
+
 # Un lien GetMySocial est lu par des gens sur Twitter : il doit ressembler au
 # compte, pas a une reference interne. D'ou des mots doux plutot qu'un tirage
 # au hasard. La base vient de la modele (« emy »), le reste de cette liste.
@@ -385,6 +390,8 @@ def synchroniser(gid: str) -> Dict[str, Any]:
     gid = str(gid)
     equipe = str(config().get("equipe") or EQUIPE_VA)
     bilan = {"groupes_crees": [], "deplaces": [], "sans_categorie": [], "rates": []}
+    if gid not in SERVEURS:
+        return bilan      # les managers de ce serveur n'ont rien a faire ici
 
     connus = groupes(equipe)
     if connus is None:

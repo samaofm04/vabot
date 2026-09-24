@@ -50759,6 +50759,11 @@ def _start_podium_semaine_daemon() -> bool:
                 import podium_discord as _p
                 import verif_discord as _vd_p
                 for gid in _vd_p.SERVEURS_EXTRA:
+                    # le podium ne vaut que la ou ses chiffres veulent dire
+                    # quelque chose : les liens VA de Twitter ne racontent
+                    # rien des VA Threads
+                    if gid not in _p.SERVEURS:
+                        continue
                     # le lundi : on fige la semaine ecoulee, une fois, avec
                     # @everyone. Le message vivant repart a neuf ensuite.
                     if _p.a_poster():

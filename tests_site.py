@@ -13103,6 +13103,8 @@ try:
     # --- le bouton « Confirmer le VA » : les managers, et eux seuls
     import tempfile as _tfT
     _savEtat, _savApi3 = _tkP.ETAT_FICHIER, _tkP._api
+    import liens_va as _lvC
+    _lvC.SERVEURS.add("g1")          # serveur de test, ouvert aux liens le temps du test
     try:
         _tkP.ETAT_FICHIER = _plT(_tfT.mkdtemp()) / "tickets.json"
         _rolesC = [{"id": "r-mgr", "name": "🛡️ Manager"},
@@ -13170,6 +13172,7 @@ try:
               _sans["data"]["flags"] == 64 and "introuvable" in _sans["data"]["content"])
     finally:
         _tkP.ETAT_FICHIER, _tkP._api = _savEtat, _savApi3
+        _lvC.SERVEURS.discard("g1")
 
     check("l accueil du VA est epingle : il le retrouve des semaines plus tard",
           "/pins/" in _srcT and "accueil non épinglé" in _srcT)
@@ -13577,6 +13580,9 @@ try:
     import tickets_discord as _tkS
     _savS = (_gmsL._call_tool, _gmsL.assign_link_to_group, _tkS._api,
              _tkS.managers, _tkS._etat, _lv.ETAT_FICHIER)
+    # « g1 » est un serveur de test : les liens ne sont branches que sur
+    # Twitter, on l ouvre le temps de verifier la synchro
+    _lv.SERVEURS.add("g1")
     try:
         import tempfile as _tf5, json as _js5
         _lv.ETAT_FICHIER = _plL(_tf5.mkdtemp()) / "l.json"
@@ -13638,6 +13644,7 @@ try:
     finally:
         (_gmsL._call_tool, _gmsL.assign_link_to_group, _tkS._api,
          _tkS.managers, _tkS._etat, _lv.ETAT_FICHIER) = _savS
+        _lv.SERVEURS.discard("g1")
 
     _srcWs = _plL("web_upload.py").read_text(encoding="utf-8")
     check("la synchro tourne dans la boucle du site, pas plus d une fois par demi-heure",
@@ -14008,6 +14015,58 @@ try:
           _pd.personne("Gerome SPAM") == ("Gerome", True))
 except Exception as _eP:
     check("podium : testable", False, repr(_eP)[:200])
+
+# ------------------------------------------- 33. YouLab THREADS, copie de Twitter
+print()
+print("=" * 70)
+print("YouLab THREADS : meme verification, mais ni podium ni liens Twitter")
+print("=" * 70)
+try:
+    import verif_discord as _vdT
+    import tickets_discord as _tkT
+    import podium_discord as _pdT
+    import liens_va as _lvT
+    _TWI, _THR = "1445108485090971710", "1498948161039896586"
+
+    check("Twitter et Threads ont chacun leur identifiant",
+          _vdT.TWITTER_ID == _TWI and _vdT.THREADS_ID == _THR)
+    check("le serveur Twitter porte son vrai nom (il s appelait THREADS un temps)",
+          _vdT.serveur(_TWI)["nom"] == "YouLab TWITTER")
+    _cT = _vdT.serveur(_THR)
+    check("Threads a sa propre verification, manuelle comme Twitter",
+          _cT and _cT["nom"] == "YouLab THREADS" and _cT["auto"] is False)
+    _cW = _vdT.serveur(_TWI)
+    _cles = ("role_verifie", "role_manager", "role_attente", "role_suspect",
+             "salon_entrees", "salon_attente", "salon_suspicions", "salon_bienvenue")
+    check("aucun role ni salon de Threads ne pointe vers Twitter",
+          all(_cT[k] != _cW[k] for k in _cles)
+          and not set(x for _, x in _cT["parcours"]) & set(x for _, x in _cW["parcours"]))
+    check("les tickets et l essai s ouvrent sur les deux serveurs",
+          {_TWI, _THR} <= set(_tkT.SERVEURS_TICKETS))
+
+    # le podium et les liens restent a Twitter : leurs chiffres viennent
+    # des liens VA de Twitter, et les liens sont crees dans EMY TWITTER
+    check("le podium n est PAS publie sur Threads",
+          _TWI in _pdT.SERVEURS and _THR not in _pdT.SERVEURS)
+    check("les liens GetMySocial ne sont PAS branches sur Threads",
+          _TWI in _lvT.SERVEURS and _THR not in _lvT.SERVEURS)
+    check("la synchro des groupes ne touche pas aux managers de Threads",
+          _lvT.synchroniser(_THR) == {"groupes_crees": [], "deplaces": [],
+                                      "sans_categorie": [], "rates": []})
+    _bT = [b["custom_id"] for r in _tkT.boutons_va("99", gid=_THR) for b in r["components"]]
+    _bW = [b["custom_id"] for r in _tkT.boutons_va("99", gid=_TWI) for b in r["components"]]
+    check("sur Threads, pas de bouton « Creer son lien »",
+          not [x for x in _bT if x.startswith("lien:")] and "essai:ok:99" in _bT)
+    check("sur Twitter, le bouton est toujours la",
+          "lien:new:99" in _bW)
+    _refus = _tkT._creer_lien(_THR, "99", "mgr", {})
+    check("un clic force sur Threads est refuse, rien n est cree",
+          _refus["data"]["flags"] == 64 and "pas encore branch" in _refus["data"]["content"])
+    _srcWT = _plP("web_upload.py").read_text(encoding="utf-8")
+    check("la boucle du podium saute les serveurs sans podium",
+          "if gid not in _p.SERVEURS:" in _srcWT)
+except Exception as _eT3:
+    check("threads : testable", False, repr(_eT3)[:200])
 
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")

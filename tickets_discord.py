@@ -60,7 +60,8 @@ AROBASE = "\uff20"
 
 # Le parcours à manager + salon perso ne vaut que pour YouLab TWITTER. Le
 # serveur Entretien doit rester tel qu'il était : on n'y ouvre aucun ticket.
-SERVEURS_TICKETS = {"1445108485090971710"}
+SERVEURS_TICKETS = {"1445108485090971710",    # YouLab TWITTER
+                    "1498948161039896586"}    # YouLab THREADS
 
 # Tout nouveau arrivant est en essai, sans exception : le role est pose en
 # meme temps que son salon. Ce qui le fera passer « confirme » viendra plus
@@ -272,7 +273,8 @@ def poser_essai(gid: str, uid: str) -> bool:
     return True
 
 
-def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False):
+def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False,
+               gid: str = ""):
     """La rangée de boutons de l'accueil. Seuls les managers peuvent s'en servir.
 
     Un bouton dont l'action est déjà faite disparaît : laisser « Confirmer »
@@ -283,7 +285,15 @@ def boutons_va(uid: str, confirme: bool = False, a_un_lien: bool = False):
     if not confirme:
         rang.append({"type": 2, "style": 3, "label": "Confirmer le VA",
                      "custom_id": f"essai:ok:{uid}", "emoji": {"name": "⭐"}})
-    if not a_un_lien:
+    # Le lien GetMySocial vise l'espace EMY TWITTER : sur un autre serveur, le
+    # bouton creerait un lien Twitter pour un VA Threads. Pas de bouton, pas
+    # de lien au mauvais endroit.
+    try:
+        import liens_va as _lv
+        lien_possible = (not gid) or str(gid) in _lv.SERVEURS
+    except Exception:
+        lien_possible = False
+    if not a_un_lien and lien_possible:
         rang.append({"type": 2, "style": 1, "label": "Créer son lien",
                      "custom_id": f"lien:new:{uid}", "emoji": {"name": "🔗"}})
     return [{"type": 1, "components": rang}] if rang else []
@@ -409,7 +419,7 @@ def traiter(p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     # le bouton « Créer son lien » reste : il n'a rien à voir avec l'essai
     import liens_va as _lv
     reste = boutons_va(uid, confirme=True,
-                       a_un_lien=bool(_lv.lien_de(gid, uid).get("public_url")))
+                       a_un_lien=bool(_lv.lien_de(gid, uid).get("public_url")), gid=gid)
     return {"type": 7, "data": {"embeds": embeds, "components": reste,
                                 "content": (msg.get("content") or "")
                                            + f"\n⭐ Confirmé par <@{qui}>." + alerte,
@@ -424,6 +434,8 @@ def _creer_lien(gid: str, uid: str, par: str, p: Dict[str, Any]) -> Dict[str, An
     là pour toujours.
     """
     import liens_va
+    if str(gid) not in liens_va.SERVEURS:
+        return _ephemere("Les liens GetMySocial ne sont pas encore branchés sur ce serveur.")
     deja = liens_va.lien_de(gid, uid)
     if deja.get("public_url"):
         return _ephemere(f'Ce VA a déjà son lien : {deja["public_url"]}\n'
@@ -511,7 +523,7 @@ def _poser_lien_dans_accueil(gid: str, uid: str, salon: str, r: Dict[str, Any]) 
     confirme = bool(fiche.get("confirme"))
     _api("PATCH", f"/channels/{salon}/messages/{mid}",
          json={"embeds": embeds,
-               "components": boutons_va(uid, confirme=confirme, a_un_lien=True)})
+               "components": boutons_va(uid, confirme=confirme, a_un_lien=True, gid=gid)})
 
 
 def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
@@ -597,7 +609,8 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
             mentions["roles"] = [rid]
         code_m, rep_m = _api("POST", f"/channels/{salon}/messages",
                              json={"content": f"<@{uid}> {qui}", "embeds": [embed],
-                                   "components": boutons_va(uid, confirme=not en_essai),
+                                   "components": boutons_va(uid, confirme=not en_essai,
+                                                            gid=gid),
                                    "allowed_mentions": mentions})
         # Épinglé : le VA doit retrouver son accueil et son bouton des semaines
         # plus tard, sans remonter la conversation. Un échec d'épinglage ne

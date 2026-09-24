@@ -96,10 +96,15 @@ SITE = "https://youl4b.com"
 
 # Serveurs geres en plus d'Entretien. « auto » faux : chaque entree attend
 # un manager, meme depuis le Benin ou Madagascar.
-THREADS_ID = "1445108485090971710"
+# Le serveur 1445108485090971710 s'est appele « YouLab THREADS » un temps, puis
+# est redevenu « YouLab TWITTER ». Le vrai serveur Threads est arrive le
+# 24/09/2026 : chacun son nom, sinon on finit par verifier les gens sur le
+# mauvais serveur.
+TWITTER_ID = "1445108485090971710"
+THREADS_ID = "1498948161039896586"
 SERVEURS_EXTRA: Dict[str, Dict[str, Any]] = {
-    THREADS_ID: {
-        "nom": "YouLab THREADS", "auto": False,
+    TWITTER_ID: {
+        "nom": "YouLab TWITTER", "auto": False,
         "role_verifie": "1552192933690744883", "role_manager": "1552192935100026881",
         "role_attente": "1552192936597520466", "role_suspect": "1552192939051188316",
         "salon_entrees": "1552192947766960158", "salon_attente": "1552192949851525131",
@@ -110,6 +115,21 @@ SERVEURS_EXTRA: Dict[str, Dict[str, Any]] = {
                      ("💰 Comment tu es payé", "1552353733357215754"),
                      ("📚 Les formations", "1552353730387644426"),
                      ("❓ Tes questions", "1552353726910431253")],
+    },
+    # Copie de Twitter du 24/09/2026 : memes roles, memes salons, memes regles
+    # (aucune entree ne passe seule). Identifiants releves dans la table de
+    # copie data/threads_copie.json.
+    THREADS_ID: {
+        "nom": "YouLab THREADS", "auto": False,
+        "role_verifie": "1552664944456245329", "role_manager": "1552664941050331140",
+        "role_attente": "1552664956095303680", "role_suspect": "1552664959173787769",
+        "salon_entrees": "1552665151885549652", "salon_attente": "1552665155656228934",
+        "salon_suspicions": "1552665158659346583", "salon_bienvenue": "1552664986055090247",
+        "etapes": {},
+        "parcours": [("📋 Lis les règles", "1552665136383402175"),
+                     ("💰 Comment tu es payé", "1552664989167517758"),
+                     ("📚 Les formations", "1552665145434706040"),
+                     ("❓ Tes questions", "1552665139424141333")],
     },
 }
 
