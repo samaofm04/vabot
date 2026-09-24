@@ -436,10 +436,18 @@ def ouvrir_ticket(uid: str, cfg: Optional[Dict[str, Any]] = None) -> str:
         mentions = {"users": [uid] + ([mid] if mid else [])}
         if not mid and rid:
             mentions["roles"] = [rid]
-        _api("POST", f"/channels/{salon}/messages",
-             json={"content": f"<@{uid}> {qui}", "embeds": [embed],
-                   "components": bouton_confirmer(uid) if en_essai else [],
-                   "allowed_mentions": mentions})
+        code_m, rep_m = _api("POST", f"/channels/{salon}/messages",
+                             json={"content": f"<@{uid}> {qui}", "embeds": [embed],
+                                   "components": bouton_confirmer(uid) if en_essai else [],
+                                   "allowed_mentions": mentions})
+        # Épinglé : le VA doit retrouver son accueil et son bouton des semaines
+        # plus tard, sans remonter la conversation. Un échec d'épinglage ne
+        # doit pas faire rater le ticket — on le dit, et on continue.
+        if code_m == 200 and rep_m.get("id"):
+            code_p, rep_p = _api("PUT", f'/channels/{salon}/pins/{rep_m["id"]}')
+            if code_p not in (200, 204):
+                print(f"[ticket] accueil non épinglé dans {salon} (HTTP {code_p}) "
+                      f"{str(rep_p)[:100]}", flush=True)
 
         fiches[cle] = {"salon": salon, "manager": mid, "ouvert": int(time.time()),
                        "essai": bool(en_essai)}

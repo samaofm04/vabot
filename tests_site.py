@@ -13165,6 +13165,11 @@ try:
     finally:
         _tkP.ETAT_FICHIER, _tkP._api = _savEtat, _savApi3
 
+    check("l accueil du VA est epingle : il le retrouve des semaines plus tard",
+          "/pins/" in _srcT and "accueil non épinglé" in _srcT)
+    check("un epinglage rate n annule pas le ticket",
+          _srcT.index("accueil non épinglé") < _srcT.index('fiches[cle] = {"salon"'))
+
     _srcW2 = _plT("web_upload.py").read_text(encoding="utf-8")
     check("le bouton Confirmer est branche sur la route Discord",
           "_tk.traiter(charge)" in _srcW2
