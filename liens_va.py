@@ -197,6 +197,36 @@ def creer_gms(nom: str, url: str) -> Dict[str, Any]:
     return {"ok": False, "erreur": "douze noms essayés, tous pris"}
 
 
+def groupes(equipe: str, essais: int = 3) -> Optional[Dict[str, str]]:
+    """{nom en minuscules: identifiant} des groupes d'un espace. None si on ne sait pas.
+
+    Passe par l'outil MCP, PAS par `gms.group_id_by_name` : celui-ci interroge
+    l'API privée avec un cookie de session que le serveur n'a pas — il rendait
+    donc « aucun groupe », et chaque clic aurait fabriqué un « YAZID » de plus.
+
+    None et {} veulent dire deux choses différentes : « je ne sais pas » et
+    « il n'y en a aucun ». Confondre les deux, c'est créer à l'aveugle.
+    """
+    import time as _t
+    import gms
+    for essai in range(max(1, essais)):
+        r = gms._call_tool("list_groups", {"team_id": equipe})
+        if r.get("ok"):
+            d = r.get("data") or {}
+            items = d.get("data") if isinstance(d, dict) else d
+            out: Dict[str, str] = {}
+            for g in (items or []):
+                if isinstance(g, dict) and g.get("name") and g.get("id"):
+                    out[str(g["name"]).strip().lower()] = str(g["id"])
+            return out
+        # l'outil est limité en débit : on laisse passer l'orage une fois
+        if "429" in str(r.get("error") or "") and essai + 1 < essais:
+            _t.sleep(22)
+            continue
+        return None
+    return None
+
+
 def groupe_manager(equipe: str, nom: str) -> str:
     """L'identifiant du groupe GetMySocial au nom du manager, créé s'il manque.
 
@@ -209,22 +239,29 @@ def groupe_manager(equipe: str, nom: str) -> str:
     if not nom:
         return ""
     try:
-        deja = gms.group_id_by_name(equipe, nom)
+        connus = groupes(equipe)
+        if connus is None:
+            # On ne SAIT PAS ce qui existe : creer a l'aveugle ferait un
+            # deuxieme « YAZID » a chaque clic. On renonce au rangement, le
+            # lien lui-meme est deja cree et ne risque rien.
+            print(f"[lien] groupes illisibles : « {nom} » non rangé cette fois",
+                  flush=True)
+            return ""
+        deja = connus.get(nom.lower())
         if deja:
-            return str(deja)
+            return deja
         r = gms._call_tool("create_group", {"name": nom, "team_id": equipe})
         if not r.get("ok"):
             print(f"[lien] groupe « {nom} » non créé : {str(r.get('error'))[:100]}",
                   flush=True)
             return ""
         d = r.get("data") or {}
-        if isinstance(d, dict):
-            g = d.get("group") if isinstance(d.get("group"), dict) else d
-            gid = g.get("id") or g.get("_id") or g.get("groupId") or ""
-            if gid:
-                return str(gid)
+        g = d.get("group") if isinstance(d, dict) and isinstance(d.get("group"), dict) else d
+        gid = (g or {}).get("id") or (g or {}).get("_id") or (g or {}).get("groupId") or ""
+        if gid:
+            return str(gid)
         # créé mais identifiant illisible : on relit plutôt que d'abandonner
-        return str(gms.group_id_by_name(equipe, nom) or "")
+        return (groupes(equipe) or {}).get(nom.lower(), "")
     except Exception as e:
         print(f"[lien] groupe « {nom} » : {type(e).__name__}: {e}", flush=True)
         return ""

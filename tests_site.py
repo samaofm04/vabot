@@ -13521,33 +13521,53 @@ try:
 
     # --- le lien est range dans le groupe du manager
     import gms as _gmsL
-    _savGN, _savGC, _savAS = _gmsL.group_id_by_name, _gmsL._call_tool, _gmsL.assign_link_to_group
+    _savGC, _savAS = _gmsL._call_tool, _gmsL.assign_link_to_group
     try:
-        _gmsL.group_id_by_name = lambda tid, nom: "g-yazid" if nom == "YAZID" else None
-        _appelsG = []
+        _appelsG, _cree = [], []
+        _existants = [{"id": "g-yazid", "name": "YAZID"}]
+
+        def _outil(nom, args):
+            if nom == "list_groups":
+                return {"ok": True, "data": {"data": list(_existants)}}
+            if nom == "create_group":
+                _cree.append(args)
+                _existants.append({"id": "g-" + args["name"].lower(), "name": args["name"]})
+                return {"ok": True, "data": {"id": "g-" + args["name"].lower()}}
+            return {"ok": False, "error": "inconnu"}
+        _gmsL._call_tool = _outil
         _gmsL.assign_link_to_group = lambda lid, gid, **k: (_appelsG.append((lid, gid))
                                                             or {"ok": True})
         check("un groupe qui existe deja n est PAS recree",
               _lv.ranger("tm_x", "lnk_1", "YAZID") == "YAZID"
-              and _appelsG == [("lnk_1", "g-yazid")])
+              and not _cree and _appelsG == [("lnk_1", "g-yazid")])
+        check("la recherche ignore la casse",
+              _lv.groupe_manager("tm_x", "yazid") == "g-yazid" and not _cree)
 
-        _cree = []
-        _gmsL._call_tool = lambda nom, args: (_cree.append(args)
-                                              or {"ok": True, "data": {"id": "g-moan"}})
         _appelsG.clear()
         check("un groupe absent est cree au nom du manager",
               _lv.ranger("tm_x", "lnk_2", "MOAN") == "MOAN"
               and _cree and _cree[0]["name"] == "MOAN"
               and _appelsG == [("lnk_2", "g-moan")])
 
-        _gmsL._call_tool = lambda nom, args: {"ok": False, "error": "refus"}
+        # LE PIEGE : liste illisible ≠ liste vide. Creer a l aveugle ferait un
+        # deuxieme « YAZID » a chaque clic.
+        _cree.clear()
+        _gmsL._call_tool = lambda nom, args: {"ok": False, "error": "boom"}
+        check("groupes illisibles : on ne cree RIEN a l aveugle",
+              _lv.groupes("tm_x", essais=1) is None
+              and _lv.ranger("tm_x", "lnk_3", "YAZID") == "" and not _cree)
+
+        _gmsL._call_tool = lambda nom, args: ({"ok": True, "data": {"data": []}}
+                                              if nom == "list_groups"
+                                              else {"ok": False, "error": "refus"})
         check("un groupe qui ne se cree pas n empeche pas le lien d exister",
-              _lv.ranger("tm_x", "lnk_3", "INCONNU") == "")
+              _lv.ranger("tm_x", "lnk_4", "INCONNU") == "")
+        check("aucun groupe connu se distingue de groupes illisibles",
+              _lv.groupes("tm_x", essais=1) == {})
         check("sans manager connu, on ne range nulle part",
-              _lv.ranger("tm_x", "lnk_4", "") == "")
+              _lv.ranger("tm_x", "lnk_5", "") == "")
     finally:
-        _gmsL.group_id_by_name, _gmsL._call_tool = _savGN, _savGC
-        _gmsL.assign_link_to_group = _savAS
+        _gmsL._call_tool, _gmsL.assign_link_to_group = _savGC, _savAS
 
     check("les shortcodes ressemblent a un compte, pas a un tirage",
           [_lv.mots_doux("emy", i) for i in range(3)] == ["emycute", "emylovee", "emybaby"])
