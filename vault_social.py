@@ -292,7 +292,7 @@ def _ecrire_voisin(dossier: Path, stem: str, donnees: dict) -> bool:
                                 indent=None, backup=False))
 
 
-def _lister_tiktok_creator(username: str) -> list:
+def _lister_tiktok_creator(username: str, info: Optional[dict] = None) -> list:
     """La liste d'un profil TikTok par /api/creator/item_list, au format des
     entrées yt-dlp (id, url, view_count, timestamp, title) + « photo »."""
     import json as _json
@@ -310,6 +310,9 @@ def _lister_tiktok_creator(username: str) -> list:
             # les vidéos de quelqu'un d'autre, sans que rien ne le montre.
             if str(user.get("uniqueId") or "").lower() == username.lower():
                 sec = user.get("secUid") or ""
+                if info is not None:
+                    info["avatar"] = (user.get("avatarLarger") or user.get("avatarMedium")
+                                      or user.get("avatarThumb") or "")
             elif det.get("statusCode"):
                 raise RuntimeError(f"profil introuvable ou privé (code {det['statusCode']})")
         except (KeyError, ValueError, TypeError):
@@ -367,7 +370,7 @@ def _lister_tiktok(url: str) -> list:
     return [e for e in (info.get("entries") or []) if isinstance(e, dict)]
 
 
-def _lister_instagram(username: str) -> list:
+def _lister_instagram(username: str, info: Optional[dict] = None) -> list:
     """Les reels récents, au format des entrées yt-dlp (id, url, view_count,
     timestamp, title) plus video_url, que HikerAPI rend dans le même appel.
 
@@ -378,6 +381,9 @@ def _lister_instagram(username: str) -> list:
     res = _hk.scrape_profile(username, MAX_EXAMINEES_INSTA)
     if res.get("error"):
         raise RuntimeError(str(res["error"]))
+    if info is not None:
+        # Même appel que la liste : la photo ne coûte aucune requête de plus.
+        info["avatar"] = (res.get("profile") or {}).get("profile_pic_url") or ""
     out = []
     for r in res.get("reels") or []:
         code = r.get("shortcode") or ""
@@ -416,15 +422,16 @@ def _telecharger_direct(url_video: str, cible_sans_ext: Path) -> Path:
     return final
 
 
-def _lister(src: dict, bilan: Optional[dict] = None) -> list:
+def _lister(src: dict, bilan: Optional[dict] = None,
+            info: Optional[dict] = None) -> list:
     """La liste du profil. TikTok : l'API « creator » d'abord (la seule qui
     réponde depuis le VPS), yt-dlp en secours — tous deux gratuits."""
     if src.get("plateforme") == "instagram":
         if bilan is not None:
             bilan["source"] = "HikerAPI"
-        return _lister_instagram(src.get("username") or "")
+        return _lister_instagram(src.get("username") or "", info)
     try:
-        out = _lister_tiktok_creator(src.get("username") or "")
+        out = _lister_tiktok_creator(src.get("username") or "", info)
         if bilan is not None:
             bilan["source"] = "TikTok"
         return out
@@ -488,6 +495,36 @@ def _telecharger_tiktok(url: str, cible_sans_ext: Path) -> Path:
             pass
         raise PasUneVideo(f"format {chemin.suffix} reçu au lieu d'une vidéo")
     return chemin
+
+
+_EXT_IMAGE = {"image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png",
+              "image/webp": "webp"}
+
+
+def _poser_avatar(dossier_identite: Path, url: str) -> str:
+    """La photo du profil devient celle du dossier — SEULEMENT s'il n'en a
+    pas : une photo choisie à la création ou changée à la main l'emporte.
+    Rend le nom du fichier posé, '' sinon."""
+    if not url or any(dossier_identite.glob("avatar.*")):
+        return ""
+    try:
+        from curl_cffi import requests as _http
+        r = _http.get(url, impersonate="chrome", timeout=30)
+    except ImportError:
+        import requests as _http
+        r = _http.get(url, timeout=30)
+    if r.status_code != 200 or len(r.content) < 512:
+        raise RuntimeError(f"photo de profil : HTTP {r.status_code}")
+    type_ = (r.headers.get("content-type") or "").split(";")[0].strip().lower()
+    ext = _EXT_IMAGE.get(type_)
+    if not ext:
+        # HEIC, AVIF… : le site ne sert que png/jpg/webp (_identity_avatar_path).
+        raise RuntimeError(f"photo de profil : format {type_ or 'inconnu'} non géré")
+    final = dossier_identite / f"avatar.{ext}"
+    tmp = dossier_identite / f".avatar.{ext}.tmp"
+    tmp.write_bytes(r.content)
+    os.replace(tmp, final)
+    return final.name
 
 
 def _rapatrier(dossier: Path) -> int:
@@ -555,7 +592,15 @@ def synchroniser(identite: str, dossier_videos: Path,
         dossier_videos.mkdir(exist_ok=True)
         bilan["rapatriees"] = _rapatrier(dossier_videos)
         tmp.mkdir(parents=True, exist_ok=True)
-        entrees = _lister(src, bilan)
+        info: Dict[str, Any] = {}
+        entrees = _lister(src, bilan, info)
+        try:
+            if _poser_avatar(dossier_videos.parent, info.get("avatar") or ""):
+                bilan["photo"] = True
+        except Exception as err_pp:
+            # Sans photo, le dossier garde son initiale : ce n'est pas une
+            # raison d'arrêter l'import. Mais ça se dit.
+            print(f"[vault-social] {ident} : {err_pp}", flush=True)
         liste_lue = True
         bilan["examinees"] = len(entrees)
         now = int(time.time())

@@ -9644,6 +9644,9 @@ function vsSuivre(ident){
            signature a change, le bandeau affiche doit etre redessine. */
         var change = j && j.sig && j.sig !== box.getAttribute('data-vs-sig');
         if((vu || change) && vsBandeau(ident) && typeof vaultGoTo==='function'){
+          /* Le cache de survol garde la galerie d AVANT l import : sans ce
+             vidage, vaultGoTo la resservait telle quelle, vide. */
+          try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
           vaultGoTo({preventDefault:function(){}}, location.pathname+location.search);
         }
       }
@@ -13922,7 +13925,7 @@ body.light #pf-modal .pf-card img{background:#eceff3!important}
         <input id="ident-new-seuil" type="number" min="0" step="1000" value="10000"
                style="flex:1;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:8px;font-size:13px;font-family:inherit;box-sizing:border-box">
       </label>
-      <div style="font-size:11px;color:#888;line-height:1.5">Les vidéos au-dessus de ce seuil sont téléchargées dans la Vidéo brut du dossier, triées par vues. Relecture du profil toutes les 2 semaines. Le dossier reste hors de la rotation Discord des VA.</div>
+      <div style="font-size:11px;color:#888;line-height:1.5">Les vidéos au-dessus de ce seuil sont téléchargées dans la Vidéo brut du dossier, triées par vues. Sans photo choisie ci-dessous, celle du profil est reprise. Relecture du profil toutes les 2 semaines. Le dossier reste hors de la rotation Discord des VA.</div>
     </div>
     <input id="ident-new-name" type="text" placeholder="nom (lettres, chiffres, _ ou -)" autocomplete="off"
            style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:10px;font-size:13px;font-family:inherit;box-sizing:border-box">

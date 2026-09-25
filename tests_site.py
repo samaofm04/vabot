@@ -14760,7 +14760,7 @@ try:
                     {"id": "3", "view_count": None},
                     {"id": "4", "view_count": 20_000}]
         _vsS._lister_tiktok = lambda url: [dict(e) for e in _profilS]
-        _vsS._lister_tiktok_creator = lambda u: [dict(e) for e in _profilS]
+        _vsS._lister_tiktok_creator = lambda u, info=None: [dict(e) for e in _profilS]
         _ratesS = set()
 
         def _dlS(url, cible):
@@ -14841,17 +14841,17 @@ try:
               not _r5["ok"] and _e5.get("statut") == "erreur"
               and _e5.get("reessai_le") and not _e5.get("echecs"), str(_e5.get("echecs")))
         _vsS._lister_tiktok = lambda url: (_ for _ in ()).throw(RuntimeError("HTTP Error 403"))
-        _vsS._lister_tiktok_creator = lambda u: (_ for _ in ()).throw(RuntimeError("HTTP Error 403"))
+        _vsS._lister_tiktok_creator = lambda u, info=None: (_ for _ in ()).throw(RuntimeError("HTTP Error 403"))
         _vsS.synchroniser("lea", _dS)
         check("liste refusee : le bilan precedent reste affiche",
               (_vsS.lire("lea").get("bilan") or {}).get("examinees") == len(_profilS))
         _vsS._lister_tiktok = lambda url: [dict(e) for e in _profilS]
-        _vsS._lister_tiktok_creator = lambda u: [dict(e) for e in _profilS]
+        _vsS._lister_tiktok_creator = lambda u, info=None: [dict(e) for e in _profilS]
         _vsS._telecharger_tiktok = _dlS
         # La liste vient de l'API « creator » de TikTok ; si elle est
         # refusee, yt-dlp prend le relais. Le bandeau dit laquelle a servi.
         _sav_cr = _vsS._lister_tiktok_creator
-        _vsS._lister_tiktok_creator = lambda u: (
+        _vsS._lister_tiktok_creator = lambda u, info=None: (
             [dict(e) for e in _profilS] + [{"id": "50", "view_count": 90_000, "photo": True}])
         try:
             _b6 = _vsS.synchroniser("lea", _dS)["bilan"]
@@ -14859,7 +14859,7 @@ try:
                   _b6.get("source") == "TikTok" and _b6["examinees"] == len(_profilS) + 1, str(_b6))
             check("un diaporama TikTok est compte comme publication photo",
                   "50" in (_vsS.lire("lea").get("photos") or []))
-            _vsS._lister_tiktok_creator = lambda u: (_ for _ in ()).throw(RuntimeError("liste refusée"))
+            _vsS._lister_tiktok_creator = lambda u, info=None: (_ for _ in ()).throw(RuntimeError("liste refusée"))
             _b7 = _vsS.synchroniser("lea", _dS)["bilan"]
             check("API creator refusee : yt-dlp prend le relais",
                   _b7.get("source") == "yt-dlp", str(_b7))
@@ -14871,6 +14871,28 @@ try:
         finally:
             _vsS._lister_tiktok_creator = _sav_cr
             _vsS._lister_tiktok = lambda url: [dict(e) for e in _profilS]
+        # Photo du dossier : celle du profil, sauf si le dossier en a deja une.
+        _ppS = []
+        _sav_pp = _vsS._poser_avatar
+
+        def _cr_pp(u, info=None):
+            if info is not None:
+                info["avatar"] = "https://exemple/pp.jpg"
+            return [dict(e) for e in _profilS]
+        _vsS._lister_tiktok_creator = _cr_pp
+        _vsS._poser_avatar = lambda d, url: _ppS.append((d.name, url)) or "avatar.jpg"
+        try:
+            _b9 = _vsS.synchroniser("lea", _dS)["bilan"]
+            check("la photo du profil est proposee au dossier de l identite",
+                  _ppS == [("lea", "https://exemple/pp.jpg")] and _b9.get("photo"), str(_ppS))
+        finally:
+            _vsS._poser_avatar = _sav_pp
+            _vsS._lister_tiktok_creator = lambda u, info=None: [dict(e) for e in _profilS]
+        (_tmpS / "lea" / "avatar.png").write_bytes(b"x")
+        check("une photo deja la n est jamais remplacee (aucun telechargement)",
+              _vsS._poser_avatar(_tmpS / "lea", "https://exemple/pp.jpg") == ""
+              and (_tmpS / "lea" / "avatar.png").read_bytes() == b"x")
+        (_tmpS / "lea" / "avatar.png").unlink()
         check("plus aucun appel a Apify dans l'import", "apify" not in
               open("vault_social.py", encoding="utf-8").read().lower().replace(
                   "apify marchait aussi", ""))
