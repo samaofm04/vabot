@@ -61893,11 +61893,14 @@ def create_app():
 
     @app.route("/infloww")
     def infloww_page():
-        """Les abonnés lus par l'API officielle d'Infloww — une page À PART.
+        """Les chiffres de l'API officielle d'Infloww — une page À PART.
 
         Le propriétaire a voulu cette source isolée pour ne rien casser : rien
         d'autre du site n'importe infloww.py, et cette page ne nourrit ni le
         podium ni la paie. Admin seulement : ce sont les chiffres de l'agence.
+        Six vues (?vue=apercu|revenus|equipe|marketing|messages|journal) ;
+        infloww.page() valide les paramètres, n'appelle que les adresses de la
+        vue demandée et affiche chaque panne sur la page, section par section.
         """
         from flask import Response as _R
         if not is_auth():
@@ -61905,23 +61908,13 @@ def create_app():
         if not _is_admin():
             return ("Réservé à l'administration.", 403)
         import infloww as _ifw
-        pseudo = str(request.args.get("creatrice") or "")
-        if pseudo not in _ifw.suivies():
-            pseudo = _ifw.suivies()[0]
         try:
-            jours = int(request.args.get("jours") or 30)
-        except ValueError:
-            jours = 30
-        if jours not in _ifw.PERIODES:
-            jours = 30
-        try:
-            html = _ifw.page_html(pseudo, jours, _ifw.bilan(pseudo, jours))
-        except _ifw.ErreurInfloww as e:
-            html = _ifw.page_html(pseudo, jours, erreur=e)
+            html = _ifw.page(request.args)
         except Exception as e:
-            # l'erreur s'affiche SUR la page : une page blanche ferait croire
-            # que l'API ne renvoie rien, alors qu'elle a peut-être répondu faux
-            html = _ifw.page_html(pseudo, jours, erreur=_ifw.ErreurInfloww(
+            # page() ne lève pas ; si elle le faisait quand même, l'erreur
+            # s'affiche SUR la page : une page blanche ferait croire que l'API
+            # ne renvoie rien, alors qu'elle a peut-être répondu faux
+            html = _ifw.page_html(_ifw.suivies()[0], 30, erreur=_ifw.ErreurInfloww(
                 f"{type(e).__name__} : {e}"))
         r = _R(html, mimetype="text/html")
         r.headers["Cache-Control"] = "no-store"

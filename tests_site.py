@@ -17448,9 +17448,12 @@ try:
           and _tr[0][0] == _dtI.date(2026, 7, 1) and _tr[-1][1] == _dtI.date(2026, 9, 25)
           and all(_tr[i][1] + _dtI.timedelta(days=1) == _tr[i + 1][0] for i in range(len(_tr) - 1)))
 
-    _savI = (_ifw._get, _ifw.CACHE_FICHIER)
+    _savI = (_ifw._get, _ifw.CACHE_FICHIER, _ifw.CONFIG_FICHIER)
     try:
         _ifw.CACHE_FICHIER = _plI(_tfI.mkdtemp()) / "c.json"
+        # un reglage absent : sinon le data/infloww_config.json de la machine
+        # (Emy, Khloe suivies en plus) changeait ce que les verifications voient
+        _ifw.CONFIG_FICHIER = _plI(_tfI.mkdtemp()) / "absent.json"
         _vus = []
 
         def _faux(chemin, params):
@@ -17499,7 +17502,7 @@ try:
         _cache = _jsI.loads(_ifw.CACHE_FICHIER.read_text()) if _ifw.CACHE_FICHIER.exists() else {}
         check("une erreur n est jamais gardee en cache", "creators" not in _cache)
     finally:
-        _ifw._get, _ifw.CACHE_FICHIER = _savI
+        _ifw._get, _ifw.CACHE_FICHIER, _ifw.CONFIG_FICHIER = _savI
 
     # la page : rendue cote serveur, sans JavaScript, noms echappes
     _b = {"creatrice": {"userName": "jessyewdiference"}, "debut": "2026-09-01", "fin": "2026-09-25",
@@ -18692,6 +18695,659 @@ except Exception as _eEqS:
     check("equipe (site) : testable", False, repr(_eEqS)[:200] + " " + _tbEqS.format_exc()[-600:])
 finally:
     _shEq.rmtree(_dirEq, ignore_errors=True)
+
+# ------------------------------------------------ 38. Infloww, les six vues
+print()
+print("=" * 70)
+print("Infloww : les six vues de la page, sur une fausse API (aucun appel reseau)")
+print("=" * 70)
+try:
+    import infloww as _ifx
+    import datetime as _dtX
+    import tempfile as _tfX
+    import json as _jsX
+    import re as _reX
+    from pathlib import Path as _plX
+
+    _UTC = _dtX.timezone.utc
+    _AUJ = _ifx._aujourdhui()
+    _J, _EMY, _KHL = "2325486654980122", "2513465915080717", "2386982449905718"
+    _PID = "2579981036683309"
+    _ALICE, _BOB, _CHLOE, _DAN = "2381879877697548", "2179096369299478", "2000000000000001", "2000000000000002"
+
+    def _msX(d, h=0, m=0):
+        return int(_dtX.datetime.combine(d, _dtX.time(h, m), _UTC).timestamp() * 1000)
+
+    def _jX(n):
+        return _AUJ - _dtX.timedelta(days=n)
+
+    _CONNEXION = _jX(175)
+    _CREAS = [
+        {"id": _EMY, "platformPid": "2579981036683307", "name": "Emy", "nickName": "Emy <3",
+         "userName": "emy.brw", "tagName": "", "createdTime": _msX(_jX(40), 23)},
+        {"id": _KHL, "platformPid": "2579981036683308", "name": "Khloe", "nickName": "Khloe",
+         "userName": "khloecute", "tagName": "", "createdTime": _msX(_jX(130), 16)},
+        {"id": _J, "platformPid": _PID, "name": "Jessye", "nickName": "Jessye",
+         "userName": "jessyewdiference", "tagName": "", "createdTime": _msX(_CONNEXION, 6)}]
+    _EMPL = [(_ALICE, "Alice", "Activated"), (_BOB, "Bob <b>", "Activated"),
+             (_CHLOE, "Chloe", "Deleted"), (_DAN, "Dan", "Inactive")]
+    _AFFECT = {_ALICE: [_J, _EMY], _BOB: [_KHL], _DAN: [_J, "777"]}
+    _LIENS_X = {
+        "TRACKING": [
+            {"id": "2558281382297618", "name": "VA 6 <script>alert(1)</script>, Emma", "code": "121",
+             "clickCount": "351", "subCount": "41", "finishedFlag": False, "source": "Twitter",
+             "earningsGross": "1587", "earningsNet": "1270", "payingFansCount": "3",
+             "subscriptionCVR": "11.68", "spendingCVR": "7.32", "epcGross": "4", "epcNet": "3",
+             "aepsGross": "38", "aepsNet": "30", "currency": "USD", "createdTime": str(_msX(_jX(20), 9)),
+             "expiredTime": None, "updatedTime": str(_msX(_AUJ, 0, 5))},
+            {"id": "2288345120702466", "name": "Gros lien", "code": "47", "clickCount": "29277",
+             "subCount": "4723", "finishedFlag": True, "source": "Instagram", "earningsGross": "1745618",
+             "earningsNet": "1396529", "payingFansCount": "300", "subscriptionCVR": "16.13",
+             "spendingCVR": "6.22", "aepsGross": "369", "aepsNet": "295", "epcGross": "59", "epcNet": "47",
+             "currency": "USD", "createdTime": str(_msX(_CONNEXION - _dtX.timedelta(days=40), 12)),
+             "expiredTime": str(_msX(_jX(30))), "updatedTime": str(_msX(_AUJ, 0, 5))},
+            {"id": "2558281382297600", "name": "VA 7 Lea", "code": "122", "clickCount": "50000",
+             "subCount": "10", "finishedFlag": False, "source": "Threads", "earningsGross": "0",
+             "earningsNet": "0", "payingFansCount": "0", "currency": "USD",
+             "createdTime": str(_msX(_jX(21), 9)), "expiredTime": None, "updatedTime": str(_msX(_AUJ, 0, 5))},
+            {"id": "2400000000000003", "name": "Sans source", "code": "60", "clickCount": "100",
+             "subCount": "5", "finishedFlag": "false", "source": "", "earningsGross": "0",
+             "earningsNet": "0", "payingFansCount": "0", "currency": "USD",
+             "createdTime": str(_msX(_jX(100), 8)), "expiredTime": None, "updatedTime": str(_msX(_AUJ, 0, 5))}],
+        "TRIAL": [
+            {"id": "2286379166138398", "name": "Essai <i>14j</i>", "code": "jirng6jehvsywdaqruom9ppxn092kwac",
+             "subDuration": "14", "subLimit": "0", "subCount": "0", "finishedFlag": True, "source": "",
+             "payingFansCount": "0", "earningsGross": "0", "earningsNet": "0", "currency": "USD",
+             "createdTime": str(_msX(_jX(200), 10)), "expiredTime": str(_msX(_jX(186), 10)),
+             "updatedTime": str(_msX(_AUJ))}],
+        "CAMPAIGN": []}
+    # les fans du lien 121 : des JUMEAUX (meme id), dont une paire aux gains differents
+    _FANS_X = []
+    for _i, _gx in ((105, {"tipsEarningGross": "1000", "tipsEarningNet": "800"}),
+                    (104, {}), (104, {"messagesEarningGross": "500", "messagesEarningNet": "400"}),
+                    (103, {}), (102, {"postsEarningGross": "87", "postsEarningNet": "70"}),
+                    (102, {"postsEarningGross": "87", "postsEarningNet": "70"}), (101, {})):
+        _fx = {"id": str(_i), "fanId": "9%d" % _i, "fanName": "fan<%d>" % _i, "currency": "USD",
+               "subscribedTime": str(_msX(_jX(_i - 90)))}
+        for _c in ("subscription", "posts", "messages", "streams", "tips"):
+            _fx[_c + "EarningGross"] = "0"
+            _fx[_c + "EarningNet"] = "0"
+        _fx.update(_gx)
+        _FANS_X.append(_fx)
+
+    def _ms_de(v):
+        v = str(v)
+        if v.isdigit():
+            return int(v)
+        return int(_dtX.datetime.fromisoformat(v.replace("Z", "+00:00")).timestamp() * 1000)
+
+    def _ventes_brutes(s, e, perf=False):
+        out = []
+        d = _dtX.datetime.fromtimestamp(s / 1000, _UTC).date()
+        while _msX(d) <= e:
+            t0 = _msX(d, 0, 10)
+            rows = [(0, "Messages", None, "2499", "500", "1999",
+                     "done" if d < _jX(7) else "loading", "111", "FAN_A", _ALICE, "Message sender")]
+            if d == _jX(2):
+                rows.append((1, "Tips", "PostAll", "5000", "1000", "4000", "loading", "222",
+                             "<img src=x onerror=alert(1)>", _BOB, "Last chatter"))
+            if d == _jX(3):
+                rows.append((2, "Messages", None, "986", "197", "789", "undo", "333", None, _ALICE,
+                             "Message sender"))
+            if d == _jX(1):
+                rows.append((3, "Posts", None, "1000", "200", "800", "loading", "444", "FAN_D", None,
+                             "Unassigned"))
+            for k, ty, src, am, fe, ne, st, fid, fnm, emp, regle in rows:
+                t = t0 + k * 1000
+                if s <= t <= e:
+                    r = {"id": str(t * 10 + k), "transactionId": "hashundo" if k == 2 else "h%d%d" % (t, k),
+                         "platformPid": _PID, "fanId": fid, "fanName": fnm, "createdTime": str(t),
+                         "type": ty, "tipSource": src, "status": st, "amount": am, "fee": fe, "net": ne,
+                         "currency": "USD"}
+                    if perf:
+                        r.update(id=str(t * 10 + k + 5), transactionId=str(t * 10 + k), createdTime=t,
+                                 salesRule=regle, attributeEmployeeId=emp, salesAmount=am)
+                    out.append(r)
+            d += _dtX.timedelta(days=1)
+        out.sort(key=lambda r: -int(r["id"]))
+        return out
+
+    def _paginer(rows, params, taille=7, cle="id"):
+        cur = params.get("cursor")
+        if cur is not None:
+            rows = [r for r in rows if int(r[cle]) < int(cur)]
+        page = rows[:min(taille, int(params.get("limit") or 10))]
+        plus = len(rows) > len(page)
+        return {"data": {"platformCode": "OnlyFans", "list": page},
+                "cursor": page[-1][cle] if (page and plus) else None, "hasMore": plus}
+
+    _STATUTS_X = [{"id": str(2524872743977011 + i), "platformPid": "2579981036683307",
+                   "statusBefore": None if i == 0 else ("connected" if i % 2 else "disconnected"),
+                   "statusAfter": "disconnected" if i % 2 else "connected", "creatorId": _EMY,
+                   "operationTime": _msX(_jX(20)) + i * 7200000,
+                   "operationEmployeeId": None if i % 3 else _ALICE} for i in range(150)]
+    _vusX = []
+    _panneX = {}
+    _droitsX = {"orga": False, "empl": False}
+    _droitsX["retour"] = {}
+
+    def _refus(rid):
+        raise _ifx.ErreurInfloww("Scope validation failure", 403, rid)
+
+    def _api(chemin, params):
+        _vusX.append((chemin, dict(params)))
+        if chemin in _panneX:
+            p = _panneX[chemin]
+            if isinstance(p, Exception):
+                raise p
+            return p
+        if chemin == "/v1/creators":
+            return {"data": {"platformCode": "OnlyFans", "list": _CREAS}, "cursor": None, "hasMore": False}
+        if chemin == "/v1/all-creators":
+            return {"data": {"list": [dict(c, status="connected", deletedTime=None) for c in _CREAS]
+                             + [{"id": "999", "platformPid": "1", "name": "Partie", "nickName": "",
+                                 "userName": "partie", "status": "deleted", "createdTime": _msX(_jX(300)),
+                                 "deletedTime": _msX(_jX(250))}]}, "cursor": None, "hasMore": False}
+        if chemin.startswith("/v1/creator-report/"):
+            a = _dtX.date.fromisoformat(params["startTime"])
+            b = _dtX.date.fromisoformat(params["endTime"])
+            js = [a + _dtX.timedelta(days=i) for i in range((b - a).days + 1)]
+            if chemin.endswith("subscriber-count"):
+                l = [{"platformPid": _PID, "date": d.isoformat(), "newSubscribers": "100",
+                      "subscriberRenewals": "0"} for d in js]
+            elif chemin.endswith("fans/count"):
+                l = [{"platformPid": _PID, "date": d.isoformat(), "activeFans": str(18000 + (d - a).days),
+                      "expiredFans": "1963"} for d in js]
+            elif chemin.endswith("renew-on"):
+                l = []
+            elif chemin.endswith("avg-subscription-length"):
+                l = [{"platformPid": _PID, "date": d.isoformat(), "avgSubscriptionLength": "19"}
+                     for d in js if d != _jX(3)]
+            elif chemin.endswith("profile-visitor-count"):
+                l = [{"platformPid": _PID, "date": d.isoformat(),
+                      "profileVisitors": "0" if d == _AUJ else "8070",
+                      "guestProfileVisitors": "0" if d == _AUJ else "5149",
+                      "loggedInUsersProfileVisitors": "0" if d == _AUJ else "2921"} for d in js]
+            elif chemin.endswith("rank"):
+                l = [{"platformPid": _PID, "date": d.isoformat(), "performanceRank": "1.70"} for d in js]
+            elif chemin.endswith("chat-summary"):
+                l = [{"platformPid": _PID, "replyTime": "355784", "fansChatted": "174",
+                      "messagesSent": "1935", "ppvsSent": "91"}]
+            else:
+                l = []
+            return {"data": {"platformCode": "OnlyFans", "list": l}}
+        if chemin in ("/v1/transactions", "/v1/transaction-perf/details"):
+            return _paginer(_ventes_brutes(_ms_de(params["startTime"]), _ms_de(params["endTime"]),
+                                           perf=chemin != "/v1/transactions"), params)
+        if chemin == "/v1/refunds":
+            s, e = _ms_de(params["startTime"]), _ms_de(params["endTime"])
+            l = [r for r in [{"id": "2555598084243456", "transactionId": "hashundo", "fanId": "333",
+                              "paymentTime": str(_msX(_jX(5), 7)), "refundTime": str(_msX(_jX(3), 8)),
+                              "paymentStatus": "undo", "paymentAmount": "986",
+                              "transactionType": "chat_messages", "currency": "USD"}]
+                 if s <= int(r["refundTime"]) <= e]
+            return _paginer(l, params)
+        if chemin == "/v1/invoice-data/monthly-billing":
+            if not _droitsX["orga"]:
+                _refus("RID-FACT")
+            return {"data": {"list": [{"billingId": 1, "invoiceId": "INV-<1>", "billingPeriod": "2026-08",
+                                       "currency": "USD", "subscription": 49900, "discount": 0, "igic": None,
+                                       "total": 49900, "deductions": 0, "balanceDue": 0, "paid": 49900,
+                                       "pending": 0}]}}
+        if chemin == "/v1/transaction-perf/manual-assignment/details":
+            if not _droitsX["orga"]:
+                _refus("RID-REASSIGN")
+            return _paginer([{"id": "5", "transactionId": "2579878289539084", "transactionPerfId": "6",
+                              "operationType": "Include", "operationEmployeeId": _ALICE,
+                              "beforeAttributeEmployeeId": None, "afterAttributeEmployeeId": _BOB,
+                              "createdTime": str(_msX(_jX(2)))}], params)
+        if chemin == "/v1/employees":
+            # trie par id decroissant, comme la vraie API : le curseur veut dire « id inferieur »
+            return _paginer([{"employeeId": i, "employeeName": n, "status": s, "createdTime": _msX(_jX(90)),
+                              "deletedTime": _msX(_jX(10)) if s == "Deleted" else None}
+                             for i, n, s in sorted(_EMPL, key=lambda x: -int(x[0]))], params,
+                            taille=3, cle="employeeId")
+        if chemin == "/v1/employees/assigned-creators":
+            return {"data": {"list": [{"platformCode": "OnlyFans", "employeeId": params["employeeId"],
+                                       "creatorId": c} for c in _AFFECT.get(params["employeeId"], [])]},
+                    "cursor": None, "hasMore": False}
+        if chemin.startswith("/v1/employee-report/"):
+            if not _droitsX["empl"]:
+                _refus("RID-EMP")
+            if chemin.endswith("sales-summary"):
+                return {"data": {"list": [
+                    {"employeeId": _ALICE, "date": _jX(2).isoformat(), "platformPid": _PID, "salesAmount": "4900",
+                     "ppvSalesAmount": "4900", "tipsSalesAmount": "0", "directMessageSalesAmount": "4900",
+                     "priorityMassMessageSalesAmount": "0", "massMessageSalesAmount": "0", "currency": "USD"},
+                    {"employeeId": _ALICE, "date": _jX(2).isoformat(), "platformPid": "AUTRE",
+                     "salesAmount": "100000", "currency": "USD"}]}}
+            return {"data": {"list": [
+                {"employeeId": _ALICE, "date": _jX(2).isoformat(), "platformPid": _PID, "directMessagesSent": "120",
+                 "directPpvsSent": "10", "goldenRatio": "8.3%", "ppvsUnlocked": "4", "unlockRate": "40.0%",
+                 "fansChatted": "30", "characterCount": "5000", "responseTimeBasedOnScheduledHours": "60000",
+                 "responseTimeBasedOnClockedHours": "50000"}]}}
+        if chemin == "/v1/links":
+            s, e = _ms_de(params["startTime"]), _ms_de(params["endTime"])
+            it = sorted([x for x in _LIENS_X[params["linkType"]] if s <= int(x["createdTime"]) <= e],
+                        key=lambda x: -int(x["createdTime"]))
+            if params.get("cursor"):
+                it = it[[x["id"] for x in it].index(params["cursor"]) + 1:]
+            page = it[:1]
+            return {"data": {"platformCode": "OnlyFans", "linkType": params["linkType"], "list": page},
+                    "cursor": page[-1]["id"] if len(it) > 1 else None, "hasMore": len(it) > 1}
+        if chemin == "/v1/linkfans":
+            if params["linkId"] != "2558281382297618" or params["linkType"] != "TRACKING":
+                return {"data": {"list": []}, "cursor": None, "hasMore": False}
+            # le curseur veut dire « id strictement inferieur », et une page de 2
+            # coupe la paire 104 en deux : c'est le piege observe sur le lien code 2
+            return _paginer(list(_FANS_X), params, taille=2)
+        if chemin in ("/v1/automated-messages", "/v1/priority-mass-messages"):
+            s, e = _ms_de(params["startTime"]), _ms_de(params["endTime"])
+            auto = chemin == "/v1/automated-messages"
+            base = [{"employeeId": _ALICE, "status": "Active" if auto else "Completed",
+                     "includeListNames": ["Fans", "New Fans (3 days)-HDM"], "excludeListNames": ["Muted"],
+                     "totalSpendMin": "0", "totalSpendMax": None, "messageCdHours": "6",
+                     "trigger": 2, "triggerFrequency": 1, "onlyOnlineFans": False,
+                     "price": "0", "totalNumberOfTimeSent": "22415", "totalNumberOfPurchases": "3",
+                     "totalRevenue": "4500", "canceledByEmployeeId": None, "unsentType": None if auto else 1,
+                     "unsentByEmployeeId": None if auto else _BOB,
+                     "sentTime": _msX(_CONNEXION, 7), "endTime": None,
+                     "createdTime": _msX(_CONNEXION, 7), "modifiedTime": _msX(_CONNEXION, 7)},
+                    {"employeeId": _BOB, "status": "Canceled", "includeListNames": ["Fans"], "excludeListNames": [],
+                     "trigger": 1, "triggerFrequency": 2, "price": "0", "totalNumberOfTimeSent": "10",
+                     "totalNumberOfPurchases": "0", "totalRevenue": "0", "canceledByEmployeeId": _ALICE,
+                     "sentTime": _msX(_jX(60)), "endTime": _msX(_jX(59)), "createdTime": _msX(_jX(60)),
+                     "modifiedTime": _msX(_jX(59))}]
+            col = {"collectionNo": "1", "messages": [{"messageContent": "<p>Hey {name} &amp; <b>welcome</b>"
+                                                                        "<script>x</script></p>", "price": "0"}],
+                   "price": "0", "numberOfTimesSent": "22415", "numberOfPurchases": "3", "revenue": "4500"}
+            for i, x in enumerate(base):
+                if auto:
+                    x["automatedMessageId"] = str(2326213361205251 - i)
+                    x["collections"] = [col]
+                else:
+                    x["priorityMassMessageId"] = str(2531195775549488 - i)
+                    x["collection"] = col
+            return _paginer([x for x in base if s <= x["createdTime"] <= e], params,
+                            cle="automatedMessageId" if auto else "priorityMassMessageId")
+        if chemin == "/v1/creator/status-change-log":
+            s, e = _ms_de(params["startTime"]), _ms_de(params["endTime"])
+            l = [x for x in _STATUTS_X if s <= x["operationTime"] <= e]
+            if params.get("cursor"):             # le vrai curseur est casse : il ne doit pas servir
+                l = [x for x in l if int(x["id"]) < int(params["cursor"])]
+            page = l[:int(params.get("limit") or 10)]
+            return {"data": {"platformCode": "OnlyFans", "list": page},
+                    "cursor": page[-1]["id"] if page else None, "hasMore": len(l) > len(page)}
+        raise AssertionError("adresse inattendue : " + chemin)
+
+    # --- conversions et mise en forme ---
+    check("infloww+ : des centimes en texte deviennent des dollars avec la devise",
+          _ifx._argent("2499") == "24,99\u00a0$" and _ifx._argent(1767085) == "17\u202f670,85\u00a0$"
+          and _ifx._argent("500", "EUR") == "5,00\u00a0€" and _ifx._argent(None) == "0,00\u00a0$",
+          _ifx._argent(1767085))
+    check("infloww+ : un classement en texte reste un decimal (1.70 n est pas 1)",
+          _ifx._f("1.70") == 1.7 and _ifx._f("Top 5%") == 5.0 and _ifx._f(None) is None
+          and _ifx._f("x") is None and _ifx._n("1.70") == 1)
+    check("infloww+ : un delai en millisecondes se lit en minutes",
+          _ifx._duree_ms("355784") == "5 min 55 s" and _ifx._duree_ms(0) == "—")
+    check("infloww+ : le HTML d un message devient du texte",
+          _ifx._texte_html("<p>Hey {name} &amp; <b>you</b></p><p>2</p>") == "Hey {name} & you 2")
+    check("infloww+ : la fin de tranche garde ses millisecondes (pas de trou a 23:59:59.5)",
+          _ifx._ms(_dtX.datetime(2026, 9, 24, 23, 59, 59, 999000, _UTC)).endswith("999"))
+    try:
+        _ifx._liste({"data": {"list": []}, "errors": [{"creatorId": "123456",
+                                                        "errorMessage": "Scope validation failure"}]})
+        _refuse = False
+    except _ifx.ErreurInfloww as _eX:
+        _refuse = "Scope validation failure" in str(_eX) and "123456" in str(_eX)
+    check("infloww+ : un refus cache dans « errors » (reponse 200) est remonte", _refuse)
+    _trX = list(_ifx._tranches_heure(_jX(89), _AUJ))
+    check("infloww+ : 90 jours en tranches de moins de 31 jours, sans trou ni chevauchement",
+          len(_trX) == 3 and all(int(e) - int(s) < 31 * 86400000 for _, _, s, e in _trX)
+          and all(int(_trX[i][3]) + 1 == int(_trX[i + 1][2]) for i in range(len(_trX) - 1))
+          and int(_trX[0][2]) == _msX(_jX(89)) and int(_trX[-1][3]) <= _msX(_AUJ, 23, 59) + 60000,
+          str([(a, b) for a, b, _, _ in _trX]))
+    _rsX = _ifx.resume_ventes([
+        {"t": _msX(_jX(1)), "type": "Messages", "source": "", "statut": "done", "brut": 2499, "frais": 500,
+         "net": 1999, "devise": "USD", "fan": "1", "fan_nom": "A"},
+        {"t": _msX(_jX(1)), "type": "Messages", "source": "", "statut": "undo", "brut": 986, "frais": 197,
+         "net": 789, "devise": "USD", "fan": "2", "fan_nom": "B"},
+        {"t": _msX(_jX(1)), "type": "Tips", "source": "Chat", "statut": "loading", "brut": 5000, "frais": 1000,
+         "net": 4000, "devise": "EUR", "fan": "3", "fan_nom": "C"}])
+    check("infloww+ : une vente remboursee et une autre devise sont comptees a part, pas additionnees",
+          _rsX["brut"] == 2499 and _rsX["nb"] == 1 and _rsX["exclues"] == {"nb": 1, "brut": 986}
+          and _rsX["autres_devises"] == 1 and _rsX["fans_nb"] == 1, str(_rsX)[:200])
+    _reqX = _ifx.resume_equipe([
+        {"statut": "done", "brut": 4900, "net": 3920, "attribue": 4900, "employe": _ALICE, "regle": "Message sender",
+         "type": "Messages", "devise": "USD"},
+        {"statut": "done", "brut": 1000, "net": 800, "attribue": 1000, "employe": "", "regle": "Unassigned",
+         "type": "Posts", "devise": "USD"}])
+    check("infloww+ : une vente sans chatteur n est payee a personne",
+          _reqX["par_employe"][_ALICE]["brut"] == 4900 and _reqX["sans"]["brut"] == 1000
+          and "" not in _reqX["par_employe"])
+
+    # un remboursement EN COURS n est pas du CA encaisse
+    _rvX = _ifx.resume_ventes([
+        {"statut": "done", "brut": 1000, "frais": 200, "net": 800, "type": "Tips", "source": "",
+         "fan": "f1", "devise": "USD", "t": 1789770929000},
+        {"statut": "pending_return", "brut": 5000, "frais": 1000, "net": 4000, "type": "Posts",
+         "source": "", "fan": "f2", "devise": "USD", "t": 1789770929000}])
+    check("infloww+ : une vente en cours de remboursement sort des totaux",
+          _rvX["brut"] == 1000 and _rvX["exclues"]["nb"] == 1 and _rvX["exclues"]["brut"] == 5000)
+    _rqX = _ifx.resume_equipe([
+        {"statut": "pending_return", "brut": 5000, "net": 4000, "attribue": 5000, "employe": _ALICE,
+         "regle": "Message sender", "type": "Posts", "devise": "USD"}])
+    check("infloww+ : un remboursement en cours n est pas paye au chatteur",
+          _ALICE not in _rqX["par_employe"] and _rqX["exclues"]["nb"] == 1)
+    check("infloww+ : les trois orthographes de remboursement de la doc ont un libelle",
+          all(k in _ifx._TYPES_REMB for k in ("post", "stream", "subscribes")))
+    check("infloww+ : les declencheurs 3 a 8 de la doc sont nommes",
+          all(k in _ifx._DECLENCHEURS for k in (1, 2, 3, 5, 6, 7, 8)))
+
+    # un reglage ecrit a la main de travers ne fait pas tomber la page
+    _savCfgX = _ifx.CONFIG_FICHIER
+    try:
+        _ifx.CONFIG_FICHIER = _plX(_tfX.mkdtemp()) / "cfg.json"
+        _ifx.CONFIG_FICHIER.write_text(_jsX.dumps(["emy.brw"]), encoding="utf-8")
+        check("infloww+ : un reglage qui est une liste est ignore, pas une 500",
+              _ifx._config() == {} and _ifx.suivies() == list(_ifx.SUIVIES))
+        _ifx.CONFIG_FICHIER.write_text(_jsX.dumps({"suivies": "emy.brw"}), encoding="utf-8")
+        check("infloww+ : une seule creatrice ecrite en texte est comprise",
+              _ifx.suivies() == ["emy.brw"])
+    finally:
+        _ifx.CONFIG_FICHIER = _savCfgX
+
+    # le cache se vide de ce qui ne resservira plus
+    _savCacheX = _ifx.CACHE_FICHIER
+    try:
+        _ifx.CACHE_FICHIER = _plX(_tfX.mkdtemp()) / "cache.json"
+        _ifx.CACHE_FICHIER.write_text(_jsX.dumps({"vieux": {"t": 1.0, "v": 1}}), encoding="utf-8")
+        _ifx._avec_cache("neuf", lambda: 2)
+        _lu_X = _jsX.loads(_ifx.CACHE_FICHIER.read_text(encoding="utf-8"))
+        check("infloww+ : une entree de cache perimee est retiree a la prochaine ecriture",
+              "vieux" not in _lu_X and _lu_X["neuf"]["v"] == 2)
+    finally:
+        _ifx.CACHE_FICHIER = _savCacheX
+
+    _savX = (_ifx._get, _ifx.CACHE_FICHIER, _ifx._config, _ifx.CONFIG_FICHIER)
+    try:
+        _ifx._get = _api
+        _ifx.CONFIG_FICHIER = _plX(_tfX.mkdtemp()) / "absent.json"
+
+        def _neuf():
+            # un cache vide par vue : sinon /v1/creators, lu une fois, fausserait le decompte
+            _ifx.CACHE_FICHIER = _plX(_tfX.mkdtemp()) / "cache.json"
+            _vusX.clear()
+
+        def _vue(**args):
+            _neuf()
+            h = _ifx.page(args)
+            return h, sorted({c for c, _ in _vusX})
+
+        def _sans_js(h):
+            return ("<script" not in h and not _reX.search(r"<[^>]*\son[a-z]+\s*=", h)
+                    and "javascript:" not in h.lower())
+
+        _ATTENDU = {
+            "apercu": ["/v1/creator-report/fans/avg-subscription-length", "/v1/creator-report/fans/count",
+                       "/v1/creator-report/fans/renew-on", "/v1/creator-report/fans/subscriber-count",
+                       "/v1/creator-report/rank", "/v1/creator-report/reach/profile-visitor-count",
+                       "/v1/creators"],
+            "revenus": ["/v1/creators", "/v1/invoice-data/monthly-billing", "/v1/refunds", "/v1/transactions"],
+            "equipe": ["/v1/creators", "/v1/employee-report/employee-chat-summary",
+                       "/v1/employee-report/employee-sales-summary", "/v1/employees",
+                       "/v1/transaction-perf/details"],
+            "marketing": ["/v1/creators", "/v1/links"],
+            "messages": ["/v1/automated-messages", "/v1/creator-report/chat-summary", "/v1/creators",
+                         "/v1/employees", "/v1/priority-mass-messages"],
+            "journal": ["/v1/all-creators", "/v1/creator/status-change-log", "/v1/creators", "/v1/employees",
+                        "/v1/transaction-perf/manual-assignment/details"],
+        }
+        _pagesX = {}
+        for _v, _att in _ATTENDU.items():
+            _hX, _adr = _vue(vue=_v, jours="30")
+            _pagesX[_v] = (_hX, list(_vusX))
+            check("infloww+ %s : n appelle QUE ses adresses" % _v,
+                  _adr == _att and set(_adr) <= set(_ifx.ADRESSES[_v]), str(_adr))
+            check("infloww+ %s : rendue sans aucun JavaScript" % _v, _sans_js(_hX))
+            check("infloww+ %s : l onglet de la vue est actif, les autres sont des liens simples" % _v,
+                  ('class="vue on" href="%s"' % _ifx._url(_v, "jessyewdiference", 30)) in _hX
+                  and all(('href="%s"' % _ifx._url(_w, "jessyewdiference", 30)) in _hX for _w, _ in _ifx.VUES))
+            check("infloww+ %s : les periodes gardent la vue" % _v,
+                  all(('href="%s"' % _ifx._url(_v, "jessyewdiference", _p)) in _hX for _p in (7, 30, 90)))
+
+        # --- vue d'ensemble ---
+        _h = _pagesX["apercu"][0]
+        _nbj = 30
+        check("infloww+ apercu : les abonnes du mois, convertis depuis le texte",
+              _ifx._nb(100 * _nbj) in _h and "nouveaux abonnés · 30 j" in _h)
+        check("infloww+ apercu : fans actifs du dernier jour, et la progression",
+              _ifx._nb(18000 + 29) in _h and "+29 depuis le" in _h)
+        check("infloww+ apercu : la ligne du jour a 0/0/0 est « en attente », hors des totaux",
+              "en attente" in _h and _ifx._nb(8070 * 29) in _h)
+        check("infloww+ apercu : le classement garde ses decimales", "top 1,70" in _h)
+        check("infloww+ apercu : un jour absent est dit, pas mis a zero",
+              "durée moyenne : 1 jour(s) absent(s)" in _h and _jX(3).isoformat()[5:] in _h)
+        check("infloww+ apercu : un renouvellement auto vide n est pas presente comme zero",
+              "liste VIDE" in _h)
+        check("infloww+ apercu : les autres creatrices connectees sont signalees, avec la marche a suivre",
+              "@emy.brw" in _h and "@khloecute" in _h and "infloww_config.json" in _h)
+
+        # --- revenus ---
+        _h, _vx = _pagesX["revenus"]
+        _txX = [p for c, p in _vx if c == "/v1/transactions"]
+        _uniq = {r["id"]: r for p in _txX for r in _ventes_brutes(_ms_de(p["startTime"]), _ms_de(p["endTime"]))}
+        _ok = [r for r in _uniq.values() if r["status"] != "undo"]
+        _brutX = sum(int(r["amount"]) for r in _ok)
+        check("infloww+ revenus : toutes les pages sont lues (curseur suivi)",
+              len(_txX) >= 5 and any(p.get("cursor") for p in _txX)
+              and ('<div class="v">%s</div><div class="l">ventes</div>' % _ifx._nb(len(_ok))) in _h
+              and _ifx._argent(_brutX) in _h, "%d appels" % len(_txX))
+        check("infloww+ revenus : la vente remboursee est exclue, et montree a part",
+              _ifx._argent(986) in _h and "undo" in _h and "exclu" in _h)
+        check("infloww+ revenus : un nom de fan est echappe",
+              "&lt;img src=x onerror=alert(1)&gt;" in _h and "<img" not in _h)
+        check("infloww+ revenus : l origine de tip absente de la doc (PostAll) est gardee, pas ecartee",
+              "Tips · PostAll" in _h)
+        check("infloww+ revenus : le remboursement est liste (date du remboursement, montant brut)",
+              (_jX(3).isoformat() + " 08:00") in _h and "#333" in _h and "Aucun remboursement" not in _h)
+        check("infloww+ revenus : la facture refusee (403) dit la portee a ouvrir, avec l identifiant",
+              "RID-FACT" in _h and "Organization scope" in _h and "HTTP 403" in _h)
+        check("infloww+ revenus : les autres sections s affichent malgre la facture en panne",
+              "Jour par jour" in _h and "Meilleurs fans" in _h)
+        _h90 = _vue(vue="revenus", jours="90")[0]
+        _tx90 = [p for c, p in _vusX if c == "/v1/transactions"]
+        _deb90 = {p["startTime"] for p in _tx90}
+        check("infloww+ revenus 90 j : chaque requete couvre 31 jours au plus",
+              _tx90 and all(_ms_de(p["endTime"]) - _ms_de(p["startTime"]) < 31 * 86400000 for p in _tx90)
+              and len(_deb90) == 3 and str(_msX(_jX(89))) in _deb90, str(sorted(_deb90)))
+
+        # --- equipe ---
+        _h, _vx = _pagesX["equipe"]
+        check("infloww+ equipe : le CA par chatteur, noms echappes",
+              "Alice" in _h and "Bob &lt;b&gt;" in _h and "Bob <b>" not in _h)
+        check("infloww+ equipe : les ventes rattachees a personne sont a part, jamais payees",
+              "attribué à personne" in _h and "non payé" in _h and "Unassigned" in _h)
+        check("infloww+ equipe : les rapports employes refuses disent quoi ouvrir dans Infloww",
+              "RID-EMP" in _h and "All employees" in _h)
+        check("infloww+ equipe : les affectations (un appel par employe) attendent qu on les demande",
+              "Charger les affectations" in _h
+              and ('href="%s"' % _ifx._url("equipe", "jessyewdiference", 30, affectations=1)) in _h)
+        _hA = _vue(vue="equipe", jours="30", affectations="1")[0]
+        _aff = [p["employeeId"] for c, p in _vusX if c == "/v1/employees/assigned-creators"]
+        check("infloww+ equipe : les affectations lues sur demande, supprimes non interroges",
+              sorted(_aff) == sorted([_ALICE, _BOB, _DAN]) and "supprimés non interrogés" in _hA, str(_aff))
+        check("infloww+ equipe : un vendeur non affecte est signale",
+              "sans être affectés" in _hA and "Bob &lt;b&gt;" in _hA)
+        check("infloww+ equipe : une creatrice hors du perimetre de la cle est comptee",
+              "hors du périmètre de la clé" in _hA)
+        _vusX.clear()
+        _hA2 = _ifx.page({"vue": "equipe", "jours": "30"})
+        check("infloww+ equipe : ensuite les affectations viennent du cache, sans rappel",
+              not [c for c, _ in _vusX if c == "/v1/employees/assigned-creators"]
+              and "Charger les affectations" not in _hA2 and "sans être affectés" in _hA2)
+        _droitsX["empl"] = True
+        _hE = _vue(vue="equipe", jours="7")[0]
+        check("infloww+ equipe : avec le droit, les rapports employes s affichent (filtres sur la creatrice)",
+              "RID-EMP" not in _hE and _ifx._argent(4900) in _hE and "d'autres créatrices" in _hE
+              and _ifx._argent(100000) not in _hE and "40,0" in _hE)
+        _droitsX["empl"] = False
+
+        # --- marketing ---
+        _h, _vx = _pagesX["marketing"]
+        check("infloww+ marketing : un nom de lien est echappe et garde sa virgule",
+              "VA 6 &lt;script&gt;alert(1)&lt;/script&gt;, Emma" in _h)
+        check("infloww+ marketing : les liens crees AVANT la connexion sont inclus, et dits",
+              "c47" in _h and "avant la connexion" in _h and _ifx._nb(29277) in _h)
+        check("infloww+ marketing : revenus des liens en dollars, par source",
+              _ifx._argent(1396529) in _h and "Par source" in _h and "(sans source)" in _h)
+        check("infloww+ marketing : un « false » en texte n est pas pris pour vrai",
+              "Sans source" in _h and _h.count('<span class="pill">terminé</span>') == 2,
+              str(_h.count('<span class="pill">terminé</span>')))
+        check("infloww+ marketing : les liens sont lus page par page, sur un an",
+              sum(1 for c, p in _vx if c == "/v1/links" and p.get("cursor")) >= 1
+              and min(_ms_de(p["startTime"]) for c, p in _vx if c == "/v1/links") <= _msX(_jX(364)))
+        check("infloww+ marketing : essai gratuit liste, promotions vides dites",
+              "Essai &lt;i&gt;14j&lt;/i&gt;" in _h and "Promotions de profil" in _h and "Aucun (liste vide" in _h)
+        check("infloww+ marketing : chaque lien mene a ses fans",
+              ('href="%s"' % _ifx._url("lien", "jessyewdiference", 30, lien="2558281382297618",
+                                        type="TRACKING")) in _h)
+        _tri = _vue(vue="marketing", jours="30", tri="clics")[0]
+        check("infloww+ marketing : par defaut au revenu, et le tri par clics change l ordre",
+              _h.index("Gros lien") < _h.index("VA 7 Lea") and _tri.index("VA 7 Lea") < _tri.index("Gros lien"))
+
+        # --- fans d'un lien ---
+        _hL, _adrL = _vue(vue="lien", jours="30", lien="2558281382297618", type="TRACKING")
+        _lf = [p for c, p in _vusX if c == "/v1/linkfans"]
+        check("infloww+ lien : n appelle que ses adresses",
+              _adrL == ["/v1/creators", "/v1/linkfans", "/v1/links"], str(_adrL))
+        check("infloww+ lien : les jumeaux sont retires, la ligne au total maximal gardee",
+              "fans distincts" in _hL and ">5</div>" in _hL and _ifx._argent(1587) in _hL
+              and "Recoupement" in _hL and "Écart" not in _hL)
+        check("infloww+ lien : le curseur repart de dernier id + 1 (aucun jumeau perdu)",
+              any(p.get("cursor") == "105" for p in _lf) and "INCOMPLÈTE" not in _hL,
+              str([p.get("cursor") for p in _lf]))
+        check("infloww+ lien : noms de fans echappes, fans sans depense comptes mais dits",
+              "fan&lt;105&gt;" in _hL and "sans aucune dépense" in _hL and _sans_js(_hL))
+        _hB, _adrB = _vue(vue="lien", jours="30", lien="abc<script>")
+        check("infloww+ lien : un identifiant de lien invalide renvoie aux liens, sans lire de fans",
+              "/v1/linkfans" not in _adrB and "Liens de suivi" in _hB and "abc" not in _hB)
+
+        # --- messages ---
+        _h = _pagesX["messages"][0]
+        check("infloww+ messages : les messages envoyes, et le delai en minutes",
+              _ifx._nb(1935) in _h and "5 min 55 s" in _h and _ifx._nb(174) in _h)
+        check("infloww+ messages : un appel par jour pour le detail (31 au plus)",
+              sum(1 for c, p in _pagesX["messages"][1] if c.endswith("chat-summary")
+                  and p["startTime"] == p["endTime"]) == 30)
+        check("infloww+ messages : les automatisations, leurs envois et le texte du message sans balise",
+              _ifx._nb(22415) in _h and "bienvenue" in _h and "Hey {name} &amp; welcome" in _h)
+        check("infloww+ messages : qui a pose et qui a annule, par leur nom",
+              "Canceled" in _h and "Alice" in _h and "Bob &lt;b&gt;" in _h)
+        check("infloww+ messages : un envoi de masse retire a la main est signale",
+              "retiré à la main" in _h and "Envois de masse prioritaires" in _h)
+        _auto = [p for c, p in _pagesX["messages"][1] if c == "/v1/automated-messages"]
+        check("infloww+ messages : lus depuis la connexion, dix par page",
+              _auto and all(p["limit"] == 10 for p in _auto)
+              and min(_ms_de(p["startTime"]) for p in _auto) == _msX(_CONNEXION))
+
+        # --- journal ---
+        _h, _vx = _pagesX["journal"]
+        _jl = [p for c, p in _vx if c == "/v1/creator/status-change-log"]
+        check("infloww+ journal : le curseur casse n est jamais suivi, la fenetre est relancee",
+              not any("cursor" in p for p in _jl) and len(_jl) >= 2 and all(p["limit"] == 100 for p in _jl))
+        check("infloww+ journal : les 150 changements sont tous la, une seule fois",
+              _h.count('@emy.brw</td><td class="faible">') == 150 and "(première liaison)" in _h,
+              str(_h.count('@emy.brw</td><td class="faible">')))
+        check("infloww+ journal : deconnexion automatique dite, supprimee listee",
+              "automatique" in _h and "partie" in _h and "deleted" in _h)
+        check("infloww+ journal : les reattributions refusees disent la portee a ouvrir",
+              "RID-REASSIGN" in _h and "Organization scope" in _h)
+        _droitsX["orga"] = True
+        _hO = _vue(vue="journal", jours="7")[0]
+        _hF = _vue(vue="revenus", jours="7")[0]
+        check("infloww+ avec la portee : reattributions et facture s affichent",
+              "RID-REASSIGN" not in _hO and "Include" in _hO and "RID-FACT" not in _hF
+              and _ifx._argent(49900) in _hF and "INV-&lt;1&gt;" in _hF)
+        _droitsX["orga"] = False
+
+        # --- une section en panne n'efface pas les autres ---
+        _panneX["/v1/creator-report/rank"] = _ifx.ErreurInfloww("boom", 500, "RID-RANK")
+        _hP = _vue(vue="apercu", jours="7")[0]
+        _cacheP = _jsX.loads(_ifx.CACHE_FICHIER.read_text()) if _ifx.CACHE_FICHIER.exists() else {}
+        check("infloww+ panne : la section en erreur le dit, avec l identifiant",
+              "Classement OnlyFans : indisponible" in _hP and "RID-RANK" in _hP and "HTTP 500" in _hP)
+        check("infloww+ panne : les autres sections s affichent quand meme",
+              "nouveaux abonnés · 7 j" in _hP and "fans actifs" in _hP and "visiteurs du profil" in _hP)
+        check("infloww+ panne : l echec n est pas garde en cache, le reste oui",
+              not any(k.startswith("rang:") for k in _cacheP) and any(k.startswith("subs:") for k in _cacheP))
+        _panneX.clear()
+        _panneX["/v1/creator-report/fans/count"] = {"data": {"list": []}, "errors": [
+            {"creatorId": _J, "errorMessage": "Scope validation failure"}]}
+        _hS = _vue(vue="apercu", jours="7")[0]
+        check("infloww+ panne : une creatrice hors perimetre (200 + errors) n est pas affichee a zero",
+              "Fans actifs et expirés : indisponible" in _hS and "périmètre de la clé" in _hS)
+        _panneX.clear()
+        _panneX["/v1/creators"] = _ifx.ErreurInfloww("Scope validation failure", 403, "RID-TOUT")
+        _hT = _vue(vue="revenus", jours="7")[0]
+        check("infloww+ panne : sans la liste des creatrices, la page le dit (pas de page blanche)",
+              "RID-TOUT" in _hT and "Infloww n&#x27;a pas répondu" in _hT and _sans_js(_hT))
+        _panneX.clear()
+
+        # --- Emy et Khloe, si la config les suit ---
+        _ifx._config = lambda: {"suivies": ["jessyewdiference", "emy.brw", "khloecute"]}
+        _hK = _vue(vue="marketing", jours="7", creatrice="khloecute")[0]
+        check("infloww+ config : Emy et Khloe ont leur onglet, qui garde la vue",
+              ('href="%s">@emy.brw' % _ifx._url("marketing", "emy.brw", 7)) in _hK
+              and ('class="ong on" href="%s">@khloecute' % _ifx._url("marketing", "khloecute", 7)) in _hK
+              and "non suivies ici" not in _hK)
+        check("infloww+ config : la vue de Khloe lit Khloe",
+              any(p.get("creatorId") == _KHL for c, p in _vusX if c == "/v1/links")
+              and not any(p.get("creatorId") == _J for c, p in _vusX if c == "/v1/links"))
+        _hInc = _vue(creatrice="inconnue", vue="nimporte", jours="45")[0]
+        check("infloww+ config : creatrice, vue et periode inconnues retombent sur les valeurs sures",
+              'class="vue on" href="?creatrice=jessyewdiference&jours=30"' in _hInc)
+        _ifx._config = _savX[2]
+
+        # --- la route ---
+        import web_upload as _wX
+        _appX = _wX.create_app(); _appX.config["TESTING"] = True
+        _usersX = _wX._load_web_users
+        try:
+            _wX._load_web_users = lambda: {"admin": {"role": "admin", "password": "x"},
+                                           "chat1": {"role": "chatter", "password": "x"}}
+            _cX = _appX.test_client()
+            with _cX.session_transaction() as _s:
+                _s["auth"] = True; _s["username"] = "chat1"; _s["role"] = "chatter"
+            check("infloww+ route : un chatteur ne voit aucune vue",
+                  all(_cX.get("/infloww?vue=%s" % _v).status_code == 403 for _v in _ATTENDU))
+            _cX = _appX.test_client()
+            with _cX.session_transaction() as _s:
+                _s["auth"] = True; _s["username"] = "admin"; _s["role"] = "admin"
+            _neuf()
+            _rX = _cX.get("/infloww?vue=revenus&jours=7")
+            check("infloww+ route : l admin voit la vue Revenus, sans cache navigateur",
+                  _rX.status_code == 200 and "Infloww · Revenus" in _rX.get_data(as_text=True)
+                  and "no-store" in (_rX.headers.get("Cache-Control") or ""))
+            _neuf()
+            _rX = _cX.get("/infloww?vue=journal&jours=7&creatrice=%3Cscript%3E")
+            check("infloww+ route : une creatrice injectee dans l URL n est pas reprise",
+                  _rX.status_code == 200 and "<script" not in _rX.get_data(as_text=True)
+                  and "Infloww · Journal" in _rX.get_data(as_text=True))
+        finally:
+            _wX._load_web_users = _usersX
+    finally:
+        _ifx._get, _ifx.CACHE_FICHIER, _ifx._config, _ifx.CONFIG_FICHIER = _savX
+
+    # le module reste a part : rien d'autre ne l'importe (la section 37 le verifie
+    # aussi), et la page ne contient aucun script, meme dans son gabarit
+    _gab = _ifx.page_html("jessyewdiference", 30, {}) + _ifx.page_html(
+        "jessyewdiference", 30, erreur=_ifx.ErreurInfloww("x"))
+    check("infloww+ : le gabarit de la page n a ni <script ni gestionnaire on...=",
+          "<script" not in _gab and not _reX.search(r"<[^>]*\son[a-z]+\s*=", _gab))
+except Exception as _eX:
+    import traceback as _tbX
+    check("infloww+ : testable", False, repr(_eX)[:200] + " " + _tbX.format_exc()[-800:])
 
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
