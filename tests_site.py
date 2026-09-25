@@ -15947,8 +15947,14 @@ try:
             check("reserves : l identite par defaut est une reserve",
                   _wNT._marche_prefere(["zzz_lola", "zzz_blonde"]) == ["zzz_blonde"])
         with _appNT.test_request_context("/"):
-            check("reserves : sans le filtre, rien ne change",
-                  _wNT._marche_cache("zzz_lola") == "" and _wNT._marche_prefere(["zzz_lola", "zzz_blonde"]) == ["zzz_lola", "zzz_blonde"])
+            # 26/09/2026 : « les reserves je les vois uniquement quand je
+            # selectionne Reserve, pas avant »
+            check("reserves : sans le filtre, les reserves sont masquees (le reste non)",
+                  _wNT._marche_cache("zzz_lola") == "" and _wNT._marche_cache("zzz_blonde") == "display:none")
+            check("reserves : sans le filtre, une reserve ouverte reste visible",
+                  _wNT._marche_cache("zzz_blonde", "zzz_blonde") == "")
+            check("reserves : sans le filtre, la galerie ne s ouvre pas d office sur une reserve",
+                  _wNT._marche_prefere(["zzz_blonde", "zzz_lola"]) == ["zzz_lola"])
     finally:
         _wNT._load_web_users, _wNT._type_identite = _savNT
 except Exception as _eNT:

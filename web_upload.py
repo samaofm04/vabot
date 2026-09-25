@@ -16661,6 +16661,11 @@ def _marche_cache(ident: str, selected: str = "") -> str:
     # complete qui clignote avant que le JavaScript ne la filtre.
     if nat == "reserve" and _type_identite(ident) != "reserve":
         return "display:none"
+    # ... et SANS lui, pas de reserves du tout : le proprietaire, le
+    # 26/09/2026, « les reserves je les vois uniquement quand je selectionne
+    # Reserve, pas avant ». Elles encombraient le haut de chaque liste.
+    if nat != "reserve" and _type_identite(ident) == "reserve":
+        return "display:none"
     if mk not in ("fr", "us"):
         return ""          # aucun filtre choisi : on montre tout
     return "" if identity_market(ident) == mk else "display:none"
@@ -16689,6 +16694,10 @@ def _marche_prefere(identities: list) -> list:
     gardees = list(identities)
     if nat == "reserve":
         gardees = [i for i in gardees if _type_identite(i) == "reserve"]
+    else:
+        # hors filtre « Réserves », les reserves sont masquees (_marche_cache) :
+        # la galerie ne s ouvre pas d office sur l une d elles
+        gardees = [i for i in gardees if _type_identite(i) != "reserve"]
     if mk in ("fr", "us"):
         gardees = [i for i in gardees if identity_market(i) == mk]
     return gardees or identities
@@ -24401,6 +24410,11 @@ function vaultItemVisible(a){
   if(mk && (a.getAttribute('data-market') || '') !== mk) return false;
   var nat = natureCur();
   if(nat && (a.getAttribute('data-nature') || '') !== nat) return false;
+  /* Les reserves ne se montrent QUE sous le filtre « Réserves » (demande du
+     proprietaire, 26/09/2026) -- sauf celle qui est ouverte, comme le
+     serveur (_marche_cache). */
+  if(!nat && (a.getAttribute('data-nature') || '') === 'reserve'
+     && !a.classList.contains('vault-item-active')) return false;
   var q = window.__vaultQ;
   if(q && (a.getAttribute('data-ident') || '').toLowerCase().indexOf(q) === -1) return false;
   // Le filtre « Avec du contenu / Vides » a ete retire : il cachait des
