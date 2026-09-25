@@ -5294,12 +5294,21 @@ function scanTexteMaj(txt, couleur){
   var e = document.getElementById('scantexte-etat');
   if(e){ e.textContent = txt || ''; e.style.color = couleur || '#9a9aa6'; }
 }
-async function scanTexteLancer(identity){
+async function scanTexteLancer(identity, refaire){
   if(!identity){ alert('Choisis d abord une identité.'); return; }
+  if(refaire){
+    var rb = document.getElementById('scantexte-refaire');
+    var nb = parseInt((rb && rb.getAttribute('data-nb')) || '0', 10) || 0;
+    var duree = nb ? (' Environ ' + Math.max(1, Math.round(nb * 1.8 / 60)) + ' min pour ' + nb + ' vidéo(s).') : '';
+    if(!confirm('Réexaminer TOUTES les brutes de @' + identity + ', même celles déjà jugées ?'
+                + ' C est gratuit (OCR sur le serveur).' + duree
+                + ' Rien n est désactivé tout seul : tu choisis ensuite dans le rapport.')) return;
+  }
   var btn = document.getElementById('scantexte-btn');
   if(btn) btn.disabled = true;
   try{
     var fd = new FormData(); fd.set('identity', identity);
+    if(refaire) fd.set('refaire', '1');
     var r = await fetch('/cloud/scan_texte', { method:'POST', body: fd });
     var j = await r.json();
     if(!j.ok){
@@ -5376,15 +5385,25 @@ function scanTexteAfficher(rap){
          + '</div>';
     });
     h += '</div>';
-    // UN bouton pour toutes : le but est qu elles soient eteintes, pas de les
-    // pointer une par une. Rien n est supprime — le site n efface jamais un
-    // media, et le bouton inverse est juste a cote.
-    var reste = rap.a_eteindre || 0;
+  }
+  // UN bouton pour toutes : le but est qu elles soient eteintes, pas de les
+  // pointer une par une. Rien n est supprime — le site n efface jamais un
+  // media, et le bouton inverse est juste a cote.
+  // La rangee s affiche des qu il y a quelque chose a faire, meme sans aucune
+  // video a texte : c est justement le cas apres un « Tout reexaminer » qui
+  // blanchit des brutes eteintes a tort.
+  var reste = rap.a_eteindre || 0;
+  if(reste || rap.a_rallumer || rap.desactivees){
     h += '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">';
     if(reste){
       h += '<button type="button" data-scanact="off" class="btn"'
          + ' style="width:auto;margin:0;padding:9px 16px">'
          + 'Désactiver ces ' + reste + ' vidéo(s)</button>';
+    }
+    if(rap.a_rallumer){
+      h += '<button type="button" data-scanact="on-sans" class="btn"'
+         + ' style="width:auto;margin:0;padding:9px 16px">'
+         + 'Remettre les ' + rap.a_rallumer + ' sans texte (dernier examen)</button>';
     }
     if(rap.desactivees){
       h += '<button type="button" data-scanact="on"'
@@ -5406,16 +5425,18 @@ function scanTexteAfficher(rap){
   }
   boite.innerHTML = h;
   /* Les cartes suivent le rapport : sans ca, « Desactiver ces 40 videos »
-     les laissait en couleur jusqu au rechargement de la page. */
-  var etats = {};
-  (rap.avec_texte || []).forEach(function(x){ etats[x.fichier] = !!x.desactivee; });
+     les laissait en couleur jusqu au rechargement de la page. La liste porte
+     TOUTES les brutes eteintes, pas seulement celles a texte : une brute
+     rallumee par « sans texte » doit se degriser aussi. */
+  var eteintes = {};
+  (rap.desactivees_noms || []).forEach(function(n){ eteintes[n] = true; });
   var prefixe = (rap.identite || '') + '|brutes|';
   document.querySelectorAll('.vault-card-bg[data-fid]').forEach(function(el){
     var fid = el.getAttribute('data-fid') || '';
     if(fid.indexOf(prefixe) !== 0) return;
+    if(!rap.desactivees_noms) return;
     var nom = fid.slice(prefixe.length);
-    if(!(nom in etats)) return;
-    var off = etats[nom], card = el.closest('.cloud-card');
+    var off = !!eteintes[nom], card = el.closest('.cloud-card');
     if(card) card.classList.toggle('is-reel-off', off);
     var b = card ? card.querySelector('button[onclick*="toggleReelDisabled"]') : null;
     if(b){ b.classList.toggle('is-off', off); b.style.color = off ? '#ef4444' : '#9aa0a6'; }
@@ -5426,13 +5447,15 @@ function scanTexteAfficher(rap){
   // en silence.
   boite.querySelectorAll('[data-scanact]').forEach(function(b){
     b.addEventListener('click', async function(){
-      var remettre = b.getAttribute('data-scanact') === 'on';
+      var act = b.getAttribute('data-scanact');
+      var remettre = (act === 'on' || act === 'on-sans');
       b.disabled = true;
       b.textContent = remettre ? 'Remise en service…' : 'Désactivation…';
       try{
         var fd = new FormData();
         fd.append('identity', rap.identite || '');
-        if(remettre) fd.append('remettre', '1');
+        if(act === 'on') fd.append('remettre', '1');
+        if(act === 'on-sans') fd.append('remettre', 'sans_texte');
         var r = await fetch('/cloud/desactiver_texte', {method:'POST', body:fd});
         var j = await r.json();
         if(!j || !j.ok){
@@ -23211,6 +23234,16 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         "style='display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#1a1a1a;"
         "border:1px solid #3a3a3a;border-radius:8px;color:#8b9cf7;cursor:pointer;font-size:13px;"
         "font-weight:700;font-family:inherit;white-space:nowrap'>🔎 Repérer le texte</button>"
+        # Réexaminer TOUT, même ce qui a déjà un verdict : l'examen est
+        # gratuit depuis qu'il passe par l'OCR du serveur, et les anciens
+        # verdicts de Claude comptaient souvent un logo de t-shirt comme texte.
+        "<button type='button' id='scantexte-refaire' "
+        f"data-nb='{len(files)}' "
+        "onclick=\"scanTexteLancer('" + (selected or "") + "', true)\" "
+        "title='Réexaminer toutes les brutes, même celles déjà jugées — gratuit (OCR sur le serveur)' "
+        "style='display:inline-flex;align-items:center;gap:6px;padding:8px 12px;background:none;"
+        "border:1px solid #3a3a3a;border-radius:8px;color:#9a9aa6;cursor:pointer;font-size:12.5px;"
+        "font-weight:600;font-family:inherit;white-space:nowrap'>↻ Tout réexaminer</button>"
         "<span id='scantexte-etat' style='font-size:12px;color:#9a9aa6'></span>"
     ) if (subdir == "brutes" and selected) else ""
 
@@ -23923,11 +23956,23 @@ def _lancer_scan_texte(identity: str, refaire: bool = False) -> tuple:
 def rapport_texte_brutes(identity: str) -> dict:
     """Ce que l'examen a trouve, pret a etre affiche. Ne supprime rien."""
     avec, sans, inconnu = [], 0, []
-    desactivees = a_eteindre = 0
+    desactivees = a_eteindre = a_rallumer = 0
+    # Toutes les brutes grisées, quelle qu'en soit la raison (voisin .off.json
+    # OU ancienne marque ⊘) : l'écran s'en sert pour griser les cartes.
+    _marques = _load_disabled_reels()
+    noms_eteints = []
     for p in _brutes_d_identite(identity):
+        if brute_desactivee(p) or f"{identity}|brutes|{p.name}" in _marques:
+            noms_eteints.append(p.name)
         if brute_desactivee(p):
             desactivees += 1
         d = _textecheck_lire(p)
+        # Éteinte pour du texte, mais le DERNIER examen n'en voit pas : le
+        # plus souvent un logo de t-shirt que l'ancien examen (Claude) avait
+        # compté. On la propose au rallumage, on ne la rallume pas seul.
+        if (brute_desactivee(p) and lire_desactive(p).get("cause") == CAUSE_TEXTE
+                and d.get("texte") is False):
+            a_rallumer += 1
         if not d.get("le"):
             continue
         if d.get("texte") is True:
@@ -23951,6 +23996,7 @@ def rapport_texte_brutes(identity: str) -> dict:
     return {"identite": identity, "avec_texte": avec, "sans_texte": sans,
             "non_conclu": inconnu,
             "desactivees": desactivees, "a_eteindre": a_eteindre,
+            "a_rallumer": a_rallumer, "desactivees_noms": noms_eteints,
             "total_examine": len(avec) + sans + len(inconnu),
             "total_brutes": len(_brutes_d_identite(identity))}
 
@@ -53049,7 +53095,11 @@ def create_app():
         identity = (request.form.get("identity") or "").strip().lower()
         if not identity or identity not in _list_identities():
             return jsonify({"ok": False, "error": "identité invalide"})
-        remettre = (request.form.get("remettre") or "") in ("1", "true", "on")
+        _rem = (request.form.get("remettre") or "").strip()
+        remettre = _rem in ("1", "true", "on", "sans_texte")
+        # « sans_texte » : seulement celles que le DERNIER examen voit sans
+        # texte (après un « Tout réexaminer »). « 1 » : toutes, comme avant.
+        seulement_sans_texte = _rem == "sans_texte"
         faits, rates = 0, 0
         for p in _brutes_d_identite(identity):
             if remettre:
@@ -53057,6 +53107,8 @@ def create_app():
                 # une brute désactivée à la main pour une autre raison n'a
                 # aucune raison de revenir avec ce bouton.
                 if lire_desactive(p).get("cause") != CAUSE_TEXTE:
+                    continue
+                if seulement_sans_texte and _textecheck_lire(p).get("texte") is not False:
                     continue
                 if reactiver_brute(p):
                     faits += 1

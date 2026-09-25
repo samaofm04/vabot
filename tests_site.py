@@ -15034,6 +15034,58 @@ try:
         (_wT.IDENTITIES_DIR / "zz" / "brutes").mkdir(parents=True)
         _okT, _msgT = _wT._lancer_scan_texte("zz")
         check("lancer l'examen ne demande plus de cle IA", "Clé IA" not in _msgT, _msgT)
+        # « Tout reexaminer » : meme les brutes deja jugees repassent, puis on
+        # ne rallume QUE celles eteintes pour du texte que le nouvel examen
+        # voit sans texte (souvent un logo de t-shirt compte par Claude).
+        import time as _tT2
+        _dT = _wT.IDENTITIES_DIR / "zz" / "brutes"
+        for _n in ("logo.mp4", "pov.mp4", "main.mp4"):
+            (_dT / _n).write_bytes(b"x")
+            _wT._textecheck_ecrire(_dT / _n, True, ["ancien verdict"])
+        _wT.desactiver_brute(_dT / "logo.mp4", _wT.CAUSE_TEXTE)
+        _wT.desactiver_brute(_dT / "pov.mp4", _wT.CAUSE_TEXTE)
+        _wT.desactiver_brute(_dT / "main.mp4", "désactivée à la main")
+        _savB2 = _wT._brute_a_du_texte
+        _vus = []
+
+        def _faux_ocr(p, key=""):
+            _vus.append(p.name)
+            return (p.name == "pov.mp4"), (["Pov tu novio"] if p.name == "pov.mp4" else []), ""
+        _wT._brute_a_du_texte = _faux_ocr
+        try:
+            _ok0, _m0 = _wT._lancer_scan_texte("zz")
+            check("sans « reexaminer », les brutes deja jugees ne repassent pas", not _ok0, _m0)
+            _ok1, _m1 = _wT._lancer_scan_texte("zz", refaire=True)
+            for _ in range(50):
+                if not _wT.scan_texte_etat().get("en_cours"):
+                    break
+                _tT2.sleep(0.1)
+            check("« Tout reexaminer » repasse toutes les brutes, meme deja jugees",
+                  _ok1 and sorted(_vus) == ["logo.mp4", "main.mp4", "pov.mp4"], str(_vus))
+            _rapT = _wT.rapport_texte_brutes("zz")
+            check("rapport : 1 brute a rallumer (eteinte pour du texte, plus de texte vu)",
+                  _rapT["a_rallumer"] == 1
+                  and sorted(_rapT["desactivees_noms"]) == ["logo.mp4", "main.mp4", "pov.mp4"], str(_rapT))
+            _savU = _wT._load_web_users
+            _wT._load_web_users = lambda: {"admin": {"role": "owner", "password": "x"}}
+            try:
+                _cT = _wT.create_app().test_client()
+                with _cT.session_transaction() as _sT:
+                    _sT["auth"] = True; _sT["username"] = "admin"; _sT["role"] = "owner"
+                _jR = _cT.post("/cloud/desactiver_texte",
+                               data={"identity": "zz", "remettre": "sans_texte"}).get_json()
+                check("« Remettre les sans texte » ne rallume que celle-la",
+                      _jR.get("faits") == 1 and not _wT.brute_desactivee(_dT / "logo.mp4")
+                      and _wT.brute_desactivee(_dT / "pov.mp4")
+                      and _wT.brute_desactivee(_dT / "main.mp4"), str(_jR)[:200])
+            finally:
+                _wT._load_web_users = _savU
+            with _wT.create_app().test_request_context("/?tab=cloudbrutes&cloud_brutes_ident=zz"):
+                _hT = _wT._render_cloud_content_html("brutes", _wT.VIDEO_EXTS)
+            check("le bouton « Tout reexaminer » est dans Video brut",
+                  "scanTexteLancer('zz', true)" in _hT and "Tout réexaminer" in _hT)
+        finally:
+            _wT._brute_a_du_texte = _savB2
     finally:
         _wT.IDENTITIES_DIR = _savI
 except Exception as _eT:
