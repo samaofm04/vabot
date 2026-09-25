@@ -14751,7 +14751,8 @@ try:
     check("vues au format TikTok", _vsS.format_vues(12345) == "12,3 k"
           and _vsS.format_vues(1_200_000) == "1,2 M" and _vsS.format_vues(999) == "999")
     _tmpS = _plS.Path(_tfS.mkdtemp())
-    _savS = (_vsS.FICHIER, _vsS._lister_tiktok, _vsS._telecharger_tiktok, _vsS.PAUSE_SEC)
+    _savS = (_vsS.FICHIER, _vsS._lister_tiktok, _vsS._telecharger_tiktok, _vsS.PAUSE_SEC,
+             _vsS._lister_tiktok_creator)
     try:
         _vsS.FICHIER, _vsS.PAUSE_SEC = _tmpS / "reg.json", 0
         _profilS = [{"id": "1", "view_count": 50_000, "timestamp": 1_700_000_000},
@@ -14759,6 +14760,7 @@ try:
                     {"id": "3", "view_count": None},
                     {"id": "4", "view_count": 20_000}]
         _vsS._lister_tiktok = lambda url: [dict(e) for e in _profilS]
+        _vsS._lister_tiktok_creator = lambda u: [dict(e) for e in _profilS]
         _ratesS = set()
 
         def _dlS(url, cible):
@@ -14827,32 +14829,39 @@ try:
               not _r5["ok"] and _e5.get("statut") == "erreur"
               and _e5.get("reessai_le") and not _e5.get("echecs"), str(_e5.get("echecs")))
         _vsS._lister_tiktok = lambda url: (_ for _ in ()).throw(RuntimeError("HTTP Error 403"))
+        _vsS._lister_tiktok_creator = lambda u: (_ for _ in ()).throw(RuntimeError("HTTP Error 403"))
         _vsS.synchroniser("lea", _dS)
         check("liste refusee : le bilan precedent reste affiche",
               (_vsS.lire("lea").get("bilan") or {}).get("examinees") == len(_profilS))
         _vsS._lister_tiktok = lambda url: [dict(e) for e in _profilS]
+        _vsS._lister_tiktok_creator = lambda u: [dict(e) for e in _profilS]
         _vsS._telecharger_tiktok = _dlS
-        # TikTok refuse la liste depuis le serveur : Apify prend le relais,
-        # et le bandeau dit par quelle source la liste est venue.
-        def _yt_refuse(url):
-            raise RuntimeError("Unable to extract secondary user ID")
-        _vsS._lister_tiktok = _yt_refuse
-        _sav_ap = _vsS._lister_tiktok_apify
-        _vsS._lister_tiktok_apify = lambda u: (
+        # La liste vient de l'API « creator » de TikTok ; si elle est
+        # refusee, yt-dlp prend le relais. Le bandeau dit laquelle a servi.
+        _sav_cr = _vsS._lister_tiktok_creator
+        _vsS._lister_tiktok_creator = lambda u: (
             [dict(e) for e in _profilS] + [{"id": "50", "view_count": 90_000, "photo": True}])
         try:
             _b6 = _vsS.synchroniser("lea", _dS)["bilan"]
-            check("yt-dlp refuse : la liste vient d'Apify",
-                  _b6.get("source") == "Apify" and _b6["examinees"] == len(_profilS) + 1, str(_b6))
-            check("Apify : un diaporama est compte comme publication photo",
+            check("la liste vient de l'API creator de TikTok",
+                  _b6.get("source") == "TikTok" and _b6["examinees"] == len(_profilS) + 1, str(_b6))
+            check("un diaporama TikTok est compte comme publication photo",
                   "50" in (_vsS.lire("lea").get("photos") or []))
-            _vsS._lister_tiktok_apify = lambda u: (_ for _ in ()).throw(RuntimeError("HTTP 402"))
-            _r7 = _vsS.synchroniser("lea", _dS)
-            check("yt-dlp ET Apify refuses : l'erreur dit les deux",
-                  not _r7["ok"] and "Apify" in _r7["error"] and "refuse" in _r7["error"], _r7.get("error"))
+            _vsS._lister_tiktok_creator = lambda u: (_ for _ in ()).throw(RuntimeError("liste refusée"))
+            _b7 = _vsS.synchroniser("lea", _dS)["bilan"]
+            check("API creator refusee : yt-dlp prend le relais",
+                  _b7.get("source") == "yt-dlp", str(_b7))
+            _vsS._lister_tiktok = lambda url: (_ for _ in ()).throw(RuntimeError("secondary user ID"))
+            _r8 = _vsS.synchroniser("lea", _dS)
+            check("les deux refusent : l'erreur dit les deux",
+                  not _r8["ok"] and "liste refusée" in _r8["error"] and "yt-dlp" in _r8["error"],
+                  _r8.get("error"))
         finally:
-            _vsS._lister_tiktok_apify = _sav_ap
+            _vsS._lister_tiktok_creator = _sav_cr
             _vsS._lister_tiktok = lambda url: [dict(e) for e in _profilS]
+        check("plus aucun appel a Apify dans l'import", "apify" not in
+              open("vault_social.py", encoding="utf-8").read().lower().replace(
+                  "apify marchait aussi", ""))
         # Une relecture demandee pendant une autre n'est pas perdue, et
         # survit a un redemarrage (la demande est ecrite dans le registre).
         _vsS._en_cours["lea"] = {"fait": 0, "total": 1, "etape": "x"}
@@ -14899,7 +14908,8 @@ try:
         finally:
             _wS.IDENTITIES_DIR = _savW
     finally:
-        _vsS.FICHIER, _vsS._lister_tiktok, _vsS._telecharger_tiktok, _vsS.PAUSE_SEC = _savS
+        (_vsS.FICHIER, _vsS._lister_tiktok, _vsS._telecharger_tiktok, _vsS.PAUSE_SEC,
+         _vsS._lister_tiktok_creator) = _savS
     _srcS = open("web_upload.py", encoding="utf-8").read()
     check("supprimer un media emporte son voisin .social.json",
           'n == f"{stem}.social.json"' in _srcS)

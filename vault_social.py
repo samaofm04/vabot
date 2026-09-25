@@ -58,15 +58,15 @@ MAX_EXAMINEES = 600
 #: relecture) : on lit ce que sa page de reels rend, au plus ce nombre.
 MAX_EXAMINEES_INSTA = 100
 
-#: TikTok refuse la LISTE des vidéos d'un profil aux adresses de serveur
-#: (mesuré le 25/09/2026 depuis le VPS : « Unable to extract secondary user
-#: ID », puis une réponse vide avec yt-dlp à jour et curl_cffi) ; une vidéo
-#: seule, elle, passe. La liste est alors demandée à Apify, facturé environ
-#: 0,002 $ par vidéo listée : plafond décidé par le propriétaire, 300 vidéos
-#: par relecture, et un plafond de dépense par appel en garde-fou.
-ACTEUR_TIKTOK = "clockworks~tiktok-profile-scraper"
-MAX_EXAMINEES_APIFY = 300
-PLAFOND_USD_APIFY = "0.80"
+#: LA LISTE D'UN PROFIL TIKTOK, DEPUIS LE VPS. Mesuré le 25/09/2026 : yt-dlp
+#: se voit refuser la liste aux adresses de serveur (« Unable to extract
+#: secondary user ID », puis un corps vide même à jour avec curl_cffi), tout
+#: comme /api/post/item_list et l'API de l'application. /api/creator/item_list,
+#: lui, répond — par pages de 15, vues et date comprises, gratuitement — à
+#: condition de parler comme Chrome (curl_cffi) avec les cookies de la page
+#: profil. Apify marchait aussi, mais le propriétaire n'en veut pas.
+PAGE_CREATOR = 15          # au-delà : HTTP 400 « invalid count parameter »
+MAX_PAGES_CREATOR = 60
 
 #: Un échec de téléchargement est retenté aux relectures suivantes, mais pas
 #: indéfiniment : une vidéo retirée ou privée échouerait à chaque passage.
@@ -286,44 +286,68 @@ def _ecrire_voisin(dossier: Path, stem: str, donnees: dict) -> bool:
                                 indent=None, backup=False))
 
 
-def _lister_tiktok_apify(username: str) -> list:
-    """La liste d'un profil TikTok par Apify, au format des entrées yt-dlp."""
-    import requests
-    import apify_reels as _ap
-    jeton = _ap.get_token()
-    if not jeton:
-        raise RuntimeError("aucun jeton Apify sur ce serveur (Settings)")
-    entree = {"profiles": [username], "profileScrapeSections": ["videos"],
-              "profileSorting": "latest", "resultsPerPage": MAX_EXAMINEES_APIFY,
-              "excludePinnedPosts": False, "shouldDownloadVideos": False,
-              "shouldDownloadCovers": False, "shouldDownloadSlideshowImages": False,
-              "shouldDownloadAvatars": False}
-    r = requests.post(
-        f"https://api.apify.com/v2/acts/{ACTEUR_TIKTOK}/run-sync-get-dataset-items",
-        params={"token": jeton, "maxItems": MAX_EXAMINEES_APIFY,
-                "maxTotalChargeUsd": PLAFOND_USD_APIFY, "timeout": 280},
-        json=entree, timeout=300)
-    if r.status_code not in (200, 201):
-        raise RuntimeError(f"Apify HTTP {r.status_code} : {r.text[:160]}")
-    items = r.json()
-    if not isinstance(items, list):
-        raise RuntimeError(f"Apify : réponse inattendue {str(items)[:160]}")
-    erreurs = [str(it.get("error")) for it in items
-               if isinstance(it, dict) and it.get("error")]
+def _lister_tiktok_creator(username: str) -> list:
+    """La liste d'un profil TikTok par /api/creator/item_list, au format des
+    entrées yt-dlp (id, url, view_count, timestamp, title) + « photo »."""
+    import json as _json
+    from curl_cffi import requests as _cr
+    s = _cr.Session(impersonate="chrome")
+    page = s.get(f"https://www.tiktok.com/@{username}", timeout=30)
+    sec = ""
+    m = re.search(r'<script[^>]*id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>',
+                  page.text, re.S)
+    if m:
+        try:
+            det = _json.loads(m.group(1))["__DEFAULT_SCOPE__"]["webapp.user-detail"]
+            user = ((det.get("userInfo") or {}).get("user") or {})
+            # Le secUid d'un AUTRE compte (suggestions de la page) listerait
+            # les vidéos de quelqu'un d'autre, sans que rien ne le montre.
+            if str(user.get("uniqueId") or "").lower() == username.lower():
+                sec = user.get("secUid") or ""
+            elif det.get("statusCode"):
+                raise RuntimeError(f"profil introuvable ou privé (code {det['statusCode']})")
+        except (KeyError, ValueError, TypeError):
+            pass
+    if not sec:
+        raise RuntimeError(f"page du profil illisible (HTTP {page.status_code})")
+    base = {"aid": 1988, "app_language": "en", "app_name": "tiktok_web",
+            "browser_language": "en-US", "browser_name": "Mozilla",
+            "browser_platform": "MacIntel", "channel": "tiktok_web",
+            "cookie_enabled": "true", "device_platform": "web_pc",
+            "secUid": sec, "region": "FR", "count": PAGE_CREATOR, "type": 1}
+    curseur = int(time.time() * 1000)
+    vus: Dict[str, dict] = {}
+    for _ in range(MAX_PAGES_CREATOR):
+        r = s.get("https://www.tiktok.com/api/creator/item_list/",
+                  params=dict(base, cursor=curseur), timeout=30,
+                  headers={"Referer": f"https://www.tiktok.com/@{username}"})
+        try:
+            j = _json.loads(r.text or "{}")
+        except ValueError:
+            j = {}
+        items = j.get("itemList") or []
+        if not items:
+            if not vus:
+                raise RuntimeError(f"liste refusée (HTTP {r.status_code}, "
+                                   f"{j.get('statusMsg') or j.get('status_msg') or 'corps vide'})")
+            break
+        neufs = [it for it in items if str(it.get("id")) not in vus]
+        for it in neufs:
+            vus[str(it["id"])] = it
+        if not neufs or not j.get("hasMorePrevious") or len(vus) >= MAX_EXAMINEES:
+            break
+        # Page suivante : ce qui a été posté avant la plus ancienne reçue.
+        curseur = min(int(it.get("createTime") or 0) for it in items) * 1000
+        time.sleep(0.6)
     out = []
-    for it in items:
-        if not isinstance(it, dict) or not it.get("id") or it.get("error"):
-            continue
-        vues = it.get("playCount")
-        out.append({"id": str(it["id"]),
-                    "url": it.get("webVideoUrl") or "",
+    for vid, it in list(vus.items())[:MAX_EXAMINEES]:
+        vues = (it.get("stats") or {}).get("playCount")
+        out.append({"id": vid,
+                    "url": f"https://www.tiktok.com/@{username}/video/{vid}",
                     "view_count": int(vues) if isinstance(vues, (int, float)) else None,
                     "timestamp": it.get("createTime") or None,
-                    "title": it.get("text") or "",
-                    "photo": bool(it.get("isSlideshow"))})
-    if not out and erreurs:
-        # Profil introuvable, privé… : Apify le dit dans un élément « error ».
-        raise RuntimeError("Apify : " + erreurs[0][:200])
+                    "title": it.get("desc") or "",
+                    "photo": bool(it.get("imagePost"))})
     return out
 
 
@@ -387,28 +411,28 @@ def _telecharger_direct(url_video: str, cible_sans_ext: Path) -> Path:
 
 
 def _lister(src: dict, bilan: Optional[dict] = None) -> list:
-    """La liste du profil. TikTok : yt-dlp d'abord (gratuit, et il marche
-    depuis une adresse résidentielle), Apify seulement s'il est refusé."""
+    """La liste du profil. TikTok : l'API « creator » d'abord (la seule qui
+    réponde depuis le VPS), yt-dlp en secours — tous deux gratuits."""
     if src.get("plateforme") == "instagram":
         if bilan is not None:
             bilan["source"] = "HikerAPI"
         return _lister_instagram(src.get("username") or "")
     try:
-        out = _lister_tiktok(src["url"])
+        out = _lister_tiktok_creator(src.get("username") or "")
+        if bilan is not None:
+            bilan["source"] = "TikTok"
+        return out
+    except Exception as err_creator:
+        print(f"[vault-social] API creator refusée pour {src.get('username')} : "
+              f"{str(err_creator)[:160]} — essai yt-dlp", flush=True)
+        try:
+            out = _lister_tiktok(src["url"])
+        except Exception as err_ytdlp:
+            raise RuntimeError(
+                f"TikTok refuse de lister ce profil : {str(err_creator)[:150]} "
+                f"(yt-dlp : {str(err_ytdlp)[:120]})") from err_ytdlp
         if bilan is not None:
             bilan["source"] = "yt-dlp"
-        return out
-    except Exception as err_ytdlp:
-        print(f"[vault-social] yt-dlp refusé pour {src.get('username')} : "
-              f"{str(err_ytdlp)[:160]} — relais Apify", flush=True)
-        try:
-            out = _lister_tiktok_apify(src.get("username") or "")
-        except Exception as err_apify:
-            raise RuntimeError(
-                f"TikTok refuse de lister ce profil depuis le serveur, et le "
-                f"relais Apify a échoué : {str(err_apify)[:200]}") from err_apify
-        if bilan is not None:
-            bilan["source"] = "Apify"
         return out
 
 
