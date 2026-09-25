@@ -14939,6 +14939,34 @@ try:
                   "sous le seuil" in _hS and "publication(s) photo" in _hS)
             check("galerie : le bandeau porte la signature de la derniere relecture",
                   "data-vs-sig='" in _hS)
+            # Une brute eteinte par son voisin .off.json (reperage du texte)
+            # est grisee, et le bouton ⊘ d'une brute ecrit CE voisin — le seul
+            # que lit le bot — et plus disabled_reels.json.
+            import brutes_off as _boS
+            _boS.desactiver(_dS / "tt_4.mp4", "caption déjà incrustée")
+            with _wS.create_app().test_request_context("/?tab=cloudbrutes&cloud_brutes_ident=lea"):
+                _hS2 = _wS._render_cloud_content_html("brutes", _wS.VIDEO_EXTS)
+            _carteS = _hS2[:_hS2.find("data-fid='lea|brutes|tt_4.mp4'")]
+            check("brute eteinte par le reperage du texte : carte grisee",
+                  _carteS.rfind("cloud-card is-reel-off") > _carteS.rfind("class='cloud-card'"))
+            _sav_users = _wS._load_web_users
+            _sav_disS = _wS.DISABLED_REELS_FILE
+            _wS._load_web_users = lambda: {"admin": {"role": "owner", "password": "x"}}
+            _wS.DISABLED_REELS_FILE = _tmpS / "disabled_reels.json"
+            try:
+                _cS = _wS.create_app().test_client()
+                with _cS.session_transaction() as _ssS:
+                    _ssS["auth"] = True; _ssS["username"] = "admin"; _ssS["role"] = "owner"
+                _j1 = _cS.post("/reel/toggle_disabled", data={"file_id": "lea|brutes|tt_4.mp4"}).get_json()
+                _j2 = _cS.post("/reel/toggle_disabled", data={"file_id": "lea|brutes|tt_6.mp4"}).get_json()
+                check("⊘ sur une brute eteinte : la rallume (voisin .off.json retire)",
+                      _j1 == {"ok": True, "disabled": False} and not _boS.est_desactivee(_dS / "tt_4.mp4"), str(_j1))
+                check("⊘ sur une brute allumee : ecrit .off.json, pas disabled_reels.json",
+                      _j2 == {"ok": True, "disabled": True} and _boS.est_desactivee(_dS / "tt_6.mp4")
+                      and not (_tmpS / "disabled_reels.json").exists(), str(_j2))
+            finally:
+                _wS._load_web_users = _sav_users
+                _wS.DISABLED_REELS_FILE = _sav_disS
         finally:
             _wS.IDENTITIES_DIR = _savW
     finally:

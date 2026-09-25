@@ -5120,7 +5120,7 @@ async function toggleReelDisabled(btn, fileId){
     if(card) card.classList.toggle('is-reel-off', off);
     btn.classList.toggle('is-off', off);
     btn.style.color = off ? '#ef4444' : '#9aa0a6';
-    if(typeof showToast === 'function') showToast(off ? '⊘ Reel désactivé' : '✓ Reel réactivé', off ? 'warning' : 'success');
+    if(typeof showToast === 'function') showToast(off ? '⊘ Vidéo désactivée' : '✓ Vidéo réactivée', off ? 'warning' : 'success');
   }catch(e){ alert('Erreur réseau : ' + e); }
   finally{ btn.disabled = false; btn.style.opacity = '1'; }
 }
@@ -5404,6 +5404,22 @@ function scanTexteAfficher(rap){
        + 'elles ne sont proposées à rien.</div>';
   }
   boite.innerHTML = h;
+  /* Les cartes suivent le rapport : sans ca, « Desactiver ces 40 videos »
+     les laissait en couleur jusqu au rechargement de la page. */
+  var etats = {};
+  (rap.avec_texte || []).forEach(function(x){ etats[x.fichier] = !!x.desactivee; });
+  var prefixe = (rap.identite || '') + '|brutes|';
+  document.querySelectorAll('.vault-card-bg[data-fid]').forEach(function(el){
+    var fid = el.getAttribute('data-fid') || '';
+    if(fid.indexOf(prefixe) !== 0) return;
+    var nom = fid.slice(prefixe.length);
+    if(!(nom in etats)) return;
+    var off = etats[nom], card = el.closest('.cloud-card');
+    if(card) card.classList.toggle('is-reel-off', off);
+    var b = card ? card.querySelector('button[onclick*="toggleReelDisabled"]') : null;
+    if(b){ b.classList.toggle('is-off', off); b.style.color = off ? '#ef4444' : '#9aa0a6'; }
+  });
+  try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
   // data-attributs + addEventListener : ce JS vit dans une chaine Python, et
   // une apostrophe echappee a la main y tuerait le script de la page entiere,
   // en silence.
@@ -23418,6 +23434,16 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         total_files = len(files)
         _banger_marks = _load_banger_marks()  # 1 lecture pour toute la galerie
         _disabled_reels = _load_disabled_reels()  # idem : reels grisés/désactivés
+        # Une brute s'éteint aussi par son voisin .off.json (repérage du texte,
+        # brutes_off) — c'est même LE réglage que lit le bot. Sans ce second
+        # regard, 40 brutes éteintes par le repérage restaient en couleur.
+        _brutes_off = set()
+        if subdir == "brutes" and folder.exists():
+            try:
+                _brutes_off = {f.name[:-len(SUFFIXE_DESACTIVE)]
+                               for f in folder.glob("*" + SUFFIXE_DESACTIVE)}
+            except Exception:
+                _brutes_off = set()
         _fav_brutes = _load_fav_brutes()  # idem : rushs bruts marqués ⭐ favoris
         _flash_trend = _load_flash_trend()  # montages ⚡ Flash Trend (exclus ailleurs)
         # Reels marqués « Dispo pour les VA » (va_ready dans leur .montage.json) -> filigrane.
@@ -23464,7 +23490,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
                 second_url = ""
             # Apres INITIAL_BATCH : on render avec data-src vide, l image se charge a l intersection
             deferred = idx >= INITIAL_BATCH
-            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, a_approuver=(p.stem in _a_approuver_stems), deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels), is_fav_brute=(file_id in _fav_brutes), is_flash_trend=(file_id in _flash_trend), vues=_vues.get(p.stem), is_va_ready=((is_reels or subdir == "templates") and p.stem in _va_ready_stems), can_montage=can_montage))
+            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, a_approuver=(p.stem in _a_approuver_stems), deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels or p.stem in _brutes_off), is_fav_brute=(file_id in _fav_brutes), is_flash_trend=(file_id in _flash_trend), vues=_vues.get(p.stem), is_va_ready=((is_reels or subdir == "templates") and p.stem in _va_ready_stems), can_montage=can_montage))
         gallery = (
             gallery_header
             # auto-fill 165px : le nombre de colonnes s'adapte a la largeur
@@ -52872,6 +52898,25 @@ def create_app():
         file_id = (request.form.get("file_id") or "").strip()
         if not file_id:
             return jsonify({"ok": False, "error": "file_id manquant"})
+        if "|brutes|" in file_id:
+            # UNE BRUTE S'ÉTEINT PAR SON VOISIN .off.json, pas ici. Le bot
+            # (cogs/user.py) ne lit que lui : griser une brute dans
+            # disabled_reels.json la laissait partir chez les VA, et une brute
+            # éteinte par le repérage du texte n'apparaissait pas grisée.
+            parsed = _parse_file_id(file_id)
+            if not parsed:
+                return jsonify({"ok": False, "error": "fichier introuvable"})
+            _dossier_b, chemin = parsed
+            eteinte = brute_desactivee(chemin) or file_id in _load_disabled_reels()
+            if eteinte:
+                ok = _off.reactiver(chemin)
+                if file_id in _load_disabled_reels():
+                    _toggle_disabled_reel(file_id)      # l'ancienne marque part aussi
+            else:
+                ok = desactiver_brute(chemin, "désactivée à la main")
+            if not ok:
+                return jsonify({"ok": False, "error": "écriture impossible"})
+            return jsonify({"ok": True, "disabled": not eteinte})
         now_off = _toggle_disabled_reel(file_id)
         return jsonify({"ok": True, "disabled": now_off})
 
