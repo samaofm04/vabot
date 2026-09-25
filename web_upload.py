@@ -47562,7 +47562,20 @@ def _render_gemini_settings() -> str:
     """Clé Gemini (Google) — OCR GRATUIT qui lit le texte stylé + les emojis.
     Stockée dans le .env du VPS via /settings/gemini_key. Jamais renvoyée."""
     present = _gemini_key_present()
+    # Panne vue par le dernier appel (modèle retiré, quota…) : sans ce bandeau,
+    # la page disait « ✓ lit les emojis » pendant que tout passait par Tesseract.
+    panne = ""
+    try:
+        import tg_router
+        panne = tg_router.STATUS.get("gemini_error") or ""
+    except Exception:
+        pass
     status = (
+        "<div style='padding:12px 16px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.35);"
+        "border-radius:8px;margin-bottom:14px;font-size:13px;color:#f59e0b'>"
+        "⚠ Gemini enregistré, mais son dernier appel a échoué — l'OCR retombe sur Tesseract "
+        f"(sans les emojis) :<br><code style='font-size:11px;word-break:break-word'>{html_escape(panne)}</code></div>"
+        if present and panne else
         "<div style='padding:12px 16px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.3);"
         "border-radius:8px;margin-bottom:14px;font-size:13px;color:#34d399'>"
         "✓ Gemini enregistré — l'OCR lit le texte incrusté <b>et les emojis</b>, gratuitement. "

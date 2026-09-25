@@ -15091,6 +15091,133 @@ try:
 except Exception as _eT:
     check("reperer le texte : testable", False, repr(_eT)[:200])
 
+# ------------------------------------------ 39. OCR Gemini : alias stable + repli
+print()
+print("=" * 70)
+print("OCR Gemini : un seul modele defini, repli sur 404/503, panne visible")
+print("=" * 70)
+try:
+    import types as _typesG
+    import requests as _reqG
+    import tg_router as _trG
+    import web_upload as _wG
+
+    # gemini-2.0-flash codé en dur est mort en 404 sans un mot : une seule
+    # adresse Gemini dans tout le projet, celle de GEMINI_URL
+    _racG = pathlib.Path(__file__).resolve().parent
+    _occG = [f.name for f in _racG.rglob("*.py")
+             if "venv" not in f.parts and f.name != "tests_site.py"
+             for _l in f.read_text(encoding="utf-8", errors="ignore").splitlines()
+             if "generativelanguage.googleapis.com" in _l]
+    check("une seule adresse Gemini dans le projet (GEMINI_URL)",
+          _occG == ["tg_router.py"] and "{model}" in _trG.GEMINI_URL, str(_occG))
+    check("le premier modele essaye est l'alias stable",
+          _trG.GEMINI_MODELS[0] == "gemini-flash-lite-latest"
+          and len(_trG.GEMINI_MODELS) >= 2, str(_trG.GEMINI_MODELS))
+
+    class _RepG:
+        def __init__(self, code, data):
+            self.status_code, self._d = code, data
+            self.text = json.dumps(data)
+
+        def json(self):
+            return self._d
+
+    _okG = {"candidates": [{"content": {"parts": [{"text": "POV: il repond 😭"}]}}],
+            "modelVersion": "gemini-9-lite"}
+
+    def _err(code, msg):
+        return _RepG(code, {"error": {"code": code, "message": msg}})
+
+    _tmpG = pathlib.Path(tempfile.mkdtemp())
+    _frG = _tmpG / "f.jpg"
+    _frG.write_bytes(b"\xff\xd8" + b"0" * 2000)
+    _savG = (_trG.requests, _trG._env_gemini_key, _trG._env_api_key,
+             _trG._ocr_tesseract, _trG.DATA_DIR, _trG._frames_from_video_file,
+             _trG._ocr_ready, dict(_trG.STATUS))
+
+    def _simuler(*reponses):
+        """requests.post du routeur remplace : rend les reponses dans l'ordre,
+        note les modeles appeles. Le vrai module requests n'est pas touche."""
+        _vus, _file = [], list(reponses)
+
+        def _post(url, **kw):
+            _vus.append(url.split("/models/")[1].split(":")[0])
+            return _file.pop(0)
+        _trG.requests = _typesG.SimpleNamespace(post=_post, RequestException=_reqG.RequestException)
+        return _vus
+
+    try:
+        _trG._env_gemini_key = lambda: "AIzaTEST"
+        _trG._env_api_key = lambda: ""
+        _trG._ocr_tesseract = lambda frames, tag="": "lu par tesseract"
+        m1, m2 = _trG.GEMINI_MODELS[:2]
+
+        _vus = _simuler(_err(404, "no longer available"), _RepG(200, _okG))
+        _tG = _trG._ocr_gemini([_frG], "t")
+        check("404 sur l'alias : repli sur le second modele",
+              _tG == "POV: il repond 😭" and _vus == [m1, m2], f"{_tG!r} {_vus}")
+
+        _vus = _simuler(_err(503, "high demand"), _RepG(200, _okG))
+        _tG = _trG._ocr_gemini([_frG], "t")
+        check("503 (surcharge) : repli sur le second modele",
+              _tG and _vus == [m1, m2] and _trG.STATUS.get("gemini_model") == "gemini-9-lite",
+              f"{_tG!r} {_vus} {_trG.STATUS}")
+
+        _vus = _simuler(_err(400, "API key not valid"))
+        _tG = _trG._ocr_gemini([_frG], "t")
+        check("cle refusee (400) : pas de repli inutile, la raison est dite",
+              _tG == "" and _vus == [m1] and "HTTP 400" in _trG._GEMINI_LAST_ERR
+              and "API key not valid" in _trG._GEMINI_LAST_ERR, _trG._GEMINI_LAST_ERR)
+
+        _vus = _simuler(_err(404, "no longer available"), _err(503, "high demand"))
+        _tG = _trG._ocr_gemini([_frG], "t")
+        _eG = _trG._GEMINI_LAST_ERR
+        check("tous en echec : chaque modele et sa raison sont remontes",
+              _tG == "" and _vus == [m1, m2] and m1 in _eG and m2 in _eG
+              and "HTTP 404" in _eG and "HTTP 503" in _eG, _eG)
+        check("... et la panne reste visible dans STATUS",
+              "HTTP 404" in (_trG.STATUS.get("gemini_error") or ""), str(_trG.STATUS))
+
+        _simuler(_err(404, "no longer available"), _err(404, "no longer available"))
+        _rG = _trG._run_ocr([_frG], "t")
+        check("veille : Gemini en panne -> Tesseract, sans effacer la panne",
+              _rG == "lu par tesseract" and _trG._OCR_ENGINE_USED == "tesseract"
+              and _trG.STATUS.get("gemini_error"), f"{_rG!r} {_trG.STATUS}")
+
+        _savK = _wG._gemini_key_present
+        _wG._gemini_key_present = lambda: True
+        try:
+            _hG = _wG._render_gemini_settings()
+        finally:
+            _wG._gemini_key_present = _savK
+        check("Settings -> Cle IA : la panne s'affiche au lieu de « ✓ lit les emojis »",
+              "dernier appel a échoué" in _hG and "HTTP 404" in _hG
+              and "✓ Gemini enregistré" not in _hG, _hG[:200])
+
+        _trG.DATA_DIR = _tmpG
+        _trG._ocr_ready = lambda: True
+        _trG._frames_from_video_file = lambda vid, slug, ts=None: [shutil.copy(_frG, _tmpG / "g.jpg")]
+        _simuler(_err(404, "no longer available"), _err(404, "no longer available"))
+        _bG = _trG.ocr_video_bytes(b"x" * 100)
+        check("site (video en octets) : gemini_err renvoye au modal",
+              _bG.get("engine") == "tesseract" and "HTTP 404" in (_bG.get("gemini_err") or ""),
+              str(_bG)[:200])
+
+        _simuler(_RepG(200, _okG))
+        _trG._ocr_gemini([_frG], "t")
+        check("un succes efface la panne affichee",
+              _trG.STATUS.get("gemini_error") == "", str(_trG.STATUS))
+    finally:
+        (_trG.requests, _trG._env_gemini_key, _trG._env_api_key,
+         _trG._ocr_tesseract, _trG.DATA_DIR, _trG._frames_from_video_file,
+         _trG._ocr_ready, _stG) = _savG
+        _trG.STATUS.clear()
+        _trG.STATUS.update(_stG)
+        shutil.rmtree(_tmpG, ignore_errors=True)
+except Exception as _eG:
+    check("ocr gemini : testable", False, repr(_eG)[:200])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

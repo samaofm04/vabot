@@ -47,7 +47,8 @@ _CACHE_LOCK = threading.Lock()   # protège l'écriture du cache (routages concu
 _POST_LOCK = threading.RLock()
 _THREAD = None
 _STOP = threading.Event()
-STATUS = {"running": False, "last_update": 0, "routed": 0, "error": ""}
+STATUS = {"running": False, "last_update": 0, "routed": 0, "error": "",
+          "gemini_error": "", "gemini_model": ""}
 EVENTS = []  # ring buffer des 15 dernières décisions (debug)
 
 # ── Registre des veilles ────────────────────────────────────────────────────
@@ -704,7 +705,12 @@ def ocr_video_bytes(video_bytes: bytes, second=None) -> dict:
         frames = _frames_from_video_file(vid, slug, ts)
         try:
             text = _run_ocr(frames, "site") if frames else ""
-            return {"ok": True, "text": text, "engine": _OCR_ENGINE_USED or "tesseract"}
+            engine = _OCR_ENGINE_USED or "tesseract"
+            gem_key = bool(_env_gemini_key())
+            # comme ocr_video_url : le modal dit « IA indisponible (…) » au lieu
+            # d'un « ✅ lu (Tesseract) » qui cachait la panne de Gemini
+            return {"ok": True, "text": text, "engine": engine, "gemini_key": gem_key,
+                    "gemini_err": _GEMINI_LAST_ERR if gem_key and engine == "tesseract" else ""}
         finally:
             _cleanup_frames(frames, None)
     except Exception as e:
@@ -842,11 +848,61 @@ def _env_gemini_key() -> str:
 
 _GEMINI_LAST_ERR = ""
 
+# Modèles Gemini essayés dans l'ordre — seule définition du projet : tout appel
+# à Gemini passe par _gemini_generate(). Un nom figé finit par être retiré sans
+# préavis : le 25/09/2026, gemini-2.0-flash (et 2.5-flash) répondaient 404
+# « no longer available » et l'OCR retombait sur Tesseract sans rien dire.
+# L'alias « -latest » suit Google (il visait gemini-3.5-flash-lite ce jour-là) ;
+# le repli est un modèle DISTINCT de celui que vise l'alias, pour qu'une
+# surcharge de l'un n'emporte pas l'autre.
+GEMINI_MODELS = ("gemini-flash-lite-latest", "gemini-3.1-flash-lite")
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+# 404 = modèle retiré, 503 = surcharge passagère : un autre modèle peut répondre.
+# Toute autre erreur (clé refusée, requête invalide) serait la même partout.
+_GEMINI_REPLI_SI = (404, 503)
+
+
+class GeminiError(Exception):
+    """Aucun modèle Gemini n'a répondu ; le message dit lequel a dit quoi."""
+
+
+def _gemini_generate(parts, key: str, timeout: int = 60):
+    """Envoie `parts` à Gemini en essayant GEMINI_MODELS dans l'ordre.
+    Retourne (réponse JSON, modèle qui a répondu). Lève GeminiError si aucun
+    n'a répondu, avec la raison de chacun — jamais un "" muet."""
+    fails = []
+    for model in GEMINI_MODELS:
+        try:
+            # clé via header x-goog-api-key (robuste pour les 2 formats Google : AIza… ET AQ.…)
+            rr = requests.post(
+                GEMINI_URL.format(model=model),
+                headers={"content-type": "application/json", "x-goog-api-key": key},
+                json={"contents": [{"parts": parts}]}, timeout=timeout)
+        except requests.RequestException as e:
+            fails.append(f"{model} : {str(e)[:120]}")
+            break
+        try:
+            data = rr.json()
+        except Exception:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        if rr.status_code == 200:
+            if fails:
+                _trace(f"Gemini : {' ; '.join(fails)} → repli sur {model}")
+            return data, data.get("modelVersion") or model
+        msg = (data.get("error") or {}).get("message", "") or (rr.text or "")
+        fails.append(f"{model} HTTP {rr.status_code} — {msg[:120]}")
+        if rr.status_code not in _GEMINI_REPLI_SI:
+            break
+    raise GeminiError(" ; ".join(fails))
+
 
 def _ocr_gemini(frame_paths, tag: str = "", prompt: str = None,
                 max_frames: int = 3, max_len: int = 300) -> str:
     """OCR via Gemini (Google, tier GRATUIT, clé aistudio.google.com) — lit le
-    texte STYLÉ et les EMOJIS. Pose la raison d'échec dans _GEMINI_LAST_ERR."""
+    texte STYLÉ et les EMOJIS. Pose la raison d'échec dans _GEMINI_LAST_ERR,
+    et une panne de Gemini (pas « aucun texte ») dans STATUS["gemini_error"]."""
     global _GEMINI_LAST_ERR
     _GEMINI_LAST_ERR = ""
     key = _env_gemini_key()
@@ -865,35 +921,28 @@ def _ocr_gemini(frame_paths, tag: str = "", prompt: str = None,
         return ""
     parts.append({"text": prompt or _OCR_PROMPT})
     try:
-        # clé via header x-goog-api-key (robuste pour les 2 formats Google : AIza… ET AQ.…)
-        rr = requests.post(
-            "https://generativelanguage.googleapis.com/v1beta/models/"
-            "gemini-2.0-flash:generateContent",
-            headers={"content-type": "application/json", "x-goog-api-key": key},
-            json={"contents": [{"parts": parts}]}, timeout=60)
-        try:
-            data = rr.json()
-        except Exception:
-            data = {}
-        if rr.status_code != 200:
-            msg = (data.get("error") or {}).get("message", "") or (rr.text or "")[:120]
-            _GEMINI_LAST_ERR = f"HTTP {rr.status_code} — {msg}"
-            _trace(f"ocr Gemini: {_GEMINI_LAST_ERR}")
-            return ""
-        cands = data.get("candidates") or []
-        if not cands:
-            _GEMINI_LAST_ERR = "réponse Gemini vide (contenu bloqué ?)"
-            return ""
-        txt = "".join(p.get("text", "") for p in
-                      ((cands[0].get("content") or {}).get("parts") or [])).strip()
-        if txt and not txt.upper().startswith("AUCUN"):
-            _trace(f"✍️ texte lu (Gemini) {tag}: {txt[:45]}…")
-            return txt[:max_len]
-        _GEMINI_LAST_ERR = "Gemini n'a détecté aucun texte sur cette image"
-        return ""
+        data, model = _gemini_generate(parts, key)
     except Exception as e:
-        _GEMINI_LAST_ERR = str(e)[:140]
-        _trace(f"ocr Gemini: {e}")
+        # Gardée dans STATUS jusqu'au prochain succès : /routerdebug, /tgrouter
+        # et Settings → Clé IA l'affichent. Avant, seule une ligne de trace le
+        # disait, noyée parmi les 15 dernières, et tout affichait « ✅ GEMINI ».
+        _GEMINI_LAST_ERR = str(e)[:300]
+        STATUS["gemini_error"] = f"{time.strftime('%d/%m %H:%M')} {_GEMINI_LAST_ERR}"
+        _trace(f"ocr Gemini {tag}: {_GEMINI_LAST_ERR}")
+        return ""
+    STATUS["gemini_error"] = ""
+    STATUS["gemini_model"] = model
+    cands = data.get("candidates") or []
+    if not cands:
+        why = (data.get("promptFeedback") or {}).get("blockReason") or "contenu bloqué ?"
+        _GEMINI_LAST_ERR = f"réponse Gemini vide ({why})"
+        return ""
+    txt = "".join(p.get("text", "") for p in
+                  ((cands[0].get("content") or {}).get("parts") or [])).strip()
+    if txt and not txt.upper().startswith("AUCUN"):
+        _trace(f"✍️ texte lu (Gemini {model}) {tag}: {txt[:45]}…")
+        return txt[:max_len]
+    _GEMINI_LAST_ERR = "Gemini n'a détecté aucun texte sur cette image"
     return ""
 
 
@@ -1162,6 +1211,11 @@ def _handle_command(cfg: dict, msg: dict, text: str):
             ocr_on = "✅ GRATUIT (Tesseract local) — texte net OK, mais PAS les emojis"
         else:
             ocr_on = "❌ aucun OCR configuré → texte incrusté non lu"
+        if STATUS.get("gemini_error"):
+            ocr_on += (f"\n⚠️ Gemini en échec → repli Tesseract (sans emojis) : "
+                       f"{STATUS['gemini_error']}")
+        elif STATUS.get("gemini_model"):
+            ocr_on += f"\n(dernier modèle Gemini : {STATUS['gemini_model']})"
         _reply(chat_id, f"🔍 Dernières décisions du routeur :\n{ev}\n\n🤖 OCR : {ocr_on}"
                + (f"\n\n⚠️ Erreur : {STATUS.get('error')}" if STATUS.get("error") else ""),
                thread_id)

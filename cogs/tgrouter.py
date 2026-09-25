@@ -62,6 +62,8 @@ class TGRouter(commands.Cog):
             f"• Sujets créés : {len(cfg.get('topics') or {})}\n"
             f"• Vidéos rangées : **{st.get('routed', 0)}**\n"
             + (f"• ⚠️ Dernière erreur : `{st.get('error')}`\n" if st.get("error") else "")
+            + (f"• ⚠️ OCR Gemini en échec (repli Tesseract, sans emojis) : `{st.get('gemini_error')}`\n"
+               if st.get("gemini_error") else "")
             + "\n**Setup :**\n"
             "1. Crée un groupe Telegram → active les **Sujets** (Paramètres du groupe)\n"
             "2. Ajoute ton bot Veille en **admin** (avec « Gérer les sujets »)\n"
