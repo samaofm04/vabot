@@ -445,6 +445,12 @@ class NoctusPool(commands.Cog):
             log.exception("[noctuspool] impossible de lister les identites")
             return
         identites = self._sans_reserves(identites)
+        # En pause : rien n'est servi, rien a fabriquer d'avance.
+        try:
+            import identite_pause as _ip
+            identites = _ip.sans_pauses(identites)
+        except Exception as e:
+            log.warning("[noctuspool] controle « pause » indisponible (%s)", e)
         if not identites:
             return
 

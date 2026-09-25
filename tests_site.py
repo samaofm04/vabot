@@ -19405,6 +19405,103 @@ except Exception as _eX:
     import traceback as _tbX
     check("infloww+ : testable", False, repr(_eX)[:200] + " " + _tbX.format_exc()[-800:])
 
+# ------------------------------------------ Identite EN PAUSE (26/09/2026)
+# « disable une identite, la mettre en pause pour plus l avoir et tout sur le
+# Discord, la griser dans la bibliotheque ». Une cle « pause » dans
+# identities_config.json, lue par le bot ET le site (identite_pause.py).
+print()
+print("=" * 70)
+print("Identite en pause : plus rien sur Discord, grisee dans la Bibliotheque")
+print("=" * 70)
+try:
+    import tempfile as _tfP, pathlib as _plP, json as _jsP, shutil as _shP
+    import identite_pause as _ipP
+    import cogs.welcome as _wlP
+    import type_identite as _tiP
+    _tmpP = _plP.Path(_tfP.mkdtemp())
+    _cfgP = _tmpP / "identities_config.json"
+    _cfgP.write_text(_jsP.dumps({"lea": {"enabled": False}}), encoding="utf-8")
+    _savP = (_ipP.FICHIER, _wlP.IDENTITIES_CONFIG_FILE)
+    try:
+        _ipP.FICHIER, _wlP.IDENTITIES_CONFIG_FILE = _cfgP, _cfgP
+        check("pause : rien n est en pause par defaut", not _ipP.en_pause("mia") and not _ipP.pauses())
+        check("pause : definir l ecrit sans toucher aux autres cles",
+              _ipP.definir("lea", True) and _ipP.en_pause("LEA")
+              and _jsP.loads(_cfgP.read_text())["lea"].get("enabled") is False)
+        _ipP.definir("mia", True)
+        check("pause : sans_pauses ecarte les identites en pause",
+              _ipP.sans_pauses(["lea", "mia", "zoe"]) == ["zoe"])
+        check("bot : une identite en pause n est plus « active » (rotation, grilles Jailbreak)",
+              _wlP.is_identity_active("mia") is False and _wlP.is_identity_active("zoe") is True)
+        check("bot : elle ne s attribue plus (ticket, attribution forcee, site)",
+              "en pause" in _tiP.refus_assignation("mia"))
+        _savLiens = _tiP._liens
+        _tiP._liens = lambda: {"modelx": ["mia", "zoe"]}
+        _savRI = _tiP._raison_invalide
+        _tiP._raison_invalide = lambda m, r: ""
+        try:
+            _ret, _ec = _tiP.reserves_liees("modelx")
+            check("✨ General : une reserve en pause en sort, AVEC sa raison",
+                  _ret == ["zoe"] and ("mia", "en pause") in _ec, str((_ret, _ec)))
+        finally:
+            _tiP._liens, _tiP._raison_invalide = _savLiens, _savRI
+        import cogs.autopost as _apP
+        _runP = _apP._new_autopost_run("2026-09-26", {}, {
+            "1": {"identity": "mia", "channel_id": 11}, "2": {"identity": "zoe", "channel_id": 12}})
+        _stP = {k: {i["status"] for i in v["items"].values()} for k, v in _runP["targets"].items()}
+        _raisP = {i["reason"] for i in _runP["targets"]["1"]["items"].values()}
+        check("autopost : le VA d une identite en pause est ANNULE avec sa raison, pas oublie",
+              _stP == {"1": {"cancelled"}, "2": {"pending"}} and _raisP == {"identity_paused"},
+              str((_stP, _raisP)))
+        _ipP.definir("mia", False)
+        check("pause : reactiver la retire, et le bot la reprend",
+              not _ipP.en_pause("mia") and _wlP.is_identity_active("mia") is True
+              and "mia" not in _jsP.loads(_cfgP.read_text()))
+        _srcU = _plP.Path("cogs/user.py").read_text(encoding="utf-8")
+        check("bot : le controle de contenu (toutes les commandes) regarde la pause",
+              "identite_pause" in _srcU[_srcU.find("async def _gate_contenu"):][:1500])
+        check("bot : les boutons Jailbreak deja postes refusent une identite en pause",
+              "_ip.en_pause(idl)" in _srcU[_srcU.find("def _refus_reserve_jb"):][:900])
+        # --- le site : la route, la pastille, le grise
+        import web_upload as _wP
+        _dP = _wP.IDENTITIES_DIR / "tst_pause"
+        (_dP / "brutes").mkdir(parents=True, exist_ok=True)
+        _savUP = _wP._load_web_users
+        _wP._load_web_users = lambda: {"boss": {"role": "owner", "password_hash": "x"}}
+        try:
+            _wP._invalidate_all_ttl_cache()
+            _aP = _wP.create_app(); _aP.testing = True
+            _cP = _aP.test_client()
+            with _cP.session_transaction() as _sP:
+                _sP["auth"] = True; _sP["username"] = "boss"; _sP["role"] = "owner"
+            _j1 = _cP.post("/identity/pause", data={"identity": "tst_pause", "pause": "1"}).get_json() or {}
+            check("site : la route met en pause", _j1.get("ok") is True and _ipP.en_pause("tst_pause")
+                  and "En pause" in (_j1.get("badges") or ""), str(_j1)[:120])
+            _hP = _cP.get("/?tab=cloudbrutes&cloud_brutes_ident=tst_pause").get_data(as_text=True)
+            check("site : grisee dans la Bibliotheque (classe sur l entree), pas cachee",
+                  "vault-item-paused' data-ident='tst_pause'" in _hP, "")
+            (_dP / "brutes" / "a.mp4").write_bytes(b"x" * 2000)
+            with _aP.test_request_context("/?tab=cloudbrutes&cloud_brutes_ident=tst_pause"):
+                _gP = _wP._render_cloud_content_html("brutes", _wP.VIDEO_EXTS)
+            check("site : la fiche sait qu elle est en pause (bouton Reactiver)",
+                  "data-identedit='tst_pause'" in _gP and "data-pause='1'" in _gP
+                  and "identEditPause" in _hP, "")
+            _j2 = _cP.post("/identity/pause", data={"identity": "inconnue_zz", "pause": "1"}).get_json() or {}
+            check("site : une identite inconnue est refusee", _j2.get("ok") is not True)
+            _j3 = _cP.post("/identity/pause", data={"identity": "tst_pause", "pause": "0"}).get_json() or {}
+            check("site : la route reactive", _j3.get("ok") is True and not _ipP.en_pause("tst_pause"))
+        finally:
+            _wP._load_web_users = _savUP
+            _shP.rmtree(_dP, ignore_errors=True)
+            _wP._invalidate_all_ttl_cache()
+    finally:
+        _ipP.FICHIER, _wlP.IDENTITIES_CONFIG_FILE = _savP
+        _ipP._CACHE.update(sig=None)
+        _shP.rmtree(_tmpP, ignore_errors=True)
+except Exception as _eP:
+    import traceback as _tbP
+    check("pause : testable", False, repr(_eP)[:200] + " " + _tbP.format_exc()[-300:])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

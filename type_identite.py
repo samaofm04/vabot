@@ -249,8 +249,16 @@ def reserves_liees(modele: str) -> tuple:
     """
     idl = (modele or "").strip().lower()
     retenues, ecartees = [], []
+    try:
+        import identite_pause as _ip
+    except Exception:
+        _ip = None
     for r in _liens().get(idl, []):
         raison = _raison_invalide(idl, r)
+        # En pause : le lien reste pose (il revient a la reactivation), mais
+        # la reserve sort du ✨ General -- dit, pas tu.
+        if not raison and _ip is not None and _ip.en_pause(r):
+            raison = "en pause"
         if raison:
             ecartees.append((r, raison))
         elif r not in retenues:
@@ -311,5 +319,12 @@ def refus_assignation(nom: str) -> str:
     if idl and est_reserve(idl):
         return (f"`{idl}` est une réserve (contenu partagé) : "
                 "elle ne s'assigne pas à un VA.")
+    # En pause : ne s'attribue plus (ticket, attribution forcee, site).
+    try:
+        import identite_pause as _ip
+        if _ip.en_pause(idl):
+            return _ip.refus(idl)
+    except Exception:
+        pass
     return ""
 

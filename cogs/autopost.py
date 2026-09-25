@@ -345,6 +345,17 @@ def _autopost_target(raw):
     return raw.get("identity"), channel_id, raw.get("auto_post", True)
 
 
+def _en_pause(identity) -> bool:
+    """identite_pause.en_pause, repli OUVERT et journalise : un module qui ne
+    repond pas ne coupe pas l'autopost de tout le monde."""
+    try:
+        import identite_pause as _ip
+        return _ip.en_pause(identity)
+    except Exception as exc:
+        log.warning("controle « pause » indisponible pour %r (%s)", identity, type(exc).__name__)
+        return False
+
+
 def _new_autopost_run(day, cfg, users):
     targets = {}
     kinds = [kind for kind in AUTOPOST_KINDS if cfg.get(f"post_{kind}", True)]
@@ -353,10 +364,14 @@ def _new_autopost_run(day, cfg, users):
         if not enabled or not kinds:
             continue
         valid = bool(identity and channel_id)
+        # Identite en pause : annulee AVEC sa raison, visible dans le bilan.
+        pause = valid and _en_pause(identity)
         targets[user_id] = {
             "identity": identity, "channel_id": channel_id,
-            "items": {kind: {"status": "pending" if valid else "failed", "attempts": 0,
-                             "reason": "" if valid else "identity_or_channel_missing"}
+            "items": {kind: {"status": ("cancelled" if pause else "pending") if valid else "failed",
+                             "attempts": 0,
+                             "reason": ("identity_paused" if pause else "") if valid
+                                       else "identity_or_channel_missing"}
                       for kind in kinds},
         }
     return {"schema": 1, "date": day, "targets": targets}
@@ -462,6 +477,12 @@ async def run_autopost_for_all(bot, *, now=None):
                     _save_autopost_run(run)
                     changed = True
                     continue
+                if _en_pause(target["identity"]):
+                    # mise en pause PENDANT le passage
+                    item.update(status="cancelled", reason="identity_paused")
+                    _save_autopost_run(run)
+                    changed = True
+                    continue
                 if item.get("retry_after", 0) > clock().timestamp():
                     continue
                 if item["attempts"] >= AUTOPOST_MAX_ATTEMPTS:
@@ -538,6 +559,7 @@ async def run_broadcast(
     envois = 0        # medias REELLEMENT postes
     sans_salon = 0    # salon introuvable (bot absent du serveur, salon supprime)
     sans_contenu = 0  # VA cible mais 0 media envoye (stock de l'identite vide)
+    en_pause = 0      # VA dont l'identite est en pause : rien d'envoye, compte
     vides = {}        # identite -> nb de VAs restes sans rien
     for user_id_str, raw_data in users.items():
         if isinstance(raw_data, str):
@@ -552,6 +574,9 @@ async def run_broadcast(
             continue
         # Filtre par identite si specifie (comparaison case-insensitive)
         if identity_filter and identity.lower() != identity_filter.lower():
+            continue
+        if _en_pause(identity):
+            en_pause += 1
             continue
         try:
             channel = await resolve_autopost_channel(bot, channel_id)
@@ -584,7 +609,7 @@ async def run_broadcast(
             log.error(f"Broadcast erreur pour user {user_id_str}: {e}")
             errors += 1
     return count, errors, {"envois": envois, "sans_salon": sans_salon,
-                           "sans_contenu": sans_contenu, "vides": vides}
+                           "sans_contenu": sans_contenu, "vides": vides, "en_pause": en_pause}
 
 
 class AutoPost(commands.Cog):
@@ -777,6 +802,9 @@ class AutoPost(commands.Cog):
         if det["sans_salon"]:
             msg += (f"\n⚠️ {det['sans_salon']} VA(s) ignores : salon introuvable "
                     f"(salon supprime, ou bot absent de leur serveur).")
+        if det.get("en_pause"):
+            msg += (f"\n⏸ {det['en_pause']} VA(s) ignores : leur identite est en pause "
+                    f"(Vault → Modifier → Réactiver).")
         await interaction.followup.send(msg[:1990], ephemeral=True)
 
     @app_commands.command(name="setvachannel", description="[ADMIN] Définit le salon d'auto-post pour un VA")

@@ -222,6 +222,10 @@ def is_identity_active(name):
     cfg = load_identities_config()
     entry = cfg.get(name)
     if isinstance(entry, dict):
+        # EN PAUSE (identite_pause, reglee dans le Vault) : hors rotation ET
+        # hors des grilles Jailbreak, qui passent toutes par ici.
+        if entry.get("pause"):
+            return False
         return entry.get("enabled", True)
     return True  # par defaut actif
 

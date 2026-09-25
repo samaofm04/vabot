@@ -10610,6 +10610,12 @@ document.addEventListener('click', function(ev){
   var dw=document.getElementById('ident-edit-dangerwrap');
   if(dw) dw.style.display = identEditCtx.typelock ? 'none' : 'flex';
   identEditRetirerFerme();
+  /* La pause : ni pour une verrouillee (source du menu US), ni pour la
+     Bibliotheque 2 (elle ne va jamais sur Discord). */
+  identEditCtx.pause = !!b.getAttribute('data-pause');
+  var pw=document.getElementById('ident-edit-pausewrap');
+  if(pw) pw.style.display = (identEditCtx.typelock || /^v2_/.test(identEditCtx.ident)) ? 'none' : 'flex';
+  identEditPausePeindre();
   /* Les liens AVANT la nature et le marche : identEditType et identEditMarket
      repeignent la liste, qui doit deja porter ceux de CETTE entree et non
      ceux de la modale precedente. */
@@ -10666,6 +10672,30 @@ async function identEditRetirerOuvre(){
     q.textContent = txt + ' Rien n\u2019est effac\u00e9 : tout part dans data/_corbeille_identites.';
   }catch(e){ q.textContent='Impossible de lire ce que \u00e7a touche.'; }
   var n=document.getElementById('ident-edit-dangernom'); if(n){ n.value=''; n.focus(); }
+}
+function identEditPausePeindre(){
+  var b=document.getElementById('ident-edit-pause'), h=document.getElementById('ident-edit-pausehint');
+  if(b){ b.disabled=false; b.textContent = identEditCtx.pause ? '▶ Réactiver' : '⏸ Mettre en pause'; }
+  if(h) h.textContent = identEditCtx.pause
+    ? 'En pause : plus servie sur Discord, grisée dans la Bibliothèque. Réactiver la remet partout.'
+    : 'Plus rien sur Discord (menus, rotation, Jailbreak, General, autopost), grisée dans la Bibliothèque. Tout est gardé : ça se réactive d’un clic.';
+}
+async function identEditPause(){
+  var b=document.getElementById('ident-edit-pause'), err=document.getElementById('ident-edit-err');
+  if(b){ b.disabled=true; b.textContent='◌'; }
+  try{
+    var fd=new FormData(); fd.set('identity', identEditCtx.ident);
+    fd.set('pause', identEditCtx.pause ? '0' : '1'); fd.set('ajax','1');
+    var r=await fetch('/identity/pause',{method:'POST',body:fd,credentials:'same-origin'});
+    var j=null; try{ j=await r.json(); }catch(e2){}
+    if(!(j&&j.ok)){
+      if(err) err.textContent=(j&&j.error)||('Refusé par le serveur (HTTP '+r.status+')');
+      identEditPausePeindre(); return;
+    }
+    try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e3){}
+    identEditClose();
+    window.location.reload();   // les quatre listes et l en-tete, rendus par le serveur
+  }catch(e){ if(err) err.textContent=String(e); identEditPausePeindre(); }
 }
 function identEditRetirerFerme(){
   var z=document.getElementById('ident-edit-danger');
@@ -15434,6 +15464,10 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
       <label class="ie-fichier" id="ident-edit-avlbl">Choisir une image&hellip;
         <input id="ident-edit-avatar" type="file" accept="image/*" onchange="identEditAvChoisi(this)"></label>
     </div>
+    <div class="ie-sec" id="ident-edit-pausewrap"><span class="ie-lbl">Pause</span>
+      <button type="button" id="ident-edit-pause" class="ie-btn" onclick="identEditPause()"></button>
+      <div id="ident-edit-pausehint" class="ie-hint"></div>
+    </div>
     <!-- RETIRER. Volontairement en bas, volontairement discret, et
          volontairement en deux temps : le premier clic ne fait qu'OUVRIR le
          recapitulatif de ce qui sera deplace. Rien ne part tant que le nom
@@ -16609,6 +16643,22 @@ def _set_identity_styles(ident: str, styles) -> bool:
     return ok
 
 
+def _en_pause(ident) -> bool:
+    """identite_pause.en_pause, repli « pas en pause » : un module qui ne
+    repond pas ne grise pas toute la Bibliotheque."""
+    try:
+        import identite_pause as _ip
+        return _ip.en_pause(ident)
+    except Exception:
+        return False
+
+
+def _classe_pause(ident) -> str:
+    """Classe des entrees de la Bibliotheque : une identite en pause y reste,
+    GRISEE (demande du proprietaire, 26/09/2026), pas cachee."""
+    return " vault-item-paused" if _en_pause(ident) else ""
+
+
 def _style_badges_html(ident: str, taille: int = 12) -> str:
     """Les pastilles de styles à côté du nom, ou rien si aucune n'est cochée.
 
@@ -16629,6 +16679,17 @@ def _style_badges_html(ident: str, taille: int = 12) -> str:
                 f"stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
                 f"<path d='M12 2 2 7l10 5 10-5-10-5z'/><path d='M2 17l10 5 10-5'/><path d='M2 12l10 5 10-5'/></svg>"
                 f"Réserve</span>")
+    # EN PAUSE : dit a cote du nom, dans la liste comme dans l en-tete.
+    if _en_pause(ident):
+        _res = (f"<span class='ident-pause-pill' title='En pause : plus servie sur Discord "
+                f"(menus, rotation, Jailbreak, General, autopost). Modifier → Réactiver.' "
+                f"style='display:inline-flex;align-items:center;gap:3px;margin-left:4px;padding:0 5px;"
+                f"border-radius:6px;background:rgba(148,163,184,.18);color:#8a94a6;"
+                f"font-size:{max(9, taille - 2)}px;font-weight:700;line-height:1.5'>"
+                f"<svg viewBox='0 0 24 24' width='{taille}' height='{taille}' fill='currentColor' "
+                f"stroke='none'><rect x='6' y='4' width='4' height='16' rx='1'/>"
+                f"<rect x='14' y='4' width='4' height='16' rx='1'/></svg>"
+                f"En pause</span>") + _res
     poses = identity_styles(ident)
     if not poses:
         return _res
@@ -23255,6 +23316,9 @@ _VAULT_CORE_RAW = """<style>
 .vault-filter-row{padding:4px 6px;cursor:pointer}
 .vault-list{display:flex;flex-direction:column;gap:4px;overflow-y:auto;flex:1;margin:0 -6px;padding:0 6px}
 .vault-item{display:flex;align-items:center;gap:12px;padding:10px 12px;background:transparent;border:1px solid transparent;border-radius:10px;text-decoration:none;color:inherit;transition:all .15s}
+.vault-item.vault-item-paused{opacity:.45;filter:grayscale(1)}
+.vault-item.vault-item-paused:hover,.vault-item.vault-item-paused.vault-item-active{opacity:.8}
+body.light .ident-pause-pill{color:#475569!important;background:rgba(100,116,139,.14)!important}
 .vault-item:hover{background:rgba(255,255,255,.04)}
 .vault-item-active{background:linear-gradient(90deg,rgba(59,130,246,.18),rgba(168,85,247,.08)) !important;border-color:rgba(59,130,246,.4) !important}
 .vault-gallery{background:#0f1116;border:1px solid #2a2a2a;border-radius:14px;padding:20px}
@@ -24792,7 +24856,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
             f"<a href='?tab={tab_name}&{subdir_key}={ident}' "
             f"onclick='return vaultGoTo(event,this.href)' "
             f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
-            f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}' "
+            f"data-no-loader='1' class='vault-item {active_class}{_classe_pause(ident)}' data-ident='{ident}' "
             f"data-market='{identity_market(ident)}' "
             f"style='{_marche_cache(ident, selected)}' data-nature='{_type_identite(ident)}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
@@ -25241,6 +25305,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         # Verrou servi au panneau : le bouton « Identité » se grise pour
         # celles qui ne peuvent pas sortir des modèles.
         f"data-typelock='{'1' if _type_mod.verrouillee(selected) else ''}' "
+        f"data-pause='{'1' if _en_pause(selected) else ''}' "
         # Ce que l'entrée porte, servi au panneau : décider « modèle ou
         # identité » sans ce chiffre revient à décider de mémoire.
         f"data-vas='{_effectif_identite(selected)[0]}' "
@@ -26444,7 +26509,7 @@ def _render_cloud_captions_html() -> str:
             f"<a href='?tab=cloudcaptions&cloud_captions_ident={ident}' "
             f"onclick='return vaultGoTo(event,this.href)' "
             f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
-            f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}' "
+            f"data-no-loader='1' class='vault-item {active_class}{_classe_pause(ident)}' data-ident='{ident}' "
             f"data-market='{identity_market(ident)}' "
             f"style='{_marche_cache(ident, selected)}' data-nature='{_type_identite(ident)}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
@@ -26749,7 +26814,7 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
             f"<a href='?tab={tab}&{ident_key}={ident}' "
             f"onclick='return vaultGoTo(event,this.href)' "
             f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
-            f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}' "
+            f"data-no-loader='1' class='vault-item {active_class}{_classe_pause(ident)}' data-ident='{ident}' "
             f"data-market='{identity_market(ident)}' "
             f"style='{_marche_cache(ident, selected)}' data-nature='{_type_identite(ident)}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
@@ -27237,7 +27302,7 @@ def _render_textvault_html(cat: str) -> str:
             f"<a href='?tab={tab}&{ikey}={ident}' "
             f"onclick='return vaultGoTo(event,this.href)' "
             f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
-            f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}' "
+            f"data-no-loader='1' class='vault-item {active_class}{_classe_pause(ident)}' data-ident='{ident}' "
             f"data-market='{identity_market(ident)}' "
             f"style='{_marche_cache(ident, selected)}' data-nature='{_type_identite(ident)}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
@@ -58517,6 +58582,41 @@ def create_app():
             _invalidate_all_ttl_cache()
             r["label"] = _v2_label(r.get("identite") or new)
         return jsonify(r)
+
+    @app.route("/identity/pause", methods=["POST"])
+    def identity_pause_set():
+        """Met une identité EN PAUSE, ou la réactive. Ne retire rien.
+
+        En pause : plus servie sur Discord (rotation, grilles Jailbreak,
+        ✨ General, commandes de contenu, menu du jour, autopost), grisée
+        dans la Bibliothèque. Demande du propriétaire, 26/09/2026. Le détail
+        vit dans identite_pause.py ; ici, l'écriture et le redessin des
+        grilles Discord (un message posté ne se met pas à jour seul)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        import identite_pause as _ip
+        import type_identite as _ti
+        ident = (request.form.get("identity") or "").strip().lower()
+        if ident not in set(_list_identities()):
+            return jsonify({"ok": False, "error": "identité inconnue"})
+        if _ti.verrouillee(ident):
+            return jsonify({"ok": False, "error": f"@{ident} ne se met pas en pause : "
+                                                  "elle sert de source au menu US."})
+        pause = (request.form.get("pause") or "") == "1"
+        if not _ip.definir(ident, pause):
+            return jsonify({"ok": False, "error": "écriture impossible (identities_config.json)"})
+        _invalidate_all_ttl_cache()
+        menus = False
+        try:
+            from cogs.welcome import demander_rafraichissement
+            menus = bool(demander_rafraichissement(
+                _BOT_REF, raison=f"{'pause' if pause else 'reprise'} de {ident}"))
+        except Exception as e:
+            log.warning(f"identity_pause: menus Discord non prévenus ({e})")
+        vas, comptes = _effectif_identite(ident)
+        return jsonify({"ok": True, "identity": ident, "pause": pause, "menus": menus,
+                        "vas": vas, "badges": _style_badges_html(ident, 11)})
 
     def _mot_de_passe_du_compte_ok(mdp: str) -> bool:
         """Le mot de passe du compte CONNECTÉ, vérifié comme à la connexion.

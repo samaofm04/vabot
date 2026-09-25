@@ -2009,6 +2009,18 @@ _IDENTITY_OVERRIDE = contextvars.ContextVar("identity_override", default=None)
 _MODEL_REELLE = contextvars.ContextVar("model_reelle", default=None)
 
 
+def _identite_en_pause(identity) -> bool:
+    """identite_pause.en_pause, sans jamais planter un envoi : repli OUVERT
+    (pas en pause) et journalise."""
+    try:
+        import identite_pause as _ip
+        return _ip.en_pause(identity)
+    except Exception as e:
+        log.warning("controle « pause » indisponible pour %r (%s: %s)",
+                    identity, type(e).__name__, e)
+        return False
+
+
 def _dossier_brutes(identity):
     """LE seul endroit qui dit d'ou vient la brute : la model reelle pendant
     un clic General, sinon l'identite elle-meme. Les quatre chemins qui
@@ -2438,7 +2450,22 @@ class UserCog(commands.Cog):
         mode Threads et que la commande n'en fait pas partie (threads_ok=False)."""
         blocked = False
         msg = "⚠️ Cette fonction est désactivée sur ce serveur."
-        if not _menu_feature_check(interaction, "contenu"):
+        # IDENTITE EN PAUSE (identite_pause) : plus rien n'est servi pour
+        # elle, ni au VA qui l'a, ni via Jailbreak ou le ✨ General (la
+        # reserve ET la model cliquee). Un seul point de passage pour toutes
+        # les commandes de contenu. Repli OUVERT et journalise : un module
+        # qui ne repond pas ne coupe pas le contenu de tout le monde.
+        try:
+            import identite_pause as _ip
+            for _cand in (_MODEL_REELLE.get(), get_user_identity(interaction.user.id)):
+                if _cand and _ip.en_pause(_cand):
+                    blocked, msg = True, _ip.refus(_cand)
+                    break
+        except Exception as e:
+            log.warning("controle « pause » indisponible (%s: %s)", type(e).__name__, e)
+        if blocked:
+            pass
+        elif not _menu_feature_check(interaction, "contenu"):
             blocked = True
         else:
             try:
@@ -4745,14 +4772,20 @@ class UserCog(commands.Cog):
     async def _push_menu_to_all_vas(self, guild=None):
         """Poste le menu (avec @ping) dans le salon de chaque VA. Retourne le nb d'envois.
         Si `guild` est fourni, ne pousse QUE dans les salons va- de ce serveur."""
-        sent = 0
+        sent = sautes = 0
         for ch, uid, ident in self._va_targets(guild):
+            # Identite en pause : pas de menu (ses boutons refuseraient tous).
+            if _identite_en_pause(ident):
+                sautes += 1
+                continue
             try:
                 uid_int = int(uid) if uid is not None else None
             except (TypeError, ValueError):
                 uid_int = None
             if await self._post_menu(ch, ident, mention_user_id=uid_int):
                 sent += 1
+        if sautes:
+            log.info("menu VA : %d salon(s) saute(s), identite en pause", sautes)
         return sent
 
     @tasks.loop(time=_dt.time(hour=0, minute=0, tzinfo=_PARIS_TZ))
@@ -10164,6 +10197,15 @@ def _refus_reserve_jb(ident) -> str:
     idl = (ident or "").strip().lower()
     if not idl or idl == "_":
         return ""
+    # En pause : les boutons deja postes restent cliquables tant que la
+    # grille n'est pas redessinee ; ils refusent avec la raison.
+    try:
+        import identite_pause as _ip
+        if _ip.en_pause(idl):
+            return _ip.refus(idl)
+    except Exception as e:
+        log.warning("controle « pause » indisponible pour %r (%s: %s)",
+                    idl, type(e).__name__, e)
     try:
         import type_identite as _ti
         refus = _ti.refus_assignation(idl)
