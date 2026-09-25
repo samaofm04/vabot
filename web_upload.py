@@ -8270,8 +8270,11 @@ document.addEventListener('paste', function(ev){
   var recu=''; try{ recu=[].slice.call(cd.types||[]).join(', '); }catch(e){}
   if(!files.length){
     /* Du texte colle dans un champ : un collage normal, meme s il finit par
-       « .jpg » (une adresse d image, par exemple). */
-    if(champ) return;
+       « .jpg » quand c est une adresse (« / » ou « : »). Un nom de fichier
+       NU, lui, n est jamais une caption : c est une capture dont seul le
+       nom est arrive. */
+    var nomNu=noms && texte.indexOf('/')<0 && texte.indexOf(':')<0;
+    if(champ && !nomNu) return;
     if(noms){
       /* Seul le NOM du fichier est arrive : le dire, plutot que de coller ce
          nom dans une caption ou de ne rien faire sans un mot. */
@@ -8289,13 +8292,14 @@ document.addEventListener('paste', function(ev){
   }
   /* Des cellules copiees depuis Excel ou Numbers arrivent en texte ET en
      image : collees dans un champ, c est le texte qu on veut, pas une
-     capture de ces cellules. Leur image est un simple dessin, que Chrome
-     nomme toujours « image.png ». Des fichiers portant un vrai nom viennent
-     du Finder ou de Photos : ce sont eux qu on veut lire, meme si le texte
-     joint (leurs noms) n a pas d extension, quand le Mac masque les
-     extensions. */
-  var vraisFichiers=files.some(function(f){ return f.name && f.name!=='image.png'; });
-  if(texte && !noms && !vraisFichiers && champ) return;
+     capture de ces cellules. Mais quand ce texte n est que la liste des NOMS
+     des fichiers colles (Finder, extensions masquees sur le Mac), ce sont
+     les images qu on veut lire. */
+  var nomsDuTexte=files.every(function(f){
+    var n=String(f.name||''), q=n.lastIndexOf('.'), base=(q>0?n.slice(0,q):n).trim();
+    return base && texte.indexOf(base)>=0;
+  });
+  if(texte && !noms && !nomsDuTexte && champ) return;
   ev.preventDefault();
   if(!ouverte && formAjout){ capAddCaptures(files); return; }
   if(!ouverte) capOcrOpen();
@@ -8575,8 +8579,15 @@ function capAddClose(force){
   var m=document.getElementById('cap-add-modal'); if(!m) return;
   // Fermer pendant une lecture perdait son texte sans un mot (le prochain
   // « Add captions » repart d une liste vide).
-  if(!force && document.querySelector('#capAddList .capadd-ta[data-capocr]')
-     && !confirm('Des captures sont encore en lecture : fermer quand même ? Leur texte sera perdu.')) return;
+  if(!force){
+    var enLecture=!!document.querySelector('#capAddList .capadd-ta[data-capocr]'), ecrites=0;
+    document.querySelectorAll('#capAddList .capadd-ta').forEach(function(x){ if(String(x.value||'').trim()) ecrites++; });
+    // un clic a cote du formulaire (ou une selection de texte relachee
+    // dessus) le fermait : les captions lues des captures etaient perdues
+    if((enLecture || ecrites) && !confirm(enLecture
+        ? 'Des captures sont encore en lecture : fermer quand même ? Leur texte sera perdu.'
+        : 'Fermer sans ajouter ? '+ecrites+' caption'+(ecrites>1?'s':'')+' non ajoutée'+(ecrites>1?'s':'')+(ecrites>1?' seront':' sera')+' perdue'+(ecrites>1?'s':'')+'.')) return;
+  }
   m.style.display='none';
   // les captures pas encore parties ne partent plus (quota Gemini)
   if(typeof capAddOcr!=='undefined') capAddOcr.file=[];
@@ -8652,7 +8663,10 @@ function capAddCaptures(files){
     if(!capEstImage(f)){ ignores++; continue; }
     var ta=null;
     document.querySelectorAll('#capAddList .capadd-ta').forEach(function(x){
-      if(!ta && !String(x.value||'').trim() && !x.dataset.capocr) ta=x;
+      // un champ vide dont la capture a echoue garde sa ligne rouge : on ne
+      // le reprend pas, sinon on ne savait plus laquelle avait echoue
+      var w0=x.closest('.capadd-wrap');
+      if(!ta && !String(x.value||'').trim() && !x.dataset.capocr && !(w0 && w0.querySelector('.capadd-ocr'))) ta=x;
     });
     if(!ta) ta=capAddField(false);
     if(!ta) continue;
@@ -8670,6 +8684,11 @@ function capAddCaptures(files){
     var ancienne=wrap&&wrap.querySelector('.capadd-ocr'); if(ancienne) ancienne.remove();
     if(wd) wd.parentNode.insertBefore(info, wd.nextSibling); else ta.parentNode.appendChild(info);
     capAddOcr.file.push({f:f, ta:ta, info:info, wd:wd}); n++;
+    // la liste defile dans le formulaire : sans ca, une capture collee sous
+    // trois captions remplissait un champ hors de vue. Le bloc entier (champ
+    // et ligne d info), une fois construit.
+    var bloc=wrap||ta;
+    if(n===1 && bloc.scrollIntoView) try{ bloc.scrollIntoView({block:'nearest'}); }catch(e){}
   }
   if(typeof showToast==='function'){
     if(!n) showToast('Aucune image parmi ces fichiers','warning');
@@ -8715,7 +8734,7 @@ async function capAddOcrLire(j){
       j.info.style.color='#8b8b95';
     }else{
       j.info.textContent=nom+(etat==='vide'?' — aucun texte lu : écris-le à la main, ou laisse vide':' — échec de la lecture')+(note?' : '+note:'');
-      j.info.style.color='#ef4444';
+      j.info.style.color='#ef4444'; j.info.classList.add('capadd-ocr-ko');
     }
     // (h) tous les champs sont revus : deux lectures paralleles du meme texte
     // finissent dans n importe quel ordre
@@ -14611,6 +14630,10 @@ body.light #capocr-drop span,body.light #capocr-etat,body.light #capocr-cibles,b
 /* 100000 : au-dessus du formulaire Add captions et de l editeur de captions
    (99999) ; a egalite, la fenetre ouverte par un collage restait DERRIERE eux. */
 #capocr-modal .capocr-meta{color:#9a9aa6}
+/* ligne d une capture dans Add captions : sa couleur est posee en ligne, le
+   theme clair la remplace (3,4:1 seulement sur fond blanc) */
+body.light #cap-add-modal .capadd-ocr{color:#4b5563!important}
+body.light #cap-add-modal .capadd-ocr.capadd-ocr-ko{color:#dc2626!important}
 #capocr-modal .capocr-meta.capocr-alerte,body.light #capocr-modal .capocr-meta.capocr-alerte{color:#dc2626!important}
 </style>
 <div id="capocr-modal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.78);align-items:center;justify-content:center;padding:20px" onclick="capOcrClose()" ondragover="event.preventDefault()" ondrop="event.preventDefault()">

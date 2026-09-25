@@ -15482,6 +15482,8 @@ r.excel      = coller({ajout:1,onglet:1},[img],'a'+TAB+'b',champ);
 r.texte      = coller({ajout:1,onglet:1},[],'une caption',champ);
 r.nomSeul    = coller({onglet:1},[],'IMG_2041.HEIC',corps);
 r.urlChamp   = coller({ajout:1,onglet:1},[],'https://x.com/p.jpg',champ);
+r.nomChamp   = coller({ajout:1,onglet:1},[],'Capture d’écran 2026-09-25 à 16.20.11.png',champ);
+r.excelNomme = coller({ajout:1,onglet:1},[{type:'image/png', name:'Image.png'}],'pov a'+TAB+'pov b',champ);
 r.sansImage  = coller({onglet:1},[],'https://instagram.com/p/x',corps);
 r.sansImageChamp = coller({capocr:1,onglet:1},[],'une correction',champ);
 r.autreOnglet= coller({},[img],null,corps);
@@ -15490,9 +15492,10 @@ r.ecouteurs  = (ecouteurs.paste||[]).length;
 console.log(JSON.stringify(r));
 """
 _DOM_FORMULAIRE = r"""
-var appels=[], toasts=[], enVol=0, maxVol=0, partis=0;
+var appels=[], toasts=[], enVol=0, maxVol=0, partis=0, defile=0;
 function FEl(tag, cls){ this.tagName=tag; this.className=cls||''; this.children=[]; this.parentNode=null;
-  this.dataset={}; this.style={}; this.value=''; this.placeholder=''; this.readOnly=false; this.textContent=''; }
+  this.dataset={}; this.style={}; this.value=''; this.placeholder=''; this.readOnly=false; this.textContent='';
+  var soi=this; this.classes=[]; this.classList={add:function(c){ soi.classes.push(c); }}; this.scrollIntoView=function(){ defile++; }; }
 FEl.prototype.appendChild=function(c){ c.parentNode=this; this.children.push(c); return c; };
 FEl.prototype.insertBefore=function(c, ref){ c.parentNode=this; var i=ref?this.children.indexOf(ref):-1;
   if(i<0) this.children.push(c); else this.children.splice(i,0,c); return c; };
@@ -15540,7 +15543,11 @@ _SCENARIOS_FORMULAIRE = r"""
   var f=img('b.png'); f.illisible=true;
   capAddCaptures([f]); await attendre(40);
   var w=liste.children[liste.children.length-1], info=w.querySelector('.capadd-ocr');
-  r.illisible={info:info.textContent, rouge:info.style.color==='#ef4444'};
+  r.illisible={info:info.textContent, rouge:info.style.color==='#ef4444' && info.classes.indexOf('capadd-ocr-ko')>=0};
+  var nChamps=liste.children.length; capAddCaptures([img('a.png')]); await attendre(30);
+  r.echecGarde={nouveauChamp: liste.children.length===nChamps+1,
+    ligneRestee: (w.querySelector('.capadd-ocr')||{}).textContent===info.textContent};
+  r.defile=defile>0;
   // la fenetre des captures lit deja une image : il ne reste qu une place
   capOcr.actifs=1; maxVol=0;
   capAddCaptures([img('c.png'), img('d.png'), img('e.png')]); await attendre(80);
@@ -15570,7 +15577,7 @@ try:
     _sCl = _uCl[_uCl.find("function capAddSubmit("):]
     check("coller : envoyer pendant une lecture demande confirmation (pas de caption perdue)",
           "capadd-ta[data-capocr]" in _sCl[:900] and "confirm(" in _sCl[:900])
-    _fermCl = _uCl[_uCl.find("function capAddClose("):][:700]
+    _fermCl = _uCl[_uCl.find("function capAddClose("):][:1600]
     check("coller : fermer le formulaire pendant une lecture demande confirmation et vide la file",
           "capadd-ta[data-capocr]" in _fermCl and "confirm(" in _fermCl and "capAddOcr.file=[]" in _fermCl)
     if 0 <= _dCl < _fCl:
@@ -15601,6 +15608,10 @@ try:
                   _oCl.get("excel") == "laisse", _dbg)
             check("coller : un texte seul n est jamais intercepte (meme une adresse .jpg)",
                   _oCl.get("texte") == "laisse" and _oCl.get("urlChamp") == "laisse", _dbg)
+            check("coller : un nom de fichier NU colle dans un champ n y est pas ecrit (message)",
+                  _oCl.get("nomChamp") == "pris toast:warning,signal:noms seuls", _dbg)
+            check("coller : Excel dont l image a un autre nom (Safari) reste un collage de texte",
+                  _oCl.get("excelNomme") == "laisse", _dbg)
             check("coller : seul le NOM du fichier -> message, et rien d ecrit dans la caption",
                   _oCl.get("nomSeul") == "pris capOcrOpen,toast:warning,signal:noms seuls", _dbg)
             check("coller : pas d image hors d un champ -> un message et une trace, plus de silence",
@@ -15642,6 +15653,9 @@ try:
         check("formulaire : un fichier illisible dit pourquoi, en rouge",
               "échec de la lecture : ILLISIBLE" in (_oF.get("illisible") or {}).get("info", "")
               and (_oF.get("illisible") or {}).get("rouge") is True, _dbF)
+        check("formulaire : un champ en echec garde sa ligne (la capture suivante prend un autre champ)",
+              _oF.get("echecGarde") == {"nouveauChamp": True, "ligneRestee": True}, _dbF)
+        check("formulaire : le champ rempli est amene a l ecran", _oF.get("defile") is True, _dbF)
         check("formulaire : jamais plus de 2 lectures a la fois, fenetre des captures comprise",
               _oF.get("maxSimultanees") == 2, _dbF)   # 1 dans la fenetre + 1 ici ; 3 sans limite commune
         check("formulaire : apres reouverture, les captures de l ancien formulaire ne partent plus",
