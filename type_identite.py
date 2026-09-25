@@ -42,6 +42,18 @@ liste trop longue, le temps qu'il fasse le tri.
 Les entrees de la Bibliotheque 2 (prefixe v2_) ne sont JAMAIS des modeles :
 leur propre commentaire dans web_upload.py dit qu'elles sont « invisibles de
 la Bibliotheque, des menus Discord, de la rotation des VAs et du Jailbreak ».
+
+UNE TROISIEME NATURE : LA RESERVE (25/09/2026)
+
+  - une RESERVE : du contenu PARTAGE par plusieurs modeles (ex. « Blonde » :
+    PP, bios, stories, story CTA, posts, captions, templates, flash). Jamais
+    de video brute. Comme une identite, elle n'est pas une modele (ni
+    Jailbreak, ni scrape, ni rotation des VA) ; a la difference d'une
+    identite, son MARCHE compte (bios FR ou US) et elle alimente le menu
+    « ✨ General » des modeles qui y sont liees.
+
+Elle a son propre nom, et pas « identite generale », a la demande du
+proprietaire : les deux doivent se distinguer d'un coup d'oeil.
 """
 from __future__ import annotations
 
@@ -53,6 +65,9 @@ FICHIER = Path("data") / "identity_type.json"
 
 MODELE = "modele"
 IDENTITE = "identite"
+RESERVE = "reserve"
+#: Les seules valeurs que le fichier peut porter.
+NATURES = (MODELE, IDENTITE, RESERVE)
 
 #: Prefixe technique de la Bibliotheque 2. Recopie ici plutot qu'importe :
 #: web_upload importe ce module, l'inverse creerait un cycle.
@@ -94,7 +109,7 @@ def _table() -> dict:
 
 
 def de(identity: str) -> str:
-    """« modele » ou « identite ». Jamais autre chose."""
+    """« modele », « identite » ou « reserve ». Jamais autre chose."""
     idl = (identity or "").strip().lower()
     if not idl:
         return IDENTITE
@@ -103,7 +118,7 @@ def de(identity: str) -> str:
     if idl.startswith(_PREFIXE_V2):
         return IDENTITE
     v = _table().get(idl)
-    if v in (MODELE, IDENTITE):
+    if v in NATURES:
         return v
     return MODELE
 
@@ -112,12 +127,16 @@ def est_modele(identity: str) -> bool:
     return de(identity) == MODELE
 
 
+def est_reserve(identity: str) -> bool:
+    return de(identity) == RESERVE
+
+
 def choisi(identity: str) -> bool:
     """Le proprietaire a-t-il tranche pour celle-ci, ou est-ce encore le repli ?
 
     Sert a l'ecran : on ne presente pas une valeur devinee comme un choix.
     """
-    return _table().get((identity or "").strip().lower()) in (MODELE, IDENTITE)
+    return _table().get((identity or "").strip().lower()) in NATURES
 
 
 def verrouillee(identity: str) -> bool:
@@ -132,7 +151,8 @@ def definir(identity: str, valeur: str) -> bool:
     if idl in TOUJOURS_MODELE and str(valeur).strip().lower() != MODELE:
         return False
     d = dict(_table())
-    d[idl] = MODELE if str(valeur).strip().lower() == MODELE else IDENTITE
+    v = str(valeur).strip().lower()
+    d[idl] = v if v in NATURES else IDENTITE
     FICHIER.parent.mkdir(parents=True, exist_ok=True)
     safe_json.write(FICHIER, d)
     _CACHE.update(sig=None, data={})
@@ -148,3 +168,8 @@ def filtrer_modeles(identites) -> list:
     exactement ce qui se passait avant.
     """
     return [i for i in (identites or []) if est_modele(i)]
+
+
+def filtrer_reserves(identites) -> list:
+    """Ne garde que les reserves, dans l'ordre recu."""
+    return [i for i in (identites or []) if est_reserve(i)]

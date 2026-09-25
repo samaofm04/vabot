@@ -144,6 +144,7 @@ ACTIONS = {
 # --- Formulaires ------------------------------------------------------------
 FORMS = {
     "Identité": "Identity",
+    "Réserve": "Reserve",
     "Identités": "Identities",
     "Nom de l'identité": "Identity name",
     "Nom affiché": "Display name",

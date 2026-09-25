@@ -9777,7 +9777,7 @@ function identEditType(v){
      echouera. */
   if(identEditCtx.typelock) v = 'modele';
   identEditCtx.type = v;
-  [['modele','ident-edit-modele'],['identite','ident-edit-identite']].forEach(function(p){
+  [['modele','ident-edit-modele'],['identite','ident-edit-identite'],['reserve','ident-edit-reserve']].forEach(function(p){
     var b=document.getElementById(p[1]); if(!b) return;
     var on = (p[0] === v);
     b.style.borderColor = on ? '#a855f7' : '#34343a';
@@ -9787,16 +9787,17 @@ function identEditType(v){
   /* Le marche ne veut rien dire pour un dossier de montage : on le grise
      plutot que de le retirer, pour que son reglage reste visible si on
      repasse en modele. */
+  /* Une RESERVE, elle, a un marche qui compte (bios FR ou US) : il reste net. */
   ['ident-edit-fr','ident-edit-us'].forEach(function(id){
     var b=document.getElementById(id); if(!b) return;
-    b.style.opacity = (v === 'modele') ? '1' : '.45';
+    b.style.opacity = (v === 'modele' || v === 'reserve') ? '1' : '.45';
   });
-  var bi=document.getElementById('ident-edit-identite');
-  if(bi){
+  ['ident-edit-identite','ident-edit-reserve'].forEach(function(id){
+    var bi=document.getElementById(id); if(!bi) return;
     bi.disabled = !!identEditCtx.typelock;
     bi.style.opacity = identEditCtx.typelock ? '.35' : '1';
     bi.style.cursor  = identEditCtx.typelock ? 'not-allowed' : 'pointer';
-  }
+  });
   var h=document.getElementById('ident-edit-thint');
   if(identEditCtx.typelock){
     if(h) h.textContent = "Celle-ci reste une modèle : elle sert de source au menu US.";
@@ -9804,6 +9805,8 @@ function identEditType(v){
   }
   if(h) h.textContent = (v === 'modele')
     ? "Mod\u00e8le : une cr\u00e9atrice r\u00e9elle. Elle appara\u00eet dans Jailbreak, dans le p\u00e9rim\u00e8tre de scrape et dans les menus des VA."
+    : (v === 'reserve')
+    ? "R\u00e9serve : du contenu partag\u00e9 par plusieurs mod\u00e8les (PP, bios, stories, story CTA, posts, captions, templates, flash), jamais de vid\u00e9o brute. Elle reste dans la Biblioth\u00e8que, n'est pas une mod\u00e8le, et son march\u00e9 compte."
     : "Identit\u00e9 : un dossier pour produire des vid\u00e9os. Elle reste dans la Biblioth\u00e8que, et dispara\u00eet de Jailbreak, du scrape et des menus VA.";
 }
 function identEditMarket(v){
@@ -10025,7 +10028,7 @@ setInterval(function(){
 function identNewType(v, auto){
   identNewCtx.type=v;
   if(!auto) identNewCtx.typeTouche=true;   /* un clic du proprietaire l emporte sur le lien */
-  [['identite','ident-new-t-identite'],['modele','ident-new-t-modele']].forEach(function(p){
+  [['identite','ident-new-t-identite'],['modele','ident-new-t-modele'],['reserve','ident-new-t-reserve']].forEach(function(p){
     var b=document.getElementById(p[1]); if(!b) return;
     if(p[0]===v) b.classList.add('on'); else b.classList.remove('on');
   });
@@ -14184,6 +14187,7 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
       <div class="ie-duo">
         <button type="button" id="ident-edit-modele" class="ie-btn" onclick="identEditType('modele')"><svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' style='flex-shrink:0'><path d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'/><circle cx='12' cy='7' r='4'/></svg> Mod&egrave;le</button>
         <button type="button" id="ident-edit-identite" class="ie-btn" onclick="identEditType('identite')"><svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' style='flex-shrink:0'><path d='M3 7.5h18v12a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 19.5z'/><path d='M3 7.5 5.4 3h13.2L21 7.5'/><path d='M8.4 3 10.8 7.5'/><path d='M14.4 3l2.4 4.5'/></svg> Identit&eacute;</button>
+        <button type="button" id="ident-edit-reserve" class="ie-btn" onclick="identEditType('reserve')"><svg viewBox='0 0 24 24' width='15' height='15' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' style='flex-shrink:0'><path d='M12 2 2 7l10 5 10-5-10-5z'/><path d='M2 17l10 5 10-5'/><path d='M2 12l10 5 10-5'/></svg> R&eacute;serve</button>
       </div>
       <div id="ident-edit-thint" class="ie-hint"></div>
     </div>
@@ -14304,6 +14308,7 @@ body.light #pf-modal .pf-card img{background:#eceff3!important}
     <div style="display:flex;gap:8px">
       <button type="button" id="ident-new-t-identite" class="ident-new-t" onclick="identNewType('identite')" style="flex:1;border-radius:9px;padding:8px;font-size:12.5px;cursor:pointer;font-family:inherit">Identité</button>
       <button type="button" id="ident-new-t-modele" class="ident-new-t" onclick="identNewType('modele')" style="flex:1;border-radius:9px;padding:8px;font-size:12.5px;cursor:pointer;font-family:inherit">Modèle</button>
+      <button type="button" id="ident-new-t-reserve" class="ident-new-t" onclick="identNewType('reserve')" title="Contenu partagé par plusieurs modèles (ex. Blonde) — jamais de vidéo brute" style="flex:1;border-radius:9px;padding:8px;font-size:12.5px;cursor:pointer;font-family:inherit">Réserve</button>
     </div>
     <label style="font-size:12px;color:#c4c4cc;display:flex;flex-direction:column;gap:6px">Photo de profil (optionnel)
       <input id="ident-new-avatar" type="file" accept="image/png,image/jpeg,image/webp" style="font-size:12px;color:#9a9aa6">
@@ -15078,7 +15083,9 @@ import type_identite as _type_mod
 
 
 def _type_identite(ident) -> str:
-    """« modele » ou « identite ». Un seul point de lecture dans tout le site."""
+    """« modele », « identite » ou « reserve ». Un seul point de lecture dans
+    tout le site. Une reserve n est pas une modele : tout ce qui filtre sur
+    « modele » la laisse dehors, comme une identite."""
     try:
         return _type_mod.de(ident)
     except Exception:
@@ -15281,9 +15288,23 @@ def _style_badges_html(ident: str, taille: int = 12) -> str:
     Volontairement en emoji et pas en SVG — contrairement au drapeau, qui lui
     n'a pas le choix (Windows n'a pas de police de drapeaux). Ceux-la sont
     dessines par toutes les plateformes."""
+    # UNE RESERVE SE VOIT DANS LA LISTE : sans marque, rien ne la distingue
+    # d une modele au moment de ranger du contenu — « ca va faire un
+    # bourbier », disait le proprietaire. Meme endroit que les styles, donc
+    # rendu serveur ET rafraichissement client (/identity/styles) d un coup.
+    _res = ""
+    if _type_identite(ident) == "reserve":
+        _res = (f"<span title='Réserve : contenu partagé par plusieurs modèles' "
+                f"style='display:inline-flex;align-items:center;gap:3px;margin-left:4px;padding:0 5px;"
+                f"border-radius:6px;background:rgba(20,184,166,.14);color:#2dd4bf;"
+                f"font-size:{max(9, taille - 2)}px;font-weight:700;line-height:1.5'>"
+                f"<svg viewBox='0 0 24 24' width='{taille}' height='{taille}' fill='none' stroke='currentColor' "
+                f"stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
+                f"<path d='M12 2 2 7l10 5 10-5-10-5z'/><path d='M2 17l10 5 10-5'/><path d='M2 12l10 5 10-5'/></svg>"
+                f"Réserve</span>")
     poses = identity_styles(ident)
     if not poses:
-        return ""
+        return _res
     par_cle = {c: (e, lab, coul, titre) for c, e, lab, coul, titre in _STYLES}
     bouts = []
     for c in poses:
@@ -15304,7 +15325,7 @@ def _style_badges_html(ident: str, taille: int = 12) -> str:
             f"<span title='{html_escape(lab)} — {html_escape(titre)}' "
             f"style='display:inline-flex;line-height:1'>{_corps}</span>"
         )
-    return (f"<span class='ident-styles' data-styles='{','.join(poses)}' "
+    return (_res + f"<span class='ident-styles' data-styles='{','.join(poses)}' "
             f"style='display:inline-flex;align-items:center;gap:2px;flex-shrink:0'>"
             + "".join(bouts) + "</span>")
 
@@ -55250,7 +55271,7 @@ def create_app():
         # serveur, parce que le navigateur peut ne pas avoir reconnu le lien.
         if social and not request.form.get("type_choisi"):
             _type = "identite"
-        if _type in ("modele", "identite") and not safe.startswith(V2_PREFIX):
+        if _type in ("modele", "identite", "reserve") and not safe.startswith(V2_PREFIX):
             try:
                 import type_identite as _ti
                 if not _ti.definir(safe, _type):
@@ -55463,6 +55484,10 @@ def create_app():
         connues = set(_list_identities())
         change, refuses = 0, []
         for nom in sorted(connues):
+            # Le tri en masse ne coche que des MODELES : une reserve non cochee
+            # reste une reserve, elle ne retombe pas en simple identite.
+            if nom not in modeles and _ti.est_reserve(nom):
+                continue
             veut = "modele" if nom in modeles else "identite"
             if _ti.verrouillee(nom) and veut != "modele":
                 refuses.append(nom)
@@ -55501,7 +55526,7 @@ def create_app():
             return jsonify({"ok": False, "error": "unauth"}), 401
         ident = (request.form.get("identity") or "").strip().lower()
         valeur = (request.form.get("type") or "").strip().lower()
-        if valeur not in ("modele", "identite"):
+        if valeur not in ("modele", "identite", "reserve"):
             return jsonify({"ok": False, "error": "type inconnu"})
         import type_identite as _ti
         # LE VERROU SE LIT AVANT L'EXISTENCE, et ce n'est pas un detail :

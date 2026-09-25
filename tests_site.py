@@ -6604,6 +6604,33 @@ try:
             check("nature : la route explique le verrou au lieu de refuser en silence",
                   _jT3.get("ok") is not True and "menu US" in str(_jT3.get("error")),
                   str(_jT3)[:110])
+            # LA RESERVE (3e nature) : contenu partage, jamais une modele
+            _savListeT = _wT._list_identities
+            _wT._list_identities = lambda: ["zzz_blonde", "zzz_a", "zzz_b"]
+            try:
+                _jR = (_cT.post("/identity/type",
+                                data={"identity": "zzz_blonde", "type": "reserve"}).get_json() or {})
+                check("reserve : la route l accepte", _jR.get("ok") is True, str(_jR)[:110])
+                check("reserve : elle est choisie, pas une modele, bien une reserve",
+                      _tiT.de("zzz_blonde") == "reserve" and _tiT.choisi("zzz_blonde")
+                      and not _tiT.est_modele("zzz_blonde") and _tiT.est_reserve("zzz_blonde"))
+                check("reserve : hors de toute liste de modeles",
+                      _tiT.filtrer_modeles(["zzz_blonde", "zzz_a"]) == ["zzz_a"]
+                      and _tiT.filtrer_reserves(["zzz_blonde", "zzz_a"]) == ["zzz_blonde"])
+                _cT.post("/identity/types", data={"modeles": '["zzz_a"]'})
+                check("reserve : le tri en masse (modeles coches) ne la rabaisse pas en identite",
+                      _tiT.de("zzz_blonde") == "reserve" and _tiT.de("zzz_b") == "identite")
+                check("reserve : jessye ne peut pas en devenir une",
+                      _tiT.definir("jessye", "reserve") is False and _tiT.de("jessye") == "modele")
+                check("reserve : la marque « Réserve » s affiche a cote du nom",
+                      "Réserve" in _wT._style_badges_html("zzz_blonde", 11)
+                      and "Réserve" not in _wT._style_badges_html("zzz_a", 11))
+                _homeR = _cT.get("/").get_data(as_text=True)
+                check("reserve : 3e choix dans « Modifier » et a la creation",
+                      'id="ident-edit-reserve"' in _homeR and 'id="ident-new-t-reserve"' in _homeR
+                      and "['reserve','ident-edit-reserve']" in _homeR)
+            finally:
+                _wT._list_identities = _savListeT
         finally:
             _wT._load_web_users = _svT
     finally:
