@@ -383,9 +383,9 @@ if _demo_v2_dispo():
             for cle in ("name", "pseudo", "pp", "bio"):
                 r0.add_item(_DemoBouton(self, cle, _demo_libelle(cle)))
             boite.add_item(r0)
+            # Pas de « ⭐⭐⭐ Trends » : le proprietaire l'a retire le 25/09/2026,
+            # la fonction n'est « pas encore good ».
             r1 = ui.ActionRow()
-            r1.add_item(_DemoBouton(self, "trend", _demo_libelle("trend"),
-                                    discord.ButtonStyle.success))
             for cle in ("story", "storycta", "post"):
                 r1.add_item(_DemoBouton(self, cle, _demo_libelle(cle)))
             boite.add_item(r1)
