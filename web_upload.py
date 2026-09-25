@@ -9532,13 +9532,137 @@ document.addEventListener('click', function(ev){
   identNewCtx.vtab=b.getAttribute('data-vtab')||'';
   identNewCtx.ikey=b.getAttribute('data-ikey')||'';
   var n=document.getElementById('ident-new-name'); if(n) n.value='';
+  var lk=document.getElementById('ident-new-link'); if(lk) lk.value='';
+  identNewCtx.auto=''; identNewCtx.typeTouche=false; identNewLink('');
+  identNewType('modele', true);
   var a=document.getElementById('ident-new-avatar'); if(a) a.value='';
   var e=document.getElementById('ident-new-err'); if(e) e.textContent='';
   var g=document.getElementById('ident-new-go'); if(g){ g.disabled=false; g.textContent='Créer'; }
   var m=document.getElementById('ident-new-modal'); if(m) m.style.display='flex';
-  if(n) setTimeout(function(){ n.focus(); },60);
+  /* Le lien d abord : c est lui qui remplit le nom. */
+  if(lk) setTimeout(function(){ lk.focus(); },60);
 });
 function identNewClose(){ var m=document.getElementById('ident-new-modal'); if(m) m.style.display='none'; }
+/* Lien colle : la plateforme se deduit du lien (TikTok ou Instagram) et
+   le nom du dossier devient le username. Sans expression reguliere : ce
+   script vit dans une chaine Python, et une barre oblique inverse y change
+   de sens. Meme regle que le serveur (vault_social.analyser_lien). */
+var IDENT_INSTA_PAS_COMPTE=['p','reel','reels','tv','stories','explore','accounts','direct','about','legal'];
+function identNewLink(v){
+  var s=String(v||'').trim().toLowerCase(), u='', plat='', i=s.indexOf('tiktok.com/@'), j=s.indexOf('instagram.com/');
+  if(i>=0){ u=s.slice(i+12); plat='TikTok'; }
+  else if(j>=0){ u=s.slice(j+14); plat='Instagram'; }
+  var ok='abcdefghijklmnopqrstuvwxyz0123456789_.', out='';
+  for(var k=0;k<u.length;k++){ var c=u.charAt(k); if(ok.indexOf(c)<0) break; out+=c; }
+  if(plat==='Instagram' && IDENT_INSTA_PAS_COMPTE.indexOf(out)>=0) out='';
+  var box=document.getElementById('ident-new-social');
+  if(box) box.style.display=out?'flex':'none';
+  var pl=document.getElementById('ident-new-plat');
+  if(pl) pl.textContent=out?(plat+' @'+out):'';
+  var n=document.getElementById('ident-new-name');
+  if(!out){
+    /* Lien efface : on rend ce que le lien avait pose, pas plus. */
+    if(n && identNewCtx.auto && n.value===identNewCtx.auto) n.value='';
+    identNewCtx.auto='';
+    if(!identNewCtx.typeTouche) identNewType('modele', true);
+    return;
+  }
+  var nom=out.split('.').join('_').slice(0,30);
+  /* On ne remplace le nom que s il vient de nous : un nom tape a la main
+     ne doit pas etre ecrase par une retouche du lien. */
+  if(n && (!n.value || n.value===identNewCtx.auto)){ n.value=nom; identNewCtx.auto=nom; }
+  if(!identNewCtx.typeTouche) identNewType('identite', true);
+}
+/* ---- Profil TikTok branche sur un dossier (vault_social.py) ---- */
+async function vsPost(fd){
+  var r=await fetch('/identity/social',{method:'POST',body:fd,credentials:'same-origin'});
+  var j={}; try{ j=await r.json(); }catch(e){ j={ok:false,error:'Erreur '+r.status}; }
+  if(!(j&&j.ok) && typeof showToast==='function') showToast((j&&j.error)||('Erreur '+r.status),'error');
+  return j;
+}
+async function vsRelire(ident, btn){
+  var fd=new FormData(); fd.set('identity',ident); fd.set('action','relire');
+  if(btn) btn.disabled=true;
+  var j=await vsPost(fd);
+  if(btn) btn.disabled=false;
+  if(j&&j.ok){ if(typeof showToast==='function') showToast(j.message||'Relecture du profil lancée','success'); vsSuivre(ident); }
+}
+async function vsSeuil(ident, champ){
+  /* Champ vide ou illisible : rien n part. Envoyer 0 a sa place faisait
+     descendre TOUT le profil (chaque video a au moins 0 vue). */
+  var v=String((champ&&champ.value)||'').trim();
+  if(!v || isNaN(Number(v)) || Number(v)<0){
+    if(typeof showToast==='function') showToast('Vues minimum : un nombre, 0 ou plus','error');
+    if(champ) champ.value=champ.defaultValue;
+    return;
+  }
+  var fd=new FormData(); fd.set('identity',ident); fd.set('action','seuil'); fd.set('seuil',String(Math.floor(Number(v))));
+  var j=await vsPost(fd);
+  if(j&&j.ok){
+    if(champ) champ.defaultValue=champ.value;
+    if(typeof showToast==='function') showToast(j.message||'Seuil enregistré — relecture lancée','success');
+    vsSuivre(ident);
+  }else if(champ){ champ.value=champ.defaultValue; }
+}
+/* Le bandeau de CE dossier, dans la section a l ecran. Les Reels des deux
+   bibliotheques restent dans la page (masquees) : prendre le premier
+   bandeau venu suivait parfois celui d une section cachee. */
+function vsBandeau(ident){
+  var l=document.querySelectorAll('[data-vs-etat]');
+  for(var k=0;k<l.length;k++){
+    if(l[k].getAttribute('data-vs-etat')===ident && l[k].offsetParent!==null) return l[k];
+  }
+  return null;
+}
+/* Suit l import d UN dossier. A la fin, seule la galerie est rechargee, et
+   seulement si ce dossier est encore a l ecran : recharger toute la page
+   coupait les televersements en cours et les saisies des autres onglets.
+   Si on a change de dossier entre-temps, le suivi s arrete sans rien
+   recharger. */
+window.__vsSuivis = window.__vsSuivis || {};
+function vsSuivre(ident){
+  if(!ident || window.__vsSuivis[ident]) return;
+  var vu=false;
+  var stop=function(){ clearInterval(window.__vsSuivis[ident]); delete window.__vsSuivis[ident]; };
+  window.__vsSuivis[ident]=setInterval(async function(){
+    var box=vsBandeau(ident);
+    if(!box){ stop(); return; }
+    var out=box.querySelector('[data-vs-prog]');
+    try{
+      var r=await fetch('/identity/social_etat?identity='+encodeURIComponent(ident),{credentials:'same-origin'});
+      var j=await r.json(), p=j&&j.progression;
+      if(p){
+        vu=true;
+        if(out) out.textContent=p.total?(p.etape+' '+p.fait+' / '+p.total):(p.etape+'…');
+      }else{
+        stop();
+        if(out) out.textContent='';
+        if(vu && vsBandeau(ident) && typeof vaultGoTo==='function'){
+          vaultGoTo({preventDefault:function(){}}, location.pathname+location.search);
+        }
+      }
+    }catch(e){}
+  }, 3000);
+}
+/* La galerie est remplacee par vaultGoTo sans recharger la page : un
+   DOMContentLoaded ne verrait que la premiere. On regarde donc toutes les
+   5 s si un bandeau neuf est a l ecran, et on interroge le serveur. */
+setInterval(function(){
+  var l=document.querySelectorAll('[data-vs-etat]:not([data-vs-vu])');
+  for(var k=0;k<l.length;k++){
+    if(l[k].offsetParent===null) continue;
+    l[k].setAttribute('data-vs-vu','1');
+    vsSuivre(l[k].getAttribute('data-vs-etat'));
+  }
+}, 5000);
+function identNewType(v, auto){
+  identNewCtx.type=v;
+  if(!auto) identNewCtx.typeTouche=true;   /* un clic du proprietaire l emporte sur le lien */
+  [['identite','ident-new-t-identite'],['modele','ident-new-t-modele']].forEach(function(p){
+    var b=document.getElementById(p[1]); if(!b) return;
+    if(p[0]===v) b.classList.add('on'); else b.classList.remove('on');
+  });
+}
 async function identNewCreate(){
   var n=document.getElementById('ident-new-name'), err=document.getElementById('ident-new-err'), go=document.getElementById('ident-new-go');
   var name=String((n&&n.value)||'').trim().toLowerCase();
@@ -9548,6 +9672,15 @@ async function identNewCreate(){
   if(String(identNewCtx.vtab||'').indexOf('v2')===0) fd.set('vault2','1');
   var a=document.getElementById('ident-new-avatar');
   if(a&&a.files&&a.files[0]) fd.set('avatar',a.files[0]);
+  var lk=document.getElementById('ident-new-link');
+  if(lk&&String(lk.value||'').trim()){
+    fd.set('social_url',String(lk.value).trim());
+    fd.set('seuil',String((document.getElementById('ident-new-seuil')||{}).value||'10000'));
+  }
+  /* Sans lien et sans clic, rien n est envoye : la creation garde son
+     comportement d avant (le repli de type_identite). */
+  if(identNewCtx.type && (identNewCtx.typeTouche || fd.get('social_url'))) fd.set('type',identNewCtx.type);
+  if(identNewCtx.typeTouche) fd.set('type_choisi','1');
   if(go){ go.disabled=true; go.textContent='◌'; }
   try{
     var r=await fetch('/identity/create',{method:'POST',body:fd,credentials:'same-origin'});
@@ -9557,8 +9690,10 @@ async function identNewCreate(){
       if(go){ go.disabled=false; go.textContent='Créer'; }
       return;
     }
-    if(typeof showToast==='function') showToast('✓ Identité @'+String(j.identity||'').replace(/^v2_/,'')+' créée'+(j.warn?(' ('+j.warn+')'):''),'success');
+    if(typeof showToast==='function') showToast('✓ Identité @'+String(j.identity||'').replace(/^v2_/,'')+' créée'+(j.social?' — import des vidéos lancé':'')+(j.warn?(' ('+j.warn+')'):''),j.warn?'info':'success');
     var vt=identNewCtx.vtab||'cloudreels', ik=identNewCtx.ikey||'';
+    /* Les videos arrivent dans les Reels : c est la qu il faut atterrir. */
+    if(j.social){ vt=(String(vt).indexOf('v2')===0)?'v2reels':'cloudreels'; ik='cloud_videos_ident'; }
     // reload complet : toutes les sidebars vault doivent afficher la nouvelle identité
     window.location.href='/?tab='+encodeURIComponent(vt)+(ik?('&'+ik+'='+encodeURIComponent(j.identity)):'');
   }catch(e){
@@ -13772,8 +13907,34 @@ body.light #pf-modal .pf-card img{background:#eceff3!important}
 <div id="ident-new-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center" onclick="identNewClose()">
   <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:20px;width:330px;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
     <div style="font-weight:800;font-size:15px">＋ Nouvelle identité</div>
+    <input id="ident-new-link" type="text" placeholder="Lien TikTok ou Instagram (optionnel)" autocomplete="off"
+           oninput="identNewLink(this.value)"
+           style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:10px;font-size:13px;font-family:inherit;box-sizing:border-box">
+    <div id="ident-new-social" style="display:none;flex-direction:column;gap:6px">
+      <div id="ident-new-plat" style="font-size:12px;font-weight:700;color:#7aa2ff"></div>
+      <label style="font-size:12px;color:#c4c4cc;display:flex;align-items:center;gap:8px">Vues minimum
+        <input id="ident-new-seuil" type="number" min="0" step="1000" value="10000"
+               style="flex:1;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:8px;font-size:13px;font-family:inherit;box-sizing:border-box">
+      </label>
+      <div style="font-size:11px;color:#888;line-height:1.5">Les vidéos au-dessus de ce seuil sont téléchargées dans les Reels du dossier, triées par vues. Relecture du profil toutes les 2 semaines. Le dossier reste hors de la rotation Discord des VA.</div>
+    </div>
     <input id="ident-new-name" type="text" placeholder="nom (lettres, chiffres, _ ou -)" autocomplete="off"
            style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:10px;font-size:13px;font-family:inherit;box-sizing:border-box">
+    <!-- Couleurs par CLASSE, pas en style inline : le JS reecrivait l attribut
+         style au format « rgb(...) », les regles du theme clair (qui lisent
+         « background:#131316 ») ne le reconnaissaient plus et les deux boutons
+         paraissaient inverses. Specificites : 1,1,0 / 1,2,0 en sombre,
+         1,2,1 / 1,3,1 en clair — plus fortes que toute regle generale. -->
+    <style>
+      #ident-new-modal .ident-new-t{border:1px solid #34343a;background:#131316;color:#e6e6ea}
+      #ident-new-modal .ident-new-t.on{border-color:#3b82f6;background:rgba(59,130,246,.14);color:#7aa2ff}
+      body.light #ident-new-modal .ident-new-t{border-color:#d1d5db!important;background:#fff!important;color:#1c1c1e!important}
+      body.light #ident-new-modal .ident-new-t.on{border-color:#3b82f6!important;background:rgba(59,130,246,.12)!important;color:#1d4ed8!important}
+    </style>
+    <div style="display:flex;gap:8px">
+      <button type="button" id="ident-new-t-identite" class="ident-new-t" onclick="identNewType('identite')" style="flex:1;border-radius:9px;padding:8px;font-size:12.5px;cursor:pointer;font-family:inherit">Identité</button>
+      <button type="button" id="ident-new-t-modele" class="ident-new-t" onclick="identNewType('modele')" style="flex:1;border-radius:9px;padding:8px;font-size:12.5px;cursor:pointer;font-family:inherit">Modèle</button>
+    </div>
     <label style="font-size:12px;color:#c4c4cc;display:flex;flex-direction:column;gap:6px">Photo de profil (optionnel)
       <input id="ident-new-avatar" type="file" accept="image/png,image/jpeg,image/webp" style="font-size:12px;color:#9a9aa6">
     </label>
@@ -20827,7 +20988,104 @@ def _va_ready_watermark_uri():
 _VA_READY_WM = _va_ready_watermark_uri()
 
 
-def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "", deferred: bool = False, is_banger: bool = False, is_disabled: bool = False, is_va_ready: bool = False, can_montage: bool = None, a_approuver: bool = False, is_fav_brute: bool = False, is_flash_trend: bool = False) -> str:
+#: Styles du bandeau et du badge de vues. Thème clair : le gris #9a9aa6 et
+#: le #c4c4cc du bouton tombaient à 2,8:1 et 1,7:1 sur le blanc de la galerie.
+#: Spécificité 0,2,2 à 0,2,3 avec !important : passe devant le style inline,
+#: et aucune règle générale ne vise ces couleurs. Le badge remonte au-dessus
+#: de la bande « DISPO VA » (::after, bottom:0, ~20 px) qui le coupait.
+_VS_CSS = (
+    "<style>"
+    "body.light div.vs-bandeau{color:#4b5563!important;border-color:#e5e7eb!important}"
+    "body.light div.vs-bandeau button,body.light div.vs-bandeau input"
+    "{color:#374151!important;border-color:#d1d5db!important}"
+    ".vault-card-bg.va-ready .card-vues-badge{bottom:27px!important}"
+    "</style>")
+
+
+def _vault_social_bandeau(ident: str, src: dict) -> str:
+    """Le bandeau « TikTok @x · ≥ 10 k vues · relu il y a 3 j » d'un dossier.
+
+    Rien sans profil branché. Le JS (vsRelire / vsSeuil) vit dans
+    UPLOAD_HTML ; data-vs-etat
+    fait suivre l'import en cours sans recharger la page.
+    """
+    import html as _h
+    import vault_social as _vs
+    ident_js = _h.escape(ident, quote=True)
+    # Pas de bouton « brancher » sur un dossier existant : sur une modèle qui
+    # a des VA, des centaines de vidéos d'un tiers seraient arrivées dans le
+    # stock où ils piochent au hasard. Un profil se branche à la création.
+    if not src.get("url"):
+        return ""
+    now = time.time()
+
+    def _il_y_a(ts):
+        if not ts:
+            return "jamais"
+        j = int((now - ts) // 86400)
+        return "aujourd'hui" if j <= 0 else ("hier" if j == 1 else f"il y a {j} j")
+
+    prochaine = _vs.prochaine(ident) or 0
+    jp = max(0, int((prochaine - now + 86399) // 86400))
+    b = src.get("bilan") or {}
+    morceaux = []
+    if b:
+        morceaux.append(f"{b.get('deja_la', 0) + b.get('nouvelles', 0)} dans le dossier")
+        if b.get("nouvelles"):
+            morceaux.append(f"{b['nouvelles']} nouvelle(s)")
+        if b.get("sous_seuil"):
+            morceaux.append(f"{b['sous_seuil']} sous le seuil")
+        if b.get("retirees_a_la_main"):
+            morceaux.append(f"{b['retirees_a_la_main']} supprimée(s) par toi, pas reprises")
+        if b.get("vues_inconnues"):
+            morceaux.append(f"{b['vues_inconnues']} sans compteur de vues")
+        if b.get("photos"):
+            morceaux.append(f"{b['photos']} publication(s) photo, non importées")
+        if b.get("echecs"):
+            morceaux.append(f"{b['echecs']} échec(s), retentées à la prochaine relecture")
+        if b.get("abandonnees"):
+            morceaux.append(f"{b['abandonnees']} abandonnée(s) après 3 échecs")
+        morceaux.append(f"{b.get('examinees', 0)} vidéos lues sur le profil")
+    erreur = ""
+    if src.get("statut") == "erreur" and src.get("erreur"):
+        erreur = (f"<div style='color:#f87171;margin-top:4px'>Dernière relecture en échec : "
+                  f"{_h.escape(str(src['erreur']))}</div>")
+    elif src.get("statut") == "en_cours" and _vs.progression(ident) is None:
+        # Relecture coupée par un redémarrage : la file la reprend toute
+        # seule, mais le bandeau ne doit pas faire comme si de rien n'était.
+        erreur = ("<div style='color:#fbbf24;margin-top:4px'>Relecture interrompue "
+                  "(redémarrage) — reprise automatique dans la demi-heure.</div>")
+    seuil = int(src.get("seuil") or 0)
+    return (
+        _VS_CSS
+        + f"<div class='vs-bandeau' data-vs-etat='{ident_js}' style='margin:12px 0 0;padding:10px 12px;border:1px solid #2a2a30;"
+        "border-radius:10px;font-size:12px;color:#9a9aa6;line-height:1.55'>"
+        "<div style='display:flex;align-items:center;gap:10px;flex-wrap:wrap'>"
+        f"<a href='{_h.escape(src['url'], quote=True)}' target='_blank' rel='noopener' "
+        f"style='font-weight:700;color:#7aa2ff;text-decoration:none'>"
+        f"{_vs.LIBELLES.get(src.get('plateforme'), 'TikTok')} @{_h.escape(src.get('username') or '')}</a>"
+        "<span>·</span>"
+        "<label style='display:inline-flex;align-items:center;gap:6px'>vues min."
+        f"<input type='number' min='0' step='1000' value='{seuil}' "
+        f"onchange='vsSeuil(\"{ident_js}\", this)' "
+        "style='width:90px;background:transparent;border:1px solid #34343a;color:inherit;"
+        "border-radius:6px;padding:3px 6px;font-size:12px;font-family:inherit'></label>"
+        "<span>·</span>"
+        f"<span>relu {_il_y_a(src.get('derniere_synchro'))}, "
+        f"{'nouvel essai' if src.get('reessai_le') else 'prochaine relecture'} "
+        f"{'dès que possible' if jp == 0 else f'dans {jp} j'}</span>"
+        "<span style='flex:1'></span>"
+        "<span data-vs-prog style='color:#fbbf24'></span>"
+        f"<button type='button' onclick='vsRelire(\"{ident_js}\", this)' "
+        "style='background:none;border:1px solid #34343a;color:#c4c4cc;border-radius:8px;"
+        "padding:5px 10px;font-size:12px;cursor:pointer;font-family:inherit'>↻ Relire maintenant</button>"
+        "</div>"
+        + (f"<div style='margin-top:4px'>{' · '.join(morceaux)}</div>" if morceaux else "")
+        + erreur
+        + "</div>")
+
+
+def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "", deferred: bool = False, is_banger: bool = False, is_disabled: bool = False, is_va_ready: bool = False, can_montage: bool = None, a_approuver: bool = False, is_fav_brute: bool = False, is_flash_trend: bool = False, vues: int = None) -> str:
     """Carte preview style propre : juste un badge date en haut à gauche + thumbnail
     en grand. Plus de nom de fichier ni de taille en dessous (visible au hover via title).
 
@@ -20871,6 +21129,19 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
             f"box-shadow:0 2px 8px rgba(0,0,0,.2),0 0 0 1px rgba(255,255,255,.4) inset'>{date_short}</div>"
         )
 
+    # Vues TikTok, en bas à gauche. Même habillage que la date (texte sombre
+    # sur fond clair) : un texte blanc en style inline serait assombri par le
+    # thème clair, et posé sur la vignette il deviendrait illisible.
+    vues_badge = ""
+    if isinstance(vues, int):
+        import vault_social as _vs_c
+        vues_badge = (
+            f"<div class='card-date-badge card-vues-badge' title='{str(format(vues, ",")).replace(",", " ")} vues' style='position:absolute;bottom:8px;left:8px;"
+            f"background:rgba(255,255,255,.92);color:#1a1a1a;font-size:11px;font-weight:800;"
+            f"padding:4px 9px;border-radius:6px;backdrop-filter:blur(8px);pointer-events:none;z-index:4;"
+            f"box-shadow:0 2px 8px rgba(0,0,0,.2)'>▶ {_vs_c.format_vues(vues)}</div>"
+        )
+
     _va_cls = " va-ready" if is_va_ready else ""   # filigrane « DISPO VA » via CSS (togglable live)
     # Description reprise du post et pas encore relue : meme mecanique,
     # en ambre. Le proprietaire doit le voir SANS ouvrir la carte.
@@ -20905,6 +21176,7 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
         f"{img_tag}"
         f"{play_badge}"
         f"{date_badge}"
+        f"{vues_badge}"
         f"</div>"
     )
 
@@ -21830,7 +22102,11 @@ async function pushAllReels(form){
     var curTab = new URLSearchParams(window.location.search).get('tab');
     if(curTab === reelsTab){
       setTimeout(function(){
-        window.location.href = '?tab=' + reelsTab + '&' + reelsKey + '=' + encodeURIComponent(identity);
+        /* sort=recent : un dossier branche sur TikTok/Instagram s ouvre trie
+           par vues, et le reel qu on vient d envoyer (sans vues) tombait en
+           dernier, apres des centaines d imports. */
+        window.location.href = '?tab=' + reelsTab + '&' + reelsKey + '=' + encodeURIComponent(identity)
+          + (reelsKey === 'cloud_videos_ident' ? '&cloud_videos_sort=recent' : '');
       }, 900);
     }
   }
@@ -22745,8 +23021,30 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         except Exception:
             pass
 
+    # Vues des vidéos importées d'un profil TikTok (voisins .social.json).
+    # Un dossier branché s'ouvre trié par vues : c'est la raison pour
+    # laquelle on l'a branché ; « Récemment » reste à un clic.
+    _social = {}
+    _vues = {}
+    if subdir == "videos":
+        try:
+            import vault_social as _vs_g
+            _social = _vs_g.lire(selected)
+            _vues = _vs_g.vues_du_dossier(folder)
+        except Exception:
+            _social, _vues = {}, {}
+        try:
+            if _social.get("url") and not _req.args.get(f"cloud_{subdir}_sort"):
+                sort_mode = "vues"
+        except Exception:
+            pass
+
     # Tri
-    if sort_mode == "asc":
+    if sort_mode == "vues":
+        # Les fichiers sans compteur (ajoutés à la main) passent après, du
+        # plus récent au plus ancien — les cacher fausserait le total.
+        files.sort(key=lambda p: (-(_vues.get(p.stem, -1)), -p.stat().st_mtime))
+    elif sort_mode == "asc":
         files.sort(key=lambda p: p.stat().st_mtime)  # plus ancien d'abord
     elif sort_mode == "desc" or sort_mode == "recent":
         files.sort(key=lambda p: p.stat().st_mtime, reverse=True)  # plus récent d'abord
@@ -22759,7 +23057,9 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         # reconduit deja, celui-ci les jetait — choisir « Croissant » apres
         # « Aller a la date » ramenait tout le dossier, sans un mot.
         params = [f"tab={tab_name}", f"{subdir_key}={selected}"]
-        if value != "recent":
+        # « recent » s'écrit en clair quand le dossier s'ouvre trié par vues :
+        # l'omettre ramenait le tri par défaut, donc les vues.
+        if value != "recent" or _social.get("url"):
             params.append(f"cloud_{subdir}_sort={value}")
         if filter_date:
             params.append(f"cloud_{subdir}_date={filter_date}")
@@ -22777,7 +23077,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         "<div class='vault-sort'>"
         "<button type='button' class='vault-sort-btn' onclick='vaultSortToggle(event,this)'>"
         "<svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2'><line x1='4' y1='6' x2='20' y2='6'/><line x1='8' y1='12' x2='16' y2='12'/><line x1='10' y1='18' x2='14' y2='18'/></svg>"
-        f"<span>{('Tout' if sort_mode == 'all' else 'Récemment' if sort_mode == 'recent' else 'Croissant' if sort_mode == 'asc' else 'Décroissant' if sort_mode == 'desc' else 'Trier')}</span>"
+        f"<span>{('Tout' if sort_mode == 'all' else 'Plus vues' if sort_mode == 'vues' else 'Récemment' if sort_mode == 'recent' else 'Croissant' if sort_mode == 'asc' else 'Décroissant' if sort_mode == 'desc' else 'Trier')}</span>"
         "<svg viewBox='0 0 24 24' width='12' height='12' fill='none' stroke='currentColor' stroke-width='2.5'><polyline points='6 9 12 15 18 9'/></svg>"
         "</button>"
         "<div class='vault-sort-menu' onclick='event.stopPropagation()'>"
@@ -22788,7 +23088,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         f"<form method='GET' class='vault-sort-form'>"
         f"<input type='hidden' name='tab' value='{tab_name}'>"
         f"<input type='hidden' name='{subdir_key}' value='{selected}'>"
-        f"<input type='hidden' name='cloud_{subdir}_sort' value='{sort_mode if sort_mode in ('all', 'recent', 'asc', 'desc') else 'recent'}'>"
+        f"<input type='hidden' name='cloud_{subdir}_sort' value='{sort_mode if sort_mode in ('all', 'recent', 'asc', 'desc', 'vues') else 'recent'}'>"
         f"<input type='hidden' name='cloud_{subdir}_type' value='{type_filter if type_filter in ('all', 'photo', 'video') else 'all'}'>"
         "<label class='vault-sort-item' style='cursor:default'>"
         "<span class='vault-radio'></span>Aller à la date :</label>"
@@ -22803,6 +23103,10 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         "<span class='vault-radio'></span>Croissant</a>"
         f"<a href='{_sort_url('desc')}' data-no-loader='1' class='vault-sort-item {('vault-sort-active' if sort_mode == 'desc' else '')}'>"
         "<span class='vault-radio'></span>Décroissant</a>"
+        + ((f"<div class='vault-sort-sep'></div>"
+            f"<a href='{_sort_url('vues')}' data-no-loader='1' class='vault-sort-item {('vault-sort-active' if sort_mode == 'vues' else '')}'>"
+            "<span class='vault-radio'></span>Plus vues</a>")
+           if (_vues or _social.get("url")) else "")
         + (("<div class='vault-sort-sep'></div>"
             "<button type='button' class='vault-sort-item' "
             f"onclick='purgeBanger(\"{selected}\", this)' "
@@ -23022,6 +23326,13 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
                 "Partager</button>"
             )
 
+    # Bandeau du profil TikTok branché (Reels seulement). Le bilan dit ce qui
+    # n'est PAS descendu et pourquoi : sans lui, « 40 vidéos sur un profil de
+    # 300 » ressemblait à une panne alors que c'était le seuil.
+    social_html = ""
+    if subdir == "videos":
+        social_html = _vault_social_bandeau(selected, _social)
+
     gallery_header = (
         # === Row 1 : identite a gauche + Add media a droite ===
         f"<div class='vault-gallery-header' style='justify-content:space-between'>"
@@ -23060,6 +23371,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         f"{add_media_btn}"
         f"</div>"
         f"</div>"
+        + social_html +
         # === Row 2 : tri + filtres ===
         f"<div style='display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px;padding:10px 0 0'>"   # trait retire : l'en-tete au-dessus en a deja un (on en voyait deux)
         f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap'>"
@@ -23138,7 +23450,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
                 second_url = ""
             # Apres INITIAL_BATCH : on render avec data-src vide, l image se charge a l intersection
             deferred = idx >= INITIAL_BATCH
-            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, a_approuver=(p.stem in _a_approuver_stems), deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels), is_fav_brute=(file_id in _fav_brutes), is_flash_trend=(file_id in _flash_trend), is_va_ready=((is_reels or subdir == "templates") and p.stem in _va_ready_stems), can_montage=can_montage))
+            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, a_approuver=(p.stem in _a_approuver_stems), deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels), is_fav_brute=(file_id in _fav_brutes), is_flash_trend=(file_id in _flash_trend), vues=_vues.get(p.stem), is_va_ready=((is_reels or subdir == "templates") and p.stem in _va_ready_stems), can_montage=can_montage))
         gallery = (
             gallery_header
             # auto-fill 165px : le nombre de colonnes s'adapte a la largeur
@@ -52779,6 +53091,7 @@ def create_app():
 
                         if (n == f"{stem}.montage.json"      # brouillon d'édition
                                 or n == f"{stem}.analyse.json"   # analyse auto
+                                or n == f"{stem}.social.json"    # vues TikTok (vault_social)
                                 or n == f"{stem}{SUFFIXE_TEXTECHECK}"  # verdict « porte du texte »
                                 # Le voisin de désactivation part avec la vidéo :
                                 # laissé seul, il éteindrait à la naissance une
@@ -54327,6 +54640,24 @@ def create_app():
             return jsonify({"ok": False, "error": "unauth"}), 401
         raw_name = (request.form.get("identity_name") or "").strip()
         import re as _re
+        import vault_social as _vs
+        social_url = (request.form.get("social_url") or "").strip()
+        social = None
+        if social_url:
+            # Le lien est vérifié AVANT de créer le dossier : un lien illisible
+            # laissait sinon un dossier vide que personne n'avait voulu.
+            social = _vs.analyser_lien(social_url)
+            if social.get("erreur"):
+                return jsonify({"ok": False, "error": social["erreur"]})
+            _pas_prete = _vs.source_prete(social["plateforme"])
+            if _pas_prete:
+                return jsonify({"ok": False, "error": _pas_prete})
+            try:
+                int(str(request.form.get("seuil") or _vs.SEUIL_DEFAUT).replace(" ", ""))
+            except ValueError:
+                return jsonify({"ok": False, "error": "Vues minimum : un nombre, sans lettres"})
+            if not raw_name:
+                raw_name = _vs.nom_dossier(social["username"])
         safe = _re.sub(r"[^a-z0-9_\-]", "", raw_name.lower())[:30]
         if not safe:
             return jsonify({"ok": False, "error": "Nom invalide (lettres, chiffres, _ ou -)"})
@@ -54358,8 +54689,99 @@ def create_app():
                     warn = f"avatar non sauvé : {e}"
             else:
                 warn = f"avatar refusé (format {ext})"
+        # Modèle ou identité, choisi dans la fenêtre. Sans choix, le repli de
+        # type_identite fait d'un dossier une MODÈLE — et un profil TikTok
+        # importé partait alors dans la rotation Discord des VA.
+        _type = (request.form.get("type") or "").strip().lower()
+        # Un profil TikTok importé n'est pas une créatrice de l'agence : sauf
+        # clic explicite sur « Modèle », il reste une identité. Filet côté
+        # serveur, parce que le navigateur peut ne pas avoir reconnu le lien.
+        if social and not request.form.get("type_choisi"):
+            _type = "identite"
+        if _type in ("modele", "identite") and not safe.startswith(V2_PREFIX):
+            try:
+                import type_identite as _ti
+                if not _ti.definir(safe, _type):
+                    warn = (warn + " ; " if warn else "") + "type non enregistré"
+            except Exception as e:
+                warn = (warn + " ; " if warn else "") + f"type non enregistré : {e}"
+        if social and not safe.startswith(V2_PREFIX):
+            # HORS DE LA ROTATION DISCORD. Le type « identité » ne filtre plus
+            # la rotation depuis le 12/09 (cogs/welcome.list_active_identities) :
+            # sans ça, le prochain VA arrivé recevait ce dossier et postait les
+            # vidéos d'un tiers. enabled:false est le réglage que lit
+            # is_identity_active ; il se rallume par la commande Discord.
+            try:
+                _cfg_ic = _load_identities_config()
+                _cfg_ic = _cfg_ic if isinstance(_cfg_ic, dict) else {}
+                _e_ic = _cfg_ic.get(safe) if isinstance(_cfg_ic.get(safe), dict) else {}
+                _e_ic["enabled"] = False
+                _cfg_ic[safe] = _e_ic
+                if not safe_json.write(IDENTITIES_CONFIG_FILE, _cfg_ic, indent=2):
+                    warn = (warn + " ; " if warn else "") + "PAS retirée de la rotation Discord"
+            except Exception as e:
+                warn = (warn + " ; " if warn else "") + f"PAS retirée de la rotation Discord : {e}"
+        if social:
+            r = _vs.brancher(safe, social_url, request.form.get("seuil") or _vs.SEUIL_DEFAUT)
+            if r.get("ok"):
+                _vs.planifier(safe)
+            else:
+                warn = (warn + " ; " if warn else "") + f"import non lancé : {r.get('error')}"
+                social = None
         _invalidate_all_ttl_cache()   # compteurs/sidebars vault à jour partout
-        return jsonify({"ok": True, "identity": safe, "warn": warn})
+        return jsonify({"ok": True, "identity": safe, "warn": warn,
+                        "social": bool(social)})
+
+    @app.route("/identity/social", methods=["POST"])
+    def identity_social():
+        """Profil branché sur un dossier : changer le seuil, relire.
+
+        action = seuil (seuil) | relire. Le branchement se fait à la
+        création du dossier (/identity/create), pas après — voir
+        _vault_social_bandeau."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        import vault_social as _vs
+        ident = (request.form.get("identity") or "").strip().lower()
+        if ident not in _list_identities():
+            return jsonify({"ok": False, "error": "identité inconnue"})
+        action = (request.form.get("action") or "").strip()
+        # Une relecture déjà en route n'est pas interrompue : la demande
+        # passe juste après elle, et le message le dit.
+        _deja = _vs.progression(ident) is not None
+        _msg_apres = "Enregistré — relecture programmée après celle en cours"
+        if action == "seuil":
+            r = _vs.regler_seuil(ident, request.form.get("seuil"))
+            # Un seuil abaissé ne sert à rien sans relecture : les vidéos
+            # nouvellement admises ne descendraient que dans deux semaines.
+            if r.get("ok"):
+                _vs.planifier(ident)
+                if _deja:
+                    r["message"] = _msg_apres
+            return jsonify(r)
+        if action == "relire":
+            r = _vs.relancer(ident)
+            if r.get("ok") and _deja:
+                r["message"] = _msg_apres
+            return jsonify(r)
+        return jsonify({"ok": False, "error": "action inconnue"})
+
+    @app.route("/identity/social_etat")
+    def identity_social_etat():
+        """Où en est l'import d'un dossier (barre de progression)."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        import vault_social as _vs
+        ident = (request.args.get("identity") or "").strip().lower()
+        e = _vs.lire(ident)
+        return jsonify({"ok": True, "branche": bool(e.get("url")),
+                        "progression": _vs.progression(ident),
+                        "statut": e.get("statut") or "", "erreur": e.get("erreur") or "",
+                        "bilan": e.get("bilan") or {},
+                        "derniere_synchro": e.get("derniere_synchro"),
+                        "prochaine": _vs.prochaine(ident)})
 
     @app.route("/identity/avatar_set", methods=["POST"])
     def identity_avatar_set():
@@ -67140,6 +67562,17 @@ def start_in_thread():
         _gd_w.start_watcher()
     except Exception as e:
         print(f"[start_in_thread] veille Drive non demarree: {e}", flush=True)
+    # Profils TikTok branchés sur des dossiers du vault : relus toutes les
+    # deux semaines, et tout de suite après leur branchement.
+    try:
+        import vault_social as _vs_boot
+
+        def _vs_dossier(ident):
+            d = IDENTITIES_DIR / ident
+            return (d / "videos") if d.is_dir() else None
+        _vs_boot.demarrer(_vs_dossier, _invalidate_all_ttl_cache)
+    except Exception as e:
+        print(f"[start_in_thread] import TikTok non demarre: {e}", flush=True)
     # Pré-calcul des clics GMS -> le Dashboard clics est déjà prêt à l'ouverture
     try:
         _start_gmsdash_warm()

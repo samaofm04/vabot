@@ -52,6 +52,10 @@ _CLES = (
     ("identity_styles.json", "les pastilles « ce qui marche »"),
     ("captions.json", "les captions de la Bibliotheque"),
     ("gms_templates.json", "le modele de lien GMS"),
+    ("vault_social.json", "le profil TikTok/Instagram branche sur le dossier"),
+    # Sans lui, renommer une identite desactivee pour Discord la rallumait :
+    # enabled:false restait sous l'ancien nom.
+    ("identities_config.json", "l'activation pour la rotation Discord"),
 )
 
 #: jailbreak.json N'EST PAS DANS _CLES, ET C'EST VOLONTAIRE.

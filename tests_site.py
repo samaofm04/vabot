@@ -14728,6 +14728,166 @@ try:
 except Exception as _eJ:
     check("outil local jarvis : testable", False, repr(_eJ)[:200])
 
+# ------------------------------------------ 37. Dossier du vault branché sur un TikTok
+print()
+print("=" * 70)
+print("Vault : import d'un profil TikTok/Instagram au-dessus d'un seuil de vues")
+print("=" * 70)
+try:
+    import tempfile as _tfS, pathlib as _plS
+    import vault_social as _vsS
+    _lnS = _vsS.analyser_lien
+    check("lien TikTok : username lu, parametres ignores",
+          _lnS("https://www.tiktok.com/@Lea.Test?lang=fr").get("username") == "lea.test")
+    check("lien Instagram : la plateforme se deduit du lien",
+          _lnS("https://www.instagram.com/Lea.Test/?hl=fr").get("plateforme") == "instagram"
+          and _lnS("instagram.com/lea").get("username") == "lea")
+    check("lien d une publication Instagram : refuse AVEC une raison",
+          "publication" in (_lnS("https://www.instagram.com/reel/ABC/").get("erreur") or ""))
+    check("un nom seul ne dit pas la plateforme : refuse",
+          bool(_lnS("@lea").get("erreur")) and bool(_lnS("lea").get("erreur")))
+    check("le point d un username devient _ dans le nom du dossier",
+          _vsS.nom_dossier("khaby.lame") == "khaby_lame")
+    check("vues au format TikTok", _vsS.format_vues(12345) == "12,3 k"
+          and _vsS.format_vues(1_200_000) == "1,2 M" and _vsS.format_vues(999) == "999")
+    _tmpS = _plS.Path(_tfS.mkdtemp())
+    _savS = (_vsS.FICHIER, _vsS._lister_tiktok, _vsS._telecharger_tiktok, _vsS.PAUSE_SEC)
+    try:
+        _vsS.FICHIER, _vsS.PAUSE_SEC = _tmpS / "reg.json", 0
+        _profilS = [{"id": "1", "view_count": 50_000, "timestamp": 1_700_000_000},
+                    {"id": "2", "view_count": 9_000},
+                    {"id": "3", "view_count": None},
+                    {"id": "4", "view_count": 20_000}]
+        _vsS._lister_tiktok = lambda url: [dict(e) for e in _profilS]
+        _ratesS = set()
+
+        def _dlS(url, cible):
+            if cible.name in _ratesS:
+                raise RuntimeError("403")
+            p = cible.with_suffix(".mp4"); p.write_bytes(b"x"); return p
+        _vsS._telecharger_tiktok = _dlS
+        _dS = _tmpS / "lea" / "videos"
+        (_tmpS / "lea").mkdir()     # le dossier de l'identité existe toujours
+        check("seuil illisible : refuse, pas remplace par 10 000 en silence",
+              not _vsS.brancher("lea", "tiktok.com/@lea", "dix mille").get("ok"))
+        _vsS.brancher("lea", "tiktok.com/@lea", 10_000)
+        _ratesS.add("tt_4")
+        _b1 = _vsS.synchroniser("lea", _dS)["bilan"]
+        check("seuil : seule la video au-dessus descend, les autres sont COMPTEES",
+              _b1["nouvelles"] == 1 and _b1["sous_seuil"] == 1
+              and _b1["vues_inconnues"] == 1 and _b1["echecs"] == 1, str(_b1))
+        check("la date du fichier est celle du post TikTok",
+              int((_dS / "tt_1.mp4").stat().st_mtime) == 1_700_000_000)
+        (_dS / "tt_1.mp4").unlink(); (_dS / "tt_1.social.json").unlink()
+        _ratesS.clear()
+        _profilS[3]["view_count"] = 25_000
+        _b2 = _vsS.synchroniser("lea", _dS)["bilan"]
+        check("une video supprimee a la main n est PAS retelechargee",
+              not (_dS / "tt_1.mp4").exists() and _b2["retirees_a_la_main"] == 1, str(_b2))
+        check("un echec est retente a la relecture suivante",
+              (_dS / "tt_4.mp4").exists() and _b2["nouvelles"] == 1)
+        # Des voisins qui commencent comme la video : la relecture doit
+        # ecrire les vues a cote de la VIDEO, pas du premier fichier venu.
+        (_dS / "tt_4.desc.txt").write_text("x")
+        (_dS / "tt_4.thumb.jpg").write_bytes(b"x")
+        _profilS[3]["view_count"] = 31_000
+        _vsS.synchroniser("lea", _dS)
+        check("les vues d une video deja la sont mises a jour",
+              _vsS.vues_du_dossier(_dS).get("tt_4") == 31_000)
+        check("aucun voisin parasite (.desc.social.json, .prev)",
+              not [p.name for p in _dS.iterdir()
+                   if p.name.count(".social") > 1 or ".desc.social" in p.name
+                   or ".thumb.social" in p.name or p.name.endswith(".prev")],
+              str(sorted(p.name for p in _dS.iterdir())))
+        # Publication photo : TikTok n'en sert que le son.
+        _profilS.append({"id": "5", "view_count": 80_000})
+
+        def _dl_photo(url, cible):
+            if cible.name == "tt_5":
+                raise _vsS.PasUneVideo("audio seul")
+            return _dlS(url, cible)
+        _vsS._telecharger_tiktok = _dl_photo
+        _b3 = _vsS.synchroniser("lea", _dS)["bilan"]
+        check("publication photo : comptee a part, pas « importee »",
+              _b3["photos"] == 1 and _b3["nouvelles"] == 0
+              and not list(_dS.glob("tt_5.*")), str(_b3))
+        _b4 = _vsS.synchroniser("lea", _dS)["bilan"]
+        check("publication photo : pas retentee a chaque relecture",
+              _b4["photos"] == 1 and _b4["echecs"] == 0, str(_b4))
+        # Refus en serie (403) : la relecture s'arrete, rien n'est abandonne.
+        _profilS.extend({"id": str(k), "view_count": 70_000} for k in (6, 7, 8, 9))
+
+        def _dl_403(url, cible):
+            raise RuntimeError("HTTP Error 403: Forbidden")
+        _vsS._telecharger_tiktok = _dl_403
+        _bilan_avant = _vsS.lire("lea").get("bilan")
+        _r5 = _vsS.synchroniser("lea", _dS)
+        _e5 = _vsS.lire("lea")
+        check("403 en serie : arret, nouvel essai demain, aucun abandon",
+              not _r5["ok"] and _e5.get("statut") == "erreur"
+              and _e5.get("reessai_le") and not _e5.get("echecs"), str(_e5.get("echecs")))
+        _vsS._lister_tiktok = lambda url: (_ for _ in ()).throw(RuntimeError("HTTP Error 403"))
+        _vsS.synchroniser("lea", _dS)
+        check("liste refusee : le bilan precedent reste affiche",
+              (_vsS.lire("lea").get("bilan") or {}).get("examinees") == len(_profilS))
+        _vsS._lister_tiktok = lambda url: [dict(e) for e in _profilS]
+        _vsS._telecharger_tiktok = _dlS
+        # Une relecture demandee pendant une autre n'est pas perdue, et
+        # survit a un redemarrage (la demande est ecrite dans le registre).
+        _vsS._en_cours["lea"] = {"fait": 0, "total": 1, "etape": "x"}
+        _vsS._file_attente.clear()
+        _sav_tr = _vsS._assurer_travailleur
+        _vsS._assurer_travailleur = lambda: None
+        try:
+            check("relire pendant une relecture : remis en file",
+                  _vsS.planifier("lea") and "lea" in _vsS._file_attente)
+            check("... et la demande est ecrite, pour survivre a un redemarrage",
+                  _vsS.lire("lea").get("demande") is True)
+            _vsS._en_cours.pop("lea", None)
+            _vsS._file_attente.clear()
+            check("apres redemarrage, la file reprend la demande",
+                  "lea" in _vsS._dus(0))
+        finally:
+            _vsS._assurer_travailleur = _sav_tr
+            _vsS._en_cours.pop("lea", None)
+            _vsS._file_attente.clear()
+        # Rendu reel de la galerie : triee par vues, badge sur la carte.
+        import web_upload as _wS
+        _savW = _wS.IDENTITIES_DIR
+        try:
+            _wS.IDENTITIES_DIR = _tmpS
+            (_dS / "a_la_main.mp4").write_bytes(b"x")
+            (_dS / "tt_9.mp4").write_bytes(b"x")
+            import safe_json as _sjS
+            _sjS.write(_dS / "tt_9.social.json", {"vues": 90_000})
+            with _wS.create_app().test_request_context("/?tab=cloudreels&cloud_videos_ident=lea"):
+                _hS = _wS._render_cloud_content_html("videos", _wS.VIDEO_EXTS)
+            import re as _reS
+            _ordS = _reS.findall(r"data-fid='lea\|videos\|([^']+)'", _hS)
+            check("galerie d un dossier branche : triee par vues, ajouts manuels a la fin",
+                  _ordS[:2] == ["tt_9.mp4", "tt_4.mp4"] and _ordS[-1] == "a_la_main.mp4", str(_ordS))
+            check("galerie : le badge de vues est sur la carte", "▶ 90 k" in _hS)
+            check("galerie : le bandeau dit pourquoi des videos manquent",
+                  "sous le seuil" in _hS and "publication(s) photo" in _hS)
+        finally:
+            _wS.IDENTITIES_DIR = _savW
+    finally:
+        _vsS.FICHIER, _vsS._lister_tiktok, _vsS._telecharger_tiktok, _vsS.PAUSE_SEC = _savS
+    _srcS = open("web_upload.py", encoding="utf-8").read()
+    check("supprimer un media emporte son voisin .social.json",
+          'n == f"{stem}.social.json"' in _srcS)
+    import identite_admin as _iaS
+    _clesS = [f for f, _ in _iaS._CLES]
+    check("renommer/archiver une identite emporte son profil branche",
+          "vault_social.json" in _clesS)
+    check("... et son reglage de rotation Discord (sinon renommer la rallume)",
+          "identities_config.json" in _clesS)
+    import gdrive_sync as _gdS
+    check("Drive : le voisin .social.json suit son media",
+          _gdS._tige_media("tt_1.social.json") == "tt_1")
+except Exception as _eS:
+    check("import tiktok : testable", False, repr(_eS)[:200])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

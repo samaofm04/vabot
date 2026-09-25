@@ -670,6 +670,12 @@ def _iter_jobs(include_videos):
                 suffixe = p.suffix.lower()
                 if suffixe not in exts:
                     continue
+                # Les vues d'une video importee (vault_social) ne partent pas :
+                # elles changent a chaque relecture, et le Drive recevait un
+                # second fichier homonyme a chaque fois (on n'y met rien a
+                # jour, on televerse). Elles se relisent sur la plateforme.
+                if p.name.lower().endswith(".social.json"):
+                    continue
                 # La video exemple pese autant qu'un reel : elle suit le
                 # sort des medias. Les captions, non.
                 if medias_ecartes and suffixe not in SIDECAR_EXTS:
@@ -1743,7 +1749,10 @@ def _tige_media(nom: str) -> str:
     p = Path(nom or "")
     if p.suffix.lower() in SIDECAR_EXTS:
         tige = p.stem                      # « reel12.desc » pour .desc.txt
-        for marq in (".desc", ".acheck", ".montage", ".analyse"):
+        # .social : les vues d'une vidéo importée de TikTok/Instagram
+        # (vault_social.SUFFIXE). Sans lui, le voisin formait un lot à part
+        # et n'était pas renommé avec son média.
+        for marq in (".desc", ".acheck", ".montage", ".analyse", ".social"):
             if tige.lower().endswith(marq):
                 return tige[:-len(marq)]
         return tige
