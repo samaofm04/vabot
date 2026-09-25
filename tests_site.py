@@ -15269,6 +15269,38 @@ try:
                                                       "action": "debrancher"}).get_json() or {}
             check("site : debrancher l Instagram garde le TikTok",
                   _j3D.get("ok") and [c for c, _ in _vsD.sources_de("tst_soc")] == ["tst_soc"])
+            # « c est deux liens differents » : TikTok ET Instagram des la creation
+            import type_identite as _tiD
+            _savCD = (_wD.IDENTITIES_CONFIG_FILE, _tiD.FICHIER)
+            _wD.IDENTITIES_CONFIG_FILE, _tiD.FICHIER = _tmpD / "ic.json", _tmpD / "types.json"
+            try:
+                _planD.clear()
+                _j4D = _cD.post("/identity/create", data={
+                    "identity_name": "tst_deux", "social_url": "https://www.tiktok.com/@tst.deux",
+                    "social_url_2": "https://www.instagram.com/tst.deux/", "seuil": "15000"}).get_json() or {}
+                check("creation : un lien TikTok ET un lien Instagram, deux profils branches",
+                      _j4D.get("ok") and [c for c, _ in _vsD.sources_de("tst_deux")] == ["tst_deux", "tst_deux|instagram"]
+                      and _planD == ["tst_deux", "tst_deux|instagram"]
+                      and _vsD.lire("tst_deux|instagram").get("seuil") == 15000, str((_j4D, _planD)))
+                _j5D = _cD.post("/identity/create", data={
+                    "identity_name": "tst_meme", "social_url": "https://www.tiktok.com/@aa",
+                    "social_url_2": "https://www.tiktok.com/@bb"}).get_json() or {}
+                check("creation : deux liens du meme reseau refuses, AVANT de creer le dossier",
+                      _j5D.get("ok") is not True and "même réseau" in str(_j5D.get("error"))
+                      and not (_wD.IDENTITIES_DIR / "tst_meme").exists(), str(_j5D))
+                _j6D = _cD.post("/identity/create", data={
+                    "identity_name": "tst_rate", "social_url": "https://www.tiktok.com/@aa",
+                    "social_url_2": "https://www.instagram.com/reel/XYZ/"}).get_json() or {}
+                check("creation : un 2e lien illisible est refuse sans dossier orphelin",
+                      _j6D.get("ok") is not True and not (_wD.IDENTITIES_DIR / "tst_rate").exists(), str(_j6D))
+            finally:
+                _wD.IDENTITIES_CONFIG_FILE, _tiD.FICHIER = _savCD
+                for _nD in ("tst_deux", "tst_meme", "tst_rate"):
+                    _shD.rmtree(_wD.IDENTITIES_DIR / _nD, ignore_errors=True)
+            _srcD = _plD.Path("web_upload.py").read_text(encoding="utf-8")
+            check("interface : un champ TikTok ET un champ Instagram, a la creation comme dans Modifier",
+                  'id="ident-new-link-ig"' in _srcD and 'id="ident-edit-socig"' in _srcD
+                  and "fd.set('social_url_2'" in _srcD)
         finally:
             _wD._load_web_users, _vsD.planifier = _savWD
             _shD.rmtree(_idD, ignore_errors=True)

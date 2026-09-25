@@ -10616,6 +10616,7 @@ document.addEventListener('click', function(ev){
   try{ identEditCtx.sociaux = JSON.parse(b.getAttribute('data-sociaux')||'[]')||[]; }catch(eS){ identEditCtx.sociaux=[]; }
   identEditCtx.vas = nv;
   var sl=document.getElementById('ident-edit-soclien'); if(sl) sl.value='';
+  var sg=document.getElementById('ident-edit-socig'); if(sg) sg.value='';
   identEditSocPeindre();
   var pw=document.getElementById('ident-edit-pausewrap');
   if(pw) pw.style.display = (identEditCtx.typelock || /^v2_/.test(identEditCtx.ident)) ? 'none' : 'flex';
@@ -10696,6 +10697,12 @@ function identEditSocPeindre(){
     x.addEventListener('click', function(){ identEditSocDebrancher(s.cle, x); });
     l.appendChild(t); l.appendChild(x); box.appendChild(l);
   });
+  /* Chaque champ rappelle ce qui est deja branche sur SON reseau. */
+  var deja={};
+  (identEditCtx.sociaux||[]).forEach(function(s){ deja[s.plateforme]=s.username; });
+  var ct=document.getElementById('ident-edit-soclien'), ci=document.getElementById('ident-edit-socig');
+  if(ct) ct.placeholder = deja.tiktok ? ('Lien TikTok — branché : @'+deja.tiktok+' (un autre lien le remplace)') : 'Lien TikTok';
+  if(ci) ci.placeholder = deja.instagram ? ('Lien Instagram — branché : @'+deja.instagram+' (un autre lien le remplace)') : 'Lien Instagram';
   /* Ce que le branchement engage, dit AVANT : sur une model avec des VA,
      ces videos arrivent dans le stock de brutes ou ils piochent. */
   var txt='Les vidéos au-dessus du seuil arrivent dans la Vidéo brut, triées par vues, relues toutes les 2 semaines. '
@@ -10705,17 +10712,30 @@ function identEditSocPeindre(){
 }
 async function identEditSocBrancher(){
   var err=document.getElementById('ident-edit-err'), go=document.getElementById('ident-edit-socgo');
-  var lien=String((document.getElementById('ident-edit-soclien')||{}).value||'').trim();
-  if(!lien){ if(err) err.textContent='Colle le lien du profil TikTok ou Instagram.'; return; }
+  var tt=String((document.getElementById('ident-edit-soclien')||{}).value||'').trim();
+  var ig=String((document.getElementById('ident-edit-socig')||{}).value||'').trim();
+  if(!tt && !ig){ if(err) err.textContent='Colle le lien TikTok et/ou Instagram du profil.'; return; }
+  /* chaque champ n accepte que son reseau : dit avant le moindre envoi */
+  var ptt=tt?identLienProfil(tt):null, pig=ig?identLienProfil(ig):null;
+  if(tt && !(ptt && ptt.plat==='tiktok')){ if(err) err.textContent='Champ TikTok : attendu un lien tiktok.com/@nom'; return; }
+  if(ig && !(pig && pig.plat==='instagram')){ if(err) err.textContent='Champ Instagram : attendu un lien instagram.com/nom'; return; }
   if(err) err.textContent='';
   if(go){ go.disabled=true; go.textContent='◌'; }
   try{
-    var fd=new FormData(); fd.set('identity', identEditCtx.ident); fd.set('action','brancher');
-    fd.set('lien', lien); fd.set('seuil', String((document.getElementById('ident-edit-socseuil')||{}).value||'10000'));
-    fd.set('ajax','1');
-    var r=await fetch('/identity/social',{method:'POST',body:fd,credentials:'same-origin'});
-    var j=null; try{ j=await r.json(); }catch(e2){}
-    if(!(j&&j.ok)){ if(err) err.textContent=(j&&j.error)||('Refusé par le serveur (HTTP '+r.status+')'); identEditSocPeindre(); return; }
+    var refus=[], faits=0;
+    var liens=[tt,ig].filter(Boolean);
+    for(var k=0;k<liens.length;k++){
+      var fd=new FormData(); fd.set('identity', identEditCtx.ident); fd.set('action','brancher');
+      fd.set('lien', liens[k]); fd.set('seuil', String((document.getElementById('ident-edit-socseuil')||{}).value||'10000'));
+      fd.set('ajax','1');
+      var r=await fetch('/identity/social',{method:'POST',body:fd,credentials:'same-origin'});
+      var j=null; try{ j=await r.json(); }catch(e2){}
+      if(j&&j.ok) faits++; else refus.push(((k===0&&tt)?'TikTok':'Instagram')+' : '+((j&&j.error)||('HTTP '+r.status)));
+    }
+    if(refus.length){
+      if(err) err.textContent=(faits?'Branché en partie. ':'')+refus.join(' · ');
+      identEditSocPeindre(); return;
+    }
     try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e3){}
     identEditClose();
     /* la Video brut du dossier : c est la que l import se suit */
@@ -11109,7 +11129,8 @@ document.addEventListener('click', function(ev){
   identNewCtx.ikey=b.getAttribute('data-ikey')||'';
   var n=document.getElementById('ident-new-name'); if(n) n.value='';
   var lk=document.getElementById('ident-new-link'); if(lk) lk.value='';
-  identNewCtx.auto=''; identNewCtx.typeTouche=false; identNewLink('');
+  var lkig=document.getElementById('ident-new-link-ig'); if(lkig) lkig.value='';
+  identNewCtx.auto=''; identNewCtx.typeTouche=false; identNewLink();
   identNewCtx.styles=[]; identNewCtx.reserves=[];
   identNewType('modele', true);
   /* Le marche d office : celui affiche a l ecran (pilule FR/US), sinon FR. */
@@ -11130,17 +11151,31 @@ function identNewClose(){ var m=document.getElementById('ident-new-modal'); if(m
    script vit dans une chaine Python, et une barre oblique inverse y change
    de sens. Meme regle que le serveur (vault_social.analyser_lien). */
 var IDENT_INSTA_PAS_COMPTE=['p','reel','reels','tv','stories','explore','accounts','direct','about','legal'];
-function identNewLink(v){
+/* Un lien de profil -> {plat:'tiktok'|'instagram', u:'nom'}, ou null. */
+function identLienProfil(v){
   var s=String(v||'').trim().toLowerCase(), u='', plat='', i=s.indexOf('tiktok.com/@'), j=s.indexOf('instagram.com/');
-  if(i>=0){ u=s.slice(i+12); plat='TikTok'; }
-  else if(j>=0){ u=s.slice(j+14); plat='Instagram'; }
+  if(i>=0){ u=s.slice(i+12); plat='tiktok'; }
+  else if(j>=0){ u=s.slice(j+14); plat='instagram'; }
   var ok='abcdefghijklmnopqrstuvwxyz0123456789_.', out='';
   for(var k=0;k<u.length;k++){ var c=u.charAt(k); if(ok.indexOf(c)<0) break; out+=c; }
-  if(plat==='Instagram' && IDENT_INSTA_PAS_COMPTE.indexOf(out)>=0) out='';
+  if(plat==='instagram' && IDENT_INSTA_PAS_COMPTE.indexOf(out)>=0) out='';
+  return out ? {plat:plat, u:out} : null;
+}
+function identNewLink(){
+  /* Deux champs : chacun n accepte que son reseau. Un lien colle dans le
+     mauvais champ est DIT, pas deplace en douce. */
+  var tt=identLienProfil((document.getElementById('ident-new-link')||{}).value);
+  var ig=identLienProfil((document.getElementById('ident-new-link-ig')||{}).value);
+  var avert=[];
+  if(tt && tt.plat!=='tiktok'){ avert.push('le champ TikTok contient un lien Instagram'); tt=null; }
+  if(ig && ig.plat!=='instagram'){ avert.push('le champ Instagram contient un lien TikTok'); ig=null; }
+  identNewCtx.tt=tt; identNewCtx.ig=ig;
+  var out=(tt||ig) ? (tt||ig).u : '';
   var box=document.getElementById('ident-new-social');
-  if(box) box.style.display=out?'flex':'none';
+  if(box) box.style.display=(out||avert.length)?'flex':'none';
   var pl=document.getElementById('ident-new-plat');
-  if(pl) pl.textContent=out?(plat+' @'+out):'';
+  if(pl) pl.textContent=[tt?('TikTok @'+tt.u):'', ig?('Instagram @'+ig.u):''].filter(Boolean).join(' · ')
+                        + (avert.length?((out?' — ':'')+'⚠ '+avert.join(', ')):'');
   var n=document.getElementById('ident-new-name');
   if(!out){
     /* Lien efface : on rend ce que le lien avait pose, pas plus. */
@@ -11334,11 +11369,19 @@ async function identNewCreate(){
   if(String(identNewCtx.vtab||'').indexOf('v2')===0) fd.set('vault2','1');
   var a=document.getElementById('ident-new-avatar');
   if(a&&a.files&&a.files[0]) fd.set('avatar',a.files[0]);
-  var lk=document.getElementById('ident-new-link');
-  if(lk&&String(lk.value||'').trim()){
-    fd.set('social_url',String(lk.value).trim());
+  var lk=document.getElementById('ident-new-link'), lkig=document.getElementById('ident-new-link-ig');
+  var brutTT=String((lk&&lk.value)||'').trim(), brutIG=String((lkig&&lkig.value)||'').trim();
+  identNewLink();
+  /* un champ rempli mais illisible : on le dit, rien n est cree */
+  if(brutTT && !identNewCtx.tt){ if(err) err.textContent='Lien TikTok illisible : attendu tiktok.com/@nom'; return; }
+  if(brutIG && !identNewCtx.ig){ if(err) err.textContent='Lien Instagram illisible : attendu instagram.com/nom'; return; }
+  /* le premier devient le profil principal, le second se branche a cote */
+  var premier=brutTT||brutIG, second=(brutTT&&brutIG)?brutIG:'';
+  if(premier){
+    fd.set('social_url',premier);
     fd.set('seuil',String((document.getElementById('ident-new-seuil')||{}).value||'10000'));
   }
+  if(second) fd.set('social_url_2',second);
   /* Sans lien et sans clic, rien n est envoye : la creation garde son
      comportement d avant (le repli de type_identite). */
   if(identNewCtx.type && (identNewCtx.typeTouche || fd.get('social_url'))) fd.set('type',identNewCtx.type);
@@ -15639,12 +15682,13 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
          main avant (vault_social + empreintes_video). -->
     <div class="ie-sec" id="ident-edit-socwrap"><span class="ie-lbl">TikTok / Instagram</span>
       <div id="ident-edit-sociaux" style="display:flex;flex-direction:column;gap:6px"></div>
-      <div style="display:flex;gap:6px">
-        <input id="ident-edit-soclien" type="text" autocomplete="off" data-lpignore="true" placeholder="Lien TikTok ou Instagram"
-               style="flex:1;min-width:0;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:10px;font-size:13px;font-family:inherit;box-sizing:border-box">
-        <input id="ident-edit-socseuil" type="number" min="0" step="1000" value="10000" title="Vues minimum"
-               style="width:86px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:10px;font-size:13px;font-family:inherit;box-sizing:border-box">
-      </div>
+      <input id="ident-edit-soclien" type="text" autocomplete="off" data-lpignore="true" placeholder="Lien TikTok"
+             style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:10px;font-size:13px;font-family:inherit;box-sizing:border-box">
+      <input id="ident-edit-socig" type="text" autocomplete="off" data-lpignore="true" placeholder="Lien Instagram"
+             style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:10px;font-size:13px;font-family:inherit;box-sizing:border-box">
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px">Vues minimum
+        <input id="ident-edit-socseuil" type="number" min="0" step="1000" value="10000"
+               style="flex:1;min-width:0;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:10px;font-size:13px;font-family:inherit;box-sizing:border-box"></label>
       <button type="button" id="ident-edit-socgo" class="ie-btn" onclick="identEditSocBrancher()">Brancher et importer</button>
       <div id="ident-edit-sochint" class="ie-hint"></div>
     </div>
@@ -15725,8 +15769,13 @@ body.light #pf-modal .pf-card img{background:#eceff3!important}
 <div id="ident-new-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center" onclick="identNewClose()">
   <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:20px;width:330px;max-height:92vh;overflow-y:auto;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
     <div style="font-weight:800;font-size:15px">＋ Nouvelle identité</div>
-    <input id="ident-new-link" type="text" placeholder="Lien TikTok ou Instagram (optionnel)" autocomplete="off"
-           oninput="identNewLink(this.value)"
+    <!-- DEUX CHAMPS, un par reseau (demande du proprietaire, 26/09/2026 :
+         « c est deux liens differents ») : une modele a souvent les deux. -->
+    <input id="ident-new-link" type="text" placeholder="Lien TikTok (optionnel)" autocomplete="off"
+           oninput="identNewLink()"
+           style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:10px;font-size:13px;font-family:inherit;box-sizing:border-box">
+    <input id="ident-new-link-ig" type="text" placeholder="Lien Instagram (optionnel)" autocomplete="off"
+           oninput="identNewLink()"
            style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:10px;font-size:13px;font-family:inherit;box-sizing:border-box">
     <div id="ident-new-social" style="display:none;flex-direction:column;gap:6px">
       <div id="ident-new-plat" style="font-size:12px;font-weight:700;color:#7aa2ff"></div>
@@ -58282,6 +58331,21 @@ def create_app():
                 return jsonify({"ok": False, "error": "Vues minimum : un nombre, sans lettres"})
             if not raw_name:
                 raw_name = _vs.nom_dossier(social["username"])
+        # DEUX LIENS (TikTok ET Instagram, demande du propriétaire 26/09/2026) :
+        # le second est vérifié lui aussi AVANT de créer le dossier, et doit
+        # être de l'autre réseau — le premier devient le profil principal.
+        social_url_2 = (request.form.get("social_url_2") or "").strip()
+        social2 = None
+        if social_url_2:
+            social2 = _vs.analyser_lien(social_url_2)
+            if social2.get("erreur"):
+                return jsonify({"ok": False, "error": social2["erreur"]})
+            if social and social2["plateforme"] == social["plateforme"]:
+                return jsonify({"ok": False, "error": "Les deux liens sont du même réseau : "
+                                                      "un TikTok et un Instagram"})
+            _pas_prete2 = _vs.source_prete(social2["plateforme"])
+            if _pas_prete2:
+                return jsonify({"ok": False, "error": _pas_prete2})
         safe = _re.sub(r"[^a-z0-9_\-]", "", raw_name.lower())[:30]
         if not safe:
             return jsonify({"ok": False, "error": "Nom invalide (lettres, chiffres, _ ou -)"})
@@ -58352,6 +58416,12 @@ def create_app():
             else:
                 warn = (warn + " ; " if warn else "") + f"import non lancé : {r.get('error')}"
                 social = None
+        if social and social2:
+            r2 = _vs.brancher_existante(safe, social_url_2, request.form.get("seuil") or _vs.SEUIL_DEFAUT)
+            if r2.get("ok"):
+                _vs.planifier(r2["cle"])
+            else:
+                warn = (warn + " ; " if warn else "") + f"2e profil non branché : {r2.get('error')}"
         _invalidate_all_ttl_cache()   # compteurs/sidebars vault à jour partout
         return jsonify({"ok": True, "identity": safe, "warn": warn,
                         "social": bool(social)})
