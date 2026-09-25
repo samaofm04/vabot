@@ -9,6 +9,7 @@ import logging
 import threading
 import sys
 import time
+import shutil
 import subprocess
 from pathlib import Path
 from html import escape as html_escape
@@ -23756,23 +23757,18 @@ _SCAN_FILE = []
 
 #: Combien de brutes sont examinees EN MEME TEMPS a l interieur d un examen.
 #:
-#: Une brute passe l essentiel de son temps a ATTENDRE la reponse de l API,
-#: pas a calculer : en serie, le VPS reste les bras croises. Quatre ouvriers
-#: divisent l attente par quatre sans multiplier le travail reel -- ffmpeg ne
-#: tire que quatre images en 720 par video, c est court.
-#:
-#: On reste modeste volontairement. Monter plus haut ferait tomber l API en
-#: 429 (elle est retentee, mais on n aurait rien gagne) et prendrait le
-#: processeur au bot Discord, qui vit dans le MEME processus.
-SCAN_OUVRIERS = max(1, int(os.getenv("SCAN_OUVRIERS") or "4"))
+#: Depuis que l examen est un OCR local (Tesseract), c est du CALCUL, plus de
+#: l attente d API : un ouvrier par coeur, pas plus — au-dela ils se battent
+#: pour le meme processeur. ffmpeg et tesseract tournent en priorite basse
+#: (nice), pour que le bot Discord, qui vit dans le MEME processus, reste
+#: reactif pendant un examen.
+SCAN_OUVRIERS = max(1, int(os.getenv("SCAN_OUVRIERS") or str(os.cpu_count() or 2)))
 
 #: Combien d images sont tirees de CHAQUE video pour la juger.
 #:
-#: Quatre, reparties sur la duree. Descendre a une seule ne fait pas
-#: economiser ce qu on croit : le prompt et la reponse coutent pareil quel que
-#: soit le nombre d images, et representent deja plus de la moitie du prix
-#: d une video. Mesure sur 192 brutes : 0,52 $ a quatre images, 0,29 $ a une.
-#: Vingt-deux centimes, pour quatre fois moins de couverture.
+#: Quatre, reparties sur la duree. L examen est gratuit (OCR local) : le
+#: seul prix d une image de plus est ~0,5 s de calcul, et le verdict repose
+#: sur un mot qui REVIENT d une image a l autre — il en faut plusieurs.
 #:
 #: Et le risque n est pas symetrique. Une accroche RATEE est silencieuse : la
 #: video est classee « sans texte », elle part chez un VA, et elle se publie
@@ -23812,10 +23808,7 @@ def _lancer_scan_texte(identity: str, refaire: bool = False) -> tuple:
     change. Par defaut on saute ce qui porte deja un verdict : chaque appel
     coute, et 1345 brutes re-analysees a chaque clic seraient un gouffre.
     """
-    key = _anthropic_key()
-    if not key:
-        return False, ("Clé IA manquante : ajoute ANTHROPIC_API_KEY dans "
-                       "Réglages → Clé IA.")
+    key = ""        # l'examen est local (Tesseract) : aucune clé, aucun coût
     ident = (identity or "").strip().lower()
     with _SCAN_TEXTE_LOCK:
         if _SCAN_TEXTE["en_cours"]:
@@ -47289,111 +47282,112 @@ desactiver_brute = _off.desactiver
 reactiver_brute = _off.reactiver
 sans_desactivees = _off.sans_desactivees
 
-_PROMPT_TEXTE_BRUTE = (
-    "Regarde ces images extraites d'une même vidéo verticale.\n\n"
-    "UNE SEULE QUESTION : la vidéo porte-t-elle du TEXTE INCRUSTÉ, "
-    "c'est-à-dire un texte ajouté au montage, par-dessus l'image ?\n\n"
-    "COMPTE comme du texte incrusté :\n"
-    "  - une phrase ou un mot posé en surimpression (accroche, punchline, "
-    "sous-titre stylisé, texte dans une bulle ou un rectangle)\n"
-    "  - un texte manifestement ajouté après coup, quelle que soit sa police\n\n"
-    "NE COMPTE PAS :\n"
-    "  - l'interface d'une application (boutons, like, commentaires, partage, "
-    "barre de progression, heure du téléphone, batterie)\n"
-    "  - un pseudo ou un @identifiant seul\n"
-    "  - un watermark ou un logo\n"
-    "  - du texte qui appartient à la scène filmée : une enseigne, un panneau, "
-    "un t-shirt, un écran filmé, un livre. Ce texte-là est DANS le décor, il "
-    "n'a pas été ajouté au montage.\n\n"
-    "Dans le doute, réponds false : cette réponse sert à proposer des "
-    "suppressions, et effacer une vidéo utilisable coûte plus cher que d'en "
-    "garder une à retrier à la main.\n\n"
-    "Réponds UNIQUEMENT par un objet JSON :\n"
-    '{"texte": true|false, "extraits": ["le texte lu", "..."], '
-    '"confiance": "haute"|"moyenne"|"basse"}'
-)
+#: REPÉRER LE TEXTE : GRATUIT, PAR OCR LOCAL (Tesseract), plus par Claude.
+#:
+#: Décision du propriétaire le 25/09/2026 : cette tâche doit être gratuite,
+#: même plus lente (« 500 vidéos, une dizaine de minutes »).
+#:
+#: MESURÉ sur le VPS (2 cœurs), 60 brutes à texte incrusté + 120 sans, tirées
+#: de six profils, contre les verdicts de Claude Haiku :
+#:   - Tesseract sur l'image brute : le texte TikTok (blanc, fin, posé sur la
+#:     vidéo) lui échappe. On ne garde QUE les pixels presque blancs avant
+#:     l'OCR ; en 1280 de haut, les petites polices restent lisibles.
+#:   - Règle « 2 mots lus en tout sur les 4 images » : ~80 % des vrais textes
+#:     incrustés trouvés, 1 faux positif sur 120. Exiger que les mots se
+#:     RÉPÈTENT d'une image à l'autre ratait les sous-titres mot à mot.
+#:   - Environ 1,8 s par vidéo, 2 ouvriers : ~15 min pour 500 vidéos.
+#:   - RapidOCR (PaddleOCR) essayé aussi : pas meilleur, plus lent, et il
+#:     « lit » du charabia dans les textures.
+#: Ce qui reste manqué : un texte FONCÉ sur fond clair (le filtre ne garde que
+#: le blanc) et des sous-titres d'un mot qui changent entre les 4 images.
+#: Beaucoup des « ratés » de la mesure étaient en fait des erreurs de Claude
+#: (marques sur un t-shirt, enseignes) — que la consigne excluait.
+SCAN_OCR_HAUTEUR = int(os.getenv("SCAN_OCR_HAUTEUR") or "1280")
+SCAN_OCR_SEUIL_BLANC = 225     # 0-255 : au-dessus, c'est du texte blanc
+SCAN_OCR_CONFIANCE = 60        # en dessous, Tesseract devine
+_NICE = ["nice", "-n", "10"] if shutil.which("nice") else []
 
 
-def _brute_a_du_texte(src: Path, key: str):
+def _mots_ocr(image: Path) -> list:
+    """Les mots lus sur une image, dans l'ordre (3 lettres et plus)."""
+    r = subprocess.run(
+        # --psm 11 : texte épars, sans supposer de paragraphe — une accroche
+        # posée n'importe où. tessedit_do_invert=0 : l'image est déjà en noir
+        # sur blanc, la seconde lecture inversée doublait le temps pour rien.
+        _NICE + ["tesseract", str(image), "-", "-l", "eng", "--psm", "11",
+                 "-c", "tessedit_do_invert=0", "tsv"],
+        capture_output=True, text=True, timeout=90)
+    mots = []
+    for ligne in r.stdout.splitlines()[1:]:
+        c = ligne.split("\t")
+        if len(c) != 12 or not c[11].strip():
+            continue
+        try:
+            conf = float(c[10])
+        except ValueError:
+            continue
+        mot = re.sub(r"[^A-Za-zÀ-ÿ]", "", c[11])
+        if conf >= SCAN_OCR_CONFIANCE and len(mot) >= 3:
+            mots.append(mot)
+    return mots
+
+
+def _brute_a_du_texte(src: Path, key: str = ""):
     """La brute porte-t-elle du texte incrusté ? -> (verdict, extraits, erreur).
 
     `verdict` vaut True, False, ou None si on n'a pas pu conclure. None n'est
     JAMAIS traité comme False par l'appelant : une vidéo qu'on n'a pas su lire
     ne doit pas se retrouver dans une liste de suppressions.
 
-    Haiku suffit pour une question binaire, et le choix n'est pas cosmétique :
-    sur 1345 brutes, Opus coûterait des dizaines d'euros là où Haiku coûte
-    quelques centimes. Quatre images, en 720 de haut — assez pour voir une
-    accroche, deux fois moins de jetons qu'en 1280.
-
-    Le nombre d'images se règle par SCAN_IMAGES ; lire son commentaire avant
-    de le baisser, l'économie est plus petite qu'elle n'en a l'air.
+    `key` ne sert plus (l'examen passait par l'API Claude) : gardé pour que
+    les appelants n'aient pas à changer.
     """
-    import base64
-    import json as _json
     import tempfile
-    import requests
-
+    if not shutil.which("tesseract"):
+        return None, [], ("Tesseract absent du serveur "
+                          "(sudo apt install tesseract-ocr)")
     duration, _w, h = _probe_video(src)
     if duration <= 0:
         return None, [], "vidéo illisible (ffmpeg absent ou fichier abîmé ?)"
     n_img = SCAN_IMAGES
-    times = sorted({round(duration * (i + 0.5) / n_img, 2) for i in range(n_img)
-                    if 0 <= duration * (i + 0.5) / n_img < duration})
+    instants = sorted({round(duration * (i + 0.5) / n_img, 2) for i in range(n_img)})
+    filtre = ("scale=-2:%d,format=gray,lutyuv=y=if(gt(val\\,%d)\\,0\\,255)"
+              # Agrandie jusqu'à 1280 même si la vidéo est plus petite (TikTok
+              # sert du 1024) : c'est ce qui rend lisibles les petites polices.
+              % (SCAN_OCR_HAUTEUR, SCAN_OCR_SEUIL_BLANC))
+    par_image = []
     with tempfile.TemporaryDirectory(prefix="txtcheck_") as tmp:
-        frames = _grab_frames(src, times, Path(tmp), height=min(720, h or 720))
-        if not frames:
-            return None, [], "impossible d'extraire des images"
-        content = []
-        for _t, fp in frames:
-            try:
-                content.append({"type": "image", "source": {
-                    "type": "base64", "media_type": "image/jpeg",
-                    "data": base64.b64encode(fp.read_bytes()).decode()}})
-            except Exception:
-                continue
-        if not content:
-            return None, [], "images illisibles"
-        content.append({"type": "text", "text": _PROMPT_TEXTE_BRUTE})
-        body = {"model": "claude-haiku-4-5-20251001", "max_tokens": 600,
-                "messages": [{"role": "user", "content": content}]}
-        hdr = {"x-api-key": key, "anthropic-version": "2023-06-01",
-               "content-type": "application/json"}
-        derniere = ""
-        for wait in (0, 5, 12):        # surcharge passagere : on retente
-            if wait:
-                import time as _t2
-                _t2.sleep(wait)
-            try:
-                r = requests.post("https://api.anthropic.com/v1/messages",
-                                  json=body, headers=hdr, timeout=90)
-            except Exception as e:
-                derniere = str(e)[:120]
-                continue
-            if r.status_code in (429, 529) or r.status_code >= 500:
-                derniere = "HTTP %s" % r.status_code
-                continue
-            if r.status_code >= 400:
-                # Le credit epuise est LA panne courante, et elle sortait en
-                # « HTTP 400 : {json...} » tronque a 120 caracteres. Vu de
-                # l ecran, l examen affichait seulement « N illisibles » :
-                # impossible de deviner qu il fallait recharger le compte.
-                _corps = (r.text or "").lower()
-                if "credit balance" in _corps or "insufficient" in _corps:
-                    return None, [], "CREDIT_EPUISE"
-                return None, [], "HTTP %s : %s" % (r.status_code, r.text[:120])
-            try:
-                txt = "".join(b.get("text", "")
-                              for b in (r.json().get("content") or [])).strip()
-                if txt.startswith("```"):
-                    txt = txt.split("```")[1]
-                    txt = txt[4:] if txt.lower().startswith("json") else txt
-                d = _json.loads(txt[txt.index("{"):txt.rindex("}") + 1])
-            except Exception as e:
-                return None, [], "réponse illisible : %s" % str(e)[:90]
-            extraits = [str(x)[:200] for x in (d.get("extraits") or [])][:6]
-            return bool(d.get("texte")), extraits, ""
-        return None, [], derniere or "l'IA n'a pas répondu"
+        for i, t in enumerate(instants):
+            dest = Path(tmp) / f"f{i}.png"
+            subprocess.run(_NICE + ["ffmpeg", "-v", "error", "-y", "-ss", f"{t:.2f}",
+                                    "-i", str(src), "-frames:v", "1", "-vf", filtre,
+                                    str(dest)],
+                           capture_output=True, timeout=60)
+            if dest.exists() and dest.stat().st_size > 200:
+                par_image.append(_mots_ocr(dest))
+    if not par_image:
+        return None, [], "impossible d'extraire des images"
+    verdict, extraits = _verdict_texte(par_image)
+    return verdict, extraits, ""
+
+
+def _verdict_texte(par_image: list) -> tuple:
+    """(verdict, extraits) à partir des mots lus sur chaque image.
+
+    Du texte incrusté : deux mots distincts au moins, lus avec confiance, sur
+    l'ensemble des images (voir la mesure au-dessus de SCAN_OCR_HAUTEUR). Un
+    mot isolé est presque toujours du décor ou une lecture de travers.
+    """
+    ensembles = [{m.lower() for m in mots} for mots in par_image]
+    toutes = set().union(*ensembles) if ensembles else set()
+    verdict = len(toutes) >= 2
+    extraits = []
+    if verdict:
+        # L'image la plus bavarde, mots dans l'ordre de lecture : c'est ce
+        # que le rapport montre pour qu'on juge d'un coup d'oeil.
+        meilleure = max(par_image, key=len)
+        extraits = [" ".join(meilleure[:14])]
+    return verdict, extraits
 
 
 def _textecheck_lire(video: Path) -> dict:

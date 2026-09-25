@@ -5148,15 +5148,25 @@ try:
     check("texte : la brute non examinee n apparait nulle part",
           _rapTx["total_examine"] == 3 and _rapTx["total_brutes"] == 4)
 
-    # Sans cle IA, on ne lance rien et on le DIT.
-    _savKey = _osRg.environ.pop("ANTHROPIC_API_KEY", None) if "_osRg" in dir() else None
-    import os as _osTx
+    # L'examen est un OCR local et gratuit depuis le 25/09/2026 : sans cle
+    # IA, il part quand meme. (Avant, il refusait et le disait.)
+    import os as _osTx, time as _tTx
     _k0 = _osTx.environ.pop("ANTHROPIC_API_KEY", None)
-    _laTx, _msgTx = _wTx._lancer_scan_texte(_idTx)
-    check("texte : sans cle IA, rien n est lance et le message le dit",
-          _laTx is False and "clé ia" in _msgTx.lower(), _msgTx[:80])
-    if _k0 is not None:
-        _osTx.environ["ANTHROPIC_API_KEY"] = _k0
+    _savBTx = _wTx._brute_a_du_texte
+    _wTx._brute_a_du_texte = lambda p, key="": (None, [], "test")
+    try:
+        _laTx, _msgTx = _wTx._lancer_scan_texte(_idTx)
+        for _ in range(50):
+            if not _wTx.scan_texte_etat().get("en_cours"):
+                break
+            _tTx.sleep(0.1)
+        check("texte : sans cle IA, l'examen part quand meme (OCR local, gratuit)",
+              _laTx is True and "clé ia" not in _msgTx.lower(), _msgTx[:80])
+    finally:
+        _wTx._brute_a_du_texte = _savBTx
+        (_dTx / "d.mp4").with_suffix(_wTx.SUFFIXE_TEXTECHECK).unlink(missing_ok=True)
+        if _k0 is not None:
+            _osTx.environ["ANTHROPIC_API_KEY"] = _k0
 
     # Le voisin doit partir avec la video, sinon un re-upload homonyme
     # heriterait du verdict de l ancienne.
@@ -14986,6 +14996,48 @@ try:
           _gdS._tige_media("tt_1.social.json") == "tt_1")
 except Exception as _eS:
     check("import tiktok : testable", False, repr(_eS)[:200])
+
+# ------------------------------------------ 38. Reperer le texte : gratuit (OCR local)
+print()
+print("=" * 70)
+print("Reperer le texte des brutes : Tesseract local, plus d'API payante")
+print("=" * 70)
+try:
+    import web_upload as _wT
+    _vT = _wT._verdict_texte
+    check("texte incruste : des mots lus sur les images",
+          _vT([["Pov", "novio"], ["Pov", "novio", "comer"], [], ["pov"]])[0] is True)
+    check("un mot isole n'est pas du texte incruste",
+          _vT([["Nike"], [], [], []])[0] is False
+          and _vT([["Nike"], ["nike"], ["NIKE"], []])[0] is False)
+    check("sous-titres mot a mot : deux mots differents sur deux images suffisent",
+          _vT([["pick"], [], ["just"], []])[0] is True)
+    check("le rapport montre les mots de l'image la plus bavarde, dans l'ordre",
+          _vT([["Pov", "novio"], ["Pov", "tu", "novio"], [], []])[1] == ["Pov tu novio"])
+    _srcT = open("web_upload.py", encoding="utf-8").read()
+    _i = _srcT.index("def _brute_a_du_texte(")
+    _corpsT = _srcT[_i:_srcT.index("\ndef ", _i + 10)]
+    check("l'examen n'appelle plus aucune API payante",
+          "api.anthropic.com" not in _corpsT and "tesseract" in _corpsT)
+    _savW = _wT.shutil.which
+    try:
+        _wT.shutil.which = lambda n: None
+        _rT = _wT._brute_a_du_texte(_wT.Path("x.mp4"))
+        check("Tesseract absent : pas de verdict invente, et la raison est dite",
+              _rT[0] is None and "Tesseract" in _rT[2], str(_rT))
+    finally:
+        _wT.shutil.which = _savW
+    import tempfile as _tfT
+    _savI = _wT.IDENTITIES_DIR
+    try:
+        _wT.IDENTITIES_DIR = _wT.Path(_tfT.mkdtemp())
+        (_wT.IDENTITIES_DIR / "zz" / "brutes").mkdir(parents=True)
+        _okT, _msgT = _wT._lancer_scan_texte("zz")
+        check("lancer l'examen ne demande plus de cle IA", "Clé IA" not in _msgT, _msgT)
+    finally:
+        _wT.IDENTITIES_DIR = _savI
+except Exception as _eT:
+    check("reperer le texte : testable", False, repr(_eT)[:200])
 
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
