@@ -15094,7 +15094,7 @@ except Exception as _eT:
 # ------------------------------------------ 39. OCR Gemini : alias stable + repli
 print()
 print("=" * 70)
-print("OCR Gemini : un seul modele defini, repli sur 404/503, panne visible")
+print("OCR Gemini : un seul modele defini, repli sur 404/429/503, panne visible")
 print("=" * 70)
 try:
     import types as _typesG
@@ -15163,6 +15163,11 @@ try:
         check("503 (surcharge) : repli sur le second modele",
               _tG and _vus == [m1, m2] and _trG.STATUS.get("gemini_model") == "gemini-9-lite",
               f"{_tG!r} {_vus} {_trG.STATUS}")
+
+        _vus = _simuler(_err(429, "Resource has been exhausted (e.g. check quota)."), _RepG(200, _okG))
+        _tG = _trG._ocr_gemini([_frG], "t")
+        check("429 (quota du modele epuise) : repli sur le second modele",
+              _tG and _vus == [m1, m2], f"{_tG!r} {_vus}")
 
         _vus = _simuler(_err(400, "API key not valid"))
         _tG = _trG._ocr_gemini([_frG], "t")

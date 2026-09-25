@@ -857,9 +857,11 @@ _GEMINI_LAST_ERR = ""
 # surcharge de l'un n'emporte pas l'autre.
 GEMINI_MODELS = ("gemini-flash-lite-latest", "gemini-3.1-flash-lite")
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-# 404 = modèle retiré, 503 = surcharge passagère : un autre modèle peut répondre.
-# Toute autre erreur (clé refusée, requête invalide) serait la même partout.
-_GEMINI_REPLI_SI = (404, 503)
+# 404 = modèle retiré, 503 = surcharge passagère, 429 = quota épuisé — le quota
+# gratuit est compté PAR MODÈLE, l'autre a encore le sien. Un autre modèle peut
+# répondre. Toute autre erreur (clé refusée, requête invalide) serait la même
+# partout.
+_GEMINI_REPLI_SI = (404, 429, 503)
 
 
 class GeminiError(Exception):
