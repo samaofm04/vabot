@@ -354,10 +354,122 @@ if _mm is not None:
         "Copy the %s, ⚡ and ⭐ tags of these edits to every identity of the "
         "same market (adds only, never removes)" % _t)
 
+# --- Onglet Equipe (Social Analytics, equipe.py) ------------------------------
+# Les compteurs sont ecrits dans leur propre <span> : la traduction se fait sur
+# le noeud de texte ENTIER, « 3 actif(s) » d'un seul tenant ne serait jamais
+# reconnu.
+EQUIPE = {
+    "Équipe": "Team",
+    "Membres": "Members",
+    "actif(s)": "active",
+    "une info, pas un accès": "information, not access",
+    "À confirmer": "To confirm",
+    "fiche(s) VA": "VA profile(s)",
+    "Liens cassés": "Broken links",
+    "fiche ou identité introuvable": "profile or identity not found",
+    "Fiches VA non proposées": "VA profiles not suggested",
+    "— elles sont rangées sous une réserve, un dossier de montage, ou une identité "
+    "absente de « Comptes par identité ».":
+        "— they sit under a reserve, an editing folder, or an identity missing "
+        "from « Accounts by identity ».",
+    "Périmètre indisponible : toutes les identités sont proposées":
+        "Scope unavailable: every identity is suggested",
+    "Des fiches de réserves, ou d’identités absentes de « Comptes par identité », "
+    "peuvent figurer dans « À confirmer ».":
+        "Profiles from reserves, or from identities missing from « Accounts by "
+        "identity », may appear in « To confirm ».",
+    "sans nom": "without a name",
+    "en double sous la même identité": "duplicated under the same identity",
+    "Rôle proposé aux suggestions absent de la liste :":
+        "Role given to suggestions is missing from the list:",
+    "— les suggestions seront ajoutées sans rôle ; choisis-en un dans « Rôles ».":
+        "— suggestions will be added without a role; pick one in « Roles ».",
+    "Rôle proposé aux suggestions": "Role given to suggestions",
+    # Raisons d'un lien casse : libelles seuls, la donnee est dans un <b>.
+    "fiche absente de": "profile missing from",
+    "(supprimée ou renommée ?)": "(deleted or renamed?)",
+    "identité introuvable :": "identity not found:",
+    "(renommée ou archivée ?)": "(renamed or archived?)",
+    "aussi liée à": "also linked to",
+    "fiche supprimée le": "profile deleted on",
+    "fiche supprimée, nom repris le": "profile deleted, name reused on",
+    "Autres @Discord": "Other @Discord",
+    "séparés par des virgules": "comma-separated",
+    "Fiches ignorées dans le référentiel": "Profiles skipped in the registry",
+    "Lecture seule : les modifications sont réservées aux administrateurs.":
+        "Read only: changes are reserved to administrators.",
+    "Équipe illisible": "Team file unreadable",
+    "Référentiel Jailbreak indisponible": "Jailbreak registry unavailable",
+    "Les liens des membres ne peuvent pas être vérifiés : rien n'est affiché "
+    "plutôt que des liens faussement cassés.":
+        "Member links cannot be checked: nothing is shown rather than links "
+        "wrongly marked as broken.",
+    "+ Ajouter une personne": "+ Add a person",
+    "Ajouter une personne": "Add a person",
+    "Tous les rôles": "All roles",
+    "Sans rôle": "No role",
+    "Rechercher un nom…": "Search a name…",
+    "Afficher les inactifs": "Show inactive",
+    "Nom": "Name",
+    "Rôle": "Role",
+    "Comptes Insta": "Insta accounts",
+    "Fiches liées": "Linked profiles",
+    "Statut": "Status",
+    "Actif": "Active",
+    "Inactif": "Inactive",
+    "(sans nom)": "(no name)",
+    "+ fiche": "+ profile",
+    "Délier": "Unlink",
+    "Fusionner avec…": "Merge with…",
+    "Retirer": "Remove",
+    "Personne dans l’équipe pour l’instant : ajoute les suggestions ci-dessous, "
+    "ou une personne à la main.":
+        "Nobody in the team yet: add the suggestions below, or a person by hand.",
+    "Aucun membre ne correspond au filtre.": "No member matches the filter.",
+    "Fiches VA de « Comptes par identité » liées à personne. Regroupées par "
+    "@Discord quand il est renseigné ; jamais par le nom : le même nom sous deux "
+    "models, ce sont deux personnes.":
+        "VA profiles from « Accounts by identity » linked to nobody. Grouped by "
+        "@Discord when it is filled in; never by name: the same name under two "
+        "models means two different people.",
+    "Rien à confirmer : chaque fiche VA est liée à quelqu’un ou masquée.":
+        "Nothing to confirm: every VA profile is linked to someone or hidden.",
+    "même @Discord que": "same @Discord as",
+    "Rattacher à…": "Attach to…",
+    "Pas dans l’équipe": "Not in the team",
+    "Masquées": "Hidden",
+    "Aucune fiche masquée.": "No hidden profile.",
+    "Remettre": "Restore",
+    "Un rôle est une simple information : il ne donne aucun accès au site. "
+    "Les accès se règlent dans Settings → Rôles.":
+        "A role is only information: it grants no access to the site. Access "
+        "is set in Settings → Roles.",
+    "membre(s)": "member(s)",
+    "Renommer": "Rename",
+    "Nouveau rôle": "New role",
+    "pseudo": "username",
+    "Lier une fiche à": "Link a profile to",
+    "Seules les fiches liées à personne sont proposées. Lier une fiche masquée "
+    "la sort des masquées.":
+        "Only profiles linked to nobody are offered. Linking a hidden profile "
+        "takes it out of the hidden list.",
+    "La personne choisie est fondue dans celle-ci : ses fiches passent ici, les "
+    "champs vides sont complétés, un @Discord différent est gardé en second, un "
+    "rôle différent est reporté dans la note, les notes sont mises bout à bout, "
+    "puis elle disparaît de l’équipe.":
+        "The chosen person is merged into this one: their profiles move here, "
+        "empty fields are filled in, a different @Discord is kept as a second "
+        "one, a different role is written into the note, notes are joined, then "
+        "they leave the team.",
+    "Les fiches de la suggestion rejoignent le membre choisi.":
+        "The suggestion's profiles join the chosen member.",
+    "Valider": "Confirm",
+}
+
 # Le dictionnaire complet, dans l'ordre : les libelles les plus longs d'abord
 # (sinon « Posts » remplacerait le debut de « Posts programmes »).
 TRADUCTIONS = {}
-for _bloc in (MENU, PAGES, ACTIONS, FORMS, ETATS, AIDES, MARQUES_MONTAGE):
+for _bloc in (MENU, PAGES, ACTIONS, FORMS, ETATS, AIDES, MARQUES_MONTAGE, EQUIPE):
     TRADUCTIONS.update(_bloc)
 
 

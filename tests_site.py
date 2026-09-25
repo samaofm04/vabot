@@ -17561,6 +17561,1138 @@ try:
 except Exception as _eI:
     check("infloww : testable", False, repr(_eI)[:200])
 
+print()
+print("=" * 70)
+print("EQUIPE (Social Analytics) : noms et roles, liens vers les fiches VA")
+print("=" * 70)
+# Onglet ajoute le 25/09/2026 : equipe.py (module pur) + /jbequipe/ (site).
+# TOUT se joue dans un dossier temporaire. Les routes du site, jailbreak,
+# va_portal, jb_objectifs et identite_admin ecrivent par des chemins RELATIFS
+# (« data/... ») : sans les detours ci-dessous, ce banc ecrirait dans les
+# vraies donnees -- equipe.json, le referentiel des comptes, la paie.
+#
+# Ce qui est verrouille ici, et pourquoi :
+#  - un fichier present mais illisible n est JAMAIS pris pour une equipe vide
+#    (la premiere ecriture suivante graverait ce vide) ;
+#  - une fiche VA n appartient qu a UNE personne, le refus nomme le membre ;
+#  - le SEUL regroupement automatique est le pseudo Discord : « Jaurel X2 »
+#    sous jessye et sous lola sont deux personnes ;
+#  - un lien vers une fiche disparue reste, et se montre CASSE avec sa raison ;
+#  - les deux portes de renommage (fiche, identite) emportent les liens.
+import html as _htmlEq
+import importlib as _ilEq
+import inspect as _inspEq
+import re as _reEq
+import shutil as _shEq
+import subprocess as _spEq
+import threading as _thEq
+from html.parser import HTMLParser as _HPEq
+
+_dirEq = pathlib.Path(tempfile.mkdtemp(prefix="equipe_"))
+
+
+def _refusEq(fn, *a, **k):
+    """Le message d un refus NOMME (ErreurEquipe), ou « » si ca passe."""
+    try:
+        fn(*a, **k)
+        return ""
+    except _eqE.ErreurEquipe as _e:
+        return str(_e) or "(refus sans message)"
+
+
+def _octetsEq(p):
+    return p.read_bytes() if p.exists() else None
+
+
+try:
+    import equipe as _eqE
+    _savEqFile = _eqE.EQUIPE_FILE
+    # Filet : si un appel oubliait son chemin=, il tomberait ici, pas dans data/.
+    _eqE.EQUIPE_FILE = _dirEq / "filet" / "equipe.json"
+    try:
+        # ---------------------------------------------------------------
+        # 1. Lecture : absent -> vide ; illisible -> erreur NOMMEE
+        # ---------------------------------------------------------------
+        _pA = _dirEq / "a" / "equipe.json"
+        _pA.parent.mkdir(parents=True)
+        _d0 = _eqE.lire(chemin=_pA)
+        check("equipe : fichier absent -> equipe vide avec les 4 roles par defaut, rien cree",
+              _d0 == {"roles": list(_eqE.ROLES_DEFAUT), "membres": [], "masquees": []}
+              and list(_eqE.ROLES_DEFAUT) == ["VA", "Manager", "Chef d'équipe", "Monteur"]
+              and not _pA.exists(), _d0)
+
+        _pasNommesEq = []
+        for _contenuEq, _quoiEq in (
+                ("", "vide"), ("   \n", "blanc"), ("{coupe", "JSON tronque"),
+                ("[]", "racine liste"), ('{"membres": {}}', "membres pas une liste"),
+                ('{"membres": [42]}', "membre pas un objet"),
+                ('{"roles": ["VA", 3]}', "role pas un texte"),
+                ('{"membres": [{"nom": "A", "fiches": [{"identite": "lola"}]}]}', "lien sans fiche"),
+                ('{"masquees": [{"fiche": "X"}]}', "masquee sans identite")):
+            _pA.write_text(_contenuEq, encoding="utf-8")
+            try:
+                _eqE.lire(chemin=_pA)
+                _pasNommesEq.append(_quoiEq + " (lu sans erreur)")
+            except _eqE.EquipeIllisible as _e:
+                if "equipe.json est illisible" not in str(_e):
+                    _pasNommesEq.append(_quoiEq + " : " + str(_e)[:60])
+            except Exception as _e:
+                _pasNommesEq.append("%s : %r" % (_quoiEq, _e))
+        check("equipe : vide, tronque ou mal forme -> EquipeIllisible nommee (9 cas)",
+              not _pasNommesEq, " | ".join(_pasNommesEq))
+
+        _pA.write_text("{coupe", encoding="utf-8")
+        _rIll = [_refusEq(_eqE.ajouter_membre, "Paul", chemin=_pA),
+                 _refusEq(_eqE.ajouter_role, "Stagiaire", chemin=_pA),
+                 _refusEq(_eqE.renommer_fiche, "jessye", "Noum", "Noum X1", chemin=_pA),
+                 _refusEq(_eqE.renommer_identite, "lola", "lolita", chemin=_pA)]
+        check("equipe : fichier illisible -> ajout, role et renommages REFUSES, fichier intact",
+              all("illisible" in _r for _r in _rIll)
+              and _pA.read_text(encoding="utf-8") == "{coupe", _rIll)
+
+        # La copie .prev laissee par safe_json est citee : c est la reparation.
+        _pP = _dirEq / "p" / "equipe.json"
+        _eqE.ajouter_role("Stagiaire", chemin=_pP)
+        _eqE.ajouter_role("Chauffeur", chemin=_pP)
+        _pP.write_text('{"roles": [', encoding="utf-8")
+        _rPrev = _refusEq(_eqE.lire, chemin=_pP)
+        check("equipe : l erreur de lecture cite la copie equipe.json.prev",
+              "equipe.json.prev" in _rPrev, _rPrev)
+
+        # Ecriture ratee : jamais un « ok ».
+        _pB = _dirEq / "b" / "equipe.json"
+        _svWEq = safe_json.write
+        safe_json.write = lambda *a, **k: False
+        try:
+            _rW = _refusEq(_eqE.ajouter_membre, "Paul", chemin=_pB)
+        finally:
+            safe_json.write = _svWEq
+        check("equipe : safe_json.write rend False -> EcritureImpossible nommee",
+              "impossible" in _rW and not _pB.exists(), _rW)
+        _srcEqMod = pathlib.Path("equipe.py").read_text(encoding="utf-8")
+        check("equipe : le module n ecrit que par safe_json.write",
+              "safe_json.write(" in _srcEqMod
+              and not _reEq.search(r"write_text\(|json\.dump\(|open\([^)]*['\"][wa]", _srcEqMod))
+        # Le role d equipe est une FICHE, pas un droit : aucun lien vers les
+        # comptes du site ni vers les roles d acces des Reglages.
+        check("equipe : le module ignore les comptes et les roles d acces du site",
+              not _reEq.search(r"web_users|role_definitions|_role_allowed|import web_upload|from web_upload",
+                               _srcEqMod))
+
+        # ---------------------------------------------------------------
+        # 2. Membres : ajout, modification, refus nommes, tout ou rien
+        # ---------------------------------------------------------------
+        _p = _dirEq / "c" / "equipe.json"
+        _mPaul = _eqE.ajouter_membre("  Paul  ", role="manager", discord="@Paul.9",
+                                     note="Gère l'équipe", chemin=_p)
+        check("equipe : ajout -> nom nettoye, role ecrit comme dans la liste, @ retire",
+              _mPaul["nom"] == "Paul" and _mPaul["role"] == "Manager"
+              and _mPaul["discord"] == "Paul.9" and _mPaul["actif"] is True
+              and _mPaul["id"] and _eqE.lire(chemin=_p)["membres"][0]["id"] == _mPaul["id"], _mPaul)
+        _avEq = _octetsEq(_p)
+        _r1 = _refusEq(_eqE.ajouter_membre, "   ", chemin=_p)
+        _r2 = _refusEq(_eqE.ajouter_membre, "Zoe", role="Stagiaire", chemin=_p)
+        check("equipe : nom vide / role inconnu -> refus nommes, rien d ecrit",
+              "obligatoire" in _r1 and "Rôle inconnu" in _r2 and "Stagiaire" in _r2
+              and _octetsEq(_p) == _avEq, (_r1, _r2))
+
+        _eqE.modifier_membre(_mPaul["id"], role="VA", chemin=_p)
+        _dP = _eqE.lire(chemin=_p)["membres"][0]
+        check("equipe : modifier le seul role ne touche ni la note ni le Discord",
+              _dP["role"] == "VA" and _dP["note"] == "Gère l'équipe" and _dP["discord"] == "Paul.9", _dP)
+        _r3 = _refusEq(_eqE.modifier_membre, "m_inconnu", nom="X", chemin=_p)
+        _r4 = _refusEq(_eqE.modifier_membre, _mPaul["id"], salaire="1000", chemin=_p)
+        check("equipe : membre introuvable / champ inconnu -> refus nommes",
+              "introuvable" in _r3 and "Champ inconnu" in _r4 and "salaire" in _r4, (_r3, _r4))
+
+        _mNoum = _eqE.ajouter_membre("Noum", fiches=[("JESSYE", "Noum")], chemin=_p)
+        check("equipe : l identite d un lien est rangee en minuscules",
+              _eqE.lire(chemin=_p)["membres"][1]["fiches"] == [{"identite": "jessye", "fiche": "Noum"}])
+        _r5 = _refusEq(_eqE.lier_fiche, _mPaul["id"], "jessye", "NOUM", chemin=_p)
+        check("equipe : une fiche deja liee est refusee EN NOMMANT son membre (casse ignoree)",
+              "déjà liée à Noum" in _r5, _r5)
+        _avEq = _octetsEq(_p)
+        _r6 = _refusEq(_eqE.lier_fiches, _mPaul["id"], [("lola", "Libre"), ("jessye", "noum")], chemin=_p)
+        check("equipe : lier plusieurs fiches est tout ou rien (la libre n est pas liee)",
+              _r6 and _octetsEq(_p) == _avEq, _r6)
+        _r7 = _refusEq(_eqE.ajouter_membres,
+                       [{"nom": "Alpha"}, {"nom": "Beta", "fiches": [("jessye", "Noum")]}], chemin=_p)
+        check("equipe : ajout groupe tout ou rien (Alpha non cree quand Beta est refuse)",
+              _r7 and _octetsEq(_p) == _avEq
+              and "Alpha" not in [m["nom"] for m in _eqE.lire(chemin=_p)["membres"]], _r7)
+
+        _eqE.lier_fiche(_mPaul["id"], "lola", "Jaurel X2", chemin=_p)
+        _eqE.delier_fiche(_mPaul["id"], "LOLA", "jaurel x2", chemin=_p)
+        _r8 = _refusEq(_eqE.delier_fiche, _mPaul["id"], "lola", "Jaurel X2", chemin=_p)
+        check("equipe : delier ignore la casse ; delier un lien absent est refuse",
+              not _eqE.lire(chemin=_p)["membres"][0]["fiches"] and "n'est pas liée" in _r8, _r8)
+
+        # ---------------------------------------------------------------
+        # 3. Fusion
+        # ---------------------------------------------------------------
+        _mBis = _eqE.ajouter_membre("Noum bis", role="Monteur", discord="noum0075", note="note B",
+                                    fiches=[("lola", "VA NOUM 4X1"), ("jessye", "Noum-2")], chemin=_p)
+        _eqE.modifier_membre(_mNoum["id"], note="note A", chemin=_p)
+        _rf = _eqE.fusionner(_mNoum["id"], _mBis["id"], chemin=_p)
+        _dF = _eqE.lire(chemin=_p)
+        _gF = [m for m in _dF["membres"] if m["id"] == _mNoum["id"]]
+        check("equipe : fusion -> fiches reunies, vides completes, notes bout a bout, absorbe parti",
+              len(_gF) == 1 and len(_gF[0]["fiches"]) == 3 and _gF[0]["discord"] == "noum0075"
+              and _gF[0]["role"] == "Monteur" and _gF[0]["note"] == "note A\nnote B"
+              and _mBis["id"] not in [m["id"] for m in _dF["membres"]] and _rf["fiches"] == 2,
+              (_rf, _gF))
+        _r9 = _refusEq(_eqE.fusionner, _mNoum["id"], _mNoum["id"], chemin=_p)
+        _r9b = _refusEq(_eqE.fusionner, _mNoum["id"], _mBis["id"], chemin=_p)
+        check("equipe : fusion avec soi-meme / avec un absorbe disparu -> refus nommes",
+              "différentes" in _r9 and "introuvable" in _r9b, (_r9, _r9b))
+
+        # ---------------------------------------------------------------
+        # 4. Roles
+        # ---------------------------------------------------------------
+        _r10 = _refusEq(_eqE.ajouter_role, "chef D'ÉQUIPE", chemin=_p)
+        check("equipe : role en double refuse (casse ignoree)", "existe déjà" in _r10, _r10)
+        _eqE.ajouter_role("Stagiaire", chemin=_p)
+        _eqE.modifier_membre(_mNoum["id"], role="va", chemin=_p)
+        _nR = _eqE.renommer_role("va", "Assistant VA", chemin=_p)
+        _dR = _eqE.lire(chemin=_p)
+        check("equipe : renommer un role -> les membres suivent, leur nombre est rendu",
+              _nR == 2 and "Assistant VA" in _dR["roles"] and "VA" not in _dR["roles"]
+              and all(m["role"] == "Assistant VA" for m in _dR["membres"]), (_nR, _dR["roles"]))
+        _r11 = _refusEq(_eqE.supprimer_role, "assistant va", chemin=_p)
+        _r12 = _refusEq(_eqE.renommer_role, "Stagiaire", "MANAGER", chemin=_p)
+        check("equipe : supprimer un role porte -> refus AVEC le nombre ; renommer sur un existant -> refus",
+              "porté par 2 membre(s)" in _r11 and "existe déjà" in _r12, (_r11, _r12))
+        _eqE.supprimer_role("stagiaire", chemin=_p)
+        check("equipe : un role libre se supprime", "Stagiaire" not in _eqE.lire(chemin=_p)["roles"])
+
+        # Un role absent de la liste (fichier retouche a la main) ne bloque pas
+        # la correction d une note : il n est controle que s il CHANGE.
+        _dH = _eqE.lire(chemin=_p)
+        _dH["membres"][0]["role"] = "Ancien role"
+        safe_json.write(_p, _dH, indent=2)
+        _rH1 = _refusEq(_eqE.modifier_membre, _dH["membres"][0]["id"], role="Ancien role",
+                        note="corrigee", chemin=_p)
+        _rH2 = _refusEq(_eqE.modifier_membre, _dH["membres"][0]["id"], role="Autre inconnu", chemin=_p)
+        check("equipe : role hors liste garde tant qu il ne change pas, refuse s il change",
+              not _rH1 and "Rôle inconnu" in _rH2
+              and _eqE.lire(chemin=_p)["membres"][0]["note"] == "corrigee", (_rH1, _rH2))
+
+        # ---------------------------------------------------------------
+        # 5. Masquage (« pas dans l equipe »)
+        # ---------------------------------------------------------------
+        _r13 = _refusEq(_eqE.masquer_fiche, "jessye", "noum", chemin=_p)
+        _nM1 = _eqE.masquer_fiche("lola", "Jaurel X2", chemin=_p)
+        _nM2 = _eqE.masquer_fiche("LOLA", "jaurel x2", chemin=_p)
+        check("equipe : masquer une fiche liee refuse (nomme) ; masquer deux fois n ajoute rien",
+              "est liée à Noum" in _r13 and _nM1 == 1 and _nM2 == 0
+              and len(_eqE.lire(chemin=_p)["masquees"]) == 1, (_r13, _nM1, _nM2))
+        _rl = _eqE.lier_fiche(_mPaul["id"], "lola", "Jaurel X2", chemin=_p)
+        check("equipe : lier une fiche masquee la sort des masquees",
+              _rl["demasquees"] == 1 and not _eqE.lire(chemin=_p)["masquees"], _rl)
+        _eqE.delier_fiche(_mPaul["id"], "lola", "Jaurel X2", chemin=_p)
+        _eqE.masquer_fiche("lola", "Jaurel X2", chemin=_p)
+        _nD = _eqE.demasquer_fiche("lola", "JAUREL X2", chemin=_p)
+        _r14 = _refusEq(_eqE.demasquer_fiche, "lola", "Jaurel X2", chemin=_p)
+        check("equipe : remettre une masquee ; la remettre deux fois est refuse",
+              _nD == 1 and "n'est pas masquée" in _r14, _r14)
+
+        _rRet = _eqE.retirer_membre(_mPaul["id"], chemin=_p)
+        check("equipe : retirer un membre le fait disparaitre (et le rend)",
+              _rRet["nom"] == "Paul" and _mPaul["id"] not in [m["id"] for m in _eqE.lire(chemin=_p)["membres"]])
+
+        # ---------------------------------------------------------------
+        # 6. Verrou : lire-modifier-ecrire sans ecrasement
+        # ---------------------------------------------------------------
+        _pC = _dirEq / "conc" / "equipe.json"
+        _errC = []
+
+        def _ajoutsEq(k):
+            for i in range(8):
+                try:
+                    _eqE.ajouter_membre("P%d-%d" % (k, i), chemin=_pC)
+                except Exception as _e:
+                    _errC.append(repr(_e))
+        _thsEq = [_thEq.Thread(target=_ajoutsEq, args=(k,)) for k in range(5)]
+        for _t in _thsEq:
+            _t.start()
+        for _t in _thsEq:
+            _t.join()
+        _dC = _eqE.lire(chemin=_pC)
+        check("equipe : 5 fils x 8 ajouts -> 40 membres, ids uniques, aucun perdu",
+              not _errC and len(_dC["membres"]) == 40
+              and len({m["id"] for m in _dC["membres"]}) == 40, (_errC[:2], len(_dC["membres"])))
+
+        # ---------------------------------------------------------------
+        # 7. La vue : regroupement par Discord SEULEMENT, liens casses, compteurs
+        # ---------------------------------------------------------------
+        _FV = {
+            "jessye": [{"name": "Noum", "discord_username": "noum0075"},
+                       {"name": "Jaurel X2", "discord_username": ""},
+                       {"name": "Safidy", "discord_username": "safidy.9"},
+                       {"name": "Fiche Liee", "discord_username": ""},
+                       {"name": "", "discord_username": ""},
+                       {"name": "fiche liee", "discord_username": ""},
+                       {"name": "Cachee", "discord_username": ""}],
+            "lola": [{"name": "VA NOUM 4X1", "discord_username": "@NOUM0075"},
+                     {"name": "Jaurel X2", "discord_username": ""},
+                     {"name": "Safidy", "discord_username": ""}],
+            "blonde": [{"name": "Hors", "discord_username": ""}],
+        }
+        _CV = {"jessye": [{"va": "Noum"}, {"va": "noum"}, {"va": " NOUM "}, {"va": "Jaurel X2"},
+                          {"va": "Fiche Liee"}, {"va": ""}],
+               "lola": [{"va": "VA NOUM 4X1"}]}
+        _pV = _dirEq / "v" / "equipe.json"
+        _mV = _eqE.ajouter_membre("Liee", fiches=[("jessye", "Fiche Liee"), ("jessye", "Supprimee"),
+                                                   ("zoe", "Ancienne")], chemin=_pV)
+        _mD = _eqE.ajouter_membre("Noum (a la main)", discord="@Noum0075", chemin=_pV)
+        _eqE.masquer_fiche("jessye", "Cachee", chemin=_pV)
+        _eqE.masquer_fiche("jessye", "Disparue", chemin=_pV)
+        _v = _eqE.vue(_FV, _CV, perimetre=["jessye", "lola"], chemin=_pV)
+        _sg = {s["cle"]: s for s in _v["suggestions"]}
+        # .get : une suggestion manquante doit faire ECHOUER la verification,
+        # pas lever une KeyError qui emporterait toutes les suivantes.
+        _sgN, _sgJ = _sg.get("d:noum0075", {}), _sg.get("f:jessye|jaurel x2", {})
+        check("vue : meme pseudo Discord (casse et @ ignores) -> UNE suggestion, deux models",
+              sorted((f["identite"], f["fiche"]) for f in _sgN.get("fiches", []))
+              == [("jessye", "Noum"), ("lola", "VA NOUM 4X1")]
+              and _sgN.get("models") == ["jessye", "lola"], sorted(_sg))
+        check("vue : meme NOM sous deux identites -> deux suggestions (jamais par le nom)",
+              "f:jessye|jaurel x2" in _sg and "f:lola|jaurel x2" in _sg
+              and "d:safidy.9" in _sg and "f:lola|safidy" in _sg
+              and all(len(s["fiches"]) == 1 for c, s in _sg.items() if not c.startswith("d:")), sorted(_sg))
+        check("vue : une suggestion est proposee au role VA",
+              all(s["role"] == "VA" for s in _v["suggestions"]))
+        check("vue : les comptes Insta suivent la fiche (casse et espaces du champ va ignores)",
+              _sgN.get("n_comptes") == 4 and _sgJ.get("n_comptes") == 1,
+              (_sgN.get("n_comptes"), _sgJ.get("n_comptes")))
+        check("vue : la suggestion signale le membre qui porte deja ce @Discord",
+              _sgN.get("membres_meme_discord") == [_mD["id"]])
+        _mvV = [m for m in _v["membres"] if m["id"] == _mV["id"]][0]
+        _rsV = {f["fiche"]: f.get("raison", "") for f in _mvV["fiches"] if not f["ok"]}
+        check("vue : liens casses GARDES et expliques (fiche absente / identite introuvable)",
+              _mvV["n_casses"] == 2 and _rsV.get("Supprimee", "").startswith("fiche absente de jessye")
+              and "identité « zoe » introuvable" in _rsV.get("Ancienne", "")
+              and len(_eqE.lire(chemin=_pV)["membres"][0]["fiches"]) == 3, _rsV)
+        check("vue : le membre compte ses models et ses comptes (liens vivants seulement)",
+              _mvV["models"] == ["jessye"] and _mvV["n_comptes"] == 1, (_mvV["models"], _mvV["n_comptes"]))
+        _cV = _v["compteurs"]
+        check("vue : compteurs -> fiches = liees + suggerees + hors perimetre + masquees existantes",
+              _cV["fiches"] == _cV["liees"] + _cV["suggerees"] + _cV["hors_perimetre"]
+              + _cV["masquees_existantes"] and _cV["fiches"] == 9 and _cV["liees"] == 1
+              and _cV["hors_perimetre"] == 1 and _cV["masquees"] == 2
+              and _cV["masquees_existantes"] == 1 and _cV["casses"] == 2, _cV)
+        check("vue : fiche sans nom et doublon sous la meme identite COMPTES, pas ignores",
+              _cV["sans_nom"] == 1 and _cV["doublons"] == 1, _cV)
+        _mqV = {m["fiche"]: m for m in _v["masquees"]}
+        check("vue : une masquee dont la fiche a disparu est montree avec sa raison",
+              _mqV["Cachee"]["ok"] and not _mqV["Disparue"]["ok"]
+              and _mqV["Disparue"]["raison"].startswith("fiche absente"), _mqV)
+        check("vue : une suggestion disparue -> refus nomme (la liste a change)",
+              "n'existe plus" in _refusEq(_eqE.suggestion, _v, "d:personne"))
+        # Deux membres pour une fiche : impossible par le site, possible a la
+        # main. Le second lien est MONTRE casse, pas avale.
+        _dX = _eqE.lire(chemin=_pV)
+        _dX["membres"][1]["fiches"].append({"identite": "jessye", "fiche": "fiche liee"})
+        safe_json.write(_pV, _dX, indent=2)
+        _vX = _eqE.vue(_FV, _CV, perimetre=["jessye", "lola"], chemin=_pV)
+        _mdX = [m for m in _vX["membres"] if m["id"] == _mD["id"]][0]
+        check("vue : une fiche liee a deux membres (retouche a la main) -> « aussi liee a »",
+              _mdX["n_casses"] == 1 and "aussi liée à Liee" in _mdX["fiches"][0].get("raison", ""),
+              _mdX["fiches"])
+        _eqE.delier_fiche(_mD["id"], "jessye", "fiche liee", chemin=_pV)
+        _eqE.retirer_membre(_mV["id"], chemin=_pV)
+        _vR = _eqE.vue(_FV, _CV, perimetre=["jessye", "lola"], chemin=_pV)
+        check("vue : retirer un membre rend ses fiches aux suggestions",
+              "f:jessye|fiche liee" in [s["cle"] for s in _vR["suggestions"]])
+
+        # ---------------------------------------------------------------
+        # 8. Renommages vus du module
+        # ---------------------------------------------------------------
+        _pN = _dirEq / "n" / "equipe.json"
+        check("renommage : fichier absent -> 0, et le fichier n est pas cree",
+              _eqE.renommer_fiche("jessye", "A", "B", chemin=_pN) == 0
+              and _eqE.renommer_identite("lola", "lolita", chemin=_pN) == 0 and not _pN.exists())
+        _mN = _eqE.ajouter_membre("Noum", fiches=[("jessye", "Noum"), ("lola", "Noum")], chemin=_pN)
+        _eqE.masquer_fiche("lola", "Jaurel X2", chemin=_pN)
+        _nF = _eqE.renommer_fiche("jessye", "NOUM", "Noum X1", chemin=_pN)
+        _dN = _eqE.lire(chemin=_pN)
+        check("renommage de fiche : le lien suit, et SEULEMENT sous cette identite",
+              _nF == 1 and _dN["membres"][0]["fiches"] == [{"identite": "jessye", "fiche": "Noum X1"},
+                                                           {"identite": "lola", "fiche": "Noum"}],
+              _dN["membres"][0]["fiches"])
+        _nI = _eqE.renommer_identite("LOLA", "lolita", chemin=_pN)
+        _dN = _eqE.lire(chemin=_pN)
+        check("renommage d identite : les liens ET les masquees suivent",
+              _nI == 2 and {"identite": "lolita", "fiche": "Noum"} in _dN["membres"][0]["fiches"]
+              and _dN["masquees"][0]["identite"] == "lolita", (_nI, _dN["masquees"]))
+
+        # ---------------------------------------------------------------
+        # 8bis. Correctifs de la relecture du 25/09 (un cas par constat)
+        # ---------------------------------------------------------------
+        # -- nom de fiche borne comme jailbreak (strip()[:60], espaces gardes)
+        _pK = _dirEq / "k" / "equipe.json"
+        _n70 = "N" + "o" * 69
+        _FK = {"jessye": [{"name": "VA  Noum", "discord_username": ""},
+                          {"name": _n70[:60], "discord_username": ""}]}
+        _CK = {"jessye": [{"va": "VA  Noum"}, {"va": "va  noum"}]}
+        _mK = _eqE.ajouter_membre("VA Noum", fiches=[("jessye", "VA  Noum")], chemin=_pK)
+        _mK2 = _eqE.ajouter_membre("Long", fiches=[("jessye", _n70)], chemin=_pK)
+        _vK = _eqE.vue(_FK, _CK, chemin=_pK)
+        _fK = {m["id"]: m for m in _vK["membres"]}
+        check("fiche : un espace double est garde -> le lien est VIVANT, ses comptes comptes",
+              _fK[_mK["id"]]["fiches"][0]["ok"] and _fK[_mK["id"]]["n_comptes"] == 2
+              and not _vK["suggestions"], _fK[_mK["id"]]["fiches"])
+        check("fiche : un nom de 70 caracteres est borne a 60, comme jailbreak -> lien vivant",
+              _fK[_mK2["id"]]["fiches"][0]["ok"]
+              and _eqE.lire(chemin=_pK)["membres"][1]["fiches"][0]["fiche"] == _n70[:60],
+              _fK[_mK2["id"]]["fiches"])
+        _eqE.renommer_fiche("jessye", "VA  Noum", "  VA   NOUM " + "x" * 60, chemin=_pK)
+        check("fiche : renommer_fiche borne le nouveau nom a 60 sans fusionner les espaces",
+              _eqE.lire(chemin=_pK)["membres"][0]["fiches"][0]["fiche"]
+              == ("VA   NOUM " + "x" * 60)[:60])
+
+        # -- meme @Discord : celui des fiches liees compte aussi -------------
+        _pD2 = _dirEq / "d2" / "equipe.json"
+        _FD = {"jessye": [{"name": "Noum", "discord_username": "noum"}],
+               "lola": [{"name": "VA NOUM 4X1", "discord_username": "@Noum"}]}
+        _mD2 = _eqE.ajouter_membre("Noum", fiches=[("jessye", "Noum")], chemin=_pD2)
+        _sD2 = _eqE.vue(_FD, {}, chemin=_pD2)["suggestions"]
+        check("discord : un membre SANS @Discord mais lie a une fiche @noum est reconnu",
+              len(_sD2) == 1 and _sD2[0]["membres_meme_discord"] == [_mD2["id"]],
+              [(s["cle"], s["membres_meme_discord"]) for s in _sD2])
+        _avD2 = _octetsEq(_pD2)
+        _rD2 = _refusEq(_eqE.appliquer_suggestions,
+                        [{"nom": "X"}, {"nom": "Y", "role": "Inconnu"}],
+                        [(_mD2["id"], [("lola", "VA NOUM 4X1")])], chemin=_pD2)
+        check("discord : appliquer_suggestions est tout ou rien (rattachement annule avec l ajout refuse)",
+              "Rôle inconnu" in _rD2 and _octetsEq(_pD2) == _avD2, _rD2)
+        _rA2 = _eqE.appliquer_suggestions([{"nom": "Z", "role": "VA"}],
+                                          [(_mD2["id"], [("lola", "VA NOUM 4X1")])], chemin=_pD2)
+        _dA2 = _eqE.lire(chemin=_pD2)
+        check("discord : appliquer_suggestions rattache ET cree en une ecriture",
+              _rA2["rattachees"] == 1 and _rA2["fiches_rattachees"] == 1 and len(_rA2["crees"]) == 1
+              and len(_dA2["membres"]) == 2 and len(_dA2["membres"][0]["fiches"]) == 2, _rA2)
+
+        # -- fiche supprimee puis recreee : le lien ne ressuscite pas --------
+        _pS = _dirEq / "s" / "equipe.json"
+        _FS = {"lola": [{"name": "Jaurel X2", "discord_username": "nouveau_va"}]}
+        _CS = {"lola": [{"va": "Jaurel X2"}] * 9}
+        _mJ = _eqE.ajouter_membre("Jaurel", fiches=[("lola", "Jaurel X2")], chemin=_pS)
+        _eqE.masquer_fiche("lola", "Autre", chemin=_pS)
+        _nS = _eqE.marquer_supprimee("LOLA", "jaurel x2", chemin=_pS)
+        _eqE.marquer_supprimee("lola", "Autre", chemin=_pS)
+        _vS2 = _eqE.vue(_FS, _CS, chemin=_pS)
+        _jS = [m for m in _vS2["membres"] if m["id"] == _mJ["id"]][0]
+        check("supprimee : une fiche recreee sous le meme nom ne rend PAS le lien vivant",
+              _nS == 1 and not _jS["fiches"][0]["ok"] and _jS["fiches"][0]["code"] == "supprimee"
+              and _jS["n_comptes"] == 0 and "d:nouveau_va" in [s["cle"] for s in _vS2["suggestions"]],
+              (_jS["fiches"], [s["cle"] for s in _vS2["suggestions"]]))
+        _mN2 = _eqE.ajouter_membre("Nouveau", fiches=[("lola", "Jaurel X2")], chemin=_pS)
+        _vS3 = _eqE.vue(_FS, _CS, chemin=_pS)
+        _nS3 = [m for m in _vS3["membres"] if m["id"] == _mN2["id"]][0]
+        check("supprimee : la fiche recreee se lie a une autre personne, sans « deja liee »",
+              _nS3["fiches"][0]["ok"] and _nS3["n_comptes"] == 9 and _vS3["compteurs"]["casses"] == 1,
+              _nS3["fiches"])
+        _eqE.masquer_fiche("lola", "Autre", chemin=_pS)
+        check("supprimee : une masquee marquee cede la place quand on masque la fiche recreee",
+              [x.get("supprimee") for x in _eqE.lire(chemin=_pS)["masquees"]] == [None])
+        _eqE.retirer_membre(_mN2["id"], chemin=_pS)
+        _eqE.lier_fiche(_mJ["id"], "lola", "Jaurel X2", chemin=_pS)
+        check("supprimee : relier la fiche recreee a son ancien membre leve la marque",
+              _eqE.vue(_FS, _CS, chemin=_pS)["membres"][0]["fiches"][0]["ok"]
+              and "supprimee" not in _eqE.lire(chemin=_pS)["membres"][0]["fiches"][0])
+        # Renommer A -> B quand un lien PERIME (non marque) vise deja B : il
+        # est marque « nom repris », le lien de A suit.
+        _pR = _dirEq / "r" / "equipe.json"
+        _mX = _eqE.ajouter_membre("X", fiches=[("jessye", "B")], chemin=_pR)
+        _mY = _eqE.ajouter_membre("Y", fiches=[("jessye", "A")], chemin=_pR)
+        _eqE.renommer_fiche("jessye", "A", "B", chemin=_pR)
+        _vR2 = {m["id"]: m for m in _eqE.vue({"jessye": [{"name": "B"}]}, {"jessye": [{"va": "B"}] * 4},
+                                              chemin=_pR)["membres"]}
+        check("supprimee : renommer sur un nom deja porte par un lien perime -> Y suit, X casse « nom repris »",
+              _vR2[_mY["id"]]["fiches"][0]["ok"] and _vR2[_mY["id"]]["n_comptes"] == 4
+              and not _vR2[_mX["id"]]["fiches"][0]["ok"]
+              and _vR2[_mX["id"]]["fiches"][0]["code"] == "reprise",
+              (_vR2[_mX["id"]]["fiches"], _vR2[_mY["id"]]["fiches"]))
+
+        # -- id redonne : deterministe, les actions passent ------------------
+        _pI = _dirEq / "i" / "equipe.json"
+        _pI.parent.mkdir(parents=True)
+        _pI.write_text(json.dumps({"membres": [
+            {"nom": "Paul", "role": "VA", "fiches": []},
+            {"id": "mdouble", "nom": "A", "fiches": []},
+            {"id": "mdouble", "nom": "B", "fiches": []}]}), encoding="utf-8")
+        _iI1 = [m["id"] for m in _eqE.lire(chemin=_pI)["membres"]]
+        _iI2 = [m["id"] for m in _eqE.vue({}, {}, chemin=_pI)["membres"]]
+        check("id : sans id ou en double -> le meme id d une lecture a l autre",
+              _iI1[0] and _iI1[2] != "mdouble" and sorted(_iI1) == sorted(_iI2), (_iI1, _iI2))
+        _rI1 = _refusEq(_eqE.modifier_membre, _iI1[0], note="ok", chemin=_pI)
+        _rI2 = _refusEq(_eqE.modifier_membre, _iI1[2], note="ok", chemin=_pI)
+        check("id : modifier le membre sans id et le doublon avec l id rendu -> accepte, id grave",
+              not _rI1 and not _rI2
+              and [m["id"] for m in json.loads(_pI.read_text(encoding="utf-8"))["membres"]] == _iI1,
+              (_rI1, _rI2))
+
+        # -- fusion : le @Discord et le role de l absorbe ne se perdent pas --
+        _pF = _dirEq / "f" / "equipe.json"
+        _mF1 = _eqE.ajouter_membre("Noum", role="VA", discord="noum", chemin=_pF)
+        _mF2 = _eqE.ajouter_membre("Noum bis", role="Monteur", discord="@noum_alt", chemin=_pF)
+        _rF = _eqE.fusionner(_mF1["id"], _mF2["id"], chemin=_pF)
+        _gF2 = _eqE.lire(chemin=_pF)["membres"][0]
+        _sF = _eqE.vue({"lola": [{"name": "Neuve", "discord_username": "NOUM_ALT"}]}, {},
+                       chemin=_pF)["suggestions"]
+        check("fusion : le @Discord different est garde en second, le role reporte en note",
+              _gF2["discord"] == "noum" and _gF2["discords_autres"] == ["noum_alt"]
+              and "Rôle aussi : Monteur" in _gF2["note"]
+              and _rF["discords_gardes"] == ["noum_alt"] and _rF["role_reporte"] == "Monteur", (_rF, _gF2))
+        check("fusion : une fiche @noum_alt est ensuite reconnue comme la meme personne",
+              _sF and _sF[0]["membres_meme_discord"] == [_mF1["id"]], _sF)
+        _eqE.modifier_membre(_mF1["id"], discords_autres="", chemin=_pF)
+        check("fusion : un pseudo secondaire se retire a la main",
+              _eqE.lire(chemin=_pF)["membres"][0]["discords_autres"] == [])
+
+        # -- notes : jamais coupees en silence -------------------------------
+        _pL = _dirEq / "l" / "equipe.json"
+        _mL1 = _eqE.ajouter_membre("A", note="a" * 700, chemin=_pL)
+        _mL2 = _eqE.ajouter_membre("B", note="b" * 700, chemin=_pL)
+        _avL = _octetsEq(_pL)
+        _rL = _refusEq(_eqE.fusionner, _mL1["id"], _mL2["id"], chemin=_pL)
+        check("note : fusion dont la note reunie depasse 1000 -> refus nomme avec la longueur, rien ecrit",
+              "Notes trop longues" in _rL and "1401" in _rL and _octetsEq(_pL) == _avL, _rL)
+        _rL2 = _refusEq(_eqE.modifier_membre, _mL1["id"], note="c" * 1001, chemin=_pL)
+        _rL3 = _refusEq(_eqE.ajouter_membre, "C", note="d" * 1001, chemin=_pL)
+        check("note : une note de plus de 1000 est refusee (modifier, ajouter), jamais coupee",
+              "trop longue" in _rL2 and "1001" in _rL2 and "trop longue" in _rL3
+              and _eqE.lire(chemin=_pL)["membres"][0]["note"] == "a" * 700, (_rL2, _rL3))
+        _dL = _eqE.lire(chemin=_pL)
+        _dL["membres"][0]["note"] = "e" * 1200
+        safe_json.write(_pL, _dL, indent=2)
+        _rL4 = _refusEq(_eqE.modifier_membre, _mL1["id"], note="e" * 1200, discord="x", chemin=_pL)
+        check("note : une note deja longue (retouche) ne bloque pas le reste tant qu elle ne change pas",
+              not _rL4 and len(_eqE.lire(chemin=_pL)["membres"][0]["note"]) == 1200, _rL4)
+
+        # -- role propose : enregistre, suit les renommages ------------------
+        _pP2 = _dirEq / "p2" / "equipe.json"
+        _eqE.ajouter_role("Stagiaire", chemin=_pP2)
+        _eqE.renommer_role("VA", "Assistante VA", chemin=_pP2)
+        _sP = _eqE.vue({"lola": [{"name": "F"}]}, {}, chemin=_pP2)
+        check("role propose : renommer « VA » -> les suggestions suivent le nouveau nom",
+              _sP["suggestions"][0]["role"] == "Assistante VA" and _sP["role_propose"] == "Assistante VA",
+              _sP["suggestions"][0]["role"])
+        _rP = _refusEq(_eqE.supprimer_role, "assistante va", chemin=_pP2)
+        check("role propose : le supprimer est refuse en le nommant",
+              "rôle proposé aux suggestions" in _rP, _rP)
+        _eqE.definir_role_propose("stagiaire", chemin=_pP2)
+        _eqE.supprimer_role("Assistante VA", chemin=_pP2)
+        _eqE.definir_role_propose("", chemin=_pP2)
+        _sP2 = _eqE.vue({"lola": [{"name": "F"}]}, {}, chemin=_pP2)
+        check("role propose : choisi puis vide -> suggestions sans role, dit par la vue",
+              _sP2["suggestions"][0]["role"] == "" and _sP2["role_propose"] == ""
+              and "Rôle inconnu" in _refusEq(_eqE.definir_role_propose, "Pilote", chemin=_pP2))
+        _dP2 = _eqE.lire(chemin=_pP2)
+        _dP2["role_propose"] = "Disparu"
+        safe_json.write(_pP2, _dP2, indent=2)
+        check("role propose : absent de la liste (retouche) -> signale, pas pris en silence",
+              _eqE.vue({}, {}, chemin=_pP2)["role_propose_inconnu"] == "Disparu")
+    finally:
+        _eqE.EQUIPE_FILE = _savEqFile
+    check("equipe : aucun appel du module n est tombe sur le chemin par defaut",
+          not (_dirEq / "filet").exists())
+except Exception as _eEq:
+    import traceback as _tbEq
+    check("equipe (module) : testable", False, repr(_eEq)[:200] + " " + _tbEq.format_exc()[-500:])
+
+
+# =========================================================================
+# LE SITE : onglet, routes, droits, renommages par les vraies routes
+# =========================================================================
+try:
+    import equipe as _eqE
+    import jailbreak as _jbE, va_portal as _vpE, jb_objectifs as _obE
+    import type_identite as _tiE, identite_admin as _iaE, sheets_sync as _ssE
+    import dashboard_cache as _dcE
+    import web_upload as _wE
+
+    _sD = _dirEq / "site"
+    (_sD / "identities").mkdir(parents=True)
+    _savS = {
+        "eq": _eqE.EQUIPE_FILE,
+        "jb": (_jbE.DATA_DIR, _jbE.JAILBREAK_FILE, _jbE.BACKUP_DIR, _jbE.PREV_FILE,
+               _jbE.TOMB_FILE, _jbE._LAST_GOOD.get("data")),
+        "vp": (_vpE.DATA_DIR, _vpE.LIENS_FILE),
+        "ob": (_obE.DATA_DIR, _obE.OBJECTIFS_FILE, _obE.HISTO_FILE, _obE.VA_ACT_CFG,
+               _obE.SCRAPE_IDENTS_FILE),
+        "ti": (_tiE.FICHIER, _tiE.FICHIER_LIENS, _tiE._DOSSIER),
+        "ia": (_iaE.DATA, _iaE.IDENTITES, _iaE.CORBEILLE),
+        # Les routes poussent vers Google Sheets en arriere-plan : sur le VPS
+        # (Sheets configure), ce banc ecrirait son faux referentiel dans les
+        # vrais classeurs.
+        "ss": (_ssE.push_all, _ssE.push_all_async, _ssE._push_all_folder, _ssE._push_all_single),
+        "dc": _dcE._STORE,
+        "wu": (_wE.DATA_DIR, _wE.IDENTITIES_DIR, _wE._load_web_users, _wE._load_role_definitions),
+    }
+    try:
+        _eqE.EQUIPE_FILE = _sD / "equipe.json"
+        _jbE.DATA_DIR = _sD
+        _jbE.JAILBREAK_FILE = _sD / "jailbreak.json"
+        _jbE.BACKUP_DIR = _sD / "jb_backups"
+        _jbE.PREV_FILE = _sD / "jailbreak.prev.json"
+        _jbE.TOMB_FILE = _sD / "jb_tombstones.json"
+        _jbE._LAST_GOOD["data"] = None
+        _vpE.DATA_DIR, _vpE.LIENS_FILE = _sD, _sD / "jb_va_liens.json"
+        _obE.DATA_DIR = _sD
+        _obE.OBJECTIFS_FILE = _sD / "jb_objectifs.json"
+        _obE.HISTO_FILE = _sD / "jb_report_comptes.json"
+        _obE.VA_ACT_CFG = _sD / "va_activity_cfg.json"
+        _obE.SCRAPE_IDENTS_FILE = _sD / "scrape_identites.json"
+        _tiE.FICHIER = _sD / "identity_type.json"
+        _tiE.FICHIER_LIENS = _sD / "identity_reserves.json"
+        _tiE._DOSSIER = _sD / "identities"
+        _tiE._CACHE.update(sig=None, data={})
+        _tiE._CACHE_LIENS.update(sig=None, data={})
+        _iaE.DATA, _iaE.IDENTITES = _sD, _sD / "identities"
+        _iaE.CORBEILLE = _sD / "_corbeille_identites"
+        _ssE.push_all = lambda *a, **k: False
+        _ssE.push_all_async = lambda *a, **k: None
+        _ssE._push_all_folder = lambda *a, **k: False
+        _ssE._push_all_single = lambda *a, **k: False
+        # Le cache d instantanes du tableau de bord ecrit sous data/ : un
+        # magasin jetable, et pas de chauffeur qui tournerait 30 min derriere.
+        _stEq = _dcE.SnapshotStore(_sD / "dashboard_snapshots", "banc-equipe")
+        _stEq.warmer = type("_SansChauffeur", (), {"touch": lambda self: None})()
+        _dcE._STORE = _stEq
+        _wE.DATA_DIR = _sD
+        _wE.IDENTITIES_DIR = _sD / "identities"
+        _wE._oublier_identites()
+        _wE._load_web_users = lambda: {"admin": {"role": "owner", "password": "x"},
+                                       "lecteur": {"role": "lecteur", "password": "x"},
+                                       "chat": {"role": "chatter", "password": "x"}}
+        _wE._load_role_definitions = lambda: {
+            "lecteur": {"permissions": {"jbequipe": {"enabled": True}}}}
+
+        safe_json.write(_tiE.FICHIER, {"blonde": "reserve"})
+        _JBS = {
+            "jessye": {"vas": [{"name": "Noum", "discord_username": "noum0075"},
+                               {"name": "Jaurel X2", "discord_username": ""},
+                               {"name": "Fiche Morte", "discord_username": ""}],
+                       "accounts": [{"id": 1, "username": "e1", "va": "Noum"},
+                                    {"id": 2, "username": "e2", "va": "noum"},
+                                    {"id": 3, "username": "e3", "va": "Implicite"}]},
+            "lola": {"vas": [{"name": "VA NOUM 4X1", "discord_username": "@Noum0075"},
+                             {"name": "Jaurel X2", "discord_username": ""},
+                             {"name": "L'Ami <b>", "discord_username": ""}],
+                     "accounts": [{"id": 4, "username": "l1", "va": "VA NOUM 4X1"}]},
+            "blonde": {"vas": [{"name": "Hors", "discord_username": ""}], "accounts": []},
+        }
+        safe_json.write(_jbE.JAILBREAK_FILE, _JBS)
+        for _iS in _JBS:
+            (_sD / "identities" / _iS).mkdir()
+        _wE._oublier_identites()
+
+        _appEq = _wE.create_app()
+        _appEq.config["TESTING"] = True
+
+        def _clientEq(user=None, role=None, langue="fr"):
+            _c = _appEq.test_client()
+            if user:
+                with _c.session_transaction() as _s:
+                    _s["auth"] = True
+                    _s["username"] = user
+                    _s["role"] = role
+            if langue:
+                _c.set_cookie("va_lang", langue)
+            return _c
+
+        _adm = _clientEq("admin", "owner")
+
+        def _fragEq(c=None):
+            _r = (c or _adm).get("/jbequipe/fragment", headers={"X-Tab-Ajax": "1"})
+            return _r.status_code, _r.get_data(as_text=True)
+
+        def _agirEq(action, c=None, **donnees):
+            donnees.setdefault("ajax", "1")
+            _r = (c or _adm).post("/jbequipe/" + action, data=donnees,
+                                  headers={"Accept": "application/json"})
+            return _r.status_code, (_r.get_json(silent=True) or {})
+
+        # ---------------------------------------------------------------
+        # 9. Rendu : menu, section, fragment differe, un seul rendu, JS
+        # ---------------------------------------------------------------
+        # La page entiere est rendue pour le role RESTREINT qui a l onglet :
+        # ses autres onglets ne sont pas produits, la page reste legere, et
+        # c est aussi la preuve que l entree lui est montree.
+        _lec = _clientEq("lecteur", "lecteur")
+        _pgL = _lec.get("/?tab=jbequipe").get_data(as_text=True)
+        _iAct, _iEqp = _pgL.find('id="tab-jbactivite"'), _pgL.find('id="tab-jbequipe"')
+        check("rendu : l entree de menu Equipe suit directement Activite VA",
+              0 < _iAct < _iEqp and _pgL[_iAct:_iEqp].count("<button") == 1, (_iAct, _iEqp))
+        check("rendu : la section form-jbequipe porte son emplacement differe",
+              'id="form-jbequipe"' in _pgL and "data-lazy-tab='jbequipe'" in _pgL)
+        check("rendu : le role restreint qui a la case voit l onglet (garde du menu)",
+              _reEq.search(r"var A=\[[^\]]*\"jbequipe\"", _pgL) is not None)
+        check("rendu : la permission jbequipe (vue / modification) est declaree",
+              any(it.get("key") == "jbequipe" and it.get("perms") == ["view", "edit"]
+                  for sec in _wE.ROLE_MENU_STRUCTURE for it in sec.get("items", [])))
+
+        _stF, _frF = _fragEq()
+        _lzR = _adm.get("/?lazy=jbequipe", headers={"X-Tab-Ajax": "1"})
+        _lzF = _lzR.get_data(as_text=True)
+        check("rendu : fragment et chargement differe repondent 200 a l admin",
+              _stF == 200 and _lzR.status_code == 200, (_stF, _lzR.status_code))
+        check("rendu : UN SEUL rendu -- le fragment recharge est celui de l onglet",
+              "<div id='eq-root'><div id='eq-frag'>" + _frF + "</div></div>" in _lzF)
+
+        _nodeEq = _shEq.which("node")
+        _scrEq = [c for a, c in _reEq.findall(r"<script(?![^>]*\bsrc=)([^>]*)>(.*?)</script>",
+                                                _lzF, _reEq.S) if "json" not in a.lower()]
+        _mOnc = _reEq.search(r'<button[^>]*id="tab-jbequipe"[^>]*onclick="([^"]*)"', _pgL)
+        if _nodeEq:
+            _cassesJs = []
+            for _k, _sc in enumerate(_scrEq):
+                _fJ = _dirEq / ("onglet_%d.js" % _k)
+                _fJ.write_text(_sc, encoding="utf-8")
+                _rJ = _spEq.run([_nodeEq, "--check", str(_fJ)], capture_output=True, text=True, timeout=60)
+                if _rJ.returncode:
+                    _cassesJs.append((_rJ.stderr or "")[:160].replace(chr(10), " "))
+            check("rendu : le script de l onglet passe node --check",
+                  _scrEq and not _cassesJs, " | ".join(_cassesJs) or "aucun script")
+            # L onclick du menu est du JS dans un attribut : une apostrophe
+            # droite dans le sous-titre fermerait la chaine de showTab.
+            _fO = _dirEq / "menu_onclick.js"
+            _fO.write_text("function __menuEquipe(){" + _htmlEq.unescape(_mOnc.group(1) if _mOnc else "")
+                           + "\n}", encoding="utf-8")
+            _rO = _spEq.run([_nodeEq, "--check", str(_fO)], capture_output=True, text=True, timeout=60)
+            check("rendu : l onclick de l entree Equipe passe node --check",
+                  _mOnc is not None and _rO.returncode == 0, (_rO.stderr or "")[:160])
+        else:
+            # Ne jamais ecarter en silence : dire que la verification n a pas eu lieu.
+            print("     (node absent : le JavaScript de l onglet Equipe n a PAS ete verifie)")
+
+        # Deux tables qui decident la meme chose doivent concorder : chaque
+        # bouton rendu a son traitement dans le script, chaque action postee
+        # par le script existe cote serveur (sinon : 404 muet au clic).
+        _jsEq = "\n".join(_scrEq)
+        _actsJs = set(_reEq.findall(r"act === '([\w-]+)'", _jsEq))
+        _actsRendus = set(_reEq.findall(r"data-act='([\w-]+)'", _frF))
+        _postJs = set()
+        for _g in _reEq.findall(r"agir\(([^,()]+),", _jsEq):
+            _postJs |= set(_reEq.findall(r"'(\w+)'", _g))
+        _srcAg = _inspEq.getsource(_wE._jbequipe_agir)
+        _actsSrv = set(_reEq.findall(r'action == "(\w+)"', _srcAg))
+        for _g in _reEq.findall(r"action in \(([^)]*)\)", _srcAg):
+            _actsSrv |= set(_reEq.findall(r'"(\w+)"', _g))
+        check("rendu : chaque bouton du fragment est traite par le script",
+              _actsRendus and _actsRendus <= _actsJs, sorted(_actsRendus - _actsJs))
+        check("rendu : chaque action postee par le script existe cote serveur",
+              len(_postJs) >= 14 and _postJs <= _actsSrv, sorted(_postJs - _actsSrv))
+
+        # ---------------------------------------------------------------
+        # 10. Suggestions et actions par les routes
+        # ---------------------------------------------------------------
+        _vS = _wE._jbequipe_vue()
+        _clS = [s["cle"] for s in _vS["suggestions"]]
+        check("site : perimetre -> la reserve est comptee hors perimetre, pas proposee",
+              _vS["compteurs"]["hors_perimetre"] == 1 and not any(c.startswith("f:blonde") for c in _clS),
+              _vS["compteurs"])
+        check("site : la fiche implicite (portee par un compte) est proposee",
+              "f:jessye|implicite" in _clS, _clS)
+        check("site : Jaurel X2 sous jessye et sous lola -> deux suggestions",
+              "f:jessye|jaurel x2" in _clS and "f:lola|jaurel x2" in _clS, _clS)
+        check("site : l ecran dit combien de fiches ne sont pas proposees",
+              "Fiches VA non proposées" in _frF)
+        check("site : un nom de fiche piege est echappe",
+              "L&#x27;Ami &lt;b&gt;" in _frF and "L'Ami <b>" not in _frF)
+
+        _st, _j = _agirEq("sug_ajouter", cle="d:noum0075")
+        _dS = _eqE.lire()
+        check("site : « Ajouter » cree la personne avec ses deux fiches, role VA",
+              _j.get("ok") and len(_dS["membres"]) == 1 and _dS["membres"][0]["role"] == "VA"
+              and len(_dS["membres"][0]["fiches"]) == 2, _j)
+        _idNoum = _dS["membres"][0]["id"]
+        _st, _j = _agirEq("membre_ajouter", nom="Paul", role="Manager", discord="@paul",
+                          note="Gère l'équipe <b>x</b>", actif="1")
+        _idPaul = [m["id"] for m in _eqE.lire()["membres"] if m["nom"] == "Paul"][0] if _j.get("ok") else ""
+        check("site : ajout a la main", _j.get("ok") and _idPaul, _j)
+        _st, _j = _agirEq("membre_ajouter", nom="Zoe", role="Inexistant")
+        check("site : role inconnu -> refus nomme, pas d ok", _st == 200 and _j.get("ok") is False
+              and "Rôle inconnu" in _j.get("error", ""), _j)
+        _st, _j = _agirEq("membre_lier", id=_idPaul, identite="jessye", fiche="fiche morte")
+        check("site : lier une fiche du referentiel (casse ignoree, nom reel garde)",
+              _j.get("ok") and {"identite": "jessye", "fiche": "Fiche Morte"}
+              in [m for m in _eqE.lire()["membres"] if m["id"] == _idPaul][0]["fiches"], _j)
+        _st, _j = _agirEq("membre_lier", id=_idPaul, identite="jessye", fiche="Noum")
+        check("site : lier une fiche deja liee -> « deja liee a Noum »",
+              _j.get("ok") is False and "déjà liée à Noum" in _j.get("error", ""), _j)
+        _st, _j = _agirEq("membre_lier", id=_idPaul, identite="jessye", fiche="Personne")
+        check("site : lier une fiche inexistante -> refus (un lien ne nait pas casse)",
+              _j.get("ok") is False and "introuvable" in _j.get("error", ""), _j)
+        _st, _j = _agirEq("sug_rattacher", cle="f:lola|jaurel x2", id=_idPaul)
+        _st2, _j2 = _agirEq("sug_masquer", cle="f:jessye|jaurel x2")
+        check("site : « Rattacher a » et « Pas dans l equipe »",
+              _j.get("ok") and _j2.get("ok") and len(_eqE.lire()["masquees"]) == 1, (_j, _j2))
+        _stF, _frF = _fragEq()
+        check("site : la section Masquees (1) apparait", "<span>Masquées</span> <span class='eq-n'>(1)</span>" in _frF)
+        _st, _j = _agirEq("masquee_remettre", identite="jessye", fiche="Jaurel X2")
+        check("site : « Remettre » rend la fiche aux suggestions",
+              _j.get("ok") and not _eqE.lire()["masquees"], _j)
+        _st, _j = _agirEq("sug_ajouter", cle="d:personne")
+        check("site : suggestion disparue -> refus nomme", _j.get("ok") is False
+              and "n'existe plus" in _j.get("error", ""), _j)
+        _st, _j = _agirEq("role_supprimer", nom="Manager")
+        check("site : supprimer un role porte -> refus avec le nombre",
+              _j.get("ok") is False and "1 membre" in _j.get("error", ""), _j)
+        _st, _j = _agirEq("membre_modifier", id=_idPaul, role="Chef d'équipe")
+        _pD = [m for m in _eqE.lire()["membres"] if m["id"] == _idPaul][0]
+        check("site : le menu du role n envoie que le role, la note reste",
+              _j.get("ok") and _pD["role"] == "Chef d'équipe" and _pD["note"].startswith("Gère"), _pD)
+        _st, _j = _agirEq("membre_modifier", id=_idPaul, actif="0")
+        _stF, _frF = _fragEq()
+        _trP = _reEq.search(r"<tr class='eq-m eq-inactif' data-id='" + _idPaul + r"'[^>]*>", _frF)
+        check("site : inactif -> ligne grisee et masquee d office (sans attendre le script)",
+              _j.get("ok") and _trP is not None and _trP.group(0).endswith(" hidden>"), _j)
+        check("site : la note est echappee au rendu",
+              "Gère l&#x27;équipe &lt;b&gt;x&lt;/b&gt;" in _frF)
+        check("site : la pastille identite · fiche est rendue", "jessye · Fiche Morte" in _frF)
+
+        # -- renommer une fiche par la VRAIE route : le lien suit ----------
+        _rU = _adm.post("/jailbreak/update_va", data={"identity": "jessye", "old_name": "Noum",
+                                                      "new_name": "Noum X1", "discord_username": "",
+                                                      "ajax": "1"})
+        _fN = [m for m in _wE._jbequipe_vue()["membres"] if m["id"] == _idNoum][0]["fiches"]
+        check("site : /jailbreak/update_va renomme la fiche -> le lien d equipe suit",
+              (_rU.get_json(silent=True) or {}).get("ok")
+              and ("jessye", "Noum X1", True) in [(f["identite"], f["fiche"], f["ok"]) for f in _fN],
+              (_rU.get_data(as_text=True)[:120], _fN))
+        # -- supprimer une fiche : le lien reste, CASSE et explique ---------
+        _rV = _adm.post("/jailbreak/remove_va", data={"identity": "jessye", "va_name": "Fiche Morte",
+                                                      "ajax": "1"})
+        for _tS in _thEq.enumerate():
+            if _tS.name in ("jb-rmva-sheet", "jb-renomme-sheet"):
+                _tS.join(10)
+        _vC = _wE._jbequipe_vue()
+        _pC2 = [m for m in _vC["membres"] if m["id"] == _idPaul][0]
+        # Le lien est MARQUE supprime par la route (pas seulement « absent ») :
+        # une fiche recreee sous ce nom ne le ressuscitera pas.
+        _fC2 = [f for f in _pC2["fiches"] if not f["ok"]]
+        check("site : /jailbreak/remove_va -> le lien reste, marque supprime, avec sa raison",
+              (_rV.get_json(silent=True) or {}).get("ok") and _pC2["n_casses"] == 1
+              and _fC2 and _fC2[0].get("code") == "supprimee"
+              and _fC2[0]["raison"].startswith("fiche supprimée le"),
+              _pC2["fiches"])
+        _stF, _frF = _fragEq()
+        # La raison est rendue en morceaux (libelle en <span>, donnee en <b>)
+        # pour etre traduisible : le constat venait d une phrase d un bloc.
+        check("site : le lien casse est rendu en rouge, raison et compteur a l appui",
+              "eq-chip eq-casse" in _frF
+              and "<span>fiche supprimée le</span> <b>" in _frF
+              and "Liens cassés</div><div class='eq-val eq-rouge'>1<" in _frF)
+
+        # -- renommer une identite par la route historique du Jailbreak ------
+        _rE = _adm.post("/jailbreak/edit_identity", data={"old_name": "lola", "identity_name": "lolita"})
+        _dE = _eqE.lire()
+        check("site : /jailbreak/edit_identity renomme l identite -> les liens suivent",
+              _rE.status_code in (200, 302) and (_sD / "identities" / "lolita").is_dir()
+              and any(l["identite"] == "lolita" for m in _dE["membres"] for l in m["fiches"])
+              and not any(l["identite"] == "lola" for m in _dE["membres"] for l in m["fiches"]),
+              (_rE.status_code, [m["fiches"] for m in _dE["membres"]]))
+
+        # -- identite_admin : renommer, apercu, archiver ---------------------
+        _rA = _iaE.renommer("lolita", "lila")
+        _dA = _eqE.lire()
+        check("site : identite_admin.renommer emporte les liens et le DIT",
+              _rA.get("ok") and any("équipe" in t["ou"] for t in _rA.get("touches", []))
+              and any(l["identite"] == "lila" for m in _dA["membres"] for l in m["fiches"])
+              and _wE._jbequipe_vue()["compteurs"]["casses"] == 1, _rA)
+        _apA = _iaE.apercu("lila")
+        check("site : l apercu avant action cite l equipe",
+              any("équipe" in e["ou"] for e in _apA.get("emplacements", [])), _apA.get("emplacements"))
+        _rZ = _iaE.archiver("lila")
+        _fiZ = list((_sD / "_corbeille_identites").glob("lila-*/_fiche.json"))
+        _srcZ = safe_json.load(_fiZ[0], default={}).get("sources", {}) if _fiZ else {}
+        _vZ = _wE._jbequipe_vue()
+        check("site : archiver garde les liens (signales casses) et les copie dans la fiche",
+              _rZ.get("ok") and "equipe.json" in _srcZ
+              and any("équipe" in t["ou"] for t in _rZ.get("retires", []))
+              and _vZ["compteurs"]["casses"] >= 3
+              and any(l["identite"] == "lila" for m in _eqE.lire()["membres"] for l in m["fiches"]),
+              (_rZ.get("retires"), list(_srcZ)))
+        # Illisible : le renommage d identite passe, l equipe est un ECHEC NOMME.
+        _octIll = '{"membres": ['
+        _eqE.EQUIPE_FILE.write_text(_octIll, encoding="utf-8")
+        safe_json.write(_jbE.JAILBREAK_FILE, dict(_jbE.list_all(), zazie={"vas": [], "accounts": []}))
+        _rI = _iaE.renommer("zazie", "zaza")
+        check("site : identite_admin.renommer avec equipe.json illisible -> echec nomme, fichier intact",
+              _rI.get("ok") and any("équipe" in e["ou"] and "illisible" in e["detail"]
+                                    for e in _rI.get("echecs", []))
+              and _eqE.EQUIPE_FILE.read_text(encoding="utf-8") == _octIll, _rI.get("echecs"))
+
+        # -- fichier illisible / ecriture ratee, vus du site ----------------
+        _stF, _frF = _fragEq()
+        _st, _j = _agirEq("role_ajouter", nom="Stagiaire")
+        check("site : equipe.json illisible -> erreur nommee a l ecran, ecriture refusee, fichier intact",
+              "Équipe illisible" in _frF and "equipe.json est illisible" in _frF
+              and _j.get("ok") is False and "illisible" in _j.get("error", "")
+              and _eqE.EQUIPE_FILE.read_text(encoding="utf-8") == _octIll, _j)
+        _eqE.EQUIPE_FILE.unlink()
+        _svW2 = safe_json.write
+        safe_json.write = lambda *a, **k: False
+        try:
+            _st, _j = _agirEq("role_ajouter", nom="Stagiaire")
+        finally:
+            safe_json.write = _svW2
+        check("site : ecriture ratee -> erreur nommee, jamais un ok",
+              _j.get("ok") is False and "impossible" in _j.get("error", "")
+              and not _eqE.EQUIPE_FILE.exists(), _j)
+
+        # -- « Tout ajouter » ne suit que la liste confirmee ------------------
+        _nSug = len(_wE._jbequipe_vue()["suggestions"])
+        _st, _j = _agirEq("sug_tout", n=str(_nSug + 2))
+        check("site : « Tout ajouter » refuse si la liste a change depuis la confirmation",
+              _j.get("ok") is False and "La liste a changé" in _j.get("error", "")
+              and not _eqE.EQUIPE_FILE.exists(), _j)
+        _st, _j = _agirEq("sug_tout", n=str(_nSug))
+        _vT = _wE._jbequipe_vue()
+        check("site : « Tout ajouter » cree une personne par suggestion",
+              _nSug > 0 and _j.get("ok") and not _vT["suggestions"]
+              and _vT["compteurs"]["membres"] == _nSug, (_nSug, _j, _vT["compteurs"]))
+        _st, _j = _agirEq("inconnue")
+        check("site : action inconnue -> 404 nomme", _st == 404 and "inconnue" in _j.get("error", ""), (_st, _j))
+
+        # ---------------------------------------------------------------
+        # 10bis. Correctifs de la relecture du 25/09, par les vraies routes
+        # ---------------------------------------------------------------
+        # Un referentiel et une equipe NEUFS : chaque constat a son cas.
+        if _eqE.EQUIPE_FILE.exists():
+            _eqE.EQUIPE_FILE.unlink()
+        for _iS in ("jessye", "lola", "zed"):
+            (_sD / "identities" / _iS).mkdir(exist_ok=True)
+        _shEq.rmtree(_sD / "identities" / "orph", ignore_errors=True)
+        safe_json.write(_jbE.JAILBREAK_FILE, {
+            "jessye": {"vas": [{"name": "Noum", "discord_username": "noum0075"},
+                               {"name": "Jaurel X2", "discord_username": ""},
+                               {"name": "Cachee", "discord_username": ""}],
+                       "accounts": [{"id": 1, "username": "e1", "va": "Noum"}]},
+            "lola": {"vas": [{"name": "VA NOUM 4X1", "discord_username": "@Noum0075"},
+                             {"name": "Jaurel X2", "discord_username": ""},
+                             {"name": "Rebaptisee", "discord_username": ""}],
+                     "accounts": [{"id": 4, "username": "l1", "va": "VA NOUM 4X1"}]},
+            "zed": {"vas": [{"name": "Zed VA", "discord_username": ""}], "accounts": []},
+            # Cle ORPHELINE : dans jailbreak.json, sans dossier -- absente de
+            # « Comptes par identite ».
+            "orph": {"vas": [{"name": "Orpheline", "discord_username": ""}], "accounts": []},
+        })
+        _wE._oublier_identites()
+
+        # -- perimetre = celui de « Comptes par identite » --------------------
+        _vP = _wE._jbequipe_vue()
+        _stF, _frF = _fragEq()
+        check("perimetre : une cle de jailbreak.json sans dossier est comptee, pas proposee",
+              "orph" not in _wE._identites_modeles()
+              and _vP["compteurs"]["hors_perimetre"] == 1
+              and not any(s["cle"].startswith("f:orph") for s in _vP["suggestions"])
+              and "une identité absente de « Comptes par identité »" in _frF,
+              (_vP["compteurs"]["hors_perimetre"], [s["cle"] for s in _vP["suggestions"]]))
+        _svFM = _wE._type_mod.filtrer_modeles
+
+        def _panneEq(*a, **k):
+            raise RuntimeError("panne du type")
+        _wE._type_mod.filtrer_modeles = _panneEq
+        try:
+            _vPE = _wE._jbequipe_vue()
+            _stPE, _frPE = _fragEq()
+        finally:
+            _wE._type_mod.filtrer_modeles = _svFM
+        check("perimetre : un filtre en panne est DIT (message a l ecran), pas avale",
+              "panne du type" in _vPE.get("perimetre_erreur", "")
+              and "Périmètre indisponible" in _frPE and "panne du type" in _frPE,
+              _vPE.get("perimetre_erreur"))
+
+        # -- meme @Discord : jamais une deuxieme personne ---------------------
+        _st, _j = _agirEq("membre_ajouter", nom="Noum", role="VA")
+        _idN = [m["id"] for m in _eqE.lire()["membres"] if m["nom"] == "Noum"][0] if _j.get("ok") else ""
+        _agirEq("membre_lier", id=_idN, identite="jessye", fiche="Noum")
+        _st, _j = _agirEq("sug_ajouter", cle="d:noum0075")
+        check("discord : « Ajouter » une suggestion au @Discord d un membre -> refus qui le nomme",
+              _j.get("ok") is False and "même @Discord que Noum" in _j.get("error", "")
+              and "Rattacher" in _j.get("error", "") and len(_eqE.lire()["membres"]) == 1, _j)
+        _st, _j = _agirEq("role_proposer", nom="Monteur")
+        _stF, _frF = _fragEq()
+        _nSug2 = len(_wE._jbequipe_vue()["suggestions"])
+        check("discord : la ligne n a pas de bouton « Ajouter », « Tout ajouter » annonce 1 rattachement",
+              "data-act='sug-ajouter' data-cle='d:noum0075'" not in _frF
+              and "<span>même @Discord que</span> <b>Noum</b>" in _frF
+              and "data-k='1'" in _frF and "data-role='Monteur'" in _frF, _j)
+        _st, _j = _agirEq("sug_tout", n=str(_nSug2))
+        _dT = _eqE.lire()
+        _nT = [m for m in _dT["membres"] if m["id"] == _idN][0]
+        check("discord : « Tout ajouter » RATTACHE au membre du meme @Discord, cree les autres au role propose",
+              _j.get("ok") and "1 rattachée(s)" in _j.get("message", "")
+              and len(_dT["membres"]) == _nSug2
+              and {"identite": "lola", "fiche": "VA NOUM 4X1"} in _nT["fiches"]
+              and not any(m["nom"] == "VA NOUM 4X1" for m in _dT["membres"])
+              and all(m["role"] == "Monteur" for m in _dT["membres"] if m["id"] != _idN),
+              (_j, [(m["nom"], m["role"]) for m in _dT["membres"]]))
+
+        # -- homonymes : discernables dans les listes de choix ---------------
+        _stF, _frF = _fragEq()
+        _optJ = _reEq.findall(r"<option value='[^']*' data-nom='Jaurel X2' data-label='([^']*)'", _frF)
+        check("homonymes : deux « Jaurel X2 » ont deux etiquettes distinctes (models)",
+              len(_optJ) == 2 and len(set(_optJ)) == 2
+              and any("jessye" in o for o in _optJ) and any("lola" in o for o in _optJ), _optJ)
+
+        # -- renommage vers un nom de 70 caracteres : le lien reste vivant ---
+        _n70S = "Rebaptisee " + "z" * 59
+        _rU2 = _adm.post("/jailbreak/update_va", data={"identity": "lola", "old_name": "Rebaptisee",
+                                                       "new_name": _n70S, "discord_username": "",
+                                                       "ajax": "1"})
+        for _tS in _thEq.enumerate():
+            if _tS.name in ("jb-rmva-sheet", "jb-renomme-sheet"):
+                _tS.join(10)
+        _fRb = [f for m in _wE._jbequipe_vue()["membres"] for f in m["fiches"]
+                if f["identite"] == "lola" and f["fiche"].startswith("Rebaptisee")]
+        check("fiche : /jailbreak/update_va vers 70 caracteres -> lien borne a 60 et VIVANT",
+              (_rU2.get_json(silent=True) or {}).get("ok")
+              and [(f["fiche"], f["ok"]) for f in _fRb] == [(_n70S[:60], True)], _fRb)
+
+        # -- supprimer puis recreer une fiche : pas de resurrection ----------
+        _adm.post("/jailbreak/remove_va", data={"identity": "jessye", "va_name": "Cachee", "ajax": "1"})
+        for _tS in _thEq.enumerate():
+            if _tS.name in ("jb-rmva-sheet", "jb-renomme-sheet"):
+                _tS.join(10)
+        _jbE.add_va("jessye", "Cachee", "autre_va")
+        _vRc = _wE._jbequipe_vue()
+        _fRc = [f for m in _vRc["membres"] for f in m["fiches"]
+                if f["identite"] == "jessye" and f["fiche"] == "Cachee"]
+        check("supprimee : fiche recreee pour un NOUVEAU VA -> l ancien lien reste casse, la fiche est proposee",
+              [(f["ok"], f.get("code")) for f in _fRc] == [(False, "supprimee")]
+              and "d:autre_va" in [s["cle"] for s in _vRc["suggestions"]],
+              (_fRc, [s["cle"] for s in _vRc["suggestions"]]))
+
+        # -- anglais : raisons et fiches masquees traduisibles ---------------
+        _agirEq("sug_masquer", cle="d:autre_va")
+        _stF, _frF = _fragEq()
+        _stE2, _frE2 = _fragEq(_clientEq("admin", "owner", langue="en"))
+        check("anglais : la raison d un lien casse est traduite (libelles separes des donnees)",
+              "profile deleted on" in _frE2 and "fiche supprimée le" not in _frE2
+              and "<span>fiche supprimée le</span>" in _frF,
+              _reEq.findall(r"<span class='eq-raison'>.*?</span></span>", _frE2)[:2])
+        check("anglais : une fiche masquee est marquee ⊘, plus de « (masquée) » colle au nom",
+              "jessye · Cachee ⊘</option>" in _frF and "(masquée)" not in _frF)
+        check("anglais : plus d infobulle composee en francais (« N compte(s) », raison)",
+              "compte(s)'" not in _frF and not _reEq.search(r"eq-casse' title=", _frF))
+
+        # -- renommage d identite vers un nom deja pris par le referentiel --
+        # (« Zed VA » a ete lie par « Tout ajouter » ; « orph » existe dans
+        # jailbreak.json sans dossier.) Depuis le 25/09, /jailbreak/edit_identity
+        # passe par identite_admin.renommer : c est LUI qui fait suivre les
+        # liens de l equipe, et seulement quand le referentiel a suivi. On
+        # verifie donc l invariant plutot qu un message : chaque lien pointe la
+        # ou la fiche se trouve reellement dans jailbreak.json.
+        _rZe =_adm.post("/jailbreak/edit_identity", data={"old_name": "zed", "identity_name": "orph"})
+        with _adm.session_transaction() as _sZe:
+            _flZe = _sZe.get("flash_msg", "") or _sZe.get("flash_error", "")
+        _lZe = [l for m in _eqE.lire()["membres"] for l in m["fiches"] if l["fiche"] == "Zed VA"]
+        _ouZe = [i for i, e in _jbE.list_all().items()
+                 if any((v.get("name") if isinstance(v, dict) else v) == "Zed VA"
+                        for v in (e.get("vas") or []))]
+        check("identite : renommage vers un nom deja pris -> les liens restent la ou est la fiche",
+              len(_lZe) == 1 and len(_ouZe) == 1 and _lZe[0]["identite"] == _ouZe[0],
+              (_lZe, _ouZe, str(_flZe)[:160]))
+
+        # -- CSS : fenetres au-dessus des controles fixes, noms longs, note --
+        _zOv = _reEq.search(r"#eq-root \.eq-ov\{[^}]*z-index:(\d+)", _lzF)
+        check("ecran : les fenetres passent au-dessus du menu mobile (9600), sous uiConfirm (100000)",
+              _zOv is not None and 9600 < int(_zOv.group(1)) < 100000, _zOv and _zOv.group(1))
+        _cNom = _reEq.search(r"#eq-root \.eq-nom\{([^}]*)\}", _lzF)
+        _cMod = _reEq.search(r"#eq-root \.eq-mod\{([^}]*)\}", _lzF)
+        check("ecran : un nom long sans espace se coupe, le crayon ne sort pas de la carte",
+              _cNom is not None and "min-width:0" in _cNom.group(1)
+              and "overflow-wrap:anywhere" in _cNom.group(1)
+              and _cMod is not None and "flex:none" in _cMod.group(1))
+        _cCont = _lzF[_lzF.find("@container (max-width: 859px)"):]
+        check("ecran : en carte (telephone), la note s affiche en entier",
+              _reEq.search(r"#eq-root \.eq-note\{[^}]*max-height:none", _cCont) is not None)
+
+        # -- JS : rien n est jete pendant une action en cours -----------------
+        check("script : les actions partent en FILE (plus de « occupe » qui jetait le second clic)",
+              "if(occupe)" not in _jsEq and "FILE.then(function(){ return envoyer(action, donnees); })" in _jsEq)
+        check("script : un rechargement ancien ne remplace jamais un plus recent",
+              _jsEq.count("if(n !== SEQ) return;") == 2)
+        check("script : un changement sans reponse ne relance pas un rechargement concurrent",
+              "if(!x || !x.ok) recharger()" not in _jsEq and "if(x && !x.ok) recharger()" in _jsEq)
+
+        # ---------------------------------------------------------------
+        # 11. Anglais : le texte change, la structure non
+        # ---------------------------------------------------------------
+        class _StructEq(_HPEq):
+            def __init__(self):
+                super().__init__(convert_charrefs=True)
+                self.t = []
+
+            def handle_starttag(self, tag, attrs):
+                self.t.append((tag, tuple(sorted(k for k, _v in attrs))))
+
+        def _structEq(h):
+            _p = _StructEq()
+            _p.feed(h)
+            _p.close()
+            return _p.t
+        _stF, _frF = _fragEq()
+        _stE, _frE = _fragEq(_clientEq("admin", "owner", langue="en"))
+        _lzE = _clientEq("admin", "owner", langue="en").get(
+            "/?lazy=jbequipe", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+        check("anglais : le fragment et le chargement differe sont traduits",
+              "Linked profiles" in _frE and "To confirm" in _frE and "+ Add a person" in _frE
+              and "Linked profiles" in _lzE and "Fiches liées" not in _frE)
+        check("anglais : la traduction ne casse aucune balise ni aucun attribut",
+              _structEq(_frF) == _structEq(_frE))
+
+        # ---------------------------------------------------------------
+        # 12. Droits : anonyme, role restreint, chatteur
+        # ---------------------------------------------------------------
+        _octAv = _octetsEq(_eqE.EQUIPE_FILE)
+        _ano = _clientEq(langue="fr")
+        _stA1 = _ano.get("/jbequipe/fragment").status_code
+        _stA2 = _ano.post("/jbequipe/role_ajouter", data={"nom": "Pirate", "ajax": "1"}).status_code
+        check("droits : anonyme -> 401 en lecture comme en ecriture",
+              _stA1 in (401, 302) and _stA2 in (401, 302), (_stA1, _stA2))
+        _stL, _frL = _fragEq(_lec)
+        _actsL = set(_reEq.findall(r"data-act='([\w-]+)'", _frL))
+        check("droits : role restreint qui a la case -> lecture seule, aucun bouton d ecriture",
+              _stL == 200 and "Lecture seule" in _frL and _actsL <= {"recharger"}
+              and "eq-src-libres" not in _frL, (_stL, sorted(_actsL)))
+        _stL2, _jL2 = _agirEq("role_ajouter", c=_lec, nom="Pirate")
+        _stL3, _jL3 = _agirEq("membre_retirer", c=_lec, id=_idPaul)
+        check("droits : role restreint -> 403 en ecriture (refuse par defaut)",
+              _stL2 == 403 and _stL3 == 403, (_stL2, _stL3))
+        _chat = _clientEq("chat", "chatter")
+        _stC1 = _chat.get("/jbequipe/fragment").status_code
+        _stC2 = _chat.get("/?lazy=jbequipe", headers={"X-Tab-Ajax": "1"}).status_code
+        _stC3 = _agirEq("role_ajouter", c=_chat, nom="Pirate")[0]
+        check("droits : chatteur sans la case -> 403 partout (fragment, differe, ecriture)",
+              (_stC1, _stC2, _stC3) == (403, 403, 403), (_stC1, _stC2, _stC3))
+        check("droits : aucune de ces tentatives n a ecrit", _octetsEq(_eqE.EQUIPE_FILE) == _octAv)
+    finally:
+        _eqE.EQUIPE_FILE = _savS["eq"]
+        (_jbE.DATA_DIR, _jbE.JAILBREAK_FILE, _jbE.BACKUP_DIR, _jbE.PREV_FILE,
+         _jbE.TOMB_FILE, _jbE._LAST_GOOD["data"]) = _savS["jb"]
+        (_vpE.DATA_DIR, _vpE.LIENS_FILE) = _savS["vp"]
+        (_obE.DATA_DIR, _obE.OBJECTIFS_FILE, _obE.HISTO_FILE, _obE.VA_ACT_CFG,
+         _obE.SCRAPE_IDENTS_FILE) = _savS["ob"]
+        (_tiE.FICHIER, _tiE.FICHIER_LIENS, _tiE._DOSSIER) = _savS["ti"]
+        _tiE._CACHE.update(sig=None, data={})
+        _tiE._CACHE_LIENS.update(sig=None, data={})
+        (_iaE.DATA, _iaE.IDENTITES, _iaE.CORBEILLE) = _savS["ia"]
+        (_ssE.push_all, _ssE.push_all_async, _ssE._push_all_folder, _ssE._push_all_single) = _savS["ss"]
+        _dcE._STORE = _savS["dc"]
+        (_wE.DATA_DIR, _wE.IDENTITIES_DIR, _wE._load_web_users, _wE._load_role_definitions) = _savS["wu"]
+        _wE._oublier_identites()
+except Exception as _eEqS:
+    import traceback as _tbEqS
+    check("equipe (site) : testable", False, repr(_eEqS)[:200] + " " + _tbEqS.format_exc()[-600:])
+finally:
+    _shEq.rmtree(_dirEq, ignore_errors=True)
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

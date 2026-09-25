@@ -12530,6 +12530,12 @@ document.addEventListener('click',function(e){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="m9 16 2 2 4-4"/></svg>
       Activité VA
     </button>
+    <!-- Équipe : pas d apostrophe droite dans les arguments de showTab
+         (elle fermerait la chaine JS de l onclick) -> ’ typographique. -->
+    <button class="item" id="tab-jbequipe" onclick="showTab('jailbreak','jbequipe','Équipe','Les noms et les rôles de l’équipe Insta, et leurs fiches VA')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 10h2"/><path d="M16 14h2"/><path d="M6.17 15a3 3 0 0 1 5.66 0"/><circle cx="9" cy="11" r="2"/><rect x="2" y="5" width="20" height="14" rx="2"/></svg>
+      Équipe
+    </button>
   </div>
 </div>
 
@@ -14830,6 +14836,11 @@ document.addEventListener('keydown', function(e){
 <div class="form-section" id="form-jbactivite" style="display:none">
 {jbactivite_html}
 </div>
+
+<!-- JAILBREAK - Équipe (noms et rôles, equipe.py) -->
+<div class="form-section" id="form-jbequipe" style="display:none">
+{jbequipe_html}
+</div>
 <!-- SETTINGS - TOKEN -->
 <div class="form-section" id="form-stoken" style="display:none">
 <form method="POST" action="/settings/admin_token" class="box">
@@ -16414,7 +16425,7 @@ def _serveurs_dedies_a(ident) -> list:
     return noms
 
 
-def _identites_modeles(identites=None) -> list:
+def _identites_modeles(identites=None, strict=False) -> list:
     """Les CRÉATRICES, sans les dossiers de montage.
 
     Un seul point de passage, utilisé par la page Jailbreak, le périmètre de
@@ -16423,11 +16434,17 @@ def _identites_modeles(identites=None) -> list:
     référentiel Jailbreak alors que les pastilles étaient dessinées depuis
     les dossiers — on rallumait donc des pastilles qu'on n'affichait pas, et
     le compteur ne tombait jamais sur N/N.
+
+    strict=True : un échec du filtre REMONTE au lieu de rendre la liste non
+    filtrée. L'onglet Équipe s'en sert pour dire « périmètre indisponible »
+    plutôt que de proposer en silence les fiches des réserves.
     """
     base = _list_identities() if identites is None else list(identites)
     try:
         return _type_mod.filtrer_modeles(base)
     except Exception:
+        if strict:
+            raise
         return base
 
 # Avancement du nettoyage des doublons du Drive (tache de fond)
@@ -43932,6 +43949,1073 @@ if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoad
     return css + body
 
 
+# ==============================================================================
+# SOCIAL ANALYTICS — ÉQUIPE : noms et rôles de l'équipe Insta (equipe.py)
+# ==============================================================================
+# UN SEUL RENDU. Le serveur fabrique le fragment ; après chaque action le
+# JavaScript le redemande à /jbequipe/fragment et le remplace tel quel. Aucun
+# second rendu côté navigateur : c'est ce qui, ailleurs, faisait réapparaître
+# un correctif appliqué d'un seul côté au premier rafraîchissement.
+
+def _jbequipe_acces_complet() -> bool:
+    """Owner/admin : les boutons d'écriture s'affichent. Un rôle restreint
+    à qui on a donné l'onglet le voit en LECTURE : toute écriture sous
+    /jbequipe/ lui est refusée par le garde (deny par défaut), inutile de
+    lui montrer des boutons qui répondraient 403."""
+    try:
+        from flask import session
+        role = ""
+        uname = (session.get("username") or "").lower()
+        if uname:
+            u = _load_web_users().get(uname)
+            if isinstance(u, dict):
+                role = (u.get("role") or "").lower()
+        if not role:
+            role = (session.get("role") or "").lower()
+        return _role_allowed_tabs(role) is None
+    except Exception:
+        return False
+
+
+def _jbequipe_vue(donnees=None) -> dict:
+    """La vue de l'onglet, branchée sur le référentiel Jailbreak.
+
+    Les fiches viennent de jailbreak.list_vas_for_identity (fiches déclarées
+    ET fiches implicites portées par des comptes) pour TOUTES les clés du
+    référentiel : c'est ce qui dit si un lien est vivant.
+
+    Le PÉRIMÈTRE des suggestions est celui de « Comptes par identité » :
+    _identites_modeles(), le même point de passage que cet onglet voisin
+    (dossiers de data/identities filtrés aux models). Pris sur les clés de
+    jailbreak.json, il proposait les fiches d'une clé orpheline (identité
+    recréée par le portail VA, renommage refusé) que l'onglet voisin ne
+    montre pas — et « Tout ajouter » en faisait des membres. Ce qui sort du
+    périmètre est compté (hors_perimetre), pas écarté en silence.
+    """
+    import equipe as _eq
+    import jailbreak as _jb
+    tout = _jb.list_all()
+    fiches = {i: _jb.list_vas_for_identity(i) for i in tout}
+    comptes = {i: list((e or {}).get("accounts") or [])
+               for i, e in tout.items() if isinstance(e, dict)}
+    perim_err = ""
+    try:
+        perim = _identites_modeles(strict=True)
+    except Exception as e:
+        perim, perim_err = None, f"{type(e).__name__}: {e}"[:200]
+        print(f"[equipe] périmètre indisponible, toutes les identités proposées : {perim_err}",
+              flush=True)
+    v = _eq.vue(fiches, comptes, perimetre=perim, donnees=donnees)
+    v["perimetre_erreur"] = perim_err
+    return v
+
+
+def _jbequipe_teinte(s: str) -> int:
+    """Une teinte stable par identité : la même model garde sa couleur d'une
+    ligne à l'autre, on la repère sans lire."""
+    return sum((i + 1) * ord(c) for i, c in enumerate(str(s or ""))) % 360
+
+
+def _render_jbequipe_fragment() -> str:
+    """Le contenu de l'onglet Équipe (sans le <script>, qui vit dans la
+    coquille) : c'est ce qui est remplacé après chaque action."""
+    import equipe as _eq
+    x = lambda s: html_escape(str("" if s is None else s), quote=True)
+    try:
+        d = _eq.lire()
+    except _eq.ErreurEquipe as e:
+        return ("<div class='eq-alerte eq-alerte-bad'><b>Équipe illisible</b>"
+                f"<div>{x(e)}</div></div>")
+    try:
+        v = _jbequipe_vue(donnees=d)
+    except Exception as e:
+        # Rien plutôt que des liens faussement « cassés » : sans le
+        # référentiel, on ne peut pas dire lequel est vivant.
+        return ("<div class='eq-alerte eq-alerte-bad'><b>Référentiel Jailbreak indisponible</b>"
+                f"<div>{x(type(e).__name__)} : {x(e)}</div>"
+                "<div>Les liens des membres ne peuvent pas être vérifiés : "
+                "rien n'est affiché plutôt que des liens faussement cassés.</div></div>")
+    edit = _jbequipe_acces_complet()
+    c = v["compteurs"]
+    roles = [r["nom"] for r in v["roles"]]
+    h = []
+
+    def _opts_roles(courant=""):
+        o = ["<option value=''>—</option>"]
+        for r in roles:
+            o.append(f"<option value='{x(r)}'{' selected' if r == courant else ''}>{x(r)}</option>")
+        if courant and courant not in roles:
+            # Rôle absent de la liste (retouche à la main) : montré tel quel,
+            # jamais remplacé en douce par « — ».
+            o.append(f"<option value='{x(courant)}' selected>{x(courant)} (?)</option>")
+        return "".join(o)
+
+    def _model(ident):
+        return (f"<span class='eq-model' style='--h:{_jbequipe_teinte(ident)}'>"
+                f"{x(ident)}</span>")
+
+    def _raison_html(f):
+        """La raison d'un lien cassé, en morceaux : libellés dans leurs
+        propres <span>, données dans des <b>. _traduire_html ne reconnaît
+        qu'un nœud de texte ENTIER ; « fiche absente de jessye (…) » d'un
+        seul tenant restait en français dans l'interface anglaise."""
+        code, p = f.get("code"), x(f.get("param"))
+        if code == "absente":
+            return f"<span>fiche absente de</span> <b>{p}</b> <span>(supprimée ou renommée ?)</span>"
+        if code == "identite":
+            return f"<span>identité introuvable :</span> <b>{p}</b> <span>(renommée ou archivée ?)</span>"
+        if code == "doublon":
+            return f"<span>aussi liée à</span> <b>{p}</b>"
+        if code == "supprimee":
+            return f"<span>fiche supprimée le</span> <b>{p}</b>"
+        if code == "reprise":
+            return f"<span>fiche supprimée, nom repris le</span> <b>{p}</b>"
+        return f"<span>{x(f.get('raison'))}</span>"
+
+    def _etiquette(m):
+        """Nom — rôle · models · @Discord : deux homonymes (« Jaurel X2 »
+        chez jessye et chez lola, deux personnes) donnaient deux options
+        identiques dans « Fusionner avec… » et « Rattacher à… »."""
+        det = [m["role"]] if m["role"] else []
+        if m.get("models"):
+            det.append(", ".join(m["models"]))
+        if m["discord"]:
+            det.append("@" + m["discord"])
+        return (m["nom"] or "(sans nom)") + (" — " + " · ".join(det) if det else "")
+
+    # --- Alertes : ce qui n'est pas proposé est COMPTÉ et dit -----------------
+    if v.get("perimetre_erreur"):
+        h.append("<div class='eq-alerte eq-alerte-bad'><b>Périmètre indisponible : toutes les "
+                 "identités sont proposées</b>"
+                 f"<div>{x(v['perimetre_erreur'])}</div>"
+                 "<div>Des fiches de réserves, ou d’identités absentes de « Comptes par "
+                 "identité », peuvent figurer dans « À confirmer ».</div></div>")
+    if c["hors_perimetre"]:
+        h.append("<div class='eq-alerte'><span>Fiches VA non proposées</span> "
+                 f"<b>{c['hors_perimetre']}</b> <span class='eq-sub'>— elles sont "
+                 "rangées sous une réserve, un dossier de montage, ou une identité "
+                 "absente de « Comptes par identité ».</span></div>")
+    if c["sans_nom"] or c["doublons"]:
+        h.append("<div class='eq-alerte'><span>Fiches ignorées dans le référentiel</span> "
+                 f"<b>{c['sans_nom'] + c['doublons']}</b> <span class='eq-sub'>— "
+                 f"<b>{c['sans_nom']}</b> <span>sans nom</span> · <b>{c['doublons']}</b> "
+                 "<span>en double sous la même identité</span></span></div>")
+    if v.get("role_propose_inconnu"):
+        h.append("<div class='eq-alerte'><span>Rôle proposé aux suggestions absent de la "
+                 f"liste :</span> <b>{x(v['role_propose_inconnu'])}</b> <span class='eq-sub'>— "
+                 "les suggestions seront ajoutées sans rôle ; choisis-en un dans "
+                 "« Rôles ».</span></div>")
+    if not edit:
+        h.append("<div class='eq-alerte'><span>Lecture seule : les modifications "
+                 "sont réservées aux administrateurs.</span></div>")
+
+    # --- Compteurs -------------------------------------------------------------
+    h.append("<div class='eq-cards'>")
+    h.append("<div class='eq-card'><div class='eq-lab'>Membres</div>"
+             f"<div class='eq-val'>{c['membres']}</div><div class='eq-sub'>"
+             f"<span>{c['actifs']}</span> <span>actif(s)</span></div></div>")
+    h.append("<div class='eq-card'><div class='eq-lab'>Rôles</div>"
+             f"<div class='eq-val'>{c['roles']}</div><div class='eq-sub'>"
+             "<span>une info, pas un accès</span></div></div>")
+    h.append("<div class='eq-card'><div class='eq-lab'>À confirmer</div>"
+             f"<div class='eq-val{' eq-orange' if c['suggestions'] else ''}'>{c['suggestions']}</div>"
+             f"<div class='eq-sub'><span>{c['suggerees']}</span> <span>fiche(s) VA</span></div></div>")
+    h.append("<div class='eq-card'><div class='eq-lab'>Liens cassés</div>"
+             f"<div class='eq-val{' eq-rouge' if c['casses'] else ''}'>{c['casses']}</div>"
+             "<div class='eq-sub'><span>fiche ou identité introuvable</span></div></div>")
+    h.append("</div>")
+
+    # --- Barre : ajout, filtres ------------------------------------------------
+    n_inactifs = c["membres"] - c["actifs"]
+    h.append("<div class='eq-bar'>")
+    if edit:
+        h.append("<button type='button' class='eq-b eq-b-acc' data-act='form-ouvrir'>"
+                 "+ Ajouter une personne</button>")
+    h.append("<select data-filtre='role' aria-label='Filtrer par rôle'>"
+             "<option value=''>Tous les rôles</option>"
+             + "".join(f"<option value='{x(r)}'>{x(r)}</option>" for r in roles)
+             + "<option value='__sans'>Sans rôle</option></select>")
+    h.append("<input type='text' data-filtre='q' placeholder='Rechercher un nom…' "
+             "autocomplete='off'>")
+    h.append("<label class='eq-chk'><input type='checkbox' data-filtre='inactifs'> "
+             f"<span>Afficher les inactifs</span> <span class='eq-sub'>({n_inactifs})</span></label>")
+    h.append("<span class='eq-filtre-info eq-sub'></span>")
+    h.append("<button type='button' class='eq-b' data-act='recharger' title='Recharger'>&#8635;</button>")
+    h.append("</div>")
+
+    # --- Tableau des membres ---------------------------------------------------
+    h.append("<div class='eq-tblw'><table class='eq-tbl'><thead><tr>"
+             "<th>Nom</th><th>Rôle</th><th>Models</th><th class='eq-num'>Comptes Insta</th>"
+             "<th>Fiches liées</th><th>Statut</th><th>Note</th>"
+             "</tr></thead><tbody>")
+    for m in v["membres"]:
+        autres = m.get("discords_autres") or []
+        cherche = " ".join([m["nom"], m["discord"]] + autres + m["models"]
+                           + [f["fiche"] for f in m["fiches"]]).lower()
+        mdata = dict({k: m.get(k) for k in ("id", "nom", "role", "discord", "note", "actif")},
+                     discords_autres=", ".join(autres), label=_etiquette(m))
+        mdata = json.dumps(mdata, ensure_ascii=False)
+        pseudos = [p for p in [m["discord"]] + autres if p]
+        h.append(f"<tr class='eq-m{'' if m['actif'] else ' eq-inactif'}' data-id='{x(m['id'])}' "
+                 f"data-role='{x(m['role'])}' data-actif='{'1' if m['actif'] else '0'}' "
+                 f"data-cherche='{x(cherche)}' data-m='{x(mdata)}'"
+                 # Inactif : masqué d'office (le filtre « Afficher les
+                 # inactifs » le fait revenir, grisé) — posé côté serveur
+                 # pour ne pas clignoter avant que le script tourne.
+                 + ("" if m["actif"] else " hidden") + ">")
+        # Modifier / fusionner / retirer vivent dans la fenêtre d'édition,
+        # ouverte par le crayon : une huitième colonne de boutons faisait
+        # déborder le tableau de son cadre dès 1280 px avec le menu ouvert.
+        h.append("<td class='eq-td-nom'><div class='eq-nom-l'><span class='eq-nom'>"
+                 + x(m["nom"] or "(sans nom)") + "</span>"
+                 + ("<button type='button' class='eq-mod' data-act='modifier' title='Modifier' "
+                    "aria-label='Modifier'>&#9998;</button>" if edit else "")
+                 + "</div>"
+                 + (f"<div class='eq-sub eq-pseudos'>{' · '.join('@' + x(p) for p in pseudos)}</div>"
+                    if pseudos else "")
+                 + "</td>")
+        if edit:
+            h.append(f"<td><span class='eq-ml'>Rôle</span><select class='eq-sel' data-chg='role' data-id='{x(m['id'])}' "
+                     f"aria-label='Rôle'>{_opts_roles(m['role'])}</select></td>")
+        else:
+            h.append(f"<td><span class='eq-ml'>Rôle</span>{x(m['role'] or '—')}</td>")
+        h.append("<td><span class='eq-ml'>Models</span>" + ("".join(_model(i) for i in m["models"])
+                                          or "<span class='eq-sub'>—</span>") + "</td>")
+        detail = " · ".join(f"{f['identite']}/{f['fiche']} : {f['comptes']}"
+                            for f in m["fiches"] if f["ok"])
+        h.append(f"<td class='eq-num' title='{x(detail)}'><span class='eq-ml'>Comptes Insta</span>"
+                 f"<b>{m['n_comptes']}</b></td>")
+        chips = []
+        for f in m["fiches"]:
+            btn = (f"<button type='button' class='eq-x' data-act='delier' data-id='{x(m['id'])}' "
+                   f"data-nom='{x(m['nom'])}' data-ident='{x(f['identite'])}' "
+                   f"data-fiche='{x(f['fiche'])}' title='Délier' aria-label='Délier'>&times;</button>"
+                   if edit else "")
+            # Pas d'infobulle composée (« 3 compte(s) », la raison) : elle
+            # restait en français dans l'interface anglaise. Le nombre de
+            # comptes se lit dans la pastille, comme dans « À confirmer ».
+            if f["ok"]:
+                chips.append(f"<span class='eq-chip'>{x(f['identite'])} · {x(f['fiche'])} "
+                             f"<span class='eq-sub'>({f['comptes']})</span>{btn}</span>")
+            else:
+                chips.append(f"<span class='eq-chip eq-casse'>"
+                             f"&#9888; {x(f['identite'])} · {x(f['fiche'])}{btn}"
+                             f"<span class='eq-raison'>{_raison_html(f)}</span></span>")
+        if edit:
+            chips.append(f"<button type='button' class='eq-b eq-b-s' data-act='lier' "
+                         f"data-id='{x(m['id'])}' data-nom='{x(m['nom'])}'>+ fiche</button>")
+        h.append("<td class='eq-td-fiches'><span class='eq-ml'>Fiches liées</span>"
+                 + ("".join(chips) or "<span class='eq-sub'>—</span>") + "</td>")
+        if edit:
+            h.append(f"<td class='eq-td-statut'><span class='eq-ml'>Statut</span><label class='eq-chk'><input type='checkbox' data-chg='actif' "
+                     f"data-id='{x(m['id'])}'{' checked' if m['actif'] else ''}> "
+                     "<span>Actif</span></label></td>")
+        else:
+            h.append(f"<td class='eq-td-statut'><span class='eq-ml'>Statut</span>{'Actif' if m['actif'] else 'Inactif'}</td>")
+        h.append(f"<td class='eq-td-note{'' if m['note'].strip() else ' eq-td-vide'}'>"
+                 f"<span class='eq-ml'>Note</span>"
+                 f"<div class='eq-note' title='{x(m['note'])}'>{x(m['note'])}</div></td>")
+        h.append("</tr>")
+    h.append("</tbody></table>")
+    if not v["membres"]:
+        h.append("<div class='eq-vide'>Personne dans l’équipe pour l’instant : ajoute les "
+                 "suggestions ci-dessous, ou une personne à la main.</div>")
+    h.append("<div class='eq-vide eq-filtre-vide' hidden>Aucun membre ne correspond au filtre.</div>")
+    h.append("</div>")
+
+    # --- À confirmer (suggestions) ---------------------------------------------
+    h.append("<div class='eq-sec'><div class='eq-sec-h'><span>À confirmer</span> "
+             f"<span class='eq-n'>({c['suggestions']})</span>")
+    if edit and v["suggestions"]:
+        # data-k / data-l / data-role : la confirmation annonce ce qui sera
+        # VRAIMENT fait (rattachements par @Discord, suggestions laissées,
+        # rôle donné), pas « N ajoutées (rôle VA) » quoi qu'il arrive.
+        h.append(f"<button type='button' class='eq-b eq-b-acc eq-b-s' data-act='sug-tout' "
+                 f"data-n='{len(v['suggestions'])}' data-k='{c['a_rattacher']}' "
+                 f"data-l='{c['a_laisser']}' data-role='{x(v['role_propose'])}'>Tout ajouter</button>")
+    h.append("</div><div class='eq-sec-aide'>Fiches VA de « Comptes par identité » liées à "
+             "personne. Regroupées par @Discord quand il est renseigné ; jamais par le nom : "
+             "le même nom sous deux models, ce sont deux personnes.</div>")
+    noms_membres = {m["id"]: m["nom"] for m in v["membres"]}
+    if not v["suggestions"]:
+        h.append("<div class='eq-vide'>Rien à confirmer : chaque fiche VA est liée à "
+                 "quelqu’un ou masquée.</div>")
+    for s in v["suggestions"]:
+        memes = s["membres_meme_discord"]
+        pre = memes[0] if memes else ""
+        h.append(f"<div class='eq-sug' data-cle='{x(s['cle'])}'><div class='eq-sug-t'>"
+                 f"<span class='eq-nom'>{x(s['nom'])}</span>"
+                 + (f" <span class='eq-sub'>@{x(s['discord'])}</span>" if s["discord"] else "")
+                 + (f" <span class='eq-tag'><span>même @Discord que</span> "
+                    f"<b>{x(', '.join(noms_membres.get(i, '?') for i in memes))}</b></span>"
+                    if memes else "")
+                 + "</div><div class='eq-sug-f'>")
+        for f in s["fiches"]:
+            h.append(f"<span class='eq-chip'>{_model(f['identite'])}{x(f['fiche'])} "
+                     f"<span class='eq-sub'>({f['comptes']})</span></span>")
+        h.append("</div>")
+        if edit:
+            # Même @Discord qu'un membre = même personne : pas de bouton
+            # « Ajouter » (le serveur le refuserait), « Rattacher à… » passe
+            # en avant, pré-réglé sur ce membre.
+            h.append("<div class='eq-sug-a'>"
+                     + ("" if memes else
+                        f"<button type='button' class='eq-b eq-b-s eq-b-acc' data-act='sug-ajouter' "
+                        f"data-cle='{x(s['cle'])}'>Ajouter</button>")
+                     + f"<button type='button' class='eq-b eq-b-s{' eq-b-acc' if memes else ''}' "
+                     f"data-act='sug-rattacher' "
+                     f"data-cle='{x(s['cle'])}' data-nom='{x(s['nom'])}' data-pre='{x(pre)}'>"
+                     "Rattacher à…</button>"
+                     f"<button type='button' class='eq-b eq-b-s' data-act='sug-masquer' "
+                     f"data-cle='{x(s['cle'])}'>Pas dans l’équipe</button></div>")
+        h.append("</div>")
+    h.append("</div>")
+
+    # --- Masquées ----------------------------------------------------------------
+    h.append("<details class='eq-sec' data-det='masquees'><summary><span>Masquées</span> "
+             f"<span class='eq-n'>({len(v['masquees'])})</span></summary>")
+    if not v["masquees"]:
+        h.append("<div class='eq-vide'>Aucune fiche masquée.</div>")
+    for mq in v["masquees"]:
+        cls = "eq-chip" if mq["ok"] else "eq-chip eq-casse"
+        raison = "" if mq["ok"] else f"<span class='eq-raison'>{_raison_html(mq)}</span>"
+        h.append(f"<div class='eq-ligne'><span class='{cls}'>{x(mq['identite'])} · "
+                 f"{x(mq['fiche'])}{raison}</span>"
+                 + (f"<button type='button' class='eq-b eq-b-s' data-act='remettre' "
+                    f"data-ident='{x(mq['identite'])}' data-fiche='{x(mq['fiche'])}'>Remettre</button>"
+                    if edit else "") + "</div>")
+    h.append("</details>")
+
+    # --- Rôles -------------------------------------------------------------------
+    h.append("<details class='eq-sec' data-det='roles'><summary><span>Rôles</span> "
+             f"<span class='eq-n'>({len(v['roles'])})</span></summary>"
+             "<div class='eq-sec-aide'>Un rôle est une simple information : il ne donne "
+             "aucun accès au site. Les accès se règlent dans Settings → Rôles.</div>")
+    # Le rôle que reçoivent les suggestions : enregistré, il suit les
+    # renommages ; figé sur « VA », « Tout ajouter » créait des membres sans
+    # rôle dès que « VA » avait été renommé.
+    if edit:
+        h.append("<div class='eq-ligne'><label><span>Rôle proposé aux suggestions</span> "
+                 "<select class='eq-sel' data-chg='role-propose' "
+                 f"aria-label='Rôle proposé aux suggestions'>{_opts_roles(v['role_propose'])}</select>"
+                 "</label></div>")
+    else:
+        h.append("<div class='eq-ligne'><span>Rôle proposé aux suggestions</span> "
+                 f"<b>{x(v['role_propose'] or '—')}</b></div>")
+    for r in v["roles"]:
+        if edit:
+            h.append(f"<div class='eq-ligne'><input type='text' value='{x(r['nom'])}' "
+                     f"maxlength='40' aria-label='Nom du rôle'>"
+                     f"<span class='eq-sub'>{r['n']} <span>membre(s)</span></span>"
+                     f"<button type='button' class='eq-b eq-b-s' data-act='role-renommer' "
+                     f"data-role='{x(r['nom'])}'>Renommer</button>"
+                     f"<button type='button' class='eq-b eq-b-s eq-b-bad' data-act='role-supprimer' "
+                     f"data-role='{x(r['nom'])}' data-n='{r['n']}'>Supprimer</button></div>")
+        else:
+            h.append(f"<div class='eq-ligne'><b>{x(r['nom'])}</b> <span class='eq-sub'>"
+                     f"{r['n']} <span>membre(s)</span></span></div>")
+    if edit:
+        h.append("<div class='eq-ligne'><input type='text' id='eq-role-new' maxlength='40' "
+                 "placeholder='Nouveau rôle'><button type='button' class='eq-b eq-b-s eq-b-acc' "
+                 "data-act='role-ajouter'>Ajouter</button></div>")
+    h.append("</details>")
+
+    if edit:
+        # --- Sources des listes de choix : rendues UNE fois ------------------
+        # (un menu par ligne pesait 50 membres × 100 fiches d'options).
+        # Une fiche masquée est marquée ⊘ et non « (masquée) » : collé au
+        # nom dans une <option>, le mot restait en français en anglais.
+        h.append("<select id='eq-src-libres' hidden>")
+        for f in v["libres"]:
+            h.append(f"<option value='{x(f['identite'] + '|' + f['fiche'])}' "
+                     f"data-ident='{x(f['identite'])}' data-fiche='{x(f['fiche'])}'>"
+                     f"{x(f['identite'])} · {x(f['fiche'])}"
+                     + (" ⊘" if f["masquee"] else "") + "</option>")
+        h.append("</select><select id='eq-src-membres' hidden>")
+        for m in sorted(v["membres"], key=lambda z: z["nom"].casefold()):
+            h.append(f"<option value='{x(m['id'])}' data-nom='{x(m['nom'])}' "
+                     f"data-label='{x(_etiquette(m))}'>{x(_etiquette(m))}</option>")
+        h.append("</select>")
+        # --- Formulaire ajout / modification (fenêtre) -----------------------
+        h.append(
+            f"<div class='eq-ov' id='eq-form' data-role-def='{x(v['role_propose'])}' hidden>"
+            "<div class='eq-box' role='dialog' aria-modal='true'>"
+            "<div class='eq-box-t'><span data-t='add'>Ajouter une personne</span>"
+            "<span data-t='mod' hidden>Modifier</span> <b class='eq-t-nom'></b></div>"
+            "<input type='hidden' name='id'>"
+            "<div class='eq-grid'>"
+            "<label><span>Nom</span><input type='text' name='nom' maxlength='80' autocomplete='off'></label>"
+            f"<label><span>Rôle</span><select name='role'>{_opts_roles()}</select></label>"
+            "<label><span>@Discord</span><input type='text' name='discord' maxlength='60' "
+            "autocomplete='off' placeholder='pseudo'></label>"
+            "<label class='eq-chk eq-chk-form'><input type='checkbox' name='actif' checked> "
+            "<span>Actif</span></label>"
+            "</div>"
+            # Les pseudos gardés par une fusion (ou une personne qui a
+            # changé de compte) : ils servent à reconnaître ses fiches. Ici
+            # on les voit, et on retire celui qui n'est plus le sien.
+            "<label><span>Autres @Discord</span><input type='text' name='discords_autres' "
+            "maxlength='700' autocomplete='off' placeholder='séparés par des virgules'></label>"
+            "<label><span>Note</span><textarea name='note' rows='3' maxlength='1000'></textarea></label>"
+            "<div class='eq-box-a'><span class='eq-box-g' data-t='mod' hidden>"
+            "<button type='button' class='eq-b' data-act='fusion'>Fusionner avec…</button>"
+            "<button type='button' class='eq-b eq-b-bad' data-act='retirer'>Retirer</button></span>"
+            "<button type='button' class='eq-b' data-act='form-fermer'>Annuler</button>"
+            "<button type='button' class='eq-b eq-b-acc' data-act='form-sauver'>Enregistrer</button></div>"
+            "</div></div>")
+        # --- Fenêtre de choix (lier / fusionner / rattacher) -----------------
+        h.append(
+            "<div class='eq-ov' id='eq-pick' hidden><div class='eq-box' role='dialog' aria-modal='true'>"
+            "<div class='eq-box-t'><span data-mode='lier'>Lier une fiche à</span>"
+            "<span data-mode='fusion'>Fusionner avec…</span>"
+            "<span data-mode='rattacher'>Rattacher à…</span> <b class='eq-t-nom'></b></div>"
+            "<div class='eq-sec-aide'><span data-mode='lier'>Seules les fiches liées à personne "
+            "sont proposées. Lier une fiche masquée la sort des masquées.</span>"
+            "<span data-mode='fusion'>La personne choisie est fondue dans celle-ci : ses fiches "
+            "passent ici, les champs vides sont complétés, un @Discord différent est gardé en "
+            "second, un rôle différent est reporté dans la note, les notes sont mises bout à "
+            "bout, puis elle disparaît de l’équipe.</span>"
+            "<span data-mode='rattacher'>Les fiches de la suggestion rejoignent le membre choisi.</span></div>"
+            "<select class='eq-pick-sel' aria-label='Choix'></select>"
+            "<div class='eq-box-a'><button type='button' class='eq-b' data-act='pick-fermer'>Annuler</button>"
+            "<button type='button' class='eq-b eq-b-acc' data-act='pick-ok'>Valider</button></div>"
+            "</div></div>")
+    return "".join(h)
+
+
+def _render_jbequipe_html() -> str:
+    """Onglet « Équipe » (Social Analytics) : la coquille — CSS, fragment
+    rendu par le serveur, et le script qui le recharge après chaque action."""
+    css = """
+<style>
+/* Couleurs en VARIABLES, redéfinies sous body.light : le thème clair ne
+   dépend donc d'aucune règle générale. Pas une couleur en style inline :
+   les règles claires qui visent les blancs en style inline les repeindraient
+   (sombre sur sombre dans une pastille), et c'est exactement ce qui a déjà
+   coûté des régressions. Leur sélecteur n'est pas recopié ici : le banc de
+   tests lit ce source et prenait la citation pour une règle sans !important. */
+#eq-root{--eq-card:#0f0f13;--eq-line:#1d2027;--eq-line2:#2a2e38;--eq-fg:#d1d5db;
+  --eq-strong:#f9fafb;--eq-dim:#9ca3af;--eq-chip:#1a1d24;--eq-chip-fg:#cbd5e1;
+  --eq-bad-bg:rgba(239,68,68,.14);--eq-bad-fg:#fca5a5;--eq-bad-line:rgba(239,68,68,.4);
+  --eq-warn-bg:rgba(245,158,11,.10);--eq-warn-fg:#fcd34d;--eq-warn-line:rgba(245,158,11,.35);
+  --eq-acc:#2563eb;--eq-acc-fg:#ffffff;--eq-inp:#0c0e12;--eq-hov:#151821;
+  --eq-ov:rgba(0,0,0,.62);--eq-mod-l:74%;max-width:1180px;color:var(--eq-fg)}
+body.light #eq-root{--eq-card:#ffffff;--eq-line:#e5e7eb;--eq-line2:#d1d5db;--eq-fg:#374151;
+  --eq-strong:#111827;--eq-dim:#5b6472;--eq-chip:#f3f4f6;--eq-chip-fg:#374151;
+  --eq-bad-bg:#fef2f2;--eq-bad-fg:#b91c1c;--eq-bad-line:#fecaca;
+  --eq-warn-bg:#fffbeb;--eq-warn-fg:#92400e;--eq-warn-line:#fde68a;
+  --eq-inp:#ffffff;--eq-hov:#f9fafb;--eq-ov:rgba(17,24,39,.38);--eq-mod-l:25%}
+#eq-root [hidden]{display:none!important}
+#eq-root *{box-sizing:border-box}
+#eq-root .eq-alerte{background:var(--eq-warn-bg);border:1px solid var(--eq-warn-line);color:var(--eq-warn-fg);
+  border-radius:12px;padding:10px 14px;margin-bottom:12px;font-size:12.5px;line-height:1.45}
+#eq-root .eq-alerte b{color:var(--eq-warn-fg)}
+#eq-root .eq-alerte.eq-alerte-bad{background:var(--eq-bad-bg);border-color:var(--eq-bad-line);color:var(--eq-bad-fg)}
+#eq-root .eq-alerte.eq-alerte-bad b{color:var(--eq-bad-fg);display:block;margin-bottom:4px}
+#eq-root .eq-cards{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+#eq-root .eq-card{flex:1 1 140px;min-width:0;background:var(--eq-card);border:1px solid var(--eq-line);
+  border-radius:14px;padding:12px 16px}
+#eq-root .eq-lab{color:var(--eq-dim);font-size:10px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase}
+#eq-root .eq-val{font-size:24px;font-weight:800;color:var(--eq-strong);margin-top:2px}
+#eq-root .eq-val.eq-rouge{color:var(--eq-bad-fg)}
+#eq-root .eq-val.eq-orange{color:var(--eq-warn-fg)}
+#eq-root .eq-sub{color:var(--eq-dim);font-size:11px;font-weight:500}
+#eq-root .eq-n{color:var(--eq-dim);font-weight:600}
+#eq-root .eq-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+#eq-root label{display:inline-flex;align-items:center;gap:6px;margin:0;font-size:12px;font-weight:600;color:var(--eq-fg)}
+#eq-root input[type=text],#eq-root select,#eq-root textarea{width:auto;max-width:100%;background:var(--eq-inp);
+  border:1px solid var(--eq-line2);color:var(--eq-strong);border-radius:9px;padding:7px 10px;font-size:13px;
+  font-family:inherit;margin:0}
+#eq-root input[type=checkbox]{width:auto;margin:0;accent-color:var(--eq-acc)}
+#eq-root .eq-bar input[type=text]{flex:1 1 160px;min-width:0}
+#eq-root .eq-b{background:var(--eq-chip);color:var(--eq-strong);border:1px solid var(--eq-line2);border-radius:9px;
+  padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;line-height:1.2;margin:0}
+#eq-root .eq-b:hover{border-color:var(--eq-acc)}
+#eq-root .eq-b.eq-b-acc{background:var(--eq-acc);border-color:var(--eq-acc);color:var(--eq-acc-fg)}
+#eq-root .eq-b.eq-b-bad{color:var(--eq-bad-fg);border-color:var(--eq-bad-line);background:var(--eq-bad-bg)}
+#eq-root .eq-b.eq-b-s{padding:4px 9px;font-size:11px;border-radius:8px}
+/* container-type sur le CADRE du tableau, pas sur #eq-root : la contenance
+   de mise en page ferait de #eq-root le repere des fenetres position:fixed,
+   qui ne couvriraient plus l'ecran. */
+#eq-root .eq-tblw{background:var(--eq-card);border:1px solid var(--eq-line);border-radius:14px;overflow-x:auto;
+  max-width:100%;margin-bottom:16px;container-type:inline-size}
+#eq-root .eq-tbl{width:100%;min-width:860px;border-collapse:collapse;margin:0}
+#eq-root .eq-tbl td.eq-td-nom{min-width:140px}
+#eq-root .eq-tbl td.eq-td-fiches{min-width:210px}
+#eq-root .eq-tbl td.eq-td-note{min-width:140px}
+#eq-root .eq-tbl th{background:transparent;color:var(--eq-dim);font-size:10px;font-weight:800;letter-spacing:.8px;
+  text-transform:uppercase;padding:10px;border-bottom:1px solid var(--eq-line2);text-align:left;white-space:nowrap}
+#eq-root .eq-tbl td{padding:9px 10px;border-bottom:1px solid var(--eq-line);vertical-align:top;font-size:12.5px;
+  color:var(--eq-fg)}
+#eq-root .eq-tbl tr.eq-m:hover td{background:var(--eq-hov)}
+#eq-root .eq-tbl tr.eq-inactif td{opacity:.5}
+#eq-root .eq-num{text-align:right;font-variant-numeric:tabular-nums}
+#eq-root .eq-ml{display:none}
+/* min-width:0 + anywhere : un nom long SANS espace (« marie.dupont.longnom… »)
+   gardait sa largeur minimale dans le flex et poussait le crayon hors de la
+   carte a 375 px — or le crayon est la seule entree vers Modifier/Fusionner. */
+#eq-root .eq-nom{font-weight:800;color:var(--eq-strong);overflow-wrap:anywhere;min-width:0}
+#eq-root .eq-tbl td b{color:var(--eq-strong)}
+#eq-root .eq-sel{font-size:12px;padding:5px 8px}
+#eq-root .eq-model{display:inline-block;border-radius:6px;padding:1px 7px;font-size:10.5px;font-weight:700;
+  margin:0 4px 4px 0;background:hsla(var(--h),65%,50%,.13);color:hsl(var(--h),70%,var(--eq-mod-l))}
+#eq-root .eq-chip{display:inline-flex;align-items:center;flex-wrap:wrap;gap:3px;background:var(--eq-chip);
+  color:var(--eq-chip-fg);border:1px solid var(--eq-line2);border-radius:999px;padding:2px 6px 2px 9px;
+  font-size:11px;margin:0 4px 4px 0;max-width:100%;overflow-wrap:anywhere}
+#eq-root .eq-chip .eq-model{margin:0 3px 0 0}
+#eq-root .eq-chip.eq-casse{background:var(--eq-bad-bg);color:var(--eq-bad-fg);border-color:var(--eq-bad-line);
+  border-radius:10px}
+#eq-root .eq-raison{display:block;flex-basis:100%;font-size:10px;opacity:.9}
+/* La donnee de la raison (identite, date) est en <b> pour la traduction :
+   elle garde le rouge de la pastille. Specificite (1,3,1) : passe devant
+   la regle des gras du tableau (1,1,2), qui la peignait en blanc. */
+#eq-root .eq-chip.eq-casse .eq-raison b{color:inherit}
+#eq-root .eq-x{background:transparent;border:0;color:inherit;cursor:pointer;font-size:14px;line-height:1;
+  padding:0 3px;margin:0;opacity:.75;font-family:inherit}
+#eq-root .eq-x:hover{opacity:1}
+#eq-root .eq-note{white-space:pre-wrap;max-width:260px;max-height:4.5em;overflow:hidden;color:var(--eq-fg);
+  overflow-wrap:break-word}
+#eq-root .eq-nom-l{display:flex;align-items:flex-start;gap:4px}
+#eq-root .eq-mod{background:transparent;border:1px solid transparent;border-radius:7px;color:var(--eq-dim);
+  cursor:pointer;font-size:13px;line-height:1;padding:2px 5px;margin:0;font-family:inherit;flex:none}
+#eq-root .eq-mod:hover{color:var(--eq-strong);border-color:var(--eq-line2)}
+#eq-root .eq-box-a .eq-box-g{display:flex;gap:8px;margin-right:auto;flex-wrap:wrap}
+#eq-root .eq-vide{padding:18px;text-align:center;color:var(--eq-dim);font-size:12.5px}
+#eq-root .eq-sec{background:var(--eq-card);border:1px solid var(--eq-line);border-radius:14px;padding:12px 14px;
+  margin-bottom:14px}
+#eq-root .eq-sec-h,#eq-root summary{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;
+  font-weight:800;color:var(--eq-strong);cursor:default}
+#eq-root summary{cursor:pointer;list-style:none}
+#eq-root summary::-webkit-details-marker{display:none}
+#eq-root summary::before{content:'▸';color:var(--eq-dim);font-size:11px}
+#eq-root details[open] > summary::before{content:'▾'}
+#eq-root .eq-sec-h .eq-b{margin-left:auto}
+#eq-root .eq-sec-aide{color:var(--eq-dim);font-size:11.5px;margin:6px 0 10px;line-height:1.45}
+#eq-root .eq-sug{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;padding:9px 0;
+  border-top:1px solid var(--eq-line)}
+#eq-root .eq-sug-t{flex:1 1 180px;min-width:0;font-size:13px}
+#eq-root .eq-sug-f{flex:2 1 220px;min-width:0}
+#eq-root .eq-sug-a{display:flex;gap:6px;flex-wrap:wrap}
+#eq-root .eq-tag{display:inline-block;font-size:10.5px;color:var(--eq-warn-fg);background:var(--eq-warn-bg);
+  border:1px solid var(--eq-warn-line);border-radius:6px;padding:1px 6px;margin-left:4px}
+#eq-root .eq-tag b{color:var(--eq-warn-fg)}
+#eq-root .eq-ligne{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--eq-line)}
+#eq-root .eq-ligne input[type=text]{flex:0 1 200px;min-width:0}
+/* z-index 99000 : au-dessus des controles fixes du site (SFW / marche 90,
+   barre laterale 100, tiroir et bouton du menu mobile 9400-9600, panneau
+   des notifications 9998), qui restaient vifs et cliquables par-dessus le
+   voile a 80 ; en dessous de uiConfirm (100000) et des toasts (200000),
+   declenches DEPUIS ces fenetres et qui doivent passer devant. */
+#eq-root .eq-ov{position:fixed;inset:0;background:var(--eq-ov);z-index:99000;display:flex;align-items:center;
+  justify-content:center;padding:16px}
+#eq-root .eq-box{background:var(--eq-card);border:1px solid var(--eq-line2);border-radius:16px;padding:18px;
+  width:100%;max-width:460px;max-height:calc(100vh - 32px);overflow:auto;color:var(--eq-fg)}
+#eq-root .eq-box-t{font-size:15px;font-weight:800;color:var(--eq-strong);margin-bottom:12px}
+#eq-root .eq-box-t b{color:var(--eq-strong)}
+#eq-root .eq-box label{display:flex;flex-direction:column;align-items:stretch;gap:4px;font-size:11px;
+  text-transform:uppercase;letter-spacing:.5px;color:var(--eq-dim);margin-bottom:10px}
+#eq-root .eq-box label.eq-chk-form{flex-direction:row;align-items:center;text-transform:none;letter-spacing:0;
+  font-size:12.5px;color:var(--eq-fg);align-self:end;margin-bottom:18px}
+#eq-root .eq-box input[type=text],#eq-root .eq-box select,#eq-root .eq-box textarea{width:100%}
+#eq-root .eq-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:0 12px}
+#eq-root .eq-box-a{display:flex;gap:8px;justify-content:flex-end;align-items:center;flex-wrap:wrap;margin-top:8px}
+#eq-root .eq-box-a .eq-b{white-space:nowrap}
+#eq-root .eq-pick-sel{width:100%}
+/* Place etroite (telephone, ou barre laterale ouverte sur une tablette) :
+   chaque membre devient une carte. Le tableau a huit colonnes n'y tenait
+   pas, meme en defilant dans son cadre. On regarde la largeur du CADRE et
+   pas celle de l'ecran : sur 800 px avec le menu ouvert, il ne restait que
+   650 px et les colonnes s'ecrasaient. */
+@container (max-width: 859px){
+  #eq-root .eq-tbl{min-width:0}
+  #eq-root .eq-tbl thead{display:none}
+  #eq-root .eq-tbl,#eq-root .eq-tbl tbody{display:block;width:100%}
+  #eq-root .eq-tbl tr.eq-m{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:2px 14px;
+    padding:10px 14px;border-bottom:1px solid var(--eq-line2)}
+  #eq-root .eq-tbl td{display:block;border:0;padding:4px 0;min-width:0}
+  #eq-root .eq-tbl td.eq-td-nom,#eq-root .eq-tbl td.eq-td-fiches,
+  #eq-root .eq-tbl td.eq-td-note{grid-column:1 / -1;min-width:0}
+  #eq-root .eq-tbl td.eq-td-vide{display:none}
+  /* Le statut remonte a cote des comptes : sinon les fiches (pleine
+     largeur) le repoussaient seul sur sa ligne. */
+  #eq-root .eq-tbl td.eq-td-statut{order:1}
+  #eq-root .eq-tbl td.eq-td-fiches,#eq-root .eq-tbl td.eq-td-note{order:2}
+  #eq-root .eq-tbl tr.eq-m:hover td{background:transparent}
+  #eq-root .eq-ml{display:block;color:var(--eq-dim);font-size:9.5px;font-weight:800;letter-spacing:.8px;
+    text-transform:uppercase;margin-bottom:2px}
+  #eq-root .eq-num{text-align:left}
+  /* Pas de survol sur un ecran tactile : l'infobulle ne montre rien, et un
+     role en lecture seule n'a pas de fenetre Modifier. La note entiere. */
+  #eq-root .eq-note{max-width:none;max-height:none}
+}
+</style>
+"""
+    body = ("<div id='eq-root'><div id='eq-frag'>" + _render_jbequipe_fragment()
+            + "</div></div>")
+    # Script en chaîne BRUTE : pas un antislash, pas une apostrophe droite
+    # dans les textes (’ typographique) — une apostrophe mal échappée ici ne
+    # casse pas Python, elle casse le script de la page entière, en silence.
+    # Les données passent par des attributs data-* lus avec getAttribute :
+    # jamais par un littéral JS dans un onclick, où « Chef d'équipe »
+    # fermerait la chaîne.
+    js = r"""
+<script>
+(function(){
+  var root = document.getElementById('eq-root');
+  if(!root || root.getAttribute('data-arme') === '1') return;
+  root.setAttribute('data-arme', '1');
+  var UI = window.__eqUI || (window.__eqUI = {role: '', q: '', inactifs: false, det: {}});
+  var PICK = null;
+  var FORM_M = null;
+  // Les actions partent EN FILE, une à la fois, dans l’ordre des clics.
+  // Avant, une action lancée pendant qu’une autre était en vol était jetée
+  // sans un mot : décocher « Actif » sur deux lignes de suite n’enregistrait
+  // que la première, et la seconde case se recochait toute seule.
+  var FILE = Promise.resolve();
+  var ENCOURS = {};
+  // Chaque rechargement a son numéro : une réponse ancienne, revenue après
+  // une plus récente, ne remet jamais l’écran dans un état dépassé.
+  var SEQ = 0;
+  function frag(){ return document.getElementById('eq-frag'); }
+  function toast(msg, type){
+    if(typeof showToast === 'function') showToast(msg, type || 'success', type === 'error' ? 6000 : 2400);
+    else if(type === 'error') window.alert(msg);
+  }
+  function confirmer(msg, titre, danger){
+    if(typeof uiConfirm === 'function') return uiConfirm(msg, {title: titre || 'Confirmer', okText: titre || 'Confirmer', danger: !!danger});
+    return Promise.resolve(window.confirm(msg));
+  }
+  function filtrer(){
+    var f = frag(); if(!f) return;
+    var q = String(UI.q || '').trim().toLowerCase();
+    var vus = 0, tot = 0;
+    Array.prototype.forEach.call(f.querySelectorAll('tr.eq-m'), function(tr){
+      tot++;
+      var ok = true;
+      var r = tr.getAttribute('data-role') || '';
+      if(UI.role){ ok = (UI.role === '__sans') ? (r === '') : (r === UI.role); }
+      if(ok && q){ ok = (tr.getAttribute('data-cherche') || '').indexOf(q) !== -1; }
+      if(ok && !UI.inactifs && tr.getAttribute('data-actif') === '0'){ ok = false; }
+      tr.hidden = !ok;
+      if(ok) vus++;
+    });
+    var info = f.querySelector('.eq-filtre-info');
+    if(info) info.textContent = (vus === tot) ? '' : (vus + ' / ' + tot);
+    var vide = f.querySelector('.eq-filtre-vide');
+    if(vide) vide.hidden = !(tot && !vus);
+  }
+  function restaurer(){
+    var f = frag(); if(!f) return;
+    var sr = f.querySelector('[data-filtre="role"]');
+    if(sr){ sr.value = UI.role; if(sr.value !== UI.role){ UI.role = ''; sr.value = ''; } }
+    var sq = f.querySelector('[data-filtre="q"]'); if(sq) sq.value = UI.q || '';
+    var si = f.querySelector('[data-filtre="inactifs"]'); if(si) si.checked = !!UI.inactifs;
+    Array.prototype.forEach.call(f.querySelectorAll('details[data-det]'), function(d){
+      if(UI.det[d.getAttribute('data-det')]) d.open = true;
+    });
+    filtrer();
+  }
+  function recharger(){
+    var n = ++SEQ;
+    return fetch('/jbequipe/fragment', {credentials: 'same-origin', headers: {'X-Tab-Ajax': '1'}})
+      .then(function(r){ if(!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+      .then(function(html){
+        if(n !== SEQ) return;
+        var f = frag(); if(f){ f.innerHTML = html; restaurer(); }
+      })
+      .catch(function(e){
+        if(n !== SEQ) return;
+        toast('Rechargement impossible : ' + ((e && e.message) || e), 'error');
+      });
+  }
+  function envoyer(action, donnees){
+    var fd = new FormData();
+    fd.append('ajax', '1');
+    Object.keys(donnees || {}).forEach(function(k){ fd.append(k, donnees[k] == null ? '' : donnees[k]); });
+    return fetch('/jbequipe/' + action, {method: 'POST', body: fd, credentials: 'same-origin',
+                                          headers: {'Accept': 'application/json'}})
+      .then(function(r){
+        return r.json().catch(function(){ return {ok: false, error: 'Réponse illisible (HTTP ' + r.status + ')'}; });
+      })
+      .then(function(x){
+        if(x && x.ok){
+          toast(x.message || 'Enregistré', 'success');
+          // Le rechargement fait partie de l’action : la suivante de la
+          // file part sur l’écran à jour.
+          return recharger().then(function(){ return x; });
+        }
+        toast((x && x.error) || 'Échec', 'error');
+        return x;
+      })
+      .catch(function(e){ toast('Erreur réseau : ' + ((e && e.message) || e), 'error'); return null; });
+  }
+  function agir(action, donnees){
+    // Un double-clic renvoie la MÊME demande : elle n’est pas rejouée (deux
+    // clics sur « Enregistrer » auraient créé deux fois la personne), et on
+    // le dit au lieu de l’avaler.
+    var cle = action + '|' + JSON.stringify(donnees || {});
+    if(ENCOURS[cle]){
+      toast('Déjà envoyé : réponse en attente.', 'info');
+      return Promise.resolve(null);
+    }
+    ENCOURS[cle] = 1;
+    var p = FILE.then(function(){ return envoyer(action, donnees); });
+    FILE = p.then(null, function(){});
+    return p.then(function(x){ delete ENCOURS[cle]; return x; },
+                  function(e){ delete ENCOURS[cle]; throw e; });
+  }
+  function fermer(sel){ var f = frag(); var el = f && f.querySelector(sel); if(el) el.hidden = true; }
+  function modes(box, attr, val){
+    Array.prototype.forEach.call(box.querySelectorAll('[' + attr + ']'), function(el){
+      el.hidden = el.getAttribute(attr) !== val;
+    });
+  }
+  function formOuvrir(m){
+    FORM_M = m || null;
+    var f = frag(); var ov = f && f.querySelector('#eq-form'); if(!ov) return;
+    modes(ov, 'data-t', m ? 'mod' : 'add');
+    ov.querySelector('.eq-t-nom').textContent = m ? (m.nom || '') : '';
+    ov.querySelector('[name=id]').value = m ? m.id : '';
+    ov.querySelector('[name=nom]').value = m ? (m.nom || '') : '';
+    var sel = ov.querySelector('[name=role]');
+    Array.prototype.forEach.call(sel.querySelectorAll('option[data-tmp]'), function(o){ o.parentNode.removeChild(o); });
+    // Ajout : le rôle proposé (enregistré, il suit les renommages) plutôt
+    // qu’un « VA » écrit en dur, perdu dès que ce rôle est renommé.
+    var r = m ? (m.role || '') : (ov.getAttribute('data-role-def') || '');
+    sel.value = r;
+    if(sel.value !== r){
+      if(m && r){
+        var o = document.createElement('option');
+        o.value = r; o.textContent = r + ' (?)'; o.setAttribute('data-tmp', '1');
+        sel.appendChild(o); sel.value = r;
+      } else { sel.value = ''; }
+    }
+    ov.querySelector('[name=discord]').value = m ? (m.discord || '') : '';
+    ov.querySelector('[name=discords_autres]').value = m ? (m.discords_autres || '') : '';
+    ov.querySelector('[name=note]').value = m ? (m.note || '') : '';
+    ov.querySelector('[name=actif]').checked = m ? !!m.actif : true;
+    ov.hidden = false;
+    setTimeout(function(){ try{ ov.querySelector('[name=nom]').focus(); }catch(e){} }, 30);
+  }
+  function formSauver(){
+    var ov = frag().querySelector('#eq-form'); if(!ov) return;
+    var id = ov.querySelector('[name=id]').value;
+    var d = {
+      nom: ov.querySelector('[name=nom]').value,
+      role: ov.querySelector('[name=role]').value,
+      discord: ov.querySelector('[name=discord]').value,
+      discords_autres: ov.querySelector('[name=discords_autres]').value,
+      note: ov.querySelector('[name=note]').value,
+      actif: ov.querySelector('[name=actif]').checked ? '1' : '0'
+    };
+    if(!String(d.nom).trim()){ toast('Le nom est obligatoire.', 'error'); return; }
+    if(id) d.id = id;
+    agir(id ? 'membre_modifier' : 'membre_ajouter', d);
+  }
+  function pickOuvrir(opts){
+    var f = frag(); var ov = f && f.querySelector('#eq-pick'); var src = f && f.querySelector(opts.src);
+    if(!ov || !src) return;
+    var sel = ov.querySelector('.eq-pick-sel');
+    sel.innerHTML = '';
+    Array.prototype.forEach.call(src.options, function(o){
+      if(opts.exclure && o.value === opts.exclure) return;
+      sel.appendChild(o.cloneNode(true));
+    });
+    if(!sel.options.length){ toast(opts.vide, 'error'); return; }
+    if(opts.pre){ sel.value = opts.pre; if(sel.value !== opts.pre) sel.selectedIndex = 0; }
+    modes(ov, 'data-mode', opts.mode);
+    ov.querySelector('.eq-t-nom').textContent = opts.label || opts.nom || '';
+    PICK = opts;
+    ov.hidden = false;
+    setTimeout(function(){ try{ sel.focus(); }catch(e){} }, 30);
+  }
+  function pickOk(){
+    var f = frag(); var ov = f && f.querySelector('#eq-pick'); if(!ov || !PICK) return;
+    var sel = ov.querySelector('.eq-pick-sel');
+    var o = sel.options[sel.selectedIndex]; if(!o) return;
+    var P = PICK;
+    ov.hidden = true;
+    if(P.mode === 'lier'){
+      agir('membre_lier', {id: P.id, identite: o.getAttribute('data-ident'), fiche: o.getAttribute('data-fiche')});
+    } else if(P.mode === 'fusion'){
+      // Les deux personnes par leur étiquette complète (rôle, models,
+      // @Discord) : deux homonymes « Jaurel X2 » étaient indiscernables.
+      var nomB = o.getAttribute('data-label') || o.textContent;
+      var nomG = P.label || P.nom;
+      confirmer('« ' + nomB + ' » sera fondu(e) dans « ' + nomG + ' » : ses fiches passent à ' + P.nom
+                + ', son @Discord (s’il diffère) est gardé en second, son rôle (s’il diffère) est '
+                + 'reporté dans la note, puis la personne absorbée disparaît de l’équipe.', 'Fusionner', true)
+        .then(function(ok){ if(ok) agir('membre_fusionner', {id: P.id, avec: o.value}); });
+    } else if(P.mode === 'rattacher'){
+      agir('sug_rattacher', {cle: P.cle, id: o.value});
+    }
+  }
+  root.addEventListener('click', function(e){
+    var b = (e.target && e.target.closest) ? e.target.closest('[data-act]') : null;
+    if(!b || !root.contains(b)) return;
+    var act = b.getAttribute('data-act');
+    var id = b.getAttribute('data-id') || '';
+    var nom = b.getAttribute('data-nom') || '';
+    if(act === 'recharger'){ recharger(); }
+    else if(act === 'form-ouvrir'){ formOuvrir(null); }
+    else if(act === 'form-fermer'){ fermer('#eq-form'); }
+    else if(act === 'form-sauver'){ formSauver(); }
+    else if(act === 'modifier'){
+      var tr = b.closest('tr.eq-m'), m = null;
+      try{ m = JSON.parse(tr.getAttribute('data-m')); }catch(err){ m = null; }
+      if(m) formOuvrir(m);
+    }
+    else if(act === 'lier'){
+      pickOuvrir({mode: 'lier', id: id, nom: nom, src: '#eq-src-libres',
+                  vide: 'Aucune fiche libre : toutes sont déjà liées à quelqu’un.'});
+    }
+    else if(act === 'fusion' || act === 'retirer'){
+      // Boutons de la fenetre d edition : la personne est celle qu elle montre.
+      var label = '';
+      if(!id && FORM_M){ id = FORM_M.id; nom = FORM_M.nom || ''; label = FORM_M.label || ''; }
+      if(!id) return;
+      fermer('#eq-form');
+      if(act === 'fusion'){
+        pickOuvrir({mode: 'fusion', id: id, nom: nom, label: label, src: '#eq-src-membres', exclure: id,
+                    vide: 'Personne d’autre dans l’équipe.'});
+      } else {
+        confirmer('Retirer ' + (label || nom) + ' de l’équipe ? Ses fiches VA ne sont pas touchées : elles repassent « À confirmer ».', 'Retirer', true)
+          .then(function(ok){ if(ok) agir('membre_retirer', {id: id}); });
+      }
+    }
+    else if(act === 'pick-fermer'){ fermer('#eq-pick'); }
+    else if(act === 'pick-ok'){ pickOk(); }
+    else if(act === 'delier'){
+      var ident = b.getAttribute('data-ident') || '', fiche = b.getAttribute('data-fiche') || '';
+      confirmer('Délier « ' + ident + ' · ' + fiche + ' » de ' + nom + ' ? La fiche repassera « À confirmer ».', 'Délier')
+        .then(function(ok){ if(ok) agir('membre_delier', {id: id, identite: ident, fiche: fiche}); });
+    }
+    else if(act === 'sug-ajouter'){ agir('sug_ajouter', {cle: b.getAttribute('data-cle')}); }
+    else if(act === 'sug-masquer'){ agir('sug_masquer', {cle: b.getAttribute('data-cle')}); }
+    else if(act === 'sug-rattacher'){
+      pickOuvrir({mode: 'rattacher', cle: b.getAttribute('data-cle'), nom: nom,
+                  pre: b.getAttribute('data-pre') || '', src: '#eq-src-membres',
+                  vide: 'Aucun membre pour l’instant : utilise « Ajouter ».'});
+    }
+    else if(act === 'sug-tout'){
+      // La confirmation dit ce qui sera VRAIMENT fait : une suggestion au
+      // même @Discord qu’un membre lui est rattachée (même pseudo = même
+      // personne), plusieurs membres possibles = laissée au choix.
+      var n = b.getAttribute('data-n') || '0';
+      var nk = parseInt(b.getAttribute('data-k') || '0', 10) || 0;
+      var nl = parseInt(b.getAttribute('data-l') || '0', 10) || 0;
+      var na = (parseInt(n, 10) || 0) - nk - nl;
+      var rl = b.getAttribute('data-role') || '';
+      var msg = na + ' suggestion(s) ajoutée(s) comme membres (' + (rl ? 'rôle ' + rl : 'sans rôle') + ')';
+      if(nk) msg += ', ' + nk + ' rattachée(s) au membre qui a le même @Discord';
+      if(nl) msg += ', ' + nl + ' laissée(s) : plusieurs membres ont ce @Discord';
+      confirmer(msg + ' ?', 'Tout ajouter')
+        .then(function(ok){ if(ok) agir('sug_tout', {n: n}); });
+    }
+    else if(act === 'remettre'){
+      agir('masquee_remettre', {identite: b.getAttribute('data-ident'), fiche: b.getAttribute('data-fiche')});
+    }
+    else if(act === 'role-ajouter'){
+      var inp = frag().querySelector('#eq-role-new');
+      agir('role_ajouter', {nom: inp ? inp.value : ''});
+    }
+    else if(act === 'role-renommer'){
+      var inp2 = b.parentNode.querySelector('input[type=text]');
+      agir('role_renommer', {ancien: b.getAttribute('data-role'), nouveau: inp2 ? inp2.value : ''});
+    }
+    else if(act === 'role-supprimer'){
+      var r = b.getAttribute('data-role') || '';
+      confirmer('Supprimer le rôle « ' + r + ' » ?', 'Supprimer', true)
+        .then(function(ok){ if(ok) agir('role_supprimer', {nom: r}); });
+    }
+  });
+  root.addEventListener('change', function(e){
+    var t = e.target; if(!t || !t.getAttribute || !root.contains(t)) return;
+    var fl = t.getAttribute('data-filtre');
+    if(fl === 'role'){ UI.role = t.value; filtrer(); return; }
+    if(fl === 'inactifs'){ UI.inactifs = !!t.checked; filtrer(); return; }
+    var ch = t.getAttribute('data-chg');
+    var data = null;
+    if(ch === 'role') data = {id: t.getAttribute('data-id'), role: t.value};
+    else if(ch === 'actif') data = {id: t.getAttribute('data-id'), actif: t.checked ? '1' : '0'};
+    // Refusé : on recharge, sinon le menu garderait une valeur qui n’a pas
+    // été enregistrée. Pas sur null (réseau coupé, ou demande déjà en
+    // file) : un rechargement lancé là partait pendant qu’un POST était en
+    // vol, et pouvait revenir APRÈS lui avec l’état d’avant.
+    if(data){
+      agir('membre_modifier', data).then(function(x){ if(x && !x.ok) recharger(); });
+    } else if(ch === 'role-propose'){
+      agir('role_proposer', {nom: t.value}).then(function(x){ if(x && !x.ok) recharger(); });
+    }
+  });
+  root.addEventListener('input', function(e){
+    var t = e.target;
+    if(t && t.getAttribute && t.getAttribute('data-filtre') === 'q'){
+      UI.q = t.value;
+      if(typeof siteDebounce === 'function') siteDebounce('eq-q', filtrer, 120); else filtrer();
+    }
+  });
+  root.addEventListener('toggle', function(e){
+    var d = e.target;
+    if(d && d.getAttribute && d.getAttribute('data-det')) UI.det[d.getAttribute('data-det')] = !!d.open;
+  }, true);
+  root.addEventListener('keydown', function(e){
+    var t = e.target; if(!t || !t.closest) return;
+    if(e.key === 'Escape'){ fermer('#eq-form'); fermer('#eq-pick'); return; }
+    if(e.key !== 'Enter' || t.tagName === 'TEXTAREA') return;
+    if(t.closest('#eq-form')){ e.preventDefault(); formSauver(); }
+    else if(t.id === 'eq-role-new'){ e.preventDefault(); agir('role_ajouter', {nom: t.value}); }
+  });
+  root.addEventListener('mousedown', function(e){
+    var t = e.target;
+    if(t && t.classList && t.classList.contains('eq-ov')) t.hidden = true;
+  });
+  restaurer();
+})();
+</script>
+"""
+    return css + body + js
+
+
+def _jbequipe_agir(action: str, f) -> str:
+    """Exécute une action de l'onglet Équipe ; rend le message à afficher.
+
+    `f` : le formulaire (request.form, ou un dict pour les tests). Un refus
+    lève equipe.ErreurEquipe, dont le message se montre tel quel. Une action
+    inconnue rend None (la route répond 404).
+
+    Les actions sur une SUGGESTION la recalculent ici, côté serveur, à partir
+    de sa clé : on ne prend jamais la liste des fiches envoyée par le
+    navigateur, qui peut dater d'avant un autre clic.
+    """
+    import equipe as _eq
+
+    def g(k):
+        return str(f.get(k) or "").strip()
+
+    def _vrai(val):
+        return str(val or "").strip().lower() in ("1", "true", "on", "oui")
+
+    if action == "membre_ajouter":
+        m = _eq.ajouter_membre(g("nom"), role=g("role"), discord=g("discord"),
+                               discords_autres=str(f.get("discords_autres") or ""),
+                               note=str(f.get("note") or ""),
+                               actif=_vrai(f.get("actif", "1")))
+        return f"✓ {m['nom']} ajouté(e) à l'équipe"
+    if action == "membre_modifier":
+        champs = {k: str(f.get(k) or "")
+                  for k in ("nom", "role", "discord", "discords_autres", "note") if k in f}
+        if "actif" in f:
+            champs["actif"] = _vrai(f.get("actif"))
+        if not champs:
+            raise _eq.ErreurEquipe("Rien à modifier.")
+        m = _eq.modifier_membre(g("id"), **champs)
+        return f"✓ {m['nom']} mis(e) à jour"
+    if action == "membre_retirer":
+        m = _eq.retirer_membre(g("id"))
+        n = len(m.get("fiches") or [])
+        return (f"✓ {m['nom']} retiré(e) de l'équipe"
+                + (f" — {n} fiche(s) repassent « À confirmer »" if n else ""))
+    if action == "membre_lier":
+        ident, fiche = g("identite").lower(), g("fiche")
+        # La fiche doit EXISTER : un lien vers un nom tapé de travers
+        # naîtrait cassé.
+        import jailbreak as _jb
+        noms = {str(n).strip().lower(): str(n) for n in _jb.list_va_names_for_identity(ident)}
+        if not ident or fiche.lower() not in noms:
+            raise _eq.ErreurEquipe(f"Fiche « {ident} · {fiche} » introuvable dans le "
+                                   "référentiel : la liste a changé, recharge.")
+        r = _eq.lier_fiche(g("id"), ident, noms[fiche.lower()])
+        return (f"✓ « {ident} · {noms[fiche.lower()]} » liée à {r['membre']}"
+                + (" (elle était masquée)" if r.get("demasquees") else ""))
+    if action == "membre_delier":
+        r = _eq.delier_fiche(g("id"), g("identite"), g("fiche"))
+        return f"✓ Fiche déliée de {r['membre']}"
+    if action == "membre_fusionner":
+        r = _eq.fusionner(g("id"), g("avec"))
+        # Ce qui a été gardé autrement qu'en place est DIT : un pseudo
+        # Discord ou un rôle qui disparaissait sans un mot, c'était la
+        # personne recréée en double à sa prochaine fiche.
+        extra = []
+        if r.get("discords_gardes"):
+            extra.append(f"@Discord gardé en second : {', '.join(r['discords_gardes'])}")
+        if r.get("role_reporte"):
+            extra.append(f"rôle « {r['role_reporte']} » reporté dans la note")
+        return (f"✓ {r['absorbe']} fondu(e) dans {r['garde']} — {r['fiches']} fiche(s) reprise(s)"
+                + ("" if not extra else " ; " + " ; ".join(extra)))
+    if action in ("sug_ajouter", "sug_rattacher", "sug_masquer"):
+        v = _jbequipe_vue()
+        s = _eq.suggestion(v, g("cle"))
+        if action == "sug_ajouter":
+            if s["membres_meme_discord"]:
+                # Même pseudo = même personne : la créer la ferait figurer
+                # deux fois, ses comptes Insta répartis sur deux lignes.
+                noms = {m["id"]: m["nom"] for m in v["membres"]}
+                qui = ", ".join(noms.get(i, "?") for i in s["membres_meme_discord"])
+                raise _eq.ErreurEquipe(f"« {s['nom']} » porte le même @Discord que {qui} : "
+                                       "c'est la même personne — utilise « Rattacher à… ».")
+            m = _eq.ajouter_membres([{"nom": s["nom"], "role": s["role"],
+                                      "discord": s["discord"], "fiches": s["fiches"]}])[0]
+            return f"✓ {m['nom']} ajouté(e) avec {len(s['fiches'])} fiche(s)"
+        if action == "sug_rattacher":
+            r = _eq.lier_fiches(g("id"), s["fiches"])
+            return f"✓ {r['ajoutees']} fiche(s) rattachée(s) à {r['membre']}"
+        n = _eq.masquer_fiches(s["fiches"])
+        return f"✓ {n} fiche(s) rangée(s) dans « Masquées »"
+    if action == "sug_tout":
+        v = _jbequipe_vue()
+        sug = v["suggestions"]
+        attendu = g("n")
+        # Le propriétaire a confirmé « ajouter les 12 » : si la liste a bougé
+        # entre-temps (un autre onglet, le poller), on n'en ajoute pas 15.
+        if attendu.isdigit() and int(attendu) != len(sug):
+            raise _eq.ErreurEquipe(f"La liste a changé ({len(sug)} suggestion(s) au lieu de "
+                                   f"{attendu}) : recharge avant de tout ajouter.")
+        if not sug:
+            raise _eq.ErreurEquipe("Aucune suggestion à ajouter.")
+        # Même @Discord qu'UN membre : rattachée à lui (même pseudo = même
+        # personne) ; créée, elle faisait figurer la personne deux fois.
+        # Plusieurs membres possibles : laissée, et dit — c'est au
+        # propriétaire de choisir. Une seule écriture, tout ou rien.
+        ajouts, ratt, laissees = [], [], 0
+        for s in sug:
+            memes = s["membres_meme_discord"]
+            if len(memes) == 1:
+                ratt.append((memes[0], s["fiches"]))
+            elif memes:
+                laissees += 1
+            else:
+                ajouts.append({"nom": s["nom"], "role": s["role"],
+                               "discord": s["discord"], "fiches": s["fiches"]})
+        if not ajouts and not ratt:
+            raise _eq.ErreurEquipe(f"Rien à ajouter : les {laissees} suggestion(s) portent un "
+                                   "@Discord qu'ont plusieurs membres — rattache-les une à une.")
+        r = _eq.appliquer_suggestions(ajouts, ratt)
+        return (f"✓ {len(r['crees'])} personne(s) ajoutée(s) à l'équipe"
+                + (f", {r['rattachees']} rattachée(s) au membre du même @Discord"
+                   if r["rattachees"] else "")
+                + (f", {laissees} laissée(s) : plusieurs membres ont ce @Discord"
+                   if laissees else ""))
+    if action == "masquee_remettre":
+        _eq.demasquer_fiche(g("identite"), g("fiche"))
+        return "✓ Fiche remise dans « À confirmer »"
+    if action == "role_ajouter":
+        r = _eq.ajouter_role(g("nom"))
+        return f"✓ Rôle « {r} » ajouté"
+    if action == "role_renommer":
+        n = _eq.renommer_role(g("ancien"), g("nouveau"))
+        return (f"✓ Rôle renommé en « {g('nouveau')} »"
+                + (f" — {n} membre(s) suivent" if n else ""))
+    if action == "role_supprimer":
+        r = _eq.supprimer_role(g("nom"))
+        return f"✓ Rôle « {r} » supprimé"
+    if action == "role_proposer":
+        r = _eq.definir_role_propose(g("nom"))
+        return (f"✓ Les suggestions seront ajoutées avec le rôle « {r} »" if r
+                else "✓ Les suggestions seront ajoutées sans rôle")
+    return None
+
+
 def _render_facture_html() -> str:
     """Page Facture (compta mensuelle OFM). Isolé dans facture_web.py."""
     try:
@@ -50725,6 +51809,11 @@ ROLE_MENU_STRUCTURE = [
         {"key": "jbanalyse", "name": "Jailbreak — Analyse vues", "perms": ["view"]},
         {"key": "jbglobal", "name": "Jailbreak — Analyse globale", "perms": ["view"]},
         {"key": "jbactivite", "name": "Jailbreak — Activité VA (assiduité, paie)", "perms": ["view", "edit"]},
+        # Clé == nom d'onglet réel : rien à ajouter dans _PERM_KEY_TO_TABS.
+        # Le « rôle » qu'on y écrit est une fiche, pas un droit : il n'ouvre
+        # rien ici. L'écriture reste admin-only (/jbequipe/ dans
+        # _ADMIN_ONLY_WRITE) ; un rôle qui a la case voit l'onglet en lecture.
+        {"key": "jbequipe", "name": "Social Analytics — Équipe (noms et rôles)", "perms": ["view", "edit"]},
         {"key": "jb2", "name": "Jailbreak 2", "perms": ["view"]},
     ]},
     {"section": "Finances", "items": [
@@ -51975,6 +53064,9 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{jbanalyse_html}", _g("jbanalyse", _render_jbanalyse_html))
         .replace("{jbglobal_html}", _lazy("jbglobal"))
         .replace("{jbactivite_html}", _g("jbactivite", _render_jbactivite_html))
+        # Équipe : différée — elle relit le référentiel Jailbreak à chaque
+        # rendu, inutile de le payer à chaque chargement de page.
+        .replace("{jbequipe_html}", _lazy("jbequipe"))
         .replace("{gms_html}", _lazy("gms"))
         .replace("{linkscale_html}", _lazy("linkscale"))
         .replace("{schedule_html}", _lazy("schedule"))
@@ -53864,6 +54956,10 @@ def create_app():
     _ADMIN_ONLY_WRITE = (
         "/settings/", "/admin/", "/business/", "/facture/", "/mypuls/",
         "/gms/", "/gmsdash/", "/linkscale/", "/jailbreak/", "/jbactivite/",
+        # Équipe : déjà refusée par défaut (absente de l allow-list) ; déclarée
+        # ici comme ses voisines pour qu un ajout futur à l allow-list ne
+        # l ouvre pas par mégarde.
+        "/jbequipe/",
         "/jbanalyse/", "/insta/", "/sheets", "/va/", "/identity/",
         "/textpool/", "/onboarding/", "/biolinks/", "/geelark/", "/noctus/",
         "/veille/", "/tg/", "/sfs", "/guild", "/vtg/", "/schedule/",
@@ -53889,6 +54985,8 @@ def create_app():
     # leur API JSON (le masquage des onglets ne suffisait pas).
     _ADMIN_ONLY_READ = (
         "/facture/", "/business/", "/jailbreak/", "/jbactivite/", "/jbanalyse/",
+        # Les noms, rôles et pseudos Discord de toute l équipe.
+        "/jbequipe/",
         "/gmsdash/", "/gms/", "/linkscale/", "/settings/role", "/admin/",
         "/sheets", "/external/list", "/va/get_insta",
         "/sessions/",
@@ -53957,6 +55055,7 @@ def create_app():
     _READ_PREFIX_TO_TAB = {
         "/facture/": "facture", "/business/": "business",
         "/jailbreak/": "jailbreak", "/jbactivite/": "jbactivite",
+        "/jbequipe/": "jbequipe",
         "/jbanalyse/": "jbanalyse", "/gmsdash/": "gmsdash", "/gms/": "gms",
         "/linkscale/": "linkscale", "/paievas/": "paievas",
         # pages standalone -> onglet équivalent (un rôle qui a la permission
@@ -54373,6 +55472,9 @@ def create_app():
                 "jbanalyse": _render_jbanalyse_html,
                 "jbglobal": _render_jbglobal_html,
                 "jbactivite": _render_jbactivite_html,
+                # Équipe : son script s'arme sur #eq-root sans attendre
+                # DOMContentLoaded -> réinjectable tel quel.
+                "jbequipe": _render_jbequipe_html,
                 "facture": _render_facture_html,
                 # Remote 2 : la coquille est inerte sans /parc/app.js, donc
                 # ré-injectable telle quelle par le chargeur paresseux (le JS
@@ -64916,6 +66018,43 @@ def create_app():
         _vaact_cfg_save(cfg)
         return jsonify({"ok": True})
 
+    # ---------------- Équipe (Social Analytics) ----------------
+    @app.route("/jbequipe/fragment")
+    def jbequipe_fragment():
+        """Le fragment de l'onglet Équipe, redemandé après chaque action.
+
+        Traduit comme le chargeur paresseux : sans ça, le premier clic
+        remettait en français un onglet ouvert en anglais."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False}), 401
+        _frag = _render_jbequipe_fragment()
+        return _traduire_html(_frag) if _langue_courante() == "en" else _frag
+
+    @app.route("/jbequipe/<action>", methods=["POST"])
+    def jbequipe_action(action):
+        """Toutes les écritures de l'onglet Équipe (table dans _jbequipe_agir).
+
+        Un refus nommé (equipe.ErreurEquipe) repart tel quel : « déjà liée à
+        Paul », « porté par 3 membres », « fichier illisible »... Jamais un
+        ok quand rien n'a été écrit."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "auth": True,
+                            "error": "Session expirée — recharge la page"}), 401
+        import equipe as _eq
+        try:
+            _msg = _jbequipe_agir(action, request.form)
+        except _eq.ErreurEquipe as e:
+            return jsonify({"ok": False, "error": str(e)})
+        except Exception as e:
+            print(f"[equipe] {action} : {type(e).__name__}: {e}", flush=True)
+            return jsonify({"ok": False,
+                            "error": f"Erreur inattendue ({type(e).__name__}: {e})"[:300]}), 500
+        if _msg is None:
+            return jsonify({"ok": False, "error": f"Action inconnue : {action}"}), 404
+        return jsonify({"ok": True, "message": _msg})
+
     @app.route("/jailbreak/discord_debug")
     def jailbreak_discord_debug():
         """Diagnostic PP Discord : dit si le bot voit les membres et pourquoi un
@@ -65011,6 +66150,22 @@ def create_app():
                 va_portal.renommer_va(identity, old_name, new_name)
             except Exception as _e_vp:
                 print(f"[va-portail] lien non suivi au renommage : {_e_vp}", flush=True)
+            # L'onglet Équipe lie ses membres aux fiches PAR LEUR NOM : sans
+            # ce suivi, la personne perdait sa fiche au renommage et l'onglet
+            # la montrait « cassée ». Un échec ici n'annule pas le renommage :
+            # le lien reste visible comme cassé, et se relie à la main.
+            # Le nom tel que le référentiel l'a ENREGISTRÉ (update_va le
+            # borne à 60) : passé brut, un nom de 70 caractères donnait un
+            # lien de 70 vers une fiche de 60 — cassé sitôt renommé.
+            try:
+                import equipe as _eq_rn
+                _borne = new_name.strip()[:60]
+                _nom_jb = next((n for n in jb.list_va_names_for_identity(identity)
+                                if n.lower() == _borne.lower()), _borne)
+                _eq_rn.renommer_fiche(identity, old_name, _nom_jb)
+            except Exception as _e_eq:
+                print(f"[equipe] lien non suivi au renommage de {identity}/{old_name} : "
+                      f"{_e_eq}", flush=True)
         # Push Sheet force, comme le fait deja la suppression juste en dessous.
         # Sans lui, le classeur garde l'ANCIEN nom jusqu'au push suivant, qui
         # est asynchrone, non force, et peut echouer sur quota ou mourir avec
@@ -65296,6 +66451,17 @@ def create_app():
                 va_portal.revoquer(identity, va_name)
             except Exception as _e_vp:
                 print(f"[va-portail] lien non révoqué : {_e_vp}", flush=True)
+            # L'onglet Équipe : les liens vers cette fiche sont MARQUÉS
+            # supprimés. Sans marque, recréer une fiche du même nom pour un
+            # nouveau VA ressuscitait le lien de l'ancien, qui prenait ses
+            # comptes sans une suggestion. Un échec ici n'annule pas la
+            # suppression : il est journalisé.
+            try:
+                import equipe as _eq_rv
+                _eq_rv.marquer_supprimee(identity, va_name)
+            except Exception as _e_eqv:
+                print(f"[equipe] liens non marqués à la suppression de {identity}/{va_name} : "
+                      f"{_e_eqv}", flush=True)
             # Push Sheet en ARRIÈRE-PLAN : en synchrone il réécrit un classeur
             # par identité (plusieurs secondes) et figeait le bouton Supprimer.
             try:

@@ -280,6 +280,16 @@ def _ou_apparait(nom: str) -> list:
                          and str(e.get("identity") or "").lower() == nom)
         if n:
             trouves.append({"ou": "les bios et CTA", "detail": f"{n} texte(s)"})
+    try:
+        import equipe as _eq
+        _l = _eq.liens_identite(nom, chemin=DATA / "equipe.json")
+        n = len(_l["membres"]) + len(_l["masquees"])
+        if n:
+            trouves.append({"ou": "l'équipe (liens des membres)", "detail": f"{n} lien(s)"})
+    except Exception as e:
+        # Dit, pas tu : un aperçu muet laisserait croire qu'il n'y a rien.
+        trouves.append({"ou": "l'équipe (liens des membres)",
+                        "detail": f"illisible : {str(e)[:60]}"})
     return trouves
 
 
@@ -397,6 +407,20 @@ def renommer(ancien: str, nouveau: str, ancien_exact: bool = False) -> dict:
         if _n:
             (touches if _ecrire("identity_reserves.json", _dr) else echecs).append(
                 {"ou": "les réserves liées (menu Général)", "detail": f"{_n} model(s)"})
+
+    # L'EQUIPE (onglet Equipe) : le nom vit dans les VALEURS de ses liens
+    # (membre -> {identite, fiche}) et de ses fiches masquees. Sans ce suivi,
+    # chaque membre de cette model perdait ses fiches, affichees « cassees ».
+    # Le chemin suit DATA, comme tout ce fichier : un essai qui redirige DATA
+    # ne doit pas toucher le vrai data/equipe.json. Illisible -> echec NOMME
+    # (equipe refuse d'ecrire par-dessus un fichier qu'il ne sait pas lire).
+    try:
+        import equipe as _eq
+        _n = _eq.renommer_identite(ancien, nouveau, chemin=DATA / "equipe.json")
+        if _n:
+            touches.append({"ou": "l'équipe (liens des membres)", "detail": f"{_n} lien(s)"})
+    except Exception as e:
+        echecs.append({"ou": "l'équipe (liens des membres)", "detail": str(e)[:80]})
 
     for fichier, champ, libelle in _CHAMPS:
         d = _charger(fichier)
@@ -583,6 +607,18 @@ def archiver(nom: str) -> dict:
                            and str(x.get("identity") or "").lower() == nom]
         if textes:
             fiche["sources"]["text_pool.json"] = textes
+    # L'equipe : ses liens vers les fiches de cette model RESTENT dans
+    # equipe.json (l'onglet Equipe les montre « identite introuvable », le
+    # proprietaire decide). On en garde la copie ici pour les retrouver si la
+    # model revient.
+    _eq_liens, _eq_err = None, ""
+    try:
+        import equipe as _eq
+        _eq_liens = _eq.liens_identite(nom, chemin=DATA / "equipe.json")
+        if _eq_liens["membres"] or _eq_liens["masquees"]:
+            fiche["sources"]["equipe.json"] = _eq_liens
+    except Exception as e:
+        _eq_err = str(e)[:80]
 
     horodatage = time.strftime("%Y%m%d-%H%M%S")
     dossier = CORBEILLE / f"{nom}-{horodatage}"
@@ -651,6 +687,15 @@ def archiver(nom: str) -> dict:
             continue
         if len(neuf) != len(e) and _ecrire(fichier, neuf):
             retires.append({"ou": libelle, "detail": "copiees dans la fiche"})
+
+    if _eq_err:
+        retires.append({"ou": "l'équipe (liens des membres)",
+                        "detail": f"non recopiés, equipe.json illisible ({_eq_err})"})
+    elif _eq_liens and (_eq_liens["membres"] or _eq_liens["masquees"]):
+        _n = len(_eq_liens["membres"]) + len(_eq_liens["masquees"])
+        retires.append({"ou": "l'équipe (liens des membres)",
+                        "detail": f"{_n} lien(s) gardé(s), signalé(s) cassé(s) "
+                                  "dans l'onglet Équipe ; copie dans la fiche"})
 
     return {"ok": True, "identite": nom, "corbeille": str(dossier),
             "retires": retires, "impossible": list(IMPOSSIBLE)}
