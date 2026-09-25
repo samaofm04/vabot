@@ -60,9 +60,45 @@ INTERVALLE_SEC = 14 * 86400
 #: prend plusieurs minutes et TikTok finit par couper.
 MAX_EXAMINEES = 600
 
-#: Instagram passe par HikerAPI (payant à la requête, 2 requêtes par
-#: relecture) : on lit ce que sa page de reels rend, au plus ce nombre.
-MAX_EXAMINEES_INSTA = 100
+#: Instagram passe par HikerAPI, payé à la requête (0,001 $, solde prépayé).
+#: Une page de reels en rend 12 (mesuré le 25/09/2026 sur khaby00) : avant,
+#: on n'en lisait qu'une, soit les 12 derniers reels d'un profil de 675.
+#: Même borne que TikTok : 600 reels = 1 + 50 requêtes, environ 0,05 $.
+MAX_EXAMINEES_INSTA = 600
+
+#: Réserve HikerAPI propre au vault, par jour. Le suivi des comptes épuise
+#: chaque jour l'enveloppe commune (10 000/10 000 le 25/09 au soir) : sur
+#: elle, un import restait bloqué, et il ne doit pas non plus la vider.
+#: 300 requêtes = une relecture complète de 5 profils, 0,30 $ au plus.
+PLAFOND_JOUR_INSTA = 300
+_BUDGET_INSTA = _ICI / "data" / "vault_social_hiker.json"
+_BUDGET_VERROU = threading.Lock()
+
+
+def budget_insta() -> dict:
+    """{jour, utilise, plafond, restant} de la réserve du vault."""
+    jour = time.strftime("%Y-%m-%d", time.gmtime())
+    d = safe_json.load(_BUDGET_INSTA, default={})
+    d = d if isinstance(d, dict) else {}
+    utilise = int(d.get("utilise") or 0) if d.get("jour") == jour else 0
+    return {"jour": jour, "utilise": utilise, "plafond": PLAFOND_JOUR_INSTA,
+            "restant": max(0, PLAFOND_JOUR_INSTA - utilise)}
+
+
+def _consommer_insta(n: int = 1) -> bool:
+    """Réserve n requêtes AVANT l'appel ; faux si la réserve du jour est vide.
+    Fermé en cas d'échec d'écriture, comme l'enveloppe commune : un compteur
+    qu'on ne peut pas tenir n'autorise rien."""
+    with _BUDGET_VERROU:
+        e = budget_insta()
+        if e["restant"] < n:
+            return False
+        try:
+            safe_json.write(_BUDGET_INSTA, {"jour": e["jour"], "utilise": e["utilise"] + n})
+        except Exception as err:
+            print(f"[vault-social] compteur HikerAPI non écrit, appel refusé : {err}", flush=True)
+            return False
+        return True
 
 #: LA LISTE D'UN PROFIL TIKTOK, DEPUIS LE VPS. Mesuré le 25/09/2026 : yt-dlp
 #: se voit refuser la liste aux adresses de serveur (« Unable to extract
@@ -371,32 +407,77 @@ def _lister_tiktok(url: str) -> list:
 
 
 def _lister_instagram(username: str, info: Optional[dict] = None) -> list:
-    """Les reels récents, au format des entrées yt-dlp (id, url, view_count,
-    timestamp, title) plus video_url, que HikerAPI rend dans le même appel.
+    """Les reels d'un profil, les plus récents d'abord, au format des entrées
+    yt-dlp (id, url, view_count, timestamp, title) plus video_url, que
+    HikerAPI rend dans le même appel.
 
-    Appel direct de hiker_reels, PAS d'insta_scraper.scrape_profile : ce
+    Appels directs de HikerAPI, PAS d'insta_scraper.scrape_profile : ce
     dernier range le profil dans le cache de la veille Trends, et chaque
-    dossier d'inspiration serait apparu dans Trends."""
+    dossier d'inspiration serait apparu dans Trends. Comptés sur la réserve
+    du vault, pas sur l'enveloppe du suivi des comptes.
+
+    Une lecture arrêtée en route (réserve vide, erreur sur une page) rend ce
+    qui a été lu et le DIT dans info["incomplet"] : le bandeau l'affiche."""
     import hiker_reels as _hk
-    res = _hk.scrape_profile(username, MAX_EXAMINEES_INSTA)
-    if res.get("error"):
-        raise RuntimeError(str(res["error"]))
+    jeton = _hk.get_token()
+    if not jeton:
+        raise RuntimeError("HikerAPI : jeton absent")
+    if not _consommer_insta(1):
+        raise RuntimeError(f"réserve HikerAPI du vault épuisée pour aujourd'hui "
+                           f"({PLAFOND_JOUR_INSTA} requêtes) — nouvel essai demain")
+    data, err = _hk._appel("/v1/user/by/username", jeton, 45, username=username)
+    if err:
+        raise RuntimeError("HikerAPI : " + err)
+    user = data.get("user") if isinstance((data or {}).get("user"), dict) else (data or {})
+    pk = user.get("pk") or user.get("id")
+    if not pk:
+        raise RuntimeError("HikerAPI : profil introuvable")
+    if user.get("is_private"):
+        raise RuntimeError("profil privé : ses reels ne sont pas lisibles")
     if info is not None:
         # Même appel que la liste : la photo ne coûte aucune requête de plus.
-        info["avatar"] = (res.get("profile") or {}).get("profile_pic_url") or ""
-    out = []
-    for r in res.get("reels") or []:
-        code = r.get("shortcode") or ""
-        if not code:
-            continue
-        vues = r.get("views")
-        out.append({"id": code,
-                    "url": f"https://www.instagram.com/reel/{code}/",
-                    "view_count": int(vues) if isinstance(vues, (int, float)) else None,
-                    "timestamp": r.get("taken_at") or None,
-                    "title": r.get("caption") or "",
-                    "video_url": r.get("video_url") or ""})
-    return out
+        info["avatar"] = user.get("profile_pic_url_hd") or user.get("profile_pic_url") or ""
+    out, vus, page = [], set(), ""
+    while len(out) < MAX_EXAMINEES_INSTA:
+        if not _consommer_insta(1):
+            if info is not None:
+                info["incomplet"] = (f"réserve HikerAPI du jour épuisée après {len(out)} "
+                                     "reels — la suite à la prochaine relecture")
+            break
+        params = {"user_id": pk}
+        if page:
+            params["page_id"] = page
+        data, err = _hk._appel("/v2/user/clips", jeton, 60, **params)
+        if err:
+            if not out:
+                raise RuntimeError("HikerAPI : " + err)
+            if info is not None:
+                info["incomplet"] = f"lecture arrêtée après {len(out)} reels : {err[:120]}"
+            break
+        rep = (data or {}).get("response") or {}
+        items = rep.get("items") if isinstance(rep, dict) else None
+        items = items if isinstance(items, list) else []
+        for it in items:
+            m = it.get("media") if isinstance(it.get("media"), dict) else it
+            if not isinstance(m, dict):
+                continue
+            code = m.get("code") or ""
+            if not code or code in vus:
+                continue
+            vus.add(code)
+            vues = m.get("play_count")
+            if vues is None:
+                vues = m.get("view_count")
+            out.append({"id": code,
+                        "url": f"https://www.instagram.com/reel/{code}/",
+                        "view_count": int(vues) if isinstance(vues, (int, float)) else None,
+                        "timestamp": _hk._horodatage(m.get("taken_at_ts") or m.get("taken_at")) or None,
+                        "title": _hk._legende(m) or "",
+                        "video_url": _hk._url_video(m)})
+        page = (data or {}).get("next_page_id") or ""
+        if not page or not items:
+            break
+    return out[:MAX_EXAMINEES_INSTA]
 
 
 def _telecharger_direct(url_video: str, cible_sans_ext: Path) -> Path:
@@ -594,6 +675,8 @@ def synchroniser(identite: str, dossier_videos: Path,
         tmp.mkdir(parents=True, exist_ok=True)
         info: Dict[str, Any] = {}
         entrees = _lister(src, bilan, info)
+        if info.get("incomplet"):
+            bilan["incomplet"] = info["incomplet"]
         try:
             if _poser_avatar(dossier_videos.parent, info.get("avatar") or ""):
                 bilan["photo"] = True

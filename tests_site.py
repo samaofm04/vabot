@@ -15065,6 +15065,77 @@ try:
 except Exception as _eS:
     check("import tiktok : testable", False, repr(_eS)[:200])
 
+# --- Instagram : TOUTES les pages de reels, sur une reserve propre au vault.
+# Le 25/09, l import ne lisait qu une page (12 reels sur 675 chez khaby00), et
+# passait par l enveloppe HikerAPI du suivi des comptes, epuisee chaque soir.
+try:
+    import tempfile as _tfI, pathlib as _plI, json as _jsI
+    import vault_social as _vsI
+    import hiker_reels as _hkI
+    _tmpI = _plI.Path(_tfI.mkdtemp())
+    _appelsI = []
+
+    def _reel(code, vues):
+        return {"media": {"code": code, "play_count": vues, "taken_at": 1_700_000_000,
+                          "caption": {"text": "legende " + code},
+                          "video_versions": [{"url": "https://cdn/" + code + ".mp4"}]}}
+    _PAGES = {"": ([_reel("a%d" % k, 1000 * k) for k in range(12)], "p2"),
+              "p2": ([_reel("b%d" % k, 5) for k in range(12)] + [_reel("a0", 0)], "p3"),
+              "p3": ([_reel("c%d" % k, 70_000) for k in range(5)], "")}
+
+    def _faux_appel(chemin, jeton, timeout, **params):
+        _appelsI.append(chemin)
+        if chemin == "/v1/user/by/username":
+            if params.get("username") == "prive":
+                return {"user": {"pk": 9, "is_private": True}}, None
+            return {"user": {"pk": 42, "profile_pic_url": "https://cdn/pp.jpg"}}, None
+        items, suite = _PAGES[params.get("page_id", "")]
+        return {"response": {"items": items}, "next_page_id": suite}, None
+    _savI = (_hkI._appel, _hkI.get_token, _vsI._BUDGET_INSTA, _vsI.PLAFOND_JOUR_INSTA, _hkI._consommer)
+    try:
+        _hkI._appel, _hkI.get_token = _faux_appel, (lambda: "jeton")
+        _hkI._consommer = lambda n: _appelsI.append("ENVELOPPE-SUIVI") or True
+        _vsI._BUDGET_INSTA = _tmpI / "budget.json"
+        _infoI = {}
+        _lI = _vsI._lister_instagram("lea", _infoI)
+        check("instagram : toutes les pages sont lues (12 + 12 + 5, doublon ecarte)",
+              len(_lI) == 29 and len({e["id"] for e in _lI}) == 29, str(len(_lI)))
+        check("instagram : vues, lien video et legende de chaque reel",
+              _lI[0]["view_count"] == 0 and _lI[-1]["view_count"] == 70_000
+              and _lI[-1]["video_url"] == "https://cdn/c4.mp4" and "legende" in _lI[-1]["title"])
+        check("instagram : 1 requete profil + 1 par page, comptees sur la reserve du vault",
+              _appelsI.count("/v2/user/clips") == 3 and _vsI.budget_insta()["utilise"] == 4,
+              str((_appelsI, _vsI.budget_insta())))
+        check("instagram : la photo du profil vient du meme appel",
+              _infoI.get("avatar") == "https://cdn/pp.jpg" and "incomplet" not in _infoI)
+        # reserve epuisee en route : ce qui est lu est rendu, et c est DIT
+        _vsI.PLAFOND_JOUR_INSTA = 6
+        _infoI2 = {}
+        _lI2 = _vsI._lister_instagram("lea", _infoI2)
+        check("instagram : reserve epuisee en route -> lecture partielle signalee, pas muette",
+              len(_lI2) == 12 and "épuisée" in (_infoI2.get("incomplet") or ""), str((len(_lI2), _infoI2)))
+        _raisI = ""
+        try:
+            _vsI._lister_instagram("lea", {})
+        except Exception as _eR:
+            _raisI = str(_eR)
+        check("instagram : reserve vide -> refus avec la raison (nouvel essai demain)",
+              "réserve" in _raisI and "demain" in _raisI, _raisI)
+        _vsI.PLAFOND_JOUR_INSTA = 300
+        _raisP = ""
+        try:
+            _vsI._lister_instagram("prive", {})
+        except Exception as _eP:
+            _raisP = str(_eP)
+        check("instagram : profil prive -> refus explicite", "privé" in _raisP, _raisP)
+        check("instagram : l enveloppe du suivi des comptes n est jamais entamee",
+              "ENVELOPPE-SUIVI" not in _appelsI, str(_appelsI)[:120])
+    finally:
+        (_hkI._appel, _hkI.get_token, _vsI._BUDGET_INSTA, _vsI.PLAFOND_JOUR_INSTA,
+         _hkI._consommer) = _savI
+except Exception as _eI:
+    check("import instagram : testable", False, repr(_eI)[:200])
+
 # ------------------------------------------ 38. Reperer le texte : gratuit (OCR local)
 print()
 print("=" * 70)

@@ -22812,6 +22812,10 @@ def _vault_social_bandeau(ident: str, src: dict) -> str:
             morceaux.append(f"{b['abandonnees']} abandonnée(s) après 3 échecs")
         morceaux.append(f"{b.get('examinees', 0)} vidéos lues sur le profil"
                         + (f" (via {b['source']})" if b.get("source") else ""))
+        if b.get("incomplet"):
+            # Instagram lit les reels par pages payantes : une lecture arrêtée
+            # en route se dit, sinon « 36 vidéos lues » passait pour le profil.
+            morceaux.append(f"lecture incomplète : {b['incomplet']}")
     erreur = ""
     if src.get("statut") == "erreur" and src.get("erreur"):
         erreur = (f"<div style='color:#f87171;margin-top:4px'>Dernière relecture en échec : "
