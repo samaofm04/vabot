@@ -2,8 +2,8 @@
 """Un dossier du vault branché sur un profil TikTok ou Instagram.
 
 On colle le lien d'un profil à la création du dossier — la plateforme se
-déduit du lien — : les vidéos au-dessus
-d'un seuil de vues descendent dans ses Reels, chacune avec un voisin
+déduit du lien — : les vidéos au-dessus d'un seuil de vues descendent dans
+sa « Vidéo brut » (sous-dossier brutes), chacune avec un voisin
 ``<stem>.social.json`` qui porte ses vues. Toutes les deux semaines, le profil
 est relu : les compteurs sont mis à jour et les nouvelles vidéos qui ont
 franchi le seuil arrivent.
@@ -44,6 +44,12 @@ PREFIXES = {"tiktok": PREFIXE_TIKTOK, "instagram": PREFIXE_INSTA}
 LIBELLES = {"tiktok": "TikTok", "instagram": "Instagram"}
 
 SEUIL_DEFAUT = 10_000
+
+#: Où descendent les vidéos : « Vidéo brut », la matière première des
+#: montages (choix du propriétaire, 25/09/2026). Elles allaient d'abord dans
+#: les Reels ; ANCIEN_SOUS_DOSSIER sert à rapatrier ce qui y est arrivé.
+SOUS_DOSSIER = "brutes"
+ANCIEN_SOUS_DOSSIER = "videos"
 
 #: « Toutes les deux semaines, pas tous les jours. » TikTok bloque vite une
 #: adresse qui relit trop souvent, et les vues d'une vidéo vieille de plus
@@ -484,6 +490,30 @@ def _telecharger_tiktok(url: str, cible_sans_ext: Path) -> Path:
     return chemin
 
 
+def _rapatrier(dossier: Path) -> int:
+    """Déplace dans ``dossier`` les vidéos importées restées dans l'ancien
+    sous-dossier (Reels), avec TOUS leurs voisins. Ne supprime rien : un nom
+    déjà pris à l'arrivée reste où il est, et c'est compté dans le journal."""
+    ancien = dossier.parent / ANCIEN_SOUS_DOSSIER
+    if dossier.name == ANCIEN_SOUS_DOSSIER or not ancien.is_dir():
+        return 0
+    deplaces = 0
+    for voisin in sorted(ancien.glob("*" + SUFFIXE)):
+        stem = voisin.name[:-len(SUFFIXE)]
+        if not stem.startswith(tuple(PREFIXES.values())):
+            continue
+        for f in sorted(ancien.glob(stem + ".*")):
+            cible = dossier / f.name
+            if cible.exists():
+                print(f"[vault-social] {f.name} déjà dans {dossier.name}, laissé en place",
+                      flush=True)
+                continue
+            shutil.move(str(f), str(cible))
+            if f.suffix.lower() in EXTS_VIDEO:
+                deplaces += 1
+    return deplaces
+
+
 def synchroniser(identite: str, dossier_videos: Path,
                  apres: Optional[Callable[[], None]] = None) -> dict:
     """Relit le profil, met les vues à jour, descend les nouvelles vidéos.
@@ -523,6 +553,7 @@ def synchroniser(identite: str, dossier_videos: Path,
         if not dossier_videos.parent.is_dir():
             raise RuntimeError("dossier introuvable dans le vault")
         dossier_videos.mkdir(exist_ok=True)
+        bilan["rapatriees"] = _rapatrier(dossier_videos)
         tmp.mkdir(parents=True, exist_ok=True)
         entrees = _lister(src, bilan)
         liste_lue = True

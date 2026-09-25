@@ -14768,8 +14768,16 @@ try:
                 raise RuntimeError("403")
             p = cible.with_suffix(".mp4"); p.write_bytes(b"x"); return p
         _vsS._telecharger_tiktok = _dlS
-        _dS = _tmpS / "lea" / "videos"
+        _dS = _tmpS / "lea" / _vsS.SOUS_DOSSIER
         (_tmpS / "lea").mkdir()     # le dossier de l'identité existe toujours
+        check("les videos importees vont dans Video brut", _vsS.SOUS_DOSSIER == "brutes")
+        # Arrivees d'abord dans les Reels (premiere version) : rapatriees avec
+        # TOUS leurs voisins a la relecture suivante, sans rien ecraser.
+        _ancS = _tmpS / "lea" / "videos"
+        _ancS.mkdir()
+        for _nS in ("tt_77.mp4", "tt_77.desc.txt", "a_moi.mp4"):
+            (_ancS / _nS).write_text("x")
+        (_ancS / "tt_77.social.json").write_text('{"vues": 5}')
         check("seuil illisible : refuse, pas remplace par 10 000 en silence",
               not _vsS.brancher("lea", "tiktok.com/@lea", "dix mille").get("ok"))
         _vsS.brancher("lea", "tiktok.com/@lea", 10_000)
@@ -14778,6 +14786,10 @@ try:
         check("seuil : seule la video au-dessus descend, les autres sont COMPTEES",
               _b1["nouvelles"] == 1 and _b1["sous_seuil"] == 1
               and _b1["vues_inconnues"] == 1 and _b1["echecs"] == 1, str(_b1))
+        check("les imports restes dans Reels sont rapatries avec leurs voisins",
+              (_dS / "tt_77.mp4").exists() and (_dS / "tt_77.desc.txt").exists()
+              and not (_ancS / "tt_77.mp4").exists() and (_ancS / "a_moi.mp4").exists()
+              and _b1.get("rapatriees") == 1, str(_b1))
         check("la date du fichier est celle du post TikTok",
               int((_dS / "tt_1.mp4").stat().st_mtime) == 1_700_000_000)
         (_dS / "tt_1.mp4").unlink(); (_dS / "tt_1.social.json").unlink()
@@ -14890,10 +14902,10 @@ try:
             (_dS / "tt_9.mp4").write_bytes(b"x")
             import safe_json as _sjS
             _sjS.write(_dS / "tt_9.social.json", {"vues": 90_000})
-            with _wS.create_app().test_request_context("/?tab=cloudreels&cloud_videos_ident=lea"):
-                _hS = _wS._render_cloud_content_html("videos", _wS.VIDEO_EXTS)
+            with _wS.create_app().test_request_context("/?tab=cloudbrutes&cloud_brutes_ident=lea"):
+                _hS = _wS._render_cloud_content_html("brutes", _wS.VIDEO_EXTS)
             import re as _reS
-            _ordS = _reS.findall(r"data-fid='lea\|videos\|([^']+)'", _hS)
+            _ordS = _reS.findall(r"data-fid='lea\|brutes\|([^']+)'", _hS)
             _vuesS = _vsS.vues_du_dossier(_dS)
             _avecS = [n for n in _ordS if n != "a_la_main.mp4"]
             check("galerie d un dossier branche : triee par vues, ajouts manuels a la fin",

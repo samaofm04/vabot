@@ -8785,7 +8785,10 @@ setInterval(function(){
         var key=(j.subdir==='templates')?'cloud_templates_ident':'cloud_brutes_ident';
         var sec=document.getElementById('form-'+tab);
         if(sec && sec.offsetParent!==null && typeof vaultGoTo==='function'){
-          vaultGoTo({preventDefault:function(){}}, '/?tab='+tab+'&'+key+'='+encodeURIComponent(j.identity||''));
+          /* sort=recent : un dossier branche sur TikTok/Instagram s ouvre
+             trie par vues, et ce qu on vient d importer tombait en dernier. */
+          vaultGoTo({preventDefault:function(){}}, '/?tab='+tab+'&'+key+'='+encodeURIComponent(j.identity||'')
+            +(tab==='cloudbrutes'?'&cloud_brutes_sort=recent':''));
         }
         if(typeof showToast==='function' && st==='done'){
           showToast((j.ok?('✓ '+j.ok+' vidéo(s) importée(s) chez @'+(j.identity||'')):'✕ Import terminé sans succès')+(j.fail?(' · '+j.fail+' échec(s) : '+(j.err||'')):''), j.ok?'success':'error', 8000);
@@ -9695,8 +9698,8 @@ async function identNewCreate(){
     }
     if(typeof showToast==='function') showToast('✓ Identité @'+String(j.identity||'').replace(/^v2_/,'')+' créée'+(j.social?' — import des vidéos lancé':'')+(j.warn?(' ('+j.warn+')'):''),j.warn?'info':'success');
     var vt=identNewCtx.vtab||'cloudreels', ik=identNewCtx.ikey||'';
-    /* Les videos arrivent dans les Reels : c est la qu il faut atterrir. */
-    if(j.social){ vt=(String(vt).indexOf('v2')===0)?'v2reels':'cloudreels'; ik='cloud_videos_ident'; }
+    /* Les videos arrivent dans la Video brut : c est la qu il faut atterrir. */
+    if(j.social){ vt=(String(vt).indexOf('v2')===0)?'v2brutes':'cloudbrutes'; ik='cloud_brutes_ident'; }
     // reload complet : toutes les sidebars vault doivent afficher la nouvelle identité
     window.location.href='/?tab='+encodeURIComponent(vt)+(ik?('&'+ik+'='+encodeURIComponent(j.identity)):'');
   }catch(e){
@@ -13919,7 +13922,7 @@ body.light #pf-modal .pf-card img{background:#eceff3!important}
         <input id="ident-new-seuil" type="number" min="0" step="1000" value="10000"
                style="flex:1;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:8px;font-size:13px;font-family:inherit;box-sizing:border-box">
       </label>
-      <div style="font-size:11px;color:#888;line-height:1.5">Les vidéos au-dessus de ce seuil sont téléchargées dans les Reels du dossier, triées par vues. Relecture du profil toutes les 2 semaines. Le dossier reste hors de la rotation Discord des VA.</div>
+      <div style="font-size:11px;color:#888;line-height:1.5">Les vidéos au-dessus de ce seuil sont téléchargées dans la Vidéo brut du dossier, triées par vues. Relecture du profil toutes les 2 semaines. Le dossier reste hors de la rotation Discord des VA.</div>
     </div>
     <input id="ident-new-name" type="text" placeholder="nom (lettres, chiffres, _ ou -)" autocomplete="off"
            style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:10px;font-size:13px;font-family:inherit;box-sizing:border-box">
@@ -21036,6 +21039,8 @@ def _vault_social_bandeau(ident: str, src: dict) -> str:
         morceaux.append(f"{b.get('deja_la', 0) + b.get('nouvelles', 0)} dans le dossier")
         if b.get("nouvelles"):
             morceaux.append(f"{b['nouvelles']} nouvelle(s)")
+        if b.get("rapatriees"):
+            morceaux.append(f"{b['rapatriees']} déplacée(s) depuis Reels")
         if b.get("sous_seuil"):
             morceaux.append(f"{b['sous_seuil']} sous le seuil")
         if b.get("retirees_a_la_main"):
@@ -22108,10 +22113,10 @@ async function pushAllReels(form){
     if(curTab === reelsTab){
       setTimeout(function(){
         /* sort=recent : un dossier branche sur TikTok/Instagram s ouvre trie
-           par vues, et le reel qu on vient d envoyer (sans vues) tombait en
-           dernier, apres des centaines d imports. */
+           par vues dans sa Video brut, et la video qu on vient d envoyer
+           (sans vues) tombait en dernier, apres des centaines d imports. */
         window.location.href = '?tab=' + reelsTab + '&' + reelsKey + '=' + encodeURIComponent(identity)
-          + (reelsKey === 'cloud_videos_ident' ? '&cloud_videos_sort=recent' : '');
+          + (reelsKey === 'cloud_brutes_ident' ? '&cloud_brutes_sort=recent' : '');
       }, 900);
     }
   }
@@ -23026,12 +23031,13 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         except Exception:
             pass
 
-    # Vues des vidéos importées d'un profil TikTok (voisins .social.json).
+    # Vues des vidéos importées d'un profil TikTok/Instagram (voisins
+    # .social.json). Elles arrivent dans « Vidéo brut » (vault_social.SOUS_DOSSIER).
     # Un dossier branché s'ouvre trié par vues : c'est la raison pour
     # laquelle on l'a branché ; « Récemment » reste à un clic.
     _social = {}
     _vues = {}
-    if subdir == "videos":
+    if subdir == "brutes":
         try:
             import vault_social as _vs_g
             _social = _vs_g.lire(selected)
@@ -23331,11 +23337,11 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
                 "Partager</button>"
             )
 
-    # Bandeau du profil TikTok branché (Reels seulement). Le bilan dit ce qui
+    # Bandeau du profil branché (Vidéo brut seulement). Le bilan dit ce qui
     # n'est PAS descendu et pourquoi : sans lui, « 40 vidéos sur un profil de
     # 300 » ressemblait à une panne alors que c'était le seuil.
     social_html = ""
-    if subdir == "videos":
+    if subdir == "brutes":
         social_html = _vault_social_bandeau(selected, _social)
 
     gallery_header = (
@@ -67575,7 +67581,7 @@ def start_in_thread():
 
         def _vs_dossier(ident):
             d = IDENTITIES_DIR / ident
-            return (d / "videos") if d.is_dir() else None
+            return (d / _vs_boot.SOUS_DOSSIER) if d.is_dir() else None
         _vs_boot.demarrer(_vs_dossier, _invalidate_all_ttl_cache)
     except Exception as e:
         print(f"[start_in_thread] import TikTok non demarre: {e}", flush=True)
