@@ -12,3 +12,4 @@ tzdata>=2024.1
 gspread>=6.0.0
 google-auth>=2.20.0
 waitress>=3.0.0
+opencv-python-headless>=4.8,<5

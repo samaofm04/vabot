@@ -1783,6 +1783,9 @@ try:
                 "function nxMStylePaint(){}\nfunction nxMRenderCaps(){}\n"
                 "function nxMUpdatePreview(){}\nfunction nxMSetApproveBtn(){}\n"
                 "function nxMHistInit(){}\n"
+                # Dependances ajoutees le 25/09/2026 (proposition « a verifier »)
+                "function nxMVerifShow(){}\nfunction showToast(){}\n"
+                "function nxMApplyAnalyse(a){nxMState.caps=a.captions||[];}\n"
                 "var document={getElementById:function(){return {};}};\n"
                 "function fetch(){return Promise.resolve({json:function(){"
                 "return Promise.resolve(" + json.dumps(_rep) + ");}});}\n"
@@ -1803,6 +1806,12 @@ try:
                                     "style": "{}"}})
         check("D3 : un brouillon vide EFFACE la caption du fichier voisin",
               _o == "[]", _o[:160])
+        _oA = _caps_apres({"ok": True, "desc": "", "draft": {
+                               "segments": json.dumps([{"text": "proposition", "start": 0, "end": 3.1}]),
+                               "font": "Strong", "style": "{}", "cut_at": 3.1, "propose": True},
+                           "analyse": {"cut_at": 3.1, "verifier": {"priorite": "normale", "raisons": []}}})
+        check("D3 : sans brouillon, la proposition « a verifier » (servie en brouillon) est appliquee",
+              "proposition" in _oA and "voisin" not in _oA, _oA[:160])
         _o = _caps_apres({"ok": True, "desc": "",
                           "draft": {"segments": json.dumps(
                               [{"text": "la vraie", "start": None, "end": None}]),
@@ -15222,6 +15231,185 @@ try:
         shutil.rmtree(_tmpG, ignore_errors=True)
 except Exception as _eG:
     check("ocr gemini : testable", False, repr(_eG)[:200])
+
+# ------------------------------------------ 40. Templates en arriere-plan + captions depuis des captures
+print()
+print("=" * 70)
+print("Templates analyses en arriere-plan (gratuit) + captions depuis des captures")
+print("=" * 70)
+try:
+    import analyse_gratuite as _agX
+    import web_upload as _wX
+    import tempfile as _tfX, json as _jsX
+    from pathlib import Path as _PX
+    # --- regle de coupure mesuree (26/28 sur les templates valides)
+    _c, _r, _cand = _agX.choisir_coupe([(0.4, 0.9), (1.2, 0.5), (2.47, 0.68), (5.0, 0.8)], 9.0)
+    check("coupure : premier changement de plan net apres 1,5 s", _c == 2.47, str(_c))
+    _c2, _r2, _ = _agX.choisir_coupe([(2.0, 0.12), (3.0, 0.15)], 6.0)
+    check("coupure : aucun plan net -> video entiere (pas de partie 2)", _c2 == 5.95, str(_c2))
+    # --- priorite de verification
+    check("a verifier : sans changement de plan -> priorite haute",
+          _agX.raisons_de_verifier(5.95, [], 6.0, None, True)[0] == "haute")
+    _vis = [(t / 4, 1) for t in range(0, 40)]          # visage partout, meme apres la coupure
+    _p, _rs = _agX.raisons_de_verifier(3.0, [3.0], 10.0, _vis, True)
+    check("a verifier : une personne encore visible apres la coupure -> priorite haute",
+          _p == "haute" and any("encore visible" in x for x in _rs), str(_rs))
+    _vis2 = [(t / 4, 1 if t / 4 < 3.0 else 0) for t in range(0, 40)]
+    check("a verifier : cas nominal (personne avant, montage apres) -> priorite normale",
+          _agX.raisons_de_verifier(3.0, [3.0], 10.0, _vis2, True)[0] == "normale")
+    check("a verifier : deux plans d accroche rapproches -> priorite haute",
+          _agX.raisons_de_verifier(3.0, [3.0, 3.6], 10.0, _vis2, True)[0] == "haute")
+    # --- lecture d une capture : Gemini d abord, Tesseract en secours, et ca se DIT
+    _savG, _savT = _agX.gemini_texte, _agX.transcrire_tesseract
+    try:
+        _tmpX = _PX(_tfX.mkdtemp())
+        (_tmpX / "c.png").write_bytes(b"x")
+        _agX.gemini_texte = lambda *a, **k: ("Pov: tu novio 😡", "")
+        check("capture : lue par Gemini (emojis compris)",
+              _agX.lire_capture(_tmpX / "c.png")["texte"] == "Pov: tu novio 😡")
+        _agX.gemini_texte = lambda *a, **k: ("", "gemini-flash-lite-latest : HTTP 503")
+        _agX.transcrire_tesseract = lambda p, capture=False: {"texte": "Pov tu novio", "erreur": ""}
+        _rx = _agX.lire_capture(_tmpX / "c.png")
+        check("capture : Gemini tombe -> Tesseract, et la note le dit",
+              _rx["source"] == "Tesseract" and "Gemini indisponible" in _rx.get("note", ""), str(_rx))
+    finally:
+        _agX.gemini_texte, _agX.transcrire_tesseract = _savG, _savT
+    _srcX = open("web_upload.py", encoding="utf-8").read()
+    _i = _srcX.index("def _analyse_template_gratuite(")
+    _corpsX = _srcX[_i:_srcX.index("\ndef _analyze_montage_template", _i)]
+    check("analyse de template : aucune API payante",
+          "api.anthropic.com" not in _corpsX and "_claude_montage_analyze" not in _srcX)
+    # --- file d attente, badge, validation
+    _savI = _wX.IDENTITIES_DIR
+    try:
+        _wX.IDENTITIES_DIR = _PX(_tfX.mkdtemp())
+        _dX = _wX.IDENTITIES_DIR / "zz" / "templates"; _dX.mkdir(parents=True)
+        import os as _osX, time as _tX
+        for _n in ("a.mp4", "b.mp4", "c.mp4", "d.MOV", "e.mp4"):
+            (_dX / _n).write_bytes(b"x")
+            _osX.utime(_dX / _n, (_tX.time() - 600, _tX.time() - 600))
+        (_dX / "b.montage.json").write_text("{}")
+        # ancienne analyse Claude (sans « verifier ») : a refaire, pas a valider
+        (_dX / "e.analyse.json").write_text(_jsX.dumps({"cut_at": 0, "captions": [
+            {"text": "partie 2", "start": None, "end": None}], "_source": "analyse automatique a l'import"}))
+        (_dX / "f.mp4").write_bytes(b"x")                 # tout juste depose
+        check("file : templates sans analyse, ou avec une ANCIENNE analyse Claude, repris",
+              [p.name for p in _wX._templates_sans_analyse()] == ["a.mp4", "c.mp4", "d.MOV", "e.mp4"],
+              str([p.name for p in _wX._templates_sans_analyse()]))
+        check("file : un fichier modifie il y a moins de 30 s attend le tour suivant",
+              "f.mp4" not in [p.name for p in _wX._templates_sans_analyse()])
+        (_dX / "e.analyse.json").unlink(); (_dX / "e.mp4").unlink(); (_dX / "f.mp4").unlink()
+        _savA = _wX._analyze_montage_template
+        _wX._analyze_montage_template = lambda v: (None, "vidéo illisible")
+        try:
+            _wX._analyser_template_en_file(_dX / "c.mp4")
+        finally:
+            _wX._analyze_montage_template = _savA
+        _ac = _jsX.loads((_dX / "c.analyse.json").read_text())
+        check("file : un echec laisse une analyse « a verifier » avec la raison (pas de boucle)",
+              _ac.get("erreur") and _ac["verifier"]["priorite"] == "haute" and _ac.get("essais") == 1)
+        check("file : un echec recent n'est pas repris tout de suite",
+              not _wX._analyse_a_refaire(_dX / "c.mp4"))
+        _wX._analyze_montage_template = lambda v: (_ for _ in ()).throw(TimeoutError("tesseract"))
+        try:
+            _wX._analyser_template_en_file(_dX / "d.MOV")
+        finally:
+            _wX._analyze_montage_template = _savA
+        check("file : une exception laisse aussi une trace (plus de reanalyse toutes les 5 min)",
+              "TimeoutError" in _jsX.loads((_dX / "d.analyse.json").read_text()).get("erreur", ""))
+        _prop = {"cut_at": 3.1, "cut_reason": "plan", "duration": 9.0, "lecture": "Gemini",
+                 "captions": [{"text": "Pov: x", "x": 0.5, "y": 0.4, "start": 0.0, "end": 3.1}],
+                 "style": {"size": 52, "color": "#ffffff"},
+                 "verifier": {"priorite": "haute", "raisons": ["une personne est encore visible"]}}
+        (_dX / "a.analyse.json").write_text(_jsX.dumps(_prop))
+        _br = _wX._brouillon_depuis_analyse(_prop)
+        _segs = _jsX.loads(_br["segments"])
+        check("brouillon : segments et style en chaines JSON, caption sur la seule partie 1",
+              isinstance(_br["segments"], str) and _segs[0]["end"] == 3.1 and _br["cut_at"] == 3.1
+              and _jsX.loads(_br["style"])["bold"] is True and _jsX.loads(_br["style"])["size"] == 52)
+        with _wX.create_app().test_request_context("/?tab=cloudtemplates&cloud_templates_ident=zz"):
+            _hX = _wX._render_cloud_content_html("templates", _wX.VIDEO_EXTS)
+        check("galerie : badge « a verifier » (priorite haute) sur le template analyse",
+              "montage-a-verifier verif-haute" in _hX)
+        _piege = "</script><script>alert(1)</script>"
+        with _wX.create_app().test_request_context(
+                "/?tab=cloudtemplates&cloud_templates_ident=zz&openmontage=" + _piege):
+            _hP = _wX._render_cloud_content_html("templates", _wX.VIDEO_EXTS)
+        with _wX.create_app().test_request_context(
+                "/?tab=cloudtemplates&cloud_templates_ident=zz&openmontage=a.mp4"):
+            _hO = _wX._render_cloud_content_html("templates", _wX.VIDEO_EXTS)
+        check("openmontage : un nom qui n'est pas un fichier affiche n'est jamais injecte (XSS)",
+              "alert(1)" not in _hP and 'var nom="a.mp4"' in _hO)
+        _mv = _wX._montages_a_verifier()
+        _prios = [r["priorite"] for r in _mv]
+        check("a relire : une video en .MOV (majuscules) est retrouvee",
+              "d.MOV" in [r["fichier"] for r in _mv], str([r["fichier"] for r in _mv]))
+        _mv = [r for r in _mv if r["fichier"] != "d.MOV"]
+        check("a relire : les templates a verifier, priorite haute en tete",
+              sorted(r["fichier"] for r in _mv) == ["a.mp4", "c.mp4"]
+              and _prios == sorted(_prios, key=lambda p: p != "haute"), str(_mv)[:200])
+        _savU = _wX._load_web_users
+        _wX._load_web_users = lambda: {"admin": {"role": "owner", "password": "x"}}
+        try:
+            _cX = _wX.create_app().test_client()
+            with _cX.session_transaction() as _sX:
+                _sX["auth"] = True; _sX["username"] = "admin"; _sX["role"] = "owner"
+            _ml = _cX.get("/noctus/montage_load?file_id=zz|templates|a.mp4").get_json()
+            check("editeur : la proposition est servie comme un brouillon marque « propose »",
+                  (_ml.get("draft") or {}).get("propose") is True
+                  and _jsX.loads(_ml["draft"]["segments"])[0]["end"] == 3.1, str(_ml)[:200])
+            _cX.post("/a-relire/valider_montage", data={"identity": "zz", "fichier": "a.mp4"})
+            _mj = _jsX.loads((_dX / "a.montage.json").read_text())
+            _vj = _jsX.loads((_dX / "a.analyse.json").read_text()).get("valide") or {}
+            check("« Valider tel quel » ecrit le brouillon et note l ecart (0)",
+                  _mj.get("cut_at") == 3.1 and _vj.get("ecart") == 0 and _vj.get("tel_quel") is True, str(_vj))
+            _cX.post("/a-relire/valider_montage", data={"identity": "zz", "fichier": "c.mp4"})
+            check("« Valider tel quel » refuse une analyse en echec", not (_dX / "c.montage.json").exists())
+            check("la page « a relire » liste les templates a verifier",
+                  "Templates à vérifier" in _cX.get("/a-relire").get_data(as_text=True))
+            # --- captions : ajout en masse aux identites d UN marche, jamais aux modeles
+            _savCF, _savMk, _savTy = _wX.CAPTIONS_FILE, _wX.identity_market, _wX._type_identite
+            _savLCI = _wX._list_content_identities
+            try:
+                _wX.CAPTIONS_FILE = _PX(_tfX.mkdtemp()) / "captions.json"
+                _wX._list_content_identities = lambda: ["idfr", "idus", "modfr", "_tst_x"]
+                _wX.identity_market = lambda i: "us" if i == "idus" else "fr"
+                _wX._type_identite = lambda i: "modele" if i == "modfr" else "identite"
+                _jc = _cX.get("/captions/cibles?marche=fr").get_json()
+                check("captions : cibles = identites du marche, sans modeles ni tests",
+                      _jc.get("identites") == ["idfr"], str(_jc))
+                _ja = _cX.post("/captions/ajout_masse", data={"marche": "fr", "textes": _jsX.dumps(
+                    ["Pov: tu novio", "pov : TU NOVIO", "Autre texte"])}).get_json()
+                _libX = _jsX.loads(_wX.CAPTIONS_FILE.read_text())
+                check("captions : ajoutees a l identite FR seulement, doublon ecarte",
+                      _ja["resultats"][0]["ajoutees"] == 2 and _ja["resultats"][0]["doublons"] == 1
+                      and list(_libX) == ["idfr"], str(_ja)[:200])
+                _it = _libX["idfr"]["items"][0]
+                check("captions : au centre, actives", _it["x"] == 0.5 and _it["y"] == 0.5 and _it["enabled"])
+                _je = _cX.post("/captions/ajout_masse", data={"marche": "fr", "textes": _jsX.dumps(
+                    ["😭😭"] + ["t%d" % k for k in range(505)])}).get_json()
+                check("captions : une caption faite d'emojis n'est plus ecartee en silence",
+                      "😭😭" in [c["text"] for c in _jsX.loads(_wX.CAPTIONS_FILE.read_text())["idfr"]["items"]])
+                check("captions : au-dela de 500 textes, le surplus est COMPTE",
+                      _je.get("ecartes_limite") == 6, str({k: _je.get(k) for k in ("ecartes_limite", "limite")}))
+                (_wX.IDENTITIES_DIR / "idfr").mkdir(exist_ok=True)
+                _n0 = len(_jsX.loads(_wX.CAPTIONS_FILE.read_text())["idfr"]["items"])
+                _js0 = _cX.post("/captions/save", data={"identity": "idfr", "rev": "perime",
+                                                        "data": _jsX.dumps({"items": []})})
+                check("captions : un onglet perime ne peut plus effacer un ajout en masse (409)",
+                      _js0.status_code == 409 and _n0 > 0
+                      and len(_jsX.loads(_wX.CAPTIONS_FILE.read_text())["idfr"]["items"]) == _n0)
+                check("captions : plafond releve a 300", _wX.CAPTIONS_MAX == 300)
+            finally:
+                _wX.CAPTIONS_FILE, _wX.identity_market, _wX._type_identite = _savCF, _savMk, _savTy
+                _wX._list_content_identities = _savLCI
+        finally:
+            _wX._load_web_users = _savU
+    finally:
+        _wX.IDENTITIES_DIR = _savI
+except Exception as _eX:
+    import traceback as _tbX
+    check("templates/captions : testable", False, repr(_eX)[:200] + " " + _tbX.format_exc()[-300:])
 
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")

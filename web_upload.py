@@ -6304,7 +6304,7 @@ function nxMAnalyze(){
     if(btn2){ btn2.textContent=txt; btn2.classList.remove('busy');
               setTimeout(function(){ if(myRun===nxMState.aiRun) btn2.textContent=orig2; },2500); }
   }
-  if(typeof showToast==='function') showToast('Claude regarde la video… (30 s a 1 min)','info',6000);
+  if(typeof showToast==='function') showToast('Analyse de la video… (quelques secondes)','info',6000);
   var askedFid=nxMState.fid;              // le reel sur lequel on a lance l analyse
   nxMCommit();                            // point de retour avant ecrasement (Ctrl+Z)
   var fd=new FormData(); fd.set('file_id', askedFid);
@@ -6318,34 +6318,8 @@ function nxMAnalyze(){
         return;
       }
       if(!j.ok){ done('✕ Erreur'); if(typeof showToast==='function') showToast('✕ '+(j.error||'analyse impossible'),'error',9000); return; }
-      // Claude renvoie cut_at=0 quand il ne trouve pas de coupe : ne JAMAIS
-      // effacer avec ca un trait place a la main.
-      var _nc=Math.max(0,+j.cut_at||0);
-      if(_nc>0.05) nxMState.cut=_nc;
-      else if(!(nxMState.cut>0.05)) nxMState.cut=0;
-      var caps=j.captions||[];
-      if(caps.length){
-        nxMState.caps=caps.map(function(c){
-          var o={text:String(c.text||''), x:c.x, y:c.y,
-                 start:(c.start==null?null:+c.start), end:(c.end==null?null:+c.end)};
-          // texte deja decoupe en lignes par l analyse -> largeur de wrap au max,
-          // le moteur garde alors les retours a la ligne tels quels.
-          if(c.wrapW!=null) o.wrapW=+c.wrapW;
-          return o;
-        });
-        if(!nxMState.style) nxMStyleInit();
-        if(j.style) nxMState.style=Object.assign(nxMState.style, j.style);
-        var s=nxMState.style||{};
-        var sz=document.getElementById('nx-m-size'); if(sz) sz.value=s.size||44;
-        var sv=document.getElementById('nx-m-size-val'); if(sv) sv.textContent=s.size||44;
-        var cp=document.getElementById('nx-m-color'); if(cp&&/^#[0-9a-fA-F]{6}$/.test(s.color||'')) cp.value=s.color;
-        try{ nxMStylePaint(); }catch(e){}
-      }
-      nxMState.editIdx=-1;
-      var ca=document.getElementById('nx-m-caption'); if(ca) ca.value='';
-      var ac=document.getElementById('nx-m-addcap'); if(ac) ac.textContent='Ajouter cette caption';
-      var en=document.getElementById('nx-m-editnote'); if(en) en.textContent='';
-      try{ nxMRenderCaps(); nxMUpdatePreview(); }catch(e){}
+      var caps=nxMApplyAnalyse(j);
+      nxMVerifShow(j);
       nxMHistTouch();
       done('✓ Analyse OK');
       var msg='Coupe placee a '+(nxMState.cut||0).toFixed(2)+'s';
@@ -6354,6 +6328,111 @@ function nxMAnalyze(){
       if(typeof showToast==='function') showToast(msg+' · verifie et ajuste avant de generer','success',10000);
     })
     .catch(function(){ done('✕ Erreur'); if(typeof showToast==='function') showToast('Erreur reseau pendant l analyse','error'); });
+}
+/* Applique une analyse (bouton « Analyser » OU proposition faite en
+   arriere-plan, chargee a l ouverture) : trait de coupe, captions, style.
+   Rend la liste des captions appliquees. */
+function nxMApplyAnalyse(j){
+  // cut_at=0 veut dire « pas de coupe trouvee » : ne JAMAIS effacer avec ca
+  // un trait place a la main.
+  var _nc=Math.max(0,+j.cut_at||0);
+  if(_nc>0.05) nxMState.cut=_nc;
+  else if(!(nxMState.cut>0.05)) nxMState.cut=0;
+  var caps=j.captions||[];
+  if(caps.length){
+    nxMState.caps=caps.map(function(c){
+      var o={text:String(c.text||''), x:c.x, y:c.y,
+             start:(c.start==null?null:+c.start), end:(c.end==null?null:+c.end)};
+      // texte deja decoupe en lignes par l analyse -> largeur de wrap au max,
+      // le moteur garde alors les retours a la ligne tels quels.
+      if(c.wrapW!=null) o.wrapW=+c.wrapW;
+      return o;
+    });
+    if(!nxMState.style) nxMStyleInit();
+    if(j.style) nxMState.style=Object.assign(nxMState.style, j.style);
+    /* la taille a ete calibree pour Strong : sans ca, la police du template
+       ouvert juste avant restait selectionnee. */
+    var fsel=document.getElementById('nx-m-font'); if(fsel) fsel.value=j.font||'Strong';
+    var s=nxMState.style||{};
+    var sz=document.getElementById('nx-m-size'); if(sz) sz.value=s.size||44;
+    var sv=document.getElementById('nx-m-size-val'); if(sv) sv.textContent=s.size||44;
+    var cp=document.getElementById('nx-m-color'); if(cp&&/^#[0-9a-fA-F]{6}$/.test(s.color||'')) cp.value=s.color;
+    try{ nxMStylePaint(); }catch(e){}
+  } else if(nxMState.cut>0.05 && j.verifier){
+    // Aucune caption lue : la caption saisie a l envoi (reprise sur toute la
+    // video) est ramenee a la partie 1. La partie 2 se garde telle quelle.
+    (nxMState.caps||[]).forEach(function(c){
+      if(c.start==null && c.end==null){ c.start=0; c.end=nxMState.cut; }
+    });
+  }
+  nxMState.editIdx=-1;
+  var ca=document.getElementById('nx-m-caption'); if(ca) ca.value='';
+  var ac=document.getElementById('nx-m-addcap'); if(ac) ac.textContent='Ajouter cette caption';
+  var en=document.getElementById('nx-m-editnote'); if(en) en.textContent='';
+  try{ nxMRenderCaps(); nxMUpdatePreview(); }catch(e){}
+  return caps;
+}
+/* Pastille « A verifier » de la barre de titre. Couleurs posees en
+   cssText (format rgb) : les regles du theme clair qui visent le style
+   inline « color:#fff » ne la touchent pas. */
+function nxMVerifShow(a){
+  var el=document.getElementById('nx-m-verif');
+  if(!el){
+    /* Creee ici, pas dans le HTML de la modale : le studio de templates du
+       VPS redessine cette barre de titre, et un element ajoute dans le HTML
+       faisait tomber son patch. #nx-m-proj existe dans les deux versions. */
+    var pj=document.getElementById('nx-m-proj'); if(!pj||!pj.parentNode) return;
+    el=document.createElement('span'); el.id='nx-m-verif';
+    pj.parentNode.insertBefore(el, pj.nextSibling);
+  }
+  var v=(a&&a.verifier)||null;
+  if(!v){ el.style.cssText='display:none'; el.textContent=''; el.title=''; return; }
+  var haute=(v.priorite==='haute');
+  var raisons=(v.raisons||[]);
+  el.textContent=haute?'⚠ À vérifier — priorité':'À vérifier';
+  el.title=raisons.length?raisons.join(' · '):'Proposition automatique : vérifie la coupe et la caption, puis enregistre.';
+  el.style.cssText='display:inline-flex;align-items:center;margin-left:8px;padding:3px 10px;border-radius:999px;'
+    +'font-size:11.5px;font-weight:800;cursor:help;white-space:nowrap;'
+    +(haute?'background:rgb(220,38,38);color:rgb(255,255,255)':'background:rgb(245,158,11);color:rgb(42,28,0)');
+}
+/* Apres « Enregistrer » ou « Dispo VA », le template est valide : la
+   pastille et le bandeau de la carte doivent partir. On ecoute le clic au
+   lieu de modifier nxMontageSave / nxMontageApprove, que le studio de
+   templates du VPS retouche. Relu 1,5 s plus tard sur le serveur. */
+function nxMVerifRelire(fid){
+  fetch('/noctus/montage_load?file_id='+encodeURIComponent(fid),{credentials:'same-origin'})
+    .then(function(r){ return r.json(); }).then(function(j){
+      if(!j||!j.ok||!j.draft||j.draft.propose) return;      // pas encore enregistre
+      if(nxMState.fid===fid) nxMVerifShow(null);
+      document.querySelectorAll('.vault-card-bg[data-fid]').forEach(function(c){
+        if(c.getAttribute('data-fid')===fid){ c.classList.remove('montage-a-verifier'); c.classList.remove('verif-haute'); }
+      });
+    }).catch(function(){});
+}
+document.addEventListener('click', function(ev){
+  var b=ev.target.closest?ev.target.closest('[onclick*="nxMontageSave"],[onclick*="nxMontageApprove"]'):null;
+  if(!b||typeof nxMState==='undefined'||!nxMState.fid) return;
+  var fid=nxMState.fid;
+  setTimeout(function(){ nxMVerifRelire(fid); }, 1500);
+}, true);
+/* Pastille « a verifier » du template ouvert. Le brouillon propose, lui,
+   arrive par nxMLoadDraft (le serveur le sert comme un brouillon marque
+   « propose ») : cette fonction ne fait que le signaler. */
+function nxMVerifCharger(fid){
+  nxMVerifShow(null);
+  fetch('/noctus/montage_load?file_id='+encodeURIComponent(fid),{credentials:'same-origin'})
+    .then(function(r){ return r.json(); }).then(function(j){
+      if(!j || !j.ok || nxMState.fid!==fid) return;   // on a change de template entre-temps
+      var a=j.analyse||null;
+      if(j.draft && j.draft.propose && a){
+        nxMVerifShow(a);
+        var rs=((a.verifier||{}).raisons||[]);
+        if(typeof showToast==='function') showToast('Proposition automatique — à vérifier'
+          +(rs.length?(' : '+rs.join(' · ')):'')+'. Enregistre pour valider.','info',9000);
+      } else if(!j.draft && a && a.erreur){
+        nxMVerifShow(a);
+      }
+    }).catch(function(){});
 }
 // ── Sélecteur de models façon Infloww (réutilisable) ─────────────────────────
 // Utilisé par « Appliquer aux autres » (montage) ET par l envoi Veille.
@@ -6945,6 +7024,7 @@ async function nxMontageOpen(fid, exampleUrl){
   document.getElementById('nx-m-timeinfo').textContent='';
   document.getElementById('nx-m-addcap').textContent='Ajouter cette caption';
   nxMSetApproveBtn(false);   // état « dispo VA » par défaut (nxMLoadDraft le corrige si le reel est déjà approuvé)
+  nxMVerifCharger(fid);      // pastille « à vérifier » : celle du template ouvert, pas du précédent
   var rp=document.querySelector('input[name=nxmtime][value="cursor"]'); if(rp){ rp.checked=true; nxMTimeToggle(); }
   // reprend le texte du reel comme 1re caption (toute la vidéo) — modifiable / supprimable
   try{ var r=await fetch('/cloud/meta/get?file_id='+encodeURIComponent(fid)); var j=await r.json(); if(j.ok){ var cap=(j.caption||'').trim(); if(cap) nxMState.caps=[{text:cap, start:null, end:null}]; } }catch(e){}
@@ -7750,6 +7830,8 @@ function capLibInit(){
     capLib.identity=j.identity;
     capLib.block=j.block||{font:'TikTokSans',style:{},global_pos:{enabled:false,x:0.5,y:0.2},items:[]};
     capLib.brutes=j.brutes||[];
+    capLib.rev=j.rev||'';
+    capLib.marche=j.marche||'';
   }
   return true;
 }
@@ -7881,15 +7963,213 @@ function capRenderCards(){
   if(info){ var n=items.length; info.textContent=n+' caption'+(n!==1?'s':'')+' · '+capLib.brutes.length+' brute'+(capLib.brutes.length!==1?'s':'')+' dispo'; }
 }
 var capSaveT=null;
+/* ---- 📷 Captures -> captions (lecture gratuite, relecture, envoi) ---- */
+var capOcr={items:[], file:[], actifs:0, cibles:[], gen:0};
+function capOcrEnCours(){
+  /* ce qui n a pas encore ete envoye : une fermeture le perdrait */
+  return capOcr.items.filter(function(x){ return !x.retire && !x.envoye; }).length;
+}
+function capOcrOpen(){
+  /* Une relecture en cours est GARDEE : la rouvrir la retrouve telle quelle.
+     On ne repart de zero que si tout a deja ete envoye. */
+  if(!capOcrEnCours()){
+    capOcr={items:[], file:[], actifs:0, cibles:[], gen:(capOcr.gen||0)+1};
+    var l=document.getElementById('capocr-liste'); if(l) l.innerHTML='';
+  }
+  var m=document.getElementById('capocr-marche');
+  if(m){
+    /* Le marche affiche a l ecran (pilule FR/US) ; sinon celui de l identite ouverte. */
+    var mk='';
+    try{ mk=(typeof marketCur==='function')?(marketCur()||''):''; }catch(e){}
+    if(mk!=='fr' && mk!=='us'){
+      try{ mk=JSON.parse((document.getElementById('capLibData')||{}).textContent||'{}').marche||'fr'; }catch(e){ mk='fr'; }
+    }
+    m.value=(mk==='us')?'us':'fr';
+  }
+  capOcrEtat();
+  var md=document.getElementById('capocr-modal'); if(md) md.style.display='flex';
+  capOcrCibles();
+}
+function capOcrClose(){
+  /* La relecture n est pas perdue en fermant (elle revient a la reouverture),
+     mais un clic a cote de la fenetre ne doit pas la faire disparaitre
+     sans prevenir. */
+  var n=capOcrEnCours();
+  if(n && !confirm(n+' texte(s) pas encore envoyé(s). Fermer ? (tu les retrouveras en rouvrant)')) return;
+  var md=document.getElementById('capocr-modal'); if(md) md.style.display='none';
+}
+function capOcrFichiers(files){
+  for(var i=0;i<(files||[]).length;i++){
+    var f=files[i];
+    if(String(f.type||'').indexOf('image/')!==0) continue;
+    var it={f:f, url:URL.createObjectURL(f), texte:'', etat:'attente', source:'', note:'', ecartees:[], retire:false, gen:capOcr.gen};
+    capOcr.items.push(it); capOcr.file.push(it); capOcrLigne(it);
+  }
+  capOcrPompe();
+}
+function capOcrPompe(){
+  /* deux lectures a la fois : Gemini gratuit limite le debit, et le VPS n a
+     que deux coeurs pour Tesseract. */
+  while(capOcr.actifs<2 && capOcr.file.length){
+    var it=capOcr.file.shift();
+    if(it.retire) continue;
+    capOcr.actifs++; capOcrLire(it);
+  }
+  capOcrEtat();
+}
+async function capOcrLire(it){
+  it.etat='lecture'; capOcrMaj(it);
+  try{
+    var fd=new FormData(); fd.set('image', it.f, it.f.name||'capture.png');
+    var r=await fetch('/captions/ocr',{method:'POST',body:fd,credentials:'same-origin'});
+    var j=await r.json();
+    if(j&&j.ok){
+      it.texte=j.texte||''; it.source=j.source||''; it.note=j.note||j.erreur||'';
+      it.ecartees=j.ecartees||[]; it.etat=it.texte?'lu':'vide';
+    } else { it.etat='erreur'; it.note=(j&&j.error)||('Erreur '+r.status); }
+  }catch(e){ it.etat='erreur'; it.note=String(e); }
+  /* une lecture lancee avant une remise a zero ne touche pas les compteurs
+     de la nouvelle relecture */
+  if(it.gen!==capOcr.gen) return;
+  capOcr.actifs=Math.max(0,capOcr.actifs-1); capOcrMaj(it); capOcrPompe();
+}
+function capOcrLigne(it){
+  var l=document.getElementById('capocr-liste'); if(!l) return;
+  var row=document.createElement('div');
+  row.style.cssText='display:flex;gap:10px;align-items:flex-start;padding:8px;border:1px solid #2a2a30;border-radius:10px';
+  var img=document.createElement('img'); img.src=it.url;
+  img.style.cssText='width:54px;height:96px;object-fit:cover;border-radius:6px;flex-shrink:0;background:#000';
+  var col=document.createElement('div'); col.style.cssText='flex:1;min-width:0;display:flex;flex-direction:column;gap:4px';
+  var ta=document.createElement('textarea'); ta.rows=3; ta.placeholder='Lecture…';
+  ta.style.cssText='width:100%;box-sizing:border-box;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;padding:8px;font-size:13px;font-family:inherit;resize:vertical';
+  ta.addEventListener('input', function(){ it.touche=true; });
+  var meta=document.createElement('div'); meta.className='capocr-meta'; meta.style.cssText='font-size:11.5px';
+  var del=document.createElement('button'); del.type='button'; del.textContent='✕';
+  del.title='Ne pas ajouter ce texte';
+  del.style.cssText='background:none;border:0;color:#9a9aa6;cursor:pointer;font-size:14px;flex-shrink:0';
+  del.addEventListener('click', function(){ it.retire=true; row.remove(); capOcrEtat(); });
+  col.appendChild(ta); col.appendChild(meta);
+  row.appendChild(img); row.appendChild(col); row.appendChild(del);
+  l.appendChild(row);
+  it.ta=ta; it.meta=meta; it.row=row;
+  capOcrMaj(it);
+}
+function capOcrMaj(it){
+  if(!it.ta) return;
+  if(it.etat==='lu' && !it.touche && !it.ta.value) it.ta.value=it.texte;
+  var bouts=[];
+  if(it.etat==='attente') bouts.push('en attente');
+  else if(it.etat==='lecture') bouts.push('lecture…');
+  else if(it.etat==='lu') bouts.push('lu par '+(it.source||'?'));
+  else if(it.etat==='vide') bouts.push('aucun texte lu — écris-le à la main ou retire la capture');
+  else if(it.etat==='erreur') bouts.push('échec');
+  if(it.note) bouts.push(it.note);
+  if(it.ecartees&&it.ecartees.length) bouts.push('interface écartée : '+it.ecartees.join(' · '));
+  it.meta.textContent=bouts.join(' — ');
+  it.meta.classList.toggle('capocr-alerte', it.etat==='erreur'||it.etat==='vide');
+  /* !important en ligne : le theme clair force la bordure des textarea en
+     !important, et le cadre « lu par Tesseract » disparaissait. */
+  if(it.etat==='lu'&&it.source==='Tesseract') it.ta.style.setProperty('border-color','#b45309','important');
+  else it.ta.style.removeProperty('border-color');
+  capOcrEtat();
+}
+function capOcrEtat(){
+  var e=document.getElementById('capocr-etat'); if(!e) return;
+  var vis=capOcr.items.filter(function(x){ return !x.retire; });
+  if(!vis.length){ e.textContent=''; return; }
+  var lus=vis.filter(function(x){ return x.etat==='lu'; }).length;
+  var enc=vis.filter(function(x){ return x.etat==='attente'||x.etat==='lecture'; }).length;
+  var rat=vis.filter(function(x){ return x.etat==='vide'||x.etat==='erreur'; }).length;
+  e.textContent=vis.length+' capture(s) · '+lus+' lue(s)'+(enc?(' · '+enc+' en cours'):'')+(rat?(' · '+rat+' sans texte'):'')
+    +' — les textes lus par Tesseract (cadre orange) méritent un coup d œil : pas d emojis.';
+}
+async function capOcrCibles(){
+  var m=(document.getElementById('capocr-marche')||{}).value||'fr';
+  var sp=document.getElementById('capocr-cibles'), go=document.getElementById('capocr-go');
+  if(sp) sp.textContent='…';
+  try{
+    var r=await fetch('/captions/cibles?marche='+encodeURIComponent(m),{credentials:'same-origin'});
+    var j=await r.json();
+    capOcr.cibles=(j&&j.ok)?(j.identites||[]):[];
+    var nt=(j&&j.non_triees)||[];
+    if(sp) sp.textContent=capOcr.cibles.length
+      ? ('→ '+capOcr.cibles.length+' identité(s) '+m.toUpperCase()+' : '+capOcr.cibles.join(', ')
+         +(nt.length?(' · '+nt.length+' entrée(s) jamais triée(s) ignorée(s) (Modifier → Identité)'):''))
+      : ('aucune identité de type « identité » sur le marché '+m.toUpperCase());
+    if(go) go.textContent=capOcr.cibles.length?('Ajouter à '+capOcr.cibles.length+' identité(s)'):'Ajouter aux identités';
+  }catch(e){ if(sp) sp.textContent='liste des identités indisponible'; }
+}
+async function capOcrEnvoyer(){
+  var textes=[];
+  capOcr.items.forEach(function(x){
+    if(x.retire||!x.ta) return;
+    var t=String(x.ta.value||'').trim(); if(t) textes.push(t);
+  });
+  if(!textes.length){ if(typeof showToast==='function') showToast('Aucun texte à ajouter','error'); return; }
+  if(capOcr.actifs>0 && !confirm('Des captures sont encore en lecture. Envoyer seulement les textes déjà prêts ?')) return;
+  if(!capOcr.cibles.length){ if(typeof showToast==='function') showToast('Aucune identité sur ce marché','error'); return; }
+  var m=(document.getElementById('capocr-marche')||{}).value||'fr';
+  var go=document.getElementById('capocr-go'); if(go){ go.disabled=true; go.textContent='Envoi…'; }
+  try{
+    var fd=new FormData(); fd.set('marche',m); fd.set('textes',JSON.stringify(textes));
+    var r=await fetch('/captions/ajout_masse',{method:'POST',body:fd,credentials:'same-origin'});
+    var j=await r.json();
+    if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('✕ '+((j&&j.error)||'échec'),'error',9000); return; }
+    var aj=0, db=0, pl=0, pleines=[];
+    (j.resultats||[]).forEach(function(x){ aj+=x.ajoutees; db+=x.doublons; pl+=x.pleins; if(x.pleins) pleines.push(x.identite); });
+    var msg='✓ '+(textes.length-(j.ecartes_limite||0))+' texte(s) → '+(j.resultats||[]).length+' identité(s) : '+aj+' caption(s) ajoutée(s)'
+      +(db?(' · '+db+' déjà présente(s)'):'')+(pl?(' · '+pl+' refusée(s), plafond de '+j.max+' atteint chez '+pleines.join(', ')):'')
+      +(j.ecartes_limite?(' · '+j.ecartes_limite+' texte(s) non envoyé(s) : '+j.limite+' au plus par envoi'):'');
+    capOcr.items.forEach(function(x){ if(!x.retire) x.envoye=true; });
+    var e=document.getElementById('capocr-etat'); if(e) e.textContent=msg;
+    if(typeof showToast==='function') showToast(msg, pl?'warning':'success', 9000);
+    capLibRecharger();
+  }catch(err){ if(typeof showToast==='function') showToast('✕ '+err,'error'); }
+  finally{ if(go){ go.disabled=false; capOcrCibles(); } }
+}
+/* Recharge la bibliotheque de l identite ouverte depuis le serveur : apres un
+   ajout en masse, le bloc garde en memoire est perime, et le prochain
+   enregistrement l aurait fait disparaitre (le serveur le refuse
+   maintenant, mais autant ne pas en arriver la). */
+async function capLibRecharger(){
+  if(!capLib.identity) return;
+  try{
+    var r=await fetch('/captions/list?identity='+encodeURIComponent(capLib.identity),{credentials:'same-origin'});
+    var j=await r.json();
+    if(j&&j.ok&&j.block){
+      capLib.block=j.block; capLib.rev=j.rev||'';
+      try{ capRenderCards(); }catch(e){}
+      var el=document.getElementById('capLibData');
+      if(el) el.textContent=JSON.stringify({identity:capLib.identity,block:capLib.block,brutes:capLib.brutes,max:capLib.max,rev:capLib.rev,marche:capLib.marche||''});
+      try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
+    }
+  }catch(e){}
+}
 function capSave(){
   if(!capLib.identity||!capLib.block) return;
   clearTimeout(capSaveT);
   capSaveT=setTimeout(function(){
+    /* Un enregistrement a la fois : le second partait avec l ancienne version
+       avant le retour du premier, prenait un faux 409, et la modification
+       etait perdue. Il repart maintenant apres, avec la version a jour. */
+    if(capLib.enVol){ capLib.aRefaire=true; return; }
+    capLib.enVol=true;
     var fd=new FormData(); fd.set('identity',capLib.identity); fd.set('data',JSON.stringify(capLib.block));
+    if(capLib.rev) fd.set('rev',capLib.rev);
     fetch('/captions/save',{method:'POST',body:fd,credentials:'same-origin'})
       .then(function(r){return r.json();}).then(function(j){
+        if(j&&j.conflit){
+          /* La bibliotheque a change ailleurs (ajout en masse, autre onglet) :
+             on prend la version du serveur plutot que d effacer ses ajouts. */
+          capLib.block=j.block; capLib.rev=j.rev||'';
+          try{ capRenderCards(); }catch(e){}
+          if(typeof showToast==='function') showToast('La bibliothèque de @'+capLib.identity+' a changé ailleurs : rechargée. Refais ta dernière modification.','warning',9000);
+          capLib.aRefaire=false;
+          return;
+        }
         if(!(j&&j.ok)){ if(typeof showToast==='function') showToast('✕ Sauvegarde captions : '+((j&&j.error)||'?'),'error'); return; }
         if(j.max) capLib.max=j.max;
+        if(j.rev) capLib.rev=j.rev;
         // Le serveur a refusé du surplus : on le DIT et on aligne l écran sur
         // ce qui est réellement enregistré. Sans ça les cartes en trop
         // restaient affichées jusqu au prochain rechargement, puis
@@ -7902,8 +8182,12 @@ function capSave(){
         }
         try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
         var el=document.getElementById('capLibData');
-        if(el) el.textContent=JSON.stringify({identity:capLib.identity,block:capLib.block,brutes:capLib.brutes,max:capLib.max});
-      }).catch(function(e){ if(typeof showToast==='function') showToast('✕ Sauvegarde captions : '+e,'error'); });
+        if(el) el.textContent=JSON.stringify({identity:capLib.identity,block:capLib.block,brutes:capLib.brutes,max:capLib.max,rev:capLib.rev,marche:capLib.marche||''});
+      }).catch(function(e){ if(typeof showToast==='function') showToast('✕ Sauvegarde captions : '+e,'error'); })
+      .then(function(){
+        capLib.enVol=false;
+        if(capLib.aRefaire){ capLib.aRefaire=false; capSave(); }
+      });
   },250);
 }
 // ---- Actions (délégation : survit au swap vaultGoTo de la section) ----
@@ -7959,6 +8243,7 @@ document.addEventListener('click', function(ev){
   else if(act==='test'){ capGenerate(1,cid); }
   else if(act==='gen'){ capGenerate(0,null); }
   else if(act==='addcap'){ capAddOpen(); }
+  else if(act==='ocr'){ capOcrOpen(); }
   else if(act==='share'){ capShareOpen(); }
   else if(act==='delsel'){ capSelDelete(); }
   else if(act==='selclear'){ capSelClear(); }
@@ -10524,10 +10809,13 @@ document.addEventListener('DOMContentLoaded', function(){
        el.style.background='rgba(59,130,246,.14)';
        el.style.borderColor='rgba(59,130,246,.4)';
        el.style.color='#3b82f6';
-     } else if(j.a_relire>0){
+     } else if(j.a_relire>0 || j.a_verifier>0){
        el.style.display='inline-flex';
        ico.classList.remove('tourne');
-       txt.textContent = j.a_relire+' a relire';
+       var bouts=[];
+       if(j.a_verifier>0) bouts.push(j.a_verifier+' template'+(j.a_verifier>1?'s':'')+' a verifier');
+       if(j.a_relire>0) bouts.push(j.a_relire+' a relire');
+       txt.textContent = bouts.join(' · ');
        el.style.background='rgba(234,179,8,.14)';
        el.style.borderColor='rgba(234,179,8,.45)';
        el.style.color='#a16207';
@@ -14000,6 +14288,42 @@ body.light #pf-modal .pf-card img{background:#eceff3!important}
      « + Ajouter une autre caption », gros bouton d envoi). Ecrites au CENTRE
      par defaut ; un nouveau champ vide s ajoute tout seul quand on tape dans
      le dernier. ===== -->
+<!-- ===== 📷 Captures : captions lues sur des captures d ecran (gratuit),
+     RELUES ici avant d aller dans toutes les identites d un marche. ===== -->
+<style>
+/* Theme clair (defaut du site) : textes de la fenetre des captures lisibles
+   sur le fond devenu blanc. Specificite 1,1,1 et plus, avec !important. */
+body.light #capocr-drop b{color:#1c1c1e!important}
+body.light #capocr-drop span,body.light #capocr-etat,body.light #capocr-cibles,body.light #capocr-modal .capocr-meta{color:#4b5563!important}
+#capocr-modal .capocr-meta{color:#9a9aa6}
+#capocr-modal .capocr-meta.capocr-alerte,body.light #capocr-modal .capocr-meta.capocr-alerte{color:#dc2626!important}
+</style>
+<div id="capocr-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center;padding:20px" onclick="capOcrClose()" ondragover="event.preventDefault()" ondrop="event.preventDefault()">
+  <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:22px;width:680px;max-width:94vw;max-height:88vh;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-weight:800;font-size:15px">📷 Captions depuis des captures</span>
+      <span style="flex:1"></span>
+      <button type="button" onclick="capOcrClose()" style="background:none;border:0;color:#9a9aa6;cursor:pointer;font-size:15px">✕</button>
+    </div>
+    <label id="capocr-drop" ondragover="event.preventDefault();this.style.borderColor='#3b82f6'" ondragleave="this.style.borderColor=''" ondrop="event.preventDefault();this.style.borderColor='';capOcrFichiers(event.dataTransfer.files)"
+           style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:18px;border:1.5px dashed #3a3a44;border-radius:12px;cursor:pointer;color:#9a9aa6;font-size:13px;text-align:center">
+      <input id="capocr-input" type="file" accept="image/png,image/jpeg,image/webp" multiple style="display:none" onchange="capOcrFichiers(this.files);this.value=''">
+      <b style="color:#c4c4cc">Dépose tes captures ici, ou clique pour les choisir</b>
+      <span>Texte lu gratuitement (Gemini, sinon Tesseract). Rien ne part avant ta relecture.</span>
+    </label>
+    <div id="capocr-etat" style="font-size:12px;color:#9a9aa6"></div>
+    <div id="capocr-liste" style="overflow:auto;display:flex;flex-direction:column;gap:8px;min-height:0;flex:1"></div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid #2a2a30;padding-top:12px">
+      <label style="font-size:12.5px;color:#c4c4cc;display:inline-flex;align-items:center;gap:6px">Marché
+        <select id="capocr-marche" onchange="capOcrCibles()" style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;padding:6px 8px;font-family:inherit">
+          <option value="fr">FR</option><option value="us">US</option>
+        </select>
+      </label>
+      <span id="capocr-cibles" style="font-size:12px;color:#9a9aa6;flex:1;min-width:180px"></span>
+      <button type="button" id="capocr-go" onclick="capOcrEnvoyer()" style="background:linear-gradient(135deg,#3b82f6,#a855f7);border:0;color:#fff;border-radius:9px;padding:9px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Ajouter aux identités</button>
+    </div>
+  </div>
+</div>
 <div id="cap-add-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center;padding:20px" onclick="capAddClose()">
   <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:22px;width:560px;max-width:94vw;max-height:88vh;display:flex;flex-direction:column;gap:14px;box-sizing:border-box">
     <div style="display:flex;align-items:center;gap:8px">
@@ -21138,7 +21462,7 @@ def _vault_social_bandeau(ident: str, src: dict) -> str:
         + "</div>")
 
 
-def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "", deferred: bool = False, is_banger: bool = False, is_disabled: bool = False, is_va_ready: bool = False, can_montage: bool = None, a_approuver: bool = False, is_fav_brute: bool = False, is_flash_trend: bool = False, vues: int = None) -> str:
+def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "", deferred: bool = False, is_banger: bool = False, is_disabled: bool = False, is_va_ready: bool = False, can_montage: bool = None, a_approuver: bool = False, is_fav_brute: bool = False, is_flash_trend: bool = False, vues: int = None, a_verifier: str = "") -> str:
     """Carte preview style propre : juste un badge date en haut à gauche + thumbnail
     en grand. Plus de nom de fichier ni de taille en dessous (visible au hover via title).
 
@@ -21199,6 +21523,9 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
     # Description reprise du post et pas encore relue : meme mecanique,
     # en ambre. Le proprietaire doit le voir SANS ouvrir la carte.
     _va_cls += " a-approuver" if a_approuver else ""
+    # Template analysé en arrière-plan, pas encore validé (hors service).
+    if a_verifier:
+        _va_cls += " montage-a-verifier" + (" verif-haute" if a_verifier == "haute" else "")
     is_video_js = "true" if is_video else "false"
     fid_safe = file_id.replace("'", "\\'") if file_id else ""
     example_safe = example_url.replace("'", "\\'") if example_url else ""
@@ -21609,6 +21936,15 @@ body.light .vault-card-bg{background:linear-gradient(110deg,#eceff1 8%,#f5f5f5 1
 /* Description reprise d'un post, pas encore relue. Ambre : ni une erreur
    (rouge), ni quelque chose de valide (vert) — quelque chose a regarder. */
 .vault-card-bg.a-approuver::after{content:'A APPROUVER';position:absolute;top:8px;left:8px;z-index:5;pointer-events:none;background:rgba(234,179,8,.96);color:#2a1c00;font-size:9.5px;font-weight:800;letter-spacing:.4px;padding:3px 7px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.35)}
+/* Template analyse en arriere-plan, pas encore valide : il reste HORS
+   SERVICE. Sur ::before (bande du bas) : ::after porte deja « A APPROUVER »,
+   et le filigrane va-ready (::before) ne peut pas coexister — va_ready vit
+   dans le brouillon, absent par definition. Priorite haute en rouge. */
+.vault-card-bg.montage-a-verifier::before{content:'À VÉRIFIER';position:absolute;left:0;right:0;bottom:0;top:auto;z-index:4;pointer-events:none;text-align:center;font-size:9.5px;font-weight:800;letter-spacing:.1em;padding:4px 0;color:#2a1c00;box-shadow:0 -2px 8px rgba(0,0,0,.22);background:rgba(245,158,11,.94)}
+.vault-card-bg.montage-a-verifier.verif-haute::before{content:'À VÉRIFIER — PRIORITÉ';color:#fff;background:rgba(220,38,38,.94)}
+/* Filet : « Dispo VA » pose va-ready en direct avant que le bandeau ne soit
+   retire ; le ::before commun couvrait alors toute la vignette. */
+.vault-card-bg.va-ready.montage-a-verifier::before,.vault-card-bg.va-ready.montage-a-verifier.verif-haute::before{content:'';background:none;box-shadow:none;padding:0}
 /* Un template peut etre a la fois « dispo VA » et « a approuver » : le
    second se decale pour ne pas recouvrir le premier. */
 .vault-card-bg.va-ready.a-approuver::after{content:'DISPO VA · À APPROUVER';position:absolute;left:0;right:0;bottom:0;top:auto;z-index:4;pointer-events:none;text-align:center;font-size:9.5px;font-weight:800;letter-spacing:.1em;padding:4px 0;border-radius:0;color:#fff;box-shadow:0 -2px 8px rgba(0,0,0,.22);background:rgba(217,119,6,.94)}
@@ -22295,8 +22631,9 @@ document.addEventListener('submit', function(e){
       var curTab = new URLSearchParams(window.location.search).get('tab');
       if(curTab === _g[0]){
         setTimeout(function(){
-          var _extra = (form.dataset.utype === 'template') ? '&openmontage=1' : '';
-          window.location.href = '?tab=' + _g[0] + (_g[1] && _ident ? '&' + _g[1] + '=' + encodeURIComponent(_ident) : '') + _extra;
+          /* Plus d ouverture automatique de l editeur apres un template :
+             l analyse se fait en arriere-plan, la carte dit « A VERIFIER ». */
+          window.location.href = '?tab=' + _g[0] + (_g[1] && _ident ? '&' + _g[1] + '=' + encodeURIComponent(_ident) : '');
         }, 900);
       }
     }
@@ -23490,6 +23827,21 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
                 _a_approuver_stems.add(_ac.name[:-len(".acheck.txt")])
         except Exception:
             pass
+        # Templates analyses en arriere-plan et pas encore valides : une
+        # analyse SANS brouillon. Statut deduit, aucun fichier en plus — et
+        # enregistrer dans l'editeur (ou « Valider ») le fait disparaitre.
+        _a_verifier = {}
+        if subdir == "templates" and folder.exists():
+            for _an in folder.glob("*.analyse.json"):
+                _st = _an.name[:-len(".analyse.json")]
+                if (folder / (_st + ".montage.json")).exists():
+                    continue
+                try:
+                    _prio = ((json.loads(_an.read_text(encoding="utf-8")).get("verifier")
+                              or {}).get("priorite") or "normale")
+                except Exception:
+                    _prio = "haute"
+                _a_verifier[_st] = _prio
         _va_ready_stems = set()
         # templates/ compte aussi : un template approuve part chez les VA au
         # meme titre qu'un reel (sinon le filigrane disparaissait au F5).
@@ -23524,7 +23876,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
                 second_url = ""
             # Apres INITIAL_BATCH : on render avec data-src vide, l image se charge a l intersection
             deferred = idx >= INITIAL_BATCH
-            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, a_approuver=(p.stem in _a_approuver_stems), deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels or p.stem in _brutes_off), is_fav_brute=(file_id in _fav_brutes), is_flash_trend=(file_id in _flash_trend), vues=_vues.get(p.stem), is_va_ready=((is_reels or subdir == "templates") and p.stem in _va_ready_stems), can_montage=can_montage))
+            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, a_approuver=(p.stem in _a_approuver_stems), deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels or p.stem in _brutes_off), is_fav_brute=(file_id in _fav_brutes), is_flash_trend=(file_id in _flash_trend), vues=_vues.get(p.stem), a_verifier=_a_verifier.get(p.stem, ""), is_va_ready=((is_reels or subdir == "templates") and p.stem in _va_ready_stems), can_montage=can_montage))
         gallery = (
             gallery_header
             # auto-fill 165px : le nombre de colonnes s'adapte a la largeur
@@ -23535,25 +23887,34 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
             + "".join(cards_html)
             + "</div>"
         )
-        # Retour d'un upload de TEMPLATE : on enchaine directement sur l'editeur
-        # de montage du fichier qui vient d'etre depose (le plus recent = 1re
-        # carte). C'est le « je fais le montage et ca arrive » demande.
-        # NB : `request` n'est PAS global dans ce module (importé localement
-        # partout) — sans cet import, le NameError était avalé par le except
-        # et l'ouverture auto ne partait jamais, en silence.
-        _want_open = False
+        # ?openmontage=<fichier> : ouvre l'editeur sur CE template (lien
+        # « Verifier dans l'editeur » de /a-relire). Plus d'ouverture sur la
+        # 1re carte apres un upload : avec des envois en parallele, ce
+        # n'etait pas forcement la bonne, et l'analyse se fait maintenant en
+        # arriere-plan. `request` n'est pas global dans ce module.
+        _open_nom = ""
         if subdir == "templates" and cards_html:
             try:
                 from flask import request as _rq_open
-                _want_open = (_rq_open.args.get("openmontage") or "") == "1"
+                _open_nom = (_rq_open.args.get("openmontage") or "").strip()
             except Exception:
-                _want_open = False
-        if _want_open:
+                _open_nom = ""
+        # Le nom vient de l'URL : on n'accepte qu'un fichier REELLEMENT
+        # affiche, et on echappe « </ ». Sans ca, un lien piege fermait le
+        # <script> et en ouvrait un autre, execute avec la session de l'admin.
+        if _open_nom and _open_nom != "1" and _open_nom in {p.name for p in files}:
             gallery += (
                 "<script>(function(){"
+                "var nom=" + json.dumps(_open_nom).replace("</", "<\\/") + ";"
                 "var g=document.getElementById('vault-grid');if(!g)return;"
-                "var b=g.querySelector('.card-edit-btn[onclick*=nxMontageOpen]');"
+                "var cs=g.querySelectorAll('.vault-card-bg[data-fid]');"
+                "for(var i=0;i<cs.length;i++){"
+                "var f=cs[i].getAttribute('data-fid')||'';"
+                "if(f.slice(f.lastIndexOf('|')+1)!==nom)continue;"
+                "var card=cs[i].closest('.cloud-card');"
+                "var b=card?card.querySelector('.card-edit-btn[onclick*=nxMontageOpen]'):null;"
                 "if(b)setTimeout(function(){b.click();},350);"
+                "break;}"
                 "})();</script>"
             )
         # Compteur en bas + auto-scroll trigger
@@ -23595,7 +23956,77 @@ CAPTION_FONTS = ("Strong", "TikTokSans", "Inter", "Poppins", "Montserrat",
 # vers d'autres models et le compteur du navigateur le lisent tous ici. Quand
 # il vivait en dur à trois endroits, le navigateur annonçait « 10 ajoutées »
 # pendant que le serveur en jetait 6 sans le dire.
-CAPTIONS_MAX = 80
+CAPTIONS_MAX = 300      # 80 jusqu'au 25/09/2026 : trop juste pour les ajouts en masse
+
+#: Toute écriture de la bibliothèque est un « lire, modifier, écrire » sur UN
+#: fichier : sans verrou, un ajout en masse et un enregistrement simultanés
+#: se marchaient dessus, et le dernier effaçait le premier.
+_CAPTIONS_LOCK = threading.RLock()
+
+
+def _caption_cle(texte) -> str:
+    """Clé de doublon : casse, accents composés et ponctuation ignorés."""
+    import unicodedata as _ud
+    t = _ud.normalize("NFKC", str(texte or "")).lower()
+    t2 = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9à-ɏ\s]", " ", t)).strip()
+    # Une caption faite seulement d'emojis n'a ni lettre ni chiffre : sa clé
+    # aurait été vide et elle était écartée sans un mot. On garde alors le
+    # texte brut (espaces compris) comme clé.
+    return t2 or re.sub(r"\s+", " ", t).strip()
+
+
+def _caption_rev(block) -> str:
+    """Version d'une bibliothèque : l'onglet la renvoie en enregistrant. Un
+    onglet resté ouvert avant un ajout en masse aurait sinon réécrit le bloc
+    entier sans les captions ajoutées, sans un mot."""
+    import hashlib as _hl
+    return _hl.sha1(json.dumps(block, sort_keys=True, ensure_ascii=False)
+                    .encode("utf-8")).hexdigest()[:12]
+
+
+def _ajouter_captions_a(lib: dict, cible: str, textes: list) -> dict:
+    """Ajoute des textes à la bibliothèque d'une identité (dans `lib`, en
+    mémoire). Doublon AVANT plafond : une caption déjà là ne prend pas de
+    place. Rend {identite, ajoutees, doublons, pleins}."""
+    bloc = _clean_caption_block(lib.get(cible))
+    deja = {_caption_cle(c.get("text")) for c in bloc["items"]}
+    res = {"identite": cible, "ajoutees": 0, "doublons": 0, "pleins": 0}
+    maintenant = int(time.time())
+    for i, texte in enumerate(textes):
+        texte = str(texte or "").strip()[:300]
+        cle = _caption_cle(texte)
+        if not cle:
+            continue
+        if cle in deja:
+            res["doublons"] += 1
+            continue
+        if len(bloc["items"]) >= CAPTIONS_MAX:
+            res["pleins"] += 1
+            continue
+        deja.add(cle)
+        bloc["items"].append({"id": f"c{int(time.time() * 1000)}_{i}_{cible[:6]}",
+                              "text": texte, "x": 0.5, "y": 0.5, "wrapW": 0.88,
+                              "enabled": True, "created": maintenant})
+        res["ajoutees"] += 1
+    if res["ajoutees"]:
+        lib[cible] = bloc
+    return res
+
+
+def _identites_cibles_captions(marche: str) -> dict:
+    """Les entrées de type « identité » d'un marché (FR/US) — jamais les
+    modèles, jamais les dossiers de test. Rend aussi celles du marché qui
+    n'ont jamais été triées (le type par défaut est « modèle ») : sans ce
+    chiffre, une identité oubliée au tri ne recevrait rien, en silence."""
+    cibles, non_triees = [], []
+    for i in _list_content_identities():
+        if i.startswith("_tst") or identity_market(i) != marche:
+            continue
+        if _type_identite(i) == "identite":
+            cibles.append(i)
+        elif not _type_mod.choisi(i):
+            non_triees.append(i)
+    return {"identites": cibles, "non_triees": non_triees}
 
 
 def _load_captions_lib() -> dict:
@@ -24001,48 +24432,258 @@ def rapport_texte_brutes(identity: str) -> dict:
             "total_brutes": len(_brutes_d_identite(identity))}
 
 
-def _lancer_analyse_auto(video) -> bool:
-    """Analyse un template en arriere-plan ; ecrit <stem>.analyse.json.
+# ---- File d'analyse des templates, en arriere-plan -------------------------
+#
+# UN SEUL mecanisme pour toutes les arrivees (upload, zip, import par lien,
+# Drive, copies) : on cherche les templates qui n'ont NI analyse NI brouillon.
+# Brancher l'analyse sur chaque chemin d'arrivee en aurait oublie un.
+#
+# Un seul ouvrier, en priorite basse : le bot Discord vit dans le meme
+# processus, et un zip de 30 templates lancait 30 ffmpeg a la fois.
+_TPL_FILE: list = []
+_TPL_LOCK = threading.Lock()
+_TPL_OUVRIER = {"fil": None}
+TPL_RELECTURE_SEC = 300
 
-    On ne touche PAS au brouillon d'edition : le resultat est une
-    proposition, servie a l'editeur tant que rien n'a ete enregistre a la
-    main. Sans cle IA, on ne tente rien — inutile de faire tourner ffmpeg
-    pour echouer ensuite.
-    """
+
+#: Un fichier modifie il y a moins que ca est peut-etre encore en cours
+#: d'ecriture (upload, zip, Drive) : on le reprendra au tour suivant.
+TPL_DELAI_ECRITURE = 30
+TPL_ESSAIS_MAX = 3
+TPL_REESSAI_SEC = 1800
+
+
+def _analyse_a_refaire(video) -> bool:
+    """Faut-il (re)analyser ce template ? Oui s'il n'a pas d'analyse, si
+    c'est une ANCIENNE analyse Claude (sans « verifier » : elle recopiait
+    aussi le texte de la partie 2, et « Valider tel quel » l'aurait grave),
+    ou si c'est un echec de plus de 30 min qui n'a pas epuise ses essais."""
+    ap = video.with_suffix(".analyse.json")
+    if not ap.exists():
+        return True
+    try:
+        a = json.loads(ap.read_text(encoding="utf-8"))
+    except Exception:
+        return True
+    if not isinstance(a, dict) or "verifier" not in a:
+        return True
+    if a.get("erreur"):
+        return (int(a.get("essais") or 1) < TPL_ESSAIS_MAX
+                and time.time() - float(a.get("le") or 0) > TPL_REESSAI_SEC)
+    return False
+
+
+def _templates_sans_analyse() -> list:
+    """Les templates sans brouillon dont l'analyse est a (re)faire."""
+    out = []
+    try:
+        for d in sorted(IDENTITIES_DIR.iterdir()):
+            dossier = d / "templates"
+            if not dossier.is_dir():
+                continue
+            for v in sorted(dossier.iterdir()):
+                if (not v.is_file() or v.suffix.lower() not in VIDEO_EXTS
+                        or ".example" in v.name):
+                    continue
+                if v.with_suffix(".montage.json").exists() or not _analyse_a_refaire(v):
+                    continue
+                try:
+                    if time.time() - v.stat().st_mtime < TPL_DELAI_ECRITURE:
+                        continue          # encore en cours d'ecriture, peut-etre
+                except OSError:
+                    continue
+                out.append(v)
+    except Exception as e:
+        log.warning(f"templates sans analyse : {e}")
+    return out
+
+
+def _analyser_template_en_file(video) -> None:
+    """Analyse un template et range le resultat. Un echec laisse AUSSI une
+    analyse (avec l'erreur) : sinon la file le reprendrait toutes les 5 min,
+    et la galerie ne dirait pas qu'il y a un souci."""
     from pathlib import Path as _P
     video = _P(video)
+    with _ANALYSES_LOCK:
+        _ANALYSES["en_cours"] += 1
 
-    def _travail():
+    def _echec(motif: str) -> dict:
+        essais = 0
+        try:
+            essais = int(json.loads(video.with_suffix(".analyse.json")
+                                    .read_text(encoding="utf-8")).get("essais") or 0)
+        except Exception:
+            pass
+        with _ANALYSES_LOCK:
+            _ANALYSES["echecs"] += 1
+            _ANALYSES["motif"] = motif[:200]
+        return {"erreur": motif[:200], "essais": essais + 1, "le": int(time.time()),
+                "verifier": {"priorite": "haute",
+                             "raisons": ["analyse impossible : " + motif[:160]]}}
+    try:
         try:
             out, err = _analyze_montage_template(video)
             if err or not out:
+                out = _echec(err or "raison inconnue")
+            else:
                 with _ANALYSES_LOCK:
-                    _ANALYSES["echecs"] += 1
-                    # Sans le motif, la page « A relire » n annoncait qu un
-                    # NOMBRE d echecs : impossible de savoir s il fallait
-                    # recharger le compte, installer ffmpeg, ou autre chose.
-                    _ANALYSES["motif"] = (err or "raison inconnue")[:200]
-                return
-            out["_source"] = "analyse automatique a l'import"
-            safe_json.write(video.with_suffix(".analyse.json"), out, indent=None)
-            with _ANALYSES_LOCK:
-                _ANALYSES["faites"] += 1
-                _ANALYSES["dernier"] = video.name
+                    _ANALYSES["faites"] += 1
+                    _ANALYSES["dernier"] = video.name
         except Exception as e:
-            with _ANALYSES_LOCK:
-                _ANALYSES["echecs"] += 1
-            log.warning(f"analyse auto {video.name}: {e}")
-        finally:
-            with _ANALYSES_LOCK:
-                _ANALYSES["en_cours"] = max(0, _ANALYSES["en_cours"] - 1)
-
-    try:
-        if not _anthropic_key():
-            return False
+            # Une exception (ffmpeg ou tesseract trop longs…) laisse AUSSI une
+            # trace : sinon le template etait repris toutes les 5 min, sans fin.
+            log.warning(f"analyse template {video.name}: {e}")
+            out = _echec(f"{type(e).__name__} : {e}")
+        # Le brouillon a pu etre enregistre PENDANT l'analyse : alors il fait
+        # autorite, on ne pose rien a cote.
+        if not video.with_suffix(".montage.json").exists() and video.exists():
+            safe_json.write(video.with_suffix(".analyse.json"), out, indent=None)
+    finally:
         with _ANALYSES_LOCK:
-            _ANALYSES["en_cours"] += 1
-        threading.Thread(target=_travail, daemon=True,
-                         name="analyse-auto").start()
+            _ANALYSES["en_cours"] = max(0, _ANALYSES["en_cours"] - 1)
+
+
+def _ouvrier_templates():
+    import time as _t
+    dernier_tour = 0.0
+    while True:
+        video = None
+        with _TPL_LOCK:
+            if _TPL_FILE:
+                video = _TPL_FILE.pop(0)
+        if video is not None:
+            if (video.exists() and not video.with_suffix(".montage.json").exists()
+                    and _analyse_a_refaire(video)):
+                _analyser_template_en_file(video)
+            continue
+        if _t.time() - dernier_tour >= TPL_RELECTURE_SEC:
+            dernier_tour = _t.time()
+            _planifier_templates(demarrer=False)
+            continue
+        _t.sleep(5)
+
+
+def _planifier_templates(videos=None, demarrer: bool = True) -> int:
+    """Met en file les templates donnes, ou tous ceux sans analyse. Rend le
+    nombre ajoute. Lance l'ouvrier s'il ne tourne pas."""
+    cand = list(videos) if videos else _templates_sans_analyse()
+    # Sous le banc d'essai, pas de fil : le test d'import par lien le
+    # demarrait, et il rescannait le VRAI data/identities en appelant Gemini.
+    if os.environ.get("VABOT_BANC_ESSAI"):
+        demarrer = False
+    ajout = 0
+    with _TPL_LOCK:
+        for v in cand:
+            if v not in _TPL_FILE:
+                _TPL_FILE.append(v)
+                ajout += 1
+        if demarrer and (_TPL_OUVRIER["fil"] is None or not _TPL_OUVRIER["fil"].is_alive()):
+            _TPL_OUVRIER["fil"] = threading.Thread(target=_ouvrier_templates, daemon=True,
+                                                   name="analyse-templates")
+            _TPL_OUVRIER["fil"].start()
+    return ajout
+
+
+def _montages_a_verifier() -> list:
+    """Templates analyses et pas encore valides (analyse SANS brouillon).
+    Priorite haute d'abord, puis les plus recents."""
+    out = []
+    try:
+        for d in sorted(IDENTITIES_DIR.iterdir()):
+            dossier = d / "templates"
+            if not dossier.is_dir():
+                continue
+            # Les videos par tige, extension comparee en minuscules : sur le
+            # VPS (Linux), IMG_1234.MOV n'etait pas retrouve et le template
+            # disparaissait de /a-relire et du temoin.
+            par_tige = {v.stem: v for v in dossier.iterdir()
+                        if v.is_file() and v.suffix.lower() in VIDEO_EXTS
+                        and ".example" not in v.name}
+            for ap in dossier.glob("*.analyse.json"):
+                stem = ap.name[:-len(".analyse.json")]
+                if (dossier / (stem + ".montage.json")).exists():
+                    continue
+                video = par_tige.get(stem)
+                if video is None:
+                    continue
+                try:
+                    a = json.loads(ap.read_text(encoding="utf-8"))
+                except Exception:
+                    a = {"erreur": "analyse illisible"}
+                v = a.get("verifier") or {}
+                out.append({"identity": d.name, "fichier": video.name, "stem": stem,
+                            "coupe": a.get("cut_at"), "duree": a.get("duration"),
+                            "raisons": v.get("raisons") or [],
+                            "priorite": v.get("priorite") or "normale",
+                            "captions": [str(c.get("text") or "") for c in (a.get("captions") or [])],
+                            "lecture": a.get("lecture") or "", "erreur": a.get("erreur") or "",
+                            "ts": int(video.stat().st_mtime)})
+    except Exception as e:
+        log.warning(f"montages a verifier : {e}")
+    out.sort(key=lambda r: (r["priorite"] != "haute", -r["ts"]))
+    return out
+
+
+#: Le style par defaut de l'editeur (nxMStyleInit) : un brouillon ecrit par
+#: « Valider tel quel » doit avoir EXACTEMENT la forme d'un brouillon
+#: enregistre depuis l'editeur, sinon il se rechargerait de travers.
+_STYLE_EDITEUR = {"size": 44, "color": "#ffffff", "align": "center", "case": "none",
+                  "bold": True, "italic": False, "underline": False, "box": False,
+                  "boxColor": "#000000", "effect": "none"}
+
+
+def _brouillon_depuis_analyse(a: dict) -> dict:
+    """Le brouillon (.montage.json) qu'aurait ecrit l'editeur en enregistrant
+    la proposition telle quelle. segments et style en CHAINES JSON, comme
+    montage_save : nxMLoadDraft fait JSON.parse dessus."""
+    segs = []
+    for c in a.get("captions") or []:
+        seg = {"text": str(c.get("text") or ""), "x": c.get("x"), "y": c.get("y"),
+               "start": c.get("start"), "end": c.get("end")}
+        if c.get("wrapW") is not None:
+            seg["wrapW"] = c["wrapW"]
+        segs.append(seg)
+    style = dict(_STYLE_EDITEUR)
+    style.update({k: v for k, v in (a.get("style") or {}).items() if k in _STYLE_EDITEUR})
+    # Strong : la taille a ete calibree pour elle (_caption_size_for_width).
+    draft = {"segments": json.dumps(segs, ensure_ascii=False),
+             "font": a.get("font") or "Strong",
+             "style": json.dumps(style, ensure_ascii=False)}
+    try:
+        if float(a.get("cut_at") or 0) > 0:
+            draft["cut_at"] = round(float(a["cut_at"]), 3)
+    except (TypeError, ValueError):
+        pass
+    return draft
+
+
+def _noter_validation(video, coupe_validee, tel_quel: bool = False) -> None:
+    """Garde, dans l'analyse, la coupure finalement retenue : c'est la mesure
+    continue de la justesse de l'analyse gratuite (la verite terrain d'avant
+    venait pour l'essentiel de l'ancienne analyse, validee sans retouche).
+    Une seule fois : la PREMIERE validation est celle qui juge la proposition."""
+    from pathlib import Path as _P
+    ap = _P(video).with_suffix(".analyse.json")
+    if not ap.exists():
+        return
+    try:
+        a = json.loads(ap.read_text(encoding="utf-8"))
+        if a.get("valide") or a.get("erreur"):
+            return
+        prop = float(a.get("cut_at") or 0)
+        val = float(coupe_validee or 0)
+        a["valide"] = {"cut_at": round(val, 3), "ecart": round(val - prop, 3),
+                       "tel_quel": bool(tel_quel), "le": int(time.time())}
+        safe_json.write(ap, a, indent=None)
+    except Exception as e:
+        log.warning(f"trace de validation {ap.name} : {e}")
+
+
+def _lancer_analyse_auto(video) -> bool:
+    """Import par lien : le template part dans la file commune (gratuite)."""
+    from pathlib import Path as _P
+    try:
+        _planifier_templates([_P(video)])
         return True
     except Exception:
         return False
@@ -24351,6 +24992,11 @@ def _render_cloud_captions_html() -> str:
         "stroke-linecap='round' stroke-linejoin='round'><circle cx='18' cy='5' r='3'/><circle cx='6' cy='12' r='3'/>"
         "<circle cx='18' cy='19' r='3'/><line x1='8.6' y1='10.6' x2='15.4' y2='6.4'/><line x1='8.6' y1='13.4' x2='15.4' y2='17.6'/></svg>"
         "Partager</button>"
+        # 📷 Captures : captions lues sur des captures d'écran (gratuit), relues
+        # dans une fenêtre, puis ajoutées à toutes les identités d'un marché.
+        "<button type='button' class='btn-partager' data-capact='ocr' "
+        "title='Déposer des captures d écran : le texte est lu gratuitement, tu le relis, "
+        "puis il part dans toutes les identités du marché choisi'>📷 Captures</button>"
         # ＋ Add captions = même bouton phare que « Add template » sur l'onglet
         # Template montage (gradient) : ouvre le formulaire façon Upload Reel.
         "<button type='button' data-capact='addcap' title='Ajoute tes captions — écrites au CENTRE par défaut' "
@@ -24471,7 +25117,8 @@ def _render_cloud_captions_html() -> str:
     # ajoutait au-delà et annonçait « ajoutées » pendant que le serveur
     # refusait le surplus.
     payload = _js.dumps({"identity": selected, "block": block, "brutes": brutes[:80],
-                         "max": CAPTIONS_MAX},
+                         "max": CAPTIONS_MAX, "rev": _caption_rev(block),
+                         "marche": identity_market(selected)},
                         ensure_ascii=False).replace("</", "<\\/")
     state = f"<script type='application/json' id='capLibData'>{payload}</script>"
 
@@ -46843,12 +47490,16 @@ def _gemini_key_present() -> bool:
 
 
 # ==========================================================================
-# ANALYSE AUTOMATIQUE D'UN TEMPLATE DE MONTAGE (bouton « 🪄 Analyser »)
+# ANALYSE AUTOMATIQUE D'UN TEMPLATE DE MONTAGE — GRATUITE
 # --------------------------------------------------------------------------
-# 1) ffmpeg trouve les changements de plan (gratuit, local, fiable)
-# 2) Claude regarde quelques images : il choisit LE changement qui sépare
-#    l'accroche du montage, et recopie la caption incrustée + sa position.
-# Le résultat pré-remplit l'éditeur ; l'utilisateur vérifie et ajuste.
+# 1) ffmpeg trouve les changements de plan : la coupure partie 1 / partie 2
+#    est le premier plan net après 1,5 s (mesure dans analyse_gratuite.py)
+# 2) la caption de la partie 1 est lue par Gemini (offre gratuite, emojis
+#    compris), Tesseract en secours ; sa position par l'OCR
+# 3) les visages disent si la coupure est douteuse (« à vérifier »)
+# L'analyse passait par Claude (payant) ; retirée le 25/09/2026 à la demande
+# du propriétaire. Le résultat pré-remplit l'éditeur ; rien n'est mis en
+# service avant validation.
 # ==========================================================================
 
 def _anthropic_key() -> str:
@@ -46894,7 +47545,7 @@ def _scene_cuts(src: Path, threshold: float = 0.2):
     Renvoie [(seconde, score), …] du plus tôt au plus tard."""
     try:
         r = subprocess.run(
-            ["ffmpeg", "-hide_banner", "-nostats", "-i", str(src), "-an",
+            _NICE + ["ffmpeg", "-hide_banner", "-nostats", "-i", str(src), "-an",
              "-filter:v", f"select='gt(scene,{threshold})',metadata=print:file=-",
              "-f", "null", "-"],
             capture_output=True, timeout=120)
@@ -46935,326 +47586,6 @@ def _grab_frames(src: Path, times, outdir: Path, height: int = 1280):
         except Exception:
             pass
     return got
-
-
-# Schéma imposé à Claude : la réponse est garantie parsable (structured outputs).
-_MONTAGE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "cut_at": {"type": "number"},
-        "cut_reason": {"type": "string"},
-        "captions": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "text": {"type": "string"},
-                    "x": {"type": "number"},
-                    "y": {"type": "number"},
-                    "block_w": {"type": "number"},
-                    "block_h": {"type": "number"},
-                    "line_height": {"type": "number"},
-                    "start": {"type": "number"},
-                    "end": {"type": "number"},
-                    "box": {"type": "boolean"},
-                    "color": {"type": "string"},
-                    "box_color": {"type": "string"},
-                    "align": {"type": "string", "enum": ["left", "center", "right"]},
-                    "upper": {"type": "boolean"},
-                },
-                "required": ["text", "x", "y", "block_w", "block_h", "line_height",
-                             "start", "end", "box", "color", "box_color", "align", "upper"],
-                "additionalProperties": False,
-            },
-        },
-    },
-    "required": ["cut_at", "cut_reason", "captions"],
-    "additionalProperties": False,
-}
-
-
-def _montage_prompt(duration: float, cuts) -> str:
-    if cuts:
-        liste = ", ".join(f"{t}s (force {s})" for t, s in cuts)
-    else:
-        liste = "aucun (l'image ne change jamais d'un coup)"
-    return (
-        "Tu analyses un TEMPLATE de montage vidéo vertical fait sur CapCut.\n"
-        f"Durée totale : {duration:.2f} s.\n\n"
-        "Ce template a deux parties :\n"
-        "  1) un DÉBUT d'accroche qui sera REMPLACÉ par une autre vidéo à la génération ;\n"
-        "  2) la SUITE (le montage), qu'on garde telle quelle avec son son.\n\n"
-        "DEUX choses à me donner.\n\n"
-        "A) cut_at — l'instant EXACT (en secondes) où la partie 1 s'arrête et où la "
-        "partie 2 commence.\n"
-        f"Changements de plan détectés automatiquement : {liste}\n"
-        "Choisis parmi ces instants celui qui sépare vraiment l'accroche du montage "
-        "(reprends sa valeur telle quelle). Si aucun ne convient, ou si toute la vidéo "
-        "est une seule séquence continue, réponds cut_at = 0.\n"
-        "Explique ton choix en une phrase courte dans cut_reason.\n\n"
-        "B) captions — les textes INCRUSTÉS sur la vidéo (ceux ajoutés au montage).\n"
-        "Recopie-les EXACTEMENT : mêmes mots, même ponctuation, mêmes emojis, mêmes "
-        "majuscules.\n"
-        "RETOURS À LA LIGNE (règle absolue) : dans text, mets un saut de ligne à "
-        "CHAQUE endroit où le texte passe à la ligne À L'ÉCRAN. Le nombre de lignes "
-        "de ton text doit être EXACTEMENT le nombre de lignes affichées sur l'image. "
-        "Ne recolle jamais deux lignes affichées en une seule.\n"
-        "IGNORE : l'interface de l'appli (like, commentaires, partage), les watermarks, "
-        "les pseudos, les sous-titres automatiques.\n"
-        "ANTI-DOUBLON (règle absolue) : un même texte vu sur plusieurs images = UNE "
-        "SEULE caption (étends start/end). Un texte affiché en double sur la même "
-        "image (ombre, contour, dédoublement d'un effet) = UNE seule caption. Ta "
-        "liste ne doit JAMAIS contenir deux captions au texte identique ou "
-        "quasi-identique.\n"
-        "Pour chaque caption :\n"
-        "  - text : le texte exact, avec ses sauts de ligne\n"
-        "  - x, y : le CENTRE du bloc de texte, en fraction de l'image "
-        "(x=0 bord gauche, x=1 bord droit, y=0 tout en haut, y=1 tout en bas)\n"
-        "  - block_w : largeur du bloc de texte (sa ligne la plus large, fond compris) "
-        "divisée par la largeur de l'image — mesure soigneusement, c'est ce qui fixe "
-        "la taille du texte reproduit\n"
-        "  - block_h : hauteur totale du bloc (de la 1re à la dernière ligne) divisée "
-        "par la hauteur de l'image\n"
-        "  - line_height : hauteur d'UNE LETTRE MAJUSCULE divisée par la hauteur totale "
-        "de l'image (souvent entre 0.02 et 0.05)\n"
-        "  - start, end : secondes d'apparition et de disparition, d'après les instants "
-        "des images que je te donne\n"
-        "  - box : true s'il y a un rectangle / une bulle de couleur derrière le texte\n"
-        "  - color : couleur du texte en hexadécimal (ex. #ffffff)\n"
-        "  - box_color : couleur du fond si box vaut true, sinon #000000\n"
-        "  - align : left, center ou right\n"
-        "  - upper : true si le texte est écrit tout en MAJUSCULES\n"
-        "S'il n'y a aucun texte incrusté, renvoie une liste captions vide."
-    )
-
-
-def _claude_montage_analyze(frames, duration: float, cuts, key: str):
-    """Envoie les images à Claude et récupère la coupe + les captions.
-    Renvoie (données, message_d_erreur)."""
-    import base64
-    import requests
-    content = []
-    for t, fp in frames:
-        try:
-            data = base64.b64encode(fp.read_bytes()).decode()
-        except Exception:
-            continue
-        content.append({"type": "text", "text": f"Image prise à {t:.2f} s :"})
-        content.append({"type": "image", "source": {
-            "type": "base64", "media_type": "image/jpeg", "data": data}})
-    if not content:
-        return None, "impossible d'extraire les images de la vidéo"
-    content.append({"type": "text", "text": _montage_prompt(duration, cuts)})
-
-    base = {"model": "claude-opus-5", "max_tokens": 8000,
-            "messages": [{"role": "user", "content": content}]}
-    hdr = {"x-api-key": key, "anthropic-version": "2023-06-01",
-           "content-type": "application/json"}
-    fmt = {"type": "json_schema", "schema": _MONTAGE_SCHEMA}
-
-    # Trois tentatives, de la plus riche à la plus simple : si le compte n'a pas
-    # une des options récentes, on retombe sur un appel basique au lieu d'échouer.
-    attempts = [
-        (dict(base, output_config={"effort": "medium", "format": fmt},
-              fallbacks="default"),
-         dict(hdr, **{"anthropic-beta": "server-side-fallback-2026-07-01"})),
-        (dict(base, output_config={"effort": "medium", "format": fmt}), dict(hdr)),
-        (dict(base), dict(hdr)),
-    ]
-
-    data, last_err = None, ""
-    for i, (body, headers) in enumerate(attempts):
-        if i == len(attempts) - 1:
-            # Dernier recours : plus de schéma imposé -> on le demande en toutes lettres.
-            body["messages"][0]["content"][-1] = {
-                "type": "text",
-                "text": content[-1]["text"] + "\n\nRéponds UNIQUEMENT avec un objet "
-                        "JSON valide {\"cut_at\":…, \"cut_reason\":…, \"captions\":[…]}, "
-                        "sans aucun texte autour.",
-            }
-        rr = None
-        # Surcharge passagère (529/429/5xx) : deux reprises espacées AVANT
-        # d'abandonner — un 529 dure souvent quelques secondes à peine.
-        for wait in (0, 6, 15):
-            if wait:
-                time.sleep(wait)
-            try:
-                rr = requests.post("https://api.anthropic.com/v1/messages",
-                                   headers=headers, json=body, timeout=180)
-            except Exception as e:
-                return None, f"appel à Claude impossible : {e}"[:220]
-            if rr.status_code not in (429, 500, 502, 503, 504, 529):
-                break
-        if rr.status_code == 200:
-            data = rr.json()
-            break
-        try:
-            last_err = ((rr.json().get("error") or {}).get("message") or "")
-        except Exception:
-            last_err = ""
-        # 4xx = la requête déplaît -> on retente en plus simple. 5xx / 429 = côté
-        # serveur, réessayer en plus simple n'y changerait rien.
-        # Un credit epuise ne se repare pas en reessayant « en plus simple » :
-        # chaque tentative repart pour un appel qui echouera pareil. On sort
-        # tout de suite, et on le dit en clair — le message d Anthropic est
-        # en anglais et noye au milieu du reste.
-        if 400 <= rr.status_code < 500 and (
-                "credit balance" in last_err.lower()
-                or "insufficient" in last_err.lower()):
-            return None, ("Credit Anthropic epuise : recharge le compte sur "
-                          "console.anthropic.com (Billing), puis relance "
-                          "l analyse.")
-        if rr.status_code in (429, 503, 529):
-            return None, ("Claude est surchargé en ce moment "
-                          f"({rr.status_code}) — attends 1 min et re-clique")
-        if not (400 <= rr.status_code < 500):
-            return None, f"Claude indisponible ({rr.status_code}) {last_err}"[:220]
-        last_err = f"({rr.status_code}) {last_err}"
-    if data is None:
-        return None, f"Claude a refusé la requête {last_err}"[:220]
-
-    if data.get("stop_reason") == "refusal":
-        return None, "Claude a refusé d'analyser cette vidéo"
-    text = "".join(b.get("text", "") for b in (data.get("content") or [])
-                   if b.get("type") == "text").strip()
-    if not text:
-        if data.get("stop_reason") == "max_tokens":
-            return None, "réponse coupée par la limite de tokens — réessaie"
-        return None, "réponse vide de Claude"
-    try:
-        return json.loads(text), ""
-    except Exception:
-        pass
-    # Sans schéma imposé, Claude peut entourer le JSON de texte ou de ```json.
-    m = re.search(r"\{.*\}", text, re.S)
-    if m:
-        try:
-            return json.loads(m.group(0)), ""
-        except Exception:
-            pass
-    return None, "réponse de Claude illisible"
-
-
-def _montage_to_editor(raw: dict, duration: float, cuts):
-    """Traduit la réponse de Claude vers ce que l'éditeur attend :
-    captions {text,x,y,start,end} + style global + point de coupe."""
-    if not isinstance(raw, dict):      # Claude a répondu autre chose qu'un objet
-        raw = {}
-
-    def _num(v, lo, hi, default):
-        try:
-            f = float(v)
-        except (TypeError, ValueError):
-            return default
-        if f != f:                      # NaN
-            return default
-        return max(lo, min(hi, f))
-
-    def _hex(v, default):
-        v = str(v or "").strip()
-        return v if re.fullmatch(r"#[0-9a-fA-F]{6}", v) else default
-
-    cut = _num(raw.get("cut_at"), 0.0, max(0.0, duration - 0.05), 0.0)
-    # Claude choisit PARMI les coupes détectées : on ré-aligne sur la plus proche
-    # (à 0.25 s près) pour tomber au frame exact plutôt qu'à côté.
-    if cut > 0.02 and cuts:
-        near = min(cuts, key=lambda c: abs(c[0] - cut))
-        if abs(near[0] - cut) <= 0.25:
-            cut = near[0]
-
-    caps, style = [], None
-    for c in (raw.get("captions") or [])[:12]:
-        if not isinstance(c, dict):
-            continue
-        # Seul champ libre de la réponse : on le borne comme les autres (une
-        # caption incrustée qui dépasse 400 caractères n'existe pas).
-        text = str(c.get("text") or "").strip()[:400]
-        if not text:
-            continue
-        # Clé de comparaison sans accents ni ponctuation : le même texte relevé
-        # sur deux images ne compte qu'une fois même si Claude l'orthographie
-        # légèrement différemment ("ca" vs "ça"). Les retours à la ligne ne
-        # comptent pas non plus : « ligne1\nligne2 » = « ligne1 ligne2 ».
-        import unicodedata
-        norm = unicodedata.normalize("NFKD", text.lower())
-        norm = re.sub(r"[^a-z0-9]+", " ", "".join(
-            ch for ch in norm if not unicodedata.combining(ch))).strip()
-        # Emojis / ponctuation seule -> la clé serait vide : on retombe sur le
-        # texte brut, sinon ces captions ne seraient jamais dédupliquées.
-        kname = norm or text.lower().strip()
-        start = _num(c.get("start"), 0.0, duration, 0.0)
-        end = _num(c.get("end"), 0.0, duration, duration)
-        if end <= start:
-            end = duration
-        # Même texte avec une fenêtre qui CHEVAUCHE une caption déjà retenue ->
-        # doublon (le même texte relu sur une autre image, ou renvoyé deux fois
-        # avec des instants légèrement différents) : on fusionne les fenêtres au
-        # lieu d'empiler deux textes superposés sur la vidéo. Deux fenêtres
-        # disjointes restent deux captions (le texte revient plus tard).
-        dup = False
-        for prev in caps:
-            if prev.get("_k") != kname:
-                continue
-            ps = 0.0 if prev["start"] is None else prev["start"]
-            pe = duration if prev["end"] is None else prev["end"]
-            if start <= pe + 0.25 and end >= ps - 0.25:
-                ns, ne = min(ps, start), max(pe, end)
-                if ns <= 0.15 and ne >= duration - 0.15:
-                    prev["start"] = prev["end"] = None
-                else:
-                    prev["start"], prev["end"] = round(ns, 2), round(ne, 2)
-                # on garde le texte le plus riche (celui qui a des sauts de ligne)
-                if "\n" in text and "\n" not in prev["text"]:
-                    prev["text"] = text
-                dup = True
-                break
-        if dup:
-            continue
-        entry = {
-            "text": text,
-            "_k": kname,
-            "x": round(_num(c.get("x"), 0.03, 0.97, 0.5), 4),
-            "y": round(_num(c.get("y"), 0.03, 0.90, 0.61), 4),
-        }
-        # Texte déjà découpé en lignes par l'analyse -> on écarte la largeur de
-        # wrap au maximum pour que le moteur ne re-coupe pas les lignes ailleurs.
-        if "\n" in text:
-            entry["wrapW"] = 0.97
-        # Visible quasiment tout du long -> caption « permanente » dans l'éditeur.
-        if start <= 0.15 and end >= duration - 0.15:
-            entry["start"] = None
-            entry["end"] = None
-        else:
-            entry["start"] = round(start, 2)
-            entry["end"] = round(end, 2)
-        caps.append(entry)
-        if style is None:
-            # Estimation de secours par la hauteur d'une majuscule (~0.72 × la
-            # taille de police sur un cadre de 1920 px). Peu fiable : le modèle
-            # surestime — c'est le calibrage par la LARGEUR du bloc (rendu réel
-            # dans _analyze_montage_template) qui fixe la taille quand il peut.
-            lh = _num(c.get("line_height"), 0.012, 0.20, 0.0)
-            size = int(round(lh * 1920 / 0.72)) if lh else 44
-            box = bool(c.get("box"))
-            style = {
-                "_bw": round(_num(c.get("block_w"), 0.0, 1.0, 0.0), 4),
-                "_bh": round(_num(c.get("block_h"), 0.0, 0.95, 0.0), 4),
-                "size": max(16, min(120, size)),
-                "color": _hex(c.get("color"), "#ffffff"),
-                "box": box,
-                "boxColor": _hex(c.get("box_color"), "#000000"),
-                "align": c.get("align") if c.get("align") in ("left", "center", "right") else "center",
-                "case": "upper" if c.get("upper") else "none",
-            }
-    for e in caps:                      # clé interne de dédoublonnage
-        e.pop("_k", None)
-    return {
-        "cut_at": round(cut, 3),
-        "cut_reason": str(raw.get("cut_reason") or "")[:200],
-        "captions": caps,
-        "style": style,
-        "scenes": [t for t, _s in cuts],
-    }
 
 
 def _caption_size_for_width(text: str, target_w_px: float,
@@ -47509,53 +47840,102 @@ def _montage_gen_liberer(model_id: str) -> None:
         _MONTAGE_GEN_RESERVE.pop(model_id, None)
 
 
-def _analyze_montage_template(src: Path):
-    """Analyse complète d'un template : (résultat, erreur)."""
-    key = _anthropic_key()
-    if not key:
-        return None, ("Clé IA manquante : ajoute ANTHROPIC_API_KEY=sk-ant-… dans "
-                      "Réglages → Clé IA (console.anthropic.com)")
-    duration, _w, h = _probe_video(src)
+def _analyse_template_gratuite(src: Path):
+    """Analyse d'un template, GRATUITE : (résultat, erreur).
+
+    Même forme de résultat que l'ancienne analyse (cut_at, captions, style,
+    scenes, duration) : l'éditeur, /a-relire et la page de validation la
+    lisent sans changement. En plus : « verifier » {priorite, raisons}.
+
+    La caption n'est posée QUE sur la partie 1 ([0, coupure]) : la partie 2
+    est gardée telle quelle, elle porte déjà son propre texte. Recopier ce
+    texte dans le brouillon le faisait apparaître EN DOUBLE (deux brouillons
+    d'alicia touchés, mesuré le 25/09/2026).
+    """
+    import tempfile
+    import analyse_gratuite as _ag
+    duration, _w, _h = _probe_video(src)
     if duration <= 0:
         return None, "vidéo illisible (ffmpeg/ffprobe absent ou fichier abîmé ?)"
     cuts = _scene_cuts(src)
-    # Instants regardés : 7 images réparties sur toute la vidéo + juste après
-    # chaque changement de plan (c'est là que la caption apparaît).
-    times = [round(duration * (i + 0.5) / 7, 2) for i in range(7)]
-    for t, _s in cuts[:4]:
-        times.append(round(min(duration - 0.05, t + 0.35), 2))
-    times = sorted({t for t in times if 0 <= t < duration})[:10]
-    height = min(1280, h) if h else 1280
-    import tempfile
-    with tempfile.TemporaryDirectory(prefix="nxmanalyze_") as tmp:
-        frames = _grab_frames(src, times, Path(tmp), height=height)
-        if not frames:
-            return None, "impossible d'extraire des images de la vidéo"
-        raw, err = _claude_montage_analyze(frames, duration, cuts, key)
-    if err:
-        return None, err
-    out = _montage_to_editor(raw, duration, cuts)
-    # TAILLE DU TEXTE : on la cale sur la LARGEUR du bloc mesurée sur la vidéo,
-    # en faisant rendre le texte par le vrai moteur — l'estimation à l'œil de
-    # la hauteur d'une lettre donnait des captions beaucoup trop grosses.
-    st, caps_out = out.get("style"), out.get("captions") or []
-    if isinstance(st, dict):
-        bw = st.pop("_bw", 0) or 0
-        bh = st.pop("_bh", 0) or 0
-        if caps_out:
-            txt = caps_out[0]["text"]
-            nlines = txt.count("\n") + 1
-            size = None
-            if bw > 0.04:
-                size = _caption_size_for_width(
-                    txt, bw * 1080, wrap_w=caps_out[0].get("wrapW", 0.88))
-            if size is None and bh > 0.01:
-                # secours : hauteur totale du bloc / nb de lignes (interligne 1.45)
-                size = int(round(bh * 1920 / ((nlines - 1) * 1.45 + 1.05)))
+    cut, raison, cands = _ag.choisir_coupe(cuts, duration)
+    # L'image lue : au milieu de l'accroche, AVANT la fin — le texte part
+    # souvent 0,3 à 0,45 s avant le changement de plan.
+    t_img = max(0.3, min(cut - 0.45, cut * 0.55)) if cut > 0.9 else cut / 2
+    texte, lecture, x, y, box, polarite = "", "", 0.5, 0.61, None, ""
+    with tempfile.TemporaryDirectory(prefix="tplgr_") as tmp:
+        frames = _grab_frames(src, [t_img], Path(tmp), height=1280)
+        if frames:
+            img = frames[0][1]
+            ocr = _ag.transcrire_tesseract(img)
+            brut, err_g = _ag.gemini_texte(img.read_bytes(), _ag.CONSIGNE_TEMPLATE)
+            d = _ag._json_souple(brut) if brut else {}
+            if str(d.get("texte") or "").strip():
+                texte, lecture = str(d["texte"]).strip()[:400], "Gemini"
+                try:
+                    x = min(0.97, max(0.03, float(d.get("x"))))
+                    y = min(0.90, max(0.03, float(d.get("y"))))
+                except (TypeError, ValueError):
+                    pass
+            elif err_g and ocr.get("texte"):
+                # Tesseract seulement si Gemini n'a PAS repondu. Quand Gemini
+                # dit « pas de caption », il a vu l'image : Tesseract, lui,
+                # lirait une enseigne ou un t-shirt et en ferait une caption.
+                texte, lecture = ocr["texte"][:400], "Tesseract"
+            # La position MESURÉE par l'OCR passe avant l'estimation de
+            # Gemini — calculée sur les SEULES lignes qui portent des mots de
+            # la caption, pas sur tout ce que Tesseract a lu (décor compris).
+            if texte and ocr.get("lignes"):
+                mots_cap = {m.lower() for m in re.findall(r"\w{3,}", texte)}
+                siennes = [l for l in ocr["lignes"]
+                           if lecture == "Tesseract"
+                           or mots_cap & {m.lower() for m in re.findall(r"\w{3,}", l["texte"])}]
+                if siennes:
+                    x0 = min(l["box"][0] for l in siennes); y0 = min(l["box"][1] for l in siennes)
+                    x1 = max(l["box"][0] + l["box"][2] for l in siennes)
+                    y1 = max(l["box"][1] + l["box"][3] for l in siennes)
+                    box, polarite = (x0, y0, x1 - x0, y1 - y0), ocr.get("polarite") or ""
+                    x = round(x0 + (x1 - x0) / 2, 4)
+                    y = round(y0 + (y1 - y0) / 2, 4)
+    if not texte:
+        # Caption saisie à l'envoi (<stem>.txt) : mieux que rien.
+        try:
+            t = src.with_suffix(".txt").read_text(encoding="utf-8").strip()
+        except OSError:
+            t = ""
+        if t:
+            texte, lecture = t[:400], "caption saisie à l'envoi"
+    style = {"size": 44, "color": "#ffffff", "box": False, "boxColor": "#000000",
+             "align": "center", "case": "none"}
+    if polarite == "sombre":
+        style.update(color="#000000", box=True, boxColor="#ffffff")
+    caps = []
+    if texte:
+        c = {"text": texte, "x": round(x, 4), "y": round(y, 4),
+             "start": 0.0, "end": round(cut, 3)}
+        if "\n" in texte:
+            c["wrapW"] = 0.97
+        caps.append(c)
+        if box and box[2] > 0.04:
+            size = _caption_size_for_width(texte, box[2] * 1080,
+                                           wrap_w=c.get("wrapW", 0.88))
             if size:
-                st["size"] = max(16, min(120, size))
-    out["duration"] = round(duration, 3)
-    return out, ""
+                style["size"] = max(16, min(120, size))
+    vis = _ag.visages(src, min(duration, cut + 4))
+    prio, raisons = _ag.raisons_de_verifier(cut, cands, duration, vis, bool(texte),
+                                            scenes=cuts)
+    return {"cut_at": cut, "cut_reason": raison, "captions": caps, "style": style,
+            "scenes": [t for t, _s in cuts], "duration": round(duration, 3),
+            "lecture": lecture,
+            "_source": "analyse gratuite (plans ffmpeg"
+                       + (f" + {lecture}" if lecture else "") + ")",
+            "verifier": {"priorite": prio, "raisons": raisons}}, ""
+
+
+def _analyze_montage_template(src: Path):
+    """Le bouton « 🪄 Analyser » et la file d'arrière-plan passent tous deux
+    ici : une seule analyse, gratuite."""
+    return _analyse_template_gratuite(src)
 
 
 def _render_gemini_settings() -> str:
@@ -52673,7 +53053,14 @@ def create_app():
         Chacun apporte SA piste son — c'est elle qui sera gardée à l'assemblage."""
         if not is_auth():
             return redirect("/")
-        return _save_many_videos("video", _vault_subdir("templates"))
+        rep = _save_many_videos("video", _vault_subdir("templates"))
+        # L'analyse part en arrière-plan : l'éditeur ne s'ouvre plus tout
+        # seul (demande du propriétaire), la carte porte « À VÉRIFIER ».
+        try:
+            _planifier_templates()
+        except Exception as e:
+            log.warning(f"file d'analyse des templates : {e}")
+        return rep
 
     @app.route("/upload/post", methods=["POST"])
     def upload_post():
@@ -53578,6 +53965,9 @@ def create_app():
             safe_json.write(p, draft, indent=None)
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
+        # Enregistrer (ou « Dispo VA ») VALIDE la proposition : on garde
+        # l'ecart avec la coupure proposee, pour mesurer l'analyse.
+        _noter_validation(src, draft.get("cut_at") or 0)
         return jsonify({"ok": True})
 
     @app.route("/noctus/montage_analyze", methods=["POST"])
@@ -53830,7 +54220,15 @@ def create_app():
                     _sugg = _js0.loads(_ap.read_text(encoding="utf-8"))
             except Exception:
                 _sugg = None
-            return jsonify({"ok": True, "draft": None, "desc": dsc,
+            # Proposition valide (analyse gratuite, pas en echec) : servie
+            # COMME un brouillon, marque « propose ». L'editeur la charge par
+            # le chemin normal ; rien n'est ecrit tant qu'on n'enregistre pas.
+            # (Modifier nxMLoadDraft faisait tomber le patch « template
+            # studio » du VPS, qui en retouche les premieres lignes.)
+            _draft = None
+            if isinstance(_sugg, dict) and _sugg.get("verifier") and not _sugg.get("erreur"):
+                _draft = dict(_brouillon_depuis_analyse(_sugg), propose=True)
+            return jsonify({"ok": True, "draft": _draft, "desc": dsc,
                             "analyse": _sugg})
         import json as _js
         try:
@@ -54699,6 +55097,9 @@ def create_app():
             safe_json.write(p, draft, indent=None)
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)})
+        # Enregistrer (ou « Dispo VA ») VALIDE la proposition : on garde
+        # l'ecart avec la coupure proposee, pour mesurer l'analyse.
+        _noter_validation(src, draft.get("cut_at") or 0)
         return jsonify({"ok": True})
 
     @app.route("/noctus/montage_unapprove", methods=["POST"])
@@ -55281,8 +55682,9 @@ def create_app():
         ident = (request.args.get("identity") or "").strip().lower()
         if ident not in _list_identities():
             return jsonify({"ok": False, "error": "identité inconnue"})
-        return jsonify({"ok": True, "identity": ident,
-                        "block": _clean_caption_block(_load_captions_lib().get(ident))})
+        _blk = _clean_caption_block(_load_captions_lib().get(ident))
+        return jsonify({"ok": True, "identity": ident, "block": _blk,
+                        "rev": _caption_rev(_blk)})
 
     @app.route("/captions/save", methods=["POST"])
     def captions_save():
@@ -55302,16 +55704,101 @@ def create_app():
         # maintenant, et le dit.
         _ec = {}
         block = _clean_caption_block(raw, _ec)
-        lib = _load_captions_lib()
-        lib[ident] = block
-        if not _save_captions_lib(lib):
-            return jsonify({"ok": False, "error": "écriture impossible"})
+        rev_client = (request.form.get("rev") or "").strip()
+        with _CAPTIONS_LOCK:
+            lib = _load_captions_lib()
+            actuel = _clean_caption_block(lib.get(ident))
+            # L'onglet enregistre le bloc ENTIER : s'il a été chargé avant un
+            # ajout en masse (ou une autre fenêtre), il effacerait ce qui a
+            # été ajouté entre-temps. On refuse et on lui rend la version
+            # à jour. Sans « rev » (page ouverte avant ce contrôle) : accepté.
+            if rev_client and rev_client != _caption_rev(actuel):
+                return jsonify({"ok": False, "conflit": True, "block": actuel,
+                                "rev": _caption_rev(actuel),
+                                "error": "la bibliothèque a changé ailleurs"}), 409
+            lib[ident] = block
+            if not _save_captions_lib(lib):
+                return jsonify({"ok": False, "error": "écriture impossible"})
         # Route AJAX : pas de _success() -> on invalide les caches ttl à la main
         # (compteurs de la sidebar vault, page pleine éventuellement cachée).
         _invalidate_all_ttl_cache()
         return jsonify({"ok": True, "count": len(block["items"]),
                         "refuses": int(_ec.get("plein") or 0),
-                        "max": CAPTIONS_MAX})
+                        "max": CAPTIONS_MAX, "rev": _caption_rev(block)})
+
+    @app.route("/captions/ocr", methods=["POST"])
+    def captions_ocr():
+        """Lit le texte incrusté d'UNE capture d'écran (gratuit : Gemini, puis
+        Tesseract). N'écrit RIEN : l'écran de relecture décide."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        f = request.files.get("image")
+        if not f or not f.filename:
+            return jsonify({"ok": False, "error": "aucune image"})
+        ext = os.path.splitext(f.filename)[1].lower()
+        if ext not in (".png", ".jpg", ".jpeg", ".webp"):
+            return jsonify({"ok": False, "error": f"format {ext or '?'} non lu (png, jpg, webp)"})
+        import tempfile as _tf
+        import analyse_gratuite as _ag
+        with _tf.TemporaryDirectory(prefix="capocr_") as tmp:
+            chemin = Path(tmp) / ("capture" + ext)
+            f.save(str(chemin))
+            if chemin.stat().st_size > 15 * 1024 * 1024:
+                return jsonify({"ok": False, "error": "image trop lourde (15 Mo max)"})
+            r = _ag.lire_capture(chemin)
+        return jsonify({"ok": True, "texte": r.get("texte") or "",
+                        "source": r.get("source") or "", "note": r.get("note") or "",
+                        "ecartees": r.get("ecartees") or [], "erreur": r.get("erreur") or "",
+                        "conf": r.get("conf")})
+
+    @app.route("/captions/cibles", methods=["GET"])
+    def captions_cibles():
+        """Les identités qui recevraient un ajout en masse, pour un marché."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        marche = (request.args.get("marche") or "").strip().lower()
+        if marche not in ("fr", "us"):
+            return jsonify({"ok": False, "error": "marché inconnu (fr ou us)"})
+        return jsonify({"ok": True, "marche": marche, **_identites_cibles_captions(marche)})
+
+    @app.route("/captions/ajout_masse", methods=["POST"])
+    def captions_ajout_masse():
+        """Ajoute des textes (relus) à TOUTES les identités d'un marché — pas
+        aux modèles. Les cibles sont recalculées ici : on ne fait pas
+        confiance à une liste envoyée par le navigateur."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        marche = (request.form.get("marche") or "").strip().lower()
+        if marche not in ("fr", "us"):
+            return jsonify({"ok": False, "error": "marché inconnu (fr ou us)"})
+        try:
+            textes = json.loads(request.form.get("textes") or "[]")
+        except Exception:
+            return jsonify({"ok": False, "error": "liste de textes illisible"})
+        textes = [str(t).strip() for t in (textes if isinstance(textes, list) else [])
+                  if str(t).strip()]
+        # Au-delà, on refuse le surplus EN LE DISANT (il était coupé en silence).
+        LIMITE_MASSE = 500
+        ecartes_limite = max(0, len(textes) - LIMITE_MASSE)
+        textes = textes[:LIMITE_MASSE]
+        if not textes:
+            return jsonify({"ok": False, "error": "aucun texte à ajouter"})
+        cibles = _identites_cibles_captions(marche)
+        if not cibles["identites"]:
+            return jsonify({"ok": False, "error": f"aucune identité de type « identité » "
+                            f"sur le marché {marche.upper()}", **cibles})
+        with _CAPTIONS_LOCK:
+            lib = _load_captions_lib()
+            resultats = [_ajouter_captions_a(lib, c, textes) for c in cibles["identites"]]
+            if any(r["ajoutees"] for r in resultats) and not _save_captions_lib(lib):
+                return jsonify({"ok": False, "error": "écriture impossible"})
+        _invalidate_all_ttl_cache()
+        return jsonify({"ok": True, "marche": marche, "resultats": resultats,
+                        "non_triees": cibles["non_triees"], "max": CAPTIONS_MAX,
+                        "ecartes_limite": ecartes_limite, "limite": LIMITE_MASSE})
 
     @app.route("/captions/apply", methods=["POST"])
     def captions_apply():
@@ -55337,6 +55824,15 @@ def create_app():
         targets = [t for t in targets if t in idents and t != src]
         if not targets:
             return jsonify({"ok": False, "error": "aucune model cible valide"})
+        _CAPTIONS_LOCK.acquire()
+        try:
+            return _captions_apply_verrouille(src, ids, targets)
+        finally:
+            _CAPTIONS_LOCK.release()
+
+    def _captions_apply_verrouille(src, ids, targets):
+        from flask import jsonify
+        import time as _t
         lib = _load_captions_lib()
         sblock = _clean_caption_block(lib.get(src))
         items = sblock["items"]
@@ -55346,10 +55842,7 @@ def create_app():
         if not items:
             return jsonify({"ok": False, "error": "aucune caption à partager"})
 
-        def _tnorm(s):
-            s = _ud.normalize("NFKC", str(s or "")).lower()
-            s = re.sub(r"[^a-z0-9à-ɏ\s]", " ", s)
-            return re.sub(r"\s+", " ", s).strip()
+        _tnorm = _caption_cle    # une seule définition du doublon
 
         # DEUX refus, DEUX compteurs. « Déjà là » et « plus de place » n'ont
         # ni la même cause ni le même remède : tout mettre dans `skipped`
@@ -56382,7 +56875,35 @@ def create_app():
             return jsonify({"ok": False}), 401
         etat = analyses_etat()
         etat["a_relire"] = len(_a_relire_liste())
+        etat["a_verifier"] = len(_montages_a_verifier())
         return jsonify({"ok": True, **etat})
+
+    @app.route("/a-relire/valider_montage", methods=["POST"])
+    def a_relire_valider_montage():
+        """« Valider tel quel » : la proposition devient le brouillon, le
+        template passe en service. Rien d'automatique : c'est ce clic."""
+        if not is_auth():
+            return redirect("/")
+        ident = (request.form.get("identity") or "").strip().lower()
+        nom = (request.form.get("fichier") or "").strip()
+        if (ident not in _list_identities() or not nom or "/" in nom
+                or "\\" in nom or nom in (".", "..")):
+            return redirect("/a-relire")
+        video = IDENTITIES_DIR / ident / "templates" / nom
+        ap, mp = video.with_suffix(".analyse.json"), video.with_suffix(".montage.json")
+        if not video.is_file() or not ap.exists() or mp.exists():
+            return redirect("/a-relire")
+        try:
+            a = json.loads(ap.read_text(encoding="utf-8"))
+        except Exception:
+            return redirect("/a-relire")
+        if a.get("erreur"):
+            return redirect("/a-relire")     # rien a valider : ouvrir l'editeur
+        if safe_json.write(mp, _brouillon_depuis_analyse(a), indent=None):
+            _noter_validation(video, a.get("cut_at") or 0, tel_quel=True)
+        _invalidate_all_ttl_cache()
+        return redirect("/a-relire")
+
 
     @app.route("/a-relire")
     def page_a_relire():
@@ -56395,10 +56916,8 @@ def create_app():
         # cette liste — autant le dire ici plutot que de laisser chercher.
         import shutil as _sh
         _souci = []
-        if not _anthropic_key():
-            _souci.append("<b>Cle IA absente</b> — aucune analyse de montage "
-                          "n'est lancee. Ajoute ANTHROPIC_API_KEY dans "
-                          "Reglages &rarr; Cle IA.")
+        # (Plus de « cle IA absente » : l'analyse des templates est gratuite
+        # depuis le 25/09/2026, elle ne demande plus aucune cle.)
         if not _sh.which("ffmpeg") or not _sh.which("ffprobe"):
             _souci.append("<b>ffmpeg introuvable</b> sur le serveur — l'analyse "
                           "ne peut pas extraire d'images.")
@@ -56475,9 +56994,70 @@ def create_app():
             corps = (_diag + "<p style='color:#666'>%d description(s) reprises "
                      "d'un post, en attente de ta relecture. Corrige si besoin, "
                      "puis valide.</p>" % len(lst)) + "".join(cartes) + _rappel
+        # --- Templates analyses en arriere-plan, hors service jusqu'a
+        # validation. Priorite haute d'abord : c'est la que l'analyse doute.
+        mv = _montages_a_verifier()
+        bloc_mv = ""
+        if mv:
+            lignes_mv = []
+            for r in mv:
+                ident_q = html_escape(r["identity"], quote=True)
+                nom_q = html_escape(r["fichier"], quote=True)
+                from urllib.parse import quote as _q_mv
+                lien = ("/?tab=cloudtemplates&cloud_templates_ident=" + _q_mv(r["identity"])
+                        + "&openmontage=" + _q_mv(r["fichier"]))
+                haute = r["priorite"] == "haute"
+                pastille = ("<span style='background:%s;color:%s;font-size:11px;font-weight:800;"
+                            "padding:2px 8px;border-radius:99px'>%s</span>"
+                            % (("#dc2626", "#fff", "PRIORITÉ") if haute else
+                               ("#f59e0b", "#2a1c00", "à vérifier")))
+                raisons = "".join("<li>%s</li>" % html_escape(x) for x in r["raisons"])
+                caps = "".join("<div>&laquo; %s &raquo;</div>" % html_escape(c[:200])
+                               for c in r["captions"][:2])
+                coupe = ("coupure proposée à <b>%.2f s</b>" % r["coupe"]
+                         + (" sur %.1f s" % r["duree"] if r.get("duree") else "")
+                         if r.get("coupe") else "")
+                valider = ("" if r["erreur"] else
+                           "<form method='POST' action='/a-relire/valider_montage' style='margin:0'>"
+                           f"<input type='hidden' name='identity' value='{ident_q}'>"
+                           f"<input type='hidden' name='fichier' value='{nom_q}'>"
+                           "<button style='padding:8px 14px;background:#16a34a;border:0;color:#fff;"
+                           "border-radius:9px;font:inherit;font-weight:600;cursor:pointer'>"
+                           "Valider tel quel</button></form>")
+                lignes_mv.append(
+                    "<div style='border:1px solid %s;border-radius:12px;padding:12px 14px;"
+                    "margin-bottom:12px;background:%s;display:flex;gap:14px'>"
+                    % (("#fecaca", "#fef2f2") if haute else ("#fde68a", "#fffbeb"))
+                    + "<video src='/cloud/file/%s/templates/%s' preload='none' controls muted "
+                      "style='width:120px;height:213px;object-fit:cover;border-radius:8px;"
+                      "background:#000;flex-shrink:0'></video>"
+                      % (_q_mv(r["identity"]), _q_mv(r["fichier"]))
+                    + "<div style='flex:1;min-width:0'>"
+                    f"<div style='font-size:12px;color:#666;margin-bottom:6px'>{pastille} "
+                    f"@{html_escape(r['identity'])} &middot; {html_escape(r['fichier'])}</div>"
+                    + (f"<div style='color:#b91c1c'>Analyse impossible : {html_escape(r['erreur'])}</div>"
+                       if r["erreur"] else "")
+                    + (f"<div style='font-size:13px'>{coupe}</div>" if coupe else "")
+                    + (f"<div style='font-size:13px;margin-top:4px'><b>Caption lue</b>"
+                       f"{' (' + html_escape(r['lecture']) + ')' if r['lecture'] else ''}{caps}</div>"
+                       if caps else "")
+                    + (f"<ul style='margin:6px 0 0;padding-left:18px;font-size:12.5px;color:#374151'>{raisons}</ul>"
+                       if raisons else "")
+                    + "<div style='margin-top:9px;display:flex;gap:8px;flex-wrap:wrap'>"
+                    f"<a href='{html_escape(lien, quote=True)}' style='padding:8px 14px;background:#2563eb;"
+                    "color:#fff;border-radius:9px;text-decoration:none;font-weight:600'>"
+                    "Vérifier dans l'éditeur</a>" + valider + "</div></div></div>")
+            bloc_mv = ("<h2 style='margin:0 0 6px'>Templates à vérifier</h2>"
+                       "<p style='color:#666;font-size:13px;margin:0 0 12px'>Analysés "
+                       "automatiquement (gratuit) et <b>hors service</b> tant que tu ne "
+                       "les as pas validés. Partie 1 : la caption est gardée, la brute "
+                       "prend la place du plan. Partie 2 : gardée telle quelle.</p>"
+                       + "".join(lignes_mv)
+                       + "<div style='height:1px;background:#e5e7eb;margin:18px 0'></div>")
         return ("<div style=\"font:14px/1.55 -apple-system,system-ui,sans-serif;"
                 "padding:26px;max-width:720px;margin:30px auto;background:#fff;"
                 "color:#1c1c1e;border:1px solid #e5e7eb;border-radius:14px\">"
+                + bloc_mv +
                 "<h2 style='margin:0 0 10px'>Descriptions a relire</h2>"
                 + corps +
                 "<p style='margin-top:16px'><a href='/?tab=cloudtemplates'>"
@@ -67681,6 +68261,12 @@ def start_in_thread():
         _gd_w.start_watcher()
     except Exception as e:
         print(f"[start_in_thread] veille Drive non demarree: {e}", flush=True)
+    # Templates sans analyse (arrivés par Drive, copie, lien…) : la file
+    # gratuite les reprend au démarrage puis toutes les 5 minutes.
+    try:
+        _planifier_templates()
+    except Exception as e:
+        print(f"[start_in_thread] file d'analyse des templates : {e}", flush=True)
     # Profils TikTok branchés sur des dossiers du vault : relus toutes les
     # deux semaines, et tout de suite après leur branchement.
     try:
