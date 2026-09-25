@@ -14832,6 +14832,27 @@ try:
               (_vsS.lire("lea").get("bilan") or {}).get("examinees") == len(_profilS))
         _vsS._lister_tiktok = lambda url: [dict(e) for e in _profilS]
         _vsS._telecharger_tiktok = _dlS
+        # TikTok refuse la liste depuis le serveur : Apify prend le relais,
+        # et le bandeau dit par quelle source la liste est venue.
+        def _yt_refuse(url):
+            raise RuntimeError("Unable to extract secondary user ID")
+        _vsS._lister_tiktok = _yt_refuse
+        _sav_ap = _vsS._lister_tiktok_apify
+        _vsS._lister_tiktok_apify = lambda u: (
+            [dict(e) for e in _profilS] + [{"id": "50", "view_count": 90_000, "photo": True}])
+        try:
+            _b6 = _vsS.synchroniser("lea", _dS)["bilan"]
+            check("yt-dlp refuse : la liste vient d'Apify",
+                  _b6.get("source") == "Apify" and _b6["examinees"] == len(_profilS) + 1, str(_b6))
+            check("Apify : un diaporama est compte comme publication photo",
+                  "50" in (_vsS.lire("lea").get("photos") or []))
+            _vsS._lister_tiktok_apify = lambda u: (_ for _ in ()).throw(RuntimeError("HTTP 402"))
+            _r7 = _vsS.synchroniser("lea", _dS)
+            check("yt-dlp ET Apify refuses : l'erreur dit les deux",
+                  not _r7["ok"] and "Apify" in _r7["error"] and "refuse" in _r7["error"], _r7.get("error"))
+        finally:
+            _vsS._lister_tiktok_apify = _sav_ap
+            _vsS._lister_tiktok = lambda url: [dict(e) for e in _profilS]
         # Une relecture demandee pendant une autre n'est pas perdue, et
         # survit a un redemarrage (la demande est ecrite dans le registre).
         _vsS._en_cours["lea"] = {"fait": 0, "total": 1, "etape": "x"}
@@ -14864,11 +14885,17 @@ try:
                 _hS = _wS._render_cloud_content_html("videos", _wS.VIDEO_EXTS)
             import re as _reS
             _ordS = _reS.findall(r"data-fid='lea\|videos\|([^']+)'", _hS)
+            _vuesS = _vsS.vues_du_dossier(_dS)
+            _avecS = [n for n in _ordS if n != "a_la_main.mp4"]
             check("galerie d un dossier branche : triee par vues, ajouts manuels a la fin",
-                  _ordS[:2] == ["tt_9.mp4", "tt_4.mp4"] and _ordS[-1] == "a_la_main.mp4", str(_ordS))
+                  _ordS[0] == "tt_9.mp4" and _ordS[-1] == "a_la_main.mp4"
+                  and [_vuesS[n[:-4]] for n in _avecS]
+                  == sorted((_vuesS[n[:-4]] for n in _avecS), reverse=True), str(_ordS))
             check("galerie : le badge de vues est sur la carte", "▶ 90 k" in _hS)
             check("galerie : le bandeau dit pourquoi des videos manquent",
                   "sous le seuil" in _hS and "publication(s) photo" in _hS)
+            check("galerie : le bandeau porte la signature de la derniere relecture",
+                  "data-vs-sig='" in _hS)
         finally:
             _wS.IDENTITIES_DIR = _savW
     finally:

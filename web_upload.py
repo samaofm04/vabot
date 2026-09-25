@@ -9637,7 +9637,10 @@ function vsSuivre(ident){
       }else{
         stop();
         if(out) out.textContent='';
-        if(vu && vsBandeau(ident) && typeof vaultGoTo==='function'){
+        /* Relecture finie AVANT le premier coup d oeil (echec en 2 s) : la
+           signature a change, le bandeau affiche doit etre redessine. */
+        var change = j && j.sig && j.sig !== box.getAttribute('data-vs-sig');
+        if((vu || change) && vsBandeau(ident) && typeof vaultGoTo==='function'){
           vaultGoTo({preventDefault:function(){}}, location.pathname+location.search);
         }
       }
@@ -21045,7 +21048,8 @@ def _vault_social_bandeau(ident: str, src: dict) -> str:
             morceaux.append(f"{b['echecs']} échec(s), retentées à la prochaine relecture")
         if b.get("abandonnees"):
             morceaux.append(f"{b['abandonnees']} abandonnée(s) après 3 échecs")
-        morceaux.append(f"{b.get('examinees', 0)} vidéos lues sur le profil")
+        morceaux.append(f"{b.get('examinees', 0)} vidéos lues sur le profil"
+                        + (f" (via {b['source']})" if b.get("source") else ""))
     erreur = ""
     if src.get("statut") == "erreur" and src.get("erreur"):
         erreur = (f"<div style='color:#f87171;margin-top:4px'>Dernière relecture en échec : "
@@ -21058,7 +21062,8 @@ def _vault_social_bandeau(ident: str, src: dict) -> str:
     seuil = int(src.get("seuil") or 0)
     return (
         _VS_CSS
-        + f"<div class='vs-bandeau' data-vs-etat='{ident_js}' style='margin:12px 0 0;padding:10px 12px;border:1px solid #2a2a30;"
+        + f"<div class='vs-bandeau' data-vs-etat='{ident_js}' "
+        f"data-vs-sig='{_h.escape(_vs.signature(ident), quote=True)}' style='margin:12px 0 0;padding:10px 12px;border:1px solid #2a2a30;"
         "border-radius:10px;font-size:12px;color:#9a9aa6;line-height:1.55'>"
         "<div style='display:flex;align-items:center;gap:10px;flex-wrap:wrap'>"
         f"<a href='{_h.escape(src['url'], quote=True)}' target='_blank' rel='noopener' "
@@ -54781,7 +54786,8 @@ def create_app():
                         "statut": e.get("statut") or "", "erreur": e.get("erreur") or "",
                         "bilan": e.get("bilan") or {},
                         "derniere_synchro": e.get("derniere_synchro"),
-                        "prochaine": _vs.prochaine(ident)})
+                        "prochaine": _vs.prochaine(ident),
+                        "sig": _vs.signature(ident)})
 
     @app.route("/identity/avatar_set", methods=["POST"])
     def identity_avatar_set():

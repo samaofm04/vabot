@@ -58,6 +58,16 @@ MAX_EXAMINEES = 600
 #: relecture) : on lit ce que sa page de reels rend, au plus ce nombre.
 MAX_EXAMINEES_INSTA = 100
 
+#: TikTok refuse la LISTE des vidéos d'un profil aux adresses de serveur
+#: (mesuré le 25/09/2026 depuis le VPS : « Unable to extract secondary user
+#: ID », puis une réponse vide avec yt-dlp à jour et curl_cffi) ; une vidéo
+#: seule, elle, passe. La liste est alors demandée à Apify, facturé environ
+#: 0,002 $ par vidéo listée : plafond décidé par le propriétaire, 300 vidéos
+#: par relecture, et un plafond de dépense par appel en garde-fou.
+ACTEUR_TIKTOK = "clockworks~tiktok-profile-scraper"
+MAX_EXAMINEES_APIFY = 300
+PLAFOND_USD_APIFY = "0.80"
+
 #: Un échec de téléchargement est retenté aux relectures suivantes, mais pas
 #: indéfiniment : une vidéo retirée ou privée échouerait à chaque passage.
 MAX_ECHECS = 3
@@ -276,6 +286,47 @@ def _ecrire_voisin(dossier: Path, stem: str, donnees: dict) -> bool:
                                 indent=None, backup=False))
 
 
+def _lister_tiktok_apify(username: str) -> list:
+    """La liste d'un profil TikTok par Apify, au format des entrées yt-dlp."""
+    import requests
+    import apify_reels as _ap
+    jeton = _ap.get_token()
+    if not jeton:
+        raise RuntimeError("aucun jeton Apify sur ce serveur (Settings)")
+    entree = {"profiles": [username], "profileScrapeSections": ["videos"],
+              "profileSorting": "latest", "resultsPerPage": MAX_EXAMINEES_APIFY,
+              "excludePinnedPosts": False, "shouldDownloadVideos": False,
+              "shouldDownloadCovers": False, "shouldDownloadSlideshowImages": False,
+              "shouldDownloadAvatars": False}
+    r = requests.post(
+        f"https://api.apify.com/v2/acts/{ACTEUR_TIKTOK}/run-sync-get-dataset-items",
+        params={"token": jeton, "maxItems": MAX_EXAMINEES_APIFY,
+                "maxTotalChargeUsd": PLAFOND_USD_APIFY, "timeout": 280},
+        json=entree, timeout=300)
+    if r.status_code not in (200, 201):
+        raise RuntimeError(f"Apify HTTP {r.status_code} : {r.text[:160]}")
+    items = r.json()
+    if not isinstance(items, list):
+        raise RuntimeError(f"Apify : réponse inattendue {str(items)[:160]}")
+    erreurs = [str(it.get("error")) for it in items
+               if isinstance(it, dict) and it.get("error")]
+    out = []
+    for it in items:
+        if not isinstance(it, dict) or not it.get("id") or it.get("error"):
+            continue
+        vues = it.get("playCount")
+        out.append({"id": str(it["id"]),
+                    "url": it.get("webVideoUrl") or "",
+                    "view_count": int(vues) if isinstance(vues, (int, float)) else None,
+                    "timestamp": it.get("createTime") or None,
+                    "title": it.get("text") or "",
+                    "photo": bool(it.get("isSlideshow"))})
+    if not out and erreurs:
+        # Profil introuvable, privé… : Apify le dit dans un élément « error ».
+        raise RuntimeError("Apify : " + erreurs[0][:200])
+    return out
+
+
 def _lister_tiktok(url: str) -> list:
     import yt_dlp
     opts = {"quiet": True, "no_warnings": True, "skip_download": True,
@@ -335,10 +386,30 @@ def _telecharger_direct(url_video: str, cible_sans_ext: Path) -> Path:
     return final
 
 
-def _lister(src: dict) -> list:
+def _lister(src: dict, bilan: Optional[dict] = None) -> list:
+    """La liste du profil. TikTok : yt-dlp d'abord (gratuit, et il marche
+    depuis une adresse résidentielle), Apify seulement s'il est refusé."""
     if src.get("plateforme") == "instagram":
+        if bilan is not None:
+            bilan["source"] = "HikerAPI"
         return _lister_instagram(src.get("username") or "")
-    return _lister_tiktok(src["url"])
+    try:
+        out = _lister_tiktok(src["url"])
+        if bilan is not None:
+            bilan["source"] = "yt-dlp"
+        return out
+    except Exception as err_ytdlp:
+        print(f"[vault-social] yt-dlp refusé pour {src.get('username')} : "
+              f"{str(err_ytdlp)[:160]} — relais Apify", flush=True)
+        try:
+            out = _lister_tiktok_apify(src.get("username") or "")
+        except Exception as err_apify:
+            raise RuntimeError(
+                f"TikTok refuse de lister ce profil depuis le serveur, et le "
+                f"relais Apify a échoué : {str(err_apify)[:200]}") from err_apify
+        if bilan is not None:
+            bilan["source"] = "Apify"
+        return out
 
 
 def _telecharger(src: dict, voisin: dict, cible_sans_ext: Path) -> Path:
@@ -429,7 +500,7 @@ def synchroniser(identite: str, dossier_videos: Path,
             raise RuntimeError("dossier introuvable dans le vault")
         dossier_videos.mkdir(exist_ok=True)
         tmp.mkdir(parents=True, exist_ok=True)
-        entrees = _lister(src)
+        entrees = _lister(src, bilan)
         liste_lue = True
         bilan["examinees"] = len(entrees)
         now = int(time.time())
@@ -462,7 +533,7 @@ def synchroniser(identite: str, dossier_videos: Path,
                         bilan["vues_maj"] += 1
                 recus.add(vid)
                 continue
-            if vid in photos or "/photo/" in (e.get("url") or ""):
+            if vid in photos or e.get("photo") or "/photo/" in (e.get("url") or ""):
                 bilan["photos"] += 1
                 photos.add(vid)
                 continue
@@ -566,6 +637,15 @@ def synchroniser(identite: str, dossier_videos: Path,
                 apres()
             except Exception:
                 pass
+
+
+def signature(identite: str) -> str:
+    """Ce qui change quand une relecture se termine. Le bandeau la porte :
+    une relecture finie avant que la page ne commence à suivre (échec en
+    deux secondes) laissait sinon l'ancien bandeau, sans l'erreur."""
+    e = lire(identite)
+    return "|".join(str(e.get(k) or "") for k in
+                    ("statut", "derniere_synchro", "reessai_le", "erreur"))
 
 
 def progression(identite: str) -> Optional[dict]:
