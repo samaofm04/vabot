@@ -15739,6 +15739,40 @@ console.log(JSON.stringify({n:capLib.block.items.length, textes:capLib.block.ite
 except Exception as _eCl:
     check("coller des captures : testable", False, repr(_eCl)[:200])
 
+print()
+print("=" * 70)
+print("Notifications : un bouton dans le selecteur de marche, rien qui flotte")
+print("=" * 70)
+try:
+    import web_upload as _wNO
+    _appNO = _wNO.create_app()
+    _appNO.config["TESTING"] = True
+    _savNO = _wNO._load_web_users
+    _wNO._load_web_users = lambda: {"admin": {"role": "admin", "password": "x"}}
+    try:
+        _cNO = _appNO.test_client()
+        with _cNO.session_transaction() as _sNO:
+            _sNO["auth"] = True
+            _sNO["username"] = "admin"
+            _sNO["role"] = "admin"
+        _hNO = _cNO.get("/").get_data(as_text=True)
+        _iNO = _hNO.index('<div id="market-floating"')
+        _mfNO = _hNO[_iNO:_hNO.index("</div>", _iNO)]
+        check("notifs : le bouton vit DANS le selecteur de marche", 'id="va-notif-btn"' in _mfNO)
+        check("notifs : ce n est pas un marche (pas de data-mkopt, jamais « actif » sur Tout)",
+              "data-mkopt" not in _mfNO.split('id="va-notif-btn"')[1][:200]
+              and "#market-floating button[data-mkopt]" in _hNO)
+        check("notifs : l ancienne pastille fixee en haut a droite a disparu",
+              'id="va-analyse-temoin"' not in _hNO)
+        check("notifs : la liste s ouvre au clic, cachee par defaut",
+              '<div id="va-notif-panel" hidden>' in _hNO and "window.vaNotifToggle = basculer;" in _hNO)
+        check("notifs : les cartes d upload / scrape restent visibles comme avant",
+              "#vatasks{position:fixed" in _hNO)
+    finally:
+        _wNO._load_web_users = _savNO
+except Exception as _eNO:
+    check("notifs : testable", False, repr(_eNO)[:160])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

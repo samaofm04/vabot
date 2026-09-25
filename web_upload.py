@@ -11102,59 +11102,124 @@ document.addEventListener('DOMContentLoaded', function(){
      simple-icons ; MyPuls, Getatext et Apify sont dessines d'apres
      leurs icones. -->
 <svg style="position:absolute;width:0;height:0" aria-hidden="true"><symbol id="lg-discord" viewBox="0 0 24 24"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" fill="#5865F2"/></symbol><symbol id="lg-instagram" viewBox="0 0 24 24"><defs><linearGradient id="lgGrad-ig" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#FFDD55"/><stop offset=".35" stop-color="#FF543E"/><stop offset=".7" stop-color="#C837AB"/><stop offset="1" stop-color="#3771C8"/></linearGradient></defs><path d="M7.0301.084c-1.2768.0602-2.1487.264-2.911.5634-.7888.3075-1.4575.72-2.1228 1.3877-.6652.6677-1.075 1.3368-1.3802 2.127-.2954.7638-.4956 1.6365-.552 2.914-.0564 1.2775-.0689 1.6882-.0626 4.947.0062 3.2586.0206 3.6671.0825 4.9473.061 1.2765.264 2.1482.5635 2.9107.308.7889.72 1.4573 1.388 2.1228.6679.6655 1.3365 1.0743 2.1285 1.38.7632.295 1.6361.4961 2.9134.552 1.2773.056 1.6884.069 4.9462.0627 3.2578-.0062 3.668-.0207 4.9478-.0814 1.28-.0607 2.147-.2652 2.9098-.5633.7889-.3086 1.4578-.72 2.1228-1.3881.665-.6682 1.0745-1.3378 1.3795-2.1284.2957-.7632.4966-1.636.552-2.9124.056-1.2809.0692-1.6898.063-4.948-.0063-3.2583-.021-3.6668-.0817-4.9465-.0607-1.2797-.264-2.1487-.5633-2.9117-.3084-.7889-.72-1.4568-1.3876-2.1228C21.2982 1.33 20.628.9208 19.8378.6165 19.074.321 18.2017.1197 16.9244.0645 15.6471.0093 15.236-.005 11.977.0014 8.718.0076 8.31.0215 7.0301.0839m.1402 21.6932c-1.17-.0509-1.8053-.2453-2.2287-.408-.5606-.216-.96-.4771-1.3819-.895-.422-.4178-.6811-.8186-.9-1.378-.1644-.4234-.3624-1.058-.4171-2.228-.0595-1.2645-.072-1.6442-.079-4.848-.007-3.2037.0053-3.583.0607-4.848.05-1.169.2456-1.805.408-2.2282.216-.5613.4762-.96.895-1.3816.4188-.4217.8184-.6814 1.3783-.9003.423-.1651 1.0575-.3614 2.227-.4171 1.2655-.06 1.6447-.072 4.848-.079 3.2033-.007 3.5835.005 4.8495.0608 1.169.0508 1.8053.2445 2.228.408.5608.216.96.4754 1.3816.895.4217.4194.6816.8176.9005 1.3787.1653.4217.3617 1.056.4169 2.2263.0602 1.2655.0739 1.645.0796 4.848.0058 3.203-.0055 3.5834-.061 4.848-.051 1.17-.245 1.8055-.408 2.2294-.216.5604-.4763.96-.8954 1.3814-.419.4215-.8181.6811-1.3783.9-.4224.1649-1.0577.3617-2.2262.4174-1.2656.0595-1.6448.072-4.8493.079-3.2045.007-3.5825-.006-4.848-.0608M16.953 5.5864A1.44 1.44 0 1 0 18.39 4.144a1.44 1.44 0 0 0-1.437 1.4424M5.8385 12.012c.0067 3.4032 2.7706 6.1557 6.173 6.1493 3.4026-.0065 6.157-2.7701 6.1506-6.1733-.0065-3.4032-2.771-6.1565-6.174-6.1498-3.403.0067-6.156 2.771-6.1496 6.1738M8 12.0077a4 4 0 1 1 4.008 3.9921A3.9996 3.9996 0 0 1 8 12.0077" fill="url(#lgGrad-ig)"/></symbol><symbol id="lg-mypuls" viewBox="0 0 24 24"><path d="M12 20.6 3.9 12.5a5.2 5.2 0 0 1 0-7.4 5.2 5.2 0 0 1 7.4 0l.7.7.7-.7a5.2 5.2 0 0 1 7.4 0 5.2 5.2 0 0 1 0 7.4z" fill="none" stroke="#C6F24E" stroke-width="2.1" stroke-linejoin="round"/><rect x="7.6" y="9.3" width="1.9" height="3.6" rx=".5" fill="#C6F24E"/><rect x="11.05" y="7.6" width="1.9" height="5.3" rx=".5" fill="#C6F24E"/><rect x="14.5" y="10.4" width="1.9" height="2.5" rx=".5" fill="#C6F24E"/></symbol><symbol id="lg-telegram" viewBox="0 0 24 24"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" fill="#26A5E4"/></symbol><symbol id="lg-sms" viewBox="0 0 24 24"><defs><linearGradient id="lgGrad-sms" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5BF675"/><stop offset="1" stop-color="#0CBB2F"/></linearGradient></defs><rect x="1" y="1" width="22" height="22" rx="6" fill="url(#lgGrad-sms)"/><path d="M12 5.4c4.3 0 7.4 2.6 7.4 5.9 0 3.3-3.1 5.9-7.4 5.9-.7 0-1.4-.1-2-.2-1.1 1.1-2.8 1.9-4.6 2.1.9-.8 1.6-1.8 1.8-2.9-1.6-1.1-2.6-2.7-2.6-4.50-3.3 3.1-5.9 7.4-5.9z" fill="#fff"/></symbol><symbol id="lg-claude" viewBox="0 0 24 24"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z" fill="#D97757"/></symbol><symbol id="lg-rapid" viewBox="0 0 24 24"><path d="M16.028 15.798c-.212-.065-.228-.359.017-.457 4.216-1.993 3.938-6.519 3.938-6.519C19.967 4.232 16.6-.016 11.158 0 5.112.033 1.468 4.787 1.5 10.407 1.55 20.26 9.067 24.017 11.42 24l-.016-3.905c0-.62 0-1.11.375-1.11 0 0 2.42 2.434 5.116 2.417 4.183-.016 5.605-3.529 5.605-3.529zm-4.837-3.006a3.86 3.86 0 0 1-3.89-3.855 3.86 3.86 0 0 1 3.857-3.889 3.86 3.86 0 0 1 3.89 3.856c0 2.14-1.716 3.888-3.857 3.888z" fill="#0055DA"/></symbol><symbol id="lg-apify" viewBox="0 0 24 24"><path d="M1.2 1.6h9.1L1.2 14.9z" fill="#21A24A" stroke="#21A24A" stroke-width="1.6" stroke-linejoin="round"/><path d="M13.7 1.6h9.1v13.3z" fill="#2563F2" stroke="#2563F2" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 11.4 22.6 22.4H1.4z" fill="#F4661C" stroke="#F4661C" stroke-width="1.6" stroke-linejoin="round"/></symbol><symbol id="lg-gms" viewBox="1045 365 237 237"><path stroke="#8a4af9" stroke-opacity="0.992" stroke-width="2.00" fill="none" stroke-linecap="butt" vector-effect="non-scaling-stroke" d=" M 1154.00 477.19 C 1151.27 472.93 1146.36 471.11 1141.43 469.72" /><path fill="#5b45f4" fill-opacity="0.988" d=" M 1107.59 529.28 A 0.26 0.25 -71.0 0 1 1107.16 529.49 Q 1076.03 499.44 1064.03 487.71 Q 1051.86 475.82 1050.83 458.74 C 1050.53 453.75 1050.70 448.03 1052.19 442.87 C 1059.70 416.77 1087.48 403.48 1113.14 409.42 C 1123.53 411.82 1132.01 417.47 1140.31 425.83 Q 1149.23 434.81 1156.95 443.49 A 0.60 0.60 0.0 0 1 1156.89 444.33 L 1146.95 452.93 A 0.86 0.85 -39.7 0 1 1145.73 452.82 Q 1138.84 444.42 1129.50 434.99 C 1127.35 432.82 1125.48 431.46 1122.95 429.32 C 1116.78 424.10 1109.03 421.80 1100.22 421.78 Q 1080.68 421.73 1069.91 437.69 C 1063.30 447.49 1063.35 461.58 1069.31 471.70 Q 1071.39 475.23 1083.03 486.62 Q 1098.17 501.44 1106.51 509.11 A 1.12 1.10 22.7 0 1 1106.87 509.97 Q 1106.45 518.40 1107.59 529.28 Z" /><path fill="#b94ffd" fill-opacity="0.996" d=" M 1154.00 477.19 C 1151.27 472.93 1146.36 471.11 1141.43 469.72 Q 1166.27 445.21 1191.40 421.14 Q 1199.41 413.47 1209.75 410.49 Q 1231.34 404.26 1249.59 413.37 Q 1262.18 419.65 1268.90 429.93 Q 1276.07 440.92 1276.25 454.22 Q 1276.45 469.00 1267.32 481.72 Q 1264.57 485.57 1256.30 493.05 Q 1236.15 511.30 1220.35 525.85 Q 1219.36 526.77 1218.91 526.99 A 0.63 0.62 -11.5 0 1 1218.01 526.40 Q 1218.50 517.74 1217.36 510.74 A 2.93 2.93 0.0 0 1 1218.32 508.07 Q 1232.00 495.99 1244.87 483.81 C 1247.53 481.29 1251.50 478.19 1254.47 474.72 C 1263.25 464.42 1264.22 448.30 1256.40 437.15 Q 1250.29 428.43 1241.51 425.04 Q 1227.37 419.58 1214.61 423.49 Q 1207.24 425.76 1200.27 432.52 Q 1177.20 454.90 1154.00 477.19 Z" /><path fill="#5b45f4" fill-opacity="0.988" d=" M 1141.43 469.72 C 1146.36 471.11 1151.27 472.93 1154.00 477.19 Q 1142.93 487.45 1138.89 491.64 Q 1131.25 499.53 1130.02 510.02 C 1129.45 514.93 1129.57 521.83 1131.39 526.82 Q 1137.97 544.84 1156.30 548.89 C 1167.31 551.32 1180.01 547.55 1187.86 538.94 Q 1196.66 529.29 1196.41 514.71 C 1196.22 503.59 1191.21 494.60 1182.76 487.02 Q 1175.28 480.30 1168.58 476.10 A 0.60 0.60 0.0 0 1 1168.47 475.17 L 1178.42 465.23 A 0.72 0.72 0.0 0 1 1179.42 465.21 Q 1195.88 480.40 1199.05 484.21 Q 1213.77 501.87 1209.80 524.55 Q 1206.82 541.59 1194.63 551.72 Q 1182.90 561.45 1166.08 562.63 C 1146.43 564.02 1127.20 552.90 1119.53 534.68 Q 1114.37 522.42 1116.01 508.66 Q 1117.96 492.24 1130.80 479.81 Q 1136.12 474.67 1141.43 469.72 Z" /></symbol><symbol id="lg-smspool" viewBox="-2.4 -2.4 65.5 65.5"><path d="M51.2384 0H9.40916C6.91615 0.00798102 4.52753 1.00186 2.76469 2.76469C1.00186 4.52753 0.00798102 6.91615 0 9.40916L0 27.582C0.0078085 30.075 1.00163 32.4638 2.7645 34.2266C4.52737 35.9895 6.91609 36.9833 9.40916 36.9911H40.0383L51.3154 46.1371V36.9911C53.7957 36.9643 56.1658 35.9621 57.9127 34.2012C59.6597 32.4403 60.6431 30.0624 60.6502 27.582V9.40916C60.6419 6.9158 59.6476 4.52698 57.8842 2.76415C56.1209 1.00132 53.7318 0.00763233 51.2384 0Z" fill="#224ABE"></path><path d="M8.76285 21.4469C9.03704 22.1328 9.49428 22.7303 10.0847 23.1741C10.6644 23.6106 11.3726 23.8421 12.0982 23.8321C12.652 23.8475 13.1979 23.6982 13.6668 23.4031C13.8758 23.2731 14.0465 23.09 14.1616 22.8724C14.2766 22.6549 14.3318 22.4107 14.3215 22.1648C14.3215 21.3866 13.7205 20.7911 12.5186 20.3783L10.4433 19.6638C9.31171 19.3025 8.27973 18.6828 7.42912 17.8537C7.05614 17.4609 6.76559 16.9974 6.57461 16.4906C6.38362 15.9838 6.29607 15.4438 6.31712 14.9026C6.30603 14.1936 6.44927 13.4906 6.73692 12.8425C7.01137 12.2378 7.41576 11.7011 7.92129 11.2705C8.44924 10.8233 9.05689 10.4797 9.71232 10.2579C10.4402 10.0125 11.2044 9.89166 11.9725 9.90061C13.2075 9.88661 14.422 10.2165 15.4802 10.8534C16.5198 11.4741 17.3459 12.3964 17.8489 13.4978L14.761 15.2132C14.5069 14.6697 14.1404 14.1862 13.6859 13.7946C13.2284 13.4035 12.6426 13.1954 12.0409 13.2103C11.5434 13.1862 11.052 13.3288 10.6447 13.6156C10.4757 13.7376 10.339 13.899 10.2465 14.0858C10.154 14.2725 10.1084 14.4791 10.1137 14.6874C10.109 14.8733 10.1466 15.0577 10.2236 15.2269C10.3007 15.396 10.4152 15.5455 10.5585 15.6639C10.9272 15.958 11.3454 16.1839 11.7935 16.3311L14.0418 17.1647C15.2203 17.5328 16.2868 18.1926 17.1423 19.0828C17.8174 19.8746 18.1741 20.8891 18.1431 21.9292C18.1578 22.7049 17.984 23.4727 17.6364 24.1663C17.31 24.8043 16.851 25.3652 16.2902 25.8113C15.7102 26.265 15.0534 26.6109 14.3511 26.8325C13.6047 27.0725 12.825 27.1931 12.0409 27.1898C11.3399 27.1929 10.6417 27.1006 9.96564 26.9154C9.32263 26.7399 8.70737 26.4752 8.13776 26.1291C7.57392 25.784 7.06641 25.3544 6.63296 24.8552C6.17983 24.3333 5.82033 23.7369 5.57031 23.0925L8.76285 21.4469Z" fill="#FAFAFA"></path><path d="M39.5921 9.89404V27.1878H35.9857V16.2811L31.4844 27.1878H28.8308L24.3499 16.3304V27.1872H20.7441V9.89404H25.2651L30.2296 21.9259L35.6646 9.89404H39.5921Z" fill="#FAFAFA"></path><path d="M45.5596 21.447C45.8338 22.1329 46.2911 22.7304 46.8815 23.1742C47.4612 23.6107 48.1694 23.8422 48.895 23.8322C49.4488 23.8476 49.9947 23.6983 50.4636 23.4032C50.6726 23.2733 50.8434 23.0901 50.9584 22.8726C51.0734 22.655 51.1286 22.4108 51.1183 22.1649C51.1183 21.3867 50.5173 20.7912 49.3154 20.3784L47.2415 19.6606C46.1098 19.2994 45.0779 18.6796 44.2272 17.8505C43.8543 17.4577 43.5637 16.9943 43.3727 16.4874C43.1817 15.9806 43.0942 15.4406 43.1152 14.8994C43.1042 14.1904 43.2474 13.4874 43.535 12.8393C43.8095 12.2346 44.2139 11.6979 44.7194 11.2674C45.2474 10.8201 45.855 10.4766 46.5104 10.2547C47.2383 10.0093 48.0025 9.88846 48.7706 9.89744C50.0056 9.88344 51.2201 10.2133 52.2783 10.8502C53.3196 11.4692 54.1478 12.3904 54.653 13.4913L51.565 15.2067C51.3109 14.6632 50.9445 14.1797 50.4899 13.7881C50.0323 13.3974 49.4465 13.1893 48.845 13.2038C48.3476 13.1798 47.8565 13.3225 47.4494 13.6091C47.2804 13.7312 47.1438 13.8926 47.0513 14.0793C46.9587 14.2661 46.9131 14.4726 46.9184 14.681C46.9137 14.8668 46.9513 15.0513 47.0283 15.2204C47.1054 15.3896 47.2199 15.539 47.3632 15.6574C47.7319 15.9515 48.1501 16.1775 48.5982 16.3246L50.8465 17.1583C52.025 17.5264 53.0915 18.1861 53.9469 19.0763C54.6221 19.8681 54.9788 20.8826 54.9477 21.9227C54.9625 22.6985 54.7887 23.4662 54.4411 24.1599C54.1147 24.7979 53.6557 25.3587 53.0949 25.8048C52.5151 26.2598 51.8583 26.6068 51.1558 26.8293C50.4093 27.0694 49.6297 27.1899 48.8456 27.1866C48.1448 27.1897 47.4469 27.0974 46.771 26.9122C46.128 26.7367 45.5127 26.4721 44.9431 26.1259C44.3784 25.781 43.8699 25.3514 43.4357 24.8521C42.9826 24.3301 42.6231 23.7338 42.373 23.0893L45.5596 21.447Z" fill="#FAFAFA"></path></symbol><symbol id="lg-smsbower" viewBox="-15.0 -15.0 403.9 403.9"><path d="M0 0H157L222 70L259.5 31H336L374 70H338L148 261V181L204 125L186 106.5H105.5L0 0Z" fill="#06593A"/><path d="M259.369 31H336L374 70H338L148 261L259.369 31Z" fill="#EF8512"/><path d="M314 46H303V57H314V46Z" fill="#06593A"/></symbol><symbol id="lg-getatext" viewBox="0 0 24 24"><defs><linearGradient id="lgGrad-sim" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#24417E"/><stop offset="1" stop-color="#5B9BD5"/></linearGradient></defs><path d="M4.4 1.9h8.2l6.9 6.4v12.9a1.8 1.8 0 0 1-1.8 1.8H4.4a1.8 1.8 0 0 1-1.8-1.8V3.7a1.8 1.8 0 0 1 1.8-1.8z" fill="url(#lgGrad-sim)"/><rect x="5.9" y="8.6" width="10.2" height="9.4" rx="2.6" fill="#F5D525"/><path d="M5.9 13.3h10.2M11 8.6v9.4" stroke="#24417E" stroke-width="1.15"/></symbol></svg>
-<!-- Temoin des analyses de montage : masque tant qu'il n'y a rien a dire. -->
-<a id="va-analyse-temoin" href="/a-relire" title="Analyses de montage"
-   style="display:none;position:fixed;top:12px;right:16px;z-index:9999;
-   align-items:center;gap:7px;padding:7px 13px;border-radius:99px;
-   background:rgba(59,130,246,.14);border:1px solid rgba(59,130,246,.4);
-   color:#3b82f6;font:600 12px/1 -apple-system,system-ui,sans-serif;
-   text-decoration:none;backdrop-filter:blur(8px)">
-  <svg id="va-analyse-ico" viewBox="0 0 24 24" width="14" height="14" fill="none"
-       stroke="currentColor" stroke-width="2" stroke-linecap="round">
-    <path d="M21 12a9 9 0 1 1-6.2-8.6"/></svg>
-  <span id="va-analyse-txt">analyse en cours</span>
-</a>
+<!-- CENTRE DE NOTIFICATIONS. La pastille « 13 templates a verifier », fixee en
+     haut a droite, couvrait le selecteur de marche et cachait ce qu on etait
+     en train de faire. Elle devient UN bouton dans le selecteur : ⚠ + nombre
+     (ou un anneau qui tourne tant qu une analyse travaille) ; un clic ouvre
+     la liste, un clic ailleurs la referme. Les cartes d upload et de scrape
+     Instagram restent ou elles sont : le proprietaire les veut visibles
+     (25/09/2026). -->
 <style>
 @keyframes vaSpin{to{transform:rotate(360deg)}}
-#va-analyse-ico.tourne{animation:vaSpin 1s linear infinite;transform-origin:50% 50%}
+#va-notif-ico.tourne{animation:vaSpin 1s linear infinite;transform-origin:50% 50%}
+#market-floating #va-notif-btn{color:#f59e0b;gap:3px}
+#market-floating #va-notif-btn.encours{color:#3b82f6}
+#market-floating #va-notif-btn svg{box-shadow:none;opacity:1;border-radius:0}
+body.light #market-floating #va-notif-btn{color:#b45309!important}
+body.light #market-floating #va-notif-btn.encours{color:#1d4ed8!important}
+#va-notif-panel{position:fixed;z-index:9998;width:340px;max-width:calc(100vw - 24px);max-height:65vh;
+  overflow:auto;background:#15171e;border:1px solid #2a2d38;border-radius:12px;padding:10px;
+  box-shadow:0 16px 40px rgba(0,0,0,.45);display:flex;flex-direction:column;gap:8px}
+#va-notif-panel[hidden]{display:none}
+body.light #va-notif-panel{background:#fff;border-color:#e5e7eb;box-shadow:0 16px 40px rgba(0,0,0,.12)}
+.va-notif-ligne{display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:10px;
+  background:rgba(234,179,8,.10);color:#f59e0b;font:600 12.5px/1.35 -apple-system,system-ui,sans-serif;
+  text-decoration:none}
+.va-notif-ligne.encours{background:rgba(59,130,246,.12);color:#60a5fa}
+/* Les themes clairs posent « body.light.xxx a {color:... !important} » sur
+   TOUS les liens : la ligne sortait en bleu. L identifiant du panneau donne
+   une specificite qu aucune de ces regles n atteint. */
+#va-notif-panel a.va-notif-ligne{color:#f59e0b!important}
+#va-notif-panel a.va-notif-ligne.encours{color:#60a5fa!important}
+body.light #va-notif-panel a.va-notif-ligne{color:#a16207!important}
+body.light #va-notif-panel a.va-notif-ligne.encours{color:#1d4ed8!important}
+.va-notif-ligne .va-notif-go{margin-left:auto;font-weight:800;white-space:nowrap}
+#va-notif-vide{color:#8a90a3;font-size:12px;padding:6px 4px}
 </style>
 <script>(function(){
- // Un seul sondeur par page, meme apres un changement d'onglet.
- if(window.__vaAnalysePoll) return; window.__vaAnalysePoll=1;
- var el=null, txt=null, ico=null;
- function maj(){
-  el=el||document.getElementById('va-analyse-temoin');
-  txt=txt||document.getElementById('va-analyse-txt');
-  ico=ico||document.getElementById('va-analyse-ico');
-  if(!el) return;
-  fetch('/analyses/etat',{credentials:'same-origin'})
-   .then(function(r){return r.json();})
-   .then(function(j){
-     if(!(j&&j.ok)){ el.style.display='none'; return; }
-     if(j.en_cours>0){
-       el.style.display='inline-flex';
-       ico.classList.add('tourne');
-       txt.textContent = j.en_cours>1 ? (j.en_cours+' analyses en cours')
-                                      : 'analyse en cours';
-       el.style.background='rgba(59,130,246,.14)';
-       el.style.borderColor='rgba(59,130,246,.4)';
-       el.style.color='#3b82f6';
-     } else if(j.a_relire>0 || j.a_verifier>0){
-       el.style.display='inline-flex';
-       ico.classList.remove('tourne');
-       var bouts=[];
-       if(j.a_verifier>0) bouts.push(j.a_verifier+' template'+(j.a_verifier>1?'s':'')+' a verifier');
-       if(j.a_relire>0) bouts.push(j.a_relire+' a relire');
-       txt.textContent = bouts.join(' · ');
-       el.style.background='rgba(234,179,8,.14)';
-       el.style.borderColor='rgba(234,179,8,.45)';
-       el.style.color='#a16207';
-     } else {
-       el.style.display='none';
-     }
-   }).catch(function(){});
+ // Un seul centre par page, meme apres un changement d onglet.
+ if(window.vaNotif) return;
+ var WARN = "<path d='M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z'/><path d='M12 9v4'/><path d='M12 17h.01'/>";
+ var SPIN = "<path d='M21 12a9 9 0 1 1-6.2-8.6'/>";
+ var analyse = null;
+ function el(id){ return document.getElementById(id); }
+ function ouvert(){ var p = el('va-notif-panel'); return !!(p && !p.hidden); }
+ function placer(){
+  // Aligne sous le bouton, mais TOUJOURS dans l ecran : sur un ecran etroit,
+  // aligner le bord droit sur le bouton faisait deborder la liste a gauche.
+  var b = el('va-notif-btn'), p = el('va-notif-panel');
+  if(!b || !p || p.hidden) return;
+  var r = b.getBoundingClientRect(), w = p.offsetWidth, vw = window.innerWidth;
+  var gauche = Math.min(r.right - w, vw - w - 12);
+  p.style.left = Math.max(12, Math.round(gauche)) + 'px';
+  p.style.right = 'auto';
+  p.style.top = Math.round(r.bottom + 8) + 'px';
  }
- maj(); setInterval(maj, 5000);
+ function fermer(){ var p = el('va-notif-panel'); if(p) p.hidden = true; }
+ function basculer(ev){
+  if(ev) ev.stopPropagation();
+  var p = el('va-notif-panel'); if(!p) return;
+  if(ouvert()){ fermer(); return; }
+  p.hidden = false; placer();
+ }
+ function ligneAnalyse(){
+  var box = el('va-notif-analyse'); if(!box) return;
+  box.innerHTML = '';
+  var a = analyse || {};
+  var enCours = a.en_cours || 0, aVerifier = a.a_verifier || 0, aRelire = a.a_relire || 0;
+  if(!enCours && !aVerifier && !aRelire) return;
+  var l = document.createElement('a');
+  l.href = '/a-relire';
+  l.className = 'va-notif-ligne' + ((enCours && !aVerifier && !aRelire) ? ' encours' : '');
+  var bouts = [];
+  if(enCours) bouts.push(enCours > 1 ? (enCours + ' analyses en cours') : 'analyse en cours');
+  if(aVerifier) bouts.push(aVerifier + ' template' + (aVerifier > 1 ? 's' : '') + ' à vérifier');
+  if(aRelire) bouts.push(aRelire + ' à relire');
+  var t = document.createElement('span'); t.textContent = bouts.join(' · ');
+  var go = document.createElement('span'); go.className = 'va-notif-go'; go.textContent = 'Ouvrir';
+  l.appendChild(t); l.appendChild(go);
+  box.appendChild(l);
+ }
+ function maj(){
+  var b = el('va-notif-btn'), n = el('va-notif-n'), ico = el('va-notif-ico');
+  if(!b || !n || !ico) return;
+  var a = analyse || {};
+  var aVoir = (a.a_verifier || 0) + (a.a_relire || 0);
+  var enCours = (a.en_cours || 0);
+  var vide = el('va-notif-vide');
+  if(vide) vide.style.display = (aVoir + enCours) ? 'none' : '';
+  if(!(aVoir + enCours)){ b.style.display = 'none'; fermer(); return; }
+  b.style.display = 'flex';
+  // ce qui demande un geste l emporte sur ce qui tourne tout seul
+  var tourne = enCours > 0 && !aVoir;
+  b.classList.toggle('encours', tourne);
+  ico.innerHTML = tourne ? SPIN : WARN;
+  ico.classList.toggle('tourne', tourne);
+  n.textContent = String(aVoir + enCours);
+  var titre = [];
+  if(aVoir) titre.push(aVoir + ' à vérifier / relire');
+  if(enCours) titre.push(enCours + ' en cours');
+  b.title = 'Notifications : ' + titre.join(' · ') + ' — clique pour voir';
+  if(ouvert()) placer();
+ }
+ function sonder(){
+  fetch('/analyses/etat', {credentials:'same-origin'})
+   .then(function(r){ return r.json(); })
+   .then(function(j){ analyse = (j && j.ok) ? j : null; ligneAnalyse(); maj(); })
+   .catch(function(){});
+ }
+ document.addEventListener('click', function(ev){
+  if(!ouvert()) return;
+  var p = el('va-notif-panel'), b = el('va-notif-btn');
+  if((p && p.contains(ev.target)) || (b && b.contains(ev.target))) return;
+  fermer();
+ });
+ document.addEventListener('keydown', function(ev){ if(ev.key === 'Escape') fermer(); });
+ window.addEventListener('resize', function(){ if(ouvert()) placer(); });
+ window.vaNotif = {maj: maj, fermer: fermer, basculer: basculer};
+ window.vaNotifToggle = basculer;
+ document.addEventListener('DOMContentLoaded', function(){ sonder(); maj(); });
+ setInterval(sonder, 5000);
 })();</script>
 <!-- Page loader global (affiché pendant la navigation) -->
 <div id="page-loader"><div class="pl-ring"></div></div>
@@ -11835,7 +11900,11 @@ document.addEventListener('click',function(e){
   <button type="button" data-mkopt="us" onclick="marketSet('us')" aria-label="Etats-Unis">
     <svg viewBox="0 0 19 10" width="19" height="11" preserveAspectRatio="none"><rect width="19" height="10" fill="#fff"/><rect y="0" width="19" height="0.77" fill="#b22234"/><rect y="1.54" width="19" height="0.77" fill="#b22234"/><rect y="3.08" width="19" height="0.77" fill="#b22234"/><rect y="4.62" width="19" height="0.77" fill="#b22234"/><rect y="6.15" width="19" height="0.77" fill="#b22234"/><rect y="7.69" width="19" height="0.77" fill="#b22234"/><rect y="9.23" width="19" height="0.77" fill="#b22234"/><rect width="7.6" height="5.38" fill="#3c3b6e"/></svg>
   </button>
+  <button type="button" id="va-notif-btn" onclick="vaNotifToggle(event)" aria-label="Notifications" style="display:none"><svg id="va-notif-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg><span id="va-notif-n"></span></button>
 </div>
+<!-- La liste du centre de notifications : un panneau a part (pas DANS le
+     selecteur, dont le CSS restyle tous les boutons), place sous le bouton. -->
+<div id="va-notif-panel" hidden><div id="va-notif-analyse"></div><div id="va-notif-vide">Rien en cours.</div></div>
 <script>(function(){
   // Pastille « X fichiers a importer » sur l'onglet Drive + notification.
   // On lit un cache serveur : aucun appel a Google au chargement.
@@ -23154,7 +23223,7 @@ function vaultRefilter(){
     });
   }catch(e){}
   var mk = marketCur();
-  document.querySelectorAll('#market-floating button').forEach(function(b){
+  document.querySelectorAll('#market-floating button[data-mkopt]').forEach(function(b){
     if((b.getAttribute('data-mkopt') || '') === mk) b.setAttribute('data-on','1');
     else b.removeAttribute('data-on');
   });
