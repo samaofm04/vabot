@@ -15441,6 +15441,290 @@ except Exception as _eX:
     import traceback as _tbX
     check("templates/captions : testable", False, repr(_eX)[:200] + " " + _tbX.format_exc()[-300:])
 
+# --- Coller des captures (Cmd+V) : le VRAI ecouteur de la page, dans node.
+# Le 25/09, le collage « ne marchait pas » : dans « Add captions », la fenetre
+# des captures s ouvrait DERRIERE le formulaire (meme z-index, placee avant
+# dans la page) ; et une capture copiee depuis le Finder, qui arrive avec son
+# nom en texte, etait traitee comme du texte a coller.
+_DOM_COLLER = r"""
+var ecouteurs={}, window={}, appels=[], elts={};
+var document={ addEventListener:function(t,f){ (ecouteurs[t]=ecouteurs[t]||[]).push(f); },
+               getElementById:function(id){ return elts[id]||null; } };
+function capOcrOpen(){ appels.push('capOcrOpen'); }
+function capOcrFichiers(f){ appels.push('capOcrFichiers:'+f.length); }
+function capAddCaptures(f){ appels.push('capAddCaptures:'+f.length); }
+function showToast(m,t){ appels.push('toast:'+t); }
+function capCollageSignal(q){ appels.push('signal:'+q); }
+function Fausse(display, visible){ this.style={display:display}; this.offsetParent=visible?{}:null; }
+"""
+_SCENARIOS_COLLER = r"""
+function Item(kind,type,file){ this.kind=kind; this.type=type; this.getAsFile=function(){ return file; }; }
+function coller(etat, files, texte, cible){
+  appels=[];
+  elts={'capocr-modal':new Fausse(etat.capocr?'flex':'none', etat.capocr),
+        'cap-add-modal':new Fausse(etat.ajout?'flex':'none', etat.ajout),
+        'form-cloudcaptions':new Fausse('block', !!etat.onglet)};
+  var items=files.map(function(f){ return new Item('file', f.type, f); });
+  if(texte!=null) items.push(new Item('string','text/plain',null));
+  var cd={items:items, files:files, getData:function(t){ return (t==='text/plain' && texte!=null)?texte:''; }};
+  var ev={clipboardData:cd, target:cible, defaultPrevented:false, preventDefault:function(){ this.defaultPrevented=true; }};
+  (ecouteurs.paste||[]).forEach(function(f){ f(ev); });
+  return (ev.defaultPrevented?'pris':'laisse')+(appels.length?' '+appels.join(','):'');
+}
+var img={type:'image/png', name:'image.png'}, champ={tagName:'TEXTAREA'}, corps={tagName:'BODY'};
+var NL=String.fromCharCode(10), TAB=String.fromCharCode(9), r={};
+r.ajout      = coller({ajout:1,onglet:1},[img],null,champ);
+r.editeur    = coller({onglet:1},[img],null,champ);
+r.finder     = coller({ajout:1,onglet:1},[img],'Capture d’écran 2026-09-25 à 16.20.11.png',champ);
+r.finder2    = coller({onglet:1},[img,img],'a.png'+NL+'b.JPEG',corps);
+r.finderMasque = coller({ajout:1,onglet:1},[{type:'image/png', name:'Capture 16.20.11.png'}],'Capture 16.20.11',champ);
+r.excel      = coller({ajout:1,onglet:1},[img],'a'+TAB+'b',champ);
+r.texte      = coller({ajout:1,onglet:1},[],'une caption',champ);
+r.nomSeul    = coller({onglet:1},[],'IMG_2041.HEIC',corps);
+r.urlChamp   = coller({ajout:1,onglet:1},[],'https://x.com/p.jpg',champ);
+r.sansImage  = coller({onglet:1},[],'https://instagram.com/p/x',corps);
+r.sansImageChamp = coller({capocr:1,onglet:1},[],'une correction',champ);
+r.autreOnglet= coller({},[img],null,corps);
+r.fenetre    = coller({capocr:1,ajout:1,onglet:1},[img],null,champ);
+r.ecouteurs  = (ecouteurs.paste||[]).length;
+console.log(JSON.stringify(r));
+"""
+_DOM_FORMULAIRE = r"""
+var appels=[], toasts=[], enVol=0, maxVol=0, partis=0;
+function FEl(tag, cls){ this.tagName=tag; this.className=cls||''; this.children=[]; this.parentNode=null;
+  this.dataset={}; this.style={}; this.value=''; this.placeholder=''; this.readOnly=false; this.textContent=''; }
+FEl.prototype.appendChild=function(c){ c.parentNode=this; this.children.push(c); return c; };
+FEl.prototype.insertBefore=function(c, ref){ c.parentNode=this; var i=ref?this.children.indexOf(ref):-1;
+  if(i<0) this.children.push(c); else this.children.splice(i,0,c); return c; };
+FEl.prototype.remove=function(){ if(this.parentNode){ var k=this.parentNode.children; k.splice(k.indexOf(this),1); this.parentNode=null; } };
+Object.defineProperty(FEl.prototype,'nextSibling',{get:function(){ if(!this.parentNode) return null;
+  var k=this.parentNode.children; return k[k.indexOf(this)+1]||null; }});
+Object.defineProperty(FEl.prototype,'isConnected',{get:function(){ var n=this; while(n.parentNode) n=n.parentNode; return n===liste; }});
+FEl.prototype.closest=function(sel){ var n=this; while(n){ if(sel==='.'+n.className) return n; n=n.parentNode; } return null; };
+FEl.prototype.querySelector=function(sel){ for(var i=0;i<this.children.length;i++){ if('.'+this.children[i].className===sel) return this.children[i]; } return null; };
+var liste=new FEl('div','liste');
+var document={ createElement:function(t){ return new FEl(t,''); },
+  querySelectorAll:function(sel){ var out=[]; liste.children.forEach(function(w){
+    if(sel==='#capAddList .capadd-ta') out.push(w.children[0]); else if(sel==='#capAddList .capadd-wrap') out.push(w); }); return out; } };
+function capAddField(){ var w=new FEl('div','capadd-wrap'); var ta=new FEl('textarea','capadd-ta'); var wd=new FEl('div','capadd-warn');
+  w.appendChild(ta); w.appendChild(wd); liste.appendChild(w); return ta; }
+function capEstImage(f){ return String(f.type||'').indexOf('image/')===0; }
+function capAddWarnCheck(ta){ appels.push('revu:'+ta.value); }
+function showToast(m,t){ toasts.push(t+':'+m); }
+var capOcr={actifs:0};
+function capOcrPompe(){}
+var FormData=function(){ this.d={}; }; FormData.prototype.set=function(k,v){ this.d[k]=v; };
+async function capOcrCorps(f){ if(f.illisible) throw new Error('ILLISIBLE'); return f; }
+async function capOcrJson(r){ return r.json(); }
+var TEXTES={'a.png':'Me when he says','deja.png':'pov: deja'};
+function fetch(u,o){ var nom=o.body.d.image.name; partis++; enVol++; maxVol=Math.max(maxVol,enVol+capOcr.actifs);
+  return new Promise(function(res){ setTimeout(function(){ enVol--;
+    res({status:200, json:function(){ return Promise.resolve({ok:true, texte:TEXTES[nom]||'', source:'Gemini',
+      ecartees: nom==='a.png'?['12:45']:[]}); }}); }, 5); }); }
+function img(n){ return {type:'image/png', name:n}; }
+function attendre(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
+"""
+_SCENARIOS_FORMULAIRE = r"""
+(async function(){
+  var r={};
+  capAddField();                                   // capAddOpen ouvre avec un champ vide
+  capAddCaptures([img('a.png'), img('deja.png'), {type:'application/pdf', name:'x.pdf'}]);
+  var tas=document.querySelectorAll('#capAddList .capadd-ta');
+  r.pendant={champs:tas.length, lecture:tas.map(function(t){ return t.readOnly; }), ph:tas[0].placeholder.indexOf('Lecture')>=0};
+  r.toasts=toasts.slice();
+  await attendre(60);
+  tas=document.querySelectorAll('#capAddList .capadd-ta');
+  r.apres={valeurs:tas.map(function(t){ return t.value; }), lecture:tas.map(function(t){ return t.readOnly; }),
+           revus: appels.indexOf('revu:Me when he says')>=0 && appels.indexOf('revu:pov: deja')>=0,
+           info0: (liste.children[0].querySelector('.capadd-ocr')||{}).textContent};
+  var f=img('b.png'); f.illisible=true;
+  capAddCaptures([f]); await attendre(40);
+  var w=liste.children[liste.children.length-1], info=w.querySelector('.capadd-ocr');
+  r.illisible={info:info.textContent, rouge:info.style.color==='#ef4444'};
+  // la fenetre des captures lit deja une image : il ne reste qu une place
+  capOcr.actifs=1; maxVol=0;
+  capAddCaptures([img('c.png'), img('d.png'), img('e.png')]); await attendre(80);
+  r.maxSimultanees=maxVol; capOcr.actifs=0;
+  // reouverture pendant que des captures attendent : l ancienne file ne part plus
+  capOcr.actifs=2; capAddCaptures([img('f.png'), img('g.png')]);
+  liste.children.slice().forEach(function(w){ w.remove(); }); capAddField(); var avant=partis;
+  capOcr.actifs=0; capAddOcrPompe(); await attendre(40);
+  r.apresReouverture=partis-avant;
+  console.log(JSON.stringify(r));
+})();
+"""
+try:
+    import shutil as _shCl
+    import subprocess as _spCl
+    import re as _reCl
+    import web_upload as _wCl
+    _uCl = _wCl.UPLOAD_HTML
+    _dCl = _uCl.find("function capCollageNomsDeFichiers(")
+    _fCl = _uCl.find("/* Recharge la bibliotheque de l identite ouverte")
+    check("coller : l ecouteur est retrouvable dans la page", 0 <= _dCl < _fCl, f"{_dCl} {_fCl}")
+    _zCl = {m.group(1): int(m.group(2)) for m in _reCl.finditer(
+        r'<div id="(capocr-modal|cap-add-modal|cap-ed-modal)" style="[^"]*?z-index:(\d+)', _uCl)}
+    check("coller : la fenetre des captures passe AU-DESSUS du formulaire Add captions",
+          _zCl.get("capocr-modal", 0) > _zCl.get("cap-add-modal", 10 ** 9)
+          and _zCl.get("capocr-modal", 0) > _zCl.get("cap-ed-modal", 0), str(_zCl))
+    _sCl = _uCl[_uCl.find("function capAddSubmit("):]
+    check("coller : envoyer pendant une lecture demande confirmation (pas de caption perdue)",
+          "capadd-ta[data-capocr]" in _sCl[:900] and "confirm(" in _sCl[:900])
+    _fermCl = _uCl[_uCl.find("function capAddClose("):][:700]
+    check("coller : fermer le formulaire pendant une lecture demande confirmation et vide la file",
+          "capadd-ta[data-capocr]" in _fermCl and "confirm(" in _fermCl and "capAddOcr.file=[]" in _fermCl)
+    if 0 <= _dCl < _fCl:
+        _blocCl = _uCl[_dCl:_fCl]
+        _fjCl = TMP / "coller_captures.js"
+        # le bloc est charge DEUX fois : la garde doit garder un seul ecouteur
+        _fjCl.write_text(_DOM_COLLER + _blocCl + "\n" + _blocCl + "\n" + _SCENARIOS_COLLER,
+                          encoding="utf-8")
+        _nCl = _shCl.which("node")
+        if _nCl:
+            _rCl = _spCl.run([_nCl, str(_fjCl)], capture_output=True, text=True,
+                             encoding="utf-8", timeout=60)
+            try:
+                _oCl = json.loads((_rCl.stdout or "").strip().splitlines()[-1])
+            except Exception:
+                _oCl = {}
+            _dbg = ((_rCl.stderr or "") + " " + str(_oCl))[:300]
+            check("coller : dans Add captions, la capture remplit le formulaire (pas une fenetre cachee)",
+                  _oCl.get("ajout") == "pris capAddCaptures:1", _dbg)
+            check("coller : ailleurs dans Caption (editeur compris), la fenetre des captures s ouvre",
+                  _oCl.get("editeur") == "pris capOcrOpen,capOcrFichiers:1", _dbg)
+            check("coller : une capture copiee dans le Finder (image + nom) est lue comme une IMAGE",
+                  _oCl.get("finder") == "pris capAddCaptures:1"
+                  and _oCl.get("finder2") == "pris capOcrOpen,capOcrFichiers:2", _dbg)
+            check("coller : Finder avec extensions masquees (nom sans .png) : c est quand meme l image",
+                  _oCl.get("finderMasque") == "pris capAddCaptures:1", _dbg)
+            check("coller : cellules Excel (texte + image) dans un champ = collage de texte normal",
+                  _oCl.get("excel") == "laisse", _dbg)
+            check("coller : un texte seul n est jamais intercepte (meme une adresse .jpg)",
+                  _oCl.get("texte") == "laisse" and _oCl.get("urlChamp") == "laisse", _dbg)
+            check("coller : seul le NOM du fichier -> message, et rien d ecrit dans la caption",
+                  _oCl.get("nomSeul") == "pris capOcrOpen,toast:warning,signal:noms seuls", _dbg)
+            check("coller : pas d image hors d un champ -> un message et une trace, plus de silence",
+                  _oCl.get("sansImage") == "laisse toast:warning,signal:sans image"
+                  and _oCl.get("sansImageChamp") == "laisse", _dbg)
+            check("coller : hors de l onglet Caption, rien n est intercepte",
+                  _oCl.get("autreOnglet") == "laisse", _dbg)
+            check("coller : fenetre des captures ouverte -> la capture s y ajoute",
+                  _oCl.get("fenetre") == "pris capOcrFichiers:1", _dbg)
+            check("coller : un seul ecouteur meme si le script est rejoue",
+                  _oCl.get("ecouteurs") == 1, _dbg)
+        else:
+            print("     (node absent : le collage des captures n a pas ete execute)")
+    # Le formulaire lui-meme : capAddCaptures, la file et la lecture, executes.
+    _dF = _uCl.find("var capAddOcr=")
+    _fF = _uCl.find("// GLISSER des captures")
+    check("coller : le code du formulaire est retrouvable", 0 <= _dF < _fF, f"{_dF} {_fF}")
+    if 0 <= _dF < _fF and _shCl.which("node"):
+        _fjF = TMP / "coller_formulaire.js"
+        _fjF.write_text(_DOM_FORMULAIRE + _uCl[_dF:_fF] + _SCENARIOS_FORMULAIRE, encoding="utf-8")
+        _rF = _spCl.run([_shCl.which("node"), str(_fjF)], capture_output=True, text=True,
+                        encoding="utf-8", timeout=60)
+        try:
+            _oF = json.loads((_rF.stdout or "").strip().splitlines()[-1])
+        except Exception:
+            _oF = {}
+        _dbF = ((_rF.stderr or "") + " " + str(_oF))[:400]
+        check("formulaire : 2 captures -> le champ vide est repris, un 2e est ajoute, lecture seule pendant la lecture",
+              _oF.get("pendant") == {"champs": 2, "lecture": [True, True], "ph": True}, _dbF)
+        check("formulaire : un fichier qui n est pas une image est COMPTE et signale",
+              _oF.get("toasts") == ["warning:1 fichier ignoré : ce n’est pas une image"], _dbF)
+        check("formulaire : le texte lu remplit chaque champ, qui redevient modifiable",
+              _oF.get("apres", {}).get("valeurs") == ["Me when he says", "pov: deja"]
+              and _oF.get("apres", {}).get("lecture") == [False, False], _dbF)
+        check("formulaire : chaque champ est revu pour les doublons une fois tout lu",
+              _oF.get("apres", {}).get("revus") is True, _dbF)
+        check("formulaire : les lignes ecartees comme interface sont dites, pas perdues",
+              "interface écartée : 12:45" in (_oF.get("apres", {}).get("info0") or ""), _dbF)
+        check("formulaire : un fichier illisible dit pourquoi, en rouge",
+              "échec de la lecture : ILLISIBLE" in (_oF.get("illisible") or {}).get("info", "")
+              and (_oF.get("illisible") or {}).get("rouge") is True, _dbF)
+        check("formulaire : jamais plus de 2 lectures a la fois, fenetre des captures comprise",
+              _oF.get("maxSimultanees") == 2, _dbF)   # 1 dans la fenetre + 1 ici ; 3 sans limite commune
+        check("formulaire : apres reouverture, les captures de l ancien formulaire ne partent plus",
+              _oF.get("apresReouverture") == 0, _dbF)
+    # « Seulement @x » (fenetre ouverte depuis l editeur de captions) : memes
+    # doublons et meme plafond que le formulaire, puis enregistrement.
+    _dI = _uCl.find("function capOcrAjouterIci(")
+    _fI = _uCl.find("/* COLLER des captures (Cmd+V / Ctrl+V)")
+    _oCap = _uCl[_uCl.find("function capOcrOpen("):][:2500]
+    check("coller : depuis l editeur, la fenetre vise d office l identite ouverte",
+          "cap-ed-modal" in _oCap and "m.value='ici'" in _oCap)
+    if 0 <= _dI < _fI and _shCl.which("node"):
+        _fjI = TMP / "coller_ici.js"
+        _fjI.write_text(r"""
+var appels=[], toasts=[];
+var capLib={identity:'lea', max:3, block:{items:[{text:'Pov: A'}]}};
+function capLibInit(){ return true; }
+function capNorm(t){ return String(t||'').toLowerCase().trim(); }
+function capRenderCards(){ appels.push('cartes'); }
+function capEdLibRender(){ appels.push('editeur'); }
+function capSave(){ appels.push('save'); }
+function showToast(m,t){ toasts.push(t+':'+m); }
+var capOcr={items:[{}, {retire:true}]};
+var document={ getElementById:function(){ return null; } };
+""" + _uCl[_dI:_fI] + r"""
+capOcrAjouterIci(['pov: a','B','B','C','D']);
+console.log(JSON.stringify({n:capLib.block.items.length, textes:capLib.block.items.map(function(x){return x.text;}),
+  appels:appels, toast:toasts[0], envoye:capOcr.items.map(function(x){ return !!x.envoye; })}));
+""", encoding="utf-8")
+        _rI = _spCl.run([_shCl.which("node"), str(_fjI)], capture_output=True, text=True,
+                        encoding="utf-8", timeout=60)
+        try:
+            _oI = json.loads((_rI.stdout or "").strip().splitlines()[-1])
+        except Exception:
+            _oI = {}
+        _dbI = ((_rI.stderr or "") + " " + str(_oI))[:300]
+        check("seulement @x : doublons ecartes, plafond respecte, chaque refus compte",
+              _oI.get("textes") == ["Pov: A", "B", "C"]
+              and "2 caption(s) ajoutée(s) · 2 déjà présente(s) · 1 refusée(s)" in (_oI.get("toast") or ""), _dbI)
+        check("seulement @x : enregistre, et la liste de l editeur se met a jour",
+              _oI.get("appels") == ["cartes", "editeur", "save"]
+              and _oI.get("envoye") == [True, False], _dbI)
+    # Photos (Mac) colle ses originaux en HEIC, que le ffmpeg du VPS n ouvre
+    # pas : la route les convertit en PNG avant de les lire.
+    try:
+        import pillow_heif as _phCl
+        from PIL import Image as _ImCl
+        import io as _ioCl
+        import analyse_gratuite as _agCl
+        _bufCl = _ioCl.BytesIO()
+        _phCl.from_pillow(_ImCl.new("RGB", (64, 96), (20, 20, 20))).save(_bufCl, format="HEIF")
+        _vuCl = {}
+
+        def _lireCl(chemin):
+            _vuCl["suffixe"] = chemin.suffix
+            with _ImCl.open(chemin) as _im:
+                _vuCl["format"] = _im.format
+            return {"texte": "ok", "source": "test"}
+        _savLCl, _savUCl = _agCl.lire_capture, _wCl._load_web_users
+        _agCl.lire_capture = _lireCl
+        _wCl._load_web_users = lambda: {"admin": {"role": "owner", "password": "x"}}
+        try:
+            _appCl = _wCl.create_app()
+            _appCl.config["TESTING"] = True
+            _cCl = _appCl.test_client()
+            with _cCl.session_transaction() as _s:
+                _s["auth"] = True; _s["username"] = "admin"; _s["role"] = "owner"
+            _bufCl.seek(0)
+            _jCl = _cCl.post("/captions/ocr", data={"image": (_bufCl, "IMG_2041.HEIC")},
+                             content_type="multipart/form-data").get_json()
+            _rdCl = _cCl.post("/captions/collage_diag", data={"quoi": "sans image", "detail": "text/plain"})
+            check("coller : un collage sans lecture laisse une trace cote serveur (204)",
+                  _rdCl.status_code == 204, str(_rdCl.status_code))
+            check("coller : une photo HEIC (app Photos) est convertie en PNG puis lue",
+                  _jCl.get("ok") and _jCl.get("texte") == "ok"
+                  and _vuCl == {"suffixe": ".png", "format": "PNG"}, str((_jCl, _vuCl))[:200])
+        finally:
+            _agCl.lire_capture, _wCl._load_web_users = _savLCl, _savUCl
+    except ImportError:
+        print("     (pillow-heif absent : la conversion HEIC n a pas ete verifiee)")
+except Exception as _eCl:
+    check("coller des captures : testable", False, repr(_eCl)[:200])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

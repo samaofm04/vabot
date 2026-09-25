@@ -7987,9 +7987,26 @@ function capOcrOpen(){
       try{ mk=JSON.parse((document.getElementById('capLibData')||{}).textContent||'{}').marche||'fr'; }catch(e){ mk='fr'; }
     }
     m.value=(mk==='us')?'us':'fr';
+    /* « Seulement @x » : l identite ouverte. Choisie d office quand la
+       fenetre s ouvre depuis l editeur de captions de cette identite : y
+       coller une capture, c est vouloir LA caption la, pas tout le marche. */
+    var ici=document.getElementById('capocr-ici');
+    if(ici){
+      ici.hidden=!capLib.identity; ici.textContent='Seulement @'+(capLib.identity||'');
+      var ed=document.getElementById('cap-ed-modal');
+      if(capLib.identity && ed && ed.style.display==='flex') m.value='ici';
+    }
   }
   capOcrEtat();
-  var md=document.getElementById('capocr-modal'); if(md) md.style.display='flex';
+  var md=document.getElementById('capocr-modal');
+  /* L editeur de captions peut passer en plein ecran : seul son contenu est
+     alors affiche, et la fenetre s ouvrait sans jamais se voir. */
+  var pe=document.fullscreenElement||document.webkitFullscreenElement;
+  if(md && pe && !pe.contains(md)){
+    try{ var sortir=document.exitFullscreen||document.webkitExitFullscreen;
+         var p=sortir&&sortir.call(document); if(p&&p.catch) p.catch(function(){}); }catch(e){}
+  }
+  if(md) md.style.display='flex';
   capOcrCibles();
 }
 function capOcrClose(){
@@ -8001,39 +8018,68 @@ function capOcrClose(){
   var md=document.getElementById('capocr-modal'); if(md) md.style.display='none';
 }
 function capOcrFichiers(files){
+  var ignores=0;
   for(var i=0;i<(files||[]).length;i++){
     var f=files[i];
-    if(String(f.type||'').indexOf('image/')!==0) continue;
+    if(!capEstImage(f)){ ignores++; continue; }
     var it={f:f, url:URL.createObjectURL(f), texte:'', etat:'attente', source:'', note:'', ecartees:[], retire:false, gen:capOcr.gen};
     capOcr.items.push(it); capOcr.file.push(it); capOcrLigne(it);
   }
+  if(ignores && typeof showToast==='function') showToast(ignores+(ignores>1?' fichiers ignorés : ce ne sont pas des images':' fichier ignoré : ce n’est pas une image'),'warning');
   capOcrPompe();
 }
 function capOcrPompe(){
   /* deux lectures a la fois : Gemini gratuit limite le debit, et le VPS n a
      que deux coeurs pour Tesseract. */
-  while(capOcr.actifs<2 && capOcr.file.length){
+  while(capOcr.actifs+capAddOcrActives()<2 && capOcr.file.length){
     var it=capOcr.file.shift();
     if(it.retire) continue;
     capOcr.actifs++; capOcrLire(it);
   }
   capOcrEtat();
 }
+/* Un fichier copie dans le Finder ou dans Photos n est qu une REFERENCE :
+   Chrome ne le lit qu a l envoi, et macOS peut le lui refuser (Bureau,
+   Documents, Photos). L envoi echouait alors sans atteindre le serveur, sur
+   un « Failed to fetch » muet. Lu ici d abord, pour pouvoir dire pourquoi. */
+var CAP_ILLISIBLE='Chrome n’a pas pu lire ce fichier : macOS lui refuse sans doute ce dossier (Bureau, Documents, Photos). Glisse-le dans la fenêtre, ou autorise Chrome dans Réglages Système › Confidentialité et sécurité › Fichiers et dossiers.';
+async function capOcrCorps(f){
+  try{ var b=await f.arrayBuffer(); if(!b.byteLength) throw 0; return new Blob([b],{type:f.type||'image/png'}); }
+  catch(e){ capCollageSignal('illisible', (f.type||'?')+' '+(f.size||0)+' o'); throw new Error(CAP_ILLISIBLE); }
+}
+/* Ce qui n a rien donne remonte aussi au serveur, en une ligne de journal :
+   le 25/09, « ca ne marche toujours pas » n avait laisse aucune trace. */
+function capCollageSignal(quoi, detail){
+  try{
+    var fd=new FormData(); fd.set('quoi', String(quoi||'').slice(0,40)); fd.set('detail', String(detail||'').slice(0,300));
+    fetch('/captions/collage_diag',{method:'POST',body:fd,credentials:'same-origin'}).catch(function(){});
+  }catch(e){}
+}
+/* nginx repond en HTML quand l image est trop lourde (413) ou la lecture
+   trop longue (504) : sans ce detour, le champ affichait une erreur de
+   decodage JSON au lieu de la raison. */
+async function capOcrJson(r){
+  try{ return await r.json(); }
+  catch(e){ throw new Error(r.status===403?'réservé aux administrateurs (HTTP 403)'
+    :('réponse illisible du serveur (HTTP '+r.status
+    +(r.status===413?' : image trop lourde':(r.status===504?' : lecture trop longue':''))+')')); }
+}
 async function capOcrLire(it){
   it.etat='lecture'; capOcrMaj(it);
   try{
-    var fd=new FormData(); fd.set('image', it.f, it.f.name||'capture.png');
+    var fd=new FormData(); fd.set('image', await capOcrCorps(it.f), it.f.name||'capture.png');
     var r=await fetch('/captions/ocr',{method:'POST',body:fd,credentials:'same-origin'});
-    var j=await r.json();
+    var j=await capOcrJson(r);
     if(j&&j.ok){
       it.texte=j.texte||''; it.source=j.source||''; it.note=j.note||j.erreur||'';
       it.ecartees=j.ecartees||[]; it.etat=it.texte?'lu':'vide';
     } else { it.etat='erreur'; it.note=(j&&j.error)||('Erreur '+r.status); }
-  }catch(e){ it.etat='erreur'; it.note=String(e); }
+  }catch(e){ it.etat='erreur'; it.note=(e&&e.message)||String(e); }
   /* une lecture lancee avant une remise a zero ne touche pas les compteurs
      de la nouvelle relecture */
   if(it.gen!==capOcr.gen) return;
   capOcr.actifs=Math.max(0,capOcr.actifs-1); capOcrMaj(it); capOcrPompe();
+  if(typeof capAddOcrPompe==='function') capAddOcrPompe();
 }
 function capOcrLigne(it){
   var l=document.getElementById('capocr-liste'); if(!l) return;
@@ -8088,6 +8134,12 @@ function capOcrEtat(){
 async function capOcrCibles(){
   var m=(document.getElementById('capocr-marche')||{}).value||'fr';
   var sp=document.getElementById('capocr-cibles'), go=document.getElementById('capocr-go');
+  if(m==='ici'){
+    capOcr.cibles=capLib.identity?[capLib.identity]:[];
+    if(sp) sp.textContent='→ @'+capLib.identity+' seulement (déjà présentes ignorées)';
+    if(go) go.textContent='Ajouter à @'+capLib.identity;
+    return;
+  }
   if(sp) sp.textContent='…';
   try{
     var r=await fetch('/captions/cibles?marche='+encodeURIComponent(m),{credentials:'same-origin'});
@@ -8111,6 +8163,7 @@ async function capOcrEnvoyer(){
   if(capOcr.actifs>0 && !confirm('Des captures sont encore en lecture. Envoyer seulement les textes déjà prêts ?')) return;
   if(!capOcr.cibles.length){ if(typeof showToast==='function') showToast('Aucune identité sur ce marché','error'); return; }
   var m=(document.getElementById('capocr-marche')||{}).value||'fr';
+  if(m==='ici'){ capOcrAjouterIci(textes); return; }
   var go=document.getElementById('capocr-go'); if(go){ go.disabled=true; go.textContent='Envoi…'; }
   try{
     var fd=new FormData(); fd.set('marche',m); fd.set('textes',JSON.stringify(textes));
@@ -8129,10 +8182,74 @@ async function capOcrEnvoyer(){
   }catch(err){ if(typeof showToast==='function') showToast('✕ '+err,'error'); }
   finally{ if(go){ go.disabled=false; capOcrCibles(); } }
 }
-/* COLLER des captures (Cmd+V / Ctrl+V) : depuis l onglet Caption, une image
-   copiee ouvre la fenetre des captures et part en lecture ; fenetre ouverte,
-   chaque collage s ajoute a la relecture. Un collage de TEXTE n est jamais
-   intercepte : seules les images le sont. */
+/* « Seulement @x » : ajout dans la bibliotheque ouverte, comme le formulaire
+   Add captions (memes doublons, meme plafond), puis enregistrement. */
+function capOcrAjouterIci(textes){
+  if(!capLibInit()) return;
+  var vus={}, doublons=0, ajout=[];
+  (capLib.block.items||[]).forEach(function(c){ vus[capNorm(String(c.text||''))]=1; });
+  textes.forEach(function(t){
+    t=String(t).slice(0,300); var k=capNorm(t);
+    if(vus[k]){ doublons++; return; }
+    vus[k]=1; ajout.push(t);
+  });
+  var max=capLib.max||80, place=Math.max(0, max-(capLib.block.items||[]).length);
+  var refuses=Math.max(0, ajout.length-place); if(refuses) ajout=ajout.slice(0,place);
+  var now=Date.now();
+  ajout.forEach(function(t,i){
+    capLib.block.items.push({id:'c'+now+'_'+i+'_'+Math.floor(Math.random()*1000), text:t, x:0.5, y:0.5, wrapW:0.88, enabled:true, created:Math.floor(now/1000)});
+  });
+  if(ajout.length){
+    try{ capRenderCards(); }catch(e){}
+    try{ if(typeof capEdLibRender==='function') capEdLibRender(); }catch(e){}
+    capSave();
+  }
+  var msg='✓ @'+capLib.identity+' : '+ajout.length+' caption(s) ajoutée(s)'
+    +(doublons?(' · '+doublons+' déjà présente(s)'):'')
+    +(refuses?(' · '+refuses+' refusée(s) : plafond de '+max+' atteint'):'');
+  capOcr.items.forEach(function(x){ if(!x.retire) x.envoye=true; });
+  var e=document.getElementById('capocr-etat'); if(e) e.textContent=msg;
+  if(typeof showToast==='function') showToast(msg, refuses?'warning':'success', 9000);
+}
+/* COLLER des captures (Cmd+V / Ctrl+V) dans l onglet Caption :
+   - formulaire « Add captions » ouvert : chaque capture remplit un champ
+     caption de CE formulaire (identite ouverte). Un texte deja dans la
+     bibliotheque y est marque « deja utilisee », et l envoi l ignore ;
+   - ailleurs dans l onglet, editeur de captions compris : la fenetre des
+     captures (toutes les identites du marche, apres relecture).
+   Un collage de TEXTE n est jamais intercepte. */
+/* Une capture copiee depuis le Finder arrive avec son NOM en texte brut.
+   Traite comme du texte, ce nom partait dans le champ au lieu de l image. */
+function capCollageNomsDeFichiers(t){
+  var ext=['png','jpg','jpeg','webp','heic','heif','gif','tif','tiff','bmp'];
+  var lignes=String(t||'').split(String.fromCharCode(10)), vus=0;
+  for(var i=0;i<lignes.length;i++){
+    var l=lignes[i].trim(); if(!l) continue;
+    var p=l.lastIndexOf('.');
+    if(p<1 || ext.indexOf(l.slice(p+1).toLowerCase())<0) return false;
+    vus++;
+  }
+  return vus>0;
+}
+/* Une image, par son type ; sans type (Chrome n en donne pas a toutes les
+   extensions), par son nom. Le serveur verifie de toute facon. */
+function capEstImage(f){
+  if(!f) return false;
+  var ty=String(f.type||'');
+  if(ty.indexOf('image/')===0) return true;
+  return !ty && capCollageNomsDeFichiers(f.name||'');
+}
+function capCollageImages(cd){
+  var out=[], items=(cd&&cd.items)||[];
+  for(var i=0;i<items.length;i++){
+    if(items[i].kind!=='file') continue;
+    var f=items[i].getAsFile(); if(capEstImage(f)) out.push(f);
+  }
+  if(!out.length && cd && cd.files){
+    for(var k=0;k<cd.files.length;k++){ if(capEstImage(cd.files[k])) out.push(cd.files[k]); }
+  }
+  return out;
+}
 /* Un seul ecouteur par page, meme si ce script etait execute deux fois
    (meme garde que le temoin d analyses) : sinon chaque collage comptait
    double. */
@@ -8140,22 +8257,47 @@ if(!window.__capOcrColler){ window.__capOcrColler=1;
 document.addEventListener('paste', function(ev){
   var md=document.getElementById('capocr-modal');
   var ouverte=md && md.style.display==='flex';
+  var ajout=document.getElementById('cap-add-modal');
+  var formAjout=ajout && ajout.style.display==='flex';
   var onglet=document.getElementById('form-cloudcaptions');
   var surCaption=onglet && onglet.offsetParent!==null;
-  if(!ouverte && !surCaption) return;
-  var items=(ev.clipboardData&&ev.clipboardData.items)||[], files=[], texte=false;
-  for(var i=0;i<items.length;i++){
-    if(items[i].kind==='file' && String(items[i].type||'').indexOf('image/')===0){
-      var f=items[i].getAsFile(); if(f) files.push(f);
-    } else if(items[i].kind==='string' && items[i].type==='text/plain'){ texte=true; }
+  if(!ouverte && !formAjout && !surCaption) return;
+  var cd=ev.clipboardData; if(!cd) return;
+  var files=capCollageImages(cd), texte='';
+  try{ texte=String(cd.getData('text/plain')||'').trim(); }catch(e){}
+  var noms=capCollageNomsDeFichiers(texte);
+  var t=ev.target, champ=t && (t.isContentEditable || /^(TEXTAREA|INPUT)$/.test(t.tagName||''));
+  var recu=''; try{ recu=[].slice.call(cd.types||[]).join(', '); }catch(e){}
+  if(!files.length){
+    /* Du texte colle dans un champ : un collage normal, meme s il finit par
+       « .jpg » (une adresse d image, par exemple). */
+    if(champ) return;
+    if(noms){
+      /* Seul le NOM du fichier est arrive : le dire, plutot que de coller ce
+         nom dans une caption ou de ne rien faire sans un mot. */
+      ev.preventDefault();
+      if(!ouverte && !formAjout) capOcrOpen();
+      if(typeof showToast==='function') showToast('📷 Seul le nom du fichier est arrivé, pas l’image. Glisse les captures dans la fenêtre, ou ouvre-les (Aperçu) et fais ⌘C puis ⌘V.','warning',9000);
+      capCollageSignal('noms seuls', recu);
+      return;
+    }
+    /* Hors d un champ, rien ne se passait, sans un mot : dire ce qui est
+       arrive a la place d une image. */
+    if(typeof showToast==='function') showToast('📋 Pas d’image dans ce collage (reçu : '+(recu||'rien')+'). Copie l’image elle-même : clic droit › Copier l’image, ou ⌘⇧^4 pour une capture.','warning',9000);
+    capCollageSignal('sans image', recu);
+    return;
   }
-  if(!files.length) return;
   /* Des cellules copiees depuis Excel ou Numbers arrivent en texte ET en
      image : collees dans un champ, c est le texte qu on veut, pas une
-     capture de ces cellules. */
-  var t=ev.target, champ=t && (t.isContentEditable || /^(TEXTAREA|INPUT)$/.test(t.tagName||''));
-  if(texte && champ) return;
+     capture de ces cellules. Leur image est un simple dessin, que Chrome
+     nomme toujours « image.png ». Des fichiers portant un vrai nom viennent
+     du Finder ou de Photos : ce sont eux qu on veut lire, meme si le texte
+     joint (leurs noms) n a pas d extension, quand le Mac masque les
+     extensions. */
+  var vraisFichiers=files.some(function(f){ return f.name && f.name!=='image.png'; });
+  if(texte && !noms && !vraisFichiers && champ) return;
   ev.preventDefault();
+  if(!ouverte && formAjout){ capAddCaptures(files); return; }
   if(!ouverte) capOcrOpen();
   capOcrFichiers(files);
 });
@@ -8172,6 +8314,8 @@ async function capLibRecharger(){
     if(j&&j.ok&&j.block){
       capLib.block=j.block; capLib.rev=j.rev||'';
       try{ capRenderCards(); }catch(e){}
+      // l editeur de captions ouvert montrait l ancienne liste et l ancien compte
+      try{ if(typeof capEdLibRender==='function') capEdLibRender(); }catch(e){}
       var el=document.getElementById('capLibData');
       if(el) el.textContent=JSON.stringify({identity:capLib.identity,block:capLib.block,brutes:capLib.brutes,max:capLib.max,rev:capLib.rev,marche:capLib.marche||''});
       try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
@@ -8310,8 +8454,12 @@ function capAddWarnCheck(ta,wd){
     var s=(capNorm(c.text)===nv)?1:capSim(v,c.text);
     if(s>bestS){ bestS=s; best=String(c.text||''); bestField=false; }
   });
+  // seuls les champs AU-DESSUS comptent : l envoi garde le premier et ignore
+  // les suivants (avant, le premier champ etait aussi annonce « ignore »)
+  var auDessus=true;
   document.querySelectorAll('#capAddList .capadd-ta').forEach(function(o){
-    if(o===ta) return;
+    if(o===ta){ auDessus=false; return; }
+    if(!auDessus) return;
     var ov=String(o.value||'').trim(); if(!ov) return;
     var s=(capNorm(ov)===nv)?1:capSim(v,ov);
     if(s>bestS){ bestS=s; best=ov; bestField=true; }
@@ -8423,13 +8571,26 @@ function capAddOpen(){
   m.style.display='flex';
   var ta=document.querySelector('#capAddList .capadd-ta'); if(ta) setTimeout(function(){ ta.focus(); },60);
 }
-function capAddClose(){ var m=document.getElementById('cap-add-modal'); if(m) m.style.display='none'; }
+function capAddClose(force){
+  var m=document.getElementById('cap-add-modal'); if(!m) return;
+  // Fermer pendant une lecture perdait son texte sans un mot (le prochain
+  // « Add captions » repart d une liste vide).
+  if(!force && document.querySelector('#capAddList .capadd-ta[data-capocr]')
+     && !confirm('Des captures sont encore en lecture : fermer quand même ? Leur texte sera perdu.')) return;
+  m.style.display='none';
+  // les captures pas encore parties ne partent plus (quota Gemini)
+  if(typeof capAddOcr!=='undefined') capAddOcr.file=[];
+}
 // SOUMISSION en fonction directe (onclick inline) : la modale porte un
 // event.stopPropagation() sur son conteneur (anti fermeture au clic), donc un
 // clic DANS la modale n atteint JAMAIS le document -> la délégation
 // [data-capact] n y fonctionne pas. Piège idem pour tout futur bouton de modale.
 function capAddSubmit(){
   if(!capLibInit()) return;
+  // Une capture collée encore en lecture a un champ VIDE : sans cette
+  // question, l envoi l ignorait et la fermeture perdait sa lecture.
+  if(document.querySelector('#capAddList .capadd-ta[data-capocr]')
+     && !confirm('Des captures sont encore en lecture. Ajouter seulement les captions déjà prêtes ?')) return;
   // doublons filtrés : entre les champs ET contre la bibliothèque existante
   // (une extension d autofill peut recopier le même texte partout)
   // dédupe NORMALISÉE (casse/ponctuation ignorées) + comptage des « très proches »
@@ -8471,13 +8632,127 @@ function capAddSubmit(){
     if(vals[i].desc) itN.desc=vals[i].desc;   // vide = pas de description
     capLib.block.items.push(itN);
   }
-  capAddClose();
+  capAddClose(true);
   capRenderCards(); capSave();
   if(typeof showToast==='function') showToast('✓ '+vals.length+' caption'+(vals.length>1?'s ajoutées au centre':' ajoutée au centre')
     +(dropped?(' · '+dropped+' déjà utilisée'+(dropped>1?'s ignorées':' ignorée')):'')
     +(refusesPlein?(' · ✕ '+refusesPlein+' refusée'+(refusesPlein>1?'s':'')+' : plafond de '+max+' atteint'):'')
     +(near?(' · ⚠️ '+near+' très proche'+(near>1?'s':'')+' de captions existantes'):''),
     (refusesPlein||near)?'warning':'success', (refusesPlein||near)?9000:undefined);
+}
+// CAPTURES collées ou glissées dans « Add captions » : chaque image remplit
+// un champ caption avec le texte lu (gratuit : Gemini, sinon Tesseract).
+// Avant, la fenêtre des captures s ouvrait DERRIÈRE ce formulaire : la
+// lecture partait et l utilisateur ne voyait rien.
+var capAddOcr={file:[], enCours:[]};
+function capAddCaptures(files){
+  var n=0, ignores=0;
+  for(var i=0;i<(files||[]).length;i++){
+    var f=files[i];
+    if(!capEstImage(f)){ ignores++; continue; }
+    var ta=null;
+    document.querySelectorAll('#capAddList .capadd-ta').forEach(function(x){
+      if(!ta && !String(x.value||'').trim() && !x.dataset.capocr) ta=x;
+    });
+    if(!ta) ta=capAddField(false);
+    if(!ta) continue;
+    ta.dataset.capocr='1'; ta.dataset.capocrPh=ta.placeholder||'';
+    // lecture seule, pas « disabled » : un champ désactivé perd le focus, et
+    // le ⌘V suivant ne visait plus le formulaire
+    ta.placeholder='◌ Lecture de la capture…'; ta.readOnly=true;
+    var info=document.createElement('div');
+    info.className='capadd-ocr';
+    info.style.cssText='font-size:11.5px;font-weight:600;margin-top:6px;color:#8b8b95';
+    info.textContent='📷 '+(f.name||'capture')+' — lecture…';
+    var wrap=ta.closest('.capadd-wrap'), wd=wrap&&wrap.querySelector('.capadd-warn');
+    // champ réutilisé (sa capture précédente n avait pas de texte) : une
+    // seule ligne d info, celle de la nouvelle capture
+    var ancienne=wrap&&wrap.querySelector('.capadd-ocr'); if(ancienne) ancienne.remove();
+    if(wd) wd.parentNode.insertBefore(info, wd.nextSibling); else ta.parentNode.appendChild(info);
+    capAddOcr.file.push({f:f, ta:ta, info:info, wd:wd}); n++;
+  }
+  if(typeof showToast==='function'){
+    if(!n) showToast('Aucune image parmi ces fichiers','warning');
+    else if(ignores) showToast(ignores+(ignores>1?' fichiers ignorés : ce ne sont pas des images':' fichier ignoré : ce n’est pas une image'),'warning');
+  }
+  capAddOcrPompe();
+}
+function capAddOcrActives(){
+  if(typeof capAddOcr==='undefined') return 0;
+  capAddOcr.enCours=capAddOcr.enCours.filter(function(j){ return j.ta.isConnected; });
+  return capAddOcr.enCours.length;
+}
+function capAddOcrPompe(){
+  /* deux lectures a la fois, comme la fenetre des captures. Seules comptent
+     celles du formulaire AFFICHE : apres une reouverture, les lectures de
+     l ancien ne font plus attendre les nouvelles captures. */
+  while(capAddOcrActives()+(capOcr.actifs||0)<2 && capAddOcr.file.length){
+    var j=capAddOcr.file.shift();
+    if(!j.ta.isConnected) continue;   // formulaire rouvert entre-temps
+    capAddOcr.enCours.push(j); capAddOcrLire(j);
+  }
+}
+async function capAddOcrLire(j){
+  var texte='', note='', source='', etat='erreur';
+  try{
+    var fd=new FormData(); fd.set('image', await capOcrCorps(j.f), j.f.name||'capture.png');
+    var r=await fetch('/captions/ocr',{method:'POST',body:fd,credentials:'same-origin'});
+    var o=await capOcrJson(r);
+    // « erreur » sans texte = la lecture a ÉCHOUÉ (Gemini et Tesseract en
+    // panne) : ce n est pas une capture sans texte, et il faut le dire.
+    if(o&&o.ok){ texte=String(o.texte||'').trim(); source=o.source||''; note=o.note||o.erreur||''; etat=texte?'lu':(o.erreur?'erreur':'vide');
+      if(o.ecartees&&o.ecartees.length) note=(note?note+' — ':'')+'interface écartée : '+o.ecartees.join(' · '); }
+    else note=(o&&o.error)||('Erreur '+r.status);
+  }catch(e){ note=(e&&e.message)||String(e); }
+  capAddOcr.enCours=capAddOcr.enCours.filter(function(x){ return x!==j; });
+  var ta=j.ta;
+  if(ta.isConnected){
+    ta.readOnly=false; ta.placeholder=ta.dataset.capocrPh||''; delete ta.dataset.capocr;
+    if(etat==='lu' && !String(ta.value||'').trim()) ta.value=texte;
+    var nom='📷 '+(j.f.name||'capture');
+    if(etat==='lu'){
+      j.info.textContent=nom+' — lu par '+(source||'?')+(note?' — '+note:'');
+      j.info.style.color='#8b8b95';
+    }else{
+      j.info.textContent=nom+(etat==='vide'?' — aucun texte lu : écris-le à la main, ou laisse vide':' — échec de la lecture')+(note?' : '+note:'');
+      j.info.style.color='#ef4444';
+    }
+    // (h) tous les champs sont revus : deux lectures paralleles du meme texte
+    // finissent dans n importe quel ordre
+    document.querySelectorAll('#capAddList .capadd-wrap').forEach(function(w){
+      var a=w.querySelector('.capadd-ta'); if(a && !a.dataset.capocr) capAddWarnCheck(a, w.querySelector('.capadd-warn'));
+    });
+  }
+  capAddOcrPompe();
+  if(typeof capOcrPompe==='function') capOcrPompe();
+}
+// GLISSER des captures : sur le formulaire, même chemin que le collage ;
+// sur la page Caption, la fenêtre des captures. Avant, une image lâchée hors
+// de la zone pointillée faisait OUVRIR l image par le navigateur, à la place
+// du site. Les zones d upload (.up-drop) gardent leur propre dépôt.
+if(!window.__capAddGlisser){ window.__capAddGlisser=1;
+['dragover','drop'].forEach(function(nomEv){
+  document.addEventListener(nomEv, function(ev){
+    var dt=ev.dataTransfer; if(!dt || [].indexOf.call(dt.types||[],'Files')<0) return;
+    // un avatar glisse pour reordonner la liste porte aussi « Files »
+    if(typeof __identDrag!=='undefined' && __identDrag) return;
+    var m=document.getElementById('cap-add-modal');
+    var dansForm=!!(m && m.style.display==='flex' && m.contains(ev.target));
+    var md=document.getElementById('capocr-modal');
+    var onglet=document.getElementById('form-cloudcaptions');
+    var ed=document.getElementById('cap-ed-modal');
+    var dansEditeur=!!(ed && ed.style.display==='flex' && ed.contains(ev.target));
+    var surPage=!dansForm && !(md && md.style.display==='flex')
+      && ((!!onglet && onglet.offsetParent!==null && onglet.contains(ev.target)) || dansEditeur)
+      && !(ev.target.closest && ev.target.closest('.up-drop'));
+    if(!dansForm && !surPage) return;
+    ev.preventDefault();
+    if(nomEv!=='drop' || !dt.files || !dt.files.length) return;
+    if(dansForm){ capAddCaptures(dt.files); return; }
+    if(![].some.call(dt.files||[], capEstImage)){ if(typeof showToast==='function') showToast('Aucune image parmi ces fichiers','warning'); return; }
+    capOcrOpen(); capOcrFichiers(dt.files);   // compte et signale les autres fichiers
+  });
+});
 }
 // NB : PAS de getElementById au chargement ici — ce script s exécute AVANT que
 // les modales (plus bas dans la page) existent ; les boutons de la modale sont
@@ -14333,10 +14608,12 @@ body.light #pf-modal .pf-card img{background:#eceff3!important}
    sur le fond devenu blanc. Specificite 1,1,1 et plus, avec !important. */
 body.light #capocr-drop b{color:#1c1c1e!important}
 body.light #capocr-drop span,body.light #capocr-etat,body.light #capocr-cibles,body.light #capocr-modal .capocr-meta{color:#4b5563!important}
+/* 100000 : au-dessus du formulaire Add captions et de l editeur de captions
+   (99999) ; a egalite, la fenetre ouverte par un collage restait DERRIERE eux. */
 #capocr-modal .capocr-meta{color:#9a9aa6}
 #capocr-modal .capocr-meta.capocr-alerte,body.light #capocr-modal .capocr-meta.capocr-alerte{color:#dc2626!important}
 </style>
-<div id="capocr-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center;padding:20px" onclick="capOcrClose()" ondragover="event.preventDefault()" ondrop="event.preventDefault()">
+<div id="capocr-modal" style="display:none;position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.78);align-items:center;justify-content:center;padding:20px" onclick="capOcrClose()" ondragover="event.preventDefault()" ondrop="event.preventDefault()">
   <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:22px;width:680px;max-width:94vw;max-height:88vh;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
     <div style="display:flex;align-items:center;gap:8px">
       <span style="font-weight:800;font-size:15px">📷 Captions depuis des captures</span>
@@ -14345,16 +14622,16 @@ body.light #capocr-drop span,body.light #capocr-etat,body.light #capocr-cibles,b
     </div>
     <label id="capocr-drop" ondragover="event.preventDefault();this.style.borderColor='#3b82f6'" ondragleave="this.style.borderColor=''" ondrop="event.preventDefault();this.style.borderColor='';capOcrFichiers(event.dataTransfer.files)"
            style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:18px;border:1.5px dashed #3a3a44;border-radius:12px;cursor:pointer;color:#9a9aa6;font-size:13px;text-align:center">
-      <input id="capocr-input" type="file" accept="image/png,image/jpeg,image/webp" multiple style="display:none" onchange="capOcrFichiers(this.files);this.value=''">
+      <input id="capocr-input" type="file" accept="image/png,image/jpeg,image/webp,image/heic,image/heif,.heic,.heif" multiple style="display:none" onchange="capOcrFichiers(this.files);this.value=''">
       <b style="color:#c4c4cc">Colle (⌘V), dépose tes captures ici, ou clique pour les choisir</b>
       <span>Texte lu gratuitement (Gemini, sinon Tesseract). Rien ne part avant ta relecture.</span>
     </label>
     <div id="capocr-etat" style="font-size:12px;color:#9a9aa6"></div>
     <div id="capocr-liste" style="overflow:auto;display:flex;flex-direction:column;gap:8px;min-height:0;flex:1"></div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid #2a2a30;padding-top:12px">
-      <label style="font-size:12.5px;color:#c4c4cc;display:inline-flex;align-items:center;gap:6px">Marché
+      <label style="font-size:12.5px;color:#c4c4cc;display:inline-flex;align-items:center;gap:6px">Vers
         <select id="capocr-marche" onchange="capOcrCibles()" style="background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:8px;padding:6px 8px;font-family:inherit">
-          <option value="fr">FR</option><option value="us">US</option>
+          <option value="fr">Identités FR</option><option value="us">Identités US</option><option value="ici" id="capocr-ici" hidden>Seulement l’identité ouverte</option>
         </select>
       </label>
       <span id="capocr-cibles" style="font-size:12px;color:#9a9aa6;flex:1;min-width:180px"></span>
@@ -55795,8 +56072,8 @@ def create_app():
         if not f or not f.filename:
             return jsonify({"ok": False, "error": "aucune image"})
         ext = os.path.splitext(f.filename)[1].lower()
-        if ext not in (".png", ".jpg", ".jpeg", ".webp"):
-            return jsonify({"ok": False, "error": f"format {ext or '?'} non lu (png, jpg, webp)"})
+        if ext not in (".png", ".jpg", ".jpeg", ".webp", ".heic", ".heif"):
+            return jsonify({"ok": False, "error": f"format {ext or '?'} non lu (png, jpg, webp, heic)"})
         import tempfile as _tf
         import analyse_gratuite as _ag
         with _tf.TemporaryDirectory(prefix="capocr_") as tmp:
@@ -55804,11 +56081,40 @@ def create_app():
             f.save(str(chemin))
             if chemin.stat().st_size > 15 * 1024 * 1024:
                 return jsonify({"ok": False, "error": "image trop lourde (15 Mo max)"})
+            if ext in (".heic", ".heif"):
+                # Photos (Mac) copie les originaux en HEIC : le ffmpeg du VPS
+                # ne les ouvre pas (Tesseract n'avait donc rien à lire).
+                # Convertis ici en PNG, lus ensuite comme n'importe quelle capture.
+                try:
+                    import pillow_heif as _ph
+                    from PIL import Image as _Im
+                    _ph.register_heif_opener()
+                    png = chemin.with_suffix(".png")
+                    with _Im.open(chemin) as _im:
+                        _im.convert("RGB").save(png)
+                    chemin = png
+                except Exception as err:
+                    return jsonify({"ok": False, "error": f"photo HEIC illisible ({str(err)[:80]}) : "
+                                                          "exporte-la en PNG ou JPEG"})
             r = _ag.lire_capture(chemin)
         return jsonify({"ok": True, "texte": r.get("texte") or "",
                         "source": r.get("source") or "", "note": r.get("note") or "",
                         "ecartees": r.get("ecartees") or [], "erreur": r.get("erreur") or "",
                         "conf": r.get("conf")})
+
+    @app.route("/captions/collage_diag", methods=["POST"])
+    def captions_collage_diag():
+        """Un collage de captures qui n'a rien donné, signalé par la page
+        (pas d'image, fichier illisible). Le 25/09, « ça ne marche toujours
+        pas » n'avait laissé aucune trace : ni requête, ni erreur."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        quoi = (request.form.get("quoi") or "")[:40]
+        detail = (request.form.get("detail") or "")[:300]
+        print(f"[captions] collage sans lecture ({session.get('username')}) : {quoi} — {detail}",
+              flush=True)
+        return ("", 204)
 
     @app.route("/captions/cibles", methods=["GET"])
     def captions_cibles():
