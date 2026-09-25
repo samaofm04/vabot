@@ -7830,7 +7830,8 @@ function capLibInit(){
   if(capLib.identity!==j.identity||!capLib.block){
     if(capLib.identity!==j.identity) capSelSet={};   // sélection liée à UNE identité
     capLib.identity=j.identity;
-    capLib.block=j.block||{font:'TikTokSans',style:{},global_pos:{enabled:false,x:0.5,y:0.2},items:[]};
+    // meme defaut que le serveur (CAPTION_POLICE_DEFAUT / CAPTION_STYLE_DEFAUT)
+    capLib.block=j.block||{font:'InstagramModerne',style:{size:63,bold:false},global_pos:{enabled:false,x:0.5,y:0.2},items:[]};
     capLib.brutes=j.brutes||[];
     capLib.rev=j.rev||'';
     capLib.marche=j.marche||'';
@@ -25232,16 +25233,26 @@ def _linkimp_run(ident: str, subdir: str, urls: list, desc: str = ""):
     _invalidate_all_ttl_cache()   # compteurs/galeries à jour au prochain rendu
 
 
+#: Police et style par défaut des captions (onglet Caption seulement, pas les
+#: templates) : la « Moderne Instagram » À CONTOUR NOIR, comme réglée le
+#: 25/09/2026 sur lillaroseconlon (taille 63, non grasse). Demande du
+#: propriétaire : « c'est elle qu'il faut mettre de base tout le temps ».
+#: La police vient des patchs locaux du VPS (CAPTION_FONTS, @font-face,
+#: noctus/pipeline-core.js) ; sans eux, le rendu retombe sur Arial.
+CAPTION_POLICE_DEFAUT = "InstagramModerne"
+CAPTION_STYLE_DEFAUT = {"size": 63, "bold": False}
+
+
 def _clean_caption_block(raw, ecartes: dict = None) -> dict:
     """Valide/clampe le bloc caption d'une identité (bornes = celles du moteur).
-    Police par défaut = TikTokSans (demande user : l'écriture TikTok partout).
+    Police par défaut = CAPTION_POLICE_DEFAUT (TikTokSans jusqu'au 25/09/2026).
 
     `ecartes` : dictionnaire optionnel rempli avec ce qui a été REFUSÉ, jamais
     jeté en silence. Clé "plein" = captions valides écartées parce que le
     plafond CAPTIONS_MAX était atteint. Sans ce compte, un ajout de 10 captions
     sur une bibliothèque déjà à 78 affichait « 10 ajoutées » et en perdait 8.
     """
-    out = {"font": "TikTokSans", "style": {},
+    out = {"font": CAPTION_POLICE_DEFAUT, "style": dict(CAPTION_STYLE_DEFAUT),
            "global_pos": {"enabled": False, "x": 0.5, "y": 0.2}, "items": []}
     if ecartes is not None:
         ecartes["plein"] = 0
@@ -25250,7 +25261,9 @@ def _clean_caption_block(raw, ecartes: dict = None) -> dict:
     f = raw.get("font")
     if isinstance(f, str) and f in CAPTION_FONTS:
         out["font"] = f
-    st = raw.get("style") if isinstance(raw.get("style"), dict) else {}
+    # Sans style (bibliothèque créée par un ajout en masse), celui par défaut :
+    # sinon la Moderne sortait en taille 44, plus petite que celle choisie.
+    st = raw.get("style") if isinstance(raw.get("style"), dict) else dict(CAPTION_STYLE_DEFAUT)
     s2 = {}
     try:
         if st.get("size") is not None:
