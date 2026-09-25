@@ -10707,6 +10707,7 @@ async function identEditRetirer(){
   var err=document.getElementById('ident-edit-err');
   var go=document.getElementById('ident-edit-dangergo');
   var n=document.getElementById('ident-edit-dangernom');
+  if(err) err.textContent='';   // l echec precedent ne reste pas affiche
   if(go){ go.disabled=true; go.textContent='\u25cc'; }
   try{
     var fd=new FormData();
@@ -11047,10 +11048,16 @@ document.addEventListener('click', function(ev){
   var n=document.getElementById('ident-new-name'); if(n) n.value='';
   var lk=document.getElementById('ident-new-link'); if(lk) lk.value='';
   identNewCtx.auto=''; identNewCtx.typeTouche=false; identNewLink('');
+  identNewCtx.styles=[]; identNewCtx.reserves=[];
   identNewType('modele', true);
+  /* Le marche d office : celui affiche a l ecran (pilule FR/US), sinon FR. */
+  var mk0=''; try{ mk0=(typeof marketCur==='function')?(marketCur()||''):''; }catch(e0){}
+  identNewMarket(mk0==='us'?'us':'fr');
+  identNewStylesPeindre();
   var a=document.getElementById('ident-new-avatar'); if(a) a.value='';
   var e=document.getElementById('ident-new-err'); if(e) e.textContent='';
-  var g=document.getElementById('ident-new-go'); if(g){ g.disabled=false; g.textContent='Créer'; }
+  var g=document.getElementById('ident-new-go');
+  if(g){ g.disabled=false; g.textContent='Créer'; g.onclick=function(){ identNewCreate(); }; }
   var m=document.getElementById('ident-new-modal'); if(m) m.style.display='flex';
   /* Le lien d abord : c est lui qui remplit le nom. */
   if(lk) setTimeout(function(){ lk.focus(); },60);
@@ -11181,6 +11188,80 @@ function identNewType(v, auto){
     var b=document.getElementById(p[1]); if(!b) return;
     if(p[0]===v) b.classList.add('on'); else b.classList.remove('on');
   });
+  /* comme dans Modifier : le marche ne veut rien dire pour un dossier de
+     montage, grise mais visible ; une reserve ne se lie a rien */
+  ['ident-new-mk-fr','ident-new-mk-us'].forEach(function(id){
+    var b=document.getElementById(id); if(b) b.style.opacity=(v==='identite')?'.45':'1';
+  });
+  identNewReservesPeindre();
+}
+function identNewMarket(v){
+  identNewCtx.market=v;
+  [['fr','ident-new-mk-fr'],['us','ident-new-mk-us']].forEach(function(p){
+    var b=document.getElementById(p[1]); if(!b) return;
+    if(p[0]===v) b.classList.add('on'); else b.classList.remove('on');
+  });
+  identNewReservesPeindre();
+}
+function identNewStylesPeindre(){
+  var box=document.getElementById('ident-new-styles'); if(!box) return;
+  var poses=identNewCtx.styles||[];
+  box.innerHTML='';
+  identStylesTable().forEach(function(s){
+    var on=poses.indexOf(s.cle)>=0;
+    var b=document.createElement('button');
+    b.type='button'; b.title=s.titre; b.setAttribute('data-style',s.cle);
+    if(s.trace){
+      b.innerHTML = "<svg viewBox='0 0 24 24' width='13' height='13' fill='none' "
+        + "stroke='currentColor' stroke-width='2' stroke-linecap='round' "
+        + "stroke-linejoin='round' style='flex-shrink:0'>" + s.trace + "</svg>";
+      b.appendChild(document.createTextNode(' ' + s.label));
+    } else { b.textContent = s.emoji + ' ' + s.label; }
+    b.style.cssText='background:'+(on?'rgba(255,255,255,.10)':'#131316')
+      +';border:1.5px solid '+(on?s.couleur:'#34343a')
+      +';color:'+(on?s.couleur:'#9a9aa6')
+      +';border-radius:9px;padding:7px 10px;font-size:12px;font-weight:700;'
+      +'cursor:pointer;font-family:inherit;flex:1 1 auto;'
+      +'display:inline-flex;align-items:center;justify-content:center;gap:5px';
+    b.addEventListener('click',function(){
+      var i=identNewCtx.styles.indexOf(s.cle);
+      if(i>=0){ identNewCtx.styles.splice(i,1); } else { identNewCtx.styles.push(s.cle); }
+      identNewStylesPeindre();
+    });
+    box.appendChild(b);
+  });
+}
+function identNewReservesPeindre(){
+  var wrap=document.getElementById('ident-new-reswrap'), box=document.getElementById('ident-new-reserves'),
+      h=document.getElementById('ident-new-rhint');
+  if(!box) return;
+  box.innerHTML='';
+  /* Bibliotheque 2 : ni VA ni Discord. Une reserve : ne se lie a rien. */
+  var montrer = String(identNewCtx.vtab||'').indexOf('v2')!==0 && identNewCtx.type!=='reserve';
+  if(wrap) wrap.style.display = montrer ? 'flex' : 'none';
+  if(!montrer) return;
+  var t=identReservesTable();
+  if(t.erreur){ if(h) h.textContent='Liens illisibles ('+t.erreur+') : à régler ensuite dans Modifier.'; return; }
+  var mk=identNewCtx.market||'fr';
+  var valides=(t.reserves||[]).filter(function(r){
+    return ((typeof mkMarketOf==='function' && mkMarketOf(r)) || 'fr') === mk; });
+  /* changer de marche retire les reserves de l autre (le serveur les refuserait) */
+  identNewCtx.reserves=(identNewCtx.reserves||[]).filter(function(r){ return valides.indexOf(r)>=0; });
+  valides.forEach(function(r){
+    var b=document.createElement('button');
+    b.type='button'; b.className='ident-new-t'+(identNewCtx.reserves.indexOf(r)>=0?' on':'');
+    b.style.cssText='border-radius:9px;padding:6px 10px;font-size:12px;cursor:pointer;font-family:inherit';
+    b.textContent=r;
+    b.addEventListener('click',function(){
+      var i=identNewCtx.reserves.indexOf(r);
+      if(i>=0){ identNewCtx.reserves.splice(i,1); } else { identNewCtx.reserves.push(r); }
+      identNewReservesPeindre();
+    });
+    box.appendChild(b);
+  });
+  if(h) h.textContent = valides.length
+    ? ('Le menu General du Discord US sert le contenu de la réserve cochée.'+(mk!=='us'?' Model FR : sans effet pour l’instant.':''))
+    : ('Aucune réserve '+mk.toUpperCase()+'.');
 }
 async function identNewCreate(){
   var n=document.getElementById('ident-new-name'), err=document.getElementById('ident-new-err'), go=document.getElementById('ident-new-go');
@@ -11209,12 +11290,39 @@ async function identNewCreate(){
       if(go){ go.disabled=false; go.textContent='Créer'; }
       return;
     }
-    if(typeof showToast==='function') showToast('✓ Identité @'+String(j.identity||'').replace(/^v2_/,'')+' créée'+(j.social?' — import des vidéos lancé':'')+(j.warn?(' ('+j.warn+')'):''),j.warn?'info':'success');
+    /* MARCHE, RESERVES, CE QUI MARCHE : les routes de « Modifier », dans le
+       meme ordre qu Enregistrer (le marche AVANT les reserves : lier compare
+       les marches). Un refus est DIT, jamais avale. */
+    var avert=[], v2=String(identNewCtx.vtab||'').indexOf('v2')===0;
+    async function reglage(url, champs, quoi){
+      var f=new FormData(); f.set('identity', j.identity); f.set('ajax','1');
+      Object.keys(champs).forEach(function(k){ f.set(k, champs[k]); });
+      try{
+        var r2=await fetch(url,{method:'POST',body:f,credentials:'same-origin'});
+        var j2=null; try{ j2=await r2.json(); }catch(e4){}
+        if(!(j2&&j2.ok)) avert.push(quoi+' : '+((j2&&j2.error)||('HTTP '+r2.status)));
+      }catch(e5){ avert.push(quoi+' : '+e5); }
+    }
+    await reglage('/identity/market', {market: identNewCtx.market||'fr'}, 'marché');
+    if(!v2 && identNewCtx.type!=='reserve' && (identNewCtx.reserves||[]).length)
+      await reglage('/identity/reserves', {reserves: identNewCtx.reserves.slice().sort().join(',')}, 'réserves liées');
+    if((identNewCtx.styles||[]).length)
+      await reglage('/identity/styles', {styles: identNewCtx.styles.join(',')}, 'ce qui marche');
     var vt=identNewCtx.vtab||'cloudreels', ik=identNewCtx.ikey||'';
     /* Les videos arrivent dans la Video brut : c est la qu il faut atterrir. */
     if(j.social){ vt=(String(vt).indexOf('v2')===0)?'v2brutes':'cloudbrutes'; ik='cloud_brutes_ident'; }
     // reload complet : toutes les sidebars vault doivent afficher la nouvelle identité
-    window.location.href='/?tab='+encodeURIComponent(vt)+(ik?('&'+ik+'='+encodeURIComponent(j.identity)):'');
+    var dest='/?tab='+encodeURIComponent(vt)+(ik?('&'+ik+'='+encodeURIComponent(j.identity)):'');
+    if(avert.length){
+      /* la page qui se recharge effacerait l avertissement : on le montre
+         ici, et le bouton ouvre l identite quand on l a lu */
+      if(err) err.textContent='Identité créée, mais pas tout : '+avert.join(' · ')+'. À refaire dans Modifier.';
+      if(go){ go.disabled=false; go.textContent='Ouvrir @'+String(j.identity||'').replace(/^v2_/,'');
+              go.onclick=function(){ window.location.href=dest; }; }
+      return;
+    }
+    if(typeof showToast==='function') showToast('✓ Identité @'+String(j.identity||'').replace(/^v2_/,'')+' créée'+(j.social?' — import des vidéos lancé':'')+(j.warn?(' ('+j.warn+')'):''),j.warn?'info':'success');
+    window.location.href=dest;
   }catch(e){
     if(err) err.textContent=String(e);
     if(go){ go.disabled=false; go.textContent='Créer'; }
@@ -15539,7 +15647,7 @@ body.light #pf-modal .pf-card img{background:#eceff3!important}
 
 <!-- ===== Nouvelle identité (bouton ＋ des sidebars de la Bibliothèque) ===== -->
 <div id="ident-new-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center" onclick="identNewClose()">
-  <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:20px;width:330px;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
+  <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:20px;width:330px;max-height:92vh;overflow-y:auto;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
     <div style="font-weight:800;font-size:15px">＋ Nouvelle identité</div>
     <input id="ident-new-link" type="text" placeholder="Lien TikTok ou Instagram (optionnel)" autocomplete="off"
            oninput="identNewLink(this.value)"
@@ -15569,6 +15677,25 @@ body.light #pf-modal .pf-card img{background:#eceff3!important}
       <button type="button" id="ident-new-t-identite" class="ident-new-t" onclick="identNewType('identite')" style="flex:1;border-radius:9px;padding:8px;font-size:12.5px;cursor:pointer;font-family:inherit">Identité</button>
       <button type="button" id="ident-new-t-modele" class="ident-new-t" onclick="identNewType('modele')" style="flex:1;border-radius:9px;padding:8px;font-size:12.5px;cursor:pointer;font-family:inherit">Modèle</button>
       <button type="button" id="ident-new-t-reserve" class="ident-new-t" onclick="identNewType('reserve')" title="Contenu partagé par plusieurs modèles (ex. Blonde) — jamais de vidéo brute" style="flex:1;border-radius:9px;padding:8px;font-size:12.5px;cursor:pointer;font-family:inherit">Réserve</button>
+    </div>
+    <!-- MARCHE, RESERVES LIEES, CE QUI MARCHE : les memes reglages que
+         « Modifier », des la creation (demande du proprietaire, 26/09/2026).
+         Ils partent par les memes routes, dans le meme ordre qu Enregistrer. -->
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="font-size:12px;color:#c4c4cc">March&eacute;</div>
+      <div style="display:flex;gap:8px">
+        <button type="button" id="ident-new-mk-fr" class="ident-new-t" onclick="identNewMarket('fr')" style="flex:1;border-radius:9px;padding:8px;font-size:12.5px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;gap:6px"><svg viewBox='0 0 3 2' width='17' height='11' preserveAspectRatio='none' style='border-radius:2px;flex-shrink:0;box-shadow:0 0 0 1px rgba(255,255,255,.22)'><rect width='1' height='2' fill='#0055a4'/><rect x='1' width='1' height='2' fill='#fff'/><rect x='2' width='1' height='2' fill='#ef4135'/></svg> FR</button>
+        <button type="button" id="ident-new-mk-us" class="ident-new-t" onclick="identNewMarket('us')" style="flex:1;border-radius:9px;padding:8px;font-size:12.5px;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;justify-content:center;gap:6px"><svg viewBox='0 0 19 10' width='19' height='10' preserveAspectRatio='none' style='border-radius:2px;flex-shrink:0;box-shadow:0 0 0 1px rgba(255,255,255,.22)'><rect width='19' height='10' fill='#fff'/><rect x='0' y='0.000' width='19' height='0.769' fill='#b22234'/><rect x='0' y='1.538' width='19' height='0.769' fill='#b22234'/><rect x='0' y='3.077' width='19' height='0.769' fill='#b22234'/><rect x='0' y='4.615' width='19' height='0.769' fill='#b22234'/><rect x='0' y='6.154' width='19' height='0.769' fill='#b22234'/><rect x='0' y='7.692' width='19' height='0.769' fill='#b22234'/><rect x='0' y='9.231' width='19' height='0.769' fill='#b22234'/><rect width='7.6' height='5.385' fill='#3c3b6e'/></svg> US</button>
+      </div>
+    </div>
+    <div id="ident-new-reswrap" style="display:none;flex-direction:column;gap:6px">
+      <div style="font-size:12px;color:#c4c4cc">R&eacute;serves li&eacute;es</div>
+      <div id="ident-new-reserves" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+      <div id="ident-new-rhint" style="font-size:11px;color:#888;line-height:1.5"></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="font-size:12px;color:#c4c4cc">Ce qui marche</div>
+      <div id="ident-new-styles" style="display:flex;gap:6px;flex-wrap:wrap"></div>
     </div>
     <label style="font-size:12px;color:#c4c4cc;display:flex;flex-direction:column;gap:6px">Photo de profil (optionnel)
       <input id="ident-new-avatar" type="file" accept="image/png,image/jpeg,image/webp" style="font-size:12px;color:#9a9aa6">

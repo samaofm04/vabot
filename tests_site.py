@@ -6546,6 +6546,14 @@ try:
           "identEditCtx.rename = !b.getAttribute('data-typelock')" in _srcA)
     check("interface : le retrait se fait en deux temps",
           "identEditRetirerOuvre" in _srcA and "ident-edit-dangernom" in _srcA)
+    _cre = _srcA[_srcA.find("async function identNewCreate"):][:4000]
+    check("creation : marche, reserves liees et ce qui marche des « Nouvelle identite »",
+          'id="ident-new-mk-fr"' in _srcA and 'id="ident-new-reserves"' in _srcA
+          and 'id="ident-new-styles"' in _srcA)
+    check("creation : les reglages partent par les routes de Modifier, marche AVANT reserves",
+          0 < _cre.find("'/identity/market'") < _cre.find("'/identity/reserves'") < _cre.find("'/identity/styles'"))
+    check("creation : un reglage refuse est DIT (pas de rechargement qui l efface)",
+          "avert.push(" in _cre and "Identité créée, mais pas tout" in _cre)
     check("interface : la confirmation se fait par le mot de passe (champ masque)",
           'id="ident-edit-dangernom" type="password"' in _srcA and "fd.set('password'" in _srcA)
     check("interface : le recapitulatif est demande au serveur, pas devine",
