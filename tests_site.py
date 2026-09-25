@@ -15114,8 +15114,11 @@ try:
     # gemini-2.0-flash codé en dur est mort en 404 sans un mot : une seule
     # adresse Gemini dans tout le projet, celle de GEMINI_URL
     _racG = pathlib.Path(__file__).resolve().parent
+    # .claude/ : les worktrees d'autres sessions (copies complètes du dépôt)
+    # y vivent ; les compter faisait voir deux tg_router.py.
     _occG = [f.name for f in _racG.rglob("*.py")
-             if "venv" not in f.parts and f.name != "tests_site.py"
+             if "venv" not in f.parts and ".claude" not in f.parts
+             and f.name != "tests_site.py"
              for _l in f.read_text(encoding="utf-8", errors="ignore").splitlines()
              if "generativelanguage.googleapis.com" in _l]
     check("une seule adresse Gemini dans le projet (GEMINI_URL)",
