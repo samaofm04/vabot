@@ -17352,6 +17352,144 @@ except Exception as _eTt:
     import traceback as _tbTt
     check("trash (site) : testable", False, repr(_eTt)[:200] + " " + _tbTt.format_exc()[-500:])
 
+# ------------------------------------------------ 37. Infloww, un module a part
+print()
+print("=" * 70)
+print("Infloww : l API officielle, lue a part, sans toucher au reste")
+print("=" * 70)
+try:
+    import infloww as _ifw
+    import datetime as _dtI
+    import tempfile as _tfI
+    import json as _jsI
+    from pathlib import Path as _plI
+
+    # l identifiant d agence est dans la cle : sans lui, Cloudflare bloque tout
+    check("l identifiant d agence se lit dans la cle",
+          _ifw.oid("st_ifw_2145486421426233abcDEF") == "2145486421426233")
+    check("une cle sans identifiant ne fabrique pas d x-oid", _ifw.oid("nimportequoi") == "")
+    # l API renvoie ses compteurs en TEXTE
+    check("les compteurs en texte deviennent des nombres",
+          _ifw._n("210") == 210 and _ifw._n("8.9") == 8 and _ifw._n(None) == 0 and _ifw._n("x") == 0)
+    _tr = list(_ifw._tranches(_dtI.date(2026, 7, 1), _dtI.date(2026, 9, 25)))
+    check("une periode longue est coupee en tranches de 31 jours au plus",
+          all((b - a).days + 1 <= 31 for a, b in _tr)
+          and _tr[0][0] == _dtI.date(2026, 7, 1) and _tr[-1][1] == _dtI.date(2026, 9, 25)
+          and all(_tr[i][1] + _dtI.timedelta(days=1) == _tr[i + 1][0] for i in range(len(_tr) - 1)))
+
+    _savI = (_ifw._get, _ifw.CACHE_FICHIER)
+    try:
+        _ifw.CACHE_FICHIER = _plI(_tfI.mkdtemp()) / "c.json"
+        _vus = []
+
+        def _faux(chemin, params):
+            _vus.append((chemin, dict(params)))
+            if chemin == "/v1/creator-report/fans/subscriber-count":
+                a = _dtI.date.fromisoformat(params["startTime"])
+                b = _dtI.date.fromisoformat(params["endTime"])
+                return {"data": {"list": [{"date": (a + _dtI.timedelta(days=i)).isoformat(),
+                                           "newSubscribers": "10", "subscriberRenewals": "1"}
+                                          for i in range((b - a).days + 1)]}}
+            if chemin == "/v1/links":
+                if params.get("cursor"):
+                    return {"data": {"list": [{"id": "2", "name": "B, avec virgule", "subCount": "5",
+                                               "clickCount": "50", "createdTime": "1789770929000"}]},
+                            "hasMore": False}
+                return {"data": {"list": [{"id": "1", "name": "<b>VA 1</b>", "subCount": "40",
+                                           "clickCount": "400", "createdTime": "1789770929000"}]},
+                        "hasMore": True, "cursor": 99}
+            return {}
+        _ifw._get = _faux
+        _pj = _ifw.abonnes_par_jour("c1", _dtI.date(2026, 7, 1), _dtI.date(2026, 9, 1))
+        _appels = [v for v in _vus if v[0].endswith("subscriber-count")]
+        check("les abonnes jour par jour couvrent toute la periode, sans trou",
+              len(_pj) == 63 and sum(x["nouveaux"] for x in _pj) == 630)
+        check("aucune requete ne depasse 31 jours",
+              all((_dtI.date.fromisoformat(p["endTime"]) - _dtI.date.fromisoformat(p["startTime"])).days + 1 <= 31
+                  for _, p in _appels))
+        _vus.clear()
+        _pj2 = _ifw.abonnes_par_jour("c1", _dtI.date(2026, 7, 1), _dtI.date(2026, 9, 1))
+        check("un second passage relit le cache, sans rappeler l API",
+              not _vus and _pj2 == _pj)
+
+        _l = _ifw.liens_suivi("c1", _dtI.date.today() - _dtI.timedelta(days=5))
+        check("les liens sont lus sur toutes les pages, et tries par abonnes",
+              [x["id"] for x in _l] == ["1", "2"] and _l[0]["abonnes"] == 40)
+
+        # un echec ne doit jamais etre mis en cache
+        _ifw.CACHE_FICHIER = _plI(_tfI.mkdtemp()) / "c2.json"
+        def _panne(chemin, params):
+            raise _ifw.ErreurInfloww("boom", 500, "rid-1")
+        _ifw._get = _panne
+        try:
+            _ifw.creatrices()
+        except _ifw.ErreurInfloww:
+            pass
+        _cache = _jsI.loads(_ifw.CACHE_FICHIER.read_text()) if _ifw.CACHE_FICHIER.exists() else {}
+        check("une erreur n est jamais gardee en cache", "creators" not in _cache)
+    finally:
+        _ifw._get, _ifw.CACHE_FICHIER = _savI
+
+    # la page : rendue cote serveur, sans JavaScript, noms echappes
+    _b = {"creatrice": {"userName": "jessyewdiference"}, "debut": "2026-09-01", "fin": "2026-09-25",
+          "jours": [{"date": "2026-09-24", "nouveaux": 80, "renouvellements": 0},
+                    {"date": "2026-09-25", "nouveaux": 12, "renouvellements": 1}],
+          "nouveaux": 92, "renouvellements": 1, "moyenne": 46.0, "lu_a": 0,
+          "liens": [{"id": "1", "nom": "<script>x</script>, VA 1", "code": "77", "source": "Instagram",
+                     "clics": 21119, "abonnes": 1883, "conversion": "8.92", "revenus": 0,
+                     "termine": False, "cree": "2026-07-10"}]}
+    _h = _ifw.page_html("jessyewdiference", 30, _b)
+    check("la page n a aucun JavaScript (rien a casser dans une chaine Python)",
+          "<script" not in _h.replace("&lt;script&gt;", ""))
+    check("un nom de lien est echappe, et garde sa virgule",
+          "&lt;script&gt;x&lt;/script&gt;, VA 1" in _h)
+    check("les milliers sont espaces sans toucher au reste", "21\u202f119" in _h and "1\u202f883" in _h)
+    _he = _ifw.page_html("jessyewdiference", 30,
+                         erreur=_ifw.ErreurInfloww("Query time span exceeds", 400, "RID-42"))
+    check("une panne est dite sur la page, avec l identifiant pour le support",
+          "Query time span exceeds" in _he and "RID-42" in _he and "HTTP 400" in _he)
+
+    # la route : admin seulement
+    import web_upload as _wI
+    _appI = _wI.create_app(); _appI.config["TESTING"] = True
+    _usersI = _wI._load_web_users
+    _savB = _ifw.bilan
+    try:
+        _ifw.bilan = lambda pseudo, jours: dict(_b)
+        _wI._load_web_users = lambda: {"chat1": {"role": "chatter", "password": "x"}}
+        _cI = _appI.test_client()
+        with _cI.session_transaction() as _s:
+            _s["auth"] = True; _s["username"] = "chat1"; _s["role"] = "chatter"
+        check("un chatteur ne voit PAS la page Infloww", _cI.get("/infloww").status_code == 403)
+        _cA = _appI.test_client()
+        check("sans connexion, on est renvoye a l accueil",
+              _cA.get("/infloww").status_code in (301, 302))
+        # un vrai compte admin (is_auth rejette un nom absent du fichier des comptes)
+        _wI._load_web_users = lambda: {"admin": {"role": "admin", "password": "x"}}
+        with _cA.session_transaction() as _s:
+            _s["auth"] = True; _s["username"] = "admin"; _s["role"] = "admin"
+        _rI = _cA.get("/infloww?jours=7")
+        check("l admin voit la page, rendue", _rI.status_code == 200 and b"Infloww" in _rI.data)
+        check("une periode inconnue retombe sur 30 jours",
+              b'class="ong on" href="?creatrice=jessyewdiference&jours=30"' in _cA.get("/infloww?jours=999").data)
+    finally:
+        _ifw.bilan = _savB
+        _wI._load_web_users = _usersI
+
+    # a part : rien d autre n importe ce module
+    import re as _reI, glob as _gI
+    _importeurs = []
+    for _f in _gI.glob("*.py") + _gI.glob("cogs/*.py"):
+        if _f in ("infloww.py", "tests_site.py"):
+            continue
+        _src = open(_f, encoding="utf-8", errors="replace").read()
+        if _reI.search(r"^\s*(import infloww|from infloww import)", _src, _reI.M) or "import infloww as" in _src:
+            _importeurs.append(_f)
+    check("seule la route /infloww importe le module (rien d autre n en depend)",
+          _importeurs == ["web_upload.py"], str(_importeurs))
+except Exception as _eI:
+    check("infloww : testable", False, repr(_eI)[:200])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

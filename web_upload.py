@@ -60785,6 +60785,42 @@ def create_app():
                         "restants": len([h for h in demandes
                                          if not sortie[h].get("connu")])})
 
+    @app.route("/infloww")
+    def infloww_page():
+        """Les abonnés lus par l'API officielle d'Infloww — une page À PART.
+
+        Le propriétaire a voulu cette source isolée pour ne rien casser : rien
+        d'autre du site n'importe infloww.py, et cette page ne nourrit ni le
+        podium ni la paie. Admin seulement : ce sont les chiffres de l'agence.
+        """
+        from flask import Response as _R
+        if not is_auth():
+            return redirect("/")
+        if not _is_admin():
+            return ("Réservé à l'administration.", 403)
+        import infloww as _ifw
+        pseudo = str(request.args.get("creatrice") or "")
+        if pseudo not in _ifw.suivies():
+            pseudo = _ifw.suivies()[0]
+        try:
+            jours = int(request.args.get("jours") or 30)
+        except ValueError:
+            jours = 30
+        if jours not in _ifw.PERIODES:
+            jours = 30
+        try:
+            html = _ifw.page_html(pseudo, jours, _ifw.bilan(pseudo, jours))
+        except _ifw.ErreurInfloww as e:
+            html = _ifw.page_html(pseudo, jours, erreur=e)
+        except Exception as e:
+            # l'erreur s'affiche SUR la page : une page blanche ferait croire
+            # que l'API ne renvoie rien, alors qu'elle a peut-être répondu faux
+            html = _ifw.page_html(pseudo, jours, erreur=_ifw.ErreurInfloww(
+                f"{type(e).__name__} : {e}"))
+        r = _R(html, mimetype="text/html")
+        r.headers["Cache-Control"] = "no-store"
+        return r
+
     @app.route("/version")
     def version_du_site():
         """Quelle version du code ce serveur fait-il tourner ?
