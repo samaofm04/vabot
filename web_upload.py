@@ -11115,6 +11115,8 @@ document.addEventListener('DOMContentLoaded', function(){
 #market-floating #va-notif-btn{color:#f59e0b;gap:3px}
 #market-floating #va-notif-btn.encours{color:#3b82f6}
 #market-floating #va-notif-btn svg{box-shadow:none;opacity:1;border-radius:0}
+#market-floating #nat-reserve-btn svg{box-shadow:none;border-radius:0}
+@media(max-width:768px){#market-floating #nat-reserve-btn .nat-lbl{display:none}}
 body.light #market-floating #va-notif-btn{color:#b45309!important}
 body.light #market-floating #va-notif-btn.encours{color:#1d4ed8!important}
 #va-notif-panel{position:fixed;z-index:9998;width:340px;max-width:calc(100vw - 24px);max-height:65vh;
@@ -11900,6 +11902,7 @@ document.addEventListener('click',function(e){
   <button type="button" data-mkopt="us" onclick="marketSet('us')" aria-label="Etats-Unis">
     <svg viewBox="0 0 19 10" width="19" height="11" preserveAspectRatio="none"><rect width="19" height="10" fill="#fff"/><rect y="0" width="19" height="0.77" fill="#b22234"/><rect y="1.54" width="19" height="0.77" fill="#b22234"/><rect y="3.08" width="19" height="0.77" fill="#b22234"/><rect y="4.62" width="19" height="0.77" fill="#b22234"/><rect y="6.15" width="19" height="0.77" fill="#b22234"/><rect y="7.69" width="19" height="0.77" fill="#b22234"/><rect y="9.23" width="19" height="0.77" fill="#b22234"/><rect width="7.6" height="5.38" fill="#3c3b6e"/></svg>
   </button>
+  <button type="button" id="nat-reserve-btn" data-natopt="reserve" onclick="natureToggle()" title="N&#39;afficher que les réserves (contenu partagé)"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg><span class="nat-lbl">Réserves</span></button>
   <button type="button" id="va-notif-btn" onclick="vaNotifToggle(event)" aria-label="Notifications" style="display:none"><svg id="va-notif-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg><span id="va-notif-n"></span></button>
 </div>
 <!-- La liste du centre de notifications : un panneau a part (pas DANS le
@@ -15543,8 +15546,15 @@ def _marche_cache(ident: str, selected: str = "") -> str:
     try:
         from flask import request as _rq
         mk = (_rq.cookies.get("va_market") or "").strip().lower()
+        nat = (_rq.cookies.get("va_nature") or "").strip().lower()
     except Exception:
         return ""          # hors requete (tests, rendu hors ligne)
+    # Le bouton « Réserves » du selecteur : ne montrer QUE les reserves. Il se
+    # combine avec le marche (US + Réserves = les reserves US), et passe par
+    # le meme cookie que le marche, pour la meme raison : pas de liste
+    # complete qui clignote avant que le JavaScript ne la filtre.
+    if nat == "reserve" and _type_identite(ident) != "reserve":
+        return "display:none"
     if mk not in ("fr", "us"):
         return ""          # aucun filtre choisi : on montre tout
     return "" if identity_market(ident) == mk else "display:none"
@@ -15567,11 +15577,14 @@ def _marche_prefere(identities: list) -> list:
     try:
         from flask import request as _rq
         mk = (_rq.cookies.get("va_market") or "").strip().lower()
+        nat = (_rq.cookies.get("va_nature") or "").strip().lower()
     except Exception:
         return identities
-    if mk not in ("fr", "us"):
-        return identities
-    gardees = [i for i in identities if identity_market(i) == mk]
+    gardees = list(identities)
+    if nat == "reserve":
+        gardees = [i for i in gardees if _type_identite(i) == "reserve"]
+    if mk in ("fr", "us"):
+        gardees = [i for i in gardees if identity_market(i) == mk]
     return gardees or identities
 
 
@@ -23174,9 +23187,25 @@ function mkRowsMarche(rows){
 function marketCur(){
   try{ return localStorage.getItem('vault_market') || ''; }catch(e){ return ''; }
 }
+// « Réserves » : ne montrer que le contenu partage. Se combine avec le marche.
+function natureCur(){
+  try{ return localStorage.getItem('vault_nature') || ''; }catch(e){ return ''; }
+}
+function natureCookie(v){
+  try{ document.cookie = 'va_nature=' + encodeURIComponent(v || '')
+        + ';path=/;max-age=31536000;samesite=lax'; }catch(e){}
+}
+function natureToggle(){
+  var v = (natureCur() === 'reserve') ? '' : 'reserve';
+  try{ localStorage.setItem('vault_nature', v); }catch(e){}
+  natureCookie(v);
+  vaultRefilter();
+}
 function vaultItemVisible(a){
   var mk = marketCur();
   if(mk && (a.getAttribute('data-market') || '') !== mk) return false;
+  var nat = natureCur();
+  if(nat && (a.getAttribute('data-nature') || '') !== nat) return false;
   var q = window.__vaultQ;
   if(q && (a.getAttribute('data-ident') || '').toLowerCase().indexOf(q) === -1) return false;
   // Le filtre « Avec du contenu / Vides » a ete retire : il cachait des
@@ -23206,7 +23235,8 @@ function vaultRefilter(){
         var q = window.__vaultQ || '';
         note.innerHTML = q
           ? 'Aucune identite ne correspond a « ' + q.replace(/[<>&]/g,'') + ' ».'
-          : 'Aucune identite affichee (filtre de marche actif).';
+          : (natureCur() ? 'Aucune réserve affichee (filtre Réserves actif).'
+                         : 'Aucune identite affichee (filtre de marche actif).');
         var b = document.createElement('button');
         b.textContent = 'Tout afficher';
         b.style.cssText = 'display:block;margin-top:8px;background:none;border:0;padding:0;'
@@ -23214,8 +23244,9 @@ function vaultRefilter(){
         b.onclick = function(){
           window.__vaultQ = '';
           document.querySelectorAll('.vault-search input').forEach(function(i){ i.value = ''; });
-          try{ localStorage.setItem('vault_market',''); }catch(e){}
+          try{ localStorage.setItem('vault_market',''); localStorage.setItem('vault_nature',''); }catch(e){}
           marcheCookie('');
+          natureCookie('');
           vaultRefilter();
         };
         note.appendChild(b);
@@ -23227,6 +23258,8 @@ function vaultRefilter(){
     if((b.getAttribute('data-mkopt') || '') === mk) b.setAttribute('data-on','1');
     else b.removeAttribute('data-on');
   });
+  var nb = document.getElementById('nat-reserve-btn');
+  if(nb){ if(natureCur() === 'reserve') nb.setAttribute('data-on','1'); else nb.removeAttribute('data-on'); }
 }
 function marketSet(v){
   try{ localStorage.setItem('vault_market', v || ''); }catch(e){}
@@ -23251,6 +23284,10 @@ document.addEventListener('DOMContentLoaded', function(){
     if(document.cookie.indexOf('va_market=') === -1){
       var _mk = localStorage.getItem('vault_market') || '';
       if(_mk) marcheCookie(_mk);
+    }
+    if(document.cookie.indexOf('va_nature=') === -1){
+      var _nt = localStorage.getItem('vault_nature') || '';
+      if(_nt) natureCookie(_nt);
     }
   }catch(e){}
   vaultRefilter();
@@ -23752,7 +23789,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
             f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
             f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}' "
             f"data-market='{identity_market(ident)}' "
-            f"style='{_marche_cache(ident, selected)}'>"
+            f"style='{_marche_cache(ident, selected)}' data-nature='{_type_identite(ident)}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
             f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em;display:flex;"
@@ -25356,7 +25393,7 @@ def _render_cloud_captions_html() -> str:
             f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
             f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}' "
             f"data-market='{identity_market(ident)}' "
-            f"style='{_marche_cache(ident, selected)}'>"
+            f"style='{_marche_cache(ident, selected)}' data-nature='{_type_identite(ident)}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
             f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em;display:flex;"
@@ -25661,7 +25698,7 @@ def _render_cloud_drive_html(sections=_DRIVE_SECTIONS, tab: str = "clouddrive",
             f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
             f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}' "
             f"data-market='{identity_market(ident)}' "
-            f"style='{_marche_cache(ident, selected)}'>"
+            f"style='{_marche_cache(ident, selected)}' data-nature='{_type_identite(ident)}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
             f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em;display:flex;"
@@ -26149,7 +26186,7 @@ def _render_textvault_html(cat: str) -> str:
             f"onmouseenter='vaultPrefetch(this.href)' onmouseleave='vaultPrefetchCancel()' "
             f"data-no-loader='1' class='vault-item {active_class}' data-ident='{ident}' "
             f"data-market='{identity_market(ident)}' "
-            f"style='{_marche_cache(ident, selected)}'>"
+            f"style='{_marche_cache(ident, selected)}' data-nature='{_type_identite(ident)}'>"
             f"<div style='position:relative;display:inline-block'>{avatar_html}{status_dot}</div>"
             f"<div style='flex:1;min-width:0'>"
             f"<div style='font-weight:700;font-size:14px;letter-spacing:-.01em;display:flex;"

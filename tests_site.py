@@ -15773,6 +15773,52 @@ try:
 except Exception as _eNO:
     check("notifs : testable", False, repr(_eNO)[:160])
 
+print()
+print("=" * 70)
+print("Filtre « Réserves » : ne voir que le contenu partage")
+print("=" * 70)
+try:
+    import re as _reNT
+    import web_upload as _wNT
+    _appNT = _wNT.create_app()
+    _appNT.config["TESTING"] = True
+    _savNT = (_wNT._load_web_users, _wNT._type_identite)
+    try:
+        _wNT._load_web_users = lambda: {"admin": {"role": "admin", "password": "x"}}
+        _cNT = _appNT.test_client()
+        with _cNT.session_transaction() as _sNT:
+            _sNT["auth"] = True
+            _sNT["username"] = "admin"
+            _sNT["role"] = "owner"
+            _sNT["sid"] = "tests"
+        _hNT = _cNT.get("/").get_data(as_text=True)
+        _iNT = _hNT.index('<div id="market-floating"')
+        _mfNT = _hNT[_iNT:_hNT.index("</div>", _iNT)]
+        check("reserves : bouton « Réserves » dans le selecteur, qui n est pas un marche",
+              'id="nat-reserve-btn"' in _mfNT and _hNT.count("data-mkopt=") == 3)
+        check("reserves : meme point de decision que le marche (page)",
+              "var nat = natureCur();" in _hNT and "function natureToggle(" in _hNT)
+        _rNT = _cNT.get("/?tab=cloudreels&frag=1", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+        _cartesNT = _reNT.findall(r"<a [^>]*class='vault-item[^>]*>", _rNT)
+        check("reserves : chaque carte porte sa nature",
+              len(_cartesNT) > 0 and all("data-nature=" in x for x in _cartesNT), "%d carte(s)" % len(_cartesNT))
+        # cote serveur : avec le cookie, tout ce qui n est pas une reserve est masque d entree
+        _wNT._type_identite = lambda i: "reserve" if i == "zzz_blonde" else "modele"
+        with _appNT.test_request_context("/", headers={"Cookie": "va_nature=reserve"}):
+            check("reserves : le serveur masque les non-reserves des le HTML",
+                  _wNT._marche_cache("zzz_lola") == "display:none" and _wNT._marche_cache("zzz_blonde") == "")
+            check("reserves : l identite ouverte reste visible",
+                  _wNT._marche_cache("zzz_lola", "zzz_lola") == "")
+            check("reserves : l identite par defaut est une reserve",
+                  _wNT._marche_prefere(["zzz_lola", "zzz_blonde"]) == ["zzz_blonde"])
+        with _appNT.test_request_context("/"):
+            check("reserves : sans le filtre, rien ne change",
+                  _wNT._marche_cache("zzz_lola") == "" and _wNT._marche_prefere(["zzz_lola", "zzz_blonde"]) == ["zzz_lola", "zzz_blonde"])
+    finally:
+        _wNT._load_web_users, _wNT._type_identite = _savNT
+except Exception as _eNT:
+    check("reserves (filtre) : testable", False, repr(_eNT)[:160])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
