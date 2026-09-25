@@ -5298,9 +5298,24 @@ try:
     # c'est ce qui rendait le menu illisible. La commande /captionbrut reste.
     _BTNS = ("cmenu:capbanger", "cmenu:montagebanger", "cmenu:templatebanger",
              "cmenu:templatebrut", "cmenu:brutbanger")
+    # Depuis le 25/09/2026 (menus par famille, maquette validee par le
+    # proprietaire), quatre de ces cinq boutons vivent dans le SOUS-MENU de
+    # leur famille -- « 💬 Caption ▸ » et « 🎞️ Template ▸ » -- et non plus sur
+    # le menu lui-meme : il etait a 25 composants sur 25, Trash n'y entrait
+    # pas. Ce qu'on protege ne change pas : chacun reste ATTEIGNABLE depuis le
+    # menu VA, en bouton direct ou par le lanceur de sa famille. (Les anciens
+    # custom_id des menus deja epingles restent geres : tests_jailbreak.py.)
+    def _atteignableFv(b):
+        if b in _idsFv:
+            return True
+        _cleFv = b.split(":", 1)[1]
+        return any(_cleFv in _f.actions and ("cmenu:fam:" + _f.cle) in _idsFv
+                   and _cleFv in _uFv._variantes_menu_va(_f.cle, None, False)
+                   for _f in _uFv._FAMILLES_MENU)
+
     check("favoris : les 5 boutons sont dans le menu VA",
-          all(b in _idsFv for b in _BTNS),
-          str([b for b in _BTNS if b not in _idsFv]))
+          all(_atteignableFv(b) for b in _BTNS),
+          str([b for b in _BTNS if not _atteignableFv(b)]))
     check("favoris : les 5 boutons sont declares dans _MENU_BTN_FEATURE",
           all(_uFv._MENU_BTN_FEATURE.get(b) == "contenu" for b in _BTNS),
           str([b for b in _BTNS if _uFv._MENU_BTN_FEATURE.get(b) != "contenu"]))
@@ -5400,8 +5415,17 @@ try:
     #
     # C est la REGLE qu on protege, pas les nombres : une rangee, une famille,
     # et aucune qui deborde les cinq places de Discord.
+    #
+    # Forme du 25/09/2026 : {0:5, 1:4, 2:3, 3:4} -- CHANGEMENT VOULU (maquette
+    # validee par le proprietaire). Le panneau etait a 24 composants sur 25,
+    # les variantes etalees sur quatre rangees : Trash Trend n'y tenait pas.
+    # Chaque famille a variantes (Caption, Template, Trash, Flash) devient UN
+    # lanceur « ▸ » en rangee 3, qui ouvre ses variantes en ephemere. Rangee 0 :
+    # la quantite (un bouton depuis qu'elle a quitte le deroulant) et
+    # l'identite ; 1 : les trends et les publications ; 2 : le brut. Une
+    # famille de plus ne coutera qu'un lanceur.
     check("favoris : le panneau US garde ses 4 familles sur 4 rangees",
-          _rowsFv == {1: 5, 2: 5, 3: 5, 4: 5}, str(_rowsFv))
+          _rowsFv == {0: 5, 1: 4, 2: 3, 3: 4}, str(_rowsFv))
     check("favoris : et il ne deborde jamais les 5 places par rangee",
           all(_n <= 5 for _n in _rowsFv.values()) and len(_rowsFv) <= 4
           and sum(_rowsFv.values()) <= 20,
@@ -9249,8 +9273,12 @@ try:
     # template / flash » n avait qu une reponse possible.
     check("assistant : Caption saute le choix de famille",
           "if(pfState.famille === 'caption'){ pfEtape3('captions'); return; }" in _srcDv)
-    check("assistant : Template propose template ET flash, pas caption",
-          "Add perfect — 2. Template ou flash ?" in _srcDv
+    # CHANGEMENT VOULU le 25/09/2026 : Trash Trend se range ENTRE les deux
+    # (Template · Trash · Flash, l'ordre demande par le proprietaire). L'etape 2
+    # propose donc trois familles -- et toujours pas caption.
+    check("assistant : Template propose template, trash ET flash, pas caption",
+          "Add perfect — 2. Template, trash ou flash ?" in _srcDv
+          and 'data-pfgenre="trash"' in _srcDv
           and _srcDv.count('data-pfgenre="captions"') == 0)
 except Exception as _eDv:
     check("dossiers video : testable", False, repr(_eDv)[:200])
@@ -16004,9 +16032,12 @@ try:
               _cuGn._MODEL_REELLE.get() is None and _cuGn._IDENTITY_OVERRIDE.get() is None)
 
         # -- 4. le message General : etats, rangees, custom_id ------------------
+        # JBFamilleBouton (« jbus:f: », les lanceurs de famille du panneau US
+        # depuis le 25/09/2026) en fait partie : un custom_id jbg: qui tomberait
+        # sous son motif lancerait les deux.
         _tplJbus = [getattr(c, "__discord_ui_compiled_template__")
                     for c in (_cuGn.JBModelButton, _cuGn.JBQtyBouton, _cuGn.JBQtySelect,
-                              _cuGn.JBActionButton)]
+                              _cuGn.JBActionButton, _cuGn.JBFamilleBouton)]
         _tplJbg = [getattr(c, "__discord_ui_compiled_template__")
                    for c in (_cuGn.JBGenButton, _cuGn.JBGenQtyBouton, _cuGn.JBGenReserveBouton)]
 
@@ -16025,8 +16056,17 @@ try:
               and _vNue2 is not None)
         _e1, _v1 = _cuGn._jb_general(None, "zgen_lola", 3)
         _ids1 = _idsGn(_v1)
-        check("general : une reserve -> 11 actions + la quantite, pas de choix de reserve",
-              len(_ids1) == 12 and not any(i.startswith("jbg:r:") for i in _ids1), str(_ids1)[:160])
+        # 11 -> 13 le 25/09/2026, CHANGEMENT VOULU : « Trash » et « ⭐ Trash »
+        # rejoignent la rangee 4, devant Flash (Trash vit « entre » les
+        # templates et Flash). 13 actions + la quantite = 14 identifiants.
+        check("general : une reserve -> 13 actions + la quantite, pas de choix de reserve",
+              len(_ids1) == 14 and not any(i.startswith("jbg:r:") for i in _ids1), str(_ids1)[:160])
+        import marques_montage as _mmGn
+        _r4Gn = [getattr(i, "item", i).custom_id.split(":")[4] for i in _v1.children
+                 if getattr(i, "row", None) == 4]
+        check("general : rangee 4 = Trash, ⭐ Trash, puis Flash, ⭐ Flash",
+              _r4Gn == list(_mmGn.MARQUES["trash"]["actions"][:2])
+              + list(_mmGn.MARQUES["flash"]["actions"][:2]), str(_r4Gn))
         check("general : les cles sont exactement celles de la liste blanche",
               {i.split(":")[4] for i in _ids1 if i.startswith("jbg:a:")} == set(_cuGn._JB_GENERAL_RANGEES)
               and set(_cuGn._JB_GENERAL_RANGEES) <= {a[0] for a in _cuGn._JB_ACTIONS_US})
@@ -16348,6 +16388,969 @@ try:
 except Exception as _eGn:
     import traceback as _tbGn
     check("menu General : testable", False, repr(_eGn)[:200] + " " + _tbGn.format_exc()[-400:])
+
+# ==============================================================================
+# TRASH TREND (25/09/2026) : une marque de montage rangee ENTRE les templates
+# et Flash, exclusive avec Flash
+# ==============================================================================
+# Tout ce qui s'ecrit ici vit dans un dossier temporaire : les registres de
+# marque, les identites, les vignettes, la corbeille des doublons. Les chemins
+# sont des globales de web_upload relues a chaque appel (_fichier_marque) : les
+# rediriger suffit, et data/ n'est jamais touche.
+print()
+print("=" * 70)
+print("TRASH TREND : la marque entre les templates et Flash (site)")
+print("=" * 70)
+try:
+    import html.parser as _hpTt
+    import json as _jsTt
+    import os as _osTt
+    import pathlib as _plTt
+    import re as _reTt
+    import shutil as _shTt
+    import subprocess as _spTt
+    import tempfile as _tfTt
+    import marques_montage as _mmTt
+
+    # -- 1. LE MODULE : une seule table pour le nom, le logo, la couleur --------
+    _MTt, _FTt = _mmTt.MARQUES["trash"], _mmTt.MARQUES["flash"]
+    check("trash : marques_montage declare Flash et Trash, Trash AVANT Flash a l ecran",
+          set(_mmTt.MARQUES) == {"flash", "trash"} and _mmTt.ORDRE == ("trash", "flash"),
+          str(_mmTt.ORDRE))
+    check("trash : une donnee doublement marquee se lit Flash (PRIORITE)",
+          _mmTt.PRIORITE[0] == "flash"
+          and _mmTt.gagnante(["trash", "flash"]) == "flash"
+          and _mmTt.gagnante(["trash"]) == "trash" and _mmTt.gagnante([]) == "")
+    _champsTt = ("nom", "court", "emoji", "couleur", "couleur_clair", "fichier", "actions")
+    check("trash : chaque marque a sa fiche complete, des couleurs hex et SON registre",
+          all(all(_mmTt.MARQUES[c].get(k) for k in _champsTt) for c in _mmTt.MARQUES)
+          and all(_reTt.fullmatch(r"#[0-9a-fA-F]{6}", _mmTt.MARQUES[c][k])
+                  for c in _mmTt.MARQUES for k in ("couleur", "couleur_clair"))
+          and len({m["fichier"] for m in _mmTt.MARQUES.values()}) == len(_mmTt.MARQUES))
+    _actTt = [a for m in _mmTt.MARQUES.values() for a in m["actions"]]
+    # [a-z]+ : c'est le motif de la cle dans les custom_id « jbus:a:… ». Un
+    # chiffre ou un souligne rendrait le bouton muet, sans erreur nulle part.
+    check("trash : 4 actions par marque, en [a-z]+ (motif des custom_id), sans doublon",
+          all(len(m["actions"]) == 4 for m in _mmTt.MARQUES.values())
+          and all(_reTt.fullmatch(r"[a-z]+", a) for a in _actTt)
+          and len(set(_actTt)) == len(_actTt), str(_actTt))
+    # « trash » seul designe la CORBEILLE dans ce depot (bouton de
+    # suppression, fichiers trashed du Drive) : les deux ne doivent jamais
+    # pouvoir se confondre dans un grep.
+    check("trash : jamais « trash » seul dans les noms (le mot = corbeille ici)",
+          _MTt["fichier"] == "trash_trend.json"
+          and all(a.startswith(("templatetrash", "bruttrash")) for a in _MTt["actions"]),
+          str((_MTt["fichier"], _MTt["actions"])))
+    check("trash : le logo n est pas un symbole deja pris (🔥 💥 🗑️ ⚡ ⭐)",
+          _MTt["emoji"] not in ("🔥", "💥", "🗑️", "🗑", "⚡", "⭐")
+          and _MTt["emoji"] != _FTt["emoji"], _MTt["emoji"])
+    check("trash : autres() rend la marque a retirer quand on pose l autre",
+          _mmTt.autres("trash") == ("flash",) and _mmTt.autres("flash") == ("trash",))
+    try:
+        _mmTt.marque("trsh")
+        _kTt = False
+    except KeyError:
+        _kTt = True
+    check("trash : une cle mal tapee leve, au lieu de rendre une fiche vide", _kTt)
+    _dTt = _plTt.Path(_tfTt.mkdtemp(prefix="trash_mm_"))
+    try:
+        (_dTt / "l.json").write_text('["a|templates|x.mp4", 3]', encoding="utf-8")
+        (_dTt / "d.json").write_text('{"b|templates|y.mp4": 1}', encoding="utf-8")
+        (_dTt / "k.json").write_text("{pas du json", encoding="utf-8")
+        (_dTt / "n.json").write_text("42", encoding="utf-8")
+        check("trash : lire_cles_ou_erreur tolere un registre absent, une liste, un dict",
+              _mmTt.lire_cles_ou_erreur(_dTt / "absent.json") == (set(), "")
+              and _mmTt.lire_cles_ou_erreur(_dTt / "l.json") == ({"a|templates|x.mp4"}, "")
+              and _mmTt.lire_cles_ou_erreur(_dTt / "d.json") == ({"b|templates|y.mp4"}, ""))
+        _eKTt = _mmTt.lire_cles_ou_erreur(_dTt / "k.json")
+        _eNTt = _mmTt.lire_cles_ou_erreur(_dTt / "n.json")
+        check("trash : un registre illisible ou de format inattendu est NOMME, pas avale",
+              _eKTt[0] == set() and "k.json illisible" in _eKTt[1]
+              and _eNTt[0] == set() and "format inattendu" in _eNTt[1], str((_eKTt, _eNTt)))
+        # Un registre PRESENT mais vide (scp de data/ interrompu) se lisait
+        # comme « aucune marque » : le 2e clic ecrasait alors le .prev qui
+        # gardait les vraies marques. Le code n'ecrit jamais un registre vide.
+        (_dTt / "v.json").write_text("", encoding="utf-8")
+        (_dTt / "b.json").write_text("  \n", encoding="utf-8")
+        _eVTt = _mmTt.lire_cles_ou_erreur(_dTt / "v.json")
+        _eBTt = _mmTt.lire_cles_ou_erreur(_dTt / "b.json")
+        check("trash : un registre VIDE (0 octet ou blancs) est une erreur nommee, pas une liste vide",
+              _eVTt[0] == set() and "v.json vide" in _eVTt[1] and ".prev" in _eVTt[1]
+              and _eBTt[0] == set() and "b.json vide" in _eBTt[1], str((_eVTt, _eBTt)))
+    finally:
+        _shTt.rmtree(_dTt, ignore_errors=True)
+    check("trash : conflits() liste les medias doublement marques, prioritaire d abord",
+          _mmTt.conflits({"flash": {"a", "b"}, "trash": {"b", "c"}}) == {"b": ["flash", "trash"]},
+          str(_mmTt.conflits({"flash": {"a", "b"}, "trash": {"b", "c"}})))
+
+    # -- 2. RIEN D'ECRIT EN DUR AILLEURS ---------------------------------------
+    # Changer le logo doit tenir en UNE ligne de marques_montage.py. Recopie
+    # dans une chaine JS, un toast ou un libelle Discord, il resterait a
+    # l'ancien sans que personne ne le voie. Deux exceptions PREEXISTANTES, sans
+    # rapport avec la marque : le placeholder « Ouais bon on va espérer hein »
+    # (qui porte ce crane depuis toujours) et le remap clair de #84cc16.
+    _enDurTt = []
+    for _fT in ("web_upload.py", "cogs/user.py", "identite_admin.py", "i18n_en.py",
+                "cogs/noctuspool.py", "outils_icones_discord.py"):
+        for _nlT, _lnT in enumerate(_plTt.Path(_fT).read_text(encoding="utf-8").splitlines(), 1):
+            if "on va espérer hein" in _lnT or "84cc16" in _lnT:
+                continue
+            for _vT in (_MTt["emoji"], _MTt["couleur"], _MTt["couleur_clair"]):
+                if _vT.lower() in _lnT.lower():
+                    _enDurTt.append("%s:%d (%s)" % (_fT, _nlT, _vT))
+    check("trash : logo et couleurs Trash ne sont ecrits en dur nulle part ailleurs",
+          not _enDurTt, " | ".join(_enDurTt[:4]))
+
+    import web_upload as _wTt
+    # Les messages des registres sont traduits par MORCEAUX (_MARQUES_FR_EN),
+    # recopies de leurs sources : si l'une change sa phrase, le morceau ne
+    # s'applique plus et le bandeau anglais repasse au francais. On traduit
+    # donc les VRAIS messages, tels que les produisent marques_montage et
+    # _lire_marque, et il ne doit rien rester de francais.
+    _msgsEnTt = [_wTt._marques_en("tag NON enregistre : " + _m
+                                  + " -- rien n'a ete ecrit ; la version precedente est dans x.prev")
+                 for _m in (_eKTt[1], _eNTt[1], _eVTt[1])]
+    check("trash : les messages d erreur des registres se traduisent en entier (aucun mot francais)",
+          all(_m and not _reTt.search(r"illisible|inattendu|\bvide\b|rien n|precedente|enregistre", _m)
+              for _m in _msgsEnTt), " | ".join(_msgsEnTt)[:260])
+    check("trash : les deux registres du site viennent du module",
+          _wTt.TRASH_TREND_FILE.name == _MTt["fichier"]
+          and _wTt.FLASH_TREND_FILE.name == _FTt["fichier"])
+    # Le logo et le nom entrent dans le JS et le CSS par des jetons remplaces
+    # au rendu. Un jeton oublie s'afficherait tel quel -- « {marque_trash_nom} »
+    # a l'ecran -- ou, dans du CSS, casserait la regle qui le porte.
+    _restesTt = sorted(set(_reTt.findall(r"\{marques?_[a-z_]+\}",
+                                        _wTt._marques_remplacer(_wTt.UPLOAD_HTML))))
+    check("trash : chaque jeton {marque_…} de la page est remplace au rendu",
+          not _restesTt and "{marque_trash_" in _wTt.UPLOAD_HTML, str(_restesTt))
+
+    # -- 3. LE BAC A SABLE -------------------------------------------------------
+    _TT = _plTt.Path(_tfTt.mkdtemp(prefix="trash_site_"))
+    _IDTt = _TT / "identities"
+    _NOMS_SAUVES_Tt = ("FLASH_TREND_FILE", "TRASH_TREND_FILE", "FAV_BRUTES_FILE",
+                       "DISABLED_REELS_FILE", "IDENTITIES_DIR", "THUMB_DIR", "DATA_DIR",
+                       "_load_web_users", "identity_market", "_type_identite",
+                       "_pregen_thumbs_async", "_render_home_dashboard_html")
+    _savTt = {k: getattr(_wTt, k) for k in _NOMS_SAUVES_Tt}
+    _savSyncTt = dict(_wTt._SYNC_MARCHE)
+    import cogs.user as _cuTt
+    import identite_admin as _iaTt
+    import va_portal as _vpTt
+    _savCuTt = (_cuTt.DATA_DIR, _cuTt.IDENTITIES_DIR)
+    _savIaTt = (_iaTt.DATA, _iaTt.IDENTITES, _iaTt.CORBEILLE)
+    _savVpTt = _vpTt.LIENS_FILE
+    _savRigTt = _osTt.environ.get("RIG_API_TOKEN")
+    # Deux models US (la source et sa soeur) et une FR : la propagation et la
+    # synchro ne doivent jamais traverser le marche.
+    _MARCHES_Tt = {"zztta": "us", "zzttb": "us", "zzttc": "fr"}
+    try:
+        _wTt.FLASH_TREND_FILE = _TT / _FTt["fichier"]
+        _wTt.TRASH_TREND_FILE = _TT / _MTt["fichier"]
+        _wTt.FAV_BRUTES_FILE = _TT / "fav_brutes.json"
+        _wTt.DISABLED_REELS_FILE = _TT / "disabled_reels.json"
+        _wTt.IDENTITIES_DIR = _IDTt
+        _wTt.THUMB_DIR = _TT / "thumbnails"
+        # La galerie pre-genere ses vignettes dans un fil de fond : sans ce
+        # neutre, ffmpeg irait ecrire dans le vrai dossier des vignettes.
+        _wTt._pregen_thumbs_async = lambda items: None
+        # Le tableau de bord de l'accueil a son propre cache DANS data/
+        # (dashboard_snapshots) et un fil qui le rechauffe : rendre « / » ici
+        # le reecrivait. Il n'a rien a voir avec les marques ; on le neutralise
+        # AVANT create_app, qui en garde une reference.
+        _wTt._render_home_dashboard_html = lambda *a, **k: ""
+        _wTt._load_web_users = lambda: {"admin": {"role": "owner", "password": "x"},
+                                        "chatteur1": {"role": "chatter", "password": "x"},
+                                        "mont1": {"role": "montage", "password": "x"}}
+        _wTt.identity_market = lambda i: _MARCHES_Tt.get(str(i or "").lower(), "fr")
+        _wTt._type_identite = lambda i: "modele"
+        _cuTt.DATA_DIR, _cuTt.IDENTITIES_DIR = _TT, _IDTt
+        _iaTt.DATA, _iaTt.IDENTITES, _iaTt.CORBEILLE = _TT, _IDTt, _TT / "_corbeille_identites"
+        _vpTt.LIENS_FILE = _TT / "jb_va_liens.json"
+        # Le MEME contenu pour un meme nom chez toutes les identites : une copie
+        # vers une soeur qui l'a deja ne cree pas de « x_2.mp4 ».
+        for _iT in _MARCHES_Tt:
+            (_IDTt / _iT / "templates").mkdir(parents=True, exist_ok=True)
+            for _nT in ("a", "b", "c", "d", "e"):
+                if _iT == "zzttc" and _nT == "a":
+                    continue            # le partage devra l'y COPIER
+                (_IDTt / _iT / "templates" / (_nT + ".mp4")).write_bytes(
+                    ("montage " + _nT).encode() * 20)
+                if _nT != "e":          # « e » n'a pas de point de coupe
+                    (_IDTt / _iT / "templates" / (_nT + ".montage.json")).write_text(
+                        '{"segments": "[]", "font": "Strong", "style": "{}", "cut_at": 1.5}',
+                        encoding="utf-8")
+        _wTt._oublier_identites()
+        _appTt = _wTt.create_app()
+        _appTt.config["TESTING"] = True
+        _cTt = _appTt.test_client()
+        with _cTt.session_transaction() as _sTt:
+            _sTt["auth"] = True; _sTt["username"] = "admin"; _sTt["role"] = "owner"
+
+        def _regTt(cle):
+            _p = _TT / _mmTt.MARQUES[cle]["fichier"]
+            return set(_jsTt.loads(_p.read_text(encoding="utf-8"))) if _p.exists() else set()
+
+        def _ecrireTt(fichier, cles):
+            _p = _TT / fichier
+            _wTt.safe_json.write_text(_p, _jsTt.dumps(sorted(cles)))
+            _wTt._invalidate_json_cache(_p)
+
+        def _marquerTt(flash=(), trash=()):
+            _ecrireTt(_FTt["fichier"], flash)
+            _ecrireTt(_MTt["fichier"], trash)
+
+        def _togTt(cle, fid):
+            # Les deux adresses en entier, comme dans la page : un grep sur
+            # l'une doit trouver son test.
+            _url = "/reel/toggle_trash_trend" if cle == "trash" else "/reel/toggle_flash_trend"
+            return _cTt.post(_url, data={"file_id": fid}).get_json() or {}
+
+        _A, _B, _C, _D, _E = ("zztta|templates|%s.mp4" % n for n in "abcde")
+        _sA, _sB, _sC, _sD = ("zzttb|templates|%s.mp4" % n for n in "abcd")
+
+        # -- 4. LA BASCULE, EXCLUSIVE ------------------------------------------
+        # Un montage porte AU PLUS une marque : sans ca, le meme template partait
+        # par deux familles de boutons Discord et se publiait deux fois.
+        _jT = _togTt("trash", _A)
+        check("trash : poser Trash -> ok, et la reponse donne l etat des DEUX marques",
+              _jT == {"ok": True, "trash": True, "flash": False}, str(_jT))
+        check("trash : ... ecrit dans trash_trend.json, pas dans flash_trend.json",
+              _A in _regTt("trash") and _A not in _regTt("flash"))
+        _jT = _togTt("flash", _A)
+        check("trash : poser Flash sur un Trash RETIRE le Trash (exclusif)",
+              _jT == {"ok": True, "trash": False, "flash": True}
+              and _A in _regTt("flash") and _A not in _regTt("trash"), str(_jT))
+        _jT = _togTt("trash", _A)
+        check("trash : reposer Trash retire le Flash",
+              _jT == {"ok": True, "trash": True, "flash": False}
+              and _A in _regTt("trash") and _A not in _regTt("flash"), str(_jT))
+        _jT = _togTt("trash", _A)
+        check("trash : recliquer Trash l eteint, sans rien rallumer",
+              _jT == {"ok": True, "trash": False, "flash": False}
+              and _A not in _regTt("trash") | _regTt("flash"), str(_jT))
+        # Donnee ancienne doublement marquee : la carte montre ⚡ allume. Le
+        # bandeau dit « cliquer la marque voulue n'en laisse qu'une » : cliquer
+        # ⚡ doit donc GARDER Flash seul. Avant, il retirait Flash et laissait
+        # Trash -- l'inverse du but.
+        _marquerTt(flash={_C}, trash={_C})
+        _jT = _togTt("flash", _C)
+        check("trash : doublement marque -> cliquer ⚡ (allume) garde Flash SEUL, sans le retirer",
+              _jT == {"ok": True, "trash": False, "flash": True}
+              and _C in _regTt("flash") and _C not in _regTt("trash"), str(_jT))
+        _marquerTt(flash={_C}, trash={_C})
+        _jT = _togTt("trash", _C)
+        check("trash : doublement marque -> cliquer Trash garde Trash seul",
+              _jT == {"ok": True, "trash": True, "flash": False}
+              and _C in _regTt("trash") and _C not in _regTt("flash"), str(_jT))
+        _marquerTt()
+        _jT = _togTt("trash", "zztta|brutes|a.mp4")
+        check("trash : refuse hors des montages (une brute n a pas de marque)",
+              _jT.get("ok") is False and "montages" in str(_jT.get("error")), str(_jT))
+        _jT = _cTt.post("/reel/toggle_trash_trend", data={}).get_json() or {}
+        check("trash : file_id manquant -> refus nomme", _jT.get("ok") is False
+              and "file_id" in str(_jT.get("error")), str(_jT))
+        # Tout POST est refuse aux roles restreints tant qu'il n'est pas
+        # declare : c'est voulu pour cette route, et un chatteur ne doit pas
+        # pouvoir marquer depuis la console.
+        for _roleT, _userT in (("chatter", "chatteur1"), ("montage", "mont1")):
+            _crT = _appTt.test_client()
+            with _crT.session_transaction() as _sTt:
+                _sTt["auth"] = True; _sTt["username"] = _userT; _sTt["role"] = _roleT
+            _rrT = _crT.post("/reel/toggle_trash_trend", data={"file_id": _B})
+            check("trash : role %s -> /reel/toggle_trash_trend refuse (403), rien d ecrit" % _roleT,
+                  _rrT.status_code == 403 and _B not in _regTt("trash"), _rrT.status_code)
+
+        # -- 5. UN REGISTRE ILLISIBLE : ON N'ECRIT RIEN ---------------------------
+        # _cached_json_load avale une erreur de parsing et rend {}. Avec
+        # l'exclusivite, un clic Trash REECRIT flash_trend.json : parti d'une
+        # lecture vide, il aurait efface toutes les marques Flash d'un coup.
+        _marquerTt(flash={_C}, trash={_B})
+        _ecrireTt(_FTt["fichier"], {_C})       # une seconde ecriture : la .prev existe
+        (_TT / _FTt["fichier"]).write_text("{pas du json", encoding="utf-8")
+        _avTt = (_TT / _MTt["fichier"]).read_text(encoding="utf-8")
+        _jT = _togTt("trash", _D)
+        check("trash : flash_trend.json illisible -> le clic Trash est REFUSE, et nomme le fichier",
+              _jT.get("ok") is False and (_FTt["fichier"] + " illisible") in str(_jT.get("error")),
+              str(_jT))
+        check("trash : ... sans rien reecrire, ni trash_trend.json ni le Flash illisible",
+              (_TT / _MTt["fichier"]).read_text(encoding="utf-8") == _avTt
+              and (_TT / _FTt["fichier"]).read_text(encoding="utf-8") == "{pas du json")
+        check("trash : ... et l erreur dit ou est la version precedente (.prev)",
+              ".prev" in str(_jT.get("error")), str(_jT.get("error")))
+        # L'etat d'un registre illisible est INCONNU : null, pas false. Rendu
+        # false, le JS eteignait l'eclair et la carte revenait dans la vue de
+        # base alors que le registre la porte peut-etre encore.
+        check("trash : ... l etat du registre illisible part a null (inconnu), l autre reste un booleen",
+              "flash" in _jT and _jT.get("flash") is None and _jT.get("trash") is False, str(_jT))
+        _jT = _togTt("flash", _C)
+        check("trash : Flash, son propre registre illisible -> refuse aussi",
+              _jT.get("ok") is False and "illisible" in str(_jT.get("error"))
+              and (_TT / _FTt["fichier"]).read_text(encoding="utf-8") == "{pas du json", str(_jT))
+        _marquerTt(flash={_C}, trash={_B})
+        (_TT / _MTt["fichier"]).write_text("[[[", encoding="utf-8")
+        _avFTt = (_TT / _FTt["fichier"]).read_text(encoding="utf-8")
+        _jT = _togTt("flash", _D)
+        check("trash : trash_trend.json illisible -> le clic Flash est refuse, flash_trend.json intact",
+              _jT.get("ok") is False and (_MTt["fichier"] + " illisible") in str(_jT.get("error"))
+              and (_TT / _FTt["fichier"]).read_text(encoding="utf-8") == _avFTt, str(_jT))
+        _rPTt = _wTt._pop_marques(_B)
+        check("trash : _pop_marques ne reecrit pas un registre illisible, et le dit",
+              (_MTt["fichier"] + " illisible") in " ".join(_rPTt[1])
+              and (_TT / _MTt["fichier"]).read_text(encoding="utf-8") == "[[[", str(_rPTt))
+        _rATt = _wTt._ajouter_marques({"flash": {_sA}})
+        check("trash : _ajouter_marques refuse tant qu un registre est illisible",
+              not _rATt[0]["flash"] and _rATt[2]
+              and (_TT / _FTt["fichier"]).read_text(encoding="utf-8") == _avFTt, str(_rATt))
+        _rGTt = _wTt.propager_tags_templates("zztta")
+        check("trash : la propagation refuse aussi, en nommant le registre",
+              _rGTt.get("ok") is False and (_MTt["fichier"] + " illisible") in str(_rGTt.get("error")),
+              str(_rGTt))
+        _fragKoTt = _cTt.get("/?lazy=cloudtemplates&cloud_templates_ident=zztta",
+                             headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+        # _cTt n'a pas de cookie va_lang : la page est en ANGLAIS (defaut). Le
+        # bandeau sortait pourtant en francais -- la traduction par noeud
+        # texte entier ne reconnait pas une phrase qui porte un nom de
+        # fichier. Il est maintenant rendu dans la langue de la page.
+        _cKoFrTt = _appTt.test_client()
+        with _cKoFrTt.session_transaction() as _sTt:
+            _sTt["auth"] = True; _sTt["username"] = "admin"; _sTt["role"] = "owner"
+        _cKoFrTt.set_cookie("va_lang", "fr")
+        _fragKoFrTt = _cKoFrTt.get("/?lazy=cloudtemplates&cloud_templates_ident=zztta",
+                                   headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+        check("trash : la galerie DIT qu un registre est illisible (ses montages reviennent en vue)",
+              (_MTt["fichier"] + " illisible") in _fragKoFrTt
+              and (_MTt["fichier"] + " unreadable") in _fragKoTt)
+        _avisEnTt = " ".join(_reTt.findall(r"class='marques-avis'[^>]*>(.*?)</div>", _fragKoTt, _reTt.S))
+        check("trash : ... en anglais, sans aucun morceau francais du message",
+              _avisEnTt and not any(_fr.strip(" ;:(") in _avisEnTt
+                                    for _fr, _en in _wTt._MARQUES_FR_EN),
+              _avisEnTt[:200])
+
+        # -- 5 bis. REGISTRE ILLISIBLE : ni copie sans marque, ni liste muette ---
+        # Les lectures d'AFFICHAGE rendent un ensemble vide pour un registre
+        # casse. La synchro de marche et le partage recopiaient alors les
+        # montages SANS leur marque (toast vert), et Perfect proposait un
+        # Flash sous « Template » sans un mot.
+        _wTt._SYNC_MARCHE["en_cours"] = False
+        _jT = _cTt.post("/noctus/sync_marche", data={"identity": "zztta"}).get_json() or {}
+        check("trash : synchro de marche REFUSEE au clic tant qu un registre de marque est illisible",
+              _jT.get("ok") is False and (_MTt["fichier"] + " illisible") in str(_jT.get("error"))
+              and not _wTt._SYNC_MARCHE.get("en_cours"), str(_jT)[:200])
+        _wTt._sync_marche_travail("zztta")
+        _eT = dict(_wTt._SYNC_MARCHE)
+        check("trash : ... le fil de fond aussi : aucune copie, et l erreur est dite",
+              _eT.get("copies") == 0 and not _eT.get("en_cours")
+              and any("marques non recopiees" in e for e in _eT.get("erreurs") or []),
+              str({k: _eT.get(k) for k in ("copies", "erreurs", "en_cours")})[:220])
+        _jT = _cTt.post("/noctus/montage_apply",
+                        data={"file_id": _A, "targets": "zzttb"}).get_json() or {}
+        check("trash : partage avec un registre illisible -> les fichiers partent, tags_error LE DIT",
+              _jT.get("ok") and "marque de la source inconnue" in str(_jT.get("tags_error"))
+              and (_MTt["fichier"] + " illisible") in str(_jT.get("tags_error")), str(_jT)[:220])
+        _rPfTt = _cTt.get("/perfect/liste?identity=zztta&type=templates").get_json() or {}
+        check("trash : Perfect avec un registre illisible -> la liste porte un avertissement nomme",
+              _rPfTt.get("ok") is True and _MTt["fichier"] in str(_rPfTt.get("avertissement"))
+              and _rPfTt.get("erreurs"), str({k: _rPfTt.get(k) for k in ("avertissement", "erreurs")})[:200])
+        _uplPfTt = _wTt._marques_remplacer(_wTt.UPLOAD_HTML)
+        _pfDTt = _uplPfTt.find("async function pfEtape3(")
+        _pfCorpsTt = _uplPfTt[_pfDTt:_uplPfTt.find("\n}\n", _pfDTt)]
+        check("trash : ... et l assistant l affiche (liste vide comprise)",
+              _pfDTt > 0 and "j.avertissement" in _pfCorpsTt and "pfVide(avert" in _pfCorpsTt)
+
+        # Un registre VIDE (copie interrompue) : le clic est refuse, et le
+        # .prev qui garde les vraies marques survit aux clics suivants. Avant,
+        # le 1er clic passait et le 2e ecrasait le .prev.
+        _marquerTt(flash={_C, _D}, trash=())
+        _ecrireTt(_FTt["fichier"], {_C, _D})      # la .prev porte C et D
+        _prevFTt = _TT / (_FTt["fichier"] + ".prev")
+        _avPrevTt = _prevFTt.read_text(encoding="utf-8")
+        (_TT / _FTt["fichier"]).write_text("", encoding="utf-8")
+        _j1Tt, _j2Tt = _togTt("flash", _E), _togTt("flash", _E)
+        check("trash : flash_trend.json VIDE -> les clics sont refuses, le .prev garde les vraies marques",
+              _j1Tt.get("ok") is False and _j2Tt.get("ok") is False
+              and "vide" in str(_j1Tt.get("error"))
+              and _prevFTt.read_text(encoding="utf-8") == _avPrevTt
+              and (_TT / _FTt["fichier"]).read_text(encoding="utf-8") == "",
+              str((_j1Tt, _prevFTt.read_text(encoding="utf-8")))[:220])
+        check("trash : ... et le message ne nomme le .prev qu une fois",
+              str(_j1Tt.get("error")).count(".prev") == 1, str(_j1Tt.get("error")))
+
+        # Le verrou des registres : un clic et la synchro ne s'ecrasent plus.
+        # Tenu par un autre fil, il fait ATTENDRE le clic au lieu de le laisser
+        # ecrire au milieu de la sequence lecture -> ecritures.
+        import threading as _thTt
+        _marquerTt(flash=(), trash=())
+        _tenuTt, _relacheTt, _finiTt = _thTt.Event(), _thTt.Event(), []
+
+        def _tenirTt():
+            with _wTt._MARQUES_VERROU:
+                _tenuTt.set()
+                _relacheTt.wait(5)
+
+        _fT1 = _thTt.Thread(target=_tenirTt)
+        _fT1.start()
+        _tenuTt.wait(5)
+        _fT2 = _thTt.Thread(target=lambda: _finiTt.append(_wTt._toggle_marque("trash", _A)))
+        _fT2.start()
+        _fT2.join(0.3)
+        _attendTt = not _finiTt and _A not in _regTt("trash")
+        _relacheTt.set()
+        _fT1.join(5)
+        _fT2.join(5)
+        check("trash : lire-modifier-ecrire sous _MARQUES_VERROU (le clic attend la synchro)",
+              _attendTt and _finiTt and _A in _regTt("trash")
+              and all(_nV in _wTt._pop_marques.__code__.co_names
+                      and _nV in _wTt._ajouter_marques.__code__.co_names
+                      for _nV in ("_MARQUES_VERROU",)),
+              str((_attendTt, _finiTt)))
+        _marquerTt()
+
+        # -- 6. LA GALERIE, RENDUE PAR LE SERVEUR --------------------------------
+        # b : Trash (et ⭐) ; c : Flash ET Trash, donnee ancienne ; d : Flash ;
+        # a : ⭐ seul ; e : rien.
+        _marquerTt(flash={_C, _D}, trash={_B, _C})
+        _ecrireTt("fav_brutes.json", {_A, _B})
+        _fragTt = _cTt.get("/?lazy=cloudtemplates&cloud_templates_ident=zztta",
+                           headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+
+        def _carteTt(nom):
+            _i = _fragTt.find("zztta|templates|%s.mp4" % nom)
+            _d = _fragTt.rfind("<div class='cloud-card", 0, _i)
+            _f = _fragTt.find("<div class='cloud-card", _i)
+            return _fragTt[_d:_f if _f > 0 else len(_fragTt)] if _i >= 0 and _d >= 0 else ""
+
+        _cA, _cB, _cC, _cD, _cE = (_carteTt(n) for n in "abcde")
+        check("trash : carte Trash -> is-trash-card, cachee de la vue de base des le serveur",
+              "is-trash-card" in _cB.split(">")[0] and "display:none" in _cB.split(">")[0],
+              _cB[:200])
+        check("trash : ... meme etoilee : elle ne tombe pas dans les Bangers de la vue de base",
+              "fav-brute-star is-fav" in _cB and "display:none" in _cB.split(">")[0])
+        check("trash : ... et son bouton est allume (trash-trend is-trash-trend)",
+              "card-edit-btn trash-trend is-trash-trend" in _cB)
+        check("trash : carte Flash -> cachee aussi, bouton Trash eteint",
+              "is-flash-card" in _cD.split(">")[0] and "display:none" in _cD.split(">")[0]
+              and "is-trash-trend" not in _cD)
+        check("trash : donnee ancienne doublement marquee -> lue Flash, Trash eteint",
+              "is-flash-card" in _cC.split(">")[0] and "is-trash-card" not in _cC
+              and "is-trash-trend" not in _cC and "flash-trend is-flash" in _cC, _cC[:260])
+        check("trash : montages sans marque (⭐ ou rien) -> visibles",
+              all("display:none" not in _x.split(">")[0] and "is-trash-trend" not in _x
+                  and _x for _x in (_cA, _cE)))
+        # _fragTt est la page ANGLAISE (pas de cookie va_lang) : le bandeau y
+        # etait en francais, la traduction par noeud entier ne reconnaissant
+        # pas une phrase qui porte un nombre. Il suit desormais la langue ; la
+        # version francaise est verifiee plus bas, sur _fragFrTt.
+        check("trash : le doublon ancien est COMPTE a l ecran, pas tu",
+              "1 edit(s) carry two marks" in _fragTt,
+              str(_reTt.findall(r"marques-avis[^<]*<", _fragTt))[:200])
+        _ordreTt = [m.group(1) for m in _reTt.finditer(
+            r"id='((?:favbrute|trash|flash)-toggle-btn)'", _fragTt)]
+        check("trash : barre du vault dans l ordre ⭐ Bangers · Trash · ⚡ Flash",
+              _ordreTt == ["favbrute-toggle-btn", "trash-toggle-btn", "flash-toggle-btn"],
+              str(_ordreTt))
+        check("trash : le filtre porte le logo et le nom du module, et part neutre",
+              "id='trash-toggle-btn' data-on='0'" in _fragTt
+              and ("%s %s</button>" % (_MTt["emoji"], _MTt["nom"])) in _fragTt)
+        _ordreCTt = _reTt.findall(r"class='card-edit-btn (fav-brute-star|trash-trend|flash-trend)", _cA)
+        check("trash : sur la carte, ⭐ · Trash · ⚡ dans cet ordre",
+              _ordreCTt == ["fav-brute-star", "trash-trend", "flash-trend"], str(_ordreCTt))
+        check("trash : les pastilles passent a la ligne au lieu de recouvrir la date",
+              "card-actions ca-wrap" in _cA and ".card-actions.ca-wrap{flex-wrap:wrap" in _wTt.UPLOAD_HTML)
+        # La page est en ANGLAIS par defaut (cookie va_lang) : le meme fragment,
+        # en francais, sert de reference pour les libelles d'origine.
+        _cFrTt = _appTt.test_client()
+        with _cFrTt.session_transaction() as _sTt:
+            _sTt["auth"] = True; _sTt["username"] = "admin"; _sTt["role"] = "owner"
+        _cFrTt.set_cookie("va_lang", "fr")
+        _fragFrTt = _cFrTt.get("/?lazy=cloudtemplates&cloud_templates_ident=zztta",
+                               headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+        import i18n_en as _enTt
+        check("trash : ... en francais sur la page francaise, sans l anglais",
+              "1 montage(s) portent deux marques" in _fragFrTt
+              and "carry two marks" not in _fragFrTt
+              and "portent deux marques" not in _fragTt)
+        _tSyncTt = ("Recopier les tags %s, ⚡ et ⭐ de ces montages sur toutes les "
+                    "identites du meme marche (ajoute seulement, ne retire rien)" % _MTt["emoji"])
+        check("trash : « Appliquer a toutes » annonce qu il recopie aussi le Trash (FR et EN)",
+              ("title='%s'" % _tSyncTt) in _fragFrTt
+              and ("title='%s'" % _enTt.TRADUCTIONS.get(_tSyncTt, "??")) in _fragTt)
+        # Les libelles traduits doivent etre EXACTEMENT ceux que la page rend :
+        # la traduction compare l'attribut entier, une virgule d'ecart et elle
+        # ne s'applique plus -- le VA anglophone lirait du francais.
+        _tCarteTt = _MTt["nom"] + " — ce montage sort de la vue de base ET des Bangers"
+        _tFiltreTt = ("Afficher seulement les montages %s %s (ils sont cachés ailleurs)"
+                      % (_MTt["emoji"], _MTt["nom"]))
+        check("trash : les nouveaux libelles sont traduits, a l identique du rendu (FR -> EN)",
+              all(_t in _enTt.TRADUCTIONS and ("title='%s'" % _t) in _fragFrTt
+                  and ("title='%s'" % _enTt.TRADUCTIONS[_t]) in _fragTt
+                  for _t in (_tCarteTt, _tFiltreTt)),
+              str([_t[:30] for _t in (_tCarteTt, _tFiltreTt)
+                   if ("title='%s'" % _t) not in _fragFrTt]))
+
+        # -- 7. LE JAVASCRIPT DU FRAGMENT GALERIE TEMPLATES ------------------------
+        # Le fragment arrive par AJAX : le node --check de la page principale
+        # ne le voit pas. Ses <script> ET ses gestionnaires on… (onclick='…')
+        # sont du JavaScript que le navigateur execute ; un guillemet mal
+        # echappe dans une f-string Python les tue sans erreur serveur.
+        _nodeTt = _shTt.which("node")
+        if _nodeTt:
+            _scriptsTt = [c for a, c in _reTt.findall(
+                r"<script(?![^>]*\bsrc=)([^>]*)>(.*?)</script>", _fragTt, _reTt.S)
+                if "json" not in a.lower()]
+
+            class _GestTt(_hpTt.HTMLParser):
+                def __init__(self):
+                    super().__init__(convert_charrefs=True)
+                    self.gest = []
+
+                def handle_starttag(self, tag, attrs):
+                    for _k, _v in attrs:
+                        if _k.startswith("on") and _v:
+                            self.gest.append(_v)
+
+            _gTt = _GestTt()
+            _gTt.feed(_fragTt)
+            check("trash : le fragment Templates porte bien des gestionnaires (dont la bascule Trash)",
+                  len(_gTt.gest) >= 10 and any("toggleTrashTrend(" in g for g in _gTt.gest)
+                  and any("toggleTrashTrendFilter(" in g for g in _gTt.gest), len(_gTt.gest))
+            _codeGTt = "\n".join("function _g%d(event){\n%s\n}" % (i, g)
+                                 for i, g in enumerate(_gTt.gest))
+            _casTt = []
+            for _nomJ, _src in [("script%d" % i, s) for i, s in enumerate(_scriptsTt)] + [
+                    ("gestionnaires", _codeGTt)]:
+                _fJ = TMP / ("trash_frag_%s.js" % _nomJ)
+                _fJ.write_text(_src, encoding="utf-8")
+                _rJ = _spTt.run([_nodeTt, "--check", str(_fJ)], capture_output=True,
+                                text=True, timeout=60)
+                if _rJ.returncode != 0:
+                    _casTt.append("%s : %s" % (_nomJ, (_rJ.stderr or "")[:160]))
+            check("trash : node --check du fragment galerie Templates rendu (scripts + %d gestionnaires)"
+                  % len(_gTt.gest), not _casTt, " | ".join(_casTt))
+        else:
+            # Ne jamais ecarter en silence.
+            print("     (node absent : le JS du fragment Templates n a pas ete verifie)")
+
+        # -- 8. LE FILTRE COTE CLIENT, EXECUTE DANS NODE ------------------------------
+        # Le serveur cache les cartes marquees, vaultVuesAppliquer doit rendre
+        # EXACTEMENT le meme verdict, sinon une carte bouge au premier clic. On
+        # execute les vraies fonctions (memes plages que le test des filtres
+        # etoile), jetons de marque remplaces comme dans le navigateur.
+        _uplTt = _wTt._marques_remplacer(_wTt.UPLOAD_HTML)
+        _dA = _uplTt.find("function vaultSectionVisible(){")
+        _fA = _uplTt.find("// ⌫ Vide le salon banger-")
+        _dB = _uplTt.find("function favBruteApply(sec){")
+        _fB = _uplTt.find("// === Repérage des brutes")
+        _plagesOkTt = min(_dA, _fA, _dB, _fB) >= 0 and _fA > _dA and _fB > _dB
+        check("trash : les fonctions des filtres sont dans les plages executees",
+              _plagesOkTt and "function toggleTrashTrendFilter(" in (_uplTt[_dA:_fA] + _uplTt[_dB:_fB])
+              and "function montageMarquesPeindre(" in (_uplTt[_dA:_fA] + _uplTt[_dB:_fB]))
+        _SCEN_Tt = r"""
+function carte(grid, o){
+  var c=new El('div'); c.classes.push('cloud-card');
+  var fav=new El('button'); fav.classes.push('fav-brute-star'); if(o.fav) fav.classes.push('is-fav');
+  var t=new El('button'); t.classes.push('trash-trend'); if(o.trash) t.classes.push('is-trash-trend');
+  var f=new El('button'); f.classes.push('flash-trend'); if(o.flash) f.classes.push('is-flash');
+  c.appendChild(fav); c.appendChild(t); c.appendChild(f); c.nom=o.nom; grid.appendChild(c); return c;
+}
+function section(cartes){
+  var sec=new El('div'); sec.classes.push('form-section'); sec.attrs.id='form-cloudtemplates';
+  ['favbrute-toggle-btn','trash-toggle-btn','flash-toggle-btn'].forEach(function(id){
+    var b=new El('button'); b.attrs.id=id; b.setAttribute('data-on','0'); sec.appendChild(b); });
+  var grid=new El('div'); grid.attrs.id='vault-grid'; sec.appendChild(grid);
+  racine.appendChild(sec);
+  cartes.forEach(function(o){ carte(grid,o); });
+  return {sec:sec, grid:grid};
+}
+function vus(s){ return s.grid.querySelectorAll('.cloud-card').filter(function(c){
+  return c.style.display!=='none'; }).map(function(c){ return c.nom; }).join(','); }
+function bt(s,id){ return s.sec.querySelector('#'+id); }
+function note(s){ var n=s.sec.querySelector('.vues-empty-note');
+  return (n && n.style.display!=='none') ? n.textContent : ''; }
+var res={};
+var s=section([{nom:'base'},{nom:'baseFav',fav:true},{nom:'trash',trash:true},
+  {nom:'trashFav',trash:true,fav:true},{nom:'flash',flash:true},{nom:'flashFav',flash:true,fav:true},
+  {nom:'double',flash:true,trash:true}]);
+vaultVuesAppliquer(s.sec); res.base=vus(s);
+toggleFavBruteFilter(bt(s,'favbrute-toggle-btn')); res.fav=vus(s);
+toggleFavBruteFilter(bt(s,'favbrute-toggle-btn'));
+toggleTrashTrendFilter(bt(s,'trash-toggle-btn')); res.trash=vus(s);
+res.trash_label=bt(s,'trash-toggle-btn').textContent;
+toggleFavBruteFilter(bt(s,'favbrute-toggle-btn')); res.trash_fav=vus(s);
+toggleFlashTrendFilter(bt(s,'flash-toggle-btn')); res.trash_flash_fav=vus(s);
+toggleFavBruteFilter(bt(s,'favbrute-toggle-btn')); res.trash_flash=vus(s);
+toggleTrashTrendFilter(bt(s,'trash-toggle-btn')); res.flash=vus(s);
+toggleFlashTrendFilter(bt(s,'flash-toggle-btn')); res.base2=vus(s);
+vider();
+var s2=section([{nom:'base'}]);
+toggleTrashTrendFilter(bt(s2,'trash-toggle-btn')); res.vide_trash=note(s2);
+toggleFavBruteFilter(bt(s2,'favbrute-toggle-btn')); res.vide_trash_fav=note(s2);
+toggleFlashTrendFilter(bt(s2,'flash-toggle-btn')); res.vide_tout=note(s2);
+var cc=carte(s2.grid,{nom:'x',flash:true});
+montageMarquesPeindre(cc,{flash:false,trash:true});
+res.peint_trash=[cc.classes.join(' '), cc.querySelector('.trash-trend').classes.join(' '),
+                 cc.querySelector('.flash-trend').classes.join(' ')].join(' | ');
+montageMarquesPeindre(cc,{flash:true,trash:true});
+res.peint_double=[cc.classes.join(' '), cc.querySelector('.trash-trend').classes.join(' ')].join(' | ');
+console.log(JSON.stringify(res));
+"""
+        if _nodeTt and _plagesOkTt:
+            _fN = TMP / "trash_filtres.js"
+            _fN.write_text(_uplTt[_dA:_fA] + "\n" + _uplTt[_dB:_fB] + "\n"
+                           + _DOM_STUB_F3.split("var res = {};")[0] + _SCEN_Tt, encoding="utf-8")
+            _rN = _spTt.run([_nodeTt, str(_fN)], capture_output=True, text=True,
+                            encoding="utf-8", timeout=60)
+            try:
+                _resN = _jsTt.loads((_rN.stdout or "").strip().splitlines()[-1])
+            except Exception:
+                _resN = {}
+            _errN = ((_rN.stderr or "") + " " + str(_resN))[:220]
+            check("trash (JS) : vue de base = les montages SANS marque (Trash et Flash sortent)",
+                  _resN.get("base") == "base,baseFav", _errN)
+            check("trash (JS) : ⭐ Bangers seul exclut Trash comme Flash",
+                  _resN.get("fav") == "baseFav", _errN)
+            check("trash (JS) : le filtre Trash montre les Trash, pas le doublon lu Flash",
+                  _resN.get("trash") == "trash,trashFav", _errN)
+            check("trash (JS) : le bouton filtre dit son etat avec le logo du module",
+                  _resN.get("trash_label") == "%s %s ✓" % (_MTt["emoji"], _MTt["nom"]),
+                  _resN.get("trash_label"))
+            check("trash (JS) : ⭐ + Trash = « Trash Banger » (l etoile recoupe)",
+                  _resN.get("trash_fav") == "trashFav", _errN)
+            check("trash (JS) : Trash + ⚡ s additionnent (familles en UNION), ⭐ recoupe",
+                  _resN.get("trash_flash_fav") == "trashFav,flashFav"
+                  and _resN.get("trash_flash") == "trash,trashFav,flash,flashFav,double", _errN)
+            check("trash (JS) : ⚡ seul inchange, et tout eteint ramene la vue de base",
+                  _resN.get("flash") == "flash,flashFav,double"
+                  and _resN.get("base2") == "base,baseFav", _errN)
+            check("trash (JS) : liste vide -> un message qui NOMME Trash (et ⭐, et les deux familles)",
+                  _MTt["nom"] in str(_resN.get("vide_trash"))
+                  and "⭐" in str(_resN.get("vide_trash_fav"))
+                  and " ni " in str(_resN.get("vide_tout")), _errN)
+            check("trash (JS) : la reponse serveur repeint les DEUX boutons (poser Trash eteint ⚡)",
+                  _resN.get("peint_trash") == "cloud-card is-trash-card | trash-trend is-trash-trend | flash-trend",
+                  str(_resN.get("peint_trash")))
+            check("trash (JS) : un etat doublement marque se peint Flash, comme au serveur",
+                  _resN.get("peint_double") == "cloud-card is-flash-card | trash-trend",
+                  str(_resN.get("peint_double")))
+
+            # LA BASCULE ELLE-MEME, reponse du serveur simulee : le toast et le
+            # refus d'un registre illisible. showToast prend l'emoji de TETE
+            # comme icone ; « Montage ⚡ Flash Trend » commencait par une
+            # lettre, et l'icone retombait sur la coche generique.
+            _SCEN_B_Tt = r"""
+var toasts=[], alertes=[], reponse=null, res={};
+function FormData(){ this.d={}; }
+FormData.prototype.set=function(k,v){ this.d[k]=v; };
+function fetch(u,o){ return Promise.resolve({json:function(){ return Promise.resolve(reponse); }}); }
+function showToast(m,t){ toasts.push(m); }
+function alert(m){ alertes.push(m); }
+var sec=new El('div'); sec.classes.push('form-section'); sec.attrs.id='form-cloudtemplates';
+['favbrute-toggle-btn','trash-toggle-btn','flash-toggle-btn'].forEach(function(id){
+  var b=new El('button'); b.attrs.id=id; b.setAttribute('data-on','0'); sec.appendChild(b); });
+var grid=new El('div'); grid.attrs.id='vault-grid'; sec.appendChild(grid); racine.appendChild(sec);
+var c=new El('div'); c.classes.push('cloud-card'); c.classes.push('is-flash-card');
+var bT=new El('button'); bT.classes.push('trash-trend');
+var bF=new El('button'); bF.classes.push('flash-trend'); bF.classes.push('is-flash');
+c.appendChild(bT); c.appendChild(bF); grid.appendChild(c);
+(async function(){
+  reponse={ok:true, trash:true, flash:false};
+  await montageMarqueBasculer(bT, 'x', 'trash'); res.t_trash=toasts[0];
+  reponse={ok:true, trash:false, flash:true};
+  await montageMarqueBasculer(bF, 'x', 'flash'); res.t_flash=toasts[1];
+  reponse={ok:true, trash:false, flash:false};
+  await montageMarqueBasculer(bF, 'x', 'flash'); res.t_retire=toasts[2];
+  reponse={ok:true, trash:false, flash:true};
+  await montageMarqueBasculer(bF, 'x', 'flash');
+  reponse={ok:false, trash:false, flash:null, error:'tag NON enregistre : flash_trend.json illisible'};
+  await montageMarqueBasculer(bT, 'x', 'trash');
+  res.illisible=[c.classes.join(' '), bF.classes.join(' '), alertes.length].join(' | ');
+  res.connues=[montageMarquesConnues({flash:true,trash:false}),
+               montageMarquesConnues({flash:null,trash:false}),
+               montageMarquesConnues({trash:true})].join(',');
+  console.log(JSON.stringify(res));
+})();
+"""
+            _fBasTt = TMP / "trash_bascule.js"
+            _fBasTt.write_text(_uplTt[_dA:_fA] + "\n" + _uplTt[_dB:_fB] + "\n"
+                               + _DOM_STUB_F3.split("var res = {};")[0] + _SCEN_B_Tt,
+                               encoding="utf-8")
+            _rB = _spTt.run([_nodeTt, str(_fBasTt)], capture_output=True, text=True,
+                            encoding="utf-8", timeout=60)
+            try:
+                _resB = _jsTt.loads((_rB.stdout or "").strip().splitlines()[-1])
+            except Exception:
+                _resB = {}
+            _errB = ((_rB.stderr or "") + " " + str(_resB))[:260]
+            _emoT, _emoF = _MTt["emoji"], _FTt["emoji"]
+            check("trash (JS) : toast Trash -> le logo du module EN TETE (icone de la notification)",
+                  str(_resB.get("t_trash", "")).startswith("%s Montage %s" % (_emoT, _MTt["nom"]))
+                  and ("%s %s retiré" % (_emoF, _FTt["nom"])) in str(_resB.get("t_trash")), _errB)
+            check("trash (JS) : toast Flash -> ⚡ en tete, comme avant le chantier",
+                  str(_resB.get("t_flash", "")).startswith("%s Montage %s" % (_emoF, _FTt["nom"]))
+                  and ("%s %s retiré" % (_emoT, _MTt["nom"])) in str(_resB.get("t_flash")), _errB)
+            check("trash (JS) : toast de retrait -> « ○ Retiré des ⚡ Flash Trend »",
+                  _resB.get("t_retire") == "○ Retiré des %s %s" % (_emoF, _FTt["nom"]), _errB)
+            check("trash (JS) : registre illisible (null) -> la carte n est PAS repeinte, l erreur est dite",
+                  _resB.get("illisible") == "cloud-card is-flash-card | flash-trend is-flash | 1", _errB)
+            check("trash (JS) : montageMarquesConnues n accepte que des booleens pour chaque marque",
+                  _resB.get("connues") == "true,false,false", _errB)
+        elif not _nodeTt:
+            print("     (node absent : le filtre Trash n a pas ete execute)")
+
+        # -- 9. PROPAGATION PAR NOMS : additive, conflits comptes -----------------
+        _ecrireTt("fav_brutes.json", set())
+        _marquerTt(flash={_B, _sA}, trash={_A, _D})
+        _jT = _wTt.propager_tags_templates("zztta")
+        check("trash : propagation -> Trash pose chez la soeur, Flash aussi",
+              _jT.get("ok") is True and _jT.get("poses_trash") == 1 and _jT.get("poses_flash") == 1,
+              str(_jT))
+        check("trash : ... la soeur qui porte deja ⚡ sur a n est PAS touchee, et c est COMPTE",
+              _jT.get("conflits") == 1 and _sA in _jT.get("conflits_exemples", [])
+              and _sA in _regTt("flash") and _sA not in _regTt("trash"), str(_jT))
+        check("trash : ... d Trash chez la soeur, rien chez la model FR",
+              _sD in _regTt("trash")
+              and not any(k.startswith("zzttc|") for k in _regTt("trash") | _regTt("flash")))
+        _marquerTt(flash=(), trash={_E})
+        _jT = _wTt.propager_tags_templates("zztta")
+        check("trash : une identite qui n a QUE du Trash propage (plus « rien a propager »)",
+              _jT.get("ok") is True and _jT.get("poses_trash") == 1, str(_jT))
+        _marquerTt(flash={_C}, trash={_C})
+        _jT = _wTt.propager_tags_templates("zztta")
+        check("trash : source doublement marquee -> seule la prioritaire part, et c est compte",
+              _jT.get("doubles_source") == 1 and _sC in _regTt("flash") and _sC not in _regTt("trash"),
+              str(_jT))
+
+        # -- 10. PARTAGER / APPLIQUER CE MONTAGE -------------------------------------
+        _marquerTt(flash={_sA}, trash={_A})
+        _jT = _cTt.post("/noctus/montage_apply",
+                        data={"file_id": _A, "targets": "zzttb,zzttc"}).get_json() or {}
+        check("trash : partage -> la copie chez la model FR porte le Trash",
+              _jT.get("ok") and sorted(_jT.get("done", [])) == ["zzttb", "zzttc"]
+              and _jT.get("tags_trash") == 1 and "zzttc|templates|a.mp4" in _regTt("trash"), str(_jT))
+        check("trash : ... la cible qui porte deja ⚡ garde son ⚡, et le conflit est compte",
+              _jT.get("conflits") == 1 and _sA in _regTt("flash") and _sA not in _regTt("trash"),
+              str(_jT))
+        check("trash : ... la reponse porte tags_flash, tags_trash et tags_error (plus rien d avale)",
+              all(k in _jT for k in ("tags_flash", "tags_trash", "tags_fav", "tags_error",
+                                     "conflits_exemples")), str(sorted(_jT)))
+
+        # -- 11. SYNCHRO DE MARCHE (fil de fond, lance ici en direct) ------------------
+        _marquerTt(flash={_sB, _C}, trash={_B, _D})
+        _wTt._SYNC_MARCHE.update(conflits=99, tags_trash=99, tags_flash=99)
+        _wTt._sync_marche_travail("zztta")
+        _eT = dict(_wTt._SYNC_MARCHE)
+        check("trash : synchro -> compteurs remis a zero PUIS remplis (Trash, Flash, conflits)",
+              _eT.get("tags_trash") == 1 and _eT.get("tags_flash") == 1 and _eT.get("conflits") == 1,
+              str({k: _eT.get(k) for k in ("tags_trash", "tags_flash", "conflits", "erreurs")}))
+        check("trash : ... d Trash chez la soeur, b garde son ⚡, la FR n est pas une cible",
+              _sD in _regTt("trash") and _sB in _regTt("flash") and _sB not in _regTt("trash")
+              and not any(k.startswith("zzttc|") and k != "zzttc|templates|a.mp4"
+                          for k in _regTt("trash")))
+        _etT = _cTt.get("/noctus/sync_marche/etat").get_json() or {}
+        check("trash : la route d etat rend ces compteurs a l ecran",
+              all(k in _etT for k in ("tags_trash", "tags_flash", "tags_fav", "conflits")), str(sorted(_etT)))
+
+        # -- 12. PERFECT : Template · Trash · Flash -----------------------------------
+        _marquerTt(flash={_B, _C}, trash={_A, _C})
+        _ecrireTt("disabled_reels.json", {_E})
+
+        def _plTtListe(t):
+            _r = _cTt.get("/perfect/liste?identity=zztta&type=" + t).get_json() or {}
+            return sorted(x.get("nom") for x in (_r.get("items") or [])), _r
+
+        _trT, _rtT = _plTtListe("trash")
+        _flT, _rfT = _plTtListe("flash")
+        _tpT, _rtpT = _plTtListe("templates")
+        check("trash : /perfect/liste?type=trash -> les Trash seuls (le doublon part en Flash)",
+              _rtT.get("ok") is True and _trT == ["a.mp4"], str(_rtT)[:200])
+        check("trash : type=flash inchange", _flT == ["b.mp4", "c.mp4"], str(_flT))
+        check("trash : type=templates exclut Flash ET Trash (et le ⊘)",
+              _tpT == ["d.mp4"], str(_tpT))
+        check("trash : le template ⊘ ecarte est COMPTE (desactives)",
+              _rtpT.get("desactives") == 1, str(_rtpT)[:200])
+        check("trash : l assistant propose Template, Trash puis Flash",
+              _wTt.UPLOAD_HTML.find('data-pfgenre="templates"')
+              < _wTt.UPLOAD_HTML.find('data-pfgenre="trash"')
+              < _wTt.UPLOAD_HTML.find('data-pfgenre="flash"')
+              and _wTt.UPLOAD_HTML.find('data-pfgenre="trash"') > 0)
+
+        # -- 13. COMPTEURS DU PARC (diagnostic de la reserve) --------------------------
+        # Trash se compte avec LA MEME fonction que le bot : a sert, b est
+        # aussi ⚡ (Flash l'emporte), e n'a pas de point de coupe.
+        _marquerTt(flash={_B}, trash={_A, _B, _E})
+        _ecrireTt("disabled_reels.json", set())
+        _ecrireTt("fav_brutes.json", {_A})
+        _osTt.environ["RIG_API_TOKEN"] = "tests-trash-jeton"
+        _jV = _cTt.get("/api/rig/reserve?identity=zztta&diagnostic=1",
+                       headers={"X-Rig-Token": "tests-trash-jeton"}).get_json() or {}
+        _vivT = ((_jV.get("vivier") or {}).get("zztta") or {})
+        check("trash : le diagnostic du parc compte les Trash comme le bot (doubles et sans coupe ecartes)",
+              _vivT.get("trash") == 1 and _vivT.get("trash_etoiles") == 1,
+              str({k: _vivT.get(k) for k in ("trash", "trash_etoiles", "flash")}))
+        check("trash : ... sans annoncer de case de stock Trash (il n y en a pas)",
+              not any(str(k).startswith("trash") for k in (_vivT.get("possible") or {})),
+              str(_vivT.get("possible")))
+
+        # -- 14. SUPPRESSION ET DOUBLONS : la marque part avec le fichier --------------
+        _cible_supTt = _IDTt / "zzttc" / "templates" / "a.mp4"
+        if not _cible_supTt.exists():
+            _cible_supTt.write_bytes(b"montage a" * 20)
+        _marquerTt(flash=(), trash={"zzttc|templates|a.mp4"})
+        _wTt._oublier_identites()
+        _cTt.post("/cloud/delete", data={"files": ["zzttc|templates|a.mp4"]})
+        check("trash : /cloud/delete emporte la marque Trash (un homonyme ne naitra pas marque)",
+              not _cible_supTt.exists() and "zzttc|templates|a.mp4" not in _regTt("trash"),
+              str((_cible_supTt.exists(), sorted(_regTt("trash")))))
+        (_IDTt / "zztta" / "templates" / "d_2.mp4").write_bytes(
+            (_IDTt / "zztta" / "templates" / "d.mp4").read_bytes())
+        _marquerTt(flash=(), trash={"zztta|templates|d_2.mp4"})
+        _wTt.DATA_DIR = _TT             # la corbeille des doublons, dans le bac a sable
+        try:
+            _jT = _cTt.post("/gdrive/doublons", data={"supprimer": "1"}).get_json() or {}
+        finally:
+            _wTt.DATA_DIR = _savTt["DATA_DIR"]
+        check("trash : /gdrive/doublons retire la marque du doublon deplace, et la compte",
+              _jT.get("deplaces", 0) >= 1 and _jT.get("marques_retirees") == 1
+              and "zztta|templates|d_2.mp4" not in _regTt("trash")
+              and (_TT / "_corbeille_doublons" / "zztta" / "templates" / "d_2.mp4").exists(),
+              str(_jT)[:200])
+        # Le proprietaire marque la carte qu'il VOIT, souvent le doublon. La
+        # marque passe sur l'original au lieu d'etre perdue, et la reponse
+        # donne les CLES, pas seulement un nombre.
+        check("trash : ... la marque du doublon PASSE sur l original (qui n en portait pas)",
+              _D in _regTt("trash")
+              and _jT.get("marques_transferees") == [
+                  {"doublon": "zztta|templates|d_2.mp4", "original": _D,
+                   "marque": "trash", "deja": False}]
+              and _jT.get("marques_perdues") == [], str(_jT.get("marques_transferees")))
+        # L'original porte deja l'AUTRE marque : on ne la lui retire pas
+        # (additif) -- celle du doublon est perdue, et NOMMEE.
+        (_IDTt / "zztta" / "templates" / "e_2.mp4").write_bytes(
+            (_IDTt / "zztta" / "templates" / "e.mp4").read_bytes())
+        _marquerTt(flash={_E}, trash={"zztta|templates|e_2.mp4"})
+        _wTt.DATA_DIR = _TT
+        try:
+            _jT = _cTt.post("/gdrive/doublons", data={"supprimer": "1"}).get_json() or {}
+        finally:
+            _wTt.DATA_DIR = _savTt["DATA_DIR"]
+        check("trash : ... l original porte l autre marque -> il la garde, la perte est NOMMEE",
+              _E in _regTt("flash") and _E not in _regTt("trash")
+              and "zztta|templates|e_2.mp4" not in _regTt("trash")
+              and _jT.get("marques_perdues") == [
+                  {"doublon": "zztta|templates|e_2.mp4", "original": _E,
+                   "marque": "trash", "en_place": "flash"}]
+              and _jT.get("marques_transferees") == [], str(_jT)[:260])
+        # /cloud/delete avec un registre illisible : l'avertissement sort dans
+        # la langue de la page (anglais par defaut), comme le bandeau.
+        _cible_supTt.write_bytes(b"montage a" * 20)
+        _marquerTt(flash=(), trash=())
+        (_TT / _MTt["fichier"]).write_text("[[[", encoding="utf-8")
+        _wTt._oublier_identites()
+        _cTt.post("/cloud/delete", data={"files": ["zzttc|templates|a.mp4"]})
+        with _cTt.session_transaction() as _sTt:
+            _flashDelTt = str(_sTt.get("flash_msg") or "")
+        check("trash : /cloud/delete, registre illisible -> l avertissement est en anglais sur la page anglaise",
+              "mark(s) not removed" in _flashDelTt and "unreadable" in _flashDelTt
+              and "non retirée" not in _flashDelTt, _flashDelTt[:200])
+        _marquerTt()
+
+        # -- 15. THEME CLAIR : la specificite, calculee ------------------------------
+        # Une regle generale « body.light [style*=…] » repeint les textes poses
+        # en style inline. La regle du filtre Trash doit la battre par sa
+        # SPECIFICITE, pas seulement par !important.
+        def _specTt(sel):
+            s = _reTt.sub(r"\[[^\]]*\]", " [a] ", sel)
+            s = _reTt.sub(r"::[\w-]+", " ", s)
+            ids = len(_reTt.findall(r"#[\w-]+", s))
+            cls = (len(_reTt.findall(r"\.[\w-]+", s)) + s.count("[a]")
+                   + len(_reTt.findall(r"(?<!:):[\w-]+", s)))
+            elts = len(_reTt.findall(r"(?:^|[\s>+~])([a-zA-Z][\w-]*)", s))
+            return (ids, cls, elts)
+
+        _cssTt = "\n".join(_reTt.findall(r"<style[^>]*>(.*?)</style>", _uplTt, _reTt.S))
+        _cssTt = _reTt.sub(r"/\*.*?\*/", "", _cssTt, flags=_reTt.S)
+        # Les remaps GENERAUX seulement : une regle limitee a une fenetre
+        # (« body.light #cap-add-modal [style…] ») ne touche pas ce bouton.
+        _remapsTt = [s.strip() for bloc in _reTt.findall(r"([^{}]+)\{[^{}]*\}", _cssTt)
+                     for s in bloc.split(",") if s.strip().startswith("body.light")
+                     and "[style" in s and "#" not in _reTt.sub(r"\[[^\]]*\]", "", s)]
+        _maxRemapTt = max((_specTt(s) for s in _remapsTt), default=(0, 0, 0))
+        _regleTt = "body.light #trash-toggle-btn"
+        check("trash : theme clair -> le filtre Trash prend la couleur foncee du module",
+              ("%s{color:%s!important" % (_regleTt, _MTt["couleur_clair"])) in _uplTt)
+        check("trash : ... et sa regle (%s) bat les remaps generaux (%s), calcule"
+              % (",".join(map(str, _specTt(_regleTt))), ",".join(map(str, _maxRemapTt))),
+              len(_remapsTt) > 10 and _specTt(_regleTt) > _maxRemapTt, str(len(_remapsTt)))
+        check("trash : visionneuse -> la pastille Trash allumee bat « .lb-act-btn.active »",
+              ".lb-act-btn.lb-trash.active{" in _uplTt
+              and _specTt(".lb-act-btn.lb-trash.active") > _specTt(".lb-act-btn.active"))
+        # La page rendue, telle que le navigateur la recoit.
+        _pageTt = _cTt.get("/").get_data(as_text=True)
+        check("trash : la page rendue n a plus aucun jeton, et porte la regle claire",
+              not _reTt.search(r"\{marques?_[a-z_]+\}", _pageTt)
+              and (_regleTt + "{color:") in _pageTt, str(len(_pageTt)))
+        check("trash : la visionneuse porte l action Trash, a cote de ⚡, branchee sur la carte",
+              "lb-act-btn lb-trash" in _pageTt
+              and _reTt.search(r"\['lb-trash',\s*'\.trash-trend',\s*'is-trash-trend'\]", _pageTt)
+              and _pageTt.find("lb-act-btn lb-trash") < _pageTt.find("lb-act-btn lb-flash"))
+
+        # -- 16. RENOMMER UNE IDENTITE : trash_trend.json suit ------------------------
+        # EN DERNIER : zzttb change de nom.
+        _marquerTt(flash={_sB}, trash={_sD})
+        _apT = _iaTt.apercu("zzttb")
+        check("trash : l apercu du renommage annonce les montages Trash Trend",
+              any(_MTt["nom"] in e.get("ou", "") for e in _apT.get("emplacements", [])),
+              str(_apT.get("emplacements"))[:200])
+        _rnT = _iaTt.renommer("zzttb", "zzttd")
+        check("trash : renommer -> la cle Trash suit le nouveau nom, sans echec",
+              _rnT.get("ok") and "zzttd|templates|d.mp4" in _regTt("trash")
+              and not any(k.startswith("zzttb|") for k in _regTt("trash"))
+              and not _rnT.get("echecs"), str((_rnT.get("echecs"), sorted(_regTt("trash")))))
+        check("trash : ... et la cle Flash aussi",
+              "zzttd|templates|b.mp4" in _regTt("flash"), str(sorted(_regTt("flash"))))
+
+        # -- 17. LE FORMULAIRE « MODIFIER L'IDENTITE » DE L'ONGLET JAILBREAK --------
+        # Il deplacait le dossier et jailbreak.json, pas les tables de cles :
+        # les marques Trash et Flash restaient a l'ancien nom. Il passe
+        # maintenant par identite_admin.renommer, comme /identity/rename.
+        _wTt._oublier_identites()
+        _rvTt = _cTt.post("/jailbreak/edit_identity",
+                          data={"old_name": "zzttd", "identity_name": "zz_tte"})
+        check("trash : edit_identity -> un nouveau nom avec « _ » est REFUSE, rien ne bouge",
+              _rvTt.status_code in (302, 303) and (_IDTt / "zzttd").is_dir()
+              and not (_IDTt / "zz_tte").exists()
+              and "zzttd|templates|d.mp4" in _regTt("trash"), _rvTt.status_code)
+        _wTt._oublier_identites()
+        _rvTt = _cTt.post("/jailbreak/edit_identity",
+                          data={"old_name": "zzttd", "identity_name": "zztte"})
+        with _cTt.session_transaction() as _sTt:
+            _msgRvTt = str(_sTt.get("flash_msg") or "")
+        check("trash : edit_identity -> les cles Trash ET Flash suivent le nouveau nom",
+              (_IDTt / "zztte").is_dir() and not (_IDTt / "zzttd").exists()
+              and "zztte|templates|d.mp4" in _regTt("trash")
+              and "zztte|templates|b.mp4" in _regTt("flash")
+              and not any(k.startswith("zzttd|") for k in _regTt("trash") | _regTt("flash")),
+              str((sorted(_regTt("trash")), sorted(_regTt("flash")), _msgRvTt[:120])))
+        check("trash : ... et le message dit ce qui a suivi (emplacements) et ce qui reste a la main",
+              "emplacement(s) mis à jour" in _msgRvTt and "Discord" in _msgRvTt, _msgRvTt[:200])
+    finally:
+        for _kT, _vT in _savTt.items():
+            setattr(_wTt, _kT, _vT)
+        _wTt._SYNC_MARCHE.clear()
+        _wTt._SYNC_MARCHE.update(_savSyncTt)
+        _cuTt.DATA_DIR, _cuTt.IDENTITIES_DIR = _savCuTt
+        _iaTt.DATA, _iaTt.IDENTITES, _iaTt.CORBEILLE = _savIaTt
+        _vpTt.LIENS_FILE = _savVpTt
+        if _savRigTt is None:
+            _osTt.environ.pop("RIG_API_TOKEN", None)
+        else:
+            _osTt.environ["RIG_API_TOKEN"] = _savRigTt
+        _wTt._oublier_identites()
+        for _fT in (_FTt["fichier"], _MTt["fichier"], "fav_brutes.json", "disabled_reels.json"):
+            _wTt._invalidate_json_cache(_TT / _fT)
+        _shTt.rmtree(_TT, ignore_errors=True)
+except Exception as _eTt:
+    import traceback as _tbTt
+    check("trash (site) : testable", False, repr(_eTt)[:200] + " " + _tbTt.format_exc()[-500:])
 
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")

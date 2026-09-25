@@ -39,6 +39,8 @@ import shutil
 import time
 from pathlib import Path
 
+import marques_montage as _mm
+
 import safe_json
 
 DATA = Path("data")
@@ -95,10 +97,19 @@ _SOUS_LISTES = (
 )
 
 #: Fichiers dont les cles sont des identifiants « <nom>|<sous-dossier>|<fichier> ».
+#:
+#: Les registres des marques de montage (Flash Trend, Trash Trend) viennent de
+#: marques_montage.py, la seule table qui les nomme : une marque ajoutee
+#: la-bas suit un renommage sans qu'on pense a revenir ici. Oubliee, elle
+#: perdait toutes ses cles en silence au premier renommage -- et une
+#: identite recreee sous l'ancien nom naissait deja marquee.
 _PREFIXES = (
     ("fav_brutes.json", "les brutes mises en favori"),
     ("banger_marks.json", "les reels marques banger"),
-    ("flash_trend.json", "les montages Flash Trend"),
+) + tuple(
+    (_mm.MARQUES[_c]["fichier"], "les montages " + _mm.MARQUES[_c]["nom"])
+    for _c in _mm.PRIORITE
+) + (
     ("disabled_reels.json", "les reels mis de cote"),
 )
 
@@ -289,8 +300,16 @@ def apercu(nom: str) -> dict:
 # Renommer
 # ==============================================================================
 
-def renommer(ancien: str, nouveau: str) -> dict:
+def renommer(ancien: str, nouveau: str, ancien_exact: bool = False) -> dict:
     """Renomme partout ou le nom est une cle. Rend le detail de ce qui a bouge.
+
+    `ancien_exact` : l'ancien nom est pris TEL QUEL (minuscules), sans
+    normaliser(). Pour /jailbreak/edit_identity : l'onglet Jailbreak creait
+    des identites avec « _ » ou « - », et normaliser() les rendait
+    introuvables (« marie_lou » cherche « marielou »). L'appelant garantit
+    que ce nom est celui d'une identite existante ; on refuse quand meme
+    tout ce qui pourrait sortir de data/identities. Le NOUVEAU nom, lui,
+    passe toujours par normaliser().
 
     L'ORDRE COMPTE, et il est dicte par le cout d'un echec a mi-chemin.
 
@@ -304,7 +323,15 @@ def renommer(ancien: str, nouveau: str) -> dict:
        dans le rapport plutot que passee sous silence : on saura quoi
        rattraper a la main.
     """
-    ancien, nouveau = normaliser(ancien), normaliser(nouveau)
+    if ancien_exact:
+        import re
+        ancien = str(ancien or "").strip().lower()
+        # Ni point ni barre : rien qui puisse sortir de data/identities.
+        if not re.fullmatch(r"[a-z0-9_\-]{1,60}", ancien):
+            return {"ok": False, "error": "Ancien nom invalide"}
+    else:
+        ancien = normaliser(ancien)
+    nouveau = normaliser(nouveau)
     if not ancien or not nouveau:
         return {"ok": False, "error": "Nom invalide (lettres et chiffres seulement)"}
     if ancien == nouveau:

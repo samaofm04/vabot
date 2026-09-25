@@ -1,4 +1,5 @@
 import asyncio
+import collections as _collections
 import datetime as _dt
 import json
 import logging
@@ -12,6 +13,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+import marques_montage
 import safe_json
 from video_transform import (transform_video, transform_metadata_strict,
                              transform_full_strict,
@@ -54,6 +56,12 @@ _MENU_BTN_FEATURE = {
     "cmenu:templateflash": "contenu",
     "cmenu:templateflashbanger": "contenu",
     "cmenu:templateflashbrut": "contenu",
+    # Les trois Trash du menu VA, meme regle. Ils ne sont pas des boutons
+    # postes mais des variantes du sous-menu Trash : c'est ici que le sous-menu
+    # lit si le serveur les autorise.
+    "cmenu:templatetrash": "contenu",
+    "cmenu:templatetrashbanger": "contenu",
+    "cmenu:templatetrashbrut": "contenu",
     "cmenu:addaccount": "onboarding",
     "cmenu:lien": "liens", "cmenu:clics": "clics",
 }
@@ -61,6 +69,98 @@ _MENU_BTN_FEATURE = {
 # Mode Threads : menu réduit à ces boutons (PP, Name, Pseudo, Mes clics,
 # Demander un lien, Mes comptes). Les comptes pointent vers threads.net.
 _THREADS_MENU = {"cmenu:pp", "cmenu:name", "cmenu:pseudo", "cmenu:clics", "cmenu:lien", "cmenu:comptes", "cmenu:help", "cmenu:pay", "cmenu:tuto"}
+
+
+# ---------------------------------------------------------------------------
+# LES FAMILLES DE CONTENU -- UNE SEULE TABLE POUR TOUS LES MENUS.
+#
+# Chaque famille a variantes devient UN bouton (« 💬 Caption ▸ ») qui ouvre
+# ses variantes dans un message ephemere, visible du seul VA. Decision du
+# proprietaire du 25/09/2026, validee sur maquette : sans ca, Trash ne tenait
+# nulle part -- le menu VA etait a 25 composants sur 25, son embed a 25 champs
+# sur 25, le panneau US a 24 sur 25.
+#
+# Le panneau US, le panneau ephemere des serveurs non-US, le menu VA et son
+# embed d'aide lisent TOUS cette table. Deux tables, deux comportements : le
+# Drive en a perdu 598 fichiers (CLAUDE.md).
+#
+# Dans une famille, les actions vont de la plus simple a la plus exigeante :
+# la matiere seule, + etoile, brute etoilee + matiere, matiere etoilee +
+# brute etoilee. Les marques (Trash, Flash) viennent de marques_montage, dans
+# SON ordre : Trash vit « entre » les templates et Flash.
+_Famille = _collections.namedtuple("_Famille", "cle emoji nom actions")
+
+_FAMILLES_MENU = (
+    _Famille("caption", "💬", "Caption",
+             ("reelcaption", "capbanger", "brutcaption", "montagebanger")),
+    _Famille("template", "🎞️", "Template",
+             ("reelmonte", "templatebanger", "bruttemplate", "templatebrut")),
+) + tuple(
+    _Famille(_m, marques_montage.marque(_m)["emoji"],
+             marques_montage.marque(_m)["court"],
+             tuple(marques_montage.marque(_m)["actions"]))
+    for _m in marques_montage.ORDRE)
+
+#: Ce qu'exige chaque action d'une marque, dans l'ordre de ses « actions »
+#: (marques_montage) : (template etoile ?, brute etoilee ?).
+_MARQUE_VARIANTES = ((False, False), (True, False), (False, True), (True, True))
+
+
+def _famille_menu(cle):
+    """La famille `cle` de _FAMILLES_MENU, ou None."""
+    for f in _FAMILLES_MENU:
+        if f.cle == cle:
+            return f
+    return None
+
+
+def _libelles_marque(cle) -> tuple:
+    """Les quatre libelles d'une marque, dans l'ordre de ses actions.
+
+    Tires de marques_montage et de lui seul : changer le logo la-bas change
+    ces boutons, sans qu'aucun logo soit recopie ici.
+    """
+    m = marques_montage.marque(cle)
+    e, c = m["emoji"], m["court"]
+    return (f"{e} {c}", f"⭐ {c}", f"⭐ Brut + {c}", f"⭐⭐ {c} + Brut")
+
+
+def _explications_actions() -> dict:
+    """{cle d'action: ce qu'elle envoie}, en une ligne.
+
+    Le sous-menu d'une famille met CETTE ligne sous chaque variante : quatre
+    boutons qui ne different que par leurs etoiles ne s'expliquent pas tout
+    seuls, et c'etait deja le role de l'embed du menu VA.
+    """
+    out = {
+        "reelcaption": "une vidéo brute, une caption au hasard incrustée",
+        "capbanger": "tes captions ⭐, incrustées sur une vidéo",
+        "brutcaption": "une brute ⭐, une caption au hasard incrustée",
+        "montagebanger": "une brute ⭐ + une caption ⭐, montées pour toi",
+        "reelmonte": "les reels montés (texte déjà incrusté), à poster tels quels",
+        "templatebanger": "ton template ⭐, monté avec une de tes brutes",
+        "bruttemplate": "une brute ⭐, un template au hasard",
+        "templatebrut": "un template ⭐ assemblé avec une brute ⭐",
+    }
+    for m in marques_montage.ORDRE:
+        fiche = marques_montage.marque(m)
+        e, nom = fiche["emoji"], fiche["nom"]
+        a = fiche["actions"]
+        out[a[0]] = f"un montage {e} {nom}, monté avec une brute au hasard"
+        out[a[1]] = f"un montage {e} ET ⭐, monté avec une brute au hasard"
+        out[a[2]] = f"une brute ⭐, un montage {e} au hasard"
+        out[a[3]] = f"un montage {e} ET ⭐, monté avec ta brute ⭐"
+    return out
+
+
+_EXPLICATIONS = _explications_actions()
+
+
+def _libelle_action(cle) -> str:
+    """Le libelle d'une action, tel que le panneau US l'affiche. Une seule
+    source (_JB_ACTIONS_US) pour le panneau, les sous-menus et l'aide."""
+    e = _jb_action(cle)
+    return e[1] if e else cle
 
 
 def _ch_handle_va(name) -> str:
@@ -162,6 +262,11 @@ def _menu_feature_check(interaction, feature: str) -> bool:
 
 # Correspondance suffixe de custom_id -> icone. Couvre « cmenu: » comme
 # « cmenu2: » : on coupe au premier deux-points.
+#
+# Les trois Flash n'y sont plus : ils pointaient vers l'icone « Template +
+# Brut », qui ecrasait leur ⚡ des que les icones etaient televersees. Ils
+# vivent desormais dans le sous-menu ⚡, qui pose l'icone de CHAQUE action
+# (icones_actions) -- vatemplateflash compris, qui n'etait jamais montree.
 _ICONE_PAR_ACTION_MENU = {
     "reel": "reelcaption",
     "reelmonte": "reelmonte",
@@ -175,10 +280,11 @@ _ICONE_PAR_ACTION_MENU = {
     "capbanger": "capbanger",
     "montagebanger": "montagebanger",
     "templatebrut": "templatebrut",
-    "templateflash": "templatebrut",
-    "templateflashbanger": "templatebrut",
-    "templateflashbrut": "templatebrut",
 }
+# Chaque lanceur de famille prend l'icone de sa premiere action (la plus
+# simple) : c'est elle qui represente la famille dans le panneau US aussi.
+_ICONE_PAR_ACTION_MENU.update(
+    {"fam:" + _f.cle: _f.actions[0] for _f in _FAMILLES_MENU})
 
 
 def _poser_icones_menu(view, guild):
@@ -209,19 +315,58 @@ def _poser_icones_menu(view, guild):
                 pass
 
 
+def _reglages_menu(guild):
+    """(fonctions actives, mode Threads) du serveur, avec le repli d'avant :
+    un module de reglages qui ne repond pas ne doit pas vider le menu."""
+    try:
+        import guild_features as gf
+        return gf.get_features(guild), gf.threads_mode(guild)
+    except Exception:
+        return None, False
+
+
+def _variantes_menu_va(famille, feats, threads) -> list:
+    """Les variantes du menu VA d'une famille que CE serveur autorise.
+
+    `feats` None = reglages illisibles : on garde tout, comme avant. Une
+    variante suit la fonction de son ancien bouton (_MENU_BTN_FEATURE) : le
+    sous-menu applique donc les memes reglages que le menu d'avant.
+    """
+    fam = _famille_menu(famille)
+    if fam is None:
+        return []
+    out = []
+    for cle in fam.actions:
+        if cle not in _MENU_VA_APPELS:
+            continue
+        cid = "cmenu:" + cle
+        if threads and cid not in _THREADS_MENU:
+            continue
+        need = _MENU_BTN_FEATURE.get(cid, "contenu")
+        if feats is not None and need and need not in feats:
+            continue
+        out.append(cle)
+    return out
+
+
 def _filter_menu_view(view, guild):
     """Retire les boutons désactivés sur ce serveur (fonctions + mode Threads).
     En mode Threads, garde uniquement le set _THREADS_MENU et renomme le bouton
-    'Mes comptes Insta' en 'Mes comptes Threads'."""
+    'Mes comptes Insta' en 'Mes comptes Threads'.
+
+    Un lanceur de famille (« cmenu:fam:… ») part quand AUCUNE de ses variantes
+    n'est autorisee : un bouton qui ouvrirait un sous-menu vide ne sert a rien.
+    """
     _poser_icones_menu(view, guild)
-    try:
-        import guild_features as gf
-        feats = gf.get_features(guild)
-        threads = gf.threads_mode(guild)
-    except Exception:
+    feats, threads = _reglages_menu(guild)
+    if feats is None:
         return view
     for item in list(view.children):
         cid = getattr(item, "custom_id", "")
+        if (cid or "").startswith(_CMENU_FAMILLE):
+            if not _variantes_menu_va(cid[len(_CMENU_FAMILLE):], feats, threads):
+                view.remove_item(item)
+            continue
         need = _MENU_BTN_FEATURE.get(cid)
         if need and need not in feats:
             view.remove_item(item)
@@ -237,17 +382,22 @@ def _filter_menu_view(view, guild):
     return view
 
 
+#: Prefixe des lanceurs de famille du menu VA.
+_CMENU_FAMILLE = "cmenu:fam:"
+
+
 def _build_menu_embed(identity, guild=None):
     """Embed clair et intuitif : chaque bouton est expliqué en une ligne.
     Masque les champs des fonctions désactivées ; en mode Threads, n'affiche que
-    le menu réduit et bascule les comptes en Threads."""
-    try:
-        import guild_features as gf
-        feats = gf.get_features(guild)
-        threads = gf.threads_mode(guild)
-    except Exception:
+    le menu réduit et bascule les comptes en Threads.
+
+    Les champs suivent les RANGEES du menu. Une famille tient en UN champ, qui
+    nomme ses variantes : Discord plafonne un embed a 25 champs, et l'ancien
+    en comptait 25 -- plus aucune ligne ne pouvait entrer.
+    """
+    feats, threads = _reglages_menu(guild)
+    if feats is None:
         feats = set(("contenu", "onboarding", "clics", "liens", "tickets", "statut"))
-        threads = False
     emb = discord.Embed(
         title="🧵 Ton menu Threads" if threads else "☀️ Ton menu",
         description="Clique sur un bouton 👇",
@@ -261,40 +411,42 @@ def _build_menu_embed(identity, guild=None):
             return
         emb.add_field(name=name, value=value, inline=True)
 
+    # Rangee 0 : les publications.
     add("cmenu:reel", "contenu", "🎬 Reel", "Vidéos + captions (1 par compte)")
-    add("cmenu:reelmonte", "contenu", "🎞️ Template", "Reels montés (texte déjà incrusté) — à poster tels quels")
-    add("cmenu:story", "contenu", "📖 Story", "Photo + texte pour ta story")
-    add("cmenu:post", "contenu", "🖼️ Post", "Photo + légende pour le feed")
-    add("cmenu:storycta", "contenu", "📲 Story CTA", "Photo CTA (à poster le soir)")
     add("cmenu:banger", "contenu", "⭐ Reels", "Tes meilleurs reels (marqués ⭐)")
-    add("cmenu:capbanger", "contenu", "⭐ Caption", "Tes meilleures captions (marquées ⭐)")
-    add("cmenu:montagebanger", "contenu", "⭐⭐ Caption + Vidéo brut", "Une brute ⭐ + une caption ⭐, montées pour toi")
-    add("cmenu:templatebanger", "contenu", "⭐ Template",
-        "Ton template ⭐, monté avec une de tes brutes")
-    add("cmenu:templatebrut", "contenu", "⭐⭐ Template + Brut", "Un template ⭐ assemblé avec une brute ⭐")
-    add("cmenu:brutbanger", "contenu", "⭐ Vidéo brut", "Tes meilleures brutes ⭐, sans montage")
-    add("cmenu:templateflash", "contenu", "⚡ Flash",
-        "Un montage ⚡ Flash Trend, monté avec une brute au hasard")
-    add("cmenu:templateflashbanger", "contenu", "⭐ Flash",
-        "Un montage ⚡ ET ⭐, monté avec une brute au hasard")
-    add("cmenu:templateflashbrut", "contenu", "⭐⭐ Flash + Brut",
-        "Un montage ⚡ ET ⭐, monté avec ta brute ⭐")
-    add("cmenu:pseudo", "contenu", "👤 Pseudo", "Des pseudos dispo")
+    add("cmenu:story", "contenu", "📖 Story", "Photo + texte pour ta story")
+    add("cmenu:storycta", "contenu", "📲 Story CTA", "Photo CTA (à poster le soir)")
+    add("cmenu:post", "contenu", "🖼️ Post", "Photo + légende pour le feed")
+    # Rangee 1 : le compte, puis la brute marquee.
     add("cmenu:name", "contenu", "📝 Name", "Des noms d'affichage")
-    add("cmenu:bio", "contenu", "💬 Bio", "Des bios de ton identité")
+    add("cmenu:pseudo", "contenu", "👤 Pseudo", "Des pseudos dispo")
     add("cmenu:pp", "contenu", "🖼 PP", "Des photos de profil prêtes")
-    add("cmenu:lien", "liens", "🔗 Demander un lien", "Affiche ton lien si tu en as un, sinon prévient les managers")
+    add("cmenu:bio", "contenu", "💬 Bio", "Des bios de ton identité")
+    add("cmenu:brutbanger", "contenu", "⭐ Vidéo brut", "Tes meilleures brutes ⭐, sans montage")
+    # Rangee 2 : une ligne par famille, qui annonce ses variantes. Le champ
+    # suit le lanceur : il disparait avec lui quand aucune n'est permise.
+    if not threads:
+        for fam in _FAMILLES_MENU:
+            cles = _variantes_menu_va(fam.cle, feats, threads)
+            if not cles:
+                continue
+            noms = " · ".join(_libelle_action(c) for c in cles)
+            emb.add_field(name=f"{fam.emoji} {fam.nom} ▸",
+                          value=f"Ouvre : {noms}", inline=True)
+    # Rangee 3 : suivi et aide.
     add("cmenu:clics", "clics", "📊 Mes clics", "Tes clics en direct (aujourd'hui, hier, semaine, quinzaine)")
-    add("cmenu:addaccount", "onboarding", "➕ Ajouter un compte", "Relance l'onboarding pour créer un nouveau compte")
-    add("cmenu:comptes", "contenu",
-        "📷 Mes comptes Threads" if threads else "📷 Mes comptes Insta",
-        "La liste de tes comptes Threads (@pseudo)" if threads else "La liste de tes comptes Instagram (@pseudo)")
     add("cmenu:help", None, "🆘 Assistance",
         "Un souci ? Explique-le, un manager/boss vient t'aider")
+    add("cmenu:lien", "liens", "🔗 Demander un lien", "Affiche ton lien si tu en as un, sinon prévient les managers")
     add("cmenu:pay", None, "💸 Mon paiement",
         "Ton moyen pour recevoir l'argent (crypto ou TapTap)")
     add("cmenu:tuto", None, "❓ Comprends rien ?",
         "Une vidéo qui explique comment tout marche")
+    # Rangee 4 : les comptes.
+    add("cmenu:addaccount", "onboarding", "➕ Ajouter un compte", "Relance l'onboarding pour créer un nouveau compte")
+    add("cmenu:comptes", "contenu",
+        "📷 Mes comptes Threads" if threads else "📷 Mes comptes Insta",
+        "La liste de tes comptes Threads (@pseudo)" if threads else "La liste de tes comptes Instagram (@pseudo)")
     if identity and not threads:
         emb.set_footer(text=f"Identité : {identity}")
     return emb
@@ -1524,40 +1676,87 @@ def tous_templates_for(identity, limit=15):
     return utilisables, sans_coupe
 
 
-def flash_templates_for(identity, limit=15, exiger_banger=False):
-    """Templates marques Flash Trend -> ([(Path, draft)], nb_sans_coupe).
+def _cles_registre(fichier):
+    """Les cles « identite|dossier|fichier » d'un registre du site, toleres
+    en liste comme en dict. Absent ou illisible : ensemble vide -- ces
+    registres-la (etoiles, ⊘) n'ont jamais bloque un bouton, on ne commence
+    pas ici."""
+    try:
+        raw = json.loads((DATA_DIR / fichier).read_text(encoding="utf-8"))
+    except Exception:
+        return set()
+    if isinstance(raw, dict):
+        return {k for k in raw if isinstance(k, str)}
+    if isinstance(raw, list):
+        return {k for k in raw if isinstance(k, str)}
+    return set()
+
+
+def marque_templates_for(cle, identity, limit=15, exiger_banger=False,
+                         ecartes=None):
+    """Templates portant la marque `cle` (« flash », « trash ») ->
+    ([(Path, draft)], nb_sans_coupe).
 
     Meme contrat que fav_templates_for, meme validation : un template sans
     point de coupe est ECARTE et COMPTE, parce que le moteur le recopierait
     tel quel et que le VA recevrait une video ou aucune brute n'apparait.
 
-    `exiger_banger` demande en plus l'etoile. Les deux marques vivent dans
-    deux fichiers distincts et se cumulent sans se gener : c'est seulement
-    l'AFFICHAGE du site qui separe les deux vues, jamais la donnee.
+    `exiger_banger` demande en plus l'etoile. L'etoile vit dans un autre
+    fichier et se cumule avec la marque (⭐ + ⚡ = « Flash Banger »).
+
+    CE QUI EST ENCORE ECARTE, ET COMPTE dans `ecartes` (dict facultatif :
+    les appelants a deux valeurs, dont le stock, ne changent pas) :
+
+      desactives  le ⊘ du site (disabled_reels.json). Aucun selecteur du bot
+                  ne le lisait : un template mis de cote partait quand meme
+                  par ⚡ Flash. Corrige ICI pour les deux marques, sinon
+                  « desactive » ne voudrait rien dire pour Trash non plus.
+      conflits    un montage marque aussi d'une marque PRIORITAIRE
+                  (marques_montage.PRIORITE : Flash l'emporte). Le site rend
+                  les marques exclusives a l'ecriture ; une donnee ancienne
+                  peut encore porter les deux, et le meme template partirait
+                  alors par deux familles de boutons -- publie deux fois.
+      erreurs     un registre de marque qui existe mais ne se lit pas. Le
+                  dire, sinon « aucun montage » envoie chercher une panne
+                  qui n'existe pas.
+
+    Le bot ne fait que LIRE ces registres : aucune ecriture ici.
     """
     import json as _json
-
-    def _noms(fichier, sous):
-        try:
-            raw = _json.loads((DATA_DIR / fichier).read_text(encoding="utf-8"))
-            keys = list(raw.keys()) if isinstance(raw, dict) else list(raw or [])
-        except Exception:
-            return set()
-        p = f"{identity}|{sous}|"
-        return {k[len(p):] for k in keys
-                if isinstance(k, str) and k.startswith(p) and k[len(p):]}
-
-    noms = _noms("flash_trend.json", "templates")
+    fiche = marques_montage.marque(cle)
+    cles, err = marques_montage.lire_cles_ou_erreur(DATA_DIR / fiche["fichier"])
+    erreurs = [err] if err else []
+    p = f"{identity}|templates|"
+    noms = {k[len(p):] for k in cles if k.startswith(p) and k[len(p):]}
     if exiger_banger:
-        noms &= _noms("fav_brutes.json", "templates")
+        noms &= {k[len(p):] for k in _cles_registre("fav_brutes.json")
+                 if k.startswith(p)}
+
+    # Flash l'emporte sur Trash : on retire ce qu'une marque PLUS prioritaire
+    # porte deja. Un registre prioritaire illisible ne bloque pas le bouton
+    # (on ne peut plus trier les doubles) : on le dit.
+    conflits = 0
+    for autre in marques_montage.PRIORITE[:marques_montage.PRIORITE.index(cle)]:
+        a_cles, a_err = marques_montage.lire_cles_ou_erreur(
+            DATA_DIR / marques_montage.marque(autre)["fichier"])
+        if a_err:
+            erreurs.append(a_err + " : doubles marques non verifiees")
+            continue
+        doubles = {n for n in noms if p + n in a_cles}
+        conflits += len(doubles)
+        noms -= doubles
+
+    eteints = _cles_registre("disabled_reels.json")
+    desactives = {n for n in noms if p + n in eteints}
+    noms -= desactives
 
     tdir = IDENTITIES_DIR / identity / "templates"
     utilisables, sans_coupe = [], 0
     for fn in sorted(noms):
-        p = tdir / fn
-        if not (p.exists() and p.is_file()):
+        chemin = tdir / fn
+        if not (chemin.exists() and chemin.is_file()):
             continue
-        mj = p.parent / f"{p.stem}.montage.json"
+        mj = chemin.parent / f"{chemin.stem}.montage.json"
         if not mj.exists():
             sans_coupe += 1
             continue
@@ -1570,10 +1769,23 @@ def flash_templates_for(identity, limit=15, exiger_banger=False):
         if cut <= 0.05:
             sans_coupe += 1
             continue
-        utilisables.append((p, draft))
+        utilisables.append((chemin, draft))
         if limit and len(utilisables) >= limit:
             break
+    if isinstance(ecartes, dict):
+        ecartes.update(sans_coupe=sans_coupe, desactives=len(desactives),
+                       conflits=conflits, erreurs=erreurs)
     return utilisables, sans_coupe
+
+
+def flash_templates_for(identity, limit=15, exiger_banger=False, ecartes=None):
+    """Templates marques Flash Trend -> ([(Path, draft)], nb_sans_coupe).
+
+    Garde son nom : cogs/noctuspool.py et le diagnostic du site l'appellent.
+    Tout le travail est dans marque_templates_for.
+    """
+    return marque_templates_for("flash", identity, limit=limit,
+                                exiger_banger=exiger_banger, ecartes=ecartes)
 
 
 def _reserve_ouverte_aux_va() -> bool:
@@ -2268,7 +2480,10 @@ class UserCog(commands.Cog):
         presents = sorted(set(attendus.values()) & apres)
         manquants = sorted(set(attendus.values()) - apres)
 
-        lignes = [f"**{len(presents)}/{len(attendus)} icônes disponibles** sur ce serveur."]
+        # On compte des NOMS d'emoji, pas des actions : les quatre Trash
+        # partagent une icone, et « 18/24 » aurait annonce six manquantes.
+        lignes = [f"**{len(presents)}/{len(set(attendus.values()))} icônes "
+                  "disponibles** sur ce serveur."]
         if crees:
             lignes.append(f"➕ {len(crees)} envoyée(s) à l'instant.")
         elif presents:
@@ -3144,6 +3359,31 @@ class UserCog(commands.Cog):
         await self._send_template_flash(interaction, exiger_banger=False,
                                         brute_favorite=True, nombre=nombre)
 
+    # LES QUATRE TRASH : des METHODES, jamais des commandes slash. Le bot
+    # principal est a 100 commandes sur 100, et une de plus fait echouer la
+    # synchronisation de TOUT l'arbre, sans un message. Le panneau US, le
+    # ✨ General et le menu VA savent appeler une methode ordinaire
+    # (_run_for_model). Ordre et forme calques sur les quatre Flash.
+    async def templatetrash(self, interaction, nombre=3):
+        """Trash : un montage Trash Trend, une brute au hasard."""
+        await self._send_template_marque(interaction, "trash", nombre=nombre)
+
+    async def templatetrashbanger(self, interaction, nombre=3):
+        """⭐ Trash : un montage Trash Trend ET etoile, une brute au hasard."""
+        await self._send_template_marque(interaction, "trash",
+                                         exiger_banger=True, nombre=nombre)
+
+    async def bruttrash(self, interaction, nombre=3):
+        """⭐ Brut + Trash : une brute ETOILEE, un Trash au hasard."""
+        await self._send_template_marque(interaction, "trash",
+                                         brute_favorite=True, nombre=nombre)
+
+    async def templatetrashbrut(self, interaction, nombre=3):
+        """⭐⭐ Trash + Brut : un Trash etoile, monte avec ta brute etoilee."""
+        await self._send_template_marque(interaction, "trash",
+                                         exiger_banger=True,
+                                         brute_favorite=True, nombre=nombre)
+
     async def _send_montage_bangers(self, interaction, caption_favorite=True,
                                     nombre=3):
         """Bouton '🎬 Montage Banger' : une BRUTE favorite + une CAPTION favorite.
@@ -3355,16 +3595,32 @@ class UserCog(commands.Cog):
 
     async def _send_template_flash(self, interaction, exiger_banger=False,
                                    brute_favorite=False, nombre=3):
-        """Les trois boutons Flash, qui ne different que par ce qu ils exigent.
+        """Les boutons Flash. Garde son nom : le menu VA et les commandes
+        /templateflash* l'appellent. Tout le travail est dans
+        _send_template_marque, partage avec Trash."""
+        await self._send_template_marque(interaction, "flash",
+                                         exiger_banger=exiger_banger,
+                                         brute_favorite=brute_favorite,
+                                         nombre=nombre)
 
-            Template Flash          template FLASH          brute au hasard
-            Template Flash Banger   template FLASH + ETOILE brute au hasard
-            Flash Banger + Brut     template FLASH + ETOILE brute ETOILEE
+    async def _send_template_marque(self, interaction, cle, exiger_banger=False,
+                                    brute_favorite=False, nombre=3):
+        """Les quatre boutons d'une marque (Flash, Trash), qui ne different
+        que par ce qu'ils exigent :
+
+            Flash / Trash          template MARQUE           brute au hasard
+            ⭐ Flash / ⭐ Trash    template MARQUE + ETOILE  brute au hasard
+            ⭐ Brut + …            template MARQUE           brute ETOILEE
+            ⭐⭐ … + Brut           template MARQUE + ETOILE  brute ETOILEE
 
         « brute au hasard » n est pas un pis-aller : sans brutes_dir, le moteur
         pioche lui-meme parmi toutes les brutes de l identite. C est le
         comportement voulu quand seul le TEMPLATE est trie -- imposer en plus
         une brute etoilee reduirait le stock sans rien trier de mieux.
+
+        UNE fonction pour les deux marques, pilotee par marques_montage : une
+        copie par marque aurait diverge a la premiere retouche (CLAUDE.md,
+        « deux mappings valent deux comportements »).
         """
         import shutil as _sh
         import tempfile as _tf
@@ -3373,36 +3629,52 @@ class UserCog(commands.Cog):
         identity = get_user_identity(interaction.user.id)
         if not identity:
             await interaction.response.send_message(
-                "Tu n'as pas d'identite assignee. Demande a un admin.", ephemeral=True)
+                "Tu n'as pas d'identité assignée. Demande à un admin.", ephemeral=True)
             return
 
-        quoi = ("montage \u26a1 **et** \u2b50" if exiger_banger
-                else "montage \u26a1")
-        templates, sans_coupe = flash_templates_for(
-            identity, exiger_banger=exiger_banger)
+        fiche = marques_montage.marque(cle)
+        logo, court = fiche["emoji"], fiche["court"]
+        quoi = (f"montage {logo} **et** ⭐" if exiger_banger
+                else f"montage {logo}")
+        ecartes = {}
+        templates, sans_coupe = marque_templates_for(
+            cle, identity, exiger_banger=exiger_banger, ecartes=ecartes)
         brutes = fav_brutes_for(identity) if brute_favorite else []
 
+        # CE QUI A ETE ECARTE SE DIT TOUJOURS, dans les deux messages : un
+        # admin qui a tague cinq montages et n'en voit aucun arriver doit
+        # apprendre pourquoi (point de coupe, ⊘, double marque, registre
+        # illisible), pas chercher une panne ailleurs.
+        notes = []
+        if sans_coupe:
+            notes.append(f"ℹ️ {sans_coupe} montage(s) {logo} écarté(s) : pas de "
+                         "**point de coupe**, donc aucune brute n'y apparaîtrait. "
+                         "_(À définir dans l'éditeur Montage du site.)_")
+        if ecartes.get("desactives"):
+            notes.append(f"ℹ️ {ecartes['desactives']} montage(s) {logo} écarté(s) : "
+                         "mis de côté ⊘ sur le site.")
+        if ecartes.get("conflits"):
+            autres = " / ".join(
+                marques_montage.marque(m)["emoji"] + " " + marques_montage.marque(m)["court"]
+                for m in marques_montage.PRIORITE[:marques_montage.PRIORITE.index(cle)])
+            notes.append(f"ℹ️ {ecartes['conflits']} montage(s) {logo} écarté(s) : "
+                         f"aussi marqué(s) {autres} — c'est le bouton {autres} "
+                         "qui les envoie.")
+        for err in ecartes.get("erreurs") or []:
+            notes.append(f"⚠️ {err} — préviens un admin.")
+
         if not templates or (brute_favorite and not brutes):
-            # Le nombre ecarte se dit TOUJOURS : un admin qui a tague cinq
-            # montages et n en voit aucun arriver doit apprendre qu il leur
-            # manque un point de coupe, pas chercher une panne ailleurs.
-            note = ""
-            if sans_coupe:
-                note = ("\n" + "\u26a0\ufe0f " + str(sans_coupe) + " montage(s) "
-                        "\u26a1 **ecartes** : pas de **point de coupe**, donc aucune "
-                        "brute n'y apparaitrait. _(A definir dans l'editeur "
-                        "Montage du site.)_")
             if not templates:
                 manque = ("Aucun " + quoi + " utilisable "
                           "(onglet **Templates montage**).")
             else:
-                manque = ("Tu as **" + str(len(templates)) + " montage(s) \u26a1 "
-                          "utilisable(s)**, mais **aucune video brute etoilee** "
-                          "(onglet **Video brut**).")
+                manque = (f"Tu as **{len(templates)} montage(s) {logo} "
+                          "utilisable(s)**, mais **aucune vidéo brute étoilée** "
+                          "(onglet **Vidéo brut**).")
             await interaction.response.send_message(
-                "\u26a1 Impossible d'assembler pour `" + identity + "`." + "\n"
-                + manque + note + "\n"
-                + "_(Un admin pose le \u26a1 sur le site, page Templates montage.)_",
+                f"{logo} Impossible d'assembler pour `{identity}`.\n"
+                + manque + "".join("\n" + n for n in notes) + "\n"
+                + f"_(Un admin pose le {logo} sur le site, page Templates montage.)_",
                 ephemeral=True)
             return
 
@@ -3410,12 +3682,12 @@ class UserCog(commands.Cog):
             import noctus_web
         except Exception as e:
             await interaction.response.send_message(
-                f"\u26a0\ufe0f Module video indisponible : {e}", ephemeral=True)
+                f"⚠️ Module vidéo indisponible : {e}", ephemeral=True)
             return
         if not noctus_web.setup_ok():
             await interaction.response.send_message(
-                "\u26a0\ufe0f La generation video n'est pas prete sur le serveur "
-                "(Node/ffmpeg). Previens un admin.", ephemeral=True)
+                "⚠️ La génération vidéo n'est pas prête sur le serveur "
+                "(Node/ffmpeg). Préviens un admin.", ephemeral=True)
             return
 
         await interaction.response.defer()
@@ -3424,24 +3696,36 @@ class UserCog(commands.Cog):
         # trois, sans un mot. Le plafond par les combinaisons reelles
         # reste : au-dela, _pick_fresh recycle et on republie le meme.
         total = min(nombre, len(templates) * (len(brutes) if brute_favorite else 1))
-        libelle = ("FLASH BANGER + BRUT" if brute_favorite
-                   else "TEMPLATE FLASH BANGER" if exiger_banger
-                   else "TEMPLATE FLASH")
-        avec = " avec ta brute \u2b50" if brute_favorite else ""
-        intro = ("\u26a1 **" + str(total) + " " + libelle + " pour `" + identity
-                 + "`** \u2014 ton " + quoi + ", monte" + avec + "." + "\n"
-                 + "\u23f3 Je les genere (~15-30s chacun).")
-        if sans_coupe:
-            intro += ("\n" + "\u2139\ufe0f " + str(sans_coupe)
-                      + " montage(s) \u26a1 ecarte(s) : pas de point de coupe.")
+        # Le libelle nomme ce que le VA a demande. « ⭐ Brut + Flash » se
+        # disait « FLASH BANGER + BRUT », comme la double etoile, alors que
+        # son template n'est pas etoile.
+        haut = court.upper()
+        libelle = (f"{haut} BANGER + BRUT" if exiger_banger and brute_favorite
+                   else f"BRUT BANGER + {haut}" if brute_favorite
+                   else f"TEMPLATE {haut} BANGER" if exiger_banger
+                   else f"TEMPLATE {haut}")
+        avec = " avec ta brute ⭐" if brute_favorite else ""
+        intro = (f"{logo} **{total} {libelle} pour `{identity}`** — ton {quoi}, "
+                 f"monté{avec}.\n⏳ Je les génère (~15-30s chacun).")
+        intro += "".join("\n" + n for n in notes)
         intro += self._note_plafond(
             nombre, total,
-            str(len(templates)) + " montage(s) \u26a1"
-            + (" \u00d7 " + str(len(brutes)) + " brute(s)" if brute_favorite else ""))
+            f"{len(templates)} montage(s) {logo}"
+            + (f" × {len(brutes)} brute(s)" if brute_favorite else ""))
         await interaction.followup.send(intro)
 
+        # La famille de reserve : la meme regle que noctus_reserve.
+        # FAMILLE_PAR_ACTION (templateflashbrut -> flash_brut, brutflash ->
+        # flash_vid). « ⭐ Brut + Flash » passait « flash_brut » : sans effet
+        # tant que la reserve est au parc (POUR_LES_VA), faux le jour ou elle
+        # rouvre aux VA. Trash n'a pas de famille de stock : la reserve ne
+        # trouve rien et on genere, comme pour une case vide.
+        famille = (f"{cle}_brut" if exiger_banger and brute_favorite
+                   else f"{cle}_vid" if brute_favorite
+                   else f"{cle}_banger" if exiger_banger
+                   else cle)
         used_t, used_b = set(), set()
-        suivi = _Progression(interaction, total, "Montages Flash", mot="Flash")
+        suivi = _Progression(interaction, total, f"Montages {court}", mot=court)
         await suivi.demarrer()
         for idx in range(1, total + 1):
             tpl, draft = _pick_fresh(templates, used_t, key=lambda t: str(t[0]))
@@ -3452,7 +3736,7 @@ class UserCog(commands.Cog):
                     # Un dossier par generation, supprime quoi qu il arrive : le
                     # VPS se remplirait sinon d une copie de brute a chaque clic.
                     vid = _pick_fresh(brutes, used_b, key=lambda p: str(p))
-                    tmp = _tf.mkdtemp(prefix="flashbrute-")
+                    tmp = _tf.mkdtemp(prefix=f"{cle}brute-")
                     cible = Path(tmp) / vid.name
                     try:
                         os.link(str(vid), str(cible))   # pas de copie : lien dur
@@ -3460,11 +3744,9 @@ class UserCog(commands.Cog):
                         _sh.copy2(str(vid), str(cible))
                 await self._gen_and_send_montaged(
                     interaction, tpl, draft, desc, idx, total, identity,
-                    label=libelle, emoji="\u26a1",
-                    prefixe_fichier="flash", brutes_dir=tmp,
-                    famille=("flash_brut" if brute_favorite else
-                             "flash_banger" if exiger_banger else "flash"),
-                    suivi=suivi)
+                    label=libelle, emoji=logo,
+                    prefixe_fichier=cle, brutes_dir=tmp,
+                    famille=famille, suivi=suivi)
             finally:
                 if tmp:
                     _sh.rmtree(tmp, ignore_errors=True)
@@ -4179,29 +4461,56 @@ class UserCog(commands.Cog):
             await _envoyer_texte(interaction, desc)
 
     async def cog_load(self):
-        # Vue persistante : les boutons du menu marchent meme apres un redemarrage du bot
-        try:
-            self.bot.add_view(ContentMenuView(self))
-            self.bot.add_view(CentralMenuView(self))
-            self.bot.add_view(JailbreakMenuView(self))  # menu jailbreak (select des models)
-            self.bot.add_view(JailbreakMenuView(self, us=True))  # variante US (custom_id distinct)
-            self.bot.add_view(LinkPanelView())  # panneau "Générer un lien"
-            self.bot.add_dynamic_items(GenLinkButton)  # bouton "Générer le lien" persistant
-            self.bot.add_dynamic_items(JBModelButton)  # 1 bouton par model (menu US)
-            # panneau d'actions permanent : l'etat vit dans le custom_id, donc
-            # les boutons repondent encore apres un redemarrage
-            # JBQtySelect reste enregistree pour les panneaux DEJA postes :
-            # ils portent son custom_id, et sans elle leurs boutons
-            # deviendraient muets sans un mot.
-            self.bot.add_dynamic_items(JBQtyBouton, JBQtySelect, JBActionButton)
-            # Panneau Trends : sans cet enregistrement, ses boutons ne
-            # repondent plus apres un redemarrage — le message reste a
-            # l ecran, les clics ne font rien, et rien ne le dit.
-        except Exception:
-            pass
-        # Le menu ✨ General, a part et JOURNALISE : le bloc du dessus avale
-        # tout en silence, et un enregistrement rate y laisserait les boutons
-        # du General muets sans une ligne nulle part.
+        # Vues persistantes : les boutons des menus marchent meme apres un
+        # redemarrage du bot.
+        #
+        # CHAQUE ENREGISTREMENT DANS SON PROPRE ESSAI, ET JOURNALISE. Ils
+        # partageaient un seul « try ... except: pass » : une vue qui deborde
+        # (un 26e composant, un 6e bouton sur une rangee) leve a la
+        # construction, et TOUS les enregistrements suivants sautaient en
+        # silence -- au redemarrage, le panneau US entier devenait muet sans
+        # une ligne dans le journal.
+        def _enregistrer(quoi, faire):
+            try:
+                faire()
+            except Exception as e:
+                log.warning("cog_load : %s non enregistre(s) (%s: %s) -- "
+                            "ses boutons ne repondront pas.",
+                            quoi, type(e).__name__, e)
+
+        _enregistrer("menu VA", lambda: self.bot.add_view(ContentMenuView(self)))
+        # Les boutons RETIRES du menu VA le 25/09/2026 (passes dans les
+        # sous-menus de famille) : les menus deja epingles les portent encore
+        # jusqu'au prochain repost, et sans cette vue ils ne repondraient plus.
+        _enregistrer("anciens boutons du menu VA",
+                     lambda: self.bot.add_view(ContentMenuHeritageView(self)))
+        _enregistrer("menu central", lambda: self.bot.add_view(CentralMenuView(self)))
+        # menu jailbreak (select des models), puis sa variante US
+        # (custom_id distinct)
+        _enregistrer("menu Jailbreak", lambda: self.bot.add_view(JailbreakMenuView(self)))
+        _enregistrer("menu Jailbreak US",
+                     lambda: self.bot.add_view(JailbreakMenuView(self, us=True)))
+        _enregistrer("panneau des liens", lambda: self.bot.add_view(LinkPanelView()))
+        _enregistrer("bouton Generer le lien",
+                     lambda: self.bot.add_dynamic_items(GenLinkButton))
+        # 1 bouton par model (menu US)
+        _enregistrer("boutons des models US",
+                     lambda: self.bot.add_dynamic_items(JBModelButton))
+        # Panneau d'actions permanent : l'etat vit dans le custom_id, donc
+        # les boutons repondent encore apres un redemarrage.
+        _enregistrer("quantite du panneau US",
+                     lambda: self.bot.add_dynamic_items(JBQtyBouton))
+        # JBQtySelect reste enregistree pour les panneaux DEJA postes : ils
+        # portent son custom_id, et sans elle leurs boutons deviendraient
+        # muets sans un mot. JBActionButton sert le panneau, les sous-menus de
+        # famille ET les anciens panneaux (jbus:a:…:templateflash:…).
+        _enregistrer("actions du panneau US",
+                     lambda: self.bot.add_dynamic_items(JBQtySelect, JBActionButton))
+        # Les lanceurs de famille (💬 Caption ▸ …) du panneau US.
+        _enregistrer("familles du panneau US",
+                     lambda: self.bot.add_dynamic_items(JBFamilleBouton))
+        # Le menu ✨ General, a part et JOURNALISE : un enregistrement rate y
+        # laisserait les boutons du General muets sans une ligne nulle part.
         try:
             self.bot.add_dynamic_items(JBGenButton, JBGenQtyBouton,
                                        JBGenReserveBouton)
@@ -6236,6 +6545,99 @@ async def _fermer_panneau_jb(user_id):
         pass
 
 
+#: Ce que montre le panneau EPINGLE de chaque salon US : {salon: (model, qte)}.
+#:
+#: Les sous-menus de famille (« 💬 Caption ▸ »…) sont des ephemeres ARRETES
+#: (_vue_sans_suivi) : ils n'expirent jamais et restent cliquables. Quand le
+#: VA passe le panneau de Lola a Julia, l'ancien sous-menu garde
+#: « jbus:a:lola:… » dans ses boutons, et un clic servait Lola dans le
+#: -content pendant que le panneau affichait Julia -- le melange d'identites
+#: du 05/09/2026, reintroduit par le chemin US. Avant les sous-menus, toutes
+#: les variantes etaient sur le panneau epingle, qui suit toujours la model.
+#: En memoire seulement : apres un redemarrage l'etat est inconnu, et on ne
+#: refuse RIEN (un refus sans savoir bloquerait un VA pour rien).
+_JB_PANNEAU_COURANT = {}
+
+#: Le dernier sous-menu de famille ouvert par chaque personne :
+#: {user_id: (salon_id, message)}. Pour l'effacer quand un autre s'ouvre ou
+#: quand le panneau change de model ou de quantite -- tant que le jeton de
+#: l'interaction (15 min) le permet ; au-dela, le refus de JBActionButton
+#: prend le relais.
+_JB_SOUS_MENUS = {}
+
+
+def _jb_panneau_noter(chan_id, ident, qty):
+    """Retient ce que montre desormais le panneau epingle du salon.
+
+    `ident` None : l'etat devient INCONNU (on l'oublie) plutot que faux --
+    par exemple quand c'est le panneau de secours, envoye en ephemere, qui a
+    change, et non celui que le salon voit.
+    """
+    cid = int(chan_id or 0)
+    if not cid:
+        return
+    if ident is None:
+        _JB_PANNEAU_COURANT.pop(cid, None)
+    else:
+        _JB_PANNEAU_COURANT[cid] = ((ident or "").lower(), int(qty))
+
+
+def _jb_est_panneau_epingle(interaction) -> bool:
+    """Le message de ce clic est-il le panneau ENREGISTRE du salon ?"""
+    cid = int(getattr(getattr(interaction, "channel", None), "id", 0) or 0)
+    mid = int(getattr(getattr(interaction, "message", None), "id", 0) or 0)
+    epingle = _jb_panel_ids().get(str(cid)) if cid else None
+    return bool(cid and mid and epingle and int(epingle) == mid)
+
+
+async def _jb_sous_menus_fermer(user_id=None, channel_id=None):
+    """Efface les sous-menus de famille d'une personne ou d'un salon.
+
+    Ne leve jamais : un ephemere deja rejete, ou dont le jeton a expire, n'a
+    plus rien a effacer -- et echouer ici empecherait d'ouvrir le suivant.
+    Rend le nombre de messages effaces.
+    """
+    if user_id is None and channel_id is None:
+        return 0
+    n = 0
+    for uid, (cid, msg) in list(_JB_SOUS_MENUS.items()):
+        if user_id is not None and uid != int(user_id):
+            continue
+        if channel_id is not None and cid != int(channel_id):
+            continue
+        _JB_SOUS_MENUS.pop(uid, None)
+        try:
+            await msg.delete()
+            n += 1
+        except Exception:
+            pass
+    return n
+
+
+def _jb_sous_menu_perime(interaction, ident, qty) -> str:
+    """Le refus a opposer au clic d'un sous-menu PERIME, "" sinon.
+
+    Seulement pour un message ephemere (le panneau epingle, lui, est
+    toujours a jour) et seulement si l'etat du panneau est connu.
+    """
+    msg = getattr(interaction, "message", None)
+    if not getattr(getattr(msg, "flags", None), "ephemeral", False):
+        return ""
+    cid = int(getattr(getattr(interaction, "channel", None), "id", 0) or 0)
+    etat = _JB_PANNEAU_COURANT.get(cid)
+    if not etat:
+        return ""
+    m, q = etat
+    if m != (ident or "").lower():
+        return (f"⚠️ Ce sous-menu est pour **{(ident or '?').capitalize()}**, ton "
+                f"panneau est passé sur **{m.capitalize()}** : reclique ▸ sur le "
+                "panneau pour avoir les bons boutons.")
+    if int(q) != int(qty):
+        return (f"⚠️ Ce sous-menu est réglé sur **{qty}** média(s), ton panneau "
+                f"sur **{q}** : reclique ▸ sur le panneau.")
+    return ""
+
+
 async def _poser_panneau_jb(interaction, view):
     """Ouvre un panneau Jailbreak en fermant le precedent.
 
@@ -6713,60 +7115,226 @@ class ChoixBrutesView(discord.ui.View):
             ephemeral=True)
 
 
+def _appel_marque(cle, exiger_banger, brute_favorite):
+    """L'appel d'une variante de marque, tel que le faisaient ses boutons."""
+    async def _appel(cog, itx):
+        await cog._send_template_marque(itx, cle, exiger_banger=exiger_banger,
+                                        brute_favorite=brute_favorite)
+    return _appel
+
+
+async def _appel_reelmonte(cog, itx):
+    await cog.reelmonte.callback(cog, itx)
+
+
+async def _appel_capbanger(cog, itx):
+    await cog._send_caption_bangers(itx)
+
+
+async def _appel_montagebanger(cog, itx):
+    await cog._send_montage_bangers(itx)
+
+
+async def _appel_templatebanger(cog, itx):
+    await cog._send_template_plus_brute(itx, brute_favorite=False)
+
+
+async def _appel_templatebrut(cog, itx):
+    await cog._send_template_plus_brute(itx)
+
+
+#: Les variantes que le MENU VA sait lancer, et COMMENT. Ce sont exactement
+#: les appels des anciens boutons (cmenu:capbanger, cmenu:templateflash…) :
+#: les ranger dans un sous-menu ne devait rien changer a ce qu'ils envoient.
+#:
+#: Le menu VA n'a jamais eu les « ⭐ Brut + … », ni « 💬 Caption » (c'est
+#: « Reel », rangee 0) : la table ne les invente pas. Les marques suivent
+#: marques_montage (la marque seule, + etoile, + etoile + brute etoilee).
+_MENU_VA_APPELS = {
+    "capbanger": _appel_capbanger,
+    "montagebanger": _appel_montagebanger,
+    "reelmonte": _appel_reelmonte,
+    "templatebanger": _appel_templatebanger,
+    "templatebrut": _appel_templatebrut,
+}
+for _m in marques_montage.ORDRE:
+    for _i in (0, 1, 3):
+        _MENU_VA_APPELS[marques_montage.marque(_m)["actions"][_i]] = _appel_marque(
+            _m, *_MARQUE_VARIANTES[_i])
+del _m, _i
+
+
+async def _lancer_variante_va(cog, interaction, cle):
+    """Lance une variante du menu VA par sa cle d'action."""
+    appel = _MENU_VA_APPELS.get(cle)
+    if appel is None:
+        await interaction.response.send_message(
+            f"Action indisponible (`{cle}`).", ephemeral=True)
+        return
+    await appel(cog, interaction)
+
+
+class _BoutonVarianteVA(discord.ui.Button):
+    """Une variante dans le sous-menu ephemere d'une famille du menu VA.
+
+    PAS de custom_id fixe, et c'est voulu. Selon sa version (le VPS n'est
+    pas fige : requirements.txt dit >= 2.3.2), discord.py range une vue
+    ephemere sous la meme cle qu'une vue persistante. Reprendre
+    « cmenu:capbanger » ici pouvait ecraser le bouton herite des menus deja
+    epingles, puis l'effacer a l'expiration du sous-menu.
+    """
+
+    def __init__(self, cle, icone=None):
+        lib = _libelle_action(cle)
+        super().__init__(
+            label=(_libelle_sans_emoji(lib) if icone is not None else lib),
+            style=discord.ButtonStyle.primary, row=0)
+        if icone is not None:
+            self.emoji = icone
+        self.cle = cle
+
+    async def callback(self, interaction: discord.Interaction):
+        await _lancer_variante_va(self.view.cog, interaction, self.cle)
+
+
+class _SousMenuFamilleVA(discord.ui.View):
+    """Les variantes d'UNE famille du menu VA, dans un message ephemere.
+
+    Dix minutes : assez pour cliquer plusieurs variantes a la suite. Passe ce
+    delai, les boutons s'eteignent au lieu de rester cliquables sans reponse.
+    """
+
+    def __init__(self, cog, cles, icones=None):
+        super().__init__(timeout=600)
+        self.cog = cog
+        self.itx = None           # pose apres l'envoi, pour l'eteindre
+        icones = icones or {}
+        for cle in cles:
+            self.add_item(_BoutonVarianteVA(cle, icone=icones.get(cle)))
+
+    async def on_timeout(self):
+        for item in self.children:
+            item.disabled = True
+        try:
+            if self.itx is not None:
+                await self.itx.edit_original_response(view=self)
+        except Exception:
+            pass
+
+
+def _embed_famille(fam, cles, titre_suffixe="") -> "discord.Embed":
+    """L'embed d'un sous-menu : une ligne d'explication par variante."""
+    lignes = [f"**{_libelle_action(c)}** — {_EXPLICATIONS.get(c, '')}".rstrip(" —")
+              for c in cles]
+    return discord.Embed(
+        title=f"{fam.emoji} {fam.nom}{titre_suffixe}",
+        description="\n".join(lignes) + "\n\nClique sur une variante 👇",
+        color=discord.Color.blurple())
+
+
+async def _ouvrir_famille_va(cog, interaction, famille):
+    """Le clic sur un lanceur « ▸ » du menu VA : ses variantes, en ephemere."""
+    fam = _famille_menu(famille)
+    if fam is None:
+        await interaction.response.send_message(
+            f"Famille inconnue (`{famille}`) : ce menu est ancien, un nouveau "
+            "arrive au prochain repost.", ephemeral=True)
+        return
+    feats, threads = _reglages_menu(getattr(interaction, "guild", None))
+    cles = _variantes_menu_va(famille, feats, threads)
+    if not cles:
+        # Le lanceur aurait du etre retire par _filter_menu_view ; un menu
+        # poste AVANT un changement de reglage le porte encore.
+        await interaction.response.send_message(
+            "⚠️ Cette fonction est désactivée sur ce serveur.", ephemeral=True)
+        return
+    vue = _SousMenuFamilleVA(cog, cles,
+                             icones_actions(getattr(interaction, "guild", None)))
+    await interaction.response.send_message(
+        embed=_embed_famille(fam, cles), view=vue, ephemeral=True)
+    vue.itx = interaction
+
+
+class _LanceurFamilleVA(discord.ui.Button):
+    """« 💬 Caption ▸ », « 🎞️ Template ▸ »… du menu VA. Persistant : son
+    custom_id est fixe (cmenu:fam:<famille>) et la vue est enregistree au
+    demarrage."""
+
+    def __init__(self, fam, row=2):
+        super().__init__(label=f"{fam.nom} ▸", emoji=fam.emoji,
+                         style=discord.ButtonStyle.primary,
+                         custom_id=_CMENU_FAMILLE + fam.cle, row=row)
+        self.famille = fam.cle
+
+    async def callback(self, interaction: discord.Interaction):
+        await _ouvrir_famille_va(self.view.cog, interaction, self.famille)
+
+
 class ContentMenuView(discord.ui.View):
     """Menu de contenu cliquable. Chaque bouton sert le contenu correspondant
     pour l'identité du VA qui clique (réutilise les commandes existantes).
-    Vue persistante (custom_id) : marche après un redémarrage du bot."""
+    Vue persistante (custom_id) : marche après un redémarrage du bot.
+
+    Disposition du 25/09/2026 (maquette validee par le proprietaire) :
+      0  Reel, ⭐ Reels, Story, Story CTA, Post
+      1  Name, Pseudo, PP, Bio, ⭐ Vidéo brut
+      2  un lanceur ▸ par famille de _FAMILLES_MENU (Caption, Template,
+         Trash, Flash) : ses variantes s'ouvrent en ephemere
+      3  Mes clics, Assistance, Demander un lien, Mon paiement, Comprends rien ?
+      4  Ajouter un compte, Mes comptes Insta
+    Le menu etait a 25 composants sur 25 : Trash n'y entrait pas. Il en
+    compte 21, et une famille de plus ne coutera qu'un lanceur.
+    """
 
     def __init__(self, cog):
         super().__init__(timeout=None)
         self.cog = cog
+        # Les lanceurs sont ajoutes ICI, pas en decorateur : ils suivent la
+        # table des familles, sans liste a recopier.
+        for fam in _FAMILLES_MENU:
+            self.add_item(_LanceurFamilleVA(fam, row=2))
 
     @discord.ui.button(label="Reel", emoji="🎬", style=discord.ButtonStyle.primary, custom_id="cmenu:reel", row=0)
     async def b_reel(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.reel.callback(self.cog, interaction)
 
+    @discord.ui.button(label="⭐ Reels", style=discord.ButtonStyle.primary, custom_id="cmenu:banger", row=0)
+    async def b_banger(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._send_banger_reels(interaction)
+
     @discord.ui.button(label="Story", emoji="📖", style=discord.ButtonStyle.primary, custom_id="cmenu:story", row=0)
     async def b_story(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.story.callback(self.cog, interaction)
-
-    @discord.ui.button(label="Post", emoji="🖼️", style=discord.ButtonStyle.primary, custom_id="cmenu:post", row=0)
-    async def b_post(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog.post.callback(self.cog, interaction)
 
     @discord.ui.button(label="Story CTA", emoji="📲", style=discord.ButtonStyle.primary, custom_id="cmenu:storycta", row=0)
     async def b_storycta(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.storycta.callback(self.cog, interaction)
 
-    @discord.ui.button(label="⭐ Reels", style=discord.ButtonStyle.primary, custom_id="cmenu:banger", row=0)
-    async def b_banger(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog._send_banger_reels(interaction)
-
-    @discord.ui.button(label="Template", emoji="🎞️", style=discord.ButtonStyle.primary, custom_id="cmenu:reelmonte", row=1)
-    async def b_reelmonte(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog.reelmonte.callback(self.cog, interaction)
-
-    @discord.ui.button(label="Pseudo", emoji="👤", style=discord.ButtonStyle.secondary, custom_id="cmenu:pseudo", row=1)
-    async def b_pseudo(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog.username.callback(self.cog, interaction)
+    @discord.ui.button(label="Post", emoji="🖼️", style=discord.ButtonStyle.primary, custom_id="cmenu:post", row=0)
+    async def b_post(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.post.callback(self.cog, interaction)
 
     @discord.ui.button(label="Name", emoji="📝", style=discord.ButtonStyle.secondary, custom_id="cmenu:name", row=1)
     async def b_name(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.name.callback(self.cog, interaction)
 
-    @discord.ui.button(label="Bio", emoji="💬", style=discord.ButtonStyle.secondary, custom_id="cmenu:bio", row=1)
-    async def b_bio(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog.bio.callback(self.cog, interaction)
+    @discord.ui.button(label="Pseudo", emoji="👤", style=discord.ButtonStyle.secondary, custom_id="cmenu:pseudo", row=1)
+    async def b_pseudo(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.username.callback(self.cog, interaction)
 
     @discord.ui.button(label="PP", emoji="🖼", style=discord.ButtonStyle.secondary, custom_id="cmenu:pp", row=1)
     async def b_pp(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.profilepic.callback(self.cog, interaction)
 
-    @discord.ui.button(label="Demander un lien", emoji="🔗", style=discord.ButtonStyle.success, custom_id="cmenu:lien", row=2)
-    async def b_lien(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog.request_link(interaction)
+    @discord.ui.button(label="Bio", emoji="💬", style=discord.ButtonStyle.secondary, custom_id="cmenu:bio", row=1)
+    async def b_bio(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.bio.callback(self.cog, interaction)
 
-    @discord.ui.button(label="Mes clics", emoji="📊", style=discord.ButtonStyle.success, custom_id="cmenu:clics", row=2)
+    @discord.ui.button(label="⭐ Vidéo brut", style=discord.ButtonStyle.primary, custom_id="cmenu:brutbanger", row=1)
+    async def b_brutbanger(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog._send_brutes_bangers(interaction)
+
+    @discord.ui.button(label="Mes clics", emoji="📊", style=discord.ButtonStyle.success, custom_id="cmenu:clics", row=3)
     async def b_clics(self, interaction: discord.Interaction, button: discord.ui.Button):
         # Délègue au cog clickrecap (logique des clics centralisée là-bas)
         cog = interaction.client.get_cog("ClickRecap")
@@ -6776,15 +7344,29 @@ class ContentMenuView(discord.ui.View):
             return
         await cog._handle_myclicks(interaction)
 
-    @discord.ui.button(label="Assistance", emoji="🆘", style=discord.ButtonStyle.danger, custom_id="cmenu:help", row=2)
+    @discord.ui.button(label="Assistance", emoji="🆘", style=discord.ButtonStyle.danger, custom_id="cmenu:help", row=3)
     async def b_help(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(AssistanceModal(self.cog))
 
-    @discord.ui.button(label="Comprends rien ?", emoji="❓", style=discord.ButtonStyle.secondary, custom_id="cmenu:tuto", row=2)
+    @discord.ui.button(label="Demander un lien", emoji="🔗", style=discord.ButtonStyle.success, custom_id="cmenu:lien", row=3)
+    async def b_lien(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.request_link(interaction)
+
+    @discord.ui.button(label="Mon paiement", emoji="💸", style=discord.ButtonStyle.secondary, custom_id="cmenu:pay", row=3)
+    async def b_pay(self, interaction: discord.Interaction, button: discord.ui.Button):
+        emb = discord.Embed(
+            title="💸 Ton moyen de paiement",
+            description="Choisis **comment tu veux recevoir ton argent** 👇",
+            color=discord.Color.gold(),
+        )
+        await interaction.response.send_message(
+            embed=emb, view=PaymentMethodView(self.cog), ephemeral=True)
+
+    @discord.ui.button(label="Comprends rien ?", emoji="❓", style=discord.ButtonStyle.secondary, custom_id="cmenu:tuto", row=3)
     async def b_tuto(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog._send_tutoriel(interaction)
 
-    @discord.ui.button(label="Ajouter un compte", emoji="➕", style=discord.ButtonStyle.primary, custom_id="cmenu:addaccount", row=3)
+    @discord.ui.button(label="Ajouter un compte", emoji="➕", style=discord.ButtonStyle.primary, custom_id="cmenu:addaccount", row=4)
     async def b_addaccount(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not _menu_feature_check(interaction, "onboarding"):
             await interaction.response.send_message("⚠️ Désactivé sur ce serveur.", ephemeral=True)
@@ -6804,7 +7386,7 @@ class ContentMenuView(discord.ui.View):
         except Exception:
             pass
 
-    @discord.ui.button(label="Mes comptes Insta", emoji="📷", style=discord.ButtonStyle.secondary, custom_id="cmenu:comptes", row=3)
+    @discord.ui.button(label="Mes comptes Insta", emoji="📷", style=discord.ButtonStyle.secondary, custom_id="cmenu:comptes", row=4)
     async def b_comptes(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not _menu_feature_check(interaction, "contenu"):
             await interaction.response.send_message("⚠️ Désactivé sur ce serveur.", ephemeral=True)
@@ -6820,51 +7402,40 @@ class ContentMenuView(discord.ui.View):
             pass
         await interaction.response.send_modal(MesComptesInstaModal(prefill=prefill))
 
-    @discord.ui.button(label="Mon paiement", emoji="💸", style=discord.ButtonStyle.secondary, custom_id="cmenu:pay", row=2)
-    async def b_pay(self, interaction: discord.Interaction, button: discord.ui.Button):
-        emb = discord.Embed(
-            title="💸 Ton moyen de paiement",
-            description="Choisis **comment tu veux recevoir ton argent** 👇",
-            color=discord.Color.gold(),
-        )
-        await interaction.response.send_message(
-            embed=emb, view=PaymentMethodView(self.cog), ephemeral=True)
 
-    # Rangee 4, laissee libre jusqu'ici : les deux favoris ont leur propre
-    # ligne, ce qui les distingue a l'oeil du « Reels Banger » qui, lui, ne
-    # marche pas pareil (il envoie dans un salon, ceux-ci sont des favoris).
-    @discord.ui.button(label="⭐ Caption", style=discord.ButtonStyle.primary, custom_id="cmenu:capbanger", row=4)
-    async def b_capbanger(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog._send_caption_bangers(interaction)
+class _BoutonHeritageVA(discord.ui.Button):
+    """Un bouton RETIRE du menu VA, encore porte par les menus deja postes."""
 
-    @discord.ui.button(label="⭐⭐ Caption + Vidéo brut", style=discord.ButtonStyle.primary, custom_id="cmenu:montagebanger", row=4)
-    async def b_montagebanger(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog._send_montage_bangers(interaction)
+    def __init__(self, cle):
+        super().__init__(label=cle, custom_id=f"cmenu:{cle}")
+        self.cle = cle
 
-    @discord.ui.button(label="Flash", emoji="⚡", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflash", row=3)
-    async def b_templateflash(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog._send_template_flash(interaction)
+    async def callback(self, interaction: discord.Interaction):
+        await _lancer_variante_va(self.view.cog, interaction, self.cle)
 
-    @discord.ui.button(label="⭐ Flash", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflashbanger", row=3)
-    async def b_templateflashbanger(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog._send_template_flash(interaction, exiger_banger=True)
 
-    @discord.ui.button(label="⭐⭐ Flash + Brut", style=discord.ButtonStyle.secondary, custom_id="cmenu:templateflashbrut", row=3)
-    async def b_templateflashbrut(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog._send_template_flash(interaction, exiger_banger=True, brute_favorite=True)
+class ContentMenuHeritageView(discord.ui.View):
+    """Les custom_id que le menu VA a quittes le 25/09/2026, TOUJOURS GERES.
 
-    @discord.ui.button(label="⭐ Template", style=discord.ButtonStyle.primary, custom_id="cmenu:templatebanger", row=4)
-    async def b_templatebanger(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog._send_template_plus_brute(interaction, brute_favorite=False)
+    Jamais postee : enregistree au demarrage (cog_load) pour repondre aux
+    menus deja epingles dans les salons va-, jusqu'a ce que daily_menu les
+    remplace. Sans elle, ces boutons resteraient a l'ecran et ne feraient
+    plus rien -- sans un mot, pour le VA comme pour le journal.
 
-    @discord.ui.button(label="⭐⭐ Template + Brut", style=discord.ButtonStyle.primary, custom_id="cmenu:templatebrut", row=4)
-    async def b_templatebrut(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog._send_template_plus_brute(interaction)
+    Chaque bouton lance EXACTEMENT ce qu'il lancait (_MENU_VA_APPELS). Les
+    Trash n'y sont pas : ils n'ont jamais ete postes hors d'un sous-menu.
+    """
 
-    @discord.ui.button(label="⭐ Vidéo brut", style=discord.ButtonStyle.primary, custom_id="cmenu:brutbanger", row=4)
-    async def b_brutbanger(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog._send_brutes_bangers(interaction)
+    #: Les anciens boutons, dans l'ordre de l'ancien menu.
+    ANCIENS = ("reelmonte", "templateflash", "templateflashbanger",
+               "templateflashbrut", "capbanger", "montagebanger",
+               "templatebanger", "templatebrut")
 
+    def __init__(self, cog):
+        super().__init__(timeout=None)
+        self.cog = cog
+        for cle in self.ANCIENS:
+            self.add_item(_BoutonHeritageVA(cle))
 
 
 class CentralMenuView(discord.ui.View):
@@ -7088,110 +7659,120 @@ _JB_ACTIONS = [
 # Serveur US : PAS de « Reel » brut (les VA US ne postent pas de reel avec
 # exemple) — à la place « Reel caption » (brute + caption incrustée, biblio
 # Caption du site) et « Reel monté » (montage template).
+def _actions_marque(cle) -> list:
+    """Les quatre actions d'une marque, au format de _JB_ACTIONS_US.
+
+    Cle d'action = attribut du cog : templateflash* sont des commandes
+    slash, brutflash et les quatre Trash des methodes ordinaires, et
+    _run_for_model sait appeler les deux.
+    """
+    return [(k, lib, k, True) for k, lib in
+            zip(marques_montage.marque(cle)["actions"], _libelles_marque(cle))]
+
+
 _JB_ACTIONS_US = [
-    # Rangee 1 - IDENTITE.
+    # IDENTITE.
     ('name', '📝 Name', 'name', False),
     ('pseudo', '👤 Pseudo', 'username', False),
     ('pp', '🖼️ PP', 'profilepic', True),
     ('bio', '💬 Bio', 'bio', True),
 
-    # Rangee 2 - PUBLICATIONS, puis le brut nu et sa version marquee.
+    # PUBLICATIONS, puis le brut nu et sa version marquee.
     ('story', '📖 Story', 'story', True),
     ('storycta', '📲 Story CTA', 'storycta', True),
     ('post', '🖼️ Post', 'post', True),
     ('brute', '🎥 Vidéo brut', 'videobrut', True),
     ('brutbanger', '⭐ Vidéo brut', 'brutbanger', False),
 
-    # Rangee 3 - CAPTIONS en entier, puis l'entree de la famille Template.
+    # Les FAMILLES, dans l'ordre de _FAMILLES_MENU. Chacune va de la matiere
+    # seule a la double etoile. LA BRUTE ETOILEE, LA MATIERE AU HASARD
+    # (« ⭐ Brut + … ») suit l'etoile simple dont elle est la variante : on
+    # lit la progression d'une meme matiere, pas un compte d'etoiles.
     ('reelcaption', '💬 Caption', 'reelcaption', True),
     ('capbanger', '⭐ Caption', 'captionbanger', True),
-    # LA BRUTE ETOILEE, LA MATIERE AU HASARD. Rangee derriere l'etoile simple
-    # dont elle est la variante : on lit la progression d'une meme matiere,
-    # pas un compte d'etoiles. Les trois n'ont pu entrer que parce que la
-    # quantite est passee du deroulant au bouton -- un Select mangeait une
-    # rangee entiere et le panneau plafonnait a vingt actions.
     ('brutcaption', '⭐ Brut + Caption', 'brutcaption', True),
     ('montagebanger', '⭐⭐ Caption + Vidéo brut', 'montagebanger', True),
     ('reelmonte', '🎞️ Template', 'reelmonte', True),
     ('templatebanger', '⭐ Template', 'templatebanger', True),
     ('bruttemplate', '⭐ Brut + Template', 'bruttemplate', True),
-
-    # Rangee 4 - fin des TEMPLATES, puis les FLASH.
     ('templatebrut', '⭐⭐ Template + Brut', 'templatebrut', True),
-    ('templateflash', '⚡ Flash', 'templateflash', True),
-    ('templateflashbanger', '⭐ Flash', 'templateflashbanger', True),
-    ('brutflash', '⭐ Brut + Flash', 'brutflash', True),
-    ('templateflashbrut', '⭐⭐ Flash + Brut', 'templateflashbrut', True),
+    # Les MARQUES (Trash, puis Flash) : cles, libelles et ordre viennent de
+    # marques_montage -- changer le logo la-bas change ces boutons.
+    *[_e for _mq in marques_montage.ORDRE for _e in _actions_marque(_mq)],
 
-    # Les TRENDS : des videos deja FINIES, a poster telles quelles. Une entree
-    # par famille, posee juste apres les etoiles dont elle est le degre
-    # au-dessus. Elles tiennent parce que la quantite est passee en bouton :
-    # le menu deroulant qu elle occupait mangeait une rangee entiere, soit
-    # cinq places.
+    # Les TRENDS : des videos deja FINIES, a poster telles quelles.
     ('trend', '⭐⭐⭐ Trends', 'trends', True),
     ('brutchoix', '🎛️ Choisir ma brute', 'choisirbrute', False),
 
+    # CETTE LISTE N'EST PAS L'ORDRE D'AFFICHAGE : c'est _JB_PANNEAU_US. Elle
+    # fait foi pour ce qui EXISTE (panneau, ✨ General, parc, menutest).
+    # Trends et « Choisir ma brute » restent en queue : le menu de test
+    # (cogs/menutest.py) coupe au-dela de 25 entrees en le disant, et ce sont
+    # les deux seules qui n'ont de toute facon pas de reserve a y essayer.
 ]
 
-#: La rangee de chaque action : UNE rangee = UNE famille.
-#:
-#: L'ordre suit le MONTAGE d'un compte, tel qu'un VA le fait : le nom et le
-#: pseudo, la photo et la bio, les stories, le post, puis les reels. Les
-#: favoris ⭐ restent groupes en bas -- ils ne servent pas au montage, ils
-#: servent quand le compte tourne.
-#:
-#: Le rangement se calculait avant par « i // 4 », qui coupait les familles
-#: n'importe ou -- « Vidéo brut » se retrouvait colle a « PP », et les
-#: favoris etaient repartis sur deux lignes. Ici la position est DITE, donc
-#: ajouter une action ne deplace plus les autres.
-#:
-#: Discord : rangees 0 a 4, 5 composants par rangee. La 0 porte le
-#: selecteur de quantite, il reste donc 4 rangees, soit 20 places.
 #: Les actions servies par le stock « Trends » : elles se distinguent a
-#: l oeil, en vert, du reste du panneau.
+#: l oeil, en vert, du reste du panneau. Aucune cle Trash ne commence par
+#: « trend » : « Trash Trend » n'est pas « ⭐⭐⭐ Trends ».
 _JB_CLES_TREND = frozenset({"trend", "trendcaption", "trendtemplate", "trendflash"})
 
-_JB_RANGEES = {
-    # Rangee 0 : la quantite (un BOUTON depuis qu'elle a quitte le deroulant),
-    # puis l'identite. C'est ce passage qui a libere quatre places.
-    'name': 0, 'pseudo': 0, 'pp': 0, 'bio': 0,
-    # Rangee 1 : les trends et les publications simples.
-    'trend': 1,
-    'story': 1, 'storycta': 1, 'post': 1, 'brute': 1,
-    # Rangee 2 : le brut marque, puis les CAPTIONS en entier -- de la version
-    # libre a la double etoile, l'essai range DERRIERE la simple etoile dont il
-    # est la variante. On lit la progression, pas un compte d'etoiles.
-    'brutbanger': 2,
-    # Rangee 3 : les CAPTIONS, de la version libre aux versions marquees, puis
-    # les deux fusions. Rangee 4 : le BRUT et les TEMPLATES, meme progression.
-    #
-    # La version marquee suit toujours sa base : « Video brut » puis « ⭐ Video
-    # brut », « Template Flash » puis « ⭐ Flash ». Auparavant tous les etoiles
-    # etaient parques ensemble en rangee 4, loin de ce dont ils sont la
-    # variante — on lisait le compte d'etoiles sans voir la parente.
-    # Rangee 3 : les CAPTIONS en entier, puis l'entree de la famille Template.
-    # Rangee 3 : les CAPTIONS en entier, puis l'entree de la famille Template.
-    'reelcaption': 2, 'capbanger': 2, 'brutcaption': 2, 'montagebanger': 2,
-    # Rangee 3 : les TEMPLATES, meme progression, puis l'outil.
-    'reelmonte': 3, 'templatebanger': 3, 'bruttemplate': 3,
-    'templatebrut': 3, 'brutchoix': 3,
-    # Rangee 4 : les FLASH, meme progression.
-    'templateflash': 4, 'templateflashbanger': 4, 'brutflash': 4,
-    'templateflashbrut': 4,
-    # Retire du menu, garde ici : un panneau DEJA poste porte encore ce bouton,
-    # et sans rangee il retomberait sur le filet et atterrirait n'importe ou.
-    'captionbrut': 3,
-}
+#: Le panneau US, RANGEE PAR RANGEE (maquette validee le 25/09/2026) :
+#:
+#:   0  la quantite (un bouton), puis l'identite
+#:   1  les trends, puis les publications simples
+#:   2  le brut : nu, marque, et l'outil qui le choisit
+#:   3  un lanceur ▸ par famille de _FAMILLES_MENU -- Caption, Template,
+#:      Trash, Flash -- qui ouvre ses variantes en ephemere
+#:
+#: Il comptait 24 composants sur 25, les variantes etalees sur quatre
+#: rangees : Trash n'y tenait pas. Il en compte 16, et une famille de plus ne
+#: coute qu'un lanceur. Un bouton de trop ne casse pas le bouton : il fait
+#: echouer la vue ENTIERE.
+_JB_PANNEAU_US = (
+    ("name", "pseudo", "pp", "bio"),
+    ("trend", "story", "storycta", "post"),
+    ("brute", "brutbanger", "brutchoix"),
+)
+_JB_RANGEE_FAMILLES = 3
+
+#: La rangee de chaque action, DEDUITE de la disposition : une action de
+#: famille est sur la rangee de son lanceur. Rien a tenir a jour a la main.
+_JB_RANGEES = {_k: _r for _r, _ks in enumerate(_JB_PANNEAU_US) for _k in _ks}
+_JB_RANGEES.update({_k: _JB_RANGEE_FAMILLES
+                    for _f in _FAMILLES_MENU for _k in _f.actions})
+# Retire du menu, garde ici : un panneau DEJA poste porte encore ce bouton.
+_JB_RANGEES['captionbrut'] = _JB_RANGEE_FAMILLES
 
 
-def _jb_rangee(key, i):
-    """Rangee du bouton `key`. `i` ne sert que de filet.
+def _jb_disposition():
+    """[(« action » | « famille », cle, rangee)] du panneau, dans l'ordre.
 
-    Une cle inconnue -- une action du marche FR, ou une ajoutee sans
-    l'inscrire ci-dessus -- retombe sur un rangement par paquets de 5. Elle
-    s'affiche donc quand meme, plutot que de faire echouer la vue entiere.
+    LE FILET. Une action de _JB_ACTIONS_US que ni la disposition ni une
+    famille ne place s'affiche quand meme, au bout de la rangee des familles
+    tant qu'il y a de la place. Au-dela, elle est COMPTEE et journalisee --
+    jamais ecartee en silence, et jamais un 6e bouton qui ferait tomber le
+    panneau entier. Rend aussi la liste de celles qui n'ont pas pu entrer.
     """
-    return _JB_RANGEES.get(key, 1 + min(i, 19) // 5)
+    out = [("action", k, r) for r, ks in enumerate(_JB_PANNEAU_US) for k in ks]
+    out += [("famille", f.cle, _JB_RANGEE_FAMILLES) for f in _FAMILLES_MENU]
+    orphelines = [a[0] for a in _JB_ACTIONS_US if a[0] not in _JB_RANGEES]
+    place = 5 - len(_FAMILLES_MENU)
+    out += [("action", k, _JB_RANGEE_FAMILLES) for k in orphelines[:place]]
+    hors = orphelines[place:]
+    if orphelines:
+        log.warning("panneau US : %d action(s) sans place dans _JB_PANNEAU_US "
+                    "(%s)%s", len(orphelines), ", ".join(orphelines),
+                    (" -- %d non affichee(s) : %s" % (len(hors), ", ".join(hors)))
+                    if hors else "")
+    return out, hors
+
+
+def _jb_note_hors(hors) -> str:
+    """La ligne d'embed qui dit ce que le panneau n'a pas pu afficher."""
+    if not hors:
+        return ""
+    return (f"⚠️ {len(hors)} action(s) sans place dans ce panneau : "
+            + ", ".join(hors) + " (à signaler à un admin).\n\n")
 
 # Quantites proposees (multiplicateur). Plafonnees au stock reel de la model.
 _JB_QTY_OPTIONS = [1, 3, 5, 10, 15, 20, 30, 50, 60]
@@ -7543,10 +8124,61 @@ class _JailbreakActionButton(discord.ui.Button):
             interaction, model, cmd, count=qty, supports_count=self.supports_count)
 
 
+class _JailbreakFamilleButton(discord.ui.Button):
+    """Lanceur « ▸ » d'une famille dans le panneau EPHEMERE (serveurs non-US).
+
+    Ici le panneau est deja un ephemere a la seule vue du VA : on y deplie la
+    famille SUR PLACE plutot que d'empiler un second ephemere. Un sous-panneau
+    a part garderait sa model et sa quantite quand le VA en choisit une autre
+    -- le melange d'identites constate le 05/09/2026 (_DERNIER_PANNEAU_JB).
+    """
+
+    def __init__(self, fam, row, icone=None):
+        lib = f"{fam.emoji} {fam.nom} ▸"
+        if icone is not None:
+            super().__init__(label=_libelle_sans_emoji(lib), emoji=icone,
+                             style=discord.ButtonStyle.primary, row=row)
+        else:
+            super().__init__(label=lib, style=discord.ButtonStyle.primary, row=row)
+        self.famille = fam.cle
+
+    async def callback(self, interaction: discord.Interaction):
+        if not _jb_can_use(interaction):
+            await interaction.response.send_message(
+                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
+            return
+        view = self.view
+        view.famille = self.famille
+        view._build()
+        await interaction.response.edit_message(embed=view._embed(), view=view)
+
+
+class _JailbreakRetourButton(discord.ui.Button):
+    """Replie la famille : retour au panneau complet."""
+
+    def __init__(self, row):
+        super().__init__(label="◂ Retour", style=discord.ButtonStyle.secondary,
+                         row=row)
+
+    async def callback(self, interaction: discord.Interaction):
+        view = self.view
+        view.famille = None
+        view._build()
+        await interaction.response.edit_message(embed=view._embed(), view=view)
+
+
 class JailbreakActionsView(discord.ui.View):
     """Quantite + actions pour UNE model. Ephemere (regeneree a chaque choix).
-    us=True -> liste US (Reel caption au lieu du Reel brut)."""
-    def __init__(self, cog, model, quantity=3, us=False, icones=None):
+    us=True -> liste US (Reel caption au lieu du Reel brut).
+
+    Meme disposition que le panneau US (_jb_disposition), decalee d'une
+    rangee : le menu deroulant de la quantite prend la rangee 0 A LUI SEUL.
+    Avant, l'identite etait posee sur cette meme rangee 0 : 5 + 4 places sur
+    5, et la vue levait « item would not fit at row 0 » des sa construction
+    -- choisir une model dans le menu Jailbreak des serveurs non-US ne
+    repondait plus. `famille` deplie une famille a la place du panneau."""
+    def __init__(self, cog, model, quantity=3, us=False, icones=None,
+                 famille=None):
         self.icones = icones or {}
         # 180 s et non 600 : un panneau laisse ouvert apres un changement de
         # model sert l'ANCIENNE identite. Meme duree que le menu des brutes,
@@ -7556,6 +8188,7 @@ class JailbreakActionsView(discord.ui.View):
         self.model = model
         self.quantity = quantity
         self.us = us
+        self.famille = famille
         self.message = None      # pose par _poser_panneau_jb, pour l'eteindre
         self._build()
 
@@ -7582,25 +8215,63 @@ class JailbreakActionsView(discord.ui.View):
         except Exception:
             pass
 
+    def _bouton_action(self, key, row):
+        entree = _jb_action(key)
+        if entree is None:
+            return None
+        _k, label, cmd_attr, sc = entree
+        return _JailbreakActionButton(
+            self.cog, self.model, label, cmd_attr, sc, row=row, key=key,
+            icone=self.icones.get(key))
+
     def _build(self):
         self.clear_items()
         self.add_item(_JailbreakQtySelect(self.quantity))
-        actions = _JB_ACTIONS_US        # « Reel caption » pour les 2 marches
-        for i, (key, label, cmd_attr, sc) in enumerate(actions):
-            self.add_item(_JailbreakActionButton(
-                self.cog, self.model, label, cmd_attr, sc, row=_jb_rangee(key, i), key=key,
-                icone=self.icones.get(key)))
+        fam = _famille_menu(self.famille) if self.famille else None
+        if fam is not None:
+            # La famille depliee : ses variantes sur une rangee, le retour
+            # sur la suivante.
+            for key in fam.actions:
+                b = self._bouton_action(key, 1)
+                if b is not None:
+                    self.add_item(b)
+            self.add_item(_JailbreakRetourButton(2))
+            return
+        self.famille = None
+        disposition, self._hors = _jb_disposition()
+        for sorte, cle, rangee in disposition:
+            if sorte == "famille":
+                f = _famille_menu(cle)
+                self.add_item(_JailbreakFamilleButton(
+                    f, rangee + 1, icone=self.icones.get(f.actions[0])))
+                continue
+            b = self._bouton_action(cle, rangee + 1)
+            if b is not None:
+                self.add_item(b)
 
     def _embed(self):
         m = self.model.capitalize()
+        fam = _famille_menu(self.famille) if self.famille else None
+        quant = (f"📦 **Quantité : {self.quantity} média par action** "
+                 "_(change-la dans le menu déroulant ci-dessus)._\n"
+                 "La quantité est **plafonnée au stock dispo** de la model.\n")
+        if fam is not None:
+            lignes = [f"**{_libelle_action(c)}** — {_EXPLICATIONS.get(c, '')}"
+                      for c in fam.actions]
+            return discord.Embed(
+                title=f"🔓 {m} — {fam.emoji} {fam.nom}",
+                description=(quant + "\n" + "\n".join(lignes)
+                             + "\n\nClique sur une variante 👇 "
+                               "_(◂ Retour pour les autres actions)_"),
+                color=discord.Color.dark_red())
         return discord.Embed(
             title=f"🔓 {m} — que veux-tu générer ?",
             description=(
-                f"📦 **Quantité : {self.quantity} média par action** "
-                "_(change-la dans le menu déroulant ci-dessus)._\n"
-                "La quantité est **plafonnée au stock dispo** de la model.\n"
-                "ℹ️ *Pseudo* et *Name* en donnent toujours 5 (sans quantité).\n\n"
-                "Clique sur une action 👇"
+                quant
+                + "ℹ️ *Pseudo* et *Name* en donnent toujours 5 (sans quantité).\n"
+                "Les boutons **▸** ouvrent leurs variantes.\n\n"
+                + _jb_note_hors(getattr(self, "_hors", ()))
+                + "Clique sur une action 👇"
             ),
             color=discord.Color.dark_red(),
         )
@@ -7712,6 +8383,12 @@ _ICONES_ACTIONS = {
     "templatebanger": "vatemplatebanger",
     "trend": "vatrend",
     "brutchoix": "vabrutchoix",
+    # Les quatre Trash partagent UNE icone (le template et la marque Trash) :
+    # un serveur sans boost n'a que 50 emplacements d'emoji, partages avec la
+    # PP de chaque model. Les etoiles restent dans le libelle
+    # (_libelle_sans_emoji les garde) : c'est elles qui distinguent les
+    # variantes, pas l'icone.
+    **{_a: "vatemplatetrash" for _a in marques_montage.marque("trash")["actions"]},
     # « captionbrut » est parti d'ici : le bouton a quitte le menu le
     # 21/08 (il envoyait le meme couple brute ⭐ + caption ⭐ que « Montage »,
     # mais la caption en texte a recopier). Seules restent la commande
@@ -7761,6 +8438,10 @@ async def ensure_action_emojis(guild) -> dict:
                 continue
             out[cle] = await guild.create_custom_emoji(
                 name=nom, image=data, reason="icones du menu VA (style du site)")
+            # Plusieurs actions partagent une icone (les quatre Trash) : sans
+            # cette ligne, chacune televersait SA copie, et Discord accepte
+            # les doublons de nom -- quatre emplacements pour une image.
+            presents[nom] = out[cle]
         except Exception as e:
             log.warning(f"emoji action {nom}: {e}")
     return out
@@ -8067,8 +8748,19 @@ class JBModelButton(discord.ui.DynamicItem[discord.ui.Button],
                 await interaction.response.defer()
             panneau_pose = True
         except Exception:
+            # Le panneau en ephemere, mais SANS suivi : voir _vue_sans_suivi.
+            # Suivi, il expirait au bout de 15 minutes et emportait les
+            # motifs de TOUS les panneaux US du serveur.
             await interaction.response.send_message(
-                embed=emb, view=view, ephemeral=True)
+                embed=emb, view=_vue_sans_suivi(view), ephemeral=True)
+        # Les sous-menus de famille ouverts portent l'ANCIENNE model dans
+        # leurs boutons : on les efface, et on retient ce que montre le
+        # panneau pour refuser ceux qu'on n'a plus le droit d'effacer.
+        # Panneau de secours (ephemere) : l'epingle n'a pas change, l'etat
+        # devient inconnu plutot que faux.
+        _jb_panneau_noter(getattr(chan, "id", 0),
+                          self.ident if panneau_pose else None, 3)
+        await _jb_sous_menus_fermer(channel_id=getattr(chan, "id", 0) or 0)
         # Le ✨ General suit la model choisie, APRES le defer et dans son
         # propre try : le except du dessus repond par send_message, qui
         # leverait InteractionResponded si la reponse etait deja partie.
@@ -8164,6 +8856,7 @@ class JBQtyBouton(discord.ui.DynamicItem[discord.ui.Button],
             # message d'origine : c'est ce qui evite de reposter un panneau en
             # double dans le salon.
             await inter.response.edit_message(embed=emb2, view=vue2)
+            await _jb_panneau_qte_changee(inter, self.ident, q)
 
         await interaction.response.send_modal(_JBQtyModal(_suite))
 
@@ -8211,6 +8904,7 @@ class JBQtySelect(discord.ui.DynamicItem[discord.ui.Select],
                 # message d origine : c est ce qui evite de reposter un
                 # panneau en double dans le salon.
                 await inter.response.edit_message(embed=emb2, view=vue2)
+                await _jb_panneau_qte_changee(inter, self.ident, q)
             await interaction.response.send_modal(_JBQtyModal(_suite))
             return
         try:
@@ -8219,6 +8913,22 @@ class JBQtySelect(discord.ui.DynamicItem[discord.ui.Select],
             q = self.qty
         emb, view = _repose(interaction, q)
         await interaction.response.edit_message(embed=emb, view=view)
+        await _jb_panneau_qte_changee(interaction, self.ident, q)
+
+
+async def _jb_panneau_qte_changee(inter, ident, q):
+    """Apres un changement de quantite : les sous-menus ouverts portent
+    l'ANCIENNE quantite dans leurs boutons. On les efface et on retient la
+    nouvelle -- si c'est bien le panneau epingle qui a change ; sinon (le
+    panneau de secours, ephemere) l'etat devient inconnu. Ne leve jamais :
+    le panneau est deja a jour, c'est l'essentiel."""
+    try:
+        cid = getattr(getattr(inter, "channel", None), "id", 0) or 0
+        _jb_panneau_noter(cid, ident if _jb_est_panneau_epingle(inter) else None, q)
+        await _jb_sous_menus_fermer(channel_id=cid)
+    except Exception as e:
+        log.warning("panneau US : sous-menus non mis a jour (%s: %s)",
+                    type(e).__name__, e)
 
 
 def _jb_action(key):
@@ -8279,6 +8989,14 @@ class JBActionButton(discord.ui.DynamicItem[discord.ui.Button],
         if _refus:
             await interaction.response.send_message(_refus, ephemeral=True)
             return
+        # Un sous-menu de famille reste cliquable apres que le panneau a
+        # change de model ou de quantite (au-dela de 15 min on ne peut plus
+        # l'effacer). Son clic servirait l'ANCIENNE model dans le -content :
+        # on refuse, en disant quoi faire.
+        _perime = _jb_sous_menu_perime(interaction, self.ident, self.qty)
+        if _perime:
+            await interaction.response.send_message(_perime, ephemeral=True)
+            return
         cog = interaction.client.get_cog("UserCog")
         entree = _jb_action(self.key)
         if cog is None or entree is None:
@@ -8301,29 +9019,166 @@ class JBActionButton(discord.ui.DynamicItem[discord.ui.Button],
                                  count=self.qty, supports_count=supports_count)
 
 
+def _vue_sans_suivi(view):
+    """Rend `view` envoyable en ephemere SANS que discord.py la suive.
+
+    LE PIEGE. Une vue envoyee en ephemere recoit un delai de 15 minutes (si
+    elle n'en a pas) et discord.py la range ; a l'expiration, il la retire.
+    Quand elle a ete rangee sans numero de message -- sous la cle des vues
+    PERSISTANTES, ce que fait discord.py 2.4 pour une reponse a un bouton --,
+    ce retrait emporte les MOTIFS de ses elements dynamiques (JBActionButton,
+    JBFamilleBouton…), c'est-a-dire les enregistrements de cog_load : un seul
+    sous-menu expire, et TOUS les panneaux US deviennent muets jusqu'au
+    prochain redemarrage, sans une erreur. Reproduit en simulation sur 2.7.1
+    (vue rangee sans numero) ; la version du VPS n'est pas figee
+    (requirements.txt : >= 2.3.2).
+
+    Une vue ARRETEE avant l'envoi n'est pas rangee du tout, quelle que soit
+    la version : ses boutons partent quand meme, et chacun est servi par son
+    motif, enregistre une fois pour toutes au demarrage. Ils n'ont besoin de
+    rien d'autre : tout leur etat (model, action, quantite) est dans leur
+    custom_id.
+    """
+    view.stop()
+    return view
+
+
+class JBFamilleBouton(discord.ui.DynamicItem[discord.ui.Button],
+                      template=r"jbus:f:(?P<ident>[a-z0-9_.\-]+):(?P<fam>[a-z]+):(?P<qty>\d+)"):
+    """Le lanceur d'une famille du panneau US (« 💬 Caption ▸ »…).
+
+    Au clic : les memes gardes qu'une action (role, reserve), puis les
+    variantes de la famille en message EPHEMERE, visible du seul VA -- le
+    panneau, lui, est partage par tout le salon et ne doit pas changer sous
+    les yeux des autres. Ces variantes sont des JBActionButton ordinaires
+    (meme model, meme quantite, memes icones) : un clic sur l'une vaut un
+    clic sur l'ancien bouton du panneau.
+
+    Prefixe « jbus:f: » : discord.py lance TOUS les motifs dynamiques qui
+    correspondent a un custom_id, celui-ci ne doit recouper ni jbus:a/m/q/qb,
+    ni jbg:. L'identite ne contient pas « : », la famille est en [a-z].
+    """
+
+    def __init__(self, ident, famille, qty, row=_JB_RANGEE_FAMILLES, icone=None):
+        self.ident = (ident or "_").lower()
+        self.famille = famille
+        self.qty = int(qty)
+        fam = _famille_menu(famille)
+        lib = f"{fam.emoji} {fam.nom} ▸" if fam else f"{famille} ▸"
+        _btn = discord.ui.Button(
+            label=(_libelle_sans_emoji(lib) if icone is not None else lib),
+            style=discord.ButtonStyle.primary, row=row,
+            custom_id=f"jbus:f:{self.ident}:{self.famille}:{self.qty}")
+        if icone is not None:
+            _btn.emoji = icone
+        super().__init__(_btn)
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match, /):
+        return cls(match["ident"], match["fam"], match["qty"])
+
+    async def callback(self, interaction: discord.Interaction):
+        if not _jb_can_use(interaction):
+            await interaction.response.send_message(
+                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
+            return
+        _refus = _refus_reserve_jb(self.ident)
+        if _refus:
+            await interaction.response.send_message(_refus, ephemeral=True)
+            return
+        fam = _famille_menu(self.famille)
+        if fam is None or self.ident == "_":
+            await interaction.response.send_message(
+                f"Famille indisponible (`{self.famille}`) : reclique la model "
+                "au-dessus, le panneau se remet à jour.", ephemeral=True)
+            return
+        emb, vue = _jb_sous_menu_famille(self.ident, fam, self.qty,
+                                         guild=interaction.guild)
+        # Le sous-menu PRECEDENT de ce VA part : deux sous-menus ouverts, c'est
+        # deux jeux de boutons dont l'un peut viser une autre model.
+        uid = int(getattr(getattr(interaction, "user", None), "id", 0) or 0)
+        await _jb_sous_menus_fermer(user_id=uid)
+        await interaction.response.send_message(
+            embed=emb, view=_vue_sans_suivi(vue), ephemeral=True)
+        # Le handle, pour pouvoir l'effacer quand le panneau change. Un
+        # ephemere envoye par send_message ne rend rien : il faut le
+        # redemander. Sans lui, le refus de JBActionButton reste le filet.
+        try:
+            msg = await interaction.original_response()
+            _JB_SOUS_MENUS[uid] = (
+                int(getattr(getattr(interaction, "channel", None), "id", 0) or 0), msg)
+        except Exception:
+            pass
+        # Le panneau d'ou part ce clic dit ce qu'il montre : si l'etat etait
+        # inconnu (redemarrage), on l'apprend ici -- mais seulement depuis
+        # l'epingle, pas depuis un panneau de secours.
+        if _jb_est_panneau_epingle(interaction):
+            _jb_panneau_noter(getattr(interaction.channel, "id", 0),
+                              self.ident, self.qty)
+
+
+def _jb_sous_menu_famille(ident, fam, qty, guild=None):
+    """(embed, vue) des variantes d'une famille pour `ident` : une ligne
+    d'explication par variante, et leurs JBActionButton sur une rangee."""
+    _ic = icones_actions(guild)          # lecture seule : rien sur le reseau
+    vue = discord.ui.View(timeout=None)
+    lignes = []
+    for key in fam.actions:
+        entree = _jb_action(key)
+        if entree is None:
+            # Une cle de famille sans action : elle ne s'afficherait pas, et
+            # personne ne saurait pourquoi. On le dit dans le sous-menu.
+            lignes.append(f"⚠️ `{key}` : action inconnue, bouton absent.")
+            log.warning("famille %s : action %r absente de _JB_ACTIONS_US",
+                        fam.cle, key)
+            continue
+        vue.add_item(JBActionButton(ident, key, qty, label=entree[1], row=0,
+                                    icone=_ic.get(key)))
+        lignes.append(f"**{entree[1]}** — {_EXPLICATIONS.get(key, '')}")
+    emb = discord.Embed(
+        title=f"{fam.emoji} {fam.nom} — {ident.capitalize()}",
+        description=(f"📦 **{qty} média par action**\n\n" + "\n".join(lignes)
+                     + "\n\nLe contenu arrive dans ton salon **-content** 👇"),
+        color=discord.Color.dark_red())
+    return emb, vue
+
+
 def _jb_panel(cog, ident, qty=3, marche="us", guild=None):
     """(embed, view) du panneau permanent. `ident` vaut « _ » tant qu'aucune
     model n'est choisie : on n'affiche alors que la quantite.
     `marche` (role @Jailbreak FR / US du VA) decide des ACTIONS proposees :
-    le marche FR garde son Reel avec exemple, le marche US a Reel caption."""
+    le marche FR garde son Reel avec exemple, le marche US a Reel caption.
+
+    Disposition : _JB_PANNEAU_US, puis un lanceur par famille (_jb_disposition).
+    """
     ident = (ident or "_").lower()
     view = discord.ui.View(timeout=None)
     view.add_item(JBQtyBouton(ident, qty))
     if ident != "_":
         # Meme liste pour tout le monde : « Reel caption », pas de Reel brut.
-        _actions = _JB_ACTIONS_US
         _ic = icones_actions(guild)      # lecture seule : rien sur le reseau
-        for i, (key, label, _c, _s) in enumerate(_actions):
-            view.add_item(JBActionButton(ident, key, qty, label=label,
-                                         row=_jb_rangee(key, i), icone=_ic.get(key)))
+        disposition, hors = _jb_disposition()
+        for sorte, cle, rangee in disposition:
+            if sorte == "famille":
+                # Le lanceur porte l'icone de la premiere action de sa famille.
+                view.add_item(JBFamilleBouton(
+                    ident, cle, qty, row=rangee,
+                    icone=_ic.get(_famille_menu(cle).actions[0])))
+                continue
+            entree = _jb_action(cle)
+            view.add_item(JBActionButton(ident, cle, qty,
+                                         label=(entree[1] if entree else None),
+                                         row=rangee, icone=_ic.get(cle)))
         emb = discord.Embed(
             title=f"🔓 {ident.capitalize()} — que veux-tu générer ?",
             description=(
                 f"📦 **Quantité : {qty} média par action** "
                 "_(clique sur le bouton Quantité ci-dessus et tape le nombre)._\n"
                 "La quantité est **plafonnée au stock dispo** de la model.\n"
-                "ℹ️ *Pseudo* et *Name* en donnent toujours 5 (sans quantité).\n\n"
-                "Le contenu arrive dans ton salon **-content** 👇"
+                "ℹ️ *Pseudo* et *Name* en donnent toujours 5 (sans quantité).\n"
+                "Les boutons **▸** ouvrent leurs variantes, visibles de toi seul.\n\n"
+                + _jb_note_hors(hors)
+                + "Le contenu arrive dans ton salon **-content** 👇"
             ),
             color=discord.Color.dark_red())
     else:
@@ -8342,13 +9197,14 @@ def _jb_panel(cog, ident, qty=3, marche="us", guild=None):
 # d'actions (serveur US seulement, decision du proprietaire).
 #
 # Il sert le contenu des RESERVES liees a la model choisie (type_identite) :
-# PP, bios, stories, story CTA, posts, captions, templates, flash. Pendant un
+# PP, bios, stories, story CTA, posts, captions, templates, trash, flash. Pendant un
 # clic, l'identite active est la RESERVE (tout le contenu vient d'elle, sans
 # toucher aux fonctions de tirage) et la brute vient de la MODEL
 # (_MODEL_REELLE, _dossier_brutes).
 #
-# Un message A PART, pas des boutons de plus dans _jb_panel : sa vue compte
-# deja 24 composants sur 25. Prefixe « jbg: » : discord.py lance TOUS les
+# Un message A PART, pas des boutons de plus dans _jb_panel : quand il est
+# ne, le panneau comptait 24 composants sur 25 (16 depuis les familles ▸).
+# Prefixe « jbg: » : discord.py lance TOUS les
 # templates dynamiques qui correspondent, celui-ci ne doit recouper aucun
 # « jbus: ». Titre sans « Jailbreak » ni « menu » : le premier designe le
 # menu des models (_ensure_us_menu), le second fait supprimer le message
@@ -8357,19 +9213,25 @@ def _jb_panel(cog, ident, qty=3, marche="us", guild=None):
 #: Les actions du General ET leur rangee. Ses cles SONT la liste blanche : un
 #: custom_id forge avec une autre cle est refuse. Libelle, commande et
 #: quantite se lisent par _jb_action : rien n'est recopie de _JB_ACTIONS_US.
+#:
+#: Rangee 4 : les MARQUES, dans l'ordre de marques_montage -- Trash puis
+#: Flash, chacune suivie de sa version etoilee. Trash « entre » les templates
+#: (rangee 3) et Flash, comme partout.
 _JB_GENERAL_RANGEES = {
     "pp": 1, "bio": 1, "story": 1, "storycta": 1, "post": 1,
     "reelcaption": 2, "capbanger": 2,
     "reelmonte": 3, "templatebanger": 3,
-    "templateflash": 4, "templateflashbanger": 4,
+    **{_a: 4 for _mq in marques_montage.ORDRE
+       for _a in marques_montage.marque(_mq)["actions"][:2]},
 }
 
 #: Celles qui posent le contenu sur une brute de la MODEL. Refusees d'avance
 #: si elle n'en a aucune : sinon 30 s de rendu, puis un template nu marque
 #: « NE POSTE PAS ». Template (reelmonte) n'y est pas : un brouillon sans
 #: coupe n'utilise pas de brute, et son repli l'annonce deja.
-_JB_GEN_BRUTE = frozenset({"reelcaption", "capbanger", "templatebanger",
-                           "templateflash", "templateflashbanger"})
+_JB_GEN_BRUTE = frozenset({"reelcaption", "capbanger", "templatebanger"} | {
+    _a for _mq in marques_montage.ORDRE
+    for _a in marques_montage.marque(_mq)["actions"][:2]})
 
 #: Boutons de choix de reserve, rangee 0 ; la 5e place est la quantite.
 _JB_GEN_MAX_RESERVES = 4
@@ -8380,6 +9242,14 @@ _JB_GENERAL_STORE = DATA_DIR / "us_general_panels.json"
 _JB_CUSTOM_ID_MAX = 100
 #: Ce que les motifs jbg: acceptent comme nom (model ou reserve).
 _JB_NOM_BOUTON = re.compile(r"[a-z0-9_.\-]+")
+
+
+def _marques_en_toutes_lettres(majuscule=False) -> str:
+    """« trash et flash » : les marques, dans l'ordre de marques_montage."""
+    noms = [marques_montage.marque(m)["court"] for m in marques_montage.ORDRE]
+    if not majuscule:
+        noms = [n.lower() for n in noms]
+    return " et ".join([", ".join(noms[:-1]), noms[-1]] if len(noms) > 1 else noms)
 
 
 def _refus_reserve_jb(ident) -> str:
@@ -8421,9 +9291,9 @@ def _jb_general(cog, model, qty=3, reserve=None, guild=None):
       - « _ » : aucune model choisie, on attend le clic au-dessus ;
       - aucune reserve retenue : on le dit, avec les liens ecartes et leur
         raison (rien n'est ecarte en silence), et le chemin sur le site ;
-      - sinon : les 11 actions de la reserve active (`reserve` si elle est
-        encore liee, sinon la premiere), et ses voisines en boutons de choix
-        s'il y en a plusieurs.
+      - sinon : les actions de _JB_GENERAL_RANGEES (13 depuis Trash) de la
+        reserve active (`reserve` si elle est encore liee, sinon la
+        premiere), et ses voisines en boutons de choix s'il y en a plusieurs.
     `cog` n'est pas lu : il est la pour la symetrie avec _jb_panel.
     """
     model = (model or "_").strip().lower() or "_"
@@ -8438,7 +9308,7 @@ def _jb_general(cog, model, qty=3, reserve=None, guild=None):
         emb.description = (
             "Quand tu cliques une model, ce message sert le contenu des "
             "**réserves** qui lui sont liées : PP, bios, stories, posts, "
-            "captions, templates et flash.")
+            "captions, templates, " + _marques_en_toutes_lettres() + ".")
         return emb, None
     nom = model.capitalize()
     if _est_reserve_sure(model):
@@ -8522,8 +9392,9 @@ def _jb_general(cog, model, qty=3, reserve=None, guild=None):
                     "absents : %s", ", ".join(manquantes))
     act = active.capitalize()
     emb.title = _titre_general(f"✨ General — {act} pour {nom}")
-    desc = [f"Contenu de la réserve **{act}**. Caption, Template et Flash "
-            f"sont posés sur une brute de **{nom}**."]
+    desc = [f"Contenu de la réserve **{act}**. Caption, Template, "
+            + _marques_en_toutes_lettres(majuscule=True)
+            + f" sont posés sur une brute de **{nom}**."]
     if montrees:
         desc.append(f"{len(retenues)} réserves liées : clique un nom au-dessus "
                     "pour changer de réserve.")

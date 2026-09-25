@@ -2400,6 +2400,686 @@ try:
 except Exception as _esu:
     check("perimetre : testable", False, repr(_esu)[:200])
 
+# ==============================================================================
+# TRASH TREND ET MENUS PAR FAMILLE (bot, 25/09/2026)
+# ==============================================================================
+# Chaque vue est CONSTRUITE avec discord.py puis serialisee (to_components) :
+# c'est ce que Discord recoit, et c'est la qu'un 26e composant ou un 6e bouton
+# sur une rangee fait echouer la vue ENTIERE -- pas seulement le bouton de trop.
+# Les registres lus par le bot sont rediriges vers un dossier temporaire.
+print()
+print("=" * 70)
+print("TRASH TREND ET MENUS PAR FAMILLE (bot)")
+print("=" * 70)
+try:
+    import asyncio as _aioTb
+    import inspect as _insTb
+    import json as _jsTb
+    import logging as _lgTb
+    import pathlib as _plTb
+    import re as _reTb
+    import shutil as _shTb
+    import tempfile as _tfTb
+    import types as _tyTb
+    import discord as _dTb
+    import guild_features as _gfTb
+    import marques_montage as _mmTb
+    import cogs.user as _uTb
+
+    _TRASH = tuple(_mmTb.MARQUES["trash"]["actions"])
+    _FLASH = tuple(_mmTb.MARQUES["flash"]["actions"])
+    _LOGO = _mmTb.MARQUES["trash"]["emoji"]
+
+    def _rowsTb(vue):
+        """[[custom_id…] par rangee], tel que Discord le recevra."""
+        return [[c.get("custom_id") for c in r["components"]] for r in vue.to_components()]
+
+    def _limitesTb(vue):
+        """'' si la vue tient dans les limites de Discord, sinon la raison."""
+        rows = vue.to_components()
+        comps = [c for r in rows for c in r["components"]]
+        ids = [c["custom_id"] for c in comps if c.get("custom_id")]
+        libs = [c.get("label") or "" for c in comps]
+        pbs = []
+        if len(comps) > 25:
+            pbs.append("%d composants" % len(comps))
+        if len(rows) > 5:
+            pbs.append("%d rangees" % len(rows))
+        if any(len(r["components"]) > 5 for r in rows):
+            pbs.append("rangee > 5 : %s" % [len(r["components"]) for r in rows])
+        if any(len(r["components"]) > 1 and any(c["type"] != 2 for c in r["components"])
+               for r in rows):
+            pbs.append("un menu deroulant partage sa rangee")
+        if any(len(i) > 100 for i in ids):
+            pbs.append("custom_id > 100 : %s" % max(ids, key=len))
+        if len(ids) != len(set(ids)):
+            pbs.append("custom_id en double")
+        if any(len(l) > 80 for l in libs):
+            pbs.append("libelle > 80")
+        return " ; ".join(pbs)
+
+    class _RepTb:
+        def __init__(self):
+            self.envois, self._fait = [], False
+
+        async def send_message(self, *a, **k):
+            self.envois.append((a[0] if a else k.get("content"), k))
+            self._fait = True
+
+        async def edit_message(self, *a, **k):
+            self.envois.append(("<edit>", k))
+            self._fait = True
+
+        async def defer(self, *a, **k):
+            self._fait = True
+
+        def is_done(self):
+            return self._fait
+
+    def _itxTb(guild=None):
+        return _tyTb.SimpleNamespace(
+            response=_RepTb(), guild=guild, user=_tyTb.SimpleNamespace(id=5),
+            client=_tyTb.SimpleNamespace(get_cog=lambda n: None), channel=None)
+
+    _journalTb = []
+
+    class _HTb(_lgTb.Handler):
+        def emit(self, r):
+            _journalTb.append(r.getMessage())
+
+    _hTb = _HTb()
+    _lgTb.getLogger().addHandler(_hTb)
+
+    # -- 1. LES REGISTRES, LUS PAR LE BOT -----------------------------------------
+    _TB = _plTb.Path(_tfTb.mkdtemp(prefix="trash_bot_"))
+    _savTb = (_uTb.DATA_DIR, _uTb.IDENTITIES_DIR, _uTb.get_user_identity)
+    try:
+        _uTb.DATA_DIR = _TB
+        _uTb.IDENTITIES_DIR = _TB / "identities"
+        _tdTb = _uTb.IDENTITIES_DIR / "zzbot" / "templates"
+        _tdTb.mkdir(parents=True)
+        for _nB in "abcdefg":
+            (_tdTb / (_nB + ".mp4")).write_bytes(b"x" + _nB.encode())
+            if _nB != "e":        # « e » n'a pas de point de coupe
+                (_tdTb / (_nB + ".montage.json")).write_text(
+                    '{"segments": "[]", "cut_at": 1.5}', encoding="utf-8")
+        _PB = "zzbot|templates|"
+
+        def _regTb(nom, noms):
+            (_TB / nom).write_text(_jsTb.dumps([_PB + n + ".mp4" for n in noms]),
+                                   encoding="utf-8")
+
+        # b est Flash ET Trash (donnee ancienne) ; d et g sont mis de cote ⊘.
+        _regTb("flash_trend.json", "abg")
+        _regTb("trash_trend.json", "bcdef")
+        _regTb("disabled_reels.json", "dg")
+        _regTb("fav_brutes.json", "ac")
+        _avantTb = {f.name: f.read_text(encoding="utf-8") for f in _TB.glob("*.json")}
+        _ecTb = {}
+        _uT, _scT = _uTb.marque_templates_for("trash", "zzbot", ecartes=_ecTb)
+        check("trash bot : sert les Trash utilisables (c, f), dans l ordre",
+              [p.name for p, _d in _uT] == ["c.mp4", "f.mp4"], str([p.name for p, _d in _uT]))
+        check("trash bot : ecarte ET compte le doublon Flash, le ⊘ et le sans-coupe",
+              _ecTb.get("conflits") == 1 and _ecTb.get("desactives") == 1
+              and _ecTb.get("sans_coupe") == 1 and _scT == 1 and _ecTb.get("erreurs") == [],
+              str(_ecTb))
+        _uT, _scT = _uTb.marque_templates_for("trash", "zzbot", exiger_banger=True)
+        check("trash bot : ⭐ Trash = Trash ET etoile", [p.name for p, _d in _uT] == ["c.mp4"],
+              str([p.name for p, _d in _uT]))
+        _ecFb = {}
+        _uF, _scF = _uTb.flash_templates_for("zzbot", ecartes=_ecFb)
+        # Le bug d'avant : aucun selecteur du bot ne lisait le ⊘ du site, un
+        # template mis de cote partait quand meme par ⚡ Flash.
+        check("flash bot : le template ⊘ n est plus servi, et il est compte",
+              [p.name for p, _d in _uF] == ["a.mp4", "b.mp4"] and _ecFb.get("desactives") == 1
+              and _ecFb.get("conflits") == 0, str(([p.name for p, _d in _uF], _ecFb)))
+        check("flash bot : flash_templates_for reste l enveloppe de marque_templates_for",
+              [p.name for p, _d in _uF]
+              == [p.name for p, _d in _uTb.marque_templates_for("flash", "zzbot")[0]])
+        check("trash bot : le bot LIT les registres, il n y ecrit jamais",
+              {f.name: f.read_text(encoding="utf-8") for f in _TB.glob("*.json")} == _avantTb)
+        (_TB / "trash_trend.json").unlink()
+        _ecTb = {}
+        check("trash bot : trash_trend.json absent (pas encore de marque) -> liste vide, sans erreur",
+              _uTb.marque_templates_for("trash", "zzbot", ecartes=_ecTb) == ([], 0)
+              and _ecTb.get("erreurs") == [], str(_ecTb))
+        (_TB / "trash_trend.json").write_text("{pas du json", encoding="utf-8")
+        _ecTb = {}
+        _rT = _uTb.marque_templates_for("trash", "zzbot", ecartes=_ecTb)
+        check("trash bot : un registre Trash illisible est NOMME au lieu de passer pour vide",
+              _rT == ([], 0) and any("trash_trend.json illisible" in e for e in _ecTb.get("erreurs", [])),
+              str(_ecTb))
+        _regTb("trash_trend.json", "bcdef")
+        (_TB / "flash_trend.json").write_text("[[[", encoding="utf-8")
+        _ecTb = {}
+        _rT = _uTb.marque_templates_for("trash", "zzbot", ecartes=_ecTb)
+        check("trash bot : un registre Flash illisible ne bloque pas Trash, mais c est dit",
+              [p.name for p, _d in _rT[0]] == ["b.mp4", "c.mp4", "f.mp4"]
+              and any("flash_trend.json illisible" in e for e in _ecTb.get("erreurs", [])),
+              str(_ecTb))
+        _regTb("flash_trend.json", "abg")
+
+        # -- 2. CE QUE LE VA LIT QUAND RIEN NE PART ---------------------------------
+        # Un admin qui a marque cinq montages et n'en voit aucun arriver doit
+        # apprendre POURQUOI : point de coupe, ⊘, double marque.
+        _regTb("trash_trend.json", "bde")
+        _uTb.get_user_identity = lambda uid: "zzbot"
+        _iT = _itxTb()
+        class _CogGate:
+            # Le serveur autorise le contenu : seule la selection est testee.
+            async def _gate_contenu(self, itx, threads_ok=False):
+                return False
+
+        _aioTb.run(_uTb.UserCog._send_template_marque(_CogGate(), _iT, "trash"))
+        _msgT = str(_iT.response.envois[0][0]) if _iT.response.envois else ""
+        check("trash bot : sans Trash utilisable, message EPHEMERE au VA, logo du module",
+              _iT.response.envois and _iT.response.envois[0][1].get("ephemeral") is True
+              and _msgT.startswith(_LOGO), _msgT[:120])
+        check("trash bot : ... qui compte chaque montage ecarte (coupe, ⊘, aussi ⚡ Flash)",
+              _msgT.count("écarté(s)") == 3 and "point de coupe" in _msgT and "⊘" in _msgT
+              and ("%s %s" % (_mmTb.MARQUES["flash"]["emoji"], _mmTb.MARQUES["flash"]["court"])) in _msgT,
+              _msgT[:400])
+    finally:
+        _uTb.DATA_DIR, _uTb.IDENTITIES_DIR, _uTb.get_user_identity = _savTb
+        _shTb.rmtree(_TB, ignore_errors=True)
+
+    # -- 3. QUATRE METHODES, AUCUNE COMMANDE SLASH ----------------------------------
+    # Le bot principal est a 100 commandes sur 100 : une de plus fait echouer la
+    # synchronisation de TOUT l'arbre, sans un message.
+    _slashTb = [c.name for c in getattr(_uTb.UserCog, "__cog_app_commands__", [])]
+    check("trash bot : les 4 actions Trash sont des methodes du cog",
+          all(_insTb.iscoroutinefunction(getattr(_uTb.UserCog, k, None)) for k in _TRASH),
+          str([k for k in _TRASH if not hasattr(_uTb.UserCog, k)]))
+    check("trash bot : ... et AUCUNE n est une commande slash",
+          all(not hasattr(getattr(_uTb.UserCog, k), "callback") for k in _TRASH)
+          and _slashTb and not any("trash" in n for n in _slashTb), str(_slashTb[:5]))
+    _appelsTb = []
+
+    class _CogMq:
+        async def _send_template_marque(self, itx, cle, **k):
+            _appelsTb.append((cle, k.get("exiger_banger", False),
+                              k.get("brute_favorite", False), k.get("nombre")))
+
+    for _kT in _TRASH:
+        _aioTb.run(getattr(_uTb.UserCog, _kT)(_CogMq(), None, nombre=4))
+    check("trash bot : Trash, ⭐ Trash, ⭐ Brut + Trash, ⭐⭐ Trash + Brut -> la bonne exigence",
+          _appelsTb == [("trash", False, False, 4), ("trash", True, False, 4),
+                        ("trash", False, True, 4), ("trash", True, True, 4)], str(_appelsTb))
+    _srcMq = _insTb.getsource(_uTb.UserCog._send_template_marque)
+    check("trash bot : famille de reserve et prefixe de fichier suivent la marque",
+          'prefixe_fichier=cle' in _srcMq and 'famille=famille' in _srcMq
+          and 'f"{cle}_brut"' in _srcMq and 'f"{cle}_vid"' in _srcMq)
+
+    # -- 4. LES TABLES : actions, libelles, icone ----------------------------------
+    _clesTb = [a[0] for a in _uTb._JB_ACTIONS_US]
+    check("trash bot : les 4 Trash sont declarees, ENTRE les templates et les Flash",
+          all(k in _clesTb for k in _TRASH)
+          and _clesTb.index("templatebrut") < _clesTb.index(_TRASH[0])
+          and _clesTb.index(_TRASH[-1]) < _clesTb.index(_FLASH[0]), str(_clesTb))
+    check("trash bot : libelles Trash tires du module, Flash inchanges",
+          [a[1] for a in _uTb._JB_ACTIONS_US if a[0] in _TRASH]
+          == ["%s Trash" % _LOGO, "⭐ Trash", "⭐ Brut + Trash", "⭐⭐ Trash + Brut"]
+          and [a[1] for a in _uTb._JB_ACTIONS_US if a[0] in _FLASH]
+          == ["⚡ Flash", "⭐ Flash", "⭐ Brut + Flash", "⭐⭐ Flash + Brut"])
+    check("trash bot : chaque action pointe vers un attribut reel du cog",
+          all(hasattr(_uTb.UserCog, a[2]) for a in _uTb._JB_ACTIONS_US),
+          str([a[0] for a in _uTb._JB_ACTIONS_US if not hasattr(_uTb.UserCog, a[2])]))
+    check("trash bot : les variantes Trash du menu VA suivent le reglage « contenu »",
+          all(_uTb._MENU_BTN_FEATURE.get("cmenu:" + k) == "contenu"
+              for k in (_TRASH[0], _TRASH[1], _TRASH[3])))
+    # UNE icone pour les quatre : 50 emplacements d'emoji sans boost, partages
+    # avec les PP des models.
+    _pngTb = _plTb.Path("emojis") / "vatemplatetrash.png"
+    check("trash bot : une seule icone pour les 4 Trash, et le PNG existe",
+          {_uTb._ICONES_ACTIONS.get(k) for k in _TRASH} == {"vatemplatetrash"} and _pngTb.exists())
+
+    class _GuildEmTb:
+        emojis = []
+
+        def __init__(self):
+            self.crees = []
+
+        async def create_custom_emoji(self, name, image, reason=None):
+            self.crees.append(name)
+            return _dTb.PartialEmoji(name=name, id=len(self.crees))
+
+    _gEm = _GuildEmTb()
+    _aioTb.run(_uTb.ensure_action_emojis(_gEm))
+    check("trash bot : une icone partagee n est televersee qu UNE fois",
+          _gEm.crees.count("vatemplatetrash") == 1 and len(_gEm.crees) == len(set(_gEm.crees)),
+          str(_gEm.crees))
+
+    # -- 5. LE PANNEAU US : une rangee de lanceurs de famille ----------------------
+    # {0:5, 1:4, 2:3, 3:4} : quantite + identite, trends + publications, le
+    # brut, puis Caption ▸ Template ▸ Trash ▸ Flash ▸. 16 composants au lieu
+    # de 24 : Trash n'entrait plus.
+    _GUILD_ICTb = _tyTb.SimpleNamespace(
+        id=1, emojis=[_dTb.PartialEmoji(name=n, id=10000 + i)
+                      for i, n in enumerate(sorted(set(_uTb._ICONES_ACTIONS.values())))])
+    for _gT, _nomG in ((None, "sans icones"), (_GUILD_ICTb, "avec icones")):
+        _eP, _vP = _uTb._jb_panel(None, "emma", 3, "us", _gT)
+        _rP = _rowsTb(_vP)
+        check("familles : panneau US (%s) dans les limites de Discord" % _nomG,
+              not _limitesTb(_vP), _limitesTb(_vP))
+        check("familles : panneau US (%s) = quantite+identite, trends+publications, brut, 4 lanceurs" % _nomG,
+              _rP == [["jbus:qb:emma:3"] + ["jbus:a:emma:%s:3" % k for k in ("name", "pseudo", "pp", "bio")],
+                      ["jbus:a:emma:%s:3" % k for k in ("trend", "story", "storycta", "post")],
+                      ["jbus:a:emma:%s:3" % k for k in ("brute", "brutbanger", "brutchoix")],
+                      ["jbus:f:emma:%s:3" % f for f in ("caption", "template", "trash", "flash")]],
+              str(_rP))
+    check("familles : l ordre des lanceurs suit la table unique (Trash entre Template et Flash)",
+          [f.cle for f in _uTb._FAMILLES_MENU] == ["caption", "template", "trash", "flash"]
+          and _uTb._famille_menu("trash").actions == _TRASH
+          and _uTb._famille_menu("flash").actions == _FLASH)
+    check("familles : chaque action du panneau a une place (aucune ecartee en silence)",
+          _uTb._jb_disposition()[1] == [] and all(a[0] in _uTb._JB_RANGEES for a in _uTb._JB_ACTIONS_US),
+          str(_uTb._jb_disposition()[1]))
+    _eL, _vL = _uTb._jb_panel(None, "a" * 60, 100, "us", _GUILD_ICTb)
+    check("familles : identite de 60 caracteres et quantite 100 -> custom_id <= 100",
+          not _limitesTb(_vL), _limitesTb(_vL))
+
+    # -- 6. LES SOUS-MENUS : les JBActionButton de la famille ----------------------
+    for _fT in _uTb._FAMILLES_MENU:
+        _eS, _vS = _uTb._jb_sous_menu_famille("emma", _fT, 7, guild=_GUILD_ICTb)
+        _lignesS = [l for l in (_eS.description or "").split("\n")
+                    if l.startswith("**") and " — " in l]
+        check("familles : sous-menu %s = ses %d variantes (jbus:a:…), une ligne d aide chacune"
+              % (_fT.cle, len(_fT.actions)),
+              _rowsTb(_vS) == [["jbus:a:emma:%s:7" % k for k in _fT.actions]]
+              and len(_lignesS) == len(_fT.actions) and not _limitesTb(_vS),
+              str((_rowsTb(_vS), len(_lignesS))))
+    _vraiCanTb, _vraiRefTb = _uTb._jb_can_use, _uTb._refus_reserve_jb
+    try:
+        _uTb._jb_can_use = lambda i: True
+        _uTb._refus_reserve_jb = lambda i: ""
+        _iT = _itxTb(_GUILD_ICTb)
+        _aioTb.run(_uTb.JBFamilleBouton("emma", "trash", 5).callback(_iT))
+        _vT = _iT.response.envois[0][1].get("view") if _iT.response.envois else None
+        check("familles : le lanceur Trash repond en EPHEMERE, avec les 4 Trash",
+              _iT.response.envois and _iT.response.envois[0][1].get("ephemeral") is True
+              and _vT is not None and _rowsTb(_vT) == [["jbus:a:emma:%s:5" % k for k in _TRASH]],
+              str(_iT.response.envois)[:200])
+        # Une vue ephemere SUIVIE par discord.py, a son expiration, emportait
+        # les motifs enregistres au demarrage : tous les panneaux devenaient
+        # muets. Arretee avant l'envoi, elle n'est pas suivie.
+        check("familles : ... une vue ARRETEE avant l envoi (non suivie par discord.py)",
+              _vT is not None and _vT.is_finished())
+        _iT = _itxTb()
+        _aioTb.run(_uTb.JBFamilleBouton("emma", "inconnue", 5).callback(_iT))
+        check("familles : une famille inconnue est refusee en le disant",
+              _iT.response.envois and "inconnue" in str(_iT.response.envois[0][0])
+              and _iT.response.envois[0][1].get("ephemeral") is True, str(_iT.response.envois))
+        _uTb._refus_reserve_jb = lambda i: "⛔ reserve"
+        _iT = _itxTb()
+        _aioTb.run(_uTb.JBFamilleBouton("zres", "trash", 5).callback(_iT))
+        check("familles : une reserve est refusee au lanceur comme a l action",
+              _iT.response.envois and _iT.response.envois[0][0] == "⛔ reserve")
+        _uTb._refus_reserve_jb = lambda i: ""
+        _uTb._jb_can_use = lambda i: False
+        _iT = _itxTb()
+        _aioTb.run(_uTb.JBFamilleBouton("emma", "trash", 5).callback(_iT))
+        check("familles : le lanceur garde le role Jailbreak",
+              _iT.response.envois and "Réservé" in str(_iT.response.envois[0][0]))
+    finally:
+        _uTb._jb_can_use, _uTb._refus_reserve_jb = _vraiCanTb, _vraiRefTb
+
+    # -- 7. LES ANCIENS MESSAGES DEJA POSTES REPONDENT TOUJOURS ---------------------
+    # Les panneaux et les menus VA epingles avant le 25/09/2026 portent les
+    # custom_id d'avant. cog_load doit enregistrer de quoi repondre a chacun --
+    # par UN element exactement : discord.py lance tous ceux qui correspondent.
+    class _BotTb:
+        def __init__(self):
+            self.vues, self.dyn = [], []
+
+        def add_view(self, v, message_id=None):
+            self.vues.append(v)
+
+        def add_dynamic_items(self, *items):
+            self.dyn.extend(items)
+
+    _botT = _BotTb()
+    del _journalTb[:]
+    _aioTb.run(_uTb.UserCog.cog_load(_tyTb.SimpleNamespace(
+        bot=_botT, daily_menu=_tyTb.SimpleNamespace(is_running=lambda: True))))
+    check("familles : cog_load enregistre tout, sans un echec au journal",
+          not [l for l in _journalTb if "cog_load" in l]
+          and _uTb.JBFamilleBouton in _botT.dyn and _uTb.JBActionButton in _botT.dyn
+          and any(isinstance(v, _uTb.ContentMenuHeritageView) for v in _botT.vues),
+          str([l for l in _journalTb if "cog_load" in l])[:200])
+    _persTb = {it.custom_id for v in _botT.vues for it in v.children
+               if not isinstance(it, _dTb.ui.DynamicItem) and getattr(it, "custom_id", None)}
+    _motifsTb = [(c, c.__discord_ui_compiled_template__) for c in _botT.dyn]
+
+    def _qui(cid):
+        if cid in _persTb:
+            return ["vue"]
+        return [c.__name__ for c, p in _motifsTb if p.fullmatch(cid)]
+
+    # Les custom_id d'AVANT (ef00e45) : le panneau US, sa quantite, la grille,
+    # et les 25 boutons du menu VA.
+    _ANCIENS_US = ("name", "pseudo", "pp", "bio", "story", "storycta", "post", "brute",
+                   "brutbanger", "reelcaption", "capbanger", "brutcaption", "montagebanger",
+                   "reelmonte", "templatebanger", "bruttemplate", "templatebrut",
+                   "templateflash", "templateflashbanger", "brutflash", "templateflashbrut",
+                   "trend", "brutchoix")
+    _ANCIENS_MENU = ("reel", "story", "post", "storycta", "banger", "reelmonte", "pseudo",
+                     "name", "bio", "pp", "lien", "clics", "help", "tuto", "addaccount",
+                     "comptes", "pay", "capbanger", "montagebanger", "templateflash",
+                     "templateflashbanger", "templateflashbrut", "templatebanger",
+                     "templatebrut", "brutbanger")
+    _ancTb = (["jbus:a:emma:%s:3" % k for k in _ANCIENS_US]
+              + ["jbus:qb:emma:3", "jbus:q:emma:3", "jbus:m:emma"]
+              + ["cmenu:" + k for k in _ANCIENS_MENU])
+    _sansTb = [(c, _qui(c)) for c in _ancTb if len(_qui(c)) != 1]
+    check("familles : les %d custom_id des anciens messages sont pris en charge, chacun par UN element"
+          % len(_ancTb), not _sansTb, str(_sansTb)[:200])
+    check("familles : ... et chaque ancienne action du panneau vise encore une methode reelle",
+          all(_uTb._jb_action(k) and hasattr(_uTb.UserCog, _uTb._jb_action(k)[2])
+              for k in _ANCIENS_US))
+    _neufsTb = ([it.item.custom_id for it in _uTb._jb_panel(None, "emma", 3)[1].children]
+                + [it.item.custom_id for f in _uTb._FAMILLES_MENU
+                   for it in _uTb._jb_sous_menu_famille("emma", f, 3)[1].children]
+                + [it.custom_id for it in _uTb.ContentMenuView(None).children])
+    _sansNTb = [(c, _qui(c)) for c in _neufsTb if len(_qui(c)) != 1]
+    check("familles : chaque NOUVEAU custom_id persistant est pris en charge par UN element",
+          not _sansNTb, str(_sansNTb)[:200])
+    _tfTb2 = _uTb.JBFamilleBouton.__discord_ui_compiled_template__
+    _idsFTb = ["jbus:f:%s:%s:%d" % (i, f.cle, q) for i in ("emma", "a.b-c_d", "x" * 60)
+               for f in _uTb._FAMILLES_MENU for q in (1, 3, 100)]
+    check("familles : jbus:f: ne recoupe aucun autre motif, dans les deux sens",
+          all(_qui(i) == ["JBFamilleBouton"] for i in _idsFTb)
+          and not any(_tfTb2.fullmatch(c) for c in _ancTb + _neufsTb if not c.startswith("jbus:f:")))
+
+    # -- 8. LE MENU VA : lanceurs persistants, sous-menus ephemeres -----------------
+    _vM = _uTb.ContentMenuView(None)
+    check("familles : menu VA dans les limites (%d composants)" % len(_vM.children),
+          not _limitesTb(_vM) and len(_vM.children) <= 25, _limitesTb(_vM))
+    _rM = _rowsTb(_vM)
+    check("familles : menu VA -> rangee 2 = un lanceur par famille, dans l ordre de la table",
+          len(_rM) == 5 and _rM[2] == ["cmenu:fam:" + f.cle for f in _uTb._FAMILLES_MENU], str(_rM))
+    _vH = _uTb.ContentMenuHeritageView(None)
+    _idsH = [it.custom_id for it in _vH.children]
+    check("familles : la vue heritee garde les 8 boutons retires, persistante, sans doublon avec le menu",
+          sorted(_idsH) == sorted("cmenu:" + k for k in (
+              "reelmonte", "templateflash", "templateflashbanger", "templateflashbrut",
+              "capbanger", "montagebanger", "templatebanger", "templatebrut"))
+          and _vH.is_persistent() and not set(_idsH) & {it.custom_id for it in _vM.children},
+          str(_idsH))
+    _vraiesGf = (_gfTb.get_features, _gfTb.threads_mode)
+    try:
+        _gfTb.get_features = lambda g: set(_gfTb.ALL_FEATURES)
+        _gfTb.threads_mode = lambda g: False
+        _vAttTb = {"caption": ["capbanger", "montagebanger"],
+                   "template": ["reelmonte", "templatebanger", "templatebrut"],
+                   "trash": [_TRASH[0], _TRASH[1], _TRASH[3]],
+                   "flash": [_FLASH[0], _FLASH[1], _FLASH[3]]}
+        check("familles : sous-menus du menu VA = exactement les variantes du cahier",
+              {f.cle: _uTb._variantes_menu_va(f.cle, set(_gfTb.ALL_FEATURES), False)
+               for f in _uTb._FAMILLES_MENU} == _vAttTb)
+        _embM = _uTb._build_menu_embed("emma", None)
+        check("familles : l embed d aide tient (%d champs <= 25, %d car. <= 6000)"
+              % (len(_embM.fields), len(_embM)),
+              len(_embM.fields) <= 25 and len(_embM) <= 6000
+              and len([f for f in _embM.fields if f.name.endswith("▸")]) == len(_uTb._FAMILLES_MENU))
+        for _fT in _uTb._FAMILLES_MENU:
+            _vSm = _uTb._SousMenuFamilleVA(None, _vAttTb[_fT.cle])
+            check("familles : sous-menu VA %s ephemere (10 min), sans custom_id fixe, dans les limites"
+                  % _fT.cle,
+                  _vSm.timeout == 600 and not _vSm.is_persistent() and not _limitesTb(_vSm))
+        _gfTb.get_features = lambda g: set(_gfTb.ALL_FEATURES) - {"contenu"}
+        _vF = _uTb._filter_menu_view(_uTb.ContentMenuView(None), None)
+        check("familles : « contenu » coupe -> plus aucun lanceur (pas de sous-menu vide)",
+              not [it for it in _vF.children
+                   if str(getattr(it, "custom_id", "")).startswith("cmenu:fam:")])
+    finally:
+        _gfTb.get_features, _gfTb.threads_mode = _vraiesGf
+
+    # Les variantes appellent EXACTEMENT ce qu'appelaient les anciens boutons.
+    _appelsV = []
+
+    class _CogV:
+        def __init__(self):
+            async def _cb(cog, itx):
+                _appelsV.append(("reelmonte",))
+            self.reelmonte = _tyTb.SimpleNamespace(callback=_cb)
+
+        async def _send_caption_bangers(self, itx):
+            _appelsV.append(("_send_caption_bangers",))
+
+        async def _send_montage_bangers(self, itx):
+            _appelsV.append(("_send_montage_bangers",))
+
+        async def _send_template_plus_brute(self, itx, **k):
+            _appelsV.append(("_send_template_plus_brute", tuple(sorted(k.items()))))
+
+        async def _send_template_marque(self, itx, cle, **k):
+            _appelsV.append((cle, tuple(sorted(k.items()))))
+
+    _attV = {"reelmonte": ("reelmonte",), "capbanger": ("_send_caption_bangers",),
+             "montagebanger": ("_send_montage_bangers",),
+             "templatebanger": ("_send_template_plus_brute", (("brute_favorite", False),)),
+             "templatebrut": ("_send_template_plus_brute", ())}
+    for _mq, _acts in (("flash", _FLASH), ("trash", _TRASH)):
+        _attV[_acts[0]] = (_mq, (("brute_favorite", False), ("exiger_banger", False)))
+        _attV[_acts[1]] = (_mq, (("brute_favorite", False), ("exiger_banger", True)))
+        _attV[_acts[3]] = (_mq, (("brute_favorite", True), ("exiger_banger", True)))
+    _ecartsV = []
+    _cogV = _CogV()
+    for _bT in _uTb.ContentMenuHeritageView(_cogV).children:
+        del _appelsV[:]
+        _aioTb.run(_bT.callback(_itxTb()))
+        if _appelsV != [_attV[_bT.cle]]:
+            _ecartsV.append((_bT.custom_id, list(_appelsV)))
+    for _cT in (_TRASH[0], _TRASH[1], _TRASH[3]):
+        del _appelsV[:]
+        _aioTb.run(_uTb._lancer_variante_va(_cogV, _itxTb(), _cT))
+        if _appelsV != [_attV[_cT]]:
+            _ecartsV.append((_cT, list(_appelsV)))
+    check("familles : anciens boutons et variantes Trash lancent l appel attendu",
+          not _ecartsV, str(_ecartsV)[:200])
+
+    # -- 9. LE PANNEAU EPHEMERE DES SERVEURS NON-US ----------------------------------
+    # Il plantait des sa construction (« item would not fit at row 0 ») :
+    # choisir une model dans le menu Jailbreak ne repondait plus.
+    _pbJ = []
+    for _famT in (None,) + tuple(f.cle for f in _uTb._FAMILLES_MENU):
+        for _icT in ({}, _uTb.icones_actions(_GUILD_ICTb)):
+            try:
+                _vJ = _uTb.JailbreakActionsView(None, "emma", 3, us=True, icones=_icT, famille=_famT)
+                if _limitesTb(_vJ):
+                    _pbJ.append("%s : %s" % (_famT, _limitesTb(_vJ)))
+            except Exception as _eJ:
+                _pbJ.append("%s : %r" % (_famT, _eJ))
+    check("familles : JailbreakActionsView se construit (panneau et chaque famille depliee)",
+          not _pbJ, " | ".join(_pbJ)[:200])
+    _vJ = _uTb.JailbreakActionsView(None, "emma", 3, us=True)
+    _vraiCanTb = _uTb._jb_can_use
+    try:
+        _uTb._jb_can_use = lambda i: True
+        _lanceurT = [c for c in _vJ.children if isinstance(c, _uTb._JailbreakFamilleButton)
+                     and c.famille == "trash"]
+        _aioTb.run(_lanceurT[0].callback(_itxTb()))
+        _clesJ = [c.key for c in _vJ.children if isinstance(c, _uTb._JailbreakActionButton)]
+        check("familles : le lanceur Trash deplie SUR PLACE ses 4 variantes",
+              _vJ.famille == "trash" and _clesJ == list(_TRASH), str(_clesJ))
+        _retT = [c for c in _vJ.children if isinstance(c, _uTb._JailbreakRetourButton)]
+        _aioTb.run(_retT[0].callback(_itxTb()))
+        check("familles : ◂ Retour replie le panneau",
+              _vJ.famille is None and len([c for c in _vJ.children
+                                           if isinstance(c, _uTb._JailbreakFamilleButton)]) == 4)
+    finally:
+        _uTb._jb_can_use = _vraiCanTb
+
+    # -- 10. ✨ GENERAL ET STOCK ---------------------------------------------------------
+    check("trash bot : ✨ General -> rangee 4 = Trash, ⭐ Trash, puis Flash, ⭐ Flash",
+          [k for k, r in _uTb._JB_GENERAL_RANGEES.items() if r == 4]
+          == [_TRASH[0], _TRASH[1], _FLASH[0], _FLASH[1]]
+          and {_TRASH[0], _TRASH[1]} <= _uTb._JB_GEN_BRUTE)
+    # Plus de repli « famille inconnue = Flash » dans le stock : une famille
+    # « trash » declaree un jour sans recette aurait ete remplie de Flash.
+    import cogs.noctuspool as _npTb
+    _fauxNp = _tyTb.SimpleNamespace()
+    del _journalTb[:]
+    _r1 = _npTb.NoctusPool._recette(_fauxNp, "zzbot", "trash")
+    _r2 = _npTb.NoctusPool._recette(_fauxNp, "zzbot", "trash")
+    check("trash bot : le stock ne fabrique RIEN pour une famille inconnue, et le journalise une fois",
+          _r1 is None and _r2 is None
+          and len([l for l in _journalTb if "'trash'" in l and "sans recette" in l]) == 1,
+          str(_journalTb)[:200])
+
+    # -- 11. SOUS-MENUS PERIMES DU PANNEAU US -------------------------------------------
+    # Un sous-menu de famille est un ephemere ARRETE : il n'expire jamais. Le
+    # VA ouvre « 💀 Trash ▸ » sur Lola, passe le panneau sur Julia, puis
+    # clique l'ancien sous-menu : sans garde, les montages de LOLA partaient
+    # dans le -content pendant que le panneau affichait Julia -- le melange
+    # d'identites du 05/09/2026.
+    class _MsgPTb:
+        def __init__(self, mid=0, ephemere=False):
+            self.id = mid
+            self.flags = _tyTb.SimpleNamespace(ephemeral=ephemere)
+            self.effaces = 0
+            self.edits = []
+
+        async def delete(self):
+            self.effaces += 1
+
+        async def edit(self, **k):
+            self.edits.append(k)
+
+    class _CogPTb:
+        def __init__(self):
+            self.appels = []
+
+        async def _run_for_model(self, interaction, model, cmd, count=1, supports_count=True):
+            self.appels.append((model, count))
+
+    for _nomM in ("templatetrash", "templatetrashbanger", "bruttrash", "templatetrashbrut"):
+        setattr(_CogPTb, _nomM, lambda *a, **k: None)
+    _cogP = _CogPTb()
+
+    def _itxPTb(chan_id=77, ephemere=True, mid=0, uid=5):
+        _i = _itxTb()
+        _i.channel = _tyTb.SimpleNamespace(id=chan_id)
+        _i.message = _MsgPTb(mid, ephemere)
+        _i.user = _tyTb.SimpleNamespace(id=uid)
+        _i.client = _tyTb.SimpleNamespace(get_cog=lambda n: _cogP)
+        return _i
+
+    _vraisP = (_uTb._jb_can_use, _uTb._refus_reserve_jb, _uTb._JB_PANEL_STORE,
+               dict(_uTb._JB_PANNEAU_COURANT), dict(_uTb._JB_SOUS_MENUS))
+    _TP = _plTb.Path(_tfTb.mkdtemp(prefix="jb_sousmenus_"))
+    try:
+        _uTb._jb_can_use = lambda i: True
+        _uTb._refus_reserve_jb = lambda i: ""
+        _uTb._JB_PANEL_STORE = _TP / "us_panels.json"
+        _uTb._JB_PANEL_STORE.write_text('{"77": 1000}', encoding="utf-8")
+        _uTb._JB_PANNEAU_COURANT.clear()
+        _uTb._JB_SOUS_MENUS.clear()
+
+        # a) Le panneau est passe sur Julia : l'ancien sous-menu de Lola refuse.
+        _uTb._JB_PANNEAU_COURANT[77] = ("julia", 3)
+        _iP = _itxPTb()
+        _aioTb.run(_uTb.JBActionButton("lola", "templatetrash", 3).callback(_iP))
+        _repP = str(_iP.response.envois[0][0]) if _iP.response.envois else ""
+        check("sous-menus : panneau passe sur une autre model -> l ancien sous-menu REFUSE, en le disant",
+              not _cogP.appels and "Lola" in _repP and "Julia" in _repP
+              and _iP.response.envois[0][1].get("ephemeral") is True, _repP[:160])
+        # b) Meme model, autre quantite : refuse aussi.
+        _uTb._JB_PANNEAU_COURANT[77] = ("lola", 5)
+        _iP = _itxPTb()
+        _aioTb.run(_uTb.JBActionButton("lola", "templatetrash", 3).callback(_iP))
+        check("sous-menus : quantite changee sur le panneau -> l ancien sous-menu refuse",
+              not _cogP.appels and _iP.response.envois
+              and "5" in str(_iP.response.envois[0][0]), str(_iP.response.envois)[:160])
+        # c) A jour : le clic part, avec la model et la quantite du bouton.
+        _uTb._JB_PANNEAU_COURANT[77] = ("lola", 3)
+        _aioTb.run(_uTb.JBActionButton("lola", "templatetrash", 3).callback(_itxPTb()))
+        check("sous-menus : sous-menu a jour -> l action part (lola, 3)",
+              _cogP.appels == [("lola", 3)], str(_cogP.appels))
+        # d) Le panneau EPINGLE (message non ephemere) n'est jamais refuse, et
+        #    un etat inconnu (redemarrage) ne refuse rien.
+        del _cogP.appels[:]
+        _uTb._JB_PANNEAU_COURANT[77] = ("julia", 3)
+        _aioTb.run(_uTb.JBActionButton("lola", "templatetrash", 3).callback(
+            _itxPTb(ephemere=False, mid=1000)))
+        _uTb._JB_PANNEAU_COURANT.clear()
+        _aioTb.run(_uTb.JBActionButton("lola", "templatetrash", 3).callback(_itxPTb()))
+        check("sous-menus : ni le panneau epingle ni un etat inconnu (redemarrage) ne sont refuses",
+              _cogP.appels == [("lola", 3), ("lola", 3)], str(_cogP.appels))
+
+        # e) Ouvrir un sous-menu efface le PRECEDENT de ce VA, et retient le
+        #    nouveau ; clique depuis l'epingle, il apprend l'etat du panneau.
+        _m1, _m2 = _MsgPTb(501, True), _MsgPTb(502, True)
+        for _mX in (_m1, _m2):
+            _iF = _itxPTb(ephemere=False, mid=1000)
+
+            async def _orig(_m=_mX):
+                return _m
+            _iF.original_response = _orig
+            _aioTb.run(_uTb.JBFamilleBouton("lola", "trash", 3).callback(_iF))
+        check("sous-menus : ouvrir un sous-menu efface le precedent du meme VA",
+              _m1.effaces == 1 and _m2.effaces == 0
+              and _uTb._JB_SOUS_MENUS.get(5, (0, None))[1] is _m2,
+              str((_m1.effaces, _m2.effaces)))
+        check("sous-menus : ... et le clic depuis le panneau epingle apprend ce qu il montre",
+              _uTb._JB_PANNEAU_COURANT.get(77) == ("lola", 3),
+              str(_uTb._JB_PANNEAU_COURANT))
+
+        # f) Changer la quantite du panneau epingle : sous-menus effaces, etat
+        #    retenu. Depuis un panneau de secours (autre message) : inconnu.
+        _aioTb.run(_uTb._jb_panneau_qte_changee(_itxPTb(ephemere=False, mid=1000), "lola", 6))
+        check("sous-menus : quantite changee -> sous-menus du salon effaces, nouvel etat retenu",
+              _m2.effaces == 1 and not _uTb._JB_SOUS_MENUS
+              and _uTb._JB_PANNEAU_COURANT.get(77) == ("lola", 6),
+              str((_m2.effaces, _uTb._JB_PANNEAU_COURANT)))
+        _aioTb.run(_uTb._jb_panneau_qte_changee(_itxPTb(ephemere=True, mid=999), "lola", 2))
+        check("sous-menus : ... depuis un panneau de secours, l etat devient inconnu (rien de faux)",
+              77 not in _uTb._JB_PANNEAU_COURANT, str(_uTb._JB_PANNEAU_COURANT))
+
+        # g) Choisir une autre model dans la grille (serveur US) : le panneau
+        #    epingle est reecrit, les sous-menus ouverts effaces, l'etat suit.
+        import guild_features as _gfP
+        _vraisGP = (_gfP.is_us_guild, _uTb.marche_du_membre, _uTb._jb_general_maj)
+        try:
+            _gfP.is_us_guild = lambda g: True
+            _uTb.marche_du_membre = lambda u: "us"
+
+            async def _genP(*a, **k):
+                return None
+            _uTb._jb_general_maj = _genP
+            _epP = _MsgPTb(1000, False)
+            _m3 = _MsgPTb(503, True)
+            _uTb._JB_SOUS_MENUS[5] = (77, _m3)
+            _iM = _itxPTb(ephemere=False, mid=2000)
+
+            async def _fetchP(mid):
+                return _epP
+            _iM.channel = _tyTb.SimpleNamespace(id=77, fetch_message=_fetchP)
+            _aioTb.run(_uTb.JBModelButton("julia").callback(_iM))
+            check("sous-menus : autre model choisie -> panneau reecrit, sous-menus effaces, etat = julia",
+                  len(_epP.edits) == 1 and _m3.effaces == 1 and not _uTb._JB_SOUS_MENUS
+                  and _uTb._JB_PANNEAU_COURANT.get(77) == ("julia", 3),
+                  str((len(_epP.edits), _m3.effaces, _uTb._JB_PANNEAU_COURANT)))
+        finally:
+            _gfP.is_us_guild, _uTb.marche_du_membre, _uTb._jb_general_maj = _vraisGP
+    finally:
+        _uTb._jb_can_use, _uTb._refus_reserve_jb, _uTb._JB_PANEL_STORE = _vraisP[:3]
+        _uTb._JB_PANNEAU_COURANT.clear()
+        _uTb._JB_PANNEAU_COURANT.update(_vraisP[3])
+        _uTb._JB_SOUS_MENUS.clear()
+        _uTb._JB_SOUS_MENUS.update(_vraisP[4])
+        import shutil as _shP
+        _shP.rmtree(_TP, ignore_errors=True)
+except Exception as _eTb:
+    import traceback as _tbTb
+    check("trash bot : testable", False, repr(_eTb)[:200] + " " + _tbTb.format_exc()[-500:])
+finally:
+    # Le journal de la section ne doit pas continuer a tout capturer ensuite.
+    try:
+        _lgTb.getLogger().removeHandler(_hTb)
+    except NameError:
+        pass
+
 if FAILS:
     print("ECHECS :")
     for f in FAILS:

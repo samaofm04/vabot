@@ -26,8 +26,13 @@ Usage
 -----
     python outils_icones_discord.py
 
-Ecrit 19 PNG de 128x128 dans emojis/. Ils sont versionnes : le VPS n a
+Ecrit 20 PNG de 128x128 dans emojis/. Ils sont versionnes : le VPS n a
 donc besoin d aucune bibliotheque de rendu, il lit les fichiers.
+
+Pour UNE icone neuve, ne pas tout relancer (fabriquer() reecrit les vingt,
+et Discord garde de toute facon l'ancienne image des noms deja televerses) :
+
+    python -c "import outils_icones_discord as o; o.i_templatetrash().enregistrer('vatemplatetrash')"
 """
 from __future__ import annotations
 
@@ -149,6 +154,41 @@ class Icone:
             self._detourer([(cx + (x - cx) * 1.9, cy + (y - cy) * 1.5)
                             for x, y in pts])
         self.polygone(self._pts_eclair(cx, cy, h), couleur)
+
+    @staticmethod
+    def _pts_ellipse(cx, cy, rx, ry, n=40):
+        return [(cx + rx * math.cos(2 * math.pi * i / n),
+                 cy + ry * math.sin(2 * math.pi * i / n)) for i in range(n)]
+
+    def crane(self, cx, cy, h, couleur=BLANC):
+        """La marque des Trash Trend (logo choisi le 25/09/2026).
+
+        Comme l'eclair, une SURFACE pleine : un crane trace au trait n'est plus
+        qu'un rond a 22 px. Ce qui le fait lire comme un crane, ce sont les
+        CREUX -- les deux orbites, le nez, deux fentes entre les dents --, pas
+        une couleur (le jeu est monochrome).
+
+        C'est le seul dessin a refaire si le logo change dans
+        marques_montage.py -- et sous un NOUVEAU nom d'emoji : Discord garde
+        l'ancienne image tant que le nom existe sur le serveur.
+        """
+        s = h / 10.0
+        # La silhouette : la calotte, puis la machoire, plus etroite.
+        self.polygone(self._pts_ellipse(cx, cy - 1.1 * s, 4.7 * s, 4.1 * s), couleur)
+        self.d.rounded_rectangle(
+            [_p(cx - 2.9 * s, cy + 1.2 * s), _p(cx + 2.9 * s, cy + 4.9 * s)],
+            radius=1.1 * s * ECHELLE, fill=couleur)
+        # Les creux : orbites, nez, fentes des dents.
+        for dx in (-1.85, 1.85):
+            self._detourer(self._pts_ellipse(cx + dx * s, cy - 0.5 * s,
+                                             1.35 * s, 1.5 * s))
+        self._detourer([(cx, cy + 1.2 * s), (cx - 0.75 * s, cy + 2.5 * s),
+                        (cx + 0.75 * s, cy + 2.5 * s)])
+        for dx in (-1.0, 1.0):
+            self._detourer([(cx + dx * s - 0.32 * s, cy + 3.3 * s),
+                            (cx + dx * s + 0.32 * s, cy + 3.3 * s),
+                            (cx + dx * s + 0.32 * s, cy + 5.2 * s),
+                            (cx + dx * s - 0.32 * s, cy + 5.2 * s)])
 
     def enregistrer(self, nom: str):
         DOSSIER.mkdir(parents=True, exist_ok=True)
@@ -357,6 +397,23 @@ def i_templateflashbrut():
     return ic
 
 
+def i_templatetrash():
+    """Le Template dont la lecture devient un CRANE : le montage Trash.
+
+    Meme composition que i_templateflash -- la marque DANS le cadre, a la
+    place du triangle -- pour que les deux marques se lisent comme deux
+    variantes d'une meme chose.
+
+    UNE icone pour les quatre actions Trash (cogs/user.py, _ICONES_ACTIONS) :
+    un serveur sans boost n'a que 50 emplacements d'emoji, partages avec la PP
+    de chaque model. Les etoiles des variantes restent dans leur libelle.
+    """
+    ic = Icone()
+    ic.rect(3, 5, 18, 14, 3.4)
+    ic.crane(12, 12, 9.4)
+    return ic
+
+
 def i_trend():
     """Les Trends : la courbe qui monte, et sa fleche.
 
@@ -407,6 +464,7 @@ ICONES = {
     "vatemplateflash": i_templateflash,
     "vatemplateflashbanger": i_templateflashbanger,
     "vatemplateflashbrut": i_templateflashbrut,
+    "vatemplatetrash": i_templatetrash,
     "vatrend": i_trend,
     "vabrutchoix": i_brutchoix,
 }

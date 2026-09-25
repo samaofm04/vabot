@@ -41,10 +41,15 @@ import time
 import uuid
 from pathlib import Path
 
+import marques_montage as _mm
 import safe_json
 
 #: Racine du stock. Surchargée par les tests, jamais en production.
 RACINE = Path(os.environ.get("NOCTUS_RESERVE_DIR") or "data/noctus/reserve")
+
+#: Où lire les registres des marques (flash_trend.json…). Surchargé par les
+#: tests, jamais en production : c'est le data/ du site.
+DOSSIER_MARQUES = Path("data")
 
 #: Profondeur visée par identité et par famille. Se règle sans toucher au code
 #: (NOCTUS_RESERVE_PROFONDEUR), mais la valeur par défaut est celle qui compte :
@@ -274,10 +279,76 @@ def _servable(fiche: dict) -> bool:
     return "repli" in ((fiche or {}).get("recette") or {})
 
 
+def marque_de_famille(famille: str) -> str:
+    """La marque exclusive qu'une famille de stock exige, "" si aucune.
+
+    « flash », « flash_banger », « flash_brut », « flash_vid » -> « flash ».
+    La table des marques est celle de marques_montage : une marque ajoutee
+    la-bas (Trash, le jour ou elle aura un stock) est suivie ici sans rien
+    toucher.
+    """
+    tete = str(famille or "").split("_", 1)[0]
+    return tete if tete in _mm.MARQUES else ""
+
+
+#: Les registres illisibles deja signales au journal : ce test revient a
+#: chaque prise, le journal ne doit pas s'en remplir.
+_ILLISIBLES_NOTES: set = set()
+
+
+def _porteurs(famille: str):
+    """Les cles « identite|templates|nom » portant la marque de la famille.
+
+    None quand la famille n'exige aucune marque, OU quand son registre est
+    illisible : on ne sait plus rien, et le parc n'a pas de repli -- une case
+    vide et le telephone ne publie rien. On sert donc comme avant, et on le
+    note au journal (une fois par erreur).
+    """
+    m = marque_de_famille(famille)
+    if not m:
+        return None
+    cles, err = _mm.lire_cles_ou_erreur(_mm.chemin(m, DOSSIER_MARQUES))
+    if err:
+        if err not in _ILLISIBLES_NOTES:
+            _ILLISIBLES_NOTES.add(err)
+            _noter({"acte": "marque_illisible", "famille": famille,
+                    "erreur": err})
+        return None
+    return cles
+
+
+def _marque_perdue(fiche: dict, porteurs) -> bool:
+    """La source de cette variante a-t-elle perdu la marque de sa famille ?
+
+    Un montage passe de Flash a Trash (ou demarque) gardait son stock Flash :
+    le parc publiait ses variantes sous ⚡ pendant que les VA recevaient le
+    meme template par les boutons Trash -- la double famille que
+    l'exclusivite devait empecher. La cle se reconstruit depuis le chemin de
+    la source (…/<identite>/templates/<nom>), celui que le remplisseur a
+    ecrit dans la recette. Sans source lisible, on ne juge pas.
+    """
+    if porteurs is None:
+        return False
+    src = ((fiche or {}).get("recette") or {}).get("source")
+    if not src:
+        return False
+    p = Path(str(src))
+    if p.parent.name != "templates" or not p.parent.parent.name:
+        return False
+    return ("%s|templates|%s" % (p.parent.parent.name.lower(), p.name)) not in porteurs
+
+
 def compter(identite: str, famille: str, emp: str | None = None) -> int:
-    """Combien de variantes SERVABLES attendent. Avec `emp`, celles à jour."""
+    """Combien de variantes SERVABLES attendent. Avec `emp`, celles à jour.
+
+    Une variante dont la source a perdu sa marque n'est pas comptee : le
+    remplisseur en refait une a partir d'un montage qui la porte encore.
+    Elle n'est pas effacee pour autant -- remarquer le montage la rend.
+    """
+    porteurs = _porteurs(famille)
     return sum(1 for _m, _j, f in _fiches_libres(identite, famille)
-               if (emp is None or f.get("empreinte") == emp) and _servable(f))
+               if (emp is None or f.get("empreinte") == emp) and _servable(f)
+               and not _marque_perdue(f, porteurs))
 
 
 #: La réserve sert-elle ? Coupée le 05/09/2026 à la demande du propriétaire,
@@ -318,7 +389,7 @@ POUR_LES_VA = False
 
 
 def prendre(identite: str, famille: str, emp: str | None = None,
-            demandeur: str = "", fiche_out=None) -> tuple:
+            demandeur: str = "", fiche_out=None, ecartes_out=None) -> tuple:
     """Sort UNE variante du stock. Rend (chemin, description) ou (None, "").
 
     C'est le renommage qui garantit l'unicité, pas le verrou : le noyau ne
@@ -328,11 +399,29 @@ def prendre(identite: str, famille: str, emp: str | None = None,
     Rend (None, "") quand la réserve est coupée : c'est exactement ce que
     rend un stock vide, donc chaque appelant repart en génération à la
     demande sans qu'une seule ligne de plus soit nécessaire ailleurs.
+
+    Une variante dont la source a PERDU la marque de sa famille (un Flash
+    passe en Trash) n'est pas servie : elle est comptee dans `ecartes_out`
+    (dict facultatif, cle « marque_perdue ») et notee au journal. Elle reste
+    en stock : remarquer le montage la rend servable.
     """
     if not ACTIF:
         return None, ""
-    candidats = [(m, j, f) for m, j, f in _fiches_libres(identite, famille)
-                 if (emp is None or f.get("empreinte") == emp) and _servable(f)]
+    porteurs = _porteurs(famille)
+    candidats, perdues = [], 0
+    for m, j, f in _fiches_libres(identite, famille):
+        if not ((emp is None or f.get("empreinte") == emp) and _servable(f)):
+            continue
+        if _marque_perdue(f, porteurs):
+            perdues += 1
+            continue
+        candidats.append((m, j, f))
+    if isinstance(ecartes_out, dict):
+        ecartes_out["marque_perdue"] = perdues
+    if perdues:
+        _noter({"acte": "ecarte_marque_perdue", "identite": identite,
+                "famille": famille, "combien": perdues,
+                "demandeur": demandeur})
     if not candidats:
         return None, ""
     random.shuffle(candidats)
@@ -390,11 +479,15 @@ def purger_perimes(identite: str, famille: str, emp_courante: str) -> int:
     sont bien là et que rien n'échoue.
     """
     jetes = 0
+    porteurs = _porteurs(famille)
     for mp4, fiche_json, fiche in _fiches_libres(identite, famille):
         # Une variante inservable est perimee par nature : la laisser
         # attendrait un changement de template pour la voir partir, et elle
-        # occuperait le disque pour rien pendant ce temps.
-        if fiche.get("empreinte") == emp_courante and _servable(fiche):
+        # occuperait le disque pour rien pendant ce temps. Celle dont la
+        # source a perdu sa marque aussi : c'est la meme question que
+        # compter et prendre, elle doit recevoir la meme reponse.
+        if (fiche.get("empreinte") == emp_courante and _servable(fiche)
+                and not _marque_perdue(fiche, porteurs)):
             continue
         for f in (mp4, fiche_json):
             try:

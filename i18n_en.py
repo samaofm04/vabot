@@ -328,10 +328,36 @@ AIDES = {
         "template uploaded, editable afterwards in the editor",
 }
 
+# --- Marques de montage (Flash Trend, Trash Trend) ---------------------------
+# Construites depuis marques_montage.py, ou le nom et le logo de chaque marque
+# sont ecrits UNE fois : changer le logo la-bas change aussi ces cles. Les
+# phrases francaises doivent rester identiques a celles que web_upload.py
+# rend (_preview_card, barre d'outils des montages) : la traduction compare
+# l'attribut ENTIER, une virgule d'ecart et elle ne s'applique plus.
+MARQUES_MONTAGE = {}
+try:
+    import marques_montage as _mm
+except Exception:          # pragma: no cover - la traduction doit survivre
+    _mm = None
+if _mm is not None:
+    for _c in _mm.ORDRE:
+        _m = _mm.MARQUES[_c]
+        MARQUES_MONTAGE[_m["nom"] + " — ce montage sort de la vue de base ET des Bangers"] = (
+            _m["nom"] + " — this edit leaves the main view AND Bangers")
+        MARQUES_MONTAGE["Afficher seulement les montages %s %s (ils sont cachés ailleurs)"
+                        % (_m["emoji"], _m["nom"])] = (
+            "Show only %s %s edits (they are hidden everywhere else)"
+            % (_m["emoji"], _m["nom"]))
+    _t = _mm.MARQUES["trash"]["emoji"]
+    MARQUES_MONTAGE["Recopier les tags %s, ⚡ et ⭐ de ces montages sur toutes les "
+                    "identites du meme marche (ajoute seulement, ne retire rien)" % _t] = (
+        "Copy the %s, ⚡ and ⭐ tags of these edits to every identity of the "
+        "same market (adds only, never removes)" % _t)
+
 # Le dictionnaire complet, dans l'ordre : les libelles les plus longs d'abord
 # (sinon « Posts » remplacerait le debut de « Posts programmes »).
 TRADUCTIONS = {}
-for _bloc in (MENU, PAGES, ACTIONS, FORMS, ETATS, AIDES):
+for _bloc in (MENU, PAGES, ACTIONS, FORMS, ETATS, AIDES, MARQUES_MONTAGE):
     TRADUCTIONS.update(_bloc)
 
 

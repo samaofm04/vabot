@@ -929,7 +929,10 @@ def _brute_banger_discord(file_id: str, allumee: bool) -> str:
     return "envoyé dans " + msg
 
 
-FLASH_TREND_FILE = DATA_DIR / "flash_trend.json"
+import marques_montage as _mm
+
+FLASH_TREND_FILE = DATA_DIR / _mm.MARQUES["flash"]["fichier"]
+TRASH_TREND_FILE = DATA_DIR / _mm.MARQUES["trash"]["fichier"]
 
 #: Un TROISIEME etat pour un montage, a cote de « ordinaire » et « banger ».
 #:
@@ -940,11 +943,45 @@ FLASH_TREND_FILE = DATA_DIR / "flash_trend.json"
 #:
 #: Meme forme de fichier que fav_brutes.json — une liste de file_id — pour que
 #: les deux se lisent, se sauvent et se purgent de la meme facon.
+#:
+#: DEUX MARQUES, UNE SEULE A LA FOIS (25/09/2026). Trash Trend est venue se
+#: ranger « entre » les templates et les Flash. Nom, logo, couleur et fichier
+#: vivent dans marques_montage.py et nulle part ailleurs : le logo doit
+#: pouvoir changer en une ligne. Un montage porte AU PLUS une marque -- sans
+#: ca, le meme template partait par deux familles de boutons Discord et se
+#: publiait deux fois. Poser l'une retire l'autre, a l'ecriture ; une donnee
+#: ancienne qui porte les deux se lit comme Flash (marques_montage.PRIORITE).
 
 
-def _load_flash_trend() -> set:
+def _fichier_marque(cle: str):
+    """Le registre d'une marque, relu A CHAQUE APPEL.
+
+    Pas une table figee a l'import : un test (ou un outil) qui redirige
+    FLASH_TREND_FILE vers un dossier temporaire doit etre suivi par TOUTES
+    les fonctions, sinon il ecrirait dans les vraies donnees.
+    """
+    return {"flash": FLASH_TREND_FILE, "trash": TRASH_TREND_FILE}[cle]
+
+
+# Une marque ajoutee a marques_montage.py sans registre ici ferait lever
+# _fichier_marque au premier clic. On le dit au demarrage, pas au clic.
+for _c_mm in _mm.MARQUES:
     try:
-        data = _cached_json_load(FLASH_TREND_FILE)
+        _fichier_marque(_c_mm)
+    except KeyError:
+        log.error("marque « %s » declaree dans marques_montage.py sans "
+                  "registre dans web_upload._fichier_marque", _c_mm)
+
+
+def _load_marque(cle: str) -> set:
+    """Les cles portant la marque `cle`, pour l'AFFICHAGE (tolerant, en cache).
+
+    Rend toujours une COPIE : muter l'objet du cache le corromprait pour tous
+    les lecteurs. Un registre illisible se lit ici comme vide ; tout chemin
+    qui ECRIT passe par _lire_marque, qui refuse de le faire.
+    """
+    try:
+        data = _cached_json_load(_fichier_marque(cle))
         if isinstance(data, list):
             return set(data)
         if isinstance(data, dict):
@@ -954,26 +991,481 @@ def _load_flash_trend() -> set:
     return set()
 
 
+def _lire_marque(cle: str):
+    """(cles, erreur) -- la lecture STRICTE, avant toute ecriture.
+
+    _cached_json_load avale une erreur de parsing et rend {}. Avec
+    l'exclusivite, un clic sur une marque reecrit AUSSI le registre de
+    l'autre : parti d'une lecture vide, il aurait efface toutes ses marques
+    d'un coup. Un fichier present mais illisible rend donc une erreur NOMMEE,
+    et l'appelant n'ecrit rien.
+    """
+    p = _fichier_marque(cle)
+    cles, err = _mm.lire_cles_ou_erreur(p)
+    if err:
+        prev = p.with_suffix(p.suffix + ".prev")
+        # Un registre VIDE nomme deja son .prev (marques_montage) : le redire
+        # doublait la phrase dans le bandeau.
+        err += " -- rien n'a ete ecrit" + (
+            " ; la version precedente est dans %s" % prev.name
+            if prev.exists() and ".prev" not in err else "")
+    return cles, err
+
+
+def _ecrire_marque(cle: str, cles) -> str:
+    """Ecrit un registre de marque. Rend l'erreur, vide si c'est fait.
+
+    safe_json.write_text ne leve jamais : il rend False. Un try/except autour
+    ne capturait donc rien, et un registre non ecrit passait pour ecrit.
+    """
+    p = _fichier_marque(cle)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if not safe_json.write_text(
+                p, json.dumps(sorted(cles), ensure_ascii=False)):
+            return "%s : ecriture refusee (droits ou disque plein ?)" % p.name
+    except Exception as e:
+        return "%s : %s" % (p.name, str(e)[:150])
+    _invalidate_json_cache(p)
+    return ""
+
+
+#: UN verrou pour tout lire-modifier-ecrire des registres de marque.
+#:
+#: Depuis l'exclusivite, un clic reecrit DEUX registres, et la synchro de
+#: marche (fil de fond, des minutes) lit les deux avant d'ecrire les siens.
+#: Sans verrou : la synchro lit F0 et T0, un clic Trash sur x ecrit T0+{x} puis
+#: F0-{x}, et la synchro ecrit ensuite F0 + ses ajouts (x redevient Flash)
+#: puis T0 + ses ajouts (x perd Trash) -- alors que l'ecran avait annonce
+#: « Montage Trash ». Le verrou de safe_json ne couvre qu'UNE ecriture, pas
+#: la sequence. Bot et site partagent le processus, et le bot ne fait que
+#: lire : un verrou de processus suffit. Reentrant : le transfert de
+#: /gdrive/doublons enchaine _ajouter_marques et _pop_marques sous lui.
+_MARQUES_VERROU = threading.RLock()
+
+
+def _marques_lecture():
+    """({marque: cles}, {marque: erreur}) -- la lecture stricte, registre par
+    registre. Le detail sert a ne rendre un etat QUE pour les registres lus."""
+    etat, erreurs = {}, {}
+    for c in _mm.ORDRE:
+        s, e = _lire_marque(c)
+        etat[c] = s
+        if e:
+            erreurs[c] = e
+    return etat, erreurs
+
+
+def _marques_etat():
+    """({marque: cles}, [erreurs]) de tous les registres, en lecture stricte."""
+    etat, erreurs = _marques_lecture()
+    return etat, [erreurs[c] for c in _mm.ORDRE if c in erreurs]
+
+
+def _marque_effective(etat: dict, file_id: str) -> str:
+    """La marque que l'ECRAN montre pour ce montage ("" si aucune).
+
+    Une donnee ancienne peut porter les deux : la priorite tranche
+    (marques_montage.PRIORITE), la meme partout -- carte, filtre, Perfect.
+    """
+    return _mm.gagnante([c for c in _mm.ORDRE if file_id in etat.get(c, ())])
+
+
+def _toggle_marque(cle: str, file_id: str):
+    """Bascule la marque `cle` d'un montage. Rend ({marque: bool|None}, erreur).
+
+    EXCLUSIVE : la poser la retire des autres registres. On ecrit d'abord la
+    marque posee, PUIS on retire l'autre : si la seconde ecriture echoue, le
+    montage garde les deux (et la priorite tranche), au lieu de n'en garder
+    aucune et de revenir dans la vue de base sans que personne l'ait voulu.
+
+    Chaque ecriture teste son booleen, et l'etat rendu est celui des
+    REGISTRES apres coup -- pas celui qu'on esperait.
+
+    L'etat « allume » se lit comme a l'ecran (priorite comprise) : sur un
+    montage qui porte encore Flash ET Trash, la carte montre Flash seul, et
+    cliquer la marque eteinte doit la POSER, pas retirer une marque
+    invisible.
+
+    DOUBLEMENT MARQUE (donnee ancienne) : cliquer l'une OU l'autre marque la
+    garde SEULE. Le bandeau de la galerie le promet (« cliquer la marque
+    voulue n'en laisse qu'une ») ; avant, cliquer ⚡ -- allume, puisque Flash
+    l'emporte a l'ecran -- RETIRAIT Flash et laissait Trash : l'inverse du
+    but, qu'il fallait rattraper par un second clic.
+
+    REGISTRE ILLISIBLE : rien n'est ecrit, et son etat vaut None -- pas
+    False. Rendre False pour un etat inconnu faisait eteindre l'eclair a
+    l'ecran (la carte revenait dans la vue de base) alors que le registre le
+    portait peut-etre encore. Le JS ne repeint que si TOUS les etats sont
+    des booleens.
+    """
+    with _MARQUES_VERROU:
+        etat, illisibles = _marques_lecture()
+        if illisibles:
+            # Sans l'etat des AUTRES registres, poser une marque pourrait
+            # laisser un montage doublement marque ; la retirer partirait
+            # d'une lecture vide. On n'ecrit rien et on dit pourquoi.
+            return ({c: (None if c in illisibles else file_id in etat[c])
+                     for c in _mm.ORDRE},
+                    "tag NON enregistre : " + " ; ".join(
+                        illisibles[c] for c in _mm.ORDRE if c in illisibles))
+        portees = [c for c in _mm.ORDRE if file_id in etat[c]]
+        poser = _marque_effective(etat, file_id) != cle or len(portees) > 1
+        err = ""
+        if poser:
+            if file_id not in etat[cle]:
+                nouveau = set(etat[cle]) | {file_id}
+                err = _ecrire_marque(cle, nouveau)
+                if err:
+                    err = "tag NON enregistre : " + err
+                else:
+                    etat[cle] = nouveau
+            if not err:
+                for autre in _mm.autres(cle):
+                    if file_id not in etat[autre]:
+                        continue
+                    reste = set(etat[autre]) - {file_id}
+                    e2 = _ecrire_marque(autre, reste)
+                    if e2:
+                        err = ("%s posee, mais %s n'a pas pu etre retiree (%s)"
+                               % (_mm.MARQUES[cle]["nom"],
+                                  _mm.MARQUES[autre]["nom"], e2))
+                        break
+                    etat[autre] = reste
+        else:
+            reste = set(etat[cle]) - {file_id}
+            err = _ecrire_marque(cle, reste)
+            if err:
+                err = "tag NON retire : " + err
+            else:
+                etat[cle] = reste
+        return {c: file_id in etat[c] for c in _mm.ORDRE}, err
+
+
+def _ajouter_marques(ajouts: dict):
+    """Pose des marques SANS JAMAIS EN RETIRER. Rend (marquees, conflits, erreurs).
+
+    `marquees` : {marque: cles de `ajouts` qui la PORTENT apres l'appel} --
+    posees ici ou deja la, mais jamais une cle sautee ou dont l'ecriture a
+    echoue. « Deja la » compte : un partage rejoue doit pouvoir dire que la
+    copie est arrivee marquee, sinon on irait la remarquer a la main.
+
+    Pour la propagation par noms, le partage et la synchro de marche : des
+    operations additives. Une cle qui porte DEJA une autre marque n'est pas
+    touchee -- retirer l'autre serait soustractif -- elle est sautee et
+    COMPTEE dans `conflits`, que l'ecran affiche.
+
+    Les registres sont relus juste avant l'ecriture, SOUS _MARQUES_VERROU :
+    la synchro de marche tourne des minutes en fond, et un clic pendant ce
+    temps doit compter -- relire ne suffisait pas, le clic pouvait tomber
+    entre la lecture et l'ecriture. Si deux ajouts visent la meme cle, la
+    priorite tranche.
+    """
+    marquees = {c: set() for c in _mm.ORDRE}
+    if not any(ajouts.get(c) for c in _mm.ORDRE):
+        return marquees, [], []
+    with _MARQUES_VERROU:
+        etat, erreurs = _marques_etat()
+        if erreurs:
+            return marquees, [], erreurs
+        nouveaux = {c: set(etat[c]) for c in _mm.ORDRE}
+        posees = {c: set() for c in _mm.ORDRE}
+        conflits = []
+        for c in _mm.PRIORITE:
+            for cle in sorted(ajouts.get(c) or ()):
+                if cle in nouveaux[c]:
+                    marquees[c].add(cle)
+                    continue
+                en_place = [o for o in _mm.autres(c) if cle in nouveaux[o]]
+                if en_place:
+                    conflits.append({"cle": cle, "voulue": c,
+                                     "en_place": en_place[0]})
+                    continue
+                nouveaux[c].add(cle)
+                posees[c].add(cle)
+                marquees[c].add(cle)
+        for c in _mm.ORDRE:
+            if not posees[c]:
+                continue
+            e = _ecrire_marque(c, nouveaux[c])
+            if e:
+                erreurs.append("%d marque(s) %s NON enregistree(s) : %s"
+                               % (len(posees[c]), _mm.MARQUES[c]["nom"], e))
+                marquees[c] -= posees[c]
+        return marquees, conflits, erreurs
+
+
+def _pop_marques(file_id: str):
+    """Retire TOUTES les marques d'un montage supprime. Rend (retirees, erreurs).
+
+    La cle est « identite|templates|nom » : un nouveau fichier portant le meme
+    nom heriterait de la marque de l'ancien -- et disparaitrait de la vue de
+    base sans que personne ne comprenne pourquoi. Un registre illisible n'est
+    pas reecrit (il serait vide), il est signale.
+    """
+    retirees, erreurs = [], []
+    with _MARQUES_VERROU:
+        for c in _mm.ORDRE:
+            s, e = _lire_marque(c)
+            if e:
+                erreurs.append(e)
+                continue
+            if file_id not in s:
+                continue
+            e = _ecrire_marque(c, s - {file_id})
+            if e:
+                erreurs.append(e)
+            else:
+                retirees.append(c)
+    return retirees, erreurs
+
+
+def _transferer_marques(de: str, vers: str) -> dict:
+    """Fait passer la marque d'un doublon retire sur l'original qui reste.
+
+    /gdrive/doublons retire « x_2.mp4 » et garde « x.mp4 ». Le proprietaire
+    marque la carte qu'il VOIT : souvent x_2. Retirer sa marque sans la
+    reporter la perdait -- le montage revenait dans la vue de base, et les
+    boutons Discord de la marque ne le servaient plus. Aucun ecran n'appelle
+    cette route : personne n'aurait pu la reposer, faute de savoir laquelle.
+
+    ADDITIF pour l'original : la marque y est POSEE (_ajouter_marques), rien
+    n'y est retire. S'il porte deja l'AUTRE marque, la sienne reste et celle
+    du doublon est PERDUE -- rendue dans `perdue`, jamais tue. Un doublon qui
+    portait les deux (donnee ancienne) ne transfere que la gagnante : c'est
+    celle que l'ecran montrait.
+
+    La marque du doublon n'est retiree qu'APRES le report, et seulement s'il
+    a abouti : un registre illisible ou une ecriture refusee la laisse en
+    place (elle est au moins encore quelque part), et l'erreur est rendue.
+
+    Rend {"transferee": {...}|None, "perdue": {...}|None,
+    "retirees": [marques], "erreurs": [...]}.
+    """
+    rep = {"transferee": None, "perdue": None, "retirees": [], "erreurs": []}
+    with _MARQUES_VERROU:
+        etat, erreurs = _marques_etat()
+        if erreurs:
+            rep["erreurs"] = erreurs
+            return rep
+        c = _marque_effective(etat, de)
+        if c:
+            deja = vers in etat[c]
+            marquees, conflits, errs = _ajouter_marques({c: {vers}})
+            if errs:
+                rep["erreurs"] = errs
+                return rep
+            if vers in marquees[c]:
+                rep["transferee"] = {"doublon": de, "original": vers,
+                                     "marque": c, "deja": deja}
+            elif conflits:
+                rep["perdue"] = {"doublon": de, "original": vers, "marque": c,
+                                 "en_place": conflits[0].get("en_place")}
+        rep["retirees"], rep["erreurs"] = _pop_marques(de)
+    return rep
+
+
+# Les noms Flash d'origine restent : du code et des tests les appellent.
+def _load_flash_trend() -> set:
+    return _load_marque("flash")
+
+
+def _load_trash_trend() -> set:
+    return _load_marque("trash")
+
+
 def _toggle_flash_trend(file_id: str):
     """Bascule le tag Flash Trend. Rend (etat, erreur d'ecriture).
 
     Meme raison que son voisin : un tag qui ne s'enregistre pas doit le dire,
     pas s'allumer a l'ecran en silence.
     """
-    s = _load_flash_trend()
-    now_on = file_id not in s
-    if now_on:
-        s.add(file_id)
-    else:
-        s.discard(file_id)
-    try:
-        FLASH_TREND_FILE.parent.mkdir(parents=True, exist_ok=True)
-        if not safe_json.write_text(
-                FLASH_TREND_FILE, json.dumps(sorted(s), ensure_ascii=False)):
-            return now_on, "ecriture refusee (droits ou disque plein ?)"
-    except Exception as e:
-        return now_on, str(e)[:150]
-    return now_on, ""
+    etats, err = _toggle_marque("flash", file_id)
+    return etats["flash"], err
+
+
+def _toggle_trash_trend(file_id: str):
+    etats, err = _toggle_marque("trash", file_id)
+    return etats["trash"], err
+
+
+# --- L'AFFICHAGE DES MARQUES --------------------------------------------------
+#
+# Le JavaScript et le CSS de la page vivent dans UPLOAD_HTML, une chaine
+# Python ordinaire (pas une f-string). Le logo, le nom et la couleur de Trash
+# y entrent par des jetons {marque_<cle>_<champ>} remplaces au rendu : ecrits
+# en dur, ils auraient ete recopies dans les toasts, la visionneuse, les
+# filtres et Perfect, et changer de logo aurait voulu dire les chasser un par
+# un. Deux variantes par texte, parce que l'echappement depend du contexte :
+# {..._nom} pour du HTML, {..._nom_js} pour l'interieur d'une chaine JS a
+# apostrophes -- une apostrophe non echappee y casse le script de la page
+# ENTIERE, en silence (CLAUDE.md).
+
+_RE_COULEUR = re.compile(r"^#[0-9a-fA-F]{3,8}$")
+
+
+def _couleur_sure(c) -> str:
+    """Une couleur de marques_montage, verifiee avant d'entrer dans du CSS ou
+    un attribut style. Une valeur qui n'est pas un hex se voit dans le
+    journal et retombe sur le gris des boutons eteints."""
+    c = str(c or "").strip()
+    if _RE_COULEUR.match(c):
+        return c
+    log.error("marques_montage : couleur refusee %r (attendu #rrggbb)", c)
+    return "#9aa0a6"
+
+
+def _rgba_de(hexa: str, alpha: float) -> str:
+    h = _couleur_sure(hexa).lstrip("#")
+    if len(h) == 3:
+        h = "".join(ch * 2 for ch in h)
+    return "rgba(%d,%d,%d,%s)" % (int(h[0:2], 16), int(h[2:4], 16),
+                                  int(h[4:6], 16), alpha)
+
+
+def _js_chaine(v) -> str:
+    """Le contenu d'une chaine JS entre apostrophes (sans les apostrophes)."""
+    s = json.dumps(str(v), ensure_ascii=False)[1:-1]
+    return s.replace("'", "\\'").replace("</", "<\\/")
+
+
+def _marques_css() -> str:
+    """Le CSS des marques, tire de marques_montage.py.
+
+    THEME CLAIR : les boutons de filtre ont un fond #1a1a1a que la regle
+    generale repeint en blanc ; leur texte clair (cyan, vert acide) y tombait
+    sous 2:1. La regle d'id « body.light #<cle>-toggle-btn » (1,1,1) passe
+    devant les remaps generaux « body.light [style*=...] » (0,2,1) -- calcule,
+    pas estime -- et !important bat le style inline. Actif, le bouton recoit
+    un fond de sa teinte (vaultFiltreBouton le peignait en brun sombre, sous
+    un texte devenu fonce).
+    """
+    t = _mm.MARQUES["trash"]
+    out = [
+        # Carte : eteinte = logo gris et pale ; allumee = pastille de sa
+        # couleur. Tout l'etat vient de la classe du bouton, que la bascule
+        # JS pose et que la visionneuse relit.
+        ".card-edit-btn.trash-trend .mm-emoji{font-size:14px;line-height:1;"
+        "filter:grayscale(1);opacity:.5;transition:filter .15s,opacity .15s}",
+        ".card-edit-btn.trash-trend.is-trash-trend{background:%s}"
+        % _couleur_sure(t["couleur"]),
+        ".card-edit-btn.trash-trend.is-trash-trend .mm-emoji{filter:none;opacity:1}",
+        # Visionneuse : elle reste noire dans les deux themes. Trois classes
+        # et non deux : ce CSS est servi AVANT celui de la visionneuse, et
+        # « .lb-act-btn.active » (meme poids a deux classes, venu apres)
+        # repeignait la pastille allumee en bleu -- mesure dans la page.
+        ".lb-trash .mm-emoji{font-size:18px;line-height:1;filter:grayscale(1);opacity:.75}",
+        ".lb-act-btn.lb-trash.active{background:%s;color:#111}"
+        % _couleur_sure(t["couleur"]),
+        ".lb-trash.active .mm-emoji{filter:none;opacity:1}",
+    ]
+    for c in _mm.ORDRE:
+        m = _mm.MARQUES[c]
+        out.append("body.light #%s-toggle-btn{color:%s!important;"
+                   "border-color:#e5e7eb!important}"
+                   % (c, _couleur_sure(m["couleur_clair"])))
+        out.append("body.light #%s-toggle-btn.vault-sort-active{background:%s!important;"
+                   "border-color:%s!important}"
+                   % (c, _rgba_de(m["couleur"], .18),
+                      _couleur_sure(m["couleur_clair"])))
+    return "\n".join(out)
+
+
+def _marques_remplacer(html: str) -> str:
+    """Remplace les jetons {marque_<cle>_<champ>} et {marques_css}."""
+    for c, m in _mm.MARQUES.items():
+        for champ in ("emoji", "nom", "court"):
+            v = str(m.get(champ, ""))
+            html = html.replace("{marque_%s_%s_js}" % (c, champ), _js_chaine(v))
+            html = html.replace("{marque_%s_%s}" % (c, champ), html_escape(v))
+        for champ in ("couleur", "couleur_clair"):
+            html = html.replace("{marque_%s_%s}" % (c, champ),
+                                _couleur_sure(m.get(champ)))
+    return html.replace("{marques_css}", _marques_css())
+
+
+_UPLOAD_HTML_MARQUE = {"source": None, "html": ""}
+
+
+def _upload_html_marque() -> str:
+    """UPLOAD_HTML, jetons de marque remplaces -- calcule UNE fois.
+
+    Une vingtaine de remplacements sur 850 Ko coutaient 3,6 ms a chaque
+    affichage de la page (mesure), pour un resultat qui ne change pas tant
+    que le processus tourne. On compare l'OBJET source (« is ») : si
+    UPLOAD_HTML est remplace (test, rechargement), le cache suit.
+    """
+    if _UPLOAD_HTML_MARQUE["source"] is not UPLOAD_HTML:
+        _UPLOAD_HTML_MARQUE["html"] = _marques_remplacer(UPLOAD_HTML)
+        _UPLOAD_HTML_MARQUE["source"] = UPLOAD_HTML
+    return _UPLOAD_HTML_MARQUE["html"]
+
+
+#: Les morceaux des messages d'erreur des registres (marques_montage et
+#: _lire_marque), en anglais. Des MORCEAUX et non des phrases : le message
+#: porte un nom de fichier et le type de l'exception. Chaque morceau francais
+#: est ecrit a l'identique de sa source -- tests_site verifie qu'il n'en
+#: reste aucun dans le rendu anglais.
+_MARQUES_FR_EN = (
+    ("tag NON enregistre : ", "mark NOT saved: "),
+    (" illisible (", " unreadable ("),
+    (" : format inattendu (", ": unexpected format ("),
+    (" vide -- la version precedente est peut-etre dans ",
+     " is empty -- the previous version may be in "),
+    (" -- rien n'a ete ecrit", " -- nothing was written"),
+    (" ; la version precedente est dans ", "; the previous version is in "),
+)
+
+
+def _marques_en(texte: str) -> str:
+    """Un message d'erreur de registre de marque, en anglais."""
+    for fr, en in _MARQUES_FR_EN:
+        texte = texte.replace(fr, en)
+    return texte
+
+
+def _marques_avis_html(etat: dict, erreurs: list, ident: str, fichiers) -> str:
+    """Ce que la galerie des montages doit DIRE sur les marques.
+
+    Un registre illisible : ses montages reviennent dans la vue de base (on ne
+    peut plus savoir lesquels sont marques), et aucun clic ne l'ecrira tant
+    qu'il n'est pas repare. Un montage qui porte encore les deux marques
+    (donnee ancienne) : il s'affiche sous la prioritaire, et on le compte.
+    Ni l'un ni l'autre ne doit passer en silence.
+    """
+    # LA LANGUE SE CHOISIT ICI, pas dans i18n_en.py : _traduire_html ne
+    # remplace que des noeuds texte ENTIERS connus, et ces phrases portent un
+    # nombre ou un nom de fichier. Rendu en anglais (langue par defaut), le
+    # bandeau sortait en francais.
+    en = _langue_courante() == "en"
+    morceaux = []
+    for e in erreurs or []:
+        morceaux.append("⚠ " + html_escape(_marques_en(e) if en else e))
+    if ident and fichiers and not erreurs:
+        doubles = 0
+        for p in fichiers:
+            fid = f"{ident}|templates|{p.name}"
+            if sum(1 for c in _mm.ORDRE if fid in etat.get(c, ())) > 1:
+                doubles += 1
+        if doubles:
+            gagnante = _mm.MARQUES[_mm.PRIORITE[0]]
+            modele = ("⚠ %d edit(s) carry two marks (old data): they show as "
+                      "%s %s. Clicking the wanted mark on the card keeps only "
+                      "that one." if en else
+                      "⚠ %d montage(s) portent deux marques (donnée ancienne) : "
+                      "ils s'affichent en %s %s. Cliquer la marque voulue sur la "
+                      "carte n'en laisse qu'une.")
+            morceaux.append(modele % (doubles, html_escape(gagnante["emoji"]),
+                                      html_escape(gagnante["nom"])))
+    if not morceaux:
+        return ""
+    # Fond TRANSLUCIDE, pas un rouge sombre plein : en theme clair le texte
+    # #fca5a5 est remappe en rouge fonce, qui doit se poser sur du clair.
+    return ("<div class='marques-avis' style='margin:-8px 0 14px;padding:8px 12px;"
+            "border-radius:8px;border:1px solid rgba(239,68,68,.35);"
+            "background:rgba(239,68,68,.10);"
+            "color:#fca5a5;font-size:12.5px;line-height:1.5'>"
+            + "<br>".join(morceaux) + "</div>")
 
 
 def propager_tags_templates(source: str) -> dict:
@@ -1001,6 +1493,12 @@ def propager_tags_templates(source: str) -> dict:
     MEME MARCHE SEULEMENT
         Un montage FR n a rien a faire chez une identite US, meme si le nom
         de fichier coincide.
+
+    LES MARQUES EXCLUSIVES (Flash, Trash)
+        Toutes suivent, pas seulement Flash : une identite qui n a QUE du
+        Trash n est plus « rien a propager ». Une soeur dont le montage porte
+        deja l AUTRE marque n est pas touchee -- lui retirer la sienne serait
+        soustractif -- elle est comptee dans `conflits` et l ecran le dit.
     """
     src = (source or "").strip().lower()
     if not src:
@@ -1016,73 +1514,97 @@ def propager_tags_templates(source: str) -> dict:
 
     prefixe = src + "|templates|"
 
-    def _noms(charger):
-        return sorted({k[len(prefixe):] for k in charger()
+    def _noms(cles):
+        return sorted({k[len(prefixe):] for k in cles
                        if isinstance(k, str) and k.startswith(prefixe)
                        and k[len(prefixe):]})
 
-    noms_flash = _noms(_load_flash_trend)
-    noms_fav = _noms(lambda: set(_load_fav_brutes()))
-    if not noms_flash and not noms_fav:
+    # Lecture STRICTE des marques : cette fonction ecrit ensuite dans leurs
+    # registres, et une lecture vide (fichier illisible) les aurait reecrits
+    # avec les seules cles posees ici.
+    etat, erreurs = _marques_etat()
+    if erreurs:
+        return {"ok": False, "error": " ; ".join(erreurs)}
+    noms = {c: set(_noms(etat[c])) for c in _mm.ORDRE}
+    # Un montage de la SOURCE qui porte deux marques (donnee ancienne) ne
+    # propage que la gagnante : recopier les deux fabriquerait le conflit
+    # chez chaque soeur. On le compte pour le dire.
+    doubles_source = 0
+    for c in _mm.PRIORITE:
+        for autre in _mm.autres(c):
+            if _mm.PRIORITE.index(autre) > _mm.PRIORITE.index(c):
+                commun = noms[c] & noms[autre]
+                doubles_source += len(commun)
+                noms[autre] -= commun
+    noms_fav = set(_noms(_load_fav_brutes()))
+    if not any(noms.values()) and not noms_fav:
         return {"ok": False,
                 "error": "rien a propager : aucun montage tague chez « %s »" % src}
 
-    flash = _load_flash_trend()
     fav = _load_fav_brutes()
-    poses_flash = poses_fav = 0
+    ajouts = {c: set() for c in _mm.ORDRE}
+    poses_fav = 0
     introuvables = 0
     touchees = set()
+    tous_noms = set(noms_fav).union(*noms.values())
 
     for autre in autres:
         tdir = IDENTITIES_DIR / autre / "templates"
-        for nom in set(noms_flash) | set(noms_fav):
+        for nom in tous_noms:
             if not (tdir / nom).is_file():
                 introuvables += 1
                 continue
             cle = autre + "|templates|" + nom
-            if nom in noms_flash and cle not in flash:
-                flash.add(cle)
-                poses_flash += 1
-                touchees.add(autre)
+            for c in _mm.ORDRE:
+                if nom in noms[c] and cle not in etat[c]:
+                    ajouts[c].add(cle)
             if nom in noms_fav and cle not in fav:
                 fav.add(cle)
                 poses_fav += 1
                 touchees.add(autre)
 
-    try:
-        if poses_flash:
-            FLASH_TREND_FILE.parent.mkdir(parents=True, exist_ok=True)
-            safe_json.write_text(FLASH_TREND_FILE,
-                                 json.dumps(sorted(flash), ensure_ascii=False))
-        if poses_fav:
+    # Les marques passent par _ajouter_marques : une soeur dont le montage
+    # porte DEJA l'autre marque n'est pas touchee (ce serait retirer), elle
+    # est comptee dans `conflits`. `ajouts` ne contient que des cles qui ne
+    # portaient pas encore la marque : ce qui revient marque est donc POSE.
+    posees, conflits, erreurs = _ajouter_marques(ajouts)
+    for c in _mm.ORDRE:
+        touchees.update(k.split("|", 1)[0] for k in posees[c])
+    if poses_fav:
+        try:
             FAV_BRUTES_FILE.parent.mkdir(parents=True, exist_ok=True)
-            safe_json.write_text(FAV_BRUTES_FILE,
-                                 json.dumps(sorted(fav), ensure_ascii=False))
-    except Exception as e:
-        return {"ok": False, "error": "ecriture impossible : %s" % e}
+            if not safe_json.write_text(
+                    FAV_BRUTES_FILE, json.dumps(sorted(fav), ensure_ascii=False)):
+                erreurs.append("%d etoile(s) NON enregistree(s) : %s "
+                               "(droits ou disque plein ?)"
+                               % (poses_fav, FAV_BRUTES_FILE.name))
+                poses_fav = 0
+        except Exception as e:
+            erreurs.append("etoiles : %s" % str(e)[:150])
+            poses_fav = 0
 
-    return {"ok": True, "marche": marche, "identites": len(touchees),
-            "candidates": len(autres), "poses_flash": poses_flash,
-            "poses_fav": poses_fav, "introuvables": introuvables,
-            "noms_flash": len(noms_flash), "noms_fav": len(noms_fav)}
+    rep = {"ok": not erreurs, "marche": marche, "identites": len(touchees),
+           "candidates": len(autres), "poses_fav": poses_fav,
+           "introuvables": introuvables, "noms_fav": len(noms_fav),
+           "conflits": len(conflits),
+           "conflits_exemples": [x["cle"] for x in conflits[:5]],
+           "doubles_source": doubles_source}
+    for c in _mm.ORDRE:
+        rep["poses_" + c] = len(posees[c])
+        rep["noms_" + c] = len(noms[c])
+    if erreurs:
+        rep["error"] = " ; ".join(erreurs)
+    return rep
 
 
 def _pop_flash_trend(file_id: str) -> None:
-    """Retire le tag d'un montage supprime.
-
-    Meme raison que pour l'etoile : la cle est « identite|templates|nom », donc
-    un nouveau fichier portant le meme nom heriterait du tag de l'ancien — et
-    disparaitrait de la vue de base sans que personne ne comprenne pourquoi.
-    """
-    s = _load_flash_trend()
-    if file_id not in s:
-        return
-    s.discard(file_id)
-    try:
-        safe_json.write_text(FLASH_TREND_FILE,
-                             json.dumps(sorted(s), ensure_ascii=False))
-    except Exception:
-        pass
+    """Retire le tag Flash d'un montage supprime (voir _pop_marques, qui
+    retire TOUTES les marques et que /cloud/delete appelle)."""
+    with _MARQUES_VERROU:
+        s, e = _lire_marque("flash")
+        if e or file_id not in s:
+            return
+        _ecrire_marque("flash", s - {file_id})
 
 
 def _pop_fav_brute(file_id: str) -> None:
@@ -1556,6 +2078,26 @@ body.light.inflowwlight .sel-cb:checked + .sel-circle::after,body.light.inflowwl
   padding:0;backdrop-filter:blur(8px);transition:all .15s;
   box-shadow:0 2px 6px rgba(0,0,0,.2)}
 .card-edit-btn:hover{background:#3b82f6;color:#fff;transform:scale(1.08);box-shadow:0 4px 12px rgba(59,130,246,.4)}
+/* Les pastilles d'une carte passent a la ligne au lieu de deborder. Un
+   montage en porte six (etoile, Trash, eclair, montage, desactiver,
+   selection) : 6 x 28 + 5 x 6 = 198 px, pour une carte de 165 px au plus
+   serre. Sur une seule rangee elles sortaient a gauche, SUR le badge de date.
+   Le ::before reserve la place du badge (72 px ; mesure dans Chrome, le plus
+   large, « 30 sept. », en fait 67) sur la PREMIERE rangee ; les suivantes
+   ont toute la largeur. A 165 px : 2 pastilles puis 4, dans la carte, sans
+   toucher la date ; a 300 px, une seule rangee. Le
+   conteneur laisse passer les clics : sans pointer-events, cliquer sur la
+   date n'ouvrait plus la visionneuse. */
+.card-actions.ca-wrap{flex-wrap:wrap;justify-content:flex-end;max-width:calc(100% - 16px);pointer-events:none}
+.card-actions.ca-wrap>*{flex:none;pointer-events:auto}
+/* La regle generale « label{margin:16px 0 8px} » des formulaires atteignait
+   le cercle de selection : la rangee qui le porte faisait 48 px au lieu de
+   28, les boutons descendaient de 10 px sous le badge de date et, une fois
+   la rangee coupee en deux, un trou de 16 px separait les deux lignes. */
+.card-actions.ca-wrap>.sel-circle-wrap{margin:0}
+.card-actions.ca-date::before{content:'';flex:none;width:72px;height:28px}
+/* Marques de montage (Trash, Flash) : couleurs tirees de marques_montage.py */
+{marques_css}
 
 /* Items de la sidebar - smooth hover */
 .sidebar .item,.sidebar .group-head,.sidebar .subgroup-head,.sidebar .logout-btn{transition:background .15s,color .15s,padding-left .15s}
@@ -4947,12 +5489,22 @@ function vaultFiltreBouton(b, actif, labelOn, labelOff){
   b.style.borderColor = actif ? '#f5c518' : '#3a3a3a';
   b.textContent = actif ? labelOn : labelOff;
 }
-// Les deux filtres se COMBINENT, ils ne s'excluent pas.
+// Les filtres se COMBINENT, ils ne s'excluent pas.
 //
-//     aucun        tout, SAUF les ⚡        -- le tag sort de la vue de base
-//     ⭐ seul      les ⭐ non-⚡
-//     ⚡ seul      les ⚡
-//     ⭐ + ⚡      les ⚡ QUI SONT AUSSI ⭐   -- « Flash Banger »
+//     aucun          tout, SAUF les marques   -- la marque sort de la vue de base
+//     ⭐ seul        les ⭐ non marques
+//     ⚡ seul        les ⚡
+//     ⭐ + ⚡        les ⚡ QUI SONT AUSSI ⭐   -- « Flash Banger »
+//     Trash seul     les Trash
+//     ⭐ + Trash     les Trash qui sont ⭐     -- « Trash Banger »
+//     Trash + ⚡     les Trash ET les ⚡        -- les FAMILLES s'additionnent
+//
+// Les familles (Trash, ⚡) s'unissent, l'etoile les recoupe. Aucun bouton
+// n'eteint l'autre : c'est ce qui avait echoue plus bas.
+//
+// Une carte qui porte encore les deux marques (donnee ancienne) se lit ⚡ :
+// la meme priorite que le serveur (marques_montage.PRIORITE), sinon elle
+// changerait de famille au premier clic de filtre.
 //
 // La premiere version les rendait exclusifs : allumer l'un eteignait l'autre.
 // Mais seul toggleFlashTrendFilter le faisait, pas son voisin -- clique dans
@@ -4968,30 +5520,38 @@ function vaultVuesAppliquer(sec){
   var grid = sec.querySelector('#vault-grid');
   if(!grid) return;
   var bOn = vaultFiltreOn(sec, 'favbrute-toggle-btn');
+  var tOn = vaultFiltreOn(sec, 'trash-toggle-btn');
   var fOn = vaultFiltreOn(sec, 'flash-toggle-btn');
   var shown = 0;
   grid.querySelectorAll('.cloud-card').forEach(function(c){
+    // La classe du BOUTON de la carte fait foi, pas une classe de carte :
+    // c'est elle que la bascule pose et que la visionneuse relit.
     var estFlash = !!c.querySelector('.flash-trend.is-flash');
+    var estTrash = !estFlash && !!c.querySelector('.trash-trend.is-trash-trend');
     var estFav = !!c.querySelector('.fav-brute-star.is-fav');
-    // Sans le filtre ⚡, les montages tagues restent CACHES : c'est le tag
-    // qui les sort de la vue ordinaire, et c'est tout son interet.
-    var ok = fOn ? estFlash : !estFlash;
+    // Sans filtre de famille, les montages marques restent CACHES : c'est la
+    // marque qui les sort de la vue ordinaire, et c'est tout son interet.
+    var ok = (tOn || fOn) ? ((tOn && estTrash) || (fOn && estFlash))
+                          : (!estFlash && !estTrash);
     if(bOn && !estFav) ok = false;
     c.style.display = ok ? '' : 'none';
     if(ok) shown++;
   });
   var vide = sec.querySelector('.vues-empty-note');
-  if(shown === 0 && (bOn || fOn)){
+  if(shown === 0 && (bOn || tOn || fOn)){
     if(!vide){
       vide = document.createElement('div');
       vide.className = 'vues-empty-note';
       vide.style.cssText = 'grid-column:1/-1;text-align:center;color:#888;padding:34px;font-size:14px';
       grid.appendChild(vide);
     }
-    vide.textContent = (bOn && fOn)
-      ? 'Aucun montage ⚡ Flash Trend marqué ⭐ pour cette identité.'
-      : (fOn ? 'Aucun montage ⚡ Flash Trend pour cette identité.'
-             : 'Aucun ⭐ pour cette identité.');
+    var familles = [];
+    if(tOn) familles.push('{marque_trash_emoji_js} {marque_trash_nom_js}');
+    if(fOn) familles.push('⚡ Flash Trend');
+    vide.textContent = familles.length
+      ? ('Aucun montage ' + familles.join(' ni ') + (bOn ? ' marqué ⭐' : '')
+         + ' pour cette identité.')
+      : 'Aucun ⭐ pour cette identité.';
     vide.style.display = '';
   } else if(vide){ vide.style.display = 'none'; }
 }
@@ -5217,21 +5777,68 @@ function toggleFlashTrendFilter(btn){
   vaultVuesAppliquer(sec);
 }
 
-// ⚡ Tag Flash Trend d'un montage. Rien n'est envoye a Discord : on marque.
-async function toggleFlashTrend(btn, fileId){
-  var svg = btn.querySelector('svg');
+// === Filtre « Trash Trend » des montages ==============================
+//
+// Le jumeau du filtre ⚡ juste au-dessus, range AVANT lui dans la barre
+// (⭐ Bangers · Trash · ⚡). Le logo et le nom viennent de marques_montage.py
+// par remplacement au rendu : les changer la-bas les change ici.
+function toggleTrashTrendFilter(btn){
+  var sec = vaultFiltreSection(btn);
+  var b = btn || (sec ? sec.querySelector('#trash-toggle-btn') : null);
+  var actif = !(b && b.getAttribute('data-on') === '1');
+  vaultFiltreBouton(b, actif, '{marque_trash_emoji_js} {marque_trash_nom_js} ✓',
+                    '{marque_trash_emoji_js} {marque_trash_nom_js}');
+  vaultVuesAppliquer(sec);
+}
+
+// Repeint les DEUX marques d'une carte d'apres la reponse du serveur. Les
+// deux routes rendent l'etat des deux registres : poser Trash retire ⚡ cote
+// serveur, et sans ce repeint l'eclair restait allume a l'ecran jusqu'au
+// rechargement. Meme priorite que le serveur : une carte qui porte encore
+// les deux marques se lit ⚡.
+// L'etat de CHAQUE marque est-il connu ? Le serveur rend null pour un
+// registre illisible : ce n'est pas « eteint », c'est « on ne sait pas ».
+function montageMarquesConnues(j){
+  return !!j && typeof j.flash === 'boolean' && typeof j.trash === 'boolean';
+}
+function montageMarquesPeindre(carte, j){
+  if(!carte || !j) return;
+  var estFlash = !!j.flash, estTrash = !!j.trash && !estFlash;
+  var f = carte.querySelector('.flash-trend');
+  if(f){
+    f.classList.toggle('is-flash', estFlash);
+    f.style.color = estFlash ? '#22d3ee' : '#9aa0a6';
+    var svg = f.querySelector('svg');
+    if(svg) svg.setAttribute('fill', estFlash ? 'currentColor' : 'none');
+  }
+  var t = carte.querySelector('.trash-trend');
+  if(t) t.classList.toggle('is-trash-trend', estTrash);
+  carte.classList.toggle('is-flash-card', estFlash);
+  carte.classList.toggle('is-trash-card', estTrash);
+}
+// Bascule une marque exclusive (cle = 'flash' ou 'trash'). Rien n'est envoye
+// a Discord : on marque.
+async function montageMarqueBasculer(btn, fileId, cle){
   btn.disabled = true; btn.style.opacity = '0.55';
+  var carte = btn.closest('.cloud-card');
+  // L'etat AVANT le clic, pour dire ce que l'exclusivite a retire.
+  var avantF = !!(carte && carte.querySelector('.flash-trend.is-flash'));
+  var avantT = !!(carte && carte.querySelector('.trash-trend.is-trash-trend'));
   try{
     var fd = new FormData(); fd.set('file_id', fileId);
-    var r = await fetch('/reel/toggle_flash_trend', { method:'POST', body: fd });
+    // Les deux adresses en entier : un grep « toggle_flash_trend » doit
+    // trouver son jumeau, pas un morceau d'URL fabrique.
+    var url = (cle === 'flash') ? '/reel/toggle_flash_trend' : '/reel/toggle_trash_trend';
+    var r = await fetch(url, { method:'POST', body: fd });
     var j = await r.json();
-    if(!j.ok){ alert('✕ ' + (j.error || '?')); return; }
-    var on = !!j.flash;
-    btn.classList.toggle('is-flash', on);
-    btn.style.color = on ? '#22d3ee' : '#9aa0a6';
-    if(svg) svg.setAttribute('fill', on ? 'currentColor' : 'none');
-    var carte = btn.closest('.cloud-card');
-    if(carte) carte.classList.toggle('is-flash-card', on);
+    // Meme en echec, la reponse porte l'etat ENREGISTRE (une marque posee
+    // dont l'autre n'a pas pu etre retiree) : on le peint avant de le dire.
+    // Mais seulement s'il est CONNU pour toutes les marques : un registre
+    // illisible rend null, et peindre « null » comme « eteint » renvoyait
+    // une carte ⚡ dans la vue de base alors que le registre la porte
+    // peut-etre encore.
+    if(montageMarquesConnues(j)) montageMarquesPeindre(carte, j);
+    if(!j.ok){ alert('✕ ' + (j.error || '?')); vaultVuesAppliquer(vaultFiltreSection(btn)); return; }
     // La carte qu'on vient de taguer doit QUITTER la vue tout de suite : elle
     // n'a plus rien a y faire, et la laisser affichee ferait croire que le
     // tag n'a pas pris.
@@ -5242,10 +5849,31 @@ async function toggleFlashTrend(btn, fileId){
     // renvoyait celle d'a cote. Le tag partait bien en base, l'eclair passait
     // au bleu, et la carte restait affichee -- donc « ca ne marche pas ».
     vaultVuesAppliquer(vaultFiltreSection(btn));
-    if(typeof showToast === 'function') showToast(on ? '⚡ Montage Flash Trend' : '○ Retiré des Flash Trend', on ? 'success' : 'warning');
+    // Le fragment prefetche d'une autre identite garde l'etat d'AVANT : sans
+    // ce vidage, un aller-retour ramenait la carte dans la vue de base.
+    try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
+    var on = (cle === 'flash') ? !!j.flash : (!!j.trash && !j.flash);
+    // L'emoji EN TETE : showToast en fait l'icone de la notification. Ecrit
+    // « Montage ⚡ Flash Trend », le message commencait par une lettre et
+    // l'icone retombait sur la coche generique -- Flash avait perdu la sienne,
+    // Trash ne l'avait jamais eue.
+    var emo = (cle === 'flash') ? '{marque_flash_emoji_js}' : '{marque_trash_emoji_js}';
+    var nomSeul = (cle === 'flash') ? '{marque_flash_nom_js}' : '{marque_trash_nom_js}';
+    var msg = on ? (emo + ' Montage ' + nomSeul) : ('○ Retiré des ' + emo + ' ' + nomSeul);
+    // Poser l'une retire l'autre : le dire, sinon on croirait l'autre marque
+    // perdue par accident. Sur un montage doublement marque (lu ⚡), cliquer
+    // ⚡ le GARDE seul : l'eclair etait deja allume et le reste.
+    if(on && cle === 'trash' && avantF && !j.flash) msg += ' — {marque_flash_emoji_js} {marque_flash_nom_js} retiré (une seule marque par montage)';
+    if(on && cle === 'flash' && (avantT || avantF) && !j.trash) msg += ' — {marque_trash_emoji_js} {marque_trash_nom_js} retiré (une seule marque par montage)';
+    if(!on && cle === 'flash' && j.trash) msg += ' — reste {marque_trash_emoji_js} {marque_trash_nom_js} (marque ancienne)';
+    if(typeof showToast === 'function') showToast(msg, on ? 'success' : 'warning');
   }catch(e){ alert('Erreur réseau : ' + e); }
   finally{ btn.disabled = false; btn.style.opacity = '1'; }
 }
+// ⚡ Tag Flash Trend d'un montage.
+function toggleFlashTrend(btn, fileId){ return montageMarqueBasculer(btn, fileId, 'flash'); }
+// Marque Trash Trend d'un montage : le meme geste, l'autre registre.
+function toggleTrashTrend(btn, fileId){ return montageMarqueBasculer(btn, fileId, 'trash'); }
 function toggleFavBruteFilter(btn){
   var sec = vaultFiltreSection(btn);
   var b = btn || (sec ? sec.querySelector('#favbrute-toggle-btn') : null);
@@ -5275,11 +5903,17 @@ async function syncTagsTemplates(identity){
     if(!j || !j.ok){ dire(String((j && j.error) || 'echec'), '#e0a33a'); return; }
     var m = j.identites + ' identite(s) mise(s) a jour sur ' + j.candidates
           + ' (' + j.marche.toUpperCase() + ') : '
+          + (j.poses_trash || 0) + ' tag(s) {marque_trash_court_js}, '
           + j.poses_flash + ' tag(s) Flash, ' + j.poses_fav + ' etoile(s).';
     // Le nombre INTROUVABLE se dit : un montage renomme ailleurs ne peut pas
     // etre retrouve, et sans ce chiffre on croirait la propagation complete.
     if(j.introuvables) m += ' ' + j.introuvables + ' nom(s) absent(s) ailleurs.';
-    dire(m, j.identites ? '#43b581' : '#e0a33a');
+    // Les CONFLITS aussi : une soeur dont le montage porte deja l autre
+    // marque n est pas touchee (une seule marque par montage), et le taire
+    // ferait croire la propagation complete.
+    if(j.conflits) m += ' ' + j.conflits + ' montage(s) saute(s) : ils portent deja l autre marque.';
+    if(j.doubles_source) m += ' ' + j.doubles_source + ' montage(s) de la source portaient les deux marques : seule la prioritaire est partie.';
+    dire(m, (j.identites && !j.conflits) ? '#43b581' : '#e0a33a');
   }catch(e){ dire('Erreur reseau : ' + e, '#e0576b'); }
   finally{ if(btn){ btn.disabled = false; btn.style.opacity = '1'; } }
 }
@@ -5489,6 +6123,11 @@ function lbCollectGallery(){
   });
   var scope = visibleSection || document;
   scope.querySelectorAll('.cloud-card').forEach(function(card){
+    // Seulement les cartes AFFICHEES, comme vaultSelectAll. Les montages
+    // marques (Flash, Trash) sont caches de la vue de base : les feuilleter
+    // quand meme contredisait le filtre, et le compteur annoncait « 4 / 5 »
+    // sous un filtre qui ne montrait que deux cartes.
+    if(card.offsetParent === null) return;
     var wrap = card.querySelector('[onclick*="openLightbox"]');
     if(!wrap) return;
     var oc = wrap.getAttribute('onclick') || '';
@@ -5519,6 +6158,8 @@ var LB_ACTIONS = [
   ['lb-sel',    '.sel-cb',          null],
   ['lb-banger', '.banger-star',     'is-banger'],
   ['lb-fav',    '.fav-brute-star',  'is-fav'],
+  // La marque Trash lit la classe du BOUTON de la vignette, comme le filtre.
+  ['lb-trash',  '.trash-trend',     'is-trash-trend'],
   ['lb-flash',  '.flash-trend',     'is-flash'],
   ['lb-off',    '.reel-disable',    'is-off']
 ];
@@ -6605,8 +7246,17 @@ function nxMApplyOpen(){
               if(j2.ok){
                 var n=(j2.done||[]).length;
                 var msg='Montage appliqué à '+n+' model'+(n>1?'s':'')+' : '+(j2.done||[]).join(', ');
+                // Les marques ont suivi (ou non) : les compter ici comme le
+                // fait « Partager ». Ce chemin les avalait -- une erreur
+                // d ecriture des tags passait meme sans un mot.
+                if(j2.tags_trash) msg+=' · '+j2.tags_trash+' {marque_trash_emoji_js}';
+                if(j2.tags_flash) msg+=' · '+j2.tags_flash+' ⚡';
+                if(j2.tags_fav) msg+=' · '+j2.tags_fav+' ⭐';
+                if(j2.conflits) msg+=' · '+j2.conflits+' marque(s) non posée(s) : la copie porte déjà l autre';
                 if(j2.errors&&j2.errors.length) msg+=' — échec : '+j2.errors.join(' ; ');
-                if(typeof showToast==='function') showToast(msg,(j2.errors&&j2.errors.length)?'warning':'success',10000);
+                if(j2.tags_error) msg+=' — tags : '+j2.tags_error;
+                var aSouci=(j2.errors&&j2.errors.length)||j2.tags_error||j2.conflits;
+                if(typeof showToast==='function') showToast(msg,aSouci?'warning':'success',10000);
               } else if(typeof showToast==='function') showToast('✕ '+(j2.error||'échec'),'error',8000);
             }).catch(function(){ ui.close(); if(typeof showToast==='function') showToast('Erreur réseau','error'); });
         }
@@ -7742,9 +8392,15 @@ function syncMarcheSuivre(btn){
         }
         if(btn) btn.textContent = lbl;
         var msg = j.copies + ' copie(s) chez ' + j.cibles + ' model(s)';
-        if(j.erreurs && j.erreurs.length) msg += ' - ' + j.erreurs.length + ' erreur(s)';
+        // Les marques posees et les conflits sautes par le fil de fond : sans
+        // ces chiffres, un conflit Trash/Flash disparaissait sans trace.
+        if(j.tags_trash) msg += ' · ' + j.tags_trash + ' {marque_trash_emoji_js}';
+        if(j.tags_flash) msg += ' · ' + j.tags_flash + ' ⚡';
+        if(j.tags_fav) msg += ' · ' + j.tags_fav + ' ⭐';
+        if(j.conflits) msg += ' · ' + j.conflits + ' marque(s) non posée(s) (la copie porte déjà l autre)';
+        if(j.erreurs && j.erreurs.length) msg += ' - ' + j.erreurs.length + ' erreur(s) : ' + j.erreurs.slice(0, 2).join(' ; ');
         if(typeof showToast === 'function')
-          showToast(msg, (j.erreurs && j.erreurs.length) ? 'warning' : 'success', 6000);
+          showToast(msg, ((j.erreurs && j.erreurs.length) || j.conflits) ? 'warning' : 'success', 8000);
       })
       .catch(function(){});
   };
@@ -7781,7 +8437,7 @@ function tplShareOpen(){
     onConfirm:function(sel,_x,ui){
       ui.busy('◌ Copie…');
       (async function(){
-        var okN=0, errs=[], tagF=0, tagE=0;
+        var okN=0, errs=[], tagF=0, tagT=0, tagE=0, conf=0;
         for(var i=0;i<files.length;i++){
           try{
             var fd=new FormData(); fd.set('file_id',files[i]); fd.set('targets',sel.join(','));
@@ -7792,7 +8448,8 @@ function tplShareOpen(){
               // Les tags ont suivi le fichier. On les COMPTE pour le dire :
               // sans ca, on ne saurait pas si le montage est arrive tague, et
               // on irait le retaguer a la main chez chaque model.
-              tagF += (j.tags_flash||0); tagE += (j.tags_fav||0);
+              tagF += (j.tags_flash||0); tagT += (j.tags_trash||0); tagE += (j.tags_fav||0);
+              conf += (j.conflits||0);
               if(j.tags_error) errs.push('tags : '+j.tags_error);
             } else errs.push((j&&j.error)||'?');
           }catch(e){ errs.push(String(e)); }
@@ -7801,12 +8458,16 @@ function tplShareOpen(){
         if(typeof clearSelection==='function') clearSelection();
         try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
         var suite='';
+        if(tagT) suite += ' · '+tagT+' {marque_trash_emoji_js}';
         if(tagF) suite += ' · '+tagF+' ⚡';
         if(tagE) suite += ' · '+tagE+' ⭐';
+        // Une copie dont la cible porte deja l AUTRE marque n est pas marquee
+        // (une seule par montage) : on le compte au lieu de le taire.
+        if(conf) suite += ' · '+conf+' marque(s) non posée(s) (déjà l autre chez la cible)';
         if(typeof showToast==='function') showToast(
           okN?('✓ '+okN+' template'+(okN>1?'s copiés':' copié')+' vers '+sel.length+' model'+(sel.length>1?'s':'')
                +suite+(errs.length?(' · '+errs.length+' échec(s)'):'')):('✕ '+(errs[0]||'échec')),
-          errs.length?'warning':'success',7000);
+          (errs.length||conf)?'warning':'success',7000);
       })();
     }
   });
@@ -9743,23 +10404,26 @@ async function pfEtape1(){
 // L onglet dit deja quelle famille on remplit : dans Caption, le choix
 // « caption / template / flash » n avait qu une seule reponse possible et
 // coutait un ecran pour rien. On y saute donc directement a la liste des
-// captions ; seul Template garde un choix, parce qu il en a deux — le
-// template classique et le flash.
+// captions ; seul Template garde un choix, parce qu il en a trois — le
+// template classique, le trash et le flash, dans cet ordre (le trash se
+// range « entre les deux », a la demande du proprietaire).
 function pfEtape2(){
   if(pfState.famille === 'caption'){ pfEtape3('captions'); return; }
-  pfTitre('Add perfect — 2. Template ou flash ?',
+  pfTitre('Add perfect — 2. Template, trash ou flash ?',
           'Vidéo retenue : ' + pfState.bruteNom);
   var b = document.getElementById('pf-suivant');
   if(b) b.style.display = 'none';
   pfGrille(
     '<button type="button" class="pf-choix" data-pfgenre="templates">Template'
     + '<small>un montage qui apporte son son</small></button>'
+    + '<button type="button" class="pf-choix" data-pfgenre="trash">{marque_trash_emoji_js} {marque_trash_court_js}'
+    + '<small>un template marqué {marque_trash_nom_js}</small></button>'
     + '<button type="button" class="pf-choix" data-pfgenre="flash">Flash'
     + '<small>un template au rythme rapide</small></button>');
 }
 async function pfEtape3(genre){
   pfState.genre = genre;
-  var noms = {captions:'une caption', templates:'un template', flash:'un flash'};
+  var noms = {captions:'une caption', templates:'un template', trash:'un trash', flash:'un flash'};
   var rang = (pfState.famille === 'caption') ? '2. ' : '3. ';
   pfTitre('Add perfect — ' + rang + 'Choisis ' + (noms[genre] || genre),
           'Vidéo retenue : ' + pfState.bruteNom);
@@ -9767,8 +10431,21 @@ async function pfEtape3(genre){
   try{
     var j = await pfListe(genre);
     var it = (j && j.items) || [];
-    if(!it.length){ pfVide('Rien de disponible ici pour cette model.'); return; }
-    var h = '';
+    // Les templates mis de cote (⊘) ne sont plus proposes : les compter,
+    // sinon une liste vide ne dirait pas pourquoi.
+    if(j && j.desactives){
+      pfTitre('Add perfect — ' + rang + 'Choisis ' + (noms[genre] || genre),
+              'Vidéo retenue : ' + pfState.bruteNom + ' · ' + j.desactives
+              + ' template(s) mis de côté (⊘) non proposé(s)');
+    }
+    // Un registre de marque illisible : le serveur ne sait plus trier
+    // Template, Trash et Flash. Sans ce bandeau, un Flash etait propose sous
+    // « Template » et la liste Flash restait vide sans un mot.
+    var avert = (j && j.avertissement) ? String(j.avertissement) : '';
+    if(!it.length){ pfVide(avert ? ('⚠ ' + avert) : 'Rien de disponible ici pour cette model.'); return; }
+    var h = avert ? ('<div class="pf-avert" style="grid-column:1/-1;padding:8px 12px;border-radius:8px;'
+      + 'border:1px solid rgba(239,68,68,.35);background:rgba(239,68,68,.10);color:#fca5a5;'
+      + 'font-size:12.5px;line-height:1.5">⚠ ' + pfEsc(avert) + '</div>') : '';
     for(var i=0;i<it.length;i++){
       if(genre === 'captions'){
         h += '<button type="button" class="pf-card pf-txt" data-pfsource="cap:' + pfEsc(it[i].id)
@@ -10220,7 +10897,7 @@ function identEditType(v){
   if(h) h.textContent = (v === 'modele')
     ? "Mod\u00e8le : une cr\u00e9atrice r\u00e9elle. Elle appara\u00eet dans Jailbreak, dans le p\u00e9rim\u00e8tre de scrape et dans les menus des VA."
     : (v === 'reserve')
-    ? "R\u00e9serve : du contenu partag\u00e9 par plusieurs mod\u00e8les (PP, bios, stories, story CTA, posts, captions, templates, flash), jamais de vid\u00e9o brute. Elle reste dans la Biblioth\u00e8que, n'est pas une mod\u00e8le, et son march\u00e9 compte."
+    ? "R\u00e9serve : du contenu partag\u00e9 par plusieurs mod\u00e8les (PP, bios, stories, story CTA, posts, captions, templates, trash, flash), jamais de vid\u00e9o brute. Elle reste dans la Biblioth\u00e8que, n'est pas une mod\u00e8le, et son march\u00e9 compte."
     : "Identit\u00e9 : un dossier pour produire des vid\u00e9os. Elle reste dans la Biblioth\u00e8que, et dispara\u00eet de Jailbreak, du scrape et des menus VA.";
 }
 function identEditMarket(v){
@@ -11648,7 +12325,7 @@ document.addEventListener('click',function(e){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 6.1H3"/><path d="M21 12.1H3"/><path d="M15.1 18H3"/></svg>
       Caption
     </button>
-    <button class="item" id="tab-perfecttemplate" onclick="showTab('perfect','perfecttemplate','Template perfect','Des couples brute + son figés, Flash compris — déjà prêts à poster')">
+    <button class="item" id="tab-perfecttemplate" onclick="showTab('perfect','perfecttemplate','Template perfect','Des couples brute + son figés, Trash et Flash compris — déjà prêts à poster')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
       Template
     </button>
@@ -15221,6 +15898,9 @@ body.light #cap-add-modal .capadd-ocr.capadd-ocr-ko{color:#dc2626!important}
     <button class="lb-act-btn lb-fav" onclick="lbAction('fav')" title="Favori — Banger">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
     </button>
+    <button class="lb-act-btn lb-trash" onclick="lbAction('trash')" title="{marque_trash_nom}">
+      <span class="mm-emoji" aria-hidden="true">{marque_trash_emoji}</span>
+    </button>
     <button class="lb-act-btn lb-flash" onclick="lbAction('flash')" title="Flash Trend">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
     </button>
@@ -15274,7 +15954,10 @@ body.light #cap-add-modal .capadd-ocr.capadd-ocr-ko{color:#dc2626!important}
 #lightbox{display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);backdrop-filter:blur(8px);z-index:300;align-items:center;justify-content:center;padding:60px 80px;animation:lbFade .2s}
 #lightbox.show{display:flex}
 @keyframes lbFade{from{opacity:0}to{opacity:1}}
-.lb-header{position:absolute;top:18px;right:20px;display:flex;align-items:center;gap:14px;z-index:5}
+/* flex-wrap : sur un montage l en-tete porte case, ⭐, Trash, ⚡, ⊘, crayon,
+   fermer et compteur, soit plus de 400 px. Sans retour a la ligne, sur un
+   telephone (375 px), les premiers boutons sortaient de l ecran a gauche. */
+.lb-header{position:absolute;top:18px;right:20px;display:flex;align-items:center;gap:14px;z-index:5;flex-wrap:wrap;justify-content:flex-end;max-width:calc(100vw - 40px)}
 .lb-counter{background:rgba(0,0,0,.5);color:#fff;font-size:14px;font-weight:600;padding:7px 14px;border-radius:8px;letter-spacing:.01em;backdrop-filter:blur(6px)}
 .lb-close-btn{background:rgba(0,0,0,.5);border:0;color:#fff;width:40px;height:40px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;backdrop-filter:blur(6px);transition:all .15s}
 .lb-close-btn:hover{background:rgba(255,255,255,.15);transform:scale(1.08)}
@@ -22169,7 +22852,7 @@ def _vault_social_bandeau(ident: str, src: dict) -> str:
         + "</div>")
 
 
-def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "", deferred: bool = False, is_banger: bool = False, is_disabled: bool = False, is_va_ready: bool = False, can_montage: bool = None, a_approuver: bool = False, is_fav_brute: bool = False, is_flash_trend: bool = False, vues: int = None, a_verifier: str = "") -> str:
+def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, file_id: str = "", example_url: str = "", deferred: bool = False, is_banger: bool = False, is_disabled: bool = False, is_va_ready: bool = False, can_montage: bool = None, a_approuver: bool = False, is_fav_brute: bool = False, is_flash_trend: bool = False, vues: int = None, a_verifier: str = "", is_trash_trend: bool = False) -> str:
     """Carte preview style propre : juste un badge date en haut à gauche + thumbnail
     en grand. Plus de nom de fichier ni de taille en dessous (visible au hover via title).
 
@@ -22313,6 +22996,23 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
                 f"<svg viewBox='0 0 24 24' width='14' height='14' fill='{_ffill}' stroke='{_fstroke}' stroke-width='{_fsw}'><polygon points='12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2'/></svg>"
                 f"</button>"
             )
+        # Marque Trash Trend : le meme geste que l'eclair juste en dessous,
+        # rangee AVANT lui (ordre voulu : ⭐ · Trash · ⚡). Le logo est un
+        # emoji tire de marques_montage : un dessin SVG propre au site ne
+        # suivrait pas un changement de logo. Tout l'etat visuel vient du CSS
+        # (.trash-trend / .is-trash-trend, voir _marques_css) : la bascule JS
+        # n'a qu'une classe a poser, et la carte rendue par le serveur et
+        # celle repeinte par le client ne peuvent pas diverger.
+        trash_trend_btn = ""
+        if "|templates|" in (file_id or ""):
+            _mt = _mm.MARQUES["trash"]
+            trash_trend_btn = (
+                f"<button class='card-edit-btn trash-trend{(' is-trash-trend' if is_trash_trend else '')}' "
+                f"onclick='event.stopPropagation();toggleTrashTrend(this, \"{fid_safe}\")' "
+                f"title='{html_escape(_mt['nom'])} — ce montage sort de la vue de base ET des Bangers'>"
+                f"<span class='mm-emoji' aria-hidden='true'>{html_escape(_mt['emoji'])}</span>"
+                f"</button>"
+            )
         # Eclair Flash Trend : uniquement sur les montages. Le tag EXCLUT au
         # lieu d ajouter — voir FLASH_TREND_FILE — donc il n a de sens que la
         # ou un montage peut partir chez un VA.
@@ -22355,9 +23055,15 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
             f"</button>"
         )
         actions_html = (
-            f"<div class='card-actions' style='position:absolute;top:8px;right:8px;display:flex;gap:6px;align-items:center;z-index:5'>"
+            # flex-wrap + une largeur bornee : un montage porte ⭐ · Trash · ⚡ ·
+            # montage · ⊘ · selection, six pastilles (198 px) pour une carte
+            # de 165 px au plus serre. Sans retour a la ligne, la rangee
+            # debordait a gauche SUR le badge de date. Voir .card-actions dans
+            # le CSS pour le calcul de la largeur.
+            f"<div class='card-actions ca-wrap{(' ca-date' if date_badge else '')}' style='position:absolute;top:8px;right:8px;display:flex;gap:6px;align-items:center;z-index:5'>"
             f"{banger_btn}"
             f"{fav_brute_btn}"
+            f"{trash_trend_btn}"
             f"{flash_btn}"
             f"{montage_btn}"
             f"{edit_btn}"
@@ -22371,11 +23077,18 @@ def _preview_card(media_url: str, thumb_url: str, file_path, is_video: bool, fil
             f"</div>"
         )
 
+    # Une carte MARQUEE (Flash ou Trash) est cachee de la vue de base des le
+    # rendu serveur ; vaultVuesAppliquer rend exactement le meme verdict cote
+    # client, sinon la carte bougerait au premier clic de filtre. L'appelant
+    # a deja tranche une donnee ancienne doublement marquee (Flash l'emporte) :
+    # is_trash_trend n'arrive vrai que seul.
+    _marquee = bool(is_flash_trend or is_trash_trend)
     return (
         f"<div class='cloud-card{(' is-reel-off' if is_disabled else '')}"
-        f"{(' is-flash-card' if is_flash_trend else '')}' "
+        f"{(' is-flash-card' if is_flash_trend else '')}"
+        f"{(' is-trash-card' if is_trash_trend and not is_flash_trend else '')}' "
         f"style='background:transparent;border:0;border-radius:10px;"
-        f"position:relative{';display:none' if is_flash_trend else ''}'>"
+        f"position:relative{';display:none' if _marquee else ''}'>"
         f"{actions_html}"
         f"{media_html}"
         f"</div>"
@@ -23900,11 +24613,12 @@ PERFECT_SUFFIXE = ".perfect.json"
 
 #: Les deux familles du menu Perfect. Les FLASH sont rangees avec les templates :
 #: un flash EST un template, avec un rythme different — leur donner un onglet a
-#: part aurait fait chercher au mauvais endroit.
+#: part aurait fait chercher au mauvais endroit. Les TRASH aussi, pour la meme
+#: raison ; seul l'assistant « Add perfect » les distingue (etape 2).
 _PERFECT_FAMILLES = {
     "caption": ("Caption perfect", "brute + texte figés",
                 "Un couple précis : cette brute, ce texte. Pas de tirage au sort."),
-    "template": ("Template perfect", "brute + son figés, Flash compris",
+    "template": ("Template perfect", "brute + son figés, Trash et Flash compris",
                  "Un couple précis : cette brute, ce template. Le son vient du template."),
 }
 
@@ -24265,6 +24979,25 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         "font-weight:700;font-family:inherit;white-space:nowrap'>⭐ Bangers</button>"
     ) if subdir in ("brutes", "templates") else ""
 
+    # Les registres de marques, lus UNE fois pour la galerie, en STRICT : un
+    # registre illisible se lirait comme vide et TOUS ses montages
+    # reapparaitraient dans la vue de base, sans un mot. On le dit en tete.
+    _marques_g, _marques_err = ({c: set() for c in _mm.ORDRE}, [])
+    if subdir == "templates":
+        _marques_g, _marques_err = _marques_etat()
+    _tm = _mm.MARQUES["trash"]
+    # Bouton « Trash Trend » : le jumeau du filtre ⚡, range AVANT lui
+    # (⭐ Bangers · Trash · ⚡ Flash Trend). Nom, logo et couleur viennent de
+    # marques_montage.py. En theme clair, la couleur foncee est posee par
+    # une regle d'id (_marques_css), plus specifique que les remaps generaux.
+    trash_trend_toggle_html = (
+        "<button type='button' id='trash-toggle-btn' data-on='0' onclick='toggleTrashTrendFilter(this)' "
+        f"title='Afficher seulement les montages {html_escape(_tm['emoji'])} {html_escape(_tm['nom'])} (ils sont cachés ailleurs)' "
+        "style='display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#1a1a1a;"
+        f"border:1px solid #3a3a3a;border-radius:8px;color:{_couleur_sure(_tm['couleur'])};cursor:pointer;font-size:13px;"
+        f"font-weight:700;font-family:inherit;white-space:nowrap'>{html_escape(_tm['emoji'])} {html_escape(_tm['nom'])}</button>"
+    ) if subdir == "templates" else ""
+
     # Bouton « ⚡ Flash Trend » : uniquement sur les montages. Le tag EXCLUT,
     # donc son filtre est le SEUL endroit ou ces montages apparaissent — la vue
     # de base et le filtre ⭐ Bangers les masquent tous les deux.
@@ -24283,7 +25016,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
     sync_tags_html = (
         "<button type='button' id='synctags-btn' "
         "onclick=\"syncTagsTemplates('" + (selected or "") + "')\" "
-        "title='Recopier les tags ⚡ et ⭐ de ces montages sur "
+        f"title='Recopier les tags {html_escape(_tm['emoji'])}, ⚡ et ⭐ de ces montages sur "
         "toutes les identites du meme marche (ajoute seulement, ne retire rien)' "
         "style='display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#1a1a1a;"
         "border:1px solid #3a3a3a;border-radius:8px;color:#c4c4cc;cursor:pointer;font-size:13px;"
@@ -24356,7 +25089,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         "trends_caption": ("trend", "Perfect — Caption",
                            "Brute + texte, déjà assemblés et prêts à poster", "Add perfect"),
         "trends_template": ("trend", "Perfect — Template",
-                            "Brute + son, Flash compris — prêts à poster", "Add perfect"),
+                            "Brute + son, Trash et Flash compris — prêts à poster", "Add perfect"),
         # Vault PRO : MÊMES panneaux d'upload, le champ caché « vault » (posé par
         # upPrefillIdentity) fait atterrir le fichier dans pro_* côté serveur.
         "pro_videos": ("reel", "Upload Reel — Vault PRO", "Vidéo clean + caption + description", "Add media"),
@@ -24509,8 +25242,11 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap'>"
         + type_filter_html.replace("<div class='media-type-pills'>", "<div class='media-type-pills' style='margin:0'>")
         + f"</div>"
-        f"<div style='display:flex;align-items:center;gap:8px'>{banger_toggle_html}{fav_brute_toggle_html}{flash_toggle_html}{sync_tags_html}{scan_texte_html}{sort_btn_html}</div>"
+        # flex-wrap : sur un telephone, un bouton de plus poussait la rangee
+        # hors de l'ecran. Ordre voulu : ⭐ Bangers · Trash · ⚡ Flash Trend.
+        f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap'>{banger_toggle_html}{fav_brute_toggle_html}{trash_trend_toggle_html}{flash_toggle_html}{sync_tags_html}{scan_texte_html}{sort_btn_html}</div>"
         f"</div>"
+        + _marques_avis_html(_marques_g, _marques_err, selected, files)
     )
 
     if not files:
@@ -24547,7 +25283,11 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
             except Exception:
                 _brutes_off = set()
         _fav_brutes = _load_fav_brutes()  # idem : rushs bruts marqués ⭐ favoris
-        _flash_trend = _load_flash_trend()  # montages ⚡ Flash Trend (exclus ailleurs)
+        # Montages marques (exclus de la vue de base), lus plus haut en strict.
+        # Une donnee ancienne qui porte les deux marques se montre sous UNE
+        # seule : la priorite de marques_montage, la meme que le filtre client.
+        def _marque_de(fid):
+            return _marque_effective(_marques_g, fid)
         # Reels marqués « Dispo pour les VA » (va_ready dans leur .montage.json) -> filigrane.
         # 1 scan pour toute la galerie (uniquement pour les vidéos, seules à avoir un montage).
         # Templates dont la description vient du post et attend une
@@ -24607,7 +25347,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
                 second_url = ""
             # Apres INITIAL_BATCH : on render avec data-src vide, l image se charge a l intersection
             deferred = idx >= INITIAL_BATCH
-            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, a_approuver=(p.stem in _a_approuver_stems), deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels or p.stem in _brutes_off), is_fav_brute=(file_id in _fav_brutes), is_flash_trend=(file_id in _flash_trend), vues=_vues.get(p.stem), a_verifier=_a_verifier.get(p.stem, ""), is_va_ready=((is_reels or subdir == "templates") and p.stem in _va_ready_stems), can_montage=can_montage))
+            cards_html.append(_preview_card(url, thumb_url, p, is_video, file_id, second_url, a_approuver=(p.stem in _a_approuver_stems), deferred=deferred, is_banger=(file_id in _banger_marks), is_disabled=(file_id in _disabled_reels or p.stem in _brutes_off), is_fav_brute=(file_id in _fav_brutes), is_flash_trend=(_marque_de(file_id) == "flash"), is_trash_trend=(_marque_de(file_id) == "trash"), vues=_vues.get(p.stem), a_verifier=_a_verifier.get(p.stem, ""), is_va_ready=((is_reels or subdir == "templates") and p.stem in _va_ready_stems), can_montage=can_montage))
         gallery = (
             gallery_header
             # auto-fill 165px : le nombre de colonnes s'adapte a la largeur
@@ -35806,8 +36546,11 @@ def _render_jailbreak_html() -> str:
         "  var fileInp = document.getElementById('jb-edit-id-avatar');"
         "  var hasFile = fileInp.files && fileInp.files.length > 0;"
         "  if(!n){ if(typeof showToast === 'function') showToast('Nom requis', 'error'); return false; }"
-        "  if(!/^[a-zA-Z0-9_\\-]+$/.test(n)){"
-        "    if(typeof showToast === 'function') showToast('Nom invalide', 'error');"
+        # Un NOUVEAU nom : lettres et chiffres seulement, comme le serveur
+        # (identite_admin.normaliser). L'ancien nom, lui, peut porter un _ ou
+        # un - : le garder tel quel pour ne changer que la photo reste permis.
+        "  if(n.toLowerCase() !== old.toLowerCase() && !/^[a-zA-Z0-9]+$/.test(n)){"
+        "    if(typeof showToast === 'function') showToast('Nom invalide : lettres et chiffres seulement', 'error');"
         "    return false;"
         "  }"
         "  if(n === old && !hasFile){"
@@ -51151,7 +51894,9 @@ def _render_upload_inner(msg=None, error=None):
             "infloww": "infloww"}[_th]
 
     html = (
-        UPLOAD_HTML
+        # EN PREMIER : seuls les jetons ecrits dans UPLOAD_HTML sont vises, pas
+        # le contenu des galeries inserees plus bas.
+        _upload_html_marque()
         .replace("{theme_pre_class}", _pre)
         .replace("{theme_body_class}", _bod)
         # Socle des galeries : une seule fois pour toute la page.
@@ -52476,9 +53221,19 @@ def _start_auto_scrape_daemon():
 #: L'etat de la synchro de marche. Une seule a la fois, et elle tourne en
 #: fond : vingt-et-un montages vers quinze models, c'est plusieurs centaines
 #: de copies de fichiers video. Une requete HTTP n'attend pas ca.
+def _sync_marche_compteurs_zero() -> dict:
+    """Les compteurs de marques (tags_flash, tags_trash, tags_fav, conflits),
+    remis a zero par LES DEUX mises a jour de _SYNC_MARCHE : la route et le
+    fil de fond. Sans eux, un conflit Flash/Trash saute par le fil de fond
+    disparaissait sans aucune trace."""
+    d = {"tags_" + c: 0 for c in _mm.ORDRE}
+    d.update(tags_fav=0, conflits=0)
+    return d
+
+
 _SYNC_MARCHE = {"en_cours": False, "fait": 0, "total": 0, "source": "",
                 "cibles": 0, "copies": 0, "erreurs": [], "fini_le": 0,
-                "message": ""}
+                "message": "", **_sync_marche_compteurs_zero()}
 _SYNC_MARCHE_VERROU = _th_mod.Lock()
 
 
@@ -52542,9 +53297,25 @@ def _sync_marche_travail(source: str):
     ) if dossier.is_dir() else []
 
     _SYNC_MARCHE.update(en_cours=True, fait=0, total=len(fichiers), source=src,
-                        cibles=len(cibles), copies=0, erreurs=[], message="")
-    tags_flash, tags_fav = set(), set()
-    flash = _load_flash_trend()
+                        cibles=len(cibles), copies=0, erreurs=[], message="",
+                        **_sync_marche_compteurs_zero())
+    tags = {c: set() for c in _mm.ORDRE}
+    tags["fav"] = set()
+    # Ce que porte la source se lit en STRICT. La lecture d'affichage
+    # (_load_marque) rend un ensemble VIDE pour un registre illisible : les
+    # montages Flash partaient alors chez quinze models comme des templates
+    # ordinaires, le toast restait vert, et une fois le registre repare rien
+    # ne disait quelles copies etaient restees sans marque. On ne copie rien :
+    # relancer la synchro apres reparation repose tout (une copie deja
+    # presente n'est pas refaite, ses marques si).
+    marques, errs_m = _marques_etat()
+    if errs_m:
+        _SYNC_MARCHE["erreurs"].append(
+            "marques non recopiees : %s -- synchro arretee avant toute copie, "
+            "a relancer une fois le registre repare" % " ; ".join(errs_m))
+        _SYNC_MARCHE["message"] = "registre de marque illisible"
+        _SYNC_MARCHE.update(en_cours=False, fini_le=int(_t_sm.time()))
+        return
     favs = _load_fav_brutes()
     try:
         for f in fichiers:
@@ -52557,10 +53328,15 @@ def _sync_marche_travail(source: str):
                     draft = _d
             except Exception:
                 pass
+            # Une seule marque suit, la gagnante : une source doublement
+            # marquee (donnee ancienne) ne doit pas fabriquer le conflit chez
+            # quinze models.
+            porte = {_marque_effective(marques, cle)} - {""}
+            if cle in favs:
+                porte.add("fav")
             try:
                 faits, errs = _copier_template_vers(
-                    dossier, f, cibles, draft, tags_flash, tags_fav,
-                    cle in flash, cle in favs)
+                    dossier, f, cibles, draft, tags, porte)
                 _SYNC_MARCHE["copies"] += len(faits)
                 for e in errs[:3]:
                     if len(_SYNC_MARCHE["erreurs"]) < 20:
@@ -52572,12 +53348,21 @@ def _sync_marche_travail(source: str):
         # Les registres, une seule fois : les ecrire par montage reecrirait
         # le fichier entier vingt-et-une fois.
         try:
-            if tags_flash:
-                safe_json.write_text(FLASH_TREND_FILE, json.dumps(
-                    sorted(_load_flash_trend() | tags_flash), ensure_ascii=False))
-            if tags_fav:
-                safe_json.write_text(FAV_BRUTES_FILE, json.dumps(
-                    sorted(_load_fav_brutes() | tags_fav), ensure_ascii=False))
+            posees, conflits, errs_t = _ajouter_marques(tags)
+            for c in _mm.ORDRE:
+                _SYNC_MARCHE["tags_" + c] = len(posees[c])
+            _SYNC_MARCHE["conflits"] = len(conflits)
+            for e in errs_t:
+                _SYNC_MARCHE["erreurs"].append("tags : %s" % str(e)[:160])
+            if tags["fav"]:
+                if safe_json.write_text(FAV_BRUTES_FILE, json.dumps(
+                        sorted(_load_fav_brutes() | tags["fav"]),
+                        ensure_ascii=False)):
+                    _SYNC_MARCHE["tags_fav"] = len(tags["fav"])
+                else:
+                    _SYNC_MARCHE["erreurs"].append(
+                        "tags : %d etoile(s) NON enregistree(s) (%s)"
+                        % (len(tags["fav"]), FAV_BRUTES_FILE.name))
         except Exception as e:
             _SYNC_MARCHE["erreurs"].append("tags : %s" % str(e)[:120])
         _invalidate_all_ttl_cache()
@@ -52586,8 +53371,7 @@ def _sync_marche_travail(source: str):
 
 
 
-def _copier_template_vers(src_dir, src, targets, draft,
-                          tags_flash, tags_fav, flash_src, fav_src):
+def _copier_template_vers(src_dir, src, targets, draft, tags, porte):
     """Copie UN montage chez plusieurs models. Rend (faits, erreurs).
 
     Sortie de la vue /noctus/montage_apply SANS un changement de
@@ -52595,10 +53379,17 @@ def _copier_template_vers(src_dir, src, targets, draft,
     exactement ce que fait le bouton « Partager ». Deux implementations de
     la meme copie, c'est deux comportements le jour ou l'une bouge.
 
-    Les deux ensembles de tags sont passes en PARAMETRE plutot que rendus :
-    une synchro enchaine des centaines de copies et n'ecrit les registres
-    qu'une fois, a la fin. Les ecrire ici reecrirait chaque fichier en
-    entier a chaque montage.
+    `tags` : {"flash": set(), "trash": set(), "fav": set()}, REMPLI ici ;
+    `porte` : les cles de `tags` que la source porte. Des dicts plutot que
+    deux arguments par marque : Trash en aurait ajoute deux de plus a une
+    signature positionnelle appelee a deux endroits.
+
+    Les tags sont passes en PARAMETRE plutot que rendus : une synchro
+    enchaine des centaines de copies et n'ecrit les registres qu'une fois, a
+    la fin. Les ecrire ici reecrirait chaque fichier en entier a chaque
+    montage. C'est aussi a la fin, dans _ajouter_marques, que l'exclusivite
+    se verifie : une copie dont la cible porte deja l'autre marque y est
+    sautee et comptee.
     """
     import shutil as _sh
     done, errs = [], []
@@ -52633,10 +53424,8 @@ def _copier_template_vers(src_dir, src, targets, draft,
             # dst.name, PAS src.name : en cas de collision de nom la copie
             # est suffixee (_2), et taguer le nom de depart poserait le tag
             # sur un fichier qui n existe pas chez la cible.
-            if flash_src:
-                tags_flash.add(f"{t}|templates|{dst.name}")
-            if fav_src:
-                tags_fav.add(f"{t}|templates|{dst.name}")
+            for k in porte:
+                tags.setdefault(k, set()).add(f"{t}|templates|{dst.name}")
             done.append(t)
         except Exception as e:
             errs.append(f"{t} : {e}")
@@ -54187,21 +54976,41 @@ def create_app():
         la ferait disparaitre de l'ecran sans qu'aucun filtre ne la rende --
         une brute evaporee, impossible a deboguer depuis l'interface.
         """
+        return _basculer_marque_route("flash")
+
+    @app.route("/reel/toggle_trash_trend", methods=["POST"])
+    def reel_toggle_trash_trend():
+        """Marque Trash Trend d'un montage. Persiste dans data/trash_trend.json.
+
+        Le jumeau de /reel/toggle_flash_trend, memes gardes : montages
+        seulement, et sous /reel/ pour etre refusee aux roles restreints sans
+        rien declarer. Les deux rendent l'etat des DEUX marques : poser l'une
+        retire l'autre, et l'ecran doit eteindre l'autre bouton de la carte.
+        """
+        return _basculer_marque_route("trash")
+
+    def _basculer_marque_route(cle):
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
         file_id = (request.form.get("file_id") or "").strip()
         if not file_id:
             return jsonify({"ok": False, "error": "file_id manquant"})
+        nom = _mm.MARQUES[cle]["nom"]
         if "|templates|" not in file_id:
             return jsonify({"ok": False,
-                            "error": "le tag Flash Trend ne vaut que pour les "
-                                     "montages"})
-        now_on, err = _toggle_flash_trend(file_id)
+                            "error": "le tag %s ne vaut que pour les montages"
+                                     % nom})
+        etats, err = _toggle_marque(cle, file_id)
+        rep = dict(etats)
         if err:
-            return jsonify({"ok": False,
-                            "error": "tag NON enregistre : " + err})
-        return jsonify({"ok": True, "flash": now_on})
+            # L'etat des registres part AUSSI avec l'erreur : si la marque a
+            # ete posee mais que l'autre n'a pas pu etre retiree, l'ecran doit
+            # montrer ce qui est reellement enregistre.
+            rep.update(ok=False, error=err)
+            return jsonify(rep)
+        rep["ok"] = True
+        return jsonify(rep)
 
     @app.route("/cloud/scan_texte", methods=["POST"])
     def cloud_scan_texte():
@@ -54309,6 +55118,7 @@ def create_app():
             return _error("✕ Aucun fichier sélectionné")
         deleted = []
         failed = []
+        marques_ko = []         # marques Flash/Trash qu'on n'a pas pu retirer
         sans_copie = 0          # fichiers effaces dont le Drive n'a pas de copie
         identities_list = _list_identities()
         valid_subdirs = CLOUD_SUBDIRS
@@ -54385,9 +55195,17 @@ def create_app():
                 # favori sans que personne ne l'ait voulu.
                 try:
                     _pop_fav_brute(fid)
-                    _pop_flash_trend(fid)
                 except Exception:
                     pass
+                # Les marques exclusives (Flash, Trash), pour la meme raison.
+                # Leur propre essai : une exception de l'etoile sautait le
+                # retrait Flash. Elles ne se posent que sur les montages.
+                if subdir == "templates":
+                    try:
+                        _r_mq, _e_mq = _pop_marques(fid)
+                        marques_ko.extend(_e_mq)
+                    except Exception as _e_pm:
+                        marques_ko.append(str(_e_pm)[:120])
                 # La vignette aussi : sans ca, un fichier re-televerse sous le
                 # meme nom heritait de l apercu de l ancien.
                 try:
@@ -54410,6 +55228,19 @@ def create_app():
                 "pas de copie sur le Drive : perdu(s) définitivement")
         if failed:
             msg_parts.append(f"✕ <b>{len(failed)}</b> échec(s) : " + ", ".join(f"{fid} ({err})" for fid, err in failed[:3]))
+        if marques_ko:
+            # Une marque restee derriere un fichier supprime renaitrait sur un
+            # homonyme televerse plus tard : le dire, pas l'avaler. Dans la
+            # langue de la page : la phrase porte des noms de fichiers, la
+            # traduction par noeud texte entier ne la reconnaissait pas.
+            _en_ko = _langue_courante() == "en"
+            _noms_ko = html_escape("/".join(_mm.MARQUES[c]["court"] for c in _mm.ORDRE))
+            _det_ko = " ; ".join(sorted(set(marques_ko))[:2])
+            msg_parts.append(
+                ("⚠ " + _noms_ko + " mark(s) not removed: "
+                 + html_escape(_marques_en(_det_ko))) if _en_ko else
+                ("⚠ marque(s) " + _noms_ko + " non retirée(s) : "
+                 + html_escape(_det_ko)))
         if bool(failed) and not deleted:
             return _error(" • ".join(msg_parts))
         return _success(" • ".join(msg_parts))
@@ -54841,8 +55672,18 @@ def create_app():
             if not cibles:
                 return jsonify({"ok": False,
                                 "error": "Aucune autre model sur ce marché"})
+            # Refusee TOUT DE SUITE si un registre de marque est illisible :
+            # les copies partiraient sans leur marque (voir
+            # _sync_marche_travail, qui le reverifie). Le dire au clic vaut
+            # mieux qu'un toast deux minutes plus tard.
+            _errs_mq = _marques_etat()[1]
+            if _errs_mq:
+                return jsonify({"ok": False,
+                                "error": "Synchro refusée, les marques ne "
+                                         "suivraient pas : " + " ; ".join(_errs_mq)})
             _SYNC_MARCHE.update(en_cours=True, fait=0, total=0, source=src,
-                                cibles=len(cibles), copies=0, erreurs=[])
+                                cibles=len(cibles), copies=0, erreurs=[],
+                                **_sync_marche_compteurs_zero())
         _th_mod.Thread(target=_sync_marche_travail, args=(src,),
                        name="sync-marche", daemon=True).start()
         return jsonify({"ok": True, "source": src, "cibles": len(cibles),
@@ -54910,39 +55751,66 @@ def create_app():
         #
         # On releve l etat de la source ICI, une seule fois : le relire dans
         # la boucle rechargerait le fichier a chaque model.
+        #
+        # Une seule marque suit : la gagnante (marques_montage.PRIORITE). Une
+        # source doublement marquee (donnee ancienne) aurait sinon fabrique
+        # le meme conflit chez chaque model cochee.
+        #
+        # Lecture STRICTE : celle d'affichage (_load_marque) rend un ensemble
+        # vide pour un registre illisible, et un montage Flash partait comme
+        # un template ordinaire sans un mot (tags_error vide). Le partage des
+        # fichiers n'est pas bloque -- il est demande explicitement, model par
+        # model -- mais l'erreur sort dans tags_error : repartager une fois le
+        # registre repare pose la marque.
         _cle_src = f"{src_ident}|templates|{src.name}"
-        _flash_src = _cle_src in _load_flash_trend()
-        _fav_src = _cle_src in _load_fav_brutes()
-        _tags_flash, _tags_fav = set(), set()
+        _marques_src, _errs_src = _marques_etat()
+        _porte = {_marque_effective(_marques_src, _cle_src)} - {""}
+        if _cle_src in _load_fav_brutes():
+            _porte.add("fav")
+        _tags = {c: set() for c in _mm.ORDRE}
+        _tags["fav"] = set()
 
         done, errs = _copier_template_vers(
-            src_dir, src, targets, draft, _tags_flash, _tags_fav,
-            _flash_src, _fav_src)
+            src_dir, src, targets, draft, _tags, _porte)
         # Une seule ecriture par registre, apres la boucle : sauver a chaque
         # model reecrirait le fichier entier quarante fois pour rien.
         #
         # Un echec ici n annule PAS le partage : les fichiers sont copies, ils
         # sont utilisables, et seuls les tags manquent. On le DIT dans la
-        # reponse plutot que de faire croire que rien n a marche.
-        _tags_err = ""
+        # reponse plutot que de faire croire que rien n a marche. Chaque
+        # ecriture teste son booleen : safe_json.write_text ne leve jamais,
+        # et le try/except d avant ne capturait donc rien.
+        _errs_tags = []
+        _posees, _conflits = {c: set() for c in _mm.ORDRE}, []
+        _n_fav = 0
         try:
-            if _tags_flash:
-                _f = _load_flash_trend() | _tags_flash
-                FLASH_TREND_FILE.parent.mkdir(parents=True, exist_ok=True)
-                safe_json.write_text(FLASH_TREND_FILE,
-                                     json.dumps(sorted(_f), ensure_ascii=False))
-            if _tags_fav:
-                _v = _load_fav_brutes() | _tags_fav
+            _posees, _conflits, _errs_tags = _ajouter_marques(_tags)
+            if _errs_src:
+                _errs_tags = ["marque de la source inconnue, copies non "
+                              "marquees : " + " ; ".join(_errs_src)
+                              ] + list(_errs_tags)
+            if _tags["fav"]:
+                _v = _load_fav_brutes() | _tags["fav"]
                 FAV_BRUTES_FILE.parent.mkdir(parents=True, exist_ok=True)
-                safe_json.write_text(FAV_BRUTES_FILE,
-                                     json.dumps(sorted(_v), ensure_ascii=False))
+                if safe_json.write_text(FAV_BRUTES_FILE,
+                                        json.dumps(sorted(_v), ensure_ascii=False)):
+                    _n_fav = len(_tags["fav"])
+                else:
+                    _errs_tags.append("%d etoile(s) NON enregistree(s) (%s)"
+                                      % (len(_tags["fav"]), FAV_BRUTES_FILE.name))
         except Exception as e:
-            _tags_err = str(e)[:150]
+            _errs_tags.append(str(e)[:150])
 
-        return jsonify({"ok": bool(done), "done": done, "errors": errs,
-                        "tags_flash": len(_tags_flash),
-                        "tags_fav": len(_tags_fav),
-                        "tags_error": _tags_err})
+        rep = {"ok": bool(done), "done": done, "errors": errs,
+               "tags_fav": _n_fav,
+               # Une copie dont la cible porte deja l AUTRE marque n est pas
+               # marquee (ce serait retirer la sienne) : comptee, affichee.
+               "conflits": len(_conflits),
+               "conflits_exemples": [x["cle"] for x in _conflits[:5]],
+               "tags_error": " ; ".join(_errs_tags)}
+        for c in _mm.ORDRE:
+            rep["tags_" + c] = len(_posees[c])
+        return jsonify(rep)
 
     @app.route("/noctus/montage_load")
     def noctus_montage_load():
@@ -55288,7 +56156,14 @@ def create_app():
         Les FLASH ne sont pas un dossier a part : ce sont des templates portant
         la marque flash. On lit donc le meme dossier et on partage sur le
         registre — un template promu flash apparait au bon endroit sans qu on
-        ait rien a deplacer.
+        ait rien a deplacer. Les TRASH aussi (type=trash) ; « templates »
+        exclut les deux marques, et un montage n'apparait que sous UNE
+        famille : la priorite de marques_montage tranche une donnee ancienne
+        qui porterait les deux.
+
+        Un template MIS DE COTE (⊘, disabled_reels.json) n'est plus propose :
+        le griser, c'est le sortir de la rotation, et le proposer ici defaisait
+        le geste. Ils sont comptes (`desactives`) et l'ecran le dit.
         """
         from flask import jsonify
         if not is_auth():
@@ -55319,15 +56194,25 @@ def create_app():
                 })
             return jsonify({"ok": True, "type": genre, "items": out})
 
-        sous_dossier = {"brutes": "brutes", "templates": "templates",
-                        "flash": "templates"}.get(genre)
+        sous_dossier = {"brutes": "brutes", "templates": "templates"}.get(genre)
+        if genre in _mm.MARQUES:
+            sous_dossier = "templates"
         if not sous_dossier:
             return jsonify({"ok": False, "error": "type inconnu : " + genre[:20]})
         dossier = IDENTITIES_DIR / identity / sous_dossier
         if not dossier.is_dir():
             return jsonify({"ok": True, "type": genre, "items": []})
 
-        marques = _load_flash_trend() if genre in ("templates", "flash") else set()
+        est_montage = sous_dossier == "templates"
+        # Lecture STRICTE : celle d'affichage rend un ensemble vide pour un
+        # registre casse, et l'assistant proposait alors un Flash sous
+        # « Template » puis « Rien de disponible » sous Flash, sans dire
+        # pourquoi -- la galerie, elle, signalait deja le registre illisible.
+        # La liste reste servie (le choix est fait a la main), l'avertissement
+        # part avec elle.
+        marques, err_mq = (_marques_etat() if est_montage else ({}, []))
+        eteints = _load_disabled_reels() if est_montage else set()
+        desactives = 0
         # Une brute DESACTIVEE porte deja du texte incruste : la proposer ici
         # reviendrait a en poser un second par-dessus. Le reste du site l ecarte
         # partout, cet ecran doit faire pareil.
@@ -55342,11 +56227,14 @@ def create_app():
             if _off_pf is not None and _off_pf.est_desactivee(p):
                 continue
             fid = f"{identity}|{sous_dossier}|{p.name}"
-            est_flash = fid in marques
-            if genre == "flash" and not est_flash:
-                continue
-            if genre == "templates" and est_flash:
-                continue
+            if est_montage:
+                # La famille de CE montage : "" (template), "flash" ou "trash".
+                famille = _marque_effective(marques, fid)
+                if famille != ("" if genre == "templates" else genre):
+                    continue
+                if fid in eteints:
+                    desactives += 1
+                    continue
             out.append({
                 "id": fid,
                 "nom": p.name,
@@ -55359,7 +56247,18 @@ def create_app():
                 # souris s arrete dessus, jamais les cinquante d un coup.
                 "fichier": f"/cloud/file/{identity}/{sous_dossier}/{_url_nom(p.name)}",
             })
-        return jsonify({"ok": True, "type": genre, "items": out})
+        rep = {"ok": True, "type": genre, "items": out}
+        if est_montage:
+            rep["desactives"] = desactives
+            if err_mq:
+                rep["erreurs"] = err_mq
+                rep["avertissement"] = (
+                    ("unreadable marks, Flash and Trash edits cannot be told "
+                     "apart: " + _marques_en(" ; ".join(err_mq)))
+                    if _langue_courante() == "en" else
+                    ("marques illisibles, les montages Flash et Trash ne "
+                     "peuvent pas être distingués : " + " ; ".join(err_mq)))
+        return jsonify(rep)
 
     @app.route("/noctus/montage_perfect", methods=["POST"])
     def noctus_montage_perfect():
@@ -57554,6 +58453,8 @@ def create_app():
         motif = _re.compile(r"^(.+)_(\d+)(\.[A-Za-z0-9]+)$")
         par_ident, total, octets = {}, 0, 0
         deplaces, echecs = 0, 0
+        marques_retirees, marques_erreurs = 0, []
+        marques_transferees, marques_perdues = [], []
         if IDENTITIES_DIR.exists():
             for ident_dir in sorted(IDENTITIES_DIR.iterdir()):
                 if not ident_dir.is_dir():
@@ -57595,6 +58496,24 @@ def create_app():
                                 deplaces += 1
                             except Exception:
                                 echecs += 1
+                                continue
+                            # Le doublon parti, sa marque Flash/Trash doit
+                            # partir aussi : la cle « identite|templates|x_2 »
+                            # restait orpheline, et un homonyme televerse
+                            # plus tard naissait marque, hors de la vue de base.
+                            # Mais elle passe D'ABORD sur l'original : c'est
+                            # souvent x_2 que le proprietaire avait marque, et
+                            # l'effacer seul perdait la marque du montage.
+                            if sous.name == "templates":
+                                _tr = _transferer_marques(
+                                    f"{ident_dir.name}|{sous.name}|{nom}",
+                                    f"{ident_dir.name}|{sous.name}|{base}")
+                                marques_retirees += len(_tr["retirees"])
+                                marques_erreurs.extend(_tr["erreurs"])
+                                if _tr["transferee"]:
+                                    marques_transferees.append(_tr["transferee"])
+                                if _tr["perdue"]:
+                                    marques_perdues.append(_tr["perdue"])
         if supprimer:
             _invalidate_all_ttl_cache()
         detail = sorted(par_ident.items(), key=lambda kv: -kv[1])[:40]
@@ -57602,6 +58521,14 @@ def create_app():
                         "mo": round(octets / (1024 * 1024), 1),
                         "detail": [{"ou": k, "n": v} for k, v in detail],
                         "deplaces": deplaces, "echecs": echecs,
+                        # Les CLES, pas seulement un nombre : une marque qui
+                        # n'a pas pu passer sur l'original (il portait
+                        # l'autre) doit pouvoir etre retrouvee et reposee a
+                        # la main -- un compteur seul ne dit pas laquelle.
+                        "marques_retirees": marques_retirees,
+                        "marques_transferees": marques_transferees,
+                        "marques_perdues": marques_perdues,
+                        "marques_erreurs": sorted(set(marques_erreurs))[:5],
                         "corbeille": str(corbeille) if supprimer else None})
 
     @app.route("/gdrive/debug_state", methods=["POST"])
@@ -58766,10 +59693,14 @@ def create_app():
         for cle, libelle, _cmd, _qte in _JB_ACTIONS_US:
             famille = ("identite" if cle in _RIG_IDENTITE
                        else "outil" if cle in _RIG_OUTIL else "publication")
-            # Ce que le parc peut REELLEMENT obtenir. Neuf boutons exigent un
+            # Ce que le parc peut REELLEMENT obtenir. Les boutons de
+            # noctus_reserve.FAMILLE_PAR_ACTION (onze le 25/09/2026) exigent un
             # montage : sans reserve, le parc n'a aucune porte pour eux, et il
             # vaut mieux qu'il le sache en lisant la liste qu'en echouant a
-            # l'envoi. « reserve » vaut null pour tous les autres.
+            # l'envoi. « reserve » vaut null pour tous les autres -- dont les
+            # quatre boutons Trash, qui fabriquent a la demande et n'ont pas
+            # de stock : ils sortent donc en source « aucune ». (Le nombre
+            # n'est pas ecrit en dur ici : l'ancien « neuf » etait deja faux.)
             res = _res.famille_de(cle) if _res else None
             dos = _RIG_DOSSIER.get(cle)
             out.append({"cle": cle, "nom": libelle, "famille": famille,
@@ -58782,7 +59713,10 @@ def create_app():
 
     # -- LA RESERVE, OUVERTE AU PARC ------------------------------------
     #
-    # Neuf boutons du menu livrent une video MONTEE. Le montage tourne en
+    # Les boutons du menu qui livrent une video MONTEE avec du stock (ceux de
+    # noctus_reserve.FAMILLE_PAR_ACTION -- onze le 25/09/2026, pas « neuf »
+    # comme l'ecrivait ce commentaire ; les Trash n'en font pas partie, ils
+    # fabriquent a la demande). Le montage tourne en
     # Node+ffmpeg lance depuis Flask, et rien ne le declenchait par HTTP : la
     # seule porte etait le bouton Discord, que le parc ne peut pas cliquer.
     # Son reglage « 2 Caption etoilees par jour » restait donc une intention.
@@ -59623,6 +60557,15 @@ def create_app():
                 caps_tous = 0
             flash = _n(u.flash_templates_for, i, exiger_banger=False)
             flash_b = _n(u.flash_templates_for, i, exiger_banger=True)
+            # Trash : le vivier des boutons Trash du bot, lu par LA MEME fonction
+            # que lui. None (et pas 0) si le bot ne l'expose pas : « zero
+            # montage Trash » et « on ne sait pas compter » ne disent pas la
+            # meme chose.
+            _mtf = getattr(u, "marque_templates_for", None)
+            trash = (_n(_mtf, "trash", i, exiger_banger=False)
+                     if _mtf else None)
+            trash_b = (_n(_mtf, "trash", i, exiger_banger=True)
+                       if _mtf else None)
             prets = _n(u.va_ready_montages_for, i, 1)
             sortie[i] = {
                 "captions_etoilees": caps, "captions": caps_tous,
@@ -59630,6 +60573,7 @@ def create_app():
                 "brutes": toutes_brutes, "templates_etoiles": tpl,
                 "templates": tpl_tous,
                 "flash": flash, "flash_etoiles": flash_b,
+                "trash": trash, "trash_etoiles": trash_b,
                 "montages_prets": prets,
                 # Possible ou non, famille par famille -- exactement les
                 # conditions de _recette, dans le meme ordre.
@@ -59646,6 +60590,10 @@ def create_app():
                     "caption_vid": bool(caps_tous and fav_brutes),
                     "template_vid": bool(tpl_tous and fav_brutes),
                     "flash_vid": bool(flash and fav_brutes),
+                    # PAS de ligne trash* ici : « possible » suit les familles
+                    # de la reserve (noctus_reserve.FAMILLES), et Trash n'en a
+                    # aucune -- ses boutons fabriquent a la demande. Annoncer
+                    # une case de stock qui n'existe pas rassurerait a tort.
                 },
             }
         return sortie
@@ -59671,12 +60619,20 @@ def create_app():
             return jsonify({"ok": False, "error": "sans_reserve",
                             "detail": "%s ne passe pas par la reserve"
                                       % action}), 400
-        chemin, desc = _res.prendre(ident, famille, demandeur="rig")
+        # Les variantes dont le montage source a perdu la marque de la
+        # famille (un Flash passe en Trash) ne sont plus servies : on dit
+        # combien, sinon une case « vide » avec du stock sur le disque ne
+        # s'expliquerait pas.
+        _ecartes = {}
+        chemin, desc = _res.prendre(ident, famille, demandeur="rig",
+                                    ecartes_out=_ecartes)
         if not chemin:
             return jsonify({"ok": False, "error": "vide",
-                            "identite": ident, "famille": famille}), 404
+                            "identite": ident, "famille": famille,
+                            "ecartes_marque": _ecartes.get("marque_perdue", 0)}), 404
         f = Path(chemin)
         return jsonify({"ok": True, "identite": ident, "famille": famille,
+                        "ecartes_marque": _ecartes.get("marque_perdue", 0),
                         "jeton": f.stem, "nom": f.name, "desc": desc,
                         "octets": f.stat().st_size if f.is_file() else 0,
                         "url": "/api/rig/reserve/fichier/%s/%s/%s"
@@ -63558,33 +64514,38 @@ def create_app():
         if not new_name:
             return _error("✕ Nouveau nom invalide", tab="jailbreak")
         renamed = False
+        rapport_rn = None
         if new_name != old_name:
             # Le nouveau nom ne doit pas exister deja
             if new_name in _list_identities():
                 return _error(f"✕ L'identité <b>{new_name}</b> existe déjà", tab="jailbreak")
-            # Move filesystem
-            try:
-                (IDENTITIES_DIR / old_name).rename(IDENTITIES_DIR / new_name)
-            except Exception as e:
-                return _error(f"✕ Rename échoué : {e}", tab="jailbreak")
-            # Move storage jailbreak.json
-            try:
-                import jailbreak as jb
-                jb.rename_identity_in_storage(old_name, new_name)
-            except Exception:
-                pass  # storage echec non bloquant - le filesystem est deja move
-            # Les liens publics des VAs suivent l'identité, comme ils suivent
-            # déjà le renommage d'une fiche. Sans ça, ils restaient collés à
-            # l'ancien nom : la page répondait 200 mais annonçait « aucun
-            # compte », et le premier ajout du VA RECRÉAIT l'identité disparue
-            # dans le référentiel — invisible sur cette page-ci, mais bien
-            # comptée par l'Activité VA et l'Analyse vues.
-            try:
-                import va_portal
-                va_portal.renommer_identite(old_name, new_name)
-            except Exception as _e_vpi:
-                print(f"[va-portail] liens non suivis au renommage d identite : {_e_vpi}",
-                      flush=True)
+            # PAR identite_admin.renommer, comme /identity/rename. Cette route
+            # deplacait le dossier, jailbreak.json et le portail VA, et rien
+            # d'autre : les cles « lila|templates|… » de trash_trend.json et
+            # flash_trend.json (et des autres tables _PREFIXES) restaient a
+            # l'ancien nom. Chez lila2, tous les montages marques revenaient
+            # dans la vue de base, les boutons Discord de la marque ne
+            # trouvaient plus rien -- et une « lila » recreee plus tard
+            # naissait avec ces marques.
+            import identite_admin as _ia
+            import type_identite as _ti
+            if _ti.verrouillee(old_name):
+                return _error(f"✕ <b>@{html_escape(old_name)}</b> ne se renomme pas : "
+                              "elle sert de source au menu US.", tab="jailbreak")
+            # Ni « - » ni « _ » dans un NOUVEAU nom (identite_admin.normaliser :
+            # le bot tronque le suffixe des salons au premier separateur, et le
+            # VA perdrait l'acces aux siens). Refuse en le disant, plutot que de
+            # retirer les caracteres en silence.
+            if _ia.normaliser(new_name) != new_name:
+                return _error("✕ Nouveau nom refusé : lettres et chiffres seulement "
+                              "(un « - » ou un « _ » casse le rattachement des "
+                              "salons Discord)", tab="jailbreak")
+            rapport_rn = _ia.renommer(old_name, new_name, ancien_exact=True)
+            if not rapport_rn.get("ok"):
+                return _error("✕ Rename échoué : "
+                              + html_escape(str(rapport_rn.get("error") or "?")),
+                              tab="jailbreak")
+            _invalidate_all_ttl_cache()
             renamed = True
         # Avatar : remplace si fourni
         avatar_file = request.files.get("avatar")
@@ -63612,7 +64573,19 @@ def create_app():
         if avatar_changed: parts.append("photo de profil mise à jour")
         if not parts:
             return _success(f"✓ Aucun changement pour <b>{new_name}</b>", tab="jailbreak")
-        return _success("✓ Identité " + ", ".join(parts), tab="jailbreak")
+        msg = "✓ Identité " + ", ".join(parts)
+        if rapport_rn:
+            # Ce qui a suivi, et SURTOUT ce qui n'a pas suivi : un emplacement
+            # en echec garde l'ancien nom, il faut le savoir pour le rattraper.
+            msg += " — %d emplacement(s) mis à jour" % len(rapport_rn.get("touches") or [])
+            _ech = rapport_rn.get("echecs") or []
+            if _ech:
+                msg += (" • ⚠ <b>%d</b> non suivi(s) : " % len(_ech)
+                        + html_escape(", ".join("%s (%s)" % (e.get("ou"), e.get("detail"))
+                                                for e in _ech[:4])))
+            msg += (" • ⚠ à faire à la main : renommer catégorie, salons et rôle "
+                    "Discord, puis reposter les menus")
+        return _success(msg, tab="jailbreak")
 
     @app.route("/jailbreak/add_account", methods=["POST"])
     def jailbreak_add_account():

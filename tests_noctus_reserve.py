@@ -77,6 +77,71 @@ def main():
               nr.empreinte("emma", "template", src) != e1)
         emp = nr.empreinte("emma", "template", src)
 
+        # ---- une source qui a PERDU la marque de sa famille ----
+        #
+        # Un montage passe de Flash a Trash gardait son stock Flash : le parc
+        # publiait ses variantes sous ⚡ pendant que les VA recevaient le meme
+        # template par les boutons Trash. Section isolee (sa propre racine,
+        # ses propres registres) : elle ne touche pas au stock des tests
+        # suivants.
+        import json as _json
+        import safe_json as _sj
+
+        def _reg(fichier, cles):
+            # Atomique, comme le reste du depot (tests_site le verifie).
+            _sj.write_text(fichier, _json.dumps(sorted(cles)))
+
+        _racine_av, _marques_av = nr.RACINE, nr.DOSSIER_MARQUES
+        try:
+            nr.RACINE = Path(tmp) / "reserve_marques"
+            nr.DOSSIER_MARQUES = Path(tmp) / "data_marques"
+            nr.DOSSIER_MARQUES.mkdir()
+            tdir = Path(tmp) / "identities" / "zoe" / "templates"
+            tdir.mkdir(parents=True)
+            vx, vy = faux_mp4(tdir, "x.mp4"), faux_mp4(tdir, "y.mp4")
+            flash_f = nr.DOSSIER_MARQUES / "flash_trend.json"
+            trash_f = nr.DOSSIER_MARQUES / "trash_trend.json"
+            _reg(flash_f, ["zoe|templates|x.mp4", "zoe|templates|y.mp4"])
+            for s, nom in ((vx, "vx.mp4"), (vy, "vy.mp4")):
+                nr.deposer("zoe", "flash_banger", faux_mp4(atelier, nom), "e",
+                           recette={"source": str(s), "repli": False})
+            check("marque : la famille flash_* exige la marque Flash, les autres aucune",
+                  nr.marque_de_famille("flash_banger") == "flash"
+                  and nr.marque_de_famille("flash_vid") == "flash"
+                  and nr.marque_de_famille("template") == ""
+                  and nr.marque_de_famille("caption_vid") == "")
+            check("marque : deux variantes servables tant que leurs sources sont Flash",
+                  nr.compter("zoe", "flash_banger") == 2)
+            # x passe en Trash (l'exclusivite l'a retire de flash_trend.json).
+            _reg(flash_f, ["zoe|templates|y.mp4"])
+            _reg(trash_f, ["zoe|templates|x.mp4"])
+            check("marque : la variante de x n est plus comptee (le remplisseur en refera une)",
+                  nr.compter("zoe", "flash_banger") == 1)
+            ec, fiche = {}, {}
+            c1, _d = nr.prendre("zoe", "flash_banger", ecartes_out=ec, fiche_out=fiche)
+            check("marque : prendre sert la variante de y, ecarte celle de x et le COMPTE",
+                  c1 is not None and (fiche.get("recette") or {}).get("source") == str(vy)
+                  and ec.get("marque_perdue") == 1, str((c1, fiche.get("recette"), ec)))
+            ec2 = {}
+            check("marque : ... plus rien a servir, la variante de x reste en stock (non effacee)",
+                  nr.prendre("zoe", "flash_banger", ecartes_out=ec2) == (None, "")
+                  and ec2.get("marque_perdue") == 1
+                  and len(list(nr._dossier("zoe", "flash_banger", "libre").glob("*.mp4"))) == 1)
+            _reg(flash_f, ["zoe|templates|x.mp4"])
+            _reg(trash_f, [])
+            check("marque : remarquer x Flash la rend servable",
+                  nr.compter("zoe", "flash_banger") == 1)
+            flash_f.write_text("{casse", encoding="utf-8")
+            n1 = nr.compter("zoe", "flash_banger")
+            nr.compter("zoe", "flash_banger")
+            _lignes = [_json.loads(x) for x in nr._journal().read_text(
+                encoding="utf-8").splitlines() if x.strip()]
+            check("marque : registre illisible -> on sert comme avant (le parc n a pas de repli), note UNE fois",
+                  n1 == 1 and sum(1 for x in _lignes if x.get("acte") == "marque_illisible") == 1,
+                  str(_lignes[-3:]))
+        finally:
+            nr.RACINE, nr.DOSSIER_MARQUES = _racine_av, _marques_av
+
         # ---- deposer et compter ----
         check("stock vide au depart", nr.compter("emma", "template") == 0)
         p = nr.deposer("emma", "template", faux_mp4(atelier, "v1.mp4"), emp,

@@ -232,12 +232,29 @@ class NoctusPool(commands.Cog):
             # Tout le dossier, pas seulement les etoiles : c'est la brute qui
             # porte l'etoile pour cette famille.
             templates, _ecartes = u.tous_templates_for(identite)
-        elif famille == "flash_vid":
+        elif famille in ("flash", "flash_vid"):
             templates, _ecartes = u.flash_templates_for(
                 identite, exiger_banger=False)
-        else:
+        elif famille in ("flash_banger", "flash_brut"):
             templates, _ecartes = u.flash_templates_for(
-                identite, exiger_banger=(famille != "flash"))
+                identite, exiger_banger=True)
+        else:
+            # PLUS DE REPLI « FAMILLE INCONNUE = FLASH ». Le « else » final
+            # servait des templates Flash etoiles a TOUTE famille qu'il ne
+            # connaissait pas : declarer demain une famille « trash » dans
+            # noctus_reserve.FAMILLES sans l'ajouter ici aurait rempli son
+            # stock de Flash, servis ensuite sous les boutons Trash -- sans
+            # une erreur. Une famille inconnue n'est pas fabriquee, et on le
+            # dit (une fois par famille : ce tour revient toutes les deux
+            # minutes).
+            deja = getattr(self, "_familles_inconnues", set())
+            if famille not in deja:
+                deja.add(famille)
+                self._familles_inconnues = deja
+                log.warning("[noctuspool] famille %r sans recette dans "
+                            "_recette : case ecartee, rien n'est fabrique",
+                            famille)
+            return None
         if not templates:
             return None
 
