@@ -131,6 +131,41 @@ class NoctusPool(commands.Cog):
     def cog_unload(self):
         self.remplir.cancel()
 
+    def _sans_reserves(self, identites):
+        """Retire les RESERVES (type_identite) de la liste a remplir.
+
+        Une reserve n'a jamais de video brute : ses variantes sortiraient en
+        templates nus, ou sa case serait ecartee a chaque tour -- des cycles
+        machine pour rien. Et le stock est indexe par la seule identite : il
+        ne sait pas pour quelle model une variante a ete montee, alors que le
+        menu ✨ General monte le contenu d'une reserve sur la brute de la
+        model cliquee.
+
+        On journalise le nombre ecarte, mais seulement quand il CHANGE : ce
+        tour revient toutes les deux minutes. Repli ouvert si le module ne
+        repond pas (liste inchangee, avec un log) : au pire la case d'une
+        reserve est ecartee faute de brute, comme avant.
+        """
+        try:
+            import type_identite as _ti
+            gardees = _ti.sans_reserves(identites)
+        except Exception as e:
+            if not getattr(self, "_filtre_en_panne", False):
+                self._filtre_en_panne = True
+                log.warning("[noctuspool] filtre des reserves indisponible "
+                            "(%s: %s) : liste non filtree", type(e).__name__, e)
+            return list(identites)
+        if getattr(self, "_filtre_en_panne", False):
+            self._filtre_en_panne = False
+            log.info("[noctuspool] filtre des reserves de nouveau disponible")
+        ecartees = sorted(set(identites) - set(gardees))
+        if ecartees != getattr(self, "_reserves_vues", None):
+            self._reserves_vues = ecartees
+            if ecartees:
+                log.info("[noctuspool] %d reserve(s) hors remplissage (pas "
+                         "de brute) : %s", len(ecartees), ", ".join(ecartees))
+        return gardees
+
     # ------------------------------------------------------------ recettes --
 
     def _recette(self, identite: str, famille: str):
@@ -392,6 +427,7 @@ class NoctusPool(commands.Cog):
         except Exception:
             log.exception("[noctuspool] impossible de lister les identites")
             return
+        identites = self._sans_reserves(identites)
         if not identites:
             return
 

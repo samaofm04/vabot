@@ -232,13 +232,58 @@ def is_identity_active(name):
 V2_PREFIX = "v2_"
 
 
-def list_identities():
+#: Dernier avertissement « filtre des reserves indisponible ». list_identities
+#: est appelee a chaque clic et a chaque autocompletion : sans ce frein, un
+#: module casse noierait le journal sous la meme ligne.
+_REPLI_RESERVES = {"quand": 0.0}
+
+
+def list_identities(avec_reserves=False):
     """Toutes les identités existantes (active ou non), SAUF celles de la
-    Bibliothèque 2 du site (préfixe v2_) qui n'existent que sur le site."""
+    Bibliothèque 2 du site (préfixe v2_) qui n'existent que sur le site.
+
+    SANS LES RESERVES, sauf avec_reserves=True (25/09/2026). Une réserve est
+    du contenu partagé par plusieurs models (type_identite.RESERVE) : elle ne
+    s'assigne jamais à un VA et n'a pas sa place dans la grille des models.
+    Le filtre vit ICI, et pas dans chaque appelant, parce que cette liste est
+    la base de toutes les autres côté bot -- grille US, rotation, repli du
+    ticket, /setidentite, menus FR, cogs/admin. Posé ailleurs, un seul chemin
+    oublié suffisait à donner « blonde » à un VA.
+
+    On filtre sur est_reserve, JAMAIS sur la nature « modèle » : le 12/09 un
+    filtre sur la nature a vidé quinze des vingt-deux entrées du menu (voir
+    list_active_identities). Une « identité » reste donc dans la liste.
+
+    Repli OUVERT si type_identite ne répond pas, comme est_une_model : la
+    liste part sans filtre et le journal le dit. Une réserve de trop dans un
+    menu se voit et se corrige ; un bot qui ne propose plus aucune model
+    parce qu'un fichier est illisible, non.
+    """
     if not IDENTITIES_DIR.exists():
         return []
-    return sorted(p.name for p in IDENTITIES_DIR.iterdir()
+    noms = sorted(p.name for p in IDENTITIES_DIR.iterdir()
                   if p.is_dir() and not p.name.lower().startswith(V2_PREFIX))
+    if avec_reserves:
+        return noms
+    try:
+        import type_identite as _ti
+        return _ti.sans_reserves(noms)
+    except Exception as e:
+        if time.time() - _REPLI_RESERVES["quand"] > 600:
+            _REPLI_RESERVES["quand"] = time.time()
+            log.warning("list_identities : filtre des reserves indisponible "
+                        "(%s: %s) -- liste NON filtree, une reserve peut "
+                        "apparaitre dans les menus et la rotation.",
+                        type(e).__name__, e)
+        return noms
+
+
+def reserves_hors_liste():
+    """Les réserves que list_identities() retire, pour le DIRE à l'écran
+    (/identitystatus, /listidentites) au lieu de les faire disparaître.
+    Vide si le filtre est en repli : rien n'a alors été retiré."""
+    gardees = set(list_identities())
+    return [n for n in list_identities(avec_reserves=True) if n not in gardees]
 
 
 # Identités réservées à Jailbreak : JAMAIS assignées aux VAs Discord (pas de
@@ -707,9 +752,16 @@ def _proprio_du_salon(channel):
     return None
 
 
-async def _ensure_us_menu(bot, channel):
+async def _ensure_us_menu(bot, channel, etat=None):
     """Poste (et épingle) le menu Jailbreak US dans un salon -content s'il n'y est
-    pas déjà (détection via les messages épinglés du bot). Idempotent."""
+    pas déjà (détection via les messages épinglés du bot). Idempotent.
+
+    `etat` (dict, facultatif) recoit etat["general"] : True si le ✨ General
+    est en place, False s'il n'a pas pu etre pose, None si on n'y a pas
+    touche. Le retour, lui, reste un booleen : l'appelant le teste tel quel
+    (numeros, /resetmenus), un tuple serait toujours « vrai »."""
+    if isinstance(etat, dict):
+        etat["general"] = None
     if bot is None or channel is None:
         return False
     try:
@@ -720,22 +772,40 @@ async def _ensure_us_menu(bot, channel):
             pins = await channel.pins()
         except Exception:
             pins = []
-        # Les DEUX messages doivent rester dans l'ordre : menu (choix de la
-        # model) PUIS panneau d'actions. Si le panneau est plus ancien que le
-        # menu (menu reposte apres coup), l'ordre est inverse a l'ecran -> on
-        # repart de zero pour les deux.
-        _menu = _panneau = None
+        # Les TROIS messages doivent rester dans l'ordre : menu (choix de la
+        # model), PUIS panneau d'actions, PUIS « ✨ General ». Si le panneau
+        # est plus ancien que le menu (menu reposte apres coup), l'ordre est
+        # inverse a l'ecran -> on repart de zero pour les deux, et le General
+        # suit (voir _a_refaire).
+        _menu = _panneau = _general = None
         for p in pins:
             if p.author.id != getattr(bot.user, "id", 0) or not p.embeds:
                 continue
             _t = p.embeds[0].title or ""
             _f = p.embeds[0].footer.text or ""
-            if "Jailbreak" in _t and _menu is None:
+            # Le General se reconnait a son FOOTER, et on le teste AVANT le
+            # titre : le menu, lui, est reconnu a « Jailbreak » dans son
+            # titre. Si un jour le titre du General contenait ce mot, il
+            # serait pris pour le menu et le vrai menu ne serait plus jamais
+            # repose.
+            if _f == FOOTER_GENERAL:
+                if _general is None:
+                    _general = p
+            elif "Jailbreak" in _t and _menu is None:
                 _menu = p
             elif _f == "panneau-actions-us" and _panneau is None:
                 _panneau = p
         if _menu is not None and (_panneau is None or _panneau.id > _menu.id):
-            return True                       # deja en place, dans le bon ordre
+            # Deja en place, dans le bon ordre. C'est le cas de TOUS les
+            # salons existants : sans cet appel, aucun ne recevrait jamais le
+            # General. Sans panneau, rien a faire ici : le premier clic sur
+            # une model recree le panneau puis repose le General dessous.
+            if _panneau is not None:
+                _g = await _ensure_us_general(bot, channel, apres=_panneau,
+                                              epingles=pins)
+                if isinstance(etat, dict):
+                    etat["general"] = _g
+            return True
         # Deux cas a reprendre : ordre inverse, OU menu absent alors qu'un
         # panneau existe (le menu se poserait APRES -> inverse a l'ecran).
         _a_refaire = [m for m in
@@ -743,21 +813,27 @@ async def _ensure_us_menu(bot, channel):
                                              and _panneau.id < _menu.id)
                        else ((_panneau,) if _menu is None and _panneau is not None else ()))
                       if m is not None]
+        # Arrive ici, le menu est TOUJOURS reposte : un General deja present
+        # se retrouverait au-dessus de lui. On le refait donc avec le reste.
+        if _general is not None:
+            _a_refaire.append(_general)
         if _a_refaire:
             for _m in _a_refaire:
                 try:
                     await _m.delete()
                 except Exception:
                     pass
+            # Les ids memorises pointent sur des messages qu'on vient de
+            # supprimer : un clic les chercherait en vain (un appel reseau
+            # perdu dans les 3 s de Discord). Un seul point d'oubli pour les
+            # deux fichiers, dans cogs/user.py.
             try:
-                from cogs.user import _jb_panel_ids
-                import safe_json
-                from pathlib import Path as _P
-                _d = _jb_panel_ids()
-                _d.pop(str(channel.id), None)
-                safe_json.write(_P("data") / "us_panels.json", _d, indent=2)
-            except Exception:
-                pass
+                from cogs.user import _jb_panneaux_oublier
+                _jb_panneaux_oublier(channel.id)
+            except Exception as e:
+                log.warning("_ensure_us_menu %s : ids des panneaux non oublies "
+                            "(%s: %s)", getattr(channel, "name", "?"),
+                            type(e).__name__, e)
         # Marche du PROPRIETAIRE du salon : chaque -menu appartient a une seule
         # personne, on peut donc lui servir SES models (role Jailbreak FR/US).
         # Repli sur le marche du SERVEUR, pas sur « us » en dur : depuis que la
@@ -786,6 +862,16 @@ async def _ensure_us_menu(bot, channel):
         except Exception:
             pass
         await _ensure_us_panel(bot, channel)
+        # Le General se pose SOUS le panneau d'actions : on lui donne l'id
+        # que _ensure_us_panel vient de memoriser (panneau retrouve ou cree).
+        try:
+            from cogs.user import _jb_panel_ids
+            _id_panneau = _jb_panel_ids().get(str(channel.id))
+        except Exception:
+            _id_panneau = None
+        _g = await _ensure_us_general(bot, channel, apres=_id_panneau)
+        if isinstance(etat, dict):
+            etat["general"] = _g
         return True
     except Exception as e:
         log.warning(f"_ensure_us_menu: {e}")
@@ -947,9 +1033,138 @@ async def _ensure_us_panel(bot, channel):
         return False
 
 
-async def reset_us_menu(bot, channel):
-    """Repart de zero dans un salon -menu : on vide, puis on repose les deux
-    messages permanents. Utile quand le salon s'est encombre de contenu."""
+#: Footer du 3e message epingle, « ✨ General ». Meme chaine que dans
+#: cogs/user.py (_jb_general), mot pour mot : c'est elle, et JAMAIS le titre,
+#: qui designe ce message. Les titres sont deja pris -- « Jailbreak » designe
+#: le menu (_ensure_us_menu), « menu » fait supprimer le message
+#: (_delete_old_menus).
+FOOTER_GENERAL = "panneau-general-us"
+
+
+def _id_message(x):
+    """L'id d'un message, qu'on recoive le message, son id, ou rien."""
+    if x is None:
+        return None
+    try:
+        return int(getattr(x, "id", x))
+    except (TypeError, ValueError):
+        return None
+
+
+async def _ensure_us_general(bot, channel, apres=None, epingles=None):
+    """Troisieme message PERMANENT : « ✨ General », sous le panneau d'actions.
+
+    Il sert le contenu des RESERVES liees a la model choisie (voir
+    type_identite). Pose ici a l'etat d'attente ('_' : « choisis une model
+    au-dessus »), sans bouton ; c'est le clic sur une model qui le remplit
+    (cogs/user.py, _jb_general_maj).
+
+    `apres` : le message, ou son id, SOUS lequel il doit s'afficher -- le
+    panneau d'actions. Un General plus ancien que lui s'afficherait au-dessus
+    du panneau : on le supprime et on le repose. `epingles` evite de relire
+    les epingles quand l'appelant vient de le faire.
+
+    Les doublons sont supprimes aussi : chacun garde les boutons de SA
+    derniere model, et un clic dessus servirait la brute d'une autre que
+    celle affichee dans le panneau.
+
+    SERVEUR US SEULEMENT (decision du proprietaire) : ailleurs, un clic sur
+    une model ouvre un panneau ephemere et ne mettrait jamais ce message a
+    jour -- il resterait fige a « choisis une model ».
+    """
+    if bot is None or channel is None:
+        return False
+    _nom = getattr(channel, "name", "?")
+    try:
+        import guild_features as _gf
+        _us = _gf.is_us_guild(channel.guild)
+    except Exception as e:
+        # Dans le doute on ne pose rien : un General pose a tort est un
+        # message mort, alors que son absence se repare par /resetmenus.
+        log.warning("_ensure_us_general %s : serveur non reconnu (%s: %s), "
+                    "General non pose", _nom, type(e).__name__, e)
+        return False
+    if not _us:
+        log.info("_ensure_us_general %s : pas le serveur US, pas de General",
+                 _nom)
+        return False
+    try:
+        # Le bot PRINCIPAL seulement : un bouton n'est servi que par
+        # l'application qui a poste le message. Sur le bot admin (qui fait
+        # /resetpanels), UserCog n'existe pas.
+        ucog = bot.get_cog("UserCog")
+        if ucog is None:
+            return False
+        from cogs.user import _jb_general, _jb_general_set, _jb_general_ids
+        _moi = getattr(bot.user, "id", 0)
+        _seuil = _id_message(apres)
+        if epingles is None:
+            try:
+                epingles = await channel.pins()
+            except Exception as e:
+                log.warning("_ensure_us_general %s : epingles illisibles "
+                            "(%s: %s)", _nom, type(e).__name__, e)
+                epingles = []
+
+        def _est_general(m):
+            return (m is not None and getattr(m.author, "id", None) == _moi
+                    and m.embeds
+                    and (m.embeds[0].footer.text or "") == FOOTER_GENERAL)
+
+        generaux = {m.id: m for m in epingles if _est_general(m)}
+        # Un General dont l'epinglage a echoue (plafond de 50 epingles) n'est
+        # pas dans la liste, mais son id est memorise : sans ce detour on en
+        # poserait un second, et l'ancien garderait ses boutons actifs.
+        _memo = _id_message(_jb_general_ids().get(str(channel.id)))
+        if _memo and _memo not in generaux:
+            try:
+                _m = await channel.fetch_message(_memo)
+                if _est_general(_m):
+                    generaux[_m.id] = _m
+            except Exception:
+                pass                           # supprime entre-temps
+        garde = None
+        for _id in sorted(generaux, reverse=True):   # le plus recent d'abord
+            if _seuil is None or _id > _seuil:
+                garde = generaux[_id]
+                break
+        a_jeter = [m for i, m in generaux.items() if m is not garde]
+        for m in a_jeter:
+            try:
+                await m.delete()
+            except Exception as e:
+                log.warning("_ensure_us_general %s : ancien General %s non "
+                            "supprime (%s: %s)", _nom, m.id,
+                            type(e).__name__, e)
+        if a_jeter:
+            log.info("_ensure_us_general %s : %d General retire(s) (au-dessus "
+                     "du panneau d'actions, ou en double)", _nom, len(a_jeter))
+        if garde is not None:
+            _jb_general_set(channel.id, garde.id)
+            return True                        # deja en place, au bon endroit
+        emb, view = _jb_general(ucog, "_", guild=channel.guild)
+        # view vaut None a l'etat d'attente : aucun bouton tant qu'aucune
+        # model n'est choisie.
+        msg = await (channel.send(embed=emb, view=view) if view is not None
+                     else channel.send(embed=emb))
+        _jb_general_set(channel.id, msg.id)
+        try:
+            await msg.pin()
+        except Exception as e:
+            log.warning("_ensure_us_general %s : General pose mais non "
+                        "epingle (%s: %s)", _nom, type(e).__name__, e)
+        return True
+    except Exception as e:
+        log.warning("_ensure_us_general %s : %s: %s", _nom,
+                    type(e).__name__, e)
+        return False
+
+
+async def reset_us_menu(bot, channel, etat=None):
+    """Repart de zero dans un salon -menu : on vide, puis on repose les trois
+    messages permanents (menu, panneau d'actions, General sur le serveur US).
+    Utile quand le salon s'est encombre de contenu. `etat` : voir
+    _ensure_us_menu (etat["general"] dit si le General a ete pose)."""
     if channel is None:
         return False
     # On n'efface QUE ce que le bot a poste. Avant, la purge prenait tout —
@@ -961,16 +1176,16 @@ async def reset_us_menu(bot, channel):
                             check=lambda m: m.author.id == _moi)
     except Exception as e:
         log.warning(f"reset_us_menu purge: {e}")
+    # Les messages memorises viennent d'etre purges : on oublie leurs ids
+    # (panneau d'actions ET General), par la fonction de cogs/user.py qui
+    # connait les deux fichiers -- plus de chemin ecrit en dur ici.
     try:
-        from cogs.user import _jb_panel_ids
-        d = _jb_panel_ids()
-        d.pop(str(channel.id), None)
-        import safe_json
-        from pathlib import Path as _P
-        safe_json.write(_P("data") / "us_panels.json", d, indent=2)
-    except Exception:
-        pass
-    return await _ensure_us_menu(bot, channel)
+        from cogs.user import _jb_panneaux_oublier
+        _jb_panneaux_oublier(channel.id)
+    except Exception as e:
+        log.warning("reset_us_menu %s : ids des panneaux non oublies (%s: %s)",
+                    getattr(channel, "name", "?"), type(e).__name__, e)
+    return await _ensure_us_menu(bot, channel, etat=etat)
 
 
 async def _ensure_num_panel(bot, channel):
@@ -1156,6 +1371,23 @@ async def setup_va_ticket(guild, member, bot=None):
             identity = gf.get_server_identity(guild)
         except Exception:
             identity = None
+        # L'identite dediee du serveur ne passe pas par la rotation, donc pas
+        # par le filtre de list_identities : posee avant que l'entree devienne
+        # une reserve, elle ferait atterrir CHAQUE nouveau VA sur du contenu
+        # partage. On l'ignore, on le dit, et la rotation prend le relais.
+        if identity:
+            try:
+                import type_identite as _ti
+                _refus = _ti.refus_assignation(identity)
+            except Exception as e:
+                _refus = ""            # repli ouvert, comme list_identities
+                log.warning("[ticket] controle « reserve » indisponible pour "
+                            "« %s » (%s: %s)", identity, type(e).__name__, e)
+            if _refus:
+                log.warning("[ticket] %s : identite dediee du serveur ignoree "
+                            "-- %s Rotation normale.",
+                            getattr(guild, "name", "?"), _refus)
+                identity = None
         if not identity:
             identity = pick_next_identity()
         if not identity:
@@ -2088,9 +2320,16 @@ class Welcome(commands.Cog):
             return
         safe = name.lower().strip()
         if safe not in list_identities():
-            await interaction.response.send_message(
-                f"Identité `{safe}` introuvable. Voir /listidentites.", ephemeral=True
-            )
+            # Une reserve existe bien, elle est seulement hors rotation :
+            # « introuvable » enverrait chercher un dossier qui est la.
+            _msg = f"Identité `{safe}` introuvable. Voir /listidentites."
+            if safe in reserves_hors_liste():
+                try:
+                    import type_identite as _ti
+                    _msg = _ti.refus_assignation(safe) or _msg
+                except Exception:
+                    pass
+            await interaction.response.send_message(_msg, ephemeral=True)
             return
         cfg = load_identities_config()
         cfg.setdefault(safe, {})["enabled"] = enabled
@@ -2119,6 +2358,12 @@ class Welcome(commands.Cog):
         for n in identities:
             status = "✅ Active" if is_identity_active(n) else "❌ Désactivée"
             lines.append(f"• `{n}` — {status}")
+        # Les reserves ne tournent jamais : on les nomme, pour qu'un dossier
+        # absent de cette liste ne passe pas pour perdu.
+        _res = reserves_hors_liste()
+        if _res:
+            lines.append(f"_{len(_res)} réserve(s) hors rotation (contenu "
+                         f"partagé) : {', '.join(_res)}_")
         await interaction.response.send_message(
             f"**Statut des identités** ({len(identities)})\n" + "\n".join(lines),
             ephemeral=True,
@@ -2165,7 +2410,7 @@ class Welcome(commands.Cog):
 
     @app_commands.command(
         name="resetmenus",
-        description="[ADMIN] Repose les 2 menus permanents dans les salons -menu, dans le bon ordre",
+        description="[ADMIN] Repose les 3 messages permanents des salons -menu, dans le bon ordre",
     )
     @app_commands.describe(salon="Ne remettre a neuf QUE ce salon -menu (sinon : tous)")
     async def resetmenus(self, interaction: discord.Interaction,
@@ -2190,15 +2435,43 @@ class Welcome(commands.Cog):
             f"🧹 Remise à neuf de {len(cibles)} salon(s) `-menu`…", ephemeral=True)
 
         async def _run():
-            faits, rates = [], []
+            # Le General n'existe que sur le serveur US (decision du
+            # proprietaire) : ailleurs, annoncer « 3 messages » ferait
+            # chercher un message qui n'a pas ete pose.
+            try:
+                import guild_features as _gf
+                _us = _gf.is_us_guild(guild)
+            except Exception:
+                _us = False
+            faits, rates, sans_general = [], [], []
             for ch in cibles:
                 try:
-                    ok = await reset_us_menu(self.bot, ch)
+                    _etat = {}
+                    ok = await reset_us_menu(self.bot, ch, etat=_etat)
                     (faits if ok else rates).append(ch.name)
+                    # On annonce ce qui a ETE pose, salon par salon : le
+                    # General peut echouer seul (import, envoi refuse, 429)
+                    # alors que le menu et le panneau sont en place.
+                    if ok and _us and _etat.get("general") is not True:
+                        sans_general.append(ch.name)
                 except Exception as e:
                     rates.append(f"{ch.name} ({type(e).__name__})")
                 await asyncio.sleep(1.2)          # on menage l'API Discord
-            txt = f"✅ **{len(faits)}** salon(s) remis à neuf — menu + panneau d'actions épinglés."
+            if not _us:
+                _poses = ("menu + panneau d'actions épinglés (le ✨ General "
+                          "n'existe que sur le serveur US)")
+            elif sans_general and len(sans_general) >= len(faits):
+                _poses = "menu + panneau d'actions épinglés, ✨ General NON posé"
+            elif sans_general:
+                _poses = (f"menu + panneau d'actions épinglés, ✨ General dans "
+                          f"{len(faits) - len(sans_general)} sur {len(faits)}")
+            else:
+                _poses = "menu, panneau d'actions et ✨ General épinglés"
+            txt = f"✅ **{len(faits)}** salon(s) remis à neuf — {_poses}."
+            if sans_general:
+                txt += (f"\n⚠️ ✨ General non posé : {', '.join(sans_general[:8])}"
+                        + (f" (+{len(sans_general) - 8})" if len(sans_general) > 8 else "")
+                        + " — voir le journal du bot (_ensure_us_general).")
             if rates:
                 txt += f"\n⚠️ Échecs : {', '.join(rates[:8])}"
             try:

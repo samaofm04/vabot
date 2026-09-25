@@ -1,6 +1,7 @@
 import asyncio
 import datetime as _dt
 import json
+import logging
 import os
 import random
 import re
@@ -20,6 +21,11 @@ from image_transform import transform_image, load_config as load_image_config
 DATA_DIR = Path("data")
 IDENTITIES_DIR = DATA_DIR / "identities"
 PROFILE_PICS_DIR = DATA_DIR / "profile_pics"
+
+# Le fichier appelait deja log.warning (emojis d'actions et de PP) sans
+# jamais definir `log` : le moindre echec d'emoji levait NameError dans son
+# propre except. Le menu General journalise aussi ses echecs ici.
+log = logging.getLogger("vabot.user")
 
 # Fuseau France pour le post quotidien à minuit (heure locale FR)
 try:
@@ -972,8 +978,13 @@ def _vault_texts(category, identity):
 
     ⚠️ Les identités du MARCHÉ FR sont volontairement EXCLUES : leur contenu
     ne doit pas bouger tant que l'user ne l'a pas demandé (elles continuent de
-    ne servir que leurs .txt, exactement comme avant)."""
-    if _is_fr_market(identity):
+    ne servir que leurs .txt, exactement comme avant).
+
+    SAUF UNE RESERVE (25/09/2026) : elle est nee sur le site, son contenu
+    n'existe QUE dans la bibliotheque. L'exclusion FR rendait invisibles les
+    bios saisies pour une reserve FR, et le menu General repondait « aucune
+    bio » alors qu'on venait d'en poser."""
+    if _is_fr_market(identity) and not _est_reserve_sure(identity):
         return []
     try:
         import text_pool as _tp
@@ -997,6 +1008,11 @@ def random_bio_for(identity):
             return unescape_newlines(random.choice(bios))
         if idl and not _is_fr_market(idl):
             return None            # US : pas de repli FR, on dit qu'il n'y en a pas
+    # Menu ✨ General : la bio doit venir de la RESERVE. Retomber sur les
+    # bios partagees servirait un texte qui n'est ni a elle ni a la model,
+    # sans que rien ne le signale ; « aucune bio » dit le vrai manque.
+    if _MODEL_REELLE.get():
+        return None
     bios = _read_bios_at(SHARED_BIOS_FILE)
     if bios:
         return unescape_newlines(random.choice(bios))
@@ -1571,7 +1587,14 @@ def _reserve_ouverte_aux_va() -> bool:
     Decision du proprietaire, 13/09/2026 : le stock est au parc. On lit le
     drapeau A CHAQUE APPEL et non a l'import, pour que le rallumer ne demande
     pas de redemarrer le bot.
+
+    Jamais pendant un clic du menu ✨ General : le stock est indexe par la
+    seule identite (ici la reserve), il ne sait pas sur la brute de QUELLE
+    model une variante a ete montee. Le jour ou POUR_LES_VA repasse a True,
+    Lola recevrait sinon une video montee sur la brute de Julia.
     """
+    if _MODEL_REELLE.get():
+        return False
     try:
         import noctus_reserve as _res
         return bool(getattr(_res, "POUR_LES_VA", True))
@@ -1651,6 +1674,11 @@ def random_profile_pic(identity=None):
             own = [p for p in d.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTS]
             if own:
                 return random.choice(own)
+    # Menu ✨ General : une reserve sans PP repond « aucune PP ». Le pool
+    # partage donnerait une photo qui n'est pas la sienne, et le VA la
+    # posterait comme si elle l'etait.
+    if _MODEL_REELLE.get():
+        return None
     if not PROFILE_PICS_DIR.exists():
         return None
     pics = [p for p in PROFILE_PICS_DIR.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTS]
@@ -1715,6 +1743,34 @@ import contextvars
 # asyncio (contextvars) -> aucune interference entre interactions concurrentes.
 # Par defaut None = comportement STRICTEMENT identique pour tous les VAs normaux.
 _IDENTITY_OVERRIDE = contextvars.ContextVar("identity_override", default=None)
+
+# Menu « ✨ General » : _IDENTITY_OVERRIDE y vaut la RESERVE (tout le contenu
+# vient d'elle, sans toucher aux fonctions de tirage), et celui-ci la MODEL
+# cliquee, dont on prend la VIDEO BRUTE. Pas « reserve » dans le nom : ce
+# mot designe deja ici le stock noctus (_reserve_ouverte_aux_va).
+# None hors General = chemins d'avant, a l'identique.
+_MODEL_REELLE = contextvars.ContextVar("model_reelle", default=None)
+
+
+def _dossier_brutes(identity):
+    """LE seul endroit qui dit d'ou vient la brute : la model reelle pendant
+    un clic General, sinon l'identite elle-meme. Les quatre chemins qui
+    montent une brute l'appellent ; recalcule a chacun, un seul oubli aurait
+    monte le contenu de Blonde sur un dossier vide (template nu)."""
+    return IDENTITIES_DIR / ((_MODEL_REELLE.get() or identity or "").strip().lower()) / "brutes"
+
+
+def _est_reserve_sure(identity) -> bool:
+    """type_identite.est_reserve, sans jamais faire planter un tirage : si le
+    module ne repond pas, on garde le comportement d'avant (pas une reserve)
+    et on le journalise."""
+    try:
+        import type_identite as _ti
+        return _ti.est_reserve(identity)
+    except Exception as e:
+        log.warning("controle « reserve » indisponible pour %r (%s: %s)",
+                    identity, type(e).__name__, e)
+        return False
 
 
 def get_user_identity(user_id):
@@ -2774,8 +2830,10 @@ class UserCog(commands.Cog):
             # ne contenant QUE la brute etoilee choisie. Sans ca, le moteur en
             # tire une au hasard parmi toutes celles de l'identite et l'etoile
             # de la brute ne servirait a rien.
+            # Hors brutes_dir impose, _dossier_brutes : la model reelle
+            # pendant un clic ✨ General (le template vient de la reserve).
             _brutes = (Path(brutes_dir) if brutes_dir else
-                       IDENTITIES_DIR / (identity or "").strip().lower() / "brutes")
+                       _dossier_brutes(identity))
             model = await asyncio.to_thread(
                 noctus_web.gen_from_draft, str(video), draft, ["V1"], None, _brutes,
                 _rapport)
@@ -3004,7 +3062,7 @@ class UserCog(commands.Cog):
         #     Caption (*)    brute quelconque + caption ETOILEE     <- ici
         #     Montage (*)    brute ETOILEE    + caption ETOILEE
         import brutes_off as _off
-        brutes = _off.lister(IDENTITIES_DIR / identity / "brutes",
+        brutes = _off.lister(_dossier_brutes(identity),
                              extensions=VIDEO_EXTS)
         if not brutes:
             await interaction.followup.send(
@@ -3215,7 +3273,7 @@ class UserCog(commands.Cog):
             # Tout le stock, moins les desactivees : une brute dont la caption
             # est deja incrustee ne doit pas servir de support.
             import brutes_off as _off_t
-            brutes = _off_t.lister(IDENTITIES_DIR / identity / "brutes",
+            brutes = _off_t.lister(_dossier_brutes(identity),
                                    extensions=VIDEO_EXTS)
         if not templates or not brutes:
             # Le nombre ecarte se dit TOUJOURS : un admin qui a etoile cinq
@@ -3951,7 +4009,7 @@ class UserCog(commands.Cog):
         # Meme porte d entree que la commande « Video brut » : les brutes
         # desactivees ne doivent pas non plus servir de support a une caption.
         import brutes_off as _off
-        bdir = IDENTITIES_DIR / identity / "brutes"
+        bdir = _dossier_brutes(identity)
         brutes = _off.lister(bdir, extensions=VIDEO_EXTS)
         if not brutes:
             await interaction.response.send_message(
@@ -4141,6 +4199,16 @@ class UserCog(commands.Cog):
             # l ecran, les clics ne font rien, et rien ne le dit.
         except Exception:
             pass
+        # Le menu ✨ General, a part et JOURNALISE : le bloc du dessus avale
+        # tout en silence, et un enregistrement rate y laisserait les boutons
+        # du General muets sans une ligne nulle part.
+        try:
+            self.bot.add_dynamic_items(JBGenButton, JBGenQtyBouton,
+                                       JBGenReserveBouton)
+        except Exception as e:
+            log.warning("cog_load : boutons du menu General non enregistres "
+                        "(%s: %s) -- ils ne repondront pas.",
+                        type(e).__name__, e)
         if not self.daily_menu.is_running():
             self.daily_menu.start()
 
@@ -4514,14 +4582,20 @@ class UserCog(commands.Cog):
             ephemeral=True,
         )
 
-    async def _run_for_model(self, interaction, model, cmd, count=None, supports_count=False):
+    async def _run_for_model(self, interaction, model, cmd, count=None, supports_count=False,
+                             brute_de=None):
         """Execute une action de contenu (reel/story/...) pour la MODEL choisie en
         surchargeant temporairement l'identite via le contextvar (menu Jailbreak).
         `count` = quantite demandee (multiplicateur) ; envoyee a la commande SEULEMENT
         si elle accepte un parametre `nombre` (reel/story/post/storycta/bio/pp). Le
         plafond Range[1,10] du slash n'est PAS applique ici (appel direct du callback)
         -> on peut demander beaucoup ; les generateurs plafonnent au stock dispo. Local
-        a la task -> pas d'interference entre clics simultanes."""
+        a la task -> pas d'interference entre clics simultanes.
+
+        `brute_de` (menu ✨ General) : `model` est alors la RESERVE, d'ou vient
+        tout le contenu, et `brute_de` la model cliquee, dont on prend la video
+        brute (_dossier_brutes). Nomme et en dernier : JBActionButton et le
+        menu FR ne le passent pas, rien ne change pour eux."""
         # Serveur US : le contenu part dans le salon @pseudo-content du cliqueur
         # (le salon -menu est en lecture seule), via un proxy d'interaction.
         itx, target = interaction, None
@@ -4541,6 +4615,7 @@ class UserCog(commands.Cog):
         except Exception:
             itx, target = interaction, None
         token = _IDENTITY_OVERRIDE.set((model or "").strip().lower())
+        token_m = _MODEL_REELLE.set((brute_de or "").strip().lower() or None)
         try:
             _rappel = getattr(cmd, "callback", None)
             if _rappel is None:
@@ -4554,6 +4629,9 @@ class UserCog(commands.Cog):
             else:
                 await _rappel(self, itx)
         finally:
+            # Dans le finally, comme l'identite : une commande qui leve ne
+            # doit pas laisser la model reelle posee pour la suite de la tache.
+            _MODEL_REELLE.reset(token_m)
             _IDENTITY_OVERRIDE.reset(token)
         # (Plus de note « Direction #salon » : le panneau permanent l'annonce
         # deja, et elle doublait le nombre de messages dans le salon -menu.)
@@ -5745,6 +5823,22 @@ class UserCog(commands.Cog):
             gf.set_server_identity(interaction.guild, None)
             await interaction.response.send_message(
                 "✅ Identité dédiée retirée — retour à la rotation normale.", ephemeral=True)
+            return
+        # Une RESERVE (contenu partage) ne devient pas l'identite d'un
+        # serveur : avec reassigner:true, la boucle du dessous l'ecrivait sur
+        # chaque VA du serveur, et _link_identity leur generait des liens GMS
+        # a son nom. Sans reassigner, le ticket l'ignore : « les nouveaux VAs
+        # auront blonde » serait faux. Repli ouvert et journalise, comme
+        # cogs/admin._refus_reserve.
+        try:
+            import type_identite as _ti
+            _refus = _ti.refus_assignation(ident)
+        except Exception as e:
+            _refus = ""
+            log.warning("setidentite : controle « reserve » indisponible pour "
+                        "%r (%s: %s)", ident, type(e).__name__, e)
+        if _refus:
+            await interaction.response.send_message(f"❌ {_refus}", ephemeral=True)
             return
         gf.set_server_identity(interaction.guild, ident)
         if not reassigner:
@@ -7362,9 +7456,20 @@ def _jb_diagnostic_marche(marche="us") -> str:
     # comptages divergents, c'est le defaut qu'on vient de corriger.
     du_marche = [n for n in actives if _market_of(n) == marche]
     retenues = [n for n in du_marche if n.strip().lower() not in EXCLURE_MENU]
-    bouts = ["%d identite(s) au total" % len(toutes),
-             "%d active(s)" % len(actives),
-             "%d sur le marche %s" % (len(du_marche), marche.upper())]
+    # Les RESERVES sont deja retirees par list_identities : on les compte
+    # quand meme, sinon « 22 au total » devient « 21 » sans explication le
+    # jour ou une entree passe en reserve. Illisible -> etape omise.
+    try:
+        from cogs.welcome import reserves_hors_liste
+        reserves = list(reserves_hors_liste() or [])
+    except Exception:
+        reserves = []
+    bouts = ["%d identite(s) au total" % (len(toutes) + len(reserves))]
+    if reserves:
+        bouts.append("%d reserve(s) hors grille (%s)"
+                     % (len(reserves), ", ".join(sorted(reserves))))
+    bouts += ["%d active(s)" % len(actives),
+              "%d sur le marche %s" % (len(du_marche), marche.upper())]
     exclues = [n for n in du_marche if n.strip().lower() in EXCLURE_MENU]
     if exclues:
         bouts.append("%d exclue(s) du menu (%s)" % (len(exclues), ", ".join(sorted(exclues))))
@@ -7901,6 +8006,14 @@ class JBModelButton(discord.ui.DynamicItem[discord.ui.Button],
             await interaction.response.send_message(
                 "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
             return
+        # Une grille DEJA postee peut encore porter le bouton d'une entree
+        # devenue reserve depuis (le rafraichissement peut echouer). Sans ce
+        # refus, le panneau d'actions servirait son contenu comme celui d'une
+        # model, monte sur SES brutes -- qu'une reserve n'a pas.
+        _refus = _refus_reserve_jb(self.ident)
+        if _refus:
+            await interaction.response.send_message(_refus, ephemeral=True)
+            return
         cog = interaction.client.get_cog("UserCog")
         if cog is None:
             await interaction.response.send_message("Indisponible.", ephemeral=True)
@@ -7939,6 +8052,7 @@ class JBModelButton(discord.ui.DynamicItem[discord.ui.Button],
                         break
             except Exception:
                 cible = None
+        panneau_pose = False
         try:
             if cible is not None:
                 await cible.edit(embed=emb, view=view)
@@ -7951,9 +8065,25 @@ class JBModelButton(discord.ui.DynamicItem[discord.ui.Button],
                 except Exception:
                     pass
                 await interaction.response.defer()
+            panneau_pose = True
         except Exception:
             await interaction.response.send_message(
                 embed=emb, view=view, ephemeral=True)
+        # Le ✨ General suit la model choisie, APRES le defer et dans son
+        # propre try : le except du dessus repond par send_message, qui
+        # leverait InteractionResponded si la reponse etait deja partie.
+        # Panneau recree (cible absente) : le General est REPOSTE, sinon il
+        # resterait au-dessus du nouveau panneau. Panneau non pose : on ne
+        # touche a rien, le salon a un probleme que le General n'arrangera pas.
+        if panneau_pose:
+            try:
+                await _jb_general_maj(interaction.client, chan, self.ident,
+                                      interaction.guild,
+                                      reposter=(cible is None))
+            except Exception as e:
+                log.warning("General %s / %s : non mis a jour (%s: %s)",
+                            getattr(chan, "name", "?"), self.ident,
+                            type(e).__name__, e)
 
 
 # ---------------------------------------------------------------------------
@@ -8141,6 +8271,14 @@ class JBActionButton(discord.ui.DynamicItem[discord.ui.Button],
             await interaction.response.send_message(
                 "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
             return
+        # Un panneau d'actions peut rester affiche sur une entree devenue
+        # reserve depuis (seul le menu est rafraichi, pas ce panneau). Sans ce
+        # refus, Template partait monte sur ses brutes -- vides -- et le VA
+        # recevait un template nu marque « NE POSTE PAS ».
+        _refus = _refus_reserve_jb(self.ident)
+        if _refus:
+            await interaction.response.send_message(_refus, ephemeral=True)
+            return
         cog = interaction.client.get_cog("UserCog")
         entree = _jb_action(self.key)
         if cog is None or entree is None:
@@ -8197,6 +8335,513 @@ def _jb_panel(cog, ident, qty=3, marche="us", guild=None):
             color=discord.Color.dark_red())
     emb.set_footer(text="panneau-actions-us")
     return emb, view
+
+
+# ---------------------------------------------------------------------------
+# Menu « ✨ General » : 3e message epingle du salon -menu, sous le panneau
+# d'actions (serveur US seulement, decision du proprietaire).
+#
+# Il sert le contenu des RESERVES liees a la model choisie (type_identite) :
+# PP, bios, stories, story CTA, posts, captions, templates, flash. Pendant un
+# clic, l'identite active est la RESERVE (tout le contenu vient d'elle, sans
+# toucher aux fonctions de tirage) et la brute vient de la MODEL
+# (_MODEL_REELLE, _dossier_brutes).
+#
+# Un message A PART, pas des boutons de plus dans _jb_panel : sa vue compte
+# deja 24 composants sur 25. Prefixe « jbg: » : discord.py lance TOUS les
+# templates dynamiques qui correspondent, celui-ci ne doit recouper aucun
+# « jbus: ». Titre sans « Jailbreak » ni « menu » : le premier designe le
+# menu des models (_ensure_us_menu), le second fait supprimer le message
+# (_delete_old_menus). C'est le FOOTER qui designe le General.
+
+#: Les actions du General ET leur rangee. Ses cles SONT la liste blanche : un
+#: custom_id forge avec une autre cle est refuse. Libelle, commande et
+#: quantite se lisent par _jb_action : rien n'est recopie de _JB_ACTIONS_US.
+_JB_GENERAL_RANGEES = {
+    "pp": 1, "bio": 1, "story": 1, "storycta": 1, "post": 1,
+    "reelcaption": 2, "capbanger": 2,
+    "reelmonte": 3, "templatebanger": 3,
+    "templateflash": 4, "templateflashbanger": 4,
+}
+
+#: Celles qui posent le contenu sur une brute de la MODEL. Refusees d'avance
+#: si elle n'en a aucune : sinon 30 s de rendu, puis un template nu marque
+#: « NE POSTE PAS ». Template (reelmonte) n'y est pas : un brouillon sans
+#: coupe n'utilise pas de brute, et son repli l'annonce deja.
+_JB_GEN_BRUTE = frozenset({"reelcaption", "capbanger", "templatebanger",
+                           "templateflash", "templateflashbanger"})
+
+#: Boutons de choix de reserve, rangee 0 ; la 5e place est la quantite.
+_JB_GEN_MAX_RESERVES = 4
+
+_JB_GENERAL_FOOTER = "panneau-general-us"
+_JB_GENERAL_STORE = DATA_DIR / "us_general_panels.json"
+#: Plafond Discord d'un custom_id.
+_JB_CUSTOM_ID_MAX = 100
+#: Ce que les motifs jbg: acceptent comme nom (model ou reserve).
+_JB_NOM_BOUTON = re.compile(r"[a-z0-9_.\-]+")
+
+
+def _refus_reserve_jb(ident) -> str:
+    """Le message ephemere a opposer au clic si `ident` est une reserve,
+    sinon « ». La phrase de type_identite, la meme que sur le site, plus ce
+    que le VA peut faire a la place. Repli OUVERT et journalise : un module
+    qui ne repond pas ne doit pas bloquer tout le panneau."""
+    idl = (ident or "").strip().lower()
+    if not idl or idl == "_":
+        return ""
+    try:
+        import type_identite as _ti
+        refus = _ti.refus_assignation(idl)
+    except Exception as e:
+        log.warning("controle « reserve » indisponible pour %r (%s: %s)",
+                    idl, type(e).__name__, e)
+        return ""
+    if not refus:
+        return ""
+    return (f"⛔ {refus}\nElle n'est plus dans la grille des models : "
+            "clique une model qui y est liée, puis le **✨ General** "
+            "sous le panneau d'actions.")
+
+
+def _titre_general(titre: str) -> str:
+    """Le titre, sauf s'il contient un mot qui designe un AUTRE message (un
+    nom de model peut en contenir un) : on retombe alors sur « ✨ General »."""
+    bas = (titre or "").lower()
+    if "menu" in bas or "jailbreak" in bas:
+        return "✨ General"
+    return titre
+
+
+def _jb_general(cog, model, qty=3, reserve=None, guild=None):
+    """(embed, view ou None) du menu ✨ General pour `model`.
+
+    Trois etats, et view=None dans les deux premiers : sans ca, un edit
+    garderait les boutons de la model PRECEDENTE, qui serviraient SA brute.
+      - « _ » : aucune model choisie, on attend le clic au-dessus ;
+      - aucune reserve retenue : on le dit, avec les liens ecartes et leur
+        raison (rien n'est ecarte en silence), et le chemin sur le site ;
+      - sinon : les 11 actions de la reserve active (`reserve` si elle est
+        encore liee, sinon la premiere), et ses voisines en boutons de choix
+        s'il y en a plusieurs.
+    `cog` n'est pas lu : il est la pour la symetrie avec _jb_panel.
+    """
+    model = (model or "_").strip().lower() or "_"
+    try:
+        qty = max(1, int(qty))
+    except (TypeError, ValueError):
+        qty = 3
+    emb = discord.Embed(color=discord.Color.teal())
+    emb.set_footer(text=_JB_GENERAL_FOOTER)
+    if model == "_":
+        emb.title = "✨ General — choisis une model au-dessus 👆"
+        emb.description = (
+            "Quand tu cliques une model, ce message sert le contenu des "
+            "**réserves** qui lui sont liées : PP, bios, stories, posts, "
+            "captions, templates et flash.")
+        return emb, None
+    nom = model.capitalize()
+    if _est_reserve_sure(model):
+        emb.title = _titre_general(f"✨ General — {nom} est une réserve")
+        emb.description = ("Une réserve ne se choisit pas dans la grille : "
+                           "clique une model qui y est liée.")
+        return emb, None
+    try:
+        import type_identite as _ti
+        retenues, ecartees = _ti.reserves_liees(model)
+    except Exception as e:
+        log.warning("General %s : liens des reserves illisibles (%s: %s)",
+                    model, type(e).__name__, e)
+        emb.title = _titre_general(f"✨ General — {nom}")
+        emb.description = (f"Liens des réserves illisibles ({type(e).__name__}) : "
+                           "reclique la model dans un instant.")
+        return emb, None
+    # Le custom_id n'accepte que [a-z0-9_.-] (motif des boutons) : un nom
+    # hors de ce jeu ferait lever discord.py a la construction, et le
+    # General entier tomberait. On l'ecarte, en le disant.
+    _hors_motif = [r for r in retenues if not _JB_NOM_BOUTON.fullmatch(r)]
+    if _hors_motif:
+        retenues = [r for r in retenues if r not in _hors_motif]
+        ecartees = list(ecartees) + [(r, "nom illisible dans un bouton Discord")
+                                     for r in _hors_motif]
+    if not _JB_NOM_BOUTON.fullmatch(model):
+        emb.title = _titre_general(f"✨ General — {nom}")
+        emb.description = ("Nom de model illisible dans un bouton Discord "
+                           "(lettres minuscules, chiffres, « _ . - ») : "
+                           "renomme-la sur le site.")
+        return emb, None
+    lignes_ecartees = [f"• `{n}` : {r}" for n, r in ecartees[:10]]
+    if len(ecartees) > 10:
+        lignes_ecartees.append(f"• … et {len(ecartees) - 10} autre(s)")
+    if not retenues:
+        emb.title = _titre_general(f"✨ General — aucune réserve liée à {nom}")
+        desc = [f"Rien à servir ici pour **{nom}**."]
+        if lignes_ecartees:
+            desc.append("Lien(s) écarté(s) :")
+            desc += lignes_ecartees
+        desc.append(f"Pour en lier une : site → **Bibliothèque › {nom} › "
+                    "Modifier › Réserves liées**.")
+        emb.description = "\n".join(desc)
+        return emb, None
+    reserve = (reserve or "").strip().lower()
+    active = reserve if reserve in retenues else retenues[0]
+    montrees = []
+    if len(retenues) >= 2:
+        montrees = retenues[:_JB_GEN_MAX_RESERVES]
+        # La reserve active reste toujours visible et marquee, meme si un
+        # custom_id plus ancien la designe au-dela des quatre premieres.
+        if active not in montrees:
+            montrees[-1] = active
+    # Un custom_id de plus de 100 caracteres fait refuser le message ENTIER
+    # par Discord : on le dit plutot que de poster des boutons morts.
+    _plus_long = max(len(f"jbg:a:{model}:{r}:{k}:{qty}")
+                     for r in (montrees or [active]) for k in _JB_GENERAL_RANGEES)
+    if _plus_long > _JB_CUSTOM_ID_MAX:
+        log.warning("General %s : custom_id de %d caracteres (> %d), noms trop "
+                    "longs", model, _plus_long, _JB_CUSTOM_ID_MAX)
+        emb.title = _titre_general(f"✨ General — {nom}")
+        emb.description = (f"Noms trop longs pour Discord ({_plus_long} caractères "
+                           f"sur {_JB_CUSTOM_ID_MAX}) : raccourcis le nom de la "
+                           "model ou de la réserve sur le site.")
+        return emb, None
+    view = discord.ui.View(timeout=None)
+    for r in montrees:
+        view.add_item(JBGenReserveBouton(model, r, qty, active=(r == active)))
+    view.add_item(JBGenQtyBouton(model, active, qty))
+    _ic = icones_actions(guild)          # lecture seule : rien sur le reseau
+    manquantes = []
+    for key, rangee in _JB_GENERAL_RANGEES.items():
+        entree = _jb_action(key)
+        if entree is None:
+            manquantes.append(key)
+            continue
+        view.add_item(JBGenButton(model, active, key, qty, label=entree[1],
+                                  row=rangee, icone=_ic.get(key)))
+    if manquantes:
+        log.warning("General : actions inconnues de _jb_action, boutons "
+                    "absents : %s", ", ".join(manquantes))
+    act = active.capitalize()
+    emb.title = _titre_general(f"✨ General — {act} pour {nom}")
+    desc = [f"Contenu de la réserve **{act}**. Caption, Template et Flash "
+            f"sont posés sur une brute de **{nom}**."]
+    if montrees:
+        desc.append(f"{len(retenues)} réserves liées : clique un nom au-dessus "
+                    "pour changer de réserve.")
+        cachees = [r for r in retenues if r not in montrees]
+        if cachees:
+            desc.append(f"+{len(cachees)} autre(s), sans bouton (4 au plus) : "
+                        + ", ".join(cachees[:10])
+                        + ("…" if len(cachees) > 10 else "") + ".")
+    if lignes_ecartees:
+        desc.append("Lien(s) écarté(s) :")
+        desc += lignes_ecartees
+    if manquantes:
+        desc.append(f"⚠️ {len(manquantes)} action(s) indisponible(s) : "
+                    + ", ".join(manquantes) + ".")
+    desc.append(f"\n📦 **Quantité : {qty} média par action** "
+                "_(bouton Quantité, puis tape le nombre)_.")
+    desc.append("Le contenu arrive dans ton salon **-content** 👇")
+    emb.description = "\n".join(desc)
+    return emb, view
+
+
+class JBGenButton(discord.ui.DynamicItem[discord.ui.Button],
+                  template=r"jbg:a:(?P<model>[a-z0-9_.\-]+):(?P<res>[a-z0-9_.\-]+)"
+                           r":(?P<key>[a-z]+):(?P<qty>\d+)"):
+    """Une action du ✨ General : le contenu de la reserve `res`, la brute de
+    la model `model`. Tout l'etat voyage dans le custom_id : le bouton repond
+    encore apres un redemarrage."""
+
+    def __init__(self, model, res, key, qty, label=None, row=1, icone=None):
+        self.model = (model or "_").lower()
+        self.res = (res or "_").lower()
+        self.key = key
+        self.qty = int(qty)
+        _e = _jb_action(key)
+        lib = label or (_e[1] if _e else key)
+        _btn = discord.ui.Button(
+            label=(_libelle_sans_emoji(lib) if icone is not None else lib),
+            style=discord.ButtonStyle.primary, row=row,
+            custom_id=f"jbg:a:{self.model}:{self.res}:{self.key}:{self.qty}")
+        if icone is not None:
+            _btn.emoji = icone
+        super().__init__(_btn)
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match, /):
+        return cls(match["model"], match["res"], match["key"], match["qty"])
+
+    async def callback(self, interaction: discord.Interaction):
+        if not _jb_can_use(interaction):
+            await interaction.response.send_message(
+                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
+            return
+        if self.key not in _JB_GENERAL_RANGEES:
+            await interaction.response.send_message(
+                f"Action `{self.key}` absente du ✨ General.", ephemeral=True)
+            return
+        cog = interaction.client.get_cog("UserCog")
+        entree = _jb_action(self.key)
+        if cog is None or entree is None:
+            await interaction.response.send_message(
+                f"Action indisponible (`{self.key}`).", ephemeral=True)
+            return
+        _k, _label, cmd_attr, supports_count = entree
+        cmd = getattr(cog, cmd_attr, None)
+        if cmd is None:
+            await interaction.response.send_message(
+                f"Action indisponible (`{cmd_attr}`).", ephemeral=True)
+            return
+        # La model a pu devenir une reserve depuis que ce General est affiche.
+        _refus = _refus_reserve_jb(self.model)
+        if _refus:
+            await interaction.response.send_message(_refus, ephemeral=True)
+            return
+        nom, res = self.model.capitalize(), self.res.capitalize()
+        # LE LIEN EST REVERIFIE AU CLIC : il a pu etre retire sur le site,
+        # la reserve changer de marche ou de nature, depuis que ce message est
+        # affiche. Rien ne se rafraichit tout seul dans le salon.
+        try:
+            import type_identite as _ti
+            retenues, ecartees = _ti.reserves_liees(self.model)
+        except Exception as e:
+            log.warning("General %s/%s : liens illisibles (%s: %s)",
+                        self.model, self.res, type(e).__name__, e)
+            await interaction.response.send_message(
+                "Liens des réserves illisibles : réessaie dans un instant.",
+                ephemeral=True)
+            return
+        if self.res not in retenues:
+            raison = dict(ecartees).get(self.res)
+            await interaction.response.send_message(
+                f"La réserve **{res}** n'est plus liée à **{nom}**"
+                + (f" ({raison})" if raison else "")
+                + ". Reclique la model au-dessus : ce message se remet à jour.",
+                ephemeral=True)
+            return
+        if self.key in _JB_GEN_BRUTE:
+            try:
+                import brutes_off as _off
+                brutes = _off.lister(IDENTITIES_DIR / self.model / "brutes",
+                                     extensions=VIDEO_EXTS)
+            except Exception as e:
+                # La commande relit le meme dossier et dira son propre echec.
+                log.warning("General %s : brutes illisibles (%s: %s)",
+                            self.model, type(e).__name__, e)
+                brutes = None
+            if brutes is not None and not brutes:
+                await interaction.response.send_message(
+                    f"**{nom}** n'a aucune vidéo brute active : "
+                    f"{_libelle_sans_emoji(_label)} pose le contenu de "
+                    f"**{res}** sur une brute de la model.\n"
+                    f"_(Un admin en ajoute sur le site, onglet **Vidéo brut** "
+                    f"de {nom}.)_", ephemeral=True)
+                return
+        await cog._run_for_model(interaction, self.res, cmd,
+                                 count=self.qty, supports_count=supports_count,
+                                 brute_de=self.model)
+
+
+class JBGenQtyBouton(discord.ui.DynamicItem[discord.ui.Button],
+                     template=r"jbg:qb:(?P<model>[a-z0-9_.\-]+):(?P<res>[a-z0-9_.\-]+)"
+                              r":(?P<qty>\d+)"):
+    """La quantite du ✨ General : meme fenetre de saisie que le panneau
+    d'actions, et la reserve active reste celle qu'on regardait."""
+
+    def __init__(self, model, res, qty):
+        self.model = (model or "_").lower()
+        self.res = (res or "_").lower()
+        self.qty = int(qty)
+        super().__init__(discord.ui.Button(
+            label=f"📦 Quantité : {self.qty} — clique pour changer",
+            style=discord.ButtonStyle.secondary, row=0,
+            custom_id=f"jbg:qb:{self.model}:{self.res}:{self.qty}"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match, /):
+        return cls(match["model"], match["res"], match["qty"])
+
+    async def callback(self, interaction: discord.Interaction):
+        if not _jb_can_use(interaction):
+            await interaction.response.send_message(
+                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
+            return
+
+        async def _suite(inter, q):
+            emb2, vue2 = _jb_general(inter.client.get_cog("UserCog"), self.model,
+                                     q, reserve=self.res, guild=inter.guild)
+            # Depuis une soumission de Modal, edit_message modifie le message
+            # d'origine : pas de General en double dans le salon.
+            await inter.response.edit_message(embed=emb2, view=vue2)
+
+        await interaction.response.send_modal(_JBQtyModal(_suite))
+
+
+class JBGenReserveBouton(discord.ui.DynamicItem[discord.ui.Button],
+                         template=r"jbg:r:(?P<model>[a-z0-9_.\-]+):(?P<res>[a-z0-9_.\-]+)"
+                                  r":(?P<qty>\d+)"):
+    """Choix de la reserve active, quand une model en a plusieurs. Une seule
+    a la fois : les fonctions de tirage ne prennent qu'une identite."""
+
+    def __init__(self, model, res, qty, active=False):
+        self.model = (model or "_").lower()
+        self.res = (res or "_").lower()
+        self.qty = int(qty)
+        super().__init__(discord.ui.Button(
+            label=_couper_discord(self.res.capitalize(), 80),
+            style=(discord.ButtonStyle.success if active
+                   else discord.ButtonStyle.secondary), row=0,
+            custom_id=f"jbg:r:{self.model}:{self.res}:{self.qty}"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match, /):
+        return cls(match["model"], match["res"], match["qty"])
+
+    async def callback(self, interaction: discord.Interaction):
+        if not _jb_can_use(interaction):
+            await interaction.response.send_message(
+                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
+            return
+        # _jb_general revalide le lien : une reserve deliee entre-temps
+        # retombe sur la premiere encore liee, ou sur l'etat « aucune ».
+        emb, vue = _jb_general(interaction.client.get_cog("UserCog"), self.model,
+                               self.qty, reserve=self.res, guild=interaction.guild)
+        await interaction.response.edit_message(embed=emb, view=vue)
+
+
+def _jb_general_ids() -> dict:
+    """{str(id du salon): str(id du General)}. Un fichier a part de
+    us_panels.json : celui-la est lu par int(), un autre format y casserait
+    le panneau d'actions."""
+    try:
+        d = safe_json.load(_JB_GENERAL_STORE, default={}) or {}
+    except Exception as e:
+        log.warning("us_general_panels.json illisible (%s: %s)",
+                    type(e).__name__, e)
+        return {}
+    if not isinstance(d, dict):
+        return {}
+    return {str(k): str(v) for k, v in d.items()}
+
+
+def _jb_general_set(channel_id, message_id):
+    d = _jb_general_ids()
+    d[str(channel_id)] = str(int(message_id))
+    try:
+        safe_json.write(_JB_GENERAL_STORE, d, indent=2)
+    except Exception as e:
+        # Sans l'id, le prochain clic cherche le General dans les epingles :
+        # plus lent, pas faux. On le dit quand meme.
+        log.warning("us_general_panels.json non ecrit (%s: %s)",
+                    type(e).__name__, e)
+
+
+def _jb_panneaux_oublier(channel_id):
+    """Oublie les ids memorises du panneau d'actions ET du General d'un
+    salon (messages supprimes). Un seul point d'oubli pour les deux fichiers :
+    cogs/welcome.py l'appelle au lieu d'ecrire ces chemins en dur."""
+    cle = str(channel_id)
+    for chemin, lire in ((_JB_PANEL_STORE, _jb_panel_ids),
+                         (_JB_GENERAL_STORE, _jb_general_ids)):
+        d = lire()
+        if cle not in d:
+            continue
+        d.pop(cle, None)
+        try:
+            safe_json.write(chemin, d, indent=2)
+        except Exception as e:
+            log.warning("%s : id du salon %s non oublie (%s: %s)",
+                        chemin.name, cle, type(e).__name__, e)
+
+
+def _est_general(m, moi) -> bool:
+    try:
+        return (m is not None and getattr(m.author, "id", None) == moi
+                and bool(m.embeds)
+                and (m.embeds[0].footer.text or "") == _JB_GENERAL_FOOTER)
+    except Exception:
+        return False
+
+
+async def _jb_general_maj(client, chan, model, guild, reposter=False):
+    """Met le ✨ General du salon `chan` a jour pour `model`. -> True si fait.
+
+    Edite par l'id memorise, sans fetch (un appel reseau de moins dans les 3 s
+    de Discord) ; a defaut cherche dans les epingles par le footer ; a defaut
+    le poste, l'epingle et memorise son id.
+
+    reposter=True : le panneau d'actions vient d'etre RECREE en bas du salon.
+    Un General simplement edite resterait au-dessus de lui ; on supprime
+    l'ancien et on en poste un nouveau, dessous.
+    """
+    if chan is None:
+        return False
+    cog = client.get_cog("UserCog") if client is not None else None
+    emb, view = _jb_general(cog, model, 3, guild=guild)
+    moi = getattr(getattr(client, "user", None), "id", None)
+    _nom = getattr(chan, "name", "?")
+    memo = _jb_general_ids().get(str(chan.id))
+    try:
+        epingles = None
+        if reposter:
+            anciens = set()
+            if memo:
+                try:
+                    anciens.add(int(memo))
+                except ValueError:
+                    pass
+            try:
+                epingles = await chan.pins()
+                anciens |= {m.id for m in epingles if _est_general(m, moi)}
+            except Exception as e:
+                log.warning("General %s : epingles illisibles (%s: %s)",
+                            _nom, type(e).__name__, e)
+            for mid in anciens:
+                try:
+                    await chan.get_partial_message(mid).delete()
+                except Exception as e:
+                    # Deja supprime le plus souvent (NotFound) : sans gravite,
+                    # mais un General reste peut-etre au-dessus du panneau.
+                    log.info("General %s : ancien message %s non supprime "
+                             "(%s)", _nom, mid, type(e).__name__)
+        else:
+            if memo:
+                try:
+                    await chan.get_partial_message(int(memo)).edit(embed=emb, view=view)
+                    return True
+                except (discord.NotFound, discord.Forbidden, ValueError):
+                    pass                       # supprime ou id perime : on cherche
+                except discord.HTTPException as e:
+                    # Autre refus (debit, panne) : le message existe sans
+                    # doute encore, en poster un second ferait un doublon
+                    # dont les boutons serviraient l'ancienne model.
+                    log.warning("General %s : edition refusee (%s: %s)",
+                                _nom, type(e).__name__, e)
+                    return False
+            try:
+                epingles = await chan.pins()
+            except Exception as e:
+                log.warning("General %s : epingles illisibles (%s: %s)",
+                            _nom, type(e).__name__, e)
+                epingles = []
+            for m in epingles:
+                if _est_general(m, moi):
+                    await m.edit(embed=emb, view=view)
+                    _jb_general_set(chan.id, m.id)
+                    return True
+        msg = await (chan.send(embed=emb, view=view) if view is not None
+                     else chan.send(embed=emb))
+        _jb_general_set(chan.id, msg.id)
+        try:
+            await msg.pin()
+        except Exception as e:
+            log.warning("General %s : pose mais non epingle (%s: %s)",
+                        _nom, type(e).__name__, e)
+        return True
+    except Exception as e:
+        log.warning("General %s / %s : %s: %s", _nom, model,
+                    type(e).__name__, e)
+        return False
 
 
 class JailbreakModelsView(discord.ui.View):

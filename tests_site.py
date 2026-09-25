@@ -15846,6 +15846,509 @@ try:
 except Exception as _eRT:
     check("ordre des reserves : testable", False, repr(_eRT)[:160])
 
+print()
+print("=" * 70)
+print("MENU ✨ GENERAL : reserves liees, cote bot et cote site (etape 7)")
+print("=" * 70)
+# Tout est redirige vers un dossier temporaire : natures, liens, dossiers
+# d'identites, ids des panneaux. Rien n'est ecrit dans data/.
+try:
+    import ast as _astGn
+    import asyncio as _aioGn
+    import tempfile as _tfGn
+    import types as _tyGn
+    import pathlib as _plGn
+    import discord as _dGn
+    import type_identite as _tiGn
+    import guild_features as _gfGn
+    import jailbreak as _jbGn
+    import cogs.user as _cuGn
+    import cogs.welcome as _cwGn
+    _dirGn = _plGn.Path(_tfGn.mkdtemp(prefix="general_"))
+    _idGn = _dirGn / "identities"
+    _M30 = "zgen_" + "m" * 25           # 30 caracteres, le plafond vise
+    _R30 = ["zgen_" + c * 25 for c in "abcde"]
+    for _n in (["zgen_lola", "zgen_nue", "zgen_blonde", "zgen_brune", "zgen_rousse",
+                "zgen_r4", "zgen_r5", "zgen_usa", "zgen_ident", _M30] + _R30):
+        (_idGn / _n).mkdir(parents=True)
+    (_idGn / "zgen_lola" / "brutes").mkdir()
+    (_idGn / "zgen_lola" / "brutes" / "b1.mp4").write_bytes(b"x")
+    _savGn = {
+        "ti": (_tiGn.FICHIER, _tiGn.FICHIER_LIENS, _tiGn._DOSSIER, _tiGn._marche),
+        "cu": (_cuGn.IDENTITIES_DIR, _cuGn._JB_PANEL_STORE, _cuGn._JB_GENERAL_STORE,
+               _cuGn._jb_can_use, _cuGn.marche_du_membre, _cuGn._jb_general),
+        "cw": (_cwGn.IDENTITIES_DIR,),
+        "gf": (_gfGn.is_us_guild, _gfGn._load_svid, _gfGn.set_server_identity),
+        "jb": (_jbGn._load,),
+    }
+    try:
+        _tiGn.FICHIER = _dirGn / "identity_type.json"
+        _tiGn.FICHIER_LIENS = _dirGn / "identity_reserves.json"
+        _tiGn._DOSSIER = _idGn
+        _tiGn._CACHE.update(sig=None, data={})
+        _tiGn._CACHE_LIENS.update(sig=None, data={})
+        safe_json.write(_tiGn.FICHIER, dict(
+            {n: "reserve" for n in ["zgen_blonde", "zgen_brune", "zgen_rousse", "zgen_r4",
+                                    "zgen_r5", "zgen_usa"] + _R30},
+            zgen_ident="identite"))
+        # Le marche est pose ici plutot que lu dans data/identity_market.json.
+        _tiGn._marche = lambda n: "us" if n == "zgen_usa" else "fr"
+        _cuGn.IDENTITIES_DIR = _idGn
+        _cwGn.IDENTITIES_DIR = _idGn
+        _cuGn._JB_PANEL_STORE = _dirGn / "us_panels.json"
+        _cuGn._JB_GENERAL_STORE = _dirGn / "us_general_panels.json"
+
+        # -- 1. l'interface figee existe, et welcome.py n'importe que du reel --
+        # Le 25/09, welcome.py importait cinq fonctions que cogs/user.py ne
+        # definissait pas : ImportError avale par un except, aucun General
+        # pose, et /resetmenus annoncait quand meme « General epingles ».
+        _nomsGn = ("_MODEL_REELLE", "_dossier_brutes", "_jb_general", "_jb_general_ids",
+                   "_jb_general_set", "_jb_panneaux_oublier", "_jb_general_maj",
+                   "JBGenButton", "JBGenQtyBouton", "JBGenReserveBouton")
+        check("general : cogs/user.py definit toute l interface figee",
+              all(hasattr(_cuGn, n) for n in _nomsGn),
+              str([n for n in _nomsGn if not hasattr(_cuGn, n)]))
+        check("general : fichier des ids a part (us_general_panels.json)",
+              _savGn["cu"][2].name == "us_general_panels.json")
+        _impGn = set()
+        for _nd in _astGn.walk(_astGn.parse(_plGn.Path("cogs/welcome.py").read_text(encoding="utf-8"))):
+            if isinstance(_nd, _astGn.ImportFrom) and _nd.module == "cogs.user":
+                _impGn |= {a.name for a in _nd.names}
+        check("general : chaque nom que welcome.py importe de cogs.user existe",
+              _impGn and all(hasattr(_cuGn, n) for n in _impGn),
+              str(sorted(n for n in _impGn if not hasattr(_cuGn, n))))
+        check("general : les boutons sont enregistres dans cog_load, a part et journalises",
+              "add_dynamic_items(JBGenButton, JBGenQtyBouton," in _plGn.Path("cogs/user.py").read_text(encoding="utf-8"))
+
+        # -- 2. type_identite : liens et refus --------------------------------
+        _okL, _rfL = _tiGn.lier("zgen_lola", ["zgen_usa"])
+        check("liens : une reserve d un autre marche est refusee, nommee",
+              not _okL and "zgen_usa" in " ".join(_rfL), str(_rfL))
+        _okL, _rfL = _tiGn.lier("zgen_lola", ["zgen_ident"])
+        check("liens : une cible qui n est pas une reserve est refusee",
+              not _okL and "zgen_ident" in " ".join(_rfL), str(_rfL))
+        _okL, _rfL = _tiGn.lier("zgen_blonde", ["zgen_brune"])
+        check("liens : une reserve ne se lie a rien", not _okL, str(_rfL))
+        check("liens : une model se lie a une reserve de son marche",
+              _tiGn.lier("zgen_lola", ["zgen_blonde"]) == (True, [])
+              and _tiGn.reserves_liees("zgen_lola") == (["zgen_blonde"], []))
+        # Disque plein : safe_json.write rend False sans lever. La route
+        # repondait « ok » et la case cochee n etait enregistree nulle part.
+        _wrGn = _tiGn.safe_json.write
+        try:
+            _tiGn.safe_json.write = lambda *a, **k: False
+            _okW, _rfW = _tiGn.lier("zgen_lola", [])
+        finally:
+            _tiGn.safe_json.write = _wrGn
+        _tiGn._CACHE_LIENS.update(sig=None, data={})
+        check("liens : un echec d ecriture est un refus nomme, pas un ok",
+              not _okW and "écriture impossible" in " ".join(_rfW)
+              and _tiGn.reserves_liees("zgen_lola") == (["zgen_blonde"], []), str(_rfW))
+        _srcGnJ = _plGn.Path("web_upload.py").read_text(encoding="utf-8")
+        check("liens : Modifier n efface pas un lien hors service sans qu une case valable change",
+              "var rs0=(identEditCtx.reserves0||[]).filter(function(r){ return vr.indexOf(r) >= 0; })" in _srcGnJ)
+        safe_json.write(_tiGn.FICHIER_LIENS, {"zgen_nue": ["zgen_blonde", "zgen_ident", "zgen_fantome"],
+                                              "zgen_lola": ["zgen_blonde"]})
+        _tiGn._CACHE_LIENS.update(sig=None, data={})
+        _retL, _ecL = _tiGn.reserves_liees("zgen_nue")
+        check("liens : a la lecture, les liens invalides sont ecartes AVEC leur raison",
+              _retL == ["zgen_blonde"] and dict(_ecL).get("zgen_ident") == "n'est plus une réserve"
+              and dict(_ecL).get("zgen_fantome") == "dossier absent", str(_ecL))
+        check("liens : sans_reserves garde l ordre et une « identite »",
+              _tiGn.sans_reserves(["zgen_lola", "zgen_blonde", "zgen_ident"]) == ["zgen_lola", "zgen_ident"])
+        check("liens : refus_assignation nomme la reserve, rien pour une model",
+              "zgen_blonde" in _tiGn.refus_assignation("zgen_blonde")
+              and _tiGn.refus_assignation("zgen_lola") == "")
+        check("liens : list_identities ecarte la reserve, avec_reserves la garde",
+              "zgen_blonde" not in _cwGn.list_identities()
+              and "zgen_blonde" in _cwGn.list_identities(avec_reserves=True)
+              and "zgen_ident" in _cwGn.list_identities())
+
+        # -- 3. le contexte : contenu de la reserve, brute de la model --------
+        _tokGn = _cuGn._MODEL_REELLE.set("zgen_lola")
+        try:
+            check("contexte : la brute vient de la model reelle",
+                  _cuGn._dossier_brutes("zgen_blonde") == _idGn / "zgen_lola" / "brutes")
+            check("contexte : le stock noctus n est jamais servi en mode General",
+                  _cuGn._reserve_ouverte_aux_va() is False)
+            check("contexte : pas de PP du pool partage pour une reserve sans PP",
+                  _cuGn.random_profile_pic("zgen_blonde") is None)
+            check("contexte : pas de bio partagee pour une reserve sans bio",
+                  _cuGn.random_bio_for("zgen_blonde") is None)
+        finally:
+            _cuGn._MODEL_REELLE.reset(_tokGn)
+        check("contexte : hors General, la brute reste celle de l identite",
+              _cuGn._dossier_brutes("zgen_blonde") == _idGn / "zgen_blonde" / "brutes")
+
+        _vuGn = {}
+
+        async def _cmdGn(itx, n=None):
+            _vuGn.update(ident=_cuGn._IDENTITY_OVERRIDE.get(), reelle=_cuGn._MODEL_REELLE.get(),
+                         brutes=_cuGn._dossier_brutes(_cuGn._IDENTITY_OVERRIDE.get()), n=n)
+
+        async def _cmdKo(itx, n=None):
+            raise RuntimeError("commande en echec")
+
+        _itxNu = _tyGn.SimpleNamespace(guild=None, channel=None, user=None)
+        _aioGn.run(_cuGn.UserCog._run_for_model(object(), _itxNu, "zgen_blonde", _cmdGn,
+                                                count=4, supports_count=True, brute_de="zgen_lola"))
+        check("contexte : _run_for_model pose la reserve ET la model reelle",
+              _vuGn == {"ident": "zgen_blonde", "reelle": "zgen_lola",
+                        "brutes": _idGn / "zgen_lola" / "brutes", "n": 4}, str(_vuGn))
+        try:
+            _aioGn.run(_cuGn.UserCog._run_for_model(object(), _itxNu, "zgen_blonde", _cmdKo,
+                                                    brute_de="zgen_lola"))
+        except RuntimeError:
+            pass
+        check("contexte : remis a zero apres la commande, meme si elle leve",
+              _cuGn._MODEL_REELLE.get() is None and _cuGn._IDENTITY_OVERRIDE.get() is None)
+
+        # -- 4. le message General : etats, rangees, custom_id ------------------
+        _tplJbus = [getattr(c, "__discord_ui_compiled_template__")
+                    for c in (_cuGn.JBModelButton, _cuGn.JBQtyBouton, _cuGn.JBQtySelect,
+                              _cuGn.JBActionButton)]
+        _tplJbg = [getattr(c, "__discord_ui_compiled_template__")
+                   for c in (_cuGn.JBGenButton, _cuGn.JBGenQtyBouton, _cuGn.JBGenReserveBouton)]
+
+        def _idsGn(v):
+            return [getattr(getattr(i, "item", i), "custom_id", "") for i in v.children]
+
+        _eAtt, _vAtt = _cuGn._jb_general(None, "_")
+        _eNue, _vNue = _cuGn._jb_general(None, "zgen_ident")
+        check("general : en attente et sans reserve, AUCUN bouton (view=None)",
+              _vAtt is None and _vNue is None)
+        check("general : sans reserve, il dit ou la lier sur le site",
+              "Réserves liées" in (_eNue.description or ""), (_eNue.description or "")[:120])
+        _eNue2, _vNue2 = _cuGn._jb_general(None, "zgen_nue")
+        check("general : les liens ecartes sont dits, avec leur raison",
+              "zgen_ident" in _eNue2.description and "zgen_fantome" in _eNue2.description
+              and _vNue2 is not None)
+        _e1, _v1 = _cuGn._jb_general(None, "zgen_lola", 3)
+        _ids1 = _idsGn(_v1)
+        check("general : une reserve -> 11 actions + la quantite, pas de choix de reserve",
+              len(_ids1) == 12 and not any(i.startswith("jbg:r:") for i in _ids1), str(_ids1)[:160])
+        check("general : les cles sont exactement celles de la liste blanche",
+              {i.split(":")[4] for i in _ids1 if i.startswith("jbg:a:")} == set(_cuGn._JB_GENERAL_RANGEES)
+              and set(_cuGn._JB_GENERAL_RANGEES) <= {a[0] for a in _cuGn._JB_ACTIONS_US})
+        check("general : footer « panneau-general-us », jamais « menu » ni « Jailbreak » dans le titre",
+              all(e.footer.text == "panneau-general-us"
+                  and "menu" not in (e.title or "").lower() and "jailbreak" not in (e.title or "").lower()
+                  for e in (_eAtt, _eNue, _e1)))
+        check("general : un nom qui contient « menu » ne passe pas dans le titre",
+              _cuGn._titre_general("✨ General — Emenu pour Lola") == "✨ General")
+        safe_json.write(_tiGn.FICHIER_LIENS, {"zgen_lola": ["zgen_blonde"], _M30: _R30})
+        _tiGn._CACHE_LIENS.update(sig=None, data={})
+        _e5, _v5 = _cuGn._jb_general(None, _M30, 100, reserve=_R30[4])
+        _ids5 = _idsGn(_v5)
+        _rows5 = {}
+        for _it in _v5.children:
+            _rows5[_it.row] = _rows5.get(_it.row, 0) + 1
+        check("general : 5 reserves -> 4 boutons de choix + quantite en rangee 0, aucune rangee pleine",
+              _rows5.get(0) == 5 and all(n <= 5 for n in _rows5.values())
+              and len(_v5.children) <= 25, str(_rows5))
+        check("general : la reserve active reste visible et marquee, meme 5e",
+              any(getattr(i.item, "style", None) == _dGn.ButtonStyle.success
+                  and i.item.custom_id.startswith("jbg:r:") and _R30[4] in i.item.custom_id
+                  for i in _v5.children))
+        check("general : le surplus est compte dans l embed, pas ecarte en silence",
+              "+1 autre" in (_e5.description or ""), (_e5.description or "")[:200])
+        check("general : custom_id de 100 caracteres au plus, noms de 30 et quantite 100",
+              max(len(i) for i in _ids5) <= 100, str(max(len(i) for i in _ids5)))
+        check("general : aucun custom_id jbg: ne tombe sous un motif jbus:",
+              not any(t.fullmatch(i) for t in _tplJbus for i in _ids5 + _ids1))
+        check("general : chaque custom_id jbg: correspond a UN seul motif du General",
+              all(sum(bool(t.fullmatch(i)) for t in _tplJbg) == 1 for i in _ids5 + _ids1))
+
+        # -- 5. les clics -------------------------------------------------------
+        _cuGn._jb_can_use = lambda i: True
+        _appelsGn = []
+
+        class _CogGn:
+            templateflash = "CMD_FLASH"
+            story = "CMD_STORY"
+
+            async def _run_for_model(self, interaction, model, cmd, count=None,
+                                     supports_count=False, brute_de=None):
+                _appelsGn.append((model, cmd, count, brute_de))
+
+        class _RepGn:
+            def __init__(self):
+                self.msgs, self.fait = [], False
+
+            async def send_message(self, *a, **k):
+                self.msgs.append((a[0] if a else k.get("content"), k.get("ephemeral")))
+                self.fait = True
+
+            async def defer(self, *a, **k):
+                self.fait = True
+
+            def is_done(self):
+                return self.fait
+
+        def _itxGn(chan=None):
+            _c = _CogGn()
+            return _tyGn.SimpleNamespace(
+                client=_tyGn.SimpleNamespace(get_cog=lambda n: _c, user=_tyGn.SimpleNamespace(id=1)),
+                response=_RepGn(), guild=_tyGn.SimpleNamespace(emojis=[], id=7), user=None,
+                channel=chan)
+
+        _i = _itxGn()
+        _aioGn.run(_cuGn.JBGenButton("zgen_lola", "zgen_blonde", "templateflash", 3).callback(_i))
+        check("clic : la reserve fournit le contenu, la model la brute",
+              _appelsGn == [("zgen_blonde", "CMD_FLASH", 3, "zgen_lola")], str(_appelsGn))
+        _appelsGn.clear(); _i = _itxGn()
+        _aioGn.run(_cuGn.JBGenButton("zgen_lola", "zgen_brune", "story", 3).callback(_i))
+        check("clic : une reserve qui n est plus liee est refusee, avec la marche a suivre",
+              not _appelsGn and "n'est plus liée" in str(_i.response.msgs), str(_i.response.msgs)[:120])
+        _appelsGn.clear(); _i = _itxGn()
+        safe_json.write(_tiGn.FICHIER_LIENS, {"zgen_lola": ["zgen_blonde"], "zgen_nue": ["zgen_blonde"]})
+        _tiGn._CACHE_LIENS.update(sig=None, data={})
+        _aioGn.run(_cuGn.JBGenButton("zgen_nue", "zgen_blonde", "templateflash", 3).callback(_i))
+        check("clic : model sans brute -> refus immediat, pas 30 s de template nu",
+              not _appelsGn and "aucune vidéo brute" in str(_i.response.msgs), str(_i.response.msgs)[:120])
+        _appelsGn.clear(); _i = _itxGn()
+        _aioGn.run(_cuGn.JBGenButton("zgen_lola", "zgen_blonde", "brute", 3).callback(_i))
+        check("clic : une cle hors liste blanche est refusee", not _appelsGn and _i.response.msgs)
+        # Les gardes « reserve » des boutons de la grille et du panneau.
+        _i = _itxGn()
+        _aioGn.run(_cuGn.JBModelButton("zgen_blonde").callback(_i))
+        check("grille : un bouton de reserve encore affiche est refuse",
+              "réserve" in str(_i.response.msgs) and _i.response.msgs[0][1] is True, str(_i.response.msgs)[:120])
+        _appelsGn.clear(); _i = _itxGn()
+        _aioGn.run(_cuGn.JBActionButton("zgen_blonde", "story", 3).callback(_i))
+        check("panneau : une action sur une entree devenue reserve est refusee",
+              not _appelsGn and "réserve" in str(_i.response.msgs), str(_i.response.msgs)[:120])
+
+        # -- 6. les ids memorises ------------------------------------------------
+        safe_json.write(_cuGn._JB_PANEL_STORE, {"42": 5, "7": 6})
+        _cuGn._jb_general_set(42, 1001)
+        _cuGn._jb_general_set(7, 1002)
+        check("ids : le General memorise ses ids en chaines",
+              _cuGn._jb_general_ids() == {"42": "1001", "7": "1002"}, str(_cuGn._jb_general_ids()))
+        _cuGn._jb_panneaux_oublier(42)
+        check("ids : oublier un salon le retire des DEUX fichiers, et de lui seul",
+              _cuGn._jb_panel_ids() == {"7": 6} and _cuGn._jb_general_ids() == {"7": "1002"})
+
+        # -- 7. le vrai parcours Discord, sur un faux salon ---------------------
+        _nGn = iter(range(5000, 9000))
+
+        class _AutGn:
+            def __init__(self, i):
+                self.id = i
+
+        class _MsgGn:
+            def __init__(self, ch, emb, view):
+                self.id, self.ch, self.embeds = next(_nGn), ch, [emb]
+                self.view, self.author, self.pinned = view, _AutGn(1), False
+
+            async def edit(self, embed=None, view=None, **k):
+                self.embeds, self.view = [embed], view
+
+            async def delete(self):
+                self.ch.msgs.remove(self)
+
+            async def pin(self):
+                self.pinned = True
+
+        class _PartGn:
+            def __init__(self, ch, i):
+                self.ch, self.i = ch, int(i)
+
+            def _m(self):
+                for m in self.ch.msgs:
+                    if m.id == self.i:
+                        return m
+                raise _dGn.NotFound(_tyGn.SimpleNamespace(status=404, reason="Not Found"), "x")
+
+            async def edit(self, **k):
+                await self._m().edit(**k)
+
+            async def delete(self):
+                await self._m().delete()
+
+        class _ChanGn:
+            def __init__(self, cid):
+                self.id, self.name, self.msgs, self.overwrites = cid, "zgen-menu", [], {}
+                self.guild = _tyGn.SimpleNamespace(id=7, emojis=[], text_channels=[self])
+
+            async def pins(self):
+                return [m for m in reversed(self.msgs) if m.pinned]
+
+            async def send(self, embed=None, view=None, **k):
+                m = _MsgGn(self, embed, view)
+                self.msgs.append(m)
+                return m
+
+            def get_partial_message(self, i):
+                return _PartGn(self, i)
+
+            async def fetch_message(self, i):
+                return _PartGn(self, i)._m()
+
+            async def purge(self, limit=200, check=None):
+                self.msgs[:] = [m for m in self.msgs if not check(m)]
+
+        def _ordreGn(ch):
+            return "".join({"panneau-general-us": "G", "panneau-actions-us": "P"}.get(
+                m.embeds[0].footer.text or "", "M") for m in ch.msgs)
+
+        _gfGn.is_us_guild = lambda g: True
+        _cuGn.marche_du_membre = lambda m: "us"
+        _chGn = _ChanGn(4242)
+        _i = _itxGn(_chGn)
+        _aioGn.run(_cuGn.JBModelButton("zgen_lola").callback(_i))
+        _gen = [m for m in _chGn.msgs if m.embeds[0].footer.text == "panneau-general-us"]
+        check("clic model : panneau d actions PUIS General, epingles, id memorise",
+              _ordreGn(_chGn) == "PG" and _gen[0].pinned
+              and _cuGn._jb_general_ids().get("4242") == str(_gen[0].id), _ordreGn(_chGn))
+        check("clic model : le General porte les boutons de la reserve liee",
+              _gen[0].view is not None
+              and any("zgen_blonde" in c for c in _idsGn(_gen[0].view)))
+        _i = _itxGn(_chGn)
+        _aioGn.run(_cuGn.JBModelButton("zgen_ident").callback(_i))
+        _gen = [m for m in _chGn.msgs if m.embeds[0].footer.text == "panneau-general-us"]
+        check("clic model sans reserve : le MEME General est edite, boutons retires",
+              len(_gen) == 1 and _gen[0].view is None and _ordreGn(_chGn) == "PG", _ordreGn(_chGn))
+
+        # -- 8. /resetmenus annonce ce qui a VRAIMENT ete pose -------------------
+        class _UCogGn:
+            def jailbreak_us_menu(self, marche):
+                return _dGn.Embed(title="🔓 Menu Jailbreak US"), None
+
+            async def jailbreak_us_menu_async(self, guild, marche):
+                return self.jailbreak_us_menu(marche)
+
+        _botGn = _tyGn.SimpleNamespace(user=_AutGn(1),
+                                       get_cog=lambda n: _UCogGn() if n == "UserCog" else None)
+
+        def _resetGn(ch):
+            _taches, _dits = [], []
+
+            async def _rep(*a, **k):
+                _dits.append(a[0] if a else k.get("content"))
+
+            _itx = _tyGn.SimpleNamespace(
+                guild=ch.guild, user=_AutGn(1),
+                response=_tyGn.SimpleNamespace(send_message=_rep),
+                followup=_tyGn.SimpleNamespace(send=_rep),
+                client=_tyGn.SimpleNamespace(loop=_tyGn.SimpleNamespace(create_task=_taches.append)))
+            _cog = object.__new__(_cwGn.Welcome)
+            _cog.bot = _botGn
+
+            async def _admin(itx):
+                return True
+            _cog.require_admin = _admin
+
+            async def _tout():
+                await _cwGn.Welcome.resetmenus.callback(_cog, _itx, ch)
+                for t in _taches:
+                    await t
+            _aioGn.run(_tout())
+            return _dits[-1] if _dits else ""
+
+        _chR = _ChanGn(4343)
+        _etR = {}
+        _okR = _aioGn.run(_cwGn.reset_us_menu(_botGn, _chR, etat=_etR))
+        check("reset : menu, panneau, General, dans cet ordre, et l etat le dit",
+              _okR is True and _ordreGn(_chR) == "MPG" and _etR.get("general") is True,
+              (_ordreGn(_chR), _etR))
+        _txR = _resetGn(_ChanGn(4344))
+        check("resetmenus : General pose -> annonce avec General",
+              "✨ General épinglés" in _txR and "non posé" not in _txR, _txR[:160])
+
+        def _casse(*a, **k):
+            raise RuntimeError("General en panne")
+        _cuGn._jb_general = _casse
+        _chK = _ChanGn(4345)
+        _etK = {}
+        _okK = _aioGn.run(_cwGn.reset_us_menu(_botGn, _chK, etat=_etK))
+        check("reset : General en echec -> menu et panneau poses, l etat dit False",
+              _okK is True and _ordreGn(_chK) == "MP" and _etK.get("general") is False,
+              (_ordreGn(_chK), _etK))
+        _txK = _resetGn(_ChanGn(4346))
+        check("resetmenus : General en echec -> il ne l annonce pas, il nomme le salon",
+              "General épinglés" not in _txK and "non posé" in _txK and "zgen-menu" in _txK, _txK[:200])
+        _cuGn._jb_general = _savGn["cu"][5]
+
+        # -- 9. /setidentite refuse une reserve ---------------------------------
+        _fixesGn = []
+        _gfGn.set_server_identity = lambda g, i: _fixesGn.append(i) or True
+
+        def _setidGn(ident, reassigner):
+            _dits = []
+
+            async def _rep(*a, **k):
+                _dits.append(a[0] if a else k.get("content"))
+
+            async def _appinfo():
+                return _tyGn.SimpleNamespace(owner=_AutGn(1))
+            _itx = _tyGn.SimpleNamespace(
+                user=_AutGn(1), guild=_tyGn.SimpleNamespace(id=7, name="Zgen", text_channels=[]),
+                client=_tyGn.SimpleNamespace(application_info=_appinfo),
+                response=_tyGn.SimpleNamespace(send_message=_rep))
+            _aioGn.run(_cuGn.UserCog.setidentite.callback(object(), _itx, ident, reassigner))
+            return " ".join(str(d) for d in _dits)
+
+        _txS = _setidGn("zgen_blonde", True)
+        check("/setidentite : une reserve n est jamais posee comme identite de serveur",
+              not _fixesGn and "réserve" in _txS, _txS[:120])
+        _txS2 = _setidGn("zgen_lola", False)
+        check("/setidentite : une model passe toujours", _fixesGn == ["zgen_lola"], _txS2[:120])
+
+        # -- 10. site : la garde « reserve » de /identity/type -------------------
+        import web_upload as _wGn
+        _jbGn._load = lambda: {
+            # Paul n est PAS dans vas[] : il n existe que par ses comptes.
+            "zgen_lola": {"vas": [], "accounts": [{"va": "Paul"}, {"va": "paul"}]},
+            "zgen_old": [{"va": "A"}, {"va": "B"}, {"va": ""}],
+            "zgen_libre": {"vas": [], "accounts": [{"va": ""}]},
+        }
+        check("site : les VA implicites (portes par les comptes) sont comptes",
+              _wGn._vas_jailbreak_de("zgen_lola") == 1 and _wGn._vas_jailbreak_de("zgen_old") == 2
+              and _wGn._vas_jailbreak_de("zgen_libre") == 0)
+        _gfGn._load_svid = lambda: {"999": "zgen_srv"}
+        _savLi, _savWu = _wGn._list_identities, _wGn._load_web_users
+        _wGn._list_identities = lambda: ["zgen_lola", "zgen_srv", "zgen_libre"]
+        _wGn._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"}}
+        try:
+            _cGn = _wGn.create_app().test_client()
+            with _cGn.session_transaction() as _sGn:
+                _sGn["auth"] = True; _sGn["username"] = "boss"; _sGn["role"] = "owner"
+            _jL = _cGn.post("/identity/type", data={"identity": "zgen_lola", "type": "reserve"}).get_json() or {}
+            check("site : une entree dont les comptes portent un VA ne devient pas reserve",
+                  _jL.get("ok") is not True and "Jailbreak" in str(_jL.get("error"))
+                  and _tiGn.de("zgen_lola") != "reserve", str(_jL)[:160])
+            _jS = _cGn.post("/identity/type", data={"identity": "zgen_srv", "type": "reserve"}).get_json() or {}
+            check("site : l identite dediee d un serveur ne devient pas reserve",
+                  _jS.get("ok") is not True and "dédiée" in str(_jS.get("error"))
+                  and "setidentite" in str(_jS.get("error")), str(_jS)[:160])
+            _jF = _cGn.post("/identity/type", data={"identity": "zgen_libre", "type": "reserve"}).get_json() or {}
+            check("site : une entree libre passe, et ses comptes restants sont signales",
+                  _jF.get("ok") is True and _jF.get("comptes") == 1 and "compte" in str(_jF.get("avis")),
+                  str(_jF)[:200])
+        finally:
+            _wGn._list_identities, _wGn._load_web_users = _savLi, _savWu
+        # La fenetre Modifier defile : sans ca, Enregistrer sortait de l ecran.
+        _srcGn = _plGn.Path("web_upload.py").read_text(encoding="utf-8")
+        _dGnM = _srcGn.index('<div id="ident-edit-modal"')
+        _pGnM = _srcGn.index('<div onclick="event.stopPropagation()"', _dGnM)
+        _stGnM = _srcGn[_pGnM:_srcGn.index(">", _pGnM)]
+        check("site : la fenetre Modifier defile au lieu de sortir de l ecran",
+              "max-height:calc(100vh" in _stGnM and "overflow-y:auto" in _stGnM, _stGnM[:200])
+    finally:
+        (_tiGn.FICHIER, _tiGn.FICHIER_LIENS, _tiGn._DOSSIER, _tiGn._marche) = _savGn["ti"]
+        (_cuGn.IDENTITIES_DIR, _cuGn._JB_PANEL_STORE, _cuGn._JB_GENERAL_STORE,
+         _cuGn._jb_can_use, _cuGn.marche_du_membre, _cuGn._jb_general) = _savGn["cu"]
+        (_cwGn.IDENTITIES_DIR,) = _savGn["cw"]
+        (_gfGn.is_us_guild, _gfGn._load_svid, _gfGn.set_server_identity) = _savGn["gf"]
+        (_jbGn._load,) = _savGn["jb"]
+        _tiGn._CACHE.update(sig=None, data={})
+        _tiGn._CACHE_LIENS.update(sig=None, data={})
+        shutil.rmtree(_dirGn, ignore_errors=True)
+except Exception as _eGn:
+    import traceback as _tbGn
+    check("menu General : testable", False, repr(_eGn)[:200] + " " + _tbGn.format_exc()[-400:])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

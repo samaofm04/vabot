@@ -222,6 +222,20 @@ def get_server_identity(guild_or_id):
     return v if (isinstance(v, str) and v.strip()) else None
 
 
+def serveurs_avec_identite(ident) -> list:
+    """Ids (str) des serveurs dont `ident` est l'identité dédiée.
+
+    Sert au site, avant de faire d'une entrée une RÉSERVE : _link_identity
+    rend l'identité dédiée du serveur pour chacun de ses VA, quelle que soit
+    celle stockée dans users.json. Compter les seuls VA laissait donc passer
+    une entrée qui sert encore tout un serveur."""
+    idl = str(ident or "").strip().lower()
+    if not idl:
+        return []
+    return sorted(g for g, v in _load_svid().items()
+                  if isinstance(v, str) and v.strip().lower() == idl)
+
+
 def set_server_identity(guild_or_id, ident) -> bool:
     gid = _gid(guild_or_id)
     if gid is None:

@@ -56,6 +56,10 @@ _CLES = (
     # Sans lui, renommer une identite desactivee pour Discord la rallumait :
     # enabled:false restait sous l'ancien nom.
     ("identities_config.json", "l'activation pour la rotation Discord"),
+    # Les reserves liees a une model (menu « ✨ General »). La CLE suit un
+    # renommage de la model ; si c'est la RESERVE qu'on renomme, son nom est
+    # remplace dans les listes juste apres la boucle (voir renommer).
+    ("identity_reserves.json", "les réserves liées (menu Général)"),
 )
 
 #: jailbreak.json N'EST PAS DANS _CLES, ET C'EST VOLONTAIRE.
@@ -353,6 +357,19 @@ def renommer(ancien: str, nouveau: str) -> dict:
         d[nouveau] = d.pop(ancien)
         (touches if _ecrire(fichier, d) else echecs).append(
             {"ou": libelle, "detail": fichier})
+
+    # Une RESERVE renommee : son nom vit aussi dans les VALEURS (les listes
+    # de reserves de chaque model). Sans ca, les models liees la perdaient.
+    _dr = _charger("identity_reserves.json")
+    if isinstance(_dr, dict):
+        _n = 0
+        for _m, _rs in _dr.items():
+            if isinstance(_rs, list) and ancien in _rs:
+                _dr[_m] = [nouveau if x == ancien else x for x in _rs]
+                _n += 1
+        if _n:
+            (touches if _ecrire("identity_reserves.json", _dr) else echecs).append(
+                {"ou": "les réserves liées (menu Général)", "detail": f"{_n} model(s)"})
 
     for fichier, champ, libelle in _CHAMPS:
         d = _charger(fichier)

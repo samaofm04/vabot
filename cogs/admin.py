@@ -50,12 +50,33 @@ def save_json(path, data):
     safe_json.write_text(path, json.dumps(data, indent=2, ensure_ascii=False))
 
 
-def list_identities():
-    if not IDENTITIES_DIR.exists():
-        return []
-    # v2_ = Bibliothèque 2 du site : jamais dans Discord
-    return sorted(p.name for p in IDENTITIES_DIR.iterdir()
-                  if p.is_dir() and not p.name.lower().startswith('v2_'))
+def list_identities(avec_reserves=False):
+    """La liste de cogs/welcome.py, et plus une copie.
+
+    Il y avait ici une seconde implementation du meme filtre (v2_). Le jour
+    ou les reserves sont sorties des listes (25/09/2026), elle les aurait
+    laissees passer : /adduser identity:blonde donnait un salon et un VA a du
+    contenu partage. Deux endroits qui decident la meme chose finissent par
+    diverger (CLAUDE.md). Import paresseux, comme les autres emprunts de ce
+    fichier a cogs/welcome (list_active_identities, pick_next_identity).
+    """
+    from cogs.welcome import list_identities as _li
+    return _li(avec_reserves=avec_reserves)
+
+
+def _refus_reserve(nom) -> str:
+    """La phrase de refus de type_identite (la meme sur le site et ici), ou
+    « » si `nom` s'assigne. Repli OUVERT, comme list_identities : si le
+    module ne repond pas, on n'empeche pas une assignation, on le journalise."""
+    try:
+        import type_identite as _ti
+        return _ti.refus_assignation(nom)
+    except Exception as e:
+        import logging as _lg
+        _lg.getLogger("vabot.admin").warning(
+            "controle « reserve » indisponible pour %r (%s: %s)",
+            nom, type(e).__name__, e)
+        return ""
 
 
 def identity_videos_dir(name):
@@ -542,6 +563,11 @@ class Admin(commands.Cog):
             if _m:
                 va_handle = _m.group(1)
         valids = [n.lower() for n in list_identities()]
+        # Une reserve existe, mais n'a pas de VA : « inconnue » mentirait.
+        _refus = _refus_reserve(ident) if ident not in valids else ""
+        if _refus:
+            await interaction.followup.send(f"❌ {_refus}", ephemeral=True)
+            return
         if ident not in valids:
             await interaction.followup.send(
                 f"❌ Identité `{identite}` inconnue.\nDispo : {', '.join(sorted(valids)) or '(aucune)'}",
@@ -823,7 +849,11 @@ class Admin(commands.Cog):
     async def listidentites(self, interaction: discord.Interaction):
         if not await self.require_admin(interaction):
             return
-        identities = list_identities()
+        # Les reserves restent listees ici, marquees : c'est l'inventaire du
+        # CONTENU, et une reserve en porte (bios, captions...). Les retirer
+        # comme des listes d'assignation ferait croire qu'elles ont disparu.
+        identities = list_identities(avec_reserves=True)
+        _assignables = set(list_identities())
         if not identities:
             await interaction.response.send_message("Aucune identité.", ephemeral=True)
             return
@@ -850,8 +880,9 @@ class Admin(commands.Cog):
             assigned = sum(1 for v in users.values() if _va_identity(v) == n)
             n_bios = len(read_bios(n))
             n_usernames = len(read_lines(identity_usernames_file(n)))
+            _tag = "" if n in _assignables else " • réserve (jamais assignée)"
             lines.append(
-                f"• `{n}` — 🎬{n_reels} reels ({n_captions}cap/{n_descs}desc/{n_examples}ex) • 📝{n_bios} bios • 👤{n_usernames} usernames • {assigned} VA"
+                f"• `{n}` — 🎬{n_reels} reels ({n_captions}cap/{n_descs}desc/{n_examples}ex) • 📝{n_bios} bios • 👤{n_usernames} usernames • {assigned} VA{_tag}"
             )
         # Le message etait envoye en entier : au-dela d'une vingtaine
         # d'identites il depasse les 2000 caracteres de Discord et l'envoi
@@ -1758,6 +1789,12 @@ class Admin(commands.Cog):
                 f"Identité `{safe}` introuvable. Voir /listidentites.", ephemeral=True
             )
             return
+        # Une reserve a bien un dossier, donc passait le controle ci-dessus :
+        # c'est une voie d'assignation directe, hors de toute liste filtree.
+        _refus = _refus_reserve(safe)
+        if _refus:
+            await interaction.response.send_message(f"❌ {_refus}", ephemeral=True)
+            return
         # Bloque les identités jailbreak-only (jessye) : pas assignables aux VAs Discord
         try:
             from cogs.welcome import JAILBREAK_ONLY_IDENTITIES as _JB_ONLY
@@ -1816,6 +1853,13 @@ class Admin(commands.Cog):
                 f"Identité `{safe}` introuvable. Tape /listidentites pour voir les dispo.",
                 ephemeral=True,
             )
+            return
+        # Meme garde que /setidentity : cette commande ecrit aussi une
+        # assignation dans users.json. Pour voir le contenu d'une reserve, le
+        # bouton ✨ General d'une model qui y est liee le sert tel quel.
+        _refus = _refus_reserve(safe)
+        if _refus:
+            await interaction.response.send_message(f"❌ {_refus}", ephemeral=True)
             return
         # Preserver channel_id si deja set
         existing = users.get(str(interaction.user.id))
@@ -1984,6 +2028,13 @@ class Admin(commands.Cog):
         # Si identite forcee fournie, prevaut sur tout
         if identity:
             forced_safe = sanitize_identity_name(identity)
+            # La liste ci-dessus ne contient plus les reserves : sans ce
+            # message, « blonde » serait annoncee « introuvable » alors que
+            # son dossier est la.
+            _refus = _refus_reserve(forced_safe)
+            if _refus:
+                await interaction.followup.send(f"❌ {_refus}", ephemeral=True)
+                return
             if forced_safe not in [i.lower() for i in identities] and forced_safe not in identities:
                 await interaction.followup.send(
                     f"Identité `{forced_safe}` introuvable. Voir /listidentites.",

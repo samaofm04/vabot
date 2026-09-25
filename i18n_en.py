@@ -145,6 +145,7 @@ ACTIONS = {
 FORMS = {
     "Identité": "Identity",
     "Réserve": "Reserve",
+    "Réserves liées": "Linked reserves",
     "Identités": "Identities",
     "Nom de l'identité": "Identity name",
     "Nom affiché": "Display name",

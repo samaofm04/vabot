@@ -9933,12 +9933,18 @@ document.addEventListener('click', function(ev){
   var dw=document.getElementById('ident-edit-dangerwrap');
   if(dw) dw.style.display = identEditCtx.typelock ? 'none' : 'flex';
   identEditRetirerFerme();
+  /* Les liens AVANT la nature et le marche : identEditType et identEditMarket
+     repeignent la liste, qui doit deja porter ceux de CETTE entree et non
+     ceux de la modale precedente. */
+  identEditCtx.reserves0 = identReservesDe(identEditCtx.ident);
+  identEditCtx.reserves = identEditCtx.reserves0.slice();
   identEditType(identEditCtx.type0);
   identEditCtx.market0 = b.getAttribute('data-market') || 'fr';
   identEditMarket(identEditCtx.market0);
   identEditCtx.styles0 = identStylesDe(identEditCtx.ident);
   identEditCtx.styles = identEditCtx.styles0.slice();
   identEditStylesPeindre();
+  identEditReservesPeindre();
   var e=document.getElementById('ident-edit-err'); if(e) e.textContent='';
   var g=document.getElementById('ident-edit-go'); if(g){ g.disabled=false; g.textContent='Enregistrer'; }
   var m=document.getElementById('ident-edit-modal'); if(m) m.style.display='flex';
@@ -10066,6 +10072,115 @@ function identEditStylesPeindre(){
     box.appendChild(b);
   });
 }
+// ---- Réserves liées : d ou le menu General du Discord US tire le contenu --
+// La table vient du serveur (#ident-reserves-data, lue dans type_identite) :
+// la meme regle que le bot. Le marche de chaque reserve se lit par
+// mkMarketOf, dans mk-markets, comme partout ailleurs sur la page.
+function identReservesTable(){
+  try{
+    var n=document.getElementById('ident-reserves-data');
+    if(!n) return {reserves:[], liens:{}, erreur:'bloc absent de la page'};
+    var d=JSON.parse(n.textContent||'{}')||{};
+    return {reserves:d.reserves||[], liens:d.liens||{}, erreur:d.erreur||''};
+  }catch(e){
+    /* Un bloc illisible ne doit pas passer pour « aucune reserve » : le
+       premier Enregistrer aurait delie toutes celles de la model. */
+    return {reserves:[], liens:{}, erreur:'JSON invalide'};
+  }
+}
+function identReservesDe(ident){
+  var l=identReservesTable().liens[String(ident||'').toLowerCase()];
+  return (l && l.slice) ? l.slice() : [];
+}
+/* Les reserves que CETTE model peut recevoir, avec le marche choisi dans la
+   modale et non celui d avant : le serveur valide contre le nouveau, puisque
+   /identity/market part avant /identity/reserves. */
+function identEditReservesValides(t){
+  var ident=String(identEditCtx.ident||'').toLowerCase();
+  var mk=identEditCtx.market||'fr';
+  return (t.reserves||[]).filter(function(r){
+    var m=(typeof mkMarketOf==='function' && mkMarketOf(r)) || 'fr';
+    return r !== ident && m === mk;
+  });
+}
+/* Ce qui part au serveur : les cochees encore valables. Un lien devenu
+   invalide n est pas renvoye (lier refuserait TOUT), et la modale l a
+   annonce « sera retire » avant le clic. Trie : le menu General affiche les
+   reserves dans cet ordre, il ne doit pas dependre de l ordre des clics. */
+function identEditReservesEnvoi(){
+  var v=identEditReservesValides(identReservesTable());
+  return (identEditCtx.reserves||[]).filter(function(r){ return v.indexOf(r) >= 0; }).sort();
+}
+function identEditReservesPeindre(){
+  var wrap=document.getElementById('ident-edit-reswrap');
+  var box=document.getElementById('ident-edit-reserves');
+  var h=document.getElementById('ident-edit-rhint');
+  if(!box) return;
+  box.innerHTML='';
+  identEditCtx.reservesOk = false;
+  var ident=String(identEditCtx.ident||'').toLowerCase();
+  /* La Bibliotheque 2 n a ni VA ni menu Discord : rien a y lier. */
+  var actif = ident.indexOf('v2_') !== 0;
+  if(wrap) wrap.style.display = actif ? 'flex' : 'none';
+  if(!actif) return;
+  var t=identReservesTable();
+  if(t.erreur){
+    if(h) h.textContent = 'Liens illisibles (' + t.erreur + ') : rien ne sera modifié ici.';
+    return;
+  }
+  if(identEditCtx.type === 'reserve'){
+    /* Une reserve ne se lie a rien : on dit qui s en sert, en lecture seule. */
+    var liees=Object.keys(t.liens).filter(function(m){
+      return (t.liens[m]||[]).indexOf(ident) >= 0; }).sort();
+    if(h) h.textContent = liees.length
+      ? ('Liée à : ' + liees.join(', ') + '.')
+      : 'Aucune model liée. Le lien se pose depuis la model : Modifier, Réserves liées.';
+    return;
+  }
+  identEditCtx.reservesOk = true;
+  var mk=identEditCtx.market||'fr';
+  var valides=identEditReservesValides(t);
+  var poses=identEditCtx.reserves||[];
+  valides.forEach(function(r){
+    var b=document.createElement('button');
+    b.type='button';
+    b.className='ie-btn' + (poses.indexOf(r) >= 0 ? ' on' : '');
+    b.setAttribute('data-reserve', r);
+    b.textContent=r;
+    b.addEventListener('click', function(){
+      var i=identEditCtx.reserves.indexOf(r);
+      if(i >= 0){ identEditCtx.reserves.splice(i,1); } else { identEditCtx.reserves.push(r); }
+      identEditReservesPeindre();
+    });
+    box.appendChild(b);
+  });
+  /* JAMAIS RETIRE EN SILENCE : un lien qui ne vaut plus (autre marche, plus
+     une reserve) reste a l ecran, barre, avec sa raison, jusqu au clic. */
+  var perimes=[];
+  poses.forEach(function(r){
+    if(valides.indexOf(r) >= 0) return;
+    var m=(typeof mkMarketOf==='function' && mkMarketOf(r)) || '';
+    var raison = (t.reserves.indexOf(r) < 0)
+      ? (m ? "n'est plus une réserve" : 'introuvable')
+      : ('marché ' + (m || 'fr').toUpperCase());
+    perimes.push(r + ' (' + raison + ')');
+    var b=document.createElement('button');
+    b.type='button';
+    b.className='ie-btn ie-perime';
+    b.disabled=true;
+    b.title=raison + ' : hors service, retiré si les réserves de cette model changent';
+    b.textContent=r;
+    box.appendChild(b);
+  });
+  var txt = valides.length
+    ? 'Le menu General du Discord US sert le contenu de la réserve cochée ; la brute reste celle de la model. Plusieurs : le VA choisit.'
+    : 'Aucune réserve ' + mk.toUpperCase() + '. Une réserve se crée avec Nouvelle identité, nature Réserve.';
+  var nOn=poses.filter(function(r){ return valides.indexOf(r) >= 0; }).length;
+  if(nOn > 4) txt += ' Au-delà de 4, le menu montre les 4 premières (ordre alphabétique) et compte les autres.';
+  if(mk !== 'us') txt += ' Model FR : sans effet pour l’instant (General US seulement).';
+  if(perimes.length) txt += ' Hors service : ' + perimes.join(', ') + '. Retiré si tu modifies les réserves ici, sinon il reprend quand il redevient valable.';
+  if(h) h.textContent = txt;
+}
 function identEditType(v){
   /* Certaines ne peuvent pas sortir des modeles (Jessye : source du menu US).
      Le serveur refuse deja ; ici on evite juste de proposer un clic qui
@@ -10079,6 +10194,10 @@ function identEditType(v){
     b.style.background  = on ? 'rgba(168,85,247,.14)' : '#131316';
     b.style.color       = on ? '#c9a4ff' : '#e6e6ea';
   });
+  /* La liste des reserves depend de la nature : cases pour une model ou une
+     identite, lecture seule pour une reserve. Avant le retour anticipe du
+     verrou, sinon Jessye garderait la liste de la modale precedente. */
+  identEditReservesPeindre();
   /* Le marche ne veut rien dire pour un dossier de montage : on le grise
      plutot que de le retirer, pour que son reglage reste visible si on
      repasse en modele. */
@@ -10117,6 +10236,9 @@ function identEditMarket(v){
   if(h) h.textContent = (v === 'us')
     ? "US : cette identité reste sur le serveur Youl4b uniquement."
     : "FR : cette identité va sur le Discord YouL4b Agency.";
+  /* Une model US ne se lie qu a une reserve US : changer le marche change
+     la liste, et un lien de l autre marche s affiche « sera retire ». */
+  identEditReservesPeindre();
 }
 async function identEditSave(){
   var err=document.getElementById('ident-edit-err'), go=document.getElementById('ident-edit-go');
@@ -10156,6 +10278,27 @@ async function identEditSave(){
       if(!(jm&&jm.ok)){ if(err) err.textContent=(jm&&jm.error)||('Erreur '+rm.status);
                         if(go){go.disabled=false;go.textContent='Enregistrer';} return; }
       fait=true;
+    }
+    /* LES LIENS APRES LA NATURE ET LE MARCHE : le serveur les valide contre
+       les nouveaux (dans l autre ordre, il refuserait un lien valable). Et
+       sous `cible`, le nom rendu par le renommage : l ancien n existe plus.
+       Une reserve n envoie rien : elle ne se lie a rien. */
+    if(identEditCtx.reservesOk && identEditCtx.type !== 'reserve'){
+      /* Compare a la part ENCORE VALABLE du depart : sinon ouvrir Modifier
+         pour une photo renvoyait la liste sans le lien hors service, et
+         effacait un lien qui reprend tout seul si la reserve redevient
+         valable. On n envoie que si une case valable a change. */
+      var vr=identEditReservesValides(identReservesTable());
+      var rs0=(identEditCtx.reserves0||[]).filter(function(r){ return vr.indexOf(r) >= 0; }).sort().join(',');
+      var rs1=identEditReservesEnvoi().join(',');
+      if(rs1!==rs0){
+        var fres=new FormData(); fres.set('identity',cible); fres.set('reserves',rs1);
+        var rres=await fetch('/identity/reserves',{method:'POST',body:fres,credentials:'same-origin'});
+        var jres=await rres.json();
+        if(!(jres&&jres.ok)){ if(err) err.textContent=(jres&&jres.error)||('Erreur '+rres.status);
+                              if(go){go.disabled=false;go.textContent='Enregistrer';} return; }
+        fait=true;
+      }
     }
     var st0=(identEditCtx.styles0||[]).slice().sort().join(',');
     var st1=(identEditCtx.styles||[]).slice().sort().join(',');
@@ -11894,6 +12037,9 @@ document.addEventListener('click',function(e){
      que le serveur : deux listes en dur, ce serait deux comportements. -->
 <script type="application/json" id="ident-styles-data">{styles_json}</script>
 <script type="application/json" id="ident-styles-choix">{styles_choix_json}</script>
+<!-- Reserves et liens model -> reserves (menu General du Discord US), lus
+     dans type_identite : la meme regle que le bot, pas une copie. -->
+<script type="application/json" id="ident-reserves-data">{reserves_json}</script>
 <!-- Filtre de marche : Tout / FR / US (meme esprit que le SFW) -->
 <div id="market-floating" title="N'afficher que les identites d'un marche">
   <button type="button" data-mkopt="" onclick="marketSet('')">Tout</button>
@@ -14535,7 +14681,11 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
 
 <!-- ===== Modifier une identité : photo (partout) + nom (Vault PRO) ===== -->
 <div id="ident-edit-modal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.78);align-items:center;justify-content:center" onclick="identEditClose()">
-  <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:20px;width:340px;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
+  <!-- max-height + overflow : l overlay est fixe et centre, donc tout ce
+       qui depasse l ecran est rogne en haut ET en bas, sans defilement
+       possible. Avec les Reserves liees, le panneau passait 846 px : sur un
+       ecran de 725 px, Enregistrer sortait de l ecran. -->
+  <div onclick="event.stopPropagation()" style="background:#0f0f12;border:1px solid #2a2a30;border-radius:14px;padding:20px;width:340px;max-height:calc(100vh - 24px);overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:12px;box-sizing:border-box">
     <div class="ie-tete">
       <img id="ident-edit-pp" class="ie-pp" alt="" referrerpolicy="no-referrer"
            onerror="this.style.visibility='hidden'">
@@ -14565,6 +14715,28 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
         <button type="button" id="ident-edit-us" class="ie-btn" onclick="identEditMarket('us')"><svg viewBox='0 0 19 10' width='19' height='10' preserveAspectRatio='none' style='border-radius:2px;flex-shrink:0;box-shadow:0 0 0 1px rgba(255,255,255,.22)'><rect width='19' height='10' fill='#fff'/><rect x='0' y='0.000' width='19' height='0.769' fill='#b22234'/><rect x='0' y='1.538' width='19' height='0.769' fill='#b22234'/><rect x='0' y='3.077' width='19' height='0.769' fill='#b22234'/><rect x='0' y='4.615' width='19' height='0.769' fill='#b22234'/><rect x='0' y='6.154' width='19' height='0.769' fill='#b22234'/><rect x='0' y='7.692' width='19' height='0.769' fill='#b22234'/><rect x='0' y='9.231' width='19' height='0.769' fill='#b22234'/><rect width='7.6' height='5.385' fill='#3c3b6e'/></svg> US</button>
       </div>
       <div id="ident-edit-mhint" class="ie-hint"></div>
+    </div>
+
+    <!-- RESERVES LIEES : d'ou le menu General du Discord US tire le contenu
+         de cette model. APRES le marche, parce que la liste en depend : une
+         model US ne se lie qu'a une reserve US. Pour une reserve, la section
+         dit en lecture seule quelles models s'en servent.
+         Etat par CLASSE (.on), jamais par style inline : le navigateur
+         reecrit un style pose en JS au format rgb(...), et les regles du
+         theme clair ne le reconnaissent plus (boutons sombres sur fond clair).
+         Specificites : 1,1,0 / 1,2,0 en sombre, 1,2,1 / 1,3,1 en clair,
+         plus fortes que .ie-btn (0,1,0) et body.light .ie-btn (0,2,1). -->
+    <style>
+      #ident-edit-reserves .ie-btn{flex:0 1 auto;padding:6px 11px;font-size:12px}
+      #ident-edit-reserves .ie-btn.on{border-color:#14b8a6;background:rgba(20,184,166,.14);color:#5eead4}
+      #ident-edit-reserves .ie-btn.ie-perime{border-style:dashed;border-color:#7f1d1d;color:#d98a8a;text-decoration:line-through;cursor:default}
+      body.light #ident-edit-reserves .ie-btn{background:#fff!important;border-color:#d8d8de!important;color:#1f2937!important}
+      body.light #ident-edit-reserves .ie-btn.on{border-color:#0d9488!important;background:rgba(20,184,166,.12)!important;color:#0f766e!important}
+      body.light #ident-edit-reserves .ie-btn.ie-perime{border-color:#fca5a5!important;background:#fff!important;color:#b91c1c!important}
+    </style>
+    <div class="ie-sec" id="ident-edit-reswrap"><span class="ie-lbl">Réserves liées</span>
+      <div id="ident-edit-reserves" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+      <div id="ident-edit-rhint" class="ie-hint"></div>
     </div>
 
     <div class="ie-sec"><span class="ie-lbl">Ce qui marche</span>
@@ -15486,6 +15658,79 @@ def _effectif_identite(ident) -> tuple:
     return (len(entree.get("vas") or []), len(entree.get("accounts") or []))
 
 
+def _vas_discord_de(ident) -> int:
+    """Nombre de VA de users.json (salons Discord) rattachés à cette identité.
+
+    _effectif_identite ne compte que le référentiel Jailbreak ; un VA Discord
+    peut porter une identité sans y figurer. Passer en réserve une entrée qui
+    sert encore des VA leur retirerait leur contenu sans rien dire : il faut
+    les deux chiffres pour refuser.
+    """
+    idl = str(ident or "").strip().lower()
+    users = _load_users()
+    n = 0
+    for v in (users.values() if isinstance(users, dict) else []):
+        cur = v.get("identity") if isinstance(v, dict) else v
+        if str(cur or "").strip().lower() == idl:
+            n += 1
+    return n
+
+
+def _vas_jailbreak_de(ident):
+    """Nombre de VA du referentiel Jailbreak pour cette identite, fiches
+    IMPLICITES comprises (un nom porte par un compte mais absent de vas[]),
+    ou None si le referentiel est illisible.
+
+    _effectif_identite ne compte que len(vas) : une entree dont les douze
+    comptes portent va='Paul' et dont vas[] est vide passait pour « 0 VA »,
+    et devenait une reserve -- retiree de la page Jailbreak et du scrape avec
+    ses comptes. La page, elle, compte comme list_vas_for_identity : on
+    compte pareil.
+    """
+    idl = str(ident or "").strip().lower()
+    try:
+        import jailbreak as _jb_v
+    except Exception as e:
+        log.warning(f"_vas_jailbreak_de({idl}) : module jailbreak absent ({e})")
+        return None
+    try:
+        return len(_jb_v.list_vas_for_identity(idl))
+    except Exception:
+        pass
+    # Ancienne forme : l'entree EST la liste des comptes (list_vas_for_identity
+    # n'en veut pas). Les VA sont alors les seuls noms portes par ces comptes.
+    try:
+        entree = (_jb_v._load() or {}).get(idl)
+    except Exception as e:
+        log.warning(f"_vas_jailbreak_de({idl}) : referentiel illisible ({e})")
+        return None
+    if isinstance(entree, list):
+        return len({str(a.get("va") or "").strip().lower() for a in entree
+                    if isinstance(a, dict) and str(a.get("va") or "").strip()})
+    return 0 if not entree else None
+
+
+def _serveurs_dedies_a(ident) -> list:
+    """Noms (ou ids) des serveurs Discord dont `ident` est l'identite dediee.
+    Le nom vient du bot s'il tourne dans ce processus, sinon l'id suffit."""
+    try:
+        import guild_features as _gf_s
+        ids = _gf_s.serveurs_avec_identite(ident)
+    except Exception as e:
+        log.warning(f"_serveurs_dedies_a({ident}) : illisible ({e})")
+        return []
+    noms = []
+    for gid in ids:
+        nom = None
+        try:
+            g = _BOT_REF.get_guild(int(gid)) if _BOT_REF is not None else None
+            nom = getattr(g, "name", None)
+        except Exception:
+            nom = None
+        noms.append(nom or gid)
+    return noms
+
+
 def _identites_modeles(identites=None) -> list:
     """Les CRÉATRICES, sans les dossiers de montage.
 
@@ -15731,6 +15976,31 @@ def _styles_choix_json() -> str:
         return _j.dumps(_styles_mod.table_json())
     except Exception:
         return "[]"
+
+
+def _reserves_json() -> str:
+    """{"reserves": [...], "liens": {model: [reserves]}} pour la modale.
+
+    Les liens sont servis TELS QU'ECRITS (liens_bruts), pas refiltres : la
+    modale doit pouvoir montrer un lien devenu invalide (autre marche, plus
+    une reserve) avec la mention « sera retire », au lieu qu'il disparaisse
+    de l'ecran sans un mot. Le marche de chaque reserve se lit par
+    mkMarketOf, dans mk-markets : pas de deuxieme copie ici.
+
+    En cas d'echec, la cle « erreur » est posee plutot que de servir des
+    listes vides : sans elle, la modale se serait ouverte « sans reserve »,
+    et le premier Enregistrer aurait delie toutes les reserves de la model.
+    """
+    import json as _j
+    try:
+        d = {"reserves": _type_mod.filtrer_reserves(_list_identities()),
+             "liens": _type_mod.liens_bruts()}
+    except Exception as e:
+        log.warning(f"identity_reserves: liens illisibles ({e})")
+        d = {"reserves": [], "liens": {}, "erreur": str(e)[:120] or "liens illisibles"}
+    # « < » echappe : le fichier se corrige a la main, et un « </script> »
+    # glisse dans un nom fermerait le bloc JSON au milieu de la page.
+    return _j.dumps(d).replace("<", "\\u003c")
 
 
 def _adresse_publique() -> str:
@@ -50889,6 +51159,7 @@ def _render_upload_inner(msg=None, error=None):
         .replace("{markets_json}", _markets_json())
         .replace("{styles_json}", _styles_json())
         .replace("{styles_choix_json}", _styles_choix_json())
+        .replace("{reserves_json}", _reserves_json())
         .replace("{ident_opts}", opts)
         .replace("{pp_ident_opts}", pp_opts)
         .replace("{msg_html}", msg_html)
@@ -55972,10 +56243,98 @@ def create_app():
                                      "elle sert de source au menu US."})
         if ident not in _list_identities() and not _ti.verrouillee(ident):
             return jsonify({"ok": False, "error": "identité inconnue"})
+        # UNE RESERVE NE S'ASSIGNE PAS A UN VA. Y passer une entree qui en
+        # sert encore les laisserait sur un dossier que la grille Discord ne
+        # montre plus et que les gardes d'assignation refusent : ils
+        # perdraient leur contenu sans que rien ne le dise. On refuse, avec
+        # le chiffre, pour qu'on sache qui reassigner d'abord.
+        n_comptes = 0
+        if valeur == "reserve" and _ti.de(ident) != "reserve":
+            n_disc = _vas_discord_de(ident)
+            # Fiches IMPLICITES comprises (noms portes par les seuls comptes) :
+            # la page Jailbreak les affiche, la garde doit les voir aussi.
+            n_jb = _vas_jailbreak_de(ident)
+            if n_jb is None:
+                # Dans le doute on refuse : passer en reserve retire l'entree
+                # de Jailbreak et du scrape, et on ne sait pas ce qu'elle porte.
+                return jsonify({
+                    "ok": False,
+                    "error": f"Référentiel Jailbreak illisible : impossible de "
+                             f"vérifier les VA de @{ident}. Réessaie."})
+            if n_disc or n_jb:
+                detail = ", ".join(x for x in (
+                    f"{n_disc} sur Discord" if n_disc else "",
+                    f"{n_jb} dans Jailbreak" if n_jb else "") if x)
+                return jsonify({
+                    "ok": False, "vas": n_disc + n_jb,
+                    "error": f"@{ident} porte encore {n_disc + n_jb} VA ({detail}) : "
+                             "une réserve ne s'assigne pas à un VA. "
+                             "Réassigne-les d'abord."})
+            # L'identite DEDIEE d'un serveur sert chacun de ses VA, quelle
+            # que soit celle de users.json (_link_identity) : leurs liens GMS
+            # seraient generes au nom d'une reserve, et chaque ticket
+            # basculerait en rotation avec un simple log.
+            serveurs = _serveurs_dedies_a(ident)
+            if serveurs:
+                return jsonify({
+                    "ok": False, "serveurs": serveurs,
+                    "error": f"@{ident} est l'identité dédiée de {len(serveurs)} "
+                             f"serveur(s) Discord ({', '.join(serveurs[:4])}"
+                             f"{'…' if len(serveurs) > 4 else ''}) : "
+                             "/setidentite none sur ce(s) serveur(s) d'abord."})
+            n_comptes = _effectif_identite(ident)[1]
+        avant = _ti.de(ident)
         if not _ti.definir(ident, valeur):
             return jsonify({"ok": False, "error": "écriture impossible"})
         _invalidate_all_ttl_cache()
-        return jsonify({"ok": True, "identity": ident, "type": valeur})
+        # La grille des models du Discord US ecarte les reserves, mais un
+        # message poste ne se redessine pas seul : sans ce rappel, une reserve
+        # toute neuve y restait cliquable jusqu'au prochain /resetmenus (et
+        # une ancienne reserve n'y revenait pas). Meme mecanique que
+        # /identity/styles : regroupee cote bot, sans faire attendre le site.
+        menus = False
+        if (avant == "reserve") != (valeur == "reserve"):
+            try:
+                from cogs.welcome import demander_rafraichissement
+                menus = bool(demander_rafraichissement(
+                    _BOT_REF, raison=f"nature de {ident} ({avant} -> {valeur})"))
+            except Exception as e:
+                log.warning(f"identity_type: menus Discord non prévenus ({e})")
+        # CE QUE LE CHANGEMENT LAISSE EN PLAN, dit tout de suite. Les liens ne
+        # sont pas effaces (le bot les refiltre a chaque lecture et les
+        # retrouve si la nature revient), mais ils cessent de servir.
+        liees, propres, avis = [], [], ""
+        if avant == "reserve" and valeur != "reserve":
+            liees = _ti.models_liees(ident)
+            if liees:
+                avis = (f"⚠ {len(liees)} model(s) étaient liées à @{ident} "
+                        f"({', '.join(liees[:6])}{'…' if len(liees) > 6 else ''}) : "
+                        "leur menu General ne la propose plus tant qu'elle "
+                        "n'est pas redevenue une réserve.")
+        elif valeur == "reserve" and avant != "reserve":
+            propres = list(_ti.liens_bruts().get(ident, []))
+            if propres:
+                avis = (f"⚠ @{ident} était liée à {len(propres)} réserve(s) "
+                        f"({', '.join(propres[:6])}) : ces liens ne servent "
+                        "plus tant qu'elle est elle-même une réserve.")
+            # Des comptes sans VA ne bloquent pas (une reserve peut avoir
+            # herite d'un vieux referentiel), mais ils quittent la page
+            # Jailbreak et le scrape avec elle : on le dit.
+            if n_comptes:
+                avis = ((avis + " ") if avis else "") + (
+                    f"⚠ @{ident} porte encore {n_comptes} compte(s) Instagram "
+                    "dans Jailbreak : ils sortent de la page Jailbreak et du "
+                    "scrape tant qu'elle est une réserve.")
+        if avis:
+            # La modale recharge la page aussitot apres l'enregistrement : une
+            # notification posee par le JS disparaitrait avec elle. Le message
+            # flash, lui, s'affiche au rechargement.
+            session["flash_msg"] = html_escape(avis)
+            session["flash_error"] = False
+        return jsonify({"ok": True, "identity": ident, "type": valeur,
+                        "menus_discord": menus, "liees": len(liees),
+                        "models_liees": liees, "liens_propres": propres,
+                        "comptes": n_comptes, "avis": avis})
 
     @app.route("/identity/styles", methods=["POST"])
     def identity_styles_set():
@@ -56020,6 +56379,41 @@ def create_app():
         return jsonify({"ok": True, "identity": ident, "styles": poses,
                         "badges": _style_badges_html(ident, 11),
                         "menus_discord": menus})
+
+    @app.route("/identity/reserves", methods=["POST"])
+    def identity_reserves_set():
+        """Les réserves d'une model : d'où son menu General tire le contenu.
+
+        La liste arrive COMPLETE, séparée par des virgules — comme les styles :
+        vide = on délie tout, et on ne confond jamais « aucune réserve » avec
+        « la requête n'est pas passée ». La règle (marché, nature, dossier)
+        vit dans type_identite.lier, la même que le bot relit à chaque clic.
+
+        Refus en bloc et NOMMÉ : un nom écarté sans un mot, c'est une case
+        qu'on croit cochée et un menu General qui ne la propose jamais.
+
+        Pas de rafraîchissement Discord : le General se reconstruit au
+        prochain clic sur la model, et le lien y est revérifié.
+        Admin seulement : /identity/ est dans _ADMIN_ONLY_WRITE.
+        """
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        import type_identite as _ti
+        ident = (request.form.get("identity") or "").strip().lower()
+        if ident not in _list_identities():
+            return jsonify({"ok": False, "error": "identité inconnue"})
+        demandes = [s.strip().lower()
+                    for s in (request.form.get("reserves") or "").split(",") if s.strip()]
+        ok, refus = _ti.lier(ident, demandes)
+        if not ok:
+            return jsonify({"ok": False, "refuses": refus,
+                            "error": "Réserves non liées : " + " ; ".join(refus[:6])})
+        _invalidate_all_ttl_cache()
+        retenues, ecartees = _ti.reserves_liees(ident)
+        return jsonify({"ok": True, "identity": ident, "reserves": retenues,
+                        "refuses": [],
+                        "ecartees": [{"nom": n, "raison": r} for n, r in ecartees]})
 
     @app.route("/identity/apercu", methods=["POST"])
     def identity_apercu():
@@ -63404,6 +63798,14 @@ def create_app():
             return _error("✕ Identité manquante", tab="jailbreak")
         if not va_name:
             return _error("✕ Nom du VA manquant", tab="jailbreak")
+        # Une reserve est du contenu partage, pas une creatrice : un VA pose
+        # dessus n'aurait ni grille Discord ni brute. Meme phrase que le bot.
+        _refus = _type_mod.refus_assignation(identity)
+        if _refus:
+            if request.form.get("ajax") == "1":
+                from flask import jsonify
+                return jsonify({"ok": False, "error": _refus})
+            return _error("✕ " + html_escape(_refus), tab="jailbreak")
         added = jb.add_va(identity, va_name, discord_username=discord_username)
         if request.form.get("ajax") == "1":
             # Mode AJAX (modal du site) : pas de redirect — la page se met à jour
@@ -68192,6 +68594,11 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             return jsonify({"ok": False, "error": "identity + display_name requis"}), 400
         if identity not in _list_identities():
             return jsonify({"ok": False, "error": f"identite '{identity}' introuvable"}), 400
+        # Une reserve ne s'assigne pas a un VA : meme phrase, mot pour mot,
+        # que le bot (type_identite.refus_assignation).
+        _refus = _type_mod.refus_assignation(identity)
+        if _refus:
+            return jsonify({"ok": False, "error": _refus}), 400
         import secrets as _secrets, time as _t
         uid = "manual_" + _secrets.token_hex(4)
         users = _load_users()
@@ -68513,6 +68920,11 @@ a{{color:#3b82f6;text-decoration:none}}</style></head><body>
             return _error("✕ user_id ou identite manquant")
         if new_identity not in _list_identities():
             return _error(f"✕ Identité <code>{new_identity}</code> introuvable")
+        # Reassigner un VA sur une reserve le laisserait sans grille Discord
+        # ni brute. Meme phrase que le bot (type_identite.refus_assignation).
+        _refus = _type_mod.refus_assignation(new_identity)
+        if _refus:
+            return _error("✕ " + html_escape(_refus))
         users = _load_users()
         if uid not in users:
             return _error(f"✕ VA {uid} introuvable")

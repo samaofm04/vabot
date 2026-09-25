@@ -173,3 +173,143 @@ def filtrer_modeles(identites) -> list:
 def filtrer_reserves(identites) -> list:
     """Ne garde que les reserves, dans l'ordre recu."""
     return [i for i in (identites or []) if est_reserve(i)]
+
+
+def sans_reserves(identites) -> list:
+    """Tout SAUF les reserves, dans l'ordre recu.
+
+    C'est le filtre des listes « a qui peut-on assigner un VA » : on filtre
+    sur est_reserve et JAMAIS sur est_modele. Le 12/09/2026, un filtre sur la
+    nature a vide quinze des vingt-deux entrees du menu Jailbreak : une
+    « identite » doit rester dans les menus, une reserve jamais.
+    """
+    return [i for i in (identites or []) if not est_reserve(i)]
+
+
+# ============ Liens model -> reserves (menu « ✨ General ») ============
+#
+# {model: [reserve, ...]} en minuscules. Un fichier a part : identity_type.json
+# convertit chaque valeur en chaine, une liste y serait detruite. Le site
+# ecrit, le bot lit — relu quand le fichier bouge, comme la nature.
+
+FICHIER_LIENS = Path("data") / "identity_reserves.json"
+_DOSSIER = Path("data") / "identities"
+_CACHE_LIENS: dict = {"sig": None, "data": {}}
+
+
+def _liens() -> dict:
+    try:
+        sig = FICHIER_LIENS.stat().st_mtime_ns
+    except OSError:
+        _CACHE_LIENS.update(sig=None, data={})
+        return {}
+    if _CACHE_LIENS["sig"] != sig:
+        d = safe_json.load(FICHIER_LIENS, default={}) or {}
+        out = {}
+        if isinstance(d, dict):
+            for k, v in d.items():
+                if isinstance(v, (list, tuple)):
+                    out[str(k).strip().lower()] = [str(x).strip().lower() for x in v if str(x).strip()]
+        _CACHE_LIENS.update(sig=sig, data=out)
+    return _CACHE_LIENS["data"]
+
+
+def liens_bruts() -> dict:
+    """{model: [reserves]} tel qu'ecrit, SANS refiltrage (pour l'ecran)."""
+    return {k: list(v) for k, v in _liens().items()}
+
+
+def _marche(nom: str) -> str:
+    try:
+        import marche                      # paresseux : pas de cycle
+        return marche.de(nom)
+    except Exception:
+        return ""
+
+
+def _raison_invalide(modele: str, reserve: str) -> str:
+    """« » si `reserve` peut servir `modele`, sinon la raison, en clair."""
+    if not (_DOSSIER / reserve).is_dir():
+        return "dossier absent"
+    if not est_reserve(reserve):
+        return "n'est plus une réserve"
+    mm, mr = _marche(modele), _marche(reserve)
+    if mm and mr and mm != mr:
+        return f"marché {mr.upper()} (la model est {mm.upper()})"
+    return ""
+
+
+def reserves_liees(modele: str) -> tuple:
+    """(retenues, ecartees) pour une model.
+
+    Le lien est REFILTRE A LA LECTURE : le marche d'une model ou d'une
+    reserve peut changer apres la pose du lien, une reserve peut repasser en
+    identite ou disparaitre. `ecartees` = [(nom, raison)] : rien n'est ecarte
+    en silence, l'ecran et Discord le disent.
+    """
+    idl = (modele or "").strip().lower()
+    retenues, ecartees = [], []
+    for r in _liens().get(idl, []):
+        raison = _raison_invalide(idl, r)
+        if raison:
+            ecartees.append((r, raison))
+        elif r not in retenues:
+            retenues.append(r)
+    return retenues, ecartees
+
+
+def models_liees(reserve: str) -> list:
+    """Les models qui pointent vers cette reserve (lien brut, pour l'ecran)."""
+    r = (reserve or "").strip().lower()
+    return sorted(m for m, rs in _liens().items() if r in rs)
+
+
+def lier(modele: str, reserves) -> tuple:
+    """Pose la liste COMPLETE des reserves d'une model -> (ok, refus).
+
+    Refuse TOUT si une cible n'est pas valable (nommee, avec sa raison), ou si
+    la model est elle-meme une reserve. Une liste vide delie.
+    """
+    idl = (modele or "").strip().lower()
+    if not idl:
+        return False, ["nom vide"]
+    if est_reserve(idl):
+        return False, [f"{idl} est elle-même une réserve"]
+    voulues = []
+    for r in reserves or []:
+        r = str(r).strip().lower()
+        if r and r not in voulues:
+            voulues.append(r)
+    refus = []
+    for r in voulues:
+        if r == idl:
+            refus.append(f"{r} : une model ne se lie pas à elle-même")
+            continue
+        raison = _raison_invalide(idl, r)
+        if raison:
+            refus.append(f"{r} : {raison}")
+    if refus:
+        return False, refus
+    d = dict(_liens())
+    if voulues:
+        d[idl] = voulues
+    else:
+        d.pop(idl, None)
+    FICHIER_LIENS.parent.mkdir(parents=True, exist_ok=True)
+    # safe_json.write avale l'exception et rend False : sans ce test, un
+    # disque plein repondait « ok » et la case cochee n'etait nulle part.
+    if not safe_json.write(FICHIER_LIENS, d):
+        return False, ["écriture impossible (identity_reserves.json)"]
+    _CACHE_LIENS.update(sig=None, data={})
+    return True, []
+
+
+def refus_assignation(nom: str) -> str:
+    """« » si `nom` peut etre assigne a un VA, sinon LA phrase de refus —
+    la meme, mot pour mot, sur Discord et sur le site."""
+    idl = (nom or "").strip().lower()
+    if idl and est_reserve(idl):
+        return (f"`{idl}` est une réserve (contenu partagé) : "
+                "elle ne s'assigne pas à un VA.")
+    return ""
+
