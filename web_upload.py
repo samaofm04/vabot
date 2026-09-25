@@ -10613,6 +10613,10 @@ document.addEventListener('click', function(ev){
   /* La pause : ni pour une verrouillee (source du menu US), ni pour la
      Bibliotheque 2 (elle ne va jamais sur Discord). */
   identEditCtx.pause = !!b.getAttribute('data-pause');
+  try{ identEditCtx.sociaux = JSON.parse(b.getAttribute('data-sociaux')||'[]')||[]; }catch(eS){ identEditCtx.sociaux=[]; }
+  identEditCtx.vas = nv;
+  var sl=document.getElementById('ident-edit-soclien'); if(sl) sl.value='';
+  identEditSocPeindre();
   var pw=document.getElementById('ident-edit-pausewrap');
   if(pw) pw.style.display = (identEditCtx.typelock || /^v2_/.test(identEditCtx.ident)) ? 'none' : 'flex';
   identEditPausePeindre();
@@ -10672,6 +10676,64 @@ async function identEditRetirerOuvre(){
     q.textContent = txt + ' Rien n\u2019est effac\u00e9 : tout part dans data/_corbeille_identites.';
   }catch(e){ q.textContent='Impossible de lire ce que \u00e7a touche.'; }
   var n=document.getElementById('ident-edit-dangernom'); if(n){ n.value=''; n.focus(); }
+}
+function identEditSocPeindre(){
+  var box=document.getElementById('ident-edit-sociaux'), h=document.getElementById('ident-edit-sochint');
+  var go=document.getElementById('ident-edit-socgo');
+  if(go){ go.disabled=false; go.textContent='Brancher et importer'; }
+  if(!box) return;
+  box.innerHTML='';
+  var libelles={tiktok:'TikTok', instagram:'Instagram'};
+  (identEditCtx.sociaux||[]).forEach(function(s){
+    var l=document.createElement('div');
+    l.style.cssText='display:flex;align-items:center;gap:8px;font-size:12.5px';
+    var t=document.createElement('span'); t.style.flex='1';
+    t.textContent=(libelles[s.plateforme]||s.plateforme)+' @'+s.username+' · ≥ '+(s.seuil||0)+' vues';
+    var x=document.createElement('button'); x.type='button'; x.className='ie-btn';
+    x.style.cssText='flex:0 0 auto;padding:5px 10px;font-size:12px';
+    x.textContent='Débrancher';
+    x.title='Plus de relecture de ce profil. Les vidéos déjà importées restent.';
+    x.addEventListener('click', function(){ identEditSocDebrancher(s.cle, x); });
+    l.appendChild(t); l.appendChild(x); box.appendChild(l);
+  });
+  /* Ce que le branchement engage, dit AVANT : sur une model avec des VA,
+     ces videos arrivent dans le stock de brutes ou ils piochent. */
+  var txt='Les vidéos au-dessus du seuil arrivent dans la Vidéo brut, triées par vues, relues toutes les 2 semaines. '
+    +'Les doublons ne sont pas repris : ni ce qui est déjà là (même déposé à la main, reconnu à l’image), ni une vidéo publiée sur les deux réseaux.';
+  if(identEditCtx.vas) txt += ' ⚠ '+identEditCtx.vas+' VA piochent dans ces brutes.';
+  if(h) h.textContent=txt;
+}
+async function identEditSocBrancher(){
+  var err=document.getElementById('ident-edit-err'), go=document.getElementById('ident-edit-socgo');
+  var lien=String((document.getElementById('ident-edit-soclien')||{}).value||'').trim();
+  if(!lien){ if(err) err.textContent='Colle le lien du profil TikTok ou Instagram.'; return; }
+  if(err) err.textContent='';
+  if(go){ go.disabled=true; go.textContent='◌'; }
+  try{
+    var fd=new FormData(); fd.set('identity', identEditCtx.ident); fd.set('action','brancher');
+    fd.set('lien', lien); fd.set('seuil', String((document.getElementById('ident-edit-socseuil')||{}).value||'10000'));
+    fd.set('ajax','1');
+    var r=await fetch('/identity/social',{method:'POST',body:fd,credentials:'same-origin'});
+    var j=null; try{ j=await r.json(); }catch(e2){}
+    if(!(j&&j.ok)){ if(err) err.textContent=(j&&j.error)||('Refusé par le serveur (HTTP '+r.status+')'); identEditSocPeindre(); return; }
+    try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e3){}
+    identEditClose();
+    /* la Video brut du dossier : c est la que l import se suit */
+    window.location.href='/?tab=cloudbrutes&cloud_brutes_ident='+encodeURIComponent(identEditCtx.ident);
+  }catch(e){ if(err) err.textContent=String(e); identEditSocPeindre(); }
+}
+async function identEditSocDebrancher(cle, bouton){
+  var err=document.getElementById('ident-edit-err');
+  if(bouton){ bouton.disabled=true; bouton.textContent='◌'; }
+  try{
+    var fd=new FormData(); fd.set('identity', cle); fd.set('action','debrancher'); fd.set('ajax','1');
+    var r=await fetch('/identity/social',{method:'POST',body:fd,credentials:'same-origin'});
+    var j=null; try{ j=await r.json(); }catch(e2){}
+    if(!(j&&j.ok)){ if(err) err.textContent=(j&&j.error)||('Refusé par le serveur (HTTP '+r.status+')'); identEditSocPeindre(); return; }
+    identEditCtx.sociaux=(identEditCtx.sociaux||[]).filter(function(s){ return s.cle!==cle; });
+    identEditSocPeindre();
+    if(typeof showToast==='function') showToast('Profil débranché : les vidéos déjà importées restent.','success');
+  }catch(e){ if(err) err.textContent=String(e); identEditSocPeindre(); }
 }
 function identEditPausePeindre(){
   var b=document.getElementById('ident-edit-pause'), h=document.getElementById('ident-edit-pausehint');
@@ -15572,6 +15634,20 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
       <label class="ie-fichier" id="ident-edit-avlbl">Choisir une image&hellip;
         <input id="ident-edit-avatar" type="file" accept="image/*" onchange="identEditAvChoisi(this)"></label>
     </div>
+    <!-- TIKTOK / INSTAGRAM sur un dossier EXISTANT (26/09/2026) : les deux
+         reseaux possibles, sans doublons -- meme ce qui a ete depose a la
+         main avant (vault_social + empreintes_video). -->
+    <div class="ie-sec" id="ident-edit-socwrap"><span class="ie-lbl">TikTok / Instagram</span>
+      <div id="ident-edit-sociaux" style="display:flex;flex-direction:column;gap:6px"></div>
+      <div style="display:flex;gap:6px">
+        <input id="ident-edit-soclien" type="text" autocomplete="off" data-lpignore="true" placeholder="Lien TikTok ou Instagram"
+               style="flex:1;min-width:0;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:10px;font-size:13px;font-family:inherit;box-sizing:border-box">
+        <input id="ident-edit-socseuil" type="number" min="0" step="1000" value="10000" title="Vues minimum"
+               style="width:86px;background:#131316;border:1px solid #34343a;color:#e6e6ea;border-radius:9px;padding:10px;font-size:13px;font-family:inherit;box-sizing:border-box">
+      </div>
+      <button type="button" id="ident-edit-socgo" class="ie-btn" onclick="identEditSocBrancher()">Brancher et importer</button>
+      <div id="ident-edit-sochint" class="ie-hint"></div>
+    </div>
     <div class="ie-sec" id="ident-edit-pausewrap"><span class="ie-lbl">Pause</span>
       <button type="button" id="ident-edit-pause" class="ie-btn" onclick="identEditPause()"></button>
       <div id="ident-edit-pausehint" class="ie-hint"></div>
@@ -16787,6 +16863,19 @@ def _en_pause(ident) -> bool:
         return _ip.en_pause(ident)
     except Exception:
         return False
+
+
+def _sociaux_json(ident) -> str:
+    """Les profils branchés sur un dossier, pour la fiche « Modifier »
+    (échappé pour un attribut entre apostrophes)."""
+    import json as _j
+    try:
+        import vault_social as _vs
+        l = [{"cle": c, "plateforme": e.get("plateforme"), "username": e.get("username"),
+              "seuil": e.get("seuil")} for c, e in _vs.sources_de(ident)]
+    except Exception:
+        l = []
+    return html_escape(_j.dumps(l, ensure_ascii=False), quote=True)
 
 
 def _classe_pause(ident) -> str:
@@ -22988,9 +23077,9 @@ def _vault_social_bandeau(ident: str, src: dict) -> str:
     import html as _h
     import vault_social as _vs
     ident_js = _h.escape(ident, quote=True)
-    # Pas de bouton « brancher » sur un dossier existant : sur une modèle qui
-    # a des VA, des centaines de vidéos d'un tiers seraient arrivées dans le
-    # stock où ils piochent au hasard. Un profil se branche à la création.
+    # `ident` est la CLÉ du registre : « lea » ou « lea|instagram » (2e
+    # profil du dossier). Brancher sur un dossier existant se fait depuis
+    # Modifier, qui avertit quand des VA piochent dans ces brutes.
     if not src.get("url"):
         return ""
     now = time.time()
@@ -23023,6 +23112,9 @@ def _vault_social_bandeau(ident: str, src: dict) -> str:
             morceaux.append(f"{b['echecs']} échec(s), retentées à la prochaine relecture")
         if b.get("abandonnees"):
             morceaux.append(f"{b['abandonnees']} abandonnée(s) après 3 échecs")
+        if b.get("doublons"):
+            # reconnues à l'image : déposées à la main, ou venues de l'autre réseau
+            morceaux.append(f"{b['doublons']} déjà là sous un autre nom, pas reprise(s)")
         morceaux.append(f"{b.get('examinees', 0)} vidéos lues sur le profil"
                         + (f" (via {b['source']})" if b.get("source") else ""))
         if b.get("incomplet"):
@@ -25086,14 +25178,16 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
     # Un dossier branché s'ouvre trié par vues : c'est la raison pour
     # laquelle on l'a branché ; « Récemment » reste à un clic.
     _social = {}
+    _sources_vs = []      # [(cle, entree)] : TikTok ET Instagram possibles
     _vues = {}
     if subdir == "brutes":
         try:
             import vault_social as _vs_g
-            _social = _vs_g.lire(selected)
+            _sources_vs = _vs_g.sources_de(selected)
+            _social = _sources_vs[0][1] if _sources_vs else {}
             _vues = _vs_g.vues_du_dossier(folder)
         except Exception:
-            _social, _vues = {}, {}
+            _social, _sources_vs, _vues = {}, [], {}
         try:
             if _social.get("url") and not _req.args.get(f"cloud_{subdir}_sort"):
                 sort_mode = "vues"
@@ -25421,7 +25515,8 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
     # 300 » ressemblait à une panne alors que c'était le seuil.
     social_html = ""
     if subdir == "brutes":
-        social_html = _vault_social_bandeau(selected, _social)
+        # un bandeau par profil branché (le TikTok et l'Instagram d'un dossier)
+        social_html = "".join(_vault_social_bandeau(_c, _e) for _c, _e in _sources_vs)
 
     gallery_header = (
         # === Row 1 : identite a gauche + Add media a droite ===
@@ -25447,6 +25542,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         # celles qui ne peuvent pas sortir des modèles.
         f"data-typelock='{'1' if _type_mod.verrouillee(selected) else ''}' "
         f"data-pause='{'1' if _en_pause(selected) else ''}' "
+        f"data-sociaux='{_sociaux_json(selected)}' "
         # Ce que l'entrée porte, servi au panneau : décider « modèle ou
         # identité » sans ce chiffre revient à décider de mémoire.
         f"data-vas='{_effectif_identite(selected)[0]}' "
@@ -58271,10 +58367,26 @@ def create_app():
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
         import vault_social as _vs
+        # `identity` peut être la CLÉ d'un 2e profil (« lea|instagram ») :
+        # c'est son dossier qui doit exister.
         ident = (request.form.get("identity") or "").strip().lower()
-        if ident not in _list_identities():
+        if _vs.identite_de(ident) not in _list_identities():
             return jsonify({"ok": False, "error": "identité inconnue"})
         action = (request.form.get("action") or "").strip()
+        if action == "brancher":
+            # Sur un dossier QUI EXISTE (demande du propriétaire, 26/09/2026) :
+            # TikTok et/ou Instagram, sans doublons (vault_social + empreintes).
+            r = _vs.brancher_existante(_vs.identite_de(ident), request.form.get("lien") or "",
+                                       request.form.get("seuil") or _vs.SEUIL_DEFAUT)
+            if r.get("ok"):
+                _vs.planifier(r["cle"])
+                _invalidate_all_ttl_cache()
+            return jsonify(r)
+        if action == "debrancher":
+            r = _vs.debrancher(ident)
+            if r.get("ok"):
+                _invalidate_all_ttl_cache()
+            return jsonify(r)
         # Une relecture déjà en route n'est pas interrompue : la demande
         # passe juste après elle, et le message le dit.
         _deja = _vs.progression(ident) is not None
@@ -58302,7 +58414,7 @@ def create_app():
         if not is_auth():
             return jsonify({"ok": False}), 401
         import vault_social as _vs
-        ident = (request.args.get("identity") or "").strip().lower()
+        ident = (request.args.get("identity") or "").strip().lower()   # ou une clé « lea|instagram »
         e = _vs.lire(ident)
         return jsonify({"ok": True, "branche": bool(e.get("url")),
                         "progression": _vs.progression(ident),
@@ -71685,8 +71797,9 @@ def start_in_thread():
     try:
         import vault_social as _vs_boot
 
-        def _vs_dossier(ident):
-            d = IDENTITIES_DIR / ident
+        def _vs_dossier(cle):
+            # « lea|instagram » (2e profil) descend dans le dossier de « lea »
+            d = IDENTITIES_DIR / _vs_boot.identite_de(cle)
             return (d / _vs_boot.SOUS_DOSSIER) if d.is_dir() else None
         _vs_boot.demarrer(_vs_dossier, _invalidate_all_ttl_cache)
     except Exception as e:

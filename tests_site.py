@@ -15168,6 +15168,126 @@ try:
 except Exception as _eI:
     check("import instagram : testable", False, repr(_eI)[:200])
 
+# --- TikTok ET Instagram sur un dossier EXISTANT, sans doublons (26/09/2026)
+# « c est possible de link un truc que j avais deja pour ajouter du content,
+# juste les doublons ca les met pas [...] et si j avais add a la main avant ».
+try:
+    import tempfile as _tfD, pathlib as _plD, json as _jsD, shutil as _shD, subprocess as _spD
+    import vault_social as _vsD
+    import empreintes_video as _evD
+    _tmpD = _plD.Path(_tfD.mkdtemp())
+    _savD = (_vsD.FICHIER, _vsD._lister_tiktok_creator, _vsD._lister_tiktok, _vsD._telecharger_tiktok,
+             _vsD.PAUSE_SEC, _vsD.source_prete, _evD.DOSSIER_CACHE, _vsD._lister_instagram)
+    try:
+        _vsD.FICHIER, _vsD.PAUSE_SEC = _tmpD / "reg.json", 0
+        _vsD.source_prete = lambda p: ""
+        _evD.DOSSIER_CACHE = _tmpD / "empreintes"
+        # sources multiples
+        check("sources : un profil sur un dossier sans profil devient le principal",
+              _vsD.brancher_existante("lea", "tiktok.com/@lea", 10_000).get("cle") == "lea")
+        _rI = _vsD.brancher_existante("lea", "instagram.com/lea.ig", 5_000)
+        check("sources : l autre reseau s ajoute A COTE (cle lea|instagram)",
+              _rI.get("cle") == "lea|instagram" and _vsD.lire("lea").get("plateforme") == "tiktok")
+        check("sources : sources_de rend les deux, principal d abord",
+              [c for c, _ in _vsD.sources_de("lea")] == ["lea", "lea|instagram"]
+              and _vsD.identite_de("lea|instagram") == "lea")
+        _vsD._maj("lea|instagram", recus=["x1"], doublons={"x2": "a.mp4"})
+        _vsD.brancher_existante("lea", "instagram.com/autre", 5_000)
+        check("sources : un AUTRE compte sur la meme source repart de zero",
+              _vsD.lire("lea|instagram").get("recus") == [] and _vsD.lire("lea|instagram").get("username") == "autre")
+        check("sources : debrancher oublie le profil (les videos restent)",
+              _vsD.debrancher("lea|instagram").get("ok") and [c for c, _ in _vsD.sources_de("lea")] == ["lea"])
+        import identite_admin as _iaD
+        check("sources : renommer / retirer une identite emporte ses 2e profils",
+              "vault_social.json" in [f for f, _ in _iaD._PREFIXES])
+        # DOUBLONS : un vrai contenu, depose a la main sous un autre nom
+        _dD = _tmpD / "lea" / _vsD.SOUS_DOSSIER
+        _dD.mkdir(parents=True)
+
+        def _video(chemin, source, filtre="", duree=4):
+            _spD.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"{source}=size=320x568:rate=25",
+                      "-t", str(duree)]
+                     + (["-vf", filtre] if filtre else []) + ["-c:v", "libx264", "-pix_fmt", "yuv420p", str(chemin)],
+                     check=True, capture_output=True)
+        _video(_dD / "IMG_1.mp4", "testsrc")                       # depose a la main
+        _profilD = [{"id": "111", "view_count": 50_000}, {"id": "222", "view_count": 40_000}]
+        _vsD._lister_tiktok_creator = lambda u, info=None: [dict(e) for e in _profilD]
+
+        def _dlD(url, cible):
+            p = cible.with_suffix(".mp4")
+            if cible.name.endswith("111"):   # le meme contenu, reencode plus petit
+                _video(p, "testsrc", "scale=240:426")
+            else:                            # une vraie nouvelle video
+                _video(p, "mandelbrot")
+            return p
+        _vsD._telecharger_tiktok = _dlD
+        _bD = _vsD.synchroniser("lea", _dD)["bilan"]
+        check("doublons : la copie d une video deposee a la main n est PAS importee",
+              not (_dD / "tt_111.mp4").exists() and _bD.get("doublons") == 1, str(_bD))
+        check("doublons : la video vraiment nouvelle, elle, est importee",
+              (_dD / "tt_222.mp4").exists() and _bD.get("nouvelles") == 1, str(_bD))
+        _vD = _jsD.loads((_dD / "IMG_1.social.json").read_text(encoding="utf-8"))
+        check("doublons : le fichier depose a la main recoit les VUES (badge)",
+              _vD.get("vues") == 50_000 and _vD.get("id") == "111")
+        check("doublons : la correspondance est retenue (pas de nouveau telechargement)",
+              _vsD.lire("lea").get("doublons") == {"111": "IMG_1.mp4"})
+        _profilD[0]["view_count"] = 60_000
+        _b2D = _vsD.synchroniser("lea", _dD)["bilan"]
+        check("doublons : a la relecture, rien n est retelecharge et les vues suivent",
+              _b2D.get("doublons") == 1 and _b2D.get("nouvelles") == 0
+              and _jsD.loads((_dD / "IMG_1.social.json").read_text(encoding="utf-8")).get("vues") == 60_000,
+              str(_b2D))
+        check("doublons : rien du vault n est efface",
+              (_dD / "IMG_1.mp4").exists() and (_dD / "tt_222.mp4").exists())
+        # le site : brancher / debrancher depuis « Modifier »
+        import web_upload as _wD
+        _idD = _wD.IDENTITIES_DIR / "tst_soc"
+        (_idD / "brutes").mkdir(parents=True, exist_ok=True)
+        _savWD = (_wD._load_web_users, _vsD.planifier)
+        _planD = []
+        _vsD.planifier = lambda c: _planD.append(c) or True
+        _wD._load_web_users = lambda: {"boss": {"role": "owner", "password_hash": "x"}}
+        try:
+            _wD._invalidate_all_ttl_cache()
+            _aD = _wD.create_app(); _aD.testing = True
+            _cD = _aD.test_client()
+            with _cD.session_transaction() as _sD:
+                _sD["auth"] = True; _sD["username"] = "boss"; _sD["role"] = "owner"
+            _j1D = _cD.post("/identity/social", data={"identity": "tst_soc", "action": "brancher",
+                                                      "lien": "https://www.tiktok.com/@tst.soc", "seuil": "20000"}).get_json() or {}
+            _j2D = _cD.post("/identity/social", data={"identity": "tst_soc", "action": "brancher",
+                                                      "lien": "https://www.instagram.com/tst.soc/", "seuil": "5000"}).get_json() or {}
+            check("site : brancher TikTok puis Instagram sur un dossier existant, relecture lancee",
+                  _j1D.get("cle") == "tst_soc" and _j2D.get("cle") == "tst_soc|instagram"
+                  and _planD == ["tst_soc", "tst_soc|instagram"], str((_j1D.get("cle"), _j2D.get("cle"), _planD)))
+            (_idD / "brutes" / "a.mp4").write_bytes(b"x" * 2000)
+            with _aD.test_request_context("/?tab=cloudbrutes&cloud_brutes_ident=tst_soc"):
+                _gD = _wD._render_cloud_content_html("brutes", _wD.VIDEO_EXTS)
+            check("site : la fiche liste les deux profils, et la galerie a un bandeau par profil",
+                  "tst_soc|instagram" in _gD and _gD.count("class='vs-bandeau'") == 2, "")
+            _j3D = _cD.post("/identity/social", data={"identity": "tst_soc|instagram",
+                                                      "action": "debrancher"}).get_json() or {}
+            check("site : debrancher l Instagram garde le TikTok",
+                  _j3D.get("ok") and [c for c, _ in _vsD.sources_de("tst_soc")] == ["tst_soc"])
+        finally:
+            _wD._load_web_users, _vsD.planifier = _savWD
+            _shD.rmtree(_idD, ignore_errors=True)
+            _wD._invalidate_all_ttl_cache()
+        # empreintes : les images unies ne prouvent rien
+        _unie = {"duree": 4.0, "images": {str(t): ["0" * 64, False] for t in _evD.INSTANTS[:5]}}
+        check("empreintes : deux videos aux images unies (fondus) ne sont pas « la meme »",
+              not _evD.correspond(_unie, dict(_unie)))
+        check("empreintes : durees compatibles = egales, ou le carton de fin TikTok",
+              _evD.durees_compatibles(45.8, 45.9) and _evD.durees_compatibles(45.8, 49.3)
+              and not _evD.durees_compatibles(45.8, 60.0) and not _evD.durees_compatibles(45.8, 47.0))
+    finally:
+        (_vsD.FICHIER, _vsD._lister_tiktok_creator, _vsD._lister_tiktok, _vsD._telecharger_tiktok,
+         _vsD.PAUSE_SEC, _vsD.source_prete, _evD.DOSSIER_CACHE, _vsD._lister_instagram) = _savD
+        _shD.rmtree(_tmpD, ignore_errors=True)
+except Exception as _eD:
+    import traceback as _tbD
+    check("doublons / sources multiples : testable", False, repr(_eD)[:200] + _tbD.format_exc()[-300:])
+
 # ------------------------------------------ 38. Reperer le texte : gratuit (OCR local)
 print()
 print("=" * 70)

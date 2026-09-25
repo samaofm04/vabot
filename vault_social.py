@@ -243,6 +243,81 @@ def brancher(identite: str, lien: str, seuil: int) -> dict:
     return {"ok": True, **e}
 
 
+#: PLUSIEURS SOURCES PAR DOSSIER (26/09/2026) : « faire pk pas instagram et
+#: tiktok ». La premiere garde la cle « <identite> » (tout l existant la lit
+#: ainsi) ; celle de l autre plateforme vit sous « <identite>|<plateforme> ».
+#: Chaque cle est une unite de relecture a part entiere (planifier,
+#: synchroniser, bandeau), et identite_admin suit ces cles « <nom>|... » au
+#: renommage et au retrait (_PREFIXES).
+SEP_SOURCE = "|"
+
+
+def identite_de(cle: str) -> str:
+    """Le dossier d'une cle du registre (« lea|instagram » -> « lea »)."""
+    return (cle or "").lower().split(SEP_SOURCE, 1)[0]
+
+
+def sources_de(identite: str) -> list:
+    """[(cle, entree)] des profils branches sur un dossier, principal d'abord."""
+    ident = (identite or "").lower()
+    reg = _registre()
+    out = [(k, dict(v)) for k, v in reg.items()
+           if isinstance(v, dict) and v.get("url")
+           and (k == ident or k.startswith(ident + SEP_SOURCE))]
+    return sorted(out, key=lambda kv: (kv[0] != ident, kv[0]))
+
+
+def brancher_existante(identite: str, lien: str, seuil) -> dict:
+    """Branche un profil sur un dossier QUI EXISTE DEJA, sans rien retirer.
+
+    Meme plateforme que le profil principal (ou aucun profil) : c'est lui qui
+    change. Autre plateforme : une seconde source, a cote. Un AUTRE compte
+    sur la meme source repart de zero (ses recus, ecartes et doublons ne
+    valent plus). Ne lance pas la relecture."""
+    info = analyser_lien(lien)
+    if info.get("erreur"):
+        return {"ok": False, "error": info["erreur"]}
+    pas_prete = source_prete(info["plateforme"])
+    if pas_prete:
+        return {"ok": False, "error": pas_prete}
+    try:
+        seuil = max(0, int(str(seuil).replace(" ", "").replace("\u202f", "")))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": f"seuil illisible : {seuil!r}"}
+    ident = (identite or "").lower()
+    with _verrou:
+        reg = _registre()
+        principal = reg.get(ident) if isinstance(reg.get(ident), dict) else {}
+        if not principal.get("url") or principal.get("plateforme") == info["plateforme"]:
+            cle = ident
+        else:
+            cle = ident + SEP_SOURCE + info["plateforme"]
+        ancien = reg.get(cle) if isinstance(reg.get(cle), dict) else {}
+        champs = {"plateforme": info["plateforme"], "username": info["username"],
+                  "url": info["url"], "seuil": seuil, "branche_le": int(time.time())}
+        if ancien.get("username") and ancien.get("username") != info["username"]:
+            champs.update(recus=[], photos=[], echecs={}, doublons={}, bilan={},
+                          derniere_synchro=None, statut="", erreur="", reessai_le=None)
+        e = _maj(cle, **champs)
+    return {"ok": True, "cle": cle, **e}
+
+
+def debrancher(cle: str) -> dict:
+    """Oublie un profil branche. Les videos deja descendues RESTENT."""
+    c = (cle or "").lower()
+    with _verrou:
+        reg = _registre()
+        if c not in reg:
+            return {"ok": False, "error": "aucun profil sous cette clé"}
+        e = reg.pop(c)
+        if not _ecrire(reg):
+            return {"ok": False, "error": "registre non écrit"}
+        if c in _file_attente:
+            _file_attente.remove(c)
+    return {"ok": True, "cle": c, "username": (e or {}).get("username"),
+            "plateforme": (e or {}).get("plateforme")}
+
+
 def regler_seuil(identite: str, seuil: int) -> dict:
     ident = (identite or "").lower()
     if not lire(ident):
@@ -632,6 +707,47 @@ def _rapatrier(dossier: Path) -> int:
     return deplaces
 
 
+class _DejaLa(Exception):
+    """La video telechargee est deja dans le dossier sous un autre nom."""
+
+
+def _a_d_autres_videos(dossier: Path, prefixe: str) -> bool:
+    """Le dossier a-t-il des videos qui ne viennent pas de CETTE source ?"""
+    try:
+        return any(p.is_file() and p.suffix.lower() in EXTS_VIDEO and not p.name.startswith(prefixe)
+                   for p in dossier.iterdir())
+    except OSError:
+        return False
+
+
+def _jumeau(brut: Path, dossier: Path) -> Optional[Path]:
+    """Le fichier du dossier qui est la MEME video que `brut`, ou None.
+    Une panne de la comparaison n'empeche pas l'import : elle se dit."""
+    try:
+        import empreintes_video as _ev
+        return _ev.trouver_doublon(brut, dossier)
+    except Exception as err:
+        print(f"[vault-social] comparaison au contenu indisponible : {err}", flush=True)
+        return None
+
+
+def _vues_sur_jumeau(dossier: Path, nom: str, voisin: dict) -> bool:
+    """Pose les vues sur le fichier deja la (badge de la galerie) -- sauf
+    s'il porte deja celles d'une AUTRE source : on n'ecrase pas les vues
+    TikTok d'une video par celles de son double Instagram. Vrai si ecrit."""
+    stem = Path(nom).stem
+    chemin = dossier / (stem + SUFFIXE)
+    ancien = safe_json.load(chemin, default={}) if chemin.exists() else {}
+    ancien = ancien if isinstance(ancien, dict) else {}
+    if ancien and (ancien.get("plateforme"), str(ancien.get("id"))) != (voisin.get("plateforme"), str(voisin.get("id"))):
+        return False
+    v = {k: val for k, val in voisin.items() if not k.startswith("_")}
+    if ancien.get("vues") == v.get("vues") and ancien.get("titre") == v.get("titre"):
+        return False
+    ancien.update(v)
+    return _ecrire_voisin(dossier, stem, ancien)
+
+
 def synchroniser(identite: str, dossier_videos: Path,
                  apres: Optional[Callable[[], None]] = None) -> dict:
     """Relit le profil, met les vues à jour, descend les nouvelles vidéos.
@@ -652,9 +768,14 @@ def synchroniser(identite: str, dossier_videos: Path,
     # et pas effacé par relancer() : une relecture en cours aurait réécrit
     # ses propres échecs par-dessus en finissant.
     echecs = {} if src.get("raz_echecs") else dict(src.get("echecs") or {})
+    #: {id: fichier} : les videos reconnues DEJA PRESENTES sous un autre nom
+    #: (deposees a la main, ou venues de l'autre reseau) -- jamais importees
+    #: une seconde fois, jamais retelechargees (empreintes_video).
+    doublons = dict(src.get("doublons") or {})
     bilan = {"examinees": 0, "au_dessus": 0, "deja_la": 0, "nouvelles": 0,
              "sous_seuil": 0, "vues_inconnues": 0, "retirees_a_la_main": 0,
-             "photos": 0, "echecs": 0, "abandonnees": 0, "vues_maj": 0}
+             "photos": 0, "echecs": 0, "abandonnees": 0, "vues_maj": 0,
+             "doublons": 0}
     liste_lue = False
     _en_cours[ident] = {"fait": 0, "total": 0, "etape": "lecture du profil"}
     # « demande » retombe ici et pas à la fin : un clic pendant la relecture
@@ -666,7 +787,7 @@ def synchroniser(identite: str, dossier_videos: Path,
     # Les téléchargements se font HORS du vault, puis sont déplacés : yt-dlp
     # recrée tout dossier manquant, et un dossier renommé ou archivé pendant
     # la relecture renaissait sous l'ancien nom, vide et orphelin.
-    tmp = FICHIER.parent / "_vault_social_tmp" / ident
+    tmp = FICHIER.parent / "_vault_social_tmp" / ident.replace(SEP_SOURCE, "__")
     try:
         if not dossier_videos.parent.is_dir():
             raise RuntimeError("dossier introuvable dans le vault")
@@ -716,6 +837,14 @@ def synchroniser(identite: str, dossier_videos: Path,
                         bilan["vues_maj"] += 1
                 recus.add(vid)
                 continue
+            if vid in doublons:
+                # deja present sous un autre nom : ses vues suivent sur le
+                # fichier qui est la (badge), sans rien retelecharger
+                bilan["doublons"] += 1
+                if (dossier_videos / doublons[vid]).exists() and isinstance(vues, int):
+                    if _vues_sur_jumeau(dossier_videos, doublons[vid], voisin):
+                        bilan["vues_maj"] += 1
+                continue
             if vid in photos or e.get("photo") or "/photo/" in (e.get("url") or ""):
                 bilan["photos"] += 1
                 photos.add(vid)
@@ -742,6 +871,11 @@ def synchroniser(identite: str, dossier_videos: Path,
         _en_cours[ident] = {"fait": 0, "total": len(a_prendre),
                             "etape": "téléchargement"}
         refus = 0
+        # La comparaison au contenu ne sert que si le dossier a des videos
+        # d'une AUTRE origine (deposees a la main, ou de l'autre reseau) :
+        # entre elles, les videos d'une meme source se reconnaissent a leur
+        # numero. Un import neuf ne paie donc rien.
+        comparer = _a_d_autres_videos(dossier_videos, prefixe)
         for i, (vid, stem, voisin) in enumerate(a_prendre):
             try:
                 brut = _telecharger(src, voisin, tmp / stem)
@@ -751,6 +885,20 @@ def synchroniser(identite: str, dossier_videos: Path,
                     except OSError:
                         pass
                     raise RuntimeError("dossier renommé ou archivé pendant la relecture")
+                jumeau = _jumeau(brut, dossier_videos) if comparer else None
+                if jumeau is not None:
+                    # Deja la sous un autre nom : le telechargement (hors du
+                    # vault) repart, rien du vault n'est touche.
+                    try:
+                        brut.unlink()
+                    except OSError:
+                        pass
+                    doublons[vid] = jumeau.name
+                    bilan["doublons"] += 1
+                    voisin.pop("_video_url", None)
+                    _vues_sur_jumeau(dossier_videos, jumeau.name, voisin)
+                    echecs.pop(vid, None)
+                    raise _DejaLa()
                 chemin = dossier_videos / brut.name
                 shutil.move(str(brut), str(chemin))
                 voisin.pop("_video_url", None)
@@ -766,6 +914,9 @@ def synchroniser(identite: str, dossier_videos: Path,
                 recus.add(vid)
                 echecs.pop(vid, None)
                 bilan["nouvelles"] += 1
+                refus = 0
+                comparer = True   # la suivante peut etre ce meme contenu
+            except _DejaLa:
                 refus = 0
             except PasUneVideo:
                 photos.add(vid)
@@ -792,11 +943,12 @@ def synchroniser(identite: str, dossier_videos: Path,
             # milieu d'un gros profil ne refait pas ce qui est déjà descendu.
             if (i + 1) % 10 == 0:
                 _maj(ident, creer=False, recus=sorted(recus),
-                     photos=sorted(photos), echecs=echecs)
+                     photos=sorted(photos), echecs=echecs, doublons=doublons)
             time.sleep(PAUSE_SEC)
         _maj(ident, creer=False, statut="ok", erreur="", reessai_le=None,
              derniere_synchro=int(time.time()), bilan=bilan,
-             recus=sorted(recus), photos=sorted(photos), echecs=echecs)
+             recus=sorted(recus), photos=sorted(photos), echecs=echecs,
+             doublons=doublons)
         return {"ok": True, "bilan": bilan}
     except Exception as err:
         msg = str(err).strip().splitlines()[0][:300] if str(err).strip() else type(err).__name__
@@ -805,7 +957,7 @@ def synchroniser(identite: str, dossier_videos: Path,
                   # répond 403 serait relu en boucle), ni dans deux semaines.
                   "reessai_le": int(time.time()) + REESSAI_SEC,
                   "recus": sorted(recus), "photos": sorted(photos),
-                  "echecs": echecs}
+                  "echecs": echecs, "doublons": doublons}
         # Liste refusée : le bilan précédent reste. L'écraser par des zéros
         # faisait annoncer « 0 dans le dossier » à côté de 40 vidéos.
         if liste_lue:

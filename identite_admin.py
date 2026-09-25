@@ -111,6 +111,10 @@ _PREFIXES = (
     for _c in _mm.PRIORITE
 ) + (
     ("disabled_reels.json", "les reels mis de cote"),
+    # Un 2e profil (l'autre reseau) branche sur le dossier vit sous
+    # « <nom>|instagram » ou « <nom>|tiktok » (vault_social.SEP_SOURCE) ; le
+    # 1er est une cle simple, deja dans _CLES.
+    ("vault_social.json", "les autres profils TikTok/Instagram branchés"),
 )
 
 #: Etats dont les CLES SONT DES CHEMINS contenant le nom comme un segment.
