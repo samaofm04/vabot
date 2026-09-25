@@ -6409,12 +6409,14 @@ function nxMVerifRelire(fid){
       });
     }).catch(function(){});
 }
+if(!window.__nxMVerifClic){ window.__nxMVerifClic=1;
 document.addEventListener('click', function(ev){
   var b=ev.target.closest?ev.target.closest('[onclick*="nxMontageSave"],[onclick*="nxMontageApprove"]'):null;
   if(!b||typeof nxMState==='undefined'||!nxMState.fid) return;
   var fid=nxMState.fid;
   setTimeout(function(){ nxMVerifRelire(fid); }, 1500);
 }, true);
+}
 /* Pastille « a verifier » du template ouvert. Le brouillon propose, lui,
    arrive par nxMLoadDraft (le serveur le sert comme un brouillon marque
    « propose ») : cette fonction ne fait que le signaler. */
@@ -8126,6 +8128,37 @@ async function capOcrEnvoyer(){
     capLibRecharger();
   }catch(err){ if(typeof showToast==='function') showToast('✕ '+err,'error'); }
   finally{ if(go){ go.disabled=false; capOcrCibles(); } }
+}
+/* COLLER des captures (Cmd+V / Ctrl+V) : depuis l onglet Caption, une image
+   copiee ouvre la fenetre des captures et part en lecture ; fenetre ouverte,
+   chaque collage s ajoute a la relecture. Un collage de TEXTE n est jamais
+   intercepte : seules les images le sont. */
+/* Un seul ecouteur par page, meme si ce script etait execute deux fois
+   (meme garde que le temoin d analyses) : sinon chaque collage comptait
+   double. */
+if(!window.__capOcrColler){ window.__capOcrColler=1;
+document.addEventListener('paste', function(ev){
+  var md=document.getElementById('capocr-modal');
+  var ouverte=md && md.style.display==='flex';
+  var onglet=document.getElementById('form-cloudcaptions');
+  var surCaption=onglet && onglet.offsetParent!==null;
+  if(!ouverte && !surCaption) return;
+  var items=(ev.clipboardData&&ev.clipboardData.items)||[], files=[], texte=false;
+  for(var i=0;i<items.length;i++){
+    if(items[i].kind==='file' && String(items[i].type||'').indexOf('image/')===0){
+      var f=items[i].getAsFile(); if(f) files.push(f);
+    } else if(items[i].kind==='string' && items[i].type==='text/plain'){ texte=true; }
+  }
+  if(!files.length) return;
+  /* Des cellules copiees depuis Excel ou Numbers arrivent en texte ET en
+     image : collees dans un champ, c est le texte qu on veut, pas une
+     capture de ces cellules. */
+  var t=ev.target, champ=t && (t.isContentEditable || /^(TEXTAREA|INPUT)$/.test(t.tagName||''));
+  if(texte && champ) return;
+  ev.preventDefault();
+  if(!ouverte) capOcrOpen();
+  capOcrFichiers(files);
+});
 }
 /* Recharge la bibliotheque de l identite ouverte depuis le serveur : apres un
    ajout en masse, le bloc garde en memoire est perime, et le prochain
@@ -14308,7 +14341,7 @@ body.light #capocr-drop span,body.light #capocr-etat,body.light #capocr-cibles,b
     <label id="capocr-drop" ondragover="event.preventDefault();this.style.borderColor='#3b82f6'" ondragleave="this.style.borderColor=''" ondrop="event.preventDefault();this.style.borderColor='';capOcrFichiers(event.dataTransfer.files)"
            style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:18px;border:1.5px dashed #3a3a44;border-radius:12px;cursor:pointer;color:#9a9aa6;font-size:13px;text-align:center">
       <input id="capocr-input" type="file" accept="image/png,image/jpeg,image/webp" multiple style="display:none" onchange="capOcrFichiers(this.files);this.value=''">
-      <b style="color:#c4c4cc">Dépose tes captures ici, ou clique pour les choisir</b>
+      <b style="color:#c4c4cc">Colle (⌘V), dépose tes captures ici, ou clique pour les choisir</b>
       <span>Texte lu gratuitement (Gemini, sinon Tesseract). Rien ne part avant ta relecture.</span>
     </label>
     <div id="capocr-etat" style="font-size:12px;color:#9a9aa6"></div>
@@ -24995,8 +25028,8 @@ def _render_cloud_captions_html() -> str:
         # 📷 Captures : captions lues sur des captures d'écran (gratuit), relues
         # dans une fenêtre, puis ajoutées à toutes les identités d'un marché.
         "<button type='button' class='btn-partager' data-capact='ocr' "
-        "title='Déposer des captures d écran : le texte est lu gratuitement, tu le relis, "
-        "puis il part dans toutes les identités du marché choisi'>📷 Captures</button>"
+        "title='Coller (⌘V) ou déposer des captures d écran : le texte est lu gratuitement, "
+        "tu le relis, puis il part dans toutes les identités du marché choisi'>📷 Captures</button>"
         # ＋ Add captions = même bouton phare que « Add template » sur l'onglet
         # Template montage (gradient) : ouvre le formulaire façon Upload Reel.
         "<button type='button' data-capact='addcap' title='Ajoute tes captions — écrites au CENTRE par défaut' "
