@@ -12530,12 +12530,6 @@ document.addEventListener('click',function(e){
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="m9 16 2 2 4-4"/></svg>
       Activité VA
     </button>
-    <!-- Équipe : pas d apostrophe droite dans les arguments de showTab
-         (elle fermerait la chaine JS de l onclick) -> ’ typographique. -->
-    <button class="item" id="tab-jbequipe" onclick="showTab('jailbreak','jbequipe','Équipe','Les noms et les rôles de l’équipe Insta, et leurs fiches VA')">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 10h2"/><path d="M16 14h2"/><path d="M6.17 15a3 3 0 0 1 5.66 0"/><circle cx="9" cy="11" r="2"/><rect x="2" y="5" width="20" height="14" rx="2"/></svg>
-      Équipe
-    </button>
   </div>
 </div>
 
@@ -44383,6 +44377,49 @@ def _render_jbequipe_fragment() -> str:
     return "".join(h)
 
 
+#: L'entree « Équipe » du menu Social Analytics, INSEREE AU RENDU (voir
+#: _menu_avec_equipe) au lieu d'etre ecrite dans le menu de UPLOAD_HTML.
+#:
+#: Le VPS reapplique apres chaque deploiement des patchs locaux qu'un autre
+#: outil ecrit directement sur le serveur (/root/vabot-patches), et chacun ne
+#: s'applique que si ses lignes voisines n'ont pas bouge. Dans ce groupe, TOUTES
+#: les places sont prises : « instagram-page-polish » s'ancre avant Comptes par
+#: identite, « instagram-dashboard » entre Comptes et Analyse vues,
+#: « instagram-all-periods » (qui retire Analyse globale et Activite VA, a la
+#: demande du proprietaire) apres Activite VA. Le 25/09, ce bouton ecrit apres
+#: Activite VA a fait tomber ce dernier en silence : les deux pages sont
+#: revenues dans le menu. Ecrit ailleurs dans le groupe, il en faisait tomber
+#: cinq autres. D'ou l'insertion a la volee, en fin de groupe.
+#:
+#: Pas d'apostrophe droite dans les arguments de showTab (elle fermerait la
+#: chaine JS de l'onclick) -> ’ typographique.
+_MENU_EQUIPE_BTN = (
+    '    <button class="item" id="tab-jbequipe" onclick="showTab(\'jailbreak\',\'jbequipe\',\'Équipe\',\'Les noms et les rôles de l’équipe Insta, et leurs fiches VA\')">\n'
+    '      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 10h2"/><path d="M16 14h2"/><path d="M6.17 15a3 3 0 0 1 5.66 0"/><circle cx="9" cy="11" r="2"/><rect x="2" y="5" width="20" height="14" rx="2"/></svg>\n'
+    '      Équipe\n'
+    '    </button>\n'
+)
+
+
+def _menu_avec_equipe(page: str) -> str:
+    """Ajoute l'entree « Équipe » en fin du groupe Social Analytics.
+
+    Ancree sur la FIN du groupe (« </div></div> » qui suit son ouverture), que
+    les patchs du VPS ne touchent pas, quel que soit le nombre d'entrees qu'ils
+    laissent. Si le groupe est introuvable, on le dit dans le journal au lieu
+    de perdre l'entree sans trace.
+    """
+    if 'id="tab-jbequipe"' in page:
+        return page
+    i = page.find('<div class="group" id="grp-jailbreak">')
+    j = page.find("\n  </div>\n</div>", i) if i >= 0 else -1
+    if j < 0:
+        print("[equipe] groupe Social Analytics introuvable dans le menu : "
+              "entree Equipe non ajoutee", flush=True)
+        return page
+    return page[:j + 1] + _MENU_EQUIPE_BTN + page[j + 1:]
+
+
 def _render_jbequipe_html() -> str:
     """Onglet « Équipe » (Social Analytics) : la coquille — CSS, fragment
     rendu par le serveur, et le script qui le recharge après chaque action."""
@@ -51809,12 +51846,14 @@ ROLE_MENU_STRUCTURE = [
         {"key": "jbanalyse", "name": "Jailbreak — Analyse vues", "perms": ["view"]},
         {"key": "jbglobal", "name": "Jailbreak — Analyse globale", "perms": ["view"]},
         {"key": "jbactivite", "name": "Jailbreak — Activité VA (assiduité, paie)", "perms": ["view", "edit"]},
+        {"key": "jb2", "name": "Jailbreak 2", "perms": ["view"]},
+        # Après jb2 : le patch local « instagram-all-periods » s'ancre sur
+        # jbglobal, jbactivite et jb2 consécutifs.
         # Clé == nom d'onglet réel : rien à ajouter dans _PERM_KEY_TO_TABS.
         # Le « rôle » qu'on y écrit est une fiche, pas un droit : il n'ouvre
         # rien ici. L'écriture reste admin-only (/jbequipe/ dans
         # _ADMIN_ONLY_WRITE) ; un rôle qui a la case voit l'onglet en lecture.
         {"key": "jbequipe", "name": "Social Analytics — Équipe (noms et rôles)", "perms": ["view", "edit"]},
-        {"key": "jb2", "name": "Jailbreak 2", "perms": ["view"]},
     ]},
     {"section": "Finances", "items": [
         # « Dépenses » ne correspondait à AUCUNE page : la case ne faisait rien.
@@ -52989,7 +53028,7 @@ def _render_upload_inner(msg=None, error=None):
     html = (
         # EN PREMIER : seuls les jetons ecrits dans UPLOAD_HTML sont vises, pas
         # le contenu des galeries inserees plus bas.
-        _upload_html_marque()
+        _menu_avec_equipe(_upload_html_marque())
         .replace("{theme_pre_class}", _pre)
         .replace("{theme_body_class}", _bod)
         # Socle des galeries : une seule fois pour toute la page.

@@ -18226,9 +18226,41 @@ try:
         # c est aussi la preuve que l entree lui est montree.
         _lec = _clientEq("lecteur", "lecteur")
         _pgL = _lec.get("/?tab=jbequipe").get_data(as_text=True)
-        _iAct, _iEqp = _pgL.find('id="tab-jbactivite"'), _pgL.find('id="tab-jbequipe"')
-        check("rendu : l entree de menu Equipe suit directement Activite VA",
-              0 < _iAct < _iEqp and _pgL[_iAct:_iEqp].count("<button") == 1, (_iAct, _iEqp))
+        # Equipe est AJOUTEE AU RENDU en fin du groupe Social Analytics
+        # (_menu_avec_equipe), jamais ecrite dans le menu de UPLOAD_HTML : les
+        # patchs locaux du VPS s ancrent sur chaque place du groupe, et le
+        # 25/09 l entree ecrite apres Activite VA a fait tomber
+        # « instagram-all-periods » (Analyse globale et Activite VA sont
+        # revenues dans le menu). Les ancres sont verifiees ci-dessous.
+        _iGrp = _pgL.find('id="grp-jailbreak"')
+        _iFin = _pgL.find("\n  </div>\n</div>", _iGrp)
+        _iEqp = _pgL.find('id="tab-jbequipe"')
+        check("rendu : l entree de menu Equipe ferme le groupe Social Analytics",
+              0 < _iGrp < _iEqp < _iFin and _pgL[_iEqp:_iFin].count("<button") == 0
+              and _pgL.count('id="tab-jbequipe"') == 1, (_iGrp, _iEqp, _iFin))
+        check("rendu : l entree Equipe n est PAS ecrite dans le menu source (UPLOAD_HTML)",
+              'id="tab-jbequipe"' not in _wE.UPLOAD_HTML)
+        # Menu tel que le VPS le sert, patch « instagram-all-periods » applique :
+        # Analyse globale et Activite VA retirees -> Equipe se pose quand meme
+        # en fin de groupe, derriere « Analyse ».
+        _grpA = _wE.UPLOAD_HTML.index('<div class="group" id="grp-jailbreak">')
+        _grpB = _wE.UPLOAD_HTML.index("\n  </div>\n</div>", _grpA)
+        _menuP = _wE.UPLOAD_HTML[_grpA:_grpB]
+        _iGl = _menuP.index('    <button class="item" id="tab-jbglobal"')
+        _menuP = _menuP[:_iGl] + "  </div>\n</div>\n"
+        _rP = _wE._menu_avec_equipe(_menuP)
+        check("rendu : menu patche (sans Analyse globale ni Activite VA) -> Equipe en fin de groupe",
+              _rP.count('id="tab-jbequipe"') == 1
+              and _rP.index('id="tab-jbanalyse"') < _rP.index('id="tab-jbequipe"')
+              and "tab-jbactivite" not in _rP, _rP[-300:])
+        check("rendu : groupe introuvable -> page rendue telle quelle (et dit au journal)",
+              _wE._menu_avec_equipe("<div>rien</div>") == "<div>rien</div>")
+        _srcAnc = pathlib.Path("web_upload.py").read_text(encoding="utf-8")
+        check("patch VPS instagram-all-periods : Activite VA reste le dernier bouton du groupe",
+              "      Activité VA\n    </button>\n  </div>\n</div>\n" in _srcAnc)
+        check("patch VPS instagram-all-periods : jbglobal, jbactivite, jb2 restent consecutifs",
+              _reEq.search(r'\{"key": "jbglobal".*\n\s*\{"key": "jbactivite".*\n\s*\{"key": "jb2"', _srcAnc)
+              is not None)
         check("rendu : la section form-jbequipe porte son emplacement differe",
               'id="form-jbequipe"' in _pgL and "data-lazy-tab='jbequipe'" in _pgL)
         check("rendu : le role restreint qui a la case voit l onglet (garde du menu)",
