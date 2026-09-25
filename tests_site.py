@@ -15823,6 +15823,29 @@ try:
 except Exception as _eNT:
     check("reserves (filtre) : testable", False, repr(_eNT)[:160])
 
+print()
+print("=" * 70)
+print("Reserves en tete de toutes les listes d identites du site")
+print("=" * 70)
+try:
+    import web_upload as _wRT
+    _savRT = (_wRT._type_identite, _wRT._load_identity_order)
+    try:
+        _wRT._type_identite = lambda i: "reserve" if i in ("zzz_blonde", "zzz_brune") else "modele"
+        _wRT._load_identity_order = lambda: ["zzz_lola", "zzz_brune", "zzz_amelia", "zzz_blonde"]
+        _ordRT = _wRT._apply_identity_order(["zzz_amelia", "zzz_blonde", "zzz_zoe", "zzz_lola", "zzz_brune"])
+        check("ordre : les reserves passent en tete, dans l ordre choisi entre elles",
+              _ordRT[:2] == ["zzz_brune", "zzz_blonde"], str(_ordRT))
+        check("ordre : le reste garde exactement son ordre habituel",
+              _ordRT[2:] == ["zzz_lola", "zzz_amelia", "zzz_zoe"], str(_ordRT))
+        _wRT._type_identite = lambda i: "modele"
+        check("ordre : sans reserve, rien ne change",
+              _wRT._apply_identity_order(["zzz_zoe", "zzz_lola"]) == ["zzz_lola", "zzz_zoe"])
+    finally:
+        _wRT._type_identite, _wRT._load_identity_order = _savRT
+except Exception as _eRT:
+    check("ordre des reserves : testable", False, repr(_eRT)[:160])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

@@ -24547,7 +24547,17 @@ def _apply_identity_order(identities):
     chargement, parce que le site a son cache, invalide a chaque ecriture.
     """
     import identites_ordre
-    return identites_ordre.trier(identities, _load_identity_order())
+    tri = identites_ordre.trier(identities, _load_identity_order())
+    # LES RESERVES TOUJOURS EN TETE, dans l ordre choisi entre elles, puis
+    # tout le reste dans l ordre habituel. Demande du proprietaire
+    # (25/09/2026) : c est la qu il range le contenu partage, il ne veut pas
+    # les chercher dans la liste. Le site seulement : les menus Discord
+    # passent par identites_ordre.trier directement, et une reserve n y
+    # figure pas.
+    reserves = [i for i in tri if _type_identite(i) == "reserve"]
+    if not reserves:
+        return tri
+    return reserves + [i for i in tri if _type_identite(i) != "reserve"]
 
 
 # ====================================================================
