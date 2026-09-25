@@ -6500,9 +6500,27 @@ try:
             check("routes : sans le bon mot de passe du compte, on ne retire rien",
                   _j3.get("ok") is not True and "Mot de passe" in str(_j3.get("error")),
                   str(_j3)[:90])
+            # 26/09 : une identite a « _ » ne se renommait pas (« modelefr n existe pas »)
+            _REN = "tst_ren_a"
+            (_iaR.IDENTITES / _REN / "reels").mkdir(parents=True, exist_ok=True)
+            _wR._invalidate_all_ttl_cache()
+            try:
+                _jr = (_cR.post("/identity/rename", data={"identity": _REN, "new_name": "tstrenb"}).get_json() or {})
+                check("routes : une identite a « _ » se renomme (ancien nom pris tel quel)",
+                      _jr.get("ok") is True and (_iaR.IDENTITES / "tstrenb").is_dir()
+                      and not (_iaR.IDENTITES / _REN).exists(), str(_jr)[:120])
+            finally:
+                for _nn in (_REN, "tstrenb"):
+                    _shR.rmtree(_iaR.IDENTITES / _nn, ignore_errors=True)
+                _wR._invalidate_all_ttl_cache()
             _j4 = (_cR.post("/identity/apercu", data={"identity": "julia"}).get_json() or {})
             check("routes : l apercu repond sans rien modifier",
                   _j4.get("ok") is True and "impossible" in _j4)
+            _jdon = (_cR.get("/identity/donnees").get_json() or {})
+            check("routes : /identity/donnees rend les tables que la page garde (sans recharger)",
+                  _jdon.get("ok") is True and all(isinstance(_jdon.get(k), str)
+                                                  for k in ("markets", "styles", "styles_choix", "reserves")),
+                  str(list(_jdon))[:90])
             # 26/09 : « ariiiann__ » ne se retirait pas (cherchee sans ses
             # « _ »), et une voisine au nom sans tiret aurait ete retiree.
             _SOUL, _VOIS = "tst_ret__", "tstret"
@@ -6554,6 +6572,17 @@ try:
           0 < _cre.find("'/identity/market'") < _cre.find("'/identity/reserves'") < _cre.find("'/identity/styles'"))
     check("creation : un reglage refuse est DIT (pas de rechargement qui l efface)",
           "avert.push(" in _cre and "Identité créée, mais pas tout" in _cre)
+    # 26/09 : « quand je modifie et je fais enregistrer, ca me refresh la page »
+    import re as _reRl
+    for _fnRl in ("async function identEditSave", "async function identEditPause",
+                  "async function identEditSocBrancher", "async function identEditRetirer()"):
+        _corpsRl = _srcA[_srcA.find(_fnRl):]
+        _corpsRl = _corpsRl[:_reRl.search(r"\n}\n", _corpsRl).end()]
+        check("fiche : %s ne recharge plus la page (mise a jour sur place)" % _fnRl.split()[-1].rstrip("()"),
+              "location.reload" not in _corpsRl and "vaultRafraichir(" in _corpsRl, "")
+    check("fiche : le rafraichissement garde l identite ouverte et remet a jour les tables de la page",
+          "vault-item-active[href]" in _srcA and "'/identity/donnees'" in _srcA
+          and "window.__mkMap = undefined" in _srcA)
     check("interface : la confirmation se fait par le mot de passe (champ masque)",
           'id="ident-edit-dangernom" type="password"' in _srcA and "fd.set('password'" in _srcA)
     check("interface : le recapitulatif est demande au serveur, pas devine",

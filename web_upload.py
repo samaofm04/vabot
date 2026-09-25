@@ -10736,10 +10736,9 @@ async function identEditSocBrancher(){
       if(err) err.textContent=(faits?'Branché en partie. ':'')+refus.join(' · ');
       identEditSocPeindre(); return;
     }
-    try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e3){}
     identEditClose();
-    /* la Video brut du dossier : c est la que l import se suit */
-    window.location.href='/?tab=cloudbrutes&cloud_brutes_ident='+encodeURIComponent(identEditCtx.ident);
+    await vaultRafraichir(null);
+    if(typeof showToast==='function') showToast('✓ Import lancé — il se suit dans la Vidéo brut de @'+identEditCtx.ident.replace(/^v2_/,''),'success');
   }catch(e){ if(err) err.textContent=String(e); identEditSocPeindre(); }
 }
 async function identEditSocDebrancher(cle, bouton){
@@ -10774,9 +10773,9 @@ async function identEditPause(){
       if(err) err.textContent=(j&&j.error)||('Refusé par le serveur (HTTP '+r.status+')');
       identEditPausePeindre(); return;
     }
-    try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e3){}
     identEditClose();
-    window.location.reload();   // les quatre listes et l en-tete, rendus par le serveur
+    await vaultRafraichir(null);   // les listes et l en-tete, rendus par le serveur, sans recharger
+    if(typeof showToast==='function') showToast(j.pause ? '⏸ @'+identEditCtx.ident+' en pause : plus rien sur Discord' : '▶ @'+identEditCtx.ident+' réactivée','success');
   }catch(e){ if(err) err.textContent=String(e); identEditPausePeindre(); }
 }
 function identEditRetirerFerme(){
@@ -10807,7 +10806,10 @@ async function identEditRetirer(){
       return;
     }
     identEditClose();
-    window.location.reload();
+    if(go){ go.disabled=false; go.textContent='Retirer'; }
+    /* retiree : elle sort de l adresse, la galerie retombe sur une autre */
+    await vaultRafraichir({ancien: identEditCtx.ident, nouveau: ''});
+    if(typeof showToast==='function') showToast('✓ @'+identEditCtx.ident.replace(/^v2_/,'')+' retirée (dans la corbeille)','success');
   }catch(e){
     if(err) err.textContent=String(e);
     if(go){ go.disabled=false; go.textContent='Retirer'; }
@@ -11034,6 +11036,100 @@ function identEditMarket(v){
      la liste, et un lien de l autre marche s affiche « sera retire ». */
   identEditReservesPeindre();
 }
+/* APRES MODIFIER, LA PAGE NE SE RECHARGE PLUS (demande du proprietaire,
+   26/09/2026 : « ca me refresh la page, c est pas normal »). La section a
+   l ecran (liste des identites + galerie) est redemandee au serveur et
+   remplacee sur place, par le meme chemin que le chargement des onglets
+   (?lazy=) ; les autres sections de la Bibliotheque se rechargeront a leur
+   ouverture ; les tables gardees par la page (marches, ce qui marche,
+   reserves) sont remises a jour. `renomme` : {ancien, nouveau} ou
+   {ancien, nouveau:''} (retiree) -- l identite dans l adresse suit. */
+async function vaultRafraichir(renomme, ouvrir){
+  try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
+  if(renomme && renomme.ancien){
+    try{
+      var u=new URL(location.href), chg=false;
+      Array.from(u.searchParams.keys()).forEach(function(k){
+        if(/_ident$/.test(k) && u.searchParams.get(k)===renomme.ancien){
+          if(renomme.nouveau) u.searchParams.set(k, renomme.nouveau); else u.searchParams.delete(k);
+          chg=true;
+        }
+      });
+      if(chg) history.replaceState(history.state, '', u.pathname+'?'+u.searchParams.toString()+u.hash);
+    }catch(e){}
+  }
+  try{
+    var rd=await fetch('/identity/donnees',{credentials:'same-origin'});
+    var jd=await rd.json();
+    if(jd&&jd.ok){
+      [['mk-markets','markets'],['ident-styles-data','styles'],['ident-styles-choix','styles_choix'],
+       ['ident-reserves-data','reserves']].forEach(function(p){
+        var el=document.getElementById(p[0]);
+        if(el && typeof jd[p[1]]==='string') el.textContent=jd[p[1]];
+      });
+      window.__mkMap = undefined;   // mkMarketOf relira la table a jour
+    }
+  }catch(e){}
+  var secs=Array.prototype.slice.call(document.querySelectorAll('.form-section')).filter(function(s){
+    return !!s.querySelector('.vault-list'); });
+  for(var i=0;i<secs.length;i++){
+    var sec=secs[i], nom=String(sec.id||'').replace(/^form-/,'');
+    if(!nom) continue;
+    if(sec.style.display==='none' || sec.offsetParent===null){
+      sec.innerHTML="<div data-lazy-tab='"+nom+"' style='padding:60px 20px;text-align:center'><div class='va-loading'>Chargement…</div></div>";
+      continue;
+    }
+    try{ await vaultSectionRecharger(sec, nom, renomme, ouvrir); }
+    catch(e){ window.location.reload(); return; }   // dernier recours : la page, plutot qu une liste perimee
+  }
+  if(typeof vaultRefilter==='function'){ try{ vaultRefilter(); }catch(e){} }
+}
+async function vaultSectionRecharger(sec, nom, renomme, ouvrir){
+  /* L IDENTITE OUVERTE se lit sur l entree active de la liste : la page
+     retire l identite de l adresse une fois chargee, et sans elle le serveur
+     retombait sur l identite par defaut -- Enregistrer « changeait » de
+     model sous les yeux. Renommee : son nouveau nom ; retiree : aucune. */
+  var q=(location.search||'').replace(/^[?]/,'');
+  /* `ouvrir` : une identite a ouvrir (tout juste creee) -- l adresse la porte */
+  var act=ouvrir ? null : sec.querySelector('.vault-item-active[href]');
+  if(act){
+    try{
+      var ua=new URL(act.getAttribute('href'), location.href);
+      if(renomme && renomme.ancien){
+        Array.from(ua.searchParams.keys()).forEach(function(k){
+          if(/_ident$/.test(k) && ua.searchParams.get(k)===renomme.ancien){
+            if(renomme.nouveau) ua.searchParams.set(k, renomme.nouveau); else ua.searchParams.delete(k);
+          }
+        });
+      }
+      q=ua.searchParams.toString();
+    }catch(e){}
+  }
+  var r=await fetch('/?lazy='+encodeURIComponent(nom)+(q?'&'+q:''),
+                    {headers:{'X-Tab-Ajax':'1'}, credentials:'same-origin'});
+  if(!r.ok) throw new Error('HTTP '+r.status);
+  var html=await r.text();
+  var y=window.scrollY, bac=document.createElement('div');
+  bac.innerHTML=html;
+  var noeuds=Array.prototype.slice.call(bac.childNodes);
+  sec.innerHTML='';
+  noeuds.forEach(function(n){ sec.appendChild(n); });
+  /* les scripts du fragment, rejoues comme au chargement d un onglet */
+  noeuds.forEach(function(n){
+    if(!n.querySelectorAll) return;
+    var lst=(n.tagName==='SCRIPT') ? [n] : Array.prototype.slice.call(n.querySelectorAll('script'));
+    lst.forEach(function(old){
+      var s2=document.createElement('script');
+      for(var k=0;k<old.attributes.length;k++) s2.setAttribute(old.attributes[k].name, old.attributes[k].value);
+      s2.textContent=old.textContent;
+      old.parentNode.replaceChild(s2, old);
+    });
+  });
+  window.scrollTo(0, y);
+  if(typeof window.vaultChargerVignettes==='function'){
+    requestAnimationFrame(function(){ try{ window.vaultChargerVignettes(); }catch(e){} });
+  }
+}
 async function identEditSave(){
   var err=document.getElementById('ident-edit-err'), go=document.getElementById('ident-edit-go');
   var ident=identEditCtx.ident, fait=false, cible=ident;
@@ -11115,7 +11211,9 @@ async function identEditSave(){
     }
     if(!fait){ identEditClose(); return; }
     identEditClose();
-    window.location.reload();
+    if(go){ go.disabled=false; go.textContent='Enregistrer'; }
+    await vaultRafraichir(cible!==ident ? {ancien:ident, nouveau:cible} : null);
+    if(typeof showToast==='function') showToast('✓ @'+String(cible).replace(/^v2_/,'')+' enregistrée','success');
   }catch(e){
     if(err) err.textContent=String(e);
     if(go){ go.disabled=false; go.textContent='Enregistrer'; }
@@ -11427,6 +11525,19 @@ async function identNewCreate(){
       return;
     }
     if(typeof showToast==='function') showToast('✓ Identité @'+String(j.identity||'').replace(/^v2_/,'')+' créée'+(j.social?' — import des vidéos lancé':'')+(j.warn?(' ('+j.warn+')'):''),j.warn?'info':'success');
+    /* Meme onglet : on y ouvre la nouvelle identite SANS recharger la page.
+       Autre onglet (import lance depuis les Reels -> Video brut) : on y va. */
+    var secVis=document.getElementById('form-'+vt);
+    if(ik && secVis && secVis.offsetParent!==null){
+      identNewClose();
+      if(go){ go.disabled=false; go.textContent='Créer'; }
+      try{
+        var u2=new URL(location.href); u2.searchParams.set('tab', vt); u2.searchParams.set(ik, j.identity);
+        history.pushState(history.state, '', u2.pathname+'?'+u2.searchParams.toString());
+      }catch(e6){ window.location.href=dest; return; }
+      await vaultRafraichir(null, j.identity);
+      return;
+    }
     window.location.href=dest;
   }catch(e){
     if(err) err.textContent=String(e);
@@ -58900,11 +59011,28 @@ def create_app():
         # n'apparaît jamais à l'écran, mais c'est lui qui la rend invisible
         # du Jailbreak et des menus Discord.
         new = (V2_PREFIX + base) if _is_v2(old) else base
-        r = _ia.renommer(old, new)
+        # L'ANCIEN nom est pris TEL QUEL quand c'est un dossier qui existe :
+        # normalisé, « modele_fr » devenait « modelefr » -- « n'existe pas ».
+        # Aucune identité à « _ » (ariiiann__...) ne se renommait. Le NOUVEAU
+        # passe toujours par normaliser() (salons Discord, cf. identite_admin).
+        r = _ia.renommer(old, new, ancien_exact=old in set(_list_identities()))
         if r.get("ok"):
             _invalidate_all_ttl_cache()
             r["label"] = _v2_label(r.get("identite") or new)
         return jsonify(r)
+
+    @app.route("/identity/donnees")
+    def identity_donnees():
+        """Les tables d'identités que la page garde en mémoire (marchés,
+        « ce qui marche », réserves), à jour. Après Modifier, la page se
+        rafraîchit SANS se recharger (vaultRafraichir) : sans elles, la
+        fiche rouverte relisait les anciens réglages, et un second
+        Enregistrer les aurait remis."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        return jsonify({"ok": True, "markets": _markets_json(), "styles": _styles_json(),
+                        "styles_choix": _styles_choix_json(), "reserves": _reserves_json()})
 
     @app.route("/identity/pause", methods=["POST"])
     def identity_pause_set():
