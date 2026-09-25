@@ -259,19 +259,11 @@ def _embed(marche: str, nb: int) -> discord.Embed:
 # Une vue ephemere qui expire en portant un DynamicItem efface le motif
 # enregistre pour les vrais panneaux -- d'ou aucun ici.
 #
-# Libelles et familles LUS dans cogs.user (_jb_action, _FAMILLES_MENU,
-# _EXPLICATIONS) : la maquette montre les vrais noms, logo Trash compris.
-
-#: Le menu « Brut » : les trois boutons de brute du panneau actuel.
-_DEMO_BRUT = ("brute", "brutbanger", "brutchoix")
-_DEMO_BRUT_EXPLI = {
-    "brute": "une vidéo brute, sans rien dessus",
-    "brutbanger": "une de tes brutes ⭐",
-    "brutchoix": "tu choisis toi-même la brute à utiliser",
-}
-
-#: L'ordre des menus, voulu par le proprietaire : Brut AVANT Template.
-_DEMO_ORDRE_MENUS = ("brut", "caption", "template", "trash", "flash")
+# Libelles, rangees de boutons, familles et explications LUS dans cogs.user
+# (_jb_action, _JB_BOUTONS_V2, _FAMILLES_PANNEAU, _EXPLICATIONS) : la TABLE
+# UNIQUE du vrai panneau depuis qu'il a pris cette forme. La maquette montre
+# donc les vrais noms, dans le vrai ordre (Brut avant Template), logo Trash
+# compris -- et ne peut plus s'en ecarter.
 
 
 def _demo_libelle(cle: str) -> str:
@@ -285,22 +277,25 @@ def _demo_libelle(cle: str) -> str:
     return cle
 
 
-def _demo_familles() -> dict:
-    """{cle: (emoji, nom, (actions...))} lu dans cogs.user, plus « brut »."""
-    out = {}
+def _demo_familles() -> list:
+    """[(emoji, nom, (actions...))] des menus du vrai panneau, dans son ordre."""
     try:
-        from cogs.user import _FAMILLES_MENU
-        for f in _FAMILLES_MENU:
-            out[f.cle] = (f.emoji, f.nom, tuple(f.actions))
+        from cogs.user import _FAMILLES_PANNEAU
+        return [(f.emoji, f.nom, tuple(f.actions)) for f in _FAMILLES_PANNEAU]
     except Exception:                                        # noqa: BLE001
-        pass
-    out["brut"] = ("🎥", "Brut", _DEMO_BRUT)
-    return out
+        return []
+
+
+def _demo_rangees() -> tuple:
+    """Les rangees de boutons du vrai panneau ; « _qte » = la quantite."""
+    try:
+        from cogs.user import _JB_BOUTONS_V2
+        return _JB_BOUTONS_V2
+    except Exception:                                        # noqa: BLE001
+        return (("_qte",),)
 
 
 def _demo_expli(cle: str) -> str:
-    if cle in _DEMO_BRUT_EXPLI:
-        return _DEMO_BRUT_EXPLI[cle]
     try:
         from cogs.user import _EXPLICATIONS
         return _EXPLICATIONS.get(cle, "")
@@ -377,23 +372,19 @@ if _demo_v2_dispo():
                 f"📦 **Quantité : {self.qty} média par action** — plafonnée "
                 "au stock dispo de la model.\n"
                 "-# 🧪 Maquette : les menus s'ouvrent, rien n'est envoyé."))
-            r0 = ui.ActionRow()
-            r0.add_item(_DemoBouton(self, "_qty", f"📦 Quantité : {self.qty}",
-                                    discord.ButtonStyle.secondary))
-            for cle in ("name", "pseudo", "pp", "bio"):
-                r0.add_item(_DemoBouton(self, cle, _demo_libelle(cle)))
-            boite.add_item(r0)
             # Pas de « ⭐⭐⭐ Trends » : le proprietaire l'a retire le 25/09/2026,
-            # la fonction n'est « pas encore good ».
-            r1 = ui.ActionRow()
-            for cle in ("story", "storycta", "post"):
-                r1.add_item(_DemoBouton(self, cle, _demo_libelle(cle)))
-            boite.add_item(r1)
-            fam = _demo_familles()
-            for cle in _DEMO_ORDRE_MENUS:
-                if cle not in fam:
-                    continue
-                e, nom, actions = fam[cle]
+            # la fonction n'est « pas encore good » (_JB_MASQUEES de cogs.user).
+            for rangee in _demo_rangees():
+                r = ui.ActionRow()
+                for cle in rangee:
+                    if cle == "_qte":
+                        r.add_item(_DemoBouton(self, "_qty",
+                                               f"📦 Quantité : {self.qty}",
+                                               discord.ButtonStyle.secondary))
+                    else:
+                        r.add_item(_DemoBouton(self, cle, _demo_libelle(cle)))
+                boite.add_item(r)
+            for e, nom, actions in _demo_familles():
                 r = ui.ActionRow()
                 r.add_item(_DemoSelect(self, e, nom, actions))
                 boite.add_item(r)

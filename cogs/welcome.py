@@ -778,8 +778,19 @@ async def _ensure_us_menu(bot, channel, etat=None):
         # inverse a l'ecran -> on repart de zero pour les deux, et le General
         # suit (voir _a_refaire).
         _menu = _panneau = _general = None
+        from cogs.user import _est_panneau_actions
         for p in pins:
-            if p.author.id != getattr(bot.user, "id", 0) or not p.embeds:
+            if p.author.id != getattr(bot.user, "id", 0):
+                continue
+            # Le panneau d'actions AVANT le test des embeds : en V2 il n'en a
+            # plus (sa marque est une ligne de son texte). L'ignorer ici, c'est
+            # ne jamais le voir : le General n'etait plus repose, et un salon
+            # dans le desordre n'etait plus remis dans l'ordre.
+            if _est_panneau_actions(p):
+                if _panneau is None:
+                    _panneau = p
+                continue
+            if not p.embeds:
                 continue
             _t = p.embeds[0].title or ""
             _f = p.embeds[0].footer.text or ""
@@ -793,8 +804,6 @@ async def _ensure_us_menu(bot, channel, etat=None):
                     _general = p
             elif "Jailbreak" in _t and _menu is None:
                 _menu = p
-            elif _f == "panneau-actions-us" and _panneau is None:
-                _panneau = p
         if _menu is not None and (_panneau is None or _panneau.id > _menu.id):
             # Deja en place, dans le bon ordre. C'est le cas de TOUS les
             # salons existants : sans cet appel, aucun ne recevrait jamais le
@@ -1011,17 +1020,21 @@ async def _ensure_us_panel(bot, channel):
     if bot is None or channel is None:
         return False
     try:
-        from cogs.user import _jb_panel, _jb_panel_set
+        from cogs.user import _jb_panel, _jb_panel_set, _est_panneau_actions
         try:
             for m in await channel.pins():
-                if (m.author.id == getattr(bot.user, "id", 0) and m.embeds
-                        and (m.embeds[0].footer.text or "") == "panneau-actions-us"):
+                # Les deux formats : un ancien panneau (embed) reste celui du
+                # salon jusqu'a ce qu'un clic le convertisse en V2 ; en
+                # reposer un second ici laisserait deux panneaux.
+                if _est_panneau_actions(m, getattr(bot.user, "id", 0)):
                     _jb_panel_set(channel.id, m.id)
                     return True                   # deja en place
-        except Exception:
-            pass
-        emb, view = _jb_panel(bot.get_cog("UserCog"), "_", 3)
-        msg = await channel.send(embed=emb, view=view)
+        except Exception as e:
+            log.warning("_ensure_us_panel %s : epingles illisibles (%s: %s)",
+                        getattr(channel, "name", "?"), type(e).__name__, e)
+        # Format « Components V2 » : une vue, sans embed ni texte a cote.
+        view = _jb_panel(bot.get_cog("UserCog"), "_", 3)
+        msg = await channel.send(view=view)
         _jb_panel_set(channel.id, msg.id)
         try:
             await msg.pin()

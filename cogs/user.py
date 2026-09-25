@@ -57,8 +57,8 @@ _MENU_BTN_FEATURE = {
     "cmenu:templateflashbanger": "contenu",
     "cmenu:templateflashbrut": "contenu",
     # Les trois Trash du menu VA, meme regle. Ils ne sont pas des boutons
-    # postes mais des variantes du sous-menu Trash : c'est ici que le sous-menu
-    # lit si le serveur les autorise.
+    # postes mais des options du menu deroulant Trash : c'est ici que le menu
+    # lit si le serveur les autorise (_variantes_menu_va).
     "cmenu:templatetrash": "contenu",
     "cmenu:templatetrashbanger": "contenu",
     "cmenu:templatetrashbrut": "contenu",
@@ -74,14 +74,16 @@ _THREADS_MENU = {"cmenu:pp", "cmenu:name", "cmenu:pseudo", "cmenu:clics", "cmenu
 # ---------------------------------------------------------------------------
 # LES FAMILLES DE CONTENU -- UNE SEULE TABLE POUR TOUS LES MENUS.
 #
-# Chaque famille a variantes devient UN bouton (« 💬 Caption ▸ ») qui ouvre
-# ses variantes dans un message ephemere, visible du seul VA. Decision du
-# proprietaire du 25/09/2026, validee sur maquette : sans ca, Trash ne tenait
-# nulle part -- le menu VA etait a 25 composants sur 25, son embed a 25 champs
-# sur 25, le panneau US a 24 sur 25.
+# Chaque famille a variantes devient UN MENU DEROULANT (« 💬 Caption… »), pose
+# directement dans le message, sans etape : le VA choisit la variante.
+# Decisions du proprietaire du 25/09/2026, validees sur maquette : sans ca,
+# Trash ne tenait nulle part -- le menu VA etait a 25 composants sur 25, son
+# embed a 25 champs sur 25, le panneau US a 24 sur 25. Un premier passage en
+# faisait un bouton « ▸ » qui ouvrait les variantes en ephemere (dc157c3) ;
+# /demopanneau a montre les menus directs, retenus (format « Components V2 »).
 #
 # Le panneau US, le panneau ephemere des serveurs non-US, le menu VA et son
-# embed d'aide lisent TOUS cette table. Deux tables, deux comportements : le
+# texte d'aide lisent TOUS cette table. Deux tables, deux comportements : le
 # Drive en a perdu 598 fichiers (CLAUDE.md).
 #
 # Dans une famille, les actions vont de la plus simple a la plus exigeante :
@@ -128,11 +130,18 @@ def _libelles_marque(cle) -> tuple:
 def _explications_actions() -> dict:
     """{cle d'action: ce qu'elle envoie}, en une ligne.
 
-    Le sous-menu d'une famille met CETTE ligne sous chaque variante : quatre
+    Le menu d'une famille met CETTE ligne sous chaque variante : quatre
     boutons qui ne different que par leurs etoiles ne s'expliquent pas tout
     seuls, et c'etait deja le role de l'embed du menu VA.
     """
     out = {
+        # Le menu 🎥 Brut du panneau US : ses options portent AUSSI une ligne
+        # d'explication, comme toutes les autres. Elles vivaient dans la
+        # maquette (/demopanneau) seulement ; ici, la maquette et le vrai
+        # panneau lisent la meme ligne.
+        "brute": "une vidéo brute, sans rien dessus",
+        "brutbanger": "une de tes brutes ⭐",
+        "brutchoix": "tu choisis toi-même la brute à utiliser",
         "reelcaption": "une vidéo brute, une caption au hasard incrustée",
         "capbanger": "tes captions ⭐, incrustées sur une vidéo",
         "brutcaption": "une brute ⭐, une caption au hasard incrustée",
@@ -158,7 +167,7 @@ _EXPLICATIONS = _explications_actions()
 
 def _libelle_action(cle) -> str:
     """Le libelle d'une action, tel que le panneau US l'affiche. Une seule
-    source (_JB_ACTIONS_US) pour le panneau, les sous-menus et l'aide."""
+    source (_JB_ACTIONS_US) pour le panneau, les menus et l'aide."""
     e = _jb_action(cle)
     return e[1] if e else cle
 
@@ -265,8 +274,12 @@ def _menu_feature_check(interaction, feature: str) -> bool:
 #
 # Les trois Flash n'y sont plus : ils pointaient vers l'icone « Template +
 # Brut », qui ecrasait leur ⚡ des que les icones etaient televersees. Ils
-# vivent desormais dans le sous-menu ⚡, qui pose l'icone de CHAQUE action
-# (icones_actions) -- vatemplateflash compris, qui n'etait jamais montree.
+# vivent desormais dans le menu deroulant ⚡, qui pose l'icone de CHAQUE
+# action (icones_actions) -- vatemplateflash compris, qui n'etait jamais
+# montree. Depuis les menus directs, « capbanger », « montagebanger » et
+# « templatebrut » sont des OPTIONS de menu (icone posee par
+# _jb_option_action) : leurs lignes ici ne servent plus aucun bouton poste.
+# « reelmonte » sert encore le menu central (cmenu2:reelmonte).
 _ICONE_PAR_ACTION_MENU = {
     "reel": "reelcaption",
     "reelmonte": "reelmonte",
@@ -281,10 +294,9 @@ _ICONE_PAR_ACTION_MENU = {
     "montagebanger": "montagebanger",
     "templatebrut": "templatebrut",
 }
-# Chaque lanceur de famille prend l'icone de sa premiere action (la plus
-# simple) : c'est elle qui represente la famille dans le panneau US aussi.
-_ICONE_PAR_ACTION_MENU.update(
-    {"fam:" + _f.cle: _f.actions[0] for _f in _FAMILLES_MENU})
+# Les lanceurs de famille (« cmenu:fam: ») n'y sont plus : ils ne sont plus
+# poses. Les variantes des menus deroulants prennent l'icone de CHAQUE action
+# (_jb_option_action) ; cette table sert les boutons.
 
 
 def _poser_icones_menu(view, guild):
@@ -330,7 +342,7 @@ def _variantes_menu_va(famille, feats, threads) -> list:
 
     `feats` None = reglages illisibles : on garde tout, comme avant. Une
     variante suit la fonction de son ancien bouton (_MENU_BTN_FEATURE) : le
-    sous-menu applique donc les memes reglages que le menu d'avant.
+    menu deroulant applique donc les memes reglages que le menu d'avant.
     """
     fam = _famille_menu(famille)
     if fam is None:
@@ -349,107 +361,140 @@ def _variantes_menu_va(famille, feats, threads) -> list:
     return out
 
 
-def _filter_menu_view(view, guild):
-    """Retire les boutons désactivés sur ce serveur (fonctions + mode Threads).
-    En mode Threads, garde uniquement le set _THREADS_MENU et renomme le bouton
-    'Mes comptes Insta' en 'Mes comptes Threads'.
+def _bouton_va_permis(cid, feats, threads) -> bool:
+    """Ce serveur montre-t-il le bouton `cid` du menu VA ?
 
-    Un lanceur de famille (« cmenu:fam:… ») part quand AUCUNE de ses variantes
-    n'est autorisee : un bouton qui ouvrirait un sous-menu vide ne sert a rien.
-    """
-    _poser_icones_menu(view, guild)
-    feats, threads = _reglages_menu(guild)
+    `feats` None = reglages illisibles : on garde tout, comme avant. Memes
+    regles que les variantes (_variantes_menu_va) : _MENU_BTN_FEATURE, puis le
+    jeu reduit du mode Threads."""
     if feats is None:
-        return view
-    for item in list(view.children):
-        cid = getattr(item, "custom_id", "")
-        if (cid or "").startswith(_CMENU_FAMILLE):
-            if not _variantes_menu_va(cid[len(_CMENU_FAMILLE):], feats, threads):
-                view.remove_item(item)
-            continue
-        need = _MENU_BTN_FEATURE.get(cid)
-        if need and need not in feats:
-            view.remove_item(item)
-            continue
-        if threads and cid not in _THREADS_MENU:
-            view.remove_item(item)
-            continue
-        if threads and cid == "cmenu:comptes":
-            try:
-                item.label = "Mes comptes Threads"
-            except Exception:
-                pass
+        return True
+    need = _MENU_BTN_FEATURE.get(cid)
+    if need and need not in feats:
+        return False
+    if threads and cid not in _THREADS_MENU:
+        return False
+    return True
+
+
+def _filter_menu_view(view, guild):
+    """Applique a `view` (un ContentMenuView) les reglages de ce serveur :
+    fonctions coupees, mode Threads (jeu reduit, « Mes comptes Threads »),
+    icones dessinees.
+
+    Le menu est RECONSTRUIT avec les reglages, plus rien n'est retire apres
+    coup : un bouton coupe disparait, une option coupee disparait de son menu,
+    un menu sans option disparait -- et le texte d'en tete, deduit de ce qui a
+    ete pose, ne decrit plus un bouton absent. Avant, l'embed d'aide etait
+    ecrit a part, avec sa propre liste : deux listes, deux comportements."""
+    view.construire(guild)
     return view
 
 
-#: Prefixe des lanceurs de famille du menu VA.
+#: Prefixe des lanceurs de famille des menus VA postes entre dc157c3 et le
+#: passage aux menus directs (« 💬 Caption ▸ »…). Plus poses : un clic
+#: convertit le menu qui les porte (ContentMenuLanceursView).
 _CMENU_FAMILLE = "cmenu:fam:"
+#: Prefixe des menus deroulants de famille du menu VA (« 💬 Caption… »).
+#: Distinct de tout custom_id « cmenu:<cle> » : aucune cle d'action ne
+#: s'appelle « sel ».
+_CMENU_MENU = "cmenu:sel:"
+
+#: La derniere ligne du texte du menu VA, en petit gris. Un message
+#: « Components V2 » n'a pas d'embed : c'est CETTE ligne qui le designe
+#: (_est_menu_va), pour _delete_old_menus et consorts. Le titre ne suffit
+#: pas : il change en mode Threads.
+_MENU_VA_PIED = "menu-contenu-va"
+_MENU_VA_MARQUE = "-# " + _MENU_VA_PIED
+#: Titres de l'ancien menu (embed) : ce sont eux qui le designent.
+_MENU_VA_TITRES = ("☀️ Ton menu", "🧵 Ton menu Threads")
 
 
-def _build_menu_embed(identity, guild=None):
-    """Embed clair et intuitif : chaque bouton est expliqué en une ligne.
-    Masque les champs des fonctions désactivées ; en mode Threads, n'affiche que
-    le menu réduit et bascule les comptes en Threads.
+def _est_menu_va(m, moi=None) -> bool:
+    """Ce message est-il le menu VA, dans l'un ou l'autre format ?
 
-    Les champs suivent les RANGEES du menu. Une famille tient en UN champ, qui
-    nomme ses variantes : Discord plafonne un embed a 25 champs, et l'ancien
-    en comptait 25 -- plus aucune ligne ne pouvait entrer.
-    """
-    feats, threads = _reglages_menu(guild)
-    if feats is None:
-        feats = set(("contenu", "onboarding", "clics", "liens", "tickets", "statut"))
-    emb = discord.Embed(
-        title="🧵 Ton menu Threads" if threads else "☀️ Ton menu",
-        description="Clique sur un bouton 👇",
-        color=discord.Color.blurple(),
-    )
+    Ancien : un embed titre « ☀️ Ton menu » / « 🧵 Ton menu Threads ».
+    V2 : la ligne _MENU_VA_MARQUE dans son texte. `moi` : l'id du bot ; donne,
+    un message d'un autre auteur n'est jamais le menu. Ne leve jamais."""
+    try:
+        if m is None:
+            return False
+        if moi is not None and getattr(getattr(m, "author", None), "id", None) != moi:
+            return False
+        emb = getattr(m, "embeds", None) or []
+        if emb and (getattr(emb[0], "title", None) or "") in _MENU_VA_TITRES:
+            return True
+        return any(ligne.strip() == _MENU_VA_MARQUE
+                   for t in _textes_v2(m) for ligne in t.splitlines())
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("menu VA : message %s illisible (%s: %s)",
+                    getattr(m, "id", "?"), type(e).__name__, e)
+        return False
 
-    def add(cid, feat, name, value):
-        if feat is not None and feat not in feats:
-            return
-        if threads and cid not in _THREADS_MENU:
-            return
-        emb.add_field(name=name, value=value, inline=True)
 
-    # Rangee 0 : les publications.
-    add("cmenu:reel", "contenu", "🎬 Reel", "Vidéos + captions (1 par compte)")
-    add("cmenu:banger", "contenu", "⭐ Reels", "Tes meilleurs reels (marqués ⭐)")
-    add("cmenu:story", "contenu", "📖 Story", "Photo + texte pour ta story")
-    add("cmenu:storycta", "contenu", "📲 Story CTA", "Photo CTA (à poster le soir)")
-    add("cmenu:post", "contenu", "🖼️ Post", "Photo + légende pour le feed")
-    # Rangee 1 : le compte, puis la brute marquee.
-    add("cmenu:name", "contenu", "📝 Name", "Des noms d'affichage")
-    add("cmenu:pseudo", "contenu", "👤 Pseudo", "Des pseudos dispo")
-    add("cmenu:pp", "contenu", "🖼 PP", "Des photos de profil prêtes")
-    add("cmenu:bio", "contenu", "💬 Bio", "Des bios de ton identité")
-    add("cmenu:brutbanger", "contenu", "⭐ Vidéo brut", "Tes meilleures brutes ⭐, sans montage")
-    # Rangee 2 : une ligne par famille, qui annonce ses variantes. Le champ
-    # suit le lanceur : il disparait avec lui quand aucune n'est permise.
-    if not threads:
-        for fam in _FAMILLES_MENU:
-            cles = _variantes_menu_va(fam.cle, feats, threads)
-            if not cles:
-                continue
-            noms = " · ".join(_libelle_action(c) for c in cles)
-            emb.add_field(name=f"{fam.emoji} {fam.nom} ▸",
-                          value=f"Ouvre : {noms}", inline=True)
-    # Rangee 3 : suivi et aide.
-    add("cmenu:clics", "clics", "📊 Mes clics", "Tes clics en direct (aujourd'hui, hier, semaine, quinzaine)")
-    add("cmenu:help", None, "🆘 Assistance",
-        "Un souci ? Explique-le, un manager/boss vient t'aider")
-    add("cmenu:lien", "liens", "🔗 Demander un lien", "Affiche ton lien si tu en as un, sinon prévient les managers")
-    add("cmenu:pay", None, "💸 Mon paiement",
-        "Ton moyen pour recevoir l'argent (crypto ou TapTap)")
-    add("cmenu:tuto", None, "❓ Comprends rien ?",
-        "Une vidéo qui explique comment tout marche")
-    # Rangee 4 : les comptes.
-    add("cmenu:addaccount", "onboarding", "➕ Ajouter un compte", "Relance l'onboarding pour créer un nouveau compte")
-    add("cmenu:comptes", "contenu",
-        "📷 Mes comptes Threads" if threads else "📷 Mes comptes Insta",
-        "La liste de tes comptes Threads (@pseudo)" if threads else "La liste de tes comptes Instagram (@pseudo)")
-    if identity and not threads:
-        emb.set_footer(text=f"Identité : {identity}")
-    return emb
+_RE_MENU_VA_IDENT = re.compile(r"^(?:-# )?Identité : `?([^`\n]+?)`?\s*$")
+_RE_MENU_VA_MENTION = re.compile(r"^<@!?(\d+)> 👇")
+
+
+def _menu_va_lire(m):
+    """(identite, id du VA mentionne) d'un menu VA deja poste, dans l'un ou
+    l'autre format -- pour le redessiner SANS rien perdre de ce qu'il
+    affichait. (None, None) si rien n'est lisible. Ne leve jamais."""
+    ident = mention = None
+    try:
+        lignes = [l for t in _textes_v2(m) for l in t.splitlines()]
+        emb = getattr(m, "embeds", None) or []
+        if emb:
+            pied = getattr(getattr(emb[0], "footer", None), "text", None) or ""
+            lignes.append(pied)
+        lignes += (getattr(m, "content", None) or "").splitlines()
+        for l in lignes:
+            l = l.strip()
+            mi = _RE_MENU_VA_IDENT.match(l)
+            if mi and ident is None:
+                ident = mi.group(1).strip() or None
+            mm = _RE_MENU_VA_MENTION.match(l)
+            if mm and mention is None:
+                mention = int(mm.group(1))
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("menu VA : message %s illisible (%s: %s)",
+                    getattr(m, "id", "?"), type(e).__name__, e)
+    return ident, mention
+
+
+def _menu_va_texte(aide, threads, avec_menus, identite=None, mention=None,
+                   inconnues=()) -> str:
+    """Le texte en tete du menu VA (TextDisplay), qui remplace l'embed.
+
+    `aide` : une ligne par rangee REELLEMENT posee (ContentMenuView). Sa
+    DERNIERE ligne est la marque qui le designe (_MENU_VA_MARQUE) ; juste
+    au-dessus, l'identite, comme l'ancien pied d'embed -- /setidentite
+    « first » la relit dans l'historique du salon."""
+    haut = []
+    if mention:
+        haut.append(f"<@{int(mention)}> 👇 **Ton menu du jour est prêt !**")
+    haut.append("## 🧵 Ton menu Threads" if threads else "## ☀️ Ton menu")
+    haut.append("Clique sur un bouton, ou choisis directement dans un menu 👇"
+                if avec_menus else "Clique sur un bouton 👇")
+    haut += list(aide)
+    if inconnues:
+        haut.append(f"⚠️ {len(inconnues)} élément(s) introuvable(s), absent(s) "
+                    "du menu : " + ", ".join(inconnues) + " (à signaler à un admin).")
+    bas = []
+    if identite and not threads:
+        bas.append(f"-# Identité : `{identite}`")
+    bas.append(_MENU_VA_MARQUE)
+    corps, fin = "\n".join(haut), "\n".join(bas)
+    # 4000 caracteres pour TOUT le texte d'un message V2. On coupe l'aide,
+    # jamais la marque : sans elle, le menu ne serait plus reconnu.
+    place = 4000 - len(fin) - 1
+    if len(corps) > place:
+        log.warning("menu VA : texte trop long (%d > %d), aide coupee",
+                    len(corps), place)
+        corps = corps[:max(0, place - 1)] + "…"
+    return corps + "\n" + fin
+
+
 USERS_FILE = DATA_DIR / "users.json"
 TUTO_VIDEO_FILE = DATA_DIR / "tutoriel.mp4"  # vidéo explicative (bouton "Comprends rien ?")
 WHITELIST_FILE = DATA_DIR / "whitelist.json"
@@ -4478,12 +4523,17 @@ class UserCog(commands.Cog):
                             "ses boutons ne repondront pas.",
                             quoi, type(e).__name__, e)
 
+        # Le menu VA en V2 : construit SANS reglage, il porte tous ses
+        # custom_id (boutons « cmenu:<cle> », menus « cmenu:sel:<famille> »).
         _enregistrer("menu VA", lambda: self.bot.add_view(ContentMenuView(self)))
-        # Les boutons RETIRES du menu VA le 25/09/2026 (passes dans les
-        # sous-menus de famille) : les menus deja epingles les portent encore
-        # jusqu'au prochain repost, et sans cette vue ils ne repondraient plus.
+        # Ce que les menus VA deja epingles portent encore et que le V2 n'a
+        # plus : les boutons retires le 25/09/2026, puis les lanceurs « ▸ »
+        # (cmenu:fam:…), qui convertissent leur menu en V2 au clic. Sans ces
+        # vues, ils resteraient a l'ecran sans rien faire.
         _enregistrer("anciens boutons du menu VA",
                      lambda: self.bot.add_view(ContentMenuHeritageView(self)))
+        _enregistrer("anciens lanceurs du menu VA",
+                     lambda: self.bot.add_view(ContentMenuLanceursView(self)))
         _enregistrer("menu central", lambda: self.bot.add_view(CentralMenuView(self)))
         # menu jailbreak (select des models), puis sa variante US
         # (custom_id distinct)
@@ -4506,9 +4556,15 @@ class UserCog(commands.Cog):
         # famille ET les anciens panneaux (jbus:a:…:templateflash:…).
         _enregistrer("actions du panneau US",
                      lambda: self.bot.add_dynamic_items(JBQtySelect, JBActionButton))
-        # Les lanceurs de famille (💬 Caption ▸ …) du panneau US.
+        # Les lanceurs de famille (💬 Caption ▸ …) des panneaux US deja
+        # postes : ils ne sont plus poses, mais un clic doit encore
+        # reconstruire le panneau en V2.
         _enregistrer("familles du panneau US",
                      lambda: self.bot.add_dynamic_items(JBFamilleBouton))
+        # Les menus deroulants du panneau US V2 (« jbus:s: ») : tout leur
+        # etat est dans le custom_id, ils repondent apres un redemarrage.
+        _enregistrer("menus du panneau US",
+                     lambda: self.bot.add_dynamic_items(JBMenuFamille))
         # Le menu ✨ General, a part et JOURNALISE : un enregistrement rate y
         # laisserait les boutons du General muets sans une ligne nulle part.
         try:
@@ -4539,8 +4595,16 @@ class UserCog(commands.Cog):
             async for m in channel.history(limit=40):
                 if not (m.author and m.author.id == me.id):
                     continue
-                rm = False
-                if m.embeds:
+                # Le panneau d'actions US et le ✨ General ne sont JAMAIS des
+                # menus a remplacer, dans aucun de leurs formats : le panneau
+                # V2 n'a plus d'embed, et un reperage elargi a son texte
+                # (« … le menu … ») l'aurait emporte.
+                if _est_panneau_actions(m) or _est_general(m, me.id):
+                    continue
+                # Le menu VA, dans ses DEUX formats : le V2 n'a plus d'embed,
+                # il se reconnait a la marque de son texte (_est_menu_va).
+                rm = _est_menu_va(m)
+                if not rm and m.embeds:
                     t = (m.embeds[0].title or "").lower()
                     if "menu" in t or "contenu du jour" in t:
                         rm = True
@@ -4623,22 +4687,28 @@ class UserCog(commands.Cog):
         return emb, JailbreakMenuView(self, us=True)
 
     async def _post_menu(self, channel, identity, mention_user_id=None):
-        """Poste le menu (embed + boutons) dans `channel`. @ping le VA si fourni.
-        Filtre les boutons/champs selon les fonctions activées sur le serveur."""
+        """Poste le menu (V2 : texte + boutons + menus) dans `channel`. @ping
+        le VA si fourni. Filtre boutons, menus et aide selon les fonctions
+        activées sur le serveur.
+
+        Un message V2 n'a pas de `content` : la ligne qui pinge le VA est la
+        premiere de son texte (_menu_va_texte), et allowed_mentions s'y
+        applique comme au contenu d'avant."""
         guild = getattr(channel, "guild", None)
-        view = _filter_menu_view(ContentMenuView(self), guild)
-        if not view.children:
+        view = _menu_va(self, identity, guild, mention=mention_user_id)
+        if not view.a_des_elements():
             return False  # aucune fonction de menu activée sur ce serveur
-        content = f"<@{mention_user_id}> 👇 **Ton menu du jour est prêt !**" if mention_user_id else None
         try:
             await channel.send(
-                content=content,
-                embed=_build_menu_embed(identity, guild),
                 view=view,
                 allowed_mentions=discord.AllowedMentions(users=True),
             )
             return True
-        except Exception:
+        except Exception as e:
+            # Jusqu'ici un echec d'envoi disparaissait : le menu du jour
+            # manquait dans le salon sans une ligne nulle part.
+            log.warning("menu VA non poste dans %s (%s: %s)",
+                        getattr(channel, "name", "?"), type(e).__name__, e)
             return False
 
     def _va_targets(self, guild=None):
@@ -5482,10 +5552,10 @@ class UserCog(commands.Cog):
         for ch, uid, ident in self._va_targets(guild):
             try:
                 await self._delete_old_menus(ch, also_onboarding=clean_onboarding)
-                _view = _filter_menu_view(ContentMenuView(self), guild)
-                if not _view.children:
+                _view = _menu_va(self, ident, guild)
+                if not _view.a_des_elements():
                     continue
-                msg = await ch.send(embed=_build_menu_embed(ident, guild), view=_view)
+                msg = await ch.send(view=_view)
                 await msg.pin(reason="Menu permanent VA (h24)")
                 pinned += 1
                 await asyncio.sleep(1.2)
@@ -5702,21 +5772,19 @@ class UserCog(commands.Cog):
     )
     async def menu(self, interaction: discord.Interaction):
         guild = interaction.guild
-        view = _filter_menu_view(ContentMenuView(self), guild)
-        if not view.children:
+        identity = get_user_identity(interaction.user.id)
+        view = _menu_va(self, identity, guild)
+        if not view.a_des_elements():
             await interaction.response.send_message(
                 "⚠️ Aucune fonction de menu activée sur ce serveur.", ephemeral=True)
             return
-        identity = get_user_identity(interaction.user.id)
         # L'identité n'est requise que si le menu contient du contenu (reel/story…).
         if _menu_feature_check(interaction, "contenu") and not identity:
             await interaction.response.send_message(
                 "⚠️ Tu n'as pas d'identité assignée — demande à un admin.", ephemeral=True
             )
             return
-        await interaction.response.send_message(
-            embed=_build_menu_embed(identity, guild), view=view
-        )
+        await interaction.response.send_message(view=view)
 
     @app_commands.command(
         name="serverfeatures",
@@ -6012,6 +6080,11 @@ class UserCog(commands.Cog):
                                 texts.append(emb.title)
                             if emb.description:
                                 texts.append(emb.description)
+                        # Le menu V2 n'a plus d'embed : son identite est une
+                        # ligne de son texte (« -# Identité : `x` »). Ligne par
+                        # ligne : la regex ne lit que le PREMIER « identité »
+                        # d'un texte, et l'aide du menu pourrait en contenir un.
+                        texts += [l for t in _textes_v2(msg) for l in t.splitlines()]
                         for t in texts:
                             # "Identité : X" OU "identité X" OU "identité `X`" (footer ou texte)
                             mm = _re_h.search(r'identit[ée]\s*[:\-—]*\s*[`*_]*([a-zA-Z]{2,})', t or "", _re_h.IGNORECASE)
@@ -6614,11 +6687,15 @@ async def _jb_sous_menus_fermer(user_id=None, channel_id=None):
     return n
 
 
-def _jb_sous_menu_perime(interaction, ident, qty) -> str:
+def _jb_sous_menu_perime(interaction, ident, qty, panneau=False) -> str:
     """Le refus a opposer au clic d'un sous-menu PERIME, "" sinon.
 
     Seulement pour un message ephemere (le panneau epingle, lui, est
     toujours a jour) et seulement si l'etat du panneau est connu.
+
+    `panneau=True` : le clic vient d'un panneau de SECOURS (ephemere, V2),
+    pas d'un ancien sous-menu -- il n'y a pas de « ▸ » a recliquer, la
+    phrase renvoie au panneau epingle.
     """
     msg = getattr(interaction, "message", None)
     if not getattr(getattr(msg, "flags", None), "ephemeral", False):
@@ -6628,13 +6705,17 @@ def _jb_sous_menu_perime(interaction, ident, qty) -> str:
     if not etat:
         return ""
     m, q = etat
+    quoi = "Ce panneau" if panneau else "Ce sous-menu"
+    suite = ("sers-toi du panneau épinglé du salon." if panneau else
+             "reclique ▸ sur le panneau pour avoir les bons boutons.")
     if m != (ident or "").lower():
-        return (f"⚠️ Ce sous-menu est pour **{(ident or '?').capitalize()}**, ton "
-                f"panneau est passé sur **{m.capitalize()}** : reclique ▸ sur le "
-                "panneau pour avoir les bons boutons.")
+        return (f"⚠️ {quoi} est pour **{(ident or '?').capitalize()}**, ton "
+                f"panneau est passé sur **{m.capitalize()}** : {suite}")
     if int(q) != int(qty):
-        return (f"⚠️ Ce sous-menu est réglé sur **{qty}** média(s), ton panneau "
-                f"sur **{q}** : reclique ▸ sur le panneau.")
+        return (f"⚠️ {quoi} est réglé sur **{qty}** média(s), ton panneau "
+                f"sur **{q}** : "
+                + ("sers-toi du panneau épinglé du salon." if panneau
+                   else "reclique ▸ sur le panneau."))
     return ""
 
 
@@ -6646,8 +6727,9 @@ async def _poser_panneau_jb(interaction, view):
     original_response().
     """
     await _fermer_panneau_jb(interaction.user.id)
-    await interaction.response.send_message(
-        embed=view._embed(), view=view, ephemeral=True)
+    # Un panneau « Components V2 » (LayoutView) : pas d'embed, tout le texte
+    # est dans la vue. discord.py pose lui-meme le drapeau du format.
+    await interaction.response.send_message(view=view, ephemeral=True)
     try:
         view.message = await interaction.original_response()
         _DERNIER_PANNEAU_JB[int(interaction.user.id)] = view.message
@@ -7145,7 +7227,8 @@ async def _appel_templatebrut(cog, itx):
 
 #: Les variantes que le MENU VA sait lancer, et COMMENT. Ce sont exactement
 #: les appels des anciens boutons (cmenu:capbanger, cmenu:templateflash…) :
-#: les ranger dans un sous-menu ne devait rien changer a ce qu'ils envoient.
+#: les ranger dans un menu deroulant ne devait rien changer a ce qu'ils
+#: envoient.
 #:
 #: Le menu VA n'a jamais eu les « ⭐ Brut + … », ni « 💬 Caption » (c'est
 #: « Reel », rangee 0) : la table ne les invente pas. Les marques suivent
@@ -7174,168 +7257,381 @@ async def _lancer_variante_va(cog, interaction, cle):
     await appel(cog, interaction)
 
 
-class _BoutonVarianteVA(discord.ui.Button):
-    """Une variante dans le sous-menu ephemere d'une famille du menu VA.
+# ---------------------------------------------------------------------------
+# LE MENU VA, EN « COMPONENTS V2 » (menus directs, 25/09/2026)
+#
+# Meme principe que le panneau US (maquette /demopanneau validee par le
+# proprietaire) : plus de lanceur « ▸ » qui ouvre un sous-menu ephemere, UN
+# MENU DEROULANT PAR FAMILLE, directement dans le menu. Un message classique
+# plafonne a cinq rangees et chaque menu en prend une : quatre rangees de
+# boutons + quatre menus n'y tiennent pas. Le V2 compte les composants (40
+# au plus ; le menu en a 31) et n'a pas d'embed : l'aide passe dans le texte
+# d'en tete.
+#
+# Vue PERSISTANTE : timeout None, custom_id fixes (« cmenu:<cle> » pour les
+# boutons, « cmenu:sel:<famille> » pour les menus), enregistree dans
+# cog_load. Les menus deja epingles, dans l'ancien format, repondent encore :
+# leurs boutons gardent les memes custom_id, les boutons retires avant eux
+# sont servis par ContentMenuHeritageView, leurs lanceurs « ▸ » par
+# ContentMenuLanceursView.
 
-    PAS de custom_id fixe, et c'est voulu. Selon sa version (le VPS n'est
-    pas fige : requirements.txt dit >= 2.3.2), discord.py range une vue
-    ephemere sous la meme cle qu'une vue persistante. Reprendre
-    « cmenu:capbanger » ici pouvait ecraser le bouton herite des menus deja
-    epingles, puis l'effacer a l'expiration du sous-menu.
-    """
+#: Un bouton du menu VA : sa cle (custom_id « cmenu:<cle> »), son libelle,
+#: son emoji standard (remplace par l'icone dessinee du serveur quand elle
+#: existe), son style, et sa ligne dans le texte d'aide.
+_BoutonVA = _collections.namedtuple("_BoutonVA", "cle libelle emoji style aide")
 
-    def __init__(self, cle, icone=None):
-        lib = _libelle_action(cle)
-        super().__init__(
-            label=(_libelle_sans_emoji(lib) if icone is not None else lib),
-            style=discord.ButtonStyle.primary, row=0)
-        if icone is not None:
-            self.emoji = icone
-        self.cle = cle
+#: La place des menus deroulants de famille dans la disposition.
+_MENU_VA_FAMILLES = "_familles"
+
+_BS = discord.ButtonStyle
+
+#: LE MENU VA, EN UNE SEULE TABLE : rangees dans l'ordre, chaque bouton, et
+#: sa ligne d'aide. Les menus viennent de _FAMILLES_MENU (variantes :
+#: _variantes_menu_va, appels : _MENU_VA_APPELS). Le texte d'en tete est
+#: DEDUIT de ce qui a ete reellement pose apres les reglages du serveur :
+#: l'ancien embed avait sa propre liste, et pouvait decrire un bouton absent.
+_MENU_VA_DISPOSITION = (
+    ("Publier", (
+        _BoutonVA("reel", "Reel", "🎬", _BS.primary, "vidéos + captions (1 par compte)"),
+        _BoutonVA("banger", "⭐ Reels", None, _BS.primary, "tes meilleurs reels ⭐"),
+        _BoutonVA("story", "Story", "📖", _BS.primary, "photo + texte pour ta story"),
+        _BoutonVA("storycta", "Story CTA", "📲", _BS.primary, "photo CTA, à poster le soir"),
+        _BoutonVA("post", "Post", "🖼️", _BS.primary, "photo + légende pour le feed"),
+    )),
+    ("Ton compte", (
+        _BoutonVA("name", "Name", "📝", _BS.secondary, "des noms d'affichage"),
+        _BoutonVA("pseudo", "Pseudo", "👤", _BS.secondary, "des pseudos dispo"),
+        _BoutonVA("pp", "PP", "🖼", _BS.secondary, "des photos de profil prêtes"),
+        _BoutonVA("bio", "Bio", "💬", _BS.secondary, "des bios prêtes à coller"),
+        _BoutonVA("brutbanger", "⭐ Vidéo brut", None, _BS.primary,
+                  "tes meilleures brutes ⭐, sans montage"),
+    )),
+    ("Montages", _MENU_VA_FAMILLES),
+    ("Suivi et aide", (
+        _BoutonVA("clics", "Mes clics", "📊", _BS.success,
+                  "tes clics en direct (jour, hier, semaine, quinzaine)"),
+        _BoutonVA("help", "Assistance", "🆘", _BS.danger,
+                  "un souci ? un manager ou le boss vient t'aider"),
+        _BoutonVA("lien", "Demander un lien", "🔗", _BS.success,
+                  "ton lien si tu en as un, sinon les managers sont prévenus"),
+        _BoutonVA("pay", "Mon paiement", "💸", _BS.secondary,
+                  "comment tu reçois ton argent (crypto ou TapTap)"),
+        _BoutonVA("tuto", "Comprends rien ?", "❓", _BS.secondary,
+                  "une vidéo qui explique comment tout marche"),
+    )),
+    ("Tes comptes", (
+        _BoutonVA("addaccount", "Ajouter un compte", "➕", _BS.primary,
+                  "relance l'onboarding pour un nouveau compte"),
+        _BoutonVA("comptes", "Mes comptes Insta", "📷", _BS.secondary,
+                  "la liste de tes comptes Instagram (@pseudo)"),
+    )),
+)
+
+#: Mode Threads : (libelle, aide) qui remplacent ceux de la table.
+_MENU_VA_THREADS = {
+    "comptes": ("Mes comptes Threads", "la liste de tes comptes Threads (@pseudo)"),
+}
+
+
+class _BoutonMenuVA(discord.ui.Button):
+    """Un bouton du menu VA. Il garde son menu en reference directe : dans
+    un LayoutView, il vit dans une rangee, elle-meme dans un conteneur."""
+
+    def __init__(self, menu, spec, libelle, emoji):
+        super().__init__(label=libelle, emoji=emoji, style=spec.style,
+                         custom_id="cmenu:" + spec.cle)
+        self.menu = menu
+        self.cle = spec.cle
 
     async def callback(self, interaction: discord.Interaction):
-        await _lancer_variante_va(self.view.cog, interaction, self.cle)
+        await getattr(self.menu, "_clic_" + self.cle)(interaction)
 
 
-class _SousMenuFamilleVA(discord.ui.View):
-    """Les variantes d'UNE famille du menu VA, dans un message ephemere.
+class _MenuFamilleVA(discord.ui.Select):
+    """Le menu deroulant d'une famille du menu VA (« 💬 Caption… »).
 
-    Dix minutes : assez pour cliquer plusieurs variantes a la suite. Passe ce
-    delai, les boutons s'eteignent au lieu de rester cliquables sans reponse.
-    """
+    Options : les variantes que CE serveur autorise (_variantes_menu_va),
+    avec le libelle de production, la ligne d'explication et l'icone du
+    serveur (_jb_option_action, la brique du panneau US). custom_id fixe
+    « cmenu:sel:<famille> » : il repond apres un redemarrage."""
 
-    def __init__(self, cog, cles, icones=None):
-        super().__init__(timeout=600)
-        self.cog = cog
-        self.itx = None           # pose apres l'envoi, pour l'eteindre
-        icones = icones or {}
+    def __init__(self, menu, fam, cles, icones=None):
+        opts, self.inconnues = [], []
         for cle in cles:
-            self.add_item(_BoutonVarianteVA(cle, icone=icones.get(cle)))
-
-    async def on_timeout(self):
-        for item in self.children:
-            item.disabled = True
-        try:
-            if self.itx is not None:
-                await self.itx.edit_original_response(view=self)
-        except Exception:
-            pass
-
-
-def _embed_famille(fam, cles, titre_suffixe="") -> "discord.Embed":
-    """L'embed d'un sous-menu : une ligne d'explication par variante."""
-    lignes = [f"**{_libelle_action(c)}** — {_EXPLICATIONS.get(c, '')}".rstrip(" —")
-              for c in cles]
-    return discord.Embed(
-        title=f"{fam.emoji} {fam.nom}{titre_suffixe}",
-        description="\n".join(lignes) + "\n\nClique sur une variante 👇",
-        color=discord.Color.blurple())
-
-
-async def _ouvrir_famille_va(cog, interaction, famille):
-    """Le clic sur un lanceur « ▸ » du menu VA : ses variantes, en ephemere."""
-    fam = _famille_menu(famille)
-    if fam is None:
-        await interaction.response.send_message(
-            f"Famille inconnue (`{famille}`) : ce menu est ancien, un nouveau "
-            "arrive au prochain repost.", ephemeral=True)
-        return
-    feats, threads = _reglages_menu(getattr(interaction, "guild", None))
-    cles = _variantes_menu_va(famille, feats, threads)
-    if not cles:
-        # Le lanceur aurait du etre retire par _filter_menu_view ; un menu
-        # poste AVANT un changement de reglage le porte encore.
-        await interaction.response.send_message(
-            "⚠️ Cette fonction est désactivée sur ce serveur.", ephemeral=True)
-        return
-    vue = _SousMenuFamilleVA(cog, cles,
-                             icones_actions(getattr(interaction, "guild", None)))
-    await interaction.response.send_message(
-        embed=_embed_famille(fam, cles), view=vue, ephemeral=True)
-    vue.itx = interaction
-
-
-class _LanceurFamilleVA(discord.ui.Button):
-    """« 💬 Caption ▸ », « 🎞️ Template ▸ »… du menu VA. Persistant : son
-    custom_id est fixe (cmenu:fam:<famille>) et la vue est enregistree au
-    demarrage."""
-
-    def __init__(self, fam, row=2):
-        super().__init__(label=f"{fam.nom} ▸", emoji=fam.emoji,
-                         style=discord.ButtonStyle.primary,
-                         custom_id=_CMENU_FAMILLE + fam.cle, row=row)
+            o = _jb_option_action(cle, icones)
+            if o is None:
+                self.inconnues.append(cle)
+            else:
+                opts.append(o)
+        if self.inconnues:
+            log.warning("menu VA, famille %s : variante(s) sans libelle "
+                        "(absente(s) de _JB_ACTIONS_US) : %s",
+                        fam.cle, ", ".join(self.inconnues))
+        #: Aucune option : ContentMenuView ne pose pas ce menu (Discord
+        #: refuserait le message ENTIER) et le dit dans le texte.
+        self.vide = not opts
+        super().__init__(
+            custom_id=_CMENU_MENU + fam.cle,
+            placeholder=_jb_placeholder_famille(fam), min_values=1, max_values=1,
+            options=opts or [discord.SelectOption(label="(aucune variante)", value="_")])
+        self.menu = menu
         self.famille = fam.cle
 
     async def callback(self, interaction: discord.Interaction):
-        await _ouvrir_famille_va(self.view.cog, interaction, self.famille)
+        # Les valeurs de L'INTERACTION, pas celles de l'objet : l'element
+        # enregistre au demarrage est partage par tous les salons va-.
+        valeurs = ((getattr(interaction, "data", None) or {}).get("values")
+                   or list(self.values or []))
+        await _menu_va_choisir(self.menu.cog, interaction, self.famille,
+                               (valeurs or [""])[0])
 
 
-class ContentMenuView(discord.ui.View):
+def _menu_va(cog, identite=None, guild=None, mention=None):
+    """Le menu VA pret a partir : reglages de `guild` appliques, texte
+    compris. `mention` : l'id du VA a pinger en tete (menu du jour)."""
+    vue = ContentMenuView(cog, identite=identite, mention=mention)
+    return _filter_menu_view(vue, guild)
+
+
+def _menu_va_frais(cog, interaction):
+    """Le menu VA d'ou vient le clic, redessine : ses menus sur leur
+    intitule, les reglages ACTUELS du serveur, et ce qu'il affichait
+    (identite, mention) relu dans le message. En ephemere, une vue ARRETEE
+    (_vue_sans_suivi) : ses clics sont servis par la vue persistante."""
+    msg = getattr(interaction, "message", None)
+    ident, mention = _menu_va_lire(msg) if msg is not None else (None, None)
+    vue = _menu_va(cog, ident, getattr(interaction, "guild", None), mention)
+    if getattr(getattr(msg, "flags", None), "ephemeral", False):
+        _vue_sans_suivi(vue)
+    return vue
+
+
+async def _menu_va_choisir(cog, interaction, famille, choix):
+    """Un choix dans un menu de famille du menu VA.
+
+    La valeur est VALIDEE (liste blanche de la famille, variantes que le
+    serveur autorise AUJOURD'HUI -- un menu poste avant un changement de
+    reglage porte encore l'option), puis la variante part par
+    _MENU_VA_APPELS, EXACTEMENT comme son ancien bouton. Le menu reprend son
+    intitule, sans quoi re-choisir la meme variante ne declencherait rien.
+    Une interaction = une reponse, dans tous les cas (_menu_lancer)."""
+    msg = getattr(interaction, "message", None)
+    ephemere = bool(getattr(getattr(msg, "flags", None), "ephemeral", False))
+    frais = _menu_va_frais(cog, interaction)
+    fam = _famille_menu(famille)
+    feats, threads = _reglages_menu(getattr(interaction, "guild", None))
+    refus = ""
+    if fam is None or choix not in fam.actions or choix not in _MENU_VA_APPELS:
+        # Hors de la liste blanche : ce choix ne vient pas d'un menu que le
+        # bot a pose. Refuse, et trace.
+        log.warning("menu VA : choix %r refuse (famille %r)", choix, famille)
+        refus = f"Option inconnue (`{choix}`) : tape `/menu` pour un menu à jour."
+    elif choix not in _variantes_menu_va(famille, feats, threads):
+        refus = "⚠️ Cette fonction est désactivée sur ce serveur."
+    if refus:
+        await _jb_menu_refuser(interaction, refus, frais)
+        return
+    # Le message du SALON se redessine tout de suite, sans attendre la fin
+    # d'un rendu de 30 s : c'est un message du bot, il s'edite sans passer
+    # par l'interaction. Un ephemere est redessine apres coup, par elle.
+    tache = None
+    if not ephemere and msg is not None:
+        tache = _jb_en_fond(msg.edit(view=frais, **_jb_kw_format(msg)),
+                            "menu VA : menu remis sur son intitule")
+    appel = _MENU_VA_APPELS[choix]
+    await _menu_lancer(interaction, lambda: appel(cog, interaction), choix,
+                       frais, tache, "menu VA")
+
+
+async def _menu_va_reposer(chan, ancien, vue, raison):
+    """Le REPLI quand Discord refuse de convertir un ancien menu par
+    edition : un NOUVEAU menu V2 est poste (epingle si l'ancien l'etait),
+    puis l'ancien est retire. Tout est journalise. Leve si le nouveau n'a
+    pas pu etre poste : _jb_panneau_en_reponse le laisse remonter."""
+    nom = getattr(chan, "name", "?")
+    nouveau = await chan.send(view=vue)
+    log.warning("menu VA %s : %s -- nouveau menu V2 %s a la place de %s",
+                nom, raison, nouveau.id, getattr(ancien, "id", None))
+    if getattr(ancien, "pinned", False):
+        try:
+            await nouveau.pin(reason="Menu permanent VA (h24)")
+        except Exception as e:                               # noqa: BLE001
+            log.warning("menu VA %s : nouveau menu non epingle (%s: %s)",
+                        nom, type(e).__name__, e)
+    if ancien is not None:
+        try:
+            await ancien.delete()
+        except Exception as e:                               # noqa: BLE001
+            log.warning("menu VA %s : ancien menu %s non retire (%s: %s) -- "
+                        "deux menus dans le salon", nom,
+                        getattr(ancien, "id", "?"), type(e).__name__, e)
+    return nouveau
+
+
+async def _menu_va_convertir(cog, interaction):
+    """Le clic sur un ancien lanceur « ▸ » : le menu qui le porte devient le
+    menu V2, SUR PLACE (meme message, meme epingle), au lieu d'ouvrir un
+    sous-menu ephemere. Le VA choisit ensuite sa variante dans le menu de la
+    famille. Conversion par edition, repli par un nouveau message : la
+    brique du panneau US (_jb_panneau_en_reponse)."""
+    vue = _menu_va_frais(cog, interaction)
+    if not vue.a_des_elements():
+        await interaction.response.send_message(
+            "⚠️ Aucune fonction de menu activée sur ce serveur.", ephemeral=True)
+        return
+    try:
+        await _jb_panneau_en_reponse(interaction, vue, None, quoi="menu VA",
+                                     reposer=_menu_va_reposer)
+        return
+    except Exception as e:                                   # noqa: BLE001
+        # Edition refusee ET nouveau message impossible (droits du salon…) :
+        # sans ce repli, le clic finissait sur un accuse de reception muet.
+        log.warning("menu VA %s : conversion impossible (%s: %s) -- menu "
+                    "envoye en ephemere", getattr(interaction.channel, "name", "?"),
+                    type(e).__name__, e)
+    secours = _vue_sans_suivi(_menu_va_frais(cog, interaction))
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(view=secours, ephemeral=True)
+        else:
+            await interaction.response.send_message(view=secours, ephemeral=True)
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("menu VA : menu de secours non envoye (%s: %s)",
+                    type(e).__name__, e)
+
+
+class ContentMenuView(discord.ui.LayoutView):
     """Menu de contenu cliquable. Chaque bouton sert le contenu correspondant
     pour l'identité du VA qui clique (réutilise les commandes existantes).
-    Vue persistante (custom_id) : marche après un redémarrage du bot.
+    Vue persistante (custom_id fixes, timeout None) : marche après un
+    redémarrage du bot.
 
-    Disposition du 25/09/2026 (maquette validee par le proprietaire) :
-      0  Reel, ⭐ Reels, Story, Story CTA, Post
-      1  Name, Pseudo, PP, Bio, ⭐ Vidéo brut
-      2  un lanceur ▸ par famille de _FAMILLES_MENU (Caption, Template,
-         Trash, Flash) : ses variantes s'ouvrent en ephemere
-      3  Mes clics, Assistance, Demander un lien, Mon paiement, Comprends rien ?
-      4  Ajouter un compte, Mes comptes Insta
-    Le menu etait a 25 composants sur 25 : Trash n'y entrait pas. Il en
-    compte 21, et une famille de plus ne coutera qu'un lanceur.
+    « Components V2 » depuis le 25/09/2026 (menus directs) : un bloc, le
+    texte d'aide en tete, puis les rangees de _MENU_VA_DISPOSITION --
+      Reel, ⭐ Reels, Story, Story CTA, Post
+      Name, Pseudo, PP, Bio, ⭐ Vidéo brut
+      un menu deroulant par famille de _FAMILLES_MENU (Caption, Template,
+      Trash, Flash), sans etape
+      Mes clics, Assistance, Demander un lien, Mon paiement, Comprends rien ?
+      Ajouter un compte, Mes comptes Insta
+    Construite sans reglages (enregistrement au demarrage, tests) elle porte
+    TOUT ; _filter_menu_view / _menu_va la reconstruisent pour un serveur.
     """
 
-    def __init__(self, cog):
+    def __init__(self, cog, identite=None, mention=None):
         super().__init__(timeout=None)
         self.cog = cog
-        # Les lanceurs sont ajoutes ICI, pas en decorateur : ils suivent la
-        # table des familles, sans liste a recopier.
-        for fam in _FAMILLES_MENU:
-            self.add_item(_LanceurFamilleVA(fam, row=2))
+        self.identite = identite
+        self.mention = mention
+        self.construire(None, filtrer=False)
 
-    @discord.ui.button(label="Reel", emoji="🎬", style=discord.ButtonStyle.primary, custom_id="cmenu:reel", row=0)
-    async def b_reel(self, interaction: discord.Interaction, button: discord.ui.Button):
+    def a_des_elements(self) -> bool:
+        """Au moins un bouton ou un menu : sinon, rien a poster."""
+        return self.nb_elements > 0
+
+    def construire(self, guild=None, filtrer=True):
+        """(Re)construit le menu avec les reglages de `guild` : un bouton coupe
+        disparait, une option coupee disparait de son menu, un menu sans
+        option disparait. `filtrer=False` : tout, sans reglage (la vue
+        enregistree au demarrage doit porter TOUS les custom_id)."""
+        ui = discord.ui
+        feats, threads = _reglages_menu(guild) if filtrer else (None, False)
+        try:
+            icones = icones_actions(guild)   # lecture seule : rien sur le reseau
+        except Exception as e:                               # noqa: BLE001
+            log.warning("menu VA : icones illisibles (%s: %s)", type(e).__name__, e)
+            icones = {}
+        self.clear_items()
+        self.threads = threads
+        self.inconnues = []
+        self.nb_elements = 0
+        boite = ui.Container(accent_colour=discord.Colour.blurple())
+        texte = ui.TextDisplay(_MENU_VA_MARQUE)      # ecrit a la fin
+        boite.add_item(texte)
+        aide, avec_menus = [], False
+        for titre, boutons in _MENU_VA_DISPOSITION:
+            if boutons is _MENU_VA_FAMILLES:
+                noms = []
+                for fam in _FAMILLES_MENU:
+                    cles = _variantes_menu_va(fam.cle, feats, threads)
+                    if not cles:
+                        continue                 # aucune variante permise ici
+                    menu = _MenuFamilleVA(self, fam, cles, icones)
+                    self.inconnues += menu.inconnues
+                    if menu.vide:
+                        self.inconnues.append(f"menu {fam.nom}")
+                        continue
+                    rangee = ui.ActionRow()
+                    rangee.add_item(menu)
+                    boite.add_item(rangee)
+                    self.nb_elements += 1
+                    noms.append(f"{fam.emoji} {fam.nom}")
+                if noms:
+                    avec_menus = True
+                    aide.append(f"**{titre}** — un menu par famille ("
+                                + " · ".join(noms) + ") : choisis ta variante, "
+                                "chaque option dit ce qu'elle envoie.")
+                continue
+            rangee, morceaux = ui.ActionRow(), []
+            for b in boutons:
+                if not _bouton_va_permis("cmenu:" + b.cle, feats, threads):
+                    continue
+                if not hasattr(self, "_clic_" + b.cle):
+                    # Une ligne de table sans methode : le bouton ne ferait
+                    # rien. Absent du menu, mais COMPTE et dit.
+                    log.warning("menu VA : bouton %r sans methode _clic_%s",
+                                b.cle, b.cle)
+                    self.inconnues.append(b.cle)
+                    continue
+                libelle, expli = b.libelle, b.aide
+                if threads and b.cle in _MENU_VA_THREADS:
+                    libelle, expli = _MENU_VA_THREADS[b.cle]
+                cle_ic = _ICONE_PAR_ACTION_MENU.get(b.cle)
+                icone = icones.get(cle_ic) if cle_ic else None
+                rangee.add_item(_BoutonMenuVA(
+                    self, b, libelle, icone if icone is not None else b.emoji))
+                self.nb_elements += 1
+                morceaux.append(f"{b.emoji + ' ' if b.emoji else ''}**{libelle}** : {expli}")
+            if morceaux:
+                boite.add_item(rangee)
+                aide.append(f"**{titre}** — " + " · ".join(morceaux))
+        texte.content = _menu_va_texte(aide, threads, avec_menus, self.identite,
+                                       self.mention, self.inconnues)
+        self.add_item(boite)
+
+    # -- ce que fait chaque bouton (cle de _MENU_VA_DISPOSITION) -------------
+
+    async def _clic_reel(self, interaction: discord.Interaction):
         await self.cog.reel.callback(self.cog, interaction)
 
-    @discord.ui.button(label="⭐ Reels", style=discord.ButtonStyle.primary, custom_id="cmenu:banger", row=0)
-    async def b_banger(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _clic_banger(self, interaction: discord.Interaction):
         await self.cog._send_banger_reels(interaction)
 
-    @discord.ui.button(label="Story", emoji="📖", style=discord.ButtonStyle.primary, custom_id="cmenu:story", row=0)
-    async def b_story(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _clic_story(self, interaction: discord.Interaction):
         await self.cog.story.callback(self.cog, interaction)
 
-    @discord.ui.button(label="Story CTA", emoji="📲", style=discord.ButtonStyle.primary, custom_id="cmenu:storycta", row=0)
-    async def b_storycta(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _clic_storycta(self, interaction: discord.Interaction):
         await self.cog.storycta.callback(self.cog, interaction)
 
-    @discord.ui.button(label="Post", emoji="🖼️", style=discord.ButtonStyle.primary, custom_id="cmenu:post", row=0)
-    async def b_post(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _clic_post(self, interaction: discord.Interaction):
         await self.cog.post.callback(self.cog, interaction)
 
-    @discord.ui.button(label="Name", emoji="📝", style=discord.ButtonStyle.secondary, custom_id="cmenu:name", row=1)
-    async def b_name(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _clic_name(self, interaction: discord.Interaction):
         await self.cog.name.callback(self.cog, interaction)
 
-    @discord.ui.button(label="Pseudo", emoji="👤", style=discord.ButtonStyle.secondary, custom_id="cmenu:pseudo", row=1)
-    async def b_pseudo(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _clic_pseudo(self, interaction: discord.Interaction):
         await self.cog.username.callback(self.cog, interaction)
 
-    @discord.ui.button(label="PP", emoji="🖼", style=discord.ButtonStyle.secondary, custom_id="cmenu:pp", row=1)
-    async def b_pp(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _clic_pp(self, interaction: discord.Interaction):
         await self.cog.profilepic.callback(self.cog, interaction)
 
-    @discord.ui.button(label="Bio", emoji="💬", style=discord.ButtonStyle.secondary, custom_id="cmenu:bio", row=1)
-    async def b_bio(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _clic_bio(self, interaction: discord.Interaction):
         await self.cog.bio.callback(self.cog, interaction)
 
-    @discord.ui.button(label="⭐ Vidéo brut", style=discord.ButtonStyle.primary, custom_id="cmenu:brutbanger", row=1)
-    async def b_brutbanger(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _clic_brutbanger(self, interaction: discord.Interaction):
         await self.cog._send_brutes_bangers(interaction)
 
-    @discord.ui.button(label="Mes clics", emoji="📊", style=discord.ButtonStyle.success, custom_id="cmenu:clics", row=3)
-    async def b_clics(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _clic_clics(self, interaction: discord.Interaction):
         # Délègue au cog clickrecap (logique des clics centralisée là-bas)
         cog = interaction.client.get_cog("ClickRecap")
         if cog is None or not hasattr(cog, "_handle_myclicks"):
@@ -7344,16 +7640,13 @@ class ContentMenuView(discord.ui.View):
             return
         await cog._handle_myclicks(interaction)
 
-    @discord.ui.button(label="Assistance", emoji="🆘", style=discord.ButtonStyle.danger, custom_id="cmenu:help", row=3)
-    async def b_help(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _clic_help(self, interaction: discord.Interaction):
         await interaction.response.send_modal(AssistanceModal(self.cog))
 
-    @discord.ui.button(label="Demander un lien", emoji="🔗", style=discord.ButtonStyle.success, custom_id="cmenu:lien", row=3)
-    async def b_lien(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _clic_lien(self, interaction: discord.Interaction):
         await self.cog.request_link(interaction)
 
-    @discord.ui.button(label="Mon paiement", emoji="💸", style=discord.ButtonStyle.secondary, custom_id="cmenu:pay", row=3)
-    async def b_pay(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _clic_pay(self, interaction: discord.Interaction):
         emb = discord.Embed(
             title="💸 Ton moyen de paiement",
             description="Choisis **comment tu veux recevoir ton argent** 👇",
@@ -7362,12 +7655,10 @@ class ContentMenuView(discord.ui.View):
         await interaction.response.send_message(
             embed=emb, view=PaymentMethodView(self.cog), ephemeral=True)
 
-    @discord.ui.button(label="Comprends rien ?", emoji="❓", style=discord.ButtonStyle.secondary, custom_id="cmenu:tuto", row=3)
-    async def b_tuto(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _clic_tuto(self, interaction: discord.Interaction):
         await self.cog._send_tutoriel(interaction)
 
-    @discord.ui.button(label="Ajouter un compte", emoji="➕", style=discord.ButtonStyle.primary, custom_id="cmenu:addaccount", row=4)
-    async def b_addaccount(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _clic_addaccount(self, interaction: discord.Interaction):
         if not _menu_feature_check(interaction, "onboarding"):
             await interaction.response.send_message("⚠️ Désactivé sur ce serveur.", ephemeral=True)
             return
@@ -7386,8 +7677,7 @@ class ContentMenuView(discord.ui.View):
         except Exception:
             pass
 
-    @discord.ui.button(label="Mes comptes Insta", emoji="📷", style=discord.ButtonStyle.secondary, custom_id="cmenu:comptes", row=4)
-    async def b_comptes(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _clic_comptes(self, interaction: discord.Interaction):
         if not _menu_feature_check(interaction, "contenu"):
             await interaction.response.send_message("⚠️ Désactivé sur ce serveur.", ephemeral=True)
             return
@@ -7414,12 +7704,30 @@ class _BoutonHeritageVA(discord.ui.Button):
         await _lancer_variante_va(self.view.cog, interaction, self.cle)
 
 
+class _LanceurFamilleVA(discord.ui.Button):
+    """« 💬 Caption ▸ », « 🎞️ Template ▸ »… des menus VA postes entre
+    dc157c3 et le passage aux menus directs. PLUS POSE : il ouvrait les
+    variantes dans un sous-menu ephemere. Au clic, il convertit le menu qui
+    le porte en menu V2, sur place (_menu_va_convertir). Servi par
+    ContentMenuLanceursView."""
+
+    def __init__(self, fam):
+        super().__init__(label=f"{fam.nom} ▸", emoji=fam.emoji,
+                         style=discord.ButtonStyle.primary,
+                         custom_id=_CMENU_FAMILLE + fam.cle)
+        self.famille = fam.cle
+
+    async def callback(self, interaction: discord.Interaction):
+        await _menu_va_convertir(self.view.cog, interaction)
+
+
 class ContentMenuHeritageView(discord.ui.View):
-    """Les custom_id que le menu VA a quittes le 25/09/2026, TOUJOURS GERES.
+    """Les custom_id que le menu VA a quittes le 25/09/2026 (passes dans les
+    familles), TOUJOURS GERES.
 
     Jamais postee : enregistree au demarrage (cog_load) pour repondre aux
-    menus deja epingles dans les salons va-, jusqu'a ce que daily_menu les
-    remplace. Sans elle, ces boutons resteraient a l'ecran et ne feraient
+    menus deja epingles dans les salons va-, jusqu'a ce qu'un nouveau menu
+    les remplace. Sans elle, ces boutons resteraient a l'ecran et ne feraient
     plus rien -- sans un mot, pour le VA comme pour le journal.
 
     Chaque bouton lance EXACTEMENT ce qu'il lancait (_MENU_VA_APPELS). Les
@@ -7436,6 +7744,22 @@ class ContentMenuHeritageView(discord.ui.View):
         self.cog = cog
         for cle in self.ANCIENS:
             self.add_item(_BoutonHeritageVA(cle))
+
+
+class ContentMenuLanceursView(discord.ui.View):
+    """Les lanceurs « ▸ » (cmenu:fam:<famille>) des menus VA postes entre
+    dc157c3 et le passage aux menus directs, TOUJOURS GERES : un clic
+    convertit leur menu en V2, sur place (_menu_va_convertir).
+
+    Jamais postee, enregistree au demarrage comme ContentMenuHeritageView.
+    A part d'elle : ses boutons ne lancent pas une variante, ils changent le
+    message qui les porte."""
+
+    def __init__(self, cog):
+        super().__init__(timeout=None)
+        self.cog = cog
+        for fam in _FAMILLES_MENU:
+            self.add_item(_LanceurFamilleVA(fam))
 
 
 class CentralMenuView(discord.ui.View):
@@ -7704,8 +8028,10 @@ _JB_ACTIONS_US = [
     ('trend', '⭐⭐⭐ Trends', 'trends', True),
     ('brutchoix', '🎛️ Choisir ma brute', 'choisirbrute', False),
 
-    # CETTE LISTE N'EST PAS L'ORDRE D'AFFICHAGE : c'est _JB_PANNEAU_US. Elle
-    # fait foi pour ce qui EXISTE (panneau, ✨ General, parc, menutest).
+    # CETTE LISTE N'EST PAS L'ORDRE D'AFFICHAGE : c'est _JB_BOUTONS_V2 et
+    # _FAMILLES_PANNEAU. Elle fait foi pour ce qui EXISTE (panneau, ✨ General,
+    # parc, menutest) -- « trend » compris, masque mais toujours servi
+    # (_JB_MASQUEES).
     # Trends et « Choisir ma brute » restent en queue : le menu de test
     # (cogs/menutest.py) coupe au-dela de 25 entrees en le disant, et ce sont
     # les deux seules qui n'ont de toute facon pas de reserve a y essayer.
@@ -7716,63 +8042,149 @@ _JB_ACTIONS_US = [
 #: « trend » : « Trash Trend » n'est pas « ⭐⭐⭐ Trends ».
 _JB_CLES_TREND = frozenset({"trend", "trendcaption", "trendtemplate", "trendflash"})
 
-#: Le panneau US, RANGEE PAR RANGEE (maquette validee le 25/09/2026) :
+#: LE PANNEAU D'ACTIONS, EN UNE SEULE TABLE (maquette /demopanneau validee
+#: par le proprietaire le 25/09/2026 : « c'est good, vas-y »).
 #:
-#:   0  la quantite (un bouton), puis l'identite
-#:   1  les trends, puis les publications simples
-#:   2  le brut : nu, marque, et l'outil qui le choisit
-#:   3  un lanceur ▸ par famille de _FAMILLES_MENU -- Caption, Template,
-#:      Trash, Flash -- qui ouvre ses variantes en ephemere
+#: Le panneau US epingle, le panneau ephemere des serveurs non-US et la
+#: maquette lisent TOUS cette table : _JB_BOUTONS_V2 (les boutons) et
+#: _FAMILLES_PANNEAU (les menus) ; _JB_MASQUEES dit ce qui est retire expres.
+#: Deux dispositions recopiees, c'est deux comportements.
 #:
-#: Il comptait 24 composants sur 25, les variantes etalees sur quatre
-#: rangees : Trash n'y tenait pas. Il en compte 16, et une famille de plus ne
-#: coute qu'un lanceur. Un bouton de trop ne casse pas le bouton : il fait
-#: echouer la vue ENTIERE.
-_JB_PANNEAU_US = (
-    ("name", "pseudo", "pp", "bio"),
-    ("trend", "story", "storycta", "post"),
-    ("brute", "brutbanger", "brutchoix"),
+#: POURQUOI LE FORMAT « COMPONENTS V2 » (LayoutView)
+#:     Un message classique plafonne a CINQ rangees, et un menu deroulant en
+#:     occupe une entiere : deux rangees de boutons + cinq menus = sept. Le V2
+#:     compte les COMPOSANTS (40 au plus, conteneur et rangees compris) et le
+#:     texte (4000 au plus) ; il n'a pas d'embed, le texte passe dans un
+#:     TextDisplay. Le panneau US en compte 22.
+#:
+#: Rangees de BOUTONS, dans l'ordre ; « _qte » est la place de la quantite
+#: (bouton sur le panneau US, menu deroulant sur sa rangee a lui dans le
+#: panneau ephemere). Puis UN MENU DEROULANT PAR FAMILLE, sans etape : le VA
+#: choisit directement la variante. Les lanceurs « ▸ » qui ouvraient un
+#: sous-menu ephemere (dc157c3) ne sont plus poses ; ceux deja postes
+#: reconstruisent le panneau a la place (JBFamilleBouton).
+_JB_QTE = "_qte"
+_JB_BOUTONS_V2 = (
+    (_JB_QTE, "name", "pseudo", "pp", "bio"),
+    ("story", "storycta", "post"),
 )
-_JB_RANGEE_FAMILLES = 3
 
-#: La rangee de chaque action, DEDUITE de la disposition : une action de
-#: famille est sur la rangee de son lanceur. Rien a tenir a jour a la main.
-_JB_RANGEES = {_k: _r for _r, _ks in enumerate(_JB_PANNEAU_US) for _k in _ks}
-_JB_RANGEES.update({_k: _JB_RANGEE_FAMILLES
-                    for _f in _FAMILLES_MENU for _k in _f.actions})
-# Retire du menu, garde ici : un panneau DEJA poste porte encore ce bouton.
-_JB_RANGEES['captionbrut'] = _JB_RANGEE_FAMILLES
+#: Le menu 🎥 Brut : le brut nu, la brute etoilee, et l'outil qui la choisit.
+#: A part de _FAMILLES_MENU : cette table-la sert aussi le menu VA, qui garde
+#: « ⭐ Vidéo brut » en bouton et n'a pas de famille Brut.
+_FAMILLE_BRUT = _Famille("brut", "🎥", "Brut", ("brute", "brutbanger", "brutchoix"))
+
+#: Les menus du panneau, dans l'ordre voulu par le proprietaire : Brut AVANT
+#: les familles de _FAMILLES_MENU (Caption, Template, Trash, Flash).
+_FAMILLES_PANNEAU = (_FAMILLE_BRUT,) + _FAMILLES_MENU
+
+#: Actions qui EXISTENT encore mais ne s'affichent plus. « ⭐⭐⭐ Trends » a ete
+#: retire par le proprietaire le 25/09/2026 (« pas encore good ») : sa cle
+#: reste dans _JB_ACTIONS_US, parce que les panneaux deja postes portent
+#: encore « jbus:a:…:trend:… » et doivent continuer de repondre. Etre ici,
+#: c'est etre masquee EXPRES : le filet de _jb_disposition ne la compte pas
+#: comme oubliee.
+_JB_MASQUEES = frozenset({"trend"})
+
+
+def _famille_panneau(cle):
+    """La famille `cle` des menus du panneau (Brut compris), ou None."""
+    for f in _FAMILLES_PANNEAU:
+        if f.cle == cle:
+            return f
+    return None
+
+
+#: La rangee PREVUE de chaque action : boutons d'abord (0, 1), puis le menu
+#: de sa famille (2 = Brut, 3 = Caption…). Deduite de la table, rien a tenir
+#: a jour a la main ; elle sert au filet (une action absente d'ici n'a pas
+#: de place prevue).
+_JB_RANGEES = {_k: _r for _r, _ks in enumerate(_JB_BOUTONS_V2)
+               for _k in _ks if _k != _JB_QTE}
+_JB_RANGEES.update({_k: len(_JB_BOUTONS_V2) + _i
+                    for _i, _f in enumerate(_FAMILLES_PANNEAU) for _k in _f.actions})
 
 
 def _jb_disposition():
-    """[(« action » | « famille », cle, rangee)] du panneau, dans l'ordre.
+    """([(sorte, cle, rangee)], hors) -- le panneau, dans l'ordre d'affichage.
 
-    LE FILET. Une action de _JB_ACTIONS_US que ni la disposition ni une
-    famille ne place s'affiche quand meme, au bout de la rangee des familles
-    tant qu'il y a de la place. Au-dela, elle est COMPTEE et journalisee --
-    jamais ecartee en silence, et jamais un 6e bouton qui ferait tomber le
-    panneau entier. Rend aussi la liste de celles qui n'ont pas pu entrer.
+    `sorte` vaut « qte » (la quantite), « action » (un bouton) ou « menu »
+    (le menu deroulant d'une famille de _FAMILLES_PANNEAU). `rangee` est le
+    rang de la rangee, de haut en bas.
+
+    LE FILET. Une action de _JB_ACTIONS_US que ni les boutons ni un menu ne
+    placent, et qui n'est pas masquee expres (_JB_MASQUEES), s'affiche quand
+    meme : sur une rangee de boutons a elle, entre les boutons et les menus,
+    cinq au plus. Au-dela, elle est COMPTEE, journalisee et dite dans le
+    panneau -- jamais ecartee en silence.
     """
-    out = [("action", k, r) for r, ks in enumerate(_JB_PANNEAU_US) for k in ks]
-    out += [("famille", f.cle, _JB_RANGEE_FAMILLES) for f in _FAMILLES_MENU]
-    orphelines = [a[0] for a in _JB_ACTIONS_US if a[0] not in _JB_RANGEES]
-    place = 5 - len(_FAMILLES_MENU)
-    out += [("action", k, _JB_RANGEE_FAMILLES) for k in orphelines[:place]]
-    hors = orphelines[place:]
+    out = []
+    for r, ks in enumerate(_JB_BOUTONS_V2):
+        for k in ks:
+            out.append(("qte" if k == _JB_QTE else "action", k, r))
+    rangee = len(_JB_BOUTONS_V2)
+    orphelines = [a[0] for a in _JB_ACTIONS_US
+                  if a[0] not in _JB_RANGEES and a[0] not in _JB_MASQUEES]
     if orphelines:
-        log.warning("panneau US : %d action(s) sans place dans _JB_PANNEAU_US "
-                    "(%s)%s", len(orphelines), ", ".join(orphelines),
+        out += [("action", k, rangee) for k in orphelines[:5]]
+        rangee += 1
+    hors = orphelines[5:]
+    out += [("menu", f.cle, rangee + i) for i, f in enumerate(_FAMILLES_PANNEAU)]
+    if orphelines:
+        log.warning("panneau US : %d action(s) sans place prevue (%s)%s",
+                    len(orphelines), ", ".join(orphelines),
                     (" -- %d non affichee(s) : %s" % (len(hors), ", ".join(hors)))
                     if hors else "")
     return out, hors
 
 
 def _jb_note_hors(hors) -> str:
-    """La ligne d'embed qui dit ce que le panneau n'a pas pu afficher."""
+    """La ligne du panneau qui dit ce qu'il n'a pas pu afficher."""
     if not hors:
         return ""
     return (f"⚠️ {len(hors)} action(s) sans place dans ce panneau : "
-            + ", ".join(hors) + " (à signaler à un admin).\n\n")
+            + ", ".join(hors) + " (à signaler à un admin).")
+
+
+def _jb_option_action(cle, icones=None):
+    """La SelectOption d'une action : libelle de production (_jb_action),
+    la ligne d'explication (_EXPLICATIONS) en description, et l'icone
+    dessinee du serveur si elle existe -- sinon l'emoji du libelle, tel
+    quel, comme sur les boutons. None si l'action est inconnue."""
+    entree = _jb_action(cle)
+    if entree is None:
+        return None
+    lib = entree[1]
+    icone = (icones or {}).get(cle)
+    expli = _EXPLICATIONS.get(cle) or None
+    return discord.SelectOption(
+        label=_couper_discord(_libelle_sans_emoji(lib) if icone is not None else lib, 100),
+        value=cle,
+        description=_couper_discord(expli, 100) if expli else None,
+        emoji=icone)
+
+
+def _jb_options_famille(fam, icones=None):
+    """(options, inconnues) du menu d'une famille. Une cle de famille sans
+    action n'aurait pas d'option, et personne ne saurait pourquoi : elle est
+    rendue a part, pour etre journalisee et dite."""
+    opts, inconnues = [], []
+    for cle in fam.actions:
+        o = _jb_option_action(cle, icones)
+        if o is None:
+            inconnues.append(cle)
+        else:
+            opts.append(o)
+    if inconnues:
+        log.warning("famille %s : action(s) absente(s) de _JB_ACTIONS_US : %s",
+                    fam.cle, ", ".join(inconnues))
+    return opts, inconnues
+
+
+def _jb_placeholder_famille(fam) -> str:
+    """L'intitule d'un menu -- celui qu'il REPREND apres chaque choix."""
+    return f"{fam.emoji} {fam.nom}…"
+
 
 # Quantites proposees (multiplicateur). Plafonnees au stock reel de la model.
 _JB_QTY_OPTIONS = [1, 3, 5, 10, 15, 20, 30, 50, 60]
@@ -8058,25 +8470,177 @@ def _jb_diagnostic_marche(marche="us") -> str:
     return " → ".join(bouts)
 
 
+# ---------------------------------------------------------------------------
+# MENUS DEROULANTS : UN CHOIX = UNE ACTION, PUIS LE MENU REPREND SON INTITULE.
+#
+# Discord garde l'option choisie affichee dans le menu tant que le message
+# n'est pas redessine, et re-choisir la MEME option ne declenche rien : le
+# VA qui veut un deuxieme « ⭐ Caption » cliquerait dans le vide. Chaque choix
+# doit donc etre suivi d'un redessin du message -- mais l'action (via
+# _run_for_model) consomme deja la reponse de l'interaction (defer,
+# send_message) : une interaction, UNE reponse. Le redessin passe donc par un
+# autre chemin que la reponse, choisi selon ce que l'action a fait d'elle.
+
+#: Les taches de fond en cours : une reference forte, sinon le ramasse-miettes
+#: peut detruire une tache avant sa fin (documentation d'asyncio).
+_JB_TACHES = set()
+
+
+def _jb_en_fond(coro, quoi):
+    """Lance `coro` sans l'attendre. La tache rend True si tout s'est bien
+    passe, False sinon -- et l'echec est journalise, jamais avale."""
+    async def _garde():
+        try:
+            await coro
+            return True
+        except Exception as e:                               # noqa: BLE001
+            log.warning("%s : %s: %s", quoi, type(e).__name__, e)
+            return False
+    t = asyncio.get_running_loop().create_task(_garde())
+    _JB_TACHES.add(t)
+    t.add_done_callback(_JB_TACHES.discard)
+    return t
+
+
+async def _jb_tache_ok(tache) -> bool:
+    """Le resultat d'une tache de _jb_en_fond, False si elle a echoue."""
+    if tache is None:
+        return False
+    try:
+        return bool(await tache)
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
+async def _jb_menu_remettre(interaction, vue, quoi="panneau") -> bool:
+    """Redessine le message du clic avec `vue`, APRES l'action : ses menus
+    reprennent leur intitule. Ne leve jamais ; rend True si c'est fait.
+
+    Le chemin depend de ce que l'action a fait de la reponse :
+      - rien (elle n'a pas repondu) : on repond EN redessinant
+        (edit_message), sans quoi Discord afficherait « l'interaction a
+        echoue » ;
+      - une mise a jour differee (le defer() d'un composant) : @original
+        designe alors le message du clic, edit_original_response le redessine ;
+      - un nouveau message : un message du salon se redessine par lui-meme
+        (message.edit), un ephemere par le jeton de l'interaction
+        (followup.edit_message).
+    Un echec est JOURNALISE : le menu garde alors son choix, et le VA doit en
+    prendre un autre avant de reprendre le meme.
+    """
+    msg = getattr(interaction, "message", None)
+    try:
+        rep = interaction.response
+        if not rep.is_done():
+            await rep.edit_message(view=vue)
+            return True
+        if getattr(rep, "type", None) in (
+                discord.InteractionResponseType.deferred_message_update,
+                discord.InteractionResponseType.message_update):
+            await interaction.edit_original_response(view=vue)
+            return True
+        if msg is None:
+            log.warning("%s : menu non remis sur son intitule (pas de message)", quoi)
+            return False
+        if getattr(getattr(msg, "flags", None), "ephemeral", False):
+            await interaction.followup.edit_message(msg.id, view=vue)
+        else:
+            await msg.edit(view=vue)
+        return True
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("%s : menu non remis sur son intitule (%s: %s)",
+                    quoi, type(e).__name__, e)
+        return False
+
+
+async def _jb_menu_refuser(interaction, texte, vue):
+    """Refuse un choix de menu : le menu reprend son intitule ET le VA lit
+    pourquoi. UNE reponse (l'edition du message), le texte en suivi
+    ephemere. Si l'edition est refusee, le texte part en reponse : le VA
+    doit au moins savoir pourquoi rien ne se passe."""
+    try:
+        await interaction.response.edit_message(view=vue)
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("refus de menu : message non redessine (%s: %s)",
+                    type(e).__name__, e)
+        if not interaction.response.is_done():
+            await interaction.response.send_message(texte, ephemeral=True)
+            return
+    await interaction.followup.send(texte, ephemeral=True)
+
+
+async def _jb_menu_lancer(interaction, cog, model, cle, cmd, supports_count,
+                          qty, vue, tache, quoi):
+    """Lance l'action choisie dans un menu du panneau, EXACTEMENT comme son
+    bouton (_run_for_model), puis s'assure que le menu reprend son intitule
+    (_menu_lancer)."""
+    await _menu_lancer(
+        interaction,
+        lambda: cog._run_for_model(interaction, model, cmd, count=qty,
+                                   supports_count=supports_count),
+        cle, vue, tache, quoi, detail=f" pour {model}")
+
+
+async def _menu_lancer(interaction, action, cle, vue, tache, quoi, detail=""):
+    """Lance `action()` (la coroutine de la variante choisie dans un menu
+    deroulant), puis s'assure que le menu reprend son intitule. Sert le
+    panneau US, le panneau ephemere et le menu VA.
+
+    `tache` : le redessin deja lance en fond (None s'il n'y en a pas). S'il a
+    echoue, ou si l'action n'a pas repondu, on redessine par l'interaction du
+    choix -- ce qui repond aussi, quand il le faut.
+
+    Une action qui leve ne laisse pas le VA devant « l'interaction a
+    echoue » : l'erreur est journalisee et DITE, en ephemere."""
+    erreur = ""
+    try:
+        await action()
+    except Exception as e:                                   # noqa: BLE001
+        log.exception("%s : action %s%s en echec", quoi, cle, detail)
+        erreur = (f"❌ **{_libelle_action(cle)}** : erreur ({type(e).__name__}). "
+                  "Réessaie ; si ça recommence, préviens un admin.")
+    if not await _jb_tache_ok(tache) or not interaction.response.is_done():
+        await _jb_menu_remettre(interaction, vue, quoi)
+    if erreur:
+        try:
+            await interaction.followup.send(erreur, ephemeral=True)
+        except Exception as e:                               # noqa: BLE001
+            log.warning("%s : erreur non annoncee au VA (%s: %s)",
+                        quoi, type(e).__name__, e)
+
+
+_JB_REFUS_ROLE = "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »)."
+
+
 class _JailbreakQtySelect(discord.ui.Select):
-    """Choix de la quantite de media par action (multiplicateur jailbreak)."""
-    def __init__(self, current):
+    """Choix de la quantite de media par action (multiplicateur jailbreak).
+
+    Il garde son panneau en reference directe : dans un LayoutView, il vit
+    dans une rangee, elle-meme dans un conteneur."""
+    def __init__(self, current, panneau=None):
         super().__init__(
             placeholder=f"📦 Quantité : {current} par action",
-            min_values=1, max_values=1, options=_jb_qty_options(current), row=0)
+            min_values=1, max_values=1, options=_jb_qty_options(current))
+        self.panneau = panneau
 
     async def callback(self, interaction: discord.Interaction):
         if not _jb_can_use(interaction):
-            await interaction.response.send_message(
-                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
+            await interaction.response.send_message(_JB_REFUS_ROLE, ephemeral=True)
             return
-        view = self.view
+        view = self.panneau or self.view
         if self.values and self.values[0] == _JB_QTY_AUTRE:
             async def _suite(inter, q):
                 view.quantity = q
                 view._build()
-                await inter.response.edit_message(embed=view._embed(), view=view)
+                await inter.response.edit_message(view=view)
             await interaction.response.send_modal(_JBQtyModal(_suite))
+            # La fenetre ouverte, le menu afficherait « Autre nombre… » : si
+            # le VA la ferme sans rien taper, re-choisir « Autre » ne ferait
+            # plus rien. On le redessine par le jeton du panneau.
+            if getattr(view, "message", None) is not None:
+                view._build()
+                _jb_en_fond(view.message.edit(view=view),
+                            "panneau Jailbreak : quantite remise apres « Autre »")
             return
         try:
             q = int(self.values[0])
@@ -8084,13 +8648,13 @@ class _JailbreakQtySelect(discord.ui.Select):
             q = 3
         view.quantity = q
         view._build()  # reconstruit pour refleter la nouvelle quantite
-        await interaction.response.edit_message(embed=view._embed(), view=view)
+        await interaction.response.edit_message(view=view)
 
 
 class _JailbreakActionButton(discord.ui.Button):
     """Un bouton d'action (reel, story, ...) pour une model donnee. Ephemere."""
-    def __init__(self, cog, model, label, cmd_attr, supports_count, row, key="",
-                 icone=None):
+    def __init__(self, cog, model, label, cmd_attr, supports_count, row=None, key="",
+                 icone=None, panneau=None):
         # Icone du serveur si elle existe, sinon on garde le libelle tel quel,
         # emoji standard compris : c est exactement le comportement d avant.
         if icone is not None:
@@ -8103,11 +8667,11 @@ class _JailbreakActionButton(discord.ui.Button):
         self.cmd_attr = cmd_attr
         self.supports_count = supports_count
         self.key = key
+        self.panneau = panneau
 
     async def callback(self, interaction: discord.Interaction):
         if not _jb_can_use(interaction):
-            await interaction.response.send_message(
-                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
+            await interaction.response.send_message(_JB_REFUS_ROLE, ephemeral=True)
             return
         cmd = getattr(self.cog, self.cmd_attr, None)
         if cmd is None:
@@ -8119,66 +8683,73 @@ class _JailbreakActionButton(discord.ui.Button):
         # serveur — trois critères pour une seule intention, et les chemins qui
         # ne passaient pas par ce bouton n'arbitraient rien du tout.
         model = self.model
-        qty = getattr(self.view, "quantity", 3)
+        qty = getattr(self.panneau or self.view, "quantity", 3)
         await self.cog._run_for_model(
             interaction, model, cmd, count=qty, supports_count=self.supports_count)
 
 
-class _JailbreakFamilleButton(discord.ui.Button):
-    """Lanceur « ▸ » d'une famille dans le panneau EPHEMERE (serveurs non-US).
+class _JailbreakFamilleSelect(discord.ui.Select):
+    """Le menu d'une famille dans le panneau EPHEMERE (serveurs non-US).
 
-    Ici le panneau est deja un ephemere a la seule vue du VA : on y deplie la
-    famille SUR PLACE plutot que d'empiler un second ephemere. Un sous-panneau
-    a part garderait sa model et sa quantite quand le VA en choisit une autre
-    -- le melange d'identites constate le 05/09/2026 (_DERNIER_PANNEAU_JB).
-    """
+    Ordinaire, pas dynamique : le panneau vit en memoire (model, quantite)
+    et expire au bout de 3 minutes. Un element dynamique dans une vue qui
+    expire emporterait, a l'expiration, les motifs de TOUS les panneaux US
+    (voir _vue_sans_suivi)."""
 
-    def __init__(self, fam, row, icone=None):
-        lib = f"{fam.emoji} {fam.nom} ▸"
-        if icone is not None:
-            super().__init__(label=_libelle_sans_emoji(lib), emoji=icone,
-                             style=discord.ButtonStyle.primary, row=row)
-        else:
-            super().__init__(label=lib, style=discord.ButtonStyle.primary, row=row)
+    def __init__(self, panneau, fam):
+        opts, self.inconnues = _jb_options_famille(fam, panneau.icones)
+        super().__init__(placeholder=_jb_placeholder_famille(fam),
+                         min_values=1, max_values=1, options=opts)
+        self.panneau = panneau
         self.famille = fam.cle
 
     async def callback(self, interaction: discord.Interaction):
+        vue = self.panneau
+        choix = (self.values or [""])[0]
+        fam = _famille_panneau(self.famille)
+        refus, cmd, sc = "", None, False
         if not _jb_can_use(interaction):
-            await interaction.response.send_message(
-                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
+            refus = _JB_REFUS_ROLE
+        elif fam is None or choix not in fam.actions:
+            # Une valeur hors de la liste blanche de la famille ne vient pas
+            # d'un menu que le bot a pose : on refuse, et on le trace.
+            log.warning("panneau Jailbreak : choix %r refuse (famille %r)",
+                        choix, self.famille)
+            refus = f"Option inconnue (`{choix}`) : rouvre le menu Jailbreak."
+        else:
+            entree = _jb_action(choix)
+            cmd = getattr(vue.cog, entree[2], None) if entree else None
+            sc = bool(entree and entree[3])
+            if cmd is None:
+                refus = f"Action indisponible (`{choix}`)."
+        vue._build()                       # le menu reviendra sur son intitule
+        if refus:
+            await _jb_menu_refuser(interaction, refus, vue)
             return
-        view = self.view
-        view.famille = self.famille
-        view._build()
-        await interaction.response.edit_message(embed=view._embed(), view=view)
+        # Redessin TOUT DE SUITE, par le jeton de l'interaction qui a pose ce
+        # panneau (valable 15 min) : le VA peut reprendre la meme variante
+        # sans attendre la fin d'un rendu de 30 s.
+        tache = (_jb_en_fond(vue.message.edit(view=vue),
+                             "panneau Jailbreak : menu remis sur son intitule")
+                 if vue.message is not None else None)
+        await _jb_menu_lancer(interaction, vue.cog, vue.model, choix, cmd, sc,
+                              vue.quantity, vue, tache, "panneau Jailbreak")
 
 
-class _JailbreakRetourButton(discord.ui.Button):
-    """Replie la famille : retour au panneau complet."""
-
-    def __init__(self, row):
-        super().__init__(label="◂ Retour", style=discord.ButtonStyle.secondary,
-                         row=row)
-
-    async def callback(self, interaction: discord.Interaction):
-        view = self.view
-        view.famille = None
-        view._build()
-        await interaction.response.edit_message(embed=view._embed(), view=view)
-
-
-class JailbreakActionsView(discord.ui.View):
+class JailbreakActionsView(discord.ui.LayoutView):
     """Quantite + actions pour UNE model. Ephemere (regeneree a chaque choix).
     us=True -> liste US (Reel caption au lieu du Reel brut).
 
-    Meme disposition que le panneau US (_jb_disposition), decalee d'une
-    rangee : le menu deroulant de la quantite prend la rangee 0 A LUI SEUL.
-    Avant, l'identite etait posee sur cette meme rangee 0 : 5 + 4 places sur
-    5, et la vue levait « item would not fit at row 0 » des sa construction
-    -- choisir une model dans le menu Jailbreak des serveurs non-US ne
-    repondait plus. `famille` deplie une famille a la place du panneau."""
-    def __init__(self, cog, model, quantity=3, us=False, icones=None,
-                 famille=None):
+    MEME DISPOSITION QUE LE PANNEAU US, lue dans la meme table
+    (_jb_disposition : _JB_BOUTONS_V2 puis un menu par famille de
+    _FAMILLES_PANNEAU), en « Components V2 ». Seule difference : la quantite
+    reste un menu deroulant, sur sa rangee a elle, au lieu du bouton.
+
+    Avant, c'etait une vue classique : cinq rangees au plus, et un menu en
+    prend une entiere. Elle avait deja plante a la construction (« item would
+    not fit at row 0 ») : choisir une model dans le menu Jailbreak des
+    serveurs non-US ne repondait plus."""
+    def __init__(self, cog, model, quantity=3, us=False, icones=None):
         self.icones = icones or {}
         # 180 s et non 600 : un panneau laisse ouvert apres un changement de
         # model sert l'ANCIENNE identite. Meme duree que le menu des brutes,
@@ -8188,8 +8759,9 @@ class JailbreakActionsView(discord.ui.View):
         self.model = model
         self.quantity = quantity
         self.us = us
-        self.famille = famille
         self.message = None      # pose par _poser_panneau_jb, pour l'eteindre
+        self._hors = []
+        self._inconnues = []
         self._build()
 
     async def on_timeout(self):
@@ -8197,84 +8769,81 @@ class JailbreakActionsView(discord.ui.View):
 
         Un ephemere ne disparait pas tout seul : sans ca, celui d'une model
         abandonnee reste cliquable et sert ses medias a la place de ceux de
-        la model en cours.
+        la model en cours. En V2 il n'y a pas d'embed : le panneau est
+        remplace par une ligne de texte, sans aucun bouton.
         """
-        for item in self.children:
-            item.disabled = True
+        self.clear_items()
+        boite = discord.ui.Container(accent_colour=discord.Colour.dark_grey())
+        boite.add_item(discord.ui.TextDisplay(
+            f"### ⏳ Panneau expiré (model `{self.model}`)\n"
+            "Rouvre le menu Jailbreak pour en obtenir un à jour."))
+        self.add_item(boite)
         for cle, msg in list(_DERNIER_PANNEAU_JB.items()):
             if msg is self.message:
                 _DERNIER_PANNEAU_JB.pop(cle, None)
         try:
             if self.message is not None:
-                await self.message.edit(
-                    embed=discord.Embed(
-                        title="⏳ Panneau expiré (model `%s`)" % self.model,
-                        description="Rouvre le menu Jailbreak pour en obtenir un à jour.",
-                        color=discord.Color.dark_grey()),
-                    view=self)
+                await self.message.edit(view=self)
         except Exception:
             pass
 
-    def _bouton_action(self, key, row):
+    def _bouton_action(self, key):
         entree = _jb_action(key)
         if entree is None:
             return None
         _k, label, cmd_attr, sc = entree
         return _JailbreakActionButton(
-            self.cog, self.model, label, cmd_attr, sc, row=row, key=key,
-            icone=self.icones.get(key))
+            self.cog, self.model, label, cmd_attr, sc, key=key,
+            icone=self.icones.get(key), panneau=self)
 
     def _build(self):
+        ui = discord.ui
         self.clear_items()
-        self.add_item(_JailbreakQtySelect(self.quantity))
-        fam = _famille_menu(self.famille) if self.famille else None
-        if fam is not None:
-            # La famille depliee : ses variantes sur une rangee, le retour
-            # sur la suivante.
-            for key in fam.actions:
-                b = self._bouton_action(key, 1)
-                if b is not None:
-                    self.add_item(b)
-            self.add_item(_JailbreakRetourButton(2))
-            return
-        self.famille = None
         disposition, self._hors = _jb_disposition()
+        self._inconnues = []
+        rangees = {}
         for sorte, cle, rangee in disposition:
-            if sorte == "famille":
-                f = _famille_menu(cle)
-                self.add_item(_JailbreakFamilleButton(
-                    f, rangee + 1, icone=self.icones.get(f.actions[0])))
+            if sorte == "qte":
+                continue                   # la quantite a sa rangee a elle
+            if sorte == "menu":
+                fam = _famille_panneau(cle)
+                menu = _JailbreakFamilleSelect(self, fam)
+                self._inconnues += menu.inconnues
+                if not menu.options:
+                    # Un menu sans option serait refuse par Discord, et le
+                    # panneau ENTIER avec lui : on le retire, en le disant.
+                    self._inconnues.append(f"menu {fam.nom}")
+                    continue
+                rangees.setdefault(rangee, ui.ActionRow()).add_item(menu)
                 continue
-            b = self._bouton_action(cle, rangee + 1)
-            if b is not None:
-                self.add_item(b)
+            b = self._bouton_action(cle)
+            if b is None:
+                self._inconnues.append(cle)
+                continue
+            rangees.setdefault(rangee, ui.ActionRow()).add_item(b)
+        boite = ui.Container(accent_colour=discord.Colour.dark_red())
+        boite.add_item(ui.TextDisplay(self._texte()))
+        qte = ui.ActionRow()
+        qte.add_item(_JailbreakQtySelect(self.quantity, panneau=self))
+        boite.add_item(qte)
+        for r in sorted(rangees):
+            boite.add_item(rangees[r])
+        self.add_item(boite)
 
-    def _embed(self):
-        m = self.model.capitalize()
-        fam = _famille_menu(self.famille) if self.famille else None
-        quant = (f"📦 **Quantité : {self.quantity} média par action** "
-                 "_(change-la dans le menu déroulant ci-dessus)._\n"
-                 "La quantité est **plafonnée au stock dispo** de la model.\n")
-        if fam is not None:
-            lignes = [f"**{_libelle_action(c)}** — {_EXPLICATIONS.get(c, '')}"
-                      for c in fam.actions]
-            return discord.Embed(
-                title=f"🔓 {m} — {fam.emoji} {fam.nom}",
-                description=(quant + "\n" + "\n".join(lignes)
-                             + "\n\nClique sur une variante 👇 "
-                               "_(◂ Retour pour les autres actions)_"),
-                color=discord.Color.dark_red())
-        return discord.Embed(
-            title=f"🔓 {m} — que veux-tu générer ?",
-            description=(
-                quant
-                + "ℹ️ *Pseudo* et *Name* en donnent toujours 5 (sans quantité).\n"
-                "Les boutons **▸** ouvrent leurs variantes.\n\n"
-                + _jb_note_hors(getattr(self, "_hors", ()))
-                + "Clique sur une action 👇"
-            ),
-            color=discord.Color.dark_red(),
-        )
+    def _texte(self):
+        lignes = [f"## 🔓 {self.model.capitalize()} — que veux-tu générer ?",
+                  f"📦 **Quantité : {self.quantity} média par action** "
+                  "— change-la dans le menu juste en dessous ; elle est "
+                  "plafonnée au stock dispo de la model.",
+                  "ℹ️ *Pseudo* et *Name* en donnent toujours 5 (sans quantité)."]
+        if self._hors:
+            lignes.append(_jb_note_hors(self._hors))
+        if self._inconnues:
+            lignes.append(f"⚠️ {len(self._inconnues)} action(s) introuvable(s), "
+                          "sans bouton : " + ", ".join(self._inconnues)
+                          + " (à signaler à un admin).")
+        lignes.append("Choisis une action 👇")
+        return "\n".join(lignes)
 
 
 class _DejaPret(Exception):
@@ -8714,9 +9283,10 @@ class JBModelButton(discord.ui.DynamicItem[discord.ui.Button],
             return
         # Serveur US : on met a jour le PANNEAU PERMANENT du salon au lieu
         # d'envoyer un message ephemere qui disparait au rafraichissement.
-        emb, view = _jb_panel(cog, self.ident, 3, marche=_marche,
-                              guild=interaction.guild)
+        vue = _jb_panel(cog, self.ident, 3, marche=_marche,
+                        guild=interaction.guild)
         chan = interaction.channel
+        moi = getattr(getattr(interaction.client, "user", None), "id", None)
         msg_id = _jb_panel_ids().get(str(getattr(chan, "id", 0)))
         cible = None
         try:
@@ -8724,35 +9294,63 @@ class JBModelButton(discord.ui.DynamicItem[discord.ui.Button],
                 cible = await chan.fetch_message(int(msg_id))
         except Exception:
             cible = None
-        if cible is None:                      # panneau introuvable -> on le recree
+        if cible is None:                      # panneau introuvable -> on le cherche
             try:
                 for m in await chan.pins():
-                    if (m.author.id == interaction.client.user.id and m.embeds
-                            and (m.embeds[0].footer.text or "") == "panneau-actions-us"):
+                    # Les DEUX formats : l'ancien (pied d'embed) et le V2
+                    # (ligne-marque dans le texte). Rater l'un, c'etait poster
+                    # un second panneau a cote du premier.
+                    if _est_panneau_actions(m, moi):
                         cible = m
                         break
             except Exception:
                 cible = None
         panneau_pose = False
+        recree = cible is None
         try:
             if cible is not None:
-                await cible.edit(embed=emb, view=view)
-                await interaction.response.defer()
-            else:
-                nouveau = await chan.send(embed=emb, view=view)
+                try:
+                    # Un ancien panneau (embed) passe en V2 par cette edition :
+                    # _jb_kw_format vide son texte et son embed.
+                    await cible.edit(view=vue, **_jb_kw_format(cible))
+                    await interaction.response.defer()
+                except discord.NotFound:
+                    cible = None               # supprime entre-temps : on le repose
+                except discord.HTTPException as e:
+                    # Conversion refusee par Discord : un NOUVEAU panneau V2
+                    # prend sa place (epingle, id memorise), l'ancien part.
+                    await interaction.response.defer()
+                    await _jb_panneau_reposer(
+                        interaction.client, chan, cible, vue, self.ident,
+                        f"edition refusee ({type(e).__name__}: {e})",
+                        general=False)
+                    recree = True
+            if cible is None:
+                nouveau = await chan.send(view=vue)
                 _jb_panel_set(chan.id, nouveau.id)
                 try:
                     await nouveau.pin()
-                except Exception:
-                    pass
-                await interaction.response.defer()
+                except Exception as e:
+                    log.warning("panneau US %s : pose mais non epingle (%s: %s)",
+                                getattr(chan, "name", "?"), type(e).__name__, e)
+                if not interaction.response.is_done():
+                    await interaction.response.defer()
+                recree = True
             panneau_pose = True
-        except Exception:
+        except Exception as e:
+            log.warning("panneau US %s : non pose dans le salon (%s: %s) -- "
+                        "envoye en ephemere", getattr(chan, "name", "?"),
+                        type(e).__name__, e)
             # Le panneau en ephemere, mais SANS suivi : voir _vue_sans_suivi.
             # Suivi, il expirait au bout de 15 minutes et emportait les
-            # motifs de TOUS les panneaux US du serveur.
-            await interaction.response.send_message(
-                embed=emb, view=_vue_sans_suivi(view), ephemeral=True)
+            # motifs de TOUS les panneaux US du serveur. Une vue NEUVE : la
+            # premiere a peut-etre ete rangee par un envoi a moitie reussi.
+            secours = _vue_sans_suivi(_jb_panel(cog, self.ident, 3, marche=_marche,
+                                                guild=interaction.guild))
+            if not interaction.response.is_done():
+                await interaction.response.send_message(view=secours, ephemeral=True)
+            else:
+                await interaction.followup.send(view=secours, ephemeral=True)
         # Les sous-menus de famille ouverts portent l'ANCIENNE model dans
         # leurs boutons : on les efface, et on retient ce que montre le
         # panneau pour refuser ceux qu'on n'a plus le droit d'effacer.
@@ -8764,14 +9362,15 @@ class JBModelButton(discord.ui.DynamicItem[discord.ui.Button],
         # Le ✨ General suit la model choisie, APRES le defer et dans son
         # propre try : le except du dessus repond par send_message, qui
         # leverait InteractionResponded si la reponse etait deja partie.
-        # Panneau recree (cible absente) : le General est REPOSTE, sinon il
-        # resterait au-dessus du nouveau panneau. Panneau non pose : on ne
-        # touche a rien, le salon a un probleme que le General n'arrangera pas.
+        # Panneau recree (absent, ou conversion refusee) : le General est
+        # REPOSTE, sinon il resterait au-dessus du nouveau panneau. Panneau
+        # non pose : on ne touche a rien, le salon a un probleme que le
+        # General n'arrangera pas.
         if panneau_pose:
             try:
                 await _jb_general_maj(interaction.client, chan, self.ident,
                                       interaction.guild,
-                                      reposter=(cible is None))
+                                      reposter=recree)
             except Exception as e:
                 log.warning("General %s / %s : non mis a jour (%s: %s)",
                             getattr(chan, "name", "?"), self.ident,
@@ -8805,10 +9404,167 @@ def _jb_panel_set(channel_id, message_id):
     d = _jb_panel_ids()
     d[str(channel_id)] = int(message_id)
     try:
-        import safe_json
-        safe_json.write(_JB_PANEL_STORE, d, indent=2)
-    except Exception:
-        pass
+        ok = safe_json.write(_JB_PANEL_STORE, d, indent=2)
+    except Exception as e:                                   # noqa: BLE001
+        ok = False
+        log.warning("us_panels.json : %s", e)
+    if not ok:
+        # Sans l'id, le prochain clic cherche le panneau dans les epingles :
+        # plus lent, pas faux. On le dit quand meme.
+        log.warning("us_panels.json non ecrit : panneau du salon %s non memorise",
+                    channel_id)
+
+
+#: Ce qui designe le panneau d'actions, dans les DEUX formats :
+#:   - l'ancien (embed) : le pied de l'embed vaut exactement cette chaine ;
+#:   - le V2 (LayoutView), qui n'a PAS d'embed : une derniere ligne
+#:     « -# panneau-actions-us » dans son texte (petit texte gris).
+#: C'est la seule marque fiable : le titre change avec la model. Toute
+#: recherche du panneau (clic sur une model, _ensure_us_menu,
+#: _ensure_us_panel, _delete_old_menus) passe par _est_panneau_actions.
+_JB_PANNEAU_PIED = "panneau-actions-us"
+_JB_PANNEAU_MARQUE = "-# " + _JB_PANNEAU_PIED
+
+
+def _textes_v2(obj) -> list:
+    """Les textes (TextDisplay) d'un message « Components V2 », a toute
+    profondeur (conteneur, section). Accepte un message recu de Discord
+    (ses `components`) comme une vue construite ici (ses `children`).
+    [] pour un message classique."""
+    td = getattr(discord.ComponentType, "text_display", None)
+    pile = list(getattr(obj, "components", None)
+                or getattr(obj, "children", None) or [])
+    out, vus = [], 0
+    while pile and vus < 500:          # garde-fou : un message a 40 composants
+        c = pile.pop(0)
+        vus += 1
+        texte = getattr(c, "content", None)
+        if isinstance(texte, str) and td is not None and getattr(c, "type", None) == td:
+            out.append(texte)
+        enfants = getattr(c, "children", None)
+        if isinstance(enfants, (list, tuple)):
+            pile.extend(enfants)
+    return out
+
+
+def _est_panneau_actions(m, moi=None) -> bool:
+    """Ce message est-il le panneau d'actions US, dans l'un ou l'autre format ?
+
+    `moi` : l'id du bot ; donne, un message d'un autre auteur n'est jamais le
+    panneau. Ne leve jamais."""
+    try:
+        if m is None:
+            return False
+        if moi is not None and getattr(getattr(m, "author", None), "id", None) != moi:
+            return False
+        emb = getattr(m, "embeds", None) or []
+        if emb:
+            pied = getattr(getattr(emb[0], "footer", None), "text", None) or ""
+            if pied == _JB_PANNEAU_PIED:
+                return True
+        return any(ligne.strip() == _JB_PANNEAU_MARQUE
+                   for t in _textes_v2(m) for ligne in t.splitlines())
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("panneau US : message %s illisible (%s: %s)",
+                    getattr(m, "id", "?"), type(e).__name__, e)
+        return False
+
+
+def _jb_kw_format(message) -> dict:
+    """Ce qu'une edition doit vider pour passer `message` au format V2.
+
+    Discord accepte qu'un message classique devienne « Components V2 » par
+    une EDITION, a condition d'effacer dans la meme requete son texte et ses
+    embeds (discord.py pose alors le drapeau). Un message deja V2 n'a rien a
+    vider : on n'envoie rien de plus que la vue."""
+    fl = getattr(message, "flags", None)
+    if fl is not None and getattr(fl, "components_v2", False):
+        return {}
+    return {"content": None, "embed": None}
+
+
+async def _jb_panneau_reposer(client, chan, ancien, vue, ident, raison,
+                              general=True):
+    """Le REPLI quand Discord refuse d'editer (convertir) le panneau :
+    un NOUVEAU panneau V2 est poste, epingle et memorise, puis l'ancien est
+    retire. Tout est journalise. Leve si le nouveau n'a pas pu etre poste :
+    l'appelant a son propre repli.
+
+    `general` : repose aussi le ✨ General (serveur US seulement), sinon il
+    resterait AU-DESSUS du nouveau panneau. JBModelButton s'en charge
+    lui-meme, avec la bonne model : il passe False."""
+    nom = getattr(chan, "name", "?")
+    nouveau = await chan.send(view=vue)
+    _jb_panel_set(chan.id, nouveau.id)
+    log.warning("panneau US %s : %s -- nouveau panneau V2 %s a la place de %s",
+                nom, raison, nouveau.id, getattr(ancien, "id", None))
+    try:
+        await nouveau.pin()
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("panneau US %s : nouveau panneau non epingle (%s: %s)",
+                    nom, type(e).__name__, e)
+    if ancien is not None:
+        try:
+            await ancien.delete()
+        except Exception as e:                               # noqa: BLE001
+            log.warning("panneau US %s : ancien panneau %s non retire (%s: %s) "
+                        "-- deux panneaux dans le salon", nom,
+                        getattr(ancien, "id", "?"), type(e).__name__, e)
+    if general and client is not None:
+        try:
+            import guild_features as _gf
+            _us = _gf.is_us_guild(getattr(chan, "guild", None))
+        except Exception:                                    # noqa: BLE001
+            _us = False
+        if _us:
+            try:
+                await _jb_general_maj(client, chan, ident,
+                                      getattr(chan, "guild", None), reposter=True)
+            except Exception as e:                           # noqa: BLE001
+                log.warning("panneau US %s : General non repose (%s: %s)",
+                            nom, type(e).__name__, e)
+    return nouveau
+
+
+async def _jb_panneau_en_reponse(interaction, vue, ident, quoi="panneau US",
+                                 reposer=None) -> bool:
+    """Remplace le panneau d'ou vient le clic par `vue`, EN REPONSE au clic.
+
+    Un ancien panneau (embed) est converti au passage (_jb_kw_format). Si
+    Discord refuse l'edition : le panneau du salon est repose en V2
+    (_jb_panneau_reposer) ; un panneau ephemere est remplace par un nouvel
+    ephemere. Une interaction = une reponse, dans tous les cas.
+    Rend True si c'est le message du SALON qui porte desormais `vue`.
+
+    Le menu VA s'en sert aussi (conversion d'un ancien menu) : `quoi` nomme
+    le message dans le journal, `reposer(chan, ancien, vue, raison)`
+    remplace le repli propre au panneau (memoire us_panels.json, ✨ General)."""
+    msg = getattr(interaction, "message", None)
+    ephemere = bool(getattr(getattr(msg, "flags", None), "ephemeral", False))
+    try:
+        await interaction.response.edit_message(
+            view=(_vue_sans_suivi(vue) if ephemere else vue), **_jb_kw_format(msg))
+        return not ephemere
+    except discord.HTTPException as e:
+        if interaction.response.is_done():
+            raise
+        refus = e
+    log.warning("%s : edition refusee (%s: %s)%s", quoi, type(refus).__name__,
+                refus, " -- nouvel ephemere" if ephemere else "")
+    chan = getattr(interaction, "channel", None)
+    if ephemere or msg is None or chan is None:
+        await interaction.response.send_message(view=_vue_sans_suivi(vue),
+                                                ephemeral=True)
+        return False
+    # Accuser reception AVANT de reposer : poster, epingler, retirer et
+    # reposer le General ne tient pas dans les 3 s de Discord.
+    await interaction.response.defer()
+    raison = f"edition refusee ({type(refus).__name__}: {refus})"
+    if reposer is None:
+        await _jb_panneau_reposer(interaction.client, chan, msg, vue, ident, raison)
+    else:
+        await reposer(chan, msg, vue, raison)
+    return True
 
 
 class JBQtyBouton(discord.ui.DynamicItem[discord.ui.Button],
@@ -8833,7 +9589,9 @@ class JBQtyBouton(discord.ui.DynamicItem[discord.ui.Button],
         self.ident = (ident or "_").lower()
         self.qty = int(qty)
         super().__init__(discord.ui.Button(
-            label=f"📦 Quantité : {self.qty} — clique pour changer",
+            # Le libelle de la maquette validee : sur une rangee de cinq
+            # boutons, la phrase « clique pour changer » ne tenait pas.
+            label=f"📦 Quantité : {self.qty}",
             style=discord.ButtonStyle.secondary, row=0,
             custom_id=f"jbus:qb:{self.ident}:{self.qty}"))
 
@@ -8849,13 +9607,13 @@ class JBQtyBouton(discord.ui.DynamicItem[discord.ui.Button],
             return
 
         async def _suite(inter, q):
-            emb2, vue2 = _jb_panel(inter.client.get_cog("UserCog"), self.ident,
-                                   q, guild=inter.guild,
-                                   marche=marche_du_membre(inter.user))
+            vue2 = _jb_panel(inter.client.get_cog("UserCog"), self.ident,
+                             q, guild=inter.guild,
+                             marche=marche_du_membre(inter.user))
             # edit_message depuis une soumission de Modal modifie bien le
             # message d'origine : c'est ce qui evite de reposter un panneau en
-            # double dans le salon.
-            await inter.response.edit_message(embed=emb2, view=vue2)
+            # double dans le salon. Un ancien panneau passe en V2 au passage.
+            await _jb_panneau_en_reponse(inter, vue2, self.ident)
             await _jb_panneau_qte_changee(inter, self.ident, q)
 
         await interaction.response.send_modal(_JBQtyModal(_suite))
@@ -8886,24 +9644,17 @@ class JBQtySelect(discord.ui.DynamicItem[discord.ui.Select],
         vals = getattr(self.item, "values", None) or []
 
         def _repose(inter, q):
-            """Reconstruit le panneau avec la quantite demandee."""
-            return _jb_panel(inter.client.get_cog("UserCog"), self.ident, q,
-                             guild=inter.guild,
-                             marche=marche_du_membre(inter.user))
-
-        def _repose(inter, q):
-            """Reconstruit le panneau avec la quantite demandee."""
+            """Reconstruit le panneau (V2) avec la quantite demandee."""
             return _jb_panel(inter.client.get_cog("UserCog"), self.ident, q,
                              guild=inter.guild,
                              marche=marche_du_membre(inter.user))
 
         if vals and vals[0] == _JB_QTY_AUTRE:
             async def _suite(inter, q):
-                emb2, vue2 = _repose(inter, q)
                 # edit_message depuis une soumission de Modal modifie bien le
                 # message d origine : c est ce qui evite de reposter un
                 # panneau en double dans le salon.
-                await inter.response.edit_message(embed=emb2, view=vue2)
+                await _jb_panneau_en_reponse(inter, _repose(inter, q), self.ident)
                 await _jb_panneau_qte_changee(inter, self.ident, q)
             await interaction.response.send_modal(_JBQtyModal(_suite))
             return
@@ -8911,8 +9662,9 @@ class JBQtySelect(discord.ui.DynamicItem[discord.ui.Select],
             q = int(vals[0])
         except Exception:
             q = self.qty
-        emb, view = _repose(interaction, q)
-        await interaction.response.edit_message(embed=emb, view=view)
+        # Ce menu n'existe plus que sur les panneaux d'AVANT : y toucher les
+        # fait passer au panneau V2.
+        await _jb_panneau_en_reponse(interaction, _repose(interaction, q), self.ident)
         await _jb_panneau_qte_changee(interaction, self.ident, q)
 
 
@@ -9045,21 +9797,23 @@ def _vue_sans_suivi(view):
 
 class JBFamilleBouton(discord.ui.DynamicItem[discord.ui.Button],
                       template=r"jbus:f:(?P<ident>[a-z0-9_.\-]+):(?P<fam>[a-z]+):(?P<qty>\d+)"):
-    """Le lanceur d'une famille du panneau US (« 💬 Caption ▸ »…).
+    """Le lanceur « ▸ » d'une famille (« 💬 Caption ▸ »…) des panneaux US
+    postes entre dc157c3 et le passage aux menus directs.
 
-    Au clic : les memes gardes qu'une action (role, reserve), puis les
-    variantes de la famille en message EPHEMERE, visible du seul VA -- le
-    panneau, lui, est partage par tout le salon et ne doit pas changer sous
-    les yeux des autres. Ces variantes sont des JBActionButton ordinaires
-    (meme model, meme quantite, memes icones) : un clic sur l'une vaut un
-    clic sur l'ancien bouton du panneau.
+    IL N'EST PLUS POSE. Il ouvrait les variantes dans un sous-menu
+    ephemere ; le panneau V2 les offre directement, dans un menu deroulant
+    par famille (JBMenuFamille). Les panneaux deja epingles le portent encore
+    jusqu'a leur prochaine mise a jour : au clic, apres les memes gardes
+    qu'une action (role, reserve), il RECONSTRUIT le panneau qui le porte, en
+    V2, a la place -- plus de sous-menu. Le VA choisit ensuite sa variante
+    dans le menu de la famille.
 
     Prefixe « jbus:f: » : discord.py lance TOUS les motifs dynamiques qui
-    correspondent a un custom_id, celui-ci ne doit recouper ni jbus:a/m/q/qb,
+    correspondent a un custom_id, celui-ci ne doit recouper ni jbus:a/m/q/qb/s,
     ni jbg:. L'identite ne contient pas « : », la famille est en [a-z].
     """
 
-    def __init__(self, ident, famille, qty, row=_JB_RANGEE_FAMILLES, icone=None):
+    def __init__(self, ident, famille, qty, row=None, icone=None):
         self.ident = (ident or "_").lower()
         self.famille = famille
         self.qty = int(qty)
@@ -9079,8 +9833,7 @@ class JBFamilleBouton(discord.ui.DynamicItem[discord.ui.Button],
 
     async def callback(self, interaction: discord.Interaction):
         if not _jb_can_use(interaction):
-            await interaction.response.send_message(
-                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
+            await interaction.response.send_message(_JB_REFUS_ROLE, ephemeral=True)
             return
         _refus = _refus_reserve_jb(self.ident)
         if _refus:
@@ -9092,104 +9845,254 @@ class JBFamilleBouton(discord.ui.DynamicItem[discord.ui.Button],
                 f"Famille indisponible (`{self.famille}`) : reclique la model "
                 "au-dessus, le panneau se remet à jour.", ephemeral=True)
             return
-        emb, vue = _jb_sous_menu_famille(self.ident, fam, self.qty,
-                                         guild=interaction.guild)
-        # Le sous-menu PRECEDENT de ce VA part : deux sous-menus ouverts, c'est
-        # deux jeux de boutons dont l'un peut viser une autre model.
-        uid = int(getattr(getattr(interaction, "user", None), "id", 0) or 0)
-        await _jb_sous_menus_fermer(user_id=uid)
-        await interaction.response.send_message(
-            embed=emb, view=_vue_sans_suivi(vue), ephemeral=True)
-        # Le handle, pour pouvoir l'effacer quand le panneau change. Un
-        # ephemere envoye par send_message ne rend rien : il faut le
-        # redemander. Sans lui, le refus de JBActionButton reste le filet.
-        try:
-            msg = await interaction.original_response()
-            _JB_SOUS_MENUS[uid] = (
-                int(getattr(getattr(interaction, "channel", None), "id", 0) or 0), msg)
-        except Exception:
-            pass
+        vue = _jb_panel(interaction.client.get_cog("UserCog"), self.ident,
+                        self.qty, guild=interaction.guild,
+                        marche=marche_du_membre(interaction.user))
+        epingle = _jb_est_panneau_epingle(interaction)
+        await _jb_panneau_en_reponse(interaction, vue, self.ident)
         # Le panneau d'ou part ce clic dit ce qu'il montre : si l'etat etait
         # inconnu (redemarrage), on l'apprend ici -- mais seulement depuis
         # l'epingle, pas depuis un panneau de secours.
-        if _jb_est_panneau_epingle(interaction):
+        if epingle:
             _jb_panneau_noter(getattr(interaction.channel, "id", 0),
                               self.ident, self.qty)
 
 
-def _jb_sous_menu_famille(ident, fam, qty, guild=None):
-    """(embed, vue) des variantes d'une famille pour `ident` : une ligne
-    d'explication par variante, et leurs JBActionButton sur une rangee."""
-    _ic = icones_actions(guild)          # lecture seule : rien sur le reseau
-    vue = discord.ui.View(timeout=None)
-    lignes = []
-    for key in fam.actions:
-        entree = _jb_action(key)
-        if entree is None:
-            # Une cle de famille sans action : elle ne s'afficherait pas, et
-            # personne ne saurait pourquoi. On le dit dans le sous-menu.
-            lignes.append(f"⚠️ `{key}` : action inconnue, bouton absent.")
-            log.warning("famille %s : action %r absente de _JB_ACTIONS_US",
-                        fam.cle, key)
-            continue
-        vue.add_item(JBActionButton(ident, key, qty, label=entree[1], row=0,
-                                    icone=_ic.get(key)))
-        lignes.append(f"**{entree[1]}** — {_EXPLICATIONS.get(key, '')}")
-    emb = discord.Embed(
-        title=f"{fam.emoji} {fam.nom} — {ident.capitalize()}",
-        description=(f"📦 **{qty} média par action**\n\n" + "\n".join(lignes)
-                     + "\n\nLe contenu arrive dans ton salon **-content** 👇"),
-        color=discord.Color.dark_red())
-    return emb, vue
+class JBMenuFamille(discord.ui.DynamicItem[discord.ui.Select],
+                    template=r"jbus:s:(?P<ident>[a-z0-9_.\-]+):(?P<fam>[a-z]+):(?P<qty>\d+)"):
+    """Le menu deroulant d'une famille du panneau US (« 💬 Caption… »).
+
+    Ses options sont les actions de la famille (_FAMILLES_PANNEAU) : libelle
+    de production, ligne d'explication, icone du serveur. Tout l'etat (model,
+    famille, quantite) est dans le custom_id : le menu repond encore apres un
+    redemarrage (from_custom_id), comme les boutons du panneau.
+
+    Au choix : les memes gardes que JBActionButton (role, reserve, panneau
+    perime), la valeur VALIDEE contre la liste blanche de la famille, puis
+    _run_for_model exactement comme le bouton -- et le menu reprend son
+    intitule, sans quoi re-choisir la meme variante ne declencherait rien.
+
+    Prefixe « jbus:s: » : il ne recoupe aucun autre motif (jbus:a/m/q/qb/f,
+    jbg:) -- discord.py les lance TOUS quand ils correspondent.
+    """
+
+    def __init__(self, ident, famille, qty, icones=None):
+        self.ident = (ident or "_").lower()
+        self.famille = famille
+        self.qty = int(qty)
+        fam = _famille_panneau(famille)
+        if fam is not None:
+            opts, self.inconnues = _jb_options_famille(fam, icones)
+            intitule = _jb_placeholder_famille(fam)
+        else:
+            opts, self.inconnues, intitule = [], [], f"{famille}…"
+        #: Aucune option : _jb_panel ne pose pas ce menu (Discord refuserait
+        #: le message ENTIER) et le dit. L'option factice ne sert qu'a
+        #: construire l'objet quand un vieux custom_id revient.
+        self.vide = not opts
+        if not opts:
+            opts = [discord.SelectOption(label="(aucune variante)", value="_")]
+        super().__init__(discord.ui.Select(
+            placeholder=intitule, min_values=1, max_values=1, options=opts,
+            custom_id=f"jbus:s:{self.ident}:{self.famille}:{self.qty}"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match, /):
+        return cls(match["ident"], match["fam"], match["qty"])
+
+    async def callback(self, interaction: discord.Interaction):
+        choix = (getattr(self.item, "values", None) or [""])[0]
+        cog = interaction.client.get_cog("UserCog")
+        msg = getattr(interaction, "message", None)
+        ephemere = bool(getattr(getattr(msg, "flags", None), "ephemeral", False))
+
+        def _frais():
+            """Le panneau tel qu'il etait avant le choix : ses menus sur leur
+            intitule. En ephemere, une vue ARRETEE (_vue_sans_suivi)."""
+            v = _jb_panel(cog, self.ident, self.qty, guild=interaction.guild)
+            return _vue_sans_suivi(v) if ephemere else v
+
+        fam = _famille_panneau(self.famille)
+        refus, cmd, sc = "", None, False
+        if not _jb_can_use(interaction):
+            refus = _JB_REFUS_ROLE
+        else:
+            # Un panneau peut rester affiche sur une entree devenue reserve
+            # depuis : son contenu partirait monte sur des brutes qu'elle n'a
+            # pas (meme refus que JBActionButton).
+            refus = _refus_reserve_jb(self.ident)
+        if not refus:
+            if fam is None or self.ident == "_":
+                refus = (f"Famille indisponible (`{self.famille}`) : reclique la "
+                         "model au-dessus, le panneau se remet à jour.")
+            elif choix not in fam.actions:
+                # Hors de la liste blanche : ce choix ne vient pas d'un menu
+                # que le bot a pose. Refuse, et trace.
+                log.warning("panneau US : choix %r refuse (famille %r, model %r)",
+                            choix, self.famille, self.ident)
+                refus = f"Option inconnue (`{choix}`) : reclique la model au-dessus."
+            else:
+                refus = _jb_sous_menu_perime(interaction, self.ident,
+                                             self.qty, panneau=True)
+        if not refus:
+            entree = _jb_action(choix)
+            cmd = getattr(cog, entree[2], None) if (cog is not None and entree) else None
+            sc = bool(entree and entree[3])
+            if cmd is None:
+                refus = f"Action indisponible (`{choix}`)."
+        if refus:
+            await _jb_menu_refuser(interaction, refus, _frais())
+            return
+        if _jb_est_panneau_epingle(interaction):
+            _jb_panneau_noter(getattr(interaction.channel, "id", 0),
+                              self.ident, self.qty)
+        # Le panneau du SALON se redessine tout de suite, sans attendre la fin
+        # d'un rendu de 30 s : c'est un message du bot, il s'edite sans passer
+        # par l'interaction. Un ephemere n'a pas ce chemin : il est redessine
+        # apres coup, par l'interaction (_jb_menu_remettre).
+        tache = None
+        if not ephemere and msg is not None:
+            tache = _jb_en_fond(
+                _jb_remettre_epingle(interaction, self.ident, self.qty, _frais()),
+                "panneau US : menu remis sur son intitule")
+        await _jb_menu_lancer(interaction, cog, self.ident, choix, cmd, sc,
+                              self.qty, _frais(), tache, "panneau US")
+
+
+async def _jb_remettre_epingle(interaction, ident, qty, vue):
+    """Redessine le panneau du salon d'ou vient le choix : ses menus
+    reprennent leur intitule.
+
+    SAUF s'il a change entre-temps (autre model, autre quantite) : un
+    redessin l'a alors deja remis a zero, et le redessiner avec l'etat du
+    clic le ferait revenir EN ARRIERE -- le panneau montrerait Lola pendant
+    que le VA vient de choisir Julia."""
+    cid = int(getattr(getattr(interaction, "channel", None), "id", 0) or 0)
+    etat = _JB_PANNEAU_COURANT.get(cid)
+    if etat is not None and etat != ((ident or "").lower(), int(qty)):
+        log.info("panneau US %s : deja redessine (%s), pas de remise a zero",
+                 cid, etat)
+        return
+    await interaction.message.edit(view=vue)
+
+
+def _jb_panel_texte(ident, qty, hors=(), inconnues=()) -> str:
+    """Le texte en tete du panneau (TextDisplay). Sa DERNIERE ligne est la
+    marque qui le designe (_JB_PANNEAU_MARQUE) : le format V2 n'a pas de pied
+    d'embed ou la mettre.
+
+    Ni « menu » ni « Jailbreak » dans ce texte : le premier fait supprimer un
+    message par _delete_old_menus, le second designe le menu des models dans
+    _ensure_us_menu."""
+    if ident == "_":
+        lignes = ["## 🔓 Choisis une model au-dessus 👆",
+                  "Clique sur une model dans la grille du dessus : les actions "
+                  "apparaissent ici.",
+                  f"📦 **Quantité : {qty} média par action** — le bouton "
+                  "ci-dessous la change.",
+                  "Le contenu généré part dans ton salon **-content**."]
+    else:
+        lignes = [f"## 🔓 {ident.capitalize()} — que veux-tu générer ?",
+                  f"📦 **Quantité : {qty} média par action** — plafonnée au "
+                  "stock dispo de la model."]
+        if hors:
+            lignes.append(_jb_note_hors(hors))
+        if inconnues:
+            lignes.append(f"⚠️ {len(inconnues)} action(s) introuvable(s), sans "
+                          "bouton : " + ", ".join(inconnues)
+                          + " (à signaler à un admin).")
+        lignes.append("Le contenu arrive dans ton salon **-content** 👇")
+    lignes.append(_JB_PANNEAU_MARQUE)
+    return "\n".join(lignes)
+
+
+def _jb_panel_probleme(ident, qty) -> str:
+    """Pourquoi le panneau de `ident` ne peut PAS porter de boutons, ou "".
+
+    Un nom hors de [a-z0-9_.-] fait lever discord.py a la construction (le
+    motif des custom_id le refuse), et un custom_id de plus de 100 caracteres
+    fait refuser le message ENTIER par Discord. Dans les deux cas, un panneau
+    qui le DIT vaut mieux qu'un clic qui echoue sans un mot."""
+    if not _JB_NOM_BOUTON.fullmatch(ident):
+        return ("Nom de model illisible dans un bouton Discord (lettres "
+                "minuscules, chiffres, « _ . - ») : renomme-la sur le site.")
+    ids = [f"jbus:qb:{ident}:{qty}"]
+    ids += [f"jbus:a:{ident}:{k}:{qty}" for ks in _JB_BOUTONS_V2 for k in ks]
+    ids += [f"jbus:a:{ident}:{a[0]}:{qty}" for a in _JB_ACTIONS_US]
+    ids += [f"jbus:s:{ident}:{f.cle}:{qty}" for f in _FAMILLES_PANNEAU]
+    plus_long = max(len(i) for i in ids)
+    if plus_long > _JB_CUSTOM_ID_MAX:
+        return (f"Nom trop long pour Discord ({plus_long} caractères sur "
+                f"{_JB_CUSTOM_ID_MAX}) : raccourcis le nom de la model sur le site.")
+    return ""
 
 
 def _jb_panel(cog, ident, qty=3, marche="us", guild=None):
-    """(embed, view) du panneau permanent. `ident` vaut « _ » tant qu'aucune
-    model n'est choisie : on n'affiche alors que la quantite.
-    `marche` (role @Jailbreak FR / US du VA) decide des ACTIONS proposees :
-    le marche FR garde son Reel avec exemple, le marche US a Reel caption.
+    """Le panneau permanent : une LayoutView « Components V2 ».
 
-    Disposition : _JB_PANNEAU_US, puis un lanceur par famille (_jb_disposition).
+    Un bloc (conteneur a accent rouge fonce) : le texte en tete, puis les
+    rangees de boutons de _JB_BOUTONS_V2, puis UN MENU DEROULANT PAR FAMILLE
+    de _FAMILLES_PANNEAU (Brut, Caption, Template, Trash, Flash) -- la
+    disposition de la maquette /demopanneau, validee par le proprietaire.
+    Plus d'embed : il ne rend que la vue.
+
+    `ident` vaut « _ » tant qu'aucune model n'est choisie : le texte invite a
+    en choisir une, et seule la quantite est la. `marche` n'est plus lu (la
+    meme liste pour tout le monde : « Reel caption », pas de Reel brut) ; il
+    reste pour les appelants.
+
+    Tout l'etat (model, quantite) est dans les custom_id : aucune memoire, et
+    les elements repondent encore apres un redemarrage.
     """
+    ui = discord.ui
     ident = (ident or "_").lower()
-    view = discord.ui.View(timeout=None)
-    view.add_item(JBQtyBouton(ident, qty))
-    if ident != "_":
-        # Meme liste pour tout le monde : « Reel caption », pas de Reel brut.
-        _ic = icones_actions(guild)      # lecture seule : rien sur le reseau
-        disposition, hors = _jb_disposition()
-        for sorte, cle, rangee in disposition:
-            if sorte == "famille":
-                # Le lanceur porte l'icone de la premiere action de sa famille.
-                view.add_item(JBFamilleBouton(
-                    ident, cle, qty, row=rangee,
-                    icone=_ic.get(_famille_menu(cle).actions[0])))
+    try:
+        qty = max(1, int(qty))
+    except (TypeError, ValueError):
+        qty = 3
+    vue = ui.LayoutView(timeout=None)
+    boite = ui.Container(accent_colour=discord.Colour.dark_red())
+    vue.add_item(boite)
+    if ident == "_":
+        boite.add_item(ui.TextDisplay(_jb_panel_texte("_", qty)))
+        rangee = ui.ActionRow()
+        rangee.add_item(JBQtyBouton("_", qty))
+        boite.add_item(rangee)
+        return vue
+    probleme = _jb_panel_probleme(ident, qty)
+    if probleme:
+        log.warning("panneau US %r : sans boutons -- %s", ident, probleme)
+        boite.add_item(ui.TextDisplay(
+            f"## 🔓 {_couper_discord(ident.capitalize(), 100)}\n⚠️ {probleme}\n"
+            + _JB_PANNEAU_MARQUE))
+        return vue
+    _ic = icones_actions(guild)          # lecture seule : rien sur le reseau
+    disposition, hors = _jb_disposition()
+    rangees, inconnues = {}, []
+    for sorte, cle, r in disposition:
+        if sorte == "qte":
+            item = JBQtyBouton(ident, qty)
+        elif sorte == "menu":
+            item = JBMenuFamille(ident, cle, qty, icones=_ic)
+            inconnues += item.inconnues
+            if item.vide:
+                # Un menu sans option serait refuse par Discord, et le
+                # panneau ENTIER avec lui : on le retire, en le disant.
+                inconnues.append(f"menu {cle}")
                 continue
+        else:
             entree = _jb_action(cle)
-            view.add_item(JBActionButton(ident, cle, qty,
-                                         label=(entree[1] if entree else None),
-                                         row=rangee, icone=_ic.get(cle)))
-        emb = discord.Embed(
-            title=f"🔓 {ident.capitalize()} — que veux-tu générer ?",
-            description=(
-                f"📦 **Quantité : {qty} média par action** "
-                "_(clique sur le bouton Quantité ci-dessus et tape le nombre)._\n"
-                "La quantité est **plafonnée au stock dispo** de la model.\n"
-                "ℹ️ *Pseudo* et *Name* en donnent toujours 5 (sans quantité).\n"
-                "Les boutons **▸** ouvrent leurs variantes, visibles de toi seul.\n\n"
-                + _jb_note_hors(hors)
-                + "Le contenu arrive dans ton salon **-content** 👇"
-            ),
-            color=discord.Color.dark_red())
-    else:
-        emb = discord.Embed(
-            title="🔓 Choisis une model au-dessus 👆",
-            description=("Clique sur une model dans le menu du dessus : "
-                         "les actions apparaissent ici.\n"
-                         "Le contenu généré part dans ton salon **-content**."),
-            color=discord.Color.dark_red())
-    emb.set_footer(text="panneau-actions-us")
-    return emb, view
+            if entree is None:
+                inconnues.append(cle)
+                log.warning("panneau US : action %r de _JB_BOUTONS_V2 inconnue", cle)
+                continue
+            item = JBActionButton(ident, cle, qty, label=entree[1], row=None,
+                                  icone=_ic.get(cle))
+        rangees.setdefault(r, ui.ActionRow()).add_item(item)
+    boite.add_item(ui.TextDisplay(_jb_panel_texte(ident, qty, hors, inconnues)))
+    for r in sorted(rangees):
+        boite.add_item(rangees[r])
+    return vue
 
 
 # ---------------------------------------------------------------------------
@@ -9203,7 +10106,8 @@ def _jb_panel(cog, ident, qty=3, marche="us", guild=None):
 # (_MODEL_REELLE, _dossier_brutes).
 #
 # Un message A PART, pas des boutons de plus dans _jb_panel : quand il est
-# ne, le panneau comptait 24 composants sur 25 (16 depuis les familles ▸).
+# ne, le panneau comptait 24 composants sur 25 (22 sur 40 depuis le passage
+# au format V2 et aux menus directs). Il RESTE un message classique (embed).
 # Prefixe « jbg: » : discord.py lance TOUS les
 # templates dynamiques qui correspondent, celui-ci ne doit recouper aucun
 # « jbus: ». Titre sans « Jailbreak » ni « menu » : le premier designe le
