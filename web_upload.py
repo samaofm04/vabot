@@ -10647,7 +10647,7 @@ async function identEditRetirerOuvre(){
   z.style.display='flex';
   q.textContent='Lecture\u2026';
   try{
-    var fd=new FormData(); fd.set('identity', identEditCtx.ident);
+    var fd=new FormData(); fd.set('identity', identEditCtx.ident); fd.set('ajax','1');
     var r=await fetch('/identity/apercu',{method:'POST',body:fd,credentials:'same-origin'});
     var j=await r.json();
     var l=(j&&j.emplacements)||[];
@@ -10681,11 +10681,15 @@ async function identEditRetirer(){
   try{
     var fd=new FormData();
     fd.set('identity', identEditCtx.ident);
-    fd.set('confirme', String((n&&n.value)||'').trim().toLowerCase());
+    /* le mot de passe du compte, plus le nom retape : sur « ariiiann__ »
+       le nom retape ne correspondait jamais, et rien ne se retirait */
+    fd.set('password', String((n&&n.value)||''));
+    fd.set('ajax','1');   // un refus 403 revient en JSON, pas en texte brut
     var r=await fetch('/identity/archive',{method:'POST',body:fd,credentials:'same-origin'});
-    var j=await r.json();
+    var j=null; try{ j=await r.json(); }catch(e2){}
     if(!(j&&j.ok)){
-      if(err) err.textContent=(j&&j.error)||('Erreur '+r.status);
+      if(err) err.textContent=(j&&j.error)||('Refusé par le serveur (HTTP '+r.status+')');
+      if(n){ n.value=''; n.focus(); }
       if(go){ go.disabled=false; go.textContent='Retirer'; }
       return;
     }
@@ -15439,8 +15443,9 @@ body.light .btn-partager:hover{background:rgba(147,51,234,.18);color:#6b21a8}
               style="border-color:#4a2a2a;color:#d98a8a"><svg viewBox='0 0 24 24' width='14' height='14' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' style='flex-shrink:0'><path d='M3 6h18'/><path d='M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2'/><path d='M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6'/><path d='M10 11v6M14 11v6'/></svg> Retirer cette identit&eacute;&hellip;</button>
       <div id="ident-edit-danger" style="display:none;flex-direction:column;gap:7px">
         <div id="ident-edit-dangerquoi" class="ie-hint"></div>
-        <input id="ident-edit-dangernom" type="text" autocomplete="off" data-lpignore="true"
-               placeholder="retape le nom pour confirmer"
+        <input id="ident-edit-dangernom" type="password" autocomplete="current-password"
+               placeholder="ton mot de passe admin, pour confirmer"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();identEditRetirer();}"
                style="background:#131316;border:1px solid #4a2a2a;color:#e6e6ea;border-radius:9px;padding:9px;font-size:13px;font-family:inherit;box-sizing:border-box">
         <div class="ie-duo">
           <button type="button" class="ie-btn" onclick="identEditRetirerFerme()">Annuler</button>
@@ -58473,7 +58478,9 @@ def create_app():
             return jsonify({"ok": False, "error": "unauth"}), 401
         import identite_admin as _ia
         ident = (request.form.get("identity") or "").strip().lower()
-        return jsonify(dict(_ia.apercu(ident), ok=True))
+        # Le nom EXACT du dossier (la fiche envoie data-identedit) : normalisé,
+        # « ariiiann__ » devenait « ariiiann », introuvable.
+        return jsonify(dict(_ia.apercu(ident, exact=True), ok=True))
 
     @app.route("/identity/rename", methods=["POST"])
     def identity_rename():
@@ -58511,6 +58518,22 @@ def create_app():
             r["label"] = _v2_label(r.get("identite") or new)
         return jsonify(r)
 
+    def _mot_de_passe_du_compte_ok(mdp: str) -> bool:
+        """Le mot de passe du compte CONNECTÉ, vérifié comme à la connexion.
+
+        Pas _check_web_login : il accepte le mot de passe maître pour
+        n'importe quel pseudo et réécrit le fichier des comptes. Ici, une
+        session ouverte par le mot de passe maître (sans pseudo) se confirme
+        avec lui ; toute autre, avec le mot de passe de SON compte."""
+        import hmac as _hm
+        if not mdp:
+            return False
+        if session.get("legacy_owner"):
+            return hmac_compare_str(_hm, mdp, WEB_PASSWORD)
+        nom = str(session.get("username") or "").strip().lower()
+        fiche = (_load_web_users() or {}).get(nom) or {}
+        return bool(fiche.get("password_hash")) and _verify_password(fiche["password_hash"], mdp)
+
     @app.route("/identity/archive", methods=["POST"])
     def identity_archive():
         """Retire une identité de la circulation. N'efface RIEN.
@@ -58522,25 +58545,35 @@ def create_app():
         Les effacer ici reviendrait à contourner cette règle par la porte de
         derrière.
 
-        Le nom doit être retapé pour confirmer. Un bouton qui retire
-        vingt-quatre dossiers de médias sur un clic mal placé n'est pas un
-        bouton, c'est un piège.
+        Confirmé par le MOT DE PASSE du compte connecté (demande du
+        propriétaire, 26/09/2026). Avant, il fallait retaper le nom : sur
+        « ariiiann__ » le nom retapé ne correspondait jamais (le serveur le
+        cherchait sans ses « _ »), et six clics n'ont rien retiré. Un bouton
+        qui retire vingt-quatre dossiers de médias sur un clic mal placé
+        n'est pas un bouton, c'est un piège : le mot de passe reste exigé,
+        et ses échecs comptent dans l'anti-force brute de la connexion.
         """
         from flask import jsonify
         if not is_auth():
             return jsonify({"ok": False, "error": "unauth"}), 401
+        if not _is_admin():
+            return jsonify({"ok": False, "error": "Action réservée aux administrateurs"}), 403
         import identite_admin as _ia
         import type_identite as _ti
         ident = (request.form.get("identity") or "").strip().lower()
-        confirme = (request.form.get("confirme") or "").strip().lower()
         if _ti.verrouillee(ident):
             return jsonify({"ok": False,
                             "error": f"@{ident} ne se retire pas : elle sert de "
                                      "source au menu US."})
-        if confirme != ident:
-            return jsonify({"ok": False,
-                            "error": "Retape le nom exact pour confirmer."})
-        r = _ia.archiver(ident)
+        attente = _login_blocked()
+        if attente:
+            return jsonify({"ok": False, "error": f"Trop d'essais ratés : réessaie dans "
+                                                  f"{max(1, attente // 60)} min."})
+        if not _mot_de_passe_du_compte_ok(request.form.get("password") or ""):
+            _login_note(False)
+            return jsonify({"ok": False, "error": "Mot de passe incorrect."})
+        _login_note(True)
+        r = _ia.archiver(ident, exact=True)
         if r.get("ok"):
             _invalidate_all_ttl_cache()
         return jsonify(r)

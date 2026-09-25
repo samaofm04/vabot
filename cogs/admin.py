@@ -905,13 +905,27 @@ class Admin(commands.Cog):
     async def deleteidentite(self, interaction: discord.Interaction, name: str):
         if not await self.require_admin(interaction):
             return
-        identity_dir = IDENTITIES_DIR / sanitize_identity_name(name)
+        import identite_admin as _ia
+        # Le nom EXACT d'abord : sanitize_identity_name retire les « _ » de
+        # fin, et « ariiiann__ » devenait « ariiiann », introuvable.
+        cible = _ia.nom_exact(name.strip().lstrip("@"))
+        if not cible or not (IDENTITIES_DIR / cible).is_dir():
+            cible = sanitize_identity_name(name)
+        identity_dir = IDENTITIES_DIR / cible
         if not identity_dir.exists():
             await interaction.response.send_message(f"Identité introuvable.", ephemeral=True)
             return
-        shutil.rmtree(identity_dir)
+        # À la CORBEILLE, comme « Retirer » sur le site : avant, un rmtree
+        # effaçait pour de bon tous les médias de l'identité, contre la règle
+        # du projet (le site n'efface jamais un média). La fiche garde de quoi
+        # revenir en arrière.
+        r = _ia.archiver(cible, exact=True)
+        if not r.get("ok"):
+            await interaction.response.send_message(
+                f"❌ Rien n'a été retiré : {r.get('error') or 'échec'}", ephemeral=True)
+            return
         users = load_json(USERS_FILE, {})
-        target_ident = sanitize_identity_name(name)
+        target_ident = cible
         def _va_id(v):
             if isinstance(v, str):
                 return v
@@ -923,7 +937,9 @@ class Admin(commands.Cog):
             del users[uid]
         save_json(USERS_FILE, users)
         await interaction.response.send_message(
-            f"✅ Identité supprimée. {len(detached)} VA détaché(s).", ephemeral=True
+            f"✅ Identité retirée (dossier dans la corbeille : "
+            f"{Path(r.get('corbeille') or '').name or '?'}). {len(detached)} VA détaché(s).",
+            ephemeral=True
         )
 
     # ---------- REELS (vidéo + caption pair) ----------

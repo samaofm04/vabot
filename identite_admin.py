@@ -182,6 +182,22 @@ def normaliser(brut: str) -> str:
     return re.sub(r"[^a-z0-9]", "", str(brut or "").strip().lower())[:40]
 
 
+def nom_exact(brut: str) -> str:
+    """Le nom d'un dossier EXISTANT, pris tel quel (minuscules), sans le
+    passer par normaliser().
+
+    normaliser() retire « _ » et « - » : c'est juste pour un NOUVEAU nom (cf.
+    ci-dessus), mais faux pour retrouver un dossier deja cree avec ces
+    caracteres. Le 25/09/2026, « Retirer » echouait sur « ariiiann__ »
+    (cherchee sous « ariiiann ») -- et aurait retire « lola2 » a la place de
+    « lola_2 » si les deux avaient existe. Rien qui puisse sortir de
+    data/identities : ni point ni barre.
+    """
+    import re
+    n = str(brut or "").strip().lower()
+    return n if re.fullmatch(r"[a-z0-9_\-]{1,60}", n) else ""
+
+
 def existe(nom: str) -> bool:
     if (IDENTITES / nom).is_dir():
         return True
@@ -293,9 +309,10 @@ def _ou_apparait(nom: str) -> list:
     return trouves
 
 
-def apercu(nom: str) -> dict:
-    """Ce qu'une action sur ce nom toucherait. Ne modifie rien."""
-    nom = normaliser(nom)
+def apercu(nom: str, exact: bool = False) -> dict:
+    """Ce qu'une action sur ce nom toucherait. Ne modifie rien.
+    `exact` : le nom d'un dossier existant, pris tel quel (cf. nom_exact)."""
+    nom = nom_exact(nom) if exact else normaliser(nom)
     emplacements = _ou_apparait(nom)
     vas = comptes = 0
     d = _charger("jailbreak.json")
@@ -553,7 +570,7 @@ def renommer(ancien: str, nouveau: str, ancien_exact: bool = False) -> dict:
 # Retirer (jamais effacer)
 # ==============================================================================
 
-def archiver(nom: str) -> dict:
+def archiver(nom: str, exact: bool = False) -> dict:
     """Sort une identite de la circulation, sans rien detruire.
 
     Le dossier part dans `data/_corbeille_identites/<nom>-<horodatage>/`, et
@@ -566,8 +583,10 @@ def archiver(nom: str) -> dict:
     La fiche est ecrite AVANT le moindre deplacement, et par safe_json : c'est
     le seul exemplaire de ce qu'on retire, un JSON tronque par une coupure
     rendrait le retour arriere impossible.
+
+    `exact` : le nom d'un dossier existant, pris tel quel (cf. nom_exact).
     """
-    nom = normaliser(nom)
+    nom = nom_exact(nom) if exact else normaliser(nom)
     if not nom:
         return {"ok": False, "error": "Nom invalide"}
     if not existe(nom):

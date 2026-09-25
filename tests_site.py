@@ -6478,10 +6478,11 @@ try:
         check("retirer : l apercu annonce ce qui est encore VIVANT",
               "vas" in _iaR.apercu("jessye") and "comptes" in _iaR.apercu("jessye"))
 
-        # Les routes : verrou, confirmation retapee.
+        # Les routes : verrou, confirmation par le MOT DE PASSE du compte.
         _aR = _wR.create_app(); _aR.testing = True
         _svR = _wR._load_web_users
-        _wR._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"}}
+        _hR = _wR._hash_password("secret-boss")
+        _wR._load_web_users = lambda: {"boss": {"role": "owner", "password_hash": _hR}}
         try:
             _cR = _aR.test_client()
             with _cR.session_transaction() as _sR:
@@ -6491,17 +6492,38 @@ try:
             check("routes : jessye ne se renomme pas",
                   _j1.get("ok") is not True and "menu US" in str(_j1.get("error")))
             _j2 = (_cR.post("/identity/archive",
-                            data={"identity": "jessye", "confirme": "jessye"}).get_json() or {})
+                            data={"identity": "jessye", "password": "secret-boss"}).get_json() or {})
             check("routes : jessye ne se retire pas",
                   _j2.get("ok") is not True and "menu US" in str(_j2.get("error")))
             _j3 = (_cR.post("/identity/archive",
-                            data={"identity": "julia", "confirme": "pas le bon"}).get_json() or {})
-            check("routes : sans le nom retape, on ne retire rien",
-                  _j3.get("ok") is not True and "Retape" in str(_j3.get("error")),
+                            data={"identity": "julia", "password": "pas le bon"}).get_json() or {})
+            check("routes : sans le bon mot de passe du compte, on ne retire rien",
+                  _j3.get("ok") is not True and "Mot de passe" in str(_j3.get("error")),
                   str(_j3)[:90])
             _j4 = (_cR.post("/identity/apercu", data={"identity": "julia"}).get_json() or {})
             check("routes : l apercu repond sans rien modifier",
                   _j4.get("ok") is True and "impossible" in _j4)
+            # 26/09 : « ariiiann__ » ne se retirait pas (cherchee sans ses
+            # « _ »), et une voisine au nom sans tiret aurait ete retiree.
+            _SOUL, _VOIS = "tst_ret__", "tstret"
+            for _nn in (_SOUL, _VOIS):
+                (_iaR.IDENTITES / _nn / "reels").mkdir(parents=True, exist_ok=True)
+                (_iaR.IDENTITES / _nn / "reels" / "v.mp4").write_bytes(b"x")
+            try:
+                _j5 = (_cR.post("/identity/apercu", data={"identity": _SOUL}).get_json() or {})
+                check("routes : l apercu vise le dossier EXACT (souligne compris)",
+                      _j5.get("identite") == _SOUL and _j5.get("existe") is True, str(_j5)[:90])
+                _j6 = (_cR.post("/identity/archive",
+                                data={"identity": _SOUL, "password": "secret-boss"}).get_json() or {})
+                check("routes : avec le mot de passe, une identite a « _ » se retire (corbeille)",
+                      _j6.get("ok") is True and not (_iaR.IDENTITES / _SOUL).exists()
+                      and _plR.Path(_j6.get("corbeille", "/nulle-part"), "media", "reels", "v.mp4").exists(),
+                      str(_j6)[:120])
+                check("routes : la voisine au nom sans « _ » n est pas touchee",
+                      (_iaR.IDENTITES / _VOIS / "reels" / "v.mp4").exists())
+            finally:
+                for _nn in (_SOUL, _VOIS):
+                    _shR.rmtree(_iaR.IDENTITES / _nn, ignore_errors=True)
         finally:
             _wR._load_web_users = _svR
     finally:
@@ -6524,6 +6546,8 @@ try:
           "identEditCtx.rename = !b.getAttribute('data-typelock')" in _srcA)
     check("interface : le retrait se fait en deux temps",
           "identEditRetirerOuvre" in _srcA and "ident-edit-dangernom" in _srcA)
+    check("interface : la confirmation se fait par le mot de passe (champ masque)",
+          'id="ident-edit-dangernom" type="password"' in _srcA and "fd.set('password'" in _srcA)
     check("interface : le recapitulatif est demande au serveur, pas devine",
           "/identity/apercu" in _srcA)
     check("interface : ce que le renommage n a pas suivi remonte a l ecran",
