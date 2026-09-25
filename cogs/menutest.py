@@ -238,9 +238,173 @@ def _embed(marche: str, nb: int) -> discord.Embed:
     return emb
 
 
+# ---------------------------------------------------------------------------
+# /demopanneau : MAQUETTE CLIQUABLE du panneau US « B » (25/09/2026).
+#
+# Le proprietaire a choisi sur maquette un panneau ou « Template » ouvre QUATRE
+# menus deroulants (Template, Brut, Trash, Flash), puis a demande a le VOIR sur
+# Discord avant qu'on refasse le vrai : « fais une mini commande exemple, meme
+# si elle marche pas, juste pour voir ». D'ou cette demo : la navigation
+# marche, les menus s'ouvrent, mais RIEN n'est genere ni envoye.
+#
+# Message EPHEMERE et boutons sans custom_id fixe : rien de persistant, rien a
+# enregistrer au demarrage. Aucun DynamicItem non plus -- une vue ephemere qui
+# expire en porte un, et discord.py efface alors le motif enregistre pour les
+# vrais panneaux.
+#
+# Les libelles et les familles sont LUS dans cogs.user (_jb_action,
+# _FAMILLES_MENU, _EXPLICATIONS) : la maquette montre les vrais noms, et Trash
+# y prend le logo de marques_montage comme partout.
+
+#: Le menu « Brut » de la maquette : les trois boutons de brute du panneau.
+_DEMO_BRUT = ("brute", "brutbanger", "brutchoix")
+_DEMO_BRUT_EXPLI = {
+    "brute": "une vidéo brute, sans rien dessus",
+    "brutbanger": "une de tes brutes ⭐",
+    "brutchoix": "tu choisis toi-même la brute à utiliser",
+}
+
+
+def _demo_libelle(cle: str) -> str:
+    try:
+        from cogs.user import _jb_action
+        e = _jb_action(cle)
+        if e:
+            return e[1]
+    except Exception:                                        # noqa: BLE001
+        pass
+    return cle
+
+
+def _demo_familles() -> dict:
+    """{cle: (emoji, nom, (actions...))} lu dans cogs.user, plus « brut »."""
+    out = {}
+    try:
+        from cogs.user import _FAMILLES_MENU
+        for f in _FAMILLES_MENU:
+            out[f.cle] = (f.emoji, f.nom, tuple(f.actions))
+    except Exception:                                        # noqa: BLE001
+        pass
+    out["brut"] = ("🎥", "Brut", _DEMO_BRUT)
+    return out
+
+
+def _demo_expli(cle: str) -> str:
+    if cle in _DEMO_BRUT_EXPLI:
+        return _DEMO_BRUT_EXPLI[cle]
+    try:
+        from cogs.user import _EXPLICATIONS
+        return _EXPLICATIONS.get(cle, "")
+    except Exception:                                        # noqa: BLE001
+        return ""
+
+
+async def _demo_recu(interaction: discord.Interaction, cle: str, vue):
+    """Ce qu'un vrai clic aurait fait, dit au lieu d'etre fait."""
+    lib = _demo_libelle(cle)
+    await interaction.response.edit_message(view=vue)   # remet les menus a zero
+    await interaction.followup.send(
+        "🧪 **Démo** — ici le VA recevrait **%s** × %d dans son salon "
+        "-content.\n_%s_" % (lib, vue.qty, _demo_expli(cle) or "—"),
+        ephemeral=True)
+
+
+class _DemoBouton(discord.ui.Button):
+    def __init__(self, cle, label, row, style=discord.ButtonStyle.primary):
+        super().__init__(label=label[:80], style=style, row=row)
+        self.cle = cle
+
+    async def callback(self, interaction: discord.Interaction):
+        vue = self.view
+        if self.cle == "_qty":
+            vue.qty = {1: 3, 3: 5, 5: 10}.get(vue.qty, 1)
+            vue.construire()
+            await interaction.response.edit_message(view=vue)
+        elif self.cle.startswith("_mode:"):
+            vue.mode = self.cle.split(":", 1)[1]
+            vue.construire()
+            await interaction.response.edit_message(view=vue)
+        else:
+            await _demo_recu(interaction, self.cle, vue)
+
+
+class _DemoSelect(discord.ui.Select):
+    def __init__(self, fam, emoji, nom, actions, row):
+        opts = []
+        for a in actions:
+            opts.append(discord.SelectOption(
+                label=_demo_libelle(a)[:100], value=a,
+                description=(_demo_expli(a) or None) and _demo_expli(a)[:100]))
+        super().__init__(placeholder=f"{emoji} {nom}…", options=opts,
+                         min_values=1, max_values=1, row=row)
+
+    async def callback(self, interaction: discord.Interaction):
+        vue = self.view
+        vue.construire()          # la liste revient sur son intitule
+        await _demo_recu(interaction, self.values[0], vue)
+
+
+class DemoPanneauB(discord.ui.View):
+    """Le panneau US version B, en maquette. `mode` : accueil, template,
+    caption."""
+
+    def __init__(self, ident="model"):
+        super().__init__(timeout=900)
+        self.ident = ident
+        self.qty = 3
+        self.mode = "accueil"
+        self.construire()
+
+    def construire(self):
+        self.clear_items()
+        fam = _demo_familles()
+        quantite = _DemoBouton("_qty", f"📦 Quantité : {self.qty}", 0,
+                               discord.ButtonStyle.secondary)
+        if self.mode == "accueil":
+            self.add_item(quantite)
+            for cle in ("name", "pseudo", "pp", "bio"):
+                self.add_item(_DemoBouton(cle, _demo_libelle(cle), 0))
+            self.add_item(_DemoBouton("trend", _demo_libelle("trend"), 1,
+                                      discord.ButtonStyle.success))
+            for cle in ("story", "storycta", "post"):
+                self.add_item(_DemoBouton(cle, _demo_libelle(cle), 1))
+            self.add_item(_DemoBouton("_mode:caption", "💬 Caption ▸", 1))
+            self.add_item(_DemoBouton("_mode:template", "🎞️ Template ▸", 2))
+            return
+        self.add_item(_DemoBouton("_mode:accueil", "◂ Retour", 0,
+                                  discord.ButtonStyle.secondary))
+        self.add_item(quantite)
+        ordre = (("caption",) if self.mode == "caption"
+                 else ("template", "brut", "trash", "flash"))
+        for i, cle in enumerate(ordre, start=1):
+            if cle in fam:
+                e, nom, actions = fam[cle]
+                self.add_item(_DemoSelect(cle, e, nom, actions, i))
+
+
+def _demo_embed(ident: str) -> discord.Embed:
+    return discord.Embed(
+        title=f"🔓 {ident.capitalize()} — que veux-tu générer ?",
+        description=(
+            "🧪 **MAQUETTE du panneau « B »** — la navigation marche, les menus "
+            "s'ouvrent, mais **rien n'est généré ni envoyé**.\n\n"
+            "Clique **🎞️ Template ▸** : quatre menus déroulants (Template, "
+            "Brut, Trash, Flash). **◂ Retour** revient au panneau."),
+        color=discord.Color.dark_red())
+
+
 class MenuTest(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
+    @app_commands.command(
+        name="demopanneau",
+        description="[DÉMO] Aperçu du panneau US avec menus déroulants — rien n'est envoyé",
+    )
+    async def demopanneau(self, interaction: discord.Interaction):
+        await interaction.response.send_message(
+            embed=_demo_embed("model"), view=DemoPanneauB("model"),
+            ephemeral=True)
 
     async def _poster(self, interaction: discord.Interaction, marche: str):
         if interaction.guild is None:
