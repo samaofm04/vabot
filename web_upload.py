@@ -6856,7 +6856,7 @@ function nxMRealCap(c){
 }
 // ── Réglages texte façon CapCut (taille/couleur/gras/italique/souligné/casse/alignement) ──
 function nxMStyleInit(){
-  nxMState.style={size:44,color:'#ffffff',align:'center','case':'none',bold:true,italic:false,underline:false,box:false,boxColor:'#000000',effect:'none'};
+  nxMState.style={size:44,color:'#ffffff',align:'center','case':'none',bold:false,italic:false,underline:false,box:false,boxColor:'#000000',effect:'none'};
   nxMState.rimg={}; nxMState.rpend={}; nxMState.lastImg={}; nxMState.rfail={};
   var sz=document.getElementById('nx-m-size'); if(sz) sz.value=44;
   var sv=document.getElementById('nx-m-size-val'); if(sv) sv.textContent='44';
@@ -26637,8 +26637,11 @@ def _montages_a_verifier() -> list:
 #: Le style par defaut de l'editeur (nxMStyleInit) : un brouillon ecrit par
 #: « Valider tel quel » doit avoir EXACTEMENT la forme d'un brouillon
 #: enregistre depuis l'editeur, sinon il se rechargerait de travers.
+#: SANS GRAS depuis le 27/09/2026 : les templates sont en Classique Instagram
+#: a bord noir, « pas de gras » (demande du proprietaire). Meme reglage que
+#: nxMStyleInit, qu'il faut changer avec.
 _STYLE_EDITEUR = {"size": 44, "color": "#ffffff", "align": "center", "case": "none",
-                  "bold": True, "italic": False, "underline": False, "box": False,
+                  "bold": False, "italic": False, "underline": False, "box": False,
                   "boxColor": "#000000", "effect": "none"}
 
 
@@ -44983,14 +44986,17 @@ TEMPLATES_POLICE_SAUVEGARDE = DATA_DIR / "templates_police_avant.json"
 
 
 def _templates_police(mode: str = "essai") -> dict:
-    """Met la police de base (TEMPLATE_POLICE_DEFAUT) sur TOUS les templates.
+    """Met la police de base (TEMPLATE_POLICE_DEFAUT), SANS GRAS, sur TOUS les
+    templates -- tous types confondus (template, etoile, Flash, Trash : ce sont
+    des marques sur les memes fichiers de templates/). Les captions et les
+    reels deja montes du vault n'en font pas partie.
 
     mode « essai » : ne fait que compter. « appliquer » : ecrit. « annuler » :
     remet la police d'avant, d'apres la sauvegarde, la ou elle n'a pas ete
     changee depuis a la main.
 
-    Seule la cle « font » du brouillon change : la coupe, les captions, le
-    style, l'approbation VA restent tels quels. Pas par /noctus/montage_save,
+    Seules la cle « font » et le gras du style changent : la coupe, les
+    captions, la taille, l'italique, l'approbation VA restent tels quels. Pas par /noctus/montage_save,
     qui reecrit le brouillon entier et note une « validation » de la coupe
     pour l'analyse -- 328 fausses validations auraient fausse ses mesures.
     Rien n'est ecarte sans le dire : un brouillon illisible est nomme.
@@ -45007,6 +45013,8 @@ def _templates_police(mode: str = "essai") -> dict:
                                          + TEMPLATES_POLICE_SAUVEGARDE.name)
     sauve = sauve or {"police": cible, "fichiers": {}}
     anciennes = sauve.setdefault("fichiers", {})
+    # {fichier: True} : ceux qui etaient en gras avant le passage.
+    gras_avant = sauve.setdefault("gras", {})
     brouillons = sorted(IDENTITIES_DIR.glob("*/templates/*.montage.json"))
     res["total"] = len(brouillons)
     lus = []
@@ -45022,33 +45030,64 @@ def _templates_police(mode: str = "essai") -> dict:
             continue
         police = str(d.get("font") or "(aucune)")
         res["par_police"][police] = res["par_police"].get(police, 0) + 1
-        lus.append((bp, rel, d, police))
+        # Le style est une CHAINE JSON (celle de l'editeur), parfois un dict.
+        st = d.get("style")
+        try:
+            st = json.loads(st) if isinstance(st, str) else (st if isinstance(st, dict) else {})
+        except Exception:
+            st = None
+            res.setdefault("styles_illisibles", []).append(rel)
+        gras = bool(st and st.get("bold"))
+        if gras:
+            res["en_gras"] = res.get("en_gras", 0) + 1
+        lus.append((bp, rel, d, police, st, gras))
+
+    def _poser_style(d, st):
+        # meme forme qu'avant : chaine compacte (JSON.stringify) ou dict
+        d["style"] = (json.dumps(st, ensure_ascii=False, separators=(",", ":"))
+                      if isinstance(d.get("style"), str) or d.get("style") is None else st)
+
     if mode == "annuler":
-        for bp, rel, d, police in lus:
-            if rel in anciennes and police == sauve.get("police"):
+        for bp, rel, d, police, st, gras in lus:
+            remet_police = rel in anciennes and police == sauve.get("police")
+            # le gras n'est remis que si personne ne l'a remis entre-temps
+            remet_gras = rel in gras_avant and st is not None and not gras
+            if not (remet_police or remet_gras):
+                continue
+            if remet_police:
                 d["font"] = anciennes[rel]
-                if safe_json.write(bp, d, indent=None):
-                    res["restaures"] += 1
-                    anciennes.pop(rel, None)
-                else:
-                    res["echecs"].append(rel)
+            if remet_gras:
+                st["bold"] = True
+                _poser_style(d, st)
+            if safe_json.write(bp, d, indent=None):
+                res["restaures"] += 1
+                anciennes.pop(rel, None)
+                gras_avant.pop(rel, None)
+            else:
+                res["echecs"].append(rel)
         if not safe_json.write(TEMPLATES_POLICE_SAUVEGARDE, sauve):
             res["echecs"].append(TEMPLATES_POLICE_SAUVEGARDE.name)
     else:
-        a_changer = [x for x in lus if x[3] != cible]
+        a_changer = [x for x in lus if x[3] != cible or x[5]]
         res["deja"] = len(lus) - len(a_changer)
         res["a_changer"] = len(a_changer)
         if mode == "appliquer" and a_changer:
-            for bp, rel, d, police in a_changer:
+            for bp, rel, d, police, st, gras in a_changer:
                 # la PREMIERE police connue reste : une deuxieme passe ne doit
                 # pas ecraser l'origine par la police de la premiere.
-                anciennes.setdefault(rel, police if police != "(aucune)" else "")
+                if police != cible:
+                    anciennes.setdefault(rel, police if police != "(aucune)" else "")
+                if gras:
+                    gras_avant[rel] = True
             sauve["police"] = cible
             if not safe_json.write(TEMPLATES_POLICE_SAUVEGARDE, sauve):
                 return dict(res, ok=False, error="sauvegarde des polices impossible : "
                                                  "rien n'a ete change")
-            for bp, rel, d, police in a_changer:
+            for bp, rel, d, police, st, gras in a_changer:
                 d["font"] = cible
+                if gras:
+                    st["bold"] = False
+                    _poser_style(d, st)
                 if safe_json.write(bp, d, indent=None):
                     res["changes"] += 1
                 else:
