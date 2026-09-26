@@ -44,6 +44,14 @@ Jessye sur GMS qui sont comptés, chaque personne c'est un truc ». Donc :
   perte = revenu net de la plage − fixe au prorata − primes par quinzaine
   (paliers de subs non cumulables, subs de MyPuls quinzaine par quinzaine).
   Euros convertis au taux BCE. Rien de tout ça sur Discord.
+  Le fixe est payé PAR LIGNE : « chaque ligne c'est une paye (c'est un
+  iPhone) » — une ligne = un lien GetMySocial de la personne qui a fait au
+  moins un clic sur la tranche (clics GMS lien par lien, en arrière-plan,
+  gardés dans data/infloww_liens_lignes.json, avec la personne à qui était
+  le lien ; tranche close FIGÉE ; lignes « forcées » par le propriétaire
+  pour un passé faussé ; rien avant la création du lien GMS). Les VA SPAM sont payés AU SUB
+  (type « au_sub » : 0,40 $ jusqu'à 200 subs par quinzaine, 0,50 $ au-delà,
+  au marginal), sans fixe.
 
 Deux sorties : la page /infloww/liens, sans JavaScript (clé ?k= pour les VA
 sans compte), et des messages Discord de Bixby dans « inflow-resultat ».
@@ -199,7 +207,9 @@ def _aujourdhui() -> str:
 # bord : la liste est reprise telle quelle pendant GMS_FRAIS_S.
 GMS_COPIE = DATA_DIR / "infloww_liens_gms.json"
 GMS_FRAIS_S = 600
-_CHAMPS_GMS = ("id", "shortcode", "display_name", "title", "url")
+# created_at / createdAt : gardés s'ils viennent un jour (la liste v3 du 26/09
+# n'en a pas) — la date de création d'un lien GMS borne ses lignes (cree_gms)
+_CHAMPS_GMS = ("id", "shortcode", "display_name", "title", "url", "created_at", "createdAt")
 
 
 def _copie_gms() -> Dict[str, Any]:
@@ -245,6 +255,44 @@ def liens_gms(maintenant: Optional[float] = None) -> Dict[str, Any]:
 def nom_gms(l: Mapping[str, Any]) -> str:
     # l'ordre de podium_discord.entites : le même lien porte le même nom partout
     return str(l.get("display_name") or l.get("title") or l.get("shortcode") or "")
+
+
+# « lnk_6a0e5346fba948185cdbdfaf » : un ObjectId, dont les 8 premiers chiffres
+# hexadécimaux sont les secondes de sa création (0x6a0e5346 = 21/05/2026, le
+# jour de l'espace tm_6a0e4739…)
+_LNK_OBJECTID = re.compile(r"lnk_([0-9a-f]{8})[0-9a-f]{16}")
+_TS_MIN = 1577836800                  # 01/01/2020 : avant, ce n'est pas une date de lien
+
+
+def cree_gms(l: Any, maintenant: Optional[float] = None) -> str:
+    """Le jour (AAAA-MM-JJ, heure de Paris) où un lien GMS a été créé : son
+    champ de création s'il en a un, sinon l'horodatage de son identifiant.
+    "" si on ne sait pas (identifiant d'une autre forme) : rien n'est alors
+    borné par cette date. `l` : le lien, ou son seul identifiant."""
+    maintenant = time.time() if maintenant is None else maintenant
+    ts: Optional[float] = None
+    lid = str(l.get("id") or "") if isinstance(l, Mapping) else str(l or "")
+    if isinstance(l, Mapping):
+        for champ in ("created_at", "createdAt"):
+            v = l.get(champ)
+            if isinstance(v, bool) or v in (None, ""):
+                continue
+            try:
+                if isinstance(v, (int, float)):
+                    ts = float(v) / (1000.0 if float(v) > 1e11 else 1.0)
+                else:
+                    d = dt.datetime.fromisoformat(str(v).strip().replace("Z", "+00:00"))
+                    ts = (d if d.tzinfo else d.replace(tzinfo=dt.timezone.utc)).timestamp()
+            except (ValueError, OverflowError, OSError):
+                ts = None
+            if ts is not None:
+                break
+    if ts is None:
+        m = _LNK_OBJECTID.fullmatch(lid)
+        ts = float(int(m.group(1), 16)) if m else None
+    if ts is None or not _TS_MIN <= ts <= maintenant + 86400:
+        return ""
+    return _jour_de(ts)
 
 
 _URL_OF = re.compile(r"^https?://(?:www\.)?onlyfans\.com/([^/?#\s]+)/c(\d+)/?(?:[?#]\S*)?$", re.I)
@@ -1215,14 +1263,32 @@ def tableau_periode(du: str, au: str, us: str = "page") -> Dict[str, Any]:
 # Rien de tout ça ne part sur Discord : le démon passe par tableau(), jamais
 # par avec_paie(), et messages_discord ne lit que ses propres colonnes.
 PAIE_FICHIER = DATA_DIR / "infloww_liens_paie.json"
-TYPES_PAIE = ("aucun", "fixe", "fixe_primes")
-LIB_TYPES = {"aucun": "Aucun", "fixe": "Fixe", "fixe_primes": "Fixe + primes"}
+# « au_sub » (le propriétaire, 26/09) : « les VA SPAM c'est des paiements au
+# sub : 0,4, et au-delà de 200 subs sur la quinzaine ça passe à 0,5 ». Pas de
+# fixe. Au MARGINAL : 250 subs = 200 × 0,40 + 50 × 0,50 = 105 $ (et non
+# 250 × 0,50). Rien n'est choisi à la place du propriétaire : une ligne SPAM
+# non réglée n'est pas mise « au sub » d'office, le formulaire n'en porte que
+# les valeurs par défaut.
+TYPES_PAIE = ("aucun", "fixe", "fixe_primes", "au_sub")
+LIB_TYPES = {"aucun": "Aucun", "fixe": "Fixe", "fixe_primes": "Fixe + primes", "au_sub": "Au sub"}
+TYPES_PAYES = ("fixe", "fixe_primes", "au_sub")     # ceux qui coûtent : un gain se calcule
+TYPES_FIXE = ("fixe", "fixe_primes")                # ceux qui ont un fixe, payé par ligne active
 DEVISES = ("USD", "EUR")
 FREQUENCES = ("quinzaine", "mois")
 # ce que le formulaire propose pour une personne pas encore réglée : la grille
 PAIE_DEFAUT: Dict[str, Any] = {"type": "fixe_primes", "montant": 75.0, "devise": "USD",
-                               "frequence": "quinzaine", "depuis": ""}
+                               "frequence": "quinzaine", "depuis": "",
+                               "taux1": 0.40, "seuil": 200, "taux2": 0.50, "lignes": None}
 MONTANT_MAX = 20000.0            # par quinzaine ou par mois : au-delà, une faute de frappe
+TAUX_SUB_MAX = 100.0             # $ par sub : au-delà, une faute de frappe
+SEUIL_SUB_MAX = 100000           # subs par quinzaine
+LIGNES_MAX = 50                  # « lignes payées » saisies à la main
+# « lignes forcées » : le nombre de lignes d'une quinzaine (ou d'un mois)
+# imposé par le propriétaire, même quand GetMySocial l'a compté — pour un
+# passé faussé avant que le propriétaire de chaque lien soit noté (BO7 sur le
+# 01/09 → 15/09 : « ( BO7 ) 3 » et « 4 » renommés le 26/09, relevés ensuite
+# au nom de LaBoule). Par tranche ENTIÈRE, au plus FORCES_MAX.
+FORCES_MAX = 240
 PAIE_PERSONNES_MAX = 500
 # (plancher de subs de la quinzaine, prime en $), du plus haut au plus bas
 PALIERS_PRIMES: Tuple[Tuple[int, float], ...] = (
@@ -1273,6 +1339,40 @@ BCE_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
 BCE_FICHIER = DATA_DIR / "infloww_liens_bce.json"
 BCE_REESSAI_S = 1800              # un échec n'est pas retenté à chaque affichage
 _VERROU_BCE = threading.Lock()
+
+# Les LIGNES ACTIVES (le propriétaire, 26/09) : « quand un VA a 2 liens et
+# qu'ils font des clics, il prend 2 payes de base : chaque ligne c'est une
+# paye (c'est un iPhone) ». BO7 a quatre liens GMS qui visent tous c85 :
+# quatre iPhones, quatre fixes. Une ligne est ACTIVE sur une tranche du fixe
+# (quinzaine ou mois, partie incluse dans la plage) si son lien GMS y a fait
+# au moins un clic, tous pays. UN appel analytics_for_link par lien et par
+# tranche, sur le quota GetMySocial serré et partagé (épuisé le 26/09 au petit
+# matin) : cache disque par (tranche, lien), tranche close définitive, tranche
+# en cours relue au plus une fois par jour, budget d'appels par jour, calcul
+# en fil de fond — la page n'attend pas. Tant qu'un compte manque : les
+# « lignes payées » saisies à la main s'il y en a, sinon « — ».
+#
+# À QUI était un lien sur une tranche (relecture du 26/09) : les lignes d'une
+# quinzaine close se recalculaient avec la liste GMS du jour. « ( BO7 ) 3 » et
+# « ( BO7 ) 4 », renommés « Laboule ( X ) » et « LaBoule ( Phone ) » le 26/09,
+# retiraient deux payes à BO7 sur le 01/09 → 15/09 et en donnaient une à X,
+# sur une quinzaine antérieure à son lien. Donc : chaque relevé note la
+# personne à qui était le lien (« qui ») ; une tranche close entièrement
+# relevée est FIGÉE ({personne: liens, actif ou non}) et relue telle quelle ;
+# un lien qui a changé de personne ou disparu depuis est dit sous la ligne.
+# Et un lien créé après la fin d'une tranche n'en est pas une ligne (aucun
+# appel) : avant le premier lien GMS d'une personne, « pas encore de lien
+# GetMySocial » — les liens Noum datent du 21/05, leurs liens Infloww du
+# 02/04 ; la vue « depuis toujours » payait avril à 0 ligne.
+LIGNES_FICHIER = DATA_DIR / "infloww_liens_lignes.json"
+LIGNES_APPELS_JOUR = 120          # vérifications des zéros comprises
+LIGNES_GARDE_S = 45 * 86400       # un morceau de période plus servi depuis : élagué
+# Faux dans les tests : le relevé se fait sur place, sans fil
+LIGNES_EN_FOND = True
+_VERROU_LG = threading.Lock()     # un relevé à la fois
+_VERROU_LG_F = threading.Lock()   # les écritures du fichier (relevé et « vu » de la page)
+_VERROU_LG_LANCE = threading.Lock()
+_FIL_LG: Dict[str, Any] = {"fil": None}
 
 
 def palier(subs: Any) -> Tuple[float, str]:
@@ -1330,46 +1430,115 @@ def cout_fixe(cfg: Mapping[str, Any], a: dt.date, b: dt.date) -> Tuple[float, Li
     return sum(m * t["jours"] / t["jours_periode"] for t in tr), tr
 
 
+def _milliemes(v: Any) -> int:
+    return int(round(float(v or 0) * 1000))
+
+
+def cout_au_sub(cfg: Mapping[str, Any], subs: Any) -> Tuple[float, int, int]:
+    """(coût dans la devise du réglage, subs au premier prix, subs au second)
+    pour les subs d'UNE quinzaine (ou de sa partie incluse : le seuil reste
+    celui de la quinzaine entière). Au MARGINAL : avec 0,40 jusqu'à 200 puis
+    0,50, 250 subs = 200 × 0,40 + 50 × 0,50 = 105 ; 201 subs = 80,50. Compté
+    en millièmes : 200 × 0,4 ne donne pas 80,000000001."""
+    n = max(0, _entier(subs) or 0)
+    seuil = max(0, _entier(cfg.get("seuil")) or 0)
+    bas, haut = min(n, seuil), max(0, n - seuil)
+    return (bas * _milliemes(cfg.get("taux1")) + haut * _milliemes(cfg.get("taux2"))) / 1000.0, bas, haut
+
+
 # ─── le paiement : les réglages ──────────────────────────────────────────
-_MONTANT_TXT = re.compile(r"\d{1,6}(?:\.\d{0,2})?")
-
-
-def _montant(v: Any) -> Optional[float]:
-    """Un montant >= 0 et <= MONTANT_MAX, deux décimales au plus ; « 75,5 »
+def _decimal(v: Any, maxi: float, decimales: int) -> Optional[float]:
+    """Un nombre >= 0 et <= maxi, `decimales` décimales au plus ; « 75,5 »
     comme « 75.50 ». Autre chose : None."""
     if isinstance(v, bool) or v is None:
         return None
     if isinstance(v, (int, float)):
         f = float(v)
     else:
-        s = (str(v).strip().replace("\u202f", "").replace("\u00a0", "").replace(" ", "")
+        s = (str(v).strip().replace(" ", "").replace(" ", "").replace(" ", "")
              .replace(",", "."))
-        if not _MONTANT_TXT.fullmatch(s):
+        if not re.fullmatch(r"\d{1,6}(?:\.\d{0,%d})?" % decimales, s):
             return None
         f = float(s)
-    if not math.isfinite(f) or f < 0 or f > MONTANT_MAX:
+    if not math.isfinite(f) or f < 0 or f > maxi:
         return None
-    return round(f, 2)
+    return round(f, decimales)
+
+
+def _montant(v: Any) -> Optional[float]:
+    """Un montant >= 0 et <= MONTANT_MAX, deux décimales au plus."""
+    return _decimal(v, MONTANT_MAX, 2)
+
+
+def _entier_borne(v: Any, mini: int, maxi: int) -> Optional[int]:
+    """Un entier de mini à maxi (« 200 », 200, 200.0) ; « 2,5 », « 1e3 » ou
+    autre chose : None."""
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, int):
+        n = v
+    elif isinstance(v, float):
+        if not math.isfinite(v) or not v.is_integer():
+            return None
+        n = int(v)
+    else:
+        s = str(v).strip().replace(" ", "").replace(" ", "").replace(" ", "")
+        if not re.fullmatch(r"\d{1,7}", s):
+            return None
+        n = int(s)
+    return n if mini <= n <= maxi else None
 
 
 def valider_paie(r: Any, aujourdhui: str = "") -> Tuple[Optional[Dict[str, Any]], str]:
     """Un réglage, du formulaire ou du fichier : (réglage propre, "") ou
-    (None, ce qui ne va pas)."""
+    (None, ce qui ne va pas). Seuls les champs du type choisi comptent : le
+    formulaire envoie tout (fixe comme au sub), le réglage ne garde que les
+    siens — un prix au sub vide n'empêche pas d'enregistrer un fixe."""
     if not isinstance(r, Mapping):
         return None, "réglage illisible"
     typ = str(r.get("type") or "").strip()
     if typ not in TYPES_PAIE:
-        return None, "type inconnu (Aucun, Fixe ou Fixe + primes)"
-    m = _montant(r.get("montant"))
-    if m is None:
-        return None, (f"montant invalide : un nombre de 0 à {_nb(MONTANT_MAX)}, "
-                      "deux décimales au plus")
+        return None, "type inconnu (Aucun, Fixe, Fixe + primes ou Au sub)"
+    sub: Dict[str, Any] = {}
+    m: Optional[float] = None
+    if typ == "au_sub":
+        for champ, quoi in (("taux1", "prix par sub jusqu'au seuil"), ("taux2", "prix par sub au-delà du seuil")):
+            sub[champ] = _decimal(r.get(champ), TAUX_SUB_MAX, 3)
+            if sub[champ] is None:
+                return None, (f"{quoi} invalide : un nombre de 0 à {_nb(TAUX_SUB_MAX)}, "
+                              "trois décimales au plus")
+        sub["seuil"] = _entier_borne(r.get("seuil"), 0, SEUIL_SUB_MAX)
+        if sub["seuil"] is None:
+            return None, f"seuil invalide : un nombre entier de subs, de 0 à {_nb(SEUIL_SUB_MAX)}"
+    else:
+        m = _montant(r.get("montant"))
+        if m is None:
+            return None, (f"montant invalide : un nombre de 0 à {_nb(MONTANT_MAX)}, "
+                          "deux décimales au plus")
     devise = str(r.get("devise") or "").strip().upper()
     if devise not in DEVISES:
         return None, "devise inconnue (USD ou EUR)"
     freq = str(r.get("frequence") or "").strip().lower()
-    if freq not in FREQUENCES:
+    if typ != "au_sub" and freq not in FREQUENCES:
         return None, "fréquence inconnue (quinzaine ou mois)"
+    lignes: Optional[int] = None
+    if typ in TYPES_FIXE and str(r.get("lignes") if r.get("lignes") is not None else "").strip():
+        lignes = _entier_borne(r.get("lignes"), 1, LIGNES_MAX)
+        if lignes is None:
+            return None, f"lignes payées invalides : un nombre entier de 1 à {_nb(LIGNES_MAX)}, ou rien"
+    forces: Dict[str, int] = {}
+    if typ in TYPES_FIXE and r.get("forces") is not None:
+        # jamais du formulaire (enregistrer_paie les fusionne), seulement du fichier
+        fr = r.get("forces")
+        if not isinstance(fr, Mapping) or len(fr) > FORCES_MAX:
+            return None, f"lignes forcées illisibles (un objet de {_nb(FORCES_MAX)} tranches au plus)"
+        for k, n in fr.items():
+            if cle_tranche_entiere(k) != str(k):
+                return None, f"lignes forcées : « {str(k)[:30]} » n'est pas une quinzaine ou un mois entier"
+            nn = _entier_borne(n, 0, LIGNES_MAX)
+            if nn is None:
+                return None, f"lignes forcées invalides : un nombre entier de 0 à {_nb(LIGNES_MAX)}"
+            forces[str(k)] = nn
     brut = str(r.get("depuis") or "").strip()
     depuis = ""
     if brut:
@@ -1385,7 +1554,15 @@ def valider_paie(r: Any, aujourdhui: str = "") -> Tuple[Optional[Dict[str, Any]]
             return None, (f"date « payé depuis » hors bornes (du {_jour_long(PLANCHER.isoformat())} "
                           f"au {_jour_long(fin.isoformat())})")
         depuis = d.isoformat()
-    return {"type": typ, "montant": m, "devise": devise, "frequence": freq, "depuis": depuis}, ""
+    if typ == "au_sub":
+        return dict(type=typ, taux1=sub["taux1"], seuil=sub["seuil"], taux2=sub["taux2"],
+                    devise=devise, depuis=depuis), ""
+    out = {"type": typ, "montant": m, "devise": devise, "frequence": freq, "depuis": depuis}
+    if lignes is not None:
+        out["lignes"] = lignes
+    if forces:
+        out["forces"] = dict(sorted(forces.items()))
+    return out, ""
 
 
 def lire_paie() -> Tuple[Dict[str, Dict[str, Any]], List[str]]:
@@ -1448,6 +1625,26 @@ def enregistrer_paie(form: Mapping[str, Any]) -> Tuple[bool, str, str]:
     v, err = valider_paie(form)
     if v is None:
         return False, err, retour
+    v.pop("forces", None)                 # jamais du formulaire : fusionnées plus bas
+    # « Lignes forcées » de la période affichée : le champ n'est dans le
+    # formulaire que sur une vue par période. Vide : plus rien de forcé sur
+    # ses quinzaines (ou mois) ; un nombre : forcé sur chacune, en entier.
+    # « forcer_avant » : la valeur que le formulaire montrait. Inchangée : rien
+    # n'est touché (enregistrer un montant ne retire pas une tranche forcée).
+    forcer: Optional[Tuple[set, Optional[int]]] = None
+    if ("forcer_lignes" in form and v["type"] in TYPES_FIXE
+            and str(form.get("forcer_lignes") or "").strip() != str(form.get("forcer_avant") or "").strip()):
+        a_f, b_f = _date_arg(form.get("du")), _date_arg(form.get("au"))
+        if not (a_f and b_f and a_f <= b_f):
+            return False, "lignes forcées : choisissez d'abord la période en haut de la page", retour
+        brut_f = str(form.get("forcer_lignes") or "").strip()
+        n_f: Optional[int] = None
+        if brut_f:
+            n_f = _entier_borne(brut_f, 0, LIGNES_MAX)
+            if n_f is None:
+                return False, (f"lignes forcées invalides : un nombre entier de 0 à {_nb(LIGNES_MAX)}, "
+                               "ou rien pour ne plus forcer"), retour
+        forcer = ({_k_entiere(t) for t in decouper(a_f, b_f, v["frequence"])}, n_f)
     try:
         deja = cle in (lire_paie()[0])
         if not deja:
@@ -1476,6 +1673,20 @@ def enregistrer_paie(form: Mapping[str, Any]) -> Tuple[bool, str, str]:
             pers = dict(d.get("personnes") or {})
             if cle not in pers and len(pers) >= PAIE_PERSONNES_MAX:
                 return False, f"déjà {PAIE_PERSONNES_MAX} réglages", retour
+            if v["type"] in TYPES_FIXE:
+                # les tranches forcées d'autres périodes restent ; celles de
+                # la période affichée prennent la nouvelle valeur (ou sortent)
+                ancien, _e_anc = valider_paie(pers.get(cle)) if isinstance(pers.get(cle), Mapping) else (None, "")
+                forces = dict((ancien or {}).get("forces") or {})
+                if forcer is not None:
+                    for k in forcer[0]:
+                        forces.pop(k, None)
+                        if forcer[1] is not None:
+                            forces[k] = forcer[1]
+                if len(forces) > FORCES_MAX:
+                    return False, f"déjà {_nb(FORCES_MAX)} tranches aux lignes forcées", retour
+                if forces:
+                    v["forces"] = dict(sorted(forces.items()))
             pers[cle] = dict(v, maj=time.time())
             if not safe_json.write(PAIE_FICHIER, dict(d, personnes=pers, maj=time.time())):
                 return False, "réglage non écrit (disque)", retour
@@ -1790,6 +2001,412 @@ def _subs_par_personne(liens: List[Any], gms: List[Any]
     return out, trous
 
 
+# ─── le paiement : les lignes actives (clics GetMySocial, lien par lien) ─
+def _lignes_cache() -> Dict[str, Any]:
+    return _lire_json(LIGNES_FICHIER)
+
+
+def _tranches_lg(cache: Any) -> Dict[str, Any]:
+    t = cache.get("tranches") if isinstance(cache, Mapping) else None
+    return dict(t) if isinstance(t, Mapping) else {}
+
+
+def _entree_lg(tranches: Mapping[str, Any], k: str, lid: str) -> Dict[str, Any]:
+    bloc = tranches.get(k)
+    liens = bloc.get("liens") if isinstance(bloc, Mapping) else None
+    e = liens.get(lid) if isinstance(liens, Mapping) else None
+    return dict(e) if isinstance(e, Mapping) else {}
+
+
+def _index_lg(tranches: Mapping[str, Any]) -> Dict[str, List[Tuple[str, str, Mapping[str, Any]]]]:
+    """{lien: [(du, au, relevé)]} : chaque recherche ne parcourt que les
+    relevés de SON lien. Sans index, la vue « depuis toujours » (vingt-cinq
+    tranches, trente liens) relisait tout le fichier pour chaque couple."""
+    idx: Dict[str, List[Tuple[str, str, Mapping[str, Any]]]] = {}
+    for k, bloc in tranches.items():
+        d0, _, d1 = str(k).partition("|")
+        liens = bloc.get("liens") if isinstance(bloc, Mapping) else None
+        if not d1 or not isinstance(liens, Mapping):
+            continue
+        for lid, e in liens.items():
+            if isinstance(e, Mapping):
+                idx.setdefault(str(lid), []).append((d0, d1, e))
+    return idx
+
+
+def etat_lien(tranches: Mapping[str, Any], lid: Any, du: str, au: str, jour: str,
+              index: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+    """Ce qu'on sait des clics du lien GMS `lid` sur [du, au] (AAAA-MM-JJ) :
+    {etat} = « actif » (au moins un clic, tous pays), « inactif » (zéro
+    CONFIRMÉ), « rate » (dernier relevé raté : raison, essai, essais),
+    « perime » (zéro relevé pendant la tranche, qui a pu bouger depuis) ou
+    « absent ».
+
+    Un relevé sert aussi une autre tranche quand il la tranche sans
+    ambiguïté : un clic sur [d0, d1] inclus dans [du, au] rend la ligne
+    active (relevé hier sur 16 → 26, vue d'aujourd'hui 16 → 27 : pas d'appel) ;
+    un zéro sur une plage qui contient [du, au], relevé après `au` ou
+    aujourd'hui, la rend inactive. Jamais un zéro inventé : un lien sans
+    relevé valable n'est ni l'un ni l'autre."""
+    lid = str(lid)
+    zero = False
+    e: Mapping[str, Any] = {}
+    for d0, d1, r in (_index_lg(tranches) if index is None else index).get(lid) or ():
+        if (d0, d1) == (du, au):
+            e = r
+        n = _entier(r.get("clics"))
+        if n is None:
+            continue
+        if n > 0 and du <= d0 and d1 <= au:
+            return {"etat": "actif"}
+        if n == 0 and d0 <= du and au <= d1:
+            j = str(r.get("jour") or "")
+            if j > au or j == jour:
+                zero = True
+    if zero:
+        return {"etat": "inactif"}
+    if e.get("rate"):
+        return {"etat": "rate", "raison": str(e["rate"]), "essai": _f_ou_none(e.get("essai")) or 0.0,
+                "essais": _entier(e.get("essais")) or 0, "essais_jour": str(e.get("essais_jour") or "")}
+    return {"etat": "perime" if _entier(e.get("clics")) is not None else "absent"}
+
+
+def _a_relever(st: Mapping[str, Any], jour: str, maintenant: float) -> bool:
+    """Absent ou périmé : oui. Raté : après 10 min, trois fois par jour au
+    plus — chaque essai coûte un appel du quota partagé."""
+    if st.get("etat") in ("absent", "perime"):
+        return True
+    if st.get("etat") != "rate":
+        return False
+    if 0 <= maintenant - float(st.get("essai") or 0) < US_REESSAI_S:
+        return False
+    return not (st.get("essais_jour") == jour and int(st.get("essais") or 0) >= US_PERIODE_ESSAIS_MAX)
+
+
+def _tranche_entiere(k: str) -> bool:
+    """« 2026-09-01|2026-09-15 » ou « 2026-09-01|2026-09-30 » : une
+    quinzaine ou un mois ENTIER, qui resservira tel quel."""
+    try:
+        du, au = (dt.date.fromisoformat(x) for x in str(k).split("|", 1))
+    except ValueError:
+        return False
+    return quinzaine_de(du) == (du, au) or mois_de(du) == (du, au)
+
+
+def cle_tranche_entiere(k: Any) -> str:
+    """La clé « AAAA-MM-JJ|AAAA-MM-JJ » d'une quinzaine ou d'un mois entier,
+    sous sa forme exacte ; "" pour autre chose."""
+    try:
+        du, au = (dt.date.fromisoformat(x) for x in str(k).split("|", 1))
+    except ValueError:
+        return ""
+    if quinzaine_de(du) != (du, au) and mois_de(du) != (du, au):
+        return ""
+    return _cle_periode(du.isoformat(), au.isoformat())
+
+
+def _k_entiere(t: Mapping[str, Any]) -> str:
+    """La tranche ENTIÈRE (quinzaine ou mois) d'un morceau de decouper."""
+    return _cle_periode(t["p_du"].isoformat(), t["p_au"].isoformat())
+
+
+def _elaguer_lignes(tr: Mapping[str, Any], maintenant: float) -> Dict[str, Any]:
+    """Quinzaines et mois entiers gardés pour toujours ; un morceau de
+    période (« 7 derniers jours », une autre tranche chaque jour) sort après
+    LIGNES_GARDE_S sans servir : sans ça, une entrée par lien et par jour."""
+    out: Dict[str, Any] = {}
+    for k, bloc in tr.items():
+        if not isinstance(bloc, Mapping):
+            continue
+        liens = bloc.get("liens") if isinstance(bloc.get("liens"), Mapping) else {}
+        dernier = max([_f_ou_none(bloc.get("vu")) or 0.0]
+                      + [max(_f_ou_none(e.get("quand")) or 0.0, _f_ou_none(e.get("essai")) or 0.0)
+                         for e in liens.values() if isinstance(e, Mapping)])
+        if _tranche_entiere(k) or maintenant - dernier < LIGNES_GARDE_S:
+            out[k] = bloc
+    return out
+
+
+def _ecrire_lien(k: str, lid: str, e: Mapping[str, Any], jour: str, faits: int) -> Dict[str, Any]:
+    """Range le relevé d'UN lien sur une tranche, fichier relu sous verrou
+    (la page a pu noter un « vu » entre-temps). Rend les tranches à jour."""
+    with _VERROU_LG_F:
+        c = _lignes_cache()
+        tr = _tranches_lg(c)
+        bloc = dict(tr[k]) if isinstance(tr.get(k), Mapping) else {}
+        liens = dict(bloc.get("liens") or {}) if isinstance(bloc.get("liens"), Mapping) else {}
+        liens[str(lid)] = dict(e)
+        maintenant = time.time()
+        bloc["liens"] = liens
+        bloc.setdefault("vu", maintenant)
+        tr[k] = bloc
+        tr = _elaguer_lignes(tr, maintenant)
+        faits = max(int(faits), _appels_du_jour(c, jour))
+        safe_json.write(LIGNES_FICHIER, {"tranches": tr, "appels": {jour: faits}, "maj": maintenant})
+        return tr
+
+
+def _toucher_lignes(cles: Any, maintenant: Optional[float] = None) -> None:
+    """Note que ces tranches servent encore (« vu », au jour près) : un
+    morceau de période resservi à chaque affichage n'est pas élagué. UNE
+    écriture au plus, aucune si rien ne change."""
+    maintenant = time.time() if maintenant is None else maintenant
+    with _VERROU_LG_F:
+        c = _lignes_cache()
+        tr = _tranches_lg(c)
+        change = False
+        for k in {_cle_periode(*k) for k in cles}:
+            bloc = tr.get(k)
+            if isinstance(bloc, Mapping) and maintenant - (_f_ou_none(bloc.get("vu")) or 0.0) >= QUINZ_VU_PAS_S:
+                tr[k] = dict(bloc, vu=maintenant)
+                change = True
+        if change:
+            safe_json.write(LIGNES_FICHIER, dict(c, tranches=_elaguer_lignes(tr, maintenant), maj=maintenant))
+
+
+def _clics_releve(tot: Any, pays: Any) -> Optional[int]:
+    """Les clics TOUS PAYS d'un relevé gms (total, pays) ; None s'il n'y en a
+    pas (appel raté)."""
+    if not isinstance(pays, Mapping):
+        return None
+    s = 0
+    for v in pays.values():
+        s += _entier(v) or 0
+    return max(_entier(tot) or 0, s)
+
+
+def releve_lignes(taches: List[Tuple[str, str, str]],
+                  proprios: Optional[Mapping[Tuple[str, str, str], Tuple[str, str]]] = None) -> Dict[str, Any]:
+    """Les clics de chaque (lien GMS, du, au) de `taches` sans relevé
+    valable : UN appel gms.analytics_for_link chacun, dans l'ordre reçu
+    (personne par personne : quand le budget tombe, mieux vaut des personnes
+    complètes que toutes à moitié).
+
+    `proprios` : (personne, nom du lien) de chaque tâche, notés dans le relevé
+    (« qui », « nom ») au PREMIER relevé de ce lien sur cette tranche, et
+    gardés ensuite : un renommage ne déplace plus la ligne d'une tranche déjà
+    relevée vers une autre personne.
+
+    (0 clic, aucun pays) est ambigu — c'est aussi ce que gms rend quand il
+    n'a pas su lire la réponse (26/09 : « NOTICE: stale: true » après le
+    JSON) : relu dans la réponse brute (_verifier_zero), un appel de plus. Un
+    relevé raté n'est jamais écrit comme un zéro. Chaque appel, vérification
+    comprise, est décompté de LIGNES_APPELS_JOUR ; GetMySocial en pause : on
+    s'arrête, le reste attend."""
+    if not _VERROU_LG.acquire(blocking=False):
+        return {"appels": 0, "rates": 0, "occupe": True}
+    try:
+        jour = _aujourdhui()
+        cache = _lignes_cache()
+        tr = _tranches_lg(cache)
+        idx = _index_lg(tr)
+        maintenant = time.time()
+        cibles = list(dict.fromkeys((str(l), str(d), str(a)) for l, d, a in taches
+                                    if _a_relever(etat_lien(tr, l, d, a, jour, idx), jour, maintenant)))
+        if not cibles:
+            return {"appels": 0, "rates": 0}
+        budget = LIGNES_APPELS_JOUR
+        faits = _appels_du_jour(cache, jour)
+        if faits >= budget:
+            return {"appels": 0, "rates": 0, "budget": budget}
+        if _pause_gms() > 0:
+            return {"appels": 0, "rates": 0, "pause": True}
+        import gms
+        rates = appels = mesures = 0
+        for i, (lid, du, au) in enumerate(cibles):
+            if i and _pause_gms():
+                break                 # quota tombé en route : les suivants restent à relever
+            if faits >= budget:
+                break                 # budget du jour atteint : idem, jusqu'à demain
+            if not _a_relever(etat_lien(tr, lid, du, au, jour, idx), jour, time.time()):
+                mesures += 1          # tranché entre-temps par un relevé de cette passe
+                continue
+            raison = ""
+            appels += 1
+            faits += 1
+            try:
+                tot, pays = gms.analytics_for_link(lid, du, au)
+            except Exception as e:
+                tot, pays, raison = None, None, f"{type(e).__name__} : {e}"[:160]
+            clics = _clics_releve(tot, pays)
+            if clics == 0:
+                if faits >= budget:
+                    clics, raison = None, "relevé à 0 clic non vérifié : budget GetMySocial du jour atteint"
+                else:
+                    appels += 1
+                    faits += 1
+                    t2, p2, raison = _verifier_zero([lid], du, au)
+                    clics = _clics_releve(t2, p2)
+            mesures += 1
+            k = _cle_periode(du, au)
+            e = _entree_lg(tr, k, lid)
+            e["essai"] = time.time()
+            qui = (proprios or {}).get((lid, du, au))
+            if qui and not e.get("qui"):
+                e["qui"], e["nom"] = str(qui[0]), str(qui[1])
+            if clics is None:
+                rates += 1
+                if not raison and _pause_gms():
+                    raison = "quota GetMySocial épuisé" + _reprise_gms()
+                n = int(e.get("essais") or 0) if e.get("essais_jour") == jour else 0
+                e.update(rate=f"{jour} : " + (raison or "GetMySocial n'a pas rendu de relevé"),
+                         essais=n + 1, essais_jour=jour)
+            else:
+                e.update(clics=int(clics), quand=time.time(), jour=jour, rate="", essais=0)
+            tr = _ecrire_lien(k, lid, e, jour, faits)
+            idx = _index_lg(tr)
+            if i + 1 < len(cibles):
+                _dormir_us(US_PAUSE_S)
+        return {"appels": appels, "rates": rates, "reportes": len(cibles) - mesures,
+                "budget": budget if faits >= budget and mesures < len(cibles) else 0}
+    finally:
+        _VERROU_LG.release()
+
+
+def _lancer_lignes(taches: List[Tuple[str, str, str]],
+                   proprios: Optional[Mapping[Tuple[str, str, str], Tuple[str, str]]] = None
+                   ) -> Optional[threading.Thread]:
+    """En arrière-plan, un relevé à la fois (verrou à part de _VERROU, que
+    l'envoi Discord garde pendant tout un passage : la page n'attend pas)."""
+    if not LIGNES_EN_FOND:
+        releve_lignes(taches, proprios)
+        return None
+    with _VERROU_LG_LANCE:
+        f = _FIL_LG.get("fil")
+        if f is not None and f.is_alive():
+            return f
+        f = threading.Thread(target=releve_lignes, args=(list(taches), dict(proprios or {})), daemon=True,
+                             name="infloww-liens-lignes")
+        _FIL_LG["fil"] = f
+        f.start()
+        return f
+
+
+def _info_lignes(reste: int, jour: str) -> Dict[str, Any]:
+    """Pourquoi des lignes attendent encore : budget du jour, pause
+    GetMySocial ou calcul en cours ({} si rien n'attend un appel)."""
+    if not reste:
+        return {}
+    if _appels_du_jour(_lignes_cache(), jour) >= LIGNES_APPELS_JOUR:
+        return {"budget": LIGNES_APPELS_JOUR}
+    if _pause_gms():
+        return {"pause": "quota du jour épuisé" + _reprise_gms()}
+    return {"en_cours": True}
+
+
+def _lignes_pour_la_page(taches: List[Tuple[str, str, str]],
+                         proprios: Optional[Mapping[Tuple[str, str, str], Tuple[str, str]]] = None
+                         ) -> Dict[str, Any]:
+    """Lance le relevé de ce qui manque, SANS l'attendre ; rien si le budget
+    du jour est fait ou si GetMySocial est en pause. Rend ce que la page doit
+    en dire."""
+    if not taches:
+        return {}
+    info = _info_lignes(len(taches), _aujourdhui())
+    if info.get("en_cours"):
+        _lancer_lignes(taches, proprios)
+    return info
+
+
+def _figer_lignes(gels: Mapping[str, Mapping[str, Any]], maintenant: Optional[float] = None) -> None:
+    """Fige, UNE fois pour toutes, les lignes de tranches closes entièrement
+    relevées : {tranche: {personne: {quand, liens: {lien: {nom, actif}}}}}.
+    Une personne déjà figée sur une tranche ne l'est jamais une seconde fois.
+    UNE écriture, aucune si rien n'est nouveau."""
+    maintenant = time.time() if maintenant is None else maintenant
+    with _VERROU_LG_F:
+        c = _lignes_cache()
+        tr = _tranches_lg(c)
+        change = False
+        for k, pers in gels.items():
+            bloc = dict(tr[k]) if isinstance(tr.get(k), Mapping) else {"liens": {}, "vu": maintenant}
+            fige = dict(bloc.get("fige") or {}) if isinstance(bloc.get("fige"), Mapping) else {}
+            for cle, v in pers.items():
+                if cle not in fige:
+                    fige[cle] = dict(v)
+                    change = True
+            bloc["fige"] = fige
+            tr[k] = bloc
+        if change:
+            safe_json.write(LIGNES_FICHIER, dict(c, tranches=_elaguer_lignes(tr, maintenant), maj=maintenant))
+
+
+def _lignes_tranche(tr: Mapping[str, Any], idx: Mapping[str, Any], cle: str,
+                    liens_now: List[Mapping[str, Any]], du: str, au: str, jour: str,
+                    proprio: Mapping[str, str], noms: Mapping[str, str],
+                    crees: Mapping[str, str]) -> Dict[str, Any]:
+    """Les lignes de la personne `cle` sur la tranche [du, au] :
+    {fige, sts: [(lien, état)], partis, exclus, pas_encore}.
+
+    1. Tranche FIGÉE pour elle : l'ensemble gardé, tel quel (état compris).
+    2. Sinon : ses liens du jour, SAUF ceux qu'un relevé de cette tranche a
+       notés à une autre personne (ou figés chez une autre) ; PLUS ceux notés
+       à elle, partis depuis (renommés, supprimés). Un lien jamais relevé sur
+       la tranche : la liste du jour décide (rien d'autre n'est su).
+    Un lien créé après la fin de la tranche n'y est pas une ligne
+    (« pas_encore ») : aucun appel GetMySocial pour lui.
+    `partis` : liens comptés, qui ne sont plus à elle aujourd'hui ;
+    `exclus` : liens à elle aujourd'hui, pas comptés (à une autre sur la tranche)."""
+    k = _cle_periode(du, au)
+    bloc = tr.get(k) if isinstance(tr.get(k), Mapping) else {}
+    fige = bloc.get("fige") if isinstance(bloc.get("fige"), Mapping) else {}
+    rel = bloc.get("liens") if isinstance(bloc.get("liens"), Mapping) else {}
+    miens = {str(l["id"]): str(l.get("nom") or l["id"]) for l in liens_now}
+    a_autrui: Dict[str, str] = {}
+    for c, v in fige.items():
+        if str(c) != cle and isinstance(v, Mapping) and isinstance(v.get("liens"), Mapping):
+            for lid in v["liens"]:
+                a_autrui[str(lid)] = str(c)
+    out: Dict[str, Any] = {"fige": False, "sts": [], "partis": [], "exclus": [], "pas_encore": []}
+
+    def cree(lid: str) -> str:
+        return crees.get(lid) or cree_gms(lid)
+
+    mien_f = fige.get(cle)
+    if isinstance(mien_f, Mapping) and isinstance(mien_f.get("liens"), Mapping):
+        out["fige"] = True
+        for lid, v in mien_f["liens"].items():
+            v = v if isinstance(v, Mapping) else {}
+            out["sts"].append(({"id": str(lid), "nom": str(v.get("nom") or lid)},
+                               {"etat": "actif" if v.get("actif") else "inactif"}))
+        figes = {l["id"] for l, _s in out["sts"]}
+        for lid, nom in miens.items():
+            if lid in figes:
+                continue
+            if cree(lid) and cree(lid) > au:
+                out["pas_encore"].append({"nom": nom, "cree": cree(lid)})
+            else:
+                out["exclus"].append({"nom": nom, "chez": a_autrui.get(lid, "")})
+    else:
+        siens: Dict[str, str] = {}
+        for lid, nom in miens.items():
+            e = rel.get(lid) if isinstance(rel.get(lid), Mapping) else {}
+            q = str(e.get("qui") or "")
+            autre = a_autrui.get(lid) or (q if q and q != cle else "")
+            if autre:
+                out["exclus"].append({"nom": nom, "chez": autre})
+            else:
+                siens[lid] = nom
+        for lid, e in rel.items():
+            lid = str(lid)
+            if (lid not in siens and lid not in miens and lid not in a_autrui and isinstance(e, Mapping)
+                    and str(e.get("qui") or "") == cle):
+                siens[lid] = str(e.get("nom") or noms.get(lid) or lid)
+        for lid, nom in siens.items():
+            if cree(lid) and cree(lid) > au:
+                out["pas_encore"].append({"nom": nom, "cree": cree(lid)})
+            else:
+                out["sts"].append(({"id": lid, "nom": nom}, etat_lien(tr, lid, du, au, jour, idx)))
+    out["sts"].sort(key=lambda s: (_cle_nom(s[0]["nom"]), s[0]["id"]))
+    for l, _s in out["sts"]:
+        if l["id"] not in miens:
+            out["partis"].append({"nom": l["nom"], "chez": proprio.get(l["id"], ""),
+                                  "nom_jour": noms.get(l["id"], "")})
+    for cle_l in ("partis", "exclus", "pas_encore"):
+        out[cle_l].sort(key=lambda d: _cle_nom(d["nom"]))
+    return out
+
+
 # ─── le paiement : le calcul ─────────────────────────────────────────────
 def _plage_paie(x: Mapping[str, Any], cfg: Mapping[str, Any], per: Mapping[str, Any],
                 liens_p: Mapping[str, Any], auj: dt.date) -> Tuple[Optional[dt.date], Optional[dt.date], str]:
@@ -1835,7 +2452,8 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
     """Le tableau, plus le paiement de chaque personne et ce qu'elle rapporte
     (colonnes Paiement et Gain / perte). Pour la PAGE seulement. `t` n'est
     pas modifié. Peut lancer des lectures MyPuls (subs par quinzaine) et
-    attendre QUINZ_ATTENTE_S au plus."""
+    attendre QUINZ_ATTENTE_S au plus, et lancer le relevé GetMySocial des
+    lignes actives (sans l'attendre)."""
     attente = QUINZ_ATTENTE_S if attente is None else float(attente)
     out = dict(t)
     lignes = [dict(x) for x in t.get("lignes") or []]
@@ -1845,7 +2463,7 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
     P: Dict[str, Any] = {"mauvais": mauvais, "taux": None, "en_attente": 0, "a_relire": 0, "erreurs": {},
                          "orphelins": sorted((c for c, v in cfgs.items()
                                               if c not in presents and v["type"] != "aucun"), key=_cle_nom),
-                         "configures": 0, "totaux": {}, "pause": ""}
+                         "configures": 0, "totaux": {}, "pause": "", "lignes": {}}
     out["paie"] = P
     for x in lignes:
         cfg = cfgs.get(str(x.get("cle")))
@@ -1864,14 +2482,14 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
         auj = dt.date.fromisoformat(_aujourdhui())
     except ValueError:
         auj = dt.date.today()
-    actifs = [x for x in lignes if (x["paie"]["cfg"] or {}).get("type") in ("fixe", "fixe_primes")]
+    actifs = [x for x in lignes if (x["paie"]["cfg"] or {}).get("type") in TYPES_PAYES]
     P["configures"] = len(actifs)
     if not actifs:
         return out
     if any(x["paie"]["cfg"]["devise"] == "EUR" for x in actifs):
         P["taux"] = taux_eur_usd()
 
-    # 1. plages, et quinzaines dont il faut les subs
+    # 1. plages, et quinzaines dont il faut les subs (primes, paie au sub)
     maintenant = time.time()
     disque = _q_disque()
     # par tranche, les codes de suivi dont les personnes réglées ont besoin :
@@ -1882,7 +2500,7 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
         p, cfg = x["paie"], x["paie"]["cfg"]
         a, b, raison = _plage_paie(x, cfg, per, liens_p, auj)
         p.update(debut=a.isoformat() if a else "", fin=b.isoformat() if b else "", raison=raison)
-        if a is None or cfg["type"] != "fixe_primes":
+        if a is None or cfg["type"] not in ("fixe_primes", "au_sub"):
             continue
         p["quinzaines"] = decouper(a, b, "quinzaine")
         codes_x = _codes_personne(x)
@@ -1919,71 +2537,238 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
             P["erreurs"][k] = e["erreur"]
     attente_k: set = set()
 
-    # 2. par personne : revenu - fixe - primes ; chaque manque est dit
+    # 1 bis. les lignes actives des types à fixe : chaque lien GMS de la
+    # personne, sur chaque tranche de son fixe (quinzaine ou mois, partie
+    # incluse dans la plage). Relevé lancé en arrière-plan pour ce qui manque.
+    ents_g, _sans = entites(gms)
+    par_id_g = {str(l.get("id")): l for l in gms if isinstance(l, Mapping) and l.get("id")}
+    proprio_g = {str(i): str(c) for c, e in ents_g.items() for i in e.get("ids") or []}
+    noms_g = {i: nom_gms(l) or i for i, l in par_id_g.items()}
+    crees_g = {i: cree_gms(l) for i, l in par_id_g.items()}
+    jour = _aujourdhui()
+    fixes: List[Dict[str, Any]] = []             # personne par personne
+    for x in sorted(actifs, key=lambda x: _cle_nom(x.get("cle"))):
+        p, cfg = x["paie"], x["paie"]["cfg"]
+        if cfg["type"] not in TYPES_FIXE or not p.get("debut"):
+            continue
+        ids = sorted({str(i) for i in (ents_g.get(str(x.get("cle"))) or {}).get("ids") or []})
+        p["liens_gms"] = sorted(({"id": i, "nom": noms_g.get(i) or i} for i in ids),
+                                key=lambda l: (_cle_nom(l["nom"]), l["id"]))
+        p["tranches_f"] = decouper(dt.date.fromisoformat(p["debut"]), dt.date.fromisoformat(p["fin"]),
+                                   cfg["frequence"])
+        premiers = [crees_g.get(l["id"]) or "" for l in p["liens_gms"]]
+        p["premier_lien"] = min(premiers) if premiers and all(premiers) else ""
+        fixes.append(x)
+    tr_lg = _tranches_lg(_lignes_cache()) if fixes else {}
+    idx_lg = _index_lg(tr_lg)
+
+    def etats_lignes() -> Tuple[Dict[Tuple[str, str, str], Dict[str, Any]],
+                                Dict[Tuple[str, str, str], Tuple[str, str, Dict[str, Any]]]]:
+        """({(personne, du, au): lignes de la tranche}, {(lien, du, au):
+        (personne, nom, état)} des liens dont le compte sert) — une tranche
+        figée ou aux lignes forcées ne demande aucun relevé."""
+        res: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+        besoin: Dict[Tuple[str, str, str], Tuple[str, str, Dict[str, Any]]] = {}
+        for x in fixes:
+            p, cfg = x["paie"], x["paie"]["cfg"]
+            forces = cfg.get("forces") or {}
+            for q in p["tranches_f"]:
+                du_q, au_q = _k_tranche(q)
+                r = _lignes_tranche(tr_lg, idx_lg, str(x["cle"]), p["liens_gms"], du_q, au_q, jour,
+                                    proprio_g, noms_g, crees_g)
+                r["force"] = forces.get(_k_entiere(q))
+                res[(str(x["cle"]), du_q, au_q)] = r
+                if r["force"] is None and not r["fige"]:
+                    for l, st in r["sts"]:
+                        besoin[(l["id"], du_q, au_q)] = (str(x["cle"]), l["nom"], st)
+        return res, besoin
+
+    res_lg, besoin_lg = etats_lignes()
+    taches = [pr for pr, v in besoin_lg.items() if _a_relever(v[2], jour, time.time())]
+    if taches:
+        _lignes_pour_la_page(taches, {pr: besoin_lg[pr][:2] for pr in taches})
+        tr_lg = _tranches_lg(_lignes_cache())   # relevé sur place (tests) ou déjà fait
+        idx_lg = _index_lg(tr_lg)
+        res_lg, besoin_lg = etats_lignes()
+    # une tranche CLOSE dont tous les liens sont tranchés (un clic, ou un 0
+    # relu après sa fin) est figée : la liste GMS de demain n'y change rien
+    gels: Dict[str, Dict[str, Any]] = {}
+    for (c, du_q, au_q), r in res_lg.items():
+        if (not r["fige"] and au_q < jour and r["sts"]
+                and all(s["etat"] in ("actif", "inactif") for _l, s in r["sts"])):
+            gels.setdefault(_cle_periode(du_q, au_q), {})[c] = {
+                "quand": time.time(),
+                "liens": {l["id"]: {"nom": l["nom"], "actif": s["etat"] == "actif"} for l, s in r["sts"]}}
+    if gels:
+        _figer_lignes(gels)
+    if res_lg:
+        _toucher_lignes({k[1:] for k in res_lg})
+
+    # 2. par personne : revenu - coût ; chaque manque est dit
     taux = (P.get("taux") or {}).get("taux")
     devise_periode = str(per.get("devise") or "") if per else ""
+    lg_inconnus = 0
+    lg_rates: List[str] = []
+
+    def subs_des_quinzaines(x: Mapping[str, Any], p: Mapping[str, Any]) -> Tuple[List[Dict[str, Any]], int, str]:
+        """(détail, quinzaines en attente, ce qui manque) des subs de la
+        personne, quinzaine par quinzaine."""
+        attente_q = 0
+        manque_q = ""
+        detail_q: List[Dict[str, Any]] = []
+        for q in p.get("quinzaines") or []:
+            k = _k_tranche(q)
+            e = besoins.get(k) or {}
+            s = (subs_q.get(k) or {}).get(str(x["cle"]))
+            detail_q.append({"du": k[0], "au": k[1], "complete": q["complete"], "subs": s})
+            if k in subs_q and s is not None:
+                continue
+            if e.get("a_lire") or e.get("en_cours"):
+                attente_q += 1             # (re)lecture demandée ou en vol
+                attente_k.add(k)
+            elif k in subs_q:
+                tr = (trous_q.get(k) or {}).get(str(x["cle"])) or []
+                manque_q = manque_q or (
+                    f"subs du {_libelle_periode(*k)} inconnus chez MyPuls"
+                    + (f" pour {', '.join('c' + c for c in tr)}" if tr else "")
+                    + " (lien absent ou sans nombre de subs"
+                    + (f" ; relu le {_heure(e['trou_relu'])}, relu au plus une fois par heure"
+                       if e.get("trou_relu") else "") + ")")
+            elif k in P["erreurs"]:
+                manque_q = manque_q or (f"MyPuls n'a pas répondu pour le {_libelle_periode(*k)} "
+                                        f"({P['erreurs'][k][:160]})")
+            else:
+                attente_q += 1
+                attente_k.add(k)
+        return detail_q, attente_q, manque_q
+
+    def en_attente(quoi: str, detail_q: List[Any], attente_q: int) -> str:
+        lues = len(detail_q) - attente_q
+        return (f"{quoi} : calcul en cours ({_nb(lues)} quinzaine{'s' if lues > 1 else ''} "
+                f"lue{'s' if lues > 1 else ''} sur {_nb(len(detail_q))})")
+
     for x in actifs:
         p, cfg = x["paie"], x["paie"]["cfg"]
+        typ = cfg["type"]
         rev, r_raison = _revenu(x, liens_p, devise_periode)
         p["revenu"] = rev
         if not p.get("debut"):
             continue                       # début inconnu : la raison est déjà dite
-        a, b = dt.date.fromisoformat(p["debut"]), dt.date.fromisoformat(p["fin"])
-        fixe_d, tr_fixe = cout_fixe(cfg, a, b)
-        p["fixe_devise"], p["tranches_fixe"] = fixe_d, tr_fixe
-        p["fixe"] = fixe_d if cfg["devise"] == "USD" else (fixe_d * taux if taux else None)
         raisons: List[str] = []
-        if p["fixe"] is None:
-            raisons.append("taux EUR → USD inconnu : fixe en euros non converti")
+        cout: Optional[float] = 0.0
+        if typ in TYPES_FIXE:
+            # le fixe, PAR LIGNE ACTIVE de chaque tranche. Lignes forcées par
+            # le propriétaire : elles, telles quelles. Compte à trou : les
+            # « lignes payées » saisies, BORNÉES par ce qui est su (jamais
+            # moins que les lignes déjà confirmées actives, jamais plus que la
+            # personne n'a de liens) ; sinon « — ». Avant son premier lien
+            # GMS : les lignes saisies, sinon « — » (rien n'est inventé).
+            m = float(cfg["montant"])
+            saisie = _entier(cfg.get("lignes"))
+            detail_f: List[Dict[str, Any]] = []
+            for q in p.get("tranches_f") or []:
+                du_q, au_q = _k_tranche(q)
+                r = res_lg.get((str(x["cle"]), du_q, au_q)) or {"sts": [], "fige": False, "partis": [],
+                                                                 "exclus": [], "pas_encore": [], "force": None}
+                sts = r["sts"]
+                actives = [l["nom"] for l, s in sts if s["etat"] == "actif"]
+                sans_clic = [l["nom"] for l, s in sts if s["etat"] == "inactif"]
+                inconnus = [l["nom"] for l, s in sts if s["etat"] not in ("actif", "inactif")]
+                force = r.get("force")
+                if force is None:              # une tranche forcée n'attend aucun relevé
+                    lg_rates += [s["raison"] for _l, s in sts if s["etat"] == "rate"]
+                    lg_inconnus += len(inconnus)
+                if force is not None:
+                    n, source = int(force), "force"
+                elif not sts and r["pas_encore"]:
+                    n, source = saisie, "sans_lien"
+                elif not inconnus:
+                    n, source = len(actives), "gms"
+                elif saisie:
+                    n = len(actives) + min(len(inconnus), max(0, saisie - len(actives)))
+                    source = "manuel"
+                else:
+                    n, source = None, ""
+                base = m * q["jours"] / q["jours_periode"]
+                detail_f.append({"du": du_q, "au": au_q, "complete": q["complete"], "jours": q["jours"],
+                                 "jours_periode": q["jours_periode"], "base": base, "total": len(sts),
+                                 "actives": None if inconnus else len(actives), "confirmees": len(actives),
+                                 "lignes": n, "source": source, "saisie": saisie, "fige": r["fige"],
+                                 "sans_clic": sans_clic, "inconnus": inconnus,
+                                 "pas_encore": [d["nom"] for d in r["pas_encore"]],
+                                 "partis": r["partis"], "exclus": r["exclus"],
+                                 "premier_lien": p.get("premier_lien") or "",
+                                 "montant": None if n is None else base * n})
+            p["detail_f"] = detail_f
+            manque_f = [f for f in detail_f if f["lignes"] is None]
+            fixe_d = None if manque_f else sum(f["montant"] for f in detail_f)
+            p["fixe_devise"] = fixe_d
+            p["fixe"] = (None if fixe_d is None else
+                         fixe_d if cfg["devise"] == "USD" else (fixe_d * taux if taux else None))
+            en_cours_f = [f for f in manque_f if f["source"] == ""]
+            sans_lien_f = [f for f in manque_f if f["source"] == "sans_lien"]
+            if en_cours_f:
+                p["en_cours"] = True
+                noms = sorted({nm for f in en_cours_f for nm in f["inconnus"]}, key=_cle_nom)
+                raisons.append(f"lignes actives : calcul en cours (clics GetMySocial pas encore relevés pour "
+                               f"{', '.join(noms)}" + (f", sur {_nb(len(en_cours_f))} {cfg['frequence']}s"
+                                                         if len(detail_f) > 1 else "") + ")")
+            if sans_lien_f:
+                raisons.append(f"lignes : pas encore de lien GetMySocial du {_jour_long(sans_lien_f[0]['du'])} au "
+                               f"{_jour_long(sans_lien_f[-1]['au'])}"
+                               + (f" (premier lien créé le {_jour_long(p['premier_lien'])})"
+                                  if p.get("premier_lien") else "")
+                               + " : renseignez « lignes payées » (ou « payé depuis »)")
+            if not manque_f and p["fixe"] is None:
+                raisons.append("taux EUR → USD inconnu : fixe en euros non converti")
+            cout = p["fixe"]
         if rev is None:
             raisons.append(r_raison)
-        primes: Optional[float] = 0.0
-        detail_q: List[Dict[str, Any]] = []
-        if cfg["type"] == "fixe_primes":
-            attente_q = 0
-            manque_q = ""
-            for q in p.get("quinzaines") or []:
-                k = _k_tranche(q)
-                e = besoins.get(k) or {}
-                s = (subs_q.get(k) or {}).get(str(x["cle"]))
-                ligne_q: Dict[str, Any] = {"du": k[0], "au": k[1], "complete": q["complete"], "subs": s}
-                if k in subs_q and s is not None:
-                    ligne_q["prime"], ligne_q["palier"] = palier(s)
-                elif e.get("a_lire") or e.get("en_cours"):
-                    attente_q += 1             # (re)lecture demandée ou en vol
-                    attente_k.add(k)
-                elif k in subs_q:
-                    tr = (trous_q.get(k) or {}).get(str(x["cle"])) or []
-                    manque_q = manque_q or (
-                        f"subs du {_libelle_periode(*k)} inconnus chez MyPuls"
-                        + (f" pour {', '.join('c' + c for c in tr)}" if tr else "")
-                        + " (lien absent ou sans nombre de subs"
-                        + (f" ; relu le {_heure(e['trou_relu'])}, relu au plus une fois par heure"
-                           if e.get("trou_relu") else "") + ")")
-                elif k in P["erreurs"]:
-                    manque_q = manque_q or (f"MyPuls n'a pas répondu pour le {_libelle_periode(*k)} "
-                                            f"({P['erreurs'][k][:160]})")
-                else:
-                    attente_q += 1
-                    attente_k.add(k)
-                detail_q.append(ligne_q)
+        if typ == "fixe_primes":
+            detail_q, attente_q, manque_q = subs_des_quinzaines(x, p)
+            for q in detail_q:
+                if q["subs"] is not None:
+                    q["prime"], q["palier"] = palier(q["subs"])
             if manque_q:
                 raisons.append(manque_q)
             if attente_q:
-                lues = len(detail_q) - attente_q
                 p["en_cours"] = True
-                raisons.append(f"primes : calcul en cours ({_nb(lues)} quinzaine{'s' if lues > 1 else ''} "
-                               f"lue{'s' if lues > 1 else ''} sur {_nb(len(detail_q))})")
+                raisons.append(en_attente("primes", detail_q, attente_q))
             primes = None if (manque_q or attente_q) else sum(q["prime"] for q in detail_q)
-        p["primes"], p["detail_q"] = primes, detail_q
+            p["primes"], p["detail_q"] = primes, detail_q
+            cout = None if (cout is None or primes is None) else cout + primes
+        elif typ == "au_sub":
+            # au sub, par quinzaine : le seuil s'applique aux subs de CHAQUE
+            # quinzaine (une quinzaine coupée par la plage garde le seuil entier)
+            detail_q, attente_q, manque_q = subs_des_quinzaines(x, p)
+            for q in detail_q:
+                if q["subs"] is not None:
+                    q["cout"], q["bas"], q["haut"] = cout_au_sub(cfg, q["subs"])
+            if manque_q:
+                raisons.append(manque_q)
+            if attente_q:
+                p["en_cours"] = True
+                raisons.append(en_attente("paie au sub", detail_q, attente_q))
+            sub_d = None if (manque_q or attente_q) else sum(q["cout"] for q in detail_q)
+            p["detail_q"], p["sub_devise"] = detail_q, sub_d
+            p["cout_sub"] = (None if sub_d is None else
+                             sub_d if cfg["devise"] == "USD" else (sub_d * taux if taux else None))
+            if sub_d is not None and p["cout_sub"] is None:
+                raisons.append("taux EUR → USD inconnu : paie au sub en euros non convertie")
+            cout = p["cout_sub"]
+        p["cout"] = cout
         p["raison"] = " ; ".join(raisons)
-        if not raisons and primes is not None and rev is not None and p["fixe"] is not None:
-            p["gain"] = round(rev - p["fixe"] - primes, 2)
+        if not raisons and cout is not None and rev is not None:
+            p["gain"] = round(rev - cout, 2)
             x["gain"] = p["gain"]
     # les tranches qu'une personne attend : jamais lues, ou à relire (une
     # lecture d'avant avait un trou pour elle)
     P["en_attente"] = len(attente_k)
     P["a_relire"] = sum(1 for k in attente_k if "liens" in (besoins.get(k) or {}))
+    if besoin_lg:
+        reste = sum(1 for v in besoin_lg.values() if _a_relever(v[2], jour, time.time()))
+        P["lignes"] = {"paires": len(besoin_lg), "inconnus": lg_inconnus, "a_relever": reste,
+                       "rates": sorted(set(lg_rates))[:3], "info": _info_lignes(reste, jour)}
 
     # 3. totaux, sur les personnes configurées dont le gain se calcule. Le
     # revenu d'un lien visé par deux personnes n'y compte qu'UNE fois, comme
@@ -1994,7 +2779,7 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
     if calcules:
         ids = {str(r.get("id")) for x in calcules for r in x.get("infloww") or []}
         T["revenu"] = sum(int((liens_p.get(i) or {}).get("net") or 0) for i in ids) / 100.0
-        T["cout"] = sum(x["paie"]["fixe"] + x["paie"]["primes"] for x in calcules)
+        T["cout"] = sum(x["paie"]["cout"] for x in calcules)
         T["gain"] = round(T["revenu"] - T["cout"], 2)
     P["totaux"] = T
     return out
@@ -2016,16 +2801,28 @@ def page_refus_paie(pourquoi: str, retour: str) -> str:
 
 
 def resume_paie(cfg: Optional[Mapping[str, Any]]) -> str:
-    """« 75 $ / quinzaine + primes », « 200 EUR / mois », « — »."""
-    if not cfg or cfg.get("type") not in ("fixe", "fixe_primes"):
+    """« 75 $ / quinzaine + primes », « 200 EUR / mois », « 0,40 $ / sub
+    jusqu'à 200, 0,50 $ au-delà », « — »."""
+    if not cfg or cfg.get("type") not in TYPES_PAYES:
         return "—"
-    s = f"{_montant_court(cfg['montant'])}\u00a0{'$' if cfg['devise'] == 'USD' else 'EUR'} / {cfg['frequence']}"
+    dev = "$" if cfg.get("devise") == "USD" else "EUR"
+    if cfg["type"] == "au_sub":
+        return (f"{_taux_court(cfg['taux1'])} {dev} / sub jusqu'à {_nb(cfg['seuil'])}, "
+                f"{_taux_court(cfg['taux2'])} {dev} au-delà")
+    s = f"{_montant_court(cfg['montant'])} {dev} / {cfg['frequence']}"
     return s + (" + primes" if cfg["type"] == "fixe_primes" else "")
 
 
 def _montant_court(m: Any) -> str:
     f = float(m or 0)
     return _nb(f) if f.is_integer() else _dec(f)
+
+
+def _taux_court(v: Any) -> str:
+    """Un prix par sub : « 0,40 », « 0,375 », « 1,00 » (deux décimales au
+    moins, trois au plus : 0,375 ne s'affiche pas 0,38)."""
+    s = f"{float(v or 0):.3f}"
+    return (s[:-1] if s.endswith("0") else s).replace(".", ",")
 
 
 # ─── formats ─────────────────────────────────────────────────────────────
@@ -2842,17 +3639,140 @@ def _argent(v: Optional[float], signe: bool = False) -> str:
 
 
 def _explique_fixe(p: Mapping[str, Any], taux: Optional[float]) -> str:
+    """« 75 $ / quinzaine × 6/15 j × 3 lignes », ou sur plusieurs tranches
+    « 75 $ / quinzaine du … au …, au prorata des jours, par ligne active de
+    chaque quinzaine » (le détail tranche par tranche est dessous)."""
     cfg = p["cfg"]
-    tr = p.get("tranches_fixe") or []
-    base = f"{_montant_court(cfg['montant'])}\u00a0{'$' if cfg['devise'] == 'USD' else 'EUR'} / {cfg['frequence']}"
-    if not tr:
+    df = p.get("detail_f") or []
+    base = f"{_montant_court(cfg['montant'])} {'$' if cfg['devise'] == 'USD' else 'EUR'} / {cfg['frequence']}"
+    if not df:
         return f"payé à partir du {_jour_long(cfg.get('depuis'))} : rien sur la plage"
-    if len(tr) == 1:
-        s = base + ("" if tr[0]["complete"] else f" × {tr[0]['jours']}/{tr[0]['jours_periode']} j")
+    if len(df) == 1:
+        f = df[0]
+        s = base + ("" if f["complete"] else f" × {f['jours']}/{f['jours_periode']} j")
+        if f.get("lignes") is not None:
+            s += f" × {_txt_lignes(f['lignes'])}" + {
+                "manuel": " (saisie à la main, bornée par GetMySocial)",
+                "sans_lien": " (saisie à la main)", "force": " (forcées à la main)"}.get(f.get("source") or "", "")
     else:
-        s = f"{base} du {_jour_long(p.get('debut'))} au {_jour_long(p.get('fin'))}, au prorata des jours"
-    if cfg["devise"] == "EUR":
-        s += f" = {_dec(p.get('fixe_devise'))}\u00a0EUR × {_dec(taux, 4)}" if taux else ""
+        s = (f"{base} du {_jour_long(p.get('debut'))} au {_jour_long(p.get('fin'))}, au prorata des jours, "
+             f"par ligne active de chaque {cfg['frequence']}")
+    if cfg["devise"] == "EUR" and p.get("fixe_devise") is not None:
+        s += f" = {_dec(p.get('fixe_devise'))} EUR × {_dec(taux, 4)}" if taux else ""
+    return s
+
+
+def _txt_lignes(n: Any, adj: str = "") -> str:
+    """« 1 ligne », « 3 lignes actives », « 0 ligne active »."""
+    s = "s" if int(n or 0) > 1 else ""
+    return f"{_nb(n)} ligne{s}" + (f" {adj}{s}" if adj else "")
+
+
+def _pl(n: Any, *mots: str) -> str:
+    """« 1 inconnue », « 3 actives confirmées » : chaque mot au pluriel au-delà de 1."""
+    s = "s" if int(n or 0) > 1 else ""
+    return " ".join([_nb(n)] + [m + s for m in mots])
+
+
+def _ligne_f(f: Mapping[str, Any], cfg: Mapping[str, Any]) -> str:
+    """Le compte des lignes d'UNE tranche du fixe : « 3 lignes actives sur 4
+    (× 75 $) — sans clic : ( BO7 ) 4 », les lignes forcées ou saisies à la
+    main (avec ce que GetMySocial a confirmé), l'absence de lien GMS, ou le
+    calcul en cours (et quels liens il attend) ; puis les liens comptés mais
+    partis depuis, et ceux pas comptés (à une autre personne sur la tranche)."""
+    dev = "$" if cfg.get("devise") == "USD" else "EUR"
+    par = f"× {_montant_court(round(float(f.get('base') or 0), 2))}\u00a0{dev}"
+    inconnus = list(f.get("inconnus") or [])
+    src = f.get("source")
+    premier = f" (premier lien créé le {_jour_long(f['premier_lien'])})" if f.get("premier_lien") else ""
+    if src == "gms":
+        s = (f"{_txt_lignes(f['lignes'], 'active')} sur {_nb(f.get('total'))} ({par})"
+             + (", figé à la clôture" if f.get("fige") else ""))
+    elif src == "force":
+        if f.get("actives") is not None and f.get("total"):
+            gms_txt = f"{_txt_lignes(f['actives'], 'active')} sur {_nb(f['total'])}"
+        elif not f.get("total") and f.get("pas_encore"):
+            gms_txt = "pas encore de lien"
+        elif not f.get("total"):
+            gms_txt = "aucun lien à cette personne sur cette période"
+        else:
+            gms_txt = (f"{_pl(f.get('confirmees'), 'active', 'confirmée')}, "
+                       f"{_pl(len(inconnus), 'lien')} pas relevé{'s' if len(inconnus) > 1 else ''}")
+        s = f"{_txt_lignes(f['lignes'], 'forcée')} à la main ({par}) ; GetMySocial : {gms_txt}"
+    elif src == "manuel":
+        a, u, sa = int(f.get("confirmees") or 0), len(inconnus), int(f.get("saisie") or 0)
+        s = (f"{_pl(a, 'active', 'confirmée')} + {_pl(u, 'inconnue')} ({', '.join(inconnus)} : clics "
+             f"GetMySocial pas encore relevés), {_pl(sa, 'saisie')} à la main → "
+             f"{_txt_lignes(f['lignes'], 'payée')} ({par})")
+    elif src == "sans_lien":
+        if f.get("lignes") is not None:
+            s = (f"{_txt_lignes(f['lignes'], 'payée')} saisie{'s' if int(f['lignes']) > 1 else ''} à la main "
+                 f"({par}) : pas encore de lien GetMySocial{premier}")
+        else:
+            s = f"pas encore de lien GetMySocial{premier} : « lignes payées » à renseigner"
+    else:
+        s = (f"lignes actives : calcul en cours ({', '.join(inconnus)} pas encore "
+             f"relevé{'s' if len(inconnus) > 1 else ''})")
+    if f.get("sans_clic"):
+        s += " — sans clic : " + ", ".join(f["sans_clic"])
+    if f.get("pas_encore") and src != "sans_lien":
+        s += " — pas encore créé : " + ", ".join(f["pas_encore"])
+    if f.get("partis"):
+        s += " — compté, changé depuis : " + ", ".join(
+            f"{d['nom']} (" + (f"aujourd'hui « {d['nom_jour']} », à {d['chez']}" if d.get("chez")
+                               else "supprimé de GetMySocial") + ")" for d in f["partis"])
+    if f.get("exclus"):
+        s += " — pas compté : " + ", ".join(
+            f"{d['nom']} (" + (f"à {d['chez']} sur cette période" if d.get("chez")
+                               else "pas à cette personne au relevé de cette période") + ")" for d in f["exclus"])
+    return s
+
+
+def _textes_lignes(p: Mapping[str, Any], connues: bool = False) -> List[str]:
+    """Les lignes actives de chaque tranche du fixe, en texte (préfixées de
+    la période quand il y en a plusieurs) ; `connues` : seulement les
+    tranches dont le nombre de lignes est connu (relevé ou saisi)."""
+    cfg = p.get("cfg") or {}
+    df = p.get("detail_f") or []
+    garde = [f for f in df if f.get("lignes") is not None or not connues]
+    if len(df) == 1:
+        return [_ligne_f(f, cfg) for f in garde]
+    return [f"{_libelle_periode(f['du'], f['au'])} : {_ligne_f(f, cfg)}" for f in garde]
+
+
+def _calc_sub(q: Mapping[str, Any], cfg: Mapping[str, Any]) -> str:
+    """« 200 × 0,40 $ + 50 × 0,50 $ »."""
+    dev = "$" if cfg.get("devise") == "USD" else "EUR"
+    s = f"{_nb(q.get('bas'))} × {_taux_court(cfg['taux1'])} {dev}"
+    if q.get("haut"):
+        s += f" + {_nb(q['haut'])} × {_taux_court(cfg['taux2'])} {dev}"
+    return s
+
+
+def _ligne_q_sub(q: Mapping[str, Any], cfg: Mapping[str, Any]) -> str:
+    """« 01/09 → 15/09 : 250 subs → 200 × 0,40 $ + 50 × 0,50 $ = 105,00 $ »."""
+    dev = "$" if cfg.get("devise") == "USD" else "EUR"
+    s = f"{_libelle_periode(q['du'], q['au'])} : {_nb(q.get('subs'))} subs"
+    if q.get("cout") is not None:
+        s += f" → {_calc_sub(q, cfg)} = {_dec(q['cout'])} {dev}"
+    return s + ("" if q.get("complete") else " (quinzaine incomplète)")
+
+
+def _explique_sub(p: Mapping[str, Any], taux: Optional[float]) -> str:
+    cfg = p["cfg"]
+    dq = p.get("detail_q") or []
+    if not dq:
+        s = "aucune quinzaine sur la plage"
+    elif len(dq) == 1:
+        q = dq[0]
+        s = (f"{_nb(q.get('subs'))} subs" + (f" : {_calc_sub(q, cfg)}" if q.get("cout") is not None else "")
+             + ("" if q.get("complete") else ", quinzaine incomplète"))
+    else:
+        inc = sum(1 for q in dq if not q.get("complete"))
+        s = (f"{_nb(len(dq))} quinzaines" + (f", dont {_nb(inc)} incomplète{'s' if inc > 1 else ''}" if inc else "")
+             + f", seuil de {_nb(cfg['seuil'])} subs par quinzaine")
+    if cfg["devise"] == "EUR" and taux and p.get("sub_devise") is not None:
+        s += f" = {_dec(p['sub_devise'])} EUR × {_dec(taux, 4)}"
     return s
 
 
@@ -2880,10 +3800,17 @@ def _explique_primes(p: Mapping[str, Any]) -> str:
 
 
 def lignes_calcul(p: Mapping[str, Any], taux: Optional[float] = None) -> List[str]:
-    """Le détail du gain, en texte : « revenu X », « − fixe Y (…) », « − primes Z (…) »."""
-    L = [f"revenu {_argent(p.get('revenu'))}",
-         f"− fixe {_argent(p.get('fixe'))} ({_explique_fixe(p, taux)})"]
-    if (p.get("cfg") or {}).get("type") == "fixe_primes":
+    """Le détail du gain, en texte : « revenu X », « − fixe Y (…) », les
+    lignes actives, « − primes Z (…) » ; ou, au sub, « − paie au sub Y (…) »."""
+    cfg = p.get("cfg") or {}
+    L = [f"revenu {_argent(p.get('revenu'))}"]
+    if cfg.get("type") == "au_sub":
+        L.append(f"− paie au sub {_argent(p.get('cout_sub'))} ({_explique_sub(p, taux)})")
+        return L
+    L.append(f"− fixe {_argent(p.get('fixe'))} ({_explique_fixe(p, taux)})")
+    if len(p.get("detail_f") or []) == 1:
+        L += _textes_lignes(p)
+    if cfg.get("type") == "fixe_primes":
         L.append(f"− primes {_argent(p.get('primes'))} ({_explique_primes(p)})")
     return L
 
@@ -2892,7 +3819,10 @@ def _form_paie(x: Mapping[str, Any], cle: str, tri: str, sens: str, du: str, au:
     """Le réglage d'une personne, SANS JavaScript : un formulaire POST dans un
     <details>. Clé, période et tri voyagent en champs cachés : le retour se
     fait sur la même vue. Seule la vue du propriétaire le porte : la clé est
-    alors la sienne (cle_paie), jamais celle du salon."""
+    alors la sienne (cle_paie), jamais celle du salon. Tous les champs sont
+    là (sans script, rien ne s'affiche selon le type) : seuls ceux du type
+    choisi sont lus. Une ligne SPAM non réglée n'est PAS mise « au sub »
+    d'office ; les prix au sub portent seulement leurs valeurs par défaut."""
     cfg = (x.get("paie") or {}).get("cfg")
     v = dict(PAIE_DEFAUT, **(cfg or {}))
     caches = "".join(f'<input type="hidden" name="{n}" value="{_e(val)}">'
@@ -2902,54 +3832,132 @@ def _form_paie(x: Mapping[str, Any], cle: str, tri: str, sens: str, du: str, au:
     def choix(options, courant):
         return "".join(f'<option value="{_e(c)}"{" selected" if c == courant else ""}>{_e(lib)}</option>'
                        for c, lib in options)
+
+    def taux_champ(val: Any) -> str:
+        return _taux_court(val).replace(",", ".")
     montant = ("%.2f" % float(v["montant"] or 0)).rstrip("0").rstrip(".")
     try:
         fin = dt.date.fromisoformat(_aujourdhui()) + dt.timedelta(days=366)
     except ValueError:
         fin = dt.date.today() + dt.timedelta(days=366)
+    lignes = "" if v.get("lignes") in (None, "") else str(int(v["lignes"]))
+    # les lignes FORCÉES : seulement sur une vue par période (les quinzaines,
+    # ou mois, qu'elle touche, en entier). « forcer_avant » : la valeur
+    # montrée — enregistrer le montant sans toucher à ce champ ne retire
+    # rien, même si les tranches de la période n'ont pas toutes la même.
+    a_f, b_f = _date_arg(du), _date_arg(au)
+    if a_f and b_f and a_f <= b_f:
+        tr_f = decouper(a_f, b_f, v["frequence"])
+        vals = {(v.get("forces") or {}).get(_k_entiere(t)) for t in tr_f}
+        pre = str(next(iter(vals))) if len(vals) == 1 and None not in vals else ""
+        quoi = "des quinzaines" if v["frequence"] == "quinzaine" else "des mois"
+        forcer = (f'<label>Forcer les lignes {quoi} du {_jour_court(tr_f[0]["p_du"].isoformat())} au '
+                  f'{_jour_court(tr_f[-1]["p_au"].isoformat())}, même si GetMySocial a compté (vide : ne plus '
+                  f'forcer)<input type="number" name="forcer_lignes" value="{_e(pre)}" min="0" max="{LIGNES_MAX}" '
+                  f'step="1" inputmode="numeric"></label><input type="hidden" name="forcer_avant" value="{_e(pre)}">')
+    else:
+        forcer = ('<div class="det">Forcer les lignes d\'une quinzaine : choisissez-la d\'abord en haut de la '
+                  'page.</div>')
     return ('<details class="mod"><summary>modifier</summary>'
             f'<form class="fpaie" method="post" action="/infloww/liens/paie">{caches}'
             f'<label>Type<select name="type">{choix(((t, LIB_TYPES[t]) for t in TYPES_PAIE), v["type"])}'
             '</select></label>'
-            f'<label>Montant<input type="number" name="montant" value="{_e(montant)}" min="0" '
-            f'max="{int(MONTANT_MAX)}" step="0.01" inputmode="decimal" required></label>'
             f'<label>Devise<select name="devise">{choix((("USD", "$ (USD)"), ("EUR", "€ (EUR), converti en $")), v["devise"])}'
             '</select></label>'
+            '<fieldset><legend>Fixe, Fixe + primes</legend>'
+            f'<label>Montant par ligne<input type="number" name="montant" value="{_e(montant)}" min="0" '
+            f'max="{int(MONTANT_MAX)}" step="0.01" inputmode="decimal"></label>'
             f'<label>Fréquence<select name="frequence">'
             f'{choix((("quinzaine", "par quinzaine"), ("mois", "par mois")), v["frequence"])}'
             '</select></label>'
+            '<label>Lignes payées tant que GetMySocial n\'a pas répondu, ou avant le premier lien GMS '
+            '(facultatif)<input type="number" '
+            f'name="lignes" value="{_e(lignes)}" min="1" max="{LIGNES_MAX}" step="1" inputmode="numeric"></label>'
+            f'{forcer}</fieldset>'
+            '<fieldset><legend>Au sub (par quinzaine)</legend>'
+            f'<label>Prix par sub jusqu\'au seuil<input type="number" name="taux1" value="{_e(taux_champ(v["taux1"]))}" '
+            f'min="0" max="{int(TAUX_SUB_MAX)}" step="0.001" inputmode="decimal"></label>'
+            f'<label>Seuil (subs par quinzaine)<input type="number" name="seuil" value="{_e(v["seuil"])}" '
+            f'min="0" max="{SEUIL_SUB_MAX}" step="1" inputmode="numeric"></label>'
+            f'<label>Prix par sub au-delà<input type="number" name="taux2" value="{_e(taux_champ(v["taux2"]))}" '
+            f'min="0" max="{int(TAUX_SUB_MAX)}" step="0.001" inputmode="decimal"></label>'
+            '</fieldset>'
             f'<label>Payé depuis (facultatif)<input type="date" name="depuis" value="{_e(v["depuis"])}" '
             f'min="{_e(PLANCHER.isoformat())}" max="{_e(fin.isoformat())}"></label>'
             '<button type="submit">Enregistrer</button></form></details>')
 
 
+def _force_applicable(k: str, frequence: str) -> bool:
+    """Une tranche forcée compte-t-elle avec cette fréquence ? (une quinzaine
+    forcée ne dit rien d'une paie au mois : elle est montrée, pas comptée)"""
+    try:
+        du, au = (dt.date.fromisoformat(x) for x in str(k).split("|", 1))
+    except ValueError:
+        return False
+    return (mois_de if frequence == "mois" else quinzaine_de)(du) == (du, au)
+
+
 def _cellule_paie(x: Mapping[str, Any], cle: str, tri: str, sens: str, du: str, au: str) -> str:
     p = x.get("paie") or {}
     cfg = p.get("cfg")
-    det = ""
-    if cfg and cfg.get("type") in ("fixe", "fixe_primes") and cfg.get("depuis"):
-        det = f'<div class="det">payé depuis le {_e(_jour_long(cfg["depuis"]))}</div>'
-    return (f'<td class="paie"><span class="pr">{_e(p.get("resume") or resume_paie(cfg))}</span>{det}'
-            f'{_form_paie(x, cle, tri, sens, du, au)}</td>')
+    det: List[str] = []
+    if cfg and cfg.get("type") in TYPES_PAYES and cfg.get("depuis"):
+        det.append(f"payé depuis le {_jour_long(cfg['depuis'])}")
+    if cfg and cfg.get("type") == "au_sub":
+        det.append("par quinzaine, sans fixe")
+    if cfg and cfg.get("type") in TYPES_FIXE and cfg.get("lignes"):
+        det.append(f"lignes payées tant que GetMySocial manque : {_nb(cfg['lignes'])}")
+    if cfg and cfg.get("type") in TYPES_FIXE and cfg.get("forces"):
+        fz = sorted(cfg["forces"].items())
+        det.append("lignes forcées à la main : " + " ; ".join(
+            f"{_libelle_periode(*k.split('|', 1))} : {_nb(n)}"
+            + ("" if _force_applicable(k, cfg["frequence"]) else f" (ignorée : paie au {cfg['frequence']})")
+            for k, n in fz[:4]) + (f" ; et {_nb(len(fz) - 4)} autre(s)" if len(fz) > 4 else ""))
+    cl = "pr ps" if cfg and cfg.get("type") == "au_sub" else "pr"
+    return (f'<td class="paie"><span class="{cl}">{_e(p.get("resume") or resume_paie(cfg))}</span>'
+            + (f'<div class="det">{"<br>".join(_e(d) for d in det)}</div>' if det else "")
+            + f'{_form_paie(x, cle, tri, sens, du, au)}</td>')
+
+
+def _details_tranches(p: Mapping[str, Any]) -> str:
+    """Le détail tranche par tranche (subs et primes ou paie au sub, lignes
+    actives), replié, quand la plage en compte plusieurs."""
+    cfg = p.get("cfg") or {}
+    df, dq = p.get("detail_f") or [], p.get("detail_q") or []
+    if len(df) <= 1 and len(dq) <= 1:
+        return ""
+    par: Dict[Tuple[str, str], List[str]] = {}
+    for q in dq:
+        par.setdefault((q["du"], q["au"]), []).append(
+            _ligne_q_sub(q, cfg) if cfg.get("type") == "au_sub" else _ligne_q(q))
+    for f in df:
+        k = (f["du"], f["au"])
+        if k in par:
+            par[k].append(_ligne_f(f, cfg))
+        else:
+            par[k] = [f"{_libelle_periode(*k)} : {_ligne_f(f, cfg)}"]
+    quoi = "par quinzaine" if (cfg.get("type") == "au_sub" or cfg.get("frequence") != "mois") else "par période"
+    return (f'<details class="qz"><summary>{quoi}</summary><div class="det">'
+            + "<br>".join(_e(" ; ".join(v)) for _k, v in sorted(par.items())) + "</div></details>")
 
 
 def _cellule_gain(x: Mapping[str, Any], taux: Optional[float]) -> str:
     """Le DERNIER chiffre de la ligne : vert si le VA rapporte au moins ce
     qu'il coûte, rouge sinon ; « — » s'il n'est pas réglé ou si un élément
-    manque (dit dessous). Le détail du calcul sous le montant, et au survol."""
+    manque (dit dessous, avec les lignes actives déjà connues). Le détail du
+    calcul sous le montant, et au survol."""
     p = x.get("paie") or {}
     cfg = p.get("cfg")
-    if not cfg or cfg.get("type") not in ("fixe", "fixe_primes"):
+    if not cfg or cfg.get("type") not in TYPES_PAYES:
         return '<td class="n gain">—</td>'
     g = p.get("gain")
+    q = _details_tranches(p)
     if g is None:
-        return f'<td class="n gain">—<div class="det manque">{_e(p.get("raison") or "incalculable")}</div></td>'
+        connu = _textes_lignes(p, connues=True)
+        extra = f'<div class="det">{"<br>".join(_e(l) for l in connu)}</div>' if connu and not q else ""
+        return (f'<td class="n gain">—<div class="det manque">{_e(p.get("raison") or "incalculable")}</div>'
+                f'{extra}{q}</td>')
     L = lignes_calcul(p, taux)
-    q = ""
-    dq = p.get("detail_q") or []
-    if len(dq) > 1:
-        q = ('<details class="qz"><summary>par quinzaine</summary><div class="det">'
-             + "<br>".join(_e(_ligne_q(z)) for z in dq) + "</div></details>")
     return (f'<td class="n gain" title="{_e(" ".join(L))}"><span class="nv {"gp" if g >= 0 else "gn"}">'
             f'{_argent(g, signe=True)}</span><div class="det calc">{"<br>".join(_e(l) for l in L)}</div>{q}</td>')
 
@@ -2993,48 +4001,85 @@ def _avert_paie(t: Mapping[str, Any], lignes: List[Mapping[str, Any]]) -> List[s
                      f'dernier taux connu, publié le {_e(_jour_long(tx.get("date")))}.</div>')
     if P.get("en_attente"):
         n, r = int(P["en_attente"]), int(P.get("a_relire") or 0)
-        h.append(f'<div class="avert">Primes : {_nb(n)} quinzaine{"s" if n > 1 else ""} pas encore '
-                 f'lue{"s" if n > 1 else ""} dans MyPuls'
+        h.append(f'<div class="avert">Subs par quinzaine (primes, paie au sub) : {_nb(n)} '
+                 f'quinzaine{"s" if n > 1 else ""} pas encore lue{"s" if n > 1 else ""} dans MyPuls'
                  + (f' (dont {_nb(r)} à relire : un lien y manquait ou était sans nombre de subs)' if r else "")
                  + '. Lecture en arrière-plan, '
                  f'{_nb(QUINZ_APPELS_MAX)} au plus par affichage (le débit MyPuls est limité) : rechargez '
                  "dans une minute. Gain / perte « — » en attendant.</div>")
     if P.get("pause"):
-        h.append(f'<div class="avert">Primes : MyPuls a refusé une lecture ({_e(P["pause"])}) : pas de '
+        h.append(f'<div class="avert">Subs par quinzaine : MyPuls a refusé une lecture ({_e(P["pause"])}) : pas de '
                  f'nouvelle lecture de quinzaine pendant {_nb(MYPULS_ECHEC_S)} s.</div>')
     elif P.get("erreurs"):
         k, r = sorted(P["erreurs"].items())[0]
-        h.append(f'<div class="avert">Primes : MyPuls n\'a pas répondu pour {_nb(len(P["erreurs"]))} '
+        h.append(f'<div class="avert">Subs par quinzaine : MyPuls n\'a pas répondu pour {_nb(len(P["erreurs"]))} '
                  f'quinzaine(s), dont le {_e(_libelle_periode(*k))} ({_e(r)}) : Gain / perte « — » pour les '
                  "personnes concernées.</div>")
+    L = P.get("lignes") or {}
+    if L.get("inconnus"):
+        info = L.get("info") or {}
+        n = int(L["inconnus"])
+        if info.get("budget"):
+            pourquoi = (f"les {_nb(info['budget'])} appels GetMySocial du jour réservés à ce relevé sont faits "
+                        "(le quota est partagé avec le tableau de bord) : la suite demain")
+        elif info.get("pause"):
+            pourquoi = (f"GetMySocial n'accepte plus d'appel ({_e(info['pause'])}) : le relevé reprendra à un "
+                        "prochain affichage")
+        elif info.get("en_cours"):
+            pourquoi = "relevé en arrière-plan : rechargez dans une minute"
+        else:
+            pourquoi = ("dernier relevé raté" + (f" ({_e(L['rates'][0])})" if L.get("rates") else "")
+                        + " : retenté dans 10 min, trois fois par jour au plus")
+        s = "s" if n > 1 else ""
+        h.append(f'<div class="avert">Lignes actives : {_nb(n)} relevé{s} de clics GetMySocial (un par lien '
+                 f'GMS et par tranche du fixe) pas encore connu{s} — {pourquoi}. '
+                 "Gain / perte « — » en attendant pour les personnes concernées, sauf « lignes payées » "
+                 "saisies à la main, bornées par les lignes connues (jamais un nombre de lignes inventé).</div>")
     return h
 
 
 def _note_paie(t: Mapping[str, Any], du: str) -> List[str]:
     P = t.get("paie") or {}
-    primes = ", ".join(f"{_nb(b)}{'–' + _nb(PALIERS_PRIMES[i - 1][0] - 1) if i else ' et plus'} +{_montant_court(v)}\u00a0$"
+    primes = ", ".join(f"{_nb(b)}{'–' + _nb(PALIERS_PRIMES[i - 1][0] - 1) if i else ' et plus'} +{_montant_court(v)} $"
                        for i, (b, v) in reversed(list(enumerate(PALIERS_PRIMES))))
     note = ["<b>Paiement</b> : réglé par personne (« modifier ») ; <b>Gain / perte</b> = revenu net de la "
-            "personne sur la plage − fixe − primes, en dollars (vert si ≥ 0, rouge sinon) ; « — » sans "
-            "réglage ou quand un élément manque",
+            "personne sur la plage − coût (fixe × lignes actives + primes, ou paie au sub), en dollars (vert "
+            "si ≥ 0, rouge sinon) ; « — » sans réglage ou quand un élément manque",
             ("<b>Plage</b> : la période affichée, à partir de « payé depuis » s'il tombe dedans ; revenu = "
              "gains nets MyPuls de la période" if du else
              "<b>Plage</b> : de « payé depuis » (sinon de la création du plus ancien lien Infloww de la "
              "personne) à aujourd'hui ; revenu = gains nets Infloww cumulés"),
             "<b>Fixe</b> au prorata des jours : quinzaines du 1er au 15 et du 16 à la fin du mois (paie le 16 "
             "et le 1er), ou mois civil",
-            f"<b>Primes</b> par quinzaine, sur les subs de la personne lus dans MyPuls, non cumulables "
-            f"(seul le palier atteint compte) : {_e(primes)} ; une quinzaine coupée par la plage est comptée "
-            "sur ses seuls jours (« quinzaine incomplète »)",
+            "<b>Lignes</b> : une paie de base par ligne ACTIVE — un lien GetMySocial de la personne (un "
+            "iPhone) qui a fait au moins 1 clic, tous pays, sur la quinzaine ou le mois (partie incluse dans "
+            "la plage) : fixe × lignes actives ; clics relevés lien par lien en arrière-plan et gardés "
+            "(tranche close définitive, tranche en cours relue une fois par jour, "
+            f"{_nb(LIGNES_APPELS_JOUR)} appels GetMySocial par jour au plus) ; un 0 n'est compté qu'une fois "
+            "relu dans la réponse brute. Chaque relevé note à qui était le lien, et une tranche close "
+            "entièrement relevée est FIGÉE : un lien renommé ou supprimé ensuite ne change plus ses lignes "
+            "(il est dit sous la ligne). Un lien créé après la fin d'une tranche n'y compte pas (aucun appel) ; "
+            "avant le premier lien GetMySocial de la personne : « pas encore de lien ». Tant qu'un compte "
+            "manque, les « lignes payées » saisies à la main, jamais moins que les lignes déjà confirmées "
+            "actives ni plus que la personne n'a de liens (sans lien GetMySocial : telles quelles), sinon "
+            "« — ». « Forcer les lignes » (vue par période) impose le nombre d'une quinzaine ou d'un mois, "
+            "même compté par GetMySocial : pour un passé faussé, dit « forcées à la main »",
+            f"<b>Primes</b> par quinzaine, une fois par personne (pas par ligne), sur les subs de la personne "
+            f"lus dans MyPuls, non cumulables (seul le palier atteint compte) : {_e(primes)} ; une quinzaine "
+            "coupée par la plage est comptée sur ses seuls jours (« quinzaine incomplète »)",
+            "<b>Au sub</b> (sans fixe) : un prix par sub jusqu'au seuil, un autre au-delà, par quinzaine sur "
+            "les subs de la personne lus dans MyPuls, au marginal (0,40 $ jusqu'à 200 puis 0,50 $ : 250 subs = "
+            "200 × 0,40 + 50 × 0,50 = 105 $) ; une quinzaine coupée par la plage compte les subs de ses seuls "
+            "jours, avec le seuil entier (« quinzaine incomplète »)",
             "Top Performer, Bonus Agence, Bonus Elite et malus : décidés à la main, non comptés"]
     tx = P.get("taux") or {}
     if tx.get("taux") is not None:
-        note.append(f"euros convertis au taux BCE du {_e(_jour_long(tx.get('date')))} : 1\u00a0EUR = "
-                    f"{_e(_dec(tx['taux'], 4))}\u00a0$ (le même pour toute la plage)")
+        note.append(f"euros convertis au taux BCE du {_e(_jour_long(tx.get('date')))} : 1 EUR = "
+                    f"{_e(_dec(tx['taux'], 4))} $ (le même pour toute la plage)")
     elif P.get("taux") is not None:
         note.append("aucun taux EUR → USD connu : coût des VA payés en euros « — »")
     else:
-        note.append("un fixe en euros est converti au taux BCE du jour")
+        note.append("un montant en euros est converti au taux BCE du jour")
     return note
 
 
@@ -3121,11 +4166,13 @@ td.vieux{{color:var(--faible)}}
 .nv.v3{{background:#166534;color:#fff}} .nv.o1{{background:#fbbf24;color:#1c1203}}
 .nv.o2{{background:#f97316;color:#1c0a02}} .nv.r{{background:#dc2626;color:#fff}}
 .nv.gp{{background:#16a34a;color:#fff}} .nv.gn{{background:#dc2626;color:#fff}}
-td.paie{{min-width:118px}} td.paie .pr{{white-space:nowrap}}
+td.paie{{min-width:118px}} td.paie .pr{{white-space:nowrap}} td.paie .pr.ps{{white-space:normal}}
 td details{{margin:4px 0 0}} td summary{{font-size:11px;padding:2px 0}}
 td details.mod summary{{color:var(--acc)}}
 .fpaie{{display:grid;gap:6px;margin-top:6px;min-width:176px;max-width:220px}}
 .fpaie label{{display:grid;gap:2px;font-size:11px;color:var(--faible)}}
+.fpaie fieldset{{display:grid;gap:6px;margin:0;padding:6px 7px 7px;border:1px solid var(--bord);border-radius:8px;min-width:0}}
+.fpaie legend{{font-size:11px;color:var(--faible);padding:0 3px}}
 .fpaie input,.fpaie select{{background:var(--fond);color:var(--texte);border:1px solid var(--bord);border-radius:6px;padding:5px 6px;font:inherit;font-size:13px;min-width:0;color-scheme:dark}}
 .fpaie button{{background:var(--acc);color:#1c0a02;border:0;border-radius:6px;padding:7px 10px;font:inherit;font-weight:700;cursor:pointer}}
 /* le détail du gain se replie : sur une ligne, il élargissait la colonne

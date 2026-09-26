@@ -21982,8 +21982,28 @@ try:
                _il._dormir_q, dict(_il._FIL_Q), _il.QUINZ_APPELS_MAX)
     # la cle du proprietaire (paiement), a part de celle du salon
     _savKPL = _il.CLE_PAIE_FICHIER
+    # les lignes actives : clics GetMySocial PAR LIEN (bouchonnes), leur cache
+    # disque dans le dossier temporaire, releve sur place (pas de fil)
+    _savLgL = (_gmL.analytics_for_link, _il.LIGNES_FICHIER, _il.LIGNES_EN_FOND, _il.LIGNES_APPELS_JOUR,
+               _il._lancer_lignes)
     try:
         _il.CLE_PAIE_FICHIER = _tmpL / "cle_paie"
+        _il.LIGNES_FICHIER = _tmpL / "lignes.json"
+        _il.LIGNES_EN_FOND = False
+        _il.LIGNES_APPELS_JOUR = 100000
+        # un lien a 5 clics, sauf : « zero » (0 clic, confirme par la reponse
+        # brute si le lien est aussi dans _US["zero"]), « illisible » (0 clic,
+        # reponse brute non lue), « rate » (pas de releve)
+        _LGL = {"appels": [], "zero": set(), "illisible": set(), "rate": set()}
+
+        def _anaLgL(lid, d0, d1):
+            _LGL["appels"].append((lid, d0, d1))
+            if lid in _LGL["rate"]:
+                return None, None
+            if lid in _LGL["zero"] or lid in _LGL["illisible"]:
+                return 0, {}
+            return 5, {"US": 3, "FR": 2}
+        _gmL.analytics_for_link = _anaLgL
         _il.PAIE_FICHIER = _tmpL / "paie.json"
         _il.QUINZ_FICHIER = _tmpL / "quinzaines.json"
         _il.BCE_FICHIER = _tmpL / "bce.json"
@@ -23052,6 +23072,10 @@ try:
                        "Casse": _cfgL("fixe", -5)})
         _JOUR["j"] = "2026-09-26"
         _il._MYPULS_CACHE.clear(); _il._MYPULS_ECHECS.clear(); _MPL["appels"].clear(); _MPL["panne"] = None
+        # « chaque ligne c est une paye » : ( BO7 ) 4 n a fait aucun clic
+        # (zero confirme dans la reponse brute), les autres liens en ont fait
+        _LGL["zero"].add("lnk_7")
+        _US["zero"].add(("lnk_7",))
         _tInL = _il.tableau_periode(_DU, _AU, us="cache")
         _tPy = _il.avec_paie(_tInL)
         _pPy = {x["nom"]: x for x in _tPy["lignes"]}
@@ -23062,11 +23086,13 @@ try:
                                         "palier": "100–149 subs"}], str(_nqL.get("detail_q")))
         check("paie : la lecture MyPuls de la periode sert aussi sa quinzaine (aucun appel de plus)",
               len(_MPL["appels"]) == 1, str(_MPL["appels"]))
-        check("paie : un VA qui coute plus qu il ne rapporte -> gain negatif",
-              _pPy["Bryan"]["paie"]["fixe"] == 80.0 and _pPy["Bryan"]["gain"] == -5.0)
-        check("paie : un fixe en EUR converti au taux BCE (bouchonne a 1,2), lu une fois",
-              _pPy["BO7"]["paie"]["fixe_devise"] == 20.0 and _pPy["BO7"]["paie"]["fixe"] == 24.0
-              and _pPy["BO7"]["gain"] == -14.5 and _tPy["paie"]["taux"]["taux"] == 1.2 and _BCEL["n"] == 1)
+        check("paie : un VA qui coute plus qu il ne rapporte -> gain negatif (2 liens actifs : 2 fixes)",
+              _pPy["Bryan"]["paie"]["fixe"] == 160.0 and _pPy["Bryan"]["gain"] == -85.0,
+              str((_pPy["Bryan"]["paie"].get("fixe"), _pPy["Bryan"]["gain"])))
+        check("paie : un fixe en EUR converti au taux BCE (bouchonne a 1,2), lu une fois, x 3 lignes actives sur 4",
+              _pPy["BO7"]["paie"]["fixe_devise"] == 60.0 and _pPy["BO7"]["paie"]["fixe"] == 72.0
+              and _pPy["BO7"]["gain"] == -62.5 and _tPy["paie"]["taux"]["taux"] == 1.2 and _BCEL["n"] == 1,
+              str((_pPy["BO7"]["paie"].get("fixe_devise"), _pPy["BO7"]["paie"].get("fixe"), _pPy["BO7"]["gain"])))
         _il.avec_paie(_tInL)
         check("paie : le taux du jour est garde (pas de seconde lecture BCE)", _BCEL["n"] == 1)
         check("paie : incalculable ou non regle -> None (jamais un zero invente), et la raison",
@@ -23076,7 +23102,7 @@ try:
         _TPy = _tPy["paie"]["totaux"]
         check("paie : totaux sur les personnes reglees dont le gain se calcule",
               _TPy["configures"] == 4 and _TPy["calcules"] == 3 and abs(_TPy["revenu"] - 335.16) < 1e-9
-              and _TPy["cout"] == 144.0 and _TPy["gain"] == 191.16, str(_TPy))
+              and _TPy["cout"] == 272.0 and _TPy["gain"] == 63.16, str(_TPy))
         check("paie : reglage illisible et personne absente de GetMySocial : dits, pas avales",
               _tPy["paie"]["orphelins"] == ["Parti"] and len(_tPy["paie"]["mauvais"]) == 1
               and "Casse" in _tPy["paie"]["mauvais"][0])
@@ -23098,18 +23124,23 @@ try:
               and '<span class="pr">200\u00a0$ / quinzaine</span>' in _lbL
               and '<span class="pr">—</span>' in _lgL)
         check("page paie : gain vert si >= 0, rouge si < 0, dernier de la ligne",
-              '<span class="nv gp">+210,66\u00a0$</span>' in _lnL and '<span class="nv gn">−5,00\u00a0$</span>' in _lbL
+              '<span class="nv gp">+210,66\u00a0$</span>' in _lnL and '<span class="nv gn">−85,00\u00a0$</span>' in _lbL
               and _lnL.rfind("<td") == _lnL.find('<td class="n gain"'))
         check("page paie : le detail du calcul sous le montant (revenu - fixe - primes, palier)",
-              "revenu 250,66\u00a0$<br>− fixe 30,00\u00a0$ (75\u00a0$ / quinzaine × 6/15 j)<br>"
+              "revenu 250,66\u00a0$<br>− fixe 30,00\u00a0$ (75\u00a0$ / quinzaine × 6/15 j × 1 ligne)<br>"
+              "1 ligne active sur 1 (× 30\u00a0$)<br>"
               "− primes 10,00\u00a0$ (101 subs, palier 100–149 subs, quinzaine incomplète)" in _lnL
               and 'title="revenu 250,66\u00a0$ − fixe 30,00' in _lnL
-              and "= 20,00\u00a0EUR × 1,2000" in _ligneL(_hPy, "BO7"))
+              and "= 60,00\u00a0EUR × 1,2000" in _ligneL(_hPy, "BO7"))
+        check("page paie : sous la ligne, « 3 lignes actives sur 4 (x ...) » et les liens sans clic",
+              "(100\u00a0EUR / mois × 6/30 j × 3 lignes = 60,00\u00a0EUR × 1,2000)" in _ligneL(_hPy, "BO7")
+              and "3 lignes actives sur 4 (× 20\u00a0EUR) — sans clic : ( BO7 ) 4" in _ligneL(_hPy, "BO7")
+              and "2 lignes actives sur 2 (× 80\u00a0$)" in _lbL, _ligneL(_hPy, "BO7")[-900:])
         check("page paie : non regle ou incalculable -> « — », avec la raison s il est regle",
               '<td class="n gain">—</td>' in _lgL and '<td class="n gain">—</td>' in _ligneL(_hPy, "ANDRY")
               and '<td class="n gain">—<div class="det manque">' in _ligneL(_hPy, "Roucham"))
         check("page paie : ligne de totaux (personnes reglees, partiel dit)",
-              '<span class="nv gp">+191,16\u00a0$</span>' in _hPy and "partiel : 3 personnes sur 4" in _hPy
+              '<span class="nv gp">+63,16\u00a0$</span>' in _hPy and "partiel : 3 personnes sur 4" in _hPy
               and "4 réglés" in _hPy)
         check("page paie : la note dit le taux et sa date, le prorata, les paliers, les primes non comptees",
               "taux BCE du 25/09/2026 : 1\u00a0EUR = 1,2000\u00a0$" in _hPy and "au prorata des jours" in _hPy
@@ -23136,8 +23167,8 @@ try:
         check("page paie : aucun <script, aucun gestionnaire on...=",
               "<script" not in _hPy and not _reL.search(r"<[^>]*\son[a-z]+\s*=", _hPy))
         check("page paie : tri par gain (les « — » en bas), lien d en-tete",
-              [x["nom"] for x in _il.trier(_tPy["lignes"], "gain", "desc")][:3] == ["VA 1 Noum", "Bryan", "BO7"]
-              and [x["nom"] for x in _il.trier(_tPy["lignes"], "gain", "asc")][:3] == ["BO7", "Bryan", "VA 1 Noum"]
+              [x["nom"] for x in _il.trier(_tPy["lignes"], "gain", "desc")][:3] == ["VA 1 Noum", "BO7", "Bryan"]
+              and [x["nom"] for x in _il.trier(_tPy["lignes"], "gain", "asc")][:3] == ["Bryan", "BO7", "VA 1 Noum"]
               and 'href="?tri=gain&amp;sens=desc&amp;du=2026-09-21&amp;au=2026-09-26&amp;k=K1"' in _hPy)
         check("page paie : lisible a 360 px (le tableau defile dans sa boite, formulaire compact)",
               "overflow-x:auto" in _hPy and ".fpaie{display:grid" in _hPy and "max-width:220px" in _hPy)
@@ -23167,7 +23198,8 @@ try:
                          for m in _il.messages_discord(_tPy, "https://youl4b.com/x"))
         check("discord : aucun paiement ni gain (ni montant, ni colonne, ni prime)",
               not any(w in _MpL for w in ("Paiement", "Gain", "prime", "fixe", "EUR", "revenu", "210,66",
-                                          "191,16", "−5,00", "quinzaine")), _MpL[:200])
+                                          "63,16", "−85,00", "−62,50", "quinzaine", "lignes actives", "sans clic",
+                                          "au sub", "/ sub jusqu")), _MpL[:200])
         _srcAvL = _srcIL.split("def _rafraichir", 1)[1].split("\ndef ", 1)[0] + \
             _srcIL.split("def tableau(", 1)[1].split("\ndef ", 1)[0]
         _srcILn = _plL("infloww_liens.py").read_text(encoding="utf-8")
@@ -23183,7 +23215,7 @@ try:
         _tBa = _il.avec_paie(_tInL)
         _hBa = _il.page_html(_tBa)
         check("paie : BCE muette -> dernier taux connu, et la page dit de quand",
-              abs({x["nom"]: x for x in _tBa["lignes"]}["BO7"]["paie"]["fixe"] - 22.0) < 1e-9
+              abs({x["nom"]: x for x in _tBa["lignes"]}["BO7"]["paie"]["fixe"] - 66.0) < 1e-9
               and "la BCE n'a pas répondu (RuntimeError : HTTP 503" in _hBa
               and "dernier taux connu, publié le 20/09/2026" in _hBa and "1\u00a0EUR = 1,1000\u00a0$" in _hBa)
         _il.avec_paie(_tInL)
@@ -23194,7 +23226,7 @@ try:
         _hBn = _il.page_html(_tBn)
         check("paie : aucun taux connu -> cout EUR « — » (jamais un taux invente), et c est dit",
               _pBn["BO7"]["gain"] is None and "taux EUR → USD inconnu" in _pBn["BO7"]["paie"]["raison"]
-              and _pBn["Bryan"]["gain"] == -5.0 and "Aucun taux EUR → USD connu" in _hBn
+              and _pBn["Bryan"]["gain"] == -85.0 and "Aucun taux EUR → USD connu" in _hBn
               and "coût des VA payés en euros est « — »" in _hBn)
 
         # deux quinzaines dans la plage : chacune lue sur ses seuls jours ;
@@ -23253,16 +23285,16 @@ try:
         _tCr = _il.construire([dict(_infL(5, "Andry", "87", 715, 35, 17800), cree="2026-09-20"),
                                _infL(6, "Jaurel", "83", 3612, 266, 12200)], _GMS, lu_a=1790380000)
         _pCr = {x["nom"]: x for x in _il.avec_paie(_tCr)["lignes"]}
-        check("paie depuis toujours : debut = creation du plus ancien lien (75 x 7/15 = 35 $)",
-              _pCr["ANDRY"]["paie"]["debut"] == "2026-09-20" and _pCr["ANDRY"]["paie"]["fixe"] == 35.0
-              and _pCr["ANDRY"]["gain"] == 143.0)
+        check("paie depuis toujours : debut = creation du plus ancien lien (75 x 7/15 = 35 $ par ligne, 2 lignes)",
+              _pCr["ANDRY"]["paie"]["debut"] == "2026-09-20" and _pCr["ANDRY"]["paie"]["fixe"] == 70.0
+              and _pCr["ANDRY"]["gain"] == 108.0, str((_pCr["ANDRY"]["paie"].get("fixe"), _pCr["ANDRY"]["gain"])))
         check("paie depuis toujours : ni date de creation ni « paye depuis » -> « — », et pourquoi",
               _pCr["Bryan"]["gain"] is None and "début inconnu" in _pCr["Bryan"]["paie"]["raison"])
         # « paye depuis » apres la periode : rien a payer dessus
         _ecrire_paieL({"Bryan": _cfgL("fixe", 200, depuis="2026-09-25")})
         _pDp = {x["nom"]: x for x in _il.avec_paie(_tInL)["lignes"]}["Bryan"]["paie"]
-        check("paie : « paye depuis » dans la periode -> fixe a partir de ce jour (200 x 2/15)",
-              abs(_pDp["fixe"] - 200 * 2 / 15) < 1e-9 and _pDp["debut"] == "2026-09-25")
+        check("paie : « paye depuis » dans la periode -> fixe a partir de ce jour (200 x 2/15, x 2 lignes)",
+              abs(_pDp["fixe"] - 2 * 200 * 2 / 15) < 1e-9 and _pDp["debut"] == "2026-09-25")
         # MyPuls refuse une quinzaine : arret au premier echec, pause, « — » et dit
         _ecrire_paieL({"VA 1 Noum": _cfgL("fixe_primes", 75, depuis="2026-06-01")})
         _MPL["panne"] = {"ok": False, "error": "Quota MyPuls atteint (429), réessai dans 60s"}
@@ -23342,13 +23374,13 @@ try:
               and "relu au plus une fois par heure" in _bT2["paie"]["raison"], str(_MPL["appels"]))
         _vieillirL("relu", "lu", de=_il.QUINZ_TROU_REESSAI_S + 5)
         _bT3 = _vueTrouL("2026-09-01", "2026-09-20")
-        check("paie trou : passe l heure, relue puis complete -> le gain SE CALCULE (75 - fixe 100 - 0 prime)",
-              len(_MPL["appels"]) == 3 and _bT3["gain"] == -25.0 and _bT3["paie"]["primes"] == 0.0
+        check("paie trou : passe l heure, relue puis complete -> le gain SE CALCULE (75 - fixe 2 x 100 - 0 prime)",
+              len(_MPL["appels"]) == 3 and _bT3["gain"] == -125.0 and _bT3["paie"]["primes"] == 0.0
               and _tranchesL()[_QAL]["subs"]["83"] == 30 and _tranchesL()[_QAL]["subs"]["47"] == 101,
               f"{len(_MPL['appels'])} {_bT3['paie'].get('raison')}")
         _bT3b = _vueTrouL("2026-09-01", "2026-09-20")
         check("paie trou : ... et ensuite definitive (plus aucune lecture de tranche)",
-              len(_MPL["appels"]) == 1 and _bT3b["gain"] == -25.0)
+              len(_MPL["appels"]) == 1 and _bT3b["gain"] == -125.0)
         # un lien que MyPuls ne connait pas encore (absent de la lecture)
         _QCL = "2026-08-01|2026-08-15"
         _bT4 = _vueTrouL("2026-08-01", "2026-08-20", [("2026-08-01", "2026-08-15"), ("2026-08-16", "2026-08-20")],
@@ -23358,9 +23390,9 @@ try:
               and "83" not in _tranchesL()[_QCL]["subs"], _bT4["paie"]["raison"])
         _vieillirL("relu", "lu", de=_il.QUINZ_TROU_REESSAI_S + 5)
         _bT5 = _vueTrouL("2026-08-01", "2026-08-20")
-        # aout : la quinzaine du 16 au 31 a 16 jours, 5 payes -> 75 x 5/16
+        # aout : la quinzaine du 16 au 31 a 16 jours, 5 payes -> 75 x 5/16 ; 2 lignes
         check("paie trou : ... MyPuls le connait ensuite -> relue, gain calcule",
-              _bT5["gain"] == round(75 - 75 - 75 * 5 / 16, 2) and _tranchesL()[_QCL]["subs"]["83"] == 30,
+              _bT5["gain"] == round(75 - 2 * (75 + 75 * 5 / 16), 2) and _tranchesL()[_QCL]["subs"]["83"] == 30,
               str((_bT5["gain"], _bT5["paie"].get("raison"))))
         # une tranche gelee par la version d avant (None sur disque) guerit
         _tvL = _tranchesL()
@@ -23368,7 +23400,7 @@ try:
         _il.QUINZ_FICHIER.write_text(_jsL.dumps({"tranches": _tvL}))
         _bT6 = _vueTrouL("2026-07-01", "2026-07-20")
         check("paie trou : une tranche gelee avec un None par l ancienne version est relue, et guerit",
-              _bT6["gain"] == round(75 - 75 - 75 * 5 / 16, 2)
+              _bT6["gain"] == round(75 - 2 * (75 + 75 * 5 / 16), 2)
               and _tranchesL()["2026-07-01|2026-07-15"]["subs"]["83"] == 30,
               str((_bT6["gain"], _bT6["paie"].get("raison"))))
         # MyPuls a compte d autres jours que ceux demandes : rien sur disque
@@ -23457,6 +23489,527 @@ try:
         check("paie : sans fichier du tout, le premier reglage s ecrit",
               _il.enregistrer_paie(_fBrL)[0] is True and _il.lire_paie()[0]["Bryan"]["montant"] == 75.0)
         _razL(_il.PAIE_FICHIER, _il.QUINZ_FICHIER)
+        _il._MYPULS_CACHE.clear(); _il._MYPULS_ECHECS.clear()
+
+        # --- AU SUB (les VA SPAM) et LIGNES ACTIVES (le proprietaire, 26/09) :
+        # « les VA spam c est des payment au sub, 0,4 et au-dela de 200 sub sur
+        # la quinzaine ca passe a 0,5 » ; « quand un VA a 2 liens et qu ils
+        # font des clics, il prend 2 payes de base : chaque ligne c est une
+        # paye (c est un iPhone) ». MyPuls rend ici des subs PAR TRANCHE
+        # (bouchon _apiSubL), GetMySocial des clics PAR LIEN (bouchon _anaLgL).
+        _cSL = {"type": "au_sub", "taux1": 0.4, "seuil": 200, "taux2": 0.5, "devise": "USD", "depuis": ""}
+        _cxL = [_il.cout_au_sub(_cSL, n)[0] for n in (0, 199, 200, 201, 250)]
+        check("au sub : marginal par quinzaine (0, 199, 200, 201, 250 subs -> 0 ; 79,60 ; 80 ; 80,50 ; 105)",
+              _cxL == [0.0, 79.6, 80.0, 80.5, 105.0] and _il.cout_au_sub(_cSL, 250)[1:] == (200, 50)
+              and _il.cout_au_sub(dict(_cSL, taux1=0.3, seuil=100, taux2=0.45), 150)[0] == 52.5
+              and _il.cout_au_sub(dict(_cSL, taux1=0.375), 3)[0] == 1.125 and _il.cout_au_sub(_cSL, None)[0] == 0.0,
+              str(_cxL))
+        _vSL = {"type": "au_sub", "taux1": "0,4", "seuil": "200", "taux2": "0.50", "devise": "eur",
+                "montant": "", "frequence": "", "lignes": "x"}
+        check("au sub : reglage valide et normalise (virgule, eur) ; montant, frequence et lignes du fixe ignores",
+              _il.valider_paie(_vSL) == (dict(_cSL, devise="EUR"), "")
+              and _il.valider_paie(dict(_vSL, depuis="01/09/2026"))[0]["depuis"] == "2026-09-01",
+              str(_il.valider_paie(_vSL)))
+        _malSL = [(k, v) for k, v in (("taux1", "-0.1"), ("taux1", "abc"), ("taux1", "0.4444"), ("taux1", "100.01"),
+                                      ("taux1", ""), ("taux1", None), ("taux1", True), ("taux1", float("nan")),
+                                      ("taux2", "1e3"), ("taux2", ""), ("seuil", "-1"), ("seuil", "2.5"),
+                                      ("seuil", "abc"), ("seuil", ""), ("seuil", "100001"), ("seuil", 2.5),
+                                      ("devise", "GBP"), ("depuis", "2026-02-31"), ("type", "au sub"))
+                  if _il.valider_paie(dict(_vSL, **{k: v}))[0] is not None]
+        check("au sub : valeurs refusees (prix negatif, 4 decimales, > 100, vide, seuil non entier, devise, date)",
+              not _malSL and "prix par sub" in _il.valider_paie(dict(_vSL, taux1="-1"))[1]
+              and "seuil invalide" in _il.valider_paie(dict(_vSL, seuil="2,5"))[1], str(_malSL))
+        _vFL = _cfgL("fixe", "75")
+        check("lignes payees : facultatif, entier de 1 a 50 pour un fixe ; ignore pour Aucun",
+              _il.valider_paie(dict(_vFL, lignes="2"))[0] == dict(_cfgL("fixe", 75.0), lignes=2)
+              and _il.valider_paie(dict(_vFL, lignes=""))[0] == _cfgL("fixe", 75.0)
+              and _il.valider_paie(dict(_vFL, lignes=" "))[0] == _cfgL("fixe", 75.0)
+              and all(_il.valider_paie(dict(_vFL, lignes=v))[0] is None for v in ("0", "51", "1.5", "x", "-2"))
+              and _il.valider_paie(dict(_vFL, type="aucun", lignes="x"))[0] == _cfgL("aucun", 75.0))
+        _trU = {"2026-09-01|2026-09-30": {"liens": {"a": {"clics": 0, "jour": "2026-10-02"},
+                                                    "d": {"clics": 0, "jour": "2026-09-20"}}},
+                "2026-09-03|2026-09-05": {"liens": {"b": {"clics": 2, "jour": "2026-09-04"}}}}
+        _elU = [_il.etat_lien(_trU, l, d0, "2026-09-15", "2026-10-05")["etat"]
+                for l, d0 in (("a", "2026-09-01"), ("b", "2026-09-01"), ("b", "2026-09-04"), ("c", "2026-09-01"),
+                              ("d", "2026-09-01"))]
+        check("lignes : un clic sur une sous-plage rend actif ; un zero releve apres la fin d une plage plus large, inactif",
+              _elU == ["inactif", "actif", "absent", "absent", "inactif"], str(_elU))
+
+        _SQL = {}
+
+        def _apiSubL(path, params=None, _essai=0):
+            # MyPuls : les subs et le revenu de chaque code, PAR tranche demandee
+            _MPL["appels"].append((path, dict(params or {})))
+            d0, d1 = params["from"], params["to"]
+            _its = [_mpiL(c, 1000, s, rev) for c, (s, rev) in sorted((_SQL.get((d0, d1)) or {}).items())]
+            return {"ok": True, "data": {"period": {"from": d0 + "T00:00:00+02:00", "to": d1 + "T23:59:59+02:00"},
+                                         "currency": "USD", "count": len(_its), "data": _its}}
+        _mpL.api_get = _apiSubL
+        _JOUR["j"] = "2026-09-26"
+        _Q1 = ("2026-09-01", "2026-09-15")
+        _SQL[_Q1] = {110: (250, 400.0), 85: (120, 300.0), 47: (101, 250.0)}
+        _razL(_il.LIGNES_FICHIER, _il.QUINZ_FICHIER)
+        _il._MYPULS_CACHE.clear(); _il._MYPULS_ECHECS.clear(); _il._FIL_Q["pause"] = 0.0
+        _ecrire_paieL({"Roucham SPAM": _cSL, "BO7": _cfgL("fixe", 75)})
+        _LGL["appels"].clear(); _US["verif"].clear(); _MPL["appels"].clear()
+        _tS1 = _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))
+        _pS1 = {x["nom"]: x for x in _tS1["lignes"]}
+        _rsS, _boS = _pS1["Roucham SPAM"]["paie"], _pS1["BO7"]["paie"]
+        check("au sub : Roucham SPAM, 250 subs sur la quinzaine -> 200 x 0,40 + 50 x 0,50 = 105 $, gain = revenu - 105",
+              _rsS["cout_sub"] == 105.0 and _rsS["cout"] == 105.0 and _pS1["Roucham SPAM"]["gain"] == 295.0
+              and _rsS["detail_q"] == [{"du": _Q1[0], "au": _Q1[1], "complete": True, "subs": 250, "cout": 105.0,
+                                        "bas": 200, "haut": 50}]
+              and "fixe" not in _rsS and "primes" not in _rsS, str(_rsS.get("detail_q")))
+        check("lignes : BO7, 4 liens GMS dont 1 sans clic -> 3 lignes actives, 3 payes de base (3 x 75 = 225 $)",
+              _boS["fixe"] == 225.0 and _pS1["BO7"]["gain"] == 75.0
+              and [(f["actives"], f["total"], f["lignes"], f["source"], f["sans_clic"]) for f in _boS["detail_f"]]
+              == [(3, 4, 3, "gms", ["( BO7 ) 4"])], str(_boS.get("detail_f")))
+        check("lignes : UN appel analytics_for_link par lien et par tranche (BO7 seul, pas l au sub), le 0 relu brut",
+              sorted(_LGL["appels"]) == [(f"lnk_{i}",) + _Q1 for i in (4, 5, 6, 7)]
+              and _US["verif"] == [(("lnk_7",),) + _Q1], str((_LGL["appels"], _US["verif"])))
+        _cLgL = _jsL.loads(_il.LIGNES_FICHIER.read_text())
+        check("lignes : cache disque par (tranche, lien), le zero confirme garde comme tel, appels du jour comptes",
+              sorted(_cLgL["tranches"]) == ["2026-09-01|2026-09-15"]
+              and {k: v["clics"] for k, v in _cLgL["tranches"]["2026-09-01|2026-09-15"]["liens"].items()}
+              == {"lnk_4": 5, "lnk_5": 5, "lnk_6": 5, "lnk_7": 0}
+              and _cLgL["appels"] == {"2026-09-26": 5}, str(_cLgL)[:400])
+        _LGL["appels"].clear()
+        _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))
+        check("lignes : tranche close deja relevee -> aucun appel au second affichage", not _LGL["appels"],
+              str(_LGL["appels"]))
+        _hS1 = _il.page_html(_tS1, cle="KP")
+        _lsS, _lbS, _lgS = _ligneL(_hS1, "Roucham SPAM"), _ligneL(_hS1, "BO7"), _ligneL(_hS1, "Gerome SPAM")
+        check("page au sub : resume, detail du calcul (marginal), gain, aucun fixe",
+              '<span class="pr ps">0,40 $ / sub jusqu&#x27;à 200, 0,50 $ au-delà</span>' in _lsS
+              and "revenu 400,00 $<br>− paie au sub 105,00 $ (250 subs : 200 × 0,40 $ + 50 × "
+                  "0,50 $)" in _lsS
+              and '<span class="nv gp">+295,00 $</span>' in _lsS and "− fixe" not in _lsS
+              and "par quinzaine, sans fixe" in _lsS, _lsS[-800:])
+        check("page lignes : « 3 lignes actives sur 4 (x 75 $) » et le lien sans clic, sous la ligne",
+              "− fixe 225,00 $ (75 $ / quinzaine × 3 lignes)" in _lbS
+              and "3 lignes actives sur 4 (× 75 $) — sans clic : ( BO7 ) 4" in _lbS
+              and '<span class="nv gp">+75,00 $</span>' in _lbS, _lbS[-800:])
+        check("page au sub et lignes : aucun <script, aucun gestionnaire on...=",
+              "<script" not in _hS1 and not _reL.search(r"<[^>]*\son[a-z]+\s*=", _hS1))
+        check("page : la note dit les lignes (1 clic, tous pays), les primes une fois par personne, l au sub marginal",
+              "<b>Lignes</b> : une paie de base par ligne ACTIVE" in _hS1 and "au moins 1 clic, tous pays" in _hS1
+              and "une fois par personne (pas par ligne)" in _hS1 and "<b>Au sub</b>" in _hS1
+              and "250 subs = 200 × 0,40 + 50 × 0,50 = 105 $" in _hS1)
+        check("formulaire : champs au sub (0,40 / 200 / 0,50 par defaut) et lignes payees ; cle et periode suivent",
+              all(f in _lgS for f in ('name="taux1" value="0.40"', 'name="seuil" value="200"',
+                                      'name="taux2" value="0.50"', 'name="lignes" value=""',
+                                      '<option value="au_sub">Au sub</option>',
+                                      '<input type="hidden" name="k" value="KP">',
+                                      '<input type="hidden" name="du" value="2026-09-01">',
+                                      '<input type="hidden" name="au" value="2026-09-15">',
+                                      '<legend>Au sub (par quinzaine)</legend>')), _lgS[-1600:])
+        check("formulaire : une ligne SPAM non reglee n est PAS mise au sub d office (Fixe + primes par defaut)",
+              '<option value="fixe_primes" selected>' in _lgS and '<option value="au_sub" selected>' not in _lgS
+              and '<span class="pr">—</span>' in _lgS)
+        check("formulaire : le reglage au sub enregistre est pre-rempli",
+              '<option value="au_sub" selected>' in _lsS and 'name="taux1" value="0.40"' in _lsS
+              and 'name="taux2" value="0.50"' in _lsS)
+        _MsL = "\n".join(_jsL.dumps(m, ensure_ascii=False) for m in _il.messages_discord(_tS1, "https://youl4b.com/x"))
+        check("discord : ni au sub, ni lignes actives, ni gain (Discord inchange)",
+              not any(w in _MsL for w in ("au sub", "jusqu", "lignes actives", "sans clic", "105,00", "295,00",
+                                          "225,00", "+75,00", "fixe", "Paiement", "Gain")), _MsL[:300])
+
+        # les primes restent PAR PERSONNE, une fois, quel que soit le nombre de lignes
+        _ecrire_paieL({"BO7": _cfgL("fixe_primes", 75)})
+        _pS2 = {x["nom"]: x for x in _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))["lignes"]}["BO7"]
+        check("lignes : primes une fois par personne (120 subs -> +10 $, pas x 3) : 300 - 3 x 75 - 10 = 65",
+              _pS2["paie"]["fixe"] == 225.0 and _pS2["paie"]["primes"] == 10.0 and _pS2["gain"] == 65.0,
+              str((_pS2["paie"].get("fixe"), _pS2["paie"].get("primes"), _pS2["gain"])))
+        # au sub en euros
+        _BCEL["rep"] = ("<gesmes:Envelope><Cube><Cube time='2026-09-25'><Cube currency='USD' rate='1.2000'/>"
+                        "</Cube></Cube></gesmes:Envelope>")
+        _razL(_il.BCE_FICHIER)
+        _ecrire_paieL({"Roucham SPAM": dict(_cSL, devise="EUR")})
+        _tS3 = _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))
+        _rS3 = {x["nom"]: x for x in _tS3["lignes"]}["Roucham SPAM"]
+        _lS3 = _ligneL(_il.page_html(_tS3), "Roucham SPAM")
+        check("au sub en EUR : 105 EUR convertis au taux BCE (1,2) -> 126 $, dit dans le detail",
+              _rS3["paie"]["sub_devise"] == 105.0 and abs(_rS3["paie"]["cout_sub"] - 126.0) < 1e-9
+              and _rS3["gain"] == 274.0 and "= 105,00 EUR × 1,2000" in _lS3
+              and "0,40 EUR / sub jusqu" in _lS3, str(_rS3["paie"].get("cout_sub")))
+        # deux quinzaines coupees par la plage : subs de la partie incluse, seuil entier
+        _ecrire_paieL({"Roucham SPAM": _cSL})
+        _SQL[("2026-09-10", "2026-09-20")] = {110: (351, 500.0)}
+        _SQL[("2026-09-10", "2026-09-15")] = {110: (201, 280.0)}
+        _SQL[("2026-09-16", "2026-09-20")] = {110: (150, 220.0)}
+        _tS4 = _il.avec_paie(_il.tableau_periode("2026-09-10", "2026-09-20", us="cache"))
+        _rS4 = {x["nom"]: x for x in _tS4["lignes"]}["Roucham SPAM"]
+        _lS4 = _ligneL(_il.page_html(_tS4), "Roucham SPAM")
+        check("au sub : quinzaines incompletes -> subs de la partie incluse, seuil ENTIER (201 -> 80,50 ; 150 -> 60)",
+              [(q["subs"], q["cout"], q["complete"]) for q in _rS4["paie"]["detail_q"]]
+              == [(201, 80.5, False), (150, 60.0, False)]
+              and _rS4["paie"]["cout_sub"] == 140.5 and _rS4["gain"] == 359.5, str(_rS4["paie"].get("detail_q")))
+        check("page au sub : detail par quinzaine, « quinzaine incomplete », seuil par quinzaine",
+              "2 quinzaines, dont 2 incomplètes, seuil de 200 subs par quinzaine" in _lS4
+              and "10/09 → 15/09 : 201 subs → 200 × 0,40 $ + 1 × 0,50 $ = 80,50 $ (quinzaine incomplète)"
+              in _lS4
+              and "16/09 → 20/09 : 150 subs → 150 × 0,40 $ = 60,00 $ (quinzaine incomplète)" in _lS4,
+              _lS4[-900:])
+
+        # un releve GMS illisible n est jamais un zero
+        _ecrire_paieL({"BO7": _cfgL("fixe", 75)})
+        _razL(_il.LIGNES_FICHIER)
+        _LGL["illisible"].add("lnk_6")
+        _LGL["appels"].clear(); _US["verif"].clear()
+        _tS5 = _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))
+        _bS5 = {x["nom"]: x for x in _tS5["lignes"]}["BO7"]
+        _hS5 = _il.page_html(_tS5)
+        _eS5 = _jsL.loads(_il.LIGNES_FICHIER.read_text())["tranches"]["2026-09-01|2026-09-15"]["liens"]
+        check("lignes : releve illisible (0 clic, reponse brute non lue) -> PAS un zero : lignes inconnues, « — »",
+              _bS5["gain"] is None and _bS5["paie"]["detail_f"][0]["lignes"] is None
+              and _bS5["paie"]["detail_f"][0]["inconnus"] == ["( BO7 ) 3"] and "clics" not in _eS5["lnk_6"]
+              and "illisible" in _eS5["lnk_6"]["rate"] and "calcul en cours" in _bS5["paie"]["raison"]
+              and "( BO7 ) 3" in _bS5["paie"]["raison"], str((_bS5["paie"].get("raison"), _eS5.get("lnk_6"))))
+        check("page lignes : les lignes inconnues sont dites en tete (releve rate), gain « — » avec la raison",
+              "Lignes actives : 1 relevé de clics GetMySocial (un par lien GMS et par tranche du fixe) pas "
+              "encore connu — dernier relevé raté" in _hS5
+              and "dernier relevé raté" in _hS5
+              and '<td class="n gain">—<div class="det manque">lignes actives : calcul en cours'
+              in _ligneL(_hS5, "BO7"))
+        # « lignes payees » saisies : servent tant que le compte manque
+        _ecrire_paieL({"BO7": dict(_cfgL("fixe", 75), lignes=2)})
+        _LGL["appels"].clear()
+        _tS6 = _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))
+        _bS6 = {x["nom"]: x for x in _tS6["lignes"]}["BO7"]
+        _lS6 = _ligneL(_il.page_html(_tS6, cle="KP"), "BO7")
+        check("lignes : compte inconnu + « lignes payees » saisies (2) -> 2 x 75, dit ; aucun appel (rate < 10 min)",
+              not _LGL["appels"] and _bS6["paie"]["fixe"] == 150.0 and _bS6["gain"] == 150.0
+              and _bS6["paie"]["detail_f"][0]["source"] == "manuel"
+              and _il._e("2 actives confirmées + 1 inconnue (( BO7 ) 3 : clics GetMySocial pas encore relevés), "
+                         "2 saisies à la main → 2 lignes payées (× 75 $) — sans clic : ( BO7 ) 4") in _lS6
+              and "(75 $ / quinzaine × 2 lignes (saisie à la main, bornée par GetMySocial))" in _lS6
+              and 'name="lignes" value="2"' in _lS6 and "lignes payées tant que GetMySocial manque : 2" in _lS6,
+              str((_bS6["paie"].get("fixe"), _LGL["appels"])))
+        _cLgL = _jsL.loads(_il.LIGNES_FICHIER.read_text())
+        _cLgL["tranches"]["2026-09-01|2026-09-15"]["liens"]["lnk_6"]["essai"] -= _il.US_REESSAI_S + 5
+        _il.LIGNES_FICHIER.write_text(_jsL.dumps(_cLgL))
+        _LGL["illisible"].discard("lnk_6")
+        _LGL["appels"].clear()
+        _bS7 = {x["nom"]: x for x in _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))["lignes"]}["BO7"]
+        check("lignes : un releve rate est retente passe 10 min (ce lien seul) ; le compte relu prime sur la saisie",
+              _LGL["appels"] == [("lnk_6",) + _Q1] and _bS7["paie"]["detail_f"][0]["source"] == "gms"
+              and _bS7["paie"]["fixe"] == 225.0, str(_LGL["appels"]))
+        # GetMySocial en pause : aucun appel, rien d invente
+        _razL(_il.LIGNES_FICHIER)
+        _ecrire_paieL({"BO7": _cfgL("fixe", 75)})
+        _gmL.pause_restante = lambda: 3600
+        _gmL.etat_quota = lambda: {"pause_s": 3600, "reprise": "21:40", "restant_jour": 0, "raison": "quota"}
+        _LGL["appels"].clear()
+        _tS8 = _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))
+        _hS8 = _il.page_html(_tS8)
+        check("lignes : GetMySocial en pause -> aucun appel, gain « — » (aucune ligne inventee), la page le dit",
+              not _LGL["appels"] and {x["nom"]: x for x in _tS8["lignes"]}["BO7"]["gain"] is None
+              and "Lignes actives : 4 relevés de clics GetMySocial (un par lien GMS et par tranche du fixe) pas "
+                  "encore connus — GetMySocial n'accepte plus d'appel (quota du jour épuisé, reprise vers 21:40)" in _hS8,
+              str(_LGL["appels"]))
+        _gmL.pause_restante = lambda: 0
+        _gmL.etat_quota = lambda: {"pause_s": 0, "reprise": "", "restant_jour": None, "raison": ""}
+        # budget d appels par jour
+        _il.LIGNES_APPELS_JOUR = 2
+        _LGL["appels"].clear()
+        _tS9 = _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))
+        _hS9 = _il.page_html(_tS9)
+        _nS9 = list(_LGL["appels"])
+        _LGL["appels"].clear()
+        _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))
+        check("lignes : budget du jour (2) -> 2 appels et pas 4, gain « — », la page le dit ; plus rien ensuite",
+              _nS9 == [("lnk_4",) + _Q1, ("lnk_5",) + _Q1] and not _LGL["appels"]
+              and {x["nom"]: x for x in _tS9["lignes"]}["BO7"]["gain"] is None
+              and "les 2 appels GetMySocial du jour réservés à ce relevé sont faits" in _hS9
+              and _jsL.loads(_il.LIGNES_FICHIER.read_text())["appels"] == {"2026-09-26": 2}, str(_nS9))
+        _JOUR["j"] = "2026-09-27"
+        _LGL["appels"].clear(); _US["verif"].clear()
+        _bS9 = {x["nom"]: x for x in _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))["lignes"]}["BO7"]
+        _e7L = _jsL.loads(_il.LIGNES_FICHIER.read_text())["tranches"]["2026-09-01|2026-09-15"]["liens"]["lnk_7"]
+        check("lignes : le lendemain, la suite ; un 0 que le budget ne permet pas de verifier n est pas un zero",
+              _LGL["appels"] == [("lnk_6",) + _Q1, ("lnk_7",) + _Q1] and not _US["verif"]
+              and _bS9["gain"] is None and "non vérifié" in _e7L.get("rate", "") and "clics" not in _e7L,
+              str((_LGL["appels"], _e7L)))
+        _il.LIGNES_APPELS_JOUR = 100000
+        # tranche en cours : relue au plus une fois par jour ; un clic ne
+        # s efface pas, seul un 0 est relu le lendemain
+        _JOUR["j"] = "2026-09-26"
+        _razL(_il.LIGNES_FICHIER)
+        _Q2, _Q3 = ("2026-09-16", "2026-09-26"), ("2026-09-16", "2026-09-27")
+        _SQL[_Q2] = {85: (40, 100.0)}
+        _SQL[_Q3] = {85: (41, 101.0)}
+        _LGL["appels"].clear()
+        _il.avec_paie(_il.tableau_periode(*_Q2, us="cache"))
+        _n1L = len(_LGL["appels"])
+        _LGL["appels"].clear()
+        _il.avec_paie(_il.tableau_periode(*_Q2, us="cache"))
+        _n2L = len(_LGL["appels"])
+        _JOUR["j"] = "2026-09-27"
+        _LGL["appels"].clear()
+        _il.avec_paie(_il.tableau_periode(*_Q2, us="cache"))
+        _n3L = list(_LGL["appels"])
+        _LGL["appels"].clear()
+        _bQ3 = {x["nom"]: x for x in _il.avec_paie(_il.tableau_periode(*_Q3, us="cache"))["lignes"]}["BO7"]
+        _n4L = list(_LGL["appels"])
+        check("lignes : tranche en cours relue au plus une fois par jour ; le lendemain, seul le 0 est relu",
+              _n1L == 4 and _n2L == 0 and _n3L == [("lnk_7",) + _Q2], str((_n1L, _n2L, _n3L)))
+        check("lignes : une plage qui contient une plage deja active ne rappelle pas GetMySocial pour ces liens",
+              _n4L == [("lnk_7",) + _Q3] and _bQ3["paie"]["detail_f"][0]["lignes"] == 3, str(_n4L))
+        # le fixe au mois : la tranche est la partie du mois dans la plage
+        _JOUR["j"] = "2026-09-26"
+        _ecrire_paieL({"BO7": _cfgL("fixe", 300, freq="mois")})
+        _razL(_il.LIGNES_FICHIER)
+        _tS12 = _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))
+        _bS12 = {x["nom"]: x for x in _tS12["lignes"]}["BO7"]
+        check("lignes : fixe au mois -> partie du mois dans la plage (300 x 15/30 = 150 par ligne, x 3 lignes)",
+              _bS12["paie"]["fixe"] == 450.0 and _bS12["gain"] == -150.0
+              and "3 lignes actives sur 4 (× 150 $)" in _ligneL(_il.page_html(_tS12), "BO7"),
+              str(_bS12["paie"].get("fixe")))
+        # la page n attend pas le releve : il part en arriere-plan
+        _ecrire_paieL({"BO7": _cfgL("fixe", 75)})
+        _razL(_il.LIGNES_FICHIER)
+        _lanLgL = []
+        _il.LIGNES_EN_FOND = True
+        _il._lancer_lignes = lambda taches, proprios=None: _lanLgL.append(list(taches))
+        _LGL["appels"].clear()
+        _tS11 = _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))
+        _hS11 = _il.page_html(_tS11)
+        check("lignes : la page n attend pas le releve (lance en arriere-plan) : « calcul en cours », « — », rechargez",
+              not _LGL["appels"] and len(_lanLgL) == 1
+              and sorted(_lanLgL[0]) == [(f"lnk_{i}",) + _Q1 for i in (4, 5, 6, 7)]
+              and {x["nom"]: x for x in _tS11["lignes"]}["BO7"]["gain"] is None
+              and "lignes actives : calcul en cours" in _hS11
+              and "relevé en arrière-plan : rechargez dans une minute" in _hS11, str(_lanLgL))
+        _il.LIGNES_EN_FOND = False
+        _il._lancer_lignes = _savLgL[4]
+        # --- relecture du 26/09, trois defauts reproduits :
+        # 1. les lignes d une quinzaine CLOSE se recalculaient avec la liste GMS
+        #    du jour (« ( BO7 ) 3 » et « 4 » renommes « Laboule ( X ) » et
+        #    « LaBoule ( Phone ) » le 26/09 : BO7 2 lignes au lieu de 4 sur le
+        #    01/09 -> 15/09) ; et « lignes payees » ne pouvait rien y corriger ;
+        # 2. « lignes payees » remplacait le compte entier des qu un lien manquait
+        #    (1 saisie -> 75 $ avec 3 lignes deja confirmees ; 9 -> 675 $ pour 4 liens) ;
+        # 3. avant la creation du lien GMS, une tranche comptait 0 ligne (0 $)
+        #    et coutait deux appels GetMySocial pour rien.
+        _JOUR["j"] = "2026-09-26"
+        _il.LIGNES_APPELS_JOUR = 100000
+        _razL(_il.LIGNES_FICHIER, _il.QUINZ_FICHIER)
+        _il._MYPULS_CACHE.clear(); _il._MYPULS_ECHECS.clear(); _il._FIL_Q["pause"] = 0.0
+        _LGL["rate"].clear(); _LGL["illisible"].clear()
+        _LT["rep"] = {"ok": True, "links": list(_GMS)}
+        _ecrire_paieL({"BO7": _cfgL("fixe", 75), "ANDRY": _cfgL("fixe", 75)})
+        _LGL["appels"].clear()
+        _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))
+        _cF1 = _jsL.loads(_il.LIGNES_FICHIER.read_text())["tranches"]["2026-09-01|2026-09-15"]
+        _nomsF = {"lnk_4": "( BO7 ) 1", "lnk_5": "( BO7 ) 2", "lnk_6": "( BO7 ) 3", "lnk_7": "( BO7 ) 4"}
+        check("lignes figees : chaque releve note a qui etait le lien ; la quinzaine close entierement relevee est figee",
+              {k: (v.get("qui"), v.get("nom")) for k, v in _cF1["liens"].items()}
+              == dict({k: ("BO7", n) for k, n in _nomsF.items()}, lnk_8=("ANDRY", "(ANDRY) 1"),
+                      lnk_9=("ANDRY", "(ANDRY) 2"))
+              and _cF1["fige"]["BO7"]["liens"] == {k: {"nom": n, "actif": k != "lnk_7"} for k, n in _nomsF.items()}
+              and sorted(_cF1["fige"]["ANDRY"]["liens"]) == ["lnk_8", "lnk_9"], str(_cF1)[:700])
+        # ( BO7 ) 2 supprime de GMS, ( BO7 ) 3 renomme « (ANDRY) 3 » : APRES la quinzaine
+        _GMSf = [dict(g, display_name="(ANDRY) 3") if g.get("id") == "lnk_6" else g
+                 for g in _GMS if g.get("id") != "lnk_5"]
+        _LT["rep"] = {"ok": True, "links": _GMSf}
+        _LGL["appels"].clear()
+        _tF2 = _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))
+        _pF2 = {x["nom"]: x for x in _tF2["lignes"]}
+        _hF2 = _il.page_html(_tF2, cle="KP")
+        check("lignes figees : lien supprime et lien renomme ensuite -> la quinzaine close ne bouge pas "
+              "(BO7 3 x 75 = 225 $, ANDRY 2 x 75 = 150 $ et pas 225), aucun appel",
+              _pF2["BO7"]["paie"]["fixe"] == 225.0 and _pF2["ANDRY"]["paie"]["fixe"] == 150.0 and not _LGL["appels"]
+              and [(f["lignes"], f["total"], f["fige"]) for f in _pF2["BO7"]["paie"]["detail_f"]] == [(3, 4, True)],
+              str((_pF2["BO7"]["paie"].get("fixe"), _pF2["ANDRY"]["paie"].get("fixe"), _LGL["appels"])))
+        check("page lignes figees : sous la ligne, les liens changes depuis ; chez ANDRY, le lien arrive n est pas compte",
+              _il._e("3 lignes actives sur 4 (× 75 $), figé à la clôture — sans clic : ( BO7 ) 4 — compté, "
+                     "changé depuis : ( BO7 ) 2 (supprimé de GetMySocial), ( BO7 ) 3 (aujourd'hui « (ANDRY) 3 », "
+                     "à ANDRY)") in _ligneL(_hF2, "BO7")
+              and _il._e("pas compté : (ANDRY) 3 (à BO7 sur cette période)") in _ligneL(_hF2, "ANDRY"),
+              _ligneL(_hF2, "BO7")[-700:])
+        # une tranche EN COURS, pas figee : le proprietaire note au releve fait foi
+        _LT["rep"] = {"ok": True, "links": list(_GMS)}
+        _il.avec_paie(_il.tableau_periode(*_Q2, us="cache"))
+        _LT["rep"] = {"ok": True, "links": _GMSf}
+        _LGL["appels"].clear()
+        _pF3 = {x["nom"]: x for x in _il.avec_paie(_il.tableau_periode(*_Q2, us="cache"))["lignes"]}
+        check("lignes notees (tranche en cours, pas figee) : le lien renomme reste a BO7, ANDRY ne le compte pas, "
+              "aucun appel",
+              [(f["lignes"], f["total"], f["fige"]) for f in _pF3["BO7"]["paie"]["detail_f"]] == [(3, 4, False)]
+              and _pF3["ANDRY"]["paie"]["detail_f"][0]["lignes"] == 2
+              and [d["nom"] for d in _pF3["ANDRY"]["paie"]["detail_f"][0]["exclus"]] == ["(ANDRY) 3"]
+              and not _LGL["appels"], str((_pF3["BO7"]["paie"].get("detail_f"), _LGL["appels"]))[:600])
+        # le passe DEJA fausse (releve fait apres le renommage, comme BO7 sur le
+        # VPS) : « forcer » les lignes de la quinzaine, meme comptees par GMS
+        _razL(_il.LIGNES_FICHIER)
+        _ecrire_paieL({"BO7": _cfgL("fixe", 75)})
+        _LGL["appels"].clear()
+        _pF4 = {x["nom"]: x for x in _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))["lignes"]}["BO7"]
+        _fzL = {"personne": "BO7", "type": "fixe", "montant": "75", "devise": "USD", "frequence": "quinzaine",
+                "depuis": "", "k": "KP", "du": _Q1[0], "au": _Q1[1]}
+        _okF = _il.enregistrer_paie(dict(_fzL, forcer_lignes="4", forcer_avant=""))
+        _cfF = _jsL.loads(_il.PAIE_FICHIER.read_text())["personnes"]["BO7"]
+        _LGL["appels"].clear()
+        _tF5 = _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))
+        _pF5 = {x["nom"]: x for x in _tF5["lignes"]}["BO7"]
+        _hF5 = _il.page_html(_tF5, cle="KP")
+        _lF5 = _ligneL(_hF5, "BO7")
+        check("lignes forcees : releve fait APRES le renommage -> 1 ligne sur 2 (75 $) ; forcees a 4 pour la quinzaine "
+              "affichee -> 4 x 75 = 300 $, meme si GetMySocial a compte",
+              _pF4["paie"]["fixe"] == 75.0 and _okF[0] and _cfF.get("forces") == {"2026-09-01|2026-09-15": 4}
+              and _pF5["paie"]["fixe"] == 300.0 and _pF5["gain"] == 0.0
+              and _pF5["paie"]["detail_f"][0]["source"] == "force" and not _LGL["appels"],
+              str((_pF4["paie"].get("fixe"), _okF, _cfF, _pF5["paie"].get("fixe"), _LGL["appels"])))
+        check("page lignes forcees : « forcées à la main », avec ce que GetMySocial a compte ; la case du paiement "
+              "les liste",
+              _il._e("4 lignes forcées à la main (× 75 $) ; GetMySocial : 1 ligne active sur 2 — sans clic : "
+                     "( BO7 ) 4") in _lF5
+              and "(75 $ / quinzaine × 4 lignes (forcées à la main))" in _lF5
+              and "lignes forcées à la main : 01/09 → 15/09 : 4" in _lF5, _lF5[-900:])
+        _fzSansP = _il._form_paie(_pF5, "KP", "nom", "asc", "", "")
+        check("formulaire : « forcer les lignes » sur une vue par periode (pre-rempli, valeur montree gardee a part), "
+              "remplace par une aide sans periode",
+              'name="forcer_lignes" value="4" min="0" max="50"' in _lF5
+              and '<input type="hidden" name="forcer_avant" value="4">' in _lF5
+              and "Forcer les lignes des quinzaines du 01/09 au 15/09, même si GetMySocial a compté" in _lF5
+              and 'name="forcer_lignes"' not in _fzSansP
+              and "choisissez-la d'abord en haut de la page" in _fzSansP, _lF5[-1500:])
+        _razL(_il.LIGNES_FICHIER)
+        _LGL["appels"].clear()
+        _tF6 = _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))
+        _pF6 = {x["nom"]: x for x in _tF6["lignes"]}["BO7"]
+        check("lignes forcees : aucun appel GetMySocial pour une quinzaine forcee (quota epargne), et c est dit",
+              not _LGL["appels"] and _pF6["paie"]["fixe"] == 300.0
+              and _il._e("4 lignes forcées à la main (× 75 $) ; GetMySocial : 0 active confirmée, 2 liens pas "
+                         "relevés") in _ligneL(_il.page_html(_tF6, cle="KP"), "BO7"),
+              str(_LGL["appels"]))
+        # enregistrer sans toucher au champ garde ; une autre periode s ajoute ;
+        # vider le champ retire ; le reste est refuse sans rien ecrire
+        _r1F = _il.enregistrer_paie(dict(_fzL, montant="80", forcer_lignes="4", forcer_avant="4"))
+        _f1F = _il.lire_paie()[0]["BO7"]
+        _r2F = _il.enregistrer_paie(dict(_fzL, du="2026-09-20", au="2026-09-26", forcer_lignes="2", forcer_avant=""))
+        _f2F = _il.lire_paie()[0]["BO7"].get("forces")
+        _r3F = _il.enregistrer_paie(dict(_fzL, forcer_lignes="", forcer_avant="4"))
+        _f3F = _il.lire_paie()[0]["BO7"].get("forces")
+        _avF = _il.PAIE_FICHIER.read_text(encoding="utf-8")
+        _malF = [(v, du, au) for v, du, au in (("51", _Q1[0], _Q1[1]), ("x", _Q1[0], _Q1[1]), ("-1", _Q1[0], _Q1[1]),
+                                               ("3", "", ""), ("3", "pas une date", _Q1[1]))
+                 if _il.enregistrer_paie(dict(_fzL, du=du, au=au, forcer_lignes=v, forcer_avant=""))[0]]
+        check("lignes forcees : sans changement -> gardees (montant change) ; une autre periode s ajoute (quinzaine "
+              "entiere) ; vide -> retirees ; valeur ou periode invalide -> refuse, rien d ecrit",
+              _r1F[0] and _f1F["montant"] == 80.0 and _f1F.get("forces") == {"2026-09-01|2026-09-15": 4}
+              and _r2F[0] and _f2F == {"2026-09-01|2026-09-15": 4, "2026-09-16|2026-09-30": 2}
+              and _r3F[0] and _f3F == {"2026-09-16|2026-09-30": 2}
+              and not _malF and _il.PAIE_FICHIER.read_text(encoding="utf-8") == _avF,
+              str((_r1F, _f1F, _f2F, _f3F, _malF)))
+        _malFF = [f for f in ({"2026-09-02|2026-09-15": 4}, {"2026-09-01|2026-09-15": 51},
+                              {"2026-09-01|2026-09-15": "x"}, {"x": 1}, "2026-09-01|2026-09-15", [4])
+                  if _il.valider_paie(dict(_cfgL("fixe", 75), forces=f))[0] is not None]
+        check("lignes forcees : relues du fichier seulement sur des quinzaines ou mois entiers, de 0 a 50 ; "
+              "ignorees par Aucun et Au sub",
+              not _malFF
+              and _il.valider_paie(dict(_cfgL("fixe", 75), forces={"2026-09-01|2026-09-30": 0}))[0]["forces"]
+              == {"2026-09-01|2026-09-30": 0}
+              and "forces" not in _il.valider_paie(dict(_cSL, forces={"2026-09-01|2026-09-15": 4}))[0]
+              and "forces" not in _il.valider_paie(dict(_cfgL("aucun", 75), forces={"x": 1}))[0], str(_malFF))
+
+        # « lignes payees » BORNEES par ce qui est su
+        _razL(_il.LIGNES_FICHIER)
+        _LT["rep"] = {"ok": True, "links": list(_GMS)}
+        _LGL["rate"].add("lnk_7")             # ( BO7 ) 4 : GetMySocial ne rend rien
+        _ecrire_paieL({"BO7": dict(_cfgL("fixe", 75), lignes=1)})
+        _tB1 = _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))
+        _pB1 = {x["nom"]: x for x in _tB1["lignes"]}["BO7"]
+        _ecrire_paieL({"BO7": dict(_cfgL("fixe", 75), lignes=9)})
+        _pB2 = {x["nom"]: x for x in _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))["lignes"]}["BO7"]
+        check("lignes payees bornees : 3 actives confirmees + 1 inconnue, saisie 1 -> 3 payees (pas 1) ; "
+              "saisie 9 -> 4 (pas plus que de liens)",
+              _pB1["paie"]["fixe"] == 225.0
+              and [(f["lignes"], f["confirmees"], f["inconnus"], f["source"]) for f in _pB1["paie"]["detail_f"]]
+              == [(3, 3, ["( BO7 ) 4"], "manuel")]
+              and _pB2["paie"]["fixe"] == 300.0 and _pB2["paie"]["detail_f"][0]["lignes"] == 4,
+              str((_pB1["paie"].get("fixe"), _pB2["paie"].get("fixe"))))
+        check("page lignes payees bornees : « 3 actives confirmees + 1 inconnue, 1 saisie → 3 lignes payees »",
+              _il._e("3 actives confirmées + 1 inconnue (( BO7 ) 4 : clics GetMySocial pas encore relevés), "
+                     "1 saisie à la main → 3 lignes payées (× 75 $)") in _ligneL(_il.page_html(_tB1), "BO7"),
+              _ligneL(_il.page_html(_tB1), "BO7")[-700:])
+        _LGL["rate"].clear()
+
+        # un lien GMS cree APRES la fin d une tranche n y est pas une ligne
+        def _oidL(y, m, d, fin="0" * 16):
+            return "lnk_" + format(int(_dtL.datetime(y, m, d, 12, tzinfo=_dtL.timezone.utc).timestamp()), "x") + fin
+        check("cree_gms : date de creation tiree de l identifiant lnk_ (ObjectId) ou du champ de GMS, heure de Paris ; "
+              "sinon rien (jamais une date inventee)",
+              _il.cree_gms({"id": "lnk_6a0e5346fba948185cdbdfaf"}) == "2026-05-21"
+              and _il.cree_gms("lnk_6a8717c5ad7d51ec19dcf647") == "2026-08-20"
+              and _il.cree_gms({"id": _oidL(2026, 6, 10)}) == "2026-06-10"
+              and _il.cree_gms({"id": "lnk_4"}) == "" and _il.cree_gms({"id": "lnk_zz" + "0" * 22}) == ""
+              and _il.cree_gms({"id": "lnk_4", "created_at": "2026-05-20T23:30:00Z"}) == "2026-05-21"
+              and _il.cree_gms({"id": "lnk_4", "createdAt": 1779323698000}) == "2026-05-21"
+              and _il.cree_gms({"id": "lnk_ff" + "0" * 22}) == ""
+              and _il.cree_gms({"id": "lnk_4", "created_at": "pas une date"}) == "")
+        _idN1, _idN2 = _oidL(2026, 5, 21), _oidL(2026, 6, 10, "a" * 16)
+        _GMSn = [dict(g, id=_idN1) if g.get("id") == "lnk_2" else g for g in _GMS] + [
+            {"id": _idN2, "display_name": "( VA 1 Noum ) 2", "shortcode": "scn2", "url": _OFL % 47}]
+        _LT["rep"] = {"ok": True, "links": _GMSn}
+        _PN = ("2026-04-01", "2026-06-30")
+        _SQL[_PN] = {47: (500, 900.0)}
+        _razL(_il.LIGNES_FICHIER)
+        _ecrire_paieL({"VA 1 Noum": _cfgL("fixe", 200, freq="mois")})
+        _LGL["appels"].clear()
+        _tN1 = _il.avec_paie(_il.tableau_periode(*_PN, us="cache"))
+        _pN1 = {x["nom"]: x for x in _tN1["lignes"]}["VA 1 Noum"]
+        _hN1 = _il.page_html(_tN1, cle="KP")
+        _lN1 = _ligneL(_hN1, "VA 1 Noum")
+        check("pas encore de lien : aucun appel GetMySocial pour une tranche finie avant la creation du lien "
+              "(avril : aucun ; mai : le 1er lien ; juin : les deux)",
+              sorted(_LGL["appels"]) == sorted([(_idN1, "2026-05-01", "2026-05-31"), (_idN1, "2026-06-01", "2026-06-30"),
+                                                (_idN2, "2026-06-01", "2026-06-30")]), str(_LGL["appels"]))
+        check("pas encore de lien : avril sans lien GMS -> pas une ligne a 0 $ : gain « — », dit, avec la date du "
+              "premier lien ; mai 1 ligne (le 2e pas encore cree), juin 2",
+              _pN1["gain"] is None and _pN1["paie"]["fixe"] is None
+              and [(f["du"], f["lignes"], f["source"], f["total"], f["pas_encore"]) for f in _pN1["paie"]["detail_f"]]
+              == [("2026-04-01", None, "sans_lien", 0, ["( VA 1 Noum ) 1", "( VA 1 Noum ) 2"]),
+                  ("2026-05-01", 1, "gms", 1, ["( VA 1 Noum ) 2"]), ("2026-06-01", 2, "gms", 2, [])]
+              and "pas encore de lien GetMySocial du 01/04/2026 au 30/04/2026 (premier lien créé le 21/05/2026) : "
+                  "renseignez « lignes payées » (ou « payé depuis »)" in _pN1["paie"]["raison"],
+              str((_pN1["paie"].get("raison"), [(f["du"], f["lignes"], f["source"])
+                                                for f in _pN1["paie"].get("detail_f") or []])))
+        check("page pas encore de lien : le detail par mois le dit (« pas encore de lien », « pas encore cree »)",
+              _il._e("01/04 → 30/04 : pas encore de lien GetMySocial (premier lien créé le 21/05/2026) : « lignes "
+                     "payées » à renseigner") in _lN1
+              and _il._e("01/05 → 31/05 : 1 ligne active sur 1 (× 200 $) — pas encore créé : "
+                         "( VA 1 Noum ) 2") in _lN1, _lN1[-1200:])
+        _ecrire_paieL({"VA 1 Noum": dict(_cfgL("fixe", 200, freq="mois"), lignes=1)})
+        _LGL["appels"].clear()
+        _tN2 = _il.avec_paie(_il.tableau_periode(*_PN, us="cache"))
+        _pN2 = {x["nom"]: x for x in _tN2["lignes"]}["VA 1 Noum"]
+        check("pas encore de lien + « lignes payees » (1) : avril 1 x 200, mai 1 x 200, juin 2 x 200 = 800 $, "
+              "gain 900 - 800 ; aucun appel de plus",
+              _pN2["paie"]["fixe"] == 800.0 and _pN2["gain"] == 100.0 and not _LGL["appels"]
+              and [(f["lignes"], f["source"]) for f in _pN2["paie"]["detail_f"]]
+              == [(1, "sans_lien"), (1, "gms"), (2, "gms")]
+              and _il._e("01/04 → 30/04 : 1 ligne payée saisie à la main (× 200 $) : pas encore de lien "
+                         "GetMySocial (premier lien créé le 21/05/2026)") in _ligneL(_il.page_html(_tN2), "VA 1 Noum")
+              and _il._e("01/05 → 31/05 : 1 ligne active sur 1 (× 200 $), figé à la clôture — pas encore créé : "
+                         "( VA 1 Noum ) 2") in _ligneL(_il.page_html(_tN2), "VA 1 Noum"),
+              str((_pN2["paie"].get("fixe"), _pN2["gain"], _LGL["appels"])))
+        _hTousF = _hF2 + _hF5 + _hN1
+        _MsF = "\n".join(_jsL.dumps(m, ensure_ascii=False)
+                         for t in (_tF2, _tF5, _tN1) for m in _il.messages_discord(t, "https://youl4b.com/x"))
+        check("pages lignes figees, forcees, pas encore de lien : aucun <script, aucun gestionnaire on...= ; "
+              "Discord sans paie",
+              "<script" not in _hTousF and not _reL.search(r"<[^>]*\son[a-z]+\s*=", _hTousF)
+              and not any(w in _MsF for w in ("forcée", "figé", "pas encore de lien", "lignes actives", "fixe",
+                                              "Paiement", "Gain", "300,00", "225,00", "confirmée")), _MsF[:300])
+        _LT["rep"] = {"ok": True, "links": list(_GMS)}
+        # rien de tout ca ne tombe sur un tableau sans reglage
+        _razL(_il.PAIE_FICHIER, _il.QUINZ_FICHIER, _il.LIGNES_FICHIER, _il.BCE_FICHIER)
+        _LGL["appels"].clear()
+        _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))
+        check("lignes : personne n est regle -> aucun appel GetMySocial", not _LGL["appels"])
+        _mpL.api_get = _apiMPL
+        _BCEL["rep"] = RuntimeError("BCE non utilisee")
         _il._MYPULS_CACHE.clear(); _il._MYPULS_ECHECS.clear()
 
         # --- la route
@@ -23591,6 +24144,35 @@ try:
                     _refusL.append((_chL, _vL, _rVL.status_code))
             check("route paie : valeurs invalides ou personne inconnue -> 400, dit, lien de retour, rien d ecrit",
                   not _refusL and _il.PAIE_FICHIER.read_text(encoding="utf-8") == _avantPL, str(_refusL))
+            # au sub et « lignes payees » par le formulaire (la route passe le
+            # formulaire entier au module, qui ne garde que les champs du type)
+            _avantSubL = _il.PAIE_FICHIER.read_text(encoding="utf-8")
+            _rSubX = _cN.post("/infloww/liens/paie", data=dict(_fPL, personne="Roucham SPAM", type="au_sub",
+                                                               taux1="0.4444", seuil="200", taux2="0.5"))
+            _okSubX = (_rSubX.status_code == 400 and "Réglage non enregistré" in _rSubX.get_data(as_text=True)
+                       and _il.PAIE_FICHIER.read_text(encoding="utf-8") == _avantSubL)
+            _rSub = _cN.post("/infloww/liens/paie", data=dict(_fPL, personne="Roucham SPAM", type="au_sub",
+                                                              taux1="0,4", seuil="200", taux2="0.5", montant=""))
+            _rLg = _cN.post("/infloww/liens/paie", data=dict(_fPL, personne="BO7", type="fixe", montant="75",
+                                                             lignes="3"))
+            _cfgsR = _il.lire_paie()[0]
+            check("route paie : un reglage au sub et des lignes payees s enregistrent (303) ; un prix invalide -> 400",
+                  _okSubX and _rSub.status_code == 303 and _rLg.status_code == 303
+                  and _cfgsR.get("Roucham SPAM") == {"type": "au_sub", "taux1": 0.4, "seuil": 200, "taux2": 0.5,
+                                                     "devise": "USD", "depuis": ""}
+                  and _cfgsR.get("BO7") == dict(_cfgL("fixe", 75.0), lignes=3),
+                  str((_rSubX.status_code, _rSub.status_code, _rLg.status_code, _cfgsR.get("Roucham SPAM"))))
+            # « forcer les lignes » par la route : la periode affichee (21/09 -> 26/09)
+            # force sa quinzaine ENTIERE (16/09 -> 30/09)
+            _rFzR = _cN.post("/infloww/liens/paie", data=dict(_fPL, personne="BO7", type="fixe", montant="75",
+                                                              forcer_lignes="4", forcer_avant=""))
+            _rFzX = _cN.post("/infloww/liens/paie", data=dict(_fPL, personne="BO7", type="fixe", montant="75",
+                                                              forcer_lignes="99", forcer_avant=""))
+            check("route paie : « forcer les lignes » s enregistre pour la quinzaine entiere de la periode (303) ; "
+                  "un nombre invalide -> 400",
+                  _rFzR.status_code == 303 and _rFzX.status_code == 400
+                  and _il.lire_paie()[0].get("BO7", {}).get("forces") == {"2026-09-16|2026-09-30": 4},
+                  str((_rFzR.status_code, _rFzX.status_code, _il.lire_paie()[0].get("BO7"))))
             _hEsc = _cN.post("/infloww/liens/paie", data=dict(_fPL, personne="<b>x</b>")).get_data(as_text=True)
             check("route paie : le refus est echappe", "&lt;b&gt;x&lt;/b&gt;" in _hEsc and "<b>x</b>" not in _hEsc)
             check("route paie : un envoi venu d un autre site (Sec-Fetch-Site) -> 403, meme avec la cle",
@@ -23648,6 +24230,8 @@ try:
         _il._FIL_Q.clear(); _il._FIL_Q.update(_savPaL[6])
         _il.QUINZ_APPELS_MAX = _savPaL[7]
         _il.CLE_PAIE_FICHIER = _savKPL
+        (_gmL.analytics_for_link, _il.LIGNES_FICHIER, _il.LIGNES_EN_FOND, _il.LIGNES_APPELS_JOUR,
+         _il._lancer_lignes) = _savLgL
         import shutil as _shL
         _shL.rmtree(_tmpL, ignore_errors=True)
 except Exception as _eL:
