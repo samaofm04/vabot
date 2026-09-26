@@ -129,6 +129,14 @@ _file_attente: list = []
 #: 26/09/2026, treize profils attendaient derriere un seul import.
 VOIES = ("tiktok", "instagram")
 _travailleurs: Dict[str, threading.Thread] = {}
+#: {cle: reseau} des relectures en cours, fixe a la prise. Relu dans le
+#: registre, un profil debranche en pleine relecture n'avait plus de reseau :
+#: son import Instagram passait pour un TikTok et bloquait la file TikTok.
+_voie_active: Dict[str, str] = {}
+#: Dernier tour « qui est du ? », commun aux files : le premier fil libre le
+#: fait. Reserve a la file TikTok, un Instagram du attendait la fin de tout
+#: l'import TikTok (des heures, avec treize profils en file).
+_dernier_tour = [0.0]
 
 
 # ------------------------------------------------------------------ registre
@@ -549,6 +557,9 @@ def _lister_instagram(username: str, info: Optional[dict] = None) -> list:
             if vues is None:
                 vues = m.get("view_count")
             out.append({"id": code,
+                        # le numero long, que gardent certains telechargements
+                        # (« …_DbJxrPKKSDn_3947905023860089063.mp4 »)
+                        "pk": str(m.get("pk") or "").split("_")[0],
                         "url": f"https://www.instagram.com/reel/{code}/",
                         "view_count": int(vues) if isinstance(vues, (int, float)) else None,
                         "timestamp": _hk._horodatage(m.get("taken_at_ts") or m.get("taken_at")) or None,
@@ -716,13 +727,42 @@ class _DejaLa(Exception):
     """La video telechargee est deja dans le dossier sous un autre nom."""
 
 
-def _a_d_autres_videos(dossier: Path, prefixe: str) -> bool:
-    """Le dossier a-t-il des videos qui ne viennent pas de CETTE source ?"""
+#: Un numero de publication plus court pourrait etre un mot du titre.
+NUMERO_MIN = 9
+
+
+def _noms_etrangers(dossier: Path, prefixe: str) -> list:
+    """Les videos du dossier qui ne viennent pas de CETTE source, triees."""
     try:
-        return any(p.is_file() and p.suffix.lower() in EXTS_VIDEO and not p.name.startswith(prefixe)
-                   for p in dossier.iterdir())
+        return sorted(p.name for p in dossier.iterdir()
+                      if p.is_file() and p.suffix.lower() in EXTS_VIDEO
+                      and not p.name.startswith(prefixe))
     except OSError:
-        return False
+        return []
+
+
+def _porte_le_numero(noms: list, *numeros: str) -> Optional[str]:
+    """Le premier de `noms` qui porte l'un de ces numeros ENTIER (ni lettre
+    ni chiffre colle devant ou derriere).
+
+    Les telechargements en masse gardent le numero de la publication :
+    « ibenhaastrup__#fyp_7129973973982563590_bulk.mp4 », « mikkibunni_2026-
+    07-24_DbJxrPKKSDn_3947905023860089063.mp4 ». Le 26/09/2026, 190 videos
+    sur 193 d'ibenhaastrup etaient ainsi nommees, et restaient sans vues :
+    l'import ne les reconnaissait qu'a SON nom (tt_<numero>), et la
+    comparaison a l'image les aurait toutes retelechargees pour conclure."""
+    for num in numeros:
+        num = str(num or "")
+        if len(num) < NUMERO_MIN:
+            continue
+        motif = None
+        for nom in noms:
+            if num not in nom:
+                continue
+            motif = motif or re.compile(r"(?<![A-Za-z0-9])" + re.escape(num) + r"(?![A-Za-z0-9])")
+            if motif.search(nom):
+                return nom
+    return None
 
 
 def _jumeau(brut: Path, dossier: Path) -> Optional[Path]:
@@ -814,6 +854,7 @@ def synchroniser(identite: str, dossier_videos: Path,
         bilan["examinees"] = len(entrees)
         now = int(time.time())
         a_prendre = []
+        etrangers = _noms_etrangers(dossier_videos, prefixe)
         for e in entrees:
             vid = str(e.get("id") or "")
             if not vid:
@@ -842,6 +883,12 @@ def synchroniser(identite: str, dossier_videos: Path,
                         bilan["vues_maj"] += 1
                 recus.add(vid)
                 continue
+            if vid not in doublons:
+                nom = _porte_le_numero(etrangers, vid, e.get("pk"))
+                if nom:
+                    # deja la sous un autre nom, et ce nom le dit : c'est un
+                    # doublon reconnu sans rien telecharger
+                    doublons[vid] = nom
             if vid in doublons:
                 # deja present sous un autre nom : ses vues suivent sur le
                 # fichier qui est la (badge), sans rien retelecharger
@@ -880,7 +927,7 @@ def synchroniser(identite: str, dossier_videos: Path,
         # d'une AUTRE origine (deposees a la main, ou de l'autre reseau) :
         # entre elles, les videos d'une meme source se reconnaissent a leur
         # numero. Un import neuf ne paie donc rien.
-        comparer = _a_d_autres_videos(dossier_videos, prefixe)
+        comparer = bool(etrangers)
         for i, (vid, stem, voisin) in enumerate(a_prendre):
             try:
                 brut = _telecharger(src, voisin, tmp / stem)
@@ -947,8 +994,11 @@ def synchroniser(identite: str, dossier_videos: Path,
             # Le registre est tenu à jour en route : un redémarrage du bot au
             # milieu d'un gros profil ne refait pas ce qui est déjà descendu.
             if (i + 1) % 10 == 0:
-                _maj(ident, creer=False, recus=sorted(recus),
-                     photos=sorted(photos), echecs=echecs, doublons=doublons)
+                if not _maj(ident, creer=False, recus=sorted(recus),
+                            photos=sorted(photos), echecs=echecs, doublons=doublons):
+                    # Debranche (ou renomme) en route : sans ca, tout le
+                    # profil descendait quand meme dans le dossier.
+                    raise RuntimeError("profil débranché pendant la relecture")
             time.sleep(PAUSE_SEC)
         _maj(ident, creer=False, statut="ok", erreur="", reessai_le=None,
              derniere_synchro=int(time.time()), bilan=bilan,
@@ -971,7 +1021,8 @@ def synchroniser(identite: str, dossier_videos: Path,
         print(f"[vault-social] {ident} : {msg}", flush=True)
         return {"ok": False, "error": msg, "bilan": bilan}
     finally:
-        _en_cours.pop(ident, None)
+        with _verrou:
+            _en_cours.pop(ident, None)
         if apres:
             try:
                 apres()
@@ -1030,7 +1081,9 @@ def relancer(identite: str) -> dict:
     if not lire(ident).get("url"):
         return {"ok": False, "error": "aucun profil branché"}
     _maj(ident, creer=False, raz_echecs=True)
-    planifier(ident)
+    # un clic passe DEVANT la file : derriere treize profils, « Relire
+    # maintenant » attendait des heures
+    planifier(ident, devant=True)
     return {"ok": True}
 
 
@@ -1040,9 +1093,10 @@ _dossier_de: Callable[[str], Optional[Path]] = lambda ident: None
 _apres_global: Optional[Callable[[], None]] = None
 
 
-def planifier(identite: str) -> bool:
-    """Met un dossier dans la file. Une seule synchro à la fois : deux
-    profils lus en parallèle depuis la même adresse, c'est le 403 assuré.
+def planifier(identite: str, devant: bool = False) -> bool:
+    """Met un dossier dans la file de son réseau (une synchro à la fois par
+    réseau : deux profils TikTok lus en parallèle, c'est le 403 assuré).
+    `devant` : en tête de file (un clic de l'utilisateur).
 
     Un dossier EN COURS de relecture est remis en file : un seuil changé ou
     un « Relire » cliqué pendant la relecture était sinon perdu, alors que le
@@ -1053,8 +1107,13 @@ def planifier(identite: str) -> bool:
     _maj(ident, creer=False, demande=True)
     with _verrou:
         if ident in _file_attente:
-            return False
-        _file_attente.append(ident)
+            if not devant:
+                return False
+            _file_attente.remove(ident)
+        if devant:
+            _file_attente.insert(0, ident)
+        else:
+            _file_attente.append(ident)
     _assurer_travailleur()
     return True
 
@@ -1072,9 +1131,14 @@ def _assurer_travailleur():
 
 
 def _voie(cle: str, reg: Optional[dict] = None) -> str:
-    """Le reseau d'une cle (sa file). `reg` : le registre deja lu."""
+    """Le reseau d'une cle (sa file). `reg` : le registre deja lu.
+    Un reseau inconnu va dans la premiere file : sinon aucune ne le prenait
+    et il restait « en file d'attente » pour toujours."""
+    if cle in _voie_active:
+        return _voie_active[cle]
     e = (reg if reg is not None else _registre()).get(cle) or {}
-    return e.get("plateforme") or "tiktok"
+    v = e.get("plateforme") or VOIES[0]
+    return v if v in VOIES else VOIES[0]
 
 
 def _prendre(voie: str) -> Optional[str]:
@@ -1082,8 +1146,10 @@ def _prendre(voie: str) -> Optional[str]:
     en cours : ses deux profils ecrivent dans le meme dossier, et lus en
     parallele, une video publiee sur les deux reseaux passerait deux fois
     (chacun la compare au dossier avant que l'autre l'y ait posee)."""
-    reg = _registre()
     with _verrou:
+        # lu SOUS le verrou : un profil branche entre la lecture et la prise
+        # partait sinon dans la mauvaise file
+        reg = _registre()
         # un reseau deja en cours ne prend rien de plus : deux TikTok en
         # parallele, c'est le 403 -- verifie ici, pas seulement suppose par
         # le nombre de fils
@@ -1096,14 +1162,15 @@ def _prendre(voie: str) -> Optional[str]:
             _file_attente.pop(i)
             # reserve AVANT de relacher le verrou : l'autre file la voit prise
             _en_cours[k] = {"fait": 0, "total": 0, "etape": "démarrage"}
+            _voie_active[k] = voie
             return k
     return None
 
 
 def _dus(maintenant: float) -> list:
-    """Les dossiers à relire. Appelé par le seul fil de travail, file vide :
-    un « en_cours » trouvé ici est donc forcément une relecture interrompue
-    (redémarrage du bot), qu'on reprend au lieu d'attendre deux semaines."""
+    """Les dossiers à relire. Un « en_cours » du registre absent de _en_cours
+    est une relecture interrompue (redémarrage du bot), qu'on reprend au lieu
+    d'attendre deux semaines ; celle que fait l'autre file est dans _en_cours."""
     out = []
     for ident, e in _registre().items():
         if not e.get("url") or ident in _en_cours:
@@ -1115,33 +1182,47 @@ def _dus(maintenant: float) -> list:
 
 
 def _boucle(voie: str = "tiktok"):
-    dernier_tour = 0.0
     while True:
-        ident = _prendre(voie)
-        if ident:
-            try:
-                dossier = _dossier_de(ident)
-                if dossier is None:
-                    # Dossier supprimé ou renommé : le dire dans le registre,
-                    # ne pas relire un profil pour rien.
-                    _maj(ident, creer=False, statut="erreur", demande=False,
-                         erreur="dossier introuvable dans le vault",
-                         reessai_le=int(time.time()) + REESSAI_SEC)
-                else:
-                    synchroniser(ident, dossier, _apres_global)
-            finally:
-                # synchroniser le fait ; ici pour ses sorties anticipees et le
-                # dossier introuvable, sinon l'identite resterait « occupee »
+        try:
+            _un_tour(voie)
+        except Exception as err:
+            # Un fil mort laissait sa file « en file d'attente » sans fin et
+            # sans un mot : on le dit, et on continue.
+            print(f"[vault-social] file {voie} : {type(err).__name__}: {err}", flush=True)
+            time.sleep(60)
+
+
+def _un_tour(voie: str) -> None:
+    ident = _prendre(voie)
+    if ident:
+        try:
+            dossier = _dossier_de(ident)
+            if dossier is None:
+                # Dossier supprimé ou renommé : le dire dans le registre,
+                # ne pas relire un profil pour rien.
+                _maj(ident, creer=False, statut="erreur", demande=False,
+                     erreur="dossier introuvable dans le vault",
+                     reessai_le=int(time.time()) + REESSAI_SEC)
+            else:
+                synchroniser(ident, dossier, _apres_global)
+        finally:
+            # synchroniser le fait ; ici pour ses sorties anticipees et le
+            # dossier introuvable, sinon l'identite resterait « occupee »
+            with _verrou:
                 _en_cours.pop(ident, None)
-            continue
-        # File vide : toutes les demi-heures, qui est dû ? (une seule file s'en
-        # charge : planifier range chaque profil dans la bonne)
-        if voie == VOIES[0] and time.time() - dernier_tour >= 1800:
-            dernier_tour = time.time()
-            for ident2 in _dus(time.time()):
-                planifier(ident2)
-            continue
-        time.sleep(20)
+                _voie_active.pop(ident, None)
+        return
+    # File vide : toutes les demi-heures, qui est dû ? Le premier fil libre
+    # s'en charge ; planifier range chaque profil dans la bonne file.
+    with _verrou:
+        du = time.time() - _dernier_tour[0] >= 1800
+        if du:
+            _dernier_tour[0] = time.time()
+    if du:
+        for ident2 in _dus(time.time()):
+            planifier(ident2)
+        return
+    time.sleep(20)
 
 
 def demarrer(dossier_de: Callable[[str], Optional[Path]],

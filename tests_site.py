@@ -15329,6 +15329,85 @@ try:
               str(_b2D))
         check("doublons : rien du vault n est efface",
               (_dD / "IMG_1.mp4").exists() and (_dD / "tt_222.mp4").exists())
+        # LE NUMERO DANS LE NOM suffit (« benhaastrup je vois pas les vues des
+        # reels ») : 190 telechargements en masse sur 193, restes sans vues
+        (_dD / "lea__#fyp #foryou_7129973973982563590_bulk.mp4").write_bytes(b"x" * 100)
+        (_dD / "lea__sous le seuil_7129973973982563591_bulk.mp4").write_bytes(b"x" * 100)
+        (_dD / "lea_71299739739825635921.mp4").write_bytes(b"x" * 100)   # numero PLUS long
+        _profilD += [{"id": "7129973973982563590", "view_count": 30_000},
+                     {"id": "7129973973982563591", "view_count": 500},
+                     {"id": "7129973973982563592", "view_count": 800}]
+        _dlN = []
+        _vsD._telecharger_tiktok = lambda url, cible: (_dlN.append(cible.name), _dlD(url, cible))[1]
+        _bN = _vsD.synchroniser("lea", _dD)["bilan"]
+        _vsD._telecharger_tiktok = _dlD
+        _sN = _dD / "lea__#fyp #foryou_7129973973982563590_bulk.social.json"
+        check("numero : une video nommee avec son numero TikTok recoit ses vues, sans telechargement",
+              not _dlN and _sN.exists()
+              and _jsD.loads(_sN.read_text(encoding="utf-8")).get("vues") == 30_000, str((_dlN, _bN)))
+        check("numero : meme sous le seuil, une video deja la a ses vues",
+              (_dD / "lea__sous le seuil_7129973973982563591_bulk.social.json").exists())
+        check("numero : un nombre qui CONTIENT le numero n est pas cette video",
+              not (_dD / "lea_71299739739825635921.social.json").exists())
+        check("numero : compte « deja la sous un autre nom » et retenu",
+              _bN.get("doublons") == 3 and _bN.get("nouvelles") == 0
+              and _vsD.lire("lea").get("doublons", {}).get("7129973973982563590", "").endswith("_bulk.mp4"), str(_bN))
+        _nomsN = ["mikkibunni_2026-07-24_DbJxrPKKSDn_3947905023860089063.mp4", "IMG_1.mp4"]
+        check("numero : un code Instagram, ou son numero long, entiers dans le nom",
+              _vsD._porte_le_numero(_nomsN, "DbJxrPKKSDn") == _nomsN[0]
+              and _vsD._porte_le_numero(_nomsN, "ZZZZZZZZZZZ", "3947905023860089063") == _nomsN[0]
+              and _vsD._porte_le_numero(_nomsN, "bJxrPKKSD") is None
+              and _vsD._porte_le_numero(_nomsN, "2026") is None)
+        # debrancher en pleine relecture ARRETE l import
+        _dS = _tmpD / "stp" / _vsD.SOUS_DOSSIER
+        _dS.mkdir(parents=True)
+        _vsD._maj("stp", plateforme="tiktok", url="https://www.tiktok.com/@stp", username="stp", seuil=0)
+        _savLS = (_vsD._lister_tiktok_creator, _vsD._telecharger_tiktok)
+        _nS = []
+
+        def _dlS(url, cible):
+            _nS.append(1)
+            if len(_nS) == 3:
+                _vsD.debrancher("stp")
+            _pS = cible.with_suffix(".mp4")
+            _pS.write_bytes(b"x")
+            return _pS
+        _vsD._lister_tiktok_creator = lambda u, info=None: [{"id": str(900 + i), "view_count": 1000} for i in range(25)]
+        _vsD._telecharger_tiktok = _dlS
+        try:
+            _rS = _vsD.synchroniser("stp", _dS)
+        finally:
+            _vsD._lister_tiktok_creator, _vsD._telecharger_tiktok = _savLS
+        check("debrancher en pleine relecture arrete l import (pas tout le profil)",
+              len(_nS) == 10 and not _rS.get("ok") and "stp" not in _vsD._registre(), str((len(_nS), _rS)))
+        # un ffmpeg rate (VPS charge) n est pas garde comme une empreinte finie
+        _savRun = _evD.subprocess.run
+
+        def _lent(*a, **k):
+            raise _spD.TimeoutExpired(cmd="ffmpeg", timeout=120, output=bytes(17 * 16 * 12))
+        _evD.subprocess.run = _lent
+        try:
+            _eE = _evD.empreinte(_dD / "IMG_1.mp4", 6.0)
+        finally:
+            _evD.subprocess.run = _savRun
+        check("empreintes : un ffmpeg rate garde ses images lues, et sera recalcule",
+              "v" not in _eE and len(_eE["images"]) == 2, str(_eE)[:160])
+        _savEm = (_evD.empreinte, _evD.DOSSIER_CACHE)
+        _nEm = []
+
+        def _emF(f, d=None):
+            if f.name == "IMG_1.mp4":
+                _nEm.append(1)
+                return {"duree": d, "images": {}}
+            return {"duree": 4.0, "v": _evD.VERSION, "images": {"0.5": ["0" * 64, True]}}
+        _evD.empreinte, _evD.DOSSIER_CACHE = _emF, _tmpD / "empreintes_essais"
+        try:
+            for _ in range(5):
+                _evD.trouver_doublon(_tmpD / "neuf.mp4", _dD)
+        finally:
+            _evD.empreinte, _evD.DOSSIER_CACHE = _savEm
+        check("empreintes : un fichier illisible est retente trois fois, pas a chaque comparaison",
+              len(_nEm) == 3, str(len(_nEm)))
         # le site : brancher / debrancher depuis « Modifier »
         import web_upload as _wD
         _idD = _wD.IDENTITIES_DIR / "tst_soc"
@@ -15412,8 +15491,35 @@ try:
             _pgQ = (_vsD.progression("qb") or {}).get("etape", "")
             check("files : le bandeau dit la place et ce qui passe avant",
                   "en file d'attente (1e)" in _pgQ and "@qa 12/40" in _pgQ, _pgQ)
+            _vsD.debrancher("qc|instagram")
+            check("files : un Instagram debranche en pleine relecture reste dans SA file (le TikTok n attend pas)",
+                  _vsD._voie("qc|instagram") == "instagram")
+            _vsD._maj("qz", plateforme="TikTok ", url="https://x/qz", username="qz")
+            check("files : un reseau inconnu va dans une file, jamais « en attente » pour toujours",
+                  _vsD._voie("qz") in _vsD.VOIES)
+            _vsD._file_attente.clear(); _vsD._en_cours.clear(); _vsD._voie_active.clear()
+            _savT = (_vsD.planifier, _vsD._dernier_tour[0])
+            _plT = []
+            _vsD.planifier = lambda c: _plT.append(c) or True
+            try:
+                _vsD._dernier_tour[0] = 0.0
+                _vsD._un_tour("instagram")
+            finally:
+                _vsD.planifier, _vsD._dernier_tour[0] = _savT
+            check("files : la file Instagram, libre, fait aussi le tour des profils dus",
+                  "qa|instagram" in _plT, str(_plT))
+            _vsD._file_attente[:] = ["qa", "qb"]
+            _savAT = _vsD._assurer_travailleur
+            _vsD._assurer_travailleur = lambda: None    # pas de vrai fil d import ici
+            try:
+                _vsD.relancer("qb")
+            finally:
+                _vsD._assurer_travailleur = _savAT
+            check("files : « Relire maintenant » passe devant la file",
+                  _vsD._file_attente == ["qb", "qa"], str(_vsD._file_attente))
         finally:
             _vsD._file_attente[:] = _savQ[0]; _vsD._en_cours.clear(); _vsD._en_cours.update(_savQ[1])
+            _vsD._voie_active.clear()
         # empreintes : les images unies ne prouvent rien
         _unie = {"duree": 4.0, "images": {str(t): ["0" * 64, False] for t in _evD.INSTANTS[:5]}}
         check("empreintes : deux videos aux images unies (fondus) ne sont pas « la meme »",

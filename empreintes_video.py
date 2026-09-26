@@ -108,6 +108,7 @@ def empreinte(f: Path, d: Optional[float] = None) -> dict:
     depuis l'image cle precedente."""
     d = duree(f) if d is None else d
     images = {}
+    err = "" if d else "durée illisible"
     if d:
         lire = min(d, max(INSTANTS) + 0.5)
         try:
@@ -115,9 +116,14 @@ def empreinte(f: Path, d: Optional[float] = None) -> dict:
                                         "-vf", f"fps={PAS},scale={LARGEUR}:{HAUTEUR}:flags=area,format=gray",
                                         "-f", "rawvideo", "-"],
                                capture_output=True, timeout=120)
-            px = r.stdout if r.returncode == 0 else b""
-        except Exception:
-            px = b""
+            px = r.stdout or b""
+            if r.returncode != 0:
+                err = f"ffmpeg code {r.returncode}"
+        except subprocess.TimeoutExpired as e:
+            # les images lues avant l'arret restent bonnes : leur rang suit le temps
+            px, err = e.stdout or b"", "ffmpeg > 120 s"
+        except Exception as e:
+            px, err = b"", str(e)[:200]
         taille = LARGEUR * HAUTEUR
         n = len(px) // taille
         for t in INSTANTS:
@@ -127,6 +133,13 @@ def empreinte(f: Path, d: Optional[float] = None) -> dict:
             if k >= n:
                 break
             images[str(t)] = _hash_image(px[k * taille:(k + 1) * taille])
+    if err:
+        # Sans « v », l'entree du cache est recalculee au prochain passage :
+        # marquee comme les autres, un echec d'UN ffmpeg (VPS charge) cachait
+        # pour toujours une empreinte vide, et le doublon n'etait plus jamais
+        # reconnu -- sans trace.
+        print(f"[empreintes] {f.name} : {err}, {len(images)} image(s) lue(s)", flush=True)
+        return {"duree": d, "images": images}
     return {"duree": d, "v": VERSION, "images": images}
 
 
@@ -196,7 +209,9 @@ def trouver_doublon(nouveau: Path, dossier: Path, exclure: Iterable[str] = ()) -
         e_neuf = empreinte(nouveau)
     except Exception:
         return None
-    if not e_neuf.get("duree"):
+    if not e_neuf.get("duree") or not e_neuf.get("images"):
+        # rien a comparer (lecture ratee, dite par empreinte()) : inutile de
+        # calculer celles de tout le dossier
         return None
     exclus = set(exclure or ())
     with _VERROU:
@@ -225,8 +240,12 @@ def trouver_doublon(nouveau: Path, dossier: Path, exclure: Iterable[str] = ()) -
                 change = True
             if not durees_compatibles(e_neuf["duree"], c.get("duree")):
                 continue
-            if "images" not in c or c.get("v") != VERSION:
+            # une lecture ratee se retente, trois fois : un fichier casse ne
+            # repasse pas deux minutes dans ffmpeg a chaque video comparee
+            if "images" not in c or (c.get("v") != VERSION and c.get("essais", 0) < 3):
                 c.update(empreinte(f, c.get("duree")))
+                if c.get("v") != VERSION:
+                    c["essais"] = c.get("essais", 0) + 1
                 change = True
                 calcules += 1
                 # au fil de l'eau : un redemarrage du bot (chaque deploiement)
