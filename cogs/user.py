@@ -8550,6 +8550,29 @@ async def _jb_tache_ok(tache) -> bool:
         return False
 
 
+async def _jb_accuser(interaction, quoi="clic") -> bool:
+    """Accuse reception d'un clic de composant (defer : rien ne change a
+    l'ecran), sans jamais lever. -> True si l'interaction est acquittee (par
+    cet appel ou avant lui), False si Discord a refuse l'accuse.
+
+    Pourquoi a part : un accuse refuse (au-dela de 3 s, 10062 « Unknown
+    interaction ») levait NotFound au milieu d'un try qui en attendait un
+    autre -- celui du panneau supprime -- et le panneau etait pose une
+    seconde fois. Ici l'echec est JOURNALISE et rendu : l'appelant sait
+    qu'aucune reponse ni suite ne passera plus, et continue ce qui ne
+    depend pas de l'interaction (les messages du salon)."""
+    try:
+        if interaction.response.is_done():
+            return True
+        await interaction.response.defer()
+        return True
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("%s : accuse de reception refuse (%s: %s) -- le choix est "
+                    "applique quand meme, le VA lira « l'interaction a "
+                    "echoue »", quoi, type(e).__name__, e)
+        return False
+
+
 async def _jb_menu_remettre(interaction, vue, quoi="panneau") -> bool:
     """Redessine le message du clic avec `vue`, APRES l'action : ses menus
     reprennent leur intitule. Ne leve jamais ; rend True si c'est fait.
@@ -9364,9 +9387,9 @@ async def _jb_model_ouvrir(interaction, ident):
 
 
 async def _jb_model_panneau(interaction, cog, ident):
-    """Le corps de l'ancien JBModelButton.callback, tel quel : panneau
-    ephemere hors serveur US, panneau PERMANENT du salon sur le serveur US
-    (edition, conversion, replis), puis le ✨ General."""
+    """Le corps de l'ancien JBModelButton.callback : panneau ephemere hors
+    serveur US, panneau PERMANENT du salon sur le serveur US (accuse de
+    reception d'abord, puis edition, conversion, replis), puis le ✨ General."""
     try:
         import guild_features as gf
         us = gf.is_us_guild(getattr(interaction, "guild", None))
@@ -9382,6 +9405,19 @@ async def _jb_model_panneau(interaction, cog, ident):
         return
     # Serveur US : on met a jour le PANNEAU PERMANENT du salon au lieu
     # d'envoyer un message ephemere qui disparait au rafraichissement.
+    #
+    # ACCUSER RECEPTION D'ABORD, avant tout appel a Discord. Un defer de
+    # composant ne change rien a l'ecran ; il ne fait que tenir les 3 s.
+    # Avant, il suivait l'edition du panneau : trois choix en moins de 5 s
+    # epuisaient le compteur des editions du salon (menu, panneau, General),
+    # discord.py faisait attendre la 3e edition du panneau, le defer partait
+    # apres les 3 s et levait NotFound (10062) -- que le `except NotFound`
+    # de l'edition prenait pour « panneau supprime » : un SECOND panneau
+    # epingle, et le ✨ General reste sur l'ancienne model (simule le
+    # 26/09/2026 avec un faux Discord a compteur d'editions par salon).
+    # Un accuse refuse ne bloque pas le choix : le panneau et le General sont
+    # des messages du salon, ils se mettent a jour sans l'interaction.
+    accuse = await _jb_accuser(interaction, "panneau US")
     vue = _jb_panel(cog, ident, 3, marche=_marche,
                     guild=interaction.guild)
     chan = interaction.channel
@@ -9408,17 +9444,19 @@ async def _jb_model_panneau(interaction, cog, ident):
     recree = cible is None
     try:
         if cible is not None:
+            # Le try ne couvre QUE l'edition du panneau : un NotFound y veut
+            # dire « panneau supprime entre-temps ». Il couvrait aussi le
+            # defer, dont le NotFound (10062, accuse trop tard) faisait
+            # poser un second panneau a cote du premier, deja edite.
             try:
                 # Un ancien panneau (embed) passe en V2 par cette edition :
                 # _jb_kw_format vide son texte et son embed.
                 await cible.edit(view=vue, **_jb_kw_format(cible))
-                await interaction.response.defer()
             except discord.NotFound:
                 cible = None               # supprime entre-temps : on le repose
             except discord.HTTPException as e:
                 # Conversion refusee par Discord : un NOUVEAU panneau V2
                 # prend sa place (epingle, id memorise), l'ancien part.
-                await interaction.response.defer()
                 await _jb_panneau_reposer(
                     interaction.client, chan, cible, vue, ident,
                     f"edition refusee ({type(e).__name__}: {e})",
@@ -9432,8 +9470,6 @@ async def _jb_model_panneau(interaction, cog, ident):
             except Exception as e:
                 log.warning("panneau US %s : pose mais non epingle (%s: %s)",
                             getattr(chan, "name", "?"), type(e).__name__, e)
-            if not interaction.response.is_done():
-                await interaction.response.defer()
             recree = True
         panneau_pose = True
     except Exception as e:
@@ -9446,10 +9482,21 @@ async def _jb_model_panneau(interaction, cog, ident):
         # premiere a peut-etre ete rangee par un envoi a moitie reussi.
         secours = _vue_sans_suivi(_jb_panel(cog, ident, 3, marche=_marche,
                                             guild=interaction.guild))
-        if not interaction.response.is_done():
-            await interaction.response.send_message(view=secours, ephemeral=True)
-        else:
-            await interaction.followup.send(view=secours, ephemeral=True)
+        # L'accuse est deja parti : le panneau de secours suit en ephemere.
+        # S'il a ete refuse, l'interaction est morte -- plus rien ne peut
+        # atteindre le VA ; on le dit au journal au lieu de lever, sinon la
+        # suite (etat retenu, sous-menus) sauterait.
+        try:
+            if accuse:
+                await interaction.followup.send(view=secours, ephemeral=True)
+            elif not interaction.response.is_done():
+                await interaction.response.send_message(view=secours,
+                                                        ephemeral=True)
+        except Exception as e2:                              # noqa: BLE001
+            log.warning("panneau US %s : panneau de secours non envoye non "
+                        "plus (%s: %s) -- le VA n'a aucun panneau pour %s",
+                        getattr(chan, "name", "?"), type(e2).__name__, e2,
+                        ident)
     # Les sous-menus de famille ouverts portent l'ANCIENNE model dans
     # leurs boutons : on les efface, et on retient ce que montre le
     # panneau pour refuser ceux qu'on n'a plus le droit d'effacer.
@@ -9720,16 +9767,20 @@ class JBModelsMenu(discord.ui.DynamicItem[discord.ui.Select],
         if refus:
             await _jb_menu_refuser(interaction, refus, _frais())
             return
-        # Le menu du SALON se redessine tout de suite, sans attendre la mise a
-        # jour du panneau : c'est un message du bot, il s'edite sans passer
-        # par l'interaction (qui reste libre pour l'action). Un ephemere n'a
-        # pas ce chemin : _menu_lancer le redessine apres coup.
-        tache = None
-        if not ephemere and msg is not None:
-            tache = _jb_en_fond(msg.edit(view=_frais()),
-                                "menu des models : menu remis sur son intitule")
+        # PAS de redessin de fond par msg.edit (tache=None) : _menu_lancer
+        # remet le menu sur ses intitules APRES l'action, par l'interaction
+        # (edit_original_response, derriere le defer du panneau). Cette route
+        # est celle du webhook de l'interaction : elle ne consomme pas le
+        # compteur des editions du SALON, que le panneau et le ✨ General
+        # partagent. L'edition de fond en faisait une troisieme par choix :
+        # trois choix en moins de 5 s epuisaient ce compteur (5 par 5 s), le
+        # panneau attendait, son accuse partait trop tard et un second
+        # panneau etait epingle (simule le 26/09/2026 : 3 choix en 2 s
+        # suffisaient). Hors serveur US, la reponse est le panneau
+        # ephemere : _menu_lancer redessine alors par msg.edit, sans edition
+        # de panneau en concurrence.
         await _menu_lancer(interaction, lambda: _jb_model_ouvrir(interaction, choix),
-                           f"👤 {choix.capitalize()}", _frais(), tache,
+                           f"👤 {choix.capitalize()}", _frais(), None,
                            "menu des models")
 
 
@@ -9951,6 +10002,63 @@ async def _jb_menu_models_editer(client, chan, ancien, vue) -> str:
     return "repose"
 
 
+def _jb_marche_ancien_menu(msg, chan, guild=None):
+    """Le marche (« fr » / « us ») d'un ancien menu des models a convertir,
+    et d'ou il vient -> (marche, source), pour le journal.
+
+      1. Salon « -menu » : le marche de son PROPRIETAIRE (marche_du_salon),
+         la regle de _ensure_us_menu qui l'a pose -- chacun de ces salons
+         appartient a une seule personne.
+      2. Ailleurs, l'ancien message lui-meme, qui dit quelle commande l'a
+         pose : « jbmenu:model » (ancien /menujailbreak, que la commande pose
+         aujourd'hui en FR) -> fr, « jbmenuus:model » -> us ; sinon le titre
+         de son embed : « models FR » -> fr, « models US » -> us,
+         « toutes les models » (ancien /menujailbreak) -> fr.
+      3. En dernier repli, le marche du SERVEUR.
+
+    Pourquoi pas marche_du_salon partout : hors -menu, il prenait le premier
+    membre qui a une autorisation nominative sur le salon (un manager sur
+    #jailbreak), et marche_du_membre rend « us » a qui n'a pas de role de
+    marche. Le menu /menujailbreak partage du serveur FR passait alors en
+    models US pour tous les VA du salon, sans rien au journal (simule le
+    26/09/2026). Ne leve jamais."""
+    if _est_salon_menu(chan):
+        try:
+            from cogs.welcome import marche_du_salon
+            return marche_du_salon(chan), "proprietaire du salon -menu"
+        except Exception as e:                               # noqa: BLE001
+            log.warning("menu des models %s : marche du salon illisible (%s: %s), "
+                        "lu dans le message", getattr(chan, "name", "?"),
+                        type(e).__name__, e)
+    try:
+        ids = _ids_composants(msg)
+    except Exception:                                        # noqa: BLE001
+        ids = []
+    if "jbmenuus:model" in ids:
+        return "us", "ancien menu unique jbmenuus:model"
+    if "jbmenu:model" in ids:
+        return "fr", "ancien /menujailbreak (jbmenu:model)"
+    try:
+        emb = getattr(msg, "embeds", None) or []
+        titre = (getattr(emb[0], "title", None) or "") if emb else ""
+    except Exception:                                        # noqa: BLE001
+        titre = ""
+    if "models FR" in titre:
+        return "fr", "titre de l'ancien menu"
+    if "models US" in titre:
+        return "us", "titre de l'ancien menu"
+    if "toutes les models" in titre:
+        return "fr", "titre de l'ancien /menujailbreak"
+    try:
+        import guild_features as _gf
+        g = guild if guild is not None else getattr(chan, "guild", None)
+        return ("us" if _gf.is_us_guild(g) else "fr"), "serveur (rien dans le message)"
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("menu des models : marche illisible (%s: %s), US par defaut",
+                    type(e).__name__, e)
+        return "us", "defaut"
+
+
 async def _jb_menu_models_convertir(interaction):
     """Si le clic vient d'un menu des models encore a l'ANCIEN format (grille
     de boutons-photos, ou un seul menu coupe a 25), il passe en « menus de
@@ -9970,19 +10078,12 @@ async def _jb_menu_models_convertir(interaction):
         if not _est_menu_models(msg, moi):
             return
         chan = getattr(interaction, "channel", None)
-        # Le marche du SALON (son proprietaire, sinon le serveur) : la regle
-        # de _ensure_us_menu, qui a pose ce menu.
-        try:
-            from cogs.welcome import marche_du_salon
-            marche = marche_du_salon(chan)
-        except Exception as e:                               # noqa: BLE001
-            log.warning("menu des models : marche du salon illisible (%s: %s), "
-                        "US par defaut", type(e).__name__, e)
-            marche = "us"
+        marche, source = _jb_marche_ancien_menu(
+            msg, chan, getattr(interaction, "guild", None))
         vue = _jb_menu_models_vue(marche, getattr(interaction, "guild", None))
         etat = await _jb_menu_models_editer(interaction.client, chan, msg, vue)
-        log.info("menu des models %s : ancien format -> menus de 10 (%s, %s)",
-                 getattr(chan, "name", "?"), marche, etat)
+        log.info("menu des models %s : ancien format -> menus de 10 (%s d'apres "
+                 "%s, %s)", getattr(chan, "name", "?"), marche, source, etat)
     except Exception as e:                                   # noqa: BLE001
         log.warning("menu des models %s : ancien menu %s non converti (%s: %s) "
                     "-- il reste a l'ancien format, ses boutons repondent "

@@ -769,7 +769,13 @@ def marche_du_salon(channel) -> str:
     (qui le redessine) et la conversion d'un ancien menu au clic
     (cogs/user.py). maj_menu_marche avait sa propre variante, repliee sur
     « us » : le meme salon FR sans proprietaire recevait des models FR a la
-    pose et US au rafraichissement."""
+    pose et US au rafraichissement.
+
+    SALONS -menu SEULEMENT. Ailleurs (un #jailbreak partage), la premiere
+    autorisation nominative n'est pas un proprietaire : un manager sans role
+    de marche y faisait passer le menu du serveur FR en models US. La
+    conversion au clic ne l'appelle donc que pour un -menu
+    (_jb_marche_ancien_menu)."""
     try:
         import guild_features as _gf
         marche = "us" if _gf.is_us_guild(channel.guild) else "fr"
