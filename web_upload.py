@@ -72372,7 +72372,10 @@ def _start_doublons_vault_daemon() -> bool:
         return False
 
     def _boucle():
-        time.sleep(600)            # la veille Drive et les imports d'abord
+        # 2 minutes, pas 10 : le 26/09, les deploiements se suivaient a moins
+        # de 10 minutes et le premier passage n'arrivait jamais. La pause
+        # Drive (gdrive_sync.pause_drive) couvre un import en cours.
+        time.sleep(120)
         while True:
             attente = 3600
             try:
