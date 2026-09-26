@@ -18245,19 +18245,51 @@ try:
             return [[c.custom_id for c in r.children] for r in v.walk_children()
                     if isinstance(r, _dGn.ui.ActionRow)]
 
-        _vAtt = _cuGn._jb_general(None, "_")
-        _vNue = _cuGn._jb_general(None, "zgen_ident")
-        check("general : en attente et sans reserve, AUCUN bouton (texte seul, V2)",
-              all(isinstance(v, _dGn.ui.LayoutView) and v.has_components_v2()
-                  and not _idsGn(v) and _texteGn(v) for v in (_vAtt, _vNue)))
-        check("general : sans reserve, il dit ou la lier sur le site",
-              "Réserves liées" in _texteGn(_vNue), _texteGn(_vNue)[:120])
-        _vNue2 = _cuGn._jb_general(None, "zgen_nue")
-        check("general : les liens ecartes sont dits, avec leur raison",
-              "zgen_ident" in _texteGn(_vNue2) and "zgen_fantome" in _texteGn(_vNue2)
-              and "n'est plus une réserve" in _texteGn(_vNue2)
-              and "dossier absent" in _texteGn(_vNue2)
-              and _idsGn(_vNue2), _texteGn(_vNue2)[:200])
+        # MENUS EPURES (demande du proprietaire du 26/09/2026) : « toutes tes
+        # ecritures, on dirait que c'est prepare pour une notice ». Le General
+        # n'a plus en tete que l'icone de la reserve et son nom ; un etat sans
+        # action (attente, aucune reserve) n'a AUCUN texte, seulement le
+        # bouton « 🔢 5 » (quantite par defaut 5) -- c'est son custom_id jbg:
+        # qui le fait reconnaitre. Ce que le texte disait (ou lier une reserve,
+        # liens ecartes et leur raison) part au JOURNAL : on l'y exige, jamais
+        # tu. Le journal du bot est ecoute le temps de ces constructions.
+        import logging as _lgGn
+
+        class _JrnGn(_lgGn.Handler):
+            def __init__(self):
+                super().__init__(_lgGn.DEBUG)
+                self.lignes = []
+
+            def emit(self, r):
+                self.lignes.append(r.getMessage())
+        _jrnGn = _JrnGn()
+        _lgUGn = _lgGn.getLogger("vabot.user")
+        _nivGn = _lgUGn.level
+        _lgUGn.addHandler(_jrnGn)
+        _lgUGn.setLevel(_lgGn.DEBUG)
+        try:
+            _vAtt = _cuGn._jb_general(None, "_")
+            _vNue = _cuGn._jb_general(None, "zgen_ident")
+            _vNue2 = _cuGn._jb_general(None, "zgen_nue")
+        finally:
+            _lgUGn.removeHandler(_jrnGn)
+            _lgUGn.setLevel(_nivGn)
+        check("general : en attente et sans reserve, AUCUNE action ni texte, la seule quantite « 🔢 5 » (V2)",
+              all(isinstance(v, _dGn.ui.LayoutView) and v.has_components_v2() and _texteGn(v) == ""
+                  for v in (_vAtt, _vNue))
+              and _idsGn(_vAtt) == ["jbg:qb:_:_:5"] and _idsGn(_vNue) == ["jbg:qb:zgen_ident:_:5"]
+              and all(str(i.item.emoji) == "🔢" and i.item.label == "5" for v in (_vAtt, _vNue)
+                      for i in v.walk_children() if isinstance(i, _dGn.ui.DynamicItem)),
+              (_idsGn(_vAtt), _idsGn(_vNue), _texteGn(_vNue)[:80]))
+        check("general : sans reserve, ou la lier sur le site part au JOURNAL (plus dans le message)",
+              any("General zgen_ident : sans action -- aucune reserve liee" in l
+                  and "Reserves liees" in l for l in _jrnGn.lignes),
+              _jrnGn.lignes[-4:])
+        check("general : les liens ecartes sont JOURNALISES, avec leur raison, et le General sert quand meme",
+              any("General zgen_nue : 2 lien(s) ecarte(s)" in l and "zgen_ident : n'est plus une réserve" in l
+                  and "zgen_fantome : dossier absent" in l for l in _jrnGn.lignes)
+              and _idsGn(_vNue2) and _texteGn(_vNue2) == "## Zgen_blonde",
+              (_jrnGn.lignes[-4:], _texteGn(_vNue2)[:80]))
         _v1 = _cuGn._jb_general(None, "zgen_lola", 3)
         _ids1 = _idsGn(_v1)
         _m1 = _menusGn(_v1)
@@ -18290,20 +18322,48 @@ try:
               set(_acts1) == set(_cuGn._JB_GENERAL_RANGEES)
               and set(_cuGn._JB_GENERAL_RANGEES) <= {a[0] for a in _cuGn._JB_ACTIONS_US},
               str(set(_acts1) ^ set(_cuGn._JB_GENERAL_RANGEES)))
-        # CHANGEMENT VOULU : plus de pied d embed -- la marque est la derniere
-        # ligne du texte, et le titre est sa premiere.
-        check("general : marque « -# panneau-general-us » en derniere ligne, jamais « menu » ni « Jailbreak » dans le titre",
-              all(_texteGn(v).splitlines()[-1] == "-# panneau-general-us"
-                  and _texteGn(v).splitlines()[0].startswith("## ✨ General")
-                  and "menu" not in _texteGn(v).splitlines()[0].lower()
-                  and "jailbreak" not in _texteGn(v).splitlines()[0].lower()
-                  for v in (_vAtt, _vNue, _v1)),
-              [_texteGn(v).splitlines()[:1] for v in (_vAtt, _vNue, _v1)])
-        check("general : un nom qui contient « menu » ne passe pas dans le titre",
-              _cuGn._titre_general("✨ General — Emenu pour Lola") == "✨ General")
+        # CHANGEMENT VOULU (menus epures, 26/09/2026) : plus de pied d embed NI
+        # de ligne-marque, plus de titre « ✨ General — … » -- en tete le seul
+        # nom de la reserve. Le General se reconnait a ses custom_id jbg:, sous
+        # le format que Discord renvoie (composants recus), meme sans texte.
+        from discord.components import _component_factory as _cf4Gn
+
+        def _recuGn(v, auteur=1):
+            return _tyGn.SimpleNamespace(author=_tyGn.SimpleNamespace(id=auteur), embeds=[],
+                                         content=None, components=[_cf4Gn(d) for d in v.to_components()])
+        check("general : plus de marque ni de titre -- attente et sans reserve SANS texte, avec reserve "
+              "l en-tete « ## Zgen_blonde » seul ; chacun reconnu comme General, jamais comme panneau ni menu",
+              _texteGn(_vAtt) == "" and _texteGn(_vNue) == "" and _texteGn(_v1) == "## Zgen_blonde"
+              and all(_cuGn._est_general(_recuGn(v), 1) and not _cuGn._est_panneau_actions(_recuGn(v), 1)
+                      and not _cuGn._est_menu_models(_recuGn(v), 1) for v in (_vAtt, _vNue, _v1))
+              and not _cuGn._est_general(_recuGn(_v1, auteur=99), 1),
+              [_texteGn(v)[:40] for v in (_vAtt, _vNue, _v1)])
+        # Le repli sur « ✨ General » (_titre_general) existait parce qu un
+        # titre contenant « menu » faisait supprimer le message par
+        # _delete_old_menus, et « Jailbreak » le faisait prendre pour le menu
+        # des models. L en-tete montre maintenant le nom TEL QUEL : ce qui
+        # protege, c est le reperage par custom_id, teste AVANT le menu.
+        _vMnGn = _dGn.ui.LayoutView(timeout=None)
+        _cMnGn = _dGn.ui.Container()
+        _cMnGn.add_item(_dGn.ui.TextDisplay(_cuGn._jb_entete("zgen_emenu_jailbreak")))
+        _rMnGn = _dGn.ui.ActionRow()
+        _rMnGn.add_item(_cuGn.JBGenQtyBouton("zgen_lola", "zgen_emenu_jailbreak", 5))
+        _cMnGn.add_item(_rMnGn)
+        _vMnGn.add_item(_cMnGn)
+        check("general : un nom qui contient « menu »/« Jailbreak » s affiche tel quel, le General reste reconnu (jamais pris pour le menu)",
+              _texteGn(_vMnGn) == "## Zgen_emenu_jailbreak" and _cuGn._est_general(_recuGn(_vMnGn), 1)
+              and not _cuGn._est_menu_models(_recuGn(_vMnGn), 1)
+              and not hasattr(_cuGn, "_titre_general"), _texteGn(_vMnGn))
         safe_json.write(_tiGn.FICHIER_LIENS, {"zgen_lola": ["zgen_blonde"], _M30: _R30})
         _tiGn._CACHE_LIENS.update(sig=None, data={})
-        _v5 = _cuGn._jb_general(None, _M30, 100, reserve=_R30[4])
+        _jrnGn.lignes.clear()
+        _lgUGn.addHandler(_jrnGn)
+        _lgUGn.setLevel(_lgGn.DEBUG)
+        try:
+            _v5 = _cuGn._jb_general(None, _M30, 100, reserve=_R30[4])
+        finally:
+            _lgUGn.removeHandler(_jrnGn)
+            _lgUGn.setLevel(_nivGn)
         _ids5 = _idsGn(_v5)
         _rows5 = [len(r) for r in _rangeesGn(_v5)]
         # Limite V2 : 40 composants (conteneur, texte et rangees compris), plus
@@ -18317,8 +18377,12 @@ try:
                   and i.item.style == _dGn.ButtonStyle.success
                   and i.custom_id.startswith("jbg:r:") and _R30[4] in i.custom_id
                   for i in _v5.walk_children()))
-        check("general : le surplus est compte dans le texte, pas ecarte en silence",
-              "+1 autre" in _texteGn(_v5), _texteGn(_v5)[:200])
+        # Menus epures (26/09/2026) : le message n a plus que l en-tete ; le
+        # surplus est COMPTE et NOMME au journal.
+        check("general : le surplus est compte au journal (nomme), pas ecarte en silence",
+              any("1 reserve(s) liee(s) sans bouton" in l and _R30[3] in l for l in _jrnGn.lignes)
+              and _texteGn(_v5) == "## " + _R30[4].capitalize(),
+              (_jrnGn.lignes[-3:], _texteGn(_v5)[:80]))
         check("general : custom_id de 100 caracteres au plus, noms de 30 et quantite 100",
               _ids5 and max(len(i) for i in _ids5) <= 100,
               str(max(len(i) for i in _ids5) if _ids5 else "aucun custom_id"))
@@ -18570,9 +18634,11 @@ try:
               and _cuGn._jb_general_ids().get("4242") == str(_gen[0].id), _ordreGn(_chGn))
         # CHANGEMENT VOULU (partie E) : le General pose est V2 -- sans embed,
         # reconnu a sa marque, pas a un pied d embed.
-        check("clic model : le General pose est un message V2, sans embed, marque en derniere ligne",
+        # Menus epures (26/09/2026) : plus de ligne-marque, l en-tete de la
+        # reserve seul (ce faux serveur n a pas son emoji : le nom seul).
+        check("clic model : le General pose est un message V2, sans embed, en-tete « ## Zgen_blonde » seul",
               _gen and not _gen[0].embeds and _gen[0].flags.components_v2
-              and _texteGn(_gen[0].view).splitlines()[-1] == "-# panneau-general-us"
+              and _texteGn(_gen[0].view) == "## Zgen_blonde"
               and _piedGn(_gen[0]) == "", _texteGn(_gen[0].view)[-80:] if _gen else "aucun")
         check("clic model : le General porte les boutons de la reserve liee",
               _gen[0].view is not None
@@ -18583,9 +18649,13 @@ try:
         _gen = [m for m in _chGn.msgs if _cuGn._est_general(m, 1)]
         # CHANGEMENT VOULU (partie E) : « boutons retires » = une vue de TEXTE
         # SEUL (V2), plus view=None ; ni bouton ni menu de la model d avant.
-        check("clic model sans reserve : le MEME General est edite, boutons retires",
-              len(_gen) == 1 and _gen[0].id == _idGenAvant and not _idsGn(_gen[0].view)
-              and "aucune réserve" in _texteGn(_gen[0].view) and _ordreGn(_chGn) == "PG",
+        # Menus epures (26/09/2026) : « boutons retires » = plus que la
+        # quantite de la NOUVELLE model, sans texte ; ni bouton ni menu de la
+        # model d avant.
+        check("clic model sans reserve : le MEME General est edite, boutons retires (la seule quantite, aucun texte)",
+              len(_gen) == 1 and _gen[0].id == _idGenAvant
+              and _idsGn(_gen[0].view) == ["jbg:qb:zgen_ident:_:5"]
+              and _texteGn(_gen[0].view) == "" and _ordreGn(_chGn) == "PG",
               (_ordreGn(_chGn), _idsGn(_gen[0].view) if _gen else None))
 
         # Un ANCIEN General (embed, poste avant le 26/09/2026) sous le panneau :
