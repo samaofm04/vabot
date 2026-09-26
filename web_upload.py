@@ -54065,15 +54065,61 @@ def _banger_examiner(handle: str, reels) -> None:
     Tout est sous try/except : une exception ici remonterait dans _scrape_one et
     ferait compter le compte comme un echec de scrape. Une veille qui casse le
     scrape serait bien pire que pas de veille du tout.
+
+    Les NOUVEAUX bangers partent aussi vers le salon « all-banger »
+    (_all_banger_signaler) : c est ici, et seulement ici, que le lien video du
+    scrape est encore frais -- le telecharger maintenant ne coute rien.
     """
     try:
         if not reels:
             return
         import bangers as _bg
         ident, va = _banger_table_proprietaires().get(handle or "", ("", ""))
-        _bg.examiner(handle, reels, identite=ident, va=va)
+        res = _bg.examiner(handle, reels, identite=ident, va=va)
     except Exception as e:                                    # noqa: BLE001
         log.warning(f"[bangers] examen @{handle} : {e}")
+        return
+    _all_banger_signaler((res or {}).get("nouveaux") or [], reels)
+
+
+def _all_banger_signaler(nouveaux, reels) -> int:
+    """Confie au fil « all-banger » les videos a descendre. Rend leur nombre.
+
+    Rien de lent ici (pas de reseau) : on est dans le pool de scrape. Le
+    telechargement et l envoi Discord se font dans le fil d envoi.
+
+    Garde de MACHINE : sur le poste de dev, le scrape tourne aussi quand on
+    rend une page -- sans cette garde, le poste posterait dans le salon du
+    VPS, avec son propre registre, donc en double.
+    """
+    try:
+        if not _machine_proprietaire("all-banger"):
+            return 0
+        import all_banger as _ab
+        travaux = _ab.signaler(nouveaux, reels)
+        if travaux:
+            _ab.pousser(travaux)
+            _start_all_banger_daemon()
+        return len(travaux)
+    except Exception as e:                                    # noqa: BLE001
+        log.warning(f"[all-banger] signalement : {type(e).__name__}: {e}")
+        return 0
+
+
+def _start_all_banger_daemon() -> bool:
+    """Le fil qui descend les videos des bangers et les poste dans « all-banger ».
+
+    Lance au demarrage du site (des bangers « prets » peuvent attendre depuis
+    avant un redemarrage) et, au besoin, au premier banger signale. Un seul
+    fil par processus : les envois partent un par un.
+    """
+    if not _machine_proprietaire("all-banger"):
+        return False
+    import all_banger as _ab
+    # _BOT_REF est relu a CHAQUE appel : le bot se connecte apres le site.
+    return _ab.demarrer(
+        poster=lambda sc, e: _ab.poster_via_bot(_BOT_REF, sc, e),
+        pret=lambda: _ab.bot_pret(_BOT_REF))
 
 
 def _banger_recuperer(shortcode: str, url: str) -> tuple:
@@ -55257,6 +55303,13 @@ def create_app():
         _start_infloww_liens_daemon()
     except Exception as _e:
         log.warning(f"liens Infloww non démarrés: {_e}")
+    # Salon « all-banger » : chaque banger dont la video est descendue, poste
+    # des qu'il est detecte. Lance ici aussi pour reprendre, apres un
+    # redemarrage, les videos pretes qui n etaient pas encore parties.
+    try:
+        _start_all_banger_daemon()
+    except Exception as _e:
+        log.warning(f"all-banger non démarré: {_e}")
     # Collecte AUTO des SFS reçus (DM entrants) toutes les 5 min via l'API
     # MyPuls — sans elle, un message lu vite par un chatteur serait raté
     try:

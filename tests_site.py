@@ -11365,6 +11365,541 @@ try:
 except Exception as _eB:
     check("bangers : veille testable", False, repr(_eB)[:220])
 
+# --- Salon « all-banger » ----------------------------------------------
+# Demande du 26/09/2026 : chaque banger dont la video a ete RECUPEREE est
+# reposte dans « all-banger », la video et la description, rien d autre.
+# Tout se joue dans un dossier temporaire, avec un faux salon Discord et un
+# faux telechargement : aucun appel HikerAPI, Apify ni Discord.
+try:
+    import asyncio as _aioA, logging as _logA, re as _reA, types as _tyA
+    import tempfile as _tfA, pathlib as _plA, inspect as _inA, time as _tA
+    import discord as _dA
+    import bangers as _bgA
+    import all_banger as _abA
+    _tmpA = _plA.Path(_tfA.mkdtemp(prefix="allbanger_test_"))
+    _savA = (_bgA.FICHIER, _bgA.DOSSIER, _bgA.DETAILS_DIR, _abA.FICHIER,
+             _abA.DOSSIER_CACHE_INSTA, _abA._est_une_video)
+    _vraieSondeA = _abA._est_une_video
+    # QUE PERSONNE N APPELLE UNE SOURCE PAYANTE. Chaque porte est remplacee
+    # par un piege qui note l appel : la chaine entiere doit tourner sans.
+    _interditsA, _savPiegesA = [], []
+    for _modN, _fnN in (("hiker_reels", "scrape_profile"), ("hiker_reels", "_appel"),
+                        ("apify_reels", "fetch_reel_details"),
+                        ("reels_source", "fetch_video_urls"),
+                        ("veille_telegram", "download_video_bytes"),
+                        ("veille_telegram", "download_via_ytdlp")):
+        try:
+            _modO = importlib.import_module(_modN)
+        except Exception:
+            continue
+        if hasattr(_modO, _fnN):
+            _savPiegesA.append((_modO, _fnN, getattr(_modO, _fnN)))
+            setattr(_modO, _fnN, (lambda _n: (lambda *a, **k: _interditsA.append(_n)))(
+                _modN + "." + _fnN))
+    _journalA = []
+
+    class _OreilleA(_logA.Handler):
+        def emit(self, rec):
+            _journalA.append(rec.getMessage())
+    _oreilleA = _OreilleA()
+    _logA.getLogger("vabot.all_banger").addHandler(_oreilleA)
+    try:
+        _bgA.FICHIER = _tmpA / "bangers.json"
+        _bgA.DOSSIER = _tmpA / "bangers"
+        _bgA.DETAILS_DIR = _tmpA / "bangers_details"
+        _abA.FICHIER = _tmpA / "bangers_all.json"
+        _abA.DOSSIER_CACHE_INSTA = _tmpA / "insta_videos"
+        # ffprobe n existe pas partout : la sonde est remplacee par la
+        # signature MP4, la vraie est verifiee plus bas quand ffmpeg est la.
+        _abA._est_une_video = lambda p: (p.stat().st_size > 1024
+                                         and p.read_bytes()[4:8] == b"ftyp")
+        _abA._EN_COURS.clear(); _abA._DITS.clear()
+        while not _abA.FILE.empty():
+            _abA.FILE.get_nowait()
+        _MP4A = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 4000
+        _telechA = []
+
+        def _dlOkA(url, info):
+            _telechA.append(url)
+            return _MP4A
+
+        def _dl403A(url, info):
+            _telechA.append(url)
+            info["reason"] = "http_403"
+            return None
+
+        class _MsgA:
+            def __init__(self, mid, auteur, contenu, noms):
+                self.id, self.content = mid, contenu
+                self.author = _tyA.SimpleNamespace(id=auteur)
+                self.attachments = [_tyA.SimpleNamespace(filename=n) for n in noms]
+                self.nonce = None      # Discord ne le rend pas a la relecture
+
+        class _SalonA:
+            def __init__(self, cid, nom, guild):
+                self.id, self.name, self.guild, self.position = cid, nom, guild, 0
+                self.envois, self.messages, self.panne = [], [], None
+
+            async def send(self, content=None, files=None, nonce=None,
+                           allowed_mentions=None, suppress_embeds=False, **kw):
+                if self.panne is not None:
+                    raise self.panne
+                joints = {}
+                for _f in (files or []):
+                    if _f.filename.endswith(".txt"):
+                        joints[_f.filename] = _f.fp.read().decode("utf-8")
+                noms = [_f.filename for _f in (files or [])]
+                self.envois.append({"content": content, "noms": noms, "joints": joints,
+                                    "nonce": nonce, "am": allowed_mentions,
+                                    "sans_apercu": suppress_embeds, "autres": kw})
+                m = _MsgA(9000 + len(self.envois), 42, content, noms)
+                self.messages.append(m)
+                return m
+
+            def history(self, limit=100, after=None):
+                async def _gen():
+                    for _m in list(self.messages):
+                        yield _m
+                return _gen()
+
+            def permissions_for(self, membre):
+                return _tyA.SimpleNamespace(send_messages=True, attach_files=True)
+
+        class _GuildA:
+            def __init__(self):
+                self.id, self.filesize_limit, self.me = _abA.GUILD_ID, 10 * 1024 * 1024, object()
+                self.text_channels = []
+
+        _guildA = _GuildA()
+        _generalA = _SalonA(111, "général", _guildA)
+        _salonA = _SalonA(222, "🔥・all‑banger", _guildA)
+        _guildA.text_channels = [_generalA, _salonA]
+        _clientA = _tyA.SimpleNamespace(user=_tyA.SimpleNamespace(id=42),
+                                        get_guild=lambda gid: _guildA if gid == _guildA.id else None)
+
+        def _posterA(sc, e):
+            return _aioA.run(_abA.envoyer(_clientA, sc, e))
+
+        def _envoisA():
+            return _abA.traiter_envois(_posterA, dormir=lambda s: None)
+
+        _nowA = _tA.time()
+
+        def _reelA(sc, vues, lien, legende=""):
+            return {"shortcode": sc, "is_video": True, "views": vues,
+                    "taken_at": _nowA - 3600, "caption": legende, "video_url": lien}
+
+        # 1) Un NOUVEAU banger, video recuperee : poste une fois, video +
+        #    description, rien d autre.
+        _legA = "Ma legende #un_tag et #deux_tags @everyone"
+        _rA = [_reelA("ALLBG01", 15000, "https://cdn.test/ALLBG01-a.mp4", _legA),
+               _reelA("ALLBG02", 500, "https://cdn.test/ALLBG02-a.mp4")]
+        _exA = _bgA.examiner("compte.secret", _rA, identite="jessye", va="VA Secret",
+                             maintenant=_nowA)
+        _jobsA = _abA.signaler(_exA["nouveaux"], _rA)
+        check("all-banger : seul le nouveau banger part au telechargement, avec le lien du scrape",
+              [(j["shortcode"], j["video_url"]) for j in _jobsA]
+              == [("ALLBG01", "https://cdn.test/ALLBG01-a.mp4")], str(_jobsA)[:200])
+        check("all-banger : la detection ne telecharge rien elle-meme (fil a part)",
+              not _telechA and not _bgA.video_presente("ALLBG01"))
+        for _j in _jobsA:
+            _abA.traiter_job(_j, telecharger_octets=_dlOkA)
+        check("all-banger : la video va dans l archive des bangers, la description a cote",
+              _bgA.video_presente("ALLBG01")
+              and _bgA.chemin_description("ALLBG01").read_text(encoding="utf-8") == _legA
+              and _abA.entree("ALLBG01").get("etat") == "pret")
+        check("all-banger : aucun tampon ne reste dans l archive",
+              sorted(p.name for p in _bgA.DOSSIER.iterdir()) == ["ALLBG01.mp4", "ALLBG01.txt"],
+              str(sorted(p.name for p in _bgA.DOSSIER.iterdir())))
+        _b1A = _envoisA()
+        _e1A = _salonA.envois[0] if _salonA.envois else {}
+        check("all-banger : le banger est poste, une fois, dans le salon all-banger",
+              len(_salonA.envois) == 1 and not _generalA.envois and _b1A.get("envoyes") == 1,
+              str(_b1A))
+        check("all-banger : le message porte la video, et elle seule en piece jointe",
+              _e1A.get("noms") == ["ALLBG01.mp4"], str(_e1A.get("noms")))
+        check("all-banger : le texte EST la description (l echappement ne change pas le texte copie)",
+              _reA.sub(r"\\(.)", r"\1", _e1A.get("content") or "") == _legA,
+              repr(_e1A.get("content")))
+        check("all-banger : ni VA, ni compte, ni vues, ni identite dans le message",
+              not any(x in (_e1A.get("content") or "")
+                      for x in ("VA Secret", "compte.secret", "15", "vues", "jessye")),
+              repr(_e1A.get("content")))
+        _amA = _e1A.get("am")
+        check("all-banger : aucune mention ne notifie (AllowedMentions.none)",
+              isinstance(_amA, _dA.AllowedMentions) and _amA.everyone is False
+              and _amA.users is False and _amA.roles is False, repr(_amA))
+        check("all-banger : un lien de la legende ne deroule pas d apercu",
+              _e1A.get("sans_apercu") is True)
+        # L echappement : invisible a l affichage, et le texte copie est
+        # l original -- y compris les lignes « ␣␣- », les barres obliques et
+        # les liens (une barre dans une URL la casserait).
+        _pieceA = "  - puce\n# titre\n> cite\n*gras* ~x~ |s| `c` \\ [a](b)\nhttps://t.co/a_b_c"
+        _echA = _abA._echapper(_pieceA)
+        check("all-banger : l echappement rend le texte d origine, liens intacts",
+              _reA.sub(r"\\(.)", r"\1", _echA) == _pieceA
+              and "https://t.co/a_b_c" in _echA and _echA.startswith("  \\- puce"),
+              repr(_echA))
+        check("all-banger : l envoi porte le nonce du reel (anti-doublon de Discord)",
+              _e1A.get("nonce") == _abA.nonce_de("ALLBG01") and len(_e1A["nonce"]) <= 25)
+        _envoyeA = _abA.entree("ALLBG01")
+        check("all-banger : l envoi est consigne (etat, message, salon)",
+              _envoyeA.get("etat") == "envoye" and _envoyeA.get("message_id") == 9001
+              and _envoyeA.get("channel_id") == 222, str(_envoyeA)[:200])
+        _envoisA()
+        _jobsBisA = _abA.signaler(_exA["nouveaux"], _rA)
+        check("all-banger : un second passage ne reposte pas, ne retelecharge pas",
+              len(_salonA.envois) == 1 and not _jobsBisA)
+
+        # 2) Echec de telechargement : rien n est poste ; UNE relance au
+        #    scrape suivant, avec un lien NEUF ; au-dela, on renonce.
+        _rB = [_reelA("ALLBG03", 20000, "https://cdn.test/ALLBG03-a.mp4", "b")]
+        _exB = _bgA.examiner("compte.b", _rB, maintenant=_nowA)
+        for _j in _abA.signaler(_exB["nouveaux"], _rB):
+            _abA.traiter_job(_j, telecharger_octets=_dl403A)
+        _eB = _abA.entree("ALLBG03")
+        check("all-banger : un echec est compte, avec sa raison, et rien n est poste",
+              _eB.get("etat") == "video" and _eB.get("essais") == 1
+              and _eB.get("raison") == "http_403" and len(_salonA.envois) == 1
+              and not _bgA.video_presente("ALLBG03"), str(_eB))
+        _envoisA()
+        check("all-banger : un banger sans video ne part jamais", len(_salonA.envois) == 1)
+        check("all-banger : le meme lien mort ne brule pas la relance",
+              _abA.signaler([], _rB) == [])
+        _rB2 = [_reelA("ALLBG03", 21000, "https://cdn.test/ALLBG03-b.mp4", "b")]
+        _jB2 = _abA.signaler([], _rB2)
+        check("all-banger : le scrape suivant apporte un lien neuf -> une relance",
+              [j["video_url"] for j in _jB2] == ["https://cdn.test/ALLBG03-b.mp4"], str(_jB2))
+        for _j in _jB2:
+            _abA.traiter_job(_j, telecharger_octets=_dl403A)
+        _rB3 = [_reelA("ALLBG03", 22000, "https://cdn.test/ALLBG03-c.mp4", "b")]
+        check("all-banger : apres la relance ratee, plus aucun essai (echec definitif)",
+              _abA.entree("ALLBG03").get("etat") == "echec" and _abA.signaler([], _rB3) == [])
+        _envoisA()
+        check("all-banger : l echec definitif n est jamais poste", len(_salonA.envois) == 1)
+        check("all-banger : l echec definitif est journalise",
+              any("ALLBG03" in l and "NON récupérée" in l for l in _journalA),
+              " | ".join(_journalA[-3:])[:200])
+        # la relance qui REUSSIT, elle, part bien
+        _rC = [_reelA("ALLBG04", 30000, "https://cdn.test/ALLBG04-a.mp4", "c")]
+        _exC = _bgA.examiner("compte.c", _rC, maintenant=_nowA)
+        for _j in _abA.signaler(_exC["nouveaux"], _rC):
+            _abA.traiter_job(_j, telecharger_octets=_dl403A)
+        _rC2 = [_reelA("ALLBG04", 30000, "https://cdn.test/ALLBG04-b.mp4", "c")]
+        for _j in _abA.signaler([], _rC2):
+            _abA.traiter_job(_j, telecharger_octets=_dlOkA)
+        _envoisA()
+        check("all-banger : la relance reussie est postee",
+              _abA.entree("ALLBG04").get("etat") == "envoye"
+              and _salonA.envois[-1]["noms"] == ["ALLBG04.mp4"])
+        # un scrape SANS lien (source de repli) ne consomme pas l essai
+        _rD = [_reelA("ALLBG05", 40000, "", "d")]
+        _exD = _bgA.examiner("compte.d", _rD, maintenant=_nowA)
+        check("all-banger : un scrape sans lien ne consomme aucun essai",
+              _abA.signaler(_exD["nouveaux"], _rD) == []
+              and _abA.entree("ALLBG05").get("essais") == 0
+              and _abA.entree("ALLBG05").get("raison") == "scrape_sans_lien")
+        # ... mais une copie deja sur le disque (cache des Trends) suffit
+        _abA.DOSSIER_CACHE_INSTA.mkdir(parents=True, exist_ok=True)
+        (_abA.DOSSIER_CACHE_INSTA / "ALLBG05.mp4").write_bytes(_MP4A)
+        _jD = _abA.signaler([], _rD)
+        for _j in _jD:
+            _abA.traiter_job(_j, telecharger_octets=_dlOkA)
+        check("all-banger : une video deja dans le cache est COPIEE, sans telechargement",
+              _abA.entree("ALLBG05").get("etat") == "pret"
+              and _abA.entree("ALLBG05").get("source") == "cache"
+              and (_abA.DOSSIER_CACHE_INSTA / "ALLBG05.mp4").exists()
+              and "ALLBG05" not in " ".join(_telechA))
+        _envoisA()
+
+        # 3) Pas de doublon apres un redemarrage.
+        def _intentionA(sc, age):
+            _dI = _abA.charger()
+            _dI["reels"][sc] = {"etat": "envoi", "essais": 1, "detecte_le": int(_nowA),
+                                "intention_le": _nowA - age, "nonce": _abA.nonce_de(sc)}
+            _abA._ecrire(_dI)
+            _bgA.chemin_video(sc).write_bytes(_MP4A)
+        # le processus est mort APRES l envoi : le message est dans le salon
+        _intentionA("ALLBG06", 600)
+        _salonA.messages.append(_MsgA(7777, 42, "x", ["ALLBG06.mp4"]))
+        _nA = len(_salonA.envois)
+        _b3A = _envoisA()
+        check("all-banger : apres une coupure, un envoi deja fait est RETROUVE, pas refait",
+              len(_salonA.envois) == _nA and _abA.entree("ALLBG06").get("etat") == "envoye"
+              and _abA.entree("ALLBG06").get("message_id") == 7777 and _b3A.get("retrouves") == 1,
+              str(_b3A))
+        # le processus est mort AVANT : rien dans le salon -> un seul envoi
+        _intentionA("ALLBG07", 600)
+        _envoisA()
+        check("all-banger : une intention sans message devient « pret », sans envoi immediat",
+              _abA.entree("ALLBG07").get("etat") == "pret" and len(_salonA.envois) == _nA)
+        _envoisA(); _envoisA()
+        check("all-banger : ... puis part UNE fois",
+              [e["noms"] for e in _salonA.envois[_nA:]] == [["ALLBG07.mp4"]])
+        # une intention toute fraiche peut encore etre en vol : on n y touche pas
+        _intentionA("ALLBG08", 5)
+        _nA = len(_salonA.envois)
+        _envoisA()
+        check("all-banger : une intention trop recente n est ni verifiee ni renvoyee",
+              _abA.entree("ALLBG08").get("etat") == "envoi" and len(_salonA.envois) == _nA)
+        # sans droit de relire l historique, on ne tranche pas : on attend
+        _intentionA("ALLBG08", 600)
+        _histA = _salonA.history
+
+        def _histInterdit(limit=100, after=None):
+            raise _dA.Forbidden(_tyA.SimpleNamespace(status=403, reason="Forbidden"), "no")
+        _salonA.history = _histInterdit
+        _b3bA = _envoisA()
+        _salonA.history = _histA
+        check("all-banger : historique illisible -> ni renvoi ni abandon, cause dite",
+              _abA.entree("ALLBG08").get("etat") == "envoi" and len(_salonA.envois) == _nA
+              and "relecture" in _b3bA.get("attente", ""), str(_b3bA))
+        _dX = _abA.charger(); _dX["reels"].pop("ALLBG08"); _abA._ecrire(_dX)
+        _bgA.chemin_video("ALLBG08").unlink()
+        # redemarrage : memoire vide, meme detection -> rien de neuf
+        _abA._EN_COURS.clear()
+        _jR = _abA.signaler(_exA["nouveaux"] + _exC["nouveaux"], _rA + _rC2)
+        check("all-banger : apres redemarrage, un banger deja poste n est ni retelecharge ni reposte",
+              not _jR and _abA.entree("ALLBG01").get("etat") == "envoye"
+              and len(_salonA.envois) == _nA)
+        check("all-banger : le registre d envoi est sur le disque (survit au redemarrage)",
+              json.loads(_abA.FICHIER.read_text(encoding="utf-8"))["reels"]["ALLBG01"]["etat"]
+              == "envoye")
+
+        # 4) Trop lourd pour Discord : pas d envoi, compte et journalise.
+        _rE = [_reelA("ALLBG09", 50000, "https://cdn.test/ALLBG09.mp4", "e")]
+        _exE = _bgA.examiner("compte.e", _rE, maintenant=_nowA)
+        for _j in _abA.signaler(_exE["nouveaux"], _rE):
+            _abA.traiter_job(_j, telecharger_octets=_dlOkA)
+        _guildA.filesize_limit = 2000
+        _nA = len(_salonA.envois)
+        _b4A = _envoisA()
+        _guildA.filesize_limit = 10 * 1024 * 1024
+        check("all-banger : une video trop lourde n est pas postee, elle est comptee",
+              len(_salonA.envois) == _nA and _abA.entree("ALLBG09").get("etat") == "trop_lourd"
+              and _b4A.get("trop_lourds") == 1 and _abA.bilan().get("trop_lourd") == 1,
+              str(_b4A))
+        check("all-banger : « trop lourd » est journalise avec la taille",
+              any("ALLBG09" in l and "trop lourd" in l for l in _journalA))
+        _envoisA()
+        check("all-banger : un trop lourd n est pas retente a chaque passage",
+              len(_salonA.envois) == _nA)
+
+        # 5) Salon absent : rien ne part, les videos attendent, une seule ligne
+        #    de journal ; le salon cree, elles partent.
+        _rF = [_reelA("ALLBG10", 60000, "https://cdn.test/ALLBG10.mp4", "f")]
+        _exF = _bgA.examiner("compte.f", _rF, maintenant=_nowA)
+        for _j in _abA.signaler(_exF["nouveaux"], _rF):
+            _abA.traiter_job(_j, telecharger_octets=_dlOkA)
+        _guildA.text_channels = [_generalA]
+        _nA = len(_salonA.envois)
+        _b5A = _envoisA(); _envoisA()
+        check("all-banger : salon absent -> rien n est poste, nulle part",
+              len(_salonA.envois) == _nA and not _generalA.envois
+              and _abA.entree("ALLBG10").get("etat") == "pret"
+              and "all-banger" in _b5A.get("attente", ""), str(_b5A))
+        check("all-banger : salon absent -> journalise UNE fois",
+              sum("aucun salon" in l and "partiront dès que ce sera réglé" in l
+                  for l in _journalA) == 1)
+        _guildA.text_channels = [_generalA, _salonA]
+        _envoisA()
+        check("all-banger : le salon revenu, la video en attente part",
+              _abA.entree("ALLBG10").get("etat") == "envoye"
+              and _salonA.envois[-1]["noms"] == ["ALLBG10.mp4"])
+
+        # 6) Description trop longue pour un message : jointe en .txt
+        _longA = ("mot_" * 700).strip()
+        _rG = [_reelA("ALLBG11", 70000, "https://cdn.test/ALLBG11.mp4", _longA)]
+        _exG = _bgA.examiner("compte.g", _rG, maintenant=_nowA)
+        for _j in _abA.signaler(_exG["nouveaux"], _rG):
+            _abA.traiter_job(_j, telecharger_octets=_dlOkA)
+        _envoisA()
+        _eG = _salonA.envois[-1]
+        check("all-banger : description > 2000 signes -> fichier .txt, texte complet",
+              _eG["content"] is None and _eG["noms"] == ["ALLBG11.mp4", "ALLBG11_description.txt"]
+              and _eG["joints"].get("ALLBG11_description.txt") == _longA,
+              str(_eG["noms"]))
+
+        # 7) Refus net de Discord (droits) : rien de cree, on reprend plus tard
+        _rH = [_reelA("ALLBG12", 80000, "https://cdn.test/ALLBG12.mp4", "h")]
+        _exH = _bgA.examiner("compte.h", _rH, maintenant=_nowA)
+        for _j in _abA.signaler(_exH["nouveaux"], _rH):
+            _abA.traiter_job(_j, telecharger_octets=_dlOkA)
+        _salonA.panne = _dA.Forbidden(_tyA.SimpleNamespace(status=403, reason="Forbidden"),
+                                      "Missing Permissions")
+        _nA = len(_salonA.envois)
+        _b7A = _envoisA()
+        _salonA.panne = None
+        check("all-banger : un refus 403 ne cree rien et remet le banger en attente",
+              _abA.entree("ALLBG12").get("etat") == "pret"
+              and _abA.entree("ALLBG12").get("essais_envoi") == 1 and _b7A.get("refus") == 1
+              and len(_salonA.envois) == _nA, str(_abA.entree("ALLBG12")))
+        # issue incertaine (coupure reseau) : on NE renvoie PAS a l aveugle
+        _salonA.panne = ConnectionResetError("coupure")
+        _b7bA = _envoisA()
+        _salonA.panne = None
+        check("all-banger : une issue incertaine laisse « envoi » (verification, pas renvoi)",
+              _abA.entree("ALLBG12").get("etat") == "envoi" and _b7bA.get("incertains") == 1)
+        _dX = _abA.charger(); _dX["reels"]["ALLBG12"]["intention_le"] = _nowA - 600
+        _abA._ecrire(_dX)
+        _envoisA(); _envoisA()
+        check("all-banger : ... puis, absent du salon, il part une seule fois",
+              _abA.entree("ALLBG12").get("etat") == "envoye"
+              and [e["noms"][0] for e in _salonA.envois].count("ALLBG12.mp4") == 1)
+
+        # 8) Ce qui n entre pas : trop vieux (muet), essai du bouton de test
+        _rI = [{"shortcode": "ALLBG13", "views": 90000, "taken_at": _nowA - 40 * 86400,
+                "caption": "vieux", "video_url": "https://cdn.test/ALLBG13.mp4"}]
+        _exI = _bgA.examiner("compte.i", _rI, maintenant=_nowA)
+        _fEss = _bgA.forcer("compte.i", _reelA("ALLBG14", 50, "https://cdn.test/ALLBG14.mp4"))
+        _fMuet = dict(_bgA.fiche("ALLBG13"), shortcode="ALLBG13")
+        check("all-banger : ni les reels « muets » ni les essais n entrent",
+              _fMuet.get("muet") is True and not _exI["nouveaux"]
+              and _abA.signaler([_fMuet, _fEss],
+                                _rI + [_reelA("ALLBG14", 50, "https://cdn.test/ALLBG14.mp4")]) == []
+              and not _abA.entree("ALLBG13") and not _abA.entree("ALLBG14"))
+
+        # 9) Expiration : un banger jamais revu ne reste pas « en attente » a vie
+        _dX = _abA.charger()
+        _dX["reels"]["ALLBG15"] = {"etat": "video", "essais": 0,
+                                   "detecte_le": int(_nowA - 4 * 86400)}
+        _abA._ecrire(_dX)
+        check("all-banger : sans lien neuf en 3 jours, echec compte (pas d attente eternelle)",
+              _abA.expirer() == 1 and _abA.entree("ALLBG15").get("etat") == "echec"
+              and _abA.entree("ALLBG15").get("raison"))
+
+        # 10) Nom du salon : decorations oui, autre salon non
+        check("all-banger : le salon est reconnu malgre emoji, tirets speciaux, casse",
+              all(_abA.est_salon_all_banger(n) for n in
+                  ("all-banger", "🔥・all‑banger", "│ALL_BANGERS", "all-bаnger")))
+        check("all-banger : un salon au nom voisin n est PAS pris",
+              not any(_abA.est_salon_all_banger(n) for n in
+                      ("tall-banger", "banger", "all-banger-archive", "banger-jessye")))
+
+        # 11) Rattrapage : existe, n est pas declenche
+        _bgA.chemin_video("ALLBG16").write_bytes(_MP4A)       # hors registre
+        _bgA.forcer("compte.j", _reelA("ALLBG17", 50, ""))
+        _bgA.chemin_video("ALLBG17").write_bytes(_MP4A)       # essai
+        _rK = [_reelA("ALLBG18", 95000, "")]
+        _bgA.examiner("compte.k", _rK, maintenant=_nowA)
+        _bgA.chemin_video("ALLBG18").write_bytes(_MP4A)       # vrai banger archive
+        _ratA = _abA.rattrapage()
+        check("all-banger : le rattrapage ajoute les archives, et dit ce qu il laisse",
+              _ratA.get("ajoutes") == 1 and _abA.entree("ALLBG18").get("etat") == "pret"
+              and _ratA["ecartes"].get("hors_registre") == 1
+              and _ratA["ecartes"].get("essai") == 1, str(_ratA))
+        _srcWA = _plA.Path("web_upload.py").read_text(encoding="utf-8")
+        check("all-banger : le rattrapage n est appele nulle part (pas de salve)",
+              not _reA.search(r"\.rattrapage\(", _srcWA))
+
+        # 12) Branchement dans le site, et garde de machine
+        import web_upload as _wA
+        check("all-banger : les nouveaux bangers de l examen partent au signalement",
+              "_all_banger_signaler(" in _inA.getsource(_wA._banger_examiner))
+        _savMpA = _wA._machine_proprietaire
+        _savDemA = _wA._start_all_banger_daemon
+        _demarresA = []
+        try:
+            _wA._machine_proprietaire = lambda quoi: False
+            _rL = [_reelA("ALLBG19", 99000, "https://cdn.test/ALLBG19.mp4", "l")]
+            _exL = _bgA.examiner("compte.l", _rL, maintenant=_nowA)
+            check("all-banger : hors machine de production, rien n est inscrit ni lance",
+                  _wA._all_banger_signaler(_exL["nouveaux"], _rL) == 0
+                  and not _abA.entree("ALLBG19") and _abA.FILE.empty()
+                  and _wA._start_all_banger_daemon() is False)
+            _wA._machine_proprietaire = lambda quoi: True
+            _wA._start_all_banger_daemon = lambda: _demarresA.append(1) or True
+            _rM = [_reelA("ALLBG20", 99000, "https://cdn.test/ALLBG20.mp4", "m")]
+            _wA._banger_examiner("compte.m", _rM)
+            _jobM = _abA.FILE.get_nowait() if not _abA.FILE.empty() else {}
+            check("all-banger : sur la machine de production, le scrape met le banger en file",
+                  _jobM.get("shortcode") == "ALLBG20"
+                  and _jobM.get("video_url") == "https://cdn.test/ALLBG20.mp4"
+                  and _abA.entree("ALLBG20").get("etat") == "video" and _demarresA,
+                  str(_jobM))
+            _abA._EN_COURS.discard("ALLBG20")
+        finally:
+            _wA._machine_proprietaire = _savMpA
+            _wA._start_all_banger_daemon = _savDemA
+        check("all-banger : le fil d envoi ne s arme que sur la machine de production",
+              "if not _machine_proprietaire(\"all-banger\")"
+              in _inA.getsource(_wA._start_all_banger_daemon))
+        check("all-banger : le fil d envoi est lance au demarrage du site",
+              "_start_all_banger_daemon()" in _srcWA.split("def create_app", 1)[-1])
+        check("all-banger : l envoi passe par la boucle du bot",
+              "run_coroutine_threadsafe" in _inA.getsource(_abA.poster_via_bot))
+
+        # 12 bis) Le vrai chemin du fil : un tour telecharge PUIS poste, et
+        #    l envoi passe par la boucle du bot (run_coroutine_threadsafe).
+        _boucleA = _aioA.new_event_loop()
+        _filA = threading.Thread(target=_boucleA.run_forever, daemon=True)
+        _filA.start()
+        _pretA = {"v": False}
+        _botA = _tyA.SimpleNamespace(user=_clientA.user, get_guild=_clientA.get_guild,
+                                     loop=_boucleA, is_ready=lambda: _pretA["v"])
+        try:
+            _rN = [_reelA("ALLBG21", 99000, "https://cdn.test/ALLBG21.mp4", "n")]
+            _exN = _bgA.examiner("compte.n", _rN, maintenant=_nowA)
+            _abA.pousser(_abA.signaler(_exN["nouveaux"], _rN))
+            _nA = len(_salonA.envois)
+            _tN = _abA.tour(lambda sc, e: _abA.poster_via_bot(_botA, sc, e),
+                            lambda: _abA.bot_pret(_botA), telecharger_octets=_dlOkA,
+                            dormir=lambda s: None)
+            check("all-banger : bot pas pret -> la video est gardee, rien ne part",
+                  _abA.entree("ALLBG21").get("etat") == "pret" and len(_salonA.envois) == _nA
+                  and "pas prêt" in str(_tN.get("attente")), str(_tN))
+            _pretA["v"] = True
+            _abA.tour(lambda sc, e: _abA.poster_via_bot(_botA, sc, e),
+                      lambda: _abA.bot_pret(_botA), dormir=lambda s: None)
+            check("all-banger : bot pret -> poste depuis la boucle du bot",
+                  _abA.entree("ALLBG21").get("etat") == "envoye"
+                  and _salonA.envois[-1]["noms"] == ["ALLBG21.mp4"])
+        finally:
+            _boucleA.call_soon_threadsafe(_boucleA.stop)
+            _filA.join(5)
+
+        # 13) Rien de payant : ni appel constate, ni import
+        _srcAB = _plA.Path("all_banger.py").read_text(encoding="utf-8")
+        check("all-banger : aucun appel HikerAPI, Apify ni yt-dlp pendant toute la chaine",
+              not _interditsA, str(_interditsA))
+        check("all-banger : le module n importe aucune source payante",
+              not _reA.search(r"^\s*(?:import|from)\s+(?:apify_reels|reels_source|"
+                              r"hiker_reels|insta_scraper)\b", _srcAB, _reA.M))
+        check("all-banger : le registre passe par safe_json (ecriture atomique)",
+              "safe_json.write" in _inA.getsource(_abA._ecrire)
+              and "os.replace" in _inA.getsource(_abA.telecharger))
+        # la publication quotidienne n a pas bouge : meme salon fixe, meme identite
+        check("all-banger : la publication du matin (Jessye, salon fixe) est intacte",
+              _bgA.CHANNEL_ID == 1548115360702664804 and _bgA.IDENTITE == "jessye"
+              and "preparer_fiches" in _inA.getsource(_wA._banger_cycle))
+    finally:
+        _bgA.FICHIER, _bgA.DOSSIER, _bgA.DETAILS_DIR, _abA.FICHIER, \
+            _abA.DOSSIER_CACHE_INSTA, _abA._est_une_video = _savA
+        for _modO, _fnN, _fnO in _savPiegesA:
+            setattr(_modO, _fnN, _fnO)
+        _logA.getLogger("vabot.all_banger").removeHandler(_oreilleA)
+        _abA._EN_COURS.clear(); _abA._DITS.clear()
+        while not _abA.FILE.empty():
+            _abA.FILE.get_nowait()
+    # La VRAIE sonde, quand ffmpeg est la : une page d erreur n est pas une video.
+    import shutil as _shA, subprocess as _spA
+    if _shA.which("ffmpeg") and _shA.which("ffprobe"):
+        _vraieA = _tmpA / "vraie.mp4"
+        _spA.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                  "color=c=black:s=64x64:d=1", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                  str(_vraieA)], capture_output=True, timeout=60)
+        _fausseA = _tmpA / "fausse.mp4"
+        _fausseA.write_bytes(b"<html>" + b"x" * 4000)
+        check("all-banger : ffprobe reconnait une vraie video et refuse une page d erreur",
+              _vraieSondeA(_vraieA) and not _vraieSondeA(_fausseA))
+    else:
+        print("     (ffmpeg absent : sonde ffprobe non verifiee sur ce poste)")
+    shutil.rmtree(_tmpA, ignore_errors=True)
+except Exception as _eA:
+    import traceback as _tbA
+    _tbA.print_exc()
+    check("all-banger : testable", False, repr(_eA)[:220])
+
 # --- Les DEUX classements : report Discord et page /clics ---------------
 # Le premier dit qui envoie du trafic, le second qui le convertit. Ils
 # s AJOUTENT au tableau par lien, qui reste alphabetique : un tableau qu on
