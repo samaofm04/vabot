@@ -123,7 +123,12 @@ _verrou = threading.RLock()
 #: synchro en cours, pour la barre de progression du site.
 _en_cours: Dict[str, Dict[str, Any]] = {}
 _file_attente: list = []
-_travailleur: Optional[threading.Thread] = None
+#: UNE FILE PAR RESEAU. Deux profils TikTok lus en parallele depuis la meme
+#: adresse, c'est le 403 assure (constate) : TikTok reste un a la fois. Un
+#: TikTok et un Instagram ne se genent pas (HikerAPI d'un cote) : le
+#: 26/09/2026, treize profils attendaient derriere un seul import.
+VOIES = ("tiktok", "instagram")
+_travailleurs: Dict[str, threading.Thread] = {}
 
 
 # ------------------------------------------------------------------ registre
@@ -988,7 +993,21 @@ def progression(identite: str) -> Optional[dict]:
     if ident in _en_cours:
         return dict(_en_cours[ident])
     if ident in _file_attente:
-        return {"fait": 0, "total": 0, "etape": "en file d'attente"}
+        # SA PLACE et ce qui passe avant : « en file d'attente » tout court,
+        # sur treize dossiers d'un coup, ressemblait a une panne.
+        reg = _registre()
+        voie = _voie(ident, reg)
+        with _verrou:
+            if ident not in _file_attente:
+                return None
+            devant = [k for k in _file_attente[:_file_attente.index(ident)] if _voie(k, reg) == voie]
+            actifs = [(k, dict(v)) for k, v in _en_cours.items() if _voie(k, reg) == voie]
+        etape = f"en file d'attente ({len(devant) + 1}e)"
+        if actifs:
+            k, p = actifs[0]
+            etape += f" — en cours : @{identite_de(k)}" + (
+                f" {p.get('fait', 0)}/{p['total']}" if p.get("total") else "")
+        return {"fait": 0, "total": 0, "etape": etape}
     return None
 
 
@@ -1041,13 +1060,44 @@ def planifier(identite: str) -> bool:
 
 
 def _assurer_travailleur():
-    global _travailleur
     with _verrou:
-        if _travailleur is not None and _travailleur.is_alive():
-            return
-        _travailleur = threading.Thread(target=_boucle, daemon=True,
-                                        name="vault-social")
-        _travailleur.start()
+        for voie in VOIES:
+            t = _travailleurs.get(voie)
+            if t is not None and t.is_alive():
+                continue
+            t = threading.Thread(target=_boucle, args=(voie,), daemon=True,
+                                 name=f"vault-social-{voie}")
+            _travailleurs[voie] = t
+            t.start()
+
+
+def _voie(cle: str, reg: Optional[dict] = None) -> str:
+    """Le reseau d'une cle (sa file). `reg` : le registre deja lu."""
+    e = (reg if reg is not None else _registre()).get(cle) or {}
+    return e.get("plateforme") or "tiktok"
+
+
+def _prendre(voie: str) -> Optional[str]:
+    """La premiere cle en file pour ce reseau dont l'IDENTITE n'est pas deja
+    en cours : ses deux profils ecrivent dans le meme dossier, et lus en
+    parallele, une video publiee sur les deux reseaux passerait deux fois
+    (chacun la compare au dossier avant que l'autre l'y ait posee)."""
+    reg = _registre()
+    with _verrou:
+        # un reseau deja en cours ne prend rien de plus : deux TikTok en
+        # parallele, c'est le 403 -- verifie ici, pas seulement suppose par
+        # le nombre de fils
+        if any(_voie(k, reg) == voie for k in _en_cours):
+            return None
+        occupees = {identite_de(k) for k in _en_cours}
+        for i, k in enumerate(_file_attente):
+            if _voie(k, reg) != voie or identite_de(k) in occupees:
+                continue
+            _file_attente.pop(i)
+            # reserve AVANT de relacher le verrou : l'autre file la voit prise
+            _en_cours[k] = {"fait": 0, "total": 0, "etape": "démarrage"}
+            return k
+    return None
 
 
 def _dus(maintenant: float) -> list:
@@ -1064,26 +1114,29 @@ def _dus(maintenant: float) -> list:
     return out
 
 
-def _boucle():
+def _boucle(voie: str = "tiktok"):
     dernier_tour = 0.0
     while True:
-        ident = None
-        with _verrou:
-            if _file_attente:
-                ident = _file_attente.pop(0)
+        ident = _prendre(voie)
         if ident:
-            dossier = _dossier_de(ident)
-            if dossier is None:
-                # Dossier supprimé ou renommé : le dire dans le registre,
-                # ne pas relire un profil pour rien.
-                _maj(ident, creer=False, statut="erreur", demande=False,
-                     erreur="dossier introuvable dans le vault",
-                     reessai_le=int(time.time()) + REESSAI_SEC)
-            else:
-                synchroniser(ident, dossier, _apres_global)
+            try:
+                dossier = _dossier_de(ident)
+                if dossier is None:
+                    # Dossier supprimé ou renommé : le dire dans le registre,
+                    # ne pas relire un profil pour rien.
+                    _maj(ident, creer=False, statut="erreur", demande=False,
+                         erreur="dossier introuvable dans le vault",
+                         reessai_le=int(time.time()) + REESSAI_SEC)
+                else:
+                    synchroniser(ident, dossier, _apres_global)
+            finally:
+                # synchroniser le fait ; ici pour ses sorties anticipees et le
+                # dossier introuvable, sinon l'identite resterait « occupee »
+                _en_cours.pop(ident, None)
             continue
-        # File vide : toutes les demi-heures, qui est dû ?
-        if time.time() - dernier_tour >= 1800:
+        # File vide : toutes les demi-heures, qui est dû ? (une seule file s'en
+        # charge : planifier range chaque profil dans la bonne)
+        if voie == VOIES[0] and time.time() - dernier_tour >= 1800:
             dernier_tour = time.time()
             for ident2 in _dus(time.time()):
                 planifier(ident2)

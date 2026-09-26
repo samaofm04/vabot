@@ -15395,6 +15395,25 @@ try:
             _wD._load_web_users, _vsD.planifier = _savWD
             _shD.rmtree(_idD, ignore_errors=True)
             _wD._invalidate_all_ttl_cache()
+        # UNE FILE PAR RESEAU : un TikTok et un Instagram en parallele, jamais
+        # deux TikTok (403), jamais les deux profils d une meme identite
+        _savQ = (list(_vsD._file_attente), dict(_vsD._en_cours))
+        try:
+            _vsD._file_attente.clear(); _vsD._en_cours.clear()
+            for _k, _pl in (("qa", "tiktok"), ("qa|instagram", "instagram"), ("qb", "tiktok"), ("qc|instagram", "instagram")):
+                _vsD._maj(_k, plateforme=_pl, url="https://x/" + _k, username=_k)
+                _vsD._file_attente.append(_k)
+            check("files : le TikTok part, et l Instagram d une AUTRE identite en meme temps",
+                  _vsD._prendre("tiktok") == "qa" and _vsD._prendre("instagram") == "qc|instagram")
+            check("files : l Instagram de qa attend (son TikTok est en cours : meme dossier)",
+                  "qa|instagram" in _vsD._file_attente and _vsD._prendre("instagram") is None)
+            check("files : jamais deux TikTok a la fois", _vsD._prendre("tiktok") is None)
+            _vsD._en_cours["qa"] = {"fait": 12, "total": 40, "etape": "téléchargement"}
+            _pgQ = (_vsD.progression("qb") or {}).get("etape", "")
+            check("files : le bandeau dit la place et ce qui passe avant",
+                  "en file d'attente (1e)" in _pgQ and "@qa 12/40" in _pgQ, _pgQ)
+        finally:
+            _vsD._file_attente[:] = _savQ[0]; _vsD._en_cours.clear(); _vsD._en_cours.update(_savQ[1])
         # empreintes : les images unies ne prouvent rien
         _unie = {"duree": 4.0, "images": {str(t): ["0" * 64, False] for t in _evD.INSTANTS[:5]}}
         check("empreintes : deux videos aux images unies (fondus) ne sont pas « la meme »",

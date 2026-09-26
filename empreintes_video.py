@@ -62,6 +62,14 @@ ECART_EGAL = 0.6
 CARTON_MIN, CARTON_MAX = 2.0, 5.5
 
 EXTS_VIDEO = frozenset({".mp4", ".mov", ".m4v", ".webm", ".mkv"})
+#: Version de la methode de lecture des images. Les empreintes d'une autre
+#: version sont recalculees : deux methodes ne tombent pas exactement sur la
+#: meme image (jusqu'a 53 bits d'ecart mesures sur une video tres animee),
+#: les melanger ferait rater des doublons.
+#: v2 (26/09/2026) : une seule lecture de 10 s a 10 images/s, 2 a 3 fois plus
+#: rapide que huit recherches (v1) -- 13 profils attendaient derriere une file.
+VERSION = 2
+PAS = 10                              # images par seconde lues
 _NICE = ["nice", "-n", "10"] if shutil.which("nice") else []
 _VERROU = threading.RLock()
 
@@ -79,43 +87,47 @@ def duree(f: Path) -> Optional[float]:
         return None
 
 
-def _image(f: Path, t: float) -> Optional[list]:
-    """[hash hexa, informative] de l'image a l'instant t, ou None."""
-    try:
-        r = subprocess.run(_NICE + ["ffmpeg", "-v", "error", "-ss", f"{t:.2f}", "-i", str(f),
-                                    "-frames:v", "1", "-vf",
-                                    f"scale={LARGEUR}:{HAUTEUR}:flags=area,format=gray",
-                                    "-f", "rawvideo", "-"],
-                           capture_output=True, timeout=30)
-    except Exception:
-        return None
-    px = r.stdout
-    if r.returncode != 0 or len(px) < LARGEUR * HAUTEUR:
-        return None
+def _hash_image(px: bytes) -> list:
     bits = 0
     for y in range(HAUTEUR):
         ligne = px[y * LARGEUR:(y + 1) * LARGEUR]
         for x in range(LARGEUR - 1):
             bits = (bits << 1) | (1 if ligne[x] < ligne[x + 1] else 0)
     try:
-        relief = statistics.pstdev(px[:LARGEUR * HAUTEUR])
+        relief = statistics.pstdev(px)
     except Exception:
         relief = 0.0
     return [f"{bits:064x}", relief >= RELIEF_MIN]
 
 
 def empreinte(f: Path, d: Optional[float] = None) -> dict:
-    """{"duree": s, "images": {"0.5": [hash, informative], ...}}."""
+    """{"duree": s, "v": VERSION, "images": {"0.5": [hash, informative], ...}}.
+
+    UNE lecture des premieres secondes, a PAS images/s, dont on garde celles
+    des INSTANTS -- plutot que huit recherches, qui redecodaient chacune
+    depuis l'image cle precedente."""
     d = duree(f) if d is None else d
     images = {}
     if d:
+        lire = min(d, max(INSTANTS) + 0.5)
+        try:
+            r = subprocess.run(_NICE + ["ffmpeg", "-v", "error", "-t", f"{lire:.2f}", "-i", str(f),
+                                        "-vf", f"fps={PAS},scale={LARGEUR}:{HAUTEUR}:flags=area,format=gray",
+                                        "-f", "rawvideo", "-"],
+                               capture_output=True, timeout=120)
+            px = r.stdout if r.returncode == 0 else b""
+        except Exception:
+            px = b""
+        taille = LARGEUR * HAUTEUR
+        n = len(px) // taille
         for t in INSTANTS:
             if t > d - 0.3:
                 break
-            im = _image(f, t)
-            if im:
-                images[str(t)] = im
-    return {"duree": d, "images": images}
+            k = int(round(t * PAS))
+            if k >= n:
+                break
+            images[str(t)] = _hash_image(px[k * taille:(k + 1) * taille])
+    return {"duree": d, "v": VERSION, "images": images}
 
 
 # ---------------------------------------------------------------- comparaison
@@ -190,6 +202,7 @@ def trouver_doublon(nouveau: Path, dossier: Path, exclure: Iterable[str] = ()) -
     with _VERROU:
         cache = _cache(dossier)
         change = False
+        calcules = 0
         vus = set()
         trouve = None
         try:
@@ -212,9 +225,14 @@ def trouver_doublon(nouveau: Path, dossier: Path, exclure: Iterable[str] = ()) -
                 change = True
             if not durees_compatibles(e_neuf["duree"], c.get("duree")):
                 continue
-            if "images" not in c:
+            if "images" not in c or c.get("v") != VERSION:
                 c.update(empreinte(f, c.get("duree")))
                 change = True
+                calcules += 1
+                # au fil de l'eau : un redemarrage du bot (chaque deploiement)
+                # ne perd pas un quart d'heure de calcul
+                if calcules % 20 == 0:
+                    _ecrire_cache(dossier, cache)
             if correspond(e_neuf, c):
                 trouve = f
                 break
