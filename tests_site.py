@@ -20115,6 +20115,71 @@ except Exception as _eP:
     import traceback as _tbP
     check("pause : testable", False, repr(_eP)[:200] + " " + _tbP.format_exc()[-300:])
 
+print()
+print("=" * 70)
+print("Menus Discord redessines apres ajout, marche, classement... (26/09/2026)")
+print("=" * 70)
+# Le proprietaire ajoutait des identites qui « n'arrivaient pas » dans le menu
+# des models et rangeait sans que l'ordre suive : ces routes ne prevenaient
+# pas le bot. Un crochet after_request le fait desormais pour toutes.
+try:
+    import web_upload as _wMD
+    import cogs.welcome as _cwMD
+    from flask import jsonify as _jsMD, redirect as _rdMD
+    _appelsMD = []
+    _savMD = _cwMD.demander_rafraichissement
+    _cwMD.demander_rafraichissement = (
+        lambda bot, raison="", delai=None: _appelsMD.append(raison) or True)
+    try:
+        _appMD = _wMD.create_app()
+        _appMD.config["TESTING"] = True
+        _savUMD = _wMD._load_web_users
+        _wMD._load_web_users = lambda: {"admin": {"role": "owner", "password": "x"}}
+        try:
+            _cMD = _appMD.test_client()
+            with _cMD.session_transaction() as _sMD:
+                _sMD["auth"] = True; _sMD["username"] = "admin"; _sMD["role"] = "owner"
+            _ptMD = {r.rule: r.endpoint for r in _appMD.url_map.iter_rules()}
+            _vfMD = _appMD.view_functions
+            # Reponses simulees : on remplace la vue, le crochet reste le vrai.
+            _vfMD[_ptMD["/identity/reorder"]] = lambda: _jsMD({"ok": True})
+            _vfMD[_ptMD["/identity/market"]] = lambda: _jsMD({"ok": False, "error": "x"})
+            _vfMD[_ptMD["/identity/rename"]] = lambda: _rdMD("/")
+            _cMD.post("/identity/reorder")
+            check("menus Discord : un classement reussi redessine les menus",
+                  _appelsMD == ["site : /identity/reorder"], str(_appelsMD))
+            _appelsMD.clear()
+            _cMD.post("/identity/market")
+            check("menus Discord : une action refusee (ok false) ne redessine rien",
+                  _appelsMD == [], str(_appelsMD))
+            _cMD.post("/identity/rename")
+            check("menus Discord : une reponse non JSON (redirection) redessine quand meme",
+                  _appelsMD == ["site : /identity/rename"], str(_appelsMD))
+            _appelsMD.clear()
+            _cMD.get("/identity/donnees?identity=zz")
+            _vfMD[_ptMD["/identity/styles"]] = lambda: _jsMD({"ok": True})
+            _cMD.post("/identity/styles")
+            check("menus Discord : ni un GET ni une route hors liste ne declenchent le crochet",
+                  _appelsMD == [], str(_appelsMD))
+            _cwMD.demander_rafraichissement = lambda *a, **k: 1 / 0
+            _rMD = _cMD.post("/identity/reorder")
+            check("menus Discord : un bot en panne ne casse pas la reponse du site",
+                  _rMD.status_code == 200 and (_rMD.get_json() or {}).get("ok") is True)
+            _srcMD = pathlib.Path("web_upload.py").read_text(encoding="utf-8")
+            check("menus Discord : ajout, marche, classement, renommage, archivage, photo couverts",
+                  all(('"%s"' % r) in _srcMD.split("_ROUTES_MENUS_DISCORD = frozenset(")[1][:400]
+                      for r in ("/identity/create", "/identity/market", "/identity/reorder",
+                                "/identity/rename", "/identity/archive",
+                                "/identity/avatar_set", "/identity/upload_avatar")))
+        finally:
+            _wMD._load_web_users = _savUMD
+    finally:
+        _cwMD.demander_rafraichissement = _savMD
+except Exception as _eMD:
+    import traceback as _tbMD
+    check("menus Discord apres action du site : testable", False,
+          repr(_eMD)[:200] + " " + _tbMD.format_exc()[-400:])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:

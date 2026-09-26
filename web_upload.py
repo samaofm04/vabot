@@ -55629,6 +55629,48 @@ def create_app():
         "/mypulslive/": "mypulslive",
     }
 
+    #: Actions du site qui changent CE QUE MONTRENT les menus Discord des
+    #: models : la liste (ajout, marche, archivage, renommage, nature en
+    #: masse), l'ordre (classement) et la photo. Un message poste ne se
+    #: redessine pas seul : le 26/09/2026 le proprietaire ajoutait des
+    #: identites qui « n'arrivaient pas » et rangeait sans que le menu suive,
+    #: jusqu'au prochain /resetmenus. La pause, la nature et les styles
+    #: prevenaient deja le bot, chacune dans sa route ; celles-ci ne le
+    #: faisaient pas. Un SEUL crochet pour toutes, plutot qu'un appel par
+    #: route : une route a plusieurs sorties en oubliait toujours une.
+    _ROUTES_MENUS_DISCORD = frozenset({
+        "/identity/create", "/identity/market", "/identity/reorder",
+        "/identity/rename", "/identity/archive", "/identity/types",
+        "/identity/avatar_set", "/identity/upload_avatar",
+    })
+
+    @app.after_request
+    def _menus_discord_apres(response):
+        # Enregistre APRES _perf_after_request, donc execute AVANT lui (Flask
+        # remonte la liste) : la reponse JSON n'est pas encore compressee.
+        try:
+            if (request.method != "POST"
+                    or request.path not in _ROUTES_MENUS_DISCORD
+                    or response.status_code >= 400):
+                return response
+            if response.is_json:
+                j = response.get_json(silent=True) or {}
+                if not j.get("ok"):
+                    return response          # rien n'a change
+            # Reponse non JSON (redirection + message) : on ne sait pas si
+            # l'action a abouti. Redessiner pour rien ne coute rien (les
+            # demandes sont regroupees cote bot) ; ne pas redessiner laissait
+            # le menu faux.
+            from cogs.welcome import demander_rafraichissement
+            if not demander_rafraichissement(
+                    _BOT_REF, raison=f"site : {request.path}"):
+                log.info("menus Discord non prevenus apres %s (bot absent)",
+                         request.path)
+        except Exception as e:                                  # noqa: BLE001
+            log.warning("menus Discord non prevenus apres %s : %s: %s",
+                        request.path, type(e).__name__, e)
+        return response
+
     @app.before_request
     def _guard_write_routes():
         from flask import jsonify
