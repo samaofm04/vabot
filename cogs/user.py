@@ -1673,6 +1673,45 @@ def random_n_reels_for(identity, n: int):
     return [(v, *_video_meta(v)) for v in picked]
 
 
+def templates_marques(identity, ecartes=None) -> set:
+    """Noms de fichiers des templates d'une identite qui portent une MARQUE
+    (Trash, Flash, lues dans marques_montage).
+
+    Une marque SORT le montage des templates ordinaires : le site les cache
+    de la vue de base (et le filtre « Template Trend » ne montre que les
+    autres). Les boutons Template du bot, eux, piochaient dans tout le
+    dossier : le 27/09/2026, un ⚡ Flash de la reserve blonde est parti par
+    « Template » du menu ✨ General, dans le -content de bid_a. Un montage
+    marque ne sort plus que par les boutons de SA marque.
+
+    Registre illisible : impossible de savoir quoi ecarter. On sert quand
+    meme les templates -- bloquer tous les boutons Template serait pire --
+    mais on le dit au journal et dans `ecartes["marques_illisibles"]`.
+    """
+    noms = set()
+    prefixe = f"{(identity or '').strip().lower()}|templates|"
+    for m in marques_montage.ORDRE:
+        cles, err = marques_montage.lire_cles_ou_erreur(
+            DATA_DIR / marques_montage.marque(m)["fichier"])
+        if err:
+            log.warning("templates marques : %s -- les montages %s ne peuvent "
+                        "pas etre ecartes des boutons Template", err, m)
+            if isinstance(ecartes, dict):
+                ecartes.setdefault("marques_illisibles", []).append(err)
+        noms |= {k[len(prefixe):] for k in cles
+                 if isinstance(k, str) and k.lower().startswith(prefixe) and k[len(prefixe):]}
+    return noms
+
+
+def _note_templates_marques(n: int) -> str:
+    """La phrase qui DIT pourquoi des templates manquent au bouton Template."""
+    familles = " / ".join(marques_montage.marque(m)["emoji"] + " "
+                          + marques_montage.marque(m)["court"]
+                          for m in marques_montage.PRIORITE)
+    return (f"_({n} template(s) marqué(s) {familles} ne partent que par les "
+            f"boutons de leur marque.)_")
+
+
 def va_ready_montages_for(identity, n: int, ecartes=None):
     """Reels APPROUVES « Dispo pour les VA » d'une identite : ceux dont le brouillon de
     montage (<stem>.montage.json a cote de la video) a va_ready=true. La variante MONTEE
@@ -1686,10 +1725,19 @@ def va_ready_montages_for(identity, n: int, ecartes=None):
     # silencieusement invisible pour les VA.
     sources = list(_list_clean_videos(identity))
     _tpl = IDENTITIES_DIR / identity / "templates"
+    marques = 0
     if _tpl.exists():
-        sources += [p for p in _tpl.iterdir()
-                    if p.is_file() and p.suffix.lower() in VIDEO_EXTS
-                    and not p.stem.lower().endswith(".example")]
+        # Un template MARQUE (Trash, Flash) ne part que par les boutons de sa
+        # marque -- voir templates_marques. Compte, jamais ecarte en silence.
+        _marques = templates_marques(identity, ecartes)
+        for p in _tpl.iterdir():
+            if not (p.is_file() and p.suffix.lower() in VIDEO_EXTS
+                    and not p.stem.lower().endswith(".example")):
+                continue
+            if p.name in _marques:
+                marques += 1
+                continue
+            sources.append(p)
     for v in sources:
         mj = v.parent / f"{v.stem}.montage.json"
         if not mj.exists():
@@ -1725,6 +1773,7 @@ def va_ready_montages_for(identity, n: int, ecartes=None):
     # quatre appelants existants ne changent pas.
     if isinstance(ecartes, dict):
         ecartes["sans_montage"] = sans_montage
+        ecartes["marques"] = marques
     if not ready:
         return []
     n = min(n, len(ready))
@@ -1839,7 +1888,7 @@ def trends_for(identity, limit=3):
     return fichiers
 
 
-def fav_templates_for(identity, limit=15):
+def fav_templates_for(identity, limit=15, ecartes=None):
     """Templates marques ⭐ favoris -> (utilisables, sans_point_de_coupe).
 
     `utilisables` = [(Path, draft)] : les templates dont le brouillon
@@ -1870,9 +1919,15 @@ def fav_templates_for(identity, limit=15):
                 names.append(fn)
     tdir = IDENTITIES_DIR / identity / "templates"
     utilisables, sans_coupe = [], 0
+    # Etoile ET marque = « ⭐ Flash » / « ⭐ Trash », pas ⭐ Template.
+    _marques = templates_marques(identity, ecartes)
     for fn in names:
         p = tdir / fn
         if not (p.exists() and p.is_file()):
+            continue
+        if fn in _marques:
+            if isinstance(ecartes, dict):
+                ecartes["marques"] = ecartes.get("marques", 0) + 1
             continue
         mj = p.parent / f"{p.stem}.montage.json"
         if not mj.exists():
@@ -1896,7 +1951,7 @@ def fav_templates_for(identity, limit=15):
     return utilisables, sans_coupe
 
 
-def tous_templates_for(identity, limit=15):
+def tous_templates_for(identity, limit=15, ecartes=None):
     """TOUS les templates exploitables d'une identite -> ([(Path, draft)], nb).
 
     Meme contrat et MEME validation que fav_templates_for : un template sans
@@ -1918,8 +1973,13 @@ def tous_templates_for(identity, limit=15):
     if not tdir.is_dir():
         return [], 0
     utilisables, sans_coupe = [], 0
+    _marques = templates_marques(identity, ecartes)
     for p in sorted(tdir.iterdir()):
         if not (p.is_file() and p.suffix.lower() in VIDEO_EXTS):
+            continue
+        if p.name in _marques:
+            if isinstance(ecartes, dict):
+                ecartes["marques"] = ecartes.get("marques", 0) + 1
             continue
         mj = p.parent / f"{p.stem}.montage.json"
         if not mj.exists():
@@ -3876,8 +3936,9 @@ class UserCog(commands.Cog):
         # decide de celui des brutes. Les deux a False n'aurait aucun sens --
         # ce serait « n'importe quoi sur n'importe quoi » -- et aucun bouton ne
         # le propose.
-        templates, sans_coupe = (fav_templates_for(identity) if template_favori
-                                 else tous_templates_for(identity))
+        _ecartes_t = {}
+        templates, sans_coupe = (fav_templates_for(identity, ecartes=_ecartes_t) if template_favori
+                                 else tous_templates_for(identity, ecartes=_ecartes_t))
         if brute_favorite:
             brutes = fav_brutes_for(identity)
         else:
@@ -3891,8 +3952,10 @@ class UserCog(commands.Cog):
             # templates et n'en voit aucun arriver doit apprendre qu'il leur
             # manque un point de coupe, pas chercher une panne ailleurs.
             note = ""
+            if _ecartes_t.get("marques"):
+                note += "\n" + _note_templates_marques(_ecartes_t["marques"])
             if sans_coupe:
-                note = (f"\n⚠️ {sans_coupe} template(s) étoilé(s) ont été **écartés** : "
+                note += (f"\n⚠️ {sans_coupe} template(s) étoilé(s) ont été **écartés** : "
                         f"ils n'ont pas de **point de coupe**, donc ta brute n'y "
                         f"apparaîtrait pas. _(À définir dans l'éditeur Montage du site.)_")
             if not templates and not brutes:
@@ -4468,6 +4531,8 @@ class UserCog(commands.Cog):
             else:
                 _detail = ("_(Un admin doit ouvrir un reel dans l'éditeur Montage du site "
                            "et cliquer « 📥 Dispo pour les VA ».)_")
+            if _ecartes.get("marques"):
+                _detail += "\n" + _note_templates_marques(_ecartes["marques"])
             await interaction.response.send_message(
                 f"Aucun **reel monté** dispo pour ton identité `{identity}` pour l'instant.\n"
                 + _detail,

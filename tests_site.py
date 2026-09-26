@@ -26168,6 +26168,70 @@ except Exception as _eT:
     import traceback as _tbT
     check("templates police : testable", False, repr(_eT)[:200] + " " + _tbT.format_exc()[-600:])
 
+print()
+print("=" * 70)
+print("BOUTONS TEMPLATE DU BOT : jamais un montage marque Flash ou Trash")
+print("=" * 70)
+# 27/09/2026 : un ⚡ Flash de la reserve blonde est parti par « Template » du
+# menu ✨ General (salon de bid_a). Un template marque ne sort plus que par les
+# boutons de SA marque, comme sur le site (vue de base, filtre Template Trend).
+try:
+    import cogs.user as _uTm
+    import json as _jsTm, shutil as _shTm, tempfile as _tfTm
+    _dTm = pathlib.Path(_tfTm.mkdtemp(prefix="tpl_marques_"))
+    _savTm = (_uTm.DATA_DIR, _uTm.IDENTITIES_DIR)
+    try:
+        _uTm.DATA_DIR = _dTm
+        _uTm.IDENTITIES_DIR = _dTm / "identities"
+        _tdTm = _dTm / "identities" / "zzblonde" / "templates"
+        _tdTm.mkdir(parents=True)
+        for _n in ("base", "baseFav", "flashFav", "trash"):
+            (_tdTm / (_n + ".mp4")).write_bytes(b"x")
+            (_tdTm / (_n + ".montage.json")).write_text(_jsTm.dumps(
+                {"segments": "[]", "font": "InstagramClassique", "style": "{}",
+                 "cut_at": 3.0, "va_ready": True}), encoding="utf-8")
+        (_dTm / "flash_trend.json").write_text(_jsTm.dumps(["zzblonde|templates|flashFav.mp4"]))
+        (_dTm / "trash_trend.json").write_text(_jsTm.dumps(["zzblonde|templates|trash.mp4"]))
+        (_dTm / "fav_brutes.json").write_text(_jsTm.dumps(
+            ["zzblonde|templates|baseFav.mp4", "zzblonde|templates|flashFav.mp4"]))
+        _nomsTm = lambda lst: sorted(p.name for p, *_r in lst)
+
+        _eR = {}
+        _rR = _uTm.va_ready_montages_for("zzblonde", 10, _eR)
+        check("Template : seuls les templates SANS marque partent (le Flash et le Trash restent)",
+              _nomsTm(_rR) == ["base.mp4", "baseFav.mp4"], _nomsTm(_rR))
+        check("Template : les templates marques ecartes sont COMPTES",
+              _eR.get("marques") == 2, _eR)
+        _eF = {}
+        _rF, _scF = _uTm.fav_templates_for("zzblonde", ecartes=_eF)
+        check("⭐ Template : une etoile qui porte aussi ⚡ part par « ⭐ Flash », plus par ⭐ Template",
+              _nomsTm(_rF) == ["baseFav.mp4"] and _eF.get("marques") == 1, (_nomsTm(_rF), _eF))
+        _eT = {}
+        _rT, _scT = _uTm.tous_templates_for("zzblonde", ecartes=_eT)
+        check("⭐ Brut + Template : le vivier ne contient que les templates sans marque",
+              _nomsTm(_rT) == ["base.mp4", "baseFav.mp4"] and _eT.get("marques") == 2,
+              (_nomsTm(_rT), _eT))
+        _rM, _scM = _uTm.marque_templates_for("flash", "zzblonde")
+        check("⚡ Flash : ses boutons le servent toujours",
+              _nomsTm(_rM) == ["flashFav.mp4"], _nomsTm(_rM))
+        check("le message au VA dit pourquoi des templates manquent",
+              "ne partent que par les boutons de leur marque" in _uTm._note_templates_marques(2))
+        # Registre illisible : impossible de trier -> on sert, mais on le DIT
+        (_dTm / "trash_trend.json").write_text("{", encoding="utf-8")
+        for _pv in _dTm.glob("trash_trend.json.prev"):
+            _pv.unlink()
+        _eI = {}
+        _rI = _uTm.va_ready_montages_for("zzblonde", 10, _eI)
+        check("registre illisible : les boutons marchent encore, et l erreur est remontee",
+              "trash.mp4" in _nomsTm(_rI) and "flashFav.mp4" not in _nomsTm(_rI)
+              and _eI.get("marques_illisibles"), (_nomsTm(_rI), _eI))
+    finally:
+        _uTm.DATA_DIR, _uTm.IDENTITIES_DIR = _savTm
+        _shTm.rmtree(_dTm, ignore_errors=True)
+except Exception as _eTm:
+    import traceback as _tbTm
+    check("boutons template / marques : testable", False, repr(_eTm)[:200] + " " + _tbTm.format_exc()[-500:])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
