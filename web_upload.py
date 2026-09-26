@@ -26655,7 +26655,9 @@ def _brouillon_depuis_analyse(a: dict) -> dict:
         segs.append(seg)
     style = dict(_STYLE_EDITEUR)
     style.update({k: v for k, v in (a.get("style") or {}).items() if k in _STYLE_EDITEUR})
-    # Strong : la taille a ete calibree pour elle (_caption_size_for_width).
+    # La police dans laquelle la taille a ete MESUREE (_caption_size_for_width) :
+    # celle que l'analyse a notee, sinon Strong -- les analyses faites avant le
+    # 27/09/2026 ont mesure en Strong et ne le notaient pas.
     draft = {"segments": json.dumps(segs, ensure_ascii=False),
              "font": a.get("font") or "Strong",
              "style": json.dumps(style, ensure_ascii=False)}
@@ -26790,6 +26792,14 @@ def _linkimp_run(ident: str, subdir: str, urls: list, desc: str = ""):
 #: noctus/pipeline-core.js) ; sans eux, le rendu retombe sur Arial.
 CAPTION_POLICE_DEFAUT = "InstagramModerne"
 CAPTION_STYLE_DEFAUT = {"size": 63, "bold": False}
+
+#: Police de base des TEMPLATES (brouillons .montage.json) : la « Classique »
+#: d'Instagram A BORD NOIR -- pas la version Plain. Demande du proprietaire
+#: (27/09/2026) : « pour les templates c'est Classique avec bord noir
+#: Instagram », les captions restant en Moderne. Jusque-la, l'editeur partait
+#: sur TikTokSans (302 templates sur 328) et les propositions de l'analyse sur
+#: Strong. Comme la Moderne, cette police vient des patchs locaux du VPS.
+TEMPLATE_POLICE_DEFAUT = "InstagramClassique"
 
 
 def _clean_caption_block(raw, ecartes: dict = None) -> dict:
@@ -44939,6 +44949,118 @@ def _menu_avec_equipe(page: str) -> str:
     return page[:j + 1] + _MENU_EQUIPE_BTN + page[j + 1:]
 
 
+def _police_template_par_defaut(page: str) -> str:
+    """Coche TEMPLATE_POLICE_DEFAUT dans la liste des polices de l'editeur de
+    templates (#nx-m-font) au lieu de TikTokSans.
+
+    AU RENDU, et non dans UPLOAD_HTML : cette ligne est reecrite par le patch
+    local du VPS qui ajoute les polices Instagram (l'option « Classique
+    Instagram » n'existe QUE par lui). La modifier dans le code faisait tomber
+    ce patch en silence -- et la police visee disparaissait de la liste. Si
+    l'option est absente (copie sans les patchs), la page reste telle quelle.
+    """
+    i = page.find('<select id="nx-m-font"')
+    j = page.find("</select>", i) if i >= 0 else -1
+    if j < 0:
+        print("[templates] liste des polices de l'editeur introuvable : "
+              "police par defaut non posee", flush=True)
+        return page
+    liste = page[i:j]
+    cible = '<option value="%s"' % TEMPLATE_POLICE_DEFAUT
+    if cible not in liste:
+        return page
+    liste = (liste.replace("<option selected>", "<option>")
+             .replace(" selected>", ">")
+             .replace(cible, cible + " selected", 1))
+    return page[:i] + liste + page[j:]
+
+
+#: Les polices d'AVANT le passage des templates dans la police de base :
+#: {"police": cible, "fichiers": {"<ident>/templates/<x>.montage.json": ancienne}}.
+#: Ecrite AVANT de toucher au moindre brouillon, pour que « annuler » marche
+#: meme apres une coupure en plein passage.
+TEMPLATES_POLICE_SAUVEGARDE = DATA_DIR / "templates_police_avant.json"
+
+
+def _templates_police(mode: str = "essai") -> dict:
+    """Met la police de base (TEMPLATE_POLICE_DEFAUT) sur TOUS les templates.
+
+    mode « essai » : ne fait que compter. « appliquer » : ecrit. « annuler » :
+    remet la police d'avant, d'apres la sauvegarde, la ou elle n'a pas ete
+    changee depuis a la main.
+
+    Seule la cle « font » du brouillon change : la coupe, les captions, le
+    style, l'approbation VA restent tels quels. Pas par /noctus/montage_save,
+    qui reecrit le brouillon entier et note une « validation » de la coupe
+    pour l'analyse -- 328 fausses validations auraient fausse ses mesures.
+    Rien n'est ecarte sans le dire : un brouillon illisible est nomme.
+    """
+    cible = TEMPLATE_POLICE_DEFAUT
+    res = {"ok": True, "mode": mode, "police": cible, "total": 0,
+           "par_police": {}, "changes": 0, "deja": 0, "illisibles": [],
+           "echecs": [], "restaures": 0, "sauvegarde": TEMPLATES_POLICE_SAUVEGARDE.name}
+    sauve = safe_json.load(TEMPLATES_POLICE_SAUVEGARDE, default=None)
+    if TEMPLATES_POLICE_SAUVEGARDE.exists() and not isinstance(sauve, dict):
+        # Une sauvegarde illisible ne doit pas etre ecrasee par une neuve : ce
+        # serait perdre les polices d'origine de la premiere passe.
+        return dict(res, ok=False, error="sauvegarde des polices illisible : "
+                                         + TEMPLATES_POLICE_SAUVEGARDE.name)
+    sauve = sauve or {"police": cible, "fichiers": {}}
+    anciennes = sauve.setdefault("fichiers", {})
+    brouillons = sorted(IDENTITIES_DIR.glob("*/templates/*.montage.json"))
+    res["total"] = len(brouillons)
+    lus = []
+    for bp in brouillons:
+        rel = bp.relative_to(IDENTITIES_DIR).as_posix()
+        try:
+            d = json.loads(bp.read_text(encoding="utf-8"))
+        except Exception as e:
+            res["illisibles"].append(f"{rel} ({type(e).__name__})")
+            continue
+        if not isinstance(d, dict):
+            res["illisibles"].append(f"{rel} (pas un brouillon)")
+            continue
+        police = str(d.get("font") or "(aucune)")
+        res["par_police"][police] = res["par_police"].get(police, 0) + 1
+        lus.append((bp, rel, d, police))
+    if mode == "annuler":
+        for bp, rel, d, police in lus:
+            if rel in anciennes and police == sauve.get("police"):
+                d["font"] = anciennes[rel]
+                if safe_json.write(bp, d, indent=None):
+                    res["restaures"] += 1
+                    anciennes.pop(rel, None)
+                else:
+                    res["echecs"].append(rel)
+        if not safe_json.write(TEMPLATES_POLICE_SAUVEGARDE, sauve):
+            res["echecs"].append(TEMPLATES_POLICE_SAUVEGARDE.name)
+    else:
+        a_changer = [x for x in lus if x[3] != cible]
+        res["deja"] = len(lus) - len(a_changer)
+        res["a_changer"] = len(a_changer)
+        if mode == "appliquer" and a_changer:
+            for bp, rel, d, police in a_changer:
+                # la PREMIERE police connue reste : une deuxieme passe ne doit
+                # pas ecraser l'origine par la police de la premiere.
+                anciennes.setdefault(rel, police if police != "(aucune)" else "")
+            sauve["police"] = cible
+            if not safe_json.write(TEMPLATES_POLICE_SAUVEGARDE, sauve):
+                return dict(res, ok=False, error="sauvegarde des polices impossible : "
+                                                 "rien n'a ete change")
+            for bp, rel, d, police in a_changer:
+                d["font"] = cible
+                if safe_json.write(bp, d, indent=None):
+                    res["changes"] += 1
+                else:
+                    res["echecs"].append(rel)
+    if res["changes"] or res["restaures"]:
+        _invalidate_all_ttl_cache()
+    if res["echecs"]:
+        res["ok"] = False
+        res["error"] = "%d brouillon(s) non ecrit(s)" % len(res["echecs"])
+    return res
+
+
 def _render_jbequipe_html() -> str:
     """Onglet « Équipe » (Social Analytics) : la coquille — CSS, fragment
     rendu par le serveur, et le script qui le recharge après chaque action."""
@@ -51058,13 +51180,15 @@ def _analyse_template_gratuite(src: Path):
         caps.append(c)
         if box and box[2] > 0.04:
             size = _caption_size_for_width(texte, box[2] * 1080,
-                                           wrap_w=c.get("wrapW", 0.88))
+                                           wrap_w=c.get("wrapW", 0.88),
+                                           font=TEMPLATE_POLICE_DEFAUT)
             if size:
                 style["size"] = max(16, min(120, size))
     vis = _ag.visages(src, min(duration, cut + 4))
     prio, raisons = _ag.raisons_de_verifier(cut, cands, duration, vis, bool(texte),
                                             scenes=cuts)
     return {"cut_at": cut, "cut_reason": raison, "captions": caps, "style": style,
+            "font": TEMPLATE_POLICE_DEFAUT,
             "scenes": [t for t, _s in cuts], "duration": round(duration, 3),
             "lecture": lecture,
             "_source": "analyse gratuite (plans ffmpeg"
@@ -53547,7 +53671,7 @@ def _render_upload_inner(msg=None, error=None):
     html = (
         # EN PREMIER : seuls les jetons ecrits dans UPLOAD_HTML sont vises, pas
         # le contenu des galeries inserees plus bas.
-        _menu_avec_equipe(_upload_html_marque())
+        _police_template_par_defaut(_menu_avec_equipe(_upload_html_marque()))
         .replace("{theme_pre_class}", _pre)
         .replace("{theme_body_class}", _bod)
         # Socle des galeries : une seule fois pour toute la page.
@@ -55083,7 +55207,7 @@ def _sync_marche_travail(source: str):
     try:
         for f in fichiers:
             cle = f"{src}|templates|{f.name}"
-            draft = {"segments": "[]", "font": "Strong", "style": "{}"}
+            draft = {"segments": "[]", "font": TEMPLATE_POLICE_DEFAUT, "style": "{}"}
             try:
                 _d = json.loads((dossier / f"{f.stem}.montage.json")
                                 .read_text(encoding="utf-8"))
@@ -57266,6 +57390,24 @@ def create_app():
             return resp
         except Exception:
             return "", 500
+
+    @app.route("/noctus/templates_police", methods=["POST"])
+    def noctus_templates_police():
+        """Tous les templates dans la police de base (TEMPLATE_POLICE_DEFAUT).
+        mode=essai (par defaut, ne change rien) | appliquer | annuler.
+        POST sous /noctus/ : refuse d'office aux roles restreints."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "error": "unauth"}), 401
+        mode = (request.form.get("mode") or "essai").strip().lower()
+        if mode not in ("essai", "appliquer", "annuler"):
+            return jsonify({"ok": False, "error": "mode inconnu (essai, appliquer, annuler)"}), 400
+        res = _templates_police(mode)
+        print(f"[templates] police {mode} par {session.get('username')} : "
+              f"{res.get('changes', 0)} change(s), {res.get('restaures', 0)} restaure(s), "
+              f"{len(res.get('illisibles') or [])} illisible(s), "
+              f"{len(res.get('echecs') or [])} echec(s)", flush=True)
+        return jsonify(res)
 
     @app.route("/noctus/montage_save", methods=["POST"])
     def noctus_montage_save():

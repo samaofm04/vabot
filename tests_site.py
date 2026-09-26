@@ -25902,6 +25902,162 @@ except Exception as _eL:
     import traceback as _tbL
     check("liens infloww : testable", False, repr(_eL)[:200] + " " + _tbL.format_exc()[-800:])
 
+print()
+print("=" * 70)
+print("TEMPLATES : la Classique Instagram a bord noir comme police de base")
+print("=" * 70)
+# 27/09/2026 : « pour les templates c est Classique avec bord noir Instagram ».
+# Tout se passe dans un dossier temporaire : brouillons, sauvegarde, comptes.
+try:
+    import web_upload as _wT
+    import json as _jsT, shutil as _shT, tempfile as _tfT
+    import dashboard_cache as _dcT
+    _dT = pathlib.Path(_tfT.mkdtemp(prefix="tpl_police_"))
+    _savT = (_wT.IDENTITIES_DIR, _wT.TEMPLATES_POLICE_SAUVEGARDE, _wT._load_web_users,
+             _wT._load_role_definitions, _dcT._STORE, safe_json.write)
+    try:
+        check("templates : police de base = Classique Instagram A BORD NOIR (pas la Plain)",
+              _wT.TEMPLATE_POLICE_DEFAUT == "InstagramClassique")
+        # -- la liste des polices de l editeur, telle que les patchs du VPS la servent
+        _selT = ('<select id="nx-m-font" onchange="nxMFontChange(this.value)" class="nxm-inp">'
+                 '<option selected>TikTokSans</option><option>Strong</option>'
+                 '<optgroup label="Instagram"><option value="InstagramClassique" title="x">Classique Instagram</option>'
+                 '<option value="InstagramClassiquePlain" title="y">Classique Instagram · sans contour</option>'
+                 '</optgroup></select>')
+        _pgT = _wT._police_template_par_defaut("<div>" + _selT + "</div>")
+        check("editeur : Classique Instagram (bord noir) est cochee d office, TikTokSans ne l est plus",
+              '<option value="InstagramClassique" selected' in _pgT
+              and "<option selected>TikTokSans" not in _pgT
+              and '<option value="InstagramClassiquePlain" selected' not in _pgT, _pgT[:300])
+        _sansT = _selT.replace('<option value="InstagramClassique" title="x">Classique Instagram</option>', "")
+        check("editeur : sans l option (copie sans les patchs du VPS) -> page intacte",
+              _wT._police_template_par_defaut(_sansT) == _sansT)
+        check("editeur : liste introuvable -> page intacte",
+              _wT._police_template_par_defaut("<p>rien</p>") == "<p>rien</p>")
+        check("editeur : le choix se fait au RENDU, la ligne de UPLOAD_HTML (ancre du patch) est intacte",
+              '<select id="nx-m-font" onchange="nxMStyleRefresh()" class="nxm-inp"><option selected>TikTokSans</option>'
+              in _wT.UPLOAD_HTML)
+        check("analyse : une proposition est mesuree ET notee dans la police de base",
+              "font=TEMPLATE_POLICE_DEFAUT)" in pathlib.Path("web_upload.py").read_text(encoding="utf-8"))
+        check("analyse : une ancienne proposition (sans police notee) reste en Strong, sa mesure",
+              _jsT.loads(_jsT.dumps(_wT._brouillon_depuis_analyse({"captions": [], "style": {}})))["font"] == "Strong")
+        check("analyse : une proposition neuve garde sa police",
+              _wT._brouillon_depuis_analyse({"captions": [], "style": {}, "font": "InstagramClassique"})["font"]
+              == "InstagramClassique")
+
+        # -- le passage de tous les templates -----------------------------------
+        _idT = _dT / "identities"
+        for _n, _c in {
+            "a/templates/t1.montage.json": {"segments": "[]", "font": "TikTokSans", "style": "{}",
+                                            "cut_at": 2.5, "va_ready": True},
+            "a/templates/t2.montage.json": {"segments": "[]", "font": "Strong", "style": "{}"},
+            "b/templates/t3.montage.json": {"segments": "[]", "font": "InstagramClassique", "style": "{}"},
+            "b/templates/t6.montage.json": {"segments": "[]", "style": "{}"},
+        }.items():
+            (_idT / _n).parent.mkdir(parents=True, exist_ok=True)
+            (_idT / _n).write_text(_jsT.dumps(_c), encoding="utf-8")
+        (_idT / "b/templates/t4.montage.json").write_text("{", encoding="utf-8")
+        (_idT / "b/templates/t5.montage.json").write_text("[]", encoding="utf-8")
+        _wT.IDENTITIES_DIR = _idT
+        _wT.TEMPLATES_POLICE_SAUVEGARDE = _dT / "templates_police_avant.json"
+        _lireT = lambda n: _jsT.loads((_idT / n).read_text(encoding="utf-8"))
+        _avT = {n.relative_to(_idT).as_posix(): n.read_text(encoding="utf-8")
+                for n in _idT.glob("*/templates/*.json")}
+
+        _eT = _wT._templates_police("essai")
+        check("essai : compte tout, nomme les illisibles, n ecrit RIEN",
+              _eT["ok"] and _eT["total"] == 6 and _eT["a_changer"] == 3 and _eT["deja"] == 1
+              and len(_eT["illisibles"]) == 2 and _eT["changes"] == 0
+              and not _wT.TEMPLATES_POLICE_SAUVEGARDE.exists()
+              and all((_idT / n).read_text(encoding="utf-8") == v for n, v in _avT.items()), _eT)
+        check("essai : le compte par police dit d ou l on part",
+              _eT["par_police"] == {"TikTokSans": 1, "Strong": 1, "InstagramClassique": 1, "(aucune)": 1},
+              _eT["par_police"])
+
+        _aT = _wT._templates_police("appliquer")
+        _t1 = _lireT("a/templates/t1.montage.json")
+        check("appliquer : les 3 passent en Classique, la deja Classique est laissee",
+              _aT["ok"] and _aT["changes"] == 3
+              and all(_lireT(n)["font"] == "InstagramClassique" for n in
+                      ("a/templates/t1.montage.json", "a/templates/t2.montage.json",
+                       "b/templates/t3.montage.json", "b/templates/t6.montage.json")), _aT)
+        check("appliquer : SEULE la police change (coupe, approbation VA, captions intactes)",
+              _t1 == {"segments": "[]", "font": "InstagramClassique", "style": "{}",
+                      "cut_at": 2.5, "va_ready": True}, _t1)
+        check("appliquer : les illisibles ne sont pas touches",
+              (_idT / "b/templates/t4.montage.json").read_text(encoding="utf-8") == "{")
+        _svT = _jsT.loads(_wT.TEMPLATES_POLICE_SAUVEGARDE.read_text(encoding="utf-8"))
+        check("appliquer : la police d avant est sauvegardee, fichier par fichier",
+              _svT["fichiers"] == {"a/templates/t1.montage.json": "TikTokSans",
+                                   "a/templates/t2.montage.json": "Strong",
+                                   "b/templates/t6.montage.json": ""}, _svT)
+        _a2T = _wT._templates_police("appliquer")
+        check("appliquer deux fois : rien a refaire, la sauvegarde garde les polices d ORIGINE",
+              _a2T["changes"] == 0 and _jsT.loads(_wT.TEMPLATES_POLICE_SAUVEGARDE.read_text(
+                  encoding="utf-8"))["fichiers"]["a/templates/t1.montage.json"] == "TikTokSans", _a2T)
+
+        # t2 retouche a la main depuis : l annulation ne doit pas l ecraser
+        _t2 = _lireT("a/templates/t2.montage.json"); _t2["font"] = "Poppins"
+        (_idT / "a/templates/t2.montage.json").write_text(_jsT.dumps(_t2), encoding="utf-8")
+        _rT = _wT._templates_police("annuler")
+        check("annuler : remet la police d avant, sans ecraser une retouche faite depuis",
+              _rT["ok"] and _rT["restaures"] == 2
+              and _lireT("a/templates/t1.montage.json")["font"] == "TikTokSans"
+              and _lireT("a/templates/t2.montage.json")["font"] == "Poppins"
+              and _lireT("b/templates/t3.montage.json")["font"] == "InstagramClassique", _rT)
+
+        # sauvegarde impossible -> rien n est change
+        safe_json.write = lambda *a, **k: False
+        try:
+            _fT = _wT._templates_police("appliquer")
+        finally:
+            safe_json.write = _savT[5]
+        check("appliquer : sauvegarde impossible -> refus nomme et AUCUN brouillon touche",
+              not _fT["ok"] and "rien n'a ete change" in _fT.get("error", "")
+              and _lireT("a/templates/t1.montage.json")["font"] == "TikTokSans", _fT)
+        # sauvegarde illisible -> refus, on ne l ecrase pas
+        _wT.TEMPLATES_POLICE_SAUVEGARDE.write_text("{", encoding="utf-8")
+        for _pv in _dT.glob("templates_police_avant.json.prev"):
+            _pv.unlink()
+        _iT = _wT._templates_police("appliquer")
+        check("appliquer : sauvegarde illisible -> refus, rien d ecrase",
+              not _iT["ok"] and "illisible" in _iT.get("error", "")
+              and _wT.TEMPLATES_POLICE_SAUVEGARDE.read_text(encoding="utf-8") == "{", _iT)
+        _wT.TEMPLATES_POLICE_SAUVEGARDE.unlink()
+
+        # -- la route --------------------------------------------------------------
+        _stT = _dcT.SnapshotStore(_dT / "dashboard_snapshots", "banc-templates")
+        _stT.warmer = type("_SansChauffeur", (), {"touch": lambda self: None})()
+        _dcT._STORE = _stT
+        _wT._load_web_users = lambda: {"admin": {"role": "owner", "password": "x"},
+                                       "lecteur": {"role": "lecteur", "password": "x"}}
+        _wT._load_role_definitions = lambda: {"lecteur": {"permissions": {"cloudtemplates": {"enabled": True}}}}
+        _appT = _wT.create_app(); _appT.config["TESTING"] = True
+        def _cliT(u, r):
+            _c = _appT.test_client()
+            with _c.session_transaction() as _s:
+                _s["auth"] = True; _s["username"] = u; _s["role"] = r
+            return _c
+        _rA = _cliT("admin", "owner").post("/noctus/templates_police", data={"mode": "essai"})
+        check("route : l admin fait un essai (rien d ecrit)",
+              _rA.status_code == 200 and (_rA.get_json() or {}).get("a_changer") == 3
+              and not _wT.TEMPLATES_POLICE_SAUVEGARDE.exists(), (_rA.status_code, _rA.get_data(as_text=True)[:200]))
+        _rM = _cliT("admin", "owner").post("/noctus/templates_police", data={"mode": "tout"})
+        check("route : mode inconnu -> 400", _rM.status_code == 400)
+        _rR = _cliT("lecteur", "lecteur").post("/noctus/templates_police", data={"mode": "appliquer"})
+        check("route : un role restreint est refuse (ecriture sous /noctus/)",
+              _rR.status_code in (302, 401, 403) and _lireT("a/templates/t1.montage.json")["font"] == "TikTokSans",
+              _rR.status_code)
+        _rN = _appT.test_client().post("/noctus/templates_police", data={"mode": "essai"})
+        check("route : anonyme -> refuse", _rN.status_code in (302, 401, 403), _rN.status_code)
+    finally:
+        (_wT.IDENTITIES_DIR, _wT.TEMPLATES_POLICE_SAUVEGARDE, _wT._load_web_users,
+         _wT._load_role_definitions, _dcT._STORE, safe_json.write) = _savT
+        _shT.rmtree(_dT, ignore_errors=True)
+except Exception as _eT:
+    import traceback as _tbT
+    check("templates police : testable", False, repr(_eT)[:200] + " " + _tbT.format_exc()[-600:])
+
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")
 if FAILS:
