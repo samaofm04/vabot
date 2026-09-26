@@ -141,32 +141,29 @@ def phrase_classement(identites, ordre=None) -> str:
 #:
 #: Premiere version : une medaille pour les trois premiers, un chiffre nu
 #: pour la suite. Le proprietaire, en relisant son menu : « je veux une
-#: medaille pour chacun ». C'est le meme constat qu'avant, applique aux
-#: lignes du bas : « 4. Genesaag » se lit comme un nom qui commencerait par
-#: un chiffre, « 4️⃣ Genesaag » se voit avant d'etre lu. S'arreter a trois,
-#: c'etait garder le probleme pour les douze lignes suivantes.
+#: medaille pour chacun ». « 4. Genesaag » se lit comme un nom qui
+#: commencerait par un chiffre ; un dessin se voit avant d'etre lu.
 #:
-#: Au-dela de dix il n'existe pas de pastille chiffree : on pose alors les
-#: CHIFFRES un par un, « 1️⃣2️⃣ » pour douze. Ce n'est pas elegant, c'est
-#: lisible -- et le menu US compte vingt-deux models.
+#: 26/09/2026 : les pastilles « 1️⃣2️⃣ » (chiffres poses un par un au-dela
+#: de dix) ont ete jugees laides. Choix du proprietaire sur maquette : le
+#: podium garde or, argent, bronze, puis CHAQUE model a sa medaille 🏅 suivie
+#: de son numero dans un rond (« 🏅④ », « 🏅⑪ ») -- « mets avec les numeros
+#: du B », le rond fin de la maquette.
 #:
-#: UNE REGLE DE PALETTE EST ENFREINTE ICI, SCIEMMENT. clics_personnes
-#: n'accepte que des emoji d'UN SEUL point de code, parce qu'une sequence se
-#: casse en deux dessins sur les polices anciennes. Une pastille chiffree en
-#: compte trois (le chiffre, le selecteur de variante, la marque
-#: d'encadrement) : elle ne respecte donc PAS cette regle.
-#:
-#: On la prend quand meme, pour deux raisons. La sequence keycap est l'une
-#: des plus vieilles d'Unicode et Discord la dessine sur tous ses clients ; et
-#: surtout, si elle se cassait, ce qui reste a l'ecran est le CHIFFRE -- soit
-#: exactement l'ancien affichage. Le pire cas de ce choix, c'est l'etat
-#: d'avant. Aucun ZWJ en revanche, la regle qui compte vraiment.
-KEYCAPS = tuple(chr(0x30 + c) + "\uFE0F\u20E3" for c in range(10))
-DIX = "\U0001F51F"
+#: Tous ces signes sont d'UN SEUL point de code, la regle de palette de
+#: clics_personnes (une sequence se casse en deux dessins sur les polices
+#: anciennes) : l'ancienne pastille keycap l'enfreignait, celle-ci non.
+#: Les ronds existent de 1 a 50 ; au-dela, le numero passe en exposant
+#: (« 🏅⁵¹ »), toujours d'un seul point de code par chiffre.
+MEDAILLE = "\U0001F3C5"
+_RONDS = ({n: chr(0x2460 + n - 1) for n in range(1, 21)}        # ①..⑳
+          | {n: chr(0x3251 + n - 21) for n in range(21, 36)}   # ㉑..㉟
+          | {n: chr(0x32B1 + n - 36) for n in range(36, 51)})  # ㊱..㊿
+_EXPOSANTS = "\u2070\u00b9\u00b2\u00b3\u2074\u2075\u2076\u2077\u2078\u2079"
 
 
 def prefixe_rang(n) -> str:
-    """Le badge du rang : 1 → 🥇, 2 → 🥈, 3 → 🥉, 4 → 4️⃣, 10 → 🔟, 12 → 1️⃣2️⃣.
+    """Le badge du rang : 1 → 🥇, 2 → 🥈, 3 → 🥉, 4 → 🏅④, 11 → 🏅⑪, 51 → 🏅⁵¹.
 
     Jamais un chiffre nu, et jamais rien : une ligne sans badge au milieu de
     lignes qui en portent un redeviendrait le cas particulier qu'on essaie
@@ -183,9 +180,9 @@ def prefixe_rang(n) -> str:
         return ""
     if n <= len(MEDAILLES):
         return MEDAILLES[n - 1]
-    if n == 10:
-        return DIX
-    return "".join(KEYCAPS[int(c)] for c in str(n))
+    if n in _RONDS:
+        return MEDAILLE + _RONDS[n]
+    return MEDAILLE + "".join(_EXPOSANTS[int(c)] for c in str(n))
 
 
 def etiqueter(identites, ordre=None, gabarit="{rang} {nom}") -> dict:

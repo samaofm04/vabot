@@ -693,18 +693,26 @@ try:
     # chiffre nu (« 4. Genesaag »). Le proprietaire : « je veux une medaille
     # pour chacun » -- dans un menu deroulant, un chiffre colle au nom se lit
     # comme une partie du nom, et c'est vrai a la ligne 4 comme a la ligne 1.
-    check("ordre : au-dela du podium, le rang porte une pastille chiffree",
-          _ioOr.prefixe_rang(4) == "4\uFE0F\u20E3"
-          and _ioOr.prefixe_rang(9) == "9\uFE0F\u20E3",
+    # 26/09/2026 : les pastilles keycap (« 1️⃣2️⃣ » au-dela de dix) jugees
+    # laides ; choix du proprietaire : 🏅 suivie du numero dans un rond.
+    check("ordre : au-dela du podium, une medaille et le numero dans un rond",
+          _ioOr.prefixe_rang(4) == "\U0001F3C5\u2463"
+          and _ioOr.prefixe_rang(9) == "\U0001F3C5\u2468",
           repr(_ioOr.prefixe_rang(4)))
-    check("ordre : dix a son propre dessin",
-          _ioOr.prefixe_rang(10) == "\U0001F51F", repr(_ioOr.prefixe_rang(10)))
-    # Au-dela de dix il n'existe pas de pastille : on pose les CHIFFRES un par
-    # un. Le menu US compte vingt-deux models, la question se pose pour de bon.
-    check("ordre : au-dela de dix, les chiffres se posent un par un",
-          _ioOr.prefixe_rang(14) == "1\uFE0F\u20E3" + "4\uFE0F\u20E3"
-          and _ioOr.prefixe_rang(22) == "2\uFE0F\u20E3" + "2\uFE0F\u20E3",
-          repr(_ioOr.prefixe_rang(14)))
+    check("ordre : dix et au-dela gardent un rond d un seul signe",
+          _ioOr.prefixe_rang(10) == "\U0001F3C5\u2469"
+          and _ioOr.prefixe_rang(14) == "\U0001F3C5\u246D"
+          and _ioOr.prefixe_rang(22) == "\U0001F3C5\u3252"
+          and _ioOr.prefixe_rang(50) == "\U0001F3C5\u32BF",
+          repr([_ioOr.prefixe_rang(n) for n in (10, 14, 22, 50)]))
+    check("ordre : au-dela de 50 (plus de rond), le numero passe en exposant",
+          _ioOr.prefixe_rang(51) == "\U0001F3C5\u2075\u00b9",
+          repr(_ioOr.prefixe_rang(51)))
+    # La regle de palette de clics_personnes : un signe = UN point de code
+    # (une sequence se casse en deux dessins sur les polices anciennes).
+    check("ordre : chaque signe du badge est d un seul point de code",
+          all(len(ch) == 1 for n in range(1, 120) for ch in _ioOr.prefixe_rang(n)),
+          "")
     # AUCUN CHIFFRE NU NE SUBSISTE : c'etait toute la demande.
     check("ordre : plus aucun rang ne s affiche en chiffre nu",
           all(_ioOr.prefixe_rang(n) and not _ioOr.prefixe_rang(n)[0].isdigit()
@@ -779,9 +787,9 @@ try:
     _lib14 = _ioOr.etiqueter(_ord14, _ord14)
     check("ordre : le badge arrive dans le libelle, du premier au dernier",
           _lib14["n01"] == "\U0001F947 N01"
-          and _lib14["n04"] == "4\uFE0F\u20E3 N04"
-          and _lib14["n10"] == "\U0001F51F N10"
-          and _lib14["n14"] == "1\uFE0F\u20E3" + "4\uFE0F\u20E3" + " N14",
+          and _lib14["n04"] == "\U0001F3C5\u2463 N04"
+          and _lib14["n10"] == "\U0001F3C5\u2469 N10"
+          and _lib14["n14"] == "\U0001F3C5\u246D N14",
           str([_lib14[k] for k in ("n04", "n10", "n14")]))
     check("ordre : un fichier absent ne fait pas tomber la lecture",
           isinstance(_ioOr.lire(), list))

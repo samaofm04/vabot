@@ -9298,7 +9298,7 @@ def _couper_discord(s: str, limite: int) -> str:
 
 
 def _libelle_model(ident, libelles=None) -> str:
-    """Le libelle d une model dans les menus : « 4️⃣ Lola — Caption + Template ».
+    """Le libelle d une model dans les menus : « 🏅④ Lola — Caption + Template ».
 
     Cette phrase annoncait « 3. Lola 💬⚡ » : les deux moities du format ont
     change depuis (le rang porte un badge, les styles s ecrivent en toutes
