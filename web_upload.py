@@ -1333,6 +1333,11 @@ def _js_chaine(v) -> str:
     return s.replace("'", "\\'").replace("</", "<\\/")
 
 
+#: Infobulle du filtre « Template Trend » : la traduction anglaise compare la
+#: phrase ENTIERE, elle la lit donc ici.
+_TITRE_FILTRE_TEMPLATE = "Afficher seulement les templates de base, sans marque Trash ni Flash"
+
+
 def _marques_css() -> str:
     """Le CSS des marques, tire de marques_montage.py.
 
@@ -1372,6 +1377,12 @@ def _marques_css() -> str:
                    "border-color:%s!important}"
                    % (c, _rgba_de(m["couleur"], .18),
                       _couleur_sure(m["couleur_clair"])))
+    # « Template Trend » (les templates sans marque) : meme traitement que les
+    # marques, dans le rose des templates, fonce pour le blanc.
+    out.append("body.light #template-toggle-btn{color:#be185d!important;"
+               "border-color:#e5e7eb!important}")
+    out.append("body.light #template-toggle-btn.vault-sort-active{"
+               "background:rgba(244,114,182,.18)!important;border-color:#be185d!important}")
     return "\n".join(out)
 
 
@@ -5529,6 +5540,7 @@ function vaultVuesAppliquer(sec){
   var grid = sec.querySelector('#vault-grid');
   if(!grid) return;
   var bOn = vaultFiltreOn(sec, 'favbrute-toggle-btn');
+  var gOn = vaultFiltreOn(sec, 'template-toggle-btn');
   var tOn = vaultFiltreOn(sec, 'trash-toggle-btn');
   var fOn = vaultFiltreOn(sec, 'flash-toggle-btn');
   var oOn = vaultFiltreOn(sec, 'offbrute-toggle-btn');
@@ -5541,8 +5553,11 @@ function vaultVuesAppliquer(sec){
     var estFav = !!c.querySelector('.fav-brute-star.is-fav');
     // Sans filtre de famille, les montages marques restent CACHES : c'est la
     // marque qui les sort de la vue ordinaire, et c'est tout son interet.
-    var ok = (tOn || fOn) ? ((tOn && estTrash) || (fOn && estFlash))
-                          : (!estFlash && !estTrash);
+    // Template Trend = les montages SANS marque : une famille comme les
+    // autres, qui s'additionne a Trash et ⚡.
+    var estBase = !estFlash && !estTrash;
+    var ok = (gOn || tOn || fOn) ? ((gOn && estBase) || (tOn && estTrash) || (fOn && estFlash))
+                                 : estBase;
     if(bOn && !estFav) ok = false;
     // ⊘ : la carte grisée OU son bouton ⊘ allumé (les deux vont ensemble ;
     // le repérage du texte et le clic les posent tous les deux)
@@ -5551,7 +5566,7 @@ function vaultVuesAppliquer(sec){
     if(ok) shown++;
   });
   var vide = sec.querySelector('.vues-empty-note');
-  if(shown === 0 && (bOn || tOn || fOn || oOn)){
+  if(shown === 0 && (bOn || gOn || tOn || fOn || oOn)){
     if(!vide){
       vide = document.createElement('div');
       vide.className = 'vues-empty-note';
@@ -5559,6 +5574,7 @@ function vaultVuesAppliquer(sec){
       grid.appendChild(vide);
     }
     var familles = [];
+    if(gOn) familles.push('🎞️ Template Trend');
     if(tOn) familles.push('{marque_trash_emoji_js} {marque_trash_nom_js}');
     if(fOn) familles.push('⚡ Flash Trend');
     vide.textContent = familles.length
@@ -5790,6 +5806,18 @@ function toggleFlashTrendFilter(btn){
   // On n'eteint plus l'autre bouton : les deux se combinent, et allumer les
   // deux donne « Flash Banger » plutot qu'un ecran incoherent.
   vaultFiltreBouton(b, actif, '⚡ Flash Trend ✓', '⚡ Flash Trend');
+  vaultVuesAppliquer(sec);
+}
+
+// === Filtre « Template Trend » : les templates de base =================
+//
+// Range entre ⭐ Bangers et Trash dans la barre. Il montre les montages sans
+// aucune marque, et se combine aux autres familles (vaultVuesAppliquer).
+function toggleTemplateTrendFilter(btn){
+  var sec = vaultFiltreSection(btn);
+  var b = btn || (sec ? sec.querySelector('#template-toggle-btn') : null);
+  var actif = !(b && b.getAttribute('data-on') === '1');
+  vaultFiltreBouton(b, actif, '🎞️ Template Trend ✓', '🎞️ Template Trend');
   vaultVuesAppliquer(sec);
 }
 
@@ -25524,6 +25552,20 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         f"font-weight:700;font-family:inherit;white-space:nowrap'>{html_escape(_tm['emoji'])} {html_escape(_tm['nom'])}</button>"
     ) if subdir == "templates" else ""
 
+    # Bouton « Template Trend » : les templates de BASE, ceux qui ne portent
+    # aucune marque (ni Trash ni ⚡). Demande du proprietaire (27/09/2026),
+    # range entre ⭐ Bangers et Trash : « pour filtrer uniquement les videos
+    # de base ». Il s'additionne aux familles comme elles entre elles
+    # (vaultVuesAppliquer). Rose : la couleur des templates ailleurs sur le
+    # site ; fonce en theme clair par _marques_css.
+    template_trend_toggle_html = (
+        "<button type='button' id='template-toggle-btn' data-on='0' onclick='toggleTemplateTrendFilter(this)' "
+        "title='%s' "
+        "style='display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#1a1a1a;"
+        "border:1px solid #3a3a3a;border-radius:8px;color:#f472b6;cursor:pointer;font-size:13px;"
+        "font-weight:700;font-family:inherit;white-space:nowrap'>🎞️ Template Trend</button>"
+    ) % html_escape(_TITRE_FILTRE_TEMPLATE) if subdir == "templates" else ""
+
     # Bouton « ⚡ Flash Trend » : uniquement sur les montages. Le tag EXCLUT,
     # donc son filtre est le SEUL endroit ou ces montages apparaissent — la vue
     # de base et le filtre ⭐ Bangers les masquent tous les deux.
@@ -25773,7 +25815,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         + f"</div>"
         # flex-wrap : sur un telephone, un bouton de plus poussait la rangee
         # hors de l'ecran. Ordre voulu : ⭐ Bangers · Trash · ⚡ Flash Trend.
-        f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap'>{banger_toggle_html}{fav_brute_toggle_html}{off_brute_toggle_html}{trash_trend_toggle_html}{flash_toggle_html}{sync_tags_html}{scan_texte_html}{sort_btn_html}</div>"
+        f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap'>{banger_toggle_html}{fav_brute_toggle_html}{off_brute_toggle_html}{template_trend_toggle_html}{trash_trend_toggle_html}{flash_toggle_html}{sync_tags_html}{scan_texte_html}{sort_btn_html}</div>"
         f"</div>"
         + _marques_avis_html(_marques_g, _marques_err, selected, files)
     )

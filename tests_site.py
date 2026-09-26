@@ -20533,6 +20533,18 @@ try:
         check("trash : barre du vault dans l ordre ⭐ Bangers · Trash · ⚡ Flash",
               _ordreTt == ["favbrute-toggle-btn", "trash-toggle-btn", "flash-toggle-btn"],
               str(_ordreTt))
+        # 27/09/2026 : « Template Trend » (les templates sans marque) entre
+        # ⭐ Bangers et Trash, a la demande du proprietaire.
+        _ordreGTt = [m.group(1) for m in _reTt.finditer(
+            r"id='((?:favbrute|template|trash|flash)-toggle-btn)'", _fragTt)]
+        check("template trend : barre ⭐ Bangers · 🎞️ Template Trend · Trash · ⚡ Flash",
+              _ordreGTt == ["favbrute-toggle-btn", "template-toggle-btn",
+                            "trash-toggle-btn", "flash-toggle-btn"], str(_ordreGTt))
+        check("template trend : le bouton part neutre et se dit Template Trend",
+              "id='template-toggle-btn' data-on='0'" in _fragTt
+              and "Template Trend</button>" in _fragTt)
+        check("template trend : couleur foncee en theme clair (regle d id, !important)",
+              "body.light #template-toggle-btn{color:#be185d!important" in _wTt._marques_css())
         check("trash : le filtre porte le logo et le nom du module, et part neutre",
               "id='trash-toggle-btn' data-on='0'" in _fragTt
               and ("%s %s</button>" % (_MTt["emoji"], _MTt["nom"])) in _fragTt)
@@ -20716,6 +20728,53 @@ console.log(JSON.stringify(res));
             check("trash (JS) : un etat doublement marque se peint Flash, comme au serveur",
                   _resN.get("peint_double") == "cloud-card is-flash-card | trash-trend",
                   str(_resN.get("peint_double")))
+
+            # « Template Trend » : les montages SANS marque, famille comme les
+            # autres (union), l etoile recoupe.
+            _SCEN_G = _SCEN_Tt.split("var res={};")[0].replace(
+                "['favbrute-toggle-btn','trash-toggle-btn','flash-toggle-btn']",
+                "['favbrute-toggle-btn','template-toggle-btn','trash-toggle-btn','flash-toggle-btn']") + r"""
+var res={};
+var s=section([{nom:'base'},{nom:'baseFav',fav:true},{nom:'trash',trash:true},
+  {nom:'trashFav',trash:true,fav:true},{nom:'flash',flash:true},{nom:'double',flash:true,trash:true}]);
+toggleTemplateTrendFilter(bt(s,'template-toggle-btn')); res.g=vus(s);
+res.g_label=bt(s,'template-toggle-btn').textContent;
+toggleFavBruteFilter(bt(s,'favbrute-toggle-btn')); res.g_fav=vus(s);
+toggleFavBruteFilter(bt(s,'favbrute-toggle-btn'));
+toggleTrashTrendFilter(bt(s,'trash-toggle-btn')); res.g_trash=vus(s);
+toggleFlashTrendFilter(bt(s,'flash-toggle-btn')); res.tout=vus(s);
+toggleTrashTrendFilter(bt(s,'trash-toggle-btn')); toggleFlashTrendFilter(bt(s,'flash-toggle-btn'));
+toggleTemplateTrendFilter(bt(s,'template-toggle-btn')); res.eteint=vus(s);
+res.eteint_label=bt(s,'template-toggle-btn').textContent;
+vider();
+var s2=section([{nom:'trash',trash:true}]);
+toggleTemplateTrendFilter(bt(s2,'template-toggle-btn')); res.vide=note(s2);
+console.log(JSON.stringify(res));
+"""
+            _fG = TMP / "template_trend_filtres.js"
+            _fG.write_text(_uplTt[_dA:_fA] + "\n" + _uplTt[_dB:_fB] + "\n"
+                           + _DOM_STUB_F3.split("var res = {};")[0] + _SCEN_G, encoding="utf-8")
+            _rG = _spTt.run([_nodeTt, str(_fG)], capture_output=True, text=True,
+                            encoding="utf-8", timeout=60)
+            try:
+                _resG = _jsTt.loads((_rG.stdout or "").strip().splitlines()[-1])
+            except Exception:
+                _resG = {}
+            _errG = ((_rG.stderr or "") + " " + str(_resG))[:220]
+            check("template trend (JS) : seul, il montre les templates SANS marque",
+                  _resG.get("g") == "base,baseFav", _errG)
+            check("template trend (JS) : le bouton dit son etat",
+                  _resG.get("g_label") == "🎞️ Template Trend ✓"
+                  and _resG.get("eteint_label") == "🎞️ Template Trend", _errG)
+            check("template trend (JS) : ⭐ recoupe (templates de base marques ⭐)",
+                  _resG.get("g_fav") == "baseFav", _errG)
+            check("template trend (JS) : il s additionne a Trash, puis a ⚡ (union des familles)",
+                  _resG.get("g_trash") == "base,baseFav,trash,trashFav"
+                  and _resG.get("tout") == "base,baseFav,trash,trashFav,flash,double", _errG)
+            check("template trend (JS) : tout eteint ramene la vue de base",
+                  _resG.get("eteint") == "base,baseFav", _errG)
+            check("template trend (JS) : liste vide -> un message qui le nomme",
+                  "Template Trend" in str(_resG.get("vide")), _errG)
 
             # LA BASCULE ELLE-MEME, reponse du serveur simulee : le toast et le
             # refus d'un registre illisible. showToast prend l'emoji de TETE

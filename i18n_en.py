@@ -348,6 +348,8 @@ if _mm is not None:
                         % (_m["emoji"], _m["nom"])] = (
             "Show only %s %s edits (they are hidden everywhere else)"
             % (_m["emoji"], _m["nom"]))
+    MARQUES_MONTAGE["Afficher seulement les templates de base, sans marque Trash ni Flash"] = (
+        "Show only the base templates, with no Trash or Flash mark")
     _t = _mm.MARQUES["trash"]["emoji"]
     MARQUES_MONTAGE["Recopier les tags %s, ⚡ et ⭐ de ces montages sur toutes les "
                     "identites du meme marche (ajoute seulement, ne retire rien)" % _t] = (
