@@ -8439,13 +8439,34 @@ def _jb_models_marche(marche="us"):
     donc a en demoter quinze sur vingt-deux, sans que rien ne le dise.
     """
     try:
-        from cogs.welcome import list_identities, is_identity_active
+        from cogs.welcome import list_identities
         return [n for n in list_identities()
-                if is_identity_active(n)
+                if not _jb_en_pause(n)
                 and n.strip().lower() not in EXCLURE_MENU
                 and _market_of(n) == marche]
     except Exception:
         return []
+
+
+def _jb_en_pause(n) -> bool:
+    """La PAUSE du Vault (identite_pause) : seul reglage d'activite qui
+    retire une model des menus Jailbreak.
+
+    26/09/2026 : le menu US montrait 14 models, le site 18. Les quatre
+    manquantes (ema_bb0, nanas__nyspam, mxckeymeiji, mini_caryn) portaient
+    « enabled: false » dans identities_config.json -- le drapeau de la
+    ROTATION des nouveaux VA (/toggleidentity), que le site n'affiche nulle
+    part. Le proprietaire : « sur le site il y a tout ». Le menu suit donc le
+    site. Une identite retiree de la rotation reste proposee aux VA
+    Jailbreak ; pour la cacher PARTOUT, c'est la pause du Vault, que
+    is_identity_active et la rotation respectent aussi.
+    """
+    try:
+        from cogs.welcome import load_identities_config
+        e = (load_identities_config() or {}).get(n)
+        return isinstance(e, dict) and bool(e.get("pause"))
+    except Exception:
+        return False
 
 
 # Jessye est la SOURCE du menu (pseudo/name), pas une model a proposer.
@@ -8477,11 +8498,12 @@ def _jb_diagnostic_marche(marche="us") -> str:
     On compte donc ce que chaque filtre retire, dans l'ordre ou il retire.
     """
     try:
-        from cogs.welcome import list_identities, is_identity_active
+        from cogs.welcome import list_identities
     except Exception as e:                                   # noqa: BLE001
         return "impossible de lire les identites (%s)" % type(e).__name__
     toutes = list(list_identities() or [])
-    actives = [n for n in toutes if is_identity_active(n)]
+    # Meme filtre que la liste : la pause seule (voir _jb_en_pause).
+    actives = [n for n in toutes if not _jb_en_pause(n)]
     # LE DIAGNOSTIC COMPTE CE QUE LA LISTE FILTRE, pas autre chose. Il
     # comptait la nature alors que la liste ne la regarde plus : deux
     # comptages divergents, c'est le defaut qu'on vient de corriger.
@@ -10135,10 +10157,11 @@ def _jb_models_ecartees(marche="us"):
         else:
             if n in avec_reserves and n not in sans_reserves:
                 raisons.append("réserve")
-            if not is_identity_active(n):
-                e = cfg.get(n)
-                raisons.append("en pause" if isinstance(e, dict) and e.get("pause")
-                               else "désactivée")
+            # La pause seule retire du menu (_jb_en_pause). « enabled: false »
+            # ne concerne que la rotation des nouveaux VA : ce n'est pas une
+            # raison d'absence, on ne la donne donc pas.
+            if _jb_en_pause(n):
+                raisons.append("en pause")
             if idl in EXCLURE_MENU:
                 raisons.append("source du menu (pseudo/name)")
             mk = _market_of(n)

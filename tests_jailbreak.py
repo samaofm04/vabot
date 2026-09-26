@@ -9420,19 +9420,25 @@ def _v2_bloc_menu_models():
     ec = dict(U._jb_models_ecartees("us"))
     U._jb_models_marche = _vrai_jmm
     att = {"julia": ["marché FR"], "blonde": ["réserve"], "v2_nova": ["Bibliothèque 2 (site seulement)"],
-           "jessye": ["source du menu (pseudo/name)"], "coupee": ["désactivée"], "pausee": ["en pause"],
+           "jessye": ["source du menu (pseudo/name)"], "pausee": ["en pause"],
            "nouvelle": ["marché FR"], "nouvelle2": ["marché FR"],
            "mystere": ["autre (aucun filtre connu ne l'explique)"]}
     check("B : chaque identite EXISTANTE absente du menu US, avec SA raison (production), emma absente",
           ec == att, ec)
-    MARCHES["coupee"] = "fr"
-    check("B : plusieurs raisons -> toutes dites (desactivee + marche FR)",
-          dict(U._jb_models_ecartees("us"))["coupee"] == ["désactivée", "marché FR"])
-    del MARCHES["coupee"]
-    # (sans la simulation de « mystere » : elle est dans le menu, 8 ecartees.)
+    # 26/09/2026 : « enabled: false » (rotation des nouveaux VA) ne retire
+    # plus du menu -- le site ne l'affiche pas, et 4 models US en manquaient.
+    check("B : une identite retiree de la rotation SEULE reste dans le menu US",
+          "coupee" in U._jb_models_marche("us") and "coupee" not in ec)
+    check("B : la pause du Vault, elle, retire du menu",
+          "pausee" not in U._jb_models_marche("us"))
+    MARCHES["pausee"] = "fr"
+    check("B : plusieurs raisons -> toutes dites (en pause + marche FR)",
+          dict(U._jb_models_ecartees("us"))["pausee"] == ["en pause", "marché FR"])
+    del MARCHES["pausee"]
+    # (sans la simulation de « mystere » : elle est dans le menu, 7 ecartees.)
     t = MT.demo_ecartees_texte("us", 3000)
-    check("B : section « Écartées du menu US : 8 », groupee par raison, noms en clair, piste du marche",
-          t.startswith("### Écartées du menu US : 8") and "• **marché FR** (3) : `julia`, `nouvelle`, `nouvelle2`" in t
+    check("B : section « Écartées du menu US : 7 », groupee par raison, noms en clair, piste du marche",
+          t.startswith("### Écartées du menu US : 7") and "• **marché FR** (3) : `julia`, `nouvelle`, `nouvelle2`" in t
           and "• **réserve** (1) : `blonde`" in t and "Bibliothèque → ✏️ Modifier → Marché" in t
           and "`mystere`" not in t and "non listé" not in t, t)
     # Beaucoup d'ecartees, noms tres longs : coupe propre, le total est dit.
@@ -9444,24 +9450,24 @@ def _v2_bloc_menu_models():
     _m = re.search(r"\(\+(\d+)\)", t)
     _nl = re.search(r"-# (\d+) nom\(s\) non listé", t)
     _listes = len(re.findall(r"`[^`]+`", t))
-    check("B : 308 ecartees dans 1500 unites -> tronque proprement, listes + non listees = total",
+    check("B : 307 ecartees dans 1500 unites -> tronque proprement, listes + non listees = total",
           U._long_discord(t) <= 1500 and f"{nb_total} écartée(s) au total" in t and _nl
-          and _listes + int(_nl.group(1)) == nb_total and "y…`" in t and nb_total == 308
+          and _listes + int(_nl.group(1)) == nb_total and "y…`" in t and nb_total == 307
           and t.splitlines()[-1].startswith("-# ") and "Bibliothèque → ✏️" in t,
           (U._long_discord(t), nb_total, _listes, _nl and _nl.group(1), t[-300:]))
     for _b in (120, 200, 400, 1000):
         _t = MT.demo_ecartees_texte("us", _b)
         _nl = re.search(r"-# (\d+) nom\(s\) non listé", _t)
-        if not (U._long_discord(_t) <= _b and "308 écartée(s) au total" in _t.splitlines()[-1]
-                and _nl and len(re.findall(r"`[^`]+`", _t)) + int(_nl.group(1)) == 308):
+        if not (U._long_discord(_t) <= _b and "307 écartée(s) au total" in _t.splitlines()[-1]
+                and _nl and len(re.findall(r"`[^`]+`", _t)) + int(_nl.group(1)) == 307):
             check("B : budget %d -> le compte reste la derniere ligne" % _b, False, _t)
             break
     else:
         check("B : budgets serres (120, 200, 400, 1000) -> le compte en derniere ligne, "
-              "listes + non listees = 308, jamais au-dela du budget", True)
+              "listes + non listees = 307, jamais au-dela du budget", True)
     _t = MT.demo_ecartees_texte("us", 60)
     check("B : budget 60 (pas la place de nommer) -> le total seul, dans le budget",
-          U._long_discord(_t) <= 60 and "308" in _t, _t)
+          U._long_discord(_t) <= 60 and "307" in _t, _t)
     # >190 US : les dernieres sont dites « au-dela de 190 ».
     for i in range(200):
         (FAUX / ("us%03d" % i)).mkdir(parents=True, exist_ok=True)
