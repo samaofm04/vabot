@@ -1031,11 +1031,67 @@ def bloc_video_discord(shortcode, fichier, description=None):
     constructions séparées pouvaient diverger sans que rien ne le dise.
     `description` est le texte alternatif de la vidéo (None : aucun).
     """
+    galerie, fichiers = bloc_medias_discord([(fichier, shortcode + '.mp4', description)])
+    return galerie, fichiers[0]
+
+
+def bloc_medias_discord(medias):
+    """Une galerie (Components V2) et ses pièces jointes, pour [(fichier, nom, alt)].
+
+    La brique de bloc_video_discord, partagée avec les cartes de livraison du
+    salon -content des VA (cogs/user.py) : une galerie ne montre une pièce
+    jointe que si `attachment://<nom>` désigne EXACTEMENT le nom donné au
+    fichier ; deux constructions séparées pouvaient diverger en silence.
+    `nom` doit rester dans [a-zA-Z0-9_.-] : Discord réécrit les autres noms
+    au téléversement, et la galerie pointerait alors dans le vide.
+
+    Un fichier absent lève (FileNotFoundError) après avoir refermé ceux déjà
+    ouverts : sans ça, chaque essai raté laissait un descripteur ouvert.
+    """
     import discord
-    filename = shortcode + '.mp4'
-    galerie = discord.ui.MediaGallery(discord.MediaGalleryItem(
-        'attachment://' + filename, description=description))
-    return galerie, discord.File(str(fichier), filename=filename)
+    items, fichiers = [], []
+    try:
+        for fichier, nom, description in medias:
+            items.append(discord.MediaGalleryItem('attachment://' + nom, description=description))
+            fichiers.append(discord.File(str(fichier), filename=nom))
+    except Exception:
+        for f in fichiers:
+            f.close()
+        raise
+    return discord.ui.MediaGallery(*items), fichiers
+
+
+#: Au-delà, un texte « à copier » est coupé à l'affichage et marqué d'un « … ».
+#: Une légende Instagram fait 2200 signes au plus ; un message en composants
+#: n'en porte que 4000 en tout.
+PLAFOND_A_COPIER = 3500
+
+
+def texte_a_copier(texte, plafond=PLAFOND_A_COPIER):
+    """(texte tel qu'il s'affiche dans un bloc de code, coupé ?).
+
+    Un bloc déjà entouré de ``` est déballé ; les ``` restants sont cassés
+    (« ` ` ` ») : ils fermeraient le bloc par le milieu et la suite sortirait
+    interprétée en Markdown — des « _ » de hashtags mangés, justement ce que
+    le bloc évite."""
+    display = str(texte or '').strip()
+    if display.startswith('```\n') and display.endswith('```'):
+        display = display[4:-3].strip()
+    display = display.replace('```', '` ` `')
+    coupe = len(display) > plafond
+    if coupe:
+        display = display[:plafond] + '…'
+    return display, coupe
+
+
+def contenu_a_copier(titre, texte, plafond=PLAFOND_A_COPIER):
+    """« **<titre>** » puis le texte dans un bloc de code, et s'il a été coupé.
+
+    La MÊME mise en forme pour les bangers (« Description à copier ») et les
+    cartes de livraison des VA : le propriétaire copie de l'un comme de
+    l'autre, une coupe différente d'un côté aurait donné deux textes."""
+    display, coupe = texte_a_copier(texte, plafond)
+    return '**' + titre + '**\n```\n' + display + '\n```', coupe
 
 
 def blocs_description_discord(shortcode, description, url, joindre_fichier=True):
@@ -1062,17 +1118,10 @@ def blocs_description_discord(shortcode, description, url, joindre_fichier=True)
     children, files = [], []
     desc = str(description or '')
     if desc:
-        display = desc.strip()
-        if display.startswith('```\n') and display.endswith('```'):
-            display = display[4:-3].strip()
-        display = display.replace('```', '` ` `')
-        suffix = ''
-        plafond = 2700 if joindre_fichier else 3500
-        if len(display) > plafond:
-            display = display[:plafond] + '…'
-            if joindre_fichier:
-                suffix = '\nTexte complet dans le fichier ci-dessous.'
-        children.append(discord.ui.TextDisplay('**Description à copier**\n```\n' + display + '\n```' + suffix))
+        plafond = 2700 if joindre_fichier else PLAFOND_A_COPIER
+        contenu, coupe = contenu_a_copier('Description à copier', desc, plafond)
+        suffix = '\nTexte complet dans le fichier ci-dessous.' if coupe and joindre_fichier else ''
+        children.append(discord.ui.TextDisplay(contenu + suffix))
         if joindre_fichier:
             filename = shortcode + '_description.txt'
             files.append(discord.File(io.BytesIO(desc.encode('utf-8')), filename=filename))

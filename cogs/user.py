@@ -1283,10 +1283,16 @@ class _Progression:
     DELAI_MINI = 4.0
 
     def __init__(self, interaction, total, titre="Génération des reels",
-                 mot="Reel"):
+                 mot="Reel", note=""):
         self.interaction = interaction
         self.total = max(1, int(total or 1))
         self.titre = titre
+        # CE QUE DISAIT L'ANCIEN MESSAGE D'INTRO, EN UNE LIGNE (27/09/2026).
+        # Le proprietaire a fait retirer l'intro (« 5 reel(s) deja montes pour
+        # blonde — je les genere pour toi… ») : la carte suffit. Mais « 3 sur
+        # 5 demandes » ou « 2 ecartes » ne doivent pas disparaitre en silence :
+        # ils restent ici, sur la carte, a chaque mise a jour.
+        self.note = str(note or "").strip()
         # LE MOT DE L ELEMENT. Le corps disait « Reel N/total » en dur :
         # au-dessus d un TEMPLATE ou d un FLASH, il annoncait le mauvais
         # objet. Le titre ne coiffe que l en-tete, pas les lignes.
@@ -1307,6 +1313,8 @@ class _Progression:
         lignes = [self._barre(part) + f"  **{int(round(part * 100))} %**",
                   f"{self.mot} **{min(self.faits + 1, self.total)}/{self.total}**"
                   if not self._fini else f"**{self.total}/{self.total}** — terminé"]
+        if self.note:
+            lignes.append(self.note)
         if detail:
             lignes.append(detail)
         return "\n".join(lignes)
@@ -1382,6 +1390,220 @@ async def _envoyer_texte(interaction, texte, copiable=True):
         return
     for bout in _morceaux_discord(t):
         await interaction.followup.send(bout)
+
+
+# ---------------------------------------------------------------------------
+# LES CARTES DE LIVRAISON (27/09/2026).
+#
+# Un contenu livre au VA (reel, template, trash, flash, caption, brute, story,
+# post, PP...) arrivait en trois ou quatre messages : « 🎞️ REEL MONTÉ 1/5 →
+# à poster sur ton compte n°1 (`x`) / 📥 Poste cette vidéo telle quelle… »,
+# la video, « 📄 DESCRIPTION REEL MONTÉ 1/5 (à coller dans le champ
+# légende) : », puis le texte. Le proprietaire : « ils savent très bien ce
+# qu'ils ont à faire » -- il veut la forme des cartes du salon all-banger :
+# UNE carte par contenu, avec SEULEMENT le rang et la photo + le nom du
+# compte, le media, et le texte a copier.
+#
+# Les VRAIS avertissements restent (montage rate, brute non rendue unique,
+# exemple a ne pas telecharger, legende retenue) : ils evitent une erreur,
+# ce ne sont pas des consignes.
+#
+# UNE fonction pour tous les envois (_livrer_contenu) : une carte par type
+# aurait diverge a la premiere retouche. Les briques (galerie, bloc a copier)
+# sont celles de bangers.py, partagees avec all-banger.
+
+#: Titres des blocs a copier. « Description à copier » est celui des bangers.
+_T_DESC = "Description à copier"
+_T_CAP = "Caption à copier"
+#: Garde son libelle d'avant : c'est la consigne de SON d'une trend, pas une
+#: legende, et le VA la reconnait a ce mot.
+_T_SON = "SON / CONSIGNE"
+
+#: Discord refuse un message en composants au-dela de 4000 signes de texte en
+#: tout, ou de 40 composants.
+_V2_TEXTE_MAX = 4000
+_V2_COMPOSANTS_MAX = 40
+
+#: Liseres de la carte : celui des bangers, rouge quand la carte dit « ne
+#: poste pas » -- un VA qui enchaine cinq cartes doit voir celle-la.
+_COULEUR_CARTE_ALERTE = 0xED4245
+
+#: Ce qu'un nom de piece jointe peut porter sans que Discord le reecrive au
+#: televersement (la galerie « attachment://… » viserait alors un nom absent).
+_PJ_INTERDIT = re.compile(r"[^A-Za-z0-9_.-]")
+
+_ALERTE_EXEMPLE = "👁️ La 2e est l'**EXEMPLE** — ne la télécharge pas."
+_ALERTE_DESC_RETENUE = (
+    "ℹ️ _Pas de description : celle du fichier est la **légende du post "
+    "d'origine** et porte le **@ d'un autre compte**. Un admin la relit sur "
+    "le site (**À relire**) et elle repartira._")
+
+
+def _nom_piece_jointe(nom, repli="media"):
+    """`nom` ramene a [A-Za-z0-9_.-], extension gardee. « ma vidéo (2).MP4 »
+    -> « ma_vid_o_2.mp4 ». Jamais vide : `repli` + extension."""
+    p = Path(str(nom or ""))
+    ext = _PJ_INTERDIT.sub("", p.suffix).lower()[:10]
+    base = re.sub(r"_{2,}", "_", _PJ_INTERDIT.sub("_", p.stem)).strip("._")[:80]
+    return (base or repli) + ext
+
+
+def _entete_carte(rang, total, identite, guild=None) -> str:
+    """« **1/5** · <photo> ibenhaastrup ». La photo est l'emoji de la PP
+    (_identity_emoji_name), LU parmi ceux du serveur : jamais cree ici, on
+    est au milieu d'un envoi. Absent : le nom seul. Sans identite (PP du
+    vivier partage) : le rang seul."""
+    tete = f"**{rang}/{total}**"
+    nom = str(identite or "").strip()
+    if not nom:
+        return tete
+    e = None
+    if guild is not None:
+        try:
+            e = _jb_emojis_presents(guild, [nom]).get(nom)
+        except Exception as ex:                              # noqa: BLE001
+            log.warning("carte : emoji de %r illisible (%s: %s), nom seul",
+                        nom, type(ex).__name__, ex)
+    # Echappe : « lola_rose_x » perdait ses « _ » et partait en italique.
+    nom_md = discord.utils.escape_markdown(nom)
+    return f"{tete} · {e} {nom_md}" if e is not None else f"{tete} · {nom_md}"
+
+
+def _carte_livraison(rang, total, identite, medias, *, guild=None, textes=(),
+                     alertes=(), bloquant=False, quoi="contenu"):
+    """La carte d'UN contenu : (vue LayoutView, fichiers a joindre).
+
+    `medias` : [(chemin, nom de piece jointe)] -- le 1er est le contenu, un
+    2e eventuel est l'exemple. `textes` : [(titre, texte)] a copier, sautes
+    s'ils sont vides. `alertes` : lignes gardees sous l'en-tete.
+
+    Dans l'ordre : l'en-tete (_entete_carte), les alertes, la galerie, puis
+    un separateur et les blocs a copier. Rien d'autre : ni vues (inconnues
+    ici), ni libelle REEL MONTÉ / TEMPLATE, ni consigne.
+
+    Leve si la carte ne tient pas dans les limites de Discord : l'appelant
+    repasse alors par l'ancien envoi, qui ne perd rien."""
+    import bangers as _bg
+    alertes = [str(a).strip() for a in alertes if str(a or "").strip()]
+    textes = [(t, str(x)) for t, x in textes if str(x or "").strip()]
+    enfants = [discord.ui.TextDisplay(_entete_carte(rang, total, identite, guild))]
+    if alertes:
+        enfants.append(discord.ui.TextDisplay("\n".join(alertes)))
+    # Deux pieces jointes du meme nom : la galerie montrerait deux fois la
+    # premiere. Un suffixe les separe.
+    vus, items = set(), []
+    for i, (chemin, nom) in enumerate(medias):
+        n = _nom_piece_jointe(nom)
+        if n in vus:
+            p = Path(n)
+            n = f"{p.stem}_{i + 1}{p.suffix}"
+        vus.add(n)
+        items.append((chemin, n, None))
+    galerie, fichiers = _bg.bloc_medias_discord(items)
+    try:
+        enfants.append(galerie)
+        if textes:
+            enfants.append(discord.ui.Separator())
+        for titre, texte in textes:
+            # Le budget de 4000 signes est celui du message ENTIER. Au-dela du
+            # plafond des bangers (3500), la coupe est celle d'all-banger, et
+            # elle se dit au journal. En deca, un texte qui ne tient pas parce
+            # qu'un AUTRE prend la place n'est pas coupe : la carte est
+            # refusee et l'ancien envoi le livre entier, en plusieurs messages.
+            deja = sum(len(e.content) for e in enfants
+                       if isinstance(e, discord.ui.TextDisplay))
+            reste = _V2_TEXTE_MAX - deja - len(titre) - 16
+            plafond = min(_bg.PLAFOND_A_COPIER, reste)
+            contenu, coupe = _bg.contenu_a_copier(titre, texte, plafond)
+            if coupe and plafond < _bg.PLAFOND_A_COPIER:
+                raise ValueError(f"pas la place pour « {titre} » en entier "
+                                 f"({len(texte)} signes, {reste} disponibles)")
+            if coupe:
+                log.warning("carte %s : « %s » coupe a %d signes sur %d",
+                            quoi, titre, plafond, len(texte))
+            enfants.append(discord.ui.TextDisplay(contenu))
+        vue = discord.ui.LayoutView(timeout=None)
+        vue.add_item(discord.ui.Container(
+            *enfants,
+            accent_colour=_COULEUR_CARTE_ALERTE if bloquant else _bg.COULEUR_FICHE))
+        if vue.content_length() > _V2_TEXTE_MAX:
+            raise ValueError(f"{vue.content_length()} signes > {_V2_TEXTE_MAX}")
+        if vue.total_children_count > _V2_COMPOSANTS_MAX:
+            raise ValueError(f"{vue.total_children_count} composants > {_V2_COMPOSANTS_MAX}")
+    except Exception:
+        for f in fichiers:
+            f.close()
+        raise
+    return vue, fichiers
+
+
+async def _livrer_contenu(interaction, rang, total, identite, medias, *,
+                          textes=(), alertes=(), bloquant=False, quoi="contenu"):
+    """Livre UN contenu au VA : la carte (_carte_livraison), sinon l'ancien
+    envoi (en-tete + fichier(s), puis chaque texte en bloc de code).
+
+    -> « carte » ou « repli ». UN CONTENU N'EST JAMAIS PERDU : une carte
+    refusee (fichier trop gros, refus de Discord, limite depassee) est ecrite
+    au journal et le contenu repart a l'ancienne. Seules deux erreurs
+    remontent, celles que les appelants savaient deja dire au VA :
+    FileNotFoundError (source rangee entre le tirage et l'envoi) et
+    discord.HTTPException (l'ancien envoi refuse lui aussi).
+
+    Passe par interaction.followup : le proxy du serveur US (_JBRedirect) y
+    envoie la carte dans le salon -content, `view=` et `files=` compris."""
+    guild = getattr(interaction, "guild", None)
+    try:
+        vue, fichiers = _carte_livraison(rang, total, identite, medias,
+                                         guild=guild, textes=textes,
+                                         alertes=alertes, bloquant=bloquant,
+                                         quoi=quoi)
+    except FileNotFoundError:
+        raise                   # l'ancien envoi echouerait pareil
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("carte %s non construite (%s: %s) : ancien envoi",
+                    quoi, type(e).__name__, e)
+        vue, fichiers = None, []
+    if vue is not None:
+        try:
+            await interaction.followup.send(view=vue, files=fichiers)
+            return "carte"
+        except Exception as e:                               # noqa: BLE001
+            log.warning("carte %s refusee (%s: %s) : ancien envoi",
+                        quoi, type(e).__name__, e)
+        finally:
+            for f in fichiers:
+                f.close()
+
+    # L'ANCIEN ENVOI, sans ses consignes : le meme en-tete que la carte, le
+    # fichier, puis les textes. Fichiers neufs : discord.py referme ceux d'un
+    # envoi, meme rate.
+    alertes = [str(a).strip() for a in alertes if str(a or "").strip()]
+    tete = "\n".join([_entete_carte(rang, total, identite, guild)] + alertes)
+    ouverts = []
+    try:
+        for chemin, nom in medias:
+            ouverts.append(discord.File(str(chemin), filename=_nom_piece_jointe(nom)))
+    except Exception:
+        for f in ouverts:
+            f.close()
+        raise
+    try:
+        await interaction.followup.send(content=tete, files=ouverts)
+    except discord.HTTPException as e:
+        if len(medias) < 2:
+            raise
+        # L'exemple fait souvent deborder la taille permise : le contenu
+        # seul passe, et l'omission se dit.
+        log.warning("%s : envoi refuse avec l'exemple (%s), repli sans lui", quoi, e)
+        chemin, nom = medias[0]
+        await interaction.followup.send(
+            content=tete + "\n⚠️ *(Exemple omis : trop lourd)*",
+            file=discord.File(str(chemin), filename=_nom_piece_jointe(nom)))
+    for titre, texte in textes:
+        if str(texte or "").strip():
+            await interaction.followup.send(f"**{titre}**")
+            await _envoyer_texte(interaction, texte)
+    return "repli"
 
 
 _ETRANGER = re.compile(r"(?:^|[^\w@])@[A-Za-z0-9._]{3,}|https?://|\bwww\.")
@@ -2195,12 +2417,15 @@ class _RedirectFollowup:
             except Exception as e:                           # noqa: BLE001
                 log.info("message ephemere non remplace (%s: %s), nouveau "
                          "message", type(e).__name__, e)
+        # Une carte de livraison (LayoutView) n'a pas de texte : on ne passe
+        # alors AUCUN `content`, le format « Components V2 » n'en admet pas.
+        args = () if content is None else (content,)
         if not info:
-            # Du CONTENU (video, texte a copier) : jamais remplace par le
-            # message suivant, il part a part.
-            return await self._real.send(content, **kw)
+            # Du CONTENU (video, texte a copier, carte) : jamais remplace par
+            # le message suivant, il part a part.
+            return await self._real.send(*args, **kw)
         kw["wait"] = True
-        m = await self._real.send(content, **kw)
+        m = await self._real.send(*args, **kw)
         self._eph = m
         return m
 
@@ -2431,14 +2656,19 @@ class _SendProxy:
     def __init__(self, channel):
         self._ch = channel
 
-    def _clean(self, kw):
-        return {k: v for k, v in kw.items() if k in self._OK}
+    def _clean(self, kw, content=None):
+        # Pas de `content` du tout quand il n'y en a pas : une carte de
+        # livraison (LayoutView, « Components V2 ») n'a que `view` et `files`.
+        out = {k: v for k, v in kw.items() if k in self._OK}
+        if content is not None:
+            out["content"] = content
+        return out
 
     async def send(self, content=None, **kw):
-        return await self._ch.send(content=content, **self._clean(kw))
+        return await self._ch.send(**self._clean(kw, content))
 
     async def send_message(self, content=None, **kw):
-        return await self._ch.send(content=content, **self._clean(kw))
+        return await self._ch.send(**self._clean(kw, content))
 
     async def defer(self, *a, **k):
         return None
@@ -2703,7 +2933,9 @@ class UserCog(commands.Cog):
         for u in available:
             lines.append(f"• `{u}`")
         lines.append("")
-        lines.append("👉 Copie celui que tu veux et inscris-le sur Instagram.")
+        # Plus de « 👉 Copie celui que tu veux et inscris-le sur Instagram » :
+        # une consigne, que les VA connaissent (27/09/2026). L'avertissement,
+        # lui, reste -- un pseudo peut etre pris entre-temps.
         lines.append("⚠️ Les pseudos sont checkés en temps réel — ils peuvent être pris à tout moment, prends rapidement.")
         await interaction.followup.send("\n".join(lines))
 
@@ -2732,11 +2964,11 @@ class UserCog(commands.Cog):
                     f"Aucun nom pour ton identité `{identity}`.", ephemeral=True,
                 )
             return
+        # Plus de « 👉 Copie celui qui te plait pour le display name
+        # Instagram » : une consigne, que les VA connaissent (27/09/2026).
         lines = [f"✨ **5 noms pour `{identity}` :**", ""]
         for n in names:
             lines.append(f"• `{n}`")
-        lines.append("")
-        lines.append("👉 Copie celui qui te plait pour le display name Instagram.")
         await interaction.response.send_message("\n".join(lines))
 
     @app_commands.command(name="insta", description="Enregistre tes 3 comptes Instagram (handles séparés par espace)")
@@ -2853,8 +3085,11 @@ class UserCog(commands.Cog):
         if len(bios) == 1:
             await interaction.response.send_message(bios[0])
         else:
-            msg = "💬 **Bios pour ton identité** (mets-en une différente par compte) :\n\n" + "\n\n".join(
-                f"**Compte {i}.** {b}" for i, b in enumerate(bios, 1)
+            # Le rang « 1/3 » des cartes de livraison, plus de « Compte 1. »
+            # ni de « (mets-en une différente par compte) » : une consigne,
+            # que les VA connaissent (27/09/2026).
+            msg = "💬 **Bios pour ton identité** :\n\n" + "\n\n".join(
+                f"**{i}/{len(bios)}** {b}" for i, b in enumerate(bios, 1)
             )
             await interaction.response.send_message(msg[:2000])
 
@@ -2893,19 +3128,21 @@ class UserCog(commands.Cog):
                     tmp_path = Path(tmp_dir) / pic.name
                     if await asyncio.to_thread(transform_image, pic, tmp_path, cfg, "profile"):
                         send_path = tmp_path
-                head = (
-                    f"📸 **Photo de profil {i}/{n}** → une différente sur ton **compte n°{i}**"
-                    if n > 1
-                    else "📸 **Photo de profil**"
-                )
+                # La carte de livraison : « 1/3 · <photo> model » et l'image,
+                # plus de « une différente sur ton compte n°X » ni de
+                # « Télécharge et upload » (27/09/2026, _livrer_contenu).
                 try:
-                    await interaction.followup.send(
-                        f"{head}\n*Télécharge et upload sur Instagram.*",
-                        file=discord.File(send_path),
-                    )
+                    await _livrer_contenu(interaction, i, n, identity,
+                                          [(send_path, pic.name)],
+                                          quoi=f"PP {i}/{n}")
                 except FileNotFoundError:
                     # rangee entre le tirage et l'envoi (doublons_vault)
                     await interaction.followup.send(f"⚠️ Photo de profil {i}/{n} : introuvable (déplacée entre-temps), passe à la suivante.")
+                    continue
+                except discord.HTTPException as e:
+                    # Levait au-dessus de la boucle et emportait les PP
+                    # suivantes, sans un mot sur celle-ci.
+                    await interaction.followup.send(f"⚠️ Photo de profil {i}/{n} : envoi impossible : {e}")
                     continue
             finally:
                 if tmp_dir:
@@ -2957,38 +3194,26 @@ class UserCog(commands.Cog):
                     if await asyncio.to_thread(transform_image, image, tmp_path, transform_cfg, kind_target):
                         send_path = tmp_path
                 num = f" {i}/{n}" if n > 1 else ""
-                if n > 1:
-                    intro = (
-                        f"🖼️ **{kind_label.upper()} {i}/{n}** → à poster sur ton **compte n°{i}** (`{identity}`)\n"
-                        f"📥 Télécharge la photo CLEAN."
-                    )
-                else:
-                    intro = f"🖼️ **{kind_label.upper()} — identité `{identity}`**\n📥 Télécharge la photo CLEAN."
+                # UNE carte : la photo (et son exemple), la caption et la
+                # description a copier -- plus de « à poster sur ton compte
+                # n°X » ni de « Télécharge la photo CLEAN » (27/09/2026).
+                # L'exemple reste signale : le poster serait une erreur.
+                medias = [(send_path, image.name)]
                 if example:
-                    intro += "\n👁️ La 2e pièce jointe est l'EXEMPLE — NE PAS la télécharger."
+                    medias.append((example, f"EXEMPLE_{example.name}"))
                 try:
-                    files = [discord.File(send_path, filename=image.name)]
-                    if example:
-                        files.append(discord.File(example, filename=f"EXEMPLE_{example.name}"))
+                    await _livrer_contenu(
+                        interaction, i, n, identity, medias,
+                        textes=[(_T_CAP, caption), (_T_DESC, description)],
+                        alertes=[_ALERTE_EXEMPLE] if example else [],
+                        quoi=f"{kind_label.upper()}{num}")
                 except FileNotFoundError:
                     # rangee entre le tirage et l'envoi (doublons_vault)
                     await interaction.followup.send(f"⚠️ {kind_label.upper()}{num} : introuvable (déplacée entre-temps), passe à la suivante.")
                     continue
-                try:
-                    await interaction.followup.send(content=intro, files=files)
                 except discord.HTTPException as e:
                     await interaction.followup.send(f"Erreur d'envoi : {e}", ephemeral=True)
                     continue
-                if caption:
-                    await interaction.followup.send(
-                        f"📝 **CAPTION {kind_label.upper()}{num}** (à écrire **PAR-DESSUS la photo**) :"
-                    )
-                    await _envoyer_texte(interaction, caption)
-                if description:
-                    await interaction.followup.send(
-                        f"📄 **DESCRIPTION {kind_label.upper()}{num}** (à coller dans le **champ légende**) :"
-                    )
-                    await _envoyer_texte(interaction, description)
             finally:
                 if tmp_dir:
                     try:
@@ -3056,27 +3281,21 @@ class UserCog(commands.Cog):
                     tmp_path = Path(tmp_dir) / image.name
                     if await asyncio.to_thread(transform_image, image, tmp_path, cfg, "storycta"):
                         send_path = tmp_path
-                head = (
-                    f"📲 **STORY CTA {i}/{n}** → pour ton **compte n°{i}** (`{identity}`)"
-                    if n > 1
-                    else f"📲 **STORY CTA — identité `{identity}`**"
-                )
-                intro = (
-                    f"{head}\n"
-                    f"📥 Télécharge la photo, écris la caption dessus en story.\n\n"
-                    f"🕖 **À POSTER LE SOIR ENTRE 19H ET 23H** — c'est le créneau "
-                    f"où tes clics convertissent le mieux 💰"
-                )
+                # UNE carte : la photo et la caption a copier. Plus de « pour
+                # ton compte n°X », de « Télécharge la photo, écris la caption
+                # dessus » ni du rappel « à poster le soir entre 19h et 23h » :
+                # des consignes, que les VA connaissent (27/09/2026).
                 try:
-                    await interaction.followup.send(content=intro, file=discord.File(send_path))
+                    await _livrer_contenu(interaction, i, n, identity,
+                                          [(send_path, image.name)],
+                                          textes=[(_T_CAP, caption)],
+                                          quoi=f"STORY CTA {i}/{n}")
                 except FileNotFoundError:
                     await interaction.followup.send(f"⚠️ STORY CTA {i}/{n} : introuvable (déplacée entre-temps), passe à la suivante.")
                     continue
                 except discord.HTTPException as e:
                     await interaction.followup.send(f"Erreur d'envoi : {e}", ephemeral=True)
                     continue
-                if caption:
-                    await _envoyer_texte(interaction, caption)
             finally:
                 if tmp_dir:
                     try:
@@ -3086,22 +3305,26 @@ class UserCog(commands.Cog):
                         pass
 
     async def _deliver_reels_loop(self, interaction, reels, identity, label="REEL", delete_after=False):
-        """Envoie chaque reel [(video, caption, desc, example)] : video (+exemple) avec
-        fallback fichier trop lourd, puis CAPTION et DESCRIPTION. `label` = REEL/BANGER.
+        """Envoie chaque reel [(video, caption, desc, example)] en UNE carte (video
+        + exemple, caption et description a copier ; _livrer_contenu, qui retombe
+        sur l'ancien envoi si la carte est refusee). `label` = REEL/BANGER, pour
+        les messages d'erreur.
         `delete_after` supprime la source (JAMAIS pour les bangers). Interaction deja defer()."""
         total = len(reels)
         for idx, (video, caption, description, example) in enumerate(reels, start=1):
-            intro = (
-                f"🎬 **{label} {idx}/{total}** → à poster sur ton **compte n°{idx}** (`{identity}`)\n"
-                f"📥 Télécharge la vidéo CLEAN."
-            )
+            # UNE carte : la video (et son exemple), la caption et la
+            # description a copier. Plus de « REEL 1/3 → à poster sur ton
+            # compte n°1 » ni de « Télécharge la vidéo CLEAN » (27/09/2026).
+            # Le label ne sert plus qu'aux messages d'erreur.
+            medias = [(video, video.name)]
             if example:
-                intro += "\n👁️ La 2e pièce jointe est l'EXEMPLE — NE PAS la télécharger."
-            video_to_send = video
+                medias.append((example, f"EXEMPLE_{example.name}"))
             try:
-                files = [discord.File(video_to_send, filename=video.name)]
-                if example:
-                    files.append(discord.File(example, filename=f"EXEMPLE_{example.name}"))
+                await _livrer_contenu(
+                    interaction, idx, total, identity, medias,
+                    textes=[(_T_CAP, caption), (_T_DESC, description)],
+                    alertes=[_ALERTE_EXEMPLE] if example else [],
+                    quoi=f"{label} {idx}/{total}")
             except FileNotFoundError:
                 # Rangee entre le tirage et l'envoi (doublons_vault range les
                 # copies exactes) : on le dit et on passe a la suivante, au
@@ -3109,31 +3332,12 @@ class UserCog(commands.Cog):
                 await interaction.followup.send(
                     f"⚠️ {label} {idx}: vidéo introuvable (déplacée entre-temps), passe à la suivante.")
                 continue
-            try:
-                await interaction.followup.send(content=intro, files=files)
             except discord.HTTPException as e:
-                if example and len(files) == 2:
-                    try:
-                        await interaction.followup.send(
-                            content=intro + "\n\n⚠️ *(Vidéo exemple omise car trop lourde)*",
-                            file=discord.File(video_to_send, filename=video.name),
-                        )
-                    except (discord.HTTPException, FileNotFoundError):
-                        await interaction.followup.send(
-                            f"⚠️ {label} {idx}: impossible d'envoyer (trop lourd): {e}")
-                        continue
-                else:
-                    await interaction.followup.send(
-                        f"⚠️ {label} {idx}: impossible d'envoyer (trop lourd): {e}")
-                    continue
-            if caption:
+                # La carte, puis l'ancien envoi (avec, puis sans l'exemple)
+                # ont ete refuses : _livrer_contenu l'a ecrit au journal.
                 await interaction.followup.send(
-                    f"📝 **CAPTION {label} {idx}** (à mettre **PAR-DESSUS la vidéo** dans l'éditeur Insta) :")
-                await _envoyer_texte(interaction, caption)
-            if description:
-                await interaction.followup.send(
-                    f"📄 **DESCRIPTION {label} {idx}** (à coller dans le **champ légende** du post) :")
-                await _envoyer_texte(interaction, description)
+                    f"⚠️ {label} {idx}: impossible d'envoyer (trop lourd): {e}")
+                continue
             if delete_after:
                 # a la corbeille avec tous ses voisins, et retenue : effacee,
                 # la veille Drive la rapatriait dans la minute et le reel
@@ -3149,9 +3353,12 @@ class UserCog(commands.Cog):
                                      prefixe_fichier="reel_monte", brutes_dir=None,
                                      famille="", suivi=None):
         """Génère À LA DEMANDE une variante MONTÉE (texte incrusté) du reel `video` via le
-        pipeline Noctus (draft = son .montage.json), puis l'envoie à poster telle quelle +
-        la description. Chaque appel = une variante UNIQUE (uniquification iPhone). Lent
-        (~15-30s) -> interaction déjà defer()."""
+        pipeline Noctus (draft = son .montage.json), puis l'envoie en UNE carte (vidéo +
+        description à copier, _livrer_contenu). Chaque appel = une variante UNIQUE
+        (uniquification iPhone). Lent (~15-30s) -> interaction déjà defer().
+
+        `label` et `emoji` ne s'affichent plus sur la carte (27/09/2026) : `label`
+        nomme encore l'élément dans les messages d'erreur."""
         import asyncio
         import noctus_web
 
@@ -3282,26 +3489,41 @@ class UserCog(commands.Cog):
         # telle quelle » serait alors un mauvais conseil. Le moteur le sait
         # depuis toujours et l'ecrit dans son rapport ; c'est la premiere fois
         # qu'on l'ecoute.
-        _tete = (f"{emoji} **{label} {idx}/{total}** → à poster sur ton "
-                 f"**compte n°{idx}** (`{identity}`)")
+        #
+        # UNE CARTE (27/09/2026) : « 1/5 · <photo> model », la video, la
+        # description a copier. Plus de « REEL MONTÉ 1/5 → à poster sur ton
+        # compte n°1 » ni de « Poste cette vidéo telle quelle » : le VA le sait.
+        # Le « NE POSTE PAS » du repli reste, en rouge : il evite une erreur.
+        alertes, textes = [], []
         if _rapport.get("repli"):
-            intro = (
-                _tete + "\n"
-                "⚠️ **NE POSTE PAS cette vidéo telle quelle.** Le montage n'a pas pu se faire : "
-                + (_rapport.get("message") or "aucune vidéo brute utilisable") + ".\n"
-                "Ce n'est pas la vidéo de la model — signale-le avant de publier."
-            )
-        else:
-            intro = (
-                _tete + "\n"
-                "📥 Poste cette vidéo **telle quelle** — le texte est **déjà incrusté** dessus."
-            )
+            alertes.append(
+                "⚠️ **NE POSTE PAS cette vidéo telle quelle** : le montage n'a pas pu se faire ("
+                + (_rapport.get("message") or "aucune vidéo brute utilisable")
+                + "). Ce n'est pas la vidéo de la model — signale-le avant de publier.")
+        # Pas de legende derriere un « ne poste pas » : la carte vient
+        # d'interdire la publication, lui donner de quoi la remplir decrirait
+        # la marche a suivre de ce qu'on interdit.
+        elif description:
+            textes.append((_T_DESC, description))
+        elif desc_retenue(video):
+            # RETENUE, PAS PERDUE. Se taire ferait croire que ce montage n a
+            # pas de legende ; le VA en inventerait une. On dit qu elle
+            # existe, pourquoi elle ne part pas, et qui peut la debloquer.
+            alertes.append(_ALERTE_DESC_RETENUE)
         try:
+            await _livrer_contenu(
+                interaction, idx, total, identity,
+                [(out, f"{prefixe_fichier}_{idx}.mp4")],
+                textes=textes, alertes=alertes,
+                bloquant=bool(_rapport.get("repli")),
+                quoi=f"{label} {idx}/{total}")
+        except (discord.HTTPException, FileNotFoundError) as e:
+            # FileNotFoundError : la video produite (ou sortie de la reserve) a
+            # disparu avant l'envoi. _livrer_contenu la laisse remonter ; sans
+            # ce cas, elle coupait le lot et figeait la barre.
+            _pq = "introuvable" if isinstance(e, FileNotFoundError) else "trop lourd"
             await interaction.followup.send(
-                content=intro, file=discord.File(str(out), filename=f"{prefixe_fichier}_{idx}.mp4"))
-        except discord.HTTPException as e:
-            await interaction.followup.send(
-                f"⚠️ {label} {idx}/{total} : envoi impossible (trop lourd) : {e}")
+                f"⚠️ {label} {idx}/{total} : envoi impossible ({_pq}) : {e}")
             if suivi is not None:
                 await suivi.un_de_plus()
             return
@@ -3317,23 +3539,6 @@ class UserCog(commands.Cog):
                     pass
         if suivi is not None:
             await suivi.un_de_plus()
-        # Pas de legende derriere un « ne poste pas ». Le message precedent
-        # vient d'interdire la publication ; enchainer sur « a coller dans le
-        # champ legende » decrit la marche a suivre de ce qu'on interdit, et
-        # c'est la consigne la plus recente qui est suivie.
-        if description and not _rapport.get("repli"):
-            await interaction.followup.send(
-                f"📄 **DESCRIPTION {label} {idx}/{total}** (à coller dans le **champ légende**) :")
-            await _envoyer_texte(interaction, description)
-        elif desc_retenue(video) and not _rapport.get("repli"):
-            # RETENUE, PAS PERDUE. Se taire ferait croire que ce montage n a
-            # pas de legende ; le VA en inventerait une. On dit qu elle
-            # existe, pourquoi elle ne part pas, et qui peut la debloquer.
-            await interaction.followup.send(
-                f"ℹ️ _Pas de description pour ce {label.lower()} : "
-                "celle du template est la **légende du post d'origine** et "
-                "porte le **@ d'un autre compte**. Un admin la relit sur le "
-                "site (**À relire**) et elle repartira._")
 
     async def _send_banger_reels(self, interaction):
         """Bouton '💥 Reels Banger' : envoie au VA ses reels marques ⭐ banger (dans la
@@ -3354,10 +3559,12 @@ class UserCog(commands.Cog):
             return
         await interaction.response.defer()
         total = len(reels)
+        # Sans l'explication « CAPTION = par-dessus · DESCRIPTION = légende »
+        # (27/09/2026) : les VA la connaissent. La regle anti-doublon reste,
+        # elle evite un shadowban.
         await interaction.followup.send(
-            f"💥 **{total} REEL(S) BANGER pour `{identity}`** — tes meilleurs, à reposter ! 🔥\n\n"
-            f"🚨 **1 reel différent par compte.**\n"
-            f"📝 **CAPTION** = par-dessus la vidéo · **DESCRIPTION** = dans la légende du post.")
+            f"💥 **{total} REEL(S) BANGER pour `{identity}`** — tes meilleurs, à reposter ! 🔥\n"
+            f"🚨 **1 reel différent par compte.**")
         await self._deliver_reels_loop(interaction, reels, identity, label="BANGER", delete_after=False)
 
     @staticmethod
@@ -3374,6 +3581,16 @@ class UserCog(commands.Cog):
         return (f"\n\u26a0\ufe0f Tu en as demande **{demande}**, il en part "
                 f"**{total}** : c'est tout ce que permet le stock ({quoi}). "
                 f"Au-dela, la meme video repartirait deux fois.")
+
+    @staticmethod
+    def _note_courte(demande, total, quoi, *autres):
+        """La ligne de la carte de progression qui remplace l'intro : le
+        plafond du stock (« 3 sur 5 demandés (…) ») et les ecartes. Vide si
+        rien n'est a dire."""
+        bouts = [a for a in autres if a]
+        if demande and total < demande:
+            bouts.append(f"{total} sur {demande} demandés ({quoi})")
+        return "ℹ️ " + " · ".join(bouts) if bouts else ""
 
     async def _send_caption_bangers(self, interaction, nombre=3):
         """Bouton '⭐ Caption Banger' : les captions marquees favorites sur le site.
@@ -3472,18 +3689,15 @@ class UserCog(commands.Cog):
         # caption ne redonne pas la meme video : c'est le texte incruste qui
         # change. Ce qu'il faut eviter, c'est la meme PAIRE deux fois.
         total = min(nombre, len(utiles) * len(brutes))
-        entete = (f"⭐ **{total} VIDÉO(S) À CAPTION BANGER pour `{identity}`** — "
-                  f"tes meilleures captions, déjà incrustées.\n"
-                  f"⏳ Je les génère (≈15-30s chacune). Poste **tel quel**.")
-        if vides:
-            entete += f"\n{vides} caption(s) favorite(s) écartée(s) : texte vide."
-        entete += self._note_plafond(
-            nombre, total, f"{len(utiles)} caption(s) ⭐, {len(brutes)} brute(s) ⭐")
-        await interaction.followup.send(entete)
+        # Plus de message d'intro (27/09/2026) : la carte de progression
+        # suffit, et porte en une ligne ce que l'intro disait d'utile.
+        _note = self._note_courte(
+            nombre, total, f"{len(utiles)} caption(s) ⭐ × {len(brutes)} brute(s) ⭐",
+            f"{vides} caption(s) vide(s) écartée(s)" if vides else "")
 
         used_b, used_c = set(), set()
         suivi = _Progression(interaction, total, "Captions incrustées",
-                             mot="Caption")
+                             mot="Caption", note=_note)
         await suivi.demarrer()
         for idx in range(1, total + 1):
             cap = _pick_fresh(utiles, used_c, key=lambda c: c.get("id"))
@@ -3610,17 +3824,12 @@ class UserCog(commands.Cog):
         # Le plafond par les combinaisons REELLES reste : sans lui, 1 brute +
         # 1 caption sortiraient sept fois la meme video.
         total = min(nombre, len(brutes) * len(caps))
-        await interaction.followup.send(
-            f"🎬 **{total} MONTAGE(S) BANGER pour `{identity}`** — tes meilleures "
-            f"brutes avec tes meilleures captions.\n"
-            f"⏳ Je les génère (≈15-30s chacun). Le texte est **incrusté** : "
-            f"poste **tel quel**."
-            + self._note_plafond(
-                nombre, total,
-                f"{len(brutes)} brute(s) × {len(caps)} caption(s)"))
+        # Plus de message d'intro (27/09/2026) : la carte de progression suffit.
         used_b, used_c = set(), set()
         suivi = _Progression(interaction, total, "Montages caption + brut",
-                             mot="Montage")
+                             mot="Montage", note=self._note_courte(
+                                 nombre, total,
+                                 f"{len(brutes)} brute(s) × {len(caps)} caption(s)"))
         await suivi.demarrer()
         for idx in range(1, total + 1):
             cap = _pick_fresh(caps, used_c, key=lambda c: c.get("id"))
@@ -3719,18 +3928,14 @@ class UserCog(commands.Cog):
         # trois, sans un mot. Le plafond par les combinaisons reelles
         # reste : au-dela, _pick_fresh recycle et on republie le meme.
         total = min(nombre, len(templates) * len(brutes))
-        intro = (f"🎵 **{total} TEMPLATE pour `{identity}`** — ton template "
-                 + ("étoilé, monté avec ta brute étoilée." if brute_favorite else "étoilé, monté avec une de tes brutes.") + "\n"
-                 f"⏳ Je les génère (≈15-30s chacun).")
-        if sans_coupe:
-            intro += (f"\nℹ️ {sans_coupe} template(s) étoilé(s) écarté(s) : "
-                      f"pas de point de coupe.")
-        intro += self._note_plafond(
-            nombre, total, f"{len(templates)} template(s) × {len(brutes)} brute(s)")
-        await interaction.followup.send(intro)
+        # Plus de message d'intro (27/09/2026) : la carte de progression suffit.
         used_t, used_b = set(), set()
         suivi = _Progression(interaction, total, "Assemblage template + brut",
-                             mot="Template")
+                             mot="Template", note=self._note_courte(
+                                 nombre, total,
+                                 f"{len(templates)} template(s) × {len(brutes)} brute(s)",
+                                 f"{sans_coupe} template(s) sans point de coupe écarté(s)"
+                                 if sans_coupe else ""))
         await suivi.demarrer()
         for idx in range(1, total + 1):
             tpl, draft = _pick_fresh(templates, used_t, key=lambda t: str(t[0]))
@@ -3867,14 +4072,13 @@ class UserCog(commands.Cog):
                    else f"TEMPLATE {haut} BANGER" if exiger_banger
                    else f"TEMPLATE {haut}")
         avec = " avec ta brute ⭐" if brute_favorite else ""
-        intro = (f"{logo} **{total} {libelle} pour `{identity}`** — ton {quoi}, "
-                 f"monté{avec}.\n⏳ Je les génère (~15-30s chacun).")
-        intro += "".join("\n" + n for n in notes)
-        intro += self._note_plafond(
+        # Plus de message d'intro (27/09/2026) : la carte de progression porte
+        # les ecartes (`notes`) et le plafond, en une ligne.
+        _note = self._note_courte(
             nombre, total,
             f"{len(templates)} montage(s) {logo}"
-            + (f" × {len(brutes)} brute(s)" if brute_favorite else ""))
-        await interaction.followup.send(intro)
+            + (f" × {len(brutes)} brute(s)" if brute_favorite else ""),
+            *[str(n).lstrip("ℹ️⚠️ \ufe0f").strip() for n in notes])
 
         # La famille de reserve : la meme regle que noctus_reserve.
         # FAMILLE_PAR_ACTION (templateflashbrut -> flash_brut, brutflash ->
@@ -3887,7 +4091,8 @@ class UserCog(commands.Cog):
                    else f"{cle}_banger" if exiger_banger
                    else cle)
         used_t, used_b = set(), set()
-        suivi = _Progression(interaction, total, f"Montages {court}", mot=court)
+        suivi = _Progression(interaction, total, f"Montages {court}", mot=court,
+                             note=_note)
         await suivi.demarrer()
         for idx in range(1, total + 1):
             tpl, draft = _pick_fresh(templates, used_t, key=lambda t: str(t[0]))
@@ -3959,10 +4164,10 @@ class UserCog(commands.Cog):
         await interaction.response.defer()
         n = len(videos)
         suffixe = f" — {famille}" if famille else ""
+        # Sans « poste-la telle quelle, ne la remonte pas » (27/09/2026) :
+        # « PRÊTE » le dit, et les VA le savent.
         entete = (f"⭐⭐⭐ **{n} TREND{'S' if n > 1 else ''} PRÊTE{'S' if n > 1 else ''} "
-                  f"pour `{identity}`**{suffixe}\n"
-                  f"🔥 Le travail est **déjà fait** : poste-la telle quelle, "
-                  f"ne la remonte pas, ne réécris pas le texte.")
+                  f"pour `{identity}`**{suffixe}")
         await self._envoyer_brutes_meta(interaction, videos, identity,
                                         "TREND", entete, avec_texte=True)
 
@@ -4080,17 +4285,25 @@ class UserCog(commands.Cog):
             return
         await interaction.response.defer()
         total = min(len(brutes), 5)
+        # Plus du mode d'emploi « vidéo nue · caption à écrire par-dessus »
+        # (27/09/2026) : chaque carte porte sa caption a copier.
         await interaction.followup.send(
-            f"📝 **{total} BRUTE(S) + CAPTION BANGER pour `{identity}`**\n"
-            f"🎥 La vidéo est **nue** · 📝 la caption est à **écrire par-dessus** "
-            f"dans l'éditeur Instagram.")
+            f"📝 **{total} BRUTE(S) + CAPTION BANGER pour `{identity}`**")
         used_c = set()
         for idx, v in enumerate(brutes[:total], start=1):
             cap = _pick_fresh(caps, used_c, key=lambda c: c.get("id"))
+            # UNE carte : la brute, la caption et la description a copier.
+            # Plus de « (à mettre par-dessus la vidéo) » ni de « (champ
+            # légende) » (27/09/2026). Les textes ne sont plus coupes a 1800
+            # signes sans rien dire : la carte a son propre budget, et l'ancien
+            # envoi decoupe en plusieurs messages.
+            txt = str((cap or {}).get("text") or "").strip()
+            desc = str((cap or {}).get("desc") or "").strip()
             try:
-                await interaction.followup.send(
-                    content=f"🎥 **BRUTE {idx}/{total}** (`{identity}`)",
-                    file=discord.File(str(v), filename=v.name))
+                await _livrer_contenu(interaction, idx, total, identity,
+                                      [(v, v.name)],
+                                      textes=[(_T_CAP, txt), (_T_DESC, desc)],
+                                      quoi=f"BRUTE {idx}/{total}")
             except FileNotFoundError:
                 await interaction.followup.send(f"⚠️ BRUTE {idx}/{total} : introuvable (déplacée entre-temps), passe à la suivante.")
                 continue
@@ -4098,16 +4311,6 @@ class UserCog(commands.Cog):
                 await interaction.followup.send(
                     f"⚠️ BRUTE {idx}/{total} : envoi impossible (trop lourde) : {e}")
                 continue
-            txt = str((cap or {}).get("text") or "").strip()
-            if txt:
-                await interaction.followup.send(
-                    f"📝 **CAPTION {idx}/{total}** (à mettre **par-dessus la "
-                    f"vidéo**) :\n```\n{txt[:1800]}\n```")
-            desc = str((cap or {}).get("desc") or "").strip()
-            if desc:
-                await interaction.followup.send(
-                    f"📄 **DESCRIPTION {idx}/{total}** (champ légende) :\n"
-                    f"```\n{desc[:1800]}\n```")
 
     # Les deux actions existent AUSSI en commandes, pour une raison precise :
     # le panneau du serveur US ne sait declencher que des app_commands — il
@@ -4218,18 +4421,13 @@ class UserCog(commands.Cog):
         transform_cfg = load_transform_config()
         total = len(reels)
 
-        # Message d'intro CLAIR : 1 reel different par compte + explication caption/description
+        # L'intro ne garde que la regle anti-doublon, qui evite un shadowban.
+        # Plus de « Poste REEL 1 sur ton compte 1… » ni du mode d'emploi
+        # CAPTION / DESCRIPTION (27/09/2026) : « ils savent très bien ce qu'ils
+        # ont à faire », et chaque carte porte ses deux textes a copier.
         intro_global = (
-            f"🎬 **{total} reels pour `{identity}` — {total} comptes**\n\n"
-            f"🚨 **RÈGLE : 1 reel différent par compte.**\n"
-            f"Poste **REEL 1** sur ton **compte 1**, **REEL 2** sur le **compte 2**, "
-            f"**REEL 3** sur le **compte 3**.\n"
-            f"⚠️ NE POSTE JAMAIS le même reel sur 2 comptes → duplicate content = shadowban.\n\n"
-            f"📝 **Pour chaque reel je vais t'envoyer 2 textes :**\n"
-            f"• **CAPTION** = le texte à écrire **PAR-DESSUS la vidéo** "
-            f"(dans l'éditeur Insta, outil texte, en overlay sur le reel)\n"
-            f"• **DESCRIPTION** = le texte à coller dans **le champ légende** du post "
-            f"(en bas, là où Instagram demande 'Écrire une légende...')"
+            f"🎬 **{total} reels pour `{identity}`**\n"
+            f"🚨 **1 reel différent par compte** — le même sur 2 comptes = shadowban."
         )
         await interaction.followup.send(intro_global)
 
@@ -4289,20 +4487,13 @@ class UserCog(commands.Cog):
             return
         await interaction.response.defer()
         total = len(ready)
-        await interaction.followup.send(
-            f"🎞️ **{total} reel(s) déjà monté(s) pour `{identity}`** — je les **génère pour toi** "
-            f"(≈15-30s chacun ⏳). Chaque reel est **unique** — jamais le même sur 2 comptes.\n"
-            f"✅ Texte **déjà incrusté** : poste **tel quel** + la **DESCRIPTION** en légende."
-        )
-        if total < nombre:
-            await interaction.followup.send(
-                f"ℹ️ Seulement **{total}** reel(s) monté(s) approuvé(s) pour `{identity}` "
-                f"(tu en as demandé {nombre})."
-            )
-        # LA BARRE. Entre ce message et le premier fichier il se passe une
-        # minute pendant laquelle le salon ne disait RIEN : le VA relancait la
-        # commande, ce qui refabriquait tout et allongeait encore l attente.
-        suivi = _Progression(interaction, total, "Génération des reels")
+        # Plus de message d'intro (27/09/2026, « génération des reels, reel
+        # 1/5, rendu en cours, ça suffit largement »). LA BARRE reste : entre
+        # le clic et le premier fichier il se passe une minute, et sans elle
+        # le VA relancait la commande.
+        suivi = _Progression(interaction, total, "Génération des reels",
+                             note=self._note_courte(nombre, total,
+                                                    "reels montés approuvés"))
         await suivi.demarrer()
         for idx, (video, draft, description) in enumerate(ready, start=1):
             await self._gen_and_send_montaged(
@@ -4390,19 +4581,35 @@ class UserCog(commands.Cog):
         with _tmp.TemporaryDirectory(prefix="brutmeta_") as _d:
             for idx, v in enumerate(videos, start=1):
                 fichier, _reecrit, _raison = await brute_a_envoyer(v, _d, identity)
-                tete = f"🎥 **{label} {idx}/{total}** (`{identity}`)"
+                alertes, textes = [], []
                 # En temps normal le VA ne lit RIEN sur l uniquification : le
                 # reglage vit sur le site, c est l affaire de l admin. Mais
                 # quand elle est demandee et qu elle ECHOUE, il doit le savoir :
                 # il poste la brute telle quelle, donc il publierait un doublon
                 # sans s en douter. Se taire ici lui coute un compte.
                 if _raison:
-                    tete += ("\n⚠️ _Celle-ci n a **pas** pu etre rendue unique — "
-                             "ne la poste pas telle quelle, previens un admin._")
+                    alertes.append("⚠️ _Celle-ci n a **pas** pu etre rendue unique — "
+                                   "ne la poste pas telle quelle, previens un admin._")
+                # Le texte voisin de la video, quand elle en a un. Pour une
+                # TREND c est la consigne qui compte — le son a utiliser — et
+                # son bloc de code la rend copiable d un doigt sur mobile.
+                if avec_texte:
+                    _cap, _desc, _ = _video_meta(v)
+                    textes.append((_T_SON, _cap))
+                    if _desc:
+                        textes.append((_T_DESC, _desc))
+                    elif desc_retenue(v):
+                        # RETENUE, PAS ABSENTE. Se taire ferait croire que
+                        # ce fichier n a pas de legende.
+                        alertes.append(_ALERTE_DESC_RETENUE)
+                # UNE carte (27/09/2026) : « 1/3 · <photo> model », la video,
+                # les textes a copier. Plus de « VIDÉO BRUTE 1/3 » ni de
+                # « (champ légende) », et plus de coupe muette a 1800 signes.
                 try:
-                    await interaction.followup.send(
-                        content=tete,
-                        file=discord.File(str(fichier), filename=v.name))
+                    await _livrer_contenu(interaction, idx, total, identity,
+                                          [(fichier, v.name)], textes=textes,
+                                          alertes=alertes,
+                                          quoi=f"{label} {idx}/{total}")
                 except FileNotFoundError:
                     await interaction.followup.send(f"⚠️ {label} {idx}/{total} : introuvable (déplacée entre-temps), passe à la suivante.")
                     continue
@@ -4411,27 +4618,6 @@ class UserCog(commands.Cog):
                         f"⚠️ {label} {idx}/{total} : envoi impossible "
                         f"(trop lourde pour Discord) : {e}")
                     continue
-                # Le texte voisin de la video, quand elle en a un. Pour une
-                # TREND c est la consigne qui compte — le son a utiliser — et
-                # l envoyer separement la rend copiable d un doigt sur mobile.
-                if avec_texte:
-                    _cap, _desc, _ = _video_meta(v)
-                    if _cap:
-                        await interaction.followup.send(
-                            "🎵 **SON / CONSIGNE** :\n```\n"
-                            + str(_cap)[:1800] + "\n```")
-                    if _desc:
-                        await interaction.followup.send(
-                            "📄 **DESCRIPTION** (champ légende) :\n```\n"
-                            + str(_desc)[:1800] + "\n```")
-                    elif desc_retenue(v):
-                        # RETENUE, PAS ABSENTE. Se taire ferait croire que
-                        # ce fichier n a pas de legende.
-                        await interaction.followup.send(
-                            "ℹ️ _Pas de description ici : celle du fichier est "
-                            "la **legende du post d'origine** et porte le **@ "
-                            "d'un autre compte**. Un admin la relit sur le site "
-                            "(**A relire**)._")
 
     @app_commands.command(
         name="reelcaption",
@@ -4479,9 +4665,7 @@ class UserCog(commands.Cog):
             return
         await interaction.response.defer()
         total = min(nombre, len(brutes) * 3)
-        await interaction.followup.send(
-            f"💬 **{total} reel(s) caption pour `{identity}`** — je les génère "
-            f"(≈15-30s chacun ⏳). Le texte est **incrusté** : poste **tel quel**.")
+        # Plus de message d'intro (27/09/2026) : la carte de progression suffit.
         used_b, used_c = set(), set()
         suivi = _Progression(interaction, total, "Captions incrustées",
                              mot="Caption")
@@ -4496,12 +4680,13 @@ class UserCog(commands.Cog):
                                     identity, label="REEL CAPTION", emoji="💬",
                                     prefixe_fichier="reel_caption", famille="",
                                     suivi=None):
-        """Génère UNE vidéo brute + caption incrustée puis l'envoie (+ description).
+        """Génère UNE vidéo brute + caption incrustée puis l'envoie en UNE carte
+        (vidéo + description à copier, _livrer_contenu).
 
-        `label` sert au bouton « Montage Banger », qui emprunte exactement cette
-        recette : sans lui, le VA lirait « REEL CAPTION » sur un contenu qu'on
-        vient de lui annoncer comme un montage banger. Le défaut laisse
-        /reelcaption strictement inchangé.
+        `label` et `emoji` ne s'affichent plus sur la carte (27/09/2026, « ils
+        savent très bien ce qu'ils ont à faire ») : `label` nomme encore
+        l'élément dans les messages d'erreur (« MONTAGE BANGER 2/3 : génération
+        impossible »), où il dit à l'admin quel bouton a échoué.
         """
         import asyncio
         import noctus_web
@@ -4595,16 +4780,22 @@ class UserCog(commands.Cog):
         if suivi is not None and de_la_reserve is not None:
             await suivi.poser(suivi.part_courante(100), "servi depuis la réserve",
                               force=True)
-        intro = (f"{emoji} **{label} {idx}/{total}** → à poster sur ton **compte n°{idx}** "
-                 f"(`{identity}`)\n📥 Poste cette vidéo **telle quelle** — la caption est "
-                 f"**déjà écrite** dessus.")
+        # UNE CARTE (27/09/2026) : « 1/5 · <photo> model », la video, la
+        # description a copier. Plus de « REEL CAPTION 1/5 → à poster sur ton
+        # compte n°1 » ni de « Poste cette vidéo telle quelle » : le VA le sait.
         try:
+            await _livrer_contenu(
+                interaction, idx, total, identity,
+                [(fichier, f"{prefixe_fichier}_{idx}.mp4")],
+                textes=[(_T_DESC, str(cap.get("desc") or "").strip())],
+                quoi=f"{label} {idx}/{total}")
+        except (discord.HTTPException, FileNotFoundError) as e:
+            # FileNotFoundError : la video produite (ou sortie de la reserve) a
+            # disparu avant l'envoi. _livrer_contenu la laisse remonter ; sans
+            # ce cas, elle coupait le lot et figeait la barre.
+            _pq = "introuvable" if isinstance(e, FileNotFoundError) else "trop lourd"
             await interaction.followup.send(
-                content=intro,
-                file=discord.File(str(fichier), filename=f"{prefixe_fichier}_{idx}.mp4"))
-        except discord.HTTPException as e:
-            await interaction.followup.send(
-                f"⚠️ {label} {idx}/{total} : envoi impossible (trop lourd) : {e}")
+                f"⚠️ {label} {idx}/{total} : envoi impossible ({_pq}) : {e}")
             if suivi is not None:
                 await suivi.un_de_plus()
             return
@@ -4622,11 +4813,6 @@ class UserCog(commands.Cog):
                     pass
         if suivi is not None:
             await suivi.un_de_plus()
-        desc = str(cap.get("desc") or "").strip()
-        if desc:
-            await interaction.followup.send(
-                f"📄 **DESCRIPTION {label} {idx}/{total}** (à coller dans le **champ légende**) :")
-            await _envoyer_texte(interaction, desc)
 
     async def cog_load(self):
         # Vues persistantes : les boutons des menus marchent meme apres un
@@ -7034,28 +7220,32 @@ class ChoixCaptionView(discord.ui.View):
         # donc sortir avec la meme empreinte reecrite. Elle partait telle
         # quelle depuis le disque -- l uniquification etait allumee et ne
         # s appliquait pas ici, sans un mot.
+        # UNE carte (27/09/2026) : « 1/1 · <photo> model », la brute, la
+        # description a copier. Plus de « BRUTE CHOISIE — sans montage » ni de
+        # « (champ légende) » ; la carte est publique, comme l'etait la video
+        # (followup.send l'est par defaut), le menu qui l'a demandee ne l'est pas.
         import tempfile as _tmp
         try:
             with _tmp.TemporaryDirectory(prefix="brutmeta_") as _d:
                 fichier, _reecrit, _raison = await brute_a_envoyer(
                     self.video, _d, self.identity)
-                _av = ("\n⚠️ _Elle n a **pas** pu etre rendue unique — ne la "
+                _av = ("⚠️ _Elle n a **pas** pu etre rendue unique — ne la "
                        "poste pas telle quelle, previens un admin._"
                        if _raison else "")
-                await interaction.followup.send(
-                    content=("🎥 **BRUTE CHOISIE** (`%s`) — sans montage.%s"
-                             % (self.identity, _av)),
-                    file=discord.File(str(fichier),
-                                      filename=self.video.name),
-                    ephemeral=False)
+                await _livrer_contenu(interaction, 1, 1, self.identity,
+                                      [(fichier, self.video.name)],
+                                      textes=[(_T_DESC, desc)], alertes=[_av],
+                                      quoi="brute choisie")
+        except FileNotFoundError:
+            # Rangee entre le choix et l'envoi (doublons_vault) : levait
+            # jusqu'a discord.py, le VA ne lisait rien.
+            await interaction.followup.send(
+                "⚠️ Cette brute est introuvable (déplacée entre-temps).", ephemeral=True)
+            return
         except discord.HTTPException as e:
             await interaction.followup.send(
                 "⚠️ Envoi impossible (trop lourde) : %s" % e, ephemeral=True)
             return
-        if desc:
-            await interaction.followup.send(
-                "📄 **DESCRIPTION** (champ légende) :\n```\n%s\n```"
-                % str(desc)[:1800], ephemeral=False)
 
     async def _ecrire(self, interaction):
         await interaction.response.send_modal(
