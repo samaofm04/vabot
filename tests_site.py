@@ -18187,17 +18187,24 @@ try:
         _ifw.bilan = _savB
         _wI._load_web_users = _usersI
 
-    # a part : rien d autre n importe ce module
+    # a part : rien d autre n importe ce module. Deux importeurs voulus par le
+    # proprietaire : le site (la route /infloww) et infloww_liens.py, les liens
+    # de suivi postes par Bixby. \b : « import infloww_liens » n est pas un
+    # import d infloww, sans quoi tout importeur de infloww_liens comptait.
     import re as _reI, glob as _gI
     _importeurs = []
     for _f in _gI.glob("*.py") + _gI.glob("cogs/*.py"):
         if _f in ("infloww.py", "tests_site.py"):
             continue
         _src = open(_f, encoding="utf-8", errors="replace").read()
-        if _reI.search(r"^\s*(import infloww|from infloww import)", _src, _reI.M) or "import infloww as" in _src:
+        if (_reI.search(r"^\s*(import infloww\b|from infloww import)", _src, _reI.M)
+                or "import infloww as" in _src):
             _importeurs.append(_f)
-    check("seule la route /infloww importe le module (rien d autre n en depend)",
-          _importeurs == ["web_upload.py"], str(_importeurs))
+    check("seuls le site et infloww_liens importent le module (rien d autre n en depend)",
+          sorted(_importeurs) == ["infloww_liens.py", "web_upload.py"], str(sorted(_importeurs)))
+    check("ni le podium ni la paie ne lisent Infloww",
+          not any(("podium" in _f or "paie" in _f or "revenus" in _f) for _f in _importeurs),
+          str(_importeurs))
 except Exception as _eI:
     check("infloww : testable", False, repr(_eI)[:200])
 
@@ -20179,6 +20186,589 @@ except Exception as _eMD:
     import traceback as _tbMD
     check("menus Discord apres action du site : testable", False,
           repr(_eMD)[:200] + " " + _tbMD.format_exc()[-400:])
+
+# ------------------------------------------ 41. Liens Infloww par personne (GetMySocial + Infloww)
+# « c'est que les tracking sur le retour de Jessye sur GMS qui sont comptes,
+# chaque personne c'est un truc » : les personnes viennent de l'espace GMS
+# « JESSY LE RETOUR », les chiffres d'Infloww (code c<N> de l'adresse OnlyFans),
+# les clics US de GetMySocial. Aucun montant de gains affiche. Aucun appel
+# reseau : Infloww, GetMySocial et Discord sont bouchonnes, l'etat, la cle,
+# le jeton et les caches vivent dans un dossier temporaire.
+print()
+print("=" * 70)
+print("Liens Infloww par personne : page, clics US et messages de Bixby, sur de fausses API")
+print("=" * 70)
+try:
+    import infloww_liens as _il
+    import infloww as _ifL
+    import podium_discord as _pdL
+    import gms as _gmL
+    import tempfile as _tfL
+    import base64 as _b64L
+    import json as _jsL
+    import re as _reL
+    import time as _tL
+    from pathlib import Path as _plL
+
+    _tmpL = _plL(_tfL.mkdtemp())
+    _savL = (_il.ETAT_FICHIER, _il.CLE_FICHIER, _il.JETON_FICHIERS, _il.CONFIG_FICHIER,
+             _il.US_FICHIER, _il.GMS_CACHE, _il.US_EN_FOND, _il._requete, _il._dormir,
+             _il._dormir_us, _il.tableau, _il._aujourdhui, _il._lancer_us,
+             _ifL._creatrice_ou_erreur, _ifL.liens,
+             _gmL.list_links_team, _gmL.analytics_for_links, _gmL.pause_restante, _gmL.etat_quota)
+    try:
+        _il.ETAT_FICHIER = _tmpL / "etat.json"
+        _il.CLE_FICHIER = _tmpL / "cle"
+        _il.JETON_FICHIERS = (_tmpL / "absent", _tmpL / "jeton")
+        _il.CONFIG_FICHIER = _tmpL / "config.json"
+        _il.US_FICHIER = _tmpL / "us.json"
+        _il.GMS_CACHE = _tmpL / "gmsdash_links.json"
+        _il.US_EN_FOND = False
+        _il._dormir_us = lambda s: None
+        _gmL.pause_restante = lambda: 0
+        _gmL.etat_quota = lambda: {"pause_s": 0, "reprise": "", "restant_jour": None, "raison": ""}
+        _JOUR = {"j": "2026-09-26"}
+        _il._aujourdhui = lambda: _JOUR["j"]
+
+        def _infL(i, nom, code, clics, subs, net, off=False):
+            # la forme de infloww._lien_norm ; montants en centimes
+            return {"id": str(i), "nom": nom, "code": code, "clics": clics, "abonnes": subs,
+                    "net": net, "brut": net * 5 // 4, "termine": off, "maj": 1790382831491}
+        _INF = [_infL(1, "Roucham SPAM", "110", 7194, 269, 65200),
+                _infL(2, "VA 4 JB", "47", 29456, 4731, 1397000),
+                _infL(3, "Gérôme SPAM", "124", 498, 41, 0),
+                _infL(4, "Bo07", "85", 2417, 126, 29000, off=True),
+                _infL(5, "Andry", "87", 715, 35, 17800),
+                _infL(6, "Jaurel", "83", 3612, 266, 12200),
+                _infL(7, "VA 2 Geelark", "78", 33352, 2168, 999900),
+                _infL(8, "Twitter", "2", 3311, 247, 5000, off=True),
+                _infL(9, "sans clics", "130", None, 3, 300),
+                "pas un lien"]
+        _OFL = "https://onlyfans.com/jessyewdiference/c%s"
+
+        def _gL(i, nom, code=None, url=None):
+            return {"id": f"lnk_{i}", "display_name": nom, "shortcode": f"sc{i}",
+                    "url": url if url is not None else (_OFL % code)}
+        _GMS = [_gL(1, "(Roucham) 1SPAM", 110), _gL(2, "( VA 1 Noum ) 1", 47),
+                _gL(3, "(Gerome) SPAM", 124),
+                _gL(4, "( BO7 ) 1", 85), _gL(5, "( BO7 ) 2", 85), _gL(6, "( BO7 ) 3", 85),
+                _gL(7, "( BO7 ) 4", 85),
+                _gL(8, "(ANDRY) 1", 87), _gL(9, "(ANDRY) 2", 87),
+                _gL(10, "( Bryan ) 1", 83), _gL(11, "( Bryan ) 2", 83),
+                _gL(12, "(Roucham) 1", 999), _gL(13, "(Kylmich) 1", url=""),
+                _gL(14, "(Emy) 1", url="https://onlyfans.com/emywdiff/c3"),
+                _gL(15, "(Z) 1", 130),
+                {"display_name": "(sans id) 1", "url": _OFL % 47}]
+        _tL0 = _il.construire(_INF, _GMS, lu_a=1790380000)
+        _pL = {x["nom"]: x for x in _tL0["lignes"]}
+
+        # --- qui est qui : le podium decide, pas une regle de plus
+        _entL = _pdL.entites([g for g in _GMS if g.get("id")])
+        check("personnes : les cles sont celles de podium_discord.entites (personne + cle_entite)",
+              set(_pL) == set(_entL) and len(_pL) == 10, str(sorted(_pL)))
+        _srcIL = _plL("infloww_liens.py").read_text(encoding="utf-8")
+        check("personnes : aucune regle de nommage a part (le module appelle celle du podium)",
+              "pd.entites(" in _srcIL and "def personne" not in _srcIL and "def cle_entite" not in _srcIL)
+        check("personnes : seul l espace JESSY LE RETOUR, celui du podium",
+              _il.EQUIPE_GMS == _pdL.EQUIPES_VA[0] == "tm_6a0e4739bfa0c238f20a8bf5"
+              and "tm_6ab46ebb11a0232c11211b1a" not in _srcIL)
+        check("personnes : le lien SPAM est une personne a part",
+              "Roucham SPAM" in _pL and "Roucham" in _pL
+              and [r["code"] for r in _pL["Roucham SPAM"]["infloww"]] == ["110"]
+              and _pL["Roucham SPAM"]["spam"] is True and _pL["Roucham"]["spam"] is False)
+        _bo = _pL["BO7"]
+        check("personnes : 4 liens GMS vers c85 -> le lien Infloww compte UNE fois",
+              _bo["nb_gms"] == 4 and [r["code"] for r in _bo["infloww"]] == ["85"]
+              and _bo["clics"] == 2417 and _bo["subs"] == 126, str((_bo["clics"], _bo["subs"])))
+        check("personnes : ANDRY (2 liens -> c87) et Bryan (2 -> c83) une fois aussi",
+              _pL["ANDRY"]["clics"] == 715 and _pL["ANDRY"]["subs"] == 35
+              and _pL["Bryan"]["subs"] == 266 and len(_pL["Bryan"]["infloww"]) == 1)
+        check("personnes : un lien Infloww desactive reste compte, et marque",
+              _bo["infloww"][0]["desactive"] is True and _bo["subs"] == 126)
+
+        # --- les chiffres cites par le proprietaire
+        _rs = _pL["Roucham SPAM"]
+        check("chiffres : (Roucham) 1SPAM -> c110 -> 7194 clics, 269 subs, 2,42 $ par sub (NETS)",
+              _rs["clics"] == 7194 and _rs["subs"] == 269 and _il._dollars(_rs["par_sub"]) == "2,42\u00a0$",
+              str(_rs["par_sub"]))
+        _no = _pL["VA 1 Noum"]
+        check("chiffres : ( VA 1 Noum ) 1 -> c47 = « VA 4 JB », 29456 clics, 4731 subs",
+              _no["clics"] == 29456 and _no["subs"] == 4731
+              and _no["infloww"] == [{"id": "2", "nom": "VA 4 JB", "code": "47", "desactive": False}])
+        _ge = _pL["Gerome SPAM"]
+        check("chiffres : (Gerome) SPAM -> c124 = « Gérôme SPAM », 498 / 41 / 0 $",
+              _ge["clics"] == 498 and _ge["subs"] == 41 and _ge["par_sub"] == 0.0
+              and _ge["infloww"][0]["nom"] == "Gérôme SPAM")
+        check("chiffres : CVR = subs / clics OF (41 / 498 -> 8,23 %)",
+              _il._pct(_ge["cvr"]) == "8,23\u00a0%")
+        _z = _pL["Z"]
+        check("chiffres : clics inconnus chez Infloww -> pas de CVR invente, le $ / sub reste",
+              _z["clics"] is None and _z["cvr"] is None and _z["subs"] == 3 and _z["par_sub"] == 1.0
+              and _tL0["sans_clics"] == 1)
+
+        # --- jamais d ecart silencieux
+        _ro = _pL["Roucham"]
+        check("introuvable : code absent d Infloww -> « — », pas zero, et la raison est dite",
+              _ro["clics"] is None and _ro["subs"] is None and _ro["par_sub"] is None
+              and "c999" in _ro["introuvables"][0]["raison"] and _ro["introuvables"][0]["nom"] == "(Roucham) 1")
+        check("introuvable : lien GMS sans adresse, ou vers une autre creatrice : dit",
+              "pas d'adresse" in _pL["Kylmich"]["introuvables"][0]["raison"]
+              and "@emywdiff" in _pL["Emy"]["introuvables"][0]["raison"]
+              and _pL["Emy"]["subs"] is None and _tL0["introuvables"] == 3)
+        check("introuvable : un lien GMS sans identifiant et une ligne Infloww illisible sont COMPTES",
+              _tL0["gms_sans_id"] == 1 and _tL0["illisibles"] == 1)
+        _horsL = {x["nom"]: x for x in _tL0["hors_gms"]}
+        check("hors GMS : les liens Infloww qu aucun lien GMS ne vise sont listes a part",
+              set(_horsL) == {"VA 2 Geelark", "Twitter"} and _horsL["Twitter"]["desactive"] is True
+              and _horsL["VA 2 Geelark"]["subs"] == 2168)
+        _TL = _tL0["totaux"]
+        _subsL = 269 + 4731 + 41 + 126 + 35 + 266 + 3
+        check("totaux : seuls les liens rattaches, chacun une fois (ni hors GMS, ni doublon BO7)",
+              _TL["subs"] == _subsL and _TL["clics"] == 7194 + 29456 + 498 + 2417 + 715 + 3612
+              and abs(_TL["par_sub"] - (65200 + 1397000 + 0 + 29000 + 17800 + 12200 + 300) / 100 / _subsL) < 1e-9
+              and _TL["liens_infloww"] == 7 and _TL["personnes"] == 10, str(_TL))
+        check("totaux : aucune ligne ne garde le montant des gains",
+              not any(k in x for x in _tL0["lignes"] + _tL0["hors_gms"] + [_TL]
+                      for k in ("net", "brut", "revenus")))
+        _tPa = _il.construire(_INF, _GMS + [_gL(16, "(Partage) 1", 47)], lu_a=1790380000)
+        _pPa = {x["nom"]: x for x in _tPa["lignes"]}
+        check("partage : deux personnes sur le meme code -> chacune le voit, le total une fois, et c est dit",
+              _pPa["Partage"]["subs"] == 4731 and _pPa["VA 1 Noum"]["subs"] == 4731
+              and _tPa["totaux"]["subs"] == _subsL
+              and _tPa["partages"] == [{"code": "47", "nom": "VA 4 JB", "personnes": ["Partage", "VA 1 Noum"]}]
+              and "UNE seule fois dans le total" in _il.page_html(_tPa))
+        check("codes : c085, 085 et l adresse OnlyFans se rejoignent",
+              _il._code_infloww({"code": "c085"}) == "85" and _il._code_infloww({"code": "085"}) == "85"
+              and _il.code_de_l_url("https://www.OnlyFans.com/JessyeWDiference/c110/?utm=x") == ("110", "")
+              and _il.code_de_l_url("https://onlyfans.com/jessyewdiference")[0] == ""
+              and _il.code_de_l_url("https://onlyfans.com.evil.io/jessyewdiference/c1")[0] == "")
+
+        # --- le tri
+        _nomsL = lambda l: [x["nom"] for x in l]  # noqa: E731
+        check("tri : par defaut subs decroissants, les introuvables en bas",
+              _nomsL(_tL0["lignes"])[:3] == ["VA 1 Noum", "Roucham SPAM", "Bryan"]
+              and set(_nomsL(_il.trier(_tL0["lignes"]))[-3:]) == {"Roucham", "Kylmich", "Emy"})
+        check("tri : CVR croissant, les valeurs absentes restent en bas dans les deux sens",
+              _nomsL(_il.trier(_tL0["lignes"], "cvr", "asc"))[0] == "Roucham SPAM"
+              and "Z" in _nomsL(_il.trier(_tL0["lignes"], "cvr", "asc"))[-4:]
+              and "Z" in _nomsL(_il.trier(_tL0["lignes"], "cvr", "desc"))[-4:])
+        check("tri : par nom, et un tri inconnu retombe sur subs decroissants",
+              _nomsL(_il.trier(_tL0["lignes"], "nom", "asc"))[0] == "ANDRY"
+              and _nomsL(_il.trier(_tL0["lignes"], "rm -rf", "x")) == _nomsL(_tL0["lignes"])
+              and _il._tri_valide("us", "zz") == ("us", "desc") and _il._tri_valide("nom", "") == ("nom", "asc"))
+
+        # --- Infloww et GetMySocial bouchonnes : tableau()
+        _ifL._creatrice_ou_erreur = lambda p: ({"id": "2325486654980122", "userName": p}, [])
+        _ifL.liens = lambda cid, typ="TRACKING", depuis=None: {
+            "liens": list(_INF), "tronque": [], "depuis": "2025-09-26", "doublons": 0}
+        _LT = {"appels": [], "rep": {"ok": True, "links": list(_GMS)}}
+
+        def _listeL(tid, force_refresh=False):
+            _LT["appels"].append((tid, force_refresh))
+            return _LT["rep"]
+        _gmL.list_links_team = _listeL
+        _US = {"appels": [], "val": {}, "rate": set(), "vide": set()}
+
+        def _anaL(ids, d0, d1):
+            ids = tuple(ids)
+            _US["appels"].append((ids, d0, d1))
+            if ids in _US["rate"]:
+                return None, None
+            if ids in _US["vide"]:
+                return 0, {}                     # ce que gms rend quand il n'a pas su lire
+            n = _US["val"].get(ids, 7)
+            return n * 3, {"US": n, "FR": 1}
+        _gmL.analytics_for_links = _anaL
+        _idsBO = tuple(sorted(f"lnk_{i}" for i in (4, 5, 6, 7)))
+        _US["val"][_idsBO] = 500
+
+        _tU = _il.tableau(us="calcul")
+        _pU = {x["nom"]: x for x in _tU["lignes"]}
+        check("gms : la liste est lue EN DIRECT, dans l espace JESSY LE RETOUR seulement",
+              _LT["appels"] and all(a == ("tm_6a0e4739bfa0c238f20a8bf5", True) for a in _LT["appels"])
+              and not _tU["repli_gms"] and len(_tU["lignes"]) == 10)
+        check("clics US : UN appel par personne, tous ses liens GMS ensemble, depuis toujours",
+              len(_US["appels"]) == 10 and (_idsBO, _pdL.ALLTIME_DEPUIS, "2026-09-26") in _US["appels"]
+              and all(d0 == _pdL.ALLTIME_DEPUIS and d1 == "2026-09-26" for _i, d0, d1 in _US["appels"]),
+              str(len(_US["appels"])))
+        check("clics US : la valeur est le pays US du releve, et le total les additionne",
+              _pU["BO7"]["us"] == 500 and _pU["ANDRY"]["us"] == 7 and _pU["BO7"]["us_etat"] == "ok"
+              and _tU["totaux"]["us"] == 500 + 7 * 9 and _tU["totaux"]["us_manquants"] == 0)
+        check("clics US : garde dans son propre cache disque",
+              _il.US_FICHIER.exists() and _jsL.loads(_il.US_FICHIER.read_text())["personnes"]["BO7"]["us"] == 500)
+        _US["appels"].clear()
+        _il.tableau(us="calcul")
+        _il.tableau(us="page")
+        check("clics US : releve du jour -> plus aucun appel (ni le demon, ni la page)",
+              not _US["appels"] and not _il.us_a_rafraichir())
+
+        # le lendemain : BO7 rate, ANDRY rend un releve vide
+        _JOUR["j"] = "2026-09-27"
+        check("clics US : un nouveau jour -> le demon doit relever", _il.us_a_rafraichir())
+        _US["rate"].add(_idsBO)
+        _US["vide"].add(("lnk_8", "lnk_9"))
+        _US["val"][("lnk_1",)] = 42
+        _tR = _il.tableau(us="calcul")
+        _pR = {x["nom"]: x for x in _tR["lignes"]}
+        check("clics US : un releve rate garde l ancienne valeur, marquee (jamais un zero)",
+              _pR["BO7"]["us"] == 500 and _pR["BO7"]["us_etat"] == "rate" and _pR["BO7"]["us_jour"] == "2026-09-26"
+              and _pR["Roucham SPAM"]["us"] == 42 and _pR["Roucham SPAM"]["us_etat"] == "ok")
+        check("clics US : (0 clic, aucun pays) n est pas ecrit comme un zero",
+              _pR["ANDRY"]["us"] == 7 and _pR["ANDRY"]["us_etat"] == "rate"
+              and "vide ou illisible" in _pR["ANDRY"]["us_raison"])
+        _hR = _il.page_html(_tR)
+        check("clics US : la page dit le releve rate et la date de la valeur gardee",
+              "dernier relevé raté, valeur du 26/09" in _hR and "2 en échec au dernier essai" in _hR)
+        _US["appels"].clear()
+        _il.tableau(us="calcul")
+        check("clics US : un releve rate n est pas retente a chaque affichage (10 min)",
+              not _US["appels"] and not _il.us_a_rafraichir())
+        check("clics US : ... mais le demon le retente passe 10 min",
+              _il.us_a_rafraichir(_tL.time() + _il.US_REESSAI_S + 5))
+        # la page ne l attend pas quand il y a deja des valeurs
+        _JOUR["j"] = "2026-09-28"
+        _lancesL = []
+        _il._lancer_us = lambda ents: _lancesL.append(sorted(ents)) or None
+        _US["appels"].clear()
+        _tP0 = _il.tableau()
+        _pP0 = {x["nom"]: x for x in _tP0["lignes"]}
+        check("clics US : la page affiche le dernier releve sans l attendre, et lance le calcul derriere",
+              not _US["appels"] and len(_lancesL) == 1 and _pP0["Roucham SPAM"]["us"] == 42
+              and _pP0["Roucham SPAM"]["us_etat"] == "ancien" and "relevé du 27/09" in _il.page_html(_tP0))
+        _il._lancer_us = _savL[12]
+        # premier affichage, aucun cache du tout : la page releve sur place
+        _il.US_FICHIER.unlink()
+        _il.US_FICHIER.with_suffix(".json.prev").unlink(missing_ok=True)
+        _US["rate"].clear(); _US["vide"].clear()
+        _tP1 = _il.tableau()
+        check("clics US : premier affichage sans aucun releve -> releve sur place",
+              len(_US["appels"]) == 10 and all(x["us_etat"] == "ok" for x in _tP1["lignes"]))
+        # quota du jour epuise
+        _JOUR["j"] = "2026-09-29"
+        _US["appels"].clear()
+        _gmL.pause_restante = lambda: 3600
+        _gmL.etat_quota = lambda: {"pause_s": 3600, "reprise": "21:40", "restant_jour": 0, "raison": "quota"}
+        _tQ = _il.tableau(us="calcul")
+        check("clics US : GetMySocial en pause -> aucun appel, anciennes valeurs, et la page le dit",
+              not _US["appels"] and _tQ["us_pause"] and all(x["us"] is not None for x in _tQ["lignes"])
+              and "reprise vers 21:40" in _il.page_html(_tQ) and "pause" in _il.rafraichir_us())
+        _gmL.pause_restante = lambda: 0
+
+        # --- repli sur le cache du site
+        _LT["rep"] = {"ok": False, "error": "HTTP 429"}
+        _il.GMS_CACHE.write_text(_jsL.dumps({
+            "tm_6a0e4739bfa0c238f20a8bf5": [{"id": g["id"], "shortcode": g["shortcode"],
+                                             "display_name": g["display_name"], "url": g["url"]}
+                                            for g in _GMS if g.get("id")],
+            "tm_autre": [_gL(99, "(Intrus) 1", 47)]}))
+        _tC = _il.tableau(us="cache")
+        check("repli : GetMySocial muet -> cache du site, de CET espace seulement, et c est dit",
+              _tC["repli_gms"] == "HTTP 429" and len(_tC["lignes"]) == 10
+              and "Intrus" not in {x["nom"] for x in _tC["lignes"]}
+              and "GetMySocial n'a pas répondu" in _il.page_html(_tC)
+              and "cache du site" in _il.messages_discord(_tC)[0]["embeds"][0]["description"])
+        _il.GMS_CACHE.write_text(_jsL.dumps({"tm_6a0e4739bfa0c238f20a8bf5": [
+            {"id": "lnk_2", "shortcode": "x", "display_name": "( VA 1 Noum ) 1"}]}))
+        _tC2 = _il.tableau(us="cache")
+        check("repli : un cache sans adresse ne rattache rien, et le dit (pas de zero)",
+              _tC2["lignes"][0]["subs"] is None and "pas d'adresse" in _tC2["lignes"][0]["introuvables"][0]["raison"])
+        _il.GMS_CACHE.write_text("{}")
+        _tC3 = _il.tableau(us="cache")
+        check("repli : ni GetMySocial ni cache -> la page le dit, sans tableau",
+              "GetMySocial n'a pas répondu" in _tC3["erreur"] and 'class="err"' in _il.page_html(_tC3))
+        _LT["rep"] = {"ok": True, "links": list(_GMS)}
+
+        # --- Infloww en panne
+        def _panL(cid, typ="TRACKING", depuis=None):
+            raise _ifL.ErreurInfloww("Scope validation failure", 403, "RID-9")
+        _ifL.liens = _panL
+        _tE = _il.tableau(us="cache")
+        check("tableau : une panne d Infloww est dite (code, request id), sans exception",
+              "Scope validation failure" in _tE["erreur"] and "HTTP 403" in _tE["erreur"]
+              and "RID-9" in _tE["erreur"] and 'class="err"' in _il.page_html(_tE))
+        _ifL.liens = lambda cid, typ="TRACKING", depuis=None: {
+            "liens": list(_INF), "tronque": ["2026-01-01 → 2026-01-31"], "depuis": "2025-09-26",
+            "doublons": 0}
+        _tTr = _il.tableau(us="cache")
+        check("tableau : une pagination Infloww arretee est DITE, sur Discord comme sur la page",
+              "INCOMPLÈTE" in _il.messages_discord(_tTr)[0]["embeds"][0]["description"]
+              and "INCOMPLÈTE" in _il.page_html(_tTr))
+        _ifL.liens = lambda cid, typ="TRACKING", depuis=None: {
+            "liens": list(_INF), "tronque": [], "depuis": "2025-09-26", "doublons": 0}
+
+        # --- la page
+        _GX = _GMS + [_gL(17, "(<script>x</script> & 'Léa') 1", 999)]
+        _INX = [dict(x, nom="<i>Bo07</i>") if isinstance(x, dict) and x["id"] == "4" else x for x in _INF]
+        _tH = _il.construire(_INX, _GX, us=_il.us_depuis_cache(_il.entites(_GX)[0], {}), lu_a=1790380000)
+        _hP = _il.page_html(_tH)
+        check("page : aucun JavaScript, aucun gestionnaire on...=",
+              "<script" not in _hP and not _reL.search(r"<[^>]*\son[a-z]+\s*=", _hP))
+        check("page : les noms sont echappes (GMS comme Infloww)",
+              "&lt;script&gt;x&lt;/script&gt; &amp; &#x27;Léa&#x27;" in _hP
+              and "&lt;i&gt;Bo07&lt;/i&gt;" in _hP and "<i>Bo07" not in _hP)
+        check("page : les colonnes demandees, et elles seules",
+              all(c in _hP for c in (">Personne", ">Clics US", ">Clics OF", ">Subs", ">CVR", "$\u00a0/\u00a0sub"))
+              and ">Net" not in _hP and "Brut" not in _hP and "Gains" not in _hP)
+        check("page : sous le nom, le lien Infloww rattache, son code, et « desactive »",
+              "VA 4 JB · c47" in _hP and "c85 · <span class=\"off\">désactivé</span>" in _hP
+              and "« (Roucham) 1 » : lien Infloww introuvable" in _hP and "4 liens GetMySocial" in _hP)
+        _detL = _hP[_hP.find("<details>"):]
+        _avantL = _hP[:_hP.find("<details>")]
+        check("page : les liens hors GMS sont dans un <details>, comptes, NON comptes au total",
+              "Hors GetMySocial, non comptés (2)" in _detL and "VA 2 Geelark" in _detL
+              and "VA 2 Geelark" not in _avantL and "c2 · <span class=\"off\">désactivé</span>" in _detL)
+        check("page : tri par liens d en-tete, sans script (et la cle suit si elle est donnee)",
+              'href="?tri=us&amp;sens=desc"' in _hP and 'href="?tri=subs&amp;sens=asc"' in _hP
+              and 'href="?tri=nom&amp;sens=asc&amp;k=K1"' in _il.page_html(_tH, cle="K1"))
+        _hC = _il.page_html(_tH, "clics", "asc")
+        check("page : le tri demande est applique",
+              _hC.index(">Gerome SPAM<") < _hC.index(">VA 1 Noum<")
+              and _hP.index(">VA 1 Noum<") < _hP.index(">Gerome SPAM<"))
+        check("page : un tri inconnu retombe sur le defaut", _il.page_html(_tH, "x'><", "y") == _hP)
+        _argentL = [_il._dec(v, 2, s) for v in (13970.0, 652.0, 290.0, 178.0, 122.0, 9999.0, 50.0,
+                                                  (65200 + 1397000 + 29000 + 17800 + 12200 + 300) / 100)
+                    for s in ("\u202f", "\u00a0", ",", "")]
+        check("page : aucun montant de gains (ni par lien, ni par personne, ni au total)",
+              not any(a in _hP for a in _argentL), str([a for a in _argentL if a in _hP]))
+        check("page : la note dit les sources (Infloww 2 h, GMS JESSY LE RETOUR, pas MyPuls) et l heure",
+              "toutes les 2 h" in _hP and "JESSY LE RETOUR" in _hP and "pas dans MyPuls" in _hP
+              and "gains nets ÷ subs" in _hP and _il._e(_il._heure(1790380000)) in _hP and "Paris" in _hP)
+        check("page : clics US jamais releves -> « — » et c est dit UNE fois, en tete",
+              f"Clics US : {len(_tH['lignes'])} pas encore relevé(s) (—)" in _hP
+              and _hP.count("pas encore relev") == 1)
+        _hE = _il.page_html(_il._vide("Boom <b>500</b>"))
+        check("page : une panne est dite sur la page, echappee",
+              'class="err"' in _hE and "Boom &lt;b&gt;500&lt;/b&gt;" in _hE)
+        check("page : lisible a 360 px (viewport, gouttiere 16 px, le tableau defile dans sa boite)",
+              'name="viewport"' in _hP and "padding:20px 16px" in _hP and "overflow-x:auto" in _hP
+              and "@media (max-width:480px)" in _hP)
+
+        # --- Discord : le contenu, avec 150 personnes aux noms piegeux
+        # ni « @nom » ni parenthese : personne() en tirerait un autre nom (le
+        # pseudo apres l arobase, le texte avant la premiere parenthese fermante)
+        _PIEGE = "*g* _i_ |s| ~b~ `c` <@1> [x] "
+        _I150 = [_infL(1000 + i, f"l{i}", str(1000 + i), 1000 + i, 500 - i, 123456 + i) for i in range(150)]
+        _G150 = [_gL(1000 + i, f"(#{i} " + _PIEGE + "n" * (i % 40) + "m" * 20 + ") 1", 1000 + i)
+                 for i in range(150)]
+        _t150 = _il.construire(_I150 + [_infL(9, "vieux", "9", 5, 1, 99)], _G150, lu_a=1790380000)
+        _url = "https://youl4b.com/infloww/liens?k=CLE_TEST"
+        _M = _il.messages_discord(_t150, _url)
+        _descs = [m["embeds"][0]["description"] for m in _M]
+        _tout = "\n".join(_descs)
+        check("discord : plusieurs messages quand un seul ne suffit pas", len(_M) > 1, str(len(_M)))
+        check("discord : description <= 4096, <= 6000 caracteres et <= 10 embeds par message",
+              all(len(m["embeds"]) <= 10 and all(len(e["description"]) <= 4096 for e in m["embeds"])
+                  and sum(_il._taille_embed(e) for e in m["embeds"]) <= 6000 for m in _M),
+              str([sum(_il._taille_embed(e) for e in m["embeds"]) for m in _M]))
+        check("discord : personne n est notifie (allowed_mentions vide, aucun @)",
+              all(m.get("allowed_mentions") == {"parse": []} for m in _M) and all("content" not in m for m in _M))
+        check("discord : une ligne par personne, numerotees dans l ordre des subs",
+              all(f"**{i}. #{i - 1} " in _tout for i in range(1, 151)) and "…**" in _tout
+              and "clics OF → **" in _tout and "US · " in _tout)
+        check("discord : les noms sont echappes (gras, italique, spoiler, barre, code, liens)",
+              "\\*g\\*" in _tout and "\\_i\\_" in _tout and "\\|s\\|" in _tout
+              and "\\~b\\~" in _tout and "\\`c\\`" in _tout and "\\[x\\]" in _tout and "*g*" not in _tout)
+        check("discord : @everyone et <@id> sont rendus inertes",
+              "<@1>" not in _tout and "\\<@\u200b1\\>" in _tout
+              and _il._md("@everyone") == "@\u200beveryone" and "@everyone" not in _tout)
+        check("discord : le lien de la page est en tete du premier message",
+              _descs[0].startswith("🔗 **[Voir le tableau complet](" + _url + ")**")
+              and _M[0]["embeds"][0].get("url") == _url)
+        _pied = _M[0]["embeds"][0]["footer"]["text"]
+        check("discord : le pied dit les sources, le rythme, l heure de Paris et les liens hors GMS",
+              "Infloww" in _pied and "JESSY LE RETOUR" in _pied and "2 h" in _pied and "Paris" in _pied
+              and "1 lien Infloww hors GetMySocial, non compté" in _pied and _il._heure(1790380000) in _pied, _pied)
+        _nets = [_il._dec(x["net"] / 100, 2, s) for x in _I150 for s in ("\u00a0", "\u202f")]
+        check("discord : aucun montant de gains, ni par personne ni au total",
+              not any(n in _tout for n in _nets)
+              and _il._dec(sum(x["net"] for x in _I150) / 100, 2, "\u00a0") not in _tout and "Net" not in _tout)
+        _MI = "\n".join(m["embeds"][0]["description"] for m in _il.messages_discord(_tL0))
+        check("discord : une personne sans lien Infloww le dit, sans zero",
+              "**" + str(len(_tL0["lignes"]) - 2) + ". " in _MI and "lien Infloww introuvable" in _MI
+              and "sans lien Infloww en face" in _MI)
+
+        # --- l interrupteur Discord : coupe par defaut
+        _FD = {"n": 1000, "msgs": {}, "appels": [], "script": []}
+
+        def _fauxD(methode, chemin, corps, tok):
+            _FD["appels"].append((methode, chemin, tok))
+            if _FD["script"]:
+                return _FD["script"].pop(0)
+            mid = chemin.rsplit("/", 1)[-1]
+            if methode == "POST":
+                _FD["n"] += 1
+                _FD["msgs"][str(_FD["n"])] = corps
+                return 200, {"id": str(_FD["n"])}, {}
+            if methode == "PATCH":
+                if mid in _FD["msgs"]:
+                    _FD["msgs"][mid] = corps
+                    return 200, {"id": mid}, {}
+                return 404, {"message": "Unknown Message", "code": 10008}, {}
+            if methode == "DELETE":
+                return (204, {}, {}) if _FD["msgs"].pop(mid, None) is not None else (404, {}, {})
+            return 405, {}, {}
+        _dodos = []
+        _il._requete = _fauxD
+        _il._dormir = lambda s: _dodos.append(s)
+        _courant = {"t": _t150}
+        _il.tableau = lambda **k: _courant["t"]
+        _bon = _b64L.urlsafe_b64encode(_il.BOT_APP.encode()).decode().rstrip("=") + ".abc.def"
+        (_tmpL / "jeton").write_text(_bon + "\n")
+
+        def _meth():
+            m = [a[0] for a in _FD["appels"]]
+            _FD["appels"].clear()
+            return m
+        check("interrupteur : absent -> Discord coupe (a_rafraichir faux, meme jamais poste)",
+              not _il.CONFIG_FICHIER.exists() and _il.discord_actif() is False and _il.a_rafraichir() is False)
+        _sC = _il.rafraichir()
+        check("interrupteur : coupe -> rafraichir ne poste rien et le statut le dit",
+              "coupé" in _sC and not _FD["appels"] and not _il._etat().get("messages"))
+        _il.CONFIG_FICHIER.write_text('{"discord_actif": "true"}')
+        check("interrupteur : seul un vrai booleen l allume (« true » en texte ne suffit pas)",
+              _il.discord_actif() is False and "coupé" in _il.rafraichir() and not _FD["appels"])
+        _il.CONFIG_FICHIER.write_text('{"discord_actif": true}')
+        check("interrupteur : allume -> a_rafraichir dit oui (jamais poste)", _il.a_rafraichir() is True)
+
+        # --- le cycle, interrupteur allume, sur un faux Discord
+        (_tmpL / "jeton").unlink()
+        _s0 = _il.rafraichir()
+        check("cycle : sans jeton de Bixby, rien ne part et le statut le dit",
+              "jeton" in _s0 and not _FD["appels"] and _il._etat().get("erreur") and _il.a_rafraichir())
+        _mauvais = _b64L.urlsafe_b64encode(b"1445108485090971710").decode().rstrip("=") + ".x.y"
+        (_tmpL / "jeton").write_text(_mauvais)
+        _s0b = _il.rafraichir()
+        check("cycle : le jeton d un AUTRE bot est refuse (Siri ne poste pas a la place de Bixby)",
+              "1445108485090971710" in _s0b and not _FD["appels"])
+        (_tmpL / "jeton").write_text(_bon + "\n")
+        check("cycle : le jeton est lu dans le second emplacement", _il.jeton() == _bon)
+        _s1 = _il.rafraichir()
+        _e1 = _il._etat()
+        _n1 = len(_M)
+        _ap1 = list(_FD["appels"])
+        check("cycle : premier passage, toutes les pages sont POSTEES dans le bon salon, par Bixby",
+              _meth() == ["POST"] * _n1 and len(_e1["messages"]) == _n1 and not _e1.get("erreur")
+              and all(c == "/channels/%s/messages" % _il.SALON and t == _bon for _m, c, t in _ap1)
+              and _e1.get("personnes") == 150 and _e1.get("hors_gms") == 1, _s1)
+        check("cycle : a_rafraichir dit non juste apres, oui passe 2 h",
+              not _il.a_rafraichir() and _il.a_rafraichir(_tL.time() + _il.REFRESH_S + 1))
+        _il.rafraichir()
+        check("cycle : second passage, les memes messages sont MODIFIES, aucun nouveau",
+              _meth() == ["PATCH"] * _n1 and _il._etat()["messages"] == _e1["messages"])
+        _FD["msgs"].pop(_e1["messages"][0])
+        _il.rafraichir()
+        _e2 = _il._etat()
+        check("cycle : un message supprime a la main (404) est reposte, dans l ordre",
+              len(_e2["messages"]) == _n1 and set(_e2["messages"]) == set(_FD["msgs"])
+              and _e2["messages"] == sorted(_e2["messages"], key=int), str(_e2["messages"]))
+        _meth()
+        _courant["t"] = _il.construire(_I150[:5], _G150[:5], lu_a=1790380000)
+        _il.rafraichir()
+        _e3 = _il._etat()
+        check("cycle : moins de pages -> les messages en trop (les SIENS) sont supprimes",
+              _meth() == ["PATCH"] + ["DELETE"] * (_n1 - 1) and len(_e3["messages"]) == 1
+              and list(_FD["msgs"]) == _e3["messages"])
+        _courant["t"] = _t150
+        _il.rafraichir()
+        check("cycle : plus de pages -> les manquantes sont postees",
+              _meth() == ["PATCH"] + ["POST"] * (_n1 - 1) and len(_il._etat()["messages"]) == _n1)
+        _eV = _il._etat(); _eV["vu"] = _tL.time() - _il.REFRESH_S - 5; _il._ecrire(_eV)
+        _avant = (dict(_FD["msgs"]), list(_il._etat()["messages"]))
+        _courant["t"] = _il._vide("Infloww HS (HTTP 502)")
+        _sE = _il.rafraichir()
+        check("cycle : lecture impossible -> rien n est touche, l erreur est notee",
+              not _FD["appels"] and _FD["msgs"] == _avant[0] and _il._etat()["messages"] == _avant[1]
+              and "HTTP 502" in (_il._etat().get("erreur") or "") and "gardés" in _sE)
+        check("cycle : ... et le passage rate est retente au reveil suivant, sans attendre 2 h",
+              _il.a_rafraichir() is True)
+        _courant["t"] = _t150
+        _FD["script"] = [(429, {"retry_after": 1.5, "global": False}, {})]
+        _il.rafraichir()
+        check("cycle : un 429 fait attendre retry_after puis reprendre",
+              _dodos and _dodos[0] >= 1.5 and len(_il._etat()["messages"]) == _n1
+              and not _il._etat().get("erreur"))
+        _meth()
+        _vuL = _il._etat()["vu"]
+        _FD["script"] = [(500, {"message": "Internal"}, {})]
+        _il.rafraichir()
+        _e5 = _il._etat()
+        check("cycle : une panne Discord (500) garde le message, sans en reposter un",
+              "POST" not in _meth() and _e5["messages"] == _avant[1] and len(_avant[1]) == _n1,
+              str(_e5.get("erreur")))
+        check("cycle : ... l ennui est note et le passage sera retente",
+              "HTTP 500" in (_e5.get("erreur") or "") and _e5["vu"] == _vuL)
+        _FD["script"] = []
+        _il.CONFIG_FICHIER.unlink()
+        check("interrupteur : recoupe -> plus rien, meme avec des messages deja postes",
+              _il.a_rafraichir(_tL.time() + _il.REFRESH_S + 1) is False
+              and "coupé" in _il.rafraichir() and not _FD["appels"])
+
+        # --- la cle de la page
+        _k1 = _il.cle_page()
+        check("page : la cle est creee une fois, puis relue",
+              len(_k1) >= 20 and _il.cle_page() == _k1
+              and _il.url_page() == "https://youl4b.com/infloww/liens?k=" + _k1)
+
+        # --- la route
+        import web_upload as _wL
+        import os as _osL
+        if _osL.environ.get("VA_MACHINE_PROD") != "1":
+            check("route : le demon ne s arme pas hors de la machine proprietaire",
+                  _wL._start_infloww_liens_daemon() is False)
+        _srcWL = _plL("web_upload.py").read_text(encoding="utf-8")
+        _demL = _srcWL[_srcWL.find("def _start_infloww_liens_daemon"):]
+        _demL = _demL[:_demL.find("\ndef ")]
+        check("route : le demon releve les clics US et ne poste que si a_rafraichir le dit",
+              "_il.us_a_rafraichir()" in _demL and "_il.rafraichir_us()" in _demL
+              and "if _il.a_rafraichir():" in _demL)
+        _il.tableau = lambda **k: _tH
+        _appL = _wL.create_app(); _appL.config["TESTING"] = True
+        _usersL = _wL._load_web_users
+        try:
+            _wL._load_web_users = lambda: {"admin": {"role": "admin", "password": "x"},
+                                           "chat1": {"role": "chatter", "password": "x"}}
+            _cA = _appL.test_client()
+            with _cA.session_transaction() as _s:
+                _s["auth"] = True; _s["username"] = "admin"; _s["role"] = "admin"
+            _rA = _cA.get("/infloww/liens")
+            _hA = _rA.get_data(as_text=True)
+            check("route : l admin voit la page par personne",
+                  _rA.status_code == 200 and "Roucham SPAM" in _hA and ">Clics US" in _hA
+                  and "<script" not in _hA)
+            _cN = _appL.test_client()
+            _rK = _cN.get("/infloww/liens?k=" + _k1 + "&tri=us&sens=asc")
+            _hK = _rK.get_data(as_text=True)
+            check("route : la bonne cle ouvre la page SANS session (aucun before_request ne bloque)",
+                  _rK.status_code == 200 and "Roucham SPAM" in _hK and "&amp;k=" + _k1 in _hK
+                  and 'class="n on"><a href="?tri=us&amp;sens=desc' in _hK, str(_rK.status_code))
+            check("route : ni cache, ni indexation, ni Referer (la cle est dans l adresse)",
+                  "no-store" in (_rK.headers.get("Cache-Control") or "")
+                  and "noindex" in (_rK.headers.get("X-Robots-Tag") or "")
+                  and _rK.headers.get("Referrer-Policy") == "no-referrer")
+            check("route : une cle fausse -> 403", _cN.get("/infloww/liens?k=faux" + _k1).status_code == 403)
+            check("route : ... meme pour un admin connecte",
+                  _cA.get("/infloww/liens?k=" + _k1[:-1]).status_code == 403)
+            check("route : ni cle ni session -> pas de page", _cN.get("/infloww/liens").status_code != 200)
+            _cC = _appL.test_client()
+            with _cC.session_transaction() as _s:
+                _s["auth"] = True; _s["username"] = "chat1"; _s["role"] = "chatter"
+            check("route : un chatteur sans cle est refuse",
+                  _cC.get("/infloww/liens").status_code == 403)
+            check("route : un chatteur connecte AVEC la cle voit la page (le lien du salon)",
+                  _cC.get("/infloww/liens?k=" + _k1).status_code == 200)
+        finally:
+            _wL._load_web_users = _usersL
+    finally:
+        (_il.ETAT_FICHIER, _il.CLE_FICHIER, _il.JETON_FICHIERS, _il.CONFIG_FICHIER,
+         _il.US_FICHIER, _il.GMS_CACHE, _il.US_EN_FOND, _il._requete, _il._dormir,
+         _il._dormir_us, _il.tableau, _il._aujourdhui, _il._lancer_us,
+         _ifL._creatrice_ou_erreur, _ifL.liens,
+         _gmL.list_links_team, _gmL.analytics_for_links, _gmL.pause_restante, _gmL.etat_quota) = _savL
+        import shutil as _shL
+        _shL.rmtree(_tmpL, ignore_errors=True)
+except Exception as _eL:
+    import traceback as _tbL
+    check("liens infloww : testable", False, repr(_eL)[:200] + " " + _tbL.format_exc()[-800:])
 
 print("=" * 70)
 print(f"RESULTAT : {len(OKS)} OK / {len(FAILS)} ECHEC(S)")

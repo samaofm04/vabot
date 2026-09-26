@@ -40961,8 +40961,13 @@ def _gmsdash_links_persist(team: str, links: list):
         d = {}
         if GMSDASH_LINKS_FILE.exists():
             d = json.loads(GMSDASH_LINKS_FILE.read_text(encoding="utf-8")) or {}
+        # « url » : la page /infloww/liens rattache chaque lien à son lien de
+        # suivi Infloww par l'adresse OnlyFans (…/c<N>). Sans elle, sa liste
+        # de secours ne rattachait plus rien, et chaque personne tombait en
+        # « lien Infloww introuvable » à la première panne de GetMySocial.
         d[team] = [{"id": l.get("id"), "shortcode": l.get("shortcode") or "",
-                    "display_name": l.get("display_name") or l.get("shortcode") or ""}
+                    "display_name": l.get("display_name") or l.get("shortcode") or "",
+                    "url": l.get("url") or ""}
                    for l in links if l.get("id")]
         tmp = GMSDASH_LINKS_FILE.with_suffix(".json.tmp")
         safe_json.write_text(tmp, json.dumps(d, ensure_ascii=False))
@@ -54746,6 +54751,58 @@ def _start_podium_semaine_daemon() -> bool:
     return True
 
 
+def _start_infloww_liens_daemon() -> bool:
+    """Les liens de suivi de Jessye, par personne : clics US et salon Discord.
+
+    Réveil toutes les 10 minutes. Deux travaux, chacun décidé par son module :
+    - les clics US « depuis toujours » (un appel GetMySocial par personne),
+      relevés une fois par jour ICI plutôt que pendant l'affichage de la page
+      /infloww/liens, qui montre le dernier relevé sans l'attendre ;
+    - les messages de Bixby dans « inflow-resultat », toutes les 2 h (Infloww
+      ne met pas ses liens à jour plus souvent). L'envoi est COUPÉ tant que
+      data/infloww_liens_config.json ne porte pas "discord_actif": true :
+      a_rafraichir() rend faux et rien ne part.
+    Un passage raté est retenté au réveil suivant. Seule la machine
+    propriétaire tourne : sans ça le Mac et le VPS, chacun avec son data/,
+    auraient tenu chacun leurs propres messages dans le salon.
+    """
+    import threading as _th_il
+    if not _machine_proprietaire("infloww-liens"):
+        return False
+    if getattr(_start_infloww_liens_daemon, "_on", False):
+        return False
+    _start_infloww_liens_daemon._on = True
+
+    def _boucle():
+        import time as _t_il
+        _t_il.sleep(120)                    # laisser le site se lever
+        dernier = None
+        dernier_us = None
+        while True:
+            try:
+                import infloww_liens as _il
+                if _il.us_a_rafraichir():
+                    s_us = _il.rafraichir_us()
+                    if s_us != dernier_us:
+                        print(f"[infloww-liens] {s_us}", flush=True)
+                        dernier_us = s_us
+                if _il.a_rafraichir():
+                    s = _il.rafraichir()
+                    # le même statut toutes les 10 min (jeton absent, par
+                    # exemple) noierait le journal : on ne dit que ce qui change
+                    if s != dernier:
+                        print(f"[infloww-liens] {s}", flush=True)
+                        dernier = s
+            except Exception as e:
+                print(f"[infloww-liens] boucle : {type(e).__name__}: {e}", flush=True)
+            _t_il.sleep(600)
+
+    _th_il.Thread(target=_boucle, daemon=True, name="infloww-liens").start()
+    print("[infloww-liens] liens de suivi armés (clics US une fois par jour, salon Discord "
+          "toutes les 2 h s'il est activé ; vérifié toutes les 10 min)", flush=True)
+    return True
+
+
 def _start_auto_scrape_daemon():
     """Background daemon : telecharge chaque heure les mp4 manquants.
 
@@ -55189,6 +55246,13 @@ def create_app():
         _start_podium_semaine_daemon()
     except Exception as _e:
         log.warning(f"podium de la semaine non démarré: {_e}")
+    # Les liens de suivi de Jessye par personne : clics US relevés une fois
+    # par jour ; le salon « inflow-resultat » (Bixby) reste coupé tant que
+    # data/infloww_liens_config.json ne l'active pas.
+    try:
+        _start_infloww_liens_daemon()
+    except Exception as _e:
+        log.warning(f"liens Infloww non démarrés: {_e}")
     # Collecte AUTO des SFS reçus (DM entrants) toutes les 5 min via l'API
     # MyPuls — sans elle, un message lu vite par un chatteur serait raté
     try:
@@ -62627,6 +62691,51 @@ def create_app():
         r = _R(html, mimetype="text/html")
         r.headers["Cache-Control"] = "no-store"
         return r
+
+    @app.route("/infloww/liens")
+    def infloww_liens_page():
+        """Les liens de suivi de Jessye, par personne de GetMySocial « JESSY
+        LE RETOUR » : clics US, clics OF, subs, CVR, $ par sub.
+
+        La page que Bixby met en tête de ses messages dans « inflow-resultat ».
+        Les VA qui l'ouvrent n'ont pas de compte : la clé de l'adresse (?k=)
+        suffit, comparée en temps constant. Sans clé, c'est la règle de
+        /infloww : admin seulement. Une clé FAUSSE est refusée même à un admin
+        connecté — elle ne se confond pas avec une absence de clé.
+        """
+        import hmac as _hm_il
+        from flask import Response as _R
+        import infloww_liens as _il
+
+        def _entetes(r):
+            r.headers["Cache-Control"] = "no-store"
+            # la clé est dans l'adresse : ni moteur de recherche, ni en-tête
+            # Referer qui la porterait vers un autre site
+            r.headers["X-Robots-Tag"] = "noindex, nofollow"
+            r.headers["Referrer-Policy"] = "no-referrer"
+            return r
+
+        k = str(request.args.get("k") or "")
+        if k:
+            try:
+                bonne = _il.cle_page()
+            except Exception as e:
+                log.warning(f"[infloww-liens] clé de la page illisible : {e}")
+                bonne = ""
+            if not (bonne and _hm_il.compare_digest(k.encode("utf-8"), bonne.encode("utf-8"))):
+                return _entetes(_R("Lien invalide.", status=403, mimetype="text/plain"))
+        else:
+            if not is_auth():
+                return redirect("/")
+            if not _is_admin():
+                return _entetes(_R("Réservé à l'administration.", status=403, mimetype="text/plain"))
+        try:
+            html = _il.page(request.args, cle=k)
+        except Exception as e:
+            # page() ne lève pas ; si elle le faisait, la panne s'affiche SUR
+            # la page plutôt qu'en page blanche
+            html = _il.page_html(_il._vide(f"{type(e).__name__} : {e}"))
+        return _entetes(_R(html, mimetype="text/html"))
 
     @app.route("/version")
     def version_du_site():
