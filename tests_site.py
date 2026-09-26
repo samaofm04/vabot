@@ -6252,6 +6252,21 @@ var brut2 = faireSection('form-cloudtemplates', true,  [true,false,false], 'favb
 toggleFavBruteFilter(brut2.btn);
 res.fav_portee_visible = nbCaches(brut2.grid);        // attendu 2
 res.fav_portee_cachee  = nbCaches(brut1.grid);        // attendu 0
+// --- ⊘ Desactivees : seules les brutes grisees (carte OU bouton ⊘) -------
+vider();
+var sb = faireSection('form-cloudbrutes', true, [true,false,false,false], 'favbrute-toggle-btn', 'fav-brute-star.is-fav');
+var bo = new El('button'); bo.attrs.id = 'offbrute-toggle-btn'; bo.setAttribute('data-on','0'); sb.sec.appendChild(bo);
+var cartesO = sb.grid.querySelectorAll('.cloud-card');
+cartesO[0].classes.push('is-reel-off');                       // ⭐ et grisee
+var boff = new El('button'); boff.classes.push('reel-disable'); boff.classes.push('is-off');
+cartesO[2].appendChild(boff);                                 // grisee par son bouton seul
+toggleOffBruteFilter(bo);
+res.off_seules = nbCaches(sb.grid);                           // attendu 2
+res.off_bouton = bo.getAttribute('data-on');                  // '1'
+toggleFavBruteFilter(sb.btn);
+res.off_et_fav = nbCaches(sb.grid);                           // attendu 3
+toggleOffBruteFilter(bo); toggleFavBruteFilter(sb.btn);
+res.off_eteint = nbCaches(sb.grid);                           // attendu 0
 console.log(JSON.stringify(res));
 """
 try:
@@ -6269,6 +6284,9 @@ try:
     # Le bouton rendu par le serveur PORTE l etat : sans data-on, la variable
     # de page reprenait la main et la galerie se vidait sous un bouton neutre.
     _srcF3 = pathlib.Path("web_upload.py").read_text(encoding="utf-8")
+    check("filtre ⊘ Desactivees : le bouton n existe que sur Video brut, apres ⭐ Bangers",
+          "id='offbrute-toggle-btn' data-on='0'" in _srcF3 and ') if subdir == "brutes" else ""' in _srcF3
+          and "{fav_brute_toggle_html}{off_brute_toggle_html}" in _srcF3)
     check("filtres etoile : le bouton rendu part neutre et porte l etat (data-on)",
           "id='banger-toggle-btn' data-on='0'" in _srcF3
           and "id='favbrute-toggle-btn' data-on='0'" in _srcF3)
@@ -6294,6 +6312,10 @@ try:
             check("filtre ★ : il ne survit pas au re-rendu de la section (bouton neutre = galerie entiere)",
                   _resF3.get("banger_apres_rerendu") == 0
                   and _resF3.get("banger_bouton_neutre") == "0", str(_resF3)[:200])
+            check("filtre ⊘ Desactivees : seules les brutes grisees (carte ou bouton ⊘)",
+                  _resF3.get("off_seules") == 2 and _resF3.get("off_bouton") == "1", str(_resF3)[:200])
+            check("filtre ⊘ + ⭐ : les ⭐ desactivees seulement ; eteint, tout revient",
+                  _resF3.get("off_et_fav") == 3 and _resF3.get("off_eteint") == 0, str(_resF3)[:200])
             check("filtre ⭐ brutes : il vise la galerie visible (Template montage), pas Video brut",
                   _resF3.get("fav_portee_visible") == 2
                   and _resF3.get("fav_portee_cachee") == 0, str(_resF3)[:200])

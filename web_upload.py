@@ -2240,6 +2240,11 @@ body.light #market-floating button{color:#4b5563!important}
    dore comme SIGNE (c est l etoile), en le fonçant assez pour se lire. */
 body.light #banger-toggle-btn,body.light #favbrute-toggle-btn{
   color:#8a6d0b!important;border-color:#e5e7eb!important}
+/* « ⊘ Desactivees » : le rouge du ⊘ des cartes, fonce pour le blanc. Allume,
+   un fond rose pale : le fond sombre pose en ligne serait noir sur blanc. */
+body.light #offbrute-toggle-btn{color:#b91c1c!important;border-color:#e5e7eb!important}
+body.light #offbrute-toggle-btn.vault-sort-active{background:rgba(239,68,68,.12)!important;
+  border-color:#b91c1c!important}
 /* Dix teintes de TEXTE n avaient aucune contrepartie claire : elles ont
    ete pensees sur du noir et se posaient telles quelles sur du blanc.
    Mesure faite dans la page, pas devinee : 211 elements concernes, tous
@@ -5522,6 +5527,7 @@ function vaultVuesAppliquer(sec){
   var bOn = vaultFiltreOn(sec, 'favbrute-toggle-btn');
   var tOn = vaultFiltreOn(sec, 'trash-toggle-btn');
   var fOn = vaultFiltreOn(sec, 'flash-toggle-btn');
+  var oOn = vaultFiltreOn(sec, 'offbrute-toggle-btn');
   var shown = 0;
   grid.querySelectorAll('.cloud-card').forEach(function(c){
     // La classe du BOUTON de la carte fait foi, pas une classe de carte :
@@ -5534,11 +5540,14 @@ function vaultVuesAppliquer(sec){
     var ok = (tOn || fOn) ? ((tOn && estTrash) || (fOn && estFlash))
                           : (!estFlash && !estTrash);
     if(bOn && !estFav) ok = false;
+    // ⊘ : la carte grisée OU son bouton ⊘ allumé (les deux vont ensemble ;
+    // le repérage du texte et le clic les posent tous les deux)
+    if(oOn && !(c.classList.contains('is-reel-off') || c.querySelector('.reel-disable.is-off'))) ok = false;
     c.style.display = ok ? '' : 'none';
     if(ok) shown++;
   });
   var vide = sec.querySelector('.vues-empty-note');
-  if(shown === 0 && (bOn || tOn || fOn)){
+  if(shown === 0 && (bOn || tOn || fOn || oOn)){
     if(!vide){
       vide = document.createElement('div');
       vide.className = 'vues-empty-note';
@@ -5551,7 +5560,8 @@ function vaultVuesAppliquer(sec){
     vide.textContent = familles.length
       ? ('Aucun montage ' + familles.join(' ni ') + (bOn ? ' marqué ⭐' : '')
          + ' pour cette identité.')
-      : 'Aucun ⭐ pour cette identité.';
+      : (oOn ? ('Aucune brute désactivée' + (bOn ? ' parmi les ⭐' : '') + ' pour cette identité.')
+             : 'Aucun ⭐ pour cette identité.');
     vide.style.display = '';
   } else if(vide){ vide.style.display = 'none'; }
 }
@@ -5681,6 +5691,8 @@ async function toggleReelDisabled(btn, fileId){
     if(card) card.classList.toggle('is-reel-off', off);
     btn.classList.toggle('is-off', off);
     btn.style.color = off ? '#ef4444' : '#9aa0a6';
+    // filtre « ⊘ Désactivées » allumé : une brute rallumée quitte la vue
+    capOffRefiltrer();
     if(typeof showToast === 'function') showToast(off ? '⊘ Vidéo désactivée' : '✓ Vidéo réactivée', off ? 'warning' : 'success');
   }catch(e){ alert('Erreur réseau : ' + e); }
   finally{ btn.disabled = false; btn.style.opacity = '1'; }
@@ -5881,6 +5893,25 @@ function toggleFavBruteFilter(btn){
   vaultFiltreBouton(b, actif, '⭐ Bangers ✓', '⭐ Bangers');
   favBruteApply(sec);
 }
+// Refiltre la galerie visible apres un ⊘, SEULEMENT si elle porte le bouton
+// « ⊘ Desactivees » (Video brut) : sur Reels, vaultVuesAppliquer aurait
+// reaffiche les cartes que « ★ Reels Banger » cache par sa propre logique.
+function capOffRefiltrer(){
+  try{
+    var s = vaultSectionVisible();
+    if(s && s.querySelector('#offbrute-toggle-btn')) vaultVuesAppliquer(s);
+  }catch(e){}
+}
+// ⊘ Desactivees : seules les brutes grisees. Se combine avec ⭐ (les ⭐
+// desactivees). Le rouge du ⊘ plutot que le dore des etoiles.
+function toggleOffBruteFilter(btn){
+  var sec = vaultFiltreSection(btn);
+  var b = btn || (sec ? sec.querySelector('#offbrute-toggle-btn') : null);
+  var actif = !(b && b.getAttribute('data-on') === '1');
+  vaultFiltreBouton(b, actif, '⊘ Désactivées ✓', '⊘ Désactivées');
+  if(b){ b.style.background = actif ? '#3a1111' : '#1a1a1a'; b.style.borderColor = actif ? '#ef4444' : '#3a3a3a'; }
+  vaultVuesAppliquer(sec);
+}
 // === « Appliquer a toutes » : propager les tags des montages ===========
 //
 // Le meme montage sert a presque toutes les identites. Ce bouton recopie ses
@@ -6075,6 +6106,7 @@ function scanTexteAfficher(rap){
     var b = card ? card.querySelector('button[onclick*="toggleReelDisabled"]') : null;
     if(b){ b.classList.toggle('is-off', off); b.style.color = off ? '#ef4444' : '#9aa0a6'; }
   });
+  capOffRefiltrer();   // la vue « ⊘ Désactivées » suit le rapport
   try{ window.__vaultPrefetchCache={}; window.__vaultPrefetchOrder=[]; }catch(e){}
   // data-attributs + addEventListener : ce JS vit dans une chaine Python, et
   // une apostrophe echappee a la main y tuerait le script de la page entiere,
@@ -25458,6 +25490,17 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         "font-weight:700;font-family:inherit;white-space:nowrap'>⭐ Bangers</button>"
     ) if subdir in ("brutes", "templates") else ""
 
+    # Bouton « ⊘ Désactivées » : ne montrer QUE les brutes grisées (⊘ à la
+    # main ou éteintes par « Repérer le texte »), pour les revoir et en
+    # rallumer. Même mécanique que ⭐ Bangers : le bouton porte l'état.
+    off_brute_toggle_html = (
+        "<button type='button' id='offbrute-toggle-btn' data-on='0' onclick='toggleOffBruteFilter(this)' "
+        "title='Afficher seulement les brutes désactivées (grisées)' "
+        "style='display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:#1a1a1a;"
+        "border:1px solid #3a3a3a;border-radius:8px;color:#f87171;cursor:pointer;font-size:13px;"
+        "font-weight:700;font-family:inherit;white-space:nowrap'>⊘ Désactivées</button>"
+    ) if subdir == "brutes" else ""
+
     # Les registres de marques, lus UNE fois pour la galerie, en STRICT : un
     # registre illisible se lirait comme vide et TOUS ses montages
     # reapparaitraient dans la vue de base, sans un mot. On le dit en tete.
@@ -25726,7 +25769,7 @@ def _render_cloud_content_html(subdir: str, exts, include_jb: bool = False,
         + f"</div>"
         # flex-wrap : sur un telephone, un bouton de plus poussait la rangee
         # hors de l'ecran. Ordre voulu : ⭐ Bangers · Trash · ⚡ Flash Trend.
-        f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap'>{banger_toggle_html}{fav_brute_toggle_html}{trash_trend_toggle_html}{flash_toggle_html}{sync_tags_html}{scan_texte_html}{sort_btn_html}</div>"
+        f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap'>{banger_toggle_html}{fav_brute_toggle_html}{off_brute_toggle_html}{trash_trend_toggle_html}{flash_toggle_html}{sync_tags_html}{scan_texte_html}{sort_btn_html}</div>"
         f"</div>"
         + _marques_avis_html(_marques_g, _marques_err, selected, files)
     )
