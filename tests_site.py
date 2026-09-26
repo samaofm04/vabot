@@ -5289,8 +5289,15 @@ try:
         _fCv.write_text(_savCv, encoding="utf-8")
 
     # -- le menu VA porte bien les deux boutons -----------------------------
+    # Depuis le 26/09/2026 le menu VA est une LayoutView « Components V2 » :
+    # ses boutons et ses menus vivent dans un conteneur, sur des rangees. On
+    # les parcourt a toute profondeur (walk_children) ; .children ne rendrait
+    # que le conteneur.
+    import discord as _dFv
     _vFv = _uFv.ContentMenuView(None)
-    _idsFv = [getattr(i, "custom_id", "") for i in _vFv.children]
+    _idsFv = [getattr(i, "custom_id", "") for i in _vFv.walk_children()]
+    _optsFv = {o.value for i in _vFv.walk_children()
+               if isinstance(i, _dFv.ui.Select) for o in i.options}
     # Quatre depuis le 21/08 : « Caption + Brut » a quitte le menu. Il prenait
     # le meme couple d'ingredients que « Montage » — une brute etoilee et une
     # caption etoilee — mais les envoyait separement, la caption en texte a
@@ -5305,11 +5312,16 @@ try:
     # pas. Ce qu'on protege ne change pas : chacun reste ATTEIGNABLE depuis le
     # menu VA, en bouton direct ou par le lanceur de sa famille. (Les anciens
     # custom_id des menus deja epingles restent geres : tests_jailbreak.py.)
+    # Depuis le 26/09/2026 (menus directs), le lanceur « ▸ » et son sous-menu
+    # ont laisse place a UN MENU DEROULANT PAR FAMILLE (« cmenu:sel:<famille> »)
+    # dans le menu lui-meme : une variante est atteignable si c'est une option
+    # du menu de SA famille.
     def _atteignableFv(b):
         if b in _idsFv:
             return True
         _cleFv = b.split(":", 1)[1]
-        return any(_cleFv in _f.actions and ("cmenu:fam:" + _f.cle) in _idsFv
+        return any(_cleFv in _f.actions and ("cmenu:sel:" + _f.cle) in _idsFv
+                   and _cleFv in _optsFv
                    and _cleFv in _uFv._variantes_menu_va(_f.cle, None, False)
                    for _f in _uFv._FAMILLES_MENU)
 
@@ -5321,12 +5333,16 @@ try:
           str([b for b in _BTNS if _uFv._MENU_BTN_FEATURE.get(b) != "contenu"]))
     # Discord plafonne a 5 boutons par rangee : une 6e sur la meme ligne fait
     # echouer l instanciation de la vue, donc le menu entier.
-    from collections import Counter as _CntFv
-    _rowsV = _CntFv(i.row for i in _vFv.children)
+    _rowsV = [len(_r.children) for _r in _vFv.walk_children()
+              if isinstance(_r, _dFv.ui.ActionRow)]
     check("favoris : aucune rangee du menu VA ne deborde",
-          all(n <= 5 for n in _rowsV.values()), str(dict(_rowsV)))
-    check("favoris : la vue tient dans les 25 composants de Discord",
-          len(_vFv.children) <= 25, "%d composants" % len(_vFv.children))
+          _rowsV and all(n <= 5 for n in _rowsV), str(_rowsV))
+    # CHANGEMENT VOULU (26/09/2026) : en « Components V2 », la limite n est
+    # plus 25 elements sur 5 rangees mais 40 COMPOSANTS -- conteneur, texte
+    # et rangees compris (total_children_count les compte tous).
+    check("favoris : la vue tient dans les 40 composants de Discord (V2)",
+          _vFv.total_children_count <= 40 and _vFv.content_length() <= 4000,
+          "%d composants" % _vFv.total_children_count)
 
     # -- le menu du serveur US -----------------------------------------------
     # Le serveur US n'utilise PAS ContentMenuView : ses salons -menu portent le
@@ -5361,19 +5377,21 @@ try:
     # echoue alors que le panneau tenait parfaitement. Un test qui reimplemente
     # ce qu il verifie ne verifie que sa propre copie.
     #
-    # Le selecteur de quantite n a pas de rangee fixee (row=None) : Discord la
-    # lui attribue. On ne compte donc que ce qui en porte une.
-    _emb_us, _vue_us = _uFv._jb_panel(None, "test", 3, "us", None)
-    _rowsFv = {}
-    for _it in _vue_us.children:
-        if getattr(_it, "row", None) is not None:
-            _rowsFv[_it.row] = _rowsFv.get(_it.row, 0) + 1
+    # Depuis le 26/09/2026, _jb_panel rend UNE LayoutView « Components V2 »
+    # (plus de couple embed, vue) : les rangees sont de vraies ActionRow, dans
+    # un conteneur, et elles SONT la disposition -- on les compte telles
+    # quelles, dans l ordre.
+    _vue_us = _uFv._jb_panel(None, "test", 3, "us", None)
+    _rowsFv = {_i: len(_r.children) for _i, _r in enumerate(
+        _r for _r in _vue_us.walk_children() if isinstance(_r, _dFv.ui.ActionRow))}
     check("favoris : le panneau US ne deborde aucune rangee",
-          all(_n <= 5 for _n in _rowsFv.values()) and max(_rowsFv) <= 4,
+          _rowsFv and all(_n <= 5 for _n in _rowsFv.values()),
           str(_rowsFv))
-    check("favoris : le panneau US tient dans les 25 composants de Discord",
-          len(_vue_us.children) <= 25,
-          "%d composants" % len(_vue_us.children))
+    # CHANGEMENT VOULU : la limite V2 est de 40 composants (conteneur, texte
+    # et rangees compris), plus 25 elements sur 5 rangees.
+    check("favoris : le panneau US tient dans les 40 composants de Discord (V2)",
+          _vue_us.total_children_count <= 40 and _vue_us.content_length() <= 4000,
+          "%d composants" % _vue_us.total_children_count)
     # Une rangee = une famille : identite, photos, brut+Flash, favoris ⭐.
     # C'est la forme VOULUE du panneau, pas un effet de bord d'un « i // 4 » --
     # une action ajoutee ne doit plus pousser les suivantes sur la ligne
@@ -5424,19 +5442,40 @@ try:
     # la quantite (un bouton depuis qu'elle a quitte le deroulant) et
     # l'identite ; 1 : les trends et les publications ; 2 : le brut. Une
     # famille de plus ne coutera qu'un lanceur.
-    check("favoris : le panneau US garde ses 4 familles sur 4 rangees",
-          _rowsFv == {0: 5, 1: 4, 2: 3, 3: 4}, str(_rowsFv))
+    #
+    # Forme du 26/09/2026 : {0:5, 1:3} puis cinq menus -- CHANGEMENT VOULU
+    # (maquette /demopanneau validee par le proprietaire : « c'est good,
+    # vas-y »). Les lanceurs « ▸ » et leurs sous-menus ephemeres laissent
+    # place a UN MENU DEROULANT PAR FAMILLE, directement dans le panneau :
+    # Brut, Caption, Template, Trash, Flash, chacun sur sa rangee (un menu
+    # prend une rangee entiere). Rangee 0 : la quantite et l identite ; 1 : les
+    # publications. Le ⭐⭐⭐ Trends est retire (« pas encore good »). Le
+    # panneau passe au format « Components V2 » : un message classique
+    # plafonne a cinq rangees, sept n y tiendraient pas.
+    _familles_us = [_f.cle for _f in _uFv._FAMILLES_PANNEAU]
+    check("favoris : le panneau US = 2 rangees de boutons puis un menu par famille",
+          _rowsFv == {0: 5, 1: 3, **{2 + _i: 1 for _i in range(len(_familles_us))}}
+          and _familles_us == ["brut", "caption", "template", "trash", "flash"],
+          str((_rowsFv, _familles_us)))
     check("favoris : et il ne deborde jamais les 5 places par rangee",
-          all(_n <= 5 for _n in _rowsFv.values()) and len(_rowsFv) <= 4
-          and sum(_rowsFv.values()) <= 20,
+          all(_n <= 5 for _n in _rowsFv.values())
+          and _vue_us.total_children_count <= 40,
           str(_rowsFv))
-    check("favoris : le ⭐⭐⭐ Trends est la, et c est le seul",
+    # Le ⭐⭐⭐ reste DECLARE : les panneaux deja postes portent encore
+    # « jbus:a:…:trend:… » et doivent repondre. Mais il est masque EXPRES
+    # (_JB_MASQUEES) et n apparait plus nulle part dans le panneau.
+    _js_us = _jsFv.dumps(_vue_us.to_components(), ensure_ascii=False)
+    check("favoris : le ⭐⭐⭐ Trends reste declare, un seul, mais masque du panneau",
           len([_b for _b in _uFv._JB_ACTIONS_US
-               if _b[0] in _uFv._JB_CLES_TREND]) == 1)
-    # Et chaque action connait sa rangee : sans entree, elle retombe sur le
-    # filet et atterrit n'importe ou.
+               if _b[0] in _uFv._JB_CLES_TREND]) == 1
+          and "trend" in _uFv._JB_MASQUEES
+          and ":trend:" not in _js_us and "⭐⭐⭐" not in _js_us)
+    # Et chaque action connait sa place : sans entree, elle retombe sur le
+    # filet et atterrit n'importe ou. Seule exception : une action masquee
+    # EXPRES (_JB_MASQUEES), qui n a pas de place et ne doit pas en avoir.
     check("favoris : chaque action US a une rangee attribuee",
-          all(a[0] in _uFv._JB_RANGEES for a in _uFv._JB_ACTIONS_US),
+          all(a[0] in _uFv._JB_RANGEES or a[0] in _uFv._JB_MASQUEES
+              for a in _uFv._JB_ACTIONS_US),
           str([a[0] for a in _uFv._JB_ACTIONS_US
                if a[0] not in _uFv._JB_RANGEES]))
 
@@ -16346,66 +16385,119 @@ try:
         # -- 4. le message General : etats, rangees, custom_id ------------------
         # JBFamilleBouton (« jbus:f: », les lanceurs de famille du panneau US
         # depuis le 25/09/2026) en fait partie : un custom_id jbg: qui tomberait
-        # sous son motif lancerait les deux.
+        # sous son motif lancerait les deux. Depuis le 26/09/2026, les menus
+        # deroulants du panneau (JBMenuFamille, « jbus:s: ») aussi.
         _tplJbus = [getattr(c, "__discord_ui_compiled_template__")
                     for c in (_cuGn.JBModelButton, _cuGn.JBQtyBouton, _cuGn.JBQtySelect,
-                              _cuGn.JBActionButton, _cuGn.JBFamilleBouton)]
+                              _cuGn.JBActionButton, _cuGn.JBFamilleBouton,
+                              _cuGn.JBMenuFamille)]
+        # ... et le menu deroulant du General lui-meme (JBGenMenu, « jbg:s: »).
         _tplJbg = [getattr(c, "__discord_ui_compiled_template__")
-                   for c in (_cuGn.JBGenButton, _cuGn.JBGenQtyBouton, _cuGn.JBGenReserveBouton)]
+                   for c in (_cuGn.JBGenButton, _cuGn.JBGenQtyBouton, _cuGn.JBGenReserveBouton,
+                             _cuGn.JBGenMenu)]
 
+        # CHANGEMENT VOULU (26/09/2026, partie E -- le proprietaire : « le menu
+        # stp juste pour caption template trash et flash ») : _jb_general rend
+        # UNE LayoutView « Components V2 », plus de couple (embed, vue). Ses
+        # boutons et ses menus vivent dans un conteneur, sur des rangees : on
+        # les parcourt a toute profondeur (walk_children). Son texte remplace
+        # l embed ; sa DERNIERE ligne, « -# panneau-general-us », remplace le
+        # pied. Un etat sans action n a que le texte (plus de view=None).
         def _idsGn(v):
-            return [getattr(getattr(i, "item", i), "custom_id", "") for i in v.children]
+            return ([i.custom_id for i in v.walk_children()
+                     if isinstance(i, _dGn.ui.DynamicItem)] if v is not None else [])
 
-        _eAtt, _vAtt = _cuGn._jb_general(None, "_")
-        _eNue, _vNue = _cuGn._jb_general(None, "zgen_ident")
-        check("general : en attente et sans reserve, AUCUN bouton (view=None)",
-              _vAtt is None and _vNue is None)
+        def _texteGn(v):
+            return ("\n".join(i.content for i in v.walk_children()
+                              if isinstance(i, _dGn.ui.TextDisplay)) if v is not None else "")
+
+        def _menusGn(v):
+            """{famille: [valeurs des options]} des menus du General, dans l ordre."""
+            return {i.custom_id.split(":")[4]: [o.value for o in i.item.options]
+                    for i in v.walk_children()
+                    if isinstance(i, _dGn.ui.DynamicItem) and isinstance(i.item, _dGn.ui.Select)}
+
+        def _rangeesGn(v):
+            return [[c.custom_id for c in r.children] for r in v.walk_children()
+                    if isinstance(r, _dGn.ui.ActionRow)]
+
+        _vAtt = _cuGn._jb_general(None, "_")
+        _vNue = _cuGn._jb_general(None, "zgen_ident")
+        check("general : en attente et sans reserve, AUCUN bouton (texte seul, V2)",
+              all(isinstance(v, _dGn.ui.LayoutView) and v.has_components_v2()
+                  and not _idsGn(v) and _texteGn(v) for v in (_vAtt, _vNue)))
         check("general : sans reserve, il dit ou la lier sur le site",
-              "Réserves liées" in (_eNue.description or ""), (_eNue.description or "")[:120])
-        _eNue2, _vNue2 = _cuGn._jb_general(None, "zgen_nue")
+              "Réserves liées" in _texteGn(_vNue), _texteGn(_vNue)[:120])
+        _vNue2 = _cuGn._jb_general(None, "zgen_nue")
         check("general : les liens ecartes sont dits, avec leur raison",
-              "zgen_ident" in _eNue2.description and "zgen_fantome" in _eNue2.description
-              and _vNue2 is not None)
-        _e1, _v1 = _cuGn._jb_general(None, "zgen_lola", 3)
+              "zgen_ident" in _texteGn(_vNue2) and "zgen_fantome" in _texteGn(_vNue2)
+              and "n'est plus une réserve" in _texteGn(_vNue2)
+              and "dossier absent" in _texteGn(_vNue2)
+              and _idsGn(_vNue2), _texteGn(_vNue2)[:200])
+        _v1 = _cuGn._jb_general(None, "zgen_lola", 3)
         _ids1 = _idsGn(_v1)
+        _m1 = _menusGn(_v1)
         # 11 -> 13 le 25/09/2026, CHANGEMENT VOULU : « Trash » et « ⭐ Trash »
-        # rejoignent la rangee 4, devant Flash (Trash vit « entre » les
-        # templates et Flash). 13 actions + la quantite = 14 identifiants.
-        check("general : une reserve -> 13 actions + la quantite, pas de choix de reserve",
-              len(_ids1) == 14 and not any(i.startswith("jbg:r:") for i in _ids1), str(_ids1)[:160])
+        # rejoignent le General, devant Flash (Trash vit « entre » les
+        # templates et Flash).
+        # 26/09/2026, CHANGEMENT VOULU (partie E) : les 13 actions restent,
+        # mais les 8 de Caption, Template, Trash et Flash sont les options de
+        # QUATRE menus ; PP, Bio, Story, Story CTA et Post restent des
+        # boutons. D ou 10 identifiants : la quantite, 5 boutons, 4 menus.
+        _acts1 = [i.split(":")[4] for i in _ids1 if i.startswith("jbg:a:")] + [
+            a for _o in _m1.values() for a in _o]
+        check("general : une reserve -> 13 actions (5 boutons + 4 menus) + la quantite, pas de choix de reserve",
+              len(_ids1) == 10 and len(_acts1) == 13 and len(set(_acts1)) == 13
+              and sum(i.startswith("jbg:a:") for i in _ids1) == 5
+              and sum(i.startswith("jbg:s:") for i in _ids1) == 4
+              and not any(i.startswith("jbg:r:") for i in _ids1), str(_ids1)[:200])
         import marques_montage as _mmGn
-        _r4Gn = [getattr(i, "item", i).custom_id.split(":")[4] for i in _v1.children
-                 if getattr(i, "row", None) == 4]
-        check("general : rangee 4 = Trash, ⭐ Trash, puis Flash, ⭐ Flash",
-              _r4Gn == list(_mmGn.MARQUES["trash"]["actions"][:2])
-              + list(_mmGn.MARQUES["flash"]["actions"][:2]), str(_r4Gn))
+        # CHANGEMENT VOULU (partie E) : Trash et Flash ne partagent plus la
+        # rangee 4 -- chacun est un menu, sur sa rangee, Trash juste avant
+        # Flash. Ce qu on protege reste l ordre et les variantes.
+        _ordreMGn = [c.split(":")[4] for r in _rangeesGn(_v1) for c in r if c.startswith("jbg:s:")]
+        check("general : menus Caption, Template, puis Trash (Trash, ⭐ Trash), puis Flash (Flash, ⭐ Flash)",
+              _ordreMGn == ["caption", "template", "trash", "flash"]
+              and _m1.get("trash") == list(_mmGn.MARQUES["trash"]["actions"][:2])
+              and _m1.get("flash") == list(_mmGn.MARQUES["flash"]["actions"][:2])
+              and all(len(r) == 1 for r in _rangeesGn(_v1) if r[0].startswith("jbg:s:")),
+              str((_ordreMGn, _m1)))
         check("general : les cles sont exactement celles de la liste blanche",
-              {i.split(":")[4] for i in _ids1 if i.startswith("jbg:a:")} == set(_cuGn._JB_GENERAL_RANGEES)
-              and set(_cuGn._JB_GENERAL_RANGEES) <= {a[0] for a in _cuGn._JB_ACTIONS_US})
-        check("general : footer « panneau-general-us », jamais « menu » ni « Jailbreak » dans le titre",
-              all(e.footer.text == "panneau-general-us"
-                  and "menu" not in (e.title or "").lower() and "jailbreak" not in (e.title or "").lower()
-                  for e in (_eAtt, _eNue, _e1)))
+              set(_acts1) == set(_cuGn._JB_GENERAL_RANGEES)
+              and set(_cuGn._JB_GENERAL_RANGEES) <= {a[0] for a in _cuGn._JB_ACTIONS_US},
+              str(set(_acts1) ^ set(_cuGn._JB_GENERAL_RANGEES)))
+        # CHANGEMENT VOULU : plus de pied d embed -- la marque est la derniere
+        # ligne du texte, et le titre est sa premiere.
+        check("general : marque « -# panneau-general-us » en derniere ligne, jamais « menu » ni « Jailbreak » dans le titre",
+              all(_texteGn(v).splitlines()[-1] == "-# panneau-general-us"
+                  and _texteGn(v).splitlines()[0].startswith("## ✨ General")
+                  and "menu" not in _texteGn(v).splitlines()[0].lower()
+                  and "jailbreak" not in _texteGn(v).splitlines()[0].lower()
+                  for v in (_vAtt, _vNue, _v1)),
+              [_texteGn(v).splitlines()[:1] for v in (_vAtt, _vNue, _v1)])
         check("general : un nom qui contient « menu » ne passe pas dans le titre",
               _cuGn._titre_general("✨ General — Emenu pour Lola") == "✨ General")
         safe_json.write(_tiGn.FICHIER_LIENS, {"zgen_lola": ["zgen_blonde"], _M30: _R30})
         _tiGn._CACHE_LIENS.update(sig=None, data={})
-        _e5, _v5 = _cuGn._jb_general(None, _M30, 100, reserve=_R30[4])
+        _v5 = _cuGn._jb_general(None, _M30, 100, reserve=_R30[4])
         _ids5 = _idsGn(_v5)
-        _rows5 = {}
-        for _it in _v5.children:
-            _rows5[_it.row] = _rows5.get(_it.row, 0) + 1
+        _rows5 = [len(r) for r in _rangeesGn(_v5)]
+        # Limite V2 : 40 composants (conteneur, texte et rangees compris), plus
+        # 25 elements sur 5 rangees.
         check("general : 5 reserves -> 4 boutons de choix + quantite en rangee 0, aucune rangee pleine",
-              _rows5.get(0) == 5 and all(n <= 5 for n in _rows5.values())
-              and len(_v5.children) <= 25, str(_rows5))
+              _rows5 and _rows5[0] == 5 and all(n <= 5 for n in _rows5)
+              and _v5.total_children_count <= 40 and _v5.content_length() <= 4000,
+              str((_rows5, _v5.total_children_count)))
         check("general : la reserve active reste visible et marquee, meme 5e",
-              any(getattr(i.item, "style", None) == _dGn.ButtonStyle.success
-                  and i.item.custom_id.startswith("jbg:r:") and _R30[4] in i.item.custom_id
-                  for i in _v5.children))
-        check("general : le surplus est compte dans l embed, pas ecarte en silence",
-              "+1 autre" in (_e5.description or ""), (_e5.description or "")[:200])
+              any(isinstance(i, _dGn.ui.DynamicItem) and isinstance(i.item, _dGn.ui.Button)
+                  and i.item.style == _dGn.ButtonStyle.success
+                  and i.custom_id.startswith("jbg:r:") and _R30[4] in i.custom_id
+                  for i in _v5.walk_children()))
+        check("general : le surplus est compte dans le texte, pas ecarte en silence",
+              "+1 autre" in _texteGn(_v5), _texteGn(_v5)[:200])
         check("general : custom_id de 100 caracteres au plus, noms de 30 et quantite 100",
-              max(len(i) for i in _ids5) <= 100, str(max(len(i) for i in _ids5)))
+              _ids5 and max(len(i) for i in _ids5) <= 100,
+              str(max(len(i) for i in _ids5) if _ids5 else "aucun custom_id"))
         check("general : aucun custom_id jbg: ne tombe sous un motif jbus:",
               not any(t.fullmatch(i) for t in _tplJbus for i in _ids5 + _ids1))
         check("general : chaque custom_id jbg: correspond a UN seul motif du General",
@@ -16461,6 +16553,64 @@ try:
         _appelsGn.clear(); _i = _itxGn()
         _aioGn.run(_cuGn.JBGenButton("zgen_lola", "zgen_blonde", "brute", 3).callback(_i))
         check("clic : une cle hors liste blanche est refusee", not _appelsGn and _i.response.msgs)
+
+        # Le MENU du General (partie E, 26/09/2026) passe par les MEMES gardes
+        # que le bouton (_jb_gen_controle) -- ici avec les VRAIS liens de
+        # type_identite, sur fichiers temporaires. Il repond en redessinant le
+        # message (le menu reprend son intitule, sinon re-choisir la meme
+        # option ne declencherait rien) et dit un refus en suivi ephemere : son
+        # faux Discord a donc edit_message et followup, et refuse une seconde
+        # reponse comme Discord.
+        class _RepMnGn(_RepGn):
+            def __init__(self):
+                super().__init__()
+                self.edits = []
+
+            async def edit_message(self, *a, **k):
+                if self.fait:
+                    raise RuntimeError("seconde reponse a la meme interaction")
+                self.edits.append(k)
+                self.fait = True
+
+        def _choisirGn(model, res, fam, valeur):
+            _mn = _cuGn.JBGenMenu(model, res, fam, 3)
+            _mn.item._values = [valeur]
+            _iM = _itxGn()
+            _iM.response = _RepMnGn()
+            _iM.suivis = []
+
+            async def _suivi(*a, **k):
+                _iM.suivis.append((a[0] if a else k.get("content"), k.get("ephemeral")))
+            _iM.followup = _tyGn.SimpleNamespace(send=_suivi)
+            _aioGn.run(_mn.callback(_iM))
+            return _iM
+
+        _appelsGn.clear()
+        _i = _choisirGn("zgen_lola", "zgen_blonde", "flash", "templateflash")
+        _vMn = _i.response.edits[0].get("view") if _i.response.edits else None
+        check("clic menu : meme appel que le bouton, puis le General revient sur son intitule",
+              _appelsGn == [("zgen_blonde", "CMD_FLASH", 3, "zgen_lola")]
+              and len(_i.response.edits) == 1 and not _i.response.msgs
+              and _vMn is not None and len(_menusGn(_vMn)) == 4
+              and not any(o.default for it in _vMn.walk_children()
+                          if isinstance(it, _dGn.ui.DynamicItem)
+                          and isinstance(it.item, _dGn.ui.Select) for o in it.item.options),
+              str((_appelsGn, _i.response.edits, _i.response.msgs))[:200])
+        _appelsGn.clear()
+        _i = _choisirGn("zgen_lola", "zgen_brune", "flash", "templateflash")
+        check("clic menu : une reserve qui n est plus liee est refusee, comme par le bouton",
+              not _appelsGn and len(_i.response.edits) == 1
+              and "n'est plus liée" in str(_i.suivis) and _i.suivis[0][1] is True,
+              str(_i.suivis)[:160])
+        _appelsGn.clear()
+        _i = _choisirGn("zgen_lola", "zgen_blonde", "caption", "brutcaption")
+        check("clic menu : une valeur hors de sa famille (Brut forge) est refusee",
+              not _appelsGn and len(_i.response.edits) == 1 and "inconnue" in str(_i.suivis),
+              str(_i.suivis)[:160])
+        _appelsGn.clear()
+        _i = _choisirGn("zgen_nue", "zgen_blonde", "flash", "templateflash")
+        check("clic menu : model sans brute -> refus immediat, comme le bouton",
+              not _appelsGn and "aucune vidéo brute" in str(_i.suivis), str(_i.suivis)[:160])
         # Les gardes « reserve » des boutons de la grille et du panneau.
         _i = _itxGn()
         _aioGn.run(_cuGn.JBModelButton("zgen_blonde").callback(_i))
@@ -16488,13 +16638,47 @@ try:
             def __init__(self, i):
                 self.id = i
 
+        # Depuis le 26/09/2026 le panneau d actions est un message
+        # « Components V2 » : SANS embed, reconnu a la marque de son texte
+        # (_est_panneau_actions), et il est converti par une edition qui vide
+        # texte ET embed (content=None, embed=None). Le faux message suit donc
+        # Discord : pas d embed quand il n y en a pas, les composants tels que
+        # Discord les renvoie, et une edition qui ne touche que ce qu elle
+        # nomme. Depuis le 26/09/2026 (partie E), le ✨ General est lui aussi
+        # un message V2 (_est_general, marque « -# panneau-general-us ») : le
+        # faux message porte donc le drapeau components_v2 de Discord, que le
+        # bot lit pour savoir s il doit encore vider texte et embed.
+        from discord.components import _component_factory as _cfGn
+
+        def _compsGn(view):
+            return ([_cfGn(d) for d in view.to_components()]
+                    if view is not None and view.has_components_v2() else [])
+
+        def _v2Gn(view):
+            return bool(view is not None and view.has_components_v2())
+
         class _MsgGn:
             def __init__(self, ch, emb, view):
-                self.id, self.ch, self.embeds = next(_nGn), ch, [emb]
+                self.id, self.ch = next(_nGn), ch
+                self.embeds = [emb] if emb is not None else []
                 self.view, self.author, self.pinned = view, _AutGn(1), False
+                self.components = _compsGn(view)
+                self.flags = _tyGn.SimpleNamespace(ephemeral=False, components_v2=_v2Gn(view))
 
-            async def edit(self, embed=None, view=None, **k):
-                self.embeds, self.view = [embed], view
+            async def edit(self, **k):
+                if "embed" in k:
+                    self.embeds = [k["embed"]] if k["embed"] is not None else []
+                if "view" in k:
+                    # Discord refuse un V2 qui garderait son embed : le
+                    # faux message aussi, sinon une conversion ratee passerait.
+                    if _v2Gn(k["view"]) and self.embeds:
+                        raise _dGn.HTTPException(
+                            _tyGn.SimpleNamespace(status=400, reason="Bad Request"),
+                            "V2 avec un embed restant")
+                    self.view = k["view"]
+                    self.components = _compsGn(self.view)
+                    if _v2Gn(self.view):
+                        self.flags.components_v2 = True
 
             async def delete(self):
                 self.ch.msgs.remove(self)
@@ -16540,27 +16724,67 @@ try:
             async def purge(self, limit=200, check=None):
                 self.msgs[:] = [m for m in self.msgs if not check(m)]
 
+        def _piedGn(m):
+            return (m.embeds[0].footer.text or "") if m.embeds else ""
+
         def _ordreGn(ch):
-            return "".join({"panneau-general-us": "G", "panneau-actions-us": "P"}.get(
-                m.embeds[0].footer.text or "", "M") for m in ch.msgs)
+            # P : le panneau d actions ; G : le ✨ General -- chacun dans l un
+            # ou l autre format, et c est la fonction du bot qui le dit, comme
+            # dans les epingles.
+            return "".join("P" if _cuGn._est_panneau_actions(m, 1)
+                           else "G" if _cuGn._est_general(m, 1) else "M"
+                           for m in ch.msgs)
 
         _gfGn.is_us_guild = lambda g: True
         _cuGn.marche_du_membre = lambda m: "us"
         _chGn = _ChanGn(4242)
         _i = _itxGn(_chGn)
         _aioGn.run(_cuGn.JBModelButton("zgen_lola").callback(_i))
-        _gen = [m for m in _chGn.msgs if m.embeds[0].footer.text == "panneau-general-us"]
+        _gen = [m for m in _chGn.msgs if _cuGn._est_general(m, 1)]
         check("clic model : panneau d actions PUIS General, epingles, id memorise",
               _ordreGn(_chGn) == "PG" and _gen[0].pinned
               and _cuGn._jb_general_ids().get("4242") == str(_gen[0].id), _ordreGn(_chGn))
+        # CHANGEMENT VOULU (partie E) : le General pose est V2 -- sans embed,
+        # reconnu a sa marque, pas a un pied d embed.
+        check("clic model : le General pose est un message V2, sans embed, marque en derniere ligne",
+              _gen and not _gen[0].embeds and _gen[0].flags.components_v2
+              and _texteGn(_gen[0].view).splitlines()[-1] == "-# panneau-general-us"
+              and _piedGn(_gen[0]) == "", _texteGn(_gen[0].view)[-80:] if _gen else "aucun")
         check("clic model : le General porte les boutons de la reserve liee",
               _gen[0].view is not None
               and any("zgen_blonde" in c for c in _idsGn(_gen[0].view)))
         _i = _itxGn(_chGn)
+        _idGenAvant = _gen[0].id if _gen else None
         _aioGn.run(_cuGn.JBModelButton("zgen_ident").callback(_i))
-        _gen = [m for m in _chGn.msgs if m.embeds[0].footer.text == "panneau-general-us"]
+        _gen = [m for m in _chGn.msgs if _cuGn._est_general(m, 1)]
+        # CHANGEMENT VOULU (partie E) : « boutons retires » = une vue de TEXTE
+        # SEUL (V2), plus view=None ; ni bouton ni menu de la model d avant.
         check("clic model sans reserve : le MEME General est edite, boutons retires",
-              len(_gen) == 1 and _gen[0].view is None and _ordreGn(_chGn) == "PG", _ordreGn(_chGn))
+              len(_gen) == 1 and _gen[0].id == _idGenAvant and not _idsGn(_gen[0].view)
+              and "aucune réserve" in _texteGn(_gen[0].view) and _ordreGn(_chGn) == "PG",
+              (_ordreGn(_chGn), _idsGn(_gen[0].view) if _gen else None))
+
+        # Un ANCIEN General (embed, poste avant le 26/09/2026) sous le panneau :
+        # le clic sur une model le CONVERTIT sur place en V2 -- meme message,
+        # meme id, texte et embed vides dans la meme edition. Le faux message
+        # refuse, comme Discord, un V2 qui garderait son embed : une conversion
+        # ratee reposterait un General (nouvel id) et ce test le verrait.
+        _chCv = _ChanGn(4250)
+        _pCv = _MsgGn(_chCv, None, _cuGn._jb_panel(None, "_", 3))
+        _eCv = _dGn.Embed(title="✨ General — Zgen_blonde pour Zgen_lola")
+        _eCv.set_footer(text="panneau-general-us")
+        _gCv = _MsgGn(_chCv, _eCv, None)
+        for _mCv in (_pCv, _gCv):
+            _mCv.pinned = True
+            _chCv.msgs.append(_mCv)
+        _cuGn._jb_panel_set(_chCv.id, _pCv.id)
+        _cuGn._jb_general_set(_chCv.id, _gCv.id)
+        _aioGn.run(_cuGn.JBModelButton("zgen_lola").callback(_itxGn(_chCv)))
+        check("clic model : un ANCIEN General (embed) est converti SUR PLACE en V2, meme message",
+              _ordreGn(_chCv) == "PG" and _chCv.msgs[1] is _gCv and not _gCv.embeds
+              and _gCv.flags.components_v2 and "zgen_blonde" in " ".join(_idsGn(_gCv.view))
+              and _cuGn._jb_general_ids().get("4250") == str(_gCv.id),
+              (_ordreGn(_chCv), _gCv.embeds, _idsGn(_gCv.view)[:3]))
 
         # -- 8. /resetmenus annonce ce qui a VRAIMENT ete pose -------------------
         class _UCogGn:

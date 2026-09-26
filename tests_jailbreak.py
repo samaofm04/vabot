@@ -570,10 +570,19 @@ try:
           _fwR.recu == [("contenu sans destination", True)] and not _menuR.recu,
           str(_fwR.recu))
 
-    _embP, _viewP = _uP._jb_panel(None, "e30princesss", 5)
-    _idsP = [getattr(getattr(i, "item", None), "custom_id", None) for i in _viewP.children]
+    # Depuis le 25/09/2026 (menus directs), _jb_panel rend UNE LayoutView
+    # « Components V2 » -- plus de couple (embed, vue) -- et ses elements vivent
+    # dans un conteneur, sur des rangees : on les parcourt a toute profondeur
+    # (walk_children). Les menus de famille portent eux aussi l'etat dans leur
+    # custom_id ; une liste vide ne doit pas passer pour « tout va bien ».
+    import discord as _dP
+    _viewP = _uP._jb_panel(None, "e30princesss", 5)
+    _idsP = [i.custom_id for i in _viewP.walk_children()
+             if isinstance(i, _dP.ui.DynamicItem)]
     check("panneau : quantite et identite dans chaque custom_id",
-          all(str(x or "").endswith(":5") and "e30princesss" in str(x or "") for x in _idsP),
+          len(_idsP) == 1 + sum(len(r) - (_uP._JB_QTE in r) for r in _uP._JB_BOUTONS_V2)
+          + len(_uP._FAMILLES_PANNEAU)
+          and all(str(x or "").endswith(":5") and "e30princesss" in str(x or "") for x in _idsP),
           str(_idsP[:2]))
     check("panneau : permanent (sans timeout)", _viewP.timeout is None)
 except Exception as _eP:
@@ -2086,35 +2095,51 @@ try:
     import pathlib as _pTr
     import shutil as _shTr
 
-    # LA garde qui compte : Discord plafonne a 5 boutons par rangee et 5
-    # rangees, dont une prise par le menu deroulant. Depasser ne casse pas le
-    # bouton fautif — ca fait echouer la vue ENTIERE, donc tout le panneau.
-    _embTr, _vueTr = _uTr._jb_panel(None, "julia", 3)
+    # LA garde qui compte : un message qui depasse les limites de Discord ne
+    # perd pas l element fautif -- il est refuse ENTIER, donc tout le panneau.
+    # Depuis le 25/09/2026 le panneau est une LayoutView « Components V2 » :
+    # 40 composants au plus (conteneur et rangees compris), 5 elements par
+    # rangee, 4000 caracteres de texte.
+    _vueTr = _uTr._jb_panel(None, "julia", 3)
+    _rangTr = [_r for _r in _vueTr.walk_children() if isinstance(_r, _dTr.ui.ActionRow)]
     _libTr = []
-    for _itTr in _vueTr.children:
+    for _itTr in _vueTr.walk_children():
         _bTr = getattr(_itTr, "item", None) or _itTr
-        _lTr = getattr(_bTr, "label", None)
-        if _lTr:
-            _libTr.append((getattr(_itTr, "row", None), _lTr, getattr(_bTr, "style", None)))
-    from collections import Counter as _CTr
-    _parRangeeTr = _CTr(r for r, _l, _s in _libTr)
-    check("trends : le menu porte le bouton ⭐⭐⭐",
-          len([1 for _r, _l, _s in _libTr if "⭐⭐⭐" in _l]) == 1,
-          str([_l for _r, _l, _s in _libTr if "⭐" in _l])[:130])
+        for _lTr in [getattr(_bTr, "label", None), getattr(_bTr, "placeholder", None)] + [
+                _o.label for _o in (getattr(_bTr, "options", None) or [])]:
+            if _lTr:
+                _libTr.append((_lTr, getattr(_bTr, "style", None),
+                               getattr(_bTr, "custom_id", "") or ""))
+    # CHANGEMENT VOULU (25/09/2026) : le proprietaire a retire « ⭐⭐⭐ Trends »
+    # du panneau (« pas encore good »). Avant, ce test exigeait le bouton ; il
+    # exige maintenant son ABSENCE -- ni bouton, ni option de menu, ni
+    # custom_id. L action reste definie pour les panneaux deja postes (voir
+    # « un ancien bouton ⭐⭐⭐ » plus bas).
+    check("trends : le panneau ne porte PLUS le ⭐⭐⭐ (retire par le proprietaire)",
+          _libTr and not [_l for _l, _s, _c in _libTr if "⭐⭐⭐" in _l or ":trend:" in _c],
+          str([_l for _l, _s, _c in _libTr if "⭐⭐⭐" in _l])[:130])
     check("trends : et le menu reste dans les limites de Discord",
-          all(_n <= 5 for _n in _parRangeeTr.values())
-          and len(_parRangeeTr) <= 5 and len(_vueTr.children) <= 25,
-          str(dict(sorted(_parRangeeTr.items()))))
-    check("trends : les trois boutons sont verts",
-          all(_s == _dTr.ButtonStyle.success
-              for _r, _l, _s in _libTr if "⭐⭐⭐" in _l))
-    # Le menu deroulant de la quantite est DEPLIE au debut du panneau : c est
-    # comme ca qu on choisit son nombre sans clic supplementaire. Il occupe une
-    # rangee entiere — cinq places de bouton — et c est ce qui limite le
-    # panneau a vingt, donc a UN seul ⭐⭐⭐.
-    check("trends : la quantite reste depliee au debut du panneau",
-          any(getattr(getattr(_i, "item", None), "placeholder", None)
-              for _i in _vueTr.children))
+          _vueTr.total_children_count <= 40 and _vueTr.content_length() <= 4000
+          and _rangTr and all(len(_r.children) <= 5 for _r in _rangTr),
+          "%d composants, %s" % (_vueTr.total_children_count,
+                                 [len(_r.children) for _r in _rangTr]))
+    # Le vert isole les trends (videos deja FINIES) : un ancien bouton
+    # ⭐⭐⭐ reconstruit par discord.py au clic garde son custom_id et son vert.
+    _btnTr = _uTr.JBActionButton("julia", "trend", 3)
+    check("trends : un ancien bouton ⭐⭐⭐ se reconstruit vert, meme custom_id",
+          _btnTr.item.style == _dTr.ButtonStyle.success
+          and _btnTr.custom_id == "jbus:a:julia:trend:3"
+          and "⭐⭐⭐" in (_btnTr.item.label or ""), str((_btnTr.item.style, _btnTr.custom_id)))
+    # CHANGEMENT VOULU : la quantite n est plus un menu deroulant deplie (il
+    # prenait une rangee entiere) mais le bouton « 📦 Quantité : N » de la
+    # maquette validee, qui OUVRE le panneau : premier element de la premiere
+    # rangee. Le test d avant (« la quantite reste depliee… ») echouait deja
+    # depuis le passage au bouton.
+    check("trends : la quantite ouvre le panneau (premier bouton, premiere rangee)",
+          _rangTr and _rangTr[0].children
+          and getattr(_rangTr[0].children[0], "custom_id", "") == "jbus:qb:julia:3"
+          and "Quantité" in (_rangTr[0].children[0].item.label or ""),
+          str([getattr(_c, "custom_id", None) for _c in (_rangTr[0].children if _rangTr else [])]))
 
     # Aucune commande slash consommee : le bot principal est deja au-dela du
     # plafond de 100, et chaque commande en trop en fait disparaitre une autre
@@ -2649,60 +2674,134 @@ try:
           _gEm.crees.count("vatemplatetrash") == 1 and len(_gEm.crees) == len(set(_gEm.crees)),
           str(_gEm.crees))
 
-    # -- 5. LE PANNEAU US : une rangee de lanceurs de famille ----------------------
-    # {0:5, 1:4, 2:3, 3:4} : quantite + identite, trends + publications, le
-    # brut, puis Caption ▸ Template ▸ Trash ▸ Flash ▸. 16 composants au lieu
-    # de 24 : Trash n'entrait plus.
+    # -- 5. LE PANNEAU US : UN MENU DEROULANT PAR FAMILLE (Components V2) ---------
+    # CHANGEMENT VOULU (25/09/2026, maquette /demopanneau validee par le
+    # proprietaire : « c'est good, vas-y »). Avant : {0:5, 1:4, 2:3, 3:4}, une
+    # rangee de lanceurs « ▸ » qui ouvraient chacun un sous-menu ephemere, et
+    # le ⭐⭐⭐ Trends. Maintenant : quantite + identite, publications, puis UN
+    # MENU PAR FAMILLE (Brut, Caption, Template, Trash, Flash) directement dans
+    # le panneau, sans etape ; Trends retire (« pas encore good »). Un message
+    # classique plafonne a cinq rangees et un menu en prend une : le panneau
+    # est passe au format « Components V2 » (LayoutView), que les helpers
+    # ci-dessous lisent tel que Discord le recoit (to_components).
+    def _compsV2Tb(vue):
+        """Tous les composants envoyes a Discord, a plat et dans l'ordre
+        (conteneur, texte, rangees, boutons, menus)."""
+        pile, out = list(vue.to_components()), []
+        while pile:
+            c = pile.pop(0)
+            out.append(c)
+            pile[0:0] = list(c.get("components") or [])
+        return out
+
+    def _rowsV2Tb(vue):
+        """[[custom_id…] par rangee], tel que Discord le recevra."""
+        return [[b.get("custom_id") for b in c["components"]]
+                for c in _compsV2Tb(vue) if c["type"] == 1]
+
+    def _limitesV2Tb(vue):
+        """'' si la vue V2 tient dans les limites de Discord, sinon la raison.
+        Depasser ne retire pas l'element fautif : le message est refuse ENTIER."""
+        comps = _compsV2Tb(vue)
+        rows = [c for c in comps if c["type"] == 1]
+        ids = [c["custom_id"] for c in comps if c.get("custom_id")]
+        pbs = []
+        if len(comps) > 40:
+            pbs.append("%d composants" % len(comps))
+        if sum(len(c.get("content") or "") for c in comps if c["type"] == 10) > 4000:
+            pbs.append("texte > 4000")
+        if any(len(r["components"]) > 5 for r in rows):
+            pbs.append("rangee > 5 : %s" % [len(r["components"]) for r in rows])
+        if any(len(r["components"]) > 1 and any(c["type"] != 2 for c in r["components"])
+               for r in rows):
+            pbs.append("un menu deroulant partage sa rangee")
+        if any(len(i) > 100 for i in ids):
+            pbs.append("custom_id > 100 : %s" % max(ids, key=len))
+        if len(ids) != len(set(ids)):
+            pbs.append("custom_id en double")
+        if any(len(c.get("label") or "") > 80 for c in comps if c["type"] == 2):
+            pbs.append("libelle > 80")
+        for c in comps:
+            if c["type"] == 3:
+                if not 1 <= len(c.get("options") or []) <= 25:
+                    pbs.append("%s : %d options" % (c["custom_id"], len(c.get("options") or [])))
+                if any(len(o.get("label") or "") > 100 or len(o.get("description") or "") > 100
+                       for o in c.get("options") or []):
+                    pbs.append("%s : option > 100" % c["custom_id"])
+        return " ; ".join(pbs)
+
     _GUILD_ICTb = _tyTb.SimpleNamespace(
         id=1, emojis=[_dTb.PartialEmoji(name=n, id=10000 + i)
                       for i, n in enumerate(sorted(set(_uTb._ICONES_ACTIONS.values())))])
+    _FAMS_PTb = ("brut", "caption", "template", "trash", "flash")
     for _gT, _nomG in ((None, "sans icones"), (_GUILD_ICTb, "avec icones")):
-        _eP, _vP = _uTb._jb_panel(None, "emma", 3, "us", _gT)
-        _rP = _rowsTb(_vP)
+        _vP = _uTb._jb_panel(None, "emma", 3, "us", _gT)
+        _rP = _rowsV2Tb(_vP)
         check("familles : panneau US (%s) dans les limites de Discord" % _nomG,
-              not _limitesTb(_vP), _limitesTb(_vP))
-        check("familles : panneau US (%s) = quantite+identite, trends+publications, brut, 4 lanceurs" % _nomG,
+              not _limitesV2Tb(_vP), _limitesV2Tb(_vP))
+        check("familles : panneau US (%s) = quantite+identite, publications, un menu par famille" % _nomG,
               _rP == [["jbus:qb:emma:3"] + ["jbus:a:emma:%s:3" % k for k in ("name", "pseudo", "pp", "bio")],
-                      ["jbus:a:emma:%s:3" % k for k in ("trend", "story", "storycta", "post")],
-                      ["jbus:a:emma:%s:3" % k for k in ("brute", "brutbanger", "brutchoix")],
-                      ["jbus:f:emma:%s:3" % f for f in ("caption", "template", "trash", "flash")]],
+                      ["jbus:a:emma:%s:3" % k for k in ("story", "storycta", "post")]]
+              + [["jbus:s:emma:%s:3" % f] for f in _FAMS_PTb],
               str(_rP))
-    check("familles : l ordre des lanceurs suit la table unique (Trash entre Template et Flash)",
+    check("familles : l ordre des menus suit la table unique (Brut, puis Trash entre Template et Flash)",
           [f.cle for f in _uTb._FAMILLES_MENU] == ["caption", "template", "trash", "flash"]
+          and [f.cle for f in _uTb._FAMILLES_PANNEAU] == list(_FAMS_PTb)
           and _uTb._famille_menu("trash").actions == _TRASH
           and _uTb._famille_menu("flash").actions == _FLASH)
+    # « trend » est masquee EXPRES (_JB_MASQUEES) : elle n'a pas de place, et
+    # ce n'est pas un oubli. Toute autre action sans place serait un oubli.
     check("familles : chaque action du panneau a une place (aucune ecartee en silence)",
-          _uTb._jb_disposition()[1] == [] and all(a[0] in _uTb._JB_RANGEES for a in _uTb._JB_ACTIONS_US),
+          _uTb._jb_disposition()[1] == []
+          and all(a[0] in _uTb._JB_RANGEES or a[0] in _uTb._JB_MASQUEES
+                  for a in _uTb._JB_ACTIONS_US)
+          and _uTb._JB_MASQUEES == {"trend"},
           str(_uTb._jb_disposition()[1]))
-    _eL, _vL = _uTb._jb_panel(None, "a" * 60, 100, "us", _GUILD_ICTb)
+    _vL = _uTb._jb_panel(None, "a" * 60, 100, "us", _GUILD_ICTb)
     check("familles : identite de 60 caracteres et quantite 100 -> custom_id <= 100",
-          not _limitesTb(_vL), _limitesTb(_vL))
+          not _limitesV2Tb(_vL) and len(_rowsV2Tb(_vL)) == 7, _limitesV2Tb(_vL))
 
-    # -- 6. LES SOUS-MENUS : les JBActionButton de la famille ----------------------
-    for _fT in _uTb._FAMILLES_MENU:
-        _eS, _vS = _uTb._jb_sous_menu_famille("emma", _fT, 7, guild=_GUILD_ICTb)
-        _lignesS = [l for l in (_eS.description or "").split("\n")
-                    if l.startswith("**") and " — " in l]
-        check("familles : sous-menu %s = ses %d variantes (jbus:a:…), une ligne d aide chacune"
+    # -- 6. LES MENUS DE FAMILLE (JBMenuFamille), ET LES ANCIENS LANCEURS ▸ -------
+    # Chaque menu offre les variantes de SA famille, avec la ligne d'aide que
+    # le sous-menu ephemere affichait avant (_EXPLICATIONS) en description.
+    _vP = _uTb._jb_panel(None, "emma", 7, "us", _GUILD_ICTb)
+    _menusTb = {c["custom_id"].split(":")[3]: c for c in _compsV2Tb(_vP) if c["type"] == 3}
+    for _fT in _uTb._FAMILLES_PANNEAU:
+        _mT = _menusTb.get(_fT.cle) or {}
+        _optsT = _mT.get("options") or []
+        check("familles : menu %s = ses %d variantes (jbus:s:…), une ligne d aide chacune"
               % (_fT.cle, len(_fT.actions)),
-              _rowsTb(_vS) == [["jbus:a:emma:%s:7" % k for k in _fT.actions]]
-              and len(_lignesS) == len(_fT.actions) and not _limitesTb(_vS),
-              str((_rowsTb(_vS), len(_lignesS))))
+              _mT.get("custom_id") == "jbus:s:emma:%s:7" % _fT.cle
+              and [o["value"] for o in _optsT] == list(_fT.actions)
+              and all(o.get("description") == _uTb._EXPLICATIONS.get(o["value"])
+                      and o.get("description") for o in _optsT)
+              and _mT.get("placeholder") == "%s %s…" % (_fT.emoji, _fT.nom),
+              str(_mT)[:200])
     _vraiCanTb, _vraiRefTb = _uTb._jb_can_use, _uTb._refus_reserve_jb
     try:
         _uTb._jb_can_use = lambda i: True
         _uTb._refus_reserve_jb = lambda i: ""
+        # Un panneau poste entre dc157c3 et les menus directs porte encore ses
+        # lanceurs « ▸ ». Plus de sous-menu : un clic RECONSTRUIT son panneau,
+        # en V2, a la place (texte et embed vides : c'est ce qui permet a
+        # Discord de convertir le message par une edition).
         _iT = _itxTb(_GUILD_ICTb)
         _aioTb.run(_uTb.JBFamilleBouton("emma", "trash", 5).callback(_iT))
+        _envT = _iT.response.envois
+        _vT = _envT[0][1].get("view") if _envT else None
+        check("familles : un ancien lanceur ▸ reconstruit le panneau V2 SUR PLACE (plus de sous-menu)",
+              len(_envT) == 1 and _envT[0][0] == "<edit>"
+              and _envT[0][1].get("content", 1) is None and _envT[0][1].get("embed", 1) is None
+              and isinstance(_vT, _dTb.ui.LayoutView)
+              and ["jbus:s:emma:trash:5"] in _rowsV2Tb(_vT), str(_envT)[:200])
+        # Depuis un panneau EPHEMERE (le panneau de secours), la vue part
+        # ARRETEE : suivie par discord.py, son expiration emportait les motifs
+        # enregistres au demarrage et tous les panneaux devenaient muets.
+        _iT = _itxTb(_GUILD_ICTb)
+        _iT.message = _tyTb.SimpleNamespace(id=9, flags=_tyTb.SimpleNamespace(ephemeral=True))
+        _aioTb.run(_uTb.JBFamilleBouton("emma", "trash", 5).callback(_iT))
         _vT = _iT.response.envois[0][1].get("view") if _iT.response.envois else None
-        check("familles : le lanceur Trash repond en EPHEMERE, avec les 4 Trash",
-              _iT.response.envois and _iT.response.envois[0][1].get("ephemeral") is True
-              and _vT is not None and _rowsTb(_vT) == [["jbus:a:emma:%s:5" % k for k in _TRASH]],
-              str(_iT.response.envois)[:200])
-        # Une vue ephemere SUIVIE par discord.py, a son expiration, emportait
-        # les motifs enregistres au demarrage : tous les panneaux devenaient
-        # muets. Arretee avant l'envoi, elle n'est pas suivie.
-        check("familles : ... une vue ARRETEE avant l envoi (non suivie par discord.py)",
+        check("familles : ... depuis un panneau EPHEMERE, une vue ARRETEE (non suivie par discord.py)",
               _vT is not None and _vT.is_finished())
         _iT = _itxTb()
         _aioTb.run(_uTb.JBFamilleBouton("emma", "inconnue", 5).callback(_iT))
@@ -2744,9 +2843,13 @@ try:
     check("familles : cog_load enregistre tout, sans un echec au journal",
           not [l for l in _journalTb if "cog_load" in l]
           and _uTb.JBFamilleBouton in _botT.dyn and _uTb.JBActionButton in _botT.dyn
-          and any(isinstance(v, _uTb.ContentMenuHeritageView) for v in _botT.vues),
+          and _uTb.JBMenuFamille in _botT.dyn
+          and any(isinstance(v, _uTb.ContentMenuHeritageView) for v in _botT.vues)
+          and any(isinstance(v, _uTb.ContentMenuLanceursView) for v in _botT.vues),
           str([l for l in _journalTb if "cog_load" in l])[:200])
-    _persTb = {it.custom_id for v in _botT.vues for it in v.children
+    # walk_children : dans une LayoutView (menu VA V2), boutons et menus vivent
+    # dans un conteneur, pas au premier niveau.
+    _persTb = {it.custom_id for v in _botT.vues for it in v.walk_children()
                if not isinstance(it, _dTb.ui.DynamicItem) and getattr(it, "custom_id", None)}
     _motifsTb = [(c, c.__discord_ui_compiled_template__) for c in _botT.dyn]
 
@@ -2776,34 +2879,57 @@ try:
     check("familles : ... et chaque ancienne action du panneau vise encore une methode reelle",
           all(_uTb._jb_action(k) and hasattr(_uTb.UserCog, _uTb._jb_action(k)[2])
               for k in _ANCIENS_US))
-    _neufsTb = ([it.item.custom_id for it in _uTb._jb_panel(None, "emma", 3)[1].children]
-                + [it.item.custom_id for f in _uTb._FAMILLES_MENU
-                   for it in _uTb._jb_sous_menu_famille("emma", f, 3)[1].children]
-                + [it.custom_id for it in _uTb.ContentMenuView(None).children])
+    # Les lanceurs « ▸ » de dc157c3 (panneau US et menu VA) : plus poses,
+    # toujours servis.
+    _lancTb = (["jbus:f:emma:%s:3" % f.cle for f in _uTb._FAMILLES_MENU]
+               + ["cmenu:fam:" + f.cle for f in _uTb._FAMILLES_MENU])
+    _sansLTb = [(c, _qui(c)) for c in _lancTb if len(_qui(c)) != 1]
+    check("familles : les 8 lanceurs ▸ deja postes (jbus:f:, cmenu:fam:) sont pris en charge, chacun par UN element",
+          not _sansLTb, str(_sansLTb)[:200])
+    _neufsTb = ([it.custom_id for it in _uTb._jb_panel(None, "emma", 3).walk_children()
+                 if isinstance(it, _dTb.ui.DynamicItem)]
+                + [it.custom_id for it in _uTb.ContentMenuView(None).walk_children()
+                   if getattr(it, "custom_id", None)])
     _sansNTb = [(c, _qui(c)) for c in _neufsTb if len(_qui(c)) != 1]
     check("familles : chaque NOUVEAU custom_id persistant est pris en charge par UN element",
-          not _sansNTb, str(_sansNTb)[:200])
+          _neufsTb and not _sansNTb, str(_sansNTb)[:200])
     _tfTb2 = _uTb.JBFamilleBouton.__discord_ui_compiled_template__
     _idsFTb = ["jbus:f:%s:%s:%d" % (i, f.cle, q) for i in ("emma", "a.b-c_d", "x" * 60)
                for f in _uTb._FAMILLES_MENU for q in (1, 3, 100)]
     check("familles : jbus:f: ne recoupe aucun autre motif, dans les deux sens",
           all(_qui(i) == ["JBFamilleBouton"] for i in _idsFTb)
           and not any(_tfTb2.fullmatch(c) for c in _ancTb + _neufsTb if not c.startswith("jbus:f:")))
+    # Le motif des menus du panneau V2 : discord.py lance TOUS les motifs qui
+    # correspondent, un recoupement ferait partir deux actions pour un choix.
+    _tsTb = _uTb.JBMenuFamille.__discord_ui_compiled_template__
+    _idsSTb = ["jbus:s:%s:%s:%d" % (i, f.cle, q) for i in ("emma", "a.b-c_d", "x" * 60)
+               for f in _uTb._FAMILLES_PANNEAU for q in (1, 3, 100)]
+    check("familles : jbus:s: ne recoupe aucun autre motif, dans les deux sens",
+          all(_qui(i) == ["JBMenuFamille"] for i in _idsSTb)
+          and not any(_tsTb.fullmatch(c) for c in _ancTb + _lancTb + _neufsTb
+                      if not c.startswith("jbus:s:")))
 
-    # -- 8. LE MENU VA : lanceurs persistants, sous-menus ephemeres -----------------
+    # -- 8. LE MENU VA : vue V2 persistante, un menu deroulant par famille --------
+    # CHANGEMENT VOULU (meme decision) : la rangee de lanceurs « ▸ » et ses
+    # sous-menus ephemeres sont remplaces par un menu deroulant par famille,
+    # persistant (« cmenu:sel:<famille> »), dans une LayoutView V2.
     _vM = _uTb.ContentMenuView(None)
-    check("familles : menu VA dans les limites (%d composants)" % len(_vM.children),
-          not _limitesTb(_vM) and len(_vM.children) <= 25, _limitesTb(_vM))
-    _rM = _rowsTb(_vM)
-    check("familles : menu VA -> rangee 2 = un lanceur par famille, dans l ordre de la table",
-          len(_rM) == 5 and _rM[2] == ["cmenu:fam:" + f.cle for f in _uTb._FAMILLES_MENU], str(_rM))
+    _nM = len(_compsV2Tb(_vM))
+    check("familles : menu VA V2 dans les limites (%d composants <= 40)" % _nM,
+          not _limitesV2Tb(_vM) and _vM.is_persistent() and _vM.has_components_v2(),
+          _limitesV2Tb(_vM))
+    _rM = _rowsV2Tb(_vM)
+    check("familles : menu VA -> un menu par famille (cmenu:sel:), dans l ordre de la table, apres les boutons",
+          len(_rM) == 8 and _rM[2:6] == [["cmenu:sel:" + f.cle] for f in _uTb._FAMILLES_MENU],
+          str(_rM))
     _vH = _uTb.ContentMenuHeritageView(None)
     _idsH = [it.custom_id for it in _vH.children]
     check("familles : la vue heritee garde les 8 boutons retires, persistante, sans doublon avec le menu",
           sorted(_idsH) == sorted("cmenu:" + k for k in (
               "reelmonte", "templateflash", "templateflashbanger", "templateflashbrut",
               "capbanger", "montagebanger", "templatebanger", "templatebrut"))
-          and _vH.is_persistent() and not set(_idsH) & {it.custom_id for it in _vM.children},
+          and _vH.is_persistent()
+          and not set(_idsH) & {getattr(it, "custom_id", None) for it in _vM.walk_children()},
           str(_idsH))
     _vraiesGf = (_gfTb.get_features, _gfTb.threads_mode)
     try:
@@ -2813,24 +2939,29 @@ try:
                    "template": ["reelmonte", "templatebanger", "templatebrut"],
                    "trash": [_TRASH[0], _TRASH[1], _TRASH[3]],
                    "flash": [_FLASH[0], _FLASH[1], _FLASH[3]]}
+        # Le nom dit « sous-menus » (historique) : ce sont les variantes de
+        # chaque famille, que les menus deroulants offrent desormais.
         check("familles : sous-menus du menu VA = exactement les variantes du cahier",
               {f.cle: _uTb._variantes_menu_va(f.cle, set(_gfTb.ALL_FEATURES), False)
                for f in _uTb._FAMILLES_MENU} == _vAttTb)
-        _embM = _uTb._build_menu_embed("emma", None)
-        check("familles : l embed d aide tient (%d champs <= 25, %d car. <= 6000)"
-              % (len(_embM.fields), len(_embM)),
-              len(_embM.fields) <= 25 and len(_embM) <= 6000
-              and len([f for f in _embM.fields if f.name.endswith("▸")]) == len(_uTb._FAMILLES_MENU))
-        for _fT in _uTb._FAMILLES_MENU:
-            _vSm = _uTb._SousMenuFamilleVA(None, _vAttTb[_fT.cle])
-            check("familles : sous-menu VA %s ephemere (10 min), sans custom_id fixe, dans les limites"
-                  % _fT.cle,
-                  _vSm.timeout == 600 and not _vSm.is_persistent() and not _limitesTb(_vSm))
+        _vMs = _uTb._menu_va(None, "emma", None)
+        _optsM = {c["custom_id"].split(":")[2]: [o["value"] for o in c["options"]]
+                  for c in _compsV2Tb(_vMs) if c["type"] == 3}
+        check("familles : les menus deroulants du menu VA offrent exactement ces variantes",
+              _optsM == _vAttTb, str(_optsM))
+        # L'aide qui etait dans l'embed passe dans le texte d'en tete : 4000
+        # caracteres pour TOUT le texte, et la derniere ligne est la marque qui
+        # fait reconnaitre le menu (_est_menu_va).
+        _txM = "\n".join(c.get("content") or "" for c in _compsV2Tb(_vMs) if c["type"] == 10)
+        check("familles : le texte d aide du menu VA tient (%d car. <= 4000), marque en derniere ligne"
+              % len(_txM),
+              len(_txM) <= 4000 and _txM.splitlines()[-1] == _uTb._MENU_VA_MARQUE
+              and all(f.nom in _txM for f in _uTb._FAMILLES_MENU), _txM[-200:])
         _gfTb.get_features = lambda g: set(_gfTb.ALL_FEATURES) - {"contenu"}
         _vF = _uTb._filter_menu_view(_uTb.ContentMenuView(None), None)
-        check("familles : « contenu » coupe -> plus aucun lanceur (pas de sous-menu vide)",
-              not [it for it in _vF.children
-                   if str(getattr(it, "custom_id", "")).startswith("cmenu:fam:")])
+        check("familles : « contenu » coupe -> plus aucun menu de famille (pas de menu vide)",
+              not [c for c in _compsV2Tb(_vF) if c["type"] == 3]
+              and not _limitesV2Tb(_vF), _rowsV2Tb(_vF))
     finally:
         _gfTb.get_features, _gfTb.threads_mode = _vraiesGf
 
@@ -2880,41 +3011,66 @@ try:
 
     # -- 9. LE PANNEAU EPHEMERE DES SERVEURS NON-US ----------------------------------
     # Il plantait des sa construction (« item would not fit at row 0 ») :
-    # choisir une model dans le menu Jailbreak ne repondait plus.
+    # choisir une model dans le menu Jailbreak ne repondait plus. Il suit
+    # maintenant la MEME table que le panneau US, en V2 (quantite en menu, sur
+    # sa rangee a elle).
     _pbJ = []
-    for _famT in (None,) + tuple(f.cle for f in _uTb._FAMILLES_MENU):
-        for _icT in ({}, _uTb.icones_actions(_GUILD_ICTb)):
-            try:
-                _vJ = _uTb.JailbreakActionsView(None, "emma", 3, us=True, icones=_icT, famille=_famT)
-                if _limitesTb(_vJ):
-                    _pbJ.append("%s : %s" % (_famT, _limitesTb(_vJ)))
-            except Exception as _eJ:
-                _pbJ.append("%s : %r" % (_famT, _eJ))
-    check("familles : JailbreakActionsView se construit (panneau et chaque famille depliee)",
+    for _icT in ({}, _uTb.icones_actions(_GUILD_ICTb)):
+        try:
+            _vJ = _uTb.JailbreakActionsView(None, "emma", 3, us=True, icones=_icT)
+            if _limitesV2Tb(_vJ):
+                _pbJ.append(_limitesV2Tb(_vJ))
+        except Exception as _eJ:
+            _pbJ.append(repr(_eJ))
+    check("familles : JailbreakActionsView se construit en V2 (avec et sans icones), dans les limites",
           not _pbJ, " | ".join(_pbJ)[:200])
-    _vJ = _uTb.JailbreakActionsView(None, "emma", 3, us=True)
+
+    class _CogJ:
+        def __init__(self):
+            self.appels = []
+
+        async def _run_for_model(self, interaction, model, cmd, count=1, supports_count=True):
+            self.appels.append((model, cmd, count))
+            await interaction.response.defer()
+
+    for _aJ in _uTb._JB_ACTIONS_US:
+        setattr(_CogJ, _aJ[2], _aJ[2])
+    _cogJ = _CogJ()
+    _vJ = _uTb.JailbreakActionsView(_cogJ, "emma", 4, us=True)
     _vraiCanTb = _uTb._jb_can_use
     try:
         _uTb._jb_can_use = lambda i: True
-        _lanceurT = [c for c in _vJ.children if isinstance(c, _uTb._JailbreakFamilleButton)
-                     and c.famille == "trash"]
-        _aioTb.run(_lanceurT[0].callback(_itxTb()))
-        _clesJ = [c.key for c in _vJ.children if isinstance(c, _uTb._JailbreakActionButton)]
-        check("familles : le lanceur Trash deplie SUR PLACE ses 4 variantes",
-              _vJ.famille == "trash" and _clesJ == list(_TRASH), str(_clesJ))
-        _retT = [c for c in _vJ.children if isinstance(c, _uTb._JailbreakRetourButton)]
-        _aioTb.run(_retT[0].callback(_itxTb()))
-        check("familles : ◂ Retour replie le panneau",
-              _vJ.famille is None and len([c for c in _vJ.children
-                                           if isinstance(c, _uTb._JailbreakFamilleButton)]) == 4)
+        _menuJ = [c for c in _vJ.walk_children()
+                  if isinstance(c, _uTb._JailbreakFamilleSelect) and c.famille == "trash"]
+        check("familles : panneau ephemere -> le menu Trash offre ses 4 variantes",
+              _menuJ and [o.value for o in _menuJ[0].options] == list(_TRASH),
+              str([o.value for o in _menuJ[0].options]) if _menuJ else "pas de menu Trash")
+        _menuJ[0]._values = [_TRASH[1]]
+        _iJ = _itxTb()
+        _aioTb.run(_menuJ[0].callback(_iJ))
+        check("familles : ... et un choix lance l action (model, quantite du panneau)",
+              _cogJ.appels == [("emma", _uTb._jb_action(_TRASH[1])[2], 4)], str(_cogJ.appels))
     finally:
         _uTb._jb_can_use = _vraiCanTb
 
     # -- 10. ✨ GENERAL ET STOCK ---------------------------------------------------------
-    check("trash bot : ✨ General -> rangee 4 = Trash, ⭐ Trash, puis Flash, ⭐ Flash",
-          [k for k, r in _uTb._JB_GENERAL_RANGEES.items() if r == 4]
-          == [_TRASH[0], _TRASH[1], _FLASH[0], _FLASH[1]]
-          and {_TRASH[0], _TRASH[1]} <= _uTb._JB_GEN_BRUTE)
+    # CHANGEMENT VOULU (26/09/2026, partie E, « le menu stp juste pour caption
+    # template trash et flash ») : le General est passe en Components V2, un
+    # MENU DEROULANT par famille. Trash et ⭐ Trash ne partagent plus la
+    # rangee 4 avec Flash : ils sont les deux options du menu 💀 Trash
+    # (rangee prevue 4), place AVANT le menu ⚡ Flash (rangee prevue 5). Ce
+    # qu'on protege ne change pas : Trash vit entre les templates et Flash,
+    # et il pose le contenu sur une brute de la model (_JB_GEN_BRUTE).
+    _famsGenTb = [f.cle for f in _uTb._JB_GEN_FAMILLES]
+    check("trash bot : ✨ General -> menu Trash (Trash, ⭐ Trash) juste avant le menu Flash (Flash, ⭐ Flash)",
+          [k for k, r in _uTb._JB_GENERAL_RANGEES.items() if r == 4] == [_TRASH[0], _TRASH[1]]
+          and [k for k, r in _uTb._JB_GENERAL_RANGEES.items() if r == 5] == [_FLASH[0], _FLASH[1]]
+          and _famsGenTb.index("trash") + 1 == _famsGenTb.index("flash")
+          and _famsGenTb.index("template") + 1 == _famsGenTb.index("trash")
+          and _uTb._jb_gen_famille("trash").actions == (_TRASH[0], _TRASH[1])
+          and _uTb._jb_gen_famille("flash").actions == (_FLASH[0], _FLASH[1])
+          and {_TRASH[0], _TRASH[1]} <= _uTb._JB_GEN_BRUTE,
+          str((_famsGenTb, _uTb._JB_GENERAL_RANGEES)))
     # Plus de repli « famille inconnue = Flash » dans le stock : une famille
     # « trash » declaree un jour sans recette aurait ete remplie de Flash.
     import cogs.noctuspool as _npTb
@@ -3007,23 +3163,28 @@ try:
         check("sous-menus : ni le panneau epingle ni un etat inconnu (redemarrage) ne sont refuses",
               _cogP.appels == [("lola", 3), ("lola", 3)], str(_cogP.appels))
 
-        # e) Ouvrir un sous-menu efface le PRECEDENT de ce VA, et retient le
-        #    nouveau ; clique depuis l'epingle, il apprend l'etat du panneau.
+        # e) CHANGEMENT VOULU (menus directs, 25/09/2026) : un ancien lanceur
+        #    « ▸ » n'ouvre PLUS de sous-menu -- il redessine le panneau en V2,
+        #    sur place, et aucun nouveau sous-menu n'est retenu. Ceux ouverts
+        #    AVANT le deploiement restent suivis (_JB_SOUS_MENUS), pour etre
+        #    effaces au prochain changement de quantite ou de model (f, g).
+        #    Clique depuis l'epingle, le lanceur apprend toujours ce que le
+        #    panneau montre.
         _m1, _m2 = _MsgPTb(501, True), _MsgPTb(502, True)
-        for _mX in (_m1, _m2):
-            _iF = _itxPTb(ephemere=False, mid=1000)
-
-            async def _orig(_m=_mX):
-                return _m
-            _iF.original_response = _orig
-            _aioTb.run(_uTb.JBFamilleBouton("lola", "trash", 3).callback(_iF))
-        check("sous-menus : ouvrir un sous-menu efface le precedent du meme VA",
-              _m1.effaces == 1 and _m2.effaces == 0
-              and _uTb._JB_SOUS_MENUS.get(5, (0, None))[1] is _m2,
-              str((_m1.effaces, _m2.effaces)))
+        _uTb._JB_SOUS_MENUS[5] = (77, _m1)
+        _iF = _itxPTb(ephemere=False, mid=1000)
+        _aioTb.run(_uTb.JBFamilleBouton("lola", "trash", 3).callback(_iF))
+        _envF = _iF.response.envois
+        check("sous-menus : un ancien lanceur ▸ n ouvre plus de sous-menu, il redessine le panneau en V2",
+              len(_envF) == 1 and _envF[0][0] == "<edit>"
+              and isinstance(_envF[0][1].get("view"), _dTb.ui.LayoutView)
+              and all(_v[1] is _m1 for _v in _uTb._JB_SOUS_MENUS.values()),
+              str(_envF)[:160])
         check("sous-menus : ... et le clic depuis le panneau epingle apprend ce qu il montre",
               _uTb._JB_PANNEAU_COURANT.get(77) == ("lola", 3),
               str(_uTb._JB_PANNEAU_COURANT))
+        _uTb._JB_SOUS_MENUS.clear()
+        _uTb._JB_SOUS_MENUS[5] = (77, _m2)      # un ancien sous-menu encore affiche
 
         # f) Changer la quantite du panneau epingle : sous-menus effaces, etat
         #    retenu. Depuis un panneau de secours (autre message) : inconnu.
@@ -3079,6 +3240,4420 @@ finally:
         _lgTb.getLogger().removeHandler(_hTb)
     except NameError:
         pass
+
+
+# ==============================================================================
+# MENUS DIRECTS (« Components V2 ») : panneau US, panneau ephemere, menu VA,
+# ✨ General
+# ==============================================================================
+# Le 25/09/2026, le proprietaire a valide la maquette /demopanneau (« c'est
+# good, vas-y ») : plus de lanceur « ▸ » qui ouvre un sous-menu ephemere, UN
+# MENU DEROULANT PAR FAMILLE directement dans le panneau, et « ⭐⭐⭐ Trends »
+# retire (« pas encore good »). Un message classique plafonne a cinq rangees
+# et un menu en prend une entiere : le panneau US, le panneau ephemere des
+# serveurs non-US et le menu VA sont passes au format « Components V2 »
+# (LayoutView : 40 composants, 4000 caracteres de texte, plus d'embed).
+# Le 26/09/2026, le ✨ General (3e message epingle du salon -menu US) a suivi,
+# a la demande du proprietaire (« le menu stp juste pour caption template
+# trash et flash ») : PP, Bio, Story, Story CTA et Post restent des boutons,
+# Caption, Template, Trash et Flash deviennent un menu chacun (partie E).
+#
+# Ce qui casse SANS SE VOIR, et que cette section rejoue -- vues CONSTRUITES
+# par discord.py, clics SIMULES avec de faux objets Discord (reponse unique
+# exigee : une seconde reponse leve, comme chez Discord) et un vrai ViewStore
+# pour les redemarrages :
+#   - une interaction qui recoit deux reponses, ou aucune (« l'interaction a
+#     echoue ») ;
+#   - un menu qui ne revient pas a son intitule : re-choisir la meme option ne
+#     declenche alors plus rien cote Discord ;
+#   - un panneau ou un menu V2 que la recherche dans les epingles ne reconnait
+#     pas (un second est poste a cote), ou que _delete_old_menus supprime ;
+#   - un message deja poste (embed, lanceur « ▸ », ancien custom_id) qui ne
+#     repond plus apres le deploiement ou apres un redemarrage ;
+#   - une ecriture dans data/ : les fichiers d'ids sont detournes vers un
+#     dossier temporaire, et un crochet d'audit le VERIFIE.
+#
+# Chaque partie est une FONCTION : ses faux objets (Msg, Salon, Itx…) ne
+# fuient pas dans la suite. Ce qu'elle change dans les modules (cogs.user,
+# cogs.welcome, guild_features…) est remis en place apres, meme si elle leve.
+print()
+print("=" * 70)
+print("MENUS DIRECTS (Components V2) : panneau US, panneau ephemere, menu VA, General")
+print("=" * 70)
+_check_v2 = check
+
+def _v2_bloc_panneau():
+    'Parties A et B : panneau US epingle, panneau ephemere non-US, reperage, conversion, welcome, maquette.'
+    import asyncio
+    import json
+    import logging
+    import os
+    import re
+    import sys
+    import tempfile
+    import types
+    from pathlib import Path
+    import discord
+    from discord.components import _component_factory
+
+    RESULTATS = []
+
+
+    def check(nom, ok, detail=""):
+        RESULTATS.append((nom, bool(ok), detail))
+        _check_v2("v2 panneau : " + nom, ok, "" if ok else str(detail)[:400])
+
+    class _Journal(logging.Handler):
+        def __init__(self):
+            super().__init__(logging.DEBUG)
+            self.lignes = []
+
+        def emit(self, r):
+            self.lignes.append((r.levelname, r.name, r.getMessage()))
+            TOUT_JOURNAL.append((r.levelname, r.name, r.getMessage()))
+
+
+    JOURNAL = _Journal()
+    TOUT_JOURNAL = []
+    logging.getLogger().addHandler(JOURNAL)
+    logging.getLogger().setLevel(logging.DEBUG)
+
+    import cogs.user as U
+    import cogs.welcome as W
+    import cogs.menutest as MT
+    import guild_features as GF
+
+    TMP = Path(tempfile.mkdtemp(prefix="v2_panneau_"))
+    U._JB_PANEL_STORE = TMP / "us_panels.json"
+    U._JB_GENERAL_STORE = TMP / "us_general_panels.json"
+    assert "data" not in str(U._JB_PANEL_STORE)
+
+    IRT = discord.InteractionResponseType
+    ui = discord.ui
+
+    # ---------------------------------------------------------------------------
+    # Faux objets Discord
+    # ---------------------------------------------------------------------------
+    _ids = iter(range(10_000, 99_999))
+
+
+    def http_exc(cls=discord.HTTPException, status=400, texte="refus simule"):
+        return cls(types.SimpleNamespace(status=status, reason="x"), texte)
+
+
+    class Auteur:
+        def __init__(self, i):
+            self.id = i
+            self.bot = True
+
+
+    MOI = 1
+
+
+    def comps_de(vue):
+        if vue is None:
+            return []
+        return [_component_factory(d) for d in vue.to_components()]
+
+
+    class Msg:
+        def __init__(self, ch=None, embed=None, view=None, ephemere=False, auteur=MOI, content=None):
+            self.id = next(_ids)
+            self.ch = ch
+            self.embeds = [embed] if embed is not None else []
+            self.content = content
+            self.view = view
+            self.components = comps_de(view)
+            self.author = Auteur(auteur)
+            self.pinned = False
+            v2 = bool(view is not None and view.has_components_v2())
+            self.flags = types.SimpleNamespace(ephemeral=ephemere, components_v2=v2)
+            self.edits = []
+            self.echec_edit = None
+            self.supprime = False
+
+        async def edit(self, **k):
+            self.edits.append(k)
+            if self.echec_edit is not None:
+                raise self.echec_edit
+            if "view" in k:
+                v = k["view"]
+                if v is not None and v.has_components_v2():
+                    # Discord refuse un V2 qui garderait texte ou embed.
+                    if (self.embeds and "embed" not in k and "embeds" not in k) or \
+                            (self.content and "content" not in k):
+                        raise http_exc(texte="V2 avec embed/texte restant")
+                    self.flags.components_v2 = True
+                self.view = v
+                self.components = comps_de(v)
+            if "embed" in k:
+                self.embeds = [k["embed"]] if k["embed"] is not None else []
+            if "content" in k:
+                self.content = k["content"]
+            return self
+
+        async def delete(self):
+            self.supprime = True
+            if self.ch is not None and self in self.ch.msgs:
+                self.ch.msgs.remove(self)
+
+        async def pin(self, **k):
+            self.pinned = True
+
+
+    class Salon:
+        def __init__(self, cid=4242, name="zz-menu"):
+            self.id = cid
+            self.name = name
+            self.msgs = []
+            self.overwrites = {}
+            self.guild = types.SimpleNamespace(id=7, emojis=[], text_channels=[self])
+            self.echec_send = None
+
+        async def pins(self):
+            return [m for m in reversed(self.msgs) if m.pinned]
+
+        async def send(self, content=None, embed=None, view=None, **k):
+            if self.echec_send:
+                raise self.echec_send
+            m = Msg(self, embed=embed, view=view, content=content)
+            self.msgs.append(m)
+            return m
+
+        async def fetch_message(self, i):
+            for m in self.msgs:
+                if m.id == int(i):
+                    return m
+            raise http_exc(discord.NotFound, 404, "absent")
+
+        def get_partial_message(self, i):
+            salon = self
+
+            class _P:
+                id = int(i)
+
+                async def edit(self, **k):
+                    return await (await salon.fetch_message(i)).edit(**k)
+
+                async def delete(self):
+                    return await (await salon.fetch_message(i)).delete()
+            return _P()
+
+        async def purge(self, limit=200, check=None):
+            partis = [m for m in self.msgs if check(m)]
+            self.msgs[:] = [m for m in self.msgs if not check(m)]
+            return partis
+
+        async def history(self, limit=40):
+            for m in list(reversed(self.msgs))[:limit]:
+                yield m
+
+
+    class DeuxReponses(Exception):
+        pass
+
+
+    class Rep:
+        def __init__(self, itx):
+            self.itx = itx
+            self._type = None
+            self.faits = []
+            self.echec_edit = None
+            self.doubles = 0
+
+        def is_done(self):
+            return self._type is not None
+
+        @property
+        def type(self):
+            return self._type
+
+        def _marquer(self, t, quoi, a, k):
+            if self._type is not None:
+                self.doubles += 1
+                raise DeuxReponses(quoi)
+            self._type = t
+            self.faits.append((quoi, a, k))
+
+        async def send_message(self, *a, **k):
+            self._marquer(IRT.channel_message, "send_message", a, k)
+
+        async def edit_message(self, *a, **k):
+            if self.echec_edit is not None and self._type is None:
+                e, self.echec_edit = self.echec_edit, None
+                raise e
+            self._marquer(IRT.message_update, "edit_message", a, k)
+            m = self.itx.message
+            if m is not None and "view" in k:
+                await m.edit(**k)
+
+        async def defer(self, ephemeral=False, thinking=False):
+            self._marquer(IRT.deferred_channel_message if thinking else IRT.deferred_message_update,
+                          "defer", (), dict(ephemeral=ephemeral, thinking=thinking))
+
+        async def send_modal(self, modal):
+            self._marquer(IRT.modal, "send_modal", (modal,), {})
+            self.modal = modal
+
+
+    class Suivi:
+        def __init__(self, itx):
+            self.itx = itx
+            self.envois = []
+            self.edits = []
+
+        async def send(self, content=None, **k):
+            if not self.itx.response.is_done():
+                raise AssertionError("followup avant toute reponse")
+            self.envois.append((content, k))
+            return Msg(ephemere=bool(k.get("ephemeral")))
+
+        async def edit_message(self, mid, **k):
+            if not self.itx.response.is_done():
+                raise AssertionError("followup.edit avant toute reponse")
+            self.edits.append((mid, k))
+            m = self.itx.message
+            if m is not None and m.id == mid:
+                await m.edit(**k)
+
+
+    class Cog:
+        """Faux UserCog : les commandes enregistrent leur appel et repondent
+        selon `mode` (defer | defer_eph | send_eph | rien | leve)."""
+
+        def __init__(self):
+            self.appels = []
+            self.mode = "defer"
+
+        async def _run_for_model(self, interaction, model, cmd, count=None,
+                                 supports_count=False, brute_de=None):
+            self.appels.append((model, getattr(cmd, "__name__", cmd), count, supports_count))
+            mode = self.mode
+            if mode == "defer":
+                await interaction.response.defer()
+                await interaction.followup.send("contenu")
+            elif mode == "defer_eph":           # « Choisir ma brute » : defer(ephemeral=True)
+                await interaction.response.defer(ephemeral=True)
+                await interaction.followup.send("choix", ephemeral=True)
+            elif mode == "thinking":
+                await interaction.response.defer(thinking=True)
+                await interaction.followup.send("fini")
+            elif mode == "send_eph":
+                await interaction.response.send_message("Aucune brute", ephemeral=True)
+            elif mode == "leve":
+                raise RuntimeError("panne simulee")
+
+
+    for _a in U._JB_ACTIONS_US:
+        _nom = _a[2]
+
+        def _f(*a, _n=_nom, **k):
+            return None
+        _f.__name__ = _nom
+        setattr(Cog, _nom, staticmethod(_f))
+    COG = Cog()
+
+
+    class Itx:
+        def __init__(self, message=None, channel=None, guild=None, uid=5):
+            self.message = message
+            self.channel = channel
+            self.guild = guild or types.SimpleNamespace(id=7, emojis=[])
+            self.user = types.SimpleNamespace(id=uid, roles=[])
+            self.client = types.SimpleNamespace(
+                get_cog=lambda n: COG if n == "UserCog" else None,
+                user=types.SimpleNamespace(id=MOI))
+            self.response = Rep(self)
+            self.followup = Suivi(self)
+            self.orig_edits = []
+            self.data = {}
+
+        async def edit_original_response(self, **k):
+            if self.response.type not in (IRT.deferred_message_update, IRT.message_update):
+                raise AssertionError("@original n'est pas le message du clic")
+            self.orig_edits.append(k)
+            if self.message is not None:
+                await self.message.edit(**k)
+
+        async def original_response(self):
+            return Msg(ephemere=True)
+
+
+    def run(coro):
+        return asyncio.run(coro)
+
+
+    async def attendre_fond():
+        for _ in range(5):
+            await asyncio.sleep(0)
+        if U._JB_TACHES:
+            await asyncio.gather(*list(U._JB_TACHES), return_exceptions=True)
+
+
+    def lancer(coro):
+        async def _t():
+            r = await coro
+            await attendre_fond()
+            return r
+        return asyncio.run(_t())
+
+
+    def items(vue):
+        return list(vue.walk_children())
+
+
+    def cids(vue):
+        return [getattr(i, "custom_id", None) for i in items(vue)
+                if getattr(i, "custom_id", None) and not isinstance(i, ui.DynamicItem)] + \
+               [i.custom_id for i in items(vue) if isinstance(i, ui.DynamicItem)]
+
+
+    def rangees(vue):
+        """[[custom_id…] par ActionRow], dans l'ordre."""
+        out = []
+        for i in items(vue):
+            if isinstance(i, ui.ActionRow):
+                out.append([c.custom_id for c in i.children])
+        return out
+
+
+    def selects(vue):
+        return [i for i in items(vue) if isinstance(i, ui.DynamicItem) and isinstance(i.item, ui.Select)]
+
+
+    def limites(vue):
+        pb = []
+        if vue.total_children_count > 40:
+            pb.append("composants %d > 40" % vue.total_children_count)
+        if vue.content_length() > 4000:
+            pb.append("texte %d > 4000" % vue.content_length())
+        for i in items(vue):
+            base = i.item if isinstance(i, ui.DynamicItem) else i
+            if isinstance(i, ui.ActionRow) and len(i.children) > 5:
+                pb.append("rangee a %d" % len(i.children))
+            cid = getattr(base, "custom_id", None)
+            if cid and len(cid) > 100:
+                pb.append("custom_id %d" % len(cid))
+            if isinstance(base, ui.Button) and base.label and U._long_discord(base.label) > 80:
+                pb.append("libelle bouton %r" % base.label)
+            if isinstance(base, ui.Select):
+                if len(base.options) > 25 or not base.options:
+                    pb.append("options %d" % len(base.options))
+                if base.placeholder and len(base.placeholder) > 150:
+                    pb.append("placeholder")
+                for o in base.options:
+                    if U._long_discord(o.label) > 100:
+                        pb.append("option %r" % o.label)
+                    if o.description and U._long_discord(o.description) > 100:
+                        pb.append("description %r" % o.description)
+        # Ce que discord.py envoie doit se serialiser.
+        json.dumps(vue.to_components())
+        return pb
+
+
+    def texte(vue):
+        return "\n".join(i.content for i in items(vue) if isinstance(i, ui.TextDisplay))
+
+
+    GUILD_IC = types.SimpleNamespace(
+        id=7, emojis=[discord.PartialEmoji(name=n, id=20000 + k)
+                      for k, n in enumerate(sorted(set(U._ICONES_ACTIONS.values())))])
+
+    VRAI = dict(can=U._jb_can_use, res=U._refus_reserve_jb, gen=U._jb_general_maj,
+                us=GF.is_us_guild, marche=U.marche_du_membre)
+    U._jb_can_use = lambda i: True
+    U._refus_reserve_jb = lambda i: ""
+    U.marche_du_membre = lambda m: "us"
+
+    # ===========================================================================
+    # 1. LA TABLE UNIQUE
+    # ===========================================================================
+    check("table : menus dans l'ordre Brut, Caption, Template, Trash, Flash",
+          [f.cle for f in U._FAMILLES_PANNEAU] == ["brut", "caption", "template", "trash", "flash"],
+          [f.cle for f in U._FAMILLES_PANNEAU])
+    check("table : _FAMILLES_MENU (menu VA) inchangee",
+          [f.cle for f in U._FAMILLES_MENU] == ["caption", "template", "trash", "flash"])
+    check("table : Brut = brute, brutbanger, brutchoix",
+          U._famille_panneau("brut").actions == ("brute", "brutbanger", "brutchoix"))
+    check("table : Trash et Flash lus dans marques_montage",
+          U._famille_panneau("trash").actions == tuple(U.marques_montage.marque("trash")["actions"])
+          and U._famille_panneau("flash").actions == tuple(U.marques_montage.marque("flash")["actions"]))
+    check("table : boutons = [qte, name, pseudo, pp, bio], [story, storycta, post]",
+          U._JB_BOUTONS_V2 == (("_qte", "name", "pseudo", "pp", "bio"), ("story", "storycta", "post")))
+    _disp, _hors = U._jb_disposition()
+    check("table : aucune action oubliee (trend masquee expres)",
+          _hors == [] and not [a[0] for a in U._JB_ACTIONS_US
+                               if a[0] not in U._JB_RANGEES and a[0] not in U._JB_MASQUEES],
+          (_hors, [a[0] for a in U._JB_ACTIONS_US if a[0] not in U._JB_RANGEES]))
+    check("table : « trend » existe toujours mais n'est nulle part dans la disposition",
+          U._jb_action("trend") is not None and all(c != "trend" for _s, c, _r in _disp)
+          and not any("trend" in f.actions for f in U._FAMILLES_PANNEAU))
+    check("table : chaque action a sa ligne d'explication (brut compris)",
+          all(U._EXPLICATIONS.get(k) for f in U._FAMILLES_PANNEAU for k in f.actions),
+          [k for f in U._FAMILLES_PANNEAU for k in f.actions if not U._EXPLICATIONS.get(k)])
+
+    # Le filet : une action ajoutee sans place s'affiche quand meme, comptee.
+    _sauve = list(U._JB_ACTIONS_US)
+    try:
+        U._JB_ACTIONS_US.append(("zznouvelle", "🆕 Nouvelle", "story", True))
+        del JOURNAL.lignes[:]
+        _d2, _h2 = U._jb_disposition()
+        _v2 = U._jb_panel(None, "emma", 3)
+        check("filet : une action sans place prevue s'affiche sur une rangee a elle, et c'est journalise",
+              ("action", "zznouvelle", 2) in _d2 and _h2 == []
+              and any("zznouvelle" in l[2] for l in JOURNAL.lignes)
+              and "jbus:a:emma:zznouvelle:3" in rangees(_v2)[2], rangees(_v2)[:3])
+        for n in range(6):
+            U._JB_ACTIONS_US.append(("zzplus%s" % "abcdef"[n], "X", "story", True))
+        _d3, _h3 = U._jb_disposition()
+        _v3 = U._jb_panel(None, "emma", 3)
+        check("filet : au-dela de 5, les actions sont COMPTEES et dites dans le panneau",
+              len(_h3) == 2 and "2 action(s) sans place" in texte(_v3) and not limites(_v3),
+              (_h3, limites(_v3)))
+    finally:
+        U._JB_ACTIONS_US[:] = _sauve
+
+    # ===========================================================================
+    # 2. LE PANNEAU US V2 : structure, etats, limites
+    # ===========================================================================
+    for _g, _nomg in ((None, "sans icones"), (GUILD_IC, "avec icones")):
+        v = U._jb_panel(None, "emma", 3, "us", _g)
+        check("panneau (%s) : LayoutView V2, un seul conteneur rouge fonce" % _nomg,
+              isinstance(v, ui.LayoutView) and v.has_components_v2() and len(v.children) == 1
+              and isinstance(v.children[0], ui.Container)
+              and v.children[0].accent_colour == discord.Colour.dark_red()
+              and v.timeout is None)
+        check("panneau (%s) : dans les limites de Discord" % _nomg, not limites(v), limites(v))
+        r = rangees(v)
+        attendu = [["jbus:qb:emma:3"] + ["jbus:a:emma:%s:3" % k for k in ("name", "pseudo", "pp", "bio")],
+                   ["jbus:a:emma:%s:3" % k for k in ("story", "storycta", "post")]] + \
+                  [["jbus:s:emma:%s:3" % f] for f in ("brut", "caption", "template", "trash", "flash")]
+        check("panneau (%s) : rangees = quantite+identite, publications, 5 menus" % _nomg,
+              r == attendu, r)
+        check("panneau (%s) : le texte vient en tete du conteneur" % _nomg,
+              isinstance(v.children[0].children[0], ui.TextDisplay))
+        t = texte(v)
+        check("panneau (%s) : texte = titre, quantite, -content, marque en derniere ligne" % _nomg,
+              "## 🔓 Emma — que veux-tu générer ?" in t and "Quantité : 3 média par action" in t
+              and "-content" in t and t.splitlines()[-1] == "-# panneau-actions-us", t)
+        check("panneau (%s) : ni « menu » ni « Jailbreak » dans le texte" % _nomg,
+              "menu" not in t.lower() and "jailbreak" not in t.lower(), t)
+        _js = json.dumps(v.to_components(), ensure_ascii=False)
+        check("panneau (%s) : aucune trace de Trends (ni custom_id, ni libelle)" % _nomg,
+              ":trend:" not in _js and "Trends" not in _js and "⭐⭐⭐" not in _js)
+        sel = selects(v)
+        ok_opts, det = True, []
+        for s_, f in zip(sel, U._FAMILLES_PANNEAU):
+            opts = s_.item.options
+            if [o.value for o in opts] != list(f.actions):
+                ok_opts = False
+                det.append((f.cle, [o.value for o in opts]))
+            if s_.item.placeholder != "%s %s…" % (f.emoji, f.nom):
+                ok_opts = False
+                det.append(s_.item.placeholder)
+            for o in opts:
+                lib = U._jb_action(o.value)[1]
+                icone = U.icones_actions(_g).get(o.value)
+                if icone is not None:
+                    if o.emoji is None or o.emoji.name != icone.name or o.label != U._libelle_sans_emoji(lib):
+                        ok_opts = False
+                        det.append(("icone", o.value, o.label, o.emoji))
+                else:
+                    if o.emoji is not None or o.label != lib:
+                        ok_opts = False
+                        det.append(("sans icone", o.value, o.label, o.emoji))
+                if o.description != U._EXPLICATIONS[o.value]:
+                    ok_opts = False
+                    det.append(("desc", o.value))
+                if o.default:
+                    ok_opts = False
+                    det.append(("defaut", o.value))
+        check("panneau (%s) : options = libelle de production, explication, icone sinon emoji du libelle" % _nomg,
+              ok_opts, det)
+
+    v_ic = U._jb_panel(None, "emma", 3, "us", GUILD_IC)
+    _bt = [i for i in items(v_ic) if isinstance(i, ui.DynamicItem) and isinstance(i.item, ui.Button)]
+    check("panneau : les boutons portent l'icone du serveur quand elle existe",
+          all((b.item.emoji is not None) for b in _bt if b.custom_id.startswith("jbus:a:")),
+          [(b.custom_id, b.item.emoji) for b in _bt])
+    check("panneau : bouton Quantite au libelle de la maquette",
+          _bt[0].item.label == "📦 Quantité : 3" and _bt[0].item.style == discord.ButtonStyle.secondary)
+    check("panneau : le panneau compte 22 composants",
+          U._jb_panel(None, "emma", 3).total_children_count == 22,
+          U._jb_panel(None, "emma", 3).total_children_count)
+
+    v0 = U._jb_panel(None, "_", 3)
+    check("etat « _ » : texte d'invitation + le seul bouton Quantite, marque presente",
+          rangees(v0) == [["jbus:qb:_:3"]] and "Choisis une model" in texte(v0)
+          and texte(v0).splitlines()[-1] == "-# panneau-actions-us" and not limites(v0)
+          and "menu" not in texte(v0).lower(), (rangees(v0), texte(v0)))
+    v0b = U._jb_panel(None, None, 7)
+    check("etat « _ » : ident vide -> « _ », quantite gardee", rangees(v0b) == [["jbus:qb:_:7"]])
+
+    vL = U._jb_panel(None, "a" * 60, 100, "us", GUILD_IC)
+    check("limites : identite de 60 et quantite 100 -> tout tient (custom_id <= 100)",
+          not limites(vL) and len(selects(vL)) == 5, limites(vL))
+    del JOURNAL.lignes[:]
+    vT = U._jb_panel(None, "b" * 90, 100)
+    check("limites : identite de 90 -> panneau SANS boutons qui le dit, journalise",
+          not rangees(vT) and "trop long" in texte(vT) and not limites(vT)
+          and texte(vT).splitlines()[-1] == "-# panneau-actions-us"
+          and any("sans boutons" in l[2] for l in JOURNAL.lignes), texte(vT))
+    vX = U._jb_panel(None, "chloé x", 3)
+    check("limites : nom hors [a-z0-9_.-] -> panneau sans boutons qui le dit (pas d'exception)",
+          not rangees(vX) and "illisible" in texte(vX))
+    vQ = U._jb_panel(None, "emma", "abc")
+    check("limites : quantite illisible -> 3", "jbus:qb:emma:3" in rangees(vQ)[0])
+
+    # Menu vide (famille sans action connue) : retire ET dit.
+    _fam_sauve = U._FAMILLES_PANNEAU
+    try:
+        U._FAMILLES_PANNEAU = _fam_sauve + (U._Famille("zzvide", "❔", "Vide", ("inexistante",)),)
+        del JOURNAL.lignes[:]
+        vV = U._jb_panel(None, "emma", 3)
+        check("menu vide : pas pose (Discord refuserait tout), dit dans le texte, journalise",
+              all("zzvide" not in c for rr in rangees(vV) for c in rr)
+              and "inexistante" in texte(vV) and "menu zzvide" in texte(vV)
+              and any("inexistante" in l[2] for l in JOURNAL.lignes), texte(vV))
+    finally:
+        U._FAMILLES_PANNEAU = _fam_sauve
+
+    # ===========================================================================
+    # 3. REPERAGE DANS LES EPINGLES : les deux formats
+    # ===========================================================================
+    _emb_old = discord.Embed(title="🔓 Emma — que veux-tu générer ?")
+    _emb_old.set_footer(text="panneau-actions-us")
+    m_old = Msg(embed=_emb_old, view=None)
+    m_v2 = Msg(view=U._jb_panel(None, "emma", 3))
+    m_v2_0 = Msg(view=U._jb_panel(None, "_", 3))
+    _eg = discord.Embed(title="✨ General — Lola")
+    _eg.set_footer(text="panneau-general-us")
+    m_gen = Msg(embed=_eg)
+    m_menu = Msg(embed=discord.Embed(title="Menu Jailbreak US — models US"))
+    m_autre = Msg(view=U._jb_panel(None, "emma", 3), auteur=999)
+    _lv = ui.LayoutView()
+    _c = ui.Container()
+    _c.add_item(ui.TextDisplay("## Autre chose\n-# pas-le-panneau"))
+    _lv.add_item(_c)
+    m_v2_autre = Msg(view=_lv)
+    check("reperage : ancien panneau (pied d'embed) reconnu", U._est_panneau_actions(m_old, MOI))
+    check("reperage : panneau V2 reconnu (message recu, composants Discord)",
+          U._est_panneau_actions(m_v2, MOI) and U._est_panneau_actions(m_v2_0, MOI))
+    check("reperage : General, menu, autre message V2, autre auteur : NON",
+          not U._est_panneau_actions(m_gen, MOI) and not U._est_panneau_actions(m_menu, MOI)
+          and not U._est_panneau_actions(m_v2_autre, MOI) and not U._est_panneau_actions(m_autre, MOI))
+    check("reperage : General toujours reconnu par son pied (format classique inchange)",
+          U._est_general(m_gen, MOI) and not U._est_general(m_v2, MOI))
+    check("reperage : ne leve jamais (None, objet quelconque)",
+          U._est_panneau_actions(None) is False and U._est_panneau_actions(object()) is False)
+    check("conversion : kw = vider texte ET embed pour un ancien, rien pour un V2",
+          U._jb_kw_format(m_old) == {"content": None, "embed": None} and U._jb_kw_format(m_v2) == {})
+
+    # ===========================================================================
+    # 4. MOTIFS DYNAMIQUES ET REDEMARRAGE
+    # ===========================================================================
+
+
+    class BotF:
+        def __init__(self):
+            self.vues, self.dyn = [], []
+
+        def add_view(self, v, message_id=None):
+            self.vues.append(v)
+
+        def add_dynamic_items(self, *its):
+            self.dyn.extend(its)
+
+
+    _bot = BotF()
+    del JOURNAL.lignes[:]
+    run(U.UserCog.cog_load(types.SimpleNamespace(
+        bot=_bot, daily_menu=types.SimpleNamespace(is_running=lambda: True))))
+    check("cog_load : tout enregistre, JBMenuFamille compris, aucun echec au journal",
+          U.JBMenuFamille in _bot.dyn and U.JBFamilleBouton in _bot.dyn and U.JBActionButton in _bot.dyn
+          and U.JBQtySelect in _bot.dyn and U.JBQtyBouton in _bot.dyn
+          and not [l for l in JOURNAL.lignes if "cog_load" in l[2]],
+          [l for l in JOURNAL.lignes if "cog_load" in l[2]])
+    _motifs = [(c.__name__, c.__discord_ui_compiled_template__) for c in _bot.dyn]
+    _persist = {it.custom_id for v in _bot.vues for it in v.walk_children()
+                if not isinstance(it, ui.DynamicItem) and getattr(it, "custom_id", None)}
+
+
+    def qui(cid):
+        if cid in _persist:
+            return ["vue"]
+        return [n for n, p in _motifs if p.fullmatch(cid)]
+
+
+    _neufs = []
+    for ident in ("emma", "a.b-c_d", "x" * 60, "_"):
+        for q in (1, 3, 100):
+            _neufs += [c for rr in rangees(U._jb_panel(None, ident, q, "us", GUILD_IC)) for c in rr]
+    _mauvais = [(c, qui(c)) for c in _neufs if len(qui(c)) != 1]
+    check("motifs : chaque custom_id du panneau V2 est servi par UN element exactement",
+          not _mauvais and len(_neufs) > 50, _mauvais[:5])
+    check("motifs : les menus « jbus:s: » vont a JBMenuFamille et a lui seul",
+          all(qui(c) == ["JBMenuFamille"] for c in _neufs if c.startswith("jbus:s:")))
+    _anciens = (["jbus:a:emma:%s:3" % a[0] for a in U._JB_ACTIONS_US] + ["jbus:a:emma:trend:3"]
+                + ["jbus:qb:emma:3", "jbus:q:emma:3", "jbus:m:emma", "jbus:qb:_:3", "jbus:q:_:3"]
+                + ["jbus:f:emma:%s:3" % f.cle for f in U._FAMILLES_MENU]
+                + ["jbg:a:lola:blonde:story:3", "jbg:qb:lola:blonde:3", "jbg:r:lola:blonde:3",
+                   "genlink:123"])
+    _mauv2 = [(c, qui(c)) for c in _anciens if len(qui(c)) != 1]
+    check("motifs : tous les ANCIENS custom_id (jbus:a/qb/q/m/f, trend, jbg:, genlink) servis par UN element",
+          not _mauv2, _mauv2)
+    _tS = U.JBMenuFamille.__discord_ui_compiled_template__
+    check("motifs : jbus:s: ne capture aucun ancien custom_id",
+          not any(_tS.fullmatch(c) for c in _anciens))
+
+
+    class EtatF:
+        """Etat minimal pour un vrai ViewStore de discord.py."""
+
+
+    async def _redemarrage(cid, valeur, message):
+        """Un clic sur un menu DEJA poste, apres un redemarrage : un ViewStore
+        neuf, les motifs de cog_load, et le vrai parcours de discord.py
+        (from_message -> from_custom_id -> callback)."""
+        from discord.ui.view import ViewStore
+        store = ViewStore(EtatF())
+        store.add_dynamic_items(*_bot.dyn)
+        itx = Itx(message=message, channel=message.ch)
+        itx.data = {"custom_id": cid, "component_type": 3, "values": [valeur]}
+        store.dispatch_view(3, cid, itx)
+        await asyncio.sleep(0)
+        for _ in range(20):
+            await asyncio.sleep(0)
+        await attendre_fond()
+        return itx
+
+
+    _salonR = Salon(5151)
+    _vueR = U._jb_panel(None, "emma", 5, "us", GUILD_IC)
+    _mR = Msg(_salonR, view=_vueR)
+    _mR.pinned = True
+    _salonR.msgs.append(_mR)
+    U._jb_panel_set(_salonR.id, _mR.id)
+    U._JB_PANNEAU_COURANT.clear()
+    COG.appels.clear()
+    COG.mode = "defer"
+    _iR = run(_redemarrage("jbus:s:emma:trash:5", "bruttrash", _mR))
+    check("redemarrage : un menu deja poste repond (ViewStore neuf, from_custom_id), l'action part",
+          COG.appels == [("emma", "bruttrash", 5, True)], COG.appels)
+    check("redemarrage : ... une seule reponse, et le panneau est redessine (menus sur leur intitule)",
+          _iR.response.doubles == 0 and len(_iR.response.faits) == 1 and _mR.edits
+          and all(not o.default for s_ in selects(_mR.edits[-1]["view"]) for o in s_.item.options),
+          (_iR.response.faits, len(_mR.edits)))
+    COG.appels.clear()
+    _iR2 = run(_redemarrage("jbus:s:emma:trash:5", "templateflash", _mR))
+    check("redemarrage : une valeur hors de la famille (forgee) est refusee, rien ne part",
+          not COG.appels and _iR2.response.faits and _iR2.response.faits[0][0] == "edit_message"
+          and _iR2.followup.envois and "inconnue" in str(_iR2.followup.envois[0][0]),
+          (_iR2.response.faits, _iR2.followup.envois))
+    COG.appels.clear()
+    # Un ANCIEN panneau (vue classique) qui porte encore « ⭐⭐⭐ Trends ».
+    _vA = ui.View(timeout=None)
+    _vA.add_item(U.JBActionButton("emma", "trend", 5, row=1))
+    _vA.add_item(U.JBFamilleBouton("emma", "caption", 5, row=2))
+    _mA = Msg(_salonR, view=_vA)
+    _salonR.msgs.append(_mA)
+
+
+    async def _redemarrage_bouton(cid, message):
+        from discord.ui.view import ViewStore
+        store = ViewStore(EtatF())
+        store.add_dynamic_items(*_bot.dyn)
+        itx = Itx(message=message, channel=message.ch)
+        itx.data = {"custom_id": cid, "component_type": 2}
+        store.dispatch_view(2, cid, itx)
+        for _ in range(20):
+            await asyncio.sleep(0)
+        await attendre_fond()
+        return itx
+
+
+    _iR3 = run(_redemarrage_bouton("jbus:a:emma:trend:5", _mA))
+    check("redemarrage : un ancien bouton « trend » (vue classique) repond toujours",
+          COG.appels == [("emma", "trends", 5, True)], COG.appels)
+    _iR4 = run(_redemarrage_bouton("jbus:f:emma:caption:5", _mA))
+    check("redemarrage : un ancien lanceur ▸ convertit son panneau en V2 (conversion par edition)",
+          _iR4.response.faits and _iR4.response.faits[0][0] == "edit_message"
+          and _mA.flags.components_v2 and U._est_panneau_actions(_mA, MOI),
+          _iR4.response.faits)
+
+    # ===========================================================================
+    # 5. CLIC SUR UN MENU DU PANNEAU US (callbacks simules)
+    # ===========================================================================
+
+
+    def panneau_epingle(ident="emma", qty=3, cid=77):
+        ch = Salon(cid)
+        m = Msg(ch, view=U._jb_panel(None, ident, qty, "us", GUILD_IC))
+        m.pinned = True
+        ch.msgs.append(m)
+        U._jb_panel_set(ch.id, m.id)
+        return ch, m
+
+
+    def choisir(menu, valeur, message, channel, mode="defer"):
+        COG.mode = mode
+        menu.item._values = [valeur]
+        itx = Itx(message=message, channel=channel, guild=GUILD_IC)
+        lancer(menu.callback(itx))
+        menu.item._values = []
+        return itx
+
+
+    def remis(vue):
+        return vue is not None and all(not o.default for s_ in selects(vue) for o in s_.item.options) \
+            and len(selects(vue)) == 5
+
+
+    U._JB_PANNEAU_COURANT.clear()
+    for fam in U._FAMILLES_PANNEAU:
+        for cle in fam.actions:
+            ch, m = panneau_epingle()
+            COG.appels.clear()
+            itx = choisir(U.JBMenuFamille("emma", fam.cle, 3), cle, m, ch)
+            ent = U._jb_action(cle)
+            ok = (COG.appels == [("emma", ent[2], 3, bool(ent[3]))]
+                  and itx.response.doubles == 0 and len(itx.response.faits) == 1
+                  and len(m.edits) == 1 and remis(m.edits[0]["view"])
+                  and U._JB_PANNEAU_COURANT.get(77) == ("emma", 3))
+            if not ok:
+                check("menu %s / %s : action lancee comme le bouton, menu remis" % (fam.cle, cle), False,
+                      (COG.appels, itx.response.faits, len(m.edits)))
+                break
+        else:
+            check("menu %s : chacune de ses %d options lance _run_for_model comme le bouton, et le menu revient"
+                  % (fam.cle, len(fam.actions)), True)
+
+    # Choisir ma brute (defer ephemere + fenetre ephemere) depuis le panneau epingle.
+    ch, m = panneau_epingle()
+    COG.appels.clear()
+    itx = choisir(U.JBMenuFamille("emma", "brut", 3), "brutchoix", m, ch, mode="defer_eph")
+    check("Choisir ma brute : une reponse (le defer de la commande), sa fenetre en suivi, le menu revient",
+          COG.appels == [("emma", "choisirbrute", 3, False)] and itx.response.doubles == 0
+          and itx.response.faits[0][0] == "defer" and itx.followup.envois
+          and itx.followup.envois[0][1].get("ephemeral") and len(m.edits) == 1 and remis(m.edits[0]["view"]),
+          (itx.response.faits, itx.followup.envois, len(m.edits)))
+    # Reselectionner la meme option : elle repart.
+    COG.appels.clear()
+    itx2 = choisir(U.JBMenuFamille("emma", "brut", 3), "brutchoix", m, ch, mode="defer_eph")
+    check("meme option choisie deux fois : deux actions", COG.appels == [("emma", "choisirbrute", 3, False)])
+
+    # L'action ne repond pas : on repond EN redessinant.
+    ch, m = panneau_epingle()
+    itx = choisir(U.JBMenuFamille("emma", "caption", 3), "capbanger", m, ch, mode="rien")
+    check("action muette : la reponse est l'edition du panneau (jamais « l'interaction a echoue »)",
+          itx.response.faits and itx.response.faits[0][0] == "edit_message" and itx.response.doubles == 0,
+          itx.response.faits)
+
+    # L'action leve : panneau remis + erreur dite.
+    ch, m = panneau_epingle()
+    del JOURNAL.lignes[:]
+    itx = choisir(U.JBMenuFamille("emma", "caption", 3), "capbanger", m, ch, mode="leve")
+    check("action qui leve : une reponse, erreur DITE en ephemere et journalisee",
+          itx.response.doubles == 0 and len(itx.response.faits) == 1
+          and itx.followup.envois and "erreur" in itx.followup.envois[-1][0]
+          and itx.followup.envois[-1][1].get("ephemeral")
+          and any("en echec" in l[2] for l in JOURNAL.lignes),
+          (itx.response.faits, itx.followup.envois))
+
+    # Le panneau a change (autre model) pendant le rendu : pas de retour en arriere.
+    ch, m = panneau_epingle()
+    U._JB_PANNEAU_COURANT[77] = ("julia", 3)
+    _vrai_epingle = U._jb_est_panneau_epingle
+    U._jb_est_panneau_epingle = lambda i: False
+    try:
+        itx = choisir(U.JBMenuFamille("emma", "caption", 3), "capbanger", m, ch)
+    finally:
+        U._jb_est_panneau_epingle = _vrai_epingle
+    check("course : panneau deja passe sur une autre model -> aucun redessin avec l'ancienne",
+          not m.edits and COG.appels[-1][0] == "emma", len(m.edits))
+    U._JB_PANNEAU_COURANT.clear()
+
+    # Course AVEC le redessin de fond en panne (reproduit le 26/09/2026) : le
+    # repli de remise a zero (_menu_lancer) passe APRES l'action, avec la vue
+    # construite au moment du choix. Le VA ayant clique Julia pendant le rendu
+    # de 30 s, il remettait le panneau sur Emma alors que _JB_PANNEAU_COURANT
+    # disait Julia. Deux details comptent pour le voir :
+    #   - interaction.message est une PHOTO prise au clic (Photo) : ses
+    #     drapeaux et son contenu ne suivent pas le salon ;
+    #   - interaction.data porte le custom_id du menu choisi, comme chez
+    #     Discord -- c'est lui que le correctif cherche dans le message relu.
+    class Photo:
+        def __init__(self, vrai, echecs=0):
+            self.vrai = vrai
+            self.id = vrai.id
+            self.ch = vrai.ch
+            self.embeds = list(vrai.embeds)
+            self.content = vrai.content
+            self.components = list(vrai.components)
+            self.author = vrai.author
+            self.pinned = vrai.pinned
+            self.flags = types.SimpleNamespace(ephemeral=vrai.flags.ephemeral,
+                                               components_v2=vrai.flags.components_v2)
+            #: editions refusees (500) avant de passer : le redessin de fond.
+            self.echecs = echecs
+
+        async def edit(self, **k):
+            if self.echecs:
+                self.echecs -= 1
+                raise http_exc(status=500, texte="panne simulee")
+            return await self.vrai.edit(**k)
+
+        async def delete(self):
+            return await self.vrai.delete()
+
+
+    class CogCourse(Cog):
+        """_run_for_model qui joue `pendant()` au milieu du « rendu », une
+        fois le redessin de fond passe (et rate)."""
+
+        def __init__(self, pendant):
+            super().__init__()
+            self.pendant = pendant
+
+        async def _run_for_model(self, interaction, model, cmd, count=None, **k):
+            self.appels.append((model, count))
+            await interaction.response.defer()
+            for _ in range(5):
+                await asyncio.sleep(0)
+            if self.pendant is not None:
+                await self.pendant()
+            await interaction.followup.send("contenu")
+
+
+    def choisir_en_panne(menu, valeur, m, ch, pendant=None):
+        menu.item._values = [valeur]
+        itx = Itx(message=Photo(m, echecs=1), channel=ch, guild=GUILD_IC)
+        itx.data = {"custom_id": menu.item.custom_id, "component_type": 3, "values": [valeur]}
+        cog = CogCourse(pendant)
+        itx.client = types.SimpleNamespace(get_cog=lambda n: cog if n == "UserCog" else None,
+                                           user=types.SimpleNamespace(id=MOI))
+        _lire = ch.fetch_message
+        ch.lectures = 0
+
+        async def _compter(i):
+            ch.lectures += 1
+            return await _lire(i)
+        ch.fetch_message = _compter
+        lancer(menu.callback(itx))
+        menu.item._values = []
+        return itx, cog
+
+
+    ch, m = panneau_epingle(cid=70)
+    U._JB_PANNEAU_COURANT[70] = ("emma", 3)
+
+
+    async def _vers_julia():
+        U._jb_panneau_noter(70, "julia", 3)
+        await m.edit(view=U._jb_panel(None, "julia", 3, "us", GUILD_IC))
+    del JOURNAL.lignes[:]
+    itx, _cg = choisir_en_panne(U.JBMenuFamille("emma", "caption", 3), "capbanger", m, ch, _vers_julia)
+    check("course + redessin de fond en panne : le panneau RESTE sur Julia (pas de retour a Emma), "
+          "une seule reponse, rien par @original, journalise",
+          _cg.appels == [("emma", 3)] and itx.message.echecs == 0
+          and texte(m.view).startswith("## 🔓 Julia") and not itx.orig_edits
+          and len(itx.response.faits) == 1 and itx.response.doubles == 0
+          and any("deja redessine" in l[2] for l in JOURNAL.lignes),
+          (texte(m.view).splitlines()[:1], itx.orig_edits, itx.response.faits))
+    # Meme panne, la QUANTITE changee pendant le rendu (3 -> 7) : elle reste a 7.
+    ch, m = panneau_epingle(cid=71)
+    U._JB_PANNEAU_COURANT[71] = ("emma", 3)
+
+
+    async def _vers_7():
+        U._jb_panneau_noter(71, "emma", 7)
+        await m.edit(view=U._jb_panel(None, "emma", 7, "us", GUILD_IC))
+    itx, _cg = choisir_en_panne(U.JBMenuFamille("emma", "flash", 3),
+                                U._famille_panneau("flash").actions[0], m, ch, _vers_7)
+    _ids7 = [c for r_ in rangees(m.view) for c in r_]
+    check("course sur la quantite + redessin de fond en panne : le panneau reste a 7",
+          "jbus:qb:emma:7" in _ids7 and "jbus:s:emma:flash:7" in _ids7 and not itx.orig_edits,
+          _ids7[:2])
+    # Meme panne, SANS course : le repli remet bien le panneau (le cas courant).
+    ch, m = panneau_epingle(cid=72)
+    U._JB_PANNEAU_COURANT[72] = ("emma", 3)
+    itx, _cg = choisir_en_panne(U.JBMenuFamille("emma", "caption", 3), "capbanger", m, ch)
+    check("redessin de fond en panne, sans course : panneau remis par @original (1 relecture, "
+          "1 reponse), menus sur leur intitule",
+          len(itx.orig_edits) == 1 and remis(itx.orig_edits[0]["view"]) and ch.lectures == 1
+          and len(itx.response.faits) == 1 and itx.response.doubles == 0,
+          (itx.orig_edits, ch.lectures, itx.response.faits))
+    # Relecture impossible (Discord en panne) : on ne remet pas, a l'aveugle.
+    ch, m = panneau_epingle(cid=73)
+    U._JB_PANNEAU_COURANT[73] = ("emma", 3)
+
+
+    async def _lecture_en_panne(i):
+        raise http_exc(status=503, texte="panne lecture")
+    ch.fetch_message = _lecture_en_panne
+    del JOURNAL.lignes[:]
+    itx, _cg = choisir_en_panne(U.JBMenuFamille("emma", "caption", 3), "capbanger", m, ch)
+    check("relecture en panne : pas de remise a l'aveugle, journalise, une seule reponse",
+          not itx.orig_edits and len(itx.response.faits) == 1 and itx.response.doubles == 0
+          and any("illisible" in l[2] and "non remis" in l[2] for l in JOURNAL.lignes),
+          (itx.orig_edits, itx.response.faits))
+    U._JB_PANNEAU_COURANT.clear()
+
+    # Panneau EPHEMERE (secours) : redessin apres coup par l'interaction.
+    eph = Msg(view=U._vue_sans_suivi(U._jb_panel(None, "emma", 3)), ephemere=True)
+    for mode, attendu in (("defer", "orig"), ("send_eph", "followup"), ("rien", "reponse"),
+                          ("thinking", "followup")):
+        eph.edits.clear()
+        itx = choisir(U.JBMenuFamille("emma", "template", 3), "reelmonte", eph, Salon(78), mode=mode)
+        chemin = ("orig" if itx.orig_edits else "followup" if itx.followup.edits
+                  else "reponse" if itx.response.faits and itx.response.faits[0][0] == "edit_message" else "?")
+        v_ = eph.edits[-1].get("view") if eph.edits else None
+        check("ephemere (%s) : menu remis par %s, une seule reponse, vue arretee" % (mode, attendu),
+              chemin == attendu and itx.response.doubles == 0 and remis(v_) and v_.is_finished(),
+              (chemin, itx.response.faits, len(eph.edits)))
+
+    # Refus : role, reserve, famille inconnue, model « _ », perime, action absente du cog.
+    U._JB_PANNEAU_COURANT.clear()
+    ch, m = panneau_epingle()
+
+
+    def refus_avec(nom, preparer, menu, valeur, attendu, message=None, restaurer=None):
+        COG.appels.clear()
+        preparer()
+        try:
+            itx = choisir(menu, valeur, message or m, ch)
+        finally:
+            if restaurer:
+                restaurer()
+        rep = itx.response.faits
+        _vr = rep[0][2]["view"] if rep else None
+        # Un menu « _ » ne peut venir que d'un custom_id forge : le panneau
+        # redessine est alors celui de l'etat « _ » (sans menus).
+        _ok_vue = remis(_vr) if menu.ident != "_" else (_vr is not None and rangees(_vr) == [["jbus:qb:_:3"]])
+        check("refus %s : rien ne part, le menu revient, le VA lit pourquoi" % nom,
+              not COG.appels and rep and rep[0][0] == "edit_message" and _ok_vue
+              and itx.followup.envois and attendu in str(itx.followup.envois[0][0])
+              and itx.followup.envois[0][1].get("ephemeral") and itx.response.doubles == 0,
+              (COG.appels, rep[:1], itx.followup.envois))
+
+
+    refus_avec("role", lambda: setattr(U, "_jb_can_use", lambda i: False),
+               U.JBMenuFamille("emma", "caption", 3), "capbanger", "Réservé",
+               restaurer=lambda: setattr(U, "_jb_can_use", lambda i: True))
+    refus_avec("reserve", lambda: setattr(U, "_refus_reserve_jb", lambda i: "⛔ reserve"),
+               U.JBMenuFamille("emma", "caption", 3), "capbanger", "⛔ reserve",
+               restaurer=lambda: setattr(U, "_refus_reserve_jb", lambda i: ""))
+    refus_avec("valeur hors liste blanche", lambda: None,
+               U.JBMenuFamille("emma", "caption", 3), "templateflash", "inconnue")
+    refus_avec("famille inconnue", lambda: None,
+               U.JBMenuFamille("emma", "zzz", 3), "capbanger", "indisponible")
+    refus_avec("model « _ »", lambda: None,
+               U.JBMenuFamille("_", "caption", 3), "capbanger", "indisponible")
+    _attr = U._jb_action("capbanger")[2]
+    _sauv_attr = Cog.__dict__.get(_attr)
+    refus_avec("action absente du cog", lambda: delattr(Cog, _attr),
+               U.JBMenuFamille("emma", "caption", 3), "capbanger", "indisponible",
+               restaurer=lambda: setattr(Cog, _attr, _sauv_attr))
+    eph2 = Msg(view=U._vue_sans_suivi(U._jb_panel(None, "lola", 3)), ephemere=True)
+    refus_avec("panneau ephemere perime (le salon montre Julia)",
+               lambda: U._JB_PANNEAU_COURANT.__setitem__(77, ("julia", 3)),
+               U.JBMenuFamille("lola", "caption", 3), "capbanger", "Julia", message=eph2,
+               restaurer=lambda: U._JB_PANNEAU_COURANT.clear())
+    U._JB_PANNEAU_COURANT[77] = ("julia", 3)
+    _msgP = U._jb_sous_menu_perime(types.SimpleNamespace(message=eph2, channel=types.SimpleNamespace(id=77)),
+                                   "lola", 3, panneau=True)
+    _msgS = U._jb_sous_menu_perime(types.SimpleNamespace(message=eph2, channel=types.SimpleNamespace(id=77)),
+                                   "lola", 3)
+    U._JB_PANNEAU_COURANT.clear()
+    check("perime : panneau de secours -> renvoie au panneau epingle ; ancien sous-menu -> phrase d'avant",
+          "panneau épinglé" in _msgP and "▸" not in _msgP
+          and _msgS == ("⚠️ Ce sous-menu est pour **Lola**, ton panneau est passé sur **Julia** : "
+                        "reclique ▸ sur le panneau pour avoir les bons boutons."), (_msgP, _msgS))
+
+    # ===========================================================================
+    # 6. CLIC SUR UNE MODEL (JBModelButton, serveur US) : conversion et repli
+    # ===========================================================================
+    GF.is_us_guild = lambda g: True
+    _gen_appels = []
+
+
+    async def _gen_f(client, chan, model, guild, reposter=False):
+        _gen_appels.append((model, reposter))
+        return True
+    U._jb_general_maj = _gen_f
+
+
+    def clic_model(ch, ident="julia"):
+        itx = Itx(message=Msg(), channel=ch, guild=GUILD_IC)
+        lancer(U.JBModelButton(ident).callback(itx))
+        return itx
+
+
+    # a) ancien panneau epingle (embed) : converti PAR EDITION.
+    ch = Salon(81)
+    _e = discord.Embed(title="🔓 Emma — que veux-tu générer ?")
+    _e.set_footer(text="panneau-actions-us")
+    old = Msg(ch, embed=_e, view=None)
+    old.pinned = True
+    ch.msgs.append(old)
+    U._jb_panel_set(ch.id, old.id)
+    _gen_appels.clear()
+    itx = clic_model(ch)
+    k = old.edits[-1] if old.edits else {}
+    check("model : ancien panneau converti par EDITION (content=None, embed=None, vue V2)",
+          k.get("content", "x") is None and k.get("embed", "x") is None
+          and isinstance(k.get("view"), ui.LayoutView) and old.flags.components_v2 and not old.embeds
+          and U._est_panneau_actions(old, MOI) and len(ch.msgs) == 1, k)
+    check("model : ... une reponse (defer), General mis a jour sans repost",
+          itx.response.faits == [("defer", (), {"ephemeral": False, "thinking": False})]
+          and _gen_appels == [("julia", False)], (itx.response.faits, _gen_appels))
+    # b) panneau deja V2 : edition de la vue seule.
+    old.edits.clear()
+    itx = clic_model(ch, "lola")
+    check("model : panneau V2 -> edition de la vue SEULE (rien a vider)",
+          list(old.edits[-1].keys()) == ["view"] and "Lola" in texte(old.edits[-1]["view"]))
+    # c) conversion refusee : nouveau panneau V2, epingle, l'ancien retire, id memorise, journalise.
+    ch = Salon(82)
+    old = Msg(ch, embed=_e, view=None)
+    old.pinned = True
+    old.echec_edit = http_exc(texte="Cannot convert")
+    ch.msgs.append(old)
+    U._jb_panel_set(ch.id, old.id)
+    _gen_appels.clear()
+    del JOURNAL.lignes[:]
+    itx = clic_model(ch)
+    nouv = [x for x in ch.msgs if x is not old]
+    check("model : conversion refusee -> nouveau panneau V2 epingle, ancien retire, id memorise",
+          old.supprime and len(nouv) == 1 and nouv[0].pinned and U._est_panneau_actions(nouv[0], MOI)
+          and U._jb_panel_ids().get(str(ch.id)) == nouv[0].id and not nouv[0].embeds,
+          (old.supprime, len(nouv)))
+    check("model : ... journalise, une reponse, General REPOSTE sous le nouveau panneau",
+          any("edition refusee" in l[2] for l in JOURNAL.lignes) and itx.response.doubles == 0
+          and _gen_appels == [("julia", True)], (_gen_appels, itx.response.faits))
+    # d) aucun panneau : pose.
+    ch = Salon(83)
+    _gen_appels.clear()
+    itx = clic_model(ch)
+    check("model : pas de panneau -> un panneau V2 pose et epingle, General reposte",
+          len(ch.msgs) == 1 and ch.msgs[0].pinned and U._est_panneau_actions(ch.msgs[0], MOI)
+          and _gen_appels == [("julia", True)])
+    # e) id non memorise : retrouve dans les epingles, sous ses deux formats.
+    for fmt in ("ancien", "v2"):
+        ch = Salon(84 if fmt == "ancien" else 85)
+        pm = Msg(ch, embed=_e) if fmt == "ancien" else Msg(ch, view=U._jb_panel(None, "emma", 3))
+        pm.pinned = True
+        ch.msgs.append(pm)
+        itx = clic_model(ch)
+        check("model : panneau %s retrouve dans les epingles (pas de doublon)" % fmt,
+              len(ch.msgs) == 1 and pm.edits and U._jb_panel_ids().get(str(ch.id)) in (None, pm.id)
+              and "Julia" in texte(pm.edits[-1]["view"]))
+    # f) tout echoue : ephemere, vue ARRETEE.
+    ch = Salon(86)
+    ch.echec_send = http_exc(discord.Forbidden, 403, "pas le droit")
+    _gen_appels.clear()
+    itx = clic_model(ch)
+    f = itx.response.faits
+    check("model : salon inutilisable -> panneau en ephemere, vue arretee, General non touche",
+          f and f[0][0] == "send_message" and f[0][2].get("ephemeral")
+          and isinstance(f[0][2].get("view"), ui.LayoutView) and f[0][2]["view"].is_finished()
+          and "embed" not in f[0][2] and not _gen_appels, f)
+
+    # ===========================================================================
+    # 7. QUANTITE, ANCIEN MENU DE QUANTITE, LANCEURS « ▸ » : conversion
+    # ===========================================================================
+
+
+    async def soumettre(itx_clic, q, message):
+        modal = itx_clic.response.modal
+        itx_m = Itx(message=message, channel=message.ch, guild=GUILD_IC)
+        modal.nombre._value = str(q)
+        await modal.on_submit(itx_m)
+        await attendre_fond()
+        return itx_m
+
+
+    for fmt in ("ancien", "v2"):
+        ch = Salon(91)
+        pm = Msg(ch, embed=_e) if fmt == "ancien" else Msg(ch, view=U._jb_panel(None, "emma", 3))
+        pm.pinned = True
+        ch.msgs.append(pm)
+        U._jb_panel_set(ch.id, pm.id)
+        itx = Itx(message=pm, channel=ch, guild=GUILD_IC)
+        run(U.JBQtyBouton("emma", 3).callback(itx))
+        itm = run(soumettre(itx, 7, pm))
+        k = itm.response.faits[0][2] if itm.response.faits else {}
+        check("quantite (%s) : la fenetre, puis le panneau V2 a 7 par edition%s" % (
+            fmt, " (conversion)" if fmt == "ancien" else ""),
+              itx.response.faits[0][0] == "send_modal" and itm.response.faits[0][0] == "edit_message"
+              and ("jbus:qb:emma:7" in rangees(k["view"])[0])
+              and ((k.get("content", "x") is None and k.get("embed", "x") is None) if fmt == "ancien"
+                   else set(k) == {"view"}) and U._JB_PANNEAU_COURANT.get(91) == ("emma", 7),
+              (itm.response.faits, U._JB_PANNEAU_COURANT.get(91)))
+    # Edition refusee depuis la fenetre : repost.
+    ch = Salon(92)
+    pm = Msg(ch, embed=_e)
+    pm.pinned = True
+    ch.msgs.append(pm)
+    U._jb_panel_set(ch.id, pm.id)
+    itx = Itx(message=pm, channel=ch, guild=GUILD_IC)
+    run(U.JBQtyBouton("emma", 3).callback(itx))
+    modal = itx.response.modal
+    itm = Itx(message=pm, channel=ch, guild=GUILD_IC)
+    itm.response.echec_edit = http_exc(texte="refus conversion")
+    modal.nombre._value = "4"
+    _gen_appels.clear()
+    lancer(modal.on_submit(itm))
+    nouv = [x for x in ch.msgs if x is not pm]
+    check("quantite : conversion refusee -> defer, nouveau panneau V2 (4), ancien retire, General reposte",
+          itm.response.faits and itm.response.faits[0][0] == "defer" and pm.supprime and len(nouv) == 1
+          and "jbus:qb:emma:4" in rangees(nouv[0].view)[0] and nouv[0].pinned
+          and U._jb_panel_ids().get("92") == nouv[0].id and _gen_appels == [("emma", True)],
+          (itm.response.faits, pm.supprime, len(nouv), _gen_appels))
+    # Ancien panneau ephemere : refus -> un nouvel ephemere.
+    ephA = Msg(embed=_e, ephemere=True)
+    itx = Itx(message=ephA, channel=Salon(93), guild=GUILD_IC)
+    itx.response.echec_edit = http_exc(texte="refus")
+    lancer(U.JBFamilleBouton("emma", "trash", 5).callback(itx))
+    f = itx.response.faits
+    check("ancien ephemere : edition refusee -> NOUVEL ephemere V2 (vue arretee)",
+          f and f[0][0] == "send_message" and f[0][2].get("ephemeral")
+          and f[0][2]["view"].is_finished() and "jbus:s:emma:trash:5" in [c for rr in rangees(f[0][2]["view"]) for c in rr],
+          f)
+
+    # Ancien menu de quantite (jbus:q:)
+    ch = Salon(94)
+    pm = Msg(ch, embed=_e)
+    pm.pinned = True
+    ch.msgs.append(pm)
+    sel = U.JBQtySelect("emma", 3)
+    sel.item._values = ["10"]
+    itx = Itx(message=pm, channel=ch, guild=GUILD_IC)
+    lancer(sel.callback(itx))
+    check("ancien menu de quantite (jbus:q:) : repond et convertit le panneau (10)",
+          itx.response.faits[0][0] == "edit_message" and pm.flags.components_v2
+          and "jbus:qb:emma:10" in rangees(pm.view)[0])
+    sel.item._values = [U._JB_QTY_AUTRE]
+    itx = Itx(message=pm, channel=ch, guild=GUILD_IC)
+    run(sel.callback(itx))
+    itm = run(soumettre(itx, 12, pm))
+    check("ancien menu de quantite « Autre » : fenetre puis panneau V2 a 12",
+          itx.response.faits[0][0] == "send_modal" and "jbus:qb:emma:12" in rangees(pm.view)[0])
+
+    # Anciens lanceurs « ▸ » (dc157c3) : plus de sous-menu, le panneau devient V2.
+    ch = Salon(95)
+    pm = Msg(ch, embed=_e)
+    pm.pinned = True
+    ch.msgs.append(pm)
+    U._jb_panel_set(ch.id, pm.id)
+    U._JB_PANNEAU_COURANT.clear()
+    itx = Itx(message=pm, channel=ch, guild=GUILD_IC)
+    lancer(U.JBFamilleBouton("emma", "caption", 5).callback(itx))
+    f = itx.response.faits
+    check("ancien lanceur ▸ : le panneau est RECONSTRUIT en V2 sur place, pas de sous-menu ephemere",
+          f and f[0][0] == "edit_message" and not f[0][2].get("ephemeral")
+          and f[0][2].get("content", "x") is None and pm.flags.components_v2
+          and "jbus:s:emma:caption:5" in [c for rr in rangees(pm.view) for c in rr]
+          and not itx.followup.envois and U._JB_PANNEAU_COURANT.get(95) == ("emma", 5), f)
+    for nom_r, prep, rest, att in (
+            ("role", lambda: setattr(U, "_jb_can_use", lambda i: False),
+             lambda: setattr(U, "_jb_can_use", lambda i: True), "Réservé"),
+            ("reserve", lambda: setattr(U, "_refus_reserve_jb", lambda i: "⛔ res"),
+             lambda: setattr(U, "_refus_reserve_jb", lambda i: ""), "⛔ res")):
+        prep()
+        try:
+            itx = Itx(message=pm, channel=ch)
+            lancer(U.JBFamilleBouton("emma", "caption", 5).callback(itx))
+        finally:
+            rest()
+        check("ancien lanceur ▸ : garde « %s »" % nom_r,
+              itx.response.faits and itx.response.faits[0][0] == "send_message"
+              and att in str(itx.response.faits[0][1]))
+    itx = Itx(message=pm, channel=ch)
+    lancer(U.JBFamilleBouton("emma", "inconnue", 5).callback(itx))
+    check("ancien lanceur ▸ : famille inconnue refusee en le disant",
+          "inconnue" in str(itx.response.faits[0][1]) and itx.response.faits[0][2].get("ephemeral"))
+
+    # Anciens boutons d'action (jbus:a:, trend compris) : toujours servis.
+    COG.appels.clear()
+    COG.mode = "defer"
+    for cle in ("trend", "templateflash", "templatetrash", "brutchoix", "reelcaption"):
+        itx = Itx(message=pm, channel=ch)
+        lancer(U.JBActionButton("emma", cle, 3).callback(itx))
+    check("anciens boutons jbus:a: (trend, flash, trash, choisir ma brute, caption) : servis",
+          [a[1] for a in COG.appels] == ["trends", "templateflash", "templatetrash", "choisirbrute",
+                                          "reelcaption"], COG.appels)
+
+    # ===========================================================================
+    # 8. WELCOME : _ensure_us_menu, _ensure_us_panel, reset_us_menu
+    # ===========================================================================
+    U._jb_general_maj = VRAI["gen"]
+
+
+    class UCogW:
+        def jailbreak_us_menu(self, marche):
+            return discord.Embed(title="🔓 Menu Jailbreak US"), None
+
+        async def jailbreak_us_menu_async(self, guild, marche):
+            return self.jailbreak_us_menu(marche)
+
+
+    _botW = types.SimpleNamespace(user=Auteur(MOI), get_cog=lambda n: UCogW() if n == "UserCog" else None)
+    _vrai_gen = U._jb_general
+
+
+    # Depuis le 26/09/2026 (partie E), _jb_general rend lui aussi une
+    # LayoutView V2 -- plus de couple (embed, vue) -- reconnue a la derniere
+    # ligne de son texte. Ce bouchon suit ce contrat (sans lui, welcome ne
+    # posait plus de General ici) ; le vrai General est eprouve dans la
+    # partie E (_v2_bloc_general).
+    def _gen_simple(cog, model, qty=3, reserve=None, guild=None):
+        v = ui.LayoutView(timeout=None)
+        c = ui.Container()
+        c.add_item(ui.TextDisplay("## ✨ General — %s\n-# panneau-general-us" % model))
+        v.add_item(c)
+        return v
+    U._jb_general = _gen_simple
+
+
+    def ordre(ch):
+        out = ""
+        for x in ch.msgs:
+            if U._est_panneau_actions(x, MOI):
+                out += "P" if x.flags.components_v2 else "p"
+            elif U._est_general(x, MOI):
+                # Le General, dans l'un ou l'autre format : c'est la fonction
+                # du bot qui le dit, comme dans les epingles.
+                out += "G"
+            elif x.embeds and "Jailbreak" in (x.embeds[0].title or ""):
+                out += "M"
+            else:
+                out += "?"
+        return out
+
+
+    chW = Salon(4343)
+    etat = {}
+    ok = run(W.reset_us_menu(_botW, chW, etat=etat))
+    check("reset_us_menu : menu, panneau V2, General, dans cet ordre",
+          ok and ordre(chW) == "MPG" and etat.get("general") is True
+          and not chW.msgs[1].embeds and chW.msgs[1].pinned, (ordre(chW), etat))
+    # Relance : rien ne se double (le panneau V2 est reconnu).
+    etat = {}
+    ok = run(W._ensure_us_menu(_botW, chW, etat=etat))
+    check("_ensure_us_menu : panneau V2 reconnu, rien de pose en double, General garde",
+          ok and ordre(chW) == "MPG" and etat.get("general") is True, (ordre(chW), etat))
+    ok = run(W._ensure_us_panel(_botW, chW))
+    check("_ensure_us_panel : panneau V2 reconnu, pas de second panneau",
+          ok and ordre(chW) == "MPG" and U._jb_panel_ids().get(str(chW.id)) == chW.msgs[1].id)
+    # Ancien panneau (embed) : reconnu aussi.
+    chA = Salon(4344)
+    mA = Msg(chA, embed=discord.Embed(title="🔓 Menu Jailbreak US"))
+    mA.pinned = True
+    pA = Msg(chA, embed=_e)
+    pA.pinned = True
+    chA.msgs += [mA, pA]
+    etat = {}
+    ok = run(W._ensure_us_menu(_botW, chA, etat=etat))
+    check("_ensure_us_menu : ANCIEN panneau reconnu, General pose dessous, rien d'autre",
+          ok and ordre(chA) == "MpG" and etat.get("general") is True, (ordre(chA), etat))
+    ok = run(W._ensure_us_panel(_botW, chA))
+    check("_ensure_us_panel : ancien panneau reconnu (pas de doublon avant sa conversion)",
+          ok and ordre(chA) == "MpG")
+    # Ordre inverse (panneau V2 plus ancien que le menu) : on repart de zero.
+    chI = Salon(4345)
+    pI = Msg(chI, view=U._jb_panel(None, "emma", 3))
+    pI.pinned = True
+    mI = Msg(chI, embed=discord.Embed(title="🔓 Menu Jailbreak US"))
+    mI.pinned = True
+    chI.msgs += [pI, mI]
+    ok = run(W._ensure_us_menu(_botW, chI))
+    check("_ensure_us_menu : panneau V2 AU-DESSUS du menu -> retire et repose dans l'ordre",
+          ok and pI.supprime and ordre(chI) in ("MPG",), ordre(chI))
+    # Menu absent, panneau V2 present : le panneau est refait apres le menu.
+    chJ = Salon(4346)
+    pJ = Msg(chJ, view=U._jb_panel(None, "emma", 3))
+    pJ.pinned = True
+    chJ.msgs.append(pJ)
+    ok = run(W._ensure_us_menu(_botW, chJ))
+    check("_ensure_us_menu : menu absent -> le panneau V2 (reconnu) est refait sous le menu",
+          ok and pJ.supprime and ordre(chJ) == "MPG", ordre(chJ))
+    U._jb_general = _vrai_gen
+
+    # _delete_old_menus (salons VA) : ne touche jamais au panneau ni au General.
+    chD = Salon(4400, "va-test")
+    pD = Msg(chD, view=U._jb_panel(None, "_", 3))     # texte : « … la grille … », pas de « menu »
+    gD = Msg(chD, embed=_eg)
+    mD = Msg(chD, embed=discord.Embed(title="☀️ Ton menu"))
+    _lv2 = ui.LayoutView()
+    _c2 = ui.Container()
+    _c2.add_item(ui.TextDisplay("Le menu du jour\n-# panneau-actions-us"))
+    _lv2.add_item(_c2)
+    pD2 = Msg(chD, view=_lv2)                          # V2 marque, texte avec « menu »
+    chD.msgs += [pD, gD, mD, pD2]
+    _cogD = types.SimpleNamespace(bot=types.SimpleNamespace(user=Auteur(MOI)))
+    run(U.UserCog._delete_old_menus(_cogD, chD))
+    check("_delete_old_menus : le vieux menu part, panneau V2 et General restent",
+          mD.supprime and not pD.supprime and not gD.supprime and not pD2.supprime)
+
+    # ===========================================================================
+    # 9. PANNEAU EPHEMERE NON-US (JailbreakActionsView)
+    # ===========================================================================
+    pbB = []
+    for ic in ({}, U.icones_actions(GUILD_IC)):
+        try:
+            vB = U.JailbreakActionsView(COG, "emma", 3, us=True, icones=ic)
+            if limites(vB):
+                pbB.append(limites(vB))
+        except Exception as e:
+            pbB.append(repr(e))
+    check("B : se construit (avec et sans icones), dans les limites", not pbB, pbB)
+    vB = U.JailbreakActionsView(COG, "emma", 3, us=True)
+    rB = []
+    for i in items(vB):
+        if isinstance(i, ui.ActionRow):
+            rB.append([type(c).__name__ + ":" + (getattr(c, "key", "") or getattr(c, "famille", "") or "")
+                       for c in i.children])
+    check("B : meme disposition (quantite en menu a part, 4 + 3 boutons, 5 menus)",
+          rB == [["_JailbreakQtySelect:"],
+                 ["_JailbreakActionButton:name", "_JailbreakActionButton:pseudo",
+                  "_JailbreakActionButton:pp", "_JailbreakActionButton:bio"],
+                 ["_JailbreakActionButton:story", "_JailbreakActionButton:storycta",
+                  "_JailbreakActionButton:post"]]
+          + [["_JailbreakFamilleSelect:%s" % f.cle] for f in U._FAMILLES_PANNEAU], rB)
+    check("B : texte + V2, timeout 180, aucun element dynamique (il expire)",
+          "Emma — que veux-tu générer" in texte(vB) and vB.has_components_v2() and vB.timeout == 180
+          and not [i for i in items(vB) if isinstance(i, ui.DynamicItem)])
+    check("B : les options suivent la meme table (libelles, explications)",
+          [[o.value for o in s_.options] for s_ in items(vB) if isinstance(s_, U._JailbreakFamilleSelect)]
+          == [list(f.actions) for f in U._FAMILLES_PANNEAU])
+
+
+    class MsgHandle:
+        def __init__(self):
+            self.edits = []
+            self.echec = None
+
+        async def edit(self, **k):
+            if self.echec:
+                raise self.echec
+            self.edits.append(k)
+
+
+    def choisir_B(vue, famille, valeur, mode="defer"):
+        s_ = [x for x in items(vue) if isinstance(x, U._JailbreakFamilleSelect) and x.famille == famille][0]
+        s_._values = [valeur]
+        COG.mode = mode
+        itx = Itx(message=Msg(ephemere=True), channel=Salon(96))
+        lancer(s_.callback(itx))
+        return itx
+
+
+    vB = U.JailbreakActionsView(COG, "emma", 4, us=True)
+    vB.message = MsgHandle()
+    COG.appels.clear()
+    itx = choisir_B(vB, "trash", "templatetrashbanger")
+    check("B : un choix lance l'action (model, quantite du panneau)",
+          COG.appels == [("emma", "templatetrashbanger", 4, True)], COG.appels)
+    check("B : ... le menu revient tout de suite (jeton du panneau), une seule reponse",
+          len(vB.message.edits) == 1 and itx.response.doubles == 0 and len(itx.response.faits) == 1
+          and all(not getattr(s_, "values", None) for s_ in items(vB) if isinstance(s_, ui.Select)
+                  and not isinstance(s_, U._JailbreakQtySelect)),
+          (len(vB.message.edits), itx.response.faits))
+    # Jeton perime : redessin par l'interaction du choix.
+    vB.message.echec = http_exc(texte="token expire")
+    itx = choisir_B(vB, "brut", "brute")
+    check("B : jeton du panneau perime -> redessin par l'interaction (@original apres defer)",
+          itx.orig_edits and itx.response.doubles == 0, (itx.orig_edits, itx.response.faits))
+    vB.message = None
+    itx = choisir_B(vB, "caption", "reelcaption", mode="send_eph")
+    check("B : sans handle, action repondue par un message -> redessin par followup.edit_message",
+          itx.followup.edits and itx.response.doubles == 0, itx.followup.edits)
+    _sav = U._jb_can_use
+    U._jb_can_use = lambda i: False
+    try:
+        COG.appels.clear()
+        itx = choisir_B(vB, "caption", "reelcaption")
+    finally:
+        U._jb_can_use = _sav
+    check("B : role refuse -> rien ne part, menu remis, raison dite",
+          not COG.appels and itx.response.faits[0][0] == "edit_message"
+          and "Réservé" in str(itx.followup.envois[0][0]))
+    COG.appels.clear()
+    itx = choisir_B(vB, "caption", "templateflash")
+    check("B : valeur hors de la famille refusee", not COG.appels and "inconnue" in str(itx.followup.envois))
+    # Quantite (menu)
+    qs = [x for x in items(vB) if isinstance(x, U._JailbreakQtySelect)][0]
+    qs._values = ["10"]
+    itx = Itx(message=Msg(ephemere=True))
+    run(qs.callback(itx))
+    check("B : la quantite (menu) reconstruit le panneau a 10",
+          vB.quantity == 10 and itx.response.faits[0][0] == "edit_message"
+          and "Quantité : 10" in texte(vB))
+    # Expiration
+    vB.message = MsgHandle()
+    run(vB.on_timeout())
+    check("B : a l'expiration, le panneau s'eteint (texte seul, aucun bouton, pas d'embed)",
+          vB.message.edits and "expiré" in texte(vB) and not [i for i in items(vB) if isinstance(i, (ui.Button, ui.Select))]
+          and set(vB.message.edits[-1]) == {"view"})
+    # Pose : _poser_panneau_jb envoie la vue, sans embed.
+    vB2 = U.JailbreakActionsView(COG, "emma", 3, us=True)
+    itx = Itx(message=None)
+    run(U._poser_panneau_jb(itx, vB2))
+    f = itx.response.faits
+    check("B : _poser_panneau_jb envoie la LayoutView en ephemere, sans embed",
+          f[0][0] == "send_message" and f[0][2].get("view") is vB2 and f[0][2].get("ephemeral")
+          and "embed" not in f[0][2], f)
+
+    # ===========================================================================
+    # 10. LA MAQUETTE LIT LA MEME TABLE
+    # ===========================================================================
+    dm = MT.DemoPanneauDirect("emma")
+    _ph = [i.placeholder for i in dm.walk_children() if isinstance(i, ui.Select)]
+    _lb = [i.label for i in dm.walk_children() if isinstance(i, ui.Button)]
+    check("maquette : memes menus que le vrai panneau, dans le meme ordre",
+          _ph == [U._jb_placeholder_famille(f) for f in U._FAMILLES_PANNEAU], _ph)
+    check("maquette : memes boutons (sans Trends)",
+          _lb == ["📦 Quantité : 3"] + [U._jb_action(k)[1] for rr in U._JB_BOUTONS_V2 for k in rr if k != "_qte"],
+          _lb)
+    _opts_d = [[o.description for o in i.options] for i in dm.walk_children() if isinstance(i, ui.Select)]
+    check("maquette : explications de Brut lues dans _EXPLICATIONS",
+          _opts_d[0] == [U._EXPLICATIONS[k] for k in ("brute", "brutbanger", "brutchoix")])
+
+    import shutil
+    shutil.rmtree(TMP, ignore_errors=True)
+
+
+def _v2_bloc_menu_va():
+    'Partie C : le menu VA des salons va- (vue V2 persistante).'
+    import asyncio
+    import json
+    import logging
+    import os
+    import re
+    import sys
+    import tempfile
+    import types
+    from pathlib import Path
+    import discord
+    from discord.components import _component_factory
+
+    RESULTATS = []
+
+
+    def check(nom, ok, detail=""):
+        RESULTATS.append((nom, bool(ok), detail))
+        _check_v2("v2 menu VA : " + nom, ok, "" if ok else str(detail)[:400])
+
+    class _Journal(logging.Handler):
+        def __init__(self):
+            super().__init__(logging.DEBUG)
+            self.lignes = []
+
+        def emit(self, r):
+            self.lignes.append((r.levelname, r.name, r.getMessage()))
+            TOUT_JOURNAL.append((r.levelname, r.name, r.getMessage()))
+
+
+    JOURNAL = _Journal()
+    TOUT_JOURNAL = []
+    logging.getLogger().addHandler(JOURNAL)
+    logging.getLogger().setLevel(logging.DEBUG)
+
+    import cogs.user as U
+    import guild_features as GF
+    import marques_montage as MM
+
+    TMP = Path(tempfile.mkdtemp(prefix="v2_menu_va_"))
+    U._JB_PANEL_STORE = TMP / "us_panels.json"
+    U._JB_GENERAL_STORE = TMP / "us_general_panels.json"
+    U.USERS_FILE = TMP / "users.json"
+    assert "data" not in str(U.USERS_FILE)
+
+    # L'ANCIEN menu VA (dc157c3 -> 25/09/2026), tel qu'il est encore epingle
+    # dans les salons va- : une vue CLASSIQUE (embed a cote), 17 boutons et 4
+    # lanceurs « ▸ ». Releve sur le code d'avant le passage au V2 : custom_id,
+    # libelle, emoji, style, rangee. Les boutons du menu V2 doivent garder les
+    # memes, sinon les menus deja epingles cessent de repondre ou changent de
+    # tete sous les yeux du VA.
+    _ANCIEN_MENU_VA = (
+        ("cmenu:reel", "Reel", "🎬", "primary", 0),
+        ("cmenu:banger", "⭐ Reels", None, "primary", 0),
+        ("cmenu:story", "Story", "📖", "primary", 0),
+        ("cmenu:storycta", "Story CTA", "📲", "primary", 0),
+        ("cmenu:post", "Post", "🖼️", "primary", 0),
+        ("cmenu:name", "Name", "📝", "secondary", 1),
+        ("cmenu:pseudo", "Pseudo", "👤", "secondary", 1),
+        ("cmenu:pp", "PP", "🖼", "secondary", 1),
+        ("cmenu:bio", "Bio", "💬", "secondary", 1),
+        ("cmenu:brutbanger", "⭐ Vidéo brut", None, "primary", 1),
+        ("cmenu:clics", "Mes clics", "📊", "success", 3),
+        ("cmenu:help", "Assistance", "🆘", "danger", 3),
+        ("cmenu:lien", "Demander un lien", "🔗", "success", 3),
+        ("cmenu:pay", "Mon paiement", "💸", "secondary", 3),
+        ("cmenu:tuto", "Comprends rien ?", "❓", "secondary", 3),
+        ("cmenu:addaccount", "Ajouter un compte", "➕", "primary", 4),
+        ("cmenu:comptes", "Mes comptes Insta", "📷", "secondary", 4),
+        ("cmenu:fam:caption", "Caption ▸", "💬", "primary", 2),
+        ("cmenu:fam:template", "Template ▸", "🎞️", "primary", 2),
+        ("cmenu:fam:trash", "Trash ▸", "💀", "primary", 2),
+        ("cmenu:fam:flash", "Flash ▸", "⚡", "primary", 2),
+    )
+    #: Les variantes que l'ancien menu savait lancer (ses boutons retires et ses
+    #: sous-menus) : le menu V2 ne doit en perdre aucune.
+    _ANCIENS_APPELS_VA = {
+        "capbanger", "montagebanger", "reelmonte", "templatebanger", "templatebrut",
+        "templateflash", "templateflashbanger", "templateflashbrut",
+        "templatetrash", "templatetrashbanger", "templatetrashbrut"}
+
+
+    def _ancien_menu_va():
+        """L'ancien menu VA (vue classique), pour simuler un message deja poste."""
+        v = discord.ui.View(timeout=None)
+        for cid, lib, emo, sty, row in _ANCIEN_MENU_VA:
+            v.add_item(discord.ui.Button(label=lib, emoji=emo, custom_id=cid, row=row,
+                                         style=getattr(discord.ButtonStyle, sty)))
+        return v
+
+
+    IRT = discord.InteractionResponseType
+    ui = discord.ui
+
+    # ---------------------------------------------------------------------------
+    # Faux objets Discord (repris de md_verif.py, parties A/B)
+    # ---------------------------------------------------------------------------
+    _ids = iter(range(10_000, 99_999))
+
+
+    def http_exc(cls=discord.HTTPException, status=400, texte="refus simule"):
+        return cls(types.SimpleNamespace(status=status, reason="x"), texte)
+
+
+    class Auteur:
+        def __init__(self, i):
+            self.id = i
+            self.bot = True
+
+
+    MOI = 1
+
+
+    def comps_de(vue):
+        if vue is None:
+            return []
+        return [_component_factory(d) for d in vue.to_components()]
+
+
+    class Msg:
+        def __init__(self, ch=None, embed=None, view=None, ephemere=False, auteur=MOI, content=None):
+            self.id = next(_ids)
+            self.ch = ch
+            self.embeds = [embed] if embed is not None else []
+            self.content = content
+            self.view = view
+            # Ce que Discord RENVOIE : des composants reconstruits, pas la vue.
+            self.components = comps_de(view)
+            self.author = Auteur(auteur)
+            self.pinned = False
+            v2 = bool(view is not None and view.has_components_v2())
+            self.flags = types.SimpleNamespace(ephemeral=ephemere, components_v2=v2)
+            self.edits = []
+            self.echec_edit = None
+            self.supprime = False
+            self.echec_delete = None
+
+        async def edit(self, **k):
+            self.edits.append(k)
+            if self.echec_edit is not None:
+                raise self.echec_edit
+            if "view" in k:
+                v = k["view"]
+                if v is not None and v.has_components_v2():
+                    # Discord refuse un V2 qui garderait texte ou embed.
+                    if (self.embeds and "embed" not in k and "embeds" not in k) or \
+                            (self.content and "content" not in k):
+                        raise http_exc(texte="V2 avec embed/texte restant")
+                    self.flags.components_v2 = True
+                self.view = v
+                self.components = comps_de(v)
+            if "embed" in k:
+                self.embeds = [k["embed"]] if k["embed"] is not None else []
+            if "content" in k:
+                self.content = k["content"]
+            return self
+
+        async def delete(self):
+            if self.echec_delete is not None:
+                raise self.echec_delete
+            self.supprime = True
+            if self.ch is not None and self in self.ch.msgs:
+                self.ch.msgs.remove(self)
+
+        async def pin(self, **k):
+            self.pinned = True
+
+
+    class Salon:
+        def __init__(self, cid=4242, name="va-test"):
+            self.id = cid
+            self.name = name
+            self.msgs = []
+            self.guild = types.SimpleNamespace(id=7, emojis=[], text_channels=[self])
+            self.echec_send = None
+            self.envois = []
+
+        async def pins(self):
+            return [m for m in reversed(self.msgs) if m.pinned]
+
+        async def send(self, content=None, embed=None, view=None, **k):
+            self.envois.append(dict(content=content, embed=embed, view=view, **k))
+            if self.echec_send:
+                raise self.echec_send
+            m = Msg(self, embed=embed, view=view, content=content)
+            self.msgs.append(m)
+            return m
+
+        async def fetch_message(self, i):
+            for m in self.msgs:
+                if m.id == int(i):
+                    return m
+            raise http_exc(discord.NotFound, 404, "absent")
+
+        async def history(self, limit=40, oldest_first=False):
+            l = list(self.msgs) if oldest_first else list(reversed(self.msgs))
+            for m in l[:limit]:
+                yield m
+
+
+    class DeuxReponses(Exception):
+        pass
+
+
+    class Rep:
+        def __init__(self, itx):
+            self.itx = itx
+            self._type = None
+            self.faits = []
+            self.echec_edit = None
+            self.doubles = 0
+
+        def is_done(self):
+            return self._type is not None
+
+        @property
+        def type(self):
+            return self._type
+
+        def _marquer(self, t, quoi, a, k):
+            if self._type is not None:
+                self.doubles += 1
+                raise DeuxReponses(quoi)
+            self._type = t
+            self.faits.append((quoi, a, k))
+
+        async def send_message(self, *a, **k):
+            self._marquer(IRT.channel_message, "send_message", a, k)
+
+        async def edit_message(self, *a, **k):
+            if self.echec_edit is not None and self._type is None:
+                e, self.echec_edit = self.echec_edit, None
+                raise e
+            self._marquer(IRT.message_update, "edit_message", a, k)
+            m = self.itx.message
+            if m is not None and "view" in k:
+                await m.edit(**k)
+
+        async def defer(self, ephemeral=False, thinking=False):
+            self._marquer(IRT.deferred_channel_message if thinking else IRT.deferred_message_update,
+                          "defer", (), dict(ephemeral=ephemeral, thinking=thinking))
+
+        async def send_modal(self, modal):
+            self._marquer(IRT.modal, "send_modal", (modal,), {})
+            self.modal = modal
+
+
+    class Suivi:
+        def __init__(self, itx):
+            self.itx = itx
+            self.envois = []
+            self.edits = []
+
+        async def send(self, content=None, **k):
+            if not self.itx.response.is_done():
+                raise AssertionError("followup avant toute reponse")
+            self.envois.append((content, k))
+            return Msg(ephemere=bool(k.get("ephemeral")))
+
+        async def edit_message(self, mid, **k):
+            if not self.itx.response.is_done():
+                raise AssertionError("followup.edit avant toute reponse")
+            self.edits.append((mid, k))
+            m = self.itx.message
+            if m is not None and m.id == mid:
+                await m.edit(**k)
+
+
+    def repondre_selon(itx, mode):
+        """Ce que fait une action du menu VA, selon `mode`."""
+        async def _r():
+            if mode == "defer":                  # le cas courant : defer() puis suivi
+                await itx.response.defer()
+                await itx.followup.send("contenu")
+            elif mode == "thinking":
+                await itx.response.defer(thinking=True)
+                await itx.followup.send("fini")
+            elif mode == "send_eph":             # refus de l'action (rien en stock…)
+                await itx.response.send_message("Aucun montage", ephemeral=True)
+            elif mode == "leve":
+                raise RuntimeError("panne simulee")
+            # « rien » : l'action ne repond pas
+        return _r()
+
+
+    class CogVA:
+        """Faux UserCog : chaque methode appelee par le menu VA est notee, et
+        repond selon `mode`."""
+
+        def __init__(self):
+            self.appels = []
+            self.mode = "defer"
+            for nom in ("reel", "story", "storycta", "post", "name", "username",
+                        "profilepic", "bio", "reelmonte"):
+                setattr(self, nom, types.SimpleNamespace(callback=self._cb(nom)))
+
+        def _cb(self, nom):
+            async def _f(cog, itx, *a, **k):
+                self.appels.append((nom, a, k))
+                await repondre_selon(itx, self.mode)
+            return _f
+
+        def _note(self, nom, itx, *a, **k):
+            self.appels.append((nom, a, k))
+            return repondre_selon(itx, self.mode)
+
+        async def _send_banger_reels(self, itx):
+            await self._note("_send_banger_reels", itx)
+
+        async def _send_brutes_bangers(self, itx):
+            await self._note("_send_brutes_bangers", itx)
+
+        async def request_link(self, itx):
+            await self._note("request_link", itx)
+
+        async def _send_tutoriel(self, itx):
+            await self._note("_send_tutoriel", itx)
+
+        async def _send_caption_bangers(self, itx):
+            await self._note("_send_caption_bangers", itx)
+
+        async def _send_montage_bangers(self, itx):
+            await self._note("_send_montage_bangers", itx)
+
+        async def _send_template_plus_brute(self, itx, **k):
+            await self._note("_send_template_plus_brute", itx, **k)
+
+        async def _send_template_marque(self, itx, cle, **k):
+            await self._note("_send_template_marque", itx, cle, **k)
+
+
+    COG = CogVA()
+
+
+    class Itx:
+        def __init__(self, message=None, channel=None, guild=None, uid=55):
+            self.message = message
+            self.channel = channel
+            self.guild = guild or types.SimpleNamespace(id=7, emojis=[])
+            self.user = types.SimpleNamespace(id=uid, roles=[], mention=f"<@{uid}>")
+            self.client = types.SimpleNamespace(
+                get_cog=lambda n: COG if n == "UserCog" else None,
+                user=types.SimpleNamespace(id=MOI))
+            self.response = Rep(self)
+            self.followup = Suivi(self)
+            self.orig_edits = []
+            self.data = {}
+
+        async def edit_original_response(self, **k):
+            if self.response.type not in (IRT.deferred_message_update, IRT.message_update):
+                raise AssertionError("@original n'est pas le message du clic")
+            self.orig_edits.append(k)
+            if self.message is not None:
+                await self.message.edit(**k)
+
+
+    def run(coro):
+        return asyncio.run(coro)
+
+
+    async def attendre_fond():
+        for _ in range(5):
+            await asyncio.sleep(0)
+        if U._JB_TACHES:
+            await asyncio.gather(*list(U._JB_TACHES), return_exceptions=True)
+
+
+    def lancer(coro):
+        async def _t():
+            r = await coro
+            await attendre_fond()
+            return r
+        return asyncio.run(_t())
+
+
+    def items(vue):
+        return list(vue.walk_children())
+
+
+    def rangees(vue):
+        return [[c.custom_id for c in i.children] for i in items(vue) if isinstance(i, ui.ActionRow)]
+
+
+    def selects(vue):
+        return [i for i in items(vue) if isinstance(i, ui.Select)]
+
+
+    def boutons(vue):
+        return [i for i in items(vue) if isinstance(i, ui.Button)]
+
+
+    def texte(vue):
+        return "\n".join(i.content for i in items(vue) if isinstance(i, ui.TextDisplay))
+
+
+    def limites(vue):
+        pb = []
+        if vue.total_children_count > 40:
+            pb.append("composants %d > 40" % vue.total_children_count)
+        if vue.content_length() > 4000:
+            pb.append("texte %d > 4000" % vue.content_length())
+        for i in items(vue):
+            if isinstance(i, ui.ActionRow) and len(i.children) > 5:
+                pb.append("rangee a %d" % len(i.children))
+            cid = getattr(i, "custom_id", None)
+            if cid and len(cid) > 100:
+                pb.append("custom_id %d" % len(cid))
+            if isinstance(i, ui.Button) and i.label and U._long_discord(i.label) > 80:
+                pb.append("libelle bouton %r" % i.label)
+            if isinstance(i, ui.Select):
+                if len(i.options) > 25 or not i.options:
+                    pb.append("options %d" % len(i.options))
+                if i.placeholder and len(i.placeholder) > 150:
+                    pb.append("placeholder")
+                for o in i.options:
+                    if U._long_discord(o.label) > 100:
+                        pb.append("option %r" % o.label)
+                    if o.description and U._long_discord(o.description) > 100:
+                        pb.append("description %r" % o.description)
+        json.dumps(vue.to_components())
+        return pb
+
+
+    GUILD_IC = types.SimpleNamespace(
+        id=7, emojis=[discord.PartialEmoji(name=n, id=20000 + k)
+                      for k, n in enumerate(sorted(set(U._ICONES_ACTIONS.values())))])
+
+    _vrais_gf = (GF.get_features, GF.threads_mode)
+
+
+    def reglages(feats=None, threads=False):
+        """Reglages du serveur simules (None = tout)."""
+        GF.get_features = lambda g: set(GF.ALL_FEATURES) if feats is None else set(feats)
+        GF.threads_mode = lambda g: threads
+
+
+    def reglages_vrais():
+        GF.get_features, GF.threads_mode = _vrais_gf
+
+
+    reglages()
+
+    TRASH = tuple(MM.marque("trash")["actions"])
+    FLASH = tuple(MM.marque("flash")["actions"])
+
+    # ===========================================================================
+    # 1. STRUCTURE DU MENU VA V2
+    # ===========================================================================
+    v = U.ContentMenuView(None)
+    check("structure : LayoutView V2 persistante (timeout None), un seul conteneur",
+          isinstance(v, ui.LayoutView) and v.has_components_v2() and v.timeout is None
+          and v.is_persistent() and len(v.children) == 1 and isinstance(v.children[0], ui.Container))
+    check("structure : le texte vient en tete du conteneur",
+          isinstance(v.children[0].children[0], ui.TextDisplay))
+    R_ATTENDU = [
+        ["cmenu:reel", "cmenu:banger", "cmenu:story", "cmenu:storycta", "cmenu:post"],
+        ["cmenu:name", "cmenu:pseudo", "cmenu:pp", "cmenu:bio", "cmenu:brutbanger"],
+        ["cmenu:sel:caption"], ["cmenu:sel:template"], ["cmenu:sel:trash"], ["cmenu:sel:flash"],
+        ["cmenu:clics", "cmenu:help", "cmenu:lien", "cmenu:pay", "cmenu:tuto"],
+        ["cmenu:addaccount", "cmenu:comptes"],
+    ]
+    check("structure : rangees = cahier (Reel… / Name… / 4 menus / Mes clics… / comptes)",
+          rangees(v) == R_ATTENDU, rangees(v))
+    check("structure : dans les limites de Discord (%d composants, %d car.)"
+          % (v.total_children_count, v.content_length()),
+          not limites(v) and v.total_children_count <= 40, limites(v))
+    OPTS_ATTENDUES = {
+        "caption": ["capbanger", "montagebanger"],
+        "template": ["reelmonte", "templatebanger", "templatebrut"],
+        "trash": [TRASH[0], TRASH[1], TRASH[3]],
+        "flash": [FLASH[0], FLASH[1], FLASH[3]],
+    }
+    LIB_ATTENDUS = {
+        "caption": ["⭐ Caption", "⭐⭐ Caption + Vidéo brut"],
+        "template": ["🎞️ Template", "⭐ Template", "⭐⭐ Template + Brut"],
+        "trash": ["💀 Trash", "⭐ Trash", "⭐⭐ Trash + Brut"],
+        "flash": ["⚡ Flash", "⭐ Flash", "⭐⭐ Flash + Brut"],
+    }
+    _ok, _det = True, []
+    for s_ in selects(v):
+        fam = s_.custom_id.split(":")[-1]
+        vals = [o.value for o in s_.options]
+        libs = [o.label for o in s_.options]
+        f = U._famille_menu(fam)
+        if vals != OPTS_ATTENDUES[fam] or libs != LIB_ATTENDUS[fam]:
+            _ok = False
+            _det.append((fam, vals, libs))
+        if s_.placeholder != "%s %s…" % (f.emoji, f.nom):
+            _ok = False
+            _det.append(s_.placeholder)
+        for o in s_.options:
+            if o.description != U._EXPLICATIONS[o.value] or o.default:
+                _ok = False
+                _det.append(("desc/defaut", o.value))
+        if s_.min_values != 1 or s_.max_values != 1:
+            _ok = False
+    check("menus : options = variantes du cahier, libelles de production, explication, aucune par defaut",
+          _ok, _det)
+    check("menus : chaque option est une variante que le menu VA sait lancer (_MENU_VA_APPELS)",
+          all(o.value in U._MENU_VA_APPELS for s_ in selects(v) for o in s_.options))
+
+    # Boutons : memes custom_id, libelles, emojis et styles que l'ancien menu.
+    _anc = {b.custom_id: b for b in _ancien_menu_va().children if isinstance(b, ui.Button)
+            and not b.custom_id.startswith("cmenu:fam:")}
+    _diff = []
+    for b in boutons(v):
+        a = _anc.get(b.custom_id)
+        if a is None or (a.label, str(a.emoji), a.style) != (b.label, str(b.emoji), b.style):
+            _diff.append((b.custom_id, b.label, str(b.emoji), b.style,
+                          a and (a.label, str(a.emoji), a.style)))
+    check("boutons : les 17 boutons gardent custom_id, libelle, emoji et style de l'ancien menu",
+          not _diff and len(boutons(v)) == 17, _diff)
+    check("boutons : chaque bouton de la table a sa methode (_clic_<cle>)",
+          all(hasattr(U.ContentMenuView, "_clic_" + b.custom_id.split(":", 1)[1]) for b in boutons(v))
+          and not v.inconnues)
+
+    t = texte(v)
+    check("texte : titre, aide par rangee, marque en derniere ligne",
+          t.startswith("## ☀️ Ton menu\n") and "**Publier**" in t and "**Ton compte**" in t
+          and "**Montages**" in t and "**Suivi et aide**" in t and "**Tes comptes**" in t
+          and t.splitlines()[-1] == "-# menu-contenu-va", t)
+    _jsv = json.dumps(v.to_components(), ensure_ascii=False)
+    check("texte : aucune trace de ⭐⭐⭐ Trends (Trash/Flash Trend ne sont pas « Trends »)",
+          "⭐⭐⭐" not in _jsv and "Trends" not in _jsv and ":trend" not in _jsv)
+    vI = U._menu_va(COG, "julia", None, mention=55)
+    tI = texte(vI)
+    check("texte : mention en premiere ligne, identite juste au-dessus de la marque",
+          tI.splitlines()[0] == "<@55> 👇 **Ton menu du jour est prêt !**"
+          and tI.splitlines()[-2] == "-# Identité : `julia`" and tI.splitlines()[-1] == "-# menu-contenu-va", tI)
+    check("texte : le mot « identité » n'apparait que sur la ligne d'identite",
+          [l for l in tI.splitlines() if "identit" in l.lower()] == ["-# Identité : `julia`"])
+    check("texte : le menu VA V2 n'est pas pris pour le panneau US (autre marque)",
+          U._est_panneau_actions(Msg(view=vI)) is False)
+    check("texte : lecture (identite, mention) d'un menu V2 poste", U._menu_va_lire(Msg(view=vI)) == ("julia", 55),
+          U._menu_va_lire(Msg(view=vI)))
+    # Le texte trop long est coupe, jamais la marque.
+    _t_long = U._menu_va_texte(["x" * 5000], False, True, "julia")
+    check("texte : une aide geante est coupee a 4000, la marque et l'identite restent",
+          len(_t_long) <= 4000 and _t_long.splitlines()[-1] == "-# menu-contenu-va"
+          and _t_long.splitlines()[-2] == "-# Identité : `julia`")
+
+    # Icones du serveur.
+    vIc = U._menu_va(COG, "julia", GUILD_IC)
+    _bic = {b.custom_id: b.emoji for b in boutons(vIc)}
+    _ic = U.icones_actions(GUILD_IC)
+    check("icones : les boutons portent l'icone dessinee quand elle existe (Reel, Story, PP…)",
+          all(_bic["cmenu:" + k].id is not None for k in ("reel", "story", "storycta", "post",
+                                                           "name", "pseudo", "pp", "bio"))
+          and _bic["cmenu:clics"].name == "📊", _bic)
+    _oic = [(o.value, o.emoji, o.label) for s_ in selects(vIc) for o in s_.options]
+    check("icones : chaque option porte l'icone de son action, libelle sans emoji",
+          all(e is not None and e.id == _ic[k].id and l == U._libelle_sans_emoji(U._jb_action(k)[1])
+              for k, e, l in _oic), _oic)
+    check("icones : avec icones, toujours dans les limites", not limites(vIc), limites(vIc))
+
+    # ===========================================================================
+    # 2. REGLAGES PAR SERVEUR
+    # ===========================================================================
+    reglages(set(GF.ALL_FEATURES) - {"contenu"})
+    vC = U._menu_va(COG, "julia", None)
+    check("reglages : « contenu » coupe -> plus aucun bouton de contenu, plus aucun menu",
+          rangees(vC) == [["cmenu:clics", "cmenu:help", "cmenu:lien", "cmenu:pay", "cmenu:tuto"],
+                          ["cmenu:addaccount"]] and not selects(vC), rangees(vC))
+    check("reglages : ... et le texte ne decrit plus ce qui manque (ni Montages, ni Reel)",
+          "Montages" not in texte(vC) and "Reel" not in texte(vC) and "Publier" not in texte(vC)
+          and "Clique sur un bouton 👇" in texte(vC), texte(vC))
+    reglages(set(GF.ALL_FEATURES) - {"clics", "liens", "onboarding"})
+    vD = U._menu_va(COG, "julia", None)
+    _idsD = [c for r in rangees(vD) for c in r]
+    check("reglages : clics / liens / onboarding coupes -> leurs boutons disparaissent",
+          not {"cmenu:clics", "cmenu:lien", "cmenu:addaccount"} & set(_idsD)
+          and "cmenu:help" in _idsD and len(selects(vD)) == 4, _idsD)
+    reglages(threads=True)
+    vT = U._menu_va(COG, "julia", None)
+    _idsT = {c for r in rangees(vT) for c in r}
+    check("reglages : mode Threads -> seul le jeu reduit, aucun menu",
+          _idsT == U._THREADS_MENU and not selects(vT), sorted(_idsT))
+    check("reglages : mode Threads -> « Mes comptes Threads », titre Threads, pas d'identite",
+          [b.label for b in boutons(vT) if b.custom_id == "cmenu:comptes"] == ["Mes comptes Threads"]
+          and texte(vT).startswith("## 🧵 Ton menu Threads") and "Identité" not in texte(vT)
+          and "comptes Threads (@pseudo)" in texte(vT), texte(vT))
+    # Une option coupee disparait, un menu vide disparait.
+    reglages(set(GF.ALL_FEATURES) - {"rappels"})
+    _sauve_feat = dict(U._MENU_BTN_FEATURE)
+    try:
+        U._MENU_BTN_FEATURE["cmenu:capbanger"] = "rappels"
+        vO = U._menu_va(COG, "julia", None)
+        _cap = [s_ for s_ in selects(vO) if s_.custom_id == "cmenu:sel:caption"]
+        check("reglages : une option coupee disparait de son menu (Caption sans ⭐ Caption)",
+              _cap and [o.value for o in _cap[0].options] == ["montagebanger"],
+              _cap and [o.value for o in _cap[0].options])
+        U._MENU_BTN_FEATURE["cmenu:montagebanger"] = "rappels"
+        vO2 = U._menu_va(COG, "julia", None)
+        check("reglages : un menu vide disparait (plus de menu Caption), les autres restent, le texte suit",
+              [s_.custom_id for s_ in selects(vO2)] == ["cmenu:sel:template", "cmenu:sel:trash", "cmenu:sel:flash"]
+              and "💬 Caption" not in texte(vO2) and "🎞️ Template" in texte(vO2), texte(vO2))
+        U._MENU_BTN_FEATURE["cmenu:banger"] = "rappels"
+        vO3 = U._menu_va(COG, "julia", None)
+        check("reglages : un bouton coupe disparait de sa rangee (⭐ Reels) et de l'aide",
+              rangees(vO3)[0] == ["cmenu:reel", "cmenu:story", "cmenu:storycta", "cmenu:post"]
+              and "⭐ Reels" not in texte(vO3), rangees(vO3)[0])
+    finally:
+        U._MENU_BTN_FEATURE.clear()
+        U._MENU_BTN_FEATURE.update(_sauve_feat)
+
+
+    # Module de reglages en panne : on garde tout (comme avant).
+    def _panne(g):
+        raise RuntimeError("reglages illisibles")
+
+
+    GF.get_features = _panne
+    vP = U._menu_va(COG, "julia", None)
+    check("reglages : module en panne -> menu complet, comme avant",
+          rangees(vP) == R_ATTENDU, rangees(vP))
+    reglages()
+    check("reglages : _filter_menu_view garde son contrat (rend la vue, reconstruite)",
+          U._filter_menu_view(U.ContentMenuView(None), None) is not None
+          and rangees(U._filter_menu_view(U.ContentMenuView(None), None)) == R_ATTENDU)
+
+    # ===========================================================================
+    # 3. ENREGISTREMENT, MOTIFS, REDEMARRAGE
+    # ===========================================================================
+
+
+    class BotF:
+        def __init__(self):
+            self.vues, self.dyn = [], []
+
+        def add_view(self, v, message_id=None):
+            # Meme garde que discord.Client.add_view.
+            if not v.is_persistent():
+                raise ValueError("View is not persistent")
+            self.vues.append(v)
+
+        def add_dynamic_items(self, *its):
+            self.dyn.extend(its)
+
+
+    _bot = BotF()
+    del JOURNAL.lignes[:]
+    run(U.UserCog.cog_load(types.SimpleNamespace(
+        bot=_bot, daily_menu=types.SimpleNamespace(is_running=lambda: True))))
+    check("cog_load : menu VA V2, boutons herites et lanceurs herites enregistres, aucun echec au journal",
+          any(isinstance(x, U.ContentMenuView) for x in _bot.vues)
+          and any(isinstance(x, U.ContentMenuHeritageView) for x in _bot.vues)
+          and any(isinstance(x, U.ContentMenuLanceursView) for x in _bot.vues)
+          and not [l for l in JOURNAL.lignes if "cog_load" in l[2]],
+          [l for l in JOURNAL.lignes if "cog_load" in l[2]])
+
+
+    async def _cog_load_vrai_bot():
+        """cog_load contre un VRAI commands.Bot : ses gardes (vue persistante,
+        non terminee) sont celles de discord.py, pas celles d'un faux."""
+        from discord.ext import commands as _cmds
+        b = _cmds.Bot(command_prefix="!", intents=discord.Intents.none())
+        await U.UserCog.cog_load(types.SimpleNamespace(
+            bot=b, daily_menu=types.SimpleNamespace(is_running=lambda: True)))
+        return b
+
+
+    del JOURNAL.lignes[:]
+    _vb = run(_cog_load_vrai_bot())
+    _pv = [type(x).__name__ for x in _vb.persistent_views]
+    check("cog_load (vrai commands.Bot) : menu VA V2 + heritages acceptes comme vues persistantes",
+          {"ContentMenuView", "ContentMenuHeritageView", "ContentMenuLanceursView"} <= set(_pv)
+          and not [l for l in JOURNAL.lignes if "cog_load" in l[2]],
+          (_pv, [l for l in JOURNAL.lignes if "cog_load" in l[2]]))
+    _persist = [it.custom_id for x in _bot.vues for it in x.walk_children()
+                if not isinstance(it, ui.DynamicItem) and getattr(it, "custom_id", None)]
+    _motifs = [(c.__name__, c.__discord_ui_compiled_template__) for c in _bot.dyn]
+
+
+    def qui(cid):
+        n = _persist.count(cid)
+        return ["vue"] * n + [nm for nm, p in _motifs if p.fullmatch(cid)]
+
+
+    _neufs = [c for r in rangees(U.ContentMenuView(None)) for c in r]
+    _mauv = [(c, qui(c)) for c in _neufs if len(qui(c)) != 1]
+    check("motifs : chaque custom_id du menu V2 est servi par UN element exactement",
+          not _mauv and len(_neufs) == 21, _mauv)
+    _ANCIENS_MENU = ("reel", "story", "post", "storycta", "banger", "reelmonte", "pseudo",
+                     "name", "bio", "pp", "lien", "clics", "help", "tuto", "addaccount",
+                     "comptes", "pay", "capbanger", "montagebanger", "templateflash",
+                     "templateflashbanger", "templateflashbrut", "templatebanger",
+                     "templatebrut", "brutbanger")
+    _anciens = (["cmenu:" + k for k in _ANCIENS_MENU]
+                + ["cmenu:fam:" + f.cle for f in U._FAMILLES_MENU])
+    _mauv2 = [(c, qui(c)) for c in _anciens if len(qui(c)) != 1]
+    check("motifs : les 25 boutons d'avant dc157c3 et les 4 lanceurs cmenu:fam: servis par UN element",
+          not _mauv2, _mauv2)
+    _menu_ids = {it.custom_id for it in U.ContentMenuView(None).walk_children() if getattr(it, "custom_id", None)}
+    _her_ids = {it.custom_id for it in U.ContentMenuHeritageView(None).children}
+    _lan_ids = {it.custom_id for it in U.ContentMenuLanceursView(None).children}
+    check("motifs : aucun custom_id partage entre le menu V2 et les vues heritees",
+          not (_menu_ids & _her_ids) and not (_menu_ids & _lan_ids) and not (_her_ids & _lan_ids))
+    check("motifs : la vue heritee garde EXACTEMENT ses 8 boutons (inchangee), les lanceurs sont a part",
+          sorted(_her_ids) == sorted("cmenu:" + k for k in U.ContentMenuHeritageView.ANCIENS)
+          and len(_her_ids) == 8
+          and _lan_ids == {"cmenu:fam:" + f.cle for f in U._FAMILLES_MENU}
+          and U.ContentMenuLanceursView(None).is_persistent())
+    check("motifs : aucun motif dynamique ne capture un custom_id « cmenu: »",
+          not any(p.fullmatch(c) for _n, p in _motifs for c in _neufs + _anciens))
+
+
+    class EtatF:
+        """Etat minimal pour un vrai ViewStore de discord.py."""
+
+
+    def store_neuf():
+        """Un redemarrage : un ViewStore neuf, rempli comme cog_load le fait
+        (add_view sans message_id)."""
+        from discord.ui.view import ViewStore
+        store = ViewStore(EtatF())
+        cog_vrai = COG
+        store.add_view(U.ContentMenuView(cog_vrai))
+        store.add_view(U.ContentMenuHeritageView(cog_vrai))
+        store.add_view(U.ContentMenuLanceursView(cog_vrai))
+        store.add_dynamic_items(*_bot.dyn)
+        return store
+
+
+    async def _via_store(store, ctype, cid, itx, valeurs=None):
+        # Le ViewStore et ses vues naissent DANS la boucle, comme en production
+        # (cog_load) : construite hors boucle, une vue n'a pas de futur « arrete »
+        # et discord.py ignore ses clics.
+        store = store or store_neuf()
+        itx.data = {"custom_id": cid, "component_type": ctype}
+        if valeurs is not None:
+            itx.data["values"] = valeurs
+        store.dispatch_view(ctype, cid, itx)
+        for _ in range(30):
+            await asyncio.sleep(0)
+        await attendre_fond()
+
+
+    def via_store(ctype, cid, message, valeurs=None, guild=None, mode="defer"):
+        COG.mode = mode
+        COG.appels.clear()
+        itx = Itx(message=message, channel=message.ch if message else None, guild=guild)
+        run(_via_store(None, ctype, cid, itx, valeurs))
+        return itx
+
+
+    def menu_poste(ch=None, ident="julia", mention=None, epingle=True, guild=None):
+        ch = ch or Salon(900)
+        m = Msg(ch, view=U._menu_va(COG, ident, guild, mention))
+        m.pinned = epingle
+        ch.msgs.append(m)
+        return ch, m
+
+
+    def remis(vue):
+        return vue is not None and isinstance(vue, U.ContentMenuView) and len(selects(vue)) == 4 \
+            and all(not o.default for s_ in selects(vue) for o in s_.options)
+
+
+    del JOURNAL.lignes[:]
+    ch, m = menu_poste(mention=55)
+    itx = via_store(3, "cmenu:sel:trash", m, [TRASH[1]])
+    check("redemarrage : un menu V2 deja poste repond (ViewStore neuf), la variante part",
+          COG.appels == [("_send_template_marque", ("trash",), {"exiger_banger": True, "brute_favorite": False})],
+          COG.appels)
+    check("redemarrage : ... une seule reponse, menu redessine sur son intitule, identite et mention gardees",
+          itx.response.doubles == 0 and len(itx.response.faits) == 1 and len(m.edits) == 1
+          and remis(m.edits[0]["view"]) and U._menu_va_lire(m) == ("julia", 55)
+          and not [l for l in JOURNAL.lignes if "Ignoring exception" in l[2]],
+          (itx.response.faits, len(m.edits), U._menu_va_lire(m)))
+    itx = via_store(2, "cmenu:reel", m)
+    check("redemarrage : un bouton du menu V2 repond (Reel -> reel.callback)",
+          [a[0] for a in COG.appels] == ["reel"] and len(itx.response.faits) == 1, COG.appels)
+
+    # Ancien menu (embed) avec un ancien bouton et un lanceur.
+    ch2 = Salon(901)
+    _emb = discord.Embed(title="☀️ Ton menu").set_footer(text="Identité : julia")
+    mA = Msg(ch2, embed=_emb, view=_ancien_menu_va(),
+             content="<@55> 👇 **Ton menu du jour est prêt !**")
+    mA.pinned = True
+    ch2.msgs.append(mA)
+    itx = via_store(2, "cmenu:post", mA)
+    check("ancien menu : un bouton encore present (Post) repond via le menu V2 enregistre",
+          [a[0] for a in COG.appels] == ["post"] and len(itx.response.faits) == 1, COG.appels)
+    mOld = Msg(ch2, embed=_emb, view=None)
+    itx = via_store(2, "cmenu:templateflashbrut", mOld)
+    check("ancien menu : un bouton retire avant dc157c3 (templateflashbrut) lance toujours la meme chose",
+          COG.appels == [("_send_template_marque", ("flash",), {"exiger_banger": True, "brute_favorite": True})],
+          COG.appels)
+    del JOURNAL.lignes[:]
+    itx = via_store(2, "cmenu:fam:caption", mA)
+    check("ancien lanceur ▸ : convertit son menu en V2 SUR PLACE (edition, texte et embed vides)",
+          itx.response.faits and itx.response.faits[0][0] == "edit_message"
+          and itx.response.faits[0][2].get("content", 1) is None and itx.response.faits[0][2].get("embed", 1) is None
+          and mA.flags.components_v2 and not mA.embeds and mA.content is None
+          and U._est_menu_va(mA, MOI) and mA.pinned and not COG.appels and itx.response.doubles == 0,
+          itx.response.faits)
+    check("ancien lanceur ▸ : ... identite (pied d'embed) et mention (contenu) reprises dans le texte",
+          U._menu_va_lire(mA) == ("julia", 55) and remis(mA.view), U._menu_va_lire(mA))
+    # Refus de l'edition : repli par un nouveau message, epingle, ancien retire.
+    ch3 = Salon(902)
+    mB = Msg(ch3, embed=_emb, view=_ancien_menu_va())
+    mB.pinned = True
+    ch3.msgs.append(mB)
+    COG.mode = "defer"
+    COG.appels.clear()
+    itx = Itx(message=mB, channel=ch3)
+    itx.response.echec_edit = http_exc(texte="Cannot convert")
+    itx.data = {"custom_id": "cmenu:fam:trash", "component_type": 2}
+    del JOURNAL.lignes[:]
+    run(_via_store(None, 2, "cmenu:fam:trash", itx))
+    _nouv = [x for x in ch3.msgs if x is not mB]
+    check("conversion refusee : defer, nouveau menu V2 poste ET epingle, ancien retire, journalise",
+          itx.response.faits and itx.response.faits[0][0] == "defer" and len(itx.response.faits) == 1
+          and mB.supprime and len(_nouv) == 1 and _nouv[0].pinned and U._est_menu_va(_nouv[0], MOI)
+          and any("nouveau menu V2" in l[2] for l in JOURNAL.lignes)
+          and any("menu VA : edition refusee" in l[2] for l in JOURNAL.lignes),
+          (itx.response.faits, [l[2] for l in JOURNAL.lignes]))
+    # Ancien menu NON epingle (menu du jour) : le nouveau ne s'epingle pas.
+    ch4 = Salon(903)
+    mC = Msg(ch4, embed=_emb, view=_ancien_menu_va())
+    ch4.msgs.append(mC)
+    itx = Itx(message=mC, channel=ch4)
+    itx.response.echec_edit = http_exc(texte="Cannot convert")
+    itx.data = {"custom_id": "cmenu:fam:flash", "component_type": 2}
+    run(_via_store(None, 2, "cmenu:fam:flash", itx))
+    _nouv = [x for x in ch4.msgs if x is not mC]
+    check("conversion refusee : un menu du jour (non epingle) est remplace sans etre epingle",
+          len(_nouv) == 1 and not _nouv[0].pinned and mC.supprime)
+    # L'ancien ne peut pas etre retire : dit au journal.
+    ch5 = Salon(904)
+    mD = Msg(ch5, embed=_emb, view=_ancien_menu_va())
+    mD.pinned = True
+    mD.echec_delete = http_exc(discord.Forbidden, 403, "pas le droit")
+    ch5.msgs.append(mD)
+    itx = Itx(message=mD, channel=ch5)
+    itx.response.echec_edit = http_exc(texte="Cannot convert")
+    del JOURNAL.lignes[:]
+    itx.data = {"custom_id": "cmenu:fam:flash", "component_type": 2}
+    run(_via_store(None, 2, "cmenu:fam:flash", itx))
+    check("conversion refusee : ancien non retire -> « deux menus dans le salon » journalise",
+          any("deux menus dans le salon" in l[2] for l in JOURNAL.lignes))
+    # Edition refusee ET salon qui refuse le nouveau message : menu en ephemere.
+    ch5b = Salon(9045)
+    mD2 = Msg(ch5b, embed=_emb, view=_ancien_menu_va())
+    mD2.pinned = True
+    ch5b.msgs.append(mD2)
+    ch5b.echec_send = http_exc(discord.Forbidden, 403, "pas le droit d'ecrire")
+    itx = Itx(message=mD2, channel=ch5b)
+    itx.response.echec_edit = http_exc(texte="Cannot convert")
+    itx.data = {"custom_id": "cmenu:fam:trash", "component_type": 2}
+    del JOURNAL.lignes[:]
+    run(_via_store(None, 2, "cmenu:fam:trash", itx))
+    check("conversion impossible (edition ET envoi refuses) : defer, menu V2 en ephemere (vue arretee), journalise",
+          len(itx.response.faits) == 1 and itx.response.faits[0][0] == "defer"
+          and itx.followup.envois and itx.followup.envois[0][1].get("ephemeral")
+          and isinstance(itx.followup.envois[0][1].get("view"), U.ContentMenuView)
+          and itx.followup.envois[0][1]["view"].is_finished() and not mD2.supprime
+          and any("conversion impossible" in l[2] for l in JOURNAL.lignes)
+          and not [l for l in JOURNAL.lignes if "Ignoring exception" in l[2]],
+          (itx.response.faits, itx.followup.envois, [l[2] for l in JOURNAL.lignes][-5:]))
+    # Ancien menu ephemere.
+    mE = Msg(None, embed=_emb, view=_ancien_menu_va(), ephemere=True)
+    itx = Itx(message=mE, channel=Salon(905))
+    itx.response.echec_edit = http_exc(texte="refus")
+    itx.data = {"custom_id": "cmenu:fam:flash", "component_type": 2}
+    run(_via_store(None, 2, "cmenu:fam:flash", itx))
+    f = itx.response.faits
+    check("conversion refusee en ephemere : nouvel ephemere, vue ARRETEE (non suivie), une reponse",
+          len(f) == 1 and f[0][0] == "send_message" and f[0][2].get("ephemeral")
+          and isinstance(f[0][2].get("view"), U.ContentMenuView) and f[0][2]["view"].is_finished(), f)
+    # Menu vide (tout coupe) : pas de conversion.
+    reglages(set(), threads=False)
+    _sauve_feat = dict(U._MENU_BTN_FEATURE)
+    _sauve_threads = set(U._THREADS_MENU)
+    try:
+        for k in ("cmenu:help", "cmenu:pay", "cmenu:tuto"):
+            U._MENU_BTN_FEATURE[k] = "clics"
+        ch6 = Salon(906)
+        mF = Msg(ch6, embed=_emb, view=_ancien_menu_va())
+        ch6.msgs.append(mF)
+        itx = via_store(2, "cmenu:fam:caption", mF)
+        check("ancien lanceur, serveur sans aucune fonction : rien de converti, raison dite",
+              itx.response.faits and itx.response.faits[0][0] == "send_message"
+              and "Aucune fonction" in str(itx.response.faits[0][1]) and not mF.edits)
+    finally:
+        U._MENU_BTN_FEATURE.clear()
+        U._MENU_BTN_FEATURE.update(_sauve_feat)
+        reglages()
+
+    # ===========================================================================
+    # 4. CHOIX DANS UN MENU : chaque variante, remise a l'intitule, une reponse
+    # ===========================================================================
+    APPELS_ATTENDUS = {
+        "capbanger": ("_send_caption_bangers", (), {}),
+        "montagebanger": ("_send_montage_bangers", (), {}),
+        "reelmonte": ("reelmonte", (), {}),
+        "templatebanger": ("_send_template_plus_brute", (), {"brute_favorite": False}),
+        "templatebrut": ("_send_template_plus_brute", (), {}),
+    }
+    for _m, _acts in (("trash", TRASH), ("flash", FLASH)):
+        APPELS_ATTENDUS[_acts[0]] = ("_send_template_marque", (_m,), {"exiger_banger": False, "brute_favorite": False})
+        APPELS_ATTENDUS[_acts[1]] = ("_send_template_marque", (_m,), {"exiger_banger": True, "brute_favorite": False})
+        APPELS_ATTENDUS[_acts[3]] = ("_send_template_marque", (_m,), {"exiger_banger": True, "brute_favorite": True})
+
+
+    def choisir(famille, valeur, message, mode="defer", guild=None):
+        COG.mode = mode
+        COG.appels.clear()
+        vue = message.view
+        s_ = [x for x in selects(vue) if x.custom_id == U._CMENU_MENU + famille][0]
+        itx = Itx(message=message, channel=message.ch, guild=guild)
+        itx.data = {"custom_id": s_.custom_id, "component_type": 3, "values": [valeur]}
+        lancer(s_.callback(itx))
+        return itx
+
+
+    _tout_ok, _det = True, []
+    for fam, vals in OPTS_ATTENDUES.items():
+        for val in vals:
+            ch, m = menu_poste(mention=55)
+            itx = choisir(fam, val, m)
+            ok = (COG.appels == [APPELS_ATTENDUS[val]] and itx.response.doubles == 0
+                  and len(itx.response.faits) == 1 and len(m.edits) == 1 and remis(m.edits[0]["view"])
+                  and U._menu_va_lire(m) == ("julia", 55))
+            if not ok:
+                _tout_ok = False
+                _det.append((fam, val, COG.appels, itx.response.faits, len(m.edits)))
+    check("choix : chacune des 11 variantes appelle EXACTEMENT la methode de son ancien bouton, "
+          "une reponse, menu remis (identite et mention gardees)", _tout_ok, _det)
+    # Parite avec l'ancien : meme table d'appels.
+    check("choix : table d'appels identique a celle d'avant la partie C",
+          {k: (v.__name__ if hasattr(v, "__name__") else v) for k, v in U._MENU_VA_APPELS.items()}.keys()
+          == _ANCIENS_APPELS_VA)
+
+    # Action muette : la reponse est la remise a zero.
+    ch, m = menu_poste()
+    itx = choisir("caption", "capbanger", m, mode="rien")
+    check("action muette : la reponse est l'edition du menu (jamais « l'interaction a echoue »)",
+          itx.response.faits and itx.response.faits[0][0] == "edit_message" and itx.response.doubles == 0
+          and remis(itx.response.faits[0][2]["view"]), itx.response.faits)
+    # Action refusee (send_message ephemere) : menu remis quand meme.
+    ch, m = menu_poste()
+    itx = choisir("trash", TRASH[0], m, mode="send_eph")
+    check("action qui refuse (message ephemere) : une reponse, menu remis par le message",
+          len(itx.response.faits) == 1 and itx.response.faits[0][0] == "send_message"
+          and len(m.edits) == 1 and remis(m.edits[0]["view"]))
+    # Action « thinking ».
+    ch, m = menu_poste()
+    itx = choisir("template", "reelmonte", m, mode="thinking")
+    check("action « thinking » : une reponse, menu remis", len(itx.response.faits) == 1
+          and len(m.edits) == 1 and not itx.orig_edits)
+    # L'action leve.
+    ch, m = menu_poste()
+    del JOURNAL.lignes[:]
+    itx = choisir("flash", FLASH[0], m, mode="leve")
+    check("action qui leve : une reponse, erreur DITE en ephemere et journalisee",
+          itx.response.doubles == 0 and len(itx.response.faits) == 1
+          and itx.followup.envois and "erreur" in itx.followup.envois[-1][0]
+          and itx.followup.envois[-1][1].get("ephemeral")
+          and any("menu VA : action" in l[2] and "en echec" in l[2] for l in JOURNAL.lignes),
+          (itx.response.faits, itx.followup.envois))
+    # Le redessin en fond echoue : on repasse par l'interaction.
+    ch, m = menu_poste()
+    m.echec_edit = http_exc(texte="Unknown message")
+    del JOURNAL.lignes[:]
+    itx = choisir("caption", "montagebanger", m, mode="defer")
+    check("redessin en fond refuse + action differee : remise par @original, une reponse",
+          itx.orig_edits and itx.response.doubles == 0 and len(itx.response.faits) == 1
+          and any("remis sur son intitule" in l[2] for l in JOURNAL.lignes), itx.orig_edits)
+    ch, m = menu_poste()
+    m.echec_edit = http_exc(texte="Unknown message")
+    del JOURNAL.lignes[:]
+    itx = choisir("caption", "montagebanger", m, mode="send_eph")
+    check("redessin impossible partout : pas d'exception, une reponse, echec journalise",
+          itx.response.doubles == 0 and len(itx.response.faits) == 1
+          and any("non remis sur son intitule" in l[2] for l in JOURNAL.lignes))
+    # Refus : valeur forgee.
+    ch, m = menu_poste()
+    del JOURNAL.lignes[:]
+    itx = choisir("caption", "templateflash", m)
+    check("refus : une valeur hors de la famille est refusee, rien ne part, menu remis, raison dite",
+          not COG.appels and itx.response.faits[0][0] == "edit_message" and remis(itx.response.faits[0][2]["view"])
+          and "inconnue" in str(itx.followup.envois[0][0]) and itx.followup.envois[0][1].get("ephemeral")
+          and any("choix 'templateflash' refuse" in l[2] for l in JOURNAL.lignes), itx.followup.envois)
+    itx = choisir("caption", "brutcaption", m)
+    check("refus : ⭐ Brut + Caption (jamais au menu VA) est refusee elle aussi", not COG.appels
+          and "inconnue" in str(itx.followup.envois))
+    # Refus : option coupee depuis que le menu a ete poste.
+    ch, m = menu_poste()
+    reglages(set(GF.ALL_FEATURES) - {"contenu"})
+    itx = choisir("trash", TRASH[3], m)
+    check("refus : variante coupee sur le serveur depuis la pose -> refusee, et le menu redessine n'a plus de menus",
+          not COG.appels and "désactivée" in str(itx.followup.envois[0][0])
+          and not selects(itx.response.faits[0][2]["view"]), itx.followup.envois)
+    reglages()
+    # Menu EPHEMERE : pas de message.edit, remise par l'interaction.
+    mE = Msg(None, view=U._vue_sans_suivi(U._menu_va(COG, "julia", None)), ephemere=True)
+    mE.ch = None
+    itx = choisir("template", "templatebrut", mE, mode="defer")
+    check("menu ephemere + action differee : remise par @original, vue arretee",
+          itx.orig_edits and itx.orig_edits[0]["view"].is_finished() and remis(itx.orig_edits[0]["view"])
+          and len(itx.response.faits) == 1, (itx.orig_edits, itx.response.faits))
+    itx = choisir("template", "templatebrut", mE, mode="send_eph")
+    check("menu ephemere + action repondue par un message : remise par followup.edit_message",
+          itx.followup.edits and itx.followup.edits[0][0] == mE.id and len(itx.response.faits) == 1,
+          itx.followup.edits)
+    itx = choisir("template", "templatebrut", mE, mode="rien")
+    check("menu ephemere + action muette : la reponse EST la remise", itx.response.faits[0][0] == "edit_message"
+          and len(itx.response.faits) == 1)
+    # Les valeurs viennent de l'interaction, pas de l'objet partage.
+    ch, m = menu_poste()
+    s_ = [x for x in selects(m.view) if x.custom_id == "cmenu:sel:flash"][0]
+    s_._values = [FLASH[0]]
+    COG.appels.clear()
+    itx = Itx(message=m, channel=ch)
+    itx.data = {"values": [FLASH[3]]}
+    lancer(s_.callback(itx))
+    check("choix : la valeur lue est celle de L'INTERACTION (l'element persistant est partage)",
+          COG.appels == [APPELS_ATTENDUS[FLASH[3]]], COG.appels)
+    s_._values = []
+
+    # ===========================================================================
+    # 5. BOUTONS DU MENU V2 (callbacks simules)
+    # ===========================================================================
+    BOUTONS_APPELS = {
+        "reel": "reel", "banger": "_send_banger_reels", "story": "story", "storycta": "storycta",
+        "post": "post", "name": "name", "pseudo": "username", "pp": "profilepic", "bio": "bio",
+        "brutbanger": "_send_brutes_bangers", "lien": "request_link", "tuto": "_send_tutoriel",
+    }
+    _ok, _det = True, []
+    for b in boutons(U._menu_va(COG, "julia", None)):
+        k = b.custom_id.split(":", 1)[1]
+        if k not in BOUTONS_APPELS:
+            continue
+        COG.mode = "defer"
+        COG.appels.clear()
+        itx = Itx(message=Msg(Salon(910)), channel=Salon(910))
+        run(b.callback(itx))
+        if [a[0] for a in COG.appels] != [BOUTONS_APPELS[k]] or len(itx.response.faits) != 1:
+            _ok = False
+            _det.append((k, COG.appels, itx.response.faits))
+    check("boutons : chacun appelle la meme methode qu'avant (12 boutons de contenu/aide)", _ok, _det)
+    _bmap = {b.custom_id: b for b in boutons(U._menu_va(COG, "julia", None))}
+    itx = Itx(message=Msg(Salon(911)))
+    run(_bmap["cmenu:help"].callback(itx))
+    check("boutons : Assistance ouvre sa fenetre", itx.response.faits[0][0] == "send_modal"
+          and isinstance(itx.response.modal, U.AssistanceModal))
+    itx = Itx(message=Msg(Salon(911)))
+    run(_bmap["cmenu:pay"].callback(itx))
+    check("boutons : Mon paiement repond en ephemere avec son choix",
+          itx.response.faits[0][0] == "send_message" and itx.response.faits[0][2].get("ephemeral")
+          and isinstance(itx.response.faits[0][2].get("view"), U.PaymentMethodView))
+    itx = Itx(message=Msg(Salon(911)))
+    run(_bmap["cmenu:clics"].callback(itx))
+    check("boutons : Mes clics sans le cog ClickRecap -> le dit, en ephemere",
+          "indisponibles" in str(itx.response.faits[0][1]))
+    itx = Itx(message=Msg(Salon(911)))
+    run(_bmap["cmenu:comptes"].callback(itx))
+    check("boutons : Mes comptes Insta ouvre sa fenetre", itx.response.faits[0][0] == "send_modal")
+
+    # ===========================================================================
+    # 6. REPERAGE DES DEUX FORMATS
+    # ===========================================================================
+    _mV2 = Msg(view=U._menu_va(COG, "julia", None))
+    _mOld = Msg(embed=discord.Embed(title="☀️ Ton menu"))
+    _mOldT = Msg(embed=discord.Embed(title="🧵 Ton menu Threads"))
+    _mPan = Msg(view=U._jb_panel(None, "emma", 3))
+    _mGen = Msg(embed=discord.Embed(title="✨ General").set_footer(text=U._JB_GENERAL_FOOTER))
+    _mAutre = Msg(view=U._menu_va(COG, "julia", None), auteur=999)
+    _vX = ui.LayoutView()
+    _vX.add_item(ui.Container(ui.TextDisplay("## autre chose\n-# pas-la-marque")))
+    _mX = Msg(view=_vX)
+    check("reperage : menu V2 et ancien menu (deux titres) reconnus",
+          U._est_menu_va(_mV2, MOI) and U._est_menu_va(_mOld, MOI) and U._est_menu_va(_mOldT, MOI))
+    check("reperage : panneau US, General, autre V2, autre auteur -> pas le menu VA",
+          not any(U._est_menu_va(x, MOI) for x in (_mPan, _mGen, _mX, _mAutre, Msg())))
+    check("reperage : le menu VA V2 n'est pas pris pour le panneau US ni pour le General",
+          not U._est_panneau_actions(_mV2, MOI) and not U._est_general(_mV2, MOI))
+    check("reperage : un objet illisible ne fait pas lever",
+          U._est_menu_va(types.SimpleNamespace(id=1, author=Auteur(MOI), embeds=5, components=3)) is False
+          and U._menu_va_lire(object()) == (None, None))
+
+
+    # _delete_old_menus : les deux formats partent, rien d'autre.
+    class _SelfDel:
+        bot = types.SimpleNamespace(user=types.SimpleNamespace(id=MOI))
+
+
+    def salon_mixte():
+        ch = Salon(920)
+        intro_v = ui.View()
+        intro_v.add_item(ui.Button(label="Commencer", custom_id="va_start_onboarding"))
+        msgs = dict(
+            v2=Msg(ch, view=U._menu_va(COG, "julia", None)),
+            ancien=Msg(ch, embed=discord.Embed(title="☀️ Ton menu"), view=_ancien_menu_va()),
+            jour=Msg(ch, embed=discord.Embed(title="🎬 Contenu du jour")),
+            panneau=Msg(ch, view=U._jb_panel(None, "emma", 3)),
+            general=Msg(ch, embed=discord.Embed(title="✨ General").set_footer(text=U._JB_GENERAL_FOOTER)),
+            autre=Msg(ch, view=U._menu_va(COG, "julia", None), auteur=999),
+            intro=Msg(ch, view=intro_v, content="Bienvenue"),
+            texte=Msg(ch, content="bonjour"),
+        )
+        ch.msgs.extend(msgs.values())
+        return ch, msgs
+
+
+    ch, ms = salon_mixte()
+    run(U.UserCog._delete_old_menus(_SelfDel(), ch))
+    check("_delete_old_menus : menu V2, ancien menu et « contenu du jour » supprimes",
+          ms["v2"].supprime and ms["ancien"].supprime and ms["jour"].supprime)
+    check("_delete_old_menus : panneau US, General, message d'un autre, intro et texte gardes",
+          not any(ms[k].supprime for k in ("panneau", "general", "autre", "intro", "texte")))
+    ch, ms = salon_mixte()
+    run(U.UserCog._delete_old_menus(_SelfDel(), ch, also_onboarding=True))
+    check("_delete_old_menus(also_onboarding) : l'intro part aussi, le panneau reste",
+          ms["intro"].supprime and not ms["panneau"].supprime and ms["v2"].supprime)
+
+    # ===========================================================================
+    # 7. POSE : _post_menu, _pin_menus_for_guild, /menu
+    # ===========================================================================
+
+
+    class _SelfPose:
+        def __init__(self, cibles):
+            self.bot = types.SimpleNamespace(user=types.SimpleNamespace(id=MOI))
+            self._cibles = cibles
+
+        def _va_targets(self, guild=None):
+            return self._cibles
+
+        async def _delete_old_menus(self, ch, also_onboarding=False):
+            return await U.UserCog._delete_old_menus(self, ch, also_onboarding)
+
+
+    _sp = _SelfPose([])
+    chP = Salon(930)
+    ok = run(U.UserCog._post_menu(_sp, chP, "julia", mention_user_id=55))
+    _e = chP.envois[-1] if chP.envois else {}
+    check("_post_menu : envoie la vue V2 seule (ni contenu ni embed), mention en tete, pings autorises",
+          ok is True and _e.get("content") is None and _e.get("embed") is None
+          and isinstance(_e.get("view"), U.ContentMenuView)
+          and texte(_e["view"]).splitlines()[0] == "<@55> 👇 **Ton menu du jour est prêt !**"
+          and _e.get("allowed_mentions") is not None and _e["allowed_mentions"].users is True, _e)
+    chP.echec_send = http_exc(discord.Forbidden, 403, "pas le droit")
+    del JOURNAL.lignes[:]
+    ok = run(U.UserCog._post_menu(_sp, chP, "julia"))
+    check("_post_menu : echec d'envoi -> False ET journalise (avant : avale sans trace)",
+          ok is False and any("menu VA non poste" in l[2] for l in JOURNAL.lignes))
+
+    # _pin_menus_for_guild : anciens menus (deux formats) remplaces par le V2 epingle.
+    _ch1, _ms1 = salon_mixte()
+    _ch2 = Salon(931)
+    _vieux2 = Msg(_ch2, embed=discord.Embed(title="☀️ Ton menu").set_footer(text="Identité : julia"),
+                  view=_ancien_menu_va())
+    _vieux2.pinned = True
+    _ch2.msgs.append(_vieux2)
+    _sp = _SelfPose([(_ch1, "55", "julia"), (_ch2, "56", "julia")])
+    _vrai_sleep = asyncio.sleep
+
+
+    async def _sleep_rapide(t, *a, **k):
+        return await _vrai_sleep(0)
+
+
+    U.asyncio.sleep = _sleep_rapide
+    try:
+        n = run(U.UserCog._pin_menus_for_guild(_sp, types.SimpleNamespace(id=7)))
+    finally:
+        U.asyncio.sleep = _vrai_sleep
+    _poses1 = [x for x in _ch1.msgs if U._est_menu_va(x, MOI)]
+    _poses2 = [x for x in _ch2.msgs if U._est_menu_va(x, MOI)]
+    check("_pin_menus_for_guild : un seul menu par salon, V2, epingle ; anciens des deux formats retires",
+          n == 2 and len(_poses1) == 1 and len(_poses2) == 1 and _poses1[0].pinned and _poses2[0].pinned
+          and _poses1[0].flags.components_v2 and _vieux2.supprime and _ms1["v2"].supprime
+          and not _ms1["panneau"].supprime,
+          (n, len(_poses1), len(_poses2)))
+    check("_pin_menus_for_guild : le menu pose porte l'identite du salon, sans embed",
+          U._menu_va_lire(_poses1[0])[0] == "julia" and not _poses1[0].embeds)
+
+    # /menu
+    _vrai_gui = U.get_user_identity
+    U.get_user_identity = lambda uid: "julia"
+    try:
+        itx = Itx(message=None, channel=Salon(940))
+        run(U.UserCog.menu.callback(types.SimpleNamespace(), itx))
+        f = itx.response.faits
+        check("/menu : repond par le menu V2 (vue seule, identite du VA)",
+              f and f[0][0] == "send_message" and isinstance(f[0][2].get("view"), U.ContentMenuView)
+              and "embed" not in f[0][2] and "-# Identité : `julia`" in texte(f[0][2]["view"]), f)
+        U.get_user_identity = lambda uid: None
+        itx = Itx(message=None, channel=Salon(940))
+        run(U.UserCog.menu.callback(types.SimpleNamespace(), itx))
+        check("/menu : sans identite -> refus explique, comme avant",
+              "identité" in str(itx.response.faits[0][1]) and itx.response.faits[0][2].get("ephemeral"))
+    finally:
+        U.get_user_identity = _vrai_gui
+
+    # ===========================================================================
+    # 8. /setidentite first : l'identite se relit dans un menu V2
+    # ===========================================================================
+    import safe_json as _sj  # noqa: E402
+    _users = TMP / "users.json"
+    _sj.write(_users, {"55": {"channel_id": 950, "identity": "autre"}})
+    _chI = Salon(950, name="va-bob")
+    _chI.msgs.append(Msg(_chI, view=U._menu_va(COG, "julia", None, mention=55)))
+    _gI = types.SimpleNamespace(id=7, name="G", text_channels=[_chI])
+    _vrai_ssi = GF.set_server_identity
+    GF.set_server_identity = lambda g, i: True
+    # /setidentite first n'accepte qu'une identite qui EXISTE (list_identities,
+    # les dossiers de data/identities). Sans ce bouchon, le test ne passait que
+    # sur un poste dont le vrai data/ contient « julia » : lance avec un data/
+    # vide (poste neuf, dossier isole), il echouait sans rien dire du menu V2.
+    # cogs.welcome est remis en place apres la partie (_V2_MODULES).
+    import cogs.welcome as _Wi
+    _Wi.list_identities = lambda avec_reserves=False: ["julia", "autre"]
+    try:
+        itx = Itx(message=None, channel=_chI, guild=_gI, uid=4)
+        itx.client.application_info = lambda: _coro_owner()
+
+        async def _coro_owner():
+            return types.SimpleNamespace(owner=types.SimpleNamespace(id=4))
+        run(U.UserCog.setidentite.callback(types.SimpleNamespace(), itx, identity="first"))
+    finally:
+        GF.set_server_identity = _vrai_ssi
+    _apres = json.loads(_users.read_text(encoding="utf-8"))
+    check("/setidentite first : l'identite est relue dans le TEXTE d'un menu V2 (plus d'embed)",
+          _apres["55"]["identity"] == "julia", (_apres, itx.followup.envois))
+
+    reglages_vrais()
+    import shutil
+    shutil.rmtree(TMP, ignore_errors=True)
+
+
+
+def _v2_bloc_general():
+    'Partie E : le ✨ General (3e message epingle du salon -menu US) en Components V2 -- boutons PP..Post, menus Caption, Template, Trash, Flash ; reperage, conversion, anciens jbg:, welcome.'
+    import asyncio
+    import json
+    import logging
+    import os
+    import sys
+    import tempfile
+    import types
+    from pathlib import Path
+    import discord
+    from discord.components import _component_factory
+
+    RESULTATS = []
+
+
+    def check(nom, ok, detail=""):
+        RESULTATS.append((nom, bool(ok), detail))
+        _check_v2("v2 General : " + nom, ok, "" if ok else str(detail)[:400])
+
+    class _Journal(logging.Handler):
+        def __init__(self):
+            super().__init__(logging.DEBUG)
+            self.lignes = []
+
+        def emit(self, r):
+            self.lignes.append((r.levelname, r.name, r.getMessage()))
+            TOUT_JOURNAL.append((r.levelname, r.name, r.getMessage()))
+
+
+    JOURNAL = _Journal()
+    TOUT_JOURNAL = []
+    logging.getLogger().addHandler(JOURNAL)
+    logging.getLogger().setLevel(logging.DEBUG)
+
+    import cogs.user as U
+    import cogs.welcome as W
+    import guild_features as GF
+    import marques_montage as MM
+    import type_identite as TI
+    import brutes_off as BO
+
+    TMP = Path(tempfile.mkdtemp(prefix="v2_general_"))
+    U._JB_PANEL_STORE = TMP / "us_panels.json"
+    U._JB_GENERAL_STORE = TMP / "us_general_panels.json"
+    _vrai_data = os.path.realpath("data")
+    for _f in (U._JB_PANEL_STORE, U._JB_GENERAL_STORE):
+        assert not os.path.realpath(_f).startswith(_vrai_data + os.sep), _f
+
+    IRT = discord.InteractionResponseType
+    ui = discord.ui
+
+    # ---------------------------------------------------------------------------
+    # Donnees simulees : liens model -> reserves, reserves, brutes
+    # ---------------------------------------------------------------------------
+    LIENS = {
+        "lola": (["blonde"], []),
+        "duo": (["blonde", "brune"], []),
+        "six": (["r1", "r2", "r3", "r4", "r5", "r6"], []),
+        "nue": ([], [("zfr", "reserve du marche FR")]),
+        "mixte": (["blonde", "chloé x"], [("zfr", "reserve du marche FR")]),
+    }
+    RESERVES = {"blonde", "brune", "r1", "r2", "r3", "r4", "r5", "r6", "zfr"}
+    BRUTES = {}          # model -> liste ; absente = une brute
+
+
+    def _liens(m):
+        if m == "casse":
+            raise RuntimeError("fichier des liens illisible")
+        r, e = LIENS.get(m, ([], []))
+        return list(r), list(e)
+
+
+    TI.reserves_liees = _liens
+    TI.est_reserve = lambda n: (n or "").lower() in RESERVES
+    BO.lister = lambda dossier, extensions=None, **k: list(BRUTES.get(Path(dossier).parent.name, ["b.mp4"]))
+
+    # ---------------------------------------------------------------------------
+    # Faux objets Discord (repris de md_verif.py)
+    # ---------------------------------------------------------------------------
+    _ids = iter(range(10_000, 99_999))
+
+
+    def http_exc(cls=discord.HTTPException, status=400, texte="refus simule"):
+        return cls(types.SimpleNamespace(status=status, reason="x"), texte)
+
+
+    class Auteur:
+        def __init__(self, i):
+            self.id = i
+            self.bot = True
+
+
+    MOI = 1
+
+
+    def comps_de(vue):
+        if vue is None:
+            return []
+        return [_component_factory(d) for d in vue.to_components()]
+
+
+    class Msg:
+        def __init__(self, ch=None, embed=None, view=None, ephemere=False, auteur=MOI, content=None):
+            self.id = next(_ids)
+            self.ch = ch
+            self.embeds = [embed] if embed is not None else []
+            self.content = content
+            self.view = view
+            self.components = comps_de(view)
+            self.author = Auteur(auteur)
+            self.pinned = False
+            v2 = bool(view is not None and view.has_components_v2())
+            self.flags = types.SimpleNamespace(ephemeral=ephemere, components_v2=v2)
+            self.edits = []
+            self.echec_edit = None
+            self.supprime = False
+
+        async def edit(self, **k):
+            self.edits.append(k)
+            if self.echec_edit is not None:
+                raise self.echec_edit
+            if "view" in k:
+                v = k["view"]
+                if v is not None and v.has_components_v2():
+                    # Discord refuse un V2 qui garderait texte ou embed.
+                    if (self.embeds and "embed" not in k and "embeds" not in k) or \
+                            (self.content and "content" not in k):
+                        raise http_exc(texte="V2 avec embed/texte restant")
+                    self.flags.components_v2 = True
+                self.view = v
+                self.components = comps_de(v)
+            if "embed" in k:
+                self.embeds = [k["embed"]] if k["embed"] is not None else []
+            if "content" in k:
+                self.content = k["content"]
+            return self
+
+        async def delete(self):
+            self.supprime = True
+            if self.ch is not None and self in self.ch.msgs:
+                self.ch.msgs.remove(self)
+
+        async def pin(self, **k):
+            self.pinned = True
+
+
+    class Salon:
+        def __init__(self, cid=4242, name="zz-menu"):
+            self.id = cid
+            self.name = name
+            self.msgs = []
+            self.overwrites = {}
+            self.guild = types.SimpleNamespace(id=7, emojis=[], text_channels=[self])
+            self.echec_send = None
+            self.fetchs = 0
+            self.lectures_epingles = 0
+
+        async def pins(self):
+            self.lectures_epingles += 1
+            return [m for m in reversed(self.msgs) if m.pinned]
+
+        async def send(self, content=None, embed=None, view=None, **k):
+            if self.echec_send:
+                raise self.echec_send
+            m = Msg(self, embed=embed, view=view, content=content)
+            self.msgs.append(m)
+            return m
+
+        async def fetch_message(self, i):
+            self.fetchs += 1
+            for m in self.msgs:
+                if m.id == int(i):
+                    return m
+            raise http_exc(discord.NotFound, 404, "absent")
+
+        def get_partial_message(self, i):
+            salon = self
+
+            class _P:
+                id = int(i)
+
+                async def edit(self, **k):
+                    for m in salon.msgs:
+                        if m.id == int(i):
+                            return await m.edit(**k)
+                    raise http_exc(discord.NotFound, 404, "absent")
+
+                async def delete(self):
+                    for m in salon.msgs:
+                        if m.id == int(i):
+                            return await m.delete()
+                    raise http_exc(discord.NotFound, 404, "absent")
+            return _P()
+
+        async def purge(self, limit=200, check=None):
+            partis = [m for m in self.msgs if check(m)]
+            self.msgs[:] = [m for m in self.msgs if not check(m)]
+            return partis
+
+        async def history(self, limit=40):
+            for m in list(reversed(self.msgs))[:limit]:
+                yield m
+
+
+    class DeuxReponses(Exception):
+        pass
+
+
+    class Rep:
+        def __init__(self, itx):
+            self.itx = itx
+            self._type = None
+            self.faits = []
+            self.echec_edit = None
+            self.doubles = 0
+
+        def is_done(self):
+            return self._type is not None
+
+        @property
+        def type(self):
+            return self._type
+
+        def _marquer(self, t, quoi, a, k):
+            if self._type is not None:
+                self.doubles += 1
+                raise DeuxReponses(quoi)
+            self._type = t
+            self.faits.append((quoi, a, k))
+
+        async def send_message(self, *a, **k):
+            self._marquer(IRT.channel_message, "send_message", a, k)
+
+        async def edit_message(self, *a, **k):
+            if self.echec_edit is not None and self._type is None:
+                e, self.echec_edit = self.echec_edit, None
+                raise e
+            m = self.itx.message
+            if m is not None and "view" in k:
+                await m.edit(**k)          # Discord refuse AVANT de compter la reponse
+            self._marquer(IRT.message_update, "edit_message", a, k)
+
+        async def defer(self, ephemeral=False, thinking=False):
+            self._marquer(IRT.deferred_channel_message if thinking else IRT.deferred_message_update,
+                          "defer", (), dict(ephemeral=ephemeral, thinking=thinking))
+
+        async def send_modal(self, modal):
+            self._marquer(IRT.modal, "send_modal", (modal,), {})
+            self.modal = modal
+
+
+    class Suivi:
+        def __init__(self, itx):
+            self.itx = itx
+            self.envois = []
+            self.edits = []
+
+        async def send(self, content=None, **k):
+            if not self.itx.response.is_done():
+                raise AssertionError("followup avant toute reponse")
+            self.envois.append((content, k))
+            return Msg(ephemere=bool(k.get("ephemeral")))
+
+        async def edit_message(self, mid, **k):
+            if not self.itx.response.is_done():
+                raise AssertionError("followup.edit avant toute reponse")
+            self.edits.append((mid, k))
+            m = self.itx.message
+            if m is not None and m.id == mid:
+                await m.edit(**k)
+
+
+    class Cog:
+        """Faux UserCog : _run_for_model enregistre l'appel (brute_de compris)
+        et repond selon `mode` (defer | defer_eph | thinking | send_eph | rien | leve)."""
+
+        def __init__(self):
+            self.appels = []
+            self.mode = "defer"
+
+        async def _run_for_model(self, interaction, model, cmd, count=None,
+                                 supports_count=False, brute_de=None):
+            self.appels.append((model, getattr(cmd, "__name__", cmd), count, supports_count, brute_de))
+            mode = self.mode
+            if mode == "defer":
+                await interaction.response.defer()
+                await interaction.followup.send("contenu")
+            elif mode == "defer_eph":
+                await interaction.response.defer(ephemeral=True)
+                await interaction.followup.send("choix", ephemeral=True)
+            elif mode == "thinking":
+                await interaction.response.defer(thinking=True)
+                await interaction.followup.send("fini")
+            elif mode == "send_eph":
+                await interaction.response.send_message("Aucune brute", ephemeral=True)
+            elif mode == "leve":
+                raise RuntimeError("panne simulee")
+
+
+    for _a in U._JB_ACTIONS_US:
+        _nom = _a[2]
+
+        def _f(*a, _n=_nom, **k):
+            return None
+        _f.__name__ = _nom
+        setattr(Cog, _nom, staticmethod(_f))
+    COG = Cog()
+
+
+    class Itx:
+        def __init__(self, message=None, channel=None, guild=None, uid=5):
+            self.message = message
+            self.channel = channel
+            self.guild = guild or types.SimpleNamespace(id=7, emojis=[])
+            self.user = types.SimpleNamespace(id=uid, roles=[])
+            self.client = types.SimpleNamespace(
+                get_cog=lambda n: COG if n == "UserCog" else None,
+                user=types.SimpleNamespace(id=MOI))
+            self.response = Rep(self)
+            self.followup = Suivi(self)
+            self.orig_edits = []
+            self.data = {}
+
+        async def edit_original_response(self, **k):
+            if self.response.type not in (IRT.deferred_message_update, IRT.message_update):
+                raise AssertionError("@original n'est pas le message du clic")
+            self.orig_edits.append(k)
+            if self.message is not None:
+                await self.message.edit(**k)
+
+        async def original_response(self):
+            return Msg(ephemere=True)
+
+
+    def run(coro):
+        return asyncio.run(coro)
+
+
+    async def attendre_fond():
+        for _ in range(5):
+            await asyncio.sleep(0)
+        if U._JB_TACHES:
+            await asyncio.gather(*list(U._JB_TACHES), return_exceptions=True)
+
+
+    def lancer(coro):
+        async def _t():
+            r = await coro
+            await attendre_fond()
+            return r
+        return asyncio.run(_t())
+
+
+    def items(vue):
+        return list(vue.walk_children())
+
+
+    def rangees(vue):
+        """[[custom_id…] par ActionRow], dans l'ordre."""
+        out = []
+        for i in items(vue):
+            if isinstance(i, ui.ActionRow):
+                out.append([c.custom_id for c in i.children])
+        return out
+
+
+    def selects(vue):
+        return [i for i in items(vue) if isinstance(i, ui.DynamicItem) and isinstance(i.item, ui.Select)]
+
+
+    def boutons(vue):
+        return [i for i in items(vue) if isinstance(i, ui.DynamicItem) and isinstance(i.item, ui.Button)]
+
+
+    def limites(vue):
+        pb = []
+        if vue.total_children_count > 40:
+            pb.append("composants %d > 40" % vue.total_children_count)
+        if vue.content_length() > 4000:
+            pb.append("texte %d > 4000" % vue.content_length())
+        for i in items(vue):
+            base = i.item if isinstance(i, ui.DynamicItem) else i
+            if isinstance(i, ui.ActionRow) and len(i.children) > 5:
+                pb.append("rangee a %d" % len(i.children))
+            if isinstance(i, ui.TextDisplay) and U._long_discord(i.content) > 4000:
+                pb.append("texte (utf-16) %d" % U._long_discord(i.content))
+            cid = getattr(base, "custom_id", None)
+            if cid and len(cid) > 100:
+                pb.append("custom_id %d" % len(cid))
+            if isinstance(base, ui.Button) and base.label and U._long_discord(base.label) > 80:
+                pb.append("libelle bouton %r" % base.label)
+            if isinstance(base, ui.Select):
+                if len(base.options) > 25 or not base.options:
+                    pb.append("options %d" % len(base.options))
+                if base.placeholder and len(base.placeholder) > 150:
+                    pb.append("placeholder")
+                for o in base.options:
+                    if U._long_discord(o.label) > 100:
+                        pb.append("option %r" % o.label)
+                    if o.description and U._long_discord(o.description) > 100:
+                        pb.append("description %r" % o.description)
+        json.dumps(vue.to_components())
+        return pb
+
+
+    def texte(vue):
+        return "\n".join(i.content for i in items(vue) if isinstance(i, ui.TextDisplay))
+
+
+    def interactifs(vue):
+        return [i for i in items(vue) if isinstance(i, (ui.Button, ui.Select, ui.DynamicItem))]
+
+
+    GUILD_IC = types.SimpleNamespace(
+        id=7, emojis=[discord.PartialEmoji(name=n, id=20000 + k)
+                      for k, n in enumerate(sorted(set(U._ICONES_ACTIONS.values())))])
+
+    VRAI = dict(can=U._jb_can_use, res=U._refus_reserve_jb, gen=U._jb_general_maj,
+                us=GF.is_us_guild, marche=U.marche_du_membre, general=U._jb_general)
+    U._jb_can_use = lambda i: True
+    U._refus_reserve_jb = lambda i: ""
+    U.marche_du_membre = lambda m: "us"
+
+    _TRASH = MM.marque("trash")["actions"]
+    _FLASH = MM.marque("flash")["actions"]
+    # La liste blanche d'AVANT (e5a5f53) : les 13 boutons de l'ancien General.
+    _ANCIENNES_CLES = {"pp", "bio", "story", "storycta", "post", "reelcaption", "capbanger",
+                       "reelmonte", "templatebanger", _TRASH[0], _TRASH[1], _FLASH[0], _FLASH[1]}
+
+    # ===========================================================================
+    # 1. LA TABLE DU GENERAL
+    # ===========================================================================
+    check("table : boutons = PP, Bio, Story, Story CTA, Post",
+          U._JB_GEN_BOUTONS == ("pp", "bio", "story", "storycta", "post"), U._JB_GEN_BOUTONS)
+    check("table : menus Caption, Template, Trash, Flash, dans cet ordre (celui de _FAMILLES_MENU)",
+          [f.cle for f in U._JB_GEN_FAMILLES] == ["caption", "template", "trash", "flash"]
+          and [(f.emoji, f.nom) for f in U._JB_GEN_FAMILLES]
+          == [(f.emoji, f.nom) for f in U._FAMILLES_MENU], U._JB_GEN_FAMILLES)
+    check("table : chaque menu = matiere seule + version etoilee (Caption, ⭐ Caption…)",
+          [f.actions for f in U._JB_GEN_FAMILLES]
+          == [("reelcaption", "capbanger"), ("reelmonte", "templatebanger"),
+              tuple(_TRASH[:2]), tuple(_FLASH[:2])],
+          [f.actions for f in U._JB_GEN_FAMILLES])
+    check("table : libelles = Caption, ⭐ Caption, Template, ⭐ Template, Trash, ⭐ Trash, Flash, ⭐ Flash",
+          [U._jb_action(a)[1] for f in U._JB_GEN_FAMILLES for a in f.actions]
+          == ["💬 Caption", "⭐ Caption", "🎞️ Template", "⭐ Template", "💀 Trash", "⭐ Trash",
+              "⚡ Flash", "⭐ Flash"],
+          [U._jb_action(a)[1] for f in U._JB_GEN_FAMILLES for a in f.actions])
+    _brut = {"brute", "brutbanger", "brutchoix", "brutcaption", "montagebanger", "bruttemplate",
+             "templatebrut", _TRASH[2], _TRASH[3], _FLASH[2], _FLASH[3]}
+    check("table : aucun Brut dans le General (ni menu Brut, ni variante a brute ⭐)",
+          not (_brut & set(U._JB_GENERAL_RANGEES)) and "brut" not in [f.cle for f in U._JB_GEN_FAMILLES])
+    check("table : liste blanche = les 13 cles d'avant (anciens boutons jbg:a: toujours valides)",
+          set(U._JB_GENERAL_RANGEES) == _ANCIENNES_CLES,
+          set(U._JB_GENERAL_RANGEES) ^ _ANCIENNES_CLES)
+    check("table : rangees prevues deduites (1 = boutons, 2..5 = menus)",
+          U._JB_GENERAL_RANGEES == {**{k: 1 for k in U._JB_GEN_BOUTONS},
+                                    "reelcaption": 2, "capbanger": 2, "reelmonte": 3,
+                                    "templatebanger": 3, _TRASH[0]: 4, _TRASH[1]: 4,
+                                    _FLASH[0]: 5, _FLASH[1]: 5}, U._JB_GENERAL_RANGEES)
+    check("table : toutes les cles existent dans _JB_ACTIONS_US et ont une explication (menus)",
+          set(U._JB_GENERAL_RANGEES) <= {a[0] for a in U._JB_ACTIONS_US}
+          and all(U._EXPLICATIONS.get(a) for f in U._JB_GEN_FAMILLES for a in f.actions))
+    check("table : _JB_GEN_BRUTE inchange (caption, ⭐ caption, ⭐ template, trash/flash et ⭐)",
+          U._JB_GEN_BRUTE == frozenset({"reelcaption", "capbanger", "templatebanger",
+                                        _TRASH[0], _TRASH[1], _FLASH[0], _FLASH[1]}))
+
+    # ===========================================================================
+    # 2. LA VUE V2 : structure, etats, limites
+    # ===========================================================================
+
+
+    def est_v2_bloc(v):
+        return (isinstance(v, ui.LayoutView) and v.has_components_v2() and len(v.children) == 1
+                and isinstance(v.children[0], ui.Container)
+                and v.children[0].accent_colour == discord.Colour.teal()
+                and isinstance(v.children[0].children[0], ui.TextDisplay)
+                and v.timeout is None)
+
+
+    def marque_fin(v):
+        return texte(v).splitlines()[-1] == "-# panneau-general-us"
+
+
+    # Etats SANS actions : texte seul.
+    _etats = {
+        "attente « _ »": (U._jb_general(None, "_"), "choisis une model au-dessus"),
+        "model vide": (U._jb_general(None, None), "choisis une model au-dessus"),
+        "model = reserve": (U._jb_general(None, "blonde"), "est une réserve"),
+        "liens illisibles": (U._jb_general(None, "casse"), "Liens des réserves illisibles"),
+        "aucune reserve": (U._jb_general(None, "nue"), "aucune réserve liée à Nue"),
+        "nom illisible": (U._jb_general(None, "chloé x"), "illisible"),
+    }
+    for nom_e, (v_, attendu) in _etats.items():
+        check("etat %s : bloc V2, texte seul (aucun bouton ni menu), marque en derniere ligne" % nom_e,
+              est_v2_bloc(v_) and not interactifs(v_) and attendu in texte(v_) and marque_fin(v_)
+              and not limites(v_) and texte(v_).startswith("## ✨ General"),
+              texte(v_))
+    check("etat aucune reserve : liens ecartes et leur raison DITS, chemin du site",
+          "`zfr` : reserve du marche FR" in texte(_etats["aucune reserve"][0])
+          and "Réserves liées" in texte(_etats["aucune reserve"][0]))
+    check("etat « _ » : annonce captions, templates, trash et flash",
+          "captions, templates, trash et flash" in texte(_etats["attente « _ »"][0]))
+
+    for _g, _nomg in ((None, "sans icones"), (GUILD_IC, "avec icones")):
+        v = U._jb_general(None, "lola", 3, guild=_g)
+        check("1 reserve (%s) : bloc V2 turquoise, texte en tete, dans les limites" % _nomg,
+              est_v2_bloc(v) and not limites(v), limites(v))
+        check("1 reserve (%s) : rangees = [Quantite], [PP, Bio, Story, Story CTA, Post], 4 menus" % _nomg,
+              rangees(v) == [["jbg:qb:lola:blonde:3"],
+                             ["jbg:a:lola:blonde:%s:3" % k for k in ("pp", "bio", "story", "storycta", "post")],
+                             ["jbg:s:lola:blonde:caption:3"], ["jbg:s:lola:blonde:template:3"],
+                             ["jbg:s:lola:blonde:trash:3"], ["jbg:s:lola:blonde:flash:3"]], rangees(v))
+        _sel = selects(v)
+        check("1 reserve (%s) : intitules 💬 Caption…, 🎞️ Template…, 💀 Trash…, ⚡ Flash…" % _nomg,
+              [s_.item.placeholder for s_ in _sel] == ["💬 Caption…", "🎞️ Template…", "💀 Trash…", "⚡ Flash…"],
+              [s_.item.placeholder for s_ in _sel])
+        ok_o, det = True, []
+        for s_, f in zip(_sel, U._JB_GEN_FAMILLES):
+            if [o.value for o in s_.item.options] != list(f.actions):
+                ok_o = False
+                det.append((f.cle, [o.value for o in s_.item.options]))
+            for o in s_.item.options:
+                lib = U._jb_action(o.value)[1]
+                icone = U.icones_actions(_g).get(o.value)
+                if icone is not None:
+                    if o.emoji is None or o.emoji.name != icone.name or o.label != U._libelle_sans_emoji(lib):
+                        ok_o = False
+                        det.append(("icone", o.value, o.label, o.emoji))
+                elif o.emoji is not None or o.label != lib:
+                    ok_o = False
+                    det.append(("sans icone", o.value, o.label, o.emoji))
+                if o.description != U._EXPLICATIONS[o.value] or o.default:
+                    ok_o = False
+                    det.append(("desc/defaut", o.value))
+            if s_.item.min_values != 1 or s_.item.max_values != 1:
+                ok_o = False
+        check("1 reserve (%s) : options = libelle de production, explication, icone sinon emoji" % _nomg,
+              ok_o, det)
+        _bt = boutons(v)
+        check("1 reserve (%s) : PP, Bio, Story, Story CTA, Post restent des BOUTONS (libelles de production)" % _nomg,
+              [b.key for b in _bt if isinstance(b, U.JBGenButton)] == list(U._JB_GEN_BOUTONS)
+              and all((b.item.emoji is not None) == (U.icones_actions(_g).get(b.key) is not None)
+                      for b in _bt if isinstance(b, U.JBGenButton)))
+        _cles_bt = {b.key for b in _bt if isinstance(b, U.JBGenButton)}
+        check("1 reserve (%s) : Caption/Template/Trash/Flash ne sont PLUS des boutons" % _nomg,
+              not (_cles_bt & {a for f in U._JB_GEN_FAMILLES for a in f.actions}))
+        t = texte(v)
+        check("1 reserve (%s) : texte = titre, contenu de la reserve, brute de la model, quantite, -content, marque" % _nomg,
+              t.splitlines()[0] == "## ✨ General — Blonde pour Lola"
+              and "Contenu de la réserve **Blonde**" in t and "brute de **Lola**" in t
+              and "Quantité : 3 média par action" in t and "-content" in t and marque_fin(v), t)
+        _js = json.dumps(v.to_components(), ensure_ascii=False)
+        check("1 reserve (%s) : ni Brut, ni Trends, ni marque du panneau ou du menu VA" % _nomg,
+              ":brut" not in _js and "Trends" not in _js and "panneau-actions-us" not in _js
+              and "menu-contenu-va" not in _js)
+
+    v1 = U._jb_general(None, "lola", 3)
+    check("1 reserve : 18 composants (pas de bouton de reserve)", v1.total_children_count == 18,
+          v1.total_children_count)
+    v2 = U._jb_general(None, "duo", 5, reserve="brune")
+    r2 = rangees(v2)
+    check("2 reserves : 1re rangee = boutons de reserve + Quantite, la reserve choisie est active",
+          r2[0] == ["jbg:r:duo:blonde:5", "jbg:r:duo:brune:5", "jbg:qb:duo:brune:5"]
+          and [b.item.style for b in boutons(v2)[:2]] == [discord.ButtonStyle.secondary,
+                                                          discord.ButtonStyle.success]
+          and r2[2] == ["jbg:s:duo:brune:caption:5"] and "2 réserves liées" in texte(v2)
+          and texte(v2).splitlines()[0] == "## ✨ General — Brune pour Duo", r2)
+    v6 = U._jb_general(None, "six", 3, reserve="r6", guild=GUILD_IC)
+    check("6 reserves, active = la 6e : 4 boutons (l'active gardee) + Quantite, les autres DITES",
+          rangees(v6)[0] == ["jbg:r:six:r1:3", "jbg:r:six:r2:3", "jbg:r:six:r3:3", "jbg:r:six:r6:3",
+                             "jbg:qb:six:r6:3"]
+          and "+2 autre(s)" in texte(v6) and "r4, r5" in texte(v6) and not limites(v6)
+          and v6.total_children_count == 22, (rangees(v6)[0], texte(v6)))
+    vr = U._jb_general(None, "duo", 3, reserve="inconnue")
+    check("reserve demandee non liee -> retombe sur la premiere liee",
+          rangees(vr)[0][-1] == "jbg:qb:duo:blonde:3")
+    vm = U._jb_general(None, "mixte", 3)
+    check("reserve au nom illisible : ecartee EN LE DISANT, le reste sert",
+          "nom illisible dans un bouton Discord" in texte(vm) and "`zfr`" in texte(vm)
+          and rangees(vm)[0] == ["jbg:qb:mixte:blonde:3"] and not limites(vm), texte(vm))
+    vq = U._jb_general(None, "lola", "abc")
+    check("quantite illisible -> 3", rangees(vq)[0] == ["jbg:qb:lola:blonde:3"])
+
+    # Noms longs : ce qui tient, ce qui ne tient pas.
+    _m40, _r40 = "m" * 40, "r" * 40
+    LIENS[_m40] = ([_r40, "r" * 39 + "b"], [])
+    vL = U._jb_general(None, _m40, 100, guild=GUILD_IC)
+    check("noms de 40 + quantite 100 : tout tient (custom_id <= 100)",
+          not limites(vL) and len(selects(vL)) == 4 and rangees(vL)[0][-1].startswith("jbg:qb:"),
+          limites(vL))
+    _m60 = "n" * 60
+    LIENS[_m60] = (["s" * 40], [])
+    del JOURNAL.lignes[:]
+    vT = U._jb_general(None, _m60, 100)
+    check("noms trop longs : General SANS boutons qui le dit, journalise, marque gardee",
+          not interactifs(vT) and "trop longs" in texte(vT) and marque_fin(vT)
+          and any("custom_id de" in l[2] for l in JOURNAL.lignes), texte(vT))
+    _m40b = "p" * 40
+    LIENS[_m40b] = (["a", "y" * 45], [])
+    vT2 = U._jb_general(None, _m40b, 100)
+    check("noms trop longs pour une reserve VOISINE (pas l'active) : bloque aussi -- son bouton "
+          "menerait a un General sans boutons (regle d'avant gardee)",
+          not interactifs(vT2) and "trop longs" in texte(vT2), texte(vT2))
+    check("_jb_general_ids_poses : couvre reserves, quantite, boutons ET menus",
+          sorted(i.split(":")[1] for i in U._jb_general_ids_poses("m", ["a", "b"], "a", 3))
+          == sorted(["r", "r", "qb"] + ["a"] * 5 + ["s"] * 4))
+
+    # Texte trop long (liens ecartes innombrables) : coupe, marque gardee.
+    LIENS["bavarde"] = (["blonde"], [("x%03d" % i, "raison " + "tres longue " * 30) for i in range(40)])
+    LIENS["bavarde2"] = (["blonde"] + ["r%03d" % i for i in range(300)], [])
+    for _nb in ("bavarde", "bavarde2"):
+        del JOURNAL.lignes[:]
+        vB_ = U._jb_general(None, _nb, 3)
+        check("texte (%s) : sous 4000, marque en derniere ligne" % _nb,
+              not limites(vB_) and marque_fin(vB_) and U._long_discord(texte(vB_)) <= 4000,
+              (U._long_discord(texte(vB_)), limites(vB_)))
+    LIENS["enorme"] = (["blonde"], [("x", "é" * 5000)])
+    del JOURNAL.lignes[:]
+    vE = U._jb_general(None, "enorme", 3)
+    check("texte enorme : coupe a 4000, journalise, marque gardee",
+          U._long_discord(texte(vE)) <= 4000 and marque_fin(vE) and texte(vE).count("…") >= 1
+          and any("texte trop long" in l[2] for l in JOURNAL.lignes), U._long_discord(texte(vE)))
+
+    # Titre : jamais « menu » ni « Jailbreak ».
+    LIENS["menuxx"] = (["jailbreaky"], [])
+    RESERVES.add("jailbreaky")
+    vW = U._jb_general(None, "menuxx", 3)
+    check("titre : un nom contenant « menu »/« jailbreak » retombe sur « ✨ General »",
+          texte(vW).splitlines()[0] == "## ✨ General", texte(vW).splitlines()[0])
+
+    # Menu sans option : retire ET dit.
+    _fam_sauve = U._JB_GEN_FAMILLES
+    try:
+        U._JB_GEN_FAMILLES = _fam_sauve + (U._Famille("zzvide", "❔", "Vide", ("inexistante",)),)
+        del JOURNAL.lignes[:]
+        vV = U._jb_general(None, "lola", 3)
+        check("menu vide : pas pose (Discord refuserait tout), dit dans le texte, journalise",
+              all("zzvide" not in c for rr in rangees(vV) for c in rr)
+              and "inexistante" in texte(vV) and "menu zzvide" in texte(vV)
+              and any("inexistante" in l[2] for l in JOURNAL.lignes) and not limites(vV), texte(vV))
+    finally:
+        U._JB_GEN_FAMILLES = _fam_sauve
+
+    # ===========================================================================
+    # 3. REPERAGE DANS LES EPINGLES : les deux formats
+    # ===========================================================================
+    _eg = discord.Embed(title="✨ General — Blonde pour Lola")
+    _eg.set_footer(text="panneau-general-us")
+    m_gen_old = Msg(embed=_eg)
+    m_gen_v2 = Msg(view=U._jb_general(None, "lola", 3))
+    m_gen_v2_0 = Msg(view=U._jb_general(None, "_"))
+    m_pan_v2 = Msg(view=U._jb_panel(None, "emma", 3))
+    _ep = discord.Embed(title="🔓 Emma")
+    _ep.set_footer(text="panneau-actions-us")
+    m_pan_old = Msg(embed=_ep)
+    m_menu = Msg(embed=discord.Embed(title="🔓 Menu Jailbreak US"))
+    m_autre = Msg(view=U._jb_general(None, "lola", 3), auteur=999)
+    check("reperage : ancien General (pied d'embed) reconnu", U._est_general(m_gen_old, MOI))
+    check("reperage : General V2 reconnu (message recu, composants Discord), attente et plein",
+          U._est_general(m_gen_v2, MOI) and U._est_general(m_gen_v2_0, MOI)
+          and U._est_general(m_gen_v2))
+    check("reperage : panneau (2 formats), menu, autre auteur : PAS le General",
+          not U._est_general(m_pan_v2, MOI) and not U._est_general(m_pan_old, MOI)
+          and not U._est_general(m_menu, MOI) and not U._est_general(m_autre, MOI))
+    check("reperage : le General V2 n'est ni le panneau d'actions ni le menu VA",
+          not U._est_panneau_actions(m_gen_v2, MOI) and not U._est_panneau_actions(m_gen_v2_0, MOI)
+          and not U._est_menu_va(m_gen_v2, MOI))
+    check("reperage : ne leve jamais (None, objet quelconque)",
+          U._est_general(None) is False and U._est_general(object()) is False)
+    check("conversion : kw = vider texte ET embed pour l'ancien General, rien pour le V2",
+          U._jb_kw_format(m_gen_old) == {"content": None, "embed": None} and U._jb_kw_format(m_gen_v2) == {})
+
+    # ===========================================================================
+    # 4. MOTIFS DYNAMIQUES ET REDEMARRAGE
+    # ===========================================================================
+
+
+    class BotF:
+        def __init__(self):
+            self.vues, self.dyn = [], []
+
+        def add_view(self, v, message_id=None):
+            self.vues.append(v)
+
+        def add_dynamic_items(self, *its):
+            self.dyn.extend(its)
+
+
+    _bot = BotF()
+    del JOURNAL.lignes[:]
+    run(U.UserCog.cog_load(types.SimpleNamespace(
+        bot=_bot, daily_menu=types.SimpleNamespace(is_running=lambda: True))))
+    check("cog_load : JBGenMenu enregistre avec les boutons du General, aucun echec au journal",
+          {U.JBGenMenu, U.JBGenButton, U.JBGenQtyBouton, U.JBGenReserveBouton} <= set(_bot.dyn)
+          and not [l for l in JOURNAL.lignes if "cog_load" in l[2]],
+          [l for l in JOURNAL.lignes if "cog_load" in l[2]])
+    _motifs = [(c.__name__, c.__discord_ui_compiled_template__) for c in _bot.dyn]
+    _persist = {it.custom_id for v in _bot.vues for it in v.walk_children()
+                if not isinstance(it, ui.DynamicItem) and getattr(it, "custom_id", None)}
+
+
+    def qui(cid):
+        if cid in _persist:
+            return ["vue"]
+        return [n for n, p in _motifs if p.fullmatch(cid)]
+
+
+    _neufs = []
+    for m_, q_ in (("lola", 1), ("duo", 3), ("six", 100), (_m40, 100)):
+        for res_ in (None, "brune", "r6"):
+            _neufs += [c for rr in rangees(U._jb_general(None, m_, q_, reserve=res_, guild=GUILD_IC)) for c in rr]
+    _mauvais = [(c, qui(c)) for c in _neufs if len(qui(c)) != 1]
+    check("motifs : chaque custom_id du General V2 est servi par UN element exactement",
+          not _mauvais and len(_neufs) > 100, _mauvais[:5])
+    check("motifs : les menus « jbg:s: » vont a JBGenMenu et a lui seul",
+          all(qui(c) == ["JBGenMenu"] for c in _neufs if c.startswith("jbg:s:"))
+          and any(c.startswith("jbg:s:") for c in _neufs))
+    _anciens = (["jbg:a:lola:blonde:%s:3" % k for k in sorted(_ANCIENNES_CLES)]
+                + ["jbg:qb:lola:blonde:3", "jbg:r:lola:blonde:3"]
+                + ["jbus:a:emma:%s:3" % a[0] for a in U._JB_ACTIONS_US]
+                + ["jbus:s:emma:%s:3" % f.cle for f in U._FAMILLES_PANNEAU]
+                + ["jbus:qb:emma:3", "jbus:q:emma:3", "jbus:m:emma"]
+                + ["jbus:f:emma:%s:3" % f.cle for f in U._FAMILLES_MENU])
+    _mauv2 = [(c, qui(c)) for c in _anciens if len(qui(c)) != 1]
+    check("motifs : tous les ANCIENS custom_id (jbg:a/qb/r, jbus:*) servis par UN element",
+          not _mauv2, _mauv2)
+    _tG = U.JBGenMenu.__discord_ui_compiled_template__
+    check("motifs : jbg:s: ne capture aucun ancien custom_id",
+          not any(_tG.fullmatch(c) for c in _anciens))
+
+
+    class EtatF:
+        """Etat minimal pour un vrai ViewStore de discord.py."""
+
+
+    async def _redemarrage(cid, valeur, message, ctype=3):
+        """Un clic sur un General DEJA poste, apres un redemarrage : un ViewStore
+        neuf, les motifs de cog_load, le vrai parcours de discord.py
+        (from_message -> from_custom_id -> callback)."""
+        from discord.ui.view import ViewStore
+        store = ViewStore(EtatF())
+        store.add_dynamic_items(*_bot.dyn)
+        itx = Itx(message=message, channel=message.ch)
+        itx.data = {"custom_id": cid, "component_type": ctype}
+        if valeur is not None:
+            itx.data["values"] = [valeur]
+        store.dispatch_view(ctype, cid, itx)
+        for _ in range(20):
+            await asyncio.sleep(0)
+        await attendre_fond()
+        return itx
+
+
+    def general_epingle(model="lola", qty=3, res=None, cid=5151, guild=None):
+        ch = Salon(cid)
+        m = Msg(ch, view=U._jb_general(None, model, qty, reserve=res, guild=guild))
+        m.pinned = True
+        ch.msgs.append(m)
+        U._jb_general_set(ch.id, m.id)
+        return ch, m
+
+
+    def remis(vue, n=4):
+        return (vue is not None and isinstance(vue, ui.LayoutView)
+                and all(not o.default for s_ in selects(vue) for o in s_.item.options)
+                and len(selects(vue)) == n)
+
+
+    U._JB_PANNEAU_COURANT.clear()
+    _chR, _mR = general_epingle("lola", 5)
+    COG.appels.clear()
+    COG.mode = "defer"
+    _iR = run(_redemarrage("jbg:s:lola:blonde:trash:5", _TRASH[1], _mR))
+    check("redemarrage : un menu du General deja poste repond, l'action part (reserve, brute de la model)",
+          COG.appels == [("blonde", U._jb_action(_TRASH[1])[2], 5, True, "lola")], COG.appels)
+    check("redemarrage : ... une seule reponse, le General redessine (menus sur leur intitule)",
+          _iR.response.doubles == 0 and len(_iR.response.faits) == 1 and _mR.edits
+          and remis(_mR.edits[-1]["view"]), (_iR.response.faits, len(_mR.edits)))
+    COG.appels.clear()
+    _iR2 = run(_redemarrage("jbg:s:lola:blonde:caption:5", "brutcaption", _mR))
+    check("redemarrage : une variante Brut forgee dans le menu Caption est REFUSEE",
+          not COG.appels and _iR2.response.faits and _iR2.response.faits[0][0] == "edit_message"
+          and "inconnue" in str(_iR2.followup.envois), (_iR2.response.faits, _iR2.followup.envois))
+    COG.appels.clear()
+    _iR3 = run(_redemarrage("jbg:a:lola:blonde:pp:5", None, _mR, ctype=2))
+    check("redemarrage : un bouton PP du General V2 repond (jbg:a:)",
+          COG.appels == [("blonde", "profilepic", 5, True, "lola")], COG.appels)
+
+    # ===========================================================================
+    # 5. CLIC DANS UN MENU DU GENERAL (callbacks simules)
+    # ===========================================================================
+
+
+    def choisir(menu, valeur, message, channel, mode="defer"):
+        COG.mode = mode
+        menu.item._values = [valeur]
+        itx = Itx(message=message, channel=channel, guild=GUILD_IC)
+        lancer(menu.callback(itx))
+        menu.item._values = []
+        return itx
+
+
+    U._JB_PANNEAU_COURANT.clear()
+    for fam in U._JB_GEN_FAMILLES:
+        for cle in fam.actions:
+            ch, m = general_epingle("duo", 4, res="brune", cid=77)
+            COG.appels.clear()
+            itx = choisir(U.JBGenMenu("duo", "brune", fam.cle, 4), cle, m, ch)
+            ent = U._jb_action(cle)
+            _v = m.edits[0]["view"] if m.edits else None
+            ok = (COG.appels == [("brune", ent[2], 4, bool(ent[3]), "duo")]
+                  and itx.response.doubles == 0 and len(itx.response.faits) == 1
+                  and len(m.edits) == 1 and remis(_v)
+                  and rangees(_v)[0] == ["jbg:r:duo:blonde:4", "jbg:r:duo:brune:4", "jbg:qb:duo:brune:4"])
+            if not ok:
+                check("menu %s / %s : action lancee comme le bouton, menu remis" % (fam.cle, cle), False,
+                      (COG.appels, itx.response.faits, len(m.edits)))
+                break
+        else:
+            check("menu %s : ses %d options lancent _run_for_model (reserve, brute de la model, quantite), "
+                  "une reponse, le General revient sur son intitule, reserve et quantite gardees"
+                  % (fam.cle, len(fam.actions)), True)
+
+    # Meme appel qu'un bouton d'avant (jbg:a:) pour la meme cle.
+    for cle in (U._JB_GEN_FAMILLES[0].actions + U._JB_GEN_FAMILLES[2].actions):
+        ch, m = general_epingle("lola", 3, cid=78)
+        COG.appels.clear()
+        COG.mode = "defer"
+        fam = [f for f in U._JB_GEN_FAMILLES if cle in f.actions][0]
+        choisir(U.JBGenMenu("lola", "blonde", fam.cle, 3), cle, m, ch)
+        itxB = Itx(message=m, channel=ch)
+        lancer(U.JBGenButton("lola", "blonde", cle, 3).callback(itxB))
+        if len(COG.appels) != 2 or COG.appels[0] != COG.appels[1]:
+            check("menu = bouton d'avant (%s)" % cle, False, COG.appels)
+            break
+    else:
+        check("menu et ancien bouton jbg:a: font EXACTEMENT le meme appel (caption, trash)", True)
+
+    # Reprendre la meme option : elle repart.
+    ch, m = general_epingle("lola", 3, cid=79)
+    COG.appels.clear()
+    _mn = U.JBGenMenu("lola", "blonde", "flash", 3)
+    choisir(_mn, _FLASH[0], m, ch)
+    choisir(_mn, _FLASH[0], m, ch)
+    check("meme option choisie deux fois : deux actions, deux remises", len(COG.appels) == 2
+          and len(m.edits) == 2, (COG.appels, len(m.edits)))
+
+    # La quantite du General est la sienne : un panneau a 7 ne bloque pas la remise.
+    ch, m = general_epingle("lola", 3, cid=80)
+    U._JB_PANNEAU_COURANT[80] = ("lola", 7)
+    choisir(U.JBGenMenu("lola", "blonde", "caption", 3), "reelcaption", m, ch)
+    check("panneau a une autre QUANTITE (meme model) : le General est bien remis",
+          len(m.edits) == 1 and remis(m.edits[0]["view"]), len(m.edits))
+    # Course : le panneau (donc le General) est passe sur une autre model.
+    ch, m = general_epingle("lola", 3, cid=81)
+    U._JB_PANNEAU_COURANT[81] = ("julia", 3)
+    COG.appels.clear()
+    itx = choisir(U.JBGenMenu("lola", "blonde", "caption", 3), "reelcaption", m, ch)
+    check("course : panneau deja passe sur Julia -> aucun redessin du General avec Lola",
+          not m.edits and COG.appels and COG.appels[-1][4] == "lola" and itx.response.doubles == 0,
+          len(m.edits))
+    U._JB_PANNEAU_COURANT.clear()
+
+    # Action muette : on repond EN redessinant.
+    ch, m = general_epingle("lola", 3, cid=82)
+    itx = choisir(U.JBGenMenu("lola", "blonde", "template", 3), "reelmonte", m, ch, mode="rien")
+    check("action muette : la reponse est l'edition du General (jamais « l'interaction a echoue »)",
+          itx.response.faits and itx.response.faits[0][0] == "edit_message" and itx.response.doubles == 0,
+          itx.response.faits)
+    # L'action leve.
+    ch, m = general_epingle("lola", 3, cid=83)
+    del JOURNAL.lignes[:]
+    itx = choisir(U.JBGenMenu("lola", "blonde", "caption", 3), "capbanger", m, ch, mode="leve")
+    check("action qui leve : une reponse, erreur DITE en ephemere et journalisee",
+          itx.response.doubles == 0 and len(itx.response.faits) == 1
+          and itx.followup.envois and "erreur" in itx.followup.envois[-1][0]
+          and itx.followup.envois[-1][1].get("ephemeral")
+          and any("en echec" in l[2] and "General" in l[2] for l in JOURNAL.lignes),
+          (itx.response.faits, itx.followup.envois))
+    # Reponses d'action variees (defer ephemere, thinking, message) sur le General du salon.
+    for mode in ("defer_eph", "thinking", "send_eph"):
+        ch, m = general_epingle("lola", 3, cid=84)
+        itx = choisir(U.JBGenMenu("lola", "blonde", "trash", 3), _TRASH[0], m, ch, mode=mode)
+        check("reponse de l'action « %s » : une seule reponse, General remis par le salon" % mode,
+              itx.response.doubles == 0 and len(itx.response.faits) == 1 and len(m.edits) == 1
+              and remis(m.edits[0]["view"]), (itx.response.faits, len(m.edits)))
+    # Edition du salon refusee : repli par l'interaction.
+    ch, m = general_epingle("lola", 3, cid=85)
+    _vraie_edit = m.edit
+    _n_ed = {"n": 0}
+
+
+    async def _edit_une_fois_refusee(**k):
+        _n_ed["n"] += 1
+        if _n_ed["n"] == 1:
+            m.edits.append(k)
+            raise http_exc(status=500, texte="panne")
+        return await _vraie_edit(**k)
+    m.edit = _edit_une_fois_refusee
+    itx = choisir(U.JBGenMenu("lola", "blonde", "flash", 3), _FLASH[1], m, ch)
+    check("redessin du salon refuse : repli par l'interaction (@original apres defer), une reponse",
+          itx.orig_edits and itx.response.doubles == 0 and remis(itx.orig_edits[-1]["view"]),
+          (itx.orig_edits, itx.response.faits))
+
+    # Course AVEC le redessin de fond en panne (reproduit le 26/09/2026) : le
+    # repli de remise a zero (_menu_lancer) passe APRES l'action, avec la vue
+    # construite au choix. Le VA ayant pris la reserve Brune pendant le rendu,
+    # il remettait le General sur Blonde. interaction.message est une PHOTO
+    # prise au clic (Photo), et interaction.data porte le custom_id du menu,
+    # comme chez Discord : c'est lui que le correctif cherche dans le message
+    # relu. Photo et CogCourse servent aussi a la partie 6 (conversion).
+    class Photo:
+        def __init__(self, vrai, echecs=0):
+            self.vrai = vrai
+            self.id = vrai.id
+            self.ch = vrai.ch
+            self.embeds = list(vrai.embeds)
+            self.content = vrai.content
+            self.components = list(vrai.components)
+            self.author = vrai.author
+            self.pinned = vrai.pinned
+            self.flags = types.SimpleNamespace(ephemeral=vrai.flags.ephemeral,
+                                               components_v2=vrai.flags.components_v2)
+            #: editions refusees (500) avant de passer : le redessin de fond.
+            self.echecs = echecs
+
+        async def edit(self, **k):
+            if self.echecs:
+                self.echecs -= 1
+                raise http_exc(status=500, texte="panne simulee")
+            return await self.vrai.edit(**k)
+
+        async def delete(self):
+            return await self.vrai.delete()
+
+
+    class CogCourse(Cog):
+        """_run_for_model qui joue `pendant()` au milieu du « rendu », une
+        fois le redessin de fond passe (et rate)."""
+
+        def __init__(self, pendant):
+            super().__init__()
+            self.pendant = pendant
+
+        async def _run_for_model(self, interaction, model, cmd, count=None,
+                                 supports_count=False, brute_de=None):
+            self.appels.append((model, count, brute_de))
+            await interaction.response.defer()
+            for _ in range(5):
+                await asyncio.sleep(0)
+            if self.pendant is not None:
+                await self.pendant()
+            await interaction.followup.send("contenu")
+
+
+    def itx_course(m, ch, pendant=None, echecs=0):
+        itx = Itx(message=Photo(m, echecs=echecs), channel=ch, guild=GUILD_IC)
+        cog = CogCourse(pendant)
+        itx.client = types.SimpleNamespace(get_cog=lambda n: cog if n == "UserCog" else None,
+                                           user=types.SimpleNamespace(id=MOI))
+        return itx, cog
+
+
+    def titre(m):
+        return texte(m.view).splitlines()[0] if m.view is not None and not m.embeds else ""
+
+
+    ch, m = general_epingle("duo", 3, res="blonde", cid=88)
+    U._JB_PANNEAU_COURANT[88] = ("duo", 3)
+
+
+    async def _vers_brune():
+        await U.JBGenReserveBouton("duo", "brune", 3).callback(
+            Itx(message=Photo(m), channel=ch, guild=GUILD_IC))
+    _mnC = U.JBGenMenu("duo", "blonde", "trash", 3)
+    _mnC.item._values = [_TRASH[0]]
+    itx, _cg = itx_course(m, ch, _vers_brune, echecs=1)
+    itx.data = {"custom_id": _mnC.item.custom_id, "component_type": 3, "values": [_TRASH[0]]}
+    del JOURNAL.lignes[:]
+    lancer(_mnC.callback(itx))
+    check("course : reserve passee sur Brune pendant le rendu + redessin de fond en panne -> "
+          "le General RESTE sur Brune, rien par @original, une reponse, journalise",
+          _cg.appels == [("blonde", 3, "duo")] and itx.message.echecs == 0
+          and titre(m) == "## ✨ General — Brune pour Duo" and not itx.orig_edits
+          and len(itx.response.faits) == 1 and itx.response.doubles == 0
+          and any("deja redessine" in l[2] for l in JOURNAL.lignes),
+          (titre(m), itx.orig_edits, itx.response.faits))
+    # Meme panne SANS course : le repli remet bien le General (une relecture).
+    ch, m = general_epingle("duo", 3, res="blonde", cid=89)
+    U._JB_PANNEAU_COURANT[89] = ("duo", 3)
+    itx, _cg = itx_course(m, ch, None, echecs=1)
+    itx.data = {"custom_id": _mnC.item.custom_id, "component_type": 3, "values": [_TRASH[0]]}
+    ch.fetchs = 0
+    lancer(_mnC.callback(itx))
+    check("redessin de fond en panne, sans course : General remis par @original (1 relecture, 1 reponse)",
+          len(itx.orig_edits) == 1 and remis(itx.orig_edits[0]["view"]) and ch.fetchs == 1
+          and titre(m) == "## ✨ General — Blonde pour Duo" and len(itx.response.faits) == 1,
+          (itx.orig_edits, ch.fetchs, itx.response.faits))
+    _mnC.item._values = []
+    U._JB_PANNEAU_COURANT.clear()
+    # General EPHEMERE (theorique) : vue arretee, redessin par l'interaction.
+    eph = Msg(view=U._vue_sans_suivi(U._jb_general(None, "lola", 3)), ephemere=True)
+    for mode, attendu in (("defer", "orig"), ("send_eph", "followup"), ("rien", "reponse")):
+        eph.edits.clear()
+        itx = choisir(U.JBGenMenu("lola", "blonde", "template", 3), "templatebanger", eph, Salon(86), mode=mode)
+        chemin = ("orig" if itx.orig_edits else "followup" if itx.followup.edits
+                  else "reponse" if itx.response.faits and itx.response.faits[0][0] == "edit_message" else "?")
+        v_ = eph.edits[-1].get("view") if eph.edits else None
+        check("ephemere (%s) : menu remis par %s, une seule reponse, vue arretee" % (mode, attendu),
+              chemin == attendu and itx.response.doubles == 0 and remis(v_) and v_.is_finished(),
+              (chemin, itx.response.faits, len(eph.edits)))
+
+    # Refus : rien ne part, le menu revient, la raison est dite.
+    ch, m = general_epingle("lola", 3, cid=87)
+
+
+    def refus_avec(nom, preparer, menu, valeur, attendu, restaurer=None, n_menus=4):
+        COG.appels.clear()
+        preparer()
+        try:
+            itx = choisir(menu, valeur, m, ch)
+        finally:
+            if restaurer:
+                restaurer()
+        rep = itx.response.faits
+        _vr = rep[0][2].get("view") if rep else None
+        check("refus %s : rien ne part, le General revient, le VA lit pourquoi" % nom,
+              not COG.appels and rep and rep[0][0] == "edit_message" and remis(_vr, n_menus)
+              and itx.followup.envois and attendu in str(itx.followup.envois[0][0])
+              and itx.followup.envois[0][1].get("ephemeral") and itx.response.doubles == 0,
+              (COG.appels, rep[:1], itx.followup.envois))
+
+
+    refus_avec("role", lambda: setattr(U, "_jb_can_use", lambda i: False),
+               U.JBGenMenu("lola", "blonde", "caption", 3), "capbanger", "Réservé",
+               restaurer=lambda: setattr(U, "_jb_can_use", lambda i: True))
+    del JOURNAL.lignes[:]
+    refus_avec("variante Brut (brutcaption) hors liste blanche du General", lambda: None,
+               U.JBGenMenu("lola", "blonde", "caption", 3), "brutcaption", "inconnue")
+    check("refus hors liste blanche : journalise", any("refuse" in l[2] and "brutcaption" in l[2]
+                                                     for l in JOURNAL.lignes))
+    refus_avec("valeur d'une autre famille", lambda: None,
+               U.JBGenMenu("lola", "blonde", "caption", 3), _FLASH[0], "inconnue")
+    refus_avec("Brut du panneau (brutchoix)", lambda: None,
+               U.JBGenMenu("lola", "blonde", "template", 3), "brutchoix", "inconnue")
+    refus_avec("famille inconnue", lambda: None,
+               U.JBGenMenu("lola", "blonde", "brut", 3), "brute", "indisponible")
+    refus_avec("model devenue reserve", lambda: setattr(U, "_refus_reserve_jb", lambda i: "⛔ reserve"),
+               U.JBGenMenu("lola", "blonde", "caption", 3), "capbanger", "⛔ reserve",
+               restaurer=lambda: setattr(U, "_refus_reserve_jb", lambda i: ""))
+    refus_avec("reserve deliee depuis", lambda: LIENS.__setitem__("lola", (["brune"], [("blonde", "deliee")])),
+               U.JBGenMenu("lola", "blonde", "caption", 3), "capbanger", "n'est plus liée",
+               restaurer=lambda: LIENS.__setitem__("lola", (["blonde"], [])))
+    refus_avec("liens illisibles", lambda: setattr(TI, "reserves_liees",
+                                                   lambda mm: (_ for _ in ()).throw(RuntimeError("x"))),
+               U.JBGenMenu("lola", "blonde", "caption", 3), "capbanger", "illisibles",
+               restaurer=lambda: setattr(TI, "reserves_liees", _liens), n_menus=0)
+    refus_avec("model sans brute (Trash)", lambda: BRUTES.__setitem__("lola", []),
+               U.JBGenMenu("lola", "blonde", "trash", 3), _TRASH[1], "aucune vidéo brute",
+               restaurer=lambda: BRUTES.pop("lola", None))
+    _attr = U._jb_action("capbanger")[2]
+    _sauv_attr = Cog.__dict__.get(_attr)
+    refus_avec("action absente du cog", lambda: delattr(Cog, _attr),
+               U.JBGenMenu("lola", "blonde", "caption", 3), "capbanger", "indisponible",
+               restaurer=lambda: setattr(Cog, _attr, _sauv_attr))
+    # Template (reelmonte) sans brute : AUTORISE (un brouillon sans coupe n'en a pas besoin).
+    BRUTES["lola"] = []
+    COG.appels.clear()
+    choisir(U.JBGenMenu("lola", "blonde", "template", 3), "reelmonte", m, ch)
+    BRUTES.pop("lola", None)
+    check("Template sans brute : part quand meme (hors _JB_GEN_BRUTE, comme le bouton)",
+          COG.appels and COG.appels[-1][1] == "reelmonte", COG.appels)
+    # Le meme refus « sans brute » que le bouton, mot pour mot.
+    BRUTES["lola"] = []
+    itxb = Itx(message=m, channel=ch)
+    lancer(U.JBGenButton("lola", "blonde", _TRASH[0], 3).callback(itxb))
+    itxm = choisir(U.JBGenMenu("lola", "blonde", "trash", 3), _TRASH[0], m, ch)
+    BRUTES.pop("lola", None)
+    check("refus « sans brute » : le menu dit EXACTEMENT ce que dit le bouton",
+          itxb.response.faits[0][1][0] == itxm.followup.envois[0][0],
+          (itxb.response.faits[0][1], itxm.followup.envois))
+
+    # ===========================================================================
+    # 6. ANCIENS BOUTONS (jbg:a/qb/r) ET CONVERSION DE L'ANCIEN GENERAL
+    # ===========================================================================
+
+
+    def ancien_general(model="lola", res="blonde", qty=3, cid=90):
+        """Un General tel que e5a5f53 le postait : un embed + une vue classique."""
+        ch = Salon(cid)
+        e = discord.Embed(title="✨ General — %s pour %s" % (res.capitalize(), model.capitalize()))
+        e.set_footer(text="panneau-general-us")
+        v = ui.View(timeout=None)
+        v.add_item(U.JBGenQtyBouton(model, res, qty))
+        # Les rangees d'AVANT (e5a5f53) : boutons, captions, templates, marques.
+        _rg = {**{k: 1 for k in U._JB_GEN_BOUTONS}, "reelcaption": 2, "capbanger": 2,
+               "reelmonte": 3, "templatebanger": 3, _TRASH[0]: 4, _TRASH[1]: 4,
+               _FLASH[0]: 4, _FLASH[1]: 4}
+        for k in sorted(_ANCIENNES_CLES):
+            v.add_item(U.JBGenButton(model, res, k, qty, row=_rg[k]))
+        m = Msg(ch, embed=e, view=v)
+        m.pinned = True
+        ch.msgs.append(m)
+        U._jb_general_set(ch.id, m.id)
+        return ch, m
+
+
+    # a) action d'un ancien bouton (reelcaption) : repond, PUIS convertit le message.
+    ch, m = ancien_general(cid=91)
+    COG.appels.clear()
+    COG.mode = "defer"
+    itx = Itx(message=m, channel=ch)
+    lancer(U.JBGenButton("lola", "blonde", "reelcaption", 3).callback(itx))
+    k = m.edits[-1] if m.edits else {}
+    check("ancien bouton jbg:a:reelcaption : l'action part (reserve, brute de la model)",
+          COG.appels == [("blonde", "reelcaption", 3, True, "lola")], COG.appels)
+    check("... puis l'ancien General est CONVERTI par edition (content=None, embed=None, vue V2), une reponse",
+          k.get("content", "x") is None and k.get("embed", "x") is None
+          and isinstance(k.get("view"), ui.LayoutView) and m.flags.components_v2 and not m.embeds
+          and U._est_general(m, MOI) and len(ch.msgs) == 1 and itx.response.doubles == 0
+          and len(selects(m.view)) == 4, k)
+    # b) un bouton jbg:a: sur un General deja V2 : pas de nouvelle edition.
+    m.edits.clear()
+    itx = Itx(message=m, channel=ch)
+    lancer(U.JBGenButton("lola", "blonde", "pp", 3).callback(itx))
+    check("bouton PP sur un General V2 : l'action part, aucune edition (rien a convertir)",
+          COG.appels[-1][1] == "profilepic" and not m.edits, m.edits)
+    # c) conversion refusee : nouveau General V2, epingle, memorise, ancien retire.
+    ch, m = ancien_general(cid=92)
+    m.echec_edit = http_exc(texte="Cannot convert")
+    _pan_avant = dict(U._jb_panel_ids())
+    del JOURNAL.lignes[:]
+    itx = Itx(message=m, channel=ch)
+    lancer(U.JBGenButton("lola", "blonde", _FLASH[1], 3).callback(itx))
+    nouv = [x for x in ch.msgs if x is not m]
+    check("ancien bouton, conversion refusee : nouveau General V2 epingle, ancien retire, id memorise "
+          "(fichier du GENERAL, pas celui du panneau), journalise",
+          m.supprime and len(nouv) == 1 and nouv[0].pinned and U._est_general(nouv[0], MOI)
+          and not nouv[0].embeds and U._jb_general_ids().get("92") == str(nouv[0].id)
+          and U._jb_panel_ids() == _pan_avant and COG.appels[-1][1] == U._jb_action(_FLASH[1])[2]
+          and any("conversion refusee" in l[2] for l in JOURNAL.lignes) and itx.response.doubles == 0,
+          (m.supprime, len(nouv), U._jb_general_ids().get("92")))
+    # d) ancien bouton refuse (role) : message ephemere, pas de conversion.
+    ch, m = ancien_general(cid=93)
+    U._jb_can_use = lambda i: False
+    itx = Itx(message=m, channel=ch)
+    COG.appels.clear()
+    lancer(U.JBGenButton("lola", "blonde", "reelcaption", 3).callback(itx))
+    U._jb_can_use = lambda i: True
+    check("ancien bouton, role refuse : ephemere « Réservé », rien ne part, message intact",
+          itx.response.faits[0][0] == "send_message" and "Réservé" in itx.response.faits[0][1][0]
+          and itx.response.faits[0][2].get("ephemeral") and not COG.appels and not m.edits)
+    # e) ancienne cle hors liste blanche (forgee) : refusee comme avant.
+    itx = Itx(message=m, channel=ch)
+    lancer(U.JBGenButton("lola", "blonde", "brute", 3).callback(itx))
+    check("bouton jbg:a: a cle forgee (brute) : refuse « absente du ✨ General »",
+          "absente du ✨ General" in itx.response.faits[0][1][0] and not m.edits)
+    # f) choix de reserve (jbg:r:) sur un ancien General : repond EN convertissant.
+    ch = Salon(94)
+    e = discord.Embed(title="✨ General — Blonde pour Duo")
+    e.set_footer(text="panneau-general-us")
+    m = Msg(ch, embed=e, view=None)
+    m.pinned = True
+    ch.msgs.append(m)
+    U._jb_general_set(ch.id, m.id)
+    itx = Itx(message=m, channel=ch)
+    lancer(U.JBGenReserveBouton("duo", "brune", 3).callback(itx))
+    f = itx.response.faits
+    check("ancien jbg:r: : une reponse (edition) qui CONVERTIT, la reserve choisie devient active",
+          f and f[0][0] == "edit_message" and f[0][2].get("content", "x") is None
+          and f[0][2].get("embed", "x") is None and m.flags.components_v2 and not m.embeds
+          and rangees(m.view)[0] == ["jbg:r:duo:blonde:3", "jbg:r:duo:brune:3", "jbg:qb:duo:brune:3"]
+          and itx.response.doubles == 0, f)
+    # g) jbg:r: sur un General V2 : edition de la vue seule.
+    itx = Itx(message=m, channel=ch)
+    lancer(U.JBGenReserveBouton("duo", "blonde", 3).callback(itx))
+    check("jbg:r: sur un General V2 : edition de la vue SEULE (rien a vider)",
+          set(itx.response.faits[0][2]) == {"view"} and rangees(m.view)[0][-1] == "jbg:qb:duo:blonde:3")
+    # h) jbg:r: conversion refusee : defer, nouveau General, id memorise.
+    ch = Salon(95)
+    m = Msg(ch, embed=e, view=None)
+    m.pinned = True
+    ch.msgs.append(m)
+    U._jb_general_set(ch.id, m.id)
+    itx = Itx(message=m, channel=ch)
+    itx.response.echec_edit = http_exc(texte="refus conversion")
+    del JOURNAL.lignes[:]
+    lancer(U.JBGenReserveBouton("duo", "brune", 3).callback(itx))
+    nouv = [x for x in ch.msgs if x is not m]
+    check("jbg:r: conversion refusee : defer, nouveau General V2 (brune) epingle, memorise, ancien retire",
+          itx.response.faits and itx.response.faits[0][0] == "defer" and m.supprime and len(nouv) == 1
+          and nouv[0].pinned and rangees(nouv[0].view)[0][-1] == "jbg:qb:duo:brune:3"
+          and U._jb_general_ids().get("95") == str(nouv[0].id)
+          and any("General" in l[2] and "edition refusee" in l[2] for l in JOURNAL.lignes),
+          (itx.response.faits, m.supprime, len(nouv)))
+
+
+    async def soumettre(itx_clic, q, message, echec=None):
+        modal = itx_clic.response.modal
+        itx_m = Itx(message=message, channel=message.ch, guild=GUILD_IC)
+        if echec is not None:
+            itx_m.response.echec_edit = echec
+        modal.nombre._value = str(q)
+        await modal.on_submit(itx_m)
+        await attendre_fond()
+        return itx_m
+
+
+    # i) quantite (jbg:qb:) sur un ancien General : fenetre, puis conversion a 7.
+    ch, m = ancien_general("duo", "brune", 3, cid=96)
+    itx = Itx(message=m, channel=ch, guild=GUILD_IC)
+    run(U.JBGenQtyBouton("duo", "brune", 3).callback(itx))
+    itm = run(soumettre(itx, 7, m))
+    k = itm.response.faits[0][2] if itm.response.faits else {}
+    check("ancien jbg:qb: : fenetre, puis General V2 a 7 par edition (conversion), reserve gardee",
+          itx.response.faits[0][0] == "send_modal" and itm.response.faits[0][0] == "edit_message"
+          and k.get("content", "x") is None and k.get("embed", "x") is None
+          and rangees(m.view)[0][-1] == "jbg:qb:duo:brune:7"
+          and "jbg:s:duo:brune:flash:7" in [c for rr in rangees(m.view) for c in rr], itm.response.faits)
+    # j) jbg:qb: conversion refusee : repost.
+    ch, m = ancien_general("duo", "brune", 3, cid=97)
+    itx = Itx(message=m, channel=ch, guild=GUILD_IC)
+    run(U.JBGenQtyBouton("duo", "brune", 3).callback(itx))
+    itm = lancer(soumettre(itx, 4, m, echec=http_exc(texte="refus")))
+    nouv = [x for x in ch.msgs if x is not m]
+    check("jbg:qb: conversion refusee : defer, nouveau General V2 (4) epingle, memorise, ancien retire",
+          itm.response.faits[0][0] == "defer" and m.supprime and len(nouv) == 1
+          and rangees(nouv[0].view)[0][-1] == "jbg:qb:duo:brune:4"
+          and U._jb_general_ids().get("97") == str(nouv[0].id), itm.response.faits)
+    # k) quantite / reserve : role refuse.
+    U._jb_can_use = lambda i: False
+    itx = Itx(message=m, channel=ch)
+    run(U.JBGenQtyBouton("duo", "brune", 3).callback(itx))
+    itx2 = Itx(message=m, channel=ch)
+    run(U.JBGenReserveBouton("duo", "brune", 3).callback(itx2))
+    U._jb_can_use = lambda i: True
+    check("jbg:qb: et jbg:r: : role refuse -> ephemere, rien d'edite",
+          itx.response.faits[0][0] == "send_message" and itx2.response.faits[0][0] == "send_message")
+
+    # l) COURSE PENDANT L'ACTION D'UN ANCIEN BOUTON (reproduit le 26/09/2026).
+    # JBGenButton attend tout le rendu (jusqu'a 30 s) PUIS convertit l'ancien
+    # General. interaction.message est une PHOTO prise au clic : ses drapeaux
+    # disent « ancien format » pour toujours. Pendant le rendu, le VA clique
+    # Julia : _jb_general_maj convertit le General pour Julia (Brune). La
+    # conversion d'apres la photo le remettait ensuite sur « Blonde pour
+    # Lola » -- ses menus servant Blonde sur une brute de Lola pendant que le
+    # VA travaille Julia. Les tests d'avant ne le voyaient pas : leur Msg est
+    # le message du salon lui-meme, ses drapeaux passent a V2 des la
+    # premiere edition.
+    LIENS["julia"] = (["brune"], [])
+    _cliC = types.SimpleNamespace(get_cog=lambda n: COG if n == "UserCog" else None,
+                                  user=types.SimpleNamespace(id=MOI))
+    ch, m = ancien_general(cid=9101)
+    U._JB_PANNEAU_COURANT[9101] = ("lola", 3)
+    _majC = {}
+
+
+    async def _clic_julia():
+        # Ce que fait JBModelButton : noter le panneau, puis suivre le General.
+        U._jb_panneau_noter(9101, "julia", 3)
+        _majC["ok"] = await U._jb_general_maj(_cliC, ch, "julia", GUILD_IC)
+        _majC["titre"] = titre(m)
+    itx, _cg = itx_course(m, ch, _clic_julia)
+    del JOURNAL.lignes[:]
+    lancer(U.JBGenButton("lola", "blonde", "reelcaption", 3).callback(itx))
+    _idsC = [c for r_ in rangees(m.view) for c in r_] if m.view is not None else []
+    check("course (ancien bouton) : Julia cliquee pendant le rendu -> le General RESTE « Brune pour "
+          "Julia » (pas de retour a Lola), un seul General, journalise",
+          _cg.appels == [("blonde", 3, "lola")] and _majC.get("ok") is True
+          and _majC.get("titre") == "## ✨ General — Brune pour Julia"
+          and titre(m) == "## ✨ General — Brune pour Julia"
+          and "jbg:s:julia:brune:caption:3" in _idsC and not any(":lola:" in c for c in _idsC)
+          and ch.msgs == [m] and itx.response.doubles == 0
+          and any("deja converti" in l[2] for l in JOURNAL.lignes),
+          (_majC, titre(m), _idsC[:3]))
+    # Meme course, c'est la RESERVE que le VA change pendant le rendu.
+    ch, m = ancien_general("duo", "blonde", 3, cid=9102)
+    U._JB_PANNEAU_COURANT[9102] = ("duo", 3)
+
+
+    async def _clic_brune():
+        await U.JBGenReserveBouton("duo", "brune", 3).callback(
+            Itx(message=Photo(m), channel=ch, guild=GUILD_IC))
+    itx, _cg = itx_course(m, ch, _clic_brune)
+    lancer(U.JBGenButton("duo", "blonde", "capbanger", 3).callback(itx))
+    check("course (ancien bouton) : reserve Brune choisie pendant le rendu -> elle reste affichee",
+          titre(m) == "## ✨ General — Brune pour Duo" and ch.msgs == [m], titre(m))
+    # Sans course, la photo « ancien format » convertit toujours (une relecture).
+    ch, m = ancien_general(cid=9103)
+    U._JB_PANNEAU_COURANT[9103] = ("lola", 3)
+    itx, _cg = itx_course(m, ch)
+    ch.fetchs = 0
+    lancer(U.JBGenButton("lola", "blonde", "reelcaption", 3).callback(itx))
+    check("sans course : l'ancien General est converti (Blonde pour Lola, V2), une seule relecture",
+          m.flags.components_v2 and not m.embeds and titre(m) == "## ✨ General — Blonde pour Lola"
+          and ch.fetchs == 1 and ch.msgs == [m], (titre(m), ch.fetchs))
+    # General deja V2 au clic : aucune relecture (pas d'appel de plus).
+    ch.fetchs = 0
+    m.edits.clear()
+    itx, _cg = itx_course(m, ch)
+    lancer(U.JBGenButton("lola", "blonde", "pp", 3).callback(itx))
+    check("General deja V2 au clic : aucune relecture, aucune edition",
+          ch.fetchs == 0 and not m.edits, (ch.fetchs, m.edits))
+    # Panneau deja passe sur Julia, General encore ancien (sa mise a jour est
+    # en cours, ou a echoue) : pas de conversion pour Lola, journalise.
+    ch, m = ancien_general(cid=9104)
+    U._JB_PANNEAU_COURANT[9104] = ("julia", 3)
+    itx, _cg = itx_course(m, ch)
+    del JOURNAL.lignes[:]
+    lancer(U.JBGenButton("lola", "blonde", "reelcaption", 3).callback(itx))
+    check("panneau deja sur Julia : l'ancien General de Lola n'est PAS converti, journalise",
+          not m.edits and m.embeds and ch.msgs == [m]
+          and any("passe sur julia" in l[2] for l in JOURNAL.lignes), (m.edits, ch.msgs))
+    # Le General supprime pendant le rendu : rien d'edite, rien de repose, dit.
+    ch, m = ancien_general(cid=9105)
+    U._JB_PANNEAU_COURANT[9105] = ("lola", 3)
+
+
+    async def _supprime():
+        await m.delete()
+    itx, _cg = itx_course(m, ch, _supprime)
+    del JOURNAL.lignes[:]
+    lancer(U.JBGenButton("lola", "blonde", "reelcaption", 3).callback(itx))
+    check("General supprime pendant le rendu : pas de conversion ni de repli, journalise",
+          not ch.msgs and not [e for e in m.edits if "view" in e] and itx.response.doubles == 0
+          and any("disparu" in l[2] for l in JOURNAL.lignes), (ch.msgs, m.edits))
+    LIENS.pop("julia", None)
+    U._JB_PANNEAU_COURANT.clear()
+
+    # ===========================================================================
+    # 7. _jb_general_maj (clic sur une model) : edition, conversion, repli
+    # ===========================================================================
+    _cliV = types.SimpleNamespace(get_cog=lambda n: COG if n == "UserCog" else None,
+                                  user=types.SimpleNamespace(id=MOI))
+
+
+    def salon_avec(*msgs, cid):
+        ch = Salon(cid)
+        for x in msgs:
+            x.ch = ch
+            x.pinned = True
+            ch.msgs.append(x)
+        return ch
+
+
+    def old_gen():
+        e = discord.Embed(title="✨ General — Blonde pour Duo")
+        e.set_footer(text="panneau-general-us")
+        return Msg(embed=e)
+
+
+    # a) memo -> ancien General : conversion par edition (meme message).
+    g = old_gen()
+    ch = salon_avec(g, cid=101)
+    U._jb_general_set(ch.id, g.id)
+    ok = run(U._jb_general_maj(_cliV, ch, "lola", None))
+    check("maj, memo = ancien General : CONVERTI par edition (meme message, id garde)",
+          ok and len(ch.msgs) == 1 and g.flags.components_v2 and not g.embeds
+          and g.edits[-1].get("content", "x") is None and g.edits[-1].get("embed", "x") is None
+          and "Blonde pour Lola" in texte(g.view) and U._jb_general_ids().get("101") == str(g.id),
+          g.edits)
+    # b) memo -> General V2 : une seule edition, vue seule, aucune relecture.
+    g.edits.clear()
+    ch.fetchs = 0
+    ok = run(U._jb_general_maj(_cliV, ch, "duo", None))
+    check("maj, memo = General V2 : UNE edition (vue seule), aucune relecture ni epingles",
+          ok and len(g.edits) == 1 and set(g.edits[0]) == {"view"} and ch.fetchs == 0
+          and ch.lectures_epingles == 0 and "Blonde pour Duo" in texte(g.view), g.edits)
+    # c) memo -> General V2, edition refusee (panne) : False, pas de doublon, journalise.
+    g.echec_edit = http_exc(status=500, texte="panne")
+    del JOURNAL.lignes[:]
+    ok = run(U._jb_general_maj(_cliV, ch, "lola", None))
+    g.echec_edit = None
+    check("maj, General V2 refuse (panne) : False, AUCUN second General, journalise",
+          ok is False and len(ch.msgs) == 1 and any("edition refusee" in l[2] for l in JOURNAL.lignes))
+    # d) memo -> ancien General, conversion refusee : nouveau General V2.
+    g = old_gen()
+    g.echec_edit = http_exc(texte="Cannot convert")
+    ch = salon_avec(g, cid=102)
+    U._jb_general_set(ch.id, g.id)
+    del JOURNAL.lignes[:]
+    ok = run(U._jb_general_maj(_cliV, ch, "lola", None))
+    nouv = [x for x in ch.msgs if x is not g]
+    check("maj, conversion refusee (memo) : nouveau General V2 epingle, memorise, ancien retire, journalise",
+          ok and g.supprime and len(nouv) == 1 and nouv[0].pinned and U._est_general(nouv[0], MOI)
+          and U._jb_general_ids().get("102") == str(nouv[0].id)
+          and any("conversion refusee" in l[2] for l in JOURNAL.lignes), (ok, g.supprime, len(nouv)))
+    # e) pas de memo, ancien General dans les epingles : converti ; V2 : edite.
+    for fmt in ("ancien", "v2"):
+        g = old_gen() if fmt == "ancien" else Msg(view=U._jb_general(None, "duo", 3))
+        ch = salon_avec(g, cid=103 if fmt == "ancien" else 104)
+        ok = run(U._jb_general_maj(_cliV, ch, "lola", None))
+        check("maj, sans memo, General %s retrouve dans les epingles : edite%s, pas de doublon, memorise" % (
+            fmt, " ET converti" if fmt == "ancien" else " (vue seule)"),
+              ok and len(ch.msgs) == 1 and g.flags.components_v2 and "Blonde pour Lola" in texte(g.view)
+              and (set(g.edits[-1]) == ({"view", "content", "embed"} if fmt == "ancien" else {"view"}))
+              and U._jb_general_ids().get(str(ch.id)) == str(g.id), g.edits)
+    # f) pas de memo, ancien General dans les epingles, conversion refusee : repost.
+    g = old_gen()
+    g.echec_edit = http_exc(texte="Cannot convert")
+    ch = salon_avec(g, cid=105)
+    ok = run(U._jb_general_maj(_cliV, ch, "lola", None))
+    nouv = [x for x in ch.msgs if x is not g]
+    check("maj, conversion refusee (epingles) : nouveau General V2, memorise, ancien retire",
+          ok and g.supprime and len(nouv) == 1 and U._jb_general_ids().get("105") == str(nouv[0].id))
+    # g) aucun General : pose en V2, epingle, memorise.
+    ch = Salon(106)
+    ok = run(U._jb_general_maj(_cliV, ch, "lola", None))
+    check("maj, aucun General : un General V2 pose, epingle, memorise",
+          ok and len(ch.msgs) == 1 and ch.msgs[0].pinned and U._est_general(ch.msgs[0], MOI)
+          and not ch.msgs[0].embeds and U._jb_general_ids().get("106") == str(ch.msgs[0].id))
+    # h) memo sur un AUTRE message : on cherche le General, l'autre n'est pas touche.
+    autre = Msg(embed=discord.Embed(title="🔓 Menu Jailbreak US"))
+    g = old_gen()
+    ch = salon_avec(autre, g, cid=107)
+    U._jb_general_set(ch.id, autre.id)
+    autre.echec_edit = http_exc(texte="pas a toi")
+    ok = run(U._jb_general_maj(_cliV, ch, "lola", None))
+    check("maj, memo perime sur un autre message : le General est retrouve et converti, l'autre intact",
+          ok and g.flags.components_v2 and autre.embeds and autre.embeds[0].title.startswith("🔓 Menu")
+          and U._jb_general_ids().get("107") == str(g.id))
+    # i) reposter=True : TOUS les Generals (2 formats) partent, un V2 est pose dessous.
+    g1, g2 = old_gen(), Msg(view=U._jb_general(None, "duo", 3))
+    ch = salon_avec(g1, g2, cid=108)
+    U._jb_general_set(ch.id, g1.id)
+    ok = run(U._jb_general_maj(_cliV, ch, "lola", None, reposter=True))
+    check("maj reposter : ancien ET V2 retires, un seul General V2 pose et memorise",
+          ok and g1.supprime and g2.supprime and len(ch.msgs) == 1 and U._est_general(ch.msgs[0], MOI)
+          and U._jb_general_ids().get("108") == str(ch.msgs[0].id))
+    # j) etat « aucune reserve » : les boutons de la model precedente disparaissent.
+    g = Msg(view=U._jb_general(None, "duo", 3))
+    ch = salon_avec(g, cid=109)
+    U._jb_general_set(ch.id, g.id)
+    ok = run(U._jb_general_maj(_cliV, ch, "nue", None))
+    check("maj vers une model sans reserve : texte seul, plus AUCUN bouton de la model precedente",
+          ok and not [c for rr in rangees(g.view) for c in rr] and "aucune réserve" in texte(g.view)
+          and not g.components[0].children[1:] if g.components else False,
+          rangees(g.view))
+
+    # ===========================================================================
+    # 8. CLIC SUR UNE MODEL (JBModelButton) : le vrai _jb_general_maj
+    # ===========================================================================
+    GF.is_us_guild = lambda g: True
+    ch = Salon(110)
+    pan = Msg(ch, view=U._jb_panel(None, "emma", 3))
+    pan.pinned = True
+    g = old_gen()
+    g.ch = ch
+    g.pinned = True
+    ch.msgs += [pan, g]
+    U._jb_panel_set(ch.id, pan.id)
+    U._jb_general_set(ch.id, g.id)
+    itx = Itx(message=Msg(), channel=ch, guild=GUILD_IC)
+    lancer(U.JBModelButton("duo").callback(itx))
+    check("clic sur une model : panneau V2 edite, ANCIEN General converti en V2 pour cette model, "
+          "une reponse, ordre panneau puis General garde",
+          itx.response.doubles == 0 and itx.response.faits[0][0] == "defer"
+          and "Duo" in texte(pan.view) and g.flags.components_v2 and not g.embeds
+          and "Blonde pour Duo" in texte(g.view) and ch.msgs == [pan, g], (itx.response.faits, g.view and texte(g.view)))
+
+    # ===========================================================================
+    # 9. WELCOME : _ensure_us_menu, _ensure_us_general, reset, _delete_old_menus
+    # ===========================================================================
+
+
+    class UCogW:
+        def jailbreak_us_menu(self, marche):
+            return discord.Embed(title="🔓 Menu Jailbreak US"), None
+
+        async def jailbreak_us_menu_async(self, guild, marche):
+            return self.jailbreak_us_menu(marche)
+
+
+    _botW = types.SimpleNamespace(user=Auteur(MOI), get_cog=lambda n: UCogW() if n == "UserCog" else None)
+
+
+    def ordre(ch):
+        out = ""
+        for x in ch.msgs:
+            if U._est_panneau_actions(x, MOI):
+                out += "P" if x.flags.components_v2 else "p"
+            elif U._est_general(x, MOI):
+                out += "G" if x.flags.components_v2 else "g"
+            elif x.embeds and "Jailbreak" in (x.embeds[0].title or ""):
+                out += "M"
+            else:
+                out += "?"
+        return out
+
+
+    chW = Salon(4343)
+    etat = {}
+    ok = run(W.reset_us_menu(_botW, chW, etat=etat))
+    check("reset_us_menu (/resetmenus) : menu, panneau V2, General V2 (attente), dans cet ordre",
+          ok and ordre(chW) == "MPG" and etat.get("general") is True and not chW.msgs[2].embeds
+          and chW.msgs[2].pinned and "choisis une model" in texte(chW.msgs[2].view)
+          and not interactifs(chW.msgs[2].view), (ordre(chW), etat))
+    etat = {}
+    ok = run(W._ensure_us_menu(_botW, chW, etat=etat))
+    check("_ensure_us_menu : General V2 reconnu, rien de pose en double",
+          ok and ordre(chW) == "MPG" and etat.get("general") is True, (ordre(chW), etat))
+    ok = run(W._ensure_us_general(_botW, chW, apres=chW.msgs[1]))
+    check("_ensure_us_general : General V2 reconnu (pas de second), id memorise",
+          ok is True and ordre(chW) == "MPG" and U._jb_general_ids().get(str(chW.id)) == str(chW.msgs[2].id))
+    # Ancien General (embed) : reconnu aussi, garde tel quel (converti au 1er clic).
+    chA = Salon(4344)
+    mA = Msg(chA, embed=discord.Embed(title="🔓 Menu Jailbreak US"))
+    pA = Msg(chA, view=U._jb_panel(None, "_", 3))
+    gA = old_gen()
+    gA.ch = chA
+    for x in (mA, pA, gA):
+        x.pinned = True
+    chA.msgs += [mA, pA, gA]
+    etat = {}
+    ok = run(W._ensure_us_menu(_botW, chA, etat=etat))
+    check("_ensure_us_menu : ANCIEN General reconnu, garde, rien d'autre pose",
+          ok and ordre(chA) == "MPg" and etat.get("general") is True and not gA.supprime, ordre(chA))
+    # Doublons (ancien + V2) et General V2 AU-DESSUS du panneau.
+    chD = Salon(4345)
+    mD = Msg(chD, embed=discord.Embed(title="🔓 Menu Jailbreak US"))
+    gHaut = Msg(chD, view=U._jb_general(None, "lola", 3))      # au-dessus du panneau
+    pD = Msg(chD, view=U._jb_panel(None, "_", 3))
+    gOld = old_gen()
+    gOld.ch = chD
+    gV2 = Msg(chD, view=U._jb_general(None, "_"))
+    for x in (mD, gHaut, pD, gOld, gV2):
+        x.pinned = True
+    chD.msgs += [mD, gHaut, pD, gOld, gV2]
+    ok = run(W._ensure_us_general(_botW, chD, apres=pD))
+    check("_ensure_us_general : General V2 au-dessus du panneau et doublon ancien RETIRES, le plus recent garde",
+          ok and gHaut.supprime and gOld.supprime and not gV2.supprime and ordre(chD) == "MPG"
+          and U._jb_general_ids().get(str(chD.id)) == str(gV2.id), ordre(chD))
+    # Menu a reposer : le General V2 existant part avec le reste, un neuf est pose dessous.
+    chJ = Salon(4346)
+    pJ = Msg(chJ, view=U._jb_panel(None, "emma", 3))
+    gJ = Msg(chJ, view=U._jb_general(None, "lola", 3))
+    for x in (pJ, gJ):
+        x.pinned = True
+    chJ.msgs += [pJ, gJ]
+    ok = run(W._ensure_us_menu(_botW, chJ))
+    check("_ensure_us_menu : menu absent -> panneau et General V2 (reconnus) refaits dans l'ordre",
+          ok and pJ.supprime and gJ.supprime and ordre(chJ) == "MPG", ordre(chJ))
+    # Pas le serveur US : pas de General.
+    GF.is_us_guild = lambda g: False
+    chN = Salon(4347)
+    ok = run(W._ensure_us_general(_botW, chN))
+    check("_ensure_us_general hors serveur US : rien de pose", ok is False and not chN.msgs)
+    GF.is_us_guild = lambda g: True
+    # _delete_old_menus (salons VA) : ne touche jamais au General, dans aucun format.
+    chX = Salon(4400, "va-test")
+    gX1 = Msg(chX, view=U._jb_general(None, "menuxx", 3))   # texte avec « menu » (nom de model)
+    gX2 = Msg(chX, embed=_eg)
+    gX3 = Msg(chX, view=U._jb_general(None, "_"))
+    mX = Msg(chX, embed=discord.Embed(title="☀️ Ton menu"))
+    chX.msgs += [gX1, gX2, gX3, mX]
+    _cogD = types.SimpleNamespace(bot=types.SimpleNamespace(user=Auteur(MOI)))
+    run(U.UserCog._delete_old_menus(_cogD, chX))
+    check("_delete_old_menus : le vieux menu part, les General (V2, ancien, attente) restent",
+          mX.supprime and not gX1.supprime and not gX2.supprime and not gX3.supprime)
+
+    # ===========================================================================
+    # 10. LE PANNEAU D'ACTIONS N'A PAS BOUGE (mecanique partagee)
+    # ===========================================================================
+    vP = U._jb_panel(None, "emma", 3)
+    check("panneau d'actions : meme disposition qu'en production (22 composants, 5 menus)",
+          vP.total_children_count == 22 and len(selects(vP)) == 5
+          and texte(vP).splitlines()[-1] == "-# panneau-actions-us")
+    # Remise du panneau : la garde (model, quantite) est intacte.
+    chP = Salon(120)
+    mP = Msg(chP, view=U._jb_panel(None, "emma", 3))
+    mP.pinned = True
+    chP.msgs.append(mP)
+    U._jb_panel_set(chP.id, mP.id)
+    U._JB_PANNEAU_COURANT[120] = ("emma", 7)
+    _itxG = Itx(message=mP, channel=chP)
+    run(U._jb_remettre_epingle(_itxG, "emma", 3, U._jb_panel(None, "emma", 3)))
+    _n_qte = len(mP.edits)
+    run(U._jb_remettre_epingle(_itxG, "emma", None, U._jb_panel(None, "emma", 3), quoi="General"))
+    _n_none = len(mP.edits)
+    U._JB_PANNEAU_COURANT[120] = ("julia", 3)
+    run(U._jb_remettre_epingle(_itxG, "emma", None, U._jb_panel(None, "emma", 3), quoi="General"))
+    _n_autre = len(mP.edits)
+    U._JB_PANNEAU_COURANT.clear()
+    run(U._jb_remettre_epingle(_itxG, "emma", 3, U._jb_panel(None, "emma", 3)))
+    check("_jb_remettre_epingle : quantite differente -> pas de remise (panneau, garde d'avant) ; "
+          "qty=None (General) -> remise ; autre model -> pas de remise ; etat inconnu -> remise",
+          (_n_qte, _n_none, _n_autre, len(mP.edits)) == (0, 1, 1, 2),
+          (_n_qte, _n_none, _n_autre, len(mP.edits)))
+    chP2 = Salon(121)
+    mP2 = Msg(chP2, embed=_ep)
+    mP2.pinned = True
+    mP2.echec_edit = http_exc(texte="Cannot convert")
+    chP2.msgs.append(mP2)
+    U._jb_panel_set(chP2.id, mP2.id)
+    _gen_appels = []
+
+
+    async def _gen_f(client, chan, model, guild, reposter=False):
+        _gen_appels.append((model, reposter))
+        return True
+    U._jb_general_maj = _gen_f
+    del JOURNAL.lignes[:]
+    itx = Itx(message=Msg(), channel=chP2, guild=GUILD_IC)
+    lancer(U.JBModelButton("julia").callback(itx))
+    U._jb_general_maj = VRAI["gen"]
+    nouvP = [x for x in chP2.msgs if x is not mP2]
+    check("panneau d'actions : repli commun (_jb_message_reposer) -> nouveau panneau memorise dans "
+          "us_panels.json, General reposte",
+          mP2.supprime and len(nouvP) == 1 and U._jb_panel_ids().get("121") == nouvP[0].id
+          and _gen_appels == [("julia", True)]
+          and any("panneau US" in l[2] and "edition refusee" in l[2] for l in JOURNAL.lignes),
+          (_gen_appels, len(nouvP)))
+
+    import shutil
+    shutil.rmtree(TMP, ignore_errors=True)
+
+
+
+import importlib as _v2imp
+import logging as _v2log
+import os as _v2os
+import traceback as _v2tb
+
+#: Toute ouverture EN ECRITURE, tout renommage ou effacement sous le VRAI
+#: data/ pendant ces trois parties est note. Un crochet d'audit ne se retire
+#: pas : il ne fait rien hors de la section.
+_V2_AUDIT = {"actif": False, "data": _v2os.path.realpath("data"), "ecrits": []}
+
+
+def _v2_audit(ev, args):
+    if not _V2_AUDIT["actif"]:
+        return
+    try:
+        chemins = []
+        if ev == "open":
+            mode, flags = args[1], args[2]
+            if (mode and any(c in str(mode) for c in "wax+")) or (
+                    isinstance(flags, int)
+                    and flags & (_v2os.O_WRONLY | _v2os.O_RDWR | _v2os.O_CREAT)):
+                chemins = [args[0]]
+        elif ev in ("os.rename", "os.replace", "os.remove", "os.unlink",
+                    "os.mkdir", "shutil.rmtree"):
+            chemins = list(args[:2])
+        data = _V2_AUDIT["data"]
+        for p in chemins:
+            if isinstance(p, (str, bytes, _v2os.PathLike)):
+                rp = _v2os.path.realpath(_v2os.fsdecode(p))
+                if rp == data or rp.startswith(data + _v2os.sep):
+                    _V2_AUDIT["ecrits"].append((ev, rp))
+    except Exception:
+        pass
+
+
+sys.addaudithook(_v2_audit)
+
+#: Les modules que les trois parties modifient (fonctions remplacees, chemins
+#: detournes) : remis a l'identique apres chacune, meme si elle leve. La
+#: partie E remplace aussi la lecture des liens model -> reserves
+#: (type_identite) et celle des brutes (brutes_off).
+_V2_MODULES = [_v2imp.import_module(n) for n in (
+    "cogs.user", "cogs.welcome", "cogs.menutest", "guild_features", "marques_montage",
+    "type_identite", "brutes_off")]
+_v2_u = _V2_MODULES[0]
+for _nomV2, _fV2 in (("panneau", _v2_bloc_panneau), ("menu VA", _v2_bloc_menu_va),
+                     ("General", _v2_bloc_general)):
+    _savV2 = {m: dict(vars(m)) for m in _V2_MODULES}
+    # Etats en memoire modifies SUR PLACE (pas remplaces) par les clics simules.
+    _savEtatsV2 = {k: dict(getattr(_v2_u, k)) for k in (
+        "_JB_PANNEAU_COURANT", "_JB_SOUS_MENUS", "_DERNIER_PANNEAU_JB", "_MENU_BTN_FEATURE")}
+    _savActV2 = list(_v2_u._JB_ACTIONS_US)
+    _racineV2 = _v2log.getLogger()
+    _savLogV2 = (list(_racineV2.handlers), _racineV2.level)
+    _V2_AUDIT["actif"] = True
+    try:
+        _fV2()
+    except Exception as _eV2:
+        check("v2 %s : testable" % _nomV2, False,
+              repr(_eV2)[:200] + " " + _v2tb.format_exc()[-700:])
+    finally:
+        _V2_AUDIT["actif"] = False
+        for _mV2, _dV2 in _savV2.items():
+            for _kV2 in [k for k in vars(_mV2) if k not in _dV2]:
+                delattr(_mV2, _kV2)
+            for _kV2, _valV2 in _dV2.items():
+                if vars(_mV2).get(_kV2, _savV2) is not _valV2:
+                    setattr(_mV2, _kV2, _valV2)
+        for _kV2, _dV2 in _savEtatsV2.items():
+            getattr(_v2_u, _kV2).clear()
+            getattr(_v2_u, _kV2).update(_dV2)
+        _v2_u._JB_ACTIONS_US[:] = _savActV2
+        _racineV2.handlers[:] = _savLogV2[0]
+        _racineV2.setLevel(_savLogV2[1])
+check("v2 : aucune ecriture dans data/ pendant les trois parties",
+      not _V2_AUDIT["ecrits"], str(_V2_AUDIT["ecrits"][:5]))
 
 if FAILS:
     print("ECHECS :")

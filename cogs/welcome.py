@@ -782,9 +782,10 @@ async def _ensure_us_menu(bot, channel, etat=None):
         # inverse a l'ecran -> on repart de zero pour les deux, et le General
         # suit (voir _a_refaire).
         _menu = _panneau = _general = None
-        from cogs.user import _est_panneau_actions
+        from cogs.user import _est_panneau_actions, _est_general
+        _moi = getattr(bot.user, "id", 0)
         for p in pins:
-            if p.author.id != getattr(bot.user, "id", 0):
+            if p.author.id != _moi:
                 continue
             # Le panneau d'actions AVANT le test des embeds : en V2 il n'en a
             # plus (sa marque est une ligne de son texte). L'ignorer ici, c'est
@@ -794,19 +795,20 @@ async def _ensure_us_menu(bot, channel, etat=None):
                 if _panneau is None:
                     _panneau = p
                 continue
+            # Le General non plus n'a plus d'embed en V2 : reconnu sous ses
+            # DEUX formats (sa marque, jamais son titre), et AVANT le titre
+            # du menu -- le menu est reconnu a « Jailbreak » dans son titre ;
+            # si un jour le titre d'un ancien General contenait ce mot, il
+            # serait pris pour le menu et le vrai menu ne serait plus jamais
+            # repose.
+            if _est_general(p, _moi):
+                if _general is None:
+                    _general = p
+                continue
             if not p.embeds:
                 continue
             _t = p.embeds[0].title or ""
-            _f = p.embeds[0].footer.text or ""
-            # Le General se reconnait a son FOOTER, et on le teste AVANT le
-            # titre : le menu, lui, est reconnu a « Jailbreak » dans son
-            # titre. Si un jour le titre du General contenait ce mot, il
-            # serait pris pour le menu et le vrai menu ne serait plus jamais
-            # repose.
-            if _f == FOOTER_GENERAL:
-                if _general is None:
-                    _general = p
-            elif "Jailbreak" in _t and _menu is None:
+            if "Jailbreak" in _t and _menu is None:
                 _menu = p
         if _menu is not None and (_panneau is None or _panneau.id > _menu.id):
             # Deja en place, dans le bon ordre. C'est le cas de TOUS les
@@ -1050,12 +1052,10 @@ async def _ensure_us_panel(bot, channel):
         return False
 
 
-#: Footer du 3e message epingle, « ✨ General ». Meme chaine que dans
-#: cogs/user.py (_jb_general), mot pour mot : c'est elle, et JAMAIS le titre,
-#: qui designe ce message. Les titres sont deja pris -- « Jailbreak » designe
-#: le menu (_ensure_us_menu), « menu » fait supprimer le message
-#: (_delete_old_menus).
-FOOTER_GENERAL = "panneau-general-us"
+# (FOOTER_GENERAL a disparu : ce fichier recopiait la marque du ✨ General
+#  et la cherchait dans le seul pied d'embed. Le General V2 n'a plus d'embed :
+#  la copie ne le voyait plus. Le reperage vit en un seul endroit,
+#  cogs/user.py _est_general, qui connait les deux formats.)
 
 
 def _id_message(x):
@@ -1112,7 +1112,8 @@ async def _ensure_us_general(bot, channel, apres=None, epingles=None):
         ucog = bot.get_cog("UserCog")
         if ucog is None:
             return False
-        from cogs.user import _jb_general, _jb_general_set, _jb_general_ids
+        from cogs.user import (_jb_general, _jb_general_set, _jb_general_ids,
+                               _est_general as _est_general_us)
         _moi = getattr(bot.user, "id", 0)
         _seuil = _id_message(apres)
         if epingles is None:
@@ -1124,9 +1125,9 @@ async def _ensure_us_general(bot, channel, apres=None, epingles=None):
                 epingles = []
 
         def _est_general(m):
-            return (m is not None and getattr(m.author, "id", None) == _moi
-                    and m.embeds
-                    and (m.embeds[0].footer.text or "") == FOOTER_GENERAL)
+            # Les DEUX formats (ancien embed, V2) : un General V2 rate ici en
+            # faisait poser un second a cote du premier.
+            return _est_general_us(m, _moi)
 
         generaux = {m.id: m for m in epingles if _est_general(m)}
         # Un General dont l'epinglage a echoue (plafond de 50 epingles) n'est
@@ -1159,11 +1160,11 @@ async def _ensure_us_general(bot, channel, apres=None, epingles=None):
         if garde is not None:
             _jb_general_set(channel.id, garde.id)
             return True                        # deja en place, au bon endroit
-        emb, view = _jb_general(ucog, "_", guild=channel.guild)
-        # view vaut None a l'etat d'attente : aucun bouton tant qu'aucune
-        # model n'est choisie.
-        msg = await (channel.send(embed=emb, view=view) if view is not None
-                     else channel.send(embed=emb))
+        # Format « Components V2 » : une vue, sans embed ni texte a cote. A
+        # l'etat d'attente elle n'a que son texte : aucun bouton tant
+        # qu'aucune model n'est choisie.
+        vue = _jb_general(ucog, "_", guild=channel.guild)
+        msg = await channel.send(view=vue)
         _jb_general_set(channel.id, msg.id)
         try:
             await msg.pin()
