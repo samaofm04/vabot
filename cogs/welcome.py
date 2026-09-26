@@ -642,9 +642,20 @@ def _us_norm(nm):
 PREFIXES_SALONS_SERVICE = ("all-",)
 
 
+def nom_sans_decor(nom) -> str:
+    """Le nom normalise, sans ce qu'on ajoute DEVANT a la main (emoji, « ・ »).
+
+    Le proprietaire a renomme « all-download » en « ⬇️・all-download » : plus
+    rien ne le reconnaissait. Les copies des telechargements ne partaient plus
+    (« aucun salon all-download », journal du 26/09), /ticketsall l'aurait pris
+    pour le salon d'un VA parti -- et supprime avec l'archive."""
+    import re as _re
+    return _re.sub(r"^[^a-z0-9_-]+", "", _us_norm(nom))
+
+
 def salon_de_service(nom) -> bool:
     """Vrai pour un salon de service (« all-download »…), jamais un ticket."""
-    return _us_norm(nom).startswith(PREFIXES_SALONS_SERVICE)
+    return nom_sans_decor(nom).startswith(PREFIXES_SALONS_SERVICE)
 
 
 _US_CONFUSABLES = str.maketrans({

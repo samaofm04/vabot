@@ -3,15 +3,21 @@
 
 OU CA VIT
     Chaque VA a un salon <pseudo>-download (cree par /ticketsall, voir
-    cogs/welcome.py) qui porte DEUX panneaux permanents :
+    cogs/welcome.py) qui porte UN panneau, que des boutons :
 
-        « Telechargement - le compte »    Changer de compte. Le compte actif
-                                          (au plus N publications, 30 par
-                                          defaut, 200 au plus) est affiche.
-        « Telechargement - les options »  Tout, Photo de profil, Bio,
-                                          Posts photo, Reels, Top reels.
+        👤 @compte · N            changer de compte (N publications au plus,
+                                  30 par defaut, 200 au plus)
+        Tout · Photo de profil · Bio
+        Posts photo · Reels · Top reels
 
-    /menudownload les repose a la main dans un salon.
+    Demande du proprietaire (26/09/2026) : « juste les boutons », « un seul
+    pour tout ». Il y avait deux panneaux a texte, EPINGLES : chaque pose
+    laissait des notices « X a epingle un message » -- 159 dans 46 salons.
+    Plus d'epingle : le salon ne porte que ce message.
+
+    Le salon se remet au propre tout seul (remettre_au_propre) au demarrage
+    du bot puis chaque jour : anciens panneaux et notices partent, le
+    panneau actuel est repose. /menudownload le fait a la main.
 
 OU PARTENT LES FICHIERS
     Dans <pseudo>-content : le salon -download ne porte que les panneaux, y
@@ -158,9 +164,10 @@ def charger_choix(chemin=None) -> dict:
 # ─────────────────────────────────────────────────────────── salons ──
 
 def _norm(nom) -> str:
+    # sans l'emoji ajoute devant (« ⬇️・all-download ») : voir nom_sans_decor
     try:
-        from cogs.welcome import _us_norm
-        return _us_norm(nom)
+        from cogs.welcome import nom_sans_decor
+        return nom_sans_decor(nom)
     except Exception:
         return str(nom or "").strip().lower()
 
@@ -178,7 +185,7 @@ def salon_reserve(canal) -> bool:
 def salon_de_livraison(canal):
     """Ou les fichiers atterrissent : le salon -content du meme VA.
 
-    Le salon -download ne porte que les deux panneaux ; y deverser des dizaines
+    Le salon -download ne porte que le panneau ; y deverser des dizaines
     de fichiers les repousserait hors de vue. Le contenu genere vit deja dans
     -content, les telechargements l y rejoignent.
 
@@ -356,11 +363,12 @@ class Telechargement(commands.Cog):
         C est la convention de tous les autres cogs du bot : voir numeros.py,
         clickrecap.py, cta_reminder.py, onboarding.py.
         """
-        for vue in (PanneauCompte(self), PanneauOptions(self)):
-            try:
-                self.bot.add_view(vue)
-            except Exception as exc:
-                print(f"[telechargement] add_view echoue : {exc}")
+        # Un seul panneau : ses custom_id (dl:compte, dl:tout...) sont ceux des
+        # deux anciens, qui restent donc cliquables jusqu'a leur remplacement.
+        try:
+            self.bot.add_view(PanneauTelechargement(self))
+        except Exception as exc:
+            print(f"[telechargement] add_view echoue : {exc}")
         try:
             if _ANCIEN_COOKIE.exists():
                 _ANCIEN_COOKIE.unlink()
@@ -373,12 +381,38 @@ class Telechargement(commands.Cog):
                 self._purge_quotidienne.start()
         except Exception as exc:
             print(f"[telechargement] purge quotidienne non lancee : {exc}")
+        try:
+            if not self._entretien.is_running():
+                self._entretien.start()
+        except Exception as exc:
+            print(f"[telechargement] entretien des salons non lance : {exc}")
 
     async def cog_unload(self):
+        for t in (self._purge_quotidienne, self._entretien):
+            try:
+                t.cancel()
+            except Exception:
+                pass
+
+    @tasks.loop(hours=24)
+    async def _entretien(self):
+        """Au demarrage puis chaque jour : chaque salon -download ne porte que
+        le panneau actuel. /menudownload n'a jamais ete synchronise (commande
+        de serveur, et la liste globale est pleine) : sans ceci, personne ne
+        pouvait remettre les salons au propre."""
+        guilde = self.bot.get_guild(SERVEUR_ID) if hasattr(self.bot, "get_guild") else None
+        if guilde is None:
+            return
         try:
-            self._purge_quotidienne.cancel()
-        except Exception:
-            pass
+            n = await remettre_au_propre(self, guilde)
+            if n:
+                print(f"[telechargement] {n} salon(s) -download remis au propre")
+        except Exception as exc:
+            print(f"[telechargement] entretien des salons : {type(exc).__name__}: {exc}")
+
+    @_entretien.before_loop
+    async def _avant_entretien(self):
+        await self.bot.wait_until_ready()
 
     @tasks.loop(hours=24)
     async def _purge_quotidienne(self):
@@ -648,12 +682,9 @@ class Telechargement(commands.Cog):
     @app_commands.default_permissions(manage_messages=True)
     @app_commands.command(
         name="menudownload",
-        description="Poser les deux panneaux de telechargement dans ce salon")
-    @app_commands.describe(
-        epingler="true = epingle les panneaux pour qu'ils restent en haut du salon")
-    async def menudownload(self, interaction: discord.Interaction,
-                           epingler: bool = True):
-        """Pose les deux panneaux (le compte, les options) a la demande.
+        description="Remettre le panneau de telechargement dans ce salon")
+    async def menudownload(self, interaction: discord.Interaction):
+        """Pose le panneau a la demande (le salon -download est vide d'abord).
 
         Il y en avait DEUX definitions : la seconde, seule retenue par Python,
         construisait une classe `Panneau` qui n'existait plus -- la commande
@@ -666,16 +697,16 @@ class Telechargement(commands.Cog):
                 f"#{getattr(canal, 'name', '?')} est un salon de service (archive) : "
                 f"pas de panneaux ici.", ephemeral=True)
             return
-        # On repond D'ABORD : vider l'ancien panneau et epingler prend
+        # On repond D'ABORD : vider l'ancien panneau prend
         # plusieurs secondes.
         await interaction.response.defer(ephemeral=True, thinking=True)
         # Le menage des messages du bot ne se fait que dans un salon -download :
         # ailleurs (un -content), il effacerait le contenu deja livre.
         nettoyer = _norm(getattr(canal, "name", "")).endswith("-download")
-        n = await poser_panneaux(self, canal, epingler=epingler, nettoyer=nettoyer)
+        n = await poser_panneaux(self, canal, nettoyer=nettoyer)
         await interaction.followup.send(
-            f"{n} panneau(x) pose(s)." if n else
-            "Impossible de poser les panneaux ici (droits du bot ?).",
+            "Panneau posé." if n else
+            "Impossible de poser le panneau ici (droits du bot ?).",
             ephemeral=True)
 
 
@@ -694,36 +725,15 @@ def _corps(idx: int, post: dict, par_vues: bool) -> str:
     return entete + ((chr(10) + legende[:1800]) if legende else "")
 
 
-#: Titres des deux panneaux. Ils servent aussi de marqueurs : c'est a eux que
-#: poser_panneaux reconnait un ancien panneau a retirer.
-TITRE_COMPTE = "Telechargement - le compte"
-TITRE_OPTIONS = "Telechargement - les options"
+#: Titres des deux ANCIENS panneaux (avant le 26/09/2026) : c'est a eux que
+#: poser_panneaux reconnait ce qu'il faut retirer quand il ne peut pas vider.
+TITRES_ANCIENS = ("Telechargement - le compte", "Telechargement - les options")
 
 
-def _embed_compte(username: str = "", combien: int = 30):
-    """L embed du premier panneau, avec ou sans compte actif."""
-    if username:
-        return discord.Embed(
-            title=TITRE_COMPTE,
-            description=f"Compte actif : **@{username}**  (au plus {combien})"
-                        + chr(10) + "Clique pour en changer.",
-            color=discord.Color.blurple())
-    return discord.Embed(
-        title=TITRE_COMPTE,
-        description="Clique et entre le pseudo du compte a descendre."
-                    + chr(10) + "Il reste retenu jusqu a ce que tu en changes.",
-        color=discord.Color.blurple())
-
-
-def _embed_options():
-    return discord.Embed(
-        title=TITRE_OPTIONS,
-        description="Choisis ce que tu veux de ce compte."
-                    + chr(10) + chr(10)
-                    + "Ordre d'envoi : photo de profil, bio, posts, puis reels."
-                    + chr(10) + "Chaque fichier part des qu'il est pret."
-                    + chr(10) + "Deja telecharge : renvoye sans credit.",
-        color=discord.Color.green())
+def _libelle_compte(username: str = "", combien: int = 30) -> str:
+    """Le premier bouton affiche le compte actif : c'est tout le texte du
+    panneau. Un salon -download n'a qu'un VA, l'afficher ne revele rien."""
+    return f"👤 @{username} · {combien}" if username else "👤 Choisir un compte"
 
 
 class ModalCompte(discord.ui.Modal, title="Quel compte ?"):
@@ -781,40 +791,62 @@ class ModalCompte(discord.ui.Modal, title="Quel compte ?"):
         await inter.response.send_message(
             f"Compte actif : **@{username}** (au plus {n}).", ephemeral=True)
         try:
-            await inter.message.edit(
-                embed=_embed_compte(username, n),
-                view=PanneauCompte(self.cog))
+            await inter.message.edit(view=PanneauTelechargement(self.cog, username, n))
         except Exception:
             pass
 
 
-class PanneauCompte(discord.ui.View):
-    """Premier panneau : QUI. Il ne fait que retenir."""
+#: Les boutons du panneau, rangee par rangee : (cle, libelle, style).
+_RANGEES_OPTIONS = (
+    (("tout", "Tout", discord.ButtonStyle.success),
+     ("pp", "Photo de profil", discord.ButtonStyle.primary),
+     ("bio", "Bio", discord.ButtonStyle.primary)),
+    (("photos", "Posts photo", discord.ButtonStyle.primary),
+     ("reels", "Reels", discord.ButtonStyle.primary),
+     ("top", "Top reels", discord.ButtonStyle.secondary)),
+)
 
-    def __init__(self, cog: "Telechargement"):
+
+class PanneauTelechargement(discord.ui.LayoutView):
+    """LE panneau du salon -download : un message, que des boutons.
+
+    « Components V2 » (LayoutView) : un message sans texte ni embed n'existe
+    qu'ainsi. Persistant (custom_id fixes, timeout None) : il marche apres un
+    redemarrage. Le compte retenu l'est PAR PERSONNE (cog.choix), jamais dans
+    la vue."""
+
+    def __init__(self, cog: "Telechargement", username: str = "", combien: int = 30):
         super().__init__(timeout=None)
         self.cog = cog
+        ui = discord.ui
+        compte = ui.Button(label=_libelle_compte(username, combien),
+                           style=discord.ButtonStyle.primary, custom_id="dl:compte")
+        compte.callback = self._compte
+        rangee = ui.ActionRow()
+        rangee.add_item(compte)
+        self.add_item(rangee)
+        for options in _RANGEES_OPTIONS:
+            rangee = ui.ActionRow()
+            for cle, libelle, style in options:
+                b = ui.Button(label=libelle, style=style, custom_id="dl:" + cle)
+                b.callback = self._rappel(cle)
+                rangee.add_item(b)
+            self.add_item(rangee)
 
-    @discord.ui.button(label="Changer de compte", style=discord.ButtonStyle.primary,
-                       custom_id="dl:compte")
-    async def b_compte(self, inter, _):
+    def _rappel(self, quoi):
+        async def _clic(inter):
+            await self._lancer(inter, quoi)
+        return _clic
+
+    async def _compte(self, inter):
         await inter.response.send_modal(ModalCompte(self.cog))
-
-
-class PanneauOptions(discord.ui.View):
-    """Second panneau : QUOI. Il lit le compte retenu pour CETTE personne."""
-
-    def __init__(self, cog: "Telechargement"):
-        super().__init__(timeout=None)
-        self.cog = cog
 
     async def _lancer(self, inter, quoi):
         court, long_ = OPTIONS[quoi]
         garde = self.cog.choix.get(inter.user.id)
         if not garde:
             await inter.response.send_message(
-                "Entre d'abord un compte dans le panneau du dessus.",
-                ephemeral=True)
+                "Choisis d'abord un compte (bouton 👤).", ephemeral=True)
             return
         username, n = garde
         occupe = self.cog.reserver(inter.user.id, username)
@@ -837,104 +869,113 @@ class PanneauOptions(discord.ui.View):
         finally:
             self.cog.liberer(inter.user.id, username)
 
-    @discord.ui.button(label="Tout", style=discord.ButtonStyle.success,
-                       custom_id="dl:tout", row=0)
-    async def b_tout(self, inter, _):
-        await self._lancer(inter, "tout")
 
-    @discord.ui.button(label="Photo de profil", style=discord.ButtonStyle.primary,
-                       custom_id="dl:pp", row=0)
-    async def b_pp(self, inter, _):
-        await self._lancer(inter, "pp")
-
-    @discord.ui.button(label="Bio", style=discord.ButtonStyle.primary,
-                       custom_id="dl:bio", row=0)
-    async def b_bio(self, inter, _):
-        await self._lancer(inter, "bio")
-
-    @discord.ui.button(label="Posts photo", style=discord.ButtonStyle.primary,
-                       custom_id="dl:photos", row=1)
-    async def b_photos(self, inter, _):
-        await self._lancer(inter, "photos")
-
-    @discord.ui.button(label="Reels", style=discord.ButtonStyle.primary,
-                       custom_id="dl:reels", row=1)
-    async def b_reels(self, inter, _):
-        await self._lancer(inter, "reels")
-
-    @discord.ui.button(label="Top reels", style=discord.ButtonStyle.secondary,
-                       custom_id="dl:top", row=1)
-    async def b_top(self, inter, _):
-        await self._lancer(inter, "top")
+def _compte_du_salon(cog, canal):
+    """(pseudo, combien) retenu par le VA a qui est ce salon, ou ("", 30).
+    Le VA est le membre (pas un role, pas un bot) qui a un droit propre sur
+    le salon ; s'il y en a plusieurs, on n'affiche rien plutot qu'au hasard."""
+    try:
+        membres = [c for c in (getattr(canal, "overwrites", None) or {})
+                   if hasattr(c, "bot") and not c.bot]
+    except Exception:
+        membres = []
+    comptes = [cog.choix[m.id] for m in membres if m.id in cog.choix]
+    return comptes[0] if len(comptes) == 1 else ("", 30)
 
 
-async def poser_panneaux(cog, canal, epingler: bool = True, nettoyer: bool = True):
-    """Pose les DEUX panneaux dans un salon. Rend le nombre de messages poses.
+def _custom_ids(message) -> set:
+    """Les custom_id des boutons d'un message, rangees imbriquees comprises."""
+    out, pile = set(), list(getattr(message, "components", None) or [])
+    while pile:
+        c = pile.pop()
+        cid = getattr(c, "custom_id", None)
+        if cid:
+            out.add(cid)
+        pile += list(getattr(c, "children", None) or [])
+    return out
 
-    Les anciens panneaux du bot sont retires d'abord : un message Discord est
-    fige, donc une evolution du menu laisse sinon un panneau perime a cote du
-    neuf, et personne ne sait lequel fait foi.
+
+def panneau_a_jour(message, moi: int) -> bool:
+    """Le panneau actuel : du bot, sans embed, avec tous les boutons."""
+    return (getattr(getattr(message, "author", None), "id", None) == moi
+            and not getattr(message, "embeds", None)
+            and {"dl:compte", "dl:tout", "dl:top"} <= _custom_ids(message))
+
+
+async def poser_panneaux(cog, canal, nettoyer: bool = True) -> int:
+    """Pose LE panneau dans un salon. Rend 1 s'il est pose, 0 sinon.
+
+    Dans un salon -download, tout ce que le bot y a poste part d'abord :
+    anciens panneaux, notices d'epinglage (elles portent le nom du bot),
+    comptes rendus d'un ancien telechargement. Le salon ne doit porter que le
+    panneau. Les messages des humains ne sont jamais touches.
 
     Jamais dans un salon de service : « all-download » est l'archive du
-    proprietaire, et le menage ci-dessous commence par vider les messages du
-    bot -- c'est-a-dire l'archive elle-meme.
+    proprietaire, et le menage commence par vider les messages du bot --
+    c'est-a-dire l'archive elle-meme.
     """
     if salon_reserve(canal):
         print(f"[telechargement] {getattr(canal, 'name', '?')} est un salon de "
-              f"service : panneaux NON poses")
+              f"service : panneau NON pose")
         return 0
-    poses = 0
     moi = getattr(getattr(cog.bot, "user", None), "id", 0)
-    purge_faite = False
     if nettoyer:
-        # On vide ce que LE BOT a poste : panneaux perimes, notices
-        # d'epinglage, comptes rendus d'un ancien telechargement. Le salon ne
-        # doit porter que les deux panneaux, sinon ils sortent de l'ecran et
-        # plus personne ne les trouve. On ne touche pas aux messages des humains.
         try:
             await canal.purge(limit=200, check=lambda m: m.author.id == moi)
-            purge_faite = True
         except Exception:
-            purge_faite = False
-    if not purge_faite:
-        # Purge refusee (permission) ou pas voulue : on retire au moins les
-        # anciens panneaux, sinon on en empilerait un troisieme.
+            # Suppression groupee refusee (droit « Gerer les messages ») : un
+            # par un, ce que le bot a le droit de faire sur SES messages --
+            # c'est ce qui avait laisse les notices d'epinglage du 27/08.
+            try:
+                async for m in canal.history(limit=200):
+                    if m.author.id == moi:
+                        try:
+                            await m.delete()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+    else:
+        # hors d'un -download (un -content), seul un ancien panneau part
         try:
             for p in await canal.pins():
                 if (p.author.id == moi and p.embeds
-                        and "Telechargement" in (p.embeds[0].title or "")):
+                        and (p.embeds[0].title or "") in TITRES_ANCIENS):
                     try:
                         await p.delete()
                     except Exception:
                         pass
         except Exception:
             pass
+    username, combien = _compte_du_salon(cog, canal)
+    try:
+        await canal.send(view=PanneauTelechargement(cog, username, combien))
+        return 1
+    except Exception as exc:
+        print(f"[telechargement] panneau non pose dans "
+              f"{getattr(canal, 'name', '?')} : {exc}")
+        return 0
 
-    for emb, vue in ((_embed_compte(), PanneauCompte(cog)),
-                     (_embed_options(), PanneauOptions(cog))):
+
+async def remettre_au_propre(cog, guilde) -> int:
+    """Chaque salon -download du serveur ne porte, cote bot, que le panneau
+    actuel ; sinon il est vide de ce que le bot y a mis et le panneau est
+    repose. Rend le nombre de salons refaits. Un salon deja propre n'est pas
+    touche : ceci tourne a chaque demarrage (donc a chaque deploiement)."""
+    moi = getattr(getattr(cog.bot, "user", None), "id", 0)
+    refaits = 0
+    for canal in list(getattr(guilde, "text_channels", []) or []):
+        if not _norm(getattr(canal, "name", "")).endswith("-download") or salon_reserve(canal):
+            continue
         try:
-            msg = await canal.send(embed=emb, view=vue)
-            poses += 1
-            if epingler:
-                try:
-                    await msg.pin(reason="Menu de telechargement permanent")
-                    # Epingler produit une notice systeme « X a epingle un
-                    # message ». Elle compte comme un message dans le salon :
-                    # on la retire pour ne laisser QUE les panneaux.
-                    await asyncio.sleep(0.5)
-                    # Hors d'un salon -download (nettoyer=False), SEULE la
-                    # notice part : les messages sans embed du bot y sont le
-                    # contenu livre, pas des restes.
-                    await canal.purge(
-                        limit=5,
-                        check=lambda m: (m.type == discord.MessageType.pins_add
-                                         or (nettoyer and m.author.id == moi
-                                             and not m.embeds)))
-                except Exception:
-                    pass
+            du_bot = [m async for m in canal.history(limit=25) if m.author.id == moi]
         except Exception:
-            pass
-    return poses
+            continue          # illisible (droits) : on n'y touche pas
+        if len(du_bot) == 1 and panneau_a_jour(du_bot[0], moi):
+            continue
+        refaits += await poser_panneaux(cog, canal)
+        await asyncio.sleep(1.0)      # sous la limite de debit de Discord
+    return refaits
 
 
 async def setup(bot: commands.Bot):

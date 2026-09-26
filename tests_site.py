@@ -9305,7 +9305,9 @@ try:
         _VADl = _UserDl(4242, "bob")
 
         def _bouton(vue, cid):
-            return next(b for b in vue.children if getattr(b, "custom_id", "") == cid)
+            # un LayoutView range ses boutons dans des rangees : on descend
+            tous = vue.walk_children() if hasattr(vue, "walk_children") else vue.children
+            return next(b for b in tous if getattr(b, "custom_id", "") == cid)
 
         def _textes(salon):
             return [e["content"] for e in salon.envois]
@@ -9325,23 +9327,24 @@ try:
             res["cookie_retire"] = not _tlDl._ANCIEN_COOKIE.exists()
             res["vues"] = sorted(type(v).__name__ for v in bot.vues)
             cog._purge_quotidienne.cancel()
+            cog._entretien.cancel()
 
             # Saisie du compte (fenetre) : retenu ET ecrit sur le disque.
             it = _InterDl(_VADl, dl)
-            await _bouton(_tlDl.PanneauCompte(cog), "dl:compte").callback(it)
+            await _bouton(_tlDl.PanneauTelechargement(cog), "dl:compte").callback(it)
             modal = it.response.modals[0]
             modal.pseudo._value = "https://www.instagram.com/Sky.Ards/"
             modal.combien._value = "5"
             await modal.on_submit(it)
             res["choix"] = cog.choix.get(_VADl.id)
-            res["embed"] = (it.message.edits[-1]["embed"].description
+            res["embed"] = (_bouton(it.message.edits[-1]["view"], "dl:compte").label
                             if it.message.edits else "")
             res["relu"] = _tlDl.Telechargement(_BotDl()).choix.get(_VADl.id)
 
             # Clic « Tout » : tout part dans -content, copie dans all-download.
             _appelsDl.clear()
             it = _InterDl(_VADl, dl)
-            await _bouton(_tlDl.PanneauOptions(cog), "dl:tout").callback(it)
+            await _bouton(_tlDl.PanneauTelechargement(cog), "dl:tout").callback(it)
             res["reponse"] = it.response.envois[0][0] if it.response.envois else ""
             res["contenu1"] = list(ct.envois)
             res["archive1"] = list(ar.envois)
@@ -9351,7 +9354,7 @@ try:
             # Meme clic : tout repart, sans un credit.
             ct.envois.clear(); ar.envois.clear(); _appelsDl.clear(); _cdnVusDl.clear()
             it = _InterDl(_VADl, dl)
-            await _bouton(_tlDl.PanneauOptions(cog), "dl:tout").callback(it)
+            await _bouton(_tlDl.PanneauTelechargement(cog), "dl:tout").callback(it)
             res["contenu2"] = list(ct.envois)
             res["appels2"] = len(_appelsDl)
             res["cdn2"] = len(_cdnVusDl)
@@ -9366,7 +9369,7 @@ try:
                 await _aDl.sleep(0.05)
             cog.livrer = lente
             i1, i2 = _InterDl(_VADl, dl), _InterDl(_VADl, dl)
-            vo = _tlDl.PanneauOptions(cog)
+            vo = _tlDl.PanneauTelechargement(cog)
             await _aDl.gather(_bouton(vo, "dl:reels").callback(i1),
                               _bouton(vo, "dl:top").callback(i2))
             res["rafale"] = (len(compte), i2.response.envois[0][0] if i2.response.envois else "")
@@ -9452,7 +9455,7 @@ try:
             im = _InterDl(_VADl, sm)
             await _tlDl.Telechargement.menudownload.callback(cog, im)
             res["menu"] = (im.response.defers, im.followup.envois,
-                           [e.get("embed").title for e in sm.envois if e.get("embed")],
+                           [type(e.get("view")).__name__ for e in sm.envois if e.get("view")],
                            len(sm.epingles), sm.purges)
             sa = _SalonDl("all-download", gm)
             ia = _InterDl(_VADl, sa)
@@ -9496,17 +9499,79 @@ try:
             ic2 = _InterDl(chef, gt.text_channels[0])
             await go.callback(ic2)
             res["tickets"] = (plan, list(_supprimesDl), [c.name for c in gt.text_channels])
+
+            # Entretien (demarrage, puis chaque jour) : un salon sale est vide
+            # de ce que le bot y a mis et recoit LE panneau ; un salon propre
+            # n'est pas touche ; all-download jamais ; purge refusee -> un par un.
+            class _BtnH:
+                def __init__(s, cid):
+                    s.custom_id, s.children = cid, []
+
+            class _RowH:
+                def __init__(s, *cids):
+                    s.custom_id, s.children = None, [_BtnH(c) for c in cids]
+
+            class _MsgH:
+                def __init__(s, salon, auteur, embeds=(), comps=()):
+                    s.salon, s.author, s.embeds, s.components = salon, auteur, list(embeds), list(comps)
+                async def delete(s):
+                    s.salon.hist.remove(s)
+
+            class _SalonH(_SalonDl):
+                def __init__(s, nom, gu, purge_ok=True):
+                    _SalonDl.__init__(s, nom, gu)
+                    s.hist, s.purge_ok = [], purge_ok
+                def history(s, limit=100):
+                    async def _gen():
+                        for m in list(s.hist)[:limit]:
+                            yield m
+                    return _gen()
+                async def purge(s, limit=100, check=None):
+                    s.purges.append(limit)
+                    if not s.purge_ok:
+                        raise RuntimeError("403 Missing Permissions")
+                    s.hist = [m for m in s.hist if not check(m)]
+                    return []
+
+            ge = _GuDl(gid=12)
+            sale = _SalonH("bob-download", ge)
+            sale.overwrites = {_VADl: None}
+            for _ in range(2):
+                sale.hist.append(_MsgH(sale, _moiDl, embeds=["ancien panneau"]))
+            for _ in range(5):
+                sale.hist.append(_MsgH(sale, _moiDl))          # notices d'epinglage
+            humain = _MsgH(sale, _VADl)
+            sale.hist.append(humain)
+            propre = _SalonH("kim-download", ge)
+            propre.hist.append(_MsgH(propre, _moiDl, comps=[
+                _RowH("dl:compte"), _RowH("dl:tout", "dl:pp", "dl:bio"),
+                _RowH("dl:photos", "dl:reels", "dl:top")]))
+            archive = _SalonH("⬇️・all-download", ge)
+            archive.hist.append(_MsgH(archive, _moiDl))
+            refus = _SalonH("zoe-download", ge, purge_ok=False)
+            refus.hist += [_MsgH(refus, _moiDl, embeds=["x"]), _MsgH(refus, _moiDl)]
+            n = await _tlDl.remettre_au_propre(cog, ge)
+            res["entretien"] = {
+                "n": n,
+                "sale": ([m for m in sale.hist], [type(e.get("view")).__name__ for e in sale.envois],
+                         [_bouton(e["view"], "dl:compte").label for e in sale.envois]),
+                "propre": (len(propre.envois), propre.purges),
+                "archive": (len(archive.envois), archive.purges, len(archive.hist)),
+                "refus": (len(refus.hist), len(refus.envois)),
+                "humain": humain in sale.hist,
+            }
             return res
 
         _rDl = _aDl.run(_scenarioDl())
 
-        check("dl : cog_load rattache les deux panneaux persistants",
-              _rDl["vues"] == ["PanneauCompte", "PanneauOptions"], str(_rDl["vues"]))
+        check("dl : cog_load rattache LE panneau persistant (un seul, que des boutons)",
+              _rDl["vues"] == ["PanneauTelechargement"], str(_rDl["vues"]))
         check("dl : l'ancien cookies_sessionid.txt en clair est retire au chargement",
               _rDl["cookie_retire"])
         check("dl : compte saisi (lien colle, majuscules) -> pseudo retenu en minuscules",
               _rDl["choix"] == ("sky.ards", 5), str(_rDl["choix"]))
-        check("dl : le panneau affiche le compte actif", "@sky.ards" in _rDl["embed"])
+        check("dl : le premier bouton affiche le compte actif", "@sky.ards" in _rDl["embed"],
+              _rDl["embed"])
         check("dl : compte actif PERSISTE et relu au demarrage (nouvelle instance du cog)",
               _rDl["relu"] == ("sky.ards", 5)
               and json.loads(_tlDl.CHOIX_FILE.read_text(encoding="utf-8"))
@@ -9592,16 +9657,40 @@ try:
               _nppDl == 0 and any(e["fichiers"] == ["pp.local.jpg"] for e in _ppDl)
               and "0 credit" in _ppDl[-1]["content"], str(_nppDl))
         _dfDl, _fuDl, _titDl, _epDl, _puDl = _rDl["menu"]
-        check("dl : /menudownload repare : defer d'abord, deux panneaux poses et epingles",
-              len(_dfDl) == 1 and _titDl == [_tlDl.TITRE_COMPTE, _tlDl.TITRE_OPTIONS]
-              and _epDl == 2 and _fuDl and "2 panneau(x)" in (_fuDl[0][0] or ""),
+        check("dl : /menudownload : defer d'abord, UN panneau pose, rien d'epingle",
+              len(_dfDl) == 1 and _titDl == ["PanneauTelechargement"]
+              and _epDl == 0 and _fuDl and "Panneau posé" in (_fuDl[0][0] or ""),
               str(_rDl["menu"])[:200])
         check("dl : /menudownload refuse all-download (ni envoi, ni menage)",
               _rDl["menu_archive"][0] == [] and _rDl["menu_archive"][1] == []
               and "service" in (_rDl["menu_archive"][2][0][0] or ""))
-        check("dl : /menudownload hors d'un -download : panneaux poses SANS vider le salon",
-              _rDl["menu_content"][0] == 2 and 200 not in _rDl["menu_content"][1],
+        check("dl : /menudownload hors d'un -download : panneau pose SANS vider le salon",
+              _rDl["menu_content"][0] == 1 and 200 not in _rDl["menu_content"][1],
               str(_rDl["menu_content"]))
+        _enDl = _rDl["entretien"]
+        check("dl : entretien : un salon sale est vide de ce que le bot y a mis (panneaux, notices)",
+              _enDl["sale"][0] == [] or all(m.author is not _moiDl for m in _enDl["sale"][0]),
+              str(_enDl))
+        check("dl : entretien : ... et recoit UN panneau, avec le compte du VA",
+              _enDl["sale"][1] == ["PanneauTelechargement"] and "@sky.ards" in _enDl["sale"][2][0],
+              str(_enDl["sale"][1:]))
+        check("dl : entretien : les messages des humains restent", _enDl["humain"])
+        check("dl : entretien : un salon deja propre n'est pas touche",
+              _enDl["propre"] == (0, []), str(_enDl["propre"]))
+        check("dl : « ⬇️・all-download » (emoji ajoute a la main) reste un salon de service, et l'archive",
+              _wlDl.salon_de_service("⬇️・all-download")
+              and _tlDl.salon_all_download(type("G", (), {"text_channels": [
+                  type("C", (), {"name": "⬇️・all-download"})()], "id": 77})()) is not None
+              and not _wlDl.salon_de_service("bob-download"))
+        check("dl : entretien : all-download jamais touche",
+              _enDl["archive"] == (0, [], 1), str(_enDl["archive"]))
+        check("dl : entretien : suppression groupee refusee -> un par un, et le panneau est pose",
+              _enDl["refus"] == (0, 1), str(_enDl["refus"]))
+        check("dl : entretien : il dit combien de salons il a refaits", _enDl["n"] == 2,
+              str(_enDl["n"]))
+        check("dl : plus d'epingle ni de texte : le panneau n'est que des boutons",
+              "msg.pin(" not in pathlib.Path("cogs/telechargement.py").read_text(encoding="utf-8")
+              and not _tlDl.PanneauTelechargement(None).to_components()[0].get("content"))
         check("dl : le provisionnement ne pose aucun panneau dans all-download",
               _rDl["ensure_archive"] == ([], []))
         _plDl, _supDl, _restDl = _rDl["tickets"]
