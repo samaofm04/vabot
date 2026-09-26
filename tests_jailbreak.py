@@ -7757,6 +7757,39 @@ try:
             check("demomodels %s x%d : chaque groupe s'ouvre en prive, sans editer"
                   % (_varDM, _nDM), True)
 
+    # « groupes_menu » (26/09/2026, « un bouton qui ouvre un menu ») : les
+    # boutons 1–10, 11–20… se creent tout seuls ; un clic ouvre EN PRIVE un
+    # menu deroulant avec les models du groupe, sans editer le message.
+    for _nDM, _attG in ((14, 2), (26, 3), (60, 6), (100, 10), (250, 25), (260, 25)):
+        _itDM = _itemsDM(_nDM)
+        _plDM = _MDM.demo_models_plan("groupes_menu", _itDM)
+        _vuDM = [x for _l, b in _plDM["groupes"] for x in b] + _plDM["non_affichees"]
+        _vueG = _MDM.demo_models_vue(_plDM)
+        _rowsG, _parG = _rangeesDM(_vueG)
+        check("demomodels groupes_menu x%d : %d bouton(s), chaque model montree OU comptee"
+              % (_nDM, _attG),
+              len(_plDM["groupes"]) == _attG and _vuDM == _itDM
+              and len(_vueG.children) <= 25 and all(n <= 5 for n in _parG),
+              "%d groupes, %d non affichees" % (len(_plDM["groupes"]),
+                                                len(_plDM["non_affichees"])))
+        _okG = True
+        for _gDM in _vueG.children:
+            _iDM = _InterDM()
+            _aDM.run(_gDM.callback(_iDM))
+            _env = _iDM.response.envois
+            _sous = _env[0]["view"] if _env else None
+            _sel = [c for c in (_sous.children if _sous else [])
+                    if isinstance(c, _dDM.ui.Select)]
+            if not (len(_env) == 1 and _env[0].get("ephemeral") is True
+                    and not _iDM.response.editions and len(_sel) == 1
+                    and len(_sous.children) == 1
+                    and [o.value for o in _sel[0].options]
+                    == [it[0] for it in _gDM.bloc]):
+                _okG = False
+                break
+        check("demomodels groupes_menu x%d : chaque bouton ouvre, en prive, UN menu "
+              "avec les models de son groupe" % _nDM, _okG)
+
     # « menus10 » : un menu par dizaine, CREE TOUT SEUL (« si un jour j'en
     # ai 60, il y en a 6 »), en format V2 (plus de cinq menus possibles).
     for _nDM, _attM in ((6, 1), (14, 2), (26, 3), (45, 5), (60, 6), (100, 10),

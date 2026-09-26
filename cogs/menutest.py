@@ -427,11 +427,17 @@ _LIM_LIBELLE_OPTION = 100
 _TAILLE_GROUPE = 10
 
 _DEMO_MODELS_VARIANTES = {
+    # EN TETE : ce que le proprietaire a montre le 26/09/2026 (« comme ca »,
+    # sur la capture des menus directs) avec des tranches de 10 (« si j'en ai
+    # 60, il y en a 6 »).
+    "menus10": "Menus déroulants de 10 : un de plus toutes les 10 models",
     "groupes": "Groupes 1–10, 11–20… (un clic = les photos du groupe, en privé)",
     "top10": "Top 10 en photos + groupes pour la suite",
     "photos_menu": "20 photos + menu déroulant « Autres models »",
     "menus": "Menus déroulants uniquement : 1–25, 26–50…",
-    "menus10": "Menus déroulants de 10 : un de plus toutes les 10 models",
+    # « Un bouton qui ouvre un menu » : une lecture de sa demande, gardee
+    # pour comparer.
+    "groupes_menu": "Boutons 1–10, 11–20… : un clic ouvre un menu déroulant (en privé)",
 }
 
 #: Variante « menus10 » (choisie par le proprietaire le 26/09/2026 : « si un
@@ -499,7 +505,7 @@ def demo_models_plan(variante: str, items: list) -> dict:
         pris = sum(len(b) for _l, b in out)
         return out, liste[pris:]
 
-    if variante == "groupes":
+    if variante in ("groupes", "groupes_menu"):
         groupes, reste = _grouper(1, reste, _LIM_COMPOSANTS)
     elif variante == "top10":
         photos, reste = reste[:10], reste[10:]
@@ -525,7 +531,8 @@ def demo_models_plan(variante: str, items: list) -> dict:
     else:
         raise ValueError(f"variante inconnue : {variante}")
     return {"photos": photos, "groupes": groupes, "menus": menus,
-            "non_affichees": reste}
+            "non_affichees": reste,
+            "groupes_en_menu": variante == "groupes_menu"}
 
 
 async def _demo_model_choisie(interaction: discord.Interaction, libelle: str):
@@ -549,18 +556,24 @@ class _DemoGroupeBouton(discord.ui.Button):
     """Ouvre les photos du groupe dans une NOUVELLE reponse privee : le
     message de depart n'est jamais edite (en production il est partage)."""
 
-    def __init__(self, libelle, bloc, row=None):
+    def __init__(self, libelle, bloc, row=None, en_menu=False):
         super().__init__(label=libelle, style=discord.ButtonStyle.primary,
                          row=row)
         self.bloc = bloc
+        # en_menu : les models du groupe arrivent dans UN menu deroulant (avec
+        # leur photo) au lieu de dix boutons.
+        self.en_menu = en_menu
 
     async def callback(self, interaction: discord.Interaction):
         vue = discord.ui.View(timeout=900)
-        for i, it in enumerate(self.bloc):
-            vue.add_item(_DemoModelBouton(it, row=i // _LIM_PAR_RANGEE))
-        await interaction.response.send_message(
-            f"🧪 Models **{self.label}** — clique une model :",
-            view=vue, ephemeral=True)
+        if self.en_menu:
+            vue.add_item(_DemoModelsMenu(self.label, self.bloc))
+            texte = f"🧪 Models **{self.label}** — choisis dans le menu :"
+        else:
+            for i, it in enumerate(self.bloc):
+                vue.add_item(_DemoModelBouton(it, row=i // _LIM_PAR_RANGEE))
+            texte = f"🧪 Models **{self.label}** — clique une model :"
+        await interaction.response.send_message(texte, view=vue, ephemeral=True)
 
 
 class _DemoModelsMenu(discord.ui.Select):
@@ -608,7 +621,8 @@ def demo_models_vue(plan: dict) -> discord.ui.View:
         rang = (len(plan["photos"]) - 1) // _LIM_PAR_RANGEE + 1
     for i, (lib, bloc) in enumerate(plan["groupes"]):
         vue.add_item(_DemoGroupeBouton(lib, bloc,
-                                       row=rang + i // _LIM_PAR_RANGEE))
+                                       row=rang + i // _LIM_PAR_RANGEE,
+                                       en_menu=plan.get("groupes_en_menu", False)))
     if plan["groupes"]:
         rang += (len(plan["groupes"]) - 1) // _LIM_PAR_RANGEE + 1
     for i, (lib, bloc) in enumerate(plan["menus"]):
