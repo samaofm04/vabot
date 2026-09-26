@@ -142,6 +142,10 @@ _voie_active: Dict[str, str] = {}
 #: fait. Reserve a la file TikTok, un Instagram du attendait la fin de tout
 #: l'import TikTok (des heures, avec treize profils en file).
 _dernier_tour = [0.0]
+#: {identite: {ancien fichier: nouveau}} : ce que doublons_vault a range
+#: (renommer_fichier). Une relecture qui avait lu `doublons` AVANT le
+#: rangement les recrivait sous l'ancien nom en finissant : _maj les reporte.
+_renommes: Dict[str, Dict[str, str]] = {}
 
 
 # ------------------------------------------------------------------ registre
@@ -177,6 +181,9 @@ def _maj(identite: str, creer: bool = True, **champs) -> dict:
         if not creer and identite not in reg:
             return {}
         e = dict(reg.get(identite) or {})
+        r = _renommes.get(identite_de(identite))
+        if r and isinstance(champs.get("doublons"), dict):
+            champs["doublons"] = {v: r.get(n, n) for v, n in champs["doublons"].items()}
         e.update(champs)
         reg[identite] = e
         _ecrire(reg)
@@ -318,6 +325,48 @@ def brancher_existante(identite: str, lien: str, seuil) -> dict:
                           derniere_synchro=None, statut="", erreur="", reessai_le=None)
         e = _maj(cle, **champs)
     return {"ok": True, "cle": cle, **e}
+
+
+def identites_occupees() -> set:
+    """Les identites dont une relecture tourne : elle garde ses `doublons`
+    en memoire et les recrit a la fin -- un fichier range pendant ce temps
+    (doublons_vault) serait de nouveau designe par son ancien nom."""
+    with _verrou:
+        return {identite_de(k) for k in _en_cours}
+
+
+def renommer_fichier(identite: str, ancien: str, nouveau: str) -> int:
+    """doublons_vault a range `ancien`, copie exacte de `nouveau` (dans
+    SOUS_DOSSIER) : les videos qui le designaient designent le garde.
+
+    Deux cas : `ancien` etait la cible d'un doublon {video: fichier} ; ou
+    c'etait l'IMPORT lui-meme (« tt_<id>.mp4 », suivi dans `recus`) -- la
+    relecture ne le retrouvait plus, le comptait « retire a la main », et
+    les vues restaient figees. Il devient alors un doublon du garde."""
+    ident = (identite or "").lower()
+    n = 0
+    with _verrou:
+        _renommes.setdefault(ident, {})[ancien] = nouveau
+        reg = _registre()
+        for cle, e in reg.items():
+            if identite_de(cle) != ident or not isinstance(e, dict):
+                continue
+            d = e.get("doublons")
+            if not isinstance(d, dict):
+                d = e["doublons"] = {}
+            for vid, nom in list(d.items()):
+                if nom == ancien:
+                    d[vid] = nouveau
+                    n += 1
+            pre = PREFIXES.get(e.get("plateforme") or "tiktok", PREFIXE_TIKTOK)
+            tige = Path(ancien).stem
+            vid = tige[len(pre):] if tige.startswith(pre) else ""
+            if vid and vid in set(e.get("recus") or []) and d.get(vid) != nouveau:
+                d[vid] = nouveau
+                n += 1
+        if n:
+            _ecrire(reg)
+    return n
 
 
 def debrancher(cle: str) -> dict:

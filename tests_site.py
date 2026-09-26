@@ -15582,6 +15582,320 @@ except Exception as _eD:
     import traceback as _tbD
     check("doublons / sources multiples : testable", False, repr(_eD)[:200] + _tbD.format_exc()[-300:])
 
+# --- Doublons exacts du vault : ranges automatiquement, jamais effaces (26/09/2026)
+# « ne supprime pas, mets de facon automatique » -- 878 copies octet pour octet,
+# fabriquees par l'aller-retour Drive du 15/08 (x -> x_2 -> x_2_2).
+print()
+print("=" * 70)
+print("Doublons exacts du vault : rangement automatique, restaurable")
+print("=" * 70)
+try:
+    import tempfile as _tfV, pathlib as _plV, json as _jsV, hashlib as _hlV, shutil as _shV
+    import doublons_vault as _dvV
+    import gdrive_sync as _gdV
+    _tmpV = _plV.Path(_tfV.mkdtemp())
+    _savV = (_dvV.CORBEILLE, _dvV.JOURNAL, _dvV.EXCEPTIONS, _dvV.DOSSIER_MD5, _dvV.RECENT_SEC)
+    _savGdV = (_gdV.IDENTITIES_DIR, _gdV._lister, _gdV._lister_paralleles, _gdV._session,
+               _gdV.load_config, _gdV.folder_id_from, _gdV._load_state)
+    try:
+        _dvV.CORBEILLE, _dvV.JOURNAL = _tmpV / "corbeille", _tmpV / "journal.json"
+        _dvV.EXCEPTIONS, _dvV.DOSSIER_MD5 = _tmpV / "exceptions.json", _tmpV / "md5"
+        _dvV.RECENT_SEC = 0
+        _R = _tmpV / "identities"
+        _br, _po, _vi, _st, _te = (_R / "zz1" / d for d in
+                                   ("brutes", "posts", "videos", "stories", "templates"))
+        for _d in (_br, _po, _vi, _st, _te):
+            _d.mkdir(parents=True)
+        _A, _B, _C, _Dv = b"A" * 5000, b"B" * 4000, b"C" * 3000, b"D" * 2000
+        _TXT = '{"cause": "caption déjà incrustée"}'
+        # brutes : x (verdict « pas de texte ») et sa copie x_2_2, ETEINTE par
+        # le reperage du texte avec son propre verdict, et une caption
+        (_br / "x.mp4").write_bytes(_A)
+        (_br / "x.textecheck.json").write_text('{"texte": false}', encoding="utf-8")
+        (_br / "x_2_2.mp4").write_bytes(_A)
+        (_br / "x_2_2.off.json").write_text(_TXT, encoding="utf-8")
+        (_br / "x_2_2.textecheck.json").write_text('{"texte": true}', encoding="utf-8")
+        (_br / "x_2_2.txt").write_text("ma caption", encoding="utf-8")
+        (_br / "x_2_2.thumb.jpg").write_bytes(b"vignette")
+        # brutes : m eteinte A LA MAIN sur la copie seulement -> on ne tranche pas
+        (_br / "m.mp4").write_bytes(b"M" * 1500)
+        (_br / "m_2.mp4").write_bytes(b"M" * 1500)
+        (_br / "m_2.off.json").write_text('{"cause": "désactivée à la main"}', encoding="utf-8")
+        # posts : la meme photo sous deux noms sans rapport (brune, 25/09)
+        (_po / "IMG_20260922_213454_640.jpg").write_bytes(_B)
+        (_po / "5879877320368132513_121.jpg").write_bytes(_B)
+        # stories : la MEME photo que dans posts -> voulu, jamais touche
+        (_st / "IMG_20260922_213454_640.jpg").write_bytes(_B)
+        # videos : deux captions DIFFERENTES sur le meme contenu -> conflit
+        (_vi / "r.mp4").write_bytes(_C)
+        (_vi / "r.txt").write_text("caption 1", encoding="utf-8")
+        (_vi / "r_2.mp4").write_bytes(_C)
+        (_vi / "r_2.txt").write_text("caption 2", encoding="utf-8")
+        # un fichier en cours d'ecriture n'est pas juge
+        (_vi / "p.mp4").write_bytes(_Dv)
+        (_vi / "p_2.mp4").write_bytes(_Dv)
+        (_vi / "p_2.mp4.part").write_bytes(b"")
+        # videos : la casse de l'extension ne fait pas garder la copie
+        (_vi / "k.mp4").write_bytes(b"K" * 1200)
+        (_vi / "k_2.MP4").write_bytes(b"K" * 1200)
+        (_vi / "k_2.txt").write_text("caption de k", encoding="utf-8")
+        # templates : grisee (⊘) sur un exemplaire, en service sur l'autre
+        (_te / "t.mp4").write_bytes(b"T" * 900)
+        (_te / "t_2.mp4").write_bytes(b"T" * 900)
+
+        class _RegV(_dvV.Registres):
+            def __init__(self):
+                self.transferts, self.oublies = [], []
+
+            def marques(self, fid):
+                if fid == "zz1|brutes|x_2_2.mp4":
+                    return {"fav"}
+                if fid == "zz1|templates|t_2.mp4":
+                    return {"disabled"}
+                return set()
+
+            def transferer(self, de, vers):
+                self.transferts.append((de, vers))
+                return []
+
+            def oublier(self, fid):
+                self.oublies.append(fid)
+                return []
+        _regV = _RegV()
+        _socV = []
+        _simV = _dvV.passe(_R, _regV, actif=False)
+        _cfV = {c["ou"] + ":" + c["membres"][0]: c["raison"] for c in _simV["conflits"]}
+        check("doublons : la simulation compte sans rien toucher",
+              _simV["copies"] == 3 and (_br / "x_2_2.mp4").exists()
+              and (_po / "5879877320368132513_121.jpg").exists() and not _regV.transferts,
+              str({k: _simV[k] for k in ("copies", "groupes", "ecartes")}))
+        check("doublons : deux captions differentes sur le meme contenu -> groupe laisse, et DIT",
+              ".txt" in _cfV.get("zz1/videos:r.mp4", ""), str(_cfV))
+        check("doublons : eteinte a la main sur une copie, en service sur l autre -> on ne tranche pas",
+              "à la main" in _cfV.get("zz1/brutes:m.mp4", ""), str(_cfV))
+        check("doublons : grisee (⊘) sur un exemplaire, en service sur l autre -> on ne tranche pas",
+              "désactivé" in _cfV.get("zz1/templates:t.mp4", ""), str(_cfV))
+        check("doublons : un fichier en cours d ecriture (.part) n est pas juge",
+              _simV["ecartes"].get("en_cours_d_ecriture") == 1, str(_simV["ecartes"]))
+
+        class _NonV:
+            def __enter__(self):
+                return False
+
+            def __exit__(self, *a):
+                return False
+        _refusV = _dvV.passe(_R, _regV, actif=True, verrou=_NonV)
+        check("doublons : Drive occupe -> rien ne bouge, le passage est differe (et journalise)",
+              _refusV["differe"] and (_br / "x_2_2.mp4").exists()
+              and any(x.get("differe") for x in _dvV.journal()), str(_refusV.get("differe")))
+        _bV = _dvV.passe(_R, _regV, actif=True,
+                         renommer_social=lambda i, sec, a, n: _socV.append((i, sec, a, n)))
+        _baseV = _dvV.CORBEILLE / (_bV.get("dossier") or "?")
+        check("doublons : la copie part a la corbeille horodatee, avec TOUS ses voisins",
+              _bV["copies"] == 3 and not (_br / "x_2_2.mp4").exists()
+              and (_baseV / "zz1" / "brutes" / "x_2_2.mp4").exists()
+              and (_baseV / "zz1" / "brutes" / "x_2_2.thumb.jpg").exists()
+              and (_baseV / _dvV.MANIFESTE).exists(), str(_bV)[:300])
+        check("doublons : l original (racine de la chaine _2_2) est garde, jamais la copie",
+              (_br / "x.mp4").exists())
+        check("doublons : la casse de l extension ne fait pas garder la copie (k.mp4 / k_2.MP4)",
+              (_vi / "k.mp4").exists() and not (_vi / "k_2.MP4").exists()
+              and (_vi / "k.txt").read_text(encoding="utf-8") == "caption de k")
+        check("doublons : la caption de la copie passe sur l original",
+              (_br / "x.txt").read_text(encoding="utf-8") == "ma caption")
+        check("doublons : l extinction du reperage de TEXTE passe sur l original AVEC son verdict",
+              (_br / "x.off.json").exists()
+              and '"texte": true' in (_br / "x.textecheck.json").read_text(encoding="utf-8")
+              and (_baseV / "zz1" / "brutes" / "x.textecheck.json").exists())
+        check("doublons : l etoile de la copie passe sur l original, puis la copie est oubliee",
+              ("zz1|brutes|x_2_2.mp4", "zz1|brutes|x.mp4") in _regV.transferts
+              and "zz1|brutes|x_2_2.mp4" in _regV.oublies)
+        check("doublons : les vues TikTok designees par la copie suivent l original (avec la section)",
+              ("zz1", "brutes", "x_2_2.mp4", "x.mp4") in _socV, str(_socV))
+        check("doublons : deux noms sans rapport, meme contenu -> un seul reste",
+              len(list(_po.glob("*.jpg"))) == 1)
+        check("doublons : la meme photo dans posts ET stories n est pas un doublon",
+              (_st / "IMG_20260922_213454_640.jpg").exists())
+        check("doublons : les groupes en conflit sont intacts",
+              (_vi / "r_2.mp4").exists() and (_br / "m_2.off.json").exists()
+              and (_te / "t_2.mp4").exists())
+        check("doublons : le passage est restaurable depuis la corbeille elle-meme",
+              [x["nom"] for x in _dvV.passages()] == [_bV["dossier"]]
+              and _dvV.passages()[0]["copies"] == 3, str(_dvV.passages()))
+        # un passage horaire sans rien a faire ne pousse pas les autres hors de la page
+        _nJ = len(_dvV.journal())
+        for _ in range(3):
+            _dvV.passe(_R, _regV, actif=True)
+        check("doublons : un passage sans rien a ranger n encombre pas le journal (seul « dernier » bouge)",
+              len(_dvV.journal()) == _nJ + 3 and _dvV.dernier().get("copies") == 0,
+              str((len(_dvV.journal()), _nJ)))
+        # restaurer : l'etat d'avant revient, et la copie n'est plus reprise
+        _rV = _dvV.restaurer(_R, _bV["dossier"])
+        check("doublons : restaurer remet la copie, ses voisins, et ce qui etait passe sur le garde",
+              _rV.get("ok") and (_br / "x_2_2.mp4").exists() and (_br / "x_2_2.off.json").exists()
+              and (_br / "x_2_2.txt").exists() and not (_br / "x.off.json").exists()
+              and not (_br / "x.txt").exists()
+              and '"texte": false' in (_br / "x.textecheck.json").read_text(encoding="utf-8"),
+              str(_rV))
+        _b2V = _dvV.passe(_R, _regV, actif=True)
+        check("doublons : une copie restauree est VOULUE -> le passage suivant la laisse",
+              (_br / "x_2_2.mp4").exists() and _b2V["ecartes"].get("voulus", 0) >= 1,
+              str(_b2V["ecartes"]))
+        check("doublons : un passage restaure est marque comme tel",
+              any(x["nom"] == _bV["dossier"] and x["restaure"] for x in _dvV.passages()))
+        check("doublons : un nom de passage invente est refuse",
+              not _dvV.restaurer(_R, "../../etc").get("ok"))
+        check("doublons : un nom avec un chiffre non decimal (²) ne fait pas tomber le passage",
+              _dvV._cle_naturelle("12²") == ["", 12, "²"])
+        # un echec au milieu (droits, disque) : ce qui est deja parti reste restaurable
+        (_po / "w.jpg").write_bytes(b"W" * 800)
+        (_po / "w_2.jpg").write_bytes(b"W" * 800)
+        (_po / "w_2.txt").write_text("x", encoding="utf-8")
+        (_po / "w.txt").write_text("x", encoding="utf-8")
+        _mvV = _dvV.shutil.move
+
+        def _casseV(a, b):
+            if a.endswith("w_2.txt"):
+                raise PermissionError("refus")
+            return _mvV(a, b)
+        _dvV.shutil.move = _casseV
+        try:
+            _b3V = _dvV.passe(_R, _regV, actif=True)
+        finally:
+            _dvV.shutil.move = _mvV
+        check("doublons : echec au milieu -> dit, et la copie deja partie est au manifeste",
+              _b3V["erreurs"] and _b3V.get("dossier")
+              and not (_po / "w_2.jpg").exists(), str(_b3V.get("erreurs"))[:200])
+        _r3V = _dvV.restaurer(_R, _b3V["dossier"])
+        check("doublons : ... et elle se restaure",
+              _r3V.get("ok") and (_po / "w_2.jpg").exists(), str(_r3V))
+
+        # --- l'import Drive ne les ramene pas (sans perdre ce qui est nouveau)
+        check("drive : la tige d un voisin d etat (.off, .textecheck, .perfect) est celle du media",
+              _gdV._tige_media("x.off.json") == "x" and _gdV._tige_media("x.textecheck.json") == "x"
+              and _gdV._tige_media("x.perfect.json") == "x")
+        _b2 = _R / "zz2" / "brutes"
+        _b2.mkdir(parents=True)
+        _Y, _Z, _N = b"Y" * 3333, b"Z" * 2222, b"N" * 777
+        (_b2 / "y.mp4").write_bytes(_Y)
+        (_b2 / "z.mp4").write_bytes(_Z)
+        _gdV.IDENTITIES_DIR = _R
+        _md5 = lambda b: _hlV.md5(b).hexdigest()
+        _fichiersV = [
+            {"id": "f1", "name": "copie_ailleurs.mp4", "size": str(len(_Y)), "md5Checksum": _md5(_Y)},
+            {"id": "f1b", "name": "copie_ailleurs.txt", "size": "4", "md5Checksum": "c1"},
+            {"id": "f2", "name": "neuf.mp4", "size": str(len(_N)), "md5Checksum": _md5(_N)},
+            {"id": "f3", "name": "neuf_bis.mp4", "size": str(len(_N)), "md5Checksum": _md5(_N)},
+            {"id": "f3b", "name": "neuf_bis.desc.txt", "size": "4", "md5Checksum": "c3"},
+            {"id": "f4", "name": "orphelin.textecheck.json", "size": "10", "md5Checksum": "zz"},
+            {"id": "f5", "name": "neuf.txt", "size": "5", "md5Checksum": "yy"},
+            {"id": "f6", "name": "y.desc.txt", "size": "5", "md5Checksum": "ww"},
+            {"id": "K7", "name": "y.off.json", "size": "9", "md5Checksum": "vv"},
+            {"id": "f8", "name": "z.mp4", "size": str(len(_Z)), "md5Checksum": _md5(_Z)},
+        ]
+        _arbreV = {("ROOT", True): [{"name": "Bibliothèque", "id": "BIB"}],
+                   ("BIB", True): [{"name": "zz2", "id": "ID2"}],
+                   ("ID2", True): [{"name": "Rushs bruts", "id": "T1"}],
+                   ("T1", False): _fichiersV}
+
+        def _listerV(sess, pid, dossiers=False):
+            return list(_arbreV.get((pid, dossiers), []))
+
+        def _parV(sess, taches, echecs=None):
+            return {(t, d): list(_arbreV.get((t, d), [])) for t, d in taches}
+        _gdV._lister, _gdV._lister_paralleles = _listerV, _parV
+        _etatV = {"uploaded": {"Bibliothèque/FR/Zz2/Rushs bruts/y.off.json": {"id": "K7", "size": 9}},
+                  "imported": {}}
+        _candV = _gdV._candidats_import(None, _etatV, "ROOT")
+        _igV = dict(_gdV.trouves_ignores)
+        _nomsV = {c["id"]: c["nom"] for c in _candV}
+        check("drive : le meme CONTENU deja sur le site (autre nom) n est pas rapatrie",
+              "f1" not in _nomsV and _igV.get("contenu_deja_sur_le_site") == 1, str(_igV))
+        check("drive : ... mais sa caption NOUVELLE va au fichier du site",
+              _nomsV.get("f1b") == "y.txt", str(_nomsV))
+        check("drive : le meme contenu depose deux fois -> un seul entre, et la caption suit",
+              "f3" not in _nomsV and "f2" in _nomsV and _igV.get("doublons_du_lot") == 1
+              and _nomsV.get("f3b") == "neuf.desc.txt", str(_nomsV))
+        check("drive : un voisin dont le media n est plus la n est pas rapatrie (orphelin)",
+              "f4" not in _nomsV and _igV.get("voisin_sans_media") == 1, str(_igV))
+        check("drive : un voisin retire EXPRES du site (brute rallumee) ne revient pas",
+              "K7" not in _nomsV and _igV.get("voisin_retire_du_site") == 1, str(_igV))
+        check("drive : ... mais un voisin nouveau d un media du lot ou du site, si",
+              {"f5", "f6"} <= set(_nomsV), str(_nomsV))
+        # la page « Drive face au site » ne compte pas ces fichiers comme manquants,
+        # et compte normalement un fichier synchronise (meme nom, meme contenu)
+        _gdV._session, _gdV._load_state = (lambda: None), (lambda: _etatV)
+        _gdV.load_config, _gdV.folder_id_from = (lambda: {"folder": "ROOT"}), (lambda raw: "ROOT")
+        _invV = _gdV.inventaire(force=True)
+        _ligV = [l for l in _invV["lignes"] if l["identity"] == "zz2"]
+        check("drive : l inventaire ne compte ni contenu deja la, ni orphelin, ni voisin retire",
+              _ligV and _ligV[0]["drive"] == 6 and _invV.get("copies_drive") == 4,
+              str((_ligV, _invV.get("copies_drive"))))
+        with _gdV.pause_drive() as _mainV:
+            _pendantV = (_gdV._PAUSE, _gdV.start_import_background(), _gdV.start_background())
+        check("drive : pendant un rangement, ni import ni envoi ne demarre",
+              _mainV and _pendantV == (True, False, False) and not _gdV._PAUSE, str(_pendantV))
+
+        # --- vault_social : les vues suivent le garde
+        import vault_social as _vsV
+        _savVs = (_vsV.FICHIER, dict(_vsV._renommes))
+        _vsV.FICHIER = _tmpV / "vs.json"
+        try:
+            _vsV._maj("zz9", plateforme="tiktok", url="u", username="zz9",
+                      recus=["123"], doublons={"555": "b.mp4"})
+            _vsV.renommer_fichier("zz9", "b.mp4", "a.mp4")
+            _vsV.renommer_fichier("zz9", "tt_123.mp4", "c.mp4")
+            _dV = _vsV.lire("zz9").get("doublons")
+            check("vues : la cible d un doublon rangee -> il designe le garde",
+                  _dV.get("555") == "a.mp4", str(_dV))
+            check("vues : l import lui-meme (tt_<id>) range -> le garde devient son doublon",
+                  _dV.get("123") == "c.mp4", str(_dV))
+            _vsV._maj("zz9", creer=False, doublons={"555": "b.mp4"})
+            check("vues : une relecture qui ecrit l ancien nom est corrigee au vol",
+                  _vsV.lire("zz9").get("doublons", {}).get("555") == "a.mp4")
+        finally:
+            _vsV.FICHIER = _savVs[0]
+            _vsV._renommes.clear()
+            _vsV._renommes.update(_savVs[1])
+
+        # --- le bot ne s'arrete pas sur un media range entre tirage et envoi
+        _srcU = _plV.Path("cogs/user.py").read_text(encoding="utf-8")
+        check("bot : un media range entre le tirage et l envoi ne coupe pas le lot (6 chemins)",
+              _srcU.count("except FileNotFoundError") >= 6
+              and "except (discord.HTTPException, FileNotFoundError)" in _srcU)
+
+        # --- la page du site (un passage non restaure a son bouton)
+        (_po / "v.jpg").write_bytes(b"V" * 700)
+        (_po / "v_2.jpg").write_bytes(b"V" * 700)
+        _dvV.passe(_R, _regV, actif=True)
+        import web_upload as _wV
+        _savWV = _wV._load_web_users
+        _wV._load_web_users = lambda: {"boss": {"role": "owner", "password_hash": "x"}}
+        try:
+            _aV = _wV.create_app(); _aV.testing = True
+            _cV = _aV.test_client()
+            with _cV.session_transaction() as _sV:
+                _sV["auth"] = True; _sV["username"] = "boss"; _sV["role"] = "owner"
+            _pV = _cV.get("/vault/doublons").get_data(as_text=True)
+            check("site : /vault/doublons liste les passages, le dernier passage, et Restaurer",
+                  "Doublons du vault" in _pV and "/vault/doublons/restaurer" in _pV
+                  and "Dernier passage automatique" in _pV and "restauré" in _pV, _pV[:200])
+            _dmV = _plV.Path("web_upload.py").read_text(encoding="utf-8")
+            check("site : les nouvelles raisons d ecart de l import ont un libelle",
+                  all(k in _dmV for k in ('"contenu_deja_sur_le_site":', '"doublons_du_lot":',
+                                          '"voisin_sans_media":', '"voisin_retire_du_site":',
+                                          '"voisin_de_doublon_deja_la":')))
+        finally:
+            _wV._load_web_users = _savWV
+    finally:
+        (_dvV.CORBEILLE, _dvV.JOURNAL, _dvV.EXCEPTIONS, _dvV.DOSSIER_MD5, _dvV.RECENT_SEC) = _savV
+        (_gdV.IDENTITIES_DIR, _gdV._lister, _gdV._lister_paralleles, _gdV._session,
+         _gdV.load_config, _gdV.folder_id_from, _gdV._load_state) = _savGdV
+        _shV.rmtree(_tmpV, ignore_errors=True)
+except Exception as _eV:
+    import traceback as _tbV
+    check("doublons du vault : testable", False, repr(_eV)[:200] + _tbV.format_exc()[-400:])
+
 # ------------------------------------------ 38. Reperer le texte : gratuit (OCR local)
 print()
 print("=" * 70)
@@ -17911,42 +18225,46 @@ c.appendChild(bT); c.appendChild(bF); grid.appendChild(c);
         (_IDTt / "zztta" / "templates" / "d_2.mp4").write_bytes(
             (_IDTt / "zztta" / "templates" / "d.mp4").read_bytes())
         _marquerTt(flash=(), trash={"zztta|templates|d_2.mp4"})
-        _wTt.DATA_DIR = _TT             # la corbeille des doublons, dans le bac a sable
+        # /gdrive/doublons passe par doublons_vault, le moteur du rangement
+        # automatique : corbeille horodatee avec manifeste (restaurable), et
+        # tout ce que la copie porte passe sur l'original AVANT.
+        import doublons_vault as _dvTt
+        _savDvTt = (_dvTt.CORBEILLE, _dvTt.JOURNAL, _dvTt.EXCEPTIONS, _dvTt.DOSSIER_MD5,
+                    _dvTt.RECENT_SEC, _wTt.BANGER_MARKS_FILE)
+        _dvTt.CORBEILLE, _dvTt.JOURNAL = _TT / "_corbeille_doublons", _TT / "doublons_vault.json"
+        _dvTt.EXCEPTIONS, _dvTt.DOSSIER_MD5 = _TT / "doublons_exceptions.json", _TT / "empreintes_md5"
+        _dvTt.RECENT_SEC = 0              # les fichiers du test viennent d'etre ecrits
+        _wTt.BANGER_MARKS_FILE = _TT / "banger_marks.json"
         try:
             _jT = _cTt.post("/gdrive/doublons", data={"supprimer": "1"}).get_json() or {}
-        finally:
-            _wTt.DATA_DIR = _savTt["DATA_DIR"]
-        check("trash : /gdrive/doublons retire la marque du doublon deplace, et la compte",
-              _jT.get("deplaces", 0) >= 1 and _jT.get("marques_retirees") == 1
-              and "zztta|templates|d_2.mp4" not in _regTt("trash")
-              and (_TT / "_corbeille_doublons" / "zztta" / "templates" / "d_2.mp4").exists(),
-              str(_jT)[:200])
-        # Le proprietaire marque la carte qu'il VOIT, souvent le doublon. La
-        # marque passe sur l'original au lieu d'etre perdue, et la reponse
-        # donne les CLES, pas seulement un nombre.
-        check("trash : ... la marque du doublon PASSE sur l original (qui n en portait pas)",
-              _D in _regTt("trash")
-              and _jT.get("marques_transferees") == [
-                  {"doublon": "zztta|templates|d_2.mp4", "original": _D,
-                   "marque": "trash", "deja": False}]
-              and _jT.get("marques_perdues") == [], str(_jT.get("marques_transferees")))
-        # L'original porte deja l'AUTRE marque : on ne la lui retire pas
-        # (additif) -- celle du doublon est perdue, et NOMMEE.
-        (_IDTt / "zztta" / "templates" / "e_2.mp4").write_bytes(
-            (_IDTt / "zztta" / "templates" / "e.mp4").read_bytes())
-        _marquerTt(flash={_E}, trash={"zztta|templates|e_2.mp4"})
-        _wTt.DATA_DIR = _TT
-        try:
+            _rangeT = list((_TT / "_corbeille_doublons").glob("*/zztta/templates/d_2.mp4"))
+            check("trash : /gdrive/doublons range la copie exacte (corbeille horodatee, manifeste)",
+                  _jT.get("deplaces", 0) >= 1 and len(_rangeT) == 1
+                  and not (_IDTt / "zztta" / "templates" / "d_2.mp4").exists()
+                  and (_rangeT[0].parents[2] / _dvTt.MANIFESTE).exists(), str(_jT)[:200])
+            # Le proprietaire marque la carte qu'il VOIT, souvent le doublon :
+            # la marque passe sur l'original, et la reponse donne les CLES.
+            check("trash : ... la marque du doublon PASSE sur l original (qui n en portait pas)",
+                  _D in _regTt("trash") and "zztta|templates|d_2.mp4" not in _regTt("trash")
+                  and {"doublon": "zztta|templates|d_2.mp4", "original": _D,
+                       "marques": ["trash"]} in (_jT.get("marques") or []),
+                  str(_jT.get("marques")))
+            # Deux decisions contraires sur le meme contenu (Flash sur l'un,
+            # Trash sur l'autre) : on ne tranche pas a la place du
+            # proprietaire -- rien ne bouge, et le groupe est DIT.
+            (_IDTt / "zztta" / "templates" / "e_2.mp4").write_bytes(
+                (_IDTt / "zztta" / "templates" / "e.mp4").read_bytes())
+            _marquerTt(flash={_E}, trash={"zztta|templates|e_2.mp4"})
             _jT = _cTt.post("/gdrive/doublons", data={"supprimer": "1"}).get_json() or {}
+            check("trash : ... Flash sur l original, Trash sur la copie -> rien ne bouge, le conflit est DIT",
+                  _E in _regTt("flash") and "zztta|templates|e_2.mp4" in _regTt("trash")
+                  and (_IDTt / "zztta" / "templates" / "e_2.mp4").exists()
+                  and any("Flash" in c.get("raison", "") and c.get("ou") == "zztta/templates"
+                          for c in (_jT.get("conflits") or [])), str(_jT)[:260])
+            (_IDTt / "zztta" / "templates" / "e_2.mp4").unlink()
         finally:
-            _wTt.DATA_DIR = _savTt["DATA_DIR"]
-        check("trash : ... l original porte l autre marque -> il la garde, la perte est NOMMEE",
-              _E in _regTt("flash") and _E not in _regTt("trash")
-              and "zztta|templates|e_2.mp4" not in _regTt("trash")
-              and _jT.get("marques_perdues") == [
-                  {"doublon": "zztta|templates|e_2.mp4", "original": _E,
-                   "marque": "trash", "en_place": "flash"}]
-              and _jT.get("marques_transferees") == [], str(_jT)[:260])
+            (_dvTt.CORBEILLE, _dvTt.JOURNAL, _dvTt.EXCEPTIONS, _dvTt.DOSSIER_MD5,
+             _dvTt.RECENT_SEC, _wTt.BANGER_MARKS_FILE) = _savDvTt
         # /cloud/delete avec un registre illisible : l'avertissement sort dans
         # la langue de la page (anglais par defaut), comme le bandeau.
         _cible_supTt.write_bytes(b"montage a" * 20)

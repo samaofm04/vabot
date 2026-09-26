@@ -2829,10 +2829,15 @@ class UserCog(commands.Cog):
                     if n > 1
                     else "📸 **Photo de profil**"
                 )
-                await interaction.followup.send(
-                    f"{head}\n*Télécharge et upload sur Instagram.*",
-                    file=discord.File(send_path),
-                )
+                try:
+                    await interaction.followup.send(
+                        f"{head}\n*Télécharge et upload sur Instagram.*",
+                        file=discord.File(send_path),
+                    )
+                except FileNotFoundError:
+                    # rangee entre le tirage et l'envoi (doublons_vault)
+                    await interaction.followup.send(f"⚠️ Photo de profil {i}/{n} : introuvable (déplacée entre-temps), passe à la suivante.")
+                    continue
             finally:
                 if tmp_dir:
                     try:
@@ -2892,9 +2897,14 @@ class UserCog(commands.Cog):
                     intro = f"🖼️ **{kind_label.upper()} — identité `{identity}`**\n📥 Télécharge la photo CLEAN."
                 if example:
                     intro += "\n👁️ La 2e pièce jointe est l'EXEMPLE — NE PAS la télécharger."
-                files = [discord.File(send_path, filename=image.name)]
-                if example:
-                    files.append(discord.File(example, filename=f"EXEMPLE_{example.name}"))
+                try:
+                    files = [discord.File(send_path, filename=image.name)]
+                    if example:
+                        files.append(discord.File(example, filename=f"EXEMPLE_{example.name}"))
+                except FileNotFoundError:
+                    # rangee entre le tirage et l'envoi (doublons_vault)
+                    await interaction.followup.send(f"⚠️ {kind_label.upper()}{num} : introuvable (déplacée entre-temps), passe à la suivante.")
+                    continue
                 try:
                     await interaction.followup.send(content=intro, files=files)
                 except discord.HTTPException as e:
@@ -2990,6 +3000,9 @@ class UserCog(commands.Cog):
                 )
                 try:
                     await interaction.followup.send(content=intro, file=discord.File(send_path))
+                except FileNotFoundError:
+                    await interaction.followup.send(f"⚠️ STORY CTA {i}/{n} : introuvable (déplacée entre-temps), passe à la suivante.")
+                    continue
                 except discord.HTTPException as e:
                     await interaction.followup.send(f"Erreur d'envoi : {e}", ephemeral=True)
                     continue
@@ -3016,9 +3029,17 @@ class UserCog(commands.Cog):
             if example:
                 intro += "\n👁️ La 2e pièce jointe est l'EXEMPLE — NE PAS la télécharger."
             video_to_send = video
-            files = [discord.File(video_to_send, filename=video.name)]
-            if example:
-                files.append(discord.File(example, filename=f"EXEMPLE_{example.name}"))
+            try:
+                files = [discord.File(video_to_send, filename=video.name)]
+                if example:
+                    files.append(discord.File(example, filename=f"EXEMPLE_{example.name}"))
+            except FileNotFoundError:
+                # Rangee entre le tirage et l'envoi (doublons_vault range les
+                # copies exactes) : on le dit et on passe a la suivante, au
+                # lieu d'arreter tout le lot.
+                await interaction.followup.send(
+                    f"⚠️ {label} {idx}: vidéo introuvable (déplacée entre-temps), passe à la suivante.")
+                continue
             try:
                 await interaction.followup.send(content=intro, files=files)
             except discord.HTTPException as e:
@@ -3028,7 +3049,7 @@ class UserCog(commands.Cog):
                             content=intro + "\n\n⚠️ *(Vidéo exemple omise car trop lourde)*",
                             file=discord.File(video_to_send, filename=video.name),
                         )
-                    except discord.HTTPException:
+                    except (discord.HTTPException, FileNotFoundError):
                         await interaction.followup.send(
                             f"⚠️ {label} {idx}: impossible d'envoyer (trop lourd): {e}")
                         continue
@@ -4001,6 +4022,9 @@ class UserCog(commands.Cog):
                 await interaction.followup.send(
                     content=f"🎥 **BRUTE {idx}/{total}** (`{identity}`)",
                     file=discord.File(str(v), filename=v.name))
+            except FileNotFoundError:
+                await interaction.followup.send(f"⚠️ BRUTE {idx}/{total} : introuvable (déplacée entre-temps), passe à la suivante.")
+                continue
             except discord.HTTPException as e:
                 await interaction.followup.send(
                     f"⚠️ BRUTE {idx}/{total} : envoi impossible (trop lourde) : {e}")
@@ -4310,6 +4334,9 @@ class UserCog(commands.Cog):
                     await interaction.followup.send(
                         content=tete,
                         file=discord.File(str(fichier), filename=v.name))
+                except FileNotFoundError:
+                    await interaction.followup.send(f"⚠️ {label} {idx}/{total} : introuvable (déplacée entre-temps), passe à la suivante.")
+                    continue
                 except discord.HTTPException as e:
                     await interaction.followup.send(
                         f"⚠️ {label} {idx}/{total} : envoi impossible "

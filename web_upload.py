@@ -697,12 +697,16 @@ def _load_banger_marks() -> dict:
     return {}
 
 
-def _save_banger_marks(marks: dict) -> None:
+def _save_banger_marks(marks: dict) -> bool:
+    """Vrai si ecrit. Les appelants historiques ignorent le retour ; le
+    rangement des doublons, lui, ne declare pas une etoile reportee si
+    elle ne l'est pas."""
     try:
         BANGER_MARKS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        safe_json.write_text(BANGER_MARKS_FILE, json.dumps(marks, ensure_ascii=False))
-    except Exception:
-        pass
+        return bool(safe_json.write_text(BANGER_MARKS_FILE, json.dumps(marks, ensure_ascii=False)))
+    except Exception as e:
+        print(f"[banger] {BANGER_MARKS_FILE.name} non ecrit : {e}", flush=True)
+        return False
 
 
 def _set_banger_mark(file_id: str, info: dict) -> None:
@@ -60099,24 +60103,6 @@ def create_app():
         _gd.oauth_reset()
         return _success("Compte Google déconnecté", tab="clouddrive")
 
-    def _memes_octets(a, b, bloc=262144):
-        """Meme contenu ? On lit le debut ET la fin : deux medias distincts de
-        meme poids different toujours quelque part, et lire 512 Ko au lieu de
-        1,5 Mo divise le temps par trois sur 4750 fichiers."""
-        try:
-            taille = a.stat().st_size
-            with a.open("rb") as fa, b.open("rb") as fb:
-                if fa.read(bloc) != fb.read(bloc):
-                    return False
-                if taille > bloc * 2:
-                    fa.seek(-bloc, 2)
-                    fb.seek(-bloc, 2)
-                    if fa.read(bloc) != fb.read(bloc):
-                        return False
-            return True
-        except Exception:
-            return False
-
     @app.route("/gdrive/doublons_drive_etat")
     def gdrive_doublons_drive_etat():
         from flask import jsonify
@@ -60311,103 +60297,161 @@ def create_app():
 
     @app.route("/gdrive/doublons", methods=["POST"])
     def gdrive_doublons():
-        """Repere (et sur demande supprime) les fichiers rapatries EN DOUBLE
-        par l'import Drive.
+        """Les copies exactes d'un media dans un meme dossier, par
+        doublons_vault -- le moteur du rangement automatique : une seule
+        regle pour ce bouton et pour le demon.
 
-        Signature d'un doublon d'import : le fichier s'appelle « x_2.jpg »,
-        l'original « x.jpg » existe a cote, et les deux font EXACTEMENT la
-        meme taille. Le triple critere evite de toucher a un vrai fichier que
-        tu aurais nomme ainsi.
+        L'ancienne version ne comparait que le debut et la fin des fichiers,
+        ne voyait que les « x_N » dont le parent DIRECT restait (386 « _2_2 »
+        survivaient ainsi depuis le 15/08), n'emportait aucun voisin et
+        ecrasait une copie homonyme deja en corbeille.
 
-        `dry=1` (defaut) : compte seulement. `supprimer=1` : met a la
-        corbeille locale (data/_corbeille_doublons/) — rien n'est detruit."""
+        `supprimer=1` range (corbeille restaurable) ; sinon simulation."""
         from flask import jsonify
-        import re as _re
-        import shutil as _sh
         if not is_auth() or not _is_admin():
             return jsonify({"ok": False}), 403
-        supprimer = bool(request.form.get("supprimer"))
-        corbeille = DATA_DIR / "_corbeille_doublons"
-        motif = _re.compile(r"^(.+)_(\d+)(\.[A-Za-z0-9]+)$")
-        par_ident, total, octets = {}, 0, 0
-        deplaces, echecs = 0, 0
-        marques_retirees, marques_erreurs = 0, []
-        marques_transferees, marques_perdues = [], []
-        if IDENTITIES_DIR.exists():
-            for ident_dir in sorted(IDENTITIES_DIR.iterdir()):
-                if not ident_dir.is_dir():
-                    continue
-                for sous in sorted(ident_dir.iterdir()):
-                    if not sous.is_dir():
-                        continue
-                    noms = {f.name: f for f in sous.iterdir() if f.is_file()}
-                    for nom, f in sorted(noms.items()):
-                        m = motif.match(nom)
-                        if not m:
-                            continue
-                        base = m.group(1) + m.group(3)
-                        orig = noms.get(base)
-                        if orig is None:
-                            continue
-                        try:
-                            if f.stat().st_size != orig.stat().st_size:
-                                continue          # tailles differentes -> pas un doublon
-                            # meme taille ne suffit pas : on compare le CONTENU
-                            # (debut + fin), sinon deux photos de meme poids
-                            # passeraient pour identiques
-                            if not _memes_octets(f, orig):
-                                continue
-                        except OSError:
-                            continue
-                        total += 1
-                        try:
-                            octets += f.stat().st_size
-                        except OSError:
-                            pass
-                        cle = ident_dir.name + "/" + sous.name
-                        par_ident[cle] = par_ident.get(cle, 0) + 1
-                        if supprimer:
-                            try:
-                                dest = corbeille / ident_dir.name / sous.name
-                                dest.mkdir(parents=True, exist_ok=True)
-                                _sh.move(str(f), str(dest / nom))
-                                deplaces += 1
-                            except Exception:
-                                echecs += 1
-                                continue
-                            # Le doublon parti, sa marque Flash/Trash doit
-                            # partir aussi : la cle « identite|templates|x_2 »
-                            # restait orpheline, et un homonyme televerse
-                            # plus tard naissait marque, hors de la vue de base.
-                            # Mais elle passe D'ABORD sur l'original : c'est
-                            # souvent x_2 que le proprietaire avait marque, et
-                            # l'effacer seul perdait la marque du montage.
-                            if sous.name == "templates":
-                                _tr = _transferer_marques(
-                                    f"{ident_dir.name}|{sous.name}|{nom}",
-                                    f"{ident_dir.name}|{sous.name}|{base}")
-                                marques_retirees += len(_tr["retirees"])
-                                marques_erreurs.extend(_tr["erreurs"])
-                                if _tr["transferee"]:
-                                    marques_transferees.append(_tr["transferee"])
-                                if _tr["perdue"]:
-                                    marques_perdues.append(_tr["perdue"])
-        if supprimer:
-            _invalidate_all_ttl_cache()
-        detail = sorted(par_ident.items(), key=lambda kv: -kv[1])[:40]
-        return jsonify({"ok": True, "doublons": total,
-                        "mo": round(octets / (1024 * 1024), 1),
+        r = _doublons_vault_passe(actif=bool(request.form.get("supprimer")))
+        detail = sorted((r.get("par_dossier") or {}).items(), key=lambda kv: -kv[1])[:40]
+        range_ = bool(r.get("actif")) and not r.get("differe")
+        return jsonify({"ok": True, "doublons": r.get("copies", 0),
+                        "mo": round((r.get("octets") or 0) / 1048576, 1),
                         "detail": [{"ou": k, "n": v} for k, v in detail],
-                        "deplaces": deplaces, "echecs": echecs,
-                        # Les CLES, pas seulement un nombre : une marque qui
-                        # n'a pas pu passer sur l'original (il portait
-                        # l'autre) doit pouvoir etre retrouvee et reposee a
-                        # la main -- un compteur seul ne dit pas laquelle.
-                        "marques_retirees": marques_retirees,
-                        "marques_transferees": marques_transferees,
-                        "marques_perdues": marques_perdues,
-                        "marques_erreurs": sorted(set(marques_erreurs))[:5],
-                        "corbeille": str(corbeille) if supprimer else None})
+                        "deplaces": r.get("copies", 0) if range_ else 0,
+                        "echecs": len(r.get("erreurs") or []),
+                        "erreurs": (r.get("erreurs") or [])[:10],
+                        # un groupe en conflit n'est PAS touche : il est dit
+                        "conflits": (r.get("conflits") or [])[:40],
+                        "marques": r.get("marques") or [],
+                        "differe": bool(r.get("differe")),
+                        "ecartes": r.get("ecartes") or {},
+                        "passage": r.get("dossier")})
+
+    @app.route("/vault/doublons")
+    def vault_doublons_page():
+        """Ce que le rangement automatique des doublons a fait, avec de quoi
+        restaurer. Les passages restaurables sont lus dans la corbeille
+        elle-meme, pas dans le journal. Reserve a l'admin."""
+        if not is_auth() or not _is_admin():
+            return redirect("/")
+        import doublons_vault as _dv
+        msg = (request.args.get("msg") or "")[:300]
+        esc = html_escape
+
+        def _quand(ts):
+            return time.strftime("%d/%m %H:%M", time.localtime(ts or 0))
+        der = _dv.dernier()
+        if der:
+            dernier = (f"Dernier passage automatique : {_quand(der.get('ts'))} — "
+                       + ("différé, le Drive travaillait" if der.get("differe")
+                          else f"{der.get('copies', 0)} copie(s) rangée(s)"))
+        else:
+            dernier = "Aucun passage automatique pour l'instant (il tourne chaque heure)."
+        lignes = []
+        for x in _dv.passages()[:40]:
+            if x["restaure"]:
+                action = "<span style='color:#64748b'>restauré</span>"
+            else:
+                action = ("<form method='post' action='/vault/doublons/restaurer' "
+                          "style='margin:0' onsubmit=\"return confirm('Remettre en place les "
+                          "copies de ce passage ? Elles ne seront plus rangées ensuite.')\">"
+                          f"<input type='hidden' name='passage' value='{esc(x['nom'])}'>"
+                          "<button style='font:inherit;padding:3px 10px;border-radius:7px;"
+                          "border:1px solid #cbd5e1;background:#f8fafc;cursor:pointer'>"
+                          "Restaurer</button></form>")
+            note = (f" · <b style='color:#b45309'>{x['interrompus']} interrompu(s)</b>"
+                    if x["interrompus"] else "")
+            lignes.append("<tr style='border-bottom:1px solid #eef2f7'>"
+                          f"<td style='padding:6px 4px'>{_quand(x['ts'])}</td>"
+                          f"<td><b>{x['copies']}</b> copie(s) rangée(s){note}</td>"
+                          f"<td style='color:#64748b'>{esc(x['nom'])}</td>"
+                          f"<td style='text-align:right'>{action}</td></tr>")
+        dern_j = (_dv.journal() or [{}])[-1]
+        blocs = ""
+        if dern_j.get("conflits"):
+            items = "".join(
+                "<li><b>%s</b> — %s <span style='color:#64748b'>(%s)</span></li>"
+                % (esc(c.get("ou", "")), esc(c.get("raison", "")),
+                   esc(", ".join(c.get("membres") or [])[:200]))
+                for c in dern_j["conflits"][:40])
+            blocs += ("<div style='margin:16px 0;padding:12px 14px;background:#fffbeb;"
+                      "border:1px solid #fde68a;border-radius:10px;font-size:13px'>"
+                      f"<b>Laissés tels quels</b> ({_quand(dern_j.get('ts'))}) — deux états "
+                      "ou deux versions différents d'un même contenu : à trancher à la "
+                      "main.<ul style='margin:6px 0 0'>" + items + "</ul></div>")
+        pb = (dern_j.get("erreurs") or []) + (dern_j.get("avertissements") or [])
+        if pb:
+            blocs += ("<div style='margin:16px 0;padding:12px 14px;background:#fef2f2;"
+                      "border:1px solid #fecaca;border-radius:10px;font-size:13px'>"
+                      "<b>À vérifier</b><ul style='margin:6px 0 0'>"
+                      + "".join(f"<li>{esc(str(x))}</li>" for x in pb[:40]) + "</ul></div>")
+        ec = {k: v for k, v in (dern_j.get("ecartes") or {}).items() if v}
+        if ec:
+            blocs += ("<p style='color:#64748b;font-size:13px'>Laissés pour le passage "
+                      "suivant : " + esc(", ".join(f"{k.replace('_', ' ')} {v}"
+                                                   for k, v in ec.items())) + "</p>")
+        boutons = ("<form method='post' action='/vault/doublons/passe' style='display:inline'>"
+                   "<input type='hidden' name='actif' value='0'><button style='font:inherit;"
+                   "padding:6px 12px;border-radius:8px;border:1px solid #cbd5e1;background:#fff;"
+                   "cursor:pointer'>Simuler</button></form> "
+                   "<form method='post' action='/vault/doublons/passe' style='display:inline'>"
+                   "<input type='hidden' name='actif' value='1'><button style='font:inherit;"
+                   "padding:6px 12px;border-radius:8px;border:1px solid #2563eb;background:#2563eb;"
+                   "color:#fff;cursor:pointer'>Ranger maintenant</button></form>")
+        return ("<div style=\"font:14px/1.55 -apple-system,system-ui,sans-serif;"
+                "padding:28px;max-width:860px;margin:30px auto;background:#fff;"
+                "color:#1c1c1e;border:1px solid #e5e7eb;border-radius:14px\">"
+                "<h2 style='margin:0 0 4px'>Doublons du vault</h2>"
+                "<p style='color:#666;margin:0 0 8px'>Chaque heure, les copies <b>exactes</b> "
+                "d'un média dans un même dossier sont rangées dans la corbeille "
+                "(data/_corbeille_doublons), avec leurs fichiers voisins. Ce qu'elles "
+                "portaient (caption, étoile, vues) passe d'abord sur l'exemplaire gardé. "
+                "Rien n'est effacé : un passage se restaure.</p>"
+                f"<p style='color:#334155;margin:0 0 14px;font-size:13px'>{esc(dernier)}</p>"
+                + (f"<p style='padding:10px 12px;background:#f0fdf4;border:1px solid #bbf7d0;"
+                   f"border-radius:8px'>{esc(msg)}</p>" if msg else "")
+                + "<p>" + boutons + "</p>" + blocs +
+                "<table style='width:100%;border-collapse:collapse;font-size:13px'>"
+                "<thead><tr style='text-align:left;border-bottom:2px solid #e5e7eb'>"
+                "<th>Passage</th><th>Rangé</th><th>Dossier</th><th></th></tr></thead><tbody>"
+                + ("".join(lignes) or "<tr><td colspan='4' style='color:#64748b;padding:8px 4px'>"
+                   "Rien de rangé pour l'instant.</td></tr>")
+                + "</tbody></table><p style='margin-top:18px'><a href='/?tab=cloud'>"
+                "Retour au Drive</a></p></div>")
+
+    @app.route("/vault/doublons/passe", methods=["POST"])
+    def vault_doublons_passe():
+        if not is_auth() or not _is_admin():
+            return redirect("/")
+        actif = request.form.get("actif") == "1"
+
+        def _fond():
+            try:
+                _doublons_vault_passe(actif=actif)
+            except Exception as e:
+                print(f"[doublons-vault] passage manuel : {e}", flush=True)
+        # en fond : un premier passage lit le md5 de tout ce qui a la meme
+        # taille, plus long qu'une requete
+        threading.Thread(target=_fond, daemon=True, name="doublons-vault-manuel").start()
+        from urllib.parse import quote as _q
+        return redirect("/vault/doublons?msg=" + _q(
+            "Rangement lancé — recharge la page dans une minute." if actif
+            else "Simulation lancée — recharge la page dans une minute."))
+
+    @app.route("/vault/doublons/restaurer", methods=["POST"])
+    def vault_doublons_restaurer():
+        if not is_auth() or not _is_admin():
+            return redirect("/")
+        import doublons_vault as _dv
+        r = _dv.restaurer(IDENTITIES_DIR, (request.form.get("passage") or "").strip())
+        _invalidate_all_ttl_cache()
+        if not r.get("ok"):
+            m = "Restauration impossible : " + str(r.get("error"))
+        else:
+            m = f"{r['remis']} fichier(s) remis en place."
+            if r.get("bloques"):
+                m += f" {len(r['bloques'])} laissé(s) : leur nom est repris ({r['bloques'][0]}…)."
+        from urllib.parse import quote as _q
+        return redirect("/vault/doublons?msg=" + _q(m))
 
     @app.route("/gdrive/debug_state", methods=["POST"])
     def gdrive_debug_state():
@@ -63073,9 +63117,11 @@ def create_app():
                   + (f"<p style='color:#92400e;margin:0 0 16px;font-size:13px;"
                      f"padding:10px 12px;background:#fffbeb;border:1px solid #fde68a;"
                      f"border-radius:8px'><b>{inv['copies_drive']} copie(s) sur le "
-                     f"Drive</b> — des « _2 », « _3 » identiques a leur original, "
-                     f"laissees par d'anciens imports. Elles ne sont ni comptees "
-                     f"comme manquantes ni rapatriees.</p>"
+                     f"Drive</b> — le meme contenu qu'un fichier du site (« _2 », « _3 » "
+                     f"d'anciens imports, copies rangees par le rangement des "
+                     f"doublons), le voisin d'un media parti, ou un voisin retire expres "
+                     f"du site. Elles ne sont ni "
+                     f"comptees comme manquantes ni rapatriees.</p>"
                      if inv.get("copies_drive") else ""))
 
         # Les compteurs du scan : c'est la que se lit POURQUOI un fichier
@@ -63086,6 +63132,14 @@ def create_app():
                 "format_non_gere": "ecartes : extension non geree",
                 "copies_du_drive": "ecartes : copies du Drive (pp_69_2, pp_69_3…)",
                 "nom_deja_pris": "ecartes : ce nom existe deja sur le site",
+                "contenu_deja_sur_le_site": "ecartes : le meme contenu est deja sur le site "
+                                            "(autre nom, ou copie rangee)",
+                "doublons_du_lot": "ecartes : le meme contenu depose deux fois",
+                "voisin_sans_media": "ecartes : caption ou voisin dont le media n'est plus la",
+                "voisin_retire_du_site": "ecartes : voisin retire expres du site (brute "
+                                         "rallumee, relecture approuvee)",
+                "voisin_de_doublon_deja_la": "ecartes : voisin d'un doublon, le fichier garde "
+                                             "a deja le sien",
                 "dossiers_non_reconnus": "dossiers au nom inconnu",
                 "erreur": "erreur pendant le scan"}
         _items = "".join(
@@ -63114,7 +63168,8 @@ def create_app():
                 "voit meme pas'>Invisible</th></tr></thead>"
                 "<tbody>" + lignes + "</tbody></table>"
                 "<p style='margin-top:18px'><a href='/?tab=cloud'>Retour au Drive</a>"
-                " &nbsp;·&nbsp; <a href='/drive-manques?refaire=1'>Recompter</a></p>"
+                " &nbsp;·&nbsp; <a href='/drive-manques?refaire=1'>Recompter</a>"
+                " &nbsp;·&nbsp; <a href='/vault/doublons'>Doublons rangés</a></p>"
                 "</div>")
 
     @app.route("/gdrive/root_cleanup", methods=["POST"])
@@ -72158,6 +72213,128 @@ def run_web_app():
         log.error(f"Web upload crashed: {e}")
 
 
+class _RegistresVault:
+    """Les marques du site (cle « identite|section|nom ») pour doublons_vault :
+    avant qu'une copie exacte soit rangee, ce qu'elle porte passe sur
+    l'exemplaire garde -- l'etoile de « download (54)_2_2 » (seule marquee de
+    son groupe) se perdait sinon sans un mot, fav_brutes_for ignorant un
+    fichier absent."""
+
+    def marques(self, fid):
+        # Lecture STRICTE : un registre present mais illisible (scp de data/
+        # coupe) n'est pas « aucune marque ». L'exception fait passer le
+        # groupe en conflit « illisible » : rien ne bouge.
+        out = set()
+        for nom, fichier in (("banger", BANGER_MARKS_FILE), ("fav", FAV_BRUTES_FILE),
+                             ("disabled", DISABLED_REELS_FILE)):
+            cles, err = _mm.lire_cles_ou_erreur(fichier)
+            if err:
+                raise RuntimeError(err)
+            if fid in cles:
+                out.add(nom)
+        etat, err = _marques_etat()
+        if err:
+            raise RuntimeError("; ".join(err))
+        c = _marque_effective(etat, fid)
+        if c:
+            out.add(c)
+        return out
+
+    def transferer(self, de, vers):
+        erreurs = []
+        m = _load_banger_marks()
+        if de in m and vers not in m:
+            # les message_ids suivent : le salon banger montre la meme video
+            m[vers] = m.pop(de)
+            if not _save_banger_marks(m):
+                return [f"{BANGER_MARKS_FILE.name} non écrit"]
+        for fichier, lire in ((FAV_BRUTES_FILE, _load_fav_brutes),
+                              (DISABLED_REELS_FILE, _load_disabled_reels)):
+            s = lire()
+            if de in s:
+                s.add(vers)
+                s.discard(de)
+                if not safe_json.write_text(fichier, json.dumps(sorted(s), ensure_ascii=False)):
+                    erreurs.append(f"{fichier.name} non écrit")
+        tr = _transferer_marques(de, vers)
+        erreurs += tr.get("erreurs") or []
+        if tr.get("perdue"):
+            erreurs.append(f"marque {tr['perdue'].get('marque')} non reportée")
+        return erreurs
+
+    def oublier(self, fid):
+        erreurs = []
+        _pop_banger_mark(fid)
+        _pop_fav_brute(fid)
+        s = _load_disabled_reels()
+        if fid in s:
+            s.discard(fid)
+            if not safe_json.write_text(DISABLED_REELS_FILE, json.dumps(sorted(s), ensure_ascii=False)):
+                erreurs.append("disabled_reels.json non écrit")
+        _r, _e = _pop_marques(fid)
+        return erreurs + list(_e)
+
+    def apres_rangement(self, ident, section, nom):
+        try:
+            _t = _thumb_path_for(f"{ident}/{section}/{nom}")
+            if _t.exists():
+                _t.unlink()           # une vignette en cache, pas un media
+        except Exception:
+            pass
+
+
+def _doublons_vault_passe(actif: bool) -> dict:
+    """Un passage de doublons_vault avec les vraies marques, la pause Drive
+    et les vues TikTok/Instagram. Les identites dont un import tourne sont
+    laissees pour le passage suivant."""
+    import doublons_vault as _dv
+    import gdrive_sync as _gd
+    import vault_social as _vs
+    def _social(ident, section, ancien, nouveau):
+        # vault_social ne suit que « Video brut » : un reel homonyme ne doit
+        # pas rediriger les vues d'une brute
+        if section == _vs.SOUS_DOSSIER:
+            _vs.renommer_fichier(ident, ancien, nouveau)
+    res = _dv.passe(IDENTITIES_DIR, _RegistresVault(), actif=actif,
+                    exclure=_vs.identites_occupees(), verrou=_gd.pause_drive,
+                    renommer_social=_social,
+                    occupee=lambda ident: ident.lower() in _vs.identites_occupees())
+    if res.get("copies") and actif:
+        _invalidate_all_ttl_cache()
+    return res
+
+
+def _start_doublons_vault_daemon() -> bool:
+    """Range les copies exactes du vault, toutes les heures (voir
+    doublons_vault). Sur la seule machine proprietaire : un data/ de poste de
+    dev n'a rien a ranger, et le Drive n'est branche que sur le VPS."""
+    if not _machine_proprietaire("doublons-vault"):
+        return False
+
+    def _boucle():
+        time.sleep(600)            # la veille Drive et les imports d'abord
+        while True:
+            attente = 3600
+            try:
+                r = _doublons_vault_passe(actif=True)
+                if r.get("differe"):
+                    attente = 300  # le Drive travaillait : on repasse bientot
+                if (r.get("copies") or r.get("conflits") or r.get("erreurs")
+                        or r.get("avertissements")):
+                    print(f"[doublons-vault] {r.get('copies', 0)} copie(s) rangee(s) "
+                          f"({round((r.get('octets') or 0) / 1048576)} Mo) dans "
+                          f"{r.get('dossier')}, {len(r.get('conflits') or [])} groupe(s) "
+                          f"laisse(s) en conflit, {len(r.get('erreurs') or [])} erreur(s), "
+                          f"{len(r.get('avertissements') or [])} avertissement(s)",
+                          flush=True)
+            except Exception as e:
+                print(f"[doublons-vault] {type(e).__name__}: {e}", flush=True)
+            time.sleep(attente)
+
+    threading.Thread(target=_boucle, daemon=True, name="doublons-vault").start()
+    return True
+
+
 def start_in_thread():
     thread = threading.Thread(target=run_web_app, daemon=True, name="WebUploadServer")
     thread.start()
@@ -72196,6 +72373,12 @@ def start_in_thread():
         _vs_boot.demarrer(_vs_dossier, _invalidate_all_ttl_cache)
     except Exception as e:
         print(f"[start_in_thread] import TikTok non demarre: {e}", flush=True)
+    # Copies exactes d'un meme media dans un dossier : rangees chaque heure,
+    # restaurables (/vault/doublons).
+    try:
+        _start_doublons_vault_daemon()
+    except Exception as e:
+        print(f"[start_in_thread] rangement des doublons non demarre: {e}", flush=True)
     # Pré-calcul des clics GMS -> le Dashboard clics est déjà prêt à l'ouverture
     try:
         _start_gmsdash_warm()

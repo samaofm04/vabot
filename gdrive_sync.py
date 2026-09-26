@@ -143,6 +143,10 @@ _THREAD: threading.Thread | None = None
 _STATUS: dict = {"state": "idle"}
 _IMPORT_STATUS: dict = {"state": "idle"}
 _IMPORT_THREAD = None
+#: Vrai pendant que doublons_vault range des copies : ni envoi ni import ne
+#: demarre. Un import en plein rangement voyait un dossier a moitie deplace
+#: (le garde renomme, la copie pas encore partie) et pouvait ramener la copie.
+_PAUSE = False
 
 
 # ---------------------------------------------------------------- config
@@ -317,7 +321,7 @@ def start_import_background() -> bool:
     """Lance l'import Drive -> site dans un thread (un seul a la fois)."""
     global _IMPORT_THREAD
     with _LOCK:
-        if _IMPORT_THREAD is not None and _IMPORT_THREAD.is_alive():
+        if _PAUSE or (_IMPORT_THREAD is not None and _IMPORT_THREAD.is_alive()):
             return False
 
         def _run():
@@ -329,6 +333,32 @@ def start_import_background() -> bool:
         _IMPORT_THREAD = threading.Thread(target=_run, daemon=True)
         _IMPORT_THREAD.start()
         return True
+
+
+class pause_drive:
+    """`with pause_drive() as a_la_main:` -- vrai si ni envoi ni import ne
+    tournait ; ils ne demarrent plus jusqu'a la sortie. Faux sinon (rien a
+    faire : on repassera)."""
+
+    def __enter__(self):
+        global _PAUSE
+        with _LOCK:
+            occupe = (_PAUSE
+                      or (_THREAD is not None and _THREAD.is_alive())
+                      or (_IMPORT_THREAD is not None and _IMPORT_THREAD.is_alive()))
+            if occupe:
+                self.pris = False
+                return False
+            _PAUSE = True
+            self.pris = True
+            return True
+
+    def __exit__(self, *a):
+        global _PAUSE
+        if getattr(self, "pris", False):
+            with _LOCK:
+                _PAUSE = False
+        return False
 
 
 # ---------------------------------------------------------------- état local
@@ -1116,6 +1146,13 @@ def _candidats_import(sess, st, root):
     deja = {r.get("id") for r in (st.get("uploaded") or {}).values() if r.get("id")}
     vus = st.get("imported") or {}
     trouves = []
+    _rediriges: dict = {}   # (ident, sub, src, tige ecartee) -> (src|None, tige gardee)
+    try:
+        import doublons_vault as _dv
+        _contenus = _dv.IndexContenu()
+    except Exception as e:           # le module manque : on le dit, on continue
+        _contenus = None
+        _echecs.append(("empreintes locales indisponibles: %s" % e)[:160])
 
     def _identite_connue(nom_drive: str, ident: str) -> bool:
         """Le site connait-il cette identite ? Sinon on REFUSE, et on le dit.
@@ -1190,7 +1227,10 @@ def _candidats_import(sess, st, root):
             except Exception:
                 pass
             _ignores["vus"] = _ignores.get("vus", 0)
-            if vus.get(f["id"]) or f["id"] in deja:
+            # deja passe par le site (envoye ou importe) : voir _filtrer_lot,
+            # un voisin retire du site ne doit pas revenir
+            connu = bool(vus.get(f["id"]) or f["id"] in deja)
+            if connu:
                 # …SAUF s'il n'est plus sur le site. Ce test passait avant la
                 # verification d'existence locale : un fichier parti du site
                 # vers le Drive, puis disparu du site, n'etait donc JAMAIS
@@ -1217,12 +1257,38 @@ def _candidats_import(sess, st, root):
                         continue
             except Exception:
                 pass
+            try:
+                taille = int(f.get("size") or 0)
+            except (TypeError, ValueError):
+                taille = 0
+            # Le MEME CONTENU est deja dans le dossier, sous un autre nom :
+            # une copie rangee par doublons_vault, ou la meme photo deposee
+            # deux fois (brune/posts, 25/09). Le nom ne le dit pas, le md5
+            # que Drive donne deja, si. Sans ce test, le 16/08, 343 copies
+            # rangees la veille etaient revenues dans l'heure.
+            if (_contenus is not None and not _est_voisin(nom) and taille
+                    and f.get("md5Checksum")):
+                try:
+                    _loc = _contenus.present(IDENTITIES_DIR / ident / sub, taille,
+                                             f["md5Checksum"],
+                                             Path(nom).suffix.lower() in VIDEO_EXTS)
+                    if _loc:
+                        _ignores["contenu_deja_sur_le_site"] = \
+                            _ignores.get("contenu_deja_sur_le_site", 0) + 1
+                        # ses voisins NOUVEAUX (une caption deposee avec) vont
+                        # au fichier du site : c'est le meme contenu
+                        _rediriges[(ident, sub, str(dossier_id), _tige_media(nom))] = \
+                            (None, Path(_loc).stem)
+                        continue
+                except Exception as e:
+                    _echecs.append(("empreinte locale: %s" % e)[:160])
             # « src » : le dossier Drive d'ou vient le fichier. Il faut le
             # garder pour que _planifier_noms rattache un voisin a SON media
             # et pas a l'homonyme d'un autre dossier.
             trouves.append({"id": f["id"], "nom": nom, "identity": ident,
                             "sub": sub, "canonique": canonique,
-                            "src": dossier_id})
+                            "src": dossier_id, "taille": taille,
+                            "md5": f.get("md5Checksum") or "", "connu": connu})
 
     # 1) depot libre : « A IMPORTER / <identite> / <type> »
     racine = None
@@ -1315,6 +1381,9 @@ def _candidats_import(sess, st, root):
             sub = _DRIVE_TO_SUB.get(_cle_dossier(typ["name"]))
             if sub:
                 _prendre(typ["id"], ident, sub, canonique=True)
+    if _contenus is not None:
+        _contenus.fermer()
+    trouves = _filtrer_lot(trouves, _ignores, _rediriges)
     try:
         trouves_ignores.clear()
         trouves_ignores.update(_ignores)
@@ -1331,6 +1400,94 @@ def _candidats_import(sess, st, root):
     except Exception:
         pass
     return trouves
+
+
+def _tiges_medias_locales(ident: str, sub: str) -> set:
+    """Les tiges des medias presents sur le site dans ce dossier (pour
+    rattacher un voisin du Drive -- import et inventaire, meme regle)."""
+    exts = _exts_de(sub) - SIDECAR_EXTS
+    try:
+        return {p.stem for p in (IDENTITIES_DIR / ident / sub).iterdir()
+                if p.is_file() and p.suffix.lower() in exts and not _est_voisin(p.name)}
+    except OSError:
+        return set()
+
+
+def _filtrer_lot(trouves: list, _ignores: dict, rediriges: dict = None) -> list:
+    """Les tris qui demandent de voir le lot ENTIER.
+
+    1) Le meme contenu depose deux fois (deux noms, memes octets) : un seul
+       media entre -- le nom le plus court, en general l'original. Sinon la
+       paire arrivait ensemble et doublons_vault la rangeait une heure apres.
+    2) Les voisins NOUVEAUX d'un media ecarte (ici, ou deja sur le site sous
+       un autre nom) suivent le media garde : une caption deposee avec une
+       copie n'est pas perdue (doublons_vault fait de meme sur le site).
+    3) Un voisin dont le media n'est ni sur le site ni dans le lot : celui
+       d'une copie rangee (« x_2_2.textecheck.json »), ou d'un media
+       supprime. Seul, il ne se rattache a rien -- et un « .off.json »
+       eteindrait a la naissance le prochain media de ce nom. 227 revenaient
+       ainsi apres un rangement (simule le 26/09).
+    4) Un voisin deja passe par le site, absent alors que son media y est :
+       il a ete retire EXPRES (brute rallumee, relecture approuvee). Le
+       reprendre du Drive annulait ce choix dans la minute.
+    """
+    rediriges = dict(rediriges or {})
+
+    def _cle(c):
+        return (c["identity"], c["sub"], str(c.get("src") or ""), _tige_media(c["nom"]))
+    medias = sorted((c for c in trouves if not _est_voisin(c["nom"])),
+                    key=lambda c: (len(c["nom"]), c["nom"]))
+    gardes, jetes = {}, set()
+    for c in medias:
+        k = (c["identity"], c["sub"], c.get("md5") or c["id"])
+        if k in gardes:
+            jetes.add(c["id"])
+            _ignores["doublons_du_lot"] = _ignores.get("doublons_du_lot", 0) + 1
+            g = gardes[k]
+            rediriges[_cle(c)] = (str(g.get("src") or ""), _tige_media(g["nom"]))
+        else:
+            gardes[k] = c
+    trouves = [c for c in trouves if c["id"] not in jetes]
+    tiges_lot = {_cle(c) for c in trouves if not _est_voisin(c["nom"])}
+    locales: dict = {}
+
+    def _tiges_locales(ident, sub):
+        if (ident, sub) not in locales:
+            locales[(ident, sub)] = _tiges_medias_locales(ident, sub)
+        return locales[(ident, sub)]
+
+    def _ecarter(raison):
+        _ignores[raison] = _ignores.get(raison, 0) + 1
+
+    garde = []
+    for c in trouves:
+        if not _est_voisin(c["nom"]):
+            garde.append(c)
+            continue
+        k = _cle(c)
+        t = k[3]
+        r = rediriges.get(k)
+        if r is not None:
+            if c.get("connu"):
+                _ecarter("voisin_sans_media")      # le reste d'une copie rangee
+                continue
+            src2, tige2 = r
+            nouveau = tige2 + c["nom"][len(t):]
+            if (IDENTITIES_DIR / c["identity"] / c["sub"] / nouveau).exists():
+                _ecarter("voisin_de_doublon_deja_la")
+                continue
+            garde.append(dict(c, nom=nouveau, src=(c.get("src") if src2 is None else src2)))
+            continue
+        dans_lot = k in tiges_lot
+        local = t in _tiges_locales(c["identity"], c["sub"])
+        if not dans_lot and not local:
+            _ecarter("voisin_sans_media")
+            continue
+        if c.get("connu") and local and not dans_lot:
+            _ecarter("voisin_retire_du_site")
+            continue
+        garde.append(c)
+    return garde
 
 
 ATTENTE_FILE = DATA_DIR / "gdrive_attente.json"
@@ -1617,6 +1774,15 @@ def inventaire(force: bool = False) -> dict:
             a_compter.append((typ["id"], ident, sub, connue,
                               typ["name"].strip()))
     _inv_etape("comptage de %d dossier(s)" % len(a_compter))
+    try:
+        import doublons_vault as _dv
+        _contenus_inv = _dv.IndexContenu()
+    except Exception:
+        _contenus_inv = None
+    _st_inv = _load_state()
+    _connus_inv = ({r.get("id") for r in (_st_inv.get("uploaded") or {}).values()
+                    if isinstance(r, dict) and r.get("id")}
+                   | set(_st_inv.get("imported") or {}))
     fichiers = _lister_paralleles(sess, [(t[0], False) for t in a_compter],
                                   echecs_listage)
 
@@ -1644,6 +1810,8 @@ def inventaire(force: bool = False) -> dict:
         # reconnaissent au md5, jamais a la seule taille.
         ids_copies = {j["id"] for j in copies_du_dossier(liste)}
         n = 0
+        tiges_comptees = set()
+        voisins = []
         for f in liste:
             nom = Path(f["name"]).name
             if Path(nom).suffix.lower() not in exts:
@@ -1654,9 +1822,41 @@ def inventaire(force: bool = False) -> dict:
             if f.get("id") in ids_copies:
                 copies[0] += 1
                 continue
+            if _est_voisin(nom):
+                voisins.append((nom, f.get("id")))
+                continue
+            # Meme contenu deja sur le site sous un autre nom (une copie rangee
+            # par doublons_vault) : l'import ne la ramene pas, elle ne manque
+            # donc pas -- sinon la page annoncait ~380 « manquants » apres
+            # chaque rangement.
+            # (le nom d'abord : un fichier synchronise normalement a
+            # evidemment le meme contenu que son homonyme du site)
+            if (_contenus_inv is not None
+                    and not (IDENTITIES_DIR / ident / sub / nom).exists()
+                    and _contenus_inv.present(
+                        IDENTITIES_DIR / ident / sub, int(f.get("size") or 0),
+                        f.get("md5Checksum") or "", Path(nom).suffix.lower() in VIDEO_EXTS)):
+                copies[0] += 1
+                continue
+            tiges_comptees.add(Path(nom).stem)
             n += 1
+        # un voisin sans son media (ni sur le site, ni compte manquant) ne
+        # sera pas rapatrie : ce n'est pas un manque non plus
+        locales = _tiges_medias_locales(ident, sub)
+        for nom, fid in voisins:
+            t = _tige_media(nom)
+            if ((IDENTITIES_DIR / ident / sub / nom).exists() or t in tiges_comptees
+                    or (t in locales and fid not in _connus_inv)):
+                n += 1
+            else:
+                # sans son media, ou retire expres du site : l'import ne le
+                # reprend pas (_filtrer_lot), ce n'est donc pas un manque
+                copies[0] += 1
         if n:
             cote_drive[(ident, sub)] = cote_drive.get((ident, sub), 0) + n
+
+    if _contenus_inv is not None:
+        _contenus_inv.fermer()
 
     # Cote site : on compte les memes paires, sans se fier a un quelconque etat
     lignes = []
@@ -1752,7 +1952,11 @@ def _tige_media(nom: str) -> str:
         # .social : les vues d'une vidéo importée de TikTok/Instagram
         # (vault_social.SUFFIXE). Sans lui, le voisin formait un lot à part
         # et n'était pas renommé avec son média.
-        for marq in (".desc", ".acheck", ".montage", ".analyse", ".social"):
+        # .textecheck, .off, .perfect : le verdict « porte du texte », l'etat
+        # eteint et la note Perfect. Sans eux, « x.off.json » avait pour tige
+        # « x.off » : jamais rattache a x, ni renomme avec lui.
+        for marq in (".desc", ".acheck", ".montage", ".analyse", ".social",
+                     ".textecheck", ".off", ".perfect"):
             if tige.lower().endswith(marq):
                 return tige[:-len(marq)]
         return tige
@@ -2248,7 +2452,7 @@ def start_background() -> bool:
     """Lance la synchro dans un thread (une seule à la fois)."""
     global _THREAD
     with _LOCK:
-        if _THREAD is not None and _THREAD.is_alive():
+        if _PAUSE or (_THREAD is not None and _THREAD.is_alive()):
             return False
 
         def _run():
