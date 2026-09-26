@@ -25,6 +25,14 @@ Jessye sur GMS qui sont comptés, chaque personne c'est un truc ». Donc :
   Infloww de Jessye qu'aucun lien GMS ne vise sont listés à part, non
   comptés.
 
+- UNE PÉRIODE (?du=AAAA-MM-JJ&au=AAAA-MM-JJ, formulaire en tête de page) :
+  mêmes personnes, mêmes règles, mais les chiffres de ces jours-là. Clics OF,
+  subs et gains viennent alors de MyPuls (un appel pour tous les liens, bornes
+  incluses, heure de Paris), les clics US de GetMySocial sur les mêmes jours
+  (calculés en arrière-plan, gardés sur disque ; périodes distinctes et
+  appels plafonnés par jour ; MyPuls attendu 5 s au plus). Sans
+  période, la vue Infloww « depuis toujours » est inchangée ; Discord aussi.
+
 Deux sorties : la page /infloww/liens, sans JavaScript (clé ?k= pour les VA
 sans compte), et des messages Discord de Bixby dans « inflow-resultat ».
 L'ENVOI DISCORD EST COUPÉ tant que data/infloww_liens_config.json ne porte pas
@@ -91,12 +99,58 @@ US_PAUSE_S = 0.3                     # entre deux appels, comme le podium
 # survivrait aux bouchons et partirait sur le vrai GetMySocial.
 US_EN_FOND = True
 
+# ─── une PÉRIODE choisie sur la page (?du=AAAA-MM-JJ&au=AAAA-MM-JJ) ───────
+# Le propriétaire (26/09) : « je sélectionne les cinq derniers jours jusqu'à
+# aujourd'hui, je fais OK, et ça retravaille les calculs ». Infloww ne donne
+# que des compteurs cumulés depuis la création du lien : les chiffres d'une
+# période viennent de MyPuls (« les clics avec MyPuls »), qui rend TOUS les
+# liens de suivi en un seul appel, période comprise. Sans période : la vue
+# Infloww d'avant, inchangée.
+PLANCHER = dt.date.fromisoformat(pd.ALLTIME_DEPUIS)   # avant les premiers liens
+MYPULS_TTL_S = 600                   # une période relue au plus toutes les 10 min
+_MYPULS_CACHE: Dict[Tuple[str, str], Dict[str, Any]] = {}
+_MYPULS_CACHE_MAX = 40
+# MyPuls lent ou muet (relecture du 26/09) : chaque affichage d'une période
+# attendait les 30 s de mypuls.api_get, sans garder trace de l'échec, et sur
+# un 429 relançait jusqu'à six appels — ce qui prolongeait la limitation pour
+# tout le tableau de bord. La lecture part donc dans un fil, UN par période ;
+# la page ne l'attend que MYPULS_ATTENTE_S (compté depuis le départ du fil :
+# un rechargement pendant la lecture sort tout de suite) ; un échec est gardé
+# MYPULS_ECHEC_S, sans rappeler MyPuls entre-temps.
+MYPULS_ATTENTE_S = 5.0
+MYPULS_ECHEC_S = 90
+_MYPULS_ECHECS: Dict[Tuple[str, str], Dict[str, Any]] = {}
+_MYPULS_FILS: Dict[Tuple[str, str], Dict[str, Any]] = {}
+# à part de _VERROU, que l'envoi Discord garde pendant tout un relevé
+_VERROU_MP = threading.Lock()
+# Clics US d'une période : un appel GetMySocial par personne, comme depuis
+# toujours, mais sur un quota serré et partagé avec le tableau de bord (épuisé
+# le 26/09 au petit matin). D'où un cache disque par (personne, période) et un
+# plafond de périodes DISTINCTES calculées par jour : au-delà, « — », dit.
+US_PERIODES_FICHIER = DATA_DIR / "infloww_liens_us_periodes.json"
+US_PERIODES_MAX_JOUR = 6
+# Le plafond de périodes DISTINCTES ne bornait pas les appels (relecture du
+# 26/09) : une période qui finit aujourd'hui repartait pour tout le monde
+# toutes les 2 h sans compter dans le plafond — trois raccourcis ouverts
+# toutes les 2 h, 36 calculs complets par jour, 1 008 appels avec 28
+# personnes. D'où un BUDGET d'appels par jour, décompté à CHAQUE appel
+# (recalculs, reprises et vérifications de zéro compris) : 6 par personne,
+# soit six calculs complets. Au-delà, plus rien avant le lendemain, dit.
+US_PERIODES_APPELS_PAR_PERSONNE = 6
+US_OUVERTE_FRAIS_S = 2 * 3600        # période qui finit aujourd'hui : recalculée toutes les 2 h
+US_PERIODE_ESSAIS_MAX = 3            # relevés ratés d'une personne sur une période, par jour
+US_PERIODES_GARDE_S = 45 * 86400     # au-delà, une période plus consultée sort du cache
+
 TRIS = ("nom", "us", "clics", "subs", "cvr", "par_sub")
 SENS = ("asc", "desc")
 
 _VERROU = threading.RLock()
 _VERROU_US = threading.Lock()
 _FIL_US: Dict[str, Any] = {"fil": None}
+# le calcul d'une période a son propre verrou : il ne bloque pas le relevé
+# « depuis toujours » du démon, et n'est pas bloqué par lui
+_VERROU_US_P = threading.Lock()
+_FIL_US_P: Dict[str, Any] = {"fil": None}
 
 
 def _texte_erreur(e: Exception) -> str:
@@ -438,6 +492,475 @@ def _infloww() -> Dict[str, Any]:
             "lu_a": suivi.get("plus_ancien") or time.time()}
 
 
+# ─── une période : les paramètres de l'adresse ───────────────────────────
+_DATE_ISO = re.compile(r"(\d{4})-(\d{1,2})-(\d{1,2})")
+_DATE_FR = re.compile(r"(\d{1,2})/(\d{1,2})/(\d{4})")
+
+
+def _date_arg(v: Any) -> Optional[dt.date]:
+    """AAAA-MM-JJ (ce qu'envoie un champ date), ou JJ/MM/AAAA (ce qu'on tape
+    dans le champ texte d'un navigateur qui n'a pas de calendrier). Autre
+    chose, ou une date qui n'existe pas (31/02) : None."""
+    s = str(v or "").strip()[:20]
+    m = _DATE_ISO.fullmatch(s)
+    if m:
+        a, mo, j = (int(x) for x in m.groups())
+    else:
+        m = _DATE_FR.fullmatch(s)
+        if not m:
+            return None
+        j, mo, a = (int(x) for x in m.groups())
+    try:
+        return dt.date(a, mo, j)
+    except ValueError:
+        return None
+
+
+def periode_des_args(args: Mapping[str, Any], aujourdhui: str = "") -> Optional[Tuple[str, str]]:
+    """(du, au) en AAAA-MM-JJ, ou None = depuis toujours (la vue Infloww).
+
+    Une date illisible est ignorée ; début seul = jusqu'à aujourd'hui, fin
+    seule = depuis le premier jour ; bornes ramenées entre le 01/01/2024 et
+    aujourd'hui (heure de Paris) ; début après fin = inversées."""
+    try:
+        auj = dt.date.fromisoformat(aujourdhui or _aujourdhui())
+    except ValueError:
+        auj = dt.date.today()
+    du, au = _date_arg(args.get("du")), _date_arg(args.get("au"))
+    if du is None and au is None:
+        return None
+    du = du or PLANCHER
+    au = au or auj
+    du, au = (min(max(d, PLANCHER), auj) for d in (du, au))
+    if du > au:
+        du, au = au, du
+    return du.isoformat(), au.isoformat()
+
+
+# ─── une période : MyPuls ────────────────────────────────────────────────
+# Relevé réel du 26/09 (tracking-links, from/to) : la réponse rend la période
+# comptée, « 2026-09-21T00:00:00+02:00 » → « 2026-09-26T23:59:59+02:00 » pour
+# from=2026-09-21&to=2026-09-26 : journées ENTIÈRES, heure de Paris, les deux
+# bornes INCLUSES ; le 25 plus le 26 donnent exactement 25→26 (clics, subs et
+# gains). Le revenu est NET (sans période, c110 : 652,16 = le net d'Infloww).
+def _entier(v: Any) -> Optional[int]:
+    try:
+        return None if v is None or v == "" or isinstance(v, bool) else int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _lire_mypuls(d: Any) -> Dict[str, Any]:
+    """Les liens de suivi de Jessye dans une réponse tracking-links, à la forme
+    d'infloww._lien_norm (net en centimes) : construire() s'en sert tel quel.
+    Rattachés par l'ADRESSE (pseudo + code), jamais par le nom : « c47 »
+    existe chez cinq créatrices."""
+    items = d if isinstance(d, list) else None
+    if items is None and isinstance(d, Mapping):
+        inner = d.get("data")
+        items = inner.get("data") if isinstance(inner, Mapping) else inner
+    if not isinstance(items, list):
+        return {"erreur": f"MyPuls a rendu une réponse de forme imprévue ({type(d).__name__})"}
+    liens: List[Dict[str, Any]] = []
+    vus: Dict[str, int] = {}
+    illisibles = doublons = champs = 0
+    for it in items:
+        if not isinstance(it, Mapping):
+            illisibles += 1
+            continue
+        url = str(it.get("url") or "").strip()
+        m = _URL_OF.match(url)
+        if not m:
+            # un lien de Jessye à l'adresse illisible : compté, pas avalé
+            if CREATRICE in url.lower():
+                illisibles += 1
+            continue
+        if m.group(1).lower() != CREATRICE:
+            continue
+        code = str(int(m.group(2)))
+        if code in vus:
+            doublons += 1            # la même adresse deux fois : comptée UNE fois
+            continue
+        vus[code] = 1
+        rev = it.get("revenue")
+        total = rev.get("total") if isinstance(rev, Mapping) else rev
+        try:
+            net = None if total is None or isinstance(total, bool) else int(round(float(total) * 100))
+        except (TypeError, ValueError):
+            net = None
+        subs = _entier(it.get("subscribers_period"))
+        if net is None or subs is None:
+            champs += 1
+        liens.append({"id": f"mypuls:{code}", "nom": str(it.get("name") or "").strip(), "code": code,
+                      "clics": _entier(it.get("visits_period")), "abonnes": subs, "net": net,
+                      "termine": it.get("active") is False})
+    compte = _entier(d.get("count")) if isinstance(d, Mapping) else None
+    per = d.get("period") if isinstance(d, Mapping) else None
+    return {"erreur": "", "liens": liens, "illisibles": illisibles, "doublons": doublons,
+            "champs_manquants": champs,
+            "tronque": ([f"MyPuls annonce {compte} liens de suivi, {len(items)} rendus"]
+                        if compte is not None and compte > len(items) else []),
+            "periode_mypuls": ({"from": str(per.get("from") or ""), "to": str(per.get("to") or "")}
+                               if isinstance(per, Mapping) else {}),
+            "devise": str(d.get("currency") or "") if isinstance(d, Mapping) else ""}
+
+
+def _lire_mypuls_api(du: str, au: str) -> Tuple[Dict[str, Any], str]:
+    """UN appel tracking-links : (liens lus, "") ou ({}, pourquoi)."""
+    try:
+        import mypuls
+        # l'API brute et non api_tracking_links : celle-ci ne garde pas le
+        # revenu, et rend [] aussi bien en panne que sans lien — une panne
+        # serait passée pour « aucun sub »
+        r = mypuls.api_get("tracking-links", {"per_page": 500, "from": du, "to": au})
+    except Exception as e:
+        r = {"ok": False, "error": f"{type(e).__name__} : {e}"}
+    if not isinstance(r, Mapping) or not r.get("ok"):
+        return {}, str((r or {}).get("error") if isinstance(r, Mapping) else r or "") or "pas de réponse"
+    v = _lire_mypuls(r.get("data"))
+    return v, str(v.get("erreur") or "")
+
+
+def _releve_mypuls(du: str, au: str) -> None:
+    """Le fil d'une période : lit MyPuls, range la lecture (cache) ou l'échec
+    (gardé MYPULS_ECHEC_S), puis se retire. Ne lève jamais."""
+    cle = (du, au)
+    try:
+        v, raison = _lire_mypuls_api(du, au)
+    except Exception as e:  # par ceinture : un fil qui meurt sans rien ranger ne dirait rien
+        v, raison = {}, f"{type(e).__name__} : {e}"
+    t = time.time()
+    with _VERROU_MP:
+        if raison:
+            _MYPULS_ECHECS[cle] = {"t": t, "raison": raison[:300]}
+            if len(_MYPULS_ECHECS) > _MYPULS_CACHE_MAX:
+                for k in sorted(_MYPULS_ECHECS, key=lambda k: _MYPULS_ECHECS[k]["t"])[:10]:
+                    _MYPULS_ECHECS.pop(k, None)
+        else:
+            v["lu_a"] = t
+            _MYPULS_CACHE[cle] = {"t": t, "v": v}
+            _MYPULS_ECHECS.pop(cle, None)
+            if len(_MYPULS_CACHE) > _MYPULS_CACHE_MAX:
+                for k in sorted(_MYPULS_CACHE, key=lambda k: _MYPULS_CACHE[k]["t"])[:10]:
+                    _MYPULS_CACHE.pop(k, None)
+        if (_MYPULS_FILS.get(cle) or {}).get("fil") is threading.current_thread():
+            _MYPULS_FILS.pop(cle, None)
+
+
+def _sans_mypuls(hit: Optional[Mapping[str, Any]], raison: str, en_cours: bool = False) -> Dict[str, Any]:
+    """MyPuls n'a pas donné de lecture neuve : la dernière réussie de CETTE
+    période si elle existe (« perime » dit pourquoi et de quand), sinon
+    « erreur »."""
+    if hit:
+        return dict(hit["v"], perime=f"{raison[:240]} — chiffres de la lecture du {_heure(hit['t'])}")
+    if en_cours:
+        return {"erreur": raison[:400], "en_cours": True}
+    return {"erreur": f"MyPuls n'a pas répondu : {raison}"[:400]}
+
+
+def _mypuls_periode(du: str, au: str, attente: Optional[float] = None) -> Dict[str, Any]:
+    """Les liens de Jessye sur la période, lus dans MyPuls en UN appel (tous
+    les liens de l'agence), gardés MYPULS_TTL_S. Ne lève jamais, et n'attend
+    pas MyPuls plus de `attente` secondes (MYPULS_ATTENTE_S) : au-delà, la
+    lecture continue dans son fil et la page le dit (« en_cours »)."""
+    attente = MYPULS_ATTENTE_S if attente is None else float(attente)
+    cle = (du, au)
+    with _VERROU_MP:
+        maintenant = time.time()
+        hit = _MYPULS_CACHE.get(cle)
+        if hit and 0 <= maintenant - hit["t"] < MYPULS_TTL_S:
+            return dict(hit["v"])
+        ech = _MYPULS_ECHECS.get(cle)
+        if ech and 0 <= maintenant - ech["t"] < MYPULS_ECHEC_S:
+            # échec récent : pas de nouvel appel, ni d'attente
+            reste = int(MYPULS_ECHEC_S - (maintenant - ech["t"])) + 1
+            return _sans_mypuls(hit, f"{ech['raison']} (essai du {_heure(ech['t'])}, "
+                                     f"pas de nouvel essai avant {reste} s)")
+        en_vol = _MYPULS_FILS.get(cle)
+        if not en_vol or not en_vol["fil"].is_alive():
+            # UN appel à la fois par période : un rechargement pendant la
+            # lecture attend celle-ci, il n'en lance pas une seconde
+            f = threading.Thread(target=_releve_mypuls, args=(du, au), daemon=True,
+                                 name="infloww-liens-mypuls")
+            en_vol = {"fil": f, "debut": maintenant}
+            _MYPULS_FILS[cle] = en_vol
+            f.start()
+    f = en_vol["fil"]
+    f.join(max(0.0, en_vol["debut"] + attente - time.time()))
+    with _VERROU_MP:
+        neuf = _MYPULS_CACHE.get(cle)
+        ech = _MYPULS_ECHECS.get(cle)
+        fini = not f.is_alive()
+    if neuf is not None and neuf is not hit:
+        return dict(neuf["v"])
+    if fini:
+        return _sans_mypuls(hit, (ech or {}).get("raison") or "lecture terminée sans résultat")
+    return _sans_mypuls(hit, f"MyPuls ne répond pas encore (plus de {attente:g} s) : la lecture continue "
+                             "en arrière-plan, rechargez la page dans une minute", en_cours=True)
+
+
+# ─── une période : les clics US (GetMySocial) ────────────────────────────
+def _cle_periode(du: str, au: str) -> str:
+    return f"{du}|{au}"
+
+
+def _us_periodes_cache() -> Dict[str, Any]:
+    return _lire_json(US_PERIODES_FICHIER)
+
+
+def _jour_de(ts: Any) -> str:
+    """Le jour (heure de Paris) d'un horodatage."""
+    try:
+        from zoneinfo import ZoneInfo
+        return dt.datetime.fromtimestamp(float(ts), ZoneInfo("Europe/Paris")).date().isoformat()
+    except Exception:
+        return ""
+
+
+def us_periode_depuis_cache(ents: Mapping[str, Mapping[str, Any]], du: str, au: str,
+                            cache: Optional[Mapping[str, Any]] = None, jour: Optional[str] = None,
+                            maintenant: Optional[float] = None) -> Dict[str, Dict[str, Any]]:
+    """{clé: {us, etat, raison, note}} pour la période. etat : « ok » (relevé
+    pris après la fin de la période, ou il y a moins de 2 h si elle finit
+    aujourd'hui), « ancien » (relevé pris avant la fin de la période, ou sur
+    d'autres liens), « rate », « absent ». Jamais un zéro inventé."""
+    cache = _us_periodes_cache() if cache is None else cache
+    jour = jour or _aujourdhui()
+    maintenant = time.time() if maintenant is None else maintenant
+    per = ((cache.get("periodes") or {}).get(_cle_periode(du, au)) or {})
+    out: Dict[str, Dict[str, Any]] = {}
+    for cle, e in ents.items():
+        c = per.get(cle) or {}
+        v = c.get("us")
+        ids = sorted(str(i) for i in e.get("ids") or [])
+        note = ""
+        if c.get("rate"):
+            etat = "rate"
+            note = "US : dernier relevé raté" + (f", valeur du {_heure(c.get('quand'))}" if v is not None else "")
+        elif v is None:
+            etat = "absent"
+        elif sorted(c.get("ids") or []) != ids:
+            etat, note = "ancien", f"US : relevé du {_heure(c.get('quand'))}, avant un changement de liens"
+        elif str(c.get("jour") or "") > au:
+            etat = "ok"              # pris après la fin de la période : définitif
+        elif jour == au and 0 <= maintenant - float(c.get("quand") or 0) < US_OUVERTE_FRAIS_S:
+            etat = "ok"
+        else:
+            etat, note = "ancien", f"US : relevé du {_heure(c.get('quand'))}"
+        out[cle] = {"us": None if v is None else int(v), "etat": etat, "jour": str(c.get("jour") or ""),
+                    "raison": str(c.get("rate") or ""), "note": note}
+    return out
+
+
+def _a_mesurer_periode(ents: Mapping[str, Mapping[str, Any]], du: str, au: str,
+                       cache: Mapping[str, Any], jour: str, maintenant: float) -> List[str]:
+    etats = us_periode_depuis_cache(ents, du, au, cache, jour, maintenant)
+    per = ((cache.get("periodes") or {}).get(_cle_periode(du, au)) or {})
+    out = []
+    for c in ents:
+        if etats[c]["etat"] == "ok":
+            continue
+        p = per.get(c) or {}
+        if etats[c]["etat"] == "rate":
+            # un raté n'est retenté qu'après 10 min, et trois fois par jour au
+            # plus : chaque essai coûte un appel du quota partagé
+            if maintenant - float(p.get("essai") or 0) < US_REESSAI_S:
+                continue
+            if p.get("essais_jour") == jour and int(p.get("essais") or 0) >= US_PERIODE_ESSAIS_MAX:
+                continue
+        out.append(c)
+    return out
+
+
+def _periodes_du_jour(cache: Mapping[str, Any], jour: str) -> List[str]:
+    return [str(x) for x in ((cache.get("jours") or {}).get(jour) or [])]
+
+
+def _periode_admise(cache: Mapping[str, Any], jour: str, du: str, au: str) -> bool:
+    """Une période déjà calculée aujourd'hui l'est encore ; une nouvelle
+    seulement sous le plafond du jour."""
+    deja = _periodes_du_jour(cache, jour)
+    return _cle_periode(du, au) in deja or len(deja) < US_PERIODES_MAX_JOUR
+
+
+def _budget_jour(nb_personnes: int) -> int:
+    """Les appels GetMySocial permis par jour pour TOUTES les périodes."""
+    return US_PERIODES_APPELS_PAR_PERSONNE * max(1, int(nb_personnes or 0))
+
+
+def _appels_du_jour(cache: Mapping[str, Any], jour: str) -> int:
+    try:
+        return max(0, int((cache.get("appels") or {}).get(jour) or 0))
+    except (AttributeError, TypeError, ValueError):
+        return 0
+
+
+def _verifier_zero(ids: List[str], du: str, au: str) -> Tuple[Optional[int], Optional[Dict[str, int]], str]:
+    """Un relevé (0 clic, aucun pays) relu dans la réponse BRUTE de GetMySocial.
+
+    gms rend (0, {}) aussi bien pour une période sans clic que pour une
+    réponse qu'il n'a pas su lire (constaté le 26/09 : « NOTICE: stale: true »
+    après le JSON). Les visites MyPuls ne tranchent PAS : une visite OF peut
+    venir d'ailleurs que de GetMySocial (lien OF donné en direct, robot
+    d'aperçu) — une personne à 1 clic OF et 0 clic GMS restait « ratée » et
+    coûtait trois appels par jour, sans fin. La réponse brute tranche : un
+    objet qui porte total_clicks est lu, 0 compris ; du texte non lu est un
+    raté. (total, pays, "") ou (None, None, pourquoi)."""
+    try:
+        import gms
+        res = gms.get_analytics_overview(du, au, link_ids=list(ids))
+    except Exception as e:
+        return None, None, f"vérification du 0 : {type(e).__name__} : {e}"[:160]
+    if not isinstance(res, Mapping) or not res.get("ok"):
+        err = str(res.get("error") or "") if isinstance(res, Mapping) else ""
+        return None, None, ("vérification du 0 : " + (err or "pas de réponse"))[:160]
+    d = res.get("data")
+    if not isinstance(d, Mapping) or "total_clicks" not in d:
+        return None, None, "GetMySocial a rendu un relevé illisible (0 clic, aucun pays, réponse non lue)"
+    try:
+        # la lecture de gms, telle quelle : les mêmes pays que le relevé normal
+        tot, pays = gms._lire_analytics(dict(res, data=dict(d)))
+    except Exception:
+        tot, pays = None, None
+    if pays is None:
+        return None, None, "GetMySocial a rendu un relevé illisible (total_clicks non numérique)"
+    return tot, pays, ""
+
+
+def _elaguer(periodes: Mapping[str, Any], maintenant: float) -> Dict[str, Any]:
+    """Les périodes plus touchées depuis US_PERIODES_GARDE_S sortent : le
+    fichier ne grossit pas d'une entrée par période jamais revue."""
+    out = {}
+    for k, per in periodes.items():
+        if not isinstance(per, Mapping):
+            continue
+        dernier = max([float((c or {}).get("quand") or 0) for c in per.values() if isinstance(c, Mapping)]
+                      + [float((c or {}).get("essai") or 0) for c in per.values() if isinstance(c, Mapping)]
+                      + [0.0])
+        if maintenant - dernier < US_PERIODES_GARDE_S:
+            out[k] = per
+    return out
+
+
+def releve_us_periode(ents: Mapping[str, Mapping[str, Any]], du: str, au: str) -> Dict[str, Any]:
+    """Les clics US de la période, UN appel GetMySocial par personne (tous ses
+    liens ensemble), pour les personnes qui n'ont pas de relevé valable.
+
+    Un relevé (0 clic, aucun pays) est ambigu — c'est aussi ce que gms rend
+    quand il n'a pas su lire la réponse : il est vérifié dans la réponse
+    brute (_verifier_zero), un appel de plus. Chaque appel, vérification
+    comprise, est décompté du budget du jour (_budget_jour).
+    """
+    if not _VERROU_US_P.acquire(blocking=False):
+        return {"appels": 0, "rates": 0, "occupe": True}
+    try:
+        jour = _aujourdhui()
+        maintenant = time.time()
+        cache = _us_periodes_cache()
+        cibles = _a_mesurer_periode(ents, du, au, cache, jour, maintenant)
+        if not cibles:
+            return {"appels": 0, "rates": 0}
+        if not _periode_admise(cache, jour, du, au):
+            return {"appels": 0, "rates": 0, "plafond": True}
+        budget = _budget_jour(len(ents))
+        faits = _appels_du_jour(cache, jour)
+        if faits >= budget:
+            return {"appels": 0, "rates": 0, "budget": budget}
+        pause = _pause_gms()
+        if pause > 0:
+            return {"appels": 0, "rates": 0, "pause": pause}
+        import gms
+        cp = _cle_periode(du, au)
+        deja = _periodes_du_jour(cache, jour)
+        # la période compte dans le plafond dès qu'on appelle GetMySocial pour
+        # elle, que les appels réussissent ou non : c'est l'appel qui coûte
+        periodes = _elaguer(dict(cache.get("periodes") or {}), maintenant)
+        per = dict(periodes.get(cp) or {})
+        cache = {"jours": {jour: deja + ([cp] if cp not in deja else [])},
+                 "appels": {jour: faits}, "periodes": periodes, "maj": maintenant}
+        rates = appels = mesures = 0
+        for i, cle in enumerate(cibles):
+            if i and _pause_gms():
+                break                 # quota tombé en route : les suivants restent à relever
+            if faits >= budget:
+                break                 # budget du jour atteint : idem, jusqu'à demain
+            ids = sorted(str(x) for x in ents[cle].get("ids") or [])
+            raison = ""
+            appels += 1
+            faits += 1
+            try:
+                tot, pays = gms.analytics_for_links(ids, du, au)
+            except Exception as e:
+                tot, pays, raison = None, None, f"{type(e).__name__} : {e}"[:160]
+            if pays is not None and not tot and not pays:
+                if faits >= budget:
+                    pays, raison = None, "relevé à 0 clic non vérifié : budget GetMySocial du jour atteint"
+                else:
+                    appels += 1
+                    faits += 1
+                    tot, pays, raison = _verifier_zero(ids, du, au)
+            mesures += 1
+            c = dict(per.get(cle) or {})
+            c["essai"] = time.time()
+            if pays is None:
+                rates += 1
+                if not raison and _pause_gms():
+                    raison = "quota GetMySocial épuisé" + _reprise_gms()
+                n = int(c.get("essais") or 0) if c.get("essais_jour") == jour else 0
+                c.update(rate=f"{jour} : " + (raison or "GetMySocial n'a pas rendu de relevé"),
+                         essais=n + 1, essais_jour=jour)
+            else:
+                c.update(us=int((pays or {}).get("US") or 0), ids=ids, quand=time.time(), jour=jour,
+                         rate="", essais=0)
+            per[cle] = c
+            cache["periodes"] = dict(cache["periodes"], **{cp: per})
+            cache["appels"] = {jour: faits}
+            safe_json.write(US_PERIODES_FICHIER, cache)
+            if i + 1 < len(cibles):
+                _dormir_us(US_PAUSE_S)
+        return {"appels": appels, "rates": rates, "reportes": len(cibles) - mesures,
+                "budget": budget if faits >= budget and mesures < len(cibles) else 0}
+    finally:
+        _VERROU_US_P.release()
+
+
+def _lancer_us_periode(ents: Mapping[str, Mapping[str, Any]], du: str, au: str
+                       ) -> Optional[threading.Thread]:
+    """En arrière-plan, un seul calcul à la fois : une autre période demandée
+    pendant ce temps sera calculée au prochain affichage."""
+    if not US_EN_FOND:
+        releve_us_periode(ents, du, au)
+        return None
+    with _VERROU:
+        f = _FIL_US_P.get("fil")
+        if f is not None and f.is_alive():
+            return f
+        f = threading.Thread(target=releve_us_periode, args=(dict(ents), du, au),
+                             daemon=True, name="infloww-liens-us-periode")
+        _FIL_US_P["fil"] = f
+        f.start()
+        return f
+
+
+def _us_periode_pour_la_page(ents: Mapping[str, Mapping[str, Any]], du: str, au: str) -> Dict[str, Any]:
+    """Lance ce qui manque, sans l'attendre : les chiffres MyPuls de la période
+    s'affichent tout de suite, les clics US suivent. Rend ce que la page doit
+    dire (plafond, budget, pause, calcul en cours)."""
+    jour = _aujourdhui()
+    cache = _us_periodes_cache()
+    if not _a_mesurer_periode(ents, du, au, cache, jour, time.time()):
+        return {}
+    if not _periode_admise(cache, jour, du, au):
+        return {"plafond": True, "calculees": _periodes_du_jour(cache, jour)}
+    budget = _budget_jour(len(ents))
+    if _appels_du_jour(cache, jour) >= budget:
+        return {"budget": budget}
+    if _pause_gms():
+        return {"pause": "quota du jour épuisé" + _reprise_gms()}
+    _lancer_us_periode(ents, du, au)
+    return {"en_cours": True}
+
+
 # ─── le tableau ──────────────────────────────────────────────────────────
 def _somme(liens: List[Mapping[str, Any]]) -> Dict[str, Any]:
     """Clics, subs, CVR et $ / sub de liens Infloww. Le net n'est PAS rendu :
@@ -483,9 +1006,16 @@ def _ordre_defaut(x: Mapping[str, Any]):
 def construire(liens_infloww: List[Any], liens_gms_: List[Any],
                us: Optional[Mapping[str, Mapping[str, Any]]] = None, lu_a: Optional[float] = None,
                tronque: Optional[List[str]] = None, doublons: int = 0, depuis: str = "",
-               repli_gms: str = "", erreur: str = "", us_pause: str = "") -> Dict[str, Any]:
+               repli_gms: str = "", erreur: str = "", us_pause: str = "",
+               source: str = "Infloww", illisibles: int = 0,
+               periode: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
     """Le tableau par personne, à partir des liens normalisés d'infloww
-    (_lien_norm), des liens GetMySocial de l'espace et des clics US relevés."""
+    (_lien_norm), des liens GetMySocial de l'espace et des clics US relevés.
+
+    `source` = « MyPuls » pour une période : mêmes règles (liens DISTINCTS
+    par personne, un code partagé compté une fois au total), les liens étant
+    ceux que _lire_mypuls a mis à la même forme. `periode` : ce que la page
+    doit en dire (bornes, lecture MyPuls, clics US)."""
     us = us or {}
     inf = [x for x in liens_infloww if isinstance(x, Mapping)]
     par_code: Dict[str, List[Mapping[str, Any]]] = {}
@@ -507,7 +1037,7 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
             l = par_id.get(str(gid)) or {}
             code, raison = code_de_l_url(l.get("url"))
             if code and not par_code.get(code):
-                raison = f"code c{code} absent des liens de suivi d'Infloww"
+                raison = f"code c{code} absent des liens de suivi {_de(source)}"
             if raison:
                 introuvables.append({"nom": nom_gms(l), "code": code, "raison": raison})
                 continue
@@ -522,7 +1052,8 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
                                    key=lambda r: (len(r["code"]), r["code"])),
                  "introuvables": introuvables,
                  "us": u.get("us"), "us_etat": u.get("etat") or "absent",
-                 "us_jour": u.get("jour") or "", "us_raison": u.get("raison") or ""}
+                 "us_jour": u.get("jour") or "", "us_raison": u.get("raison") or "",
+                 "us_note": u.get("note") or ""}
         ligne.update(_somme(list(siens.values())))
         lignes.append(ligne)
 
@@ -544,6 +1075,7 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
     maj = max([int(x.get("maj") or 0) for x in inf] or [0])
     return {
         "creatrice": CREATRICE, "equipe": EQUIPE_GMS, "equipe_nom": NOM_EQUIPE,
+        "source": source, "periode": dict(periode or {}),
         "erreur": str(erreur or ""), "repli_gms": str(repli_gms or ""),
         # GetMySocial a coupé pour la journée : les clics US attendent la reprise
         "us_pause": str(us_pause or ""),
@@ -556,7 +1088,7 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
         "nb_infloww": len(inf),
         # une ligne que l'API rend sous une autre forme qu'un objet : comptée,
         # jamais avalée sans trace
-        "illisibles": len(liens_infloww) - len(inf),
+        "illisibles": len(liens_infloww) - len(inf) + int(illisibles or 0),
         "sans_clics": sum(1 for x in comptes if x.get("clics") is None),
         "tronque": list(tronque or []), "doublons": int(doublons or 0), "depuis": depuis,
         # quand Infloww a rafraîchi ses compteurs pour la dernière fois
@@ -564,7 +1096,14 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
     }
 
 
-def _vide(erreur: str) -> Dict[str, Any]:
+def _de(source: str) -> str:
+    return "d'Infloww" if source == "Infloww" else f"de {source}"
+
+
+def _vide(erreur: str, periode: Optional[Tuple[str, str]] = None) -> Dict[str, Any]:
+    if periode:
+        return construire([], [], erreur=erreur, source="MyPuls",
+                          periode={"du": periode[0], "au": periode[1]})
     return construire([], [], erreur=erreur)
 
 
@@ -590,6 +1129,47 @@ def tableau(us: str = "page") -> Dict[str, Any]:
                       lu_a=i.get("lu_a"), tronque=i.get("tronque"), doublons=i.get("doublons") or 0,
                       depuis=str(i.get("depuis") or ""), repli_gms=g["repli"], erreur=erreur,
                       us_pause=("quota du jour épuisé" + _reprise_gms()) if _pause_gms() else "")
+
+
+def tableau_periode(du: str, au: str, us: str = "page") -> Dict[str, Any]:
+    """Le tableau par personne sur une période (bornes incluses, AAAA-MM-JJ,
+    déjà validées par periode_des_args) : clics OF, subs et gains de MyPuls,
+    clics US de GetMySocial sur les mêmes jours. `us` : « page » (calcul en
+    arrière-plan), « calcul » (sur place), « cache » (aucun appel). Ne lève
+    jamais."""
+    g = liens_gms()
+    m = _mypuls_periode(du, au)
+    ents, _ = entites(g["liens"])
+    erreur = m.get("erreur") or ""
+    if not g["liens"]:
+        erreur = erreur or (f"GetMySocial n'a pas répondu ({g['repli']}) et le site n'a "
+                            f"aucune liste de secours pour « {NOM_EQUIPE} »")
+    per: Dict[str, Any] = {"du": du, "au": au, "perime": m.get("perime") or "",
+                           "periode_mypuls": m.get("periode_mypuls") or {},
+                           "devise": m.get("devise") or "", "doublons": int(m.get("doublons") or 0),
+                           "champs_manquants": int(m.get("champs_manquants") or 0),
+                           # MyPuls n'a pas répondu dans le temps que la page lui laisse
+                           "mypuls_en_cours": bool(m.get("en_cours"))}
+    commun = dict(lu_a=m.get("lu_a"), tronque=m.get("tronque"), repli_gms=g["repli"], erreur=erreur,
+                  source="MyPuls", illisibles=int(m.get("illisibles") or 0))
+    liens = m.get("liens") or []
+    if not erreur:
+        try:
+            if us == "calcul":
+                r = releve_us_periode(ents, du, au)
+                if r.get("plafond"):
+                    per["us_info"] = {"plafond": True,
+                                      "calculees": _periodes_du_jour(_us_periodes_cache(), _aujourdhui())}
+                else:
+                    per["us_info"] = {"budget": r["budget"]} if r.get("budget") else {}
+            elif us == "page":
+                per["us_info"] = _us_periode_pour_la_page(ents, du, au)
+        except Exception as e:  # les clics US ne font pas tomber la page
+            print(f"[infloww-liens] clics US de la période : {type(e).__name__}: {e}", flush=True)
+    info = per.get("us_info") or {}
+    if _pause_gms() and not info.get("plafond") and not info.get("budget"):
+        per["us_info"] = dict(per.get("us_info") or {}, pause="quota du jour épuisé" + _reprise_gms())
+    return construire(liens, g["liens"], us=us_periode_depuis_cache(ents, du, au), periode=per, **commun)
 
 
 # ─── formats ─────────────────────────────────────────────────────────────
@@ -628,6 +1208,13 @@ def _heure(ts: Optional[float]) -> str:
 def _jour_court(iso: str) -> str:
     try:
         return dt.date.fromisoformat(str(iso)).strftime("%d/%m")
+    except Exception:
+        return "?"
+
+
+def _jour_long(iso: str) -> str:
+    try:
+        return dt.date.fromisoformat(str(iso)).strftime("%d/%m/%Y")
     except Exception:
         return "?"
 
@@ -1021,17 +1608,34 @@ def trier(lignes: List[Mapping[str, Any]], tri: str = "nom", sens: str = "asc"
     return sorted(avec, key=cle, reverse=(sens == "desc")) + sans
 
 
-def _lien_tri(col: str, tri: str, sens: str, cle: str) -> str:
+def _adresse(*paires: Tuple[str, Any]) -> str:
+    """« ?a=1&amp;b=2 », prête pour un href. Paramètres vides omis, valeurs
+    encodées (la clé vient de l'adresse : elle ne doit rien pouvoir casser),
+    ordre fixe tri, sens, du, au, k. Rien du tout : « ? », la page nue."""
+    from urllib.parse import quote
+    q = "&".join(f"{k}={quote(str(v), safe='')}" for k, v in paires if v)
+    return _e("?" + q)
+
+
+def _lien_page(tri: str, sens: str, cle: str, du: str = "", au: str = "") -> str:
+    """Un lien vers la page, tri gardé (omis quand c'est celui par défaut)."""
+    defaut = (tri, sens) == ("nom", "asc")
+    return _adresse(("tri", "" if defaut else tri), ("sens", "" if defaut else sens),
+                    ("du", du), ("au", au), ("k", cle))
+
+
+def _lien_tri(col: str, tri: str, sens: str, cle: str, du: str = "", au: str = "") -> str:
     if col == tri:
         nouveau = "asc" if sens == "desc" else "desc"
     else:
         nouveau = "asc" if col == "nom" else "desc"
-    # des valeurs connues d'avance, plus la clé : rien à injecter
-    return f"?tri={col}&amp;sens={nouveau}" + (f"&amp;k={_e(cle)}" if cle else "")
+    # la période et la clé suivent : trier ne ramène pas à « depuis toujours »,
+    # et un VA sans compte ne perd pas l'accès
+    return _adresse(("tri", col), ("sens", nouveau), ("du", du), ("au", au), ("k", cle))
 
 
-def _detail_personne(x: Mapping[str, Any]) -> str:
-    """Sous le nom, en petit : les liens Infloww comptés, et ce qui manque."""
+def _detail_personne(x: Mapping[str, Any], source: str = "Infloww") -> str:
+    """Sous le nom, en petit : les liens de suivi comptés, et ce qui manque."""
     d: List[str] = []
     for r in x.get("infloww") or []:
         s = f'{_e(r.get("nom")) or "(sans nom)"} · c{_e(r.get("code"))}'
@@ -1040,14 +1644,18 @@ def _detail_personne(x: Mapping[str, Any]) -> str:
         d.append(f"<span>{s}</span>")
     for r in x.get("introuvables") or []:
         nom = f"« {_e(r.get('nom'))} » : " if r.get("nom") else ""
-        d.append(f'<span class="manque">{nom}lien Infloww introuvable — {_e(r.get("raison"))}</span>')
+        d.append(f'<span class="manque">{nom}lien {_e(source)} introuvable — {_e(r.get("raison"))}</span>')
     if int(x.get("nb_gms") or 0) > 1:
         d.append(f"<span>{_nb(x['nb_gms'])} liens GetMySocial</span>")
     # Clics US : la date seulement quand elle n'est pas celle du jour. « Pas
     # encore relevé » n'est dit qu'une fois, en tête : répété sur vingt-huit
     # lignes, il doublait la hauteur du tableau sur un téléphone.
     etat = x.get("us_etat")
-    if etat == "ancien":
+    if x.get("us_note"):
+        # une période : la note est déjà écrite (heure du relevé, raté)
+        cl = ' class="manque"' if etat == "rate" else ""
+        d.append(f'<span{cl}>{_e(x["us_note"])}</span>')
+    elif etat == "ancien":
         d.append(f'<span>US : relevé du {_e(_jour_court(x.get("us_jour")))}</span>')
     elif etat == "rate":
         d.append('<span class="manque">US : dernier relevé raté'
@@ -1057,19 +1665,19 @@ def _detail_personne(x: Mapping[str, Any]) -> str:
 
 
 def _table_personnes(lignes: List[Mapping[str, Any]], T: Mapping[str, Any], tri: str, sens: str,
-                     cle: str) -> str:
+                     cle: str, du: str = "", au: str = "", source: str = "Infloww") -> str:
     cols = (("nom", "Personne", "nom"), ("us", "Clics US", "n"), ("clics", "Clics OF", "n"),
             ("subs", "Subs", "n"), ("cvr", "CVR", "n"), ("par_sub", "$\u00a0/\u00a0sub", "n"))
     th = []
     for col, titre, cl in cols:
         fl = (" ▾" if sens == "desc" else " ▴") if col == tri else ""
         on = " on" if col == tri else ""
-        th.append(f'<th class="{cl}{on}"><a href="{_lien_tri(col, tri, sens, cle)}">{titre}{fl}</a></th>')
+        th.append(f'<th class="{cl}{on}"><a href="{_lien_tri(col, tri, sens, cle, du, au)}">{titre}{fl}</a></th>')
     corps = []
     for x in lignes:
         nom = _e(x.get("nom")) or '<span class="faible">(sans nom)</span>'
         us_cl = "" if x.get("us_etat") == "ok" else " vieux"
-        corps.append(f'<tr><td class="nom"><b>{nom}</b>{_detail_personne(x)}</td>'
+        corps.append(f'<tr><td class="nom"><b>{nom}</b>{_detail_personne(x, source)}</td>'
                      f'<td class="n{us_cl}">{_nb(x.get("us"))}</td>'
                      f'<td class="n">{_nb(x.get("clics"))}</td>'
                      f'<td class="n fort">{_nb(x.get("subs"))}</td>'
@@ -1088,7 +1696,7 @@ def _table_personnes(lignes: List[Mapping[str, Any]], T: Mapping[str, Any], tri:
             f'<tbody>{"".join(corps)}</tbody><tfoot>{pied}</tfoot></table></div>')
 
 
-def _table_hors(lignes: List[Mapping[str, Any]]) -> str:
+def _table_hors(lignes: List[Mapping[str, Any]], source: str = "Infloww") -> str:
     """Les liens Infloww qu'aucun lien GMS ne vise. Pas de total : ils ne
     comptent pas, un total les ferait lire comme s'ils comptaient."""
     corps = []
@@ -1102,34 +1710,57 @@ def _table_hors(lignes: List[Mapping[str, Any]]) -> str:
                      f'<td class="n">{_pastille(_pct(x.get("cvr")), niveau(x.get("cvr"), SEUIL_CVR))}</td>'
                      f'<td class="n">{_pastille(_dollars(x.get("par_sub")), niveau(x.get("par_sub"), SEUIL_PAR_SUB))}'
                      f'</td></tr>')
-    return ('<div class="boite"><table><thead><tr><th class="nom">Lien Infloww</th><th class="n">Clics OF</th>'
+    return (f'<div class="boite"><table><thead><tr><th class="nom">Lien {_e(source)}</th><th class="n">Clics OF</th>'
             '<th class="n">Subs</th><th class="n">CVR</th><th class="n">$\u00a0/\u00a0sub</th></tr></thead>'
             f'<tbody>{"".join(corps)}</tbody></table></div>')
 
 
-def _avertissements(t: Mapping[str, Any], lignes: List[Mapping[str, Any]]) -> List[str]:
+def _avertissements(t: Mapping[str, Any], lignes: List[Mapping[str, Any]], cle: str = "",
+                    tri: str = "nom", sens: str = "asc") -> List[str]:
     h: List[str] = []
+    source = str(t.get("source") or "Infloww")
+    per = t.get("periode") or {}
+    if per.get("perime"):
+        h.append(f'<div class="avert"><b>MyPuls n\'a pas répondu</b> ({_e(per["perime"])}).</div>')
     if t.get("repli_gms"):
         h.append(f'<div class="avert"><b>GetMySocial n\'a pas répondu</b> ({_e(t["repli_gms"])}) : '
                  f'liste des liens reprise du cache du site ({_nb(t.get("nb_gms"))} liens), '
                  "peut-être ancienne ou incomplète.</div>")
     if t.get("tronque"):
-        h.append('<div class="avert">Liste Infloww INCOMPLÈTE : la pagination s\'est arrêtée sur '
+        h.append(f'<div class="avert">Liste {_e(source)} INCOMPLÈTE : la pagination s\'est arrêtée sur '
                  + _e(", ".join(str(x) for x in t["tronque"])) + ".</div>")
     if t.get("illisibles"):
-        h.append(f'<div class="avert">{_nb(t["illisibles"])} ligne(s) rendue(s) par Infloww sous '
+        h.append(f'<div class="avert">{_nb(t["illisibles"])} ligne(s) rendue(s) par {_e(source)} sous '
                  "une forme illisible : non comptée(s).</div>")
+    if per.get("doublons"):
+        h.append(f'<div class="avert">{_nb(per["doublons"])} lien(s) rendu(s) deux fois par MyPuls '
+                 "(même adresse) : comptés une seule fois.</div>")
+    if per.get("champs_manquants"):
+        h.append(f'<div class="avert">{_nb(per["champs_manquants"])} lien(s) MyPuls sans nombre de subs '
+                 "ou sans gains lisibles : comptés à zéro sur ce point.</div>")
+    if per.get("devise") and per["devise"] != "USD":
+        h.append(f'<div class="avert">MyPuls compte les gains en {_e(per["devise"])}, pas en dollars : '
+                 "le $ / sub est dans cette monnaie.</div>")
+    pm = per.get("periode_mypuls") or {}
+    if pm.get("from") and pm.get("to") and (pm["from"][:10], pm["to"][:10]) != (per.get("du"), per.get("au")):
+        h.append(f'<div class="avert">MyPuls a compté du {_e(pm["from"])} au {_e(pm["to"])}, '
+                 "pas exactement la période demandée.</div>")
     if t.get("gms_sans_id"):
         h.append(f'<div class="avert">{_nb(t["gms_sans_id"])} lien(s) GetMySocial sans identifiant : '
                  "non comptés.</div>")
     if t.get("introuvables"):
         h.append(f'<div class="avert">{_nb(t["introuvables"])} lien(s) GetMySocial sans lien de suivi '
-                 "Infloww en face : la personne est affichée avec « — », pas avec un zéro "
+                 f"{_e(source)} en face : la personne est affichée avec « — », pas avec un zéro "
                  "(détail sous son nom).</div>")
     for p in t.get("partages") or []:
-        h.append(f'<div class="avert">Le lien Infloww « {_e(p["nom"])} » (c{_e(p["code"])}) est visé par '
+        h.append(f'<div class="avert">Le lien {_e(source)} « {_e(p["nom"])} » (c{_e(p["code"])}) est visé par '
                  f'plusieurs personnes ({_e(", ".join(p["personnes"]))}) : compté chez chacune, '
                  "UNE seule fois dans le total.</div>")
+    if per:
+        a = _avert_us_periode(per, lignes, cle, tri, sens)
+        if a:
+            h.append(a)
+        return h
     etats = [x.get("us_etat") for x in lignes]
     rates, anciens, absents = etats.count("rate"), etats.count("ancien"), etats.count("absent")
     if rates or anciens or absents:
@@ -1150,19 +1781,166 @@ def _avertissements(t: Mapping[str, Any], lignes: List[Mapping[str, Any]]) -> Li
     return h
 
 
+def _libelle_periode(du: str, au: str, auj: str = "") -> str:
+    """« 21/09 → 26/09 », l'année seulement quand ce n'est pas celle en cours."""
+    an = (auj or _aujourdhui())[:4]
+    f = (lambda d: _jour_court(d) if d[:4] == an else _jour_long(d))  # noqa: E731
+    return f(du) if du == au else f"{f(du)} → {f(au)}"
+
+
+def _avert_us_periode(per: Mapping[str, Any], lignes: List[Mapping[str, Any]], cle: str,
+                      tri: str, sens: str) -> str:
+    """Ce que la page dit des clics US d'une période, en UNE boîte : répété
+    sur chaque ligne, ça doublait la hauteur du tableau sur un téléphone."""
+    info = per.get("us_info") or {}
+    etats = [x.get("us_etat") for x in lignes]
+    rates, anciens, absents = etats.count("rate"), etats.count("ancien"), etats.count("absent")
+    if not (rates or anciens or absents):
+        return ""
+    if info.get("plafond"):
+        deja = [p.split("|", 1) for p in info.get("calculees") or [] if "|" in p]
+        liens = ", ".join(f'<a href="{_lien_page(tri, sens, cle, d, a)}">{_e(_libelle_periode(d, a))}</a>'
+                          for d, a in deja)
+        return ('<div class="avert">Clics US : déjà ' + _nb(US_PERIODES_MAX_JOUR)
+                + " périodes différentes calculées aujourd'hui, le plafond du jour (le quota GetMySocial "
+                "est partagé avec le tableau de bord) : pas de calcul pour celle-ci avant demain, "
+                "« — » sauf relevé déjà gardé. Les autres chiffres, eux, sont bien ceux de la période."
+                + (f" Périodes déjà calculées aujourd'hui : {liens}." if liens else "") + "</div>")
+    if info.get("budget"):
+        return ('<div class="avert">Clics US : les ' + _nb(info["budget"]) + " appels GetMySocial du jour "
+                f"réservés aux périodes sont faits ({_nb(US_PERIODES_APPELS_PAR_PERSONNE)} par personne ; le "
+                "quota est partagé avec le tableau de bord) : pas de nouveau calcul avant demain. Les relevés "
+                "déjà gardés restent (en gris s'ils ont été pris avant la fin de la période), « — » sinon. "
+                "Les autres chiffres, eux, sont bien ceux de la période.</div>")
+    m = []
+    if anciens:
+        m.append(f"{_nb(anciens)} relevé(s) pris avant la fin de la période (en gris, heure sous le nom)")
+    if rates:
+        m.append(f"{_nb(rates)} en échec au dernier essai (retenté dans 10 min, trois fois par jour au plus)")
+    if absents:
+        m.append(f"{_nb(absents)} pas encore relevé(s) (—)")
+    if info.get("pause"):
+        suite = (f". GetMySocial n'accepte plus d'appel ({_e(info['pause'])}) : "
+                 "le calcul reprendra à un prochain affichage.")
+    else:
+        suite = ". Le calcul se fait en arrière-plan : rechargez dans une minute."
+    return '<div class="avert">Clics US de la période : ' + " ; ".join(m) + suite + "</div>"
+
+
+def _titre_periode(du: str, au: str, auj: str) -> str:
+    """« Du 21/09 au 26/09 · MyPuls », « Le 26/09 · MyPuls » ou « Depuis
+    toujours · Infloww » : d'où viennent les chiffres, avant tout le reste."""
+    if not du:
+        return "Depuis toujours · Infloww"
+    f = _jour_long if (du[:4] != auj[:4] or au[:4] != auj[:4]) else _jour_court
+    return (f"Le {f(du)}" if du == au else f"Du {f(du)} au {f(au)}") + " · MyPuls"
+
+
+def _bornes_mypuls(pm: Mapping[str, Any]) -> str:
+    """« du 21/09/2026 00:00:00 au 26/09/2026 23:59:59, heure de Paris
+    (UTC+02:00) » à partir des bornes que MyPuls rend avec ses chiffres ;
+    "" si elles manquent ou ne se lisent pas."""
+    try:
+        d0, d1 = (dt.datetime.fromisoformat(str(pm.get(k) or "")) for k in ("from", "to"))
+    except ValueError:
+        return ""
+    z = d0.strftime("%z")
+    return (f"du {d0:%d/%m/%Y %H:%M:%S} au {d1:%d/%m/%Y %H:%M:%S}, heure de Paris"
+            + (f" (UTC{z[:3]}:{z[3:]})" if z else ""))
+
+
+def _formulaire(du: str, au: str, tri: str, sens: str, cle: str, auj: str) -> str:
+    """Le choix de la période, SANS JavaScript : un formulaire GET qui porte
+    aussi la clé (sans elle, un VA sans compte perdait l'accès en validant)
+    et le tri, plus des raccourcis en simples liens."""
+    caches = "".join(f'<input type="hidden" name="{n}" value="{_e(v)}">'
+                     for n, v in (("k", cle), ("tri", tri), ("sens", sens)) if v)
+    try:
+        j = dt.date.fromisoformat(auj)
+    except ValueError:
+        j = dt.date.today()
+    raccourcis = (("Depuis toujours", "", ""), ("Aujourd'hui", auj, auj),
+                  ("7 derniers jours", (j - dt.timedelta(days=6)).isoformat(), auj),
+                  ("30 derniers jours", (j - dt.timedelta(days=29)).isoformat(), auj))
+    liens = []
+    for lib, d, a in raccourcis:
+        on = ' class="on" aria-current="page"' if (d, a) == (du, au) else ""
+        liens.append(f'<a href="{_lien_page(tri, sens, cle, d, a)}"{on}>{_e(lib)}</a>')
+    bornes = f'min="{_e(PLANCHER.isoformat())}" max="{_e(auj)}"'
+    return (f'<form class="periode" method="get">{caches}'
+            '<span class="lib">Période</span>'
+            f'<input type="date" name="du" value="{_e(du)}" {bornes} aria-label="Date de début">'
+            '<span class="fl" aria-hidden="true">→</span>'
+            f'<input type="date" name="au" value="{_e(au)}" {bornes} aria-label="Date de fin">'
+            '<button type="submit">OK</button></form>'
+            f'<nav class="raccourcis" aria-label="Périodes">{"".join(liens)}</nav>')
+
+
+def _note(t: Mapping[str, Any], du: str, au: str, auj: str) -> List[str]:
+    source = str(t.get("source") or "Infloww")
+    if not du:
+        note = [f"<b>Personnes</b> : liens GetMySocial de l'espace « {_e(NOM_EQUIPE)} », un lien SPAM "
+                "compte à part ; une personne additionne ses liens Infloww distincts",
+                "<b>Clics US</b> : clics venus des États-Unis sur ses liens GetMySocial, depuis toujours "
+                "(la mesure « Clics US » du tableau de bord et du podium), relevés une fois par jour",
+                "<b>Clics OF</b> : clics OnlyFans du lien de suivi, lus dans Infloww (pas dans MyPuls)",
+                "<b>CVR</b> = subs ÷ clics OF ; <b>$ / sub</b> = gains nets ÷ subs",
+                "compteurs Infloww cumulés depuis la création de chaque lien, mis à jour toutes les 2 h",
+                f"lu le {_e(_heure(t.get('lu_a')))} (heure de Paris)"]
+        if t.get("maj_infloww"):
+            note.append(f"compteurs rafraîchis par Infloww le {_e(_heure(t['maj_infloww']))}")
+    else:
+        # la sémantique de from/to, telle que MyPuls la rend avec ses chiffres
+        # (relevé du 26/09 : journées entières, heure de Paris, bornes incluses)
+        bornes = _bornes_mypuls((t.get("periode") or {}).get("periode_mypuls") or {})
+        note = [("<b>Période</b> : " + (_e(bornes) + ", les deux jours inclus (bornes rendues par MyPuls)"
+                                        if bornes else
+                                        f"du {_e(_jour_long(du))} à 00:00:00 au {_e(_jour_long(au))} à "
+                                        "23:59:59, heure de Paris, les deux jours inclus")),
+                f"<b>Personnes</b> : liens GetMySocial de l'espace « {_e(NOM_EQUIPE)} », un lien SPAM "
+                "compte à part ; une personne additionne ses liens de suivi distincts",
+                "<b>Clics US</b> : clics venus des États-Unis sur ses liens GetMySocial pendant ces mêmes "
+                "jours, calculés en arrière-plan puis gardés (toutes les 2 h si la période finit "
+                f"aujourd'hui) ; {_nb(US_PERIODES_MAX_JOUR)} périodes différentes et "
+                f"{_nb(US_PERIODES_APPELS_PAR_PERSONNE)} appels GetMySocial par personne par jour au plus"
+                + (f" ({_nb(_budget_jour(len(t['lignes'])))} en tout)" if t.get("lignes") else "")
+                + ", le quota GetMySocial est partagé ; un 0 n'est affiché qu'une fois relu dans la réponse "
+                "brute de GetMySocial",
+                "<b>Clics OF</b> et <b>Subs</b> : visites et abonnés du lien de suivi sur la période, "
+                "lus dans MyPuls (pas dans Infloww, qui ne donne que des cumuls)",
+                "<b>CVR</b> = subs ÷ clics OF ; <b>$ / sub</b> = gains nets que MyPuls attribue au lien "
+                "sur la période ÷ subs de la période"]
+        if au == auj:
+            note.append("aujourd'hui compte jusqu'à l'heure de lecture")
+        note.append(f"MyPuls lu le {_e(_heure(t.get('lu_a')))} (heure de Paris), relu toutes les "
+                    f"{_nb(MYPULS_TTL_S // 60)} min au plus")
+    if t.get("sans_clics"):
+        note.append(f"{_nb(t['sans_clics'])} lien(s) sans nombre de clics chez {_e(source)}")
+    return note
+
+
 def page_html(t: Mapping[str, Any], tri: str = "nom", sens: str = "asc", cle: str = "") -> str:
-    """La page entière. Aucun JavaScript : le tri passe par l'adresse, et une
-    apostrophe dans un nom de lien ne peut rien casser. Tout est échappé."""
+    """La page entière. Aucun JavaScript : le tri et la période passent par
+    l'adresse, et une apostrophe dans un nom de lien ne peut rien casser.
+    Tout est échappé."""
     tri, sens = _tri_valide(tri, sens)
     lignes = trier(t.get("lignes") or [], tri, sens)
     hors = sorted(t.get("hors_gms") or [], key=_ordre_defaut)
     T = t.get("totaux") or {}
-    h: List[str] = []
+    source = str(t.get("source") or "Infloww")
+    per = t.get("periode") or {}
+    du, au = str(per.get("du") or ""), str(per.get("au") or "")
+    if not (du and au):
+        du = au = ""
+    auj = _aujourdhui()
+    h: List[str] = [_formulaire(du, au, tri, sens, cle, auj)]
     if t.get("erreur"):
-        h.append(f'<div class="err"><b>Lecture impossible.</b><br>{_e(t["erreur"])}</div>')
+        # MyPuls lent : ce n'est pas (encore) une panne, la lecture continue
+        titre = "Lecture en cours." if per.get("mypuls_en_cours") else "Lecture impossible."
+        h.append(f'<div class="err"><b>{titre}</b><br>{_e(t["erreur"])}</div>')
     else:
-        h += _avertissements(t, lignes)
-        h.append(_table_personnes(lignes, T, tri, sens, cle))
+        h += _avertissements(t, lignes, cle, tri, sens)
+        h.append(_table_personnes(lignes, T, tri, sens, cle, du, au, source))
         h.append('<p class="legende">Couleurs : <span class="nv v1">vert</span> dès '
                  f'{_dec(SEUIL_CVR, 0)}\u00a0% de CVR et dès {_dollars(SEUIL_PAR_SUB)}\u00a0par sub '
                  '(plus foncé = mieux), <span class="nv o1">orange</span> en dessous, '
@@ -1170,20 +1948,10 @@ def page_html(t: Mapping[str, Any], tri: str = "nom", sens: str = "asc", cle: st
         if hors:
             h.append(f'<details><summary>Hors GetMySocial, non comptés ({_nb(len(hors))}) — '
                      f'liens de suivi de Jessye qu\'aucun lien de « {_e(NOM_EQUIPE)} » ne vise'
-                     f'</summary>{_table_hors(hors)}</details>')
-    note = [f"<b>Personnes</b> : liens GetMySocial de l'espace « {_e(NOM_EQUIPE)} », un lien SPAM "
-            "compte à part ; une personne additionne ses liens Infloww distincts",
-            "<b>Clics US</b> : clics venus des États-Unis sur ses liens GetMySocial, depuis toujours "
-            "(la mesure « Clics US » du tableau de bord et du podium), relevés une fois par jour",
-            "<b>Clics OF</b> : clics OnlyFans du lien de suivi, lus dans Infloww (pas dans MyPuls)",
-            "<b>CVR</b> = subs ÷ clics OF ; <b>$ / sub</b> = gains nets ÷ subs",
-            "compteurs Infloww cumulés depuis la création de chaque lien, mis à jour toutes les 2 h",
-            f"lu le {_e(_heure(t.get('lu_a')))} (heure de Paris)"]
-    if t.get("maj_infloww"):
-        note.append(f"compteurs rafraîchis par Infloww le {_e(_heure(t['maj_infloww']))}")
-    if t.get("sans_clics"):
-        note.append(f"{_nb(t['sans_clics'])} lien(s) sans nombre de clics chez Infloww")
-    sous = f"@{_e(t.get('creatrice') or CREATRICE)} · GetMySocial « {_e(NOM_EQUIPE)} »"
+                     f'</summary>{_table_hors(hors, source)}</details>')
+    note = _note(t, du, au, auj)
+    sous = (f"<b>{_e(_titre_periode(du, au, auj))}</b> · @{_e(t.get('creatrice') or CREATRICE)} · "
+            f"GetMySocial « {_e(NOM_EQUIPE)} »")
     if not t.get("erreur"):
         sous += f" · {_nb(len(lignes))} personnes"
     return f'''<!doctype html><html lang="fr"><head><meta charset="utf-8">
@@ -1215,6 +1983,16 @@ td.vieux{{color:var(--faible)}}
 .nv.v3{{background:#166534;color:#fff}} .nv.o1{{background:#fbbf24;color:#1c1203}}
 .nv.o2{{background:#f97316;color:#1c0a02}} .nv.r{{background:#dc2626;color:#fff}}
 .legende{{color:var(--faible);font-size:12px;margin:8px 0 0}}
+.sous b{{color:var(--texte);font-weight:600}}
+.periode{{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 8px}}
+.periode .lib{{color:var(--faible);font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}}
+.periode input{{flex:1 1 128px;min-width:0;max-width:180px;background:var(--carte);color:var(--texte);border:1px solid var(--bord);border-radius:8px;padding:7px 8px;font:inherit;font-size:14px;color-scheme:dark}}
+.periode .fl{{color:var(--faible)}}
+.periode button{{background:var(--acc);color:#1c0a02;border:0;border-radius:8px;padding:8px 16px;font:inherit;font-weight:700;cursor:pointer}}
+.raccourcis{{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 16px}}
+.raccourcis a{{color:var(--faible);text-decoration:none;border:1px solid var(--bord);border-radius:999px;padding:4px 10px;font-size:12px;white-space:nowrap}}
+.raccourcis a.on{{color:var(--acc);border-color:var(--acc)}}
+.avert a{{color:var(--acc)}}
 tbody tr:hover td{{background:rgba(249,115,65,.06)}}
 tfoot td{{border-bottom:0;border-top:2px solid var(--bord);font-weight:700}}
 details{{margin:18px 0 0}}
@@ -1227,7 +2005,7 @@ details .boite{{margin-top:8px;opacity:.85}}
    lignes (« Clics / OF » ; th.n et non th, que .n remettait en nowrap) et le
    nom se replie ; sans ça le $ / sub, la colonne qu'on vient lire, sortait de
    l'écran. Ce qui ne tiendrait pas défile dans la boîte, jamais la page. */
-@media (max-width:480px){{table{{font-size:12px}} th,td{{padding:8px 3px}} th.n{{white-space:normal}} th:first-child,td:first-child{{padding-left:10px}} th:last-child,td:last-child{{padding-right:10px}} td.nom{{min-width:74px}} .det{{font-size:10.5px}} .nv{{padding:1px 3px}} h1{{font-size:18px}}}}
+@media (max-width:480px){{.periode .lib{{flex-basis:100%}} table{{font-size:12px}} th,td{{padding:8px 3px}} th.n{{white-space:normal}} th:first-child,td:first-child{{padding-left:10px}} th:last-child,td:last-child{{padding-right:10px}} td.nom{{min-width:74px}} .det{{font-size:10.5px}} .nv{{padding:1px 3px}} h1{{font-size:18px}}}}
 @media (max-width:340px){{table{{font-size:11.5px}} th,td{{padding:7px 2px}} th:first-child,td:first-child{{padding-left:8px}} th:last-child,td:last-child{{padding-right:8px}} td.nom{{min-width:64px}}}}
 </style></head><body>
 <div class="marque">Infloww · YouL4b</div>
@@ -1243,10 +2021,17 @@ def page(args: Mapping[str, Any], cle: str = "") -> str:
     panne s'affiche SUR la page."""
     tri, sens = _tri_valide(args.get("tri"), args.get("sens"))
     try:
-        t = tableau()
+        per = periode_des_args(args)
+    except Exception:            # par ceinture : une période illisible = depuis toujours
+        per = None
+    try:
+        # sans période : la vue Infloww d'avant, inchangée
+        t = tableau_periode(*per) if per else tableau()
     except Exception as e:  # tableau() ne lève pas ; par ceinture
-        t = _vide(f"{type(e).__name__} : {e}")
+        t = _vide(f"{type(e).__name__} : {e}", per)
     try:
         return page_html(t, tri, sens, cle)
     except Exception as e:
-        return page_html(_vide(f"la page n'a pas pu être construite : {type(e).__name__} : {e}"))
+        # la clé suit jusque dans la page de panne : le formulaire la porte
+        return page_html(_vide(f"la page n'a pas pu être construite : {type(e).__name__} : {e}", per),
+                         cle=cle)

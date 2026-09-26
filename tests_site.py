@@ -21885,6 +21885,7 @@ try:
     import infloww as _ifL
     import podium_discord as _pdL
     import gms as _gmL
+    import mypuls as _mpL
     import tempfile as _tfL
     import base64 as _b64L
     import json as _jsL
@@ -21899,6 +21900,10 @@ try:
              _ifL._creatrice_ou_erreur, _ifL.liens,
              _gmL.list_links_team, _gmL.analytics_for_links, _gmL.pause_restante, _gmL.etat_quota)
     _savCopieL = (_il.GMS_COPIE, _il.GMS_FRAIS_S)
+    # la periode : MyPuls et le cache des clics US de periode, bouchonnes aussi
+    _savPL = (_mpL.api_get, _il.US_PERIODES_FICHIER, _il._lancer_us_periode, dict(_il._MYPULS_CACHE))
+    # MyPuls lent ou muet, verification des zeros GetMySocial
+    _savFL = (_gmL.get_analytics_overview, _il.MYPULS_ATTENTE_S, _il.MYPULS_ECHEC_S, dict(_il._MYPULS_ECHECS))
     try:
         # la copie GMS de la page : dans le dossier temporaire, et sans delai
         # de fraicheur, sinon chaque tableau() reprendrait la liste du premier
@@ -21909,6 +21914,12 @@ try:
         _il.JETON_FICHIERS = (_tmpL / "absent", _tmpL / "jeton")
         _il.CONFIG_FICHIER = _tmpL / "config.json"
         _il.US_FICHIER = _tmpL / "us.json"
+        _il.US_PERIODES_FICHIER = _tmpL / "us_periodes.json"
+        _il._MYPULS_CACHE.clear()
+        _il._MYPULS_ECHECS.clear()
+        # MyPuls ne repond pas sur le Mac (pas de cle) : bouchonne, et une
+        # periode demandee par erreur echoue au lieu de partir sur le reseau
+        _mpL.api_get = lambda *a, **k: {"ok": False, "error": "MyPuls non bouchonne"}
         _il.GMS_CACHE = _tmpL / "gmsdash_links.json"
         _il.US_EN_FOND = False
         _il._dormir_us = lambda s: None
@@ -22058,7 +22069,7 @@ try:
             _LT["appels"].append((tid, force_refresh))
             return _LT["rep"]
         _gmL.list_links_team = _listeL
-        _US = {"appels": [], "val": {}, "rate": set(), "vide": set()}
+        _US = {"appels": [], "val": {}, "rate": set(), "vide": set(), "zero": set(), "verif": []}
 
         def _anaL(ids, d0, d1):
             ids = tuple(ids)
@@ -22070,6 +22081,18 @@ try:
             n = _US["val"].get(ids, 7)
             return n * 3, {"US": n, "FR": 1}
         _gmL.analytics_for_links = _anaL
+
+        # la reponse BRUTE de GetMySocial, relue seulement pour trancher un
+        # releve de periode (0 clic, aucun pays) : un objet qui porte
+        # total_clicks = 0 est un vrai zero ; du texte non lu (le « NOTICE:
+        # stale: true » du 26/09) ne l est pas
+        def _ovL(d0="", d1="", link_ids=None):
+            ids = tuple(link_ids or [])
+            _US["verif"].append((ids, d0, d1))
+            if ids in _US["zero"]:
+                return {"ok": True, "data": {"total_clicks": 0, "unique_visitors": 0, "top_countries": []}}
+            return {"ok": True, "data": '{"total_clicks": 12}\nNOTICE: stale: true'}
+        _gmL.get_analytics_overview = _ovL
         _idsBO = tuple(sorted(f"lnk_{i}" for i in (4, 5, 6, 7)))
         _US["val"][_idsBO] = 500
 
@@ -22443,6 +22466,416 @@ try:
               len(_k1) >= 20 and _il.cle_page() == _k1
               and _il.url_page() == "https://youl4b.com/infloww/liens?k=" + _k1)
 
+        # --- une PERIODE (?du=&au=) : « je selectionne les cinq derniers jours
+        # jusqu a aujourd hui, je fais OK, et ca retravaille les calculs ».
+        # Chiffres de MyPuls (tracking-links, from/to), clics US de GetMySocial
+        # sur les memes jours. MyPuls et GetMySocial bouchonnes.
+        _JOUR["j"] = "2026-09-26"
+        _pdaL = _il.periode_des_args
+        check("periode : dates valides gardees telles quelles",
+              _pdaL({"du": "2026-09-21", "au": "2026-09-26"}) == ("2026-09-21", "2026-09-26")
+              and _pdaL({"du": "21/09/2026", "au": "26/09/2026"}) == ("2026-09-21", "2026-09-26"))
+        check("periode : invalide -> ignoree (depuis toujours)",
+              _pdaL({}) is None and _pdaL({"du": "hier", "au": "2026-02-31"}) is None
+              and _pdaL({"du": "<script>", "au": ""}) is None and _pdaL({"du": "2026-9-21x"}) is None
+              and _pdaL({"du": "x", "au": "2026-09-20"}) == ("2024-01-01", "2026-09-20"))
+        check("periode : debut apres fin -> inversees",
+              _pdaL({"du": "2026-09-26", "au": "2026-09-21"}) == ("2026-09-21", "2026-09-26"))
+        check("periode : fin apres aujourd hui (Paris) -> aujourd hui, meme les deux dans le futur",
+              _pdaL({"du": "2026-09-20", "au": "2027-01-01"}) == ("2026-09-20", "2026-09-26")
+              and _pdaL({"du": "2030-01-01", "au": "2030-02-01"}) == ("2026-09-26", "2026-09-26"))
+        check("periode : avant 2024-01-01 -> 2024-01-01 ; debut seul -> jusqu a aujourd hui",
+              _pdaL({"du": "2019-05-01", "au": "2024-02-01"}) == ("2024-01-01", "2024-02-01")
+              and _pdaL({"du": "2026-09-21"}) == ("2026-09-21", "2026-09-26")
+              and _pdaL({"au": "2024-03-01"}) == ("2024-01-01", "2024-03-01"))
+
+        # la reponse reelle de MyPuls (relevee le 26/09) : period, currency,
+        # count, data ; revenue {total, by_type}. c47 existe chez d autres
+        # creatrices : seule l adresse de Jessye compte.
+        def _mpiL(code, v, s, rev, url=None, actif=True):
+            return {"creator_id": 3107, "code": f"c{code}", "name": f"Lien {code}",
+                    "url": url or (_OFL % code), "active": actif, "new_subscribers": s,
+                    "revenue": {"total": rev, "by_type": {"message": rev}}, "visits_total": 99999,
+                    "subscribers_total": 9999, "visits_period": v, "subscribers_period": s, "group_ids": []}
+        _MPIL = [_mpiL(47, 1351, 101, 250.66), _mpiL(110, 518, 12, 30.12), _mpiL(124, 40, 0, 0.0),
+                 _mpiL(85, 82, 4, 9.5, actif=False), _mpiL(87, 0, 0, 0), _mpiL(83, 300, 30, 75.0),
+                 _mpiL(130, None, 3, 6.0), _mpiL(78, 700, 70, 140.0),
+                 _mpiL(47, 88888, 888, 8888.88, url="https://onlyfans.com/emywdiff/c47"),
+                 _mpiL(110, 7777, 77, 777.77, url=(_OFL % 110) + "/"),
+                 _mpiL(0, 5, 5, 5.0, url="https://onlyfans.com/jessyewdiference/promo"), "pas un lien"]
+        _MPL = {"appels": [], "panne": None}
+
+        def _apiMPL(path, params=None, _essai=0):
+            _MPL["appels"].append((path, dict(params or {})))
+            if _MPL["panne"] is not None:
+                if isinstance(_MPL["panne"], Exception):
+                    raise _MPL["panne"]
+                return _MPL["panne"]
+            d0, d1 = params["from"], params["to"]
+            return {"ok": True, "data": {"period": {"from": d0 + "T00:00:00+02:00", "to": d1 + "T23:59:59+02:00"},
+                                         "currency": "USD", "count": len(_MPIL), "data": list(_MPIL)}}
+        _mpL.api_get = _apiMPL
+        _US["appels"].clear(); _US["rate"].clear(); _US["vide"].clear()
+        # (0 clic, aucun pays) : la reponse brute de GetMySocial tranche, pas
+        # les clics MyPuls (relecture du 26/09 : une visite OF peut venir
+        # d ailleurs que de GMS). VA 1 Noum : reponse non lue -> rate ; ANDRY
+        # (0 clic OF) et Gerome SPAM (40 clics OF, 0 clic GMS) : total_clicks
+        # = 0 lu -> un vrai zero, chacun
+        _US["vide"].update({("lnk_2",), ("lnk_8", "lnk_9"), ("lnk_3",)})
+        _US["zero"].update({("lnk_8", "lnk_9"), ("lnk_3",)})
+        _DU, _AU = "2026-09-21", "2026-09-26"
+        _tPe = _il.tableau_periode(_DU, _AU, us="calcul")
+        _pPe = {x["nom"]: x for x in _tPe["lignes"]}
+        check("mypuls : UN appel pour tous les liens, avec la periode demandee",
+              _MPL["appels"] == [("tracking-links", {"per_page": 500, "from": _DU, "to": _AU})], str(_MPL["appels"]))
+        _il.tableau_periode(_DU, _AU, us="cache")
+        check("mypuls : la meme periode relue dans les 10 min -> aucun appel de plus", len(_MPL["appels"]) == 1)
+        _il.tableau_periode("2026-09-25", _AU, us="cache")
+        check("mypuls : une autre periode -> son propre appel (cache PAR periode)",
+              len(_MPL["appels"]) == 2 and _MPL["appels"][1][1]["from"] == "2026-09-25")
+        _noL = _pPe["VA 1 Noum"]
+        check("jointure : par l adresse de Jessye (c47 d une autre creatrice ignore)",
+              _noL["clics"] == 1351 and _noL["subs"] == 101 and _tPe["source"] == "MyPuls"
+              and _noL["infloww"] == [{"id": "mypuls:47", "nom": "Lien 47", "code": "47", "desactive": False}])
+        check("jointure : la meme adresse deux fois (barre finale) comptee UNE fois, et c est dit",
+              _pPe["Roucham SPAM"]["clics"] == 518 and _tPe["periode"]["doublons"] == 1)
+        check("jointure : une adresse de Jessye illisible et une ligne qui n est pas un objet : comptees",
+              _tPe["illisibles"] == 2)
+        check("periode : clics = visits_period, subs = subscribers_period, $ / sub = revenu / subs",
+              abs(_noL["cvr"] - 101 * 100.0 / 1351) < 1e-9 and abs(_noL["par_sub"] - 250.66 / 101) < 1e-9
+              and abs(_pPe["Bryan"]["par_sub"] - 2.5) < 1e-9 and abs(_pPe["Bryan"]["cvr"] - 10.0) < 1e-9)
+        _boP = _pPe["BO7"]
+        check("periode : 4 liens GMS vers c85 -> le lien compte UNE fois, desactive marque",
+              _boP["clics"] == 82 and _boP["subs"] == 4 and abs(_boP["par_sub"] - 9.5 / 4) < 1e-9
+              and _boP["infloww"][0]["desactive"] is True)
+        check("periode : 0 clic -> pas de CVR ; 0 sub -> pas de $ / sub (jamais 0 invente)",
+              _pPe["ANDRY"]["clics"] == 0 and _pPe["ANDRY"]["cvr"] is None and _pPe["ANDRY"]["par_sub"] is None
+              and _pPe["Gerome SPAM"]["cvr"] == 0.0 and _pPe["Gerome SPAM"]["par_sub"] is None
+              and _pPe["Z"]["clics"] is None and _pPe["Z"]["cvr"] is None and _pPe["Z"]["par_sub"] == 2.0)
+        check("periode : lien absent de MyPuls -> « — », et la raison le dit",
+              _pPe["Roucham"]["subs"] is None and _pPe["Roucham"]["par_sub"] is None
+              and "c999 absent des liens de suivi de MyPuls" in _pPe["Roucham"]["introuvables"][0]["raison"])
+        _TPe = _tPe["totaux"]
+        check("periode : totaux sur les liens rattaches, une fois chacun",
+              _TPe["subs"] == 101 + 12 + 0 + 4 + 0 + 30 + 3 and _TPe["clics"] == 1351 + 518 + 40 + 82 + 0 + 300
+              and abs(_TPe["par_sub"] - (250.66 + 30.12 + 9.5 + 75.0 + 6.0) / 150) < 1e-9, str(_TPe))
+        _hoP = {x["nom"]: x for x in _tPe["hors_gms"]}
+        check("periode : les liens hors GMS ont aussi les chiffres de la periode",
+              set(_hoP) == {"Lien 78"} and _hoP["Lien 78"]["clics"] == 700 and _hoP["Lien 78"]["subs"] == 70)
+        check("periode : aucune ligne ne garde le revenu",
+              not any(k in x for x in _tPe["lignes"] + _tPe["hors_gms"] + [_TPe]
+                      for k in ("net", "brut", "revenus", "revenue")))
+
+        # --- les clics US de la periode
+        check("clics US periode : UN appel par personne, sur les jours de la periode",
+              len(_US["appels"]) == 10 and all(d0 == _DU and d1 == _AU for _i, d0, d1 in _US["appels"])
+              and (_idsBO, _DU, _AU) in _US["appels"] and _boP["us"] == 500 and _boP["us_etat"] == "ok")
+        check("clics US periode : (0 clic, aucun pays) relu UNE fois dans la reponse brute, et elle seule",
+              sorted(_US["verif"]) == sorted([(("lnk_2",), _DU, _AU), (("lnk_8", "lnk_9"), _DU, _AU),
+                                             (("lnk_3",), _DU, _AU)]), str(_US["verif"]))
+        check("clics US periode : (0 clic, aucun pays) et reponse brute non lue -> rate, pas zero",
+              _noL["us"] is None and _noL["us_etat"] == "rate" and "illisible" in _noL["us_raison"])
+        check("clics US periode : total_clicks = 0 lu -> un vrai zero, meme quand MyPuls compte des clics OF",
+              _pPe["ANDRY"]["us"] == 0 and _pPe["ANDRY"]["us_etat"] == "ok"
+              and _pPe["Gerome SPAM"]["us"] == 0 and _pPe["Gerome SPAM"]["us_etat"] == "ok"
+              and _pPe["Gerome SPAM"]["clics"] == 40 and "0 clic" not in _pPe["Gerome SPAM"]["us_note"])
+        _cPL = _jsL.loads(_il.US_PERIODES_FICHIER.read_text())
+        check("clics US periode : cache disque par (personne, periode), et la periode comptee pour le jour",
+              _cPL["periodes"][_DU + "|" + _AU]["BO7"]["us"] == 500
+              and _cPL["jours"] == {"2026-09-26": [_DU + "|" + _AU]})
+        check("clics US periode : chaque appel est decompte du budget du jour, verifications comprises",
+              _cPL["appels"] == {"2026-09-26": 10 + 3}, str(_cPL.get("appels")))
+        _US["appels"].clear(); _US["verif"].clear()
+        _il.tableau_periode(_DU, _AU, us="calcul")
+        _il.tableau_periode(_DU, _AU, us="page")
+        check("clics US periode : deja calcules -> aucun appel (le rate attend 10 min, un vrai zero n est pas relu)",
+              not _US["appels"] and not _US["verif"])
+        _nbRL = []
+        for _i in range(3):
+            _cPL = _jsL.loads(_il.US_PERIODES_FICHIER.read_text())
+            _cPL["periodes"][_DU + "|" + _AU]["VA 1 Noum"]["essai"] -= _il.US_REESSAI_S + 5
+            _il.US_PERIODES_FICHIER.write_text(_jsL.dumps(_cPL))
+            _US["appels"].clear()
+            _il.tableau_periode(_DU, _AU, us="calcul")
+            _nbRL.append(len(_US["appels"]))
+        check("clics US periode : un rate est retente apres 10 min, trois fois par jour au plus",
+              _nbRL == [1, 1, 0], str(_nbRL))
+        _US["vide"].clear()
+        # periode qui finit aujourd hui : un releve de plus de 2 h est ancien
+        _cPL = _jsL.loads(_il.US_PERIODES_FICHIER.read_text())
+        for _v in _cPL["periodes"][_DU + "|" + _AU].values():
+            if _v.get("quand"):
+                _v["quand"] -= _il.US_OUVERTE_FRAIS_S + 5
+        _il.US_PERIODES_FICHIER.write_text(_jsL.dumps(_cPL))
+        _tVi = _il.tableau_periode(_DU, _AU, us="cache")
+        _hVi = _il.page_html(_tVi)
+        check("clics US periode : periode ouverte, releve de plus de 2 h -> gris, heure sous le nom, dit en tete",
+              _tVi["lignes"][0]["us_etat"] == "ancien" and "US : relevé du " in _hVi
+              and "relevé(s) pris avant la fin de la période" in _hVi and 'class="n vieux"' in _hVi)
+        _US["appels"].clear()
+        _il.tableau_periode(_DU, _AU, us="calcul")
+        check("clics US periode : ... et recalcule", len(_US["appels"]) == 9, str(len(_US["appels"])))
+        # le lendemain : le releve pris le jour meme de la fin est recalcule
+        # une fois, puis definitif
+        _JOUR["j"] = "2026-09-27"
+        _US["appels"].clear()
+        _il.tableau_periode(_DU, _AU, us="calcul")
+        _n1L = len(_US["appels"])
+        _cPL = _jsL.loads(_il.US_PERIODES_FICHIER.read_text())
+        for _v in _cPL["periodes"][_DU + "|" + _AU].values():
+            _v["quand"] = float(_v.get("quand") or 0) - 30 * 86400 + 3600
+        _il.US_PERIODES_FICHIER.write_text(_jsL.dumps(_cPL))
+        _US["appels"].clear()
+        _tDf = _il.tableau_periode(_DU, _AU, us="calcul")
+        check("clics US periode : periode close -> recalculee une fois apres sa fin, puis definitive",
+              _n1L == 10 and not _US["appels"] and all(x["us_etat"] == "ok" for x in _tDf["lignes"]
+                                                       if x["nom"] != "VA 1 Noum"), str(_n1L))
+        # le plafond : 6 periodes DISTINCTES calculees par jour
+        _JOUR["j"] = "2026-09-28"
+        _PERL = [(f"2026-08-0{i}", f"2026-08-1{i}") for i in range(1, 8)]
+        _nbPL = []
+        for _d0, _d1 in _PERL[:6]:
+            _US["appels"].clear()
+            _il.tableau_periode(_d0, _d1, us="calcul")
+            _nbPL.append(len(_US["appels"]))
+        _US["appels"].clear()
+        _tPl = _il.tableau_periode(*_PERL[6], us="page")
+        _hPl = _il.page_html(_tPl, cle="K1")
+        check("clics US periode : 6 periodes distinctes calculees, la 7e non (aucun appel)",
+              _nbPL == [10] * 6 and not _US["appels"] and _tPl["periode"]["us_info"].get("plafond"), str(_nbPL))
+        check("clics US periode : au-dela du plafond, « — » et la page le dit (periodes deja faites en liens)",
+              all(x["us"] is None for x in _tPl["lignes"]) and "le plafond du jour" in _hPl
+              and 'href="?du=2026-08-01&amp;au=2026-08-11&amp;k=K1"' in _hPl
+              and _tPl["lignes"][0]["subs"] is not None)
+        _cPL = _jsL.loads(_il.US_PERIODES_FICHIER.read_text())
+        check("clics US periode : une periode deja calculee aujourd hui reste admise",
+              _il._periode_admise(_cPL, "2026-09-28", *_PERL[0])
+              and not _il._periode_admise(_cPL, "2026-09-28", *_PERL[6]))
+        check("clics US periode : le mode calcul dit aussi le plafond",
+              _il.tableau_periode(*_PERL[6], us="calcul")["periode"]["us_info"].get("plafond") and not _US["appels"])
+        _JOUR["j"] = "2026-09-29"
+        _US["appels"].clear()
+        _il.tableau_periode(*_PERL[6], us="calcul")
+        _cPL = _jsL.loads(_il.US_PERIODES_FICHIER.read_text())
+        check("clics US periode : un nouveau jour, un nouveau plafond (et seul le jour courant est garde)",
+              len(_US["appels"]) == 10 and list(_cPL["jours"]) == ["2026-09-29"])
+        # GetMySocial en pause
+        _gmL.pause_restante = lambda: 3600
+        _gmL.etat_quota = lambda: {"pause_s": 3600, "reprise": "21:40", "restant_jour": 0, "raison": "quota"}
+        _US["appels"].clear()
+        _tPa2 = _il.tableau_periode("2026-09-01", "2026-09-02", us="page")
+        _hPa2 = _il.page_html(_tPa2)
+        check("clics US periode : GetMySocial en pause -> aucun appel, « — », et la page le dit",
+              not _US["appels"] and all(x["us"] is None for x in _tPa2["lignes"])
+              and "GetMySocial n'accepte plus d'appel" in _hPa2 and "reprise vers 21:40" in _hPa2)
+        _gmL.pause_restante = lambda: 0
+        _gmL.etat_quota = lambda: {"pause_s": 0, "reprise": "", "restant_jour": None, "raison": ""}
+        # la page n attend pas le calcul : elle le lance derriere
+        _lanPL = []
+        _il._lancer_us_periode = lambda ents, d0, d1: _lanPL.append((d0, d1, sorted(ents)))
+        _US["appels"].clear()
+        _tFo = _il.tableau_periode("2026-09-03", "2026-09-04", us="page")
+        check("clics US periode : la page lance le calcul en arriere-plan sans l attendre",
+              not _US["appels"] and len(_lanPL) == 1 and "BO7" in _lanPL[0][2] and len(_lanPL[0][2]) == 10
+              and "rechargez dans une minute" in _il.page_html(_tFo))
+        _il._lancer_us_periode = _savPL[2]
+
+        # --- le BUDGET d appels GetMySocial des periodes (relecture du 26/09 :
+        # une periode qui finit aujourd hui repartait pour tout le monde toutes
+        # les 2 h, sans compter dans le plafond de periodes distinctes)
+        _JOUR["j"] = "2026-09-30"
+        _OUVL = ("2026-09-24", "2026-09-30")
+        _budL = _il._budget_jour(10)
+        _nbBL = []
+        for _hL in range(12):                # une journee, un affichage toutes les 2 h
+            _cPL = _jsL.loads(_il.US_PERIODES_FICHIER.read_text())
+            for _v in ((_cPL.get("periodes") or {}).get("|".join(_OUVL)) or {}).values():
+                if _v.get("quand"):
+                    _v["quand"] -= _il.US_OUVERTE_FRAIS_S + 5
+            _il.US_PERIODES_FICHIER.write_text(_jsL.dumps(_cPL))
+            _US["appels"].clear()
+            _tBL = _il.tableau_periode(*_OUVL, us="calcul")
+            _nbBL.append(len(_US["appels"]))
+        _cPL = _jsL.loads(_il.US_PERIODES_FICHIER.read_text())
+        check("budget US periode : une periode ouverte reaffichee toutes les 2 h ne depasse pas le budget du jour",
+              _budL == 60 and sum(_nbBL) == _budL and _nbBL == [10] * 6 + [0] * 6
+              and _cPL["appels"] == {"2026-09-30": _budL}, str(_nbBL))
+        _hBL = _il.page_html(_tBL, cle="K1")
+        check("budget US periode : au-dela, les releves gardes restent (en gris) et la page le dit",
+              _tBL["periode"]["us_info"] == {"budget": _budL}
+              and all(x["us"] is not None and x["us_etat"] == "ancien" for x in _tBL["lignes"])
+              and "60 appels GetMySocial du jour" in _hBL and "pas de nouveau calcul avant demain" in _hBL)
+        _US["appels"].clear()
+        _tB2L = _il.tableau_periode("2026-09-01", "2026-09-10", us="page")
+        check("budget US periode : ... une autre periode non plus, plafond de periodes pas atteint",
+              not _US["appels"] and _tB2L["periode"]["us_info"] == {"budget": _budL}
+              and all(x["us"] is None for x in _tB2L["lignes"])
+              and _il._periode_admise(_cPL, "2026-09-30", "2026-09-01", "2026-09-10"))
+        check("budget US periode : la note dit le budget (6 appels par personne, 60 en tout)",
+              "6 appels GetMySocial par personne par jour au plus (60 en tout)" in _hBL)
+        # un budget presque epuise : le calcul s arrete en route, le reste attend
+        _JOUR["j"] = "2026-10-01"
+        _cPL = _jsL.loads(_il.US_PERIODES_FICHIER.read_text())
+        _cPL["appels"] = {"2026-10-01": _budL - 4}
+        _il.US_PERIODES_FICHIER.write_text(_jsL.dumps(_cPL))
+        _US["appels"].clear()
+        _tB3L = _il.tableau_periode("2026-09-11", "2026-09-20", us="calcul")
+        check("budget US periode : presque epuise -> 4 appels et pas 10, les autres « — », c est dit",
+              len(_US["appels"]) == 4 and _tB3L["periode"]["us_info"] == {"budget": _budL}
+              and sum(1 for x in _tB3L["lignes"] if x["us"] is not None) == 4
+              and _jsL.loads(_il.US_PERIODES_FICHIER.read_text())["appels"] == {"2026-10-01": _budL},
+              str(len(_US["appels"])))
+
+        # --- MyPuls en panne
+        _JOUR["j"] = "2026-09-26"
+        _US["appels"].clear()
+        _MPL["panne"] = {"ok": False, "error": "Quota MyPuls atteint (429), réessai dans 60s"}
+        _tMp = _il.tableau_periode("2026-09-10", "2026-09-12")
+        _hMp = _il.page_html(_tMp, cle="K1")
+        check("mypuls en panne : boite d erreur, la raison, pas de clics US calcules pour rien",
+              "MyPuls n'a pas répondu" in _tMp["erreur"] and "429" in _tMp["erreur"]
+              and 'class="err"' in _hMp and not _US["appels"])
+        check("mypuls en panne : le formulaire reste (on peut revenir a depuis toujours), la cle suit",
+              '<form class="periode"' in _hMp and 'name="k" value="K1"' in _hMp
+              and 'href="?k=K1">Depuis toujours' in _hMp and "Du 10/09 au 12/09 · MyPuls" in _hMp)
+        _MPL["panne"] = RuntimeError("boum")
+        check("mypuls en panne : une exception est dite, sans remonter",
+              "RuntimeError : boum" in _il.tableau_periode("2026-09-13", "2026-09-14")["erreur"])
+        _MPL["panne"] = {"ok": True, "data": "<html>"}
+        check("mypuls : une reponse de forme imprevue est une panne, pas zero sub",
+              "forme imprévue" in _il.tableau_periode("2026-09-15", "2026-09-16")["erreur"])
+        # une periode deja lue : la derniere lecture plutot qu une page vide, et c est dit
+        _il._MYPULS_CACHE[(_DU, _AU)]["t"] -= _il.MYPULS_TTL_S + 5
+        _MPL["panne"] = {"ok": False, "error": "HTTP 502 : Bad Gateway"}
+        _tSt = _il.tableau_periode(_DU, _AU, us="cache")
+        _hSt = _il.page_html(_tSt)
+        check("mypuls en panne : une periode deja lue garde ses chiffres, avec la raison et l heure",
+              not _tSt["erreur"] and "HTTP 502" in _tSt["periode"]["perime"]
+              and "chiffres de la lecture du" in _hSt and {x["nom"]: x for x in _tSt["lignes"]}["BO7"]["subs"] == 4)
+        # MyPuls muet : l echec est garde MYPULS_ECHEC_S, sans rappeler MyPuls
+        # (relecture du 26/09 : chaque affichage relancait l appel, jusqu a six
+        # sur un 429, et prolongeait la limitation)
+        _nMpL = len(_MPL["appels"])
+        _tSt2 = _il.tableau_periode(_DU, _AU, us="cache")
+        check("mypuls muet : un echec recent est garde, le second affichage ne rappelle pas MyPuls",
+              len(_MPL["appels"]) == _nMpL and "HTTP 502" in _tSt2["periode"]["perime"]
+              and "pas de nouvel essai avant" in _tSt2["periode"]["perime"]
+              and {x["nom"]: x for x in _tSt2["lignes"]}["BO7"]["subs"] == 4)
+        _tMp2 = _il.tableau_periode("2026-09-10", "2026-09-12", us="cache")
+        check("mypuls muet : ... sans lecture gardee non plus : la boite d erreur, sans nouvel appel",
+              len(_MPL["appels"]) == _nMpL and "429" in _tMp2["erreur"] and "pas de nouvel essai avant" in _tMp2["erreur"]
+              and 'class="err"' in _il.page_html(_tMp2))
+        _il._MYPULS_ECHECS[(_DU, _AU)]["t"] -= _il.MYPULS_ECHEC_S + 1
+        _il.tableau_periode(_DU, _AU, us="cache")
+        check("mypuls muet : passe le delai, MyPuls est rappele", len(_MPL["appels"]) == _nMpL + 1)
+        # MyPuls lent : la page ne l attend que MYPULS_ATTENTE_S, UN appel par periode
+        import threading as _thL
+        _MPL["panne"] = None
+        _lentL = {"ev": _thL.Event(), "n": 0}
+
+        def _apiLentL(path, params=None, _essai=0):
+            _lentL["n"] += 1
+            _lentL["ev"].wait(10)
+            return _apiMPL(path, params)
+        _mpL.api_get = _apiLentL
+        _il.MYPULS_ATTENTE_S = 0.5
+        _PLL = ("2026-08-20", "2026-08-25")
+        _t0L = _tL.time()
+        _tLe1 = _il.tableau_periode(*_PLL, us="cache")
+        _d1L = _tL.time() - _t0L
+        _t0L = _tL.time()
+        _tLe2 = _il.tableau_periode(*_PLL, us="cache")
+        _d2L = _tL.time() - _t0L
+        _hLe1 = _il.page_html(_tLe1, cle="K1")
+        check("mypuls lent : la page n attend que quelques secondes et dit « lecture en cours, rechargez »",
+              _d1L < 3 and _tLe1["periode"]["mypuls_en_cours"] and "<b>Lecture en cours.</b>" in _hLe1
+              and "rechargez" in _hLe1 and 'name="k" value="K1"' in _hLe1, f"{_d1L:.2f} s")
+        check("mypuls lent : un second affichage pendant la lecture sort tout de suite, sans second appel",
+              _d2L < 0.25 and _lentL["n"] == 1 and _tLe2["periode"]["mypuls_en_cours"],
+              f"{_d2L:.2f} s, {_lentL['n']} appel(s)")
+        _PSL = ("2026-08-01", "2026-08-05")
+        _il._MYPULS_CACHE[_PSL] = {"t": _tL.time() - _il.MYPULS_TTL_S - 5, "v": _il._lire_mypuls(
+            _apiMPL("tracking-links", {"from": _PSL[0], "to": _PSL[1]})["data"])}
+        _t0L = _tL.time()
+        _tLe3 = _il.tableau_periode(*_PSL, us="cache")
+        _d3L = _tL.time() - _t0L
+        check("mypuls lent : une periode deja lue sert ses chiffres (dits perimes) sans attendre MyPuls",
+              _d3L < 3 and not _tLe3["erreur"] and "rechargez" in _tLe3["periode"]["perime"]
+              and {x["nom"]: x for x in _tLe3["lignes"]}["BO7"]["subs"] == 4 and _lentL["n"] == 2, f"{_d3L:.2f} s")
+        _lentL["ev"].set()
+        for _fL in list(_il._MYPULS_FILS.values()):
+            _fL["fil"].join(5)
+        _tLe4 = _il.tableau_periode(*_PLL, us="cache")
+        check("mypuls lent : la lecture finie sert l affichage suivant, sans nouvel appel",
+              not _tLe4["erreur"] and _lentL["n"] == 2 and not _il._MYPULS_FILS
+              and {x["nom"]: x for x in _tLe4["lignes"]}["BO7"]["subs"] == 4)
+        _mpL.api_get = _apiMPL
+        _il.MYPULS_ATTENTE_S = _savFL[1]
+        _MPL["panne"] = None
+
+        # --- la page d une periode
+        _il._MYPULS_CACHE.clear()
+        _il._MYPULS_ECHECS.clear()
+        _tPg = _il.tableau_periode(_DU, _AU, us="cache")
+        _hPg = _il.page_html(_tPg, "subs", "desc", cle="K1")
+        check("page periode : aucun JavaScript, aucun gestionnaire on...=",
+              "<script" not in _hPg and not _reL.search(r"<[^>]*\son[a-z]+\s*=", _hPg))
+        check("page periode : sous-titre « Du 21/09 au 26/09 · MyPuls », « Depuis toujours · Infloww » sinon",
+              "<b>Du 21/09 au 26/09 · MyPuls</b>" in _hPg and "<b>Depuis toujours · Infloww</b>" in _hP
+              and "Le 26/09 · MyPuls" in _il.page_html(_il._vide("x", ("2026-09-26", "2026-09-26")))
+              and "Du 01/01/2024 au 26/09/2026 · MyPuls" in _il.page_html(_il._vide("x", ("2024-01-01", "2026-09-26"))))
+        check("page periode : formulaire GET, dates, OK, et k, tri, sens en champs caches",
+              '<form class="periode" method="get">' in _hPg and 'name="k" value="K1"' in _hPg
+              and 'name="tri" value="subs"' in _hPg and 'name="sens" value="desc"' in _hPg
+              and 'type="date" name="du" value="2026-09-21"' in _hPg
+              and 'type="date" name="au" value="2026-09-26"' in _hPg and 'max="2026-09-26"' in _hPg
+              and '<button type="submit">OK</button>' in _hPg)
+        check("page periode : les liens de tri gardent la periode et la cle",
+              'href="?tri=us&amp;sens=desc&amp;du=2026-09-21&amp;au=2026-09-26&amp;k=K1"' in _hPg
+              and 'href="?tri=subs&amp;sens=asc&amp;du=2026-09-21&amp;au=2026-09-26&amp;k=K1"' in _hPg)
+        check("page periode : raccourcis en liens (depuis toujours sans periode), tri et cle gardes",
+              'href="?tri=subs&amp;sens=desc&amp;k=K1">Depuis toujours' in _hPg
+              and 'du=2026-09-26&amp;au=2026-09-26&amp;k=K1">Aujourd&#x27;hui' in _hPg
+              and 'du=2026-09-20&amp;au=2026-09-26&amp;k=K1">7 derniers jours' in _hPg
+              and 'du=2026-08-28&amp;au=2026-09-26&amp;k=K1">30 derniers jours' in _hPg
+              and 'class="on" aria-current="page">Depuis toujours' in _hP)
+        _hSp = _il.page_html(_tPg, cle='a&b"<\'')
+        check("page periode : une cle bizarre est echappee dans le formulaire et encodee dans les liens",
+              'value="a&amp;b&quot;&lt;&#x27;"' in _hSp and "k=a%26b%22%3C%27" in _hSp and 'a&b"' not in _hSp)
+        check("page periode : la note dit la semantique des bornes (incluses, heure de Paris) et la source",
+              "les deux jours inclus" in _hPg and "heure de Paris (UTC+02:00)" in _hPg
+              and "du 21/09/2026 00:00:00 au 26/09/2026 23:59:59" in _hPg and "lus dans MyPuls" in _hPg
+              and "aujourd'hui compte jusqu'à l'heure de lecture" in _hPg)
+        check("page periode : lien absent de MyPuls dit sous le nom, et en tete",
+              "lien MyPuls introuvable" in _hPg and "sans lien de suivi MyPuls en face" in _hPg
+              and "rendu(s) deux fois par MyPuls" in _hPg and "rendue(s) par MyPuls sous une forme illisible" in _hPg)
+        check("page periode : les couleurs s appliquent pareil",
+              '<span class="nv v1">2,48 $</span>' in _hPg and '<span class="nv o2">7,48 %</span>' in _hPg)
+        _revL = [_il._dec(v, 2, s) for v in (250.66, 30.12, 9.5, 75.0, 6.0, 140.0, 371.28, 511.28)
+                 for s in (" ", " ", ",", "")]
+        check("page periode : aucun montant de gains (ni lien, ni personne, ni total, ni hors GMS)",
+              not any(a in _hPg for a in _revL), str([a for a in _revL if a in _hPg]))
+        check("page periode : les liens hors GMS dans le <details>, chiffres de la periode",
+              "Hors GetMySocial, non comptés (1)" in _hPg and "Lien MyPuls" in _hPg)
+        check("page periode : lisible a 360 px (le formulaire passe sur plusieurs lignes)",
+              "flex-wrap:wrap" in _hPg and ".periode .lib{flex-basis:100%}" in _hPg and "min-width:0" in _hPg)
+        # page() : la periode vient de l adresse ; sans elle, la vue Infloww d avant
+        _MPL["appels"].clear()
+        _il._MYPULS_CACHE.clear()
+        _il._MYPULS_ECHECS.clear()
+        _hA0 = _il.page({"tri": "subs", "sens": "desc"}, cle="K1")
+        _hA1 = _il.page({"du": "n'importe", "au": "quoi"}, cle="K1")
+        check("page() : sans periode (ou periode illisible) -> Infloww, MyPuls jamais appele",
+              not _MPL["appels"] and "Depuis toujours · Infloww" in _hA0 and "Depuis toujours · Infloww" in _hA1)
+        _hA2 = _il.page({"du": "2026-09-26", "au": "2026-09-21", "tri": "cvr"}, cle="K1")
+        check("page() : avec une periode (inversee ici) -> MyPuls, periode remise dans l ordre",
+              len(_MPL["appels"]) == 1 and "Du 21/09 au 26/09 · MyPuls" in _hA2
+              and 'href="?tri=cvr&amp;sens=asc&amp;du=2026-09-21&amp;au=2026-09-26&amp;k=K1"' in _hA2)
+        _srcRL = _srcIL[_srcIL.find("def _rafraichir"):]
+        _srcRL = _srcRL[:_srcRL.find("\ndef ", 10)]
+        check("discord : inchange, toujours depuis toujours (Infloww)",
+              'tableau(us="calcul")' in _srcRL and "tableau_periode" not in _srcRL)
+
         # --- la route
         import web_upload as _wL
         import os as _osL
@@ -22490,6 +22923,17 @@ try:
                   _cC.get("/infloww/liens").status_code == 403)
             check("route : un chatteur connecte AVEC la cle voit la page (le lien du salon)",
                   _cC.get("/infloww/liens?k=" + _k1).status_code == 200)
+            # une periode par l adresse : la cle ouvre, la periode et la cle suivent
+            _JOUR["j"] = "2026-09-26"
+            _rPe = _cN.get("/infloww/liens?k=" + _k1 + "&du=2026-09-21&au=2026-09-26&tri=subs&sens=desc")
+            _hPeR = _rPe.get_data(as_text=True)
+            check("route : une periode par l adresse -> chiffres MyPuls, la cle et la periode suivent",
+                  _rPe.status_code == 200 and "Du 21/09 au 26/09 · MyPuls" in _hPeR
+                  and 'name="k" value="' + _k1 + '"' in _hPeR
+                  and "du=2026-09-21&amp;au=2026-09-26&amp;k=" + _k1 in _hPeR and "<script" not in _hPeR,
+                  str(_rPe.status_code))
+            check("route : une periode avec une cle fausse -> 403",
+                  _cN.get("/infloww/liens?k=faux&du=2026-09-21&au=2026-09-26").status_code == 403)
         finally:
             _wL._load_web_users = _usersL
     finally:
@@ -22499,6 +22943,10 @@ try:
          _ifL._creatrice_ou_erreur, _ifL.liens,
          _gmL.list_links_team, _gmL.analytics_for_links, _gmL.pause_restante, _gmL.etat_quota) = _savL
         _il.GMS_COPIE, _il.GMS_FRAIS_S = _savCopieL
+        _mpL.api_get, _il.US_PERIODES_FICHIER, _il._lancer_us_periode = _savPL[:3]
+        _il._MYPULS_CACHE.clear(); _il._MYPULS_CACHE.update(_savPL[3])
+        _gmL.get_analytics_overview, _il.MYPULS_ATTENTE_S, _il.MYPULS_ECHEC_S = _savFL[:3]
+        _il._MYPULS_ECHECS.clear(); _il._MYPULS_ECHECS.update(_savFL[3])
         import shutil as _shL
         _shL.rmtree(_tmpL, ignore_errors=True)
 except Exception as _eL:
