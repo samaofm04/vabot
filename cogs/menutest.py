@@ -391,9 +391,240 @@ if _demo_v2_dispo():
             self.add_item(boite)
 
 
+# ---------------------------------------------------------------------------
+# /demomodels : le MENU DES MODELS au-dela de 25 (26/09/2026).
+#
+# Le vrai menu (JailbreakModelsView, cogs/user.py) met un bouton-photo par
+# model et COUPE a 25 : cinq rangees de cinq, la limite d'un message Discord.
+# Aujourd'hui on est en dessous (US 14, FR 6), mais le jour ou un marche
+# depasse 25, les suivantes disparaitraient. Le proprietaire veut comparer
+# quatre dispositions AVANT de toucher au vrai menu, qui doit tourner tel quel
+# jusqu'a la maintenance :
+#   groupes      « 1–10 », « 11–20 »… ; un clic ouvre, EN PRIVE, les dix
+#                boutons-photos du groupe (le message public est partage par
+#                tous les VA : on ne l'edite jamais pour un seul d'entre eux)
+#   top10        les dix premieres en photos, puis les groupes pour le reste
+#   photos_menu  vingt photos + un menu deroulant « Autres models » (45 max)
+#   menus        uniquement des menus deroulants « 1–25 », « 26–50 »… (125 max)
+#
+# Tout est EPHEMERE et rien n'est envoye. Libelles, ordre et photos sont LUS
+# dans la production (_jb_models_marche, identites_ordre, _libelle_model,
+# _identity_emoji_name) : la demo montre les vrais noms dans le vrai ordre.
+# Les photos sont les emojis DEJA crees sur le serveur : jamais
+# ensure_identity_emojis ici, il en cree.
+#
+# Au-dela de ce qu'une disposition peut montrer, les models restantes sont
+# COMPTEES et dites (« N non affichees »), jamais ecartees en silence : c'est
+# precisement le defaut du [:25] de production qu'on cherche a eviter.
+
+#: Limites Discord d'un message classique (hors Components V2).
+_LIM_COMPOSANTS = 25
+_LIM_PAR_RANGEE = 5
+_LIM_OPTIONS = 25
+_LIM_LIBELLE_BOUTON = 80
+_LIM_LIBELLE_OPTION = 100
+#: Taille d'un groupe « 1–10 » : deux rangees de cinq boutons-photos.
+_TAILLE_GROUPE = 10
+
+_DEMO_MODELS_VARIANTES = {
+    "groupes": "Groupes 1–10, 11–20… (un clic = les photos du groupe, en privé)",
+    "top10": "Top 10 en photos + groupes pour la suite",
+    "photos_menu": "20 photos + menu déroulant « Autres models »",
+    "menus": "Menus déroulants uniquement : 1–25, 26–50…",
+}
+
+
+def _plage(debut: int, fin: int) -> str:
+    """« 11–20 », numerotation du VA (a partir de 1)."""
+    return f"{debut}–{fin}" if fin > debut else f"{debut}"
+
+
+def _demo_models_liste(marche: str, simuler: int, guild=None):
+    """[(ident, libelle, emoji, fausse)] dans l'ordre de production, puis les
+    fausses entrees « 🧪 Model test N » jusqu'a `simuler`. Rend aussi le
+    nombre de vraies models, pour le dire a l'ecran."""
+    reelles = []
+    try:
+        import identites_ordre as _io
+        from cogs.user import (_jb_models_marche, _libelle_model,
+                               _identity_emoji_name)
+        ordre = _io.lire()
+        tri = _io.trier(list(_jb_models_marche(marche) or []), ordre)
+        # Libelles d'apres la liste ENTIERE : au-dela de 25 le rang continue
+        # (le vrai menu ne numerote que ses 25 visibles).
+        libs = _io.etiqueter(tri, ordre)
+        presents = {e.name: e for e in (getattr(guild, "emojis", None) or [])}
+        for m in tri:
+            reelles.append((m, _libelle_model(m, libs),
+                            presents.get(_identity_emoji_name(m)), False))
+    except Exception:                                        # noqa: BLE001
+        reelles = []
+    n_reelles = len(reelles)
+    total = max(1, int(simuler or 0))
+    items = list(reelles)
+    for i in range(len(items) + 1, total + 1):
+        items.append((f"zztest{i}", f"🧪 Model test {i}", None, True))
+    return items[:total], n_reelles
+
+
+def demo_models_plan(variante: str, items: list) -> dict:
+    """La disposition, sans Discord : ce que chaque zone montre.
+
+    {"photos": [items], "groupes": [(libelle, [items])],
+     "menus": [(libelle, [items])], "non_affichees": [items]}
+
+    Chaque item de `items` se retrouve dans EXACTEMENT une zone, ou dans
+    non_affichees : c'est ce que les tests verifient.
+    """
+    photos, groupes, menus = [], [], []
+    reste = list(items)
+
+    def _grouper(depuis: int, liste: list, places: int):
+        out = []
+        for k in range(0, len(liste), _TAILLE_GROUPE):
+            if len(out) >= places:
+                break
+            bloc = liste[k:k + _TAILLE_GROUPE]
+            out.append((_plage(depuis + k, depuis + k + len(bloc) - 1), bloc))
+        pris = sum(len(b) for _l, b in out)
+        return out, liste[pris:]
+
+    if variante == "groupes":
+        groupes, reste = _grouper(1, reste, _LIM_COMPOSANTS)
+    elif variante == "top10":
+        photos, reste = reste[:10], reste[10:]
+        # 10 photos = 2 rangees ; il en reste 3, soit 15 boutons de groupe.
+        groupes, reste = _grouper(11, reste, 3 * _LIM_PAR_RANGEE)
+    elif variante == "photos_menu":
+        photos, reste = reste[:20], reste[20:]
+        if reste:
+            menus = [("Autres models", reste[:_LIM_OPTIONS])]
+            reste = reste[_LIM_OPTIONS:]
+    elif variante == "menus":
+        k = 0
+        while reste and len(menus) < _LIM_PAR_RANGEE:
+            bloc, reste = reste[:_LIM_OPTIONS], reste[_LIM_OPTIONS:]
+            menus.append((_plage(k + 1, k + len(bloc)), bloc))
+            k += len(bloc)
+    else:
+        raise ValueError(f"variante inconnue : {variante}")
+    return {"photos": photos, "groupes": groupes, "menus": menus,
+            "non_affichees": reste}
+
+
+async def _demo_model_choisie(interaction: discord.Interaction, libelle: str):
+    await interaction.response.send_message(
+        f"🧪 **Démo** — ici le VA ouvrirait le menu d'actions de **{libelle}**.",
+        ephemeral=True)
+
+
+class _DemoModelBouton(discord.ui.Button):
+    def __init__(self, item, row=None):
+        _ident, libelle, emoji, _f = item
+        super().__init__(label=libelle[:_LIM_LIBELLE_BOUTON], emoji=emoji,
+                         style=discord.ButtonStyle.secondary, row=row)
+        self.libelle = libelle
+
+    async def callback(self, interaction: discord.Interaction):
+        await _demo_model_choisie(interaction, self.libelle)
+
+
+class _DemoGroupeBouton(discord.ui.Button):
+    """Ouvre les photos du groupe dans une NOUVELLE reponse privee : le
+    message de depart n'est jamais edite (en production il est partage)."""
+
+    def __init__(self, libelle, bloc, row=None):
+        super().__init__(label=libelle, style=discord.ButtonStyle.primary,
+                         row=row)
+        self.bloc = bloc
+
+    async def callback(self, interaction: discord.Interaction):
+        vue = discord.ui.View(timeout=900)
+        for i, it in enumerate(self.bloc):
+            vue.add_item(_DemoModelBouton(it, row=i // _LIM_PAR_RANGEE))
+        await interaction.response.send_message(
+            f"🧪 Models **{self.label}** — clique une model :",
+            view=vue, ephemeral=True)
+
+
+class _DemoModelsMenu(discord.ui.Select):
+    def __init__(self, libelle, bloc, row=None):
+        self.par_valeur = {}
+        opts = []
+        for ident, lib, emoji, _f in bloc:
+            self.par_valeur[ident] = lib
+            opts.append(discord.SelectOption(
+                label=lib[:_LIM_LIBELLE_OPTION], value=ident, emoji=emoji))
+        super().__init__(placeholder=f"👤 {libelle}…", options=opts,
+                         min_values=1, max_values=1, row=row)
+
+    async def callback(self, interaction: discord.Interaction):
+        v = self.values[0]
+        await _demo_model_choisie(interaction, self.par_valeur.get(v, v))
+
+
+def demo_models_vue(plan: dict) -> discord.ui.View:
+    """La vue classique d'un plan. Les rangees sont POSEES, pas devinees :
+    un menu deroulant prend une rangee entiere, et discord.py leve au 6e
+    element d'une rangee -- on veut que ca casse dans les tests, pas chez le
+    proprietaire."""
+    vue = discord.ui.View(timeout=900)
+    rang = 0
+    for i, it in enumerate(plan["photos"]):
+        vue.add_item(_DemoModelBouton(it, row=i // _LIM_PAR_RANGEE))
+    if plan["photos"]:
+        rang = (len(plan["photos"]) - 1) // _LIM_PAR_RANGEE + 1
+    for i, (lib, bloc) in enumerate(plan["groupes"]):
+        vue.add_item(_DemoGroupeBouton(lib, bloc,
+                                       row=rang + i // _LIM_PAR_RANGEE))
+    if plan["groupes"]:
+        rang += (len(plan["groupes"]) - 1) // _LIM_PAR_RANGEE + 1
+    for i, (lib, bloc) in enumerate(plan["menus"]):
+        vue.add_item(_DemoModelsMenu(lib, bloc, row=rang + i))
+    return vue
+
+
 class MenuTest(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
+    @app_commands.command(
+        name="demomodels",
+        description="[DÉMO] Le menu des models au-delà de 25 — 4 dispositions, rien n'est envoyé",
+    )
+    @app_commands.describe(
+        variante="La disposition à essayer",
+        marche="Le marché des models (us ou fr)",
+        simuler="Nombre total de models à afficher (des « 🧪 Model test » complètent)")
+    @app_commands.choices(
+        variante=[app_commands.Choice(name=v[:100], value=k)
+                  for k, v in _DEMO_MODELS_VARIANTES.items()],
+        marche=[app_commands.Choice(name="US", value="us"),
+                app_commands.Choice(name="FR", value="fr")])
+    async def demomodels(self, interaction: discord.Interaction,
+                         variante: app_commands.Choice[str],
+                         marche: app_commands.Choice[str] = None,
+                         simuler: app_commands.Range[int, 1, 200] = 40):
+        mk = marche.value if marche else "us"
+        items, n_reelles = _demo_models_liste(mk, simuler, interaction.guild)
+        plan = demo_models_plan(variante.value, items)
+        n_fausses = sum(1 for it in items if it[3])
+        lignes = [
+            f"## 🧪 Menu des models — {_DEMO_MODELS_VARIANTES[variante.value]}",
+            f"Marché **{mk.upper()}** : **{n_reelles}** vraie(s) model(s)"
+            + (f" + **{n_fausses}** fausse(s) « 🧪 Model test »" if n_fausses else "")
+            + f" = **{len(items)}**.",
+            "_Maquette : rien n'est envoyé ; le vrai menu n'est pas touché._",
+        ]
+        if n_reelles > len(items):
+            lignes.append(f"⚠️ {n_reelles - len(items)} vraie(s) model(s) "
+                          f"au-delà de « simuler = {len(items)} ».")
+        if plan["non_affichees"]:
+            lignes.append(f"⚠️ **{len(plan['non_affichees'])} model(s) non "
+                          "affichée(s)** : cette disposition ne peut pas en "
+                          "montrer plus.")
+        await interaction.response.send_message(
+            "\n".join(lignes), view=demo_models_vue(plan), ephemeral=True)
 
     @app_commands.command(
         name="demopanneau",

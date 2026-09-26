@@ -7655,6 +7655,140 @@ for _nomV2, _fV2 in (("panneau", _v2_bloc_panneau), ("menu VA", _v2_bloc_menu_va
 check("v2 : aucune ecriture dans data/ pendant les trois parties",
       not _V2_AUDIT["ecrits"], str(_V2_AUDIT["ecrits"][:5]))
 
+
+# ---------------------------------------------------------------------------
+# /demomodels : le menu des models au-dela de 25 (maquette, bot admin).
+# Le vrai menu coupe a 25 ([:25]) ; la maquette compare quatre dispositions.
+# Chaque disposition doit tenir dans les limites Discord ET ne perdre aucune
+# model sans la compter -- c'est le defaut du [:25] qu'on veut eviter.
+print()
+print("=" * 70)
+print("/demomodels : quatre dispositions du menu des models")
+print("=" * 70)
+try:
+    import asyncio as _aDM
+    import discord as _dDM
+    import cogs.menutest as _MDM
+
+    def _itemsDM(n):
+        # Un libelle long pour verifier la coupe a 80 caracteres.
+        return [("m%d" % i, ("Model %d " % i) + ("x" * (90 if i == 3 else 0)),
+                 None, False) for i in range(1, n + 1)]
+
+    def _rangeesDM(vue):
+        rows = vue.to_components()
+        return rows, [len(r["components"]) for r in rows]
+
+    class _RespDM:
+        def __init__(self):
+            self.envois, self.editions = [], []
+        async def send_message(self, *a, **k):
+            # Le texte part souvent en premier argument positionnel.
+            d = dict(k)
+            if a:
+                d.setdefault("content", a[0])
+            self.envois.append(d)
+        async def edit_message(self, *a, **k):
+            self.editions.append(k)
+
+    class _InterDM:
+        def __init__(self):
+            self.response = _RespDM()
+
+    _attenduDM = {
+        # (variante, n) -> (photos, groupes, menus, non affichees)
+        ("groupes", 14): (0, 2, 0, 0), ("groupes", 26): (0, 3, 0, 0),
+        ("groupes", 45): (0, 5, 0, 0), ("groupes", 100): (0, 10, 0, 0),
+        ("top10", 14): (10, 1, 0, 0), ("top10", 26): (10, 2, 0, 0),
+        ("top10", 45): (10, 4, 0, 0), ("top10", 100): (10, 9, 0, 0),
+        ("photos_menu", 14): (14, 0, 0, 0), ("photos_menu", 26): (20, 0, 1, 0),
+        ("photos_menu", 45): (20, 0, 1, 0), ("photos_menu", 100): (20, 0, 1, 55),
+        ("menus", 14): (0, 0, 1, 0), ("menus", 26): (0, 0, 2, 0),
+        ("menus", 45): (0, 0, 2, 0), ("menus", 100): (0, 0, 4, 0),
+    }
+    for (_varDM, _nDM), _attDM in sorted(_attenduDM.items()):
+        _itDM = _itemsDM(_nDM)
+        _plDM = _MDM.demo_models_plan(_varDM, _itDM)
+        _vuDM = [it for it in _plDM["photos"]]
+        for _l, _b in _plDM["groupes"]:
+            _vuDM += _b
+        for _l, _b in _plDM["menus"]:
+            _vuDM += _b
+        _vuDM += _plDM["non_affichees"]
+        check("demomodels %s x%d : chaque model est montree OU comptee, une seule fois"
+              % (_varDM, _nDM), _vuDM == _itDM,
+              "%d vs %d" % (len(_vuDM), len(_itDM)))
+        _obtDM = (len(_plDM["photos"]), len(_plDM["groupes"]),
+                  len(_plDM["menus"]), len(_plDM["non_affichees"]))
+        check("demomodels %s x%d : disposition attendue %s" % (_varDM, _nDM, _attDM),
+              _obtDM == _attDM, str(_obtDM))
+        _vueDM = _MDM.demo_models_vue(_plDM)
+        _rowsDM, _parDM = _rangeesDM(_vueDM)
+        _selDM = [c for c in _vueDM.children if isinstance(c, _dDM.ui.Select)]
+        _btnDM = [c for c in _vueDM.children if isinstance(c, _dDM.ui.Button)]
+        check("demomodels %s x%d : <= 25 composants, <= 5 rangees, <= 5 par rangee"
+              % (_varDM, _nDM),
+              len(_vueDM.children) <= 25 and len(_rowsDM) <= 5
+              and all(n <= 5 for n in _parDM), "%d / %s" % (len(_vueDM.children), _parDM))
+        check("demomodels %s x%d : un menu deroulant occupe sa rangee seul, <= 25 options"
+              % (_varDM, _nDM),
+              all(len(r["components"]) == 1 for r in _rowsDM
+                  if r["components"][0]["type"] == 3)
+              and all(len(s.options) <= 25 for s in _selDM))
+        check("demomodels %s x%d : libelles <= 80 (boutons) et <= 100 (options)"
+              % (_varDM, _nDM),
+              all(len(b.label or "") <= 80 for b in _btnDM)
+              and all(len(o.label) <= 100 for s in _selDM for o in s.options))
+        # Un groupe s'ouvre dans une NOUVELLE reponse privee ; le message de
+        # depart (public en production) n'est jamais edite.
+        for _gDM in [c for c in _btnDM if isinstance(c, _MDM._DemoGroupeBouton)]:
+            _iDM = _InterDM()
+            _aDM.run(_gDM.callback(_iDM))
+            _envDM = _iDM.response.envois
+            _sousDM = _envDM[0]["view"] if _envDM else None
+            _ok = (len(_envDM) == 1 and _envDM[0].get("ephemeral") is True
+                   and not _iDM.response.editions and _sousDM is not None
+                   and len(_sousDM.children) == len(_gDM.bloc) <= 10)
+            if not _ok:
+                check("demomodels %s x%d : le groupe %s s'ouvre en prive, sans editer"
+                      % (_varDM, _nDM, _gDM.label), False, str(_envDM)[:160])
+                break
+        else:
+            check("demomodels %s x%d : chaque groupe s'ouvre en prive, sans editer"
+                  % (_varDM, _nDM), True)
+
+    # Un clic sur une model ne fait RIEN d'autre que le dire, en prive.
+    _iDM = _InterDM()
+    _bDM = _MDM._DemoModelBouton(("lola", "🥇 Lola", None, False))
+    _aDM.run(_bDM.callback(_iDM))
+    check("demomodels : un clic sur une model repond en prive, sans rien envoyer",
+          len(_iDM.response.envois) == 1
+          and _iDM.response.envois[0].get("ephemeral") is True
+          and "Lola" in (_iDM.response.envois[0].get("content")
+                         or str(_iDM.response.envois[0])))
+    # Fausses entrees clairement marquees, completees jusqu'a « simuler ».
+    _itsDM, _nrDM = _MDM._demo_models_liste("us", 40, None)
+    check("demomodels : « simuler » complete avec des « 🧪 Model test N »",
+          len(_itsDM) == 40 and all(it[1].startswith("🧪 Model test")
+                                    for it in _itsDM if it[3])
+          and sum(1 for it in _itsDM if not it[3]) == _nrDM)
+    # La demo lit la production et ne cree JAMAIS d'emoji sur le serveur.
+    _srcDM = pathlib.Path("cogs/menutest.py").read_text(encoding="utf-8")
+    check("demomodels : n'appelle pas ensure_identity_emojis (il cree des emojis)",
+          "ensure_identity_emojis(" not in _srcDM)
+    check("demomodels : libelles et ordre lus dans la production, pas recopies",
+          all(x in _srcDM for x in ("_jb_models_marche", "_io.trier(",
+                                    "_io.etiqueter(", "_libelle_model(",
+                                    "_identity_emoji_name(")))
+    import cogs.user as _uDM
+    check("demomodels : le vrai menu des models n'est pas touche (coupe a 25)",
+          "visibles = _io.trier(list(models), ordre)[:25]"
+          in pathlib.Path("cogs/user.py").read_text(encoding="utf-8"))
+except Exception as _eDM:
+    import traceback as _tbDM
+    check("demomodels : testable", False,
+          repr(_eDM)[:200] + " " + _tbDM.format_exc()[-500:])
+
 if FAILS:
     print("ECHECS :")
     for f in FAILS:
