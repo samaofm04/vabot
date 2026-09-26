@@ -55617,6 +55617,12 @@ def create_app():
         # ou ecraser une semaine entiere depuis la console.
         ("/chatting/", "chatplanning"),
         "/logout",
+        # Le paiement des VA de /infloww/liens : la route exige elle-même la
+        # clé de paiement du propriétaire (pas celle du salon) ou une session
+        # admin. Sans cette entrée, la clé, qui
+        # suffit à un visiteur SANS session, était refusée à qui l'ouvrait
+        # depuis un navigateur connecté avec un rôle restreint.
+        "/infloww/liens/paie",
         # NB : /settings/my_password est autorisé plus haut par un retour
         # anticipé du guard (exact-match), pas via cette liste de préfixes.
         # (Anciennes entrées /prefs//theme/sfw retirées : aucune route ne leur
@@ -62761,12 +62767,14 @@ def create_app():
         LE RETOUR » : clics US, clics OF, subs, CVR, $ par sub.
 
         La page que Bixby met en tête de ses messages dans « inflow-resultat ».
-        Les VA qui l'ouvrent n'ont pas de compte : la clé de l'adresse (?k=)
-        suffit, comparée en temps constant. Sans clé, c'est la règle de
-        /infloww : admin seulement. Une clé FAUSSE est refusée même à un admin
-        connecté — elle ne se confond pas avec une absence de clé.
+        Les VA qui l'ouvrent n'ont pas de compte : la clé du salon (?k=)
+        suffit, comparée en temps constant — et ne montre NI paiement NI gain.
+        La clé du propriétaire (infloww_liens.cle_paie, jamais postée) ou une
+        session admin sans clé montrent en plus les colonnes Paiement et
+        Gain / perte. Sans clé, c'est la règle de /infloww : admin seulement.
+        Une clé FAUSSE est refusée même à un admin connecté — elle ne se
+        confond pas avec une absence de clé.
         """
-        import hmac as _hm_il
         from flask import Response as _R
         import infloww_liens as _il
 
@@ -62780,25 +62788,60 @@ def create_app():
 
         k = str(request.args.get("k") or "")
         if k:
-            try:
-                bonne = _il.cle_page()
-            except Exception as e:
-                log.warning(f"[infloww-liens] clé de la page illisible : {e}")
-                bonne = ""
-            if not (bonne and _hm_il.compare_digest(k.encode("utf-8"), bonne.encode("utf-8"))):
+            acces = _il.acces_cle(k)
+            if not acces:
                 return _entetes(_R("Lien invalide.", status=403, mimetype="text/plain"))
+            paie = acces == "paie"
         else:
             if not is_auth():
                 return redirect("/")
             if not _is_admin():
                 return _entetes(_R("Réservé à l'administration.", status=403, mimetype="text/plain"))
+            paie = True
         try:
-            html = _il.page(request.args, cle=k)
+            html = _il.page(request.args, cle=k, paie=paie, lien_perso=not k)
         except Exception as e:
             # page() ne lève pas ; si elle le faisait, la panne s'affiche SUR
             # la page plutôt qu'en page blanche
             html = _il.page_html(_il._vide(f"{type(e).__name__} : {e}"))
         return _entetes(_R(html, mimetype="text/html"))
+
+    @app.route("/infloww/liens/paie", methods=["POST"])
+    def infloww_liens_paie():
+        """Le réglage de paiement d'une personne, envoyé par le formulaire
+        (sans JavaScript) de /infloww/liens. La clé du PROPRIÉTAIRE (champ k,
+        infloww_liens.cle_paie, comparée en temps constant) ou, sans clé, une
+        session admin. La clé du salon, celle des VA, est refusée : sinon
+        chaque VA aurait pu modifier les paiements. Une clé FAUSSE est refusée
+        même à un admin. Valeurs revalidées par infloww_liens.enregistrer_paie ;
+        retour 303 sur la même vue (tri, période, clé)."""
+        from flask import Response as _R
+        import infloww_liens as _il
+
+        def _entetes(r):
+            r.headers["Cache-Control"] = "no-store"
+            r.headers["X-Robots-Tag"] = "noindex, nofollow"
+            r.headers["Referrer-Policy"] = "no-referrer"
+            return r
+
+        # Un formulaire forgé sur un autre site : la session admin n'y part
+        # pas (cookie SameSite=Lax) et la clé ne s'y devine pas ; un navigateur
+        # récent dit en plus d'où vient l'envoi — ceinture et bretelles.
+        if (request.headers.get("Sec-Fetch-Site") or "same-origin") not in ("same-origin", "none"):
+            return _entetes(_R("Envoi refusé : il ne vient pas de la page.", status=403,
+                               mimetype="text/plain"))
+        k = str(request.form.get("k") or "")
+        if k:
+            acces = _il.acces_cle(k)
+            if acces != "paie":
+                return _entetes(_R("Ce lien ne permet pas de modifier les paiements." if acces
+                                   else "Lien invalide.", status=403, mimetype="text/plain"))
+        elif not (is_auth() and _is_admin()):
+            return _entetes(_R("Réservé à l'administration.", status=403, mimetype="text/plain"))
+        ok, pourquoi, retour = _il.enregistrer_paie(request.form)
+        if not ok:
+            return _entetes(_R(_il.page_refus_paie(pourquoi, retour), status=400, mimetype="text/html"))
+        return _entetes(redirect(retour, code=303))
 
     @app.route("/version")
     def version_du_site():

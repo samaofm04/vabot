@@ -21976,7 +21976,27 @@ try:
     _savPL = (_mpL.api_get, _il.US_PERIODES_FICHIER, _il._lancer_us_periode, dict(_il._MYPULS_CACHE))
     # MyPuls lent ou muet, verification des zeros GetMySocial
     _savFL = (_gmL.get_analytics_overview, _il.MYPULS_ATTENTE_S, _il.MYPULS_ECHEC_S, dict(_il._MYPULS_ECHECS))
+    # le paiement : reglages, quinzaines gardees et taux BCE dans le dossier
+    # temporaire ; la BCE bouchonnee (une lecture non prevue echoue)
+    _savPaL = (_il.PAIE_FICHIER, _il.QUINZ_FICHIER, _il.BCE_FICHIER, _il.QUINZ_EN_FOND, _il._bce_http,
+               _il._dormir_q, dict(_il._FIL_Q), _il.QUINZ_APPELS_MAX)
+    # la cle du proprietaire (paiement), a part de celle du salon
+    _savKPL = _il.CLE_PAIE_FICHIER
     try:
+        _il.CLE_PAIE_FICHIER = _tmpL / "cle_paie"
+        _il.PAIE_FICHIER = _tmpL / "paie.json"
+        _il.QUINZ_FICHIER = _tmpL / "quinzaines.json"
+        _il.BCE_FICHIER = _tmpL / "bce.json"
+        _il.QUINZ_EN_FOND = False
+        _il._dormir_q = lambda s: None
+        _BCEL = {"n": 0, "rep": None}
+
+        def _bceL():
+            _BCEL["n"] += 1
+            if isinstance(_BCEL["rep"], Exception) or _BCEL["rep"] is None:
+                raise _BCEL["rep"] or RuntimeError("BCE non bouchonnee")
+            return _BCEL["rep"]
+        _il._bce_http = _bceL
         # la copie GMS de la page : dans le dossier temporaire, et sans delai
         # de fraicheur, sinon chaque tableau() reprendrait la liste du premier
         _il.GMS_COPIE = _tmpL / "copie_gms.json"
@@ -22537,6 +22557,20 @@ try:
         check("page : la cle est creee une fois, puis relue",
               len(_k1) >= 20 and _il.cle_page() == _k1
               and _il.url_page() == "https://youl4b.com/infloww/liens?k=" + _k1)
+        # la cle du PROPRIETAIRE (paiement) : a part de celle du salon.
+        # Relecture du 26/09 : la cle du salon public ouvrait aussi le
+        # paiement ; l envoi Discord allume, chaque VA aurait lu et modifie le
+        # salaire et le gain des autres.
+        _kP = _il.cle_paie()
+        _MkL = "\n".join(_jsL.dumps(m, ensure_ascii=False) for m in _il.messages_discord(_t150, _il.url_page()))
+        check("cle de paiement : distincte de celle du salon, relue, jamais dans le lien du salon ni sur Discord",
+              len(_kP) >= 20 and _kP != _k1 and _il.cle_paie() == _kP and _kP not in _il.url_page()
+              and _k1 in _MkL and _kP not in _MkL and _il.url_paie() == "https://youl4b.com/infloww/liens?k=" + _kP
+              and oct(_il.CLE_PAIE_FICHIER.stat().st_mode & 0o777) == "0o600")
+        check("cle de paiement : acces_cle distingue les deux cles (temps constant), une fausse ne donne rien",
+              _il.acces_cle(_kP) == "paie" and _il.acces_cle(_k1) == "page" and _il.acces_cle("faux" + _kP) == ""
+              and _il.acces_cle(_kP[:-1]) == "" and _il.acces_cle("") == "" and _il.acces_cle(None) == ""
+              and "compare_digest" in _srcIL.split("def acces_cle", 1)[1].split("\ndef ", 1)[0])
 
         # --- une PERIODE (?du=&au=) : « je selectionne les cinq derniers jours
         # jusqu a aujourd hui, je fais OK, et ca retravaille les calculs ».
@@ -22948,6 +22982,483 @@ try:
         check("discord : inchange, toujours depuis toujours (Infloww)",
               'tableau(us="calcul")' in _srcRL and "tableau_periode" not in _srcRL)
 
+        # --- le PAIEMENT des VA et le GAIN / PERTE (la page seulement) :
+        # « une case ou je peux choisir leur paiement », « la derniere case
+        # qui me dit si le VA me fait perdre ou gagner de l argent ». Fixe
+        # 75 $ par quinzaine (1-15, 16-fin) ou autre (200 EUR par mois),
+        # primes par quinzaine sur les subs, paliers NON cumulables.
+        import datetime as _dtL
+        from urllib.parse import urlsplit as _usL
+        _DL = _dtL.date
+
+        def _razL(*chemins):
+            # safe_json relirait la sauvegarde .prev d un fichier efface
+            for _c in chemins:
+                _c.unlink(missing_ok=True)
+                _c.with_suffix(_c.suffix + ".prev").unlink(missing_ok=True)
+
+        def _ecrire_paieL(d):
+            _razL(_il.PAIE_FICHIER)
+            _il.PAIE_FICHIER.write_text(_jsL.dumps({"personnes": d}), encoding="utf-8")
+
+        def _cfgL(typ, m, dev="USD", freq="quinzaine", depuis=""):
+            return {"type": typ, "montant": m, "devise": dev, "frequence": freq, "depuis": depuis}
+        _pbL = [_il.palier(n)[0] for n in (0, 99, 100, 149, 150, 199, 200, 249, 250, 299, 300, 499,
+                                            500, 749, 750, 999, 1000, 1499, 1500, 99999)]
+        check("paie : paliers de primes aux bornes (99/100, 149/150, ..., 1499/1500)",
+              _pbL == [0, 0, 10, 10, 25, 25, 45, 45, 70, 70, 90, 90, 170, 170, 250, 250, 320, 320, 540, 540],
+              str(_pbL))
+        check("paie : paliers NON cumulables (320 subs -> 90 $, pas 10+25+45+70+90), libelle du palier",
+              _il.palier(320) == (90.0, "300–499 subs") and _il.palier(1500)[1] == "1\u202f500 subs et plus"
+              and _il.palier(None) == (0.0, "moins de 100 subs"))
+        _cQL = _cfgL("fixe", 75.0)
+        _cML = _cfgL("fixe", 200.0, "EUR", "mois")
+        check("paie : fixe au prorata des jours (quinzaine entiere 75 $, 5 jours 25 $, 16-28/02 entiere)",
+              _il.cout_fixe(_cQL, _DL(2026, 9, 1), _DL(2026, 9, 15))[0] == 75.0
+              and _il.cout_fixe(_cQL, _DL(2026, 9, 1), _DL(2026, 9, 5))[0] == 25.0
+              and _il.cout_fixe(_cQL, _DL(2026, 2, 16), _DL(2026, 2, 28))[0] == 75.0
+              and abs(_il.cout_fixe(_cQL, _DL(2026, 9, 10), _DL(2026, 10, 3))[0] - (30 + 75 + 15)) < 1e-9)
+        check("paie : frequence mois = mois civil au prorata (200 sur 11 jours de septembre = 73,33)",
+              abs(_il.cout_fixe(_cML, _DL(2026, 9, 16), _DL(2026, 9, 26))[0] - 200 * 11 / 30) < 1e-9
+              and _il.cout_fixe(_cML, _DL(2026, 9, 1), _DL(2026, 9, 30))[0] == 200.0
+              and abs(_il.cout_fixe(_cML, _DL(2026, 9, 21), _DL(2026, 10, 10))[0]
+                      - (200 * 10 / 30 + 200 * 10 / 31)) < 1e-9)
+        check("paie : quinzaines du 1er au 15 et du 16 a la fin, les morceaux marques incomplets",
+              [(q["du"].day, q["au"].day, q["complete"]) for q in _il.decouper(_DL(2026, 9, 10), _DL(2026, 10, 3))]
+              == [(10, 15, False), (16, 30, True), (1, 3, False)]
+              and _il.decouper(_DL(2026, 9, 5), _DL(2026, 9, 4)) == [])
+        _vbL = _cfgL("fixe", "75")
+        check("paie : reglage valide et normalise (75,5 ; eur ; JJ/MM/AAAA)",
+              _il.valider_paie(_cfgL("fixe_primes", "75,5", "eur", "mois", "20/09/2026"))[0]
+              == _cfgL("fixe_primes", 75.5, "EUR", "mois", "2026-09-20")
+              and _il.valider_paie(_vbL)[0] == _cfgL("fixe", 75.0))
+        _malL = [(k, v) for k, v in (("montant", "-1"), ("montant", "abc"), ("montant", "1e9"), ("montant", "nan"),
+                                     ("montant", "75.123"), ("montant", "20000.01"), ("montant", float("inf")),
+                                     ("montant", True), ("type", "x"), ("devise", "GBP"), ("frequence", "an"),
+                                     ("depuis", "2026-02-31"), ("depuis", "2019-01-01"), ("depuis", "2030-01-01"))
+                 if _il.valider_paie(dict(_vbL, **{k: v}))[0] is not None]
+        check("paie : valeurs refusees (montant negatif, absurde, 3 decimales, devise, frequence, dates)",
+              not _malL, str(_malL))
+
+        # une periode : 21/09 -> 26/09 (6 jours de la quinzaine du 16 au 30)
+        _BCEL["rep"] = ("<gesmes:Envelope><Cube><Cube time='2026-09-25'>"
+                        "<Cube currency='JPY' rate='160.1'/><Cube currency='USD' rate='1.2000'/></Cube></Cube>"
+                        "</gesmes:Envelope>")
+        _BCEL["n"] = 0
+        _razL(_il.BCE_FICHIER, _il.QUINZ_FICHIER)
+        _ecrire_paieL({"VA 1 Noum": _cfgL("fixe_primes", 75), "Bryan": _cfgL("fixe", 200),
+                       "BO7": _cfgL("fixe", 100, "EUR", "mois"), "Roucham": _cfgL("fixe_primes", 75),
+                       "ANDRY": _cfgL("aucun", 75), "Parti": _cfgL("fixe", 75),
+                       "Casse": _cfgL("fixe", -5)})
+        _JOUR["j"] = "2026-09-26"
+        _il._MYPULS_CACHE.clear(); _il._MYPULS_ECHECS.clear(); _MPL["appels"].clear(); _MPL["panne"] = None
+        _tInL = _il.tableau_periode(_DU, _AU, us="cache")
+        _tPy = _il.avec_paie(_tInL)
+        _pPy = {x["nom"]: x for x in _tPy["lignes"]}
+        _nqL = _pPy["VA 1 Noum"]["paie"]
+        check("paie : fixe + primes sur une quinzaine incomplete (fixe 75 x 6/15, 101 subs -> +10 $), gain",
+              _nqL["fixe"] == 30.0 and _nqL["primes"] == 10.0 and _pPy["VA 1 Noum"]["gain"] == 210.66
+              and _nqL["detail_q"] == [{"du": _DU, "au": _AU, "complete": False, "subs": 101, "prime": 10.0,
+                                        "palier": "100–149 subs"}], str(_nqL.get("detail_q")))
+        check("paie : la lecture MyPuls de la periode sert aussi sa quinzaine (aucun appel de plus)",
+              len(_MPL["appels"]) == 1, str(_MPL["appels"]))
+        check("paie : un VA qui coute plus qu il ne rapporte -> gain negatif",
+              _pPy["Bryan"]["paie"]["fixe"] == 80.0 and _pPy["Bryan"]["gain"] == -5.0)
+        check("paie : un fixe en EUR converti au taux BCE (bouchonne a 1,2), lu une fois",
+              _pPy["BO7"]["paie"]["fixe_devise"] == 20.0 and _pPy["BO7"]["paie"]["fixe"] == 24.0
+              and _pPy["BO7"]["gain"] == -14.5 and _tPy["paie"]["taux"]["taux"] == 1.2 and _BCEL["n"] == 1)
+        _il.avec_paie(_tInL)
+        check("paie : le taux du jour est garde (pas de seconde lecture BCE)", _BCEL["n"] == 1)
+        check("paie : incalculable ou non regle -> None (jamais un zero invente), et la raison",
+              _pPy["Roucham"]["gain"] is None and "revenu inconnu" in _pPy["Roucham"]["paie"]["raison"]
+              and _pPy["ANDRY"]["gain"] is None and _pPy["ANDRY"]["paie"]["resume"] == "—"
+              and _pPy["Gerome SPAM"]["gain"] is None and _pPy["Gerome SPAM"]["paie"]["cfg"] is None)
+        _TPy = _tPy["paie"]["totaux"]
+        check("paie : totaux sur les personnes reglees dont le gain se calcule",
+              _TPy["configures"] == 4 and _TPy["calcules"] == 3 and abs(_TPy["revenu"] - 335.16) < 1e-9
+              and _TPy["cout"] == 144.0 and _TPy["gain"] == 191.16, str(_TPy))
+        check("paie : reglage illisible et personne absente de GetMySocial : dits, pas avales",
+              _tPy["paie"]["orphelins"] == ["Parti"] and len(_tPy["paie"]["mauvais"]) == 1
+              and "Casse" in _tPy["paie"]["mauvais"][0])
+        check("paie : avec_paie ne touche pas au tableau recu (celui de Discord)",
+              "paie" not in _tInL and all("paie" not in x and "gain" not in x for x in _tInL["lignes"]))
+        _hPy = _il.page_html(_tPy, "subs", "desc", cle="K1")
+        _headL = _hPy[_hPy.find("<thead>"):_hPy.find("</thead>")]
+        _thL = [_reL.sub(r"<[^>]+>|[ ▾▴]+$", "", c) for c in _reL.findall(r"<th[^>]*>(.*?)</th>", _headL)]
+        check("page paie : colonnes Paiement puis Gain / perte, EN DERNIER",
+              len(_thL) == 8 and _thL[-2:] == ["Paiement", "Gain\u00a0/\u00a0perte"], str(_thL))
+
+        def _ligneL(h, cle):
+            i = h.find(f'<tr id="{_il.ancre(cle)}">')
+            return h[i:h.find("</tr>", i)] if i >= 0 else ""
+        _lnL, _lbL, _lgL = _ligneL(_hPy, "VA 1 Noum"), _ligneL(_hPy, "Bryan"), _ligneL(_hPy, "Gerome SPAM")
+        check("page paie : resume du paiement (« 75 $ / quinzaine + primes », « 100 EUR / mois »)",
+              '<span class="pr">75\u00a0$ / quinzaine + primes</span>' in _lnL
+              and '<span class="pr">100\u00a0EUR / mois</span>' in _ligneL(_hPy, "BO7")
+              and '<span class="pr">200\u00a0$ / quinzaine</span>' in _lbL
+              and '<span class="pr">—</span>' in _lgL)
+        check("page paie : gain vert si >= 0, rouge si < 0, dernier de la ligne",
+              '<span class="nv gp">+210,66\u00a0$</span>' in _lnL and '<span class="nv gn">−5,00\u00a0$</span>' in _lbL
+              and _lnL.rfind("<td") == _lnL.find('<td class="n gain"'))
+        check("page paie : le detail du calcul sous le montant (revenu - fixe - primes, palier)",
+              "revenu 250,66\u00a0$<br>− fixe 30,00\u00a0$ (75\u00a0$ / quinzaine × 6/15 j)<br>"
+              "− primes 10,00\u00a0$ (101 subs, palier 100–149 subs, quinzaine incomplète)" in _lnL
+              and 'title="revenu 250,66\u00a0$ − fixe 30,00' in _lnL
+              and "= 20,00\u00a0EUR × 1,2000" in _ligneL(_hPy, "BO7"))
+        check("page paie : non regle ou incalculable -> « — », avec la raison s il est regle",
+              '<td class="n gain">—</td>' in _lgL and '<td class="n gain">—</td>' in _ligneL(_hPy, "ANDRY")
+              and '<td class="n gain">—<div class="det manque">' in _ligneL(_hPy, "Roucham"))
+        check("page paie : ligne de totaux (personnes reglees, partiel dit)",
+              '<span class="nv gp">+191,16\u00a0$</span>' in _hPy and "partiel : 3 personnes sur 4" in _hPy
+              and "4 réglés" in _hPy)
+        check("page paie : la note dit le taux et sa date, le prorata, les paliers, les primes non comptees",
+              "taux BCE du 25/09/2026 : 1\u00a0EUR = 1,2000\u00a0$" in _hPy and "au prorata des jours" in _hPy
+              and "100–149 +10\u00a0$" in _hPy and "1\u202f500 et plus +540\u00a0$" in _hPy
+              and "non cumulables" in _hPy
+              and "Top Performer, Bonus Agence, Bonus Elite et malus : décidés à la main, non comptés" in _hPy)
+        check("page paie : reglage illisible et personne absente dits en tete",
+              "Réglage de paiement illisible, ignoré : « Casse »" in _hPy and "Parti — non compté(s)" in _hPy)
+        check("page paie : formulaire POST sans JavaScript, dans un <details>, champs caches k/du/au/tri/sens",
+              '<details class="mod"><summary>modifier</summary><form class="fpaie" method="post" '
+              'action="/infloww/liens/paie">' in _lnL
+              and all(f'<input type="hidden" name="{n}" value="{v}">' in _lnL
+                      for n, v in (("personne", "VA 1 Noum"), ("k", "K1"), ("du", _DU), ("au", _AU),
+                                   ("tri", "subs"), ("sens", "desc")))
+              and '<select name="type">' in _lnL and 'name="montant"' in _lnL and '<select name="devise">' in _lnL
+              and '<select name="frequence">' in _lnL and 'type="date" name="depuis"' in _lnL)
+        check("page paie : personne non reglee -> formulaire pre-rempli 75, USD, quinzaine",
+              'name="montant" value="75"' in _lgL and '<option value="USD" selected>' in _lgL
+              and '<option value="quinzaine" selected>' in _lgL and '<option value="fixe_primes" selected>' in _lgL)
+        check("page paie : le reglage enregistre est pre-rempli (100 EUR, mois)",
+              'name="montant" value="100"' in _ligneL(_hPy, "BO7")
+              and '<option value="EUR" selected>' in _ligneL(_hPy, "BO7")
+              and '<option value="mois" selected>' in _ligneL(_hPy, "BO7"))
+        check("page paie : aucun <script, aucun gestionnaire on...=",
+              "<script" not in _hPy and not _reL.search(r"<[^>]*\son[a-z]+\s*=", _hPy))
+        check("page paie : tri par gain (les « — » en bas), lien d en-tete",
+              [x["nom"] for x in _il.trier(_tPy["lignes"], "gain", "desc")][:3] == ["VA 1 Noum", "Bryan", "BO7"]
+              and [x["nom"] for x in _il.trier(_tPy["lignes"], "gain", "asc")][:3] == ["BO7", "Bryan", "VA 1 Noum"]
+              and 'href="?tri=gain&amp;sens=desc&amp;du=2026-09-21&amp;au=2026-09-26&amp;k=K1"' in _hPy)
+        check("page paie : lisible a 360 px (le tableau defile dans sa boite, formulaire compact)",
+              "overflow-x:auto" in _hPy and ".fpaie{display:grid" in _hPy and "max-width:220px" in _hPy)
+        # la vue des VA (cle du salon, page() par defaut) : ni paiement ni gain
+        _hVaL = _il.page({"du": _DU, "au": _AU, "tri": "gain", "sens": "desc"}, cle="K1")
+        _hPrL = _il.page({"du": _DU, "au": _AU}, cle="K2", paie=True)
+        _hAdL = _il.page({"du": _DU, "au": _AU}, paie=True, lien_perso=True)
+        check("page() : la vue des VA n a ni Paiement, ni Gain / perte, ni formulaire, ni detail du calcul",
+              ">Paiement<" not in _hVaL and "Gain" not in _hVaL and 'class="fpaie"' not in _hVaL
+              and "/infloww/liens/paie" not in _hVaL and "revenu" not in _hVaL and "prime" not in _hVaL
+              and "quinzaine" not in _hVaL and ">VA 1 Noum<" in _hVaL and 'colspan="8"' not in _hVaL
+              and "Votre lien personnel" not in _hVaL
+              and _hVaL.index(">ANDRY<") < _hVaL.index(">VA 1 Noum<"), "tri gain sur la vue des VA")
+        _thVaL = _reL.findall(r"<th\b[^>]*>", _hVaL[_hVaL.find("<thead>"):_hVaL.find("</thead>")])
+        check("page() : la vue des VA garde ses six colonnes",
+              len(_thVaL) == 6 and _hVaL[_hVaL.find("<tbody>"):_hVaL.find("</tfoot>")].count("<td")
+              == _hVaL.count('<tr id="') * 6 + 6, str(len(_thVaL)))
+        check("page() : la vue du proprietaire (paie=True) a Paiement, Gain / perte et le formulaire",
+              ">Paiement<" in _hPrL and "Gain\u00a0/\u00a0perte" in _hPrL and 'action="/infloww/liens/paie"' in _hPrL
+              and 'name="k" value="K2"' in _hPrL and "Votre lien personnel" not in _hPrL
+              and "<script" not in _hPrL and not _reL.search(r"<[^>]*\son[a-z]+\s*=", _hPrL))
+        check("page() : l admin connecte voit son lien personnel (cle de paiement), jamais celui du salon",
+              "Votre lien personnel" in _hAdL and _il.url_paie() in _hAdL and _il.cle_page() not in _hAdL
+              and ">Paiement<" in _hAdL)
+        # Discord : AUCUNE info de paiement ni de gain, meme sur un tableau qui en porte
+        _MpL = "\n".join(m["embeds"][0]["description"] + m["embeds"][0]["footer"]["text"]
+                         for m in _il.messages_discord(_tPy, "https://youl4b.com/x"))
+        check("discord : aucun paiement ni gain (ni montant, ni colonne, ni prime)",
+              not any(w in _MpL for w in ("Paiement", "Gain", "prime", "fixe", "EUR", "revenu", "210,66",
+                                          "191,16", "−5,00", "quinzaine")), _MpL[:200])
+        _srcAvL = _srcIL.split("def _rafraichir", 1)[1].split("\ndef ", 1)[0] + \
+            _srcIL.split("def tableau(", 1)[1].split("\ndef ", 1)[0]
+        _srcILn = _plL("infloww_liens.py").read_text(encoding="utf-8")
+        check("discord : le demon ne passe jamais par le paiement (avec_paie : page() seulement)",
+              "avec_paie" not in _srcAvL and _srcILn.count("avec_paie(t)") == 1
+              and "avec_paie" not in _srcILn.split("def messages_discord", 1)[1].split("\ndef ", 1)[0])
+
+        # le taux : BCE muette -> dernier taux connu, dit avec sa date ; aucun taux -> « — »
+        _razL(_il.BCE_FICHIER)
+        _il.BCE_FICHIER.write_text(_jsL.dumps({"taux": 1.1, "date": "2026-09-20", "jour_lu": "2026-09-20"}))
+        _BCEL["rep"] = RuntimeError("HTTP 503")
+        _BCEL["n"] = 0
+        _tBa = _il.avec_paie(_tInL)
+        _hBa = _il.page_html(_tBa)
+        check("paie : BCE muette -> dernier taux connu, et la page dit de quand",
+              abs({x["nom"]: x for x in _tBa["lignes"]}["BO7"]["paie"]["fixe"] - 22.0) < 1e-9
+              and "la BCE n'a pas répondu (RuntimeError : HTTP 503" in _hBa
+              and "dernier taux connu, publié le 20/09/2026" in _hBa and "1\u00a0EUR = 1,1000\u00a0$" in _hBa)
+        _il.avec_paie(_tInL)
+        check("paie : un echec BCE n est pas retente a chaque affichage", _BCEL["n"] == 1)
+        _razL(_il.BCE_FICHIER)
+        _tBn = _il.avec_paie(_tInL)
+        _pBn = {x["nom"]: x for x in _tBn["lignes"]}
+        _hBn = _il.page_html(_tBn)
+        check("paie : aucun taux connu -> cout EUR « — » (jamais un taux invente), et c est dit",
+              _pBn["BO7"]["gain"] is None and "taux EUR → USD inconnu" in _pBn["BO7"]["paie"]["raison"]
+              and _pBn["Bryan"]["gain"] == -5.0 and "Aucun taux EUR → USD connu" in _hBn
+              and "coût des VA payés en euros est « — »" in _hBn)
+
+        # deux quinzaines dans la plage : chacune lue sur ses seuls jours ;
+        # la close gardee sur disque, pour toujours
+        _BCEL["rep"] = RuntimeError("BCE non utilisee")
+        _ecrire_paieL({"VA 1 Noum": _cfgL("fixe_primes", 75)})
+        _il._MYPULS_CACHE.clear(); _il._MYPULS_ECHECS.clear(); _MPL["appels"].clear()
+        _tQz = _il.avec_paie(_il.tableau_periode("2026-09-10", "2026-09-26", us="cache"))
+        _nQz = {x["nom"]: x for x in _tQz["lignes"]}["VA 1 Noum"]
+        check("paie : deux quinzaines partielles -> deux lectures MyPuls (10-15/09 et 16-26/09), primes additionnees",
+              sorted(a[1]["from"] + a[1]["to"] for a in _MPL["appels"])
+              == ["2026-09-102026-09-15", "2026-09-102026-09-26", "2026-09-162026-09-26"]
+              and _nQz["paie"]["fixe"] == 85.0 and _nQz["paie"]["primes"] == 20.0 and _nQz["gain"] == 145.66
+              and [q["complete"] for q in _nQz["paie"]["detail_q"]] == [False, False], str(_MPL["appels"]))
+        _hQz = _il.page_html(_tQz)
+        check("page paie : plusieurs quinzaines -> detail par quinzaine, chacune « incomplete » si coupee",
+              "2 quinzaines, dont 2 incomplètes, non cumulables" in _hQz
+              and "10/09 → 15/09 : 101 subs, palier 100–149 subs → +10\u00a0$ (quinzaine incomplète)" in _hQz)
+        _qdL = _jsL.loads(_il.QUINZ_FICHIER.read_text())["tranches"]
+        check("paie : une quinzaine close est gardee sur disque (sans revenu), l ouverte non",
+              list(_qdL) == ["2026-09-10|2026-09-15"] and _qdL["2026-09-10|2026-09-15"]["subs"]["47"] == 101
+              and "net" not in _jsL.dumps(_qdL) and "revenue" not in _jsL.dumps(_qdL))
+        _il._MYPULS_CACHE.clear(); _MPL["appels"].clear()
+        _il.avec_paie(_il.tableau_periode("2026-09-10", "2026-09-26", us="cache"))
+        check("paie : ... relue ensuite depuis le disque, sans appel (seules la vue et la tranche ouverte)",
+              sorted(a[1]["from"] + a[1]["to"] for a in _MPL["appels"])
+              == ["2026-09-102026-09-26", "2026-09-162026-09-26"], str(_MPL["appels"]))
+
+        # depuis toujours : revenu Infloww, plage depuis « paye depuis » ;
+        # plafond de lectures MyPuls NOUVELLES par affichage, « calcul en cours »
+        _tabL = _savL[10]
+        _ecrire_paieL({"VA 1 Noum": _cfgL("fixe_primes", 75, depuis="2026-08-01")})
+        _il._MYPULS_CACHE.clear(); _il._MYPULS_ECHECS.clear(); _MPL["appels"].clear()
+        _razL(_il.QUINZ_FICHIER)
+        _il.QUINZ_APPELS_MAX = 3
+        _tT1 = _il.avec_paie(_tabL(us="cache"))
+        _nT1 = {x["nom"]: x for x in _tT1["lignes"]}["VA 1 Noum"]
+        _hT1 = _il.page_html(_tT1)
+        check("paie depuis toujours : 4 quinzaines a lire, 3 lectures au plus par affichage -> calcul en cours",
+              len(_MPL["appels"]) == 3 and _nT1["gain"] is None and _nT1["paie"].get("en_cours")
+              and "calcul en cours (3 quinzaines lues sur 4)" in _nT1["paie"]["raison"]
+              and _tT1["paie"]["en_attente"] == 1 and "1 quinzaine pas encore lue dans MyPuls" in _hT1
+              and "rechargez dans une minute" in _hT1, str(len(_MPL["appels"])))
+        _MPL["appels"].clear()
+        _tT2 = _il.avec_paie(_tabL(us="cache"))
+        _nT2 = {x["nom"]: x for x in _tT2["lignes"]}["VA 1 Noum"]
+        check("paie depuis toujours : l affichage suivant lit la derniere, revenu Infloww - fixe - primes",
+              len(_MPL["appels"]) == 1 and _nT2["paie"]["revenu"] == 13970.0 and _nT2["paie"]["fixe"] == 280.0
+              and _nT2["paie"]["primes"] == 40.0 and _nT2["gain"] == 13650.0
+              and _nT2["paie"]["debut"] == "2026-08-01" and _nT2["paie"]["fin"] == "2026-09-26")
+        check("page paie depuis toujours : la note dit la plage (paye depuis, sinon creation du lien)",
+              "création du plus ancien lien Infloww" in _il.page_html(_tT2)
+              and "75\u00a0$ / quinzaine du 01/08/2026 au 26/09/2026, au prorata des jours" in _il.page_html(_tT2))
+        # sans « paye depuis » : la creation du plus ancien lien Infloww ; sans elle non plus : dit
+        _ecrire_paieL({"ANDRY": _cfgL("fixe", 75), "Bryan": _cfgL("fixe", 75)})
+        _tCr = _il.construire([dict(_infL(5, "Andry", "87", 715, 35, 17800), cree="2026-09-20"),
+                               _infL(6, "Jaurel", "83", 3612, 266, 12200)], _GMS, lu_a=1790380000)
+        _pCr = {x["nom"]: x for x in _il.avec_paie(_tCr)["lignes"]}
+        check("paie depuis toujours : debut = creation du plus ancien lien (75 x 7/15 = 35 $)",
+              _pCr["ANDRY"]["paie"]["debut"] == "2026-09-20" and _pCr["ANDRY"]["paie"]["fixe"] == 35.0
+              and _pCr["ANDRY"]["gain"] == 143.0)
+        check("paie depuis toujours : ni date de creation ni « paye depuis » -> « — », et pourquoi",
+              _pCr["Bryan"]["gain"] is None and "début inconnu" in _pCr["Bryan"]["paie"]["raison"])
+        # « paye depuis » apres la periode : rien a payer dessus
+        _ecrire_paieL({"Bryan": _cfgL("fixe", 200, depuis="2026-09-25")})
+        _pDp = {x["nom"]: x for x in _il.avec_paie(_tInL)["lignes"]}["Bryan"]["paie"]
+        check("paie : « paye depuis » dans la periode -> fixe a partir de ce jour (200 x 2/15)",
+              abs(_pDp["fixe"] - 200 * 2 / 15) < 1e-9 and _pDp["debut"] == "2026-09-25")
+        # MyPuls refuse une quinzaine : arret au premier echec, pause, « — » et dit
+        _ecrire_paieL({"VA 1 Noum": _cfgL("fixe_primes", 75, depuis="2026-06-01")})
+        _MPL["panne"] = {"ok": False, "error": "Quota MyPuls atteint (429), réessai dans 60s"}
+        _MPL["appels"].clear()
+        _tEc = _il.avec_paie(_tabL(us="cache"))
+        _nEc = {x["nom"]: x for x in _tEc["lignes"]}["VA 1 Noum"]
+        _hEc = _il.page_html(_tEc)
+        check("paie : MyPuls refuse -> une seule lecture (arret au premier echec), gain « — », c est dit",
+              len(_MPL["appels"]) == 1 and _nEc["gain"] is None
+              and "MyPuls n'a pas répondu pour le 01/06 → 15/06" in _nEc["paie"]["raison"]
+              and "MyPuls a refusé une lecture" in _hEc and "429" in _hEc, str(len(_MPL["appels"])))
+        _MPL["appels"].clear()
+        _il.avec_paie(_tabL(us="cache"))
+        check("paie : ... et plus aucune lecture de quinzaine pendant la pause", not _MPL["appels"])
+        _MPL["panne"] = None
+        _il._FIL_Q["pause"] = 0.0
+        _il._MYPULS_ECHECS.clear()
+        _razL(_il.PAIE_FICHIER)
+
+        # --- une tranche close lue avec un TROU (relecture du 26/09) : un lien
+        # sans nombre de subs, ou pas encore connu de MyPuls, etait garde tel
+        # quel sur disque POUR TOUJOURS -> gain « — » a jamais, meme quand
+        # MyPuls avait les chiffres. Le disque ne garde que les subs connus ;
+        # une tranche a trou est relue, au plus une fois par heure.
+        _JOUR["j"] = "2026-09-26"
+        _TRL = {"mode": "", "cles": set()}
+
+        def _apiTrouL(path, params=None, _essai=0):
+            # MyPuls, abime seulement pour les tranches listees
+            r = _apiMPL(path, params)
+            if not (r.get("ok") and _TRL["mode"] and (params["from"], params["to"]) in _TRL["cles"]):
+                return r
+            d = dict(r["data"])
+            if _TRL["mode"] == "bornes":
+                d["period"] = {"from": params["from"] + "T00:00:00+02:00", "to": "2026-01-01T23:59:59+02:00"}
+                return dict(r, data=d)
+            _its = []
+            for _it in d["data"]:
+                if isinstance(_it, dict) and _it.get("url") == _OFL % 83:
+                    if _TRL["mode"] == "absent":
+                        continue
+                    _it = dict(_it, subscribers_period=None)
+                _its.append(_it)
+            return dict(r, data=dict(d, data=_its, count=len(_its)))
+        _mpL.api_get = _apiTrouL
+
+        def _vueTrouL(du, au, cles=(), mode=""):
+            _TRL.update(mode=mode, cles=set(cles))
+            _il._MYPULS_CACHE.clear()          # le site redemarre : plus rien en memoire
+            _MPL["appels"].clear()
+            return {x["nom"]: x for x in _il.avec_paie(_il.tableau_periode(du, au, us="cache"))["lignes"]}["Bryan"]
+
+        def _tranchesL():
+            return _jsL.loads(_il.QUINZ_FICHIER.read_text())["tranches"]
+
+        def _vieillirL(*champs, de=0.0):
+            _tv = _tranchesL()
+            for _v in _tv.values():
+                for _c in champs:
+                    if _c in _v:
+                        _v[_c] = float(_v[_c]) - de
+            _il.QUINZ_FICHIER.write_text(_jsL.dumps({"tranches": _tv}))
+        _ecrire_paieL({"Bryan": _cfgL("fixe_primes", 75)})
+        _razL(_il.QUINZ_FICHIER)
+        _il._MYPULS_ECHECS.clear()
+        _QAL = "2026-09-01|2026-09-15"
+        _bT1 = _vueTrouL("2026-09-01", "2026-09-20", [("2026-09-01", "2026-09-15"), ("2026-09-16", "2026-09-20")],
+                         "sans_subs")
+        _dT1 = _tranchesL()
+        check("paie trou : tranche close lue sans les subs d un lien -> « — », le lien est dit, aucun trou garde",
+              _bT1["gain"] is None and "inconnus chez MyPuls pour c83" in _bT1["paie"]["raison"]
+              and "83" not in _dT1[_QAL]["subs"] and _dT1[_QAL]["subs"]["47"] == 101
+              and None not in _dT1[_QAL]["subs"].values() and len(_MPL["appels"]) == 3, _bT1["paie"]["raison"])
+        _bT2 = _vueTrouL("2026-09-01", "2026-09-20")
+        check("paie trou : relue il y a moins d une heure -> pas de nouvel appel, et la raison dit le rythme",
+              len(_MPL["appels"]) == 1 and _bT2["gain"] is None
+              and "relu au plus une fois par heure" in _bT2["paie"]["raison"], str(_MPL["appels"]))
+        _vieillirL("relu", "lu", de=_il.QUINZ_TROU_REESSAI_S + 5)
+        _bT3 = _vueTrouL("2026-09-01", "2026-09-20")
+        check("paie trou : passe l heure, relue puis complete -> le gain SE CALCULE (75 - fixe 100 - 0 prime)",
+              len(_MPL["appels"]) == 3 and _bT3["gain"] == -25.0 and _bT3["paie"]["primes"] == 0.0
+              and _tranchesL()[_QAL]["subs"]["83"] == 30 and _tranchesL()[_QAL]["subs"]["47"] == 101,
+              f"{len(_MPL['appels'])} {_bT3['paie'].get('raison')}")
+        _bT3b = _vueTrouL("2026-09-01", "2026-09-20")
+        check("paie trou : ... et ensuite definitive (plus aucune lecture de tranche)",
+              len(_MPL["appels"]) == 1 and _bT3b["gain"] == -25.0)
+        # un lien que MyPuls ne connait pas encore (absent de la lecture)
+        _QCL = "2026-08-01|2026-08-15"
+        _bT4 = _vueTrouL("2026-08-01", "2026-08-20", [("2026-08-01", "2026-08-15"), ("2026-08-16", "2026-08-20")],
+                         "absent")
+        check("paie trou : lien absent de MyPuls a la lecture -> « — » dit, rien de faux garde",
+              _bT4["gain"] is None and "inconnus chez MyPuls pour c83" in _bT4["paie"]["raison"]
+              and "83" not in _tranchesL()[_QCL]["subs"], _bT4["paie"]["raison"])
+        _vieillirL("relu", "lu", de=_il.QUINZ_TROU_REESSAI_S + 5)
+        _bT5 = _vueTrouL("2026-08-01", "2026-08-20")
+        # aout : la quinzaine du 16 au 31 a 16 jours, 5 payes -> 75 x 5/16
+        check("paie trou : ... MyPuls le connait ensuite -> relue, gain calcule",
+              _bT5["gain"] == round(75 - 75 - 75 * 5 / 16, 2) and _tranchesL()[_QCL]["subs"]["83"] == 30,
+              str((_bT5["gain"], _bT5["paie"].get("raison"))))
+        # une tranche gelee par la version d avant (None sur disque) guerit
+        _tvL = _tranchesL()
+        _tvL["2026-07-01|2026-07-15"] = {"lu": _tL.time() - 7200, "subs": {"83": None, "47": 101}}
+        _il.QUINZ_FICHIER.write_text(_jsL.dumps({"tranches": _tvL}))
+        _bT6 = _vueTrouL("2026-07-01", "2026-07-20")
+        check("paie trou : une tranche gelee avec un None par l ancienne version est relue, et guerit",
+              _bT6["gain"] == round(75 - 75 - 75 * 5 / 16, 2)
+              and _tranchesL()["2026-07-01|2026-07-15"]["subs"]["83"] == 30,
+              str((_bT6["gain"], _bT6["paie"].get("raison"))))
+        # MyPuls a compte d autres jours que ceux demandes : rien sur disque
+        _vueTrouL("2026-06-01", "2026-06-20", [("2026-06-01", "2026-06-15")], "bornes")
+        check("paie trou : bornes MyPuls differentes de la tranche -> rien de garde (l autre tranche, si)",
+              "2026-06-01|2026-06-15" not in _tranchesL() and "2026-06-16|2026-06-20" in _tranchesL())
+        _gDuo = [_gL(50, "(Duo) 1", 47), _gL(51, "(Duo) 2", 83)]
+        _l47 = {"id": "mypuls:47", "code": "47", "abonnes": 5, "nom": ""}
+        _sDuo = _il._subs_par_personne([_l47], _gDuo)
+        _sDuo2 = _il._subs_par_personne([_l47, dict(_l47, id="mypuls:83", code="83", abonnes=7)], _gDuo)
+        _sDuo3 = _il._subs_par_personne([_l47, dict(_l47, id="mypuls:83", code="83", abonnes=None)], _gDuo)
+        check("paie trou : un lien d une personne absent ou sans subs -> subs « inconnus » (pas un zero), codes dits",
+              _sDuo == ({"Duo": None}, {"Duo": ["83"]}) and _sDuo2 == ({"Duo": 12}, {"Duo": []})
+              and _sDuo3 == ({"Duo": None}, {"Duo": ["83"]}), str((_sDuo, _sDuo2, _sDuo3)))
+
+        # --- le disque des quinzaines ne grossit pas sans fin (relecture du
+        # 26/09 : vingt periodes consultees, vingt-deux tranches gardees pour
+        # toujours, aucune jamais retiree)
+        _mpL.api_get = _apiMPL
+        _razL(_il.QUINZ_FICHIER)
+        for _iL in range(20):
+            _vueTrouL((_DL(2026, 8, 1) + _dtL.timedelta(days=_iL)).isoformat(), "2026-09-20")
+        _tr20 = _tranchesL()
+        _entL = {k for k in _tr20 if _il._quinzaine_entiere(k)}
+        _tardL = _tL.time() + _il.QUINZ_GARDE_S + 86400
+        check("paie disque : les morceaux de periodes sont gardes un temps, puis elagues ; les quinzaines entieres restent",
+              len(_tr20) == 22 and _entL == {"2026-08-01|2026-08-15", "2026-08-16|2026-08-31", "2026-09-01|2026-09-15"}
+              and set(_il._elaguer_tranches(_tr20, _tardL)) == _entL
+              and set(_il._elaguer_tranches(_tr20, _tL.time())) == set(_tr20), str(sorted(_tr20)))
+        _vxL = _tL.time() - _il.QUINZ_GARDE_S - 3600
+        _razL(_il.QUINZ_FICHIER)
+        _il.QUINZ_FICHIER.write_text(_jsL.dumps({"tranches": {
+            "2026-05-01|2026-05-15": {"lu": _vxL, "subs": {"83": 1}},
+            "2026-05-03|2026-05-09": {"lu": _vxL, "subs": {"83": 1}},
+            "2026-05-20|2026-05-31": {"lu": _vxL, "subs": {"83": 1}, "debut": True},
+            "2026-05-21|2026-05-25": {"lu": _vxL, "vu": _tL.time() - 86400, "subs": {"83": 1}},
+            "pas une cle": {"lu": _vxL, "subs": {}}}}))
+        _il._garder_tranche("2026-04-01", "2026-04-15", {
+            "liens": [{"code": "83", "abonnes": 2}], "lu_a": _tL.time(), "lu_jour": "2026-09-26",
+            "periode_mypuls": {"from": "2026-04-01T00:00:00+02:00", "to": "2026-04-15T23:59:59+02:00"}})
+        check("paie disque : a l ecriture, un vieux morceau inutilise sort ; quinzaine entiere, debut de paie, morceau servi restent",
+              set(_tranchesL()) == {"2026-04-01|2026-04-15", "2026-05-01|2026-05-15", "2026-05-20|2026-05-31",
+                                    "2026-05-21|2026-05-25"}, str(sorted(_tranchesL())))
+        # « depuis toujours », paye depuis le 05/08 : le morceau 05/08 -> 15/08
+        # sert a chaque affichage, il est marque et garde pour toujours
+        _razL(_il.QUINZ_FICHIER)
+        _il._MYPULS_CACHE.clear()
+        _ecrire_paieL({"Bryan": _cfgL("fixe_primes", 75, depuis="2026-08-05")})
+        _il.avec_paie(_tabL(us="cache"))
+        _trDb = _tranchesL()
+        check("paie disque : le morceau de debut de paie (paye depuis le 05/08) est marque et garde pour toujours",
+              _trDb.get("2026-08-05|2026-08-15", {}).get("debut") is True
+              and "2026-08-05|2026-08-15" in _il._elaguer_tranches(_trDb, _tardL)
+              and not any(v.get("debut") for k, v in _trDb.items() if k != "2026-08-05|2026-08-15"), str(_trDb))
+        _il.avec_paie(_tabL(us="cache"))
+        _avVuL = _il.QUINZ_FICHIER.read_text()
+        _il.avec_paie(_tabL(us="cache"))
+        _memeL = _il.QUINZ_FICHIER.read_text() == _avVuL
+        _vieillirL("vu", "relu", "lu", de=2 * 86400)
+        _il.avec_paie(_tabL(us="cache"))
+        check("paie disque : « vu » n est reecrit qu au jour pres (aucune ecriture a chaque affichage)",
+              _memeL and all(_tL.time() - v["vu"] < 60 for v in _tranchesL().values()))
+
+        # --- un fichier de reglages illisible n est pas ecrase (relecture du
+        # 26/09 : le reglage suivant effacait tous les autres, et l avertissement)
+        _ecrire_paieL({"Roucham": _cfgL("fixe_primes", 75), "VA 1 Noum": _cfgL("fixe", 200, "EUR", "mois")})
+        _txtPL = _il.PAIE_FICHIER.read_text(encoding="utf-8")
+        _il.PAIE_FICHIER.write_text(_txtPL[:len(_txtPL) // 2], encoding="utf-8")
+        _coupeL = _il.PAIE_FICHIER.read_text(encoding="utf-8")
+        _fBrL = {"personne": "Bryan", "type": "fixe", "montant": "75", "devise": "USD", "frequence": "quinzaine",
+                 "depuis": "", "k": "K1", "tri": "nom", "sens": "asc"}
+        _okF1 = _il.enregistrer_paie(_fBrL)
+        _okF2 = _il.enregistrer_paie(dict(_fBrL, montant="80"))
+        check("paie : fichier des reglages illisible -> enregistrement REFUSE, fichier intact, avertissement garde",
+              _okF1[0] is False and _okF2[0] is False and "illisible" in _okF1[1] and "rien n'est écrit" in _okF1[1]
+              and _il.PAIE_FICHIER.read_text(encoding="utf-8") == _coupeL
+              and _il.lire_paie() == ({}, ["le fichier des réglages est illisible"])
+              and not _il.PAIE_FICHIER.with_suffix(".json.prev").exists(), str((_okF1, _il.lire_paie())))
+        _razL(_il.PAIE_FICHIER)
+        _il.PAIE_FICHIER.write_text(_jsL.dumps({"personnes": ["Roucham"]}), encoding="utf-8")
+        _okF3 = _il.enregistrer_paie(_fBrL)
+        check("paie : « personnes » qui n est pas un objet -> refuse aussi, rien d ecrit",
+              _okF3[0] is False and "forme attendue" in _okF3[1]
+              and _jsL.loads(_il.PAIE_FICHIER.read_text()) == {"personnes": ["Roucham"]})
+        _razL(_il.PAIE_FICHIER)
+        check("paie : sans fichier du tout, le premier reglage s ecrit",
+              _il.enregistrer_paie(_fBrL)[0] is True and _il.lire_paie()[0]["Bryan"]["montant"] == 75.0)
+        _razL(_il.PAIE_FICHIER, _il.QUINZ_FICHIER)
+        _il._MYPULS_CACHE.clear(); _il._MYPULS_ECHECS.clear()
+
         # --- la route
         import web_upload as _wL
         import os as _osL
@@ -22993,8 +23504,24 @@ try:
                 _s["auth"] = True; _s["username"] = "chat1"; _s["role"] = "chatter"
             check("route : un chatteur sans cle est refuse",
                   _cC.get("/infloww/liens").status_code == 403)
+            _rCk = _cC.get("/infloww/liens?k=" + _k1)
+            _hCk = _rCk.get_data(as_text=True)
             check("route : un chatteur connecte AVEC la cle voit la page (le lien du salon)",
-                  _cC.get("/infloww/liens?k=" + _k1).status_code == 200)
+                  _rCk.status_code == 200)
+            check("route : la cle du salon montre la page des VA, SANS paiement ni gain (ni colonne, ni formulaire)",
+                  ">Paiement<" not in _hK and "Gain" not in _hK and "/infloww/liens/paie" not in _hK
+                  and "revenu" not in _hK and ">Paiement<" not in _hCk and 'class="fpaie"' not in _hCk
+                  and "Votre lien personnel" not in _hK and _kP not in _hK)
+            _rKP = _cN.get("/infloww/liens?k=" + _kP)
+            _hKP = _rKP.get_data(as_text=True)
+            check("route : la cle du proprietaire ouvre la page AVEC Paiement et Gain / perte (sans session)",
+                  _rKP.status_code == 200 and ">Paiement<" in _hKP and "Gain\u00a0/\u00a0perte" in _hKP
+                  and 'name="k" value="' + _kP + '"' in _hKP and _k1 not in _hKP
+                  and "<script" not in _hKP and not _reL.search(r"<[^>]*\son[a-z]+\s*=", _hKP), str(_rKP.status_code))
+            check("route : l admin connecte (sans cle) voit le paiement et son lien personnel, pas celui du salon",
+                  ">Paiement<" in _hA and "Votre lien personnel" in _hA and "?k=" + _kP in _hA and _k1 not in _hA)
+            check("route : un chatteur connecte avec la cle du PROPRIETAIRE la voit (la cle fait foi)",
+                  ">Paiement<" in _cC.get("/infloww/liens?k=" + _kP).get_data(as_text=True))
             # une periode par l adresse : la cle ouvre, la periode et la cle suivent
             _JOUR["j"] = "2026-09-26"
             _rPe = _cN.get("/infloww/liens?k=" + _k1 + "&du=2026-09-21&au=2026-09-26&tri=subs&sens=desc")
@@ -23006,6 +23533,103 @@ try:
                   str(_rPe.status_code))
             check("route : une periode avec une cle fausse -> 403",
                   _cN.get("/infloww/liens?k=faux&du=2026-09-21&au=2026-09-26").status_code == 403)
+            # --- le paiement : la route POST /infloww/liens/paie. La cle du
+            # formulaire (sans session) ou une session admin ; rien d autre.
+            _il._MYPULS_CACHE.clear(); _il._MYPULS_ECHECS.clear()
+            _razL(_il.PAIE_FICHIER)
+            _fPL = {"personne": "Bryan", "type": "fixe_primes", "montant": "80", "devise": "USD",
+                    "frequence": "quinzaine", "depuis": "", "k": _kP, "du": "2026-09-21", "au": "2026-09-26",
+                    "tri": "subs", "sens": "desc"}
+
+            def _loc(r):
+                u = _usL(r.headers.get("Location") or "")
+                return u.path + ("?" + u.query if u.query else "") + ("#" + u.fragment if u.fragment else "")
+            _rPo = _cN.post("/infloww/liens/paie", data=_fPL)
+            check("route paie : la cle du proprietaire suffit (sans session) -> 303 sur la meme vue (tri, periode, cle, ancre)",
+                  _rPo.status_code == 303 and _loc(_rPo) == "/infloww/liens?tri=subs&sens=desc&du=2026-09-21"
+                  "&au=2026-09-26&k=" + _kP + "#" + _il.ancre("Bryan")
+                  and "no-store" in (_rPo.headers.get("Cache-Control") or ""), f"{_rPo.status_code} {_loc(_rPo)}")
+            check("route paie : le reglage est ecrit (safe_json) et relu tel quel",
+                  _il.lire_paie() == ({"Bryan": _cfgL("fixe_primes", 80.0)}, []))
+            _rAd = _cA.post("/infloww/liens/paie", data=dict(_fPL, k="", personne="BO7", devise="EUR",
+                                                             frequence="mois", montant="200", type="fixe"))
+            check("route paie : un admin connecte, sans cle -> enregistre, retour sans cle",
+                  _rAd.status_code == 303 and "k=" not in _loc(_rAd)
+                  and _il.lire_paie()[0].get("BO7") == _cfgL("fixe", 200.0, "EUR", "mois"), str(_rAd.status_code))
+            _avantPL = _il.PAIE_FICHIER.read_text(encoding="utf-8")
+            _rNo = _cN.post("/infloww/liens/paie", data=dict(_fPL, k="", montant="1"))
+            _rFx = _cA.post("/infloww/liens/paie", data=dict(_fPL, k="faux" + _kP, montant="2"))
+            _rCh = _cC.post("/infloww/liens/paie", data=dict(_fPL, k="", montant="3"))
+            # la cle du lien du salon (url_page) : celle des VA
+            _kSalL = _usL(_il.url_page()).query.split("k=", 1)[1]
+            _rSa = _cN.post("/infloww/liens/paie", data=dict(_fPL, k=_kSalL, montant="0", type="fixe"))
+            _rSaA = _cA.post("/infloww/liens/paie", data=dict(_fPL, k=_kSalL, montant="0", type="fixe"))
+            _rSaC = _cC.post("/infloww/liens/paie", data=dict(_fPL, k=_kSalL, montant="0", type="fixe"))
+            check("route paie : ni cle ni session -> 403 ; cle fausse -> 403 meme pour un admin",
+                  _rNo.status_code == 403 and _rFx.status_code == 403)
+            check("route paie : la cle du lien du salon (url_page) est REFUSEE, sans session, avec une session admin, "
+                  "par un chatteur",
+                  _kSalL == _k1 and _rSa.status_code == 403 and _rSaA.status_code == 403 and _rSaC.status_code == 403
+                  and "ne permet pas de modifier les paiements" in _rSa.get_data(as_text=True),
+                  str((_rSa.status_code, _rSaA.status_code, _rSaC.status_code)))
+            check("route paie : un role restreint connecte SANS la cle -> 403 (par la route : l allow-list ne suffit pas)",
+                  _rCh.status_code == 403 and "Réservé à l'administration" in _rCh.get_data(as_text=True))
+            check("route paie : ... et rien n a ete ecrit", _il.PAIE_FICHIER.read_text(encoding="utf-8") == _avantPL)
+            _rChK = _cC.post("/infloww/liens/paie", data=dict(_fPL, montant="81"))
+            check("route paie : un role restreint connecte AVEC la cle -> accepte (la cle fait foi, comme la page)",
+                  _rChK.status_code == 303 and _il.lire_paie()[0]["Bryan"]["montant"] == 81.0, str(_rChK.status_code))
+            _avantPL = _il.PAIE_FICHIER.read_text(encoding="utf-8")
+            _refusL = []
+            for _chL, _vL in (("montant", "-3"), ("montant", "abc"), ("montant", "99999"), ("devise", "GBP"),
+                              ("frequence", "an"), ("type", "patron"), ("depuis", "2026-02-31"),
+                              ("personne", "Inconnu"), ("personne", "")):
+                _rVL = _cN.post("/infloww/liens/paie", data=dict(_fPL, **{_chL: _vL}))
+                _hVL = _rVL.get_data(as_text=True)
+                if not (_rVL.status_code == 400 and "Réglage non enregistré" in _hVL and "<script" not in _hVL
+                        and 'href="/infloww/liens?tri=subs&amp;sens=desc&amp;du=2026-09-21&amp;au=2026-09-26'
+                            '&amp;k=' + _kP in _hVL):
+                    _refusL.append((_chL, _vL, _rVL.status_code))
+            check("route paie : valeurs invalides ou personne inconnue -> 400, dit, lien de retour, rien d ecrit",
+                  not _refusL and _il.PAIE_FICHIER.read_text(encoding="utf-8") == _avantPL, str(_refusL))
+            _hEsc = _cN.post("/infloww/liens/paie", data=dict(_fPL, personne="<b>x</b>")).get_data(as_text=True)
+            check("route paie : le refus est echappe", "&lt;b&gt;x&lt;/b&gt;" in _hEsc and "<b>x</b>" not in _hEsc)
+            check("route paie : un envoi venu d un autre site (Sec-Fetch-Site) -> 403, meme avec la cle",
+                  _cN.post("/infloww/liens/paie", data=_fPL,
+                           headers={"Sec-Fetch-Site": "cross-site"}).status_code == 403
+                  and _cN.post("/infloww/liens/paie", data=dict(_fPL, montant="81"),
+                               headers={"Sec-Fetch-Site": "same-origin"}).status_code == 303)
+            check("route paie : GET -> 405 (rien ne s ecrit par une adresse)",
+                  _cN.get("/infloww/liens/paie?k=" + _k1).status_code == 405)
+            check("route paie : rien d autre n est ouvert au role restreint (une autre ecriture reste refusee)",
+                  _cC.post("/settings/role/add", data={"k": _k1}).status_code == 403
+                  and _cC.post("/settings/role/add", data={"k": _kP}).status_code == 403
+                  and _cC.post("/infloww/liens", data={"k": _kP}).status_code in (403, 405))
+            # un fichier de reglages illisible : la route refuse, sans rien ecraser
+            _il.PAIE_FICHIER.write_text('{"personnes": {"Bryan": {"type": "fixe", "mon', encoding="utf-8")
+            _il.PAIE_FICHIER.with_suffix(".json.prev").unlink(missing_ok=True)
+            _rIl = _cN.post("/infloww/liens/paie", data=dict(_fPL, montant="90"))
+            check("route paie : fichier des reglages illisible -> 400, dit, fichier intact",
+                  _rIl.status_code == 400 and "illisible" in _rIl.get_data(as_text=True)
+                  and _il.PAIE_FICHIER.read_text(encoding="utf-8").endswith('"mon'), str(_rIl.status_code))
+            _il.PAIE_FICHIER.write_text(_avantPL, encoding="utf-8")
+            _allowL = _srcWL.split("_RESTRICTED_WRITE_ALLOW = (", 1)[1].split("\n    )", 1)[0]
+            check("route paie : l allow-list ne declare que cette route (pas /infloww/ en bloc)",
+                  '"/infloww/liens/paie",' in _allowL and '"/infloww/"' not in _allowL
+                  and '"/infloww/liens",' not in _allowL)
+            check("route paie : session admin en SameSite=Lax (un POST venu d ailleurs part sans elle)",
+                  _appL.config.get("SESSION_COOKIE_SAMESITE") == "Lax")
+            _il.tableau = _savL[10]
+            _rPg = _cN.get("/infloww/liens?k=" + _kP + "&du=2026-09-21&au=2026-09-26")
+            _hPgR = _rPg.get_data(as_text=True)
+            check("route paie : la page rendue montre le reglage et son formulaire, sans script",
+                  _rPg.status_code == 200 and "81\u00a0$ / quinzaine + primes" in _hPgR
+                  and 'action="/infloww/liens/paie"' in _hPgR and 'name="k" value="' + _kP + '"' in _hPgR
+                  and "<script" not in _hPgR and not _reL.search(r"<[^>]*\son[a-z]+\s*=", _hPgR))
+            _hPgS = _cN.get("/infloww/liens?k=" + _k1 + "&du=2026-09-21&au=2026-09-26").get_data(as_text=True)
+            check("route paie : ... et la meme vue par la cle du salon ne montre ni le reglage ni le gain",
+                  "81\u00a0$" not in _hPgS and "quinzaine" not in _hPgS and ">Paiement<" not in _hPgS
+                  and "Du 21/09 au 26/09 · MyPuls" in _hPgS)
+            _razL(_il.PAIE_FICHIER)
         finally:
             _wL._load_web_users = _usersL
     finally:
@@ -23019,6 +23643,11 @@ try:
         _il._MYPULS_CACHE.clear(); _il._MYPULS_CACHE.update(_savPL[3])
         _gmL.get_analytics_overview, _il.MYPULS_ATTENTE_S, _il.MYPULS_ECHEC_S = _savFL[:3]
         _il._MYPULS_ECHECS.clear(); _il._MYPULS_ECHECS.update(_savFL[3])
+        (_il.PAIE_FICHIER, _il.QUINZ_FICHIER, _il.BCE_FICHIER, _il.QUINZ_EN_FOND, _il._bce_http,
+         _il._dormir_q) = _savPaL[:6]
+        _il._FIL_Q.clear(); _il._FIL_Q.update(_savPaL[6])
+        _il.QUINZ_APPELS_MAX = _savPaL[7]
+        _il.CLE_PAIE_FICHIER = _savKPL
         import shutil as _shL
         _shL.rmtree(_tmpL, ignore_errors=True)
 except Exception as _eL:

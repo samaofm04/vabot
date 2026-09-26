@@ -33,6 +33,18 @@ Jessye sur GMS qui sont comptés, chaque personne c'est un truc ». Donc :
   appels plafonnés par jour ; MyPuls attendu 5 s au plus). Sans
   période, la vue Infloww « depuis toujours » est inchangée ; Discord aussi.
 
+- LE PAIEMENT (page seulement, le propriétaire : « une case où je peux
+  choisir leur paiement », « la dernière case qui me dit si le VA me fait
+  perdre ou gagner de l'argent ») : un réglage par personne
+  (data/infloww_liens_paie.json : Aucun, Fixe ou Fixe + primes, montant,
+  USD ou EUR, quinzaine ou mois, payé depuis), modifiable par un formulaire
+  POST sans JavaScript (route /infloww/liens/paie). Pour le propriétaire
+  SEUL : sa clé à lui (cle_paie, jamais postée) ou une session admin ; la
+  clé du salon (celle des VA) ne montre ni paiement ni gain. Gain /
+  perte = revenu net de la plage − fixe au prorata − primes par quinzaine
+  (paliers de subs non cumulables, subs de MyPuls quinzaine par quinzaine).
+  Euros convertis au taux BCE. Rien de tout ça sur Discord.
+
 Deux sorties : la page /infloww/liens, sans JavaScript (clé ?k= pour les VA
 sans compte), et des messages Discord de Bixby dans « inflow-resultat ».
 L'ENVOI DISCORD EST COUPÉ tant que data/infloww_liens_config.json ne porte pas
@@ -44,8 +56,10 @@ from __future__ import annotations
 
 import base64
 import datetime as dt
+import hashlib
 import html as _html
 import json
+import math
 import re
 import unicodedata
 import secrets
@@ -74,6 +88,8 @@ ETAT_FICHIER = DATA_DIR / "infloww_liens_discord.json"
 CONFIG_FICHIER = DATA_DIR / "infloww_liens_config.json"
 US_FICHIER = DATA_DIR / "infloww_liens_us.json"
 CLE_FICHIER = DATA_DIR / "infloww_liens_cle"
+# la clé du propriétaire, À PART de celle du salon (cle_paie)
+CLE_PAIE_FICHIER = DATA_DIR / "infloww_liens_cle_paie"
 # le cache de liste du site, celui dont le podium se sert aussi en repli
 GMS_CACHE = pd.LIENS_CACHE
 JETON_FICHIERS: Tuple[Path, ...] = (DATA_DIR / "bixby_bot_token",
@@ -141,7 +157,9 @@ US_OUVERTE_FRAIS_S = 2 * 3600        # période qui finit aujourd'hui : recalcul
 US_PERIODE_ESSAIS_MAX = 3            # relevés ratés d'une personne sur une période, par jour
 US_PERIODES_GARDE_S = 45 * 86400     # au-delà, une période plus consultée sort du cache
 
-TRIS = ("nom", "us", "clics", "subs", "cvr", "par_sub")
+# « gain » : la colonne Gain / perte (le paiement, page seulement) ; une
+# personne sans réglage n'a pas de gain et va en bas, dans les deux sens
+TRIS = ("nom", "us", "clics", "subs", "cvr", "par_sub", "gain")
 SENS = ("asc", "desc")
 
 _VERROU = threading.RLock()
@@ -638,6 +656,9 @@ def _releve_mypuls(du: str, au: str) -> None:
                     _MYPULS_ECHECS.pop(k, None)
         else:
             v["lu_a"] = t
+            # le jour (Paris) de la lecture : une tranche lue APRÈS son dernier
+            # jour ne bouge plus, le paiement la garde alors sur disque
+            v["lu_jour"] = _aujourdhui()
             _MYPULS_CACHE[cle] = {"t": t, "v": v}
             _MYPULS_ECHECS.pop(cle, None)
             if len(_MYPULS_CACHE) > _MYPULS_CACHE_MAX:
@@ -1073,7 +1094,15 @@ def construire(liens_infloww: List[Any], liens_gms_: List[Any],
     partages = [{"code": _code_infloww(rattaches[i]), "nom": str(rattaches[i].get("nom") or ""),
                  "personnes": sorted(p)} for i, p in qui.items() if len(p) > 1]
     maj = max([int(x.get("maj") or 0) for x in inf] or [0])
+    # Pour le paiement (avec_paie, la page seulement) : le revenu et la date de
+    # création de chaque lien rattaché, À PART des lignes — une ligne qui ne
+    # porte pas de montant ne peut pas en afficher un par mégarde (Discord lit
+    # les lignes, jamais ceci).
+    paie_liens = {iid: {"net": _entier(x.get("net")), "cree": str(x.get("cree") or "")[:10],
+                        "devise": str(x.get("devise") or "")}
+                  for iid, x in rattaches.items()}
     return {
+        "_paie_liens": paie_liens, "_gms": list(liens_gms_),
         "creatrice": CREATRICE, "equipe": EQUIPE_GMS, "equipe_nom": NOM_EQUIPE,
         "source": source, "periode": dict(periode or {}),
         "erreur": str(erreur or ""), "repli_gms": str(repli_gms or ""),
@@ -1170,6 +1199,833 @@ def tableau_periode(du: str, au: str, us: str = "page") -> Dict[str, Any]:
     if _pause_gms() and not info.get("plafond") and not info.get("budget"):
         per["us_info"] = dict(per.get("us_info") or {}, pause="quota du jour épuisé" + _reprise_gms())
     return construire(liens, g["liens"], us=us_periode_depuis_cache(ents, du, au), periode=per, **commun)
+
+
+# ─── le paiement des VA, et ce qu'ils rapportent ─────────────────────────
+# Le propriétaire (26/09), pour lui seul (la page s'ouvre avec la clé) :
+# « une case où je peux choisir leur paiement », puis « la dernière case qui
+# me dit si le VA me fait perdre ou gagner de l'argent ». Sa grille :
+# - un FIXE : 75 $ par période de paie, payée le 16 et le 1er — quinzaines du
+#   1er au 15 et du 16 à la fin du mois ; certains VA ont un autre fixe, par
+#   exemple 200 € par mois, converti en dollars ;
+# - des PRIMES par quinzaine selon les VRAIS abonnés OnlyFans du VA (la
+#   colonne Subs), NON cumulables : seul le palier atteint compte ;
+# - Top Performer, Bonus Agence (tiré au sort), Bonus Elite et malus sont
+#   décidés à la main : pas calculables, pas comptés, et la page le dit.
+# Rien de tout ça ne part sur Discord : le démon passe par tableau(), jamais
+# par avec_paie(), et messages_discord ne lit que ses propres colonnes.
+PAIE_FICHIER = DATA_DIR / "infloww_liens_paie.json"
+TYPES_PAIE = ("aucun", "fixe", "fixe_primes")
+LIB_TYPES = {"aucun": "Aucun", "fixe": "Fixe", "fixe_primes": "Fixe + primes"}
+DEVISES = ("USD", "EUR")
+FREQUENCES = ("quinzaine", "mois")
+# ce que le formulaire propose pour une personne pas encore réglée : la grille
+PAIE_DEFAUT: Dict[str, Any] = {"type": "fixe_primes", "montant": 75.0, "devise": "USD",
+                               "frequence": "quinzaine", "depuis": ""}
+MONTANT_MAX = 20000.0            # par quinzaine ou par mois : au-delà, une faute de frappe
+PAIE_PERSONNES_MAX = 500
+# (plancher de subs de la quinzaine, prime en $), du plus haut au plus bas
+PALIERS_PRIMES: Tuple[Tuple[int, float], ...] = (
+    (1500, 540.0), (1000, 320.0), (750, 250.0), (500, 170.0), (300, 90.0),
+    (250, 70.0), (200, 45.0), (150, 25.0), (100, 10.0))
+
+# Les subs d'une quinzaine viennent de MyPuls, sur ses seuls jours : une
+# lecture tracking-links par tranche, la mécanique des périodes (cache mémoire
+# MYPULS_TTL_S, échec gardé MYPULS_ECHEC_S, une lecture en vol par tranche).
+# Une tranche lue APRÈS son dernier jour ne bouge plus : gardée sur disque,
+# pour toujours, sans son revenu. La vue « depuis toujours » d'un VA payé
+# depuis un an en demande vingt-cinq, et le débit MyPuls est limité (un 429
+# prolonge la limitation pour tout le tableau de bord) : QUINZ_APPELS_MAX
+# lectures NOUVELLES au plus par affichage, l'une après l'autre dans UN fil,
+# arrêtées au premier échec.
+QUINZ_FICHIER = DATA_DIR / "infloww_liens_quinzaines.json"
+QUINZ_APPELS_MAX = 3
+QUINZ_PAUSE_S = 1.0
+QUINZ_ATTENTE_S = 4.0             # la page attend le fil ça, pas plus
+# Relecture du 26/09 : une tranche close lue avec un TROU (lien sans nombre
+# de subs, ou pas encore connu de MyPuls) était gardée telle quelle, pour
+# toujours : le gain restait « — » même quand MyPuls avait les chiffres. Le
+# disque ne garde donc que les subs CONNUS, lien par lien ; une tranche dont
+# il manque un lien d'une personne réglée est relue, mais au plus une fois par
+# QUINZ_TROU_REESSAI_S : le 26/09, LaBoule (c125, c126) était absent de
+# MyPuls, et relire ses vingt-cinq quinzaines toutes les 10 min userait le
+# débit MyPuls pour rien.
+QUINZ_TROU_REESSAI_S = 3600
+# Le disque grossissait d'un morceau par période consultée (vingt périodes,
+# vingt-deux tranches gardées, aucune jamais retirée). Seules les quinzaines
+# ENTIÈRES et les morceaux de début de paie (« payé depuis », création du
+# lien) sont gardés pour toujours ; un autre morceau inutilisé depuis
+# QUINZ_GARDE_S sort. « vu » (dernière utilisation) n'est réécrit qu'au jour
+# près : pas une écriture disque à chaque affichage.
+QUINZ_GARDE_S = 45 * 86400
+QUINZ_VU_PAS_S = 86400
+# Faux dans les tests : lecture sur place, sans fil qui survivrait aux bouchons
+QUINZ_EN_FOND = True
+_VERROU_Q = threading.Lock()
+_VERROU_PAIE = threading.Lock()
+_FIL_Q: Dict[str, Any] = {"fil": None, "pause": 0.0, "raison": ""}
+
+# Euros → dollars : le taux de référence de la BCE, gratuit et sans clé, lu
+# une fois par jour et gardé. BCE muette : le dernier taux connu, et la page
+# dit de quand. Aucun taux connu : le coût d'un VA payé en euros est « — »,
+# jamais un taux inventé.
+BCE_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml"
+BCE_FICHIER = DATA_DIR / "infloww_liens_bce.json"
+BCE_REESSAI_S = 1800              # un échec n'est pas retenté à chaque affichage
+_VERROU_BCE = threading.Lock()
+
+
+def palier(subs: Any) -> Tuple[float, str]:
+    """(prime en $, palier atteint) pour les subs d'une quinzaine. Paliers
+    NON cumulables : 320 subs rapportent 90 $, pas 10 + 25 + 45 + 70 + 90."""
+    n = _entier(subs) or 0
+    haut: Optional[int] = None
+    for plancher, prime in PALIERS_PRIMES:
+        if n >= plancher:
+            return prime, (f"{_nb(plancher)} subs et plus" if haut is None
+                           else f"{_nb(plancher)}–{_nb(haut - 1)} subs")
+        haut = plancher
+    return 0.0, f"moins de {_nb(PALIERS_PRIMES[-1][0])} subs"
+
+
+def _fin_du_mois(d: dt.date) -> dt.date:
+    suivant = d.replace(day=28) + dt.timedelta(days=4)
+    return suivant - dt.timedelta(days=suivant.day)
+
+
+def quinzaine_de(d: dt.date) -> Tuple[dt.date, dt.date]:
+    """La période de paie d'un jour : du 1er au 15, ou du 16 à la fin du mois
+    (la paie tombe le 16 et le 1er)."""
+    if d.day <= 15:
+        return d.replace(day=1), d.replace(day=15)
+    return d.replace(day=16), _fin_du_mois(d)
+
+
+def mois_de(d: dt.date) -> Tuple[dt.date, dt.date]:
+    return d.replace(day=1), _fin_du_mois(d)
+
+
+def decouper(a: dt.date, b: dt.date, frequence: str = "quinzaine") -> List[Dict[str, Any]]:
+    """Les quinzaines (ou mois civils) qui touchent [a, b], bornes incluses,
+    chacune avec sa partie incluse : {du, au, p_du, p_au, jours,
+    jours_periode, complete}. [] si a > b."""
+    de = mois_de if frequence == "mois" else quinzaine_de
+    out: List[Dict[str, Any]] = []
+    d = a
+    while d <= b:
+        p0, p1 = de(d)
+        f = min(p1, b)
+        out.append({"du": d, "au": f, "p_du": p0, "p_au": p1, "jours": (f - d).days + 1,
+                    "jours_periode": (p1 - p0).days + 1, "complete": d == p0 and f == p1})
+        d = f + dt.timedelta(days=1)
+    return out
+
+
+def cout_fixe(cfg: Mapping[str, Any], a: dt.date, b: dt.date) -> Tuple[float, List[Dict[str, Any]]]:
+    """Le fixe sur [a, b], dans la devise du réglage, au prorata des jours de
+    chaque quinzaine (ou mois) : 75 $ sur toute la quinzaine du 1er au 15 =
+    75 $ ; sur 5 de ses jours = 25 $."""
+    tr = decouper(a, b, str(cfg.get("frequence") or "quinzaine"))
+    m = float(cfg.get("montant") or 0)
+    return sum(m * t["jours"] / t["jours_periode"] for t in tr), tr
+
+
+# ─── le paiement : les réglages ──────────────────────────────────────────
+_MONTANT_TXT = re.compile(r"\d{1,6}(?:\.\d{0,2})?")
+
+
+def _montant(v: Any) -> Optional[float]:
+    """Un montant >= 0 et <= MONTANT_MAX, deux décimales au plus ; « 75,5 »
+    comme « 75.50 ». Autre chose : None."""
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, (int, float)):
+        f = float(v)
+    else:
+        s = (str(v).strip().replace("\u202f", "").replace("\u00a0", "").replace(" ", "")
+             .replace(",", "."))
+        if not _MONTANT_TXT.fullmatch(s):
+            return None
+        f = float(s)
+    if not math.isfinite(f) or f < 0 or f > MONTANT_MAX:
+        return None
+    return round(f, 2)
+
+
+def valider_paie(r: Any, aujourdhui: str = "") -> Tuple[Optional[Dict[str, Any]], str]:
+    """Un réglage, du formulaire ou du fichier : (réglage propre, "") ou
+    (None, ce qui ne va pas)."""
+    if not isinstance(r, Mapping):
+        return None, "réglage illisible"
+    typ = str(r.get("type") or "").strip()
+    if typ not in TYPES_PAIE:
+        return None, "type inconnu (Aucun, Fixe ou Fixe + primes)"
+    m = _montant(r.get("montant"))
+    if m is None:
+        return None, (f"montant invalide : un nombre de 0 à {_nb(MONTANT_MAX)}, "
+                      "deux décimales au plus")
+    devise = str(r.get("devise") or "").strip().upper()
+    if devise not in DEVISES:
+        return None, "devise inconnue (USD ou EUR)"
+    freq = str(r.get("frequence") or "").strip().lower()
+    if freq not in FREQUENCES:
+        return None, "fréquence inconnue (quinzaine ou mois)"
+    brut = str(r.get("depuis") or "").strip()
+    depuis = ""
+    if brut:
+        d = _date_arg(brut)
+        if d is None:
+            return None, f"date « payé depuis » invalide : « {brut[:20]} »"
+        try:
+            auj = dt.date.fromisoformat(aujourdhui or _aujourdhui())
+        except ValueError:
+            auj = dt.date.today()
+        fin = auj + dt.timedelta(days=366)
+        if not PLANCHER <= d <= fin:
+            return None, (f"date « payé depuis » hors bornes (du {_jour_long(PLANCHER.isoformat())} "
+                          f"au {_jour_long(fin.isoformat())})")
+        depuis = d.isoformat()
+    return {"type": typ, "montant": m, "devise": devise, "frequence": freq, "depuis": depuis}, ""
+
+
+def lire_paie() -> Tuple[Dict[str, Dict[str, Any]], List[str]]:
+    """({clé de personne: réglage}, [réglages illisibles, dits sur la page])."""
+    d = _lire_json(PAIE_FICHIER)
+    mauvais: List[str] = []
+    if not d:
+        try:
+            if PAIE_FICHIER.exists() and PAIE_FICHIER.stat().st_size > 2:
+                mauvais.append("le fichier des réglages est illisible")
+        except Exception:
+            pass
+        return {}, mauvais
+    pers = d.get("personnes", {})
+    if not isinstance(pers, Mapping):
+        return {}, ["le fichier des réglages n'a pas la forme attendue"]
+    out: Dict[str, Dict[str, Any]] = {}
+    for cle, r in pers.items():
+        v, err = valider_paie(r)
+        if v is None:
+            mauvais.append(f"« {cle} » : {err}")
+        else:
+            out[str(cle)] = v
+    return out, mauvais
+
+
+def _requete_page(tri: str, sens: str, cle: str, du: str = "", au: str = "") -> str:
+    """« ?tri=…&du=…&k=… » brut (pas pour un href : _lien_page l'échappe)."""
+    from urllib.parse import quote
+    defaut = (tri, sens) == ("nom", "asc")
+    paires = (("tri", "" if defaut else tri), ("sens", "" if defaut else sens),
+              ("du", du), ("au", au), ("k", cle))
+    return "?" + "&".join(f"{k}={quote(str(v), safe='')}" for k, v in paires if v)
+
+
+def ancre(cle_personne: Any) -> str:
+    """L'ancre de la ligne d'une personne : le retour du formulaire y ramène."""
+    return "p-" + hashlib.sha1(str(cle_personne).encode("utf-8")).hexdigest()[:10]
+
+
+def adresse_retour(form: Mapping[str, Any]) -> str:
+    """La vue d'où vient le formulaire : tri, période et clé gardés, tous
+    revalidés (rien de l'envoi n'est recopié tel quel dans l'adresse)."""
+    tri, sens = _tri_valide(form.get("tri"), form.get("sens"))
+    du, au = _date_arg(form.get("du")), _date_arg(form.get("au"))
+    du_s, au_s = (du.isoformat(), au.isoformat()) if du and au else ("", "")
+    q = _requete_page(tri, sens, str(form.get("k") or "")[:200], du_s, au_s)
+    personne = str(form.get("personne") or "").strip()
+    return "/infloww/liens" + ("" if q == "?" else q) + (f"#{ancre(personne)}" if personne else "")
+
+
+def enregistrer_paie(form: Mapping[str, Any]) -> Tuple[bool, str, str]:
+    """Le réglage envoyé par le formulaire de la page : (ok, pourquoi pas,
+    adresse de retour). L'autorisation (clé de paiement ou admin) est vérifiée par la
+    route, avant. Ne lève pas."""
+    retour = adresse_retour(form)
+    cle = str(form.get("personne") or "").strip()
+    if not cle or len(cle) > 120:
+        return False, "personne manquante", retour
+    v, err = valider_paie(form)
+    if v is None:
+        return False, err, retour
+    try:
+        deja = cle in (lire_paie()[0])
+        if not deja:
+            # une personne de l'espace, pas un nom tapé à la main : le fichier
+            # ne se remplit pas de clés qui ne correspondent à aucune ligne
+            g = liens_gms()
+            connues = set(entites(g["liens"])[0])
+            if cle not in connues:
+                return False, (f"« {cle} » n'est pas une personne de l'espace GetMySocial "
+                               f"« {NOM_EQUIPE} »" + (" (liste de secours)" if g.get("repli") else "")), retour
+        with _VERROU_PAIE:
+            # Un fichier illisible (et sans .prev lisible) valait {} : le
+            # réglage suivant écrasait tous les autres, et l'avertissement de
+            # la page disparaissait avec eux (relecture du 26/09). On refuse :
+            # le fichier reste tel quel, à réparer. (safe_json.load reprend
+            # d'abord la copie .prev si elle se lit.)
+            brut = safe_json.load(PAIE_FICHIER, default=None)
+            if brut is None and PAIE_FICHIER.exists() and PAIE_FICHIER.stat().st_size > 2:
+                return False, ("fichier des réglages illisible (data/infloww_liens_paie.json) : rien n'est "
+                               "écrit, pour ne pas effacer les autres réglages — à réparer d'abord"), retour
+            d = {} if brut is None else brut
+            if not isinstance(d, Mapping) or not isinstance(d.get("personnes", {}), Mapping):
+                return False, ("fichier des réglages sans la forme attendue (un objet « personnes ») : "
+                               "rien n'est écrit, pour ne pas effacer les autres réglages — à réparer "
+                               "d'abord"), retour
+            pers = dict(d.get("personnes") or {})
+            if cle not in pers and len(pers) >= PAIE_PERSONNES_MAX:
+                return False, f"déjà {PAIE_PERSONNES_MAX} réglages", retour
+            pers[cle] = dict(v, maj=time.time())
+            if not safe_json.write(PAIE_FICHIER, dict(d, personnes=pers, maj=time.time())):
+                return False, "réglage non écrit (disque)", retour
+    except Exception as e:
+        return False, f"réglage non écrit : {type(e).__name__} : {e}"[:300], retour
+    return True, "", retour
+
+
+# ─── le paiement : le taux EUR → USD de la BCE ───────────────────────────
+_BCE_DATE = re.compile(r"""\btime\s*=\s*['"](\d{4}-\d{2}-\d{2})['"]""")
+_BCE_USD = re.compile(r"""\bcurrency\s*=\s*['"]USD['"]\s+rate\s*=\s*['"](\d+(?:\.\d+)?)['"]""")
+
+
+def _bce_http() -> str:
+    """Le fichier du jour de la BCE (bouchonné dans les tests). Lève en cas
+    de panne."""
+    import requests
+    r = requests.get(BCE_URL, timeout=(3, 5), headers={"User-Agent": "youl4b-infloww-liens/1.0"})
+    r.raise_for_status()
+    return r.text
+
+
+def lire_bce(xml: Any) -> Tuple[Optional[float], str]:
+    """(dollars pour 1 euro, jour de publication) tirés du XML de la BCE ;
+    (None, "") si le fichier ne se lit pas ou si le taux est absurde."""
+    s = str(xml or "")
+    m, d = _BCE_USD.search(s), _BCE_DATE.search(s)
+    if not m or not d:
+        return None, ""
+    try:
+        taux = float(m.group(1))
+        dt.date.fromisoformat(d.group(1))
+    except ValueError:
+        return None, ""
+    return (taux, d.group(1)) if 0.5 <= taux <= 3.0 else (None, "")
+
+
+def taux_eur_usd(maintenant: Optional[float] = None) -> Dict[str, Any]:
+    """{taux, date, panne} : le taux du jour (lu une fois par jour), sinon le
+    dernier connu avec la panne qui empêche de le relire, sinon taux None.
+    Ne lève pas."""
+    maintenant = time.time() if maintenant is None else maintenant
+    jour = _aujourdhui()
+    with _VERROU_BCE:
+        c = _lire_json(BCE_FICHIER)
+        taux = _f_ou_none(c.get("taux"))
+        if taux is not None and not 0.5 <= taux <= 3.0:
+            taux = None
+        if taux is not None and c.get("jour_lu") == jour:
+            return {"taux": taux, "date": str(c.get("date") or ""), "panne": ""}
+        if 0 <= maintenant - float(c.get("echec_t") or 0) < BCE_REESSAI_S:
+            panne = f"{c.get('echec') or '?'} (essai du {_heure(c.get('echec_t'))})"
+        else:
+            try:
+                neuf, date = lire_bce(_bce_http())
+                panne = "" if neuf is not None else "réponse de la BCE illisible"
+            except Exception as e:
+                neuf, date, panne = None, "", f"{type(e).__name__} : {e}"[:200]
+            if neuf is not None:
+                safe_json.write(BCE_FICHIER, {"taux": neuf, "date": date, "jour_lu": jour, "lu": maintenant})
+                return {"taux": neuf, "date": date, "panne": ""}
+            safe_json.write(BCE_FICHIER, dict(c, echec=panne, echec_t=maintenant))
+            panne = f"{panne} (essai du {_heure(maintenant)})"
+        return {"taux": taux, "date": str(c.get("date") or "") if taux is not None else "", "panne": panne}
+
+
+# ─── le paiement : les subs de chaque quinzaine (MyPuls) ─────────────────
+def _q_disque() -> Dict[str, Any]:
+    t = _lire_json(QUINZ_FICHIER).get("tranches")
+    return dict(t) if isinstance(t, Mapping) else {}
+
+
+def _t_entree(e: Any, *champs: str) -> float:
+    """Le plus récent des horodatages `champs` d'une tranche gardée (0 sinon)."""
+    if not isinstance(e, Mapping):
+        return 0.0
+    return max([_f_ou_none(e.get(c)) or 0.0 for c in champs] + [0.0])
+
+
+def _connus(e: Any) -> Dict[str, int]:
+    """Les subs CONNUS d'une tranche gardée. Un lien sans nombre (None, que la
+    version d'avant écrivait) n'en fait pas partie : c'est un trou, à relire."""
+    s = e.get("subs") if isinstance(e, Mapping) else None
+    if not isinstance(s, Mapping):
+        return {}
+    out: Dict[str, int] = {}
+    for c, n in s.items():
+        v = _entier(n)
+        if v is not None:
+            out[str(c)] = v
+    return out
+
+
+def _liens_tranche(connus: Mapping[str, int]) -> List[Dict[str, Any]]:
+    return [{"id": f"mypuls:{c}", "code": str(c), "abonnes": int(n), "nom": ""} for c, n in connus.items()]
+
+
+def _bornes_ok(v: Mapping[str, Any], du: str, au: str) -> bool:
+    """MyPuls a-t-il compté exactement les jours demandés ? (bornes qu'il rend
+    avec ses chiffres). Absentes : on ne sait pas, donc non."""
+    pm = v.get("periode_mypuls")
+    return (isinstance(pm, Mapping) and str(pm.get("from") or "")[:10] == du
+            and str(pm.get("to") or "")[:10] == au)
+
+
+def _quinzaine_entiere(k: str) -> bool:
+    try:
+        du, au = (dt.date.fromisoformat(x) for x in str(k).split("|", 1))
+    except ValueError:
+        return False
+    return quinzaine_de(du) == (du, au)
+
+
+def _elaguer_tranches(tr: Mapping[str, Any], maintenant: float) -> Dict[str, Any]:
+    """Garde pour toujours les quinzaines entières et les morceaux de début de
+    paie ; un autre morceau (une période choisie au hasard, 21/09 → 25/09)
+    sort après QUINZ_GARDE_S sans servir, comme les clics US (_elaguer)."""
+    return {k: e for k, e in tr.items()
+            if isinstance(e, Mapping) and (_quinzaine_entiere(k) or e.get("debut")
+                                           or maintenant - _t_entree(e, "vu", "relu", "lu") < QUINZ_GARDE_S)}
+
+
+def _garder_tranche(du: str, au: str, v: Mapping[str, Any],
+                    maintenant: Optional[float] = None) -> Optional[Dict[str, Any]]:
+    """Une tranche lue APRÈS son dernier jour : ses subs CONNUS, lien par
+    lien, sur disque (sans revenu : le paiement n'en a pas besoin). Un lien
+    sans nombre de subs, ou absent de la lecture, n'y est pas écrit : il reste
+    un trou, relu plus tard (_etat_tranche) — le 26/09, un None gardé gelait
+    le gain à « — » pour toujours. Une valeur déjà gardée ne change plus.
+    Rien n'est gardé d'une lecture incomplète (pagination coupée) ni d'une
+    lecture sur d'autres jours que ceux demandés. Rend l'entrée gardée, ou
+    None."""
+    if v.get("erreur") or v.get("tronque") or not str(v.get("lu_jour") or "") > au:
+        return None
+    if not _bornes_ok(v, du, au):
+        return None
+    connus: Dict[str, int] = {}
+    for x in v.get("liens") or []:
+        n = _entier(x.get("abonnes")) if isinstance(x, Mapping) and x.get("code") else None
+        if n is not None:
+            connus[str(x["code"])] = n
+    lu = float(v.get("lu_a") or time.time())
+    maintenant = time.time() if maintenant is None else maintenant
+    with _VERROU_Q:
+        c = _lire_json(QUINZ_FICHIER)
+        tr = dict(c.get("tranches") or {}) if isinstance(c.get("tranches"), Mapping) else {}
+        k = _cle_periode(du, au)
+        e = tr.get(k) if isinstance(tr.get(k), Mapping) else {}
+        if e and lu <= _t_entree(e, "relu", "lu"):
+            return dict(e)                 # cette lecture-là est déjà rangée
+        neuf: Dict[str, Any] = {"lu": _t_entree(e, "lu") or lu, "relu": lu,
+                                "subs": dict(connus, **_connus(e)), "vu": max(_t_entree(e, "vu"), lu)}
+        if e.get("debut"):
+            neuf["debut"] = True
+        tr[k] = neuf
+        safe_json.write(QUINZ_FICHIER, {"tranches": _elaguer_tranches(tr, maintenant), "maj": maintenant})
+        return dict(neuf)
+
+
+def _toucher_tranches(cles: Any, debuts: Any, maintenant: Optional[float] = None) -> None:
+    """Note que ces tranches gardées servent encore (« vu », au jour près) et
+    marque les morceaux de début de paie (gardés pour toujours) ; élague au
+    passage. UNE écriture au plus, et aucune si rien ne change."""
+    maintenant = time.time() if maintenant is None else maintenant
+    cles = {_cle_periode(*k) for k in cles}
+    debuts = {_cle_periode(*k) for k in debuts}
+    with _VERROU_Q:
+        c = _lire_json(QUINZ_FICHIER)
+        tr = dict(c.get("tranches") or {}) if isinstance(c.get("tranches"), Mapping) else {}
+        change = False
+        for k in cles | debuts:
+            e = tr.get(k)
+            if not isinstance(e, Mapping):
+                continue
+            e2 = dict(e)
+            if k in cles and maintenant - _t_entree(e, "vu", "relu", "lu") >= QUINZ_VU_PAS_S:
+                e2["vu"] = maintenant
+            if k in debuts:
+                e2["debut"] = True
+            if e2 != e:
+                tr[k] = e2
+                change = True
+        if change:
+            safe_json.write(QUINZ_FICHIER, {"tranches": _elaguer_tranches(tr, maintenant), "maj": maintenant})
+
+
+def _etat_tranche(du: str, au: str, disque: Mapping[str, Any], maintenant: float,
+                  codes: Any = ()) -> Dict[str, Any]:
+    """{liens} quand la tranche est lue (disque, ou mémoire même périmée),
+    plus « a_lire » s'il faut la (re)lire, « en_cours » si une lecture est en
+    vol, « erreur » si MyPuls vient d'échouer.
+
+    `codes` : les liens dont les personnes réglées ont besoin. Le disque ne
+    fait foi que s'il les a TOUS ; sinon la tranche est relue — au plus une
+    fois par QUINZ_TROU_REESSAI_S (« trou_relu ») : un lien que MyPuls ne
+    connaît pas ne coûte pas une lecture toutes les 10 min."""
+    d = disque.get(_cle_periode(du, au))
+    d = d if isinstance(d, Mapping) else None
+    connus = _connus(d)
+    if d is not None and set(codes) <= set(connus):
+        return {"liens": _liens_tranche(connus), "disque": True}
+    cle = (du, au)
+    with _VERROU_MP:
+        hit = _MYPULS_CACHE.get(cle)
+        ech = _MYPULS_ECHECS.get(cle)
+        vol = _MYPULS_FILS.get(cle)
+    out: Dict[str, Any] = {}
+    relu = _t_entree(d, "relu", "lu")
+    if hit:
+        out["liens"] = list(hit["v"].get("liens") or [])
+        g = _garder_tranche(du, au, hit["v"])
+        if g and set(codes) <= set(_connus(g)):
+            return {"liens": _liens_tranche(_connus(g)), "disque": True}
+        relu = max(relu, _t_entree(g, "relu", "lu"))
+        if 0 <= maintenant - hit["t"] < MYPULS_TTL_S:
+            return out
+    elif connus:
+        out["liens"] = _liens_tranche(connus)
+    if relu and 0 <= maintenant - relu < QUINZ_TROU_REESSAI_S:
+        # relue il y a moins d'une heure, toujours à trou : le trou tient à
+        # MyPuls, pas à la lecture ; ce qui est connu sert, le reste est dit
+        out.setdefault("liens", _liens_tranche(connus))
+        out["trou_relu"] = relu
+        return out
+    if vol and vol["fil"].is_alive():
+        out["en_cours"] = True
+    elif ech and 0 <= maintenant - ech["t"] < MYPULS_ECHEC_S:
+        out["erreur"] = str(ech.get("raison") or "?")
+    else:
+        out["a_lire"] = True
+    return out
+
+
+def _dormir_q(s: float) -> None:
+    time.sleep(s)
+
+
+def _lire_tranches(cles: List[Tuple[str, str]]) -> None:
+    """Le fil des quinzaines : UNE lecture MyPuls à la fois, une pause entre
+    deux, arrêt au premier échec (et plus aucune lecture de tranche pendant
+    MYPULS_ECHEC_S). Ne lève pas."""
+    appels = 0
+    for du, au in cles:
+        cle = (du, au)
+        if appels:
+            _dormir_q(QUINZ_PAUSE_S)
+        with _VERROU_MP:
+            hit = _MYPULS_CACHE.get(cle)
+            vol = _MYPULS_FILS.get(cle)
+            if (hit and 0 <= time.time() - hit["t"] < MYPULS_TTL_S) or (vol and vol["fil"].is_alive()):
+                continue           # lue entre-temps, ou déjà en vol (la vue elle-même)
+            _MYPULS_FILS[cle] = {"fil": threading.current_thread(), "debut": time.time()}
+        appels += 1
+        _releve_mypuls(du, au)
+        with _VERROU_MP:
+            neuf = _MYPULS_CACHE.get(cle)
+            ech = _MYPULS_ECHECS.get(cle)
+        if neuf is not None and neuf is not hit:
+            _garder_tranche(du, au, neuf["v"])
+            continue
+        _FIL_Q["pause"] = time.time() + MYPULS_ECHEC_S
+        _FIL_Q["raison"] = str((ech or {}).get("raison") or "lecture sans résultat")[:300]
+        break
+
+
+def _lancer_tranches(cles: List[Tuple[str, str]]) -> Optional[threading.Thread]:
+    """Au plus QUINZ_APPELS_MAX lectures, dans UN fil à la fois : un
+    rechargement pendant la lecture n'en lance pas d'autres."""
+    cles = list(cles)[:QUINZ_APPELS_MAX]
+    if not cles or time.time() < float(_FIL_Q.get("pause") or 0):
+        return None
+    if not QUINZ_EN_FOND:
+        _lire_tranches(cles)
+        return None
+    with _VERROU_Q:
+        f = _FIL_Q.get("fil")
+        if f is not None and f.is_alive():
+            return f
+        f = threading.Thread(target=_lire_tranches, args=(cles,), daemon=True,
+                             name="infloww-liens-quinzaines")
+        _FIL_Q["fil"] = f
+        f.start()
+        return f
+
+
+def _codes_personne(x: Mapping[str, Any]) -> set:
+    """Les codes de suivi d'une personne : ceux rattachés dans le tableau, et
+    ceux de ses liens GMS que la source ne connaît pas (introuvables avec un
+    code). Un lien GMS sans adresse de suivi n'en a pas."""
+    return ({str(r.get("code")) for r in x.get("infloww") or [] if r.get("code")}
+            | {str(r.get("code")) for r in x.get("introuvables") or [] if r.get("code")})
+
+
+def _subs_par_personne(liens: List[Any], gms: List[Any]
+                       ) -> Tuple[Dict[str, Optional[int]], Dict[str, List[str]]]:
+    """Les subs de chaque personne dans une lecture MyPuls, par la règle du
+    tableau (construire : liens DISTINCTS, rattachés par l'adresse), et ses
+    codes à trou. None : aucun lien rattaché, un lien dont MyPuls ne donne
+    pas les subs, ou un de ses liens absent de la lecture — une prime ne se
+    calcule pas sur un compte à trou (une tranche gardée n'a que les subs
+    connus : sans ce dernier cas, un lien manquant y serait compté zéro)."""
+    t = construire(liens, gms)
+    sans = {str(x.get("id")) for x in liens if isinstance(x, Mapping) and x.get("abonnes") is None}
+    out: Dict[str, Optional[int]] = {}
+    trous: Dict[str, List[str]] = {}
+    for x in t["lignes"]:
+        ids = {str(r.get("id")) for r in x.get("infloww") or []}
+        tr = ({str(r.get("code")) for r in x.get("infloww") or [] if str(r.get("id")) in sans}
+              | {str(r.get("code")) for r in x.get("introuvables") or [] if r.get("code")})
+        trous[x["cle"]] = sorted(tr, key=lambda c: (len(c), c))
+        out[x["cle"]] = None if (not ids or tr) else _entier(x.get("subs"))
+    return out, trous
+
+
+# ─── le paiement : le calcul ─────────────────────────────────────────────
+def _plage_paie(x: Mapping[str, Any], cfg: Mapping[str, Any], per: Mapping[str, Any],
+                liens_p: Mapping[str, Any], auj: dt.date) -> Tuple[Optional[dt.date], Optional[dt.date], str]:
+    """[a, b] sur laquelle la personne est payée : la période affichée (à
+    partir de « payé depuis » s'il tombe dedans), ou, depuis toujours, de
+    « payé depuis » (sinon de la création de son plus ancien lien Infloww) à
+    aujourd'hui. (None, None, pourquoi) si le début est inconnu."""
+    depuis = _date_arg(cfg.get("depuis")) if cfg.get("depuis") else None
+    if per.get("du") and per.get("au"):
+        a, b = dt.date.fromisoformat(per["du"]), dt.date.fromisoformat(per["au"])
+        return (max(a, depuis) if depuis else a), b, ""
+    if depuis:
+        return depuis, auj, ""
+    crees = sorted(c for c in (str((liens_p.get(str(r.get("id"))) or {}).get("cree") or "")
+                               for r in x.get("infloww") or []) if _date_arg(c))
+    if not crees:
+        return None, None, "début inconnu (aucune date de création Infloww) : renseignez « payé depuis »"
+    return dt.date.fromisoformat(crees[0]), auj, ""
+
+
+def _revenu(x: Mapping[str, Any], liens_p: Mapping[str, Any], devise_periode: str) -> Tuple[Optional[float], str]:
+    """Le revenu NET de la personne, en dollars : la somme de ses liens
+    DISTINCTS. (None, pourquoi) plutôt qu'un zéro inventé."""
+    ids = [str(r.get("id")) for r in x.get("infloww") or []]
+    if not ids:
+        return None, "aucun lien de suivi rattaché : revenu inconnu"
+    if devise_periode and devise_periode != "USD":
+        return None, f"revenu MyPuls en {devise_periode}, pas en dollars"
+    nets = [(liens_p.get(i) or {}).get("net") for i in ids]
+    if any(n is None for n in nets):
+        return None, "revenu illisible pour un de ses liens"
+    autres = {str((liens_p.get(i) or {}).get("devise") or "") for i in ids} - {"", "USD"}
+    if autres:
+        return None, f"revenu en {', '.join(sorted(autres))}, pas en dollars"
+    return sum(int(n) for n in nets) / 100.0, ""
+
+
+def _k_tranche(t: Mapping[str, Any]) -> Tuple[str, str]:
+    return t["du"].isoformat(), t["au"].isoformat()
+
+
+def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str, Any]:
+    """Le tableau, plus le paiement de chaque personne et ce qu'elle rapporte
+    (colonnes Paiement et Gain / perte). Pour la PAGE seulement. `t` n'est
+    pas modifié. Peut lancer des lectures MyPuls (subs par quinzaine) et
+    attendre QUINZ_ATTENTE_S au plus."""
+    attente = QUINZ_ATTENTE_S if attente is None else float(attente)
+    out = dict(t)
+    lignes = [dict(x) for x in t.get("lignes") or []]
+    out["lignes"] = lignes
+    cfgs, mauvais = lire_paie()
+    presents = {str(x.get("cle")) for x in lignes}
+    P: Dict[str, Any] = {"mauvais": mauvais, "taux": None, "en_attente": 0, "a_relire": 0, "erreurs": {},
+                         "orphelins": sorted((c for c, v in cfgs.items()
+                                              if c not in presents and v["type"] != "aucun"), key=_cle_nom),
+                         "configures": 0, "totaux": {}, "pause": ""}
+    out["paie"] = P
+    for x in lignes:
+        cfg = cfgs.get(str(x.get("cle")))
+        x["paie"] = {"cfg": cfg, "resume": resume_paie(cfg)}
+        x["gain"] = None
+    if t.get("erreur"):
+        P["orphelins"] = []            # pas de tableau : personne n'est « absent »
+        return out
+    per = t.get("periode") or {}
+    if not (per.get("du") and per.get("au")):
+        per = {}
+    P["vue"] = "periode" if per else "toujours"
+    liens_p = t.get("_paie_liens") or {}
+    gms = t.get("_gms") or []
+    try:
+        auj = dt.date.fromisoformat(_aujourdhui())
+    except ValueError:
+        auj = dt.date.today()
+    actifs = [x for x in lignes if (x["paie"]["cfg"] or {}).get("type") in ("fixe", "fixe_primes")]
+    P["configures"] = len(actifs)
+    if not actifs:
+        return out
+    if any(x["paie"]["cfg"]["devise"] == "EUR" for x in actifs):
+        P["taux"] = taux_eur_usd()
+
+    # 1. plages, et quinzaines dont il faut les subs
+    maintenant = time.time()
+    disque = _q_disque()
+    # par tranche, les codes de suivi dont les personnes réglées ont besoin :
+    # le disque ne fait foi que s'il les a tous
+    codes_q: Dict[Tuple[str, str], set] = {}
+    debuts: set = set()
+    for x in actifs:
+        p, cfg = x["paie"], x["paie"]["cfg"]
+        a, b, raison = _plage_paie(x, cfg, per, liens_p, auj)
+        p.update(debut=a.isoformat() if a else "", fin=b.isoformat() if b else "", raison=raison)
+        if a is None or cfg["type"] != "fixe_primes":
+            continue
+        p["quinzaines"] = decouper(a, b, "quinzaine")
+        codes_x = _codes_personne(x)
+        for q in p["quinzaines"]:
+            codes_q.setdefault(_k_tranche(q), set()).update(codes_x)
+        # le morceau qui commence au premier jour payé (« payé depuis », sinon
+        # la création du lien en vue « depuis toujours ») et finit avec sa
+        # quinzaine : resservi à chaque affichage, gardé pour toujours
+        q0 = p["quinzaines"][0] if p["quinzaines"] else None
+        if (q0 and not q0["complete"] and q0["au"] == q0["p_au"]
+                and (not per or a.isoformat() == cfg.get("depuis"))):
+            debuts.add(_k_tranche(q0))
+    besoins = {k: _etat_tranche(k[0], k[1], disque, maintenant, c) for k, c in codes_q.items()}
+    # d'abord les tranches sans aucune lecture, puis les relectures (tranches
+    # ouvertes dont la lecture a plus de 10 min, tranches closes à trou)
+    a_lire = sorted((k for k, e in besoins.items() if e.get("a_lire")),
+                    key=lambda k: ("liens" in besoins[k], k))
+    if a_lire:
+        f = _lancer_tranches(a_lire)
+        if f is not None and attente > 0:
+            f.join(attente)
+        maintenant = time.time()
+        disque = _q_disque()
+        besoins = {k: _etat_tranche(k[0], k[1], disque, maintenant, c) for k, c in codes_q.items()}
+    if time.time() < float(_FIL_Q.get("pause") or 0):
+        P["pause"] = str(_FIL_Q.get("raison") or "")
+    _toucher_tranches(besoins, debuts, maintenant)
+    subs_q: Dict[Tuple[str, str], Dict[str, Optional[int]]] = {}
+    trous_q: Dict[Tuple[str, str], Dict[str, List[str]]] = {}
+    for k, e in besoins.items():
+        if "liens" in e:
+            subs_q[k], trous_q[k] = _subs_par_personne(e["liens"], gms)
+        elif e.get("erreur"):
+            P["erreurs"][k] = e["erreur"]
+    attente_k: set = set()
+
+    # 2. par personne : revenu - fixe - primes ; chaque manque est dit
+    taux = (P.get("taux") or {}).get("taux")
+    devise_periode = str(per.get("devise") or "") if per else ""
+    for x in actifs:
+        p, cfg = x["paie"], x["paie"]["cfg"]
+        rev, r_raison = _revenu(x, liens_p, devise_periode)
+        p["revenu"] = rev
+        if not p.get("debut"):
+            continue                       # début inconnu : la raison est déjà dite
+        a, b = dt.date.fromisoformat(p["debut"]), dt.date.fromisoformat(p["fin"])
+        fixe_d, tr_fixe = cout_fixe(cfg, a, b)
+        p["fixe_devise"], p["tranches_fixe"] = fixe_d, tr_fixe
+        p["fixe"] = fixe_d if cfg["devise"] == "USD" else (fixe_d * taux if taux else None)
+        raisons: List[str] = []
+        if p["fixe"] is None:
+            raisons.append("taux EUR → USD inconnu : fixe en euros non converti")
+        if rev is None:
+            raisons.append(r_raison)
+        primes: Optional[float] = 0.0
+        detail_q: List[Dict[str, Any]] = []
+        if cfg["type"] == "fixe_primes":
+            attente_q = 0
+            manque_q = ""
+            for q in p.get("quinzaines") or []:
+                k = _k_tranche(q)
+                e = besoins.get(k) or {}
+                s = (subs_q.get(k) or {}).get(str(x["cle"]))
+                ligne_q: Dict[str, Any] = {"du": k[0], "au": k[1], "complete": q["complete"], "subs": s}
+                if k in subs_q and s is not None:
+                    ligne_q["prime"], ligne_q["palier"] = palier(s)
+                elif e.get("a_lire") or e.get("en_cours"):
+                    attente_q += 1             # (re)lecture demandée ou en vol
+                    attente_k.add(k)
+                elif k in subs_q:
+                    tr = (trous_q.get(k) or {}).get(str(x["cle"])) or []
+                    manque_q = manque_q or (
+                        f"subs du {_libelle_periode(*k)} inconnus chez MyPuls"
+                        + (f" pour {', '.join('c' + c for c in tr)}" if tr else "")
+                        + " (lien absent ou sans nombre de subs"
+                        + (f" ; relu le {_heure(e['trou_relu'])}, relu au plus une fois par heure"
+                           if e.get("trou_relu") else "") + ")")
+                elif k in P["erreurs"]:
+                    manque_q = manque_q or (f"MyPuls n'a pas répondu pour le {_libelle_periode(*k)} "
+                                            f"({P['erreurs'][k][:160]})")
+                else:
+                    attente_q += 1
+                    attente_k.add(k)
+                detail_q.append(ligne_q)
+            if manque_q:
+                raisons.append(manque_q)
+            if attente_q:
+                lues = len(detail_q) - attente_q
+                p["en_cours"] = True
+                raisons.append(f"primes : calcul en cours ({_nb(lues)} quinzaine{'s' if lues > 1 else ''} "
+                               f"lue{'s' if lues > 1 else ''} sur {_nb(len(detail_q))})")
+            primes = None if (manque_q or attente_q) else sum(q["prime"] for q in detail_q)
+        p["primes"], p["detail_q"] = primes, detail_q
+        p["raison"] = " ; ".join(raisons)
+        if not raisons and primes is not None and rev is not None and p["fixe"] is not None:
+            p["gain"] = round(rev - p["fixe"] - primes, 2)
+            x["gain"] = p["gain"]
+    # les tranches qu'une personne attend : jamais lues, ou à relire (une
+    # lecture d'avant avait un trou pour elle)
+    P["en_attente"] = len(attente_k)
+    P["a_relire"] = sum(1 for k in attente_k if "liens" in (besoins.get(k) or {}))
+
+    # 3. totaux, sur les personnes configurées dont le gain se calcule. Le
+    # revenu d'un lien visé par deux personnes n'y compte qu'UNE fois, comme
+    # au total des subs.
+    calcules = [x for x in actifs if x["gain"] is not None]
+    T: Dict[str, Any] = {"configures": len(actifs), "calcules": len(calcules),
+                         "revenu": None, "cout": None, "gain": None}
+    if calcules:
+        ids = {str(r.get("id")) for x in calcules for r in x.get("infloww") or []}
+        T["revenu"] = sum(int((liens_p.get(i) or {}).get("net") or 0) for i in ids) / 100.0
+        T["cout"] = sum(x["paie"]["fixe"] + x["paie"]["primes"] for x in calcules)
+        T["gain"] = round(T["revenu"] - T["cout"], 2)
+    P["totaux"] = T
+    return out
+
+
+def page_refus_paie(pourquoi: str, retour: str) -> str:
+    """Un réglage refusé : ce qui ne va pas, et le retour à la même vue.
+    Aucun JavaScript ; tout est échappé (le message peut citer l'envoi)."""
+    return ('<!doctype html><html lang="fr"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer">'
+            '<meta name="color-scheme" content="dark"><title>Réglage refusé</title>'
+            '<style>body{margin:0 auto;max-width:560px;padding:24px 16px;background:#0e0e10;color:#f4f4f5;'
+            'font:15px/1.5 -apple-system,system-ui,"Segoe UI",sans-serif}'
+            '.err{background:rgba(239,68,68,.12);border:1px solid #ef4444;border-radius:12px;padding:14px 16px;'
+            'overflow-wrap:anywhere}a{color:#f97341}</style></head><body>'
+            f'<div class="err"><b>Réglage non enregistré.</b><br>{_e(pourquoi)}</div>'
+            f'<p><a href="{_e(retour)}">Revenir au tableau</a> : rien n\'a changé.</p></body></html>')
+
+
+def resume_paie(cfg: Optional[Mapping[str, Any]]) -> str:
+    """« 75 $ / quinzaine + primes », « 200 EUR / mois », « — »."""
+    if not cfg or cfg.get("type") not in ("fixe", "fixe_primes"):
+        return "—"
+    s = f"{_montant_court(cfg['montant'])}\u00a0{'$' if cfg['devise'] == 'USD' else 'EUR'} / {cfg['frequence']}"
+    return s + (" + primes" if cfg["type"] == "fixe_primes" else "")
+
+
+def _montant_court(m: Any) -> str:
+    f = float(m or 0)
+    return _nb(f) if f.is_integer() else _dec(f)
 
 
 # ─── formats ─────────────────────────────────────────────────────────────
@@ -1555,27 +2411,69 @@ def _rafraichir() -> str:
 
 
 # ─── la page ─────────────────────────────────────────────────────────────
-def cle_page() -> str:
-    """La clé qui ouvre la page sans compte. Créée au premier appel."""
+def _cle(fichier: Path, quoi: str) -> str:
     with _VERROU:
         try:
-            v = CLE_FICHIER.read_text(encoding="utf-8").strip()
+            v = fichier.read_text(encoding="utf-8").strip()
             if len(v) >= 20:
                 return v
         except Exception:
             pass
         v = secrets.token_urlsafe(24)
-        if not safe_json.write_text(CLE_FICHIER, v):
-            raise OSError(f"clé de la page non écrite ({CLE_FICHIER})")
+        if not safe_json.write_text(fichier, v):
+            raise OSError(f"{quoi} non écrite ({fichier})")
         try:
-            CLE_FICHIER.chmod(0o600)
+            fichier.chmod(0o600)
         except Exception:
             pass
         return v
 
 
+def cle_page() -> str:
+    """La clé du salon : elle ouvre la page des VA, sans compte, SANS
+    paiement ni gain. Créée au premier appel."""
+    return _cle(CLE_FICHIER, "clé de la page")
+
+
+def cle_paie() -> str:
+    """La clé du PROPRIÉTAIRE : la page, plus les colonnes Paiement et Gain /
+    perte, et le droit de modifier un paiement. Jamais dans url_page() ni sur
+    Discord. Relecture du 26/09 : la clé du salon ouvrait aussi le paiement,
+    et une fois l'envoi Discord allumé, chaque VA aurait pu lire le salaire et
+    le gain des autres, et les modifier. Créée au premier appel."""
+    return _cle(CLE_PAIE_FICHIER, "clé de paiement")
+
+
+def acces_cle(k: Any) -> str:
+    """« paie » (clé du propriétaire), « page » (clé du salon) ou "" (clé
+    fausse, ou illisible). Comparaisons en temps constant ; ne lève pas.
+    Deux fichiers identiques par erreur : la clé est celle du salon."""
+    import hmac
+    s = str(k or "").encode("utf-8")
+    if not s:
+        return ""
+    out = ""
+    for nom, f in (("paie", cle_paie), ("page", cle_page)):
+        try:
+            bonne = f().encode("utf-8")
+        except Exception as e:
+            print(f"[infloww-liens] {nom} : clé illisible : {e}", flush=True)
+            continue
+        if hmac.compare_digest(s, bonne):
+            out = nom
+    return out
+
+
 def url_page() -> str:
+    """Le lien du salon, celui des VA : la clé du salon, jamais celle du
+    paiement."""
     return f"{SITE}/infloww/liens?k={cle_page()}"
+
+
+def url_paie() -> str:
+    """Le lien personnel du propriétaire (page + paiement). Affiché à l'admin
+    connecté seulement, jamais posté."""
+    return f"{SITE}/infloww/liens?k={cle_paie()}"
 
 
 def _e(s: Any) -> str:
@@ -1618,10 +2516,10 @@ def _adresse(*paires: Tuple[str, Any]) -> str:
 
 
 def _lien_page(tri: str, sens: str, cle: str, du: str = "", au: str = "") -> str:
-    """Un lien vers la page, tri gardé (omis quand c'est celui par défaut)."""
-    defaut = (tri, sens) == ("nom", "asc")
-    return _adresse(("tri", "" if defaut else tri), ("sens", "" if defaut else sens),
-                    ("du", du), ("au", au), ("k", cle))
+    """Un lien vers la page, tri gardé (omis quand c'est celui par défaut).
+    La même adresse que le retour du formulaire de paiement (_requete_page),
+    échappée pour un href."""
+    return _e(_requete_page(tri, sens, cle, du, au))
 
 
 def _lien_tri(col: str, tri: str, sens: str, cle: str, du: str = "", au: str = "") -> str:
@@ -1665,11 +2563,24 @@ def _detail_personne(x: Mapping[str, Any], source: str = "Infloww") -> str:
 
 
 def _table_personnes(lignes: List[Mapping[str, Any]], T: Mapping[str, Any], tri: str, sens: str,
-                     cle: str, du: str = "", au: str = "", source: str = "Infloww") -> str:
+                     cle: str, du: str = "", au: str = "", source: str = "Infloww",
+                     paie: Optional[Mapping[str, Any]] = None) -> str:
+    # Paiement (le réglage, modifiable) puis Gain / perte, EN DERNIER : « la
+    # dernière case qui me dit si le VA me fait perdre ou gagner de l'argent ».
+    # Seulement sur la vue du propriétaire (paie non None : clé de paiement ou
+    # admin) ; la vue des VA (clé du salon) n'a ni l'une ni l'autre.
+    avec = paie is not None
     cols = (("nom", "Personne", "nom"), ("us", "Clics US", "n"), ("clics", "Clics OF", "n"),
             ("subs", "Subs", "n"), ("cvr", "CVR", "n"), ("par_sub", "$\u00a0/\u00a0sub", "n"))
+    if avec:
+        cols += (("paie", "Paiement", "paie"), ("gain", "Gain\u00a0/\u00a0perte", "n"))
+    P = paie or {}
+    taux = (P.get("taux") or {}).get("taux")
     th = []
     for col, titre, cl in cols:
+        if col == "paie":
+            th.append(f'<th class="{cl}">{titre}</th>')     # pas de tri sur un réglage
+            continue
         fl = (" ▾" if sens == "desc" else " ▴") if col == tri else ""
         on = " on" if col == tri else ""
         th.append(f'<th class="{cl}{on}"><a href="{_lien_tri(col, tri, sens, cle, du, au)}">{titre}{fl}</a></th>')
@@ -1677,21 +2588,21 @@ def _table_personnes(lignes: List[Mapping[str, Any]], T: Mapping[str, Any], tri:
     for x in lignes:
         nom = _e(x.get("nom")) or '<span class="faible">(sans nom)</span>'
         us_cl = "" if x.get("us_etat") == "ok" else " vieux"
-        corps.append(f'<tr><td class="nom"><b>{nom}</b>{_detail_personne(x, source)}</td>'
+        corps.append(f'<tr id="{ancre(x.get("cle"))}"><td class="nom"><b>{nom}</b>{_detail_personne(x, source)}</td>'
                      f'<td class="n{us_cl}">{_nb(x.get("us"))}</td>'
                      f'<td class="n">{_nb(x.get("clics"))}</td>'
                      f'<td class="n fort">{_nb(x.get("subs"))}</td>'
                      f'<td class="n">{_pastille(_pct(x.get("cvr")), niveau(x.get("cvr"), SEUIL_CVR))}</td>'
                      f'<td class="n">{_pastille(_dollars(x.get("par_sub")), niveau(x.get("par_sub"), SEUIL_PAR_SUB))}'
-                     f'</td></tr>')
+                     f'</td>{_cellule_paie(x, cle, tri, sens, du, au) + _cellule_gain(x, taux) if avec else ""}</tr>')
     if not corps:
-        corps.append('<tr><td class="faible" colspan="6">Aucune personne.</td></tr>')
+        corps.append(f'<tr><td class="faible" colspan="{len(cols)}">Aucune personne.</td></tr>')
     lib = f"Total · {_nb(len(lignes))} personne{'s' if len(lignes) > 1 else ''}"
     pied = (f'<tr class="total"><td class="nom">{_e(lib)}</td><td class="n">{_nb(T.get("us"))}</td>'
             f'<td class="n">{_nb(T.get("clics"))}</td><td class="n">{_nb(T.get("subs"))}</td>'
             f'<td class="n">{_pastille(_pct(T.get("cvr")), niveau(T.get("cvr"), SEUIL_CVR))}</td>'
             f'<td class="n">{_pastille(_dollars(T.get("par_sub")), niveau(T.get("par_sub"), SEUIL_PAR_SUB))}'
-            f'</td></tr>')
+            f'</td>{_cellules_total_paie(P) if avec else ""}</tr>')
     return (f'<div class="boite"><table><thead><tr>{"".join(th)}</tr></thead>'
             f'<tbody>{"".join(corps)}</tbody><tfoot>{pied}</tfoot></table></div>')
 
@@ -1919,11 +2830,225 @@ def _note(t: Mapping[str, Any], du: str, au: str, auj: str) -> List[str]:
     return note
 
 
-def page_html(t: Mapping[str, Any], tri: str = "nom", sens: str = "asc", cle: str = "") -> str:
+# ─── la page : le paiement ───────────────────────────────────────────────
+def _argent(v: Optional[float], signe: bool = False) -> str:
+    """« 1 234,50 $ », « −12,00 $ » ; signe=True : « +12,00 $ » aussi."""
+    if v is None:
+        return "—"
+    s = _dec(abs(v)) + "\u00a0$"
+    if signe:
+        return ("+" if v >= 0 else "−") + s
+    return ("−" if v < 0 else "") + s
+
+
+def _explique_fixe(p: Mapping[str, Any], taux: Optional[float]) -> str:
+    cfg = p["cfg"]
+    tr = p.get("tranches_fixe") or []
+    base = f"{_montant_court(cfg['montant'])}\u00a0{'$' if cfg['devise'] == 'USD' else 'EUR'} / {cfg['frequence']}"
+    if not tr:
+        return f"payé à partir du {_jour_long(cfg.get('depuis'))} : rien sur la plage"
+    if len(tr) == 1:
+        s = base + ("" if tr[0]["complete"] else f" × {tr[0]['jours']}/{tr[0]['jours_periode']} j")
+    else:
+        s = f"{base} du {_jour_long(p.get('debut'))} au {_jour_long(p.get('fin'))}, au prorata des jours"
+    if cfg["devise"] == "EUR":
+        s += f" = {_dec(p.get('fixe_devise'))}\u00a0EUR × {_dec(taux, 4)}" if taux else ""
+    return s
+
+
+def _ligne_q(q: Mapping[str, Any]) -> str:
+    """« 16/09 → 26/09 : 123 subs, palier 100–149 subs → +10 $ (quinzaine incomplète) »."""
+    s = f"{_libelle_periode(q['du'], q['au'])} : {_nb(q.get('subs'))} subs"
+    if q.get("palier") is not None:
+        s += (f", palier {q['palier']} → +{_montant_court(q['prime'])}\u00a0$" if q.get("prime")
+              else ", sous le premier palier → 0\u00a0$")
+    return s + ("" if q.get("complete") else " (quinzaine incomplète)")
+
+
+def _explique_primes(p: Mapping[str, Any]) -> str:
+    dq = p.get("detail_q") or []
+    if not dq:
+        return "aucune quinzaine sur la plage"
+    if len(dq) == 1:
+        q = dq[0]
+        s = f"{_nb(q.get('subs'))} subs, " + (f"palier {q['palier']}" if q.get("prime")
+                                              else f"sous le premier palier ({_nb(PALIERS_PRIMES[-1][0])})")
+        return s + ("" if q.get("complete") else ", quinzaine incomplète")
+    inc = sum(1 for q in dq if not q.get("complete"))
+    return (f"{_nb(len(dq))} quinzaines" + (f", dont {_nb(inc)} incomplète{'s' if inc > 1 else ''}" if inc else "")
+            + ", non cumulables")
+
+
+def lignes_calcul(p: Mapping[str, Any], taux: Optional[float] = None) -> List[str]:
+    """Le détail du gain, en texte : « revenu X », « − fixe Y (…) », « − primes Z (…) »."""
+    L = [f"revenu {_argent(p.get('revenu'))}",
+         f"− fixe {_argent(p.get('fixe'))} ({_explique_fixe(p, taux)})"]
+    if (p.get("cfg") or {}).get("type") == "fixe_primes":
+        L.append(f"− primes {_argent(p.get('primes'))} ({_explique_primes(p)})")
+    return L
+
+
+def _form_paie(x: Mapping[str, Any], cle: str, tri: str, sens: str, du: str, au: str) -> str:
+    """Le réglage d'une personne, SANS JavaScript : un formulaire POST dans un
+    <details>. Clé, période et tri voyagent en champs cachés : le retour se
+    fait sur la même vue. Seule la vue du propriétaire le porte : la clé est
+    alors la sienne (cle_paie), jamais celle du salon."""
+    cfg = (x.get("paie") or {}).get("cfg")
+    v = dict(PAIE_DEFAUT, **(cfg or {}))
+    caches = "".join(f'<input type="hidden" name="{n}" value="{_e(val)}">'
+                     for n, val in (("personne", x.get("cle")), ("k", cle), ("du", du), ("au", au),
+                                    ("tri", tri), ("sens", sens)) if val)
+
+    def choix(options, courant):
+        return "".join(f'<option value="{_e(c)}"{" selected" if c == courant else ""}>{_e(lib)}</option>'
+                       for c, lib in options)
+    montant = ("%.2f" % float(v["montant"] or 0)).rstrip("0").rstrip(".")
+    try:
+        fin = dt.date.fromisoformat(_aujourdhui()) + dt.timedelta(days=366)
+    except ValueError:
+        fin = dt.date.today() + dt.timedelta(days=366)
+    return ('<details class="mod"><summary>modifier</summary>'
+            f'<form class="fpaie" method="post" action="/infloww/liens/paie">{caches}'
+            f'<label>Type<select name="type">{choix(((t, LIB_TYPES[t]) for t in TYPES_PAIE), v["type"])}'
+            '</select></label>'
+            f'<label>Montant<input type="number" name="montant" value="{_e(montant)}" min="0" '
+            f'max="{int(MONTANT_MAX)}" step="0.01" inputmode="decimal" required></label>'
+            f'<label>Devise<select name="devise">{choix((("USD", "$ (USD)"), ("EUR", "€ (EUR), converti en $")), v["devise"])}'
+            '</select></label>'
+            f'<label>Fréquence<select name="frequence">'
+            f'{choix((("quinzaine", "par quinzaine"), ("mois", "par mois")), v["frequence"])}'
+            '</select></label>'
+            f'<label>Payé depuis (facultatif)<input type="date" name="depuis" value="{_e(v["depuis"])}" '
+            f'min="{_e(PLANCHER.isoformat())}" max="{_e(fin.isoformat())}"></label>'
+            '<button type="submit">Enregistrer</button></form></details>')
+
+
+def _cellule_paie(x: Mapping[str, Any], cle: str, tri: str, sens: str, du: str, au: str) -> str:
+    p = x.get("paie") or {}
+    cfg = p.get("cfg")
+    det = ""
+    if cfg and cfg.get("type") in ("fixe", "fixe_primes") and cfg.get("depuis"):
+        det = f'<div class="det">payé depuis le {_e(_jour_long(cfg["depuis"]))}</div>'
+    return (f'<td class="paie"><span class="pr">{_e(p.get("resume") or resume_paie(cfg))}</span>{det}'
+            f'{_form_paie(x, cle, tri, sens, du, au)}</td>')
+
+
+def _cellule_gain(x: Mapping[str, Any], taux: Optional[float]) -> str:
+    """Le DERNIER chiffre de la ligne : vert si le VA rapporte au moins ce
+    qu'il coûte, rouge sinon ; « — » s'il n'est pas réglé ou si un élément
+    manque (dit dessous). Le détail du calcul sous le montant, et au survol."""
+    p = x.get("paie") or {}
+    cfg = p.get("cfg")
+    if not cfg or cfg.get("type") not in ("fixe", "fixe_primes"):
+        return '<td class="n gain">—</td>'
+    g = p.get("gain")
+    if g is None:
+        return f'<td class="n gain">—<div class="det manque">{_e(p.get("raison") or "incalculable")}</div></td>'
+    L = lignes_calcul(p, taux)
+    q = ""
+    dq = p.get("detail_q") or []
+    if len(dq) > 1:
+        q = ('<details class="qz"><summary>par quinzaine</summary><div class="det">'
+             + "<br>".join(_e(_ligne_q(z)) for z in dq) + "</div></details>")
+    return (f'<td class="n gain" title="{_e(" ".join(L))}"><span class="nv {"gp" if g >= 0 else "gn"}">'
+            f'{_argent(g, signe=True)}</span><div class="det calc">{"<br>".join(_e(l) for l in L)}</div>{q}</td>')
+
+
+def _cellules_total_paie(P: Mapping[str, Any]) -> str:
+    T = P.get("totaux") or {}
+    n = int(P.get("configures") or 0)
+    if not n:
+        return '<td class="paie">—</td><td class="n gain">—</td>'
+    paie = f'<td class="paie">{_nb(n)} réglé{"s" if n > 1 else ""}</td>'
+    if T.get("gain") is None:
+        return paie + '<td class="n gain">—<div class="det manque">aucun gain calculable</div></td>'
+    det = [f"revenu {_argent(T.get('revenu'))}", f"− coûts {_argent(T.get('cout'))}"]
+    if int(T.get("calcules") or 0) < n:
+        det.append(f"partiel : {_nb(T.get('calcules'))} personne{'s' if T.get('calcules', 0) > 1 else ''} "
+                   f"sur {_nb(n)}")
+    g = T["gain"]
+    return (paie + f'<td class="n gain" title="{_e(" ".join(det))}"><span class="nv {"gp" if g >= 0 else "gn"}">'
+            f'{_argent(g, signe=True)}</span><div class="det calc">{"<br>".join(_e(l) for l in det)}</div></td>')
+
+
+def _avert_paie(t: Mapping[str, Any], lignes: List[Mapping[str, Any]]) -> List[str]:
+    """Ce que la page dit du paiement, en tête : rien n'est écarté sans trace."""
+    P = t.get("paie") or {}
+    h: List[str] = []
+    if P.get("erreur"):
+        h.append(f'<div class="avert"><b>Paiement : calcul impossible</b> ({_e(P["erreur"])}) : '
+                 "Gain / perte « — ».</div>")
+    for m in P.get("mauvais") or []:
+        h.append(f'<div class="avert">Réglage de paiement illisible, ignoré : {_e(m)}.</div>')
+    if P.get("orphelins"):
+        h.append('<div class="avert">Réglage(s) de paiement de personne(s) absente(s) de GetMySocial '
+                 f'« {_e(NOM_EQUIPE)} » (lien renommé ?) : {_e(", ".join(P["orphelins"]))} — non compté(s).</div>')
+    tx = P.get("taux") or {}
+    if P.get("taux") is not None:
+        if tx.get("taux") is None:
+            h.append('<div class="avert"><b>Aucun taux EUR → USD connu</b> (BCE : '
+                     f'{_e(tx.get("panne") or "?")}) : le coût des VA payés en euros est « — ».</div>')
+        elif tx.get("panne"):
+            h.append(f'<div class="avert">Taux EUR → USD : la BCE n\'a pas répondu ({_e(tx["panne"])}) : '
+                     f'dernier taux connu, publié le {_e(_jour_long(tx.get("date")))}.</div>')
+    if P.get("en_attente"):
+        n, r = int(P["en_attente"]), int(P.get("a_relire") or 0)
+        h.append(f'<div class="avert">Primes : {_nb(n)} quinzaine{"s" if n > 1 else ""} pas encore '
+                 f'lue{"s" if n > 1 else ""} dans MyPuls'
+                 + (f' (dont {_nb(r)} à relire : un lien y manquait ou était sans nombre de subs)' if r else "")
+                 + '. Lecture en arrière-plan, '
+                 f'{_nb(QUINZ_APPELS_MAX)} au plus par affichage (le débit MyPuls est limité) : rechargez '
+                 "dans une minute. Gain / perte « — » en attendant.</div>")
+    if P.get("pause"):
+        h.append(f'<div class="avert">Primes : MyPuls a refusé une lecture ({_e(P["pause"])}) : pas de '
+                 f'nouvelle lecture de quinzaine pendant {_nb(MYPULS_ECHEC_S)} s.</div>')
+    elif P.get("erreurs"):
+        k, r = sorted(P["erreurs"].items())[0]
+        h.append(f'<div class="avert">Primes : MyPuls n\'a pas répondu pour {_nb(len(P["erreurs"]))} '
+                 f'quinzaine(s), dont le {_e(_libelle_periode(*k))} ({_e(r)}) : Gain / perte « — » pour les '
+                 "personnes concernées.</div>")
+    return h
+
+
+def _note_paie(t: Mapping[str, Any], du: str) -> List[str]:
+    P = t.get("paie") or {}
+    primes = ", ".join(f"{_nb(b)}{'–' + _nb(PALIERS_PRIMES[i - 1][0] - 1) if i else ' et plus'} +{_montant_court(v)}\u00a0$"
+                       for i, (b, v) in reversed(list(enumerate(PALIERS_PRIMES))))
+    note = ["<b>Paiement</b> : réglé par personne (« modifier ») ; <b>Gain / perte</b> = revenu net de la "
+            "personne sur la plage − fixe − primes, en dollars (vert si ≥ 0, rouge sinon) ; « — » sans "
+            "réglage ou quand un élément manque",
+            ("<b>Plage</b> : la période affichée, à partir de « payé depuis » s'il tombe dedans ; revenu = "
+             "gains nets MyPuls de la période" if du else
+             "<b>Plage</b> : de « payé depuis » (sinon de la création du plus ancien lien Infloww de la "
+             "personne) à aujourd'hui ; revenu = gains nets Infloww cumulés"),
+            "<b>Fixe</b> au prorata des jours : quinzaines du 1er au 15 et du 16 à la fin du mois (paie le 16 "
+            "et le 1er), ou mois civil",
+            f"<b>Primes</b> par quinzaine, sur les subs de la personne lus dans MyPuls, non cumulables "
+            f"(seul le palier atteint compte) : {_e(primes)} ; une quinzaine coupée par la plage est comptée "
+            "sur ses seuls jours (« quinzaine incomplète »)",
+            "Top Performer, Bonus Agence, Bonus Elite et malus : décidés à la main, non comptés"]
+    tx = P.get("taux") or {}
+    if tx.get("taux") is not None:
+        note.append(f"euros convertis au taux BCE du {_e(_jour_long(tx.get('date')))} : 1\u00a0EUR = "
+                    f"{_e(_dec(tx['taux'], 4))}\u00a0$ (le même pour toute la plage)")
+    elif P.get("taux") is not None:
+        note.append("aucun taux EUR → USD connu : coût des VA payés en euros « — »")
+    else:
+        note.append("un fixe en euros est converti au taux BCE du jour")
+    return note
+
+
+def page_html(t: Mapping[str, Any], tri: str = "nom", sens: str = "asc", cle: str = "",
+              lien_perso: str = "") -> str:
     """La page entière. Aucun JavaScript : le tri et la période passent par
     l'adresse, et une apostrophe dans un nom de lien ne peut rien casser.
-    Tout est échappé."""
+    Tout est échappé. Paiement et Gain / perte seulement si `t` les porte
+    (avec_paie, que page() n'appelle que pour le propriétaire) ; `lien_perso`
+    : son lien personnel, montré à l'admin connecté."""
+    paie = "paie" in t
     tri, sens = _tri_valide(tri, sens)
+    if tri == "gain" and not paie:
+        tri, sens = "nom", "asc"         # pas de colonne Gain sur la vue des VA
     lignes = trier(t.get("lignes") or [], tri, sens)
     hors = sorted(t.get("hors_gms") or [], key=_ordre_defaut)
     T = t.get("totaux") or {}
@@ -1940,20 +3065,33 @@ def page_html(t: Mapping[str, Any], tri: str = "nom", sens: str = "asc", cle: st
         h.append(f'<div class="err"><b>{titre}</b><br>{_e(t["erreur"])}</div>')
     else:
         h += _avertissements(t, lignes, cle, tri, sens)
-        h.append(_table_personnes(lignes, T, tri, sens, cle, du, au, source))
+        if paie:
+            h += _avert_paie(t, lignes)
+        h.append(_table_personnes(lignes, T, tri, sens, cle, du, au, source,
+                                  (t.get("paie") or {}) if paie else None))
         h.append('<p class="legende">Couleurs : <span class="nv v1">vert</span> dès '
                  f'{_dec(SEUIL_CVR, 0)}\u00a0% de CVR et dès {_dollars(SEUIL_PAR_SUB)}\u00a0par sub '
                  '(plus foncé = mieux), <span class="nv o1">orange</span> en dessous, '
-                 '<span class="nv r">rouge</span> sous la moitié.</p>')
+                 '<span class="nv r">rouge</span> sous la moitié.'
+                 + (' Gain / perte : <span class="nv gp">vert</span> si le VA rapporte au moins ce '
+                    'qu\'il coûte, <span class="nv gn">rouge</span> sinon.' if paie else "") + '</p>')
         if hors:
             h.append(f'<details><summary>Hors GetMySocial, non comptés ({_nb(len(hors))}) — '
                      f'liens de suivi de Jessye qu\'aucun lien de « {_e(NOM_EQUIPE)} » ne vise'
                      f'</summary>{_table_hors(hors, source)}</details>')
     note = _note(t, du, au, auj)
+    if paie and not t.get("erreur"):
+        note += _note_paie(t, du)
     sous = (f"<b>{_e(_titre_periode(du, au, auj))}</b> · @{_e(t.get('creatrice') or CREATRICE)} · "
             f"GetMySocial « {_e(NOM_EQUIPE)} »")
     if not t.get("erreur"):
         sous += f" · {_nb(len(lignes))} personnes"
+    perso = ""
+    if paie and lien_perso:
+        # le propriétaire connecté : son lien avec le paiement, à garder pour
+        # lui (celui du salon, lui, ne montre ni paiement ni gain)
+        perso = (f'<p class="perso">Votre lien personnel, paiement et gain compris — ne le partagez pas '
+                 f'(le lien du salon ne les montre pas) : <a href="{_e(lien_perso)}">{_e(lien_perso)}</a></p>')
     return f'''<!doctype html><html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer">
@@ -1982,6 +3120,19 @@ td.vieux{{color:var(--faible)}}
 .nv.v1{{background:#4ade80;color:#052e16}} .nv.v2{{background:#16a34a;color:#fff}}
 .nv.v3{{background:#166534;color:#fff}} .nv.o1{{background:#fbbf24;color:#1c1203}}
 .nv.o2{{background:#f97316;color:#1c0a02}} .nv.r{{background:#dc2626;color:#fff}}
+.nv.gp{{background:#16a34a;color:#fff}} .nv.gn{{background:#dc2626;color:#fff}}
+td.paie{{min-width:118px}} td.paie .pr{{white-space:nowrap}}
+td details{{margin:4px 0 0}} td summary{{font-size:11px;padding:2px 0}}
+td details.mod summary{{color:var(--acc)}}
+.fpaie{{display:grid;gap:6px;margin-top:6px;min-width:176px;max-width:220px}}
+.fpaie label{{display:grid;gap:2px;font-size:11px;color:var(--faible)}}
+.fpaie input,.fpaie select{{background:var(--fond);color:var(--texte);border:1px solid var(--bord);border-radius:6px;padding:5px 6px;font:inherit;font-size:13px;min-width:0;color-scheme:dark}}
+.fpaie button{{background:var(--acc);color:#1c0a02;border:0;border-radius:6px;padding:7px 10px;font:inherit;font-weight:700;cursor:pointer}}
+/* le détail du gain se replie : sur une ligne, il élargissait la colonne
+   au point de pousser le tableau hors de sa boîte même sur un ordinateur */
+td.gain .det{{white-space:normal;min-width:150px;max-width:220px;margin-left:auto}}
+td.gain details .det{{text-align:left}}
+tr:target td{{background:rgba(249,115,65,.12)}}
 .legende{{color:var(--faible);font-size:12px;margin:8px 0 0}}
 .sous b{{color:var(--texte);font-weight:600}}
 .periode{{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 8px}}
@@ -1993,6 +3144,7 @@ td.vieux{{color:var(--faible)}}
 .raccourcis a{{color:var(--faible);text-decoration:none;border:1px solid var(--bord);border-radius:999px;padding:4px 10px;font-size:12px;white-space:nowrap}}
 .raccourcis a.on{{color:var(--acc);border-color:var(--acc)}}
 .avert a{{color:var(--acc)}}
+.perso{{color:var(--faible);font-size:12px;margin:-8px 0 14px;overflow-wrap:anywhere}} .perso a{{color:var(--acc)}}
 tbody tr:hover td{{background:rgba(249,115,65,.06)}}
 tfoot td{{border-bottom:0;border-top:2px solid var(--bord);font-weight:700}}
 details{{margin:18px 0 0}}
@@ -2011,14 +3163,17 @@ details .boite{{margin-top:8px;opacity:.85}}
 <div class="marque">Infloww · YouL4b</div>
 <h1>Liens de suivi · {_e(NOM_AFFICHE)}</h1>
 <p class="sous">{sous}</p>
-{"".join(h)}
+{perso}{"".join(h)}
 <p class="note">{" · ".join(note)}.</p>
 </body></html>'''
 
 
-def page(args: Mapping[str, Any], cle: str = "") -> str:
+def page(args: Mapping[str, Any], cle: str = "", paie: bool = False, lien_perso: bool = False) -> str:
     """La page à partir des paramètres de l'adresse. Ne lève jamais : une
-    panne s'affiche SUR la page."""
+    panne s'affiche SUR la page. `paie` : la vue du propriétaire (clé de
+    paiement ou admin, décidé par la route) ; sans lui, la page des VA, sans
+    paiement ni gain. `lien_perso` : montrer son lien personnel (admin
+    connecté, sans clé)."""
     tri, sens = _tri_valide(args.get("tri"), args.get("sens"))
     try:
         per = periode_des_args(args)
@@ -2029,8 +3184,21 @@ def page(args: Mapping[str, Any], cle: str = "") -> str:
         t = tableau_periode(*per) if per else tableau()
     except Exception as e:  # tableau() ne lève pas ; par ceinture
         t = _vide(f"{type(e).__name__} : {e}", per)
+    perso = ""
+    if paie:
+        try:
+            # le paiement et le gain : la page du propriétaire seulement
+            # (Discord passe par tableau(), les VA par la clé du salon)
+            t = avec_paie(t)
+        except Exception as e:  # le tableau reste ; la panne est dite en tête
+            t = dict(t, paie={"erreur": f"{type(e).__name__} : {e}"[:300]})
+        if lien_perso:
+            try:
+                perso = url_paie()
+            except Exception as e:
+                print(f"[infloww-liens] clé de paiement illisible : {e}", flush=True)
     try:
-        return page_html(t, tri, sens, cle)
+        return page_html(t, tri, sens, cle, lien_perso=perso)
     except Exception as e:
         # la clé suit jusque dans la page de panne : le formulaire la porte
         return page_html(_vide(f"la page n'a pas pu être construite : {type(e).__name__} : {e}", per),
