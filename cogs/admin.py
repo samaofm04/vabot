@@ -281,6 +281,16 @@ def preview_video_for(identity, filename):
     return ex if ex else video_path
 
 
+
+def _a_la_corbeille(*chemins) -> str:
+    """Supprimer depuis le bot : A LA CORBEILLE, avec tous les voisins du
+    media (doublons_vault.supprimer, la meme regle que le site), jamais
+    efface. Le contenu est retenu : la veille Drive ne le ramene pas.
+    Rend "" ou ce qui n'a pas pu etre range."""
+    import doublons_vault as _dv
+    r = _dv.supprimer([Path(c) for c in chemins if c])
+    return "; ".join(f"{n} : {e}" for n, e in r["echecs"])[:300]
+
 class ImageManagerView(discord.ui.View):
     """Generic paginated manager for posts, stories, storyctas."""
     def __init__(self, identity, subdir, label, current_index=0):
@@ -368,13 +378,7 @@ class ImageManagerView(discord.ui.View):
         filename = items[self.current_index][0]
         d = IDENTITIES_DIR / self.identity / self.subdir
         target = d / filename
-        target.unlink(missing_ok=True)
-        if self.subdir in ("posts", "stories"):
-            target.with_suffix(".txt").unlink(missing_ok=True)
-            target.with_suffix(".desc.txt").unlink(missing_ok=True)
-            ex = example_image_path_for(target)
-            if ex:
-                ex.unlink(missing_ok=True)
+        _a_la_corbeille(target)
         new_items = self._get_items()
         if self.current_index >= len(new_items):
             self.current_index = max(0, len(new_items) - 1)
@@ -439,12 +443,7 @@ class ReelManagerView(discord.ui.View):
         filename = reels[self.current_index][0]
         videos_dir = identity_videos_dir(self.identity)
         video_path = videos_dir / filename
-        video_path.unlink(missing_ok=True)
-        caption_path_for(video_path).unlink(missing_ok=True)
-        description_path_for(video_path).unlink(missing_ok=True)
-        ex = example_video_path_for(video_path)
-        if ex:
-            ex.unlink(missing_ok=True)
+        _a_la_corbeille(video_path)
         # Refresh: if current index now out of range, decrement
         new_reels = list_reels(self.identity)
         if self.current_index >= len(new_reels):
@@ -1407,11 +1406,12 @@ class Admin(commands.Cog):
         if not videos_dir.exists():
             await interaction.response.send_message(f"Identité `{safe}` introuvable.", ephemeral=True)
             return
-        deleted = 0
-        for p in list(videos_dir.iterdir()):
-            if p.is_file():
-                p.unlink(missing_ok=True)
-                deleted += 1
+        # les medias (avec leurs voisins), puis ce qui resterait seul
+        _medias = [p for p in videos_dir.iterdir() if p.is_file() and p.suffix.lower() in VIDEO_EXTS]
+        _a_la_corbeille(*_medias)
+        _restes = [p for p in videos_dir.iterdir() if p.is_file()]
+        _a_la_corbeille(*_restes)
+        deleted = len(_medias) + len(_restes)
         await interaction.response.send_message(
             f"✅ {deleted} fichier(s) supprimé(s) de l'identité `{safe}`.", ephemeral=True
         )
@@ -1476,12 +1476,7 @@ class Admin(commands.Cog):
         filename = reels[index][0]
         videos_dir = identity_videos_dir(safe)
         video_path = videos_dir / filename
-        video_path.unlink(missing_ok=True)
-        caption_path_for(video_path).unlink(missing_ok=True)
-        description_path_for(video_path).unlink(missing_ok=True)
-        ex = example_video_path_for(video_path)
-        if ex:
-            ex.unlink(missing_ok=True)
+        _a_la_corbeille(video_path)
         await interaction.response.send_message(
             f"✅ Reel `{filename}` supprimé de `{safe}`.", ephemeral=True
         )
@@ -1779,7 +1774,7 @@ class Admin(commands.Cog):
         if not target.exists() or not target.is_file():
             await interaction.response.send_message(f"Fichier `{filename}` introuvable.", ephemeral=True)
             return
-        target.unlink()
+        _a_la_corbeille(target)
         await interaction.response.send_message(f"✅ `{filename}` supprimée.", ephemeral=True)
 
     # ---------- ADDUSER ----------
@@ -2535,7 +2530,7 @@ class Admin(commands.Cog):
             await interaction.response.send_message(f"Index invalide (0-{len(items)-1}).", ephemeral=True)
             return
         target = items[index]
-        target.unlink(missing_ok=True)
+        _a_la_corbeille(target)
         await interaction.response.send_message(
             f"✅ Story CTA `{target.name}` supprimée.", ephemeral=True
         )
@@ -2646,12 +2641,7 @@ class Admin(commands.Cog):
         filename = items[index][0]
         target_dir = IDENTITIES_DIR / safe / subdir
         target = target_dir / filename
-        target.unlink(missing_ok=True)
-        target.with_suffix(".txt").unlink(missing_ok=True)
-        target.with_suffix(".desc.txt").unlink(missing_ok=True)
-        ex = example_image_path_for(target)
-        if ex:
-            ex.unlink(missing_ok=True)
+        _a_la_corbeille(target)
         await interaction.response.send_message(
             f"✅ {label} `{filename}` supprimé de `{safe}`.", ephemeral=True
         )

@@ -1150,8 +1150,9 @@ def _candidats_import(sess, st, root):
     try:
         import doublons_vault as _dv
         _contenus = _dv.IndexContenu()
+        _supprime = _dv.supprime_du_site
     except Exception as e:           # le module manque : on le dit, on continue
-        _contenus = None
+        _contenus = _supprime = None
         _echecs.append(("empreintes locales indisponibles: %s" % e)[:160])
 
     def _identite_connue(nom_drive: str, ident: str) -> bool:
@@ -1266,6 +1267,17 @@ def _candidats_import(sess, st, root):
             # deux fois (brune/posts, 25/09). Le nom ne le dit pas, le md5
             # que Drive donne deja, si. Sans ce test, le 16/08, 343 copies
             # rangees la veille etaient revenues dans l'heure.
+            # Supprime EXPRES sur le site (mis a la corbeille) : le Drive en
+            # garde la sauvegarde, mais il ne le ramene plus. Avant, un media
+            # supprime revenait dans la minute.
+            if _supprime is not None and not _est_voisin(nom) and f.get("md5Checksum"):
+                try:
+                    if _supprime(ident, sub, f["md5Checksum"]):
+                        _ignores["supprime_sur_le_site"] = \
+                            _ignores.get("supprime_sur_le_site", 0) + 1
+                        continue
+                except Exception as e:
+                    _echecs.append(("suppressions du site: %s" % e)[:160])
             if (_contenus is not None and not _est_voisin(nom) and taille
                     and f.get("md5Checksum")):
                 try:
@@ -1831,6 +1843,11 @@ def inventaire(force: bool = False) -> dict:
             # chaque rangement.
             # (le nom d'abord : un fichier synchronise normalement a
             # evidemment le meme contenu que son homonyme du site)
+            if (_contenus_inv is not None
+                    and not (IDENTITIES_DIR / ident / sub / nom).exists()
+                    and _dv.supprime_du_site(ident, sub, f.get("md5Checksum") or "")):
+                copies[0] += 1           # supprime expres : pas un manque
+                continue
             if (_contenus_inv is not None
                     and not (IDENTITIES_DIR / ident / sub / nom).exists()
                     and _contenus_inv.present(

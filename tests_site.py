@@ -3876,9 +3876,11 @@ try:
 
     # Le voisin doit partir AVEC la video. Laisse seul, il eteindrait a la
     # naissance une future video qui porterait le meme nom.
+    # (la liste des voisins est celle de doublons_vault : /cloud/delete et
+    # les commandes du bot passent par doublons_vault.supprimer)
     check("desactivees : le voisin part avec la video supprimee",
-          "or n == f\"{stem}{SUFFIXE_DESACTIVE}\"" in _plOf.Path(
-              "web_upload.py").read_text(encoding="utf-8"),
+          __import__("doublons_vault").voisins_de("x", {"x.off.json"}) == ["x.off.json"]
+          and "_dv_del.supprimer(a_ranger" in _plOf.Path("web_upload.py").read_text(encoding="utf-8"),
           "un .off.json orphelin resterait sur le disque")
 
     # Le moteur video : UN seul enumerateur alimente le montage, « Reel deja
@@ -5185,8 +5187,8 @@ try:
     # heriterait du verdict de l ancienne.
     _srcTx = _plTx.Path("web_upload.py").read_text(encoding="utf-8")
     check("texte : le verdict est emporte quand la video est supprimee",
-          "SUFFIXE_TEXTECHECK}\"  # verdict" in _srcTx
-          or "{stem}{SUFFIXE_TEXTECHECK}" in _srcTx)
+          __import__("doublons_vault").voisins_de("d", {"d" + _wTx.SUFFIXE_TEXTECHECK})
+          == ["d" + _wTx.SUFFIXE_TEXTECHECK] and "_dv_del.supprimer(a_ranger" in _srcTx)
 
     _shTx.rmtree(_wTx.IDENTITIES_DIR / _idTx, ignore_errors=True)
 except Exception as _eTx:
@@ -16486,7 +16488,8 @@ try:
          _vsS._lister_tiktok_creator) = _savS
     _srcS = open("web_upload.py", encoding="utf-8").read()
     check("supprimer un media emporte son voisin .social.json",
-          'n == f"{stem}.social.json"' in _srcS)
+          __import__("doublons_vault").voisins_de("v", {"v.social.json"}) == ["v.social.json"]
+          and "_dv_del.supprimer(a_ranger" in _srcS)
     import identite_admin as _iaS
     _clesS = [f for f, _ in _iaS._CLES]
     check("renommer/archiver une identite emporte son profil branche",
@@ -16906,13 +16909,15 @@ try:
     import doublons_vault as _dvV
     import gdrive_sync as _gdV
     _tmpV = _plV.Path(_tfV.mkdtemp())
-    _savV = (_dvV.CORBEILLE, _dvV.JOURNAL, _dvV.EXCEPTIONS, _dvV.DOSSIER_MD5, _dvV.RECENT_SEC)
+    _savV = (_dvV.CORBEILLE, _dvV.JOURNAL, _dvV.EXCEPTIONS, _dvV.DOSSIER_MD5, _dvV.RECENT_SEC,
+             _dvV.CORBEILLE_SUPPRESSIONS, _dvV.SUPPRIMES)
     _savGdV = (_gdV.IDENTITIES_DIR, _gdV._lister, _gdV._lister_paralleles, _gdV._session,
                _gdV.load_config, _gdV.folder_id_from, _gdV._load_state)
     try:
         _dvV.CORBEILLE, _dvV.JOURNAL = _tmpV / "corbeille", _tmpV / "journal.json"
         _dvV.EXCEPTIONS, _dvV.DOSSIER_MD5 = _tmpV / "exceptions.json", _tmpV / "md5"
         _dvV.RECENT_SEC = 0
+        _dvV.CORBEILLE_SUPPRESSIONS, _dvV.SUPPRIMES = _tmpV / "supprimes", _tmpV / "supprimes.json"
         _R = _tmpV / "identities"
         _br, _po, _vi, _st, _te = (_R / "zz1" / d for d in
                                    ("brutes", "posts", "videos", "stories", "templates"))
@@ -17104,7 +17109,16 @@ try:
             {"id": "f6", "name": "y.desc.txt", "size": "5", "md5Checksum": "ww"},
             {"id": "K7", "name": "y.off.json", "size": "9", "md5Checksum": "vv"},
             {"id": "f8", "name": "z.mp4", "size": str(len(_Z)), "md5Checksum": _md5(_Z)},
+            {"id": "f9", "name": "jete.mp4", "size": "1111", "md5Checksum": _md5(b"J" * 1111)},
         ]
+        # jete.mp4 : supprime sur le site (poubelle) -> a la corbeille, et retenu
+        (_b2 / "jete.mp4").write_bytes(b"J" * 1111)
+        (_b2 / "jete.txt").write_text("sa caption", encoding="utf-8")
+        _supV = _dvV.supprimer([_b2 / "jete.mp4"])
+        check("supprimer : le media et sa caption partent a la corbeille, un passage restaurable",
+              not (_b2 / "jete.mp4").exists() and not (_b2 / "jete.txt").exists()
+              and _supV["passage"] and _dvV.passages(_dvV.CORBEILLE_SUPPRESSIONS)[0]["copies"] == 1,
+              str(_supV))
         _arbreV = {("ROOT", True): [{"name": "Bibliothèque", "id": "BIB"}],
                    ("BIB", True): [{"name": "zz2", "id": "ID2"}],
                    ("ID2", True): [{"name": "Rushs bruts", "id": "T1"}],
@@ -17130,6 +17144,8 @@ try:
               and _nomsV.get("f3b") == "neuf.desc.txt", str(_nomsV))
         check("drive : un voisin dont le media n est plus la n est pas rapatrie (orphelin)",
               "f4" not in _nomsV and _igV.get("voisin_sans_media") == 1, str(_igV))
+        check("drive : un media SUPPRIME sur le site ne revient plus du Drive",
+              "f9" not in _nomsV and _igV.get("supprime_sur_le_site") == 1, str(_igV))
         check("drive : un voisin retire EXPRES du site (brute rallumee) ne revient pas",
               "K7" not in _nomsV and _igV.get("voisin_retire_du_site") == 1, str(_igV))
         check("drive : ... mais un voisin nouveau d un media du lot ou du site, si",
@@ -17141,7 +17157,7 @@ try:
         _invV = _gdV.inventaire(force=True)
         _ligV = [l for l in _invV["lignes"] if l["identity"] == "zz2"]
         check("drive : l inventaire ne compte ni contenu deja la, ni orphelin, ni voisin retire",
-              _ligV and _ligV[0]["drive"] == 6 and _invV.get("copies_drive") == 4,
+              _ligV and _ligV[0]["drive"] == 6 and _invV.get("copies_drive") == 5,
               str((_ligV, _invV.get("copies_drive"))))
         with _gdV.pause_drive() as _mainV:
             _pendantV = (_gdV._PAUSE, _gdV.start_import_background(), _gdV.start_background())
@@ -17172,6 +17188,11 @@ try:
 
         # --- le bot ne s'arrete pas sur un media range entre tirage et envoi
         _srcU = _plV.Path("cogs/user.py").read_text(encoding="utf-8")
+        _srcA = _plV.Path("cogs/admin.py").read_text(encoding="utf-8")
+        _cibles = ("target.unlink", "video_path.unlink", "p.unlink(missing_ok=True)")
+        check("bot : ses commandes de suppression passent par la corbeille (plus aucun effacement)",
+              not any(c in _srcA for c in _cibles) and _srcA.count("_a_la_corbeille(") >= 7
+              and "_dv.supprimer([video])" in _srcU, str([c for c in _cibles if c in _srcA]))
         check("bot : un media range entre le tirage et l envoi ne coupe pas le lot (6 chemins)",
               _srcU.count("except FileNotFoundError") >= 6
               and "except (discord.HTTPException, FileNotFoundError)" in _srcU)
@@ -17190,7 +17211,9 @@ try:
                 _sV["auth"] = True; _sV["username"] = "boss"; _sV["role"] = "owner"
             _pV = _cV.get("/vault/doublons").get_data(as_text=True)
             check("site : /vault/doublons liste les passages, le dernier passage, et Restaurer",
-                  "Doublons du vault" in _pV and "/vault/doublons/restaurer" in _pV
+                  "Doublons et corbeille du vault" in _pV and "/vault/doublons/restaurer" in _pV
+                  and "Supprimés" in _pV and "jete.mp4" in _pV
+                  and "name='corbeille' value='suppressions'" in _pV
                   and "Dernier passage automatique" in _pV and "restauré" in _pV, _pV[:200])
             _dmV = _plV.Path("web_upload.py").read_text(encoding="utf-8")
             check("site : les nouvelles raisons d ecart de l import ont un libelle",
@@ -17200,7 +17223,8 @@ try:
         finally:
             _wV._load_web_users = _savWV
     finally:
-        (_dvV.CORBEILLE, _dvV.JOURNAL, _dvV.EXCEPTIONS, _dvV.DOSSIER_MD5, _dvV.RECENT_SEC) = _savV
+        (_dvV.CORBEILLE, _dvV.JOURNAL, _dvV.EXCEPTIONS, _dvV.DOSSIER_MD5, _dvV.RECENT_SEC,
+         _dvV.CORBEILLE_SUPPRESSIONS, _dvV.SUPPRIMES) = _savV
         (_gdV.IDENTITIES_DIR, _gdV._lister, _gdV._lister_paralleles, _gdV._session,
          _gdV.load_config, _gdV.folder_id_from, _gdV._load_state) = _savGdV
         _shV.rmtree(_tmpV, ignore_errors=True)
@@ -19525,15 +19549,41 @@ c.appendChild(bT); c.appendChild(bF); grid.appendChild(c);
               str(_vivT.get("possible")))
 
         # -- 14. SUPPRESSION ET DOUBLONS : la marque part avec le fichier --------------
+        # La corbeille des suppressions et la trace du contenu supprime, dans
+        # le bac a sable (sinon /cloud/delete ecrivait dans le vrai data/).
+        import doublons_vault as _dvSup
+        import hashlib as _hashlibTt
+        _savSupTt = (_dvSup.CORBEILLE_SUPPRESSIONS, _dvSup.SUPPRIMES, _dvSup.DOSSIER_MD5,
+                     _wTt.BANGER_MARKS_FILE)
+        _dvSup.CORBEILLE_SUPPRESSIONS = _TT / "_corbeille_suppressions"
+        _dvSup.SUPPRIMES = _TT / "supprimes_du_site.json"
+        _dvSup.DOSSIER_MD5 = _TT / "empreintes_md5"
+        _wTt.BANGER_MARKS_FILE = _TT / "banger_marks.json"
         _cible_supTt = _IDTt / "zzttc" / "templates" / "a.mp4"
         if not _cible_supTt.exists():
             _cible_supTt.write_bytes(b"montage a" * 20)
+        (_IDTt / "zzttc" / "templates" / "a.txt").write_text("caption a", encoding="utf-8")
         _marquerTt(flash=(), trash={"zzttc|templates|a.mp4"})
         _wTt._oublier_identites()
         _cTt.post("/cloud/delete", data={"files": ["zzttc|templates|a.mp4"]})
         check("trash : /cloud/delete emporte la marque Trash (un homonyme ne naitra pas marque)",
               not _cible_supTt.exists() and "zzttc|templates|a.mp4" not in _regTt("trash"),
               str((_cible_supTt.exists(), sorted(_regTt("trash")))))
+        _rgSup = list((_TT / "_corbeille_suppressions").glob("*/zzttc/templates/a.mp4"))
+        check("supprimer : le media part A LA CORBEILLE avec sa caption, rien n est efface",
+              len(_rgSup) == 1 and (_rgSup[0].parent / "a.txt").exists()
+              and not (_IDTt / "zzttc" / "templates" / "a.txt").exists(), str(_rgSup))
+        check("supprimer : son contenu est retenu (la veille Drive ne le ramenera pas)",
+              _dvSup.supprime_du_site("zzttc", "templates",
+                                      _hashlibTt.md5(b"montage a" * 20).hexdigest()))
+        _rSup = _dvSup.restaurer(_IDTt, _rgSup[0].parents[2].name, _dvSup.CORBEILLE_SUPPRESSIONS)
+        check("supprimer : restaurer remet le media ET sa caption, et oublie la trace",
+              _rSup.get("ok") and _cible_supTt.exists()
+              and (_IDTt / "zzttc" / "templates" / "a.txt").exists()
+              and not _dvSup.supprime_du_site("zzttc", "templates",
+                                              _hashlibTt.md5(b"montage a" * 20).hexdigest()),
+              str(_rSup))
+        (_IDTt / "zzttc" / "templates" / "a.txt").unlink()
         (_IDTt / "zztta" / "templates" / "d_2.mp4").write_bytes(
             (_IDTt / "zztta" / "templates" / "d.mp4").read_bytes())
         _marquerTt(flash=(), trash={"zztta|templates|d_2.mp4"})
@@ -19590,6 +19640,8 @@ c.appendChild(bT); c.appendChild(bF); grid.appendChild(c);
               "mark(s) not removed" in _flashDelTt and "unreadable" in _flashDelTt
               and "non retirée" not in _flashDelTt, _flashDelTt[:200])
         _marquerTt()
+        (_dvSup.CORBEILLE_SUPPRESSIONS, _dvSup.SUPPRIMES, _dvSup.DOSSIER_MD5,
+         _wTt.BANGER_MARKS_FILE) = _savSupTt
 
         # -- 15. THEME CLAIR : la specificite, calculee ------------------------------
         # Une regle generale « body.light [style*=…] » repeint les textes poses

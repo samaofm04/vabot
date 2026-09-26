@@ -56929,6 +56929,12 @@ def create_app():
 
     @app.route("/cloud/delete", methods=["POST"])
     def cloud_delete():
+        """Supprimer, depuis la barre de selection : A LA CORBEILLE, jamais
+        efface (regle du projet : le site n'efface jamais un media). Le media
+        part avec TOUS ses voisins (doublons_vault.VOISINS, la meme liste que
+        le rangement des doublons), ses marques sont retirees, et son contenu
+        est retenu pour que la veille Drive ne le ramene pas -- elle le
+        rapatriait dans la minute. Restaurable depuis /vault/doublons."""
         if not is_auth():
             return redirect("/")
         files = request.form.getlist("files")
@@ -56936,114 +56942,50 @@ def create_app():
             return _error("✕ Aucun fichier sélectionné")
         deleted = []
         failed = []
-        marques_ko = []         # marques Flash/Trash qu'on n'a pas pu retirer
-        sans_copie = 0          # fichiers effaces dont le Drive n'a pas de copie
+        marques_ko = []         # marques qu'on n'a pas pu retirer
         identities_list = _list_identities()
         valid_subdirs = CLOUD_SUBDIRS
+        a_ranger = []
         for fid in files:
+            parts = fid.split("|", 2)
+            if len(parts) != 3:
+                failed.append((fid, "format invalide"))
+                continue
+            scope, subdir, filename = parts
+            # Path traversal check
+            if "/" in filename or "\\" in filename or ".." in filename or not filename:
+                failed.append((fid, "filename invalide"))
+                continue
+            # PP partagée
+            if scope == "_pp_" and subdir == "pp":
+                path = PROFILE_PICS_DIR / filename
+            # Fichier identité
+            elif scope in identities_list and subdir in valid_subdirs:
+                path = IDENTITIES_DIR / scope / subdir / filename
+            else:
+                failed.append((fid, "scope/subdir invalide"))
+                continue
+            if not path.exists() or not path.is_file():
+                failed.append((fid, "fichier introuvable"))
+                continue
+            a_ranger.append(path)
+        passage = None
+        if a_ranger:
+            import doublons_vault as _dv_del
             try:
-                parts = fid.split("|", 2)
-                if len(parts) != 3:
-                    failed.append((fid, "format invalide"))
-                    continue
-                scope, subdir, filename = parts
-                # Path traversal check
-                if "/" in filename or "\\" in filename or ".." in filename or not filename:
-                    failed.append((fid, "filename invalide"))
-                    continue
-                # PP partagée
-                if scope == "_pp_" and subdir == "pp":
-                    path = PROFILE_PICS_DIR / filename
-                # Fichier identité
-                elif scope in identities_list and subdir in valid_subdirs:
-                    path = IDENTITIES_DIR / scope / subdir / filename
-                else:
-                    failed.append((fid, "scope/subdir invalide"))
-                    continue
-                if not path.exists() or not path.is_file():
-                    failed.append((fid, "fichier introuvable"))
-                    continue
-                # Supprimer le fichier ET ses metadata éventuelles (.txt, .desc.txt, .example.*)
-                stem = path.stem
-                parent = path.parent
-                to_delete = [path]
-                for sibling in parent.iterdir():
-                    if sibling.is_file() and sibling.stem.startswith(stem) and sibling != path:
-                        # Métadonnées associées : <name>.txt, <name>.desc.txt, <name>.example.*
-                        n = sibling.name
-                        if (n == f"{stem}.txt" or n == f"{stem}.desc.txt"
-                                or n == f"{stem}.acheck.txt"   # « a relire »
-                                or n.startswith(f"{stem}.example.")):
-                            to_delete.append(sibling)
-
-                        if (n == f"{stem}.montage.json"      # brouillon d'édition
-                                or n == f"{stem}.analyse.json"   # analyse auto
-                                or n == f"{stem}.social.json"    # vues TikTok (vault_social)
-                                or n == f"{stem}{SUFFIXE_TEXTECHECK}"  # verdict « porte du texte »
-                                # Le voisin de désactivation part avec la vidéo :
-                                # laissé seul, il éteindrait à la naissance une
-                                # future vidéo qui porterait le même nom.
-                                or n == f"{stem}{SUFFIXE_DESACTIVE}"
-                                or n == f"{stem}.thumb.jpg"      # vignette du menu
-                                or n == f"{stem}.montage.png"):  # aperçu généré
-                            to_delete.append(sibling)
-                # Ce qui part sans copie sur le Drive est compte AVANT
-                # l'effacement : apres, il n'y a plus rien a interroger.
-                # On ne bloque pas — c'est le proprietaire qui decide —
-                # mais il doit l'apprendre, parce que la veille va
-                # rapatrier le media et masquer la perte du reste.
-                try:
-                    sans_copie += len(_gdrive_sync.non_sauvegardes(to_delete))
-                except Exception:
-                    pass
-                for t in to_delete:
-                    try:
-                        t.unlink()
-                    except Exception:
-                        pass
-                # Marque « banger » (★) : sans ce nettoyage, un NOUVEAU fichier
-                # portant le même nom héritait de l'étoile — et du texte de
-                # montage — du fichier supprimé.
-                try:
-                    _pop_banger_mark(fid)
-                except Exception:
-                    pass
-                # Même raison pour l'étoile ⭐ des rushs bruts : la clé est
-                # « identité|brutes|nom », donc un ré-upload homonyme naîtrait
-                # favori sans que personne ne l'ait voulu.
-                try:
-                    _pop_fav_brute(fid)
-                except Exception:
-                    pass
-                # Les marques exclusives (Flash, Trash), pour la meme raison.
-                # Leur propre essai : une exception de l'etoile sautait le
-                # retrait Flash. Elles ne se posent que sur les montages.
-                if subdir == "templates":
-                    try:
-                        _r_mq, _e_mq = _pop_marques(fid)
-                        marques_ko.extend(_e_mq)
-                    except Exception as _e_pm:
-                        marques_ko.append(str(_e_pm)[:120])
-                # La vignette aussi : sans ca, un fichier re-televerse sous le
-                # meme nom heritait de l apercu de l ancien.
-                try:
-                    _t = _thumb_path_for(f"{scope}/{subdir}/{filename}")
-                    if _t.exists():
-                        _t.unlink()
-                except Exception:
-                    pass
-                deleted.append(filename)
+                r = _dv_del.supprimer(a_ranger, _RegistresVault())
             except Exception as e:
-                failed.append((fid, str(e)))
+                r = {"ranges": [], "echecs": [("*", str(e)[:150])], "passage": None}
+            passage = r.get("passage")
+            for x in r["ranges"]:
+                deleted.append(x["nom"])
+                marques_ko.extend(x.get("avertissements") or [])
+            failed.extend(r["echecs"])
         msg_parts = []
         if deleted:
-            msg_parts.append(f"✓ <b>{len(deleted)}</b> fichier(s) supprimé(s)")
-        if sans_copie:
-            # Le Drive rend ce qui y est monte ; il ne rend rien de ce qui
-            # n'y est jamais alle. Le dire ici est la seule occasion.
-            msg_parts.append(
-                f"⚠ <b>{sans_copie}</b> n'avai{'ent' if sans_copie > 1 else 't'} "
-                "pas de copie sur le Drive : perdu(s) définitivement")
+            msg_parts.append(f"✓ <b>{len(deleted)}</b> fichier(s) supprimé(s) — "
+                             "dans la corbeille, restaurable(s) depuis "
+                             "<a href='/vault/doublons'>Doublons et corbeille</a>")
         if failed:
             msg_parts.append(f"✕ <b>{len(failed)}</b> échec(s) : " + ", ".join(f"{fid} ({err})" for fid, err in failed[:3]))
         if marques_ko:
@@ -60399,18 +60341,20 @@ def create_app():
                           else f"{der.get('copies', 0)} copie(s) rangée(s)"))
         else:
             dernier = "Aucun passage automatique pour l'instant (il tourne chaque heure)."
+        def _restaurer(x, quelle, question):
+            if x["restaure"]:
+                return "<span style='color:#64748b'>restauré</span>"
+            return ("<form method='post' action='/vault/doublons/restaurer' "
+                    f"style='margin:0' onsubmit=\"return confirm('{question}')\">"
+                    f"<input type='hidden' name='passage' value='{esc(x['nom'])}'>"
+                    f"<input type='hidden' name='corbeille' value='{quelle}'>"
+                    "<button style='font:inherit;padding:3px 10px;border-radius:7px;"
+                    "border:1px solid #cbd5e1;background:#f8fafc;cursor:pointer'>"
+                    "Restaurer</button></form>")
         lignes = []
         for x in _dv.passages()[:40]:
-            if x["restaure"]:
-                action = "<span style='color:#64748b'>restauré</span>"
-            else:
-                action = ("<form method='post' action='/vault/doublons/restaurer' "
-                          "style='margin:0' onsubmit=\"return confirm('Remettre en place les "
-                          "copies de ce passage ? Elles ne seront plus rangées ensuite.')\">"
-                          f"<input type='hidden' name='passage' value='{esc(x['nom'])}'>"
-                          "<button style='font:inherit;padding:3px 10px;border-radius:7px;"
-                          "border:1px solid #cbd5e1;background:#f8fafc;cursor:pointer'>"
-                          "Restaurer</button></form>")
+            action = _restaurer(x, "doublons", "Remettre en place les copies de ce passage ? "
+                                               "Elles ne seront plus rangées ensuite.")
             note = (f" · <b style='color:#b45309'>{x['interrompus']} interrompu(s)</b>"
                     if x["interrompus"] else "")
             lignes.append("<tr style='border-bottom:1px solid #eef2f7'>"
@@ -60442,6 +60386,23 @@ def create_app():
             blocs += ("<p style='color:#64748b;font-size:13px'>Laissés pour le passage "
                       "suivant : " + esc(", ".join(f"{k.replace('_', ' ')} {v}"
                                                    for k, v in ec.items())) + "</p>")
+        # ce qui a ete SUPPRIME (bouton poubelle du site, commandes du bot) :
+        # la meme corbeille, a part
+        sup = []
+        for x in _dv.passages(_dv.CORBEILLE_SUPPRESSIONS)[:40]:
+            sup.append("<tr style='border-bottom:1px solid #eef2f7'>"
+                       f"<td style='padding:6px 4px'>{_quand(x['ts'])}</td>"
+                       f"<td><b>{x['copies']}</b> — {esc(', '.join(x.get('noms') or [])[:160])}</td>"
+                       f"<td style='text-align:right'>"
+                       f"{_restaurer(x, 'suppressions', 'Remettre ces fichiers en place ?')}</td></tr>")
+        _supprimes_html = (
+            "<h3 style='margin:26px 0 6px'>Supprimés</h3>"
+            "<p style='color:#666;margin:0 0 10px;font-size:13px'>Ce qui a été supprimé sur "
+            "le site ou depuis le bot est ici, pas effacé. Le Drive en garde la sauvegarde "
+            "mais ne le ramène plus.</p>"
+            "<table style='width:100%;border-collapse:collapse;font-size:13px'><tbody>"
+            + ("".join(sup) or "<tr><td style='color:#64748b;padding:8px 4px'>Rien de "
+               "supprimé pour l'instant.</td></tr>") + "</tbody></table>")
         boutons = ("<form method='post' action='/vault/doublons/passe' style='display:inline'>"
                    "<input type='hidden' name='actif' value='0'><button style='font:inherit;"
                    "padding:6px 12px;border-radius:8px;border:1px solid #cbd5e1;background:#fff;"
@@ -60453,7 +60414,7 @@ def create_app():
         return ("<div style=\"font:14px/1.55 -apple-system,system-ui,sans-serif;"
                 "padding:28px;max-width:860px;margin:30px auto;background:#fff;"
                 "color:#1c1c1e;border:1px solid #e5e7eb;border-radius:14px\">"
-                "<h2 style='margin:0 0 4px'>Doublons du vault</h2>"
+                "<h2 style='margin:0 0 4px'>Doublons et corbeille du vault</h2>"
                 "<p style='color:#666;margin:0 0 8px'>Chaque heure, les copies <b>exactes</b> "
                 "d'un média dans un même dossier sont rangées dans la corbeille "
                 "(data/_corbeille_doublons), avec leurs fichiers voisins. Ce qu'elles "
@@ -60468,8 +60429,8 @@ def create_app():
                 "<th>Passage</th><th>Rangé</th><th>Dossier</th><th></th></tr></thead><tbody>"
                 + ("".join(lignes) or "<tr><td colspan='4' style='color:#64748b;padding:8px 4px'>"
                    "Rien de rangé pour l'instant.</td></tr>")
-                + "</tbody></table><p style='margin-top:18px'><a href='/?tab=cloud'>"
-                "Retour au Drive</a></p></div>")
+                + "</tbody></table>" + _supprimes_html + "<p style='margin-top:18px'>"
+                "<a href='/?tab=cloud'>Retour au Drive</a></p></div>")
 
     @app.route("/vault/doublons/passe", methods=["POST"])
     def vault_doublons_passe():
@@ -60495,7 +60456,9 @@ def create_app():
         if not is_auth() or not _is_admin():
             return redirect("/")
         import doublons_vault as _dv
-        r = _dv.restaurer(IDENTITIES_DIR, (request.form.get("passage") or "").strip())
+        _corb = (_dv.CORBEILLE_SUPPRESSIONS if request.form.get("corbeille") == "suppressions"
+                 else _dv.CORBEILLE)
+        r = _dv.restaurer(IDENTITIES_DIR, (request.form.get("passage") or "").strip(), _corb)
         _invalidate_all_ttl_cache()
         if not r.get("ok"):
             m = "Restauration impossible : " + str(r.get("error"))
@@ -63193,6 +63156,7 @@ def create_app():
                                          "rallumee, relecture approuvee)",
                 "voisin_de_doublon_deja_la": "ecartes : voisin d'un doublon, le fichier garde "
                                              "a deja le sien",
+                "supprime_sur_le_site": "ecartes : supprimes expres sur le site (corbeille)",
                 "dossiers_non_reconnus": "dossiers au nom inconnu",
                 "erreur": "erreur pendant le scan"}
         _items = "".join(

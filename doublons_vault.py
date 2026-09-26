@@ -69,6 +69,13 @@ import safe_json
 _ICI = Path(__file__).resolve().parent
 DATA = _ICI / "data"
 CORBEILLE = DATA / "_corbeille_doublons"
+#: Ce qu'on SUPPRIME sur le site ou depuis le bot (supprimer()) : meme
+#: machinerie, corbeille a part. Le site n'efface jamais un media.
+CORBEILLE_SUPPRESSIONS = DATA / "_corbeille_suppressions"
+#: {"<identite>|<section>": {md5: {"nom", "le"}}} : le contenu supprime sur
+#: le site. L'import Drive le consulte : sans lui, un media supprime revenait
+#: du Drive dans la minute (la veille reprend tout ce qui manque au site).
+SUPPRIMES = DATA / "supprimes_du_site.json"
 JOURNAL = DATA / "doublons_vault.json"
 EXCEPTIONS = DATA / "doublons_exceptions.json"
 DOSSIER_MD5 = DATA / "empreintes_md5"
@@ -122,6 +129,11 @@ def est_media(nom: str, video: bool) -> bool:
         return False
     return not (".example." in bas or bas.endswith(".thumb.jpg")
                 or bas.endswith(".montage.png"))
+
+
+def est_un_media(nom: str) -> bool:
+    """Un media, video ou image, quelle que soit la section."""
+    return est_media(nom, True) or est_media(nom, False)
 
 
 def voisins_de(tige: str, noms: Iterable[str]) -> List[str]:
@@ -765,37 +777,43 @@ def dernier() -> dict:
     return d if isinstance(d, dict) else {}
 
 
-def passages() -> list:
+def passages(corbeille: Optional[Path] = None) -> list:
     """Les passages qui ont range quelque chose, lus dans la corbeille elle-
     meme (pas dans le journal) : tant que la corbeille les garde, ils se
     restaurent."""
+    corbeille = CORBEILLE if corbeille is None else corbeille
     out = []
     try:
-        dossiers = sorted((d for d in CORBEILLE.iterdir()
+        dossiers = sorted((d for d in corbeille.iterdir()
                            if d.is_dir() and (d / MANIFESTE).exists()), reverse=True)
     except OSError:
         return out
     for d in dossiers:
         lignes = _lire_manifeste(d)
-        faits = {(l.get("ident"), l.get("section"), l.get("garde"), l.get("md5")): l
-                 for l in lignes if l.get("type") in ("fait", "abandon")}
+        faits = {_cle_groupe(l): l for l in lignes if l.get("type") in ("fait", "abandon")}
         prevus = [l for l in lignes if l.get("type") == "prevu"]
-        interrompus = [l for l in prevus
-                       if (l.get("ident"), l.get("section"), l.get("garde"), l.get("md5")) not in faits]
+        interrompus = [l for l in prevus if _cle_groupe(l) not in faits]
         n = sum(1 for l in faits.values() if l.get("type") == "fait"
                 for c, fs in (l.get("copies") or {}).items() if c in fs)
         if not n and not interrompus:
             continue
         restaures = [l for l in lignes if l.get("type") == "restaure"]
+        noms = [c for l in faits.values() if l.get("type") == "fait"
+                for c, fs in (l.get("copies") or {}).items() if c in fs]
         out.append({"nom": d.name, "copies": n, "interrompus": len(interrompus),
-                    "restaure": bool(restaures),
+                    "restaure": bool(restaures), "noms": noms[:12],
                     "ts": min((l.get("ts") or 0 for l in lignes if l.get("ts")), default=0)})
     return out
 
 
+def _cle_groupe(l: dict) -> tuple:
+    return (l.get("ident"), l.get("section"), l.get("garde"), l.get("md5"),
+            tuple(sorted((l.get("copies") or {}).keys())))
+
+
 # -------------------------------------------------------------- restaurer
 
-def restaurer(racine: Path, nom_passe: str) -> dict:
+def restaurer(racine: Path, nom_passe: str, corbeille: Optional[Path] = None) -> dict:
     """Remet en place ce qu'un passage a range (jamais par-dessus un fichier).
 
     Dans l'ordre : ce qui etait passe sur le garde revient a sa copie (sinon
@@ -806,29 +824,41 @@ def restaurer(racine: Path, nom_passe: str) -> dict:
     (etoile, Flash...) restent sur l'exemplaire garde."""
     if not re.fullmatch(r"[0-9]{8}-[0-9]{6}(-[0-9]+)?", nom_passe or ""):
         return {"ok": False, "error": "passage inconnu"}
-    base = CORBEILLE / nom_passe
+    base = (CORBEILLE if corbeille is None else corbeille) / nom_passe
     lignes = _lire_manifeste(base)
     groupes: Dict[tuple, dict] = {}
     for l in lignes:
-        k = (l.get("ident"), l.get("section"), l.get("garde"), l.get("md5"))
         if l.get("type") in ("prevu", "fait"):
-            groupes.setdefault(k, {})[l["type"]] = l
+            groupes.setdefault(_cle_groupe(l), {})[l["type"]] = l
     if not groupes:
         return {"ok": False, "error": "manifeste introuvable"}
     remis, bloques = 0, []
     with _VERROU:
         exc = _exceptions()
-        for (ident, section, _g, md5), gr in groupes.items():
-            if "fait" not in gr and "prevu" not in gr:
-                continue
-            for c in ((gr.get("fait") or gr.get("prevu") or {}).get("copies") or {}):
+        n_exc = len(exc)
+        for (ident, section, _g, md5, _c), gr in groupes.items():
+            ref0 = gr.get("fait") or gr.get("prevu") or {}
+            if ref0.get("supprime"):
+                continue          # une suppression restauree n'est pas un doublon voulu
+            for c in (ref0.get("copies") or {}):
                 exc[f"{ident}|{section}|{c}"] = md5
-        if not safe_json.write(EXCEPTIONS, exc, indent=1):
+        if len(exc) != n_exc and not safe_json.write(EXCEPTIONS, exc, indent=1):
             return {"ok": False, "error": "doublons_exceptions.json non écrit : rien n'est "
                                           "remis (les copies seraient rangées de nouveau)"}
-        for (ident, section, garde, _md5), gr in groupes.items():
+        rendus = []           # (identite|section, md5) des suppressions remises
+        for (ident, section, garde, _md5, _c), gr in groupes.items():
             src = base / ident / section
             dst = racine / ident / section
+            ref0 = gr.get("fait") or gr.get("prevu") or {}
+            if ref0.get("dossier"):
+                # une suppression garde son dossier d'origine (identite, ou
+                # reserve de photos de profil) -- jamais hors de data/
+                d0 = Path(ref0["dossier"]).resolve()
+                permis = {DATA.resolve(), Path(racine).resolve().parent}
+                if not permis & set(d0.parents):
+                    bloques.append(f"{ref0['dossier']} : hors de data/, ignoré")
+                    continue
+                dst = d0
             if not dst.is_dir():
                 bloques.append(f"{ident}/{section} : dossier absent")
                 continue
@@ -863,8 +893,126 @@ def restaurer(racine: Path, nom_passe: str) -> dict:
                         continue
                     shutil.move(str(src / n), str(dst / n))
                     remis += 1
+                if ref.get("supprime") and ref.get("md5") and (dst / copie).exists():
+                    rendus.append((f"{ident}|{section}", ref["md5"]))
+        if rendus:
+            _oublier_supprimes(rendus)
         try:
             _ecrire_manifeste(base, {"type": "restaure", "ts": int(time.time()), "remis": remis})
         except Exception:
             pass
     return {"ok": True, "remis": remis, "bloques": bloques}
+
+
+# ------------------------------------------------------------- supprimer
+
+_CACHE_SUPPRIMES: dict = {"sig": None, "d": {}}
+
+
+def _supprimes() -> dict:
+    try:
+        sig = SUPPRIMES.stat().st_mtime_ns
+    except OSError:
+        return {}
+    if _CACHE_SUPPRIMES["sig"] != sig:
+        d = safe_json.load(SUPPRIMES, default={})
+        _CACHE_SUPPRIMES.update(sig=sig, d=d if isinstance(d, dict) else {})
+    return _CACHE_SUPPRIMES["d"]
+
+
+def supprime_du_site(ident: str, section: str, md5: str) -> bool:
+    """Ce contenu a-t-il ete supprime sur le site, dans ce dossier ?"""
+    if not md5:
+        return False
+    return md5 in (_supprimes().get(f"{ident}|{section}") or {})
+
+
+def _oublier_supprimes(paires: list) -> None:
+    d = dict(_supprimes())
+    for cle, h in paires:
+        (d.get(cle) or {}).pop(h, None)
+    safe_json.write(SUPPRIMES, d, indent=1)
+
+
+def supprimer(chemins: Iterable[Path], reg: Optional[Registres] = None) -> dict:
+    """Met ces fichiers a la corbeille (CORBEILLE_SUPPRESSIONS), chaque media
+    avec TOUS ses voisins -- la liste de VOISINS, la meme que le rangement
+    des doublons. Rien n'est efface ; un passage se restaure (restaurer).
+
+    Le contenu (md5) d'un media supprime dans un dossier d'identite est
+    retenu (SUPPRIMES) : l'import Drive ne le ramene plus. Sans ca, un media
+    supprime sur le site revenait du Drive dans la minute.
+
+    Rend {"ranges": [{"nom", "fichiers", "avertissements"}], "echecs":
+    [(nom, raison)], "passage": dossier de la corbeille ou None}."""
+    reg = reg or Registres()
+    chemins = [Path(c) for c in chemins]
+    ranges, echecs = [], []
+    if not chemins:
+        return {"ranges": ranges, "echecs": echecs, "passage": None}
+    with _VERROU:
+        debut = time.time()
+        nom_passe = time.strftime("%Y%m%d-%H%M%S", time.localtime(debut))
+        base = CORBEILLE_SUPPRESSIONS / nom_passe
+        k = 2
+        while base.exists():
+            base = CORBEILLE_SUPPRESSIONS / f"{nom_passe}-{k}"
+            k += 1
+        morts: Dict[str, dict] = {}
+        for p in chemins:
+            try:
+                if not p.is_file():
+                    echecs.append((p.name, "introuvable"))
+                    continue
+                dossier = p.parent
+                ident, section = dossier.parent.name, dossier.name
+                noms = {q.name for q in dossier.iterdir() if q.is_file()}
+                media = est_un_media(p.name)
+                # une tige portee par un autre media (x.mp4 et x.jpg) : ses
+                # voisins sont a lui aussi, on ne les emporte pas
+                partagee = any(q != p.name and Path(q).stem == p.stem and est_un_media(q)
+                               for q in noms)
+                liste = [p.name] + ([] if (partagee or not media)
+                                    else voisins_de(p.stem, noms))
+                h = None
+                if media:
+                    m = _Md5(dossier)
+                    h = m.de(p.name)
+                    m.fermer()
+                ligne = {"ident": ident, "section": section, "dossier": str(dossier),
+                         "garde": None, "md5": h, "supprime": True, "ts": int(debut)}
+                _ecrire_manifeste(base, dict(ligne, type="prevu", copies={p.name: liste}))
+                cible = base / ident / section
+                cible.mkdir(parents=True, exist_ok=True)
+                partis: List[str] = []
+                try:
+                    for n in liste:
+                        if not (dossier / n).exists() or (cible / n).exists():
+                            continue
+                        shutil.move(str(dossier / n), str(cible / n))
+                        partis.append(n)
+                finally:
+                    _ecrire_manifeste(base, dict(ligne, type="fait", copies={p.name: partis}))
+                if p.name not in partis:
+                    echecs.append((p.name, "non déplacé"))
+                    continue
+                if h and dossier.parent.parent.name == "identities":
+                    morts.setdefault(f"{ident}|{section}", {})[h] = {"nom": p.name,
+                                                                    "le": int(debut)}
+                avert = list(reg.oublier(f"{ident}|{section}|{p.name}"))
+                try:
+                    reg.apres_rangement(ident, section, p.name)
+                except Exception:
+                    pass
+                ranges.append({"nom": p.name, "fichiers": partis, "avertissements": avert})
+            except Exception as e:
+                echecs.append((p.name, f"{type(e).__name__}: {e}"[:160]))
+        if morts:
+            d = {k2: dict(v) for k2, v in _supprimes().items()}
+            for cle, hs in morts.items():
+                d.setdefault(cle, {}).update(hs)
+            if not safe_json.write(SUPPRIMES, d, indent=1):
+                echecs.append(("*", "supprimes_du_site.json non écrit : le Drive pourrait "
+                                    "ramener ces médias"))
+    return {"ranges": ranges, "echecs": echecs,
+            "passage": base.name if ranges else None}

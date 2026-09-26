@@ -3066,14 +3066,14 @@ class UserCog(commands.Cog):
                     f"📄 **DESCRIPTION {label} {idx}** (à coller dans le **champ légende** du post) :")
                 await _envoyer_texte(interaction, description)
             if delete_after:
+                # a la corbeille avec tous ses voisins, et retenue : effacee,
+                # la veille Drive la rapatriait dans la minute et le reel
+                # « a usage unique » repartait chez un autre VA
                 try:
-                    video.unlink(missing_ok=True)
-                    video.with_suffix(".txt").unlink(missing_ok=True)
-                    video.with_suffix(".desc.txt").unlink(missing_ok=True)
-                    if example:
-                        example.unlink(missing_ok=True)
-                except Exception:
-                    pass
+                    import doublons_vault as _dv
+                    _dv.supprimer([video])
+                except Exception as e:
+                    print(f"[reels] source non rangee apres envoi : {e}", flush=True)
 
     async def _gen_and_send_montaged(self, interaction, video, draft, description, idx,
                                      total, identity, label="REEL MONTÉ", emoji="🎞️",
