@@ -7757,6 +7757,33 @@ try:
             check("demomodels %s x%d : chaque groupe s'ouvre en prive, sans editer"
                   % (_varDM, _nDM), True)
 
+    # « menus10 » : un menu par dizaine, CREE TOUT SEUL (« si un jour j'en
+    # ai 60, il y en a 6 »), en format V2 (plus de cinq menus possibles).
+    for _nDM, _attM in ((6, 1), (14, 2), (26, 3), (45, 5), (60, 6), (100, 10),
+                        (200, 19)):
+        _itDM = _itemsDM(_nDM)
+        _plDM = _MDM.demo_models_plan("menus10", _itDM)
+        _vuDM = [x for _l, b in _plDM["menus"] for x in b] + _plDM["non_affichees"]
+        check("demomodels menus10 x%d : %d menu(s), chaque model montree OU comptee"
+              % (_nDM, _attM),
+              len(_plDM["menus"]) == _attM and _vuDM == _itDM
+              and all(len(b) <= 10 for _l, b in _plDM["menus"]),
+              "%d menus, %d non affichees" % (len(_plDM["menus"]),
+                                              len(_plDM["non_affichees"])))
+        _v2DM = _MDM.demo_models_vue_v2(_plDM, "texte")
+        _jsDM = _v2DM.to_components()
+        check("demomodels menus10 x%d : V2 <= 40 composants, menus <= 10 options"
+              % _nDM,
+              _v2DM.total_children_count <= 40
+              and all(len(s.options) <= 10 for s in _v2DM.walk_children()
+                      if isinstance(s, _dDM.ui.Select)),
+              str(_v2DM.total_children_count))
+    check("demomodels menus10 x200 : au-dela de 190, les 10 restantes sont COMPTEES",
+          len(_MDM.demo_models_plan("menus10", _itemsDM(200))["non_affichees"]) == 10)
+    check("demomodels menus10 : les libelles des menus suivent les dizaines",
+          [l for l, _b in _MDM.demo_models_plan("menus10", _itemsDM(26))["menus"]]
+          == ["1–10", "11–20", "21–26"])
+
     # Un clic sur une model ne fait RIEN d'autre que le dire, en prive.
     _iDM = _InterDM()
     _bDM = _MDM._DemoModelBouton(("lola", "🥇 Lola", None, False))

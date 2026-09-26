@@ -431,7 +431,17 @@ _DEMO_MODELS_VARIANTES = {
     "top10": "Top 10 en photos + groupes pour la suite",
     "photos_menu": "20 photos + menu déroulant « Autres models »",
     "menus": "Menus déroulants uniquement : 1–25, 26–50…",
+    "menus10": "Menus déroulants de 10 : un de plus toutes les 10 models",
 }
+
+#: Variante « menus10 » (choisie par le proprietaire le 26/09/2026 : « si un
+#: jour j'en ai 60, il y en a 6 »). Un menu par dizaine, CREE TOUT SEUL quand
+#: une model de plus passe la dizaine. Six menus depassent les cinq rangees
+#: d'un message classique : format Components V2, qui compte 40 composants --
+#: 2 pour le bloc et son texte, 2 par menu (sa rangee + lui), soit 19 menus
+#: (190 models) au plus. Au-dela : comptees et dites, comme ailleurs.
+_TAILLE_MENU10 = 10
+_MAX_MENUS10 = (40 - 2) // 2
 
 
 def _plage(debut: int, fin: int) -> str:
@@ -500,6 +510,12 @@ def demo_models_plan(variante: str, items: list) -> dict:
         if reste:
             menus = [("Autres models", reste[:_LIM_OPTIONS])]
             reste = reste[_LIM_OPTIONS:]
+    elif variante == "menus10":
+        k = 0
+        while reste and len(menus) < _MAX_MENUS10:
+            bloc, reste = reste[:_TAILLE_MENU10], reste[_TAILLE_MENU10:]
+            menus.append((_plage(k + 1, k + len(bloc)), bloc))
+            k += len(bloc)
     elif variante == "menus":
         k = 0
         while reste and len(menus) < _LIM_PAR_RANGEE:
@@ -563,6 +579,22 @@ class _DemoModelsMenu(discord.ui.Select):
         await _demo_model_choisie(interaction, self.par_valeur.get(v, v))
 
 
+def demo_models_vue_v2(plan: dict, texte: str):
+    """La variante « menus10 » : un bloc V2, le texte en tete, puis un menu
+    par dizaine. Le texte vit DANS le bloc : un message V2 n'a ni contenu ni
+    embed."""
+    ui = discord.ui
+    vue = ui.LayoutView(timeout=900)
+    boite = ui.Container(accent_colour=discord.Colour.dark_red())
+    boite.add_item(ui.TextDisplay(texte[:3900]))
+    for lib, bloc in plan["menus"]:
+        rangee = ui.ActionRow()
+        rangee.add_item(_DemoModelsMenu(lib, bloc))
+        boite.add_item(rangee)
+    vue.add_item(boite)
+    return vue
+
+
 def demo_models_vue(plan: dict) -> discord.ui.View:
     """La vue classique d'un plan. Les rangees sont POSEES, pas devinees :
     un menu deroulant prend une rangee entiere, et discord.py leve au 6e
@@ -604,8 +636,15 @@ class MenuTest(commands.Cog):
     async def demomodels(self, interaction: discord.Interaction,
                          variante: app_commands.Choice[str],
                          marche: app_commands.Choice[str] = None,
-                         simuler: app_commands.Range[int, 1, 200] = 40):
+                         simuler: app_commands.Range[int, 1, 200] = None):
         mk = marche.value if marche else "us"
+        if simuler is None:
+            # « menus10 » : on part de ce qui EXISTE (« tu fais avec ce qu'il y
+            # a ») ; les autres gardent 40 pour montrer l'au-dela de 25.
+            if variante.value == "menus10":
+                simuler = max(1, _demo_models_liste(mk, 1, None)[1])
+            else:
+                simuler = 40
         items, n_reelles = _demo_models_liste(mk, simuler, interaction.guild)
         plan = demo_models_plan(variante.value, items)
         n_fausses = sum(1 for it in items if it[3])
@@ -623,6 +662,10 @@ class MenuTest(commands.Cog):
             lignes.append(f"⚠️ **{len(plan['non_affichees'])} model(s) non "
                           "affichée(s)** : cette disposition ne peut pas en "
                           "montrer plus.")
+        if variante.value == "menus10":
+            await interaction.response.send_message(
+                view=demo_models_vue_v2(plan, "\n".join(lignes)), ephemeral=True)
+            return
         await interaction.response.send_message(
             "\n".join(lignes), view=demo_models_vue(plan), ephemeral=True)
 
