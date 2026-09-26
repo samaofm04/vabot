@@ -54112,6 +54112,10 @@ def _start_all_banger_daemon() -> bool:
     Lance au demarrage du site (des bangers « prets » peuvent attendre depuis
     avant un redemarrage) et, au besoin, au premier banger signale. Un seul
     fil par processus : les envois partent un par un.
+
+    C est aussi ce fil qui fait, UNE fois, le rattrapage de tous les bangers
+    du registre (all_banger.rattrapage), des que le bot est pret : la garde
+    de machine ci-dessous le couvre, le poste de dev ne le fait jamais.
     """
     if not _machine_proprietaire("all-banger"):
         return False
@@ -54119,7 +54123,8 @@ def _start_all_banger_daemon() -> bool:
     # _BOT_REF est relu a CHAQUE appel : le bot se connecte apres le site.
     return _ab.demarrer(
         poster=lambda sc, e: _ab.poster_via_bot(_BOT_REF, sc, e),
-        pret=lambda: _ab.bot_pret(_BOT_REF))
+        pret=lambda: _ab.bot_pret(_BOT_REF),
+        limite=lambda: _ab.limite_via_bot(_BOT_REF))
 
 
 def _banger_recuperer(shortcode: str, url: str) -> tuple:

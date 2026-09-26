@@ -12235,9 +12235,11 @@ except Exception as _eB:
 
 # --- Salon « all-banger » ----------------------------------------------
 # Demande du 26/09/2026 : chaque banger dont la video a ete RECUPEREE est
-# reposte dans « all-banger », la video et la description, rien d autre.
-# Tout se joue dans un dossier temporaire, avec un faux salon Discord et un
-# faux telechargement : aucun appel HikerAPI, Apify ni Discord.
+# reposte dans « all-banger » : la video, ses vues, la description a copier et
+# le bouton du reel -- une carte Components V2, rien d autre. Puis le
+# RATTRAPAGE de tous les bangers du registre, une seule fois (section 11).
+# Tout se joue dans un dossier temporaire, avec un faux salon Discord, un faux
+# telechargement et un faux HikerAPI : aucun appel reseau.
 try:
     import asyncio as _aioA, logging as _logA, re as _reA, types as _tyA
     import tempfile as _tfA, pathlib as _plA, inspect as _inA, time as _tA
@@ -12246,12 +12248,14 @@ try:
     import all_banger as _abA
     _tmpA = _plA.Path(_tfA.mkdtemp(prefix="allbanger_test_"))
     _savA = (_bgA.FICHIER, _bgA.DOSSIER, _bgA.DETAILS_DIR, _abA.FICHIER,
-             _abA.DOSSIER_CACHE_INSTA, _abA._est_une_video)
+             _abA.DOSSIER_CACHE_INSTA, _abA._est_une_video, _abA.FICHIER_HIKER,
+             _abA.PLAFOND_HIKER_RATTRAPAGE)
     _vraieSondeA = _abA._est_une_video
     # QUE PERSONNE N APPELLE UNE SOURCE PAYANTE. Chaque porte est remplacee
     # par un piege qui note l appel : la chaine entiere doit tourner sans.
     _interditsA, _savPiegesA = [], []
     for _modN, _fnN in (("hiker_reels", "scrape_profile"), ("hiker_reels", "_appel"),
+                        ("hiker_reels", "get_token"), ("hiker_reels", "_consommer"),
                         ("apify_reels", "fetch_reel_details"),
                         ("reels_source", "fetch_video_urls"),
                         ("veille_telegram", "download_video_bytes"),
@@ -12271,12 +12275,17 @@ try:
             _journalA.append(rec.getMessage())
     _oreilleA = _OreilleA()
     _logA.getLogger("vabot.all_banger").addHandler(_oreilleA)
+    # Le niveau de la production (main.py : basicConfig INFO) : le bilan du
+    # rattrapage est une ligne INFO, elle doit etre entendue ici aussi.
+    _niveauA = _logA.getLogger("vabot.all_banger").level
+    _logA.getLogger("vabot.all_banger").setLevel(_logA.INFO)
     try:
         _bgA.FICHIER = _tmpA / "bangers.json"
         _bgA.DOSSIER = _tmpA / "bangers"
         _bgA.DETAILS_DIR = _tmpA / "bangers_details"
         _abA.FICHIER = _tmpA / "bangers_all.json"
         _abA.DOSSIER_CACHE_INSTA = _tmpA / "insta_videos"
+        _abA.FICHIER_HIKER = _tmpA / "bangers_all_hiker.json"
         # ffprobe n existe pas partout : la sonde est remplacee par la
         # signature MP4, la vraie est verifiee plus bas quand ffmpeg est la.
         _abA._est_une_video = lambda p: (p.stat().st_size > 1024
@@ -12297,11 +12306,13 @@ try:
             return None
 
         class _MsgA:
-            def __init__(self, mid, auteur, contenu, noms):
+            def __init__(self, mid, auteur, contenu, noms, composants=()):
                 self.id, self.content = mid, contenu
                 self.author = _tyA.SimpleNamespace(id=auteur)
                 self.attachments = [_tyA.SimpleNamespace(filename=n) for n in noms]
                 self.nonce = None      # Discord ne le rend pas a la relecture
+                # les VRAIS objets composants de discord.py, relus du payload
+                self.components = [_dA.components._component_factory(c) for c in composants]
 
         class _SalonA:
             def __init__(self, cid, nom, guild):
@@ -12309,18 +12320,28 @@ try:
                 self.envois, self.messages, self.panne = [], [], None
 
             async def send(self, content=None, files=None, nonce=None,
-                           allowed_mentions=None, suppress_embeds=False, **kw):
+                           allowed_mentions=None, suppress_embeds=False, view=None, **kw):
                 if self.panne is not None:
                     raise self.panne
                 joints = {}
                 for _f in (files or []):
                     if _f.filename.endswith(".txt"):
                         joints[_f.filename] = _f.fp.read().decode("utf-8")
+                        _f.fp.seek(0)
                 noms = [_f.filename for _f in (files or [])]
+                # LE VRAI assemblage de discord.py (celui de Messageable.send) :
+                # ce que Discord recevrait, drapeaux et composants compris.
+                _paramsA = _dA.http.handle_message_parameters(
+                    content=content, files=files if files is not None else _dA.utils.MISSING,
+                    view=view, nonce=nonce, allowed_mentions=allowed_mentions)
+                _payloadA = (_paramsA.payload if _paramsA.payload is not None
+                             else json.loads(_paramsA.multipart[0]["value"]))
                 self.envois.append({"content": content, "noms": noms, "joints": joints,
                                     "nonce": nonce, "am": allowed_mentions,
-                                    "sans_apercu": suppress_embeds, "autres": kw})
-                m = _MsgA(9000 + len(self.envois), 42, content, noms)
+                                    "sans_apercu": suppress_embeds, "vue": view,
+                                    "payload": _payloadA, "autres": kw})
+                m = _MsgA(9000 + len(self.envois), 42, content, noms,
+                          _payloadA.get("components") or [])
                 self.messages.append(m)
                 return m
 
@@ -12384,30 +12405,73 @@ try:
         check("all-banger : le banger est poste, une fois, dans le salon all-banger",
               len(_salonA.envois) == 1 and not _generalA.envois and _b1A.get("envoyes") == 1,
               str(_b1A))
-        check("all-banger : le message porte la video, et elle seule en piece jointe",
-              _e1A.get("noms") == ["ALLBG01.mp4"], str(_e1A.get("noms")))
-        check("all-banger : le texte EST la description (l echappement ne change pas le texte copie)",
-              _reA.sub(r"\\(.)", r"\1", _e1A.get("content") or "") == _legA,
-              repr(_e1A.get("content")))
-        check("all-banger : ni VA, ni compte, ni vues, ni identite dans le message",
-              not any(x in (_e1A.get("content") or "")
-                      for x in ("VA Secret", "compte.secret", "15", "vues", "jessye")),
-              repr(_e1A.get("content")))
+        # La carte telle que Discord la recoit (payload assemble par discord.py).
+        def _carteA(envoi):
+            _cs = (envoi.get("payload") or {}).get("components") or []
+            return _cs[0].get("components") or [] if len(_cs) == 1 and _cs[0].get("type") == 17 else []
+
+        def _descA(envoi):
+            for _c in _carteA(envoi):
+                _t = _c.get("content") or ""
+                if _c.get("type") == 10 and _t.startswith("**Description à copier**\n```\n"):
+                    return _t[len("**Description à copier**\n```\n"):].rsplit("\n```", 1)[0]
+            return None
+        _c1A = _carteA(_e1A)
+        check("all-banger : carte V2 exacte -- video, vues, separateur, description, fichier, bouton",
+              [c.get("type") for c in _c1A] == [12, 10, 14, 10, 13, 1]
+              and len((_e1A.get("payload") or {}).get("components") or []) == 1,
+              str([c.get("type") for c in _c1A]))
+        check("all-banger : le message est en Components V2, sans aucun texte hors de la carte",
+              bool(int((_e1A.get("payload") or {}).get("flags") or 0) & (1 << 15))
+              and _e1A.get("content") is None and not (_e1A.get("payload") or {}).get("content")
+              and not (_e1A.get("payload") or {}).get("embeds"),
+              str({k: (_e1A.get("payload") or {}).get(k) for k in ("flags", "content")}))
+        check("all-banger : la galerie montre LA video du reel, sans texte alternatif (il nommait le compte)",
+              _c1A and _c1A[0].get("items") == [{"media": {"url": "attachment://ALLBG01.mp4"},
+                                                  "spoiler": False}], str(_c1A[:1]))
+        check("all-banger : les vues sont marquees, au format de la fiche du matin",
+              len(_c1A) > 1 and _c1A[1].get("content") == "**15 000** vues",
+              repr(_c1A[1] if len(_c1A) > 1 else None))
+        check("all-banger : pieces jointes = la video et la description complete, rien d autre",
+              _e1A.get("noms") == ["ALLBG01.mp4", "ALLBG01_description.txt"]
+              and _e1A.get("joints", {}).get("ALLBG01_description.txt") == _legA
+              and [a.get("filename") for a in (_e1A.get("payload") or {}).get("attachments") or []]
+              == ["ALLBG01.mp4", "ALLBG01_description.txt"], str(_e1A.get("noms")))
+        check("all-banger : la description a copier EST la legende, dans un bloc de code",
+              _descA(_e1A) == _legA, repr(_descA(_e1A)))
+        _btnA = (_c1A[-1].get("components") or [{}])[0] if _c1A else {}
+        check("all-banger : un seul bouton, le lien « Voir le reel sur Instagram »",
+              _c1A and _c1A[-1].get("type") == 1 and len(_c1A[-1].get("components") or []) == 1
+              and _btnA.get("style") == 5 and _btnA.get("label") == "Voir le reel sur Instagram"
+              and _btnA.get("url") == "https://www.instagram.com/p/ALLBG01/", str(_btnA))
+        _toutA = json.dumps(_e1A.get("payload") or {}, ensure_ascii=False)
+        check("all-banger : ni VA, ni compte, ni identite, ni likes, ni date dans le message",
+              not any(x in _toutA for x in ("VA Secret", "compte.secret", "jessye", "Jessye",
+                                            "likes", "commentaire", "Géré par", "@compte")),
+              _toutA[:300])
         _amA = _e1A.get("am")
         check("all-banger : aucune mention ne notifie (AllowedMentions.none)",
               isinstance(_amA, _dA.AllowedMentions) and _amA.everyone is False
-              and _amA.users is False and _amA.roles is False, repr(_amA))
-        check("all-banger : un lien de la legende ne deroule pas d apercu",
-              _e1A.get("sans_apercu") is True)
-        # L echappement : invisible a l affichage, et le texte copie est
-        # l original -- y compris les lignes « ␣␣- », les barres obliques et
-        # les liens (une barre dans une URL la casserait).
-        _pieceA = "  - puce\n# titre\n> cite\n*gras* ~x~ |s| `c` \\ [a](b)\nhttps://t.co/a_b_c"
-        _echA = _abA._echapper(_pieceA)
-        check("all-banger : l echappement rend le texte d origine, liens intacts",
-              _reA.sub(r"\\(.)", r"\1", _echA) == _pieceA
-              and "https://t.co/a_b_c" in _echA and _echA.startswith("  \\- puce"),
-              repr(_echA))
+              and _amA.users is False and _amA.roles is False
+              and (_e1A.get("payload") or {}).get("allowed_mentions") == {"parse": []}, repr(_amA))
+        # Le bloc de code : ce qui se copie depuis Discord est le texte d origine
+        # (pas d italique mange entre deux « _ », pas de lien deroule) ; un
+        # « ``` » de la legende ne peut pas fermer le bloc, et le fichier joint
+        # garde, lui, le texte exact.
+        _pieceA = "#un_tag et #deux_tags\n  - puce\n```\ncode\n``` https://t.co/a_b_c"
+        (_tmpA / "x.mp4").write_bytes(_MP4A)
+        _vPA, _fPA = _abA.vue_message("ALLBGXX", _tmpA / "x.mp4", _pieceA,
+                                      "https://www.instagram.com/p/ALLBGXX/", 0)
+        _cPA = _vPA.to_components()[0]["components"]
+        _jPA = {f.filename: f.fp.read().decode("utf-8") for f in _fPA if f.filename.endswith(".txt")}
+        for _f in _fPA:
+            _f.close()
+        check("all-banger : bloc de code etanche, texte complet dans le fichier joint",
+              [c["type"] for c in _cPA] == [12, 14, 10, 13, 1]
+              and _cPA[2]["content"].count("```") == 2
+              and "#un_tag et #deux_tags" in _cPA[2]["content"]
+              and "https://t.co/a_b_c" in _cPA[2]["content"]
+              and _jPA.get("ALLBGXX_description.txt") == _pieceA, repr(_cPA[2]["content"]))
         check("all-banger : l envoi porte le nonce du reel (anti-doublon de Discord)",
               _e1A.get("nonce") == _abA.nonce_de("ALLBG01") and len(_e1A["nonce"]) <= 25)
         _envoyeA = _abA.entree("ALLBG01")
@@ -12459,7 +12523,7 @@ try:
         _envoisA()
         check("all-banger : la relance reussie est postee",
               _abA.entree("ALLBG04").get("etat") == "envoye"
-              and _salonA.envois[-1]["noms"] == ["ALLBG04.mp4"])
+              and _salonA.envois[-1]["noms"] == ["ALLBG04.mp4", "ALLBG04_description.txt"])
         # un scrape SANS lien (source de repli) ne consomme pas l essai
         _rD = [_reelA("ALLBG05", 40000, "", "d")]
         _exD = _bgA.examiner("compte.d", _rD, maintenant=_nowA)
@@ -12496,20 +12560,204 @@ try:
               len(_salonA.envois) == _nA and _abA.entree("ALLBG06").get("etat") == "envoye"
               and _abA.entree("ALLBG06").get("message_id") == 7777 and _b3A.get("retrouves") == 1,
               str(_b3A))
-        # le processus est mort AVANT : rien dans le salon -> un seul envoi
+        # V2 : la relecture ne rend parfois ni nonce ni pieces jointes ; les
+        # composants de la carte (bouton du reel, galerie) suffisent -- et la
+        # carte d un reel au code VOISIN (« ALLBG6B » dans « ALLBG6BX ») n est
+        # pas prise pour la sienne.
+        _intentionA("ALLBG6B", 600)
+        (_tmpA / "ALLBG6BX.mp4").write_bytes(_MP4A)
+        _vXA, _fXA = _abA.vue_message("ALLBG6BX", _tmpA / "ALLBG6BX.mp4", "x",
+                                      "https://www.instagram.com/p/ALLBG6BX/", 12000)
+        _vRA, _fRA = _abA.vue_message("ALLBG6B", _bgA.chemin_video("ALLBG6B"), "r",
+                                      "https://www.instagram.com/p/ALLBG6B/", 20000)
+        for _f in _fXA + _fRA:
+            _f.close()
+        _salonA.messages.append(_MsgA(7780, 42, None, [], _vXA.to_components()))
+        _salonA.messages.append(_MsgA(7781, 42, None, [], _vRA.to_components()))
+        _b3vA = _envoisA()
+        check("all-banger : V2 -- retrouve par les composants seuls, jamais par un code voisin",
+              len(_salonA.envois) == _nA and _abA.entree("ALLBG6B").get("etat") == "envoye"
+              and _abA.entree("ALLBG6B").get("message_id") == 7781
+              and not _abA._porte_le_reel(_salonA.messages[-2], "ALLBG6B")
+              and _abA._porte_le_reel(_salonA.messages[-2], "ALLBG6BX"),
+              str(_abA.entree("ALLBG6B")))
+        # La description d un AUTRE banger qui cite le lien de ce reel ne fait
+        # pas prendre son message pour celui-ci : seules les ADRESSES de la
+        # carte (bouton, galerie, fichier) comptent, jamais son texte. Avant,
+        # retrouver(A) rendait le message de B, et A passait « envoye » sans
+        # avoir ete poste.
+        (_tmpA / "ALLBGRA.mp4").write_bytes(_MP4A)
+        (_tmpA / "ALLBGRB.mp4").write_bytes(_MP4A)
+        _vBA, _fBA = _abA.vue_message(
+            "ALLBGRB", _tmpA / "ALLBGRB.mp4",
+            "Partie 2, la 1 ici : instagram.com/reel/ALLBGRA et le fichier ALLBGRA.mp4 /ALLBGRA.mp4",
+            "https://www.instagram.com/p/ALLBGRB/", 15000)
+        for _f in _fBA:
+            _f.close()
+        _cBA = _vBA.to_components()
+
+        def _relu_cdnA(o, mid):
+            # ce que Discord rend a la relecture : attachment:// -> adresse du CDN
+            if isinstance(o, dict):
+                return {k: _relu_cdnA(v, mid) for k, v in o.items()}
+            if isinstance(o, list):
+                return [_relu_cdnA(v, mid) for v in o]
+            if isinstance(o, str) and o.startswith("attachment://"):
+                return (f"https://cdn.discordapp.com/attachments/222/{mid}/"
+                        f"{o[len('attachment://'):]}?ex=1&is=2&hm=3")
+            return o
+        _salonRA = _SalonA(333, "all-banger", _guildA)
+        _salonRA.messages = [_MsgA(7790, 42, None, [], _cBA),
+                             _MsgA(7791, 42, None, [], _relu_cdnA(_cBA, 7791))]
+        _trouveRA = _aioA.run(_abA.retrouver(_clientA, _salonRA, "ALLBGRA", _nowA))
+        _trouveRB = _aioA.run(_abA.retrouver(_clientA, _salonRA, "ALLBGRB", _nowA))
+        _salonRA.messages = _salonRA.messages[1:]
+        _trouveRB2 = _aioA.run(_abA.retrouver(_clientA, _salonRA, "ALLBGRB", _nowA))
+        check("all-banger : V2 -- le lien d un AUTRE reel dans la description ne trompe pas retrouver()",
+              _trouveRA is None and getattr(_trouveRB, "id", None) == 7790
+              and getattr(_trouveRB2, "id", None) == 7791
+              and "instagram.com/reel/ALLBGRA" in json.dumps(_cBA, ensure_ascii=False)
+              and not _abA._porte_le_reel(_MsgA(1, 42, None, [], _relu_cdnA(_cBA, 1)), "ALLBGRA"),
+              f"A={_trouveRA} B={getattr(_trouveRB, 'id', None)} B2={getattr(_trouveRB2, 'id', None)}")
+        # le processus est mort AVANT : rien dans le salon -> renvoye TOUT DE
+        # SUITE, a sa place (pas au passage suivant, derriere la rafale), une fois
         _intentionA("ALLBG07", 600)
-        _envoisA()
-        check("all-banger : une intention sans message devient « pret », sans envoi immediat",
-              _abA.entree("ALLBG07").get("etat") == "pret" and len(_salonA.envois) == _nA)
+        _b07A = _envoisA()
+        check("all-banger : une intention sans message est verifiee absente puis renvoyee TOUT DE SUITE",
+              _abA.entree("ALLBG07").get("etat") == "envoye" and _b07A.get("envoyes") == 1
+              and [e["noms"] for e in _salonA.envois[_nA:]] == [["ALLBG07.mp4"]], str(_b07A))
         _envoisA(); _envoisA()
-        check("all-banger : ... puis part UNE fois",
+        check("all-banger : ... et part UNE seule fois",
               [e["noms"] for e in _salonA.envois[_nA:]] == [["ALLBG07.mp4"]])
-        # une intention toute fraiche peut encore etre en vol : on n y touche pas
+        # une intention toute fraiche peut encore etre en vol : on ATTEND
+        # qu elle ait l age d etre verifiee (au plus DELAI_VERIFICATION), on ne
+        # la saute pas -- puis verification, et renvoi a sa place
         _intentionA("ALLBG08", 5)
         _nA = len(_salonA.envois)
-        _envoisA()
-        check("all-banger : une intention trop recente n est ni verifiee ni renvoyee",
-              _abA.entree("ALLBG08").get("etat") == "envoi" and len(_salonA.envois) == _nA)
+        _dortA = []
+        _abA.traiter_envois(_posterA, dormir=_dortA.append)
+        check("all-banger : une intention trop recente est ATTENDUE (pas sautee), puis verifiee",
+              len(_dortA) >= 1 and 100 <= _dortA[0] <= _abA.DELAI_VERIFICATION
+              and _abA.entree("ALLBG08").get("etat") == "envoye"
+              and [e["noms"][0] for e in _salonA.envois[_nA:]] == ["ALLBG08.mp4"],
+              f"{_dortA} {_abA.entree('ALLBG08')}")
+        _nA = len(_salonA.envois)
+        # L ORDRE CHRONOLOGIQUE survit a une coupure : un redemarrage 40 s
+        # apres le debut d un envoi, puis une issue incertaine en pleine rafale.
+        _savRegOrdreA = _abA.charger()
+
+        def _rafaleA(prefixe, n):
+            _dO = _abA._vide()
+            for _k in range(n):
+                _dO["reels"][f"{prefixe}{_k}"] = {
+                    "etat": "pret", "poste_le": int(_nowA - (50 - _k) * 86400),
+                    "detecte_le": int(_nowA - (50 - _k) * 86400)}
+            _dO["rattrapage"] = {"fait_le": 1}
+            return _dO
+        _dO = _rafaleA("ORDRE_C", 5)
+        _dO["reels"]["ORDRE_C0"].update(etat="envoye", message_id=1)
+        _dO["reels"]["ORDRE_C1"].update(etat="envoi", intention_le=_tA.time() - 40)
+        _abA._ecrire(_dO)
+        _salonOA, _dortOA = [], []
+
+        def _posterOA(sc, e):
+            if e.get("verifier"):
+                return {"absent": True}         # rien n etait parti
+            _salonOA.append(sc)
+            return {"message_id": 100 + len(_salonOA), "channel_id": 9}
+        _abA.traiter_envois(_posterOA, dormir=_dortOA.append)
+        check("all-banger : ordre -- redemarrage en plein envoi : le reel coupe repart A SA PLACE",
+              _salonOA == ["ORDRE_C1", "ORDRE_C2", "ORDRE_C3", "ORDRE_C4"]
+              and _dortOA and 70 <= _dortOA[0] <= 81, f"{_salonOA} {_dortOA[:2]}")
+        _abA._ecrire(_rafaleA("ORDRE_D", 4))
+        _salonOA[:] = []
+        _nOA = {"n": 0}
+
+        def _posterIncA(sc, e):
+            _nOA["n"] += 1
+            if e.get("verifier"):
+                return {"absent": True}
+            if sc == "ORDRE_D1" and _nOA["n"] == 2:
+                return {"incertain": "ClientOSError"}
+            _salonOA.append(sc)
+            return {"message_id": 200 + len(_salonOA), "channel_id": 9}
+        for _k in range(3):
+            _abA.traiter_envois(_posterIncA, dormir=lambda s: None,
+                                maintenant=_tA.time() + 300 * (_k + 1))
+        check("all-banger : ordre -- issue incertaine en pleine rafale : verifie puis renvoye avant le suivant",
+              _salonOA == ["ORDRE_D0", "ORDRE_D1", "ORDRE_D2", "ORDRE_D3"], str(_salonOA))
+        # UN BANGER BLOQUE NE RETIENT PAS LES SUIVANTS (« envoie tous les
+        # bangers, tout le temps »). Un refus de Discord qui ne vise QUE ce
+        # message (400, ou sa carte impossible a construire) : les suivants
+        # partent dans le meme passage. Avant, le passage s arretait a lui, et
+        # tout ce qui suivait attendait qu il ait epuise ses 5 essais.
+        for _statutRA, _libRA in ((400, "http_400"), (0, "carte:ValueError")):
+            _abA._ecrire(_rafaleA("ORDRE_R", 4))
+            _salonOA[:] = []
+
+            def _posterRA(sc, e, _s=_statutRA, _l=_libRA):
+                if sc == "ORDRE_R1":
+                    return {"refuse": _l, "status": _s}
+                _salonOA.append(sc)
+                return {"message_id": 300 + len(_salonOA), "channel_id": 9}
+            _bRA = _abA.traiter_envois(_posterRA, dormir=lambda s: None)
+            _eRA = _abA.entree("ORDRE_R1")
+            check(f"all-banger : un refus propre au message ({_libRA}) ne retient pas les suivants",
+                  _salonOA == ["ORDRE_R0", "ORDRE_R2", "ORDRE_R3"] and _bRA.get("envoyes") == 3
+                  and _bRA.get("refus") == 1 and _eRA.get("etat") == "pret"
+                  and _eRA.get("essais_envoi") == 1 and not _eRA.get("intention_le"),
+                  f"{_salonOA} {_bRA} {_eRA}")
+        # ... mais DEUX refus de contenu d affilee, c est la carte elle-meme
+        # (format rejete) : le passage s arrete, et le second n est pas compte
+        # -- un refus systematique ne coute qu un essai par passage, comme avant.
+        _abA._ecrire(_rafaleA("ORDRE_S", 4))
+        _appelsSA = []
+
+        def _posterSA(sc, e):
+            _appelsSA.append(sc)
+            return {"refuse": "http_400", "status": 400}
+        _bSA = _abA.traiter_envois(_posterSA, dormir=lambda s: None)
+        check("all-banger : deux refus de contenu d affilee -> arret, le second non compte",
+              _appelsSA == ["ORDRE_S0", "ORDRE_S1"]
+              and _abA.entree("ORDRE_S0").get("essais_envoi") == 1
+              and not _abA.entree("ORDRE_S1").get("essais_envoi")
+              and _abA.entree("ORDRE_S1").get("etat") == "pret"
+              and _abA.entree("ORDRE_S2").get("etat") == "pret" and _bSA.get("refus") == 2,
+              f"{_appelsSA} {_bSA} {_abA.entree('ORDRE_S1')}")
+        # un 403 (droits) frappe TOUS les messages : il arrete le passage net
+        _abA._ecrire(_rafaleA("ORDRE_F", 3))
+        _appelsSA[:] = []
+
+        def _poster403A(sc, e):
+            _appelsSA.append(sc)
+            return {"refuse": "http_403", "status": 403}
+        _abA.traiter_envois(_poster403A, dormir=lambda s: None)
+        check("all-banger : un refus 403 (tous les messages) arrete le passage au premier",
+              _appelsSA == ["ORDRE_F0"], str(_appelsSA))
+        # Un banger devenu pret PENDANT le passage (telecharge entre deux
+        # envois) part dans ce MEME passage : avant, il attendait le tour
+        # suivant, jusqu a PERIODE_SEC (10 min) plus tard.
+        _abA._ecrire(_rafaleA("ORDRE_N", 2))
+        _salonOA[:] = []
+        _hookNA = {"n": 0}
+
+        def _entreNA():
+            _hookNA["n"] += 1
+            if _hookNA["n"] == 1:
+                _dN = _abA.charger()
+                _dN["reels"]["ORDRE_N9"] = {"etat": "pret", "poste_le": int(_nowA),
+                                            "detecte_le": int(_nowA)}
+                _abA._ecrire(_dN)
+
+        def _posterNA(sc, e):
+            _salonOA.append(sc)
+            return {"message_id": 400 + len(_salonOA), "channel_id": 9}
+        _bNA = _abA.traiter_envois(_posterNA, dormir=lambda s: None, entre_envois=_entreNA)
+        _bNA2 = _abA.traiter_envois(_posterNA, dormir=lambda s: None)
+        check("all-banger : un banger devenu pret pendant le passage part dans ce passage, une fois",
+              _salonOA == ["ORDRE_N0", "ORDRE_N1", "ORDRE_N9"] and _bNA.get("envoyes") == 3
+              and _bNA2.get("envoyes") == 0, f"{_salonOA} {_bNA}")
+        _abA._ecrire(_savRegOrdreA)
         # sans droit de relire l historique, on ne tranche pas : on attend
         _intentionA("ALLBG08", 600)
         _histA = _salonA.history
@@ -12522,6 +12770,23 @@ try:
         check("all-banger : historique illisible -> ni renvoi ni abandon, cause dite",
               _abA.entree("ALLBG08").get("etat") == "envoi" and len(_salonA.envois) == _nA
               and "relecture" in _b3bA.get("attente", ""), str(_b3bA))
+        # ... et ce banger qu on ne peut pas trancher ne retient pas les
+        # suivants : un banger pret derriere lui (rien a verifier) part. Avant,
+        # chaque passage s arretait sur lui : plus rien ne partait, pour toujours.
+        _dPA = _abA.charger()
+        _dPA["reels"]["ALLBG8P"] = {"etat": "pret", "essais": 1, "detecte_le": int(_nowA) + 5}
+        _abA._ecrire(_dPA)
+        _bgA.chemin_video("ALLBG8P").write_bytes(_MP4A)
+        _salonA.history = _histInterdit
+        _b3cA = _envoisA()
+        _salonA.history = _histA
+        check("all-banger : historique illisible -> ce banger attend, les SUIVANTS partent",
+              _abA.entree("ALLBG08").get("etat") == "envoi"
+              and _abA.entree("ALLBG8P").get("etat") == "envoye"
+              and [e["noms"][0] for e in _salonA.envois[_nA:]] == ["ALLBG8P.mp4"]
+              and _b3cA.get("envoyes") == 1 and "relecture" in _b3cA.get("attente", ""),
+              f"{_b3cA} {[e['noms'][0] for e in _salonA.envois[_nA:]]}")
+        _nA = len(_salonA.envois)
         _dX = _abA.charger(); _dX["reels"].pop("ALLBG08"); _abA._ecrire(_dX)
         _bgA.chemin_video("ALLBG08").unlink()
         # redemarrage : memoire vide, meme detection -> rien de neuf
@@ -12573,9 +12838,10 @@ try:
         _envoisA()
         check("all-banger : le salon revenu, la video en attente part",
               _abA.entree("ALLBG10").get("etat") == "envoye"
-              and _salonA.envois[-1]["noms"] == ["ALLBG10.mp4"])
+              and _salonA.envois[-1]["noms"] == ["ALLBG10.mp4", "ALLBG10_description.txt"])
 
-        # 6) Description trop longue pour un message : jointe en .txt
+        # 6) Description trop longue pour la carte (4000 signes en tout) : coupee
+        #    a l affichage, COMPLETE dans le .txt joint -- comme le matin.
         _longA = ("mot_" * 700).strip()
         _rG = [_reelA("ALLBG11", 70000, "https://cdn.test/ALLBG11.mp4", _longA)]
         _exG = _bgA.examiner("compte.g", _rG, maintenant=_nowA)
@@ -12583,10 +12849,15 @@ try:
             _abA.traiter_job(_j, telecharger_octets=_dlOkA)
         _envoisA()
         _eG = _salonA.envois[-1]
-        check("all-banger : description > 2000 signes -> fichier .txt, texte complet",
+        _cG = _carteA(_eG)
+        _txtG = sum(len(c.get("content") or "") for c in _cG if c.get("type") == 10)
+        check("all-banger : description > 2700 signes -> coupee dans la carte, complete en .txt",
               _eG["content"] is None and _eG["noms"] == ["ALLBG11.mp4", "ALLBG11_description.txt"]
-              and _eG["joints"].get("ALLBG11_description.txt") == _longA,
-              str(_eG["noms"]))
+              and _eG["joints"].get("ALLBG11_description.txt") == _longA
+              and _descA(_eG) == _longA[:2700] + "…"
+              and any("Texte complet dans le fichier ci-dessous." in (c.get("content") or "")
+                      for c in _cG) and _txtG <= 4000,
+              str(_eG["noms"]) + " " + str(_txtG))
 
         # 7) Refus net de Discord (droits) : rien de cree, on reprend plus tard
         _rH = [_reelA("ALLBG12", 80000, "https://cdn.test/ALLBG12.mp4", "h")]
@@ -12644,21 +12915,606 @@ try:
               not any(_abA.est_salon_all_banger(n) for n in
                       ("tall-banger", "banger", "all-banger-archive", "banger-jessye")))
 
-        # 11) Rattrapage : existe, n est pas declenche
-        _bgA.chemin_video("ALLBG16").write_bytes(_MP4A)       # hors registre
-        _bgA.forcer("compte.j", _reelA("ALLBG17", 50, ""))
-        _bgA.chemin_video("ALLBG17").write_bytes(_MP4A)       # essai
-        _rK = [_reelA("ALLBG18", 95000, "")]
-        _bgA.examiner("compte.k", _rK, maintenant=_nowA)
-        _bgA.chemin_video("ALLBG18").write_bytes(_MP4A)       # vrai banger archive
-        _ratA = _abA.rattrapage()
-        check("all-banger : le rattrapage ajoute les archives, et dit ce qu il laisse",
-              _ratA.get("ajoutes") == 1 and _abA.entree("ALLBG18").get("etat") == "pret"
-              and _ratA["ecartes"].get("hors_registre") == 1
-              and _ratA["ecartes"].get("essai") == 1, str(_ratA))
+        # 11) RATTRAPAGE : tous les bangers du registre, UNE fois. Chaque cas
+        #     dans un dossier neuf, avec un faux HikerAPI (hiker_reels._appel
+        #     remplace) et un faux CDN : aucun appel reseau.
+        import hiker_reels as _hkA
+        _savPrincA = (_bgA.FICHIER, _bgA.DOSSIER, _bgA.DETAILS_DIR, _abA.FICHIER,
+                      _abA.DOSSIER_CACHE_INSTA, _abA.FICHIER_HIKER)
+        _savHkA = (_hkA._appel, _hkA.get_token)
+        _appelsHkA, _repHkA = [], {}
+
+        def _fauxHikerA(chemin, jeton, timeout, **params):
+            _appelsHkA.append((chemin, params.get("code"), jeton))
+            return _repHkA.get(params.get("code"), (None, "HTTP 404: Not found"))
+
+        def _dossierRatA(nom):
+            _dR = _tmpA / nom
+            _bgA.FICHIER, _bgA.DOSSIER = _dR / "bangers.json", _dR / "bangers"
+            _bgA.DETAILS_DIR, _abA.FICHIER = _dR / "details", _dR / "bangers_all.json"
+            _abA.DOSSIER_CACHE_INSTA, _abA.FICHIER_HIKER = _dR / "insta_videos", _dR / "hiker.json"
+            _bgA.DOSSIER.mkdir(parents=True)
+            _abA.DOSSIER_CACHE_INSTA.mkdir(parents=True)
+            _abA._EN_COURS.clear(); _abA._DITS.clear()
+            del _appelsHkA[:]
+            _repHkA.clear()
+
+        def _ficheRatA(sc, jours, vues, desc="", **extra):
+            _dF = _bgA.charger()
+            _dF["reels"][sc] = dict({
+                "compte": "compte.rat", "identite": "jessye", "va": "VA Rat",
+                "url": f"https://www.instagram.com/p/{sc}/", "vues": vues, "vues_detection": vues,
+                "poste_le": int(_nowA - jours * 86400), "detecte_le": int(_nowA - jours * 86400 + 7200),
+                "description": desc, "muet": jours > 30, "annonce": {}}, **extra)
+            _bgA._ecrire(_dF)
+
+        def _mediaA(sc, legende="", vues=0, lien=True):
+            return ({"media": {"code": sc, "play_count": vues, "caption_text": legende,
+                               "video_url": f"https://cdn.test/hiker/{sc}.mp4" if lien else ""}}, "")
+
+        def _dlRatA(url, info):
+            _telechA.append(url)
+            if "RAT_E05" in url:
+                info["reason"] = "http_403"
+                return None
+            return _MP4A
+
+        def _jsonA(chemin):
+            # un fichier absent est un echec du test, pas une exception qui
+            # couperait tous les essais suivants
+            return json.loads(chemin.read_text(encoding="utf-8")) if chemin.is_file() else {}
+
+        def _postesA(depuis):
+            return [e["noms"][0] for e in _salonA.envois[depuis:]]
+        _hkA._appel, _hkA.get_token = _fauxHikerA, (lambda: "jeton-test")
+        try:
+            # 11 a) Le registre entier : disque d abord, HikerAPI sinon.
+            _dossierRatA("rat1")
+            _longRatA = "Legende complete du reel " + "x" * 400
+            _ficheRatA("RAT_A01", 90, 50000, "a")                      # archive
+            _bgA.chemin_video("RAT_A01").write_bytes(_MP4A)
+            # publie il y a 80 jours, mais banger reconnu hier seulement : l ordre
+            # d envoi suit la PUBLICATION, pas la detection
+            _ficheRatA("RAT_B02", 80, 20000, "b",                      # cache des Trends
+                       detecte_le=int(_nowA - 86400))
+            (_abA.DOSSIER_CACHE_INSTA / "RAT_B02.mp4").write_bytes(_MP4A)
+            _ficheRatA("RAT_C03", 70, 30000, _longRatA[:280])          # HikerAPI + CDN
+            _repHkA["RAT_C03"] = _mediaA("RAT_C03", _longRatA, 123456)
+            _ficheRatA("RAT_D04", 60, 25000, "d")                      # HikerAPI : 404
+            _ficheRatA("RAT_E05", 50, 24000, "e")                      # CDN : 403
+            _repHkA["RAT_E05"] = _mediaA("RAT_E05", "e", 24000)
+            _ficheRatA("RAT_F06", 45, 99999, "f", essai=True)          # essai : dehors
+            _bgA.chemin_video("RAT_F06").write_bytes(_MP4A)
+            _ficheRatA("RAT_G07", 42, 40000, "g")                      # deja poste
+            _bgA.chemin_video("RAT_G07").write_bytes(_MP4A)
+            _ficheRatA("RAT_H08", 40, 41000, "h")                      # deja en file
+            _bgA.chemin_video("RAT_H08").write_bytes(_MP4A)
+            _ficheRatA("RAT_I09", 30, 42000, "i")                      # echec d un nouveau
+            _repHkA["RAT_I09"] = _mediaA("RAT_I09", "i", 42000)
+            _ficheRatA("RAT_J10", 20, 43000, "j")                      # trop lourd
+            _bgA.chemin_video("RAT_J10").write_bytes(_MP4A + b"\0" * 6000)
+            _ficheRatA("RAT_K11", 10, 44000, "k")                      # archive, recent
+            _bgA.chemin_video("RAT_K11").write_bytes(_MP4A)
+            _ficheRatA("RAT_L12", 5, 45000, "l")                       # HikerAPI sans video
+            _repHkA["RAT_L12"] = _mediaA("RAT_L12", "l", 45000, lien=False)
+            _dR = _abA.charger()
+            _dR["reels"]["RAT_G07"] = {"etat": "envoye", "message_id": 555, "channel_id": 222,
+                                       "detecte_le": int(_nowA - 42 * 86400)}
+            _dR["reels"]["RAT_H08"] = {"etat": "pret", "essais": 1,
+                                       "detecte_le": int(_nowA - 40 * 86400)}
+            _dR["reels"]["RAT_I09"] = {"etat": "echec", "essais": 2, "raison": "http_403",
+                                       "detecte_le": int(_nowA - 30 * 86400)}
+            _abA._ecrire(_dR)
+            _hookRA = {"n": 0}
+
+            def _entreRA():
+                # Un scrape PENDANT le rattrapage : le banger deja inscrit n est
+                # pas repris par la file des nouveaux ; un vrai nouveau banger
+                # suit son chemin ordinaire (lien du scrape, gratuit).
+                _hookRA["n"] += 1
+                if _hookRA["n"] == 1:
+                    _hookRA["k11"] = _abA.signaler(
+                        [dict(_bgA.fiche("RAT_K11"), shortcode="RAT_K11")],
+                        [{"shortcode": "RAT_K11", "views": 44000, "caption": "k",
+                          "video_url": "https://cdn.test/RAT_K11-neuf.mp4"}])
+                    _rNewA = [_reelA("RAT_NEW", 99000, "https://cdn.test/RAT_NEW.mp4", "nouveau")]
+                    _exNewA = _bgA.examiner("compte.new", _rNewA, maintenant=_nowA)
+                    _abA.pousser(_abA.signaler(_exNewA["nouveaux"], _rNewA))
+                _abA._un_job(_dlRatA)
+            _nEnvA, _nTelA = len(_salonA.envois), len(_telechA)
+            _bRA = _abA.rattrapage(limite=8000, telecharger_octets=_dlRatA, entre_deux=_entreRA)
+            check("all-banger : rattrapage -- UNE requete HikerAPI par reel absent du disque, "
+                  "la reserve allant d abord aux plus vus",
+                  [c[1] for c in _appelsHkA] == ["RAT_L12", "RAT_I09", "RAT_C03", "RAT_D04", "RAT_E05"]
+                  and all(c[0] == "/v1/media/by/code" and c[2] == "jeton-test" for c in _appelsHkA),
+                  str(_appelsHkA))
+            check("all-banger : rattrapage -- aucune requete pour une video deja sur le disque",
+                  not ({"RAT_A01", "RAT_B02", "RAT_H08", "RAT_J10", "RAT_K11", "RAT_F06", "RAT_G07"}
+                       & {c[1] for c in _appelsHkA})
+                  and not any(("RAT_A01" in u or "RAT_B02" in u or "RAT_K11" in u)
+                              for u in _telechA[_nTelA:]), str(_telechA[_nTelA:]))
+            check("all-banger : rattrapage -- bilan complet, chaque fiche comptee avec sa raison",
+                  (_bRA.get("total"), _bRA.get("essais_exclus"), _bRA.get("deja_postes"),
+                   _bRA.get("deja_en_file"), _bRA.get("a_recuperer"), _bRA.get("repris_apres_echec"),
+                   _bRA.get("postables"), _bRA.get("trop_lourds"), _bRA.get("sans_video"),
+                   _bRA.get("plafond_atteint"), _bRA.get("requetes_hiker"))
+                  == (11, 1, 1, 1, 9, 1, 5, 1, 3, 0, 5)
+                  and _bRA.get("raisons_sans_video") == {"hiker:http_404": 1,
+                                                         "cdn:http_403": 1, "hiker_sans_video": 1}
+                  and _bRA["total"] == (_bRA["deja_postes"] + _bRA["deja_en_file"]
+                                        + _bRA["deja_trop_lourds"] + _bRA["refuses_par_discord"]
+                                        + _bRA["shortcode_illisible"] + _bRA["a_recuperer"])
+                  and _bRA["a_recuperer"] == (_bRA["postables"] + _bRA["trop_lourds"]
+                                              + _bRA["sans_video"] + _bRA["plafond_atteint"])
+                  and _bRA.get("sources") == {"archive": 2, "cache": 1, "hiker+cdn": 2},
+                  str(_bRA)[:400])
+            check("all-banger : rattrapage -- la rafale annoncee est dite dans le bilan",
+                  "5 message(s)" in str(_bRA.get("rafale")), str(_bRA.get("rafale")))
+            _marqueA = _jsonA(_abA.FICHIER).get("rattrapage") or {}
+            check("all-banger : rattrapage -- marque « fait » et bilan stockes dans le registre",
+                  _marqueA.get("fait_le") and _marqueA.get("commence_le")
+                  and (_marqueA.get("bilan") or {}).get("postables") == 5, str(_marqueA)[:200])
+            check("all-banger : rattrapage -- bilan journalise",
+                  any("rattrapage terminé" in l and "5 postable(s)" in l and "11 banger(s)" in l
+                      for l in _journalA), " | ".join(_journalA[-2:])[:300])
+            check("all-banger : rattrapage -- requetes comptees dans SA reserve (fichier a part)",
+                  _jsonA(_abA.FICHIER_HIKER).get("utilise") == 5
+                  and _abA.budget_hiker()["restant"] == 195)
+            check("all-banger : rattrapage -- la description complete de HikerAPI remplace la tronquee",
+                  _bgA.chemin_description("RAT_C03").is_file()
+                  and _bgA.chemin_description("RAT_C03").read_text(encoding="utf-8") == _longRatA
+                  and _abA.description_de("RAT_C03") == _longRatA)
+            check("all-banger : rattrapage -- non poste : sans video, trop lourd (compte, pas envoye)",
+                  [_abA.entree(s).get("etat") for s in ("RAT_D04", "RAT_E05", "RAT_L12", "RAT_J10")]
+                  == ["echec", "echec", "echec", "trop_lourd"]
+                  and _abA.entree("RAT_J10").get("taille") > 8000)
+            check("all-banger : rattrapage -- un banger inscrit n est pas repris en double par un scrape",
+                  _hookRA.get("k11") == [] and _abA.entree("RAT_NEW").get("etat") == "pret")
+            _bEA = _envoisA()
+            check("all-banger : rattrapage -- envoi CHRONOLOGIQUE (publication), chacun une fois",
+                  _postesA(_nEnvA) == ["RAT_A01.mp4", "RAT_B02.mp4", "RAT_C03.mp4", "RAT_H08.mp4",
+                                       "RAT_I09.mp4", "RAT_K11.mp4", "RAT_NEW.mp4"]
+                  and _bEA.get("envoyes") == 7, str(_postesA(_nEnvA)))
+            _eC3A = next((e for e in _salonA.envois[_nEnvA:] if e["noms"][0] == "RAT_C03.mp4"), {})
+            _cC3A = _carteA(_eC3A)
+            check("all-banger : rattrapage -- meme carte V2 ; vues = la plus haute connue (HikerAPI)",
+                  [c.get("type") for c in _cC3A] == [12, 10, 14, 10, 13, 1]
+                  and _cC3A[1].get("content") == "**123 456** vues"
+                  and _descA(_eC3A) == _longRatA
+                  and _eC3A["joints"].get("RAT_C03_description.txt") == _longRatA,
+                  str([c.get("content") for c in _cC3A if c.get("type") == 10])[:200])
+            _regAvantA = _jsonA(_abA.FICHIER)
+            # Redemarrage : memoire vide, meme machine -> pas de 2e rattrapage.
+            _abA._EN_COURS.clear(); _abA._DITS.clear()
+            _nAppA, _nEnvA = len(_appelsHkA), len(_salonA.envois)
+            _b2RA = _abA.rattrapage(limite=8000, telecharger_octets=_dlRatA)
+            _t2RA = _abA.tour(_posterA, lambda: True, telecharger_octets=_dlRatA,
+                              dormir=lambda s: None, limite=lambda: 8000)
+            check("all-banger : rattrapage -- apres redemarrage, jamais un second, rien de reposte",
+                  _b2RA.get("deja_fait") == _marqueA.get("fait_le") and "rattrapage" not in _t2RA
+                  and len(_appelsHkA) == _nAppA and len(_salonA.envois) == _nEnvA
+                  and _jsonA(_abA.FICHIER).get("reels")
+                  == {k: v for k, v in _regAvantA["reels"].items()}, str(_b2RA)[:200])
+
+            # 11 b) Le PLAFOND : au-dela, compte, journalise une fois, non poste.
+            _dossierRatA("rat2")
+            _abA.PLAFOND_HIKER_RATTRAPAGE = 2
+            for _i, _sc in enumerate(("RAT_P01", "RAT_P02", "RAT_P03", "RAT_P04")):
+                _ficheRatA(_sc, 40 - _i, 10000 + 1000 * _i, "p")
+                _repHkA[_sc] = _mediaA(_sc, "p", 10000 + 1000 * _i)
+            _ficheRatA("RAT_P05", 5, 5000, "p")
+            _bgA.chemin_video("RAT_P05").write_bytes(_MP4A)
+            _nEnvA = len(_salonA.envois)
+            _bPA = _abA.rattrapage(limite=10 * 1024 * 1024, telecharger_octets=_dlRatA)
+            check("all-banger : plafond HikerAPI -- 2 requetes au plus, les suivants comptes « plafond »",
+                  [c[1] for c in _appelsHkA] == ["RAT_P04", "RAT_P03"]
+                  and _bPA.get("plafond_atteint") == 2 and _bPA.get("postables") == 3
+                  and _bPA.get("requetes_hiker") == 2
+                  and [_abA.entree(s).get("raison") for s in ("RAT_P01", "RAT_P02")]
+                  == ["plafond_hiker", "plafond_hiker"], str(_bPA)[:300])
+            check("all-banger : plafond HikerAPI -- journalise une fois",
+                  sum("réserve HikerAPI épuisée" in l for l in _journalA) == 1)
+            check("all-banger : plafond HikerAPI -- total pour tout le rattrapage, pas par jour",
+                  _jsonA(_abA.FICHIER_HIKER).get("utilise") == 2
+                  and _abA._consommer_hiker(1) == "plafond")
+            _envoisA()
+            check("all-banger : plafond HikerAPI -- seuls les reels recuperes partent, dans l ordre",
+                  _postesA(_nEnvA) == ["RAT_P03.mp4", "RAT_P04.mp4", "RAT_P05.mp4"],
+                  str(_postesA(_nEnvA)))
+            _abA.PLAFOND_HIKER_RATTRAPAGE = _savA[7]
+
+            # 11 c) Arret en plein rattrapage : reprise sans reinscription, sans
+            #      repayer ce qui etait fait.
+            _dossierRatA("rat3")
+            for _sc, _v in (("RAT_R01", 30000), ("RAT_R02", 20000), ("RAT_R03", 10000)):
+                _ficheRatA(_sc, 40, _v, "r")
+                _repHkA[_sc] = _mediaA(_sc, "r", _v)
+
+            class _CoupureA(BaseException):
+                pass
+            _nDlA = {"n": 0}
+
+            def _dlCoupeA(url, info):
+                _nDlA["n"] += 1
+                if _nDlA["n"] == 2:
+                    raise _CoupureA()
+                return _MP4A
+            try:
+                _abA.rattrapage(limite=10 * 1024 * 1024, telecharger_octets=_dlCoupeA)
+                _coupeA = False
+            except _CoupureA:
+                _coupeA = True
+            _miA = _abA.rattrapage_etat()
+            check("all-banger : rattrapage coupe -- ce qui est tranche est ecrit, le reste attend",
+                  _coupeA and _miA.get("commence_le") and not _miA.get("fait_le")
+                  and [_abA.entree(s).get("etat") for s in ("RAT_R01", "RAT_R02", "RAT_R03")]
+                  == ["pret", "rattrapage", "rattrapage"], str(_miA)[:200])
+            _abA._EN_COURS.clear(); _abA._DITS.clear()
+            _bR3A = _abA.rattrapage(limite=10 * 1024 * 1024, telecharger_octets=_dlCoupeA)
+            check("all-banger : rattrapage coupe -- repris au redemarrage, sans reinscrire ni rappeler",
+                  _abA.rattrapage_etat().get("commence_le") == _miA.get("commence_le")
+                  and _abA.rattrapage_fait() and _bR3A.get("postables") == 3
+                  and _bR3A.get("a_recuperer") == 3
+                  and [c[1] for c in _appelsHkA] == ["RAT_R01", "RAT_R02", "RAT_R02", "RAT_R03"]
+                  and (_bR3A.get("reserve_hiker") or {}).get("utilise") == 4, str(_bR3A)[:300])
+
+            # 11 d) Declenche tout seul par le fil, au premier tour ou le bot
+            #      est pret -- et une seule fois.
+            _dossierRatA("rat4")
+            _ficheRatA("RAT_T01", 12, 30000, "t")
+            _bgA.chemin_video("RAT_T01").write_bytes(_MP4A)
+            _nEnvA = len(_salonA.envois)
+            _t0A = _abA.tour(_posterA, lambda: False, telecharger_octets=_dlRatA,
+                             dormir=lambda s: None, limite=lambda: 10 * 1024 * 1024)
+            check("all-banger : rattrapage -- rien tant que le bot n est pas pret",
+                  not _abA.rattrapage_etat() and "pas prêt" in str(_t0A.get("attente"))
+                  and len(_salonA.envois) == _nEnvA, str(_t0A))
+            _t1A = _abA.tour(_posterA, lambda: True, telecharger_octets=_dlRatA,
+                             dormir=lambda s: None, limite=lambda: 10 * 1024 * 1024)
+            check("all-banger : rattrapage -- lance par le fil des que le bot est pret, puis poste",
+                  (_t1A.get("rattrapage") or {}).get("postables") == 1 and _abA.rattrapage_fait()
+                  and _t1A.get("envoyes") == 1 and _postesA(_nEnvA) == ["RAT_T01.mp4"]
+                  and not _appelsHkA, str(_t1A)[:300])
+            _t2A = _abA.tour(_posterA, lambda: True, telecharger_octets=_dlRatA,
+                             dormir=lambda s: None, limite=lambda: 10 * 1024 * 1024)
+            check("all-banger : rattrapage -- le tour suivant ne le refait pas",
+                  "rattrapage" not in _t2A and _postesA(_nEnvA) == ["RAT_T01.mp4"])
+
+            # 11 e bis) HikerAPI refuse NOTRE acces (solde epuise, cadence,
+            #      jeton) : une requete, puis SUSPENSION. Rien n est tranche,
+            #      rien n est marque « fait » : avant, un 402 au mauvais moment
+            #      classait tout « hiker_coupe » et le rattrapage n etait jamais
+            #      refait -- jusqu a 200 bangers recuperables perdus.
+            for _codeZ in ("402", "429"):
+                _dossierRatA("rat6_" + _codeZ)
+                for _sc, _v in (("RAT_Z01", 40000), ("RAT_Z02", 30000), ("RAT_Z03", 20000)):
+                    _ficheRatA(_sc, 40, _v, "z")
+                    _repHkA[_sc] = _mediaA(_sc, "z", _v)
+                _repHkA["RAT_Z01"] = (None, "HTTP " + _codeZ + ": {\"detail\":\"Payment Required\"}")
+                _ficheRatA("RAT_Z04", 35, 10000, "z")
+                _bgA.chemin_video("RAT_Z04").write_bytes(_MP4A)
+                _bZA = _abA.rattrapage(limite=10 * 1024 * 1024, telecharger_octets=_dlRatA)
+                _mZA = _abA.rattrapage_etat()
+                check("all-banger : HikerAPI en " + _codeZ + " -> une requete, puis SUSPENSION "
+                      "(rien tranche, pas « fait »)",
+                      [c[1] for c in _appelsHkA] == ["RAT_Z01"]
+                      and _bZA.get("suspendu") == "http_" + _codeZ and _bZA.get("restants") == 3
+                      and [_abA.entree(s).get("etat")
+                           for s in ("RAT_Z01", "RAT_Z02", "RAT_Z03", "RAT_Z04")]
+                      == ["rattrapage", "rattrapage", "rattrapage", "pret"]
+                      and not _abA.rattrapage_fait()
+                      and (_mZA.get("suspendu") or {}).get("raison") == "http_" + _codeZ
+                      and "Payment Required" in str((_mZA.get("suspendu") or {}).get("detail"))
+                      and _mZA.get("reprise_apres", 0) - _tA.time() > 5 * 3600
+                      and _abA.budget_hiker()["utilise"] == 1
+                      and any("SUSPENDU" in l and "http_" + _codeZ in l for l in _journalA),
+                      str(_bZA)[:300])
+                # le fil ne le relance PAS avant l heure de reprise (chaque tour
+                # de 10 min redebiterait la reserve pour le meme refus)...
+                _nZA = len(_appelsHkA)
+                _postesZA = []
+
+                def _posterZA(sc, e):
+                    _postesZA.append(sc)
+                    return {"message_id": 700 + len(_postesZA), "channel_id": 9}
+                _tZA = _abA.tour(_posterZA, lambda: True, telecharger_octets=_dlRatA,
+                                 dormir=lambda s: None, limite=lambda: 10 * 1024 * 1024)
+                check("all-banger : HikerAPI en " + _codeZ + " -> pas de relance avant l heure "
+                      "de reprise ; le deja recupere part",
+                      "rattrapage" not in _tZA and len(_appelsHkA) == _nZA
+                      and _postesZA == ["RAT_Z04"] and not _abA.rattrapage_fait(), str(_tZA))
+                # ... puis, l heure venue et HikerAPI revenu, TOUT est recupere
+                _dZA = _abA.charger()
+                _dZA["rattrapage"]["reprise_apres"] = int(_tA.time()) - 1
+                _abA._ecrire(_dZA)
+                _repHkA["RAT_Z01"] = _mediaA("RAT_Z01", "z", 40000)
+                _tZ2A = _abA.tour(_posterZA, lambda: True, telecharger_octets=_dlRatA,
+                                  dormir=lambda s: None, limite=lambda: 10 * 1024 * 1024)
+                _bZ2A = _tZ2A.get("rattrapage") or {}
+                _mZ2A = _abA.rattrapage_etat()
+                check("all-banger : HikerAPI en " + _codeZ + " -> reprise a l heure dite : tout "
+                      "recupere et poste (apres le deja parti), marque fait",
+                      _abA.rattrapage_fait() and _bZ2A.get("postables") == 4
+                      and _bZ2A.get("sans_video") == 0
+                      and [c[1] for c in _appelsHkA] == ["RAT_Z01", "RAT_Z01", "RAT_Z02", "RAT_Z03"]
+                      and _bZ2A.get("requetes_hiker") == 4 == _abA.budget_hiker()["utilise"]
+                      and _bZ2A.get("suspensions") == 1
+                      and (_mZ2A.get("derniere_suspension") or {}).get("raison") == "http_" + _codeZ
+                      and "reprise_apres" not in _mZ2A
+                      and _postesZA == ["RAT_Z04", "RAT_Z01", "RAT_Z02", "RAT_Z03"],
+                      f"{str(_bZ2A)[:200]} {_postesZA}")
+            # ... le reseau muet : cinq erreurs d affilee, pas une de plus, et
+            # ces cinq-la sont des victimes de la panne, pas des reels ratés
+            _dossierRatA("rat7")
+            for _i in range(7):
+                _ficheRatA(f"RAT_N0{_i}", 40, 50000 - _i, "n")
+                _repHkA[f"RAT_N0{_i}"] = (None, "HTTPSConnectionPool: Read timed out.")
+            _bNA = _abA.rattrapage(limite=10 * 1024 * 1024, telecharger_octets=_dlRatA)
+            check("all-banger : reseau muet -> 5 erreurs d affilee, puis SUSPENSION ; les 7 restent a recuperer",
+                  len(_appelsHkA) == 5 and _bNA.get("suspendu") == "reseau"
+                  and _bNA.get("restants") == 7
+                  and all(_abA.entree(f"RAT_N0{_i}").get("etat") == "rattrapage" for _i in range(7))
+                  and _abA.budget_hiker()["utilise"] == 5 and not _abA.rattrapage_fait(),
+                  str(_bNA)[:300])
+            # coupe depuis plus de 7 jours : on cesse d attendre, et on le dit
+            _nJNA = len(_journalA)
+            _bN2A = _abA.rattrapage(limite=10 * 1024 * 1024, telecharger_octets=_dlRatA,
+                                    maintenant=_tA.time() + 8 * 86400)
+            check("all-banger : coupure de plus de 7 jours -> classes « hiker_coupe », clos, journalise",
+                  _abA.rattrapage_fait() and len(_appelsHkA) == 10
+                  and _bN2A.get("raisons_sans_video") == {"hiker_coupe:reseau": 7}
+                  and _bN2A.get("postables") == 0 and _bN2A.get("requetes_hiker") == 10
+                  and (_abA.rattrapage_etat().get("abandon") or {}).get("reels") == 7
+                  and any("le rattrapage est clos" in l for l in _journalA[_nJNA:]),
+                  str(_bN2A)[:300])
+            # des erreurs reseau ISOLEES (HikerAPI repond ensuite) restent des
+            # echecs de ces reels : pas de suspension pour si peu
+            _dossierRatA("rat7b")
+            for _i in range(3):
+                _ficheRatA(f"RAT_M0{_i}", 40, 50000 - _i, "m")
+            _repHkA["RAT_M00"] = (None, "HTTPSConnectionPool: Read timed out.")
+            _repHkA["RAT_M01"] = (None, "HTTPSConnectionPool: Read timed out.")
+            _repHkA["RAT_M02"] = _mediaA("RAT_M02", "m", 49998)
+            _bMA = _abA.rattrapage(limite=10 * 1024 * 1024, telecharger_octets=_dlRatA)
+            check("all-banger : erreurs reseau isolees -> echecs de ces reels, pas de suspension",
+                  _abA.rattrapage_fait() and "suspendu" not in _bMA
+                  and _bMA.get("raisons_sans_video") == {"hiker:reseau": 2}
+                  and _bMA.get("postables") == 1, str(_bMA)[:300])
+            # sans jeton : le disque d abord, le reste SUSPENDU (pas « sans video »)
+            _dossierRatA("rat8")
+            _ficheRatA("RAT_S01", 40, 30000, "s")                     # pas sur le disque
+            _ficheRatA("RAT_S02", 41, 20000, "s")                     # sur le disque
+            _bgA.chemin_video("RAT_S02").write_bytes(_MP4A)
+            _ficheRatA("RAT_S03", 39, 10000, "s")                     # sera « plafond »
+            _ficheRatA("RAT_S04", 38, 9000, "s")                      # echec propre au reel
+            _hkA.get_token = lambda: ""
+            try:
+                _bSA = _abA.rattrapage(limite=10 * 1024 * 1024, telecharger_octets=_dlRatA)
+            finally:
+                _hkA.get_token = lambda: "jeton-test"
+            check("all-banger : sans jeton HikerAPI -> le disque d abord, le reste SUSPENDU",
+                  _bSA.get("suspendu") == "sans_jeton" and not _appelsHkA
+                  and _abA.entree("RAT_S01").get("etat") == "rattrapage"
+                  and _abA.entree("RAT_S02").get("etat") == "pret" and not _abA.rattrapage_fait(),
+                  str(_bSA)[:300])
+            # Le lien GRATUIT d un scrape reprend un banger du rattrapage en
+            # attente (ou ecarte faute d HikerAPI) ; jamais un echec propre au reel.
+            _dS = _abA.charger()
+            _dS["reels"]["RAT_S03"].update(etat="echec", raison="plafond_hiker")
+            _dS["reels"]["RAT_S04"].update(etat="echec", raison="hiker:http_404")
+            _abA._ecrire(_dS)
+            _jSA = _abA.signaler([], [
+                {"shortcode": s, "views": 30000, "caption": "s",
+                 "video_url": f"https://cdn.test/{s}-scrape.mp4"}
+                for s in ("RAT_S01", "RAT_S02", "RAT_S03", "RAT_S04")])
+            _eS1A = _abA.entree("RAT_S01")
+            check("all-banger : un scrape reprend gratuitement un banger du rattrapage en attente ou « plafond »",
+                  sorted(j["shortcode"] for j in _jSA) == ["RAT_S01", "RAT_S03"]
+                  and _eS1A.get("etat") == "video" and _eS1A.get("essais") == 0
+                  and (_eS1A.get("repris_par_scrape") or {}).get("etat_avant") == "rattrapage"
+                  and _abA.entree("RAT_S03").get("etat") == "video"
+                  and _abA.entree("RAT_S04").get("etat") == "echec"
+                  and _abA.entree("RAT_S02").get("etat") == "pret",
+                  str(_jSA)[:200])
+            # un premier telechargement rate : le banger attend un lien neuf, et
+            # sa detection vieille de 40 jours ne le fait pas expirer (l attente
+            # se compte depuis la reprise)
+            for _j in _jSA:
+                _abA.traiter_job(_j, telecharger_octets=_dl403A)
+            _nExpA = _abA.expirer()
+            _eS1bA = _abA.entree("RAT_S01")
+            _jS2A = _abA.signaler([], [
+                {"shortcode": s, "views": 30000, "caption": "s",
+                 "video_url": f"https://cdn.test/{s}-scrape2.mp4"} for s in ("RAT_S01", "RAT_S03")])
+            for _j in _jS2A:
+                _abA.traiter_job(_j, telecharger_octets=_dlRatA)
+            _dS = _abA.charger()
+            _dS["rattrapage"]["reprise_apres"] = 0
+            _abA._ecrire(_dS)
+            _bS2A = _abA.rattrapage(limite=10 * 1024 * 1024, telecharger_octets=_dlRatA)
+            check("all-banger : ... un echec ne le fait pas expirer ; le lien suivant le recupere "
+                  "(CDN, 0 requete), et le rattrapage se clot sans rien payer",
+                  _nExpA == 0 and _eS1bA.get("etat") == "video" and _eS1bA.get("essais") == 1
+                  and [_abA.entree(s).get("etat") for s in ("RAT_S01", "RAT_S03")] == ["pret", "pret"]
+                  and _abA.entree("RAT_S01").get("source") == "cdn"
+                  and not _appelsHkA and _abA.rattrapage_fait() and _bS2A.get("postables") == 3
+                  and "https://cdn.test/RAT_S01-scrape2.mp4" in _telechA,
+                  f"{_nExpA} {_eS1bA} {str(_bS2A)[:200]}")
+
+            # 11 f) Une entree dont l ecriture echoue n est pas declaree faite :
+            #      sa video est payee et sur le disque, le tour suivant la reprend.
+            _dossierRatA("rat9")
+            for _i, _sc in enumerate(("RAT_W01", "RAT_W02", "RAT_W03")):
+                _ficheRatA(_sc, 40 - _i, 30000 - 1000 * _i, "w")
+                _repHkA[_sc] = _mediaA(_sc, "w", 30000)
+            _vraiEcrireA = _abA._ecrire
+            _panneEcrA = {"faite": False}
+
+            def _ecrirePanneA(d):
+                # l ecriture qui tranche RAT_W02 echoue UNE fois (disque plein passager)
+                if (not _panneEcrA["faite"]
+                        and ((d.get("reels") or {}).get("RAT_W02") or {}).get("etat") == "pret"):
+                    _panneEcrA["faite"] = True
+                    return False
+                return _vraiEcrireA(d)
+            _abA._ecrire = _ecrirePanneA
+            try:
+                _bWA = _abA.rattrapage(limite=10 * 1024 * 1024, telecharger_octets=_dlRatA)
+            finally:
+                _abA._ecrire = _vraiEcrireA
+            check("all-banger : rattrapage -- une entree non ecrite : PAS marque fait, erreur dite",
+                  _panneEcrA["faite"] and "erreur" in _bWA and _bWA.get("restants") == ["RAT_W02"]
+                  and not _abA.rattrapage_fait()
+                  and _abA.entree("RAT_W02").get("etat") == "rattrapage"
+                  and _bgA.video_presente("RAT_W02")
+                  and any("non enregistrée(s)" in l for l in _journalA), str(_bWA)[:300])
+            _nWA = len(_appelsHkA)
+            _bW2A = _abA.rattrapage(limite=10 * 1024 * 1024, telecharger_octets=_dlRatA)
+            check("all-banger : ... le tour suivant la reprend SANS nouvelle requete, et elle partira",
+                  _abA.rattrapage_fait() and _nWA == 3 and len(_appelsHkA) == 3
+                  and _abA.entree("RAT_W02").get("etat") == "pret"
+                  and _bW2A.get("postables") == 3 and "RAT_W02" in _abA.a_poster()
+                  and _bW2A.get("sources") == {"hiker+cdn": 3} and _bW2A.get("requetes_hiker") == 3,
+                  str(_bW2A)[:300])
+
+            # 11 g) Compteur de la reserve impossible a ecrire : ce n est PAS le
+            #      plafond. Avant : « reserve epuisee (200 requetes) » au journal,
+            #      le reel abandonne pour toujours, zero requete faite.
+            _dossierRatA("rat10")
+            _ficheRatA("RAT_K01", 40, 30000, "k")
+            _repHkA["RAT_K01"] = _mediaA("RAT_K01", "k", 30000)
+            import safe_json as _sjA
+            _vraiSjWA = _sjA.write
+            _sjA.write = (lambda p, d, **k: False if _plA.Path(p) == _abA.FICHIER_HIKER
+                          else _vraiSjWA(p, d, **k))
+            _nJKA = len(_journalA)
+            try:
+                _bKA = _abA.rattrapage(limite=10 * 1024 * 1024, telecharger_octets=_dlRatA)
+            finally:
+                _sjA.write = _vraiSjWA
+            check("all-banger : compteur de reserve non ecrit -> pas « plafond » : SUSPENSION, cause dite",
+                  _bKA.get("suspendu") == "compteur_non_ecrit" and not _appelsHkA
+                  and _abA.budget_hiker()["utilise"] == 0
+                  and _abA.entree("RAT_K01").get("etat") == "rattrapage"
+                  and not _abA.rattrapage_fait()
+                  and not any("réserve HikerAPI épuisée" in l for l in _journalA[_nJKA:])
+                  and any("compteur HikerAPI du rattrapage non écrit" in l
+                          for l in _journalA[_nJKA:])
+                  and any("SUSPENDU (compteur_non_ecrit)" in l for l in _journalA[_nJKA:]),
+                  str(_bKA)[:300])
+            _dK = _abA.charger()
+            _dK["rattrapage"]["reprise_apres"] = 0
+            _abA._ecrire(_dK)
+            _bK2A = _abA.rattrapage(limite=10 * 1024 * 1024, telecharger_octets=_dlRatA)
+            check("all-banger : ... le disque revenu, la reprise recupere le reel (plafond_atteint = 0)",
+                  _abA.rattrapage_fait() and _bK2A.get("postables") == 1
+                  and _bK2A.get("plafond_atteint") == 0 and _abA.budget_hiker()["utilise"] == 1,
+                  str(_bK2A)[:300])
+
+            # 11 h) Arret entre la requete HikerAPI et l ecriture de l etat : la
+            #      requete est consignee AVANT l appel ; le bilan reste juste.
+            _dossierRatA("rat11")
+            _ficheRatA("RAT_X01", 40, 30000, "x")
+            _repHkA["RAT_X01"] = _mediaA("RAT_X01", "x", 30000)
+
+            class _TueA(BaseException):
+                pass
+            _vraiUnA = _abA._rattraper_un
+
+            def _meurtA(*a, **k):
+                _vraiUnA(*a, **k)       # requete payee, video descendue...
+                raise _TueA()           # ... et le processus meurt avant l ecriture
+            _abA._rattraper_un = _meurtA
+            try:
+                _abA.rattrapage(limite=10 * 1024 * 1024, telecharger_octets=_dlRatA)
+            except _TueA:
+                pass
+            finally:
+                _abA._rattraper_un = _vraiUnA
+            _eXA = _abA.entree("RAT_X01")
+            _bXA = _abA.rattrapage(limite=10 * 1024 * 1024, telecharger_octets=_dlRatA)
+            _rsXA = _bXA.get("reserve_hiker") or {}
+            check("all-banger : arret entre requete et etat -> bilan juste (1 requete, source hiker+cdn)",
+                  _eXA.get("etat") == "rattrapage" and _eXA.get("requete_hiker") is True
+                  and len(_appelsHkA) == 1 and _bXA.get("requetes_hiker") == 1
+                  and _rsXA.get("utilise", 0) - _rsXA.get("avant", 0) == 1
+                  and _bXA.get("sources") == {"hiker+cdn": 1}, str(_bXA)[:300])
+
+            # 11 e) Registre vide ou illisible : rien n est « consomme ».
+            _dossierRatA("rat5")
+            _v5A = _abA.rattrapage(limite=10 * 1024 * 1024)
+            check("all-banger : rattrapage -- registre vide : differe (pas marque fait), et dit",
+                  _v5A.get("attente") and not _abA.rattrapage_etat()
+                  and any("rattrapage différé" in l for l in _journalA), str(_v5A))
+        finally:
+            (_bgA.FICHIER, _bgA.DOSSIER, _bgA.DETAILS_DIR, _abA.FICHIER,
+             _abA.DOSSIER_CACHE_INSTA, _abA.FICHIER_HIKER) = _savPrincA
+            _hkA._appel, _hkA.get_token = _savHkA
+            _abA.PLAFOND_HIKER_RATTRAPAGE = _savA[7]
+            _abA._EN_COURS.clear(); _abA._DITS.clear()
         _srcWA = _plA.Path("web_upload.py").read_text(encoding="utf-8")
-        check("all-banger : le rattrapage n est appele nulle part (pas de salve)",
-              not _reA.search(r"\.rattrapage\(", _srcWA))
+        check("all-banger : le site n appelle pas le rattrapage : seul le fil (garde machine) le lance",
+              not _reA.search(r"\.rattrapage\(", _srcWA)
+              and "rattrapage(" in _inA.getsource(_abA.tour)
+              and "rattrapage_fait()" in _inA.getsource(_abA.tour))
+
+        # 11 bis) « Ca envoie qu un seul banger -- envoie tous les bangers, tout
+        #     le temps » (retour du proprietaire, 26/09/2026). Par le VRAI fil
+        #     (tour : telechargement, puis envois) et le vrai envoyer() : cinq
+        #     nouveaux bangers signales d un coup, trois au scrape suivant, et
+        #     une coupure reseau sur le 3e envoi. Les HUIT partent, chacun une
+        #     fois, dans l ordre, et rien d autre que la file ne les retient.
+        _sav8A = (_bgA.FICHIER, _bgA.DOSSIER, _abA.FICHIER, list(_guildA.text_channels))
+        _t8A = _tmpA / "huit"
+        _t8A.mkdir()
+        try:
+            _bgA.FICHIER = _t8A / "bangers.json"
+            _bgA.DOSSIER = _t8A / "bangers"
+            _abA.FICHIER = _t8A / "bangers_all.json"
+            _d8A = _abA._vide()
+            _d8A["rattrapage"] = {"fait_le": 1}      # le rattrapage n est pas l objet ici
+            _abA._ecrire(_d8A)
+
+            class _Salon8A(_SalonA):
+                async def send(self, *a, **k):
+                    self.essais8 = getattr(self, "essais8", 0) + 1
+                    if self.essais8 == 3:
+                        raise ConnectionResetError("coupure au milieu de la rafale")
+                    return await _SalonA.send(self, *a, **k)
+            _salon8A = _Salon8A(444, "all-banger", _guildA)
+            _guildA.text_channels = [_generalA, _salon8A]
+            _gen8A = len(_generalA.envois)
+            _dorm8A = []
+
+            def _tour8A():
+                return _abA.tour(_posterA, lambda: True, attente=0,
+                                 telecharger_octets=_dlOkA, dormir=_dorm8A.append)
+
+            def _scrape8A(compte, rangs, age_jours):
+                _rs = [dict(_reelA(f"HUIT0{k}", 20000 + k, f"https://cdn.test/HUIT0{k}.mp4",
+                                   f"legende {k}"), taken_at=_nowA - (age_jours - k * 0.1) * 86400)
+                       for k in rangs]
+                _ex = _bgA.examiner(compte, _rs, maintenant=_nowA)
+                return _abA.pousser(_abA.signaler(_ex["nouveaux"], _rs))
+            _j5A = _scrape8A("compte.huit.a", range(1, 6), 20)
+            _bil8A = [_tour8A() for _k in range(7)]
+            _j3A = _scrape8A("compte.huit.b", range(6, 9), 10)
+            _bil8A += [_tour8A() for _k in range(7)]
+            _noms8A = [e["noms"][0][:-4] for e in _salon8A.envois]
+            _attendu8A = [f"HUIT0{k}" for k in range(1, 9)]
+            check("all-banger : 5 bangers d un coup puis 3 -> les HUIT partent, un par un, "
+                  "une fois, dans l ordre (meme apres une coupure au 3e envoi)",
+                  _j5A == 5 and _j3A == 3 and _noms8A == _attendu8A
+                  and all(_abA.entree(sc).get("etat") == "envoye" for sc in _attendu8A)
+                  and len(_generalA.envois) == _gen8A and _salon8A.essais8 == 9
+                  and _dorm8A.count(_abA.DELAI_ENTRE_MESSAGES) >= 6,
+                  f"{_noms8A} essais={getattr(_salon8A, 'essais8', 0)} {_bil8A}")
+        finally:
+            _bgA.FICHIER, _bgA.DOSSIER, _abA.FICHIER, _guildA.text_channels = (
+                _sav8A[0], _sav8A[1], _sav8A[2], _sav8A[3])
+            _abA._EN_COURS.clear()
+            while not _abA.FILE.empty():
+                _abA.FILE.get_nowait()
 
         # 12) Branchement dans le site, et garde de machine
         import web_upload as _wA
@@ -12692,6 +13548,11 @@ try:
         check("all-banger : le fil d envoi ne s arme que sur la machine de production",
               "if not _machine_proprietaire(\"all-banger\")"
               in _inA.getsource(_wA._start_all_banger_daemon))
+        check("all-banger : le fil connait la taille acceptee par le serveur (rattrapage)",
+              "limite=lambda: _ab.limite_via_bot(_BOT_REF)"
+              in _inA.getsource(_wA._start_all_banger_daemon)
+              and _abA.limite_via_bot(_tyA.SimpleNamespace(get_guild=_clientA.get_guild))
+              == 10 * 1024 * 1024 and _abA.limite_via_bot(None) == 0)
         check("all-banger : le fil d envoi est lance au demarrage du site",
               "_start_all_banger_daemon()" in _srcWA.split("def create_app", 1)[-1])
         check("all-banger : l envoi passe par la boucle du bot",
@@ -12716,12 +13577,17 @@ try:
             check("all-banger : bot pas pret -> la video est gardee, rien ne part",
                   _abA.entree("ALLBG21").get("etat") == "pret" and len(_salonA.envois) == _nA
                   and "pas prêt" in str(_tN.get("attente")), str(_tN))
+            # Le rattrapage a son propre essai (11) ; sur cette machine-ci il a
+            # deja eu lieu, sinon ce tour le ferait avant d envoyer ALLBG21.
+            _dF = _abA.charger()
+            _dF["rattrapage"] = {"commence_le": int(_nowA), "fait_le": int(_nowA), "bilan": {}}
+            _abA._ecrire(_dF)
             _pretA["v"] = True
             _abA.tour(lambda sc, e: _abA.poster_via_bot(_botA, sc, e),
                       lambda: _abA.bot_pret(_botA), dormir=lambda s: None)
             check("all-banger : bot pret -> poste depuis la boucle du bot",
                   _abA.entree("ALLBG21").get("etat") == "envoye"
-                  and _salonA.envois[-1]["noms"] == ["ALLBG21.mp4"])
+                  and _salonA.envois[-1]["noms"] == ["ALLBG21.mp4", "ALLBG21_description.txt"])
         finally:
             _boucleA.call_soon_threadsafe(_boucleA.stop)
             _filA.join(5)
@@ -12730,9 +13596,28 @@ try:
         _srcAB = _plA.Path("all_banger.py").read_text(encoding="utf-8")
         check("all-banger : aucun appel HikerAPI, Apify ni yt-dlp pendant toute la chaine",
               not _interditsA, str(_interditsA))
-        check("all-banger : le module n importe aucune source payante",
+        check("all-banger : le module n importe ni Apify, ni reels_source, ni insta_scraper",
               not _reA.search(r"^\s*(?:import|from)\s+(?:apify_reels|reels_source|"
-                              r"hiker_reels|insta_scraper)\b", _srcAB, _reA.M))
+                              r"insta_scraper)\b", _srcAB, _reA.M))
+        # HikerAPI : SEULEMENT dans le rattrapage (sa reserve plafonnee), jamais
+        # dans le chemin d un nouveau banger, qui ne coute rien.
+        _hkFonctionsA = {n for n, f in vars(_abA).items() if _inA.isfunction(f)
+                         and getattr(f, "__module__", "") == _abA.__name__
+                         and "hiker_reels" in _inA.getsource(f)}
+        check("all-banger : HikerAPI n est importe que par le rattrapage",
+              _hkFonctionsA == {"_hiker_pret", "_media_hiker"}
+              and len(_reA.findall(r"^\s*import hiker_reels\b", _srcAB, _reA.M)) == 2
+              and not any("hiker" in _inA.getsource(getattr(_abA, n)).lower()
+                          for n in ("signaler", "traiter_job", "telecharger", "envoyer",
+                                    "traiter_envois", "retrouver")),
+              str(sorted(_hkFonctionsA)))
+        check("all-banger : la reserve du rattrapage est a part de l enveloppe du jour",
+              "_consommer_hiker(1)" in _inA.getsource(_abA._rattraper_un)
+              and "_consommer(" not in _inA.getsource(_abA._rattraper_un).replace(
+                  "_consommer_hiker(", "")
+              and "safe_json.write" in _inA.getsource(_abA._consommer_hiker)
+              and _abA.PLAFOND_HIKER_RATTRAPAGE == 200
+              and _abA.FICHIER_HIKER.name == "bangers_all_hiker.json")
         check("all-banger : le registre passe par safe_json (ecriture atomique)",
               "safe_json.write" in _inA.getsource(_abA._ecrire)
               and "os.replace" in _inA.getsource(_abA.telecharger))
@@ -12740,12 +13625,43 @@ try:
         check("all-banger : la publication du matin (Jessye, salon fixe) est intacte",
               _bgA.CHANNEL_ID == 1548115360702664804 and _bgA.IDENTITE == "jessye"
               and "preparer_fiches" in _inA.getsource(_wA._banger_cycle))
+        # ... et sa carte est la MEME qu avant la mise en commun des briques :
+        # composants releves sur l ancienne fiche_discord (commit d73be6f).
+        _vMA = _tmpA / "MATIN01.mp4"
+        _vMA.write_bytes(_MP4A)
+        _viewMA, _filesMA = _bgA.fiche_discord(
+            {"shortcode": "MATIN01", "compte": "compte.matin", "va": "VA Matin", "discord_id": "",
+             "jour_bilan": "2026-09-25", "vues": 15432, "likes": 800, "commentaires": 12,
+             "url": "https://www.instagram.com/p/MATIN01/",
+             "description": "Legende du matin #tag_un"}, _vMA)
+        _attenduMA = json.loads(
+            '[{"type":17,"accent_color":5793266,"spoiler":false,"components":[{"type":10,"content":'
+            '"### @compte.matin\\n**G\\u00e9r\\u00e9 par :** VA Matin\\nJessye \\u00b7 Bangers du '
+            '25/09/2026\\n\\n**15 432** vues  \\u00b7  **12** commentaires  \\u00b7  **800** likes'
+            '\\n-# Vues du dernier relev\\u00e9 disponible"},{"type":14,"divider":true,"spacing":1},'
+            '{"type":12,"items":[{"media":{"url":"attachment://MATIN01.mp4"},"spoiler":false,'
+            '"description":"Vid\\u00e9o de @compte.matin"}]},{"type":14,"divider":true,"spacing":1},'
+            '{"type":10,"content":"**Description \\u00e0 copier**\\n```\\nLegende du matin #tag_un'
+            '\\n```"},{"type":13,"file":{"url":"attachment://MATIN01_description.txt"},'
+            '"spoiler":false},{"type":1,"components":[{"type":2,"style":5,"disabled":false,'
+            '"label":"Voir le reel sur Instagram","url":"https://www.instagram.com/p/MATIN01/"}]}]}]')
+        check("all-banger : la carte du matin est rendue A L IDENTIQUE (composants et fichiers)",
+              _viewMA.to_components() == _attenduMA
+              and [f.filename for f in _filesMA] == ["MATIN01.mp4", "MATIN01_description.txt"],
+              json.dumps(_viewMA.to_components(), ensure_ascii=False)[:300])
+        for _f in _filesMA:
+            _f.close()
+        check("all-banger : matin et all-banger partagent les memes briques (description, bouton, video)",
+              all("blocs_description_discord(" in _inA.getsource(f) and "bloc_video_discord(" in
+                  _inA.getsource(f) for f in (_bgA.fiche_discord, _abA.vue_message)))
     finally:
         _bgA.FICHIER, _bgA.DOSSIER, _bgA.DETAILS_DIR, _abA.FICHIER, \
-            _abA.DOSSIER_CACHE_INSTA, _abA._est_une_video = _savA
+            _abA.DOSSIER_CACHE_INSTA, _abA._est_une_video, _abA.FICHIER_HIKER, \
+            _abA.PLAFOND_HIKER_RATTRAPAGE = _savA
         for _modO, _fnN, _fnO in _savPiegesA:
             setattr(_modO, _fnN, _fnO)
         _logA.getLogger("vabot.all_banger").removeHandler(_oreilleA)
+        _logA.getLogger("vabot.all_banger").setLevel(_niveauA)
         _abA._EN_COURS.clear(); _abA._DITS.clear()
         while not _abA.FILE.empty():
             _abA.FILE.get_nowait()
@@ -12762,11 +13678,16 @@ try:
               _vraieSondeA(_vraieA) and not _vraieSondeA(_fausseA))
     else:
         print("     (ffmpeg absent : sonde ffprobe non verifiee sur ce poste)")
-    shutil.rmtree(_tmpA, ignore_errors=True)
 except Exception as _eA:
     import traceback as _tbA
     _tbA.print_exc()
     check("all-banger : testable", False, repr(_eA)[:220])
+finally:
+    # Le bac a sable part TOUJOURS, meme quand une verification a leve : avant,
+    # l effacement etait la derniere ligne du try, et une exception laissait
+    # derriere elle des bangers/<code>.mp4 d essai.
+    if "_tmpA" in globals():
+        shutil.rmtree(_tmpA, ignore_errors=True)
 
 # --- Les DEUX classements : report Discord et page /clics ---------------
 # Le premier dit qui envoie du trafic, le second qui le convertit. Ils

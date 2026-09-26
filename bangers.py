@@ -979,9 +979,13 @@ def _mention_gerant(f):
 
 
 def fiche_discord(f, fichier, limite=25 * 1024 * 1024):
-    """Une carte native Discord ; fichiers texte complets, mentions non notifiantes."""
+    """Une carte native Discord ; fichiers texte complets, mentions non notifiantes.
+
+    La vidéo, la description et le bouton viennent des briques partagées avec
+    le salon « all-banger » (bloc_video_discord, blocs_description_discord) ;
+    seul l'en-tête (compte, VA, statistiques) est propre au message du matin.
+    """
     import discord
-    import io
     date = datetime.strptime(f['jour_bilan'], '%Y-%m-%d').strftime('%d/%m/%Y')
     vues = f.get('vues_actuelles') if f.get('vues_actuelles') is not None else f.get('vues')
     commentaires = f.get('commentaires')
@@ -997,16 +1001,60 @@ def fiche_discord(f, fichier, limite=25 * 1024 * 1024):
     children = [discord.ui.TextDisplay(header), discord.ui.Separator()]
     files = []
     if fichier and fichier.is_file() and fichier.stat().st_size <= limite:
-        filename = f['shortcode'] + '.mp4'
-        files.append(discord.File(str(fichier), filename=filename))
-        children.append(discord.ui.MediaGallery(discord.MediaGalleryItem(
-            'attachment://' + filename, description='Vidéo de @' + f['compte'])))
+        galerie, video = bloc_video_discord(f['shortcode'], fichier, 'Vidéo de @' + f['compte'])
+        files.append(video)
+        children.append(galerie)
     else:
         raison = ('La vidéo est archivée, mais dépasse la taille acceptée par Discord.'
                   if fichier else 'La vidéo n’a pas pu être récupérée. Le lien reste conservé.')
         children.append(discord.ui.TextDisplay('**Vidéo indisponible dans Discord**\n' + raison))
     children.append(discord.ui.Separator())
-    desc = str(f.get('description') or '')
+    blocs, joints = blocs_description_discord(f['shortcode'], f.get('description'), f['url'])
+    children.extend(blocs)
+    files.extend(joints)
+    view = discord.ui.LayoutView(timeout=None)
+    view.add_item(discord.ui.Container(*children, accent_colour=COULEUR_FICHE))
+    return view, files
+
+
+#: Le liseré des cartes de bangers, le même partout (matin et « all-banger ») :
+#: le salon doit reconnaître une carte de banger d'un coup d'œil.
+COULEUR_FICHE = 0x5865F2
+
+
+def bloc_video_discord(shortcode, fichier, description=None):
+    """La vidéo d'un banger en galerie (Components V2) et le fichier à joindre.
+
+    Commun à la fiche du matin et au salon « all-banger » : la galerie pointe
+    sur `attachment://<shortcode>.mp4`, et c'est ce NOM de pièce jointe que
+    les vérifications anti-doublon relisent ensuite dans le salon. Deux
+    constructions séparées pouvaient diverger sans que rien ne le dise.
+    `description` est le texte alternatif de la vidéo (None : aucun).
+    """
+    import discord
+    filename = shortcode + '.mp4'
+    galerie = discord.ui.MediaGallery(discord.MediaGalleryItem(
+        'attachment://' + filename, description=description))
+    return galerie, discord.File(str(fichier), filename=filename)
+
+
+def blocs_description_discord(shortcode, description, url):
+    """« Description à copier » puis le bouton « Voir le reel sur Instagram ».
+
+    Rend (composants, fichiers). Les deux messages de bangers (la fiche du
+    matin, le salon « all-banger ») les montrent À L'IDENTIQUE : le
+    propriétaire les copie de l'un comme de l'autre, une coupe différente
+    d'un côté aurait donné deux textes pour le même reel.
+
+    Le texte va dans un bloc de code : il s'y copie tel quel (pas d'italique
+    mangé entre deux « _ » de hashtags, pas de lien déroulé). Au-delà de 2700
+    signes il est coupé à l'affichage — un message en composants ne porte que
+    4000 signes en tout — et le fichier joint garde TOUJOURS le texte complet.
+    """
+    import discord
+    import io
+    children, files = [], []
+    desc = str(description or '')
     if desc:
         display = desc.strip()
         if display.startswith('```\n') and display.endswith('```'):
@@ -1017,15 +1065,13 @@ def fiche_discord(f, fichier, limite=25 * 1024 * 1024):
             display = display[:2700] + '…'
             suffix = '\nTexte complet dans le fichier ci-dessous.'
         children.append(discord.ui.TextDisplay('**Description à copier**\n```\n' + display + '\n```' + suffix))
-        filename = f['shortcode'] + '_description.txt'
+        filename = shortcode + '_description.txt'
         files.append(discord.File(io.BytesIO(desc.encode('utf-8')), filename=filename))
         children.append(discord.ui.File('attachment://' + filename))
     else:
         children.append(discord.ui.TextDisplay('**Description**\nAucune description récupérée pour ce reel.'))
-    children.append(discord.ui.ActionRow(discord.ui.Button(label='Voir le reel sur Instagram', url=f['url'])))
-    view = discord.ui.LayoutView(timeout=None)
-    view.add_item(discord.ui.Container(*children, accent_colour=0x5865F2))
-    return view, files
+    children.append(discord.ui.ActionRow(discord.ui.Button(label='Voir le reel sur Instagram', url=url)))
+    return children, files
 
 
 def textes_recap(record):
