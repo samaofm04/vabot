@@ -12251,6 +12251,14 @@ try:
              _abA.DOSSIER_CACHE_INSTA, _abA._est_une_video, _abA.FICHIER_HIKER,
              _abA.PLAFOND_HIKER_RATTRAPAGE)
     _vraieSondeA = _abA._est_une_video
+    # 27/09/2026 : all-banger ne poste que ce qui est passe dans 💥・banger.
+    # Ces tests-ci eprouvent l ENVOI : le perimetre y est ouvert a tout ; la
+    # regle elle-meme a son bloc a part (« perimetre 💥・banger »).
+    class _ToutA:
+        def __contains__(self, x):
+            return True
+    _vraiPerimetreA = _abA.passes_par_salon_banger
+    _abA.passes_par_salon_banger = lambda force=False: _ToutA()
     # QUE PERSONNE N APPELLE UNE SOURCE PAYANTE. Chaque porte est remplacee
     # par un piege qui note l appel : la chaine entiere doit tourner sans.
     _interditsA, _savPiegesA = [], []
@@ -13691,6 +13699,8 @@ finally:
     # derriere elle des bangers/<code>.mp4 d essai.
     if "_tmpA" in globals():
         shutil.rmtree(_tmpA, ignore_errors=True)
+    if "_vraiPerimetreA" in globals():
+        _abA.passes_par_salon_banger = _vraiPerimetreA
 
 # --- all-banger sans le .txt de la description (26/09/2026) --------------
 # « Je veux pas le truc description » : le bloc a copier suffit. Les messages
@@ -13799,6 +13809,49 @@ except Exception as _eT:
     import traceback as _tbT
     _tbT.print_exc()
     check("all-banger sans txt : testable", False, repr(_eT)[:220])
+
+# --- all-banger : seulement les bangers passes dans 💥・banger (27/09/2026) ---
+# « Pas mettre tous les bangers » : le salon ne reprend que la publication du
+# matin. Trois traces valent passage : l annonce de la fiche, un journal du
+# matin « envoye », l annonce des details.
+try:
+    import tempfile as _tfP, json as _jsP
+    import all_banger as _abP, bangers as _bgP
+    _tmpP = pathlib.Path(_tfP.mkdtemp(prefix="allbanger_perim_"))
+    _savP = (_bgP.FICHIER, _bgP.DOSSIER_JOURNEES, _bgP.DETAILS_DIR, _abP.FICHIER)
+    try:
+        _ch = _bgP.CHANNEL_ID
+        _bgP.FICHIER = _tmpP / "bangers.json"
+        _bgP.DOSSIER_JOURNEES = _tmpP / "journees"; _bgP.DOSSIER_JOURNEES.mkdir()
+        _bgP.DETAILS_DIR = _tmpP / "details"; _bgP.DETAILS_DIR.mkdir()
+        _abP.FICHIER = _tmpP / "bangers_all.json"
+        _bgP.FICHIER.write_text(_jsP.dumps({"reels": {
+            "PA": {"poste_le": 1, "annonce": {"channel_id": _ch, "message_id": 5}},
+            "PB": {"poste_le": 2}, "PC": {"poste_le": 3},
+            "PD": {"poste_le": 4, "annonce": {"channel_id": 999, "message_id": 6}},
+            "PE": {"poste_le": 5}}}), encoding="utf-8")
+        (_bgP.DOSSIER_JOURNEES / "2026-09-20.json").write_text(_jsP.dumps({"reels": {
+            "PB": {"etat": "envoye", "message_id": 7}, "PE": {"etat": "attente"}}}), encoding="utf-8")
+        (_bgP.DETAILS_DIR / "PC.json").write_text(_jsP.dumps(
+            {"annonce": {"channel_id": _ch, "message_id": 8}}), encoding="utf-8")
+        _abP.FICHIER.write_text(_jsP.dumps({"schema": 1, "reels": {
+            k: {"etat": "pret", "poste_le": i} for i, k in enumerate(["PA", "PB", "PC", "PD", "PE"], 1)}}),
+            encoding="utf-8")
+        _idsP = _abP.passes_par_salon_banger(force=True)
+        check("all-banger perimetre : les trois traces de 💥・banger comptent",
+              {"PA", "PB", "PC"} <= set(_idsP), str(sorted(_idsP)))
+        check("all-banger perimetre : un autre salon ou un journal non envoye ne comptent pas",
+              not ({"PD", "PE"} & set(_idsP)), str(sorted(_idsP)))
+        check("all-banger perimetre : seuls les bangers passes dans 💥・banger partent",
+              _abP.a_poster() == ["PA", "PB", "PC"], str(_abP.a_poster()))
+    finally:
+        _bgP.FICHIER, _bgP.DOSSIER_JOURNEES, _bgP.DETAILS_DIR, _abP.FICHIER = _savP
+        _abP._SALON_BANGER.update(quand=0.0, ids=frozenset())
+        shutil.rmtree(_tmpP, ignore_errors=True)
+except Exception as _eP:
+    import traceback as _tbP
+    _tbP.print_exc()
+    check("all-banger perimetre : testable", False, repr(_eP)[:220])
 
 # --- Les DEUX classements : report Discord et page /clics ---------------
 # Le premier dit qui envoie du trafic, le second qui le convertit. Ils

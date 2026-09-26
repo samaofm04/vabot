@@ -844,9 +844,65 @@ def bot_pret(bot) -> bool:
 
 # ---------------------------------------------------------------- envois --
 
+# ------------------------------------------- périmètre : le salon 💥・banger --
+#
+# 27/09/2026, le propriétaire : « all-banger » ne doit reprendre QUE les
+# bangers passés dans le salon 💥・banger (la publication du matin,
+# bangers.CHANNEL_ID), pas tout le registre. Le rattrapage en avait posté 22
+# qui n'y étaient jamais passés. Un banger détecté est toujours téléchargé
+# tout de suite (le lien du scrape est gratuit et expire), mais il n'est
+# POSTÉ qu'une fois paru dans 💥・banger.
+
+_SALON_BANGER = {"quand": 0.0, "ids": frozenset()}
+SALON_BANGER_CACHE_SEC = 60.0
+
+
+def passes_par_salon_banger(force: bool = False) -> frozenset:
+    """Les shortcodes réellement postés dans 💥・banger. Trois traces, dont
+    une suffit : l'annonce de la fiche (ancien flux), un journal du matin à
+    l'état « envoye », l'annonce des détails. Relu au plus une fois par
+    minute."""
+    now = time.time()
+    if not force and now - _SALON_BANGER["quand"] < SALON_BANGER_CACHE_SEC:
+        return _SALON_BANGER["ids"]
+    ch = _bg._entier(_bg.CHANNEL_ID)
+    ids = set()
+
+    def _annonce_ok(a) -> bool:
+        return isinstance(a, dict) and bool(a.get("message_id")) \
+            and _bg._entier(a.get("channel_id")) == ch
+
+    try:
+        for sc, f in (_bg.charger().get("reels") or {}).items():
+            if isinstance(f, dict) and _annonce_ok(f.get("annonce")):
+                ids.add(sc)
+    except Exception as ex:                                   # noqa: BLE001
+        _dire_une_fois("salon_banger:registre", f"[all-banger] registre des bangers "
+                       f"illisible pour le périmètre : {type(ex).__name__}")
+    for dossier, cle in ((_bg.DOSSIER_JOURNEES, "journee"), (_bg.DETAILS_DIR, "details")):
+        try:
+            fichiers = sorted(pathlib.Path(dossier).glob("*.json"))
+        except Exception:                                     # noqa: BLE001
+            fichiers = []
+        for f in fichiers:
+            try:
+                d = json.loads(f.read_text(encoding="utf-8") or "{}")
+            except Exception:                                 # noqa: BLE001
+                continue
+            if cle == "journee":
+                for sc, it in (d.get("reels") or {}).items():
+                    if isinstance(it, dict) and it.get("etat") == "envoye" and it.get("message_id"):
+                        ids.add(sc)
+            elif _annonce_ok(d.get("annonce")):
+                ids.add(f.stem)
+    _SALON_BANGER.update(quand=now, ids=frozenset(ids))
+    return _SALON_BANGER["ids"]
+
+
 def a_poster() -> List[str]:
     """Les bangers à poster ou à vérifier, dans l'ordre CHRONOLOGIQUE de
-    publication du reel (le plus ancien d'abord).
+    publication du reel (le plus ancien d'abord). SEULEMENT ceux passés dans
+    💥・banger (passes_par_salon_banger) ; les autres attendent, comptés.
 
     Le rattrapage verse d'un coup des centaines de reels de dates mêlées : le
     salon doit se lire comme un fil, du plus vieux au plus récent. La date
@@ -856,8 +912,13 @@ def a_poster() -> List[str]:
     reg = charger().get("reels") or {}
     fiches = None
     out = []
+    perimetre = passes_par_salon_banger()
+    hors = 0
     for sc, e in reg.items():
         if not isinstance(e, dict) or e.get("etat") not in ("pret", "envoi"):
+            continue
+        if sc not in perimetre:
+            hors += 1
             continue
         poste = _bg._entier(e.get("poste_le"))
         if not poste:
@@ -866,6 +927,10 @@ def a_poster() -> List[str]:
             poste = _bg._entier((fiches.get(sc) or {}).get("poste_le"))
         detecte = _bg._entier(e.get("detecte_le"))
         out.append((poste or detecte, detecte, sc))
+    if hors:
+        _dire_une_fois(f"hors_salon_banger:{hors}", f"[all-banger] {hors} banger(s) "
+                       "prêt(s) mais jamais passé(s) dans 💥・banger : ils attendent, "
+                       "non postés", logging.INFO)
     return [sc for _, _, sc in sorted(out)]
 
 
