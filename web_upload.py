@@ -65308,13 +65308,19 @@ def create_app():
         # catégories qui en contiennent. Une catégorie de discussion ordinaire
         # n'a aucune raison de s'ouvrir au bot.
         try:
-            from cogs.welcome import US_TICKET_SUFFIXES, _us_norm
+            from cogs.welcome import US_TICKET_SUFFIXES, _us_norm, salon_de_service
             suffixes = tuple("-" + s for s in US_TICKET_SUFFIXES)
         except Exception:
             suffixes = ("-menu", "-numero-mail", "-content", "-download")
 
             def _us_norm(n):
                 return str(n or "").strip().lower()
+
+            # « all-download » finit comme un ticket sans en être un : c'est
+            # l'archive des téléchargements, elle n'a pas à s'ouvrir au bot
+            # admin. Même règle que cogs.welcome.salon_de_service.
+            def salon_de_service(n):
+                return _us_norm(n).startswith("all-")
 
         async def _faire():
             """Ouvre la CATEGORIE, puis chacun de ses salons de ticket.
@@ -65358,7 +65364,8 @@ def create_app():
                     continue
                 for cat in list(getattr(g, "categories", []) or []):
                     vises = [c for c in (cat.channels or [])
-                             if any(_us_norm(c.name).endswith(s) for s in suffixes)]
+                             if any(_us_norm(c.name).endswith(s) for s in suffixes)
+                             and not salon_de_service(c.name)]
                     if not vises:
                         continue
                     if await _ouvrir(cat, f"{g.name} / {cat.name}"):

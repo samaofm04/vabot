@@ -8822,7 +8822,8 @@ try:
         name = "Youl4b"
         def __init__(s):
             s.categories = [_CatAc("bid_a", ["bid_a-menu", "bid_a-numero-mail"]),
-                            _CatAc("abdoul", ["abdoul-content", "abdoul-download"]),
+                            _CatAc("abdoul", ["abdoul-content", "abdoul-download",
+                                              "all-download"]),
                             _CatAc("discussions", ["general", "blabla"])]
         def get_member(s, i): return _MbAc()
 
@@ -8850,6 +8851,11 @@ try:
         check("acces : une categorie sans salon de ticket est epargnee",
               all(n != "discussions" for n, _ in _posesAc),
               str([n for n, _ in _posesAc]))
+        # « all-download » finit comme un ticket sans en etre un : c est
+        # l archive des telechargements du proprietaire, pas un salon de VA.
+        check("acces : all-download (archive des telechargements) n est pas ouvert",
+              all(n != "all-download" for n, _ in _posesAc),
+              str([n for n, _ in _posesAc]))
         # Juste de quoi poser un panneau — pas de quoi administrer.
         _droits = _posesAc[0][1] if _posesAc else []
         check("acces : on accorde la vue, l ecriture, l historique, l epinglage",
@@ -8869,6 +8875,777 @@ try:
         _bcAc.call_soon_threadsafe(_bcAc.stop)
 except Exception as _eAc:
     check("acces : testable", False, repr(_eAc)[:200])
+
+
+# ==============================================================================
+# Telechargeur Discord (<va>-download) : HikerAPI seulement, jamais payer deux
+# fois, copie dans « all-download » (26/09/2026)
+#
+# Tout se passe dans un dossier TEMPORAIRE : chemins de hiker_medias, du pk de
+# hiker_reels, du compte retenu et de l'ancien cookie rediriges. HikerAPI est
+# un faux _appel, le CDN un faux requests.get, Discord des salons factices :
+# aucun credit depense, aucun message envoye, rien d'ecrit dans data/.
+# ==============================================================================
+try:
+    import asyncio as _aDl, contextlib as _ctxDl, io as _ioDl, os as _osDl
+    import re as _reDl, tempfile as _tfDl, time as _tDl
+    import discord as _dDl
+    import requests as _rqDl
+    import hiker_reels as _hkDl
+    import hiker_medias as _hmDl
+    import cogs.telechargement as _tlDl
+    import cogs.welcome as _wlDl
+
+    _TMPDl = pathlib.Path(_tfDl.mkdtemp(prefix="dl_hiker_"))
+    _savDl = {
+        "hm": {k: getattr(_hmDl, k) for k in ("DATA_DIR", "DOSSIER", "LISTES", "MEDIAS",
+                                             "JOURNAL_PURGE", "BUDGET_FILE", "_GQL_TRI_KO")},
+        "hk": {k: getattr(_hkDl, k) for k in ("_PK_FILE", "_BUDGET_FILE", "get_token", "_appel")},
+        "tl": {k: getattr(_tlDl, k) for k in ("CHOIX_FILE", "_ANCIEN_COOKIE", "PAUSE_ENTRE_POSTS")},
+        "wl": {"create_us_tickets": _wlDl.create_us_tickets},
+        "get": _rqDl.get,
+    }
+    try:
+        _hmDl.DATA_DIR = _TMPDl
+        _hmDl.DOSSIER = _TMPDl / "telechargement"
+        _hmDl.LISTES = _hmDl.DOSSIER / "listes"
+        _hmDl.MEDIAS = _hmDl.DOSSIER / "medias"
+        _hmDl.JOURNAL_PURGE = _hmDl.DOSSIER / "purges.json"
+        _hmDl.BUDGET_FILE = _TMPDl / "telechargement_hiker.json"
+        _hmDl._GQL_TRI_KO = False
+        _hkDl._PK_FILE = _TMPDl / "hiker_pk.json"
+        # L'enveloppe COMMUNE du suivi : le telechargeur ne doit jamais y toucher.
+        _hkDl._BUDGET_FILE = _TMPDl / "hiker_budget_commun.json"
+        _hkDl.get_token = lambda: "jeton-factice"
+        _tlDl.CHOIX_FILE = _TMPDl / "telechargement_choix.json"
+        _tlDl._ANCIEN_COOKIE = _TMPDl / "downloads" / "cookies_sessionid.txt"
+        _tlDl.PAUSE_ENTRE_POSTS = 0
+
+        # ── faux HikerAPI ─────────────────────────────────────────────────
+        _FUTDl = format(int(_tDl.time()) + 86400, "x")
+        _PASDl = format(int(_tDl.time()) - 86400, "x")
+
+        def _cdnDl(nom, taille=2048, expire=False):
+            return "https://cdn.test/%s?taille=%d&oe=%s" % (nom, taille, _PASDl if expire else _FUTDl)
+
+        def _photoDl(code, ts=1790000000):
+            return {"pk": "1" + code, "id": "1" + code + "_1", "code": code, "media_type": 1,
+                    "taken_at": ts, "caption": {"text": "legende " + code}, "like_count": 3,
+                    "image_versions2": {"candidates": [
+                        {"url": _cdnDl(code + "_petit.jpg"), "width": 320, "height": 320},
+                        {"url": _cdnDl(code + "_grand.jpg"), "width": 1080, "height": 1350}]}}
+
+        def _videoDl(code, vues, taille=2048, expire=False, ts=1790000000):
+            return {"pk": "2" + code, "id": "2" + code + "_1", "code": code, "media_type": 2,
+                    "product_type": "clips", "play_count": vues, "taken_at": ts,
+                    "caption": {"text": "reel " + code},
+                    "video_versions": [{"url": _cdnDl(code + ".mp4", taille, expire), "width": 720}],
+                    "image_versions2": {"candidates": [{"url": _cdnDl(code + "_c.jpg"), "width": 720, "height": 1280}]}}
+
+        def _carrouselDl(code):
+            e1 = _photoDl(code + "a"); e1.pop("code")
+            e2 = _videoDl(code + "b", 10); e2.pop("code")
+            e3 = _photoDl(code + "c"); e3.pop("code")
+            return {"pk": "3" + code, "id": "3" + code, "code": code, "media_type": 8,
+                    "taken_at": 1790000500, "caption": {"text": "carrousel " + code},
+                    "carousel_media": [e1, e2, e3]}
+
+        _etDl = {"solde": True, "gql_trie": True, "lourd": 2048, "expire_v1": False}
+        _appelsDl = []
+
+        def _faux_appelDl(chemin, token, timeout, **params):
+            _appelsDl.append((chemin, dict(params)))
+            if not _etDl["solde"]:
+                return None, 'HTTP 402: {"detail":"Payment required"}'
+            if chemin == "/v1/user/by/username":
+                u = params.get("username")
+                if u == "absent.x":
+                    return None, 'HTTP 404: {"detail":"Target user not found"}'
+                return {"pk": "77" + str(len(u)), "username": u, "full_name": "Nom " + u,
+                        "biography": "bio de " + u, "media_count": 40, "follower_count": 1000,
+                        "is_private": u.startswith("prive"),
+                        "profile_pic_url_hd": _cdnDl("pp_hd_" + u + ".jpg"),
+                        "profile_pic_url": _cdnDl("pp_petite_" + u + ".jpg")}, ""
+            if chemin == "/v2/user/medias":
+                if not params.get("page_id"):
+                    items = [_photoDl("P1"), _carrouselDl("C1"),
+                             _videoDl("V1", 300, taille=_etDl["lourd"]),
+                             {"pk": 9, "media_type": 1}, _photoDl("P2")]
+                    return {"response": {"items": items}, "next_page_id": "p2"}, ""
+                return {"response": {"items": [_photoDl("P3"), _videoDl("V2", 40)]},
+                        "next_page_id": None}, ""
+            if chemin == "/v2/user/clips":
+                pages = {"": ([("R1", 100), ("R2", 5000)], "c2"),
+                         "c2": ([("R3", 50), ("R4", 90000)], "c3"),
+                         "c3": ([("R5", 700)], None)}
+                vids, suiv = pages[params.get("page_id") or ""]
+                return {"response": {"items": [{"media": _videoDl(c, v)} for c, v in vids]},
+                        "next_page_id": suiv}, ""
+            if chemin == "/gql/user/clips":
+                if _etDl["gql_trie"]:
+                    vids = [("R4", 90000), ("R2", 5000), ("R5", 700)]
+                else:
+                    vids = [("R1", 100), ("R2", 5000)]
+                return {"data": {"edges": [{"node": {"media": _videoDl(c, v)}} for c, v in vids],
+                                 "page_info": {"has_next_page": False, "end_cursor": ""}}}, ""
+            if chemin == "/v1/media/by/code":
+                c = params.get("code")
+                return {"pk": "5", "id": "5_1", "code": c, "media_type": 2,
+                        "video_url": _cdnDl(c + "-frais.mp4", expire=_etDl["expire_v1"]),
+                        "thumbnail_url": _cdnDl(c + "-frais.jpg"), "caption_text": "frais",
+                        "play_count": 1}, ""
+            return None, "HTTP 404: inconnu"
+
+        _hkDl._appel = _faux_appelDl
+
+        def _razBudgetDl():
+            # Le fichier ET sa copie .prev : safe_json restaurerait sinon
+            # l'ancien compteur depuis la copie.
+            for _fDl in (_hmDl.BUDGET_FILE,
+                         _hmDl.BUDGET_FILE.with_suffix(".json.prev")):
+                if _fDl.exists():
+                    _fDl.unlink()
+
+        # ── faux CDN ─────────────────────────────────────────────────────
+        _cdnVusDl = []
+
+        class _RepCdnDl:
+            def __init__(s, code, corps):
+                s.status_code, s._c = code, corps
+            def __enter__(s):
+                return s
+            def __exit__(s, *a):
+                return False
+            def iter_content(s, n):
+                for i in range(0, len(s._c), n):
+                    yield s._c[i:i + n]
+
+        def _faux_getDl(url, **kw):
+            _cdnVusDl.append(url)
+            if "refuse" in url:
+                return _RepCdnDl(403, b"")
+            m = _reDl.search(r"taille=(\d+)", url)
+            return _RepCdnDl(200, b"x" * (int(m.group(1)) if m else 2048))
+
+        _rqDl.get = _faux_getDl
+
+        def _nbDl(chemin=None):
+            return len([a for a in _appelsDl if chemin is None or a[0] == chemin])
+
+        # ── 1. lecture des formes ────────────────────────────────────────
+        _pDl = _hmDl.normaliser(_photoDl("P1"))
+        check("dl : une photo -> 1 element, la PLUS GRANDE image",
+              _pDl and _pDl["genre"] == "photo" and len(_pDl["elements"]) == 1
+              and "_grand.jpg" in _pDl["elements"][0]["url"], str(_pDl)[:160])
+        _cDl = _hmDl.normaliser(_carrouselDl("C1"))
+        check("dl : un carrousel garde TOUTES ses images et videos, dans l'ordre",
+              _cDl and _cDl["genre"] == "carrousel"
+              and [e["type"] for e in _cDl["elements"]] == ["photo", "video", "photo"]
+              and _cDl["elements"][1]["url"].split("?")[0].endswith("C1b.mp4"), str(_cDl)[:200])
+        _vDl = _hmDl.normaliser({"media": _videoDl("R9", 1234)})
+        check("dl : un reel emballe ({media: ...}) -> video, vues, legende",
+              _vDl and _vDl["genre"] == "video" and _vDl["vues"] == 1234
+              and _vDl["legende"] == "reel R9" and _vDl["elements"][0]["type"] == "video")
+        check("dl : un objet sans shortcode est illisible (None), jamais invente",
+              _hmDl.normaliser({"pk": 9, "media_type": 1}) is None)
+        _v1Dl = _hmDl.normaliser({"code": "K1", "media_type": 8, "caption_text": "v1",
+                                  "resources": [{"media_type": 1, "thumbnail_url": "https://a/1.jpg"},
+                                                {"media_type": 2, "video_url": "https://a/2.mp4",
+                                                 "thumbnail_url": "https://a/2.jpg"}]})
+        check("dl : forme HikerAPI v1 (resources) lue aussi",
+              _v1Dl and [e["url"] for e in _v1Dl["elements"]] == ["https://a/1.jpg", "https://a/2.mp4"]
+              and _v1Dl["legende"] == "v1")
+        _gqDl = _hmDl._medias_dans({"data": {"edges": [{"node": {"media": _videoDl("G1", 5)}}]}})
+        check("dl : forme GraphQL (edges/node/media) retrouvee",
+              len(_gqDl) == 1 and _gqDl[0].get("code") == "G1")
+        check("dl : lien CDN expire reconnu a son oe=, un lien sans oe= n'est pas condamne",
+              _hmDl.lien_expire(_cdnDl("a.jpg", expire=True))
+              and not _hmDl.lien_expire(_cdnDl("a.jpg")) and not _hmDl.lien_expire("https://x/y.jpg"))
+
+        # ── 2. reserve a part ────────────────────────────────────────────
+        _hmDl.BUDGET_FILE.write_text('{"jour": "%s", "utilise": 299}' % _hmDl._jour(), encoding="utf-8")
+        _hmDl.profil("budget.a", _hmDl.Compteur())
+        try:
+            _hmDl.profil("budget.b", _hmDl.Compteur())
+            _msgDl = ""
+        except _hmDl.ReserveEpuisee as _eDl:
+            _msgDl = str(_eDl)
+        check("dl : reserve de 300 par jour, puis refus DIT (« reessaie demain »)",
+              _hmDl.budget()["plafond"] == 300 and _hmDl.budget()["utilise"] == 300
+              and "demain" in _msgDl and "300/300" in _msgDl, _msgDl)
+        check("dl : la reserve n'entame pas l'enveloppe commune du suivi (hiker_budget)",
+              not _hkDl._BUDGET_FILE.exists())
+        _hmDl.BUDGET_FILE.write_text('{"jour": "%s", "utilise": 300, "plafond": 500}'
+                                     % _hmDl._jour(), encoding="utf-8")
+        _hmDl.profil("budget.c", _hmDl.Compteur())
+        check("dl : un plafond regle dans le fichier l'emporte, et survit aux ecritures",
+              _hmDl.budget() == {"jour": _hmDl._jour(), "utilise": 301, "plafond": 500, "restant": 199},
+              str(_hmDl.budget()))
+        _razBudgetDl()
+
+        # ── 3. listes : une redemande dans les 24 h coute 0 ──────────────
+        _appelsDl.clear()
+        _c1Dl = _hmDl.Compteur()
+        _postsDl, _noteDl = _hmDl.publications("sky.ards", 5, _c1Dl)
+        check("dl : « Tout » lit les publications une fois : fiche + 2 pages",
+              _c1Dl.requetes == 3 and _nbDl("/v2/user/medias") == 2
+              and [p["code"] for p in _postsDl] == ["P1", "C1", "V1", "P2", "P3"],
+              "%d req, %s" % (_c1Dl.requetes, [p["code"] for p in _postsDl]))
+        check("dl : l'objet illisible de la liste est COMPTE dans la note",
+              "1 objet(s)" in _noteDl, _noteDl)
+        _c2Dl = _hmDl.Compteur()
+        _p2Dl, _ = _hmDl.publications("sky.ards", 5, _c2Dl)
+        check("dl : la meme demande dans les 24 h : 0 requete",
+              _c2Dl.requetes == 0 and [p["code"] for p in _p2Dl] == [p["code"] for p in _postsDl])
+        _c3Dl = _hmDl.Compteur()
+        _phDl, _ = _hmDl.publications("sky.ards", 3, _c3Dl, photos_seulement=True)
+        check("dl : « Posts photo » ne garde que photos et carrousels, sur la liste deja lue",
+              [p["code"] for p in _phDl] == ["P1", "C1", "P2"] and _c3Dl.requetes == 0)
+        _c4Dl = _hmDl.Compteur()
+        _rDl, _ = _hmDl.reels("sky.ards", 2, _c4Dl)
+        _c5Dl = _hmDl.Compteur()
+        _r2Dl, _ = _hmDl.reels("sky.ards", 4, _c5Dl)
+        check("dl : reels : le pk de la fiche sert, et une demande plus longue ne paie que la suite",
+              _c4Dl.requetes == 1 and _c5Dl.requetes == 1
+              and [p["code"] for p in _r2Dl] == ["R1", "R2", "R3", "R4"],
+              "%d/%d" % (_c4Dl.requetes, _c5Dl.requetes))
+        # Un listing de plus de 24 h ne sert plus.
+        _lsDl = _hmDl._chemin_liste("sky.ards")
+        _dDlj = json.loads(_lsDl.read_text(encoding="utf-8"))
+        _dDlj["posts"]["lu_a"] = _tDl.time() - 25 * 3600
+        _lsDl.write_text(json.dumps(_dDlj), encoding="utf-8")
+        _c6Dl = _hmDl.Compteur()
+        _hmDl.publications("sky.ards", 5, _c6Dl)
+        check("dl : au-dela de 24 h, la liste est relue", _c6Dl.requetes == 2, str(_c6Dl.requetes))
+
+        # ── 4. top reels sur TOUT le profil ──────────────────────────────
+        _appelsDl.clear()
+        _topDl, _nDl, _srcDl = _hmDl.top_reels("top.a", 3, _hmDl.Compteur())
+        check("dl : top reels par /gql/user/clips?sort_by_views=true (1 page)",
+              [p["code"] for p in _topDl] == ["R4", "R2", "R5"] and "sort_by_views" in _srcDl
+              and any(a[0] == "/gql/user/clips" and a[1].get("sort_by_views") == "true"
+                      for a in _appelsDl), str([p["code"] for p in _topDl]) + _srcDl)
+        _etDl["gql_trie"] = False
+        _cTDl = _hmDl.Compteur()
+        _top2Dl, _n2Dl, _src2Dl = _hmDl.top_reels("top.b", 3, _cTDl)
+        check("dl : tri ignore par HikerAPI -> repli : TOUTE la liste, triee par vues, et c'est dit",
+              [p["code"] for p in _top2Dl] == ["R4", "R2", "R5"] and _hmDl._GQL_TRI_KO
+              and "indisponible" in _n2Dl and _nbDl("/v2/user/clips") == 3,
+              "%s %s" % ([p["code"] for p in _top2Dl], _n2Dl))
+        _cT2Dl = _hmDl.Compteur()
+        _hmDl.top_reels("top.b", 5, _cT2Dl)
+        check("dl : un top redemande sur une liste complete deja lue : 0 requete",
+              _cT2Dl.requetes == 0)
+        _etDl["gql_trie"] = True
+        _hmDl._GQL_TRI_KO = False
+
+        # ── 5. fichiers par shortcode, jamais retelecharges ──────────────
+        _cdnVusDl.clear()
+        _cF1 = _hmDl.Compteur()
+        _resDl = _hmDl.preparer_post(_cDl, _cF1, "sky.ards")
+        check("dl : un carrousel -> <code>_<n>.<ext> sous data/telechargement/medias",
+              [r["chemin"].name for r in _resDl] == ["C1_1.jpg", "C1_2.mp4", "C1_3.jpg"]
+              and all(r["chemin"].parent == _hmDl.MEDIAS for r in _resDl)
+              and _cF1.telecharges == 3 and len(_cdnVusDl) == 3)
+        _cF2 = _hmDl.Compteur()
+        _hmDl.preparer_post(_cDl, _cF2, "sky.ards")
+        check("dl : redemande : fichiers deja la, AUCUN octet retelecharge",
+              _cF2.reutilises == 3 and _cF2.telecharges == 0 and len(_cdnVusDl) == 3)
+        (_TMPDl / "insta" / "videos").mkdir(parents=True, exist_ok=True)
+        (_TMPDl / "insta" / "videos" / "VX.mp4").write_bytes(b"v" * 4096)
+        (_TMPDl / "bangers").mkdir(parents=True, exist_ok=True)
+        (_TMPDl / "bangers" / "VB.mp4").write_bytes(b"b" * 4096)
+        _cF3 = _hmDl.Compteur()
+        _rxDl = _hmDl.preparer_post(_hmDl.normaliser(_videoDl("VX", 1)), _cF3)
+        _rbDl = _hmDl.preparer_post(_hmDl.normaliser(_videoDl("VB", 1)), _cF3)
+        check("dl : un reel deja dans data/insta/videos ou data/bangers est repris tel quel",
+              _rxDl[0]["chemin"] == _TMPDl / "insta" / "videos" / "VX.mp4"
+              and _rbDl[0]["chemin"] == _TMPDl / "bangers" / "VB.mp4"
+              and _cF3.reutilises == 2 and len(_cdnVusDl) == 3)
+        # Lien expire + fichier absent : on relit CETTE publication seulement.
+        _appelsDl.clear()
+        _cF4 = _hmDl.Compteur()
+        _vexDl = _hmDl.normaliser(_videoDl("VE", 1, expire=True))
+        _reDlx = _hmDl.preparer_post(_vexDl, _cF4, "")
+        check("dl : lien expire -> 1 requete /v1/media/by/code, puis le fichier",
+              _reDlx[0]["chemin"] is not None and _reDlx[0]["chemin"].name == "VE.mp4"
+              and _cF4.requetes == 1 and _cF4.rafraichies == 1
+              and [a[0] for a in _appelsDl] == ["/v1/media/by/code"]
+              and "VE-frais.mp4" in _cdnVusDl[-1], str(_reDlx)[:200])
+        _cF5 = _hmDl.Compteur()
+        _refDl = _hmDl.normaliser(_videoDl("VR", 1))
+        _refDl["elements"][0]["url"] = "https://cdn.test/refuse.mp4"
+        _etDl["expire_v1"] = True
+        _rrDl = _hmDl.preparer_post(_refDl, _cF5, "")
+        _etDl["expire_v1"] = False
+        check("dl : lien refuse ET relecture sans lien valable -> erreur DITE, pas d'exception",
+              _rrDl[0]["chemin"] is None and "expir" in _rrDl[0]["erreur"] and _cF5.echecs == 1,
+              str(_rrDl))
+
+        # ── 6. 402 : solde epuise ────────────────────────────────────────
+        _etDl["solde"] = False
+        try:
+            _hmDl.profil("solde.x", _hmDl.Compteur())
+            _sDl = ""
+        except _hmDl.SoldeEpuise as _eDl:
+            _sDl = str(_eDl)
+        _etDl["solde"] = True
+        check("dl : HTTP 402 -> « solde HikerAPI epuise », en clair", "solde HikerAPI" in _sDl, _sDl)
+
+        # ── 7. purge des medias non redemandes depuis 30 jours ──────────
+        _vieuxDl = _hmDl.MEDIAS / "VIEUX.mp4"
+        _vieuxDl.write_bytes(b"x" * 2048)
+        _osDl.utime(_vieuxDl, (_tDl.time() - 31 * 86400,) * 2)
+        _osDl.utime(_TMPDl / "bangers" / "VB.mp4", (_tDl.time() - 90 * 86400,) * 2)
+        _bpDl = _hmDl.purger()
+        check("dl : purge : le vieux media part, les recents restent, journalise",
+              not _vieuxDl.exists() and (_hmDl.MEDIAS / "C1_1.jpg").exists()
+              and _bpDl["fichiers"] == 1 and _hmDl.JOURNAL_PURGE.exists(), str(_bpDl))
+        check("dl : purge : les caches du reste du bot (data/bangers) ne sont jamais touches",
+              (_TMPDl / "bangers" / "VB.mp4").exists())
+
+        # ── 8. Discord : panneaux, clics, livraison, all-download ───────
+        # Cache vide : le premier clic doit vraiment payer, le second rien.
+        shutil.rmtree(_hmDl.DOSSIER, ignore_errors=True)
+        class _Rep413Dl:
+            status = 413
+            reason = "Payload Too Large"
+
+        class _GuDl:
+            def __init__(s, limite=10 * 1024 * 1024, gid=1535758943324999711):
+                s.id, s.name, s.filesize_limit = gid, "Youl4b", limite
+                s.text_channels, s.categories, s.members = [], [], []
+            def get_member(s, i):
+                return next((m for m in s.members if m.id == i), None)
+
+        class _MsgDl:
+            def __init__(s, salon, kw):
+                s.salon, s.kw = salon, kw
+                s.embeds = [kw["embed"]] if kw.get("embed") else []
+                s.author = _moiDl
+                s.type = _dDl.MessageType.default
+                s.edits = []
+            async def pin(s, **kw):
+                s.salon.epingles.append(s)
+            async def delete(s):
+                s.salon.supprimes.append(s)
+            async def edit(s, **kw):
+                s.edits.append(kw)
+
+        class _SalonDl:
+            _n = 100
+            def __init__(s, nom, guilde, refuse413=False):
+                _SalonDl._n += 1
+                s.id, s.name, s.guild = _SalonDl._n, nom, guilde
+                s.mention = "<#%d>" % s.id
+                s.envois, s.epingles, s.supprimes, s.purges = [], [], [], []
+                s.refuse413, s.last_message_id = refuse413, None
+                s.category_id, s.position = None, 0
+                guilde.text_channels.append(s)
+            async def send(s, content=None, files=None, allowed_mentions=None, **kw):
+                noms = [f.filename for f in (files or [])]
+                if s.refuse413 and files:
+                    raise _dDl.HTTPException(_Rep413Dl(), {"code": 40005, "message": "Request entity too large"})
+                d = dict(kw, content=content or "", fichiers=noms, am=allowed_mentions)
+                s.envois.append(d)
+                return _MsgDl(s, d)
+            async def purge(s, limit=100, check=None):
+                s.purges.append(limit)
+                return []
+            async def pins(s):
+                return list(s.epingles)
+            async def delete(s, reason=None):
+                s.guild.text_channels.remove(s)
+                _supprimesDl.append(s.name)
+
+        class _UserDl:
+            def __init__(s, i, nom="bob"):
+                s.id, s.name, s.bot = i, nom, False
+                s.mention = "<@%d>" % i
+
+        class _RespDl:
+            def __init__(s):
+                s.envois, s.modals, s.defers, s.editions, s._fait = [], [], [], [], False
+            async def send_message(s, content=None, **kw):
+                s.envois.append((content, kw)); s._fait = True
+            async def send_modal(s, m):
+                s.modals.append(m); s._fait = True
+            async def defer(s, **kw):
+                s.defers.append(kw); s._fait = True
+            async def edit_message(s, **kw):
+                s.editions.append(kw); s._fait = True
+            def is_done(s):
+                return s._fait
+
+        class _SuiteDl:
+            def __init__(s):
+                s.envois = []
+            async def send(s, content=None, **kw):
+                s.envois.append((content, kw))
+
+        class _InterDl:
+            def __init__(s, user, canal):
+                s.user, s.channel = user, canal
+                s.guild = getattr(canal, "guild", None)
+                s.response, s.followup = _RespDl(), _SuiteDl()
+                s.message = _MsgDl(canal, {})
+
+        class _BotDl:
+            def __init__(s):
+                s.user, s.vues = _moiDl, []
+            def add_view(s, v):
+                s.vues.append(v)
+            async def wait_until_ready(s):
+                return None
+
+        _moiDl = _UserDl(999, "anna")
+        _supprimesDl = []
+        _VADl = _UserDl(4242, "bob")
+
+        def _bouton(vue, cid):
+            return next(b for b in vue.children if getattr(b, "custom_id", "") == cid)
+
+        def _textes(salon):
+            return [e["content"] for e in salon.envois]
+
+        async def _scenarioDl():
+            res = {}
+            gu = _GuDl()
+            dl = _SalonDl("bob-download", gu)
+            ct = _SalonDl("bob-content", gu)
+            ar = _SalonDl("All\u2011Download", gu)          # tiret sosie : trouve quand meme
+            bot = _BotDl()
+            cog = _tlDl.Telechargement(bot)
+            # Ancien cookie en clair : retire au chargement.
+            _tlDl._ANCIEN_COOKIE.parent.mkdir(parents=True, exist_ok=True)
+            _tlDl._ANCIEN_COOKIE.write_text("sessionid=secret", encoding="utf-8")
+            await cog.cog_load()
+            res["cookie_retire"] = not _tlDl._ANCIEN_COOKIE.exists()
+            res["vues"] = sorted(type(v).__name__ for v in bot.vues)
+            cog._purge_quotidienne.cancel()
+
+            # Saisie du compte (fenetre) : retenu ET ecrit sur le disque.
+            it = _InterDl(_VADl, dl)
+            await _bouton(_tlDl.PanneauCompte(cog), "dl:compte").callback(it)
+            modal = it.response.modals[0]
+            modal.pseudo._value = "https://www.instagram.com/Sky.Ards/"
+            modal.combien._value = "5"
+            await modal.on_submit(it)
+            res["choix"] = cog.choix.get(_VADl.id)
+            res["embed"] = (it.message.edits[-1]["embed"].description
+                            if it.message.edits else "")
+            res["relu"] = _tlDl.Telechargement(_BotDl()).choix.get(_VADl.id)
+
+            # Clic « Tout » : tout part dans -content, copie dans all-download.
+            _appelsDl.clear()
+            it = _InterDl(_VADl, dl)
+            await _bouton(_tlDl.PanneauOptions(cog), "dl:tout").callback(it)
+            res["reponse"] = it.response.envois[0][0] if it.response.envois else ""
+            res["contenu1"] = list(ct.envois)
+            res["archive1"] = list(ar.envois)
+            res["dl_vide"] = list(dl.envois)
+            res["appels1"] = len(_appelsDl)
+
+            # Meme clic : tout repart, sans un credit.
+            ct.envois.clear(); ar.envois.clear(); _appelsDl.clear(); _cdnVusDl.clear()
+            it = _InterDl(_VADl, dl)
+            await _bouton(_tlDl.PanneauOptions(cog), "dl:tout").callback(it)
+            res["contenu2"] = list(ct.envois)
+            res["appels2"] = len(_appelsDl)
+            res["cdn2"] = len(_cdnVusDl)
+            res["archive2"] = list(ar.envois)
+
+            # Anti double-clic : deux clics en rafale, une seule livraison.
+            vraie = cog.livrer
+            compte = []
+
+            async def lente(*a, **k):
+                compte.append(1)
+                await _aDl.sleep(0.05)
+            cog.livrer = lente
+            i1, i2 = _InterDl(_VADl, dl), _InterDl(_VADl, dl)
+            vo = _tlDl.PanneauOptions(cog)
+            await _aDl.gather(_bouton(vo, "dl:reels").callback(i1),
+                              _bouton(vo, "dl:top").callback(i2))
+            res["rafale"] = (len(compte), i2.response.envois[0][0] if i2.response.envois else "")
+            i3 = _InterDl(_VADl, dl)
+            await _bouton(vo, "dl:bio").callback(i3)
+            res["libere"] = len(compte)
+            # Un AUTRE VA sur le meme compte pendant une livraison : refuse aussi.
+            cog.reserver(1, "sky.ards")
+            i4 = _InterDl(_UserDl(5151, "zoe"), dl)
+            cog.choix[5151] = ("sky.ards", 3)
+            await _bouton(vo, "dl:pp").callback(i4)
+            res["meme_compte"] = (len(compte), i4.response.envois[0][0] if i4.response.envois else "")
+            cog.liberer(1, "sky.ards")
+            cog.livrer = vraie
+
+            # Trop lourd pour le serveur (boost 0 = 10 Mio ici reduit a 1 Mio) :
+            # un lien, et la livraison CONTINUE. Le faux profil reprend les
+            # memes shortcodes : on retire le V1 leger deja descendu.
+            _etDl["lourd"] = 3 * 1024 * 1024
+            (_hmDl.MEDIAS / "V1.mp4").unlink()
+            gu2 = _GuDl(limite=1024 * 1024, gid=2)
+            ct2 = _SalonDl("lea-content", gu2)
+            ar2 = _SalonDl("all-download", gu2)
+            await cog.livrer(ct2, "lourd.x", 5, avatar=False, bio=False, photos=True,
+                             reels=True, demandeur=_VADl, option="Tout")
+            res["lourd"] = list(ct2.envois)
+            res["lourd_archive"] = list(ar2.envois)
+
+            # 413 malgre le calcul : lien, pas d'exception, bilan quand meme.
+            gu3 = _GuDl(gid=3)
+            ct3 = _SalonDl("max-content", gu3, refuse413=True)
+            await cog.livrer(ct3, "sky.ards", 5, avatar=False, bio=False, photos=True,
+                             reels=False, demandeur=_VADl, option="Posts photo")
+            res["413"] = list(ct3.envois)
+            _etDl["lourd"] = 2048
+
+            # Pas de salon all-download : livraison normale, journalise UNE fois.
+            gu4 = _GuDl(gid=4)
+            ct4 = _SalonDl("tom-content", gu4)
+            tampon = _ioDl.StringIO()
+            with _ctxDl.redirect_stdout(tampon):
+                for _ in range(2):
+                    await cog.livrer(ct4, "sky.ards", 2, avatar=False, bio=True, photos=False,
+                                     reels=False, demandeur=_VADl, option="Bio")
+            res["sans_archive"] = (list(ct4.envois), tampon.getvalue())
+
+            # Reserve vide / solde epuise / compte prive / introuvable.
+            _hmDl.BUDGET_FILE.write_text('{"jour": "%s", "utilise": 300}' % _hmDl._jour(),
+                                         encoding="utf-8")
+            ct5 = _SalonDl("r-content", _GuDl(gid=5))
+            await cog.livrer(ct5, "nouveau.x", 5, avatar=True, bio=True, photos=True, reels=True,
+                             demandeur=_VADl, option="Tout")
+            res["reserve"] = _textes(ct5)
+            _razBudgetDl()
+            _etDl["solde"] = False
+            ct6 = _SalonDl("s-content", _GuDl(gid=6))
+            await cog.livrer(ct6, "autre.x", 5, avatar=False, bio=True, photos=False, reels=False,
+                             demandeur=_VADl, option="Bio")
+            res["solde"] = _textes(ct6)
+            _etDl["solde"] = True
+            ct7 = _SalonDl("p-content", _GuDl(gid=7))
+            _appelsDl.clear()
+            await cog.livrer(ct7, "prive.x", 5, avatar=True, bio=True, photos=True, reels=True,
+                             demandeur=_VADl, option="Tout")
+            res["prive"] = (list(ct7.envois), [a[0] for a in _appelsDl])
+            ct8 = _SalonDl("i-content", _GuDl(gid=8))
+            await cog.livrer(ct8, "absent.x", 5, avatar=True, bio=True, photos=False, reels=False,
+                             demandeur=_VADl, option="Bio")
+            res["absent"] = _textes(ct8)
+
+            # Photo de profil deja la (data/insta/pp recente) : 0 credit.
+            (_TMPDl / "insta" / "pp").mkdir(parents=True, exist_ok=True)
+            (_TMPDl / "insta" / "pp" / "pp.local.jpg").write_bytes(b"j" * 2048)
+            ct9 = _SalonDl("pp-content", _GuDl(gid=9))
+            _appelsDl.clear()
+            await cog.livrer(ct9, "pp.local", 5, avatar=True, bio=False, photos=False,
+                             reels=False, demandeur=_VADl, option="Photo de profil")
+            res["pp_locale"] = (list(ct9.envois), len(_appelsDl))
+
+            # /menudownload : repare, repond d'abord, pose les deux panneaux.
+            gm = _GuDl(gid=10)
+            sm = _SalonDl("kim-download", gm)
+            im = _InterDl(_VADl, sm)
+            await _tlDl.Telechargement.menudownload.callback(cog, im)
+            res["menu"] = (im.response.defers, im.followup.envois,
+                           [e.get("embed").title for e in sm.envois if e.get("embed")],
+                           len(sm.epingles), sm.purges)
+            sa = _SalonDl("all-download", gm)
+            ia = _InterDl(_VADl, sa)
+            await _tlDl.Telechargement.menudownload.callback(cog, ia)
+            res["menu_archive"] = (sa.envois, sa.purges, ia.response.envois)
+            sc = _SalonDl("kim-content", gm)
+            ic = _InterDl(_VADl, sc)
+            await _tlDl.Telechargement.menudownload.callback(cog, ic)
+            res["menu_content"] = (len(sc.envois), sc.purges)
+            # _ensure_dl_panel (provisionnement) ne pose rien dans all-download.
+            class _BotW:
+                def get_cog(s, n):
+                    return cog
+            sa2 = _SalonDl("all-download", _GuDl(gid=11))
+            await _wlDl._ensure_dl_panel(_BotW(), sa2)
+            res["ensure_archive"] = (sa2.envois, sa2.purges)
+
+            # /ticketsall : « all-download » n'est ni un doublon ni un orphelin.
+            gt = _GuDl(gid=1535758943324999711)
+            bob = _UserDl(4242, "bob")
+            gt.members = [bob]
+            for n in ("bob-menu", "bob-content", "bob-numero-mail", "bob-download",
+                      "all-download", "parti-download"):
+                _SalonDl(n, gt)
+            wc = _wlDl.Welcome.__new__(_wlDl.Welcome)
+            wc.bot = bot
+
+            async def _admin(inter):
+                return True
+            wc.require_admin = _admin
+
+            async def _rien(guild, member, bot=None):
+                return [], []
+            _wlDl.create_us_tickets = _rien
+            chef = _UserDl(1, "chef")
+            itk = _InterDl(chef, gt.text_channels[0])
+            await _wlDl.Welcome.ticketsall.callback(wc, itk)
+            plan, kw = itk.response.envois[0]
+            vue = kw["view"]
+            go = next(b for b in vue.children if isinstance(b, _dDl.ui.Button))
+            ic2 = _InterDl(chef, gt.text_channels[0])
+            await go.callback(ic2)
+            res["tickets"] = (plan, list(_supprimesDl), [c.name for c in gt.text_channels])
+            return res
+
+        _rDl = _aDl.run(_scenarioDl())
+
+        check("dl : cog_load rattache les deux panneaux persistants",
+              _rDl["vues"] == ["PanneauCompte", "PanneauOptions"], str(_rDl["vues"]))
+        check("dl : l'ancien cookies_sessionid.txt en clair est retire au chargement",
+              _rDl["cookie_retire"])
+        check("dl : compte saisi (lien colle, majuscules) -> pseudo retenu en minuscules",
+              _rDl["choix"] == ("sky.ards", 5), str(_rDl["choix"]))
+        check("dl : le panneau affiche le compte actif", "@sky.ards" in _rDl["embed"])
+        check("dl : compte actif PERSISTE et relu au demarrage (nouvelle instance du cog)",
+              _rDl["relu"] == ("sky.ards", 5)
+              and json.loads(_tlDl.CHOIX_FILE.read_text(encoding="utf-8"))
+              == {str(_VADl.id): {"pseudo": "sky.ards", "combien": 5}}, str(_rDl["relu"]))
+        _t1Dl = [e["content"] for e in _rDl["contenu1"]]
+        _f1Dl = [f for e in _rDl["contenu1"] for f in e["fichiers"]]
+        check("dl : « Tout » : PP HD, bio, photos (carrousel entier), reels, dans cet ordre",
+              _f1Dl == ["pp_sky.ards.jpg", "P1.jpg", "C1_1.jpg", "C1_2.mp4", "C1_3.jpg",
+                        "P2.jpg", "P3.jpg", "V1.mp4"]
+              and "bio de sky.ards" in _t1Dl and _t1Dl.index("Bio :") < _t1Dl.index("bio de sky.ards"),
+              str(_f1Dl))
+        check("dl : rien n'est deverse dans le salon -download (il ne porte que les panneaux)",
+              _rDl["dl_vide"] == [])
+        check("dl : la reponse au clic nomme le salon -content",
+              "<#" in _rDl["reponse"] and "sky.ards" in _rDl["reponse"], _rDl["reponse"])
+        check("dl : 1er clic : bilan « N requete(s) HikerAPI »",
+              "Termine pour @sky.ards" in _t1Dl[-1] and "requete(s) HikerAPI" in _t1Dl[-1],
+              _t1Dl[-1])
+        _t2Dl = [e["content"] for e in _rDl["contenu2"]]
+        _f2Dl = [f for e in _rDl["contenu2"] for f in e["fichiers"]]
+        check("dl : 2e clic identique : TOUT est re-livre, 0 requete, 0 octet du CDN",
+              _f2Dl == _f1Dl and _rDl["appels2"] == 0 and _rDl["cdn2"] == 0
+              and "0 credit HikerAPI" in _t2Dl[-1] and "sans credit" in _t2Dl[-1],
+              "%s | %s" % (_rDl["appels2"], _t2Dl[-1]))
+        _a1Dl = _rDl["archive1"]
+        _fa1Dl = [f for e in _a1Dl for f in e["fichiers"]]
+        check("dl : all-download recoit LES MEMES fichiers (salon trouve malgre un tiret sosie)",
+              _fa1Dl == _f1Dl, str(_fa1Dl))
+        check("dl : all-download : en-tete « 📥 <@VA> · @compte · option · date heure »",
+              _a1Dl and all(e["content"].startswith("📥 <@4242> · @sky.ards · Tout · ")
+                            for e in _a1Dl)
+              and all(_reDl.search(r"· \d\d/\d\d/\d{4} \d\d:\d\d", e["content"]) for e in _a1Dl),
+              _a1Dl[0]["content"][:80] if _a1Dl else "vide")
+        check("dl : all-download : mention AFFICHEE mais sans ping (AllowedMentions users=False)",
+              _a1Dl and all(e["am"] is not None and e["am"].users is False
+                            and e["am"].everyone is False and e["am"].roles is False
+                            for e in _a1Dl))
+        check("dl : all-download : la bio y est aussi, les messages d'etat non",
+              any("Bio :\nbio de sky.ards" in e["content"] for e in _a1Dl)
+              and not any("Termine" in e["content"] or "---" in e["content"] for e in _a1Dl))
+        check("dl : all-download : re-livraison sans credit archivee aussi (qui fait quoi, quand)",
+              [f for e in _rDl["archive2"] for f in e["fichiers"]] == _f1Dl)
+        check("dl : anti double-clic : deux clics en rafale -> UNE livraison, l'autre prevenu",
+              _rDl["rafale"][0] == 1 and "pas fini" in _rDl["rafale"][1], str(_rDl["rafale"]))
+        check("dl : le verrou est rendu a la fin (le clic suivant part)", _rDl["libere"] == 2)
+        check("dl : meme compte deja en cours pour un autre VA : refuse aussi",
+              _rDl["meme_compte"][0] == 2 and "deja en cours" in _rDl["meme_compte"][1],
+              str(_rDl["meme_compte"]))
+        _lDl = _rDl["lourd"]
+        check("dl : fichier au-dela de guild.filesize_limit -> lien, jamais d'exception",
+              any("V1.mp4 : 3.0 Mo" in e["content"] and "instagram.com/p/V1/" in e["content"]
+                  and not e["fichiers"] for e in _lDl)
+              and "Termine pour @lourd.x" in _lDl[-1]["content"]
+              and "1 trop lourd(s)" in _lDl[-1]["content"]
+              and any("P3.jpg" in e["fichiers"] for e in _lDl),
+              str([e["content"][:60] for e in _lDl])[:300])
+        check("dl : le lien du fichier trop lourd est archive aussi",
+              any("V1.mp4 : 3.0 Mo" in e["content"] for e in _rDl["lourd_archive"]))
+        _413Dl = _rDl["413"]
+        check("dl : Discord repond 413 -> lien, la livraison continue jusqu'au bilan",
+              sum(1 for e in _413Dl if "(trop lourd pour ce serveur) https://www.instagram.com/p/"
+                  in e["content"]) >= 3 and "Termine pour @sky.ards" in _413Dl[-1]["content"],
+              str([e["content"][:50] for e in _413Dl])[:300])
+        _saDl, _logDl = _rDl["sans_archive"]
+        check("dl : pas de salon all-download -> le VA est livre, journalise UNE fois",
+              sum(1 for e in _saDl if e["content"] == "bio de sky.ards") == 2
+              and _logDl.count("aucun salon") == 1, _logDl[:200])
+        check("dl : reserve du jour atteinte -> « reessaie demain » lu par le VA",
+              any("Arrete pour @nouveau.x" in t and "demain" in t for t in _rDl["reserve"]),
+              str(_rDl["reserve"])[:200])
+        check("dl : solde HikerAPI epuise (402) -> dit clairement au VA",
+              any("Arrete pour @autre.x" in t and "solde HikerAPI" in t for t in _rDl["solde"]),
+              str(_rDl["solde"])[:200])
+        _prDl, _apPrDl = _rDl["prive"]
+        check("dl : compte prive : PP et bio livrees, publications non lues (0 requete de liste)",
+              any("pp_prive.x.jpg" in e["fichiers"] for e in _prDl)
+              and any("PRIVE" in e["content"] for e in _prDl)
+              and _apPrDl == ["/v1/user/by/username"], str(_apPrDl))
+        check("dl : compte introuvable -> dit, sans exception",
+              any("introuvable" in t for t in _rDl["absent"]), str(_rDl["absent"])[:200])
+        _ppDl, _nppDl = _rDl["pp_locale"]
+        check("dl : photo de profil recente deja sur le disque -> renvoyee, 0 credit",
+              _nppDl == 0 and any(e["fichiers"] == ["pp.local.jpg"] for e in _ppDl)
+              and "0 credit" in _ppDl[-1]["content"], str(_nppDl))
+        _dfDl, _fuDl, _titDl, _epDl, _puDl = _rDl["menu"]
+        check("dl : /menudownload repare : defer d'abord, deux panneaux poses et epingles",
+              len(_dfDl) == 1 and _titDl == [_tlDl.TITRE_COMPTE, _tlDl.TITRE_OPTIONS]
+              and _epDl == 2 and _fuDl and "2 panneau(x)" in (_fuDl[0][0] or ""),
+              str(_rDl["menu"])[:200])
+        check("dl : /menudownload refuse all-download (ni envoi, ni menage)",
+              _rDl["menu_archive"][0] == [] and _rDl["menu_archive"][1] == []
+              and "service" in (_rDl["menu_archive"][2][0][0] or ""))
+        check("dl : /menudownload hors d'un -download : panneaux poses SANS vider le salon",
+              _rDl["menu_content"][0] == 2 and 200 not in _rDl["menu_content"][1],
+              str(_rDl["menu_content"]))
+        check("dl : le provisionnement ne pose aucun panneau dans all-download",
+              _rDl["ensure_archive"] == ([], []))
+        _plDl, _supDl, _restDl = _rDl["tickets"]
+        check("dl : /ticketsall : all-download absent du plan de suppression",
+              "all-download" not in _plDl and "parti-download" in _plDl, _plDl[:300])
+        check("dl : /ticketsall : l'orphelin part, all-download RESTE",
+              _supDl == ["parti-download"] and "all-download" in _restDl, str(_supDl))
+        _srcDl = pathlib.Path("cogs/telechargement.py").read_text(encoding="utf-8")
+        check("dl : une seule definition de /menudownload, plus de classe Panneau fantome",
+              _srcDl.count("async def menudownload") == 1 and "Panneau(self)" not in _srcDl
+              and "def ouvrir_menu" not in _srcDl
+              and [c.name for c in _tlDl.Telechargement.__cog_app_commands__].count("menudownload") == 1)
+        check("dl : plus d'Apify, de cookies ni de yt-dlp dans le cog",
+              not any(m in _srcDl for m in ("import yt_dlp", "apify_reels", "cookiejar",
+                                             'getenv("IG_SESSIONID"', "write_text(",
+                                             "download_sync")))
+        check("dl : taille lue sur guild.filesize_limit, plus de 24,5 Mo en dur",
+              "filesize_limit" in _srcDl and "24.5" not in _srcDl)
+        _hmSrcDl = pathlib.Path("hiker_medias.py").read_text(encoding="utf-8")
+        check("dl : hiker_medias passe par hiker_reels._appel, jamais par Apify",
+              "hk._appel(" in _hmSrcDl and "apify_reels" not in _hmSrcDl
+              and "run-sync" not in _hmSrcDl)
+        # Pas de comparaison de dates sur le vrai data/ : sur le VPS, le bot
+        # en marche y ecrit pendant le banc. On verifie plutot que tout ce que
+        # ces essais ont ecrit est bien arrive dans le dossier temporaire.
+        check("dl : tout ce qui a ete ecrit l'a ete dans le dossier temporaire",
+              all(_TMPDl in pathlib.Path(_xDl).parents
+                  for _xDl in (_hmDl.BUDGET_FILE, _hmDl.LISTES, _hmDl.MEDIAS,
+                               _hmDl.JOURNAL_PURGE, _tlDl.CHOIX_FILE, _hkDl._PK_FILE,
+                               _tlDl._ANCIEN_COOKIE))
+              and _tlDl.CHOIX_FILE.exists() and _hkDl._PK_FILE.exists()
+              and any(_hmDl.LISTES.glob("*.cache.json")) and any(_hmDl.MEDIAS.iterdir()))
+    finally:
+        for _kDl, _vDl in _savDl["hm"].items():
+            setattr(_hmDl, _kDl, _vDl)
+        for _kDl, _vDl in _savDl["hk"].items():
+            setattr(_hkDl, _kDl, _vDl)
+        for _kDl, _vDl in _savDl["tl"].items():
+            setattr(_tlDl, _kDl, _vDl)
+        _wlDl.create_us_tickets = _savDl["wl"]["create_us_tickets"]
+        _rqDl.get = _savDl["get"]
+        shutil.rmtree(_TMPDl, ignore_errors=True)
+except Exception as _eDl:
+    import traceback as _tbDl
+    check("dl : telechargeur testable", False,
+          repr(_eDl)[:200] + " " + _tbDl.format_exc()[-600:])
 
 
 # ==============================================================================

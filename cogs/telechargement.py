@@ -1,763 +1,178 @@
 # -*- coding: utf-8 -*-
 """Telechargement d'un compte Instagram, depuis un panneau Discord.
 
-POURQUOI DANS CE BOT ET PAS DANS LE SIEN
-    Le telechargeur avait son propre bot (ig-downloader), mais celui-ci n'est
-    invite que sur UN serveur. Manageuse est deja partout : mettre la commande
-    ici evite d'inviter un second bot et de gerer deux identites.
+OU CA VIT
+    Chaque VA a un salon <pseudo>-download (cree par /ticketsall, voir
+    cogs/welcome.py) qui porte DEUX panneaux permanents :
 
-CE QUE FAIT LA COMMANDE
-    /telechargeur   pose un panneau permanent dans le salon
+        « Telechargement - le compte »    Changer de compte. Le compte actif
+                                          (au plus N publications, 30 par
+                                          defaut, 200 au plus) est affiche.
+        « Telechargement - les options »  Tout, Photo de profil, Bio,
+                                          Posts photo, Reels, Top reels.
 
-    Un bouton ouvre une fenetre qui demande le pseudo, puis un menu propose
-    quoi descendre. L'ordre d'envoi est toujours le meme, et il est voulu :
+    /menudownload les repose a la main dans un salon.
+
+OU PARTENT LES FICHIERS
+    Dans <pseudo>-content : le salon -download ne porte que les panneaux, y
+    deverser des dizaines de fichiers les repousserait hors de vue.
+
+    Et une COPIE de chaque envoi dans « all-download », sur le meme serveur,
+    precedee de « 📥 @VA · @compte · option · date heure de Paris ». Demande
+    du proprietaire (26/09/2026) : savoir qui fait quoi, quand, et « surtout
+    stocker les videos de mon cote ». La mention est AFFICHEE sans notifier
+    personne. Sans ce salon, la livraison au VA continue (journalise une fois).
+
+L'ORDRE D'ENVOI, TOUJOURS LE MEME
 
         1. la photo de profil
         2. la bio
-        3. les publications PHOTO, avec leur description
+        3. les publications PHOTO (un carrousel part en entier), avec leur description
         4. les REELS, avec leur description
 
     L'identite du compte arrive donc AVANT son contenu : le salon se lit de
     haut en bas, et sans cela on ne sait plus a qui appartiennent les fichiers
-    qui defilent.
+    qui defilent. Chaque fichier part DES QU'IL EST PRET, jamais en lot a la
+    fin : un compte qui disparait en cours de route laisse tout ce qui est
+    deja passe.
 
-    Chaque fichier part DES QU'IL EST PRET, jamais en lot a la fin. Un compte
-    qui disparait en cours de route laisse quand meme tout ce qui est passe --
-    c'est tout l'interet de l'outil.
+D'OU VIENNENT LES DONNEES
+    HikerAPI SEULEMENT, par hiker_medias.py. Plus d'Apify (ecarte par le
+    proprietaire), plus de session Instagram (aucun cookie n'est plus lu ni
+    ecrit ici), plus de yt-dlp (il ne savait pas descendre une photo : « Posts
+    photo » echouait a tous les coups). Les listes sont gardees 24 h et les
+    fichiers par shortcode : ce qui a deja ete telecharge repart SANS depenser
+    de credit, et le bilan de chaque demande dit ce qu'elle a coute.
 
-D'OU VIENT LE CODE DE TELECHARGEMENT
-    Il a ete EXTRAIT de ig-downloader/bot.py et recopie ici, volontairement.
-    Anna tourne sur un autre hote que le telechargeur : un import croise
-    obligerait a deployer tout le dossier ig-downloader a cote du bot, et la
-    commande echouerait au premier clic s'il manquait. Ce cog est donc
-    autonome, un seul fichier a copier.
-
-    Contrepartie assumee : si le telechargeur evolue, il faut rejouer
-    l'extraction plutot que d'esperer que la correction se propage.
-
-CE QU'IL FAUT A COTE, ET C'EST TOUT
-    cookies.txt   dans le dossier du bot, session Instagram au format Netscape.
-    Sans lui la liste des publications revient VIDE, sans message d'erreur :
-    Instagram ne refuse pas, il ne montre rien. C'est le symptome le plus
-    trompeur de tout l'outil.
-
-    Deux variables d'environnement permettent de deplacer les chemins :
-    IG_COOKIES et IG_DOWNLOAD_DIR.
+CE QUI EST GARDE SUR LE DISQUE
+    data/telechargement_choix.json   le compte actif de chaque VA (il survit
+                                     a un redemarrage, comme l'embed qui
+                                     l'affiche)
+    data/telechargement_hiker.json   la reserve HikerAPI du jour (300 requetes)
+    data/telechargement/             listes (24 h) et fichiers (purges apres
+                                     30 jours sans redemande)
 """
 from __future__ import annotations
 
 import asyncio
-import http.cookiejar
 import os
 import re
-import uuid
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
-import requests
-import yt_dlp
-
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
-# ─────────────────────────────────────────────────────────────────────────
-#  Ce qui suit vient de ig-downloader/bot.py, EXTRAIT automatiquement.
-#
-#  Pourquoi le recopier ici plutot que l'importer : Anna tourne sur un autre
-#  hote que le telechargeur. Un import croise obligerait a deployer le dossier
-#  ig-downloader a cote du bot, et la commande echouerait au premier clic s'il
-#  manquait. Ce cog est donc autonome : un seul fichier a copier.
-#
-#  Contrepartie assumee : si le telechargeur evolue, il faut rejouer
-#  l'extraction (scratchpad/rendre_autonome.py).
-# ─────────────────────────────────────────────────────────────────────────
+import safe_json
 
-#: Le SEUL serveur ou cette commande existe. Anna est sur plusieurs serveurs,
-#: mais le telechargement ne concerne que celui-ci : la commande n'est donc
-#: pas seulement refusee ailleurs, elle n'y est pas proposee du tout.
+#: Le SEUL serveur ou /menudownload est proposee. Anna est sur plusieurs
+#: serveurs, mais le telechargement ne concerne que celui-ci : la commande
+#: n'est donc pas seulement refusee ailleurs, elle n'y est pas proposee du tout.
 #:
 #: On passe par un identifiant et non par un nom : il survit a un renommage.
 #:     Youl4b        1535758943324999711
 #:     YouLab AGENCY 1505418484052394004  (volontairement exclu)
 SERVEUR_ID = int(os.getenv("IG_SERVEUR_ID") or "1535758943324999711")
 
-#: Ou atterrissent les fichiers descendus. A cote du bot, pas du cog.
-DOWNLOAD_DIR = Path(
-    os.getenv("IG_DOWNLOAD_DIR")
-    or (Path(__file__).resolve().parents[1] / "downloads"))
-DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+_RACINE = Path(__file__).resolve().parents[1]
 
-#: Session Instagram au format Netscape. SANS ELLE, la liste des publications
-#: revient VIDE sans message d'erreur : Instagram ne refuse pas, il ne montre
-#: rien. C'est le symptome le plus trompeur de tout l'outil.
-COOKIES_FILE = Path(
-    os.getenv("IG_COOKIES")
-    or (Path(__file__).resolve().parents[1] / "cookies.txt"))
+#: Le compte actif de chaque VA. Il vivait en memoire : chaque redemarrage
+#: (un par deploiement) le perdait alors que l'embed l'affichait encore, et
+#: le VA qui cliquait « Reels » lisait « Entre d'abord un compte » sous un
+#: panneau qui lui montrait son compte.
+CHOIX_FILE = _RACINE / "data" / "telechargement_choix.json"
 
-IG_WEB_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    "X-IG-App-ID": "936619743392459",
-    "X-Requested-With": "XMLHttpRequest",
-    "Accept": "*/*",
-    "Referer": "https://www.instagram.com/",
+#: L'ancien fichier Netscape fabrique depuis IG_SESSIONID par la voie cookies :
+#: un identifiant de session en clair, dans un dossier que .gitignore ne
+#: couvrait pas. Il n'est plus produit ; celui qui reste est retire au
+#: chargement du cog.
+_ANCIEN_COOKIE = _RACINE / "downloads" / "cookies_sessionid.txt"
+
+#: Le salon d'archive du proprietaire, cherche par nom NORMALISE (tirets
+#: sosies, majuscules) : un salon cree a la main depuis un iPhone ressemble au
+#: notre sans etre egal caractere pour caractere.
+NOM_ARCHIVE = "all-download"
+
+#: Limite d'un fichier quand le serveur ne la donne pas : 10 Mio, celle d'un
+#: serveur sans boost (et au boost 1). Le seuil etait 24,5 Mo en dur : au-dela
+#: de 10 Mio, Discord repondait 413, une exception NON attrapee qui coupait la
+#: livraison au milieu du compte.
+LIMITE_DEFAUT = 10 * 1024 * 1024
+#: Ce que l'enveloppe multipart et le texte ajoutent au fichier.
+_MARGE_ENVOI = 256 * 1024
+#: Discord n'accepte pas plus de dix pieces jointes par message.
+_MAX_PAR_MESSAGE = 10
+
+#: Pause entre deux publications : on reste sous la limite de debit de
+#: Discord (5 messages / 5 s par salon) au lieu de la heurter. Pendant qu'il
+#: attendait derriere ses propres messages, le bot ne servait plus aucune
+#: interaction dans les trois secondes (constate le 27/08).
+PAUSE_ENTRE_POSTS = 1.0
+
+#: Un pseudo Instagram : lettres, chiffres, point et tiret bas, 30 au plus.
+#: Sans ce controle, "#" ou une URL mal collee passait, et le bot annoncait
+#: « Compte retenu : @# » avant d aller interroger un compte inexistant.
+_PSEUDO_OK = re.compile(r"^[A-Za-z0-9._]{1,30}$")
+
+#: {bouton: (libelle court pour l'archive, libelle long pour le VA)}
+OPTIONS = {
+    "tout": ("Tout", "tout"),
+    "pp": ("Photo de profil", "la photo de profil"),
+    "bio": ("Bio", "la bio"),
+    "photos": ("Posts photo", "les posts photo"),
+    "reels": ("Reels", "les reels"),
+    "top": ("Top reels", "les reels les plus vus"),
 }
 
 
-# ─────────────────────────────────────────────────────────────────────────
-#  APIFY D'ABORD, COOKIES EN REPLI
-#
-#  apify_reels.py pose la regle du projet : Apify extrait avec SES proxys, donc
-#  le compte Instagram de l'agence n'est jamais utilise -- aucun cookie, aucun
-#  risque de ban. Le telechargeur passait a cote de cette regle : il ouvrait
-#  une session avec cookies.txt pour lister un profil.
-#
-#  Le meme acteur officiel (apify~instagram-scraper) sait lister un compte : il
-#  suffit de lui donner l'URL du profil au lieu d'une liste de liens de reels.
-#  On ne retombe sur les cookies que si le jeton Apify est absent.
-# ─────────────────────────────────────────────────────────────────────────
+# ───────────────────────────────────────────────────── compte retenu ──
 
+def charger_choix(chemin=None) -> dict:
+    """{id Discord: (pseudo, combien)} relu du disque.
 
-#: Passe a True des qu Apify a repondu « quota epuise ». Un plafond mensuel ne
-#: se rouvre pas dans la minute : rappeler l acteur ne ferait qu ajouter deux
-#: secondes d attente et un pave de JSON a CHAQUE clic, pour le meme refus.
-#: Remis a False au redemarrage du bot, ce qui suffit -- un rechargement de
-#: credits s accompagne de toute facon d un restart.
-_APIFY_EPUISE = False
-
-
-def _apify_pret() -> bool:
-    """Vrai si le jeton Apify est configure ET si le quota n est pas epuise."""
-    if _APIFY_EPUISE:
-        return False
-    try:
-        import apify_reels
-        return bool(apify_reels.get_token())
-    except Exception:
-        return False
-
-
-def _apify_appel(charge: dict, timeout: int = 240):
-    """Un run synchrone de l'acteur. Rend (items, raison d'echec).
-
-    La raison est REMONTEE, pas seulement imprimee : un print part dans le
-    journal du VPS, que personne ne lit au moment ou le bouton ne fait rien.
-    C'est exactement ce qui s'est passe le 27/08 -- le salon annoncait
-    « Termine » sans avoir rien descendu, et sans dire pourquoi.
+    Une entree illisible est COMPTEE et dite dans le journal, pas ecartee en
+    silence : un VA dont le compte « disparait » doit pouvoir etre explique.
     """
-    import apify_reels
-    import requests as _rq
-    tok = apify_reels.get_token()
-    if not tok:
-        return [], "jeton Apify absent"
-    try:
-        r = _rq.post(
-            f"{apify_reels.BASE}/acts/{apify_reels.ACTOR}"
-            f"/run-sync-get-dataset-items?token={tok}",
-            json=charge, timeout=timeout)
-        if r.status_code not in (200, 201):
-            # Le plafond mensuel se presente en 403 avec un JSON illisible pour
-            # qui n a pas le nez dedans. On le nomme, et on cesse d essayer.
-            corps = r.text or ""
-            if ("hard limit exceeded" in corps
-                    or "platform-feature-disabled" in corps):
-                global _APIFY_EPUISE
-                _APIFY_EPUISE = True
-                return [], ("quota Apify epuise pour ce mois. Recharger le "
-                            "compte Apify, ou fournir IG_SESSIONID pour "
-                            "passer par la voie cookies.")
-            return [], f"HTTP {r.status_code} : {corps[:200]}"
-        items = r.json()
-        if not isinstance(items, list):
-            return [], f"reponse inattendue : {str(items)[:200]}"
-        if not items:
-            return [], ("l'acteur n'a rien renvoye : compte prive, "
-                        "inexistant, ou resultsType refuse")
-        # Un item d'erreur est frequent : l'acteur repond 200 avec un objet
-        # qui porte le probleme au lieu d'une publication.
-        if len(items) == 1 and isinstance(items[0], dict):
-            pb = (items[0].get("error") or items[0].get("errorDescription")
-                  or items[0].get("message"))
-            if pb and not items[0].get("url"):
-                return [], str(pb)[:200]
-        return items, ""
-    except Exception as exc:
-        return [], f"injoignable : {str(exc)[:150]}"
-
-
-def profil_entete_apify(username: str) -> dict:
-    """Fiche du compte via Apify. {} si indisponible."""
-    items, raison = _apify_appel({
-        "directUrls": [f"https://www.instagram.com/{username}/"],
-        "resultsType": "details",
-        "resultsLimit": 1,
-        "addParentData": False,
-    }, timeout=120)
-    # La raison est CONSERVEE, comme pour lister_posts_apify. Elle etait jetee :
-    # la fiche echouait, le salon disait « illisible » et personne ne savait si
-    # c etait le jeton, un compte prive, ou l acteur qui refusait la demande.
-    profil_entete_apify.derniere_raison = raison
-    for it in items:
-        if not isinstance(it, dict):
+    brut = safe_json.load(chemin or CHOIX_FILE, default={})
+    out, ecartes = {}, 0
+    for cle, v in (brut.items() if isinstance(brut, dict) else []):
+        try:
+            uid = int(cle)
+            pseudo = str((v or {}).get("pseudo") or "")
+            n = max(1, min(int((v or {}).get("combien") or 30), 200))
+        except (TypeError, ValueError, AttributeError):
+            ecartes += 1
             continue
-        return {
-            "avatar": (it.get("profilePicUrlHD") or it.get("profilePicUrl") or ""),
-            "bio": (it.get("biography") or "").strip(),
-            "nom": (it.get("fullName") or "").strip(),
-            "posts": it.get("postsCount") or 0,
-            "abonnes": it.get("followersCount") or 0,
-        }
-    return {}
-
-
-def lister_posts_apify(username: str, max_posts: int) -> list:
-    """Publications d'un compte via Apify, au meme format que la voie cookies.
-
-    L'acteur ne dit pas toujours explicitement si un post est une video : on le
-    deduit de la presence d'une videoUrl, plus fiable qu'un champ 'type' dont
-    le libelle change d'une version a l'autre.
-    """
-    items, raison = _apify_appel({
-        "directUrls": [f"https://www.instagram.com/{username}/"],
-        "resultsType": "posts",
-        "resultsLimit": int(max_posts),
-        "addParentData": False,
-    })
-    lister_posts_apify.derniere_raison = raison
-    posts = []
-    for it in items:
-        if not isinstance(it, dict):
+        if not _PSEUDO_OK.match(pseudo):
+            ecartes += 1
             continue
-        url = (it.get("url") or "").strip()
-        if not url:
-            continue
-        video = bool(it.get("videoUrl")) or (it.get("type") == "Video")
-        horo = None
-        ts = it.get("timestamp")
-        if ts:
-            try:
-                horo = datetime.fromisoformat(
-                    str(ts).replace("Z", "+00:00")).timestamp()
-            except Exception:
-                horo = None
-        posts.append({
-            "shortcode": it.get("shortCode") or "",
-            "url": url,
-            "is_video": video,
-            "timestamp": horo,
-            "caption": (it.get("caption") or "").strip(),
-            "views": it.get("videoViewCount") or it.get("videoPlayCount") or 0,
-            "likes": it.get("likesCount") or 0,
-            "comments": it.get("commentsCount") or 0,
-        })
-    return posts
-
-
-def build_ydl_options(output_path: str) -> dict:
-    opts = {
-        "outtmpl": output_path,
-        "format": "mp4/bestvideo*+bestaudio/best",
-        "merge_output_format": "mp4",
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "retries": 3,
-    }
-    # MEME SESSION QUE POUR LISTER, sinon on liste et on ne descend pas.
-    # _cookiefile_ytdlp rend cookies.txt s il existe, et fabrique sinon un
-    # fichier Netscape a partir d IG_SESSIONID. Cette fonction lisait
-    # UNIQUEMENT cookies.txt : sur le VPS, ou ce fichier n existe pas, les
-    # reels listes par les cookies partaient ensuite se telecharger sans
-    # aucune session -- et un compte prive ou limite les refusait.
-    ck = _cookiefile_ytdlp()
-    if ck:
-        opts["cookiefile"] = ck
-    return opts
-
-
-def download_sync(lien: str, output_path: str) -> dict:
-    """Telechargement bloquant (sera execute dans un thread)."""
-    with yt_dlp.YoutubeDL(build_ydl_options(output_path)) as ydl:
-        info = ydl.extract_info(lien, download=True)
-    return info
-
-
-def _build_ig_session() -> requests.Session:
-    """Session Instagram, par IG_SESSIONID de preference, cookies.txt sinon.
-
-    LE PLUS SIMPLE D ABORD
-        Instagram n a besoin QUE du sessionid. Le mettre dans le .env evite
-        tout le reste : pas d extension de navigateur pour exporter un fichier
-        Netscape, pas de fichier a deposer a cote du bot, pas de chemin a
-        garder synchronise entre cette machine et le VPS.
-
-        Pour le recuperer : instagram.com ouvert et connecte, outils de
-        developpement, onglet Application (ou Stockage), Cookies, ligne
-        « sessionid » -- on copie la valeur.
-
-        Dans le .env :
-
-            IG_SESSIONID=...
-
-        Les deux autres cookies sont facultatifs. Instagram les accepte
-        absents pour les lectures publiques, mais les fournir rend la session
-        plus stable dans la duree :
-
-            IG_DS_USER_ID=...
-            IG_CSRFTOKEN=...
-
-    LE FICHIER RESTE ACCEPTE
-        Si IG_SESSIONID est vide, on retombe sur cookies.txt au format
-        Netscape. Rien de ce qui marchait ne cesse de marcher.
-
-    C EST UN IDENTIFIANT DE SESSION
-        Il vaut un acces au compte : il vit dans le .env, jamais dans le
-        depot. Le .gitignore le couvre deja.
-    """
-    s = requests.Session()
-    s.headers.update(IG_WEB_HEADERS)
-
-    sessionid = (os.getenv("IG_SESSIONID") or "").strip()
-    if sessionid:
-        for nom, valeur in (("sessionid", sessionid),
-                            ("ds_user_id", (os.getenv("IG_DS_USER_ID") or "").strip()),
-                            ("csrftoken", (os.getenv("IG_CSRFTOKEN") or "").strip())):
-            if valeur:
-                s.cookies.set(nom, valeur, domain=".instagram.com")
-        return s
-
-    if not COOKIES_FILE.exists():
-        raise RuntimeError(
-            "Aucune session Instagram. Mets IG_SESSIONID dans le .env "
-            "(le plus simple), ou depose un cookies.txt au format Netscape "
-            f"dans {COOKIES_FILE.parent}."
-        )
-    cj = http.cookiejar.MozillaCookieJar(str(COOKIES_FILE))
-    cj.load(ignore_discard=True, ignore_expires=True)
-    s.cookies = cj
-    return s
-
-
-def profil_entete_sync(username: str) -> dict:
-    """Fiche du compte : avatar, bio, nom affiche.
-
-    Le meme endpoint que list_profile_posts_sync renvoie deja tout cela dans
-    l'objet `user` : ni instaloader ni aucune autre bibliotheque n'est
-    necessaire, et on reste sur les cookies que le projet gere deja.
-
-    Renvoie {} si la fiche est illisible -- le telechargement des posts, lui,
-    n'a pas de raison d'echouer pour autant.
-    """
-    try:
-        s = _build_ig_session()
-        r = s.get(
-            "https://www.instagram.com/api/v1/users/web_profile_info/",
-            params={"username": username},
-            timeout=15,
-        )
-        if r.status_code != 200:
-            return {}
-        user = ((r.json().get("data") or {}).get("user") or {})
-        return {
-            "avatar": user.get("profile_pic_url_hd") or user.get("profile_pic_url") or "",
-            "bio": (user.get("biography") or "").strip(),
-            "nom": (user.get("full_name") or "").strip(),
-            "posts": ((user.get("edge_owner_to_timeline_media") or {}).get("count") or 0),
-            "abonnes": ((user.get("edge_followed_by") or {}).get("count") or 0),
-        }
-    except Exception:
-        return {}
-
-
-def telecharger_binaire_sync(url: str, destination: str) -> bool:
-    """Descend un fichier simple (l'avatar). Rend True si le fichier est ecrit."""
-    try:
-        s = _build_ig_session()
-        r = s.get(url, timeout=60)
-        if r.status_code == 200 and r.content:
-            Path(destination).write_bytes(r.content)
-            return True
-    except Exception:
-        pass
-    return False
-
-
-def _cookiefile_ytdlp():
-    """Le fichier de cookies a donner a yt-dlp, ou None.
-
-    veille.py lit la session VIVANTE du navigateur (cookiesfrombrowser), et
-    c est pour ca qu il ne demande jamais d entretien. Impossible ici : le VPS
-    n a pas de navigateur. On retombe donc sur un fichier Netscape -- fabrique
-    au besoin depuis IG_SESSIONID, pour que la meme variable serve a la fois a
-    requests et a yt-dlp plutot que d avoir deux sources de verite.
-    """
-    if COOKIES_FILE.exists():
-        return str(COOKIES_FILE)
-    sessionid = (os.getenv("IG_SESSIONID") or "").strip()
-    if not sessionid:
-        return None
-    chemin = Path(DOWNLOAD_DIR) / "cookies_sessionid.txt"
-    lignes = ["# Netscape HTTP Cookie File"]
-    for nom, valeur in (("sessionid", sessionid),
-                        ("ds_user_id", (os.getenv("IG_DS_USER_ID") or "").strip()),
-                        ("csrftoken", (os.getenv("IG_CSRFTOKEN") or "").strip())):
-        if valeur:
-            lignes.append(chr(9).join([".instagram.com", "TRUE", "/", "TRUE",
-                                       "2147483647", nom, valeur]))
-    try:
-        chemin.parent.mkdir(parents=True, exist_ok=True)
-        chemin.write_text(chr(10).join(lignes) + chr(10), encoding="utf-8")
-    except Exception:
-        return None
-    return str(chemin)
-
-
-def list_profile_posts_sync(username: str, max_posts: int) -> list[dict]:
-    """Liste les N posts les plus recents via l'API web Instagram (cookies requis).
-
-    Renvoie une liste de dicts normalises : shortcode, url, media_type, views,
-    likes, comments, timestamp, caption, is_video.
-    """
-    s = _build_ig_session()
-
-    # 1) username -> user_id
-    r = s.get(
-        "https://www.instagram.com/api/v1/users/web_profile_info/",
-        params={"username": username},
-        timeout=15,
-    )
-    if r.status_code == 404:
-        raise RuntimeError(f"Compte @{username} introuvable.")
-    if r.status_code != 200:
-        raise RuntimeError(f"Erreur API profil ({r.status_code}). Cookies peut-etre expires.")
-    data = r.json().get("data") or {}
-    user = data.get("user") or {}
-    user_id = user.get("id")
-    if not user_id:
-        raise RuntimeError(f"Impossible de recuperer l'ID de @{username} (compte prive ?).")
-    if user.get("is_private"):
-        raise RuntimeError(
-            f"Le compte @{username} est prive. "
-            "Soit tu le suis avec le compte des cookies, soit ca ne passera pas."
-        )
-
-    # 2) feed paginé
-    items: list[dict] = []
-    max_id = None
-    while len(items) < max_posts:
-        params = {"count": min(50, max_posts - len(items))}
-        if max_id:
-            params["max_id"] = max_id
-        r = s.get(
-            f"https://www.instagram.com/api/v1/feed/user/{user_id}/",
-            params=params,
-            timeout=15,
-        )
-        if r.status_code != 200:
-            break
-        body = r.json()
-        batch = body.get("items") or []
-        if not batch:
-            break
-        items.extend(batch)
-        if not body.get("more_available"):
-            break
-        max_id = body.get("next_max_id")
-        if not max_id:
-            break
-
-    # 3) normalisation
-    out = []
-    for it in items[:max_posts]:
-        code = it.get("code")
-        if not code:
-            continue
-        media_type = it.get("media_type")  # 1=photo, 2=video, 8=carousel
-        is_video = media_type == 2
-        caption_obj = it.get("caption") or {}
-        out.append({
-            "shortcode": code,
-            "url": f"https://www.instagram.com/p/{code}/",
-            "media_type": media_type,
-            "is_video": is_video,
-            "views": it.get("play_count") or it.get("view_count") or 0,
-            "likes": it.get("like_count") or 0,
-            "comments": it.get("comment_count") or 0,
-            "timestamp": it.get("taken_at"),
-            "caption": (caption_obj.get("text") if isinstance(caption_obj, dict) else "") or "",
-        })
+        out[uid] = (pseudo, n)
+    if ecartes:
+        print(f"[telechargement] {ecartes} compte(s) retenu(s) illisible(s) "
+              f"dans {Path(chemin or CHOIX_FILE).name}, ignore(s)")
     return out
 
 
-class Telechargement(commands.Cog):
-    def __init__(self, bot: commands.Bot):
-        self.bot = bot
+# ─────────────────────────────────────────────────────────── salons ──
 
-    async def cog_load(self):
-        """Reenregistre les panneaux deja poses dans les salons.
-
-        SANS CECI, RIEN NE MARCHE APRES UN REDEMARRAGE. Les vues sont
-        declarees persistantes (timeout=None, custom_id), mais discord.py ne
-        rattache pas tout seul les boutons d un message poste par une instance
-        precedente : il ne dispatche aucun callback, Discord n obtient jamais
-        de reponse, et la personne voit « L application n a pas repondu a
-        temps » sur un bouton pourtant intact.
-
-        Le symptome est trompeur -- il ressemble a une lenteur, alors que rien
-        ne s execute. Constate le 27/08 : le panneau repondait juste apres avoir
-        ete pose, puis plus jamais des le redemarrage suivant.
-
-        C est la convention de tous les autres cogs du bot : voir numeros.py,
-        clickrecap.py, cta_reminder.py, onboarding.py.
-        """
-        for vue in (PanneauCompte(self), PanneauOptions(self)):
-            try:
-                self.bot.add_view(vue)
-            except Exception as exc:
-                print(f"[telechargement] add_view echoue : {exc}")
-        #: Compte retenu par personne : {id Discord: (pseudo, combien)}.
-        #: En memoire seulement -- un redemarrage le vide, et c'est sans
-        #: consequence : on ressaisit un pseudo en deux secondes.
-        self.choix = {}
-
-    # ---------------------------------------------------------------- envoi --
-
-    async def livrer(self, canal, username: str, combien: int,
-                     avatar: bool, bio: bool, photos: bool, reels: bool,
-                     par_vues: bool = False):
-        dossier = DOWNLOAD_DIR
-
-        apify = _apify_pret()
-        source = "Apify (sans cookie)" if apify else "cookies"
-
-        if avatar or bio:
-            fiche = await asyncio.to_thread(
-                profil_entete_apify if apify else profil_entete_sync, username)
-            if not fiche and apify:
-                # Apify muet sur la fiche : les cookies peuvent encore l'avoir.
-                fiche = await asyncio.to_thread(profil_entete_sync, username)
-            if not fiche:
-                # « Je continue avec les publications » etait affiche meme
-                # quand aucune n avait ete demandee -- en cliquant « Bio » on
-                # lisait une promesse jamais tenue, suivie d un « Termine »
-                # qui paraissait fautif. On dit ce qui se passe vraiment.
-                pourquoi = getattr(profil_entete_apify, "derniere_raison", "")
-                suite = ("Je continue avec les publications."
-                         if (photos or reels) else "Rien d autre n a ete demande.")
-                await canal.send(
-                    f"Fiche de @{username} illisible ({source})"
-                    + (f" : {pourquoi}" if pourquoi else "")
-                    + ". " + suite)
-            else:
-                entete = f"**@{username}**"
-                if fiche.get("nom"):
-                    entete += f" - {fiche['nom']}"
-                if fiche.get("posts") or fiche.get("abonnes"):
-                    entete += (f" - {fiche.get('posts', 0)} posts, "
-                               f"{fiche.get('abonnes', 0)} abonnes")
-                await canal.send(entete)
-
-                if avatar and fiche.get("avatar"):
-                    pp = dossier / f"pp_{username}_{uuid.uuid4().hex[:8]}.jpg"
-                    if await asyncio.to_thread(telecharger_binaire_sync,
-                                               fiche["avatar"], str(pp)):
-                        await canal.send(content="Photo de profil",
-                                         file=discord.File(str(pp)))
-                    else:
-                        await canal.send("Photo de profil indisponible.")
-                if bio:
-                    await canal.send("Bio :")
-                    await canal.send(fiche.get("bio") or "Pas de bio.")
-
-        if not (photos or reels):
-            await canal.send(f"Termine pour @{username}.")
-            return
-
-        try:
-            posts = await asyncio.to_thread(
-                lister_posts_apify if apify else list_profile_posts_sync,
-                username, combien)
-            if apify and not posts:
-                # On NE S ARRETE PAS sur un Apify muet : on dit pourquoi, et on
-                # tente les cookies. Un « Termine » sans rien descendre ne
-                # renseigne personne.
-                raison = getattr(lister_posts_apify, "derniere_raison", "")
-                await canal.send(
-                    f"Apify n'a rien rendu pour @{username}"
-                    + (f" : {raison}" if raison else "")
-                    + ". Nouvel essai avec les cookies.")
-                posts = await asyncio.to_thread(
-                    list_profile_posts_sync, username, combien)
-                source = "cookies (repli)"
-        except Exception as e:
-            # PAS de repli yt-dlp ici, et ce n est pas un oubli : son
-            # extracteur de PROFIL est declare casse en amont
-            # (InstagramUserIE._WORKING = False) et son motif d URL ne
-            # reconnait meme pas /<pseudo>/reels/. Verifie le 27/08 : les deux
-            # formes rendent "Unsupported URL" ou "Unable to extract data".
-            #
-            # yt-dlp sait descendre un reel DONT ON LUI DONNE LE LIEN
-            # (InstagramIE, lui, fonctionne) mais il ne sait pas dresser la
-            # liste de ces liens. Lister reste donc le travail des cookies ou
-            # d Apify : il n existe pas de troisieme chemin a essayer.
-            await canal.send(f"Erreur en lisant le profil : {str(e)[:1500]}")
-            return
-
-        if not posts:
-            await canal.send("Aucun post trouve sur ce profil.")
-            return
-
-        await canal.send(f"Source : {source}.")
-        lot_photos = [p for p in posts if not p["is_video"]]
-        lot_reels = [p for p in posts if p["is_video"]]
-        if par_vues:
-            # "Top reels" : les plus VUS, pas les plus recents. Le tri se
-            # fait sur ce que list_profile_posts_sync a deja releve, donc
-            # il ne coute aucune requete supplementaire.
-            lot_reels.sort(key=lambda p: p.get("views") or 0, reverse=True)
-            lot_reels = lot_reels[:combien]
-        await canal.send(
-            f"{len(posts)} publication(s) : {len(lot_photos)} photo(s), "
-            f"{len(lot_reels)} video(s). Envoi au fil de l'eau.")
-
-        for libelle, lot, actif, ext in (("PHOTOS", lot_photos, photos, "jpg"),
-                                         ("REELS", lot_reels, reels, "mp4")):
-            if not lot or not actif:
-                continue
-            await canal.send(f"--- {libelle} ({len(lot)}) ---")
-
-            for idx, post in enumerate(lot, start=1):
-                legende = (post.get("caption") or "").strip()
-                date_str = ""
-                if post.get("timestamp"):
-                    date_str = datetime.fromtimestamp(
-                        post["timestamp"], tz=timezone.utc).strftime("%d/%m/%Y")
-
-                # UN SEUL MESSAGE PAR PUBLICATION.
-                #
-                # Le fichier, le numero, la date et la description partaient en
-                # deux ou trois messages separes. Sur trente posts cela faisait
-                # pres de QUATRE-VINGT-DIX envois d affilee dans le meme salon,
-                # alors que Discord n en accepte qu environ cinq par cinq
-                # secondes. Le bot passait donc plusieurs minutes en file
-                # d attente derriere ses propres messages -- et pendant ce
-                # temps AUCUNE interaction ne pouvait etre servie dans les trois
-                # secondes imparties. D ou « L application n a pas repondu a
-                # temps » sur un bouton sans rapport (constate le 27/08).
-                #
-                # Tout tient maintenant dans un envoi, legende comprise.
-                entete = f"#{idx}" + (f" - {date_str}" if date_str else "")
-                corps = entete + ((chr(10) + legende[:1800]) if legende else "")
-
-                fichier = dossier / f"{uuid.uuid4().hex}.{ext}"
-                try:
-                    await asyncio.to_thread(
-                        download_sync, post["url"], str(fichier))
-                except Exception as e:
-                    await canal.send(
-                        corps + chr(10) + f"echec : {str(e)[:200]}"
-                        + chr(10) + post["url"])
-                    continue
-
-                if not fichier.exists():
-                    await canal.send(corps + chr(10) + post["url"])
-                    continue
-
-                taille_mo = fichier.stat().st_size / (1024 * 1024)
-                if taille_mo > 24.5:
-                    # Discord refuse au-dela : on donne le lien plutot que rien.
-                    await canal.send(
-                        corps + chr(10)
-                        + f"({taille_mo:.1f} Mo, trop lourd pour Discord)"
-                        + chr(10) + post["url"])
-                else:
-                    await canal.send(content=corps[:1900],
-                                     file=discord.File(str(fichier)))
-
-                # Une seconde entre deux publications : on reste sous la limite
-                # au lieu de la heurter et d attendre que Discord nous relache.
-                await asyncio.sleep(1.0)
-
-        await canal.send(f"Termine pour @{username}.")
-
-    # ----------------------------------------------------------------- menu --
-
-    async def ouvrir_menu(self, interaction: discord.Interaction):
-        """Pose les deux panneaux, pour qui veut les poser a la demande."""
-        await poser_panneaux(self, interaction.channel)
-        await interaction.response.send_message("Panneaux poses.", ephemeral=True)
-
-    @app_commands.guilds(discord.Object(id=SERVEUR_ID))
-    @app_commands.command(
-        name="menudownload",
-        description="Poser les deux panneaux de telechargement dans ce salon")
-    async def menudownload(self, interaction: discord.Interaction):
-        n = await poser_panneaux(self, interaction.channel)
-        await interaction.response.send_message(
-            f"{n} panneau(x) pose(s)." if n else
-            "Impossible de poser les panneaux ici.", ephemeral=True)
-
-    async def ouvrir_menu(self, interaction: discord.Interaction):
-        """Pose le panneau en ephemere, pour qui veut l'ouvrir a la demande.
-
-        Il montre les memes six boutons que le panneau permanent : on ne
-        renvoie pas vers une fenetre de saisie sans avoir dit ce qu'on peut
-        demander.
-        """
-        await interaction.response.send_message(
-            "Que veux-tu telecharger ?", view=Panneau(self), ephemeral=True)
-
-    @app_commands.guilds(discord.Object(id=SERVEUR_ID))
-    @app_commands.command(
-        name="menudownload",
-        description="Poser le menu de telechargement Instagram dans ce salon")
-    @app_commands.describe(
-        epingler="true = epingle le menu pour qu'il reste en haut du salon")
-    async def menudownload(self, interaction: discord.Interaction,
-                           epingler: bool = True):
-        """Pose un menu permanent, dans l'esprit du menu central du bot.
-
-        Un menu A PART, et pas un bouton greffe dans le menu contenu : les
-        deux ne servent pas la meme chose ni les memes gens, et melanger
-        "recuperer du contenu d'un compte tiers" avec "recevoir SON contenu"
-        rendrait les deux moins lisibles.
-        """
-        emb = discord.Embed(
-            title="Telechargement - clique, entre un pseudo, choisis",
-            description=(
-                "Deux etapes : d'abord **qui**, ensuite **quoi**."
-                "\n\n"
-                "**Photo de profil** \u00b7 **Bio** \u00b7 "
-                "**Posts photo** \u00b7 **Reels** \u00b7 "
-                "**Top reels** (les plus vus)"
-                "\n\n"
-                "L'ordre d'envoi est toujours le meme : photo de profil, "
-                "bio, posts, puis reels. Chaque fichier part **des qu'il "
-                "est pret** - un compte qui disparait en cours de route "
-                "laisse tout ce qui est deja passe."
-            ),
-            color=discord.Color.green())
-        try:
-            msg = await interaction.channel.send(embed=emb, view=Panneau(self))
-        except Exception as e:
-            await interaction.response.send_message(
-                f"Impossible de poster le menu : {e}", ephemeral=True)
-            return
-        if epingler:
-            try:
-                await msg.pin(reason="Menu de telechargement permanent")
-            except Exception:
-                pass
-        await interaction.response.send_message("Menu pose.", ephemeral=True)
+def _norm(nom) -> str:
+    try:
+        from cogs.welcome import _us_norm
+        return _us_norm(nom)
+    except Exception:
+        return str(nom or "").strip().lower()
 
 
-#: Titres des deux panneaux. Ils servent aussi de marqueurs : c'est a eux que
-#: _ensure_dl_panel reconnait un salon deja equipe.
-#: Un pseudo Instagram : lettres, chiffres, point et tiret bas, 30 au plus.
-#: Sans ce controle, "#" ou une URL mal collee passait, et le bot annonçait
-#: « Compte retenu : @# » avant d aller interroger un compte inexistant.
-_PSEUDO_OK = re.compile(r"^[A-Za-z0-9._]{1,30}$")
+def salon_reserve(canal) -> bool:
+    """Vrai pour un salon de service (« all-download »…), jamais un ticket."""
+    nom = getattr(canal, "name", "") or ""
+    try:
+        from cogs.welcome import salon_de_service
+        return salon_de_service(nom)
+    except Exception:
+        return _norm(nom).startswith("all-")
 
 
 def salon_de_livraison(canal):
@@ -771,36 +186,544 @@ def salon_de_livraison(canal):
     les fichiers.
     """
     nom = getattr(canal, "name", "") or ""
-    if not nom.endswith("-download"):
+    if not _norm(nom).endswith("-download"):
         return canal
-    vise = nom[: -len("-download")] + "-content"
+    vise = _norm(nom)[: -len("-download")] + "-content"
     guilde = getattr(canal, "guild", None)
     if guilde is None:
         return canal
     for c in guilde.text_channels:
-        if c.name == vise:
+        if _norm(c.name) == vise:
             return c
     return canal
 
 
+#: Serveurs dont l'absence du salon d'archive a deja ete journalisee : une
+#: ligne par serveur, pas une par fichier.
+_ARCHIVE_ABSENTE = set()
+
+
+def salon_all_download(guilde):
+    """Le salon « all-download » du serveur, ou None (journalise une fois)."""
+    if guilde is None:
+        return None
+    for c in getattr(guilde, "text_channels", []) or []:
+        if _norm(c.name) == NOM_ARCHIVE:
+            _ARCHIVE_ABSENTE.discard(getattr(guilde, "id", 0))
+            return c
+    gid = getattr(guilde, "id", 0)
+    if gid not in _ARCHIVE_ABSENTE:
+        _ARCHIVE_ABSENTE.add(gid)
+        print(f"[telechargement] aucun salon « {NOM_ARCHIVE} » sur "
+              f"{getattr(guilde, 'name', gid)} : les telechargements partent "
+              f"au VA seulement, sans copie")
+    return None
+
+
+def _heure_paris() -> str:
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Europe/Paris")).strftime("%d/%m/%Y %H:%M")
+    except Exception:
+        return datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M UTC")
+
+
+# ─────────────────────────────────────────────────────────── envoi ──
+
+def _limite(canal) -> int:
+    """Ce que CE serveur accepte par fichier (10 Mio sans boost)."""
+    try:
+        lim = int(getattr(getattr(canal, "guild", None), "filesize_limit", 0) or 0)
+    except (TypeError, ValueError):
+        lim = 0
+    return lim or LIMITE_DEFAUT
+
+
+def _taille(p) -> int:
+    try:
+        return Path(p).stat().st_size
+    except OSError:
+        return 0
+
+
+def repartir(chemins, limite: int):
+    """Range les fichiers en messages : (lots, trop_lourds).
+
+    Au plus dix fichiers par message, et un total sous la limite du serveur
+    (un carrousel de dix photos lourdes depassait sinon a lui seul). Un
+    fichier plus lourd que la limite ne part pas : il sera donne en lien.
+    """
+    plafond = max(1, int(limite) - _MARGE_ENVOI)
+    lots, lot, cumul, lourds = [], [], 0, []
+    for p in chemins:
+        t = _taille(p)
+        if t > plafond:
+            lourds.append(p)
+            continue
+        if lot and (len(lot) >= _MAX_PAR_MESSAGE or cumul + t > plafond):
+            lots.append(lot)
+            lot, cumul = [], 0
+        lot.append(p)
+        cumul += t
+    if lot:
+        lots.append(lot)
+    return lots, lourds
+
+
+async def _poster(canal, contenu: str = "", chemins=(), sans_ping: bool = False):
+    """Un message, qui ne leve JAMAIS : (envoye, trop_lourd, erreur).
+
+    Un envoi rate (413, permission, coupure) ne doit pas interrompre la
+    livraison : le reste du compte a le droit de partir.
+    """
+    kw = {}
+    if contenu:
+        kw["content"] = contenu[:2000]
+    if sans_ping:
+        kw["allowed_mentions"] = discord.AllowedMentions(
+            everyone=False, users=False, roles=False, replied_user=False)
+    if not contenu and not chemins:
+        return True, False, ""
+    try:
+        if chemins:
+            # Ouverts DANS le try : un fichier retire entre-temps (purge) est
+            # une erreur d'envoi comme une autre, pas une exception qui remonte.
+            kw["files"] = [discord.File(str(p), filename=Path(p).name) for p in chemins]
+        await canal.send(**kw)
+        return True, False, ""
+    except discord.HTTPException as e:
+        lourd = getattr(e, "status", 0) == 413 or getattr(e, "code", 0) == 40005
+        err = f"HTTP {getattr(e, 'status', '?')}"
+    except Exception as e:                                  # noqa: BLE001
+        lourd, err = False, f"{type(e).__name__}: {str(e)[:120]}"
+    finally:
+        for f in kw.get("files") or []:
+            try:
+                f.close()
+            except Exception:
+                pass
+    # Journalise : un salon ou le bot ne peut plus ecrire ne doit pas avaler
+    # la livraison sans trace (le VA ne voit rien, le journal le dit).
+    print(f"[telechargement] envoi refuse dans #{getattr(canal, 'name', '?')} : {err}")
+    return False, lourd, err
+
+
+async def _dire(canal, texte: str) -> None:
+    """Un message d'etat : jamais d'exception, meme salon ferme."""
+    await _poster(canal, texte)
+
+
+class _Demande:
+    """Une demande en cours : qui, quel compte, quelle option, quand."""
+
+    def __init__(self, pseudo: str, option: str, demandeur, canal):
+        self.pseudo = pseudo
+        self.option = option
+        self.demandeur_id = int(getattr(demandeur, "id", 0) or 0)
+        self.quand = _heure_paris()
+        self.archive = salon_all_download(getattr(canal, "guild", None))
+        self.archivees = 0
+        self.archives_ratees = 0
+        self.trop_lourds = 0
+        self.envois_rates = 0
+
+    def entete(self) -> str:
+        qui = f"<@{self.demandeur_id}>" if self.demandeur_id else "?"
+        return f"📥 {qui} · @{self.pseudo} · {self.option} · {self.quand}"
+
+
+class Telechargement(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        #: Compte retenu par personne : {id Discord: (pseudo, combien)}.
+        self.choix = charger_choix()
+        #: Anti double-clic : une demande a la fois par VA ET par compte. Deux
+        #: clics rapides lancaient deux livraisons entrelacees du meme compte,
+        #: chacune payee.
+        self._en_cours_va = set()
+        self._en_cours_pseudo = set()
+
+    async def cog_load(self):
+        """Reenregistre les panneaux deja poses dans les salons.
+
+        SANS CECI, RIEN NE MARCHE APRES UN REDEMARRAGE. Les vues sont
+        declarees persistantes (timeout=None, custom_id), mais discord.py ne
+        rattache pas tout seul les boutons d un message poste par une instance
+        precedente : il ne dispatche aucun callback, Discord n obtient jamais
+        de reponse, et la personne voit « L application n a pas repondu a
+        temps » sur un bouton pourtant intact (constate le 27/08).
+
+        C est la convention de tous les autres cogs du bot : voir numeros.py,
+        clickrecap.py, cta_reminder.py, onboarding.py.
+        """
+        for vue in (PanneauCompte(self), PanneauOptions(self)):
+            try:
+                self.bot.add_view(vue)
+            except Exception as exc:
+                print(f"[telechargement] add_view echoue : {exc}")
+        try:
+            if _ANCIEN_COOKIE.exists():
+                _ANCIEN_COOKIE.unlink()
+                print("[telechargement] ancien downloads/cookies_sessionid.txt "
+                      "retire (identifiant de session en clair)")
+        except OSError as exc:
+            print(f"[telechargement] ancien fichier de cookies non retire : {exc}")
+        try:
+            if not self._purge_quotidienne.is_running():
+                self._purge_quotidienne.start()
+        except Exception as exc:
+            print(f"[telechargement] purge quotidienne non lancee : {exc}")
+
+    async def cog_unload(self):
+        try:
+            self._purge_quotidienne.cancel()
+        except Exception:
+            pass
+
+    @tasks.loop(hours=24)
+    async def _purge_quotidienne(self):
+        """Les medias du cache non redemandes depuis 30 jours quittent le VPS."""
+        try:
+            import hiker_medias as hm
+            await asyncio.to_thread(hm.purger)
+        except Exception as exc:
+            print(f"[telechargement] purge en echec : {exc}")
+
+    @_purge_quotidienne.before_loop
+    async def _avant_purge(self):
+        await self.bot.wait_until_ready()
+
+    # ------------------------------------------------------- etat par VA --
+
+    def retenir(self, user_id: int, pseudo: str, combien: int) -> bool:
+        """Retient le compte actif d'un VA, sur le disque (ecriture atomique)."""
+        self.choix[int(user_id)] = (pseudo, int(combien))
+        ok = safe_json.write(CHOIX_FILE, {
+            str(k): {"pseudo": p, "combien": n} for k, (p, n) in self.choix.items()})
+        if not ok:
+            print(f"[telechargement] compte actif de {user_id} non ecrit : il "
+                  f"sera perdu au prochain redemarrage")
+        return ok
+
+    def reserver(self, user_id: int, pseudo: str) -> str:
+        """Prend le verrou du VA et du compte. Rend "" si c'est libre, sinon
+        la phrase a lui repondre. SYNCHRONE : aucun await entre le test et la
+        prise, sinon deux clics en rafale passent tous les deux."""
+        cle = (pseudo or "").lower()
+        if user_id in self._en_cours_va:
+            return ("Ton telechargement precedent n'est pas fini : attends son "
+                    "bilan (« Termine pour … ») avant d'en lancer un autre.")
+        if cle in self._en_cours_pseudo:
+            return (f"@{pseudo} est deja en cours de telechargement : attends "
+                    f"la fin, les fichiers deja descendus repartiront sans credit.")
+        self._en_cours_va.add(user_id)
+        self._en_cours_pseudo.add(cle)
+        return ""
+
+    def liberer(self, user_id: int, pseudo: str) -> None:
+        self._en_cours_va.discard(user_id)
+        self._en_cours_pseudo.discard((pseudo or "").lower())
+
+    # ---------------------------------------------------------------- envoi --
+
+    async def _archiver(self, dem: _Demande, texte: str, chemins) -> None:
+        """La meme chose dans « all-download », avec qui / quoi / quand.
+
+        Les fichiers sont relus du disque : un discord.File ne sert qu'une fois.
+        La mention s'affiche mais ne notifie personne (AllowedMentions) : le
+        salon est une archive, pas une sonnette.
+        """
+        if dem.archive is None:
+            return
+        contenu = dem.entete() + (("\n" + texte) if texte else "")
+        ok, lourd, err = await _poster(dem.archive, contenu[:2000], chemins,
+                                       sans_ping=True)
+        if ok:
+            dem.archivees += 1
+        else:
+            # _poster l'a journalise ; le total part dans le journal en fin
+            # de demande (le VA, lui, n'a pas a s'en soucier).
+            dem.archives_ratees += 1
+
+    async def _envoyer(self, cible, dem: _Demande, corps: str, chemins, lien: str,
+                       texte_archive: str = None) -> None:
+        """Une unite (une publication, la photo de profil, la bio) dans
+        -content, PUIS sa copie dans all-download. Ne leve jamais."""
+        if not chemins:
+            ok, _, err = await _poster(cible, corps)
+            if ok:
+                await self._archiver(dem, texte_archive or corps, [])
+            else:
+                dem.envois_rates += 1
+            return
+        limite = _limite(cible)
+        lots, lourds = repartir(chemins, limite)
+        premier = True
+        for lot in lots:
+            texte = corps if premier else ""
+            premier = False
+            ok, lourd, err = await _poster(cible, texte, lot)
+            if not ok:
+                # Discord a refuse malgre le calcul : le lien plutot que rien,
+                # et surtout pas d'exception, qui coupait toute la livraison.
+                if lourd:
+                    dem.trop_lourds += len(lot)
+                    raison = "trop lourd pour ce serveur"
+                else:
+                    dem.envois_rates += len(lot)
+                    raison = f"envoi refuse par Discord : {err}"
+                await _dire(cible, (texte + "\n" if texte else "")
+                            + f"({raison}) {lien}")
+                continue
+            await self._archiver(dem, texte, lot)
+        if lourds:
+            dem.trop_lourds += len(lourds)
+            lignes = [f"{Path(p).name} : {_taille(p) / 1048576:.1f} Mo, au-dela de "
+                      f"la limite de {limite / 1048576:.0f} Mo de ce serveur"
+                      for p in lourds]
+            texte = ((corps + "\n") if premier else "") + "\n".join(lignes) + "\n" + lien
+            await _dire(cible, texte)
+            await self._archiver(dem, texte, [])
+
+    def _bilan(self, pseudo: str, cpt, dem: _Demande, arret: str) -> str:
+        import hiker_medias as hm
+        if cpt.requetes == 0:
+            cout = "0 credit HikerAPI"
+        else:
+            cout = f"{cpt.requetes} requete(s) HikerAPI"
+            if cpt.rafraichies:
+                cout += f" (dont {cpt.rafraichies} pour des liens expires)"
+        morceaux = [cout]
+        if cpt.reutilises:
+            morceaux.append(f"{cpt.reutilises} fichier(s) deja la, renvoye(s) sans credit")
+        if cpt.telecharges:
+            morceaux.append(f"{cpt.telecharges} telecharge(s)")
+        if dem.trop_lourds:
+            morceaux.append(f"{dem.trop_lourds} trop lourd(s), donne(s) en lien")
+        if cpt.echecs:
+            morceaux.append(f"{cpt.echecs} fichier(s) non recupere(s)")
+        if dem.envois_rates:
+            morceaux.append(f"{dem.envois_rates} envoi(s) refuse(s) par Discord")
+        try:
+            b = hm.budget()
+            morceaux.append(f"reserve du jour {b['utilise']}/{b['plafond']}")
+        except Exception:
+            pass
+        tete = (f"Arrete pour @{pseudo} : {arret}" if arret
+                else f"Termine pour @{pseudo}")
+        return tete + " — " + " · ".join(morceaux) + "."
+
+    async def livrer(self, canal, username: str, combien: int,
+                     avatar: bool, bio: bool, photos: bool, reels: bool,
+                     par_vues: bool = False, demandeur=None, option: str = ""):
+        """Toute une demande, bilan compris. Ne leve jamais.
+
+        Une reserve vide, un solde epuise ou un compte introuvable arretent la
+        demande avec une phrase claire ; tout ce qui est deja parti reste.
+        """
+        import hiker_medias as hm
+        dem = _Demande(username, option or "?", demandeur, canal)
+        cpt = hm.Compteur()
+        arret = ""
+        try:
+            await self._livrer(canal, dem, cpt, username, combien,
+                               avatar, bio, photos, reels, par_vues)
+        except hm.ErreurHiker as e:
+            arret = str(e)
+        except Exception as e:                              # noqa: BLE001
+            traceback.print_exc()
+            arret = f"erreur inattendue : {type(e).__name__}: {str(e)[:300]}"
+        await _dire(canal, self._bilan(username, cpt, dem, arret))
+        if dem.archives_ratees:
+            print(f"[telechargement] @{username} : {dem.archives_ratees} copie(s) "
+                  f"dans {NOM_ARCHIVE} ratee(s), {dem.archivees} reussie(s)")
+
+    async def _livrer(self, canal, dem, cpt, username, combien,
+                      avatar, bio, photos, reels, par_vues):
+        import hiker_medias as hm
+        a_part = asyncio.to_thread
+
+        # La fiche coute une requete : on ne la paie que si elle sert. Une
+        # photo de profil deja sur le disque, ou un identifiant deja connu du
+        # suivi des comptes, s'en passent.
+        pp_deja = hm.pp_locale(username) if avatar else None
+        besoin_fiche = (bio or (avatar and pp_deja is None)
+                        or ((photos or reels) and not hm.pk_connu(username)))
+        if besoin_fiche:
+            fiche = await a_part(hm.profil, username, cpt)
+        else:
+            fiche = hm.profil_en_cache(username)
+
+        entete = f"**@{username}**"
+        if fiche:
+            if fiche.get("nom"):
+                entete += f" - {fiche['nom']}"
+            if fiche.get("posts") or fiche.get("abonnes"):
+                entete += (f" - {fiche.get('posts', 0)} posts, "
+                           f"{fiche.get('abonnes', 0)} abonnes")
+        await _dire(canal, entete)
+
+        if avatar:
+            chemin, raison = await a_part(hm.photo_de_profil, username, fiche, cpt)
+            if chemin is not None:
+                await self._envoyer(canal, dem, "Photo de profil", [chemin],
+                                    f"https://www.instagram.com/{username}/")
+            else:
+                await _dire(canal, f"Photo de profil indisponible : {raison}.")
+        if bio:
+            texte_bio = ((fiche or {}).get("bio") or "").strip() or "Pas de bio."
+            # La bio dans SON message : le VA la copie telle quelle.
+            await _dire(canal, "Bio :")
+            await self._envoyer(canal, dem, texte_bio, [], "",
+                                texte_archive="Bio :\n" + texte_bio)
+
+        if not (photos or reels):
+            return
+        if fiche and fiche.get("prive"):
+            await _dire(canal, f"@{username} est un compte PRIVE : ses publications "
+                               f"ne sont pas lisibles.")
+            return
+
+        notes = []
+        lot_photos, lot_reels = [], []
+        if photos and reels and not par_vues:
+            # « Tout » : UNE lecture des publications sert photos ET reels
+            # (les videos du fil portent leur lien mp4). Lire aussi les reels
+            # a part ferait payer deux fois les memes publications.
+            posts, note = await a_part(hm.publications, username, combien, cpt)
+            lot_photos = [p for p in posts if p.get("genre") != "video"]
+            lot_reels = [p for p in posts if p.get("genre") == "video"]
+            notes.append(note)
+        else:
+            if photos:
+                lot_photos, note = await a_part(hm.publications, username,
+                                                combien, cpt, True)
+                notes.append(note)
+            if reels and par_vues:
+                lot_reels, note, source = await a_part(hm.top_reels, username,
+                                                       combien, cpt)
+                notes += [note, f"classement : {source}"]
+            elif reels:
+                lot_reels, note = await a_part(hm.reels, username, combien, cpt)
+                notes.append(note)
+        notes = [n for n in notes if n]
+
+        if not lot_photos and not lot_reels:
+            await _dire(canal, "Aucune publication trouvee sur ce profil."
+                        + (("\n" + "\n".join(notes)) if notes else ""))
+            return
+        await _dire(canal,
+                    f"{len(lot_photos)} publication(s) photo, {len(lot_reels)} "
+                    f"reel(s). Envoi au fil de l'eau."
+                    + (("\n" + "\n".join(notes)) if notes else ""))
+
+        for titre, lot in (("POSTS PHOTO", lot_photos),
+                           ("TOP REELS" if par_vues else "REELS", lot_reels)):
+            if not lot:
+                continue
+            await _dire(canal, f"--- {titre} ({len(lot)}) ---")
+            for idx, post in enumerate(lot, start=1):
+                # UN SEUL MESSAGE PAR PUBLICATION, legende comprise : trente
+                # posts en trois messages chacun faisaient quatre-vingt-dix
+                # envois d'affilee, et le bot restait des minutes en file
+                # d'attente derriere lui-meme (constate le 27/08).
+                corps = _corps(idx, post, par_vues)
+                res = await a_part(hm.preparer_post, post, cpt, username)
+                chemins = [r["chemin"] for r in res if r["chemin"] is not None]
+                rates = [r for r in res if r["chemin"] is None]
+                lien = hm.permalien(post["code"])
+                if chemins:
+                    await self._envoyer(canal, dem, corps, chemins, lien)
+                if rates:
+                    detail = "; ".join(
+                        f"element {r['i']} : {r['erreur'] or 'indisponible'}"
+                        for r in rates)
+                    await _dire(canal, (corps if not chemins else f"#{idx}")
+                                + "\n" + detail[:600] + "\n" + lien)
+                await asyncio.sleep(PAUSE_ENTRE_POSTS)
+
+    # ----------------------------------------------------------------- menu --
+
+    @app_commands.guilds(discord.Object(id=SERVEUR_ID))
+    @app_commands.default_permissions(manage_messages=True)
+    @app_commands.command(
+        name="menudownload",
+        description="Poser les deux panneaux de telechargement dans ce salon")
+    @app_commands.describe(
+        epingler="true = epingle les panneaux pour qu'ils restent en haut du salon")
+    async def menudownload(self, interaction: discord.Interaction,
+                           epingler: bool = True):
+        """Pose les deux panneaux (le compte, les options) a la demande.
+
+        Il y en avait DEUX definitions : la seconde, seule retenue par Python,
+        construisait une classe `Panneau` qui n'existait plus -- la commande
+        echouait au premier appel. Et la premiere repondait APRES avoir pose
+        les panneaux, bien au-dela des trois secondes accordees par Discord.
+        """
+        canal = interaction.channel
+        if salon_reserve(canal):
+            await interaction.response.send_message(
+                f"#{getattr(canal, 'name', '?')} est un salon de service (archive) : "
+                f"pas de panneaux ici.", ephemeral=True)
+            return
+        # On repond D'ABORD : vider l'ancien panneau et epingler prend
+        # plusieurs secondes.
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        # Le menage des messages du bot ne se fait que dans un salon -download :
+        # ailleurs (un -content), il effacerait le contenu deja livre.
+        nettoyer = _norm(getattr(canal, "name", "")).endswith("-download")
+        n = await poser_panneaux(self, canal, epingler=epingler, nettoyer=nettoyer)
+        await interaction.followup.send(
+            f"{n} panneau(x) pose(s)." if n else
+            "Impossible de poser les panneaux ici (droits du bot ?).",
+            ephemeral=True)
+
+
+def _corps(idx: int, post: dict, par_vues: bool) -> str:
+    """Numero, date (et vues pour le top), puis la description."""
+    entete = f"#{idx}"
+    if post.get("date"):
+        try:
+            entete += " - " + datetime.fromtimestamp(
+                int(post["date"]), tz=timezone.utc).strftime("%d/%m/%Y")
+        except (OverflowError, OSError, ValueError):
+            pass
+    if par_vues and post.get("vues") is not None:
+        entete += f" - {int(post['vues']):,} vues".replace(",", " ")
+    legende = (post.get("legende") or "").strip()
+    return entete + ((chr(10) + legende[:1800]) if legende else "")
+
+
+#: Titres des deux panneaux. Ils servent aussi de marqueurs : c'est a eux que
+#: poser_panneaux reconnait un ancien panneau a retirer.
 TITRE_COMPTE = "Telechargement - le compte"
 TITRE_OPTIONS = "Telechargement - les options"
 
 
 def _embed_compte(username: str = "", combien: int = 30):
     """L embed du premier panneau, avec ou sans compte actif."""
-    import discord as _d
     if username:
-        return _d.Embed(
+        return discord.Embed(
             title=TITRE_COMPTE,
             description=f"Compte actif : **@{username}**  (au plus {combien})"
                         + chr(10) + "Clique pour en changer.",
-            color=_d.Color.blurple())
-    return _d.Embed(
+            color=discord.Color.blurple())
+    return discord.Embed(
         title=TITRE_COMPTE,
         description="Clique et entre le pseudo du compte a descendre."
                     + chr(10) + "Il reste retenu jusqu a ce que tu en changes.",
-        color=_d.Color.blurple())
+        color=discord.Color.blurple())
+
+
+def _embed_options():
+    return discord.Embed(
+        title=TITRE_OPTIONS,
+        description="Choisis ce que tu veux de ce compte."
+                    + chr(10) + chr(10)
+                    + "Ordre d'envoi : photo de profil, bio, posts, puis reels."
+                    + chr(10) + "Chaque fichier part des qu'il est pret."
+                    + chr(10) + "Deja telecharge : renvoye sans credit.",
+        color=discord.Color.green())
 
 
 class ModalCompte(discord.ui.Modal, title="Quel compte ?"):
@@ -827,7 +750,10 @@ class ModalCompte(discord.ui.Modal, title="Quel compte ?"):
 
     async def on_submit(self, inter: discord.Interaction):
         brut = str(self.pseudo).strip().rstrip("/")
-        username = brut.split("/")[-1].lstrip("@").split("?")[0]
+        # Minuscules : Instagram ne distingue pas la casse, et le cache de
+        # listing est range au pseudo -- « Sky.Ards » et « sky.ards » ne
+        # doivent pas payer deux fois.
+        username = brut.split("/")[-1].lstrip("@").split("?")[0].lower()
         if not username:
             await inter.response.send_message("Pseudo invalide.", ephemeral=True)
             return
@@ -841,7 +767,7 @@ class ModalCompte(discord.ui.Modal, title="Quel compte ?"):
                 f"« {username} » ne ressemble pas a un pseudo Instagram.",
                 ephemeral=True)
             return
-        self.cog.choix[inter.user.id] = (username, n)
+        self.cog.retenir(inter.user.id, username, n)
 
         # Le panneau AFFICHE le compte actif. Chaque VA a son propre salon
         # -download : il n y a donc qu une personne par panneau, et l afficher
@@ -851,11 +777,7 @@ class ModalCompte(discord.ui.Modal, title="Quel compte ?"):
         # Discord n accorde que TROIS SECONDES pour la premiere reponse a une
         # interaction. inter.message.edit() est un appel reseau : le placer
         # avant l accuse de reception faisait expirer le delai des que l API
-        # trainait un peu, et la personne voyait « n a pas repondu a temps »
-        # alors que sa saisie avait bien ete enregistree (constate le 27/08).
-        #
-        # Une fois l interaction acquittee, l edition peut prendre le temps
-        # qu elle veut sans rien casser.
+        # trainait un peu (constate le 27/08).
         await inter.response.send_message(
             f"Compte actif : **@{username}** (au plus {n}).", ephemeral=True)
         try:
@@ -886,7 +808,8 @@ class PanneauOptions(discord.ui.View):
         super().__init__(timeout=None)
         self.cog = cog
 
-    async def _lancer(self, inter, quoi, libelle):
+    async def _lancer(self, inter, quoi):
+        court, long_ = OPTIONS[quoi]
         garde = self.cog.choix.get(inter.user.id)
         if not garde:
             await inter.response.send_message(
@@ -894,67 +817,87 @@ class PanneauOptions(discord.ui.View):
                 ephemeral=True)
             return
         username, n = garde
-        cible = salon_de_livraison(inter.channel)
-        await inter.response.send_message(
-            f"**@{username}** - {libelle} : ca part dans {cible.mention}.",
-            ephemeral=True)
-        await self.cog.livrer(
-            cible, username, n,
-            avatar=quoi in ("tout", "pp"),
-            bio=quoi in ("tout", "bio"),
-            photos=quoi in ("tout", "photos"),
-            reels=quoi in ("tout", "reels", "top"),
-            par_vues=(quoi == "top"))
+        occupe = self.cog.reserver(inter.user.id, username)
+        if occupe:
+            await inter.response.send_message(occupe, ephemeral=True)
+            return
+        try:
+            cible = salon_de_livraison(inter.channel)
+            await inter.response.send_message(
+                f"**@{username}** - {long_} : ca part dans "
+                f"{getattr(cible, 'mention', '#?')}.", ephemeral=True)
+            await self.cog.livrer(
+                cible, username, n,
+                avatar=quoi in ("tout", "pp"),
+                bio=quoi in ("tout", "bio"),
+                photos=quoi in ("tout", "photos"),
+                reels=quoi in ("tout", "reels", "top"),
+                par_vues=(quoi == "top"),
+                demandeur=inter.user, option=court)
+        finally:
+            self.cog.liberer(inter.user.id, username)
 
     @discord.ui.button(label="Tout", style=discord.ButtonStyle.success,
                        custom_id="dl:tout", row=0)
     async def b_tout(self, inter, _):
-        await self._lancer(inter, "tout", "tout")
+        await self._lancer(inter, "tout")
 
     @discord.ui.button(label="Photo de profil", style=discord.ButtonStyle.primary,
                        custom_id="dl:pp", row=0)
     async def b_pp(self, inter, _):
-        await self._lancer(inter, "pp", "la photo de profil")
+        await self._lancer(inter, "pp")
 
     @discord.ui.button(label="Bio", style=discord.ButtonStyle.primary,
                        custom_id="dl:bio", row=0)
     async def b_bio(self, inter, _):
-        await self._lancer(inter, "bio", "la bio")
+        await self._lancer(inter, "bio")
 
     @discord.ui.button(label="Posts photo", style=discord.ButtonStyle.primary,
                        custom_id="dl:photos", row=1)
     async def b_photos(self, inter, _):
-        await self._lancer(inter, "photos", "les posts photo")
+        await self._lancer(inter, "photos")
 
     @discord.ui.button(label="Reels", style=discord.ButtonStyle.primary,
                        custom_id="dl:reels", row=1)
     async def b_reels(self, inter, _):
-        await self._lancer(inter, "reels", "les reels")
+        await self._lancer(inter, "reels")
 
     @discord.ui.button(label="Top reels", style=discord.ButtonStyle.secondary,
                        custom_id="dl:top", row=1)
     async def b_top(self, inter, _):
-        await self._lancer(inter, "top", "les reels les plus vus")
+        await self._lancer(inter, "top")
 
 
-async def poser_panneaux(cog, canal, epingler: bool = True):
+async def poser_panneaux(cog, canal, epingler: bool = True, nettoyer: bool = True):
     """Pose les DEUX panneaux dans un salon. Rend le nombre de messages poses.
 
     Les anciens panneaux du bot sont retires d'abord : un message Discord est
     fige, donc une evolution du menu laisse sinon un panneau perime a cote du
     neuf, et personne ne sait lequel fait foi.
+
+    Jamais dans un salon de service : « all-download » est l'archive du
+    proprietaire, et le menage ci-dessous commence par vider les messages du
+    bot -- c'est-a-dire l'archive elle-meme.
     """
-    import discord as _d
+    if salon_reserve(canal):
+        print(f"[telechargement] {getattr(canal, 'name', '?')} est un salon de "
+              f"service : panneaux NON poses")
+        return 0
     poses = 0
-    # On vide ce que LE BOT a poste : panneaux perimes, notices d'epinglage,
-    # comptes rendus d'un ancien telechargement. Le salon ne doit porter que
-    # les deux panneaux, sinon ils sortent de l'ecran et plus personne ne les
-    # trouve. On ne touche pas aux messages des humains.
     moi = getattr(getattr(cog.bot, "user", None), "id", 0)
-    try:
-        await canal.purge(limit=200, check=lambda m: m.author.id == moi)
-    except Exception:
-        # Purge refusee (permission manquante) : on retire au moins les
+    purge_faite = False
+    if nettoyer:
+        # On vide ce que LE BOT a poste : panneaux perimes, notices
+        # d'epinglage, comptes rendus d'un ancien telechargement. Le salon ne
+        # doit porter que les deux panneaux, sinon ils sortent de l'ecran et
+        # plus personne ne les trouve. On ne touche pas aux messages des humains.
+        try:
+            await canal.purge(limit=200, check=lambda m: m.author.id == moi)
+            purge_faite = True
+        except Exception:
+            purge_faite = False
+    if not purge_faite:
+        # Purge refusee (permission) ou pas voulue : on retire au moins les
         # anciens panneaux, sinon on en empilerait un troisieme.
         try:
             for p in await canal.pins():
@@ -967,15 +910,8 @@ async def poser_panneaux(cog, canal, epingler: bool = True):
         except Exception:
             pass
 
-    e1 = _embed_compte()
-    e2 = _d.Embed(
-        title=TITRE_OPTIONS,
-        description="Choisis ce que tu veux de ce compte."
-                    + chr(10) + chr(10) +
-                    "Ordre d'envoi : photo de profil, bio, posts, puis reels."
-                    + chr(10) + "Chaque fichier part des qu'il est pret.",
-        color=_d.Color.green())
-    for emb, vue in ((e1, PanneauCompte(cog)), (e2, PanneauOptions(cog))):
+    for emb, vue in ((_embed_compte(), PanneauCompte(cog)),
+                     (_embed_options(), PanneauOptions(cog))):
         try:
             msg = await canal.send(embed=emb, view=vue)
             poses += 1
@@ -986,10 +922,14 @@ async def poser_panneaux(cog, canal, epingler: bool = True):
                     # message ». Elle compte comme un message dans le salon :
                     # on la retire pour ne laisser QUE les panneaux.
                     await asyncio.sleep(0.5)
+                    # Hors d'un salon -download (nettoyer=False), SEULE la
+                    # notice part : les messages sans embed du bot y sont le
+                    # contenu livre, pas des restes.
                     await canal.purge(
                         limit=5,
-                        check=lambda m: (m.type == _d.MessageType.pins_add
-                                         or (m.author.id == moi and not m.embeds)))
+                        check=lambda m: (m.type == discord.MessageType.pins_add
+                                         or (nettoyer and m.author.id == moi
+                                             and not m.embeds)))
                 except Exception:
                     pass
         except Exception:

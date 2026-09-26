@@ -589,6 +589,11 @@ async def _ensure_dl_panel(bot, ch):
     """
     if bot is None or ch is None:
         return
+    if salon_de_service(getattr(ch, "name", "")):
+        # all-download n'est pas un salon de VA : y poser les panneaux
+        # commencerait par vider les messages du bot, donc l'archive.
+        print(f"[dl] {getattr(ch, 'name', '?')} est un salon de service : pas de panneaux")
+        return
     cog = bot.get_cog("Telechargement")
     if cog is None:
         return
@@ -625,6 +630,21 @@ def _us_norm(nm):
     # homoglyphes cyrilliques/grecs (un « а » russe est INVISIBLE à l'œil)
     nm = nm.translate(_US_CONFUSABLES)
     return nm
+
+
+#: Salons de SERVICE du serveur US : ils finissent comme un ticket sans en
+#: être un. « all-download » reçoit la copie de chaque téléchargement des VA
+#: (demande du propriétaire, 26/09/2026 : « c'est surtout pour stocker les
+#: vidéos de mon côté »). Son nom finit par « -download » : /ticketsall le
+#: prenait pour le salon d'un VA parti et l'aurait SUPPRIMÉ avec toute
+#: l'archive, et poser_panneaux y aurait vidé les messages du bot. Tout salon
+#: « all-… » est réservé de la même façon.
+PREFIXES_SALONS_SERVICE = ("all-",)
+
+
+def salon_de_service(nom) -> bool:
+    """Vrai pour un salon de service (« all-download »…), jamais un ticket."""
+    return _us_norm(nom).startswith(PREFIXES_SALONS_SERVICE)
 
 
 _US_CONFUSABLES = str.maketrans({
@@ -2584,7 +2604,10 @@ class Welcome(commands.Cog):
         by_name = {}
         for c in guild.text_channels:
             nn = _us_norm(c.name)
-            if pat.search(nn):
+            # « all-download » finit comme un ticket : sans cette exclusion il
+            # passait pour l'orphelin d'un membre « all » et partait à la
+            # suppression, archive des téléchargements comprise.
+            if pat.search(nn) and not salon_de_service(nn):
                 by_name.setdefault(nn, []).append(c)
         n_create = sum(1 for n in expected if n not in by_name)
         # Doublons : MÊME pseudo+type -> ON N'EN GARDE QU'UN (demande user :

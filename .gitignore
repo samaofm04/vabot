@@ -5,6 +5,9 @@
 # Donnees du bot (specifiques au VPS)
 data/
 assets/
+# Restes de l'ancien telechargeur Discord (fichiers uuid, et un
+# cookies_sessionid.txt en clair) : il range desormais tout sous data/.
+downloads/
 bot.log
 crash.log
 *.err
