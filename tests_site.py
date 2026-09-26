@@ -24291,6 +24291,34 @@ try:
         def _ligneL(h, cle):
             i = h.find(f'<tr id="{_il.ancre(cle)}">')
             return h[i:h.find("</tr>", i)] if i >= 0 else ""
+
+        # le detail du gain (le proprietaire, 26/09 : « tout est ecrit comme
+        # ca je suis pas vraiment fan [...] un truc bien detaille mais ultra
+        # simple ») : des etapes courtes, une par ligne, sur SA PROPRE ligne
+        # de tableau pleine largeur, juste sous la personne — plus dans la
+        # colonne etroite du montant
+        import html as _hmL
+
+        def _calcL(h, cle):
+            # la <tr class="calc"> qui suit IMMEDIATEMENT la ligne de la personne
+            i = h.find(f'<tr id="{_il.ancre(cle)}">')
+            j = h.find("</tr>", i) + 5 if i >= 0 else -1
+            if j < 5 or not h.startswith('<tr class="calc">', j):
+                return ""
+            return h[j:h.find("</tr>", j) + 5]
+
+        def _platL(s):
+            return s.replace("\u00a0", " ").replace("\u202f", " ")
+
+        def _etapesL(h, cle):
+            # le detail en texte : le resume (summary), puis un <li> par ligne,
+            # montant a la suite ; espaces insecables et fines rendus ordinaires
+            c = _calcL(h, cle)
+            s = _reL.search(r"<summary[^>]*>(.*?)</summary>", c)
+            L = [_reL.sub(r"<[^>]+>", "", s.group(1))] if s else []
+            L += [_reL.sub(r"<[^>]+>", "", li.replace("</span><b>", " "))
+                  for li in _reL.findall(r"<li[^>]*>(.*?)</li>", c)]
+            return [_platL(_hmL.unescape(x)) for x in L]
         _lnL, _lbL, _lgL = _ligneL(_hPy, "VA 1 Noum"), _ligneL(_hPy, "Bryan"), _ligneL(_hPy, "Gerome SPAM")
         check("page paie : resume du paiement (« 75 $ / quinzaine + primes », « 100 EUR / mois »)",
               '<span class="pr">75\u00a0$ / quinzaine + primes</span>' in _lnL
@@ -24300,19 +24328,50 @@ try:
         check("page paie : gain vert si >= 0, rouge si < 0, dernier de la ligne",
               '<span class="nv gp">+210,66\u00a0$</span>' in _lnL and '<span class="nv gn">−85,00\u00a0$</span>' in _lbL
               and _lnL.rfind("<td") == _lnL.find('<td class="n gain"'))
-        check("page paie : le detail du calcul sous le montant (revenu - fixe - primes, palier)",
-              "revenu 250,66\u00a0$<br>− fixe 30,00\u00a0$ (75\u00a0$ / quinzaine × 6/15 j × 1 ligne)<br>"
-              "1 ligne active sur 1 (× 30\u00a0$)<br>"
-              "− primes 10,00\u00a0$ (101 subs, palier 100–149 subs, quinzaine incomplète)" in _lnL
-              and 'title="revenu 250,66\u00a0$ − fixe 30,00' in _lnL
-              and "= 60,00\u00a0EUR × 1,2000" in _ligneL(_hPy, "BO7"))
-        check("page paie : sous la ligne, « 3 lignes actives sur 4 (x ...) » et les liens sans clic",
-              "(100\u00a0EUR / mois × 6/30 j × 3 lignes = 60,00\u00a0EUR × 1,2000)" in _ligneL(_hPy, "BO7")
-              and "3 lignes actives sur 4 (× 20\u00a0EUR) — sans clic : ( BO7 ) 4" in _ligneL(_hPy, "BO7")
-              and "2 lignes actives sur 2 (× 80\u00a0$)" in _lbL, _ligneL(_hPy, "BO7")[-900:])
-        check("page paie : non regle ou incalculable -> « — », avec la raison s il est regle",
+        _eNqL = _etapesL(_hPy, "VA 1 Noum")
+        check("page paie : le detail du gain en etapes courtes (paye, telephones, quinzaine x 6/15 jours, primes, "
+              "coute, rapporte, resultat)",
+              _eNqL == ["Coûte 40 $ · rapporte 250,66 $ → +210,66 $",
+                        "Paye : 75 $ la quinzaine (150 $ le mois)",
+                        "1 téléphone → 75 $ la quinzaine",
+                        "21 → 26 sept. : 1 × 75 $ × 6/15 jours = 30 $",
+                        "Primes (101 subs, palier 100–149) : 10 $",
+                        "Il a coûté : 40 $", "Il a rapporté : 250,66 $", "Résultat : +210,66 $"], str(_eNqL))
+        check("page paie : la case du gain ne porte QUE le montant colore ; le detail est une ligne pleine largeur "
+              "(colspan 8) juste dessous, hors de la cellule",
+              '<td class="n gain"><span class="nv gp">+210,66\u00a0$</span></td>' in _lnL
+              and "det calc" not in _lnL and "title=" not in _lnL and '<details class="calc">' not in _lnL
+              and _calcL(_hPy, "VA 1 Noum").startswith('<tr class="calc"><td colspan="8"><details class="calc">'
+                                                       '<summary>')
+              and _calcL(_hPy, "VA 1 Noum").count("<td") == 1
+              and '<b class="rp">+210,66\u00a0$</b></summary>' in _calcL(_hPy, "VA 1 Noum")
+              and '<li class="rp"><span>Résultat :</span><b>+210,66\u00a0$</b></li>' in _calcL(_hPy, "VA 1 Noum")
+              and _calcL(_hPy, "Gerome SPAM") == "" and _calcL(_hPy, "ANDRY") == "",
+              _calcL(_hPy, "VA 1 Noum")[:300])
+        _eBoL, _eBrL = _etapesL(_hPy, "BO7"), _etapesL(_hPy, "Bryan")
+        check("page paie : fixe en EUR (converti d emblee, taux du jour), telephones sans clic, perte en rouge",
+              _eBoL == ["Coûte 72 $ · rapporte 9,50 $ → −62,50 $",
+                        "Paye : 100 EUR le mois = 120 $ (taux du jour)",
+                        "4 téléphones, 3 ont fait des clics → 360 $ le mois",
+                        "21 → 26 sept. : 3 × 120 $ × 6/30 jours = 72 $",
+                        "Il a coûté : 72 $", "Il a rapporté : 9,50 $", "Résultat : −62,50 $",
+                        "Sans clic : ( BO7 ) 4", "1 EUR = 1,2000 $ (BCE du 25/09/2026)"]
+              and _eBrL[1:4] == ["Paye : 200 $ la quinzaine (400 $ le mois)", "2 téléphones → 400 $ la quinzaine",
+                                 "21 → 26 sept. : 2 × 200 $ × 6/15 jours = 160 $"]
+              and '<b class="rm">−85\u00a0$</b>' in _calcL(_hPy, "Bryan")
+              and '<li class="note"><span>Sans clic : ( BO7 ) 4</span></li>' in _calcL(_hPy, "BO7"),
+              str((_eBoL, _eBrL)))
+        _eRoL = _etapesL(_hPy, "Roucham")
+        check("page paie : non regle ou incalculable -> « — » seul dans la case ; regle : le detail dit pourquoi, "
+              "en phrases courtes qui disent quoi faire",
               '<td class="n gain">—</td>' in _lgL and '<td class="n gain">—</td>' in _ligneL(_hPy, "ANDRY")
-              and '<td class="n gain">—<div class="det manque">' in _ligneL(_hPy, "Roucham"))
+              and '<td class="n gain">—</td>' in _ligneL(_hPy, "Roucham")
+              and _eRoL[0] == "Incalculable · vérifiez son lien GetMySocial"
+              and '<summary class="manque">' in _calcL(_hPy, "Roucham")
+              and "Il a rapporté : ?" in _eRoL and not any(l.startswith("Résultat") for l in _eRoL)
+              and "Revenu inconnu : aucun lien de suivi à son nom : vérifiez son lien GetMySocial." in _eRoL
+              and "Subs du 21 → 26 sept. absents de MyPuls : relus tout seuls toutes les heures." in _eRoL,
+              str(_eRoL))
         check("page paie : ligne de totaux (personnes reglees, partiel dit)",
               '<span class="nv gp">+63,16\u00a0$</span>' in _hPy and "partiel : 3 personnes sur 4" in _hPy
               and "4 réglés" in _hPy)
@@ -24416,9 +24475,18 @@ try:
               and _nQz["paie"]["fixe"] == 85.0 and _nQz["paie"]["primes"] == 20.0 and _nQz["gain"] == 145.66
               and [q["complete"] for q in _nQz["paie"]["detail_q"]] == [False, False], str(_MPL["appels"]))
         _hQz = _il.page_html(_tQz)
-        check("page paie : plusieurs quinzaines -> detail par quinzaine, chacune « incomplete » si coupee",
-              "2 quinzaines, dont 2 incomplètes, non cumulables" in _hQz
-              and "10/09 → 15/09 : 101 subs, palier 100–149 subs → +10\u00a0$ (quinzaine incomplète)" in _hQz)
+        _eQzL = _etapesL(_hQz, "VA 1 Noum")
+        check("page paie : plusieurs quinzaines -> une ligne par quinzaine, la coupee se voit a sa fraction de "
+              "jours ; une prime > 0 -> une ligne de prime par quinzaine",
+              _eQzL == ["Coûte 105 $ · rapporte 250,66 $ → +145,66 $",
+                        "Paye : 75 $ la quinzaine (150 $ le mois)",
+                        "1 téléphone → 75 $ la quinzaine",
+                        "10 → 15 sept. : 1 × 75 $ × 6/15 jours = 30 $",
+                        "16 → 26 sept. : 1 × 75 $ × 11/15 jours = 55 $",
+                        "Primes 10 → 15 sept. (101 subs, palier 100–149) : 10 $",
+                        "Primes 16 → 26 sept. (101 subs, palier 100–149) : 10 $",
+                        "Il a coûté : 105 $", "Il a rapporté : 250,66 $", "Résultat : +145,66 $"]
+              and "incomplète" not in _calcL(_hQz, "VA 1 Noum"), str(_eQzL))
         _qdL = _jsL.loads(_il.QUINZ_FICHIER.read_text())["tranches"]
         check("paie : une quinzaine close est gardee sur disque (sans revenu), l ouverte non",
               list(_qdL) == ["2026-09-10|2026-09-15"] and _qdL["2026-09-10|2026-09-15"]["subs"]["47"] == 101
@@ -24444,6 +24512,14 @@ try:
               and "calcul en cours (3 quinzaines lues sur 4)" in _nT1["paie"]["raison"]
               and _tT1["paie"]["en_attente"] == 1 and "1 quinzaine pas encore lue dans MyPuls" in _hT1
               and "rechargez dans une minute" in _hT1, str(len(_MPL["appels"])))
+        _eT1L = _etapesL(_hT1, "VA 1 Noum")
+        check("page paie en cours : « — » dans la case ; le detail dit « Calcul en cours · rechargez dans une "
+              "minute », la quinzaine pas encore lue a « ? »",
+              _eT1L[0] == "Calcul en cours · rechargez dans une minute"
+              and "Subs en cours de lecture (3 quinzaines sur 4) : rechargez dans une minute." in _eT1L
+              and len([l for l in _eT1L if l.startswith("Primes ") and l.endswith(" : subs pas encore lus ?")]) == 1
+              and "Il a coûté : ?" in _eT1L and '<td class="n gain">—</td>' in _ligneL(_hT1, "VA 1 Noum"),
+              str(_eT1L))
         _MPL["appels"].clear()
         _tT2 = _il.avec_paie(_tabL(us="cache"))
         _nT2 = {x["nom"]: x for x in _tT2["lignes"]}["VA 1 Noum"]
@@ -24451,24 +24527,38 @@ try:
               len(_MPL["appels"]) == 1 and _nT2["paie"]["revenu"] == 13970.0 and _nT2["paie"]["fixe"] == 280.0
               and _nT2["paie"]["primes"] == 40.0 and _nT2["gain"] == 13650.0
               and _nT2["paie"]["debut"] == "2026-08-01" and _nT2["paie"]["fin"] == "2026-09-26")
-        check("page paie depuis toujours : la note dit la plage (paye depuis, sinon creation du lien)",
+        _eT2L = _etapesL(_il.page_html(_tT2), "VA 1 Noum")
+        check("page paie depuis toujours : la note dit la plage ; le detail, une ligne par quinzaine depuis le "
+              "« paye depuis » (01/08), milliers en espace fine",
               "création du plus ancien lien Infloww" in _il.page_html(_tT2)
-              and "75\u00a0$ / quinzaine du 01/08/2026 au 26/09/2026, au prorata des jours" in _il.page_html(_tT2))
+              and _eT2L[:7] == ["Coûte 320 $ · rapporte 13 970 $ → +13 650 $",
+                                "Paye : 75 $ la quinzaine (150 $ le mois)", "1 téléphone → 75 $ la quinzaine",
+                                "1 → 15 août : 1 × 75 $ = 75 $", "16 → 31 août : 1 × 75 $ = 75 $",
+                                "1 → 15 sept. : 1 × 75 $ = 75 $", "16 → 26 sept. : 1 × 75 $ × 11/15 jours = 55 $"]
+              and len([l for l in _eT2L if l.startswith("Primes ")]) == 4
+              and _eT2L[-3:] == ["Il a coûté : 320 $", "Il a rapporté : 13 970 $", "Résultat : +13 650 $"]
+              and "<b>13\u202f970\u00a0$</b>" in _calcL(_il.page_html(_tT2), "VA 1 Noum"), str(_eT2L))
         # sans « paye depuis » : la creation du plus ancien lien Infloww ; sans elle non plus : dit
         _ecrire_paieL({"ANDRY": _cfgL("fixe", 75), "Bryan": _cfgL("fixe", 75)})
         _tCr = _il.construire([dict(_infL(5, "Andry", "87", 715, 35, 17800), cree="2026-09-20"),
                                _infL(6, "Jaurel", "83", 3612, 266, 12200)], _GMS, lu_a=1790380000)
-        _pCr = {x["nom"]: x for x in _il.avec_paie(_tCr)["lignes"]}
+        _tCrP = _il.avec_paie(_tCr)
+        _pCr = {x["nom"]: x for x in _tCrP["lignes"]}
         check("paie depuis toujours : debut = creation du plus ancien lien (75 x 7/15 = 35 $ par ligne, 2 lignes)",
               _pCr["ANDRY"]["paie"]["debut"] == "2026-09-20" and _pCr["ANDRY"]["paie"]["fixe"] == 70.0
               and _pCr["ANDRY"]["gain"] == 108.0, str((_pCr["ANDRY"]["paie"].get("fixe"), _pCr["ANDRY"]["gain"])))
         check("paie depuis toujours : ni date de creation ni « paye depuis » -> « — », et pourquoi",
               _pCr["Bryan"]["gain"] is None and "début inconnu" in _pCr["Bryan"]["paie"]["raison"])
+        _eCrL = _etapesL(_il.page_html(_tCrP), "Bryan")
+        check("page paie : debut inconnu -> une phrase courte qui dit quoi faire (« payé depuis »)",
+              _eCrL == ["Incalculable · remplissez « payé depuis »", "Paye : 75 $ la quinzaine (150 $ le mois)",
+                        "Il a rapporté : 122 $", "Date de début inconnue : remplissez « payé depuis »."], str(_eCrL))
         # « paye depuis » apres la periode : rien a payer dessus
         _ecrire_paieL({"Bryan": _cfgL("fixe", 200, depuis="2026-09-25")})
         _pDp = {x["nom"]: x for x in _il.avec_paie(_tInL)["lignes"]}["Bryan"]["paie"]
-        check("paie : « paye depuis » dans la periode -> fixe a partir de ce jour (200 x 2/15, x 2 lignes)",
-              abs(_pDp["fixe"] - 2 * 200 * 2 / 15) < 1e-9 and _pDp["debut"] == "2026-09-25")
+        check("paie : « paye depuis » dans la periode -> fixe a partir de ce jour (200 x 2/15, x 2 lignes = 53,33 $, "
+              "au centime)",
+              _pDp["fixe"] == 53.33 and _pDp["debut"] == "2026-09-25", str(_pDp.get("fixe")))
         # MyPuls refuse une quinzaine : arret au premier echec, pause, « — » et dit
         _ecrire_paieL({"VA 1 Noum": _cfgL("fixe_primes", 75, depuis="2026-06-01")})
         _MPL["panne"] = {"ok": False, "error": "Quota MyPuls atteint (429), réessai dans 60s"}
@@ -24753,16 +24843,23 @@ try:
               str(_LGL["appels"]))
         _hS1 = _il.page_html(_tS1, cle="KP")
         _lsS, _lbS, _lgS = _ligneL(_hS1, "Roucham SPAM"), _ligneL(_hS1, "BO7"), _ligneL(_hS1, "Gerome SPAM")
-        check("page au sub : resume, detail du calcul (marginal), gain, aucun fixe",
-              '<span class="pr ps">0,40 $ / sub jusqu&#x27;à 200, 0,50 $ au-delà</span>' in _lsS
-              and "revenu 400,00 $<br>− paie au sub 105,00 $ (250 subs : 200 × 0,40 $ + 50 × "
-                  "0,50 $)" in _lsS
-              and '<span class="nv gp">+295,00 $</span>' in _lsS and "− fixe" not in _lsS
-              and "par quinzaine, sans fixe" in _lsS, _lsS[-800:])
-        check("page lignes : « 3 lignes actives sur 4 (x 75 $) » et le lien sans clic, sous la ligne",
-              "− fixe 225,00 $ (75 $ / quinzaine × 3 lignes)" in _lbS
-              and "3 lignes actives sur 4 (× 75 $) — sans clic : ( BO7 ) 4" in _lbS
-              and '<span class="nv gp">+75,00 $</span>' in _lbS, _lbS[-800:])
+        _eSsL, _eSbL = _etapesL(_hS1, "Roucham SPAM"), _etapesL(_hS1, "BO7")
+        check("page au sub : resume du paiement, une ligne « Paye au sub : 200 x 0,40 $ + 50 x 0,50 $ = 105 $ », "
+              "gain, aucun fixe",
+              '<span class="pr ps">0,40\u00a0$ / sub jusqu&#x27;à 200, 0,50\u00a0$ au-delà</span>' in _lsS
+              and _eSsL == ["Coûte 105 $ · rapporte 400 $ → +295 $",
+                            "Paye au sub : 200 × 0,40 $ + 50 × 0,50 $ = 105 $",
+                            "Il a coûté : 105 $", "Il a rapporté : 400 $", "Résultat : +295 $"]
+              and '<span class="nv gp">+295,00\u00a0$</span>' in _lsS and "fixe" not in _calcL(_hS1, "Roucham SPAM")
+              and "téléphone" not in _calcL(_hS1, "Roucham SPAM") and "par quinzaine, sans fixe" in _lsS, str(_eSsL))
+        check("page lignes : « 4 telephones, 3 ont fait des clics », 3 x 75 $ ; le lien sans clic en note, a la fin",
+              _eSbL == ["Coûte 225 $ · rapporte 300 $ → +75 $",
+                        "Paye : 75 $ la quinzaine (150 $ le mois)",
+                        "4 téléphones, 3 ont fait des clics → 225 $ la quinzaine",
+                        "1 → 15 sept. : 3 × 75 $ = 225 $",
+                        "Il a coûté : 225 $", "Il a rapporté : 300 $", "Résultat : +75 $",
+                        "Sans clic : ( BO7 ) 4"]
+              and '<span class="nv gp">+75,00\u00a0$</span>' in _lbS, str(_eSbL))
         check("page au sub et lignes : aucun <script, aucun gestionnaire on...=",
               "<script" not in _hS1 and not _reL.search(r"<[^>]*\son[a-z]+\s*=", _hS1))
         check("page : la note dit les lignes (1 clic, tous pays), les primes une fois par personne, l au sub marginal",
@@ -24801,11 +24898,17 @@ try:
         _ecrire_paieL({"Roucham SPAM": dict(_cSL, devise="EUR")})
         _tS3 = _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))
         _rS3 = {x["nom"]: x for x in _tS3["lignes"]}["Roucham SPAM"]
-        _lS3 = _ligneL(_il.page_html(_tS3), "Roucham SPAM")
-        check("au sub en EUR : 105 EUR convertis au taux BCE (1,2) -> 126 $, dit dans le detail",
+        _hS3 = _il.page_html(_tS3)
+        _lS3, _eS3L = _ligneL(_hS3, "Roucham SPAM"), _etapesL(_hS3, "Roucham SPAM")
+        check("au sub en EUR : 105 EUR convertis au taux BCE (1,2) -> 126 $, dit en une ligne « En dollars »",
               _rS3["paie"]["sub_devise"] == 105.0 and abs(_rS3["paie"]["cout_sub"] - 126.0) < 1e-9
-              and _rS3["gain"] == 274.0 and "= 105,00 EUR × 1,2000" in _lS3
-              and "0,40 EUR / sub jusqu" in _lS3, str(_rS3["paie"].get("cout_sub")))
+              and _rS3["gain"] == 274.0
+              and _eS3L == ["Coûte 126 $ · rapporte 400 $ → +274 $",
+                            "Paye au sub : 200 × 0,40 EUR + 50 × 0,50 EUR = 105 EUR",
+                            "En dollars : 105 EUR × 1,2000 = 126 $",
+                            "Il a coûté : 126 $", "Il a rapporté : 400 $", "Résultat : +274 $",
+                            "1 EUR = 1,2000 $ (BCE du 25/09/2026)"]
+              and "0,40\u00a0EUR / sub jusqu" in _lS3, str((_rS3["paie"].get("cout_sub"), _eS3L)))
         # deux quinzaines coupees par la plage : subs de la partie incluse, seuil entier
         _ecrire_paieL({"Roucham SPAM": _cSL})
         _SQL[("2026-09-10", "2026-09-20")] = {110: (351, 500.0)}
@@ -24813,17 +24916,17 @@ try:
         _SQL[("2026-09-16", "2026-09-20")] = {110: (150, 220.0)}
         _tS4 = _il.avec_paie(_il.tableau_periode("2026-09-10", "2026-09-20", us="cache"))
         _rS4 = {x["nom"]: x for x in _tS4["lignes"]}["Roucham SPAM"]
-        _lS4 = _ligneL(_il.page_html(_tS4), "Roucham SPAM")
+        _lS4, _eS4L = _ligneL(_il.page_html(_tS4), "Roucham SPAM"), _etapesL(_il.page_html(_tS4), "Roucham SPAM")
         check("au sub : quinzaines incompletes -> subs de la partie incluse, seuil ENTIER (201 -> 80,50 ; 150 -> 60)",
               [(q["subs"], q["cout"], q["complete"]) for q in _rS4["paie"]["detail_q"]]
               == [(201, 80.5, False), (150, 60.0, False)]
               and _rS4["paie"]["cout_sub"] == 140.5 and _rS4["gain"] == 359.5, str(_rS4["paie"].get("detail_q")))
-        check("page au sub : detail par quinzaine, « quinzaine incomplete », seuil par quinzaine",
-              "2 quinzaines, dont 2 incomplètes, seuil de 200 subs par quinzaine" in _lS4
-              and "10/09 → 15/09 : 201 subs → 200 × 0,40 $ + 1 × 0,50 $ = 80,50 $ (quinzaine incomplète)"
-              in _lS4
-              and "16/09 → 20/09 : 150 subs → 150 × 0,40 $ = 60,00 $ (quinzaine incomplète)" in _lS4,
-              _lS4[-900:])
+        check("page au sub : une ligne « Paye au sub » par quinzaine (seuil entier chacune), centimes seulement "
+              "s il y en a",
+              _eS4L == ["Coûte 140,50 $ · rapporte 500 $ → +359,50 $",
+                        "Paye au sub 10 → 15 sept. : 200 × 0,40 $ + 1 × 0,50 $ = 80,50 $",
+                        "Paye au sub 16 → 20 sept. : 150 × 0,40 $ = 60 $",
+                        "Il a coûté : 140,50 $", "Il a rapporté : 500 $", "Résultat : +359,50 $"], str(_eS4L))
 
         # un releve GMS illisible n est jamais un zero
         _ecrire_paieL({"BO7": _cfgL("fixe", 75)})
@@ -24839,26 +24942,38 @@ try:
               and _bS5["paie"]["detail_f"][0]["inconnus"] == ["( BO7 ) 3"] and "clics" not in _eS5["lnk_6"]
               and "illisible" in _eS5["lnk_6"]["rate"] and "calcul en cours" in _bS5["paie"]["raison"]
               and "( BO7 ) 3" in _bS5["paie"]["raison"], str((_bS5["paie"].get("raison"), _eS5.get("lnk_6"))))
-        check("page lignes : les lignes inconnues sont dites en tete (releve rate), gain « — » avec la raison",
+        _eS5L = _etapesL(_hS5, "BO7")
+        check("page lignes : les lignes inconnues sont dites en tete (releve rate) ; « — » seul dans la case, le "
+              "detail dit « calcul en cours » et quel telephone attend",
               "Lignes actives : 1 relevé de clics GetMySocial (un par lien GMS et par tranche du fixe) pas "
               "encore connu — dernier relevé raté" in _hS5
               and "dernier relevé raté" in _hS5
-              and '<td class="n gain">—<div class="det manque">lignes actives : calcul en cours'
-              in _ligneL(_hS5, "BO7"))
+              and '<td class="n gain">—</td>' in _ligneL(_hS5, "BO7")
+              and _eS5L == ["Calcul en cours · rechargez plus tard",
+                            "Paye : 75 $ la quinzaine (150 $ le mois)",
+                            "1 → 15 sept. : téléphones pas encore vérifiés ?",
+                            "Il a coûté : ?", "Il a rapporté : 300 $",
+                            "Clics pas encore relevés pour ( BO7 ) 3 : rechargez plus tard.",
+                            "Sans clic : ( BO7 ) 4"], str(_eS5L))
         # « lignes payees » saisies : servent tant que le compte manque
         _ecrire_paieL({"BO7": dict(_cfgL("fixe", 75), lignes=2)})
         _LGL["appels"].clear()
         _tS6 = _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))
         _bS6 = {x["nom"]: x for x in _tS6["lignes"]}["BO7"]
         _lS6 = _ligneL(_il.page_html(_tS6, cle="KP"), "BO7")
-        check("lignes : compte inconnu + « lignes payees » saisies (2) -> 2 x 75, dit ; aucun appel (rate < 10 min)",
+        _eS6L = _etapesL(_il.page_html(_tS6, cle="KP"), "BO7")
+        check("lignes : compte inconnu + « lignes payees » saisies (2) -> 2 x 75, dit en 4 mots ; aucun appel "
+              "(rate < 10 min)",
               not _LGL["appels"] and _bS6["paie"]["fixe"] == 150.0 and _bS6["gain"] == 150.0
               and _bS6["paie"]["detail_f"][0]["source"] == "manuel"
-              and _il._e("2 actives confirmées + 1 inconnue (( BO7 ) 3 : clics GetMySocial pas encore relevés), "
-                         "2 saisies à la main → 2 lignes payées (× 75 $) — sans clic : ( BO7 ) 4") in _lS6
-              and "(75 $ / quinzaine × 2 lignes (saisie à la main, bornée par GetMySocial))" in _lS6
+              and _eS6L == ["Coûte 150 $ · rapporte 300 $ → +150 $",
+                            "Paye : 75 $ la quinzaine (150 $ le mois)",
+                            "2 téléphones (en attendant GetMySocial) → 150 $ la quinzaine",
+                            "1 → 15 sept. : 2 × 75 $ = 150 $",
+                            "Il a coûté : 150 $", "Il a rapporté : 300 $", "Résultat : +150 $",
+                            "Sans clic : ( BO7 ) 4", "Pas encore relevé : ( BO7 ) 3"]
               and 'name="lignes" value="2"' in _lS6 and "lignes payées tant que GetMySocial manque : 2" in _lS6,
-              str((_bS6["paie"].get("fixe"), _LGL["appels"])))
+              str((_bS6["paie"].get("fixe"), _LGL["appels"], _eS6L)))
         _cLgL = _jsL.loads(_il.LIGNES_FICHIER.read_text())
         _cLgL["tranches"]["2026-09-01|2026-09-15"]["liens"]["lnk_6"]["essai"] -= _il.US_REESSAI_S + 5
         _il.LIGNES_FICHIER.write_text(_jsL.dumps(_cLgL))
@@ -24935,10 +25050,13 @@ try:
         _razL(_il.LIGNES_FICHIER)
         _tS12 = _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))
         _bS12 = {x["nom"]: x for x in _tS12["lignes"]}["BO7"]
+        _eS12L = _etapesL(_il.page_html(_tS12), "BO7")
         check("lignes : fixe au mois -> partie du mois dans la plage (300 x 15/30 = 150 par ligne, x 3 lignes)",
               _bS12["paie"]["fixe"] == 450.0 and _bS12["gain"] == -150.0
-              and "3 lignes actives sur 4 (× 150 $)" in _ligneL(_il.page_html(_tS12), "BO7"),
-              str(_bS12["paie"].get("fixe")))
+              and _eS12L[1:4] == ["Paye : 300 $ le mois", "4 téléphones, 3 ont fait des clics → 900 $ le mois",
+                                  "1 → 15 sept. : 3 × 300 $ × 15/30 jours = 450 $"]
+              and _eS12L[0] == "Coûte 450 $ · rapporte 300 $ → −150 $",
+              str((_bS12["paie"].get("fixe"), _eS12L)))
         # la page n attend pas le releve : il part en arriere-plan
         _ecrire_paieL({"BO7": _cfgL("fixe", 75)})
         _razL(_il.LIGNES_FICHIER)
@@ -24948,12 +25066,15 @@ try:
         _LGL["appels"].clear()
         _tS11 = _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))
         _hS11 = _il.page_html(_tS11)
+        _eS11L = _etapesL(_hS11, "BO7")
         check("lignes : la page n attend pas le releve (lance en arriere-plan) : « calcul en cours », « — », rechargez",
               not _LGL["appels"] and len(_lanLgL) == 1
               and sorted(_lanLgL[0]) == [(f"lnk_{i}",) + _Q1 for i in (4, 5, 6, 7)]
               and {x["nom"]: x for x in _tS11["lignes"]}["BO7"]["gain"] is None
-              and "lignes actives : calcul en cours" in _hS11
-              and "relevé en arrière-plan : rechargez dans une minute" in _hS11, str(_lanLgL))
+              and _eS11L[0] == "Calcul en cours · rechargez plus tard"
+              and "Clics pas encore relevés pour ( BO7 ) 1, ( BO7 ) 2, ( BO7 ) 3, ( BO7 ) 4 : rechargez plus "
+                  "tard." in _eS11L
+              and "relevé en arrière-plan : rechargez dans une minute" in _hS11, str((_lanLgL, _eS11L)))
         _il.LIGNES_EN_FOND = False
         _il._lancer_lignes = _savLgL[4]
         # --- relecture du 26/09, trois defauts reproduits :
@@ -24995,12 +25116,19 @@ try:
               _pF2["BO7"]["paie"]["fixe"] == 225.0 and _pF2["ANDRY"]["paie"]["fixe"] == 150.0 and not _LGL["appels"]
               and [(f["lignes"], f["total"], f["fige"]) for f in _pF2["BO7"]["paie"]["detail_f"]] == [(3, 4, True)],
               str((_pF2["BO7"]["paie"].get("fixe"), _pF2["ANDRY"]["paie"].get("fixe"), _LGL["appels"])))
-        check("page lignes figees : sous la ligne, les liens changes depuis ; chez ANDRY, le lien arrive n est pas compte",
-              _il._e("3 lignes actives sur 4 (× 75 $), figé à la clôture — sans clic : ( BO7 ) 4 — compté, "
-                     "changé depuis : ( BO7 ) 2 (supprimé de GetMySocial), ( BO7 ) 3 (aujourd'hui « (ANDRY) 3 », "
-                     "à ANDRY)") in _ligneL(_hF2, "BO7")
-              and _il._e("pas compté : (ANDRY) 3 (à BO7 sur cette période)") in _ligneL(_hF2, "ANDRY"),
-              _ligneL(_hF2, "BO7")[-700:])
+        _eF2L, _eF2aL = _etapesL(_hF2, "BO7"), _etapesL(_hF2, "ANDRY")
+        check("page lignes figees : les liens changes depuis, une note chacun ; chez ANDRY, le lien arrive n est pas "
+              "compte",
+              _eF2L == ["Coûte 225 $ · rapporte 300 $ → +75 $",
+                        "Paye : 75 $ la quinzaine (150 $ le mois)",
+                        "4 téléphones, 3 ont fait des clics → 225 $ la quinzaine",
+                        "1 → 15 sept. : 3 × 75 $ = 225 $",
+                        "Il a coûté : 225 $", "Il a rapporté : 300 $", "Résultat : +75 $",
+                        "Sans clic : ( BO7 ) 4",
+                        "( BO7 ) 2 : compté, supprimé de GetMySocial depuis",
+                        "( BO7 ) 3 : compté, aujourd'hui « (ANDRY) 3 » à ANDRY"]
+              and "(ANDRY) 3 : pas compté, à BO7 sur ces dates" in _eF2aL
+              and "2 téléphones → 150 $ la quinzaine" in _eF2aL, str((_eF2L, _eF2aL)))
         # une tranche EN COURS, pas figee : le proprietaire note au releve fait foi
         _LT["rep"] = {"ok": True, "links": list(_GMS)}
         _il.avec_paie(_il.tableau_periode(*_Q2, us="cache"))
@@ -25034,12 +25162,17 @@ try:
               and _pF5["paie"]["fixe"] == 300.0 and _pF5["gain"] == 0.0
               and _pF5["paie"]["detail_f"][0]["source"] == "force" and not _LGL["appels"],
               str((_pF4["paie"].get("fixe"), _okF, _cfF, _pF5["paie"].get("fixe"), _LGL["appels"])))
-        check("page lignes forcees : « forcées à la main », avec ce que GetMySocial a compte ; la case du paiement "
-              "les liste",
-              _il._e("4 lignes forcées à la main (× 75 $) ; GetMySocial : 1 ligne active sur 2 — sans clic : "
-                     "( BO7 ) 4") in _lF5
-              and "(75 $ / quinzaine × 4 lignes (forcées à la main))" in _lF5
-              and "lignes forcées à la main : 01/09 → 15/09 : 4" in _lF5, _lF5[-900:])
+        _eF5L = _etapesL(_hF5, "BO7")
+        check("page lignes forcees : « 4 telephones (mis a la main) », ce que GetMySocial compte en note ; la case "
+              "du paiement les liste",
+              _eF5L == ["Coûte 300 $ · rapporte 300 $ → 0 $",
+                        "Paye : 75 $ la quinzaine (150 $ le mois)",
+                        "4 téléphones (mis à la main) → 300 $ la quinzaine",
+                        "1 → 15 sept. : 4 × 75 $ = 300 $",
+                        "Il a coûté : 300 $", "Il a rapporté : 300 $", "Résultat : 0 $",
+                        "Sans clic : ( BO7 ) 4", "GetMySocial : 1 téléphone actif sur 2"]
+              and '<b class="rp">0\u00a0$</b>' in _calcL(_hF5, "BO7")
+              and "lignes forcées à la main : 01/09 → 15/09 : 4" in _lF5, str(_eF5L))
         _fzSansP = _il._form_paie(_pF5, "KP", "nom", "asc", "", "")
         check("formulaire : « forcer les lignes » sur une vue par periode (pre-rempli, valeur montree gardee a part), "
               "remplace par une aide sans periode",
@@ -25054,9 +25187,8 @@ try:
         _pF6 = {x["nom"]: x for x in _tF6["lignes"]}["BO7"]
         check("lignes forcees : aucun appel GetMySocial pour une quinzaine forcee (quota epargne), et c est dit",
               not _LGL["appels"] and _pF6["paie"]["fixe"] == 300.0
-              and _il._e("4 lignes forcées à la main (× 75 $) ; GetMySocial : 0 active confirmée, 2 liens pas "
-                         "relevés") in _ligneL(_il.page_html(_tF6, cle="KP"), "BO7"),
-              str(_LGL["appels"]))
+              and "GetMySocial : 0 actif confirmé, 2 pas relevés" in _etapesL(_il.page_html(_tF6, cle="KP"), "BO7"),
+              str((_LGL["appels"], _etapesL(_il.page_html(_tF6, cle="KP"), "BO7"))))
         # enregistrer sans toucher au champ garde ; une autre periode s ajoute ;
         # vider le champ retire ; le reste est refuse sans rien ecrire
         _r1F = _il.enregistrer_paie(dict(_fzL, montant="80", forcer_lignes="4", forcer_avant="4"))
@@ -25103,10 +25235,12 @@ try:
               == [(3, 3, ["( BO7 ) 4"], "manuel")]
               and _pB2["paie"]["fixe"] == 300.0 and _pB2["paie"]["detail_f"][0]["lignes"] == 4,
               str((_pB1["paie"].get("fixe"), _pB2["paie"].get("fixe"))))
-        check("page lignes payees bornees : « 3 actives confirmees + 1 inconnue, 1 saisie → 3 lignes payees »",
-              _il._e("3 actives confirmées + 1 inconnue (( BO7 ) 4 : clics GetMySocial pas encore relevés), "
-                     "1 saisie à la main → 3 lignes payées (× 75 $)") in _ligneL(_il.page_html(_tB1), "BO7"),
-              _ligneL(_il.page_html(_tB1), "BO7")[-700:])
+        _eB1L = _etapesL(_il.page_html(_tB1), "BO7")
+        check("page lignes payees bornees : « 3 telephones (en attendant GetMySocial) », 3 x 75 $, le lien pas "
+              "encore releve en note",
+              _eB1L[2:4] == ["3 téléphones (en attendant GetMySocial) → 225 $ la quinzaine",
+                             "1 → 15 sept. : 3 × 75 $ = 225 $"]
+              and "Pas encore relevé : ( BO7 ) 4" in _eB1L, str(_eB1L))
         _LGL["rate"].clear()
 
         # un lien GMS cree APRES la fin d une tranche n y est pas une ligne
@@ -25149,25 +25283,36 @@ try:
                   "renseignez « lignes payées » (ou « payé depuis »)" in _pN1["paie"]["raison"],
               str((_pN1["paie"].get("raison"), [(f["du"], f["lignes"], f["source"])
                                                 for f in _pN1["paie"].get("detail_f") or []])))
-        check("page pas encore de lien : le detail par mois le dit (« pas encore de lien », « pas encore cree »)",
-              _il._e("01/04 → 30/04 : pas encore de lien GetMySocial (premier lien créé le 21/05/2026) : « lignes "
-                     "payées » à renseigner") in _lN1
-              and _il._e("01/05 → 31/05 : 1 ligne active sur 1 (× 200 $) — pas encore créé : "
-                         "( VA 1 Noum ) 2") in _lN1, _lN1[-1200:])
+        _eN1L = _etapesL(_hN1, "VA 1 Noum")
+        check("page pas encore de lien : un mois par ligne, le nombre de telephones sur chacune (il change), avril "
+              "« ? » et la phrase qui dit quoi faire ; « pas encore cree » en note datee",
+              _eN1L == ["Incalculable · remplissez « lignes payées »",
+                        "Paye : 200 $ le mois",
+                        "1 → 30 avr. : pas encore de lien GetMySocial ?",
+                        "1 → 31 mai : 1 téléphone × 200 $ = 200 $",
+                        "1 → 30 juin : 2 téléphones × 200 $ = 400 $",
+                        "Il a coûté : ?", "Il a rapporté : 900 $",
+                        "Pas de lien GetMySocial avant le 21/05/2026 : remplissez « lignes payées ».",
+                        "1 → 31 mai · Pas encore créé : ( VA 1 Noum ) 2"], str(_eN1L))
         _ecrire_paieL({"VA 1 Noum": dict(_cfgL("fixe", 200, freq="mois"), lignes=1)})
         _LGL["appels"].clear()
         _tN2 = _il.avec_paie(_il.tableau_periode(*_PN, us="cache"))
         _pN2 = {x["nom"]: x for x in _tN2["lignes"]}["VA 1 Noum"]
+        _eN2L = _etapesL(_il.page_html(_tN2), "VA 1 Noum")
         check("pas encore de lien + « lignes payees » (1) : avril 1 x 200, mai 1 x 200, juin 2 x 200 = 800 $, "
               "gain 900 - 800 ; aucun appel de plus",
               _pN2["paie"]["fixe"] == 800.0 and _pN2["gain"] == 100.0 and not _LGL["appels"]
               and [(f["lignes"], f["source"]) for f in _pN2["paie"]["detail_f"]]
               == [(1, "sans_lien"), (1, "gms"), (2, "gms")]
-              and _il._e("01/04 → 30/04 : 1 ligne payée saisie à la main (× 200 $) : pas encore de lien "
-                         "GetMySocial (premier lien créé le 21/05/2026)") in _ligneL(_il.page_html(_tN2), "VA 1 Noum")
-              and _il._e("01/05 → 31/05 : 1 ligne active sur 1 (× 200 $), figé à la clôture — pas encore créé : "
-                         "( VA 1 Noum ) 2") in _ligneL(_il.page_html(_tN2), "VA 1 Noum"),
-              str((_pN2["paie"].get("fixe"), _pN2["gain"], _LGL["appels"])))
+              and _eN2L == ["Coûte 800 $ · rapporte 900 $ → +100 $",
+                            "Paye : 200 $ le mois",
+                            "1 → 30 avr. : 1 téléphone (saisi à la main) × 200 $ = 200 $",
+                            "1 → 31 mai : 1 téléphone × 200 $ = 200 $",
+                            "1 → 30 juin : 2 téléphones × 200 $ = 400 $",
+                            "Il a coûté : 800 $", "Il a rapporté : 900 $", "Résultat : +100 $",
+                            "1 → 30 avr. · Pas encore de lien GetMySocial (premier le 21/05/2026)",
+                            "1 → 31 mai · Pas encore créé : ( VA 1 Noum ) 2"],
+              str((_pN2["paie"].get("fixe"), _pN2["gain"], _LGL["appels"], _eN2L)))
         _hTousF = _hF2 + _hF5 + _hN1
         _MsF = "\n".join(_jsL.dumps(m, ensure_ascii=False)
                          for t in (_tF2, _tF5, _tN1) for m in _il.messages_discord(t, "https://youl4b.com/x"))
@@ -25176,6 +25321,272 @@ try:
               "<script" not in _hTousF and not _reL.search(r"<[^>]*\son[a-z]+\s*=", _hTousF)
               and not any(w in _MsF for w in ("forcée", "figé", "pas encore de lien", "lignes actives", "fixe",
                                               "Paiement", "Gain", "300,00", "225,00", "confirmée")), _MsF[:300])
+        # --- l exemple du proprietaire (26/09), du 01/09 au 26/09 : « a la
+        # quinzaine il prend 75, le mois 150, il a deux telephones, ca fait fois
+        # deux. Et apres tu fais les primes. Voila ce qu il a rapporte. » ANDRY
+        # Fixe + primes 75 $, 2 telephones actifs : 2 x 75 + 2 x 75 x 11/15 =
+        # 150 + 110 = 260 $, 51 subs (aucune prime), 178,28 $ rapportes ; VA 1
+        # Noum 200 EUR par mois ; Roucham SPAM au sub sur deux quinzaines ;
+        # Bryan, une prime sur une seule des deux quinzaines.
+        _LT["rep"] = {"ok": True, "links": list(_GMS)}
+        _BCEL["rep"] = ("<gesmes:Envelope><Cube><Cube time='2026-09-25'><Cube currency='USD' rate='1.1403'/>"
+                        "</Cube></Cube></gesmes:Envelope>")
+        _JOUR["j"] = "2026-09-26"
+        _razL(_il.LIGNES_FICHIER, _il.QUINZ_FICHIER, _il.BCE_FICHIER)
+        _il._MYPULS_CACHE.clear(); _il._MYPULS_ECHECS.clear(); _il._FIL_Q["pause"] = 0.0
+        _LGL["rate"].clear(); _LGL["illisible"].clear(); _LGL["appels"].clear()
+        _PX = ("2026-09-01", "2026-09-26")
+        _SQL[_PX] = {87: (51, 178.28), 47: (300, 900.0), 110: (314, 452.5), 83: (190, 75.0)}
+        _SQL[("2026-09-01", "2026-09-15")] = {87: (40, 140.0), 47: (200, 600.0), 110: (234, 300.0), 83: (162, 50.0)}
+        _SQL[("2026-09-16", "2026-09-26")] = {87: (11, 38.28), 47: (100, 300.0), 110: (80, 152.5), 83: (28, 25.0)}
+        _ecrire_paieL({"ANDRY": _cfgL("fixe_primes", 75), "VA 1 Noum": _cfgL("fixe", 200, "EUR", "mois"),
+                       "Roucham SPAM": _cSL, "Bryan": _cfgL("fixe_primes", 75)})
+        _tX = _il.avec_paie(_il.tableau_periode(*_PX, us="cache"))
+        _pX = {x["nom"]: x for x in _tX["lignes"]}
+        _hX = _il.page_html(_tX, cle="KP")
+        _eXa, _eXn, _eXr, _eXb = (_etapesL(_hX, c) for c in ("ANDRY", "VA 1 Noum", "Roucham SPAM", "Bryan"))
+        check("exemple du proprietaire : ANDRY 2 telephones, 1 -> 15 sept. 2 x 75 = 150, 16 -> 26 sept. "
+              "2 x 75 x 11/15 = 110, total 260 $ ; rapporte 178,28 $ -> -81,72 $",
+              [(f["lignes"], f["montant"]) for f in _pX["ANDRY"]["paie"]["detail_f"]] == [(2, 150.0), (2, 110.0)]
+              and _pX["ANDRY"]["paie"]["fixe"] == 260.0 and _pX["ANDRY"]["gain"] == -81.72
+              and _eXa == ["Coûte 260 $ · rapporte 178,28 $ → −81,72 $",
+                           "Paye : 75 $ la quinzaine (150 $ le mois)",
+                           "2 téléphones → 150 $ la quinzaine",
+                           "1 → 15 sept. : 2 × 75 $ = 150 $",
+                           "16 → 26 sept. : 2 × 75 $ × 11/15 jours = 110 $",
+                           "Primes (51 subs, 1er palier à 100) : 0 $",
+                           "Il a coûté : 260 $", "Il a rapporté : 178,28 $", "Résultat : −81,72 $"],
+              str((_eXa, _pX["ANDRY"]["gain"])))
+        check("exemple : fixe en EUR au mois -> « 200 EUR le mois = 228,06 $ (taux du jour) », puis tout en dollars, "
+              "le mois coupe a sa fraction de jours (26/30), le taux en note",
+              _eXn == ["Coûte 197,65 $ · rapporte 900 $ → +702,35 $",
+                       "Paye : 200 EUR le mois = 228,06 $ (taux du jour)",
+                       "1 téléphone → 228,06 $ le mois",
+                       "1 → 26 sept. : 1 × 228,06 $ × 26/30 jours = 197,65 $",
+                       "Il a coûté : 197,65 $", "Il a rapporté : 900 $", "Résultat : +702,35 $",
+                       "1 EUR = 1,1403 $ (BCE du 25/09/2026)"]
+              and _pX["VA 1 Noum"]["gain"] == 702.35, str(_eXn))
+        check("exemple : au sub sur deux quinzaines -> une ligne « Paye au sub » par quinzaine (234 subs : "
+              "200 x 0,40 + 34 x 0,50 = 97 $ ; 80 subs : 32 $)",
+              _eXr == ["Coûte 129 $ · rapporte 452,50 $ → +323,50 $",
+                       "Paye au sub 1 → 15 sept. : 200 × 0,40 $ + 34 × 0,50 $ = 97 $",
+                       "Paye au sub 16 → 26 sept. : 80 × 0,40 $ = 32 $",
+                       "Il a coûté : 129 $", "Il a rapporté : 452,50 $", "Résultat : +323,50 $"], str(_eXr))
+        check("exemple : une prime > 0 sur l une des quinzaines -> une ligne de prime par quinzaine, le palier "
+              "dit simplement",
+              _eXb == ["Coûte 285 $ · rapporte 75 $ → −210 $",
+                       "Paye : 75 $ la quinzaine (150 $ le mois)",
+                       "2 téléphones → 150 $ la quinzaine",
+                       "1 → 15 sept. : 2 × 75 $ = 150 $",
+                       "16 → 26 sept. : 2 × 75 $ × 11/15 jours = 110 $",
+                       "Primes 1 → 15 sept. (162 subs, palier 150–199) : 25 $",
+                       "Primes 16 → 26 sept. (28 subs, 1er palier à 100) : 0 $",
+                       "Il a coûté : 285 $", "Il a rapporté : 75 $", "Résultat : −210 $"], str(_eXb))
+        # la forme : une ligne de detail PLEINE LARGEUR (colspan = toutes les
+        # colonnes) juste sous chaque personne reglee, et seulement elles ; le
+        # tri, les autres colonnes et la ligne de totaux ne bougent pas
+        _nThX = len(_reL.findall(r"<th\b", _hX[_hX.find("<thead>"):_hX.find("</thead>")]))
+        _seqX = _reL.findall(r'<tr (?:id="[^"]*"|class="calc")', _hX[_hX.find("<tbody>"):_hX.find("</tbody>")])
+        _hXg = _il.page_html(_tX, "gain", "desc", cle="KP")
+        _ordX = [m for m in _reL.findall(r'<tr id="([^"]*)"', _hXg[_hXg.find("<tbody>"):_hXg.find("</tbody>")])]
+        check("exemple : le detail est une ligne pleine largeur (colspan = nombre de colonnes) sous chaque "
+              "personne reglee, et seulement elles ; tri et totaux inchanges",
+              _nThX == 8 and _hX.count('<tr class="calc"><td colspan="8">') == 4
+              and _hX.count("<tr class=\"calc\">") == 4
+              and all(_calcL(_hX, c) for c in ("ANDRY", "VA 1 Noum", "Roucham SPAM", "Bryan"))
+              and all(not _calcL(_hX, x["cle"]) for x in _tX["lignes"]
+                      if x["cle"] not in ("ANDRY", "VA 1 Noum", "Roucham SPAM", "Bryan"))
+              and all(b == '<tr class="calc"' for a, b in zip(_seqX, _seqX[1:]) if a == '<tr id="' + _il.ancre("ANDRY") + '"')
+              and _ordX[:4] == [_il.ancre(c) for c in ("VA 1 Noum", "Roucham SPAM", "ANDRY", "Bryan")]
+              and "4 réglés" in _hX[_hX.find("<tfoot>"):] and '<tr class="calc"' not in _hX[_hX.find("<tfoot>"):]
+              and _hXg.count('<tr class="calc">') == 4, str((_nThX, _seqX[:6], _ordX[:5])))
+        _resX = [e[0] for e in (_eXa, _eXn, _eXr, _eXb)]
+        check("exemple : le resume tient sur une ligne de telephone (moins de 48 signes) ; montants a la francaise "
+              "(virgule, espace insecable avant $)",
+              all(len(r) <= 48 for r in _resX)
+              and '<summary>Coûte 260\u00a0$\u202f·\u202frapporte 178,28\u00a0$\u202f→\u202f<b class="rm">−81,72\u00a0$</b></summary>'
+              in _calcL(_hX, "ANDRY")
+              and "<li><span>16 → 26 sept. : 2\u00a0×\u00a075\u00a0$\u00a0×\u00a011/15\u00a0jours =</span>"
+                  "<b>110\u00a0$</b></li>" in _calcL(_hX, "ANDRY"), str(_resX))
+        check("exemple : lisible a 360 px sans defilement de la page — le detail colle au bord gauche visible de la "
+              "boite qui defile, pas plus large que l ecran ; montants alignes a droite, chiffres tabulaires ; "
+              "sans JavaScript",
+              "details.calc{margin:0;position:sticky;left:6px;max-width:min(460px,calc(100vw - 46px))}" in _hX
+              and ".etapes li{display:flex;justify-content:space-between;" in _hX
+              and "font-variant-numeric:tabular-nums" in _hX[_hX.find(".etapes{"):_hX.find(".etapes li{")]
+              and ".etapes li b{white-space:nowrap;" in _hX and "overflow-x:auto" in _hX
+              and "<script" not in _hX and not _reL.search(r"<[^>]*\son[a-z]+\s*=", _hX))
+        _MsX = "\n".join(_jsL.dumps(m, ensure_ascii=False) for m in _il.messages_discord(_tX, "https://youl4b.com/x"))
+        check("exemple : Discord inchange (ni etapes, ni paye, ni telephones, ni resultat)",
+              not any(w in _MsX for w in ("Coûte", "rapporte", "Paye", "téléphone", "Primes", "Résultat",
+                                          "81,72", "260", "EUR")), _MsX[:300])
+        # --- relecture du detail (26/09), quatre defauts reproduits :
+        # 1. les centimes ne tombaient pas juste : chaque tranche arrondie a
+        #    l affichage, le cout et le gain calcules sur la valeur brute (« 30
+        #    derniers jours » le 27/09 : 28,13 + 150 + 120 = « Il a coute :
+        #    298,13 $ » puis « Resultat : -119,84 $ » ; 200 EUR le mois du 31/08
+        #    au 29/09 : 7,36 + 220,46 = « 227,81 $ ») ;
+        # 2. fixe en EUR : « 2 x 85,52 $ = 171,05 $ » (le produit du prix NON
+        #    arrondi) ;
+        # 3. « 1 -> 15 sept. : aucun telephone a lui sur ces dates x 75 $ = 0 $ » ;
+        # 4. au sub a 375 px, la ligne coupee au milieu d un terme (« ... + 34 » /
+        #    « x 0,50 $ = ») : espaces ordinaires autour de « x ».
+        def _centL(s):
+            # « 1 234,50 $ » -> 123450 ; « −81,72 $ » -> -8172 ; « 0 $ » -> 0
+            s = _platL(_hmL.unescape(s)).replace(" ", "").replace("$", "").replace("EUR", "")
+            neg = s.startswith("−")
+            e, _v, c = s.lstrip("−+").partition(",")
+            v = int(e) * 100 + int((c + "00")[:2])
+            return -v if neg else v
+
+        def _justeL(h, cle):
+            # en centimes entiers : somme des lignes du calcul (ou la ligne « En
+            # dollars ») = « Il a coute » ; rapporte - coute = « Resultat » = le
+            # resume = la case du gain
+            c = _calcL(h, cle)
+            L = [(_platL(_hmL.unescape(t)), _centL(m))
+                 for t, m in _reL.findall(r"<li[^>]*><span>(.*?)</span><b>(.*?)</b></li>", c)]
+            d = {t: m for t, m in L if t in ("Il a coûté :", "Il a rapporté :", "Résultat :")}
+            parts = [m for t, m in L if t.startswith("En dollars")] or [m for t, m in L if t not in d]
+            s = _reL.search(r'<b class="r[pm]">([^<]*)</b></summary>', c)
+            g = _reL.search(r'<span class="nv g[pn]">([^<]*)</span>', _ligneL(h, cle))
+            return (len(d) == 3 and bool(parts) and sum(parts) == d["Il a coûté :"]
+                    and d["Il a rapporté :"] - d["Il a coûté :"] == d["Résultat :"]
+                    and s is not None and _centL(s.group(1)) == d["Résultat :"]
+                    and g is not None and _centL(g.group(1)) == d["Résultat :"]), (parts, d)
+        check("centimes : arrondi exact au demi-centime superieur (30 EUR x 1,1715 = 35,145 -> 35,15 $, le flottant "
+              "disait 35,14) ; une tranche arrondie une fois (2 x 75 x 3/16 = 28,125 -> 28,13)",
+              _il._centimes(35.145) == 3515 and _il.prix_ligne_c(_cfgL("fixe", 30, "EUR"), 1.1715) == 3515
+              and _il.prix_ligne_c(_cfgL("fixe", 75, "EUR"), 1.1403) == 8552
+              and _il.prix_ligne_c(_cfgL("fixe", 75, "EUR"), None) is None
+              and _il.prix_ligne_c(_cfgL("fixe", 75), None) == 7500
+              and _il.montant_tranche_c(7500, 2, 3, 16) == 2813 and _il.montant_tranche_c(22806, 1, 1, 31) == 736)
+        # 1a. ANDRY, « 30 derniers jours » affiche le 27/09 : du 29/08 au 27/09
+        _JOUR["j"] = "2026-09-27"
+        _P30 = ("2026-08-29", "2026-09-27")
+        _SQL[_P30] = {87: (55, 178.28)}
+        _SQL[("2026-08-29", "2026-08-31")] = {87: (3, 0.0)}
+        _SQL[("2026-09-16", "2026-09-27")] = {87: (12, 38.28)}
+        _il._MYPULS_CACHE.clear(); _il._MYPULS_ECHECS.clear()
+        _ecrire_paieL({"ANDRY": _cfgL("fixe_primes", 75)})
+        _t30 = _il.avec_paie(_il.tableau_periode(*_P30, us="cache"))
+        _h30 = _il.page_html(_t30, cle="KP")
+        _e30 = _etapesL(_h30, "ANDRY")
+        _p30 = {x["nom"]: x for x in _t30["lignes"]}["ANDRY"]
+        check("centimes : ANDRY 2 telephones du 29/08 au 27/09 : 28,13 + 150 + 120 = 298,13 $ = « Il a coute » ; "
+              "178,28 - 298,13 = -119,85 $ (et pas -119,84) dans le detail, le resume et la case",
+              _e30 == ["Coûte 298,13 $ · rapporte 178,28 $ → −119,85 $",
+                       "Paye : 75 $ la quinzaine (150 $ le mois)",
+                       "2 téléphones → 150 $ la quinzaine",
+                       "29 → 31 août : 2 × 75 $ × 3/16 jours = 28,13 $",
+                       "1 → 15 sept. : 2 × 75 $ = 150 $",
+                       "16 → 27 sept. : 2 × 75 $ × 12/15 jours = 120 $",
+                       "Primes (55 subs, 1er palier à 100) : 0 $",
+                       "Il a coûté : 298,13 $", "Il a rapporté : 178,28 $", "Résultat : −119,85 $"]
+              and [f["usd"] for f in _p30["paie"]["detail_f"]] == [28.13, 150.0, 120.0]
+              and _p30["paie"]["cout"] == 298.13 and _p30["gain"] == -119.85
+              and '<span class="nv gn">−119,85\u00a0$</span>' in _ligneL(_h30, "ANDRY")
+              and _justeL(_h30, "ANDRY")[0], str((_e30, _p30["gain"], _justeL(_h30, "ANDRY")[1])))
+        # 1b. VA 1 Noum, 200 EUR le mois, « 30 derniers jours » le 29/09 : du 31/08 au 29/09
+        _JOUR["j"] = "2026-09-29"
+        _P30n = ("2026-08-31", "2026-09-29")
+        _SQL[_P30n] = {47: (300, 900.0)}
+        _il._MYPULS_CACHE.clear()
+        _ecrire_paieL({"VA 1 Noum": _cfgL("fixe", 200, "EUR", "mois")})
+        _t30n = _il.avec_paie(_il.tableau_periode(*_P30n, us="cache"))
+        _h30n = _il.page_html(_t30n, cle="KP")
+        _e30n = _etapesL(_h30n, "VA 1 Noum")
+        check("centimes : VA 1 Noum 200 EUR le mois du 31/08 au 29/09 : 7,36 + 220,46 = 227,82 $ = « Il a coute » "
+              "(pas 227,81)",
+              _e30n == ["Coûte 227,82 $ · rapporte 900 $ → +672,18 $",
+                        "Paye : 200 EUR le mois = 228,06 $ (taux du jour)",
+                        "1 téléphone → 228,06 $ le mois",
+                        "31 août : 1 × 228,06 $ × 1/31 jours = 7,36 $",
+                        "1 → 29 sept. : 1 × 228,06 $ × 29/30 jours = 220,46 $",
+                        "Il a coûté : 227,82 $", "Il a rapporté : 900 $", "Résultat : +672,18 $",
+                        "1 EUR = 1,1403 $ (BCE du 25/09/2026)"]
+              and {x["nom"]: x for x in _t30n["lignes"]}["VA 1 Noum"]["gain"] == 672.18
+              and _justeL(_h30n, "VA 1 Noum")[0], str(_e30n))
+        # 2. fixe en EUR : la multiplication ecrite, avec le prix tel qu il est ecrit
+        _JOUR["j"] = "2026-09-26"
+        _il._MYPULS_CACHE.clear()
+        _ecrire_paieL({"ANDRY": _cfgL("fixe", 75, "EUR"), "Bryan": _cfgL("fixe", 150, "EUR")})
+        _tEu = _il.avec_paie(_il.tableau_periode(*_PX, us="cache"))
+        _hEu = _il.page_html(_tEu, cle="KP")
+        _eEua, _eEub = _etapesL(_hEu, "ANDRY"), _etapesL(_hEu, "Bryan")
+        check("fixe en EUR : la multiplication ecrite tombe juste (75 EUR = 85,52 $ ; 2 x 85,52 $ = 171,04 $, pas "
+              "171,05) ; 150 EUR x 1,1403 = 171,045 -> 171,05 $",
+              _eEua == ["Coûte 296,47 $ · rapporte 178,28 $ → −118,19 $",
+                        "Paye : 75 EUR la quinzaine = 85,52 $ (taux du jour)",
+                        "2 téléphones → 171,04 $ la quinzaine",
+                        "1 → 15 sept. : 2 × 85,52 $ = 171,04 $",
+                        "16 → 26 sept. : 2 × 85,52 $ × 11/15 jours = 125,43 $",
+                        "Il a coûté : 296,47 $", "Il a rapporté : 178,28 $", "Résultat : −118,19 $",
+                        "1 EUR = 1,1403 $ (BCE du 25/09/2026)"]
+              and _eEub[1:4] == ["Paye : 150 EUR la quinzaine = 171,05 $ (taux du jour)",
+                                 "2 téléphones → 342,10 $ la quinzaine", "1 → 15 sept. : 2 × 171,05 $ = 342,10 $"]
+              and _justeL(_hEu, "ANDRY")[0] and _justeL(_hEu, "Bryan")[0], str((_eEua, _eEub)))
+        # 1c. au sub : chaque quinzaine au centime AVANT la somme
+        _ecrire_paieL({"Roucham SPAM": dict(_cSL, taux1=0.4, seuil=75, taux2=0.375)})
+        _tSr = _il.avec_paie(_il.tableau_periode(*_PX, us="cache"))
+        _hSr = _il.page_html(_tSr, cle="KP")
+        _eSr = _etapesL(_hSr, "Roucham SPAM")
+        _pSr = {x["nom"]: x for x in _tSr["lignes"]}["Roucham SPAM"]["paie"]
+        check("centimes au sub : chaque quinzaine arrondie avant la somme (159 x 0,375 = 59,625) : 89,63 + 31,88 = "
+              "121,51 $ = « Il a coute » (la somme brute disait 121,50)",
+              _eSr == ["Coûte 121,51 $ · rapporte 452,50 $ → +330,99 $",
+                       "Paye au sub 1 → 15 sept. : 75 × 0,40 $ + 159 × 0,375 $ = 89,63 $",
+                       "Paye au sub 16 → 26 sept. : 75 × 0,40 $ + 5 × 0,375 $ = 31,88 $",
+                       "Il a coûté : 121,51 $", "Il a rapporté : 452,50 $", "Résultat : +330,99 $"]
+              and [q["cout"] for q in _pSr["detail_q"]] == [89.63, 31.88] and _pSr["cout"] == 121.51
+              and _justeL(_hSr, "Roucham SPAM")[0], str((_eSr, _pSr.get("cout"))))
+        # 3. une tranche sans aucun telephone a elle : ( BO7 ) 3 releve a BO7 sur
+        #    la quinzaine du 1er (figee), renomme « (Kiki) 1 » ensuite
+        _razL(_il.LIGNES_FICHIER)
+        _LT["rep"] = {"ok": True, "links": list(_GMS)}
+        _ecrire_paieL({"BO7": _cfgL("fixe", 75)})
+        _il.avec_paie(_il.tableau_periode(*_Q1, us="cache"))
+        _LT["rep"] = {"ok": True, "links": [dict(g, display_name="(Kiki) 1") if g.get("id") == "lnk_6" else g
+                                            for g in _GMS]}
+        _SQL[_PX][85] = (20, 120.0)
+        _il._MYPULS_CACHE.clear()
+        _ecrire_paieL({"Kiki": _cfgL("fixe", 75)})
+        _tKi = _il.avec_paie(_il.tableau_periode(*_PX, us="cache"))
+        _hKi = _il.page_html(_tKi, cle="KP")
+        _eKi = _etapesL(_hKi, "Kiki")
+        check("tranche sans aucun telephone a lui (lien arrive d un autre VA) : « 1 -> 15 sept. : aucun telephone a "
+              "lui », 0 $, sans « x 75 $ » ; la tranche suivante compte le sien",
+              _eKi == ["Coûte 55 $ · rapporte 120 $ → +65 $",
+                       "Paye : 75 $ la quinzaine (150 $ le mois)",
+                       "1 → 15 sept. : aucun téléphone à lui 0 $",
+                       "16 → 26 sept. : 1 téléphone × 75 $ × 11/15 jours = 55 $",
+                       "Il a coûté : 55 $", "Il a rapporté : 120 $", "Résultat : +65 $",
+                       "1 → 15 sept. · (Kiki) 1 : pas compté, à BO7 sur ces dates"]
+              and '<li><span>1 → 15 sept. : aucun téléphone à lui</span><b>0\u00a0$</b></li>' in _calcL(_hKi, "Kiki")
+              and "sur ces dates ×" not in _platL(_hKi) and _justeL(_hKi, "Kiki")[0], str(_eKi))
+        # 4. « × » entre espaces insecables, partout dans le detail
+        _pagesJ = ((_hX, _tX), (_h30, _t30), (_h30n, _t30n), (_hEu, _tEu), (_hSr, _tSr), (_hKi, _tKi))
+        _calcsJ = "".join(_calcL(h, x["cle"]) for h, t in _pagesJ for x in t["lignes"])
+        check("etapes : « × » entre deux espaces insecables (et « 1 telephone » d un bloc), une ligne ne se coupe "
+              "plus au milieu d un terme (« 200 × 0,40 $ + 34 × 0,50 $ = » : seulement autour de « + » et de « = »)",
+              "Paye au sub 1 → 15 sept. : 200\u00a0×\u00a00,40\u00a0$ + 34\u00a0×\u00a00,50\u00a0$ =</span>"
+              in _calcL(_hX, "Roucham SPAM")
+              and "<span>1 → 15 sept. : 2\u00a0×\u00a075\u00a0$ =</span>" in _calcL(_hX, "ANDRY")
+              and "<span>1 → 26 sept. : 1\u00a0×\u00a0228,06\u00a0$\u00a0×\u00a026/30\u00a0jours =</span>"
+              in _calcL(_hX, "VA 1 Noum")
+              and "<span>16 → 26 sept. : 1\u00a0téléphone\u00a0×\u00a075\u00a0$\u00a0×\u00a011/15\u00a0jours =</span>"
+              in _calcL(_hKi, "Kiki")
+              and _calcsJ.count("×") >= 20 and not _reL.search(r"\s×|×\s", _calcsJ.replace("\u00a0", "")),
+              str(_reL.findall(r".{20}(?:\s×|×\s).{10}", _calcsJ.replace("\u00a0", "")))[:300])
+        # et, sur chaque page de ces exemples, chaque personne calculee tombe juste
+        _tousJ = [(h, x["cle"]) for h, t in _pagesJ for x in t["lignes"] if x.get("gain") is not None]
+        _fauxJ = [(c, _justeL(h, c)[1]) for h, c in _tousJ if not _justeL(h, c)[0]]
+        check("centimes : partout dans ces exemples, somme des lignes = « Il a coute », rapporte - coute = "
+              "« Resultat » = resume = case",
+              len(_tousJ) >= 10 and not _fauxJ, str((len(_tousJ), _fauxJ))[:600])
+        _SQL[_PX].pop(85, None)
+        _il._MYPULS_CACHE.clear()
+        _razL(_il.BCE_FICHIER)
         _LT["rep"] = {"ok": True, "links": list(_GMS)}
         # rien de tout ca ne tombe sur un tableau sans reglage
         _razL(_il.PAIE_FICHIER, _il.QUINZ_FICHIER, _il.LIGNES_FICHIER, _il.BCE_FICHIER)

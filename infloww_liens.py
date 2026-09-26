@@ -73,6 +73,7 @@ import unicodedata
 import secrets
 import threading
 import time
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
@@ -1434,6 +1435,43 @@ def _milliemes(v: Any) -> int:
     return int(round(float(v or 0) * 1000))
 
 
+# ─── le paiement : les centimes ──────────────────────────────────────────
+# Chaque montant en dollars est arrondi au centime UNE fois, là où il naît
+# (une tranche du fixe, une quinzaine au sub, une conversion), puis tout
+# s'additionne en centimes entiers. Sans ça, le 27/09 sur « 30 derniers
+# jours », le détail d'ANDRY disait 28,13 + 150 + 120 = « Il a coûté :
+# 298,13 $ » puis « Résultat : −119,84 $ » (178,28 − 298,125 arrondi) au lieu
+# de −119,85 ; et 7,36 + 220,46 = « 227,81 $ » pour 200 EUR le mois.
+def _centimes(v: Any) -> int:
+    """Un montant en centimes ENTIERS, demi-centime arrondi en s'éloignant de
+    zéro — comme l'affiche _prix. Exact : lu sur l'écriture décimale du
+    nombre, pas sur le flottant (30 EUR × 1,1715 = 35,145 → 35,15 ; en
+    flottant, 35,144999… donnait 35,14)."""
+    x = v if isinstance(v, Fraction) else Fraction(str(v))
+    c = int(math.floor(abs(x) * 100 + Fraction(1, 2)))
+    return -c if x < 0 else c
+
+
+def prix_ligne_c(cfg: Mapping[str, Any], taux: Optional[float]) -> Optional[int]:
+    """Le prix d'une ligne pour une quinzaine (ou un mois) ENTIÈRE, en
+    centimes de dollar, arrondi une fois : celui que le détail affiche
+    (« 75 EUR = 85,52 $ ») et celui qui se multiplie (2 × 85,52 = 171,04, pas
+    171,05). None : réglage en euros sans taux connu."""
+    m = Fraction(str(float(cfg.get("montant") or 0)))
+    if cfg.get("devise") == "EUR":
+        if not taux:
+            return None
+        m *= Fraction(str(float(taux)))
+    return _centimes(m)
+
+
+def montant_tranche_c(unite_c: int, lignes: int, jours: int, jours_periode: int) -> int:
+    """Une tranche du fixe en centimes : lignes × prix × jours / jours de la
+    période, arrondi au centime une seule fois (2 × 75 $ × 3/16 = 28,125 →
+    28,13 $) — le montant que le détail écrit au bout de la ligne."""
+    return _centimes(Fraction(int(unite_c) * int(lignes) * int(jours), 100 * int(jours_periode)))
+
+
 def cout_au_sub(cfg: Mapping[str, Any], subs: Any) -> Tuple[float, int, int]:
     """(coût dans la devise du réglage, subs au premier prix, subs au second)
     pour les subs d'UNE quinzaine (ou de sa partie incluse : le seuil reste
@@ -2427,21 +2465,27 @@ def _plage_paie(x: Mapping[str, Any], cfg: Mapping[str, Any], per: Mapping[str, 
     return dt.date.fromisoformat(crees[0]), auj, ""
 
 
-def _revenu(x: Mapping[str, Any], liens_p: Mapping[str, Any], devise_periode: str) -> Tuple[Optional[float], str]:
+def _revenu(x: Mapping[str, Any], liens_p: Mapping[str, Any], devise_periode: str
+            ) -> Tuple[Optional[float], str, Optional[Tuple[str, str, bool]]]:
     """Le revenu NET de la personne, en dollars : la somme de ses liens
-    DISTINCTS. (None, pourquoi) plutôt qu'un zéro inventé."""
+    DISTINCTS. (None, pourquoi, phrase courte) plutôt qu'un zéro inventé —
+    la phrase courte (quoi, que faire, en cours) est celle du détail du gain."""
     ids = [str(r.get("id")) for r in x.get("infloww") or []]
     if not ids:
-        return None, "aucun lien de suivi rattaché : revenu inconnu"
+        return (None, "aucun lien de suivi rattaché : revenu inconnu",
+                ("Revenu inconnu : aucun lien de suivi à son nom", "vérifiez son lien GetMySocial", False))
     if devise_periode and devise_periode != "USD":
-        return None, f"revenu MyPuls en {devise_periode}, pas en dollars"
+        return (None, f"revenu MyPuls en {devise_periode}, pas en dollars",
+                (f"Revenu donné en {devise_periode} par MyPuls", "pas de calcul en dollars", False))
     nets = [(liens_p.get(i) or {}).get("net") for i in ids]
     if any(n is None for n in nets):
-        return None, "revenu illisible pour un de ses liens"
+        return (None, "revenu illisible pour un de ses liens",
+                ("Revenu illisible pour un de ses liens", "rechargez plus tard", False))
     autres = {str((liens_p.get(i) or {}).get("devise") or "") for i in ids} - {"", "USD"}
     if autres:
-        return None, f"revenu en {', '.join(sorted(autres))}, pas en dollars"
-    return sum(int(n) for n in nets) / 100.0, ""
+        return (None, f"revenu en {', '.join(sorted(autres))}, pas en dollars",
+                (f"Revenu en {', '.join(sorted(autres))}", "pas de calcul en dollars", False))
+    return sum(int(n) for n in nets) / 100.0, "", None
 
 
 def _k_tranche(t: Mapping[str, Any]) -> Tuple[str, str]:
@@ -2499,7 +2543,8 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
     for x in actifs:
         p, cfg = x["paie"], x["paie"]["cfg"]
         a, b, raison = _plage_paie(x, cfg, per, liens_p, auj)
-        p.update(debut=a.isoformat() if a else "", fin=b.isoformat() if b else "", raison=raison)
+        p.update(debut=a.isoformat() if a else "", fin=b.isoformat() if b else "", raison=raison,
+                 courts=[("Date de début inconnue", "remplissez « payé depuis »", False)] if raison else [])
         if a is None or cfg["type"] not in ("fixe_primes", "au_sub"):
             continue
         p["quinzaines"] = decouper(a, b, "quinzaine")
@@ -2610,11 +2655,13 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
     lg_inconnus = 0
     lg_rates: List[str] = []
 
-    def subs_des_quinzaines(x: Mapping[str, Any], p: Mapping[str, Any]) -> Tuple[List[Dict[str, Any]], int, str]:
-        """(détail, quinzaines en attente, ce qui manque) des subs de la
-        personne, quinzaine par quinzaine."""
+    def subs_des_quinzaines(x: Mapping[str, Any], p: Mapping[str, Any]
+                            ) -> Tuple[List[Dict[str, Any]], int, str, Optional[Tuple[str, str, bool]]]:
+        """(détail, quinzaines en attente, ce qui manque, en phrase courte)
+        des subs de la personne, quinzaine par quinzaine."""
         attente_q = 0
         manque_q = ""
+        court_q: Optional[Tuple[str, str, bool]] = None
         detail_q: List[Dict[str, Any]] = []
         for q in p.get("quinzaines") or []:
             k = _k_tranche(q)
@@ -2634,27 +2681,40 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
                     + " (lien absent ou sans nombre de subs"
                     + (f" ; relu le {_heure(e['trou_relu'])}, relu au plus une fois par heure"
                        if e.get("trou_relu") else "") + ")")
+                court_q = court_q or (f"Subs du {_tranche_lib(*k)} absents de MyPuls",
+                                      "relus tout seuls toutes les heures", False)
             elif k in P["erreurs"]:
                 manque_q = manque_q or (f"MyPuls n'a pas répondu pour le {_libelle_periode(*k)} "
                                         f"({P['erreurs'][k][:160]})")
+                court_q = court_q or ("MyPuls n'a pas répondu", "rechargez dans quelques minutes", False)
             else:
                 attente_q += 1
                 attente_k.add(k)
-        return detail_q, attente_q, manque_q
+        return detail_q, attente_q, manque_q, court_q
 
     def en_attente(quoi: str, detail_q: List[Any], attente_q: int) -> str:
         lues = len(detail_q) - attente_q
         return (f"{quoi} : calcul en cours ({_nb(lues)} quinzaine{'s' if lues > 1 else ''} "
                 f"lue{'s' if lues > 1 else ''} sur {_nb(len(detail_q))})")
 
+    def attente_court(detail_q: List[Any], attente_q: int) -> Tuple[str, str, bool]:
+        lues = len(detail_q) - attente_q
+        return (f"Subs en cours de lecture ({_nb(lues)} quinzaine{'s' if lues > 1 else ''} sur "
+                f"{_nb(len(detail_q))})", "rechargez dans une minute", True)
+
     for x in actifs:
         p, cfg = x["paie"], x["paie"]["cfg"]
         typ = cfg["type"]
-        rev, r_raison = _revenu(x, liens_p, devise_periode)
+        rev, r_raison, r_court = _revenu(x, liens_p, devise_periode)
         p["revenu"] = rev
         if not p.get("debut"):
             continue                       # début inconnu : la raison est déjà dite
+        # chaque manque est dit deux fois, au même endroit : en entier
+        # (« raison », pour qui cherche) et en phrase courte (« courts » :
+        # quoi, que faire, calcul en cours ?), celle que le détail du gain
+        # montre sur le téléphone du propriétaire
         raisons: List[str] = []
+        courts: List[Tuple[str, str, bool]] = []
         cout: Optional[float] = 0.0
         if typ in TYPES_FIXE:
             # le fixe, PAR LIGNE ACTIVE de chaque tranche. Lignes forcées par
@@ -2664,6 +2724,11 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
             # personne n'a de liens) ; sinon « — ». Avant son premier lien
             # GMS : les lignes saisies, sinon « — » (rien n'est inventé).
             m = float(cfg["montant"])
+            # le prix d'une ligne en centimes : dans la devise du réglage
+            # (montré en euros tant que le taux manque), et en dollars,
+            # arrondi AVANT de multiplier, tel que le détail l'écrit
+            unite_dev_c = _centimes(m)
+            unite_usd_c = prix_ligne_c(cfg, taux)
             saisie = _entier(cfg.get("lignes"))
             detail_f: List[Dict[str, Any]] = []
             for q in p.get("tranches_f") or []:
@@ -2698,13 +2763,19 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
                                  "pas_encore": [d["nom"] for d in r["pas_encore"]],
                                  "partis": r["partis"], "exclus": r["exclus"],
                                  "premier_lien": p.get("premier_lien") or "",
-                                 "montant": None if n is None else base * n})
+                                 # au centime : dans la devise, et en dollars
+                                 # (None sans taux) — ce que le détail écrit
+                                 "montant": None if n is None else
+                                 montant_tranche_c(unite_dev_c, n, q["jours"], q["jours_periode"]) / 100,
+                                 "usd": None if (n is None or unite_usd_c is None) else
+                                 montant_tranche_c(unite_usd_c, n, q["jours"], q["jours_periode"]) / 100})
             p["detail_f"] = detail_f
             manque_f = [f for f in detail_f if f["lignes"] is None]
-            fixe_d = None if manque_f else sum(f["montant"] for f in detail_f)
+            # des additions de centimes : la somme des lignes du détail
+            fixe_d = None if manque_f else sum(_centimes(f["montant"]) for f in detail_f) / 100
             p["fixe_devise"] = fixe_d
-            p["fixe"] = (None if fixe_d is None else
-                         fixe_d if cfg["devise"] == "USD" else (fixe_d * taux if taux else None))
+            p["fixe"] = (None if fixe_d is None or unite_usd_c is None else
+                         sum(_centimes(f["usd"]) for f in detail_f) / 100)
             en_cours_f = [f for f in manque_f if f["source"] == ""]
             sans_lien_f = [f for f in manque_f if f["source"] == "sans_lien"]
             if en_cours_f:
@@ -2713,53 +2784,78 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
                 raisons.append(f"lignes actives : calcul en cours (clics GetMySocial pas encore relevés pour "
                                f"{', '.join(noms)}" + (f", sur {_nb(len(en_cours_f))} {cfg['frequence']}s"
                                                          if len(detail_f) > 1 else "") + ")")
+                courts.append((f"Clics pas encore relevés pour {', '.join(noms)}", "rechargez plus tard", True))
             if sans_lien_f:
                 raisons.append(f"lignes : pas encore de lien GetMySocial du {_jour_long(sans_lien_f[0]['du'])} au "
                                f"{_jour_long(sans_lien_f[-1]['au'])}"
                                + (f" (premier lien créé le {_jour_long(p['premier_lien'])})"
                                   if p.get("premier_lien") else "")
                                + " : renseignez « lignes payées » (ou « payé depuis »)")
+                courts.append(((f"Pas de lien GetMySocial avant le {_jour_long(p['premier_lien'])}"
+                                if p.get("premier_lien") else
+                                f"Pas de lien GetMySocial du {_tranche_lib(sans_lien_f[0]['du'], sans_lien_f[-1]['au'])}"),
+                               "remplissez « lignes payées »", False))
             if not manque_f and p["fixe"] is None:
                 raisons.append("taux EUR → USD inconnu : fixe en euros non converti")
+                courts.append(("Taux euro → dollar inconnu", "rechargez plus tard", False))
             cout = p["fixe"]
         if rev is None:
             raisons.append(r_raison)
+            if r_court:
+                courts.append(r_court)
         if typ == "fixe_primes":
-            detail_q, attente_q, manque_q = subs_des_quinzaines(x, p)
+            detail_q, attente_q, manque_q, court_q = subs_des_quinzaines(x, p)
             for q in detail_q:
                 if q["subs"] is not None:
                     q["prime"], q["palier"] = palier(q["subs"])
             if manque_q:
                 raisons.append(manque_q)
+                if court_q:
+                    courts.append(court_q)
             if attente_q:
                 p["en_cours"] = True
                 raisons.append(en_attente("primes", detail_q, attente_q))
-            primes = None if (manque_q or attente_q) else sum(q["prime"] for q in detail_q)
+                courts.append(attente_court(detail_q, attente_q))
+            primes = None if (manque_q or attente_q) else sum(_centimes(q["prime"]) for q in detail_q) / 100
             p["primes"], p["detail_q"] = primes, detail_q
-            cout = None if (cout is None or primes is None) else cout + primes
+            cout = None if (cout is None or primes is None) else (_centimes(cout) + _centimes(primes)) / 100
         elif typ == "au_sub":
             # au sub, par quinzaine : le seuil s'applique aux subs de CHAQUE
             # quinzaine (une quinzaine coupée par la plage garde le seuil entier)
-            detail_q, attente_q, manque_q = subs_des_quinzaines(x, p)
+            detail_q, attente_q, manque_q, court_q = subs_des_quinzaines(x, p)
             for q in detail_q:
                 if q["subs"] is not None:
                     q["cout"], q["bas"], q["haut"] = cout_au_sub(cfg, q["subs"])
+                    # au centime avant d'additionner : 3 × 0,375 = 1,125 → 1,13,
+                    # le montant que sa ligne écrit
+                    q["cout"] = _centimes(q["cout"]) / 100
             if manque_q:
                 raisons.append(manque_q)
+                if court_q:
+                    courts.append(court_q)
             if attente_q:
                 p["en_cours"] = True
                 raisons.append(en_attente("paie au sub", detail_q, attente_q))
-            sub_d = None if (manque_q or attente_q) else sum(q["cout"] for q in detail_q)
+                courts.append(attente_court(detail_q, attente_q))
+            sub_d = None if (manque_q or attente_q) else sum(_centimes(q["cout"]) for q in detail_q) / 100
             p["detail_q"], p["sub_devise"] = detail_q, sub_d
+            # en euros : UNE conversion, du total, arrondie au centime (la
+            # ligne « En dollars » du détail)
             p["cout_sub"] = (None if sub_d is None else
-                             sub_d if cfg["devise"] == "USD" else (sub_d * taux if taux else None))
+                             sub_d if cfg["devise"] == "USD" else
+                             (_centimes(Fraction(str(sub_d)) * Fraction(str(float(taux)))) / 100
+                              if taux else None))
             if sub_d is not None and p["cout_sub"] is None:
                 raisons.append("taux EUR → USD inconnu : paie au sub en euros non convertie")
+                courts.append(("Taux euro → dollar inconnu", "rechargez plus tard", False))
             cout = p["cout_sub"]
         p["cout"] = cout
         p["raison"] = " ; ".join(raisons)
+        p["courts"] = courts
         if not raisons and cout is not None and rev is not None:
-            p["gain"] = round(rev - cout, 2)
+            # en centimes entiers : « rapporté − coûté » tombe juste sur
+            # « Résultat » (round(178,28 − 298,125, 2) disait −119,84)
+            p["gain"] = (_centimes(rev) - _centimes(cout)) / 100
             x["gain"] = p["gain"]
     # les tranches qu'une personne attend : jamais lues, ou à relire (une
     # lecture d'avant avait un trou pour elle)
@@ -2778,9 +2874,9 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
                          "revenu": None, "cout": None, "gain": None}
     if calcules:
         ids = {str(r.get("id")) for x in calcules for r in x.get("infloww") or []}
-        T["revenu"] = sum(int((liens_p.get(i) or {}).get("net") or 0) for i in ids) / 100.0
-        T["cout"] = sum(x["paie"]["cout"] for x in calcules)
-        T["gain"] = round(T["revenu"] - T["cout"], 2)
+        rev_c = sum(int((liens_p.get(i) or {}).get("net") or 0) for i in ids)
+        cout_c = sum(_centimes(x["paie"]["cout"]) for x in calcules)
+        T["revenu"], T["cout"], T["gain"] = rev_c / 100.0, cout_c / 100, (rev_c - cout_c) / 100
     P["totaux"] = T
     return out
 
@@ -3372,7 +3468,6 @@ def _table_personnes(lignes: List[Mapping[str, Any]], T: Mapping[str, Any], tri:
     if avec:
         cols += (("paie", "Paiement", "paie"), ("gain", "Gain\u00a0/\u00a0perte", "n"))
     P = paie or {}
-    taux = (P.get("taux") or {}).get("taux")
     th = []
     for col, titre, cl in cols:
         if col == "paie":
@@ -3391,7 +3486,9 @@ def _table_personnes(lignes: List[Mapping[str, Any]], T: Mapping[str, Any], tri:
                      f'<td class="n fort">{_nb(x.get("subs"))}</td>'
                      f'<td class="n">{_pastille(_pct(x.get("cvr")), niveau(x.get("cvr"), SEUIL_CVR))}</td>'
                      f'<td class="n">{_pastille(_dollars(x.get("par_sub")), niveau(x.get("par_sub"), SEUIL_PAR_SUB))}'
-                     f'</td>{_cellule_paie(x, cle, tri, sens, du, au) + _cellule_gain(x, taux) if avec else ""}</tr>')
+                     f'</td>{_cellule_paie(x, cle, tri, sens, du, au) + _cellule_gain(x) if avec else ""}</tr>'
+                     # le détail du gain : sa propre ligne, pleine largeur, juste dessous
+                     + (_ligne_detail(x, P.get("taux"), len(cols)) if avec else ""))
     if not corps:
         corps.append(f'<tr><td class="faible" colspan="{len(cols)}">Aucune personne.</td></tr>')
     lib = f"Total · {_nb(len(lignes))} personne{'s' if len(lignes) > 1 else ''}"
@@ -3638,181 +3735,254 @@ def _argent(v: Optional[float], signe: bool = False) -> str:
     return ("−" if v < 0 else "") + s
 
 
-def _explique_fixe(p: Mapping[str, Any], taux: Optional[float]) -> str:
-    """« 75 $ / quinzaine × 6/15 j × 3 lignes », ou sur plusieurs tranches
-    « 75 $ / quinzaine du … au …, au prorata des jours, par ligne active de
-    chaque quinzaine » (le détail tranche par tranche est dessous)."""
-    cfg = p["cfg"]
-    df = p.get("detail_f") or []
-    base = f"{_montant_court(cfg['montant'])} {'$' if cfg['devise'] == 'USD' else 'EUR'} / {cfg['frequence']}"
-    if not df:
-        return f"payé à partir du {_jour_long(cfg.get('depuis'))} : rien sur la plage"
-    if len(df) == 1:
-        f = df[0]
-        s = base + ("" if f["complete"] else f" × {f['jours']}/{f['jours_periode']} j")
-        if f.get("lignes") is not None:
-            s += f" × {_txt_lignes(f['lignes'])}" + {
-                "manuel": " (saisie à la main, bornée par GetMySocial)",
-                "sans_lien": " (saisie à la main)", "force": " (forcées à la main)"}.get(f.get("source") or "", "")
-    else:
-        s = (f"{base} du {_jour_long(p.get('debut'))} au {_jour_long(p.get('fin'))}, au prorata des jours, "
-             f"par ligne active de chaque {cfg['frequence']}")
-    if cfg["devise"] == "EUR" and p.get("fixe_devise") is not None:
-        s += f" = {_dec(p.get('fixe_devise'))} EUR × {_dec(taux, 4)}" if taux else ""
-    return s
+# ─── le détail du gain : des étapes courtes, une par ligne ───────────────
+# Le propriétaire (26/09), qui le lit sur son téléphone : « tout est écrit
+# comme ça, je suis pas vraiment fan […] à la quinzaine il prend 75, le mois
+# 150, il a deux téléphones, ça fait fois deux. Et après tu fais les primes.
+# Voilà ce qu'il a rapporté. Un truc bien détaillé mais ultra simple. »
+# Avant, une phrase à parenthèses coincée sous le montant (« − fixe 260,00 $
+# (75 $ / quinzaine du 01/09/2026 au 26/09/2026, au prorata des jours, par
+# ligne active de chaque quinzaine) »). Maintenant, dans cet ordre : la paye,
+# les téléphones, une ligne par quinzaine (ou mois) avec sa multiplication,
+# les primes, ce qu'il a coûté, rapporté, le résultat ; ce qui manque dit en
+# une phrase qui dit quoi faire ; les avertissements en petit, à la fin.
+# Une quinzaine incomplète se voit à sa fraction de jours (« × 11/15 jours »).
+_MOIS_COURTS = ("janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.",
+                "nov.", "déc.")
+# « × » entre deux espaces INSÉCABLES : une ligne ne se coupe plus au milieu
+# d'un terme. À 375 px, « … + 34 » puis « × 0,50 $ = » à la ligne suivante
+# (Roucham SPAM, au sub) ; la coupure ne tombe plus qu'autour de « + » ou « = ».
+_FOIS = "\u00a0×\u00a0"
 
 
-def _txt_lignes(n: Any, adj: str = "") -> str:
-    """« 1 ligne », « 3 lignes actives », « 0 ligne active »."""
-    s = "s" if int(n or 0) > 1 else ""
-    return f"{_nb(n)} ligne{s}" + (f" {adj}{s}" if adj else "")
+def _tranche_lib(du: Any, au: Any, annee: bool = False) -> str:
+    """« 1 → 15 sept. », « 16 → 26 sept. », « 28 févr. → 3 mars » ; l'année
+    avec `annee` (une plage qui sort de l'année en cours)."""
+    try:
+        a, b = dt.date.fromisoformat(str(du)), dt.date.fromisoformat(str(au))
+    except ValueError:
+        return f"{du} → {au}"
+
+    def j(d: dt.date, an: bool) -> str:
+        return f"{d.day} {_MOIS_COURTS[d.month - 1]}" + (f" {d.year}" if an else "")
+    if a == b:
+        return j(b, annee)
+    if (a.year, a.month) == (b.year, b.month):
+        return f"{a.day} → {j(b, annee)}"
+    return f"{j(a, annee and a.year != b.year)} → {j(b, annee)}"
 
 
-def _pl(n: Any, *mots: str) -> str:
-    """« 1 inconnue », « 3 actives confirmées » : chaque mot au pluriel au-delà de 1."""
-    s = "s" if int(n or 0) > 1 else ""
-    return " ".join([_nb(n)] + [m + s for m in mots])
+def _prix(v: Optional[float], dev: str = "$", signe: bool = False) -> str:
+    """« 150 $ », « 178,28 $ », « 1 234 $ », « −81,72 $ » : les centimes
+    seulement quand il y en a (« 260,00 $ » alourdissait chaque ligne) ;
+    « ? » quand le montant n'est pas connu."""
+    if v is None:
+        return "?"
+    c = int(math.floor(abs(float(v)) * 100 + 0.5))
+    s = _nb(c // 100) if c % 100 == 0 else _dec(c / 100)
+    sg = "−" if (v < 0 and c) else ("+" if (signe and c) else "")      # « 0 $ », jamais « +0 $ »
+    return f"{sg}{s}\u00a0{dev}"
 
 
-def _ligne_f(f: Mapping[str, Any], cfg: Mapping[str, Any]) -> str:
-    """Le compte des lignes d'UNE tranche du fixe : « 3 lignes actives sur 4
-    (× 75 $) — sans clic : ( BO7 ) 4 », les lignes forcées ou saisies à la
-    main (avec ce que GetMySocial a confirmé), l'absence de lien GMS, ou le
-    calcul en cours (et quels liens il attend) ; puis les liens comptés mais
-    partis depuis, et ceux pas comptés (à une autre personne sur la tranche)."""
-    dev = "$" if cfg.get("devise") == "USD" else "EUR"
-    par = f"× {_montant_court(round(float(f.get('base') or 0), 2))}\u00a0{dev}"
-    inconnus = list(f.get("inconnus") or [])
-    src = f.get("source")
-    premier = f" (premier lien créé le {_jour_long(f['premier_lien'])})" if f.get("premier_lien") else ""
-    if src == "gms":
-        s = (f"{_txt_lignes(f['lignes'], 'active')} sur {_nb(f.get('total'))} ({par})"
-             + (", figé à la clôture" if f.get("fige") else ""))
-    elif src == "force":
-        if f.get("actives") is not None and f.get("total"):
-            gms_txt = f"{_txt_lignes(f['actives'], 'active')} sur {_nb(f['total'])}"
-        elif not f.get("total") and f.get("pas_encore"):
-            gms_txt = "pas encore de lien"
-        elif not f.get("total"):
-            gms_txt = "aucun lien à cette personne sur cette période"
-        else:
-            gms_txt = (f"{_pl(f.get('confirmees'), 'active', 'confirmée')}, "
-                       f"{_pl(len(inconnus), 'lien')} pas relevé{'s' if len(inconnus) > 1 else ''}")
-        s = f"{_txt_lignes(f['lignes'], 'forcée')} à la main ({par}) ; GetMySocial : {gms_txt}"
-    elif src == "manuel":
-        a, u, sa = int(f.get("confirmees") or 0), len(inconnus), int(f.get("saisie") or 0)
-        s = (f"{_pl(a, 'active', 'confirmée')} + {_pl(u, 'inconnue')} ({', '.join(inconnus)} : clics "
-             f"GetMySocial pas encore relevés), {_pl(sa, 'saisie')} à la main → "
-             f"{_txt_lignes(f['lignes'], 'payée')} ({par})")
-    elif src == "sans_lien":
-        if f.get("lignes") is not None:
-            s = (f"{_txt_lignes(f['lignes'], 'payée')} saisie{'s' if int(f['lignes']) > 1 else ''} à la main "
-                 f"({par}) : pas encore de lien GetMySocial{premier}")
-        else:
-            s = f"pas encore de lien GetMySocial{premier} : « lignes payées » à renseigner"
-    else:
-        s = (f"lignes actives : calcul en cours ({', '.join(inconnus)} pas encore "
-             f"relevé{'s' if len(inconnus) > 1 else ''})")
+def _telephones(f: Mapping[str, Any], court: bool = False) -> str:
+    """Les téléphones (lignes) payés d'une tranche du fixe, en trois ou quatre
+    mots : « 2 téléphones », « 3 téléphones, 2 ont fait des clics »,
+    « 4 téléphones (mis à la main) ». `court` : le nombre payé seul (ceux
+    sans clic sont dits en note)."""
+    n, src, total = int(f.get("lignes") or 0), f.get("source"), int(f.get("total") or 0)
+    tel = f"{_nb(n)} téléphone{'s' if n > 1 else ''}"
+    if src == "force":
+        return f"{tel} (mis à la main)"
+    if src == "sans_lien":
+        return f"{tel} (saisi{'s' if n > 1 else ''} à la main)"
+    if src == "manuel":
+        return f"{tel} (en attendant GetMySocial)"
+    if not total:
+        return "aucun téléphone à lui sur ces dates"
+    if court or n == total:
+        return tel
+    tous = f"{_nb(total)} téléphone{'s' if total > 1 else ''}"
+    if not n:
+        return f"{tous}, aucun n'a fait de clic"
+    return f"{tous}, {_nb(n)} {'ont' if n > 1 else 'a'} fait des clics"
+
+
+def _vu_par_gms(f: Mapping[str, Any]) -> str:
+    """Ce que GetMySocial compte sur une tranche aux lignes mises à la main."""
+    total = int(f.get("total") or 0)
+    if f.get("actives") is not None and total:
+        a = int(f["actives"])
+        return f"{_nb(a)} téléphone{'s' if a > 1 else ''} actif{'s' if a > 1 else ''} sur {_nb(total)}"
+    if not total:
+        return "pas encore de lien" if f.get("pas_encore") else "aucun lien à lui sur ces dates"
+    c, u = int(f.get("confirmees") or 0), len(f.get("inconnus") or [])
+    return (f"{_nb(c)} actif{'s' if c > 1 else ''} confirmé{'s' if c > 1 else ''}, "
+            f"{_nb(u)} pas relevé{'s' if u > 1 else ''}")
+
+
+def _notes_tranche(f: Mapping[str, Any]) -> List[str]:
+    """Les avertissements d'une tranche du fixe, une ligne chacun."""
+    src, notes = f.get("source"), []
     if f.get("sans_clic"):
-        s += " — sans clic : " + ", ".join(f["sans_clic"])
+        notes.append("Sans clic : " + ", ".join(f["sans_clic"]))
+    if src == "force":
+        notes.append("GetMySocial : " + _vu_par_gms(f))
+    if src == "manuel" and f.get("inconnus"):
+        s = "s" if len(f["inconnus"]) > 1 else ""
+        notes.append(f"Pas encore relevé{s} : " + ", ".join(f["inconnus"]))
+    if src == "sans_lien" and f.get("lignes") is not None:
+        notes.append("Pas encore de lien GetMySocial"
+                     + (f" (premier le {_jour_long(f['premier_lien'])})" if f.get("premier_lien") else ""))
     if f.get("pas_encore") and src != "sans_lien":
-        s += " — pas encore créé : " + ", ".join(f["pas_encore"])
-    if f.get("partis"):
-        s += " — compté, changé depuis : " + ", ".join(
-            f"{d['nom']} (" + (f"aujourd'hui « {d['nom_jour']} », à {d['chez']}" if d.get("chez")
-                               else "supprimé de GetMySocial") + ")" for d in f["partis"])
-    if f.get("exclus"):
-        s += " — pas compté : " + ", ".join(
-            f"{d['nom']} (" + (f"à {d['chez']} sur cette période" if d.get("chez")
-                               else "pas à cette personne au relevé de cette période") + ")" for d in f["exclus"])
-    return s
+        s = "s" if len(f["pas_encore"]) > 1 else ""
+        notes.append(f"Pas encore créé{s} : " + ", ".join(f["pas_encore"]))
+    for d in f.get("partis") or []:
+        notes.append(f"{d['nom']} : compté, " + (f"aujourd'hui « {d.get('nom_jour') or '?'} » à {d['chez']}"
+                                                 if d.get("chez") else "supprimé de GetMySocial depuis"))
+    for d in f.get("exclus") or []:
+        notes.append(f"{d['nom']} : pas compté, " + (f"à {d['chez']} sur ces dates" if d.get("chez")
+                                                     else "pas à lui au relevé"))
+    return notes
 
 
-def _textes_lignes(p: Mapping[str, Any], connues: bool = False) -> List[str]:
-    """Les lignes actives de chaque tranche du fixe, en texte (préfixées de
-    la période quand il y en a plusieurs) ; `connues` : seulement les
-    tranches dont le nombre de lignes est connu (relevé ou saisi)."""
+def etapes_calcul(p: Mapping[str, Any], tx: Optional[Mapping[str, Any]] = None, auj: str = ""
+                  ) -> Dict[str, Any]:
+    """Le calcul du gain d'une personne réglée, en étapes courtes :
+    {"lignes": [(texte, montant, genre)], "manques": [phrase], "notes":
+    [avertissement], "resume": (texte, résultat, genre)}. `montant` vide :
+    une ligne de texte seule ; genre « total » (trait au-dessus), « rp » /
+    « rm » (résultat positif / négatif). `tx` : le taux EUR → USD de la page
+    ({taux, date, panne}), None sans personne payée en euros."""
     cfg = p.get("cfg") or {}
-    df = p.get("detail_f") or []
-    garde = [f for f in df if f.get("lignes") is not None or not connues]
-    if len(df) == 1:
-        return [_ligne_f(f, cfg) for f in garde]
-    return [f"{_libelle_periode(f['du'], f['au'])} : {_ligne_f(f, cfg)}" for f in garde]
+    typ = cfg.get("type")
+    tx = tx or {}
+    taux = tx.get("taux")
+    auj = auj or _aujourdhui()
+    eur = cfg.get("devise") == "EUR"
+    df, dq = list(p.get("detail_f") or []), list(p.get("detail_q") or [])
+    annee = any(str(t.get(k) or "")[:4] != auj[:4] for t in df + dq for k in ("du", "au"))
+    L: List[Tuple[str, str, str]] = []
+    notes: List[Tuple[str, str]] = []            # (texte, tranche)
+    debut = bool(p.get("debut"))
 
+    if typ in TYPES_FIXE:
+        m = float(cfg.get("montant") or 0)
+        la = "la quinzaine" if cfg.get("frequence") != "mois" else "le mois"
+        # tout en dollars dès que le taux est connu (« 1 × 228,06 $ »), avec
+        # le prix d'une ligne ARRONDI tel qu'il est écrit, et chaque tranche
+        # telle qu'avec_paie l'a comptée : 2 × 85,52 $ = 171,04 $ (le produit
+        # du prix non arrondi disait 171,05)
+        unite_c = prix_ligne_c(cfg, taux)
+        dev = "$" if unite_c is not None else "EUR"
+        if unite_c is None:
+            unite_c = _centimes(m)
+        if eur:
+            L.append((f"Paye : {_prix(m, 'EUR')} {la}"
+                      + (f" = {_prix(unite_c / 100)} ("
+                         + ("taux du jour" if not tx.get("panne") else f"taux du {_jour_court(tx.get('date'))}")
+                         + ")" if dev == "$" else ""), "", ""))
+        else:
+            L.append((f"Paye : {_prix(m)} {la}" + (f" ({_prix(2 * m)} le mois)" if la == "la quinzaine" else ""),
+                      "", ""))
+        if debut and not df:
+            L.append((f"Payé à partir du {_jour_long(cfg.get('depuis'))} : rien sur ces dates", "", ""))
+        # le même nombre de téléphones partout : dit une fois, puis « 2 × 75 $ » ;
+        # sinon chaque tranche dit les siens
+        uniforme = (bool(df) and df[0].get("lignes") is not None
+                    and len({(f.get("lignes"), f.get("source"), f.get("total")) for f in df}) == 1)
+        if uniforme:
+            L.append((f"{_telephones(df[0])} → {_prix(int(df[0]['lignes']) * unite_c / 100, dev)} {la}", "", ""))
+        for f in df:
+            lib = _tranche_lib(f["du"], f["au"], annee)
+            if f.get("lignes") is None:
+                L.append((f"{lib} : " + ("pas encore de lien GetMySocial" if f.get("source") == "sans_lien"
+                                         else "téléphones pas encore vérifiés"), "?", ""))
+            elif f.get("source") == "gms" and not int(f.get("total") or 0):
+                # aucun lien à lui sur la tranche (passé à un autre VA) : pas
+                # de multiplication (« aucun téléphone à lui sur ces dates ×
+                # 75 $ = 0 $ »)
+                L.append((f"{lib} : aucun téléphone à lui", _prix(0, dev), ""))
+            else:
+                # « 1 téléphone » insécable lui aussi : à 375 px, « 16 → 26
+                # sept. : 1 » puis « téléphone × 75 $ × 11/15 jours = »
+                mult = _nb(f["lignes"]) if uniforme else _telephones(f, court=True).replace(" ", "\u00a0", 1)
+                frac = ("" if f.get("complete")
+                        else f"{_FOIS}{_nb(f['jours'])}/{_nb(f['jours_periode'])}\u00a0jours")
+                L.append((f"{lib} : {mult}{_FOIS}{_prix(unite_c / 100, dev)}{frac} =",
+                          _prix(f.get("usd") if dev == "$" else f.get("montant"), dev), ""))
+            notes += [(n, lib) for n in _notes_tranche(f)]
 
-def _calc_sub(q: Mapping[str, Any], cfg: Mapping[str, Any]) -> str:
-    """« 200 × 0,40 $ + 50 × 0,50 $ »."""
-    dev = "$" if cfg.get("devise") == "USD" else "EUR"
-    s = f"{_nb(q.get('bas'))} × {_taux_court(cfg['taux1'])} {dev}"
-    if q.get("haut"):
-        s += f" + {_nb(q['haut'])} × {_taux_court(cfg['taux2'])} {dev}"
-    return s
+    if typ == "fixe_primes" and debut:
+        premier = PALIERS_PRIMES[-1][0]
+        if dq and all(q.get("subs") is not None and not q.get("prime") for q in dq):
+            # aucune prime : une seule ligne
+            tot = sum(int(q["subs"]) for q in dq)
+            quoi = (f"{_nb(tot)} sub{'s' if tot > 1 else ''}, 1er palier à {_nb(premier)}"
+                    if tot < premier or len(dq) == 1 else f"moins de {_nb(premier)} subs par quinzaine")
+            L.append((f"Primes ({quoi}) :", _prix(0), ""))
+        else:
+            for q in dq:
+                lib = "" if len(dq) == 1 else " " + _tranche_lib(q["du"], q["au"], annee)
+                if q.get("subs") is None:
+                    L.append((f"Primes{lib} : subs pas encore lus", "?", ""))
+                    continue
+                s = f"{_nb(q['subs'])} sub{'s' if int(q['subs']) > 1 else ''}"
+                quoi = (f"{s}, palier {str(q.get('palier') or '').replace(' subs', '')}" if q.get("prime")
+                        else f"{s}, 1er palier à {_nb(premier)}")
+                L.append((f"Primes{lib} ({quoi}) :", _prix(q.get("prime") or 0), ""))
 
+    if typ == "au_sub" and debut:
+        dev_s = "EUR" if eur else "$"
+        if not dq:
+            L.append((f"Payé à partir du {_jour_long(cfg.get('depuis'))} : rien sur ces dates", "", ""))
+        for q in dq:
+            lib = "" if len(dq) == 1 else " " + _tranche_lib(q["du"], q["au"], annee)
+            if q.get("subs") is None:
+                L.append((f"Paye au sub{lib} : subs pas encore lus", "?", ""))
+                continue
+            calc = " + ".join(f"{_nb(q[k])}{_FOIS}{_taux_court(cfg[t])}\u00a0{dev_s}"
+                              for k, t in (("bas", "taux1"), ("haut", "taux2")) if q.get(k)) or "0 sub"
+            L.append((f"Paye au sub{lib} : {calc} =", _prix(q.get("cout"), dev_s), ""))
+        if eur and taux and p.get("sub_devise") is not None:
+            # le montant compté par avec_paie (arrondi une fois), pas un
+            # nouveau produit
+            L.append((f"En dollars : {_prix(p['sub_devise'], 'EUR')}{_FOIS}{_dec(taux, 4)} =",
+                      _prix(p.get("cout_sub")), ""))
 
-def _ligne_q_sub(q: Mapping[str, Any], cfg: Mapping[str, Any]) -> str:
-    """« 01/09 → 15/09 : 250 subs → 200 × 0,40 $ + 50 × 0,50 $ = 105,00 $ »."""
-    dev = "$" if cfg.get("devise") == "USD" else "EUR"
-    s = f"{_libelle_periode(q['du'], q['au'])} : {_nb(q.get('subs'))} subs"
-    if q.get("cout") is not None:
-        s += f" → {_calc_sub(q, cfg)} = {_dec(q['cout'])} {dev}"
-    return s + ("" if q.get("complete") else " (quinzaine incomplète)")
+    cout, rev, g = p.get("cout"), p.get("revenu"), p.get("gain")
+    if debut:
+        L.append(("Il a coûté :", _prix(cout), "total"))
+    L.append(("Il a rapporté :", _prix(rev), "" if debut else "total"))
+    if g is not None:
+        L.append(("Résultat :", _prix(g, signe=True), "rp" if g >= 0 else "rm"))
 
+    courts = list(p.get("courts") or [])
+    if g is None and not courts:
+        courts = [("Calcul impossible pour l'instant", "rechargez la page", False)]
+    manques = [f"{quoi} : {faire}." for quoi, faire, _c in courts] if g is None else []
 
-def _explique_sub(p: Mapping[str, Any], taux: Optional[float]) -> str:
-    cfg = p["cfg"]
-    dq = p.get("detail_q") or []
-    if not dq:
-        s = "aucune quinzaine sur la plage"
-    elif len(dq) == 1:
-        q = dq[0]
-        s = (f"{_nb(q.get('subs'))} subs" + (f" : {_calc_sub(q, cfg)}" if q.get("cout") is not None else "")
-             + ("" if q.get("complete") else ", quinzaine incomplète"))
+    # une note vraie sur toutes les tranches est dite une fois, sans date
+    vu: Dict[str, List[str]] = {}
+    for texte, lib in notes:
+        vu.setdefault(texte, [])
+        if lib not in vu[texte]:
+            vu[texte].append(lib)
+    notes_txt = [t if len(df) <= 1 or len(libs) == len(df) else f"{', '.join(libs)} · {t}"
+                 for t, libs in vu.items()]
+    if eur and taux:
+        notes_txt.append(f"1 EUR = {_dec(taux, 4)}\u00a0$ (BCE du {_jour_long(tx.get('date'))})")
+
+    if g is not None:
+        # espaces fines autour de « · » et « → » : le résumé des VA à quatre
+        # chiffres (« Coûte 197,65 $ · rapporte 2 248,25 $ → +2 050,60 $ »)
+        # passait sur deux lignes à 360 px ; mesuré dans Chrome, 12 px
+        resume = (f"Coûte {_prix(cout)}\u202f·\u202frapporte {_prix(rev)}\u202f→\u202f",
+                  _prix(g, signe=True), "rp" if g >= 0 else "rm")
     else:
-        inc = sum(1 for q in dq if not q.get("complete"))
-        s = (f"{_nb(len(dq))} quinzaines" + (f", dont {_nb(inc)} incomplète{'s' if inc > 1 else ''}" if inc else "")
-             + f", seuil de {_nb(cfg['seuil'])} subs par quinzaine")
-    if cfg["devise"] == "EUR" and taux and p.get("sub_devise") is not None:
-        s += f" = {_dec(p['sub_devise'])} EUR × {_dec(taux, 4)}"
-    return s
-
-
-def _ligne_q(q: Mapping[str, Any]) -> str:
-    """« 16/09 → 26/09 : 123 subs, palier 100–149 subs → +10 $ (quinzaine incomplète) »."""
-    s = f"{_libelle_periode(q['du'], q['au'])} : {_nb(q.get('subs'))} subs"
-    if q.get("palier") is not None:
-        s += (f", palier {q['palier']} → +{_montant_court(q['prime'])}\u00a0$" if q.get("prime")
-              else ", sous le premier palier → 0\u00a0$")
-    return s + ("" if q.get("complete") else " (quinzaine incomplète)")
-
-
-def _explique_primes(p: Mapping[str, Any]) -> str:
-    dq = p.get("detail_q") or []
-    if not dq:
-        return "aucune quinzaine sur la plage"
-    if len(dq) == 1:
-        q = dq[0]
-        s = f"{_nb(q.get('subs'))} subs, " + (f"palier {q['palier']}" if q.get("prime")
-                                              else f"sous le premier palier ({_nb(PALIERS_PRIMES[-1][0])})")
-        return s + ("" if q.get("complete") else ", quinzaine incomplète")
-    inc = sum(1 for q in dq if not q.get("complete"))
-    return (f"{_nb(len(dq))} quinzaines" + (f", dont {_nb(inc)} incomplète{'s' if inc > 1 else ''}" if inc else "")
-            + ", non cumulables")
-
-
-def lignes_calcul(p: Mapping[str, Any], taux: Optional[float] = None) -> List[str]:
-    """Le détail du gain, en texte : « revenu X », « − fixe Y (…) », les
-    lignes actives, « − primes Z (…) » ; ou, au sub, « − paie au sub Y (…) »."""
-    cfg = p.get("cfg") or {}
-    L = [f"revenu {_argent(p.get('revenu'))}"]
-    if cfg.get("type") == "au_sub":
-        L.append(f"− paie au sub {_argent(p.get('cout_sub'))} ({_explique_sub(p, taux)})")
-        return L
-    L.append(f"− fixe {_argent(p.get('fixe'))} ({_explique_fixe(p, taux)})")
-    if len(p.get("detail_f") or []) == 1:
-        L += _textes_lignes(p)
-    if cfg.get("type") == "fixe_primes":
-        L.append(f"− primes {_argent(p.get('primes'))} ({_explique_primes(p)})")
-    return L
+        en_cours = [c for c in courts if c[2]]
+        resume = ((f"Calcul en cours · {en_cours[0][1]}" if en_cours else f"Incalculable · {courts[0][1]}"),
+                  "", "manque")
+    return {"lignes": L, "manques": manques, "notes": notes_txt, "resume": resume}
 
 
 def _form_paie(x: Mapping[str, Any], cle: str, tri: str, sens: str, du: str, au: str) -> str:
@@ -3919,47 +4089,44 @@ def _cellule_paie(x: Mapping[str, Any], cle: str, tri: str, sens: str, du: str, 
             + f'{_form_paie(x, cle, tri, sens, du, au)}</td>')
 
 
-def _details_tranches(p: Mapping[str, Any]) -> str:
-    """Le détail tranche par tranche (subs et primes ou paie au sub, lignes
-    actives), replié, quand la plage en compte plusieurs."""
-    cfg = p.get("cfg") or {}
-    df, dq = p.get("detail_f") or [], p.get("detail_q") or []
-    if len(df) <= 1 and len(dq) <= 1:
-        return ""
-    par: Dict[Tuple[str, str], List[str]] = {}
-    for q in dq:
-        par.setdefault((q["du"], q["au"]), []).append(
-            _ligne_q_sub(q, cfg) if cfg.get("type") == "au_sub" else _ligne_q(q))
-    for f in df:
-        k = (f["du"], f["au"])
-        if k in par:
-            par[k].append(_ligne_f(f, cfg))
-        else:
-            par[k] = [f"{_libelle_periode(*k)} : {_ligne_f(f, cfg)}"]
-    quoi = "par quinzaine" if (cfg.get("type") == "au_sub" or cfg.get("frequence") != "mois") else "par période"
-    return (f'<details class="qz"><summary>{quoi}</summary><div class="det">'
-            + "<br>".join(_e(" ; ".join(v)) for _k, v in sorted(par.items())) + "</div></details>")
+def _cellule_gain(x: Mapping[str, Any]) -> str:
+    """Le DERNIER chiffre de la ligne, seul : vert si le VA rapporte au moins
+    ce qu'il coûte, rouge sinon ; « — » s'il n'est pas réglé ou si un élément
+    manque. Le calcul est sur la ligne pleine largeur juste dessous
+    (_ligne_detail) : coincé sous le montant, dans la colonne la plus
+    étroite, il était illisible sur un téléphone."""
+    p = x.get("paie") or {}
+    cfg = p.get("cfg")
+    g = p.get("gain")
+    if not cfg or cfg.get("type") not in TYPES_PAYES or g is None:
+        return '<td class="n gain">—</td>'
+    return f'<td class="n gain"><span class="nv {"gp" if g >= 0 else "gn"}">{_argent(g, signe=True)}</span></td>'
 
 
-def _cellule_gain(x: Mapping[str, Any], taux: Optional[float]) -> str:
-    """Le DERNIER chiffre de la ligne : vert si le VA rapporte au moins ce
-    qu'il coûte, rouge sinon ; « — » s'il n'est pas réglé ou si un élément
-    manque (dit dessous, avec les lignes actives déjà connues). Le détail du
-    calcul sous le montant, et au survol."""
+def _ligne_detail(x: Mapping[str, Any], tx: Optional[Mapping[str, Any]], ncols: int) -> str:
+    """Sous la ligne d'une personne réglée : une ligne de tableau pleine
+    largeur (colspan), repliée. Le résumé tient sur une ligne (« Coûte 260 $
+    · rapporte 178,28 $ → −81,72 $ ») ; déplié, les étapes (etapes_calcul),
+    montants alignés à droite. Sans JavaScript ; tout est échappé (les noms
+    de liens viennent de GetMySocial)."""
     p = x.get("paie") or {}
     cfg = p.get("cfg")
     if not cfg or cfg.get("type") not in TYPES_PAYES:
-        return '<td class="n gain">—</td>'
-    g = p.get("gain")
-    q = _details_tranches(p)
-    if g is None:
-        connu = _textes_lignes(p, connues=True)
-        extra = f'<div class="det">{"<br>".join(_e(l) for l in connu)}</div>' if connu and not q else ""
-        return (f'<td class="n gain">—<div class="det manque">{_e(p.get("raison") or "incalculable")}</div>'
-                f'{extra}{q}</td>')
-    L = lignes_calcul(p, taux)
-    return (f'<td class="n gain" title="{_e(" ".join(L))}"><span class="nv {"gp" if g >= 0 else "gn"}">'
-            f'{_argent(g, signe=True)}</span><div class="det calc">{"<br>".join(_e(l) for l in L)}</div>{q}</td>')
+        return ""
+    E = etapes_calcul(p, tx)
+    li: List[str] = []
+    for texte, montant, genre in E["lignes"]:
+        cl = f' class="{genre}"' if genre else ""
+        li.append(f"<li{cl}><span>{_e(texte)}</span>" + (f"<b>{_e(montant)}</b>" if montant else "") + "</li>")
+    li += [f'<li class="manque"><span>{_e(m)}</span></li>' for m in E["manques"]]
+    li += [f'<li class="note"><span>{_e(n)}</span></li>' for n in E["notes"]]
+    t, r, genre = E["resume"]
+    if r:
+        resume = f'<summary>{_e(t)}<b class="{genre}">{_e(r)}</b></summary>'
+    else:
+        resume = f'<summary class="manque">{_e(t)}</summary>'
+    return (f'<tr class="calc"><td colspan="{int(ncols)}"><details class="calc">{resume}'
+            f'<ul class="etapes">{"".join(li)}</ul></details></td></tr>')
 
 
 def _cellules_total_paie(P: Mapping[str, Any]) -> str:
@@ -4175,11 +4342,31 @@ td details.mod summary{{color:var(--acc)}}
 .fpaie legend{{font-size:11px;color:var(--faible);padding:0 3px}}
 .fpaie input,.fpaie select{{background:var(--fond);color:var(--texte);border:1px solid var(--bord);border-radius:6px;padding:5px 6px;font:inherit;font-size:13px;min-width:0;color-scheme:dark}}
 .fpaie button{{background:var(--acc);color:#1c0a02;border:0;border-radius:6px;padding:7px 10px;font:inherit;font-weight:700;cursor:pointer}}
-/* le détail du gain se replie : sur une ligne, il élargissait la colonne
-   au point de pousser le tableau hors de sa boîte même sur un ordinateur */
-td.gain .det{{white-space:normal;min-width:150px;max-width:220px;margin-left:auto}}
-td.gain details .det{{text-align:left}}
-tr:target td{{background:rgba(249,115,65,.12)}}
+/* le détail du gain : sa propre ligne, pleine largeur, sous la personne
+   (coincé sous le montant, il était illisible sur un téléphone). Sur un
+   téléphone le tableau défile dans sa boîte : le détail reste collé au bord
+   gauche visible et pas plus large que l'écran, sinon il fallait faire
+   défiler la boîte pour lire chaque ligne */
+tbody tr:has(+ tr.calc) td{{border-bottom:0}}
+tr.calc td{{padding:0 6px 6px}}
+tbody tr.calc:hover td{{background:none}}
+details.calc{{margin:0;position:sticky;left:6px;max-width:min(460px,calc(100vw - 46px))}}
+details.calc summary{{font-size:12px;color:var(--faible);padding:2px 0 4px;font-variant-numeric:tabular-nums;list-style:none}}
+details.calc summary::-webkit-details-marker{{display:none}}
+details.calc summary::before{{content:"▸";display:inline-block;width:11px;color:var(--acc)}}
+details.calc[open] summary::before{{content:"▾"}}
+details.calc summary b{{font-weight:700}} details.calc summary.manque{{color:var(--ambre)}}
+.etapes{{list-style:none;margin:0 0 4px;padding:7px 10px;background:var(--fond);border:1px solid var(--bord);border-radius:8px;font-size:12.5px;line-height:1.4;font-variant-numeric:tabular-nums}}
+.etapes li{{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:2px 0}}
+.etapes li span{{min-width:0;overflow-wrap:anywhere}}
+.etapes li b{{white-space:nowrap;font-weight:600}}
+.etapes li.total{{border-top:1px solid var(--bord);margin-top:4px;padding-top:6px}}
+.etapes li.rp,.etapes li.rm{{font-weight:700}}
+.etapes li.rp b,details.calc summary b.rp{{color:#4ade80}} .etapes li.rm b,details.calc summary b.rm{{color:#f87171}}
+.etapes li.manque{{color:var(--ambre)}}
+.etapes li.note{{color:var(--faible);font-size:11px;line-height:1.35}}
+.etapes li:not(.note)+li.note{{margin-top:5px;border-top:1px dashed var(--bord);padding-top:6px}}
+tr:target td,tr:target+tr.calc td{{background:rgba(249,115,65,.12)}}
 .legende{{color:var(--faible);font-size:12px;margin:8px 0 0}}
 .sous b{{color:var(--texte);font-weight:600}}
 .periode{{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 8px}}
