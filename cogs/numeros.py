@@ -730,7 +730,7 @@ class NumerosCog(commands.Cog):
         await interaction.response.defer(ephemeral=True, thinking=True)
         me = getattr(self.bot.user, "id", 0)
 
-        async def _wipe(ch, titles):
+        async def _wipe(ch, titles, est=None):
             """Supprime les anciens panneaux epingles de ce salon.
 
             De N IMPORTE QUEL bot, pas seulement du notre. Le panneau pose
@@ -741,13 +741,17 @@ class NumerosCog(commands.Cog):
             identiques a l ecran, dont un mort, et rien pour les distinguer.
 
             Le filet reste etroit : un message EPINGLE, d un BOT, dont le
-            titre d embed est l un des notres. Une conversation ne peut pas
-            tomber dedans.
+            titre d embed est l un des notres -- ou que `est(message)`
+            reconnait : le menu des models en « menus de 10 » (format V2)
+            n a plus d embed, seulement une marque dans son texte. Une
+            conversation ne peut pas tomber dedans.
             """
             try:
                 for p in await ch.pins():
                     t = (p.embeds[0].title or "") if p.embeds else ""
-                    if getattr(p.author, "bot", False) and any(k in t for k in titles):
+                    if getattr(p.author, "bot", False) and (
+                            any(k in t for k in titles)
+                            or (est is not None and est(p))):
                         try:
                             await p.delete()
                         except Exception:
@@ -759,11 +763,23 @@ class NumerosCog(commands.Cog):
                 pass
 
         n_menu = n_num = 0
-        for ch in menus:
-            await _wipe(ch, ("Jailbreak US", "Menu Jailbreak"))
-            if await _ensure_us_menu(self.bot, ch):
-                n_menu += 1
-            await asyncio.sleep(0.6)
+        # Le menu des models n est repose que par le bot qui a UserCog (le
+        # principal) : _ensure_us_menu rend False partout ailleurs. Ce cog
+        # vit sur le bot ADMIN -- effacer le menu ici, c etait laisser chaque
+        # -menu sans menu (« 0/N » au bilan), et ses VA sans rien a cliquer.
+        # On n efface donc que ce qu on peut reposer, et on le dit.
+        menu_gere = self.bot.get_cog("UserCog") is not None
+        if menu_gere:
+            from cogs.user import _est_menu_models
+            for ch in menus:
+                # Les DEUX formats : l ancien (titre d embed) et le V2
+                # (« -# menu-models-… »), de n importe quel bot. Le panneau
+                # d actions et le ✨ General n en sont jamais (_est_menu_models).
+                await _wipe(ch, ("Jailbreak US", "Menu Jailbreak"),
+                            est=_est_menu_models)
+                if await _ensure_us_menu(self.bot, ch):
+                    n_menu += 1
+                await asyncio.sleep(0.6)
         for ch in nums:
             await _wipe(ch, ("Numéro & Mail", "Numéros & Mails"))
             if await _ensure_num_panel(self.bot, ch):
@@ -775,9 +791,15 @@ class NumerosCog(commands.Cog):
             + ("SMSBower (mails) " if not s["mail_ok"] else "")
             + ("GetAText (numéros) " if not s["sms_ok"] else "")
             + "manquante — fais `/smskey`.")
+        ligne_menu = (
+            f"• 🔓 Menu Jailbreak US : **{n_menu}**/{len(menus)} salon(s) `-menu`\n"
+            if menu_gere else
+            f"• 🔓 Menu Jailbreak US : **non touché** dans {len(menus)} salon(s) "
+            "`-menu` — ce bot ne sait pas le reposer ; `/resetmenus` sur le bot "
+            "principal le remet à neuf\n")
         await interaction.followup.send(
             f"♻️ **Reset des panneaux terminé**\n"
-            f"• 🔓 Menu Jailbreak US : **{n_menu}**/{len(menus)} salon(s) `-menu`\n"
+            + ligne_menu +
             f"• 📱 Numéro & Mail : **{n_num}**/{len(nums)} salon(s) `-numero-mail`{warn}",
             ephemeral=True)
 

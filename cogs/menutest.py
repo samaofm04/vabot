@@ -394,12 +394,13 @@ if _demo_v2_dispo():
 # ---------------------------------------------------------------------------
 # /demomodels : le MENU DES MODELS au-dela de 25 (26/09/2026).
 #
-# Le vrai menu (JailbreakModelsView, cogs/user.py) met un bouton-photo par
-# model et COUPE a 25 : cinq rangees de cinq, la limite d'un message Discord.
-# Aujourd'hui on est en dessous (US 14, FR 6), mais le jour ou un marche
-# depasse 25, les suivantes disparaitraient. Le proprietaire veut comparer
-# quatre dispositions AVANT de toucher au vrai menu, qui doit tourner tel quel
-# jusqu'a la maintenance :
+# L'ancien vrai menu mettait un bouton-photo par model et COUPAIT a 25 : cinq
+# rangees de cinq, la limite d'un message Discord. Le proprietaire a compare
+# ici plusieurs dispositions, puis choisi « menus10 » (« c'est ca, mets deja
+# ca sur le bot ») : c'est devenu le VRAI menu (JailbreakModelsView,
+# cogs/user.py). Cette variante n'a donc plus de code a elle : elle appelle
+# la disposition de production (_jb_menus_de_10, _jb_menus_models_poser),
+# avec un menu inerte a la place du vrai. Les autres restent pour comparer :
 #   groupes      « 1–10 », « 11–20 »… ; un clic ouvre, EN PRIVE, les dix
 #                boutons-photos du groupe (le message public est partage par
 #                tous les VA : on ne l'edite jamais pour un seul d'entre eux)
@@ -407,11 +408,16 @@ if _demo_v2_dispo():
 #   photos_menu  vingt photos + un menu deroulant « Autres models » (45 max)
 #   menus        uniquement des menus deroulants « 1–25 », « 26–50 »… (125 max)
 #
-# Tout est EPHEMERE et rien n'est envoye. Libelles, ordre et photos sont LUS
-# dans la production (_jb_models_marche, identites_ordre, _libelle_model,
-# _identity_emoji_name) : la demo montre les vrais noms dans le vrai ordre.
-# Les photos sont les emojis DEJA crees sur le serveur : jamais
-# ensure_identity_emojis ici, il en cree.
+# Tout est EPHEMERE et rien n'est envoye. Liste, libelles, ordre et photos
+# sont ceux de la production (_jb_models_marche, puis _jb_models_entrees :
+# identites_ordre, _libelle_model, _identity_emoji_name) : la demo montre les
+# vrais noms dans le vrai ordre. Les photos sont les emojis DEJA crees sur le
+# serveur (_jb_emojis_presents) : jamais de creation d'emoji ici.
+#
+# Sous l'apercu : les identites ECARTEES du menu de ce marche, avec leur
+# raison (_jb_models_ecartees). Le proprietaire voit ses models US mais pas
+# « les autres, celles que j'ai ajoutees » ; on ne lit pas les donnees du
+# serveur d'ici, c'est donc cet ecran, visible de lui seul, qui les nomme.
 #
 # Au-dela de ce qu'une disposition peut montrer, les models restantes sont
 # COMPTEES et dites (« N non affichees »), jamais ecartees en silence : c'est
@@ -430,7 +436,8 @@ _DEMO_MODELS_VARIANTES = {
     # EN TETE : ce que le proprietaire a montre le 26/09/2026 (« comme ca »,
     # sur la capture des menus directs) avec des tranches de 10 (« si j'en ai
     # 60, il y en a 6 »).
-    "menus10": "Menus déroulants de 10 : un de plus toutes les 10 models",
+    # Choisie par lui le meme jour : c'est desormais le VRAI menu.
+    "menus10": "Menus déroulants de 10 (le vrai menu depuis le 26/09)",
     "groupes": "Groupes 1–10, 11–20… (un clic = les photos du groupe, en privé)",
     "top10": "Top 10 en photos + groupes pour la suite",
     "photos_menu": "20 photos + menu déroulant « Autres models »",
@@ -440,40 +447,36 @@ _DEMO_MODELS_VARIANTES = {
     "groupes_menu": "Boutons 1–10, 11–20… : un clic ouvre un menu déroulant (en privé)",
 }
 
-#: Variante « menus10 » (choisie par le proprietaire le 26/09/2026 : « si un
-#: jour j'en ai 60, il y en a 6 »). Un menu par dizaine, CREE TOUT SEUL quand
-#: une model de plus passe la dizaine. Six menus depassent les cinq rangees
-#: d'un message classique : format Components V2, qui compte 40 composants --
-#: 2 pour le bloc et son texte, 2 par menu (sa rangee + lui), soit 19 menus
-#: (190 models) au plus. Au-dela : comptees et dites, comme ailleurs.
-_TAILLE_MENU10 = 10
-_MAX_MENUS10 = (40 - 2) // 2
-
 
 def _plage(debut: int, fin: int) -> str:
-    """« 11–20 », numerotation du VA (a partir de 1)."""
-    return f"{debut}–{fin}" if fin > debut else f"{debut}"
+    """« 11–20 » : la numerotation du vrai menu (_jb_plage), lue et non
+    recopiee -- les groupes des autres variantes se lisent comme ses menus."""
+    from cogs.user import _jb_plage
+    return _jb_plage(debut, fin)
 
 
 def _demo_models_liste(marche: str, simuler: int, guild=None):
     """[(ident, libelle, emoji, fausse)] dans l'ordre de production, puis les
     fausses entrees « 🧪 Model test N » jusqu'a `simuler`. Rend aussi le
-    nombre de vraies models, pour le dire a l'ecran."""
+    nombre de vraies models, pour le dire a l'ecran.
+
+    Les vraies sont EXACTEMENT les entrees du vrai menu (_jb_models_entrees :
+    ordre, libelles d'apres la liste entiere, PP) -- une maquette qui les
+    recalculerait finirait par montrer autre chose que la production."""
     reelles = []
     try:
-        import identites_ordre as _io
-        from cogs.user import (_jb_models_marche, _libelle_model,
-                               _identity_emoji_name)
-        ordre = _io.lire()
-        tri = _io.trier(list(_jb_models_marche(marche) or []), ordre)
-        # Libelles d'apres la liste ENTIERE : au-dela de 25 le rang continue
-        # (le vrai menu ne numerote que ses 25 visibles).
-        libs = _io.etiqueter(tri, ordre)
-        presents = {e.name: e for e in (getattr(guild, "emojis", None) or [])}
-        for m in tri:
-            reelles.append((m, _libelle_model(m, libs),
-                            presents.get(_identity_emoji_name(m)), False))
-    except Exception:                                        # noqa: BLE001
+        from cogs.user import (_jb_models_marche, _jb_models_entrees,
+                               _jb_emojis_presents)
+        models = list(_jb_models_marche(marche) or [])
+        entrees, _rejets = _jb_models_entrees(
+            models, _jb_emojis_presents(guild, models))
+        reelles = [(v, lib, emoji, False) for v, lib, emoji in entrees]
+    except Exception as e:                                   # noqa: BLE001
+        # Une demo vide sans raison ferait chercher un bug qui n'existe pas.
+        import logging
+        logging.getLogger(__name__).warning(
+            "demomodels : models de production illisibles (%s: %s)",
+            type(e).__name__, e)
         reelles = []
     n_reelles = len(reelles)
     total = max(1, int(simuler or 0))
@@ -517,11 +520,10 @@ def demo_models_plan(variante: str, items: list) -> dict:
             menus = [("Autres models", reste[:_LIM_OPTIONS])]
             reste = reste[_LIM_OPTIONS:]
     elif variante == "menus10":
-        k = 0
-        while reste and len(menus) < _MAX_MENUS10:
-            bloc, reste = reste[:_TAILLE_MENU10], reste[_TAILLE_MENU10:]
-            menus.append((_plage(k + 1, k + len(bloc)), bloc))
-            k += len(bloc)
+        # LA disposition du vrai menu, pas une copie : c'est la variante que
+        # le proprietaire a choisie, et elle doit rester ce qu'il a vu.
+        from cogs.user import _jb_menus_de_10
+        menus, reste = _jb_menus_de_10(reste)
     elif variante == "menus":
         k = 0
         while reste and len(menus) < _LIM_PAR_RANGEE:
@@ -593,19 +595,115 @@ class _DemoModelsMenu(discord.ui.Select):
 
 
 def demo_models_vue_v2(plan: dict, texte: str):
-    """La variante « menus10 » : un bloc V2, le texte en tete, puis un menu
-    par dizaine. Le texte vit DANS le bloc : un message V2 n'a ni contenu ni
-    embed."""
-    ui = discord.ui
-    vue = ui.LayoutView(timeout=900)
-    boite = ui.Container(accent_colour=discord.Colour.dark_red())
-    boite.add_item(ui.TextDisplay(texte[:3900]))
-    for lib, bloc in plan["menus"]:
-        rangee = ui.ActionRow()
-        rangee.add_item(_DemoModelsMenu(lib, bloc))
-        boite.add_item(rangee)
-    vue.add_item(boite)
-    return vue
+    """La variante « menus10 » : le bloc du VRAI menu (_jb_menus_models_poser),
+    avec un menu inerte a la place de JBModelsMenu.
+
+    Pourquoi pas les vrais menus : ce sont des elements dynamiques, et une
+    vue ephemere qui expire en portant un element dynamique efface le motif
+    enregistre pour les vrais menus (voir _vue_sans_suivi, cogs/user.py) --
+    sans compter qu'un choix ouvrirait le vrai panneau d'actions. Le texte
+    est borne a 4000 (limite du V2) par _jb_texte_v2_borne, qui le dit."""
+    from cogs.user import _jb_menus_models_poser, _jb_texte_v2_borne
+    return _jb_menus_models_poser(
+        discord.ui.LayoutView(timeout=900),
+        _jb_texte_v2_borne(texte, [], quoi="demomodels"),
+        plan["menus"],
+        lambda _i, plage, bloc: _DemoModelsMenu(plage, bloc))
+
+
+#: Un nom plus long est coupe proprement (« … »), le compte reste exact.
+_ECARTEES_NOM_MAX = 40
+
+
+def demo_ecartees_texte(marche: str, budget: int) -> str:
+    """La section « Écartées du menu » : chaque identite EXISTANTE absente
+    du menu de `marche`, groupee par raison (_jb_models_ecartees, les filtres
+    de production), en `budget` unites Discord au plus.
+
+    Trop de noms : on coupe par groupe (« … (+k) ») et on DIT combien n'ont
+    pas pu etre listes, avec le total -- jamais un nom qui disparait sans
+    etre compte. Ne leve jamais : un diagnostic en panne le dit."""
+    try:
+        from cogs.user import _jb_models_ecartees, _long_discord, _couper_discord
+    except Exception as e:                                   # noqa: BLE001
+        return ("⚠️ Écartées du menu : diagnostic indisponible (%s)"
+                % type(e).__name__)[:max(0, budget)]
+    try:
+        ecartees = _jb_models_ecartees(marche)
+    except Exception as e:                                   # noqa: BLE001
+        return _couper_discord("⚠️ Écartées du menu : diagnostic impossible "
+                               "(%s: %s)" % (type(e).__name__, e), max(0, budget))
+    mk = marche.upper()
+    if not ecartees:
+        return _couper_discord(
+            f"### Écartées du menu {mk} : aucune\n"
+            "Toutes les identités existantes sont dans le menu.", max(0, budget))
+    groupes = {}
+    for nom, raisons in ecartees:
+        groupes.setdefault(" + ".join(raisons), []).append(nom)
+    # Les plus nombreuses d'abord : c'est la que se cache la cause probable.
+    ordre = sorted(groupes.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+
+    def _court(nom):
+        nom = str(nom).replace("`", "'")
+        c = _couper_discord(nom, _ECARTEES_NOM_MAX)
+        return f"`{c}…`" if c != nom else f"`{c}`"
+
+    # LE PIED D'ABORD : la piste du marche, et le compte de ce qui n'aura pas
+    # pu etre liste. Sa place est retenue AVANT de poser les noms -- mesuree
+    # au pire (tout non liste) -- sinon la derniere coupe emportait
+    # precisement la ligne qui dit combien manquent.
+    total = len(ecartees)
+    titre = f"### Écartées du menu {mk} : {total}"
+
+    def _compte(k):
+        return (f"-# {k} nom(s) non listé(s) faute de place — {total} "
+                "écartée(s) au total.")
+    place_compte = _long_discord(_compte(total)) + 1
+    if budget < _long_discord(titre) + place_compte:
+        # Pas meme la place de nommer : le titre porte le total, c'est lui
+        # qui reste.
+        return _couper_discord(f"{titre} (pas la place de les nommer ici)",
+                               max(0, budget))
+    # La piste du marche passe APRES le compte : elle n'est posee que s'il
+    # reste de quoi nommer quelques identites a cote.
+    piste = ("-# Le marché se règle sur le site : Bibliothèque → ✏️ Modifier "
+             "→ Marché 🇫🇷/🇺🇸." if any("marché" in r for r in groupes) else "")
+    if piste and (budget - _long_discord(titre) - place_compte
+                  < _long_discord(piste) + 1 + 80):
+        piste = ""
+    reserve = place_compte + (_long_discord(piste) + 1 if piste else 0)
+
+    out, pris, non_listees = [titre], _long_discord(titre), 0
+    for i, (raison, noms) in enumerate(ordre):
+        tete = f"• **{raison}** ({len(noms)}) : "
+        place = budget - reserve - pris - 1 - _long_discord(tete)
+        if place < 30:
+            non_listees += sum(len(ns) for _r, ns in ordre[i:])
+            break
+        mis, long_mis = [], 0
+        for nom in noms:
+            m = _court(nom)
+            plus = _long_discord(m) + (2 if mis else 0)
+            # 12 : la place du « , … (+k) » s'il faut couper ensuite.
+            if long_mis + plus > place - 12:
+                break
+            mis.append(m)
+            long_mis += plus
+        reste = len(noms) - len(mis)
+        ligne = tete + ", ".join(mis) + ((", " if mis else "") + f"… (+{reste})"
+                                         if reste else "")
+        out.append(ligne)
+        pris += 1 + _long_discord(ligne)
+        non_listees += reste
+    pied = [x for x in (piste, _compte(non_listees) if non_listees else "") if x]
+    corps = "\n".join(out)
+    place = max(0, budget) - sum(_long_discord(x) + 1 for x in pied)
+    if _long_discord(corps) > place:
+        # Budget trop petit meme pour le titre : le pied (le compte) passe
+        # avant les noms, qui sont de toute facon comptes dedans.
+        corps = _couper_discord(corps, max(0, place - 1)) + "…"
+    return _couper_discord("\n".join([corps] + pied), max(0, budget))
 
 
 def demo_models_vue(plan: dict) -> discord.ui.View:
@@ -676,12 +774,20 @@ class MenuTest(commands.Cog):
             lignes.append(f"⚠️ **{len(plan['non_affichees'])} model(s) non "
                           "affichée(s)** : cette disposition ne peut pas en "
                           "montrer plus.")
+        # Les identites ECARTEES du menu de ce marche, avec leur raison, dans
+        # la place qui reste : 4000 pour un message V2, 2000 pour le texte
+        # d'un message classique.
+        from cogs.user import _long_discord
+        entete = "\n".join(lignes)
+        plafond = 4000 if variante.value == "menus10" else 2000
+        texte = entete + "\n" + demo_ecartees_texte(
+            mk, plafond - _long_discord(entete) - 1)
         if variante.value == "menus10":
             await interaction.response.send_message(
-                view=demo_models_vue_v2(plan, "\n".join(lignes)), ephemeral=True)
+                view=demo_models_vue_v2(plan, texte), ephemeral=True)
             return
         await interaction.response.send_message(
-            "\n".join(lignes), view=demo_models_vue(plan), ephemeral=True)
+            texte, view=demo_models_vue(plan), ephemeral=True)
 
     @app_commands.command(
         name="demopanneau",

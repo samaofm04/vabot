@@ -756,6 +756,43 @@ def _proprio_du_salon(channel):
     return None
 
 
+def marche_du_salon(channel) -> str:
+    """Le marche des models a servir dans un salon -menu : « fr » ou « us ».
+
+    Celui du PROPRIETAIRE du salon : chaque -menu appartient a une seule
+    personne, on peut donc lui servir SES models (role Jailbreak FR/US).
+    Repli sur le marche du SERVEUR, pas sur « us » en dur : depuis que la
+    commande marche aussi sur le serveur principal, un salon dont le
+    proprietaire n'est pas retrouve recevait la liste des models US.
+
+    UNE regle pour tous : _ensure_us_menu (qui pose le menu), maj_menu_marche
+    (qui le redessine) et la conversion d'un ancien menu au clic
+    (cogs/user.py). maj_menu_marche avait sa propre variante, repliee sur
+    « us » : le meme salon FR sans proprietaire recevait des models FR a la
+    pose et US au rafraichissement."""
+    try:
+        import guild_features as _gf
+        marche = "us" if _gf.is_us_guild(channel.guild) else "fr"
+    except Exception:
+        marche = "us"
+    try:
+        from cogs.user import marche_du_membre
+        proprio = _proprio_du_salon(channel)
+        if proprio is not None:
+            marche = marche_du_membre(proprio)
+    except Exception:
+        pass
+    return marche
+
+
+def _kw_menu_models(emb, view) -> dict:
+    """Les arguments d'envoi du menu des models. Depuis les « menus de 10 »
+    (format V2), jailbreak_us_menu(_async) rend (None, vue) : le texte est
+    dans la vue, et un V2 n'admet ni embed ni texte a cote. Un embed rendu
+    (ancien format, bancs d'essai) part comme avant."""
+    return {"view": view} if emb is None else {"embed": emb, "view": view}
+
+
 async def _ensure_us_menu(bot, channel, etat=None):
     """Poste (et épingle) le menu Jailbreak US dans un salon -content s'il n'y est
     pas déjà (détection via les messages épinglés du bot). Idempotent.
@@ -782,7 +819,7 @@ async def _ensure_us_menu(bot, channel, etat=None):
         # inverse a l'ecran -> on repart de zero pour les deux, et le General
         # suit (voir _a_refaire).
         _menu = _panneau = _general = None
-        from cogs.user import _est_panneau_actions, _est_general
+        from cogs.user import _est_panneau_actions, _est_general, _est_menu_models
         _moi = getattr(bot.user, "id", 0)
         for p in pins:
             if p.author.id != _moi:
@@ -805,10 +842,11 @@ async def _ensure_us_menu(bot, channel, etat=None):
                 if _general is None:
                     _general = p
                 continue
-            if not p.embeds:
-                continue
-            _t = p.embeds[0].title or ""
-            if "Jailbreak" in _t and _menu is None:
+            # Le menu des models, dans ses DEUX formats : l'ancien (embed au
+            # titre « … Jailbreak … ») et le V2 « menus de 10 », sans embed,
+            # reconnu a la marque de son texte. Tester le seul embed, c'etait
+            # ne plus voir le menu V2 : un second serait pose a chaque passage.
+            if _est_menu_models(p, _moi) and _menu is None:
                 _menu = p
         if _menu is not None and (_panneau is None or _panneau.id > _menu.id):
             # Deja en place, dans le bon ordre. C'est le cas de TOUS les
@@ -849,29 +887,18 @@ async def _ensure_us_menu(bot, channel, etat=None):
                 log.warning("_ensure_us_menu %s : ids des panneaux non oublies "
                             "(%s: %s)", getattr(channel, "name", "?"),
                             type(e).__name__, e)
-        # Marche du PROPRIETAIRE du salon : chaque -menu appartient a une seule
-        # personne, on peut donc lui servir SES models (role Jailbreak FR/US).
-        # Repli sur le marche du SERVEUR, pas sur « us » en dur : depuis que la
-        # commande marche aussi sur le serveur principal, un salon dont le
-        # proprietaire n'est pas retrouve recevait la liste des models US.
-        try:
-            import guild_features as _gf
-            marche = "us" if _gf.is_us_guild(channel.guild) else "fr"
-        except Exception:
-            marche = "us"
-        try:
-            from cogs.user import marche_du_membre
-            proprio = _proprio_du_salon(channel)
-            if proprio is not None:
-                marche = marche_du_membre(proprio)
-        except Exception:
-            pass
-        # PP des models dans le select (emojis serveur, créés une seule fois)
+        # Marche du PROPRIETAIRE du salon, sinon du serveur (marche_du_salon).
+        marche = marche_du_salon(channel)
+        # PP des models dans les menus (emojis serveur, créés une seule fois)
         try:
             emb, view = await ucog.jailbreak_us_menu_async(channel.guild, marche)
-        except Exception:
-            emb, view = ucog.jailbreak_us_menu(marche)
-        msg = await channel.send(embed=emb, view=view)
+        except Exception as e:
+            log.warning("_ensure_us_menu %s : menu sans PP creees (%s: %s)",
+                        getattr(channel, "name", "?"), type(e).__name__, e)
+            # Le repli garde les PP deja presentes et la phrase d'acces
+            # du serveur : il a besoin du serveur.
+            emb, view = ucog.jailbreak_us_menu(marche, guild=channel.guild)
+        msg = await channel.send(**_kw_menu_models(emb, view))
         try:
             await msg.pin()
         except Exception:
@@ -895,7 +922,12 @@ async def _ensure_us_menu(bot, channel, etat=None):
 
 async def maj_menu_marche(bot, channel, marche=None):
     """Remplace le contenu du message de menu deja epingle par celui du
-    marche demande. On EDITE : reposter laisserait deux menus dans le salon."""
+    marche demande. On EDITE : reposter laisserait deux menus dans le salon.
+
+    Le menu est reconnu dans ses DEUX formats (_est_menu_models) ; un ancien
+    menu (embed) passe en « menus de 10 » par cette edition, avec le repli
+    d'un nouveau menu -- et l'ordre du salon remis -- si Discord refuse
+    (_jb_menu_models_editer)."""
     if bot is None or channel is None:
         return False
     try:
@@ -903,19 +935,35 @@ async def maj_menu_marche(bot, channel, marche=None):
         if ucog is None:
             return False
         if marche is None:
-            from cogs.user import marche_du_membre
-            proprio = _proprio_du_salon(channel)
-            marche = marche_du_membre(proprio) if proprio is not None else "us"
+            marche = marche_du_salon(channel)
         try:
             emb, view = await ucog.jailbreak_us_menu_async(channel.guild, marche)
-        except Exception:
-            emb, view = ucog.jailbreak_us_menu(marche)
-        for m in await channel.pins():
-            if (m.author.id == getattr(bot.user, "id", 0) and m.embeds
-                    and "Menu Jailbreak" in (m.embeds[0].title or "")):
+        except Exception as e:
+            log.warning("maj_menu_marche %s : menu sans PP creees (%s: %s)",
+                        getattr(channel, "name", "?"), type(e).__name__, e)
+            # Le repli garde les PP deja presentes et la phrase d'acces
+            # du serveur : il a besoin du serveur.
+            emb, view = ucog.jailbreak_us_menu(marche, guild=channel.guild)
+        from cogs.user import (_est_menu_models, _est_panneau_actions,
+                               _jb_menu_models_editer)
+        _moi = getattr(bot.user, "id", 0)
+        epingles = await channel.pins()
+        for m in epingles:
+            if not _est_menu_models(m, _moi):
+                continue
+            if emb is not None:
                 await m.edit(embed=emb, view=view)
                 return True
-        msg = await channel.send(embed=emb, view=view)
+            etat = await _jb_menu_models_editer(bot, channel, m, view)
+            if etat != "absent":
+                return True
+            break                              # supprime entre-temps : on repose
+        # Pas de menu. Un panneau d'actions en place : le menu posé maintenant
+        # arriverait SOUS lui -- _ensure_us_menu repose les trois dans
+        # l'ordre. Sinon, comme avant : le menu seul.
+        if any(_est_panneau_actions(p, _moi) for p in epingles):
+            return await _ensure_us_menu(bot, channel)
+        msg = await channel.send(**_kw_menu_models(emb, view))
         try:
             await msg.pin()
         except Exception:
