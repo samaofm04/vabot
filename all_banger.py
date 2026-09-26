@@ -1194,7 +1194,8 @@ def limite_via_bot(bot) -> int:
 def tour(poster: Callable, pret: Callable, attente: float = 0.0,
          telecharger_octets: Optional[Callable] = None,
          dormir: Callable = time.sleep, limite: Optional[Callable] = None,
-         nettoyer: Optional[Callable] = None) -> dict:
+         nettoyer: Optional[Callable] = None,
+         supprimer: Optional[Callable] = None) -> dict:
     """Un tour du fil : UN téléchargement s'il y en a, puis — file vide — le
     rattrapage s'il n'a jamais été fait, puis les envois.
 
@@ -1225,6 +1226,10 @@ def tour(poster: Callable, pret: Callable, attente: float = 0.0,
                        entre_envois=lambda: _un_job(telecharger_octets))
     if rat is not None:
         b["rattrapage"] = rat
+    if supprimer is not None:
+        r = retirer_hors_salon(supprimer, dormir=dormir)
+        if r.get("supprimes") or r.get("echecs") or r.get("gardes"):
+            b["retrait_hors_salon"] = r
     if nettoyer is not None:
         n = nettoyer_txt(nettoyer, dormir=dormir)
         if n.get("retires") or n.get("echecs"):
@@ -1329,6 +1334,159 @@ async def retirer_txt(client, shortcode: str, e: dict) -> dict:
     return {"retire": True}
 
 
+# ------------------------------------ retrait des bangers postés à tort --
+#
+# 27/09/2026 : le rattrapage du 26 avait posté dans « all-banger » 36 bangers
+# jamais passés dans 💥・banger. Le propriétaire a accepté (« vas-y ») qu'on
+# les SUPPRIME. Liste FIGÉE, relevée sur le VPS ce jour-là : rien n'est
+# supprimé sur la seule foi d'un calcul qui pourrait mal lire un fichier. Et
+# chaque entrée est revérifiée juste avant (toujours hors de 💥・banger,
+# message du bot, dans le salon all-banger) : dans le doute, on garde.
+
+HORS_SALON_A_RETIRER = frozenset({
+    "DY-c0kStsCY",
+    "DYU5L_MB0bb",
+    "DYu-YAUNq_D",
+    "DZ47wLJoTnH",
+    "DcE74RIBkbo",
+    "DcdoWQ3ItTW",
+    "DcdokGZIZnb",
+    "Dcdp6qntJah",
+    "DcdrU1Kq4pj",
+    "DcdrYqsKBhw",
+    "DcdrbHoKUrK",
+    "DcevS3zqVdU",
+    "DchJlWrus-V",
+    "Dcr0KzjImhd",
+    "DcrFSxpsSCx",
+    "DcsEtcAuSXZ",
+    "Dct1i7rhu03",
+    "DdKEHqMSVl6",
+    "DdKry8STSIY",
+    "DdPOeDJSC5o",
+    "DdQiwY8zOKO",
+    "DdRztvQyzUW",
+    "DdTT7MUAJ7U",
+    "DdU6lZxzWpz",
+    "DdUW2fgSzfd",
+    "DdVhf6KgFek",
+    "DdVhouYO2yF",
+    "DdW1esPTKaD",
+    "DdXfXLmo_Ao",
+    "DdZo688MVd_",
+    "DdagQfHTsqm",
+    "DddG7atB1Ll",
+    "DdgUabfsdAP",
+    "Ddor11RSzuu",
+    "DdrA-aBRtQz",
+    "DdrtGBgIyJG"
+})
+RETRAIT_PAUSE_SEC = 1.2
+
+
+def retirer_hors_salon(supprimer: Callable, dormir: Callable = time.sleep) -> dict:
+    """Supprime, une fois, les messages de HORS_SALON_A_RETIRER encore en place.
+    `supprimer(sc, e)` rend {"supprime"} / {"introuvable"} / {"refuse": raison}
+    (on garde le message, définitivement) / {"erreur": raison} (réessayé)."""
+    bilan_r = {"supprimes": 0, "introuvables": 0, "gardes": 0, "echecs": 0}
+    perimetre = None
+    for sc in sorted(HORS_SALON_A_RETIRER):
+        e = entree(sc)
+        if e.get("etat") != "envoye" or not e.get("message_id") or e.get("retrait_refuse"):
+            continue
+        if perimetre is None:
+            perimetre = passes_par_salon_banger(force=True)
+        if sc in perimetre:
+            # Paru depuis dans 💥・banger : il a sa place, on le garde.
+            res = {"refuse": "passe_par_salon_banger"}
+        else:
+            try:
+                res = supprimer(sc, dict(e)) or {}
+            except Exception as ex:                           # noqa: BLE001
+                res = {"erreur": type(ex).__name__}
+        if res.get("erreur"):
+            bilan_r["echecs"] += 1
+            _dire_une_fois("retrait:" + str(res.get("erreur"))[:40],
+                           f"[all-banger] suppression de {sc} impossible pour l'instant : "
+                           f"{res.get('erreur')} (nouvel essai au tour suivant)")
+            continue
+        with _VERROU:
+            d = charger()
+            x = d["reels"].get(sc)
+            if isinstance(x, dict):
+                if res.get("refuse"):
+                    # Gardé, et plus jamais retenté.
+                    x["retrait_refuse"] = str(res.get("refuse"))
+                else:
+                    x["etat"] = "retire"
+                    x["retire_le"] = int(time.time())
+                    x["raison_retrait"] = "jamais passé dans 💥・banger"
+                    if res.get("introuvable"):
+                        x["message_introuvable"] = True
+                _ecrire(d)
+        if res.get("refuse"):
+            bilan_r["gardes"] += 1
+            log.warning(f"[all-banger] {sc} gardé ({res.get('refuse')})")
+        elif res.get("introuvable"):
+            bilan_r["introuvables"] += 1
+        else:
+            bilan_r["supprimes"] += 1
+            dormir(RETRAIT_PAUSE_SEC)
+    if any(bilan_r.values()):
+        log.info(f"[all-banger] retrait des bangers hors 💥・banger : {bilan_r}")
+    return bilan_r
+
+
+async def supprimer_message(client, shortcode: str, e: dict) -> dict:
+    """Supprime le message de ce banger, SEULEMENT s'il est bien du bot et
+    dans le salon « all-banger »."""
+    import discord
+    try:
+        cid, mid = int(e.get("channel_id") or 0), int(e.get("message_id") or 0)
+    except (TypeError, ValueError):
+        return {"refuse": "identifiants illisibles"}
+    if not (cid and mid):
+        return {"refuse": "identifiants absents"}
+    salon = client.get_channel(cid)
+    try:
+        if salon is None:
+            salon = await client.fetch_channel(cid)
+    except discord.NotFound:
+        return {"introuvable": True}
+    except discord.HTTPException as ex:
+        return {"erreur": f"salon {getattr(ex, 'status', '?')}"}
+    if not est_salon_all_banger(getattr(salon, "name", "")):
+        return {"refuse": f"salon inattendu #{getattr(salon, 'name', '?')}"}
+    try:
+        m = await salon.fetch_message(mid)
+    except discord.NotFound:
+        return {"introuvable": True}
+    except discord.HTTPException as ex:
+        return {"erreur": f"lecture {getattr(ex, 'status', '?')}"}
+    moi = getattr(getattr(client, "user", None), "id", None)
+    if moi is None or getattr(getattr(m, "author", None), "id", None) != moi:
+        return {"refuse": "message d'un autre auteur"}
+    try:
+        await m.delete()
+    except discord.NotFound:
+        return {"introuvable": True}
+    except discord.HTTPException as ex:
+        return {"erreur": f"suppression {getattr(ex, 'status', '?')}"}
+    return {"supprime": True}
+
+
+def supprimer_via_bot(bot, shortcode: str, e: dict, timeout: float = 60.0) -> dict:
+    """Passe supprimer_message() à la boucle du bot depuis le fil d'envoi."""
+    import asyncio
+    if bot is None or not bot_pret(bot):
+        return {"erreur": "bot pas prêt"}
+    try:
+        fut = asyncio.run_coroutine_threadsafe(supprimer_message(bot, shortcode, e), bot.loop)
+        return fut.result(timeout=timeout) or {"erreur": "reponse_vide"}
+    except Exception as ex:                                   # noqa: BLE001
+        return {"erreur": type(ex).__name__}
+
+
 def nettoyer_via_bot(bot, shortcode: str, e: dict, timeout: float = 60.0) -> dict:
     """Passe retirer_txt() à la boucle du bot depuis le fil d'envoi."""
     import asyncio
@@ -1344,7 +1502,8 @@ def nettoyer_via_bot(bot, shortcode: str, e: dict, timeout: float = 60.0) -> dic
 def demarrer(poster: Callable, pret: Callable,
              telecharger_octets: Optional[Callable] = None,
              limite: Optional[Callable] = None,
-             nettoyer: Optional[Callable] = None) -> bool:
+             nettoyer: Optional[Callable] = None,
+             supprimer: Optional[Callable] = None) -> bool:
     """Lance LE fil d'envoi (un seul par processus). Rend True s'il vient
     d'être lancé."""
     with _VERROU:
@@ -1362,7 +1521,7 @@ def demarrer(poster: Callable, pret: Callable,
                 try:
                     b = tour(poster, pret, attente=attente,
                              telecharger_octets=telecharger_octets, limite=limite,
-                             nettoyer=nettoyer)
+                             nettoyer=nettoyer, supprimer=supprimer)
                     attente = ATTENTE_BOT_SEC if b.get("attente") else PERIODE_SEC
                     if attente == ATTENTE_BOT_SEC:
                         time.sleep(ATTENTE_BOT_SEC)

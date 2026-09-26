@@ -13853,6 +13853,80 @@ except Exception as _eP:
     _tbP.print_exc()
     check("all-banger perimetre : testable", False, repr(_eP)[:220])
 
+# --- all-banger : suppression unique des 36 bangers postes a tort (27/09/2026) ---
+try:
+    import asyncio as _aioR, discord as _dR
+    import all_banger as _abR
+    _savR = (_abR.charger, _abR._ecrire, _abR.passes_par_salon_banger)
+    _l = sorted(_abR.HORS_SALON_A_RETIRER)
+    _regR = {"reels": {
+        _l[0]: {"etat": "envoye", "message_id": 1, "channel_id": 9},
+        _l[1]: {"etat": "envoye", "message_id": 2, "channel_id": 9},
+        _l[2]: {"etat": "envoye", "message_id": 3, "channel_id": 9},
+        _l[3]: {"etat": "envoye", "message_id": 4, "channel_id": 9},
+        "HORSLISTE1": {"etat": "envoye", "message_id": 5, "channel_id": 9}}}
+    _abR.charger = lambda: _regR
+    _abR._ecrire = lambda d: True
+    _abR.passes_par_salon_banger = lambda force=False: frozenset({_l[1]})
+    try:
+        _vusR = []
+        _repR = {_l[0]: {"supprime": True}, _l[2]: {"erreur": "suppression 500"},
+                 _l[3]: {"refuse": "message d'un autre auteur"}}
+        def _suppR(sc, e):
+            _vusR.append(sc)
+            return _repR.get(sc, {"supprime": True})
+        _bR = _abR.retirer_hors_salon(_suppR, dormir=lambda s: None)
+        check("all-banger retrait : seule la liste figee est touchee, jamais un autre banger",
+              "HORSLISTE1" not in _vusR and _regR["reels"]["HORSLISTE1"]["etat"] == "envoye")
+        check("all-banger retrait : un banger paru depuis dans 💥・banger est garde, sans appel",
+              _l[1] not in _vusR and _regR["reels"][_l[1]]["etat"] == "envoye"
+              and _regR["reels"][_l[1]].get("retrait_refuse"))
+        check("all-banger retrait : supprime -> etat retire ; erreur -> reessaye plus tard",
+              _regR["reels"][_l[0]]["etat"] == "retire"
+              and _regR["reels"][_l[2]]["etat"] == "envoye"
+              and not _regR["reels"][_l[2]].get("retrait_refuse"), str(_bR))
+        check("all-banger retrait : un refus (autre auteur) garde le message pour de bon",
+              _regR["reels"][_l[3]]["etat"] == "envoye" and _regR["reels"][_l[3]].get("retrait_refuse"))
+        _vusR.clear(); _repR[_l[2]] = {"supprime": True}
+        _abR.retirer_hors_salon(_suppR, dormir=lambda s: None)
+        check("all-banger retrait : au tour suivant, seule l erreur est retentee",
+              _vusR == [_l[2]] and _regR["reels"][_l[2]]["etat"] == "retire", str(_vusR))
+    finally:
+        _abR.charger, _abR._ecrire, _abR.passes_par_salon_banger = _savR
+
+    # supprimer_message : jamais hors du salon all-banger, jamais un autre auteur
+    class _MsgR:
+        def __init__(self, auteur): self.author = type("A", (), {"id": auteur})(); self.supprime = False
+        async def delete(self): self.supprime = True
+    class _SalR:
+        def __init__(self, nom, m): self.name = nom; self.m = m
+        async def fetch_message(self, mid): return self.m
+    class _CliR:
+        def __init__(self, sal): self.sal = sal; self.user = type("U", (), {"id": 77})()
+        def get_channel(self, cid): return self.sal
+    _eR = {"channel_id": 9, "message_id": 1}
+    _m1 = _MsgR(77)
+    check("all-banger retrait : le message du bot dans all-banger est supprime",
+          _aioR.run(_abR.supprimer_message(_CliR(_SalR("💣・all-banger", _m1)), "X", _eR)) == {"supprime": True}
+          and _m1.supprime)
+    _m2 = _MsgR(12)
+    check("all-banger retrait : le message d un autre auteur n est jamais supprime",
+          "refuse" in _aioR.run(_abR.supprimer_message(_CliR(_SalR("all-banger", _m2)), "X", _eR))
+          and not _m2.supprime)
+    _m3 = _MsgR(77)
+    check("all-banger retrait : jamais dans un autre salon (ex. 💥・banger)",
+          "refuse" in _aioR.run(_abR.supprimer_message(_CliR(_SalR("💥・banger", _m3)), "X", _eR))
+          and not _m3.supprime)
+    check("all-banger retrait : la liste figee compte 36 bangers",
+          len(_abR.HORS_SALON_A_RETIRER) == 36)
+    check("all-banger retrait : le site branche la suppression",
+          "supprimer=lambda sc, e: _ab.supprimer_via_bot(_BOT_REF, sc, e)"
+          in pathlib.Path("web_upload.py").read_text(encoding="utf-8"))
+except Exception as _eR2:
+    import traceback as _tbR
+    _tbR.print_exc()
+    check("all-banger retrait : testable", False, repr(_eR2)[:220])
+
 # --- Les DEUX classements : report Discord et page /clics ---------------
 # Le premier dit qui envoie du trafic, le second qui le convertit. Ils
 # s AJOUTENT au tableau par lien, qui reste alphabetique : un tableau qu on

@@ -54127,7 +54127,10 @@ def _start_all_banger_daemon() -> bool:
         limite=lambda: _ab.limite_via_bot(_BOT_REF),
         # Retire, une fois, le .txt de la description des messages déjà postés
         # (le propriétaire n'en veut pas, 26/09/2026).
-        nettoyer=lambda sc, e: _ab.nettoyer_via_bot(_BOT_REF, sc, e))
+        nettoyer=lambda sc, e: _ab.nettoyer_via_bot(_BOT_REF, sc, e),
+        # Supprime, une fois, les 36 bangers postés à tort (hors 💥・banger),
+        # avec l'accord du propriétaire (27/09/2026).
+        supprimer=lambda sc, e: _ab.supprimer_via_bot(_BOT_REF, sc, e))
 
 
 def _banger_recuperer(shortcode: str, url: str) -> tuple:
