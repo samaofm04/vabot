@@ -10212,7 +10212,9 @@ class JBModelsMenu(discord.ui.DynamicItem[discord.ui.Select],
     Son option est posee « par defaut » : le menu qui la contient l'AFFICHE
     au lieu de son intitule « 👤 1–10… » (le proprietaire, 26/09/2026 :
     « quand j'ai choisi quelque chose, que ca reste comme ca »). Les autres
-    menus du message gardent leur intitule."""
+    menus du message gardent leur intitule. Seulement dans les salons -menu
+    du serveur US (_jb_menu_garde_choix) : ailleurs le panneau epingle ne
+    suit pas le choix, et le menu reprend son intitule."""
 
     def __init__(self, marche, n, plage="", bloc=(), intitule=None, choisie=None):
         self.marche = marche if marche in _JB_MM_MARCHES else "us"
@@ -10513,44 +10515,81 @@ def _jb_choix_du_menu(msg):
     return None
 
 
+def _jb_menu_garde_choix(chan, guild=None) -> bool:
+    """Le menu des models de `chan` peut-il AFFICHER une model choisie ?
+
+    Seulement dans un salon -menu du serveur US : c'est le seul endroit ou
+    le panneau epingle suit le choix. Ailleurs (autre serveur, menu
+    partage), un choix ouvre un panneau EPHEMERE : le menu garde son
+    intitule, sinon re-choisir la model affichee ne ferait rien (Discord
+    n'envoie pas ce clic) et le menu montrerait une autre model que le
+    panneau epingle (relecture du 27/09/2026).
+
+    LE seul endroit qui en decide : le clic (_jb_modele_courant), la pose
+    et les redessins (_ensure_us_menu, maj_menu_marche, _jb_salon_remplir)
+    passent tous par ici -- deux regles auraient donne deux affichages.
+    `guild` : celle de l'interaction, a defaut celle du salon. Ne leve
+    jamais."""
+    if chan is None or not _est_salon_menu(chan):
+        return False
+    try:
+        import guild_features as _gf
+        g = guild if guild is not None else getattr(chan, "guild", None)
+        return bool(_gf.is_us_guild(g))
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("salon %s : serveur illisible (%s: %s), le menu garde son "
+                    "intitule", getattr(chan, "name", "?"), type(e).__name__, e)
+        return False
+
+
 def _jb_modele_courant(interaction, repli=None):
     """La model que le menu des models d'ou vient ce clic doit afficher :
-    celle que le salon montre -- l'etat retenu du panneau (note par chaque
-    choix), sinon celle que le menu affichait deja, sinon `repli`.
+    celle que le panneau epingle du salon montre -- l'etat retenu du panneau
+    (note par chaque choix reussi), sinon celle que le menu affichait deja --
+    ou None (le menu reprend son intitule).
 
-    None hors d'un salon -menu (et hors ephemere) : le menu de /menujailbreak
-    est PARTAGE par tout un salon, la model affichee y serait celle d'un
-    autre VA.
+    None hors d'un salon -menu : le menu de /menujailbreak est PARTAGE par
+    tout un salon, la model affichee y serait celle d'un autre VA.
 
-    Un menu EPHEMERE, ou un salon -menu hors serveur US, montre le choix
-    lui-meme (`repli`) : le panneau y part en ephemere, le panneau epingle
-    ne suit pas le clic -- son etat retenu (celui de sa pose) aurait
-    ramene le menu sur la premiere model a chaque choix, et le menu relu
-    montre encore le choix PRECEDENT. Ne leve jamais."""
+    None aussi pour un menu EPHEMERE et pour un salon -menu HORS serveur US :
+    le menu y revient sur son intitule, comme avant le 26/09/2026. La, un
+    choix ouvre un panneau EPHEMERE et le panneau epingle ne suit pas le
+    clic. Garder le choix affiche (option « par defaut ») empechait de le
+    refaire : Discord n'envoie rien quand on re-choisit l'option deja
+    affichee (voir « MENUS DEROULANTS » plus haut). Le VA qui avait ferme
+    son panneau ephemere d'Emma devait passer par une autre model pour la
+    rouvrir, et le salon montrait « Emma » dans le menu au-dessus d'un
+    panneau epingle reste sur Lola, boutons actifs (relecture du
+    27/09/2026, simulee).
+
+    Serveur US : l'etat retenu du panneau (note par un choix REUSSI,
+    _jb_panneau_noter), sinon ce que le menu affichait deja. Jamais le
+    choix lui-meme (`repli`) : s'il n'a pas ete retenu, c'est que le panneau
+    epingle n'a PAS pu passer dessus (panneau de secours dans le -content) ;
+    l'afficher montrerait une model que le panneau ne montre pas, et que le
+    VA ne pourrait plus re-choisir pour reessayer. `repli` reste accepte
+    pour les appelants, sans effet. Ne leve jamais."""
     try:
         msg = getattr(interaction, "message", None)
         chan = getattr(interaction, "channel", None)
-        choix = (str(repli).strip().lower() or None) if repli else None
         ephemere = bool(getattr(getattr(msg, "flags", None), "ephemeral", False))
         if ephemere:
-            return choix or _jb_choix_du_menu(msg)
-        if not _est_salon_menu(chan):
             return None
-        try:
-            import guild_features as _gf
-            us = bool(_gf.is_us_guild(getattr(interaction, "guild", None)))
-        except Exception:                                    # noqa: BLE001
-            us = False
-        if not us:
-            return choix or _jb_choix_du_menu(msg)
+        if not _jb_menu_garde_choix(chan, getattr(interaction, "guild", None)):
+            return None
         etat = _JB_PANNEAU_COURANT.get(int(getattr(chan, "id", 0) or 0))
         if etat and etat[0] and etat[0] != "_":
             return etat[0]
-        return _jb_choix_du_menu(msg) or choix
+        return _jb_choix_du_menu(msg)
     except Exception as e:                                   # noqa: BLE001
         log.warning("menu des models : model du salon illisible (%s: %s)",
                     type(e).__name__, e)
         return None
+
+
+#: Models deja signalees (avertissement) comme impossibles a mettre dans un
+#: bouton quand on cherche la model par defaut d'un salon (_jb_modele_du_salon).
+_JB_ILLISIBLES_DITES = set()
 
 
 def _jb_modele_du_salon(chan, epingles=(), marche=None, moi=None):
@@ -10566,6 +10605,9 @@ def _jb_modele_du_salon(chan, epingles=(), marche=None, moi=None):
          menu) -- aussi quand la derniere n'est plus proposee (pause, autre
          marche, supprimee), et c'est journalise ;
       3. liste vide : (« _ », 5), l'etat d'attente d'avant, seul repli.
+    Une model dont le panneau ne peut porter aucun bouton (_jb_panel_probleme :
+    nom accentue, espace, URL, trop long) n'est jamais prise, ni comme
+    derniere ni comme premiere : c'est la suivante, et c'est journalise.
     La quantite est celle du panneau quand on garde SA model, sinon 5.
     `epingles` : les messages epingles du salon (le panneau, le General),
     lus AVANT d'etre supprimes par l'appelant. Ne leve jamais."""
@@ -10608,6 +10650,34 @@ def _jb_modele_du_salon(chan, epingles=(), marche=None, moi=None):
     if etat:
         candidats.append((etat[0], etat[1], "memoire"))
     dites = set()
+    illisibles = set()
+
+    def _sans_bouton(ident, q, source):
+        """Une model dont le panneau ne peut porter AUCUN bouton (nom hors
+        de [a-z0-9_.-], custom_id trop long : _jb_panel_probleme) n'est
+        jamais prise par defaut. Son panneau ne montre que « _ » (en-tete
+        et quantite) : relu, il ne dit jamais cette model, et
+        _jb_salon_remplir le reeditait a chaque passage -- sous-menus
+        fermes, General remis sur sa premiere reserve, a chaque coche sur
+        le site (relecture du 27/09/2026 : l'emoji
+        « idhttpswwwtiktokcomlilli1212_r1_ » du serveur US montre qu'une
+        identite au nom d'URL a deja ete proposee). Journalise une fois par
+        passage et par model, jamais ecartee en silence."""
+        try:
+            probleme = _jb_panel_probleme(ident, q)
+        except Exception as e:                               # noqa: BLE001
+            probleme = f"verification impossible ({type(e).__name__}: {e})"
+        if probleme and ident not in illisibles:
+            illisibles.add(ident)
+            # Avertissement la premiere fois (par model et par demarrage),
+            # puis en info : ce calcul tourne a chaque rafraichissement de
+            # chaque salon -menu, le journal en serait noye.
+            niveau = logging.INFO if ident in _JB_ILLISIBLES_DITES else logging.WARNING
+            _JB_ILLISIBLES_DITES.add(ident)
+            log.log(niveau, "salon %s : %s (%s) -- nom illisible dans un bouton, "
+                    "pas prise par defaut : %s", nom, ident, source, probleme)
+        return bool(probleme)
+
     for ident, qty, source in candidats:
         if not ident or ident == "_":
             continue
@@ -10616,13 +10686,23 @@ def _jb_modele_du_salon(chan, epingles=(), marche=None, moi=None):
                 q = max(1, int(qty)) if qty else _JB_QTE_DEFAUT
             except (TypeError, ValueError):
                 q = _JB_QTE_DEFAUT
+            if _sans_bouton(ident, q, source):
+                continue
             return ident, q, source
         if ident not in dites:
             dites.add(ident)
             log.info("salon %s : %s (%s) n'est plus proposee dans le menu %s, "
                      "pas reprise", nom, ident, source, str(marche).upper())
+    # La premiere du menu QUI PEUT porter ses boutons : les precedentes sont
+    # journalisees par _sans_bouton.
+    for ident in proposees:
+        if not _sans_bouton(ident, _JB_QTE_DEFAUT, "premiere du menu"):
+            return ident, _JB_QTE_DEFAUT, "premiere du menu"
     if proposees:
-        return proposees[0], _JB_QTE_DEFAUT, "premiere du menu"
+        log.warning("salon %s : aucune des %d model(s) du menu %s ne peut porter "
+                    "de boutons -- panneau et General restent en attente", nom,
+                    len(proposees), str(marche).upper())
+        return "_", _JB_QTE_DEFAUT, "aucune model utilisable"
     log.info("salon %s : aucune model dans le menu %s -- panneau et General "
              "restent en attente", nom, str(marche).upper())
     return "_", _JB_QTE_DEFAUT, "aucune model"
@@ -10725,9 +10805,13 @@ async def _jb_salon_remplir(client, chan, epingles, marche=None, menu=None):
                  source, montre or "?")
         if us and not general_fait:
             await _jb_general_maj(client, chan, model, guild)
-        if menu is not None and _jb_choix_du_menu(menu) != model:
+        # Le menu n'affiche la model que la ou le panneau epingle suit les
+        # clics (_jb_menu_garde_choix) ; ailleurs il reste sur son intitule,
+        # et on ne le redessine que s'il montrait quelque chose.
+        choisie = model if _jb_menu_garde_choix(chan) else None
+        if menu is not None and _jb_choix_du_menu(menu) != choisie:
             await _jb_menu_models_editer(
-                client, chan, menu, _jb_menu_models_vue(marche, guild, choisie=model))
+                client, chan, menu, _jb_menu_models_vue(marche, guild, choisie=choisie))
         return model
     except Exception as e:                                   # noqa: BLE001
         log.warning("salon %s : model par defaut non posee (%s: %s)", nom,
@@ -10782,14 +10866,21 @@ async def _jb_notifs_epingle_retirer(chan, cible=None, quoi="salon -menu",
     recent de `chan` (salon -menu US seulement, _jb_salon_sans_notifs) : les
     messages de type pins_add, et RIEN d'autre. `cible` : seulement celle de
     l'epinglage de ce message ; None : toutes (au /resetmenus, aux
-    redessins). Permission manquante : journalise, ne leve jamais.
-    -> nombre supprime."""
+    redessins). Permission manquante : journalise, ne leve jamais. Un refus
+    sur la notification d'un MEMBRE n'arrete pas le parcours (celles du bot
+    restent supprimables sans « Gerer les messages ») ; un refus sur une
+    notification du bot, si. -> nombre supprime."""
     if not _jb_salon_sans_notifs(chan):
         return 0
     nom = getattr(chan, "name", "?")
     if limite is None:
         limite = 10 if cible is not None else _JB_NOTIF_EPINGLE_HISTORIQUE
+    # L'auteur d'une notification d'epinglage est celui qui a epingle. Le bot
+    # supprime TOUJOURS les siennes ; celle d'un membre (un admin qui epingle
+    # un message du -menu) demande « Gerer les messages ».
+    moi = getattr(getattr(getattr(chan, "guild", None), "me", None), "id", None)
     n = 0
+    refus_autres = []
     try:
         async for m in chan.history(limit=limite):
             if not _est_notif_epingle(m, cible):
@@ -10799,15 +10890,38 @@ async def _jb_notifs_epingle_retirer(chan, cible=None, quoi="salon -menu",
                 n += 1
             except discord.NotFound:
                 pass                       # deja partie
+            except discord.Forbidden as e:
+                auteur = getattr(getattr(m, "author", None), "id", None)
+                if moi is not None and auteur is not None and auteur != moi:
+                    # Refus sur la notification d'un MEMBRE : celles du bot,
+                    # plus anciennes, restent supprimables. S'arreter ici
+                    # les laissait sous les menus (relecture du 27/09/2026 :
+                    # 2 du bot restaient derriere 1 d'un membre). Journalise
+                    # une fois, en fin de parcours.
+                    refus_autres.append((auteur, f"{type(e).__name__}: {e}"))
+                    continue
+                # Refus sur une notification du BOT lui-meme (ou d'auteur
+                # inconnu) : vraie perte de droits sur le salon, les
+                # suivantes echoueraient pareil.
+                log.warning("%s %s : notification d'epinglage non supprimee "
+                            "(%s: %s)", quoi, nom, type(e).__name__, e)
+                break
             except Exception as e:                           # noqa: BLE001
-                # Le plus souvent Forbidden (« Gerer les messages » retire) :
-                # les suivantes echoueraient pareil.
+                # Autre erreur Discord (limite de debit, panne) : on
+                # n'insiste pas, le prochain passage reprendra.
                 log.warning("%s %s : notification d'epinglage non supprimee "
                             "(%s: %s)", quoi, nom, type(e).__name__, e)
                 break
     except Exception as e:                                   # noqa: BLE001
         log.warning("%s %s : historique illisible, notifications d'epinglage "
                     "laissees (%s: %s)", quoi, nom, type(e).__name__, e)
+    if refus_autres:
+        log.warning("%s %s : %d notification(s) d'epinglage d'un autre membre "
+                    "non supprimee(s) (auteurs %s ; %s) -- il manque « Gerer les "
+                    "messages » ; celles du bot sont retirees quand meme", quoi,
+                    nom, len(refus_autres),
+                    ", ".join(sorted({str(a) for a, _e in refus_autres})),
+                    refus_autres[0][1])
     if n:
         log.info("%s %s : %d notification(s) d'epinglage retiree(s)", quoi, nom, n)
     return n

@@ -843,7 +843,8 @@ async def _ensure_us_menu(bot, channel, etat=None, modele=None):
     montre la model du salon -- la derniere choisie, lue dans le panneau
     AVANT qu'il soit supprime, sinon la premiere du menu
     (cogs/user.py _jb_modele_du_salon) -- au lieu de « 🔢 5 » seul ; le menu
-    l'affiche choisie. Un salon deja en place dont le panneau attend encore
+    l'affiche choisie sur le serveur US (hors US, il garde son intitule :
+    _jb_menu_garde_choix). Un salon deja en place dont le panneau attend encore
     (« _ ») est rempli (_jb_salon_remplir). `modele` : (model, quantite,
     source) deja lus par l'appelant -- reset_us_menu les lit avant de
     purger le salon, ou il n'y aurait plus rien a lire.
@@ -954,7 +955,13 @@ async def _ensure_us_menu(bot, channel, etat=None, modele=None):
                             "(%s: %s)", getattr(channel, "name", "?"),
                             type(e).__name__, e)
         # PP des models dans les menus (emojis serveur, créés une seule fois)
-        _choisie = None if _model == "_" else _model
+        # Le menu n'affiche la model du salon que sur le serveur US, ou le
+        # panneau epingle suit les clics (_jb_menu_garde_choix) : ailleurs
+        # un choix ouvre un panneau ephemere, et une model affichee ne
+        # pourrait plus etre re-choisie.
+        from cogs.user import _jb_menu_garde_choix
+        _choisie = (None if _model == "_" or not _jb_menu_garde_choix(channel)
+                    else _model)
         try:
             emb, view = await ucog.jailbreak_us_menu_async(channel.guild, marche,
                                                            choisie=_choisie)
@@ -1000,7 +1007,7 @@ async def maj_menu_marche(bot, channel, marche=None):
 
     UNE MODEL TOUJOURS CHOISIE (26/09/2026) : le menu redessine affiche la
     model du salon (la derniere choisie encore proposee, sinon la premiere,
-    _jb_modele_du_salon) ; un panneau qui attend encore (« _ ») ou qui
+    _jb_modele_du_salon) -- serveur US seulement, _jb_menu_garde_choix ; un panneau qui attend encore (« _ ») ou qui
     montre une model plus proposee -- en pause, passee a l'autre marche,
     supprimee -- passe sur elle, avec le General (_jb_salon_remplir). Sans
     panneau, le menu n'affiche rien de choisi : il n'y a rien a montrer
@@ -1016,13 +1023,16 @@ async def maj_menu_marche(bot, channel, marche=None):
         from cogs.user import (_est_menu_models, _est_panneau_actions,
                                _jb_menu_models_editer, _jb_modele_du_salon,
                                _jb_salon_remplir, _jb_notifs_epingle_retirer,
-                               _jb_epingler)
+                               _jb_epingler, _jb_menu_garde_choix)
         _moi = getattr(bot.user, "id", 0)
         # Les epingles d'ABORD : la model a afficher se lit dans le panneau.
         epingles = await channel.pins()
         _a_panneau = any(_est_panneau_actions(p, _moi) for p in epingles)
+        # Hors serveur US, le menu garde son intitule (_jb_menu_garde_choix) :
+        # sans ca, chaque rafraichissement le remettait sur la model du
+        # panneau epingle, que les clics la-bas ne changent pas.
         _model = (_jb_modele_du_salon(channel, epingles, marche, _moi)[0]
-                  if _a_panneau else "_")
+                  if _a_panneau and _jb_menu_garde_choix(channel) else "_")
         _choisie = None if _model == "_" else _model
         try:
             emb, view = await ucog.jailbreak_us_menu_async(channel.guild, marche,

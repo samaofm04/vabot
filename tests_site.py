@@ -19930,10 +19930,15 @@ try:
 
         # -- 8. /resetmenus annonce ce qui a VRAIMENT ete pose -------------------
         class _UCogGn:
-            def jailbreak_us_menu(self, marche):
+            # `guild`, `choisie` : les signatures du vrai UserCog. Depuis le
+            # 26/09/2026 (demande du proprietaire : une model toujours
+            # choisie), welcome passe au menu la model du salon (choisie=) ;
+            # sans ces parametres, ce bouchon levait TypeError et
+            # reset_us_menu ne posait plus rien.
+            def jailbreak_us_menu(self, marche, guild=None, choisie=None):
                 return _dGn.Embed(title="🔓 Menu Jailbreak US"), None
 
-            async def jailbreak_us_menu_async(self, guild, marche):
+            async def jailbreak_us_menu_async(self, guild, marche, choisie=None):
                 return self.jailbreak_us_menu(marche)
 
         _botGn = _tyGn.SimpleNamespace(user=_AutGn(1),
