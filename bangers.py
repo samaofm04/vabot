@@ -1038,7 +1038,7 @@ def bloc_video_discord(shortcode, fichier, description=None):
     return galerie, discord.File(str(fichier), filename=filename)
 
 
-def blocs_description_discord(shortcode, description, url):
+def blocs_description_discord(shortcode, description, url, joindre_fichier=True):
     """« Description à copier » puis le bouton « Voir le reel sur Instagram ».
 
     Rend (composants, fichiers). Les deux messages de bangers (la fiche du
@@ -1050,6 +1050,12 @@ def blocs_description_discord(shortcode, description, url):
     mangé entre deux « _ » de hashtags, pas de lien déroulé). Au-delà de 2700
     signes il est coupé à l'affichage — un message en composants ne porte que
     4000 signes en tout — et le fichier joint garde TOUJOURS le texte complet.
+
+    `joindre_fichier=False` (salon « all-banger ») : pas de .txt joint. Le
+    propriétaire n'en veut pas là (26/09/2026, « je veux pas le truc
+    description ») : le bloc à copier suffit. Le texte y est alors montré
+    jusqu'à 3500 signes (une légende Instagram en fait 2200 au plus) ; au-delà,
+    coupé et marqué d'un « … ».
     """
     import discord
     import io
@@ -1061,13 +1067,16 @@ def blocs_description_discord(shortcode, description, url):
             display = display[4:-3].strip()
         display = display.replace('```', '` ` `')
         suffix = ''
-        if len(display) > 2700:
-            display = display[:2700] + '…'
-            suffix = '\nTexte complet dans le fichier ci-dessous.'
+        plafond = 2700 if joindre_fichier else 3500
+        if len(display) > plafond:
+            display = display[:plafond] + '…'
+            if joindre_fichier:
+                suffix = '\nTexte complet dans le fichier ci-dessous.'
         children.append(discord.ui.TextDisplay('**Description à copier**\n```\n' + display + '\n```' + suffix))
-        filename = shortcode + '_description.txt'
-        files.append(discord.File(io.BytesIO(desc.encode('utf-8')), filename=filename))
-        children.append(discord.ui.File('attachment://' + filename))
+        if joindre_fichier:
+            filename = shortcode + '_description.txt'
+            files.append(discord.File(io.BytesIO(desc.encode('utf-8')), filename=filename))
+            children.append(discord.ui.File('attachment://' + filename))
     else:
         children.append(discord.ui.TextDisplay('**Description**\nAucune description récupérée pour ce reel.'))
     children.append(discord.ui.ActionRow(discord.ui.Button(label='Voir le reel sur Instagram', url=url)))

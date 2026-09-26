@@ -12417,8 +12417,9 @@ try:
                     return _t[len("**Description à copier**\n```\n"):].rsplit("\n```", 1)[0]
             return None
         _c1A = _carteA(_e1A)
-        check("all-banger : carte V2 exacte -- video, vues, separateur, description, fichier, bouton",
-              [c.get("type") for c in _c1A] == [12, 10, 14, 10, 13, 1]
+        # 26/09/2026 : plus de composant fichier (.txt) dans all-banger
+        check("all-banger : carte V2 exacte -- video, vues, separateur, description, bouton",
+              [c.get("type") for c in _c1A] == [12, 10, 14, 10, 1]
               and len((_e1A.get("payload") or {}).get("components") or []) == 1,
               str([c.get("type") for c in _c1A]))
         check("all-banger : le message est en Components V2, sans aucun texte hors de la carte",
@@ -12432,11 +12433,12 @@ try:
         check("all-banger : les vues sont marquees, au format de la fiche du matin",
               len(_c1A) > 1 and _c1A[1].get("content") == "**15 000** vues",
               repr(_c1A[1] if len(_c1A) > 1 else None))
-        check("all-banger : pieces jointes = la video et la description complete, rien d autre",
-              _e1A.get("noms") == ["ALLBG01.mp4", "ALLBG01_description.txt"]
-              and _e1A.get("joints", {}).get("ALLBG01_description.txt") == _legA
+        # 26/09/2026 : la video seule ; la description est dans la carte
+        check("all-banger : piece jointe = la video, rien d autre ; description dans la carte",
+              _e1A.get("noms") == ["ALLBG01.mp4"]
+              and _descA(_e1A) == _legA
               and [a.get("filename") for a in (_e1A.get("payload") or {}).get("attachments") or []]
-              == ["ALLBG01.mp4", "ALLBG01_description.txt"], str(_e1A.get("noms")))
+              == ["ALLBG01.mp4"], str(_e1A.get("noms")))
         check("all-banger : la description a copier EST la legende, dans un bloc de code",
               _descA(_e1A) == _legA, repr(_descA(_e1A)))
         _btnA = (_c1A[-1].get("components") or [{}])[0] if _c1A else {}
@@ -12466,12 +12468,13 @@ try:
         _jPA = {f.filename: f.fp.read().decode("utf-8") for f in _fPA if f.filename.endswith(".txt")}
         for _f in _fPA:
             _f.close()
-        check("all-banger : bloc de code etanche, texte complet dans le fichier joint",
-              [c["type"] for c in _cPA] == [12, 14, 10, 13, 1]
+        # 26/09/2026 : plus de .txt joint dans all-banger (demande du proprietaire)
+        check("all-banger : bloc de code etanche, sans fichier joint",
+              [c["type"] for c in _cPA] == [12, 14, 10, 1]
               and _cPA[2]["content"].count("```") == 2
               and "#un_tag et #deux_tags" in _cPA[2]["content"]
               and "https://t.co/a_b_c" in _cPA[2]["content"]
-              and _jPA.get("ALLBGXX_description.txt") == _pieceA, repr(_cPA[2]["content"]))
+              and not _jPA, repr(_cPA[2]["content"]))
         check("all-banger : l envoi porte le nonce du reel (anti-doublon de Discord)",
               _e1A.get("nonce") == _abA.nonce_de("ALLBG01") and len(_e1A["nonce"]) <= 25)
         _envoyeA = _abA.entree("ALLBG01")
@@ -12523,7 +12526,7 @@ try:
         _envoisA()
         check("all-banger : la relance reussie est postee",
               _abA.entree("ALLBG04").get("etat") == "envoye"
-              and _salonA.envois[-1]["noms"] == ["ALLBG04.mp4", "ALLBG04_description.txt"])
+              and _salonA.envois[-1]["noms"] == ["ALLBG04.mp4"])
         # un scrape SANS lien (source de repli) ne consomme pas l essai
         _rD = [_reelA("ALLBG05", 40000, "", "d")]
         _exD = _bgA.examiner("compte.d", _rD, maintenant=_nowA)
@@ -12838,7 +12841,7 @@ try:
         _envoisA()
         check("all-banger : le salon revenu, la video en attente part",
               _abA.entree("ALLBG10").get("etat") == "envoye"
-              and _salonA.envois[-1]["noms"] == ["ALLBG10.mp4", "ALLBG10_description.txt"])
+              and _salonA.envois[-1]["noms"] == ["ALLBG10.mp4"])
 
         # 6) Description trop longue pour la carte (4000 signes en tout) : coupee
         #    a l affichage, COMPLETE dans le .txt joint -- comme le matin.
@@ -12851,12 +12854,12 @@ try:
         _eG = _salonA.envois[-1]
         _cG = _carteA(_eG)
         _txtG = sum(len(c.get("content") or "") for c in _cG if c.get("type") == 10)
-        check("all-banger : description > 2700 signes -> coupee dans la carte, complete en .txt",
-              _eG["content"] is None and _eG["noms"] == ["ALLBG11.mp4", "ALLBG11_description.txt"]
-              and _eG["joints"].get("ALLBG11_description.txt") == _longA
-              and _descA(_eG) == _longA[:2700] + "…"
-              and any("Texte complet dans le fichier ci-dessous." in (c.get("content") or "")
-                      for c in _cG) and _txtG <= 4000,
+        # 26/09/2026 : sans .txt, la carte montre jusqu a 3500 signes
+        check("all-banger : description longue -> ENTIERE dans la carte (<= 3500), sans .txt",
+              _eG["content"] is None and _eG["noms"] == ["ALLBG11.mp4"]
+              and _descA(_eG) == (_longA if len(_longA) <= 3500 else _longA[:3500] + "…")
+              and not any("fichier ci-dessous" in (c.get("content") or "") for c in _cG)
+              and _txtG <= 4000,
               str(_eG["noms"]) + " " + str(_txtG))
 
         # 7) Refus net de Discord (droits) : rien de cree, on reprend plus tard
@@ -13078,10 +13081,10 @@ try:
             _eC3A = next((e for e in _salonA.envois[_nEnvA:] if e["noms"][0] == "RAT_C03.mp4"), {})
             _cC3A = _carteA(_eC3A)
             check("all-banger : rattrapage -- meme carte V2 ; vues = la plus haute connue (HikerAPI)",
-                  [c.get("type") for c in _cC3A] == [12, 10, 14, 10, 13, 1]
+                  [c.get("type") for c in _cC3A] == [12, 10, 14, 10, 1]
                   and _cC3A[1].get("content") == "**123 456** vues"
                   and _descA(_eC3A) == _longRatA
-                  and _eC3A["joints"].get("RAT_C03_description.txt") == _longRatA,
+                  and _eC3A["noms"] == ["RAT_C03.mp4"],
                   str([c.get("content") for c in _cC3A if c.get("type") == 10])[:200])
             _regAvantA = _jsonA(_abA.FICHIER)
             # Redemarrage : memoire vide, meme machine -> pas de 2e rattrapage.
@@ -13587,7 +13590,7 @@ try:
                       lambda: _abA.bot_pret(_botA), dormir=lambda s: None)
             check("all-banger : bot pret -> poste depuis la boucle du bot",
                   _abA.entree("ALLBG21").get("etat") == "envoye"
-                  and _salonA.envois[-1]["noms"] == ["ALLBG21.mp4", "ALLBG21_description.txt"])
+                  and _salonA.envois[-1]["noms"] == ["ALLBG21.mp4"])
         finally:
             _boucleA.call_soon_threadsafe(_boucleA.stop)
             _filA.join(5)
@@ -13688,6 +13691,114 @@ finally:
     # derriere elle des bangers/<code>.mp4 d essai.
     if "_tmpA" in globals():
         shutil.rmtree(_tmpA, ignore_errors=True)
+
+# --- all-banger sans le .txt de la description (26/09/2026) --------------
+# « Je veux pas le truc description » : le bloc a copier suffit. Les messages
+# deja postes avec le .txt sont edites UNE fois pour le retirer, la video
+# gardee ; la fiche du matin, elle, garde son fichier.
+try:
+    import tempfile as _tfT, asyncio as _aioT
+    import all_banger as _abT, bangers as _bgT, discord as _dT
+    _tmpT = pathlib.Path(_tfT.mkdtemp(prefix="allbanger_txt_"))
+    _savT = (_abT.FICHIER if hasattr(_abT, "FICHIER") else None, _bgT.DOSSIER)
+    try:
+        _vidT = _tmpT / "SCTXT01.mp4"
+        _vidT.write_bytes(b"\0" * 2048)
+        _vueT, _fichT = _abT.vue_message("SCTXT01", _vidT, "Ma description #tag_un",
+                                         "https://www.instagram.com/p/SCTXT01/", 15432)
+        _noms = [f.filename for f in _fichT]
+        for _f in _fichT:
+            _f.close()
+        _compT = json.dumps(_vueT.to_components(), ensure_ascii=False)
+        check("all-banger sans txt : le message ne joint QUE la video",
+              _noms == ["SCTXT01.mp4"], str(_noms))
+        check("all-banger sans txt : aucun composant fichier, la description reste a copier",
+              "_description.txt" not in _compT and "Description à copier" in _compT
+              and "Ma description #tag_un" in _compT and "Voir le reel sur Instagram" in _compT)
+        _longT = "x" * 3000
+        _v2, _f2 = _abT.vue_message("SCTXT01", _vidT, _longT, "https://www.instagram.com/p/SCTXT01/", 1)
+        for _f in _f2:
+            _f.close()
+        _c2 = json.dumps(_v2.to_components(), ensure_ascii=False)
+        check("all-banger sans txt : une description de 3000 signes s affiche EN ENTIER",
+              "x" * 3000 in _c2 and "fichier ci-dessous" not in _c2)
+        _bl, _jo = _bgT.blocs_description_discord("SCTXT01", "Texte du matin", "https://www.instagram.com/p/SCTXT01/")
+        check("all-banger sans txt : la fiche du matin garde son .txt",
+              [f.filename for f in _jo] == ["SCTXT01_description.txt"])
+        for _f in _jo:
+            _f.close()
+
+        # Retrait sur un message deja poste : faux client, faux message.
+        class _AttT:
+            def __init__(self, n): self.filename = n
+        class _MsgT:
+            def __init__(self, noms): self.attachments = [_AttT(n) for n in noms]; self.edits = []
+            async def edit(self, **k): self.edits.append(k)
+        class _SalT:
+            def __init__(self, m): self.m = m
+            async def fetch_message(self, mid):
+                if self.m is None:
+                    raise _dT.NotFound(type("R", (), {"status": 404, "reason": "x"})(), "absent")
+                return self.m
+        class _CliT:
+            def __init__(self, sal): self.sal = sal
+            def get_channel(self, cid): return self.sal
+        _savCV = _bgT.chemin_video
+        _bgT.chemin_video = lambda sc: _vidT
+        try:
+            _mT = _MsgT(["SCTXT01.mp4", "SCTXT01_description.txt"])
+            _rT = _aioT.run(_abT.retirer_txt(_CliT(_SalT(_mT)), "SCTXT01",
+                                             {"channel_id": 1, "message_id": 2}))
+            _gT = [a.filename for a in (_mT.edits[0]["attachments"] if _mT.edits else [])]
+            check("all-banger sans txt : l ancien message est edite, video gardee, .txt retire",
+                  _rT == {"retire": True} and _gT == ["SCTXT01.mp4"]
+                  and "_description.txt" not in json.dumps(_mT.edits[0]["view"].to_components()),
+                  str(_rT) + str(_gT))
+            _mP = _MsgT(["SCTXT01.mp4"])
+            check("all-banger sans txt : un message deja propre n est pas edite",
+                  _aioT.run(_abT.retirer_txt(_CliT(_SalT(_mP)), "SCTXT01",
+                                             {"channel_id": 1, "message_id": 2})) == {"deja_propre": True}
+                  and not _mP.edits)
+            check("all-banger sans txt : un message supprime est dit introuvable",
+                  _aioT.run(_abT.retirer_txt(_CliT(_SalT(None)), "SCTXT01",
+                                             {"channel_id": 1, "message_id": 2})) == {"introuvable": True})
+            _mV = _MsgT(["autre.mp4", "SCTXT01_description.txt"])
+            check("all-banger sans txt : sans la video dans le message, on n edite pas",
+                  "erreur" in _aioT.run(_abT.retirer_txt(_CliT(_SalT(_mV)), "SCTXT01",
+                                                         {"channel_id": 1, "message_id": 2}))
+                  and not _mV.edits)
+        finally:
+            _bgT.chemin_video = _savCV
+
+        # nettoyer_txt : un lot, marque sans_txt, l erreur est reessayee.
+        _savCh, _savEc = _abT.charger, _abT._ecrire
+        _regT = {"reels": {
+            "A1": {"etat": "envoye", "message_id": 11, "channel_id": 1},
+            "A2": {"etat": "envoye", "message_id": 12, "channel_id": 1},
+            "A3": {"etat": "envoye", "message_id": 13, "channel_id": 1, "sans_txt": True},
+            "A4": {"etat": "pret"}}}
+        _abT.charger = lambda: _regT
+        _abT._ecrire = lambda d: True
+        try:
+            _repT = {"A1": {"retire": True}, "A2": {"erreur": "edition 500"}}
+            _nT = _abT.nettoyer_txt(lambda sc, e: _repT[sc], dormir=lambda s: None)
+            check("all-banger sans txt : le lot retire, garde l erreur pour plus tard",
+                  _nT["retires"] == 1 and _nT["echecs"] == 1
+                  and _regT["reels"]["A1"].get("sans_txt") is True
+                  and not _regT["reels"]["A2"].get("sans_txt")
+                  and _abT.a_nettoyer() == ["A2"], str(_nT))
+        finally:
+            _abT.charger, _abT._ecrire = _savCh, _savEc
+        check("all-banger sans txt : apres un redemarrage, on relance toutes les 30 s (pas 10 min)",
+              _abT.ATTENTE_BOT_SEC <= 60 and "attente = 0.0" in pathlib.Path("all_banger.py").read_text(encoding="utf-8"))
+        check("all-banger sans txt : le site branche le retrait des .txt",
+              "nettoyer=lambda sc, e: _ab.nettoyer_via_bot(_BOT_REF, sc, e)" in pathlib.Path("web_upload.py").read_text(encoding="utf-8"))
+    finally:
+        shutil.rmtree(_tmpT, ignore_errors=True)
+except Exception as _eT:
+    import traceback as _tbT
+    _tbT.print_exc()
+    check("all-banger sans txt : testable", False, repr(_eT)[:220])
 
 # --- Les DEUX classements : report Discord et page /clics ---------------
 # Le premier dit qui envoie du trafic, le second qui le convertit. Ils

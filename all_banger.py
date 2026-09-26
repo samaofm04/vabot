@@ -115,6 +115,8 @@ DELAI_VERIFICATION = 120.0
 #: Le tour d'horizon quand rien n'arrive : reprise des envois en attente
 #: (salon créé entre-temps, bot reconnecté, redémarrage).
 PERIODE_SEC = 600.0
+#: Relance tant que le bot Discord n'est pas connecté (au démarrage).
+ATTENTE_BOT_SEC = 30.0
 
 #: Limite d'envoi de Discord quand le serveur ne la donne pas : 10 Mio, celle
 #: d'un serveur sans boost (niveau 0 ou 1).
@@ -640,8 +642,9 @@ def vue_message(shortcode: str, fichier, description: str, url: str, vues: int =
     """La carte « all-banger » (Components V2). Rend (vue, fichiers).
 
     Dans l'ordre : la vidéo, ses vues juste dessous, puis — les mêmes blocs
-    que la fiche du matin — la description à copier (et son .txt complet) et
-    le bouton « Voir le reel sur Instagram ». RIEN d'autre : ni compte, ni VA,
+    que la fiche du matin — la description à copier et le bouton « Voir le
+    reel sur Instagram ». SANS le .txt de la description que joint la fiche
+    du matin : le propriétaire n'en veut pas ici (26/09/2026). RIEN d'autre : ni compte, ni VA,
     ni likes, ni date (demande expresse). La vidéo n'a pas de texte
     alternatif : celui du matin nomme le compte.
     """
@@ -654,7 +657,8 @@ def vue_message(shortcode: str, fichier, description: str, url: str, vues: int =
         if vues:
             enfants.append(discord.ui.TextDisplay(ligne_vues(vues)))
         enfants.append(discord.ui.Separator())
-        blocs, joints = _bg.blocs_description_discord(sc, description, url)
+        blocs, joints = _bg.blocs_description_discord(sc, description, url,
+                                                       joindre_fichier=False)
         enfants.extend(blocs)
         fichiers.extend(joints)
         vue = discord.ui.LayoutView(timeout=None)
@@ -994,6 +998,10 @@ def _appliquer_envoi(sc: str, res: dict, verifier: bool, bilan: dict,
         if res.get("message_id"):
             e.update(etat="envoye", message_id=int(res["message_id"]),
                      channel_id=int(res.get("channel_id") or 0), envoye_le=int(time.time()))
+            # Posté sans .txt : rien à retirer (cf. nettoyer_txt). Un message
+            # RETROUVÉ peut dater d'avant ce changement : le nettoyage le lira.
+            if not res.get("retrouve"):
+                e["sans_txt"] = True
             e.pop("raison_envoi", None)
             _ecrire(d)
             bilan["retrouves" if res.get("retrouve") else "envoyes"] += 1
@@ -1120,7 +1128,8 @@ def limite_via_bot(bot) -> int:
 
 def tour(poster: Callable, pret: Callable, attente: float = 0.0,
          telecharger_octets: Optional[Callable] = None,
-         dormir: Callable = time.sleep, limite: Optional[Callable] = None) -> dict:
+         dormir: Callable = time.sleep, limite: Optional[Callable] = None,
+         nettoyer: Optional[Callable] = None) -> dict:
     """Un tour du fil : UN téléchargement s'il y en a, puis — file vide — le
     rattrapage s'il n'a jamais été fait, puis les envois.
 
@@ -1151,12 +1160,126 @@ def tour(poster: Callable, pret: Callable, attente: float = 0.0,
                        entre_envois=lambda: _un_job(telecharger_octets))
     if rat is not None:
         b["rattrapage"] = rat
+    if nettoyer is not None:
+        n = nettoyer_txt(nettoyer, dormir=dormir)
+        if n.get("retires") or n.get("echecs"):
+            b["nettoyage_txt"] = n
     return b
+
+
+# -------------------------------------------------- retrait des .txt postés --
+#
+# Les premiers messages du salon (rattrapage du 26/09/2026) portaient un
+# fichier « <sc>_description.txt ». Le propriétaire n'en veut pas : on les
+# ÉDITE une fois pour retirer ce fichier, en gardant la vidéo déjà jointe
+# (rien n'est retéléchargé ni renvoyé). Par petits lots, entre les envois,
+# pour ne jamais retarder un banger qui attend.
+
+NETTOYAGE_PAR_TOUR = 40
+NETTOYAGE_PAUSE_SEC = 1.5
+
+
+def a_nettoyer() -> List[str]:
+    """Les bangers postés dont le message peut encore porter le .txt."""
+    d = charger()
+    return [sc for sc, e in (d.get("reels") or {}).items()
+            if isinstance(e, dict) and e.get("etat") == "envoye"
+            and e.get("message_id") and not e.get("sans_txt")]
+
+
+def nettoyer_txt(nettoyer: Callable, dormir: Callable = time.sleep,
+                 par_tour: int = NETTOYAGE_PAR_TOUR) -> dict:
+    """Retire le .txt d'au plus `par_tour` messages. `nettoyer(sc, e)` rend
+    {"retire"} / {"deja_propre"} / {"introuvable"} (message supprimé) ou
+    {"erreur": raison} (on réessaiera au tour suivant, rien n'est marqué)."""
+    bilan_n = {"retires": 0, "deja_propres": 0, "introuvables": 0, "echecs": 0}
+    for sc in a_nettoyer()[:max(0, int(par_tour))]:
+        e = entree(sc)
+        try:
+            res = nettoyer(sc, dict(e)) or {}
+        except Exception as ex:                               # noqa: BLE001
+            res = {"erreur": type(ex).__name__}
+        if res.get("erreur"):
+            bilan_n["echecs"] += 1
+            _dire_une_fois("nettoyage:" + str(res.get("erreur"))[:40],
+                           f"[all-banger] retrait du .txt de {sc} impossible pour "
+                           f"l'instant : {res.get('erreur')} (nouvel essai au tour suivant)")
+            continue
+        with _VERROU:
+            d = charger()
+            x = d["reels"].get(sc)
+            if isinstance(x, dict):
+                x["sans_txt"] = True
+                if res.get("introuvable"):
+                    x["message_introuvable"] = True
+                _ecrire(d)
+        cle = ("retires" if res.get("retire") else
+               "introuvables" if res.get("introuvable") else "deja_propres")
+        bilan_n[cle] += 1
+        if res.get("retire"):
+            dormir(NETTOYAGE_PAUSE_SEC)
+    if any(bilan_n.values()):
+        log.info(f"[all-banger] retrait des .txt : {bilan_n} — reste {len(a_nettoyer())}")
+    return bilan_n
+
+
+async def retirer_txt(client, shortcode: str, e: dict) -> dict:
+    """Édite le message posté de ce banger : même carte, sans le .txt, la
+    vidéo déjà jointe gardée telle quelle."""
+    import discord
+    sc = str(shortcode or "")
+    try:
+        cid, mid = int(e.get("channel_id") or 0), int(e.get("message_id") or 0)
+    except (TypeError, ValueError):
+        return {"introuvable": True}
+    if not (cid and mid):
+        return {"introuvable": True}
+    salon = client.get_channel(cid)
+    try:
+        if salon is None:
+            salon = await client.fetch_channel(cid)
+        m = await salon.fetch_message(mid)
+    except discord.NotFound:
+        return {"introuvable": True}
+    except discord.HTTPException as ex:
+        return {"erreur": f"lecture {getattr(ex, 'status', '?')}"}
+    gardees = [a for a in (m.attachments or []) if not str(a.filename).endswith("_description.txt")]
+    if len(gardees) == len(m.attachments or []):
+        return {"deja_propre": True}
+    if not any(str(a.filename) == sc + ".mp4" for a in gardees):
+        # Sans la vidéo jointe, la carte reconstruite pointerait dans le vide.
+        return {"erreur": "video_absente_du_message"}
+    f = _fiche(sc, None)
+    vue, fichiers = vue_message(sc, _bg.chemin_video(sc), description_de(sc, f),
+                                url_de(sc, f), vues_de(sc, e, f))
+    for x in fichiers:          # rien n'est renvoyé : la vidéo est déjà là
+        x.close()
+    try:
+        await m.edit(view=vue, attachments=gardees,
+                     allowed_mentions=discord.AllowedMentions.none())
+    except discord.NotFound:
+        return {"introuvable": True}
+    except discord.HTTPException as ex:
+        return {"erreur": f"edition {getattr(ex, 'status', '?')}"}
+    return {"retire": True}
+
+
+def nettoyer_via_bot(bot, shortcode: str, e: dict, timeout: float = 60.0) -> dict:
+    """Passe retirer_txt() à la boucle du bot depuis le fil d'envoi."""
+    import asyncio
+    if bot is None or not bot_pret(bot):
+        return {"erreur": "bot pas prêt"}
+    try:
+        fut = asyncio.run_coroutine_threadsafe(retirer_txt(bot, shortcode, e), bot.loop)
+        return fut.result(timeout=timeout) or {"erreur": "reponse_vide"}
+    except Exception as ex:                                   # noqa: BLE001
+        return {"erreur": type(ex).__name__}
 
 
 def demarrer(poster: Callable, pret: Callable,
              telecharger_octets: Optional[Callable] = None,
-             limite: Optional[Callable] = None) -> bool:
+             limite: Optional[Callable] = None,
+             nettoyer: Optional[Callable] = None) -> bool:
     """Lance LE fil d'envoi (un seul par processus). Rend True s'il vient
     d'être lancé."""
     with _VERROU:
@@ -1165,10 +1288,19 @@ def demarrer(poster: Callable, pret: Callable,
             return False
 
         def _boucle():
+            # PREMIER tour sans attendre, puis toutes les 30 s tant que le bot
+            # n'est pas connecté : après un redémarrage, l'attente pleine de
+            # 10 min (file vide) faisait croire au propriétaire que rien ne
+            # partait (26/09/2026, « je vois rien »).
+            attente = 0.0
             while True:
                 try:
-                    b = tour(poster, pret, attente=PERIODE_SEC,
-                             telecharger_octets=telecharger_octets, limite=limite)
+                    b = tour(poster, pret, attente=attente,
+                             telecharger_octets=telecharger_octets, limite=limite,
+                             nettoyer=nettoyer)
+                    attente = ATTENTE_BOT_SEC if b.get("attente") else PERIODE_SEC
+                    if attente == ATTENTE_BOT_SEC:
+                        time.sleep(ATTENTE_BOT_SEC)
                     if any(b.get(k) for k in ("envoyes", "retrouves", "trop_lourds",
                                               "refus", "echecs", "incertains")):
                         log.info(f"[all-banger] passage : {b} — registre : {bilan()}")
