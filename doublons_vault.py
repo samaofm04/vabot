@@ -802,8 +802,18 @@ def passages(corbeille: Optional[Path] = None) -> list:
                 for c, fs in (l.get("copies") or {}).items() if c in fs]
         out.append({"nom": d.name, "copies": n, "interrompus": len(interrompus),
                     "restaure": bool(restaures), "noms": noms[:12],
-                    "ts": min((l.get("ts") or 0 for l in lignes if l.get("ts")), default=0)})
+                    "ts": _ts_passage(d.name, lignes)})
     return out
+
+
+def _ts_passage(nom: str, lignes: list) -> int:
+    """L'heure d'un passage : celle de son dossier (« 20260926-041209 », heure
+    du serveur). Les lignes du rangement des doublons ne la portent pas --
+    la page affichait « 01/01 01:00 »."""
+    try:
+        return int(time.mktime(time.strptime(nom[:15], "%Y%m%d-%H%M%S")))
+    except ValueError:
+        return min((l.get("ts") or 0 for l in lignes if l.get("ts")), default=0)
 
 
 def _cle_groupe(l: dict) -> tuple:

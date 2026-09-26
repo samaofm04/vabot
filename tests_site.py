@@ -17036,6 +17036,8 @@ try:
         check("doublons : les groupes en conflit sont intacts",
               (_vi / "r_2.mp4").exists() and (_br / "m_2.off.json").exists()
               and (_te / "t_2.mp4").exists())
+        check("doublons : un passage porte son heure (celle de son dossier, pas 01/01)",
+              abs(_dvV.passages()[0]["ts"] - _bV["ts"]) <= 2, str((_dvV.passages()[0]["ts"], _bV["ts"])))
         check("doublons : le passage est restaurable depuis la corbeille elle-meme",
               [x["nom"] for x in _dvV.passages()] == [_bV["dossier"]]
               and _dvV.passages()[0]["copies"] == 3, str(_dvV.passages()))

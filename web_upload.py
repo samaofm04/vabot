@@ -60333,7 +60333,10 @@ def create_app():
         esc = html_escape
 
         def _quand(ts):
-            return time.strftime("%d/%m %H:%M", time.localtime(ts or 0))
+            # heure de Paris : le serveur est en UTC, le proprietaire non
+            import datetime as _dtq
+            from zoneinfo import ZoneInfo as _Zq
+            return _dtq.datetime.fromtimestamp(ts or 0, _Zq("Europe/Paris")).strftime("%d/%m %H:%M")
         der = _dv.dernier()
         if der:
             dernier = (f"Dernier passage automatique : {_quand(der.get('ts'))} — "
