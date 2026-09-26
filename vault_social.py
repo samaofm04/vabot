@@ -109,6 +109,11 @@ def _consommer_insta(n: int = 1) -> bool:
 #: profil. Apify marchait aussi, mais le propriétaire n'en veut pas.
 PAGE_CREATOR = 15          # au-delà : HTTP 400 « invalid count parameter »
 MAX_PAGES_CREATOR = 60
+#: Plus loin que MAX_EXAMINEES, SEULEMENT pour retrouver les videos du dossier
+#: nommees avec leur numero : ibenhaastrup (26/09/2026) en avait 77 plus
+#: anciennes que ses 600 dernieres, restees sans vues. Rien n'est telecharge
+#: au-dela : on y cherche des vues, pas du contenu.
+MAX_PAGES_PROFOND = 200
 
 #: Un échec de téléchargement est retenté aux relectures suivantes, mais pas
 #: indéfiniment : une vidéo retirée ou privée échouerait à chaque passage.
@@ -416,9 +421,24 @@ def _ecrire_voisin(dossier: Path, stem: str, donnees: dict) -> bool:
                                 indent=None, backup=False))
 
 
-def _lister_tiktok_creator(username: str, info: Optional[dict] = None) -> list:
+def date_numero_tiktok(num: str) -> Optional[int]:
+    """La date (s) inscrite dans un numero de video TikTok (ses 32 bits de
+    tete), ou None si ce nombre n'en est pas un."""
+    try:
+        ts = int(num) >> 32
+    except (TypeError, ValueError):
+        return None
+    return ts if 1_450_000_000 < ts < time.time() + 86400 else None
+
+
+def _lister_tiktok_creator(username: str, info: Optional[dict] = None,
+                           chercher: Optional[set] = None) -> list:
     """La liste d'un profil TikTok par /api/creator/item_list, au format des
-    entrées yt-dlp (id, url, view_count, timestamp, title) + « photo »."""
+    entrées yt-dlp (id, url, view_count, timestamp, title) + « photo ».
+
+    `chercher` : des numeros de videos DEJA dans le dossier. La lecture va
+    au-dela des MAX_EXAMINEES dernieres tant qu'il en manque (jusqu'a leur
+    date), et rend celles-la marquees « au_dela » : pour leurs vues seules."""
     import json as _json
     from curl_cffi import requests as _cr
     s = _cr.Session(impersonate="chrome")
@@ -450,7 +470,8 @@ def _lister_tiktok_creator(username: str, info: Optional[dict] = None) -> list:
             "secUid": sec, "region": "FR", "count": PAGE_CREATOR, "type": 1}
     curseur = int(time.time() * 1000)
     vus: Dict[str, dict] = {}
-    for _ in range(MAX_PAGES_CREATOR):
+    chercher = {c for c in (chercher or ()) if date_numero_tiktok(c)}
+    for _ in range(MAX_PAGES_PROFOND if chercher else MAX_PAGES_CREATOR):
         r = s.get("https://www.tiktok.com/api/creator/item_list/",
                   params=dict(base, cursor=curseur), timeout=30,
                   headers={"Referer": f"https://www.tiktok.com/@{username}"})
@@ -467,15 +488,24 @@ def _lister_tiktok_creator(username: str, info: Optional[dict] = None) -> list:
         neufs = [it for it in items if str(it.get("id")) not in vus]
         for it in neufs:
             vus[str(it["id"])] = it
-        if not neufs or not j.get("hasMorePrevious") or len(vus) >= MAX_EXAMINEES:
+        if not neufs or not j.get("hasMorePrevious"):
             break
         # Page suivante : ce qui a été posté avant la plus ancienne reçue.
         curseur = min(int(it.get("createTime") or 0) for it in items) * 1000
+        if len(vus) >= MAX_EXAMINEES:
+            reste = chercher - vus.keys()
+            # plus rien a trouver, ou deja plus ancien que la plus ancienne
+            # cherchee (a un jour pres : elle a ete supprimee du profil)
+            if not reste or curseur < (min(date_numero_tiktok(c) for c in reste) - 86400) * 1000:
+                break
         time.sleep(0.6)
     out = []
-    for vid, it in list(vus.items())[:MAX_EXAMINEES]:
+    for i, (vid, it) in enumerate(vus.items()):
+        au_dela = i >= MAX_EXAMINEES
+        if au_dela and vid not in chercher:
+            continue
         vues = (it.get("stats") or {}).get("playCount")
-        out.append({"id": vid,
+        out.append({"id": vid, "au_dela": au_dela,
                     "url": f"https://www.tiktok.com/@{username}/video/{vid}",
                     "view_count": int(vues) if isinstance(vues, (int, float)) else None,
                     "timestamp": it.get("createTime") or None,
@@ -595,7 +625,7 @@ def _telecharger_direct(url_video: str, cible_sans_ext: Path) -> Path:
 
 
 def _lister(src: dict, bilan: Optional[dict] = None,
-            info: Optional[dict] = None) -> list:
+            info: Optional[dict] = None, chercher: Optional[set] = None) -> list:
     """La liste du profil. TikTok : l'API « creator » d'abord (la seule qui
     réponde depuis le VPS), yt-dlp en secours — tous deux gratuits."""
     if src.get("plateforme") == "instagram":
@@ -603,7 +633,7 @@ def _lister(src: dict, bilan: Optional[dict] = None,
             bilan["source"] = "HikerAPI"
         return _lister_instagram(src.get("username") or "", info)
     try:
-        out = _lister_tiktok_creator(src.get("username") or "", info)
+        out = _lister_tiktok_creator(src.get("username") or "", info, chercher)
         if bilan is not None:
             bilan["source"] = "TikTok"
         return out
@@ -840,7 +870,10 @@ def synchroniser(identite: str, dossier_videos: Path,
         bilan["rapatriees"] = _rapatrier(dossier_videos)
         tmp.mkdir(parents=True, exist_ok=True)
         info: Dict[str, Any] = {}
-        entrees = _lister(src, bilan, info)
+        etrangers = _noms_etrangers(dossier_videos, prefixe)
+        chercher = {n for nom in etrangers
+                    for n in re.findall(r"(?<![A-Za-z0-9])([0-9]{15,20})(?![A-Za-z0-9])", nom)}
+        entrees = _lister(src, bilan, info, chercher)
         if info.get("incomplet"):
             bilan["incomplet"] = info["incomplet"]
         try:
@@ -851,10 +884,9 @@ def synchroniser(identite: str, dossier_videos: Path,
             # raison d'arrêter l'import. Mais ça se dit.
             print(f"[vault-social] {ident} : {err_pp}", flush=True)
         liste_lue = True
-        bilan["examinees"] = len(entrees)
+        bilan["examinees"] = sum(1 for e in entrees if not e.get("au_dela"))
         now = int(time.time())
         a_prendre = []
-        etrangers = _noms_etrangers(dossier_videos, prefixe)
         for e in entrees:
             vid = str(e.get("id") or "")
             if not vid:
@@ -897,6 +929,8 @@ def synchroniser(identite: str, dossier_videos: Path,
                     if _vues_sur_jumeau(dossier_videos, doublons[vid], voisin):
                         bilan["vues_maj"] += 1
                 continue
+            if e.get("au_dela"):
+                continue    # lue pour les vues d'un fichier du dossier, pas a importer
             if vid in photos or e.get("photo") or "/photo/" in (e.get("url") or ""):
                 bilan["photos"] += 1
                 photos.add(vid)

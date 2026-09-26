@@ -14960,7 +14960,7 @@ try:
                     {"id": "3", "view_count": None},
                     {"id": "4", "view_count": 20_000}]
         _vsS._lister_tiktok = lambda url: [dict(e) for e in _profilS]
-        _vsS._lister_tiktok_creator = lambda u, info=None: [dict(e) for e in _profilS]
+        _vsS._lister_tiktok_creator = lambda u, info=None, chercher=None: [dict(e) for e in _profilS]
         _ratesS = set()
 
         def _dlS(url, cible):
@@ -15041,17 +15041,17 @@ try:
               not _r5["ok"] and _e5.get("statut") == "erreur"
               and _e5.get("reessai_le") and not _e5.get("echecs"), str(_e5.get("echecs")))
         _vsS._lister_tiktok = lambda url: (_ for _ in ()).throw(RuntimeError("HTTP Error 403"))
-        _vsS._lister_tiktok_creator = lambda u, info=None: (_ for _ in ()).throw(RuntimeError("HTTP Error 403"))
+        _vsS._lister_tiktok_creator = lambda u, info=None, chercher=None: (_ for _ in ()).throw(RuntimeError("HTTP Error 403"))
         _vsS.synchroniser("lea", _dS)
         check("liste refusee : le bilan precedent reste affiche",
               (_vsS.lire("lea").get("bilan") or {}).get("examinees") == len(_profilS))
         _vsS._lister_tiktok = lambda url: [dict(e) for e in _profilS]
-        _vsS._lister_tiktok_creator = lambda u, info=None: [dict(e) for e in _profilS]
+        _vsS._lister_tiktok_creator = lambda u, info=None, chercher=None: [dict(e) for e in _profilS]
         _vsS._telecharger_tiktok = _dlS
         # La liste vient de l'API « creator » de TikTok ; si elle est
         # refusee, yt-dlp prend le relais. Le bandeau dit laquelle a servi.
         _sav_cr = _vsS._lister_tiktok_creator
-        _vsS._lister_tiktok_creator = lambda u, info=None: (
+        _vsS._lister_tiktok_creator = lambda u, info=None, chercher=None: (
             [dict(e) for e in _profilS] + [{"id": "50", "view_count": 90_000, "photo": True}])
         try:
             _b6 = _vsS.synchroniser("lea", _dS)["bilan"]
@@ -15059,7 +15059,7 @@ try:
                   _b6.get("source") == "TikTok" and _b6["examinees"] == len(_profilS) + 1, str(_b6))
             check("un diaporama TikTok est compte comme publication photo",
                   "50" in (_vsS.lire("lea").get("photos") or []))
-            _vsS._lister_tiktok_creator = lambda u, info=None: (_ for _ in ()).throw(RuntimeError("liste refusée"))
+            _vsS._lister_tiktok_creator = lambda u, info=None, chercher=None: (_ for _ in ()).throw(RuntimeError("liste refusée"))
             _b7 = _vsS.synchroniser("lea", _dS)["bilan"]
             check("API creator refusee : yt-dlp prend le relais",
                   _b7.get("source") == "yt-dlp", str(_b7))
@@ -15075,7 +15075,7 @@ try:
         _ppS = []
         _sav_pp = _vsS._poser_avatar
 
-        def _cr_pp(u, info=None):
+        def _cr_pp(u, info=None, chercher=None):
             if info is not None:
                 info["avatar"] = "https://exemple/pp.jpg"
             return [dict(e) for e in _profilS]
@@ -15087,7 +15087,7 @@ try:
                   _ppS == [("lea", "https://exemple/pp.jpg")] and _b9.get("photo"), str(_ppS))
         finally:
             _vsS._poser_avatar = _sav_pp
-            _vsS._lister_tiktok_creator = lambda u, info=None: [dict(e) for e in _profilS]
+            _vsS._lister_tiktok_creator = lambda u, info=None, chercher=None: [dict(e) for e in _profilS]
         (_tmpS / "lea" / "avatar.png").write_bytes(b"x")
         check("une photo deja la n est jamais remplacee (aucun telechargement)",
               _vsS._poser_avatar(_tmpS / "lea", "https://exemple/pp.jpg") == ""
@@ -15262,7 +15262,7 @@ except Exception as _eI:
 # « c est possible de link un truc que j avais deja pour ajouter du content,
 # juste les doublons ca les met pas [...] et si j avais add a la main avant ».
 try:
-    import tempfile as _tfD, pathlib as _plD, json as _jsD, shutil as _shD, subprocess as _spD
+    import tempfile as _tfD, pathlib as _plD, json as _jsD, shutil as _shD, subprocess as _spD, sys as _sysD
     import vault_social as _vsD
     import empreintes_video as _evD
     _tmpD = _plD.Path(_tfD.mkdtemp())
@@ -15301,7 +15301,7 @@ try:
                      check=True, capture_output=True)
         _video(_dD / "IMG_1.mp4", "testsrc")                       # depose a la main
         _profilD = [{"id": "111", "view_count": 50_000}, {"id": "222", "view_count": 40_000}]
-        _vsD._lister_tiktok_creator = lambda u, info=None: [dict(e) for e in _profilD]
+        _vsD._lister_tiktok_creator = lambda u, info=None, chercher=None: [dict(e) for e in _profilD]
 
         def _dlD(url, cible):
             p = cible.with_suffix(".mp4")
@@ -15336,7 +15336,9 @@ try:
         (_dD / "lea_71299739739825635921.mp4").write_bytes(b"x" * 100)   # numero PLUS long
         _profilD += [{"id": "7129973973982563590", "view_count": 30_000},
                      {"id": "7129973973982563591", "view_count": 500},
-                     {"id": "7129973973982563592", "view_count": 800}]
+                     {"id": "7129973973982563592", "view_count": 800},
+                     # lue au-dela des 600 dernieres : pour des vues, jamais importee
+                     {"id": "7129973973982563599", "view_count": 90_000, "au_dela": True}]
         _dlN = []
         _vsD._telecharger_tiktok = lambda url, cible: (_dlN.append(cible.name), _dlD(url, cible))[1]
         _bN = _vsD.synchroniser("lea", _dD)["bilan"]
@@ -15358,6 +15360,51 @@ try:
               and _vsD._porte_le_numero(_nomsN, "ZZZZZZZZZZZ", "3947905023860089063") == _nomsN[0]
               and _vsD._porte_le_numero(_nomsN, "bJxrPKKSD") is None
               and _vsD._porte_le_numero(_nomsN, "2026") is None)
+        # au-dela des 600 dernieres, la lecture va chercher les numeros du dossier
+        import types as _tyP
+        _t0P = int(__import__("time").time()) - 3600
+        _profP = [{"id": str(((_t0P - _i * 86400) << 32) | 7), "createTime": _t0P - _i * 86400,
+                   "stats": {"playCount": 1000 + _i}, "desc": ""} for _i in range(1000)]
+        _pagesP = []
+
+        class _SessP:
+            def __init__(self, impersonate=None):
+                pass
+
+            def get(self, url, params=None, timeout=None, headers=None):
+                if "item_list" not in url:
+                    _dP = {"__DEFAULT_SCOPE__": {"webapp.user-detail": {"userInfo": {"user": {"uniqueId": "pp", "secUid": "S"}}}}}
+                    return _tyP.SimpleNamespace(status_code=200, text='<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" '
+                                                'type="application/json">' + _jsD.dumps(_dP) + "</script>")
+                _pagesP.append(1)
+                _itP = [v for v in _profP if v["createTime"] < params["cursor"] // 1000][:15]
+                return _tyP.SimpleNamespace(status_code=200, text=_jsD.dumps(
+                    {"itemList": _itP, "hasMorePrevious": len(_itP) == 15}))
+        _savP = (_sysD.modules.get("curl_cffi"), _vsD.time)
+        _sysD.modules["curl_cffi"] = _tyP.SimpleNamespace(requests=_tyP.SimpleNamespace(Session=_SessP))
+        import time as _tmP
+        _vsD.time = _tyP.SimpleNamespace(time=_tmP.time, sleep=lambda s: None)
+        try:
+            _lP0 = _savD[1]("pp", {})
+            _nP0 = len(_pagesP); _pagesP.clear()
+            _lP1 = _savD[1]("pp", {}, {_profP[700]["id"], "12345"})
+            _nP1 = len(_pagesP); _pagesP.clear()
+            _absentP = str((_profP[800]["createTime"] << 32) | 3)     # supprimee du profil
+            _lP2 = _savD[1]("pp", {}, {_absentP})
+            _nP2 = len(_pagesP)
+        finally:
+            if _savP[0] is None:
+                _sysD.modules.pop("curl_cffi", None)
+            else:
+                _sysD.modules["curl_cffi"] = _savP[0]
+            _vsD.time = _savP[1]
+        check("profil : sans numero a chercher, les 600 dernieres seulement",
+              len(_lP0) == 600 and not any(e["au_dela"] for e in _lP0) and _nP0 == 40, str((len(_lP0), _nP0)))
+        check("profil : une video du dossier plus ancienne est retrouvee, marquee au-dela, lecture arretee la",
+              len(_lP1) == 601 and [e["id"] for e in _lP1 if e["au_dela"]] == [_profP[700]["id"]]
+              and _nP1 == 47, str((len(_lP1), _nP1)))
+        check("profil : un numero absent du profil n emmene pas plus loin que sa date",
+              len(_lP2) == 600 and 53 <= _nP2 <= 55, str((len(_lP2), _nP2)))
         # debrancher en pleine relecture ARRETE l import
         _dS = _tmpD / "stp" / _vsD.SOUS_DOSSIER
         _dS.mkdir(parents=True)
@@ -15372,7 +15419,7 @@ try:
             _pS = cible.with_suffix(".mp4")
             _pS.write_bytes(b"x")
             return _pS
-        _vsD._lister_tiktok_creator = lambda u, info=None: [{"id": str(900 + i), "view_count": 1000} for i in range(25)]
+        _vsD._lister_tiktok_creator = lambda u, info=None, chercher=None: [{"id": str(900 + i), "view_count": 1000} for i in range(25)]
         _vsD._telecharger_tiktok = _dlS
         try:
             _rS = _vsD.synchroniser("stp", _dS)
