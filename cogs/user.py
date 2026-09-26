@@ -9439,6 +9439,84 @@ def _emojis_du_serveur(guild) -> dict:
     return have
 
 
+def _emojis_utiles_noms() -> set:
+    """Les noms d'emoji que CE bot doit garder, sur n'importe quel serveur :
+    la photo de chaque model proposee (marches US ET FR -- un VA FR peut
+    avoir son menu FR sur le serveur US, marche_du_membre), celle de chaque
+    reserve liee, et les icones d'actions. Tout le reste de SES emojis « id* »
+    et « va* » ne sert plus. None si la liste est illisible : alors on ne
+    sait pas ce qui sert, et on ne supprime rien."""
+    garder = set(_ICONES_ACTIONS.values())
+    try:
+        import type_identite as _ti
+        idents = set()
+        for mk in ("us", "fr"):
+            for m in _jb_models_marche(mk):
+                idents.add(m)
+                try:
+                    idents.update(_ti.reserves_liees(m)[0])
+                except Exception:                            # noqa: BLE001
+                    pass
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("emojis : liste des identites illisible, aucun menage (%s: %s)",
+                    type(e).__name__, e)
+        return None
+    if not idents:
+        # Une liste VIDE ressemble a une panne de lecture bien plus qu'a un
+        # serveur sans aucune model : on ne vide pas le serveur sur ce signe.
+        log.warning("emojis : aucune model lue, aucun menage")
+        return None
+    garder.update(_identity_emoji_name(i) for i in idents)
+    return garder
+
+
+async def _liberer_emojis(guild, combien: int) -> int:
+    """Supprime jusqu'a `combien` emojis DE CE BOT qui ne servent plus.
+
+    26/09/2026 : le serveur US etait plein (50/50) et Discord refusait les
+    icones des reserves (« Maximum number of emojis reached ») -- le ✨ General
+    affichait « Brune » sans son icone. Des places etaient prises par des
+    emojis morts : Jessye (hors menu), d'anciens noms (« mxckeymeijii »,
+    « nanasnyspam », un « idhttpswwwtiktokcom… »), l'icone d'un bouton retire.
+
+    GARDE-FOUS : seuls les emojis « id* » / « va* » CREES PAR CE BOT (lus par
+    fetch_emojis, qui donne l'auteur) et absents de _emojis_utiles_noms. Un
+    emoji pose a la main par un membre, ou d'auteur inconnu, n'est jamais
+    touche. Chaque suppression est journalisee. -> nombre supprime."""
+    if guild is None or combien <= 0:
+        return 0
+    garder = _emojis_utiles_noms()
+    if garder is None:
+        return 0
+    moi = getattr(getattr(guild, "me", None), "id", None)
+    try:
+        tous = await guild.fetch_emojis()
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("emojis : lecture impossible, aucun menage (%s: %s)",
+                    type(e).__name__, e)
+        return 0
+    morts = [e for e in tous
+             if e.name.startswith(("id", "va")) and e.name not in garder
+             and moi is not None and getattr(getattr(e, "user", None), "id", None) == moi]
+    morts.sort(key=lambda e: e.name)       # menage reproductible
+    faits = 0
+    for e in morts[:combien]:
+        try:
+            await e.delete(reason="emoji du bot qui ne sert plus (place pour une icone)")
+            _EMOJIS_CREES.pop((getattr(guild, "id", None), e.name), None)
+            faits += 1
+            log.info("emojis : %s supprime (ne sert plus) sur %s", e.name,
+                     getattr(guild, "name", "?"))
+        except Exception as ex:                              # noqa: BLE001
+            log.warning("emojis : %s non supprime (%s: %s)", e.name,
+                        type(ex).__name__, ex)
+    if faits < combien:
+        log.warning("emojis : %d place(s) demandee(s), %d liberee(s) sur %s -- "
+                    "le reste est pris par des emojis utiles ou poses a la main",
+                    combien, faits, getattr(guild, "name", "?"))
+    return faits
+
+
 async def ensure_identity_emojis(guild, models, raison="PP de la model dans le menu"):
     """Crée (une seule fois) un emoji serveur par identite a partir de sa PP
     (avatar.*, sinon sa 1re profile_pic), pour l'afficher dans les menus.
@@ -9451,6 +9529,20 @@ async def ensure_identity_emojis(guild, models, raison="PP de la model dans le m
     if guild is None:
         return out
     have = _emojis_du_serveur(guild)
+    # PLACE D'ABORD : un serveur plein refusait chaque creation, a chaque
+    # redessin, sans que rien ne change (voir _liberer_emojis). On compte ce
+    # qui manque et on fait la place une fois, avant la boucle.
+    manquants = [m for m in models
+                 if _identity_emoji_name(m) not in have and _identity_pp_file(m)]
+    try:
+        limite = int(getattr(guild, "emoji_limit", 50) or 50)
+        statiques = sum(1 for e in (getattr(guild, "emojis", None) or [])
+                        if not getattr(e, "animated", False))
+        manque_place = len(manquants) - max(0, limite - statiques)
+    except Exception:                                        # noqa: BLE001
+        manque_place = 0
+    if manquants and manque_place > 0:
+        await _liberer_emojis(guild, manque_place)
     for m in models:
         name = _identity_emoji_name(m)
         if name in have:
@@ -9469,8 +9561,16 @@ async def ensure_identity_emojis(guild, models, raison="PP de la model dans le m
             data = buf.getvalue()
             if len(data) > 256000:            # limite Discord
                 continue
-            out[m] = await guild.create_custom_emoji(
-                name=name, image=data, reason=raison)
+            try:
+                out[m] = await guild.create_custom_emoji(
+                    name=name, image=data, reason=raison)
+            except discord.HTTPException as e:
+                # 30008 = serveur plein alors que notre compte disait le
+                # contraire (cache en retard) : une place, un second essai.
+                if getattr(e, "code", None) != 30008 or not await _liberer_emojis(guild, 1):
+                    raise
+                out[m] = await guild.create_custom_emoji(
+                    name=name, image=data, reason=raison)
             _EMOJIS_CREES[(getattr(guild, "id", None), name)] = (out[m], time.monotonic())
             have[name] = out[m]
         except Exception as e:
@@ -11537,8 +11637,10 @@ def _jb_general(cog, model, qty=_JB_QTE_DEFAUT, reserve=None, guild=None):
                             logging.WARNING)
     rangees = []
     haut = ui.ActionRow()
+    _emo_res = _jb_emojis_presents(guild, montrees) if guild is not None else {}
     for r in montrees:
-        haut.add_item(JBGenReserveBouton(model, r, qty, active=(r == active)))
+        haut.add_item(JBGenReserveBouton(model, r, qty, active=(r == active),
+                                         emoji=_emo_res.get(r)))
     haut.add_item(JBGenQtyBouton(model, active, qty))
     rangees.append(haut)
     _ic = icones_actions(guild)          # lecture seule : rien sur le reseau
@@ -11920,12 +12022,15 @@ class JBGenReserveBouton(discord.ui.DynamicItem[discord.ui.Button],
     """Choix de la reserve active, quand une model en a plusieurs. Une seule
     a la fois : les fonctions de tirage ne prennent qu'une identite."""
 
-    def __init__(self, model, res, qty, active=False):
+    def __init__(self, model, res, qty, active=False, emoji=None):
         self.model = (model or "_").lower()
         self.res = (res or "_").lower()
         self.qty = int(qty)
+        # L'icone de la reserve a cote de son nom, comme dans l'en-tete
+        # (demande du proprietaire, 26/09/2026). from_custom_id ne la repasse
+        # pas : ce chemin ne sert qu'a repondre au clic.
         super().__init__(discord.ui.Button(
-            label=_couper_discord(self.res.capitalize(), 80),
+            label=_couper_discord(self.res.capitalize(), 80), emoji=emoji,
             style=(discord.ButtonStyle.success if active
                    else discord.ButtonStyle.secondary), row=0,
             custom_id=f"jbg:r:{self.model}:{self.res}:{self.qty}"))

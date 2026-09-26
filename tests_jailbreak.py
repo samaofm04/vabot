@@ -11191,6 +11191,109 @@ finally:
 check("menus epures : aucune ecriture dans data/",
       len(_V2_AUDIT["ecrits"]) == _nEcritsEP, str(_V2_AUDIT["ecrits"][_nEcritsEP:][:5]))
 
+
+# ---------------------------------------------------------------------------
+# Serveur plein (26/09/2026) : le serveur US etait a 50/50 emojis et Discord
+# refusait les icones des reserves -- « Brune » sans icone dans le ✨ General.
+# Le bot fait de la place en supprimant SES emojis qui ne servent plus.
+print()
+print("=" * 70)
+print("Emojis : serveur plein, menage des emojis du bot devenus inutiles")
+print("=" * 70)
+try:
+    import asyncio as _aEM
+    import types as _tyEM
+    import discord as _dEM
+    import cogs.user as _uEM
+
+    class _EmoEM:
+        def __init__(self, nom, auteur, animated=False):
+            self.name = nom
+            self.user = _tyEM.SimpleNamespace(id=auteur) if auteur else None
+            self.animated = animated
+            self.id = abs(hash(nom)) % 10 ** 9
+            self.supprime = False
+        async def delete(self, reason=None):
+            self.supprime = True
+            _GuildEM.courant.emojis = [e for e in _GuildEM.courant.emojis if e is not self]
+        def __str__(self):
+            return "<:%s:%d>" % (self.name, self.id)
+
+    class _GuildEM:
+        courant = None
+        def __init__(self, emojis, limite=50):
+            self.id = 1535758943324999711
+            self.name = "Youl4b"
+            self.me = _tyEM.SimpleNamespace(id=42)
+            self.emojis = list(emojis)
+            self.emoji_limit = limite
+            self.crees = []
+            _GuildEM.courant = self
+        async def fetch_emojis(self):
+            return list(self.emojis)
+        async def create_custom_emoji(self, name, image, reason=None):
+            if sum(1 for e in self.emojis if not e.animated) >= self.emoji_limit:
+                raise _dEM.HTTPException(_tyEM.SimpleNamespace(status=400, reason="x"),
+                                         {"code": 30008, "message": "Maximum number of emojis reached (50)"})
+            e = _EmoEM(name, 42)
+            self.emojis.append(e)
+            self.crees.append(name)
+            return e
+
+    _savEM = (_uEM._jb_models_marche, _uEM._identity_pp_file, dict(_uEM._EMOJIS_CREES))
+    _modelsEM = {"us": ["ema_bb0", "e30princesss"], "fr": ["julia"]}
+    _uEM._jb_models_marche = lambda mk="us": list(_modelsEM.get(mk, []))
+    _uEM._identity_pp_file = lambda i: pathlib.Path("noctus/fonts/Inter-Bold.ttf")  # remplace ci-dessous
+    import tempfile as _tfEM
+    from PIL import Image as _ImEM
+    _pngEM = pathlib.Path(_tfEM.mkdtemp()) / "pp.png"
+    _ImEM.new("RGB", (64, 64), (200, 150, 90)).save(_pngEM)
+    _uEM._identity_pp_file = lambda i: _pngEM
+    import type_identite as _tiEM
+    _savTiEM = _tiEM.reserves_liees
+    _tiEM.reserves_liees = lambda m: ((["brune"] if m == "e30princesss" else []), [])
+    try:
+        _utiles = ["idema_bb0", "ide30princesss", "idjulia"] + sorted(set(_uEM._ICONES_ACTIONS.values()))
+        _morts = ["idjessye", "idmxckeymeijii", "idnanasnyspam", "vacaptionbrut"]
+        _etranger = ["idmain", "vafait_main"]           # poses par un membre
+        _remplir = ["zz%02d" % i for i in range(50)]
+        _emEM = ([_EmoEM(n, 42) for n in _utiles + _morts] + [_EmoEM(n, 7) for n in _etranger])
+        _emEM += [_EmoEM(n, 7) for n in _remplir[: 50 - len(_emEM)]]
+        _gEM = _GuildEM(_emEM)
+        _uEM._EMOJIS_CREES.clear()
+        _outEM = _aEM.run(_uEM.ensure_identity_emojis(_gEM, ["brune"], raison="test"))
+        _noms = {e.name for e in _gEM.emojis}
+        check("emojis : serveur plein -> l'icone de la reserve est creee quand meme",
+              "brune" in _outEM and "idbrune" in _gEM.crees, str(_gEM.crees))
+        check("emojis : une seule place faite, prise dans les emojis morts du bot",
+              len(_noms & set(_morts)) == len(_morts) - 1, str(sorted(set(_morts) - _noms)))
+        check("emojis : jamais un emoji utile (models US ET FR, icones d'actions)",
+              set(_utiles) <= _noms, str(set(_utiles) - _noms))
+        check("emojis : jamais un emoji pose par un membre",
+              set(_etranger) <= _noms)
+        # Liste des models illisible -> aucun menage.
+        _uEM._jb_models_marche = lambda mk="us": (_ for _ in ()).throw(RuntimeError("x"))
+        _gEM2 = _GuildEM([_EmoEM(n, 42) for n in _morts] + [_EmoEM(n, 7) for n in _remplir[:46]])
+        check("emojis : liste des models illisible -> rien n'est supprime",
+              _aEM.run(_uEM._liberer_emojis(_gEM2, 3)) == 0
+              and all(not e.supprime for e in _gEM2.emojis))
+        _uEM._jb_models_marche = lambda mk="us": []
+        check("emojis : liste des models VIDE -> rien n'est supprime (pas de vidage sur une panne)",
+              _aEM.run(_uEM._liberer_emojis(_gEM2, 3)) == 0)
+    finally:
+        _uEM._jb_models_marche, _uEM._identity_pp_file = _savEM[0], _savEM[1]
+        _uEM._EMOJIS_CREES.clear(); _uEM._EMOJIS_CREES.update(_savEM[2])
+        _tiEM.reserves_liees = _savTiEM
+    # L'icone de la reserve sur son bouton de choix (✨ General).
+    _eBt = _dEM.PartialEmoji(name="idbrune", id=123456789)
+    _bBt = _uEM.JBGenReserveBouton("e30princesss", "brune", 5, active=True, emoji=_eBt)
+    check("emojis : le bouton de reserve du General porte son icone",
+          getattr(_bBt.item.emoji, "name", None) == "idbrune", repr(_bBt.item.emoji))
+except Exception as _eEM:
+    import traceback as _tbEM
+    check("emojis serveur plein : testable", False,
+          repr(_eEM)[:200] + " " + _tbEM.format_exc()[-500:])
+
 if FAILS:
     print("ECHECS :")
     for f in FAILS:
