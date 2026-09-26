@@ -2136,89 +2136,158 @@ def _est_salon_menu(ch) -> bool:
         return False
 
 
-class _RedirectFollowup:
-    """followup.send qui route les messages NON-éphémères vers un autre salon.
+#: Ce que TextChannel.send accepte parmi les arguments d'une reponse ou d'un
+#: suivi d'interaction. Les autres (« ephemeral », « wait », « username »…)
+#: n'ont pas de sens pour un message de salon, et TextChannel.send leverait.
+_KW_SALON = frozenset({"tts", "embed", "embeds", "file", "files", "stickers",
+                       "delete_after", "nonce", "allowed_mentions", "reference",
+                       "mention_author", "view", "suppress_embeds", "silent",
+                       "poll"})
+#: Retires sans rien dire : ils ne decrivent que la facon de repondre a
+#: l'interaction, pas le message.
+_KW_INTERACTION = frozenset({"ephemeral", "wait", "thinking"})
 
-    Les éphémères, eux, ne s'EMPILENT plus : le premier devient LE message,
-    les suivants l'éditent. Le salon -menu restait sinon jonché de « Aucun
-    story… » et « Direction #content » a chaque clic."""
+
+async def _envoyer_salon(salon, content, kw):
+    """Poste dans `salon` ce qu'une commande voulait envoyer par
+    l'interaction. Un argument inconnu est retire ET journalise : le taire
+    ferait chercher pourquoi une option n'a pas suivi."""
+    inconnus = sorted(k for k in kw if k not in _KW_SALON and k not in _KW_INTERACTION)
+    if inconnus:
+        log.warning("envoi redirige vers #%s : argument(s) ignore(s) %s",
+                    getattr(salon, "name", "?"), ", ".join(inconnus))
+    kw = {k: v for k, v in kw.items() if k in _KW_SALON}
+    if content is None:
+        return await salon.send(**kw)
+    return await salon.send(content, **kw)
+
+
+class _RedirectFollowup:
+    """followup.send d'un clic dans les messages du salon -menu (serveur US).
+
+    TOUT PART DANS LE SALON -content, ephemeres compris (26/09/2026). Le
+    proprietaire : « a part ces messages, il n'y a rien qui se passe ; s'il y
+    a des messages, ils se trouvent dans le content ». Avant, seul le contenu
+    y partait ; les « Aucun story… », les erreurs et le menu « Choisir ma
+    brute » restaient en ephemere sous les menus.
+
+    Sans -content (`target` None) : repli en ephemere, jamais dans le salon
+    -menu. Les ephemeres d'information ne s'y EMPILENT pas : le premier
+    devient LE message, les suivants l'editent -- par son propre id. L'edition
+    passait par @original : apres un accuse de composant (defer sans
+    « réfléchit… »), @original designe le message DU CLIC, et c'est le menu
+    lui-meme qui aurait pris le texte."""
     def __init__(self, real_followup, target_channel, interaction=None):
         self._real = real_followup
         self._target = target_channel
         self._itx = interaction
-        self._pose = False
+        self._eph = None
 
     async def send(self, content=None, **kw):
-        if kw.get("ephemeral"):
-            if self._itx is not None and self._pose:
-                # deja un message prive affiche -> on le remplace
-                garde = {k: v for k, v in kw.items()
-                         if k in ("embed", "embeds", "view", "attachments")}
-                try:
-                    return await self._itx.edit_original_response(
-                        content=content, **garde)
-                except Exception:
-                    pass
-            self._pose = True
+        if self._target is not None:
+            return await _envoyer_salon(self._target, content, kw)
+        info = bool(kw.get("ephemeral"))
+        kw["ephemeral"] = True
+        if info and self._eph is not None and not (kw.get("file") or kw.get("files")):
+            garde = {k: v for k, v in kw.items() if k in ("embed", "embeds", "view")}
+            try:
+                return await self._eph.edit(content=content, **garde)
+            except Exception as e:                           # noqa: BLE001
+                log.info("message ephemere non remplace (%s: %s), nouveau "
+                         "message", type(e).__name__, e)
+        if not info:
+            # Du CONTENU (video, texte a copier) : jamais remplace par le
+            # message suivant, il part a part.
             return await self._real.send(content, **kw)
-        if self._target is None:
-            # Aucun -content trouve : plutot que de polluer le salon -menu
-            # (qui ne doit contenir QUE les deux menus), on repond en prive.
-            kw["ephemeral"] = True
-            return await self._real.send(content, **kw)
-        kw.pop("ephemeral", None)
-        kw.pop("wait", None)  # kwarg webhook, inconnu de TextChannel.send
-        if content is None:
-            return await self._target.send(**kw)
-        return await self._target.send(content, **kw)
+        kw["wait"] = True
+        m = await self._real.send(content, **kw)
+        self._eph = m
+        return m
 
     def __getattr__(self, name):
         return getattr(self._real, name)
 
 
 class _RedirectResponse:
-    """`interaction.response.send_message` qui route le NON-éphémère vers le
-    salon -content.
+    """`interaction.response` d'un clic dans les messages du salon -menu
+    (serveur US) : tout ce qu'une commande y envoie part dans le salon
+    -content, ephemere ou non (voir _RedirectFollowup).
 
     Le proxy ne couvrait que `followup` : les commandes qui repondent
     directement (77 appels dans ce fichier, dont les bios) deversaient leur
-    contenu dans le salon -menu. On accuse reception de l'interaction par un
-    defer ephemere, puis on ecrit dans le bon salon."""
+    contenu dans le salon -menu.
+
+    L'ACCUSE DE RECEPTION EST SILENCIEUX : defer() de composant, sans
+    « réfléchit… » -- le -menu ne doit rien afficher d'autre que ses trois
+    messages. Une commande qui demande `thinking` n'a rien a attendre ici :
+    sa reponse part dans un autre salon, le message d'attente resterait
+    affiche pour toujours."""
     def __init__(self, real_response, target_channel, interaction):
         self._real = real_response
         self._target = target_channel
         self._itx = interaction
 
-    async def send_message(self, content=None, **kw):
-        if kw.get("ephemeral"):
-            return await self._real.send_message(content, **kw)
-        kw.pop("ephemeral", None)
+    async def defer(self, **kw):
+        if self._target is None:
+            return await self._real.defer(**kw)
+        if self._real.is_done():
+            return None
         try:
-            if not self._real.is_done():
-                await self._real.defer(ephemeral=True)
-        except Exception:
-            pass
-        if self._target is None:      # pas de -content : surtout pas ici
-            return await self._itx.followup.send(content, ephemeral=True, **kw)
-        kw.pop("wait", None)
-        if content is None:
-            return await self._target.send(**kw)
-        return await self._target.send(content, **kw)
+            return await self._real.defer()
+        except Exception as e:                               # noqa: BLE001
+            # Le contenu part quand meme dans le -content : il ne depend pas
+            # de l'interaction. Le VA lira « l'interaction a echoue ».
+            log.warning("clic redirige vers #%s : accuse de reception refuse "
+                        "(%s: %s)", getattr(self._target, "name", "?"),
+                        type(e).__name__, e)
+            return None
+
+    async def send_message(self, content=None, **kw):
+        if self._target is None:
+            # Pas de -content : surtout pas dans le salon -menu -> en prive.
+            kw["ephemeral"] = True
+            return await self._real.send_message(content, **kw)
+        await self.defer()
+        return await _envoyer_salon(self._target, content, kw)
 
     def __getattr__(self, name):
         return getattr(self._real, name)
 
 
 class _JBRedirect:
-    """Proxy d'interaction pour le menu Jailbreak du serveur US : le contenu
-    généré part dans le salon -content du membre (le salon -menu reste vierge).
-    Tout le reste (response.defer, user, guild…) est délégué tel quel."""
+    """Proxy d'interaction pour les messages du salon -menu du serveur US :
+    le contenu genere ET les messages (refus, stock vide, erreurs) partent
+    dans le salon -content du membre -- le salon -menu reste vierge. Tout le
+    reste (user, guild, send_modal…) est delegue tel quel."""
     def __init__(self, interaction, target_channel):
         object.__setattr__(self, "_itx", interaction)
+        object.__setattr__(self, "_target", target_channel)
         object.__setattr__(self, "followup", _RedirectFollowup(
             interaction.followup, target_channel, interaction))
         object.__setattr__(self, "response", _RedirectResponse(
             interaction.response, target_channel, interaction))
+
+    # APRES UN ACCUSE SILENCIEUX, @original EST LE MESSAGE DU CLIC : le menu,
+    # le panneau ou le ✨ General. Editer ou supprimer « la reponse » les
+    # toucherait eux. Aucune commande ne le fait aujourd'hui ; celle qui le
+    # ferait demain ecrit dans le -content, et le journal le dit.
+    async def edit_original_response(self, **kw):
+        cible = object.__getattribute__(self, "_target")
+        if cible is None:
+            return await object.__getattribute__(self, "_itx").edit_original_response(**kw)
+        log.warning("clic redirige : edit_original_response detourne vers #%s "
+                    "(il aurait edite le message du salon -menu)",
+                    getattr(cible, "name", "?"))
+        kw.pop("attachments", None)
+        return await _envoyer_salon(cible, kw.pop("content", None), kw)
+
+    async def delete_original_response(self):
+        cible = object.__getattribute__(self, "_target")
+        if cible is None:
+            return await object.__getattribute__(self, "_itx").delete_original_response()
+        log.warning("clic redirige : delete_original_response ignore (il aurait "
+                    "supprime le message du salon -menu)")
+        return None
 
     def __getattr__(self, name):
         return getattr(object.__getattribute__(self, "_itx"), name)
@@ -4719,6 +4788,15 @@ class UserCog(commands.Cog):
             await ensure_action_emojis(guild)
         except Exception:
             pass
+        # Et la photo de chaque RESERVE liee, pour l'en-tete du ✨ General
+        # (« <photo> Brune ») : un rafraichissement des menus (maj_menu_marche)
+        # passe par ici sans reposer le General. Serveur US seulement ; sans
+        # effet si elles existent deja.
+        try:
+            await ensure_reserve_emojis(guild)
+        except Exception as e:                               # noqa: BLE001
+            log.warning("menu des models : emojis des reserves non poses (%s: %s)",
+                        type(e).__name__, e)
         return None, JailbreakModelsView(models, emojis=emojis, marche=marche,
                                          guild=guild)
 
@@ -5035,7 +5113,12 @@ class UserCog(commands.Cog):
                     itx = _JBRedirect(interaction, target)
                 elif _est_salon_menu(getattr(interaction, "channel", None)):
                     # salon -menu sans -content identifiable : on n'y publie
-                    # rien, tout repart en ephemere
+                    # rien, tout repart en ephemere -- et le journal le dit,
+                    # sinon personne ne saurait pourquoi ce VA voit ses
+                    # messages sous le menu au lieu de son -content.
+                    log.info("#%s : pas de salon -content trouve, le contenu et "
+                             "les messages partent en ephemere",
+                             getattr(interaction.channel, "name", "?"))
                     itx = _JBRedirect(interaction, None)
                     target = None
                 else:
@@ -8260,6 +8343,10 @@ _JB_QTY_OPTIONS = [1, 3, 5, 10, 15, 20, 30, 50, 60]
 # liste des valeurs proposees.
 _JB_QTY_AUTRE = "__autre__"
 _JB_QTY_MAX = 100          # garde-fou de saisie ; le stock de la model plafonne ensuite
+#: La quantite d'un panneau (ou d'un ✨ General) pose ou redessine sans
+#: quantite connue : un clic sur une model, un salon remis a neuf. Etait 3 ;
+#: le proprietaire, le 26/09/2026 : « par défaut on va dire que c'est 5 ».
+_JB_QTE_DEFAUT = 5
 
 
 def _jb_qty_options(courante: int) -> list:
@@ -8296,13 +8383,14 @@ class _JBQtyModal(discord.ui.Modal, title="Quantité par action"):
             q = int(brut)
         except ValueError:
             # On repete ce qui a ete tape : « nombre invalide » tout court
-            # laisse chercher ce qui n allait pas.
-            await interaction.response.send_message(
-                f"« {brut} » n'est pas un nombre.", ephemeral=True)
+            # laisse chercher ce qui n allait pas. Dans le -content, pas sous
+            # les menus (_jb_dire) ; en prive hors serveur US.
+            await _jb_dire(interaction, f"« {brut} » n'est pas un nombre.",
+                           "quantite")
             return
         if not 1 <= q <= _JB_QTY_MAX:
-            await interaction.response.send_message(
-                f"Choisis un nombre entre 1 et {_JB_QTY_MAX}.", ephemeral=True)
+            await _jb_dire(interaction, f"Choisis un nombre entre 1 et {_JB_QTY_MAX}.",
+                           "quantite")
             return
         await self._suite(interaction, q)
 
@@ -8622,6 +8710,104 @@ async def _jb_accuser(interaction, quoi="clic") -> bool:
         return False
 
 
+# ---------------------------------------------------------------------------
+# LES MESSAGES D'UN CLIC PARTENT DANS LE SALON -content (26/09/2026).
+#
+# Le proprietaire : « a part ces messages [menu des models, panneau
+# d'actions, ✨ General], il n'y a rien qui se passe. Et s'il y a des
+# messages, ils se trouvent dans le content. » Refus, model absente, action
+# indisponible, stock vide, erreur, panneau de secours : rien ne s'affiche
+# plus sous les menus, pas meme en ephemere. Le clic est acquitte en silence
+# (defer de composant, pas de « réfléchit… ») et le texte part dans le
+# -content du dossier -- le salon ou arrive deja le contenu (_run_for_model).
+#
+# Hors serveur US, ou sans -content trouvable : repli en ephemere, comme
+# avant, et le journal le dit.
+
+def _jb_cible_content(interaction):
+    """Le salon -content ou dire ce qu'un clic a a dire, ou None.
+
+    La MEME recherche que celle du contenu (_us_content_target, dans
+    _run_for_model) : un refus et la video qu'il remplace arrivent au meme
+    endroit. None hors serveur US, sans -content, ou quand le clic vient deja
+    du -content (un panneau de secours y est poste) : le repli ephemere y est
+    deja « dans le content »."""
+    try:
+        import guild_features as gf
+        if not gf.is_us_guild(getattr(interaction, "guild", None)):
+            return None
+        cible = _us_content_target(interaction)
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("salon -content introuvable (%s: %s)", type(e).__name__, e)
+        return None
+    if cible is None:
+        return None
+    if getattr(cible, "id", None) == getattr(getattr(interaction, "channel", None), "id", None):
+        return None
+    return cible
+
+
+async def _jb_dire(interaction, texte, quoi="clic", **kw) -> str:
+    """Dit `texte` (et/ou `view=`…) au VA qui a clique dans un des messages
+    du salon -menu : dans son salon -content, apres un accuse de reception
+    silencieux.
+
+    Repli, journalise : en ephemere (reponse si l'interaction n'a pas encore
+    repondu, suivi sinon). Ne leve jamais : un message qui ne passe pas est
+    ecrit au journal, avec son texte. -> ou il est parti : « content »,
+    « ephemere », ou « » (nulle part -- l'appelant peut le dire mieux)."""
+    cible = _jb_cible_content(interaction)
+    if cible is not None:
+        # Poster dans un autre salon ne repond pas au clic : sans accuse,
+        # Discord afficherait « l'interaction a echoue » sous le menu.
+        await _jb_accuser(interaction, quoi)
+        try:
+            if texte is None:
+                await cible.send(**kw)
+            else:
+                await cible.send(texte, **kw)
+            return "content"
+        except Exception as e:                               # noqa: BLE001
+            log.warning("%s : message non poste dans #%s (%s: %s) -- repli en "
+                        "ephemere", quoi, getattr(cible, "name", "?"),
+                        type(e).__name__, e)
+    else:
+        log.info("%s : pas de salon -content pour ce clic (#%s), message en "
+                 "ephemere", quoi,
+                 getattr(getattr(interaction, "channel", None), "name", "?"))
+    try:
+        if not interaction.response.is_done():
+            await interaction.response.send_message(texte, ephemeral=True, **kw)
+        else:
+            await interaction.followup.send(texte, ephemeral=True, **kw)
+        return "ephemere"
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("%s : message non dit au VA (%s: %s) : %s", quoi,
+                    type(e).__name__, e, str(texte or "")[:200])
+    return ""
+
+
+async def _jb_bouton_lancer(interaction, action, cle, quoi, detail=""):
+    """Lance `action()` (l'action d'un BOUTON du panneau ou du ✨ General)
+    et garantit que le clic est acquitte.
+
+    Une action qui leve remontait a discord.py : le VA lisait « l'interaction
+    a echoue » sous le panneau, rien ne lui disait quoi. L'erreur est
+    journalisee et DITE, dans le -content (_jb_dire). Une action qui n'a
+    pas repondu du tout est acquittee en silence."""
+    try:
+        await action()
+    except Exception as e:                                   # noqa: BLE001
+        log.exception("%s : action %s%s en echec", quoi, cle, detail)
+        await _jb_dire(interaction,
+                       f"❌ **{_libelle_action(cle)}** : erreur ({type(e).__name__}). "
+                       "Réessaie ; si ça recommence, préviens un admin.", quoi)
+        return
+    # Sans effet si l'action a deja repondu (_jb_accuser le regarde lui-meme,
+    # et ne leve jamais).
+    await _jb_accuser(interaction, quoi)
+
+
 async def _jb_menu_remettre(interaction, vue, quoi="panneau") -> bool:
     """Redessine le message du clic avec `vue`, APRES l'action : ses menus
     reprennent leur intitule. Ne leve jamais ; rend True si c'est fait.
@@ -8716,24 +8902,31 @@ async def _jb_menu_deja_redessine(interaction, quoi="panneau") -> bool:
         return False
 
 
-async def _jb_menu_refuser(interaction, texte, vue):
+async def _jb_menu_refuser(interaction, texte, vue, content=False):
     """Refuse un choix de menu : le menu reprend son intitule ET le VA lit
     pourquoi. UNE reponse (l'edition du message), le texte en suivi
     ephemere. Si l'edition est refusee, le texte part en reponse : le VA
-    doit au moins savoir pourquoi rien ne se passe."""
+    doit au moins savoir pourquoi rien ne se passe.
+
+    `content=True` (les trois messages du salon -menu) : le texte part dans
+    le salon -content (_jb_dire), pas sous le menu. Le menu VA garde
+    l'ephemere : il n'est pas concerne."""
     try:
         await interaction.response.edit_message(view=vue)
     except Exception as e:                                   # noqa: BLE001
         log.warning("refus de menu : message non redessine (%s: %s)",
                     type(e).__name__, e)
-        if not interaction.response.is_done():
+        if not interaction.response.is_done() and not content:
             await interaction.response.send_message(texte, ephemeral=True)
             return
+    if content:
+        await _jb_dire(interaction, texte, "refus de menu")
+        return
     await interaction.followup.send(texte, ephemeral=True)
 
 
 async def _jb_menu_lancer(interaction, cog, model, cle, cmd, supports_count,
-                          qty, vue, tache, quoi):
+                          qty, vue, tache, quoi, content=False):
     """Lance l'action choisie dans un menu du panneau, EXACTEMENT comme son
     bouton (_run_for_model), puis s'assure que le menu reprend son intitule
     (_menu_lancer)."""
@@ -8741,10 +8934,11 @@ async def _jb_menu_lancer(interaction, cog, model, cle, cmd, supports_count,
         interaction,
         lambda: cog._run_for_model(interaction, model, cmd, count=qty,
                                    supports_count=supports_count),
-        cle, vue, tache, quoi, detail=f" pour {model}")
+        cle, vue, tache, quoi, detail=f" pour {model}", content=content)
 
 
-async def _menu_lancer(interaction, action, cle, vue, tache, quoi, detail=""):
+async def _menu_lancer(interaction, action, cle, vue, tache, quoi, detail="",
+                       content=False):
     """Lance `action()` (la coroutine de la variante choisie dans un menu
     deroulant), puis s'assure que le menu reprend son intitule. Sert le
     panneau US, le panneau ephemere et le menu VA.
@@ -8756,7 +8950,9 @@ async def _menu_lancer(interaction, action, cle, vue, tache, quoi, detail=""):
     (_jb_menu_deja_redessine).
 
     Une action qui leve ne laisse pas le VA devant « l'interaction a
-    echoue » : l'erreur est journalisee et DITE, en ephemere."""
+    echoue » : l'erreur est journalisee et DITE -- dans le -content quand
+    `content` (les trois messages du salon -menu, _jb_dire), en ephemere
+    sinon (menu VA)."""
     erreur = ""
     try:
         await action()
@@ -8770,6 +8966,9 @@ async def _menu_lancer(interaction, action, cle, vue, tache, quoi, detail=""):
         if not await _jb_menu_deja_redessine(interaction, quoi):
             await _jb_menu_remettre(interaction, vue, quoi)
     if erreur:
+        if content:
+            await _jb_dire(interaction, erreur, quoi)
+            return
         try:
             await interaction.followup.send(erreur, ephemeral=True)
         except Exception as e:                               # noqa: BLE001
@@ -8813,7 +9012,7 @@ class _JailbreakQtySelect(discord.ui.Select):
         try:
             q = int(self.values[0])
         except Exception:
-            q = 3
+            q = _JB_QTE_DEFAUT
         view.quantity = q
         view._build()  # reconstruit pour refleter la nouvelle quantite
         await interaction.response.edit_message(view=view)
@@ -8851,7 +9050,7 @@ class _JailbreakActionButton(discord.ui.Button):
         # serveur — trois critères pour une seule intention, et les chemins qui
         # ne passaient pas par ce bouton n'arbitraient rien du tout.
         model = self.model
-        qty = getattr(self.panneau or self.view, "quantity", 3)
+        qty = getattr(self.panneau or self.view, "quantity", _JB_QTE_DEFAUT)
         await self.cog._run_for_model(
             interaction, model, cmd, count=qty, supports_count=self.supports_count)
 
@@ -8917,7 +9116,7 @@ class JailbreakActionsView(discord.ui.LayoutView):
     prend une entiere. Elle avait deja plante a la construction (« item would
     not fit at row 0 ») : choisir une model dans le menu Jailbreak des
     serveurs non-US ne repondait plus."""
-    def __init__(self, cog, model, quantity=3, us=False, icones=None):
+    def __init__(self, cog, model, quantity=_JB_QTE_DEFAUT, us=False, icones=None):
         self.icones = icones or {}
         # 180 s et non 600 : un panneau laisse ouvert apres un changement de
         # model sert l'ANCIENNE identite. Meme duree que le menu des brutes,
@@ -9213,14 +9412,45 @@ def _libelle_sans_emoji(label: str):
     return (etoiles + " " + texte) if etoiles else texte
 
 
-async def ensure_identity_emojis(guild, models):
-    """Crée (une seule fois) un emoji serveur par model à partir de sa PP, pour
-    l'afficher dans le select. -> {identité: PartialEmoji}. Best-effort : une
-    model sans PP (ou serveur plein) garde simplement son option sans image."""
+#: Les emojis que CE processus vient de creer : {(serveur, nom): (emoji, quand)}.
+#:
+#: guild.emojis n'est mis a jour que par l'evenement de la passerelle, qui
+#: arrive apres coup. Deux poses a quelques secondes d'ecart -- le menu puis
+#: le ✨ General, dans le meme passage de _ensure_us_menu -- ne voyaient donc
+#: pas l'emoji que la premiere venait de creer, et la seconde en creait un
+#: DOUBLON (Discord accepte deux emojis du meme nom : un emplacement perdu
+#: sur 50). Retenu quelques minutes seulement : un emoji supprime a la main
+#: doit pouvoir etre recree.
+_EMOJIS_CREES = {}
+_EMOJIS_CREES_TTL_S = 300
+
+
+def _emojis_du_serveur(guild) -> dict:
+    """{nom: emoji} : ceux du serveur, plus ceux que ce processus vient d'y
+    creer et que guild.emojis ne montre pas encore. Lecture seule."""
+    have = {e.name: e for e in (getattr(guild, "emojis", None) or [])}
+    gid = getattr(guild, "id", None)
+    maintenant = time.monotonic()
+    for (g, nom), (e, quand) in list(_EMOJIS_CREES.items()):
+        if maintenant - quand > _EMOJIS_CREES_TTL_S:
+            _EMOJIS_CREES.pop((g, nom), None)
+        elif g == gid and nom not in have:
+            have[nom] = e
+    return have
+
+
+async def ensure_identity_emojis(guild, models, raison="PP de la model dans le menu"):
+    """Crée (une seule fois) un emoji serveur par identite a partir de sa PP
+    (avatar.*, sinon sa 1re profile_pic), pour l'afficher dans les menus.
+    -> {identité: PartialEmoji}. Best-effort : une identite sans PP (ou
+    serveur plein) garde simplement son option sans image.
+
+    Sert les models (menu des models) ET les reserves (en-tete du ✨ General,
+    ensure_reserve_emojis) : meme nom d'emoji, meme source d'image."""
     out = {}
     if guild is None:
         return out
-    have = {e.name: e for e in getattr(guild, "emojis", [])}
+    have = _emojis_du_serveur(guild)
     for m in models:
         name = _identity_emoji_name(m)
         if name in have:
@@ -9240,9 +9470,59 @@ async def ensure_identity_emojis(guild, models):
             if len(data) > 256000:            # limite Discord
                 continue
             out[m] = await guild.create_custom_emoji(
-                name=name, image=data, reason="PP de la model dans le menu")
+                name=name, image=data, reason=raison)
+            _EMOJIS_CREES[(getattr(guild, "id", None), name)] = (out[m], time.monotonic())
+            have[name] = out[m]
         except Exception as e:
             log.warning(f"emoji PP {m}: {e}")
+    return out
+
+
+async def ensure_reserve_emojis(guild) -> dict:
+    """Cree l'emoji de chaque RESERVE liee a une model (sa photo/avatar,
+    comme les PP des models), pour l'en-tete du ✨ General : « <photo> Brune ».
+
+    Appelee quand on POSE ou REDESSINE les messages du salon -menu
+    (_ensure_us_general, jailbreak_us_menu_async), jamais au clic : un
+    televersement par reserve ne tient pas dans les 3 s d'une interaction.
+    Au clic, _jb_general lit seulement ce qui existe (_jb_emojis_presents).
+
+    Serveur US seulement : le General n'existe que la-bas, et un serveur
+    sans boost n'a que 50 emplacements d'emoji. Best-effort : Discord refuse
+    (serveur plein, permission), une reserve sans photo -- l'en-tete reste
+    sans icone, et le journal le dit. -> {reserve: emoji}."""
+    if guild is None:
+        return {}
+    try:
+        import guild_features as _gf
+        if not _gf.is_us_guild(guild):
+            return {}
+        import type_identite as _ti
+        from cogs.welcome import list_identities
+        models = list(list_identities() or [])
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("emojis des reserves : liste illisible (%s: %s)",
+                    type(e).__name__, e)
+        return {}
+    reserves = []
+    for m in models:
+        try:
+            retenues, _ecartees = _ti.reserves_liees(m)
+        except Exception as e:                               # noqa: BLE001
+            log.warning("emojis des reserves : liens de %s illisibles (%s: %s)",
+                        m, type(e).__name__, e)
+            continue
+        for r in retenues:
+            if r not in reserves:
+                reserves.append(r)
+    if not reserves:
+        return {}
+    out = await ensure_identity_emojis(guild, reserves,
+                                       raison="photo de la reserve (✨ General)")
+    sans = [r for r in reserves if r not in out]
+    if sans:
+        log.info("emojis des reserves : %d reserve(s) sans icone (pas de photo, "
+                 "ou refus de Discord) : %s", len(sans), ", ".join(sans))
     return out
 
 
@@ -9376,7 +9656,8 @@ class JBModelButton(discord.ui.DynamicItem[discord.ui.Button],
     async def callback(self, interaction: discord.Interaction):
         refus = _jb_model_refus(interaction, self.ident)
         if refus:
-            await interaction.response.send_message(refus, ephemeral=True)
+            # Dans le -content, pas sous le menu (_jb_dire).
+            await _jb_dire(interaction, refus, "menu des models")
             return
         await _jb_model_ouvrir(interaction, self.ident)
 
@@ -9429,7 +9710,7 @@ async def _jb_model_ouvrir(interaction, ident):
     « menus de 10 » -- apres coup : la reponse est deja partie."""
     cog = interaction.client.get_cog("UserCog")
     if cog is None:
-        await interaction.response.send_message("Indisponible.", ephemeral=True)
+        await _jb_dire(interaction, "Indisponible.", "menu des models")
         return
     await _jb_model_panneau(interaction, cog, (ident or "").lower())
     await _jb_menu_models_convertir(interaction)
@@ -9466,8 +9747,8 @@ async def _jb_model_panneau(interaction, cog, ident):
     # 26/09/2026 avec un faux Discord a compteur d'editions par salon).
     # Un accuse refuse ne bloque pas le choix : le panneau et le General sont
     # des messages du salon, ils se mettent a jour sans l'interaction.
-    accuse = await _jb_accuser(interaction, "panneau US")
-    vue = _jb_panel(cog, ident, 3, marche=_marche,
+    await _jb_accuser(interaction, "panneau US")
+    vue = _jb_panel(cog, ident, _JB_QTE_DEFAUT, marche=_marche,
                     guild=interaction.guild)
     chan = interaction.channel
     moi = getattr(getattr(interaction.client, "user", None), "id", None)
@@ -9481,9 +9762,9 @@ async def _jb_model_panneau(interaction, cog, ident):
     if cible is None:                      # panneau introuvable -> on le cherche
         try:
             for m in await chan.pins():
-                # Les DEUX formats : l'ancien (pied d'embed) et le V2
-                # (ligne-marque dans le texte). Rater l'un, c'etait poster
-                # un second panneau a cote du premier.
+                # TOUS les formats : l'ancien (pied d'embed), le V2 a
+                # ligne-marque et le V2 sans texte (ses custom_id). Rater
+                # l'un, c'etait poster un second panneau a cote du premier.
                 if _est_panneau_actions(m, moi):
                     cible = m
                     break
@@ -9523,37 +9804,42 @@ async def _jb_model_panneau(interaction, cog, ident):
         panneau_pose = True
     except Exception as e:
         log.warning("panneau US %s : non pose dans le salon (%s: %s) -- "
-                    "envoye en ephemere", getattr(chan, "name", "?"),
+                    "panneau de secours dans le -content", getattr(chan, "name", "?"),
                     type(e).__name__, e)
-        # Le panneau en ephemere, mais SANS suivi : voir _vue_sans_suivi.
-        # Suivi, il expirait au bout de 15 minutes et emportait les
-        # motifs de TOUS les panneaux US du serveur. Une vue NEUVE : la
-        # premiere a peut-etre ete rangee par un envoi a moitie reussi.
-        secours = _vue_sans_suivi(_jb_panel(cog, ident, 3, marche=_marche,
+        # Le panneau de secours, SANS suivi : voir _vue_sans_suivi. Suivi,
+        # un ephemere expirait au bout de 15 minutes et emportait les motifs
+        # de TOUS les panneaux US du serveur. Une vue NEUVE : la premiere a
+        # peut-etre ete rangee par un envoi a moitie reussi.
+        secours = _vue_sans_suivi(_jb_panel(cog, ident, _JB_QTE_DEFAUT,
+                                            marche=_marche,
                                             guild=interaction.guild))
-        # L'accuse est deja parti : le panneau de secours suit en ephemere.
-        # S'il a ete refuse, l'interaction est morte -- plus rien ne peut
-        # atteindre le VA ; on le dit au journal au lieu de lever, sinon la
-        # suite (etat retenu, sous-menus) sauterait.
-        try:
-            if accuse:
-                await interaction.followup.send(view=secours, ephemeral=True)
-            elif not interaction.response.is_done():
-                await interaction.response.send_message(view=secours,
-                                                        ephemeral=True)
-        except Exception as e2:                              # noqa: BLE001
-            log.warning("panneau US %s : panneau de secours non envoye non "
-                        "plus (%s: %s) -- le VA n'a aucun panneau pour %s",
-                        getattr(chan, "name", "?"), type(e2).__name__, e2,
-                        ident)
+        # DANS LE -content, plus sous les menus (26/09/2026 : « tous les
+        # messages, ils se trouvent dans le content ») ; en ephemere
+        # seulement sans -content. _jb_dire ne leve pas : la suite (etat
+        # retenu, sous-menus) ne saute pas, et un envoi rate est au journal.
+        ou = await _jb_dire(interaction, None, "panneau US", view=secours)
+        if ou == "ephemere":
+            log.warning("panneau US %s : panneau de secours en ephemere pour %s "
+                        "(pas de -content)", getattr(chan, "name", "?"), ident)
+        elif not ou:
+            log.warning("panneau US %s : panneau de secours non envoye non plus "
+                        "-- le VA n'a aucun panneau pour %s",
+                        getattr(chan, "name", "?"), ident)
     # Les sous-menus de famille ouverts portent l'ANCIENNE model dans
     # leurs boutons : on les efface, et on retient ce que montre le
     # panneau pour refuser ceux qu'on n'a plus le droit d'effacer.
-    # Panneau de secours (ephemere) : l'epingle n'a pas change, l'etat
-    # devient inconnu plutot que faux.
+    # Panneau de secours (dans le -content, ou ephemere) : l'epingle n'a
+    # pas change, l'etat devient inconnu plutot que faux.
     _jb_panneau_noter(getattr(chan, "id", 0),
-                      ident if panneau_pose else None, 3)
+                      ident if panneau_pose else None, _JB_QTE_DEFAUT)
     await _jb_sous_menus_fermer(channel_id=getattr(chan, "id", 0) or 0)
+    # Un nom que les boutons Discord ne savent pas porter : le panneau n'a
+    # que son en-tete et la quantite (_jb_panel). La raison part dans le
+    # -content, pas dans le panneau (« rien d'autre que ces messages »).
+    probleme = _jb_panel_probleme(ident, _JB_QTE_DEFAUT)
+    if probleme:
+        await _jb_dire(interaction, f"⚠️ **{_couper_discord(ident.capitalize(), 60)}** : "
+                                    + probleme, "panneau US")
     # Le ✨ General suit la model choisie, APRES le defer et dans son
     # propre try : le except du dessus repond par send_message, qui
     # leverait InteractionResponded si la reponse etait deja partie.
@@ -9582,36 +9868,47 @@ async def _jb_model_panneau(interaction, cog, ident):
 # admin) et choisi « Menus deroulants de 10 » : « c'est ca, mets deja ca sur
 # le bot ».
 #
-# Un bloc « Components V2 » : le texte de l'ancien embed en tete, puis UN MENU
-# PAR DIZAINE, dans l'ordre de production (identites_ordre), intitules
-# « 👤 1–10… », « 👤 11–20… ». Un menu de plus se cree tout seul a chaque
-# dizaine franchie. Le V2 compte les composants (40 au plus) au lieu des
-# rangees : le bloc et son texte en prennent 2, chaque menu 2 (sa rangee et
-# lui), soit 19 menus -- 190 models. Au-dela : journalise ET dit dans le
-# texte, jamais ecarte en silence.
+# Un bloc « Components V2 » : UN MENU PAR DIZAINE, dans l'ordre de production
+# (identites_ordre), intitules « 👤 1–10… », « 👤 11–20… ». Un menu de plus se
+# cree tout seul a chaque dizaine franchie. Le V2 compte les composants (40 au
+# plus) au lieu des rangees : chaque menu en prend 2 (sa rangee et lui), soit
+# 19 menus -- 190 models. Au-dela : journalise, et nomme par /demomodels
+# (« Écartées du menu », _jb_models_ecartees) -- jamais ecarte en silence.
+#
+# AUCUN TEXTE DEPUIS LE 26/09/2026. Le proprietaire : « toutes tes
+# ecritures, on dirait que c'est prepare pour une notice » -- les VA savent
+# ce qu'ils font. Plus de titre, d'explication du classement, de legende ni
+# de « ouvert a tout le monde » : seulement les menus. Une liste VIDE garde
+# un menu grise « Aucune model pour l'instant » : un message V2 sans
+# composant serait refuse, et c'est son custom_id qui le fait reconnaitre.
 #
 # LA DISPOSITION VIT ICI ET NULLE PART AILLEURS : /demomodels appelle
 # _jb_menus_de_10 et _jb_menus_models_poser au lieu d'en garder une copie --
 # une maquette qui diverge de la production montre un menu qui n'existe pas.
 #
-# Repere : la derniere ligne du texte, « -# menu-models-<marche> » (le V2
-# n'a pas d'embed). L'ancien format (embed « Menu Jailbreak … ») reste
-# reconnu partout (_est_menu_models) jusqu'a sa conversion, au premier clic
-# ou au prochain rafraichissement.
+# Repere : ses CUSTOM_ID (JBModelsMenu « jbus:ms: »), plus de ligne-marque.
+# Les formats deja postes restent reconnus partout (_est_menu_models) :
+# l'embed « Menu Jailbreak … », la grille « jbus:m: », le menu unique
+# « jbmenu:model », et le V2 a ligne-marque « -# menu-models-<marche> ».
 
 #: Models par menu : « si un jour j'en ai 60, il y en a 6 » (le proprietaire).
 _JB_MM_TAILLE = 10
-#: 40 composants au plus dans un message V2 : 2 pour le bloc et son texte,
-#: 2 par menu (sa rangee + lui).
+#: 40 composants au plus dans un message V2 : 2 pour le bloc et un texte (la
+#: demo en garde un), 2 par menu (sa rangee + lui).
 _JB_MM_MAX_MENUS = (40 - 2) // 2
+#: La ligne-marque du menu V2 du 26/09 au matin (« -# menu-models-us ») :
+#: plus posee, mais les menus deja epingles la portent encore.
 _JB_MM_PIED = "menu-models"
+#: L'intitule du menu grise d'une liste vide : la seule chose qu'on lit.
+_JB_MM_VIDE = "👤 Aucune model pour l'instant"
 _JB_MM_MARCHES = ("fr", "us")
 #: Plafond Discord d'une valeur d'option de menu deroulant.
 _JB_MM_VALEUR_MAX = 100
 
 
 def _jb_menu_models_marque(marche) -> str:
-    """La ligne-marque du menu V2 : « -# menu-models-us » (petit gris)."""
+    """L'ANCIENNE ligne-marque du menu V2 : « -# menu-models-us ». Plus
+    posee ; sert a reconnaitre les menus qui la portent encore."""
     return f"-# {_JB_MM_PIED}-{marche}"
 
 
@@ -9637,13 +9934,18 @@ def _jb_menus_de_10(items):
 
 
 def _jb_menus_models_poser(vue, texte, menus, fabrique):
-    """Remplit `vue` (une LayoutView) : un bloc a accent rouge fonce, le
-    texte en tete, puis une rangee par menu, `fabrique(i, plage, bloc)`
-    fournissant le menu. La production y passe JBModelsMenu, la demo son
-    menu inerte : meme bloc, meme ordre, meme accent."""
+    """Remplit `vue` (une LayoutView) : un bloc a accent rouge fonce, puis
+    une rangee par menu, `fabrique(i, plage, bloc)` fournissant le menu. La
+    production y passe JBModelsMenu, la demo son menu inerte : meme bloc,
+    meme ordre, meme accent.
+
+    `texte` vide : aucun texte (le vrai menu, depuis le 26/09/2026). La demo
+    passe le sien (ce qu'elle simule, les models ecartees) : elle s'adresse
+    au proprietaire, pas aux VA."""
     ui = discord.ui
     boite = ui.Container(accent_colour=discord.Colour.dark_red())
-    boite.add_item(ui.TextDisplay(texte))
+    if texte:
+        boite.add_item(ui.TextDisplay(texte))
     for i, (plage, bloc) in enumerate(menus):
         rangee = ui.ActionRow()
         rangee.add_item(fabrique(i, plage, bloc))
@@ -9655,8 +9957,9 @@ def _jb_menus_models_poser(vue, texte, menus, fabrique):
 def _jb_emojis_presents(guild, models) -> dict:
     """{model: emoji de sa PP} -- LECTURE SEULE des emojis deja crees sur le
     serveur. Au clic (remise a zero, conversion), pas le temps d'en creer :
-    c'est ensure_identity_emojis, au moment de POSTER, qui s'en charge."""
-    presents = {e.name: e for e in (getattr(guild, "emojis", None) or [])}
+    c'est ensure_identity_emojis, au moment de POSTER, qui s'en charge.
+    Sert aussi l'en-tete du panneau (la model) et du ✨ General (la reserve)."""
+    presents = _emojis_du_serveur(guild)
     out = {}
     for m in models or []:
         e = presents.get(_identity_emoji_name(m))
@@ -9693,56 +9996,6 @@ def _jb_models_entrees(models, emojis=None):
     return entrees, rejets
 
 
-def _jb_menu_models_texte(marche, models, guild=None) -> str:
-    """Le texte en tete du menu : celui de l'ancien embed, titre compris.
-
-    La derniere phrase dit qui peut s'en servir, d'apres _jb_can_use : sur
-    le serveur US, tout le monde ; ailleurs, le role « Jailbreak ».
-    L'ancien menu affirmait « ouvert a tout le monde » sur les deux, et
-    /menujailbreak (serveur FR) le contraire -- avec une seule vue pour les
-    deux, c'est la regle appliquee qui tranche. Sans serveur connu : la
-    phrase d'avant."""
-    # Un classement ne sert a rien si personne ne sait que c en est un :
-    # sans cette phrase, « 1. Lola » n est qu une liste numerotee de plus.
-    # Elle est vide tant qu aucune model affichee n a ete rangee a la main.
-    import identites_ordre as _io
-    _clst = _io.phrase_classement(models)
-    # LE MOT AU BOUT DE LA LIGNE NE SE DEVINE PAS. « Genesaag — Caption »
-    # ne dit rien tant qu'on n'a pas appris que ce mot designe ce qui
-    # marche sur ce compte-la. Le proprietaire : « brut c'est que cette
-    # identite marche plus avec du brut, caption avec de la caption ».
-    # La legende ne liste QUE les styles presents dans ce menu : expliquer
-    # un mot que personne ne porte, c'est une ligne de plus entre le VA et
-    # le menu qu'il cherche.
-    _leg = ""
-    try:
-        import identity_styles as _ist
-        _lignes = _ist.legende(models)
-    except Exception:
-        _lignes = []
-    if _lignes:
-        _leg = ("**Le mot après le tiret dit ce qui marche pour elle :**\n"
-                + "\n".join("• **%s** — %s" % (lab, txt)
-                            for lab, txt in _lignes))
-    acces = "Ce menu est ouvert à tout le monde sur ce serveur."
-    if guild is not None:
-        try:
-            import guild_features as _gf
-            if not _gf.is_us_guild(guild):
-                acces = "Réservé aux membres portant le rôle **Jailbreak**."
-        except Exception:                                    # noqa: BLE001
-            pass
-    titre = ("Menu Jailbreak FR — models FR" if marche == "fr"
-             else "Menu Jailbreak US — models US")
-    return (f"## {titre}\n"
-            "Choisis une model ci-dessous, puis l'action à réaliser : "
-            "reel, reel monté, story, post, story CTA, pseudo, name, "
-            "bio ou pp.\n\n"
-            + (_clst + "\n\n" if _clst else "")
-            + (_leg + "\n\n" if _leg else "")
-            + acces)
-
-
 def _jb_texte_v2_borne(corps, pied, quoi="menu des models") -> str:
     """`corps` puis les lignes `pied` (gardees ENTIERES : alertes, marque),
     en _JB_TEXTE_V2_MAX unites Discord au plus. Un texte trop long fait
@@ -9754,13 +10007,6 @@ def _jb_texte_v2_borne(corps, pied, quoi="menu des models") -> str:
                     quoi, _long_discord(corps), place)
         corps = _couper_discord(corps, max(0, place - 1)) + "…"
     return corps + ("\n" + pied if pied else "")
-
-
-def _jb_noms(noms, n=8) -> str:
-    """« Lola, Emma, … (+3) » : quelques noms, et le compte du reste."""
-    noms = [str(x) for x in noms]
-    txt = ", ".join(_couper_discord(x, 40) for x in noms[:n])
-    return txt + (f" (+{len(noms) - n})" if len(noms) > n else "")
 
 
 class JBModelsMenu(discord.ui.DynamicItem[discord.ui.Select],
@@ -9780,19 +10026,22 @@ class JBModelsMenu(discord.ui.DynamicItem[discord.ui.Select],
     correspondent a un custom_id ; celui-ci ne recoupe aucun jbus:m/s/a/q/
     qb/f, ni jbg:."""
 
-    def __init__(self, marche, n, plage="", bloc=()):
+    def __init__(self, marche, n, plage="", bloc=(), intitule=None):
         self.marche = marche if marche in _JB_MM_MARCHES else "us"
         self.n = int(n)
         opts = [discord.SelectOption(label=lib, value=valeur, emoji=emoji)
                 for valeur, lib, emoji in bloc]
-        #: Aucune option : seul un vieux custom_id qui revient construit ce
-        #: menu vide (from_custom_id) ; la vue n'en pose jamais.
+        #: Aucune option : un vieux custom_id qui revient (from_custom_id),
+        #: ou la liste VIDE -- la vue pose alors ce menu GRISE, sous
+        #: `intitule` (_JB_MM_VIDE) : il dit qu'il n'y a rien, et son
+        #: custom_id fait reconnaitre le message (_est_menu_models).
         self.vide = not opts
         if not opts:
             opts = [discord.SelectOption(label="(aucune model)", value="_")]
         super().__init__(discord.ui.Select(
-            placeholder=(f"👤 {plage}…" if plage else "👤 Choisis une model…"),
-            min_values=1, max_values=1, options=opts,
+            placeholder=(intitule or (f"👤 {plage}…" if plage
+                                      else "👤 Choisis une model…")),
+            min_values=1, max_values=1, options=opts, disabled=self.vide,
             custom_id=f"jbus:ms:{self.marche}:{self.n}"))
 
     @classmethod
@@ -9814,7 +10063,8 @@ class JBModelsMenu(discord.ui.DynamicItem[discord.ui.Select],
 
         refus = _jb_model_refus(interaction, choix, marche=marche)
         if refus:
-            await _jb_menu_refuser(interaction, refus, _frais())
+            # Le menu reprend son intitule ; le refus part dans le -content.
+            await _jb_menu_refuser(interaction, refus, _frais(), content=True)
             return
         # PAS de redessin de fond par msg.edit (tache=None) : _menu_lancer
         # remet le menu sur ses intitules APRES l'action, par l'interaction
@@ -9830,7 +10080,7 @@ class JBModelsMenu(discord.ui.DynamicItem[discord.ui.Select],
         # de panneau en concurrence.
         await _menu_lancer(interaction, lambda: _jb_model_ouvrir(interaction, choix),
                            f"👤 {choix.capitalize()}", _frais(), None,
-                           "menu des models")
+                           "menu des models", content=True)
 
 
 class JBMenuModelsAncien(discord.ui.DynamicItem[discord.ui.Select],
@@ -9859,23 +10109,29 @@ class JBMenuModelsAncien(discord.ui.DynamicItem[discord.ui.Select],
     async def callback(self, interaction: discord.Interaction):
         model = ((getattr(self.item, "values", None) or [""])[0] or "").strip().lower()
         if not model or model == "__none__":
-            await interaction.response.send_message(
-                "Aucune model disponible.", ephemeral=True)
+            await _jb_dire(interaction, "Aucune model disponible.", "menu des models")
             return
         refus = _jb_model_refus(interaction, model)
         if refus:
-            await interaction.response.send_message(refus, ephemeral=True)
+            await _jb_dire(interaction, refus, "menu des models")
             return
         await _jb_model_ouvrir(interaction, model)
 
 
 class JailbreakModelsView(discord.ui.LayoutView):
-    """Le menu des models : un bloc V2, le texte en tete, un menu par dizaine.
+    """Le menu des models : un bloc V2, un menu par dizaine, AUCUN texte.
 
     `models` : la liste du marche (_jb_models_marche) ; `emojis` : {model:
-    PP} ; `guild` sert la phrase d'acces du texte. Ce qui ne tient pas
-    (au-dela de 190, valeur en double ou trop longue) est journalise ET dit
-    dans le texte. `hors` et `rejets` le gardent pour qui veut le compter."""
+    PP}. `guild` n'est plus lu (il servait la phrase d'acces du texte) : il
+    reste pour les appelants. `texte` : un texte en tete, pour qui en veut
+    un (la production n'en passe pas).
+
+    Ce qui ne tient pas (au-dela de 190, valeur en double ou trop longue)
+    est JOURNALISE -- il ne l'est plus dans le message, qui n'a plus de
+    texte -- et nomme par /demomodels (_jb_models_ecartees). `hors` et
+    `rejets` le gardent pour qui veut le compter. Liste vide : le
+    diagnostic par filtre (_jb_diagnostic_marche) part au journal, le menu
+    montre un menu grise « Aucune model pour l'instant »."""
 
     def __init__(self, models, emojis=None, marche="us", guild=None, texte=None):
         super().__init__(timeout=None)
@@ -9883,37 +10139,31 @@ class JailbreakModelsView(discord.ui.LayoutView):
         models = list(models or [])
         entrees, self.rejets = _jb_models_entrees(models, emojis)
         self.menus, self.hors = _jb_menus_de_10(entrees)
-        alertes = []
         if not entrees:
             # Un menu vide ne dit rien de ce qui manque : les compteurs par
             # filtre designent la case a corriger sur le site.
-            alertes.append("⚠️ **Aucune model à afficher.** "
-                           + (_jb_diagnostic_marche(self.marche) if not models else ""))
+            log.warning("menu des models %s : aucune model a afficher (%s)",
+                        self.marche,
+                        _jb_diagnostic_marche(self.marche) if not models
+                        else "%d entree(s), toutes rejetees" % len(models))
         if self.hors:
             log.warning("menu des models %s : %d model(s) au-dela de %d, NON "
                         "affichees : %s", self.marche, len(self.hors),
                         _JB_MM_TAILLE * _JB_MM_MAX_MENUS,
                         ", ".join(v for v, _l, _e in self.hors))
-            alertes.append(
-                f"⚠️ **{len(self.hors)} model(s) non affichée(s)** — le menu en "
-                f"montre {_JB_MM_TAILLE * _JB_MM_MAX_MENUS} au plus : "
-                + _jb_noms(v.capitalize() for v, _l, _e in self.hors)
-                + ". Préviens un admin.")
         if self.rejets:
             log.warning("menu des models %s : %d entree(s) sans place : %s",
                         self.marche, len(self.rejets),
                         ", ".join(f"{n!r} ({r})" for n, r in self.rejets))
-            alertes.append(
-                f"⚠️ {len(self.rejets)} entrée(s) sans place dans le menu : "
-                + _jb_noms(f"{n} ({r})" for n, r in self.rejets)
-                + ". Préviens un admin.")
-        corps = (texte if texte is not None
-                 else _jb_menu_models_texte(self.marche, models, guild))
-        _jb_menus_models_poser(
-            self,
-            _jb_texte_v2_borne(corps, alertes + [_jb_menu_models_marque(self.marche)]),
-            self.menus,
-            lambda i, plage, bloc: JBModelsMenu(self.marche, i, plage, bloc))
+        corps = _jb_texte_v2_borne(texte, []) if texte else ""
+        if self.menus:
+            _jb_menus_models_poser(
+                self, corps, self.menus,
+                lambda i, plage, bloc: JBModelsMenu(self.marche, i, plage, bloc))
+        else:
+            _jb_menus_models_poser(
+                self, corps, [("", ())],
+                lambda i, _p, _b: JBModelsMenu(self.marche, i, intitule=_JB_MM_VIDE))
 
 
 class JailbreakMenuView(JailbreakModelsView):
@@ -9940,18 +10190,30 @@ def _jb_menu_models_vue(marche, guild=None, emojis=None):
     return JailbreakModelsView(models, emojis=emojis, marche=marche, guild=guild)
 
 
-def _est_menu_models(m, moi=None) -> bool:
-    """Ce message est-il le menu des models, dans l'un ou l'autre format ?
+def _porte_ids(m, classes) -> bool:
+    """Un des composants de `m` porte-t-il un custom_id d'une de ces
+    `classes` (elements dynamiques) ? Lu dans LEURS motifs, ceux que
+    discord.py suit pour router les clics : un reperage ecrit a part
+    finirait par ne plus reconnaitre les memes messages."""
+    motifs = [c.__discord_ui_compiled_template__ for c in classes]
+    return any(mt.fullmatch(cid) for cid in _ids_composants(m) for mt in motifs)
 
-      - V2 : une ligne « -# menu-models-fr|us » dans son texte ;
+
+def _est_menu_models(m, moi=None) -> bool:
+    """Ce message est-il le menu des models, dans l'un de ses formats ?
+
+      - V2 sans texte (depuis le 26/09/2026) : un menu « jbus:ms: »
+        (JBModelsMenu) ; aussi la grille « jbus:m: » (JBModelButton) et le
+        menu unique « jbmenu(us):model » (JBMenuModelsAncien) deja postes ;
+      - V2 du 26/09 au matin : une ligne « -# menu-models-fr|us » ;
       - ancien (embed) : « Jailbreak » dans le titre de son embed -- le
         reperage de toujours de _ensure_us_menu (« Menu Jailbreak US —
         models US », « Menu Jailbreak — toutes les models »…).
     Le panneau d'actions et le ✨ General n'en sont JAMAIS, quel que soit
-    leur texte : ils se reconnaissent a leur propre marque, testee d'abord.
-    Toute recherche du menu (welcome, /resetpanels, _delete_old_menus, la
-    conversion au clic) passe par ici : deux reperages finiraient par ne plus
-    reconnaitre la meme chose.
+    leur texte : ils se reconnaissent a leurs propres custom_id ou marque,
+    testes d'abord. Toute recherche du menu (welcome, /resetpanels,
+    _delete_old_menus, la conversion au clic) passe par ici : deux
+    reperages finiraient par ne plus reconnaitre la meme chose.
 
     `moi` : l'id du bot ; donne, un message d'un autre auteur ne compte
     jamais. Ne leve jamais."""
@@ -9962,6 +10224,8 @@ def _est_menu_models(m, moi=None) -> bool:
             return False
         if _est_panneau_actions(m) or _est_general(m):
             return False
+        if _porte_ids(m, (JBModelsMenu, JBModelButton, JBMenuModelsAncien)):
+            return True
         marques = {_jb_menu_models_marque(k) for k in _JB_MM_MARCHES}
         if any(ligne.strip() in marques
                for t in _textes_v2(m) for ligne in t.splitlines()):
@@ -9980,13 +10244,14 @@ _RE_PANNEAU_ETAT = re.compile(r"jbus:qb?:(?P<ident>[a-z0-9_.\-]+):(?P<qty>\d+)")
 def _jb_panneau_etat_lu(panneau, chan_id=0):
     """(model, quantite) que montre le panneau `panneau`, lus dans son bouton
     (ou ancien menu) de quantite -- ce que le salon VOIT, meme apres un
-    redemarrage. Repli : l'etat retenu en memoire, puis (« _ », 3)."""
+    redemarrage. Repli : l'etat retenu en memoire, puis (« _ »,
+    _JB_QTE_DEFAUT)."""
     for cid in _ids_composants(panneau):
         mt = _RE_PANNEAU_ETAT.fullmatch(cid)
         if mt:
             return mt["ident"], int(mt["qty"])
     etat = _JB_PANNEAU_COURANT.get(int(chan_id or 0))
-    return (etat[0], int(etat[1])) if etat else ("_", 3)
+    return (etat[0], int(etat[1])) if etat else ("_", _JB_QTE_DEFAUT)
 
 
 async def _jb_menu_models_reposer(client, chan, ancien, vue, raison):
@@ -10022,9 +10287,10 @@ async def _jb_menu_models_reposer(client, chan, ancien, vue, raison):
     general = next((m for m in epingles if _est_general(m, moi)), None)
     if general is not None and general.id < nouveau.id:
         # Pas de panneau, mais un General au-dessus : _ensure_us_general
-        # retire ceux d'avant le menu et en repose un dessous.
+        # retire ceux d'avant le menu et en repose un dessous. Chemin d'un
+        # CLIC (conversion refusee) : pas de creation d'emoji ici.
         from cogs.welcome import _ensure_us_general
-        await _ensure_us_general(client, chan, apres=nouveau)
+        await _ensure_us_general(client, chan, apres=nouveau, creer_emojis=False)
     return nouveau
 
 
@@ -10240,15 +10506,15 @@ def _jb_panel_set(channel_id, message_id):
                     channel_id)
 
 
-#: Ce qui designe le panneau d'actions, dans les DEUX formats :
+#: La marque du panneau d'actions dans ses formats DEJA POSTES :
 #:   - l'ancien (embed) : le pied de l'embed vaut exactement cette chaine ;
-#:   - le V2 (LayoutView), qui n'a PAS d'embed : une derniere ligne
-#:     « -# panneau-actions-us » dans son texte (petit texte gris).
-#: C'est la seule marque fiable : le titre change avec la model. Toute
-#: recherche du panneau (clic sur une model, _ensure_us_menu,
-#: _ensure_us_panel, _delete_old_menus) passe par _est_panneau_actions.
+#:   - le V2 du 25 au 26/09/2026 : une derniere ligne « -# panneau-actions-us »
+#:     dans son texte (petit texte gris).
+#: Le panneau d'aujourd'hui n'a plus de texte que « <photo> Model » : il se
+#: reconnait a ses custom_id (_est_panneau_actions). Toute recherche du
+#: panneau (clic sur une model, _ensure_us_menu, _ensure_us_panel,
+#: _delete_old_menus) passe par _est_panneau_actions.
 _JB_PANNEAU_PIED = "panneau-actions-us"
-_JB_PANNEAU_MARQUE = "-# " + _JB_PANNEAU_PIED
 
 
 def _textes_v2(obj) -> list:
@@ -10295,12 +10561,14 @@ def _ids_composants(obj) -> list:
 
 
 def _porte_marque(m, pied, moi=None, quoi="message") -> bool:
-    """Ce message porte-t-il la marque `pied`, dans l'un ou l'autre format ?
+    """Ce message porte-t-il la marque `pied`, dans l'un ou l'autre des
+    formats DEJA POSTES ?
 
       - l'ancien (embed) : le pied de son embed vaut exactement `pied` ;
-      - le V2 (LayoutView), sans embed : une ligne « -# <pied> » dans son
-        texte.
-    Le panneau d'actions et le ✨ General passent TOUS DEUX par ici : deux
+      - le V2 du 25-26/09/2026 : une ligne « -# <pied> » dans son texte.
+    Les messages d'aujourd'hui n'ont plus de marque (« pas de texte de
+    notice ») : ils se reconnaissent a leurs custom_id (_porte_ids). Le
+    panneau d'actions et le ✨ General passent TOUS DEUX par ici : deux
     reperages ecrits a part finiraient par ne plus reconnaitre la meme chose.
 
     `moi` : l'id du bot ; donne, un message d'un autre auteur ne compte
@@ -10325,11 +10593,28 @@ def _porte_marque(m, pied, moi=None, quoi="message") -> bool:
 
 
 def _est_panneau_actions(m, moi=None) -> bool:
-    """Ce message est-il le panneau d'actions US, dans l'un ou l'autre format ?
+    """Ce message est-il le panneau d'actions US, dans l'un de ses formats ?
+
+      - aujourd'hui (V2, sans marque) : un element du panneau -- quantite
+        « jbus:qb: », action « jbus:a: », menu de famille « jbus:s: », et
+        ceux des panneaux deja postes (« jbus:q: », lanceur « jbus:f: ») ;
+      - avant : sa marque (pied d'embed ou ligne « -# panneau-actions-us »).
+    Le panneau « aucune model » n'a que sa quantite : elle suffit.
 
     `moi` : l'id du bot ; donne, un message d'un autre auteur n'est jamais le
     panneau. Ne leve jamais."""
-    return _porte_marque(m, _JB_PANNEAU_PIED, moi, "panneau US")
+    if _porte_marque(m, _JB_PANNEAU_PIED, moi, "panneau US"):
+        return True
+    try:
+        if m is None or (moi is not None and getattr(
+                getattr(m, "author", None), "id", None) != moi):
+            return False
+        return _porte_ids(m, (JBQtyBouton, JBQtySelect, JBActionButton,
+                              JBMenuFamille, JBFamilleBouton))
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("panneau US : message %s illisible (%s: %s)",
+                    getattr(m, "id", "?"), type(e).__name__, e)
+        return False
 
 
 def _jb_kw_format(message) -> dict:
@@ -10445,6 +10730,23 @@ async def _jb_panneau_en_reponse(interaction, vue, ident, quoi="panneau US",
     return True
 
 
+#: L'emoji du bouton de quantite : le nombre seul suit, sans phrase.
+_JB_QTE_EMOJI = "🔢"
+
+
+def _jb_bouton_quantite(qty, custom_id):
+    """Le bouton de quantite du panneau ET du ✨ General : « 🔢 5 ».
+
+    Plus de phrase (« 📦 Quantité : 3 — clique pour changer ») : le
+    proprietaire, le 26/09/2026, « juste un emoji quantité et le nombre »,
+    les VA savent ce qu'ils font. Le clic ouvre toujours la saisie du
+    nombre (_JBQtyModal). Un seul dessin pour les deux messages : deux
+    copies divergeraient au premier changement."""
+    return discord.ui.Button(label=str(int(qty)), emoji=_JB_QTE_EMOJI,
+                             style=discord.ButtonStyle.secondary, row=0,
+                             custom_id=custom_id)
+
+
 class JBQtyBouton(discord.ui.DynamicItem[discord.ui.Button],
                   template=r"jbus:qb:(?P<ident>[a-z0-9_.\-]+):(?P<qty>\d+)"):
     """La quantite, en BOUTON plutot qu'en menu deroulant.
@@ -10466,12 +10768,8 @@ class JBQtyBouton(discord.ui.DynamicItem[discord.ui.Button],
     def __init__(self, ident, qty):
         self.ident = (ident or "_").lower()
         self.qty = int(qty)
-        super().__init__(discord.ui.Button(
-            # Le libelle de la maquette validee : sur une rangee de cinq
-            # boutons, la phrase « clique pour changer » ne tenait pas.
-            label=f"📦 Quantité : {self.qty}",
-            style=discord.ButtonStyle.secondary, row=0,
-            custom_id=f"jbus:qb:{self.ident}:{self.qty}"))
+        super().__init__(_jb_bouton_quantite(
+            self.qty, f"jbus:qb:{self.ident}:{self.qty}"))
 
     @classmethod
     async def from_custom_id(cls, interaction, item, match, /):
@@ -10479,9 +10777,7 @@ class JBQtyBouton(discord.ui.DynamicItem[discord.ui.Button],
 
     async def callback(self, interaction: discord.Interaction):
         if not _jb_can_use(interaction):
-            await interaction.response.send_message(
-                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).",
-                ephemeral=True)
+            await _jb_dire(interaction, _JB_REFUS_ROLE, "panneau US")
             return
 
         async def _suite(inter, q):
@@ -10516,8 +10812,7 @@ class JBQtySelect(discord.ui.DynamicItem[discord.ui.Select],
 
     async def callback(self, interaction: discord.Interaction):
         if not _jb_can_use(interaction):
-            await interaction.response.send_message(
-                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
+            await _jb_dire(interaction, _JB_REFUS_ROLE, "panneau US")
             return
         vals = getattr(self.item, "values", None) or []
 
@@ -10607,9 +10902,9 @@ class JBActionButton(discord.ui.DynamicItem[discord.ui.Button],
         return cls(match["ident"], match["key"], match["qty"])
 
     async def callback(self, interaction: discord.Interaction):
+        # Tout refus part dans le -content (_jb_dire), rien sous le panneau.
         if not _jb_can_use(interaction):
-            await interaction.response.send_message(
-                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
+            await _jb_dire(interaction, _JB_REFUS_ROLE, "panneau US")
             return
         # Un panneau d'actions peut rester affiche sur une entree devenue
         # reserve depuis (seul le menu est rafraichi, pas ce panneau). Sans ce
@@ -10617,7 +10912,7 @@ class JBActionButton(discord.ui.DynamicItem[discord.ui.Button],
         # recevait un template nu marque « NE POSTE PAS ».
         _refus = _refus_reserve_jb(self.ident)
         if _refus:
-            await interaction.response.send_message(_refus, ephemeral=True)
+            await _jb_dire(interaction, _refus, "panneau US")
             return
         # Un sous-menu de famille reste cliquable apres que le panneau a
         # change de model ou de quantite (au-dela de 15 min on ne peut plus
@@ -10625,28 +10920,32 @@ class JBActionButton(discord.ui.DynamicItem[discord.ui.Button],
         # on refuse, en disant quoi faire.
         _perime = _jb_sous_menu_perime(interaction, self.ident, self.qty)
         if _perime:
-            await interaction.response.send_message(_perime, ephemeral=True)
+            await _jb_dire(interaction, _perime, "panneau US")
             return
         cog = interaction.client.get_cog("UserCog")
         entree = _jb_action(self.key)
         if cog is None or entree is None:
-            await interaction.response.send_message(
-                f"Action indisponible (`{self.key}`).", ephemeral=True)
+            await _jb_dire(interaction, f"Action indisponible (`{self.key}`).",
+                           "panneau US")
             return
         _k, _label, cmd_attr, supports_count = entree
         cmd = getattr(cog, cmd_attr, None)
         if cmd is None:
-            await interaction.response.send_message(
-                f"Action indisponible (`{cmd_attr}`).", ephemeral=True)
+            await _jb_dire(interaction, f"Action indisponible (`{cmd_attr}`).",
+                           "panneau US")
             return
         # Même remarque que dans _JailbreakActionButton : pseudo et name sont
         # arbitrés par _source_pseudo_name, sur le drapeau de l'identité.
         model = self.ident
         # ORDRE DES ARGUMENTS : (interaction, model, cmd, count, supports_count).
         # Les inverser faisait echouer l'action avant toute reponse -> Discord
-        # affichait « n'a pas repondu a temps ».
-        await cog._run_for_model(interaction, model, cmd,
-                                 count=self.qty, supports_count=supports_count)
+        # affichait « n'a pas repondu a temps ». Une erreur est dite dans le
+        # -content, et le clic toujours acquitte (_jb_bouton_lancer).
+        await _jb_bouton_lancer(
+            interaction,
+            lambda: cog._run_for_model(interaction, model, cmd, count=self.qty,
+                                       supports_count=supports_count),
+            self.key, "panneau US", f" pour {model}")
 
 
 def _vue_sans_suivi(view):
@@ -10710,18 +11009,20 @@ class JBFamilleBouton(discord.ui.DynamicItem[discord.ui.Button],
         return cls(match["ident"], match["fam"], match["qty"])
 
     async def callback(self, interaction: discord.Interaction):
+        # Refus dans le -content (_jb_dire), rien sous le panneau.
         if not _jb_can_use(interaction):
-            await interaction.response.send_message(_JB_REFUS_ROLE, ephemeral=True)
+            await _jb_dire(interaction, _JB_REFUS_ROLE, "panneau US")
             return
         _refus = _refus_reserve_jb(self.ident)
         if _refus:
-            await interaction.response.send_message(_refus, ephemeral=True)
+            await _jb_dire(interaction, _refus, "panneau US")
             return
         fam = _famille_menu(self.famille)
         if fam is None or self.ident == "_":
-            await interaction.response.send_message(
-                f"Famille indisponible (`{self.famille}`) : reclique la model "
-                "au-dessus, le panneau se remet à jour.", ephemeral=True)
+            await _jb_dire(interaction,
+                           f"Famille indisponible (`{self.famille}`) : reclique la "
+                           "model au-dessus, le panneau se remet à jour.",
+                           "panneau US")
             return
         vue = _jb_panel(interaction.client.get_cog("UserCog"), self.ident,
                         self.qty, guild=interaction.guild,
@@ -10819,7 +11120,8 @@ class JBMenuFamille(discord.ui.DynamicItem[discord.ui.Select],
             if cmd is None:
                 refus = f"Action indisponible (`{choix}`)."
         if refus:
-            await _jb_menu_refuser(interaction, refus, _frais())
+            # Le menu reprend son intitule ; le refus part dans le -content.
+            await _jb_menu_refuser(interaction, refus, _frais(), content=True)
             return
         if _jb_est_panneau_epingle(interaction):
             _jb_panneau_noter(getattr(interaction.channel, "id", 0),
@@ -10834,7 +11136,8 @@ class JBMenuFamille(discord.ui.DynamicItem[discord.ui.Select],
                 _jb_remettre_epingle(interaction, self.ident, self.qty, _frais()),
                 "panneau US : menu remis sur son intitule")
         await _jb_menu_lancer(interaction, cog, self.ident, choix, cmd, sc,
-                              self.qty, _frais(), tache, "panneau US")
+                              self.qty, _frais(), tache, "panneau US",
+                              content=True)
 
 
 async def _jb_remettre_epingle(interaction, ident, qty, vue, quoi="panneau US"):
@@ -10860,34 +11163,22 @@ async def _jb_remettre_epingle(interaction, ident, qty, vue, quoi="panneau US"):
     await interaction.message.edit(view=vue)
 
 
-def _jb_panel_texte(ident, qty, hors=(), inconnues=()) -> str:
-    """Le texte en tete du panneau (TextDisplay). Sa DERNIERE ligne est la
-    marque qui le designe (_JB_PANNEAU_MARQUE) : le format V2 n'a pas de pied
-    d'embed ou la mettre.
+def _jb_entete(nom, guild=None) -> str:
+    """L'en-tete du panneau (la model) et du ✨ General (la reserve) :
+    « ## <photo> Ema_bb0 » -- SEULEMENT l'icone et le nom.
 
-    Ni « menu » ni « Jailbreak » dans ce texte : le premier fait supprimer un
-    message par _delete_old_menus, le second designe le menu des models dans
-    _ensure_us_menu."""
-    if ident == "_":
-        lignes = ["## 🔓 Choisis une model au-dessus 👆",
-                  "Clique sur une model dans la grille du dessus : les actions "
-                  "apparaissent ici.",
-                  f"📦 **Quantité : {qty} média par action** — le bouton "
-                  "ci-dessous la change.",
-                  "Le contenu généré part dans ton salon **-content**."]
-    else:
-        lignes = [f"## 🔓 {ident.capitalize()} — que veux-tu générer ?",
-                  f"📦 **Quantité : {qty} média par action** — plafonnée au "
-                  "stock dispo de la model."]
-        if hors:
-            lignes.append(_jb_note_hors(hors))
-        if inconnues:
-            lignes.append(f"⚠️ {len(inconnues)} action(s) introuvable(s), sans "
-                          "bouton : " + ", ".join(inconnues)
-                          + " (à signaler à un admin).")
-        lignes.append("Le contenu arrive dans ton salon **-content** 👇")
-    lignes.append(_JB_PANNEAU_MARQUE)
-    return "\n".join(lignes)
+    Le proprietaire, le 26/09/2026 : « tu mets juste la PP [...] et Emma BB0,
+    et c'est tout ». Plus de « que veux-tu générer ? », de phrase de
+    quantite, de « le contenu arrive dans ton salon -content », de
+    ligne-marque : les VA savent ce qu'ils font.
+
+    L'icone est l'emoji de la photo (_identity_emoji_name), LU parmi ceux
+    du serveur (_jb_emojis_presents) : rien n'est cree ici, on est souvent
+    au clic. Absente (pas encore creee, serveur plein) : le nom seul."""
+    nom = str(nom or "").strip()
+    e = _jb_emojis_presents(guild, [nom]).get(nom) if guild is not None else None
+    titre = _couper_discord(nom.capitalize(), 100)
+    return f"## {e} {titre}" if e is not None else f"## {titre}"
 
 
 def _jb_panel_probleme(ident, qty) -> str:
@@ -10911,19 +11202,26 @@ def _jb_panel_probleme(ident, qty) -> str:
     return ""
 
 
-def _jb_panel(cog, ident, qty=3, marche="us", guild=None):
+def _jb_panel(cog, ident, qty=_JB_QTE_DEFAUT, marche="us", guild=None):
     """Le panneau permanent : une LayoutView « Components V2 ».
 
-    Un bloc (conteneur a accent rouge fonce) : le texte en tete, puis les
-    rangees de boutons de _JB_BOUTONS_V2, puis UN MENU DEROULANT PAR FAMILLE
-    de _FAMILLES_PANNEAU (Brut, Caption, Template, Trash, Flash) -- la
-    disposition de la maquette /demopanneau, validee par le proprietaire.
-    Plus d'embed : il ne rend que la vue.
+    Un bloc (conteneur a accent rouge fonce) : l'en-tete « <photo> Model »
+    (_jb_entete), puis les rangees de boutons de _JB_BOUTONS_V2, puis UN
+    MENU DEROULANT PAR FAMILLE de _FAMILLES_PANNEAU (Brut, Caption, Template,
+    Trash, Flash) -- la disposition de la maquette /demopanneau, validee par
+    le proprietaire. Plus d'embed : il ne rend que la vue.
 
-    `ident` vaut « _ » tant qu'aucune model n'est choisie : le texte invite a
-    en choisir une, et seule la quantite est la. `marche` n'est plus lu (la
-    meme liste pour tout le monde : « Reel caption », pas de Reel brut) ; il
-    reste pour les appelants.
+    AUCUN AUTRE TEXTE (26/09/2026, voir _jb_entete). Ce que le texte disait
+    en cas d'anomalie (action sans place, action introuvable, menu vide)
+    part au JOURNAL : c'est l'affaire d'un admin, pas du VA.
+
+    `ident` vaut « _ » tant qu'aucune model n'est choisie : AUCUN texte,
+    seulement le bouton de quantite -- c'est lui qui fait reconnaitre le
+    panneau (_est_panneau_actions). Un nom que les boutons ne savent pas
+    porter (_jb_panel_probleme) : l'en-tete et la quantite, la raison au
+    journal (et dans le -content au clic, _jb_model_panneau). `marche`
+    n'est plus lu (la meme liste pour tout le monde) ; il reste pour les
+    appelants.
 
     Tout l'etat (model, quantite) est dans les custom_id : aucune memoire, et
     les elements repondent encore apres un redemarrage.
@@ -10933,23 +11231,24 @@ def _jb_panel(cog, ident, qty=3, marche="us", guild=None):
     try:
         qty = max(1, int(qty))
     except (TypeError, ValueError):
-        qty = 3
+        qty = _JB_QTE_DEFAUT
     vue = ui.LayoutView(timeout=None)
     boite = ui.Container(accent_colour=discord.Colour.dark_red())
     vue.add_item(boite)
-    if ident == "_":
-        boite.add_item(ui.TextDisplay(_jb_panel_texte("_", qty)))
+
+    def _quantite_seule():
         rangee = ui.ActionRow()
         rangee.add_item(JBQtyBouton("_", qty))
         boite.add_item(rangee)
         return vue
+
+    if ident == "_":
+        return _quantite_seule()
     probleme = _jb_panel_probleme(ident, qty)
     if probleme:
         log.warning("panneau US %r : sans boutons -- %s", ident, probleme)
-        boite.add_item(ui.TextDisplay(
-            f"## 🔓 {_couper_discord(ident.capitalize(), 100)}\n⚠️ {probleme}\n"
-            + _JB_PANNEAU_MARQUE))
-        return vue
+        boite.add_item(ui.TextDisplay(_jb_entete(ident, guild)))
+        return _quantite_seule()
     _ic = icones_actions(guild)          # lecture seule : rien sur le reseau
     disposition, hors = _jb_disposition()
     rangees, inconnues = {}, []
@@ -10968,12 +11267,18 @@ def _jb_panel(cog, ident, qty=3, marche="us", guild=None):
             entree = _jb_action(cle)
             if entree is None:
                 inconnues.append(cle)
-                log.warning("panneau US : action %r de _JB_BOUTONS_V2 inconnue", cle)
                 continue
             item = JBActionButton(ident, cle, qty, label=entree[1], row=None,
                                   icone=_ic.get(cle))
         rangees.setdefault(r, ui.ActionRow()).add_item(item)
-    boite.add_item(ui.TextDisplay(_jb_panel_texte(ident, qty, hors, inconnues)))
+    if hors or inconnues:
+        # Plus dans le texte du panneau (« rien d'autre que la model ») :
+        # au journal, ou un admin le lit. Jamais tu.
+        log.warning("panneau US %s : %s%s", ident,
+                    (_jb_note_hors(hors) + " ") if hors else "",
+                    (f"{len(inconnues)} element(s) introuvable(s), sans bouton : "
+                     + ", ".join(inconnues)) if inconnues else "")
+    boite.add_item(ui.TextDisplay(_jb_entete(ident, guild)))
     for r in sorted(rangees):
         boite.add_item(rangees[r])
     return vue
@@ -11002,13 +11307,18 @@ def _jb_panel(cog, ident, qty=3, marche="us", guild=None):
 # font six rangees, un message classique en admet cinq et un menu en prend
 # une entiere.
 #
+# EPURE LE 26/09/2026, comme le panneau : en tete SEULEMENT l'icone de la
+# reserve et son nom (« <photo> Brune », _jb_entete) -- plus de « ✨ General
+# — Brune pour Lola », de description, de quantite, de -content ni de
+# ligne-marque. Les boutons de choix de reserve, PP…Post et les quatre menus
+# restent. L'icone est l'emoji de la photo de la reserve, cree quand on POSE
+# ou redessine les messages du salon (ensure_reserve_emojis), jamais au clic.
+#
 # Prefixe « jbg: » : discord.py lance TOUS les templates dynamiques qui
-# correspondent, celui-ci ne doit recouper aucun « jbus: ». Titre sans
-# « Jailbreak » ni « menu » : du temps de l'embed, le premier designait le
-# menu des models (_ensure_us_menu), le second faisait supprimer le message
-# (_delete_old_menus). C'est la MARQUE « panneau-general-us » qui designe le
-# General : pied de l'ancien embed, ou derniere ligne du texte V2
-# (_est_general, les deux formats).
+# correspondent, celui-ci ne doit recouper aucun « jbus: ». Ce sont ces
+# custom_id qui designent le General (_est_general) ; la MARQUE
+# « panneau-general-us » (pied de l'ancien embed, derniere ligne du texte
+# V2 du 26/09 au matin) reste reconnue pour les messages deja postes.
 
 #: Les BOUTONS du General (rangee 1) : ce que la reserve sert telle quelle.
 _JB_GEN_BOUTONS = ("pp", "bio", "story", "storycta", "post")
@@ -11060,10 +11370,10 @@ _JB_GEN_BRUTE = frozenset({"reelcaption", "capbanger", "templatebanger"} | {
 #: Boutons de choix de reserve, rangee 0 ; la 5e place est la quantite.
 _JB_GEN_MAX_RESERVES = 4
 
+#: La marque du General dans ses formats DEJA POSTES (pied de l'ancien
+#: embed, derniere ligne « -# panneau-general-us » du V2 du 26/09 au matin).
+#: Plus posee : le General d'aujourd'hui se reconnait a ses custom_id jbg:.
 _JB_GENERAL_FOOTER = "panneau-general-us"
-#: La derniere ligne du texte du General V2 (petit texte gris) : c'est elle
-#: qui le designe, un message V2 n'ayant pas de pied d'embed.
-_JB_GENERAL_MARQUE = "-# " + _JB_GENERAL_FOOTER
 #: Plafond Discord du texte d'un message V2 (tous ses TextDisplay).
 _JB_TEXTE_V2_MAX = 4000
 _JB_GENERAL_STORE = DATA_DIR / "us_general_panels.json"
@@ -11071,14 +11381,6 @@ _JB_GENERAL_STORE = DATA_DIR / "us_general_panels.json"
 _JB_CUSTOM_ID_MAX = 100
 #: Ce que les motifs jbg: acceptent comme nom (model ou reserve).
 _JB_NOM_BOUTON = re.compile(r"[a-z0-9_.\-]+")
-
-
-def _marques_en_toutes_lettres(majuscule=False) -> str:
-    """« trash et flash » : les marques, dans l'ordre de marques_montage."""
-    noms = [marques_montage.marque(m)["court"] for m in marques_montage.ORDRE]
-    if not majuscule:
-        noms = [n.lower() for n in noms]
-    return " et ".join([", ".join(noms[:-1]), noms[-1]] if len(noms) > 1 else noms)
 
 
 def _refus_reserve_jb(ident) -> str:
@@ -11112,34 +11414,6 @@ def _refus_reserve_jb(ident) -> str:
             "sous le panneau d'actions.")
 
 
-def _titre_general(titre: str) -> str:
-    """Le titre, sauf s'il contient un mot qui designe un AUTRE message (un
-    nom de model peut en contenir un) : on retombe alors sur « ✨ General »."""
-    bas = (titre or "").lower()
-    if "menu" in bas or "jailbreak" in bas:
-        return "✨ General"
-    return titre
-
-
-def _jb_general_texte(titre, lignes=()) -> str:
-    """Le texte du General (son TextDisplay) : le titre, les lignes, et en
-    DERNIERE ligne la marque qui le designe (_JB_GENERAL_MARQUE) -- le format
-    V2 n'a pas de pied d'embed ou la mettre.
-
-    Coupe sous le plafond de Discord (4000) AVANT la marque : une longue
-    liste de liens ecartes ne doit ni faire refuser le message entier, ni
-    emporter la marque (sans elle, le General ne serait plus reconnu et un
-    second serait pose a cote). La coupe est journalisee."""
-    corps = "\n".join(["## " + _titre_general(titre)] + [l for l in lignes if l is not None])
-    fin = "\n" + _JB_GENERAL_MARQUE
-    place = _JB_TEXTE_V2_MAX - _long_discord(fin)
-    if _long_discord(corps) > place:
-        log.warning("General : texte trop long (%d > %d), coupe",
-                    _long_discord(corps), place)
-        corps = _couper_discord(corps, place - 1) + "…"
-    return corps + fin
-
-
 def _jb_general_ids_poses(model, reserves, active, qty) -> list:
     """Tous les custom_id que le General de `model` porterait : ce sont
     EUX que Discord mesure (100 au plus). Un seul trop long fait refuser le
@@ -11151,27 +11425,33 @@ def _jb_general_ids_poses(model, reserves, active, qty) -> list:
     return ids
 
 
-def _jb_general(cog, model, qty=3, reserve=None, guild=None):
+def _jb_general(cog, model, qty=_JB_QTE_DEFAUT, reserve=None, guild=None):
     """Le menu ✨ General de `model` : une LayoutView « Components V2 », comme
     le panneau d'actions. Plus d'embed : il ne rend que la vue.
 
     Un bloc (conteneur a accent turquoise -- la couleur de l'ancien embed,
-    qui le distingue du panneau rouge juste au-dessus) : le texte en tete,
-    puis, quand il y a de quoi servir :
+    qui le distingue du panneau rouge juste au-dessus), puis, quand il y a
+    de quoi servir :
+      - l'en-tete « <photo> Brune » : l'icone de la reserve active et son
+        nom, RIEN d'autre (26/09/2026, _jb_entete) ;
       - rangee : les reserves liees en boutons de choix (s'il y en a
-        plusieurs, 4 au plus) + 📦 Quantite ;
+        plusieurs, 4 au plus) + 🔢 quantite ;
       - rangee : les boutons de _JB_GEN_BOUTONS (PP, Bio, Story, Story CTA,
         Post) ;
       - un menu deroulant par famille de _JB_GEN_FAMILLES (Caption,
         Template, Trash, Flash).
 
-    Les etats sans action n'ont QUE le texte : edite, le message perd donc
-    les boutons de la model PRECEDENTE, qui serviraient SA brute.
+    Les etats sans action n'ont QUE le bouton de quantite, sans texte :
+    edite, le message perd donc les boutons de la model PRECEDENTE, qui
+    serviraient SA brute ; et la quantite, seul custom_id jbg: restant, le
+    fait encore reconnaitre (_est_general). Ce que le texte en disait part
+    au JOURNAL, jamais tu :
       - « _ » : aucune model choisie, on attend le clic au-dessus ;
-      - aucune reserve retenue : on le dit, avec les liens ecartes et leur
-        raison (rien n'est ecarte en silence), et le chemin sur le site ;
-      - sinon : la reserve active (`reserve` si elle est encore liee, sinon
-        la premiere), et ses voisines en boutons de choix.
+      - la model est une reserve, ses liens sont illisibles, son nom ne
+        tient pas dans un bouton, les noms sont trop longs ;
+      - aucune reserve retenue (les liens ecartes et leur raison au journal).
+    Sinon : la reserve active (`reserve` si elle est encore liee, sinon la
+    premiere), et ses voisines en boutons de choix.
     `cog` n'est pas lu : il est la pour la symetrie avec _jb_panel.
     """
     ui = discord.ui
@@ -11179,36 +11459,44 @@ def _jb_general(cog, model, qty=3, reserve=None, guild=None):
     try:
         qty = max(1, int(qty))
     except (TypeError, ValueError):
-        qty = 3
+        qty = _JB_QTE_DEFAUT
 
-    def _vue(titre, lignes, rangees=()):
+    def _vue(entete=None, rangees=()):
         vue = ui.LayoutView(timeout=None)
         boite = ui.Container(accent_colour=discord.Colour.teal())
         vue.add_item(boite)
-        boite.add_item(ui.TextDisplay(_jb_general_texte(titre, lignes)))
+        if entete:
+            boite.add_item(ui.TextDisplay(entete))
         for r in rangees:
             boite.add_item(r)
         return vue
 
+    def _sans_action(pourquoi="", niveau=logging.INFO):
+        """Le General sans action : la quantite seule. Son custom_id garde la
+        model quand elle y tient (un changement de quantite la retrouve),
+        « _ » sinon."""
+        if pourquoi:
+            log.log(niveau, "General %s : sans action -- %s", model, pourquoi)
+        m = model
+        if (m != "_" and (not _JB_NOM_BOUTON.fullmatch(m)
+                          or len(f"jbg:qb:{m}:_:{qty}") > _JB_CUSTOM_ID_MAX)):
+            m = "_"
+        r = ui.ActionRow()
+        r.add_item(JBGenQtyBouton(m, "_", qty))
+        return _vue(None, [r])
+
     if model == "_":
-        return _vue("✨ General — choisis une model au-dessus 👆", [
-            "Quand tu cliques une model, ce message sert le contenu des "
-            "**réserves** qui lui sont liées : PP, bios, stories, posts, "
-            "captions, templates, " + _marques_en_toutes_lettres() + "."])
-    nom = model.capitalize()
+        return _sans_action()
     if _est_reserve_sure(model):
-        return _vue(f"✨ General — {nom} est une réserve",
-                    ["Une réserve ne se choisit pas dans la grille : "
-                     "clique une model qui y est liée."])
+        return _sans_action("c'est une reserve (elle ne se choisit pas dans le "
+                            "menu des models)")
     try:
         import type_identite as _ti
         retenues, ecartees = _ti.reserves_liees(model)
     except Exception as e:
         log.warning("General %s : liens des reserves illisibles (%s: %s)",
                     model, type(e).__name__, e)
-        return _vue(f"✨ General — {nom}",
-                    [f"Liens des réserves illisibles ({type(e).__name__}) : "
-                     "reclique la model dans un instant."])
+        return _sans_action("liens des reserves illisibles", logging.WARNING)
     # Le custom_id n'accepte que [a-z0-9_.-] (motif des boutons) : un nom
     # hors de ce jeu ferait lever discord.py a la construction, et le
     # General entier tomberait. On l'ecarte, en le disant.
@@ -11218,21 +11506,15 @@ def _jb_general(cog, model, qty=3, reserve=None, guild=None):
         ecartees = list(ecartees) + [(r, "nom illisible dans un bouton Discord")
                                      for r in _hors_motif]
     if not _JB_NOM_BOUTON.fullmatch(model):
-        return _vue(f"✨ General — {nom}",
-                    ["Nom de model illisible dans un bouton Discord "
-                     "(lettres minuscules, chiffres, « _ . - ») : "
-                     "renomme-la sur le site."])
-    lignes_ecartees = [f"• `{n}` : {r}" for n, r in ecartees[:10]]
-    if len(ecartees) > 10:
-        lignes_ecartees.append(f"• … et {len(ecartees) - 10} autre(s)")
+        return _sans_action("nom de model illisible dans un bouton Discord "
+                            "(lettres minuscules, chiffres, « _ . - ») : a "
+                            "renommer sur le site", logging.WARNING)
+    if ecartees:
+        log.info("General %s : %d lien(s) ecarte(s) -- %s", model, len(ecartees),
+                 "; ".join(f"{n} : {r}" for n, r in ecartees))
     if not retenues:
-        desc = [f"Rien à servir ici pour **{nom}**."]
-        if lignes_ecartees:
-            desc.append("Lien(s) écarté(s) :")
-            desc += lignes_ecartees
-        desc.append(f"Pour en lier une : site → **Bibliothèque › {nom} › "
-                    "Modifier › Réserves liées**.")
-        return _vue(f"✨ General — aucune réserve liée à {nom}", desc)
+        return _sans_action("aucune reserve liee (site : Bibliotheque > "
+                            "Modifier > Reserves liees)")
     reserve = (reserve or "").strip().lower()
     active = reserve if reserve in retenues else retenues[0]
     montrees = []
@@ -11249,12 +11531,10 @@ def _jb_general(cog, model, qty=3, reserve=None, guild=None):
     _plus_long = max(len(i) for r in (montrees or [active])
                      for i in _jb_general_ids_poses(model, montrees, r, qty))
     if _plus_long > _JB_CUSTOM_ID_MAX:
-        log.warning("General %s : custom_id de %d caracteres (> %d), noms trop "
-                    "longs", model, _plus_long, _JB_CUSTOM_ID_MAX)
-        return _vue(f"✨ General — {nom}",
-                    [f"Noms trop longs pour Discord ({_plus_long} caractères "
-                     f"sur {_JB_CUSTOM_ID_MAX}) : raccourcis le nom de la "
-                     "model ou de la réserve sur le site."])
+        return _sans_action(f"noms trop longs pour Discord ({_plus_long} "
+                            f"caracteres sur {_JB_CUSTOM_ID_MAX}) : raccourcir "
+                            "le nom de la model ou de la reserve sur le site",
+                            logging.WARNING)
     rangees = []
     haut = ui.ActionRow()
     for r in montrees:
@@ -11287,28 +11567,13 @@ def _jb_general(cog, model, qty=3, reserve=None, guild=None):
     if manquantes:
         log.warning("General : actions inconnues de _jb_action, absentes : %s",
                     ", ".join(manquantes))
-    act = active.capitalize()
-    desc = [f"Contenu de la réserve **{act}**. Caption, Template, "
-            + _marques_en_toutes_lettres(majuscule=True)
-            + f" sont posés sur une brute de **{nom}**."]
-    if montrees:
-        desc.append(f"{len(retenues)} réserves liées : clique un nom ci-dessous "
-                    "pour changer de réserve.")
-        cachees = [r for r in retenues if r not in montrees]
-        if cachees:
-            desc.append(f"+{len(cachees)} autre(s), sans bouton (4 au plus) : "
-                        + ", ".join(cachees[:10])
-                        + ("…" if len(cachees) > 10 else "") + ".")
-    if lignes_ecartees:
-        desc.append("Lien(s) écarté(s) :")
-        desc += lignes_ecartees
-    if manquantes:
-        desc.append(f"⚠️ {len(manquantes)} action(s) indisponible(s) : "
-                    + ", ".join(manquantes) + " (à signaler à un admin).")
-    desc.append(f"\n📦 **Quantité : {qty} média par action** "
-                "_(bouton Quantité, puis tape le nombre)_.")
-    desc.append("Le contenu arrive dans ton salon **-content** 👇")
-    return _vue(f"✨ General — {act} pour {nom}", desc, rangees)
+    cachees = [r for r in retenues if r not in montrees] if montrees else []
+    if cachees:
+        # Plus de ligne « +N autre(s), sans bouton » dans le message : au
+        # journal. Au-dela de quatre, la rangee (4 + la quantite) est pleine.
+        log.warning("General %s : %d reserve(s) liee(s) sans bouton (4 au plus) : %s",
+                    model, len(cachees), ", ".join(cachees))
+    return _vue(_jb_entete(active, guild), rangees)
 
 
 def _jb_gen_controle(interaction, model, res, key):
@@ -11502,11 +11767,15 @@ class JBGenButton(discord.ui.DynamicItem[discord.ui.Button],
     async def callback(self, interaction: discord.Interaction):
         refus, cmd, sc = _jb_gen_controle(interaction, self.model, self.res, self.key)
         if refus:
-            await interaction.response.send_message(refus, ephemeral=True)
+            # Dans le -content, rien sous le General (_jb_dire).
+            await _jb_dire(interaction, refus, "General")
             return
-        await interaction.client.get_cog("UserCog")._run_for_model(
-            interaction, self.res, cmd, count=self.qty, supports_count=sc,
-            brute_de=self.model)
+        cog = interaction.client.get_cog("UserCog")
+        await _jb_bouton_lancer(
+            interaction,
+            lambda: cog._run_for_model(interaction, self.res, cmd, count=self.qty,
+                                       supports_count=sc, brute_de=self.model),
+            self.key, "General", f" pour {self.res} (brute de {self.model})")
         await _jb_general_convertir(interaction, self.model, self.res, self.qty)
 
 
@@ -11588,7 +11857,8 @@ class JBGenMenu(discord.ui.DynamicItem[discord.ui.Select],
             refus, cmd, sc = _jb_gen_controle(interaction, self.model,
                                               self.res, choix)
         if refus:
-            await _jb_menu_refuser(interaction, refus, _frais())
+            # Le menu reprend son intitule ; le refus part dans le -content.
+            await _jb_menu_refuser(interaction, refus, _frais(), content=True)
             return
         # Le General du SALON se redessine tout de suite, sans attendre la fin
         # d'un rendu de 30 s -- sauf s'il a deja suivi une autre model
@@ -11605,7 +11875,7 @@ class JBGenMenu(discord.ui.DynamicItem[discord.ui.Select],
             lambda: cog._run_for_model(interaction, self.res, cmd, count=self.qty,
                                        supports_count=sc, brute_de=self.model),
             choix, _frais(), tache, "General",
-            detail=f" pour {self.res} (brute de {self.model})")
+            detail=f" pour {self.res} (brute de {self.model})", content=True)
 
 
 class JBGenQtyBouton(discord.ui.DynamicItem[discord.ui.Button],
@@ -11618,10 +11888,9 @@ class JBGenQtyBouton(discord.ui.DynamicItem[discord.ui.Button],
         self.model = (model or "_").lower()
         self.res = (res or "_").lower()
         self.qty = int(qty)
-        super().__init__(discord.ui.Button(
-            label=f"📦 Quantité : {self.qty} — clique pour changer",
-            style=discord.ButtonStyle.secondary, row=0,
-            custom_id=f"jbg:qb:{self.model}:{self.res}:{self.qty}"))
+        # « 🔢 5 », le meme bouton que le panneau (_jb_bouton_quantite).
+        super().__init__(_jb_bouton_quantite(
+            self.qty, f"jbg:qb:{self.model}:{self.res}:{self.qty}"))
 
     @classmethod
     async def from_custom_id(cls, interaction, item, match, /):
@@ -11629,8 +11898,7 @@ class JBGenQtyBouton(discord.ui.DynamicItem[discord.ui.Button],
 
     async def callback(self, interaction: discord.Interaction):
         if not _jb_can_use(interaction):
-            await interaction.response.send_message(
-                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
+            await _jb_dire(interaction, _JB_REFUS_ROLE, "General")
             return
 
         async def _suite(inter, q):
@@ -11668,8 +11936,7 @@ class JBGenReserveBouton(discord.ui.DynamicItem[discord.ui.Button],
 
     async def callback(self, interaction: discord.Interaction):
         if not _jb_can_use(interaction):
-            await interaction.response.send_message(
-                "🔒 Réservé aux VA **Jailbreak** (rôle « Jailbreak »).", ephemeral=True)
+            await _jb_dire(interaction, _JB_REFUS_ROLE, "General")
             return
         # _jb_general revalide le lien : une reserve deliee entre-temps
         # retombe sur la premiere encore liee, ou sur l'etat « aucune ».
@@ -11726,17 +11993,32 @@ def _jb_panneaux_oublier(channel_id):
 
 
 def _est_general(m, moi=None) -> bool:
-    """Ce message est-il le ✨ General, dans l'un ou l'autre format ?
+    """Ce message est-il le ✨ General, dans l'un de ses formats ?
 
-    L'ancien (embed) se reconnait au pied « panneau-general-us », le V2 a la
-    derniere ligne « -# panneau-general-us » de son texte -- le meme reperage
-    que le panneau d'actions (_porte_marque). Toute recherche du General
-    (_jb_general_maj, _delete_old_menus, cogs/welcome.py) passe par ici :
-    rater le V2, c'etait en poser un second, ou le supprimer comme un menu.
+      - aujourd'hui (V2 sans marque) : un element « jbg: » -- quantite,
+        choix de reserve, action, menu de famille. Le General sans action
+        (« _ », aucune reserve) garde sa quantite : elle suffit ;
+      - avant : le pied « panneau-general-us » de l'ancien embed, ou la
+        derniere ligne « -# panneau-general-us » du V2 (_porte_marque, le
+        meme reperage que le panneau d'actions).
+    Toute recherche du General (_jb_general_maj, _delete_old_menus,
+    cogs/welcome.py) passe par ici : rater un format, c'etait en poser un
+    second, ou le supprimer comme un menu.
 
     `moi` : l'id du bot ; donne, un message d'un autre auteur n'est jamais le
     General. Ne leve jamais."""
-    return _porte_marque(m, _JB_GENERAL_FOOTER, moi, "General")
+    if _porte_marque(m, _JB_GENERAL_FOOTER, moi, "General"):
+        return True
+    try:
+        if m is None or (moi is not None and getattr(
+                getattr(m, "author", None), "id", None) != moi):
+            return False
+        return _porte_ids(m, (JBGenQtyBouton, JBGenReserveBouton, JBGenButton,
+                              JBGenMenu))
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("General : message %s illisible (%s: %s)",
+                    getattr(m, "id", "?"), type(e).__name__, e)
+        return False
 
 
 async def _jb_general_editer(chan, m, vue) -> bool:
@@ -11785,7 +12067,7 @@ async def _jb_general_maj(client, chan, model, guild, reposter=False):
     if chan is None:
         return False
     cog = client.get_cog("UserCog") if client is not None else None
-    vue = _jb_general(cog, model, 3, guild=guild)
+    vue = _jb_general(cog, model, _JB_QTE_DEFAUT, guild=guild)
     moi = getattr(getattr(client, "user", None), "id", None)
     _nom = getattr(chan, "name", "?")
     memo = _jb_general_ids().get(str(chan.id))

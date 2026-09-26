@@ -320,8 +320,9 @@ async def _demo_recu(interaction: discord.Interaction, cle: str, vue):
 
 
 class _DemoBouton(discord.ui.Button):
-    def __init__(self, vue, cle, label, style=discord.ButtonStyle.primary):
-        super().__init__(label=label[:80], style=style)
+    def __init__(self, vue, cle, label, style=discord.ButtonStyle.primary,
+                 emoji=None):
+        super().__init__(label=label[:80], style=style, emoji=emoji)
         # La vue est gardee a part : dans un LayoutView, un bouton est range
         # dans une rangee, elle-meme dans un conteneur.
         self.vue_demo = vue
@@ -360,17 +361,23 @@ if _demo_v2_dispo():
         def __init__(self, ident="model"):
             super().__init__(timeout=900)
             self.ident = ident
-            self.qty = 3
+            # La quantite par defaut du vrai panneau (_JB_QTE_DEFAUT, 5).
+            try:
+                from cogs.user import _JB_QTE_DEFAUT
+                self.qty = _JB_QTE_DEFAUT
+            except Exception:                                # noqa: BLE001
+                self.qty = 5
             self.construire()
 
         def construire(self):
             self.clear_items()
             ui = discord.ui
             boite = ui.Container(accent_colour=discord.Colour.dark_red())
+            # L'en-tete du vrai panneau depuis le 26/09/2026 : le nom de la
+            # model, rien d'autre (_jb_entete ; la maquette n'a pas de photo).
+            # La derniere ligne dit seulement que c'est une maquette.
             boite.add_item(ui.TextDisplay(
-                f"## 🔓 {self.ident.capitalize()} — que veux-tu générer ?\n"
-                f"📦 **Quantité : {self.qty} média par action** — plafonnée "
-                "au stock dispo de la model.\n"
+                f"## {self.ident.capitalize()}\n"
                 "-# 🧪 Maquette : les menus s'ouvrent, rien n'est envoyé."))
             # Pas de « ⭐⭐⭐ Trends » : le proprietaire l'a retire le 25/09/2026,
             # la fonction n'est « pas encore good » (_JB_MASQUEES de cogs.user).
@@ -378,9 +385,10 @@ if _demo_v2_dispo():
                 r = ui.ActionRow()
                 for cle in rangee:
                     if cle == "_qte":
-                        r.add_item(_DemoBouton(self, "_qty",
-                                               f"📦 Quantité : {self.qty}",
-                                               discord.ButtonStyle.secondary))
+                        # « 🔢 5 », comme le vrai bouton (_jb_bouton_quantite).
+                        r.add_item(_DemoBouton(self, "_qty", str(self.qty),
+                                               discord.ButtonStyle.secondary,
+                                               emoji="🔢"))
                     else:
                         r.add_item(_DemoBouton(self, cle, _demo_libelle(cle)))
                 boite.add_item(r)

@@ -851,27 +851,29 @@ async def _ensure_us_menu(bot, channel, etat=None):
             if p.author.id != _moi:
                 continue
             # Le panneau d'actions AVANT le test des embeds : en V2 il n'en a
-            # plus (sa marque est une ligne de son texte). L'ignorer ici, c'est
-            # ne jamais le voir : le General n'etait plus repose, et un salon
-            # dans le desordre n'etait plus remis dans l'ordre.
+            # plus (il se reconnait a ses custom_id, ou a la ligne-marque des
+            # panneaux deja postes). L'ignorer ici, c'est ne jamais le voir :
+            # le General n'etait plus repose, et un salon dans le desordre
+            # n'etait plus remis dans l'ordre.
             if _est_panneau_actions(p):
                 if _panneau is None:
                     _panneau = p
                 continue
-            # Le General non plus n'a plus d'embed en V2 : reconnu sous ses
-            # DEUX formats (sa marque, jamais son titre), et AVANT le titre
-            # du menu -- le menu est reconnu a « Jailbreak » dans son titre ;
-            # si un jour le titre d'un ancien General contenait ce mot, il
-            # serait pris pour le menu et le vrai menu ne serait plus jamais
-            # repose.
+            # Le General non plus n'a plus d'embed en V2 : reconnu sous TOUS
+            # ses formats (custom_id jbg:, ou sa marque -- jamais son titre),
+            # et AVANT le titre du menu -- l'ancien menu est reconnu a
+            # « Jailbreak » dans son titre ; si un jour le titre d'un ancien
+            # General contenait ce mot, il serait pris pour le menu et le
+            # vrai menu ne serait plus jamais repose.
             if _est_general(p, _moi):
                 if _general is None:
                     _general = p
                 continue
-            # Le menu des models, dans ses DEUX formats : l'ancien (embed au
-            # titre « … Jailbreak … ») et le V2 « menus de 10 », sans embed,
-            # reconnu a la marque de son texte. Tester le seul embed, c'etait
-            # ne plus voir le menu V2 : un second serait pose a chaque passage.
+            # Le menu des models, dans TOUS ses formats : l'ancien (embed au
+            # titre « … Jailbreak … ») et le V2 « menus de 10 », sans embed
+            # ni texte, reconnu a ses custom_id (ou a la ligne-marque de ceux
+            # deja postes). Tester le seul embed, c'etait ne plus voir le
+            # menu V2 : un second serait pose a chaque passage.
             if _est_menu_models(p, _moi) and _menu is None:
                 _menu = p
         if _menu is not None and (_panneau is None or _panneau.id > _menu.id):
@@ -1112,8 +1114,9 @@ async def _ensure_us_panel(bot, channel):
         except Exception as e:
             log.warning("_ensure_us_panel %s : epingles illisibles (%s: %s)",
                         getattr(channel, "name", "?"), type(e).__name__, e)
-        # Format « Components V2 » : une vue, sans embed ni texte a cote.
-        view = _jb_panel(bot.get_cog("UserCog"), "_", 3)
+        # Format « Components V2 » : une vue, sans embed ni texte a cote ;
+        # « aucune model » = la quantite seule, a sa valeur par defaut.
+        view = _jb_panel(bot.get_cog("UserCog"), "_")
         msg = await channel.send(view=view)
         _jb_panel_set(channel.id, msg.id)
         try:
@@ -1142,13 +1145,19 @@ def _id_message(x):
         return None
 
 
-async def _ensure_us_general(bot, channel, apres=None, epingles=None):
+async def _ensure_us_general(bot, channel, apres=None, epingles=None,
+                             creer_emojis=True):
     """Troisieme message PERMANENT : « ✨ General », sous le panneau d'actions.
 
     Il sert le contenu des RESERVES liees a la model choisie (voir
-    type_identite). Pose ici a l'etat d'attente ('_' : « choisis une model
-    au-dessus »), sans bouton ; c'est le clic sur une model qui le remplit
+    type_identite). Pose ici a l'etat d'attente ('_'), sans texte ni action :
+    le seul bouton de quantite ; c'est le clic sur une model qui le remplit
     (cogs/user.py, _jb_general_maj).
+
+    `creer_emojis` : c'est ICI, a la pose, que la photo de chaque reserve
+    devient un emoji du serveur (ensure_reserve_emojis) -- l'en-tete
+    « <photo> Brune » du General la lit au clic, sans rien creer. False
+    depuis un chemin de clic : un televersement ne tient pas dans ses 3 s.
 
     `apres` : le message, ou son id, SOUS lequel il doit s'afficher -- le
     panneau d'actions. Un General plus ancien que lui s'afficherait au-dessus
@@ -1187,7 +1196,15 @@ async def _ensure_us_general(bot, channel, apres=None, epingles=None):
         if ucog is None:
             return False
         from cogs.user import (_jb_general, _jb_general_set, _jb_general_ids,
-                               _est_general as _est_general_us)
+                               _est_general as _est_general_us,
+                               ensure_reserve_emojis)
+        if creer_emojis:
+            try:
+                await ensure_reserve_emojis(channel.guild)
+            except Exception as e:
+                # Sans icone, l'en-tete garde le nom : le General marche.
+                log.warning("_ensure_us_general %s : emojis des reserves non "
+                            "poses (%s: %s)", _nom, type(e).__name__, e)
         _moi = getattr(bot.user, "id", 0)
         _seuil = _id_message(apres)
         if epingles is None:
@@ -1235,7 +1252,7 @@ async def _ensure_us_general(bot, channel, apres=None, epingles=None):
             _jb_general_set(channel.id, garde.id)
             return True                        # deja en place, au bon endroit
         # Format « Components V2 » : une vue, sans embed ni texte a cote. A
-        # l'etat d'attente elle n'a que son texte : aucun bouton tant
+        # l'etat d'attente elle n'a que sa quantite : aucune action tant
         # qu'aucune model n'est choisie.
         vue = _jb_general(ucog, "_", guild=channel.guild)
         msg = await channel.send(view=vue)

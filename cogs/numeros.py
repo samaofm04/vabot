@@ -743,8 +743,9 @@ class NumerosCog(commands.Cog):
             Le filet reste etroit : un message EPINGLE, d un BOT, dont le
             titre d embed est l un des notres -- ou que `est(message)`
             reconnait : le menu des models en « menus de 10 » (format V2)
-            n a plus d embed, seulement une marque dans son texte. Une
-            conversation ne peut pas tomber dedans.
+            n a plus d embed ni de texte, seulement ses menus « jbus:ms: »
+            (ou la ligne-marque de ceux deja postes). Une conversation ne
+            peut pas tomber dedans.
             """
             try:
                 for p in await ch.pins():
@@ -772,9 +773,10 @@ class NumerosCog(commands.Cog):
         if menu_gere:
             from cogs.user import _est_menu_models
             for ch in menus:
-                # Les DEUX formats : l ancien (titre d embed) et le V2
-                # (« -# menu-models-… »), de n importe quel bot. Le panneau
-                # d actions et le ✨ General n en sont jamais (_est_menu_models).
+                # TOUS les formats : l ancien (titre d embed) et le V2 (ses
+                # custom_id « jbus:ms: », ou « -# menu-models-… » pour ceux
+                # deja postes), de n importe quel bot. Le panneau d actions
+                # et le ✨ General n en sont jamais (_est_menu_models).
                 await _wipe(ch, ("Jailbreak US", "Menu Jailbreak"),
                             est=_est_menu_models)
                 if await _ensure_us_menu(self.bot, ch):
