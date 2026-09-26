@@ -48,8 +48,9 @@ Jessye sur GMS qui sont comptés, chaque personne c'est un truc ». Donc :
   iPhone) » — une ligne = un lien GetMySocial de la personne qui a fait au
   moins un clic sur la tranche (clics GMS lien par lien, en arrière-plan,
   gardés dans data/infloww_liens_lignes.json, avec la personne à qui était
-  le lien ; tranche close FIGÉE ; lignes « forcées » par le propriétaire
-  pour un passé faussé ; rien avant la création du lien GMS). Les VA SPAM sont payés AU SUB
+  le lien ; tranche close FIGÉE ; rien avant la création du lien GMS). Le
+  nombre de « Téléphones » saisi par le propriétaire le remplace sur toutes
+  les tranches, sans relevé. Les VA SPAM sont payés AU SUB
   (type « au_sub » : 0,40 $ jusqu'à 200 subs par quinzaine, 0,50 $ au-delà,
   au marginal), sans fixe.
 
@@ -1279,17 +1280,18 @@ FREQUENCES = ("quinzaine", "mois")
 # ce que le formulaire propose pour une personne pas encore réglée : la grille
 PAIE_DEFAUT: Dict[str, Any] = {"type": "fixe_primes", "montant": 75.0, "devise": "USD",
                                "frequence": "quinzaine", "depuis": "",
-                               "taux1": 0.40, "seuil": 200, "taux2": 0.50, "lignes": None}
+                               "taux1": 0.40, "seuil": 200, "taux2": 0.50, "telephones": None}
 MONTANT_MAX = 20000.0            # par quinzaine ou par mois : au-delà, une faute de frappe
 TAUX_SUB_MAX = 100.0             # $ par sub : au-delà, une faute de frappe
 SEUIL_SUB_MAX = 100000           # subs par quinzaine
-LIGNES_MAX = 50                  # « lignes payées » saisies à la main
-# « lignes forcées » : le nombre de lignes d'une quinzaine (ou d'un mois)
-# imposé par le propriétaire, même quand GetMySocial l'a compté — pour un
-# passé faussé avant que le propriétaire de chaque lien soit noté (BO7 sur le
-# 01/09 → 15/09 : « ( BO7 ) 3 » et « 4 » renommés le 26/09, relevés ensuite
-# au nom de LaBoule). Par tranche ENTIÈRE, au plus FORCES_MAX.
-FORCES_MAX = 240
+# « Téléphones » saisis à la main (le propriétaire, 27/09 : « pour BO7, de
+# base ils sont censés avoir quatre liens, là il n'y en a que deux » — deux
+# de ses liens GMS renommés « Laboule ( X ) » et « LaBoule ( Phone ) » le
+# 26/09). Saisi, ce nombre est payé sur TOUTES les tranches, quoi que
+# GetMySocial compte, tranche figée comprise ; vide : automatique. Il
+# remplace deux saisies d'avant, trop compliquées (« lignes payées » tant
+# qu'un compte manquait, bornées ; « lignes forcées » par période).
+LIGNES_MAX = 50
 PAIE_PERSONNES_MAX = 500
 # (plancher de subs de la quinzaine, prime en $), du plus haut au plus bas
 PALIERS_PRIMES: Tuple[Tuple[int, float], ...] = (
@@ -1350,8 +1352,8 @@ _VERROU_BCE = threading.Lock()
 # tranche, sur le quota GetMySocial serré et partagé (épuisé le 26/09 au petit
 # matin) : cache disque par (tranche, lien), tranche close définitive, tranche
 # en cours relue au plus une fois par jour, budget d'appels par jour, calcul
-# en fil de fond — la page n'attend pas. Tant qu'un compte manque : les
-# « lignes payées » saisies à la main s'il y en a, sinon « — ».
+# en fil de fond — la page n'attend pas. Tant qu'un compte manque : « — ».
+# Une personne aux « Téléphones » saisis n'a aucun relevé : inutile.
 #
 # À QUI était un lien sur une tranche (relecture du 26/09) : les lignes d'une
 # quinzaine close se recalculaient avec la liste GMS du jour. « ( BO7 ) 3 » et
@@ -1559,24 +1561,16 @@ def valider_paie(r: Any, aujourdhui: str = "") -> Tuple[Optional[Dict[str, Any]]
     freq = str(r.get("frequence") or "").strip().lower()
     if typ != "au_sub" and freq not in FREQUENCES:
         return None, "fréquence inconnue (quinzaine ou mois)"
-    lignes: Optional[int] = None
-    if typ in TYPES_FIXE and str(r.get("lignes") if r.get("lignes") is not None else "").strip():
-        lignes = _entier_borne(r.get("lignes"), 1, LIGNES_MAX)
-        if lignes is None:
-            return None, f"lignes payées invalides : un nombre entier de 1 à {_nb(LIGNES_MAX)}, ou rien"
-    forces: Dict[str, int] = {}
-    if typ in TYPES_FIXE and r.get("forces") is not None:
-        # jamais du formulaire (enregistrer_paie les fusionne), seulement du fichier
-        fr = r.get("forces")
-        if not isinstance(fr, Mapping) or len(fr) > FORCES_MAX:
-            return None, f"lignes forcées illisibles (un objet de {_nb(FORCES_MAX)} tranches au plus)"
-        for k, n in fr.items():
-            if cle_tranche_entiere(k) != str(k):
-                return None, f"lignes forcées : « {str(k)[:30]} » n'est pas une quinzaine ou un mois entier"
-            nn = _entier_borne(n, 0, LIGNES_MAX)
-            if nn is None:
-                return None, f"lignes forcées invalides : un nombre entier de 0 à {_nb(LIGNES_MAX)}"
-            forces[str(k)] = nn
+    # « Téléphones » : un fixe seulement (au sub ou Aucun : ignoré). Une
+    # ancienne clé « lignes » du fichier (« lignes payées ») est reprise
+    # comme telle ; « forces » (lignes forcées par période) n'est plus lue.
+    tel: Optional[int] = None
+    brut_t = r.get("telephones") if r.get("telephones") is not None else r.get("lignes")
+    if typ in TYPES_FIXE and str(brut_t if brut_t is not None else "").strip():
+        tel = _entier_borne(brut_t, 1, LIGNES_MAX)
+        if tel is None:
+            return None, (f"téléphones invalides : un nombre entier de 1 à {_nb(LIGNES_MAX)}, "
+                          "ou rien (automatique)")
     brut = str(r.get("depuis") or "").strip()
     depuis = ""
     if brut:
@@ -1596,10 +1590,8 @@ def valider_paie(r: Any, aujourdhui: str = "") -> Tuple[Optional[Dict[str, Any]]
         return dict(type=typ, taux1=sub["taux1"], seuil=sub["seuil"], taux2=sub["taux2"],
                     devise=devise, depuis=depuis), ""
     out = {"type": typ, "montant": m, "devise": devise, "frequence": freq, "depuis": depuis}
-    if lignes is not None:
-        out["lignes"] = lignes
-    if forces:
-        out["forces"] = dict(sorted(forces.items()))
+    if tel is not None:
+        out["telephones"] = tel
     return out, ""
 
 
@@ -1663,26 +1655,6 @@ def enregistrer_paie(form: Mapping[str, Any]) -> Tuple[bool, str, str]:
     v, err = valider_paie(form)
     if v is None:
         return False, err, retour
-    v.pop("forces", None)                 # jamais du formulaire : fusionnées plus bas
-    # « Lignes forcées » de la période affichée : le champ n'est dans le
-    # formulaire que sur une vue par période. Vide : plus rien de forcé sur
-    # ses quinzaines (ou mois) ; un nombre : forcé sur chacune, en entier.
-    # « forcer_avant » : la valeur que le formulaire montrait. Inchangée : rien
-    # n'est touché (enregistrer un montant ne retire pas une tranche forcée).
-    forcer: Optional[Tuple[set, Optional[int]]] = None
-    if ("forcer_lignes" in form and v["type"] in TYPES_FIXE
-            and str(form.get("forcer_lignes") or "").strip() != str(form.get("forcer_avant") or "").strip()):
-        a_f, b_f = _date_arg(form.get("du")), _date_arg(form.get("au"))
-        if not (a_f and b_f and a_f <= b_f):
-            return False, "lignes forcées : choisissez d'abord la période en haut de la page", retour
-        brut_f = str(form.get("forcer_lignes") or "").strip()
-        n_f: Optional[int] = None
-        if brut_f:
-            n_f = _entier_borne(brut_f, 0, LIGNES_MAX)
-            if n_f is None:
-                return False, (f"lignes forcées invalides : un nombre entier de 0 à {_nb(LIGNES_MAX)}, "
-                               "ou rien pour ne plus forcer"), retour
-        forcer = ({_k_entiere(t) for t in decouper(a_f, b_f, v["frequence"])}, n_f)
     try:
         deja = cle in (lire_paie()[0])
         if not deja:
@@ -1711,20 +1683,6 @@ def enregistrer_paie(form: Mapping[str, Any]) -> Tuple[bool, str, str]:
             pers = dict(d.get("personnes") or {})
             if cle not in pers and len(pers) >= PAIE_PERSONNES_MAX:
                 return False, f"déjà {PAIE_PERSONNES_MAX} réglages", retour
-            if v["type"] in TYPES_FIXE:
-                # les tranches forcées d'autres périodes restent ; celles de
-                # la période affichée prennent la nouvelle valeur (ou sortent)
-                ancien, _e_anc = valider_paie(pers.get(cle)) if isinstance(pers.get(cle), Mapping) else (None, "")
-                forces = dict((ancien or {}).get("forces") or {})
-                if forcer is not None:
-                    for k in forcer[0]:
-                        forces.pop(k, None)
-                        if forcer[1] is not None:
-                            forces[k] = forcer[1]
-                if len(forces) > FORCES_MAX:
-                    return False, f"déjà {_nb(FORCES_MAX)} tranches aux lignes forcées", retour
-                if forces:
-                    v["forces"] = dict(sorted(forces.items()))
             pers[cle] = dict(v, maj=time.time())
             if not safe_json.write(PAIE_FICHIER, dict(d, personnes=pers, maj=time.time())):
                 return False, "réglage non écrit (disque)", retour
@@ -2129,23 +2087,6 @@ def _tranche_entiere(k: str) -> bool:
     except ValueError:
         return False
     return quinzaine_de(du) == (du, au) or mois_de(du) == (du, au)
-
-
-def cle_tranche_entiere(k: Any) -> str:
-    """La clé « AAAA-MM-JJ|AAAA-MM-JJ » d'une quinzaine ou d'un mois entier,
-    sous sa forme exacte ; "" pour autre chose."""
-    try:
-        du, au = (dt.date.fromisoformat(x) for x in str(k).split("|", 1))
-    except ValueError:
-        return ""
-    if quinzaine_de(du) != (du, au) and mois_de(du) != (du, au):
-        return ""
-    return _cle_periode(du.isoformat(), au.isoformat())
-
-
-def _k_entiere(t: Mapping[str, Any]) -> str:
-    """La tranche ENTIÈRE (quinzaine ou mois) d'un morceau de decouper."""
-    return _cle_periode(t["p_du"].isoformat(), t["p_au"].isoformat())
 
 
 def _elaguer_lignes(tr: Mapping[str, Any], maintenant: float) -> Dict[str, Any]:
@@ -2591,7 +2532,7 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
     noms_g = {i: nom_gms(l) or i for i, l in par_id_g.items()}
     crees_g = {i: cree_gms(l) for i, l in par_id_g.items()}
     jour = _aujourdhui()
-    fixes: List[Dict[str, Any]] = []             # personne par personne
+    fixes: List[Dict[str, Any]] = []             # personne par personne, au compte GMS
     for x in sorted(actifs, key=lambda x: _cle_nom(x.get("cle"))):
         p, cfg = x["paie"], x["paie"]["cfg"]
         if cfg["type"] not in TYPES_FIXE or not p.get("debut"):
@@ -2603,7 +2544,10 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
                                    cfg["frequence"])
         premiers = [crees_g.get(l["id"]) or "" for l in p["liens_gms"]]
         p["premier_lien"] = min(premiers) if premiers and all(premiers) else ""
-        fixes.append(x)
+        # « Téléphones » saisis : ils font foi partout, aucun relevé
+        # GetMySocial pour elle (le quota est partagé, et serré)
+        if not cfg.get("telephones"):
+            fixes.append(x)
     tr_lg = _tranches_lg(_lignes_cache()) if fixes else {}
     idx_lg = _index_lg(tr_lg)
 
@@ -2611,19 +2555,17 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
                                 Dict[Tuple[str, str, str], Tuple[str, str, Dict[str, Any]]]]:
         """({(personne, du, au): lignes de la tranche}, {(lien, du, au):
         (personne, nom, état)} des liens dont le compte sert) — une tranche
-        figée ou aux lignes forcées ne demande aucun relevé."""
+        figée ne demande aucun relevé."""
         res: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
         besoin: Dict[Tuple[str, str, str], Tuple[str, str, Dict[str, Any]]] = {}
         for x in fixes:
-            p, cfg = x["paie"], x["paie"]["cfg"]
-            forces = cfg.get("forces") or {}
+            p = x["paie"]
             for q in p["tranches_f"]:
                 du_q, au_q = _k_tranche(q)
                 r = _lignes_tranche(tr_lg, idx_lg, str(x["cle"]), p["liens_gms"], du_q, au_q, jour,
                                     proprio_g, noms_g, crees_g)
-                r["force"] = forces.get(_k_entiere(q))
                 res[(str(x["cle"]), du_q, au_q)] = r
-                if r["force"] is None and not r["fige"]:
+                if not r["fige"]:
                     for l, st in r["sts"]:
                         besoin[(l["id"], du_q, au_q)] = (str(x["cle"]), l["nom"], st)
         return res, besoin
@@ -2717,52 +2659,43 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
         courts: List[Tuple[str, str, bool]] = []
         cout: Optional[float] = 0.0
         if typ in TYPES_FIXE:
-            # le fixe, PAR LIGNE ACTIVE de chaque tranche. Lignes forcées par
-            # le propriétaire : elles, telles quelles. Compte à trou : les
-            # « lignes payées » saisies, BORNÉES par ce qui est su (jamais
-            # moins que les lignes déjà confirmées actives, jamais plus que la
-            # personne n'a de liens) ; sinon « — ». Avant son premier lien
-            # GMS : les lignes saisies, sinon « — » (rien n'est inventé).
+            # le fixe, PAR TÉLÉPHONE de chaque tranche : les « Téléphones »
+            # saisis par le propriétaire, tels quels, partout ; sinon les
+            # lignes ACTIVES comptées par GetMySocial. Compte à trou, ou
+            # tranche d'avant le premier lien GMS : « — » (rien n'est inventé).
             m = float(cfg["montant"])
             # le prix d'une ligne en centimes : dans la devise du réglage
             # (montré en euros tant que le taux manque), et en dollars,
             # arrondi AVANT de multiplier, tel que le détail l'écrit
             unite_dev_c = _centimes(m)
             unite_usd_c = prix_ligne_c(cfg, taux)
-            saisie = _entier(cfg.get("lignes"))
+            saisie = _entier(cfg.get("telephones"))
+            vide = {"sts": [], "fige": False, "partis": [], "exclus": [], "pas_encore": []}
             detail_f: List[Dict[str, Any]] = []
             for q in p.get("tranches_f") or []:
                 du_q, au_q = _k_tranche(q)
-                r = res_lg.get((str(x["cle"]), du_q, au_q)) or {"sts": [], "fige": False, "partis": [],
-                                                                 "exclus": [], "pas_encore": [], "force": None}
+                r = vide if saisie else (res_lg.get((str(x["cle"]), du_q, au_q)) or vide)
                 sts = r["sts"]
                 actives = [l["nom"] for l, s in sts if s["etat"] == "actif"]
                 sans_clic = [l["nom"] for l, s in sts if s["etat"] == "inactif"]
                 inconnus = [l["nom"] for l, s in sts if s["etat"] not in ("actif", "inactif")]
-                force = r.get("force")
-                if force is None:              # une tranche forcée n'attend aucun relevé
-                    lg_rates += [s["raison"] for _l, s in sts if s["etat"] == "rate"]
-                    lg_inconnus += len(inconnus)
-                if force is not None:
-                    n, source = int(force), "force"
+                lg_rates += [s["raison"] for _l, s in sts if s["etat"] == "rate"]
+                lg_inconnus += len(inconnus)
+                if saisie:
+                    n, source = saisie, "main"
                 elif not sts and r["pas_encore"]:
-                    n, source = saisie, "sans_lien"
+                    n, source = None, "sans_lien"
                 elif not inconnus:
                     n, source = len(actives), "gms"
-                elif saisie:
-                    n = len(actives) + min(len(inconnus), max(0, saisie - len(actives)))
-                    source = "manuel"
                 else:
                     n, source = None, ""
                 base = m * q["jours"] / q["jours_periode"]
                 detail_f.append({"du": du_q, "au": au_q, "complete": q["complete"], "jours": q["jours"],
                                  "jours_periode": q["jours_periode"], "base": base, "total": len(sts),
-                                 "actives": None if inconnus else len(actives), "confirmees": len(actives),
-                                 "lignes": n, "source": source, "saisie": saisie, "fige": r["fige"],
+                                 "lignes": n, "source": source, "fige": r["fige"],
                                  "sans_clic": sans_clic, "inconnus": inconnus,
                                  "pas_encore": [d["nom"] for d in r["pas_encore"]],
                                  "partis": r["partis"], "exclus": r["exclus"],
-                                 "premier_lien": p.get("premier_lien") or "",
                                  # au centime : dans la devise, et en dollars
                                  # (None sans taux) — ce que le détail écrit
                                  "montant": None if n is None else
@@ -2790,11 +2723,11 @@ def avec_paie(t: Mapping[str, Any], attente: Optional[float] = None) -> Dict[str
                                f"{_jour_long(sans_lien_f[-1]['au'])}"
                                + (f" (premier lien créé le {_jour_long(p['premier_lien'])})"
                                   if p.get("premier_lien") else "")
-                               + " : renseignez « lignes payées » (ou « payé depuis »)")
+                               + " : renseignez « Téléphones » (ou « payé depuis »)")
                 courts.append(((f"Pas de lien GetMySocial avant le {_jour_long(p['premier_lien'])}"
                                 if p.get("premier_lien") else
                                 f"Pas de lien GetMySocial du {_tranche_lib(sans_lien_f[0]['du'], sans_lien_f[-1]['au'])}"),
-                               "remplissez « lignes payées »", False))
+                               "remplissez « Téléphones »", False))
             if not manque_f and p["fixe"] is None:
                 raisons.append("taux EUR → USD inconnu : fixe en euros non converti")
                 courts.append(("Taux euro → dollar inconnu", "rechargez plus tard", False))
@@ -2897,8 +2830,9 @@ def page_refus_paie(pourquoi: str, retour: str) -> str:
 
 
 def resume_paie(cfg: Optional[Mapping[str, Any]]) -> str:
-    """« 75 $ / quinzaine + primes », « 200 EUR / mois », « 0,40 $ / sub
-    jusqu'à 200, 0,50 $ au-delà », « — »."""
+    """« 75 $ / quinzaine + primes », « 75 $ / quinzaine × 4 tél. + primes »
+    (téléphones saisis), « 200 EUR / mois », « 0,40 $ / sub jusqu'à 200,
+    0,50 $ au-delà », « — »."""
     if not cfg or cfg.get("type") not in TYPES_PAYES:
         return "—"
     dev = "$" if cfg.get("devise") == "USD" else "EUR"
@@ -2906,6 +2840,8 @@ def resume_paie(cfg: Optional[Mapping[str, Any]]) -> str:
         return (f"{_taux_court(cfg['taux1'])} {dev} / sub jusqu'à {_nb(cfg['seuil'])}, "
                 f"{_taux_court(cfg['taux2'])} {dev} au-delà")
     s = f"{_montant_court(cfg['montant'])} {dev} / {cfg['frequence']}"
+    if cfg.get("telephones"):
+        s += f"{_FOIS}{_nb(cfg['telephones'])}\u00a0tél."
     return s + (" + primes" if cfg["type"] == "fixe_primes" else "")
 
 
@@ -3791,12 +3727,8 @@ def _telephones(f: Mapping[str, Any], court: bool = False) -> str:
     sans clic sont dits en note)."""
     n, src, total = int(f.get("lignes") or 0), f.get("source"), int(f.get("total") or 0)
     tel = f"{_nb(n)} téléphone{'s' if n > 1 else ''}"
-    if src == "force":
+    if src == "main":
         return f"{tel} (mis à la main)"
-    if src == "sans_lien":
-        return f"{tel} (saisi{'s' if n > 1 else ''} à la main)"
-    if src == "manuel":
-        return f"{tel} (en attendant GetMySocial)"
     if not total:
         return "aucun téléphone à lui sur ces dates"
     if court or n == total:
@@ -3807,33 +3739,23 @@ def _telephones(f: Mapping[str, Any], court: bool = False) -> str:
     return f"{tous}, {_nb(n)} {'ont' if n > 1 else 'a'} fait des clics"
 
 
-def _vu_par_gms(f: Mapping[str, Any]) -> str:
-    """Ce que GetMySocial compte sur une tranche aux lignes mises à la main."""
-    total = int(f.get("total") or 0)
-    if f.get("actives") is not None and total:
-        a = int(f["actives"])
-        return f"{_nb(a)} téléphone{'s' if a > 1 else ''} actif{'s' if a > 1 else ''} sur {_nb(total)}"
-    if not total:
-        return "pas encore de lien" if f.get("pas_encore") else "aucun lien à lui sur ces dates"
-    c, u = int(f.get("confirmees") or 0), len(f.get("inconnus") or [])
-    return (f"{_nb(c)} actif{'s' if c > 1 else ''} confirmé{'s' if c > 1 else ''}, "
-            f"{_nb(u)} pas relevé{'s' if u > 1 else ''}")
+def _compte_gms(noms: List[str], saisis: int) -> str:
+    """Téléphones saisis à la main : ce que GetMySocial compte, pour info,
+    quand ce n'est pas le même nombre (« GetMySocial n'en compte que 2 :
+    ( BO7 ) 1, ( BO7 ) 2 »)."""
+    if not noms:
+        return "GetMySocial n'en compte aucun"
+    quoi = "n'en compte que" if len(noms) < saisis else "en compte"
+    return f"GetMySocial {quoi} {_nb(len(noms))} : {', '.join(noms)}"
 
 
 def _notes_tranche(f: Mapping[str, Any]) -> List[str]:
-    """Les avertissements d'une tranche du fixe, une ligne chacun."""
-    src, notes = f.get("source"), []
+    """Les avertissements d'une tranche du fixe, une ligne chacun (aucun aux
+    téléphones saisis à la main : rien n'est relevé)."""
+    notes = []
     if f.get("sans_clic"):
         notes.append("Sans clic : " + ", ".join(f["sans_clic"]))
-    if src == "force":
-        notes.append("GetMySocial : " + _vu_par_gms(f))
-    if src == "manuel" and f.get("inconnus"):
-        s = "s" if len(f["inconnus"]) > 1 else ""
-        notes.append(f"Pas encore relevé{s} : " + ", ".join(f["inconnus"]))
-    if src == "sans_lien" and f.get("lignes") is not None:
-        notes.append("Pas encore de lien GetMySocial"
-                     + (f" (premier le {_jour_long(f['premier_lien'])})" if f.get("premier_lien") else ""))
-    if f.get("pas_encore") and src != "sans_lien":
+    if f.get("pas_encore") and f.get("source") != "sans_lien":
         s = "s" if len(f["pas_encore"]) > 1 else ""
         notes.append(f"Pas encore créé{s} : " + ", ".join(f["pas_encore"]))
     for d in f.get("partis") or []:
@@ -3969,6 +3891,9 @@ def etapes_calcul(p: Mapping[str, Any], tx: Optional[Mapping[str, Any]] = None, 
             vu[texte].append(lib)
     notes_txt = [t if len(df) <= 1 or len(libs) == len(df) else f"{', '.join(libs)} · {t}"
                  for t, libs in vu.items()]
+    saisis = _entier(cfg.get("telephones")) if typ in TYPES_FIXE else None
+    if saisis and "liens_gms" in p and len(p["liens_gms"]) != saisis:
+        notes_txt.append(_compte_gms([l["nom"] for l in p["liens_gms"]], saisis))
     if eur and taux:
         notes_txt.append(f"1 EUR = {_dec(taux, 4)}\u00a0$ (BCE du {_jour_long(tx.get('date'))})")
 
@@ -3991,8 +3916,9 @@ def _form_paie(x: Mapping[str, Any], cle: str, tri: str, sens: str, du: str, au:
     fait sur la même vue. Seule la vue du propriétaire le porte : la clé est
     alors la sienne (cle_paie), jamais celle du salon. Tous les champs sont
     là (sans script, rien ne s'affiche selon le type) : seuls ceux du type
-    choisi sont lus. Une ligne SPAM non réglée n'est PAS mise « au sub »
-    d'office ; les prix au sub portent seulement leurs valeurs par défaut."""
+    choisi sont lus ; « Téléphones », lui, n'est montré que pour un fixe.
+    Une ligne SPAM non réglée n'est PAS mise « au sub » d'office ; les prix
+    au sub portent seulement leurs valeurs par défaut."""
     cfg = (x.get("paie") or {}).get("cfg")
     v = dict(PAIE_DEFAUT, **(cfg or {}))
     caches = "".join(f'<input type="hidden" name="{n}" value="{_e(val)}">'
@@ -4010,24 +3936,13 @@ def _form_paie(x: Mapping[str, Any], cle: str, tri: str, sens: str, du: str, au:
         fin = dt.date.fromisoformat(_aujourdhui()) + dt.timedelta(days=366)
     except ValueError:
         fin = dt.date.today() + dt.timedelta(days=366)
-    lignes = "" if v.get("lignes") in (None, "") else str(int(v["lignes"]))
-    # les lignes FORCÉES : seulement sur une vue par période (les quinzaines,
-    # ou mois, qu'elle touche, en entier). « forcer_avant » : la valeur
-    # montrée — enregistrer le montant sans toucher à ce champ ne retire
-    # rien, même si les tranches de la période n'ont pas toutes la même.
-    a_f, b_f = _date_arg(du), _date_arg(au)
-    if a_f and b_f and a_f <= b_f:
-        tr_f = decouper(a_f, b_f, v["frequence"])
-        vals = {(v.get("forces") or {}).get(_k_entiere(t)) for t in tr_f}
-        pre = str(next(iter(vals))) if len(vals) == 1 and None not in vals else ""
-        quoi = "des quinzaines" if v["frequence"] == "quinzaine" else "des mois"
-        forcer = (f'<label>Forcer les lignes {quoi} du {_jour_court(tr_f[0]["p_du"].isoformat())} au '
-                  f'{_jour_court(tr_f[-1]["p_au"].isoformat())}, même si GetMySocial a compté (vide : ne plus '
-                  f'forcer)<input type="number" name="forcer_lignes" value="{_e(pre)}" min="0" max="{LIGNES_MAX}" '
-                  f'step="1" inputmode="numeric"></label><input type="hidden" name="forcer_avant" value="{_e(pre)}">')
-    else:
-        forcer = ('<div class="det">Forcer les lignes d\'une quinzaine : choisissez-la d\'abord en haut de la '
-                  'page.</div>')
+    # « Téléphones » : pour un fixe seulement (au sub, Aucun : pas de case).
+    # Vide : automatique, les liens GetMySocial qui ont fait des clics.
+    tel = "" if v.get("telephones") in (None, "") else str(int(v["telephones"]))
+    champ_tel = ('<label>Téléphones<input type="number" name="telephones" '
+                 f'value="{_e(tel)}" min="1" max="{LIGNES_MAX}" step="1" inputmode="numeric">'
+                 '<span class="aide">vide = automatique (les liens GMS qui ont fait des clics)</span>'
+                 '</label>') if v["type"] in TYPES_FIXE else ""
     return ('<details class="mod"><summary>modifier</summary>'
             f'<form class="fpaie" method="post" action="/infloww/liens/paie">{caches}'
             f'<label>Type<select name="type">{choix(((t, LIB_TYPES[t]) for t in TYPES_PAIE), v["type"])}'
@@ -4035,15 +3950,12 @@ def _form_paie(x: Mapping[str, Any], cle: str, tri: str, sens: str, du: str, au:
             f'<label>Devise<select name="devise">{choix((("USD", "$ (USD)"), ("EUR", "€ (EUR), converti en $")), v["devise"])}'
             '</select></label>'
             '<fieldset><legend>Fixe, Fixe + primes</legend>'
-            f'<label>Montant par ligne<input type="number" name="montant" value="{_e(montant)}" min="0" '
+            f'<label>Montant par téléphone<input type="number" name="montant" value="{_e(montant)}" min="0" '
             f'max="{int(MONTANT_MAX)}" step="0.01" inputmode="decimal"></label>'
             f'<label>Fréquence<select name="frequence">'
             f'{choix((("quinzaine", "par quinzaine"), ("mois", "par mois")), v["frequence"])}'
             '</select></label>'
-            '<label>Lignes payées tant que GetMySocial n\'a pas répondu, ou avant le premier lien GMS '
-            '(facultatif)<input type="number" '
-            f'name="lignes" value="{_e(lignes)}" min="1" max="{LIGNES_MAX}" step="1" inputmode="numeric"></label>'
-            f'{forcer}</fieldset>'
+            f'{champ_tel}</fieldset>'
             '<fieldset><legend>Au sub (par quinzaine)</legend>'
             f'<label>Prix par sub jusqu\'au seuil<input type="number" name="taux1" value="{_e(taux_champ(v["taux1"]))}" '
             f'min="0" max="{int(TAUX_SUB_MAX)}" step="0.001" inputmode="decimal"></label>'
@@ -4057,16 +3969,6 @@ def _form_paie(x: Mapping[str, Any], cle: str, tri: str, sens: str, du: str, au:
             '<button type="submit">Enregistrer</button></form></details>')
 
 
-def _force_applicable(k: str, frequence: str) -> bool:
-    """Une tranche forcée compte-t-elle avec cette fréquence ? (une quinzaine
-    forcée ne dit rien d'une paie au mois : elle est montrée, pas comptée)"""
-    try:
-        du, au = (dt.date.fromisoformat(x) for x in str(k).split("|", 1))
-    except ValueError:
-        return False
-    return (mois_de if frequence == "mois" else quinzaine_de)(du) == (du, au)
-
-
 def _cellule_paie(x: Mapping[str, Any], cle: str, tri: str, sens: str, du: str, au: str) -> str:
     p = x.get("paie") or {}
     cfg = p.get("cfg")
@@ -4075,14 +3977,6 @@ def _cellule_paie(x: Mapping[str, Any], cle: str, tri: str, sens: str, du: str, 
         det.append(f"payé depuis le {_jour_long(cfg['depuis'])}")
     if cfg and cfg.get("type") == "au_sub":
         det.append("par quinzaine, sans fixe")
-    if cfg and cfg.get("type") in TYPES_FIXE and cfg.get("lignes"):
-        det.append(f"lignes payées tant que GetMySocial manque : {_nb(cfg['lignes'])}")
-    if cfg and cfg.get("type") in TYPES_FIXE and cfg.get("forces"):
-        fz = sorted(cfg["forces"].items())
-        det.append("lignes forcées à la main : " + " ; ".join(
-            f"{_libelle_periode(*k.split('|', 1))} : {_nb(n)}"
-            + ("" if _force_applicable(k, cfg["frequence"]) else f" (ignorée : paie au {cfg['frequence']})")
-            for k, n in fz[:4]) + (f" ; et {_nb(len(fz) - 4)} autre(s)" if len(fz) > 4 else ""))
     cl = "pr ps" if cfg and cfg.get("type") == "au_sub" else "pr"
     return (f'<td class="paie"><span class="{cl}">{_e(p.get("resume") or resume_paie(cfg))}</span>'
             + (f'<div class="det">{"<br>".join(_e(d) for d in det)}</div>' if det else "")
@@ -4200,8 +4094,8 @@ def _avert_paie(t: Mapping[str, Any], lignes: List[Mapping[str, Any]]) -> List[s
         s = "s" if n > 1 else ""
         h.append(f'<div class="avert">Lignes actives : {_nb(n)} relevé{s} de clics GetMySocial (un par lien '
                  f'GMS et par tranche du fixe) pas encore connu{s} — {pourquoi}. '
-                 "Gain / perte « — » en attendant pour les personnes concernées, sauf « lignes payées » "
-                 "saisies à la main, bornées par les lignes connues (jamais un nombre de lignes inventé).</div>")
+                 "Gain / perte « — » en attendant pour les personnes concernées (jamais un nombre de "
+                 "téléphones inventé), sauf si leurs « Téléphones » sont saisis (« modifier »).</div>")
     return h
 
 
@@ -4227,10 +4121,8 @@ def _note_paie(t: Mapping[str, Any], du: str) -> List[str]:
             "entièrement relevée est FIGÉE : un lien renommé ou supprimé ensuite ne change plus ses lignes "
             "(il est dit sous la ligne). Un lien créé après la fin d'une tranche n'y compte pas (aucun appel) ; "
             "avant le premier lien GetMySocial de la personne : « pas encore de lien ». Tant qu'un compte "
-            "manque, les « lignes payées » saisies à la main, jamais moins que les lignes déjà confirmées "
-            "actives ni plus que la personne n'a de liens (sans lien GetMySocial : telles quelles), sinon "
-            "« — ». « Forcer les lignes » (vue par période) impose le nombre d'une quinzaine ou d'un mois, "
-            "même compté par GetMySocial : pour un passé faussé, dit « forcées à la main »",
+            "manque : « — ». « Téléphones » saisi (« modifier ») : ce nombre sur toutes les tranches, quoi "
+            "que GetMySocial compte, sans aucun relevé, dit « mis à la main » ; vide : automatique",
             f"<b>Primes</b> par quinzaine, une fois par personne (pas par ligne), sur les subs de la personne "
             f"lus dans MyPuls, non cumulables (seul le palier atteint compte) : {_e(primes)} ; une quinzaine "
             "coupée par la plage est comptée sur ses seuls jours (« quinzaine incomplète »)",
@@ -4338,6 +4230,7 @@ td details{{margin:4px 0 0}} td summary{{font-size:11px;padding:2px 0}}
 td details.mod summary{{color:var(--acc)}}
 .fpaie{{display:grid;gap:6px;margin-top:6px;min-width:176px;max-width:220px}}
 .fpaie label{{display:grid;gap:2px;font-size:11px;color:var(--faible)}}
+.fpaie .aide{{font-size:10.5px;line-height:1.3}}
 .fpaie fieldset{{display:grid;gap:6px;margin:0;padding:6px 7px 7px;border:1px solid var(--bord);border-radius:8px;min-width:0}}
 .fpaie legend{{font-size:11px;color:var(--faible);padding:0 3px}}
 .fpaie input,.fpaie select{{background:var(--fond);color:var(--texte);border:1px solid var(--bord);border-radius:6px;padding:5px 6px;font:inherit;font-size:13px;min-width:0;color-scheme:dark}}
