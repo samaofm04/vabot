@@ -830,14 +830,26 @@ def _kw_menu_models(emb, view) -> dict:
     return {"view": view} if emb is None else {"embed": emb, "view": view}
 
 
-async def _ensure_us_menu(bot, channel, etat=None):
+async def _ensure_us_menu(bot, channel, etat=None, modele=None):
     """Poste (et épingle) le menu Jailbreak US dans un salon -content s'il n'y est
     pas déjà (détection via les messages épinglés du bot). Idempotent.
 
     `etat` (dict, facultatif) recoit etat["general"] : True si le ✨ General
     est en place, False s'il n'a pas pu etre pose, None si on n'y a pas
     touche. Le retour, lui, reste un booleen : l'appelant le teste tel quel
-    (numeros, /resetmenus), un tuple serait toujours « vrai »."""
+    (numeros, /resetmenus), un tuple serait toujours « vrai ».
+
+    UNE MODEL TOUJOURS CHOISIE (26/09/2026) : ce qui est pose ou repose
+    montre la model du salon -- la derniere choisie, lue dans le panneau
+    AVANT qu'il soit supprime, sinon la premiere du menu
+    (cogs/user.py _jb_modele_du_salon) -- au lieu de « 🔢 5 » seul ; le menu
+    l'affiche choisie. Un salon deja en place dont le panneau attend encore
+    (« _ ») est rempli (_jb_salon_remplir). `modele` : (model, quantite,
+    source) deja lus par l'appelant -- reset_us_menu les lit avant de
+    purger le salon, ou il n'y aurait plus rien a lire.
+
+    Les notifications « … a epingle un message » du salon sont retirees en
+    fin de passage (_jb_notifs_epingle_retirer)."""
     if isinstance(etat, dict):
         etat["general"] = None
     if bot is None or channel is None:
@@ -887,6 +899,10 @@ async def _ensure_us_menu(bot, channel, etat=None):
             # menu V2 : un second serait pose a chaque passage.
             if _est_menu_models(p, _moi) and _menu is None:
                 _menu = p
+        from cogs.user import (_jb_modele_du_salon, _jb_salon_remplir,
+                               _jb_notifs_epingle_retirer, _jb_epingler)
+        # Marche du PROPRIETAIRE du salon, sinon du serveur (marche_du_salon).
+        marche = marche_du_salon(channel)
         if _menu is not None and (_panneau is None or _panneau.id > _menu.id):
             # Deja en place, dans le bon ordre. C'est le cas de TOUS les
             # salons existants : sans cet appel, aucun ne recevrait jamais le
@@ -897,7 +913,18 @@ async def _ensure_us_menu(bot, channel, etat=None):
                                               epingles=pins)
                 if isinstance(etat, dict):
                     etat["general"] = _g
+                # Un panneau qui attend encore (« _ »), ou sur une model qui
+                # n'est plus proposee : sur la model du salon, avec le
+                # General et le menu. Panneau deja sur une model proposee :
+                # seul un General en attente le rejoint ; aucun appel sinon.
+                await _jb_salon_remplir(bot, channel, pins, marche, menu=_menu)
+            await _jb_notifs_epingle_retirer(channel, quoi="_ensure_us_menu")
             return True
+        # La model du salon, lue AVANT de supprimer quoi que ce soit : le
+        # panneau a refaire la porte encore.
+        if modele is None:
+            modele = _jb_modele_du_salon(channel, pins, marche, _moi)
+        _model, _qty = modele[0], modele[1]
         # Deux cas a reprendre : ordre inverse, OU menu absent alors qu'un
         # panneau existe (le menu se poserait APRES -> inverse a l'ecran).
         _a_refaire = [m for m in
@@ -926,23 +953,24 @@ async def _ensure_us_menu(bot, channel, etat=None):
                 log.warning("_ensure_us_menu %s : ids des panneaux non oublies "
                             "(%s: %s)", getattr(channel, "name", "?"),
                             type(e).__name__, e)
-        # Marche du PROPRIETAIRE du salon, sinon du serveur (marche_du_salon).
-        marche = marche_du_salon(channel)
         # PP des models dans les menus (emojis serveur, créés une seule fois)
+        _choisie = None if _model == "_" else _model
         try:
-            emb, view = await ucog.jailbreak_us_menu_async(channel.guild, marche)
+            emb, view = await ucog.jailbreak_us_menu_async(channel.guild, marche,
+                                                           choisie=_choisie)
         except Exception as e:
             log.warning("_ensure_us_menu %s : menu sans PP creees (%s: %s)",
                         getattr(channel, "name", "?"), type(e).__name__, e)
             # Le repli garde les PP deja presentes et la phrase d'acces
             # du serveur : il a besoin du serveur.
-            emb, view = ucog.jailbreak_us_menu(marche, guild=channel.guild)
+            emb, view = ucog.jailbreak_us_menu(marche, guild=channel.guild,
+                                               choisie=_choisie)
         msg = await channel.send(**_kw_menu_models(emb, view))
         try:
-            await msg.pin()
+            await _jb_epingler(msg, channel, "menu des models")
         except Exception:
             pass
-        await _ensure_us_panel(bot, channel)
+        await _ensure_us_panel(bot, channel, modele=(_model, _qty))
         # Le General se pose SOUS le panneau d'actions : on lui donne l'id
         # que _ensure_us_panel vient de memoriser (panneau retrouve ou cree).
         try:
@@ -950,9 +978,11 @@ async def _ensure_us_menu(bot, channel, etat=None):
             _id_panneau = _jb_panel_ids().get(str(channel.id))
         except Exception:
             _id_panneau = None
-        _g = await _ensure_us_general(bot, channel, apres=_id_panneau)
+        _g = await _ensure_us_general(bot, channel, apres=_id_panneau,
+                                      model=_model)
         if isinstance(etat, dict):
             etat["general"] = _g
+        await _jb_notifs_epingle_retirer(channel, quoi="_ensure_us_menu")
         return True
     except Exception as e:
         log.warning(f"_ensure_us_menu: {e}")
@@ -966,7 +996,15 @@ async def maj_menu_marche(bot, channel, marche=None):
     Le menu est reconnu dans ses DEUX formats (_est_menu_models) ; un ancien
     menu (embed) passe en « menus de 10 » par cette edition, avec le repli
     d'un nouveau menu -- et l'ordre du salon remis -- si Discord refuse
-    (_jb_menu_models_editer)."""
+    (_jb_menu_models_editer).
+
+    UNE MODEL TOUJOURS CHOISIE (26/09/2026) : le menu redessine affiche la
+    model du salon (la derniere choisie encore proposee, sinon la premiere,
+    _jb_modele_du_salon) ; un panneau qui attend encore (« _ ») ou qui
+    montre une model plus proposee -- en pause, passee a l'autre marche,
+    supprimee -- passe sur elle, avec le General (_jb_salon_remplir). Sans
+    panneau, le menu n'affiche rien de choisi : il n'y a rien a montrer
+    dessous. Les notifications « … a epingle un message » sont retirees."""
     if bot is None or channel is None:
         return False
     try:
@@ -975,18 +1013,27 @@ async def maj_menu_marche(bot, channel, marche=None):
             return False
         if marche is None:
             marche = marche_du_salon(channel)
+        from cogs.user import (_est_menu_models, _est_panneau_actions,
+                               _jb_menu_models_editer, _jb_modele_du_salon,
+                               _jb_salon_remplir, _jb_notifs_epingle_retirer,
+                               _jb_epingler)
+        _moi = getattr(bot.user, "id", 0)
+        # Les epingles d'ABORD : la model a afficher se lit dans le panneau.
+        epingles = await channel.pins()
+        _a_panneau = any(_est_panneau_actions(p, _moi) for p in epingles)
+        _model = (_jb_modele_du_salon(channel, epingles, marche, _moi)[0]
+                  if _a_panneau else "_")
+        _choisie = None if _model == "_" else _model
         try:
-            emb, view = await ucog.jailbreak_us_menu_async(channel.guild, marche)
+            emb, view = await ucog.jailbreak_us_menu_async(channel.guild, marche,
+                                                           choisie=_choisie)
         except Exception as e:
             log.warning("maj_menu_marche %s : menu sans PP creees (%s: %s)",
                         getattr(channel, "name", "?"), type(e).__name__, e)
             # Le repli garde les PP deja presentes et la phrase d'acces
             # du serveur : il a besoin du serveur.
-            emb, view = ucog.jailbreak_us_menu(marche, guild=channel.guild)
-        from cogs.user import (_est_menu_models, _est_panneau_actions,
-                               _jb_menu_models_editer)
-        _moi = getattr(bot.user, "id", 0)
-        epingles = await channel.pins()
+            emb, view = ucog.jailbreak_us_menu(marche, guild=channel.guild,
+                                               choisie=_choisie)
         for m in epingles:
             if not _est_menu_models(m, _moi):
                 continue
@@ -994,19 +1041,26 @@ async def maj_menu_marche(bot, channel, marche=None):
                 await m.edit(embed=emb, view=view)
                 return True
             etat = await _jb_menu_models_editer(bot, channel, m, view)
+            if etat == "edite":
+                # Menu edite sur place : le panneau et le General suivent
+                # s'ils attendaient encore. « repose » : le repli a deja
+                # repose le panneau sur la model du salon.
+                await _jb_salon_remplir(bot, channel, epingles, marche)
             if etat != "absent":
+                await _jb_notifs_epingle_retirer(channel, quoi="maj_menu_marche")
                 return True
             break                              # supprime entre-temps : on repose
         # Pas de menu. Un panneau d'actions en place : le menu posé maintenant
         # arriverait SOUS lui -- _ensure_us_menu repose les trois dans
         # l'ordre. Sinon, comme avant : le menu seul.
-        if any(_est_panneau_actions(p, _moi) for p in epingles):
+        if _a_panneau:
             return await _ensure_us_menu(bot, channel)
         msg = await channel.send(**_kw_menu_models(emb, view))
         try:
-            await msg.pin()
+            await _jb_epingler(msg, channel, "menu des models")
         except Exception:
             pass
+        await _jb_notifs_epingle_retirer(channel, quoi="maj_menu_marche")
         return True
     except Exception as e:
         log.warning(f"maj_menu_marche: {e}")
@@ -1106,32 +1160,50 @@ def demander_rafraichissement(bot, raison="", delai=None):
         return False
 
 
-async def _ensure_us_panel(bot, channel):
+async def _ensure_us_panel(bot, channel, modele=None):
     """Second message PERMANENT : le panneau d'actions, qui suit la model
     choisie dans le menu du dessus. Les deux restent affiches en
-    permanence — avant, le panneau etait ephemere et disparaissait."""
+    permanence — avant, le panneau etait ephemere et disparaissait.
+
+    Pose, il montre la model du salon (26/09/2026) : `modele` = (model,
+    quantite) donnes par l'appelant, sinon lus dans les epingles
+    (_jb_modele_du_salon : la derniere choisie encore proposee, sinon la
+    premiere du menu). « _ » (la quantite seule) ne reste que pour un menu
+    sans aucune model."""
     if bot is None or channel is None:
         return False
     try:
-        from cogs.user import _jb_panel, _jb_panel_set, _est_panneau_actions
+        from cogs.user import (_jb_panel, _jb_panel_set, _est_panneau_actions,
+                               _jb_modele_du_salon, _jb_panneau_noter_pose,
+                               _jb_epingler)
+        _moi = getattr(bot.user, "id", 0)
+        epingles = []
         try:
-            for m in await channel.pins():
+            epingles = await channel.pins()
+            for m in epingles:
                 # Les deux formats : un ancien panneau (embed) reste celui du
                 # salon jusqu'a ce qu'un clic le convertisse en V2 ; en
                 # reposer un second ici laisserait deux panneaux.
-                if _est_panneau_actions(m, getattr(bot.user, "id", 0)):
+                if _est_panneau_actions(m, _moi):
                     _jb_panel_set(channel.id, m.id)
                     return True                   # deja en place
         except Exception as e:
             log.warning("_ensure_us_panel %s : epingles illisibles (%s: %s)",
                         getattr(channel, "name", "?"), type(e).__name__, e)
-        # Format « Components V2 » : une vue, sans embed ni texte a cote ;
-        # « aucune model » = la quantite seule, a sa valeur par defaut.
-        view = _jb_panel(bot.get_cog("UserCog"), "_")
+        if modele is None:
+            modele = _jb_modele_du_salon(channel, epingles, moi=_moi)
+        _model, _qty = modele[0], modele[1]
+        # Format « Components V2 » : une vue, sans embed ni texte a cote.
+        view = _jb_panel(bot.get_cog("UserCog"), _model, _qty,
+                         guild=getattr(channel, "guild", None))
         msg = await channel.send(view=view)
         _jb_panel_set(channel.id, msg.id)
+        # Ce que le panneau montre : un sous-menu d'une autre model sera
+        # refuse, comme apres un clic (serveur US seulement, ou le panneau
+        # epingle suit les clics).
+        _jb_panneau_noter_pose(channel, _model, _qty)
         try:
-            await msg.pin()
+            await _jb_epingler(msg, channel, "panneau US")
         except Exception:
             pass
         return True
@@ -1157,13 +1229,15 @@ def _id_message(x):
 
 
 async def _ensure_us_general(bot, channel, apres=None, epingles=None,
-                             creer_emojis=True):
+                             creer_emojis=True, model=None):
     """Troisieme message PERMANENT : « ✨ General », sous le panneau d'actions.
 
     Il sert le contenu des RESERVES liees a la model choisie (voir
-    type_identite). Pose ici a l'etat d'attente ('_'), sans texte ni action :
-    le seul bouton de quantite ; c'est le clic sur une model qui le remplit
-    (cogs/user.py, _jb_general_maj).
+    type_identite). Pose ici sur la model du salon (26/09/2026) : `model`
+    donnee par l'appelant, sinon lue dans les epingles (_jb_modele_du_salon
+    -- celle du panneau d'actions en premier) ; l'etat d'attente (« _ », la
+    quantite seule) ne reste que pour un menu sans aucune model. Un clic sur
+    une model le met ensuite a jour (cogs/user.py, _jb_general_maj).
 
     `creer_emojis` : c'est ICI, a la pose, que la photo de chaque reserve
     devient un emoji du serveur (ensure_reserve_emojis) -- l'en-tete
@@ -1208,7 +1282,8 @@ async def _ensure_us_general(bot, channel, apres=None, epingles=None,
             return False
         from cogs.user import (_jb_general, _jb_general_set, _jb_general_ids,
                                _est_general as _est_general_us,
-                               ensure_reserve_emojis)
+                               ensure_reserve_emojis, _jb_modele_du_salon,
+                               _jb_epingler)
         if creer_emojis:
             try:
                 await ensure_reserve_emojis(channel.guild)
@@ -1262,14 +1337,16 @@ async def _ensure_us_general(bot, channel, apres=None, epingles=None,
         if garde is not None:
             _jb_general_set(channel.id, garde.id)
             return True                        # deja en place, au bon endroit
-        # Format « Components V2 » : une vue, sans embed ni texte a cote. A
-        # l'etat d'attente elle n'a que sa quantite : aucune action tant
-        # qu'aucune model n'est choisie.
-        vue = _jb_general(ucog, "_", guild=channel.guild)
+        # Format « Components V2 » : une vue, sans embed ni texte a cote,
+        # sur la model du salon. Les epingles lues plus haut portent le
+        # panneau d'actions : c'est sa model qui compte.
+        if model is None:
+            model = _jb_modele_du_salon(channel, epingles, moi=_moi)[0]
+        vue = _jb_general(ucog, model or "_", guild=channel.guild)
         msg = await channel.send(view=vue)
         _jb_general_set(channel.id, msg.id)
         try:
-            await msg.pin()
+            await _jb_epingler(msg, channel, "General")
         except Exception as e:
             log.warning("_ensure_us_general %s : General pose mais non "
                         "epingle (%s: %s)", _nom, type(e).__name__, e)
@@ -1291,6 +1368,18 @@ async def reset_us_menu(bot, channel, etat=None):
     # d'ou le bridage de la commande au serveur US : sur le serveur
     # principal, elle aurait emporte des conversations.
     _moi = getattr(getattr(bot, "user", None), "id", 0)
+    # La DERNIERE model choisie se lit dans le panneau : AVANT la purge, qui
+    # l'emporte (26/09/2026 : le salon remis a neuf garde sa model au lieu
+    # de repartir sur « 🔢 5 » seul).
+    modele = None
+    try:
+        from cogs.user import _jb_modele_du_salon
+        modele = _jb_modele_du_salon(channel, await channel.pins(),
+                                     marche_du_salon(channel), _moi)
+    except Exception as e:
+        log.warning("reset_us_menu %s : model du salon non lue avant la purge "
+                    "(%s: %s) -- la premiere du menu", getattr(channel, "name", "?"),
+                    type(e).__name__, e)
     try:
         await channel.purge(limit=200,
                             check=lambda m: m.author.id == _moi)
@@ -1305,7 +1394,7 @@ async def reset_us_menu(bot, channel, etat=None):
     except Exception as e:
         log.warning("reset_us_menu %s : ids des panneaux non oublies (%s: %s)",
                     getattr(channel, "name", "?"), type(e).__name__, e)
-    return await _ensure_us_menu(bot, channel, etat=etat)
+    return await _ensure_us_menu(bot, channel, etat=etat, modele=modele)
 
 
 async def _ensure_num_panel(bot, channel):
