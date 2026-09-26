@@ -21846,7 +21846,12 @@ try:
              _il._dormir_us, _il.tableau, _il._aujourdhui, _il._lancer_us,
              _ifL._creatrice_ou_erreur, _ifL.liens,
              _gmL.list_links_team, _gmL.analytics_for_links, _gmL.pause_restante, _gmL.etat_quota)
+    _savCopieL = (_il.GMS_COPIE, _il.GMS_FRAIS_S)
     try:
+        # la copie GMS de la page : dans le dossier temporaire, et sans delai
+        # de fraicheur, sinon chaque tableau() reprendrait la liste du premier
+        _il.GMS_COPIE = _tmpL / "copie_gms.json"
+        _il.GMS_FRAIS_S = 0
         _il.ETAT_FICHIER = _tmpL / "etat.json"
         _il.CLE_FICHIER = _tmpL / "cle"
         _il.JETON_FICHIERS = (_tmpL / "absent", _tmpL / "jeton")
@@ -21975,9 +21980,13 @@ try:
 
         # --- le tri
         _nomsL = lambda l: [x["nom"] for x in l]  # noqa: E731
-        check("tri : par defaut subs decroissants, les introuvables en bas",
-              _nomsL(_tL0["lignes"])[:3] == ["VA 1 Noum", "Roucham SPAM", "Bryan"]
-              and set(_nomsL(_il.trier(_tL0["lignes"]))[-3:]) == {"Roucham", "Kylmich", "Emy"})
+        # le proprietaire veut l ordre alphabetique, VA 1 a VA 6 Noum dans l ordre
+        check("tri : par defaut alphabetique, les numeros dans l ordre naturel",
+              _nomsL(_tL0["lignes"]) == sorted(_nomsL(_tL0["lignes"]), key=_il._cle_nom)
+              and _nomsL(_il.trier(_tL0["lignes"])) == _nomsL(_tL0["lignes"])
+              and sorted(["VA 10 Noum", "VA 2 Noum", "vA 1 noum", "Gérôme", "Gerome SPAM", "Abdoul"],
+                         key=_il._cle_nom)
+              == ["Abdoul", "Gérôme", "Gerome SPAM", "vA 1 noum", "VA 2 Noum", "VA 10 Noum"])
         check("tri : CVR croissant, les valeurs absentes restent en bas dans les deux sens",
               _nomsL(_il.trier(_tL0["lignes"], "cvr", "asc"))[0] == "Roucham SPAM"
               and "Z" in _nomsL(_il.trier(_tL0["lignes"], "cvr", "asc"))[-4:]
@@ -22084,6 +22093,33 @@ try:
               and "reprise vers 21:40" in _il.page_html(_tQ) and "pause" in _il.rafraichir_us())
         _gmL.pause_restante = lambda: 0
 
+        # --- la copie de la page : ecrite a chaque liste reussie, reprise
+        # pendant GMS_FRAIS_S sans rappeler GMS, et d abord en cas de panne
+        _cpL = _jsL.loads(_il.GMS_COPIE.read_text())
+        check("copie GMS : la derniere liste reussie est gardee, adresses OnlyFans comprises",
+              len(_cpL["liens"]) == len([g for g in _GMS if isinstance(g, dict)])
+              and all("url" in g for g in _cpL["liens"] if g.get("url") is not None))
+        _nbGL = {"n": 0}
+        _vraiLT = _gmL.list_links_team
+
+        def _compteLT(*a, **k):
+            _nbGL["n"] += 1
+            return _vraiLT(*a, **k)
+        _gmL.list_links_team = _compteLT
+        _il.GMS_FRAIS_S = 600
+        _il.liens_gms(_cpL["t"] + 30)
+        check("copie GMS : reprise sans appel tant qu elle a moins de 10 min", _nbGL["n"] == 0)
+        _LT["rep"] = {"ok": False, "error": "HTTP 429"}
+        _rpL = _il.liens_gms(_cpL["t"] + 3600)
+        check("copie GMS : GetMySocial muet -> la copie (avec adresses) plutot que le cache du site",
+              _nbGL["n"] == 1 and "dernière liste lue le" in _rpL["repli"]
+              and any(str(g.get("url") or "").endswith("/c47") for g in _rpL["liens"]))
+        _gmL.list_links_team = _vraiLT
+        _il.GMS_FRAIS_S = 0
+        # safe_json relirait la sauvegarde .prev : elle part avec la copie
+        for _fL in (_il.GMS_COPIE, _il.GMS_COPIE.with_suffix(".json.prev")):
+            _fL.unlink(missing_ok=True)
+
         # --- repli sur le cache du site
         _LT["rep"] = {"ok": False, "error": "HTTP 429"}
         _il.GMS_CACHE.write_text(_jsL.dumps({
@@ -22148,12 +22184,28 @@ try:
               "Hors GetMySocial, non comptés (2)" in _detL and "VA 2 Geelark" in _detL
               and "VA 2 Geelark" not in _avantL and "c2 · <span class=\"off\">désactivé</span>" in _detL)
         check("page : tri par liens d en-tete, sans script (et la cle suit si elle est donnee)",
-              'href="?tri=us&amp;sens=desc"' in _hP and 'href="?tri=subs&amp;sens=asc"' in _hP
-              and 'href="?tri=nom&amp;sens=asc&amp;k=K1"' in _il.page_html(_tH, cle="K1"))
+              'href="?tri=us&amp;sens=desc"' in _hP and 'href="?tri=subs&amp;sens=desc"' in _hP
+              and 'href="?tri=nom&amp;sens=desc&amp;k=K1"' in _il.page_html(_tH, cle="K1"))
         _hC = _il.page_html(_tH, "clics", "asc")
         check("page : le tri demande est applique",
               _hC.index(">Gerome SPAM<") < _hC.index(">VA 1 Noum<")
-              and _hP.index(">VA 1 Noum<") < _hP.index(">Gerome SPAM<"))
+              and _il.page_html(_tH, "subs", "desc").index(">VA 1 Noum<")
+              < _il.page_html(_tH, "subs", "desc").index(">Gerome SPAM<")
+              and _hP.index(">Gerome SPAM<") < _hP.index(">VA 1 Noum<"))
+        # couleurs voulues : CVR verte des 10 %, $/sub vert des 2 $, plus fonce
+        # au-dessus, orange puis rouge en dessous, rien sur un « — »
+        check("couleurs : paliers de la CVR (seuil 10 %)",
+              [_il.niveau(v, _il.SEUIL_CVR) for v in (16, 12.5, 10, 9.9, 7.5, 5, 4.9, 0, None)]
+              == ["v3", "v2", "v1", "o1", "o1", "o2", "r", "r", ""])
+        check("couleurs : paliers du $ par sub (seuil 2 $)",
+              [_il.niveau(v, _il.SEUIL_PAR_SUB) for v in (3, 2.5, 2, 1.99, 1, 0.99, None)]
+              == ["v3", "v2", "v1", "o1", "o2", "r", ""])
+        check("couleurs : la page pose les pastilles et sa legende, Discord ses ronds",
+              'class="nv ' in _hP and 'class="legende"' in _hP
+              and "🔴" in _il._ligne_discord(1, {"nom": "x", "infloww": [1], "clics": 100, "subs": 1,
+                                                  "cvr": 1.0, "par_sub": 0.1})
+              and "🟢" in _il._ligne_discord(1, {"nom": "x", "infloww": [1], "clics": 10, "subs": 2,
+                                                  "cvr": 20.0, "par_sub": 3.0}))
         check("page : un tri inconnu retombe sur le defaut", _il.page_html(_tH, "x'><", "y") == _hP)
         _argentL = [_il._dec(v, 2, s) for v in (13970.0, 652.0, 290.0, 178.0, 122.0, 9999.0, 50.0,
                                                   (65200 + 1397000 + 29000 + 17800 + 12200 + 300) / 100)
@@ -22394,6 +22446,7 @@ try:
          _il._dormir_us, _il.tableau, _il._aujourdhui, _il._lancer_us,
          _ifL._creatrice_ou_erreur, _ifL.liens,
          _gmL.list_links_team, _gmL.analytics_for_links, _gmL.pause_restante, _gmL.etat_quota) = _savL
+        _il.GMS_COPIE, _il.GMS_FRAIS_S = _savCopieL
         import shutil as _shL
         _shL.rmtree(_tmpL, ignore_errors=True)
 except Exception as _eL:

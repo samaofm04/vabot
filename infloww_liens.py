@@ -37,7 +37,9 @@ from __future__ import annotations
 import base64
 import datetime as dt
 import html as _html
+import json
 import re
+import unicodedata
 import secrets
 import threading
 import time
@@ -118,21 +120,51 @@ def _aujourdhui() -> str:
 
 
 # ─── GetMySocial : qui est qui ───────────────────────────────────────────
-def liens_gms() -> Dict[str, Any]:
+# La page garde SA copie de la dernière liste GMS réussie, adresses OnlyFans
+# comprises. Le 26/09, le quota GetMySocial épuisé renvoyait la page sur le
+# cache du site, qui n'avait pas les adresses : 28 personnes « introuvables ».
+# Et relire GMS à chaque affichage usait ce quota partagé avec le tableau de
+# bord : la liste est reprise telle quelle pendant GMS_FRAIS_S.
+GMS_COPIE = DATA_DIR / "infloww_liens_gms.json"
+GMS_FRAIS_S = 600
+_CHAMPS_GMS = ("id", "shortcode", "display_name", "title", "url")
+
+
+def _copie_gms() -> Dict[str, Any]:
+    d = _lire_json(GMS_COPIE)
+    L = d.get("liens") if isinstance(d, dict) else None
+    return {"t": float(d.get("t") or 0), "liens": L} if isinstance(L, list) and L else {}
+
+
+def liens_gms(maintenant: Optional[float] = None) -> Dict[str, Any]:
     """{liens, repli} de l'espace JESSY LE RETOUR. `repli` non vide = la
-    liste vient du cache du site (et dit pourquoi). Ne lève jamais."""
+    liste vient d'une copie (et dit pourquoi). Ne lève jamais."""
+    maintenant = time.time() if maintenant is None else maintenant
+    copie = _copie_gms()
+    if copie and maintenant - copie["t"] < GMS_FRAIS_S:
+        return {"liens": list(copie["liens"]), "repli": ""}
     raison = ""
     try:
         import gms
-        # force_refresh : la liste est gardée deux minutes côté gms, et un
-        # lien créé la veille doit apparaître tout de suite
+        # force_refresh : un lien créé dans la journée doit apparaître au
+        # prochain relevé, pas à l'expiration du cache de gms
         r = gms.list_links_team(EQUIPE_GMS, force_refresh=True) or {}
         vivants = r.get("links") or r.get("data") or []
         if r.get("ok") is not False and vivants:
+            try:
+                safe_json.write_text(GMS_COPIE, json.dumps(
+                    {"t": maintenant, "liens": [{k: l.get(k) for k in _CHAMPS_GMS if l.get(k) is not None}
+                                               for l in vivants if isinstance(l, dict)]},
+                    ensure_ascii=False))
+            except Exception as e:
+                print(f"[infloww-liens] copie GMS non écrite : {e}", flush=True)
             return {"liens": list(vivants), "repli": ""}
         raison = str(r.get("error") or "liste vide")
     except Exception as e:
         raison = f"{type(e).__name__} : {e}"
+    if copie:
+        return {"liens": list(copie["liens"]),
+                "repli": f"{raison or '?'} — dernière liste lue le {_heure(copie['t'])}"[:300]}
     cache = _lire_json(GMS_CACHE).get(EQUIPE_GMS) or []
     return {"liens": list(cache) if isinstance(cache, list) else [],
             "repli": (raison or "?")[:300]}
@@ -433,8 +465,19 @@ def _resume_infloww(x: Mapping[str, Any]) -> Dict[str, Any]:
             "desactive": bool(x.get("termine"))}
 
 
+def _cle_nom(nom: Any) -> Tuple[Tuple[int, Any], ...]:
+    """Ordre alphabétique « naturel », sans accents ni casse : les numéros
+    comptent comme des nombres. Sans ça, VA 10 Noum passerait avant VA 2 Noum
+    (le propriétaire veut VA 1 à VA 6 dans l'ordre, pas rangés par subs)."""
+    t = unicodedata.normalize("NFKD", str(nom or "")).encode("ascii", "ignore").decode().casefold()
+    return tuple((0, int(p)) if p.isdigit() else (1, p.strip())
+                 for p in re.split(r"(\d+)", t) if p.strip())
+
+
 def _ordre_defaut(x: Mapping[str, Any]):
-    return (-int(x.get("subs") or 0), -int(x.get("clics") or 0), str(x.get("nom") or "").casefold())
+    # alphabétique : c'est l'ordre voulu par le propriétaire (26/09), pour la
+    # page comme pour Discord ; le lien SPAM suit ainsi la personne
+    return (_cle_nom(x.get("nom")), -int(x.get("subs") or 0))
 
 
 def construire(liens_infloww: List[Any], liens_gms_: List[Any],
@@ -610,6 +653,42 @@ def _md(nom: Any, maxi: int = NOM_DISCORD_MAX) -> str:
     return s.replace("@", "@\u200b")
 
 
+# Les seuils du propriétaire (26/09) : une CVR de 10 % est « good », un sub
+# qui rapporte 2 $ aussi. Au-dessus, vert, de plus en plus foncé à mesure que
+# ça monte ; en dessous, orange de plus en plus soutenu, puis rouge sous la
+# moitié du seuil. Un seul barème pour la page et pour Discord.
+SEUIL_CVR = 10.0
+SEUIL_PAR_SUB = 2.0
+_PALIERS = ((1.5, "v3"), (1.25, "v2"), (1.0, "v1"), (0.75, "o1"), (0.5, "o2"))
+
+
+def niveau(v: Any, seuil: float) -> str:
+    """v3/v2/v1 (vert, du plus foncé au plus clair), o1/o2 (orange), r
+    (rouge) ; "" si la valeur manque — pas de couleur sur un « — »."""
+    f = _f_ou_none(v)
+    if f is None:
+        return ""
+    for mult, nom in _PALIERS:
+        if f >= seuil * mult:
+            return nom
+    return "r"
+
+
+def _f_ou_none(v: Any) -> Optional[float]:
+    try:
+        return None if v is None or v == "" else float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _pastille(texte: str, niv: str) -> str:
+    return f'<span class="nv {niv}">{texte}</span>' if niv else texte
+
+
+def _rond(niv: str) -> str:
+    return {"v": "🟢", "o": "🟠", "r": "🔴"}.get(niv[:1], "")
+
+
 def _ligne_discord(rang: int, x: Mapping[str, Any]) -> str:
     """Deux lignes courtes par personne, lisibles sur un téléphone : un
     tableau en bloc de code, lui, débordait et se lisait en faisant défiler.
@@ -619,7 +698,8 @@ def _ligne_discord(rang: int, x: Mapping[str, Any]) -> str:
     if not x.get("infloww"):
         return tete + "lien Infloww introuvable"
     return (tete + f"{_nb(x.get('clics'), s)} clics OF → **{_nb(x.get('subs'), s)} subs** · "
-            f"{_pct(x.get('cvr'), s)} · **{_dollars(x.get('par_sub'), s)}**{s}/{s}sub")
+            f"{_rond(niveau(x.get('cvr'), SEUIL_CVR))}{_pct(x.get('cvr'), s)} · "
+            f"{_rond(niveau(x.get('par_sub'), SEUIL_PAR_SUB))}**{_dollars(x.get('par_sub'), s)}**{s}/{s}sub")
 
 
 def _taille_embed(e: Mapping[str, Any]) -> int:
@@ -918,14 +998,14 @@ def _e(s: Any) -> str:
 def _tri_valide(tri: Any, sens: Any) -> Tuple[str, str]:
     tri = str(tri or "")
     if tri not in TRIS:
-        return "subs", "desc"
+        return "nom", "asc"
     sens = str(sens or "")
     if sens not in SENS:
         sens = "asc" if tri == "nom" else "desc"
     return tri, sens
 
 
-def trier(lignes: List[Mapping[str, Any]], tri: str = "subs", sens: str = "desc"
+def trier(lignes: List[Mapping[str, Any]], tri: str = "nom", sens: str = "asc"
           ) -> List[Mapping[str, Any]]:
     """Trie ; une valeur absente (lien Infloww introuvable, 0 clic, 0 sub,
     clics US pas encore relevés) va toujours en bas, dans un sens comme dans
@@ -935,7 +1015,7 @@ def trier(lignes: List[Mapping[str, Any]], tri: str = "subs", sens: str = "desc"
     avec = [x for x in base if x.get(tri) is not None]
     sans = [x for x in base if x.get(tri) is None]
     if tri == "nom":
-        cle = lambda x: str(x.get("nom") or "").casefold()  # noqa: E731
+        cle = lambda x: _cle_nom(x.get("nom"))  # noqa: E731
     else:
         cle = lambda x: float(x.get(tri) or 0)  # noqa: E731
     return sorted(avec, key=cle, reverse=(sens == "desc")) + sans
@@ -992,14 +1072,18 @@ def _table_personnes(lignes: List[Mapping[str, Any]], T: Mapping[str, Any], tri:
         corps.append(f'<tr><td class="nom"><b>{nom}</b>{_detail_personne(x)}</td>'
                      f'<td class="n{us_cl}">{_nb(x.get("us"))}</td>'
                      f'<td class="n">{_nb(x.get("clics"))}</td>'
-                     f'<td class="n fort">{_nb(x.get("subs"))}</td><td class="n">{_pct(x.get("cvr"))}</td>'
-                     f'<td class="n acc">{_dollars(x.get("par_sub"))}</td></tr>')
+                     f'<td class="n fort">{_nb(x.get("subs"))}</td>'
+                     f'<td class="n">{_pastille(_pct(x.get("cvr")), niveau(x.get("cvr"), SEUIL_CVR))}</td>'
+                     f'<td class="n">{_pastille(_dollars(x.get("par_sub")), niveau(x.get("par_sub"), SEUIL_PAR_SUB))}'
+                     f'</td></tr>')
     if not corps:
         corps.append('<tr><td class="faible" colspan="6">Aucune personne.</td></tr>')
     lib = f"Total · {_nb(len(lignes))} personne{'s' if len(lignes) > 1 else ''}"
     pied = (f'<tr class="total"><td class="nom">{_e(lib)}</td><td class="n">{_nb(T.get("us"))}</td>'
             f'<td class="n">{_nb(T.get("clics"))}</td><td class="n">{_nb(T.get("subs"))}</td>'
-            f'<td class="n">{_pct(T.get("cvr"))}</td><td class="n acc">{_dollars(T.get("par_sub"))}</td></tr>')
+            f'<td class="n">{_pastille(_pct(T.get("cvr")), niveau(T.get("cvr"), SEUIL_CVR))}</td>'
+            f'<td class="n">{_pastille(_dollars(T.get("par_sub")), niveau(T.get("par_sub"), SEUIL_PAR_SUB))}'
+            f'</td></tr>')
     return (f'<div class="boite"><table><thead><tr>{"".join(th)}</tr></thead>'
             f'<tbody>{"".join(corps)}</tbody><tfoot>{pied}</tfoot></table></div>')
 
@@ -1015,8 +1099,9 @@ def _table_hors(lignes: List[Mapping[str, Any]]) -> str:
             det += ' · <span class="off">désactivé</span>'
         corps.append(f'<tr><td class="nom">{nom}<div class="det">{det}</div></td>'
                      f'<td class="n">{_nb(x.get("clics"))}</td><td class="n">{_nb(x.get("subs"))}</td>'
-                     f'<td class="n">{_pct(x.get("cvr"))}</td>'
-                     f'<td class="n">{_dollars(x.get("par_sub"))}</td></tr>')
+                     f'<td class="n">{_pastille(_pct(x.get("cvr")), niveau(x.get("cvr"), SEUIL_CVR))}</td>'
+                     f'<td class="n">{_pastille(_dollars(x.get("par_sub")), niveau(x.get("par_sub"), SEUIL_PAR_SUB))}'
+                     f'</td></tr>')
     return ('<div class="boite"><table><thead><tr><th class="nom">Lien Infloww</th><th class="n">Clics OF</th>'
             '<th class="n">Subs</th><th class="n">CVR</th><th class="n">$\u00a0/\u00a0sub</th></tr></thead>'
             f'<tbody>{"".join(corps)}</tbody></table></div>')
@@ -1065,7 +1150,7 @@ def _avertissements(t: Mapping[str, Any], lignes: List[Mapping[str, Any]]) -> Li
     return h
 
 
-def page_html(t: Mapping[str, Any], tri: str = "subs", sens: str = "desc", cle: str = "") -> str:
+def page_html(t: Mapping[str, Any], tri: str = "nom", sens: str = "asc", cle: str = "") -> str:
     """La page entière. Aucun JavaScript : le tri passe par l'adresse, et une
     apostrophe dans un nom de lien ne peut rien casser. Tout est échappé."""
     tri, sens = _tri_valide(tri, sens)
@@ -1078,6 +1163,10 @@ def page_html(t: Mapping[str, Any], tri: str = "subs", sens: str = "desc", cle: 
     else:
         h += _avertissements(t, lignes)
         h.append(_table_personnes(lignes, T, tri, sens, cle))
+        h.append('<p class="legende">Couleurs : <span class="nv v1">vert</span> dès '
+                 f'{_dec(SEUIL_CVR, 0)}\u00a0% de CVR et dès {_dollars(SEUIL_PAR_SUB)}\u00a0par sub '
+                 '(plus foncé = mieux), <span class="nv o1">orange</span> en dessous, '
+                 '<span class="nv r">rouge</span> sous la moitié.</p>')
         if hors:
             h.append(f'<details><summary>Hors GetMySocial, non comptés ({_nb(len(hors))}) — '
                      f'liens de suivi de Jessye qu\'aucun lien de « {_e(NOM_EQUIPE)} » ne vise'
@@ -1121,6 +1210,11 @@ td.nom{{overflow-wrap:anywhere;min-width:110px}}
 .n{{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}}
 .fort{{font-weight:700}} .acc{{color:var(--acc);font-weight:600}} .faible{{color:var(--faible)}}
 td.vieux{{color:var(--faible)}}
+.nv{{display:inline-block;border-radius:6px;padding:1px 7px;font-weight:700}}
+.nv.v1{{background:#4ade80;color:#052e16}} .nv.v2{{background:#16a34a;color:#fff}}
+.nv.v3{{background:#166534;color:#fff}} .nv.o1{{background:#fbbf24;color:#1c1203}}
+.nv.o2{{background:#f97316;color:#1c0a02}} .nv.r{{background:#dc2626;color:#fff}}
+.legende{{color:var(--faible);font-size:12px;margin:8px 0 0}}
 tbody tr:hover td{{background:rgba(249,115,65,.06)}}
 tfoot td{{border-bottom:0;border-top:2px solid var(--bord);font-weight:700}}
 details{{margin:18px 0 0}}
@@ -1133,7 +1227,7 @@ details .boite{{margin-top:8px;opacity:.85}}
    lignes (« Clics / OF » ; th.n et non th, que .n remettait en nowrap) et le
    nom se replie ; sans ça le $ / sub, la colonne qu'on vient lire, sortait de
    l'écran. Ce qui ne tiendrait pas défile dans la boîte, jamais la page. */
-@media (max-width:480px){{table{{font-size:12px}} th,td{{padding:8px 3px}} th.n{{white-space:normal}} th:first-child,td:first-child{{padding-left:10px}} th:last-child,td:last-child{{padding-right:10px}} td.nom{{min-width:74px}} .det{{font-size:10.5px}} h1{{font-size:18px}}}}
+@media (max-width:480px){{table{{font-size:12px}} th,td{{padding:8px 3px}} th.n{{white-space:normal}} th:first-child,td:first-child{{padding-left:10px}} th:last-child,td:last-child{{padding-right:10px}} td.nom{{min-width:74px}} .det{{font-size:10.5px}} .nv{{padding:1px 3px}} h1{{font-size:18px}}}}
 @media (max-width:340px){{table{{font-size:11.5px}} th,td{{padding:7px 2px}} th:first-child,td:first-child{{padding-left:8px}} th:last-child,td:last-child{{padding-right:8px}} td.nom{{min-width:64px}}}}
 </style></head><body>
 <div class="marque">Infloww · YouL4b</div>
