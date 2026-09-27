@@ -9792,12 +9792,15 @@ try:
                 gu.text_channels.append(s)
                 if cat is not None:
                     cat.text_channels.append(s)
-            async def send(s, content=None, files=None, view=None, **kw):
+            async def send(s, content=None, files=None, view=None, file=None, **kw):
                 noms = [f.filename for f in (files or [])]
                 # garder les octets : les fichiers vivent dans un dossier temporaire
                 octets = [f.fp.read() for f in (files or [])]
                 m = _MsgSp(s, _moiSp, content or "", noms, vue=view)
                 m.octets = octets
+                # la piece jointe unique (l'icone du panneau)
+                m.attachments = [type("A", (), {"filename": f.filename})()
+                                 for f in (files or []) + ([file] if file else [])]
                 if view is not None:
                     m.components = list(view.children)
                 s.messages.append(m)
@@ -10010,11 +10013,24 @@ try:
         _rSp = _aSp.run(_scenario())
         check("spoofer : les deux boutons restent vivants apres un redemarrage (DynamicItem)",
               _rSp["dyn"] == ["SpfQte", "SpfGo"], str(_rSp["dyn"]))
-        _pSp = _sp.panneau(5).to_components()
-        check("spoofer : panneau = « 🔢 5 » (meme dessin que Brune) + « 📤 Spoofer », sans texte",
-              len(_pSp) == 1 and [c.get("custom_id") for c in _pSp[0]["components"]] == ["spf:qb:5", "spf:go:5"]
-              and _pSp[0]["components"][0]["emoji"]["name"] == "🔢" and _pSp[0]["components"][0]["style"] == 2
-              and not any("content" in c for c in _pSp), str(_pSp))
+        # 27/09 : « mets cette icone pour le spoofer », comme le panneau Numero :
+        # un bloc, « Spoofer » + l'icone en vignette, puis les deux boutons
+        _pSp = _sp.panneau(5, icone=True).to_components()
+        _bloc = _pSp[0]["components"] if _pSp and _pSp[0].get("type") == 17 else []
+        _rgSp = [c for c in _bloc if c.get("type") == 1]
+        _tete = [c for c in _bloc if c.get("type") == 9]
+        check("spoofer : panneau = bloc « Spoofer » + icone en vignette, puis « 🔢 5 » et « 📤 Spoofer »",
+              len(_pSp) == 1 and _tete
+              and _tete[0]["accessory"]["media"]["url"] == "attachment://spoofer.png"
+              and [c["content"] for c in _tete[0]["components"]] == ["## Spoofer"]
+              and _rgSp and [c.get("custom_id") for c in _rgSp[0]["components"]] == ["spf:qb:5", "spf:go:5"]
+              and _rgSp[0]["components"][0]["emoji"]["name"] == "🔢"
+              and _rgSp[0]["components"][0]["style"] == 2, str(_pSp)[:300])
+        _pSp0 = _sp.panneau(5, icone=False).to_components()
+        check("spoofer : sans l'icone (fichier absent, ancien message) : les boutons seuls, aucune vignette",
+              len(_pSp0) == 1 and [c.get("custom_id") for c in _pSp0[0]["components"]] == ["spf:qb:5", "spf:go:5"]
+              and "attachment://" not in str(_pSp0), str(_pSp0)[:200])
+        check("spoofer : l'icone est dans le depot", _sp._ICONE.exists() and _sp._ICONE.stat().st_size > 1000)
         check("spoofer : un nombre hors 1-5 (ancien bouton, saisie) retombe a 5",
               _sp.SpfQte.__discord_ui_compiled_template__.fullmatch("spf:qb:7") is None
               and _sp._borne("9") == 5 and _sp._borne("x") == 5 and _sp._borne(2) == 2)

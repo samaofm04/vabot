@@ -159,15 +159,47 @@ class SpfGo(discord.ui.DynamicItem[discord.ui.Button], template=r"spf:go:(?P<q>[
         await interaction.response.send_modal(FenetreFichier(self.q))
 
 
-def panneau(q: int = QTE_DEFAUT) -> discord.ui.LayoutView:
-    """Le panneau : une rangee, deux boutons, aucun texte."""
+#: L'icone du panneau (27/09 : « mets cette icone pour le spoofer », comme
+#: la vignette du panneau Numero). Jointe au message, affichee en vignette.
+_ICONE = Path(__file__).resolve().parent.parent / "emojis" / "spoofer.png"
+_ICONE_NOM = "spoofer.png"
+#: Le bleu de l'icone.
+_BLEU = 0x1E84EA
+
+
+def fichier_icone():
+    """L'icone a joindre, neuve a chaque envoi (un discord.File ne se lit
+    qu'une fois), ou None si le fichier manque : le panneau part alors sans
+    vignette plutot que pas du tout, et le journal le dit."""
+    if not _ICONE.exists():
+        print(f"[spoofer] icone absente ({_ICONE}) : panneau sans vignette")
+        return None
+    return discord.File(str(_ICONE), filename=_ICONE_NOM)
+
+
+def panneau(q: int = QTE_DEFAUT, icone=None) -> discord.ui.LayoutView:
+    """Le panneau, comme celui du Numero : un bloc bleu, « Spoofer » et
+    l'icone en vignette, puis les deux boutons. `icone=False` (fichier
+    absent, ou message d'avant sans l'icone jointe) : les boutons seuls --
+    une vignette sans piece jointe ferait refuser le message."""
     q = _borne(q)
-    vue = discord.ui.LayoutView(timeout=None)
-    rangee = discord.ui.ActionRow()
+    ui = discord.ui
+    vue = ui.LayoutView(timeout=None)
+    rangee = ui.ActionRow()
     rangee.add_item(SpfQte(q))
     rangee.add_item(SpfGo(q))
-    vue.add_item(rangee)
+    if _ICONE.exists() if icone is None else bool(icone):
+        tete = ui.Section(ui.TextDisplay("## Spoofer"),
+                          accessory=ui.Thumbnail("attachment://" + _ICONE_NOM))
+        vue.add_item(ui.Container(tete, rangee, accent_colour=_BLEU))
+    else:
+        vue.add_item(rangee)
     return vue
+
+
+def _porte_icone(message) -> bool:
+    return any(getattr(a, "filename", "") == _ICONE_NOM
+               for a in (getattr(message, "attachments", None) or []))
 
 
 def _custom_ids(message) -> set:
@@ -191,7 +223,9 @@ def panneau_a_jour(message, moi: int) -> bool:
     ids = _custom_ids(message)
     return (est_panneau(message, moi) and not getattr(message, "embeds", None)
             and any(c.startswith("spf:qb:") for c in ids)
-            and any(c.startswith("spf:go:") for c in ids))
+            and any(c.startswith("spf:go:") for c in ids)
+            # sans l'icone (panneau d'avant le 27/09) : il est repose
+            and (_porte_icone(message) or not _ICONE.exists()))
 
 
 # ───────────────────────────────────────────────────────────── fenetres ──
@@ -213,7 +247,10 @@ class FenetreQuantite(discord.ui.Modal, title="🔢"):
             await _dire(interaction, f"🔢 Choisis un nombre entre 1 et {QTE_MAX}.")
             return
         try:
-            await interaction.response.edit_message(view=panneau(q))
+            # la vignette pointe sur la piece jointe DU message : un
+            # panneau qui ne l'a pas est redessine sans elle
+            await interaction.response.edit_message(
+                view=panneau(q, icone=_porte_icone(getattr(interaction, "message", None))))
         except Exception as e:                               # noqa: BLE001
             print(f"[spoofer] panneau non redessine : {type(e).__name__}: {e}")
             if not interaction.response.is_done():
@@ -508,7 +545,11 @@ class Spoofer(commands.Cog):
             except Exception:
                 pass
         try:
-            await canal.send(view=panneau(QTE_DEFAUT))
+            f = fichier_icone()
+            if f is not None:
+                await canal.send(view=panneau(QTE_DEFAUT, icone=True), file=f)
+            else:
+                await canal.send(view=panneau(QTE_DEFAUT, icone=False))
             return 1
         except Exception as e:                               # noqa: BLE001
             print(f"[spoofer] panneau non pose dans #{getattr(canal, 'name', '?')} : {e}")
