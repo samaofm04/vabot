@@ -26516,7 +26516,13 @@ try:
         del _journalBg.lignes[:]
         _ok2Bg, _m2Bg, _meta2Bg = _wBg._send_reel_to_banger_channel("lola", _vBg)
         _c2Bg = [str(x["content"] or "") for x in _s2Bg.envois]
-        _codeBg = "".join(c[4:-4] for c in _c2Bg if c.startswith("```\n") and c.endswith("\n```"))
+        # Un texte court part en UN message « **Titre** + bloc » (bouton
+        # « copier » de Discord, 27/09/2026) ; un texte long, sous son titre,
+        # en plusieurs blocs. Les deux formes comptent.
+        _codeBg = "".join(
+            (c[4:-4] if c.startswith("```\n") else c.split("\n```\n", 1)[1][:-4])
+            for c in _c2Bg if c.endswith("\n```")
+            and (c.startswith("```\n") or (c.startswith("**") and "\n```\n" in c)))
         check("salon banger, carte refusee : repli en texte, video et exemple joints, journalise",
               _ok2Bg is True and not [x for x in _s2Bg.envois if x["view"] is not None]
               and _s2Bg.envois and _s2Bg.envois[0]["noms"] == ["reel_1.mp4", "EXEMPLE_reel_1.example.mp4"]
@@ -26525,7 +26531,8 @@ try:
               (_ok2Bg, _c2Bg[:2], _journalBg.lignes[-2:]))
         check("salon banger, carte refusee : caption et description arrivent entieres",
               "".join(_CAPBg.split()) in "".join(_codeBg.split()) and _DESCBg in _codeBg
-              and "**Caption à copier**" in _c2Bg and "**Description à copier**" in _c2Bg,
+              and any(c.startswith("**Caption à copier**") for c in _c2Bg)
+              and any(c.startswith("**Description à copier**") for c in _c2Bg),
               (len(_codeBg), _c2Bg[1:3]))
         check("salon banger, carte refusee : aucune consigne de l'ancien format",
               not [a for a in _ANCIENBg if a in "\n".join(_c2Bg)],

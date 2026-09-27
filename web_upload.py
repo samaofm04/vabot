@@ -665,6 +665,9 @@ def _send_reel_to_banger_channel(identity: str, video_path) -> tuple:
                 await _u._livrer_contenu(
                     _SuiviSalon(), 1, 1, ident, medias,
                     textes=[(_u._T_CAP, caption), (_u._T_DESC, description)],
+                    # UN seul message dans ce salon : retirer l'etoile le
+                    # supprime, textes compris (voir _livrer_contenu).
+                    textes_a_part=False,
                     alertes=alertes, quoi=f"banger {ident}")
             except FileNotFoundError:
                 return False, "fichier introuvable (déplacé entre-temps)", None

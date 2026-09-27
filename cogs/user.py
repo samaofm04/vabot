@@ -1551,7 +1551,8 @@ def _carte_livraison(rang, total, identite, medias, *, guild=None, textes=(),
 
 
 async def _livrer_contenu(interaction, rang, total, identite, medias, *,
-                          textes=(), alertes=(), bloquant=False, quoi="contenu"):
+                          textes=(), alertes=(), bloquant=False, quoi="contenu",
+                          textes_a_part=True):
     """Livre UN contenu au VA : la carte (_carte_livraison), sinon l'ancien
     envoi (en-tete + fichier(s), puis chaque texte en bloc de code).
 
@@ -1565,9 +1566,18 @@ async def _livrer_contenu(interaction, rang, total, identite, medias, *,
     Passe par interaction.followup : le proxy du serveur US (_JBRedirect) y
     envoie la carte dans le salon -content, `view=` et `files=` compris."""
     guild = getattr(interaction, "guild", None)
+    # LES TEXTES A COPIER SORTENT DE LA CARTE (27/09/2026). Dans une carte
+    # (Components V2), Discord ne pose PAS son bouton « copier » sur les blocs
+    # de code ; il le pose sur ceux d'un message ordinaire. Le proprietaire
+    # veut ce bouton dans le salon -content des VA : la carte porte l'en-tete
+    # et le media, et chaque texte suit, juste en dessous, dans son propre
+    # message (_envoyer_a_copier). `textes_a_part=False` garde les textes
+    # DANS la carte : le salon banger de l'identite retire son message quand
+    # l'etoile est retiree sur le site, et des textes a part y resteraient.
     try:
         vue, fichiers = _carte_livraison(rang, total, identite, medias,
-                                         guild=guild, textes=textes,
+                                         guild=guild,
+                                         textes=() if textes_a_part else textes,
                                          alertes=alertes, bloquant=bloquant,
                                          quoi=quoi)
     except FileNotFoundError:
@@ -1577,15 +1587,22 @@ async def _livrer_contenu(interaction, rang, total, identite, medias, *,
                     quoi, type(e).__name__, e)
         vue, fichiers = None, []
     if vue is not None:
+        envoyee = False
         try:
             await interaction.followup.send(view=vue, files=fichiers)
-            return "carte"
+            envoyee = True
         except Exception as e:                               # noqa: BLE001
             log.warning("carte %s refusee (%s: %s) : ancien envoi",
                         quoi, type(e).__name__, e)
         finally:
             for f in fichiers:
                 f.close()
+        if envoyee:
+            if textes_a_part:
+                for titre, texte in textes:
+                    if str(texte or "").strip():
+                        await _envoyer_a_copier(interaction, titre, texte)
+            return "carte"
 
     # L'ANCIEN ENVOI, sans ses consignes : le meme en-tete que la carte, le
     # fichier, puis les textes. Fichiers neufs : discord.py referme ceux d'un
@@ -1614,9 +1631,23 @@ async def _livrer_contenu(interaction, rang, total, identite, medias, *,
             file=discord.File(str(chemin), filename=_nom_piece_jointe(nom)))
     for titre, texte in textes:
         if str(texte or "").strip():
-            await interaction.followup.send(f"**{titre}**")
-            await _envoyer_texte(interaction, texte)
+            await _envoyer_a_copier(interaction, titre, texte)
     return "repli"
+
+
+async def _envoyer_a_copier(interaction, titre, texte):
+    """« **Description à copier** » et son bloc de code, dans UN message
+    ordinaire : c'est la que Discord pose son bouton « copier ». Un texte
+    trop long pour un message part en plusieurs blocs, sous le titre, et
+    jamais coupe (_envoyer_texte, qui garde aussi le repli des textes
+    contenant eux-memes des accents graves)."""
+    t = str(texte or "")
+    msg = "**" + titre + "**\n```\n" + t + "\n```"
+    if "```" not in t and len(msg) <= 1990:
+        await interaction.followup.send(msg)
+        return
+    await interaction.followup.send(f"**{titre}**")
+    await _envoyer_texte(interaction, t)
 
 
 _ETRANGER = re.compile(r"(?:^|[^\w@])@[A-Za-z0-9._]{3,}|https?://|\bwww\.")
