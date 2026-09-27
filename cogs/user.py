@@ -7436,7 +7436,8 @@ def journal_brutes():
     return list(_JOURNAL_BRUTES)[::-1]
 
 
-async def brute_a_envoyer(video, dossier, identity="", sortie=None, forcer=False, complet=None):
+async def brute_a_envoyer(video, dossier, identity="", sortie=None, forcer=False, complet=None,
+                          noter=True):
     """(fichier a envoyer, metadonnees reecrites ?) pour UNE brute.
 
     Un seul endroit decide, parce qu il y a PLUSIEURS boutons qui envoient une
@@ -7460,13 +7461,16 @@ async def brute_a_envoyer(video, dossier, identity="", sortie=None, forcer=False
     Pour le salon -spoofer (cogs/spoofer.py, 27/09/2026) : `sortie` nomme le
     fichier (plusieurs versions dans un meme dossier s ecrasaient),
     `forcer` passe outre l interrupteur (le VA demande expressement le
-    spoof), `complet` impose le mode (None = celui de la page).
+    spoof), `complet` impose le mode (None = celui de la page), `noter=False`
+    garde ses essais hors du journal des brutes (diagnostic « Tester
+    maintenant » de la page) : cinq lignes par spoof en chassaient les brutes.
     """
+    _noter = _noter_brute if noter else (lambda *a, **k: None)
     import asyncio as _aio
     video = Path(video)
     cfg = load_transform_config()
     if not forcer and not bool(cfg.get("enabled", False)):
-        _noter_brute(video.name, identity, False, False, "interrupteur coupe", "")
+        _noter(video.name, identity, False, False, "interrupteur coupe", "")
         return video, False, ""
 
     # Le MODE vient de la page (menu « Mode »), pas d une constante ici.
@@ -7507,14 +7511,14 @@ async def brute_a_envoyer(video, dossier, identity="", sortie=None, forcer=False
         except Exception as e:                  # noqa: BLE001
             ok, detail = False, f"{type(e).__name__}: {e}"[:120]
         if ok and sortie.exists() and sortie.stat().st_size > 0:
-            _noter_brute(video.name, identity, True, True, "", mode)
+            _noter(video.name, identity, True, True, "", mode)
             return sortie, True, ""
 
     raison = detail or (f"ffmpeg a echoue {essais} fois de suite" if essais > 1
                         else "ffmpeg a echoue")
     print(f"[brutes] {identity or '?'} / {video.name} : uniquification "
           f"demandee ({mode}), NON appliquee ({raison})")
-    _noter_brute(video.name, identity, True, False, raison, mode)
+    _noter(video.name, identity, True, False, raison, mode)
     return video, False, raison
 
 

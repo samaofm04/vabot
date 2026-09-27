@@ -9812,6 +9812,8 @@ try:
                     for m in list(s.messages)[::-1][:limit]:
                         yield m
                 return _g()
+            async def move(s, **kw):
+                s.deplacements = getattr(s, "deplacements", []) + [kw]
 
         class _UserSp:
             def __init__(s, i, nom):
@@ -9956,7 +9958,7 @@ try:
             # video plus lourde que ce que Discord accepte : mode complet impose
             vus = []
 
-            async def _espion(video, dossier, identity="", sortie=None, forcer=False, complet=None):
+            async def _espion(video, dossier, identity="", sortie=None, forcer=False, complet=None, noter=True):
                 vus.append((forcer, complet))
                 return video, False, "espion"
             _cuSp.brute_a_envoyer = _espion
@@ -9999,17 +10001,135 @@ try:
             _moiSp.bot = True
             for n in ("bob-menu", "bob-content", "kim-menu", "kim-spoofer"):
                 _SalonSp(n, g2)
-            # zoe : son -spoofer est reste en BAS du dossier -> rangement retente
+            # zoe : son -spoofer est reste en BAS du dossier -> UN deplacement
             zoe = _UserSp(3, "zoe")
             g2.members.append(zoe)
             catz = _CatSp()
             for i, n in enumerate(("zoe-menu", "zoe-download", "zoe-content", "zoe-spoofer")):
                 c = _SalonSp(n, g2, catz); c.position = i
+            # lea a decore son salon a la main : c'est bien son -spoofer
+            lea = _UserSp(4, "lea")
+            g2.members.append(lea)
+            catl = _CatSp()
+            for i, n in enumerate(("lea-menu", "🎭・lea-spoofer", "lea-content")):
+                c = _SalonSp(n, g2, catl); c.position = i
             for c in g2.text_channels:
                 if not hasattr(c, "position"):
                     c.position = 0
             r["provision"] = (await cog._provisionner(g2), appels)
+            zsp = next(c for c in g2.text_channels if c.name == "zoe-spoofer")
+            r["zoe_move"] = [(d.get("after").name, d.get("category") is catz)
+                             for d in getattr(zsp, "deplacements", [])]
             _moiSp.bot = False
+
+            # --- relecture du 27/09 ---
+            # une fenetre d'avant redemarrage est reprise ; celles de ce processus non
+            fen = _sp.FenetreFichier(4)
+            fq = _sp.FenetreQuantite(2)
+            r["ids"] = (fen.custom_id, fq.custom_id, fen.fichier.component.custom_id,
+                        fq.nombre.custom_id, fen.custom_id in _sp._OUVERTES)
+            repris = []
+            _savDisp = _sp.FenetreFichier._dispatch_submit
+
+            def _disp(self, interaction, comps, resolved):
+                repris.append((type(self).__name__, self.q, self.custom_id))
+                return _aSp.get_event_loop().create_future()
+            _sp.FenetreFichier._dispatch_submit = _disp
+            try:
+                class _IM:
+                    type = _dSp.InteractionType.modal_submit
+                    def __init__(s, cid):
+                        s.data = {"custom_id": cid, "components": [], "resolved": {}}
+                await cog.on_interaction(_IM(fen.custom_id))          # de ce processus
+                await cog.on_interaction(_IM("spf:fen:3:deadbeef0000"))  # d'avant redemarrage
+                await cog.on_interaction(_IM("autre:truc"))
+            finally:
+                _sp.FenetreFichier._dispatch_submit = _savDisp
+            r["repris"] = repris
+            # le marqueur n'est lu qu'une fois, et un spoof en cours y reste
+            cog._marqueur_lu = False
+            _sp._marquer(77, {"salon": ct.id, "fichier": "en_cours.mp4", "q": 5, "t": 1})
+            _sp._marquer(78, {"salon": ct.id, "fichier": "coupe.mp4", "q": 5, "t": 1})
+            cog.en_cours.add(77)
+            await cog._prevenir_interrompus()
+            await cog._prevenir_interrompus()
+            r["prevenir"] = ([m.content for m in ct.messages], sorted(_jsSp.loads(_sp.MARQUEUR.read_text())))
+            cog.en_cours.discard(77); _sp._marquer(77, None); ct.messages.clear()
+            # video trop longue pour tenir, meme re-encodee : dite, sans encoder
+            import video_transform as _vtSp
+            _savDur = _vtSp.duree_secondes
+            _vtSp.duree_secondes = lambda p: 120.0
+            vus2 = []
+
+            async def _esp2(video, dossier, identity="", sortie=None, forcer=False, complet=None, noter=True):
+                vus2.append(complet)
+                return video, False, "espion"
+            _cuSp.brute_a_envoyer = _esp2
+            try:
+                long_ = _PieceSp("long.mp4", src); long_.size = 30 * 1024 * 1024
+                b_long = await cog.traiter(_InterSp(_bobSp, spf, cog), long_, 3)
+                r["long"] = (b_long, vus2[:], [m.content for m in ct.messages])
+                ct.messages.clear()
+                _vtSp.duree_secondes = lambda p: 2.0
+                # .webm : accepte, re-encode en .mp4
+                b_webm = await cog.traiter(_InterSp(_bobSp, spf, cog), _PieceSp("clip.webm", src), 2)
+                r["webm"] = (b_webm["refus"], vus2[len(r["long"][1]):])
+                ct.messages.clear()
+            finally:
+                _vtSp.duree_secondes = _savDur
+                _cuSp.brute_a_envoyer = _savSp["bae"]
+            # au-dela du plafond : pas meme telecharge
+            gros2 = _PieceSp("enorme.mp4", b"x"); gros2.size = _sp.TAILLE_MAX + 1
+            b_gros = await cog.traiter(_InterSp(_bobSp, spf, cog), gros2, 5)
+            r["plafond"] = (b_gros["refus"], [m.content for m in ct.messages])
+            ct.messages.clear()
+            # les versions identiques sont refusees (le contenu doit changer)
+            _cuSp.transform_metadata_strict = lambda src_, dst_, **k: (_shSp.copyfile(src_, dst_) or True)
+            b_id = await cog.traiter(_InterSp(_bobSp, spf, cog), _PieceSp("x.mp4", src), 3)
+            r["identiques"] = (b_id, [m.fichiers for m in ct.messages])
+            _cuSp.transform_metadata_strict = _savSp["tms"]
+            ct.messages.clear()
+            # le journal des brutes (diagnostic de la page) n'est pas rempli par le spoofer
+            n_j = len(_cuSp.journal_brutes())
+            await cog.traiter(_InterSp(_bobSp, spf, cog), _PieceSp("y.mp4", src), 2)
+            r["journal"] = (n_j, len(_cuSp.journal_brutes()))
+            ct.messages.clear()
+            # le marqueur est bien ecrit PENDANT le travail
+            vus_m = []
+            _savM = _sp._marquer
+            _sp._marquer = lambda uid, info: (vus_m.append(info), _savM(uid, info))[1]
+            try:
+                await cog.traiter(_InterSp(_bobSp, spf, cog), _PieceSp("z.mp4", src), 1)
+            finally:
+                _sp._marquer = _savM
+            r["marqueur"] = vus_m
+            ct.messages.clear()
+            # un panneau repose garde le nombre choisi
+            spf2 = _SalonSp("max-spoofer", gu, _CatSp())
+            spf2.messages.append(_MsgSp(spf2, _moiSp, comps=[type("B", (), {"custom_id": "spf:qb:2", "children": []})(),
+                                                            type("B", (), {"custom_id": "spf:go:2", "children": []})()]))
+            await cog.assurer_panneau(spf2)
+            r["garde_q"] = sorted(_sp._custom_ids(spf2.messages[-1]))
+            # PNG transparent -> fond blanc ; profil couleur garde
+            from PIL import Image as _Img2, ImageCms as _Cms
+            im = _Img2.new("RGBA", (40, 40), (0, 0, 0, 0))
+            im.save(_TMPSp / "t.png")
+            icc = _Cms.ImageCmsProfile(_Cms.createProfile("sRGB")).tobytes()
+            _Img2.new("RGB", (40, 40), (10, 200, 30)).save(_TMPSp / "icc.jpg", icc_profile=icc)
+            cfg = {"enabled": True, "metadata_only": True, "random_us_metadata": {"enabled": True}}
+            _itSp.transform_image(_TMPSp / "t.png", _TMPSp / "t_out.jpg", cfg, "post")
+            _itSp.transform_image(_TMPSp / "icc.jpg", _TMPSp / "icc_out.jpg", cfg, "post")
+            r["png"] = (_Img2.open(_TMPSp / "t_out.jpg").convert("RGB").getpixel((20, 20)),
+                        bool(_Img2.open(_TMPSp / "icc_out.jpg").info.get("icc_profile")))
+            # dossiers temporaires d'un spoof coupe : balayes
+            vieux_d = _PSp(_tfSp.gettempdir()) / "spoof_testbalai"
+            vieux_d.mkdir(exist_ok=True)
+            import os as _osSp
+            _osSp.utime(vieux_d, (1, 1))
+            recent_d = _PSp(_tfSp.mkdtemp(prefix="spoof_"))
+            _sp._balayer_temporaires()
+            r["balai"] = (vieux_d.exists(), recent_d.exists())
+            _shSp.rmtree(recent_d, ignore_errors=True)
             return r
 
         _rSp = _aSp.run(_scenario())
@@ -10097,10 +10217,43 @@ try:
         check("spoofer : jamais de panneau dans un salon de service (« ⬇️・all-spoofer »)",
               _eSp[2] == 0)
         check("spoofer : les VA deja la recoivent leur -spoofer (create_us_tickets), et eux seuls",
-              _rSp["provision"][1][:1] == ["bob"] and "kim" not in _rSp["provision"][1]
-              and "seven" not in _rSp["provision"][1], str(_rSp["provision"]))
-        check("spoofer : un -spoofer reste en bas du dossier -> le rangement est retente",
-              _rSp["provision"] == (2, ["bob", "zoe"]), str(_rSp["provision"]))
+              _rSp["provision"][1] == ["bob"], str(_rSp["provision"]))
+        check("spoofer : un -spoofer reste en bas du dossier -> UN deplacement apres -menu, sans tout recreer",
+              _rSp["provision"][0] == 2 and _rSp["zoe_move"] == [("zoe-menu", True)], str((_rSp["provision"], _rSp["zoe_move"])))
+        check("spoofer : un salon decore a la main (« 🎭・lea-spoofer ») est reconnu, pas double",
+              "lea" not in _rSp["provision"][1])
+        _idsR = _rSp["ids"]
+        check("spoofer : fenetres reconnaissables (spf:fen:<q>:…, spf:qte:…, champs fixes)",
+              _idsR[0].startswith("spf:fen:4:") and _idsR[1].startswith("spf:qte:")
+              and _idsR[2] == "spf:fichier" and _idsR[3] == "spf:nombre" and _idsR[4], str(_idsR))
+        check("spoofer : fenetre ouverte AVANT un redemarrage -> reprise (une fois), celles d'ici non",
+              _rSp["repris"] == [("FenetreFichier", 3, "spf:fen:3:deadbeef0000")], str(_rSp["repris"]))
+        check("spoofer : marqueur lu une seule fois ; un spoof EN COURS n'est ni annonce ni efface",
+              len(_rSp["prevenir"][0]) == 1 and "coupe.mp4" in _rSp["prevenir"][0][0]
+              and _rSp["prevenir"][1] == ["77"], str(_rSp["prevenir"]))
+        _bL, _vL, _cL = _rSp["long"]
+        check("spoofer : video trop longue pour tenir re-encodee -> dite, SANS encoder",
+              _bL["refus"] == "duree" and _vL == [] and _cL and "trop longue" in _cL[-1], str(_rSp["long"]))
+        check("spoofer : .webm accepte, re-encode (mode complet)",
+              _rSp["webm"][0] == "" and _rSp["webm"][1] and all(c is True for c in _rSp["webm"][1]),
+              str(_rSp["webm"]))
+        check("spoofer : au-dela du plafond, le fichier n'est pas meme telecharge, et c'est dit",
+              _rSp["plafond"][0] == "taille" and _rSp["plafond"][1] and "trop lourd" in _rSp["plafond"][1][0],
+              str(_rSp["plafond"]))
+        check("spoofer : des versions identiques a la source ne sont PAS livrees (comptees ratees)",
+              _rSp["identiques"][0]["livrees"] == 0 and _rSp["identiques"][0]["ratees"] == 3
+              and not any(_rSp["identiques"][1]), str(_rSp["identiques"]))
+        check("spoofer : le journal des brutes (diagnostic de la page) n'est pas rempli par le spoofer",
+              _rSp["journal"][0] == _rSp["journal"][1], str(_rSp["journal"]))
+        check("spoofer : le marqueur est ecrit pendant le travail, puis vide",
+              _rSp["marqueur"] and _rSp["marqueur"][0] and _rSp["marqueur"][0].get("fichier") == "z.mp4"
+              and _rSp["marqueur"][-1] is None, str(_rSp["marqueur"])[:200])
+        check("spoofer : un panneau repose garde le nombre choisi par le VA",
+              {"spf:qb:2", "spf:go:2"} <= set(_rSp["garde_q"]), str(_rSp["garde_q"]))
+        check("photos : un PNG transparent sort sur fond BLANC (plus noir), le profil couleur est garde",
+              min(_rSp["png"][0]) > 240 and _rSp["png"][1], str(_rSp["png"]))
+        check("spoofer : les dossiers temporaires d'un spoof coupe sont balayes (pas les recents)",
+              _rSp["balai"] == (False, True), str(_rSp["balai"]))
         _srcW = _PSp("cogs/welcome.py").read_text(encoding="utf-8")
         check("spoofer : salon juste apres -menu ; /ticketsall lit la liste (plus d'expression en dur)",
               _wlSp.US_TICKET_SUFFIXES == ("menu", "spoofer", "download", "numero-mail", "content")
@@ -10112,7 +10265,7 @@ try:
               and '"spoofer"' in _PSp("main.py").read_text(encoding="utf-8").split("MAIN_COGS")[1].split("]")[0])
         check("spoofer : brute_a_envoyer garde son comportement par defaut (interrupteur, nom, mode)",
               "if not forcer and not bool(cfg.get(\"enabled\", False))" in _PSp("cogs/user.py").read_text(encoding="utf-8")
-              and _cuSp.brute_a_envoyer.__defaults__ == ("", None, False, None))
+              and _cuSp.brute_a_envoyer.__defaults__ == ("", None, False, None, True))
     finally:
         _sp.MARQUEUR = _savSp["marq"]
         _sp.PAUSE_ENVOI = _savSp["pause"]

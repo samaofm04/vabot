@@ -65,7 +65,13 @@ MARQUEUR = _RACINE / "data" / "spoofer_en_cours.json"
 QTE_DEFAUT = 5
 QTE_MAX = 5
 
-VIDEOS = frozenset({".mp4", ".mov", ".m4v"})
+VIDEOS = frozenset({".mp4", ".mov", ".m4v", ".webm", ".mkv"})
+#: Conteneurs qu'une version « metadonnees seules » (remux -c copy) ne sait
+#: pas refaire en .mp4 fiable : re-encodes (mode complet).
+_A_REENCODER = frozenset({".webm", ".mkv"})
+#: Au-dela, le fichier n'est pas telecharge : il occupait la memoire et le
+#: verrou unique pendant des minutes pour, au bout, ne pas tenir sur Discord.
+TAILLE_MAX = 200 * 1024 * 1024
 PHOTOS = frozenset({".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"})
 
 #: Un traitement a la fois : le VPS a deux coeurs, partages avec le site et
@@ -249,12 +255,24 @@ def panneau_a_jour(message, moi: int) -> bool:
 
 # ───────────────────────────────────────────────────────────── fenetres ──
 
+#: custom_id des fenetres ouvertes PAR CE PROCESSUS. Une soumission absente
+#: d'ici vient d'une fenetre ouverte AVANT un redemarrage (un par
+#: deploiement) : discord.py la jetait sans repondre et le VA perdait son
+#: televersement. Le test « absente de _view_store._modals » ne suffit pas :
+#: une fenetre finie sans rendre la main en est deja retiree, et le fichier
+#: etait alors traite deux fois (constate en simulation).
+_OUVERTES: set = set()
+
+
 class FenetreQuantite(discord.ui.Modal, title="🔢"):
     nombre = discord.ui.TextInput(label="Combien de versions (1 à 5)", placeholder="5",
-                                  required=True, min_length=1, max_length=1)
+                                  required=True, min_length=1, max_length=1,
+                                  custom_id="spf:nombre")
 
-    def __init__(self, q: int = QTE_DEFAUT):
-        super().__init__()
+    def __init__(self, q: int = QTE_DEFAUT, custom_id: str = None):
+        super().__init__(custom_id=custom_id or f"spf:qte:{os.urandom(6).hex()}")
+        if custom_id is None:
+            _OUVERTES.add(self.custom_id)
         self.nombre.default = str(_borne(q))
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -289,11 +307,14 @@ class FenetreQuantite(discord.ui.Modal, title="🔢"):
 class FenetreFichier(discord.ui.Modal, title="Spoofer"):
     fichier = discord.ui.Label(
         text="Photo ou vidéo",
-        component=discord.ui.FileUpload(min_values=1, max_values=1, required=True))
+        component=discord.ui.FileUpload(custom_id="spf:fichier",
+                                        min_values=1, max_values=1, required=True))
 
-    def __init__(self, q: int = QTE_DEFAUT):
-        super().__init__()
+    def __init__(self, q: int = QTE_DEFAUT, custom_id: str = None):
         self.q = _borne(q)
+        super().__init__(custom_id=custom_id or f"spf:fen:{self.q}:{os.urandom(6).hex()}")
+        if custom_id is None:
+            _OUVERTES.add(self.custom_id)
 
     async def on_submit(self, interaction: discord.Interaction):
         cog = interaction.client.get_cog("Spoofer") if interaction.client else None
@@ -346,15 +367,16 @@ def _nom_iphone(ext: str, pris: set) -> str:
 
 
 async def versions_video(src: Path, dossier: Path, q: int, identite: str,
-                         complet=None) -> tuple:
+                         complet=None, force_ext=None) -> tuple:
     """(sorties, ratees) : q versions de la video, par le moteur des brutes."""
     from cogs.user import brute_a_envoyer
     sorties, ratees, vus, pris = [], 0, {_md5(src)}, set()
     for _ in range(q):
-        ext = ".mp4" if complet else src.suffix.lower()
+        ext = force_ext or (".mp4" if complet else src.suffix.lower())
         sortie = Path(dossier) / _nom_iphone(ext, pris)
         f, ok, _raison = await brute_a_envoyer(src, dossier, identity=identite,
-                                               sortie=sortie, forcer=True, complet=complet)
+                                               sortie=sortie, forcer=True, complet=complet,
+                                               noter=False)
         if not ok or Path(f) == src or not sortie.exists() or sortie.stat().st_size == 0:
             ratees += 1
             continue
@@ -428,6 +450,44 @@ async def _dire(interaction, texte: str) -> None:
         pass
 
 
+class _Refus(Exception):
+    """Un spoof refuse avant tout traitement : le message est pour le VA."""
+
+
+async def _trop_longue(src: Path, plafond: int) -> bool:
+    """En mode complet, une version pese au moins (800 + 128) kbit/s x duree
+    / 1,04 : au-dela du plafond, aucune ne tiendra."""
+    try:
+        import video_transform as vt
+        duree = await asyncio.to_thread(vt.duree_secondes, src)
+    except Exception:
+        return False
+    return bool(duree) and duree > 0 and (800 + 128) * 125 * duree / 1.04 > plafond
+
+
+def _balayer_temporaires(age_min: int = 3600) -> int:
+    """Les dossiers spoof_* laisses par un redemarrage pendant un spoof : le
+    TemporaryDirectory ne les efface qu'a sa fin normale. Ce sont des copies
+    de travail (source et versions), jamais du vault."""
+    import shutil
+    racine = Path(tempfile.gettempdir())
+    n = 0
+    try:
+        for d in racine.glob("spoof_*"):
+            try:
+                if d.is_dir() and time.time() - d.stat().st_mtime > age_min \
+                        and d.resolve().parent == racine.resolve():
+                    shutil.rmtree(d, ignore_errors=True)
+                    n += 1
+            except OSError:
+                pass
+    except OSError:
+        pass
+    if n:
+        print(f"[spoofer] {n} dossier(s) temporaire(s) d'un spoof interrompu retire(s)")
+    return n
+
+
 def _marquer(uid: int, info) -> None:
     d = safe_json.load(MARQUEUR, default={}) or {}
     d = d if isinstance(d, dict) else {}
@@ -458,6 +518,11 @@ class Spoofer(commands.Cog):
         self.bot = bot
         #: un spoof a la fois par VA
         self.en_cours = set()
+        #: fenetres d'avant redemarrage reprises (gardees jusqu'a leur fin)
+        self._taches = set()
+        #: le marqueur n'est lu qu'au premier tour (apres le redemarrage) : au
+        #: tour de 24 h il annoncait « interrompu » a un spoof EN COURS
+        self._marqueur_lu = False
 
     async def cog_load(self):
         try:
@@ -469,6 +534,7 @@ class Spoofer(commands.Cog):
             pillow_heif.register_heif_opener()               # photos HEIC d'iPhone
         except Exception as e:                               # noqa: BLE001
             print(f"[spoofer] HEIC non lisible : {e}")
+        _balayer_temporaires()
         try:
             if not self._entretien.is_running():
                 self._entretien.start()
@@ -480,6 +546,29 @@ class Spoofer(commands.Cog):
             self._entretien.cancel()
         except Exception:
             pass
+
+    @commands.Cog.listener()
+    async def on_interaction(self, interaction):
+        """Une fenetre ouverte AVANT un redemarrage et validee apres : elle est
+        reconstruite a partir de son custom_id et traitee comme les autres."""
+        if interaction.type is not discord.InteractionType.modal_submit:
+            return
+        data = interaction.data or {}
+        cid = str(data.get("custom_id") or "")
+        if not cid.startswith(("spf:fen:", "spf:qte:")) or cid in _OUVERTES:
+            return                        # fenetre de ce processus : discord.py s'en charge
+        print(f"[spoofer] fenetre d'avant redemarrage reprise : {cid}")
+        try:
+            if cid.startswith("spf:fen:"):
+                m = FenetreFichier(cid.split(":")[2], custom_id=cid)
+            else:
+                m = FenetreQuantite(custom_id=cid)
+            t = m._dispatch_submit(interaction, data.get("components") or [],
+                                   data.get("resolved") or {})
+            self._taches.add(t)
+            t.add_done_callback(self._taches.discard)
+        except Exception as e:                               # noqa: BLE001
+            print(f"[spoofer] fenetre {cid} non reprise : {type(e).__name__}: {e}")
 
     # ------------------------------------------------------------ travail --
 
@@ -498,13 +587,20 @@ class Spoofer(commands.Cog):
         # La vraie limite est celle que Discord annonce pour cette interaction
         # (10 Mio codes en dur dans discord.py, 20 depuis septembre) ; on prend
         # la plus grande des deux, et un 413 reste compte.
+        taille = int(getattr(piece, "size", 0) or 0)
+        if taille > TAILLE_MAX:
+            bilan["refus"] = "taille"
+            await _dire(interaction, f"📎 {nom} : {taille // 1048576} Mo, trop lourd "
+                                     f"(au plus {TAILLE_MAX // 1048576} Mo).")
+            return bilan
         from cogs import telechargement as tl
         limite = max(tl._limite(cible), int(getattr(interaction, "filesize_limit", 0) or 0))
         video = ext in VIDEOS
         # En « metadonnees seules », une version pese autant que la source :
-        # une video trop lourde pour repartir passe en mode complet (debit borne).
-        complet = True if (video and int(getattr(piece, "size", 0) or 0)
-                           > limite - tl._MARGE_ENVOI) else None
+        # une video trop lourde pour repartir passe en mode complet (debit
+        # borne). Un .webm / .mkv aussi : le remux en .mp4 n'est pas fiable.
+        complet = True if (video and (taille > limite - tl._MARGE_ENVOI
+                                      or ext in _A_REENCODER)) else None
         uid = int(getattr(interaction.user, "id", 0) or 0)
         _marquer(uid, {"salon": getattr(cible, "id", None), "fichier": nom[:120],
                        "q": q, "t": int(time.time())})
@@ -514,11 +610,20 @@ class Spoofer(commands.Cog):
                 src = d / ("source" + ext)
                 # tout de suite : l'adresse du fichier chez Discord expire
                 await piece.save(src)
+                if complet and await _trop_longue(src, limite - tl._MARGE_ENVOI):
+                    # _brider_debit ne descend pas sous 800 kbps (audio 128 au
+                    # moins) : au-dela, AUCUNE version ne tient -- q re-encodages
+                    # sous le verrou unique pour « 0/q trop lourdes » (mesure :
+                    # 100 s -> 12,2 Mo pour 9,75 permis). On le dit sans encoder.
+                    bilan["refus"] = "duree"
+                    bilan["lourdes"] = q
+                    raise _Refus(f"📎 {nom} : trop longue pour tenir sur Discord "
+                                 "une fois re-encodée — envoie-la plus courte.")
                 async with _FILE:
                     if video:
                         sorties, ratees = await versions_video(
                             src, d, q, f"spoofer {getattr(interaction.user, 'name', uid)}",
-                            complet=complet)
+                            complet=complet, force_ext=".mp4" if ext in _A_REENCODER else None)
                     else:
                         sorties, ratees = await versions_photo(src, d, q)
                 bilan["ratees"] = ratees
@@ -534,6 +639,10 @@ class Spoofer(commands.Cog):
                         bilan["ratees"] += len(lot)
                     if i < len(lots) - 1:
                         await asyncio.sleep(PAUSE_ENVOI)
+        except _Refus as e:
+            await tl._poster(cible, str(e))
+            _marquer(uid, None)
+            return bilan
         except Exception as e:                               # noqa: BLE001
             print(f"[spoofer] {nom} : {type(e).__name__}: {e}")
             bilan["ratees"] = q - bilan["livrees"]
@@ -562,23 +671,31 @@ class Spoofer(commands.Cog):
             return 0
         moi = getattr(getattr(self.bot, "user", None), "id", 0)
         try:
-            panneaux = [m async for m in canal.history(limit=50) if est_panneau(m, moi)]
+            # 200 : sans -content, les livraisons de repli vivent ici, et au-dela
+            # de 50 le panneau n'etait plus vu -- un second etait pose
+            panneaux = [m async for m in canal.history(limit=200) if est_panneau(m, moi)]
         except Exception as e:                               # noqa: BLE001
             print(f"[spoofer] #{getattr(canal, 'name', '?')} illisible : {e}")
             return 0
         if len(panneaux) == 1 and panneau_a_jour(panneaux[0], moi):
             return 0
+        # le nombre que le VA avait choisi suit le panneau repose
+        q = QTE_DEFAUT
+        for m in panneaux:
+            for cid in _custom_ids(m):
+                if cid.startswith("spf:qb:"):
+                    q = _borne(cid.rsplit(":", 1)[-1])
         for m in panneaux:
             try:
                 await m.delete()
-            except Exception:
-                pass
+            except Exception as e:                           # noqa: BLE001
+                print(f"[spoofer] ancien panneau non retire de #{getattr(canal, 'name', '?')} : {e}")
         try:
             f = fichier_icone()
             if f is not None:
-                await canal.send(view=panneau(QTE_DEFAUT, icone=True), file=f)
+                await canal.send(view=panneau(q, icone=True), file=f)
             else:
-                await canal.send(view=panneau(QTE_DEFAUT, icone=False))
+                await canal.send(view=panneau(q, icone=False))
             return 1
         except Exception as e:                               # noqa: BLE001
             print(f"[spoofer] panneau non pose dans #{getattr(canal, 'name', '?')} : {e}")
@@ -588,42 +705,65 @@ class Spoofer(commands.Cog):
         """Les VA deja la recoivent leur -spoofer par le chemin normal de
         creation (create_us_tickets : droits, ordre, panneau). JAMAIS par
         /ticketsall, qui supprimerait les dossiers des VA renommes."""
-        from cogs.welcome import _us_ticket_name, _us_norm, create_us_tickets
-        par_nom = {_us_norm(c.name): c for c in guilde.text_channels}
+        from cogs.welcome import _us_ticket_name, create_us_tickets
+        # LA cle de welcome (nom_sans_decor) ; le PREMIER du nom, comme
+        # discord.utils.find dans create_us_tickets
+        par_nom = {}
+        for c in guilde.text_channels:
+            par_nom.setdefault(_norm(c.name), c)
         faits = 0
         for m in list(getattr(guilde, "members", []) or []):
             if getattr(m, "bot", False):
                 continue
             menu = par_nom.get(_us_ticket_name(m, "menu"))
             spf = par_nom.get(_us_ticket_name(m, "spoofer"))
-            # absent, OU pas juste apres -menu : le rangement de
-            # create_us_tickets a pu echouer (constate le 27/09 : un salon sur
-            # 34 reste en bas du dossier), il est retente au passage suivant
-            if menu is not None and (spf is None or not _bien_range(menu, spf)):
-                try:
+            if menu is None or (spf is not None and _bien_range(menu, spf)):
+                continue
+            try:
+                if spf is None or getattr(menu, "category", None) is None \
+                        or getattr(spf, "category", None) is not menu.category:
                     _cr, err = await create_us_tickets(guilde, m, self.bot)
                     if err:
                         print(f"[spoofer] dossier de {m.name} : {err}")
-                    faits += 1
-                except Exception as e:                       # noqa: BLE001
-                    print(f"[spoofer] dossier de {getattr(m, 'name', '?')} : {e}")
-                await asyncio.sleep(1.0)
+                else:
+                    # seulement mal range : UN deplacement. Relancer tout
+                    # create_us_tickets ne deplacait rien quand un salon etranger
+                    # separait -menu et -spoofer, mais reposait le panneau -download
+                    # a chaque demarrage.
+                    await spf.move(after=menu, category=menu.category,
+                                   reason="-spoofer juste apres -menu")
+                faits += 1
+            except Exception as e:                           # noqa: BLE001
+                print(f"[spoofer] dossier de {getattr(m, 'name', '?')} : {type(e).__name__}: {e}")
+            await asyncio.sleep(1.0)
         return faits
 
     async def _prevenir_interrompus(self) -> None:
-        """Un spoof coupe par un redemarrage : le VA l'apprend."""
+        """Un spoof coupe par un redemarrage : le VA l'apprend. Une fois, au
+        premier tour ; seuls les spoofs qui NE tournent PAS sont annonces et
+        retires du marqueur (un spoof lance entre-temps y reste)."""
+        if self._marqueur_lu:
+            return
+        self._marqueur_lu = True
         d = safe_json.load(MARQUEUR, default={}) or {}
         if not isinstance(d, dict) or not d:
             return
+        dits = []
         for uid, info in list(d.items()):
+            if str(uid).isdigit() and int(uid) in self.en_cours:
+                continue
             try:
                 salon = self.bot.get_channel(int((info or {}).get("salon") or 0))
                 if salon is not None:
                     await salon.send(f"🎭 {info.get('fichier', 'fichier')} : interrompu par un "
                                      "redémarrage, renvoie-le.")
+                else:
+                    print(f"[spoofer] spoof interrompu de {uid} : salon introuvable")
             except Exception as e:                           # noqa: BLE001
                 print(f"[spoofer] interruption non signalee a {uid} : {e}")
-        safe_json.write(MARQUEUR, {}, indent=1)
+            dits.append(uid)
+        for uid in dits:
+            _marquer(uid, None)
 
     @tasks.loop(hours=24)
     async def _entretien(self):

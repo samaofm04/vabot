@@ -261,8 +261,12 @@ def _transform_metadata_only(input_path, output_path, config, timeout):
     if config.get("random_us_metadata", {}).get("enabled"):
         from datetime import datetime, timedelta
         meta = random_metadata_preset()
-        rand_date = datetime.now() - timedelta(days=random.randint(1, 60), hours=random.randint(0, 23))
-        creation_time = rand_date.strftime("%Y-%m-%dT%H:%M:%S.000000Z")
+        # tire a la SECONDE : avec jours + heures seulement, les versions d'un
+        # meme spoof gardaient les minutes:secondes de l'instant du spoof
+        rand_date = datetime.now() - timedelta(seconds=random.randint(86400, 60 * 86400))
+        # creationdate est l'heure locale (+0200) ; creation_time, l'UTC qui
+        # lui correspond, comme sur un iPhone (2 h d'ecart avant)
+        creation_time = (rand_date - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S.000000Z")
         # creationdate Apple = heure LOCALE avec offset (+0200), pas UTC "Z"
         creationdate = rand_date.strftime("%Y-%m-%dT%H:%M:%S+0200")
         lat_sign = "+" if meta["lat"] >= 0 else "-"
@@ -609,8 +613,12 @@ def transform_video(input_path, output_path, config=None, timeout=180):
     if config.get("random_us_metadata", {}).get("enabled"):
         meta = random_metadata_preset()
         from datetime import datetime, timedelta
-        rand_date = datetime.now() - timedelta(days=random.randint(1, 60), hours=random.randint(0, 23))
-        creation_time = rand_date.strftime("%Y-%m-%dT%H:%M:%S.000000Z")
+        # tire a la SECONDE : avec jours + heures seulement, les versions d'un
+        # meme spoof gardaient les minutes:secondes de l'instant du spoof
+        rand_date = datetime.now() - timedelta(seconds=random.randint(86400, 60 * 86400))
+        # creationdate est l'heure locale (+0200) ; creation_time, l'UTC qui
+        # lui correspond, comme sur un iPhone (2 h d'ecart avant)
+        creation_time = (rand_date - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S.000000Z")
         creationdate = rand_date.strftime("%Y-%m-%dT%H:%M:%S+0200")
         lat_sign = "+" if meta["lat"] >= 0 else "-"
         lon_sign = "+" if meta["lon"] >= 0 else "-"

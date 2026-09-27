@@ -227,11 +227,8 @@ def _build_random_exif_bytes(preset):
         import piexif
     except ImportError:
         return None
-    random_date = datetime.now() - timedelta(
-        days=random.randint(1, 60),
-        hours=random.randint(0, 23),
-        minutes=random.randint(0, 59),
-    )
+    # a la seconde : les versions d'un meme spoof ne partagent plus leurs secondes
+    random_date = datetime.now() - timedelta(seconds=random.randint(86400, 60 * 86400))
     date_str = random_date.strftime("%Y:%m:%d %H:%M:%S")
     offset_str = "+01:00"  # CET
     lat = preset["lat"]
@@ -353,7 +350,16 @@ def transform_image(input_path, output_path, config=None, target="post"):
         except Exception:
             pass
         original_mode = img.mode
-        if img.mode != "RGB":
+        # le profil couleur (Display P3 d'un iPhone) : sans lui, les couleurs
+        # ressortaient ternies
+        icc = img.info.get("icc_profile")
+        if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+            # la transparence part sur BLANC : convert("RGB") la mettait en noir
+            rgba = img.convert("RGBA")
+            fond = Image.new("RGB", rgba.size, (255, 255, 255))
+            fond.paste(rgba, mask=rgba.split()[-1])
+            img = fond
+        elif img.mode != "RGB":
             img = img.convert("RGB")
 
         if not metadata_only:
@@ -415,6 +421,8 @@ def transform_image(input_path, output_path, config=None, target="post"):
             save_kwargs["format"] = "JPEG"
             save_kwargs["quality"] = quality
 
+        if icc and save_kwargs.get("format") in ("JPEG", "WEBP", "PNG"):
+            save_kwargs["icc_profile"] = icc
         img.save(output_path, **save_kwargs)
         return True
     except Exception as e:

@@ -659,6 +659,11 @@ PREFIXES_SALONS_SERVICE = ("all-",)
 def nom_sans_decor(nom) -> str:
     """Le nom normalise, sans ce qu'on ajoute DEVANT a la main (emoji, « ・ »).
 
+    LA cle de tous les salons et dossiers de VA (create_us_tickets,
+    completer_dossiers_us, /ticketsall, cogs/spoofer) : deux normalisations
+    faisaient doubler par l'entretien un « 🎭・bob-spoofer » renomme a la
+    main, puis supprimer l'un des deux par /ticketsall.
+
     Le proprietaire a renomme « all-download » en « ⬇️・all-download » : plus
     rien ne le reconnaissait. Les copies des telechargements ne partaient plus
     (« aucun salon all-download », journal du 26/09), /ticketsall l'aurait pris
@@ -701,7 +706,7 @@ async def _us_member_category(guild, member):
     LUI seul (+ staff/admin), ses 3 salons vivent dedans."""
     base = _us_base(member)
     cat = discord.utils.find(
-        lambda c: _us_norm(c.name) == base, guild.categories)
+        lambda c: nom_sans_decor(c.name) == base, guild.categories)
     if cat is None:
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -1486,8 +1491,9 @@ async def _us_ranger(cat, in_cat):
             try:
                 await ch.move(beginning=True, offset=idx, category=cat,
                               reason="rangement dossier US")
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[dossiers-us] #{getattr(ch, 'name', '?')} non range : "
+                      f"{type(e).__name__}: {e}", flush=True)
             await asyncio.sleep(0.4)
 
 
@@ -1504,9 +1510,9 @@ async def completer_dossiers_us(guild, suffixes=("spoofer",)) -> dict:
     simple identifiant) : son dossier est saute, et compte. Idempotent.
     Rend {"crees": [...], "sans_va": [...], "erreurs": [...]}."""
     bilan = {"crees": [], "sans_va": [], "erreurs": []}
-    noms = {_us_norm(c.name) for c in guild.text_channels}
+    noms = {nom_sans_decor(c.name) for c in guild.text_channels}
     for content in list(guild.text_channels):
-        nn = _us_norm(content.name)
+        nn = nom_sans_decor(content.name)
         if not nn.endswith("-content") or salon_de_service(content.name):
             continue
         cat = getattr(content, "category", None)
@@ -1533,7 +1539,7 @@ async def completer_dossiers_us(guild, suffixes=("spoofer",)) -> dict:
                 bilan["erreurs"].append(f"{nom}: {type(e).__name__}: {e}"[:200])
         dossier = []
         for s in US_TICKET_SUFFIXES:
-            c = discord.utils.find(lambda c, n=f"{base}-{s}": _us_norm(c.name) == n,
+            c = discord.utils.find(lambda c, n=f"{base}-{s}": nom_sans_decor(c.name) == n,
                                    guild.text_channels)
             if c is not None:
                 dossier.append(c)
@@ -1560,7 +1566,7 @@ async def create_us_tickets(guild, member, bot=None):
     for suffix in US_TICKET_SUFFIXES:
         name = _us_ticket_name(member, suffix)
         existing = discord.utils.find(
-            lambda c, n=name: _us_norm(c.name) == n, guild.text_channels)
+            lambda c, n=name: nom_sans_decor(c.name) == n, guild.text_channels)
         if existing:
             chans[suffix] = existing
             continue  # déjà là (commande re-lançable sans doublons)
@@ -1972,7 +1978,7 @@ class Welcome(commands.Cog):
                 return
             cible = _us_ticket_name(after, "menu")
             salon = discord.utils.find(
-                lambda c, n=cible: _us_norm(c.name) == n, after.guild.text_channels)
+                lambda c, n=cible: nom_sans_decor(c.name) == n, after.guild.text_channels)
             if salon is None:
                 return
             await maj_menu_marche(self.bot, salon, apres)
@@ -2807,7 +2813,7 @@ class Welcome(commands.Cog):
         # qui RESSEMBLENT aux nôtres comptent comme le même salon.
         by_name = {}
         for c in guild.text_channels:
-            nn = _us_norm(c.name)
+            nn = nom_sans_decor(c.name)
             # « all-download » finit comme un ticket : sans cette exclusion il
             # passait pour l'orphelin d'un membre « all » et partait à la
             # suppression, archive des téléchargements comprise.
@@ -2900,13 +2906,13 @@ class Welcome(commands.Cog):
                     # 1b) Dossiers orphelins VIDES (ex: ancien pseudo) -> supprimés
                     orph_bases = set()
                     for c in to_del:
-                        nn = _us_norm(c.name)
+                        nn = nom_sans_decor(c.name)
                         m2 = pat.search(nn)
                         if m2:
                             orph_bases.add(nn[:m2.start()])
                     member_bases = {_us_base(m) for m in members}
                     for cat2 in list(guild.categories):
-                        nn = _us_norm(cat2.name)
+                        nn = nom_sans_decor(cat2.name)
                         if nn in orph_bases and nn not in member_bases and not cat2.channels:
                             try:
                                 await cat2.delete(reason="ticketsall : dossier orphelin vide")
@@ -2934,7 +2940,7 @@ class Welcome(commands.Cog):
                     for m in sorted(members, key=_us_base):
                         have = sum(1 for s in US_TICKET_SUFFIXES
                                    if discord.utils.find(
-                                       lambda c, n=_us_ticket_name(m, s): _us_norm(c.name) == n,
+                                       lambda c, n=_us_ticket_name(m, s): nom_sans_decor(c.name) == n,
                                        guild.text_channels))
                         _n = len(US_TICKET_SUFFIXES)
                         lines.append(("✅" if have == _n else "🛠") + f" `{_us_base(m)}` — {have}/{_n}")
