@@ -13326,6 +13326,10 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
     GEN = {}
     RATES = set()       # sources dont le montage « rate » (repli du moteur)
     PERDUS = set()      # sources dont la video produite disparait avant l'envoi
+    # La brute que le moteur dit avoir tiree (rapport["brutes"], comme
+    # noctus_web._preparer_entrees) : vide, le rapport reste celui d'avant ;
+    # la partie 8 (favoris automatiques) la remplit.
+    TIREE = {}
 
     class FauxNoctus(types.ModuleType):
         def setup_ok(self):
@@ -13337,6 +13341,8 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
             GEN[m] = {"out": os.path.realpath(out), "video": os.path.realpath(video), "draft": draft}
             if rapport is not None and Path(video).name in RATES:
                 rapport.update({"repli": True, "message": "aucune vidéo brute utilisable"})
+            elif rapport is not None and TIREE:
+                rapport["brutes"] = [dict(TIREE)]
             return m
 
         def status(self, m):
@@ -14244,6 +14250,170 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
     _CONSIGNES_INTRO = ("à toi de les monter", "tes meilleurs, à reposter", "les meilleures, sans texte")
     check("messages envoyes : plus de « à toi de les monter » ni de « tes meilleurs, à reposter »",
           not [p for p in _CONSIGNES_INTRO if p in _lit], [p for p in _CONSIGNES_INTRO if p in _lit])
+
+    # ===========================================================================
+    # 8. AJOUT DU 27/09/2026 : CHAQUE LIVRAISON NOTE SA RECETTE (favoris auto)
+    # ===========================================================================
+    # Un banger ne d'une video livree retrouve sa recette EXACTE -- la brute,
+    # le template, la caption -- et favoris_auto l'etoile sans rien deviner.
+    # Le compte des « recette= » dans le code ne prouve pas que CHAQUE chemin
+    # passe la bonne : ils sont rejoues ici pour de vrai, registre des
+    # livraisons dans un bac a sable. Photos et PP n'ont pas de recette : rien
+    # a etoiler.
+    print("\n== 8. recettes des favoris automatiques ==")
+    import shutil
+    import favoris_auto as FA
+    FAD = TMP / "fa_data"
+    FAD.mkdir()
+    try:
+        os.symlink(ID, FAD / "identities", target_is_directory=True)
+    except OSError:                      # Windows sans droit de lien : une copie
+        shutil.copytree(ID, FAD / "identities")
+    _savFA = (FA.DATA, FA.noter_livraison)
+    _savLivU = U._livraison_a_noter
+    FA.DATA = FAD
+
+    def recettes():
+        """Les livraisons notees depuis le dernier vider(), dans l'ordre."""
+        FA._CACHE_MOIS.clear()
+        livs, illisibles = FA.lire_livraisons()
+        return list(livs.values()) if not illisibles else ["%d ligne(s) illisible(s)" % illisibles]
+
+    def vider():
+        shutil.rmtree(FAD / "livraisons", ignore_errors=True)
+        FA._CACHE_MOIS.clear()
+
+    try:
+        # Une interaction de test n'est pas un vrai serveur : rien n'est note.
+        lot_us("recette, interaction factice", COG.reelmonte, count=1)
+        check("recettes : une interaction factice (pas un vrai serveur) n'ecrit RIEN",
+              recettes() == [] and U._livraison_a_noter(Itx(*dossier(771)[:2])) is False, recettes())
+        U._livraison_a_noter = lambda itx: True
+
+        # -- montage : le template ET la brute que le moteur a tiree --------
+        TIREE.update({"fichier": "V1.mp4", "brute": str(BRUTES[1]), "variante": "V1",
+                      "debut": 1.5, "gap": 0.0})
+        NUM["n"] += 1
+        g8, menu8, cont8 = dossier(700 + NUM["n"], emojis=(E_LOLA, E_BLONDE))
+        AU_MOMENT = []
+
+        def _noter_espion(*a, **k):
+            AU_MOMENT.append(len(cartes(cont8.envois)))
+            return _savFA[1](*a, **k)
+        FA.noter_livraison = _noter_espion
+        GEN.clear()
+        vider()
+        lancer(COG._run_for_model(Itx(g8, menu8), "lola", COG.reelmonte, count=1, supports_count=True))
+        FA.noter_livraison = _savFA[1]
+        r = recettes()
+        check("recettes : la recette est notee APRES l'envoi de la carte (le VA n'attend pas)",
+              AU_MOMENT == [1], AU_MOMENT)
+        check("recettes : reel monte -> template, brute tiree par le moteur et sa fenetre",
+              len(r) == 1 and r[0].get("template") == "lola|templates|t1.mp4"
+              and r[0].get("brute") == "lola|brutes|brute_b.mp4" and r[0].get("brute_debut") == 1.5
+              and not r[0].get("repli"), r)
+        check("recettes : ... avec le VA, le salon, le serveur et l'identite",
+              r and r[0].get("va") == "4242" and r[0].get("va_nom") == "va_test"
+              and r[0].get("salon") in (str(menu8.id), str(cont8.id)) and r[0].get("guild") == str(g8.id)
+              and r[0].get("identite") == "lola" and r[0].get("quoi"), r)
+        TIREE.clear()
+        # Montage rate (template entier, sans brute) : dit, pour ne pas etre etoile.
+        RATES.add(TPL[0].name)
+        vider()
+        try:
+            lot_us("recette, montage rate", COG.reelmonte, count=1)
+        finally:
+            RATES.clear()
+        r = recettes()
+        check("recettes : montage rate -> « repli », aucune brute inventee",
+              len(r) == 1 and r[0].get("repli") is True and not r[0].get("brute")
+              and r[0].get("template") == "lola|templates|t1.mp4", r)
+
+        # -- caption incrustee, brute + caption a copier, brute seule, trend, reel
+        _cles_brutes = {"lola|brutes|" + b.name for b in BRUTES}
+        vider()
+        lot_us("recette, captionbanger", COG.captionbanger, count=1)
+        r = recettes()
+        check("recettes : caption incrustee -> la brute, et QUEL texte (id, texte, mode incrustee)",
+              len(r) == 1 and r[0].get("brute") in _cles_brutes
+              and r[0].get("caption") == {"id": "c1", "texte": CAP_A, "ident": "lola", "mode": "incrustee"}, r)
+        vider()
+        lot_us("recette, captionbrut", COG._send_caption_plus_brute, supports=False)
+        r = recettes()
+        check("recettes : brute + caption a copier -> la brute, et le texte « a copier »",
+              len(r) == 2 and all(x.get("brute") in _cles_brutes and (x.get("caption") or {}).get("mode") == "a_copier"
+                                  and x["caption"].get("texte") == CAP_A for x in r), r)
+        vider()
+        lot_us("recette, videobrut", COG.videobrut, count=1)
+        r = recettes()
+        check("recettes : brute seule -> sa cle, sans caption",
+              len(r) == 1 and r[0].get("brute") in _cles_brutes and "caption" not in r[0], r)
+        vider()
+        lot_us("recette, trends", COG.trends, count=1)
+        r = recettes()
+        check("recettes : une trend est notee « media », JAMAIS comme une brute a etoiler",
+              len(r) == 1 and not r[0].get("brute")
+              and str(r[0].get("media") or r[0].get("media_nom") or "").endswith(("tr1.mp4", "tr2.mp4")), r)
+        vider()
+        lot_us("recette, reel", COG.reel, count=1)
+        r = recettes()
+        check("recettes : reel pret -> sa cle de reel, et sa caption « a copier »",
+              len(r) == 1 and r[0].get("reel") == "lola|videos|r1.mp4"
+              and (r[0].get("caption") or {}).get("mode") == "a_copier"
+              and r[0]["caption"].get("texte") == CAP_A, r)
+
+        # -- ✨ General : l'identite est la RESERVE, la brute vient de la model
+        vider()
+        lot_us("recette, general", COG.reelcaption, count=1, model="blonde", brute_de="lola")
+        r = recettes()
+        check("recettes : ✨ General -> identite = la reserve, « model » = la model de la brute",
+              len(r) == 1 and r[0].get("identite") == "blonde" and r[0].get("model") == "lola"
+              and r[0].get("brute") in _cles_brutes, r)
+
+        # -- Choisir ma brute, telle quelle
+        async def _choisie():
+            gX, menuX, contX = dossier(774, emojis=(E_LOLA,))
+            await U.ChoixCaptionView(COG, "lola", BRUTES[0])._sans_caption(Itx(gX, contX))
+        vider()
+        lancer(_choisie())
+        r = recettes()
+        check("recettes : « Choisir ma brute » -> la brute choisie",
+              len(r) == 1 and r[0].get("action") == "brute choisie"
+              and r[0].get("brute") == "lola|brutes|" + BRUTES[0].name, r)
+
+        # -- photos : aucune recette ; une recette impossible ne coupe rien
+        TIRAGE["img"] = 0
+        vider()
+        lot_us("recette, post", COG.post, count=1)
+        check("recettes : une photo n'a pas de recette (rien a etoiler)", recettes() == [], recettes())
+        del JOURNAL.lignes[:]
+        FA.noter_livraison = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("disque plein"))
+        vider()
+        cont = lot_us("recette impossible", COG.videobrut, count=1)
+        FA.noter_livraison = _savFA[1]
+        check("recettes : une recette impossible a noter ne coupe PAS la livraison, et le journal le dit",
+              len(cartes(cont.envois)) == 1 and journal("non notee") and recettes() == [],
+              JOURNAL.lignes[-2:])
+
+        # -- la variante sortie de la reserve : sa brute IMPOSEE, pas le lien temporaire
+        _rm = U._recette_montage(TPL[0], {}, {"recette": {
+            "source": str(TPL[0]), "imposees": [str(BRUTES[1])], "repli": False,
+            "brutes": [{"brute": "/tmp/reserve-brute-xyz/brute_b.mp4", "debut": 2.0}]}},
+            "template_brut", "TEMPLATE")
+        check("recettes : variante de la reserve -> la brute imposee (vrai chemin) et sa fenetre",
+              _rm.get("brute") == str(BRUTES[1]) and _rm.get("brute_debut") == 2.0
+              and _rm.get("reserve") is True and _rm.get("template") == TPL[0], _rm)
+        _rm = U._recette_montage(TPL[0], {"repli": True, "brutes": []}, None, "template", "T")
+        check("recettes : moteur en repli -> « repli », sans brute", _rm.get("repli") is True
+              and "brute" not in _rm, _rm)
+    finally:
+        FA.DATA, FA.noter_livraison = _savFA
+        FA._CACHE_MOIS.clear()
+        U._livraison_a_noter = _savLivU
+        TIREE.clear()
+        RATES.clear()
+        while not FA._FILE.empty():
+            FA._FILE.get_nowait()
 
 
 _CL_MODULES = [_v2imp.import_module(n) for n in (

@@ -359,6 +359,11 @@ def _rapport_vide(total=0) -> dict:
         "raison": "",               # pourquoi le repli, en clair
         "message": "",              # phrase prête à afficher (page, Discord, log)
         "fichiers": [],             # entrées préparées (= targets)
+        # LA BRUTE DE CHAQUE VARIANTE, et la fenêtre prise dedans : sans elle,
+        # la vidéo livrée ne disait plus de quelle brute elle venait (tirée au
+        # hasard ici), et un banger né d'un montage ne pouvait pas étoiler sa
+        # brute (favoris_auto). [{"fichier", "brute", "debut", "gap", "variante"}]
+        "brutes": [],
         "ts": 0,
     }
 
@@ -940,7 +945,7 @@ def brute_gap(template, brute, cut_at) -> float:
     return round(cut - bdur, 3)
 
 
-def assemble_brute_template(template, brute, cut_at, out_path):
+def assemble_brute_template(template, brute, cut_at, out_path, infos=None):
     """Fabrique la vidéo assemblée : la BRUTE occupe le début jusqu'au trait de
     coupe, le TEMPLATE reprend du trait jusqu'à sa fin, et le son du TEMPLATE
     accompagne le tout. Renvoie (True, "") ou (False, raison).
@@ -950,7 +955,11 @@ def assemble_brute_template(template, brute, cut_at, out_path):
     le DÉBUT de la vidéo finale est coupé, son compris : jamais de boucle ni
     d'arrêt sur image — l'image bouge toujours, et la transition reste calée
     sur le même instant de la musique (voir brute_gap pour le décalage des
-    captions)."""
+    captions).
+
+    `infos` : dict FACULTATIF rempli avec la fenêtre réellement prise dans la
+    brute ({"debut", "gap"}) — le 2e essai repart du début, c'est donc
+    l'essai qui a réussi qui compte."""
     template, brute, out_path = Path(template), Path(brute), Path(out_path)
     if not template.exists():
         return False, "template introuvable"
@@ -1034,6 +1043,8 @@ def assemble_brute_template(template, brute, cut_at, out_path):
             return False, f"ffmpeg indisponible : {e}"
         size = out_path.stat().st_size if out_path.exists() else 0
         if r.returncode == 0 and size >= 10000:
+            if isinstance(infos, dict):
+                infos.update(debut=start if essai == 1 else 0.0, gap=gap)
             return True, ""
         err = (r.stderr or b"").decode("utf-8", "ignore").strip().splitlines()
         # stderr vide arrive : on garde alors le code de sortie, sinon le
@@ -1295,10 +1306,13 @@ def _preparer_entrees(src, inp, draft, folders, brutes_dir, report=None):
     #    longtemps. ffmpeg est un sous-processus, les threads ne bloquent pas.
     def _one(job):
         name, brute, vf = job
-        ok, err = assemble_brute_template(src, brute, cut, inp / name)
+        infos = {}
+        ok, err = assemble_brute_template(src, brute, cut, inp / name, infos=infos)
         if ok:
             # brute plus courte que la place -> le début (image + son) a été coupé
             # de « gap » secondes : les captions minutées devront être décalées.
+            rap["brutes"].append({"fichier": name, "brute": str(brute), "variante": vf,
+                                  "debut": infos.get("debut"), "gap": infos.get("gap")})
             return name, vf, brute_gap(src, brute, cut), True
         # Une brute abîmée ne doit pas faire disparaître une variante : on rend
         # le template seul pour celle-là, l'utilisateur a bien ses N vidéos.

@@ -1552,7 +1552,7 @@ def _carte_livraison(rang, total, identite, medias, *, guild=None, textes=(),
 
 async def _livrer_contenu(interaction, rang, total, identite, medias, *,
                           textes=(), alertes=(), bloquant=False, quoi="contenu",
-                          textes_a_part=True):
+                          textes_a_part=True, recette=None):
     """Livre UN contenu au VA : la carte (_carte_livraison), sinon l'ancien
     envoi (en-tete + fichier(s), puis chaque texte en bloc de code).
 
@@ -1564,7 +1564,11 @@ async def _livrer_contenu(interaction, rang, total, identite, medias, *,
     discord.HTTPException (l'ancien envoi refuse lui aussi).
 
     Passe par interaction.followup : le proxy du serveur US (_JBRedirect) y
-    envoie la carte dans le salon -content, `view=` et `files=` compris."""
+    envoie la carte dans le salon -content, `view=` et `files=` compris.
+
+    `recette` : de quoi est faite la video livree (brute, template, caption),
+    notee APRES l'envoi pour les favoris automatiques (_noter_livraison). Un
+    banger ne de cette video retrouvera sa recette exacte."""
     guild = getattr(interaction, "guild", None)
     # LES TEXTES A COPIER SORTENT DE LA CARTE (27/09/2026). Dans une carte
     # (Components V2), Discord ne pose PAS son bouton « copier » sur les blocs
@@ -1602,6 +1606,7 @@ async def _livrer_contenu(interaction, rang, total, identite, medias, *,
                 for titre, texte in textes:
                     if str(texte or "").strip():
                         await _envoyer_a_copier(interaction, titre, texte)
+            await _noter_livraison(interaction, identite, medias, recette, quoi)
             return "carte"
 
     # L'ANCIEN ENVOI, sans ses consignes : le meme en-tete que la carte, le
@@ -1632,7 +1637,79 @@ async def _livrer_contenu(interaction, rang, total, identite, medias, *,
     for titre, texte in textes:
         if str(texte or "").strip():
             await _envoyer_a_copier(interaction, titre, texte)
+    await _noter_livraison(interaction, identite, medias, recette, quoi)
     return "repli"
+
+
+def _recette_montage(template, rapport, fiche_reserve, famille, label):
+    """La recette d'un montage livre : le template, et la brute REELLEMENT
+    tiree -- par le moteur (son rapport, noctus_web._preparer_entrees) ou
+    deja montee dans la variante sortie de la reserve (sa fiche)."""
+    r = {"action": label, "famille": famille, "template": template}
+    if fiche_reserve is not None:
+        rec = (fiche_reserve or {}).get("recette") or {}
+        r["reserve"] = True
+        if rec.get("repli"):
+            r["repli"] = True
+        bs = rec.get("brutes") or []
+        b = bs[0] if bs and isinstance(bs[0], dict) else {}
+        # L'imposee d'abord : c'est son vrai chemin (le moteur, lui, a vu le
+        # lien dur pose dans un dossier temporaire, efface depuis).
+        brute = next(iter(rec.get("imposees") or []), None) or b.get("brute")
+        if brute:
+            r["brute"] = brute
+        if b.get("debut") is not None:
+            r["brute_debut"] = b["debut"]
+        return r
+    if (rapport or {}).get("repli"):
+        r["repli"] = True
+    bs = [x for x in ((rapport or {}).get("brutes") or []) if isinstance(x, dict)]
+    b = next((x for x in bs if x.get("variante") == "V1"), bs[0] if bs else None)
+    if b and b.get("brute"):
+        r["brute"] = b["brute"]
+        if b.get("debut") is not None:
+            r["brute_debut"] = b["debut"]
+    return r
+
+
+def _livraison_a_noter(interaction) -> bool:
+    """Seules les livraisons faites dans un VRAI serveur sont notees : les
+    essais (interactions factices des tests, client de test) n'ecrivent
+    rien dans data/livraisons."""
+    return isinstance(getattr(interaction, "guild", None), discord.Guild)
+
+
+async def _noter_livraison(interaction, identite, medias, recette, quoi):
+    """La recette de ce qui vient de partir (favoris_auto.noter_livraison).
+
+    APRES l'envoi, dans un thread : la copie de la video (lien dur) se fait
+    avant que l'appelant n'efface son fichier temporaire, et le VA a deja sa
+    carte. JAMAIS FATAL : une livraison non notee se dit au journal, la video
+    est partie -- un banger ne d'elle passera par le rattrapage a l'image."""
+    if not recette or not medias or not _livraison_a_noter(interaction):
+        return
+    try:
+        import favoris_auto as _fa
+        r = dict(recette)
+        # ✨ General : l'identite est la RESERVE, la brute vient de la model.
+        _m = _MODEL_REELLE.get()
+        if _m:
+            r.setdefault("model", _m)
+        r.setdefault("identite_media", _m or identite or "")
+        user = getattr(interaction, "user", None)
+        salon = (getattr(interaction, "channel_id", None)
+                 or getattr(getattr(interaction, "channel", None), "id", ""))
+        rid = await asyncio.to_thread(
+            _fa.noter_livraison, identite, medias[0][0], r,
+            va=str(getattr(user, "id", "") or ""),
+            va_nom=str(getattr(user, "display_name", "") or getattr(user, "name", "") or ""),
+            salon=str(salon or ""),
+            guild=str(getattr(getattr(interaction, "guild", None), "id", "") or ""),
+            quoi=quoi)
+        if not rid:
+            log.warning("livraison %s non notee : ecriture refusee", quoi)
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("livraison %s non notee (%s: %s)", quoi, type(e).__name__, e)
 
 
 async def _envoyer_a_copier(interaction, titre, texte):
@@ -1895,8 +1972,13 @@ def fav_brutes_for(identity, limit=15):
         p = brutes_dir / fn
         if p.exists() and p.is_file() and not _off.est_desactivee(p):
             out.append(p)
-            if limit and len(out) >= limit:
-                break
+    # AU-DELA DE `limit`, UN TIRAGE, PAS LES PREMIERES PAR ORDRE ALPHABETIQUE.
+    # La boucle s'arretait a la 15e : avec les etoiles posees par les favoris
+    # automatiques (27 sur ibenhaastrup, 26 sur themikkiangel), une douzaine
+    # de brutes etoilees n'auraient JAMAIS servi, toujours les memes, sans un
+    # mot. Tirees au hasard a chaque appel, toutes finissent par partir.
+    if limit and len(out) > limit:
+        out = random.sample(out, limit)
     return out
 
 
@@ -3428,7 +3510,10 @@ class UserCog(commands.Cog):
                     interaction, idx, total, identity, medias,
                     textes=[(_T_CAP, caption), (_T_DESC, description)],
                     alertes=[_ALERTE_EXEMPLE] if example else [],
-                    quoi=f"{label} {idx}/{total}")
+                    quoi=f"{label} {idx}/{total}",
+                    recette={"action": label, "reel": video,
+                             **({"caption": {"text": caption, "ident": identity,
+                                             "mode": "a_copier"}} if caption else {})})
             except FileNotFoundError:
                 # Rangee entre le tirage et l'envoi (doublons_vault range les
                 # copies exactes) : on le dit et on passe a la suivante, au
@@ -3478,6 +3563,9 @@ class UserCog(commands.Cog):
         # verdict, et il doit survivre a la suite. Le poser plus bas
         # l'ecraserait juste apres l'avoir rempli.
         _rapport = {}
+        # La fiche de la variante sortie du stock : elle dit quelle brute y
+        # est montee (favoris automatiques).
+        _fiche_res = {}
         # LA RESERVE EST AU PARC, PAS AUX VA. Voir POUR_LES_VA dans
         # noctus_reserve.py : un VA qui trouve la case vide genere et
         # obtient sa video ; le parc, lui, n'a aucun repli. Partager le
@@ -3499,6 +3587,7 @@ class UserCog(commands.Cog):
                     fiche_out=_fiche)
                 if pris is not None:
                     fichier, de_la_reserve = pris, pris
+                    _fiche_res = dict(_fiche)
                     # Le remplisseur fabrique des templates NUS pour
                     # reelmonte / flash / flash_banger (brutes_dir=None) : sans
                     # cette reprise, le stock rendait muet l'avertissement.
@@ -3620,7 +3709,10 @@ class UserCog(commands.Cog):
                 [(out, f"{prefixe_fichier}_{idx}.mp4")],
                 textes=textes, alertes=alertes,
                 bloquant=bool(_rapport.get("repli")),
-                quoi=f"{label} {idx}/{total}")
+                quoi=f"{label} {idx}/{total}",
+                recette=_recette_montage(video, _rapport,
+                                         _fiche_res if de_la_reserve is not None else None,
+                                         famille, label))
         except (discord.HTTPException, FileNotFoundError) as e:
             # FileNotFoundError : la video produite (ou sortie de la reserve) a
             # disparu avant l'envoi. _livrer_contenu la laisse remonter ; sans
@@ -4412,7 +4504,12 @@ class UserCog(commands.Cog):
                 await _livrer_contenu(interaction, idx, total, identity,
                                       [(v, v.name)],
                                       textes=[(_T_CAP, txt), (_T_DESC, desc)],
-                                      quoi=f"BRUTE {idx}/{total}")
+                                      quoi=f"BRUTE {idx}/{total}",
+                                      recette={"action": "brute + caption", "brute": v,
+                                               **({"caption": {"id": (cap or {}).get("id"),
+                                                               "text": txt, "ident": identity,
+                                                               "mode": "a_copier"}}
+                                                  if txt else {})})
             except FileNotFoundError:
                 await interaction.followup.send(f"⚠️ BRUTE {idx}/{total} : introuvable (déplacée entre-temps), passe à la suivante.")
                 continue
@@ -4730,7 +4827,12 @@ class UserCog(commands.Cog):
                     await _livrer_contenu(interaction, idx, total, identity,
                                           [(fichier, v.name)], textes=textes,
                                           alertes=alertes, bloquant=bool(_raison),
-                                          quoi=f"{label} {idx}/{total}")
+                                          quoi=f"{label} {idx}/{total}",
+                                          # une trend n'est pas une brute : notee
+                                          # comme media, jamais etoilee
+                                          recette={"action": label,
+                                                   ("brute" if Path(v).parent.name == "brutes"
+                                                    else "media"): v})
                 except FileNotFoundError:
                     await interaction.followup.send(f"⚠️ {label} {idx}/{total} : introuvable (déplacée entre-temps), passe à la suivante.")
                     continue
@@ -4910,7 +5012,11 @@ class UserCog(commands.Cog):
                 interaction, idx, total, identity,
                 [(fichier, f"{prefixe_fichier}_{idx}.mp4")],
                 textes=[(_T_DESC, str(cap.get("desc") or "").strip())],
-                quoi=f"{label} {idx}/{total}")
+                quoi=f"{label} {idx}/{total}",
+                recette={"action": label, "famille": famille, "brute": video,
+                         "reserve": de_la_reserve is not None,
+                         "caption": {"id": cap.get("id"), "text": cap.get("text"),
+                                     "ident": identity, "mode": "incrustee"}})
         except (discord.HTTPException, FileNotFoundError) as e:
             # FileNotFoundError : la video produite (ou sortie de la reserve) a
             # disparu avant l'envoi. _livrer_contenu la laisse remonter ; sans
@@ -7360,7 +7466,9 @@ class ChoixCaptionView(discord.ui.View):
                                       [(fichier, self.video.name)],
                                       textes=[(_T_DESC, desc)], alertes=[_av],
                                       bloquant=bool(_raison),
-                                      quoi="brute choisie")
+                                      quoi="brute choisie",
+                                      recette={"action": "brute choisie",
+                                               "brute": self.video})
         except FileNotFoundError:
             # Rangee entre le choix et l'envoi (doublons_vault) : levait
             # jusqu'a discord.py, le VA ne lisait rien.

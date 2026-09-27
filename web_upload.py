@@ -901,20 +901,132 @@ def _toggle_fav_brute(file_id: str):
         Un disque plein ou un fichier appartenant a root apres un deploiement
         suffit a produire ca. Ce n'est donc pas theorique.
     """
-    s = _load_fav_brutes()
-    now_on = file_id not in s
-    if now_on:
-        s.add(file_id)
-    else:
-        s.discard(file_id)
-    try:
-        FAV_BRUTES_FILE.parent.mkdir(parents=True, exist_ok=True)
-        if not safe_json.write_text(
-                FAV_BRUTES_FILE, json.dumps(sorted(s), ensure_ascii=False)):
-            return now_on, "ecriture refusee (droits ou disque plein ?)"
-    except Exception as e:
-        return now_on, str(e)[:150]
+    with _FAV_BRUTES_LOCK:
+        # Relu SUR LE DISQUE, strictement : un registre illisible lu comme
+        # vide, puis reecrit avec la seule cle de ce clic, effacait toutes les
+        # etoiles (et celles des favoris automatiques avec).
+        s, err = _lire_fav_brutes_strict()
+        if err:
+            return False, err
+        now_on = file_id not in s
+        if now_on:
+            s.add(file_id)
+        else:
+            s.discard(file_id)
+        try:
+            FAV_BRUTES_FILE.parent.mkdir(parents=True, exist_ok=True)
+            if not safe_json.write_text(
+                    FAV_BRUTES_FILE, json.dumps(sorted(s), ensure_ascii=False)):
+                return now_on, "ecriture refusee (droits ou disque plein ?)"
+        except Exception as e:
+            return now_on, str(e)[:150]
+        # Le cache de _load_fav_brutes ne regarde que la DATE du fichier, et
+        # sur le VPS (ext4) elle avance par paliers d'une milliseconde. Un clic
+        # qui attendait le verrou pendant que les favoris automatiques posaient
+        # une etoile ecrivait dans le MEME palier : le cache gardait la version
+        # d'avant le clic, et le clic suivant reecrivait le registre sans lui
+        # (simule dans tests_site.py, « meme palier de date »).
+        _invalidate_json_cache(FAV_BRUTES_FILE)
     return now_on, ""
+
+
+#: Toute ecriture de fav_brutes.json est un « lire, modifier, ecrire » : le
+#: clic du site et les favoris automatiques (autre fil) se marcheraient
+#: dessus, et le dernier effacerait l'etoile de l'autre. TOUS les ecrivains
+#: passent par ce verrou et relisent le fichier dessous (_lire_fav_brutes_
+#: strict) : la propagation des tags, la synchro de marche, le partage, la
+#: suppression et le rangement des doublons lisaient le cache, modifiaient
+#: puis ecrivaient SANS lui -- une etoile posee entre les deux par les
+#: favoris automatiques disparaissait, et le banger suivant la prenait pour
+#: « retiree a la main » : refusee pour toujours, sans que personne l'ait
+#: retiree.
+_FAV_BRUTES_LOCK = threading.RLock()
+
+
+def _lire_fav_brutes_strict():
+    """(ensemble, erreur) lu SUR LE DISQUE (safe_json : repli sur .prev).
+
+    Absent -> ensemble vide. Present mais illisible -> (None, erreur) :
+    jamais un ensemble vide, qu'un ecrivain reecrirait en effacant toutes les
+    etoiles, et que les favoris automatiques prendraient pour « etoile
+    retiree a la main »."""
+    if not FAV_BRUTES_FILE.exists():
+        return set(), ""
+    brut = safe_json.load(FAV_BRUTES_FILE, default=None)
+    if isinstance(brut, dict):
+        return set(brut.keys()), ""
+    if isinstance(brut, list):
+        return set(x for x in brut if isinstance(x, str)), ""
+    return None, f"{FAV_BRUTES_FILE.name} illisible : rien écrit"
+
+
+def _fav_brutes_etoilees():
+    """Pour les favoris automatiques : l'ensemble RELU, ou None s'il est
+    illisible (le doute n'est pas « absente »)."""
+    with _FAV_BRUTES_LOCK:
+        s, err = _lire_fav_brutes_strict()
+    return None if err else s
+
+
+def _modifier_fav_brutes(ajouter=(), retirer=()):
+    """Ajoute / retire des cles de fav_brutes.json : relu sous le verrou,
+    ecrit, cache invalide. Rend (ajoutees, retirees, erreur) -- les deux
+    premiers sont les cles qui ont VRAIMENT change."""
+    ajouter, retirer = set(ajouter or ()), set(retirer or ())
+    with _FAV_BRUTES_LOCK:
+        s, err = _lire_fav_brutes_strict()
+        if err:
+            return set(), set(), err
+        ajoutees, retirees = ajouter - s, retirer & s
+        if not ajoutees and not retirees:
+            return set(), set(), ""
+        s = (s | ajoutees) - retirees
+        try:
+            FAV_BRUTES_FILE.parent.mkdir(parents=True, exist_ok=True)
+            if not safe_json.write_text(
+                    FAV_BRUTES_FILE, json.dumps(sorted(s), ensure_ascii=False)):
+                return set(), set(), "ecriture refusee (droits ou disque plein ?)"
+        except Exception as e:
+            return set(), set(), str(e)[:150]
+        finally:
+            _invalidate_json_cache(FAV_BRUTES_FILE)
+    return ajoutees, retirees, ""
+
+
+def _poser_fav_brute(file_id: str, allumer: bool = True):
+    """Pose (ou retire) l'etoile d'une brute ou d'un template, SANS Discord.
+
+    La fonction partagee des favoris automatiques (favoris_auto) : meme
+    registre, meme format que le clic du site, mais un ETAT voulu au lieu
+    d'une bascule, et AUCUN envoi dans le salon banger -- le rattrapage
+    etoile des dizaines de brutes d'un coup, le salon en aurait recu autant
+    de videos.
+
+    Un registre ILLISIBLE n'est pas reecrit : _load_fav_brutes le lirait
+    comme vide, et l'ecriture effacerait toutes les etoiles. Rend (ok, erreur).
+    """
+    parts = (file_id or "").split("|")
+    if len(parts) != 3 or parts[1] not in ("brutes", "templates") or not all(parts):
+        return False, "clé inattendue"
+    with _FAV_BRUTES_LOCK:
+        s, err = _lire_fav_brutes_strict()
+        if err:
+            return False, err
+        if (file_id in s) == bool(allumer):
+            return True, ""
+        if allumer:
+            s.add(file_id)
+        else:
+            s.discard(file_id)
+        try:
+            FAV_BRUTES_FILE.parent.mkdir(parents=True, exist_ok=True)
+            if not safe_json.write_text(
+                    FAV_BRUTES_FILE, json.dumps(sorted(s), ensure_ascii=False)):
+                return False, "ecriture refusee (droits ou disque plein ?)"
+        except Exception as e:
+            return False, str(e)[:150]
+        _invalidate_json_cache(FAV_BRUTES_FILE)
+    return True, ""
 
 
 def _brute_banger_discord(file_id: str, allumee: bool) -> str:
@@ -1599,6 +1711,7 @@ def propager_tags_templates(source: str) -> dict:
                 "error": "rien a propager : aucun montage tague chez « %s »" % src}
 
     fav = _load_fav_brutes()
+    _load_fav_brutes_debut = set(fav)
     ajouts = {c: set() for c in _mm.ORDRE}
     poses_fav = 0
     introuvables = 0
@@ -1628,16 +1741,13 @@ def propager_tags_templates(source: str) -> dict:
     for c in _mm.ORDRE:
         touchees.update(k.split("|", 1)[0] for k in posees[c])
     if poses_fav:
-        try:
-            FAV_BRUTES_FILE.parent.mkdir(parents=True, exist_ok=True)
-            if not safe_json.write_text(
-                    FAV_BRUTES_FILE, json.dumps(sorted(fav), ensure_ascii=False)):
-                erreurs.append("%d etoile(s) NON enregistree(s) : %s "
-                               "(droits ou disque plein ?)"
-                               % (poses_fav, FAV_BRUTES_FILE.name))
-                poses_fav = 0
-        except Exception as e:
-            erreurs.append("etoiles : %s" % str(e)[:150])
+        # Seulement les cles AJOUTEES, fusionnees sous le verrou avec le
+        # fichier relu : reecrire `fav` (lu avant _ajouter_marques) effacait
+        # une etoile posee entre-temps par les favoris automatiques.
+        _aj, _rt, _err = _modifier_fav_brutes(ajouter=fav - _load_fav_brutes_debut)
+        if _err:
+            erreurs.append("%d etoile(s) NON enregistree(s) : %s (%s)"
+                           % (poses_fav, FAV_BRUTES_FILE.name, _err))
             poses_fav = 0
 
     rep = {"ok": not erreurs, "marche": marche, "identites": len(touchees),
@@ -1671,14 +1781,12 @@ def _pop_fav_brute(file_id: str) -> None:
     l'ancien — la clé est « identité|brutes|nom ». C'est exactement la raison
     pour laquelle /cloud/delete purge déjà la marque banger.
     """
-    s = _load_fav_brutes()
-    if file_id not in s:
-        return
-    s.discard(file_id)
-    try:
-        safe_json.write_text(FAV_BRUTES_FILE, json.dumps(sorted(s), ensure_ascii=False))
-    except Exception:
-        pass
+    # Sous le verrou, relu sur le disque : voir _FAV_BRUTES_LOCK. Un registre
+    # illisible n'est pas reecrit (il aurait perdu toutes ses etoiles) : l'echec
+    # est dit au journal, et l'etoile orpheline reste jusqu'a la reparation.
+    _aj, _rt, err = _modifier_fav_brutes(retirer={file_id})
+    if err:
+        print(f"[fav_brutes] etoile de {file_id} non retiree : {err}", flush=True)
 
 
 def _delete_banger_messages(info: dict) -> tuple:
@@ -18724,7 +18832,275 @@ def _bangers_encart_html() -> str:
         "Vérifier l’envoi du jour</button>"
         "<button type='button' onclick='bgCookies(this)'>Vérifier la connexion Instagram</button>"
         "</div><div class='sv-h' id='bg-essai' role='status'></div>"
-        "</details></div>")
+        "</details></div>"
+        # Les favoris automatiques suivent l'encart PARTOUT ou il est rendu :
+        # la page Instagram du depot, et « Instagram tools » des Reglages sur
+        # le VPS (un patch local l'y deplace, avec son propre JavaScript --
+        # d'ou une section qui apporte le sien).
+        + _favoris_auto_html())
+
+
+_FA_TYPES = {"brute": "Brute", "template": "Template", "caption": "Caption"}
+
+
+def _fa_quoi(e: dict) -> str:
+    """« Brute · ibenhaastrup · tt_76375….mp4 » / « Caption · blonde · « 7 texts… » »."""
+    t = _FA_TYPES.get(e.get("type"), e.get("type") or "?")
+    ident = e.get("ident") or "identité inconnue"
+    if e.get("type") == "caption":
+        cible = "« " + str(e.get("texte") or "")[:90].replace("\n", " / ") + " »"
+    else:
+        cible = (e.get("cle") or "").split("|")[-1][:70] or "copie à choisir"
+    return f"{t} · {ident} · {cible}"
+
+
+def _fa_banger(e: dict, vues=None) -> str:
+    """Le banger d'origine : son lien et le chiffre qu'on cite."""
+    sc = str(e.get("sc") or "")
+    url = str(e.get("url") or "") or f"https://www.instagram.com/reel/{sc}/"
+    if not re.match(r"^https?://\S+$", url):
+        url = f"https://www.instagram.com/reel/{sc}/"
+    v = e.get("vues") if vues is None else vues
+    try:
+        vv = f"{int(v):,}".replace(",", " ") + " vues"
+    except Exception:
+        vv = ""
+    return (f"<a href='{html_escape(url)}' target='_blank' rel='noopener'>{html_escape(sc)}</a>"
+            + (f" · {vv}" if vv else ""))
+
+
+#: Le JavaScript de la section, AVEC elle : l'encart Bangers n'a pas le meme
+#: hote partout (page Instagram du depot ; « Instagram tools » sur le VPS, dont
+#: le script est une chaine figee par un patch local). Des fonctions posees
+#: sur window, sans dependre de celles de la page (_jbJsonOrAuth...).
+_FA_JS = (
+    "window.faJson = function(r){"
+    "  if(r.redirected || r.status === 401){"
+    "    if(typeof showToast === 'function') showToast('Session expirée — reconnexion…', 'error');"
+    "    setTimeout(function(){ window.location.reload(); }, 900);"
+    "    throw new Error('auth');"
+    "  }"
+    "  return r.json();"
+    "};"
+    "window.faAction = function(btn, op, id){"
+    "  var fd = new FormData();"
+    "  fd.append('op', op || '');"
+    "  fd.append('id', id || '');"
+    "  btn.disabled = true;"
+    "  fetch('/jailbreak/favoris_auto/action', {method:'POST', body:fd, credentials:'same-origin'})"
+    "   .then(window.faJson)"
+    "   .then(function(j){"
+    "     btn.disabled = false;"
+    "     if(!j) return;"
+    "     if(!j.ok){"
+    "       if(typeof showToast === 'function') showToast(j.error || 'Echec', 'error');"
+    "       return;"
+    "     }"
+    "     if(j.message && typeof showToast === 'function') showToast(j.message, 'success');"
+    "     window.faRafraichir();"
+    "   })"
+    "   .catch(function(){ btn.disabled = false; });"
+    "};"
+    "window.faRafraichir = function(){"
+    "  var s = document.getElementById('fa-section');"
+    "  if(!s) return;"
+    "  var ouverts = {};"
+    "  s.querySelectorAll('details[data-fa]').forEach(function(d){"
+    "    ouverts[d.getAttribute('data-fa')] = d.open;"
+    "  });"
+    "  ouverts.section = s.open;"
+    "  fetch('/jailbreak/favoris_auto/section', {credentials:'same-origin'})"
+    "   .then(function(r){ return r.ok ? r.text() : ''; })"
+    "   .then(function(h){"
+    "     if(!h) return;"
+    "     var d = document.createElement('div');"
+    "     d.innerHTML = h;"
+    "     var n = d.firstElementChild;"
+    "     var vieux = document.getElementById('fa-section');"
+    "     if(!n || !vieux) return;"
+    "     n.open = !!ouverts.section;"
+    "     n.querySelectorAll('details[data-fa]').forEach(function(x){"
+    "       var k = x.getAttribute('data-fa');"
+    "       if(k in ouverts) x.open = ouverts[k];"
+    "     });"
+    "     vieux.parentNode.replaceChild(n, vieux);"
+    "     window.faSuivre();"
+    "   })"
+    "   .catch(function(){});"
+    "};"
+    # Pendant une analyse, la section se relit toute seule (8 s) : le
+    # proprietaire voit l'index avancer sans recharger la page.
+    "window.faSuivre = function(){"
+    "  var s = document.getElementById('fa-section');"
+    "  clearTimeout(window._faMinuteur);"
+    "  if(s && s.getAttribute('data-en-cours') === '1')"
+    "    window._faMinuteur = setTimeout(window.faRafraichir, 8000);"
+    "};"
+    "setTimeout(window.faSuivre, 1500);"
+)
+
+
+def _favoris_auto_html(avec_script: bool = True) -> str:
+    """La section « Favoris automatiques », sous l'encart Bangers.
+
+    UN SEUL RENDU, ICI. Apres chaque clic la page redemande ce fragment
+    (/jailbreak/favoris_auto/section, sans le script) au lieu de reconstruire
+    la liste en JavaScript : deux rendus finiraient par diverger, et le
+    correctif d'un cote reapparaitrait au rafraichissement."""
+    try:
+        import favoris_auto as _fa
+        e = _fa.etat()
+        reg = e["registre"]
+        n_rat = _fa.a_rattraper()
+    except Exception as ex:                                   # noqa: BLE001
+        return ("<div class='sv-box sv-settings' id='fa-section'>Favoris automatiques : "
+                f"état illisible ({html_escape(type(ex).__name__)}).</div>")
+    etoiles = [x for x in reg.get("etoiles") or [] if isinstance(x, dict)]
+    posees = [x for x in etoiles if x.get("etat") == "posee"]
+    deja = [x for x in etoiles if x.get("etat") == "deja"]
+    attente = [x for x in reg.get("a_confirmer") or [] if isinstance(x, dict)
+               and x.get("etat") == "attente"]
+    bangers = {k: v for k, v in (reg.get("bangers") or {}).items() if isinstance(v, dict)}
+    faits = [v for v in bangers.values() if v.get("etat") == "fait"]
+    ignores = [(k, v) for k, v in bangers.items() if v.get("etat") == "ignore"]
+    erreurs = [(k, v) for k, v in bangers.items() if v.get("etat") == "erreur"]
+    rat = reg.get("rattrapage") or {}
+    rat_en_cours = bool(rat.get("demande_le") and not rat.get("fini_le"))
+    en_cours = bool(e.get("en_cours")) or rat_en_cours
+
+    import time as _t_fa
+
+    def _date(ts):
+        try:
+            return _t_fa.strftime("%d/%m %H:%M", _t_fa.localtime(int(ts)))
+        except Exception:
+            return "?"
+
+    # --- l'etat du fil -------------------------------------------------------
+    if e.get("en_cours"):
+        p = e.get("progres") or {}
+        etat = "Analyse en cours · " + html_escape(str(e["en_cours"]))
+        if p and not p.get("fini"):
+            etat += (f" · index des vidéos : {int(p.get('a_jour', 0)) + int(p.get('calculees', 0))}"
+                     f"/{int(p.get('videos', 0))}")
+    elif rat_en_cours:
+        etat = f"Analyse des bangers archivés demandée le {_date(rat['demande_le'])}"
+    elif e.get("dernier"):
+        d = e["dernier"]
+        etat = (f"Dernier passage {_date(d.get('le'))} · {int(d.get('analyses', 0))} banger(s) "
+                f"analysé(s), {int(d.get('posees', 0))} étoile(s) posée(s)")
+    elif e.get("actif"):
+        etat = "En attente du prochain banger"
+    else:
+        etat = "Hors service sur cette machine (serveur de production seulement)"
+    lignes = [f"<div class='sv-h sv-result'>{etat}</div>"]
+    resume = (f"{len(faits)} banger(s) décortiqué(s) · {len(posees)} étoile(s) posée(s)"
+              + (f" · {len(deja)} déjà en place" if deja else ""))
+    lignes.append(f"<div class='sv-h'>{resume}</div>")
+    # RIEN D'ECARTE EN SILENCE : ce qui n'a pas ete analyse, et pourquoi.
+    if ignores:
+        raisons = {}
+        for _k, v in ignores:
+            r = str(v.get("ignore") or "?")
+            r = "compte hors équipe" if "hors équipe" in r else r
+            raisons[r] = raisons.get(r, 0) + 1
+        lignes.append("<div class='sv-h'>Non analysés : " + html_escape(" · ".join(
+            f"{n} {r}" for r, n in sorted(raisons.items(), key=lambda x: -x[1]))) + "</div>")
+    if erreurs:
+        lignes.append(f"<div class='sv-h'>{len(erreurs)} analyse(s) en échec : "
+                      + html_escape(", ".join(k for k, _v in erreurs[:6]))
+                      + (" (plus retentées)" if any(int(v.get("essais") or 0) >= 3
+                                                    for _k, v in erreurs) else "")
+                      + "</div>")
+    # Etoiles SURES que la pose a refusees (ecriture, registre illisible,
+    # identite absente) : avant, le banger passait « fait » et l'erreur
+    # restait dans reg["erreurs"], que cette section n'affichait jamais.
+    reprendre = [(k, v) for k, v in bangers.items() if v.get("etat") == "a_reprendre"]
+    if reprendre:
+        _max = int(getattr(_fa, "ESSAIS_MAX", 3))
+        abandon = [k for k, v in reprendre if int(v.get("essais") or 0) >= _max]
+        n_np = sum(int(v.get("non_posees") or 0) for _k, v in reprendre)
+        lignes.append(f"<div class='sv-h'>{n_np} étoile(s) non posée(s) sur {len(reprendre)} "
+                      "banger(s) : " + html_escape(", ".join(k for k, _v in reprendre[:6]))
+                      + (" · reprise au prochain passage" if len(abandon) < len(reprendre) else "")
+                      + (f" · {len(abandon)} plus retenté(s)" if abandon else "") + "</div>")
+    errs = [x for x in (reg.get("erreurs") or []) if isinstance(x, dict)]
+    blocs_err = ""
+    if errs:
+        rows_err = "".join(
+            "<div class='sv-h'>" + html_escape(f"{_date(x.get('le'))} · {x.get('sc') or '?'} : "
+                                               f"{x.get('erreur') or '?'}") + "</div>"
+            for x in reversed(errs[-10:]))
+        blocs_err = (f"<details class='sv-details' data-fa='erreurs'><summary>Erreurs "
+                     f"({len(errs)})</summary>" + rows_err + "</details>")
+    # --- le rattrapage ---------------------------------------------------------
+    if n_rat and not rat_en_cours:
+        lignes.append(
+            "<div class='sv-controls'>"
+            f"<button type='button' onclick=\"faAction(this,'rattrapage','')\">"
+            f"Analyser les {n_rat} banger(s) archivé(s)</button></div>")
+
+    # --- a confirmer -----------------------------------------------------------
+    def _ligne(x, boutons):
+        raison = html_escape(str(x.get("raison") or ""))
+        autres = [b for b in (x.get("bangers") or []) if b != x.get("sc")]
+        return ("<div class='sv-identity'><span>"
+                f"{html_escape(_fa_quoi(x))}<br>{_fa_banger(x)}"
+                + (f" (+{len(autres)} autre(s))" if autres else "")
+                + (f" · {raison}" if raison else "")
+                + "</span><span>" + boutons + "</span></div>")
+
+    def _bouton(op, x, mot):
+        return (f"<button type='button' data-id='{html_escape(str(x.get('id') or ''))}' "
+                f"onclick=\"faAction(this,'{op}',this.getAttribute('data-id'))\">{mot}</button>")
+
+    blocs = []
+    if attente:
+        rows = []
+        for x in sorted(attente, key=lambda y: -int(y.get("vues") or 0))[:60]:
+            b = (_bouton("valider", x, "Valider") if x.get("cle") and x.get("ident") else "")
+            rows.append(_ligne(x, b + _bouton("refuser", x, "Refuser")))
+        plus = len(attente) - 60
+        blocs.append(
+            f"<details class='sv-details' data-fa='attente' open><summary>À confirmer "
+            f"({len(attente)})</summary>" + "".join(rows)
+            + (f"<div class='sv-h'>+ {plus} autre(s), les moins vues</div>" if plus > 0 else "")
+            + "</details>")
+    if posees:
+        rows = [_ligne(x, _bouton("annuler", x, "Retirer"))
+                for x in sorted(posees, key=lambda y: -int(y.get("le") or 0))[:80]]
+        plus = len(posees) - 80
+        blocs.append(
+            f"<details class='sv-details' data-fa='posees'><summary>Étoiles posées "
+            f"({len(posees)})</summary>" + "".join(rows)
+            + (f"<div class='sv-h'>+ {plus} plus ancienne(s)</div>" if plus > 0 else "")
+            + "</details>")
+    if faits:
+        rows = []
+        for sc, v in sorted(((k, v) for k, v in bangers.items() if v.get("etat") == "fait"),
+                            key=lambda kv: -int(kv[1].get("le") or 0))[:40]:
+            notes = "; ".join(str(n) for n in (v.get("notes") or [])[:3])
+            rows.append(
+                "<div class='sv-identity'><span>"
+                + _fa_banger({"sc": sc, "url": v.get("url")}, v.get("vues"))
+                + " · " + html_escape(str(v.get("nature") or "?"))
+                + " · " + html_escape(str(v.get("identite") or "identité inconnue")
+                                      + ("" if v.get("identite_sure") else " (à confirmer)"))
+                + (f"<br>{html_escape(notes)}" if notes else "")
+                + "</span><span></span></div>")
+        blocs.append(
+            f"<details class='sv-details' data-fa='bangers'><summary>Bangers décortiqués "
+            f"({len(faits)})</summary>" + "".join(rows) + "</details>")
+    if blocs_err:
+        blocs.append(blocs_err)
+    return ("<details class='sv-box sv-settings sv-follow' id='fa-section' data-fa='section' "
+            f"data-en-cours='{1 if en_cours else 0}'"
+            + (" open" if attente else "") + ">"
+            "<summary class='sv-heading'><b>Favoris automatiques</b>"
+            f"<span>{len(posees)} étoile(s) · {len(attente)} à confirmer</span>"
+            "<span class='sv-manage'>Gérer</span></summary>"
+            + "".join(lignes) + "".join(blocs) + "</details>"
+            + (f"<script>{_FA_JS}</script>" if avec_script else ""))
 
 
 def _bangers_cookies_ligne() -> str:
@@ -26642,6 +27018,132 @@ def _save_captions_lib(lib: dict) -> bool:
     ok = bool(safe_json.write(CAPTIONS_FILE, lib, indent=2))
     _invalidate_json_cache(CAPTIONS_FILE)
     return ok
+
+
+def _caption_trouver(items: list, texte: str, cid: str = ""):
+    """La caption d'une bibliotheque qui EST ce texte : par id, puis par cle
+    de doublon (_caption_cle), puis par VARIANTE (« so can talk » / « so he
+    can talk » : ratio >= 0,9 sur les textes sans emojis). Sans ce dernier
+    cas, les favoris automatiques ajoutaient un quasi-doublon a cote de la
+    caption deja la."""
+    if cid:
+        for c in items:
+            if c.get("id") == cid:
+                return c
+    if not str(texte or "").strip():
+        return None
+    cle = _caption_cle(texte)
+    for c in items:
+        if _caption_cle(c.get("text")) == cle:
+            return c
+    import favoris_auto as _fa
+    from difflib import SequenceMatcher as _SM
+    k = _fa._cle_texte(texte)
+    best, score = None, 0.0
+    for c in items:
+        k2 = _fa._cle_texte(c.get("text"))
+        if k and k2:
+            r = _SM(None, k, k2).ratio()
+            if r >= _fa.VARIANTE and r > score:
+                best, score = c, r
+    return best
+
+
+def _caption_etoilee(ident: str, texte: str):
+    """La caption (ou une variante) est-elle deja ⭐ dans cette bibliotheque ?
+
+    True / False sur une bibliotheque RELUE ; None si captions.json est
+    illisible. _load_captions_lib rendait {} : les favoris automatiques
+    concluaient « etoile retiree a la main » et la refusaient pour toujours."""
+    if CAPTIONS_FILE.exists():
+        lib = safe_json.load(CAPTIONS_FILE, default=None)
+        if not isinstance(lib, dict):
+            return None
+    else:
+        lib = {}
+    bloc = lib.get((ident or "").strip().lower())
+    items = (bloc or {}).get("items") if isinstance(bloc, dict) else None
+    c = _caption_trouver([x for x in (items or []) if isinstance(x, dict)], texte)
+    return bool(c and c.get("fav") is True)
+
+
+def _caption_favori(ident: str, texte: str, allumer: bool = True,
+                    retirer_ajoutee: bool = False, cid: str = "") -> dict:
+    """Pose (ou retire) l'etoile d'une caption dans la bibliotheque d'une
+    identite, en l'AJOUTANT si elle n'y est pas. Fonction partagee des
+    favoris automatiques.
+
+    Sous _CAPTIONS_LOCK, comme tout ecrivain de captions.json. Lue par
+    safe_json (repli sur .prev) : _load_captions_lib rend {} sur un fichier
+    illisible, et reecrire ce {} effacerait toutes les bibliotheques.
+
+    `retirer_ajoutee` : l'annulation d'une caption que l'automatisme avait
+    AJOUTEE la retire (retour a l'etat d'avant) ; sinon seule l'etoile part.
+    Rend {ok, id, ajoutee, deja, desactivee, erreur}, plus `note` quand le
+    retrait n'a pas pu faire ce qu'on attendait (a dire a l'ecran)."""
+    ident = (ident or "").strip().lower()
+    texte = str(texte or "").strip()[:300]
+    if not ident or ident not in _list_identities():
+        return {"ok": False, "erreur": f"identité inconnue : {ident or '?'}"}
+    res = {"ok": True, "id": "", "ajoutee": False, "deja": False,
+           "desactivee": False, "erreur": ""}
+    with _CAPTIONS_LOCK:
+        brut = safe_json.load(CAPTIONS_FILE, default=None) if CAPTIONS_FILE.exists() else {}
+        if not isinstance(brut, dict):
+            return {"ok": False, "erreur": f"{CAPTIONS_FILE.name} illisible : rien écrit"}
+        lib = dict(brut)
+        bloc = _clean_caption_block(lib.get(ident))
+        item = _caption_trouver(bloc["items"], texte, cid)
+        if allumer:
+            if item is None:
+                if not _caption_cle(texte):
+                    return {"ok": False, "erreur": "texte vide"}
+                if len(bloc["items"]) >= CAPTIONS_MAX:
+                    return {"ok": False, "erreur": f"bibliothèque de {ident} pleine "
+                                                   f"({CAPTIONS_MAX} captions)"}
+                item = {"id": f"c{int(time.time() * 1000)}_fa_{ident[:6]}", "text": texte,
+                        "x": 0.5, "y": 0.5, "wrapW": 0.88, "enabled": True,
+                        "created": int(time.time()), "fav": True}
+                bloc["items"].append(item)
+                res["ajoutee"] = True
+            else:
+                res["deja"] = item.get("fav") is True
+                item["fav"] = True
+            res["id"] = item.get("id") or ""
+            res["desactivee"] = item.get("enabled") is False
+            if res["deja"]:
+                return res
+        elif retirer_ajoutee:
+            # SUPPRIMER une caption qu'on avait ajoutee : sur son ID seulement.
+            # _caption_trouver retombe sur la cle exacte puis sur une VARIANTE :
+            # si le proprietaire avait efface la caption auto mal ecrite et
+            # saisi SA version, c'est la sienne qui partait -- dans l'identite
+            # et dans chaque reserve du groupe.
+            par_id = next((c for c in bloc["items"] if cid and c.get("id") == cid), None)
+            if par_id is not None:
+                res["id"] = cid
+                bloc["items"] = [c for c in bloc["items"] if c is not par_id]
+            else:
+                exacte = next((c for c in bloc["items"]
+                               if _caption_cle(c.get("text")) == _caption_cle(texte)), None)
+                if exacte is None or exacte.get("fav") is not True:
+                    res["note"] = "caption ajoutée introuvable (supprimée ou remplacée) : rien retiré"
+                    return res
+                # Au plus l'etoile d'une caption IDENTIQUE, jamais son texte.
+                res["id"] = exacte.get("id") or ""
+                exacte["fav"] = False
+                res["note"] = ("caption ajoutée introuvable par son id : seule l'étoile de la "
+                               "caption identique est retirée, son texte reste")
+        else:
+            if item is None:
+                return res                 # deja partie : rien a defaire
+            res["id"] = item.get("id") or ""
+            item["fav"] = False
+        lib[ident] = bloc
+        if not _save_captions_lib(lib):
+            return {"ok": False, "erreur": "écriture de captions.json impossible"}
+    _invalidate_all_ttl_cache()
+    return res
 
 
 # Ordre CUSTOM des identités dans les sidebars vault : réordonnées par GLISSER-
@@ -55013,6 +55515,81 @@ def _start_all_banger_daemon() -> bool:
         supprimer=lambda sc, e: _ab.supprimer_via_bot(_BOT_REF, sc, e))
 
 
+def _brancher_favoris_auto():
+    """Donne aux favoris automatiques LES fonctions du site qui posent les
+    etoiles (fav_brutes.json sans Discord, captions.json sous verrou) : une
+    seconde facon d'ecrire ces registres finirait par ecraser l'autre."""
+    import favoris_auto as _fa
+    _fa.brancher(
+        brute=_poser_fav_brute,
+        # Relu strictement : None si illisible, jamais un ensemble vide qui
+        # ferait conclure « retiree a la main » (un refus definitif).
+        brutes_etoilees=_fav_brutes_etoilees,
+        caption=_caption_favori,
+        caption_etoilee=_caption_etoilee)
+    return _fa
+
+
+def _start_favoris_auto_daemon() -> bool:
+    """Le fil des favoris automatiques : chaque banger archive est decortique
+    (brute, template, caption) et ce qui est SUR passe en ⭐.
+
+    Meme garde de machine que all-banger : le poste de dev a son propre
+    data/, il etoilerait sur des donnees qui ne sont pas celles du VPS.
+    Branche sur all_banger (APRES_ARCHIVAGE) pour les nouveaux bangers ; le
+    rattrapage des anciens se lance depuis le site, pas au demarrage."""
+    if not _machine_proprietaire("favoris-auto"):
+        return False
+    _fa = _brancher_favoris_auto()
+    import all_banger as _ab
+    if _fa.signaler not in _ab.APRES_ARCHIVAGE:
+        _ab.APRES_ARCHIVAGE.append(_fa.signaler)
+    return _fa.demarrer()
+
+
+#: Les familles de la reserve dont la source est une BRUTE avec une caption
+#: incrustee (cogs/noctuspool._recette) ; les autres partent d'un template.
+_FAMILLES_CAPTION = ("caption", "montage", "caption_vid")
+
+
+def _noter_livraison_rig(ident: str, famille: str, fichier, fiche: dict) -> str:
+    """Note la recette d'une variante sortie de la reserve pour le parc.
+    Jamais fatal : le parc a sa video, une recette perdue se dit au journal.
+    Sur la machine de production seulement, comme le fil qui les exploite :
+    un essai de la route sur le poste de dev n'ecrit rien dans data/livraisons."""
+    if not _machine_proprietaire("favoris-auto"):
+        return ""
+    try:
+        import favoris_auto as _fa
+        rec = (fiche or {}).get("recette") or {}
+        src = str(rec.get("source") or "")
+        r = {"action": "parc", "famille": famille, "reserve": True, "identite_media": ident}
+        if famille in _FAMILLES_CAPTION:
+            if src:
+                r["brute"] = src
+            cap = rec.get("caption") if isinstance(rec.get("caption"), dict) else {}
+            if str(cap.get("text") or "").strip():
+                r["caption"] = {"id": cap.get("id"), "text": cap["text"], "ident": ident,
+                                "mode": "incrustee"}
+        else:
+            if src:
+                r["template"] = src
+            bs = [b for b in (rec.get("brutes") or []) if isinstance(b, dict)]
+            b = bs[0] if bs else {}
+            brute = next(iter(rec.get("imposees") or []), None) or b.get("brute")
+            if brute:
+                r["brute"] = brute
+            if b.get("debut") is not None:
+                r["brute_debut"] = b["debut"]
+        if rec.get("repli"):
+            r["repli"] = True
+        return _fa.noter_livraison(ident, fichier, r, va="rig", va_nom="parc",
+                                   quoi=f"parc {famille}")
+    except Exception as e:                                    # noqa: BLE001
+        log.warning(f"[favoris-auto] livraison du parc non notée : {type(e).__name__}: {e}")
+        return ""
+
+
 def _banger_recuperer(shortcode: str, url: str) -> tuple:
     """Descend la video et la description d'un banger.
 
@@ -55998,14 +56575,14 @@ def _sync_marche_travail(source: str):
             for e in errs_t:
                 _SYNC_MARCHE["erreurs"].append("tags : %s" % str(e)[:160])
             if tags["fav"]:
-                if safe_json.write_text(FAV_BRUTES_FILE, json.dumps(
-                        sorted(_load_fav_brutes() | tags["fav"]),
-                        ensure_ascii=False)):
+                # Relu et ecrit sous _FAV_BRUTES_LOCK (voir sa note).
+                _aj, _rt, _err = _modifier_fav_brutes(ajouter=tags["fav"])
+                if not _err:
                     _SYNC_MARCHE["tags_fav"] = len(tags["fav"])
                 else:
                     _SYNC_MARCHE["erreurs"].append(
-                        "tags : %d etoile(s) NON enregistree(s) (%s)"
-                        % (len(tags["fav"]), FAV_BRUTES_FILE.name))
+                        "tags : %d etoile(s) NON enregistree(s) (%s : %s)"
+                        % (len(tags["fav"]), FAV_BRUTES_FILE.name, _err))
         except Exception as e:
             _SYNC_MARCHE["erreurs"].append("tags : %s" % str(e)[:120])
         _invalidate_all_ttl_cache()
@@ -56201,6 +56778,12 @@ def create_app():
         _start_all_banger_daemon()
     except Exception as _e:
         log.warning(f"all-banger non démarré: {_e}")
+    # Favoris automatiques : chaque banger archivé est décortiqué, ce qui est
+    # sûr passe en ⭐ (brute, template, caption), le reste attend sur le site.
+    try:
+        _start_favoris_auto_daemon()
+    except Exception as _e:
+        log.warning(f"favoris automatiques non démarrés: {_e}")
     # Collecte AUTO des SFS reçus (DM entrants) toutes les 5 min via l'API
     # MyPuls — sans elle, un message lu vite par un chatteur serait raté
     try:
@@ -58465,14 +59048,13 @@ def create_app():
                               "marquees : " + " ; ".join(_errs_src)
                               ] + list(_errs_tags)
             if _tags["fav"]:
-                _v = _load_fav_brutes() | _tags["fav"]
-                FAV_BRUTES_FILE.parent.mkdir(parents=True, exist_ok=True)
-                if safe_json.write_text(FAV_BRUTES_FILE,
-                                        json.dumps(sorted(_v), ensure_ascii=False)):
+                # Relu et ecrit sous _FAV_BRUTES_LOCK (voir sa note).
+                _aj, _rt, _err_f = _modifier_fav_brutes(ajouter=_tags["fav"])
+                if not _err_f:
                     _n_fav = len(_tags["fav"])
                 else:
-                    _errs_tags.append("%d etoile(s) NON enregistree(s) (%s)"
-                                      % (len(_tags["fav"]), FAV_BRUTES_FILE.name))
+                    _errs_tags.append("%d etoile(s) NON enregistree(s) (%s : %s)"
+                                      % (len(_tags["fav"]), FAV_BRUTES_FILE.name, _err_f))
         except Exception as e:
             _errs_tags.append(str(e)[:150])
 
@@ -60091,7 +60673,11 @@ def create_app():
         # normalisé, « modele_fr » devenait « modelefr » -- « n'existe pas ».
         # Aucune identité à « _ » (ariiiann__...) ne se renommait. Le NOUVEAU
         # passe toujours par normaliser() (salons Discord, cf. identite_admin).
-        r = _ia.renommer(old, new, ancien_exact=old in set(_list_identities()))
+        # Le renommage reecrit fav_brutes.json (cles « identite|... ») : sous
+        # le meme verrou que ses autres ecrivains (voir _FAV_BRUTES_LOCK).
+        with _FAV_BRUTES_LOCK:
+            r = _ia.renommer(old, new, ancien_exact=old in set(_list_identities()))
+            _invalidate_json_cache(FAV_BRUTES_FILE)
         if r.get("ok"):
             _invalidate_all_ttl_cache()
             r["label"] = _v2_label(r.get("identite") or new)
@@ -63519,13 +64105,18 @@ def create_app():
         # combien, sinon une case « vide » avec du stock sur le disque ne
         # s'expliquerait pas.
         _ecartes = {}
+        _fiche_rig = {}
         chemin, desc = _res.prendre(ident, famille, demandeur="rig",
-                                    ecartes_out=_ecartes)
+                                    ecartes_out=_ecartes, fiche_out=_fiche_rig)
         if not chemin:
             return jsonify({"ok": False, "error": "vide",
                             "identite": ident, "famille": famille,
                             "ecartes_marque": _ecartes.get("marque_perdue", 0)}), 404
         f = Path(chemin)
+        # La recette de ce que le parc va publier : un banger ne de cette
+        # video retrouvera sa brute, son template, sa caption. Notee MAINTENANT :
+        # le fichier est efface au solde, apres le telechargement.
+        _noter_livraison_rig(ident, famille, f, _fiche_rig)
         return jsonify({"ok": True, "identite": ident, "famille": famille,
                         "ecartes_marque": _ecartes.get("marque_perdue", 0),
                         "jeton": f.stem, "nom": f.name, "desc": desc,
@@ -67565,7 +68156,10 @@ def create_app():
                 return _error("✕ Nouveau nom refusé : lettres et chiffres seulement "
                               "(un « - » ou un « _ » casse le rattachement des "
                               "salons Discord)", tab="jailbreak")
-            rapport_rn = _ia.renommer(old_name, new_name, ancien_exact=True)
+            # Sous _FAV_BRUTES_LOCK : le renommage reecrit fav_brutes.json.
+            with _FAV_BRUTES_LOCK:
+                rapport_rn = _ia.renommer(old_name, new_name, ancien_exact=True)
+                _invalidate_json_cache(FAV_BRUTES_FILE)
             if not rapport_rn.get("ok"):
                 return _error("✕ Rename échoué : "
                               + html_escape(str(rapport_rn.get("error") or "?")),
@@ -68173,6 +68767,58 @@ def create_app():
         # s'afficher explique la borne mieux qu'un message d'erreur.
         return jsonify({"ok": True, "seuil": pose, "demande": demande,
                         "borne": pose != demande})
+
+    @app.route("/jailbreak/favoris_auto/section", methods=["GET"])
+    def jailbreak_favoris_auto_section():
+        """Le fragment de la section « Favoris automatiques », pour la
+        rafraichir apres un clic. Sous /jailbreak/ : lecture reservee aux
+        acces complets (_ADMIN_ONLY_READ)."""
+        if not is_auth():
+            return "", 401
+        return _favoris_auto_html(avec_script=False)
+
+    @app.route("/jailbreak/favoris_auto/action", methods=["POST"])
+    def jailbreak_favoris_auto_action():
+        """Retirer une etoile posee par l'automatisme, valider ou refuser une
+        proposition, lancer l'analyse des bangers archives.
+
+        Sous /jailbreak/ : refusee aux roles restreints (_ADMIN_ONLY_WRITE),
+        comme les autres reglages de cette page."""
+        from flask import jsonify
+        if not is_auth():
+            return jsonify({"ok": False, "auth": True,
+                            "error": "Session expirée — la page va se recharger"}), 401
+        try:
+            _fa = _brancher_favoris_auto()
+        except Exception as e:                                # noqa: BLE001
+            return jsonify({"ok": False, "error": f"module favoris_auto : {e}"[:200]})
+        op = (request.form.get("op") or "").strip()
+        eid = (request.form.get("id") or "").strip()
+        par = str(session.get("username") or "")
+        if op == "annuler":
+            r, msg = _fa.annuler(eid, par=par), "Étoile retirée — elle ne reviendra pas"
+            if r.get("notes"):
+                # Ce qui a ete fait autrement qu'attendu (caption ajoutee
+                # introuvable par son id : rien supprime) se dit au clic.
+                msg += " · " + " ; ".join(str(n) for n in r["notes"][:3])
+        elif op == "valider":
+            r, msg = _fa.trancher(eid, True, par=par), "Étoile posée"
+        elif op == "refuser":
+            r, msg = _fa.trancher(eid, False, par=par), "Proposition écartée — elle ne reviendra pas"
+        elif op == "rattrapage":
+            if not _machine_proprietaire("favoris-auto"):
+                return jsonify({"ok": False, "error": "L'analyse tourne sur le serveur de "
+                                                      "production seulement"})
+            _start_favoris_auto_daemon()
+            r = _fa.demander_rattrapage(par=par)
+            msg = ("Analyse déjà en cours" if r.get("deja") else
+                   "Analyse des bangers archivés lancée (la première fois, l'index du "
+                   "vault prend une à deux heures)")
+        else:
+            return jsonify({"ok": False, "error": "action inconnue"}), 400
+        if not r.get("ok"):
+            return jsonify({"ok": False, "error": r.get("erreur") or "échec"})
+        return jsonify({"ok": True, "message": msg})
 
     @app.route("/jailbreak/suivi", methods=["POST"])
     def jailbreak_suivi():
@@ -73266,8 +73912,15 @@ class _RegistresVault:
             m[vers] = m.pop(de)
             if not _save_banger_marks(m):
                 return [f"{BANGER_MARKS_FILE.name} non écrit"]
-        for fichier, lire in ((FAV_BRUTES_FILE, _load_fav_brutes),
-                              (DISABLED_REELS_FILE, _load_disabled_reels)):
+        # L'etoile suit sous _FAV_BRUTES_LOCK, relue sur le disque (voir sa
+        # note) : pas par la boucle generique, qui reecrivait le cache.
+        with _FAV_BRUTES_LOCK:
+            _sf, _err = _lire_fav_brutes_strict()
+            if not _err and de in _sf:
+                _aj, _rt, _err = _modifier_fav_brutes(ajouter={vers}, retirer={de})
+            if _err:
+                erreurs.append(f"{FAV_BRUTES_FILE.name} non écrit ({_err})")
+        for fichier, lire in ((DISABLED_REELS_FILE, _load_disabled_reels),):
             s = lire()
             if de in s:
                 s.add(vers)

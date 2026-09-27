@@ -443,6 +443,22 @@ def _ecrire_description(sc: str, texte: str) -> None:
         safe_json.write_text(chemin, texte, backup=False)
 
 
+#: Appeles (shortcode) quand une video de banger vient d'etre archivee. Les
+#: favoris automatiques s'y branchent (web_upload) : ils decortiquent le
+#: banger dans leur propre fil. Un appel ici ne doit JAMAIS attendre -- on est
+#: dans le fil d'envoi du salon -- ni faire echouer l'archivage.
+APRES_ARCHIVAGE: List[Callable[[str], None]] = []
+
+
+def _prevenir_archivage(sc: str) -> None:
+    for f in list(APRES_ARCHIVAGE):
+        try:
+            f(sc)
+        except Exception as ex:                               # noqa: BLE001
+            log.warning(f"[all-banger] {sc} : suite de l'archivage en échec "
+                        f"({type(ex).__name__}: {ex})")
+
+
 def traiter_job(job: dict, telecharger_octets: Optional[Callable] = None,
                 maintenant: float = 0.0) -> Optional[bool]:
     """Un téléchargement de la file. Rend True/False, ou None s'il n'y avait
@@ -481,6 +497,7 @@ def traiter_job(job: dict, telecharger_octets: Optional[Callable] = None,
             _ecrire(d)
         if ok:
             log.info(f"[all-banger] {sc} : vidéo récupérée ({source}), prête à poster")
+            _prevenir_archivage(sc)
         elif e.get("etat") == "echec":
             log.warning(f"[all-banger] {sc} : vidéo NON récupérée après {e['essais']} essais "
                         f"({raison}) — rien ne sera posté")

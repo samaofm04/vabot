@@ -371,6 +371,16 @@ class NoctusPool(commands.Cog):
                 identite, famille, sorties[0], emp, desc=r.get("desc") or "",
                 recette={"source": str(r["video"]),
                          "imposees": list(r.get("imposees") or ()),
+                         # La brute tiree au hasard par le moteur, et la
+                         # fenetre prise dedans : servie des semaines plus
+                         # tard, la video doit encore dire de quelle brute
+                         # elle vient (favoris automatiques).
+                         "brutes": [b for b in (_rap.get("brutes") or [])
+                                    if isinstance(b, dict)][:1],
+                         # familles a caption incrustee : QUEL texte
+                         **({"caption": {"id": str(r["caption"].get("id") or ""),
+                                         "text": str(r["caption"].get("text") or "")}}
+                            if isinstance(r.get("caption"), dict) else {}),
                          "repli": bool(_rap.get("repli")) or _nu,
                          "message": str(_rap.get("message") or "")
                                     or ("aucune video brute n a pu etre montee"

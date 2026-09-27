@@ -27128,6 +27128,1774 @@ except Exception as _eTm:
 
 print()
 print("=" * 70)
+print("FAVORIS AUTOMATIQUES : ce qui a fait un banger passe en ⭐ tout seul")
+print("=" * 70)
+# 27/09/2026 : favoris_auto.py decortique chaque banger archive et etoile ce
+# qui est SUR (la brute, le template, la caption) ; le reste attend
+# « À confirmer » sur le site. Ce bloc tient les promesses faites au
+# proprietaire, chacune parce qu'un manquement coute cher sans se voir :
+#   - GRATUIT : aucun module reseau / IA / HikerAPI / Apify. Un import de trop
+#     et chaque banger depenserait des credits, sans un message ;
+#   - les etoiles passent par les fonctions du SITE, sans AUCUN envoi Discord :
+#     une seconde facon d'ecrire fav_brutes.json ou captions.json finirait par
+#     ecraser l'autre, et le rattrapage posterait des dizaines de videos dans
+#     le salon banger ;
+#   - rien d'etoile a tort : une etoile retiree ou refusee ne revient pas, un
+#     registre illisible n'est jamais reecrit a vide (toutes les etoiles
+#     partaient) ;
+#   - rien d'ecarte en silence : chaque banger a sa ligne et sa raison.
+# Tout vit dans un bac a sable : chemins du module, du site, des bangers et
+# d'all-banger rediriges, remis en place a la sortie, meme sur une exception.
+try:
+    import ast as _zfAst, json as _zfJs, shutil as _zfSh, subprocess as _zfSp
+    import tempfile as _zfTf, threading as _zfTh, time as _zfT, re as _zfRe
+    import favoris_auto as _zfFA
+    import web_upload as _zfW
+    import bangers as _zfBG
+    import all_banger as _zfAB
+    import type_identite as _zfTI
+    import analyse_gratuite as _zfAG
+    import cogs.user as _zfU
+    _zfD = pathlib.Path(_zfTf.mkdtemp(prefix="favoris_auto_"))
+    _zfDA = _zfD / "data"
+    _zfID = _zfDA / "identities"
+    _zfSav = {
+        "FA": (_zfFA.DATA, _zfFA.fil_actif, _zfFA.ATTENTE_MAX_FICHIERS,
+               _zfFA._lancer_analyse, dict(_zfFA.APPLICATEURS)),
+        "W": (_zfW.FAV_BRUTES_FILE, _zfW.CAPTIONS_FILE, _zfW.IDENTITIES_DIR,
+              _zfW._brute_banger_discord, _zfW._send_video_to_banger_channel,
+              _zfW.CAPTIONS_MAX, _zfW._load_web_users),
+        "BG": (_zfBG.FICHIER, _zfBG.DOSSIER, _zfBG.DETAILS_DIR),
+        "AB": (_zfAB.FICHIER, _zfAB.telecharger, list(_zfAB.APRES_ARCHIVAGE)),
+        "TI": _zfTI.reserves_liees,
+        "AG": (_zfAG.transcrire_tesseract, _zfAG.lire_capture, _zfAG.gemini_texte),
+        "U": (_zfU.DATA_DIR, _zfU.IDENTITIES_DIR),
+        # Le .env du VPS pose VA_MACHINE_PROD : lance la-bas, create_app()
+        # armerait le VRAI fil des favoris sur le bac a sable.
+        "ENV": os.environ.pop("VA_MACHINE_PROD", None),
+    }
+    _zfEnvoisDiscord = []
+
+    def _zfVider():
+        while not _zfFA._FILE.empty():
+            _zfFA._FILE.get_nowait()
+
+    try:
+        _zfFA.DATA = _zfDA
+        _zfFA._CACHE_MOIS.clear()
+        _zfFA.APPLICATEURS.clear()
+        _zfW.FAV_BRUTES_FILE = _zfDA / "fav_brutes.json"
+        _zfW.CAPTIONS_FILE = _zfDA / "captions.json"
+        _zfW.IDENTITIES_DIR = _zfID
+        _zfW._oublier_identites()
+        _zfW._brute_banger_discord = lambda *a, **k: _zfEnvoisDiscord.append(a) or "ENVOYE"
+        _zfW._send_video_to_banger_channel = (
+            lambda *a, **k: _zfEnvoisDiscord.append(a) or (True, "x", {}))
+        _zfBG.FICHIER = _zfDA / "bangers.json"
+        _zfBG.DOSSIER = _zfDA / "bangers"
+        _zfBG.DETAILS_DIR = _zfDA / "bangers_details"
+        _zfAB.FICHIER = _zfDA / "bangers_all.json"
+        # Les reserves liees : mod_a -> res_x (le lien lui-meme est teste
+        # ailleurs ; ici on veut la recopie dans la reserve).
+        _zfTI.reserves_liees = lambda m: ((["res_x"] if (m or "").lower() == "mod_a" else []), [])
+        _zfU.DATA_DIR = _zfDA
+        _zfU.IDENTITIES_DIR = _zfID
+        _zfVider()
+        for _zfRel in ("mod_a/brutes/brute_A.mp4", "mod_a/brutes/brute_B.mp4",
+                       "mod_a/templates/tpl_T.mp4", "mod_b/brutes/brute_D.mp4",
+                       "mod_b/templates/tpl_T.mp4", "res_x/templates/tpl_T.mp4"):
+            (_zfID / _zfRel).parent.mkdir(parents=True, exist_ok=True)
+            (_zfID / _zfRel).write_bytes(b"\x00" * 2048)
+        (_zfID / "res_x" / "brutes").mkdir(parents=True, exist_ok=True)
+        _zfCAP = "Seven texts that make her want you badly 😱"
+        safe_json.write(_zfDA / "captions.json", {"mod_a": {"items": [
+            {"id": "c_exist", "text": "An old caption nobody starred", "enabled": True}]}})
+
+        # =================================================================
+        # 1. GRATUIT
+        # =================================================================
+        _zfSrc = pathlib.Path("favoris_auto.py").read_text(encoding="utf-8")
+        _zfArbre = _zfAst.parse(_zfSrc)
+        _zfImports = set()
+        for _zfN in _zfAst.walk(_zfArbre):
+            if isinstance(_zfN, _zfAst.Import):
+                _zfImports |= {a.name.split(".")[0] for a in _zfN.names}
+            elif isinstance(_zfN, _zfAst.ImportFrom) and _zfN.module:
+                _zfImports.add(_zfN.module.split(".")[0])
+        _zfProjet = _zfImports - set(sys.stdlib_module_names)
+        _zfReseau = _zfImports & {"urllib", "http", "socket", "ssl", "smtplib", "ftplib",
+                                  "xmlrpc", "asyncio"}
+        check("favoris auto : gratuit -- aucun module reseau de la bibliotheque standard",
+              not _zfReseau, sorted(_zfReseau))
+        check("favoris auto : gratuit -- seuls des modules LOCAUX du projet (ni requests, ni IA, "
+              "ni HikerAPI, ni Apify, ni discord)",
+              _zfProjet <= {"safe_json", "bangers", "analyse_gratuite", "type_identite",
+                            "brutes_off", "marques_montage"}, sorted(_zfProjet))
+        _zfNoms = ({n.attr for n in _zfAst.walk(_zfArbre) if isinstance(n, _zfAst.Attribute)}
+                   | {n.id for n in _zfAst.walk(_zfArbre) if isinstance(n, _zfAst.Name)})
+        # lire_capture et /captions/ocr passent D'ABORD par Gemini : l'OCR
+        # des favoris doit appeler Tesseract directement.
+        _zfPayants = {"lire_capture", "gemini_texte", "cle_gemini", "urlopen", "scrape_profile",
+                      "fetch_reel_details", "_banger_recuperer", "download_via_ytdlp",
+                      "_media_hiker", "preparer_fiches"}
+        check("favoris auto : gratuit -- aucun appel a Gemini, HikerAPI, Apify ou yt-dlp",
+              not (_zfNoms & _zfPayants), sorted(_zfNoms & _zfPayants))
+        check("favoris auto : gratuit -- l'OCR est Tesseract local (transcrire_tesseract)",
+              "transcrire_tesseract" in __import__("inspect").getsource(_zfFA.ocr_image))
+        # A l'execution aussi : Tesseract absent -> « non lu », jamais un
+        # repli payant, et jamais « aucun texte » (le banger passerait pour
+        # une brute seule sur une lecture qui n'a pas eu lieu).
+        _zfAppels = {"tesseract": 0, "payant": 0}
+
+        def _zfTess(img, capture=False):
+            _zfAppels["tesseract"] += 1
+            return {"texte": "", "erreur": "Tesseract absent (essai)"}
+
+        def _zfPiege(*a, **k):
+            _zfAppels["payant"] += 1
+            return {"texte": "lu par gemini"}
+        _zfAG.transcrire_tesseract = _zfTess
+        _zfAG.lire_capture = _zfPiege
+        _zfAG.gemini_texte = _zfPiege
+        try:
+            _zfNL = _zfFA.chercher_texte(_zfID / "mod_a/brutes/brute_A.mp4",
+                                         [{"texte": "x y z", "cle": "x y z", "source": "bibliotheque",
+                                           "ident": "mod_a", "ref": "c"}])
+        finally:
+            _zfAG.transcrire_tesseract, _zfAG.lire_capture, _zfAG.gemini_texte = _zfSav["AG"]
+        check("favoris auto : Tesseract absent -> « non_lu » avec l'erreur, jamais « aucun »",
+              _zfNL["decision"] == "non_lu" and _zfNL.get("erreur"), _zfNL)
+        check("favoris auto : Tesseract absent -> AUCUN repli payant (lire_capture, Gemini)",
+              _zfAppels["payant"] == 0, _zfAppels)
+        _zfSrcW = __import__("inspect").getsource
+        _zfFns = ("_poser_fav_brute", "_caption_trouver", "_caption_etoilee", "_caption_favori",
+                  "_brancher_favoris_auto", "_start_favoris_auto_daemon", "_noter_livraison_rig",
+                  "_favoris_auto_html")
+        _zfFuite = [f for f in _zfFns
+                    if any(p in _zfSrcW(getattr(_zfW, f)) for p in
+                           ("lire_capture", "gemini", "hiker", "apify", "_brute_banger_discord",
+                            "_send_video_to_banger_channel", "_set_banger_mark"))]
+        check("favoris auto : les fonctions du site n'appellent ni IA ni Discord",
+              not _zfFuite, _zfFuite)
+
+        # =================================================================
+        # 2. LES CLES DES REGISTRES
+        # =================================================================
+        check("favoris auto : une video du vault donne sa cle « ident|section|fichier »",
+              _zfFA.cle_media(_zfID / "mod_a/brutes/brute_A.mp4") == "mod_a|brutes|brute_A.mp4")
+        # La brute imposee passe par un dossier temporaire (lien dur) efface
+        # apres l'envoi : sa cle se retrouve par le nom, dans l'identite dite.
+        check("favoris auto : une brute passee par un dossier temporaire retrouve sa cle par son nom",
+              _zfFA.cle_media("/tmp/favbrute-x/brute_B.mp4", "mod_a", "brutes") == "mod_a|brutes|brute_B.mp4")
+        check("favoris auto : un fichier inconnu ne recoit PAS de cle inventee",
+              _zfFA.cle_media("/tmp/favbrute-x/absente.mp4", "mod_a", "brutes") == "")
+        check("favoris auto : une cle qui remonte l'arborescence est refusee",
+              _zfFA.chemin_de_cle("mod_a|..|x.mp4") is None
+              and _zfFA.chemin_de_cle("mod_a|brutes|../../x") is None
+              and _zfFA.chemin_de_cle("mod_a|brutes") is None
+              and _zfFA.chemin_de_cle("mod_a|brutes|brute_A.mp4") == _zfID / "mod_a/brutes/brute_A.mp4")
+
+        # =================================================================
+        # 3. LIVRAISONS : la recette de chaque video livree
+        # =================================================================
+        _zfFA.fil_actif = lambda: False
+        _zfR0 = _zfFA.noter_livraison(
+            "mod_a", _zfID / "mod_a/brutes/brute_A.mp4",
+            {"action": "brute + caption", "brute": _zfID / "mod_a/brutes/brute_A.mp4",
+             "caption": {"id": "c1", "text": _zfCAP, "ident": "mod_a", "mode": "a_copier"},
+             "template": "/nulle/part/tpl_inconnu.mp4", "reserve": True, "model": "MOD_A"},
+            va="42", va_nom="Jorel", salon="7", guild="8", quoi="BRUTE 1/1")
+        _zfLiv0 = _zfFA.lire_livraisons()[0].get(_zfR0, {})
+        check("favoris auto : livraison notee avec des cles de registre (brute, caption, VA, salon)",
+              _zfR0 and _zfLiv0.get("brute") == "mod_a|brutes|brute_A.mp4"
+              and _zfLiv0.get("caption") == {"id": "c1", "texte": _zfCAP, "ident": "mod_a",
+                                             "mode": "a_copier"}
+              and _zfLiv0.get("va") == "42" and _zfLiv0.get("salon") == "7"
+              and _zfLiv0.get("reserve") is True and _zfLiv0.get("model") == "mod_a", _zfLiv0)
+        check("favoris auto : un template hors du vault est NOMME, pas transforme en cle",
+              not _zfLiv0.get("template") and _zfLiv0.get("template_nom") == "tpl_inconnu.mp4", _zfLiv0)
+        # Poste de dev : personne ne calculerait l'empreinte, la copie
+        # resterait sur le disque -- des Go de liens durs pour rien.
+        check("favoris auto : fil arrete -> aucune copie de video, et la raison est ECRITE",
+              not (_zfFA.dossier_attente().is_dir() and list(_zfFA.dossier_attente().iterdir()))
+              and "arrêté" in _zfLiv0.get("empreinte_erreur", ""), _zfLiv0)
+        _zfFA.fil_actif = lambda: True
+        _zfTmpL = _zfD / "livree_tmp"
+        _zfTmpL.mkdir()
+        (_zfTmpL / "reel_caption_1.mp4").write_bytes(b"\x01" * 4096)
+        _zfR1 = _zfFA.noter_livraison("mod_b", _zfTmpL / "reel_caption_1.mp4",
+                                      {"action": "REEL CAPTION", "brute": _zfID / "mod_b/brutes/brute_D.mp4"})
+        _zfSh.rmtree(_zfTmpL)          # l'appelant efface son fichier juste apres l'envoi
+        _zfAtt = sorted(p.name for p in _zfFA.dossier_attente().iterdir())
+        check("favoris auto : la video livree est copiee AVANT que l'appelant n'efface la sienne",
+              _zfAtt == [_zfR1 + ".mp4"], _zfAtt)
+        _zfFA.ATTENTE_MAX_FICHIERS = 1
+        _zfR2 = _zfFA.noter_livraison("mod_b", _zfID / "mod_b/brutes/brute_D.mp4",
+                                      {"action": "videobrut", "brute": _zfID / "mod_b/brutes/brute_D.mp4"})
+        _zfFA.ATTENTE_MAX_FICHIERS = _zfSav["FA"][2]
+        _zfLiv2 = _zfFA.lire_livraisons()[0].get(_zfR2, {})
+        check("favoris auto : file d'empreintes pleine -> pas de copie, et c'est note sur la livraison",
+              "pleine" in _zfLiv2.get("empreinte_erreur", "")
+              and len(list(_zfFA.dossier_attente().iterdir())) == 1, _zfLiv2)
+        # Une copie qui n'est pas une video : l'echec est compte, la copie part.
+        _zfBil = _zfFA.empreinter_attente()
+        _zfLiv1 = _zfFA.lire_livraisons()[0].get(_zfR1, {})
+        check("favoris auto : empreinte impossible -> comptee en echec, copie effacee, erreur notee",
+              _zfBil["echecs"] == 1 and _zfBil["faites"] == 0
+              and not list(_zfFA.dossier_attente().iterdir())
+              and _zfLiv1.get("empreinte_erreur"), (_zfBil, _zfLiv1))
+        # Un AJOUT, jamais une reecriture ; une ligne coupee net (coupure de
+        # courant) est comptee et n'emporte pas la suivante.
+        _zfMois = sorted(_zfFA.dossier_livraisons().glob("*.jsonl"))[-1]
+        _zfAvant = _zfMois.read_bytes()
+        with open(_zfMois, "a", encoding="utf-8") as _zfF:
+            _zfF.write('{"id": "tronque", "le": 1')
+        _zfR3 = _zfFA.noter_livraison("mod_a", _zfID / "mod_a/brutes/brute_B.mp4",
+                                      {"action": "brute choisie",
+                                       "brute": _zfID / "mod_a/brutes/brute_B.mp4"})
+        _zfLivs, _zfIllis = _zfFA.lire_livraisons()
+        check("favoris auto : le registre des livraisons ne fait que grandir (ajout, pas reecriture)",
+              _zfMois.read_bytes().startswith(_zfAvant))
+        check("favoris auto : une ligne tronquee est COMPTEE et n'emporte pas la suivante",
+              _zfIllis == 1 and _zfR3 in _zfLivs and len(_zfLivs) == 4, (_zfIllis, len(_zfLivs)))
+        _zfFA.fil_actif = _zfSav["FA"][1]
+        for _zfP in list(_zfFA.dossier_attente().iterdir()):
+            _zfP.unlink()
+
+        # Les mois que plus rien ne relit partent au passage du fil. Sans ca,
+        # chaque livraison laissait ~2 Ko (recette + empreinte de 20 images)
+        # a vie sur le VPS, alors que trouver_livraison ne remonte que 45
+        # jours : des dizaines de Mo par mois pour rien. Dossier de donnees A
+        # PART : le mois courant ecrit ci-dessus ne doit pas bouger.
+        _zfDP = _zfD / "purge_livraisons"
+        _zfAtrSav = _zfFA._a_traiter
+        try:
+            _zfFA.DATA = _zfDP / "data"
+            _zfLP = _zfFA.dossier_livraisons()
+            (_zfLP / "a_empreinter").mkdir(parents=True)
+            for _zfNom in ("2026-06", "2026-07", "2026-09", "notes"):
+                (_zfLP / f"{_zfNom}.jsonl").write_text(
+                    '{"id":"a%s","le":1}\n{"id":"b%s","le":2}\n' % (_zfNom, _zfNom), encoding="utf-8")
+            # 27/09 midi : limite = 13/07. Juin finit le 1er juillet -> part ;
+            # juillet finit le 1er aout -> reste (un banger publie le 27/08
+            # remonte encore jusqu'au 13/07).
+            _zfMaint = _zfT.mktime((2026, 9, 27, 12, 0, 0, 0, 0, -1))
+            _zfOut = __import__("io").StringIO()
+            with __import__("contextlib").redirect_stdout(_zfOut):
+                _zfPurge = _zfFA.purger_livraisons(maintenant=_zfMaint)
+            _zfRestent = sorted(p.name for p in _zfLP.iterdir())
+            check("favoris auto : purge des livraisons -- seul le mois que plus rien ne relit part "
+                  "(juin au 27/09 ; juillet, septembre, un fichier hors format et la file restent)",
+                  [x.get("mois") for x in _zfPurge] == ["2026-06"]
+                  and _zfRestent == ["2026-07.jsonl", "2026-09.jsonl", "a_empreinter", "notes.jsonl"],
+                  (_zfPurge, _zfRestent))
+            check("favoris auto : purge des livraisons -- ecrite au journal, avec le nombre de lignes",
+                  _zfPurge and _zfPurge[0].get("lignes") == 2 and _zfPurge[0].get("octets", 0) > 0
+                  and "2026-06.jsonl supprimées : 2 ligne(s)" in _zfOut.getvalue(),
+                  (_zfPurge, _zfOut.getvalue()[:200]))
+            _zfOut = __import__("io").StringIO()
+            with __import__("contextlib").redirect_stdout(_zfOut):
+                _zfPurge2 = _zfFA.purger_livraisons(maintenant=_zfMaint)
+            check("favoris auto : purge des livraisons -- rien a purger : rien rendu, rien au journal",
+                  _zfPurge2 == [] and not _zfOut.getvalue(), (_zfPurge2, _zfOut.getvalue()[:200]))
+            # 17/10 : le 1er aout a 77 jours -> juillet part, septembre reste.
+            with __import__("contextlib").redirect_stdout(__import__("io").StringIO()):
+                _zfPurge3 = _zfFA.purger_livraisons(
+                    maintenant=_zfT.mktime((2026, 10, 17, 12, 0, 0, 0, 0, -1)))
+            check("favoris auto : purge des livraisons -- juillet part a son tour a la mi-octobre",
+                  [x.get("mois") for x in _zfPurge3] == ["2026-07"]
+                  and (_zfLP / "2026-09.jsonl").exists(), _zfPurge3)
+            # Branchee pour de vrai : un passage du fil (sans banger a
+            # analyser) purge un mois ancien et le rend dans son bilan.
+            (_zfLP / "2020-01.jsonl").write_text('{"id":"vieux","le":1}\n', encoding="utf-8")
+            _zfFA._a_traiter = lambda reg, tous: []
+            with __import__("contextlib").redirect_stdout(__import__("io").StringIO()):
+                _zfBt = _zfFA._tour()
+            check("favoris auto : purge des livraisons -- faite a chaque passage du fil (_tour), "
+                  "et rendue dans son bilan",
+                  not (_zfLP / "2020-01.jsonl").exists()
+                  # « in », pas « == » : l'horloge du passage est la vraie, et
+                  # septembre partira lui aussi quand ce test tournera en decembre.
+                  and "2020-01" in [x.get("mois") for x in _zfBt.get("livraisons_purgees") or []],
+                  _zfBt)
+        finally:
+            _zfFA._a_traiter = _zfAtrSav
+            _zfFA.DATA = _zfDA
+
+        # =================================================================
+        # 4. LA POSE : par les fonctions du site, sans Discord
+        # =================================================================
+        _zfA1 = {"sc": "ZfSeule", "vues": 64498, "vues_detail": {"vues": 12345},
+                 "methode": "empreinte", "nature": "montage", "identite": "mod_a",
+                 "identite_sure": True, "compte": "compte_a", "url": "https://www.instagram.com/reel/ZfSeule/",
+                 "notes": [], "propositions": [
+                     {"type": "brute", "cle": "mod_a|brutes|brute_A.mp4", "ident": "mod_a",
+                      "decision": "sur", "raison": "brute reconnue", "score": {"med": 8, "marge": 60}},
+                     {"type": "template", "cle": "mod_a|templates|tpl_T.mp4", "ident": "mod_a",
+                      "decision": "sur", "raison": "partie 2", "score": {"med": 12}},
+                     {"type": "template", "cle": "res_x|templates|tpl_T.mp4", "ident": "res_x",
+                      "decision": "sur", "raison": "partie 2", "score": {"med": 12}},
+                     {"type": "caption", "cle": "mod_a|captions|x", "ident": "mod_a", "texte": _zfCAP,
+                      "decision": "sur", "raison": "texte lu", "score": {"rappel": 1.0}},
+                     {"type": "caption", "cle": "res_x|captions|x", "ident": "res_x", "texte": _zfCAP,
+                      "decision": "sur", "raison": "texte lu (réserve liée à mod_a)", "score": {"rappel": 1.0}},
+                     {"type": "brute", "cle": "mod_b|brutes|brute_D.mp4", "ident": "mod_b",
+                      "decision": "a_confirmer", "raison": "brute probable", "score": {"med": 40}}]}
+        _zfB0 = _zfFA.appliquer(_zfA1)
+        _zfReg = _zfFA.charger()
+        check("favoris auto : sans les fonctions du site, RIEN n'est pose, et l'erreur est dite",
+              _zfB0["posees"] == 0 and _zfB0["erreurs"] == 5
+              and any("non branchées" in e.get("erreur", "") for e in _zfReg["erreurs"])
+              and not _zfW.FAV_BRUTES_FILE.exists(), _zfB0)
+        _zfReg["bangers"].pop("ZfSeule", None)
+        _zfReg["a_confirmer"] = []
+        _zfFA._ecrire(_zfReg)
+        _zfW._brancher_favoris_auto()
+        check("favoris auto : le site branche ses 4 fonctions (brutes, captions, et leur etat)",
+              set(_zfFA.APPLICATEURS) == {"brute", "brutes_etoilees", "caption", "caption_etoilee"},
+              sorted(_zfFA.APPLICATEURS))
+        _zfB1 = _zfFA.appliquer(_zfA1)
+        _zfFav = _zfJs.loads(_zfW.FAV_BRUTES_FILE.read_text(encoding="utf-8"))
+        check("favoris auto : brute et templates SURS dans fav_brutes.json (liste triee, format du site)",
+              _zfFav == sorted(["mod_a|brutes|brute_A.mp4", "mod_a|templates|tpl_T.mp4",
+                                "res_x|templates|tpl_T.mp4"]), _zfFav)
+        check("favoris auto : la proposition « À confirmer » n'est PAS posee",
+              "mod_b|brutes|brute_D.mp4" not in _zfFav and _zfB1["a_confirmer"] == 1, _zfB1)
+        _zfLib = _zfJs.loads(_zfW.CAPTIONS_FILE.read_text(encoding="utf-8"))
+        _zfCa = [c for c in _zfLib["mod_a"]["items"] if c["text"] == _zfCAP]
+        _zfCr = [c for c in (_zfLib.get("res_x") or {}).get("items", []) if c["text"] == _zfCAP]
+        check("favoris auto : la caption est AJOUTEE et ⭐ dans l'identite, texte de reference (emoji compris)",
+              len(_zfCa) == 1 and _zfCa[0].get("fav") is True, _zfCa)
+        check("favoris auto : ... et recopiee ⭐ dans la reserve liee",
+              len(_zfCr) == 1 and _zfCr[0].get("fav") is True, _zfCr)
+        check("favoris auto : la caption deja presente de l'identite est intacte",
+              any(c["id"] == "c_exist" and not c.get("fav") for c in _zfLib["mod_a"]["items"]))
+        check("favoris auto : AUCUN envoi Discord pour une etoile automatique",
+              not _zfEnvoisDiscord, _zfEnvoisDiscord[:2])
+        _zfReg = _zfFA.charger()
+        _zfPosees = [e for e in _zfReg["etoiles"] if e.get("etat") == "posee"]
+        check("favoris auto : chaque etoile dit quel banger, quelles vues, quelle source, quel score",
+              len(_zfPosees) == 5 and all(e.get("sc") == "ZfSeule" and e.get("vues") == 64498
+                                          and e.get("source") and e.get("raison")
+                                          and e.get("score") is not None for e in _zfPosees),
+              _zfPosees[:1])
+        check("favoris auto : le banger a sa ligne (nature, identite, bilan)",
+              (_zfReg["bangers"].get("ZfSeule") or {}).get("nature") == "montage"
+              and _zfReg["bangers"]["ZfSeule"].get("bilan", {}).get("posees") == 5,
+              _zfReg["bangers"].get("ZfSeule"))
+        _zfB2 = _zfFA.appliquer(_zfA1)
+        _zfLib = _zfJs.loads(_zfW.CAPTIONS_FILE.read_text(encoding="utf-8"))
+        check("favoris auto : rejouer le meme banger -> « deja », aucun doublon",
+              _zfB2["posees"] == 0 and _zfB2["deja"] == 5
+              and len([c for c in _zfLib["mod_a"]["items"] if c["text"] == _zfCAP]) == 1
+              and _zfJs.loads(_zfW.FAV_BRUTES_FILE.read_text(encoding="utf-8")) == _zfFav, _zfB2)
+
+        # --- annuler : un clic defait ce que le banger a pose ensemble ------
+        _zfEb = next(e for e in _zfFA.charger()["etoiles"]
+                     if e.get("etat") == "posee" and e["cle"] == "mod_a|brutes|brute_A.mp4")
+        _zfRa = _zfFA.annuler(_zfEb["id"], par="boss")
+        check("favoris auto : annuler retire l'etoile de fav_brutes.json",
+              _zfRa.get("ok") and "mod_a|brutes|brute_A.mp4"
+              not in _zfJs.loads(_zfW.FAV_BRUTES_FILE.read_text(encoding="utf-8")), _zfRa)
+        _zfB3 = _zfFA.appliquer(_zfA1)
+        check("favoris auto : une etoile annulee NE REVIENT PAS au passage suivant (refus memorise)",
+              _zfB3["refusees"] >= 1 and "mod_a|brutes|brute_A.mp4"
+              not in _zfJs.loads(_zfW.FAV_BRUTES_FILE.read_text(encoding="utf-8"))
+              and "brute#mod_a|brutes|brute_A.mp4" in _zfFA.charger()["refus"], _zfB3)
+        check("favoris auto : annuler deux fois est refuse proprement",
+              not _zfFA.annuler(_zfEb["id"]).get("ok") and not _zfFA.annuler("inconnu").get("ok"))
+        _zfEc = next(e for e in _zfFA.charger()["etoiles"]
+                     if e.get("etat") == "posee" and e["type"] == "caption" and e["ident"] == "mod_a")
+        _zfRc = _zfFA.annuler(_zfEc["id"])
+        _zfLib = _zfJs.loads(_zfW.CAPTIONS_FILE.read_text(encoding="utf-8"))
+        check("favoris auto : annuler une caption AJOUTEE la retire de l'identite ET de la reserve, en UN clic",
+              _zfRc.get("ok") and _zfRc.get("retirees") == 2
+              and not any(c["text"] == _zfCAP for c in _zfLib["mod_a"]["items"])
+              and not any(c["text"] == _zfCAP for c in (_zfLib.get("res_x") or {}).get("items", []))
+              and any(c["id"] == "c_exist" for c in _zfLib["mod_a"]["items"]), _zfRc)
+
+        # --- etoile retiree A LA MAIN sur le site (le vrai clic) ------------
+        _zfEt = next(e for e in _zfFA.charger()["etoiles"]
+                     if e.get("etat") == "posee" and e["cle"] == "res_x|templates|tpl_T.mp4")
+        _zfOn, _zfErrT = _zfW._toggle_fav_brute("res_x|templates|tpl_T.mp4")
+        _zfReg = _zfFA.charger()
+        _zfReg["bangers"].pop("ZfSeule", None)
+        _zfFA._ecrire(_zfReg)
+        _zfFA.appliquer(_zfA1)
+        _zfReg = _zfFA.charger()
+        check("favoris auto : retiree a la main sur le site -> pas reposee, et le refus est retenu",
+              _zfOn is False and not _zfErrT
+              and "res_x|templates|tpl_T.mp4" not in _zfJs.loads(_zfW.FAV_BRUTES_FILE.read_text(encoding="utf-8"))
+              and "template#res_x|templates|tpl_T.mp4" in _zfReg["refus"]
+              and any(e["id"] == _zfEt["id"] and e["etat"] == "retiree_a_la_main" for e in _zfReg["etoiles"]),
+              (_zfOn, _zfErrT))
+
+        # --- caption deja la (casse, ponctuation, variante) : jamais doublee --
+        safe_json.write(_zfW.CAPTIONS_FILE, dict(_zfJs.loads(_zfW.CAPTIONS_FILE.read_text(encoding="utf-8")),
+                                                 mod_b={"items": [{"id": "c_b", "text": "Already here caption",
+                                                                   "enabled": True}]}))
+        _zfW._invalidate_json_cache(_zfW.CAPTIONS_FILE)
+        _zfRf = _zfW._caption_favori("mod_b", "already here caption!!", True)
+        _zfItemsB = _zfJs.loads(_zfW.CAPTIONS_FILE.read_text(encoding="utf-8"))["mod_b"]["items"]
+        check("favoris auto : caption deja la (casse, ponctuation) -> etoilee, PAS dupliquee",
+              _zfRf["ok"] and not _zfRf["ajoutee"] and _zfRf["id"] == "c_b"
+              and len(_zfItemsB) == 1 and _zfItemsB[0]["fav"] is True, (_zfRf, _zfItemsB))
+        check("favoris auto : une VARIANTE (une lettre de travers) est reconnue, pas ajoutee a cote",
+              (_zfW._caption_trouver(_zfItemsB, "Alredy here caption") or {}).get("id") == "c_b")
+        _zfRf2 = _zfW._caption_favori("mod_b", "Already here caption", False, retirer_ajoutee=False,
+                                      cid="c_b")
+        _zfItemsB = _zfJs.loads(_zfW.CAPTIONS_FILE.read_text(encoding="utf-8"))["mod_b"]["items"]
+        check("favoris auto : retirer l'etoile d'une caption qui existait deja garde son texte",
+              _zfRf2["ok"] and len(_zfItemsB) == 1 and _zfItemsB[0]["fav"] is False
+              and _zfItemsB[0]["text"] == "Already here caption", _zfItemsB)
+        check("favoris auto : identite inconnue -> refusee, rien ecrit",
+              not _zfW._caption_favori("nexistepas", "x", True)["ok"]
+              and "nexistepas" not in _zfJs.loads(_zfW.CAPTIONS_FILE.read_text(encoding="utf-8")))
+        _zfW.CAPTIONS_MAX = 1
+        _zfRp = _zfW._caption_favori("mod_b", "Une toute nouvelle caption", True)
+        _zfW.CAPTIONS_MAX = _zfSav["W"][5]
+        check("favoris auto : bibliotheque pleine -> refus qui le DIT (pas d'ajout en douce)",
+              not _zfRp["ok"] and "pleine" in _zfRp.get("erreur", ""), _zfRp)
+        check("favoris auto : une cle de registre malformee est refusee",
+              _zfW._poser_fav_brute("mod_a|videos|x.mp4", True)[0] is False
+              and _zfW._poser_fav_brute("pas-une-cle", True)[0] is False)
+
+        # --- « À confirmer » : valider, refuser, une ligne par cle ----------
+        _zfFA.appliquer({"sc": "ZfZ1", "vues": 1, "propositions": [
+            {"type": "brute", "cle": "mod_b|brutes|brute_D.mp4", "ident": "mod_b",
+             "decision": "a_confirmer", "raison": "r", "score": {}}]})
+        _zfLz = [e for e in _zfFA.charger()["a_confirmer"] if e["cle"] == "mod_b|brutes|brute_D.mp4"]
+        check("favoris auto : une meme cle proposee par deux bangers = UNE ligne, deux bangers",
+              len(_zfLz) == 1 and _zfLz[0]["bangers"] == ["ZfSeule", "ZfZ1"], _zfLz)
+        _zfFA.appliquer({"sc": "ZfZ2", "vues": 3, "propositions": [
+            {"type": "brute", "cle": "mod_b|brutes|brute_D.mp4", "ident": "mod_b",
+             "decision": "sur", "raison": "r", "score": {}}]})
+        _zfLz = [e for e in _zfFA.charger()["a_confirmer"] if e["cle"] == "mod_b|brutes|brute_D.mp4"]
+        check("favoris auto : la ligne en attente est tranchee quand un banger SUR confirme la meme cle",
+              _zfLz[0]["etat"] == "valide" and "ZfZ2" in _zfLz[0].get("par", ""), _zfLz)
+        _zfFA.appliquer({"sc": "ZfV", "vues": 9, "propositions": [
+            {"type": "template", "cle": "mod_b|templates|tpl_T.mp4", "ident": "mod_b",
+             "decision": "a_confirmer", "raison": "essai", "score": {}},
+            {"type": "caption", "cle": "mod_a|captions|maybe", "ident": "mod_a",
+             "texte": "Maybe this caption", "decision": "a_confirmer", "raison": "essai", "score": {}},
+            {"type": "caption", "cle": "", "ident": "", "texte": "Sans identite",
+             "decision": "a_confirmer", "raison": "texte reconnu, identité inconnue", "score": {}}]})
+        _zfAtt = {e["texte"] or e["cle"]: e for e in _zfFA.charger()["a_confirmer"]
+                  if e["sc"] == "ZfV" and e["etat"] == "attente"}
+        _zfRr = _zfFA.trancher(_zfAtt["mod_b|templates|tpl_T.mp4"]["id"], False, par="boss")
+        _zfFA.appliquer({"sc": "ZfV2", "vues": 1, "propositions": [
+            {"type": "template", "cle": "mod_b|templates|tpl_T.mp4", "ident": "mod_b",
+             "decision": "a_confirmer", "raison": "essai", "score": {}}]})
+        check("favoris auto : refuser -> la proposition ne revient pas, meme par un autre banger",
+              _zfRr.get("ok") and not [e for e in _zfFA.charger()["a_confirmer"]
+                                       if e["cle"] == "mod_b|templates|tpl_T.mp4" and e["etat"] == "attente"])
+        check("favoris auto : trancher deux fois est refuse",
+              not _zfFA.trancher(_zfAtt["mod_b|templates|tpl_T.mp4"]["id"], True).get("ok"))
+        _zfRv = _zfFA.trancher(_zfAtt["Maybe this caption"]["id"], True, par="boss")
+        _zfLib = _zfJs.loads(_zfW.CAPTIONS_FILE.read_text(encoding="utf-8"))
+        check("favoris auto : valider une caption la pose dans l'identite ET la recopie dans la reserve",
+              _zfRv.get("ok") and _zfRv.get("posees") == 2
+              and any(c["text"] == "Maybe this caption" and c.get("fav") for c in _zfLib["mod_a"]["items"])
+              and any(c["text"] == "Maybe this caption" and c.get("fav") for c in _zfLib["res_x"]["items"]),
+              _zfRv)
+        check("favoris auto : la validation est annulable (journal, source « validée à la main »)",
+              any(e.get("texte") == "Maybe this caption" and e.get("etat") == "posee"
+                  and e.get("source") == "validée à la main" for e in _zfFA.charger()["etoiles"]))
+        check("favoris auto : valider sans identite est refuse, avec l'explication",
+              "identité inconnue" in (_zfFA.trancher(_zfAtt["Sans identite"]["id"], True).get("erreur") or ""))
+
+        # --- registres illisibles : JAMAIS reecrits a vide -------------------
+        _zfFavTxt = _zfW.FAV_BRUTES_FILE.read_text(encoding="utf-8")
+        _zfW.FAV_BRUTES_FILE.write_text('["mod_a|brutes|x.mp4", tronq', encoding="utf-8")
+        for _zfP in _zfDA.glob("fav_brutes.json.prev"):
+            _zfP.unlink()
+        _zfOk, _zfErr = _zfW._poser_fav_brute("mod_a|brutes|brute_B.mp4", True)
+        check("favoris auto : fav_brutes.json illisible -> refus d'ecrire (sinon toutes les etoiles partaient)",
+              not _zfOk and "illisible" in _zfErr
+              and "tronq" in _zfW.FAV_BRUTES_FILE.read_text(encoding="utf-8"), _zfErr)
+        _zfBx = _zfFA.appliquer({"sc": "ZfIllis", "vues": 1, "propositions": [
+            {"type": "brute", "cle": "mod_a|brutes|brute_B.mp4", "ident": "mod_a",
+             "decision": "sur", "raison": "r", "score": {}}]})
+        check("favoris auto : ... et l'automatisme compte l'echec au lieu de le taire",
+              _zfBx["erreurs"] == 1 and any("illisible" in n for n in
+                                            _zfFA.charger()["bangers"]["ZfIllis"]["notes"]), _zfBx)
+        _zfW.FAV_BRUTES_FILE.write_text(_zfFavTxt, encoding="utf-8")
+        _zfW._invalidate_json_cache(_zfW.FAV_BRUTES_FILE)
+        _zfCapTxt = _zfW.CAPTIONS_FILE.read_text(encoding="utf-8")
+        _zfW.CAPTIONS_FILE.write_text('{"mod_a": {tronque', encoding="utf-8")
+        for _zfP in _zfDA.glob("captions.json.prev"):
+            _zfP.unlink()
+        _zfRi = _zfW._caption_favori("mod_a", "Nouvelle", True)
+        check("favoris auto : captions.json illisible -> refus d'ecrire, fichier intact",
+              not _zfRi["ok"] and "tronque" in _zfW.CAPTIONS_FILE.read_text(encoding="utf-8"), _zfRi)
+        _zfW.CAPTIONS_FILE.write_text(_zfCapTxt, encoding="utf-8")
+        _zfW._invalidate_json_cache(_zfW.CAPTIONS_FILE)
+
+        # --- le verrou : le clic du site et le fil ne s'effacent pas ---------
+        _zfFavAvant = set(_zfJs.loads(_zfW.FAV_BRUTES_FILE.read_text(encoding="utf-8")))
+        _zfErrsT = []
+
+        def _zfPoseur(k):
+            for i in range(12):
+                ok, err = _zfW._poser_fav_brute(f"mod_a|brutes|conc_{k}_{i}.mp4", True)
+                if not ok:
+                    _zfErrsT.append(err)
+
+        def _zfCliqueur():
+            for i in range(12):
+                _zfW._toggle_fav_brute(f"mod_b|brutes|clic_{i}.mp4")
+        _zfThs = [_zfTh.Thread(target=_zfPoseur, args=(k,)) for k in range(5)] + [
+            _zfTh.Thread(target=_zfCliqueur)]
+        for _zfX in _zfThs:
+            _zfX.start()
+        for _zfX in _zfThs:
+            _zfX.join(60)
+        _zfFavApres = set(_zfJs.loads(_zfW.FAV_BRUTES_FILE.read_text(encoding="utf-8")))
+        _zfAttendu = ({f"mod_a|brutes|conc_{k}_{i}.mp4" for k in range(5) for i in range(12)}
+                      | {f"mod_b|brutes|clic_{i}.mp4" for i in range(12)} | _zfFavAvant)
+        check("favoris auto : 5 fils qui etoilent + le clic du site en meme temps -> aucune etoile perdue",
+              _zfFavApres == _zfAttendu and not _zfErrsT,
+              (len(_zfAttendu - _zfFavApres), _zfErrsT[:2]))
+        safe_json.write_text(_zfW.FAV_BRUTES_FILE, _zfJs.dumps(sorted(_zfFavAvant)))
+        _zfW._invalidate_json_cache(_zfW.FAV_BRUTES_FILE)
+        # Le cache de _load_fav_brutes ne regarde que la DATE du fichier. Sur
+        # le VPS (ext4) elle avance par paliers de quelques millisecondes : le
+        # clic du site qui attendait le verrou pendant que le fil posait une
+        # etoile ecrivait dans le MEME palier, le cache gardait la version
+        # d'avant le clic, et le clic SUIVANT reecrivait le registre sans lui.
+        # Le palier est simule en reposant la meme date apres chaque ecriture.
+        _zfPal = 1_700_000_000 * 10 ** 9
+
+        def _zfFige():
+            os.utime(_zfW.FAV_BRUTES_FILE, ns=(_zfPal, _zfPal))
+        _zfW._poser_fav_brute("mod_a|brutes|palier_1.mp4", True)
+        _zfFige()
+        _zfW._toggle_fav_brute("mod_a|brutes|palier_2.mp4")
+        _zfFige()
+        _zfW._toggle_fav_brute("mod_a|brutes|palier_3.mp4")
+        _zfFige()
+        _zfFavP = set(_zfJs.loads(_zfW.FAV_BRUTES_FILE.read_text(encoding="utf-8")))
+        check("favoris auto : une etoile du fil puis deux clics du site dans le meme palier de date "
+              "-> aucun clic perdu",
+              {f"mod_a|brutes|palier_{i}.mp4" for i in (1, 2, 3)} <= _zfFavP,
+              sorted(k for k in _zfFavP if "palier" in k))
+        check("favoris auto : ... et ce que lit l'automatisme (brutes_etoilees) est a jour",
+              {f"mod_a|brutes|palier_{i}.mp4" for i in (1, 2, 3)} <= _zfFA.APPLICATEURS["brutes_etoilees"](),
+              sorted(k for k in _zfFA.APPLICATEURS["brutes_etoilees"]() if "palier" in k))
+        safe_json.write_text(_zfW.FAV_BRUTES_FILE, _zfJs.dumps(sorted(_zfFavAvant)))
+        _zfW._invalidate_json_cache(_zfW.FAV_BRUTES_FILE)
+
+        # =================================================================
+        # 5. LE DECLENCHEMENT : quoi analyser, les echecs, le sous-processus
+        # =================================================================
+        _zfBG.DOSSIER.mkdir(parents=True, exist_ok=True)
+        _zfNow = int(_zfT.time())
+        _zfFiches = {}
+        for _zfSc, _zfIdent, _zfVid, _zfVieux in (("ZfOld1", "jessye", True, True),
+                                                  ("ZfNew1", "jessye", True, False),
+                                                  ("ZfHors1", "", True, True),
+                                                  ("ZfSansVid", "jessye", False, False)):
+            _zfFiches[_zfSc] = {"compte": "compte_z", "identite": _zfIdent, "va": "VA",
+                                "url": f"https://www.instagram.com/reel/{_zfSc}/", "vues": 20000,
+                                "poste_le": _zfNow - 3600}
+            if _zfVid:
+                _zfV = _zfBG.chemin_video(_zfSc)
+                _zfV.write_bytes(b"\x00" * 4096)
+                if _zfVieux:
+                    os.utime(_zfV, (_zfNow - 86400, _zfNow - 86400))
+        safe_json.write(_zfBG.FICHIER, {"seuil": 10000, "reels": _zfFiches})
+        _zfReg = _zfFA.charger()
+        _zfReg["active_depuis"] = _zfNow - 60
+        _zfFA._ecrire(_zfReg)
+        check("favoris auto : sans demande, seuls les bangers archives APRES la mise en service passent",
+              _zfFA._a_traiter(_zfFA.charger(), tous=False) == ["ZfNew1"],
+              _zfFA._a_traiter(_zfFA.charger(), tous=False))
+        check("favoris auto : le rattrapage demande reprend tout ce qui est archive (sans video : attend)",
+              _zfFA._a_traiter(_zfFA.charger(), tous=True) == ["ZfHors1", "ZfNew1", "ZfOld1"]
+              and _zfFA.a_rattraper() == 3, _zfFA._a_traiter(_zfFA.charger(), tous=True))
+        # Le vrai sous-processus (nice 19, --data) : il lit le registre des
+        # bangers du MEME dossier de donnees -- sinon un essai lirait la
+        # production. ZfHors1 n'existe que dans le bac a sable.
+        _zfT0 = _zfT.time()
+        _zfSub = list(_zfFA._lancer_analyse(["ZfHors1", "ZfInconnu"]))
+        _zfSubD = {a.get("sc"): a for a in _zfSub}
+        check("favoris auto : sous-processus -> une analyse par banger, sur le registre du bac a sable",
+              [a.get("sc") for a in _zfSub] == ["ZfHors1", "ZfInconnu"]
+              and "hors équipe" in _zfSubD["ZfHors1"].get("ignore", "")
+              and _zfSubD["ZfInconnu"].get("ignore") == "absent du registre des bangers",
+              [(a.get("sc"), a.get("ignore")) for a in _zfSub])
+        check("favoris auto : les videos du vault illisibles a l'index sont DITES sur l'analyse",
+              any("illisibles" in n for n in _zfSubD["ZfHors1"].get("notes", [])),
+              _zfSubD["ZfHors1"].get("notes"))
+        check("favoris auto : le sous-processus tourne a nice 19 quand nice existe",
+              _zfFA._NICE == (["nice", "-n", "19"] if _zfSh.which("nice") else []))
+        print(f"     (sous-processus : {_zfT.time() - _zfT0:.1f} s)")
+        for _zfA in _zfSub:
+            _zfFA.appliquer(_zfA)
+        _zfLigneH = _zfFA.charger()["bangers"].get("ZfHors1") or {}
+        check("favoris auto : un banger ignore a sa ligne ET sa raison, et n'est plus repris",
+              _zfLigneH.get("etat") == "ignore" and "hors équipe" in _zfLigneH.get("ignore", "")
+              and "ZfHors1" not in _zfFA._a_traiter(_zfFA.charger(), tous=True), _zfLigneH)
+        _zfFA._lancer_analyse = lambda scs: (_ for _ in ()).throw(RuntimeError("plantage simule"))
+        for _zfI in range(3):
+            _zfBt = _zfFA.traiter(["ZfNew1"])
+        _zfLigneN = _zfFA.charger()["bangers"].get("ZfNew1") or {}
+        check("favoris auto : une analyse qui plante est COMPTEE, et plus retentee apres 3 essais",
+              _zfBt["erreurs"] == 1 and _zfLigneN.get("etat") == "erreur" and _zfLigneN.get("essais") == 3
+              and "plantage simule" in _zfLigneN.get("erreur", "")
+              and "ZfNew1" not in _zfFA._a_traiter(_zfFA.charger(), tous=True), _zfLigneN)
+        _zfFA._lancer_analyse = _zfSav["FA"][3]
+        _zfVider()
+        _zfDr = _zfFA.demander_rattrapage(par="boss")
+        _zfDr2 = _zfFA.demander_rattrapage(par="boss")
+        check("favoris auto : le rattrapage se DEMANDE (file du fil), et un 2e clic ne le double pas",
+              _zfDr.get("ok") and not _zfDr.get("deja") and _zfDr2.get("deja")
+              and list(_zfFA._FILE.queue) == [("rattrapage", None)]
+              and _zfFA.charger()["rattrapage"].get("par") == "boss", (_zfDr, _zfDr2))
+        _zfVider()
+
+        # all-banger previent les favoris, sans jamais attendre ni echouer
+        safe_json.write(_zfAB.FICHIER, {"reels": {"ZfArch1": {"etat": "video", "essais": 0},
+                                                  "ZfArch2": {"etat": "video", "essais": 0},
+                                                  "ZfArch3": {"etat": "video", "essais": 0}}})
+        _zfAB.APRES_ARCHIVAGE[:] = [_zfFA.signaler]
+        _zfAB.telecharger = lambda sc, url, t=None: (True, "", "essai")
+        _zfAB.traiter_job({"shortcode": "ZfArch1", "video_url": "x"})
+        check("favoris auto : une video archivee par all-banger previent les favoris (file, sans attendre)",
+              ("banger", "ZfArch1") in list(_zfFA._FILE.queue), list(_zfFA._FILE.queue))
+        _zfVider()
+        _zfAB.APRES_ARCHIVAGE.append(lambda sc: 1 / 0)
+        _zfOkJ = _zfAB.traiter_job({"shortcode": "ZfArch2", "video_url": "x"})
+        check("favoris auto : une suite d'archivage en echec ne fait pas echouer l'archivage",
+              _zfOkJ is True and _zfAB.charger()["reels"]["ZfArch2"]["etat"] == "pret")
+        _zfVider()
+        _zfAB.telecharger = lambda sc, url, t=None: (False, "http_403", "essai")
+        _zfAB.traiter_job({"shortcode": "ZfArch3", "video_url": "x"})
+        check("favoris auto : une video NON recuperee ne declenche rien",
+              _zfFA._FILE.empty())
+        _zfAB.FICHIER, _zfAB.telecharger = _zfSav["AB"][0], _zfSav["AB"][1]
+        _zfAB.APRES_ARCHIVAGE[:] = _zfSav["AB"][2]
+        _zfVider()
+        # Machine de dev : ni fil, ni branchement, ni livraison du parc notee.
+        _zfNbAp = len(_zfAB.APRES_ARCHIVAGE)
+        check("favoris auto : hors du serveur de production, le fil n'est PAS arme",
+              _zfW._start_favoris_auto_daemon() is False and len(_zfAB.APRES_ARCHIVAGE) == _zfNbAp
+              and not _zfFA.fil_actif())
+        _zfNbLiv = len(_zfFA.lire_livraisons()[0])
+        check("favoris auto : hors production, une livraison du parc n'ecrit rien",
+              _zfW._noter_livraison_rig("mod_a", "caption", _zfID / "mod_a/brutes/brute_A.mp4",
+                                        {"recette": {"source": "x"}}) == ""
+              and len(_zfFA.lire_livraisons()[0]) == _zfNbLiv)
+        check("favoris auto : create_app arme le fil (sous sa garde de machine)",
+              "_start_favoris_auto_daemon()" in pathlib.Path("web_upload.py").read_text(
+                  encoding="utf-8").split("def create_app", 1)[-1])
+
+        # =================================================================
+        # 6. LE SITE : section, routes, droits, JavaScript
+        # =================================================================
+        _zfW._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"},
+                                        "chat": {"role": "chatter", "password": "x"}}
+        _zfApp = _zfW.create_app()
+        _zfApp.testing = True
+        _zfCl = _zfApp.test_client()
+        with _zfCl.session_transaction() as _zfS:
+            _zfS["auth"] = True
+            _zfS["username"] = "boss"
+            _zfS["role"] = "owner"
+        # Un texte venu de l'OCR ou d'un brouillon peut porter n'importe quoi.
+        _zfFA.appliquer({"sc": "ZfXss", "vues": 5, "url": "javascript:alert(1)", "propositions": [
+            {"type": "caption", "cle": "mod_a|captions|xss", "ident": "mod_a",
+             "texte": "<img src=x onerror=alert(1)>", "decision": "a_confirmer",
+             "raison": "<b>raison</b>", "score": {}}]})
+        _zfR = _zfCl.get("/jailbreak/favoris_auto/section")
+        _zfH = _zfR.get_data(as_text=True)
+        check("favoris auto : le fragment se rend (200) avec la section",
+              _zfR.status_code == 200 and "id='fa-section'" in _zfH, _zfR.status_code)
+        check("favoris auto : « À confirmer » et « Étoiles posées » listes, avec leurs boutons",
+              "À confirmer (" in _zfH and "Étoiles posées (" in _zfH and "faAction(this,'annuler'" in _zfH
+              and "faAction(this,'valider'" in _zfH and "faAction(this,'refuser'" in _zfH)
+        check("favoris auto : les bangers non analyses sont comptes avec leur raison",
+              "Non analysés" in _zfH and "compte hors équipe" in _zfH)
+        check("favoris auto : les analyses en echec sont dites (et qu'elles ne sont plus retentees)",
+              "analyse(s) en échec" in _zfH and "ZfNew1" in _zfH and "plus retentées" in _zfH)
+        check("favoris auto : un texte venu de l'OCR est echappe (pas de HTML injecte)",
+              "<img src=x" not in _zfH and "&lt;img src=x" in _zfH and "<b>raison</b>" not in _zfH)
+        check("favoris auto : un lien de banger qui n'est pas http(s) est remplace",
+              "javascript:alert" not in _zfH)
+        check("favoris auto : pas de style en ligne (theme clair)", "style=" not in _zfH)
+        _zfCls = set()
+        for _zfM in _zfRe.finditer(r"class='([^']*)'", _zfH):
+            _zfCls |= set(_zfM.group(1).split())
+        _zfSrcCss = pathlib.Path("web_upload.py").read_text(encoding="utf-8")
+        _zfSansCss = sorted(c for c in _zfCls
+                            if not _zfRe.search(r"\." + _zfRe.escape(c) + r"(?![\w-])[^;{}]*\{", _zfSrcCss))
+        check("favoris auto : chaque classe de la section existe dans la feuille du site",
+              _zfCls and not _zfSansCss, _zfSansCss)
+        check("favoris auto : le fragment de rafraichissement ne rejoue pas le script",
+              "<script" not in _zfH)
+        _zfEnc = _zfW._bangers_encart_html()
+        check("favoris auto : la section suit l'encart Bangers (le patch du VPS la deplace avec lui)",
+              "<b>Bangers</b>" in _zfEnc and "id='fa-section'" in _zfEnc
+              and _zfEnc.index("<b>Bangers</b>") < _zfEnc.index("id='fa-section'")
+              and "window.faAction = function" in _zfEnc)
+        _zfHt = _zfCl.get("/?tab=jailbreak&frag=1", headers={"X-Tab-Ajax": "1"}).get_data(as_text=True)
+        check("favoris auto : l'onglet Instagram porte la section et son script",
+              "id='fa-section'" in _zfHt and "window.faRafraichir = function" in _zfHt)
+        _zfNode = _zfSh.which("node")
+        if _zfNode:
+            _zfBlocs = _zfRe.findall(r"<script(?![^>]*\bsrc=)([^>]*)>(.*?)</script>", _zfHt, _zfRe.S)
+            _zfCode = [c for a, c in _zfBlocs if "json" not in a.lower()]
+            _zfFj = _zfD / "onglet_instagram.js"
+            _zfFj.write_text(_zfW._FA_JS + "\n;\n" + "\n;\n".join(_zfCode), encoding="utf-8")
+            _zfRn = _zfSp.run([_zfNode, "--check", str(_zfFj)], capture_output=True, text=True, timeout=90)
+            check("favoris auto : le JavaScript de la section et de l'onglet passe node --check",
+                  _zfRn.returncode == 0, (_zfRn.stderr or "")[:200])
+        else:
+            print("     (node absent : le JS de la section n a pas ete verifie)")
+        _zfPo = next(e for e in _zfFA.charger()["etoiles"] if e.get("etat") == "posee")
+        _zfR = _zfCl.post("/jailbreak/favoris_auto/action", data={"op": "annuler", "id": _zfPo["id"]})
+        check("favoris auto : « Retirer » par la route",
+              _zfR.status_code == 200 and (_zfR.get_json() or {}).get("ok")
+              and next(e for e in _zfFA.charger()["etoiles"] if e["id"] == _zfPo["id"])["etat"] == "annulee",
+              _zfR.get_data(as_text=True)[:200])
+        _zfAx = next(e for e in _zfFA.charger()["a_confirmer"] if e["sc"] == "ZfXss")
+        _zfR = _zfCl.post("/jailbreak/favoris_auto/action", data={"op": "refuser", "id": _zfAx["id"]})
+        check("favoris auto : « Refuser » par la route",
+              (_zfR.get_json() or {}).get("ok") and "caption#mod_a|captions|xss" in _zfFA.charger()["refus"])
+        _zfFA.appliquer({"sc": "ZfSite", "vues": 5, "propositions": [
+            {"type": "brute", "cle": "mod_a|brutes|brute_B.mp4", "ident": "mod_a",
+             "decision": "a_confirmer", "raison": "essai du site", "score": {}}]})
+        _zfAs = next(e for e in _zfFA.charger()["a_confirmer"] if e["sc"] == "ZfSite")
+        _zfR = _zfCl.post("/jailbreak/favoris_auto/action", data={"op": "valider", "id": _zfAs["id"]})
+        check("favoris auto : « Valider » par la route pose l'etoile",
+              (_zfR.get_json() or {}).get("ok") and "mod_a|brutes|brute_B.mp4"
+              in _zfJs.loads(_zfW.FAV_BRUTES_FILE.read_text(encoding="utf-8")))
+        _zfR = _zfCl.post("/jailbreak/favoris_auto/action", data={"op": "rattrapage"})
+        check("favoris auto : l'analyse des archives refuse hors du serveur de production, en le disant",
+              not (_zfR.get_json() or {}).get("ok") and "production" in (_zfR.get_json() or {}).get("error", ""))
+        _zfR = _zfCl.post("/jailbreak/favoris_auto/action", data={"op": "nimporte"})
+        check("favoris auto : une action inconnue -> 400", _zfR.status_code == 400, _zfR.status_code)
+        _zfCl2 = _zfApp.test_client()
+        with _zfCl2.session_transaction() as _zfS:
+            _zfS["auth"] = True
+            _zfS["username"] = "chat"
+            _zfS["role"] = "chatter"
+        _zfR = _zfCl2.post("/jailbreak/favoris_auto/action", data={"op": "annuler", "id": "x"})
+        _zfRg = _zfCl2.get("/jailbreak/favoris_auto/section")
+        check("favoris auto : un role restreint est refuse, en ecriture ET en lecture",
+              _zfR.status_code == 403 and _zfRg.status_code in (401, 403),
+              (_zfR.status_code, _zfRg.status_code))
+        _zfR = _zfApp.test_client().post("/jailbreak/favoris_auto/action", data={"op": "annuler", "id": "x"})
+        check("favoris auto : sans session -> refuse", _zfR.status_code in (401, 403), _zfR.status_code)
+        _zfW._load_web_users = _zfSav["W"][6]
+
+        # =================================================================
+        # 7. LE BOT : au-dela de 15 brutes etoilees, toutes finissent par servir
+        # =================================================================
+        # Les favoris automatiques posent 25 etoiles et plus sur une model :
+        # la boucle s'arretait a la 15e par ordre alphabetique, et les autres
+        # ne sortaient JAMAIS, toujours les memes, sans un mot.
+        for _zfI in range(20):
+            (_zfID / "mod_z" / "brutes").mkdir(parents=True, exist_ok=True)
+            (_zfID / "mod_z" / "brutes" / f"lim_{_zfI:02d}.mp4").write_bytes(b"\x00" * 64)
+        safe_json.write_text(_zfDA / "fav_brutes.json",
+                             _zfJs.dumps(sorted(f"mod_z|brutes|lim_{i:02d}.mp4" for i in range(20))))
+        _zfVus = set()
+        for _zfI in range(80):
+            _zfVus |= {p.name for p in _zfU.fav_brutes_for("mod_z")}
+        check("favoris auto : fav_brutes_for rend au plus 15 brutes par appel",
+              len(_zfU.fav_brutes_for("mod_z")) == 15)
+        check("favoris auto : au-dela de 15, TOUTES les brutes etoilees finissent par servir (tirage)",
+              len(_zfVus) == 20, len(_zfVus))
+        check("favoris auto : limit=0 rend toutes les brutes etoilees",
+              len(_zfU.fav_brutes_for("mod_z", limit=0)) == 20)
+
+        # =================================================================
+        # 8. BOUT A BOUT SUR DE VRAIES VIDEOS (ffmpeg) : index, brute seule,
+        #    recette retrouvee par l'empreinte de la livraison
+        # =================================================================
+        if _zfSh.which("ffmpeg"):
+            _zfT0 = _zfT.time()
+            _zfVault = _zfD / "vault2" / "data"
+            _zfFA.DATA = _zfVault
+            _zfFA._CACHE_MOIS.clear()
+            _zfFA._CACHE_EMP.clear()
+            _zfBG.FICHIER = _zfVault / "bangers.json"
+            _zfBG.DOSSIER = _zfVault / "bangers"
+            _zfBG.DETAILS_DIR = _zfVault / "bangers_details"
+            _zfBG.DOSSIER.mkdir(parents=True)
+
+            def _zfGen(src, out, duree):
+                out.parent.mkdir(parents=True, exist_ok=True)
+                _zfSp.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", src, "-t", str(duree),
+                           "-vf", "format=yuv420p", "-r", "30", "-c:v", "libx264", "-preset",
+                           "veryfast", "-crf", "20", str(out)], capture_output=True, timeout=120)
+
+            def _zfReenc(src, out):
+                # « Instagram » : autre taille, autre compression, sans le son
+                _zfSp.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-t", "10", "-vf",
+                           "scale=540:960", "-c:v", "libx264", "-preset", "veryfast", "-crf", "30",
+                           "-an", str(out)], capture_output=True, timeout=120)
+
+            def _zfVie(graine):
+                # « life » : un motif qui bouge et qui ne se repete pas, fixe
+                # par sa graine (la source « gradients » ignore la sienne : deux
+                # passages ne donneraient pas le meme verdict).
+                return (f"life=s=90x160:seed={graine}:ratio=0.35:mold=4:rate=30:"
+                        f"life_color=#f0f0f0:death_color=#101010,scale=360:640:flags=neighbor")
+            _zfV2 = _zfVault / "identities"
+            _zfGen(_zfVie(1), _zfV2 / "mod_a/brutes/brute_A.mp4", 10)
+            _zfGen(_zfVie(2), _zfV2 / "mod_a/brutes/brute_A2_sosie.mp4", 10)
+            _zfGen(_zfVie(5), _zfV2 / "mod_b/brutes/brute_D.mp4", 10)
+            _zfGen("mandelbrot=s=360x640:rate=30:start_scale=3:end_scale=0.3",
+                   _zfD / "inconnu.mp4", 10)
+            _zfReenc(_zfV2 / "mod_a/brutes/brute_A.mp4", _zfBG.chemin_video("ZfBgSeule"))
+            _zfReenc(_zfD / "inconnu.mp4", _zfBG.chemin_video("ZfBgInconnu"))
+            safe_json.write(_zfBG.FICHIER, {"seuil": 10000, "reels": {
+                sc: {"compte": "compte_v", "identite": "jessye", "va": "VA", "vues": 15000,
+                     "url": f"https://www.instagram.com/reel/{sc}/", "poste_le": int(_zfT.time()) + 60}
+                for sc in ("ZfBgSeule", "ZfBgInconnu", "ZfBgRecette")}})
+            _zfI1 = _zfFA.mettre_a_jour_index()
+            _zfI2 = _zfFA.mettre_a_jour_index()
+            check("favoris auto : l'index calcule chaque video du vault, puis ne relit rien (taille+date)",
+                  _zfI1["calculees"] == 3 and not _zfI1["echecs"]
+                  and _zfI2["calculees"] == 0 and _zfI2["a_jour"] == 3, (_zfI1, _zfI2))
+            (_zfV2 / "mod_a/brutes/casse.mp4").write_bytes(b"pas une video")
+            for _zfI in range(4):
+                _zfI3 = _zfFA.mettre_a_jour_index(identites=["mod_a"], sections=("brutes",))
+            check("favoris auto : une video illisible est comptee, et plus relue apres 3 essais",
+                  _zfI3["echecs"] == 1 and _zfI3["calculees"] == 0, _zfI3)
+            (_zfV2 / "mod_a/brutes/casse.mp4").unlink()
+            _zfIb, _zfIt = _zfFA.charger_index("brutes"), _zfFA.charger_index("templates")
+            # L'OCR par defaut sur une VRAIE image : Tesseract la recoit,
+            # Gemini jamais (Tesseract lui-meme n'est pas requis ici).
+            _zfImgT = []
+            _zfAG.transcrire_tesseract = (lambda img, capture=False: _zfImgT.append(
+                pathlib.Path(img).is_file()) or {"texte": "Hello there", "erreur": ""})
+            _zfAG.lire_capture = _zfPiege
+            _zfAG.gemini_texte = _zfPiege
+            try:
+                _zfOi = _zfFA.ocr_image(_zfBG.chemin_video("ZfBgSeule"), 0.6)
+            finally:
+                _zfAG.transcrire_tesseract, _zfAG.lire_capture, _zfAG.gemini_texte = _zfSav["AG"]
+            check("favoris auto : l'OCR extrait une vraie image du banger et la donne a Tesseract, jamais a Gemini",
+                  _zfImgT == [True] and _zfOi.get("texte") == "Hello there" and _zfAppels["payant"] == 0,
+                  (_zfImgT, _zfOi, _zfAppels))
+            _zfOcrVide = lambda v, t: {"texte": "", "erreur": ""}
+            _zfAs1 = _zfFA.analyser_banger("ZfBgSeule", index_brutes=_zfIb, index_templates=_zfIt,
+                                           corpus=[], registre=_zfFA._vide(), ocr=_zfOcrVide)
+            check("favoris auto : brute seule -> la brute d'origine reconnue SURE, identite deduite",
+                  (_zfAs1.get("brute") or {}).get("decision") == "sur"
+                  and _zfAs1["brute"].get("rel") == "mod_a/brutes/brute_A.mp4"
+                  and _zfAs1.get("identite") == "mod_a" and _zfAs1.get("nature") == "brute seule",
+                  (_zfAs1.get("brute"), _zfAs1.get("nature")))
+            check("favoris auto : brute seule -> UNE proposition, la brute, sure",
+                  [(p["type"], p["cle"], p["decision"]) for p in _zfAs1["propositions"]]
+                  == [("brute", "mod_a|brutes|brute_A.mp4", "sur")], _zfAs1["propositions"])
+            _zfAs2 = _zfFA.analyser_banger("ZfBgInconnu", index_brutes=_zfIb, index_templates=_zfIt,
+                                           corpus=[], registre=_zfFA._vide(), ocr=_zfOcrVide)
+            check("favoris auto : une video absente du vault n'etoile RIEN, et dit pourquoi",
+                  not [p for p in _zfAs2["propositions"] if p["decision"] == "sur"]
+                  and any("introuvable" in n for n in _zfAs2["notes"]),
+                  (_zfAs2["propositions"], _zfAs2["notes"]))
+            # La livraison : notee a l'envoi, empreinte en tache de fond, puis
+            # le banger qui en est ne la retrouve -> la recette EXACTE.
+            _zfFA.fil_actif = lambda: True
+            _zfLivree = _zfD / "livree.mp4"
+            _zfReenc(_zfV2 / "mod_b/brutes/brute_D.mp4", _zfLivree)
+            _zfRid = _zfFA.noter_livraison("mod_b", _zfLivree, {
+                "action": "REEL CAPTION", "brute": _zfV2 / "mod_b/brutes/brute_D.mp4",
+                "caption": {"id": "cX", "text": "Caption incrustee", "ident": "mod_b",
+                            "mode": "incrustee"}}, va="42", va_nom="Jorel")
+            _zfFA.fil_actif = _zfSav["FA"][1]
+            _zfBe = _zfFA.empreinter_attente()
+            check("favoris auto : l'empreinte de la livraison est calculee a part, la copie effacee",
+                  _zfBe["faites"] == 1 and not list(_zfFA.dossier_attente().iterdir())
+                  and isinstance(_zfFA.lire_livraisons()[0].get(_zfRid, {}).get("empreinte"), dict), _zfBe)
+            _zfReenc(_zfLivree, _zfBG.chemin_video("ZfBgRecette"))
+            _zfFA._CACHE_MOIS.clear()
+            # Tesseract lit la caption de la recette sur le banger : c'est
+            # depuis le 27/09 la condition pour qu'elle soit sure (la video
+            # d'essai ne porte pas de texte, la lecture est donc simulee).
+            _zfOcrCap = (lambda v, t: {"texte": "Caption incrustee" if "ZfBgRecette" in str(v) else "",
+                                       "erreur": ""})
+            _zfAs3 = _zfFA.analyser_banger("ZfBgRecette", index_brutes=_zfIb, index_templates=_zfIt,
+                                           corpus=[], registre=_zfFA._vide(), ocr=_zfOcrCap)
+            check("favoris auto : le banger ne d'une livraison retrouve SA recette (sure)",
+                  _zfAs3.get("methode") == "recette"
+                  and (_zfAs3.get("livraison") or {}).get("decision") == "sur"
+                  and _zfAs3["livraison"].get("id") == _zfRid, _zfAs3.get("livraison"))
+            check("favoris auto : ... brute ET caption incrustee proposees sures depuis la recette",
+                  sorted((p["type"], p["ident"], p["decision"]) for p in _zfAs3["propositions"])
+                  == [("brute", "mod_b", "sur"), ("caption", "mod_b", "sur")]
+                  and all("livraison" in p["raison"] and "Jorel" in p["raison"]
+                          for p in _zfAs3["propositions"]), _zfAs3["propositions"])
+            print(f"     (bout a bout ffmpeg : {_zfT.time() - _zfT0:.1f} s)")
+        else:
+            check("favoris auto : bout a bout (ffmpeg absent -> non verifie ici)", True)
+    finally:
+        (_zfFA.DATA, _zfFA.fil_actif, _zfFA.ATTENTE_MAX_FICHIERS, _zfFA._lancer_analyse, _zfApl) = _zfSav["FA"]
+        _zfFA.APPLICATEURS.clear()
+        _zfFA.APPLICATEURS.update(_zfApl)
+        _zfFA._CACHE_MOIS.clear()
+        _zfFA._CACHE_EMP.clear()
+        (_zfW.FAV_BRUTES_FILE, _zfW.CAPTIONS_FILE, _zfW.IDENTITIES_DIR, _zfW._brute_banger_discord,
+         _zfW._send_video_to_banger_channel, _zfW.CAPTIONS_MAX, _zfW._load_web_users) = _zfSav["W"]
+        _zfW._oublier_identites()
+        _zfW._invalidate_json_cache(_zfW.FAV_BRUTES_FILE)
+        _zfW._invalidate_json_cache(_zfW.CAPTIONS_FILE)
+        _zfBG.FICHIER, _zfBG.DOSSIER, _zfBG.DETAILS_DIR = _zfSav["BG"]
+        _zfAB.FICHIER, _zfAB.telecharger = _zfSav["AB"][0], _zfSav["AB"][1]
+        _zfAB.APRES_ARCHIVAGE[:] = _zfSav["AB"][2]
+        _zfTI.reserves_liees = _zfSav["TI"]
+        _zfAG.transcrire_tesseract, _zfAG.lire_capture, _zfAG.gemini_texte = _zfSav["AG"]
+        _zfU.DATA_DIR, _zfU.IDENTITIES_DIR = _zfSav["U"]
+        if _zfSav["ENV"] is not None:
+            os.environ["VA_MACHINE_PROD"] = _zfSav["ENV"]
+        _zfVider()
+        _zfSh.rmtree(_zfD, ignore_errors=True)
+except Exception as _zfE:
+    import traceback as _zfTb
+    check("favoris auto : testable", False, repr(_zfE)[:200] + " " + _zfTb.format_exc()[-700:])
+
+print()
+print("=" * 70)
+print("FAVORIS AUTOMATIQUES : la decision (brute eteinte, montage, identite devinee)")
+print("=" * 70)
+# Complement du bloc precedent, sur la DECISION elle-meme (_depuis_recette,
+# _depuis_empreintes), sans ffmpeg ni Tesseract : la recherche a l'image et
+# la lecture du texte sont remplacees par leur resultat, pour isoler ce qui
+# se decide ensuite. Chaque cas vient d'une erreur vue sur les vrais bangers
+# du VPS le 27/09/2026, et aucune ne se voyait a l'ecran :
+#   - une brute ETEINTE a la main qui avait fait un banger (Ddi--TfI1nl,
+#     46 k vues) ne donnait qu'une note, avec la cause « caption deja
+#     incrustee » ecrite en dur : fausse, et rien a valider ni a refuser ;
+#   - sur un montage, le texte du brouillon du TEMPLATE partait en caption :
+#     le nom du brouillon (sans extension) etait compare a « x.mp4 » ;
+#   - une identite devinee d'apres le compte Instagram ne doit que PROPOSER,
+#     et un template copie ailleurs ne se choisit pas a la place du
+#     proprietaire.
+try:
+    import json as _zgJs, shutil as _zgSh, tempfile as _zgTf, time as _zgT
+    import favoris_auto as _zgFA
+    import web_upload as _zgW
+    import brutes_off as _zgOff
+    import bangers as _zgBG
+    import cogs.user as _zgU
+    _zgD = pathlib.Path(_zgTf.mkdtemp(prefix="favoris_decision_"))
+    _zgDA = _zgD / "data"
+    _zgID = _zgDA / "identities"
+    _zgSav = {
+        "FA": (_zgFA.DATA, _zgFA._reserves, _zgFA.chercher_template, _zgFA.chercher_brute,
+               dict(_zgFA.APPLICATEURS)),
+        "W": (_zgW.FAV_BRUTES_FILE, _zgW.CAPTIONS_FILE, _zgW.IDENTITIES_DIR,
+              _zgW._brute_banger_discord, _zgW._send_video_to_banger_channel),
+        "BG": (_zgBG.FICHIER, _zgBG.DOSSIER, _zgBG.DETAILS_DIR),
+        "U": (_zgU.DATA_DIR, _zgU.IDENTITIES_DIR),
+    }
+    _zgDiscord = []
+    try:
+        _zgFA.DATA = _zgDA
+        _zgFA.APPLICATEURS.clear()
+        _zgW.FAV_BRUTES_FILE = _zgDA / "fav_brutes.json"
+        _zgW.CAPTIONS_FILE = _zgDA / "captions.json"
+        _zgW.IDENTITIES_DIR = _zgID
+        _zgW._oublier_identites()
+        _zgW._brute_banger_discord = lambda *a, **k: _zgDiscord.append(a) or "ENVOYE"
+        _zgW._send_video_to_banger_channel = (
+            lambda *a, **k: _zgDiscord.append(a) or (True, "x", {}))
+        # L'ecran compte les bangers a rattraper : qu'il lise le bac a sable.
+        _zgBG.FICHIER = _zgDA / "bangers.json"
+        _zgBG.DOSSIER = _zgDA / "bangers"
+        _zgBG.DETAILS_DIR = _zgDA / "bangers_details"
+        _zgU.DATA_DIR = _zgDA
+        _zgU.IDENTITIES_DIR = _zgID
+        # zg_res est la reserve liee a zg_mod (le lien lui-meme est teste
+        # ailleurs ; ici on veut la recopie).
+        _zgFA._reserves = lambda i: ["zg_res"] if i == "zg_mod" else []
+        for _zgRel in ("zg_mod/brutes/b_on.mp4", "zg_mod/brutes/b_main.mp4",
+                       "zg_mod/brutes/b_vide.mp4", "zg_mod/brutes/b_texte.mp4",
+                       "zg_mod/templates/tpl_M.mp4", "zg_res/templates/tpl_M.mp4",
+                       "zg_autre/templates/tpl_X.mp4"):
+            (_zgID / _zgRel).parent.mkdir(parents=True, exist_ok=True)
+            (_zgID / _zgRel).write_bytes(b"\x00" * 2048)
+        (_zgID / "zg_res" / "brutes").mkdir(parents=True, exist_ok=True)
+        # Les trois facons d'etre eteinte : a la main (cause + date), par
+        # l'examen de texte (brutes_off.CAUSE_TEXTE), et un voisin sans cause.
+        safe_json.write(_zgID / "zg_mod/brutes/b_main.off.json",
+                        {"cause": "à la main", "le": "26/09/2026 22:29"})
+        _zgOff.desactiver(_zgID / "zg_mod/brutes/b_texte.mp4", _zgOff.CAUSE_TEXTE)
+        (_zgID / "zg_mod/brutes/b_vide.off.json").write_text("{}", encoding="utf-8")
+        _zgTXT_TPL = "Sending him videos of my cat"
+        safe_json.write(_zgID / "zg_mod/templates/tpl_M.montage.json",
+                        {"cut_at": 3.0, "segments": _zgJs.dumps(
+                            [{"text": _zgTXT_TPL, "x": 0.5, "y": 0.5, "start": 0, "end": 3}])})
+        _zgCAP = "Seven texts that make her want you badly"
+        _zgCAP_LIB = _zgCAP + " 😱"
+        safe_json.write(_zgDA / "captions.json", {"zg_mod": {"items": [
+            {"id": "c_lib", "text": _zgCAP_LIB, "enabled": True}]}})
+        _zgW._brancher_favoris_auto()
+        _zgOcrAppels = []
+
+        def _zgOcr(texte_banger):
+            # Le banger porte `texte_banger` ; les brutes, rien -- sinon le
+            # texte passerait pour « deja present dans la brute ».
+            def _f(video, t):
+                _zgOcrAppels.append(str(video))
+                return {"texte": texte_banger if str(video).endswith("banger.mp4") else "",
+                        "erreur": ""}
+            return _f
+        _zgVid = _zgD / "banger.mp4"          # jamais lu : l'OCR est remplace
+
+        def _zgA(sc, compte="compte_zg"):
+            return {"sc": sc, "vues": 46000, "compte": compte,
+                    "livraison": {"med": 4, "marge": 60}, "notes": [], "propositions": []}
+
+        def _zgProps(a):
+            return sorted((p["type"], p["cle"], p["decision"]) for p in a["propositions"])
+
+        def _zgFav():
+            if not _zgW.FAV_BRUTES_FILE.exists():
+                return set()
+            return set(_zgJs.loads(_zgW.FAV_BRUTES_FILE.read_text(encoding="utf-8")))
+
+        # =================================================================
+        # 1. LA RECETTE D'UNE BRUTE ETEINTE : a trancher, avec sa vraie cause
+        # =================================================================
+        _zgLiv = {"id": "L1", "le": int(_zgT.time()) - 3600, "va_nom": "Jorel",
+                  "brute": "zg_mod|brutes|b_main.mp4",
+                  "caption": {"texte": _zgCAP, "mode": "incrustee", "ident": "zg_mod"}}
+        _zgA1 = _zgA("ZgEteinte")
+        # Tesseract LIT la caption incrustee sur le banger : depuis le
+        # 27/09, une caption de la recette n'est sure qu'a cette condition
+        # (sans lecture : « À confirmer », verifie dans le bloc « correctifs »).
+        _zgFA._depuis_recette(_zgA1, _zgLiv, _zgVid, [], _zgOcr(_zgCAP))
+        _zgPb = [p for p in _zgA1["propositions"] if p["type"] == "brute"]
+        check("favoris decision : brute eteinte a la main -> « À confirmer », jamais etoilee d'office",
+              len(_zgPb) == 1 and _zgPb[0]["decision"] == "a_confirmer"
+              and _zgPb[0]["cle"] == "zg_mod|brutes|b_main.mp4"
+              and (_zgPb[0].get("score") or {}).get("desactivee") is True, _zgA1["propositions"])
+        check("favoris decision : ... avec SA cause et SA date (lues dans le .off.json), "
+              "pas « caption deja incrustee » d'office",
+              bool(_zgPb) and "désactivée (à la main, le 26/09/2026 22:29)" in _zgPb[0]["raison"]
+              and _zgOff.CAUSE_TEXTE not in _zgPb[0]["raison"], _zgPb[:1])
+        check("favoris decision : ... et la note du banger le dit",
+              any("b_main.mp4" in n and "pas étoilée d'office" in n for n in _zgA1["notes"]),
+              _zgA1["notes"])
+        check("favoris decision : la caption incrustee de la recette reste SURE (identite + reserve liee)",
+              [(p["ident"], p["decision"]) for p in _zgA1["propositions"] if p["type"] == "caption"]
+              == [("zg_mod", "sur"), ("zg_res", "sur")], _zgA1["propositions"])
+        _zgCauses = {}
+        for _zgNom in ("b_texte", "b_vide"):
+            _zgAx = _zgA("Zg" + _zgNom)
+            _zgFA._depuis_recette(_zgAx, dict(_zgLiv, brute=f"zg_mod|brutes|{_zgNom}.mp4"),
+                                  _zgVid, [], _zgOcr(""))
+            _zgCauses[_zgNom] = next((p["raison"] for p in _zgAx["propositions"]
+                                      if p["type"] == "brute" and p["decision"] == "a_confirmer"), "")
+        check("favoris decision : eteinte par l'examen de texte -> cette cause-la, et sa date",
+              ("désactivée (" + _zgOff.CAUSE_TEXTE + ", le ") in _zgCauses["b_texte"], _zgCauses)
+        check("favoris decision : voisin .off.json sans cause -> « cause non notée », rien d'invente",
+              "désactivée (cause non notée)" in _zgCauses["b_vide"], _zgCauses)
+
+        # --- appliquee, puis validee a la main ------------------------------
+        _zgW._poser_fav_brute("zg_mod|brutes|b_on.mp4", True)
+        _zgB = _zgFA.appliquer(_zgA1)
+        _zgAtt = [e for e in _zgFA.charger()["a_confirmer"] if e["cle"] == "zg_mod|brutes|b_main.mp4"]
+        check("favoris decision : appliquee, la brute eteinte ATTEND (raison et score gardes), sans etoile",
+              _zgB["posees"] == 2 and _zgB["a_confirmer"] == 1 and len(_zgAtt) == 1
+              and _zgAtt[0]["etat"] == "attente" and "à la main" in _zgAtt[0]["raison"]
+              and (_zgAtt[0].get("score") or {}).get("desactivee") is True
+              and "zg_mod|brutes|b_main.mp4" not in _zgFav(), (_zgB, _zgAtt))
+        _zgHtml = _zgW._favoris_auto_html(avec_script=False)
+        check("favoris decision : l'ecran « À confirmer » montre la brute, sa cause et sa date",
+              "b_main.mp4" in _zgHtml and "désactivée (à la main, le 26/09/2026 22:29)" in _zgHtml)
+        _zgRv = _zgFA.trancher(_zgAtt[0]["id"], True, par="boss") if _zgAtt else {}
+        check("favoris decision : valider la brute eteinte pose l'etoile",
+              _zgRv.get("ok") and _zgRv.get("posees") == 1
+              and "zg_mod|brutes|b_main.mp4" in _zgFav(), _zgRv)
+        check("favoris decision : ... SANS la rallumer (.off.json intact) : le bot ne la sert pas "
+              "tant qu'elle est eteinte, l'autre etoilee part",
+              (_zgID / "zg_mod/brutes/b_main.off.json").is_file()
+              and [p.name for p in _zgU.fav_brutes_for("zg_mod", limit=0)] == ["b_on.mp4"],
+              [p.name for p in _zgU.fav_brutes_for("zg_mod", limit=0)])
+        check("favoris decision : ... et rien n'est parti sur Discord", not _zgDiscord, _zgDiscord[:2])
+
+        # =================================================================
+        # 2. LA RECETTE D'UN MONTAGE
+        # =================================================================
+        _zgA4 = _zgA("ZgMontage")
+        del _zgOcrAppels[:]
+        # La recette est une hypothese, confirmee a l'image ingredient par
+        # ingredient (verifier_brute, verifier_template -- testes pour de vrai
+        # dans le bloc « correctifs ») : ici, leur verdict est donne, pour
+        # isoler ce qui se decide ensuite.
+        _zgVerifs = (_zgFA.verifier_brute, _zgFA.verifier_template)
+        _zgFA.verifier_brute = lambda bf, cle, tpl, idx=None, lire=None: {
+            "decision": "sur", "cle": cle, "med": 6, "n": 20, "par": "image"}
+        _zgFA.verifier_template = lambda bf, cle, idx=None, video=None, ocr=None: {
+            "decision": "sur", "cle": cle, "med": 8, "n": 30, "cut": 3.0, "gap": 0.0, "par": "image"}
+        try:
+            _zgFA._depuis_recette(_zgA4, {"id": "L4", "le": 1, "brute": "zg_mod|brutes|b_on.mp4",
+                                          "template": "zg_res|templates|tpl_M.mp4", "model": "zg_mod"},
+                                  _zgVid, [], _zgOcr(_zgTXT_TPL))
+        finally:
+            _zgFA.verifier_brute, _zgFA.verifier_template = _zgVerifs
+        check("favoris decision : recette d'un montage (✨ General) -> la brute, et le template de la "
+              "model ET la copie qui a servi, surs",
+              _zgProps(_zgA4) == [("brute", "zg_mod|brutes|b_on.mp4", "sur"),
+                                  ("template", "zg_mod|templates|tpl_M.mp4", "sur"),
+                                  ("template", "zg_res|templates|tpl_M.mp4", "sur")]
+              and _zgA4.get("nature") == "montage", (_zgA4.get("nature"), _zgProps(_zgA4)))
+        check("favoris decision : ... le texte d'un montage est celui de son template : aucune "
+              "lecture, aucune caption",
+              not _zgOcrAppels and not [p for p in _zgA4["propositions"] if p["type"] == "caption"],
+              _zgOcrAppels)
+        _zgA5 = _zgA("ZgRepli")
+        _zgFA._depuis_recette(_zgA5, {"id": "L5", "le": 1, "template": "zg_mod|templates|tpl_M.mp4",
+                                      "repli": True}, _zgVid, [], _zgOcr(""))
+        check("favoris decision : montage rate (template entier, SANS brute) -> template « À confirmer », "
+              "rien de sur",
+              _zgProps(_zgA5) == [("template", "zg_mod|templates|tpl_M.mp4", "a_confirmer")]
+              and "SANS brute" in _zgA5["propositions"][0]["raison"], _zgA5["propositions"])
+
+        # =================================================================
+        # 3. A L'IMAGE (sans recette) : la decision apres la recherche
+        # =================================================================
+        _zgTplSur = {"decision": "sur", "med": 10, "gap": 0.0, "n": 40, "cut": 3.0,
+                     "copies": ["zg_mod/templates/tpl_M.mp4", "zg_res/templates/tpl_M.mp4"]}
+
+        def _zgBrSure(rel):
+            return {"decision": "sur", "rel": rel, "med": 12, "marge": 40, "decalage": 0.0,
+                    "n": 20, "notes": []}
+        _zgFA.chercher_template = lambda bf, idx: dict(_zgTplSur)
+        _zgFA.chercher_brute = lambda bf, tpl, idx, lire=None: _zgBrSure("zg_mod/brutes/b_on.mp4")
+        _zgCorpus = _zgFA.corpus_textes()
+        check("favoris decision : le corpus porte le texte du brouillon du template (nom SANS extension)",
+              any(c["source"] == "template" and c["ref"] == "zg_mod/templates/tpl_M"
+                  for c in _zgCorpus), [(c["source"], c["ref"]) for c in _zgCorpus])
+        _zgA6 = _zgA("ZgTplTexte")
+        _zgFA._depuis_empreintes(_zgA6, [], _zgVid, {}, {}, _zgCorpus, {}, _zgOcr(_zgTXT_TPL), None)
+        check("favoris decision : montage reconnu -> le texte de SON brouillon n'est PAS une caption",
+              _zgA6.get("nature") == "montage"
+              and not [p for p in _zgA6["propositions"] if p["type"] == "caption"]
+              and any("brouillon du template" in n for n in _zgA6["notes"]),
+              (_zgA6["propositions"], _zgA6["notes"]))
+        check("favoris decision : ... la brute et le template (identite + reserve) restent surs",
+              _zgProps(_zgA6) == [("brute", "zg_mod|brutes|b_on.mp4", "sur"),
+                                  ("template", "zg_mod|templates|tpl_M.mp4", "sur"),
+                                  ("template", "zg_res|templates|tpl_M.mp4", "sur")], _zgProps(_zgA6))
+        _zgA7 = _zgA("ZgTplCaption")
+        _zgFA._depuis_empreintes(_zgA7, [], _zgVid, {}, {}, _zgCorpus, {}, _zgOcr(_zgCAP), None)
+        check("favoris decision : sur un montage, un texte de la BIBLIOTHEQUE reste une caption "
+              "(sure, recopiee dans la reserve, emoji de la bibliotheque compris)",
+              [(p["ident"], p["decision"], p.get("texte")) for p in _zgA7["propositions"]
+               if p["type"] == "caption"] == [("zg_mod", "sur", _zgCAP_LIB), ("zg_res", "sur", _zgCAP_LIB)],
+              _zgA7["propositions"])
+
+        _zgFA.chercher_template = lambda bf, idx: {"decision": "rien", "candidats": []}
+        _zgFA.chercher_brute = lambda bf, tpl, idx, lire=None: _zgBrSure("zg_mod/brutes/b_main.mp4")
+        _zgA8 = _zgA("ZgEteinteImage")
+        _zgFA._depuis_empreintes(_zgA8, [], _zgVid, {}, {}, _zgCorpus, {}, _zgOcr(""), None)
+        check("favoris decision : a l'image aussi, une brute eteinte reconnue SURE -> « À confirmer » "
+              "avec sa cause",
+              [(p["type"], p["decision"]) for p in _zgA8["propositions"]] == [("brute", "a_confirmer")]
+              and "désactivée (à la main, le 26/09/2026 22:29)" in _zgA8["propositions"][0]["raison"]
+              and _zgA8.get("nature") == "brute seule",
+              (_zgA8.get("nature"), _zgA8["propositions"]))
+
+        _zgFA.chercher_template = lambda bf, idx: dict(_zgTplSur)
+        _zgFA.chercher_brute = lambda bf, tpl, idx, lire=None: {"decision": "rien",
+                                                                 "raison": "aucune candidate"}
+        _zgReg = {"bangers": {"ZgAncien": {"compte": "compte_zg", "identite": "zg_mod",
+                                           "identite_sure": True}}}
+        _zgA9 = _zgA("ZgCompte")
+        _zgFA._depuis_empreintes(_zgA9, [], _zgVid, {}, {}, _zgCorpus, _zgReg, _zgOcr(_zgCAP), None)
+        check("favoris decision : identite deduite du compte -> PROPOSEE, jamais etoilee seule",
+              _zgA9.get("identite") == "zg_mod" and _zgA9.get("identite_sure") is False
+              and _zgA9["propositions"]
+              and all(p["decision"] == "a_confirmer" for p in _zgA9["propositions"])
+              and any("1 autre(s) banger(s) sûr(s) de @compte_zg" in n for n in _zgA9["notes"]),
+              (_zgA9["propositions"], _zgA9["notes"]))
+        check("favoris decision : ... le template reconnu attend, avec la raison « identité pas sûre »",
+              any(p["type"] == "template" and "identité pas sûre" in p["raison"]
+                  for p in _zgA9["propositions"]), _zgA9["propositions"])
+        check("favoris decision : ... la caption n'est proposee qu'une fois (la valider la recopiera)",
+              [p["ident"] for p in _zgA9["propositions"] if p["type"] == "caption"] == ["zg_mod"],
+              _zgA9["propositions"])
+        check("favoris decision : ... et la brute introuvable est DITE",
+              any("brute introuvable" in n for n in _zgA9["notes"]), _zgA9["notes"])
+
+        _zgFA.chercher_template = lambda bf, idx: dict(_zgTplSur, copies=["zg_autre/templates/tpl_X.mp4"])
+        _zgFA.chercher_brute = lambda bf, tpl, idx, lire=None: _zgBrSure("zg_mod/brutes/b_on.mp4")
+        _zgA10 = _zgA("ZgAilleurs")
+        _zgFA._depuis_empreintes(_zgA10, [], _zgVid, {}, {}, _zgCorpus, {}, _zgOcr(""), None)
+        _zgPt = [p for p in _zgA10["propositions"] if p["type"] == "template"]
+        check("favoris decision : template absent de l'identite -> la copie n'est pas choisie a sa "
+              "place (« À confirmer », quelle copie)",
+              [(p["cle"], p["decision"]) for p in _zgPt] == [("zg_autre|templates|tpl_X.mp4", "a_confirmer")]
+              and "quelle copie" in _zgPt[0]["raison"]
+              and ("brute", "zg_mod|brutes|b_on.mp4", "sur") in _zgProps(_zgA10), _zgA10["propositions"])
+
+        _zgFA.chercher_template = lambda bf, idx: {"decision": "rien", "candidats": []}
+        _zgFA.chercher_brute = lambda bf, tpl, idx, lire=None: {"decision": "rien",
+                                                                 "raison": "aucune candidate"}
+        _zgA11 = _zgA("ZgRien", compte="compte_inconnu")
+        _zgFA._depuis_empreintes(_zgA11, [], _zgVid, {}, {}, _zgCorpus, {}, _zgOcr(""), None)
+        check("favoris decision : rien reconnu -> « indéterminé », AUCUNE proposition, et la raison notee",
+              _zgA11.get("nature") == "indéterminé" and not _zgA11["propositions"]
+              and any("brute introuvable" in n for n in _zgA11["notes"]),
+              (_zgA11.get("nature"), _zgA11["notes"]))
+    finally:
+        (_zgFA.DATA, _zgFA._reserves, _zgFA.chercher_template, _zgFA.chercher_brute,
+         _zgApl) = _zgSav["FA"]
+        _zgFA.APPLICATEURS.clear()
+        _zgFA.APPLICATEURS.update(_zgApl)
+        (_zgW.FAV_BRUTES_FILE, _zgW.CAPTIONS_FILE, _zgW.IDENTITIES_DIR,
+         _zgW._brute_banger_discord, _zgW._send_video_to_banger_channel) = _zgSav["W"]
+        _zgW._oublier_identites()
+        _zgW._invalidate_json_cache(_zgW.FAV_BRUTES_FILE)
+        _zgW._invalidate_json_cache(_zgW.CAPTIONS_FILE)
+        _zgBG.FICHIER, _zgBG.DOSSIER, _zgBG.DETAILS_DIR = _zgSav["BG"]
+        _zgU.DATA_DIR, _zgU.IDENTITIES_DIR = _zgSav["U"]
+        _zgSh.rmtree(_zgD, ignore_errors=True)
+except Exception as _zgE:
+    import traceback as _zgTb
+    check("favoris decision : testable", False, repr(_zgE)[:200] + " " + _zgTb.format_exc()[-700:])
+
+print()
+print("=" * 70)
+print("FAVORIS AUTOMATIQUES : correctifs de la relecture (recette, refus, verrou, reprise)")
+print("=" * 70)
+# 27/09/2026, relecture de favoris_auto.py. Chaque cas a ete reproduit AVANT
+# correction avec les vraies fonctions du site, et aucun ne se voyait :
+#   - l'empreinte d'une livraison partait dans le mois de la DATE DU FICHIER
+#     (lien dur : celle de la brute du vault) -- relue sans empreinte, la
+#     livraison n'etait jamais retrouvee ;
+#   - une recette « sure » etoilait brute, template et caption incrustee sans
+#     les verifier : le banger B + Y de VA1 etoilait la caption X de VA2 ;
+#   - une caption refusee revenait par une VARIANTE du texte ;
+#   - une etoile effacee par un autre ecrivain de fav_brutes.json (sans le
+#     verrou), ou lue dans un registre illisible, devenait un refus definitif ;
+#   - une pose en echec marquait le banger « fait » : jamais repris ;
+#   - « Retirer » pouvait supprimer la caption saisie par le proprietaire ;
+#   - data/livraisons/ grossissait sans limite.
+try:
+    import json as _fxJs, shutil as _fxSh, subprocess as _fxSp, tempfile as _fxTf, time as _fxT
+    import favoris_auto as _fxFA
+    import web_upload as _fxW
+    import bangers as _fxBG
+    _fxD = pathlib.Path(_fxTf.mkdtemp(prefix="favoris_correctifs_"))
+    _fxDA = _fxD / "data"
+    _fxID = _fxDA / "identities"
+    _fxSav = {
+        "FA": (_fxFA.DATA, _fxFA._reserves, _fxFA.fil_actif, dict(_fxFA.APPLICATEURS)),
+        "W": (_fxW.FAV_BRUTES_FILE, _fxW.CAPTIONS_FILE, _fxW.IDENTITIES_DIR,
+              _fxW._brute_banger_discord, _fxW._send_video_to_banger_channel,
+              _fxW._ajouter_marques, _fxW._marques_etat, _fxW.identity_market),
+        "BG": (_fxBG.FICHIER, _fxBG.DOSSIER, _fxBG.DETAILS_DIR),
+    }
+    _fxDiscord = []
+    try:
+        _fxFA.DATA = _fxDA
+        _fxFA._CACHE_MOIS.clear()
+        _fxFA._CACHE_EMP.clear()
+        _fxFA.APPLICATEURS.clear()
+        _fxW.FAV_BRUTES_FILE = _fxDA / "fav_brutes.json"
+        _fxW.CAPTIONS_FILE = _fxDA / "captions.json"
+        _fxW.IDENTITIES_DIR = _fxID
+        _fxW._brute_banger_discord = lambda *a, **k: _fxDiscord.append(a) or "ENVOYE"
+        _fxW._send_video_to_banger_channel = (
+            lambda *a, **k: _fxDiscord.append(a) or (True, "x", {}))
+        _fxBG.FICHIER = _fxDA / "bangers.json"
+        _fxBG.DOSSIER = _fxDA / "bangers"
+        _fxBG.DETAILS_DIR = _fxDA / "bangers_details"
+        _fxBG.DOSSIER.mkdir(parents=True, exist_ok=True)
+        # fx_res est la reserve liee a fx_mod (le lien lui-meme est teste ailleurs).
+        _fxFA._reserves = lambda i: ["fx_res"] if i == "fx_mod" else []
+        for _fxRel in ("fx_mod/brutes", "fx_mod/templates", "fx_res/brutes", "fx_res/templates",
+                       "fx_src/templates", "fx_autre/templates"):
+            (_fxID / _fxRel).mkdir(parents=True, exist_ok=True)
+        _fxW._oublier_identites()
+        _fxW._brancher_favoris_auto()
+        _fxNow = _fxT.time()
+        _fxMoisC = _fxT.strftime("%Y-%m", _fxT.localtime(_fxNow))
+
+        def _fxFav():
+            if not _fxW.FAV_BRUTES_FILE.exists():
+                return set()
+            return set(_fxJs.loads(_fxW.FAV_BRUTES_FILE.read_text(encoding="utf-8")))
+
+        def _fxLib(ident):
+            if not _fxW.CAPTIONS_FILE.exists():
+                return []
+            return [(c.get("id"), c.get("text"), c.get("fav")) for c in
+                    (_fxJs.loads(_fxW.CAPTIONS_FILE.read_text(encoding="utf-8")).get(ident) or {})
+                    .get("items", [])]
+
+        def _fxProps(a):
+            return sorted((p["type"], p["cle"], p["decision"]) for p in a["propositions"])
+
+        def _fxBrute(sc, cle, dec="sur"):
+            return {"sc": sc, "vues": 20000, "identite": cle.split("|")[0], "identite_sure": True,
+                    "methode": "empreinte", "notes": [], "propositions": [
+                        {"type": "brute", "cle": cle, "ident": cle.split("|")[0], "decision": dec,
+                         "raison": "brute reconnue", "score": {}}]}
+
+        def _fxCaption(sc, texte, ident="fx_mod", dec="sur"):
+            return {"sc": sc, "vues": 20000, "identite": ident, "identite_sure": True,
+                    "methode": "empreinte", "notes": [], "propositions": [
+                        {"type": "caption", "cle": f"{ident}|captions|{_fxFA._cle_texte(texte)[:120]}",
+                         "ident": ident, "decision": dec, "raison": "texte lu", "score": {},
+                         "texte": texte}]}
+
+        def _fxRemise():
+            _fxR = _fxFA.charger()
+            _fxR["etoiles"], _fxR["refus"], _fxR["a_confirmer"] = [], {}, []
+            _fxFA._ecrire(_fxR)
+
+        _fxFF = _fxSh.which("ffmpeg")
+
+        def _fxGen(src, out, duree):
+            out.parent.mkdir(parents=True, exist_ok=True)
+            _fxSp.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", src, "-t", str(duree),
+                       "-vf", "format=yuv420p", "-r", "30", "-c:v", "libx264", "-preset",
+                       "veryfast", "-crf", "20", str(out)], capture_output=True, timeout=120)
+
+        def _fxVie(graine):
+            # « life » : un motif qui bouge sans se repeter, fixe par sa graine.
+            return (f"life=s=90x160:seed={graine}:ratio=0.35:mold=4:rate=30:"
+                    f"life_color=#f0f0f0:death_color=#101010,scale=360:640:flags=neighbor")
+
+        def _fxReenc(src, out):
+            # « Instagram » : autre taille, autre compression, sans le son.
+            out.parent.mkdir(parents=True, exist_ok=True)
+            _fxSp.run(["ffmpeg", "-v", "error", "-y", "-i", str(src), "-t", "10", "-vf",
+                       "scale=540:960", "-c:v", "libx264", "-preset", "veryfast", "-crf", "30",
+                       "-an", str(out)], capture_output=True, timeout=120)
+
+        def _fxColle(a, a_fin, b, b_debut, b_fin, out):
+            # Un MONTAGE : [a de 0 a a_fin] puis [b de b_debut a b_fin].
+            out.parent.mkdir(parents=True, exist_ok=True)
+            _fxSp.run(["ffmpeg", "-v", "error", "-y", "-i", str(a), "-i", str(b), "-filter_complex",
+                       f"[0:v]trim=0:{a_fin},setpts=PTS-STARTPTS[x];"
+                       f"[1:v]trim={b_debut}:{b_fin},setpts=PTS-STARTPTS[y];"
+                       "[x][y]concat=n=2:v=1:a=0,format=yuv420p[v]", "-map", "[v]", "-r", "30",
+                       "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", str(out)],
+                      capture_output=True, timeout=120)
+
+        # =================================================================
+        # 1. L'EMPREINTE D'UNE LIVRAISON VA DANS LE MOIS DE LA LIVRAISON
+        # =================================================================
+        if _fxFF:
+            _fxB0 = _fxID / "fx_mod/brutes/brute_vieille.mp4"
+            _fxGen(_fxVie(21), _fxB0, 10)
+            _fxVieux = _fxNow - 120 * 86400          # importee il y a 4 mois
+            os.utime(_fxB0, (_fxVieux, _fxVieux))
+            _fxFA.fil_actif = lambda: True
+            _fxRid = _fxFA.noter_livraison("fx_mod", _fxB0, {"action": "brute choisie",
+                                                             "brute": _fxB0}, va="7", va_nom="VA1")
+            _fxFA.fil_actif = _fxSav["FA"][2]
+            _fxAtt = sorted(p.name for p in _fxFA.dossier_attente().iterdir())
+            check("favoris correctifs : l'id d'une livraison porte SON mois, et la copie en attente "
+                  "le porte dans son nom",
+                  _fxRid.startswith(_fxT.strftime("%Y%m", _fxT.localtime(_fxNow)))
+                  and _fxFA._mois_du_rid(_fxRid) == _fxMoisC and _fxAtt == [_fxRid + ".mp4"],
+                  (_fxRid, _fxAtt))
+            _fxBe = _fxFA.empreinter_attente()
+            _fxMois = sorted(p.name for p in _fxFA.dossier_livraisons().glob("*.jsonl"))
+            check("favoris correctifs : brute du vault datee de 4 mois livree telle quelle -> "
+                  "l'empreinte va dans le mois de la LIVRAISON (un seul fichier de mois)",
+                  _fxBe["faites"] == 1 and _fxMois == [_fxMoisC + ".jsonl"], (_fxBe, _fxMois))
+            check("favoris correctifs : ... sans toucher a la date de la brute du vault (lien dur, "
+                  "pas d'utime)", abs(_fxB0.stat().st_mtime - _fxVieux) < 1)
+            _fxFA._CACHE_MOIS.clear()
+            _fxFA._CACHE_EMP.clear()
+            _fxReenc(_fxB0, _fxD / "banger_vieille.mp4")
+            _fxBf0 = _fxFA.lire_images(_fxD / "banger_vieille.mp4", _fxFA.FPS_BANGER,
+                                       duree=_fxFA.SECONDES_BANGER)[0]
+            _fxTl = _fxFA.trouver_livraison(_fxBf0, int(_fxNow))
+            check("favoris correctifs : ... et trouver_livraison la RETROUVE, sure, avec son empreinte",
+                  _fxTl["decision"] == "sur" and (_fxTl.get("livraison") or {}).get("id") == _fxRid
+                  and _fxTl.get("sans_empreinte") == 0,
+                  {k: v for k, v in _fxTl.items() if k != "livraison"})
+        else:
+            check("favoris correctifs : mois de la livraison (ffmpeg absent -> non verifie ici)", True)
+
+        # Lignes d'AVANT le correctif (marqueur « attente » sous « empreinte »,
+        # empreinte rangee dans un mois ancien) : un bac a sable a part.
+        _fxFA.DATA = _fxD / "data_ancien"
+        _fxFA._CACHE_MOIS.clear()
+        _fxDl = _fxFA.dossier_livraisons()
+        _fxEmp = {"fps": 2, "h": "0" * 64 * 3, "inf": "111"}
+        _fxFA._ajouter_ligne(_fxDl / "2000-01.jsonl", {"id": "abcdef0123456789", "empreinte": _fxEmp})
+        _fxFA._ajouter_ligne(_fxDl / "2000-01.jsonl", {"id": "fedcba9876543210", "le": 1})
+        _fxFA._ajouter_ligne(_fxDl / f"{_fxMoisC}.jsonl",
+                             {"id": "abcdef0123456789", "le": int(_fxNow), "empreinte": "attente"})
+        check("favoris correctifs : le marqueur « attente » d'une ligne d'origine n'ecrase JAMAIS "
+              "une empreinte calculee (mois fusionnes dans l'ordre)",
+              _fxFA.lire_livraisons()[0].get("abcdef0123456789", {}).get("empreinte") == _fxEmp,
+              _fxFA.lire_livraisons()[0].get("abcdef0123456789"))
+        check("favoris correctifs : un id d'avant (sans mois) retrouve le fichier de sa ligne d'origine",
+              _fxFA._fichier_de_livraison("fedcba9876543210").name == "2000-01.jsonl"
+              and _fxFA._mois_du_rid("fedcba9876543210") == "",
+              _fxFA._fichier_de_livraison("fedcba9876543210"))
+
+        # =================================================================
+        # 2. LE REGISTRE DES LIVRAISONS NE GROSSIT PLUS SANS LIMITE
+        # =================================================================
+        _fxFA.DATA = _fxD / "data_purge"
+        _fxFA._CACHE_MOIS.clear()
+        _fxDl = _fxFA.dossier_livraisons()
+        (_fxDl / "a_empreinter").mkdir(parents=True)
+        for _fxM, _fxN in (("2026-05", 3), ("2026-07", 2), ("2026-09", 1)):
+            (_fxDl / f"{_fxM}.jsonl").write_text("".join(
+                _fxJs.dumps({"id": f"{_fxM}-{i}", "le": 1}) + "\n" for i in range(_fxN)),
+                encoding="utf-8")
+        (_fxDl / "notes.jsonl").write_text("x\n", encoding="utf-8")
+        _fxP = _fxFA.purger_livraisons(maintenant=_fxT.mktime((2026, 9, 27, 12, 0, 0, 0, 0, -1)))
+        _fxReste = sorted(p.name for p in _fxDl.iterdir())
+        check("favoris correctifs : un mois que plus rien ne lit (fini depuis plus de "
+              "LIVRAISON_JOURS + 31 jours) est supprime, avec son nombre de lignes",
+              [(x.get("mois"), x.get("lignes")) for x in _fxP] == [("2026-05", 3)], _fxP)
+        check("favoris correctifs : ... les mois encore lus, la file d'attente et les autres "
+              "fichiers restent", _fxReste == ["2026-07.jsonl", "2026-09.jsonl", "a_empreinter",
+                                               "notes.jsonl"], _fxReste)
+        (_fxDl / "2001-01.jsonl").write_text('{"id": "x", "le": 1}\n', encoding="utf-8")
+        _fxTour = _fxFA._tour(tous=False)
+        check("favoris correctifs : la purge tourne a chaque passage du fil, et son bilan le dit",
+              "2001-01" in [x.get("mois") for x in _fxTour.get("livraisons_purgees") or []]
+              and not (_fxDl / "2001-01.jsonl").exists(), _fxTour)
+        _fxFA.DATA = _fxDA
+        _fxFA._CACHE_MOIS.clear()
+        _fxFA._CACHE_EMP.clear()
+
+        # =================================================================
+        # 3. LA RECETTE EST UNE HYPOTHESE, CONFIRMEE INGREDIENT PAR INGREDIENT
+        # =================================================================
+        _fxX = "Seven texts that make her want you badly"
+        _fxY = "Be honest how many drinks would it take you"
+        if _fxFF:
+            _fxBa = _fxID / "fx_mod/brutes/B.mp4"
+            _fxBb = _fxID / "fx_mod/brutes/B2.mp4"
+            _fxGen(_fxVie(31), _fxBa, 10)
+            _fxGen(_fxVie(32), _fxBb, 10)
+            # Le template : 2 s d'accroche (remplacees par la brute au montage),
+            # puis sa partie 2. Son brouillon dit ou est la coupe.
+            _fxGen(_fxVie(33), _fxD / "accroche.mp4", 2)
+            _fxGen(_fxVie(34), _fxD / "partie2.mp4", 8)
+            _fxTpl = _fxID / "fx_mod/templates/T.mp4"
+            _fxColle(_fxD / "accroche.mp4", 2, _fxD / "partie2.mp4", 0, 8, _fxTpl)
+            _fxSh.copy2(_fxTpl, _fxID / "fx_res/templates/T.mp4")
+            for _fxI in ("fx_mod", "fx_res"):
+                safe_json.write(_fxID / _fxI / "templates" / "T.montage.json",
+                                {"cut_at": 2.0, "segments": "[]"})
+            _fxIdx = _fxFA.mettre_a_jour_index()
+            _fxIb, _fxIt = _fxFA.charger_index("brutes"), _fxFA.charger_index("templates")
+            # La livraison : B + T. Le banger de l'autre VA : B2 + T, la partie
+            # template (8 s) domine la mediane -> la livraison est « sure ».
+            _fxColle(_fxBa, 2, _fxTpl, 2, 10, _fxD / "livre_BT.mp4")
+            _fxColle(_fxBb, 2, _fxTpl, 2, 10, _fxD / "montage_B2T.mp4")
+            _fxFA.fil_actif = lambda: True
+            _fxRidM = _fxFA.noter_livraison("fx_mod", _fxD / "livre_BT.mp4", {
+                "action": "REEL MONTAGE", "brute": _fxBa, "template": _fxTpl}, va="8", va_nom="VA2")
+            _fxFA.fil_actif = _fxSav["FA"][2]
+            _fxFA.empreinter_attente()
+            _fxFA._CACHE_MOIS.clear()
+            _fxFA._CACHE_EMP.clear()
+            _fxFiches = {}
+            for _fxSc, _fxSrc in (("FxMontB2", _fxD / "montage_B2T.mp4"),
+                                  ("FxMontB", _fxD / "livre_BT.mp4")):
+                _fxReenc(_fxSrc, _fxBG.chemin_video(_fxSc))
+                _fxFiches[_fxSc] = {"compte": "compte_fx", "identite": "jessye", "va": "VA",
+                                    "vues": 30000, "url": f"https://www.instagram.com/reel/{_fxSc}/",
+                                    "poste_le": int(_fxNow) + 60}
+            safe_json.write(_fxBG.FICHIER, {"seuil": 10000, "reels": _fxFiches})
+            _fxOcrVide = lambda v, t: {"texte": "", "erreur": ""}
+            _fxA1 = _fxFA.analyser_banger("FxMontB2", index_brutes=_fxIb, index_templates=_fxIt,
+                                          corpus=[], registre=_fxFA._vide(), ocr=_fxOcrVide)
+            _fxPb = [p for p in _fxA1["propositions"] if p["type"] == "brute"]
+            check("favoris correctifs : montage B2 + T relie a la livraison B + T (la partie template "
+                  "domine la mediane) -- le cas qui etoilait B a tort",
+                  _fxA1.get("methode") == "recette" and _fxA1["livraison"].get("id") == _fxRidM,
+                  _fxA1.get("livraison"))
+            check("favoris correctifs : ... la brute B de la recette n'est PAS etoilee : « À confirmer », "
+                  "et la raison dit que l'image designe B2",
+                  [(p["cle"], p["decision"]) for p in _fxPb] == [("fx_mod|brutes|B.mp4", "a_confirmer")]
+                  and "B2.mp4" in _fxPb[0]["raison"], _fxA1["propositions"])
+            check("favoris correctifs : ... le template, reconnu a l'image, reste sur (model + reserve)",
+                  [(p["cle"], p["decision"]) for p in _fxA1["propositions"] if p["type"] == "template"]
+                  == [("fx_mod|templates|T.mp4", "sur"), ("fx_res|templates|T.mp4", "sur")],
+                  _fxA1["propositions"])
+            _fxA2 = _fxFA.analyser_banger("FxMontB", index_brutes=_fxIb, index_templates=_fxIt,
+                                          corpus=[], registre=_fxFA._vide(), ocr=_fxOcrVide)
+            check("favoris correctifs : le vrai montage B + T garde sa brute ET son template surs",
+                  _fxA2.get("methode") == "recette"
+                  and _fxProps(_fxA2) == [("brute", "fx_mod|brutes|B.mp4", "sur"),
+                                          ("template", "fx_mod|templates|T.mp4", "sur"),
+                                          ("template", "fx_res|templates|T.mp4", "sur")],
+                  _fxProps(_fxA2))
+            # Montage du stock fabrique avant le deploiement : pas de brute notee.
+            _fxBfM = _fxFA.lire_images(_fxBG.chemin_video("FxMontB2"), _fxFA.FPS_BANGER,
+                                       duree=_fxFA.SECONDES_BANGER)[0]
+            _fxA3 = {"sc": "FxStock", "livraison": {"med": 5, "marge": 60}, "notes": [], "propositions": []}
+            _fxFA._depuis_recette(_fxA3, {"id": "Ls", "le": int(_fxNow), "template": "fx_mod|templates|T.mp4",
+                                          "model": "fx_mod"}, _fxBG.chemin_video("FxMontB2"), [],
+                                  _fxOcrVide, bf=_fxBfM, index_brutes=_fxIb, index_templates=_fxIt)
+            check("favoris correctifs : recette de montage SANS brute -> la brute est cherchee a l'image "
+                  "(B2, sure) et l'absence est notee",
+                  ("brute", "fx_mod|brutes|B2.mp4", "sur") in _fxProps(_fxA3)
+                  and any("brute inconnue de la recette" in n for n in _fxA3["notes"]),
+                  (_fxProps(_fxA3), _fxA3["notes"]))
+            # Caption incrustee : VA2 a recu B avec X ; le banger (B, texte Y) y ressemble.
+            _fxReenc(_fxBa, _fxD / "banger_B.mp4")
+            _fxBfB = _fxFA.lire_images(_fxD / "banger_B.mp4", _fxFA.FPS_BANGER,
+                                       duree=_fxFA.SECONDES_BANGER)[0]
+            _fxLivC = {"id": "Lc", "le": int(_fxNow), "va_nom": "VA2", "brute": "fx_mod|brutes|B.mp4",
+                       "caption": {"texte": _fxX, "mode": "incrustee", "ident": "fx_mod"}}
+            _fxA4 = {"sc": "FxCapY", "livraison": {"med": 9, "marge": 60}, "notes": [], "propositions": []}
+            _fxFA._depuis_recette(_fxA4, _fxLivC, _fxD / "banger_B.mp4", [],
+                                  lambda v, t: {"texte": _fxY, "erreur": ""}, bf=_fxBfB,
+                                  index_brutes=_fxIb, index_templates=_fxIt)
+            check("favoris correctifs : caption incrustee de la recette PAS lue sur le banger (Tesseract "
+                  "lit un autre texte) -> « À confirmer », une seule ligne, pas de recopie en reserve",
+                  [(p["type"], p["ident"], p["decision"]) for p in _fxA4["propositions"]]
+                  == [("brute", "fx_mod", "sur"), ("caption", "fx_mod", "a_confirmer")]
+                  and "NON retrouvée" in _fxA4["propositions"][1]["raison"], _fxA4["propositions"])
+            _fxA5 = {"sc": "FxCapX", "livraison": {"med": 9, "marge": 60}, "notes": [], "propositions": []}
+            _fxFA._depuis_recette(_fxA5, _fxLivC, _fxD / "banger_B.mp4", [],
+                                  lambda v, t: {"texte": _fxX.upper(), "erreur": ""}, bf=_fxBfB,
+                                  index_brutes=_fxIb, index_templates=_fxIt)
+            check("favoris correctifs : ... lue sur le banger -> sure, identite ET reserve liee",
+                  sorted((p["type"], p["ident"], p["decision"]) for p in _fxA5["propositions"])
+                  == [("brute", "fx_mod", "sur"), ("caption", "fx_mod", "sur"), ("caption", "fx_res", "sur")],
+                  _fxA5["propositions"])
+            _fxA6 = {"sc": "FxCapNL", "livraison": {"med": 9, "marge": 60}, "notes": [], "propositions": []}
+            _fxFA._depuis_recette(_fxA6, _fxLivC, _fxD / "banger_B.mp4", [],
+                                  lambda v, t: {"texte": "", "erreur": "Tesseract absent (essai)"},
+                                  bf=_fxBfB, index_brutes=_fxIb, index_templates=_fxIt)
+            check("favoris correctifs : ... Tesseract absent -> « À confirmer » (jamais sure sans lecture)",
+                  [(p["type"], p["decision"]) for p in _fxA6["propositions"] if p["type"] == "caption"]
+                  == [("caption", "a_confirmer")], _fxA6["propositions"])
+            # Template sans partie visible ni texte : rien pour le verifier.
+            (_fxID / "fx_mod/templates/Tvide.mp4").write_bytes(b"\x00" * 2048)
+            _fxA7 = {"sc": "FxTvide", "livraison": {"med": 9, "marge": 60}, "notes": [], "propositions": []}
+            _fxFA._depuis_recette(_fxA7, {"id": "Lt", "le": int(_fxNow), "brute": "fx_mod|brutes|B.mp4",
+                                          "template": "fx_mod|templates|Tvide.mp4"},
+                                  _fxD / "banger_B.mp4", [], _fxOcrVide, bf=_fxBfB,
+                                  index_brutes=_fxIb, index_templates=_fxIt)
+            check("favoris correctifs : template de la recette invérifiable -> UNE ligne « À confirmer », "
+                  "raison dite",
+                  [(p["type"], p["cle"], p["decision"]) for p in _fxA7["propositions"] if p["type"] == "template"]
+                  == [("template", "fx_mod|templates|Tvide.mp4", "a_confirmer")]
+                  and any("pas confirmé" in n for n in _fxA7["notes"]), _fxA7["propositions"])
+            (_fxID / "fx_mod/templates/Tvide.mp4").unlink()
+        else:
+            check("favoris correctifs : recette verifiee (ffmpeg absent -> non verifie ici)", True)
+
+        # =================================================================
+        # 4. UNE CAPTION REFUSEE NE REVIENT PAS PAR UNE VARIANTE
+        # =================================================================
+        _fxRemise()
+        _fxVa = "So he can talk to me like that"
+        _fxVb = "So can talk to me like that"
+        _fxFA.appliquer(_fxCaption("FxVar1", _fxVa))
+        _fxE = next((e for e in _fxFA.charger()["etoiles"]
+                     if e.get("etat") == "posee" and e["sc"] == "FxVar1"), {})
+        _fxFA.annuler(_fxE.get("id") or "", par="boss")
+        _fxBv = _fxFA.appliquer(_fxCaption("FxVar2", _fxVb))
+        check("favoris auto : une etoile annulee NE REVIENT PAS, meme lue comme une VARIANTE du texte "
+              "(caption ajoutee puis retiree)",
+              _fxBv["refusees"] == 1 and _fxBv["posees"] == 0 and not _fxLib("fx_mod"), (_fxBv, _fxLib("fx_mod")))
+        _fxRemise()
+        safe_json.write(_fxW.CAPTIONS_FILE, {"fx_mod": {"items": [
+            {"id": "c_main", "text": _fxVa, "enabled": True, "fav": False}]}})
+        _fxW._invalidate_json_cache(_fxW.CAPTIONS_FILE)
+        _fxFA.appliquer(_fxCaption("FxVar3", _fxVa))
+        _fxE = next((e for e in _fxFA.charger()["etoiles"]
+                     if e.get("etat") == "posee" and e["sc"] == "FxVar3"), {})
+        _fxFA.annuler(_fxE.get("id") or "", par="boss")
+        _fxBv = _fxFA.appliquer(_fxCaption("FxVar4", _fxVb))
+        check("favoris auto : ... ni sur la caption du proprietaire, etoile auto retiree puis lue en variante",
+              _fxBv["refusees"] == 1 and _fxLib("fx_mod") == [("c_main", _fxVa, False)],
+              (_fxBv, _fxLib("fx_mod")))
+        _fxRemise()
+        safe_json.write(_fxW.CAPTIONS_FILE, {"fx_mod": {"items": [
+            {"id": "c_main", "text": _fxVa, "enabled": True, "fav": False}]}})
+        _fxW._invalidate_json_cache(_fxW.CAPTIONS_FILE)
+        _fxR = _fxFA.charger()
+        _fxR["refus"][f"caption#fx_res|captions|{_fxFA._cle_texte(_fxVb)}"] = {"le": 1, "motif": "refusée"}
+        _fxFA._ecrire(_fxR)
+        _fxFA.appliquer(_fxCaption("FxVar5", _fxVa, dec="a_confirmer"))
+        _fxE = next((e for e in _fxFA.charger()["a_confirmer"] if e["sc"] == "FxVar5"), {})
+        _fxTv = _fxFA.trancher(_fxE.get("id") or "", True, par="boss")
+        check("favoris auto : valider une caption ne la recopie PAS dans une reserve qui en a refuse "
+              "une variante",
+              _fxTv.get("ok") and _fxTv.get("posees") == 1 and ("c_main", _fxVa, True) in _fxLib("fx_mod")
+              and not _fxLib("fx_res"), (_fxTv, _fxLib("fx_res")))
+
+        # =================================================================
+        # 5. UNE ETOILE EFFACEE PAR UN AUTRE ECRIVAIN N'EST PAS UN REFUS
+        # =================================================================
+        _fxRemise()
+        (_fxID / "fx_src/templates/t.mp4").write_bytes(b"\x00" * 64)
+        (_fxID / "fx_autre/templates/t.mp4").write_bytes(b"\x00" * 64)
+        (_fxID / "fx_mod/brutes/course.mp4").write_bytes(b"\x00" * 64)
+        safe_json.write_text(_fxW.FAV_BRUTES_FILE, _fxJs.dumps(["fx_src|templates|t.mp4"]))
+        _fxW._invalidate_json_cache(_fxW.FAV_BRUTES_FILE)
+        _fxOrdre = _fxW._mm.ORDRE
+        _fxPendant = []
+
+        def _fxAjouterMarques(ajouts):
+            # Le fil des favoris automatiques pose son etoile PENDANT la
+            # propagation (entre sa lecture et son ecriture).
+            _fxPendant.append(_fxFA.appliquer(_fxBrute("FxCourse1", "fx_mod|brutes|course.mp4")))
+            return {c: set() for c in _fxOrdre}, [], []
+        _fxW._ajouter_marques = _fxAjouterMarques
+        _fxW._marques_etat = lambda: ({c: set() for c in _fxOrdre}, [])
+        _fxW.identity_market = lambda i: "US"
+        _fxRp = _fxW.propager_tags_templates("fx_src")
+        _fxW._ajouter_marques, _fxW._marques_etat, _fxW.identity_market = _fxSav["W"][5:8]
+        check("favoris correctifs : une etoile auto posee PENDANT une propagation des tags survit "
+              "a son ecriture (verrou + relecture)",
+              _fxPendant and _fxPendant[0]["posees"] == 1 and _fxRp.get("ok")
+              and {"fx_mod|brutes|course.mp4", "fx_autre|templates|t.mp4"} <= _fxFav(), (_fxRp, _fxFav()))
+        _fxB2 = _fxFA.appliquer(_fxBrute("FxCourse2", "fx_mod|brutes|course.mp4"))
+        check("favoris correctifs : ... et le banger suivant ne la prend pas pour « retiree a la main »",
+              _fxB2["refusees"] == 0 and _fxB2["deja"] == 1 and not _fxFA.charger()["refus"]
+              and not [e for e in _fxFA.charger()["etoiles"] if e.get("etat") == "retiree_a_la_main"],
+              (_fxB2, _fxFA.charger()["refus"]))
+        # Registre illisible : le doute n'est pas « absente ».
+        _fxFavTxt = _fxW.FAV_BRUTES_FILE.read_text(encoding="utf-8")
+        _fxW.FAV_BRUTES_FILE.write_text('["fx_mod|brutes|course.mp4", tronq', encoding="utf-8")
+        for _fxPp in _fxDA.glob("fav_brutes.json.prev"):
+            _fxPp.unlink()
+        _fxW._invalidate_json_cache(_fxW.FAV_BRUTES_FILE)
+        check("favoris correctifs : fav_brutes.json illisible -> « on ne sait pas » (None), jamais "
+              "« aucune etoile »", _fxFA.APPLICATEURS["brutes_etoilees"]() is None)
+        _fxB3 = _fxFA.appliquer(_fxBrute("FxCourse3", "fx_mod|brutes|course.mp4"))
+        check("favoris correctifs : ... le banger suivant ne refuse RIEN : l'echec de pose est compte",
+              _fxB3["refusees"] == 0 and _fxB3["erreurs"] == 1 and not _fxFA.charger()["refus"], _fxB3)
+        _fxOnI, _fxErrI = _fxW._toggle_fav_brute("fx_mod|brutes|autre.mp4")
+        check("favoris correctifs : ... et le clic du site refuse d'ecrire (sinon toutes les etoiles "
+              "partaient)", _fxErrI and "illisible" in _fxErrI
+              and "tronq" in _fxW.FAV_BRUTES_FILE.read_text(encoding="utf-8"), (_fxOnI, _fxErrI))
+        _fxW._pop_fav_brute("fx_mod|brutes|course.mp4")
+        check("favoris correctifs : ... la suppression d'une brute ne le reecrit pas non plus",
+              "tronq" in _fxW.FAV_BRUTES_FILE.read_text(encoding="utf-8"))
+        _fxW.FAV_BRUTES_FILE.write_text(_fxFavTxt, encoding="utf-8")
+        _fxW._invalidate_json_cache(_fxW.FAV_BRUTES_FILE)
+        _fxFA.appliquer(_fxCaption("FxCapI1", "A caption only here"))
+        _fxCapTxt = _fxW.CAPTIONS_FILE.read_text(encoding="utf-8")
+        _fxW.CAPTIONS_FILE.write_text('{"fx_mod": {tronque', encoding="utf-8")
+        for _fxPp in _fxDA.glob("captions.json.prev"):
+            _fxPp.unlink()
+        _fxW._invalidate_json_cache(_fxW.CAPTIONS_FILE)
+        _fxB4 = _fxFA.appliquer(_fxCaption("FxCapI2", "A caption only here"))
+        check("favoris correctifs : captions.json illisible -> ni « retiree a la main » ni refus, "
+              "l'echec est compte",
+              _fxW._caption_etoilee("fx_mod", "A caption only here") is None
+              and _fxB4["refusees"] == 0 and _fxB4["erreurs"] == 1
+              and not [k for k in _fxFA.charger()["refus"] if k.startswith("caption#")], _fxB4)
+        _fxW.CAPTIONS_FILE.write_text(_fxCapTxt, encoding="utf-8")
+        _fxW._invalidate_json_cache(_fxW.CAPTIONS_FILE)
+
+        # =================================================================
+        # 6. UNE POSE EN ECHEC EST REPRISE, ET L'ECRAN LE DIT
+        # =================================================================
+        _fxRemise()
+        _fxW.FAV_BRUTES_FILE.write_text("[tronque", encoding="utf-8")
+        for _fxPp in _fxDA.glob("fav_brutes.json.prev"):
+            _fxPp.unlink()
+        _fxW._invalidate_json_cache(_fxW.FAV_BRUTES_FILE)
+        _fxBr = _fxFA.appliquer(_fxBrute("FxRep", "fx_mod|brutes|B.mp4"))
+        _fxLr = _fxFA.charger()["bangers"]["FxRep"]
+        check("favoris correctifs : une etoile sure NON posee -> le banger est « a reprendre » "
+              "(essai 1, combien), pas « fait »",
+              _fxBr["erreurs"] == 1 and _fxLr.get("etat") == "a_reprendre" and _fxLr.get("essais") == 1
+              and _fxLr.get("non_posees") == 1, _fxLr)
+        _fxBG.chemin_video("FxRep").write_bytes(b"\x00" * 4096)     # > 1 Ko : « presente »
+        os.utime(_fxBG.chemin_video("FxRep"), (_fxNow - 86400 * 30, _fxNow - 86400 * 30))
+        safe_json.write(_fxBG.FICHIER, {"seuil": 10000, "reels": {"FxRep": {
+            "compte": "compte_fx", "identite": "jessye", "vues": 20000,
+            "url": "https://www.instagram.com/reel/FxRep/", "poste_le": int(_fxNow) - 86400 * 30}}})
+        _fxR = _fxFA.charger()
+        _fxR["active_depuis"] = int(_fxNow)
+        _fxFA._ecrire(_fxR)
+        check("favoris correctifs : ... il est repris au passage suivant, meme archive avant la mise "
+              "en service", "FxRep" in _fxFA._a_traiter(_fxFA.charger(), tous=False),
+              _fxFA._a_traiter(_fxFA.charger(), tous=False))
+        _fxH = _fxW._favoris_auto_html(avec_script=False)
+        check("favoris correctifs : ... l'ecran dit les etoiles non posees ET les erreurs",
+              "étoile(s) non posée(s)" in _fxH and "FxRep" in _fxH and "Erreurs (" in _fxH
+              and "illisible" in _fxH and "style=" not in _fxH)
+        for _fxI in range(2):
+            _fxFA.appliquer(_fxBrute("FxRep", "fx_mod|brutes|B.mp4"))
+        check("favoris correctifs : ... et plus retente apres ESSAIS_MAX echecs (dit a l'ecran)",
+              _fxFA.charger()["bangers"]["FxRep"].get("essais") == _fxFA.ESSAIS_MAX
+              and "FxRep" not in _fxFA._a_traiter(_fxFA.charger(), tous=True)
+              and "plus retenté" in _fxW._favoris_auto_html(avec_script=False))
+        _fxW.FAV_BRUTES_FILE.write_text(_fxFavTxt, encoding="utf-8")
+        _fxW._invalidate_json_cache(_fxW.FAV_BRUTES_FILE)
+        _fxR = _fxFA.charger()
+        _fxR["bangers"]["FxRep"]["essais"] = 1
+        _fxFA._ecrire(_fxR)
+        _fxBr = _fxFA.appliquer(_fxBrute("FxRep", "fx_mod|brutes|B.mp4"))
+        _fxBr2 = _fxFA.appliquer(_fxBrute("FxRep", "fx_mod|brutes|B.mp4"))
+        check("favoris correctifs : registre repare -> l'etoile est posee a la reprise, le banger « fait », "
+              "et le rejouer n'ajoute pas de ligne au journal",
+              _fxBr["posees"] == 1 and _fxFA.charger()["bangers"]["FxRep"].get("etat") == "fait"
+              and "fx_mod|brutes|B.mp4" in _fxFav() and _fxBr2["deja"] == 1
+              and len([e for e in _fxFA.charger()["etoiles"] if e["sc"] == "FxRep"]) == 1,
+              (_fxBr, _fxBr2))
+
+        # =================================================================
+        # 7. « RETIRER » NE SUPPRIME JAMAIS LA CAPTION DU PROPRIETAIRE
+        # =================================================================
+        _fxRemise()
+        safe_json.write(_fxW.CAPTIONS_FILE, {})
+        _fxW._invalidate_json_cache(_fxW.CAPTIONS_FILE)
+        _fxAa = "7 texts that make her want you baddd😱"
+        _fxA8 = {"sc": "FxFlou", "vues": 1, "identite": "fx_mod", "identite_sure": True,
+                 "methode": "recette", "notes": [], "propositions": []}
+        _fxFA._proposer_caption(_fxA8, _fxAa, "fx_mod", "sur", "livraison", {})
+        _fxB8 = _fxFA.appliquer(_fxA8)
+        # Le proprietaire efface la caption auto et saisit SA version : une
+        # variante dans l'identite, le meme texte dans la reserve.
+        safe_json.write(_fxW.CAPTIONS_FILE, {
+            "fx_mod": {"items": [{"id": "proprio_m", "text": "7 texts that make her want you bad 😱",
+                                  "enabled": True, "fav": True}]},
+            "fx_res": {"items": [{"id": "proprio_r", "text": _fxAa, "enabled": True, "fav": True}]}})
+        _fxW._invalidate_json_cache(_fxW.CAPTIONS_FILE)
+        _fxE = next((e for e in _fxFA.charger()["etoiles"]
+                     if e.get("etat") == "posee" and e["sc"] == "FxFlou"), {})
+        _fxRa = _fxFA.annuler(_fxE.get("id") or "", par="boss")
+        check("favoris correctifs : « Retirer » une caption ajoutee, remplacee depuis par le "
+              "proprietaire -> SA caption reste (variante : intacte ; meme texte : texte garde)",
+              _fxB8["posees"] == 2 and _fxRa.get("ok")
+              and _fxLib("fx_mod") == [("proprio_m", "7 texts that make her want you bad 😱", True)]
+              and _fxLib("fx_res") == [("proprio_r", _fxAa, False)], (_fxRa, _fxLib("fx_mod"), _fxLib("fx_res")))
+        check("favoris correctifs : ... et ce qui a ete fait a la place est DIT au clic",
+              len(_fxRa.get("notes") or []) == 2
+              and any("rien retiré" in n for n in _fxRa["notes"]), _fxRa.get("notes"))
+        check("favoris correctifs : ... rien n'est parti sur Discord", not _fxDiscord, _fxDiscord[:2])
+    finally:
+        (_fxFA.DATA, _fxFA._reserves, _fxFA.fil_actif, _fxApl) = _fxSav["FA"]
+        _fxFA.APPLICATEURS.clear()
+        _fxFA.APPLICATEURS.update(_fxApl)
+        _fxFA._CACHE_MOIS.clear()
+        _fxFA._CACHE_EMP.clear()
+        (_fxW.FAV_BRUTES_FILE, _fxW.CAPTIONS_FILE, _fxW.IDENTITIES_DIR,
+         _fxW._brute_banger_discord, _fxW._send_video_to_banger_channel,
+         _fxW._ajouter_marques, _fxW._marques_etat, _fxW.identity_market) = _fxSav["W"]
+        _fxW._oublier_identites()
+        _fxW._invalidate_json_cache(_fxW.FAV_BRUTES_FILE)
+        _fxW._invalidate_json_cache(_fxW.CAPTIONS_FILE)
+        _fxBG.FICHIER, _fxBG.DOSSIER, _fxBG.DETAILS_DIR = _fxSav["BG"]
+        _fxSh.rmtree(_fxD, ignore_errors=True)
+except Exception as _fxE:
+    import traceback as _fxTb
+    check("favoris correctifs : testable", False, repr(_fxE)[:200] + " " + _fxTb.format_exc()[-700:])
+
 print("DESACTIVES (⊘) : caches de toutes les vues, sauf sous « ⊘ Desactivees »")
 print("=" * 70)
 # 27/09/2026, demande du proprietaire : « quand je desactive, je veux JAMAIS le
