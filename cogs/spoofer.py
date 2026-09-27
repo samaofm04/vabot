@@ -642,6 +642,14 @@ class Spoofer(commands.Cog):
                 n = await self._provisionner(guilde)
                 if n:
                     print(f"[spoofer] {n} dossier(s) de VA completes d'un -spoofer")
+                # les dossiers dont le VA a change de pseudo : par leurs droits
+                try:
+                    from cogs.welcome import completer_dossiers_us
+                    b = await completer_dossiers_us(guilde, ("spoofer",))
+                    if b.get("crees"):
+                        await asyncio.sleep(2.0)   # le cache recoit les salons neufs
+                except Exception as e:                       # noqa: BLE001
+                    print(f"[spoofer] dossiers renommes : {type(e).__name__}: {e}")
                 poses = 0
                 for canal in list(guilde.text_channels):
                     if _est_salon_spoofer(canal):

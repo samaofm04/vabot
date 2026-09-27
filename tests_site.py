@@ -10126,6 +10126,110 @@ except Exception as _eSp:
     check("spoofer : testable", False, repr(_eSp)[:200] + " " + _tbSp.format_exc()[-700:])
 
 
+# ------------------------------------------------------------------------------
+# Dossiers de VA RENOMMES (27/09) : -spoofer ajoute par les droits du -content,
+# pas par le pseudo actuel (x0btc -> dossier 4vbtc, harivolaa_20561 -> harivolaa)
+# ------------------------------------------------------------------------------
+print()
+print("=" * 70)
+print("Dossiers renommes : le -spoofer suit les droits du -content")
+print("=" * 70)
+try:
+    import asyncio as _aRn
+    import cogs.welcome as _wlRn
+
+    class _MbRn:
+        def __init__(s, i, nom):
+            s.id, s.name, s.bot = i, nom, False
+
+    class _ObjRn:                      # un VA parti : Discord ne rend qu'un identifiant
+        def __init__(s, i):
+            s.id = i
+
+    class _OwRn:
+        def __init__(s, voir=True):
+            s.view_channel = voir
+
+    class _CatRn:
+        _n = 700
+
+        def __init__(s, nom, g):
+            _CatRn._n += 1
+            s.id, s.name, s.text_channels = _CatRn._n, nom, []
+            g.categories.append(s)
+
+    class _SaRn:
+        _n = 7000
+
+        def __init__(s, nom, cat, g, ow=None):
+            _SaRn._n += 1
+            s.id, s.name, s.category, s.guild = _SaRn._n, nom, cat, g
+            s.category_id, s.position, s.overwrites = cat.id, _SaRn._n, ow or {}
+            g.text_channels.append(s)
+            cat.text_channels.append(s)
+
+        async def move(s, **kw):
+            s.category_id, s.position = kw["category"].id, kw.get("offset", 0)
+
+    class _GuRn:
+        def __init__(s):
+            s.text_channels, s.categories, s.crees = [], [], []
+            s.default_role, s.me = "tous", "bot"
+
+        async def create_text_channel(s, nom, category=None, overwrites=None, reason=None):
+            s.crees.append((nom, overwrites))
+            return _SaRn(nom, category, s, overwrites)
+
+    async def _scRn():
+        _dort = _wlRn.asyncio.sleep
+
+        async def _vite(*a, **k):
+            return None
+        _wlRn.asyncio.sleep = _vite
+        try:
+            g = _GuRn()
+            x0 = _MbRn(2, "x0btc")
+            for base, va, avec_spoof in (("bob", _MbRn(1, "bob"), True), ("4vbtc", x0, False),
+                                         ("parti", _ObjRn(9), False)):
+                cat = _CatRn(base, g)
+                suf = ("menu", "spoofer", "download", "numero-mail", "content") if avec_spoof \
+                    else ("menu", "download", "numero-mail", "content")
+                for s in suf:
+                    _SaRn(f"{base}-{s}", cat, g, {va: _OwRn()})
+            arch = _CatRn("archives", g)
+            _SaRn("⬇️・all-content", arch, g, {x0: _OwRn()})
+            b1 = await _wlRn.completer_dossiers_us(g, ("spoofer",))
+            crees = list(g.crees)
+            b2 = await _wlRn.completer_dossiers_us(g, ("spoofer",))
+            ordre = [c.name for c in sorted([c for c in g.text_channels if c.name.startswith("4vbtc-")],
+                                            key=lambda c: c.position)]
+            return b1, crees, b2, ordre
+        finally:
+            _wlRn.asyncio.sleep = _dort
+
+    _b1Rn, _crRn, _b2Rn, _orRn = _aRn.run(_scRn())
+    check("dossiers renommes : 4vbtc (VA x0btc) recoit son -spoofer, bob (deja complet) rien",
+          _b1Rn["crees"] == ["4vbtc-spoofer"], str(_b1Rn))
+    _owRn = dict(_crRn).get("4vbtc-spoofer") or {}
+    check("dossiers renommes : le VA est reconnu par les droits du -content, pas par son pseudo",
+          any(getattr(k, "name", "") == "x0btc" and v.view_channel and v.attach_files
+              for k, v in _owRn.items()), str(_owRn))
+    check("dossiers renommes : le dossier d un VA parti (plus membre) est saute ET compte",
+          _b1Rn["sans_va"] == ["parti"], str(_b1Rn))
+    check("dossiers renommes : le 2e passage ne fait rien",
+          _b2Rn["crees"] == [] and _b2Rn["erreurs"] == [], str(_b2Rn))
+    check("dossiers renommes : l ordre du dossier est menu, spoofer, download, numero-mail, content",
+          _orRn == ["4vbtc-menu", "4vbtc-spoofer", "4vbtc-download", "4vbtc-numero-mail",
+                    "4vbtc-content"], str(_orRn))
+    check("dossiers renommes : un salon de service (all-*) n est jamais complete",
+          not any("all-" in n for n, _ in _crRn))
+    check("dossiers renommes : l entretien du spoofer l appelle",
+          "completer_dossiers_us" in pathlib.Path("cogs/spoofer.py").read_text(encoding="utf-8"))
+except Exception as _eRn:
+    import traceback as _tbRn
+    check("dossiers renommes : testable", False, repr(_eRn)[:200] + _tbRn.format_exc()[-400:])
+
+
 # ==============================================================================
 # Fond sombre pose en dur : le texte doit porter SA couleur
 # ==============================================================================

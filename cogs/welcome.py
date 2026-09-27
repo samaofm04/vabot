@@ -1458,6 +1458,94 @@ async def _ensure_num_panel(bot, channel):
         return False
 
 
+def _us_droits_ticket(guild, membres, suffix) -> dict:
+    """Les droits d'un salon de VA : prive, le(s) VA voi(en)t tout, ecrivent
+    et joignent partout sauf dans -menu (lecture seule). Un seul endroit
+    pour la creation d'un dossier et pour le rattrapage des dossiers
+    existants (completer_dossiers_us)."""
+    writable = suffix != "menu"  # -menu : lecture seule, rien n'y est écrit
+    ow = {guild.default_role: discord.PermissionOverwrite(view_channel=False)}
+    for m in membres:
+        ow[m] = discord.PermissionOverwrite(
+            view_channel=True, send_messages=writable,
+            read_message_history=True, attach_files=writable)
+    ow[guild.me] = discord.PermissionOverwrite(
+        view_channel=True, send_messages=True, manage_channels=True,
+        manage_messages=True)
+    return ow
+
+
+async def _us_ranger(cat, in_cat):
+    """Dossier + ordre : move() (endpoint bulk, fiable) SEULEMENT si necessaire.
+    `in_cat` : les salons du dossier, dans l'ordre de US_TICKET_SUFFIXES."""
+    ok_cat = all(c.category_id == cat.id for c in in_cat)
+    ok_order = all(in_cat[i].position <= in_cat[i + 1].position
+                   for i in range(len(in_cat) - 1))
+    if in_cat and not (ok_cat and ok_order):
+        for idx, ch in enumerate(in_cat):
+            try:
+                await ch.move(beginning=True, offset=idx, category=cat,
+                              reason="rangement dossier US")
+            except Exception:
+                pass
+            await asyncio.sleep(0.4)
+
+
+async def completer_dossiers_us(guild, suffixes=("spoofer",)) -> dict:
+    """Ajoute aux dossiers de VA EXISTANTS les salons qui leur manquent, en
+    partant du DOSSIER, pas du pseudo.
+
+    Le chemin normal (create_us_tickets) cherche le dossier au pseudo
+    ACTUEL : un VA qui a change de pseudo (x0btc, dont le dossier s'appelle
+    encore 4vbtc ; harivolaa_20561, dossier harivolaa) n'avait pas de
+    -spoofer (27/09). On part donc du salon <base>-content, range dans une
+    categorie, et de SES droits : ses VA sont les membres humains du serveur
+    qui y voient. Un VA parti n'est plus un membre (Discord le rend en
+    simple identifiant) : son dossier est saute, et compte. Idempotent.
+    Rend {"crees": [...], "sans_va": [...], "erreurs": [...]}."""
+    bilan = {"crees": [], "sans_va": [], "erreurs": []}
+    noms = {_us_norm(c.name) for c in guild.text_channels}
+    for content in list(guild.text_channels):
+        nn = _us_norm(content.name)
+        if not nn.endswith("-content") or salon_de_service(content.name):
+            continue
+        cat = getattr(content, "category", None)
+        if cat is None:
+            continue
+        base = nn[: -len("-content")]
+        manquants = [s for s in suffixes if f"{base}-{s}" not in noms]
+        if not manquants:
+            continue
+        vas = [t for t, ow in (getattr(content, "overwrites", None) or {}).items()
+               if getattr(t, "bot", None) is False and getattr(ow, "view_channel", None)]
+        if not vas:
+            bilan["sans_va"].append(base)
+            continue
+        for s in manquants:
+            nom = f"{base}-{s}"
+            try:
+                await guild.create_text_channel(
+                    nom, category=cat, overwrites=_us_droits_ticket(guild, vas, s),
+                    reason=f"Dossier US : salon -{s} ajoute")
+                noms.add(nom)
+                bilan["crees"].append(nom)
+            except Exception as e:
+                bilan["erreurs"].append(f"{nom}: {type(e).__name__}: {e}"[:200])
+        dossier = []
+        for s in US_TICKET_SUFFIXES:
+            c = discord.utils.find(lambda c, n=f"{base}-{s}": _us_norm(c.name) == n,
+                                   guild.text_channels)
+            if c is not None:
+                dossier.append(c)
+        await _us_ranger(cat, dossier)
+        await asyncio.sleep(1.0)
+    if bilan["crees"] or bilan["erreurs"]:
+        print(f"[dossiers-us] salons ajoutes : {bilan['crees']} ; erreurs : "
+              f"{bilan['erreurs'][:3]} ; dossiers sans VA present : {len(bilan['sans_va'])}",
+              flush=True)
+    return bilan
+
+
 async def create_us_tickets(guild, member, bot=None):
     """Garantit l'état cible d'un membre : UN dossier (catégorie) à son pseudo
     contenant ses salons dans l'ordre de US_TICKET_SUFFIXES, le menu
@@ -1476,16 +1564,7 @@ async def create_us_tickets(guild, member, bot=None):
         if existing:
             chans[suffix] = existing
             continue  # déjà là (commande re-lançable sans doublons)
-        writable = suffix != "menu"  # -menu : lecture seule, rien n'y est écrit
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            member: discord.PermissionOverwrite(
-                view_channel=True, send_messages=writable,
-                read_message_history=True, attach_files=writable),
-            guild.me: discord.PermissionOverwrite(
-                view_channel=True, send_messages=True, manage_channels=True,
-                manage_messages=True),
-        }
+        overwrites = _us_droits_ticket(guild, [member], suffix)
         try:
             ch = await guild.create_text_channel(
                 name, category=cat, overwrites=overwrites,
@@ -1494,19 +1573,7 @@ async def create_us_tickets(guild, member, bot=None):
             chans[suffix] = ch
         except Exception as e:
             errors.append(f"{name}: {e}")
-    # Dossier + ordre : move() (endpoint bulk, fiable) SEULEMENT si nécessaire.
-    in_cat = [chans[s] for s in US_TICKET_SUFFIXES if chans.get(s) is not None]
-    ok_cat = all(c.category_id == cat.id for c in in_cat)
-    ok_order = all(in_cat[i].position <= in_cat[i + 1].position
-                   for i in range(len(in_cat) - 1))
-    if in_cat and not (ok_cat and ok_order):
-        for idx, ch in enumerate(in_cat):
-            try:
-                await ch.move(beginning=True, offset=idx, category=cat,
-                              reason="rangement dossier US")
-            except Exception:
-                pass
-            await asyncio.sleep(0.4)
+    await _us_ranger(cat, [chans[s] for s in US_TICKET_SUFFIXES if chans.get(s) is not None])
     menu_ch, content_ch = chans.get("menu"), chans.get("content")
     # Le menu Jailbreak US vit dans -menu, en permanence.
     if menu_ch is not None:
