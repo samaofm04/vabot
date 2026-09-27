@@ -758,12 +758,12 @@ class _DemoNumBouton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction):
         v = self.vue_demo
         if self.cle == "prendre":
-            v.etat, v.valeur = "attente", "+1 555 014 2294"
+            v.etat, v.valeur = "attente", "+15550142294"
         elif self.cle == "mail":
             v.etat, v.valeur = "attente", "lena.rivers482@gmail.com"
         elif self.cle == "autre":
             v.etat = "attente"
-            v.valeur = ("+1 555 019 7731" if v.valeur.startswith("+")
+            v.valeur = ("+15550197731" if v.valeur.startswith("+")
                         else "maya.cole917@gmail.com")
         elif self.cle == "code":
             v.etat = "code"
