@@ -14373,7 +14373,8 @@ def _cartes_livraison_corps(check, journal, JOURNAL, TMP):
     # 8. AJOUT DU 27/09/2026 : CHAQUE LIVRAISON NOTE SA RECETTE (favoris auto)
     # ===========================================================================
     # Un banger ne d'une video livree retrouve sa recette EXACTE -- la brute,
-    # le template, la caption -- et favoris_auto l'etoile sans rien deviner.
+    # le template, la caption -- et favoris_auto la PROPOSE sans rien deviner
+    # (demande du proprietaire du 27/09 : a verifier, plus d'etoile automatique).
     # Le compte des « recette= » dans le code ne prouve pas que CHAQUE chemin
     # passe la bonne : ils sont rejoues ici pour de vrai, registre des
     # livraisons dans un bac a sable. Photos et PP n'ont pas de recette : rien

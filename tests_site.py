@@ -27171,18 +27171,25 @@ except Exception as _eTm:
 
 print()
 print("=" * 70)
-print("FAVORIS AUTOMATIQUES : ce qui a fait un banger passe en ⭐ tout seul")
+print("FAVORIS AUTOMATIQUES : ce qui a fait un banger est PROPOSE en ⭐, a verifier")
 print("=" * 70)
-# 27/09/2026 : favoris_auto.py decortique chaque banger archive et etoile ce
-# qui est SUR (la brute, le template, la caption) ; le reste attend
-# « À confirmer » sur le site. Ce bloc tient les promesses faites au
-# proprietaire, chacune parce qu'un manquement coute cher sans se voir :
+# Demande du propriétaire du 27/09 : à vérifier, plus d'étoile automatique.
+# 27/09/2026 : favoris_auto.py decortique chaque banger archive (la brute, le
+# template, la caption). Demande du proprietaire du 27/09 : a verifier, plus
+# d'etoile automatique (« juste tu me mets une notif a verifier [...] et pour
+# la caption aussi ») : TOUT ce que l'analyse trouve attend dans « À
+# vérifier » (« sûr » puis « probable »), le centre de notifications le
+# compte, et Valider pose ce que la pose automatique posait. Le rattrapage
+# des archives, qui ne fait plus que proposer, part tout seul une fois.
+# Ce bloc tient les promesses faites au proprietaire, chacune parce qu'un
+# manquement coute cher sans se voir :
 #   - GRATUIT : aucun module reseau / IA / HikerAPI / Apify. Un import de trop
 #     et chaque banger depenserait des credits, sans un message ;
+#   - rien n'est etoile sans un clic du proprietaire ;
 #   - les etoiles passent par les fonctions du SITE, sans AUCUN envoi Discord :
 #     une seconde facon d'ecrire fav_brutes.json ou captions.json finirait par
-#     ecraser l'autre, et le rattrapage posterait des dizaines de videos dans
-#     le salon banger ;
+#     ecraser l'autre, et « Valider les sûres » posterait des dizaines de
+#     videos dans le salon banger ;
 #   - rien d'etoile a tort : une etoile retiree ou refusee ne revient pas, un
 #     registre illisible n'est jamais reecrit a vide (toutes les etoiles
 #     partaient) ;
@@ -27466,8 +27473,13 @@ try:
             _zfFA.DATA = _zfDA
 
         # =================================================================
-        # 4. LA POSE : par les fonctions du site, sans Discord
+        # 4. PLUS D'ETOILE AUTOMATIQUE : des propositions, puis Valider
+        #    (par les fonctions du site, sans Discord)
         # =================================================================
+        # Demande du proprietaire du 27/09 : a verifier, plus d'etoile
+        # automatique. L'analyse ne pose plus rien ; ce qu'elle trouve attend
+        # dans « À vérifier » (« sûr » ou « probable ») et Valider pose
+        # exactement ce que la pose automatique posait.
         _zfA1 = {"sc": "ZfSeule", "vues": 64498, "vues_detail": {"vues": 12345},
                  "methode": "empreinte", "nature": "montage", "identite": "mod_a",
                  "identite_sure": True, "compte": "compte_a", "url": "https://www.instagram.com/reel/ZfSeule/",
@@ -27484,12 +27496,29 @@ try:
                       "decision": "sur", "raison": "texte lu (réserve liée à mod_a)", "score": {"rappel": 1.0}},
                      {"type": "brute", "cle": "mod_b|brutes|brute_D.mp4", "ident": "mod_b",
                       "decision": "a_confirmer", "raison": "brute probable", "score": {"med": 40}}]}
+
+        def _zfAttente(**crit):
+            return [e for e in _zfFA.charger()["a_confirmer"] if e.get("etat") == "attente"
+                    and all(e.get(k) == v for k, v in crit.items())]
         _zfB0 = _zfFA.appliquer(_zfA1)
-        _zfReg = _zfFA.charger()
-        check("favoris auto : sans les fonctions du site, RIEN n'est pose, et l'erreur est dite",
-              _zfB0["posees"] == 0 and _zfB0["erreurs"] == 5
-              and any("non branchées" in e.get("erreur", "") for e in _zfReg["erreurs"])
+        check("favoris auto : demande du proprietaire du 27/09 (a verifier, plus d'etoile automatique) -- "
+              "l'analyse range 4 propositions et ne pose RIEN, meme sans les fonctions du site",
+              _zfB0["posees"] == 0 and _zfB0["erreurs"] == 0 and _zfB0["a_confirmer"] == 4
               and not _zfW.FAV_BRUTES_FILE.exists(), _zfB0)
+        # Et dans le CODE : seuls Valider (trancher) et Retirer (annuler)
+        # appellent la pose ; ni appliquer, ni le fil, ni le rattrapage.
+        _zfPoseurs = sorted({f.name for f in _zfAst.walk(_zfArbre) if isinstance(f, _zfAst.FunctionDef)
+                             for c in _zfAst.walk(f) if isinstance(c, _zfAst.Call)
+                             and isinstance(c.func, _zfAst.Name) and c.func.id == "_poser"})
+        check("favoris auto : plus d'etoile automatique dans le code -- seuls trancher (Valider) et "
+              "annuler (Retirer) appellent _poser", _zfPoseurs == ["annuler", "trancher"], _zfPoseurs)
+        _zfE0 = _zfAttente(cle="mod_a|brutes|brute_A.mp4")
+        _zfR0 = _zfFA.trancher(_zfE0[0]["id"], True) if _zfE0 else {}
+        check("favoris auto : Valider sans les fonctions du site -> refuse EN LE DISANT, la ligne reste",
+              not _zfR0.get("ok") and "non branchées" in _zfR0.get("erreur", "")
+              and len(_zfAttente(cle="mod_a|brutes|brute_A.mp4")) == 1 and not _zfW.FAV_BRUTES_FILE.exists(),
+              _zfR0)
+        _zfReg = _zfFA.charger()
         _zfReg["bangers"].pop("ZfSeule", None)
         _zfReg["a_confirmer"] = []
         _zfFA._ecrire(_zfReg)
@@ -27497,43 +27526,73 @@ try:
         check("favoris auto : le site branche ses 4 fonctions (brutes, captions, et leur etat)",
               set(_zfFA.APPLICATEURS) == {"brute", "brutes_etoilees", "caption", "caption_etoilee"},
               sorted(_zfFA.APPLICATEURS))
+        _zfCapAvant = _zfW.CAPTIONS_FILE.read_text(encoding="utf-8")
         _zfB1 = _zfFA.appliquer(_zfA1)
+        check("favoris auto : demande du proprietaire du 27/09 -- fonctions branchees, TOUJOURS aucune "
+              "etoile posee (fav_brutes.json pas cree, captions.json intact)",
+              _zfB1["posees"] == 0 and not _zfW.FAV_BRUTES_FILE.exists()
+              and _zfW.CAPTIONS_FILE.read_text(encoding="utf-8") == _zfCapAvant
+              and not _zfFA.charger()["etoiles"], _zfB1)
+        _zfAtt1 = _zfAttente(sc="ZfSeule")
+        _zfParType = {e["type"]: e for e in _zfAtt1 if e["cle"] != "mod_b|brutes|brute_D.mp4"}
+        check("favoris auto : « À vérifier » -- UNE ligne par objet : brute, template (copie de "
+              "l'identite + de la reserve), caption (identite + reserve), toutes « sûr »",
+              len(_zfAtt1) == 4
+              and [c for c, _i in _zfParType["template"]["cibles"]] == ["mod_a|templates|tpl_T.mp4",
+                                                                        "res_x|templates|tpl_T.mp4"]
+              and [i for _c, i in _zfParType["caption"]["cibles"]] == ["mod_a", "res_x"]
+              and _zfParType["caption"]["texte"] == _zfCAP
+              and all(_zfFA.niveau(e) == "sur" for e in _zfParType.values()), _zfAtt1)
+        _zfLd = _zfAttente(cle="mod_b|brutes|brute_D.mp4")
+        check("favoris auto : ... la brute douteuse y est en « probable », avec le banger (compte, vues, "
+              "lien), la raison et le score",
+              len(_zfLd) == 1 and _zfFA.niveau(_zfLd[0]) == "probable" and _zfLd[0]["compte"] == "compte_a"
+              and _zfLd[0]["vues"] == 64498 and _zfLd[0]["url"].endswith("/ZfSeule/")
+              and _zfLd[0]["raison"] == "brute probable" and _zfLd[0]["score"] == {"med": 40}, _zfLd)
+        check("favoris auto : le centre de notifications compte ces 4 lignes", _zfFA.nb_a_verifier() == 4,
+              _zfFA.nb_a_verifier())
+        _zfVs = _zfFA.valider_surs(par="boss")
         _zfFav = _zfJs.loads(_zfW.FAV_BRUTES_FILE.read_text(encoding="utf-8"))
-        check("favoris auto : brute et templates SURS dans fav_brutes.json (liste triee, format du site)",
-              _zfFav == sorted(["mod_a|brutes|brute_A.mp4", "mod_a|templates|tpl_T.mp4",
-                                "res_x|templates|tpl_T.mp4"]), _zfFav)
-        check("favoris auto : la proposition « À confirmer » n'est PAS posee",
-              "mod_b|brutes|brute_D.mp4" not in _zfFav and _zfB1["a_confirmer"] == 1, _zfB1)
+        check("favoris auto : « Valider les sûres » -> brute et templates dans fav_brutes.json "
+              "(liste triee, format du site)",
+              _zfVs.get("ok") and _zfVs.get("validees") == 3
+              and _zfFav == sorted(["mod_a|brutes|brute_A.mp4", "mod_a|templates|tpl_T.mp4",
+                                    "res_x|templates|tpl_T.mp4"]), (_zfVs, _zfFav))
+        check("favoris auto : ... la « probable » n'est PAS posee, elle attend toujours",
+              "mod_b|brutes|brute_D.mp4" not in _zfFav and len(_zfAttente(cle="mod_b|brutes|brute_D.mp4")) == 1)
         _zfLib = _zfJs.loads(_zfW.CAPTIONS_FILE.read_text(encoding="utf-8"))
         _zfCa = [c for c in _zfLib["mod_a"]["items"] if c["text"] == _zfCAP]
         _zfCr = [c for c in (_zfLib.get("res_x") or {}).get("items", []) if c["text"] == _zfCAP]
-        check("favoris auto : la caption est AJOUTEE et ⭐ dans l'identite, texte de reference (emoji compris)",
-              len(_zfCa) == 1 and _zfCa[0].get("fav") is True, _zfCa)
+        check("favoris auto : la caption validee est AJOUTEE et ⭐ dans l'identite, texte de reference "
+              "(emoji compris)", len(_zfCa) == 1 and _zfCa[0].get("fav") is True, _zfCa)
         check("favoris auto : ... et recopiee ⭐ dans la reserve liee",
               len(_zfCr) == 1 and _zfCr[0].get("fav") is True, _zfCr)
         check("favoris auto : la caption deja presente de l'identite est intacte",
               any(c["id"] == "c_exist" and not c.get("fav") for c in _zfLib["mod_a"]["items"]))
-        check("favoris auto : AUCUN envoi Discord pour une etoile automatique",
+        check("favoris auto : AUCUN envoi Discord a la validation",
               not _zfEnvoisDiscord, _zfEnvoisDiscord[:2])
         _zfReg = _zfFA.charger()
         _zfPosees = [e for e in _zfReg["etoiles"] if e.get("etat") == "posee"]
-        check("favoris auto : chaque etoile dit quel banger, quelles vues, quelle source, quel score",
+        check("favoris auto : chaque etoile validee dit quel banger, quelles vues, « validée à la main », "
+              "qui, la raison et le score",
               len(_zfPosees) == 5 and all(e.get("sc") == "ZfSeule" and e.get("vues") == 64498
-                                          and e.get("source") and e.get("raison")
-                                          and e.get("score") is not None for e in _zfPosees),
-              _zfPosees[:1])
-        check("favoris auto : le banger a sa ligne (nature, identite, bilan)",
+                                          and e.get("source") == "validée à la main" and e.get("par") == "boss"
+                                          and e.get("raison") and e.get("score") is not None
+                                          for e in _zfPosees), _zfPosees[:1])
+        check("favoris auto : le banger a sa ligne (nature, identite, bilan des propositions)",
               (_zfReg["bangers"].get("ZfSeule") or {}).get("nature") == "montage"
-              and _zfReg["bangers"]["ZfSeule"].get("bilan", {}).get("posees") == 5,
+              and _zfReg["bangers"]["ZfSeule"].get("etat") == "fait"
+              and _zfReg["bangers"]["ZfSeule"].get("bilan", {}).get("a_confirmer") == 4,
               _zfReg["bangers"].get("ZfSeule"))
         _zfB2 = _zfFA.appliquer(_zfA1)
         _zfLib = _zfJs.loads(_zfW.CAPTIONS_FILE.read_text(encoding="utf-8"))
-        check("favoris auto : rejouer le meme banger -> « deja », aucun doublon",
-              _zfB2["posees"] == 0 and _zfB2["deja"] == 5
+        check("favoris auto : rejouer le meme banger -> « deja », aucune ligne ni etoile en double",
+              _zfB2["posees"] == 0 and _zfB2["deja"] == 5 and _zfB2["a_confirmer"] == 0
+              and len(_zfAttente()) == 1
               and len([c for c in _zfLib["mod_a"]["items"] if c["text"] == _zfCAP]) == 1
               and _zfJs.loads(_zfW.FAV_BRUTES_FILE.read_text(encoding="utf-8")) == _zfFav, _zfB2)
 
-        # --- annuler : un clic defait ce que le banger a pose ensemble ------
+        # --- annuler : un clic defait ce qu'une validation a pose ensemble --
         _zfEb = next(e for e in _zfFA.charger()["etoiles"]
                      if e.get("etat") == "posee" and e["cle"] == "mod_a|brutes|brute_A.mp4")
         _zfRa = _zfFA.annuler(_zfEb["id"], par="boss")
@@ -27541,9 +27600,10 @@ try:
               _zfRa.get("ok") and "mod_a|brutes|brute_A.mp4"
               not in _zfJs.loads(_zfW.FAV_BRUTES_FILE.read_text(encoding="utf-8")), _zfRa)
         _zfB3 = _zfFA.appliquer(_zfA1)
-        check("favoris auto : une etoile annulee NE REVIENT PAS au passage suivant (refus memorise)",
+        check("favoris auto : une etoile annulee N'EST PLUS PROPOSEE au passage suivant (refus memorise)",
               _zfB3["refusees"] >= 1 and "mod_a|brutes|brute_A.mp4"
               not in _zfJs.loads(_zfW.FAV_BRUTES_FILE.read_text(encoding="utf-8"))
+              and not _zfAttente(cle="mod_a|brutes|brute_A.mp4")
               and "brute#mod_a|brutes|brute_A.mp4" in _zfFA.charger()["refus"], _zfB3)
         check("favoris auto : annuler deux fois est refuse proprement",
               not _zfFA.annuler(_zfEb["id"]).get("ok") and not _zfFA.annuler("inconnu").get("ok"))
@@ -27557,7 +27617,7 @@ try:
               and not any(c["text"] == _zfCAP for c in (_zfLib.get("res_x") or {}).get("items", []))
               and any(c["id"] == "c_exist" for c in _zfLib["mod_a"]["items"]), _zfRc)
 
-        # --- etoile retiree A LA MAIN sur le site (le vrai clic) ------------
+        # --- etoile validee puis retiree A LA MAIN sur le site (le vrai clic) --
         _zfEt = next(e for e in _zfFA.charger()["etoiles"]
                      if e.get("etat") == "posee" and e["cle"] == "res_x|templates|tpl_T.mp4")
         _zfOn, _zfErrT = _zfW._toggle_fav_brute("res_x|templates|tpl_T.mp4")
@@ -27566,10 +27626,11 @@ try:
         _zfFA._ecrire(_zfReg)
         _zfFA.appliquer(_zfA1)
         _zfReg = _zfFA.charger()
-        check("favoris auto : retiree a la main sur le site -> pas reposee, et le refus est retenu",
+        check("favoris auto : validee puis retiree a la main sur le site -> plus proposee, le refus est retenu",
               _zfOn is False and not _zfErrT
               and "res_x|templates|tpl_T.mp4" not in _zfJs.loads(_zfW.FAV_BRUTES_FILE.read_text(encoding="utf-8"))
               and "template#res_x|templates|tpl_T.mp4" in _zfReg["refus"]
+              and not _zfAttente(type="template")
               and any(e["id"] == _zfEt["id"] and e["etat"] == "retiree_a_la_main" for e in _zfReg["etoiles"]),
               (_zfOn, _zfErrT))
 
@@ -27603,7 +27664,7 @@ try:
               _zfW._poser_fav_brute("mod_a|videos|x.mp4", True)[0] is False
               and _zfW._poser_fav_brute("pas-une-cle", True)[0] is False)
 
-        # --- « À confirmer » : valider, refuser, une ligne par cle ----------
+        # --- « À vérifier » : valider, refuser, une ligne par objet --------
         _zfFA.appliquer({"sc": "ZfZ1", "vues": 1, "propositions": [
             {"type": "brute", "cle": "mod_b|brutes|brute_D.mp4", "ident": "mod_b",
              "decision": "a_confirmer", "raison": "r", "score": {}}]})
@@ -27612,10 +27673,14 @@ try:
               len(_zfLz) == 1 and _zfLz[0]["bangers"] == ["ZfSeule", "ZfZ1"], _zfLz)
         _zfFA.appliquer({"sc": "ZfZ2", "vues": 3, "propositions": [
             {"type": "brute", "cle": "mod_b|brutes|brute_D.mp4", "ident": "mod_b",
-             "decision": "sur", "raison": "r", "score": {}}]})
+             "decision": "sur", "raison": "r sur", "score": {}}]})
         _zfLz = [e for e in _zfFA.charger()["a_confirmer"] if e["cle"] == "mod_b|brutes|brute_D.mp4"]
-        check("favoris auto : la ligne en attente est tranchee quand un banger SUR confirme la meme cle",
-              _zfLz[0]["etat"] == "valide" and "ZfZ2" in _zfLz[0].get("par", ""), _zfLz)
+        check("favoris auto : un banger SUR confirme une ligne « probable » -> elle passe « sûr », "
+              "et ATTEND toujours (plus rien d'etoile d'office)",
+              len(_zfLz) == 1 and _zfLz[0]["etat"] == "attente" and _zfFA.niveau(_zfLz[0]) == "sur"
+              and _zfLz[0]["sc"] == "ZfZ2" and _zfLz[0]["raison"] == "r sur"
+              and "mod_b|brutes|brute_D.mp4" not in _zfJs.loads(_zfW.FAV_BRUTES_FILE.read_text(encoding="utf-8")),
+              _zfLz)
         _zfFA.appliquer({"sc": "ZfV", "vues": 9, "propositions": [
             {"type": "template", "cle": "mod_b|templates|tpl_T.mp4", "ident": "mod_b",
              "decision": "a_confirmer", "raison": "essai", "score": {}},
@@ -27625,11 +27690,14 @@ try:
              "decision": "a_confirmer", "raison": "texte reconnu, identité inconnue", "score": {}}]})
         _zfAtt = {e["texte"] or e["cle"]: e for e in _zfFA.charger()["a_confirmer"]
                   if e["sc"] == "ZfV" and e["etat"] == "attente"}
+        check("favoris auto : la ligne d'une caption « probable » NOMME la reserve ou Valider la recopiera",
+              [i for _c, i in _zfAtt["Maybe this caption"]["cibles"]] == ["mod_a", "res_x"],
+              _zfAtt["Maybe this caption"])
         _zfRr = _zfFA.trancher(_zfAtt["mod_b|templates|tpl_T.mp4"]["id"], False, par="boss")
         _zfFA.appliquer({"sc": "ZfV2", "vues": 1, "propositions": [
             {"type": "template", "cle": "mod_b|templates|tpl_T.mp4", "ident": "mod_b",
-             "decision": "a_confirmer", "raison": "essai", "score": {}}]})
-        check("favoris auto : refuser -> la proposition ne revient pas, meme par un autre banger",
+             "decision": "sur", "raison": "essai", "score": {}}]})
+        check("favoris auto : refuser -> la proposition ne revient pas, meme par un autre banger, meme « sûr »",
               _zfRr.get("ok") and not [e for e in _zfFA.charger()["a_confirmer"]
                                        if e["cle"] == "mod_b|templates|tpl_T.mp4" and e["etat"] == "attente"])
         check("favoris auto : trancher deux fois est refuse",
@@ -27646,9 +27714,106 @@ try:
                   and e.get("source") == "validée à la main" for e in _zfFA.charger()["etoiles"]))
         check("favoris auto : valider sans identite est refuse, avec l'explication",
               "identité inconnue" in (_zfFA.trancher(_zfAtt["Sans identite"]["id"], True).get("erreur") or ""))
+        _zfAr = {"sc": "ZfRef", "vues": 2, "propositions": []}
+        _zfFA._proposer_caption(_zfAr, "Be honest how many drinks", "mod_a", "sur", "texte lu", {})
+        _zfFA.appliquer(_zfAr)
+        _zfFA.trancher(_zfAttente(sc="ZfRef")[0]["id"], False, par="boss")
+        _zfRefus = _zfFA.charger()["refus"]
+        check("favoris auto : refuser une caption memorise le refus pour l'identite ET pour sa reserve",
+              "caption#mod_a|captions|be honest how many drinks" in _zfRefus
+              and "caption#res_x|captions|be honest how many drinks" in _zfRefus, sorted(_zfRefus))
+
+        # --- relecture du 27/09 : chaque cas reproduit AVANT correction ------
+        # Demande du proprietaire du 27/09 : a verifier, plus d'etoile
+        # automatique. Un refus doit tenir pour l'OBJET (pas seulement pour
+        # les copies nommees ce jour-la), et une ligne « sûr » ne doit porter
+        # que des preuves sures.
+        _zfTiSav = _zfTI.reserves_liees
+        try:
+            # Une reserve liee APRES le refus ne fait pas revenir la caption.
+            _zfTI.reserves_liees = lambda m: ((["res_x", "res_y"] if (m or "").lower() == "mod_a" else []), [])
+            _zfAr2 = {"sc": "ZfRef2", "vues": 2, "propositions": []}
+            _zfFA._proposer_caption(_zfAr2, "Be honest how many drinks", "mod_a", "sur", "texte lu", {})
+            _zfBr2 = _zfFA.appliquer(_zfAr2)
+            check("favoris auto : caption refusee pour mod_a -> une reserve liee apres coup ne la fait PAS "
+                  "revenir (ni pour elle, ni pour les autres)",
+                  _zfBr2["a_confirmer"] == 0 and not _zfAttente(sc="ZfRef2"), (_zfBr2, _zfAttente(sc="ZfRef2")))
+            _zfTI.reserves_liees = _zfTiSav
+            # Un template refuse en « probable » (sa seule copie) ne revient pas
+            # par la copie de la reserve quand un banger « sûr » le repropose.
+            for _zfRel in ("mod_a/templates/tpl_U.mp4", "res_x/templates/tpl_U.mp4"):
+                (_zfID / _zfRel).write_bytes(b"\x00" * 2048)
+            _zfFA.appliquer({"sc": "ZfU1", "vues": 4, "propositions": [
+                {"type": "template", "cle": "mod_a|templates|tpl_U.mp4", "ident": "mod_a",
+                 "decision": "a_confirmer", "raison": "template probable", "score": {}}]})
+            _zfFA.trancher(_zfAttente(sc="ZfU1")[0]["id"], False, par="boss")
+            _zfAu = {"sc": "ZfU2", "vues": 4, "propositions": []}
+            _zfFA._proposer_template(_zfAu, "tpl_U.mp4", "mod_a", "sur", "partie 2 reconnue", {})
+            _zfBu = _zfFA.appliquer(_zfAu)
+            check("favoris auto : template refuse pour mod_a -> un banger « sûr » ne le repropose PAS par la "
+                  "copie de la reserve",
+                  sorted(p["cle"] for p in _zfAu["propositions"]) == ["mod_a|templates|tpl_U.mp4",
+                                                                      "res_x|templates|tpl_U.mp4"]
+                  and _zfBu["a_confirmer"] == 0 and not _zfAttente(sc="ZfU2"), (_zfBu, _zfAttente(sc="ZfU2")))
+            # Une reserve PARTAGEE par deux models (Blonde, Brune...) : la
+            # caption « probable » de mod_a et la « sûre » de mod_b (meme
+            # texte) se rejoignaient par la cle de la reserve -- une ligne
+            # « sûr » qui etoilait mod_a sur une preuve seulement probable.
+            _zfTI.reserves_liees = lambda m: ((["res_x"] if (m or "").lower() in ("mod_a", "mod_b") else []), [])
+            _zfFA.appliquer({"sc": "ZfP1", "vues": 3, "propositions": [
+                {"type": "caption", "cle": "mod_a|captions|shared reserve caption", "ident": "mod_a",
+                 "texte": "Shared reserve caption", "decision": "a_confirmer",
+                 "raison": "texte lu, identité pas sûre", "score": {}}]})
+            _zfAp = {"sc": "ZfP2", "vues": 3, "propositions": []}
+            _zfFA._proposer_caption(_zfAp, "Shared reserve caption", "mod_b", "sur", "texte lu", {})
+            _zfFA.appliquer(_zfAp)
+            _zfLp = {e["ident"]: e for e in _zfAttente(type="caption", texte="Shared reserve caption")}
+            check("favoris auto : meme texte pour deux models qui partagent une reserve -> DEUX lignes, "
+                  "chacune avec SON niveau et SES reserves",
+                  sorted(_zfLp) == ["mod_a", "mod_b"] and _zfFA.niveau(_zfLp["mod_a"]) == "probable"
+                  and _zfFA.niveau(_zfLp["mod_b"]) == "sur"
+                  and [i for _c, i in _zfLp["mod_a"]["cibles"]] == ["mod_a", "res_x"]
+                  and [i for _c, i in _zfLp["mod_b"]["cibles"]] == ["mod_b", "res_x"]
+                  and _zfW._fa_quoi(_zfLp["mod_a"]).startswith("Caption · mod_a + réserves : res_x ·"),
+                  {k: (_zfFA.niveau(v), v.get("cibles")) for k, v in _zfLp.items()})
+            _zfRp = _zfFA.trancher(_zfLp["mod_b"]["id"], True, par="boss") if "mod_b" in _zfLp else {}
+            _zfLib = _zfJs.loads(_zfW.CAPTIONS_FILE.read_text(encoding="utf-8"))
+
+            def _zfCapFav(i, tx):
+                return any(c.get("text") == tx and c.get("fav") for c in (_zfLib.get(i) or {}).get("items", []))
+            check("favoris auto : ... valider la « sûre » de mod_b pose mod_b et la reserve, JAMAIS mod_a "
+                  "(sa ligne « probable » attend toujours)",
+                  _zfRp.get("ok") and _zfCapFav("mod_b", "Shared reserve caption")
+                  and _zfCapFav("res_x", "Shared reserve caption")
+                  and not _zfCapFav("mod_a", "Shared reserve caption")
+                  and [e["ident"] for e in _zfAttente(type="caption", texte="Shared reserve caption")] == ["mod_a"],
+                  _zfRp)
+            if "mod_a" in _zfLp:
+                _zfFA.trancher(_zfLp["mod_a"]["id"], False, par="boss")
+        finally:
+            _zfTI.reserves_liees = _zfTiSav
+        # Une caption lue SANS identite : une ligne pour le texte (pas une par
+        # banger), et son refus tient -- avant, rien n'etait retenu.
+        for _zfSc in ("ZfN1", "ZfN2"):
+            _zfFA.appliquer({"sc": _zfSc, "vues": 1, "propositions": [
+                {"type": "caption", "cle": "", "ident": "", "texte": "Nobody knows who wrote this",
+                 "decision": "a_confirmer", "raison": "texte reconnu, identité inconnue", "score": {}}]})
+        _zfLn = _zfAttente(type="caption", texte="Nobody knows who wrote this")
+        check("favoris auto : meme texte sans identite sur deux bangers -> UNE ligne, qui cite les deux",
+              len(_zfLn) == 1 and _zfLn[0].get("bangers") == ["ZfN1", "ZfN2"], _zfLn)
+        if _zfLn:
+            _zfFA.trancher(_zfLn[0]["id"], False, par="boss")
+        _zfBn = _zfFA.appliquer({"sc": "ZfN3", "vues": 1, "propositions": [
+            {"type": "caption", "cle": "", "ident": "", "texte": "Nobody knows who wrote this!",
+             "decision": "a_confirmer", "raison": "texte reconnu, identité inconnue", "score": {}}]})
+        check("favoris auto : ... refusee, elle ne revient pas avec le banger suivant (variante comprise)",
+              _zfBn["a_confirmer"] == 0 and _zfBn["refusees"] == 1 and not _zfAttente(sc="ZfN3"), _zfBn)
 
         # --- registres illisibles : JAMAIS reecrits a vide -------------------
         _zfFavTxt = _zfW.FAV_BRUTES_FILE.read_text(encoding="utf-8")
+        _zfFA.appliquer({"sc": "ZfIllis", "vues": 1, "propositions": [
+            {"type": "brute", "cle": "mod_a|brutes|brute_B.mp4", "ident": "mod_a",
+             "decision": "sur", "raison": "r", "score": {}}]})
         _zfW.FAV_BRUTES_FILE.write_text('["mod_a|brutes|x.mp4", tronq', encoding="utf-8")
         for _zfP in _zfDA.glob("fav_brutes.json.prev"):
             _zfP.unlink()
@@ -27656,14 +27821,17 @@ try:
         check("favoris auto : fav_brutes.json illisible -> refus d'ecrire (sinon toutes les etoiles partaient)",
               not _zfOk and "illisible" in _zfErr
               and "tronq" in _zfW.FAV_BRUTES_FILE.read_text(encoding="utf-8"), _zfErr)
-        _zfBx = _zfFA.appliquer({"sc": "ZfIllis", "vues": 1, "propositions": [
-            {"type": "brute", "cle": "mod_a|brutes|brute_B.mp4", "ident": "mod_a",
-             "decision": "sur", "raison": "r", "score": {}}]})
-        check("favoris auto : ... et l'automatisme compte l'echec au lieu de le taire",
-              _zfBx["erreurs"] == 1 and any("illisible" in n for n in
-                                            _zfFA.charger()["bangers"]["ZfIllis"]["notes"]), _zfBx)
+        _zfEi = _zfAttente(sc="ZfIllis")
+        _zfBx = _zfFA.trancher(_zfEi[0]["id"], True) if _zfEi else {}
+        check("favoris auto : ... et Valider echoue EN LE DISANT, la ligne reste a verifier (rien de perdu)",
+              _zfEi and not _zfBx.get("ok") and "illisible" in _zfBx.get("erreur", "")
+              and _zfAttente(sc="ZfIllis"), _zfBx)
         _zfW.FAV_BRUTES_FILE.write_text(_zfFavTxt, encoding="utf-8")
         _zfW._invalidate_json_cache(_zfW.FAV_BRUTES_FILE)
+        _zfBx2 = _zfFA.trancher(_zfEi[0]["id"], True) if _zfEi else {}
+        check("favoris auto : ... registre repare -> Valider pose l'etoile",
+              _zfBx2.get("ok") and "mod_a|brutes|brute_B.mp4"
+              in _zfJs.loads(_zfW.FAV_BRUTES_FILE.read_text(encoding="utf-8")), _zfBx2)
         _zfCapTxt = _zfW.CAPTIONS_FILE.read_text(encoding="utf-8")
         _zfW.CAPTIONS_FILE.write_text('{"mod_a": {tronque', encoding="utf-8")
         for _zfP in _zfDA.glob("captions.json.prev"):
@@ -27756,6 +27924,26 @@ try:
         check("favoris auto : le rattrapage demande reprend tout ce qui est archive (sans video : attend)",
               _zfFA._a_traiter(_zfFA.charger(), tous=True) == ["ZfHors1", "ZfNew1", "ZfOld1"]
               and _zfFA.a_rattraper() == 3, _zfFA._a_traiter(_zfFA.charger(), tous=True))
+        # Le rattrapage passe lot par lot, les bangers archives APRES la mise
+        # en service d'abord (priorite basse : il dure des heures la premiere
+        # fois, un nouveau banger ne doit pas l'attendre), chacun une fois.
+        _zfLots = []
+        _zfTrSav, _zfLotSav = _zfFA.traiter, _zfFA.LOT
+
+        def _zfTraiterEspion(scs, deja=0, total=0):
+            _zfLots.append(list(scs))
+            return {"analyses": len(scs), "posees": 0, "a_confirmer": 0, "ignores": 0, "erreurs": 0}
+        try:
+            _zfFA.traiter, _zfFA.LOT = _zfTraiterEspion, 1
+            _zfBtr = _zfFA._tour(tous=True)
+        finally:
+            _zfFA.traiter, _zfFA.LOT = _zfTrSav, _zfLotSav
+        check("favoris auto : le rattrapage passe lot par lot, le banger archive APRES la mise en service "
+              "en tete, chacun une seule fois, puis « fini »",
+              _zfLots and _zfLots[0] == ["ZfNew1"]
+              and sorted(sum(_zfLots, [])) == ["ZfHors1", "ZfNew1", "ZfOld1"]
+              and _zfBtr.get("analyses") == 3 and _zfFA.charger()["rattrapage"].get("fini_le"),
+              (_zfLots, _zfBtr))
         # Le vrai sous-processus (nice 19, --data) : il lit le registre des
         # bangers du MEME dossier de donnees -- sinon un essai lirait la
         # production. ZfHors1 n'existe que dans le bac a sable.
@@ -27789,9 +27977,69 @@ try:
               and "ZfNew1" not in _zfFA._a_traiter(_zfFA.charger(), tous=True), _zfLigneN)
         _zfFA._lancer_analyse = _zfSav["FA"][3]
         _zfVider()
+        # Demande du proprietaire du 27/09 : le rattrapage ne fait plus que
+        # PROPOSER -> il part TOUT SEUL, une fois, au demarrage du fil (plus
+        # de moment a choisir). Le fil est remplace par un faux (rien ne
+        # tourne en arriere-plan) ; sa boucle est jouee jusqu'au 1er passage.
+        class _zfFilFactice:
+            cibles = []
+
+            def __init__(self, target=None, daemon=None, name=None):
+                _zfFilFactice.cibles.append(target)
+
+            def start(self):
+                pass
+
+            def is_alive(self):
+                return False
+        _zfThSav, _zfEtSav, _zfTourSav = _zfFA.threading.Thread, _zfFA._ETAT.get("thread"), _zfFA._tour
+        _zfTours = []
+
+        def _zfTourEspion(tous=False):
+            _zfTours.append(tous)
+            raise SystemExit              # arrete la boucle (elle ne rattrape que Exception)
+        try:
+            _zfReg = _zfFA.charger()
+            _zfReg["rattrapage"] = {}
+            _zfFA._ecrire(_zfReg)
+            # (_zfFA.threading EST le module threading : le faux ne reste en
+            # place que le temps de demarrer(), la boucle tourne dans un vrai fil.)
+            _zfFA.threading.Thread = _zfFilFactice
+            _zfFA._ETAT["thread"] = None
+            try:
+                _zfFA.demarrer()
+            finally:
+                _zfFA.threading.Thread = _zfThSav
+            _zfRat = dict(_zfFA.charger()["rattrapage"])
+            _zfFA._tour = _zfTourEspion
+            _zfVider()
+            _zfBcl = _zfThSav(target=_zfFilFactice.cibles[-1], daemon=True)
+            _zfBcl.start()
+            _zfBcl.join(30)
+            _zfFA._tour = _zfTourSav
+            check("favoris auto : le rattrapage des archives part TOUT SEUL au demarrage du fil "
+                  "(« automatique »), et la boucle du fil le lance (reprise apres redemarrage comprise)",
+                  _zfRat.get("demande_le") and _zfRat.get("par") == "automatique"
+                  and not _zfRat.get("fini_le") and _zfTours == [True], (_zfRat, _zfTours))
+            _zfReg = _zfFA.charger()
+            _zfReg["rattrapage"]["fini_le"] = int(_zfT.time())
+            _zfFA._ecrire(_zfReg)
+            _zfRat2 = dict(_zfFA.charger()["rattrapage"])
+            _zfFA._ETAT["thread"] = None
+            _zfFA.threading.Thread = _zfFilFactice
+            try:
+                _zfFA.demarrer()
+            finally:
+                _zfFA.threading.Thread = _zfThSav
+            check("favoris auto : ... UNE fois : fini, il n'est pas redemande au demarrage suivant",
+                  _zfFA.charger()["rattrapage"] == _zfRat2, _zfFA.charger()["rattrapage"])
+        finally:
+            _zfFA.threading.Thread, _zfFA._tour = _zfThSav, _zfTourSav
+            _zfFA._ETAT["thread"] = _zfEtSav
+            _zfVider()
         _zfDr = _zfFA.demander_rattrapage(par="boss")
         _zfDr2 = _zfFA.demander_rattrapage(par="boss")
-        check("favoris auto : le rattrapage se DEMANDE (file du fil), et un 2e clic ne le double pas",
+        check("favoris auto : le bouton relance l'analyse des archives (file du fil), un 2e clic ne la double pas",
               _zfDr.get("ok") and not _zfDr.get("deja") and _zfDr2.get("deja")
               and list(_zfFA._FILE.queue) == [("rattrapage", None)]
               and _zfFA.charger()["rattrapage"].get("par") == "boss", (_zfDr, _zfDr2))
@@ -27854,9 +28102,31 @@ try:
         _zfH = _zfR.get_data(as_text=True)
         check("favoris auto : le fragment se rend (200) avec la section",
               _zfR.status_code == 200 and "id='fa-section'" in _zfH, _zfR.status_code)
-        check("favoris auto : « À confirmer » et « Étoiles posées » listes, avec leurs boutons",
-              "À confirmer (" in _zfH and "Étoiles posées (" in _zfH and "faAction(this,'annuler'" in _zfH
-              and "faAction(this,'valider'" in _zfH and "faAction(this,'refuser'" in _zfH)
+        check("favoris auto : « À vérifier » (plus « À confirmer ») et « Étoiles posées » listes, avec "
+              "leurs boutons",
+              "À vérifier (" in _zfH and "À confirmer (" not in _zfH and "Étoiles posées (" in _zfH
+              and "faAction(this,'annuler'" in _zfH and "faAction(this,'valider'" in _zfH
+              and "faAction(this,'refuser'" in _zfH)
+        _zfListe = _zfH.split("data-fa='attente'", 1)[-1].split("</details>", 1)[0]
+        _zfNiv = _zfRe.findall(r"<b>(sûr|probable)</b>", _zfListe)
+        check("favoris auto : chaque ligne dit son niveau, « sûr » d'abord, puis « probable »",
+              "sûr" in _zfNiv and "probable" in _zfNiv
+              and _zfNiv == sorted(_zfNiv, key=lambda x: x != "sûr"), _zfNiv)
+        check("favoris auto : « Valider les sûres » en un clic (apres confirmation), et ce qu'une "
+              "caption vise est dit (identite + reserves)",
+              "faAction(this,'valider_surs','')" in _zfH and "if(confirm(" in _zfH
+              and "Caption · mod_a + réserves : res_x" in _zfListe)
+        # La notification : le centre du site (⚠) compte les lignes en attente,
+        # pour un acces complet seulement (la liste vit sous /jailbreak/).
+        _zfNa = len([e for e in _zfFA.charger()["a_confirmer"] if e.get("etat") == "attente"])
+        _zfEj = _zfCl.get("/analyses/etat").get_json() or {}
+        check("favoris auto : la notification -- /analyses/etat donne le nombre de favoris a verifier",
+              _zfEj.get("favoris_a_verifier") == _zfNa and _zfNa >= 2, (_zfEj.get("favoris_a_verifier"), _zfNa))
+        _zfPg = _zfCl.get("/").get_data(as_text=True)
+        check("favoris auto : ... le centre de la page sait l'afficher et y mener (onglet, section ouverte)",
+              "function ligneFavoris(nb)" in _zfPg and "a.favoris_a_verifier || 0" in _zfPg
+              and "' favoris à vérifier'" in _zfPg and "function amenerFavoris(n)" in _zfPg
+              and "details[data-fa='attente']" in _zfPg)
         check("favoris auto : les bangers non analyses sont comptes avec leur raison",
               "Non analysés" in _zfH and "compte hors équipe" in _zfH)
         check("favoris auto : les analyses en echec sont dites (et qu'elles ne sont plus retentees)",
@@ -27906,15 +28176,23 @@ try:
         check("favoris auto : « Refuser » par la route",
               (_zfR.get_json() or {}).get("ok") and "caption#mod_a|captions|xss" in _zfFA.charger()["refus"])
         _zfFA.appliquer({"sc": "ZfSite", "vues": 5, "propositions": [
-            {"type": "brute", "cle": "mod_a|brutes|brute_B.mp4", "ident": "mod_a",
+            {"type": "brute", "cle": "mod_a|brutes|brute_site.mp4", "ident": "mod_a",
              "decision": "a_confirmer", "raison": "essai du site", "score": {}}]})
         _zfAs = next(e for e in _zfFA.charger()["a_confirmer"] if e["sc"] == "ZfSite")
         _zfR = _zfCl.post("/jailbreak/favoris_auto/action", data={"op": "valider", "id": _zfAs["id"]})
-        check("favoris auto : « Valider » par la route pose l'etoile",
-              (_zfR.get_json() or {}).get("ok") and "mod_a|brutes|brute_B.mp4"
-              in _zfJs.loads(_zfW.FAV_BRUTES_FILE.read_text(encoding="utf-8")))
+        check("favoris auto : « Valider » par la route pose l'etoile, et le dit",
+              (_zfR.get_json() or {}).get("ok") and "1 étoile(s) posée(s)" in (_zfR.get_json() or {}).get("message", "")
+              and "mod_a|brutes|brute_site.mp4"
+              in _zfJs.loads(_zfW.FAV_BRUTES_FILE.read_text(encoding="utf-8")), _zfR.get_json())
+        _zfR = _zfCl.post("/jailbreak/favoris_auto/action", data={"op": "valider_surs"})
+        check("favoris auto : « Valider les sûres » par la route : les « sûr » posees, les « probable » restent",
+              (_zfR.get_json() or {}).get("ok") and "validée(s)" in (_zfR.get_json() or {}).get("message", "")
+              and "mod_b|brutes|brute_D.mp4" in _zfJs.loads(_zfW.FAV_BRUTES_FILE.read_text(encoding="utf-8"))
+              and not [e for e in _zfFA.charger()["a_confirmer"] if e.get("etat") == "attente"
+                       and _zfFA.niveau(e) == "sur"]
+              and [e for e in _zfFA.charger()["a_confirmer"] if e.get("etat") == "attente"], _zfR.get_json())
         _zfR = _zfCl.post("/jailbreak/favoris_auto/action", data={"op": "rattrapage"})
-        check("favoris auto : l'analyse des archives refuse hors du serveur de production, en le disant",
+        check("favoris auto : relancer l'analyse des archives est refuse hors production, en le disant",
               not (_zfR.get_json() or {}).get("ok") and "production" in (_zfR.get_json() or {}).get("error", ""))
         _zfR = _zfCl.post("/jailbreak/favoris_auto/action", data={"op": "nimporte"})
         check("favoris auto : une action inconnue -> 400", _zfR.status_code == 400, _zfR.status_code)
@@ -27924,10 +28202,14 @@ try:
             _zfS["username"] = "chat"
             _zfS["role"] = "chatter"
         _zfR = _zfCl2.post("/jailbreak/favoris_auto/action", data={"op": "annuler", "id": "x"})
+        _zfRs = _zfCl2.post("/jailbreak/favoris_auto/action", data={"op": "valider_surs", "id": ""})
         _zfRg = _zfCl2.get("/jailbreak/favoris_auto/section")
-        check("favoris auto : un role restreint est refuse, en ecriture ET en lecture",
-              _zfR.status_code == 403 and _zfRg.status_code in (401, 403),
-              (_zfR.status_code, _zfRg.status_code))
+        check("favoris auto : un role restreint est refuse, en ecriture (Valider les sûres compris) ET en lecture",
+              _zfR.status_code == 403 and _zfRs.status_code == 403 and _zfRg.status_code in (401, 403),
+              (_zfR.status_code, _zfRs.status_code, _zfRg.status_code))
+        _zfEj2 = _zfCl2.get("/analyses/etat").get_json() or {}
+        check("favoris auto : ... et la notification ne lui compte AUCUN favori (liste fermee)",
+              _zfEj2.get("favoris_a_verifier") == 0, _zfEj2.get("favoris_a_verifier"))
         _zfR = _zfApp.test_client().post("/jailbreak/favoris_auto/action", data={"op": "annuler", "id": "x"})
         check("favoris auto : sans session -> refuse", _zfR.status_code in (401, 403), _zfR.status_code)
         _zfW._load_web_users = _zfSav["W"][6]
@@ -28105,6 +28387,8 @@ print()
 print("=" * 70)
 print("FAVORIS AUTOMATIQUES : la decision (brute eteinte, montage, identite devinee)")
 print("=" * 70)
+# Demande du propriétaire du 27/09 : à vérifier, plus d'étoile automatique.
+# (La decision -- « sûr » / « probable » -- ne pose plus rien : elle classe.)
 # Complement du bloc precedent, sur la DECISION elle-meme (_depuis_recette,
 # _depuis_empreintes), sans ffmpeg ni Tesseract : la recherche a l'image et
 # la lecture du texte sont remplacees par leur resultat, pour isoler ce qui
@@ -28241,17 +28525,28 @@ try:
               "désactivée (cause non notée)" in _zgCauses["b_vide"], _zgCauses)
 
         # --- appliquee, puis validee a la main ------------------------------
+        # Demande du proprietaire du 27/09 : a verifier, plus d'etoile
+        # automatique -- la caption SURE attend elle aussi.
         _zgW._poser_fav_brute("zg_mod|brutes|b_on.mp4", True)
         _zgB = _zgFA.appliquer(_zgA1)
         _zgAtt = [e for e in _zgFA.charger()["a_confirmer"] if e["cle"] == "zg_mod|brutes|b_main.mp4"]
-        check("favoris decision : appliquee, la brute eteinte ATTEND (raison et score gardes), sans etoile",
-              _zgB["posees"] == 2 and _zgB["a_confirmer"] == 1 and len(_zgAtt) == 1
+        _zgAttC = [e for e in _zgFA.charger()["a_confirmer"] if e["type"] == "caption"
+                   and e["etat"] == "attente"]
+        check("favoris decision : appliquee, la brute eteinte ATTEND en « probable » (raison et score "
+              "gardes), la caption sure attend en « sûr », RIEN d'etoile",
+              _zgB["posees"] == 0 and _zgB["a_confirmer"] == 2 and len(_zgAtt) == 1
               and _zgAtt[0]["etat"] == "attente" and "à la main" in _zgAtt[0]["raison"]
+              and _zgFA.niveau(_zgAtt[0]) == "probable"
               and (_zgAtt[0].get("score") or {}).get("desactivee") is True
-              and "zg_mod|brutes|b_main.mp4" not in _zgFav(), (_zgB, _zgAtt))
+              and len(_zgAttC) == 1 and _zgFA.niveau(_zgAttC[0]) == "sur"
+              and [i for _c, i in _zgAttC[0]["cibles"]] == ["zg_mod", "zg_res"]
+              and "zg_mod|brutes|b_main.mp4" not in _zgFav()
+              and not any(c.get("fav") for c in _zgJs.loads(_zgW.CAPTIONS_FILE.read_text(
+                  encoding="utf-8"))["zg_mod"]["items"]), (_zgB, _zgAtt, _zgAttC))
         _zgHtml = _zgW._favoris_auto_html(avec_script=False)
-        check("favoris decision : l'ecran « À confirmer » montre la brute, sa cause et sa date",
-              "b_main.mp4" in _zgHtml and "désactivée (à la main, le 26/09/2026 22:29)" in _zgHtml)
+        check("favoris decision : l'ecran « À vérifier » montre la brute, sa cause et sa date",
+              "À vérifier (" in _zgHtml and "b_main.mp4" in _zgHtml
+              and "désactivée (à la main, le 26/09/2026 22:29)" in _zgHtml)
         _zgRv = _zgFA.trancher(_zgAtt[0]["id"], True, par="boss") if _zgAtt else {}
         check("favoris decision : valider la brute eteinte pose l'etoile",
               _zgRv.get("ok") and _zgRv.get("posees") == 1
@@ -28409,6 +28704,8 @@ print()
 print("=" * 70)
 print("FAVORIS AUTOMATIQUES : correctifs de la relecture (recette, refus, verrou, reprise)")
 print("=" * 70)
+# Demande du propriétaire du 27/09 : à vérifier, plus d'étoile automatique.
+# (Les correctifs tiennent toujours ; la pose se fait maintenant au clic sur Valider.)
 # 27/09/2026, relecture de favoris_auto.py. Chaque cas a ete reproduit AVANT
 # correction avec les vraies fonctions du site, et aucun ne se voyait :
 #   - l'empreinte d'une livraison partait dans le mois de la DATE DU FICHIER
@@ -28419,7 +28716,10 @@ print("=" * 70)
 #   - une caption refusee revenait par une VARIANTE du texte ;
 #   - une etoile effacee par un autre ecrivain de fav_brutes.json (sans le
 #     verrou), ou lue dans un registre illisible, devenait un refus definitif ;
-#   - une pose en echec marquait le banger « fait » : jamais repris ;
+#   - une pose en echec marquait le banger « fait » : jamais repris (depuis la
+#     demande du proprietaire du 27/09 -- a verifier, plus d'etoile
+#     automatique -- rien n'est pose sans Valider : la proposition reste et
+#     Valider dit l'erreur) ;
 #   - « Retirer » pouvait supprimer la caption saisie par le proprietaire ;
 #   - data/livraisons/ grossissait sans limite.
 try:
@@ -28495,6 +28795,13 @@ try:
             _fxR = _fxFA.charger()
             _fxR["etoiles"], _fxR["refus"], _fxR["a_confirmer"] = [], {}, []
             _fxFA._ecrire(_fxR)
+
+        def _fxValider(sc):
+            """Le clic Valider sur chaque ligne en attente de ce banger : depuis la
+            demande du proprietaire du 27/09 (a verifier, plus d'etoile
+            automatique), c'est lui qui pose ce que l'analyse propose."""
+            return [_fxFA.trancher(e["id"], True, par="boss") for e in _fxFA.charger()["a_confirmer"]
+                    if e.get("etat") == "attente" and e.get("sc") == sc]
 
         _fxFF = _fxSh.which("ffmpeg")
 
@@ -28742,24 +29049,28 @@ try:
         _fxVa = "So he can talk to me like that"
         _fxVb = "So can talk to me like that"
         _fxFA.appliquer(_fxCaption("FxVar1", _fxVa))
+        _fxValider("FxVar1")
         _fxE = next((e for e in _fxFA.charger()["etoiles"]
                      if e.get("etat") == "posee" and e["sc"] == "FxVar1"), {})
         _fxFA.annuler(_fxE.get("id") or "", par="boss")
         _fxBv = _fxFA.appliquer(_fxCaption("FxVar2", _fxVb))
-        check("favoris auto : une etoile annulee NE REVIENT PAS, meme lue comme une VARIANTE du texte "
-              "(caption ajoutee puis retiree)",
-              _fxBv["refusees"] == 1 and _fxBv["posees"] == 0 and not _fxLib("fx_mod"), (_fxBv, _fxLib("fx_mod")))
+        check("favoris auto : une etoile validee puis annulee N'EST PLUS PROPOSEE, meme lue comme une "
+              "VARIANTE du texte (identite et reserve ; caption ajoutee puis retiree)",
+              _fxBv["refusees"] == 2 and _fxBv["a_confirmer"] == 0 and _fxBv["posees"] == 0
+              and not _fxLib("fx_mod") and not _fxLib("fx_res"), (_fxBv, _fxLib("fx_mod")))
         _fxRemise()
         safe_json.write(_fxW.CAPTIONS_FILE, {"fx_mod": {"items": [
             {"id": "c_main", "text": _fxVa, "enabled": True, "fav": False}]}})
         _fxW._invalidate_json_cache(_fxW.CAPTIONS_FILE)
         _fxFA.appliquer(_fxCaption("FxVar3", _fxVa))
+        _fxValider("FxVar3")
         _fxE = next((e for e in _fxFA.charger()["etoiles"]
                      if e.get("etat") == "posee" and e["sc"] == "FxVar3"), {})
         _fxFA.annuler(_fxE.get("id") or "", par="boss")
         _fxBv = _fxFA.appliquer(_fxCaption("FxVar4", _fxVb))
-        check("favoris auto : ... ni sur la caption du proprietaire, etoile auto retiree puis lue en variante",
-              _fxBv["refusees"] == 1 and _fxLib("fx_mod") == [("c_main", _fxVa, False)],
+        check("favoris auto : ... ni sur la caption du proprietaire, etoile validee retiree puis lue en variante",
+              _fxBv["refusees"] == 2 and _fxBv["a_confirmer"] == 0
+              and _fxLib("fx_mod") == [("c_main", _fxVa, False)],
               (_fxBv, _fxLib("fx_mod")))
         _fxRemise()
         safe_json.write(_fxW.CAPTIONS_FILE, {"fx_mod": {"items": [
@@ -28789,16 +29100,18 @@ try:
         _fxPendant = []
 
         def _fxAjouterMarques(ajouts):
-            # Le fil des favoris automatiques pose son etoile PENDANT la
-            # propagation (entre sa lecture et son ecriture).
-            _fxPendant.append(_fxFA.appliquer(_fxBrute("FxCourse1", "fx_mod|brutes|course.mp4")))
+            # Une etoile des favoris (Valider, depuis le 27/09 : plus de pose
+            # d'office) est posee PENDANT la propagation (entre sa lecture et
+            # son ecriture).
+            _fxFA.appliquer(_fxBrute("FxCourse1", "fx_mod|brutes|course.mp4"))
+            _fxPendant.extend(_fxValider("FxCourse1"))
             return {c: set() for c in _fxOrdre}, [], []
         _fxW._ajouter_marques = _fxAjouterMarques
         _fxW._marques_etat = lambda: ({c: set() for c in _fxOrdre}, [])
         _fxW.identity_market = lambda i: "US"
         _fxRp = _fxW.propager_tags_templates("fx_src")
         _fxW._ajouter_marques, _fxW._marques_etat, _fxW.identity_market = _fxSav["W"][5:8]
-        check("favoris correctifs : une etoile auto posee PENDANT une propagation des tags survit "
+        check("favoris correctifs : une etoile validee PENDANT une propagation des tags survit "
               "a son ecriture (verrou + relecture)",
               _fxPendant and _fxPendant[0]["posees"] == 1 and _fxRp.get("ok")
               and {"fx_mod|brutes|course.mp4", "fx_autre|templates|t.mp4"} <= _fxFav(), (_fxRp, _fxFav()))
@@ -28816,8 +29129,14 @@ try:
         check("favoris correctifs : fav_brutes.json illisible -> « on ne sait pas » (None), jamais "
               "« aucune etoile »", _fxFA.APPLICATEURS["brutes_etoilees"]() is None)
         _fxB3 = _fxFA.appliquer(_fxBrute("FxCourse3", "fx_mod|brutes|course.mp4"))
-        check("favoris correctifs : ... le banger suivant ne refuse RIEN : l'echec de pose est compte",
-              _fxB3["refusees"] == 0 and _fxB3["erreurs"] == 1 and not _fxFA.charger()["refus"], _fxB3)
+        check("favoris correctifs : ... le banger suivant ne refuse RIEN : dans le doute, il PROPOSE "
+              "(a verifier), jamais un refus",
+              _fxB3["refusees"] == 0 and _fxB3["a_confirmer"] == 1 and not _fxFA.charger()["refus"], _fxB3)
+        _fxT3 = _fxValider("FxCourse3")
+        check("favoris correctifs : ... et Valider echoue EN LE DISANT (registre illisible), la ligne reste",
+              _fxT3 and not _fxT3[0].get("ok") and "illisible" in _fxT3[0].get("erreur", "")
+              and [e for e in _fxFA.charger()["a_confirmer"] if e["sc"] == "FxCourse3" and e["etat"] == "attente"],
+              _fxT3)
         _fxOnI, _fxErrI = _fxW._toggle_fav_brute("fx_mod|brutes|autre.mp4")
         check("favoris correctifs : ... et le clic du site refuse d'ecrire (sinon toutes les etoiles "
               "partaient)", _fxErrI and "illisible" in _fxErrI
@@ -28828,23 +29147,28 @@ try:
         _fxW.FAV_BRUTES_FILE.write_text(_fxFavTxt, encoding="utf-8")
         _fxW._invalidate_json_cache(_fxW.FAV_BRUTES_FILE)
         _fxFA.appliquer(_fxCaption("FxCapI1", "A caption only here"))
+        _fxValider("FxCapI1")
         _fxCapTxt = _fxW.CAPTIONS_FILE.read_text(encoding="utf-8")
         _fxW.CAPTIONS_FILE.write_text('{"fx_mod": {tronque', encoding="utf-8")
         for _fxPp in _fxDA.glob("captions.json.prev"):
             _fxPp.unlink()
         _fxW._invalidate_json_cache(_fxW.CAPTIONS_FILE)
         _fxB4 = _fxFA.appliquer(_fxCaption("FxCapI2", "A caption only here"))
-        check("favoris correctifs : captions.json illisible -> ni « retiree a la main » ni refus, "
-              "l'echec est compte",
+        check("favoris correctifs : captions.json illisible -> ni « retiree a la main » ni refus : "
+              "la proposition attend",
               _fxW._caption_etoilee("fx_mod", "A caption only here") is None
-              and _fxB4["refusees"] == 0 and _fxB4["erreurs"] == 1
-              and not [k for k in _fxFA.charger()["refus"] if k.startswith("caption#")], _fxB4)
+              and _fxB4["refusees"] == 0 and _fxB4["a_confirmer"] == 1
+              and not [k for k in _fxFA.charger()["refus"] if k.startswith("caption#")]
+              and not [e for e in _fxFA.charger()["etoiles"] if e.get("etat") == "retiree_a_la_main"], _fxB4)
         _fxW.CAPTIONS_FILE.write_text(_fxCapTxt, encoding="utf-8")
         _fxW._invalidate_json_cache(_fxW.CAPTIONS_FILE)
 
         # =================================================================
-        # 6. UNE POSE EN ECHEC EST REPRISE, ET L'ECRAN LE DIT
+        # 6. UN REGISTRE ILLISIBLE NE PERD RIEN, ET L'ECRAN LE DIT
         # =================================================================
+        # Depuis le 27/09 apres-midi rien n'est pose sans Valider : un registre
+        # illisible ne fait plus « a reprendre » le banger, la proposition est
+        # rangee (rien de perdu) et c'est Valider qui dit l'erreur.
         _fxRemise()
         _fxW.FAV_BRUTES_FILE.write_text("[tronque", encoding="utf-8")
         for _fxPp in _fxDA.glob("fav_brutes.json.prev"):
@@ -28852,44 +29176,47 @@ try:
         _fxW._invalidate_json_cache(_fxW.FAV_BRUTES_FILE)
         _fxBr = _fxFA.appliquer(_fxBrute("FxRep", "fx_mod|brutes|B.mp4"))
         _fxLr = _fxFA.charger()["bangers"]["FxRep"]
-        check("favoris correctifs : une etoile sure NON posee -> le banger est « a reprendre » "
-              "(essai 1, combien), pas « fait »",
-              _fxBr["erreurs"] == 1 and _fxLr.get("etat") == "a_reprendre" and _fxLr.get("essais") == 1
-              and _fxLr.get("non_posees") == 1, _fxLr)
-        _fxBG.chemin_video("FxRep").write_bytes(b"\x00" * 4096)     # > 1 Ko : « presente »
-        os.utime(_fxBG.chemin_video("FxRep"), (_fxNow - 86400 * 30, _fxNow - 86400 * 30))
-        safe_json.write(_fxBG.FICHIER, {"seuil": 10000, "reels": {"FxRep": {
+        check("favoris correctifs : fav_brutes.json illisible -> la proposition est rangee quand meme, "
+              "le banger « fait » (rien a reprendre, rien de perdu)",
+              _fxBr["erreurs"] == 0 and _fxBr["a_confirmer"] == 1 and _fxLr.get("etat") == "fait"
+              and not _fxLr.get("essais"), (_fxBr, _fxLr))
+        _fxT = _fxValider("FxRep")
+        check("favoris correctifs : ... Valider echoue EN LE DISANT, fichier intact, la ligne reste a verifier",
+              _fxT and not _fxT[0].get("ok") and "illisible" in _fxT[0].get("erreur", "")
+              and "tronque" in _fxW.FAV_BRUTES_FILE.read_text(encoding="utf-8")
+              and [e for e in _fxFA.charger()["a_confirmer"] if e["sc"] == "FxRep" and e["etat"] == "attente"],
+              _fxT)
+        # Une ligne « a reprendre » ecrite AVANT (pose d'office en echec) : elle
+        # est toujours reprise et dite a l'ecran.
+        _fxBG.chemin_video("FxOld").write_bytes(b"\x00" * 4096)     # > 1 Ko : « presente »
+        os.utime(_fxBG.chemin_video("FxOld"), (_fxNow - 86400 * 30, _fxNow - 86400 * 30))
+        safe_json.write(_fxBG.FICHIER, {"seuil": 10000, "reels": {"FxOld": {
             "compte": "compte_fx", "identite": "jessye", "vues": 20000,
-            "url": "https://www.instagram.com/reel/FxRep/", "poste_le": int(_fxNow) - 86400 * 30}}})
+            "url": "https://www.instagram.com/reel/FxOld/", "poste_le": int(_fxNow) - 86400 * 30}}})
         _fxR = _fxFA.charger()
         _fxR["active_depuis"] = int(_fxNow)
+        _fxR["bangers"]["FxOld"] = {"le": int(_fxNow) - 3600, "etat": "a_reprendre", "essais": 1,
+                                    "non_posees": 1, "notes": []}
+        _fxFA._noter_erreur(_fxR, "FxOld", "brute fx_mod|brutes|B.mp4 : registre illisible")
         _fxFA._ecrire(_fxR)
-        check("favoris correctifs : ... il est repris au passage suivant, meme archive avant la mise "
-              "en service", "FxRep" in _fxFA._a_traiter(_fxFA.charger(), tous=False),
+        check("favoris correctifs : une ligne « a reprendre » d'avant est reprise au passage suivant, "
+              "meme archivee avant la mise en service",
+              "FxOld" in _fxFA._a_traiter(_fxFA.charger(), tous=False),
               _fxFA._a_traiter(_fxFA.charger(), tous=False))
         _fxH = _fxW._favoris_auto_html(avec_script=False)
         check("favoris correctifs : ... l'ecran dit les etoiles non posees ET les erreurs",
-              "étoile(s) non posée(s)" in _fxH and "FxRep" in _fxH and "Erreurs (" in _fxH
+              "étoile(s) non posée(s)" in _fxH and "FxOld" in _fxH and "Erreurs (" in _fxH
               and "illisible" in _fxH and "style=" not in _fxH)
-        for _fxI in range(2):
-            _fxFA.appliquer(_fxBrute("FxRep", "fx_mod|brutes|B.mp4"))
-        check("favoris correctifs : ... et plus retente apres ESSAIS_MAX echecs (dit a l'ecran)",
-              _fxFA.charger()["bangers"]["FxRep"].get("essais") == _fxFA.ESSAIS_MAX
-              and "FxRep" not in _fxFA._a_traiter(_fxFA.charger(), tous=True)
-              and "plus retenté" in _fxW._favoris_auto_html(avec_script=False))
         _fxW.FAV_BRUTES_FILE.write_text(_fxFavTxt, encoding="utf-8")
         _fxW._invalidate_json_cache(_fxW.FAV_BRUTES_FILE)
-        _fxR = _fxFA.charger()
-        _fxR["bangers"]["FxRep"]["essais"] = 1
-        _fxFA._ecrire(_fxR)
-        _fxBr = _fxFA.appliquer(_fxBrute("FxRep", "fx_mod|brutes|B.mp4"))
+        _fxT2 = _fxValider("FxRep")
         _fxBr2 = _fxFA.appliquer(_fxBrute("FxRep", "fx_mod|brutes|B.mp4"))
-        check("favoris correctifs : registre repare -> l'etoile est posee a la reprise, le banger « fait », "
-              "et le rejouer n'ajoute pas de ligne au journal",
-              _fxBr["posees"] == 1 and _fxFA.charger()["bangers"]["FxRep"].get("etat") == "fait"
-              and "fx_mod|brutes|B.mp4" in _fxFav() and _fxBr2["deja"] == 1
+        check("favoris correctifs : registre repare -> Valider pose l'etoile, et rejouer le banger "
+              "n'ajoute ni ligne ni etoile",
+              _fxT2 and _fxT2[0].get("ok") and _fxT2[0].get("posees") == 1 and "fx_mod|brutes|B.mp4" in _fxFav()
+              and _fxBr2["deja"] == 1 and _fxBr2["a_confirmer"] == 0
               and len([e for e in _fxFA.charger()["etoiles"] if e["sc"] == "FxRep"]) == 1,
-              (_fxBr, _fxBr2))
+              (_fxT2, _fxBr2))
 
         # =================================================================
         # 7. « RETIRER » NE SUPPRIME JAMAIS LA CAPTION DU PROPRIETAIRE
@@ -28901,7 +29228,8 @@ try:
         _fxA8 = {"sc": "FxFlou", "vues": 1, "identite": "fx_mod", "identite_sure": True,
                  "methode": "recette", "notes": [], "propositions": []}
         _fxFA._proposer_caption(_fxA8, _fxAa, "fx_mod", "sur", "livraison", {})
-        _fxB8 = _fxFA.appliquer(_fxA8)
+        _fxFA.appliquer(_fxA8)
+        _fxV8 = _fxValider("FxFlou")
         # Le proprietaire efface la caption auto et saisit SA version : une
         # variante dans l'identite, le meme texte dans la reserve.
         safe_json.write(_fxW.CAPTIONS_FILE, {
@@ -28912,9 +29240,9 @@ try:
         _fxE = next((e for e in _fxFA.charger()["etoiles"]
                      if e.get("etat") == "posee" and e["sc"] == "FxFlou"), {})
         _fxRa = _fxFA.annuler(_fxE.get("id") or "", par="boss")
-        check("favoris correctifs : « Retirer » une caption ajoutee, remplacee depuis par le "
+        check("favoris correctifs : « Retirer » une caption ajoutee (validee), remplacee depuis par le "
               "proprietaire -> SA caption reste (variante : intacte ; meme texte : texte garde)",
-              _fxB8["posees"] == 2 and _fxRa.get("ok")
+              _fxV8 and _fxV8[0].get("posees") == 2 and _fxRa.get("ok")
               and _fxLib("fx_mod") == [("proprio_m", "7 texts that make her want you bad 😱", True)]
               and _fxLib("fx_res") == [("proprio_r", _fxAa, False)], (_fxRa, _fxLib("fx_mod"), _fxLib("fx_res")))
         check("favoris correctifs : ... et ce qui a ete fait a la place est DIT au clic",

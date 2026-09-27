@@ -998,9 +998,9 @@ def _poser_fav_brute(file_id: str, allumer: bool = True):
 
     La fonction partagee des favoris automatiques (favoris_auto) : meme
     registre, meme format que le clic du site, mais un ETAT voulu au lieu
-    d'une bascule, et AUCUN envoi dans le salon banger -- le rattrapage
-    etoile des dizaines de brutes d'un coup, le salon en aurait recu autant
-    de videos.
+    d'une bascule, et AUCUN envoi dans le salon banger -- « Valider les
+    sûres » pose des dizaines d'etoiles d'un coup, le salon en aurait recu
+    autant de videos.
 
     Un registre ILLISIBLE n'est pas reecrit : _load_fav_brutes le lirait
     comme vide, et l'ecriture effacerait toutes les etoiles. Rend (ok, erreur).
@@ -12994,29 +12994,71 @@ body.light #va-notif-panel a.va-notif-ligne.encours{color:#1d4ed8!important}
   if(ouvert()){ fermer(); return; }
   p.hidden = false; placer();
  }
+ // FAVORIS DES BANGERS A VERIFIER (27/09/2026) : plus rien n est etoile
+ // d office, chaque proposition attend le proprietaire. La liste vit dans
+ // l onglet Instagram tools (sous l encart Bangers) sur le serveur, dans
+ // l onglet Instagram sur un poste sans les patchs : on prend celui que la
+ // barre laterale porte.
+ function ongletFavoris(){ return el('tab-sigtools') ? 'sigtools' : 'jailbreak'; }
+ function amenerFavoris(n){
+  // L onglet arrive a part (fragment differe) : la section n existe qu apres.
+  // Guettee 15 s au plus, puis ouverte (elle et sa liste) et amenee a l ecran.
+  var s = el('fa-section');
+  if(s && s.offsetParent !== null){
+   s.open = true;
+   var d = s.querySelector("details[data-fa='attente']");
+   if(d) d.open = true;
+   if(s.scrollIntoView) s.scrollIntoView({block: 'start'});
+   return;
+  }
+  if((n || 0) < 60) setTimeout(function(){ amenerFavoris((n || 0) + 1); }, 250);
+ }
+ function ouvrirFavoris(ev){
+  var b = el('tab-' + ongletFavoris());
+  if(!b || typeof showTab !== 'function') return;   // lien ordinaire
+  if(ev) ev.preventDefault();
+  fermer();
+  b.click();
+  amenerFavoris(0);
+ }
+ function ligneFavoris(nb){
+  var l = document.createElement('a');
+  l.href = '/?tab=' + ongletFavoris() + '#fa-verifier';
+  l.className = 'va-notif-ligne';
+  l.setAttribute('data-notif', 'favoris');
+  l.addEventListener('click', ouvrirFavoris);
+  var t = document.createElement('span');
+  t.textContent = nb + (nb > 1 ? ' favoris à vérifier' : ' favori à vérifier');
+  var go = document.createElement('span'); go.className = 'va-notif-go'; go.textContent = 'Ouvrir';
+  l.appendChild(t); l.appendChild(go);
+  return l;
+ }
  function ligneAnalyse(){
   var box = el('va-notif-analyse'); if(!box) return;
   box.innerHTML = '';
   var a = analyse || {};
   var enCours = a.en_cours || 0, aVerifier = a.a_verifier || 0, aRelire = a.a_relire || 0;
-  if(!enCours && !aVerifier && !aRelire) return;
-  var l = document.createElement('a');
-  l.href = '/a-relire';
-  l.className = 'va-notif-ligne' + ((enCours && !aVerifier && !aRelire) ? ' encours' : '');
-  var bouts = [];
-  if(enCours) bouts.push(enCours > 1 ? (enCours + ' analyses en cours') : 'analyse en cours');
-  if(aVerifier) bouts.push(aVerifier + ' template' + (aVerifier > 1 ? 's' : '') + ' à vérifier');
-  if(aRelire) bouts.push(aRelire + ' à relire');
-  var t = document.createElement('span'); t.textContent = bouts.join(' · ');
-  var go = document.createElement('span'); go.className = 'va-notif-go'; go.textContent = 'Ouvrir';
-  l.appendChild(t); l.appendChild(go);
-  box.appendChild(l);
+  var nFav = a.favoris_a_verifier || 0;
+  if(enCours || aVerifier || aRelire){
+   var l = document.createElement('a');
+   l.href = '/a-relire';
+   l.className = 'va-notif-ligne' + ((enCours && !aVerifier && !aRelire) ? ' encours' : '');
+   var bouts = [];
+   if(enCours) bouts.push(enCours > 1 ? (enCours + ' analyses en cours') : 'analyse en cours');
+   if(aVerifier) bouts.push(aVerifier + ' template' + (aVerifier > 1 ? 's' : '') + ' à vérifier');
+   if(aRelire) bouts.push(aRelire + ' à relire');
+   var t = document.createElement('span'); t.textContent = bouts.join(' · ');
+   var go = document.createElement('span'); go.className = 'va-notif-go'; go.textContent = 'Ouvrir';
+   l.appendChild(t); l.appendChild(go);
+   box.appendChild(l);
+  }
+  if(nFav) box.appendChild(ligneFavoris(nFav));
  }
  function maj(){
   var b = el('va-notif-btn'), n = el('va-notif-n'), ico = el('va-notif-ico');
   if(!b || !n || !ico) return;
   var a = analyse || {};
-  var aVoir = (a.a_verifier || 0) + (a.a_relire || 0);
+  var aVoir = (a.a_verifier || 0) + (a.a_relire || 0) + (a.favoris_a_verifier || 0);
   var enCours = (a.en_cours || 0);
   var vide = el('va-notif-vide');
   if(vide) vide.style.display = (aVoir + enCours) ? 'none' : '';
@@ -13050,7 +13092,11 @@ body.light #va-notif-panel a.va-notif-ligne.encours{color:#1d4ed8!important}
  window.addEventListener('resize', function(){ if(ouvert()) placer(); });
  window.vaNotif = {maj: maj, fermer: fermer, basculer: basculer};
  window.vaNotifToggle = basculer;
- document.addEventListener('DOMContentLoaded', function(){ sonder(); maj(); });
+ document.addEventListener('DOMContentLoaded', function(){
+  sonder(); maj();
+  // Le lien ouvert dans un nouvel onglet (clic du milieu) arrive ici.
+  if(window.location.hash === '#fa-verifier') amenerFavoris(0);
+ });
  setInterval(sonder, 5000);
 })();</script>
 <!-- Page loader global (affiché pendant la navigation) -->
@@ -18844,9 +18890,21 @@ _FA_TYPES = {"brute": "Brute", "template": "Template", "caption": "Caption"}
 
 
 def _fa_quoi(e: dict) -> str:
-    """« Brute · ibenhaastrup · tt_76375….mp4 » / « Caption · blonde · « 7 texts… » »."""
+    """« Brute · ibenhaastrup · tt_76375….mp4 » /
+    « Caption · ibenhaastrup + réserves : blonde · « 7 texts… » ».
+
+    Une proposition porte TOUT ce que Valider posera (« cibles ») : les
+    reserves ou recopier la caption, les copies du template. Le dire sur la
+    ligne, c'est ce que le proprietaire verifie avant de cliquer."""
     t = _FA_TYPES.get(e.get("type"), e.get("type") or "?")
     ident = e.get("ident") or "identité inconnue"
+    autres = []
+    for x in e.get("cibles") or []:
+        if isinstance(x, (list, tuple)) and len(x) == 2 and x[1] and x[1] != e.get("ident") \
+                and x[1] not in autres:
+            autres.append(str(x[1]))
+    if autres:
+        ident += (" + réserves : " if e.get("type") == "caption" else " + copies : ") + ", ".join(autres)
     if e.get("type") == "caption":
         cible = "« " + str(e.get("texte") or "")[:90].replace("\n", " / ") + " »"
     else:
@@ -18902,13 +18960,7 @@ _FA_JS = (
     "   .catch(function(){ btn.disabled = false; });"
     "};"
     "window.faRafraichir = function(){"
-    "  var s = document.getElementById('fa-section');"
-    "  if(!s) return;"
-    "  var ouverts = {};"
-    "  s.querySelectorAll('details[data-fa]').forEach(function(d){"
-    "    ouverts[d.getAttribute('data-fa')] = d.open;"
-    "  });"
-    "  ouverts.section = s.open;"
+    "  if(!document.getElementById('fa-section')) return;"
     "  fetch('/jailbreak/favoris_auto/section', {credentials:'same-origin'})"
     "   .then(function(r){ return r.ok ? r.text() : ''; })"
     "   .then(function(h){"
@@ -18918,6 +18970,14 @@ _FA_JS = (
     "     var n = d.firstElementChild;"
     "     var vieux = document.getElementById('fa-section');"
     "     if(!n || !vieux) return;"
+    # Ce qui est ouvert AU MOMENT DU REMPLACEMENT, pas au depart de la
+    # requete : pendant le rattrapage la section se relit toutes les 8 s, et
+    # un clic sur la notification (qui l'ouvre) pendant la requete etait
+    # defait a l'arrivee -- section refermee sous les yeux du proprietaire.
+    "     var ouverts = {section: vieux.open};"
+    "     vieux.querySelectorAll('details[data-fa]').forEach(function(x){"
+    "       ouverts[x.getAttribute('data-fa')] = x.open;"
+    "     });"
     "     n.open = !!ouverts.section;"
     "     n.querySelectorAll('details[data-fa]').forEach(function(x){"
     "       var k = x.getAttribute('data-fa');"
@@ -18946,7 +19006,12 @@ def _favoris_auto_html(avec_script: bool = True) -> str:
     UN SEUL RENDU, ICI. Apres chaque clic la page redemande ce fragment
     (/jailbreak/favoris_auto/section, sans le script) au lieu de reconstruire
     la liste en JavaScript : deux rendus finiraient par diverger, et le
-    correctif d'un cote reapparaitrait au rafraichissement."""
+    correctif d'un cote reapparaitrait au rafraichissement.
+
+    Depuis le 27/09 apres-midi (« je dois check, et pour la caption aussi »),
+    rien n'est plus etoile d'office : la liste « À vérifier » porte TOUT ce
+    que l'analyse trouve, « sûr » en tete, puis « probable ». Le centre de
+    notifications (⚠) y mene."""
     try:
         import favoris_auto as _fa
         e = _fa.etat()
@@ -18960,6 +19025,7 @@ def _favoris_auto_html(avec_script: bool = True) -> str:
     deja = [x for x in etoiles if x.get("etat") == "deja"]
     attente = [x for x in reg.get("a_confirmer") or [] if isinstance(x, dict)
                and x.get("etat") == "attente"]
+    surs = [x for x in attente if _fa.niveau(x) == "sur" and x.get("cle") and x.get("ident")]
     bangers = {k: v for k, v in (reg.get("bangers") or {}).items() if isinstance(v, dict)}
     faits = [v for v in bangers.values() if v.get("etat") == "fait"]
     ignores = [(k, v) for k, v in bangers.items() if v.get("etat") == "ignore"]
@@ -18984,17 +19050,18 @@ def _favoris_auto_html(avec_script: bool = True) -> str:
             etat += (f" · index des vidéos : {int(p.get('a_jour', 0)) + int(p.get('calculees', 0))}"
                      f"/{int(p.get('videos', 0))}")
     elif rat_en_cours:
-        etat = f"Analyse des bangers archivés demandée le {_date(rat['demande_le'])}"
+        etat = f"Analyse des bangers archivés lancée le {_date(rat['demande_le'])}"
     elif e.get("dernier"):
         d = e["dernier"]
         etat = (f"Dernier passage {_date(d.get('le'))} · {int(d.get('analyses', 0))} banger(s) "
-                f"analysé(s), {int(d.get('posees', 0))} étoile(s) posée(s)")
+                f"analysé(s), {int(d.get('a_confirmer', 0))} proposition(s)")
     elif e.get("actif"):
         etat = "En attente du prochain banger"
     else:
         etat = "Hors service sur cette machine (serveur de production seulement)"
     lignes = [f"<div class='sv-h sv-result'>{etat}</div>"]
-    resume = (f"{len(faits)} banger(s) décortiqué(s) · {len(posees)} étoile(s) posée(s)"
+    resume = (f"{len(faits)} banger(s) décortiqué(s) · {len(attente)} à vérifier · "
+              f"{len(posees)} étoile(s) validée(s)"
               + (f" · {len(deja)} déjà en place" if deja else ""))
     lignes.append(f"<div class='sv-h'>{resume}</div>")
     # RIEN D'ECARTE EN SILENCE : ce qui n'a pas ete analyse, et pourquoi.
@@ -19012,9 +19079,8 @@ def _favoris_auto_html(avec_script: bool = True) -> str:
                       + (" (plus retentées)" if any(int(v.get("essais") or 0) >= 3
                                                     for _k, v in erreurs) else "")
                       + "</div>")
-    # Etoiles SURES que la pose a refusees (ecriture, registre illisible,
-    # identite absente) : avant, le banger passait « fait » et l'erreur
-    # restait dans reg["erreurs"], que cette section n'affichait jamais.
+    # Lignes ecrites avant le 27/09 apres-midi, quand une etoile SURE dont la
+    # pose avait echoue laissait le banger « a reprendre » : toujours dites.
     reprendre = [(k, v) for k, v in bangers.items() if v.get("etat") == "a_reprendre"]
     if reprendre:
         _max = int(getattr(_fa, "ESSAIS_MAX", 3))
@@ -19033,21 +19099,32 @@ def _favoris_auto_html(avec_script: bool = True) -> str:
             for x in reversed(errs[-10:]))
         blocs_err = (f"<details class='sv-details' data-fa='erreurs'><summary>Erreurs "
                      f"({len(errs)})</summary>" + rows_err + "</details>")
-    # --- le rattrapage ---------------------------------------------------------
-    if n_rat and not rat_en_cours:
+    # --- relancer l'analyse des archives ----------------------------------------
+    # Le premier rattrapage part tout seul (favoris_auto.demarrer) ; le bouton
+    # ne reste que pour ce qu'il n'aurait pas vu, hors analyse en cours.
+    if n_rat and not en_cours:
         lignes.append(
             "<div class='sv-controls'>"
             f"<button type='button' onclick=\"faAction(this,'rattrapage','')\">"
             f"Analyser les {n_rat} banger(s) archivé(s)</button></div>")
 
-    # --- a confirmer -----------------------------------------------------------
-    def _ligne(x, boutons):
-        raison = html_escape(str(x.get("raison") or ""))
+    # --- a verifier -------------------------------------------------------------
+    def _ligne(x, boutons, avec_niveau=False):
+        raison = str(x.get("raison") or "")
+        # La raison COURTE sur la ligne, entiere au survol : une recette
+        # verifiee a l'image peut tenir trois lignes.
+        courte = raison if len(raison) <= 150 else raison[:147].rstrip() + "…"
         autres = [b for b in (x.get("bangers") or []) if b != x.get("sc")]
-        return ("<div class='sv-identity'><span>"
-                f"{html_escape(_fa_quoi(x))}<br>{_fa_banger(x)}"
+        compte = str(x.get("compte") or "").strip().lstrip("@")
+        niv = ""
+        if avec_niveau:
+            niv = "<b>" + ("sûr" if _fa.niveau(x) == "sur" else "probable") + "</b> · "
+        return ("<div class='sv-identity'><span"
+                + (f" title='{html_escape(raison)}'" if courte != raison else "") + ">"
+                f"{niv}{html_escape(_fa_quoi(x))}<br>"
+                + (f"@{html_escape(compte)} · " if compte else "") + _fa_banger(x)
                 + (f" (+{len(autres)} autre(s))" if autres else "")
-                + (f" · {raison}" if raison else "")
+                + (f" · {html_escape(courte)}" if courte else "")
                 + "</span><span>" + boutons + "</span></div>")
 
     def _bouton(op, x, mot):
@@ -19057,12 +19134,22 @@ def _favoris_auto_html(avec_script: bool = True) -> str:
     blocs = []
     if attente:
         rows = []
-        for x in sorted(attente, key=lambda y: -int(y.get("vues") or 0))[:60]:
+        if surs:
+            # Un clic pour toutes les « sûres » (celles qui etaient posees
+            # d'office avant), apres confirmation : c'est un lot d'etoiles.
+            _pl = "s" if len(surs) > 1 else ""
+            rows.append(
+                "<div class='sv-controls'><button type='button' onclick=\"if(confirm("
+                f"'Poser les étoiles de {len(surs)} proposition{_pl} sûre{_pl} ?'))"
+                f"faAction(this,'valider_surs','')\">Valider les sûres ({len(surs)})</button></div>")
+        ordre = sorted(attente, key=lambda y: (0 if _fa.niveau(y) == "sur" else 1,
+                                                -int(y.get("vues") or 0)))
+        for x in ordre[:60]:
             b = (_bouton("valider", x, "Valider") if x.get("cle") and x.get("ident") else "")
-            rows.append(_ligne(x, b + _bouton("refuser", x, "Refuser")))
+            rows.append(_ligne(x, b + _bouton("refuser", x, "Refuser"), avec_niveau=True))
         plus = len(attente) - 60
         blocs.append(
-            f"<details class='sv-details' data-fa='attente' open><summary>À confirmer "
+            f"<details class='sv-details' data-fa='attente' open><summary>À vérifier "
             f"({len(attente)})</summary>" + "".join(rows)
             + (f"<div class='sv-h'>+ {plus} autre(s), les moins vues</div>" if plus > 0 else "")
             + "</details>")
@@ -19097,7 +19184,7 @@ def _favoris_auto_html(avec_script: bool = True) -> str:
             f"data-en-cours='{1 if en_cours else 0}'"
             + (" open" if attente else "") + ">"
             "<summary class='sv-heading'><b>Favoris automatiques</b>"
-            f"<span>{len(posees)} étoile(s) · {len(attente)} à confirmer</span>"
+            f"<span>{len(attente)} à vérifier · {len(posees)} étoile(s)</span>"
             "<span class='sv-manage'>Gérer</span></summary>"
             + "".join(lignes) + "".join(blocs) + "</details>"
             + (f"<script>{_FA_JS}</script>" if avec_script else ""))
@@ -55532,12 +55619,14 @@ def _brancher_favoris_auto():
 
 def _start_favoris_auto_daemon() -> bool:
     """Le fil des favoris automatiques : chaque banger archive est decortique
-    (brute, template, caption) et ce qui est SUR passe en ⭐.
+    (brute, template, caption) et ce qu'il trouve est PROPOSE dans « À
+    vérifier » -- plus aucune etoile d'office depuis le 27/09 apres-midi.
 
     Meme garde de machine que all-banger : le poste de dev a son propre
-    data/, il etoilerait sur des donnees qui ne sont pas celles du VPS.
+    data/, il proposerait sur des donnees qui ne sont pas celles du VPS.
     Branche sur all_banger (APRES_ARCHIVAGE) pour les nouveaux bangers ; le
-    rattrapage des anciens se lance depuis le site, pas au demarrage."""
+    rattrapage des anciens part tout seul, une fois, derriere eux
+    (favoris_auto.demarrer)."""
     if not _machine_proprietaire("favoris-auto"):
         return False
     _fa = _brancher_favoris_auto()
@@ -56778,8 +56867,8 @@ def create_app():
         _start_all_banger_daemon()
     except Exception as _e:
         log.warning(f"all-banger non démarré: {_e}")
-    # Favoris automatiques : chaque banger archivé est décortiqué, ce qui est
-    # sûr passe en ⭐ (brute, template, caption), le reste attend sur le site.
+    # Favoris automatiques : chaque banger archivé est décortiqué, ce qu'il a
+    # donné (brute, template, caption) attend la validation sur le site.
     try:
         _start_favoris_auto_daemon()
     except Exception as _e:
@@ -62183,6 +62272,17 @@ def create_app():
         # Un template peut etre a la fois « a relire » et « a verifier » : on
         # compte des FICHIERS, pas des lignes.
         etat["desactives_masques"] = len(set(_ec))
+        # Les favoris des bangers A VERIFIER (demande du proprietaire du
+        # 27/09 : plus d'etoile automatique, une notification a la place).
+        # Acces complet seulement : la liste vit sous /jailbreak/, fermee aux
+        # roles restreints -- la ligne menerait a un ecran interdit.
+        etat["favoris_a_verifier"] = 0
+        if _is_admin():
+            try:
+                import favoris_auto as _fa_n
+                etat["favoris_a_verifier"] = int(_fa_n.nb_a_verifier())
+            except Exception as _e_fa:                        # noqa: BLE001
+                log.warning(f"[favoris-auto] compte a verifier illisible : {_e_fa}")
         return jsonify({"ok": True, **etat})
 
     @app.route("/a-relire/valider_montage", methods=["POST"])
@@ -68779,8 +68879,9 @@ def create_app():
 
     @app.route("/jailbreak/favoris_auto/action", methods=["POST"])
     def jailbreak_favoris_auto_action():
-        """Retirer une etoile posee par l'automatisme, valider ou refuser une
-        proposition, lancer l'analyse des bangers archives.
+        """Valider ou refuser une proposition de « À vérifier » (ou toutes les
+        « sûres » d'un coup), retirer une etoile validee, relancer l'analyse
+        des bangers archives.
 
         Sous /jailbreak/ : refusee aux roles restreints (_ADMIN_ONLY_WRITE),
         comme les autres reglages de cette page."""
@@ -68801,8 +68902,20 @@ def create_app():
                 # Ce qui a ete fait autrement qu'attendu (caption ajoutee
                 # introuvable par son id : rien supprime) se dit au clic.
                 msg += " · " + " ; ".join(str(n) for n in r["notes"][:3])
-        elif op == "valider":
-            r, msg = _fa.trancher(eid, True, par=par), "Étoile posée"
+        elif op in ("valider", "valider_surs"):
+            if op == "valider":
+                r = _fa.trancher(eid, True, par=par)
+                n = int(r.get("posees") or 0)
+                msg = (f"{n} étoile(s) posée(s)" if n else "Déjà en place")
+            else:
+                r = _fa.valider_surs(par=par)
+                n = int(r.get("posees") or 0)
+                msg = (f"{int(r.get('validees') or 0)} proposition(s) validée(s), "
+                       f"{n} étoile(s) posée(s)" if r.get("lignes") else "Aucune proposition sûre")
+            if r.get("erreurs"):
+                # Une copie non posee (reserve pleine, registre illisible) :
+                # dite au clic, jamais tue.
+                msg += " · non posée(s) : " + " ; ".join(str(x) for x in r["erreurs"][:3])
         elif op == "refuser":
             r, msg = _fa.trancher(eid, False, par=par), "Proposition écartée — elle ne reviendra pas"
         elif op == "rattrapage":
@@ -68812,8 +68925,7 @@ def create_app():
             _start_favoris_auto_daemon()
             r = _fa.demander_rattrapage(par=par)
             msg = ("Analyse déjà en cours" if r.get("deja") else
-                   "Analyse des bangers archivés lancée (la première fois, l'index du "
-                   "vault prend une à deux heures)")
+                   "Analyse des bangers archivés relancée")
         else:
             return jsonify({"ok": False, "error": "action inconnue"}), 400
         if not r.get("ok"):

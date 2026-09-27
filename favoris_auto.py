@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Favoris automatiques : ce qui a fait un banger passe en ⭐ tout seul.
+"""Favoris des bangers : ce qui a fait un banger est PROPOSE en ⭐, a verifier.
 
 LA DEMANDE (27/09/2026)
     Les reels qui font des vues deviennent des bangers (bangers.py,
@@ -14,6 +14,17 @@ LA DEMANDE (27/09/2026)
     ibenhaastrup/brutes/tt_7637556520955251990.mp4 ⭐, caption « 7 texts that
     make her want you baddd😱 » ⭐ dans ibenhaastrup puis dans blonde.
 
+PLUS AUCUNE ETOILE AUTOMATIQUE (demande du proprietaire, 27/09/2026 apres-midi)
+    « tu peux pas mettre automatiquement dans banger stp, juste tu me mets une
+    notif a verifier [...] en mode je dois check, et pour la caption aussi ».
+    L'analyse est la meme (seuils, refus memorises, variantes, registres) ;
+    ce qui change, c'est QUI pose l'etoile. Tout ce qu'elle trouve, « sur »
+    compris, devient une proposition de la liste « À vérifier » (niveau
+    « sûr » ou « probable ») ; le bouton Valider pose exactement ce que la
+    pose automatique posait (brute ; caption + reserves liees ; template et
+    ses copies), Refuser memorise le refus. Le centre de notifications du site
+    (⚠ du selecteur de marche) compte ces propositions.
+
 GRATUIT, ET OU CA TOURNE
     Aucun appel reseau. ffmpeg (images reduites a 17x16) et Tesseract
     (analyse_gratuite.transcrire_tesseract, JAMAIS lire_capture ni
@@ -21,9 +32,10 @@ GRATUIT, ET OU CA TOURNE
     nice 19, dans un SOUS-PROCESSUS (`python favoris_auto.py analyser ...`) :
     plusieurs secondes de calcul Python par banger ne doivent pas prendre le
     verrou de l'interpreteur du bot et du site. Seule la pose des etoiles
-    (quelques ecritures JSON) se fait dans le processus principal, par les
-    fonctions du site qu'on nous branche (brancher()). Aucun HikerAPI, aucun
-    Apify, aucune API d'IA : ce module n'importe rien qui parle au reseau.
+    (quelques ecritures JSON, au clic sur Valider) se fait dans le processus
+    principal, par les fonctions du site qu'on nous branche (brancher()).
+    Aucun HikerAPI, aucun Apify, aucune API d'IA : ce module n'importe rien
+    qui parle au reseau.
 
 DEUX CHEMINS POUR RETROUVER LA RECETTE
     1. LA LIVRAISON (le plus fiable). Chaque video livree par le bot est
@@ -41,14 +53,16 @@ DEUX CHEMINS POUR RETROUVER LA RECETTE
 
 SEUILS : calibres le 27/09/2026 sur les 152 bangers du VPS, en lecture seule
     (scratchpad/favoris_explo.md, §6). dHash 256 bits sur des images 17x16.
-    Une etoile n'est posee AUTOMATIQUEMENT que si la correspondance est SURE ;
-    le reste va dans « À confirmer », avec la raison et le score.
+    Ils ne decident plus d'une etoile, seulement du NIVEAU de la proposition :
+    « sûr » (ce qui etait pose d'office avant) ou « probable » (l'ancien
+    « À confirmer »), avec la raison et le score.
 
 RIEN N'EST ECARTE EN SILENCE
     Chaque banger traite a une ligne dans le registre (data/favoris_auto.json)
     avec ce qui a ete decide et pourquoi ; ceux qu'on ne traite pas (hors
-    equipe, sans video) sont comptes et montres. Une etoile retiree a la main
-    ne revient pas : le refus est memorise.
+    equipe, sans video) sont comptes et montres. Une proposition refusee, ou
+    une etoile validee puis retiree a la main, ne revient pas : le refus est
+    memorise (variantes du texte comprises).
 """
 from __future__ import annotations
 
@@ -112,7 +126,8 @@ def dossier_identites() -> Path:
 # ------------------------------------------------------------------ seuils --
 #
 # Les chiffres ci-dessous viennent de la calibration (favoris_explo.md §5-6).
-# Les changer sans refaire la calibration, c'est etoiler au hasard.
+# Les changer sans refaire la calibration, c'est classer au hasard (« sûr » /
+# « probable » : l'ordre dans lequel le proprietaire verifie).
 
 L, H = 17, 16                  # 16 x 16 differences = 256 bits (empreintes_video)
 RELIEF_MIN = 6.0               # image unie (fondu, noir) : ne dit rien
@@ -1624,7 +1639,7 @@ def _depuis_recette(a: dict, liv: dict, video, corpus, ocr, bf=None, index_brute
                   raison + f" ; template pas confirmé ({vt.get('raison')})",
                   dict(score, tpl_med=vt.get("med"), tpl_par=vt.get("par")))
     if liv.get("reel"):
-        a["notes"].append("reel prêt livré : pas d'étoile automatique "
+        a["notes"].append("reel prêt livré : rien à proposer "
                           "(l'étoile des reels publie sur Discord)")
     if liv.get("media") or liv.get("media_nom"):
         a["notes"].append(f"vidéo livrée hors brutes/templates "
@@ -1875,7 +1890,9 @@ def charger() -> dict:
 
 
 def _ecrire(d: dict) -> bool:
-    return bool(safe_json.write(fichier_registre(), d, indent=1))
+    ok = bool(safe_json.write(fichier_registre(), d, indent=1))
+    _oublier_compte()
+    return ok
 
 
 #: Les fonctions du site qui posent vraiment les etoiles (web_upload les
@@ -1965,11 +1982,114 @@ def _id() -> str:
     return uuid.uuid4().hex[:10]
 
 
-def appliquer(a: dict) -> dict:
-    """Pose les etoiles SURES d'une analyse, range le reste dans « À confirmer ».
+def niveau(e: dict) -> str:
+    """« sur » ou « probable » : l'ordre de la liste « À vérifier ».
 
-    Rend {posees, deja, a_confirmer, refusees, erreurs}. Tout ce qui n'est pas
-    pose a sa raison dans le registre."""
+    Les lignes d'avant le 27/09 apres-midi n'ont pas le champ : elles etaient
+    toutes « À confirmer », donc « probable »."""
+    n = str(e.get("niveau") or "")
+    if n in ("sur", "probable"):
+        return n
+    return "sur" if e.get("decision") == "sur" else "probable"
+
+
+def cibles(e: dict) -> List[Tuple[str, str, str]]:
+    """[(type, cle, ident)] : tout ce que Valider posera pour cette ligne.
+
+    Une ligne porte TOUTES les copies que la pose automatique etoilait
+    ensemble (la caption et ses reserves liees, le template et ses copies) :
+    le proprietaire tranche l'objet une fois, pas chaque copie. Une ligne
+    d'avant (sans « cibles ») n'a que sa cle."""
+    out, vus = [], set()
+    for x in e.get("cibles") or []:
+        if isinstance(x, (list, tuple)) and len(x) == 2 and x[0] and x[0] not in vus:
+            vus.add(x[0])
+            out.append((e.get("type") or "", str(x[0]), str(x[1] or "")))
+    if not out and e.get("cle"):
+        out = [(e.get("type") or "", e["cle"], e.get("ident") or "")]
+    return out
+
+
+def _objet(type_: str, ident: str, cle: str, texte: str = "") -> tuple:
+    """CE QUE LE PROPRIETAIRE TRANCHE : une brute ; un template POUR une
+    identite ; une caption POUR une identite (sans identite : le texte seul).
+
+    Deux bangers qui proposent le meme objet partagent UNE ligne. Avant, la
+    ligne se retrouvait par N'IMPORTE QUELLE de ses cles : or une reserve
+    (Blonde, Brune...) est liee a plusieurs models, et la caption « probable »
+    de mod_a et la caption « sûre » de mod_b (meme texte) se rejoignaient par
+    la cle de la reserve -- une seule ligne, passee « sûr », que « Valider
+    les sûres » etoilait dans mod_a sur une preuve seulement probable, en
+    presentant mod_b comme une « réserve »."""
+    cle = cle or ""
+    if type_ == "caption" and str(texte or "").strip():
+        return ("caption", (ident or "") if cle else "", _cle_texte(texte)[:120])
+    if not cle:
+        # Rien pour reconnaitre l'objet : une ligne a part, jamais fusionnee
+        # avec une autre ligne sans cle (qui parlerait d'autre chose).
+        return (type_ or "", "?" + uuid.uuid4().hex)
+    if type_ == "template":
+        return ("template", ident or "", cle.split("|")[-1])
+    if type_ == "caption":
+        return ("caption", ident or "", cle.split("|")[-1])
+    return (type_ or "", cle)
+
+
+def _objet_ligne(e: dict) -> tuple:
+    o = e.get("objet")
+    if isinstance(o, (list, tuple)) and o:
+        return tuple(o)
+    # Ligne ecrite avant ce champ : son identite principale en tient lieu.
+    return _objet(e.get("type") or "", e.get("ident") or "", e.get("cle") or "", e.get("texte") or "")
+
+
+def _cle_sans_identite(texte: str) -> str:
+    """La cle sous laquelle se REFUSE une caption lue sans identite (pas de
+    bibliotheque ou la poser). Sans elle, refuser la ligne ne retenait rien :
+    le banger suivant au meme texte la reproposait. Meme forme que les autres
+    (« |captions|<texte> ») : _refus_de y retrouve aussi les variantes."""
+    k = _cle_texte(texte)[:120] if str(texte or "").strip() else ""
+    return f"|captions|{k}" if k else ""
+
+
+def _grouper(propositions: list) -> List[List[dict]]:
+    """Les propositions d'une analyse, UNE ligne par objet : la brute ; le
+    template (copies de l'identite, de ses reserves, et celle qui a servi) ;
+    la caption (identite puis reserves liees). _proposer_template et
+    _proposer_caption en font une par copie : c'etait l'unite de la pose
+    automatique, pas celle d'une decision du proprietaire."""
+    groupes: Dict[tuple, List[dict]] = {}
+    for p in propositions:
+        if not isinstance(p, dict):
+            continue
+        t, cle = p.get("type") or "", p.get("cle") or ""
+        if t == "template" and cle:
+            k = (t, cle.split("|")[-1])
+        elif t == "caption" and str(p.get("texte") or "").strip():
+            k = (t, _cle_texte(p.get("texte"))[:120], bool(cle))
+        else:
+            k = (t, cle or id(p))
+        groupes.setdefault(k, []).append(p)
+    return list(groupes.values())
+
+
+def appliquer(a: dict) -> dict:
+    """Range les propositions d'une analyse dans « À vérifier ». NE POSE RIEN.
+
+    Demande du proprietaire du 27/09/2026 : plus aucune etoile automatique,
+    « juste une notif a verifier ». Ce qui etait pose d'office devient une
+    ligne de niveau « sûr », le reste une ligne « probable » ; Valider (trancher)
+    pose ensuite exactement ce que la pose automatique posait.
+
+    Ce qui ne donne PAS de ligne, avec sa trace sur la ligne du banger :
+      - une cle refusee (variante du texte comprise), ou une etoile validee
+        puis retiree a la main sur le site (le refus est alors memorise) ;
+      - une cle deja ⭐ (par le proprietaire ou une validation).
+    Un objet deja en attente (propose par un autre banger) ne se double pas :
+    la ligne existante gagne ce banger, et passe « sûr » si celui-ci l'est.
+
+    Rend {posees (toujours 0), deja, a_confirmer (lignes creees), refusees,
+    erreurs}."""
     bilan = {"posees": 0, "deja": 0, "a_confirmer": 0, "refusees": 0, "erreurs": 0}
     now = int(time.time())
     with _VERROU:
@@ -1986,88 +2106,129 @@ def appliquer(a: dict) -> dict:
             if isinstance(a.get(k), dict):
                 ligne[k] = {kk: vv for kk, vv in a[k].items()
                             if kk not in ("preselection", "candidats", "lectures", "items")}
-        actives = {(e["type"], e["cle"]): e for e in reg["etoiles"] if e.get("etat") == "posee"}
-        attente = {(e["type"], e["cle"]): e for e in reg["a_confirmer"] if e.get("etat") == "attente"}
-        for p in a.get("propositions") or []:
-            t, cle, ident, texte = p["type"], p.get("cle") or "", p.get("ident") or "", p.get("texte") or ""
-            rk = _refus_de(reg, t, cle, texte) or _refus_cle(t, cle)
-            if cle and rk in reg["refus"]:
-                bilan["refusees"] += 1
-                ligne["notes"].append(f"{t} {cle.split('|')[-1][:60]} : refusé auparavant, pas reposé")
+        actives = {(e["type"], e["cle"]): e for e in reg["etoiles"]
+                   if isinstance(e, dict) and e.get("etat") == "posee"}
+        journal_deja = {(e.get("type"), e.get("cle")) for e in reg["etoiles"]
+                        if isinstance(e, dict) and e.get("etat") == "deja"}
+        # L'OBJET d'une ligne en attente -> la ligne : le meme objet propose
+        # par un autre banger la rejoint (_objet : jamais par la cle d'une
+        # reserve partagee entre deux models).
+        attente: Dict[tuple, dict] = {}
+        for e in reg["a_confirmer"]:
+            if isinstance(e, dict) and e.get("etat") == "attente":
+                attente.setdefault(_objet_ligne(e), e)
+        for groupe in _grouper(a.get("propositions") or []):
+            p0 = groupe[0]
+            t = p0.get("type") or ""
+            texte = p0.get("texte") or ""
+            niv = "sur" if all(p.get("decision") == "sur" for p in groupe) else "probable"
+            obj = _objet(t, p0.get("ident") or "", p0.get("cle") or "", texte)
+            membres = list(groupe)
+            if t == "caption" and p0.get("cle") and p0.get("ident"):
+                # Valider une caption la recopie dans les reserves liees : la
+                # ligne les NOMME des maintenant (« caption + réserves visées »),
+                # une caption « probable » comprise (_proposer_caption ne
+                # propose alors que l'identite).
+                # Par IDENTITE : une caption vaut une ligne par bibliotheque,
+                # quelle que soit l'ecriture de sa cle.
+                deja_la = {p.get("ident") for p in membres}
+                k = _cle_texte(texte)[:120]
+                for r in _reserves(p0["ident"]):
+                    if r not in deja_la:
+                        membres.append(dict(p0, cle=f"{r}|captions|{k}", ident=r))
+            # L'OBJET REFUSE NE REVIENT PAS, SOUS AUCUNE COPIE. Refuser (ou
+            # retirer) la copie de l'identite, c'est refuser l'objet pour
+            # elle : avant, un template refuse en « probable » (sa seule copie)
+            # revenait par la copie de la reserve des qu'un banger « sûr » le
+            # proposait, et une caption refusee revenait par une reserve liee
+            # apres coup. Une caption sans identite se refuse par son texte.
+            cle0 = p0.get("cle") or (_cle_sans_identite(texte) if t == "caption" else "")
+            rk0 = _refus_de(reg, t, cle0, texte) if cle0 else ""
+            if rk0:
+                # Compte par COPIE ecartee (identite + reserves), comme le
+                # refus copie par copie : le bilan ne change pas de sens.
+                bilan["refusees"] += len([p for p in membres if p.get("cle")]) or 1
+                ligne["notes"].append(f"{t} {(cle0.split('|')[-1] or texte)[:60]} "
+                                      f"({p0.get('ident') or 'sans identité'}) : refusé auparavant, "
+                                      "pas reproposé")
                 continue
-            if p["decision"] == "sur" and cle:
+            retenues: List[list] = []
+            retiree_identite = False
+            for p in membres:
+                cle, ident = p.get("cle") or "", p.get("ident") or ""
+                if not cle:
+                    continue
+                rk = _refus_de(reg, t, cle, texte) or _refus_cle(t, cle)
+                if rk in reg["refus"]:
+                    bilan["refusees"] += 1
+                    ligne["notes"].append(f"{t} {cle.split('|')[-1][:60]} ({ident}) : "
+                                          "refusé auparavant, pas reproposé")
+                    continue
                 deja = _deja_etoile(t, cle, ident, texte)
                 ancienne = actives.get((t, cle))
                 if ancienne and deja is False:
-                    # Posee par nous, retiree a la main depuis : c'est un refus.
-                    # Seulement sur un registre RELU (deja is False) : dans le
-                    # doute (None, registre illisible), on repose plus bas, et
-                    # un echec se compte -- jamais un refus pour toujours.
+                    # Validee par le proprietaire, retiree a la main depuis :
+                    # c'est un refus. Seulement sur un registre RELU (False) :
+                    # dans le doute (None), la ligne est proposee.
                     ancienne["etat"] = "retiree_a_la_main"
                     reg["refus"][rk] = {"le": now, "motif": "étoile retirée à la main", "sc": sc}
                     bilan["refusees"] += 1
-                    continue
-                if deja and ancienne:
-                    # Deja posee par NOUS (banger repris apres un echec, ou
-                    # rejoue) : une seconde ligne « deja » doublerait le journal.
-                    bilan["deja"] += 1
+                    if p is p0:
+                        # La copie de l'identite retiree : l'objet est refuse
+                        # pour elle, ses reserves ne sont pas reproposees.
+                        retiree_identite = True
+                        break
                     continue
                 if deja:
-                    reg["etoiles"].append({"id": _id(), "sc": sc, "vues": a.get("vues"), "type": t,
-                                           "cle": cle, "ident": ident, "texte": texte,
-                                           "source": a.get("methode"), "raison": p["raison"],
-                                           "score": p["score"], "le": now, "etat": "deja"})
                     bilan["deja"] += 1
+                    ligne["notes"].append(f"{t} {cle.split('|')[-1][:60]} ({ident}) : "
+                                          "déjà ⭐, rien à vérifier")
+                    if not ancienne and p.get("decision") == "sur" and (t, cle) not in journal_deja:
+                        # Le journal garde qu'un banger SUR a confirme une
+                        # etoile deja en place (« N déjà en place » a l'ecran).
+                        reg["etoiles"].append({"id": _id(), "sc": sc, "vues": a.get("vues"),
+                                               "type": t, "cle": cle, "ident": ident,
+                                               "texte": texte, "source": a.get("methode"),
+                                               "raison": p.get("raison"), "score": p.get("score"),
+                                               "le": now, "etat": "deja"})
+                        journal_deja.add((t, cle))
                     continue
-                r = _poser(t, cle, ident, texte, True)
-                if not r.get("ok"):
-                    bilan["erreurs"] += 1
-                    ligne["notes"].append(f"{t} non posée : {r.get('erreur')}")
-                    _noter_erreur(reg, sc, f"{t} {cle} : {r.get('erreur')}")
-                    continue
-                reg["etoiles"].append({"id": _id(), "sc": sc, "vues": a.get("vues"), "type": t,
-                                       "cle": cle, "ident": ident, "texte": texte,
-                                       "source": a.get("methode"), "raison": p["raison"],
-                                       "score": p["score"], "le": now, "etat": "posee",
-                                       "ajoutee": bool(r.get("ajoutee")),
-                                       "caption_id": r.get("id") or "",
-                                       **({"note": "caption hors tirage (désactivée)"}
-                                          if r.get("desactivee") else {})})
-                bilan["posees"] += 1
-                # Une proposition restee en attente pour la meme cle est
-                # tranchee par cette preuve-ci.
-                e_att = attente.pop((t, cle), None)
-                if e_att:
-                    e_att.update(etat="valide", tranche_le=now, par="confirmé par " + sc)
+                if cle not in {x[0] for x in retenues}:
+                    retenues.append([cle, ident])
+            if retiree_identite or (not retenues and any(p.get("cle") for p in groupe)):
+                continue            # tout refuse ou deja ⭐ : dit sur la ligne du banger
+            existante = attente.get(obj)
+            if existante:
+                if sc and sc not in existante.setdefault("bangers", []):
+                    existante["bangers"].append(sc)
+                connues = {c for _t, c, _i in cibles(existante)}
+                if not existante.get("cibles"):
+                    existante["cibles"] = [[c, i] for _t, c, i in cibles(existante)]
+                existante["cibles"] += [x for x in retenues if x[0] not in connues]
+                if niv == "sur" and niveau(existante) != "sur":
+                    # Un banger SUR confirme une ligne « probable » : elle
+                    # passe en tete, avec la preuve de ce banger-la. Avant,
+                    # l'etoile etait posee d'office ; c'est au proprietaire.
+                    existante.update(niveau="sur", decision="sur", raison=p0.get("raison"),
+                                     score=p0.get("score"), sc=sc, vues=a.get("vues"),
+                                     url=a.get("url"), compte=a.get("compte") or "",
+                                     confirme_par=sc, confirme_le=now)
                 continue
-            # --- a confirmer --------------------------------------------------
-            if cle and (t, cle) in actives:
-                continue                   # deja posee par un banger plus sur
-            if cle and _deja_etoile(t, cle, ident, texte):
-                ligne["notes"].append(f"{t} {cle.split('|')[-1][:60]} : déjà ⭐, rien à confirmer")
-                continue
-            e_att = attente.get((t, cle)) if cle else None
-            if e_att:
-                if sc not in e_att.setdefault("bangers", []):
-                    e_att["bangers"].append(sc)
-                continue
-            e = {"id": _id(), "sc": sc, "bangers": [sc], "vues": a.get("vues"), "type": t,
-                 "cle": cle, "ident": ident, "texte": texte, "raison": p["raison"],
-                 "score": p["score"], "le": now, "etat": "attente", "url": a.get("url")}
+            principale = retenues[0] if retenues else ["", p0.get("ident") or ""]
+            e = {"id": _id(), "sc": sc, "bangers": [sc], "vues": a.get("vues"),
+                 "compte": a.get("compte") or "", "url": a.get("url"), "type": t,
+                 "cle": principale[0], "ident": principale[1], "cibles": retenues,
+                 "texte": texte, "niveau": niv, "decision": "sur" if niv == "sur" else "a_confirmer",
+                 "raison": p0.get("raison"), "score": p0.get("score"),
+                 "methode": a.get("methode") or "", "le": now, "etat": "attente",
+                 "objet": list(obj)}
             reg["a_confirmer"].append(e)
-            if cle:
-                attente[(t, cle)] = e
+            attente[obj] = e
             bilan["a_confirmer"] += 1
         ligne["bilan"] = bilan
-        if bilan["erreurs"]:
-            # Au moins une etoile SURE n'a pas pu etre posee (ecriture
-            # refusee, registre illisible, identite absente). Avant, le banger
-            # passait « fait » quand meme : jamais repris, l'etoile perdue pour
-            # de bon, et l'erreur rangee la ou l'ecran ne regardait pas. Il
-            # est repris au passage suivant, ESSAIS_MAX fois au plus.
-            prec = reg["bangers"].get(sc) or {}
-            essais = (int(prec.get("essais") or 0) if prec.get("etat") == "a_reprendre" else 0) + 1
-            ligne.update(etat="a_reprendre", essais=essais, non_posees=bilan["erreurs"])
+        # Plus de pose ici, donc plus d'echec de pose : un banger analyse est
+        # « fait ». (« a_reprendre » reste compris a la relecture, pour une
+        # ligne ecrite avant.)
         reg["bangers"][sc] = ligne
         _ecrire(reg)
     return bilan
@@ -2083,17 +2244,17 @@ def _trouver(liste: list, eid: str) -> Optional[dict]:
 
 
 def annuler(eid: str, par: str = "") -> dict:
-    """Retire une etoile POSEE par l'automatisme, et memorise le refus : elle
-    ne reviendra pas au passage suivant. Une caption qu'on avait AJOUTEE a la
-    bibliotheque en repart (etat d'avant) ; une caption qui y etait deja garde
-    son texte, sans l'etoile."""
+    """Retire une etoile posee depuis cette liste (Valider ; ou d'office avant
+    le 27/09 apres-midi), et memorise le refus : elle ne sera plus proposee.
+    Une caption qu'on avait AJOUTEE a la bibliotheque en repart (etat
+    d'avant) ; une caption qui y etait deja garde son texte, sans l'etoile."""
     with _VERROU:
         reg = charger()
         e = _trouver(reg["etoiles"], eid)
         if not e:
             return {"ok": False, "erreur": "étoile inconnue"}
         if e.get("etat") != "posee":
-            return {"ok": False, "erreur": "cette étoile n'a pas été posée par l'automatisme"
+            return {"ok": False, "erreur": "cette étoile n'a pas été posée depuis cette liste"
                     if e.get("etat") == "deja" else "déjà retirée"}
         # UN CLIC DEFAIT CE QU'UN BANGER A POSE ENSEMBLE : la caption et ses
         # copies dans les reserves, le template et ses copies. Sinon « Retirer »
@@ -2134,7 +2295,14 @@ def _meme_objet(x: dict, e: dict) -> bool:
 
 
 def trancher(eid: str, valider: bool, par: str = "") -> dict:
-    """Valide (pose l'etoile proposee) ou refuse (memorise) une proposition."""
+    """Valide ou refuse UNE ligne de « À vérifier ».
+
+    Valider pose exactement ce que la pose automatique posait : chaque cible
+    de la ligne (la brute ; la caption, ajoutee si besoin, ⭐ dans l'identite
+    ET ses reserves liees ; le template et ses copies), par les fonctions du
+    site, sans Discord. Une reserve qui a refuse le texte (meme en variante)
+    n'est pas servie. Refuser memorise le refus de CHAQUE cible : l'objet ne
+    revient pas, meme propose par un autre banger."""
     with _VERROU:
         reg = charger()
         e = _trouver(reg["a_confirmer"], eid)
@@ -2143,47 +2311,107 @@ def trancher(eid: str, valider: bool, par: str = "") -> dict:
         if e.get("etat") != "attente":
             return {"ok": False, "erreur": "déjà tranchée"}
         now = int(time.time())
+        cs = cibles(e)
         if not valider:
             e.update(etat="refuse", tranche_le=now, par=par)
-            if e.get("cle"):
-                reg["refus"][_refus_cle(e["type"], e["cle"])] = {"le": now, "motif": "refusée",
-                                                                  "sc": e.get("sc"), "par": par}
+            if not cs and e.get("type") == "caption" and _cle_sans_identite(e.get("texte")):
+                # Caption lue SANS identite : rien a poser, mais le refus doit
+                # tenir -- sinon le banger suivant au meme texte la reproposait.
+                cs = [("caption", _cle_sans_identite(e.get("texte")), "")]
+            for t, cle, _i in cs:
+                reg["refus"][_refus_cle(t, cle)] = {"le": now, "motif": "refusée",
+                                                    "sc": e.get("sc"), "par": par}
             _ecrire(reg)
-            return {"ok": True}
+            return {"ok": True, "refusees": len(cs)}
         if not e.get("cle") or not e.get("ident"):
             return {"ok": False, "erreur": "identité inconnue : rien à poser. Étoile la bonne "
                                            "copie dans la Bibliothèque, puis refuse cette ligne."}
-        cles = [(e["type"], e["cle"], e["ident"])]
         if e["type"] == "caption":
-            # Valider une caption, c'est aussi la recopier dans les reserves
-            # liees, comme une caption sure.
-            cles += [("caption", f"{r}|captions|{_cle_texte(e.get('texte'))[:120]}", r)
-                     for r in _reserves(e["ident"])]
-        poses = []
-        for t, cle, ident in cles:
+            # Les reserves liees d'AUJOURD'HUI aussi : un lien pose depuis la
+            # proposition sert a la validation (et une ligne d'avant, sans
+            # « cibles », garde sa recopie).
+            k = _cle_texte(e.get("texte"))[:120]
+            connues = {i for _t, _c, i in cs}
+            cs += [("caption", f"{r}|captions|{k}", r) for r in _reserves(e["ident"])
+                   if r not in connues]
+        poses, deja_n, erreurs = [], 0, []
+        for t, cle, ident in cs:
             # Refusee, meme sous une VARIANTE du texte (_refus_de) : valider
             # une caption ne la recopie pas dans une reserve qui l'a refusee.
             if _refus_de(reg, t, cle, e.get("texte") or "") and cle != e["cle"]:
                 continue
-            deja = _deja_etoile(t, cle, ident, e.get("texte") or "")
-            if deja:
+            if _deja_etoile(t, cle, ident, e.get("texte") or ""):
+                deja_n += 1
                 continue
             r = _poser(t, cle, ident, e.get("texte") or "", True)
             if not r.get("ok"):
-                if not poses:
-                    return {"ok": False, "erreur": r.get("erreur") or "échec"}
+                erreurs.append(f"{ident or '?'} : {r.get('erreur') or 'échec'}")
                 continue
             reg["etoiles"].append({"id": _id(), "sc": e.get("sc"), "vues": e.get("vues"),
                                    "type": t, "cle": cle, "ident": ident,
                                    "texte": e.get("texte") or "", "source": "validée à la main",
                                    "raison": e.get("raison"), "score": e.get("score"),
                                    "le": now, "etat": "posee", "ajoutee": bool(r.get("ajoutee")),
-                                   "caption_id": r.get("id") or "", "par": par})
+                                   "caption_id": r.get("id") or "", "par": par,
+                                   **({"note": "caption hors tirage (désactivée)"}
+                                      if r.get("desactivee") else {})})
             poses.append(cle)
+        if erreurs and not poses:
+            # Rien de pose (registre illisible, bibliotheque pleine...) : la
+            # ligne RESTE a verifier, et l'erreur est dite au clic.
+            return {"ok": False, "erreur": erreurs[0]}
         reg["refus"].pop(_refus_cle(e["type"], e["cle"]), None)
         e.update(etat="valide", tranche_le=now, par=par)
+        if erreurs:
+            e["non_posees"] = erreurs[:6]
         _ecrire(reg)
-    return {"ok": True, "posees": len(poses)}
+    return {"ok": True, "posees": len(poses), "deja": deja_n, "erreurs": erreurs}
+
+
+def valider_surs(par: str = "") -> dict:
+    """« Valider les sûres » : chaque ligne « sûr » en attente, comme autant de
+    clics sur Valider (memes poses, meme journal). Une ligne qui echoue reste
+    a verifier, et l'erreur est rendue ; les « probable » ne bougent pas."""
+    with _VERROU:
+        ids = [e["id"] for e in charger()["a_confirmer"]
+               if isinstance(e, dict) and e.get("etat") == "attente" and niveau(e) == "sur"
+               and e.get("cle") and e.get("ident") and e.get("id")]
+        validees, posees, erreurs = 0, 0, []
+        for eid in ids:
+            r = trancher(eid, True, par=par)
+            if r.get("ok"):
+                validees += 1
+                posees += int(r.get("posees") or 0)
+                erreurs += list(r.get("erreurs") or [])
+            else:
+                erreurs.append(str(r.get("erreur") or "échec"))
+    return {"ok": True, "lignes": len(ids), "validees": validees, "posees": posees,
+            "erreurs": erreurs}
+
+
+#: (fichier, taille, date, inode) -> nombre de lignes en attente. Le centre de
+#: notifications le demande toutes les 5 s par page ouverte : relire et
+#: decoder le registre a chaque fois pour un seul nombre couterait pour rien.
+_CACHE_NB: Dict[str, object] = {"sig": None, "n": 0}
+
+
+def _oublier_compte() -> None:
+    _CACHE_NB.update(sig=None, n=0)
+
+
+def nb_a_verifier() -> int:
+    """Combien de propositions attendent le proprietaire (« À vérifier »)."""
+    f = fichier_registre()
+    try:
+        st = f.stat()
+    except OSError:
+        return 0
+    sig = (str(f.resolve()), st.st_size, st.st_mtime_ns, st.st_ino)
+    if _CACHE_NB.get("sig") != sig:
+        reg = charger()
+        _CACHE_NB.update(sig=sig, n=sum(1 for e in reg["a_confirmer"]
+                                        if isinstance(e, dict) and e.get("etat") == "attente"))
+    return int(_CACHE_NB.get("n") or 0)
 
 
 # ------------------------------------------------------------------ le fil --
@@ -2219,10 +2447,11 @@ def signaler(sc: str) -> None:
 
 
 def demander_rattrapage(par: str = "") -> dict:
-    """Le rattrapage des bangers deja archives : DEMANDE depuis le site, pas
-    lance tout seul au demarrage. Le premier passage calcule l'index du vault
-    (1 a 2 h a nice 19) et etoile d'un coup des dizaines de brutes : c'est au
-    proprietaire de choisir le moment."""
+    """Relance l'analyse des bangers archives jamais analyses (bouton du site).
+
+    Le premier rattrapage part TOUT SEUL (demarrer) depuis que plus rien n'est
+    pose sans le proprietaire : il ne fait que proposer. Ce bouton ne sert
+    qu'a le relancer s'il reste des bangers jamais vus."""
     with _VERROU:
         reg = charger()
         rat = reg.get("rattrapage") or {}
@@ -2302,13 +2531,15 @@ def _lancer_analyse(scs: List[str]) -> Iterable[dict]:
         raise RuntimeError(f"analyse interrompue (code {p.returncode}) : {err.strip()[-240:]}")
 
 
-def traiter(scs: List[str]) -> dict:
-    """Analyse puis applique, lot par lot. Rend un bilan."""
+def traiter(scs: List[str], deja: int = 0, total: int = 0) -> dict:
+    """Analyse puis range les propositions, lot par lot. Rend un bilan.
+    `deja` / `total` : ou en est le passage entier (rattrapage decoupe en
+    lots), pour l'ecran."""
     bilan = {"analyses": 0, "posees": 0, "a_confirmer": 0, "ignores": 0, "erreurs": 0}
     vus = set()
     for i in range(0, len(scs), LOT):
         lot = scs[i:i + LOT]
-        _ETAT["en_cours"] = f"{i + len(lot)}/{len(scs)} banger(s)"
+        _ETAT["en_cours"] = f"{deja + i + len(lot)}/{total or len(scs)} banger(s)"
         try:
             for a in _lancer_analyse(lot):
                 vus.add(a.get("sc"))
@@ -2345,14 +2576,36 @@ def _tour(tous: bool = False) -> dict:
     if purge:
         b["livraisons_purgees"] = purge
     reg = charger()
-    scs = _a_traiter(reg, tous)
-    if scs:
-        b.update(traiter(scs))
-    if tous:
-        with _VERROU:
-            reg = charger()
-            reg["rattrapage"].update(fini_le=int(time.time()), bilan=b)
-            _ecrire(reg)
+    if not tous:
+        scs = _a_traiter(reg, False)
+        if scs:
+            b.update(traiter(scs))
+        return b
+    # LE RATTRAPAGE PASSE APRES LES NOUVEAUX. Il part tout seul et dure des
+    # heures la premiere fois (index du vault, puis ~150 bangers) : d'un bloc,
+    # un banger archive pendant ce temps attendait la fin de tous les anciens.
+    # Lot par lot, et avant chaque lot, ce qui est arrive entre-temps passe
+    # devant. Un banger n'est tente qu'une fois par passage : un lot qui
+    # plante sans rien noter (« a_reprendre » d'avant) ne boucle pas.
+    tentes: set = set()
+    total = len(_a_traiter(reg, True))
+    for _k in ("analyses", "posees", "a_confirmer", "ignores", "erreurs"):
+        b[_k] = 0
+    while True:
+        reg = charger()
+        neufs = [sc for sc in _a_traiter(reg, False) if sc not in tentes]
+        anciens = [sc for sc in _a_traiter(reg, True) if sc not in tentes and sc not in neufs]
+        lot = (neufs + anciens)[:LOT]
+        if not lot:
+            break
+        tentes.update(lot)
+        r = traiter(lot, deja=len(tentes) - len(lot), total=max(total, len(tentes)))
+        for _k, _v in r.items():
+            b[_k] = b.get(_k, 0) + _v
+    with _VERROU:
+        reg = charger()
+        reg["rattrapage"].update(fini_le=int(time.time()), bilan=b)
+        _ecrire(reg)
     return b
 
 
@@ -2363,10 +2616,21 @@ def demarrer() -> bool:
         if t is not None and t.is_alive():
             return False
         reg = charger()
+        change = False
         if not reg.get("active_depuis"):
-            # La mise en service : les bangers archives AVANT attendent le
-            # rattrapage demande depuis le site.
+            # La mise en service : les bangers archives AVANT passent par le
+            # rattrapage (lot par lot, apres les nouveaux).
             reg["active_depuis"] = int(time.time())
+            change = True
+        if not (reg.get("rattrapage") or {}).get("demande_le"):
+            # UNE FOIS, TOUT SEUL : depuis le 27/09 apres-midi le rattrapage ne
+            # fait plus que PROPOSER (rien n'est pose sans le proprietaire),
+            # il n'y a donc plus de moment a choisir. Priorite basse : sous-
+            # processus a nice 19, et les nouveaux bangers passent devant
+            # (_tour). Interrompu par un redemarrage, il reprend (_boucle).
+            reg["rattrapage"] = {"demande_le": int(time.time()), "par": "automatique"}
+            change = True
+        if change:
             _ecrire(reg)
 
         def _boucle():
