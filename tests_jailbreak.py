@@ -1605,7 +1605,10 @@ except Exception as _eBr:
 try:
     import asyncio as _aioPe
     from cogs.general import PanneauPerime as _PePe, General as _GePe
-    from cogs.numeros import NumPanelView as _NpPe
+    # 27/09/2026 : le panneau numero est devenu UN message V2, et la classe de
+    # l ancien (NumPanelView) est partie avec lui. Les boutons que les anciens
+    # panneaux portent sont desormais nommes par IDS_PANNEAU_ANCIEN.
+    from cogs.numeros import IDS_PANNEAU_ANCIEN as _NpPe
 
     def _idsPe(vue):
         return sorted(str(getattr(c, "custom_id", "")) for c in vue.children
@@ -1620,7 +1623,7 @@ try:
     # (« Autre service »). Un message Discord ne se redessine pas : le bouton
     # d hier est toujours cliquable demain.
     from cogs.numeros import _PanneauAncienView as _PaPe
-    _vraisPe = set(_idsPe(_NpPe(None))) | set(_idsPe(_PaPe(None)))
+    _vraisPe = set(_NpPe) | set(_idsPe(_PaPe(None)))
     check("perime : le filet couvre tous les boutons d un ancien panneau",
           set(_idsPe(_vuePe)) >= _vraisPe,
           "manque : %s" % sorted(_vraisPe - set(_idsPe(_vuePe))))
@@ -1690,15 +1693,31 @@ try:
     # Le titre a change en cours de route : la reconnaissance cherchait encore
     # l ancien, qui n est pas un morceau du nouveau -> un panneau de plus a
     # chaque passage.
+    # 27/09/2026 : _ensure_num_panel passe par poser_panneau, dont le
+    # reperage (est_panneau_numero) reconnait les DEUX formats. On le verifie
+    # sur des messages, plus sur le texte de la fonction : le titre du panneau
+    # d avant (celui que panel_embed produisait) et son premier libelle.
+    import types as _tyRs
+    from cogs.numeros import est_panneau_numero as _epRs
+
+    class _EmbRs:
+        def __init__(s, t): s.title = t
+
+    def _mRs(titre, auteur=1):
+        return _tyRs.SimpleNamespace(
+            id=5, author=_tyRs.SimpleNamespace(id=auteur, bot=True),
+            embeds=[_EmbRs(titre)], components=[],
+            flags=_tyRs.SimpleNamespace(components_v2=False, ephemeral=False))
+    check("panneau : le titre reellement pose est reconnu",
+          _epRs(_mRs("📱 Numéros & Mails Instagram"), 1) == "ancien"
+          and _epRs(_mRs("📱 Numéro & Mail"), 1) == "ancien",
+          "_ensure_num_panel reposterait un panneau a chaque passage")
+    check("panneau : et l ancien message « Numero » n en est pas un",
+          _epRs(_mRs("📱 Numéro"), 1) is None and _epRs(_mRs("📱 Numéros & Mails"), 2) is None)
     _srcWe = _plRs.Path("cogs/welcome.py").read_text(encoding="utf-8")
     _iWe = _srcWe.index("async def _ensure_num_panel")
-    _blocWe = _srcWe[_iWe:_iWe + 1800]
-    check("panneau : le titre reellement pose est reconnu",
-          "Numéros & Mails" in _blocWe,
-          "_ensure_num_panel reposterait un panneau a chaque passage")
-    from cogs.numeros import panel_embed as _peRs
-    check("panneau : et c est bien celui que panel_embed produit",
-          "Numéros & Mails" in (_peRs().title or ""), (_peRs().title or "")[:40])
+    check("panneau : _ensure_num_panel passe par le reperage unique",
+          "poser_panneau" in _srcWe[_iWe:_iWe + 2400])
 except Exception as _eRs:
     check("reset : testable", False, repr(_eRs)[:200])
 
@@ -1787,14 +1806,20 @@ try:
           "endswith(" not in _codeIc and "interaction.channel" in _codeIc,
           "un filtre de nom est revenu dans le corps")
     # Le panneau mort, epingle, appartient a l autre application : sans
-    # nettoyage on pose le neuf a cote du cadavre.
+    # nettoyage on pose le neuf a cote du cadavre. Depuis le 27/09/2026, les
+    # NOTRES ne sont plus supprimes ici : poser_panneau les convertit sur
+    # place, avec le numero en cours. Les titres viennent de la table unique.
+    import cogs.numeros as _n3b
     check("ici : les anciens panneaux epingles sont retires",
           'getattr(p.author, "bot", False)' in _srcIc
-          and "Numéros & Mails" in _srcIc and "Numéro & Mail" in _srcIc)
-    # L epinglage a demenage dans poser_trois, qui pose les TROIS messages.
-    import cogs.numeros as _n3b
-    check("ici : les trois messages sont epingles",
-          "msg.pin()" in _insIc.getsource(_n3b.poser_trois))
+          and "TITRES_PANNEAU_ANCIEN" in _srcIc and "p.author.id != moi" in _srcIc
+          and "Numéros & Mails" in _n3b.TITRES_PANNEAU_ANCIEN
+          and "Numéro & Mail" in _n3b.TITRES_PANNEAU_ANCIEN)
+    # Plus d epingle (27/09/2026) : le proprietaire deteste la notice « a
+    # epingle un message ». Le panneau unique n est jamais epingle.
+    check("ici : le panneau n est plus epingle",
+          ".pin(" not in _insIc.getsource(_n3b.poser_panneau)
+          and "poser_panneau" in _srcIc)
     # Une pose incomplete ne doit pas passer pour une reussite muette.
     check("ici : une pose incomplete est dite",
           "incomplète" in _srcIc or "incomplete" in _srcIc)
@@ -1926,9 +1951,12 @@ try:
     # irrecuperables et personne n a demande a les perdre.
     check("nettoyer : la purge ne vise que les messages de bot",
           "m.author.bot" in _sNe and "purge(limit=" in _sNe)
-    # Ce ne sont plus un panneau mais les TROIS messages qui sont reposes.
-    check("nettoyer : les trois messages sont reposes juste apres",
-          "poser_trois" in _sNe.split("purge")[1][:600])
+    # 27/09/2026 : le panneau est CONVERTI sur place (le numero en cours y
+    # reste) ; la purge vient donc APRES la pose, et l epargne. Purger
+    # d abord emportait le panneau, et son numero avec.
+    check("nettoyer : le panneau est pose avant, et la purge l epargne",
+          "poser_panneau" in _sNe and _sNe.index("poser_panneau") < _sNe.index("purge(")
+          and "m.id != g" in _sNe)
     check("nettoyer : et le salon repasse en lecture seule",
           "verrouiller_salon" in _sNe)
     check("nettoyer : le compte rendu dit combien a ete efface",
@@ -2078,131 +2106,128 @@ except Exception as _eR:
 
 
 # ==============================================================================
-# Les trois messages permanents du salon d un VA
+# Le panneau numero du salon d un VA : UN message V2 (27/09/2026)
 # ==============================================================================
+# Jusqu au 27/09/2026, ce bloc figeait « trois messages permanents » (panneau,
+# numero, code). Le proprietaire a valide la maquette /demonumero : UN message
+# Components V2, l icone en vignette, dont le CONTENU change. Les garanties
+# d avant restent (rien d ephemere, le code s ecrit seul, une place avant
+# d acheter, un numero inaffichable rendu, pas de doublon, pas de fetch) ;
+# elles portent maintenant sur ce message unique.
 try:
+    import time as _t3
+    import discord as _d3
     import cogs.numeros as _n3
-    # Les six etats des deux blocs. Ils ne DISPARAISSENT jamais : c est leur
-    # texte qui change. Un bloc qui s efface fait douter de l endroit ou il
-    # etait, et le VA reclique le panneau pour rien.
-    check("trois : sans numero, la place existe et le dit",
-          "Aucun numéro en cours" in _n3._emb_numero(None).description)
-    check("trois : avec un numero, il est en gros et se saisit a la main",
-          "+1555" in _n3._emb_numero({"valeur": "+1555"}).description
-          and "à la main" in _n3._emb_numero({"valeur": "+1555"}).description)
-    # Solde vide chez le fournisseur : demande user — le bloc reste, c est le
-    # texte qui annonce le probleme.
-    check("trois : un souci s affiche DANS la place, elle ne disparait pas",
-          _n3._emb_numero(None, souci="pas de solde").description == "pas de solde")
-    check("trois : le code s annonce avant d exister",
-          "dès qu" in _n3._emb_code(None).description)
-    check("trois : puis il s affiche seul, sans clic",
-          "123456" in _n3._emb_code({"x": 1}, "123456").description)
-    check("trois : et l attente se voit",
-          "En attente" in _n3._emb_code({"x": 1}).description)
 
-    # Les actions vivent sur le message 2, en permanence.
-    _vA3 = _n3.ActionsView(None)
-    _ids3 = sorted(str(c.custom_id) for c in _vA3.children if getattr(c, "custom_id", None))
-    check("trois : les trois actions sont permanentes",
-          _ids3 == ["numgen:annuler", "numgen:autre", "numgen:retry"]
-          and _vA3.timeout is None, str(_ids3))
+    def _txt3(v):
+        return [i.content for i in v.walk_children() if isinstance(i, _d3.ui.TextDisplay)]
+
+    def _btn3(v):
+        return [(i.custom_id, i.label) for i in v.walk_children()
+                if isinstance(i, _d3.ui.Button)]
+
+    _act3 = {"valeur": "+1 555 014 2294", "kind": "sms", "pays_nom": "🇺🇸 États-Unis",
+             "pris_le": _t3.time()}
+    _v3 = _n3.PanneauNumero(None, solde="99.94 $")
+    check("panneau : vide, le titre et le solde, rien d autre",
+          _txt3(_v3) == ["## Numéro Instagram", "-# 💵 99,94 $"], _txt3(_v3))
+    check("panneau : vide, 📱 Prendre un numéro et 📧 Mail",
+          _btn3(_v3) == [("numgen:sms", "Prendre un numéro"), ("numgen:mail", "Mail")])
+    _v3 = _n3.PanneauNumero(None, actif=_act3)
+    # Le numero COLLE : demande expresse du proprietaire (« +15550142294 »).
+    check("panneau : en attente, le numero colle, le drapeau, l attente",
+          _txt3(_v3) == ["## `+15550142294`", "🇺🇸 ⏳ En attente du code…"], _txt3(_v3))
+    check("panneau : en attente, Redemander / Autre / Annuler (custom_id d avant)",
+          [c for c, _l in _btn3(_v3)] == ["numgen:retry", "numgen:autre", "numgen:annuler"])
+    _v3 = _n3.PanneauNumero(None, actif=_act3, code="482913")
+    check("panneau : code recu, il s affiche sans clic",
+          _txt3(_v3)[1] == "🇺🇸 🔑 **Code : `482913`**", _txt3(_v3))
+    check("panneau : code recu, C est bon / Nouveau code / Autre",
+          _btn3(_v3) == [("numgen:fini", "C'est bon"), ("numgen:retry", "Nouveau code"),
+                         ("numgen:autre", "Autre")])
+    # Un souci est UNE ligne courte ; le reste ne bouge pas (demande user : le
+    # bloc ne disparait jamais, c est son texte qui change).
+    _v3 = _n3.PanneauNumero(None, solde="1 $", souci="❌ " + "z" * 900)
+    check("panneau : un souci = une ligne courte en plus, le reste inchange",
+          _txt3(_v3)[:2] == ["## Numéro Instagram", "-# 💵 1 $"] and len(_txt3(_v3)) == 3
+          and len(_txt3(_v3)[2]) <= 150 and "\n" not in _txt3(_v3)[2])
+    _lim3 = [(e, v.total_children_count, v.content_length()) for e, v in (
+        ("vide", _n3.PanneauNumero(None, souci="❌ x")),
+        ("attente", _n3.PanneauNumero(None, actif=_act3, souci="❌ x")),
+        ("code", _n3.PanneauNumero(None, actif=_act3, code="1")))
+        if v.total_children_count > 40 or v.content_length() > 4000]
+    check("panneau : chaque etat tient dans les limites V2 (40 composants, 4000 car.)",
+          not _lim3, _lim3)
+    # Un numero MORT (plus de 20 min sans code) ne s affiche plus : il cachait
+    # « Prendre un numero » (douze salons gardaient un numero du 22/09).
+    check("panneau : un numero mort ne s affiche plus, un code recu si",
+          _n3._a_afficher({"actif": {"pris_le": 1}}) == (None, None)
+          and _n3._a_afficher({"actif": {"pris_le": 1}, "code_valeur": "5"})[1] == "5")
 
     import inspect as _i3
-    _s3 = _i3.getsource(_n3.NumerosCog.nouvelle_activation)
-    # Plus rien d ephemere : le VA doit retrouver le meme ecran apres un
-    # rechargement de Discord.
-    # 27/09/2026 : seul le REFUS d un second numero (pris par un autre, ou
-    # deja en attente) est ephemere ; la prise et l affichage du numero ne
-    # le sont jamais.
-    _s3_prise = _s3.split('if not (_id_message(rec0.get("numero"))', 1)
-    check("trois : la prise d un numero n est plus ephemere",
-          len(_s3_prise) == 2 and "ephemeral" not in _s3_prise[1])
-    check("trois : un echec s ecrit dans la place du numero",
-          "souci_num" in _s3)
-    # LE piege : un salon qui n a recu que le panneau n a ni place pour le
-    # numero ni place pour le code. Le clic achetait alors un numero que rien
-    # n affichait — perdu, avec l argent.
-    check("trois : on pose les places AVANT de commander quoi que ce soit",
-          "poser_trois" in _s3 and _s3.index("poser_trois") < _s3.index("get_number"),
+    _s3 = _i3.getsource(_n3.NumerosCog._acheter)
+    # Plus rien d ephemere dans la prise : le VA retrouve le meme ecran apres
+    # un rechargement de Discord. Seuls les incidents (rien achete, numero
+    # rendu) lui sont dits en prive, par _ephemere.
+    check("panneau : la prise d un numero n est pas ephemere",
+          "followup.send" not in _s3 and "send_message" not in _s3 and "maj_panneau" in _s3)
+    check("panneau : un echec s ecrit dans le panneau",
+          'souci="❌ %s" % res' in _s3)
+    # LE piege : un salon sans place pour le numero. Le clic achetait alors
+    # un numero que rien n affichait — perdu, avec l argent.
+    check("panneau : il est ECRIT avant qu on commande quoi que ce soit",
+          _s3.index("maj_panneau") < _s3.index("get_number"),
           "on depense avant d avoir ou l ecrire")
     _s3p = _i3.getsource(_n3.NumerosCog.panelnumero.callback
                          if hasattr(_n3.NumerosCog.panelnumero, "callback")
                          else _n3.NumerosCog.panelnumero)
-    check("trois : /panelnumero pose les trois, pas le seul panneau",
-          "poser_trois" in _s3p and "verrouiller_salon" in _s3p)
+    check("panneau : /panelnumero pose le panneau et verrouille le salon",
+          "poser_panneau" in _s3p and "verrouiller_salon" in _s3p)
+    # /panelnumero doit LAISSER un message : la purge vient apres la pose et
+    # epargne le panneau (converti sur place, avec son numero en cours).
+    check("panneau : /panelnumero purge APRES la pose, en epargnant le panneau",
+          _s3p.index("poser_panneau") < _s3p.index("purge(") and "m.id != garde" in _s3p)
 
-    # L ecoute est scindee : une enveloppe qui rattrape, et le corps qui
-    # interroge le fournisseur.
     _s3b = _i3.getsource(_n3.NumerosCog._suivre)
-    check("trois : le code est ecrit par le bot, sans qu on le demande",
-          "maj_trois" in _s3b and "get_code" in _s3b)
-    # Le code peut etre DEJA arrive chez le fournisseur alors que le bloc est
-    # reste vide — l ecoute avait lache. Redemander un SMS dans ce cas ferait
-    # perdre celui qu on a deja.
+    check("panneau : le code est ecrit par le bot, sans qu on le demande",
+          "maj_panneau" in _s3b and "get_code" in _s3b)
+    check("panneau : et son ecoute laisse une trace au journal", "log.info" in _s3b)
+    # Le code peut etre DEJA arrive chez le fournisseur alors que le panneau
+    # est reste en attente — l ecoute avait lache. Redemander un SMS dans ce
+    # cas ferait perdre celui qu on a deja.
     _s3r = _i3.getsource(_n3.NumerosCog.action_salon)
-    check("trois : « Redemander » regarde d abord si le code est deja la",
+    check("panneau : « Redemander » regarde d abord si le code est deja la",
           "get_code" in _s3r and _s3r.index("get_code") < _s3r.index("numgen.retry"),
           "on redemande avant d avoir regarde")
-    # Une tache de fond qui leve meurt sans un mot : c est arrive, le bloc
-    # restait vide et rien ne disait pourquoi.
+    # Une tache de fond qui leve meurt sans un mot : c est arrive.
     _s3s = _i3.getsource(_n3.NumerosCog.suivre)
-    check("trois : une ecoute qui echoue l ecrit dans le bloc du code",
-          "except Exception" in _s3s and "souci_code" in _s3s)
-    check("trois : et son demarrage laisse une trace au journal",
-          "log.info" in _i3.getsource(_n3.NumerosCog._suivre))
-
-    # LE doublon : la pose allait CHERCHER chaque message avant de l editer.
-    # Une lecture qui echoue une seconde — une limite d API suffit — faisait
-    # croire que le message n existait plus, et un deuxieme « Code » etait
-    # poste. On edite desormais sans lire, et seul un NotFound autorise a
-    # reposter.
-    _s3q = _i3.getsource(_n3.poser_trois)
-    check("trois : la pose edite sans aller lire le message",
-          "get_partial_message" in _s3q and "fetch_message" not in _s3q,
-          "un fetch qui echoue recree un doublon")
-    check("trois : seul un message VRAIMENT absent est repose",
+    check("panneau : une ecoute qui echoue l ecrit dans le panneau",
+          "except Exception" in _s3s and "souci=" in _s3s)
+    # LE doublon d avant : aller CHERCHER un message avant de l editer. Une
+    # lecture qui echoue une seconde le faisait croire parti, et un second
+    # etait poste. Seul un NotFound autorise a reposer.
+    _s3q = _i3.getsource(_n3.poser_panneau) + _i3.getsource(_n3._editer_v2)
+    check("panneau : la pose edite sans aller lire le message",
+          "get_partial_message" in _s3q and "fetch_message" not in _s3q)
+    check("panneau : seul un message VRAIMENT absent est repose",
           "discord.NotFound" in _s3q)
-    check("trois : les mises a jour non plus ne lisent rien",
-          "fetch_message" not in _i3.getsource(_n3.maj_trois))
-    # /panelnumero doit LAISSER trois messages, pas en ajouter trois.
-    _s3p2 = _i3.getsource(_n3.NumerosCog.panelnumero.callback
-                          if hasattr(_n3.NumerosCog.panelnumero, "callback")
-                          else _n3.NumerosCog.panelnumero)
-    check("trois : /panelnumero nettoie avant de poser",
-          "purge(" in _s3p2 and _s3p2.index("purge(") < _s3p2.index("poser_trois"))
-
-    # Chaque clic achete. Si le bloc ne peut pas etre ECRIT, le VA ne verra
-    # jamais le numero : le garder, c est le payer pour rien. Constate en
-    # vrai — le bloc restait sur « Recherche d un numero… » et le solde
-    # baissait a chaque clic.
-    _s3n = _i3.getsource(_n3.NumerosCog.nouvelle_activation)
-    check("trois : un numero inaffichable est RENDU, pas perdu",
-          "numgen.cancel" in _s3n and "montre" in _s3n,
-          "un achat invisible reste a la charge du compte")
-    check("trois : et l incident va au journal",
-          "INAFFICHABLE" in _s3n)
-    check("trois : la mise a jour dit ce qu elle a reussi a ecrire",
-          "return poses" in _i3.getsource(_n3.maj_trois))
-
-    # Exactement trois, jamais quatre : un message laisse par un incident
-    # passe n est dans aucun registre, donc personne ne le met a jour — il
-    # reste la a repeter un texte perime. La pose le supprime.
-    _s3q2 = _i3.getsource(_n3.poser_trois)
-    check("trois : la pose supprime tout message de bot en trop",
-          "channel.history" in _s3q2 and "vieux.id not in gardes" in _s3q2)
-    check("trois : mais jamais un message d humain",
-          'getattr(vieux.author, "bot", False)' in _s3q2)
-    # On ne fait le menage que si les trois sont bien identifies : sinon on
-    # supprimerait ceux qu on vient de rater.
-    check("trois : pas de menage tant que les trois ne sont pas surs",
-          "len(gardes) == 3" in _s3q2)
-
+    check("panneau : les mises a jour non plus ne lisent rien",
+          "fetch_message" not in _i3.getsource(_n3.maj_panneau))
+    # Chaque clic achete. Si le panneau ne peut pas etre ECRIT, le VA ne verra
+    # jamais le numero : le garder, c est le payer pour rien.
+    check("panneau : un numero inaffichable est RENDU, pas perdu",
+          "numgen.cancel" in _s3 and "INAFFICHABLE" in _s3)
+    # UN message, jamais deux : un message de bot laisse par un incident
+    # n est dans aucun registre ; la pose le supprime (jamais un humain).
+    _s3m = _i3.getsource(_n3.poser_panneau)
+    check("panneau : la pose supprime tout message de bot en trop, jamais un humain",
+          "channel.history" in _s3m and "vieux.id != pose" in _s3m
+          and 'getattr(vieux.author, "bot", False)' in _s3m)
     _s3c = _i3.getsource(_n3.verrouiller_salon)
-    check("trois : le salon passe en lecture seule",
+    check("panneau : le salon passe en lecture seule",
           "send_messages=False" in _s3c and "default_role" in _s3c)
 except Exception as _e3:
-    check("trois : testable", False, repr(_e3)[:200])
+    check("panneau : testable", False, repr(_e3)[:200])
 
 
 # ==============================================================================
@@ -12931,9 +12956,11 @@ def _v2_bloc_defaut_epingles():
                      'await msg.pin(reason="Menu permanent VA (h24)")',
                      'await nouveau.pin(reason="Menu permanent VA (h24)")',
                      'await msg.pin()'], pins_u)
-    check("code : dans welcome.py, seul le panneau Numero & Mail (-numero-mail) epingle en direct",
-          pins_w == ["await msg.pin()"] and "_ensure_num_panel" in src_w.split("await msg.pin()")[0][-3000:],
-          pins_w)
+    # 27/09/2026 : le panneau Numero Instagram (-numero-mail), seul a epingler
+    # en direct dans welcome.py, ne l est plus -- il est un message unique,
+    # jamais epingle (cogs/numeros.py, poser_panneau).
+    check("code : dans welcome.py, plus aucun .pin() direct",
+          pins_w == [], pins_w)
 
     import shutil
     shutil.rmtree(TMP, ignore_errors=True)
@@ -14208,12 +14235,17 @@ check("cartes livraison : aucune ecriture dans data/",
 # prise d un numero l id etait efface, et le code arrive allait se loger a sa
 # place -- le bloc Code restait sur « Il s affichera ici… ». Et un membre ne
 # peut plus annuler ou ecraser le numero d un autre.
+# Le meme jour, le panneau est devenu UN message V2 (maquette /demonumero) :
+# le scenario se rejoue dessus, et la CONVERSION d un salon a l ancien format
+# (trois messages -> un, numero en cours garde) s y ajoute. Scenario complet :
+# scratchpad num_v2_sim.py (ViewStore reel, redemarrage, replis).
 print()
 print("=" * 70)
-print("Panneau numero : code affiche, numero protege")
+print("Panneau numero : un seul message V2, code affiche, numero protege")
 print("=" * 70)
 try:
-    import asyncio as _aN, tempfile as _tN, json as _jN
+    import asyncio as _aN, tempfile as _tN, json as _jN, time as _tiN
+    import discord as _dN
     import cogs.numeros as _nN, numgen as _gN, cogs.user as _uN
     _savN = (_nN.SALONS_FILE, _nN.POLL_SECONDS, _gN.status, _gN.get_number, _gN.balances,
              _gN.get_code, _gN.cancel, _gN.finish, _uN._is_staff_member)
@@ -14234,22 +14266,35 @@ try:
 
         class _MsgN:
             _k = 10 ** 17
-            def __init__(self, **k):
-                _MsgN._k += 1; self.id = _MsgN._k; self.k = k
-                self.author = type("A", (), {"id": 1, "bot": True})(); self.embeds = []
-            async def pin(self, **k): pass
+            def __init__(self, ch, **k):
+                _MsgN._k += 1; self.id = _MsgN._k; self.ch = ch; self.k = dict(k)
+                self.author = type("A", (), {"id": 1, "bot": True})()
+                self.embeds = [k["embed"]] if k.get("embed") else []
+                v = k.get("view")
+                self.flags = type("F", (), {"components_v2": bool(v is not None and v.has_components_v2()),
+                                            "ephemeral": False})()
+                self.components = []
+            async def delete(self):
+                self.ch.msgs.pop(self.id, None)
         class _PartN:
             def __init__(self, ch, mid): self.ch, self.mid = ch, mid
             async def edit(self, **k):
                 m = self.ch.msgs.get(self.mid)
                 if m is None:
-                    raise discord.NotFound(type("R", (), {"status": 404, "reason": "x"})(), "absent")
+                    raise _dN.NotFound(type("R", (), {"status": 404, "reason": "x"})(), "absent")
                 m.k.update(k)
+                if "embed" in k:
+                    m.embeds = [k["embed"]] if k["embed"] is not None else []
+                if k.get("view") is not None and k["view"].has_components_v2():
+                    m.flags.components_v2 = True
+            async def delete(self):
+                if self.ch.msgs.pop(self.mid, None) is None:
+                    raise _dN.NotFound(type("R", (), {"status": 404, "reason": "x"})(), "absent")
         class _ChN:
             id = 4242; name = "test"; guild = None
             def __init__(self): self.msgs = {}
             async def send(self, **k):
-                m = _MsgN(**k); self.msgs[m.id] = m; return m
+                m = _MsgN(self, **k); self.msgs[m.id] = m; return m
             def get_partial_message(self, mid): return _PartN(self, mid)
             async def pins(self): return []
             def history(self, **k):
@@ -14273,12 +14318,28 @@ try:
             def __init__(self): self.env = []
             async def send(self, *a, **k): self.env.append((a, k))
         class _ItxN:
-            def __init__(self, ch, uid, bot):
+            def __init__(self, ch, uid, bot, message=None):
                 self.channel = ch; self.user = type("U", (), {"id": uid, "name": "u"})()
-                self.response = _RespN(); self.followup = _FolN(); self.client = bot; self.data = {}
+                self.response = _RespN(); self.followup = _FolN(); self.client = bot
+                self.data = {}; self.message = message
+
         def _txtN(m):
-            e = m.k.get("embed")
-            return ((e.title or "") + " " + (e.description or "")) if e else ""
+            v = m.k.get("view")
+            return " ".join(i.content for i in v.walk_children()
+                            if isinstance(i, _dN.ui.TextDisplay)) if v is not None else ""
+
+        def _cidsN(m):
+            v = m.k.get("view")
+            return [i.custom_id for i in v.walk_children()
+                    if isinstance(i, _dN.ui.Button)] if v is not None else []
+
+        async def _clicN(cog, cid, itx):
+            # Le repondant que discord.py trouve apres un redemarrage : la vue
+            # de cog_load, qui porte les six boutons.
+            vue = _nN.PanneauNumero(cog, tous=True)
+            b = next(i for i in vue.walk_children()
+                     if isinstance(i, _dN.ui.Button) and i.custom_id == cid)
+            await b.callback(itx)
 
         async def _scenarioN():
             _vraiSleep = _aN.sleep
@@ -14288,31 +14349,70 @@ try:
             try:
                 ch, bot = _ChN(), _BotN()
                 cog = _nN.NumerosCog(bot)
-                await _nN.poser_trois(bot, ch, cog)
-                idc = _nN._salon(ch.id).get("code")
-                await _nN.NumPanelView(cog).sms.callback(_ItxN(ch, 7, bot))
-                check("numero : la prise GARDE l id du message Code",
-                      _nN._salon(ch.id).get("code") == idc and _nN._id_message(idc))
+                await _nN.poser_panneau(bot, ch, cog)
+                (p,) = ch.msgs.values()
+                check("numero : UN message V2, icone jointe, pas d epingle",
+                      p.flags.components_v2 and p.k.get("file") is not None
+                      and p.k["file"].filename == "numero_instagram.png"
+                      and _cidsN(p) == ["numgen:sms", "numgen:mail"], (p.k.keys(), _cidsN(p)))
+                p.k["file"].close()
+                await _clicN(cog, "numgen:sms", _ItxN(ch, 7, bot, message=p))
+                check("numero : le numero s affiche dans CE message, rien d autre de poste",
+                      len(ch.msgs) == 1 and "+15550000001" in _txtN(p)
+                      and _cidsN(p) == ["numgen:retry", "numgen:autre", "numgen:annuler"], _txtN(p))
                 _codeN["v"] = ("code", "482913")
                 for t_ in list(bot.loop.t):
                     await t_
-                check("numero : le code recu s affiche dans le bloc Code",
-                      "482913" in _txtN(ch.msgs[int(idc)]), _txtN(ch.msgs[int(idc)])[:80])
+                bot.loop.t.clear()
+                check("numero : le code recu s affiche dans le panneau, seul",
+                      "482913" in _txtN(p) and _nN._salon(ch.id).get("code_valeur") == "482913"
+                      and _cidsN(p) == ["numgen:fini", "numgen:retry", "numgen:autre"], _txtN(p)[:80])
+                await _clicN(cog, "numgen:fini", _ItxN(ch, 7, bot, message=p))
+                check("numero : « C est bon » revient a l etat vide",
+                      "Numéro Instagram" in _txtN(p) and not _nN._salon(ch.id).get("actif"))
                 _codeN["v"] = ("wait", "")
-                await _nN.NumPanelView(cog).sms.callback(_ItxN(ch, 7, bot))
-                it = _ItxN(ch, 8, bot)
-                await _nN.NumPanelView(cog).sms.callback(it)
+                await _clicN(cog, "numgen:sms", _ItxN(ch, 7, bot, message=p))
+                it = _ItxN(ch, 8, bot, message=p)
+                await _clicN(cog, "numgen:sms", it)
                 check("numero : un autre membre n ecrase pas un numero en attente",
-                      len(_achN) == 2 and it.followup.env)
-                it = _ItxN(ch, 8, bot)
-                await _nN.ActionsView(cog).annuler.callback(it)
+                      len(_achN) == 2 and it.followup.env and "🔒" in it.followup.env[0][0][0])
+                it = _ItxN(ch, 8, bot, message=p)
+                await _clicN(cog, "numgen:annuler", it)
                 check("numero : un autre membre ne peut pas l annuler", not _annN)
-                it = _ItxN(ch, 7, bot)
-                await _nN.ActionsView(cog).annuler.callback(it)
+                it = _ItxN(ch, 7, bot, message=p)
+                await _clicN(cog, "numgen:annuler", it)
                 check("numero : le proprietaire doit confirmer l annulation",
                       not _annN and isinstance(it.response.env[0][1].get("view"), _nN._ConfirmerView))
                 check("numero : un ancien code (« 546451 ») n est pas un id de message",
                       _nN._id_message("546451") is None)
+                for t_ in bot.loop.t:
+                    t_.close()
+                bot.loop.t.clear()
+
+                # CONVERSION : un salon a l ancien format (trois messages),
+                # numero en cours d un autre membre, code du 22/09 en valeur.
+                ch2 = _ChN(); ch2.id = 4343
+                vp = await ch2.send(embed=_dN.Embed(title="📱 Numéros & Mails Instagram"))
+                vn = await ch2.send(embed=_dN.Embed(title="📱 Numéro"))
+                vc = await ch2.send(embed=_dN.Embed(title="🔑 Code"))
+                _nN._salon_ecrire(ch2.id, panneau=vp.id, numero=vn.id, code=vc.id,
+                                  actif={"id": "31", "provider": "getatext", "kind": "sms",
+                                         "service": "ig", "valeur": "+14642768655",
+                                         "pays_nom": "🇺🇸 États-Unis", "par": 9,
+                                         "pris_le": int(_tiN.time())})
+                it = _ItxN(ch2, 5, bot, message=vp)
+                await _clicN(cog, "numgen:sms", it)
+                r2 = _nN._salon(ch2.id)
+                check("conversion : 3 messages -> 1, le panneau edite (texte et embed retires, icone jointe)",
+                      list(ch2.msgs) == [vp.id] and vp.flags.components_v2
+                      and vp.k.get("content", "x") is None and not vp.embeds
+                      and vp.k.get("attachments"), (list(ch2.msgs), vp.k.keys()))
+                for f_ in vp.k.get("attachments") or []:
+                    f_.close()
+                check("conversion : le numero en cours est garde, affiche, et pas ecrase",
+                      "+14642768655" in _txtN(vp) and r2["actif"]["id"] == "31"
+                      and len(_achN) == 2 and r2.get("v2") is True
+                      and r2.get("numero") is None and r2.get("code") is None, (_txtN(vp), r2))
             finally:
                 _nN.asyncio.sleep = _vraiSleep
         _aN.run(_scenarioN())

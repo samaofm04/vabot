@@ -1408,12 +1408,22 @@ async def reset_us_menu(bot, channel, etat=None):
 
 
 async def _ensure_num_panel(bot, channel):
-    """Poste (et épingle) le panneau « Numéro & Mail » dans un salon
-    -numero-mail s'il n'y est pas déjà. Idempotent."""
+    """Garantit LE panneau « Numéro Instagram » d'un salon -numero-mail.
+    Idempotent, jamais de doublon.
+
+    Depuis le 27/09/2026, c'est UN message Components V2 (cogs/numeros.py,
+    poser_panneau) : le panneau deja la -- enregistre, ou retrouve a son
+    format, l'ancien embed « Numéros & Mails » comme le V2 a ses custom_id
+    « numgen: » (est_panneau_numero, le reperage unique) -- est mis a jour
+    SUR PLACE, et un panneau a l'ancien format est CONVERTI, le numero en
+    cours garde. Avant, seul le titre d'embed etait cherche : un panneau V2,
+    qui n'en a pas, n'aurait jamais ete reconnu, et chaque passage en aurait
+    pose un de plus. Plus d'epingle : le proprietaire deteste la notice
+    « a epingle un message »."""
     if bot is None or channel is None:
         return False
     try:
-        from cogs.numeros import NumPanelView, panel_embed
+        from cogs.numeros import poser_panneau
         ncog = bot.get_cog("NumerosCog")
         if ncog is None:
             # Ce bot cree les salons mais n a plus le module des numeros : il a
@@ -1427,27 +1437,10 @@ async def _ensure_num_panel(bot, channel):
                 "(il vit sur le bot admin) — lance /panelnumeroall depuis lui",
                 getattr(channel, "name", "?"))
             return False
-        try:
-            pins = await channel.pins()
-        except Exception:
-            pins = []
-        # Le titre a change en cours de route — c est « Numéros & Mails
-        # Instagram » depuis panel_embed(). La comparaison cherchait encore
-        # l ancien libelle, qui n est PAS un morceau du nouveau : le panneau
-        # n etait jamais reconnu, et chaque passage en reposait un de plus.
-        for p in pins:
-            t = (p.embeds[0].title or "") if p.embeds else ""
-            if p.author.id == getattr(bot.user, "id", 0) and (
-                    "Numéros & Mails" in t or "Numéro & Mail" in t):
-                return True
-        msg = await channel.send(embed=panel_embed(), view=NumPanelView(ncog))
-        try:
-            await msg.pin()
-        except Exception:
-            pass
-        return True
+        return await poser_panneau(bot, channel, ncog)
     except Exception as e:
-        log.warning(f"_ensure_num_panel: {e}")
+        log.warning("_ensure_num_panel #%s : %s: %s",
+                    getattr(channel, "name", "?"), type(e).__name__, e)
         return False
 
 
