@@ -2112,8 +2112,12 @@ try:
     _s3 = _i3.getsource(_n3.NumerosCog.nouvelle_activation)
     # Plus rien d ephemere : le VA doit retrouver le meme ecran apres un
     # rechargement de Discord.
+    # 27/09/2026 : seul le REFUS d un second numero (pris par un autre, ou
+    # deja en attente) est ephemere ; la prise et l affichage du numero ne
+    # le sont jamais.
+    _s3_prise = _s3.split('if not (_id_message(rec0.get("numero"))', 1)
     check("trois : la prise d un numero n est plus ephemere",
-          "ephemeral" not in _s3)
+          len(_s3_prise) == 2 and "ephemeral" not in _s3_prise[1])
     check("trois : un echec s ecrit dans la place du numero",
           "souci_num" in _s3)
     # LE piege : un salon qui n a recu que le panneau n a ni place pour le
@@ -14196,6 +14200,131 @@ finally:
         getattr(_v2_u, _kCL).update(_dCL)
 check("cartes livraison : aucune ecriture dans data/",
       len(_V2_AUDIT["ecrits"]) == _nEcritsCL, str(_V2_AUDIT["ecrits"][_nEcritsCL:][:5]))
+
+
+# ---------------------------------------------------------------------------
+# Panneau numero : le code recu s AFFICHE (27/09/2026). Le champ « code » du
+# salon servait a la fois d id du message Code et de valeur du code : a la
+# prise d un numero l id etait efface, et le code arrive allait se loger a sa
+# place -- le bloc Code restait sur « Il s affichera ici… ». Et un membre ne
+# peut plus annuler ou ecraser le numero d un autre.
+print()
+print("=" * 70)
+print("Panneau numero : code affiche, numero protege")
+print("=" * 70)
+try:
+    import asyncio as _aN, tempfile as _tN, json as _jN
+    import cogs.numeros as _nN, numgen as _gN, cogs.user as _uN
+    _savN = (_nN.SALONS_FILE, _nN.POLL_SECONDS, _gN.status, _gN.get_number, _gN.balances,
+             _gN.get_code, _gN.cancel, _gN.finish, _uN._is_staff_member)
+    _tmpN = pathlib.Path(_tN.mkdtemp(prefix="numtest_"))
+    _achN, _annN, _codeN = [], [], {"v": ("wait", "")}
+    try:
+        _nN.SALONS_FILE = _tmpN / "numgen_salons.json"
+        _nN.POLL_SECONDS = 1
+        _gN.status = lambda: {"sms_ok": True, "mail_ok": True}
+        _gN.get_number = lambda service="ig", country=None: (
+            _achN.append(1) or (True, {"id": str(900 + len(_achN)), "phone": "+1555000%04d" % len(_achN),
+                                       "provider": "getatext", "country": "187"}))
+        _gN.balances = lambda: {"sms": "1 $", "mail": "0 $"}
+        _gN.get_code = lambda i, p="getatext": _codeN["v"]
+        _gN.cancel = lambda i, p="getatext": (_annN.append(i) or (True, "ACCESS_CANCEL"))
+        _gN.finish = lambda i, p="getatext": "ACCESS_ACTIVATION"
+        _uN._is_staff_member = lambda m: False
+
+        class _MsgN:
+            _k = 10 ** 17
+            def __init__(self, **k):
+                _MsgN._k += 1; self.id = _MsgN._k; self.k = k
+                self.author = type("A", (), {"id": 1, "bot": True})(); self.embeds = []
+            async def pin(self, **k): pass
+        class _PartN:
+            def __init__(self, ch, mid): self.ch, self.mid = ch, mid
+            async def edit(self, **k):
+                m = self.ch.msgs.get(self.mid)
+                if m is None:
+                    raise discord.NotFound(type("R", (), {"status": 404, "reason": "x"})(), "absent")
+                m.k.update(k)
+        class _ChN:
+            id = 4242; name = "test"; guild = None
+            def __init__(self): self.msgs = {}
+            async def send(self, **k):
+                m = _MsgN(**k); self.msgs[m.id] = m; return m
+            def get_partial_message(self, mid): return _PartN(self, mid)
+            async def pins(self): return []
+            def history(self, **k):
+                async def g():
+                    for m in list(self.msgs.values()):
+                        yield m
+                return g()
+        class _LoopN:
+            def __init__(self): self.t = []
+            def create_task(self, c): self.t.append(c)
+        class _BotN:
+            def __init__(self): self.user = type("U", (), {"id": 1})(); self.loop = _LoopN()
+            def get_cog(self, n_): return None
+        class _RespN:
+            def __init__(self): self.done = False; self.env = []
+            async def defer(self, **k): self.done = True
+            def is_done(self): return self.done
+            async def send_message(self, *a, **k): self.done = True; self.env.append((a, k))
+            async def edit_message(self, **k): self.done = True
+        class _FolN:
+            def __init__(self): self.env = []
+            async def send(self, *a, **k): self.env.append((a, k))
+        class _ItxN:
+            def __init__(self, ch, uid, bot):
+                self.channel = ch; self.user = type("U", (), {"id": uid, "name": "u"})()
+                self.response = _RespN(); self.followup = _FolN(); self.client = bot; self.data = {}
+        def _txtN(m):
+            e = m.k.get("embed")
+            return ((e.title or "") + " " + (e.description or "")) if e else ""
+
+        async def _scenarioN():
+            _vraiSleep = _aN.sleep
+            async def _s0(*a, **k):
+                await _vraiSleep(0)
+            _nN.asyncio.sleep = _s0
+            try:
+                ch, bot = _ChN(), _BotN()
+                cog = _nN.NumerosCog(bot)
+                await _nN.poser_trois(bot, ch, cog)
+                idc = _nN._salon(ch.id).get("code")
+                await _nN.NumPanelView(cog).sms.callback(_ItxN(ch, 7, bot))
+                check("numero : la prise GARDE l id du message Code",
+                      _nN._salon(ch.id).get("code") == idc and _nN._id_message(idc))
+                _codeN["v"] = ("code", "482913")
+                for t_ in list(bot.loop.t):
+                    await t_
+                check("numero : le code recu s affiche dans le bloc Code",
+                      "482913" in _txtN(ch.msgs[int(idc)]), _txtN(ch.msgs[int(idc)])[:80])
+                _codeN["v"] = ("wait", "")
+                await _nN.NumPanelView(cog).sms.callback(_ItxN(ch, 7, bot))
+                it = _ItxN(ch, 8, bot)
+                await _nN.NumPanelView(cog).sms.callback(it)
+                check("numero : un autre membre n ecrase pas un numero en attente",
+                      len(_achN) == 2 and it.followup.env)
+                it = _ItxN(ch, 8, bot)
+                await _nN.ActionsView(cog).annuler.callback(it)
+                check("numero : un autre membre ne peut pas l annuler", not _annN)
+                it = _ItxN(ch, 7, bot)
+                await _nN.ActionsView(cog).annuler.callback(it)
+                check("numero : le proprietaire doit confirmer l annulation",
+                      not _annN and isinstance(it.response.env[0][1].get("view"), _nN._ConfirmerView))
+                check("numero : un ancien code (« 546451 ») n est pas un id de message",
+                      _nN._id_message("546451") is None)
+            finally:
+                _nN.asyncio.sleep = _vraiSleep
+        _aN.run(_scenarioN())
+    finally:
+        (_nN.SALONS_FILE, _nN.POLL_SECONDS, _gN.status, _gN.get_number, _gN.balances,
+         _gN.get_code, _gN.cancel, _gN.finish, _uN._is_staff_member) = _savN
+        import shutil as _shN
+        _shN.rmtree(_tmpN, ignore_errors=True)
+except Exception as _eN:
+    import traceback as _tbN
+    _tbN.print_exc()
+    check("panneau numero : testable", False, repr(_eN)[:200])
 
 if FAILS:
     print("ECHECS :")

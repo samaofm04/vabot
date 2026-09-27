@@ -279,7 +279,24 @@ class NumerosCog(commands.Cog):
         # pour le code : le clic achetait un numero que rien n'affichait, et
         # il etait perdu avec l'argent. On les pose donc d'abord.
         rec0 = _salon(ch.id)
-        if not (rec0.get("numero") and rec0.get("code")):
+        en_cours = rec0.get("actif")
+        if en_cours and not rec0.get("code_valeur") and _numero_vivant(en_cours):
+            # Un numero attend encore son code : en prendre un autre ici
+            # l'effacait de l'ecran sans le rendre (paye pour rien), et
+            # c'etait peut-etre celui d'un autre membre.
+            if _peut_gerer(itx, en_cours):
+                mot = ("📱 Tu as déjà `%s` en cours : utilise 🔁 **Autre numéro** "
+                       "ou ❌ **Annuler**." % en_cours.get("valeur", "?"))
+            else:
+                mot = ("🔒 Un numéro est déjà en cours pour <@%s> dans ce salon."
+                       % en_cours.get("par"))
+            try:
+                await itx.followup.send(mot, ephemeral=True,
+                                        allowed_mentions=discord.AllowedMentions.none())
+            except Exception:                                # noqa: BLE001
+                pass
+            return
+        if not (_id_message(rec0.get("numero")) and _id_message(rec0.get("code"))):
             await poser_trois(self.bot, ch, self)
         await maj_trois(self.bot, ch, actif=None,
                         souci_num="⏳ Recherche d'un numéro…",
@@ -313,8 +330,10 @@ class NumerosCog(commands.Cog):
             "stale": res.get("stale", ""),
             "pays_nom": dict(numgen.PAYS).get(str(res.get("country") or ""), ""),
             "par": getattr(getattr(itx, "user", None), "id", 0),
+            # Heure de prise : un numero mort ne bloque plus le salon.
+            "pris_le": int(__import__("time").time()),
         }
-        _salon_ecrire(ch.id, actif=actif, code=None)
+        _salon_ecrire(ch.id, actif=actif, code_valeur=None)
         try:
             solde = (await asyncio.to_thread(numgen.balances)).get(
                 "sms" if kind == "sms" else "mail")
@@ -336,7 +355,7 @@ class NumerosCog(commands.Cog):
                     await asyncio.to_thread(numgen.mail_cancel, actif["id"])
             except Exception as e:                  # noqa: BLE001
                 log.error("numgen: rendu impossible (%s)", e)
-            _salon_ecrire(ch.id, actif=None, code=None)
+            _salon_ecrire(ch.id, actif=None, code_valeur=None)
             return
         self.bot.loop.create_task(self.suivre(ch))
 
@@ -385,7 +404,7 @@ class NumerosCog(commands.Cog):
                 if actif.get("kind") == "sms":
                     await asyncio.to_thread(numgen.finish, actif["id"],
                                             actif["provider"])
-                _salon_ecrire(channel.id, code=val)
+                _salon_ecrire(channel.id, code_valeur=val)
                 rec2 = dict(actif); rec2["code"] = val
                 await maj_trois(self.bot, channel, actif=rec2, code=val)
                 return
@@ -415,6 +434,13 @@ class NumerosCog(commands.Cog):
                                        "/ Threads** au-dessus."))
             return
         sms = actif.get("kind") == "sms"
+        if quoi in ("autre", "annuler") and not _peut_gerer(itx, actif):
+            log.warning("numgen: %s bloque pour %s dans #%s (numero de %s)", quoi,
+                        getattr(getattr(itx, "user", None), "id", "?"),
+                        getattr(ch, "name", "?"), actif.get("par"))
+            return
+        log.info("numgen: %s par %s dans #%s", quoi,
+                 getattr(getattr(itx, "user", None), "id", "?"), getattr(ch, "name", "?"))
         if quoi == "retry":
             # D'ABORD regarder si le code est deja arrive. Il l'etait : visible
             # chez le fournisseur, absent du salon parce que l'ecoute avait
@@ -430,7 +456,7 @@ class NumerosCog(commands.Cog):
                 if sms:
                     await asyncio.to_thread(numgen.finish, actif["id"],
                                             actif["provider"])
-                _salon_ecrire(ch.id, code=val0)
+                _salon_ecrire(ch.id, code_valeur=val0)
                 await maj_trois(self.bot, ch, actif=actif, code=val0)
                 return
             if sms:
@@ -441,9 +467,9 @@ class NumerosCog(commands.Cog):
                                     souci_code="⚠️ %s" % str(msg)[:200])
                     return
             else:
-                actif["stale"] = rec.get("code") or actif.get("stale", "")
+                actif["stale"] = rec.get("code_valeur") or actif.get("stale", "")
                 _salon_ecrire(ch.id, actif=actif)
-            _salon_ecrire(ch.id, code=None)
+            _salon_ecrire(ch.id, code_valeur=None)
             await maj_trois(self.bot, ch, actif=actif)
             self.bot.loop.create_task(self.suivre(ch))
             return
@@ -456,7 +482,7 @@ class NumerosCog(commands.Cog):
                 await asyncio.to_thread(numgen.mail_cancel, actif["id"])
         except Exception as e:
             log.warning(f"action_salon {quoi} : {e}")
-        _salon_ecrire(ch.id, actif=None, code=None)
+        _salon_ecrire(ch.id, actif=None, code_valeur=None)
         if quoi == "autre":
             await self.nouvelle_activation(itx, "sms" if sms else "mail",
                                            actif.get("service", "ig"))
@@ -652,7 +678,8 @@ class NumerosCog(commands.Cog):
             vires = len(partis)
         except Exception as e:
             log.warning(f"panelnumero: nettoyage de #{ch.name} : {e}")
-        _salon_ecrire(ch.id, panneau=None, numero=None, code=None, actif=None)
+        _salon_ecrire(ch.id, panneau=None, numero=None, code=None, actif=None,
+                      code_valeur=None)
         pose = await poser_trois(self.bot, ch, self)
         await verrouiller_salon(ch, self.bot)
         mot = ("✅ Les trois messages sont posés et épinglés" if pose else
@@ -704,7 +731,7 @@ class NumerosCog(commands.Cog):
                     log.warning(f"panelnumeroall: nettoyage de #{ch.name} : {e}")
                 # Le salon repart a neuf : les TROIS messages, et le verrou.
                 _salon_ecrire(ch.id, panneau=None, numero=None, code=None,
-                              actif=None)
+                              actif=None, code_valeur=None)
                 if await poser_trois(self.bot, ch, self):
                     ok += 1
                 await verrouiller_salon(ch, self.bot)
@@ -1062,6 +1089,23 @@ def _salon(cid) -> dict:
     return _salons().get(str(cid)) or {}
 
 
+def _id_message(v):
+    """L'identifiant d'un message Discord, ou None.
+
+    Le champ « code » d'un salon a longtemps servi a DEUX choses : l'id du
+    message « Code » ET le code recu (« 546451 »). Des qu'un numero etait
+    pris, l'id etait efface ; a l'arrivee du SMS, le code prenait sa place et
+    le bot editait un message inexistant — le code n'apparaissait JAMAIS dans
+    le salon (27/09/2026). Le code vit maintenant dans « code_valeur » ; un
+    ancien « code » qui n'a pas la taille d'un identifiant Discord est ignore.
+    """
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return None
+    return n if n >= 10 ** 15 else None
+
+
 def _salon_ecrire(cid, **champs):
     """Ecrit les champs d'un salon. `actif=None` efface l'activation."""
     d = _salons()
@@ -1126,6 +1170,78 @@ def _emb_code(actif=None, code=None, souci=""):
         color=discord.Color.blurple())
 
 
+#: Duree de vie d'un numero chez le fournisseur : au-dela, il ne recevra
+#: plus de code et ne doit plus bloquer le salon.
+DUREE_NUMERO_SEC = 20 * 60
+
+
+def _numero_vivant(actif) -> bool:
+    """Un numero qui peut encore recevoir son code. Ceux d'avant le
+    27/09/2026 n'ont pas d'heure : ils sont vieux de plusieurs jours (douze
+    salons en gardaient un du 22/09), donc morts."""
+    import time as _t
+    try:
+        return _t.time() - float((actif or {}).get("pris_le") or 0) < DUREE_NUMERO_SEC
+    except (TypeError, ValueError):
+        return False
+
+
+def _peut_gerer(itx, actif) -> bool:
+    """Seul celui qui a pris le numero -- ou un admin -- peut l'annuler ou
+    le remplacer. Le 27/09/2026, dans un salon partage, un autre membre a
+    annule deux numeros en quelques secondes : « ca l'efface cash »."""
+    par = (actif or {}).get("par")
+    uid = getattr(getattr(itx, "user", None), "id", None)
+    if not par or uid == par:
+        return True
+    try:
+        from cogs.user import _is_staff_member
+        return bool(_is_staff_member(itx.user))
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
+class _ConfirmerView(discord.ui.View):
+    """« Oui, annuler » : un clic de travers ne rend plus un numero."""
+
+    def __init__(self, cog, quoi):
+        super().__init__(timeout=60)
+        self.cog, self.quoi = cog, quoi
+
+    @discord.ui.button(label="Oui", emoji="✅", style=discord.ButtonStyle.danger)
+    async def oui(self, itx: discord.Interaction, btn: discord.ui.Button):
+        self.stop()
+        await itx.response.edit_message(content="👌", view=None)
+        await self.cog.action_salon(itx, self.quoi)
+
+    @discord.ui.button(label="Non", style=discord.ButtonStyle.secondary)
+    async def non(self, itx: discord.Interaction, btn: discord.ui.Button):
+        self.stop()
+        await itx.response.edit_message(content="Rien n'a changé.", view=None)
+
+
+async def _confirmer_ou_refuser(itx, cog, quoi) -> None:
+    """Pour « Autre » et « Annuler » : refus si le numero est a quelqu'un
+    d'autre, sinon une confirmation visible du seul cliqueur."""
+    ch = getattr(itx, "channel", None)
+    actif = _salon(getattr(ch, "id", 0)).get("actif") if ch else None
+    if not actif:
+        await itx.response.defer()
+        await cog.action_salon(itx, quoi)
+        return
+    if not _peut_gerer(itx, actif):
+        log.info("numgen: %s refuse a %s (numero de %s) dans #%s", quoi,
+                 getattr(itx.user, "id", "?"), actif.get("par"), getattr(ch, "name", "?"))
+        await itx.response.send_message(
+            "🔒 Ce numéro a été pris par <@%s> : lui seul (ou un admin) peut "
+            "l'annuler ou le changer." % actif.get("par"),
+            ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        return
+    question = ("Annuler `%s` ?" if quoi == "annuler" else "Changer `%s` pour un autre numéro ?")
+    await itx.response.send_message(question % actif.get("valeur", "?"),
+                                    view=_ConfirmerView(cog, quoi), ephemeral=True)
+
+
 class ActionsView(discord.ui.View):
     """Les actions du message 2. Toujours la, meme sans numero en cours.
 
@@ -1170,16 +1286,14 @@ class ActionsView(discord.ui.View):
                        custom_id="numgen:autre")
     async def autre(self, itx: discord.Interaction, btn: discord.ui.Button):
         cog = await self._cog(itx)
-        await itx.response.defer()
-        await cog.action_salon(itx, "autre")
+        await _confirmer_ou_refuser(itx, cog, "autre")
 
     @discord.ui.button(label="Annuler", emoji="❌",
                        style=discord.ButtonStyle.danger,
                        custom_id="numgen:annuler")
     async def annuler(self, itx: discord.Interaction, btn: discord.ui.Button):
         cog = await self._cog(itx)
-        await itx.response.defer()
-        await cog.action_salon(itx, "annuler")
+        await _confirmer_ou_refuser(itx, cog, "annuler")
 
 
 async def poser_trois(bot, channel, cog=None):
@@ -1203,11 +1317,11 @@ async def poser_trois(bot, channel, cog=None):
     voulus = (
         ("panneau", panel_embed(), NumPanelView(cog)),
         ("numero", _emb_numero(actif, solde), ActionsView(cog)),
-        ("code", _emb_code(actif, (actif or {}).get("code")), None),
+        ("code", _emb_code(actif, rec.get("code_valeur") or (actif or {}).get("code")), None),
     )
     ids = {}
     for cle, emb, vue in voulus:
-        mid = rec.get(cle)
+        mid = _id_message(rec.get(cle))
         # On EDITE sans aller chercher le message : un fetch qui echoue une
         # seconde — le temps d'une limite d'API — faisait croire que le
         # message n'existait plus, et on en postait un deuxieme. C'est
@@ -1275,7 +1389,7 @@ async def maj_trois(bot, channel, actif=None, code=None, souci_num="",
     poses = {}
     for cle, emb in (("numero", _emb_numero(actif, solde, souci_num)),
                      ("code", _emb_code(actif, code, souci_code))):
-        mid = rec.get(cle)
+        mid = _id_message(rec.get(cle))
         if not mid:
             continue
         try:
