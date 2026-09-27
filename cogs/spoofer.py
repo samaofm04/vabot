@@ -373,6 +373,18 @@ def _marquer(uid: int, info) -> None:
     safe_json.write(MARQUEUR, d, indent=1)
 
 
+def _bien_range(menu, spf) -> bool:
+    """Le -spoofer est-il juste apres le -menu, dans le meme dossier ?"""
+    cat = getattr(menu, "category", None)
+    if cat is None or getattr(spf, "category", None) is not cat:
+        return getattr(spf, "category", None) is cat
+    ordre = sorted(getattr(cat, "text_channels", []) or [], key=lambda c: c.position)
+    try:
+        return ordre.index(spf) == ordre.index(menu) + 1
+    except ValueError:
+        return True           # introuvable dans le cache : on ne force rien
+
+
 # ─────────────────────────────────────────────────────────────────── cog ──
 
 class Spoofer(commands.Cog):
@@ -507,13 +519,17 @@ class Spoofer(commands.Cog):
         creation (create_us_tickets : droits, ordre, panneau). JAMAIS par
         /ticketsall, qui supprimerait les dossiers des VA renommes."""
         from cogs.welcome import _us_ticket_name, _us_norm, create_us_tickets
-        noms = {_us_norm(c.name) for c in guilde.text_channels}
+        par_nom = {_us_norm(c.name): c for c in guilde.text_channels}
         faits = 0
         for m in list(getattr(guilde, "members", []) or []):
             if getattr(m, "bot", False):
                 continue
-            if (_us_ticket_name(m, "menu") in noms
-                    and _us_ticket_name(m, "spoofer") not in noms):
+            menu = par_nom.get(_us_ticket_name(m, "menu"))
+            spf = par_nom.get(_us_ticket_name(m, "spoofer"))
+            # absent, OU pas juste apres -menu : le rangement de
+            # create_us_tickets a pu echouer (constate le 27/09 : un salon sur
+            # 34 reste en bas du dossier), il est retente au passage suivant
+            if menu is not None and (spf is None or not _bien_range(menu, spf)):
                 try:
                     _cr, err = await create_us_tickets(guilde, m, self.bot)
                     if err:

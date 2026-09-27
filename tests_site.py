@@ -9994,6 +9994,15 @@ try:
             _moiSp.bot = True
             for n in ("bob-menu", "bob-content", "kim-menu", "kim-spoofer"):
                 _SalonSp(n, g2)
+            # zoe : son -spoofer est reste en BAS du dossier -> rangement retente
+            zoe = _UserSp(3, "zoe")
+            g2.members.append(zoe)
+            catz = _CatSp()
+            for i, n in enumerate(("zoe-menu", "zoe-download", "zoe-content", "zoe-spoofer")):
+                c = _SalonSp(n, g2, catz); c.position = i
+            for c in g2.text_channels:
+                if not hasattr(c, "position"):
+                    c.position = 0
             r["provision"] = (await cog._provisionner(g2), appels)
             _moiSp.bot = False
             return r
@@ -10059,7 +10068,10 @@ try:
         check("spoofer : jamais de panneau dans un salon de service (« ⬇️・all-spoofer »)",
               _eSp[2] == 0)
         check("spoofer : les VA deja la recoivent leur -spoofer (create_us_tickets), et eux seuls",
-              _rSp["provision"] == (1, ["bob"]), str(_rSp["provision"]))
+              _rSp["provision"][1][:1] == ["bob"] and "kim" not in _rSp["provision"][1]
+              and "seven" not in _rSp["provision"][1], str(_rSp["provision"]))
+        check("spoofer : un -spoofer reste en bas du dossier -> le rangement est retente",
+              _rSp["provision"] == (2, ["bob", "zoe"]), str(_rSp["provision"]))
         _srcW = _PSp("cogs/welcome.py").read_text(encoding="utf-8")
         check("spoofer : salon juste apres -menu ; /ticketsall lit la liste (plus d'expression en dur)",
               _wlSp.US_TICKET_SUFFIXES == ("menu", "spoofer", "download", "numero-mail", "content")
