@@ -19,12 +19,15 @@ l'ancien format est converti au premier clic ou à la première pose
 
 Chaque activation est aussi notée dans data/numgen_historique.json (prise,
 code, annulation, « Autre »…). Le récap du jour vit dans « 📊・debrief-day » :
-UN message, créé au premier numéro de la journée (heure du Bénin), édité au
-fil des événements (une édition par minute au plus), puis figé à minuit en
-récap final par édition du même message (`recap_tour`).
+UN message par jour (heure du Bénin), créé dès minuit sur un serveur qui a un
+panneau numéros et un debrief-day (« Pas de SMS pour le moment. »), ailleurs
+au premier numéro ; édité au fil des événements (une édition par minute au
+plus), puis figé à minuit en récap final par édition du même message
+(`recap_tour`).
 """
 import asyncio
 import functools
+import hashlib
 import logging
 import os
 import re
@@ -299,6 +302,44 @@ class NumerosCog(commands.Cog):
         self._direct_edite_le = 0.0
         self._direct_expire_le = None
         self._direct_a_refaire = False
+        # _direct_agg : (jour, generation, bilan du jour) de la derniere
+        # lecture de l'historique. Un tour reveille seulement parce qu'un
+        # serveur n'a pas son message a 0 (envoi refuse, retente chaque minute)
+        # le reprend : sans ca, il relisait tout l'historique (plusieurs Mo)
+        # chaque minute, toute la journee.
+        # _recap_absents : (jour, salon) ou _retrouver a deja lu le salon sans
+        # y trouver de recap -- ce processus sait ce qu'il y poste ensuite, le
+        # relire a chaque essai refuse etait un appel Discord par minute. Une
+        # lecture refusee net (salon prive, 403) y est notee aussi. Un envoi
+        # sans reponse nette (connexion coupee, 5xx) l'efface : le message a
+        # pu partir quand meme (_refus_net).
+        self._direct_agg = None
+        self._recap_absents = set()
+        # _relire_apres : {salon: (instant, pause)} -- lecture ratee sans refus
+        # net : un message a 0 ne relit pas ce salon avant l'instant (pause
+        # doublee a chaque echec, RECAP_RELIRE_MAX_SEC au plus).
+        # _recap_incertains : (jour, salon) d'un envoi sans reponse nette, pas
+        # encore tranche (message retrouve, ou envoi abouti) -- aussi au
+        # registre (« incertains ») : un redemarrage juste apres la reponse
+        # perdue l'oubliait, et la relecture ratee du tour suivant faisait un
+        # second message. _registre_neuf_le : le jour ou ce processus a trouve
+        # le registre sans « jours » (perdu, ou premiere mise en route). Dans
+        # ces deux cas seulement, un message du jour est peut-etre deja dans
+        # le salon sans que rien ne le dise : un message a 0 n'y part pas sur
+        # une lecture ratee.
+        # _recap_connus : {serveur: du recap ?} vu DISPONIBLE dans ce
+        # processus -- un serveur « unavailable » que l'on sait hors du recap
+        # n'est pas cherche a minuit (trace « a_chercher » pour un serveur
+        # sans debrief-day, et journee tenue ouverte tant qu'il manquait).
+        # _figer_aggs : {jour: (generation, bilan)} des journees finies --
+        # une journee que seul un essai rate tient ouverte (serveur
+        # indisponible, salon illisible) ne relit pas l'historique a chaque
+        # tour tant qu'il n'a pas bouge (178 lectures sur une panne de 3 h).
+        self._relire_apres = {}
+        self._recap_incertains = set()
+        self._registre_neuf_le = None
+        self._recap_connus = {}
+        self._figer_aggs = {}
         self._reveil = None
         self._reveil_boucle = None
 
@@ -1157,6 +1198,11 @@ class NumerosCog(commands.Cog):
     # l'historique (« je peux avoir un recap par jour en live ? », 27/09/2026),
     # puis fige a minuit en recap final PAR EDITION du meme message -- plus de
     # second message a 00:05.
+    # Un serveur qui a un panneau numeros ET un « debrief-day » a son message
+    # des minuit, meme a 0 SMS (« Pas de SMS pour le moment. ») : le
+    # proprietaire ne voyait rien dans le salon et ne savait pas si le recap
+    # tournait (« même là, il y a 0 SMS », 27/09/2026). Le premier numero
+    # EDITE ce message ; aucun jour vide n'est poste apres coup.
     def _dire_une_fois(self, cle, niveau, msg, *args):
         """Un souci du recap se dit UNE fois par processus : la boucle repasse
         chaque minute, et le meme avertissement noyait le journal."""
@@ -1164,6 +1210,64 @@ class NumerosCog(commands.Cog):
             return
         self._recap_dits.add(cle)
         niveau(msg, *args)
+
+    def _serveurs_du_recap(self):
+        """Les serveurs (ids en chaine, comme les cles de agreger) qui ont leur
+        message du jour meme a 0 SMS : voir serveur_du_recap. Un serveur dont
+        les salons ne se lisent pas est DIT (une fois), pas ecarte en silence."""
+        out = set()
+        for g in list(getattr(self.bot, "guilds", None) or []):
+            if getattr(g, "unavailable", False):
+                # Reconnexion Discord : discord.py garde ses salons en cache
+                # (GUILD_DELETE unavailable), mais tout appel echoue en 503 et
+                # un envoi sans reponse nette a pu partir -- le message a 0 du
+                # jour etait tente chaque minute pendant la panne. Il part a
+                # son retour ; _chercher_zeros le traite a part.
+                continue
+            try:
+                du = serveur_du_recap(g)
+                self._recap_connus[str(g.id)] = bool(du)
+                if du:
+                    out.add(str(g.id))
+            except Exception as e:                           # noqa: BLE001
+                self._dire_une_fois(
+                    ("serveur", getattr(g, "id", None)), log.warning,
+                    "numgen: recap : salons du serveur %s illisibles (%s: %s) -- pas de "
+                    "message a 0 SMS pour lui", getattr(g, "id", "?"), type(e).__name__, e)
+        return out
+
+    def _zero_manquant(self, gid, fiche):
+        """Le serveur du recap `gid` n'a pas (ou plus) son message a 0 du jour :
+        aucune fiche, ou une fiche a 0 dont le salon n'est plus le sien -- un
+        « debrief-day » supprime puis recree ne recevait rien jusqu'a minuit,
+        puis la veille y etait postee apres coup.
+
+        Une fiche A NUMEROS (postee, ou retenue : salon absent, envoi refuse)
+        n'est jamais « manquante » : elle a son propre chemin (evenements,
+        rattrapage). La compter relisait l'historique chaque minute, et un
+        historique perdu la faisait remplacer par « Pas de SMS »."""
+        if not isinstance(fiche, dict) or not fiche:
+            return True
+        if not _fiche_vide(fiche):
+            return False
+        if not fiche.get("messages"):
+            return True
+        guild = self._guilde(gid)
+        salon = self._salon_recap(guild, fiche, bavard=False) if guild is not None else None
+        return salon is not None and getattr(salon, "id", None) != fiche.get("salon")
+
+    def _salon_perdu(self, guild):
+        """Le salon du recap manque-t-il POUR DE BON ? Oui si le serveur est
+        visible (disponible, ses salons connus) ou si le bot n'y est plus (il
+        en voit d'autres). Non pendant une panne : a une reconnexion complete,
+        discord.py remet les serveurs « unavailable », sans aucun salon, le
+        temps que Discord les renvoie -- le message a 0 de la veille etait clos
+        « en direct » pour toujours au premier tour de minuit tombe la-dessus."""
+        if guild is None:
+            return bool(list(getattr(self.bot, "guilds", None) or []))
+        if getattr(guild, "unavailable", False):
+            return False
+        return bool(getattr(guild, "text_channels", None))
 
     def _reveiller(self):
         """Appelee apres chaque evenement de l'historique : reveille la boucle
@@ -1247,9 +1351,12 @@ class NumerosCog(commands.Cog):
         est EDITE en recap final. S'il a disparu, ou ne peut pas etre edite,
         le recap final est poste UNE fois (repli). Un jour sans message (bot
         arrete, registre perdu) est poste de la meme facon, dans la limite du
-        rattrapage (RECAP_RATTRAPAGE_JOURS).
+        rattrapage (RECAP_RATTRAPAGE_JOURS) -- sauf un jour a 0 SMS : seul un
+        message a 0 deja poste est fige, rien n'est poste apres coup.
 
-        Journee en cours : le message est cree au premier numero, puis edite
+        Journee en cours : le message est cree au premier tour du jour sur les
+        serveurs du recap (panneau numeros + « debrief-day »), meme a 0 SMS,
+        ailleurs au premier numero ; puis edite
         quand son texte change -- au plus une fois par RECAP_DIRECT_PAS_SEC.
         Les evenements d'une rafale partent ensemble a la fin de l'attente, et
         le dernier part toujours : bilan["reveil"] dit quand repasser.
@@ -1282,9 +1389,15 @@ class NumerosCog(commands.Cog):
             entrees = _histo_cloturer(now)
             if entrees is None:
                 return bilan
-            if any(_ts(e.get("pris_le")) < bornes_jour(aujourdhui)[0] for e in entrees):
-                depuis = fenetre[-1]
-            else:
+            # Le plancher est la VEILLE, meme quand l'historique nait
+            # aujourd'hui : un message a 0 poste hier (registre perdu dans la
+            # nuit, historique vide faute de numero) restait « en direct »
+            # pour toujours, sans une ligne de journal -- plancher a
+            # aujourd'hui, la veille n'etait jamais examinee. L'examiner ne
+            # poste rien (aucun jour vide n'est poste apres coup) : une lecture
+            # du salon par serveur, et le message a 0 trouve est fige.
+            depuis = fenetre[-1]
+            if not any(_ts(e.get("pris_le")) < bornes_jour(aujourdhui)[0] for e in entrees):
                 # L'historique nait AUJOURD'HUI (deploiement) : la journee en
                 # cours est partielle. Son recap aurait fini sous « Journée
                 # complète : de 00h00 à 23h59 », sans les numeros d'avant le
@@ -1295,7 +1408,6 @@ class NumerosCog(commands.Cog):
                 # L'heure de depart est celle du premier numero connu : un
                 # numero pris avant ce premier tour est compte, l'en-tete ne
                 # doit pas dire qu'on a commence apres lui.
-                depuis = aujourdhui
                 debut = min([now] + [_ts(e.get("pris_le")) for e in entrees
                                      if _ts(e.get("pris_le"))])
                 reg.setdefault("partiel", {})[aujourdhui.isoformat()] = int(debut)
@@ -1303,11 +1415,24 @@ class NumerosCog(commands.Cog):
                          "partielle, recapitulee depuis %s", aujourdhui.isoformat(),
                          datetime.fromtimestamp(debut, BENIN).strftime("%Hh%M"))
             reg["depuis"] = depuis.isoformat()
+            self._registre_neuf_le = aujourdhui.isoformat()
             # Des maintenant, le registre existe (avec son plancher) : un recap
             # retenu (salon absent) n'est pas oublie au tour suivant.
             self._recap_sauver(reg)
         plancher = str(reg.get("depuis") or "")
         self._redonner_fiches(reg, fenetre[0].isoformat())
+        inc = reg.get("incertains")
+        if inc is not None:
+            # Un envoi incertain ne compte que pour le message a 0 du jour
+            # meme : ceux des jours passes n'ont plus d'objet.
+            garde = {k: v for k, v in (inc if isinstance(inc, dict) else {}).items()
+                     if str(k).split("|")[0] >= aujourdhui.isoformat()}
+            if garde != inc:
+                if garde:
+                    reg["incertains"] = garde
+                else:
+                    reg.pop("incertains", None)
+                self._recap_sauver(reg)
 
         # Un recap retenu (salon absent, envoi refuse) qui sort de la fenetre
         # de rattrapage ne partira plus : on le DIT, une fois, au lieu de le
@@ -1317,7 +1442,31 @@ class NumerosCog(commands.Cog):
             if cle >= fenetre[0].isoformat() or not isinstance(jours_reg[cle], dict):
                 continue
             for gid, v in jours_reg[cle].items():
-                if isinstance(v, dict) and not _finalise(v) and not v.get("abandonne"):
+                if not isinstance(v, dict) or _finalise(v) or v.get("abandonne"):
+                    continue
+                if _a_chercher(v):
+                    # Salon illisible (ou serveur indisponible) a chaque essai
+                    # pendant toute la fenetre : un message a 0 y est peut-etre
+                    # reste « en direct ». Rien n'etait en attente -- dit sans
+                    # alarme, avec la vraie raison.
+                    log.info("numgen: recap du %s (serveur %s) : salon jamais relu, un message "
+                             "a 0 eventuel n'a pas pu etre fige, sorti de la fenetre de %d jours "
+                             "-- laisse tel quel", cle, gid, RECAP_RATTRAPAGE_JOURS)
+                    v.update(finalise=True, fige=True, laisse="hors_fenetre")
+                    abandon = True
+                elif _fiche_vide(v) and v.get("messages"):
+                    # Un message a 0 jamais fige (bot arrete plus longtemps que
+                    # la fenetre, salon invisible ou Discord en panne a chaque
+                    # essai) : rien n'etait en attente, ce n'est pas un recap
+                    # perdu -- dit sans alarme, avec la vraie raison. Sans
+                    # message, la fiche est un recap RETENU (jamais poste) : il
+                    # est « abandonne », comme avant.
+                    log.info("numgen: recap a 0 SMS du %s (serveur %s) jamais fige, sorti de la "
+                             "fenetre de %d jours -- laisse tel quel", cle, gid,
+                             RECAP_RATTRAPAGE_JOURS)
+                    v.update(finalise=True, fige=True, laisse="hors_fenetre")
+                    abandon = True
+                else:
                     pourquoi = (("envoi toujours refuse (%s)" % v["envoi_refuse"])
                                 if v.get("envoi_refuse")
                                 else "toujours pas de salon « %s »" % RECAP_SALON)
@@ -1339,21 +1488,54 @@ class NumerosCog(commands.Cog):
         # le texte sans aucun evenement.
         sale = (self._direct_gen != gen or self._direct_a_refaire
                 or (self._direct_expire_le is not None and now >= self._direct_expire_le))
-        vif = sale and (direct or bool(a_corriger))
+        # Un serveur du recap sans message du jour : a minuit (le nouveau jour
+        # n'a encore AUCUN evenement, « sale » restait faux jusqu'au premier
+        # numero), quand un « debrief-day » vient d'etre cree, ou quand celui
+        # du message a 0 a ete supprime puis recree (_zero_manquant). Son
+        # message a 0 part dans la minute. Un envoi refuse le laisse
+        # « manquant » : il est retente au tour suivant (RECAP_PAS_SEC, ou plus
+        # tot sur un evenement), dit une fois -- pas de boucle serree, et sans
+        # relire l'historique (_direct_agg).
+        panneaux = self._serveurs_du_recap() if direct else set()
+        jr_auj = jours_reg.get(aujourdhui.isoformat())
+        jr_auj = jr_auj if isinstance(jr_auj, dict) else {}
+        manquants = sorted(gid for gid in panneaux if self._zero_manquant(gid, jr_auj.get(gid)))
+        # « vif_histo » : l'historique a bouge (ou rien n'en est connu) --
+        # seul cas ou il faut le relire pour la journee en cours.
+        vif_histo = sale and (direct or bool(a_corriger))
+        vif = vif_histo or bool(manquants)
         if vif and 0 <= now - self._direct_edite_le < RECAP_DIRECT_PAS_SEC:
             # Regroupement : la derniere edition a moins d'une minute. Rien
             # n'est perdu -- le recap reste « sale », et le tour de la fin de
             # l'attente envoie la derniere valeur.
             bilan["retenu"] = True
             bilan["reveil"] = self._direct_edite_le + RECAP_DIRECT_PAS_SEC
-            vif = False
+            vif = vif_histo = False
         elif self._direct_expire_le is not None and now < self._direct_expire_le:
             bilan["reveil"] = self._direct_expire_le
         # Rien a figer, rien de neuf : le tour s'arrete la, sans relire
         # l'historique.
         if not a_finir and not vif:
             return bilan
-        if entrees is None:
+        cle_auj = aujourdhui.isoformat()
+        agg = None
+        if vif and not vif_histo:
+            # Seul un message a 0 manque : l'historique n'a pas bouge depuis
+            # sa derniere lecture (meme generation, aucun numero expire), son
+            # bilan du jour vaut toujours.
+            connu = self._direct_agg
+            if connu is not None and connu[0] == cle_auj and connu[1] == self._direct_gen:
+                agg = connu[2]
+        for k in [k for k in self._figer_aggs if k < fenetre[0].isoformat()]:
+            self._figer_aggs.pop(k, None)
+        # Une journee finie deja lue dans ce processus, historique inchange :
+        # son bilan vaut toujours. Une journee tenue ouverte par un essai rate
+        # (serveur indisponible, salon illisible, trace « a_chercher ») relisait
+        # tout l'historique a chaque tour -- 178 lectures sur une panne de 3 h,
+        # 11 698 sur 8 jours, pour un bilan qui ne bougeait pas.
+        a_lire = [j for j in a_finir if self._agg_fini(j, gen) is None]
+        if entrees is None and (a_lire or (vif_histo and a_corriger)
+                                or (vif and direct and agg is None)):
             entrees = _histo_cloturer(now)
             if entrees is None:
                 return bilan
@@ -1363,40 +1545,118 @@ class NumerosCog(commands.Cog):
             self._direct_a_refaire = False
         corrige = False
         for jour in a_voir:
-            if jour in a_finir or (vif and jour in a_corriger):
-                corrige |= await self._figer_jour(jour, entrees, reg, bilan, now)
+            if jour in a_finir or (vif_histo and jour in a_corriger):
+                agg_j = self._agg_fini(jour, gen) if entrees is None else None
+                if agg_j is None:
+                    agg_j = agreger(entrees, jour, now)
+                    self._figer_aggs[jour.isoformat()] = (gen, agg_j)
+                corrige |= await self._figer_jour(jour, agg_j, reg, bilan, now)
         if not vif:
             return bilan
         self._direct_gen = gen
         edite = corrige
+        zero_echec = False
         if direct:
-            agg = agreger(entrees, aujourdhui, now)
-            for gid in sorted(agg):
-                r = await self._synchroniser(aujourdhui, gid, agg[gid], reg, bilan, now,
-                                             final=False)
-                edite |= r == "fait"
+            if agg is None:
+                agg = agreger(entrees, aujourdhui, now)
+            self._direct_agg = (cle_auj, gen, agg)
+            fiches_auj = reg["jours"].get(cle_auj)
+            fiches_auj = fiches_auj if isinstance(fiches_auj, dict) else {}
+            zeros = set()
+            for gid in sorted(panneaux - set(agg)):
+                f = fiches_auj.get(gid)
+                if isinstance(f, dict) and f and not _fiche_vide(f):
+                    # La fiche du jour compte des numeros (ou des mails) que
+                    # l'historique n'a plus (perdu ou purge en cours de
+                    # journee) -- message poste OU recap retenu (salon absent,
+                    # envoi refuse) : « Pas de SMS » par-dessus effacait un vrai
+                    # recap, puis minuit le figeait en « Aucun SMS ». Laisse
+                    # tel quel, et dit.
+                    self._dire_une_fois(
+                        ("sans_historique", cle_auj, gid), log.warning,
+                        "numgen: recap du %s (serveur %s) : la fiche du jour compte %s "
+                        "numero(s), %s mail(s) que l'historique n'a plus -- laisse tel quel, "
+                        "pas de « %s » par-dessus", cle_auj, gid, f.get("numeros", "?"),
+                        f.get("mails", 0), RECAP_ZERO_DIRECT)
+                    continue
+                zeros.add(gid)
+            cibles = set(agg) | zeros
+            if not vif_histo:
+                # Tour reveille par les seuls serveurs sans message du jour
+                # (envoi a 0 refuse, retente chaque minute) : l'historique n'a
+                # pas bouge, les autres n'ont rien de neuf. Les resynchroniser
+                # quand meme, c'etait chaque minute les noms de leurs VA
+                # (fetch_member pour un VA parti du serveur : un appel Discord
+                # par minute toute la journee).
+                cibles &= set(manquants)
+            for gid in sorted(cibles):
+                r = await self._synchroniser(aujourdhui, gid, agg.get(gid) or _agg_zero(), reg,
+                                             bilan, now, final=False)
+                # Seules les editions d'un recap a numeros comptent dans le
+                # regroupement : la creation du message a 0 (minuit, demarrage)
+                # retenait jusqu'a une minute le premier numero du jour, ou la
+                # correction de la veille.
+                edite |= r == "fait" and gid in agg
+                zero_echec |= r == "echec" and gid not in agg
         if edite:
             self._direct_edite_le = now
-        attentes = [_ts(e.get("pris_le")) + DUREE_NUMERO_SEC for e in entrees
-                    if _issue(e, now) == "attente"]
-        self._direct_expire_le = min(attentes) if attentes else None
-        if self._direct_a_refaire:
+        if entrees is not None:
+            attentes = [_ts(e.get("pris_le")) + DUREE_NUMERO_SEC for e in entrees
+                        if _issue(e, now) == "attente"]
+            self._direct_expire_le = min(attentes) if attentes else None
+        if self._direct_a_refaire or zero_echec:
             bilan["reveil"] = now + RECAP_PAS_SEC
         elif self._direct_expire_le is not None:
             bilan["reveil"] = self._direct_expire_le
         return bilan
 
-    async def _figer_jour(self, jour, entrees, reg, bilan, now):
-        """Fige le recap d'une journee finie, serveur par serveur. Rend True si
-        un recap DEJA fige a ete corrige (edition comptee dans le
-        regroupement)."""
+    def _agg_fini(self, jour, gen):
+        """Le bilan deja lu de la journee finie `jour`, s'il vaut toujours :
+        meme generation de l'historique, et aucun numero en attente de son
+        code (le temps seul change alors son issue). Sinon None."""
+        c = self._figer_aggs.get(jour.isoformat())
+        if c is None or c[0] != gen or any(g.get("attente") for g in c[1].values()):
+            return None
+        return c[1]
+
+    async def _figer_jour(self, jour, agg, reg, bilan, now):
+        """Fige le recap d'une journee finie (`agg` : son bilan), serveur par
+        serveur. Rend True si un recap DEJA fige a ete corrige (edition comptee
+        dans le regroupement)."""
         cle = jour.isoformat()
         jours_reg = reg["jours"]
-        agg = agreger(entrees, jour, now)
-        if not agg:
+        # Un message a 0 deja poste que le registre ne connait pas (registre
+        # perdu ; reponse d'envoi perdue au dernier tour de la journee) est
+        # retrouve dans le salon et fige. S'il n'y en a pas, RIEN n'est
+        # poste : un registre perdu aurait fait poster sept « Aucun SMS ».
+        # `cherches` : un essai par tour -- une edition refusee ici est
+        # retentee au tour suivant, pas une seconde fois dans celui-ci.
+        cherches = await self._chercher_zeros(jour, agg, reg, bilan, now)
+        fiches = jours_reg.get(cle)
+        fiches = fiches if isinstance(fiches, dict) else {}
+        # Les messages a 0 postes en direct : figes eux aussi (« Aucun SMS ce
+        # jour-là. »), y compris un serveur B a 0 le jour ou A a des numeros --
+        # agg seul ne les voyait pas, B restait « en direct » pour toujours.
+        zeros = sorted(gid for gid, v in fiches.items()
+                       if gid not in agg and _fiche_vide(v) and v.get("messages"))
+        a_figer_zeros = [gid for gid in zeros if gid not in cherches]
+        # Une fiche A NUMEROS dont le serveur n'a plus aucune activation ce
+        # jour-la (historique perdu ou purge) : rien ne peut la refaire -- et
+        # surtout pas en « Aucun SMS ». Laissee telle quelle, et dit.
+        if agg or zeros:
+            for gid, v in sorted(fiches.items()):
+                if (gid not in agg and isinstance(v, dict) and not _fiche_vide(v)
+                        and not _a_chercher(v) and not _finalise(v)
+                        and not v.get("abandonne")):
+                    log.warning("numgen: recap du %s (serveur %s) : l'historique n'a plus "
+                                "aucune activation de ce serveur ce jour-la -- recap laisse "
+                                "tel quel", cle, gid)
+                    self._poser_fiche(reg, cle, gid, dict(v, finalise=True, fige=True))
+        if not agg and not zeros:
             if cle not in jours_reg:
-                # Rien a poster (choix du 27/09/2026 : pas de message
-                # « aucun numero ») -- mais on le dit, et on le retient.
+                # Aucun message a 0 n'est poste apres coup (27/09/2026) :
+                # seul un message a 0 deja poste en direct est fige. On le
+                # dit, et on le retient.
                 log.info("numgen: recap du %s : aucun numero pris ce jour-la, "
                          "rien n'est poste", cle)
                 jours_reg[cle] = {}
@@ -1404,11 +1664,16 @@ class NumerosCog(commands.Cog):
             elif isinstance(jours_reg.get(cle), dict) and not _jour_fini(jours_reg[cle]):
                 # Des fiches, mais plus aucune activation ce jour-la
                 # (historique perdu ou purge) : rien ne peut les completer.
-                log.warning("numgen: recap du %s : l'historique n'a plus aucune activation "
-                            "de ce jour -- recap laisse tel quel", cle)
-                for gid, v in list(jours_reg[cle].items()):
-                    if isinstance(v, dict):
-                        self._poser_fiche(reg, cle, gid, dict(v, finalise=True, fige=True))
+                # Les traces « a_chercher » restent : leur recherche n'a pas
+                # abouti, la journee n'est pas close.
+                restes = [(gid, v) for gid, v in jours_reg[cle].items()
+                          if isinstance(v, dict) and not _a_chercher(v)
+                          and not (_finalise(v) and _fige(v))]
+                if restes:
+                    log.warning("numgen: recap du %s : l'historique n'a plus aucune activation "
+                                "de ce jour -- recap laisse tel quel", cle)
+                for gid, v in restes:
+                    self._poser_fiche(reg, cle, gid, dict(v, finalise=True, fige=True))
             bilan["vides"].append(cle)
             return False
         attente = sum(g["attente"] for g in agg.values())
@@ -1421,15 +1686,94 @@ class NumerosCog(commands.Cog):
             bilan["attente"].append(cle)
         corrige = False
         jr = jours_reg.get(cle)
-        for gid in sorted(agg):
+        for gid in sorted(set(agg) | set(a_figer_zeros)):
             fiche = jr.get(gid) if isinstance(jr, dict) else None
             fiche = fiche if isinstance(fiche, dict) else {}
             if _fige(fiche) or fiche.get("abandonne"):
                 continue
             deja = _finalise(fiche)
-            r = await self._synchroniser(jour, gid, agg[gid], reg, bilan, now, final=True)
+            r = await self._synchroniser(jour, gid, agg.get(gid) or _agg_zero(), reg, bilan,
+                                         now, final=True)
             corrige |= deja and r == "fait"
         return corrige
+
+    async def _chercher_zeros(self, jour, agg, reg, bilan, now):
+        """Cherche, sans rien poster, le message a 0 de chaque serveur du recap
+        qui n'a pas de fiche pour cette journee finie, et le fige s'il est
+        dans le salon. Rend les serveurs cherches dans ce tour.
+
+        Pas seulement quand le JOUR manque au registre : le message a 0 d'un
+        serveur B cree au dernier tour de la journee, reponse d'envoi perdue,
+        n'a pas de fiche -- et la fiche d'un serveur A faisait exister le
+        jour : B n'etait jamais cherche, « en direct » pour toujours.
+
+        Une recherche qui n'aboutit pas (lecture ratee sans refus net, serveur
+        « unavailable » pendant une reconnexion) laisse une trace
+        « a_chercher » au registre : la journee n'est pas close (_jour_fini),
+        la recherche repart au tour suivant. Sans elle, la veille etait close
+        a {} (« aucun numero pris ce jour-la ») sur une seule lecture ratee, et
+        son message a 0 restait « en direct » pour toujours."""
+        cle = jour.isoformat()
+        jours_reg = reg["jours"]
+        fiches = jours_reg.get(cle)
+        fiches = fiches if isinstance(fiches, dict) else {}
+        du_recap = self._serveurs_du_recap()
+        # Un serveur « unavailable » : ses salons ne se lisent pas, impossible
+        # de savoir s'il a un message a 0 -- il est retente, pas ecarte. Sauf
+        # s'il a ete vu disponible HORS du recap dans ce processus, sans fiche
+        # dans la fenetre : un serveur sans debrief-day, en reconnexion a
+        # minuit, recevait une trace « a_chercher » (« un message a 0 deja
+        # poste n'a pas pu etre cherche ») et tenait la veille ouverte jusqu'a
+        # son retour -- chaque minuit de plus s'il restait absent des jours.
+        plancher = jours_a_recapituler(now)[0].isoformat()
+        avec_fiche = {gid for k, jr in jours_reg.items() if k >= plancher and isinstance(jr, dict)
+                      for gid in jr}
+        indispo = {str(getattr(g, "id", "")) for g in list(getattr(self.bot, "guilds", None) or [])
+                   if getattr(g, "unavailable", False)}
+        indispo = {gid for gid in indispo
+                   if self._recap_connus.get(gid) is not False or gid in avec_fiche}
+        traces = {gid for gid, v in fiches.items() if _a_chercher(v)}
+        cherches = set()
+        for gid in sorted((du_recap | indispo | traces) - set(agg)):
+            v = fiches.get(gid)
+            if isinstance(v, dict) and v and not _a_chercher(v):
+                continue                    # fiche connue : son propre chemin
+            cherches.add(gid)
+            guild = self._guilde(gid)
+            pourquoi = "salon illisible"
+            if guild is None:
+                # Plus sur ce serveur (il en voit d'autres) : rien a y chercher.
+                r = "rien" if self._salon_perdu(None) else "illisible"
+                pourquoi = "serveur invisible pour ce bot"
+            elif getattr(guild, "unavailable", False):
+                r, pourquoi = "illisible", (
+                    "serveur indisponible (reconnexion)" if gid in self._recap_connus
+                    else "serveur indisponible (reconnexion), pas encore vu disponible depuis "
+                         "le demarrage")
+            elif gid not in du_recap and not _salons_debrief(guild):
+                r = "rien"                  # aucun « debrief-day » ou chercher
+            else:
+                r = await self._synchroniser(jour, gid, _agg_zero(), reg, bilan, now,
+                                             final=True, sans_poster=True)
+            jr = jours_reg.get(cle)
+            v = jr.get(gid) if isinstance(jr, dict) else None
+            if r == "illisible":
+                if not _a_chercher(v):
+                    self._poser_fiche(reg, cle, gid, {"a_chercher": True})
+                self._dire_une_fois(
+                    ("a_chercher", cle, gid), log.info,
+                    "numgen: recap du %s (serveur %s) : %s -- un message a 0 deja poste ce "
+                    "jour-la n'a pas pu etre cherche, la journee n'est pas close : nouvel essai "
+                    "au prochain tour", cle, gid, pourquoi)
+            elif _a_chercher(v):
+                # Lu sans rien y trouver (ou plus rien a lire) : la trace n'a
+                # plus lieu d'etre ; un jour sans autre fiche redevient
+                # « inconnu », et _figer_jour le dit (« rien n'est poste »).
+                jr.pop(gid, None)
+                if not jr:
+                    jours_reg.pop(cle, None)
+                self._recap_sauver(reg)
+        return cherches
 
     def _guilde(self, gid):
         try:
@@ -1437,10 +1781,17 @@ class NumerosCog(commands.Cog):
         except (TypeError, ValueError):
             return None
 
-    def _salon_recap(self, guild, fiche):
+    def _salon_recap(self, guild, fiche, bavard=True):
         """Le salon du recap : celui ou vit deja son message (meme renomme),
-        sinon le « debrief-day » du serveur."""
-        par_nom = salon_debrief(guild) if guild is not None else None
+        sinon le « debrief-day » du serveur. `bavard=False` : sans le journal
+        de salon_debrief (« N salons debrief-day ») -- _zero_manquant passe
+        chaque minute."""
+        if guild is None:
+            par_nom = None
+        elif bavard:
+            par_nom = salon_debrief(guild)
+        else:
+            par_nom = (_salons_debrief(guild) or [None])[0]
         cid = fiche.get("salon")
         if not cid or (par_nom is not None and getattr(par_nom, "id", None) == cid):
             return par_nom
@@ -1455,33 +1806,88 @@ class NumerosCog(commands.Cog):
             return ch
         return par_nom
 
-    async def _retrouver(self, salon, jour):
-        """L'id d'un recap de ce jour deja poste par ce bot dans le salon, ou
-        None. Le registre n'en a pas trace s'il a ete perdu, ou s'il n'a pas pu
-        s'ecrire avant un redemarrage : reposter faisait deux messages pour le
-        meme jour."""
+    async def _retrouver(self, salon, jour, now=None, patient=False):
+        """Le message d'un recap de ce jour deja poste par ce bot dans le
+        salon, ou None. Le registre n'en a pas trace s'il a ete perdu, ou s'il
+        n'a pas pu s'ecrire avant un redemarrage : reposter faisait deux
+        messages pour le meme jour. Le message entier, pas son id : un recap a
+        0 verifie qu'il ne va pas ecraser des lignes de VA.
+
+        _ILLISIBLE : la lecture a echoue sans refus net (5xx, delai depasse,
+        connexion coupee) -- ce n'est PAS « rien trouve ». _figer_jour cloturait
+        la veille la-dessus (« aucun numero pris ce jour-la ») et son message a
+        0 restait « en direct » pour toujours.
+
+        `patient` (message a 0 : rien d'urgent) : apres une lecture ratee, le
+        salon n'est relu qu'au bout de la pause (_relire_apres) -- d'ici la,
+        _ILLISIBLE sans appel. Un recap a numeros relit toujours, comme avant
+        le message a 0."""
         hist = getattr(salon, "history", None)
         moi = getattr(getattr(self.bot, "user", None), "id", None)
         if hist is None or moi is None:
             return None
         titres = {titre_recap(jour, False), titre_recap(jour, True)}
+        # Deja lu en entier dans ce processus sans rien y trouver : ce qu'il a
+        # poste depuis, il le sait (registre, _recap_postes). Le message a 0
+        # d'un serveur a l'envoi refuse est retente chaque minute : relire le
+        # salon a chaque essai, c'etait un appel Discord de plus par minute.
+        sid = getattr(salon, "id", None)
+        vu = (jour.isoformat(), sid)
+        if vu in self._recap_absents:
+            return None
+        pause = self._relire_apres.get(sid)
+        if patient and pause is not None and now is not None and now < pause[0]:
+            return _ILLISIBLE
         try:
             async for m in hist(limit=RECAP_RETROUVER):
                 if getattr(getattr(m, "author", None), "id", None) != moi:
                     continue
                 embs = getattr(m, "embeds", None) or []
                 if embs and getattr(embs[0], "title", None) in titres:
-                    log.warning("numgen: recap du %s retrouve dans #%s (message %s) sans trace "
-                                "au registre : il est edite, pas reposte", jour.isoformat(),
-                                getattr(salon, "name", "?"), m.id)
-                    return m.id
+                    # Une fois : une edition refusee du message retrouve le
+                    # faisait redire chaque minute.
+                    self._dire_une_fois(
+                        ("retrouve", jour.isoformat(), getattr(salon, "id", None), m.id),
+                        log.warning, "numgen: recap du %s retrouve dans #%s (message %s) sans "
+                        "trace au registre : il est repris, pas reposte", jour.isoformat(),
+                        getattr(salon, "name", "?"), m.id)
+                    self._relire_apres.pop(sid, None)
+                    self._recap_incertains.discard(vu)
+                    return m
+            self._recap_absents.add(vu)
+            self._relire_apres.pop(sid, None)
+            # Lu en entier : un envoi incertain d'avant n'a rien cree.
+            self._recap_incertains.discard(vu)
         except Exception as e:                               # noqa: BLE001
-            log.warning("numgen: recap du %s : messages de #%s illisibles (%s: %s) -- "
-                        "recherche d'un recap deja poste impossible", jour.isoformat(),
-                        getattr(salon, "name", "?"), type(e).__name__, e)
+            net = _refus_net(e)
+            if net:
+                # Refus net (salon prive : 403 Missing Access ; salon
+                # supprime) : le relire ne changera rien dans ce processus.
+                # Il etait relu, sans succes, a chaque essai d'envoi du
+                # message a 0, chaque minute toute la journee. Un envoi sans
+                # reponse nette l'efface quand meme
+                # (_synchroniser) : le message a pu partir.
+                self._recap_absents.add(vu)
+            elif now is not None:
+                delai = (min(RECAP_RELIRE_MAX_SEC, 2 * pause[1]) if pause is not None
+                         else float(RECAP_PAS_SEC))
+                self._relire_apres[sid] = (now + delai, delai)
+            # Une fois par (salon, erreur) : le message a 0 d'un serveur dont
+            # l'envoi est refuse est retente chaque minute, et un salon
+            # illisible aurait repete cet avertissement toute la journee. Pas
+            # par jour : au demarrage, la veille est examinee aussi, et le
+            # meme salon illisible se disait deux fois.
+            self._dire_une_fois(
+                ("illisible", getattr(salon, "id", None), type(e).__name__),
+                log.warning, "numgen: recap du %s : messages de #%s illisibles (%s: %s) -- "
+                "recherche d'un recap deja poste impossible", jour.isoformat(),
+                getattr(salon, "name", "?"), type(e).__name__, e)
+            if not net:
+                return _ILLISIBLE
         return None
 
-    async def _editer_recap(self, salon, mid, emb, cle, gid, fiche, reg, bilan, repli):
+    async def _editer_recap(self, salon, mid, emb, cle, gid, fiche, reg, bilan, repli,
+                            a_refaire=True):
         """Edite un message du recap : « ok », « disparu » (a poster a neuf),
         ou « echec » (a retenter au prochain tour).
 
@@ -1491,7 +1897,11 @@ class NumerosCog(commands.Cog):
         direct » sur une journee finie. Sinon (journee en cours, correction
         d'un recap deja fige), seul un message DISPARU est reposte : un second
         message pour le meme jour ne se justifie que si le premier n'est plus
-        la."""
+        la.
+
+        `a_refaire` : hors repli, un echec fait relire l'historique au tour
+        suivant (_direct_a_refaire) pour retenter -- pas pour un message a 0
+        en direct (voir _synchroniser)."""
         try:
             await salon.get_partial_message(int(mid)).edit(
                 embed=emb, allowed_mentions=discord.AllowedMentions.none())
@@ -1511,7 +1921,7 @@ class NumerosCog(commands.Cog):
                                 cle, mid, getattr(salon, "name", "?"), nom, e, essais)
                     return "disparu"
                 self._poser_fiche(reg, cle, gid, fiche)
-            else:
+            elif a_refaire:
                 self._direct_a_refaire = True
             self._dire_une_fois(
                 ("edition", cle, gid, nom), log.error,
@@ -1520,17 +1930,71 @@ class NumerosCog(commands.Cog):
             bilan["echecs"].append((cle, gid))
             return "echec"
 
-    async def _synchroniser(self, jour, gid, agg, reg, bilan, now, final):
+    async def _synchroniser(self, jour, gid, agg, reg, bilan, now, final, sans_poster=False):
         """Amene le message du recap (jour, serveur) au texte voulu : le cree
         s'il n'existe pas, l'edite sinon. `final` : recap fige de la journee
         (sinon « en direct »). Rend « fait » (message cree ou edite),
-        « rien » (deja a jour), « echec » ou « sans_salon »."""
+        « rien » (deja a jour), « echec » ou « sans_salon ».
+
+        `sans_poster` : n'edite qu'un message deja poste (registre ou salon),
+        n'en cree jamais -- un jour a 0 SMS sans message ne part pas apres
+        coup."""
         cle = jour.isoformat()
         jours_reg = reg.setdefault("jours", {})
         fiche = (jours_reg.get(cle) or {}).get(gid) if isinstance(jours_reg.get(cle), dict) else None
         fiche = dict(fiche) if isinstance(fiche, dict) else {}
         guild = self._guilde(gid)
+        vide = _agg_vide(agg)
+        if guild is not None and getattr(guild, "unavailable", False):
+            # Reconnexion Discord : discord.py garde les salons en cache, mais
+            # lecture, edition et envoi echouent (503) -- et un envoi sans
+            # reponse nette a pu partir. Une panne a cheval sur minuit
+            # faisait retenter le repli chaque minute : un « Aucun SMS » de
+            # la veille par essai. Rien n'est tente tant qu'il est indisponible,
+            # comme _chercher_zeros et _salon_perdu : le tour suivant reprend.
+            self._dire_une_fois(
+                ("indispo", cle, gid), log.info,
+                "numgen: recap du %s (serveur %s) : serveur indisponible (reconnexion) -- rien "
+                "n'est tente, nouvel essai au prochain tour", cle, gid)
+            if not final and not vide:
+                self._direct_a_refaire = True
+            if sans_poster:
+                return "illisible"
+            bilan["echecs"].append((cle, gid))
+            return "echec"
         salon = self._salon_recap(guild, fiche) if guild is not None else None
+        if salon is None and vide:
+            ou = (("sur le serveur « %s »" % getattr(guild, "name", gid)) if guild is not None
+                  else ("serveur %s invisible pour ce bot" % gid))
+            # Un recap a 0 n'est jamais « en attente » : pas de fiche
+            # « sans_salon » qui finirait « abandonnee » sept jours plus tard.
+            if final and fiche.get("messages") and not _finalise(fiche):
+                if self._salon_perdu(guild):
+                    # Un message a 0 deja poste dont le salon a ete supprime :
+                    # plus rien a figer, la journee est close telle quelle.
+                    self._dire_une_fois(
+                        ("salon", cle, gid), log.info,
+                        "numgen: recap a 0 SMS du %s : aucun salon « %s » (%s) -- le message "
+                        "est parti avec son salon, rien a figer, journee close", cle,
+                        RECAP_SALON, ou)
+                    fiche.update(finalise=True, fige=True, laisse="sans_salon")
+                    self._poser_fiche(reg, cle, gid, fiche)
+                else:
+                    # Serveur indisponible (reconnexion, panne Discord) : ses
+                    # salons reviennent. La fiche reste a figer, retentee a
+                    # chaque tour comme un recap a numeros ; sortie de la
+                    # fenetre, elle est dite « jamais figee », sans alarme.
+                    self._dire_une_fois(
+                        ("salon_invisible", cle, gid), log.info,
+                        "numgen: recap a 0 SMS du %s : salon du message invisible (%s, "
+                        "serveur indisponible) -- nouvel essai au prochain tour", cle, ou)
+            else:
+                self._dire_une_fois(
+                    ("salon", cle, gid), log.info,
+                    "numgen: recap a 0 SMS du %s : aucun salon « %s » (%s) -- rien n'est "
+                    "retenu", cle, RECAP_SALON, ou)
+            bilan["sans_salon"].append((cle, gid))
+            return "sans_salon"
         if salon is None:
             ou = (("sur le serveur « %s »" % getattr(guild, "name", gid)) if guild is not None
                   else ("serveur %s invisible pour ce bot" % gid) if str(gid) != "0"
@@ -1542,9 +2006,14 @@ class NumerosCog(commands.Cog):
                 cle, RECAP_SALON, ou, agg["numeros"] + agg["mails"])
             # Retenu AU REGISTRE : le jour reste « a faire » apres un
             # redemarrage, et le rattrapage le reprend quand le salon existe.
-            if not fiche.get("sans_salon") or fiche.get("numeros") != agg["numeros"]:
+            # « rendus » aussi : un recap retenu d'une journee a numeros rendus
+            # seulement passait pour une fiche a 0 (_fiche_vide), et son
+            # abandon etait dit « message a 0 jamais fige », en simple info.
+            if (not fiche.get("sans_salon")
+                    or (fiche.get("numeros"), fiche.get("mails"), fiche.get("rendus"))
+                    != (agg["numeros"], agg["mails"], agg.get("rendus", 0))):
                 fiche.update(finalise=False, sans_salon=True, numeros=agg["numeros"],
-                             mails=agg["mails"])
+                             mails=agg["mails"], rendus=agg.get("rendus", 0))
                 self._poser_fiche(reg, cle, gid, fiche)
             bilan["sans_salon"].append((cle, gid))
             return "sans_salon"
@@ -1555,26 +2024,137 @@ class NumerosCog(commands.Cog):
         titre, morceaux = texte_recap(jour, agg, noms, en_direct=None if final else now,
                                       depuis_ts=partiel)
         # La signature ne porte PAS l'heure de mise a jour : sans nouveau
-        # chiffre, aucune edition.
-        signature = (bool(final), tuple(texte_recap(jour, agg, noms, depuis_ts=partiel)[1]))
+        # chiffre, aucune edition. Elle distingue 0 et non 0 : le premier
+        # numero doit EDITER le message « Pas de SMS pour le moment. ».
+        signature = (bool(final), bool(agg["numeros"]),
+                     tuple(texte_recap(jour, agg, noms, depuis_ts=partiel)[1]))
         msgs = [m for m in (fiche.get("messages") or []) if m]
         deja_final = _finalise(fiche)
+        salon_remplace = False
         if msgs and fiche.get("salon") not in (None, getattr(salon, "id", None)):
             # Le salon du message n'existe plus (ou n'est plus visible) : ses
-            # messages ne s'editent plus, le recap repart dans le salon actuel.
-            log.warning("numgen: recap du %s : le salon %s du message n'est plus la -- "
-                        "recap poste dans #%s", cle, fiche.get("salon"),
-                        getattr(salon, "name", "?"))
+            # messages ne s'editent plus, le recap repart dans le salon actuel
+            # -- sauf un jour a 0 fini (plus bas) : rien n'est poste apres coup.
+            salon_remplace = True
+            if not (vide and final):
+                # Une fois : un message a 0 dont l'envoi est refuse dans le
+                # nouveau salon est retente chaque minute.
+                self._dire_une_fois(
+                    ("salon_remplace", cle, gid, fiche.get("salon")), log.warning,
+                    "numgen: recap du %s : le salon %s du message n'est plus la -- "
+                    "recap poste dans #%s", cle, fiche.get("salon"), getattr(salon, "name", "?"))
             msgs = []
         if msgs and deja_final == bool(final) and self._recap_signes.get((cle, gid)) == signature:
             if final and not agg["attente"] and not fiche.get("fige"):
                 fiche["fige"] = True
                 self._poser_fiche(reg, cle, gid, fiche)
             return "rien"
+        illisible = False
+        sid = getattr(salon, "id", None)
+        doute = ((cle, sid) in self._recap_incertains
+                 or _cle_incertain(cle, sid) in (reg.get("incertains") or {})
+                 or (self._registre_neuf_le is not None and cle <= self._registre_neuf_le))
         if not msgs:
-            trouve = await self._retrouver(salon, jour)
+            trouve = await self._retrouver(salon, jour, now=now,
+                                           patient=vide and (sans_poster or (not final and doute)))
+            if trouve is _ILLISIBLE:
+                # Lecture ratee sans refus net : pour un recap a numeros, rien
+                # ne change (le message part, comme avant) ; un message a 0
+                # dans le doute attend une lecture reussie (plus bas) ; pour
+                # une recherche (sans_poster, _figer_jour), c'est dit plus bas
+                # -- la journee ne doit pas etre close sur une lecture ratee.
+                trouve, illisible = None, True
+            perdu = _perdu_par_l_historique(trouve, agg) if trouve is not None else ""
             if trouve is not None:
-                msgs = [trouve]
+                fiche.pop("a_chercher", None)
+                self._incertain_tranche(reg, cle, sid)
+            if perdu:
+                # Registre ET historique perdus (data/ reparti vide) : le
+                # message retrouve montre des numeros, des mails ou des numeros
+                # rendus que plus rien ne sait refaire. Le reecrire les
+                # effacerait (« Pas de SMS », puis « Aucun SMS » a minuit) : il
+                # est laisse tel quel, et le registre le retient
+                # (« sans_historique ») pour ne pas le relire chaque minute.
+                self._dire_une_fois(
+                    ("sans_historique", cle, gid), log.warning,
+                    "numgen: recap du %s : le message %s de #%s compte %s que "
+                    "l'historique n'a plus -- laisse tel quel, pas de « %s » par-dessus",
+                    cle, trouve.id, getattr(salon, "name", "?"), perdu,
+                    RECAP_ZERO_FINAL if final else RECAP_ZERO_DIRECT)
+                fiche.update(salon=getattr(salon, "id", None), messages=[trouve.id],
+                             message=trouve.id, sans_historique=True, finalise=bool(final),
+                             fige=bool(final))
+                self._poser_fiche(reg, cle, gid, fiche)
+                return "rien"
+            if trouve is not None:
+                msgs = [trouve.id]
+                # Dans la fiche des maintenant : si l'edition echoue (erreur
+                # passagere a minuit), la fiche retenue porte le message et ses
+                # chiffres -- sans eux, une fiche retrouvee a 0 passait pour
+                # une fiche « a numeros sans historique » au tour suivant.
+                fiche.update(salon=getattr(salon, "id", None), messages=[trouve.id],
+                             message=trouve.id, numeros=agg["numeros"], mails=agg["mails"],
+                             rendus=agg.get("rendus", 0))
+                deja = _retrouve_a_jour(trouve, titre, morceaux, final, agg)
+                if deja:
+                    # Rien a editer : le message dit deja ce qu'il faut (meme
+                    # texte), ou c'est un « Aucun SMS » deja fige d'un jour a
+                    # 0 -- son en-tete (« Journée partielle ») en sait plus
+                    # qu'un registre perdu. L'editer quand meme, c'etait, sur
+                    # une edition refusee, un second « Aucun SMS » (repli).
+                    for k in ("sans_salon", "envoi_refuse", "essais_final", "sans_historique"):
+                        fiche.pop(k, None)
+                    fiche.update(parts=1, le=int(now), finalise=bool(final),
+                                 fige=bool(final) and not agg["attente"])
+                    self._poser_fiche(reg, cle, gid, fiche)
+                    if deja == "identique":
+                        self._recap_signes[(cle, gid)] = signature
+                    return "rien"
+                # Au registre AVANT l'edition : si elle est refusee, le serveur
+                # n'est plus « manquant » (_zero_manquant) et le salon n'est
+                # plus relu. Sans ca, registre perdu et edition refusee :
+                # lecture du salon, essai d'edition et « retrouve » au journal
+                # chaque minute.
+                self._poser_fiche(reg, cle, gid, fiche)
+        if not msgs and vide and final and salon_remplace:
+            # Le salon du message a 0 a ete remplace (supprime puis recree) et
+            # le jour est fini : le message a disparu avec son salon, et un
+            # jour a 0 n'est jamais poste apres coup dans un salon qui ne l'a
+            # pas eu. Journee close, dite une fois.
+            if not deja_final:
+                self._dire_une_fois(
+                    ("salon_disparu", cle, gid), log.info,
+                    "numgen: recap a 0 SMS du %s : le salon %s du message n'est plus la -- "
+                    "rien a figer, rien n'est poste apres coup dans #%s", cle,
+                    fiche.get("salon"), getattr(salon, "name", "?"))
+                fiche.update(finalise=True, fige=True, laisse="salon_disparu")
+                self._poser_fiche(reg, cle, gid, fiche)
+            return "rien"
+        if not msgs and sans_poster:
+            return "illisible" if illisible else "rien"
+        if not msgs and vide and not final and illisible and doute:
+            # Message a 0 dont le salon n'a pas pu etre relu (5xx, delai
+            # depasse) alors qu'un message du jour y est peut-etre deja :
+            # registre trouve vide par ce processus, ou envoi sans reponse
+            # nette. L'envoyer quand meme, c'etait un second « Pas de SMS » et
+            # le premier « en direct » pour toujours (lecture en 503 au premier
+            # tour apres un registre perdu ; envoi sans reponse puis relecture
+            # ratee). Rien n'est urgent a 0 : le serveur reste « manquant »,
+            # l'envoi attend une lecture reussie (pause : _relire_apres).
+            # Sans ce doute (registre intact, rien envoye), le message part
+            # comme avant : attendre, c'etait relire toute la journee un salon
+            # en 503 pour un message que rien ne dit deja la.
+            # Relecture refusee NET (salon sans « Lire l'historique ») : elle
+            # ne reussira jamais dans ce processus, attendre ne tranche rien --
+            # le message part, avec le nonce du message du jour (_nonce_recap) :
+            # apres une reponse perdue, Discord rend celui deja cree.
+            self._dire_une_fois(
+                ("zero_attend", cle, gid), log.info,
+                "numgen: recap a 0 SMS du %s : #%s pas relu (lecture ratee) -- un message du "
+                "jour y est peut-etre deja, rien n'est envoye avant une relecture reussie",
+                cle, getattr(salon, "name", "?"))
+            bilan["echecs"].append((cle, gid))
+            return "echec"
         # Figer un message « en direct » : repli permis s'il ne s'edite pas.
         repli = bool(final) and not deja_final and bool(msgs)
         embeds = [discord.Embed(title=titre if i == 0 else titre + " (suite)",
@@ -1587,10 +2167,20 @@ class NumerosCog(commands.Cog):
         nouveaux = list(msgs)
         poste = reposte = False
         morts = set()
+        # Faux si Discord a rendu, pour un nonce deja vu, un message qui ne
+        # porte pas ce texte et qu'il n'a pas ete possible d'editer.
+        texte_sur = True
+        # Message a 0 en direct : son texte ne bouge pas de la journee (pas
+        # d'heure de mise a jour), seul un redemarrage le reedite. Une edition
+        # refusee (acces au salon retire) posait _direct_a_refaire : chaque
+        # tour relisait tout l'historique et retentait jusqu'a minuit (120
+        # lectures, 120 editions sur 120 tours simules). Le prochain
+        # evenement, ou minuit, retente -- comme pour un envoi a 0 refuse.
+        a_refaire = not (vide and not final)
         for i, emb in enumerate(embeds):
             if i < len(nouveaux):
                 r = await self._editer_recap(salon, nouveaux[i], emb, cle, gid, fiche, reg,
-                                             bilan, repli)
+                                             bilan, repli, a_refaire=a_refaire)
                 if r == "ok":
                     continue
                 if r == "echec":
@@ -1598,27 +2188,107 @@ class NumerosCog(commands.Cog):
                 if i >= len(morceaux):
                     morts.add(i)    # morceau en trop disparu : rien a remettre
                     continue
+            # Nonce du message logique (_nonce_recap) : renvoye apres une
+            # reponse perdue, Discord rend le message deja cree au lieu d'en
+            # creer un second. discord.py en met un de lui-meme, mais TIRE AU
+            # HASARD a chaque envoi : il ne protege que ses propres renvois
+            # sur 5xx, pas celui du tour suivant.
+            nonce = _nonce_recap(cle, gid, sid, i, final,
+                                 nouveaux[i] if i < len(nouveaux) else None)
             try:
-                m = await salon.send(embed=emb, allowed_mentions=discord.AllowedMentions.none())
+                m = await salon.send(embed=emb, allowed_mentions=discord.AllowedMentions.none(),
+                                     nonce=nonce)
             except Exception as e:                           # noqa: BLE001
+                if not _refus_net(e):
+                    # Pas de refus net de Discord (connexion coupee, 5xx) : le
+                    # message a pu etre cree quand meme, seule la reponse s'est
+                    # perdue. Le « rien dans ce salon » lu juste avant l'envoi
+                    # ne vaut plus : le tour suivant relit le salon et reprend
+                    # ce message. Sans ca, un second message du meme jour
+                    # partait (message a 0 de minuit, premier numero, recap de
+                    # rattrapage -- simule avec ServerDisconnectedError et 503).
+                    self._recap_absents.discard((cle, getattr(salon, "id", None)))
+                    self._recap_incertains.add((cle, sid))
+                    inc = reg.setdefault("incertains", {})
+                    if _cle_incertain(cle, sid) not in inc:
+                        inc[_cle_incertain(cle, sid)] = int(now)
+                        self._recap_sauver(reg)
+                if vide and final and isinstance(e, (discord.Forbidden, discord.NotFound)):
+                    # Le message a 0 ne se fige pas (edition refusee) et le
+                    # repli est refuse POUR DE BON (droits, salon supprime) :
+                    # un recap a 0 n'est jamais « en attente », la journee est
+                    # close telle quelle -- une fiche retenue finissait
+                    # « abandonnee » sept jours plus tard.
+                    self._dire_une_fois(
+                        ("envoi", cle, gid, type(e).__name__), log.warning,
+                        "numgen: recap a 0 SMS du %s non poste dans #%s (%s: %s) -- laisse "
+                        "tel quel, rien n'est retenu", cle, getattr(salon, "name", "?"),
+                        type(e).__name__, e)
+                    fiche.update(finalise=True, fige=True, laisse=type(e).__name__)
+                    self._poser_fiche(reg, cle, gid, fiche)
+                    bilan["echecs"].append((cle, gid))
+                    return "echec"
+                if vide and final:
+                    # Erreur passagere (Discord 5xx, reseau) : clore la journee
+                    # laissait le message a 0 « en direct » pour toujours. La
+                    # fiche reste a figer (essais_final garde), retentee au tour
+                    # suivant ; sortie de la fenetre, dite « jamais figee ».
+                    self._dire_une_fois(
+                        ("envoi", cle, gid, type(e).__name__), log.warning,
+                        "numgen: recap a 0 SMS du %s : ni edite ni poste dans #%s (%s: %s) -- "
+                        "nouvel essai au prochain tour", cle, getattr(salon, "name", "?"),
+                        type(e).__name__, e)
+                    self._poser_fiche(reg, cle, gid, fiche)
+                    bilan["echecs"].append((cle, gid))
+                    return "echec"
+                # Sans refus net, « non poste » etait faux : le message a pu
+                # partir (reponse perdue), et le tour suivant le reprend.
                 self._dire_une_fois(
                     ("envoi", cle, gid, type(e).__name__), log.error,
                     "numgen: recap du %s non poste dans #%s (%s: %s) -- nouvel "
-                    "essai a chaque tour", cle, getattr(salon, "name", "?"),
+                    "essai a chaque tour" if _refus_net(e) else
+                    "numgen: recap du %s : envoi dans #%s sans reponse nette (%s: %s) -- le "
+                    "message a pu partir : le salon est relu au prochain tour, et le message "
+                    "repris s'il y est", cle, getattr(salon, "name", "?"),
                     type(e).__name__, e)
                 # Retenu AU REGISTRE, comme un salon absent : rien n'y restait,
                 # et apres 7 jours de refus le jour sortait de la fenetre sans
                 # un mot -- la boucle d'abandon ne parcourt que le registre.
-                if fiche.get("envoi_refuse") != type(e).__name__ or fiche.get("sans_salon"):
+                # Pas pour un recap a 0 : il n'est jamais « en attente » (a
+                # minuit, un jour a 0 sans message ne part pas) ; en direct, le
+                # serveur reste « manquant » et l'envoi est retente au tour
+                # suivant.
+                if not vide and (fiche.get("envoi_refuse") != type(e).__name__
+                                 or fiche.get("sans_salon")
+                                 or (fiche.get("numeros"), fiche.get("mails"),
+                                     fiche.get("rendus"))
+                                 != (agg["numeros"], agg["mails"], agg.get("rendus", 0))):
                     fiche.pop("sans_salon", None)
                     fiche.update(envoi_refuse=type(e).__name__, numeros=agg["numeros"],
-                                 mails=agg["mails"])
+                                 mails=agg["mails"], rendus=agg.get("rendus", 0))
                     fiche.setdefault("finalise", False)
                     self._poser_fiche(reg, cle, gid, fiche)
-                if not final:
+                # Un message a 0 refuse n'a pas besoin de « _direct_a_refaire » :
+                # le serveur reste « manquant » et l'envoi repart au tour
+                # suivant -- sans relire l'historique chaque minute.
+                if not final and not vide:
                     self._direct_a_refaire = True
                 bilan["echecs"].append((cle, gid))
                 return "echec"
+            # Le salon a desormais un recap de ce jour : une recherche future
+            # (_retrouver) doit le relire, pas se fier au « rien trouve ».
+            self._recap_absents.discard((cle, getattr(salon, "id", None)))
+            self._incertain_tranche(reg, cle, sid)
+            rendu = (getattr(m, "embeds", None) or [None])[0]
+            if rendu is not None and _texte_embed(rendu) != _texte_embed(emb):
+                # Discord a rendu le message deja cree avec ce nonce (reponse
+                # perdue au tour d'avant) : il porte le texte d'alors -- « Pas
+                # de SMS » quand le premier numero arrive entre-temps. Remis au
+                # texte voulu tout de suite ; sinon la signature ne le dit pas
+                # a jour, et le tour suivant (ou minuit) retente.
+                r = await self._editer_recap(salon, getattr(m, "id", None), emb, cle, gid,
+                                             fiche, reg, bilan, False, a_refaire=a_refaire)
+                texte_sur = texte_sur and r == "ok"
             if i < len(nouveaux):
                 nouveaux[i] = getattr(m, "id", None)
                 reposte = True
@@ -1629,25 +2299,33 @@ class NumerosCog(commands.Cog):
             # apres cet envoi ne doit pas le reposter.
             fiche.pop("sans_salon", None)
             fiche.update(salon=getattr(salon, "id", None), messages=list(nouveaux),
-                         message=nouveaux[0], numeros=agg["numeros"], mails=agg["mails"])
+                         message=nouveaux[0], numeros=agg["numeros"], mails=agg["mails"],
+                         rendus=agg.get("rendus", 0))
             fiche.setdefault("finalise", False)
             self._poser_fiche(reg, cle, gid, fiche)
         nouveaux = [x for i, x in enumerate(nouveaux) if i not in morts]
-        for k in ("sans_salon", "envoi_refuse", "essais_final"):
+        for k in ("sans_salon", "envoi_refuse", "essais_final", "sans_historique", "a_chercher"):
             fiche.pop(k, None)
+        # « rendus » au registre aussi : une fiche a 0 numero mais avec des
+        # numeros rendus n'est pas « vide » -- l'historique perdu, elle ne doit
+        # pas etre figee en « Aucun SMS » (_fiche_vide).
         fiche.update(salon=getattr(salon, "id", None), messages=nouveaux, message=nouveaux[0],
                      parts=len(morceaux), le=int(now), numeros=agg["numeros"],
-                     mails=agg["mails"], finalise=bool(final),
-                     fige=bool(final) and not agg["attente"])
+                     mails=agg["mails"], rendus=agg.get("rendus", 0),
+                     finalise=bool(final) and texte_sur,
+                     fige=bool(final) and texte_sur and not agg["attente"])
         if final and reposte and repli:
             fiche["repli"] = True
         self._poser_fiche(reg, cle, gid, fiche)
-        self._recap_signes[(cle, gid)] = signature
+        if texte_sur:
+            self._recap_signes[(cle, gid)] = signature
+        else:
+            self._recap_signes.pop((cle, gid), None)
         if poste or reposte:
             bilan["postes"].append((cle, gid))
         else:
             bilan["edites"].append((cle, gid))
-        if final and not deja_final:
+        if final and texte_sur and not deja_final:
             bilan["finalises"].append((cle, gid))
             if reposte and repli:
                 bilan["replis"].append((cle, gid))
@@ -1665,6 +2343,16 @@ class NumerosCog(commands.Cog):
             log.debug("numgen: recap en direct du %s edite (%d numero(s))", cle, agg["numeros"])
         return "fait"
 
+    def _incertain_tranche(self, reg, cle, sid):
+        """L'envoi incertain (jour, salon) est tranche : message retrouve, ou
+        envoi abouti (le nonce rend le message deja cree)."""
+        self._recap_incertains.discard((cle, sid))
+        inc = reg.get("incertains")
+        if isinstance(inc, dict) and inc.pop(_cle_incertain(cle, sid), None) is not None:
+            if not inc:
+                reg.pop("incertains", None)
+            self._recap_sauver(reg)
+
     def _poser_fiche(self, reg, cle, gid, fiche):
         """Ecrit la fiche (jour, serveur) au registre, et la garde en memoire
         des qu'elle porte un message : si le registre ne s'ecrit pas, le
@@ -1672,6 +2360,15 @@ class NumerosCog(commands.Cog):
         jr = reg.setdefault("jours", {})
         if not isinstance(jr.get(cle), dict):
             jr[cle] = {}
+        ancienne = jr[cle].get(gid)
+        if isinstance(ancienne, dict) and _sans_le(ancienne) == _sans_le(fiche):
+            # Rien de neuf (message reedite a l'identique au redemarrage) :
+            # pas d'ecriture. Avec un registre inecrivable, chacune ajoutait
+            # une ERROR -- et l'ecart de « le » avec le disque la faisait
+            # retenter chaque minute (_redonner_fiches).
+            if fiche.get("messages"):
+                self._recap_postes[(cle, gid)] = dict(ancienne)
+            return
         jr[cle][gid] = dict(fiche)
         if fiche.get("messages"):
             self._recap_postes[(cle, gid)] = dict(fiche)
@@ -1689,7 +2386,8 @@ class NumerosCog(commands.Cog):
                 continue
             if not isinstance(jr.get(cle), dict):
                 jr[cle] = {}
-            if jr[cle].get(gid) != fiche:
+            # « le » seul ne compte pas : ce n'est pas un fait a restituer.
+            if _sans_le(jr[cle].get(gid)) != _sans_le(fiche):
                 jr[cle][gid] = dict(fiche)
                 change = True
         if change:
@@ -2506,6 +3204,18 @@ RECAP_FINAL_ESSAIS = 3
 #: registre n'en a pas trace (perdu, ou inecrivable avant un redemarrage) :
 #: le reposter faisait deux messages pour le meme jour.
 RECAP_RETROUVER = 50
+#: La ligne d'un recap sans aucun numero, a la place des VA et du total :
+#: « tu peux pas mettre "27 sept, pas de SMS pour le moment" ? » (27/09/2026).
+#: En direct, puis une fois la journee figee a minuit.
+RECAP_ZERO_DIRECT = "Pas de SMS pour le moment."
+RECAP_ZERO_FINAL = "Aucun SMS ce jour-là."
+#: Une lecture du salon ratee sans refus net (5xx, delai depasse) n'est
+#: retentee, pour un message a 0, qu'apres une pause qui double a chaque echec
+#: (RECAP_PAS_SEC, 2 min, 4 min...) jusqu'a ce plafond : sans pause, un salon
+#: en 503 toute une apres-midi etait relu chaque minute. 5 min et pas plus : le
+#: message a 0 (et le figeage de la veille) attend la relecture, et un plafond
+#: de 30 min le retardait d'autant apres le retour de Discord.
+RECAP_RELIRE_MAX_SEC = 300
 _JOURS_FR = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
 
 _ILLISIBLE = object()
@@ -2780,6 +3490,157 @@ def _jour_a_corriger(jour_reg) -> bool:
         for v in jour_reg.values())
 
 
+def _refus_net(e) -> bool:
+    """Discord a REPONDU par un refus (4xx : droits, salon supprime, requete
+    invalide) : rien n'a ete cree. Une connexion coupee, un delai depasse ou
+    un 5xx ne disent rien -- le message a pu partir quand meme."""
+    if isinstance(e, (discord.Forbidden, discord.NotFound)):
+        return True
+    try:
+        return isinstance(e, discord.HTTPException) and 400 <= int(e.status) < 500
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
+def _agg_zero():
+    """Le bilan d'un serveur sans aucune activation ce jour-la (message a 0)."""
+    return {"vas": {}, "numeros": 0, "mails": 0, "mails_codes": 0, "rendus": 0,
+            "attente": 0}
+
+
+def _agg_vide(agg) -> bool:
+    """Rien a montrer : ni numero, ni mail, ni numero rendu. Un tel recap
+    n'est jamais « en attente » : le retenir (salon absent, envoi refuse)
+    finissait en « abandonne » sept jours plus tard pour un message qui
+    n'avait rien a dire."""
+    return not (agg.get("numeros") or agg.get("mails") or agg.get("rendus"))
+
+
+def _fiche_vide(fiche) -> bool:
+    """La fiche d'un message a 0 : rien compte a son dernier envoi.
+
+    « numeros » doit y etre ET valoir 0 : une fiche sans chiffres, ou marquee
+    « sans_historique » (vrai recap retrouve que l'historique ne sait plus
+    refaire), n'est PAS vide -- un vrai recap ne doit jamais devenir « Aucun
+    SMS » parce que l'historique a ete perdu ou purge."""
+    return (isinstance(fiche, dict) and "numeros" in fiche and fiche.get("numeros") == 0
+            and not fiche.get("mails") and not fiche.get("rendus")
+            and not fiche.get("sans_historique"))
+
+
+def _montre_des_numeros(m) -> bool:
+    """Le message (un recap deja poste) affiche au moins une ligne de VA."""
+    embs = getattr(m, "embeds", None) or []
+    desc = str(getattr(embs[0], "description", "") or "") if embs else ""
+    return any(ligne.startswith("• ") for ligne in desc.split("\n"))
+
+
+def _message_a_zero(m) -> bool:
+    """Le message (un recap deja poste) est un PUR message a 0 : apres
+    l'en-tete et la ligne vide, rien que « Pas de SMS pour le moment. » ou
+    « Aucun SMS ce jour-là. » -- ni VA, ni total, ni mails, ni rendus."""
+    embs = getattr(m, "embeds", None) or []
+    if len(embs) != 1:
+        return False
+    lignes = str(getattr(embs[0], "description", "") or "").split("\n")
+    return lignes[1:] in (["", RECAP_ZERO_DIRECT], ["", RECAP_ZERO_FINAL])
+
+
+def _retrouve_a_jour(m, titre, morceaux, final, agg) -> str:
+    """Le recap A 0 retrouve `m` (registre perdu) n'a pas a etre edite :
+    « identique » (meme titre, meme texte), « fige » (un « Aucun SMS » deja
+    fige, pour une journee finie qui est toujours a 0), sinon "".
+
+    Un recap a numeros garde le chemin d'avant (toujours edite, repli si
+    l'edition est refusee) : le changer est une autre decision."""
+    embs = getattr(m, "embeds", None) or []
+    if not _agg_vide(agg) or not embs or getattr(embs[0], "title", None) != titre:
+        return ""
+    if (len(embs) == 1 and len(morceaux) == 1
+            and str(getattr(embs[0], "description", "") or "") == morceaux[0]):
+        return "identique"
+    if final and _message_a_zero(m):
+        return "fige"
+    return ""
+
+
+def _nonce_recap(cle, gid, salon_id, i, final, remplace):
+    """Le nonce d'un envoi du recap : le meme pour le meme message logique
+    (jour, serveur, salon, morceau, en direct ou fige, message remplace). Avec
+    un nonce, discord.py demande enforce_nonce : un envoi qui reprend celui
+    d'un message cree par le bot dans les minutes d'avant rend ce message au
+    lieu d'en creer un second -- apres une reponse perdue, c'est le seul
+    moyen de le reprendre quand le salon ne se relit pas (« Lire
+    l'historique » retire : 2 messages du jour, le premier « en direct »
+    pour toujours). Le repli (message « en direct » remplace) et un
+    message disparu reposte portent l'id du message remplace : jamais le
+    nonce du message d'origine -- Discord refuse (NotFound) le nonce d'un
+    message supprime peu avant, et rendrait sinon le message en direct."""
+    brut = "recap|%s|%s|%s|%d|%d|%s" % (cle, gid, salon_id, int(i), int(bool(final)),
+                                        remplace or "")
+    return int(hashlib.sha1(brut.encode("utf-8")).hexdigest()[:15], 16)
+
+
+def _texte_embed(emb):
+    """(titre, description) d'un embed, sans les blancs de bord que Discord
+    peut retirer : un message rendu identique ne doit pas etre reedite."""
+    return (str(getattr(emb, "title", None) or "").strip(),
+            str(getattr(emb, "description", None) or "").strip())
+
+
+def _cle_incertain(cle, sid):
+    """La cle d'un envoi incertain au registre (« incertains ») : jour|salon."""
+    return "%s|%s" % (cle, sid)
+
+
+def _sans_le(fiche):
+    """La fiche sans « le » (heure du dernier passage, jamais relue) : deux
+    fiches qui ne different que par elle disent la meme chose. Au redemarrage,
+    le message a 0 est reedite a l'identique et seul « le » changeait -- avec
+    un registre inecrivable, une ERROR chaque minute jusqu'a minuit."""
+    return {k: v for k, v in fiche.items() if k != "le"} if isinstance(fiche, dict) else fiche
+
+
+def _a_chercher(fiche) -> bool:
+    """Trace posee par _figer_jour quand le salon d'un serveur du recap n'a
+    pas pu etre lu (5xx, delai depasse, serveur indisponible) : un message a 0
+    de ce jour-la y est peut-etre, la journee n'est pas close."""
+    return (isinstance(fiche, dict) and bool(fiche.get("a_chercher"))
+            and not fiche.get("messages") and not _finalise(fiche))
+
+
+def _perdu_par_l_historique(m, agg) -> str:
+    """Ce que montre le recap retrouve `m` et que le bilan de l'historique
+    (`agg`) n'a plus : « des numeros », « des mails », « des numeros
+    rendus » -- ou "" si le reecrire ne perd rien.
+
+    Une seule regle pour « ce message a-t-il du contenu », alignee sur
+    _fiche_vide : la version d'avant ne voyait que les lignes de VA, et un
+    recap « 📧 2 mail(s) » ou « ↩️ 1 numéro(s) rendu(s) » retrouve apres la
+    perte de data/ etait ecrase par « Pas de SMS », puis « Aucun SMS »."""
+    if _message_a_zero(m):
+        return ""
+    embs = getattr(m, "embeds", None) or []
+    lignes = [ligne for e in embs
+              for ligne in str(getattr(e, "description", "") or "").split("\n")]
+    perdu = []
+    if not agg.get("numeros") and (
+            _montre_des_numeros(m)
+            or any(ligne.startswith("Total : ") and not ligne.startswith("Total : 0 ")
+                   for ligne in lignes)):
+        perdu.append("des numeros")
+    if not agg.get("mails") and any(ligne.startswith("📧") for ligne in lignes):
+        perdu.append("des mails")
+    if not agg.get("rendus") and any(ligne.startswith("↩️") for ligne in lignes):
+        perdu.append("des numeros rendus")
+    if not perdu and _agg_vide(agg):
+        # Ni un pur message a 0, ni une ligne reconnue : un texte que ce code
+        # ne sait pas relire. « Pas de SMS » par-dessus pourrait effacer un
+        # vrai recap -- dans le doute, on n'y touche pas.
+        perdu.append("un recap")
+    return ", ".join(perdu)
+
+
 def agreger(entrees, jour, maintenant):
     """{serveur: {vas: {uid: {n, c, sans, attente, nom}}, numeros, mails,
     mails_codes, rendus, attente}} pour les activations PRISES ce jour-la."""
@@ -2789,9 +3650,7 @@ def agreger(entrees, jour, maintenant):
         t = _ts(e.get("pris_le"))
         if not (debut <= t < fin):
             continue
-        g = out.setdefault(str(e.get("serveur") or 0), {
-            "vas": {}, "numeros": 0, "mails": 0, "mails_codes": 0, "rendus": 0,
-            "attente": 0})
+        g = out.setdefault(str(e.get("serveur") or 0), _agg_zero())
         issue = _issue(e, maintenant)
         if issue == "attente":
             g["attente"] += 1
@@ -2855,6 +3714,13 @@ def texte_recap(jour, agg, noms, limite=4096, en_direct=None, depuis_ts=None):
     if en_direct is None:
         entete = ("Journée complète : de 00h00 à 23h59, heure du Bénin." if not depuis_ts
                   else "Journée partielle : de %s à 23h59, heure du Bénin." % debut)
+    elif _agg_vide(agg):
+        # A 0 (ni numero, ni mail, ni rendu), pas d'heure de mise a jour : le
+        # message n'est edite qu'au premier numero, et « mis à jour à 09h05 »
+        # lu a 23h faisait croire que le recap s'etait arrete a 09h05 --
+        # l'inquietude meme du proprietaire (27/09/2026). « Pas de SMS pour
+        # le moment. » dit deja qu'il suit.
+        entete = "En cours : depuis %s, heure du Bénin." % debut
     else:
         # L'heure de la derniere mise a jour : sans elle, un message qui ne
         # bouge pas (aucun numero depuis une heure) ne dit pas s'il suit.
@@ -2865,16 +3731,24 @@ def texte_recap(jour, agg, noms, limite=4096, en_direct=None, depuis_ts=None):
     def nom(uid):
         return discord.utils.escape_markdown(str(noms.get(uid) or uid))[:80]
 
-    vas = sorted(agg["vas"].items(),
-                 key=lambda kv: (-kv[1]["n"], -kv[1]["c"], nom(kv[0]).lower()))
-    for uid, v in vas:
-        pct = int(v["c"] * 100 / v["n"] + 0.5) if v["n"] else 0
-        ligne = "• %s — %d numéro(s) · %d code%s (%d %%)" % (
-            nom(uid), v["n"], v["c"], "s" if v["c"] > 1 else "", pct)
-        if v["sans"] >= RECAP_SEUIL_LOUPE:
-            ligne += " 🔎 %d sans code" % v["sans"]
-        lignes.append(ligne)
-    lignes += ["", "Total : %d numéro(s)" % agg["numeros"]]
+    if agg["numeros"]:
+        vas = sorted(agg["vas"].items(),
+                     key=lambda kv: (-kv[1]["n"], -kv[1]["c"], nom(kv[0]).lower()))
+        for uid, v in vas:
+            pct = int(v["c"] * 100 / v["n"] + 0.5) if v["n"] else 0
+            ligne = "• %s — %d numéro(s) · %d code%s (%d %%)" % (
+                nom(uid), v["n"], v["c"], "s" if v["c"] > 1 else "", pct)
+            if v["sans"] >= RECAP_SEUIL_LOUPE:
+                ligne += " 🔎 %d sans code" % v["sans"]
+            lignes.append(ligne)
+        lignes += ["", "Total : %d numéro(s)" % agg["numeros"]]
+    else:
+        # « Même là, il y a 0 SMS : tu peux pas mettre "27 sept, pas de SMS
+        # pour le moment" ? » (proprietaire, 27/09/2026). A 0, un blanc puis
+        # « Total : 0 numéro(s) » ne disait pas si le recap suivait : une
+        # phrase a la place (la date est dans le titre). Mails et rendus
+        # restent en dessous, comme apres le total.
+        lignes.append(RECAP_ZERO_DIRECT if en_direct is not None else RECAP_ZERO_FINAL)
     if agg.get("mails"):
         lignes.append("📧 %d mail(s)" % agg["mails"])
     if agg.get("rendus"):
@@ -2883,16 +3757,37 @@ def texte_recap(jour, agg, noms, limite=4096, en_direct=None, depuis_ts=None):
     return titre, _decouper(lignes, limite)
 
 
-def salon_debrief(guild):
-    """Le salon « debrief-day » du serveur, quel que soit son decor.
+def _salons_debrief(guild):
+    """Les salons « debrief-day » du serveur, quel que soit leur decor, sans
+    rien journaliser : serveur_du_recap les compte a CHAQUE tour (chaque
+    minute), et le « %d salons » de salon_debrief aurait noye le journal.
 
     Le tiret de tete est retire aussi : Discord change les espaces d'un salon
     texte en tirets, et « 📊 debrief-day » tape par le proprietaire devient
     « 📊-debrief-day », dont nom_sans_decor garde le tiret (« -debrief-day ») :
     le recap restait bloque sur « aucun salon », puis abandonne."""
     from cogs.welcome import nom_sans_decor
-    vus = [c for c in (getattr(guild, "text_channels", None) or [])
-           if nom_sans_decor(getattr(c, "name", "")).lstrip("-_") == RECAP_SALON]
+    return [c for c in (getattr(guild, "text_channels", None) or [])
+            if nom_sans_decor(getattr(c, "name", "")).lstrip("-_") == RECAP_SALON]
+
+
+def serveur_du_recap(guild) -> bool:
+    """Le serveur recoit son message du jour MEME A 0 SMS : il a un salon
+    « debrief-day » ET au moins un panneau numeros (salon -numero-mail, meme
+    test que _prive_par_construction).
+
+    « Même là, il y a 0 SMS : tu peux pas mettre "27 sept, pas de SMS pour le
+    moment" ? » (27/09/2026). Un serveur sans panneau numeros ne prend aucun
+    numero : un « Pas de SMS » chaque jour dans son debrief serait du bruit."""
+    if not _salons_debrief(guild):
+        return False
+    return any(_prive_par_construction(c) for c in (getattr(guild, "text_channels", None) or []))
+
+
+def salon_debrief(guild):
+    """Le salon « debrief-day » du serveur, quel que soit son decor (regle de
+    nom : _salons_debrief)."""
+    vus = _salons_debrief(guild)
     if len(vus) > 1:
         log.info("numgen: %d salons « %s » sur %s : le premier (#%s) recoit le recap",
                  len(vus), RECAP_SALON, getattr(guild, "name", "?"), vus[0].name)

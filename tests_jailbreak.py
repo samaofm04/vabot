@@ -15519,6 +15519,11 @@ try:
                 for f_ in k.get("attachments") or []:
                     f_.close()
                 m.k.update(k)
+                # Comme Discord : relu (history), le message porte l'embed
+                # edite. Sans ca, un recap fige a minuit se relisait « en
+                # direct » apres une perte du registre (27/09/2026, tour 2).
+                if k.get("embed") is not None:
+                    m.embeds = [k["embed"]]
             async def delete(self):
                 self.ch.msgs.pop(self.mid, None)
 
@@ -15559,6 +15564,10 @@ try:
             def __init__(self, guilds=()):
                 self.user = _tyR.SimpleNamespace(id=1); self.loop = _LoopR()
                 self.guilds_ = {g.id: g for g in guilds}
+                # Comme discord.py : le recap y cherche les serveurs qui ont
+                # leur message a 0 SMS (panneau numeros + debrief-day,
+                # 27/09/2026).
+                self.guilds = list(guilds)
             def get_cog(self, n_): return None
             def get_channel(self, i): return None
             def get_guild(self, i): return self.guilds_.get(int(i))
@@ -15767,9 +15776,14 @@ try:
                       and not b["postes"] and _sansMentionR(M.k.get("allowed_mentions")),
                       (b, "\n".join(_lignesR(M)) if M else None))
                 b = await cog.recap_tour(maintenant=_minuitR(T) + 300)          # 00:05
-                check("recap : plus de second message a 00:05, et le numero de 23:58 qui attend "
-                      "son code est dit une fois",
-                      len(_duJourR(DB, V)) == 1 and not b["postes"]
+                # 27/09/2026 : G a un panneau numeros et un debrief-day -- le
+                # message du NOUVEAU jour (T) part au premier tour hors
+                # regroupement, sans attendre un evenement. Pour la veille,
+                # toujours aucun second message.
+                check("recap : plus de second message a 00:05 pour la veille (seul le message du "
+                      "jour T part), et le numero de 23:58 qui attend son code est dit une fois",
+                      len(_duJourR(DB, V)) == 1 and b["postes"] == [(T.isoformat(), "777")]
+                      and len(_duJourR(DB, T)) == 1
                       and len([x for x in _jR.l[l0:] if "attendent encore" in x]) == 1, b)
                 b = await cog.recap_tour(maintenant=_minuitR(T) + 18 * 60 + 1)  # 00:18:01
                 fV = _ficheR(V, "777")
@@ -15799,10 +15813,15 @@ try:
                 _synR(G, 7, _minuitR(T + _tdR(days=2)) + 3600, "annule", "Belarmin")
                 b = await cog2.recap_tour(maintenant=_minuitR(T + _tdR(days=4)) + 10 * 3600)
                 mt = _duJourR(DB, T)
+                # 27/09/2026 : les jours vides SANS message (T+1, T+3, bot
+                # arrete) ne partent toujours pas ; le seul envoi en plus est
+                # le message a 0 du jour en cours (T+4), G ayant un panneau.
                 check("rattrapage : le jour du parcours (message en direct) est FIGE par edition, "
-                      "T+2 (sans message) est poste, les jours vides non",
+                      "T+2 (sans message) est poste, les jours vides non (seul le message a 0 du "
+                      "jour en cours part)",
                       (T.isoformat(), "777") in b["finalises"]
-                      and b["postes"] == [((T + _tdR(days=2)).isoformat(), "777")]
+                      and b["postes"] == [((T + _tdR(days=2)).isoformat(), "777"),
+                                          ((T + _tdR(days=4)).isoformat(), "777")]
                       and (T + _tdR(days=1)).isoformat() in b["vides"]
                       and len(mt) == 1 and mt[0].k["embed"].title == _titreR(T)
                       and len(_duJourR(DB, T + _tdR(days=2))) == 1, b)
@@ -15871,11 +15890,14 @@ try:
                     _PartR.edit = _vraiEditR
                 b = await cogD.recap_tour(maintenant=mD + 86400 + 2)             # minuit
                 fD = _ficheR(D, "777")
+                # 27/09/2026 : le seul envoi a minuit est le message a 0 du
+                # nouveau jour (D+1) ; la journee D, elle, est figee par edition.
                 check("en direct -> minuit : le MEME message devient le recap final (edition), "
                       "le registre garde son id et « finalise »",
                       _duJourR(DB, D) == [MD] and MD.k["embed"].title == _titreR(D)
                       and _lignesR(MD)[0] == "Journée complète : de 00h00 à 23h59, heure du Bénin."
-                      and b["finalises"] == [(D.isoformat(), "777")] and not b["postes"]
+                      and b["finalises"] == [(D.isoformat(), "777")]
+                      and b["postes"] == [((D + _tdR(days=1)).isoformat(), "777")]
                       and fD.get("message") == MD.id and fD.get("finalise") is True, (b, fD))
                 await cogD.recap_tour(maintenant=mD + 86400 + 300)
                 await _nR.NumerosCog(bot).recap_tour(maintenant=mD + 86400 + 3600)
@@ -15912,10 +15934,12 @@ try:
                       and "• Belarmin — 1 numéro(s) · 1 code (100 %)" in _lignesR(M2), b)
                 b = await _nR.NumerosCog(bot).recap_tour(
                     maintenant=_minuitR(D2 + _tdR(days=1)) + 1800)
+                # 27/09/2026 : le seul envoi est le message a 0 du jour (D2+1).
                 check("redemarrage le lendemain : la veille restee « en direct » est FIGEE par "
                       "edition, pas repostee",
                       _duJourR(DB, D2) == [M2] and M2.k["embed"].title == _titreR(D2)
-                      and b["finalises"] == [(D2.isoformat(), "777")] and not b["postes"], b)
+                      and b["finalises"] == [(D2.isoformat(), "777")]
+                      and b["postes"] == [((D2 + _tdR(days=1)).isoformat(), "777")], b)
 
                 # ---- garde machine
                 _nR._MACHINE_DITE.clear()
@@ -16225,6 +16249,11 @@ try:
 
         def get_guild(self, i):
             return self.guildes.get(int(i))
+
+        @property
+        def guilds(self):
+            # Comme discord.py (recap a 0 SMS, 27/09/2026).
+            return list(self.guildes.values())
 
         def get_user(self, i):
             return None
@@ -16878,7 +16907,12 @@ try:
                   "« depuis 09h00 », figee en « Journée partielle », et c est dit",
                   b0["postes"] == [(X.isoformat(), "777")] and len(db.envois) == 1
                   and (X.isoformat(), "777") in bX["finalises"]
-                  and reg.get("depuis") == X.isoformat()
+                  # Plancher a la VEILLE, meme quand l'historique nait
+                  # aujourd'hui (relecture du 27/09/2026) : un message a 0
+                  # poste la veille, registre perdu, doit etre retrouve et
+                  # fige. La veille est examinee, rien n'y est poste.
+                  and reg.get("depuis") == (X - _tdQ(days=1)).isoformat()
+                  and (X - _tdQ(days=1)).isoformat() in b0["vides"]
                   and reg.get("partiel", {}).get(X.isoformat()) == int(_tsQ(X, 9))
                   and fige and _ditQ("journee partielle", j0),
                   (b0, bX, reg.get("depuis"), txt[:300]))
@@ -16951,6 +16985,1485 @@ except Exception as _eQ:
     _tbQ.print_exc()
     check("panneau numero (relecture 2) : testable", False, repr(_eQ)[:200])
 
+
+# ---------------------------------------------------------------------------
+# Recap a 0 SMS (27/09/2026). « Même là, il y a 0 SMS : tu peux pas mettre
+# "27 sept, pas de SMS pour le moment" ? » : un serveur qui a un panneau
+# numeros (salon -numero-mail) ET un « debrief-day » a son message du jour des
+# minuit, meme sans numero ; le premier numero EDITE ce message, minuit le fige
+# en « Aucun SMS ce jour-là. ». Aucun jour vide n'est poste apres coup, et un
+# vrai recap n'est jamais ecrase par « Aucun SMS ». Memes faux objets que la
+# section du recap (_ChR, _GuildR, _BotR) ; scenario complet et mutants :
+# scratchpad recap_sim.py / zero_mut.py.
+print()
+print("=" * 70)
+print("Recap a 0 SMS : le message du jour existe meme sans numero")
+print("=" * 70)
+try:
+    import asyncio as _aZ, tempfile as _tfZ, logging as _lgZ, shutil as _shZ
+    import types as _tyZ
+    import discord as _dZ
+    import cogs.numeros as _nZ
+    import safe_json as _sjZ
+    from datetime import datetime as _dtZ, timedelta as _tdZ, timezone as _tzZ
+    _savZ = (_nZ.SALONS_FILE, _nZ.HISTO_FILE, _nZ.RECAP_FILE)
+    _envZ = os.environ.pop("VA_MACHINE_PROD", None)
+    _tmpZ = pathlib.Path(_tfZ.mkdtemp(prefix="recapzero_"))
+    _auditZ, _nEcritsZ = _V2_AUDIT["actif"], len(_V2_AUDIT["ecrits"])
+    _V2_AUDIT["actif"] = True
+
+    class _JournalZ(_lgZ.Handler):
+        def __init__(self):
+            super().__init__(_lgZ.DEBUG)
+            self.l = []
+
+        def emit(self, r):
+            self.l.append(r.getMessage())
+    _jZ = _JournalZ()
+    _logZ = _lgZ.getLogger("vabot.numeros")
+    _niveauZ = _logZ.level
+    _logZ.setLevel(_lgZ.INFO)
+    _logZ.addHandler(_jZ)
+    try:
+        _UTCZ = _tzZ(_tdZ(hours=1))
+        _ZD, _ZF = "Pas de SMS pour le moment.", "Aucun SMS ce jour-là."
+        _FINZ = "Journée complète : de 00h00 à 23h59, heure du Bénin."
+        _JOURSZ = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
+
+        def _tsZ(j, h=0, m=0, s_=0):
+            return (_dtZ(j.year, j.month, j.day, tzinfo=_UTCZ).timestamp()
+                    + h * 3600 + m * 60 + s_)
+
+        def _titreZ(j, direct=False):
+            t_ = "📊 Récap numéros SMS — %s %s" % (_JOURSZ[j.weekday()], j.strftime("%d/%m"))
+            return t_ + " · en direct" if direct else t_
+
+        def _encoursZ(depuis, t):
+            return "En cours : depuis %s, heure du Bénin — mis à jour à %s." % (
+                depuis, _dtZ.fromtimestamp(t, _UTCZ).strftime("%Hh%M"))
+
+        def _encours0Z(depuis):
+            # A 0 (ni numero, ni mail, ni rendu) : pas d'heure de mise a jour
+            # (relecture du 27/09/2026) -- le message n'est edite qu'au premier
+            # numero, et « mis à jour à 09h40 » lu a 23h faisait croire le
+            # recap arrete.
+            return "En cours : depuis %s, heure du Bénin." % depuis
+
+        def _mondeZ(nom, *guildes):
+            # Chaque cas repart d'un historique et d'un registre neufs, nommes
+            # un par un vers le dossier temporaire.
+            _nZ.SALONS_FILE = _tmpZ / nom / "numgen_salons.json"
+            _nZ.HISTO_FILE = _tmpZ / nom / "numgen_historique.json"
+            _nZ.RECAP_FILE = _tmpZ / nom / "numgen_recap.json"
+            return _BotR(guilds=guildes)
+
+        def _msgsZ(ch_):
+            return [m for m in ch_.msgs.values() if m.k.get("embed") is not None]
+
+        def _tZ(m):
+            return m.k["embed"].title
+
+        def _lZ(m):
+            return (m.k["embed"].description or "").split("\n")
+
+        def _sansMentionZ(m):
+            am = m.k.get("allowed_mentions")
+            return (isinstance(am, _dZ.AllowedMentions) and not am.everyone
+                    and not am.users and not am.roles)
+
+        def _priseZ(g, uid, t, nom=None, code=False):
+            aid = "z%d_%d" % (g.id, int(t))
+            actif = {"id": aid, "kind": "sms", "provider": "getatext", "service": "ig",
+                     "valeur": "+1888%07d" % (int(t) % 10 ** 7), "par": uid, "pris_le": int(t)}
+            u = _tyZ.SimpleNamespace(id=uid, display_name=nom) if nom else None
+            assert _nZ.histo_prise(actif, _tyZ.SimpleNamespace(id=g.id + 1, guild=g), u,
+                                   maintenant=t)
+            if code:
+                assert _nZ.histo_evenement("sms", aid, "code", maintenant=t + 60)
+
+        def _regZ():
+            return _sjZ.load(_nZ._recap_fichier(), default={})
+
+        def _fichesZ(gid):
+            return {c: v[gid] for c, v in (_regZ().get("jours") or {}).items()
+                    if isinstance(v, dict) and gid in v}
+
+        def _ditZ(motif, depuis):
+            return [x for x in _jZ.l[depuis:] if motif in x]
+
+        def _perdreZ(p):
+            for f_ in (p, p.with_name(p.name + ".prev")):
+                if f_.exists():
+                    f_.unlink()
+
+        class _ChRefusZ(_ChR):
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                self.refus = None
+
+            async def send(self, **k):
+                if self.refus is not None:
+                    raise self.refus
+                return await _ChR.send(self, **k)
+
+        async def _scenZ():
+            # ---- le registre REEL du VPS ce matin : plancher et journee
+            # partielle depuis 08h20, aucun historique, aucun numero pris.
+            GV = _GuildR(8101, "YouL4b US", {7: "Belarmin"})
+            bot = _mondeZ("vps", GV)
+            DBV = _ChR(81010, "📊・debrief-day", GV)
+            _ChR(81011, "belarmin-numero-mail", GV)
+            rf = _nZ._recap_fichier()
+            rf.parent.mkdir(parents=True, exist_ok=True)
+            assert _sjZ.write(rf, {"jours": {}, "partiel": {"2026-09-27": 1790493615},
+                                   "depuis": "2026-09-27"}, indent=2)
+            d27 = _dtZ(2026, 9, 27).date()
+            d28 = d27 + _tdZ(days=1)
+            cog = _nZ.NumerosCog(bot)
+            b = await cog.recap_tour(maintenant=_tsZ(d27, 9, 40))
+            mv = _msgsZ(DBV)
+            check("recap a 0 : registre REEL du VPS (depuis 08h20, aucun historique) -> 1er tour : "
+                  "UN message « · en direct », « Pas de SMS pour le moment. », sans mention",
+                  not _nZ._histo_fichier().exists() and b["postes"] == [("2026-09-27", "8101")]
+                  and len(mv) == 1
+                  and _tZ(mv[0]) == "📊 Récap numéros SMS — dimanche 27/09 · en direct"
+                  and _lZ(mv[0]) == [_encours0Z("08h20"), "", _ZD]
+                  and _sansMentionZ(mv[0]), (b, [_lZ(m) for m in mv]))
+            b1 = await cog.recap_tour(maintenant=_tsZ(d27, 9, 41))
+            b2 = await cog.recap_tour(maintenant=_tsZ(d27, 13))
+            check("recap a 0 : tours suivants sans evenement -> ni envoi ni edition (pas de "
+                  "boucle), une seule fiche au registre",
+                  not (b1["postes"] or b1["edites"] or b2["postes"] or b2["edites"])
+                  and len(_msgsZ(DBV)) == 1
+                  and _fichesZ("8101")["2026-09-27"].get("numeros") == 0, (b1, b2))
+            g0 = _nZ._HISTO_GEN[0]
+            b = await cog.recap_tour(maintenant=_tsZ(d28, 0, 0, 20))
+            mv = _msgsZ(DBV)
+            check("recap a 0 : minuit -> le MEME message fige par edition (« Journée partielle : de "
+                  "08h20 », « Aucun SMS ce jour-là. »)",
+                  len(mv) == 2 and _tZ(mv[0]) == "📊 Récap numéros SMS — dimanche 27/09"
+                  and _lZ(mv[0]) == ["Journée partielle : de 08h20 à 23h59, heure du Bénin.", "",
+                                     _ZF]
+                  and b["finalises"] == [("2026-09-27", "8101")]
+                  and _sansMentionZ(mv[0]), (b, [_lZ(m) for m in mv]))
+            check("recap a 0 : minuit -> le message a 0 du NOUVEAU jour part dans la minute, sans "
+                  "aucun evenement de l'historique",
+                  _nZ._HISTO_GEN[0] == g0 and b["postes"] == [("2026-09-28", "8101")]
+                  and len(mv) == 2
+                  and _tZ(mv[1]) == "📊 Récap numéros SMS — lundi 28/09 · en direct"
+                  and _lZ(mv[1]) == [_encours0Z("00h00"), "", _ZD],
+                  (b, [_lZ(m) for m in mv]))
+            bR = await _nZ.NumerosCog(bot).recap_tour(maintenant=_tsZ(d28, 0, 5))
+            check("recap a 0 : redemarrage (nouvelle instance du cog) -> le message a 0 est repris, "
+                  "jamais double", not bR["postes"] and len(_msgsZ(DBV)) == 2, bR)
+            _priseZ(GV, 7, _tsZ(d28, 10), "Belarmin")
+            b = await cog.recap_tour(maintenant=_tsZ(d28, 10, 0, 2))
+            check("recap a 0 : le PREMIER numero EDITE le message a 0 (jamais un second message)",
+                  len(_msgsZ(DBV)) == 2 and b["edites"] == [("2026-09-28", "8101")]
+                  and not b["postes"]
+                  and _lZ(mv[1]) == [_encoursZ("00h00", _tsZ(d28, 10, 0, 2)), "",
+                                     "• Belarmin — 1 numéro(s) · 0 code (0 %)", "",
+                                     "Total : 1 numéro(s)"], (b, [_lZ(m) for m in mv]))
+
+            # ---- quels serveurs, et un debrief-day cree en cours de journee
+            GA = _GuildR(8201, "A panneau + debrief")
+            GB = _GuildR(8202, "B debrief sans panneau")
+            GC = _GuildR(8203, "C panneau sans debrief")
+            bot = _mondeZ("selection", GA, GB, GC)
+            DBA = _ChR(82010, "📊・debrief-day", GA)
+            _ChR(82011, "lena-numero-mail", GA)
+            DBB = _ChR(82020, "📊・debrief-day", GB)
+            _ChR(82021, "sms-email", GB)
+            _ChR(82031, "kora-numero-mail", GC)
+            Z = d27 + _tdZ(days=60)
+            cog = _nZ.NumerosCog(bot)
+            l0 = len(_jZ.l)
+            b = await cog.recap_tour(maintenant=_tsZ(Z, 7))
+            check("recap a 0 : seul le serveur a panneau numeros ET debrief-day recoit son message ; "
+                  "sans -numero-mail ou sans debrief-day : rien, aucun « aucun salon » retenu",
+                  b["postes"] == [(Z.isoformat(), "8201")] and len(_msgsZ(DBA)) == 1
+                  and not DBB.msgs and not b["sans_salon"] and not _ditZ("aucun salon", l0)
+                  and set((_regZ().get("jours") or {}).get(Z.isoformat(), {})) == {"8201"},
+                  (b, _regZ().get("jours")))
+            DBC = _ChR(82030, "debrief-day", GC)
+            g0 = _nZ._HISTO_GEN[0]
+            b = await cog.recap_tour(maintenant=_tsZ(Z, 14, 0, 30))
+            check("recap a 0 : un « debrief-day » cree en cours de journee recoit son message a 0 "
+                  "au tour suivant, sans evenement",
+                  _nZ._HISTO_GEN[0] == g0 and b["postes"] == [(Z.isoformat(), "8203")]
+                  and [_lZ(m) for m in _msgsZ(DBC)] == [
+                      [_encours0Z("07h00"), "", _ZD]]
+                  and not DBB.msgs, (b, [_lZ(m) for m in _msgsZ(DBC)]))
+
+            # ---- envoi refuse a 0 : retente, dit une fois, jamais retenu
+            GE = _GuildR(8301, "E envoi refuse")
+            bot = _mondeZ("refus", GE)
+            DBE = _ChRefusZ(83010, "📊・debrief-day", GE)
+            _ChR(83011, "harrys-numero-mail", GE)
+            DBE.refus = _dZ.Forbidden(_tyZ.SimpleNamespace(status=403, reason="x"),
+                                      "Missing Permissions")
+            W = d27 + _tdZ(days=70)
+            cog = _nZ.NumerosCog(bot)
+            l0 = len(_jZ.l)
+            bs = [await cog.recap_tour(maintenant=_tsZ(W, 9, k)) for k in range(3)]
+            check("recap a 0, envoi refuse : retente au tour suivant (+60 s), dit UNE fois, aucune "
+                  "fiche retenue (ni « envoi_refuse » ni autre)",
+                  all(x["echecs"] == [(W.isoformat(), "8301")]
+                      and x["reveil"] == _tsZ(W, 9, k) + 60 for k, x in enumerate(bs))
+                  and len(_ditZ("non poste dans #📊・debrief-day (Forbidden", l0)) == 1
+                  and not DBE.msgs and not _fichesZ("8301"),
+                  ([(x["echecs"], x["reveil"]) for x in bs], _fichesZ("8301")))
+            for k in range(1, 10):
+                await cog.recap_tour(maintenant=_tsZ(W + _tdZ(days=k), 0, 6))
+            check("recap a 0, envoi refuse toute la journee : rien poste apres coup, jamais "
+                  "« abandonne » (9 jours plus tard), aucune fiche retenue",
+                  not DBE.msgs and not _ditZ("abandonne", l0) and not _fichesZ("8301"),
+                  _fichesZ("8301"))
+            DBE.refus = None
+            b = await cog.recap_tour(maintenant=_tsZ(W + _tdZ(days=9), 0, 7))
+            check("recap a 0 : l'envoi de nouveau permis -> seul le message du JOUR part, une fois",
+                  b["postes"] == [((W + _tdZ(days=9)).isoformat(), "8301")]
+                  and len(DBE.msgs) == 1, b)
+
+            # ---- A (numeros) et B (0) : figes tous les deux a minuit
+            GA2 = _GuildR(8401, "A2 numeros", {7: "Belarmin"})
+            GB2 = _GuildR(8402, "B2 zero")
+            bot = _mondeZ("ab", GA2, GB2)
+            DBA2 = _ChR(84010, "📊・debrief-day", GA2)
+            _ChR(84011, "va-numero-mail", GA2)
+            DBB2 = _ChR(84020, "📊・debrief-day", GB2)
+            _ChR(84021, "va-numero-mail", GB2)
+            X = d27 + _tdZ(days=80)
+            _priseZ(GA2, 7, _tsZ(X - _tdZ(days=3), 9), "Belarmin", code=True)
+            _priseZ(GA2, 7, _tsZ(X, 9), "Belarmin", code=True)
+            cog = _nZ.NumerosCog(bot)
+            b = await cog.recap_tour(maintenant=_tsZ(X, 10))
+            check("recap a 0 : A (numeros) et B (0) ont chacun leur message en direct",
+                  b["postes"] == [(X.isoformat(), "8401"), (X.isoformat(), "8402")]
+                  and [_lZ(m)[2:] for m in _msgsZ(DBB2)] == [[_ZD]], b)
+            b = await cog.recap_tour(maintenant=_tsZ(X + _tdZ(days=1), 0, 0, 30))
+            ma, mb = _msgsZ(DBA2), _msgsZ(DBB2)
+            check("recap a 0 : minuit -> A ET B figes par edition (B, hors de l'agregat du jour, "
+                  "n'est pas oublie), puis leurs messages a 0 du lendemain",
+                  b["finalises"] == [(X.isoformat(), "8401"), (X.isoformat(), "8402")]
+                  and _tZ(ma[0]) == _tZ(mb[0]) == _titreZ(X)
+                  and _lZ(ma[0]) == [_FINZ, "", "• Belarmin — 1 numéro(s) · 1 code (100 %)", "",
+                                     "Total : 1 numéro(s)"]
+                  and _lZ(mb[0]) == [_FINZ, "", _ZF]
+                  and b["postes"] == [((X + _tdZ(days=1)).isoformat(), "8401"),
+                                      ((X + _tdZ(days=1)).isoformat(), "8402")]
+                  and len(ma) == len(mb) == 2, (b, [_lZ(m) for m in ma + mb]))
+
+            # ---- registre perdu : aucun jour vide rattrape
+            GP = _GuildR(8501, "P registre perdu", {7: "Belarmin"})
+            bot = _mondeZ("perdu", GP)
+            DBP = _ChR(85010, "📊・debrief-day", GP)
+            _ChR(85011, "belarmin-numero-mail", GP)
+            Y = d27 + _tdZ(days=90)
+            _priseZ(GP, 7, _tsZ(Y - _tdZ(days=8), 9), "Belarmin", code=True)   # 7 jours vides
+            cog = _nZ.NumerosCog(bot)
+            b = await cog.recap_tour(maintenant=_tsZ(Y, 12))
+            await cog.recap_tour(maintenant=_tsZ(Y, 12, 1))
+            check("recap a 0, registre neuf : la veille (vide, sans message) n'est PAS postee, ni "
+                  "les jours d'avant ; seul le message a 0 du jour part",
+                  b["postes"] == [(Y.isoformat(), "8501")] and len(_msgsZ(DBP)) == 1
+                  and (Y - _tdZ(days=1)).isoformat() in b["vides"], b)
+            _perdreZ(_nZ._recap_fichier())          # registre perdu dans la soiree
+            cP = _nZ.NumerosCog(bot)
+            b = await cP.recap_tour(maintenant=_tsZ(Y + _tdZ(days=1), 0, 0, 30))
+            for k in range(1, 4):
+                await _nZ.NumerosCog(bot).recap_tour(maintenant=_tsZ(Y + _tdZ(days=1), 1, k))
+            mp = _msgsZ(DBP)
+            check("recap a 0, registre perdu puis redemarrage apres minuit : le message a 0 de la "
+                  "veille est RETROUVE et fige par edition, le jour a le sien, aucun « Aucun SMS » "
+                  "rattrape (ni aux redemarrages suivants)",
+                  len(mp) == 2 and _tZ(mp[0]) == _titreZ(Y) and _lZ(mp[0]) == [_FINZ, "", _ZF]
+                  and b["finalises"] == [(Y.isoformat(), "8501")]
+                  and b["postes"] == [((Y + _tdZ(days=1)).isoformat(), "8501")],
+                  (b, [(_tZ(m), _lZ(m)) for m in mp]))
+
+            # ---- fiche A NUMEROS, historique perdu : jamais « Aucun SMS »
+            GQ = _GuildR(8601, "Q historique perdu", {7: "Belarmin"})
+            GQ2 = _GuildR(8602, "Q2 zero")
+            bot = _mondeZ("histo_perdu", GQ, GQ2)
+            DBQ = _ChR(86010, "📊・debrief-day", GQ)
+            _ChR(86011, "belarmin-numero-mail", GQ)
+            DBQ2 = _ChR(86020, "📊・debrief-day", GQ2)
+            _ChR(86021, "va-numero-mail", GQ2)
+            U = d27 + _tdZ(days=100)
+            _priseZ(GQ, 7, _tsZ(U - _tdZ(days=2), 9), "Belarmin", code=True)
+            _priseZ(GQ, 7, _tsZ(U, 9), "Belarmin", code=True)
+            await _nZ.NumerosCog(bot).recap_tour(maintenant=_tsZ(U, 9, 0, 5))
+            (MQ,), (MQ2,) = _msgsZ(DBQ), _msgsZ(DBQ2)
+            avant_q = _lZ(MQ)
+            _perdreZ(_nZ._histo_fichier())
+            l0 = len(_jZ.l)
+            cQ = _nZ.NumerosCog(bot)
+            b1 = await cQ.recap_tour(maintenant=_tsZ(U, 11))
+            check("recap a 0 : historique perdu en journee -> le message qui a des numeros est "
+                  "laisse tel quel (pas de « Pas de SMS » par-dessus), dit une fois",
+                  _lZ(MQ) == avant_q and (U.isoformat(), "8601") not in b1["edites"]
+                  and not b1["postes"] and len(_msgsZ(DBQ)) == 1
+                  and len(_ditZ("que l'historique n'a plus -- laisse tel quel", l0)) == 1,
+                  (b1, _lZ(MQ)))
+            b = await cQ.recap_tour(maintenant=_tsZ(U + _tdZ(days=1), 0, 0, 30))
+            check("recap a 0 : ... a minuit, la fiche a numeros reste telle quelle (dit), jamais "
+                  "« Aucun SMS » ; le serveur a 0 du meme jour est fige",
+                  _lZ(MQ) == avant_q and _ZF not in "\n".join(_lZ(MQ))
+                  and _fichesZ("8601")[U.isoformat()].get("fige") is True
+                  and _fichesZ("8601")[U.isoformat()].get("numeros") == 1
+                  and _ditZ("aucune activation de ce serveur ce jour-la", l0)
+                  and b["finalises"] == [(U.isoformat(), "8602")]
+                  and _lZ(MQ2) == [_FINZ, "", _ZF], (b, _lZ(MQ), _lZ(MQ2)))
+
+            # ---- registre ET historique perdus (data/ reparti vide)
+            GR = _GuildR(8701, "R data vide", {7: "Belarmin"})
+            bot = _mondeZ("data_vide", GR)
+            DBR = _ChR(87010, "📊・debrief-day", GR)
+            _ChR(87011, "belarmin-numero-mail", GR)
+            V3 = d27 + _tdZ(days=110)
+            _priseZ(GR, 7, _tsZ(V3 - _tdZ(days=2), 9), "Belarmin", code=True)
+            _priseZ(GR, 7, _tsZ(V3, 9), "Belarmin", code=True)
+            await _nZ.NumerosCog(bot).recap_tour(maintenant=_tsZ(V3, 9, 0, 5))
+            (MR,) = _msgsZ(DBR)
+            avant_r = _lZ(MR)
+            _perdreZ(_nZ._histo_fichier())
+            _perdreZ(_nZ._recap_fichier())
+            l0 = len(_jZ.l)
+            cR = _nZ.NumerosCog(bot)
+            b1 = await cR.recap_tour(maintenant=_tsZ(V3, 15))
+            b2 = await cR.recap_tour(maintenant=_tsZ(V3, 15, 2))
+            check("recap a 0 : registre ET historique perdus -> le message retrouve compte des "
+                  "numeros : laisse tel quel (ni edite ni reposte), dit, plus relu ensuite",
+                  _lZ(MR) == avant_r and len(_msgsZ(DBR)) == 1
+                  and not (b1["postes"] or b1["edites"] or b2["postes"] or b2["edites"])
+                  and len(_ditZ("retrouve dans", l0)) == 1
+                  and len(_ditZ("compte des numeros que l'historique n'a plus", l0)) == 1,
+                  (b1, b2, _jZ.l[l0:l0 + 4]))
+            b = await cR.recap_tour(maintenant=_tsZ(V3 + _tdZ(days=1), 0, 0, 30))
+            check("recap a 0 : ... a minuit, toujours tel quel (jamais « Aucun SMS »), le lendemain "
+                  "a son message",
+                  _lZ(MR) == avant_r and b["postes"] == [((V3 + _tdZ(days=1)).isoformat(), "8701")]
+                  and len(_msgsZ(DBR)) == 2, (b, _lZ(MR)))
+            # ---- Relecture contradictoire du 27/09/2026 : un test par
+            # constat corrige (scripts de reproduction : scratchpad
+            # revue_minuit_*, revue_pannes_*, revue_regressions_*).
+            def _hsZ(st, cls=_dZ.HTTPException, txt="refus simule"):
+                return cls(_tyZ.SimpleNamespace(status=st, reason="x"), txt)
+
+            def _duJourZ(ch_, j):
+                return [m for m in _msgsZ(ch_) if _tZ(m) in (_titreZ(j), _titreZ(j, True))]
+
+            def _priseTypeZ(g, uid, t, kind="sms", rendu=False):
+                aid = "t%d_%d" % (g.id, int(t))
+                actif = {"id": aid, "kind": kind, "provider": "getatext", "service": "ig",
+                         "valeur": "+1777%07d" % (int(t) % 10 ** 7), "par": uid,
+                         "pris_le": int(t)}
+                assert _nZ.histo_prise(actif, _tyZ.SimpleNamespace(id=g.id + 1, guild=g), None,
+                                       maintenant=t)
+                if rendu:
+                    assert _nZ.histo_evenement(kind, aid, "rendu", maintenant=t + 5,
+                                               rendu_auto=True)
+
+            # (a) Minuit pendant une panne passagere. Serveur indisponible au
+            # tour de minuit (reconnexion : discord.py le remet
+            # « unavailable », sans salons) : la veille etait close « en
+            # direct » pour toujours. Puis 3 editions refusees et le repli
+            # refuse en 503 : idem. Attendu : retentee, figee au retour.
+            GW = _GuildR(8901, "W panne a minuit")
+            bot = _mondeZ("panne", GW)
+            DBW = _ChRefusZ(89010, "📊・debrief-day", GW)
+            _ChR(89011, "va-numero-mail", GW)
+            K = d27 + _tdZ(days=130)
+            K1, K2 = K + _tdZ(days=1), K + _tdZ(days=2)
+            cog = _nZ.NumerosCog(bot)
+            await cog.recap_tour(maintenant=_tsZ(K, 9))
+            (MW,) = _msgsZ(DBW)
+            salonsW = list(GW.text_channels)
+            GW.text_channels.clear()
+            GW.unavailable = True
+            b1 = await cog.recap_tour(maintenant=_tsZ(K1, 0, 0, 30))
+            f1 = dict(_fichesZ("8901")[K.isoformat()])
+            GW.text_channels[:] = salonsW
+            GW.unavailable = False
+            b2 = await cog.recap_tour(maintenant=_tsZ(K1, 0, 1, 30))
+            fK = _fichesZ("8901")[K.isoformat()]
+            check("recap a 0 : serveur indisponible au tour de minuit -> la veille n'est pas close "
+                  "(retentee), figee par edition a son retour, sans second message",
+                  not f1.get("finalise") and "laisse" not in f1 and not b1["finalises"]
+                  and b2["finalises"] == [(K.isoformat(), "8901")]
+                  and _tZ(MW) == _titreZ(K) and _lZ(MW)[1:] == ["", _ZF]
+                  and len(_duJourZ(DBW, K)) == 1 and fK.get("fige") is True
+                  and "laisse" not in fK, (f1, b1, b2, fK))
+            (MW1,) = _duJourZ(DBW, K1)
+            DBW.echec = 3               # 3 editions refusees (erreur ni droits ni absence)
+            await cog.recap_tour(maintenant=_tsZ(K2, 0, 0, 30))
+            await cog.recap_tour(maintenant=_tsZ(K2, 0, 1, 30))
+            DBW.refus = _hsZ(503)       # ... et le repli refuse, 503 passager
+            b3 = await cog.recap_tour(maintenant=_tsZ(K2, 0, 2, 30))
+            f3 = dict(_fichesZ("8901")[K1.isoformat()])
+            DBW.refus = None
+            b4 = await cog.recap_tour(maintenant=_tsZ(K2, 0, 3, 30))
+            fK1 = _fichesZ("8901")[K1.isoformat()]
+            check("recap a 0 : 3 editions refusees puis repli refuse en 503 a minuit -> pas close, "
+                  "retentee ; figee par edition quand Discord repond, sans second message",
+                  (K1.isoformat(), "8901") in b3["echecs"] and not f3.get("finalise")
+                  and "laisse" not in f3 and f3.get("essais_final") == 3
+                  and b4["finalises"] == [(K1.isoformat(), "8901")]
+                  and _tZ(MW1) == _titreZ(K1) and _lZ(MW1)[1:] == ["", _ZF]
+                  and len(_duJourZ(DBW, K1)) == 1 and fK1.get("fige") is True
+                  and "laisse" not in fK1 and "essais_final" not in fK1, (f3, b3, b4, fK1))
+
+            # (b) « debrief-day » supprime puis recree dans la journee : rien
+            # dans le nouveau jusqu'a minuit, puis la veille y etait postee
+            # apres coup. Attendu : le message a 0 du jour y part au tour
+            # suivant, et minuit l'edite.
+            GS = _GuildR(8911, "S salon recree")
+            bot = _mondeZ("recree", GS)
+            DS1 = _ChR(89110, "📊・debrief-day", GS)
+            _ChR(89111, "va-numero-mail", GS)
+            L = d27 + _tdZ(days=140)
+            L1 = L + _tdZ(days=1)
+            cog = _nZ.NumerosCog(bot)
+            await cog.recap_tour(maintenant=_tsZ(L, 8))
+            GS.text_channels.remove(DS1)
+            DS2 = _ChR(89120, "📊・debrief-day", GS)
+            b = await cog.recap_tour(maintenant=_tsZ(L, 14, 0, 30))
+            bs = [await cog.recap_tour(maintenant=_tsZ(L, 14, k, 30)) for k in (1, 2)]
+            check("recap a 0 : « debrief-day » supprime puis recree en journee -> le nouveau salon "
+                  "recoit le message a 0 du jour au tour suivant, une seule fois",
+                  b["postes"] == [(L.isoformat(), "8911")] and not any(x["postes"] for x in bs)
+                  and [(_tZ(m), _lZ(m)[1:]) for m in _msgsZ(DS2)] == [(_titreZ(L, True),
+                                                                        ["", _ZD])],
+                  (b, [(_tZ(m), _lZ(m)) for m in _msgsZ(DS2)]))
+            b = await cog.recap_tour(maintenant=_tsZ(L1, 0, 0, 30))
+            m2 = _msgsZ(DS2)
+            check("recap a 0 : ... a minuit, CE message est fige par edition (rien poste apres "
+                  "coup), puis le message a 0 du lendemain",
+                  b["finalises"] == [(L.isoformat(), "8911")] and not b["replis"]
+                  and b["postes"] == [(L1.isoformat(), "8911")] and len(m2) == 2
+                  and _tZ(m2[0]) == _titreZ(L) and _lZ(m2[0])[1:] == ["", _ZF]
+                  and _tZ(m2[1]) == _titreZ(L1, True), (b, [(_tZ(m), _lZ(m)) for m in m2]))
+            GS.text_channels.remove(DS2)     # remplace pendant un arret du bot
+            DS3 = _ChR(89130, "📊・debrief-day", GS)
+            l0 = len(_jZ.l)
+            b = await _nZ.NumerosCog(bot).recap_tour(maintenant=_tsZ(L1 + _tdZ(days=1), 0, 0, 30))
+            fL1 = _fichesZ("8911")[L1.isoformat()]
+            check("recap a 0 : salon remplace pendant un arret -> a minuit, la veille (a 0) est "
+                  "close « salon_disparu », RIEN n'est poste apres coup dans le nouveau salon, "
+                  "dit une fois",
+                  fL1.get("laisse") == "salon_disparu" and fL1.get("finalise") is True
+                  and [_tZ(m) for m in _msgsZ(DS3)] == [_titreZ(L1 + _tdZ(days=1), True)]
+                  and len(_ditZ("rien n'est poste apres coup", l0)) == 1,
+                  (fL1, b, [_tZ(m) for m in _msgsZ(DS3)]))
+
+            # (c) Registre perdu la nuit ET aucun historique (l'etat du VPS) :
+            # le message a 0 de la veille restait « en direct » pour toujours,
+            # sans un mot (plancher pose a aujourd'hui).
+            GH = _GuildR(8921, "H registre perdu sans historique")
+            bot = _mondeZ("perdu_vide", GH)
+            DBH = _ChR(89210, "📊・debrief-day", GH)
+            _ChR(89211, "va-numero-mail", GH)
+            M_ = d27 + _tdZ(days=150)
+            M1 = M_ + _tdZ(days=1)
+            rfH = _nZ._recap_fichier()
+            rfH.parent.mkdir(parents=True, exist_ok=True)
+            assert _sjZ.write(rfH, {"jours": {}, "partiel": {M_.isoformat(): int(_tsZ(M_, 8, 20))},
+                                    "depuis": M_.isoformat()}, indent=2)
+            await _nZ.NumerosCog(bot).recap_tour(maintenant=_tsZ(M_, 9, 40))
+            (MH,) = _msgsZ(DBH)
+            _perdreZ(rfH)
+            b = await _nZ.NumerosCog(bot).recap_tour(maintenant=_tsZ(M1, 8))
+            check("recap a 0 : registre perdu dans la nuit, AUCUN historique -> au redemarrage, "
+                  "le message a 0 de la veille est retrouve et fige ; seul le message du jour part",
+                  not _nZ._histo_fichier().exists()
+                  and b["finalises"] == [(M_.isoformat(), "8921")]
+                  and _tZ(MH) == _titreZ(M_) and _lZ(MH)[1:] == ["", _ZF]
+                  and b["postes"] == [(M1.isoformat(), "8921")] and len(_msgsZ(DBH)) == 2
+                  and _regZ().get("depuis") == M_.isoformat(),
+                  (b, _regZ(), [(_tZ(m), _lZ(m)) for m in _msgsZ(DBH)]))
+
+            # (d) Registre ET historique perdus : un recap retrouve qui ne
+            # montrait que des mails, ou que des numeros rendus, etait ecrase
+            # par « Pas de SMS », puis « Aucun SMS » a minuit.
+            GMl = _GuildR(8931, "Ml un mail")
+            GRd = _GuildR(8932, "Rd un numero rendu")
+            bot = _mondeZ("mails_perdus", GMl, GRd)
+            DBMl = _ChR(89310, "📊・debrief-day", GMl)
+            _ChR(89311, "va-numero-mail", GMl)
+            DBRd = _ChR(89320, "📊・debrief-day", GRd)
+            _ChR(89321, "va-numero-mail", GRd)
+            N_ = d27 + _tdZ(days=160)
+            _priseZ(GMl, 7, _tsZ(N_ - _tdZ(days=2), 9), code=True)   # pas de journee partielle
+            _priseTypeZ(GMl, 7, _tsZ(N_, 9), kind="mail")
+            _priseTypeZ(GRd, 8, _tsZ(N_, 9), rendu=True)
+            await _nZ.NumerosCog(bot).recap_tour(maintenant=_tsZ(N_, 9, 5))
+            (MMl,), (MRd,) = _msgsZ(DBMl), _msgsZ(DBRd)
+            avant_d = (_lZ(MMl), _lZ(MRd))
+            _perdreZ(_nZ._histo_fichier())
+            _perdreZ(_nZ._recap_fichier())
+            l0 = len(_jZ.l)
+            cD = _nZ.NumerosCog(bot)
+            bd = [await cD.recap_tour(maintenant=_tsZ(N_, h, m_)) for h, m_ in ((15, 0), (15, 2))]
+            bd.append(await cD.recap_tour(maintenant=_tsZ(N_ + _tdZ(days=1), 0, 0, 30)))
+            check("recap a 0 : registre ET historique perdus -> un recap retrouve qui ne montrait "
+                  "que des mails, ou que des numeros rendus, est laisse tel quel (ni « Pas de "
+                  "SMS » ni « Aucun SMS » par-dessus), dit une fois chacun",
+                  avant_d[0][2:] == [_ZD, "📧 1 mail(s)"] and avant_d[1][3].startswith("↩️ 1 ")
+                  and (_lZ(MMl), _lZ(MRd)) == avant_d
+                  and not any(x["edites"] for x in bd) and not any(x["postes"] for x in bd[:2])
+                  and len(_ditZ("compte des mails que l'historique n'a plus", l0)) == 1
+                  and len(_ditZ("compte des numeros rendus que l'historique n'a plus", l0)) == 1
+                  and bd[2]["postes"] == [((N_ + _tdZ(days=1)).isoformat(), "8931"),
+                                          ((N_ + _tdZ(days=1)).isoformat(), "8932")],
+                  (bd, avant_d, _lZ(MMl), _lZ(MRd)))
+
+            # (e) Recap RETENU d'une journee a numeros rendus seulement : sans
+            # « rendus » au registre, la fiche passait pour une fiche a 0, et
+            # son abandon etait dit « message a 0 jamais fige » en info.
+            GX = _GuildR(8941, "X pas de debrief-day, un rendu")
+            GY = _GuildR(8942, "Y envoi refuse, un rendu")
+            bot = _mondeZ("rendus_retenus", GX, GY)
+            _ChR(89411, "va-numero-mail", GX)
+            DBY = _ChRefusZ(89420, "📊・debrief-day", GY)
+            _ChR(89421, "va-numero-mail", GY)
+            DBY.refus = _hsZ(403, _dZ.Forbidden, "Missing Permissions")
+            P_ = d27 + _tdZ(days=170)
+            _priseTypeZ(GX, 7, _tsZ(P_, 9), rendu=True)
+            _priseTypeZ(GY, 8, _tsZ(P_, 9), rendu=True)
+            cog = _nZ.NumerosCog(bot)
+            await cog.recap_tour(maintenant=_tsZ(P_, 9, 1))
+            fx, fy = _fichesZ("8941")[P_.isoformat()], _fichesZ("8942")[P_.isoformat()]
+            check("recap a 0 : recap retenu d'une journee a numeros RENDUS seulement (salon "
+                  "absent, envoi refuse) -> « rendus » au registre, la fiche n'est pas « a 0 »",
+                  fx.get("sans_salon") is True and fx.get("rendus") == 1
+                  and fy.get("envoi_refuse") == "Forbidden" and fy.get("rendus") == 1
+                  and not _nZ._fiche_vide(fx) and not _nZ._fiche_vide(fy), (fx, fy))
+            l0 = len(_jZ.l)
+            for k in range(1, 10):
+                await cog.recap_tour(maintenant=_tsZ(P_ + _tdZ(days=k), 0, 6))
+            check("recap a 0 : ... sortis de la fenetre, chacun est dit « abandonne » (avertissement) "
+                  "avec sa vraie raison, jamais « message a 0 jamais fige »",
+                  len(_ditZ("recap du %s (serveur 8941, 0 numero(s)) abandonne : toujours pas de "
+                            "salon" % P_.isoformat(), l0)) == 1
+                  and len(_ditZ("recap du %s (serveur 8942, 0 numero(s)) abandonne : envoi "
+                                "toujours refuse (Forbidden)" % P_.isoformat(), l0)) == 1
+                  and not _ditZ("jamais fige", l0), _jZ.l[l0:l0 + 6])
+
+            # (f) Fiche A NUMEROS retenue (envoi refuse, ou pas encore de
+            # salon), puis historique perdu et envoi retabli : elle etait prise
+            # pour un jour a 0 -- « Pas de SMS », puis « Aucun SMS » a minuit.
+            GG = _GuildR(8951, "G envoi refuse", {7: "Belarmin"})
+            GG2 = _GuildR(8952, "G2 pas de debrief-day", {7: "Belarmin"})
+            bot = _mondeZ("retenue_perdue", GG, GG2)
+            DBG = _ChRefusZ(89510, "📊・debrief-day", GG)
+            _ChR(89511, "belarmin-numero-mail", GG)
+            _ChR(89521, "belarmin-numero-mail", GG2)
+            Q_ = d27 + _tdZ(days=180)
+            Q1 = Q_ + _tdZ(days=1)
+            _priseZ(GG, 7, _tsZ(Q_ - _tdZ(days=2), 9), "Belarmin", code=True)
+            DBG.refus = _hsZ(403, _dZ.Forbidden, "Missing Permissions")
+            _priseZ(GG, 7, _tsZ(Q_, 9), "Belarmin")
+            _priseZ(GG2, 7, _tsZ(Q_, 9, 0, 1), "Belarmin")
+            cog = _nZ.NumerosCog(bot)
+            await cog.recap_tour(maintenant=_tsZ(Q_, 9, 0, 5))
+            fg0 = dict(_fichesZ("8951")[Q_.isoformat()])
+            fg20 = dict(_fichesZ("8952")[Q_.isoformat()])
+            _perdreZ(_nZ._histo_fichier())
+            DBG.refus = None
+            DBG2 = _ChR(89520, "📊・debrief-day", GG2)
+            l0 = len(_jZ.l)
+            bf = [await cog.recap_tour(maintenant=_tsZ(Q_, 10, k)) for k in range(3)]
+            bf.append(await cog.recap_tour(maintenant=_tsZ(Q1, 0, 0, 30)))
+            fg, fg2 = _fichesZ("8951")[Q_.isoformat()], _fichesZ("8952")[Q_.isoformat()]
+            check("recap a 0 : fiche A NUMEROS retenue (envoi refuse / pas de salon), puis "
+                  "historique perdu et envoi possible -> ni « Pas de SMS » ni « Aucun SMS » pour "
+                  "ce jour, fiches gardees (1 numero) et figees, dit ; le lendemain a son message",
+                  fg0.get("envoi_refuse") == "Forbidden" and fg20.get("sans_salon") is True
+                  and not _duJourZ(DBG, Q_) and not _duJourZ(DBG2, Q_)
+                  and not any(x["postes"] or x["edites"] for x in bf[:3])
+                  and fg.get("numeros") == 1 and fg2.get("numeros") == 1
+                  and fg.get("fige") is True and fg2.get("fige") is True
+                  and len(_ditZ("que l'historique n'a plus -- laisse tel quel", l0)) == 2
+                  and _ditZ("l'historique n'a plus aucune activation de ce jour", l0)
+                  and bf[3]["postes"] == [(Q1.isoformat(), "8951"), (Q1.isoformat(), "8952")],
+                  (bf, fg, fg2, _jZ.l[l0:l0 + 6]))
+
+            # (g) Envoi du message a 0 refuse en permanence : l'historique
+            # etait relu en entier a chaque essai (chaque minute), et le salon
+            # aussi. L'essai, lui, garde son rythme (une fois par tour).
+            class _ChCompteZ(_ChRefusZ):
+                def __init__(self, *a, **k):
+                    super().__init__(*a, **k)
+                    self.lectures = self.essais = 0
+
+                async def send(self, **k):
+                    self.essais += 1
+                    return await _ChRefusZ.send(self, **k)
+
+                def history(self, **k):
+                    self.lectures += 1
+                    return _ChRefusZ.history(self, **k)
+            GE2 = _GuildR(8961, "E2 envoi refuse en permanence")
+            bot = _mondeZ("relectures", GE2)
+            DBE2 = _ChCompteZ(89610, "📊・debrief-day", GE2)
+            _ChR(89611, "va-numero-mail", GE2)
+            DBE2.refus = _hsZ(403, _dZ.Forbidden, "Missing Permissions")
+            R_ = d27 + _tdZ(days=190)
+            cog = _nZ.NumerosCog(bot)
+            await cog.recap_tour(maintenant=_tsZ(R_, 9))
+            lusZ = []
+            vrai_cloturerZ = _nZ._histo_cloturer
+
+            def _cloturerZ(now):
+                lusZ.append(now)
+                return vrai_cloturerZ(now)
+            _nZ._histo_cloturer = _cloturerZ
+            DBE2.lectures = DBE2.essais = 0
+            try:
+                bg = [await cog.recap_tour(maintenant=_tsZ(R_, 9, k)) for k in range(1, 31)]
+            finally:
+                _nZ._histo_cloturer = vrai_cloturerZ
+            check("recap a 0, envoi refuse en permanence : 30 tours (un par minute) -> l'envoi est "
+                  "retente a chaque tour, sans relire ni l'historique ni le salon",
+                  not lusZ and DBE2.lectures == 0 and DBE2.essais == 30
+                  and all(x["echecs"] == [(R_.isoformat(), "8961")] for x in bg)
+                  and not DBE2.msgs, (len(lusZ), DBE2.lectures, DBE2.essais))
+
+            # (h) La creation du message a 0 ouvrait le delai de regroupement :
+            # le premier numero, 20 s apres, n'etait affiche qu'une minute plus
+            # tard. Et l'en-tete a 0 ne porte pas d'heure de mise a jour.
+            GF = _GuildR(8971, "F premier numero", {7: "Belarmin"})
+            bot = _mondeZ("regroupement", GF)
+            DBF = _ChR(89710, "📊・debrief-day", GF)
+            _ChR(89711, "belarmin-numero-mail", GF)
+            S_ = d27 + _tdZ(days=200)
+            _priseZ(GF, 7, _tsZ(S_ - _tdZ(days=2), 9), "Belarmin", code=True)
+            cog = _nZ.NumerosCog(bot)
+            b0 = await cog.recap_tour(maintenant=_tsZ(S_, 9))
+            (MF,) = _msgsZ(DBF)
+            l_0 = _lZ(MF)
+            _priseZ(GF, 7, _tsZ(S_, 9, 0, 20), "Belarmin")
+            b1 = await cog.recap_tour(maintenant=_tsZ(S_, 9, 0, 21))
+            check("recap a 0 : en-tete a 0 sans heure de mise a jour ; la creation du message a 0 "
+                  "n'ouvre pas le delai de regroupement -- le premier numero, 20 s apres, est "
+                  "affiche tout de suite, dans le meme message, avec l'heure",
+                  b0["postes"] == [(S_.isoformat(), "8971")]
+                  and l_0 == [_encours0Z("00h00"), "", _ZD]
+                  and b1["edites"] == [(S_.isoformat(), "8971")] and not b1["retenu"]
+                  and len(_msgsZ(DBF)) == 1
+                  and _lZ(MF) == [_encoursZ("00h00", _tsZ(S_, 9, 0, 21)), "",
+                                  "• Belarmin — 1 numéro(s) · 0 code (0 %)", "",
+                                  "Total : 1 numéro(s)"], (b0, b1, l_0, _lZ(MF)))
+            # ... ni la correction d'un recap fige a minuit : un numero de 23:58
+            # dont le code arrive a 00:00:30 etait corrige a 00:01:03 au lieu
+            # de 00:00:31 (le message a 0 du jour venait de partir a 00:00:02).
+            GC4 = _GuildR(8981, "C4 correction apres minuit", {7: "Belarmin"})
+            bot = _mondeZ("correction", GC4)
+            DBC4 = _ChR(89810, "📊・debrief-day", GC4)
+            _ChR(89811, "belarmin-numero-mail", GC4)
+            T_ = d27 + _tdZ(days=210)
+            T1 = T_ + _tdZ(days=1)
+            _priseZ(GC4, 7, _tsZ(T_ - _tdZ(days=2), 9), "Belarmin", code=True)
+            t2358 = _tsZ(T1) - 120
+            _priseZ(GC4, 7, t2358, "Belarmin")
+            cog = _nZ.NumerosCog(bot)
+            await cog.recap_tour(maintenant=t2358 + 10)
+            b0 = await cog.recap_tour(maintenant=_tsZ(T1, 0, 0, 2))
+            assert _nZ.histo_evenement("sms", "z%d_%d" % (GC4.id, int(t2358)), "code",
+                                       maintenant=_tsZ(T1, 0, 0, 30))
+            b1 = await cog.recap_tour(maintenant=_tsZ(T1, 0, 0, 31))
+            mt = _duJourZ(DBC4, T_)
+            check("recap a 0 : la correction d'un recap fige a minuit (code arrive a 00:00:30) "
+                  "part tout de suite, meme juste apres la creation du message a 0 du jour",
+                  (T1.isoformat(), "8981") in b0["postes"]
+                  and (T_.isoformat(), "8981") in b0["finalises"]
+                  and b1["edites"] == [(T_.isoformat(), "8981")] and not b1["retenu"]
+                  and len(mt) == 1 and _tZ(mt[0]) == _titreZ(T_)
+                  and "• Belarmin — 1 numéro(s) · 1 code (100 %)" in _lZ(mt[0]),
+                  (b0, b1, [_lZ(m) for m in mt]))
+
+            # (i) Reponse d'envoi perdue (contre-verification du 27/09/2026) :
+            # Discord cree le message mais la reponse se perd (connexion
+            # coupee, 503 renvoye apres creation). Le « rien dans ce salon »
+            # lu juste avant l'envoi restait retenu (_recap_absents) : le tour
+            # suivant ne relisait plus le salon et postait un SECOND message du
+            # jour -- message a 0 de minuit, premier numero d'un serveur sans
+            # panneau. Meme processus, sans redemarrage du cog.
+            import aiohttp as _ahZ
+
+            class _ChPerduZ(_ChR):
+                def __init__(self, *a, **k):
+                    super().__init__(*a, **k)
+                    self.perdre = None
+
+                async def send(self, **k):
+                    m = await _ChR.send(self, **k)
+                    if self.perdre is not None:
+                        e_, self.perdre = self.perdre, None
+                        raise e_
+                    return m
+            GL = _GuildR(8991, "L reponse perdue")
+            GL2 = _GuildR(8992, "L2 sans panneau", {7: "Belarmin"})
+            bot = _mondeZ("reponse_perdue", GL, GL2)
+            DBL = _ChPerduZ(89910, "📊・debrief-day", GL)
+            _ChR(89911, "va-numero-mail", GL)
+            DBL2 = _ChPerduZ(89920, "📊・debrief-day", GL2)
+            V_ = d27 + _tdZ(days=220)
+            V1 = V_ + _tdZ(days=1)
+            cog = _nZ.NumerosCog(bot)
+            await cog.recap_tour(maintenant=_tsZ(V_, 23))
+            DBL.perdre = _ahZ.ServerDisconnectedError()
+            bl = [await cog.recap_tour(maintenant=_tsZ(V1, 0, k, 30)) for k in range(3)]
+            ml = _duJourZ(DBL, V1)
+            fl = (_fichesZ("8991").get(V1.isoformat()) or {})
+            check("recap a 0 : reponse perdue a l'envoi du message a 0 de minuit (connexion "
+                  "coupee) -> le tour suivant RETROUVE le message dans le salon, jamais un second",
+                  (V1.isoformat(), "8991") in bl[0]["echecs"]
+                  and not any((V1.isoformat(), "8991") in x["postes"] for x in bl)
+                  and len(ml) == 1 and _lZ(ml[0]) == [_encours0Z("00h00"), "", _ZD]
+                  and fl.get("messages") == [ml[0].id],
+                  (bl, [(_tZ(m), _lZ(m)) for m in _msgsZ(DBL)], fl))
+            _priseZ(GL2, 7, _tsZ(V1, 9), "Belarmin")
+            DBL2.perdre = _hsZ(503, _dZ.DiscordServerError, "upstream connect error")
+            bm = [await cog.recap_tour(maintenant=_tsZ(V1, 9, k, 5)) for k in range(3)]
+            mm = _duJourZ(DBL2, V1)
+            fm = (_fichesZ("8992").get(V1.isoformat()) or {})
+            check("recap a 0 : reponse perdue (503 apres creation) au premier numero d'un serveur "
+                  "sans panneau -> repris au tour suivant, un seul message du jour, rien de retenu",
+                  (V1.isoformat(), "8992") in bm[0]["echecs"]
+                  and not any((V1.isoformat(), "8992") in x["postes"] for x in bm[1:])
+                  and len(mm) == 1 and "Total : 1 numéro(s)" in _lZ(mm[0])
+                  and fm.get("messages") == [mm[0].id] and "envoi_refuse" not in fm,
+                  (bm, [(_tZ(m), _lZ(m)) for m in _msgsZ(DBL2)], fm))
+
+            # (j) Edition du message a 0 refusee (acces au salon retire) : au
+            # redemarrage, sa remise a jour echouait et posait
+            # _direct_a_refaire -- chaque tour relisait tout l'historique et
+            # retentait l'edition jusqu'a minuit (120 lectures, 120 editions
+            # sur 120 tours). Son texte ne change pas de la journee : un essai
+            # suffit, le prochain evenement retente.
+            class _ChEditRefusZ(_ChR):
+                def __init__(self, *a, **k):
+                    super().__init__(*a, **k)
+                    self.refus_edit = None
+                    self.editions = 0
+
+                def get_partial_message(self, mid):
+                    p_ = _ChR.get_partial_message(self, mid)
+
+                    async def edit(**k):
+                        self.editions += 1
+                        if self.refus_edit is not None:
+                            raise self.refus_edit
+                        return await p_.edit(**k)
+                    return _tyZ.SimpleNamespace(edit=edit)
+            GK = _GuildR(9001, "K edition refusee", {7: "Belarmin"})
+            bot = _mondeZ("edition_refusee", GK)
+            DBK = _ChEditRefusZ(90010, "📊・debrief-day", GK)
+            _ChR(90011, "belarmin-numero-mail", GK)
+            J_ = d27 + _tdZ(days=230)
+            _priseZ(GK, 7, _tsZ(J_ - _tdZ(days=3), 9), "Belarmin", code=True)
+            await _nZ.NumerosCog(bot).recap_tour(maintenant=_tsZ(J_, 0, 0, 30))
+            (MK,) = _msgsZ(DBK)
+            DBK.refus_edit = _hsZ(403, _dZ.Forbidden, "Missing Access")
+            DBK.editions = 0
+            lusK = []
+            vrai_cloturerK = _nZ._histo_cloturer
+
+            def _cloturerK(now):
+                lusK.append(now)
+                return vrai_cloturerK(now)
+            _nZ._histo_cloturer = _cloturerK
+            l0 = len(_jZ.l)
+            cK = _nZ.NumerosCog(bot)             # redemarrage
+            try:
+                bk = [await cK.recap_tour(maintenant=_tsZ(J_, 10, k)) for k in range(30)]
+            finally:
+                _nZ._histo_cloturer = vrai_cloturerK
+            check("recap a 0 : edition du message a 0 refusee au redemarrage (acces retire) -> "
+                  "30 tours : l'historique lu UNE fois, l'edition essayee une fois, rien de "
+                  "reposte, dit une fois",
+                  len(lusK) == 1 and DBK.editions == 1 and len(_msgsZ(DBK)) == 1
+                  and bk[0]["echecs"] == [(J_.isoformat(), "9001")]
+                  and not any(x["echecs"] or x["postes"] or x["edites"] for x in bk[1:])
+                  and len(_ditZ("edition du message %s refusee" % MK.id, l0)) == 1,
+                  (len(lusK), DBK.editions, [x["echecs"] for x in bk[:3]]))
+            DBK.refus_edit = None
+            _priseZ(GK, 7, _tsZ(J_, 11), "Belarmin")
+            b = await cK.recap_tour(maintenant=_tsZ(J_, 11, 0, 5))
+            check("recap a 0 : ... acces rendu, le numero suivant EDITE ce meme message",
+                  b["edites"] == [(J_.isoformat(), "9001")] and not b["postes"]
+                  and len(_msgsZ(DBK)) == 1 and "Total : 1 numéro(s)" in _lZ(MK),
+                  (b, _lZ(MK)))
+
+            # ---- Seconde relecture du 27/09/2026 (tour 2) : un test par
+            # constat corrige (scripts : scratchpad r2_doublons_t1_*,
+            # r2_charge_t1_*).
+            # (k) Message a 0 de B cree au DERNIER tour du jour (son
+            # « debrief-day » vient d'etre cree), reponse d'envoi perdue, le
+            # jour ou A a sa fiche : _figer_jour ne cherchait B que si le JOUR
+            # ENTIER manquait au registre -- la fiche de A le faisait exister,
+            # B restait « en direct » pour toujours, sans un mot.
+            GA3 = _GuildR(9011, "A3 fiche du jour")
+            GB3 = _GuildR(9012, "B3 debrief cree a 23:59")
+            bot = _mondeZ("derniere_minute", GA3, GB3)
+            DBA3 = _ChR(90110, "📊・debrief-day", GA3)
+            _ChR(90111, "va-numero-mail", GA3)
+            _ChR(90121, "vb-numero-mail", GB3)
+            Ka = d27 + _tdZ(days=240)
+            Ka1, Ka2 = Ka + _tdZ(days=1), Ka + _tdZ(days=2)
+            _priseZ(GA3, 7, _tsZ(Ka - _tdZ(days=5), 9), "Belarmin", code=True)
+            cog = _nZ.NumerosCog(bot)
+            await cog.recap_tour(maintenant=_tsZ(Ka, 0, 0, 30))
+            DBB3 = _ChPerduZ(90120, "📊・debrief-day", GB3)
+            DBB3.perdre = _ahZ.ServerDisconnectedError()
+            bk1 = await cog.recap_tour(maintenant=_tsZ(Ka, 23, 59, 30))
+            bk2 = await cog.recap_tour(maintenant=_tsZ(Ka1, 0, 0, 30))
+            await cog.recap_tour(maintenant=_tsZ(Ka1, 0, 1, 30))
+            await _nZ.NumerosCog(bot).recap_tour(maintenant=_tsZ(Ka1, 2))
+            await _nZ.NumerosCog(bot).recap_tour(maintenant=_tsZ(Ka2, 0, 0, 30))
+            mk = _duJourZ(DBB3, Ka)
+            check("recap a 0 : message a 0 de B cree au dernier tour du jour, reponse perdue, A a sa "
+                  "fiche ce jour-la -> a minuit B est RETROUVE et fige par edition (« Aucun SMS »), "
+                  "un seul message, A fige aussi",
+                  (Ka.isoformat(), "9012") in bk1["echecs"]
+                  and (Ka.isoformat(), "9012") in bk2["finalises"]
+                  and (Ka.isoformat(), "9011") in bk2["finalises"]
+                  and len(mk) == 1 and _tZ(mk[0]) == _titreZ(Ka)
+                  and _lZ(mk[0]) == [_FINZ, "", _ZF]
+                  and _fichesZ("9012")[Ka.isoformat()].get("fige") is True
+                  and [_lZ(m)[1:] for m in _duJourZ(DBA3, Ka)] == [["", _ZF]],
+                  (bk1, bk2, [(_tZ(m), _lZ(m)) for m in _msgsZ(DBB3)]))
+
+            # (l) Registre perdu dans la nuit, puis au premier tour la lecture
+            # du salon ratee (503) ou le serveur encore « unavailable »
+            # (reconnexion) : la veille etait close a {} (« aucun numero pris
+            # ce jour-la, rien n'est poste ») et son message a 0 restait « en
+            # direct » pour toujours.
+            class _ChHistZ(_ChR):
+                def __init__(self, *a, **k):
+                    super().__init__(*a, **k)
+                    self.echec_hist = []
+
+                def history(self, **k):
+                    if self.echec_hist:
+                        e_ = self.echec_hist.pop(0)
+
+                        async def g():
+                            raise e_
+                            yield None          # noqa -- generateur asynchrone
+                        return g()
+                    return _ChR.history(self, **k)
+            salonsLZ = []
+            for panneZ, gidZ, jZ in (("lecture 503", 9021, 250), ("serveur indisponible", 9022, 255)):
+                GI = _GuildR(gidZ, "I " + panneZ)
+                bot = _mondeZ("lecture_%d" % gidZ, GI)
+                DBI = _ChHistZ(gidZ * 10, "📊・debrief-day", GI)
+                salonsLZ.append(DBI)
+                _ChR(gidZ * 10 + 1, "va-numero-mail", GI)
+                Li = d27 + _tdZ(days=jZ)
+                Li1 = Li + _tdZ(days=1)
+                _priseZ(GI, 7, _tsZ(Li - _tdZ(days=5), 9), "Belarmin", code=True)
+                await _nZ.NumerosCog(bot).recap_tour(maintenant=_tsZ(Li, 0, 0, 30))
+                _perdreZ(_nZ._recap_fichier())
+                salonsI = list(GI.text_channels)
+                if gidZ == 9021:
+                    DBI.echec_hist = [_hsZ(503, _dZ.DiscordServerError, "upstream")]
+                else:
+                    GI.text_channels.clear()
+                    GI.unavailable = True
+                l0 = len(_jZ.l)
+                cI = _nZ.NumerosCog(bot)
+                bi1 = await cI.recap_tour(maintenant=_tsZ(Li1, 0, 0, 30))
+                fi1 = dict((_regZ().get("jours") or {}).get(Li.isoformat()) or {})
+                GI.text_channels[:] = salonsI
+                GI.unavailable = False
+                bi2 = await cI.recap_tour(maintenant=_tsZ(Li1, 0, 1, 30))
+                for k in range(2, 5):
+                    await cI.recap_tour(maintenant=_tsZ(Li1, 0, k, 30))
+                await _nZ.NumerosCog(bot).recap_tour(maintenant=_tsZ(Li1 + _tdZ(days=1), 0, 0, 30))
+                mi = _duJourZ(DBI, Li)
+                check("recap a 0 : registre perdu + %s au 1er tour apres minuit -> la veille n'est "
+                      "PAS close (trace « a_chercher », pas de « rien n'est poste ») ; au tour "
+                      "suivant son message a 0 est retrouve et fige, un seul message" % panneZ,
+                      (fi1.get(str(gidZ)) or {}).get("a_chercher") is True
+                      and not bi1["finalises"]
+                      and not _ditZ("recap du %s : aucun numero pris" % Li.isoformat(), l0)
+                      and _ditZ("n'a pas pu etre cherche", l0)
+                      and bi2["finalises"] == [(Li.isoformat(), str(gidZ))]
+                      and len(mi) == 1 and _tZ(mi[0]) == _titreZ(Li)
+                      and _lZ(mi[0]) == [_FINZ, "", _ZF]
+                      and "a_chercher" not in _fichesZ(str(gidZ))[Li.isoformat()]
+                      and len(_duJourZ(DBI, Li1)) == 1,
+                      (fi1, bi1, bi2, [(_tZ(m), _lZ(m)) for m in _msgsZ(DBI)]))
+
+            # (m) « debrief-day » prive (lecture ET envoi en 403 Missing
+            # Access) : le salon etait relu, sans succes, a chaque essai
+            # d'envoi du message a 0 -- deux appels Discord par minute.
+            class _ChPriveZ(_ChRefusZ):
+                def __init__(self, *a, **k):
+                    super().__init__(*a, **k)
+                    self.lectures = self.essais = 0
+
+                async def send(self, **k):
+                    self.essais += 1
+                    return await _ChRefusZ.send(self, **k)
+
+                def history(self, **k):
+                    self.lectures += 1
+                    e_ = self.refus
+
+                    async def g():
+                        if e_ is not None:
+                            raise e_
+                        for m in list(self.msgs.values()):
+                            yield m
+                    return g()
+            GPv = _GuildR(9031, "Pv salon prive")
+            bot = _mondeZ("prive", GPv)
+            DBPv = _ChPriveZ(90310, "📊・debrief-day", GPv)
+            _ChR(90311, "va-numero-mail", GPv)
+            DBPv.refus = _hsZ(403, _dZ.Forbidden, "Missing Access")
+            Pv = d27 + _tdZ(days=260)
+            cog = _nZ.NumerosCog(bot)
+            await cog.recap_tour(maintenant=_tsZ(Pv, 9))
+            lu0 = DBPv.lectures
+            DBPv.lectures = DBPv.essais = 0
+            bp = [await cog.recap_tour(maintenant=_tsZ(Pv, 9, k)) for k in range(1, 31)]
+            check("recap a 0 : « debrief-day » prive (lecture et envoi en 403 Missing Access) -> "
+                  "lu au premier tour (veille, jour), plus relu ensuite ; 30 tours : l'envoi "
+                  "retente a chaque tour, rien retenu",
+                  lu0 == 2 and DBPv.lectures == 0 and DBPv.essais == 30 and not DBPv.msgs
+                  and all(x["echecs"] == [(Pv.isoformat(), "9031")] for x in bp)
+                  and not _fichesZ("9031").get(Pv.isoformat()), (lu0, DBPv.lectures, DBPv.essais))
+
+            # (n) Registre perdu en journee (10:00) et edition refusee : le
+            # message a 0 retrouve n'etait pas au registre avant l'edition, le
+            # serveur restait « manquant » -- lecture du salon, essai
+            # d'edition et « retrouve » au journal chaque minute ; la veille,
+            # deja figee, recevait un second « Aucun SMS » (repli).
+            class _ChEditLuZ(_ChEditRefusZ):
+                def __init__(self, *a, **k):
+                    super().__init__(*a, **k)
+                    self.lectures = 0
+
+                def history(self, **k):
+                    self.lectures += 1
+                    return _ChEditRefusZ.history(self, **k)
+            GN = _GuildR(9041, "N registre perdu, edition refusee")
+            bot = _mondeZ("perdu_edition", GN)
+            DBN = _ChEditLuZ(90410, "📊・debrief-day", GN)
+            _ChR(90411, "va-numero-mail", GN)
+            Nn = d27 + _tdZ(days=270)
+            _priseZ(GN, 7, _tsZ(Nn - _tdZ(days=5), 9), "Belarmin", code=True)
+            cog = _nZ.NumerosCog(bot)
+            await cog.recap_tour(maintenant=_tsZ(Nn - _tdZ(days=1), 22))
+            await cog.recap_tour(maintenant=_tsZ(Nn, 0, 0, 30))
+            avant_n = [(_tZ(m), _lZ(m)) for m in _msgsZ(DBN)]
+            _perdreZ(_nZ._recap_fichier())
+            DBN.refus_edit = _hsZ(403, _dZ.Forbidden, "Missing Permissions")
+            DBN.lectures = DBN.editions = 0
+            l0 = len(_jZ.l)
+            cN = _nZ.NumerosCog(bot)
+            bn = [await cN.recap_tour(maintenant=_tsZ(Nn, 10, k)) for k in range(30)]
+            check("recap a 0 : registre perdu a 10:00, edition refusee -> 30 tours : le salon lu "
+                  "une fois par jour (veille, jour), aucune edition ni envoi (les messages "
+                  "retrouves disent deja le bon texte), un seul message par jour, « retrouve » "
+                  "dit une fois chacun",
+                  len(avant_n) == 2 and avant_n[0][1] == [_FINZ, "", _ZF]
+                  and DBN.lectures == 2 and DBN.editions == 0
+                  and [(_tZ(m), _lZ(m)) for m in _msgsZ(DBN)] == avant_n
+                  and not any(x["postes"] or x["edites"] or x["echecs"] for x in bn)
+                  and len(_ditZ("retrouve dans", l0)) == 2
+                  and _fichesZ("9041")[Nn.isoformat()].get("messages")
+                  and _fichesZ("9041")[(Nn - _tdZ(days=1)).isoformat()].get("fige") is True,
+                  (DBN.lectures, DBN.editions, bn[:2], _jZ.l[l0:l0 + 4]))
+            # ... et quand le texte retrouve differe (en-tete « depuis 08h20 »
+            # d'une journee partielle, que le registre perdu ne sait plus) :
+            # UNE edition, refusee, puis plus rien -- ni relecture ni essai.
+            GN2 = _GuildR(9042, "N2 en-tete different, edition refusee")
+            bot = _mondeZ("perdu_edition2", GN2)
+            DBN2 = _ChEditLuZ(90420, "📊・debrief-day", GN2)
+            _ChR(90421, "va-numero-mail", GN2)
+            Nb = d27 + _tdZ(days=275)
+            _priseZ(GN2, 7, _tsZ(Nb - _tdZ(days=5), 9), "Belarmin", code=True)
+            rfN = _nZ._recap_fichier()
+            rfN.parent.mkdir(parents=True, exist_ok=True)
+            assert _sjZ.write(rfN, {"jours": {}, "partiel": {Nb.isoformat(): int(_tsZ(Nb, 8, 20))},
+                                    "depuis": Nb.isoformat()}, indent=2)
+            await _nZ.NumerosCog(bot).recap_tour(maintenant=_tsZ(Nb, 9))
+            (MN2,) = _msgsZ(DBN2)
+            l_n2 = _lZ(MN2)
+            _perdreZ(rfN)
+            DBN2.refus_edit = _hsZ(403, _dZ.Forbidden, "Missing Permissions")
+            DBN2.lectures = DBN2.editions = 0
+            l0 = len(_jZ.l)
+            cN2 = _nZ.NumerosCog(bot)
+            bn2 = [await cN2.recap_tour(maintenant=_tsZ(Nb, 10, k)) for k in range(30)]
+            check("recap a 0 : registre perdu, message a 0 retrouve a editer, edition refusee -> "
+                  "30 tours : salon lu une fois par jour, UNE edition, rien de reposte, dit une fois",
+                  l_n2 == [_encours0Z("08h20"), "", _ZD]
+                  and DBN2.lectures == 2 and DBN2.editions == 1 and len(_msgsZ(DBN2)) == 1
+                  and bn2[0]["echecs"] == [(Nb.isoformat(), "9042")]
+                  and not any(x["echecs"] or x["postes"] or x["edites"] for x in bn2[1:])
+                  and len(_ditZ("retrouve dans", l0)) == 1
+                  and _fichesZ("9042")[Nb.isoformat()].get("messages") == [MN2.id],
+                  (DBN2.lectures, DBN2.editions, [x["echecs"] for x in bn2[:3]]))
+
+            # (o) Envoi a 0 de A refuse toute la journee : chaque tour
+            # resynchronisait AUSSI les serveurs a numeros -- un fetch_member
+            # par minute pour un VA parti du serveur (HEAD : aucun).
+            class _GuildFetchZ(_GuildR):
+                def __init__(self, *a, **k):
+                    super().__init__(*a, **k)
+                    self.fetchs = 0
+
+                async def fetch_member(self, uid):
+                    self.fetchs += 1
+                    raise _hsZ(404, _dZ.NotFound, "Unknown Member")
+            GAo = _GuildR(9051, "Ao envoi a 0 refuse")
+            GBo = _GuildFetchZ(9052, "Bo VA parti")
+            bot = _mondeZ("resync", GAo, GBo)
+            DBAo = _ChRefusZ(90510, "📊・debrief-day", GAo)
+            _ChR(90511, "va-numero-mail", GAo)
+            DBAo.refus = _hsZ(403, _dZ.Forbidden, "Missing Permissions")
+            DBBo = _ChR(90520, "📊・debrief-day", GBo)
+            _ChR(90521, "vb-numero-mail", GBo)
+            Oo = d27 + _tdZ(days=280)
+            _priseZ(GBo, 7, _tsZ(Oo - _tdZ(days=5), 9), "Parti", code=True)
+            _priseZ(GBo, 7, _tsZ(Oo, 9), "Parti", code=True)
+            cog = _nZ.NumerosCog(bot)
+            await cog.recap_tour(maintenant=_tsZ(Oo, 9, 5))
+            f0 = GBo.fetchs
+            bo = [await cog.recap_tour(maintenant=_tsZ(Oo, 10, k)) for k in range(30)]
+            check("recap a 0 : envoi a 0 de A refuse, B a un numero d'un VA parti du serveur -> "
+                  "30 tours : A retente a chaque tour, B n'est pas resynchronise (aucun "
+                  "fetch_member apres le premier tour)",
+                  f0 >= 1 and GBo.fetchs == f0
+                  and all(x["echecs"] == [(Oo.isoformat(), "9051")] for x in bo)
+                  and len(_msgsZ(DBBo)) == 1 and "• Parti — 1 numéro(s) · 1 code (100 %)"
+                  in _lZ(_msgsZ(DBBo)[0]), (f0, GBo.fetchs, bo[:2], _lZ(_msgsZ(DBBo)[0])))
+            # ---- Troisieme relecture du 27/09/2026 (tour 3) : un test par
+            # constat corrige (scripts : scratchpad r2_doublons_t2_*,
+            # r2_charge_t2_*, t3_*).
+            class _ChPerduHistZ(_ChPerduZ):
+                def __init__(self, *a, **k):
+                    super().__init__(*a, **k)
+                    self.echec_hist = []
+                    self.lectures = 0
+
+                def history(self, **k):
+                    self.lectures += 1
+                    if self.echec_hist:
+                        e_ = self.echec_hist.pop(0)
+
+                        async def g():
+                            raise e_
+                            yield None          # noqa -- generateur asynchrone
+                        return g()
+                    return _ChPerduZ.history(self, **k)
+
+            # (p) Envoi du message a 0 sans reponse nette, puis relecture du
+            # salon ratee (503) : « pour un envoi, rien ne change » -- un second
+            # « Pas de SMS » partait, et le premier restait « en direct » pour
+            # toujours. Attendu : rien n'est renvoye tant que le salon n'a pas
+            # ete relu ; relu, le message est repris ; un seul message, fige.
+            # Meme chose si le bot redemarre entre les deux (le doute est
+            # garde au registre, « incertains »).
+            salonsPZ = []
+            for redemP in (False, True):
+                gidP = 9061 + (100 if redemP else 0)
+                GP_ = _GuildR(gidP, "P reponse perdue puis lecture 503")
+                bot = _mondeZ("perdu_503_%d" % redemP, GP_)
+                DBP_ = _ChPerduHistZ(gidP * 10, "📊・debrief-day", GP_)
+                salonsPZ.append(DBP_)
+                _ChR(gidP * 10 + 1, "va-numero-mail", GP_)
+                Pp = d27 + _tdZ(days=290 + redemP)
+                Pp1 = Pp + _tdZ(days=1)
+                _priseZ(GP_, 7, _tsZ(Pp - _tdZ(days=5), 9), "Belarmin", code=True)
+                cog = _nZ.NumerosCog(bot)
+                await cog.recap_tour(maintenant=_tsZ(Pp - _tdZ(days=1), 23))
+                DBP_.perdre = _ahZ.ServerDisconnectedError()
+                bp0 = await cog.recap_tour(maintenant=_tsZ(Pp, 0, 0, 30))
+                inc0 = dict(_regZ().get("incertains") or {})
+                if redemP:
+                    cog = _nZ.NumerosCog(bot)
+                DBP_.echec_hist = [_hsZ(503, _dZ.DiscordServerError, "upstream")]
+                l0 = len(_jZ.l)
+                bp1 = await cog.recap_tour(maintenant=_tsZ(Pp, 0, 1, 30))
+                n1 = len(_duJourZ(DBP_, Pp))
+                bp2 = await cog.recap_tour(maintenant=_tsZ(Pp, 0, 2, 30))
+                fp2 = dict(_fichesZ(str(gidP)).get(Pp.isoformat()) or {})
+                inc2 = _regZ().get("incertains")
+                await cog.recap_tour(maintenant=_tsZ(Pp1, 0, 0, 30))
+                mp = _duJourZ(DBP_, Pp)
+                check("recap a 0 : envoi du message a 0 sans reponse nette puis relecture du salon "
+                      "en 503%s -> rien de renvoye tant que le salon n'est pas relu, message repris "
+                      "au tour suivant, un seul message du jour, fige a minuit"
+                      % (" (redemarrage entre les deux)" if redemP else ""),
+                      (Pp.isoformat(), str(gidP)) in bp0["echecs"]
+                      and list(inc0) == ["%s|%d" % (Pp.isoformat(), gidP * 10)]
+                      and (Pp.isoformat(), str(gidP)) in bp1["echecs"] and not bp1["postes"]
+                      and n1 == 1 and not bp2["postes"] and not inc2
+                      and len(_ditZ("pas relu (lecture ratee)", l0)) == 1
+                      and len(mp) == 1 and fp2.get("messages") == [mp[0].id]
+                      and _lZ(mp[0]) == [_FINZ, "", _ZF]
+                      and _fichesZ(str(gidP))[Pp.isoformat()].get("fige") is True,
+                      (bp0["echecs"], inc0, bp1, n1, bp2, fp2, inc2,
+                       [(_tZ(m), _lZ(m)) for m in _msgsZ(DBP_)]))
+
+            # (q) Salon ou le bot ecrit sans pouvoir lire l'historique (403
+            # net) et reponse d'envoi perdue : aucune relecture possible, le
+            # message etait renvoye -- deux messages. Le renvoi porte le MEME
+            # nonce (enforce_nonce) : Discord rend le message deja cree. Le
+            # faux salon applique cette regle. Si le premier numero arrive
+            # entre les deux, le message rendu (« Pas de SMS ») est remis au
+            # texte a numeros.
+            class _ChNonceZ(_ChR):
+                def __init__(self, *a, **k):
+                    super().__init__(*a, **k)
+                    self.vus, self.perdre, self.nonces, self.lectures = {}, 0, [], 0
+
+                async def send(self, **k):
+                    n_ = k.get("nonce")
+                    self.nonces.append(n_)
+                    m = self.vus.get(n_) if n_ is not None else None
+                    if m is None or m.id not in self.msgs:
+                        m = await _ChR.send(self, **k)
+                        if n_ is not None:
+                            self.vus[n_] = m
+                    if self.perdre:
+                        self.perdre -= 1
+                        raise _ahZ.ServerDisconnectedError()
+                    return m
+
+                def history(self, **k):
+                    self.lectures += 1
+                    e_ = _hsZ(403, _dZ.Forbidden, "Missing Access")
+
+                    async def g():
+                        raise e_
+                        yield None              # noqa -- generateur asynchrone
+                    return g()
+            salonsQZ = []
+            for numQ in (False, True):
+                gidQ = 9062 + (100 if numQ else 0)
+                GQ_ = _GuildR(gidQ, "Q historique illisible", {7: "Belarmin"})
+                bot = _mondeZ("nonce_%d" % numQ, GQ_)
+                DBQn = _ChNonceZ(gidQ * 10, "📊・debrief-day", GQ_)
+                salonsQZ.append(DBQn)
+                _ChR(gidQ * 10 + 1, "va-numero-mail", GQ_)
+                Qq = d27 + _tdZ(days=292 + numQ)
+                _priseZ(GQ_, 7, _tsZ(Qq - _tdZ(days=5), 9), "Belarmin", code=True)
+                cog = _nZ.NumerosCog(bot)
+                await cog.recap_tour(maintenant=_tsZ(Qq - _tdZ(days=1), 23))
+                DBQn.perdre = 1
+                bq0 = await cog.recap_tour(maintenant=_tsZ(Qq, 0, 0, 30))
+                nq0 = DBQn.nonces[-1]
+                if numQ:
+                    _priseZ(GQ_, 7, _tsZ(Qq, 0, 1), "Belarmin")
+                bq1 = await cog.recap_tour(maintenant=_tsZ(Qq, 0, 1, 30))
+                nq1 = DBQn.nonces[-1]
+                mq = _duJourZ(DBQn, Qq)
+                fq = dict(_fichesZ(str(gidQ)).get(Qq.isoformat()) or {})
+                if not numQ:
+                    await cog.recap_tour(maintenant=_tsZ(Qq + _tdZ(days=1), 0, 0, 30))
+                    check("recap a 0 : historique illisible (403) et reponse d'envoi perdue -> le "
+                          "renvoi reprend le MEME nonce, Discord rend le message deja cree : un seul "
+                          "message du jour, fige a minuit",
+                          (Qq.isoformat(), str(gidQ)) in bq0["echecs"]
+                          and (Qq.isoformat(), str(gidQ)) in bq1["postes"]
+                          and isinstance(nq0, int) and nq0 == nq1 and nq0 != DBQn.nonces[0]
+                          and len(str(nq0)) <= 25
+                          and len(mq) == 1 and fq.get("messages") == [mq[0].id]
+                          and _lZ(_duJourZ(DBQn, Qq)[0]) == [_FINZ, "", _ZF],
+                          (bq0["echecs"], bq1, DBQn.nonces, [(_tZ(m), _lZ(m)) for m in mq], fq))
+                else:
+                    check("recap a 0 : ... et le premier numero pris entre les deux : Discord rend le "
+                          "message « Pas de SMS », il est aussitot remis au texte a numeros (un seul "
+                          "message)",
+                          nq0 == nq1 and len(mq) == 1 and _tZ(mq[0]) == _titreZ(Qq, True)
+                          and "Total : 1 numéro(s)" in _lZ(mq[0]) and _ZD not in _lZ(mq[0])
+                          and fq.get("messages") == [mq[0].id] and fq.get("numeros") == 1,
+                          (bq1, [(_tZ(m), _lZ(m)) for m in mq], fq))
+
+            # (r) Serveur « unavailable » de 23:50 a 01:00 (GUILD_DELETE : ses
+            # salons restent en cache), tout appel en 503 : le chemin en direct
+            # et le gel tentaient envoi, lecture et edition chaque minute --
+            # douze « Aucun SMS » pour la veille quand un envoi sur dix etait
+            # cree quand meme. Attendu : aucun appel pendant la panne,
+            # l'historique pas relu chaque minute, puis au retour la veille
+            # figee par edition et le message du jour cree, un seul chacun.
+            class _ChPanneZ(_ChR):
+                def __init__(self, *a, **k):
+                    super().__init__(*a, **k)
+                    self.panne, self.appels = False, 0
+
+                def _refus(self):
+                    self.appels += 1
+                    return _hsZ(503, _dZ.DiscordServerError, "upstream")
+
+                async def send(self, **k):
+                    if self.panne:
+                        raise self._refus()
+                    return await _ChR.send(self, **k)
+
+                def get_partial_message(self, mid):
+                    p_ = _ChR.get_partial_message(self, mid)
+                    if not self.panne:
+                        return p_
+                    ch_ = self
+
+                    class _P:
+                        async def edit(self_, **k):
+                            raise ch_._refus()
+                    return _P()
+
+                def history(self, **k):
+                    if self.panne:
+                        e_ = self._refus()
+
+                        async def g():
+                            raise e_
+                            yield None          # noqa -- generateur asynchrone
+                        return g()
+                    return _ChR.history(self, **k)
+            _lireZ0 = _nZ._histo_lire
+            lecturesZ = [0]
+
+            def _lireZ(*a, **k):
+                lecturesZ[0] += 1
+                return _lireZ0(*a, **k)
+            _nZ._histo_lire = _lireZ
+            try:
+                GR3 = _GuildR(9063, "R3 panne autour de minuit")
+                bot = _mondeZ("panne_minuit", GR3)
+                DBR3 = _ChPanneZ(90630, "📊・debrief-day", GR3)
+                _ChR(90631, "va-numero-mail", GR3)
+                Rr = d27 + _tdZ(days=300)
+                Rr1 = Rr + _tdZ(days=1)
+                _priseZ(GR3, 7, _tsZ(Rr - _tdZ(days=5), 9), "Belarmin", code=True)
+                cog = _nZ.NumerosCog(bot)
+                await cog.recap_tour(maintenant=_tsZ(Rr, 0, 0, 30))
+                await cog.recap_tour(maintenant=_tsZ(Rr, 23, 49))
+                GR3.unavailable = True
+                DBR3.panne = True
+                t_ = _tsZ(Rr, 23, 50)
+                lect_minuit = None
+                while t_ < _tsZ(Rr1, 1):
+                    await cog.recap_tour(maintenant=t_)
+                    if lect_minuit is None and t_ >= _tsZ(Rr1, 0, 2):
+                        lect_minuit = lecturesZ[0]
+                    t_ += 60
+                lect_panne = lecturesZ[0] - lect_minuit
+                GR3.unavailable = False
+                DBR3.panne = False
+                br3 = await cog.recap_tour(maintenant=_tsZ(Rr1, 1, 0, 30))
+                mr3 = _duJourZ(DBR3, Rr)
+                mr31 = _duJourZ(DBR3, Rr1)
+                check("recap a 0 : serveur indisponible (salons en cache, tout en 503) de 23:50 a "
+                      "01:00 -> aucun appel Discord pendant la panne, historique pas relu chaque "
+                      "minute ; au retour la veille figee par edition et le message du jour cree, un "
+                      "seul chacun",
+                      DBR3.appels == 0 and lect_panne == 0
+                      and (Rr.isoformat(), "9063") in br3["finalises"]
+                      and (Rr1.isoformat(), "9063") in br3["postes"]
+                      and len(mr3) == 1 and _lZ(mr3[0]) == [_FINZ, "", _ZF]
+                      and len(mr31) == 1 and _tZ(mr31[0]) == _titreZ(Rr1, True)
+                      and _fichesZ("9063")[Rr.isoformat()].get("fige") is True,
+                      (DBR3.appels, lect_panne, br3, [(_tZ(m), _lZ(m)) for m in _msgsZ(DBR3)]))
+
+                # (s) Un serveur C sans debrief-day ni panneau, « unavailable »
+                # au tour de minuit : il recevait une trace « a_chercher » (« un
+                # message a 0 deja poste n'a pas pu etre cherche ») et la veille
+                # restait ouverte -- historique relu chaque minute jusqu'a son
+                # retour (178 lectures sur 3 h, 11 698 sur 8 jours). Vu
+                # disponible hors du recap dans ce processus : pas cherche. Au
+                # redemarrage pendant sa panne (jamais vu) : cherche, dit tel
+                # quel, mais sans relire l'historique a chaque tour.
+                GAs = _GuildR(9064, "As du recap")
+                GCs = _GuildR(9065, "Cs sans debrief-day ni panneau")
+                bot = _mondeZ("hors_recap", GAs, GCs)
+                DBAs = _ChR(90640, "📊・debrief-day", GAs)
+                _ChR(90641, "va-numero-mail", GAs)
+                _ChR(90650, "general", GCs)
+                Ss = d27 + _tdZ(days=305)
+                Ss1, Ss2 = Ss + _tdZ(days=1), Ss + _tdZ(days=2)
+                _priseZ(GAs, 7, _tsZ(Ss - _tdZ(days=5), 9), "Belarmin", code=True)
+                cog = _nZ.NumerosCog(bot)
+                await cog.recap_tour(maintenant=_tsZ(Ss, 22))
+                salonsC = list(GCs.text_channels)
+                GCs.text_channels.clear()
+                GCs.unavailable = True
+                l0 = len(_jZ.l)
+                await cog.recap_tour(maintenant=_tsZ(Ss1, 0, 0, 30))
+                await cog.recap_tour(maintenant=_tsZ(Ss1, 0, 1, 30))
+                lect0 = lecturesZ[0]
+                for k in range(2, 60):
+                    await cog.recap_tour(maintenant=_tsZ(Ss1, 0, k, 30))
+                regS = _regZ().get("jours") or {}
+                check("recap a 0 : serveur sans debrief-day ni panneau, vu disponible puis "
+                      "indisponible a minuit -> pas de trace « a_chercher », veille close, "
+                      "historique pas relu (00:02-01:00), rien au journal pour lui",
+                      "9065" not in (regS.get(Ss.isoformat()) or {})
+                      and _nZ._jour_fini(regS.get(Ss.isoformat()))
+                      and lecturesZ[0] == lect0 and not _ditZ("serveur 9065", l0),
+                      (regS.get(Ss.isoformat()), lecturesZ[0] - lect0, _ditZ("9065", l0)))
+                cS = _nZ.NumerosCog(bot)
+                l0 = len(_jZ.l)
+                await cS.recap_tour(maintenant=_tsZ(Ss2, 0, 0, 30))
+                trace = dict((_regZ().get("jours") or {}).get(Ss1.isoformat()) or {})
+                await cS.recap_tour(maintenant=_tsZ(Ss2, 0, 1, 30))
+                lect0 = lecturesZ[0]
+                for k in range(2, 30):
+                    await cS.recap_tour(maintenant=_tsZ(Ss2, 0, k, 30))
+                lect_trace = lecturesZ[0] - lect0
+                GCs.text_channels[:] = salonsC
+                GCs.unavailable = False
+                await cS.recap_tour(maintenant=_tsZ(Ss2, 0, 30, 30))
+                apres = dict((_regZ().get("jours") or {}).get(Ss1.isoformat()) or {})
+                check("recap a 0 : ... redemarrage pendant sa panne (jamais vu) -> cherche (trace, "
+                      "« pas encore vu disponible »), l'historique n'est plus relu a chaque tour ; "
+                      "a son retour la trace est retiree et la journee close",
+                      (trace.get("9065") or {}).get("a_chercher") is True
+                      and _ditZ("pas encore vu disponible depuis le demarrage", l0)
+                      and lect_trace == 0 and "9065" not in apres and _nZ._jour_fini(apres),
+                      (trace, lect_trace, apres))
+
+                # ... et un registre perdu pendant que le salon de A repond
+                # en 503 : la recherche de la veille ET le message a 0 du jour
+                # relisaient le salon chaque minute, et l'historique avec.
+                # Attendu : relectures espacees (pause doublee, plafonnee a
+                # RECAP_RELIRE_MAX_SEC : 3 relectures jusqu'au plafond, puis
+                # une par plafond sur 2 h), historique lu une fois.
+                GTs = _GuildR(9067, "Ts registre perdu, salon en 503")
+                bot = _mondeZ("perdu_503_long", GTs)
+                DBTs = _ChPerduHistZ(90670, "📊・debrief-day", GTs)
+                _ChR(90671, "va-numero-mail", GTs)
+                Ts = d27 + _tdZ(days=308)
+                _priseZ(GTs, 7, _tsZ(Ts - _tdZ(days=5), 9), "Belarmin", code=True)
+                await _nZ.NumerosCog(bot).recap_tour(maintenant=_tsZ(Ts, 0, 0, 30))
+                _perdreZ(_nZ._recap_fichier())
+                DBTs.echec_hist = [_hsZ(503, _dZ.DiscordServerError, "upstream")] * 1000
+                DBTs.lectures = 0
+                cT = _nZ.NumerosCog(bot)
+                await cT.recap_tour(maintenant=_tsZ(Ts, 12))
+                lect0 = lecturesZ[0]
+                for k in range(1, 120):
+                    await cT.recap_tour(maintenant=_tsZ(Ts, 12, k))
+                borneTs = 4 + -(-7200 // _nZ.RECAP_RELIRE_MAX_SEC)
+                check("recap a 0 : registre perdu, salon en 503 pendant 2 h -> salon relu au plus "
+                      "%d fois (pause doublee, pas chaque minute), historique pas relu, aucun "
+                      "second message" % borneTs,
+                      DBTs.lectures <= borneTs and lecturesZ[0] == lect0
+                      and len(_duJourZ(DBTs, Ts)) == 1,
+                      (DBTs.lectures, lecturesZ[0] - lect0, len(_duJourZ(DBTs, Ts))))
+            finally:
+                _nZ._histo_lire = _lireZ0
+
+            # (t) Registre inecrivable et redemarrages, un jour a 0 : le
+            # message a 0 reedite a l'identique changeait « le » dans la
+            # fiche, et l'ecart avec le disque faisait retenter l'ecriture
+            # chaque minute -- une ERROR par minute jusqu'a minuit (792).
+            GTt = _GuildR(9066, "Tt registre inecrivable")
+            bot = _mondeZ("registre_ko", GTt)
+            DBTt = _ChR(90660, "📊・debrief-day", GTt)
+            _ChR(90661, "va-numero-mail", GTt)
+            Tt = d27 + _tdZ(days=310)
+            _priseZ(GTt, 7, _tsZ(Tt - _tdZ(days=5), 9), "Belarmin", code=True)
+            await _nZ.NumerosCog(bot).recap_tour(maintenant=_tsZ(Tt, 0, 0, 30))
+            (MTt,) = _msgsZ(DBTt)
+            avant_t = (_tZ(MTt), _lZ(MTt))
+            _ecrZ0 = _nZ._recap_ecrire
+
+            def _ecrKoZ(reg):
+                raise OSError("disque plein (simule)")
+            _nZ._recap_ecrire = _ecrKoZ
+            try:
+                l0 = len(_jZ.l)
+                for hT in (10, 11, 12):
+                    cT = _nZ.NumerosCog(bot)
+                    for k in range(20):
+                        await cT.recap_tour(maintenant=_tsZ(Tt, hT, k, 30))
+            finally:
+                _nZ._recap_ecrire = _ecrZ0
+            check("recap a 0 : registre inecrivable, trois redemarrages -> aucune ERROR « registre "
+                  "non ecrit » (message reedite a l'identique : rien de neuf a ecrire), un seul "
+                  "message, texte inchange",
+                  not _ditZ("registre du recap non ecrit", l0) and len(_msgsZ(DBTt)) == 1
+                  and (_tZ(MTt), _lZ(MTt)) == avant_t,
+                  (_ditZ("registre du recap non ecrit", l0)[:2], len(_msgsZ(DBTt))))
+
+            # (u) Registre perdu, redemarrage a 12:00, et les deux lectures du
+            # salon du premier tour en 503 (recherche de la veille, puis
+            # message du jour) : un second « Pas de SMS » partait, le premier
+            # restait « en direct ». Attendu : rien n'est envoye avant une
+            # relecture reussie ; le message du jour est repris, fige a
+            # minuit. Temoin : registre intact, lecture en 503 a minuit -> le
+            # message a 0 du nouveau jour part quand meme (rien ne dit qu'il y
+            # est deja ; attendre, c'etait relire le salon toute la journee).
+            GU = _GuildR(9068, "U registre perdu, 2 lectures 503")
+            bot = _mondeZ("perdu_2x503", GU)
+            DBU = _ChPerduHistZ(90680, "📊・debrief-day", GU)
+            _ChR(90681, "va-numero-mail", GU)
+            Uu = d27 + _tdZ(days=315)
+            _priseZ(GU, 7, _tsZ(Uu - _tdZ(days=5), 9), "Belarmin", code=True)
+            await _nZ.NumerosCog(bot).recap_tour(maintenant=_tsZ(Uu, 0, 0, 30))
+            (MU,) = _duJourZ(DBU, Uu)
+            _perdreZ(_nZ._recap_fichier())
+            DBU.echec_hist = [_hsZ(503, _dZ.DiscordServerError, "upstream")] * 2
+            cU = _nZ.NumerosCog(bot)
+            bu = [await cU.recap_tour(maintenant=_tsZ(Uu, 12, k)) for k in range(6)]
+            await cU.recap_tour(maintenant=_tsZ(Uu + _tdZ(days=1), 0, 0, 30))
+            mu = _duJourZ(DBU, Uu)
+            check("recap a 0 : registre perdu, redemarrage, deux lectures du salon en 503 -> aucun "
+                  "second message, le message du jour repris puis fige a minuit",
+                  not any((Uu.isoformat(), "9068") in x["postes"] for x in bu)
+                  and not DBU.echec_hist and len(mu) == 1 and mu[0].id == MU.id
+                  and _lZ(mu[0]) == [_FINZ, "", _ZF],
+                  ([x["postes"] for x in bu], DBU.echec_hist,
+                   [(_tZ(m), _lZ(m)) for m in _msgsZ(DBU)]))
+            GU2 = _GuildR(9069, "U2 registre intact, lecture 503 a minuit")
+            bot = _mondeZ("intact_503", GU2)
+            DBU2 = _ChPerduHistZ(90690, "📊・debrief-day", GU2)
+            _ChR(90691, "va-numero-mail", GU2)
+            Uv = d27 + _tdZ(days=318)
+            _priseZ(GU2, 7, _tsZ(Uv - _tdZ(days=5), 9), "Belarmin", code=True)
+            cog = _nZ.NumerosCog(bot)
+            await cog.recap_tour(maintenant=_tsZ(Uv, 23))
+            DBU2.echec_hist = [_hsZ(503, _dZ.DiscordServerError, "upstream")]
+            bu2 = await cog.recap_tour(maintenant=_tsZ(Uv + _tdZ(days=1), 0, 0, 30))
+            check("recap a 0 : ... temoin : registre intact, lecture du salon en 503 a minuit -> le "
+                  "message a 0 du nouveau jour part au meme tour, un seul",
+                  not DBU2.echec_hist
+                  and ((Uv + _tdZ(days=1)).isoformat(), "9069") in bu2["postes"]
+                  and len(_duJourZ(DBU2, Uv + _tdZ(days=1))) == 1,
+                  (bu2, DBU2.echec_hist))
+
+            check("recap a 0 : tous les messages postes l'ont ete sans mention qui notifie",
+                  all(_sansMentionZ(m) for ch_ in (DBV, DBA, DBC, DBE, DBA2, DBB2, DBP, DBQ, DBQ2,
+                                                   DBR, DBW, DS2, DS3, DBH, DBMl, DBRd, DBG,
+                                                   DBG2, DBF, DBC4, DBL, DBL2, DBK, DBA3, DBB3,
+                                                   DBPv, DBN, DBN2, DBAo, DBBo, *salonsLZ,
+                                                   DBR3, DBAs, DBTs, DBTt, DBU, DBU2,
+                                                   *salonsQZ, *salonsPZ)
+                      for m in _msgsZ(ch_)))
+        _aZ.run(_scenZ())
+    finally:
+        _nZ.SALONS_FILE, _nZ.HISTO_FILE, _nZ.RECAP_FILE = _savZ
+        if _envZ is not None:
+            os.environ["VA_MACHINE_PROD"] = _envZ
+        _logZ.removeHandler(_jZ)
+        _logZ.setLevel(_niveauZ)
+        _V2_AUDIT["actif"] = _auditZ
+        _shZ.rmtree(_tmpZ, ignore_errors=True)
+    check("recap a 0 : aucune ecriture dans data/",
+          len(_V2_AUDIT["ecrits"]) == _nEcritsZ, str(_V2_AUDIT["ecrits"][_nEcritsZ:][:5]))
+except Exception as _eZ:
+    import traceback as _tbZ
+    _tbZ.print_exc()
+    check("recap a 0 : testable", False, repr(_eZ)[:200])
 
 
 # ---------------------------------------------------------------------------
