@@ -18888,21 +18888,38 @@ def _bangers_encart_html() -> str:
 
 _FA_TYPES = {"brute": "Brute", "template": "Template", "caption": "Caption"}
 
+#: « À vérifier » se lit REEL PAR REEL depuis le 27/09 au soir (« je peux
+#: avoir l'icône du reel, et dire OK pour le brut et OK pour le montage ») :
+#: sous la miniature du reel, sa brute, son montage, sa caption, dans cet
+#: ordre, chacun avec son OK.
+_FA_ORDRE_TYPES = {"brute": 0, "template": 1, "caption": 2}
+_FA_MOTS = {"brute": "Brut", "template": "Montage", "caption": "Caption"}
+
+#: Un shortcode Instagram. Ce qui n'y ressemble pas n'entre ni dans une
+#: adresse, ni dans un chemin de fichier (routes reel/miniature). \Z et
+#: fullmatch, pas `$` : le `$` de Python accepte un \n final, et
+#: « Dc0IDOCyqmr%0A » passait le controle (404 au lieu de 400).
+_FA_SC = re.compile(r"\A[A-Za-z0-9_-]{5,64}\Z")
+
+#: Cartes de reels affichees au plus dans « À vérifier » (~2 miniatures
+#: chacune). Au-dela, la liste DIT combien de reels et de propositions
+#: restent -- rien n'est ecarte sans le dire.
+FA_CARTES_MAX = 100
+FA_CARTES_POSEES_MAX = 80
+
 
 def _fa_quoi(e: dict) -> str:
     """« Brute · ibenhaastrup · tt_76375….mp4 » /
     « Caption · ibenhaastrup + réserves : blonde · « 7 texts… » ».
 
     Une proposition porte TOUT ce que Valider posera (« cibles ») : les
-    reserves ou recopier la caption, les copies du template. Le dire sur la
-    ligne, c'est ce que le proprietaire verifie avant de cliquer."""
+    reserves ou recopier la caption, les copies du template. Depuis les
+    cartes par reel (27/09 au soir), cette phrase -- nom de fichier compris --
+    vit dans l'infobulle de la ligne : le proprietaire veut VOIR, pas lire
+    des noms de fichiers, mais le detail reste a un survol."""
     t = _FA_TYPES.get(e.get("type"), e.get("type") or "?")
     ident = e.get("ident") or "identité inconnue"
-    autres = []
-    for x in e.get("cibles") or []:
-        if isinstance(x, (list, tuple)) and len(x) == 2 and x[1] and x[1] != e.get("ident") \
-                and x[1] not in autres:
-            autres.append(str(x[1]))
+    autres = _fa_autres(e)
     if autres:
         ident += (" + réserves : " if e.get("type") == "caption" else " + copies : ") + ", ".join(autres)
     if e.get("type") == "caption":
@@ -18910,6 +18927,17 @@ def _fa_quoi(e: dict) -> str:
     else:
         cible = (e.get("cle") or "").split("|")[-1][:70] or "copie à choisir"
     return f"{t} · {ident} · {cible}"
+
+
+def _fa_autres(e: dict) -> list:
+    """Les AUTRES identites que Valider etoilera (reserves d'une caption,
+    copies d'un template), sans la sienne ni doublon."""
+    autres = []
+    for x in e.get("cibles") or []:
+        if isinstance(x, (list, tuple)) and len(x) == 2 and x[1] and x[1] != e.get("ident") \
+                and str(x[1]) not in autres:
+            autres.append(str(x[1]))
+    return autres
 
 
 def _fa_banger(e: dict, vues=None) -> str:
@@ -18920,11 +18948,179 @@ def _fa_banger(e: dict, vues=None) -> str:
         url = f"https://www.instagram.com/reel/{sc}/"
     v = e.get("vues") if vues is None else vues
     try:
-        vv = f"{int(v):,}".replace(",", " ") + " vues"
+        vv = f"{int(v):,}".replace(",", " ") + " vues"
     except Exception:
         vv = ""
     return (f"<a href='{html_escape(url)}' target='_blank' rel='noopener'>{html_escape(sc)}</a>"
             + (f" · {vv}" if vv else ""))
+
+
+def _fa_reels(e: dict) -> list:
+    """Les reels sous lesquels une proposition s'affiche : CHACUN de ceux ou
+    l'analyse l'a trouvee (`bangers`), repli sur `sc`.
+
+    Constate en production le 27/09 a 16 h 25 : le proprietaire a valide la
+    brute du reel DdtCkHcS7JP et cherchait sa caption (« j'ai validé mais
+    rien, pour la vidéo c'est bon mais la caption n'est pas arrivée »). Elle
+    etait rangee sous Dc0IDOCyqmr, le PREMIER des trois reels ou on l'avait
+    vue, 17 000 vues contre 275 000 -- loin de la brute qu'il venait de
+    valider. Elle s'affiche donc sous chaque reel ; un OK ou un Non la
+    tranche partout (elle quitte toutes les cartes au rafraichissement)."""
+    vus = []
+    for s in (e.get("bangers") or [e.get("sc")]):
+        s = str(s or "").strip()
+        k = s if _FA_SC.fullmatch(s) else ""
+        if k not in vus:
+            vus.append(k)
+    return vus or [""]
+
+
+def _fa_media(cle: str):
+    """(miniature, video, chemin, cle de vignette) d'une cle
+    « ident|dossier|fichier », ou ("", "", None, "") si le fichier n'est plus
+    dans le vault. La cle de vignette est celle de /cloud/thumb : la
+    pre-generation remplit le MEME cache que la route.
+
+    CHAQUE segment est encode (_url_nom) : les rushs portent #, ?, %,
+    espaces, emojis, guillemets ; un # non encode coupait l'adresse."""
+    p = str(cle or "").split("|", 2)
+    if len(p) != 3 or not all(p) or "/" in p[2] or "\\" in p[2] or p[2] in ("..", "."):
+        return "", "", None, ""
+    ident, sd, nom = p[0].lower().strip(), p[1], p[2]
+    try:
+        chemin = IDENTITIES_DIR / ident / sd / nom
+        if not chemin.is_file():
+            return "", "", None, ""
+    except OSError:
+        return "", "", None, ""
+    bout = "/".join(_url_nom(x) for x in (ident, sd, nom))
+    return f"/cloud/thumb/{bout}", f"/cloud/file/{bout}", chemin, f"{ident}/{sd}/{nom}"
+
+
+def _fa_bouton(op: str, x: dict, mot: str, classe: str = "") -> str:
+    return (f"<button type='button' class='fa-bt{(' ' + classe) if classe else ''}' "
+            f"data-id='{html_escape(str(x.get('id') or ''))}' "
+            f"onclick=\"faAction(this,'{op}',this.getAttribute('data-id'))\">{mot}</button>")
+
+
+def _fa_ligne(x: dict, reel_video: str, boutons: str, niveau: str, marques: dict,
+              pregen: list) -> str:
+    """Une proposition dans la carte de son reel : la miniature de ce qui est
+    propose (clic = comparaison avec le reel), le type, l'identite, et les
+    boutons. Le nom de fichier et la raison technique : au survol."""
+    t = x.get("type")
+    mot = _FA_MOTS.get(t, str(t or "?"))
+    raison = str(x.get("raison") or "")
+    titre = _fa_quoi(x) + (" · " + raison if raison else "")
+    ident = str(x.get("ident") or "") or "identité inconnue"
+    autres = _fa_autres(x)
+    if t == "caption":
+        texte = str(x.get("texte") or "")
+        court = texte[:90].replace("\n", " / ") + ("…" if len(texte) > 90 else "")
+        vignette = "<span class='fa-mini fa-txt' aria-hidden='true'>Aa</span>"
+        corps = (f"<span class='fa-type'>{mot}</span> « {html_escape(court)} » → "
+                 f"<b>{html_escape(ident)}</b>"
+                 + (" + réserves : " + html_escape(", ".join(autres)) if autres else ""))
+    else:
+        cle = str(x.get("cle") or "")
+        mini, video, chemin, cle_vignette = _fa_media(cle)
+        if mini:
+            vignette = (f"<button type='button' class='fa-mini' data-reel='{html_escape(reel_video)}' "
+                        f"data-media='{html_escape(video)}' "
+                        f"data-quoi='{html_escape(mot + ' · ' + ident)}' onclick='faVoir(this)' "
+                        f"title='Comparer avec le reel'><img src='{html_escape(mini)}' "
+                        "loading='lazy' width='36' height='64' alt=''></button>")
+            pregen.append((chemin, cle_vignette, True))
+        else:
+            vignette = ("<span class='fa-mini fa-txt' title='"
+                        + ("fichier introuvable dans le vault" if cle else "copie à choisir")
+                        + "'>?</span>")
+        marque = ""
+        if t == "template" and cle:
+            m = _marque_effective(marques, cle)
+            if m in _mm.MARQUES:
+                marque = (f" <span class='fa-marque' title='{html_escape(_mm.MARQUES[m]['nom'])}'>"
+                          f"{_mm.MARQUES[m]['emoji']}</span>")
+        corps = (f"<span class='fa-type'>{mot}</span> <b>{html_escape(ident)}</b>"
+                 + ((" + réserves : " if t == "caption" else " + copies : ")
+                    + html_escape(", ".join(autres)) if autres else "")
+                 + marque)
+    if niveau:
+        corps += (" <span class='fa-niv fa-sur'>sûr</span>" if niveau == "sur"
+                  else " <span class='fa-niv fa-prob'>probable</span>")
+    return (f"<div class='fa-ligne' title='{html_escape(titre)}'>{vignette}"
+            f"<span class='fa-quoi'>{corps}</span><span class='fa-bts'>{boutons}</span></div>")
+
+
+def _fa_cartes(props: list, reg_bangers: dict, *, boutons, niveau, marques, ordre, plafond: int):
+    """Les propositions regroupees par reel -> (cartes HTML, reels caches
+    [(sc, propositions, vues)], propositions qui ne sont dans AUCUNE carte
+    affichee, miniatures a pre-generer). Les reels caches sont RENDUS, pas seulement comptes :
+    l'appelant dit ce qu'ils sont, et non ce qu'on suppose qu'ils sont.
+
+    `boutons(x)` rend les boutons d'une ligne, `niveau(x)` son niveau (ou ""),
+    `ordre(sc, lignes, vues)` la cle de tri d'une carte. Les vues, le lien et
+    le compte d'une carte sont ceux DE CE REEL (fiche du registre), jamais
+    ceux du premier reel ou la proposition a ete vue."""
+    import bangers as _bgv
+    groupes = {}
+    for x in props:
+        for k in _fa_reels(x):
+            lst = groupes.setdefault(k, [])
+            if not any(y is x for y in lst):
+                lst.append(x)
+
+    def _info(k, lst):
+        fiche = reg_bangers.get(k) if k else None
+        fiche = fiche if isinstance(fiche, dict) else {}
+        siens = [y for y in lst if str(y.get("sc") or "") == k]
+        vues = fiche.get("vues")
+        if vues is None:
+            vues = next((y.get("vues") for y in siens if y.get("vues") is not None), None)
+        try:
+            vues = int(vues) if vues is not None else None
+        except Exception:
+            vues = None
+        url = str(fiche.get("url") or "") or next((str(y.get("url")) for y in siens if y.get("url")), "")
+        compte = str(fiche.get("compte") or "") or next((str(y.get("compte")) for y in siens
+                                                          if y.get("compte")), "")
+        return vues, url, compte.strip().lstrip("@")
+
+    cartes = []
+    for k, lst in groupes.items():
+        vues, url, compte = _info(k, lst)
+        cartes.append((ordre(k, lst, vues or 0), k, lst, vues, url, compte))
+    cartes.sort(key=lambda c: c[0])
+    montrees, cachees = cartes[:plafond], cartes[plafond:]
+    vus = set()
+    html, pregen = [], []
+    for _o, k, lst, vues, url, compte in montrees:
+        present = bool(k) and _bgv.video_presente(k)
+        reel_video = f"/jailbreak/favoris_auto/reel/{k}" if present else ""
+        if present:
+            tete_img = (f"<button type='button' class='fa-reel' data-reel='{reel_video}' "
+                        "onclick='faVoir(this)' title='Voir le reel'>"
+                        f"<img src='/jailbreak/favoris_auto/miniature/{k}' loading='lazy' "
+                        "width='56' height='100' alt=''></button>")
+            pregen.append((_bgv.chemin_video(k), f"bangers/{k}", True))
+        else:
+            tete_img = ("<span class='fa-reel fa-reel-vide' title='"
+                        + ("vidéo du reel non archivée" if k else "reel inconnu") + "'>?</span>")
+        tete = ((f"@{html_escape(compte)} · " if compte else "")
+                + (_fa_banger({"sc": k, "url": url}, vues if vues is not None else "")
+                   if k else "reel inconnu"))
+        lignes = sorted(lst, key=lambda y: (_FA_ORDRE_TYPES.get(y.get("type"), 3),
+                                            0 if niveau(y) == "sur" else 1,
+                                            -int(y.get("le") or 0)))
+        for y in lignes:
+            vus.add(id(y))
+        html.append("<div class='fa-carte'>" + tete_img + "<div class='fa-corps'>"
+                    f"<div class='fa-tete'>{tete}</div>"
+                    + "".join(_fa_ligne(y, reel_video, boutons(y), niveau(y), marques, pregen)
+                              for y in lignes)
+                    + "</div></div>")
+    props_cachees = [x for x in props if id(x) not in vus]
+    return html, [(k, lst, vues) for _o, k, lst, vues, _u, _c in cachees], props_cachees, pregen
 
 
 #: Le JavaScript de la section, AVEC elle : l'encart Bangers n'a pas le meme
@@ -18996,8 +19192,114 @@ _FA_JS = (
     "  if(s && s.getAttribute('data-en-cours') === '1')"
     "    window._faMinuteur = setTimeout(window.faRafraichir, 8000);"
     "};"
+    # VOIR EN GRAND : le reel a gauche, ce qui est propose a droite, les
+    # boutons de la ligne dessous. La fenetre vit hors de #fa-section (posee
+    # sur body) : le rafraichissement de la liste ne la detruit pas. Ses OK /
+    # Non CLIQUENT les boutons de la ligne : un seul chemin vers le serveur,
+    # et leur libelle deja traduit par le rendu.
+    "window.faVoirFermer = function(){"
+    "  var m = document.getElementById('fa-voir');"
+    "  document.removeEventListener('keydown', window.faVoirTouche);"
+    "  if(!m) return;"
+    "  m.querySelectorAll('video').forEach(function(v){"
+    "    try{ v.pause(); }catch(e){}"
+    "    v.removeAttribute('src');"
+    "    try{ v.load(); }catch(e){}"
+    "  });"
+    "  if(m.parentNode) m.parentNode.removeChild(m);"
+    "};"
+    "window.faVoirTouche = function(ev){ if(ev.key === 'Escape') window.faVoirFermer(); };"
+    "window.faVoir = function(b){"
+    "  window.faVoirFermer();"
+    "  var reel = b.getAttribute('data-reel') || '';"
+    "  var media = b.getAttribute('data-media') || '';"
+    "  if(!reel && !media) return;"
+    "  var m = document.createElement('div');"
+    "  m.id = 'fa-voir';"
+    "  m.className = 'fa-voir';"
+    "  m.setAttribute('role', 'dialog');"
+    "  m.setAttribute('aria-modal', 'true');"
+    "  var boite = document.createElement('div');"
+    "  boite.className = 'fa-voir-boite';"
+    "  var x = document.createElement('button');"
+    "  x.type = 'button';"
+    "  x.className = 'fa-voir-x';"
+    "  x.textContent = '✕';"
+    "  x.setAttribute('aria-label', 'Fermer');"
+    "  x.onclick = window.faVoirFermer;"
+    "  boite.appendChild(x);"
+    "  var cols = document.createElement('div');"
+    "  cols.className = 'fa-voir-cols';"
+    "  function colonne(titre, src){"
+    "    var c = document.createElement('div');"
+    "    c.className = 'fa-voir-col';"
+    "    var t = document.createElement('div');"
+    "    t.className = 'fa-voir-t';"
+    "    t.textContent = titre;"
+    "    var v = document.createElement('video');"
+    "    v.controls = true; v.muted = true; v.autoplay = true; v.loop = true;"
+    "    v.playsInline = true;"
+    "    v.setAttribute('muted', '');"
+    "    v.setAttribute('playsinline', '');"
+    "    v.preload = 'metadata';"
+    "    v.src = src;"
+    "    c.appendChild(t);"
+    "    c.appendChild(v);"
+    "    cols.appendChild(c);"
+    "  }"
+    "  if(reel) colonne('Reel', reel);"
+    "  if(media) colonne(b.getAttribute('data-quoi') || '', media);"
+    "  boite.appendChild(cols);"
+    "  var ligne = b.closest ? b.closest('.fa-ligne') : null;"
+    "  var src = ligne ? ligne.querySelectorAll('.fa-bts button') : [];"
+    "  if(src.length){"
+    "    var a = document.createElement('div');"
+    "    a.className = 'fa-voir-actions';"
+    "    Array.prototype.forEach.call(src, function(s){"
+    "      var c = document.createElement('button');"
+    "      c.type = 'button';"
+    "      c.className = s.className;"
+    "      c.textContent = s.textContent;"
+    "      c.onclick = function(){ window.faVoirFermer(); s.click(); };"
+    "      a.appendChild(c);"
+    "    });"
+    "    boite.appendChild(a);"
+    "  }"
+    "  m.appendChild(boite);"
+    # Le fond ne ferme que sur un geste COMMENCE sur lui, et pas dans la
+    # demi-seconde qui suit l'ouverture : la fenetre s'ouvre au 1er clic, le
+    # 2e clic d'un double-clic tombait sur le fond (la miniature du reel est
+    # hors de la boite) et la refermait aussitot -- elle clignotait.
+    # Le geste commence sur le fond : un glisser parti de la boite (selection)
+    # et lache dehors ne ferme pas non plus.
+    "  var ouverte = Date.now(), bas = false;"
+    "  m.addEventListener('mousedown', function(ev){ bas = (ev.target === m); });"
+    "  m.addEventListener('click', function(ev){"
+    "    if(ev.target === m && bas && ev.detail < 2 && Date.now() - ouverte > 500) window.faVoirFermer();"
+    "    bas = false;"
+    "  });"
+    "  document.body.appendChild(m);"
+    "  document.addEventListener('keydown', window.faVoirTouche);"
+    "};"
     "setTimeout(window.faSuivre, 1500);"
 )
+
+
+def _fa_pregen(items: list) -> None:
+    """Pre-genere les miniatures des cartes affichees, 3 ffmpeg a la fois
+    (_pregen_thumbs_async), dans l'ordre de la liste.
+
+    Seulement sur la machine de production (VA_MACHINE_PROD) : c'est elle
+    qui remplit la liste, et c'est la que le proprietaire l'ouvre. Ailleurs
+    -- poste de dev, tests, bac a sable -- les miniatures se font a la
+    demande, sans fil en arriere-plan qui ecrirait des vignettes dans le
+    data/ du poste pour des fichiers de test."""
+    if os.environ.get("VA_MACHINE_PROD") != "1" or not items:
+        return
+    try:
+        _pregen_thumbs_async(items)
+    except Exception:
+        pass
 
 
 def _favoris_auto_html(avec_script: bool = True) -> str:
@@ -19010,8 +19312,10 @@ def _favoris_auto_html(avec_script: bool = True) -> str:
 
     Depuis le 27/09 apres-midi (« je dois check, et pour la caption aussi »),
     rien n'est plus etoile d'office : la liste « À vérifier » porte TOUT ce
-    que l'analyse trouve, « sûr » en tete, puis « probable ». Le centre de
-    notifications (⚠) y mene."""
+    que l'analyse trouve. Depuis le 27/09 au soir, elle se lit REEL PAR REEL,
+    en images (« je peux voir stp des icônes, en mode je sais quoi c'est ») :
+    la miniature du reel, puis la brute, le montage et la caption proposes,
+    chacun avec OK / Non. Le centre de notifications (⚠) y mene."""
     try:
         import favoris_auto as _fa
         e = _fa.etat()
@@ -19108,78 +19412,115 @@ def _favoris_auto_html(avec_script: bool = True) -> str:
             f"<button type='button' onclick=\"faAction(this,'rattrapage','')\">"
             f"Analyser les {n_rat} banger(s) archivé(s)</button></div>")
 
-    # --- a verifier -------------------------------------------------------------
-    def _ligne(x, boutons, avec_niveau=False):
-        raison = str(x.get("raison") or "")
-        # La raison COURTE sur la ligne, entiere au survol : une recette
-        # verifiee a l'image peut tenir trois lignes.
-        courte = raison if len(raison) <= 150 else raison[:147].rstrip() + "…"
-        autres = [b for b in (x.get("bangers") or []) if b != x.get("sc")]
-        compte = str(x.get("compte") or "").strip().lstrip("@")
-        niv = ""
-        if avec_niveau:
-            niv = "<b>" + ("sûr" if _fa.niveau(x) == "sur" else "probable") + "</b> · "
-        return ("<div class='sv-identity'><span"
-                + (f" title='{html_escape(raison)}'" if courte != raison else "") + ">"
-                f"{niv}{html_escape(_fa_quoi(x))}<br>"
-                + (f"@{html_escape(compte)} · " if compte else "") + _fa_banger(x)
-                + (f" (+{len(autres)} autre(s))" if autres else "")
-                + (f" · {html_escape(courte)}" if courte else "")
-                + "</span><span>" + boutons + "</span></div>")
+    # Les marques Trash / Flash d'un montage propose : lecture d'AFFICHAGE
+    # (tolerante, en cache), la meme priorite que partout (_marque_effective).
+    try:
+        marques = {c: _load_marque(c) for c in _mm.ORDRE}
+    except Exception:
+        marques = {}
 
-    def _bouton(op, x, mot):
-        return (f"<button type='button' data-id='{html_escape(str(x.get('id') or ''))}' "
-                f"onclick=\"faAction(this,'{op}',this.getAttribute('data-id'))\">{mot}</button>")
-
+    # --- a verifier : une carte par reel ------------------------------------------
     blocs = []
+    pregen = []
     if attente:
         rows = []
+
+        def _bts_attente(x):
+            return ((_fa_bouton("valider", x, "OK", "fa-ok") if x.get("cle") and x.get("ident") else "")
+                    + _fa_bouton("refuser", x, "Non", "fa-non"))
+
+        def _porte_sure(lst):
+            return any(_fa.niveau(y) == "sur" for y in lst)
+
+        # Les reels qui portent au moins une « sûre » d'abord, puis par vues.
+        cartes, caches, props_cachees, pregen = _fa_cartes(
+            attente, bangers, boutons=_bts_attente, niveau=_fa.niveau, marques=marques,
+            ordre=lambda k, lst, vues: (0 if _porte_sure(lst) else 1, -vues, k),
+            plafond=FA_CARTES_MAX)
         if surs:
             # Un clic pour toutes les « sûres » (celles qui etaient posees
             # d'office avant), apres confirmation : c'est un lot d'etoiles.
+            # Le nombre dans son propre <span> : la traduction se fait sur le
+            # noeud de texte ENTIER. La confirmation dit combien sont HORS de
+            # la liste affichee : avec le vrai registre (27/09), 5 des 80
+            # sures n'etaient dans aucune carte, et le clic les etoilait sans
+            # qu'elles aient ete vues.
             _pl = "s" if len(surs) > 1 else ""
+            _ids_caches = {id(x) for x in props_cachees}
+            _n_sc = sum(1 for x in surs if id(x) in _ids_caches)
             rows.append(
                 "<div class='sv-controls'><button type='button' onclick=\"if(confirm("
-                f"'Poser les étoiles de {len(surs)} proposition{_pl} sûre{_pl} ?'))"
-                f"faAction(this,'valider_surs','')\">Valider les sûres ({len(surs)})</button></div>")
-        ordre = sorted(attente, key=lambda y: (0 if _fa.niveau(y) == "sur" else 1,
-                                                -int(y.get("vues") or 0)))
-        for x in ordre[:60]:
-            b = (_bouton("valider", x, "Valider") if x.get("cle") and x.get("ident") else "")
-            rows.append(_ligne(x, b + _bouton("refuser", x, "Refuser"), avec_niveau=True))
-        plus = len(attente) - 60
+                f"'Poser les étoiles de {len(surs)} proposition{_pl} sûre{_pl}"
+                + (f", dont {_n_sc} hors de la liste affichée" if _n_sc else "") + " ?'))"
+                f"faAction(this,'valider_surs','')\">OK pour les sûres <span>({len(surs)})</span>"
+                "</button></div>")
+        rows.extend(cartes)
+        if caches:
+            # Dire CE QUI est cache, pas « les moins vus » : les reels sans
+            # « sûre » passent apres tous les autres quelles que soient leurs
+            # vues. Avec le vrai registre (27/09), un reel « probable » a
+            # 155 262 vues etait cache pendant que des « sûrs » a 10 366 vues
+            # s'affichaient -- sous un libelle qui disait « les moins vus ».
+            _c_sur = [c for c in caches if _porte_sure(c[1])]
+            _c_prob = [c for c in caches if not _porte_sure(c[1])]
+            _bouts = []
+            if _c_prob:
+                _vmax = max(int(c[2] or 0) for c in _c_prob)
+                _bouts.append(f"{len(_c_prob)} sans proposition sûre"
+                              + (" (le plus vu : " + f"{_vmax:,}".replace(",", " ") + " vues)"
+                                 if _vmax > 0 else ""))
+            if _c_sur:
+                _bouts.append(f"{len(_c_sur)} avec une sûre, moins vu(s) que ceux affichés")
+            rows.append(f"<div class='sv-h'>+ {len(caches)} autre(s) reel(s) : " + ", ".join(_bouts)
+                        + (f" · {len(props_cachees)} proposition(s) n'apparaissent que là"
+                           if props_cachees else "") + "</div>")
         blocs.append(
             f"<details class='sv-details' data-fa='attente' open><summary>À vérifier "
-            f"({len(attente)})</summary>" + "".join(rows)
-            + (f"<div class='sv-h'>+ {plus} autre(s), les moins vues</div>" if plus > 0 else "")
-            + "</details>")
+            f"({len(attente)})</summary>" + "".join(rows) + "</details>")
     if posees:
-        rows = [_ligne(x, _bouton("annuler", x, "Retirer"))
-                for x in sorted(posees, key=lambda y: -int(y.get("le") or 0))[:80]]
-        plus = len(posees) - 80
+        cartes, caches, _n, _pg = _fa_cartes(
+            posees, bangers, boutons=lambda x: _fa_bouton("annuler", x, "Retirer"),
+            niveau=lambda x: "", marques=marques,
+            ordre=lambda k, lst, vues: (-max(int(y.get("le") or 0) for y in lst), k),
+            plafond=FA_CARTES_POSEES_MAX)
         blocs.append(
             f"<details class='sv-details' data-fa='posees'><summary>Étoiles posées "
-            f"({len(posees)})</summary>" + "".join(rows)
-            + (f"<div class='sv-h'>+ {plus} plus ancienne(s)</div>" if plus > 0 else "")
+            f"({len(posees)})</summary>" + "".join(cartes)
+            + (f"<div class='sv-h'>+ {len(caches)} autre(s) reel(s), les plus anciens</div>"
+               if caches else "")
             + "</details>")
     if faits:
+        import bangers as _bgd
         rows = []
-        for sc, v in sorted(((k, v) for k, v in bangers.items() if v.get("etat") == "fait"),
-                            key=lambda kv: -int(kv[1].get("le") or 0))[:40]:
+        tries = sorted(((k, v) for k, v in bangers.items() if v.get("etat") == "fait"),
+                       key=lambda kv: -int(kv[1].get("le") or 0))
+        for sc, v in tries[:40]:
             notes = "; ".join(str(n) for n in (v.get("notes") or [])[:3])
+            if _FA_SC.fullmatch(str(sc)) and _bgd.video_presente(sc):
+                mini = (f"<button type='button' class='fa-reel fa-reel-petit' "
+                        f"data-reel='/jailbreak/favoris_auto/reel/{sc}' onclick='faVoir(this)' "
+                        "title='Voir le reel'>"
+                        f"<img src='/jailbreak/favoris_auto/miniature/{sc}' loading='lazy' "
+                        "width='28' height='50' alt=''></button>")
+            else:
+                mini = ("<span class='fa-reel fa-reel-petit fa-reel-vide' "
+                        "title='vidéo du reel non archivée'>?</span>")
             rows.append(
-                "<div class='sv-identity'><span>"
+                "<div class='sv-identity'><span class='fa-dec'>" + mini + "<span>"
                 + _fa_banger({"sc": sc, "url": v.get("url")}, v.get("vues"))
                 + " · " + html_escape(str(v.get("nature") or "?"))
                 + " · " + html_escape(str(v.get("identite") or "identité inconnue")
                                       + ("" if v.get("identite_sure") else " (à confirmer)"))
                 + (f"<br>{html_escape(notes)}" if notes else "")
-                + "</span><span></span></div>")
+                + "</span></span><span></span></div>")
+        if len(tries) > 40:
+            rows.append(f"<div class='sv-h'>+ {len(tries) - 40} plus ancien(s)</div>")
         blocs.append(
             f"<details class='sv-details' data-fa='bangers'><summary>Bangers décortiqués "
             f"({len(faits)})</summary>" + "".join(rows) + "</details>")
     if blocs_err:
         blocs.append(blocs_err)
+    _fa_pregen(pregen)
     return ("<details class='sv-box sv-settings sv-follow' id='fa-section' data-fa='section' "
             f"data-en-cours='{1 if en_cours else 0}'"
             + (" open" if attente else "") + ">"
@@ -44423,6 +44764,69 @@ background:none;border:0;padding:3px 0;cursor:pointer}
 .sv-settings .tn-cpt{background:none;color:inherit}
 body.light .sv-settings{--ui-text:#17202f;--ui-muted:#687181;--ui-border:#e3e5eb}
 @media(max-width:580px){.sv-identities{grid-template-columns:1fr}.sv-heading .sv-manage{margin-left:auto}}
+/* Favoris « À vérifier » : une carte par reel (27/09 au soir, « je peux voir
+   stp des icônes »). Miniature du reel a gauche, une ligne par proposition.
+   Les couleurs passent par --ui-* : .sv-settings les redefinit en theme
+   clair. Aucun texte n est pose SUR une miniature. */
+.fa-carte{display:flex;align-items:flex-start;gap:12px;padding:10px 0;
+border-bottom:1px solid var(--ui-border,#23262f);font-size:12px;color:var(--ui-text,#e7eaf3)}
+.fa-reel{flex:0 0 auto;display:block;width:56px;height:100px;padding:0;border:0;border-radius:8px;
+overflow:hidden;background:#000;cursor:pointer}
+.fa-reel img,.fa-mini img{display:block;width:100%;height:100%;object-fit:cover}
+/* (0,2,0) : .fa-mini et .fa-reel, plus bas ou plus haut, ne l emportent pas. */
+.fa-reel.fa-reel-vide,.fa-mini.fa-txt{display:flex;align-items:center;justify-content:center;cursor:default;
+background:var(--ui-border,#23262f);color:var(--ui-muted,#939aaa);font-weight:650}
+.fa-reel-petit{width:28px;height:50px;border-radius:5px}
+/* .sv-identity button (0,1,1) donnerait au bouton-miniature un fond vide
+   et une marge : (0,2,0) l emporte. */
+.sv-identity .fa-reel{display:block;padding:0;border:0;background:#000}
+.sv-identity .fa-reel-vide{display:flex;background:var(--ui-border,#23262f)}
+.fa-dec{display:flex;align-items:center;gap:10px;min-width:0;overflow-wrap:anywhere}
+.fa-corps{flex:1 1 auto;min-width:0}
+.fa-tete{color:var(--ui-muted,#939aaa);margin:0 0 4px;overflow-wrap:anywhere}
+.fa-ligne{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;padding:5px 0}
+.fa-ligne+.fa-ligne{border-top:1px dashed var(--ui-border,#23262f)}
+.fa-mini{flex:0 0 auto;display:block;width:36px;height:64px;padding:0;border:0;border-radius:6px;
+overflow:hidden;background:#000;cursor:pointer}
+.fa-quoi{flex:1 1 170px;min-width:0;line-height:1.45;overflow-wrap:anywhere}
+.fa-quoi b{color:var(--ui-text,#e7eaf3);font-weight:650}
+.fa-type{color:var(--ui-muted,#939aaa);font-size:10.5px;font-weight:650;letter-spacing:.04em;
+text-transform:uppercase;margin-right:4px}
+.fa-marque{font-size:13px}
+.fa-niv{display:inline-block;margin-left:4px;padding:1px 7px;border-radius:999px;font-size:10.5px;
+font-weight:650;white-space:nowrap}
+.fa-niv.fa-sur{background:rgba(34,197,94,.14);color:#4ade80}
+.fa-niv.fa-prob{background:rgba(245,158,11,.14);color:#fbbf24}
+.fa-bts{display:flex;gap:6px;flex:0 0 auto;margin-left:auto}
+.fa-bt{font:inherit;font-size:12px;cursor:pointer;border-radius:7px;padding:6px 12px;min-width:44px;
+background:transparent;color:var(--ui-text,#e7eaf3);border:1px solid var(--ui-border,#303440)}
+.fa-bt.fa-ok{border-color:rgba(34,197,94,.5);color:#4ade80;font-weight:650}
+.fa-bt.fa-non{color:var(--ui-muted,#939aaa)}
+.fa-bt:disabled{opacity:.6;cursor:wait}
+/* Theme clair : (0,3,1) contre (0,2,0) -- calcule. Le vert #4ade80 tombe a
+   1,7 de contraste sur blanc, l ambre #fbbf24 a 1,6. */
+body.light .fa-niv.fa-sur{background:rgba(22,163,74,.12);color:#15803d}
+body.light .fa-niv.fa-prob{background:rgba(217,119,6,.12);color:#b45309}
+body.light .fa-bt.fa-ok{border-color:rgba(22,163,74,.5);color:#15803d}
+/* La fenetre « voir en grand » : posee sur body, HORS de .sv-settings, elle
+   porte donc ses propres --ui-* (sinon, en clair, texte blanc sur blanc). */
+.fa-voir{position:fixed;inset:0;z-index:100000;background:rgba(0,0,0,.72);display:flex;
+align-items:center;justify-content:center;padding:16px;box-sizing:border-box}
+.fa-voir-boite{--ui-text:#e7eaf3;--ui-muted:#939aaa;--ui-border:#303440;position:relative;
+background:#15161c;color:var(--ui-text);border:1px solid #2a2d36;border-radius:14px;
+padding:14px;width:min(740px,100%);max-height:100%;overflow:auto;box-sizing:border-box}
+body.light .fa-voir-boite{--ui-text:#17202f;--ui-muted:#687181;--ui-border:#d5d9e0;
+background:#fff;border-color:#e3e5eb}
+.fa-voir-cols{display:flex;gap:10px;justify-content:center;padding-top:22px}
+.fa-voir-col{flex:1 1 0;min-width:0;max-width:340px}
+.fa-voir-t{font-size:12px;color:var(--ui-muted);margin:0 0 6px;overflow-wrap:anywhere}
+.fa-voir-col video{display:block;width:100%;aspect-ratio:9/16;max-height:70vh;object-fit:contain;
+background:#000;border-radius:10px}
+.fa-voir-x{position:absolute;top:8px;right:8px;width:30px;height:30px;border-radius:50%;
+border:1px solid var(--ui-border);background:transparent;color:var(--ui-text);font-size:14px;
+cursor:pointer;line-height:1}
+.fa-voir-actions{display:flex;gap:8px;justify-content:center;margin-top:12px}
+.fa-voir-actions .fa-bt{padding:8px 22px;font-size:13px}
 /* L interrupteur de la ligne : discret quand il est allume — c est l etat
    normal — et franchement eteint quand il ne l est pas. */
 .jb-suivi{flex-shrink:0;width:18px;height:18px;display:inline-flex;
@@ -68875,7 +69279,70 @@ def create_app():
         acces complets (_ADMIN_ONLY_READ)."""
         if not is_auth():
             return "", 401
-        return _favoris_auto_html(avec_script=False)
+        # Traduit comme le premier rendu : sinon « Valider » devenait
+        # « Confirm » a l'ouverture, puis redevenait francais au premier clic.
+        _frag = _favoris_auto_html(avec_script=False)
+        return _traduire_html(_frag) if _langue_courante() == "en" else _frag
+
+    def _fa_video_banger(sc):
+        """(chemin, None) de la video archivee d'un banger, ou (None, reponse).
+
+        Seul un shortcode (_FA_SC) est accepte, et le fichier resolu doit
+        rester DANS le dossier des bangers : rien d'autre n'est servi."""
+        if not _FA_SC.fullmatch(sc or ""):
+            return None, ("Shortcode invalide", 400)
+        import bangers as _bgr
+        try:
+            base = Path(_bgr.DOSSIER).resolve()
+            chemin = Path(_bgr.chemin_video(sc)).resolve()
+            chemin.relative_to(base)
+        except (ValueError, OSError):
+            return None, ("Chemin invalide", 403)
+        if not _bgr.video_presente(sc):
+            return None, ("Vidéo du reel absente", 404)
+        return chemin, None
+
+    @app.route("/jailbreak/favoris_auto/reel/<sc>", methods=["GET"])
+    def jailbreak_favoris_auto_reel(sc):
+        """La video archivee d'un banger, pour la fenetre de comparaison de
+        « À vérifier ». Sous /jailbreak/ : lecture reservee aux acces
+        complets (_ADMIN_ONLY_READ). conditional=True : lecture par plages
+        (206), l'avance rapide ne retelecharge pas tout."""
+        if not is_auth():
+            return "", 401
+        chemin, refus = _fa_video_banger(sc)
+        if refus:
+            return refus
+        from flask import send_file
+        rep = send_file(str(chemin), mimetype="video/mp4", conditional=True)
+        rep.headers["Cache-Control"] = "private, max-age=86400"
+        return rep
+
+    @app.route("/jailbreak/favoris_auto/miniature/<sc>", methods=["GET"])
+    def jailbreak_favoris_auto_miniature(sc):
+        """La miniature d'un banger, tiree de sa video archivee et mise en
+        cache comme celles du vault (_get_or_create_thumbnail). Faute de
+        pouvoir l'extraire : l'image « aperçu indisponible » et un en-tete
+        qui NOMME la cause, comme /cloud/thumb -- jamais la video entiere
+        dans un <img>."""
+        if not is_auth():
+            return "", 401
+        chemin, refus = _fa_video_banger(sc)
+        if refus and refus[1] != 404:
+            return refus
+        thumb = None
+        if chemin is not None:
+            thumb = _get_or_create_thumbnail(chemin, f"bangers/{sc}", True)
+        if thumb is None or not thumb.exists():
+            rep = app.response_class(_VIGNETTE_ABSENTE, mimetype="image/svg+xml")
+            rep.headers["X-Thumb-Error"] = ("video du reel absente" if chemin is None
+                                            else "extraction impossible (ffmpeg ?)")
+            rep.headers["Cache-Control"] = "no-store"
+            return rep
+        from flask import send_file
+        rep = send_file(str(thumb), conditional=True)
+        rep.headers["Cache-Control"] = "private, max-age=86400"
+        return rep
 
     @app.route("/jailbreak/favoris_auto/action", methods=["POST"])
     def jailbreak_favoris_auto_action():

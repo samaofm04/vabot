@@ -28108,10 +28108,15 @@ try:
               and "faAction(this,'annuler'" in _zfH and "faAction(this,'valider'" in _zfH
               and "faAction(this,'refuser'" in _zfH)
         _zfListe = _zfH.split("data-fa='attente'", 1)[-1].split("</details>", 1)[0]
-        _zfNiv = _zfRe.findall(r"<b>(sûr|probable)</b>", _zfListe)
-        check("favoris auto : chaque ligne dit son niveau, « sûr » d'abord, puis « probable »",
-              "sûr" in _zfNiv and "probable" in _zfNiv
-              and _zfNiv == sorted(_zfNiv, key=lambda x: x != "sûr"), _zfNiv)
+        # Depuis le 27/09 au soir, une carte par reel (brut, montage, caption
+        # dans cet ordre) : ce sont les REELS portant une « sûre » qui passent
+        # d'abord, chaque ligne gardant sa pastille.
+        _zfNivC = [_zfRe.findall(r"<span class='fa-niv fa-(sur|prob)'>", _zfC)
+                   for _zfC in _zfListe.split("<div class='fa-carte'>")[1:]]
+        _zfAvecSur = [("sur" in _zfN) for _zfN in _zfNivC]
+        check("favoris auto : chaque ligne dit son niveau, les reels qui portent une « sûre » d'abord",
+              _zfNivC and all(_zfNivC) and any(_zfAvecSur) and not all(_zfAvecSur)
+              and _zfAvecSur == sorted(_zfAvecSur, reverse=True), _zfNivC)
         check("favoris auto : « Valider les sûres » en un clic (apres confirmation), et ce qu'une "
               "caption vise est dit (identite + reserves)",
               "faAction(this,'valider_surs','')" in _zfH and "if(confirm(" in _zfH
@@ -29266,6 +29271,378 @@ try:
 except Exception as _fxE:
     import traceback as _fxTb
     check("favoris correctifs : testable", False, repr(_fxE)[:200] + " " + _fxTb.format_exc()[-700:])
+
+print("FAVORIS « À VÉRIFIER » : une carte par reel, OK pour le brut et pour le montage")
+print("=" * 70)
+# Demande du proprietaire du 27/09 au soir : l'icone du reel, OK pour le brut
+# et pour le montage (« je peux voir stp des icônes, en mode je sais quoi
+# c'est » puis « je peux avoir l'icône du reel, et dire OK pour le brut et OK
+# pour le montage, tu vois »). La liste etait du texte : noms de fichiers,
+# medianes, ecarts. Et constate en production le meme jour a 16 h 25 : une
+# caption vue dans trois reels etait rangee sous le PREMIER (17 000 vues), le
+# proprietaire la cherchait sous celui dont il venait de valider la brute
+# (275 000 vues) -- « j'ai validé mais rien, pour la vidéo c'est bon mais la
+# caption n'est pas arrivée ». Ce bloc tient :
+#   - une carte par reel, la proposition sous CHAQUE reel ou on l'a vue,
+#     vues/compte/lien de CE reel, compteur = propositions (pas lignes) ;
+#   - ordre : reels avec une « sûre » d'abord, puis par vues ; dans la carte
+#     brut, montage, caption ;
+#   - miniatures aux adresses ENCODEES (espace, #, ?, %, emoji, “ ”, ') et
+#     qui menent au bon fichier ; marque Trash/Flash dite par son emoji ;
+#   - OK / Non avec le bon id ; plus de nom de fichier ni de mediane a
+#     l'ecran (au survol seulement) ;
+#   - plafond de cartes DIT, rien d'ecarte en silence ; une proposition sans
+#     reel exploitable s'affiche quand meme ;
+#   - routes reel/miniature : 200 admin, 206 par plages, 403 role restreint,
+#     400 shortcode invalide, 404 video absente, « .. » refuse ;
+#   - le script de la section passe node --check.
+# Tout vit dans un dossier temporaire (registre, vault, bangers, vignettes).
+try:
+    import json as _mnJs, re as _mnRe, shutil as _mnSh, subprocess as _mnSp, tempfile as _mnTf
+    import html as _mnHt
+    from urllib.parse import quote as _mnQ
+    import favoris_auto as _mnFA
+    import web_upload as _mnW
+    import bangers as _mnBG
+    _mnD = pathlib.Path(_mnTf.mkdtemp(prefix="fa_miniatures_"))
+    _mnDA = _mnD / "data"
+    _mnID = _mnDA / "identities"
+    _mnSav = {
+        "FA": (_mnFA.DATA, dict(_mnFA.APPLICATEURS)),
+        "W": (_mnW.IDENTITIES_DIR, _mnW.THUMB_DIR, _mnW.FLASH_TREND_FILE, _mnW.TRASH_TREND_FILE,
+              _mnW._load_web_users, _mnW.FA_CARTES_MAX),
+        "BG": (_mnBG.FICHIER, _mnBG.DOSSIER, _mnBG.DETAILS_DIR),
+        "ENV": os.environ.pop("VA_MACHINE_PROD", None),
+    }
+    try:
+        _mnFA.DATA = _mnDA
+        _mnW.IDENTITIES_DIR = _mnID
+        _mnW.THUMB_DIR = _mnD / "thumbnails"
+        _mnW.FLASH_TREND_FILE = _mnDA / "flash_trend.json"
+        _mnW.TRASH_TREND_FILE = _mnDA / "trash_trend.json"
+        _mnBG.FICHIER = _mnDA / "bangers.json"
+        _mnBG.DOSSIER = _mnDA / "bangers"
+        _mnBG.DETAILS_DIR = _mnDA / "bangers_details"
+        _mnW._oublier_identites()
+        # Un nom de rush comme on en voit : espace, #, ?, %, emoji, guillemets
+        # typographiques, apostrophe.
+        _mnNom = "b #1 ?x %20 😱 “q” l'a.mp4"
+        _mnTpl = "tpl T#2.mp4"
+        for _mnRel, _mnOct in (("mod_a/brutes/" + _mnNom, b"BRUTE" * 500),
+                               ("mod_a/templates/" + _mnTpl, b"TPL" * 800),
+                               ("res_x/brutes/.garde", b"")):
+            (_mnID / _mnRel).parent.mkdir(parents=True, exist_ok=True)
+            (_mnID / _mnRel).write_bytes(_mnOct)
+        safe_json.write_text(_mnDA / "flash_trend.json",
+                             _mnJs.dumps(["mod_a|templates|" + _mnTpl]))
+        _mnW._invalidate_json_cache(_mnDA / "flash_trend.json")
+        # Les videos des bangers : une vraie (ffmpeg) si possible, pour la
+        # miniature ; sinon des octets (la lecture par plages se teste quand
+        # meme).
+        (_mnDA / "bangers").mkdir(parents=True)
+        _mnA, _mnB, _mnC = "AaaaA17k", "BbbbB275k", "CcccC900k"
+        _mnFf = _mnSh.which("ffmpeg")
+        _mnVraie = False
+        if _mnFf:
+            _mnRf = _mnSp.run([_mnFf, "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                               "testsrc=size=90x160:rate=10", "-t", "1", "-pix_fmt", "yuv420p",
+                               str(_mnDA / "bangers" / f"{_mnB}.mp4")], capture_output=True, timeout=60)
+            _mnVraie = _mnRf.returncode == 0 and (_mnDA / "bangers" / f"{_mnB}.mp4").stat().st_size > 1024
+        if not _mnVraie:
+            (_mnDA / "bangers" / f"{_mnB}.mp4").write_bytes(b"\x00" * 4096)
+        (_mnDA / "bangers" / f"{_mnA}.mp4").write_bytes(b"\x00" * 4096)
+        _mnOctB = (_mnDA / "bangers" / f"{_mnB}.mp4").read_bytes()
+
+        def _mnProp(pid, typ, sc, bangers, niveau, vues, **k):
+            d = {"id": pid, "type": typ, "sc": sc, "bangers": bangers, "niveau": niveau,
+                 "decision": niveau, "vues": vues, "etat": "attente", "le": 1790000000,
+                 "raison": "médiane 21, écart 78 au 2e", "score": {}, "texte": "", "cle": "",
+                 "ident": "", "cibles": [], "url": f"https://www.instagram.com/p/{sc}/"}
+            d.update(k)
+            return d
+
+        _mnCap = _mnProp("capAB", "caption", _mnA, [_mnA, _mnB], "sur", 17394,
+                         cle="mod_a|captions|be honest", ident="mod_a",
+                         texte="be honest:\nHow many drinks would it take",
+                         compte="compte_a",
+                         cibles=[["mod_a|captions|be honest", "mod_a"],
+                                 ["res_x|captions|be honest", "res_x"]])
+        _mnBru = _mnProp("bruB", "brute", _mnB, [_mnB], "sur", 275552,
+                         cle="mod_a|brutes|" + _mnNom, ident="mod_a",
+                         cibles=[["mod_a|brutes|" + _mnNom, "mod_a"]])
+        _mnReg = _mnFA._vide()
+        _mnReg["bangers"] = {
+            _mnA: {"etat": "fait", "vues": 17394, "compte": "compte_a", "le": 2,
+                   "url": f"https://www.instagram.com/p/{_mnA}/", "nature": "brute + caption"},
+            _mnB: {"etat": "fait", "vues": 275552, "compte": "compte_b", "le": 3,
+                   "url": f"https://www.instagram.com/p/{_mnB}/", "nature": "brute + caption"},
+        }
+        _mnReg["a_confirmer"] = [_mnCap, _mnBru]
+        safe_json.write(_mnFA.fichier_registre(), _mnReg)
+
+        _mnW._load_web_users = lambda: {"boss": {"role": "owner", "password": "x"},
+                                        "chat": {"role": "chatter", "password": "x"}}
+        _mnApp = _mnW.create_app()
+        _mnApp.testing = True
+        _mnCl = _mnApp.test_client()
+        with _mnCl.session_transaction() as _mnS:
+            _mnS["auth"] = True
+            _mnS["username"] = "boss"
+            _mnS["role"] = "owner"
+        _mnCl.set_cookie("va_lang", "fr")
+
+        def _mnListe():
+            h = _mnCl.get("/jailbreak/favoris_auto/section").get_data(as_text=True)
+            att = h.split("data-fa='attente'", 1)[-1].split("</details>", 1)[0] if "data-fa='attente'" in h else ""
+            return h, att, att.split("<div class='fa-carte'>")[1:]
+
+        def _mnCarte(cartes, sc):
+            return next((c for c in cartes if f"/p/{sc}/" in c), "")
+
+        # --- 1. la caption partagee : sous CHAQUE reel ----------------------
+        _mnH, _mnAtt, _mnCartes = _mnListe()
+        _mnCB, _mnCA = _mnCarte(_mnCartes, _mnB), _mnCarte(_mnCartes, _mnA)
+        check("favoris miniatures : une caption vue dans A (17k) et B (275k) + une brute de B -> la carte "
+              "de B montre la brute ET la caption, celle de A la caption, « À vérifier (2) »",
+              "À vérifier (2)" in _mnH and len(_mnCartes) == 2
+              and "data-id='bruB'" in _mnCB and "data-id='capAB'" in _mnCB
+              and "data-id='capAB'" in _mnCA and "data-id='bruB'" not in _mnCA,
+              (len(_mnCartes), _mnRe.findall(r"data-id='(\w+)'", _mnAtt)))
+        check("favoris miniatures : chaque carte cite les vues, le compte et le lien de SON reel",
+              "275 552 vues" in _mnCB and "@compte_b" in _mnCB and "17 394 vues" not in _mnCB
+              and "17 394 vues" in _mnCA and "@compte_a" in _mnCA and "+1" not in _mnAtt,
+              (_mnCB[:300], _mnCA[:300]))
+        check("favoris miniatures : dans la carte, la brute avant la caption",
+              _mnCB.index("data-id='bruB'") < _mnCB.index("data-id='capAB'"))
+        check("favoris miniatures : la carte la plus vue d'abord (B 275k avant A 17k)",
+              _mnAtt.index(f"/p/{_mnB}/") < _mnAtt.index(f"/p/{_mnA}/"))
+        check("favoris miniatures : OK et Non portent l'id de la proposition (valider / refuser)",
+              _mnRe.search(r"class='fa-bt fa-ok' data-id='bruB' onclick=\"faAction\(this,'valider',"
+                           r"this.getAttribute\('data-id'\)\)\">OK<", _mnCB) is not None
+              and _mnRe.search(r"class='fa-bt fa-non' data-id='bruB' onclick=\"faAction\(this,'refuser',"
+                               r"this.getAttribute\('data-id'\)\)\">Non<", _mnCB) is not None)
+        # --- 2. les images ----------------------------------------------------
+        _mnBout = "/".join(_mnQ(x, safe="") for x in ("mod_a", "brutes", _mnNom))
+        check("favoris miniatures : la miniature du reel (verticale, lazy, dimensions posees) et celle "
+              "de la brute, adresse ENCODEE segment par segment",
+              f"<img src='/jailbreak/favoris_auto/miniature/{_mnB}' loading='lazy' width='56' height='100'" in _mnCB
+              and f"src='/cloud/thumb/{_mnBout}'" in _mnCB
+              and f"data-media='/cloud/file/{_mnBout}'" in _mnCB, _mnCB[:600])
+        _mnRf = _mnCl.get(f"/cloud/file/{_mnBout}")
+        check("favoris miniatures : ... et l'adresse encodee mene au BON fichier (espace, #, ?, %, emoji, “, ')",
+              _mnRf.status_code == 200 and _mnRf.get_data() == b"BRUTE" * 500, _mnRf.status_code)
+        _mnVis = _mnRe.sub(r"<[^>]*>", " ", _mnAtt)
+        check("favoris miniatures : ni nom de fichier ni mediane a l'ecran -- au survol (title) seulement",
+              "b #1" not in _mnHt.unescape(_mnVis) and "médiane" not in _mnVis
+              and "médiane 21" in _mnAtt and "Brute · mod_a · b #1" in _mnHt.unescape(_mnAtt))
+        check("favoris miniatures : la caption dit son texte court, son identite et ses reserves",
+              "« be honest: / How many drinks would it take » → <b>mod_a</b> + réserves : res_x" in _mnCA)
+        check("favoris miniatures : chaque ligne porte sa pastille « sûr » / « probable »",
+              _mnCB.count("<span class='fa-niv fa-sur'>sûr</span>") == 2)
+        check("favoris miniatures : « OK pour les sûres (N) » garde sa confirmation",
+              "OK pour les sûres <span>(2)</span>" in _mnH and "if(confirm(" in _mnH
+              and "faAction(this,'valider_surs','')" in _mnH)
+        check("favoris miniatures : un clic sur une miniature ouvre la comparaison (faVoir), reel + proposition",
+              f"data-reel='/jailbreak/favoris_auto/reel/{_mnB}'" in _mnCB
+              and _mnCB.count("onclick='faVoir(this)'") == 2)
+        check("favoris miniatures : ni style en ligne, ni script dans le fragment",
+              "style=" not in _mnH and "<script" not in _mnH)
+
+        # --- 3. le montage, sa marque ; ordre ; sans reel ; plafond ---------
+        _mnReg = _mnFA.charger()
+        _mnReg["a_confirmer"] += [
+            _mnProp("tplC", "template", _mnC, [_mnC], "probable", 900000,
+                    cle="mod_a|templates|" + _mnTpl, ident="mod_a",
+                    cibles=[["mod_a|templates|" + _mnTpl, "mod_a"]]),
+            _mnProp("sansSc", "brute", "", [], "probable", 0,
+                    cle="mod_a|brutes|" + _mnNom, ident="mod_a"),
+            _mnProp("tplB", "template", _mnB, [_mnB, "a$b"], "probable", 275552,
+                    cle="mod_a|templates|" + _mnTpl, ident="mod_a"),
+        ]
+        _mnReg["bangers"][_mnC] = {"etat": "fait", "vues": 900000, "le": 1}
+        safe_json.write(_mnFA.fichier_registre(), _mnReg)
+        _mnH, _mnAtt, _mnCartes = _mnListe()
+        _mnCB = _mnCarte(_mnCartes, _mnB)
+        _mnOrdre = [(_mnRe.search(r"/p/(\w+)/", c) or _mnRe.search(r"(reel inconnu)", c)).group(1)
+                    for c in _mnCartes]
+        check("favoris miniatures : les reels avec une « sûre » d'abord, puis par vues (C 900k, "
+              "probable seulement, apres A 17k)",
+              _mnOrdre[:3] == [_mnB, _mnA, _mnC], _mnOrdre)
+        check("favoris miniatures : une proposition sans reel exploitable s'affiche quand meme (carte "
+              "« reel inconnu », sans miniature du reel)",
+              any("reel inconnu" in c and "data-id='sansSc'" in c and "miniature/" not in c
+                  for c in _mnCartes), _mnOrdre)
+        check("favoris miniatures : « À vérifier (N) » compte les propositions, pas les lignes",
+              "À vérifier (5)" in _mnH and _mnAtt.count("class='fa-ligne'") == 7,
+              (_mnRe.findall(r"À vérifier \(\d+\)", _mnH), _mnAtt.count("class='fa-ligne'")))
+        check("favoris miniatures : dans la carte, brut, montage, caption (dans cet ordre)",
+              _mnCB.index("data-id='bruB'") < _mnCB.index("data-id='tplB'") < _mnCB.index("data-id='capAB'"))
+        check("favoris miniatures : le montage marque Flash le dit par son emoji",
+              "<span class='fa-type'>Montage</span> <b>mod_a</b> <span class='fa-marque' title='Flash Trend'>⚡</span>"
+              in _mnCB, _mnCB[:900])
+        check("favoris miniatures : la pastille « probable »", "<span class='fa-niv fa-prob'>probable</span>" in _mnCB)
+        # Plafond : les reels sans « sûre » passent apres tous les autres,
+        # QUELLES QUE SOIENT leurs vues. Avec le vrai registre (27/09), un
+        # « probable » a 155 262 vues etait cache sous « les moins vus »
+        # pendant qu'un « sûr » a 10 366 vues s'affichait : le libelle dit ce
+        # qui est cache, et le plus vu des reels sans « sûre ».
+        _mnPl = {}
+        try:
+            for _mnMax in (2, 1, 0):
+                _mnW.FA_CARTES_MAX = _mnMax
+                _mnPl[_mnMax] = _mnListe()
+        finally:
+            _mnW.FA_CARTES_MAX = _mnSav["W"][5]
+        _mnHp, _mnAttp, _mnCartesp = _mnPl[2]
+        check("favoris miniatures : au-dela du plafond, le reste est DIT (reels et propositions cachees)",
+              len(_mnCartesp) == 2
+              and "+ 2 autre(s) reel(s) : 2 sans proposition sûre (le plus vu : 900 000 vues) · "
+                  "2 proposition(s) n'apparaissent que là" in _mnAttp,
+              _mnAttp[-300:])
+        check("favoris miniatures : un reel « probable » tres vu (C 900k) cache par le plafond n'est jamais "
+              "annonce comme « les moins vus »",
+              all("moins vus" not in _mnPl[m][1].replace("moins vu(s) que ceux affichés", "")
+                  for m in _mnPl), [_mnPl[m][1][-250:] for m in _mnPl])
+        check("favoris miniatures : plafond 1 -> les reels caches sont nommes par sorte (sans sûre / avec "
+              "une sûre)",
+              "+ 3 autre(s) reel(s) : 2 sans proposition sûre (le plus vu : 900 000 vues), 1 avec une sûre, "
+              "moins vu(s) que ceux affichés · 2 proposition(s) n'apparaissent que là" in _mnPl[1][1],
+              _mnPl[1][1][-300:])
+        check("favoris miniatures : « OK pour les sûres » dit dans sa confirmation combien de sûres sont "
+              "HORS de la liste affichee (aucune si toutes sont a l'ecran)",
+              "confirm('Poser les étoiles de 2 propositions sûres ?')" in _mnPl[2][1]
+              and "confirm('Poser les étoiles de 2 propositions sûres, dont 2 hors de la liste affichée ?')"
+              in _mnPl[0][1], _mnRe.findall(r"confirm\('[^']*'\)", _mnPl[0][1]))
+        # --- 4. traduction : le fragment comme le premier rendu --------------
+        _mnCl.delete_cookie("va_lang")
+        _mnHe = _mnCl.get("/jailbreak/favoris_auto/section").get_data(as_text=True)
+        _mnCl.set_cookie("va_lang", "fr")
+        check("favoris miniatures : en anglais, le fragment de rafraichissement est traduit comme la page",
+              ">Raw<" in _mnHe and ">Edit<" in _mnHe and ">No<" in _mnHe and ">OK for the sure ones <" in _mnHe
+              and ">Brut<" in _mnH and ">Montage<" in _mnH and ">Non<" in _mnH)
+        # --- 5. un Non tranche la proposition sous TOUTES ses cartes ---------
+        _mnR = _mnCl.post("/jailbreak/favoris_auto/action", data={"op": "refuser", "id": "capAB"})
+        _mnH, _mnAtt, _mnCartes = _mnListe()
+        check("favoris miniatures : un Non sur la caption partagee la retire de TOUTES les cartes (la carte "
+              "de A, vide, disparait)",
+              (_mnR.get_json() or {}).get("ok") and "capAB" not in _mnH and f"/p/{_mnA}/" not in _mnAtt
+              and "À vérifier (4)" in _mnH, _mnR.get_data(as_text=True)[:200])
+        # --- 6. etoiles posees, bangers decortiques --------------------------
+        _mnReg = _mnFA.charger()
+        _mnReg["etoiles"] = [dict(_mnBru, id="posB", etat="posee", le=5)]
+        safe_json.write(_mnFA.fichier_registre(), _mnReg)
+        _mnH = _mnCl.get("/jailbreak/favoris_auto/section").get_data(as_text=True)
+        _mnPo = _mnH.split("data-fa='posees'", 1)[-1].split("</details>", 1)[0]
+        _mnDe = _mnH.split("data-fa='bangers'", 1)[-1].split("</details>", 1)[0]
+        check("favoris miniatures : « Étoiles posées » en cartes (miniatures) avec « Retirer »",
+              "class='fa-carte'" in _mnPo and f"/cloud/thumb/{_mnBout}" in _mnPo
+              and "faAction(this,'annuler',this.getAttribute('data-id'))\">Retirer<" in _mnPo)
+        check("favoris miniatures : « Bangers décortiqués » porte la petite miniature du reel",
+              f"src='/jailbreak/favoris_auto/miniature/{_mnB}'" in _mnDe and "fa-reel-petit" in _mnDe
+              and "vidéo du reel non archivée" in _mnDe)
+        _mnCss = pathlib.Path("web_upload.py").read_text(encoding="utf-8")
+        _mnCls = set()
+        for _mnM in _mnRe.finditer(r"class='([^']*)'", _mnH):
+            _mnCls |= set(_mnM.group(1).split())
+        _mnSans = sorted(c for c in _mnCls
+                         if not _mnRe.search(r"\." + _mnRe.escape(c) + r"(?![\w-])[^;{}]*\{", _mnCss))
+        check("favoris miniatures : chaque classe des cartes existe dans la feuille du site",
+              not _mnSans, _mnSans)
+        # --- 7. les routes ----------------------------------------------------
+        _mnR = _mnCl.get(f"/jailbreak/favoris_auto/reel/{_mnB}")
+        check("favoris miniatures : /reel/<sc> sert la video du banger (200, video/mp4)",
+              _mnR.status_code == 200 and _mnR.get_data() == _mnOctB
+              and _mnR.mimetype == "video/mp4", (_mnR.status_code, _mnR.mimetype))
+        _mnR = _mnCl.get(f"/jailbreak/favoris_auto/reel/{_mnB}", headers={"Range": "bytes=0-99"})
+        check("favoris miniatures : ... par plages (206), pour avancer dans la video",
+              _mnR.status_code == 206 and len(_mnR.get_data()) == 100, _mnR.status_code)
+        _mnR = _mnCl.get(f"/jailbreak/favoris_auto/miniature/{_mnB}")
+        check("favoris miniatures : /miniature/<sc> rend une image" + (" JPEG tiree de la video" if _mnVraie else ""),
+              _mnR.status_code == 200 and (_mnR.mimetype == "image/jpeg" if _mnVraie
+                                           else _mnR.mimetype.startswith("image/")),
+              (_mnR.status_code, _mnR.mimetype, _mnR.headers.get("X-Thumb-Error")))
+        check("favoris miniatures : ... mise en cache dans le dossier des vignettes (pas dans le vault)",
+              (not _mnVraie) or (_mnW.THUMB_DIR / f"v{_mnW.THUMB_RECETTE}" / "bangers" / f"{_mnB}.jpg").is_file())
+        _mnR = _mnCl.get("/jailbreak/favoris_auto/miniature/ZzzzZ404")
+        check("favoris miniatures : video absente -> image « aperçu indisponible » et la cause en en-tete",
+              _mnR.status_code == 200 and _mnR.mimetype == "image/svg+xml"
+              and "absente" in (_mnR.headers.get("X-Thumb-Error") or ""), _mnR.headers.get("X-Thumb-Error"))
+        _mnCodes = {u: _mnCl.get(u).status_code for u in (
+            "/jailbreak/favoris_auto/reel/ZzzzZ404", "/jailbreak/favoris_auto/reel/..",
+            "/jailbreak/favoris_auto/miniature/..", "/jailbreak/favoris_auto/reel/a$b",
+            "/jailbreak/favoris_auto/miniature/abc", "/jailbreak/favoris_auto/reel/" + "x" * 65,
+            "/jailbreak/favoris_auto/reel/%2E%2E%2Fbangers",
+            f"/jailbreak/favoris_auto/reel/{_mnB}%0A", f"/jailbreak/favoris_auto/miniature/{_mnB}%0A")}
+        check("favoris miniatures : shortcode invalide -> 400, « .. » refuse, video absente -> 404",
+              _mnCodes["/jailbreak/favoris_auto/reel/ZzzzZ404"] == 404
+              and _mnCodes["/jailbreak/favoris_auto/reel/.."] == 400
+              and _mnCodes["/jailbreak/favoris_auto/miniature/.."] == 400
+              and _mnCodes["/jailbreak/favoris_auto/reel/a$b"] == 400
+              and _mnCodes["/jailbreak/favoris_auto/miniature/abc"] == 400
+              and _mnCodes["/jailbreak/favoris_auto/reel/" + "x" * 65] == 400
+              and _mnCodes["/jailbreak/favoris_auto/reel/%2E%2E%2Fbangers"] in (400, 404), _mnCodes)
+        # Le `$` de Python accepte un \n final : « <sc>%0A » passait le
+        # controle (404 sur le reel, image 200 sur la miniature).
+        check("favoris miniatures : un shortcode suivi d'un retour a la ligne (%0A) -> 400, reel et miniature",
+              _mnCodes[f"/jailbreak/favoris_auto/reel/{_mnB}%0A"] == 400
+              and _mnCodes[f"/jailbreak/favoris_auto/miniature/{_mnB}%0A"] == 400, _mnCodes)
+        # Un lien symbolique dans le dossier des bangers ne fait pas sortir.
+        _mnSecret = _mnD / "secret.mp4"
+        _mnSecret.write_bytes(b"S" * 4096)
+        try:
+            (_mnDA / "bangers" / "LienL1.mp4").symlink_to(_mnSecret)
+            _mnRl = _mnCl.get("/jailbreak/favoris_auto/reel/LienL1").status_code
+        except OSError:
+            _mnRl = 403
+        check("favoris miniatures : un lien qui sort du dossier des bangers n'est pas servi", _mnRl == 403, _mnRl)
+        _mnCl2 = _mnApp.test_client()
+        with _mnCl2.session_transaction() as _mnS:
+            _mnS["auth"] = True
+            _mnS["username"] = "chat"
+            _mnS["role"] = "chatter"
+        _mnR1 = _mnCl2.get(f"/jailbreak/favoris_auto/reel/{_mnB}").status_code
+        _mnR2 = _mnCl2.get(f"/jailbreak/favoris_auto/miniature/{_mnB}").status_code
+        _mnR3 = _mnApp.test_client().get(f"/jailbreak/favoris_auto/reel/{_mnB}").status_code
+        check("favoris miniatures : role restreint refuse (403) sur le reel et la miniature, sans session 401",
+              _mnR1 == 403 and _mnR2 == 403 and _mnR3 == 401, (_mnR1, _mnR2, _mnR3))
+        # --- 8. le script -----------------------------------------------------
+        _mnSc = _mnW._favoris_auto_html()
+        _mnBl = _mnRe.findall(r"<script>(.*?)</script>", _mnSc, _mnRe.S)
+        check("favoris miniatures : la section apporte faVoir / faVoirFermer (sa fenetre, Echap, clic sur le fond)",
+              len(_mnBl) == 1 and "window.faVoir = function" in _mnBl[0]
+              and "window.faVoirFermer = function" in _mnBl[0] and "'Escape'" in _mnBl[0]
+              and "ev.target === m" in _mnBl[0])
+        # Un double-clic sur la miniature du reel : la fenetre s'ouvrait au
+        # 1er clic et le 2e, tombe sur le fond, la refermait aussitot.
+        check("favoris miniatures : le fond ne ferme pas sur le 2e clic d'un double-clic (geste commence sur "
+              "le fond, detail < 2, pas dans la demi-seconde)",
+              len(_mnBl) == 1 and "m.addEventListener('mousedown'" in _mnBl[0]
+              and "ev.detail < 2" in _mnBl[0] and "Date.now() - ouverte > 500" in _mnBl[0])
+        _mnNode = _mnSh.which("node")
+        if _mnNode and _mnBl:
+            (_mnD / "section.js").write_text(_mnBl[0], encoding="utf-8")
+            _mnRn = _mnSp.run([_mnNode, "--check", str(_mnD / "section.js")], capture_output=True,
+                              text=True, timeout=60)
+            check("favoris miniatures : le script de la section passe node --check",
+                  _mnRn.returncode == 0, (_mnRn.stderr or "")[:200])
+        else:
+            print("     (node absent : le script de la section n a pas ete verifie)")
+        check("favoris miniatures : aucune pre-generation de vignettes hors de la machine de production",
+              not (_mnW.THUMB_DIR / f"v{_mnW.THUMB_RECETTE}" / "mod_a").exists())
+    finally:
+        _mnFA.DATA = _mnSav["FA"][0]
+        _mnFA.APPLICATEURS.clear()
+        _mnFA.APPLICATEURS.update(_mnSav["FA"][1])
+        (_mnW.IDENTITIES_DIR, _mnW.THUMB_DIR, _mnW.FLASH_TREND_FILE, _mnW.TRASH_TREND_FILE,
+         _mnW._load_web_users, _mnW.FA_CARTES_MAX) = _mnSav["W"]
+        _mnW._oublier_identites()
+        _mnBG.FICHIER, _mnBG.DOSSIER, _mnBG.DETAILS_DIR = _mnSav["BG"]
+        if _mnSav["ENV"] is not None:
+            os.environ["VA_MACHINE_PROD"] = _mnSav["ENV"]
+        _mnSh.rmtree(_mnD, ignore_errors=True)
+except Exception as _mnE:
+    import traceback as _mnTb
+    check("favoris miniatures : testable", False, repr(_mnE)[:200] + " " + _mnTb.format_exc()[-700:])
 
 print("DESACTIVES (⊘) : caches de toutes les vues, sauf sous « ⊘ Desactivees »")
 print("=" * 70)

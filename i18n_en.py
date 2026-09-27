@@ -474,10 +474,23 @@ EQUIPE = {
     "Valider": "Confirm",
 }
 
+# --- Favoris automatiques, liste « À vérifier » (web_upload._favoris_auto_html)
+# Une carte par reel, une ligne par proposition : « Brut », « Montage »,
+# « Caption », chacune avec OK / Non. Le nombre de « OK pour les sûres » est
+# dans son propre <span> : la traduction compare le noeud de texte ENTIER.
+FAVORIS = {
+    "Brut": "Raw",
+    "Montage": "Edit",
+    "Non": "No",
+    "OK pour les sûres": "OK for the sure ones",
+    "sûr": "sure",
+    "probable": "likely",
+}
+
 # Le dictionnaire complet, dans l'ordre : les libelles les plus longs d'abord
 # (sinon « Posts » remplacerait le debut de « Posts programmes »).
 TRADUCTIONS = {}
-for _bloc in (MENU, PAGES, ACTIONS, FORMS, ETATS, AIDES, MARQUES_MONTAGE, EQUIPE):
+for _bloc in (MENU, PAGES, ACTIONS, FORMS, ETATS, AIDES, MARQUES_MONTAGE, EQUIPE, FAVORIS):
     TRADUCTIONS.update(_bloc)
 
 
