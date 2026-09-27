@@ -9867,6 +9867,16 @@ _ICONES_ACTIONS = {
     # (_libelle_sans_emoji les garde) : c'est elles qui distinguent les
     # variantes, pas l'icone.
     **{_a: "vatemplatetrash" for _a in marques_montage.marque("trash")["actions"]},
+    # « ⭐ Brut + Caption / Template / Flash » : la brute ETOILEE, matiere au
+    # hasard. Elles n'avaient pas d'icone (le 27/09/2026 le proprietaire a vu
+    # le trou dans le menu Caption du General). Pas de dessin neuf : le
+    # serveur US a deja ses 50 emojis (« Maximum number of emojis reached »).
+    # Elles reprennent celle de « ⭐ Video brut », qui dit exactement ce
+    # qu'elles ont en commun ; dans chaque menu, les quatre icones restent
+    # differentes (matiere, ⭐ matiere, ⭐ brute, ⭐⭐ les deux).
+    "brutcaption": "vabrutbanger",
+    "bruttemplate": "vabrutbanger",
+    "brutflash": "vabrutbanger",
     # « captionbrut » est parti d'ici : le bouton a quitte le menu le
     # 21/08 (il envoyait le meme couple brute ⭐ + caption ⭐ que « Montage »,
     # mais la caption en texte a recopier). Seules restent la commande
