@@ -3224,15 +3224,23 @@ try:
     # (rangee prevue 4), place AVANT le menu ⚡ Flash (rangee prevue 5). Ce
     # qu'on protege ne change pas : Trash vit entre les templates et Flash,
     # et il pose le contenu sur une brute de la model (_JB_GEN_BRUTE).
+    # CHANGEMENT VOULU (27/09/2026, « rajoute ces options aussi la-bas ») :
+    # chaque menu du General a ses QUATRE variantes, comme le panneau. Les
+    # deux dernieres (« ⭐ Brut + Trash », « ⭐⭐ Trash + Brut ») prennent la
+    # brute ⭐ de la MODEL. L'ordre et la place de Trash sont gardes, les
+    # quatre exigent une brute de la model.
     _famsGenTb = [f.cle for f in _uTb._JB_GEN_FAMILLES]
-    check("trash bot : ✨ General -> menu Trash (Trash, ⭐ Trash) juste avant le menu Flash (Flash, ⭐ Flash)",
-          [k for k, r in _uTb._JB_GENERAL_RANGEES.items() if r == 4] == [_TRASH[0], _TRASH[1]]
-          and [k for k, r in _uTb._JB_GENERAL_RANGEES.items() if r == 5] == [_FLASH[0], _FLASH[1]]
+    check("trash bot : ✨ General -> menu Trash (ses 4 variantes) juste avant le menu Flash (ses 4 variantes)",
+          [k for k, r in _uTb._JB_GENERAL_RANGEES.items() if r == 4] == list(_TRASH)
+          and [k for k, r in _uTb._JB_GENERAL_RANGEES.items() if r == 5] == list(_FLASH)
+          and len(_TRASH) == len(_FLASH) == 4
           and _famsGenTb.index("trash") + 1 == _famsGenTb.index("flash")
           and _famsGenTb.index("template") + 1 == _famsGenTb.index("trash")
-          and _uTb._jb_gen_famille("trash").actions == (_TRASH[0], _TRASH[1])
-          and _uTb._jb_gen_famille("flash").actions == (_FLASH[0], _FLASH[1])
-          and {_TRASH[0], _TRASH[1]} <= _uTb._JB_GEN_BRUTE,
+          and _uTb._jb_gen_famille("trash").actions == tuple(_TRASH)
+          and _uTb._jb_gen_famille("flash").actions == tuple(_FLASH)
+          and set(_TRASH) <= _uTb._JB_GEN_BRUTE
+          and {_TRASH[2], _TRASH[3]} <= _uTb._JB_GEN_BRUTE_ETOILEE
+          and not ({_TRASH[0], _TRASH[1]} & _uTb._JB_GEN_BRUTE_ETOILEE),
           str((_famsGenTb, _uTb._JB_GENERAL_RANGEES)))
     # Plus de repli « famille inconnue = Flash » dans le stock : une famille
     # « trash » declaree un jour sans recette aurait ete remplie de Flash.
@@ -6253,6 +6261,15 @@ def _v2_bloc_general():
     }
     RESERVES = {"blonde", "brune", "r1", "r2", "r3", "r4", "r5", "r6", "zfr"}
     BRUTES = {}          # model -> liste ; absente = une brute
+    # Les brutes ⭐ (fav_brutes_for lit data/fav_brutes.json) : un faux du
+    # meme genre que BRUTES. Depuis le 27/09/2026, les variantes « ⭐ Brut +
+    # … » et « ⭐⭐ … + Brut » du General sont refusees d'avance quand la
+    # model n'en a aucune (_jb_gen_controle) : sans ce faux, ce bloc lirait
+    # le registre du poste, ou « lola » et « duo » n'existent pas, et toutes
+    # ces options seraient refusees. Le VRAI fav_brutes_for (cle et dossier
+    # de la model sous _MODEL_REELLE) est eprouve en dossier temporaire dans
+    # la partie « ✨ GENERAL : variantes a brute ⭐ », en fin de fichier.
+    ETOILEES = {}        # model -> liste ; absente = une brute ⭐
 
 
     def _liens(m):
@@ -6265,6 +6282,10 @@ def _v2_bloc_general():
     TI.reserves_liees = _liens
     TI.est_reserve = lambda n: (n or "").lower() in RESERVES
     BO.lister = lambda dossier, extensions=None, **k: list(BRUTES.get(Path(dossier).parent.name, ["b.mp4"]))
+    # `ecartes` accepte : _jb_gen_controle le passe. Un faux qui le refuse
+    # leverait TypeError, que la garde avale -- et toute option passerait.
+    U.fav_brutes_for = (lambda identity, limit=15, ecartes=None:
+                        list(ETOILEES.get(identity, ["b.mp4"])))
 
     # ---------------------------------------------------------------------------
     # Faux objets Discord (repris de md_verif.py)
@@ -6628,34 +6649,67 @@ def _v2_bloc_general():
           [f.cle for f in U._JB_GEN_FAMILLES] == ["caption", "template", "trash", "flash"]
           and [(f.emoji, f.nom) for f in U._JB_GEN_FAMILLES]
           == [(f.emoji, f.nom) for f in U._FAMILLES_MENU], U._JB_GEN_FAMILLES)
-    check("table : chaque menu = matiere seule + version etoilee (Caption, ⭐ Caption…)",
+    # CHANGEMENT VOULU (27/09/2026). Le proprietaire : « il manque le brut
+    # banger […] tu peux rajouter ces options aussi la-bas. Mais rappelle-toi,
+    # les reserves n'ont pas de brut : c'est l'identite associee qui a le brut
+    # banger ». Chaque menu a desormais ses QUATRE variantes, comme le
+    # panneau : la matiere seule, ⭐, « ⭐ Brut + … » et « ⭐⭐ … + Brut ».
+    # Les deux dernieres posent la matiere de la RESERVE sur une brute ⭐ de
+    # la MODEL. Ces verifications figeaient « deux variantes » (8 options,
+    # 13 cles) : elles figent maintenant les 16 options, et ce qu'elles
+    # protegeaient tient toujours -- pas de famille Brut, anciennes cles
+    # valides, rangees deduites, chaque cle connue et expliquee.
+    _NOUVELLES_CLES = {"brutcaption", "montagebanger", "bruttemplate", "templatebrut",
+                       _TRASH[2], _TRASH[3], _FLASH[2], _FLASH[3]}
+    check("table : chaque menu = ses 4 variantes (matiere, ⭐, ⭐ Brut + …, ⭐⭐ … + Brut), "
+          "exactement celles du panneau",
           [f.actions for f in U._JB_GEN_FAMILLES]
-          == [("reelcaption", "capbanger"), ("reelmonte", "templatebanger"),
-              tuple(_TRASH[:2]), tuple(_FLASH[:2])],
+          == [("reelcaption", "capbanger", "brutcaption", "montagebanger"),
+              ("reelmonte", "templatebanger", "bruttemplate", "templatebrut"),
+              tuple(_TRASH), tuple(_FLASH)]
+          and [f.actions for f in U._JB_GEN_FAMILLES] == [f.actions for f in U._FAMILLES_MENU]
+          and len(_TRASH) == len(_FLASH) == 4,
           [f.actions for f in U._JB_GEN_FAMILLES])
-    check("table : libelles = Caption, ⭐ Caption, Template, ⭐ Template, Trash, ⭐ Trash, Flash, ⭐ Flash",
+    check("table : libelles = les 16 de production (Caption … ⭐⭐ Flash + Brut)",
           [U._jb_action(a)[1] for f in U._JB_GEN_FAMILLES for a in f.actions]
-          == ["💬 Caption", "⭐ Caption", "🎞️ Template", "⭐ Template", "💀 Trash", "⭐ Trash",
-              "⚡ Flash", "⭐ Flash"],
+          == ["💬 Caption", "⭐ Caption", "⭐ Brut + Caption", "⭐⭐ Caption + Vidéo brut",
+              "🎞️ Template", "⭐ Template", "⭐ Brut + Template", "⭐⭐ Template + Brut",
+              "💀 Trash", "⭐ Trash", "⭐ Brut + Trash", "⭐⭐ Trash + Brut",
+              "⚡ Flash", "⭐ Flash", "⭐ Brut + Flash", "⭐⭐ Flash + Brut"],
           [U._jb_action(a)[1] for f in U._JB_GEN_FAMILLES for a in f.actions])
-    _brut = {"brute", "brutbanger", "brutchoix", "brutcaption", "montagebanger", "bruttemplate",
-             "templatebrut", _TRASH[2], _TRASH[3], _FLASH[2], _FLASH[3]}
-    check("table : aucun Brut dans le General (ni menu Brut, ni variante a brute ⭐)",
-          not (_brut & set(U._JB_GENERAL_RANGEES)) and "brut" not in [f.cle for f in U._JB_GEN_FAMILLES])
-    check("table : liste blanche = les 13 cles d'avant (anciens boutons jbg:a: toujours valides)",
-          set(U._JB_GENERAL_RANGEES) == _ANCIENNES_CLES,
-          set(U._JB_GENERAL_RANGEES) ^ _ANCIENNES_CLES)
-    check("table : rangees prevues deduites (1 = boutons, 2..5 = menus)",
+    # Toujours PAS de famille Brut : une reserve n'a pas de brute a servir
+    # nue, et « brutchoix » ferait choisir une brute… de la reserve.
+    _brut = {"brute", "brutbanger", "brutchoix"}
+    check("table : aucun Brut dans le General (ni menu Brut, ni ses variantes brute/brutbanger/brutchoix)",
+          not (_brut & set(U._JB_GENERAL_RANGEES)) and "brut" not in [f.cle for f in U._JB_GEN_FAMILLES]
+          and _brut == set(U._famille_panneau("brut").actions),
+          set(U._JB_GENERAL_RANGEES) & _brut)
+    check("table : liste blanche = les 13 cles d'avant + les 8 variantes a brute ⭐ "
+          "(anciens boutons jbg:a: toujours valides)",
+          set(U._JB_GENERAL_RANGEES) == _ANCIENNES_CLES | _NOUVELLES_CLES
+          and len(U._JB_GENERAL_RANGEES) == 21 and _ANCIENNES_CLES <= set(U._JB_GENERAL_RANGEES),
+          set(U._JB_GENERAL_RANGEES) ^ (_ANCIENNES_CLES | _NOUVELLES_CLES))
+    check("table : rangees prevues deduites (1 = boutons, 2..5 = menus, 4 cles par menu)",
           U._JB_GENERAL_RANGEES == {**{k: 1 for k in U._JB_GEN_BOUTONS},
-                                    "reelcaption": 2, "capbanger": 2, "reelmonte": 3,
-                                    "templatebanger": 3, _TRASH[0]: 4, _TRASH[1]: 4,
-                                    _FLASH[0]: 5, _FLASH[1]: 5}, U._JB_GENERAL_RANGEES)
+                                    "reelcaption": 2, "capbanger": 2, "brutcaption": 2,
+                                    "montagebanger": 2, "reelmonte": 3, "templatebanger": 3,
+                                    "bruttemplate": 3, "templatebrut": 3,
+                                    **{a: 4 for a in _TRASH}, **{a: 5 for a in _FLASH}},
+          U._JB_GENERAL_RANGEES)
     check("table : toutes les cles existent dans _JB_ACTIONS_US et ont une explication (menus)",
           set(U._JB_GENERAL_RANGEES) <= {a[0] for a in U._JB_ACTIONS_US}
           and all(U._EXPLICATIONS.get(a) for f in U._JB_GEN_FAMILLES for a in f.actions))
-    check("table : _JB_GEN_BRUTE inchange (caption, ⭐ caption, ⭐ template, trash/flash et ⭐)",
+    # _JB_GEN_BRUTE : les 7 d'avant (Template/reelmonte n'y est toujours pas :
+    # un brouillon sans coupe n'utilise pas de brute), plus les 8 nouvelles.
+    check("table : _JB_GEN_BRUTE = les 7 d'avant (caption, ⭐ caption, ⭐ template, trash/flash et ⭐) "
+          "+ les 8 variantes a brute ⭐, sans Template",
           U._JB_GEN_BRUTE == frozenset({"reelcaption", "capbanger", "templatebanger",
-                                        _TRASH[0], _TRASH[1], _FLASH[0], _FLASH[1]}))
+                                        _TRASH[0], _TRASH[1], _FLASH[0], _FLASH[1]}) | _NOUVELLES_CLES
+          and "reelmonte" not in U._JB_GEN_BRUTE, sorted(U._JB_GEN_BRUTE))
+    check("table : _JB_GEN_BRUTE_ETOILEE = exactement les 8 variantes a brute ⭐ (3e et 4e de chaque menu)",
+          U._JB_GEN_BRUTE_ETOILEE == _NOUVELLES_CLES
+          and U._JB_GEN_BRUTE_ETOILEE == {a for f in U._JB_GEN_FAMILLES for a in f.actions[2:]},
+          sorted(U._JB_GEN_BRUTE_ETOILEE))
 
     # ===========================================================================
     # 2. LA VUE V2 : structure, etats, limites
@@ -7046,10 +7100,24 @@ def _v2_bloc_general():
           _iR.response.doubles == 0 and len(_iR.response.faits) == 1 and _mR.edits
           and remis(_mR.edits[-1]["view"]), (_iR.response.faits, len(_mR.edits)))
     COG.appels.clear()
-    _iR2 = run(_redemarrage("jbg:s:lola:blonde:caption:5", "brutcaption", _mR))
-    check("redemarrage : une variante Brut forgee dans le menu Caption est REFUSEE",
+    # CHANGEMENT VOULU (27/09/2026) : « ⭐ Brut + Caption » (brutcaption) est
+    # desormais une option du menu Caption -- ce test la forgeait comme
+    # valeur interdite. Ce qu'il protegeait tient avec une variante du menu
+    # 🎥 Brut du panneau (brutbanger), qui n'a toujours pas sa place dans le
+    # General : une reserve n'a pas de brute a servir nue.
+    _iR2 = run(_redemarrage("jbg:s:lola:blonde:caption:5", "brutbanger", _mR))
+    check("redemarrage : une variante du Brut (brutbanger) forgee dans le menu Caption est REFUSEE",
           not COG.appels and _iR2.response.faits and _iR2.response.faits[0][0] == "edit_message"
           and "inconnue" in str(_iR2.followup.envois), (_iR2.response.faits, _iR2.followup.envois))
+    # Le custom_id du menu n'a pas change (jbg:s:<model>:<reserve>:caption:<n>) :
+    # un General DEJA poste, relu apres un redemarrage, sert la nouvelle
+    # variante -- contenu de la reserve, brute ⭐ de la model.
+    COG.appels.clear()
+    _iR2b = run(_redemarrage("jbg:s:lola:blonde:caption:5", "brutcaption", _mR))
+    check("redemarrage : « ⭐ Brut + Caption » dans un General deja poste part (reserve, brute ⭐ de la model)",
+          COG.appels == [("blonde", "brutcaption", 5, True, "lola")]
+          and _iR2b.response.doubles == 0 and len(_iR2b.response.faits) == 1,
+          (COG.appels, _iR2b.response.faits, _iR2b.followup.envois))
     COG.appels.clear()
     _iR3 = run(_redemarrage("jbg:a:lola:blonde:pp:5", None, _mR, ctype=2))
     check("redemarrage : un bouton PP du General V2 repond (jbg:a:)",
@@ -7319,9 +7387,13 @@ def _v2_bloc_general():
                U.JBGenMenu("lola", "blonde", "caption", 3), "capbanger", "Réservé",
                restaurer=lambda: setattr(U, "_jb_can_use", lambda i: True))
     del JOURNAL.lignes[:]
-    refus_avec("variante Brut (brutcaption) hors liste blanche du General", lambda: None,
-               U.JBGenMenu("lola", "blonde", "caption", 3), "brutcaption", "inconnue")
-    check("refus hors liste blanche : journalise", any("refuse" in l[2] and "brutcaption" in l[2]
+    # CHANGEMENT VOULU (27/09/2026) : brutcaption est dans le menu Caption
+    # depuis que le General a les variantes a brute ⭐. La valeur forgee est
+    # desormais une variante du Brut du panneau (brutbanger), toujours hors
+    # de la liste blanche du General.
+    refus_avec("variante Brut (brutbanger) hors liste blanche du General", lambda: None,
+               U.JBGenMenu("lola", "blonde", "caption", 3), "brutbanger", "inconnue")
+    check("refus hors liste blanche : journalise", any("refuse" in l[2] and "brutbanger" in l[2]
                                                      for l in JOURNAL.lignes))
     refus_avec("valeur d'une autre famille", lambda: None,
                U.JBGenMenu("lola", "blonde", "caption", 3), _FLASH[0], "inconnue")
@@ -7341,6 +7413,52 @@ def _v2_bloc_general():
                restaurer=lambda: setattr(TI, "reserves_liees", _liens), n_menus=0)
     refus_avec("model sans brute (Trash)", lambda: BRUTES.__setitem__("lola", []),
                U.JBGenMenu("lola", "blonde", "trash", 3), _TRASH[1], "aucune vidéo brute",
+               restaurer=lambda: BRUTES.pop("lola", None))
+    # 27/09/2026 : les variantes « ⭐ Brut + … » et « ⭐⭐ … + Brut » exigent
+    # une brute ⭐ de la MODEL. Lola a des brutes (BRUTES) mais aucune
+    # etoilee (ETOILEES vide) : « s'il n'y en a pas, c'est pas grave » -- le
+    # clic le DIT, rien ne part (ni 30 s d'attente, ni une brute quelconque).
+    for _cleE, _famE in (("brutcaption", "caption"), ("montagebanger", "caption"),
+                         ("bruttemplate", "template"), ("templatebrut", "template"),
+                         (_TRASH[2], "trash"), (_TRASH[3], "trash"),
+                         (_FLASH[2], "flash"), (_FLASH[3], "flash")):
+        refus_avec("model sans brute ⭐ (%s)" % _cleE, lambda: ETOILEES.__setitem__("lola", []),
+                   U.JBGenMenu("lola", "blonde", _famE, 3), _cleE, "**Lola** n'a aucune vidéo brute ⭐",
+                   restaurer=lambda: ETOILEES.pop("lola", None))
+    # Le texte entier : il nomme la MODEL (a qui manque l'etoile) et la
+    # RESERVE (d'ou vient la caption), dit ou poser l'etoile, et n'accuse
+    # jamais la reserve de ne pas avoir de brute -- elle n'en a jamais.
+    ETOILEES["lola"] = []
+    COG.appels.clear()
+    _itxE = choisir(U.JBGenMenu("lola", "blonde", "caption", 3), "montagebanger", m, ch)
+    _txtE = str(_itxE.followup.envois[0][0]) if _itxE.followup.envois else ""
+    check("refus sans brute ⭐ : le texte nomme Lola (la brute), Blonde (la caption) et l'onglet Vidéo brut de Lola",
+          _txtE == ("**Lola** n'a aucune vidéo brute ⭐ : ⭐⭐ Caption + Vidéo brut pose le contenu "
+                    "de **Blonde** sur une brute étoilée de la model.\n_(Un admin en étoile sur le "
+                    "site, onglet **Vidéo brut** de Lola.)_")
+          and not COG.appels, _txtE)
+    # Le bouton (jbg:a:, meme garde _jb_gen_controle) dit EXACTEMENT la meme chose.
+    itxb = Itx(message=m, channel=ch)
+    lancer(U.JBGenButton("lola", "blonde", "montagebanger", 3).callback(itxb))
+    check("refus « sans brute ⭐ » : le bouton dit EXACTEMENT ce que dit le menu, rien ne part",
+          itxb.response.faits and itxb.response.faits[0][1][0] == _txtE and not COG.appels,
+          (itxb.response.faits[:1], _txtE))
+    # Les variantes d'AVANT n'exigent pas l'etoile : elles partent toujours.
+    for _cleA, _famA in (("reelcaption", "caption"), ("capbanger", "caption"),
+                         ("templatebanger", "template"), (_TRASH[0], "trash"), (_FLASH[1], "flash")):
+        COG.appels.clear()
+        choisir(U.JBGenMenu("lola", "blonde", _famA, 3), _cleA, m, ch)
+        if not (COG.appels and COG.appels[-1][1] == U._jb_action(_cleA)[2]):
+            check("sans brute ⭐ : %s part quand meme (pas d'etoile exigee)" % _cleA, False, COG.appels)
+            break
+    else:
+        check("sans brute ⭐ : Caption, ⭐ Caption, ⭐ Template, Trash, ⭐ Flash partent quand meme "
+              "(ils n'exigent pas d'etoile)", True)
+    ETOILEES.pop("lola", None)
+    # Aucune brute DU TOUT : le refus d'avant (« aucune vidéo brute active »)
+    # passe en premier, pour les nouvelles variantes aussi.
+    refus_avec("model sans aucune brute (⭐ Brut + Flash)", lambda: BRUTES.__setitem__("lola", []),
+               U.JBGenMenu("lola", "blonde", "flash", 3), _FLASH[2], "aucune vidéo brute active",
                restaurer=lambda: BRUTES.pop("lola", None))
     _attr = U._jb_action("capbanger")[2]
     _sauv_attr = Cog.__dict__.get(_attr)
@@ -16831,6 +16949,638 @@ except Exception as _eQ:
     import traceback as _tbQ
     _tbQ.print_exc()
     check("panneau numero (relecture 2) : testable", False, repr(_eQ)[:200])
+
+
+
+# ---------------------------------------------------------------------------
+# ✨ GENERAL : les variantes a brute ⭐ de la model (27/09/2026).
+# Le proprietaire : « il manque le brut banger […] tu peux rajouter ces
+# options aussi la-bas. Mais rappelle-toi, les reserves n'ont pas de brut :
+# c'est l'identite qui est associee qui, elle, a le brut banger. […] S'il n'y
+# en a pas, c'est pas grave. » Chaque menu du General a donc ses QUATRE
+# variantes ; « ⭐ Brut + … » et « ⭐⭐ … + Brut » posent la matiere de la
+# RESERVE (captions, templates, montages marques) sur une brute ⭐ de la
+# MODEL. Le coeur : fav_brutes_for lisait « <reserve>|brutes|… » et ne
+# trouvait jamais rien.
+# Ici, les VRAIES fonctions de tirage sur un dossier temporaire (DATA_DIR et
+# IDENTITIES_DIR de cogs.user detournes) ; seuls le moteur video, la carte de
+# livraison et la barre de progression sont simules. Toute ecriture sous le
+# vrai data/ est comptee par _V2_AUDIT.
+print()
+print("=" * 70)
+print("✨ GENERAL : variantes a brute ⭐ de la model (27/09/2026)")
+print("=" * 70)
+
+
+def _v2_bloc_general_brutes():
+    "Cahier « General : variantes a brute ⭐ » (27/09/2026) : la matiere de la reserve, la brute ⭐ de la model."
+    import asyncio
+    import logging
+    import os
+    import shutil
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    def check(nom, ok, detail=""):
+        _check_v2("general brutes ⭐ : " + nom, ok, "" if ok else str(detail)[:400])
+
+    class _Journal(logging.Handler):
+        def __init__(self):
+            super().__init__(logging.DEBUG)
+            self.lignes = []
+
+        def emit(self, r):
+            self.lignes.append(r.getMessage())
+
+    JOURNAL = _Journal()
+    _log_u = logging.getLogger("vabot.user")
+    _niveau_u = _log_u.level
+    _log_u.addHandler(JOURNAL)
+    _log_u.setLevel(logging.INFO)
+    TMP = Path(tempfile.mkdtemp(prefix="general_brutes_"))
+    _vrai_data = os.path.realpath("data")
+    assert not os.path.realpath(TMP).startswith(_vrai_data + os.sep), TMP
+    # Le moteur video et l'attente sont simules ; remis en place a la sortie,
+    # meme si une verification leve (ils vivent hors des modules sauvegardes).
+    _sav_noctus = sys.modules.get("noctus_web")
+    _sav_sleep = asyncio.sleep
+    try:
+        _general_brutes_corps(check, JOURNAL, TMP)
+    finally:
+        asyncio.sleep = _sav_sleep
+        if _sav_noctus is None:
+            sys.modules.pop("noctus_web", None)
+        else:
+            sys.modules["noctus_web"] = _sav_noctus
+        _log_u.removeHandler(JOURNAL)
+        _log_u.setLevel(_niveau_u)
+        shutil.rmtree(TMP, ignore_errors=True)
+
+
+def _general_brutes_corps(check, JOURNAL, TMP):
+    "Le corps du cahier ; _v2_bloc_general_brutes remet tout en place."
+    import asyncio
+    import json
+    import sys
+    import types
+    from pathlib import Path
+    import discord
+    import cogs.user as U
+    import guild_features
+    import marques_montage as MM
+    import noctus_reserve as NR
+    import type_identite as TI
+
+    DATA = TMP / "data"
+    IDS = DATA / "identities"
+    IDS.mkdir(parents=True)
+    U.DATA_DIR = DATA
+    U.IDENTITIES_DIR = IDS
+    TRASH = MM.marque("trash")["actions"]
+    FLASH = MM.marque("flash")["actions"]
+    NOUVELLES = {"brutcaption", "montagebanger", "bruttemplate", "templatebrut",
+                 TRASH[2], TRASH[3], FLASH[2], FLASH[3]}
+
+    def fichier(p, octets=b"\x00" * 16):
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(octets)
+        return p
+
+    def montage(p):
+        fichier(p)
+        (p.parent / f"{p.stem}.montage.json").write_text(json.dumps({"cut_at": 1.0}),
+                                                         encoding="utf-8")
+        return p
+
+    def ecrire(nom, contenu):
+        (DATA / nom).write_text(json.dumps(contenu), encoding="utf-8")
+
+    def noms(liste):
+        return sorted(Path(p).name for p in liste)
+
+    def journal(motif):
+        return [l for l in JOURNAL.lignes if motif in l]
+
+    # ---------------------------------------------------------------------------
+    # Donnees. lola (model) : lb1, lb2 etoilees, lx sans etoile, loff etoilee
+    # mais DESACTIVEE. julia (model) : deux brutes, aucune etoile. zoe (model) :
+    # aucune brute. blonde (reserve) : captions, templates, montages marques --
+    # et deux PIEGES, qui ne doivent jamais servir sous le General : une brute
+    # etoilee sous la cle de la reserve (piege.mp4), et une etoile posee sous
+    # la cle de lola pour un fichier qui n'est QUE dans le dossier de blonde
+    # (lx_blonde.mp4). brune (reserve) : aucune matiere etoilee.
+    # ---------------------------------------------------------------------------
+    for n in ("lb1.mp4", "lb2.mp4", "lx.mp4", "loff.mp4"):
+        fichier(IDS / "lola/brutes" / n)
+    (IDS / "lola/brutes/loff.off.json").write_text('{"cause": "test"}', encoding="utf-8")
+    for n in ("jb1.mp4", "jb2.mp4"):
+        fichier(IDS / "julia/brutes" / n)
+    (IDS / "zoe").mkdir()
+    fichier(IDS / "blonde/brutes/piege.mp4")
+    fichier(IDS / "blonde/brutes/lx_blonde.mp4")
+    for n in ("t1.mp4", "t2.mp4", "tr1.mp4", "tr2.mp4", "fl1.mp4", "fl2.mp4"):
+        montage(IDS / "blonde/templates" / n)
+    (IDS / "brune").mkdir()
+    FAV = ["lola|brutes|lb1.mp4", "lola|brutes|lb2.mp4", "lola|brutes|loff.mp4",
+           "lola|brutes|lx_blonde.mp4", "blonde|brutes|piege.mp4",
+           "blonde|templates|t1.mp4", "blonde|templates|tr2.mp4", "blonde|templates|fl1.mp4"]
+    ecrire("fav_brutes.json", FAV)
+    ecrire(MM.marque("trash")["fichier"], ["blonde|templates|tr1.mp4", "blonde|templates|tr2.mp4"])
+    ecrire(MM.marque("flash")["fichier"], ["blonde|templates|fl1.mp4", "blonde|templates|fl2.mp4"])
+    ecrire("captions.json", {
+        "blonde": {"items": [
+            {"id": "c1", "text": "caption etoilee", "fav": True, "enabled": True},
+            {"id": "c2", "text": "caption simple", "enabled": True},
+            {"id": "c3", "text": "caption simple 2", "enabled": True},
+            {"id": "c4", "text": "caption eteinte", "enabled": False}]},
+        # brune : sa seule caption est eteinte -- ni etoilee, ni active.
+        "brune": {"items": [{"id": "d1", "text": "caption de brune", "enabled": False}]},
+        "lola": {"items": [{"id": "l1", "text": "caption de lola", "fav": True, "enabled": True}]},
+    })
+    LOLA_ETOILEES = {"lb1.mp4", "lb2.mp4"}
+
+    # ===========================================================================
+    # 1. fav_brutes_for : hors General inchange ; sous _MODEL_REELLE, la model
+    # ===========================================================================
+    _l = U.fav_brutes_for("lola")
+    check("fav_brutes_for hors General : lola -> ses brutes ⭐ en service (ni la desactivee, "
+          "ni la non etoilee, ni l'etoile sans fichier chez elle)",
+          noms(_l) == ["lb1.mp4", "lb2.mp4"] and all(p.parent == IDS / "lola/brutes" for p in _l), _l)
+    check("fav_brutes_for hors General : blonde -> SA propre cle, comme avant",
+          noms(U.fav_brutes_for("blonde")) == ["piege.mp4"], U.fav_brutes_for("blonde"))
+    _tok = U._MODEL_REELLE.set("lola")
+    try:
+        _g = U.fav_brutes_for("blonde")
+        _g1 = U.fav_brutes_for("blonde", limit=1)
+    finally:
+        U._MODEL_REELLE.reset(_tok)
+    check("fav_brutes_for sous le General (model lola, reserve blonde) : les brutes ⭐ de LOLA, "
+          "cle ET dossier -- ni piege.mp4 (cle de la reserve) ni lx_blonde.mp4 (fichier chez la reserve)",
+          noms(_g) == ["lb1.mp4", "lb2.mp4"] and all(p.parent == IDS / "lola/brutes" for p in _g), _g)
+    check("fav_brutes_for sous le General : la limite tire parmi les brutes ⭐ de la model",
+          len(_g1) == 1 and _g1[0].name in LOLA_ETOILEES, _g1)
+    _tok = U._MODEL_REELLE.set("julia")
+    try:
+        _j = U.fav_brutes_for("blonde")
+    finally:
+        U._MODEL_REELLE.reset(_tok)
+    check("fav_brutes_for sous le General : model sans etoile -> [] (jamais les brutes de la reserve)",
+          _j == [], _j)
+    check("fav_brutes_for : apres le clic, retour a l'identite (contexte remis)",
+          U._MODEL_REELLE.get() is None and noms(U.fav_brutes_for("blonde")) == ["piege.mp4"])
+    # Illisible n'est pas vide : la raison part au journal.
+    # `ecartes` : ce qui explique une liste courte (relecture du 27/09/2026).
+    _e = {}
+    U.fav_brutes_for("lola", ecartes=_e)
+    check("fav_brutes_for : `ecartes` compte les brutes ⭐ presentes mais eteintes, avec leur cause",
+          _e.get("desactivees") == 1 and _e.get("causes") == ["test"] and "illisible" not in _e, _e)
+    (DATA / "fav_brutes.json").write_text("{pas du json", encoding="utf-8")
+    del JOURNAL.lignes[:]
+    _e = {}
+    _ill = U.fav_brutes_for("lola", ecartes=_e)
+    check("fav_brutes_for : registre illisible -> [] ET une ligne au journal (jamais en silence)",
+          _ill == [] and journal("fav_brutes.json illisible"), JOURNAL.lignes[-3:])
+    check("fav_brutes_for : registre illisible -> dit aussi a l'appelant (`ecartes['illisible']`)",
+          _e.get("illisible") == "fav_brutes.json : JSONDecodeError", _e)
+    (DATA / "fav_brutes.json").unlink()
+    del JOURNAL.lignes[:]
+    _e = {}
+    _abs = U.fav_brutes_for("lola", ecartes=_e)
+    check("fav_brutes_for : registre absent (aucune etoile posee) -> [], sans alarme au journal",
+          _abs == [] and not journal("illisible") and "illisible" not in _e, (JOURNAL.lignes[-3:], _e))
+    ecrire("fav_brutes.json", FAV)
+
+    # ===========================================================================
+    # 2. Le General construit par discord.py : 0, 1 et 4 reserves
+    # ===========================================================================
+    LIENS = {}
+    RESERVES = {"blonde", "brune", "rousse", "brunette"}
+    TI.reserves_liees = lambda m: (list(LIENS.get(m, [])), [])
+    TI.est_reserve = lambda n: (n or "").lower() in RESERVES
+    U._jb_can_use = lambda i: True
+    U._refus_reserve_jb = lambda m: ""
+    guild_features.is_us_guild = lambda g: False
+
+    def selects(vue):
+        return [i for i in vue.walk_children()
+                if isinstance(i, discord.ui.DynamicItem) and isinstance(i.item, discord.ui.Select)]
+
+    def ids(vue):
+        return [i.custom_id for i in vue.walk_children() if isinstance(i, discord.ui.DynamicItem)]
+
+    for _n, _res in ((0, []), (1, ["blonde"]), (4, ["blonde", "brune", "rousse", "brunette"])):
+        LIENS["lola"] = _res
+        _v = U._jb_general(None, "lola", 5)
+        _sel = selects(_v)
+        _comp = json.dumps(_v.to_components(), ensure_ascii=False)     # le JSON envoye a Discord
+        if _n == 0:
+            check("vue, 0 reserve : la seule quantite, aucun menu",
+                  not _sel and ids(_v) == ["jbg:qb:lola:_:5"], ids(_v))
+            continue
+        _opts = [[o.value for o in s.item.options] for s in _sel]
+        check("vue, %d reserve(s) : 4 menus, 4 variantes chacun, dans l'ordre du panneau" % _n,
+              _opts == [list(f.actions) for f in U._FAMILLES_MENU] and sum(map(len, _opts)) == 16
+              and NOUVELLES <= {o for l in _opts for o in l}, _opts)
+        _ids = ids(_v)
+        _lib = [(o.label, o.description) for s in _sel for o in s.item.options]
+        check("vue, %d reserve(s) : dans les limites Discord (<= 40 composants, custom_id <= 100 et "
+              "uniques, <= 25 options, libelles et descriptions <= 100)" % _n,
+              _v.total_children_count <= 40 and all(len(i) <= 100 for i in _ids)
+              and len(set(_ids)) == len(_ids) and all(len(s.item.options) <= 25 for s in _sel)
+              and all(U._long_discord(a) <= 100 and U._long_discord(b or "") <= 100 for a, b in _lib)
+              and "⭐ Brut + Caption" in _comp and "⭐⭐ Flash + Brut" in _comp,
+              (_v.total_children_count, _ids))
+        check("vue, %d reserve(s) : les menus gardent leur custom_id (jbg:s:lola:blonde:<famille>:5) -- "
+              "les General deja postes repondent toujours" % _n,
+              [s.item.custom_id for s in _sel]
+              == ["jbg:s:lola:blonde:%s:5" % f.cle for f in U._FAMILLES_MENU], _ids)
+        if _n == 4:
+            check("vue, 4 reserves : 4 boutons de reserve + la quantite en tete",
+                  _ids[:5] == ["jbg:r:lola:%s:5" % r for r in _res] + ["jbg:qb:lola:blonde:5"], _ids[:5])
+
+    # ===========================================================================
+    # 3. La garde du clic (_jb_gen_controle), sur les vraies brutes
+    # ===========================================================================
+    COG = U.UserCog.__new__(U.UserCog)
+    COG.bot = None
+
+    async def _pas_de_garde(interaction, threads_ok=False):
+        return False
+    # Sur l'INSTANCE : la classe reste intacte pour le reste de la suite.
+    COG._gate_contenu = _pas_de_garde
+    ITX_CTRL = types.SimpleNamespace(client=types.SimpleNamespace(get_cog=lambda n: COG))
+    LIENS.update({"lola": ["blonde", "brune"], "julia": ["blonde"], "zoe": ["blonde"]})
+    _ko = []
+    for key in sorted(NOUVELLES):
+        _lab = U._libelle_sans_emoji(U._jb_action(key)[1])
+        r_l = U._jb_gen_controle(ITX_CTRL, "lola", "blonde", key)
+        r_j = U._jb_gen_controle(ITX_CTRL, "julia", "blonde", key)
+        r_z = U._jb_gen_controle(ITX_CTRL, "zoe", "blonde", key)
+        att_j = ("**Julia** n'a aucune vidéo brute ⭐ : %s pose le contenu de **Blonde** sur une "
+                 "brute étoilée de la model.\n_(Un admin en étoile sur le site, onglet "
+                 "**Vidéo brut** de Julia.)_" % _lab)
+        if not (r_l[0] == "" and r_l[1] is not None and r_l[2] is True
+                and r_j == (att_j, None, False)
+                and r_z[1] is None and r_z[0].startswith("**Zoe** n'a aucune vidéo brute active")):
+            _ko.append((key, r_l[0], r_j[0], r_z[0]))
+    check("garde : les 8 variantes a brute ⭐ partent pour lola (brutes ⭐), sont refusees pour julia "
+          "(brutes sans etoile : la model, la reserve et l'onglet Vidéo brut nommes) et pour zoe "
+          "(aucune brute : le refus d'avant)", not _ko, _ko)
+    _anc = [k for k in ("reelcaption", "capbanger", "templatebanger", TRASH[0], TRASH[1],
+                        FLASH[0], FLASH[1], "reelmonte")
+            if U._jb_gen_controle(ITX_CTRL, "julia", "blonde", k)[0]]
+    check("garde : les variantes d'avant partent toujours pour une model sans brute ⭐", not _anc, _anc)
+    check("garde : Template (reelmonte) part toujours sans aucune brute",
+          U._jb_gen_controle(ITX_CTRL, "zoe", "blonde", "reelmonte")[0] == "")
+    (DATA / "fav_brutes.json").write_text("{pas du json", encoding="utf-8")
+    del JOURNAL.lignes[:]
+    _ri = U._jb_gen_controle(ITX_CTRL, "lola", "blonde", "brutcaption")
+    ecrire("fav_brutes.json", FAV)
+    # Relecture du 27/09/2026 : ce refus disait « **Lola** n'a aucune vidéo
+    # brute ⭐ » et envoyait l'admin poser des etoiles qui existaient.
+    check("garde : registre des etoiles illisible -> refus qui dit la PANNE (registre illisible, "
+          "prevenir un admin), pas « Lola n'a aucune vidéo brute ⭐ » ; la raison au journal",
+          _ri[1] is None and _ri[0] == ("Le registre des brutes ⭐ (fav_brutes.json : JSONDecodeError) "
+                                        "est illisible : ⭐ Brut + Caption impossible pour l'instant. "
+                                        "Préviens un admin.")
+          and journal("fav_brutes.json illisible"), (_ri[0], JOURNAL.lignes[-3:]))
+    # Toutes les etoiles de la model sont ETEINTES (voisin .off.json) : les
+    # brutes actives existent (plain.mp4 passe la premiere garde), les
+    # etoiles aussi -- grisees sur le site. « n'a aucune vidéo brute ⭐ »
+    # y etait faux sur la cause.
+    import brutes_off as _BO
+    for n in ("s1.mp4", "s2.mp4", "plain.mp4"):
+        fichier(IDS / "mia/brutes" / n)
+    for n in ("s1", "s2"):
+        (IDS / "mia/brutes" / (n + ".off.json")).write_text(
+            json.dumps({"cause": _BO.CAUSE_TEXTE}), encoding="utf-8")
+    fichier(IDS / "nina/brutes/n1.mp4")
+    fichier(IDS / "nina/brutes/plain.mp4")
+    (IDS / "nina/brutes/n1.off.json").write_text('{"cause": "floue"}', encoding="utf-8")
+    ecrire("fav_brutes.json", FAV + ["mia|brutes|s1.mp4", "mia|brutes|s2.mp4", "nina|brutes|n1.mp4"])
+    LIENS.update({"mia": ["blonde"], "nina": ["blonde"]})
+    try:
+        _rm = U._jb_gen_controle(ITX_CTRL, "mia", "blonde", "brutcaption")
+        _rn = U._jb_gen_controle(ITX_CTRL, "nina", "blonde", "montagebanger")
+    finally:
+        ecrire("fav_brutes.json", FAV)
+    check("garde : etoiles toutes eteintes -> le refus les COMPTE et dit pourquoi (2, caption deja "
+          "incrustee), au lieu de « aucune vidéo brute ⭐ »",
+          _rm == ("**Mia** a 2 vidéos brutes ⭐, toutes désactivées (caption déjà incrustée) : "
+                  "⭐ Brut + Caption pose le contenu de **Blonde** sur une brute étoilée active de "
+                  "la model.\n_(Un admin en réactive une ou en étoile une autre, onglet **Vidéo brut** "
+                  "de Mia.)_", None, False), _rm)
+    check("garde : une seule etoile, eteinte -> au singulier, avec SA cause",
+          _rn[1] is None and _rn[0].startswith("**Nina** a 1 vidéo brute ⭐, désactivée (floue) : "
+                                               "⭐⭐ Caption + Vidéo brut pose"), _rn)
+
+    # ===========================================================================
+    # 4. Les 8 actions de bout en bout (_run_for_model, brute_de = la model)
+    # ===========================================================================
+    SORTIE = fichier(TMP / "sortie.mp4")
+    APPELS = []
+
+    class FauxNoctus(types.ModuleType):
+        def setup_ok(self):
+            return True
+
+        def gen_from_draft(self, video, draft, variantes, x, brutes_dir, rapport=None):
+            APPELS.append({"video": Path(video),
+                           "imposees": (sorted(p.name for p in Path(brutes_dir).iterdir())
+                                        if brutes_dir else None),
+                           "brutes_dir": Path(brutes_dir) if brutes_dir else None})
+            return "job%d" % len(APPELS)
+
+        def status(self, m):
+            return {"state": "done", "pct": 100}
+
+        def output_paths(self, m):
+            return [SORTIE]
+
+    sys.modules["noctus_web"] = FauxNoctus("noctus_web")
+    _vraie_sleep = asyncio.sleep
+
+    async def _sleep(*a, **k):
+        await _vraie_sleep(0)
+    asyncio.sleep = _sleep
+    LIVRES = []
+
+    async def _livrer(interaction, rang, total, identite, medias, **kw):
+        LIVRES.append({"identite": identite, "medias": medias, **kw})
+    U._livrer_contenu = _livrer
+
+    class _Prog:
+        def __init__(self, *a, **k):
+            pass
+
+        async def demarrer(self):
+            pass
+
+        async def un_de_plus(self):
+            pass
+
+        async def poser(self, *a, **k):
+            pass
+
+        def part_courante(self, *a):
+            return 0
+    U._Progression = _Prog
+    # LE STOCK D'AVANCE ROUVERT AUX VA (POUR_LES_VA = True, simule) : sous le
+    # General, il ne doit JAMAIS servir -- indexe par la seule identite, il
+    # ne sait pas sur la brute de quelle model une variante a ete montee.
+    PRIS = []
+    NR.POUR_LES_VA = True
+    NR.empreinte = lambda *a, **k: "emp"
+
+    def _prendre(identite, famille, emp, **k):
+        PRIS.append((identite, famille))
+        return None, None
+    NR.prendre = _prendre
+
+    class Rep:
+        def __init__(self):
+            self.msgs = []
+            self._fait = False
+
+        async def send_message(self, content=None, **k):
+            self.msgs.append(content)
+            self._fait = True
+
+        async def defer(self, **k):
+            self._fait = True
+
+        def is_done(self):
+            return self._fait
+
+    class Suivi:
+        def __init__(self):
+            self.envois = []
+
+        async def send(self, content=None, **k):
+            self.envois.append(content)
+
+    def itx():
+        return types.SimpleNamespace(
+            user=types.SimpleNamespace(id=1, name="va", display_name="va"), response=Rep(),
+            followup=Suivi(), guild=None, channel=None, channel_id=None, message=None, data={},
+            client=types.SimpleNamespace(get_cog=lambda n: COG))
+
+    def lancer(res, key, model, qty=4):
+        APPELS.clear()
+        LIVRES.clear()
+        e = U._jb_action(key)
+        i = itx()
+        asyncio.run(COG._run_for_model(i, res, getattr(COG, e[2]), count=qty,
+                                       supports_count=e[3], brute_de=model))
+        return i
+
+    # Caption : la brute ⭐ de lola EST la source, la caption vient de blonde.
+    for key, caps, n in (("brutcaption", {"c1", "c2", "c3"}, 4), ("montagebanger", {"c1"}, 2)):
+        i = lancer("blonde", key, "lola")
+        _b = [Path(l["recette"]["brute"]) for l in LIVRES]
+        _c = {l["recette"]["caption"]["id"] for l in LIVRES}
+        check("bout en bout %s : %d livraisons (2 brutes ⭐ × %d caption(s), plafond 4), carte de "
+              "la RESERVE blonde" % (key, n, len(caps)),
+              len(LIVRES) == n and all(l["identite"] == "blonde" for l in LIVRES)
+              and not i.response.msgs, (i.response.msgs, i.followup.envois, len(LIVRES)))
+        check("bout en bout %s : brutes = les brutes ⭐ de LOLA seulement (moteur et recette)" % key,
+              {p.name for p in _b} <= LOLA_ETOILEES and all(p.parent == IDS / "lola/brutes" for p in _b)
+              and all(a["video"].parent == IDS / "lola/brutes" and a["video"].name in LOLA_ETOILEES
+                      for a in APPELS) and len(APPELS) == n, (_b, APPELS))
+        check("bout en bout %s : captions de blonde, celles du bouton (%s), jamais l'eteinte"
+              % (key, ", ".join(sorted(caps))), _c and _c <= caps, _c)
+    # Template, Trash, Flash : le template (ou montage) vient de blonde, la
+    # brute ⭐ de lola est IMPOSEE au moteur (dossier temporaire a une brute).
+    for key, tpls, n in (("bruttemplate", {"t1.mp4", "t2.mp4"}, 4), ("templatebrut", {"t1.mp4"}, 2),
+                         (TRASH[2], {"tr1.mp4", "tr2.mp4"}, 4), (TRASH[3], {"tr2.mp4"}, 2),
+                         (FLASH[2], {"fl1.mp4", "fl2.mp4"}, 4), (FLASH[3], {"fl1.mp4"}, 2)):
+        i = lancer("blonde", key, "lola")
+        check("bout en bout %s : %d livraisons, carte de la reserve blonde" % (key, n),
+              len(LIVRES) == n and all(l["identite"] == "blonde" for l in LIVRES)
+              and not i.response.msgs, (i.response.msgs, i.followup.envois, len(LIVRES)))
+        check("bout en bout %s : sources = %s de blonde (les montages marques restent hors Template)"
+              % (key, ", ".join(sorted(tpls))),
+              {a["video"].name for a in APPELS} <= tpls
+              and all(a["video"].parent == IDS / "blonde/templates" for a in APPELS),
+              [str(a["video"]) for a in APPELS])
+        check("bout en bout %s : la brute IMPOSEE est une brute ⭐ de lola, jamais celles de la reserve"
+              % key,
+              APPELS and all(a["imposees"] and len(a["imposees"]) == 1
+                             and a["imposees"][0] in LOLA_ETOILEES for a in APPELS),
+              [a["imposees"] for a in APPELS])
+    check("bout en bout : le contexte est remis apres chaque clic (ni reserve ni model qui trainent)",
+          U._MODEL_REELLE.get() is None and U._IDENTITY_OVERRIDE.get() is None)
+    check("bout en bout : le stock d'avance, meme rouvert aux VA, ne sert JAMAIS un clic du General",
+          not PRIS, PRIS)
+
+    # La model n'a plus de brute ⭐ au moment du rendu (etoile retiree entre
+    # la garde et le clic) : rien n'est genere, et le message dit CHEZ QUI.
+    _ko = []
+    for key in sorted(NOUVELLES):
+        i = lancer("blonde", key, "julia")
+        m = i.response.msgs[0] if i.response.msgs else ""
+        if (APPELS or LIVRES or "`blonde` (brute de `julia`)" not in m
+                or "chez **Julia**" not in m or "Vidéo brut" not in m
+                or "Tu as **2 brute" in m):
+            _ko.append((key, m))
+    check("model sans brute ⭐ au rendu : rien de genere ni de livre, le message nomme la reserve "
+          "(« `blonde` (brute de `julia`) ») et dit ou manque l'etoile (« chez **Julia** »)",
+          not _ko, _ko)
+    # La reserve n'a pas la matiere, la model a ses brutes ⭐ : les brutes
+    # sont a Lola -- plus de « Tu as 2 brute(s) favorite(s) ».
+    _m = {}
+    for key in ("montagebanger", "brutcaption", "bruttemplate", TRASH[3]):
+        i = lancer("brune", key, "lola")
+        _m[key] = (i.response.msgs[0] if i.response.msgs else "", bool(APPELS or LIVRES))
+    check("reserve sans matiere (montagebanger) : « **Lola** a **2 brute(s) favorite(s)**, mais "
+          "**aucune caption étoilée** », pour `brune` (brute de `lola`)",
+          "🎬 Impossible de monter pour `brune` (brute de `lola`)." in _m["montagebanger"][0]
+          and "**Lola** a **2 brute(s) favorite(s)**, mais **aucune caption étoilée**" in _m["montagebanger"][0]
+          and "Tu as" not in _m["montagebanger"][0] and not _m["montagebanger"][1], _m["montagebanger"])
+    check("reserve sans matiere (brutcaption) : « aucune caption active » -- ce bouton prend toutes "
+          "les captions, il n'en exige pas d'etoilee",
+          "**Lola** a **2 brute(s) favorite(s)**, mais **aucune caption active**" in _m["brutcaption"][0]
+          and "étoilée** (onglet **Caption" not in _m["brutcaption"][0] and not _m["brutcaption"][1],
+          _m["brutcaption"])
+    check("reserve sans matiere (bruttemplate) : « **Lola** a 2 brute(s), aucun template utilisable »",
+          "**Lola** a **2 brute(s) favorite(s)**, mais **aucun template utilisable**" in _m["bruttemplate"][0]
+          and not _m["bruttemplate"][1], _m["bruttemplate"])
+    check("reserve sans matiere (⭐⭐ Trash + Brut) : aucun montage 💀 ⭐ chez `brune` (brute de `lola`)",
+          "💀 Impossible d'assembler pour `brune` (brute de `lola`)." in _m[TRASH[3]][0]
+          and "Aucun montage 💀 **et** ⭐ utilisable" in _m[TRASH[3]][0] and not _m[TRASH[3]][1],
+          _m[TRASH[3]])
+
+    # ===========================================================================
+    # 5. Hors General : rien ne change
+    # ===========================================================================
+    check("hors General : _qui_manque_brute rend les mots d'avant (`id`, « Tu as », rien)",
+          U._qui_manque_brute("julia") == ("`julia`", "Tu as", ""), U._qui_manque_brute("julia"))
+
+    def seul(identite, coro_de):
+        APPELS.clear()
+        LIVRES.clear()
+        PRIS.clear()
+        i = itx()
+        tok = U._IDENTITY_OVERRIDE.set(identite)
+        try:
+            asyncio.run(coro_de(i))
+        finally:
+            U._IDENTITY_OVERRIDE.reset(tok)
+        return i
+
+    i = seul("julia", lambda i: COG._send_montage_bangers(i, caption_favorite=True, nombre=3))
+    check("hors General : le refus de ⭐⭐ Caption + Vidéo brut est celui d'avant, mot pour mot",
+          i.response.msgs == ["🎬 Impossible de monter pour `julia`.\nIl manque **les deux** : aucune "
+                              "vidéo brute étoilée (onglet **Vidéo brut**) et aucune caption étoilée "
+                              "(onglet **Caption**).\n_(Un admin pose les étoiles ⭐ sur le site.)_"],
+          i.response.msgs)
+    i = seul("julia", lambda i: COG._send_template_marque(i, "trash", exiger_banger=True,
+                                                          brute_favorite=True, nombre=3))
+    check("hors General : le refus de ⭐⭐ Trash + Brut est celui d'avant, mot pour mot",
+          i.response.msgs == ["💀 Impossible d'assembler pour `julia`.\nAucun montage 💀 **et** ⭐ "
+                              "utilisable (onglet **Templates montage**).\n_(Un admin pose le 💀 sur "
+                              "le site, page Templates montage.)_"], i.response.msgs)
+    # ⭐ Template (brute_favorite=False) : des templates ⭐, AUCUNE brute.
+    # La priorite du ternaire collait les deux chaines avant le `if` : le
+    # nombre de templates disparaissait du refus.
+    montage(IDS / "vera/templates/v1.mp4")
+    ecrire("fav_brutes.json", FAV + ["vera|templates|v1.mp4"])
+    try:
+        i = seul("vera", lambda i: COG._send_template_plus_brute(i, brute_favorite=False, nombre=3))
+    finally:
+        ecrire("fav_brutes.json", FAV)
+    check("hors General : ⭐ Template sans brute -> « Tu as 1 template(s) utilisable(s), mais "
+          "aucune vidéo brute » (le nombre de l'AUTRE cote reste dit)",
+          i.response.msgs == ["🎵 Impossible d'assembler pour `vera`.\nTu as **1 template(s) "
+                              "utilisable(s)**, mais **aucune vidéo brute** (onglet **Vidéo brut**).\n"
+                              "_(Un admin pose les étoiles ⭐ sur le site.)_"] and not APPELS,
+          i.response.msgs)
+    i = seul("lola", lambda i: COG.brutcaption(i, 2))
+    check("hors General : ⭐ Brut + Caption pour lola sert SES brutes ⭐ et sa caption, carte de lola",
+          len(LIVRES) == 2 and all(Path(l["recette"]["brute"]).name in LOLA_ETOILEES
+                                   and l["identite"] == "lola"
+                                   and l["recette"]["caption"]["id"] == "l1" for l in LIVRES),
+          (i.response.msgs, LIVRES))
+    check("hors General : le stock d'avance rouvert (simule) sert toujours hors du General",
+          PRIS and all(p[0] == "lola" for p in PRIS), PRIS)
+
+    # ===========================================================================
+    # 6. Un General DEJA POSTE (2 variantes par menu) prend les 4 sans clic
+    # ===========================================================================
+    # Sans ca, le General deja sur la bonne model n'etait jamais redessine :
+    # « 💬 Caption / ⭐ Caption » restait jusqu'au premier clic du salon. Le
+    # message est rebati comme Discord le rend (_component_factory sur le
+    # JSON envoye), l'ancien avec les familles tronquees a 2.
+    from discord.components import _component_factory
+    U._JB_GENERAL_STORE = DATA / "us_general_panels.json"
+    MOI = 4242
+
+    class MsgG:
+        def __init__(self, vue):
+            self.id = 777
+            self.author = types.SimpleNamespace(id=MOI)
+            self.embeds = []
+            self.content = None
+            self.flags = types.SimpleNamespace(components_v2=True, ephemeral=False)
+            self.components = [_component_factory(d) for d in vue.to_components()]
+            self.edits = []
+
+        async def edit(self, **k):
+            self.edits.append(k)
+
+    def options(vue):
+        return [[o.value for o in s.item.options] for s in selects(vue)]
+
+    LIENS["lola"] = ["blonde", "brune"]
+    _vraies = U._JB_GEN_FAMILLES
+    U._JB_GEN_FAMILLES = tuple(U._Famille(f.cle, f.emoji, f.nom, f.actions[:2]) for f in _vraies)
+    try:
+        _vieux = MsgG(U._jb_general(None, "lola", 3, reserve="brune"))
+    finally:
+        U._JB_GEN_FAMILLES = _vraies
+    CHAN = types.SimpleNamespace(id=9001, name="lola-menu")
+    CLIENT = types.SimpleNamespace(get_cog=lambda n: None, user=types.SimpleNamespace(id=MOI))
+    del JOURNAL.lignes[:]
+    _perimes = U._jb_general_menus_perimes(_vieux, "lola", "brune", "3")
+    _fait = asyncio.run(U._jb_general_aligner(CLIENT, CHAN, [_vieux], "lola", None, MOI))
+    _vN = _vieux.edits[0].get("view") if _vieux.edits else None
+    check("General deja poste a 2 variantes, deja sur lola : ses 4 menus reperes comme perimes",
+          _perimes == [f.cle for f in U._FAMILLES_MENU], _perimes)
+    check("... redessine sans clic : 4 variantes par menu, SUR SA RESERVE (brune) ET SA QUANTITE (3), "
+          "et le journal le dit",
+          _fait is True and len(_vieux.edits) == 1 and _vN is not None
+          and options(_vN) == [list(f.actions) for f in U._FAMILLES_MENU]
+          and "jbg:qb:lola:brune:3" in ids(_vN) and journal("menus d'une version precedente"),
+          (_fait, _vieux.edits, JOURNAL.lignes[-3:]))
+    _neuf = MsgG(U._jb_general(None, "lola", 3, reserve="brune"))
+    _fait2 = asyncio.run(U._jb_general_aligner(CLIENT, CHAN, [_neuf], "lola", None, MOI))
+    check("... un General deja a jour n'est PAS reedite (pas d'edition a chaque passage)",
+          _fait2 is False and not _neuf.edits
+          and U._jb_general_menus_perimes(_neuf, "lola", "brune", "3") == [], _neuf.edits)
+
+
+_GB_MODULES = [_v2imp.import_module(n) for n in (
+    "cogs.user", "type_identite", "guild_features", "marques_montage", "noctus_reserve",
+    "brutes_off")]
+_savGB = {m: dict(vars(m)) for m in _GB_MODULES}
+_nEcritsGB = len(_V2_AUDIT["ecrits"])
+_V2_AUDIT["actif"] = True
+try:
+    _v2_bloc_general_brutes()
+except Exception as _eGB:
+    check("general brutes ⭐ : testable", False,
+          repr(_eGB)[:200] + " " + _v2tb.format_exc()[-700:])
+finally:
+    _V2_AUDIT["actif"] = False
+    for _mGB, _dGB in _savGB.items():
+        for _kGB in [k for k in vars(_mGB) if k not in _dGB]:
+            delattr(_mGB, _kGB)
+        for _kGB, _valGB in _dGB.items():
+            if vars(_mGB).get(_kGB, _savGB) is not _valGB:
+                setattr(_mGB, _kGB, _valGB)
+check("general brutes ⭐ : aucune ecriture dans data/",
+      len(_V2_AUDIT["ecrits"]) == _nEcritsGB, str(_V2_AUDIT["ecrits"][_nEcritsGB:][:5]))
 
 
 if FAILS:

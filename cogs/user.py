@@ -1930,7 +1930,7 @@ def banger_reels_for(identity, limit=15):
     return out
 
 
-def fav_brutes_for(identity, limit=15):
+def fav_brutes_for(identity, limit=15, ecartes=None):
     """Rushs bruts marques ⭐ favoris d'une identite -> [Path].
 
     Lit data/fav_brutes.json (cle file_id = 'identity|brutes|filename', ecrite
@@ -1946,13 +1946,36 @@ def fav_brutes_for(identity, limit=15):
     Ne garde que les fichiers encore presents sur le disque : une brute
     supprimee laisserait sinon une cle orpheline, et le VA s'entendrait
     annoncer des brutes qui n'existent plus.
+
+    Pendant un clic du menu ✨ General, ce sont les brutes ⭐ de la MODEL
+    cliquee (_MODEL_REELLE), cle ET dossier -- voir plus bas.
+
+    `ecartes` (dict facultatif, comme fav_templates_for) : ce qui explique une
+    liste vide. « illisible » : le registre n'a pas pu etre lu ; « desactivees »
+    et « causes » : les brutes ⭐ presentes mais eteintes, et pourquoi. Sans
+    eux, un registre abime et des etoiles toutes eteintes se disaient « aucune
+    brute ⭐ », et l'admin allait etoiler des brutes qui l'etaient deja.
     """
     import json as _json
+    # ✨ General : `identity` y vaut la RESERVE, qui n'a pas de brute ; la
+    # brute vient de la model, comme pour _dossier_brutes. Sans ca,
+    # « ⭐ Brut + Caption » lisait « blonde|brutes|… », ne trouvait rien et
+    # repondait « aucune vidéo brute étoilée » alors que Lola en a. Hors
+    # General (None), `identity` telle quelle : rien ne change.
+    identity = _MODEL_REELLE.get() or identity
     fav_file = DATA_DIR / "fav_brutes.json"
     try:
         raw = _json.loads(fav_file.read_text(encoding="utf-8"))
         keys = list(raw.keys()) if isinstance(raw, dict) else list(raw or [])
-    except Exception:
+    except FileNotFoundError:
+        keys = []                  # aucune etoile posee : le cas normal
+    except Exception as e:
+        # Illisible n'est pas vide : sans cette ligne, un registre abime
+        # faisait repondre « aucune brute ⭐ » a tous les boutons, sans trace.
+        log.warning("%s illisible (%s: %s) : aucune brute ⭐ servie",
+                    fav_file.name, type(e).__name__, e)
+        if isinstance(ecartes, dict):
+            ecartes["illisible"] = f"{fav_file.name} : {type(e).__name__}"
         keys = []
     prefix = f"{identity}|brutes|"
     names = []
@@ -1968,10 +1991,20 @@ def fav_brutes_for(identity, limit=15):
     import brutes_off as _off
     brutes_dir = IDENTITIES_DIR / identity / "brutes"
     out = []
+    n_off, causes = 0, []
     for fn in names:
         p = brutes_dir / fn
-        if p.exists() and p.is_file() and not _off.est_desactivee(p):
-            out.append(p)
+        if p.exists() and p.is_file():
+            if not _off.est_desactivee(p):
+                out.append(p)
+                continue
+            n_off += 1
+            c = str(_off.lire(p).get("cause") or "").strip()
+            if c and c not in causes:
+                causes.append(c)
+    if isinstance(ecartes, dict):
+        ecartes["desactivees"] = n_off
+        ecartes["causes"] = causes
     # AU-DELA DE `limit`, UN TIRAGE, PAS LES PREMIERES PAR ORDRE ALPHABETIQUE.
     # La boucle s'arretait a la 15e : avec les etoiles posees par les favoris
     # automatiques (27 sur ibenhaastrup, 26 sur themikkiangel), une douzaine
@@ -2435,6 +2468,23 @@ def _dossier_brutes(identity):
     montent une brute l'appellent ; recalcule a chacun, un seul oubli aurait
     monte le contenu de Blonde sur un dossier vide (template nu)."""
     return IDENTITIES_DIR / ((_MODEL_REELLE.get() or identity or "").strip().lower()) / "brutes"
+
+
+def _qui_manque_brute(identity):
+    """(pour, qui_a, chez) : les bouts de phrase des refus des actions a
+    brute ⭐, qui disent A QUI manque quoi.
+
+    Hors General : « `identity` », « Tu as », « » -- les messages d'avant,
+    mot pour mot. Pendant un clic ✨ General, la matiere (captions,
+    templates) vient de la RESERVE et la brute ⭐ de la MODEL : « Tu as 5
+    brute(s) favorite(s) » y parlait des brutes de Lola comme si Blonde les
+    avait, et « aucune vidéo brute étoilée » pour `blonde` accusait une
+    reserve qui n'en a jamais."""
+    m = _MODEL_REELLE.get()
+    if not m:
+        return f"`{identity}`", "Tu as", ""
+    return (f"`{identity}` (brute de `{m}`)", f"**{m.capitalize()}** a",
+            f" chez **{m.capitalize()}**")
 
 
 def _est_reserve_sure(identity) -> bool:
@@ -3983,21 +4033,29 @@ class UserCog(commands.Cog):
         if not brutes or not caps:
             # Toujours nommer le nombre de l'AUTRE cote : c'est ca qui apprend
             # au VA — et au manager — ce qui manque reellement.
+            # _qui_manque_brute : sous le ✨ General, la brute manque chez la
+            # MODEL, pas chez la reserve dont viennent les captions.
+            pour, qui_a, chez = _qui_manque_brute(identity)
+            # « ⭐ Brut + Caption » prend TOUTES les captions actives : lui
+            # repondre « aucune caption étoilée » ferait etoiler des captions
+            # qui n'existent pas.
+            cap_ok, cap_mot = (("étoilée", "favorite(s)") if caption_favorite
+                               else ("active", "active(s)"))
             if not brutes and not caps:
-                manque = ("Il manque **les deux** : aucune vidéo brute étoilée "
-                          "(onglet **Vidéo brut**) et aucune caption étoilée "
-                          "(onglet **Caption**).")
+                manque = ("Il manque **les deux** : aucune vidéo brute étoilée"
+                          f"{chez} (onglet **Vidéo brut**) et aucune caption "
+                          f"{cap_ok} (onglet **Caption**).")
             elif not brutes:
-                manque = (f"Tu as **{len(caps)} caption(s) favorite(s)**, mais "
-                          f"**aucune vidéo brute étoilée** (onglet **Vidéo brut**).")
+                manque = (f"Tu as **{len(caps)} caption(s) {cap_mot}**, mais "
+                          f"**aucune vidéo brute étoilée**{chez} (onglet **Vidéo brut**).")
             else:
                 hors = fav_captions_desactivees(identity)
                 extra = (f" _(Tes {len(hors)} caption(s) favorite(s) sont désactivées.)_"
                          if hors else "")
-                manque = (f"Tu as **{len(brutes)} brute(s) favorite(s)**, mais "
-                          f"**aucune caption étoilée** (onglet **Caption**).{extra}")
+                manque = (f"{qui_a} **{len(brutes)} brute(s) favorite(s)**, mais "
+                          f"**aucune caption {cap_ok}** (onglet **Caption**).{extra}")
             await interaction.response.send_message(
-                f"🎬 Impossible de monter pour `{identity}`.\n{manque}\n"
+                f"🎬 Impossible de monter pour {pour}.\n{manque}\n"
                 "_(Un admin pose les étoiles ⭐ sur le site.)_", ephemeral=True)
             return
         try:
@@ -4093,20 +4151,34 @@ class UserCog(commands.Cog):
                 note += (f"\n⚠️ {sans_coupe} template(s) étoilé(s) ont été **écartés** : "
                         f"ils n'ont pas de **point de coupe**, donc ta brute n'y "
                         f"apparaîtrait pas. _(À définir dans l'éditeur Montage du site.)_")
+            # _qui_manque_brute : sous le ✨ General, la brute manque chez la
+            # MODEL, pas chez la reserve dont viennent les templates.
+            pour, qui_a, chez = _qui_manque_brute(identity)
+            # Les mots suivent les viviers REELLEMENT lus : « ⭐ Brut +
+            # Template » prend tous les templates, « ⭐ Template » toutes les
+            # brutes. « aucun template étoilé » ou « 3 brute(s) favorite(s) »
+            # y faisaient chercher une etoile que le bouton n'exige pas.
+            b_ok, b_mot = ((" étoilée", " favorite(s)") if brute_favorite
+                           else ("", ""))
+            t_ok = "étoilé" if template_favori else "utilisable"
             if not templates and not brutes:
-                manque = ("Il manque **les deux** : aucun template étoilé "
-                          "(onglet **Templates montage**) et aucune vidéo brute "
-                          "étoilée (onglet **Vidéo brut**).")
+                manque = (f"Il manque **les deux** : aucun template {t_ok} "
+                          "(onglet **Templates montage**) et aucune vidéo brute"
+                          f"{b_ok}{chez} (onglet **Vidéo brut**).")
             elif not templates:
-                manque = (f"Tu as **{len(brutes)} brute(s) favorite(s)**, mais "
+                manque = (f"{qui_a} **{len(brutes)} brute(s){b_mot}**, mais "
                           f"**aucun template utilisable** (onglet **Templates montage**).")
             else:
+                # Parentheses : sans elles, les deux chaines accolees se
+                # collaient AVANT le `if`, et sans brute_favorite
+                # (⭐ Template) « Tu as N template(s) utilisable(s), mais »
+                # disparaissait -- le nombre de l'autre cote avec lui.
                 manque = (f"Tu as **{len(templates)} template(s) utilisable(s)**, mais "
-                          f"**aucune vidéo brute étoilée** (onglet **Vidéo brut**)."
-                          if brute_favorite else
-                          "**aucune vidéo brute** (onglet **Vidéo brut**).")
+                          + (f"**aucune vidéo brute étoilée**{chez} (onglet **Vidéo brut**)."
+                             if brute_favorite else
+                             f"**aucune vidéo brute**{chez} (onglet **Vidéo brut**)."))
             await interaction.response.send_message(
-                f"🎵 Impossible d'assembler pour `{identity}`.\n{manque}{note}\n"
+                f"🎵 Impossible d'assembler pour {pour}.\n{manque}{note}\n"
                 "_(Un admin pose les étoiles ⭐ sur le site.)_", ephemeral=True)
             return
         try:
@@ -4232,15 +4304,18 @@ class UserCog(commands.Cog):
             notes.append(f"⚠️ {err} — préviens un admin.")
 
         if not templates or (brute_favorite and not brutes):
+            # _qui_manque_brute : sous le ✨ General, la brute manque chez la
+            # MODEL, pas chez la reserve dont viennent les montages.
+            pour, _qui_a, chez = _qui_manque_brute(identity)
             if not templates:
                 manque = ("Aucun " + quoi + " utilisable "
                           "(onglet **Templates montage**).")
             else:
                 manque = (f"Tu as **{len(templates)} montage(s) {logo} "
-                          "utilisable(s)**, mais **aucune vidéo brute étoilée** "
-                          "(onglet **Vidéo brut**).")
+                          "utilisable(s)**, mais **aucune vidéo brute étoilée**"
+                          f"{chez} (onglet **Vidéo brut**).")
             await interaction.response.send_message(
-                f"{logo} Impossible d'assembler pour `{identity}`.\n"
+                f"{logo} Impossible d'assembler pour {pour}.\n"
                 + manque + "".join("\n" + n for n in notes) + "\n"
                 + f"_(Un admin pose le {logo} sur le site, page Templates montage.)_",
                 ephemeral=True)
@@ -11140,26 +11215,98 @@ def _jb_modele_du_salon(chan, epingles=(), marche=None, moi=None):
     return "_", _JB_QTE_DEFAUT, "aucune model"
 
 
+def _jb_general_menus_perimes(general, model, res, qty) -> list:
+    """Les familles dont le menu du ✨ General POSTE `general` n'a pas les
+    options qu'un General neuf aurait (JBGenMenu, memes model, reserve,
+    quantite). [] quand tout concorde, et aussi quand le message n'a aucun
+    menu « jbg:s: » (General sans action : rien a comparer).
+
+    Compare les VALEURS, pas les libelles ni les icones : un libelle
+    retouche ne doit pas faire reediter chaque General a chaque passage.
+    Illisible : journalise, et [] -- on n'edite pas a l'aveugle."""
+    poses = {}
+    try:
+        pile = list(getattr(general, "components", None) or [])
+        vus = 0
+        while pile and vus < 500:          # meme garde-fou que _ids_composants
+            c = pile.pop(0)
+            vus += 1
+            cid = getattr(c, "custom_id", None)
+            if isinstance(cid, str) and cid.startswith("jbg:s:"):
+                # Un composant recu porte ses options ; un element de vue
+                # (DynamicItem) les porte sur son .item.
+                opts = getattr(c, "options", None)
+                if opts is None:
+                    opts = getattr(getattr(c, "item", None), "options", None)
+                poses[cid.split(":")[4]] = [getattr(o, "value", None)
+                                            for o in opts or ()]
+            enfants = getattr(c, "children", None)
+            if isinstance(enfants, (list, tuple)):
+                pile.extend(enfants)
+            acc = getattr(c, "accessory", None)
+            if acc is not None:
+                pile.append(acc)
+        if not poses:
+            return []
+        perimes = []
+        for fam in _JB_GEN_FAMILLES:
+            neuf = JBGenMenu(model, res, fam.cle, qty)
+            # Un menu vide n'est pas pose (_jb_general) : attendu absent.
+            attendu = None if neuf.vide else [o.value for o in neuf.item.options]
+            if poses.get(fam.cle) != attendu:
+                perimes.append(fam.cle)
+        # Une famille retiree depuis : son menu poste est perime aussi.
+        perimes += sorted(set(poses) - {f.cle for f in _JB_GEN_FAMILLES})
+        return perimes
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("General %s : menus illisibles (%s: %s), pas redessine",
+                    model, type(e).__name__, e)
+        return []
+
+
 async def _jb_general_aligner(client, chan, epingles, model, guild, moi=None):
     """Le ✨ General epingle montre-t-il une AUTRE model que le panneau (ou
     l'attente « _ ») ? Il passe sur `model` (_jb_general_maj). -> True si
     edite. Un General absent (sa pose revient a _ensure_us_general), ou a
     l'ancien format sans model lisible, n'est pas touche : pas d'appel.
 
-    Un General deja sur la bonne model n'est PAS redessine : _jb_general_maj
+    Un General deja sur la bonne model n'est PAS remis a zero : _jb_general_maj
     le remettrait sur sa premiere reserve, et le VA perdrait celle qu'il a
-    choisie."""
+    choisie. Seule exception : ses menus n'ont plus les options d'aujourd'hui
+    (_jb_general_menus_perimes) -- il est alors redessine sur SA reserve et
+    SA quantite."""
     general = next((m for m in epingles or () if _est_general(m, moi)), None)
     if general is None:
         return False
-    montre = None
+    montre = etat = None
     for c in _ids_composants(general):
         mt = _RE_GENERAL_ETAT.fullmatch(c)
         if mt:
-            montre = mt["model"]
+            montre, etat = mt["model"], mt
             break
-    if montre is None or montre == model:
+    if montre is None:
         return False
+    if montre == model:
+        # Sans ca, apres le passage de 2 a 4 variantes (27/09/2026), chaque
+        # General deja poste gardait « 💬 Caption / ⭐ Caption » jusqu'au
+        # premier clic dans son salon : qui ouvrait le menu sans cliquer
+        # concluait que « ça n'a pas été fait ».
+        perimes = _jb_general_menus_perimes(general, model, etat["res"],
+                                            etat["qty"])
+        if not perimes:
+            return False
+        log.info("salon %s : General sur %s, menus d'une version precedente "
+                 "(%s) -- redessine sur la reserve %s", getattr(chan, "name", "?"),
+                 model, ", ".join(perimes), etat["res"])
+        try:
+            cog = client.get_cog("UserCog") if client is not None else None
+            vue = _jb_general(cog, model, int(etat["qty"]),
+                              reserve=etat["res"], guild=guild)
+            return bool(await _jb_general_editer(chan, general, vue))
+        except Exception as e:                               # noqa: BLE001
+            log.warning("salon %s : General non redessine (%s: %s)",
+                        getattr(chan, "name", "?"), type(e).__name__, e)
+            return False
     log.info("salon %s : General sur %s, le panneau sur %s -- le General suit",
              getattr(chan, "name", "?"), montre, model)
     return bool(await _jb_general_maj(client, chan, model, guild))
@@ -12433,7 +12580,7 @@ def _jb_panel(cog, ident, qty=_JB_QTE_DEFAUT, marche="us", guild=None):
 # PP, bios, stories, story CTA, posts, captions, templates, trash, flash. Pendant un
 # clic, l'identite active est la RESERVE (tout le contenu vient d'elle, sans
 # toucher aux fonctions de tirage) et la brute vient de la MODEL
-# (_MODEL_REELLE, _dossier_brutes).
+# (_MODEL_REELLE, _dossier_brutes ; fav_brutes_for pour les brutes ⭐).
 #
 # Un message A PART, pas des boutons de plus dans _jb_panel : quand il est
 # ne, le panneau comptait 24 composants sur 25 (22 sur 40 depuis le passage
@@ -12469,14 +12616,17 @@ _JB_GEN_BOUTONS = ("pp", "bio", "story", "storycta", "post")
 #: cette table-la, rien de recopie : un libelle ou un logo change la-bas
 #: change ici.
 #:
-#: Chaque famille garde ses DEUX premieres variantes -- la matiere seule, et
-#: sa version etoilee. Les deux suivantes exigent une brute ⭐ (voir l'ordre
-#: des familles, _MARQUE_VARIANTES) : le General pose le contenu de la
-#: reserve sur une brute quelconque de la model, il n'a pas de Brut (une
-#: reserve n'a pas de video brute). Ce sont exactement les huit boutons
-#: d'avant (Caption, ⭐ Caption, Template, ⭐ Template, Trash, ⭐ Trash, Flash,
-#: ⭐ Flash).
-_JB_GEN_VARIANTES = 2
+#: Chaque famille a ses QUATRE variantes, comme le panneau (27/09/2026). Il
+#: n'en gardait que deux -- la matiere seule, et sa version etoilee -- au
+#: motif qu'une reserve n'a pas de video brute. Le proprietaire : « les
+#: réserves n'ont pas de brut […] c'est l'identité qui est associée qui,
+#: elle, a le brut banger ». Les deux suivantes (« ⭐ Brut + … »,
+#: « ⭐⭐ … + Brut ») posent donc la matiere de la RESERVE sur une brute ⭐
+#: de la MODEL (fav_brutes_for sous _MODEL_REELLE) ; si la model n'en a
+#: aucune, le clic le dit (_jb_gen_controle, _JB_GEN_BRUTE_ETOILEE). Pas de
+#: famille Brut pour autant : une reserve n'a toujours pas de brute a servir
+#: nue.
+_JB_GEN_VARIANTES = 4
 _JB_GEN_FAMILLES = tuple(
     _Famille(_f.cle, _f.emoji, _f.nom, tuple(_f.actions[:_JB_GEN_VARIANTES]))
     for _f in _FAMILLES_MENU)
@@ -12500,13 +12650,22 @@ _JB_GENERAL_RANGEES = {_k: 1 for _k in _JB_GEN_BOUTONS}
 _JB_GENERAL_RANGEES.update({_a: 2 + _i for _i, _f in enumerate(_JB_GEN_FAMILLES)
                             for _a in _f.actions})
 
+#: Celles qui exigent une brute ⭐ de la MODEL : dans chaque famille, les
+#: variantes dont _MARQUE_VARIANTES dit « brute etoilee » (3e et 4e : toutes
+#: les familles suivent cet ordre, voir _FAMILLES_MENU). DEDUITE, comme la
+#: liste blanche : une famille de plus en herite sans rien recopier.
+_JB_GEN_BRUTE_ETOILEE = frozenset(
+    _a for _f in _JB_GEN_FAMILLES
+    for _a, (_tpl_etoile, _brute_etoilee) in zip(_f.actions, _MARQUE_VARIANTES)
+    if _brute_etoilee)
+
 #: Celles qui posent le contenu sur une brute de la MODEL. Refusees d'avance
 #: si elle n'en a aucune : sinon 30 s de rendu, puis un template nu marque
 #: « NE POSTE PAS ». Template (reelmonte) n'y est pas : un brouillon sans
 #: coupe n'utilise pas de brute, et son repli l'annonce deja.
 _JB_GEN_BRUTE = frozenset({"reelcaption", "capbanger", "templatebanger"} | {
     _a for _mq in marques_montage.ORDRE
-    for _a in marques_montage.marque(_mq)["actions"][:2]})
+    for _a in marques_montage.marque(_mq)["actions"][:2]}) | _JB_GEN_BRUTE_ETOILEE
 
 #: Boutons de choix de reserve, rangee 0 ; la 5e place est la quantite.
 _JB_GEN_MAX_RESERVES = 4
@@ -12725,7 +12884,8 @@ def _jb_gen_controle(interaction, model, res, key):
     `refus` vaut "" quand l'action peut partir. Les memes gardes, dans le
     meme ordre, pour les deux : role Jailbreak, liste blanche du General
     (_JB_GENERAL_RANGEES), action connue du cog, model devenue reserve, lien
-    model-reserve REVERIFIE, brute de la model. Deux copies de ces gardes
+    model-reserve REVERIFIE, brute de la model (etoilee pour les variantes
+    « ⭐ Brut + … » et « ⭐⭐ … + Brut »). Deux copies de ces gardes
     divergeraient au premier correctif : un menu servirait ce qu'un bouton
     refuse.
 
@@ -12780,6 +12940,49 @@ def _jb_gen_controle(interaction, model, res, key):
                     f"{_libelle_sans_emoji(_label)} pose le contenu de "
                     f"**{nres}** sur une brute de la model.\n"
                     f"_(Un admin en ajoute sur le site, onglet **Vidéo brut** "
+                    f"de {nom}.)_", None, False)
+    if key in _JB_GEN_BRUTE_ETOILEE:
+        # « S'il n'y en a pas, c'est pas grave » (le proprietaire) : le clic
+        # le DIT, en nommant la model -- pas 30 s d'attente, pas une brute
+        # quelconque a la place (ces variantes ne valent que par l'etoile),
+        # et jamais « `blonde` n'a pas de brute » : une reserve n'en a pas.
+        _e = {}
+        try:
+            etoilees = fav_brutes_for(model, limit=0, ecartes=_e)
+        except Exception as e:
+            # Un registre illisible ne leve pas (il revient dans `_e`) : ce
+            # qui leve ici vient du disque. La commande relit le meme dossier,
+            # leve a son tour, et _jb_bouton_lancer / _menu_lancer disent
+            # l'erreur au VA.
+            log.warning("General %s : brutes ⭐ illisibles (%s: %s)",
+                        model, type(e).__name__, e)
+            etoilees = None
+        _lib = _libelle_sans_emoji(_label)
+        if _e.get("illisible"):
+            # Pas « Lola n'a aucune vidéo brute ⭐ » : les etoiles existent
+            # peut-etre, c'est le registre qui ne se lit plus -- et le site
+            # refuse de le reecrire tant qu'il est abime.
+            return (f"Le registre des brutes ⭐ ({_e['illisible']}) est "
+                    f"illisible : {_lib} impossible pour l'instant. "
+                    "Préviens un admin.", None, False)
+        if etoilees is not None and not etoilees:
+            n_off = _e.get("desactivees") or 0
+            if n_off:
+                # L'admin voit ces etoiles (grisees) dans l'onglet Vidéo brut :
+                # « aucune brute ⭐ » l'envoyait en poser une de plus.
+                pourquoi = (f" ({', '.join(_e.get('causes') or [])})"
+                            if _e.get("causes") else "")
+                etat = ("1 vidéo brute ⭐, désactivée" if n_off == 1 else
+                        f"{n_off} vidéos brutes ⭐, toutes désactivées")
+                return (f"**{nom}** a {etat}{pourquoi} : {_lib} pose le "
+                        f"contenu de **{nres}** sur une brute étoilée active "
+                        f"de la model.\n_(Un admin en réactive une ou en étoile "
+                        f"une autre, onglet **Vidéo brut** de {nom}.)_",
+                        None, False)
+            return (f"**{nom}** n'a aucune vidéo brute ⭐ : "
+                    f"{_lib} pose le contenu de "
+                    f"**{nres}** sur une brute étoilée de la model.\n"
+                    f"_(Un admin en étoile sur le site, onglet **Vidéo brut** "
                     f"de {nom}.)_", None, False)
     return "", cmd, supports_count
 

@@ -20231,10 +20231,16 @@ try:
         # mais les 8 de Caption, Template, Trash et Flash sont les options de
         # QUATRE menus ; PP, Bio, Story, Story CTA et Post restent des
         # boutons. D ou 10 identifiants : la quantite, 5 boutons, 4 menus.
+        # 27/09/2026, CHANGEMENT VOULU (« il manque le brut banger […] tu peux
+        # rajouter ces options aussi la-bas ») : chaque menu a ses QUATRE
+        # variantes, comme le panneau -- « ⭐ Brut + … » et « ⭐⭐ … + Brut »
+        # posent la matiere de la reserve sur une brute ⭐ de la model. 13 ->
+        # 21 actions (5 boutons + 16 options) ; toujours 10 identifiants, les
+        # options d un menu n en ont pas.
         _acts1 = [i.split(":")[4] for i in _ids1 if i.startswith("jbg:a:")] + [
             a for _o in _m1.values() for a in _o]
-        check("general : une reserve -> 13 actions (5 boutons + 4 menus) + la quantite, pas de choix de reserve",
-              len(_ids1) == 10 and len(_acts1) == 13 and len(set(_acts1)) == 13
+        check("general : une reserve -> 21 actions (5 boutons + 4 menus de 4 variantes) + la quantite, pas de choix de reserve",
+              len(_ids1) == 10 and len(_acts1) == 21 and len(set(_acts1)) == 21
               and sum(i.startswith("jbg:a:") for i in _ids1) == 5
               and sum(i.startswith("jbg:s:") for i in _ids1) == 4
               and not any(i.startswith("jbg:r:") for i in _ids1), str(_ids1)[:200])
@@ -20242,11 +20248,16 @@ try:
         # CHANGEMENT VOULU (partie E) : Trash et Flash ne partagent plus la
         # rangee 4 -- chacun est un menu, sur sa rangee, Trash juste avant
         # Flash. Ce qu on protege reste l ordre et les variantes.
+        # 27/09/2026, CHANGEMENT VOULU : Trash et Flash ont leurs quatre
+        # variantes (les deux a brute ⭐ en plus), comme Caption et Template.
         _ordreMGn = [c.split(":")[4] for r in _rangeesGn(_v1) for c in r if c.startswith("jbg:s:")]
-        check("general : menus Caption, Template, puis Trash (Trash, ⭐ Trash), puis Flash (Flash, ⭐ Flash)",
+        check("general : menus Caption, Template, puis Trash (ses 4 variantes), puis Flash (ses 4 variantes)",
               _ordreMGn == ["caption", "template", "trash", "flash"]
-              and _m1.get("trash") == list(_mmGn.MARQUES["trash"]["actions"][:2])
-              and _m1.get("flash") == list(_mmGn.MARQUES["flash"]["actions"][:2])
+              and _m1.get("caption") == ["reelcaption", "capbanger", "brutcaption", "montagebanger"]
+              and _m1.get("template") == ["reelmonte", "templatebanger", "bruttemplate", "templatebrut"]
+              and _m1.get("trash") == list(_mmGn.MARQUES["trash"]["actions"])
+              and _m1.get("flash") == list(_mmGn.MARQUES["flash"]["actions"])
+              and len(_mmGn.MARQUES["trash"]["actions"]) == len(_mmGn.MARQUES["flash"]["actions"]) == 4
               and all(len(r) == 1 for r in _rangeesGn(_v1) if r[0].startswith("jbg:s:")),
               str((_ordreMGn, _m1)))
         check("general : les cles sont exactement celles de la liste blanche",
@@ -20422,10 +20433,42 @@ try:
               and "n'est plus liée" in str(_i.suivis) and _i.suivis[0][1] is True,
               str(_i.suivis)[:160])
         _appelsGn.clear()
-        _i = _choisirGn("zgen_lola", "zgen_blonde", "caption", "brutcaption")
+        # 27/09/2026, CHANGEMENT VOULU : brutcaption est une option du menu
+        # Caption. La valeur forgee est une variante du Brut du panneau
+        # (brutbanger), qui n a toujours pas sa place dans le General.
+        _i = _choisirGn("zgen_lola", "zgen_blonde", "caption", "brutbanger")
         check("clic menu : une valeur hors de sa famille (Brut forge) est refusee",
               not _appelsGn and len(_i.response.edits) == 1 and "inconnue" in str(_i.suivis),
               str(_i.suivis)[:160])
+        # « ⭐ Brut + Caption » (27/09/2026) : la brute ⭐ est celle de la
+        # MODEL, lue dans fav_brutes.json (ici un registre temporaire). Zgen_lola
+        # a une brute (b1.mp4) : sans etoile, refus DIT qui nomme la model et
+        # la reserve ; etoilee, l action part (reserve, brute de la model).
+        _CogGn.brutcaption = "CMD_BRUTCAPTION"
+        _savDataGn = _cuGn.DATA_DIR
+        try:
+            _cuGn.DATA_DIR = _dirGn
+            safe_json.write(_dirGn / "fav_brutes.json", ["zgen_blonde|brutes|b1.mp4"])
+            _appelsGn.clear()
+            _i = _choisirGn("zgen_lola", "zgen_blonde", "caption", "brutcaption")
+            check("clic menu : ⭐ Brut + Caption, model sans brute ⭐ -> refus qui nomme la model "
+                  "et la reserve, rien ne part (l etoile posee sous la RESERVE ne compte pas)",
+                  not _appelsGn and len(_i.response.edits) == 1
+                  and "**Zgen_lola** n'a aucune vidéo brute ⭐" in str(_i.suivis)
+                  and "**Zgen_blonde**" in str(_i.suivis)
+                  and "onglet **Vidéo brut** de Zgen_lola" in str(_i.suivis)
+                  and _i.suivis[0][1] is True, str(_i.suivis)[:240])
+            safe_json.write(_dirGn / "fav_brutes.json", ["zgen_lola|brutes|b1.mp4"])
+            _appelsGn.clear()
+            _i = _choisirGn("zgen_lola", "zgen_blonde", "caption", "brutcaption")
+            check("clic menu : ⭐ Brut + Caption, brute ⭐ chez la model -> part (contenu de la reserve, "
+                  "brute de la model)",
+                  _appelsGn == [("zgen_blonde", "CMD_BRUTCAPTION", 3, "zgen_lola")]
+                  and len(_i.response.edits) == 1 and not _i.suivis,
+                  str((_appelsGn, _i.suivis))[:200])
+        finally:
+            _cuGn.DATA_DIR = _savDataGn
+            del _CogGn.brutcaption
         _appelsGn.clear()
         _i = _choisirGn("zgen_nue", "zgen_blonde", "flash", "templateflash")
         check("clic menu : model sans brute -> refus immediat, comme le bouton",
