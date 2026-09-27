@@ -2576,6 +2576,15 @@ class NumerosCog(commands.Cog):
                                                     ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
+        # Un salon cree avant que ce bot ne soit dans les droits des tickets
+        # lui est ferme : « Missing Access », rien de pose (#carter_izac,
+        # 27/09). Le bot principal, qui y est, le lui ouvre d'abord.
+        try:
+            from cogs.welcome import ouvrir_au_bot_admin
+            if await ouvrir_au_bot_admin(ch.id) == "ouvert":
+                ch = await self.bot.fetch_channel(ch.id)
+        except Exception as e:                              # noqa: BLE001
+            log.warning(f"panelnumero: ouverture du salon au bot : {type(e).__name__}: {e}")
         moi = getattr(self.bot.user, "id", 0)
         orphelins = 0
         try:
@@ -2639,14 +2648,35 @@ class NumerosCog(commands.Cog):
             await interaction.response.send_message("À utiliser dans un serveur.", ephemeral=True)
             return
         from cogs.welcome import _us_norm
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        # Les salons prives que ce bot n'a jamais recus ne sont meme pas dans
+        # guild.text_channels : 26 salons comptes sur 37, #carter_izac oublie.
+        # Le bot principal, qui les voit tous, les lui ouvre d'abord (et pose
+        # le panneau dans ceux qu'il vient d'ouvrir).
+        ids_vus, ouverts, fermes = [], [], []
+        try:
+            from cogs.welcome import ouvrir_numeros_au_bot_admin, _bot_principal
+            principal = _bot_principal()
+            if principal is not None and principal is not self.bot:
+                b = await ouvrir_numeros_au_bot_admin(principal, guild.id)
+                ids_vus, ouverts, fermes = b["salons"], b["ouverts"], b["rates"]
+        except Exception as e:                              # noqa: BLE001
+            log.warning(f"panelnumeroall: ouverture des salons : {type(e).__name__}: {e}")
         targets = [c for c in guild.text_channels
                    if _us_norm(c.name).endswith("-numero-mail")]
+        connus = {c.id for c in targets}
+        for i in ids_vus:
+            if i in connus:
+                continue
+            try:
+                targets.append(await self.bot.fetch_channel(i))
+            except Exception as e:                          # noqa: BLE001
+                log.warning(f"panelnumeroall: salon {i} toujours invisible ({type(e).__name__})")
         if not targets:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 _pourquoi_aucun_salon(guild, self.bot, ("-numero-mail",)),
                 ephemeral=True)
             return
-        await interaction.response.defer(ephemeral=True, thinking=True)
         # Un seul releve du solde pour tous les salons : quarante releves,
         # c etait quatre-vingts appels au fournisseur pour la meme valeur.
         solde = await _solde_sms()
@@ -2692,7 +2722,11 @@ class NumerosCog(commands.Cog):
             + (f", {skipped} l'avaient déjà (`remplacer:true` pour les mettre à jour)"
                if skipped else "")
             + (f" · {vides} message(s) de bot effacé(s)" if vides else "")
-            + f" (sur {len(targets)} salons `-numero-mail`).{warn}"
+            + f" (sur {len(targets)} salons `-numero-mail`)."
+            + (f" · {len(ouverts)} salon(s) ouvert(s) au bot" if ouverts else "")
+            + (f"\n⚠️ {len(fermes)} salon(s) impossible(s) à ouvrir au bot : "
+               + ", ".join(f"`{n}`" for n in fermes[:5]) if fermes else "")
+            + warn
             + ("" if nettoyer else
                "\nℹ️ `nettoyer:true` pour ne laisser QUE le panneau dans chaque salon."),
             ephemeral=True)

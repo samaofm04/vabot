@@ -1451,8 +1451,11 @@ async def _ensure_num_panel(bot, channel):
             adm = _bot_admin()
             acog = adm.get_cog("NumerosCog") if adm is not None else None
             if acog is not None:
+                # Un salon cree avant que le bot admin ne soit dans les droits
+                # d'un ticket : on le lui ouvre d'abord, sinon « Missing Access ».
+                etat = await ouvrir_au_bot_admin(channel)
                 ach = adm.get_channel(getattr(channel, "id", 0))
-                if ach is None:
+                if ach is None or etat == "ouvert":
                     try:
                         ach = await adm.fetch_channel(channel.id)
                     except Exception as e:                  # noqa: BLE001
@@ -1495,6 +1498,113 @@ def _membre_bot_admin(guild):
     adm = _bot_admin()
     uid = getattr(getattr(adm, "user", None), "id", None)
     return guild.get_member(uid) if (guild is not None and uid) else None
+
+
+def _bot_principal():
+    """Le bot PRINCIPAL (celui qui cree les salons des VA), ou None."""
+    import sys as _sys
+    return getattr(_sys.modules.get("web_upload"), "_BOT_REF", None)
+
+
+#: Ce que le bot admin doit pouvoir faire dans un -numero-mail : voir, ecrire,
+#: relire, retirer ses anciens messages, joindre l'icone du panneau. Les memes
+#: que dans _us_droits_ticket, pour un salon neuf.
+_DROITS_BOT_ADMIN = dict(view_channel=True, send_messages=True,
+                         read_message_history=True, manage_messages=True,
+                         attach_files=True, embed_links=True)
+
+
+async def ouvrir_au_bot_admin(channel) -> str:
+    """Garantit au bot ADMIN ses droits dans ce salon, vu par le PRINCIPAL.
+
+    Rend « deja » s'il les avait, « ouvert » si la regle vient d'etre posee,
+    « » si c'est impossible (raison au journal).
+
+    C'est le PRINCIPAL qui pose la regle : il est dans le salon (il l'a cree),
+    le bot admin n'y est pas et ne peut pas s'y inviter lui-meme. Sans ca, un
+    salon cree avant que _us_droits_ticket ne pense au bot admin restait vide
+    a vie : #carter_izac-numero-mail (27/09), « Missing Access » au journal,
+    et /panelnumeroall ne le voyait meme pas. Le proprietaire, lui, voyait un
+    bot « deja admin » : son role ne lui ouvre pas les salons prives."""
+    if isinstance(channel, int):
+        principal = _bot_principal()
+        channel = principal.get_channel(channel) if principal is not None else None
+    guild = getattr(channel, "guild", None)
+    if guild is None:
+        return ""
+    adm = _membre_bot_admin(guild)
+    if adm is None:
+        uid = getattr(getattr(_bot_admin(), "user", None), "id", None)
+        if uid:
+            try:
+                adm = await guild.fetch_member(uid)
+            except Exception as e:                          # noqa: BLE001
+                log.warning("bot admin introuvable sur %s (%s) : #%s reste ferme",
+                            getattr(guild, "name", "?"), type(e).__name__,
+                            getattr(channel, "name", "?"))
+                return ""
+    if adm is None:
+        return ""
+    if adm == guild.me:
+        return "deja"
+    perms = channel.permissions_for(adm)
+    if all(getattr(perms, k, False) for k in _DROITS_BOT_ADMIN):
+        return "deja"
+    regle = channel.overwrites_for(adm)
+    regle.update(**_DROITS_BOT_ADMIN)
+    try:
+        await channel.set_permissions(adm, overwrite=regle,
+                                      reason="Acces du bot admin au panneau des numeros")
+    except Exception as e:                                  # noqa: BLE001
+        log.warning("#%s : acces du bot admin impossible a poser (%s: %s)",
+                    getattr(channel, "name", "?"), type(e).__name__, e)
+        return ""
+    log.info("#%s : acces donne au bot admin", getattr(channel, "name", "?"))
+    return "ouvert"
+
+
+def salons_numero(guild) -> list:
+    """Les -numero-mail de VA de ce serveur, vus par le bot qui le demande."""
+    return [c for c in (getattr(guild, "text_channels", None) or [])
+            if nom_sans_decor(c.name).endswith("-numero-mail")
+            and not salon_de_service(c.name)]
+
+
+async def ouvrir_numeros_au_bot_admin(principal, guild_id=None) -> dict:
+    """Ouvre au bot admin TOUS les -numero-mail que le principal voit, et pose
+    le panneau dans ceux qu'on vient d'ouvrir.
+
+    Le bot admin ne peut pas le faire seul : un salon prive n'arrive meme pas
+    jusqu'a lui (/panelnumeroall en comptait 26 sur 37). Un salon deja ouvert
+    ne coute rien : ni ecriture, ni panneau repose.
+    Rend {"salons": [ids], "ouverts": [noms], "poses": n, "rates": [noms]}."""
+    bilan = {"salons": [], "ouverts": [], "poses": 0, "rates": []}
+    if principal is None or _bot_admin() is None:
+        return bilan
+    for g in list(getattr(principal, "guilds", None) or []):
+        if guild_id and g.id != guild_id:
+            continue
+        # Un serveur ou le bot admin n'est pas (THREADS) : rien a lui ouvrir,
+        # et une recherche du membre par salon remplirait le journal.
+        if _membre_bot_admin(g) is None:
+            continue
+        for ch in salons_numero(g):
+            bilan["salons"].append(ch.id)
+            etat = await ouvrir_au_bot_admin(ch)
+            if not etat:
+                bilan["rates"].append(ch.name)
+            elif etat == "ouvert":
+                bilan["ouverts"].append(ch.name)
+                # le temps que Discord applique la regle avant d'y ecrire
+                await asyncio.sleep(1.5)
+                if await _ensure_num_panel(principal, ch):
+                    bilan["poses"] += 1
+    if bilan["ouverts"] or bilan["rates"]:
+        log.info("numeros : %d salon(s) ouverts au bot admin (%s), %d panneau(x) "
+                 "poses, %d echec(s) %s", len(bilan["ouverts"]),
+                 ", ".join(bilan["ouverts"][:10]), bilan["poses"],
+                 len(bilan["rates"]), bilan["rates"][:5])
+    return bilan
 
 
 def _us_droits_ticket(guild, membres, suffix) -> dict:
@@ -1899,11 +2009,13 @@ class Welcome(commands.Cog):
         self.check_pending_deletions.start()
         self.auto_sort_channels.start()
         self.auto_secure_general_channels.start()
+        self.ouvrir_numeros.start()
 
     def cog_unload(self):
         self.check_pending_deletions.cancel()
         self.auto_sort_channels.cancel()
         self.auto_secure_general_channels.cancel()
+        self.ouvrir_numeros.cancel()
 
     async def cog_load(self):
         # Persistent views (survivent au restart)
@@ -2149,6 +2261,30 @@ class Welcome(commands.Cog):
     @auto_sort_channels.before_loop
     async def before_auto_sort(self):
         await self.bot.wait_until_ready()
+
+    @tasks.loop(minutes=30)
+    async def ouvrir_numeros(self):
+        """Au demarrage puis toutes les 30 min : chaque -numero-mail est
+        ouvert au bot admin, et recoit son panneau s'il ne l'avait pas.
+
+        Le bouton du site faisait la meme chose, a la main : un VA arrive
+        apres le dernier clic restait sans panneau (carter_izac, 27/09), et le
+        proprietaire ne pouvait pas deviner qu'il fallait recliquer."""
+        try:
+            await ouvrir_numeros_au_bot_admin(self.bot)
+        except Exception as e:                              # noqa: BLE001
+            log.warning("ouvrir_numeros : %s: %s", type(e).__name__, e)
+
+    @ouvrir_numeros.before_loop
+    async def _avant_ouvrir_numeros(self):
+        await self.bot.wait_until_ready()
+        # Le bot admin demarre a cote : l'attendre un peu, sinon le premier
+        # passage (celui qui rattrape les salons existants) ne ferait rien.
+        for _ in range(60):
+            adm = _bot_admin()
+            if adm is not None and adm.is_ready():
+                return
+            await asyncio.sleep(5)
 
     @tasks.loop(minutes=10)
     async def auto_secure_general_channels(self):

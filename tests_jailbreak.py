@@ -19161,6 +19161,125 @@ except Exception as _eAc:
     _tbAc.print_exc()
     check("nouveau VA : testable", False, repr(_eAc)[:200])
 
+
+# ---------------------------------------------------------------------------
+# Salons de VA DEJA crees : le bot principal les ouvre au bot admin tout seul
+# (27/09/2026). _us_droits_ticket ne vaut que pour un salon neuf : le
+# -numero-mail de carter_izac, cree juste avant, restait ferme (« Missing
+# Access ») et /panelnumeroall ne le voyait pas. Plus de bouton a cliquer.
+print()
+print("=" * 70)
+print("Salons existants : le bot principal les ouvre au bot admin")
+print("=" * 70)
+try:
+    import asyncio as _aOv, sys as _sOv, inspect as _iOv, discord as _dOv
+    import cogs.welcome as _wOv
+    class _MbOv:
+        def __init__(self, i): self.id = i; self.bot = True
+        def __hash__(self): return hash(self.id)
+        def __eq__(self, o): return getattr(o, "id", None) == self.id
+    _meOv, _admOv = _MbOv(1), _MbOv(2)
+    class _PermsOv:
+        def __init__(self, ok): self._ok = ok
+        def __getattr__(self, k): return self._ok
+    class _ChOv:
+        def __init__(self, i, nom, ouvert, guild=None, refuse=False):
+            self.id, self.name, self.guild = i, nom, guild
+            self.ouvert, self.refuse, self.poses = ouvert, refuse, []
+            self._ow = _dOv.PermissionOverwrite(add_reactions=True)
+        def permissions_for(self, m): return _PermsOv(self.ouvert)
+        def overwrites_for(self, m): return _dOv.PermissionOverwrite(**dict(self._ow))
+        async def set_permissions(self, cible, *, overwrite=None, reason=None):
+            if self.refuse:
+                raise _dOv.Forbidden(type("R", (), {"status": 403, "reason": "x"})(), "Missing Access")
+            self.poses.append((cible, overwrite)); self.ouvert = True
+    class _GOv:
+        def __init__(self, chans): self.id = 55; self.me = _meOv; self.name = "US"; self.text_channels = chans
+        def get_member(self, i): return {1: _meOv, 2: _admOv}.get(i)
+    _admBotOv = type("A", (), {"user": type("U", (), {"id": 2})(),
+                                "is_ready": lambda self: True})()
+    _wuOv = type("M", (), {})(); _wuOv._BOT_ADMIN_REF = _admBotOv
+    _savWuOv = _sOv.modules.get("web_upload"); _sOv.modules["web_upload"] = _wuOv
+    try:
+        _cFerme = _ChOv(10, "🔢・carter_izac-numero-mail", False)
+        _cOuvert = _ChOv(11, "bob-numero-mail", True)
+        _cService = _ChOv(12, "all-numero-mail", False)
+        _cContent = _ChOv(13, "carter_izac-content", False)
+        _cRefus = _ChOv(14, "zoe-numero-mail", False, refuse=True)
+        _gOv = _GOv([_cFerme, _cOuvert, _cService, _cContent, _cRefus])
+        for _c in _gOv.text_channels: _c.guild = _gOv
+        _wuOv._BOT_REF = type("P", (), {"guilds": [_gOv],
+                                        "get_channel": lambda self, i: {c.id: c for c in _gOv.text_channels}.get(i)})()
+        _e1 = _aOv.run(_wOv.ouvrir_au_bot_admin(_cFerme))
+        _r1 = _cFerme.poses[0][1] if _cFerme.poses else None
+        check("acces : un salon ferme est ouvert au bot admin, par le principal",
+              _e1 == "ouvert" and _cFerme.poses and _cFerme.poses[0][0] is _admOv, repr(_e1))
+        check("acces : voir, ecrire, historique, messages, fichiers, liens",
+              _r1 is not None and all(getattr(_r1, k) for k in
+                  ("view_channel", "send_messages", "read_message_history",
+                   "manage_messages", "attach_files", "embed_links")), repr(_r1))
+        check("acces : la regle deja posee pour le bot admin est completee, pas remplacee",
+              _r1 is not None and _r1.add_reactions is True)
+        _e2 = _aOv.run(_wOv.ouvrir_au_bot_admin(_cOuvert))
+        check("acces : un salon deja ouvert n est pas reecrit",
+              _e2 == "deja" and not _cOuvert.poses)
+        _e3 = _aOv.run(_wOv.ouvrir_au_bot_admin(_cRefus))
+        check("acces : un refus de Discord ne leve pas, il rend un echec",
+              _e3 == "")
+        _e4 = _aOv.run(_wOv.ouvrir_au_bot_admin(11))
+        check("acces : un identifiant est resolu par le bot principal", _e4 == "deja")
+        # le passage complet : seuls les -numero-mail de VA, panneau pose
+        # uniquement la ou on vient d ouvrir
+        _cFerme.ouvert, _cFerme.poses = False, []
+        _panneauxOv = []
+        _savEnsure, _savSleep = _wOv._ensure_num_panel, _wOv.asyncio.sleep
+        async def _faux_ensure(bot, ch): _panneauxOv.append(ch.id); return True
+        async def _pas_d_attente(*a, **k): return None
+        _wOv._ensure_num_panel = _faux_ensure
+        _wOv.asyncio.sleep = _pas_d_attente
+        try:
+            _bOv = _aOv.run(_wOv.ouvrir_numeros_au_bot_admin(_wuOv._BOT_REF))
+        finally:
+            _wOv._ensure_num_panel = _savEnsure
+            _wOv.asyncio.sleep = _savSleep
+        check("rattrapage : seuls les -numero-mail de VA sont vises (ni all-, ni -content)",
+              sorted(_bOv["salons"]) == [10, 11, 14] and not _cService.poses
+              and not _cContent.poses, repr(_bOv))
+        check("rattrapage : le panneau n est pose que dans les salons qu on vient d ouvrir",
+              _panneauxOv == [10] and _bOv["poses"] == 1, repr(_panneauxOv))
+        check("rattrapage : un salon impossible a ouvrir est compte, pas tu",
+              _bOv["rates"] == ["zoe-numero-mail"], repr(_bOv["rates"]))
+        _wuOv._BOT_ADMIN_REF = None
+        _bVide = _aOv.run(_wOv.ouvrir_numeros_au_bot_admin(_wuOv._BOT_REF))
+        check("rattrapage : sans bot admin, rien n est touche", _bVide["salons"] == [])
+    finally:
+        if _savWuOv is not None:
+            _sOv.modules["web_upload"] = _savWuOv
+        else:
+            _sOv.modules.pop("web_upload", None)
+    # branchements
+    _srcW = _iOv.getsource(_wOv.Welcome)
+    check("rattrapage : lance au demarrage puis toutes les 30 min par le bot principal",
+          "self.ouvrir_numeros.start()" in _srcW and "tasks.loop(minutes=30)" in _srcW
+          and "ouvrir_numeros_au_bot_admin(self.bot)" in _srcW)
+    _srcE = _iOv.getsource(_wOv._ensure_num_panel)
+    check("panneau d un salon : ouvert au bot admin avant d y poser, relu frais s il vient d ouvrir",
+          "ouvrir_au_bot_admin(channel)" in _srcE and 'etat == "ouvert"' in _srcE)
+    import cogs.numeros as _nOv
+    _srcAll = _iOv.getsource(_nOv.NumerosCog.panelnumeroall.callback)
+    check("/panelnumeroall : le principal ouvre les salons AVANT la liste des cibles",
+          _srcAll.index("ouvrir_numeros_au_bot_admin") < _srcAll.index("targets = [")
+          and _srcAll.index("response.defer") < _srcAll.index("ouvrir_numeros_au_bot_admin")
+          and "fetch_channel" in _srcAll)
+    _srcUn = _iOv.getsource(_nOv.NumerosCog.panelnumero.callback)
+    check("/panelnumero : le salon est ouvert au bot avant d y toucher",
+          "ouvrir_au_bot_admin(ch.id)" in _srcUn
+          and _srcUn.index("ouvrir_au_bot_admin") < _srcUn.index("ch.pins()"))
+except Exception as _eOv:
+    import traceback as _tbOv
+    _tbOv.print_exc()
+    check("salons existants : testable", False, repr(_eOv)[:200])
+
 if FAILS:
     print("ECHECS :")
     for f in FAILS:
