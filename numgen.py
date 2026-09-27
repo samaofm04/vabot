@@ -282,7 +282,11 @@ def get_code(activation_id, provider="getatext"):
     if txt.startswith("STATUS_OK"):
         code = txt.split(":", 1)[1] if ":" in txt else ""
         return "code", code.replace(" ", "").strip()
-    if txt in ("STATUS_WAIT_CODE", "STATUS_WAIT_RETRY", "STATUS_WAIT_RESEND"):
+    # Avec ou sans « :<code> » : apres un « Nouveau code » (statut 3), le
+    # fournisseur repond STATUS_WAIT_RETRY:<ancien code> en attendant le
+    # suivant. L'egalite stricte classait cette attente en erreur : au bout
+    # de 5 tours, l'ecoute s'arretait sur « ❌ STATUS_WAIT_RETRY:… ».
+    if txt.startswith(("STATUS_WAIT_CODE", "STATUS_WAIT_RETRY", "STATUS_WAIT_RESEND")):
         return "wait", ""
     if txt == "STATUS_CANCEL":
         return "cancel", ""

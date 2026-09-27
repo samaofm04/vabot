@@ -16,12 +16,20 @@ dans ce même message. Seuls les refus et les confirmations sont éphémères.
 Il remplace les trois messages d'avant (panneau, numéro, code) : un salon à
 l'ancien format est converti au premier clic ou à la première pose
 (`poser_panneau`), le numéro en cours gardé.
+
+Chaque activation est aussi notée dans data/numgen_historique.json (prise,
+code, annulation, « Autre »…). Le récap du jour vit dans « 📊・debrief-day » :
+UN message, créé au premier numéro de la journée (heure du Bénin), édité au
+fil des événements (une édition par minute au plus), puis figé à minuit en
+récap final par édition du même message (`recap_tour`).
 """
 import asyncio
 import functools
 import logging
+import os
 import re
 import time
+from datetime import datetime, timedelta, timezone
 
 import discord
 from discord import app_commands
@@ -34,7 +42,32 @@ from pathlib import Path as _Path
 log = logging.getLogger("vabot.numeros")
 
 POLL_SECONDS = 5
-POLL_MAX = 180          # 3 min d'attente auto par code
+POLL_MAX = 180          # 3 min au rythme de POLL_SECONDS...
+#: ... puis une lecture toutes les POLL_LENT secondes, jusqu'a la fin de vie
+#: du numero (DUREE_NUMERO_SEC). L'ecoute s'arretait a 3 min alors que le
+#: numero vit 20 min : un VA qui tape le numero a la main demandait le SMS
+#: plus tard, le code arrivait et ne s'affichait plus ; il cliquait « Autre »
+#: et payait un second numero (relecture du 27/09/2026).
+POLL_LENT = 15
+#: Erreurs PASSAGERES d'affilee (timeout « ERR:… », page HTML d'un 502)
+#: avant d'abandonner l'ecoute. Une seule suffisait : le SMS arrive juste
+#: apres n'etait jamais affiche.
+ECOUTE_ERREURS_MAX = 5
+#: Un numero que le fournisseur refuse de reprendre est retente plus tard :
+#: GetAText n'accepte pas d'annulation dans les ~2 premieres minutes
+#: (EARLY_CANCEL_DENIED), et c'est justement la qu'un panneau inaffichable
+#: le rend.
+RENDU_DIFFERE_SEC = 125
+RENDU_ESSAIS = 3
+#: Essais d'affichage d'un code recu, et leur ecart. Un seul essai (dont le
+#: resultat n'etait meme pas lu) : une edition refusee (503, coupure)
+#: laissait « En attente du code… » avec le code au registre, jamais montre.
+AFFICHAGE_ESSAIS = 3
+AFFICHAGE_PAUSE_SEC = 5
+#: Fenetre de recherche du panneau dans l'historique, et du menage de ses
+#: doubles : le V2 n'est plus epingle, et un salon ou le VA a ecrit plus de
+#: 50 messages recevait un second panneau.
+FENETRE_PANNEAU = 200
 
 
 def _svc_label(code):
@@ -77,6 +110,9 @@ class _ActivationView(discord.ui.View):
         self.owner_id = None
         self.service = "ig"
         self.code = None            # rempli par le poll dès qu'il arrive
+        # Heure de prise (la vue nait avec le numero) : au-dela de
+        # DUREE_NUMERO_SEC il est mort, un refus de rendu ne bloque plus.
+        self.pris_le = time.time()
         lbl = "Voir le code SMS" if kind == "sms" else "Voir le code mail"
         self.children[0].label = lbl
         self.children[2].label = "Autre numéro" if kind == "sms" else "Autre mail"
@@ -127,15 +163,39 @@ class _ActivationView(discord.ui.View):
             f"j'écoute **{self.value}** pendant {POLL_MAX // 60} min.", ephemeral=True)
         await self.cog.watch(itx, self, first=False)
 
+    async def _rendre_ici(self):
+        """(on_peut_continuer, message) apres la tentative de rendu.
+
+        Le retour de numgen.cancel / mail_cancel etait jete : un clic dans
+        les ~2 premieres minutes recevait EARLY_CANCEL_DENIED, « Autre
+        numéro » en achetait un second quand meme, et le premier restait
+        actif, paye, connu de personne. Meme regle que le panneau : on ne
+        continue que si le fournisseur a repris le numero, s'il n'y a plus
+        rien a rendre (code deja recu, numero expire, activation inconnue)."""
+        ok, raison = await _rendre({"id": self.act_id, "kind": self.kind,
+                                    "provider": self.provider, "valeur": self.value},
+                                   "ephemere")
+        vivant = time.time() - self.pris_le < DUREE_NUMERO_SEC
+        if ok:
+            return True, "remboursé"
+        if self.code:
+            return True, "code déjà reçu : rien à rembourser"
+        if not vivant or _rendu_inutile(raison):
+            return True, "déjà clos chez le fournisseur"
+        log.warning("numgen: %s (vue ephemere) garde : rendu refuse (%s)", self.value, raison)
+        return False, raison
+
     @discord.ui.button(label="Autre numéro", emoji="🔁",
                        style=discord.ButtonStyle.secondary)
     async def other_one(self, itx: discord.Interaction, btn: discord.ui.Button):
         await itx.response.defer(ephemeral=True, thinking=True)
-        # on rend l'actuel (remboursé si aucun code) puis on en reprend un
-        if self.kind == "sms":
-            await asyncio.to_thread(numgen.cancel, self.act_id, self.provider)
-        else:
-            await asyncio.to_thread(numgen.mail_cancel, self.act_id)
+        # on rend l'actuel (remboursé si aucun code) puis on en reprend un --
+        # seulement si le rendu a reussi : sinon le VA garde CE numero.
+        continuer, mot = await self._rendre_ici()
+        if not continuer:
+            await itx.followup.send(f"❌ {mot}", ephemeral=True)
+            return
+        histo_evenement(self.kind, self.act_id, "remplace")
         self.stop()
         if self.kind == "sms":
             await self.cog.start_sms(itx, self.service)
@@ -145,13 +205,15 @@ class _ActivationView(discord.ui.View):
     @discord.ui.button(label="Annuler", emoji="❌", style=discord.ButtonStyle.danger)
     async def stop_it(self, itx: discord.Interaction, btn: discord.ui.Button):
         await itx.response.defer(ephemeral=True, thinking=True)
-        if self.kind == "sms":
-            await asyncio.to_thread(numgen.cancel, self.act_id, self.provider)
-        else:
-            await asyncio.to_thread(numgen.mail_cancel, self.act_id)
+        continuer, mot = await self._rendre_ici()
+        if not continuer:
+            # « annulé (remboursé…) » s'affichait alors que le fournisseur
+            # refusait : la vue reste active, le VA peut reessayer.
+            await itx.followup.send(f"❌ {mot}", ephemeral=True)
+            return
+        histo_evenement(self.kind, self.act_id, "annule")
         self.stop()
-        await itx.followup.send(f"❌ **{self.value}** annulé (remboursé si aucun code reçu).",
-                                ephemeral=True)
+        await itx.followup.send(f"❌ **{self.value}** annulé — {mot}.", ephemeral=True)
 
 
 class _PanneauAncienView(discord.ui.View):
@@ -210,6 +272,111 @@ class NumerosCog(commands.Cog):
         # « Autre » laissait l'ancienne interroger le nouveau numero puis
         # annoncer son delai depasse avant l'heure.
         self._ecoute = {}
+        # Reprise des ecoutes apres un redemarrage : une seule fois par
+        # processus (on_ready revient a chaque reconnexion complete).
+        self._repris = False
+        # Le recap quotidien (« debrief-day ») : une boucle par processus.
+        # _recap_postes garde en memoire ce qui est parti ({(jour, serveur):
+        # fiche}) -- si le registre ne peut pas s'ecrire, la boucle ne le
+        # reposte pas chaque minute, et le lui redonne des qu'il s'ecrit.
+        # _recap_dits : un souci (pas de salon, envoi refuse) se dit UNE fois,
+        # pas a chaque tour.
+        self._recap_tache = None
+        self._recap_arme = False
+        self._recap_postes = {}
+        self._recap_dits = set()
+        # Le message « en direct » du jour. _recap_signes : le texte (sans
+        # l'heure) de chaque message tel qu'envoye -- un tour sans nouveau
+        # chiffre n'edite rien. _direct_gen : la generation de l'historique a
+        # la derniere lecture ; None au demarrage, pour que le premier tour
+        # remette le jour a jour (evenements du temps de l'arret).
+        # _direct_edite_le : la derniere edition, pour n'en faire qu'une par
+        # minute. _direct_expire_le : le prochain numero a expirer, qui change
+        # le texte sans aucun evenement. _direct_a_refaire : une edition a
+        # echoue, elle repart au tour suivant.
+        self._recap_signes = {}
+        self._direct_gen = None
+        self._direct_edite_le = 0.0
+        self._direct_expire_le = None
+        self._direct_a_refaire = False
+        self._reveil = None
+        self._reveil_boucle = None
+
+    async def cog_unload(self):
+        t = self._recap_tache
+        if t is not None and hasattr(t, "cancel"):
+            t.cancel()
+        # Les ecoutes de cette instance s'arretent au tour suivant : un cog
+        # recharge reprend les siennes (_reprendre_ecoutes), et deux ecoutes
+        # du meme numero ecrivaient deux fois son code.
+        for cid in list(self._ecoute):
+            self._ecoute[cid] += 1
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        """Arme le recap du jour, puis reprend l'ecoute des numeros qui
+        attendaient leur code.
+
+        Chaque push sur main redemarre le bot (cron du VPS). L'ecoute d'un
+        numero pris juste avant mourait avec l'ancien processus : le code
+        arrivait chez le fournisseur et ne s'affichait plus tout seul, il
+        fallait penser a cliquer « Redemander ». Le registre sait quels
+        numeros attendent encore (vivants, sans code) : on les ecoute de
+        nouveau. Un salon que ce bot ne voit pas est DIT au journal."""
+        # Le recap ne part que de LA machine de production : un poste de dev
+        # qui lance le bot a son propre data/, se croirait en retard et
+        # posterait le meme recap une seconde fois (vu avec la quete du jour,
+        # 23/09). Son premier tour fige la veille restee « en direct »
+        # pendant l'arret, et remet le jour en cours a jour.
+        # Un drapeau, pas le retour de create_task : c'est lui qui garantit
+        # UNE boucle, quoi que rende la boucle d'evenements.
+        if not self._recap_arme and machine_prod():
+            self._recap_arme = True
+            self._recap_tache = self.bot.loop.create_task(self._boucle_recap())
+        await self._reprendre_ecoutes()
+
+    async def _reprendre_ecoutes(self):
+        """Relance l'ecoute de chaque numero vivant et sans code du registre.
+
+        Une fois par instance du cog. Appelee par on_ready au demarrage, et
+        par cog_load quand le cog est (re)charge sur un bot DEJA pret : il ne
+        recevra alors plus de on_ready, et ses numeros en attente restaient
+        sur « En attente du code… » sans que rien ne les redessine.
+        Ne leve jamais : c'est une tache de fond, et une tache qui meurt ne
+        dit rien. Un salon illisible est journalise, les autres repartent."""
+        if self._repris:
+            return
+        self._repris = True
+        repris = 0
+        try:
+            salons = _salons()
+        except Exception as e:                               # noqa: BLE001
+            log.exception("numgen: registre des salons illisible : aucune ecoute "
+                          "reprise (%s: %s)", type(e).__name__, e)
+            return
+        for cid, rec in salons.items():
+            try:
+                actif, code = _a_afficher(rec if isinstance(rec, dict) else {})
+                if not actif or code:
+                    continue
+                try:
+                    ch = self.bot.get_channel(int(cid))
+                except (TypeError, ValueError):
+                    ch = None
+                if ch is None:
+                    log.warning("numgen: ecoute de %s non reprise : salon %s introuvable "
+                                "pour ce bot", actif.get("valeur"), cid)
+                    continue
+                log.info("numgen: ecoute reprise pour #%s (%s)",
+                         getattr(ch, "name", "?"), actif.get("id"))
+                self._ecouter(ch)
+                repris += 1
+            except Exception as e:                           # noqa: BLE001
+                log.exception("numgen: ecoute du salon %s non reprise (%s: %s)",
+                              cid, type(e).__name__, e)
+        if repris:
+            log.info("numgen: %d ecoute(s) de code reprise(s) apres le redemarrage",
+                     repris)
 
     @commands.Cog.listener()
     async def on_interaction(self, itx: discord.Interaction):
@@ -242,6 +409,15 @@ class NumerosCog(commands.Cog):
                 log.error("numgen: vue persistante %s non enregistree (%s: %s) — "
                           "ses boutons ne repondront plus apres un redemarrage",
                           type(vue).__name__, type(e).__name__, e)
+        # Cog (re)charge sur un bot DEJA connecte (reload de l'extension) :
+        # on_ready ne viendra plus, les ecoutes se reprennent d'ici. Au
+        # demarrage normal, le bot n'est pas encore pret : on_ready s'en charge.
+        try:
+            pret = bool(getattr(self.bot, "is_ready", lambda: False)())
+        except Exception:                                    # noqa: BLE001
+            pret = False
+        if pret:
+            self.bot.loop.create_task(self._reprendre_ecoutes())
 
     # ---- Le panneau : un seul message, qui change --------------------------
     async def clic(self, itx, action):
@@ -302,18 +478,23 @@ class NumerosCog(commands.Cog):
                           getattr(ch, "name", "?"), type(e).__name__, e)
             return False
 
-    async def nouvelle_activation(self, itx, kind="sms", service="ig"):
+    async def nouvelle_activation(self, itx, kind="sms", service="ig", par=None):
         """Prend un numero (ou un mail) et le montre DANS le panneau.
 
         Rien d'ephemere : le VA n'a pas a garder un message fantome ouvert, et
         s'il recharge Discord il retrouve exactement le meme ecran.
+
+        `par` : le proprietaire du numero, quand ce n'est pas le cliqueur --
+        « Autre » garde celui du numero remplace. Un admin qui aidait un VA
+        devenait proprietaire du nouveau numero, et le VA recevait « 🔒 Ce
+        numéro a été pris par @admin » sur le numero dont il se servait.
         """
         ch = getattr(itx, "channel", None)
         if ch is None:
             return
         rec0 = _salon(ch.id)
         en_cours = rec0.get("actif")
-        if en_cours and not rec0.get("code_valeur") and _numero_vivant(en_cours):
+        if en_cours and not _code_courant(rec0) and _numero_vivant(en_cours):
             # Un numero attend encore son code : en prendre un autre ici
             # l'effacait de l'ecran sans le rendre (paye pour rien), et
             # c'etait peut-etre celui d'un autre membre.
@@ -334,22 +515,34 @@ class NumerosCog(commands.Cog):
             return
         self._achats.add(ch.id)
         try:
-            await self._acheter(itx, ch, kind, service)
+            await self._acheter(itx, ch, kind, service, par=par)
         finally:
             self._achats.discard(ch.id)
 
-    async def _acheter(self, itx, ch, kind, service):
+    async def _acheter(self, itx, ch, kind, service, par=None):
         # L'activation precedente (code deja recu, ou numero mort) laisse la
         # place : elle ne reviendra pas s'afficher si l'achat echoue.
-        _salon_ecrire(ch.id, actif=None, code_valeur=None)
+        # Registre inecrivable DES ICI : on n'achete rien. Le numero ne
+        # pourrait pas y etre inscrit, donc ni affiche ni ecoute.
+        try:
+            _salon_ecrire(ch.id, actif=None, code_valeur=None, code_de=None)
+        except Exception as e:                      # noqa: BLE001
+            log.error("numgen: registre des salons inecrivable (%s: %s) : rien n'est "
+                      "achete dans #%s", type(e).__name__, e, getattr(ch, "name", "?"))
+            await _ephemere(itx, "❌ Le registre des numéros ne s'écrit plus : rien n'a "
+                                 "été acheté. Préviens un admin.")
+            return
         self._ecoute[ch.id] = self._ecoute.get(ch.id, 0) + 1
         # LE PIEGE d'avant : un achat sans place pour l'afficher. Le clic
         # achetait un numero que rien ne montrait, perdu avec l'argent. Le
         # panneau doit donc etre ECRIT avant qu'on commande quoi que ce soit.
         cherche = ("⏳ Recherche d'un numéro…" if kind == "sms"
                    else "⏳ Recherche d'un mail…")
+        # Le dernier solde lu, sans relecture ; juste apres un redemarrage il
+        # n'y en a pas encore (None) : _vue_salon le lit alors une fois, au
+        # lieu d'afficher « 💵 — » le temps de la recherche.
         if not await maj_panneau(self.bot, ch, cog=self, souci=cherche,
-                                 solde=_DERNIER_SOLDE["sms"] or "—"):
+                                 solde=_DERNIER_SOLDE["sms"]):
             log.error("numgen: panneau de #%s impossible a ecrire : rien n'est achete",
                       getattr(ch, "name", "?"))
             await _ephemere(itx, "❌ Le panneau ne peut pas s'afficher dans ce salon : "
@@ -378,32 +571,147 @@ class NumerosCog(commands.Cog):
             "valeur": res.get("phone") or res.get("mail") or "?",
             "stale": res.get("stale", ""),
             "pays_nom": dict(numgen.PAYS).get(str(res.get("country") or ""), ""),
-            "par": getattr(getattr(itx, "user", None), "id", 0),
+            "par": par or getattr(getattr(itx, "user", None), "id", 0),
             # Heure de prise : un numero mort ne bloque plus le salon.
             "pris_le": int(time.time()),
         }
-        _salon_ecrire(ch.id, actif=actif, code_valeur=None)
-        if not await maj_panneau(self.bot, ch, cog=self):
+        # Noté AVANT de l'afficher : il est paye, et le recap du soir doit le
+        # compter meme si la suite echoue (il sera alors marque rendu).
+        histo_prise(actif, ch, _membre_proprietaire(itx, ch, actif["par"]))
+        # Le numero est PAYE : a partir d'ici, tout echec -- registre
+        # inecrivable, exception au dessin -- doit finir par le rendre. Une
+        # exception qui remontait telle quelle sautait le rendu : numero perdu.
+        try:
+            _salon_ecrire(ch.id, actif=actif, code_valeur=None, code_de=None)
+            montre = await maj_panneau(self.bot, ch, cog=self)
+            # Autre filet : le panneau se dessine d'apres le registre RELU.
+            # S'il n'y porte pas CE numero, ce que le VA voit n'est pas lui --
+            # un panneau « vide » bien dessine rendait True.
+            if montre and (_salon(ch.id).get("actif") or {}).get("id") != actif["id"]:
+                log.error("numgen: numero %s pris, absent du registre relu de #%s",
+                          actif.get("valeur"), getattr(ch, "name", "?"))
+                montre = False
+        except Exception as e:                      # noqa: BLE001
+            log.exception("numgen: numero %s pris, affichage en echec (%s: %s)",
+                          actif.get("valeur"), type(e).__name__, e)
+            montre = False
+        if not montre:
             # On n'a pas pu l'ECRIRE : le VA ne le verra jamais. Le garder,
             # c'est le payer pour rien — chaque clic coutait 0,25 $ pendant
             # que le panneau restait sur « Recherche d'un numero… ». On le
             # rend, ce qui rembourse tant qu'aucun code n'est arrive.
             log.error("numgen: numero %s pris mais INAFFICHABLE dans #%s — on le rend",
                       actif.get("valeur"), getattr(ch, "name", "?"))
-            try:
-                if kind == "sms":
-                    rendu = await asyncio.to_thread(numgen.cancel, actif["id"],
-                                                    actif["provider"])
-                else:
-                    rendu = await asyncio.to_thread(numgen.mail_cancel, actif["id"])
-                log.warning("numgen: rendu de %s : %s", actif.get("valeur"), rendu)
-            except Exception as e:                  # noqa: BLE001
-                log.error("numgen: rendu impossible (%s)", e)
-            _salon_ecrire(ch.id, actif=None, code_valeur=None)
-            await _ephemere(itx, "❌ Le numéro n'a pas pu s'afficher : il a été rendu "
-                                 "(remboursé).")
+            ok_rendu, raison = await _rendre(actif, "inaffichable")
+            if ok_rendu:
+                # Le VA ne l'a jamais vu : le recap ne le lui compte pas en
+                # echec, il le montre a part (« rendu par le bot »).
+                histo_evenement(kind, actif["id"], "rendu", rendu_auto=True)
+                try:
+                    _salon_ecrire(ch.id, actif=None, code_valeur=None, code_de=None)
+                except Exception as e:              # noqa: BLE001
+                    log.error("numgen: registre de #%s non remis a vide (%s: %s)",
+                              getattr(ch, "name", "?"), type(e).__name__, e)
+                await _ephemere(itx, "❌ Le numéro n'a pas pu s'afficher : il a été "
+                                     "rendu (remboursé).")
+                # Le panneau restait sur « Recherche d'un numéro… » : on le
+                # redessine d'apres le registre (vide), si Discord le permet.
+                try:
+                    await maj_panneau(self.bot, ch, cog=self)
+                except Exception as e:              # noqa: BLE001
+                    log.warning("numgen: panneau de #%s non redessine apres le rendu "
+                                "(%s: %s)", getattr(ch, "name", "?"), type(e).__name__, e)
+                return
+            await self._garder_non_rendu(itx, ch, actif, raison)
             return
         self._ecouter(ch)
+
+    async def _garder_non_rendu(self, itx, ch, actif, raison):
+        """Le fournisseur REFUSE de reprendre un numero inaffichable.
+
+        Le plus souvent « annulation trop tot » : GetAText ne reprend rien
+        dans les ~2 premieres minutes, et c'est justement la que ce cas
+        arrive. L'effacer du registre, c'etait le perdre : paye, actif chez
+        le fournisseur, et plus rien ne le connaissait -- ni affiche, ni
+        annulable, ni ecoute -- pendant que le VA lisait « rendu
+        (rembourse) ». On le GARDE, on ecoute son code, on retente le rendu
+        dans 2 min (_rendre_plus_tard), et le VA lit la verite."""
+        nom = getattr(ch, "name", "?")
+        au_registre = True
+        try:
+            _salon_ecrire(ch.id, actif=actif, code_valeur=None, code_de=None)
+        except Exception as e:                               # noqa: BLE001
+            # Registre inecrivable : le rendu differe le porte seul, sans
+            # condition (personne d'autre ne connait ce numero).
+            au_registre = False
+            log.error("numgen: %s non rendu ET hors registre dans #%s (%s: %s) -- "
+                      "seul le rendu differe le connait", actif.get("valeur"), nom,
+                      type(e).__name__, e)
+        log.warning("numgen: %s non rendu dans #%s (%s) : garde, nouvel essai dans %d s",
+                    actif.get("valeur"), nom, raison, RENDU_DIFFERE_SEC)
+        if au_registre:
+            self._ecouter(ch)
+        try:
+            self.bot.loop.create_task(self._rendre_plus_tard(ch, actif, itx, au_registre))
+        except Exception as e:                               # noqa: BLE001
+            log.error("numgen: rendu differe de %s NON programme (%s: %s) -- a rendre "
+                      "a la main chez le fournisseur", actif.get("valeur"),
+                      type(e).__name__, e)
+        await _ephemere(itx, "⚠️ Le numéro `%s` n'a pas pu s'afficher et n'est pas encore "
+                             "rendu (%s) : nouvel essai automatique dans 2 min."
+                             % (actif.get("valeur"), _ligne_courte(raison, 120)))
+        # Dernier essai d'affichage : sans lui, le panneau restait sur
+        # « Recherche d'un numéro… ».
+        try:
+            await maj_panneau(self.bot, ch, cog=self,
+                              souci="❌ Pas encore rendu : nouvel essai dans 2 min")
+        except Exception as e:                               # noqa: BLE001
+            log.warning("numgen: panneau de #%s toujours inaffichable (%s: %s)",
+                        nom, type(e).__name__, e)
+
+    async def _rendre_plus_tard(self, ch, actif, itx=None, au_registre=True):
+        """Retente le rendu d'un numero que le fournisseur refusait de
+        reprendre, tant qu'il est au panneau SANS code (un code arrive entre-
+        temps : le VA s'en sert, on n'y touche plus). Une trace par essai.
+        Ne leve jamais : c'est une tache de fond."""
+        nom = getattr(ch, "name", "?")
+        act_id = str(actif.get("id"))
+        valeur = actif.get("valeur")
+        try:
+            for essai in range(1, RENDU_ESSAIS + 1):
+                await asyncio.sleep(RENDU_DIFFERE_SEC)
+                if au_registre:
+                    rec = _salon(ch.id)
+                    if str((rec.get("actif") or {}).get("id")) != act_id:
+                        log.info("numgen: rendu differe de %s abandonne : il n'est plus "
+                                 "au panneau de #%s (annule ou remplace)", valeur, nom)
+                        return
+                    if _code_courant(rec):
+                        log.info("numgen: rendu differe de %s abandonne : son code est "
+                                 "arrive (#%s)", valeur, nom)
+                        return
+                ok, raison = await _rendre(actif, "rendu differe, essai %d/%d"
+                                           % (essai, RENDU_ESSAIS))
+                if ok or _rendu_inutile(raison):
+                    histo_evenement(actif.get("kind"), act_id, "rendu", rendu_auto=True)
+                    if au_registre:
+                        # Relu SANS await depuis : l'ecriture ne peut pas
+                        # effacer un numero pris entre-temps.
+                        rec = _salon(ch.id)
+                        if (str((rec.get("actif") or {}).get("id")) == act_id
+                                and not _code_courant(rec)):
+                            _salon_ecrire(ch.id, actif=None, code_valeur=None, code_de=None)
+                            self._ecoute[ch.id] = self._ecoute.get(ch.id, 0) + 1
+                            await maj_panneau(self.bot, ch, cog=self)
+                    return
+            log.error("numgen: %s TOUJOURS PAS RENDU apres %d essais dans #%s -- a rendre "
+                      "a la main chez le fournisseur", valeur, RENDU_ESSAIS, nom)
+            if itx is not None:
+                await _ephemere(itx, "❌ `%s` n'a pas pu être rendu : préviens un admin."
+                                % valeur)
+        except Exception as e:                               # noqa: BLE001
+            log.exception("numgen: rendu differe de %s interrompu (%s: %s) -- a verifier "
+                          "chez le fournisseur", valeur, type(e).__name__, e)
 
     def _ecouter(self, channel):
         """Lance l'ecoute du code de l'activation EN COURS du salon ; une
@@ -414,6 +722,103 @@ class NumerosCog(commands.Cog):
 
     def _ecoute_courante(self, channel, gen):
         return gen is None or self._ecoute.get(getattr(channel, "id", 0)) == gen
+
+    async def _montrer_code(self, channel, actif, val):
+        """Ecrit le code `val` de `actif` au registre, puis l'AFFICHE. Rend
+        True s'il est reellement a l'ecran.
+
+        L'activation n'est PLUS close ici. Le setStatus 6 partait des
+        l'affichage, et « 🔄 Nouveau code » (setStatus 3) n'est accepte que
+        sur une activation encore ouverte : il ne pouvait finir qu'en
+        « ❌ … », et le VA qui avait besoin d'un second SMS payait un autre
+        numero. La cloture se fait a « ✅ C'est bon », ou a « Autre » quand
+        un code a ete recu (action_salon)."""
+        nom = getattr(channel, "name", "?")
+        act_id = actif.get("id")
+        try:
+            # code_affiche=False jusqu'a l'affichage reussi : « Redemander »
+            # ne compte comme deja vu qu'un code REELLEMENT montre.
+            _salon_ecrire(channel.id, code_valeur=val, code_de=act_id, code_affiche=False)
+        except Exception as e:                               # noqa: BLE001
+            # Registre inecrivable : le panneau, dessine d'apres lui, ne
+            # montrerait pas ce code. On le met dans la ligne de souci plutot
+            # que de le perdre (l'activation reste ouverte).
+            log.error("numgen: code de %s recu mais registre inecrivable dans #%s (%s: %s) "
+                      "-- montre en ligne de souci", act_id, nom, type(e).__name__, e)
+            histo_evenement(actif.get("kind"), act_id, "code")
+            try:
+                return await maj_panneau(
+                    self.bot, channel, cog=self,
+                    souci="🔑 Code : %s (registre inécrivable, préviens un admin)" % val)
+            except Exception as e2:                          # noqa: BLE001
+                log.error("numgen: et le code de %s n'a pas pu s'afficher dans #%s (%s: %s)",
+                          act_id, nom, type(e2).__name__, e2)
+                return False
+        histo_evenement(actif.get("kind"), act_id, "code")
+        log.info("numgen: code recu pour #%s (%s)", nom, act_id)
+        return await self._afficher_code(channel, act_id, val)
+
+    async def _afficher_code(self, channel, act_id, val):
+        """Redessine le panneau qui porte le code `val` de `act_id`, en
+        AFFICHAGE_ESSAIS essais espaces de AFFICHAGE_PAUSE_SEC ; note
+        code_affiche=True au premier succes.
+
+        Le retour de maj_panneau etait ignore : deux editions ratees (503,
+        coupure, droits) laissaient « En attente du code… », l'activation
+        etait close quand meme et plus rien ne redessinait jusqu'au clic
+        suivant -- ou « Redemander » effacait ce code jamais vu."""
+        nom = getattr(channel, "name", "?")
+        for essai in range(1, AFFICHAGE_ESSAIS + 1):
+            rec = _salon(channel.id)
+            if (rec.get("actif") or {}).get("id") != act_id or _code_courant(rec) != val:
+                log.info("numgen: affichage du code de %s abandonne : le registre de #%s "
+                         "a change entre-temps", act_id, nom)
+                return False
+            try:
+                ok = await maj_panneau(self.bot, channel, cog=self)
+            except Exception as e:                           # noqa: BLE001
+                log.warning("numgen: affichage du code de %s dans #%s en echec (%s: %s)",
+                            act_id, nom, type(e).__name__, e)
+                ok = False
+            if ok:
+                # Relu sans await depuis : on ne marque pas le code d'un
+                # numero remplace pendant l'edition.
+                rec = _salon(channel.id)
+                if (rec.get("actif") or {}).get("id") == act_id and _code_courant(rec) == val:
+                    try:
+                        _salon_ecrire(channel.id, code_affiche=True)
+                    except Exception as e:                   # noqa: BLE001
+                        # Le code EST a l'ecran ; au pire « Redemander » le
+                        # remontrera au lieu d'en demander un autre.
+                        log.warning("numgen: code de %s affiche dans #%s, mais non note "
+                                    "comme tel (%s: %s)", act_id, nom, type(e).__name__, e)
+                return True
+            if essai < AFFICHAGE_ESSAIS:
+                log.warning("numgen: code de %s pas encore affiche dans #%s (essai %d/%d) : "
+                            "nouvel essai dans %d s", act_id, nom, essai, AFFICHAGE_ESSAIS,
+                            AFFICHAGE_PAUSE_SEC)
+                await asyncio.sleep(AFFICHAGE_PAUSE_SEC)
+        log.error("numgen: code de %s JAMAIS affiche dans #%s apres %d essais -- activation "
+                  "laissee ouverte, « Redemander » le montrera", act_id, nom, AFFICHAGE_ESSAIS)
+        return False
+
+    async def _code_arrive_pendant(self, ch, rec, act_id, deja, pendant):
+        """« Redemander » : vrai si le registre RELU (`rec`) porte pour
+        `act_id` un code autre que `deja` (le code deja montre) -- ecrit par
+        l'ecoute pendant l'appel au fournisseur, ou jamais montre. Il est
+        alors affiche, et rien n'est redemande ni efface.
+
+        La relecture ne comparait que l'id de l'activation : un code arrive
+        pendant l'appel etait efface juste apres, et le panneau revenait a
+        « En attente du code… »."""
+        neuf = _code_courant(rec)
+        if not neuf or neuf == deja:
+            return False
+        log.info("numgen: redemander de %s dans #%s : un code est au registre (arrive pendant "
+                 "%s, ou pas encore montre) -- il est montre, rien n'est redemande ni efface",
+                 act_id, getattr(ch, "name", "?"), pendant)
+        await self._afficher_code(ch, act_id, neuf)
+        return True
 
     async def suivre(self, channel, gen=None):
         """Ecoute le code et l'ECRIT dans le panneau des qu'il arrive.
@@ -441,19 +846,39 @@ class NumerosCog(commands.Cog):
                           getattr(channel, "name", "?"), e2)
 
     async def _suivre(self, channel, gen=None):
+        nom = getattr(channel, "name", "?")
         rec0 = _salon(channel.id)
-        act_id = (rec0.get("actif") or {}).get("id")
-        log.info("numgen: ecoute du code demarree pour #%s (%s)",
-                 getattr(channel, "name", "?"), act_id)
-        for _ in range(POLL_MAX // POLL_SECONDS):
-            await asyncio.sleep(POLL_SECONDS)
+        actif0 = rec0.get("actif") or {}
+        act_id = actif0.get("id")
+        debut = time.time()
+        try:
+            pris = float(actif0.get("pris_le") or 0)
+        except (TypeError, ValueError):
+            pris = 0.0
+        # On ecoute tant que le numero VIT (20 min apres sa prise), pas un
+        # nombre fixe de tours : l'ecoute s'arretait a 3 min, et le code
+        # arrive ensuite ne s'affichait plus. Un numero sans heure (d'avant
+        # le 27/09) garde l'ancien delai.
+        fin = (pris + DUREE_NUMERO_SEC) if pris else (debut + POLL_MAX)
+        reste = max(0.0, fin - debut)
+        log.info("numgen: ecoute du code demarree pour #%s (%s), %d s au plus",
+                 nom, act_id, reste)
+        # `dormi` borne la boucle meme si l'horloge ne bouge pas (bancs a
+        # sommeil nul) ; en vrai, l'heure de fin arrive la premiere.
+        dormi = 0.0
+        erreurs = 0
+        while dormi < reste and time.time() < fin:
+            age = debut + dormi - (pris or debut)
+            pas = POLL_SECONDS if age < POLL_MAX else max(POLL_SECONDS, POLL_LENT)
+            await asyncio.sleep(pas)
+            dormi += pas
             if not self._ecoute_courante(channel, gen):
                 return                      # une ecoute plus recente a pris le relais
             rec = _salon(channel.id)
             actif = rec.get("actif")
             if not actif or actif.get("id") != act_id:
                 return                      # annule ou remplace entre-temps
-            if rec.get("code_valeur"):
+            if _code_courant(rec):
                 return                      # deja trouve (« Redemander »)
             if actif.get("kind") == "sms":
                 etat, val = await asyncio.to_thread(
@@ -462,129 +887,824 @@ class NumerosCog(commands.Cog):
                 etat, val = await asyncio.to_thread(
                     numgen.get_mail_code, actif["id"], actif.get("stale", ""))
             if etat == "code" and val:
-                if actif.get("kind") == "sms":
-                    await asyncio.to_thread(numgen.finish, actif["id"],
-                                            actif["provider"])
-                _salon_ecrire(channel.id, code_valeur=val)
-                log.info("numgen: code recu pour #%s (%s)",
-                         getattr(channel, "name", "?"), act_id)
-                await maj_panneau(self.bot, channel, cog=self)
+                # Relu JUSTE avant d'ecrire, sans await entre les deux : pendant
+                # get_code (20 s de delai au pire), « Autre » a pu remplacer ce
+                # numero -- et son code s'ecrivait sous le numero suivant, dont
+                # l'ecoute s'arretait alors (numero paye pour rien).
+                rec = _salon(channel.id)
+                if (not self._ecoute_courante(channel, gen)
+                        or (rec.get("actif") or {}).get("id") != act_id):
+                    log.info("numgen: code de %s arrive apres son remplacement dans "
+                             "#%s : ignore", act_id, nom)
+                    return
+                # Ecrit, affiche (essais repetes), et l'activation reste
+                # OUVERTE : elle se clot a « C'est bon » (_montrer_code).
+                await self._montrer_code(channel, actif, val)
                 return
+            if etat == "error" and not _erreur_definitive(val):
+                # Timeout, coupure, page HTML d'un 502 : le numero vit
+                # toujours, son SMS peut arriver au tour suivant. Une seule
+                # erreur arretait l'ecoute pour de bon.
+                erreurs += 1
+                log.warning("numgen: ecoute de #%s : erreur passagere %d/%d (%s)",
+                            nom, erreurs, ECOUTE_ERREURS_MAX, _ligne_courte(val, 200))
+                if erreurs < ECOUTE_ERREURS_MAX:
+                    continue
             if etat in ("cancel", "error"):
-                log.warning("numgen: ecoute de #%s close : %s %s",
-                            getattr(channel, "name", "?"), etat, val)
+                log.warning("numgen: ecoute de #%s close : %s %s", nom, etat, val)
+                # Pas une fin : le numero reste au panneau, « Redemander » peut
+                # encore trouver son code. Note pour comprendre un « sans code ».
+                histo_evenement(actif.get("kind"), actif["id"], "souci",
+                                souci=_ligne_courte("%s %s" % (etat, val or ""), 150))
                 await maj_panneau(self.bot, channel, cog=self,
                                   souci="❌ %s" % (val or "activation close"))
                 return
+            erreurs = 0
         if self._ecoute_courante(channel, gen):
-            log.info("numgen: aucun code en %d min pour #%s (%s)", POLL_MAX // 60,
-                     getattr(channel, "name", "?"), act_id)
+            rec = _salon(channel.id)
+            if (rec.get("actif") or {}).get("id") != act_id or _code_courant(rec):
+                return
+            minutes = int(round((fin - (pris or debut)) / 60.0))
+            log.info("numgen: aucun code en %d min pour #%s (%s) : ecoute terminee",
+                     minutes, nom, act_id)
             await maj_panneau(self.bot, channel, cog=self,
-                              souci="❌ Aucun code reçu en %d min" % (POLL_MAX // 60))
+                              souci="❌ Aucun code reçu en %d min" % minutes)
 
-    async def action_salon(self, itx, quoi):
-        """🔄 Redemander · ✅ C'est bon · 🔁 Autre · ❌ Annuler, depuis le panneau."""
+    async def action_salon(self, itx, quoi, attendu=None, code_vu=None):
+        """🔄 Redemander · ✅ C'est bon · 🔁 Autre · ❌ Annuler, depuis le panneau.
+
+        `attendu` : l'id de l'activation que nommait la confirmation
+        (« Changer `A` pour un autre numéro ? »). Si le numero a change
+        depuis, rien n'est fait : deux confirmations ouvertes (double clic
+        sur « Autre ») rendaient A et achetaient B, puis rendaient B -- que
+        le VA venait peut-etre de saisir -- et achetaient C.
+
+        `code_vu` (avec `attendu`) : le code visible quand la question a ete
+        posee. Un code arrive PENDANT la confirmation (le VA attendait
+        justement son SMS) etait efface, et « Autre » rachetait un numero :
+        A paye et son code perdu, B paye en plus.
+        """
         ch = getattr(itx, "channel", None)
         if ch is None:
             return
+        nom = getattr(ch, "name", "?")
         rec = _salon(ch.id)
         actif = rec.get("actif")
+        if attendu is not None and str((actif or {}).get("id")) != str(attendu):
+            log.info("numgen: %s de %s ignore dans #%s : le numero a deja change (%s)",
+                     quoi, attendu, nom, (actif or {}).get("id"))
+            await _ephemere(itx, "Ce numéro a déjà changé : rien n'a été fait.")
+            await maj_panneau(self.bot, ch, cog=self)
+            return
         if not actif:
             # Un vieux message ou un double clic : rien en cours. Le panneau
             # est redessine (etat vide) au lieu d'un bouton muet.
-            log.info("numgen: %s sans numero en cours dans #%s", quoi,
-                     getattr(ch, "name", "?"))
+            log.info("numgen: %s sans numero en cours dans #%s", quoi, nom)
             await maj_panneau(self.bot, ch, cog=self)
             return
         sms = actif.get("kind") == "sms"
-        if quoi in ("autre", "annuler") and not _peut_gerer(itx, actif):
+        code = _code_courant(rec)
+        # TOUS les boutons d'un numero sont a son proprietaire (ou a un admin).
+        # Seuls Autre et Annuler l'etaient : dans un salon partage, un autre
+        # membre cliquait « C'est bon » et le code disparaissait avant que le
+        # proprietaire l'ait saisi -- deja « fini » chez le fournisseur, il
+        # n'etait plus nulle part ; « Nouveau code » l'effacait de meme.
+        # « C'est bon » d'un autre reste permis sur un numero MORT (20 min) :
+        # un proprietaire parti ne doit pas bloquer le salon.
+        gere = _peut_gerer(itx, actif) or (quoi == "fini" and not _numero_vivant(actif))
+        if quoi in ("autre", "annuler", "retry", "fini") and not gere:
             log.warning("numgen: %s bloque pour %s dans #%s (numero de %s)", quoi,
-                        getattr(getattr(itx, "user", None), "id", "?"),
-                        getattr(ch, "name", "?"), actif.get("par"))
-            await _ephemere(itx, "🔒 Ce numéro a été pris par <@%s> : lui seul (ou un "
-                                 "admin) peut l'annuler ou le changer." % actif.get("par"))
+                        getattr(getattr(itx, "user", None), "id", "?"), nom,
+                        actif.get("par"))
+            if quoi in ("autre", "annuler"):
+                mot = ("🔒 Ce numéro a été pris par <@%s> : lui seul (ou un admin) peut "
+                       "l'annuler ou le changer." % actif.get("par"))
+            else:
+                mot = ("🔒 Ce numéro a été pris par <@%s> : lui seul (ou un admin) peut "
+                       "s'en servir." % actif.get("par"))
+            await _ephemere(itx, mot)
             return
         log.info("numgen: %s par %s dans #%s", quoi,
-                 getattr(getattr(itx, "user", None), "id", "?"), getattr(ch, "name", "?"))
+                 getattr(getattr(itx, "user", None), "id", "?"), nom)
         if quoi == "fini":
-            if not rec.get("code_valeur") and _numero_vivant(actif):
+            if not code and _numero_vivant(actif):
                 # « C'est bon » sans code, ce serait abandonner un numero paye
                 # sans le rendre. Le bouton n'existe pas dans cet etat, mais un
                 # clic croise (deux onglets) peut encore l'envoyer.
                 log.warning("numgen: « C'est bon » ignore dans #%s : %s attend "
-                            "encore son code", getattr(ch, "name", "?"),
-                            actif.get("valeur"))
+                            "encore son code", nom, actif.get("valeur"))
                 await maj_panneau(self.bot, ch, cog=self)
                 return
-            _salon_ecrire(ch.id, actif=None, code_valeur=None)
+            _salon_ecrire(ch.id, actif=None, code_valeur=None, code_de=None,
+                          code_affiche=None)
+            histo_evenement(actif.get("kind"), actif.get("id"), "fini")
             self._ecoute[ch.id] = self._ecoute.get(ch.id, 0) + 1
             await maj_panneau(self.bot, ch, cog=self)
+            if code:
+                # L'activation se clot ICI, plus a la reception du code : clos
+                # des l'affichage, « Nouveau code » etait refuse. APRES
+                # l'effacement du registre, pas avant : l'appel HTTP (20 s au
+                # pire) ne tombe plus entre la lecture du registre et son
+                # ecriture, ou un autre clic pouvait s'intercaler.
+                await _finir(actif)
             return
+        act_id = actif.get("id")
         if quoi == "retry":
-            deja = rec.get("code_valeur")
+            # Le code DEJA affiche ne compte pas : « Nouveau code » en veut un
+            # autre. Un code au registre mais JAMAIS montre (code_affiche
+            # False : editions ratees), si : le VA ne l'a pas vu, et
+            # redemander un SMS le lui faisait perdre. Un code d'avant ce
+            # champ (pas de code_affiche) a ete montre.
+            deja = code if (code and rec.get("code_affiche", True) is not False) else None
             # D'ABORD regarder si le code est deja arrive. Il l'etait : visible
             # chez le fournisseur, absent du salon parce que l'ecoute avait
             # lache (un redemarrage du bot suffit). Redemander un SMS dans ce
-            # cas fait perdre celui qu'on avait deja. Le code DEJA affiche ne
-            # compte pas : « Nouveau code » en veut un autre.
+            # cas fait perdre celui qu'on avait deja.
             if sms:
                 etat0, val0 = await asyncio.to_thread(
                     numgen.get_code, actif["id"], actif["provider"])
             else:
                 etat0, val0 = await asyncio.to_thread(
                     numgen.get_mail_code, actif["id"], actif.get("stale", ""))
-            if etat0 == "code" and val0 and val0 != deja:
-                if sms:
-                    await asyncio.to_thread(numgen.finish, actif["id"],
-                                            actif["provider"])
-                _salon_ecrire(ch.id, code_valeur=val0)
+            # Relu apres l'appel : « Autre » a pu remplacer le numero pendant
+            # ce temps, et ce qui suit ecrirait sur le suivant.
+            rec = _salon(ch.id)
+            if (rec.get("actif") or {}).get("id") != act_id:
+                log.info("numgen: redemander de %s sans suite dans #%s : numero "
+                         "remplace entre-temps", act_id, nom)
                 await maj_panneau(self.bot, ch, cog=self)
+                return
+            if await self._code_arrive_pendant(ch, rec, act_id, deja, "la lecture du code"):
+                return
+            if etat0 == "code" and val0 and val0 != deja:
+                # Le code arrive souvent PAR ici (ecoute perdue a un
+                # redemarrage) : _montrer_code le note aussi a l'historique,
+                # sans quoi le recap le comptait « sans code » alors que le VA
+                # l'avait eu. L'activation reste ouverte (C'est bon la clot).
+                await self._montrer_code(ch, actif, val0)
                 return
             if sms:
                 ok, msg = await asyncio.to_thread(
                     numgen.retry, actif["id"], actif["provider"])
                 if not ok:
-                    log.warning("numgen: nouveau code refuse pour #%s : %s",
-                                getattr(ch, "name", "?"), msg)
+                    log.warning("numgen: nouveau code refuse pour #%s : %s", nom, msg)
                     await maj_panneau(self.bot, ch, cog=self, souci="❌ %s" % msg)
+                    # Le refus du « Redemander » ne tue pas le numero : son
+                    # premier SMS peut encore arriver. Sans ecoute relancee
+                    # ici, il n'etait jamais affiche (numero repris au
+                    # redemarrage, ecoute deja finie).
+                    if (not deja and _numero_vivant(actif) and etat0 != "cancel"
+                            and not (etat0 == "error" and _erreur_definitive(val0))):
+                        log.info("numgen: %s : l'ecoute de son code continue (#%s)",
+                                 actif.get("valeur"), nom)
+                        self._ecouter(ch)
+                    return
+                rec = _salon(ch.id)
+                if (rec.get("actif") or {}).get("id") != act_id:
+                    log.info("numgen: nouveau code de %s demande, mais le numero a ete "
+                             "remplace entre-temps (#%s)", act_id, nom)
+                    await maj_panneau(self.bot, ch, cog=self)
+                    return
+                # Le SMS arrive souvent PENDANT setStatus 3 : les VA cliquent
+                # justement quand il tarde. L'ecoute l'a ecrit et affiche ;
+                # l'effacer ci-dessous le faisait disparaitre du panneau.
+                if await self._code_arrive_pendant(ch, rec, act_id, deja,
+                                                   "la demande d'un nouveau code"):
                     return
             else:
-                # Le prochain code du mail doit etre DIFFERENT de celui-ci.
-                actif["stale"] = deja or actif.get("stale", "")
-                _salon_ecrire(ch.id, actif=actif)
-            _salon_ecrire(ch.id, code_valeur=None)
+                # Le prochain code du mail doit etre DIFFERENT de celui-ci. On
+                # repart de l'activation RELUE, pas de celle d'avant l'appel.
+                frais = dict(rec.get("actif") or {})
+                frais["stale"] = deja or frais.get("stale", "")
+                _salon_ecrire(ch.id, actif=frais)
+            # Aucun await depuis la derniere relecture : rien ne peut ecrire
+            # un code entre elle et cet effacement.
+            _salon_ecrire(ch.id, code_valeur=None, code_de=None, code_affiche=None)
             await maj_panneau(self.bot, ch, cog=self)
             self._ecouter(ch)
             return
-        # « Autre » et « Annuler » rendent le numero en cours : rembourse tant
-        # qu'aucun code n'est arrive.
-        rendu = None
-        try:
-            if sms:
-                rendu = await asyncio.to_thread(numgen.cancel, actif["id"],
-                                                actif["provider"])
-            else:
-                rendu = await asyncio.to_thread(numgen.mail_cancel, actif["id"])
-        except Exception as e:                               # noqa: BLE001
-            log.warning("numgen: %s dans #%s : rendu en echec (%s: %s)", quoi,
-                        getattr(ch, "name", "?"), type(e).__name__, e)
-        log.info("numgen: %s rendu dans #%s : %s", actif.get("valeur"),
-                 getattr(ch, "name", "?"), rendu)
-        trop_tot = numgen._MSG.get("EARLY_CANCEL_DENIED")
-        if (sms and isinstance(rendu, tuple) and len(rendu) == 2 and not rendu[0]
-                and rendu[1] == trop_tot and _numero_vivant(actif)):
-            # Le fournisseur REFUSE de le reprendre si tot : l'effacer d'ici
-            # laissait croire qu'il etait rendu, et « Autre » en payait un
-            # second. Il reste affiche, avec la raison.
-            await maj_panneau(self.bot, ch, cog=self, souci="❌ %s" % trop_tot)
+        # La question « Changer `A` … ? » a ete posee sans code, et un code est
+        # arrive depuis (l'ecoute l'a ecrit et montre) : on ne touche a rien.
+        # Le VA qui clique « Oui » ne l'a pas encore vu.
+        if attendu is not None and code and code != code_vu:
+            log.info("numgen: %s de %s ignore dans #%s : un code est arrive pendant la "
+                     "confirmation", quoi, act_id, nom)
+            await maj_panneau(self.bot, ch, cog=self)
+            await _ephemere(itx, "🔑 Le code vient d'arriver : rien n'a été changé.")
             return
-        _salon_ecrire(ch.id, actif=None, code_valeur=None)
+        # « Autre » et « Annuler » rendent le numero en cours : rembourse tant
+        # qu'aucun code n'est arrive. Le RESULTAT compte : un refus (« trop
+        # tot », timeout, 5xx) effacait le numero quand meme -- « Autre » en
+        # achetait un second pendant que le premier restait actif, paye et
+        # inconnu de tous.
+        if code:
+            # Un code a ete recu : l'annulation serait refusee (SMS livre, rien
+            # a rembourser). On TERMINE l'activation, qui ne l'est plus a la
+            # reception du code.
+            await _finir(actif)
+            ok_rendu, raison = False, "code deja recu"
+        else:
+            ok_rendu, raison = await _rendre(actif, quoi)
+        rec = _salon(ch.id)
+        if (rec.get("actif") or {}).get("id") != act_id:
+            log.info("numgen: %s de %s : le numero a change pendant le rendu (#%s)",
+                     quoi, act_id, nom)
+            await maj_panneau(self.bot, ch, cog=self)
+            return
+        code_apres = _code_courant(rec)
+        if code_apres and code_apres != code:
+            # Le code est arrive PENDANT l'appel au fournisseur. Vider le
+            # registre l'effacait avant que le VA l'ait vu (et « Autre »
+            # rachetait). Numero et code restent ; si le fournisseur a accepte
+            # le rendu, le journal le dit.
+            log.warning("numgen: %s de %s dans #%s : un code est arrive pendant l'appel au "
+                        "fournisseur (rendu %s) -- numero et code gardes", quoi,
+                        actif.get("valeur"), nom, "ACCEPTE" if ok_rendu else "refuse")
+            await maj_panneau(self.bot, ch, cog=self)
+            await _ephemere(itx, "🔑 Le code vient d'arriver : le numéro est gardé.")
+            return
+        vivant = _numero_vivant(actif)
+        if not (ok_rendu or code or not vivant or _rendu_inutile(raison)):
+            # Refuse, vivant, sans code : il reste affiche, avec la raison
+            # (« annulation trop tôt — attends ~2 min » le plus souvent).
+            log.warning("numgen: %s de %s refuse par le fournisseur dans #%s (%s) : "
+                        "numero garde", quoi, actif.get("valeur"), nom, raison)
+            await maj_panneau(self.bot, ch, cog=self, souci="❌ %s" % raison)
+            return
+        if not ok_rendu:
+            log.info("numgen: %s de %s sans rendu (%s) : %s", quoi,
+                     actif.get("valeur"), raison,
+                     "code deja recu, activation terminee" if code else
+                     ("numero expire" if not vivant else "deja clos chez le fournisseur"))
+        _salon_ecrire(ch.id, actif=None, code_valeur=None, code_de=None, code_affiche=None)
+        # Seulement ici : un numero que le fournisseur refuse de reprendre
+        # (ci-dessus) reste au panneau, il n'est ni annule ni remplace.
+        histo_evenement(actif.get("kind"), actif.get("id"),
+                        "remplace" if quoi == "autre" else "annule")
         self._ecoute[ch.id] = self._ecoute.get(ch.id, 0) + 1
         if quoi == "autre":
+            # Le nouveau numero reste a CELUI du numero remplace, meme si
+            # c'est un admin qui a clique.
             await self.nouvelle_activation(itx, "sms" if sms else "mail",
-                                           actif.get("service", "ig"))
+                                           actif.get("service", "ig"),
+                                           par=actif.get("par"))
             return
         await maj_panneau(self.bot, ch, cog=self)
+
+    # ------------------------------------------- récap du jour (debrief-day)
+    # UN message par jour et par serveur dans « debrief-day » : cree au premier
+    # numero de la journee (heure du Benin), edite a chaque evenement de
+    # l'historique (« je peux avoir un recap par jour en live ? », 27/09/2026),
+    # puis fige a minuit en recap final PAR EDITION du meme message -- plus de
+    # second message a 00:05.
+    def _dire_une_fois(self, cle, niveau, msg, *args):
+        """Un souci du recap se dit UNE fois par processus : la boucle repasse
+        chaque minute, et le meme avertissement noyait le journal."""
+        if cle in self._recap_dits:
+            return
+        self._recap_dits.add(cle)
+        niveau(msg, *args)
+
+    def _reveiller(self):
+        """Appelee apres chaque evenement de l'historique : reveille la boucle
+        du recap, qui sinon attendait son tour suivant (jusqu'a une minute)
+        pour creer le message du premier numero."""
+        ev, boucle = self._reveil, self._reveil_boucle
+        if ev is None or boucle is None:
+            return
+        try:
+            # call_soon_threadsafe : un evenement note depuis un fil
+            # (asyncio.to_thread) ne doit pas toucher l'Event directement.
+            boucle.call_soon_threadsafe(ev.set)
+        except RuntimeError:
+            pass                    # boucle fermee : le bot s'arrete
+
+    async def _attendre_reveil(self, delai):
+        """Dort `delai` secondes, moins si un evenement arrive entre-temps."""
+        ev = self._reveil
+        if ev is None:
+            await asyncio.sleep(delai)
+            return
+        try:
+            await asyncio.wait_for(ev.wait(), timeout=max(0.0, delai))
+        except asyncio.TimeoutError:
+            pass
+        # Efface APRES le reveil et AVANT le tour : un evenement arrive
+        # pendant le tour qui suit remet le drapeau, et la generation de
+        # l'historique (_HISTO_GEN) garde la trace de tout evenement.
+        ev.clear()
+
+    async def _boucle_recap(self):
+        """Tient le recap a jour : un tour a chaque evenement de l'historique,
+        et au moins un par minute.
+
+        Un reveil court plutot qu'un long sommeil jusqu'a minuit : le bot
+        redemarre a chaque push, et un sommeil de 20 h repartait de zero. Un
+        tour sans evenement ne coute qu'une lecture du registre : il ne relit
+        pas l'historique (plusieurs Mo a la fin des 90 jours)."""
+        attendre = getattr(self.bot, "wait_until_ready", None)
+        if attendre is not None:
+            try:
+                await attendre()
+            except Exception:                                # noqa: BLE001
+                log.exception("numgen: recap : attente de la connexion en echec")
+        self._reveil = asyncio.Event()
+        self._reveil_boucle = asyncio.get_running_loop()
+        _ECOUTEURS_HISTO.append(self._reveiller)
+        log.info("numgen: recap des numeros arme (salon « %s », en direct, fige a minuit "
+                 "heure du Benin)", RECAP_SALON)
+        try:
+            while True:
+                bilan = None
+                try:
+                    bilan = await self.recap_tour()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:                       # noqa: BLE001
+                    # Une tache de fond qui leve meurt sans un mot : le recap
+                    # s'arretait pour de bon. On le dit, et on repasse.
+                    log.exception("numgen: tour du recap en echec (%s: %s)",
+                                  type(e).__name__, e)
+                delai = float(RECAP_PAS_SEC)
+                reveil = (bilan or {}).get("reveil")
+                if reveil:
+                    # Fin du regroupement, ou prochain numero qui expire :
+                    # l'edition part a l'heure, pas jusqu'a une minute apres.
+                    delai = max(1.0, min(delai, float(reveil) - time.time()))
+                await self._attendre_reveil(delai)
+        finally:
+            try:
+                _ECOUTEURS_HISTO.remove(self._reveiller)
+            except ValueError:
+                pass
+            self._reveil = self._reveil_boucle = None
+
+    async def recap_tour(self, maintenant=None):
+        """Un tour du recap : fige les journees finies, tient a jour la
+        journee en cours. Rend le bilan du tour.
+
+        Journee finie (des minuit, heure du Benin) : son message « en direct »
+        est EDITE en recap final. S'il a disparu, ou ne peut pas etre edite,
+        le recap final est poste UNE fois (repli). Un jour sans message (bot
+        arrete, registre perdu) est poste de la meme facon, dans la limite du
+        rattrapage (RECAP_RATTRAPAGE_JOURS).
+
+        Journee en cours : le message est cree au premier numero, puis edite
+        quand son texte change -- au plus une fois par RECAP_DIRECT_PAS_SEC.
+        Les evenements d'une rafale partent ensemble a la fin de l'attente, et
+        le dernier part toujours : bilan["reveil"] dit quand repasser.
+
+        Un numero pris a 23:58 peut recevoir son code jusqu'a 00:18 : le recap
+        fige a minuit est corrige (meme regroupement) tant qu'un numero de la
+        journee attend encore, puis « fige » pour de bon."""
+        now = float(time.time() if maintenant is None else maintenant)
+        # La generation AVANT toute lecture : un evenement note pendant le tour
+        # (les envois Discord rendent la main) laisse le recap « a refaire ».
+        gen = _HISTO_GEN[0]
+        bilan = {"postes": [], "edites": [], "finalises": [], "replis": [], "attente": [],
+                 "sans_salon": [], "vides": [], "echecs": [], "retenu": False,
+                 "reveil": None}
+        reg = _recap_lire()
+        if reg is None:
+            return bilan
+        premiere = "jours" not in reg
+        jours_reg = reg.setdefault("jours", {})
+        aujourdhui = jour_benin(now)
+        fenetre = jours_a_recapituler(now)
+        entrees = None
+        if premiere:
+            # Registre neuf (premiere mise en route, ou perdu) : un PLANCHER
+            # durable, « depuis ». Rattraper une semaine sur un registre vide,
+            # c'etait reposter des recaps deja partis -- et la garde d'avant
+            # (« seulement la veille ») ne tenait qu'UN tour : il enregistrait
+            # la cle « jours », le suivant (60 s plus tard) n'etait plus
+            # « premier » et reprenait les 7 jours (6 doublons simules).
+            entrees = _histo_cloturer(now)
+            if entrees is None:
+                return bilan
+            if any(_ts(e.get("pris_le")) < bornes_jour(aujourdhui)[0] for e in entrees):
+                depuis = fenetre[-1]
+            else:
+                # L'historique nait AUJOURD'HUI (deploiement) : la journee en
+                # cours est partielle. Son recap aurait fini sous « Journée
+                # complète : de 00h00 à 23h59 », sans les numeros d'avant le
+                # deploiement, et sans rien qui le signale.
+                # Le proprietaire veut le voir EN DIRECT des la mise en route
+                # (27/09/2026) : la journee est recapitulee, mais son en-tete
+                # dit « depuis HHhMM » au lieu de « depuis 00h00 ».
+                # L'heure de depart est celle du premier numero connu : un
+                # numero pris avant ce premier tour est compte, l'en-tete ne
+                # doit pas dire qu'on a commence apres lui.
+                depuis = aujourdhui
+                debut = min([now] + [_ts(e.get("pris_le")) for e in entrees
+                                     if _ts(e.get("pris_le"))])
+                reg.setdefault("partiel", {})[aujourdhui.isoformat()] = int(debut)
+                log.info("numgen: recap : l'historique commence aujourd'hui (%s) : journee "
+                         "partielle, recapitulee depuis %s", aujourdhui.isoformat(),
+                         datetime.fromtimestamp(debut, BENIN).strftime("%Hh%M"))
+            reg["depuis"] = depuis.isoformat()
+            # Des maintenant, le registre existe (avec son plancher) : un recap
+            # retenu (salon absent) n'est pas oublie au tour suivant.
+            self._recap_sauver(reg)
+        plancher = str(reg.get("depuis") or "")
+        self._redonner_fiches(reg, fenetre[0].isoformat())
+
+        # Un recap retenu (salon absent, envoi refuse) qui sort de la fenetre
+        # de rattrapage ne partira plus : on le DIT, une fois, au lieu de le
+        # laisser filer.
+        abandon = False
+        for cle in sorted(jours_reg):
+            if cle >= fenetre[0].isoformat() or not isinstance(jours_reg[cle], dict):
+                continue
+            for gid, v in jours_reg[cle].items():
+                if isinstance(v, dict) and not _finalise(v) and not v.get("abandonne"):
+                    pourquoi = (("envoi toujours refuse (%s)" % v["envoi_refuse"])
+                                if v.get("envoi_refuse")
+                                else "toujours pas de salon « %s »" % RECAP_SALON)
+                    log.warning("numgen: recap du %s (serveur %s, %s numero(s)) abandonne : "
+                                "%s apres %d jours", cle, gid, v.get("numeros", "?"),
+                                pourquoi, RECAP_RATTRAPAGE_JOURS)
+                    v["abandonne"] = True
+                    abandon = True
+        if abandon:
+            self._recap_sauver(reg)
+
+        a_voir = [j for j in fenetre if j.isoformat() >= plancher]
+        a_finir = [j for j in a_voir if not _jour_fini(jours_reg.get(j.isoformat()))]
+        a_corriger = [j for j in a_voir if _jour_a_corriger(jours_reg.get(j.isoformat()))]
+        direct = aujourdhui.isoformat() >= plancher
+        # « Sale » : l'historique a bouge depuis la derniere lecture (ou jamais
+        # lu dans ce processus : au redemarrage, le jour est remis a jour), une
+        # edition a echoue, ou un numero vient d'expirer -- ce dernier change
+        # le texte sans aucun evenement.
+        sale = (self._direct_gen != gen or self._direct_a_refaire
+                or (self._direct_expire_le is not None and now >= self._direct_expire_le))
+        vif = sale and (direct or bool(a_corriger))
+        if vif and 0 <= now - self._direct_edite_le < RECAP_DIRECT_PAS_SEC:
+            # Regroupement : la derniere edition a moins d'une minute. Rien
+            # n'est perdu -- le recap reste « sale », et le tour de la fin de
+            # l'attente envoie la derniere valeur.
+            bilan["retenu"] = True
+            bilan["reveil"] = self._direct_edite_le + RECAP_DIRECT_PAS_SEC
+            vif = False
+        elif self._direct_expire_le is not None and now < self._direct_expire_le:
+            bilan["reveil"] = self._direct_expire_le
+        # Rien a figer, rien de neuf : le tour s'arrete la, sans relire
+        # l'historique.
+        if not a_finir and not vif:
+            return bilan
+        if entrees is None:
+            entrees = _histo_cloturer(now)
+            if entrees is None:
+                return bilan
+        if vif:
+            # Remis a zero AVANT les editions : un echec pendant ce tour le
+            # repose, et l'edition repart au tour suivant.
+            self._direct_a_refaire = False
+        corrige = False
+        for jour in a_voir:
+            if jour in a_finir or (vif and jour in a_corriger):
+                corrige |= await self._figer_jour(jour, entrees, reg, bilan, now)
+        if not vif:
+            return bilan
+        self._direct_gen = gen
+        edite = corrige
+        if direct:
+            agg = agreger(entrees, aujourdhui, now)
+            for gid in sorted(agg):
+                r = await self._synchroniser(aujourdhui, gid, agg[gid], reg, bilan, now,
+                                             final=False)
+                edite |= r == "fait"
+        if edite:
+            self._direct_edite_le = now
+        attentes = [_ts(e.get("pris_le")) + DUREE_NUMERO_SEC for e in entrees
+                    if _issue(e, now) == "attente"]
+        self._direct_expire_le = min(attentes) if attentes else None
+        if self._direct_a_refaire:
+            bilan["reveil"] = now + RECAP_PAS_SEC
+        elif self._direct_expire_le is not None:
+            bilan["reveil"] = self._direct_expire_le
+        return bilan
+
+    async def _figer_jour(self, jour, entrees, reg, bilan, now):
+        """Fige le recap d'une journee finie, serveur par serveur. Rend True si
+        un recap DEJA fige a ete corrige (edition comptee dans le
+        regroupement)."""
+        cle = jour.isoformat()
+        jours_reg = reg["jours"]
+        agg = agreger(entrees, jour, now)
+        if not agg:
+            if cle not in jours_reg:
+                # Rien a poster (choix du 27/09/2026 : pas de message
+                # « aucun numero ») -- mais on le dit, et on le retient.
+                log.info("numgen: recap du %s : aucun numero pris ce jour-la, "
+                         "rien n'est poste", cle)
+                jours_reg[cle] = {}
+                self._recap_sauver(reg)
+            elif isinstance(jours_reg.get(cle), dict) and not _jour_fini(jours_reg[cle]):
+                # Des fiches, mais plus aucune activation ce jour-la
+                # (historique perdu ou purge) : rien ne peut les completer.
+                log.warning("numgen: recap du %s : l'historique n'a plus aucune activation "
+                            "de ce jour -- recap laisse tel quel", cle)
+                for gid, v in list(jours_reg[cle].items()):
+                    if isinstance(v, dict):
+                        self._poser_fiche(reg, cle, gid, dict(v, finalise=True, fige=True))
+            bilan["vides"].append(cle)
+            return False
+        attente = sum(g["attente"] for g in agg.values())
+        if attente:
+            self._dire_une_fois(
+                ("attente", cle), log.info,
+                "numgen: recap du %s fige a minuit : %d numero(s) attendent encore leur "
+                "code (au plus %d min), il sera corrige a leur arrivee",
+                cle, attente, DUREE_NUMERO_SEC // 60)
+            bilan["attente"].append(cle)
+        corrige = False
+        jr = jours_reg.get(cle)
+        for gid in sorted(agg):
+            fiche = jr.get(gid) if isinstance(jr, dict) else None
+            fiche = fiche if isinstance(fiche, dict) else {}
+            if _fige(fiche) or fiche.get("abandonne"):
+                continue
+            deja = _finalise(fiche)
+            r = await self._synchroniser(jour, gid, agg[gid], reg, bilan, now, final=True)
+            corrige |= deja and r == "fait"
+        return corrige
+
+    def _guilde(self, gid):
+        try:
+            return self.bot.get_guild(int(gid)) if int(gid) else None
+        except (TypeError, ValueError):
+            return None
+
+    def _salon_recap(self, guild, fiche):
+        """Le salon du recap : celui ou vit deja son message (meme renomme),
+        sinon le « debrief-day » du serveur."""
+        par_nom = salon_debrief(guild) if guild is not None else None
+        cid = fiche.get("salon")
+        if not cid or (par_nom is not None and getattr(par_nom, "id", None) == cid):
+            return par_nom
+        try:
+            ch = self.bot.get_channel(int(cid))
+        except Exception:                                    # noqa: BLE001
+            ch = None
+        # Ce serveur-la seulement : le recap d'une agence dans le salon d'une
+        # autre, c'est montrer ses VA a qui ne doit pas les voir.
+        if ch is not None and getattr(getattr(ch, "guild", None), "id", None) == getattr(
+                guild, "id", None):
+            return ch
+        return par_nom
+
+    async def _retrouver(self, salon, jour):
+        """L'id d'un recap de ce jour deja poste par ce bot dans le salon, ou
+        None. Le registre n'en a pas trace s'il a ete perdu, ou s'il n'a pas pu
+        s'ecrire avant un redemarrage : reposter faisait deux messages pour le
+        meme jour."""
+        hist = getattr(salon, "history", None)
+        moi = getattr(getattr(self.bot, "user", None), "id", None)
+        if hist is None or moi is None:
+            return None
+        titres = {titre_recap(jour, False), titre_recap(jour, True)}
+        try:
+            async for m in hist(limit=RECAP_RETROUVER):
+                if getattr(getattr(m, "author", None), "id", None) != moi:
+                    continue
+                embs = getattr(m, "embeds", None) or []
+                if embs and getattr(embs[0], "title", None) in titres:
+                    log.warning("numgen: recap du %s retrouve dans #%s (message %s) sans trace "
+                                "au registre : il est edite, pas reposte", jour.isoformat(),
+                                getattr(salon, "name", "?"), m.id)
+                    return m.id
+        except Exception as e:                               # noqa: BLE001
+            log.warning("numgen: recap du %s : messages de #%s illisibles (%s: %s) -- "
+                        "recherche d'un recap deja poste impossible", jour.isoformat(),
+                        getattr(salon, "name", "?"), type(e).__name__, e)
+        return None
+
+    async def _editer_recap(self, salon, mid, emb, cle, gid, fiche, reg, bilan, repli):
+        """Edite un message du recap : « ok », « disparu » (a poster a neuf),
+        ou « echec » (a retenter au prochain tour).
+
+        `repli` : le message DOIT changer (recap « en direct » a figer). S'il
+        ne peut pas etre edite (droits, ou RECAP_FINAL_ESSAIS erreurs de
+        suite), le recap final est poste a neuf plutot que de laisser « en
+        direct » sur une journee finie. Sinon (journee en cours, correction
+        d'un recap deja fige), seul un message DISPARU est reposte : un second
+        message pour le meme jour ne se justifie que si le premier n'est plus
+        la."""
+        try:
+            await salon.get_partial_message(int(mid)).edit(
+                embed=emb, allowed_mentions=discord.AllowedMentions.none())
+            return "ok"
+        except discord.NotFound:
+            log.warning("numgen: recap du %s : le message %s a disparu de #%s -- il est "
+                        "poste a neuf", cle, mid, getattr(salon, "name", "?"))
+            return "disparu"
+        except Exception as e:                               # noqa: BLE001
+            nom = type(e).__name__
+            if repli:
+                essais = int(fiche.get("essais_final") or 0) + 1
+                fiche["essais_final"] = essais
+                if isinstance(e, discord.Forbidden) or essais >= RECAP_FINAL_ESSAIS:
+                    log.warning("numgen: recap du %s : le message %s de #%s ne peut pas etre "
+                                "fige (%s: %s, essai %d) -- recap final poste a la place",
+                                cle, mid, getattr(salon, "name", "?"), nom, e, essais)
+                    return "disparu"
+                self._poser_fiche(reg, cle, gid, fiche)
+            else:
+                self._direct_a_refaire = True
+            self._dire_une_fois(
+                ("edition", cle, gid, nom), log.error,
+                "numgen: recap du %s : edition du message %s refusee dans #%s (%s: %s) -- "
+                "nouvel essai au prochain tour", cle, mid, getattr(salon, "name", "?"), nom, e)
+            bilan["echecs"].append((cle, gid))
+            return "echec"
+
+    async def _synchroniser(self, jour, gid, agg, reg, bilan, now, final):
+        """Amene le message du recap (jour, serveur) au texte voulu : le cree
+        s'il n'existe pas, l'edite sinon. `final` : recap fige de la journee
+        (sinon « en direct »). Rend « fait » (message cree ou edite),
+        « rien » (deja a jour), « echec » ou « sans_salon »."""
+        cle = jour.isoformat()
+        jours_reg = reg.setdefault("jours", {})
+        fiche = (jours_reg.get(cle) or {}).get(gid) if isinstance(jours_reg.get(cle), dict) else None
+        fiche = dict(fiche) if isinstance(fiche, dict) else {}
+        guild = self._guilde(gid)
+        salon = self._salon_recap(guild, fiche) if guild is not None else None
+        if salon is None:
+            ou = (("sur le serveur « %s »" % getattr(guild, "name", gid)) if guild is not None
+                  else ("serveur %s invisible pour ce bot" % gid) if str(gid) != "0"
+                  else "numeros sans serveur connu")
+            self._dire_une_fois(
+                ("salon", cle, gid), log.warning,
+                "numgen: recap du %s : aucun salon « %s » (%s) -- %d numero(s) "
+                "en attente de recap, il partira des que le salon existera",
+                cle, RECAP_SALON, ou, agg["numeros"] + agg["mails"])
+            # Retenu AU REGISTRE : le jour reste « a faire » apres un
+            # redemarrage, et le rattrapage le reprend quand le salon existe.
+            if not fiche.get("sans_salon") or fiche.get("numeros") != agg["numeros"]:
+                fiche.update(finalise=False, sans_salon=True, numeros=agg["numeros"],
+                             mails=agg["mails"])
+                self._poser_fiche(reg, cle, gid, fiche)
+            bilan["sans_salon"].append((cle, gid))
+            return "sans_salon"
+        noms = {}
+        for uid, v in agg["vas"].items():
+            noms[uid] = await _nom_va(self.bot, guild, uid, v.get("nom"))
+        partiel = (reg.get("partiel") or {}).get(cle)
+        titre, morceaux = texte_recap(jour, agg, noms, en_direct=None if final else now,
+                                      depuis_ts=partiel)
+        # La signature ne porte PAS l'heure de mise a jour : sans nouveau
+        # chiffre, aucune edition.
+        signature = (bool(final), tuple(texte_recap(jour, agg, noms, depuis_ts=partiel)[1]))
+        msgs = [m for m in (fiche.get("messages") or []) if m]
+        deja_final = _finalise(fiche)
+        if msgs and fiche.get("salon") not in (None, getattr(salon, "id", None)):
+            # Le salon du message n'existe plus (ou n'est plus visible) : ses
+            # messages ne s'editent plus, le recap repart dans le salon actuel.
+            log.warning("numgen: recap du %s : le salon %s du message n'est plus la -- "
+                        "recap poste dans #%s", cle, fiche.get("salon"),
+                        getattr(salon, "name", "?"))
+            msgs = []
+        if msgs and deja_final == bool(final) and self._recap_signes.get((cle, gid)) == signature:
+            if final and not agg["attente"] and not fiche.get("fige"):
+                fiche["fige"] = True
+                self._poser_fiche(reg, cle, gid, fiche)
+            return "rien"
+        if not msgs:
+            trouve = await self._retrouver(salon, jour)
+            if trouve is not None:
+                msgs = [trouve]
+        # Figer un message « en direct » : repli permis s'il ne s'edite pas.
+        repli = bool(final) and not deja_final and bool(msgs)
+        embeds = [discord.Embed(title=titre if i == 0 else titre + " (suite)",
+                                description=texte, colour=_ROSE)
+                  for i, texte in enumerate(morceaux)]
+        # Des morceaux en trop (texte raccourci) : vides, pas supprimes -- un
+        # message du recap ne disparait jamais du fait du bot.
+        embeds += [discord.Embed(title=titre + " (suite)", description="—", colour=_ROSE)
+                   for _ in range(len(msgs) - len(morceaux))]
+        nouveaux = list(msgs)
+        poste = reposte = False
+        morts = set()
+        for i, emb in enumerate(embeds):
+            if i < len(nouveaux):
+                r = await self._editer_recap(salon, nouveaux[i], emb, cle, gid, fiche, reg,
+                                             bilan, repli)
+                if r == "ok":
+                    continue
+                if r == "echec":
+                    return "echec"
+                if i >= len(morceaux):
+                    morts.add(i)    # morceau en trop disparu : rien a remettre
+                    continue
+            try:
+                m = await salon.send(embed=emb, allowed_mentions=discord.AllowedMentions.none())
+            except Exception as e:                           # noqa: BLE001
+                self._dire_une_fois(
+                    ("envoi", cle, gid, type(e).__name__), log.error,
+                    "numgen: recap du %s non poste dans #%s (%s: %s) -- nouvel "
+                    "essai a chaque tour", cle, getattr(salon, "name", "?"),
+                    type(e).__name__, e)
+                # Retenu AU REGISTRE, comme un salon absent : rien n'y restait,
+                # et apres 7 jours de refus le jour sortait de la fenetre sans
+                # un mot -- la boucle d'abandon ne parcourt que le registre.
+                if fiche.get("envoi_refuse") != type(e).__name__ or fiche.get("sans_salon"):
+                    fiche.pop("sans_salon", None)
+                    fiche.update(envoi_refuse=type(e).__name__, numeros=agg["numeros"],
+                                 mails=agg["mails"])
+                    fiche.setdefault("finalise", False)
+                    self._poser_fiche(reg, cle, gid, fiche)
+                if not final:
+                    self._direct_a_refaire = True
+                bilan["echecs"].append((cle, gid))
+                return "echec"
+            if i < len(nouveaux):
+                nouveaux[i] = getattr(m, "id", None)
+                reposte = True
+            else:
+                nouveaux.append(getattr(m, "id", None))
+                poste = True
+            # Retenu TOUT DE SUITE (registre et memoire) : un tour coupe
+            # apres cet envoi ne doit pas le reposter.
+            fiche.pop("sans_salon", None)
+            fiche.update(salon=getattr(salon, "id", None), messages=list(nouveaux),
+                         message=nouveaux[0], numeros=agg["numeros"], mails=agg["mails"])
+            fiche.setdefault("finalise", False)
+            self._poser_fiche(reg, cle, gid, fiche)
+        nouveaux = [x for i, x in enumerate(nouveaux) if i not in morts]
+        for k in ("sans_salon", "envoi_refuse", "essais_final"):
+            fiche.pop(k, None)
+        fiche.update(salon=getattr(salon, "id", None), messages=nouveaux, message=nouveaux[0],
+                     parts=len(morceaux), le=int(now), numeros=agg["numeros"],
+                     mails=agg["mails"], finalise=bool(final),
+                     fige=bool(final) and not agg["attente"])
+        if final and reposte and repli:
+            fiche["repli"] = True
+        self._poser_fiche(reg, cle, gid, fiche)
+        self._recap_signes[(cle, gid)] = signature
+        if poste or reposte:
+            bilan["postes"].append((cle, gid))
+        else:
+            bilan["edites"].append((cle, gid))
+        if final and not deja_final:
+            bilan["finalises"].append((cle, gid))
+            if reposte and repli:
+                bilan["replis"].append((cle, gid))
+        quoi = ("recap final poste (repli)" if final and reposte and repli
+                else "recap final poste" if final and not msgs
+                else "recap fige a minuit" if final and not deja_final
+                else "recap corrige" if final
+                else "recap en direct cree" if not msgs
+                else "recap en direct reposte" if reposte
+                else None)
+        if quoi:
+            log.info("numgen: %s du %s dans #%s (%d numero(s), %d message(s))", quoi, cle,
+                     getattr(salon, "name", "?"), agg["numeros"], len(nouveaux))
+        else:
+            log.debug("numgen: recap en direct du %s edite (%d numero(s))", cle, agg["numeros"])
+        return "fait"
+
+    def _poser_fiche(self, reg, cle, gid, fiche):
+        """Ecrit la fiche (jour, serveur) au registre, et la garde en memoire
+        des qu'elle porte un message : si le registre ne s'ecrit pas, le
+        processus sait quand meme ce qui est parti (pas de doublon)."""
+        jr = reg.setdefault("jours", {})
+        if not isinstance(jr.get(cle), dict):
+            jr[cle] = {}
+        jr[cle][gid] = dict(fiche)
+        if fiche.get("messages"):
+            self._recap_postes[(cle, gid)] = dict(fiche)
+        self._recap_sauver(reg)
+
+    def _redonner_fiches(self, reg, depuis):
+        """Rend au registre relu les fiches que ce processus connait mieux
+        (ecriture ratee) : sans ca, le recap du jour etait reposte au tour
+        suivant, ou apres un redemarrage."""
+        jr = reg.setdefault("jours", {})
+        change = False
+        for (cle, gid), fiche in list(self._recap_postes.items()):
+            if cle < depuis:
+                self._recap_postes.pop((cle, gid), None)
+                continue
+            if not isinstance(jr.get(cle), dict):
+                jr[cle] = {}
+            if jr[cle].get(gid) != fiche:
+                jr[cle][gid] = dict(fiche)
+                change = True
+        if change:
+            self._recap_sauver(reg)
+
+    def _recap_sauver(self, reg):
+        try:
+            _recap_ecrire(reg)
+        except Exception as e:                               # noqa: BLE001
+            # _recap_postes garde en memoire ce qui est parti : pas de doublon
+            # dans ce processus. Au prochain redemarrage, si le registre est
+            # toujours inecrivable, le message du jour est retrouve dans le
+            # salon (_retrouver) -- sauf s'il a deja defile au-dela.
+            log.error("numgen: registre du recap non ecrit (%s: %s) -- risque de "
+                      "doublon au prochain redemarrage", type(e).__name__, e)
 
     # ------------------------------------------------------------ génération
     async def start_sms(self, interaction, service):
@@ -592,6 +1712,11 @@ class NumerosCog(commands.Cog):
         if not ok:
             await interaction.followup.send(f"❌ {res}", ephemeral=True)
             return
+        # Ce parcours (« Autre service » des anciens panneaux) achete aussi :
+        # hors de l'historique, ses numeros manquaient au recap sans un mot.
+        histo_prise(_actif_ephemere("sms", res, service, interaction),
+                    getattr(interaction, "channel", None),
+                    getattr(interaction, "user", None))
         view = _ActivationView(self, "sms", res["id"], res["phone"], res["provider"])
         view.owner_id = interaction.user.id
         view.service = service
@@ -615,6 +1740,9 @@ class NumerosCog(commands.Cog):
         if not ok:
             await interaction.followup.send(f"❌ {res}", ephemeral=True)
             return
+        histo_prise(_actif_ephemere("mail", res, service, interaction),
+                    getattr(interaction, "channel", None),
+                    getattr(interaction, "user", None))
         view = _ActivationView(self, "mail", res["id"], res["mail"],
                                stale=res.get("stale", ""))
         view.owner_id = interaction.user.id
@@ -697,6 +1825,7 @@ class NumerosCog(commands.Cog):
     async def show_code(self, interaction, view, code):
         """Code reçu : on clôture l'activation et on l'affiche dans l'embed."""
         view.code = code
+        histo_evenement(view.kind, view.act_id, "code")
         if view.kind == "sms":
             await asyncio.to_thread(numgen.finish, view.act_id, view.provider)
         else:
@@ -782,7 +1911,9 @@ class NumerosCog(commands.Cog):
                 vires += len(partis)
             except Exception as e:
                 log.warning(f"panelnumero: nettoyage de #{ch.name} : {e}")
-        await verrouiller_salon(ch, self.bot)
+        # Le panneau se pose quel que soit le nom du salon ; seul le refus de
+        # vue depend de lui (voir _prive_par_construction).
+        await verrouiller_salon(ch, self.bot, prive=_prive_par_construction(ch))
         mot = ("✅ Panneau en place" if pose else
                "⚠️ Pose incomplète — regarde les droits du bot sur ce salon")
         if bilan.get("converti"):
@@ -849,7 +1980,9 @@ class NumerosCog(commands.Cog):
                     vides += len(partis)
                 except Exception as e:
                     log.warning(f"panelnumeroall: nettoyage de #{ch.name} : {e}")
-            await verrouiller_salon(ch, self.bot)
+            # Cibles -numero-mail, privees par construction : le refus de vue
+            # est remis (l'ancien verrouillage l'effacait, voir la fonction).
+            await verrouiller_salon(ch, self.bot, prive=True)
             await asyncio.sleep(0.6)
         s = numgen.status()
         warn = "" if (s["sms_ok"] and s["mail_ok"]) else (
@@ -1174,13 +2307,21 @@ def _id_message(v):
 
 
 def _salon_ecrire(cid, **champs):
-    """Ecrit les champs d'un salon. `actif=None` efface l'activation."""
+    """Ecrit les champs d'un salon. `actif=None` efface l'activation.
+
+    LEVE (OSError) si l'ecriture echoue. safe_json.write ne leve jamais : il
+    rend False et imprime « echec ecriture ». Ce retour etait jete : un
+    numero paye, jamais inscrit, s'affichait « vide » -- le panneau relisait
+    l'ancien registre -- et n'etait ni montre, ni rendu, ni ecoute. Les
+    try/except des appelants (rendu du numero inaffichable, `au_registre`)
+    ne se declenchaient jamais."""
     d = _salons()
     rec = dict(d.get(str(cid)) or {})
     rec.update(champs)
     d[str(cid)] = rec
     SALONS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _safe_json.write(SALONS_FILE, d, indent=2)
+    if not _safe_json.write(SALONS_FILE, d, indent=2):
+        raise OSError("%s non ecrit" % _Path(SALONS_FILE).name)
     return rec
 
 
@@ -1198,6 +2339,611 @@ def _numero_vivant(actif) -> bool:
         return _t.time() - float((actif or {}).get("pris_le") or 0) < DUREE_NUMERO_SEC
     except (TypeError, ValueError):
         return False
+
+
+def _code_courant(rec):
+    """Le code a montrer pour l'activation EN COURS du salon, ou None.
+
+    « code_de » dit a quelle activation le code appartient. Une ecoute qui
+    se reveillait apres un « Autre » ecrivait le code de l'ancien numero
+    sous le nouveau : le panneau montrait le numero B avec le code de A.
+    Un code d'avant ce champ (pas de « code_de ») reste montre."""
+    rec = rec or {}
+    code = rec.get("code_valeur")
+    if not code:
+        return None
+    de = rec.get("code_de")
+    if de is not None and str(de) != str((rec.get("actif") or {}).get("id")):
+        return None
+    return code
+
+
+#: Refus DEFINITIFS du fournisseur a la lecture du code : l'activation
+#: n'existe plus, ou la cle ne marche plus. Tout le reste -- « ERR:… »
+#: (timeout, coupure), une page HTML de 502, une reponse inconnue -- est
+#: passager : le numero vit, son SMS peut arriver au tour suivant.
+_ERREURS_DEFINITIVES = ("NO_ACTIVATION", "BAD_KEY", "BANNED", "WRONG_SERVICE", "NO_KEY")
+
+
+def _erreur_definitive(val) -> bool:
+    t = str(val or "").strip()
+    if not t or t.startswith("ERR:"):
+        return False
+    return (t in {numgen._MSG.get(k) for k in _ERREURS_DEFINITIVES}
+            or t.split(":")[0] in _ERREURS_DEFINITIVES)
+
+
+def _rendu_ok(kind, rendu) -> bool:
+    """Le fournisseur a-t-il REELLEMENT repris l'activation ?
+
+    SMS : numgen.cancel rend (True, …) seulement sur ACCESS_CANCEL. Mail :
+    un dict dont le statut n'est ni 0 ni absent. Le resultat n'etait pas
+    lu : un refus passait pour un rendu, et le numero -- paye, toujours
+    actif -- sortait du registre."""
+    if kind == "mail":
+        return isinstance(rendu, dict) and rendu.get("status") not in (0, "0", None)
+    return isinstance(rendu, tuple) and len(rendu) >= 1 and bool(rendu[0])
+
+
+def _raison_rendu(rendu) -> str:
+    """Pourquoi un rendu a echoue, en une ligne lisible par le VA."""
+    if isinstance(rendu, BaseException):
+        return "%s: %s" % (type(rendu).__name__, rendu)
+    if isinstance(rendu, tuple) and len(rendu) >= 2:
+        return str(rendu[1] or "refus du fournisseur")
+    if isinstance(rendu, dict):
+        return str(rendu.get("error") or rendu.get("message") or "refus du fournisseur")
+    return str(rendu or "pas de réponse du fournisseur")
+
+
+def _rendu_inutile(raison) -> bool:
+    """Le fournisseur ne connait plus l'activation (deja close ou annulee) :
+    il n'y a plus rien a rendre, le registre peut l'oublier."""
+    t = str(raison or "").strip()
+    return (t == numgen._MSG.get("NO_ACTIVATION") or t.startswith("NO_ACTIVATION")
+            or t.startswith("STATUS_CANCEL"))
+
+
+async def _rendre(actif, contexte=""):
+    """Rend (annule) une activation chez le fournisseur -> (ok, raison).
+
+    Ne leve jamais ; chaque essai laisse une ligne « numgen: rendu de … »
+    au journal, accepte ou refuse, avec la reponse brute."""
+    actif = actif or {}
+    kind = actif.get("kind") or "sms"
+    try:
+        if kind == "mail":
+            rendu = await asyncio.to_thread(numgen.mail_cancel, actif["id"])
+        else:
+            rendu = await asyncio.to_thread(numgen.cancel, actif["id"],
+                                            actif.get("provider") or "getatext")
+    except Exception as e:                                   # noqa: BLE001
+        rendu = e
+    ok = _rendu_ok(kind, rendu)
+    raison = "" if ok else _raison_rendu(rendu)
+    if ok:
+        log.info("numgen: rendu de %s (%s) : accepte %s", actif.get("valeur"),
+                 contexte, rendu)
+    else:
+        log.warning("numgen: rendu de %s (%s) : REFUSE -- %s (reponse : %r)",
+                    actif.get("valeur"), contexte, raison, rendu)
+    return ok, raison
+
+
+async def _finir(actif):
+    """Clot l'activation SMS chez le fournisseur, une fois le code ECRIT et
+    MONTRE. Un echec se journalise : le code est deja au panneau."""
+    actif = actif or {}
+    if actif.get("kind") == "mail":
+        return
+    try:
+        r = await asyncio.to_thread(numgen.finish, actif["id"],
+                                    actif.get("provider") or "getatext")
+        log.info("numgen: activation %s terminee chez le fournisseur : %s",
+                 actif.get("id"), r)
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("numgen: fin de l'activation %s non confirmee (%s: %s)",
+                    actif.get("id"), type(e).__name__, e)
+
+
+def _membre_proprietaire(itx, channel, par):
+    """Le membre a noter a l'historique pour un numero de `par` : le
+    cliqueur si c'est lui, sinon le membre du serveur (« Autre » clique par
+    un admin : le nom du VA, pas celui de l'admin). None si introuvable --
+    le recap retombe alors sur l'id."""
+    user = getattr(itx, "user", None)
+    if not par or getattr(user, "id", None) == par:
+        return user
+    try:
+        g = getattr(channel, "guild", None)
+        return g.get_member(int(par)) if g is not None else None
+    except Exception:                                        # noqa: BLE001
+        return None
+
+
+# ==============================================================================
+# HISTORIQUE DES NUMEROS ET RECAP DU JOUR (« 📊・debrief-day »)
+# ==============================================================================
+# Le registre des salons ne garde que l'activation EN COURS, ecrasee a chaque
+# prise : impossible d'y lire qui a pris quoi la veille. Le proprietaire veut
+# le recap qu'une autre agence recoit chaque nuit (27/09/2026) : « qui a pris
+# quoi, qui a echoue ». L'historique garde donc UNE entree par activation,
+# completee a chaque evenement du parcours du panneau :
+#   pris_le · code_le · fini_le · annule_le · remplace_le (« Autre ») ·
+#   rendu_le (numero inaffichable, rendu par le bot) · souci_le (ecoute close
+#   par le fournisseur) · expire (aucun code en DUREE_NUMERO_SEC).
+
+#: None : a cote du registre des salons. Un banc qui deplace SALONS_FILE vers
+#: un dossier temporaire deplace l'historique avec lui -- sans ca, les bancs
+#: deja ecrits (qui ne connaissent que SALONS_FILE) ecrivaient dans data/.
+HISTO_FILE = None
+RECAP_FILE = None
+#: Au-dela, une activation sort de l'historique (il grossit de ~150 par jour).
+HISTO_JOURS = 90
+#: L'heure du Benin, celle des VA : UTC+1 toute l'annee, sans heure d'ete.
+BENIN = timezone(timedelta(hours=1), "Bénin")
+#: Le salon, nom SANS decor : le proprietaire l'a nomme « 📊・debrief-day ».
+RECAP_SALON = "debrief-day"
+#: Un bot arrete (ou un salon absent) plusieurs jours : autant de recaps en
+#: retard, dans cette limite.
+RECAP_RATTRAPAGE_JOURS = 7
+#: « 🔎 K sans code » a partir de K = 4, comme le recap de reference (7, 4,
+#: 6, 5 affiches ; 3 ou moins, non).
+RECAP_SEUIL_LOUPE = 4
+#: Un tour de la boucle au moins toutes les RECAP_PAS_SEC (minuit, numeros qui
+#: expirent), et a chaque evenement de l'historique.
+RECAP_PAS_SEC = 60
+#: Le message du jour est edite au plus une fois par RECAP_DIRECT_PAS_SEC :
+#: Discord limite les editions, et une rafale de prises (dix VA qui cliquent
+#: en meme temps) ne doit pas faire dix editions. Les evenements de l'attente
+#: partent ensemble, a sa fin.
+RECAP_DIRECT_PAS_SEC = 60
+#: Un message « en direct » qui refuse d'etre fige (erreur passagere) est
+#: retente a chaque tour ; apres RECAP_FINAL_ESSAIS echecs, le recap final est
+#: poste a neuf plutot que de laisser « en direct » sur une journee finie.
+RECAP_FINAL_ESSAIS = 3
+#: Messages relus dans le salon pour y retrouver le recap du jour quand le
+#: registre n'en a pas trace (perdu, ou inecrivable avant un redemarrage) :
+#: le reposter faisait deux messages pour le meme jour.
+RECAP_RETROUVER = 50
+_JOURS_FR = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
+
+_ILLISIBLE = object()
+_MACHINE_DITE = []
+#: Generation de l'historique : +1 a chaque evenement note (prise, code,
+#: annulation, « Autre », rendu...). Le recap en direct la compare a celle de
+#: sa derniere lecture : sans evenement, il ne relit pas un fichier de
+#: plusieurs Mo chaque minute.
+_HISTO_GEN = [0]
+#: Fonctions sans argument appelees apres chaque evenement : la boucle du
+#: recap s'y inscrit pour se reveiller tout de suite, au lieu d'attendre son
+#: tour suivant.
+_ECOUTEURS_HISTO = []
+
+
+def _histo_signaler():
+    """Un evenement vient d'etre ecrit dans l'historique. Ne leve jamais :
+    le parcours du VA passe avant le recap."""
+    _HISTO_GEN[0] += 1
+    for f in list(_ECOUTEURS_HISTO):
+        try:
+            f()
+        except Exception as e:                               # noqa: BLE001
+            log.warning("numgen: reveil du recap en direct en echec (%s: %s) -- il se "
+                        "fera au tour suivant", type(e).__name__, e)
+
+
+def machine_prod() -> bool:
+    """Vrai sur LA machine qui a le droit de poster le recap.
+
+    Meme regle que web_upload._machine_proprietaire (la variable n'est posee
+    que dans le .env du VPS) ; recopiee ici plutot qu'importee : importer le
+    dashboard depuis un cog, c'est charger 49 000 lignes pour un booleen."""
+    if os.environ.get("VA_MACHINE_PROD") == "1":
+        return True
+    if not _MACHINE_DITE:
+        _MACHINE_DITE.append(1)
+        log.warning("numgen: machine non proprietaire (VA_MACHINE_PROD absent) : "
+                    "recap des numeros NON arme ici")
+    return False
+
+
+def _fichier_voisin(explicite, nom):
+    return _Path(explicite) if explicite is not None else _Path(SALONS_FILE).with_name(nom)
+
+
+def _histo_fichier():
+    return _fichier_voisin(HISTO_FILE, "numgen_historique.json")
+
+
+def _recap_fichier():
+    return _fichier_voisin(RECAP_FILE, "numgen_recap.json")
+
+
+def _lire_dict(p):
+    """Le contenu (dict) du fichier, {} s'il n'existe pas.
+
+    Un fichier PRESENT mais illisible (sa copie .prev aussi) n'est pas un
+    fichier vide : ecrire par-dessus effacerait des semaines d'historique. Il
+    est mis de cote sous un autre nom, et le journal le dit. S'il ne peut pas
+    l'etre, on leve : mieux vaut ne rien noter que tout effacer."""
+    d = _safe_json.load(p, default=_ILLISIBLE)
+    if isinstance(d, dict):
+        return d
+    if d is _ILLISIBLE and (not p.exists() or p.stat().st_size == 0):
+        return {}
+    dest = p.with_name("%s.illisible-%d" % (p.name, int(time.time())))
+    p.rename(dest)
+    log.error("numgen: %s illisible : mis de cote sous %s, un neuf repart",
+              p.name, dest.name)
+    return {}
+
+
+def _ts(v) -> float:
+    try:
+        return float(v or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _histo_lire() -> list:
+    d = _lire_dict(_histo_fichier())
+    acts = d.get("activations") or []
+    if not isinstance(acts, list):
+        raise ValueError("historique : « activations » n'est pas une liste")
+    bons = [a for a in acts if isinstance(a, dict)]
+    if len(bons) != len(acts):
+        log.warning("numgen: historique : %d entree(s) malformee(s) ignoree(s)",
+                    len(acts) - len(bons))
+    return bons
+
+
+def _histo_ecrire(acts):
+    p = _histo_fichier()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    # Compact (sans indentation) : ~150 activations par jour sur 90 jours,
+    # reecrites a chaque evenement.
+    if not _safe_json.write(p, {"activations": acts}, indent=None):
+        raise OSError("ecriture de %s refusee" % p.name)
+
+
+def _nom_de(user) -> str:
+    return str(getattr(user, "display_name", None) or getattr(user, "global_name", None)
+               or getattr(user, "name", None) or "")
+
+
+def _actif_ephemere(kind, res, service, itx):
+    """L'activation du parcours ephemere, au format du registre des salons."""
+    return {"id": str((res or {}).get("id") or ""), "kind": kind, "service": service,
+            "provider": (res or {}).get("provider") or "getatext",
+            "valeur": (res or {}).get("phone") or (res or {}).get("mail") or "?",
+            "par": getattr(getattr(itx, "user", None), "id", 0),
+            "pris_le": int(time.time())}
+
+
+def histo_prise(actif, channel=None, user=None, maintenant=None) -> bool:
+    """Note une activation (numero ou mail) qui vient d'etre PAYEE.
+
+    Ne leve jamais : un historique inecrivable ne doit pas empecher un VA
+    d'avoir son numero. L'echec va au journal, avec le numero."""
+    try:
+        now = int(time.time() if maintenant is None else maintenant)
+        kind = (actif or {}).get("kind") or "sms"
+        entree = {
+            "id": str(actif.get("id") or ""),
+            # Les mails viennent tous de SMSBower ; le registre des salons leur
+            # met « getatext » par defaut, qui serait faux ici.
+            "fournisseur": ("smsbower" if kind == "mail"
+                            else actif.get("provider") or "getatext"),
+            "type": kind,
+            "service": actif.get("service") or "ig",
+            "numero": actif.get("valeur") or "?",
+            "par": actif.get("par") or getattr(user, "id", 0) or 0,
+            # Le nom du moment : repli du recap si le VA a quitte le serveur.
+            "nom": _nom_de(user),
+            "salon": getattr(channel, "id", None),
+            "serveur": getattr(getattr(channel, "guild", None), "id", None),
+            "pris_le": int(actif.get("pris_le") or now),
+        }
+        acts = _histo_lire()
+        limite = now - HISTO_JOURS * 86400
+        gardes = [a for a in acts if _ts(a.get("pris_le")) >= limite]
+        if len(gardes) != len(acts):
+            log.info("numgen: historique : %d activation(s) de plus de %d jours retiree(s)",
+                     len(acts) - len(gardes), HISTO_JOURS)
+        gardes.append(entree)
+        _histo_ecrire(gardes)
+        _histo_signaler()
+        return True
+    except Exception as e:                                   # noqa: BLE001
+        log.exception("numgen: historique : prise de %s NON notee (%s: %s) -- "
+                      "absente du recap", (actif or {}).get("valeur"), type(e).__name__, e)
+        return False
+
+
+def histo_evenement(kind, act_id, quoi, maintenant=None, **extra) -> bool:
+    """Complete l'activation `act_id` : `quoi` in code, fini, annule, remplace,
+    rendu, souci -> champ « <quoi>_le » (le PREMIER garde : un « Nouveau
+    code » ne decale pas l'heure du premier). Ne leve jamais."""
+    try:
+        now = int(time.time() if maintenant is None else maintenant)
+        acts = _histo_lire()
+        k = kind or "sms"
+        cible = None
+        for a in reversed(acts):
+            if str(a.get("id")) == str(act_id) and (a.get("type") or "sms") == k:
+                cible = a
+                break
+        if cible is None:
+            # Un numero pris avant l'historique (deploiement du 27/09/2026),
+            # ou dont la prise n'a pas pu s'ecrire : on le dit.
+            log.warning("numgen: historique : %s de %s %s sans prise notee -- ignore",
+                        quoi, k, act_id)
+            return False
+        cible.setdefault(quoi + "_le", now)
+        cible.update(extra)
+        _histo_ecrire(acts)
+        _histo_signaler()
+        return True
+    except Exception as e:                                   # noqa: BLE001
+        log.exception("numgen: historique : %s de %s NON note (%s: %s)",
+                      quoi, act_id, type(e).__name__, e)
+        return False
+
+
+def _issue(e, maintenant) -> str:
+    """rendu | code | attente | sans_code.
+
+    « sans code » = annule, remplace (« Autre ») ou expire sans code. Un code
+    passe avant tout : un numero annule APRES son code a servi. Un numero
+    rendu par le bot n'a jamais ete vu du VA : a part."""
+    if e.get("rendu_le"):
+        return "rendu"
+    if e.get("code_le"):
+        return "code"
+    if e.get("annule_le") or e.get("remplace_le") or e.get("expire"):
+        return "sans_code"
+    if maintenant - _ts(e.get("pris_le")) < DUREE_NUMERO_SEC:
+        return "attente"
+    return "sans_code"
+
+
+def _histo_cloturer(maintenant):
+    """Les activations, les expirees marquees « expire » au passage (aucun
+    evenement ne les ferme : elles meurent chez le fournisseur). None si
+    l'historique est illisible -- journalise."""
+    try:
+        acts = _histo_lire()
+    except Exception as e:                                   # noqa: BLE001
+        log.error("numgen: historique illisible (%s: %s) : pas de recap", type(e).__name__, e)
+        return None
+    change = False
+    for a in acts:
+        if (not a.get("expire") and _issue(a, maintenant) == "sans_code"
+                and not (a.get("annule_le") or a.get("remplace_le"))):
+            a["expire"] = True
+            change = True
+    if change:
+        try:
+            _histo_ecrire(acts)
+        except Exception as e:                               # noqa: BLE001
+            log.warning("numgen: historique : expirations non ecrites (%s: %s)",
+                        type(e).__name__, e)
+    return acts
+
+
+def jour_benin(ts):
+    """La date (heure du Benin) d'un horodatage."""
+    return datetime.fromtimestamp(_ts(ts), BENIN).date()
+
+
+def bornes_jour(jour):
+    """(debut, fin) du jour, heure du Benin : 00:00 inclus, 00:00 du
+    lendemain exclu -- « de 00h00 à 23h59 »."""
+    debut = datetime(jour.year, jour.month, jour.day, tzinfo=BENIN).timestamp()
+    return debut, debut + 86400
+
+
+def jours_a_recapituler(maintenant):
+    """Les journees finies, a figer, de la plus ancienne a la plus recente :
+    la veille des minuit (heure du Benin), et les RECAP_RATTRAPAGE_JOURS - 1
+    d'avant."""
+    dernier = jour_benin(maintenant) - timedelta(days=1)
+    return [dernier - timedelta(days=i)
+            for i in range(RECAP_RATTRAPAGE_JOURS - 1, -1, -1)]
+
+
+def _finalise(fiche) -> bool:
+    """Le recap de ce serveur a ete fige (edite ou poste en recap final).
+    « complet » : le nom d'avant le recap en direct."""
+    return isinstance(fiche, dict) and bool(fiche.get("finalise") or fiche.get("complet"))
+
+
+def _fige(fiche) -> bool:
+    """Fige ET plus aucun numero de la journee n'attend son code : plus rien
+    ne peut changer son texte."""
+    return isinstance(fiche, dict) and bool(fiche.get("fige") or fiche.get("complet"))
+
+
+def _jour_fini(jour_reg) -> bool:
+    """Tous les serveurs de ce jour sont figes (ou abandonnes) ; {} : jour
+    vide, rien a poster. None : jamais vu -- l'historique doit etre relu."""
+    return isinstance(jour_reg, dict) and all(
+        _finalise(v) or (isinstance(v, dict) and v.get("abandonne"))
+        for v in jour_reg.values())
+
+
+def _jour_a_corriger(jour_reg) -> bool:
+    """Un recap fige a minuit dont un numero attendait encore son code."""
+    return isinstance(jour_reg, dict) and any(
+        _finalise(v) and not _fige(v) and not v.get("abandonne")
+        for v in jour_reg.values())
+
+
+def agreger(entrees, jour, maintenant):
+    """{serveur: {vas: {uid: {n, c, sans, attente, nom}}, numeros, mails,
+    mails_codes, rendus, attente}} pour les activations PRISES ce jour-la."""
+    debut, fin = bornes_jour(jour)
+    out = {}
+    for e in entrees:
+        t = _ts(e.get("pris_le"))
+        if not (debut <= t < fin):
+            continue
+        g = out.setdefault(str(e.get("serveur") or 0), {
+            "vas": {}, "numeros": 0, "mails": 0, "mails_codes": 0, "rendus": 0,
+            "attente": 0})
+        issue = _issue(e, maintenant)
+        if issue == "attente":
+            g["attente"] += 1
+        if issue == "rendu":
+            g["rendus"] += 1
+            continue
+        if (e.get("type") or "sms") == "mail":
+            g["mails"] += 1
+            g["mails_codes"] += issue == "code"
+            continue
+        va = g["vas"].setdefault(str(e.get("par") or 0),
+                                 {"n": 0, "c": 0, "sans": 0, "attente": 0, "nom": ""})
+        va["n"] += 1
+        g["numeros"] += 1
+        if issue == "code":
+            va["c"] += 1
+        elif issue == "sans_code":
+            va["sans"] += 1
+        else:
+            va["attente"] += 1
+        if e.get("nom"):
+            va["nom"] = e["nom"]
+    return out
+
+
+def _decouper(lignes, limite):
+    """Des morceaux de `limite` signes au plus, coupes ENTRE deux lignes."""
+    morceaux, cur = [], ""
+    for ligne in lignes:
+        if len(ligne) > limite:
+            ligne = ligne[: limite - 1] + "…"
+        cand = ligne if not cur else cur + "\n" + ligne
+        if len(cand) > limite and cur:
+            morceaux.append(cur.strip("\n"))
+            cur = ligne
+        else:
+            cur = cand
+    if cur.strip("\n"):
+        morceaux.append(cur.strip("\n"))
+    return morceaux
+
+
+def titre_recap(jour, en_direct=False):
+    titre = "📊 Récap numéros SMS — %s %s" % (_JOURS_FR[jour.weekday()],
+                                              jour.strftime("%d/%m"))
+    return titre + " · en direct" if en_direct else titre
+
+
+def texte_recap(jour, agg, noms, limite=4096, en_direct=None, depuis_ts=None):
+    """(titre, [descriptions]) du recap d'un serveur ; plusieurs descriptions
+    si le texte depasse `limite` (4096 : la description d'un embed).
+
+    `en_direct` : l'horodatage de la mise a jour, pour le message de la
+    journee en cours (titre « · en direct ») ; None pour le recap final. Les
+    lignes des VA, le total et les mails sont les memes dans les deux."""
+    titre = titre_recap(jour, en_direct is not None)
+    # `depuis_ts` : la journee de la mise en route n'est suivie que depuis
+    # cette heure-la -- l'annoncer « complete » ou « depuis 00h00 » mentirait.
+    debut = (datetime.fromtimestamp(_ts(depuis_ts), BENIN).strftime("%Hh%M")
+             if depuis_ts else "00h00")
+    if en_direct is None:
+        entete = ("Journée complète : de 00h00 à 23h59, heure du Bénin." if not depuis_ts
+                  else "Journée partielle : de %s à 23h59, heure du Bénin." % debut)
+    else:
+        # L'heure de la derniere mise a jour : sans elle, un message qui ne
+        # bouge pas (aucun numero depuis une heure) ne dit pas s'il suit.
+        entete = "En cours : depuis %s, heure du Bénin — mis à jour à %s." % (
+            debut, datetime.fromtimestamp(_ts(en_direct), BENIN).strftime("%Hh%M"))
+    lignes = [entete, ""]
+
+    def nom(uid):
+        return discord.utils.escape_markdown(str(noms.get(uid) or uid))[:80]
+
+    vas = sorted(agg["vas"].items(),
+                 key=lambda kv: (-kv[1]["n"], -kv[1]["c"], nom(kv[0]).lower()))
+    for uid, v in vas:
+        pct = int(v["c"] * 100 / v["n"] + 0.5) if v["n"] else 0
+        ligne = "• %s — %d numéro(s) · %d code%s (%d %%)" % (
+            nom(uid), v["n"], v["c"], "s" if v["c"] > 1 else "", pct)
+        if v["sans"] >= RECAP_SEUIL_LOUPE:
+            ligne += " 🔎 %d sans code" % v["sans"]
+        lignes.append(ligne)
+    lignes += ["", "Total : %d numéro(s)" % agg["numeros"]]
+    if agg.get("mails"):
+        lignes.append("📧 %d mail(s)" % agg["mails"])
+    if agg.get("rendus"):
+        lignes.append("↩️ %d numéro(s) rendu(s) par le bot : impossibles à "
+                      "afficher, remboursés" % agg["rendus"])
+    return titre, _decouper(lignes, limite)
+
+
+def salon_debrief(guild):
+    """Le salon « debrief-day » du serveur, quel que soit son decor.
+
+    Le tiret de tete est retire aussi : Discord change les espaces d'un salon
+    texte en tirets, et « 📊 debrief-day » tape par le proprietaire devient
+    « 📊-debrief-day », dont nom_sans_decor garde le tiret (« -debrief-day ») :
+    le recap restait bloque sur « aucun salon », puis abandonne."""
+    from cogs.welcome import nom_sans_decor
+    vus = [c for c in (getattr(guild, "text_channels", None) or [])
+           if nom_sans_decor(getattr(c, "name", "")).lstrip("-_") == RECAP_SALON]
+    if len(vus) > 1:
+        log.info("numgen: %d salons « %s » sur %s : le premier (#%s) recoit le recap",
+                 len(vus), RECAP_SALON, getattr(guild, "name", "?"), vus[0].name)
+    return vus[0] if vus else None
+
+
+async def _nom_va(bot, guild, uid, note=""):
+    """Le nom affiche du VA sur le serveur ; repli : son nom d'utilisateur,
+    le nom note a la prise (il a quitte le serveur), puis l'identifiant."""
+    try:
+        i = int(uid)
+    except (TypeError, ValueError):
+        return str(note or uid)
+    m = None
+    if guild is not None:
+        get_m = getattr(guild, "get_member", None)
+        m = get_m(i) if get_m else None
+        if m is None and getattr(guild, "fetch_member", None) is not None and i:
+            try:
+                m = await guild.fetch_member(i)
+            except Exception:                                # noqa: BLE001
+                m = None
+    if m is not None and getattr(m, "display_name", None):
+        return m.display_name
+    get_u = getattr(bot, "get_user", None)
+    u = get_u(i) if (get_u and i) else None
+    if u is not None and getattr(u, "name", None):
+        return u.name
+    return str(note or i)
+
+
+def _recap_lire():
+    """Le registre du recap, ou None s'il est illisible (journalise) : sans
+    lui, impossible de savoir ce qui est deja parti."""
+    try:
+        return _lire_dict(_recap_fichier())
+    except Exception as e:                                   # noqa: BLE001
+        log.error("numgen: registre du recap illisible (%s: %s) : pas de recap",
+                  type(e).__name__, e)
+        return None
+
+
+def _recap_ecrire(reg):
+    limite = (datetime.now(BENIN).date() - timedelta(days=HISTO_JOURS)).isoformat()
+    jours = reg.get("jours") or {}
+    for cle in [c for c in jours if c < limite]:
+        jours.pop(cle, None)
+    p = _recap_fichier()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if not _safe_json.write(p, reg, indent=2):
+        raise OSError("ecriture de %s refusee" % p.name)
 
 
 def _peut_gerer(itx, actif) -> bool:
@@ -1218,20 +2964,33 @@ def _peut_gerer(itx, actif) -> bool:
 class _ConfirmerView(discord.ui.View):
     """« Oui, annuler » : un clic de travers ne rend plus un numero."""
 
-    def __init__(self, cog, quoi):
+    def __init__(self, cog, quoi, act_id=None, code_vu=None):
         super().__init__(timeout=60)
         self.cog, self.quoi = cog, quoi
+        # L'activation que la question NOMME : « Oui » n'agit que sur elle.
+        self.act_id = act_id
+        # Le code visible quand la question a ete posee (None : aucun). Un
+        # code arrive depuis, « Oui » ne change rien (action_salon).
+        self.code_vu = code_vu
 
     @discord.ui.button(label="Oui", emoji="✅", style=discord.ButtonStyle.danger)
     async def oui(self, itx: discord.Interaction, btn: discord.ui.Button):
         self.stop()
         await itx.response.edit_message(content="👌", view=None)
-        await self.cog.action_salon(itx, self.quoi)
+        await self.cog.action_salon(itx, self.quoi, attendu=self.act_id,
+                                    code_vu=self.code_vu)
 
     @discord.ui.button(label="Non", style=discord.ButtonStyle.secondary)
     async def non(self, itx: discord.Interaction, btn: discord.ui.Button):
         self.stop()
         await itx.response.edit_message(content="Rien n'a changé.", view=None)
+
+    async def on_error(self, itx: discord.Interaction, error: Exception, item):
+        # Sans ca, une exception apres « 👌 » (registre inecrivable...) ne
+        # laissait au VA que ce pouce, et une trace hors du journal numgen.
+        log.exception("numgen: erreur a la confirmation « %s » dans #%s", self.quoi,
+                      getattr(getattr(itx, "channel", None), "name", "?"), exc_info=error)
+        await _ephemere(itx, "❌ Erreur : %s" % (str(error)[:300] or type(error).__name__))
 
 
 async def _confirmer_ou_refuser(itx, cog, quoi) -> bool:
@@ -1241,7 +3000,8 @@ async def _confirmer_ou_refuser(itx, cog, quoi) -> bool:
     Rend True quand il n'y a RIEN a confirmer (aucun numero en cours) : le
     clic est alors differe, et l'appelant redessine le panneau."""
     ch = getattr(itx, "channel", None)
-    actif = _salon(getattr(ch, "id", 0)).get("actif") if ch else None
+    rec = _salon(getattr(ch, "id", 0)) if ch else {}
+    actif = rec.get("actif")
     if not actif:
         await itx.response.defer()
         return True
@@ -1257,7 +3017,9 @@ async def _confirmer_ou_refuser(itx, cog, quoi) -> bool:
     question = ("Annuler `%s` ?" if quoi == "annuler"
                 else "Changer `%s` pour un autre " + autre + " ?")
     await itx.response.send_message(question % actif.get("valeur", "?"),
-                                    view=_ConfirmerView(cog, quoi), ephemeral=True)
+                                    view=_ConfirmerView(cog, quoi, act_id=actif.get("id"),
+                                                        code_vu=_code_courant(rec)),
+                                    ephemeral=True)
     return False
 
 
@@ -1349,7 +3111,8 @@ def _a_afficher(rec):
     s'affiche plus : il ne recevra plus rien, et il cachait « Prendre un
     numero » -- douze salons gardaient un numero du 22/09."""
     actif = (rec or {}).get("actif")
-    code = (rec or {}).get("code_valeur")
+    # Seulement le code de CE numero (code_de) : jamais celui du precedent.
+    code = _code_courant(rec)
     if not actif:
         return None, None
     if code:
@@ -1492,27 +3255,46 @@ def est_panneau_numero(m, moi=None):
         return None
 
 
-async def _chercher_panneau(channel, moi):
+async def _chercher_panneau(channel, moi, sauf=()):
     """Le panneau deja la, quand le registre ne le connait pas (data/ reparti
-    de zero) : dans les epingles (l'ancien l'etait) puis l'historique. Un
-    panneau V2 passe avant un ancien."""
-    vus = []
+    de zero) ou vise un message disparu : dans les epingles (l'ancien l'etait)
+    puis l'historique. Un panneau V2 passe avant un ancien ; `sauf` : des
+    identifiants deja essayes (disparus).
+
+    L'historique est lu sur FENETRE_PANNEAU messages, arret au premier V2 :
+    le V2 n'est plus epingle, et avec 50 messages seulement, un salon ou le
+    VA avait ecrit davantage recevait un second panneau -- que le menage
+    (100 messages) ne retirait pas toujours."""
+    exclus = set()
+    for x in sauf or ():
+        try:
+            exclus.add(int(x))
+        except (TypeError, ValueError):
+            pass
+    anciens = []
     try:
-        vus.extend(await channel.pins())
+        for m in await channel.pins():
+            f = est_panneau_numero(m, moi)
+            if getattr(m, "id", None) in exclus or not f:
+                continue
+            if f == "v2":
+                return m
+            anciens.append(m)
     except Exception as e:                                   # noqa: BLE001
         log.warning("numgen: epingles de #%s illisibles (%s: %s)",
                     getattr(channel, "name", "?"), type(e).__name__, e)
     try:
-        async for m in channel.history(limit=50):
-            vus.append(m)
+        async for m in channel.history(limit=FENETRE_PANNEAU):
+            f = est_panneau_numero(m, moi)
+            if getattr(m, "id", None) in exclus or not f:
+                continue
+            if f == "v2":
+                return m
+            anciens.append(m)
     except Exception as e:                                   # noqa: BLE001
         log.warning("numgen: historique de #%s illisible (%s: %s)",
                     getattr(channel, "name", "?"), type(e).__name__, e)
-    for voulu in ("v2", "ancien"):
-        for m in vus:
-            if est_panneau_numero(m, moi) == voulu:
-                return m
-    return None
+    return anciens[0] if anciens else None
 
 
 async def _vue_salon(cog, rec, souci="", solde=None):
@@ -1566,17 +3348,18 @@ async def poser_panneau(bot, channel, cog=None, vu=None, souci="", solde=None,
     rec = _salon(channel.id)
     enregistre = _id_message(rec.get("panneau"))
     format_vu = est_panneau_numero(vu, moi) if vu is not None else None
-    cible, fmt = None, None
+    cible, fmt, origine = None, None, None
     if format_vu == "v2":
-        cible, fmt = vu.id, "v2"
+        cible, fmt, origine = vu.id, "v2", "clique"
     elif enregistre:
-        cible, fmt = enregistre, ("v2" if rec.get("v2") else "ancien")
+        cible, fmt, origine = enregistre, ("v2" if rec.get("v2") else "ancien"), "registre"
     elif format_vu == "ancien":
-        cible, fmt = vu.id, "ancien"
+        cible, fmt, origine = vu.id, "ancien", "clique"
     else:
         trouve = await _chercher_panneau(channel, moi)
         if trouve is not None:
             cible, fmt = trouve.id, est_panneau_numero(trouve, moi)
+            origine = "retrouve"
             log.info("numgen: panneau %s (%s) retrouve dans #%s hors registre",
                      cible, fmt, nom)
     a_virer = set()
@@ -1588,34 +3371,33 @@ async def poser_panneau(bot, channel, cog=None, vu=None, souci="", solde=None,
             a_virer.add(x)
     vue = await _vue_salon(cog, rec, souci, solde)
     pose = None
-    if cible:
+    essayes = set()
+    while cible:
+        essayes.add(int(cible))
         try:
-            if fmt == "v2":
-                try:
-                    await _editer_v2(channel, cible, vue)
-                except discord.NotFound:
-                    raise
-                except Exception as e1:                      # noqa: BLE001
-                    if not vue.icone:
-                        raise
-                    # Une vignette dont la piece jointe manque est refusee :
-                    # on la renvoie, une fois.
-                    log.warning("numgen: panneau de #%s refuse (%s: %s) : nouvel "
-                                "essai avec l'icone jointe", nom, type(e1).__name__, e1)
-                    await _editer_v2(channel, cible, vue, joindre=True)
-            else:
-                kw = {"content": None, "embed": None, "view": vue}
-                f = _fichier_icone() if vue.icone else None
-                if f is not None:
-                    kw["attachments"] = [f]
-                await channel.get_partial_message(int(cible)).edit(**kw)
-                bilan["converti"] = True
-                log.info("numgen: panneau de #%s converti au format V2 (message %s)",
-                         nom, cible)
+            await _appliquer_panneau(channel, cible, fmt, vue, nom, bilan)
             pose = int(cible)
+            break
         except discord.NotFound:
-            log.info("numgen: panneau %s de #%s introuvable : un neuf est pose",
-                     cible, nom)
+            log.info("numgen: panneau %s de #%s introuvable", cible, nom)
+            if origine != "registre":
+                break
+            # Le panneau ENREGISTRE a disparu -- /resetpanels le supprime, et
+            # l'ancien _ensure_num_panel en reposait un autre, epingle, hors
+            # registre. Poster un neuf laissait cet autre en place (bouton
+            # actif : un doublon), et echouait tout court dans un salon
+            # verrouille ou le bot ne peut plus poster. On prend donc le
+            # panneau clique, sinon celui qu'on retrouve, et on le convertit.
+            origine = "repli"
+            if format_vu and int(vu.id) not in essayes:
+                alt = vu
+            else:
+                alt = await _chercher_panneau(channel, moi, sauf=essayes)
+            if alt is None:
+                break
+            cible, fmt = alt.id, est_panneau_numero(alt, moi)
+            log.info("numgen: panneau enregistre de #%s disparu : le message %s (%s) "
+                     "prend sa place", nom, cible, fmt)
         except Exception as e:                               # noqa: BLE001
             if fmt == "v2":
                 # Reseau, limite d'API... : le panneau est la, et en poster un
@@ -1626,6 +3408,9 @@ async def poser_panneau(bot, channel, cog=None, vu=None, souci="", solde=None,
             log.warning("numgen: conversion refusee dans #%s (%s: %s) : nouveau "
                         "message, l'ancien supprime", nom, type(e).__name__, e)
             a_virer.add(int(cible))
+            break
+    if pose is None and essayes:
+        log.info("numgen: aucun panneau utilisable dans #%s : un neuf est pose", nom)
     if pose is None:
         kw = {"view": vue}
         f = _fichier_icone() if vue.icone else None
@@ -1640,6 +3425,11 @@ async def poser_panneau(bot, channel, cog=None, vu=None, souci="", solde=None,
         pose = nouveau.id
         bilan["poste"] = True
         log.info("numgen: panneau pose dans #%s (message %s)", nom, pose)
+    if format_vu and int(vu.id) != pose:
+        # Le panneau clique n'est pas celui retenu : il part par son
+        # identifiant. Sans ca, seul le menage (borne a une fenetre de
+        # l'historique) pouvait le retirer, et il gardait ses boutons actifs.
+        a_virer.add(int(vu.id))
     a_virer.discard(pose)
     restants = set()
     for mid in sorted(a_virer):
@@ -1666,26 +3456,62 @@ async def poser_panneau(bot, channel, cog=None, vu=None, souci="", solde=None,
     # est supprime -- les anciens « Numero »/« Code » qu'aucun registre ne
     # connait plus, le panneau mort de l'autre application, les notices
     # d'epinglage. Les messages des humains ne sont pas touches.
-    if menage:
-        vires = 0
-        try:
-            async for vieux in channel.history(limit=100):
-                if getattr(vieux.author, "bot", False) and vieux.id != pose:
-                    try:
-                        await vieux.delete()
-                        vires += 1
-                        await asyncio.sleep(0.3)
-                    except Exception as e:                   # noqa: BLE001
-                        log.warning("numgen: message %s de #%s non supprime (%s: %s)",
-                                    getattr(vieux, "id", "?"), nom,
-                                    type(e).__name__, e)
-        except Exception as e:                               # noqa: BLE001
-            log.warning("numgen: menage de #%s : %s", nom, e)
-        if vires:
-            bilan["vires"] += vires
-            log.info("numgen: %d message(s) de bot en trop retire(s) de #%s",
-                     vires, nom)
+    # Un autre panneau NUMERO (le notre, V2 ou ancien) part TOUJOURS, meme
+    # sans `menage`, sur toute la fenetre de recherche : c'etait le doublon
+    # qui survivait au-dela des 100 derniers messages.
+    vires = 0
+    try:
+        async for vieux in channel.history(limit=FENETRE_PANNEAU):
+            double = est_panneau_numero(vieux, moi) if vieux.id != pose else None
+            if not double and not (menage and getattr(vieux.author, "bot", False)
+                                   and vieux.id != pose):
+                continue
+            try:
+                await vieux.delete()
+                vires += 1
+                if double:
+                    log.info("numgen: panneau en double %s (%s) retire de #%s",
+                             vieux.id, double, nom)
+                await asyncio.sleep(0.3)
+            except discord.NotFound:
+                pass
+            except Exception as e:                           # noqa: BLE001
+                log.warning("numgen: message %s de #%s non supprime (%s: %s)",
+                            getattr(vieux, "id", "?"), nom, type(e).__name__, e)
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("numgen: menage de #%s : %s", nom, e)
+    if vires:
+        bilan["vires"] += vires
+        log.info("numgen: %d message(s) de bot en trop retire(s) de #%s", vires, nom)
     return True
+
+
+async def _appliquer_panneau(channel, cible, fmt, vue, nom, bilan):
+    """Met la vue sur le message `cible` : edition d'un panneau V2, ou
+    CONVERSION d'un ancien (texte et embed retires, l'icone jointe). Leve
+    discord.NotFound si le message n'existe plus, et toute autre erreur
+    telle quelle : c'est poser_panneau qui decide de la suite."""
+    if fmt == "v2":
+        try:
+            await _editer_v2(channel, cible, vue)
+        except discord.NotFound:
+            raise
+        except Exception as e1:                              # noqa: BLE001
+            if not vue.icone:
+                raise
+            # Une vignette dont la piece jointe manque est refusee : on la
+            # renvoie, une fois.
+            log.warning("numgen: panneau de #%s refuse (%s: %s) : nouvel essai avec "
+                        "l'icone jointe", nom, type(e1).__name__, e1)
+            await _editer_v2(channel, cible, vue, joindre=True)
+        return
+    kw = {"content": None, "embed": None, "view": vue}
+    f = _fichier_icone() if vue.icone else None
+    if f is not None:
+        kw["attachments"] = [f]
+    await channel.get_partial_message(int(cible)).edit(**kw)
+    bilan["converti"] = True
+    log.info("numgen: panneau de #%s converti au format V2 (message %s)", nom, cible)
 
 
 async def maj_panneau(bot, channel, souci="", solde=None, cog=None) -> bool:
@@ -1727,29 +3553,102 @@ async def maj_panneau(bot, channel, souci="", solde=None, cog=None) -> bool:
                         nom, type(e).__name__, e, type(e2).__name__, e2)
             return False
     if joindre:
-        _salon_ecrire(channel.id, icone=True)
+        # Le panneau EST a jour : un drapeau d'icone non note ne doit pas
+        # le faire passer pour inaffichable (un achat serait alors rendu).
+        try:
+            _salon_ecrire(channel.id, icone=True)
+        except Exception as e:                               # noqa: BLE001
+            log.warning("numgen: icone de #%s jointe mais non notee au registre (%s: %s)",
+                        nom, type(e).__name__, e)
     return True
 
 
-async def verrouiller_salon(channel, bot):
+def _prive_par_construction(channel) -> bool:
+    """Un salon -numero-mail est cree PRIVE (create_us_tickets : @everyone
+    sans la vue) : /panelnumero y remet ce refus de vue, ce qui repare les
+    salons que l'ancien verrouillage avait rendus publics. Un salon d'un
+    autre nom (sms-email d'un autre serveur) garde sa visibilite."""
+    from cogs.welcome import _us_norm
+    return _us_norm(getattr(channel, "name", "") or "").endswith("-numero-mail")
+
+
+async def verrouiller_salon(channel, bot, prive=False):
     """Le salon devient une vitrine : seul le bot y ecrit.
 
     Le VA garde la LECTURE et les boutons — une interaction n'est pas un
     message. Sans ca, un salon qui ne doit contenir que le panneau se
     remplissait de conversations, et le panneau se retrouvait en haut,
     hors de vue.
+
+    Les overwrites existants sont COMPLETES, jamais remplaces. L'appel
+    `set_permissions(@everyone, send_messages=False)` construisait un
+    overwrite neuf qui REMPLACAIT celui du salon : le refus de vue pose a la
+    creation des tickets disparaissait, et chaque -numero-mail devenait
+    visible de tout membre (numeros et codes des autres, « Prendre un
+    numéro » dans le salon d'un autre). `prive=True` (salons -numero-mail,
+    prives par construction) remet ce refus de vue : il repare les salons
+    deja touches.
+
+    Le VA du ticket a un overwrite MEMBRE qui autorise l'envoi, et qui
+    l'emporte sur le refus @everyone : « seul le bot ecrit » ne s'appliquait
+    pas a la seule personne presente. Chaque overwrite membre (hors bots)
+    qui autorise l'envoi est donc passe a « refuse », sa vue et son
+    historique gardes. Rend True si @everyone est verrouille ; chaque membre
+    non modifie est dit au journal.
     """
     g = getattr(channel, "guild", None)
+    nom = getattr(channel, "name", "?")
     if g is None:
         return False
+    raison = "Salon numero/mail : seul le bot y ecrit"
     try:
-        await channel.set_permissions(
-            g.default_role, send_messages=False,
-            reason="Salon numero/mail : seul le bot y ecrit")
-        return True
-    except Exception as e:
-        log.warning(f"verrouiller_salon #{getattr(channel, 'name', '?')} : {e}")
+        ow = channel.overwrites_for(g.default_role)
+        ow.send_messages = False
+        if prive:
+            ow.view_channel = False
+        await channel.set_permissions(g.default_role, overwrite=ow, reason=raison)
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("verrouiller_salon #%s : @everyone non verrouille (%s: %s)",
+                    nom, type(e).__name__, e)
         return False
+    moi = getattr(getattr(bot, "user", None), "id", None)
+    bloques, rates = 0, []
+    try:
+        cibles = list((getattr(channel, "overwrites", None) or {}).items())
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("verrouiller_salon #%s : overwrites illisibles, membres non bloques "
+                    "(%s: %s)", nom, type(e).__name__, e)
+        return True
+    for cible, ow_m in cibles:
+        # Les roles (staff…) ne sont pas touches ; un role hors cache arrive
+        # en Object de type Role.
+        if (isinstance(cible, discord.Role) or getattr(cible, "type", None) is discord.Role
+                or ow_m.send_messages is not True):
+            continue
+        try:
+            membre = cible
+            if not isinstance(membre, discord.Member):
+                # Membre hors cache : discord.py rend un Object, que
+                # set_permissions refuse (ni Member ni Role).
+                get_m = getattr(g, "get_member", None)
+                membre = get_m(cible.id) if get_m else None
+                if membre is None:
+                    membre = await g.fetch_member(cible.id)
+            # Les bots (celui-ci, le principal) doivent pouvoir poster et
+            # redessiner leurs panneaux.
+            if getattr(membre, "bot", False) or getattr(membre, "id", None) == moi:
+                continue
+            ow_m.send_messages = False
+            await channel.set_permissions(membre, overwrite=ow_m, reason=raison)
+            bloques += 1
+        except Exception as e:                               # noqa: BLE001
+            rates.append("%s (%s)" % (getattr(cible, "id", "?"), type(e).__name__))
+    if rates:
+        log.warning("verrouiller_salon #%s : %d membre(s) peuvent encore ecrire : %s",
+                    nom, len(rates), ", ".join(rates))
+    if bloques:
+        log.info("verrouiller_salon #%s : %d membre(s) ne peuvent plus y ecrire", nom, bloques)
+    return True
 
 
 async def setup(bot):

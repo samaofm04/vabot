@@ -2215,8 +2215,22 @@ try:
           "fetch_message" not in _i3.getsource(_n3.maj_panneau))
     # Chaque clic achete. Si le panneau ne peut pas etre ECRIT, le VA ne verra
     # jamais le numero : le garder, c est le payer pour rien.
+    # Relecture du 27/09 : le rendu passe par _rendre, qui LIT la reponse du
+    # fournisseur (numgen.cancel / mail_cancel) -- un refus effacait le
+    # numero quand meme. D'ou « _rendre( » ici au lieu de « numgen.cancel ».
+    _s3rd = _i3.getsource(_n3._rendre)
     check("panneau : un numero inaffichable est RENDU, pas perdu",
-          "numgen.cancel" in _s3 and "INAFFICHABLE" in _s3)
+          "_rendre(" in _s3 and "INAFFICHABLE" in _s3
+          and "numgen.cancel" in _s3rd and "numgen.mail_cancel" in _s3rd
+          and "_rendu_ok(" in _s3rd)
+    # Meme chose quand l'affichage LEVE (registre inecrivable...) : une
+    # exception qui remontait telle quelle sautait le rendu -- numero paye,
+    # jamais montre, jamais rendu. Scenario : num_v2_sim.py, « registre
+    # inecrivable apres l'achat ».
+    _s3x = _s3.split("get_number", 1)[1]
+    check("panneau : et une exception a l affichage finit aussi par le rendre",
+          "except Exception" in _s3x and "montre = False" in _s3x
+          and _s3x.index("montre = False") < _s3x.index("_rendre("))
     # UN message, jamais deux : un message de bot laisse par un incident
     # n est dans aucun registre ; la pose le supprime (jamais un humain).
     _s3m = _i3.getsource(_n3.poser_panneau)
@@ -14282,6 +14296,9 @@ try:
              _gN.get_code, _gN.cancel, _gN.finish, _uN._is_staff_member)
     _tmpN = pathlib.Path(_tN.mkdtemp(prefix="numtest_"))
     _achN, _annN, _codeN = [], [], {"v": ("wait", "")}
+    # Sur le VPS, VA_MACHINE_PROD=1 arme la boucle du recap a on_ready : une
+    # tache de plus, et la « reprise, une fois » comptait deux taches.
+    _envN = os.environ.pop("VA_MACHINE_PROD", None)
     try:
         _nN.SALONS_FILE = _tmpN / "numgen_salons.json"
         _nN.POLL_SECONDS = 1
@@ -14337,8 +14354,11 @@ try:
             def __init__(self): self.t = []
             def create_task(self, c): self.t.append(c)
         class _BotN:
-            def __init__(self): self.user = type("U", (), {"id": 1})(); self.loop = _LoopN()
+            def __init__(self, salons=()):
+                self.user = type("U", (), {"id": 1})(); self.loop = _LoopN()
+                self.salons = {c.id: c for c in salons}
             def get_cog(self, n_): return None
+            def get_channel(self, i): return self.salons.get(int(i))
         class _RespN:
             def __init__(self): self.done = False; self.env = []
             async def defer(self, **k): self.done = True
@@ -14444,18 +14464,2204 @@ try:
                       "+14642768655" in _txtN(vp) and r2["actif"]["id"] == "31"
                       and len(_achN) == 2 and r2.get("v2") is True
                       and r2.get("numero") is None and r2.get("code") is None, (_txtN(vp), r2))
+
+                # REDEMARRAGE : chaque push sur main redemarre le bot, et
+                # l'ecoute d'un numero en attente mourait avec l'ancien
+                # processus -- son code ne s'affichait plus tout seul. Le
+                # nouveau la relance d'apres le registre, une fois (on_ready
+                # revient a chaque reconnexion complete).
+                for t_ in bot.loop.t:
+                    t_.close()
+                bot.loop.t.clear()
+                bot2 = _BotN(salons=[ch2])
+                cog2 = _nN.NumerosCog(bot2)
+                await cog2.on_ready()
+                await cog2.on_ready()
+                check("reprise : au redemarrage, l ecoute du numero en attente repart, une fois",
+                      len(bot2.loop.t) == 1, len(bot2.loop.t))
+                _codeN["v"] = ("code", "271828")
+                for t_ in list(bot2.loop.t):
+                    await t_
+                bot2.loop.t.clear()
+                check("reprise : et son code s affiche tout seul",
+                      "271828" in _txtN(vp) and _nN._salon(ch2.id).get("code_valeur") == "271828",
+                      _txtN(vp)[:80])
             finally:
                 _nN.asyncio.sleep = _vraiSleep
         _aN.run(_scenarioN())
     finally:
         (_nN.SALONS_FILE, _nN.POLL_SECONDS, _gN.status, _gN.get_number, _gN.balances,
          _gN.get_code, _gN.cancel, _gN.finish, _uN._is_staff_member) = _savN
+        if _envN is not None:
+            os.environ["VA_MACHINE_PROD"] = _envN
         import shutil as _shN
         _shN.rmtree(_tmpN, ignore_errors=True)
 except Exception as _eN:
     import traceback as _tbN
     _tbN.print_exc()
     check("panneau numero : testable", False, repr(_eN)[:200])
+
+
+# ---------------------------------------------------------------------------
+# Panneau numero : relecture du 27/09/2026. Neuf defauts CONFIRMES par des
+# simulations (scratchpad rev_argent_sim.py, relecture_rollout/probe.py) --
+# chacun a son test ici :
+#   1. un rendu refuse par le fournisseur effacait quand meme le numero ;
+#   2. l'ecoute s'arretait sur une erreur passagere, ou apres 3 min ;
+#   3. « C'est bon » / « Nouveau code » d'un autre membre effacaient le code ;
+#   4. l'ecoute d'un numero remplace ecrivait son code sous le suivant ;
+#   5. la confirmation « Autre » n'etait pas liee au numero qu'elle nomme ;
+#   6. un admin qui cliquait « Autre » devenait proprietaire du nouveau ;
+#   7. registre qui vise un panneau supprime : l'ancien restait, en double ;
+#   8. reprise des ecoutes quand le cog est recharge sur un bot deja pret ;
+#   9. panneau V2 cherche dans 50 messages seulement : second panneau pose.
+print()
+print("=" * 70)
+print("Panneau numero : relecture (rendu verifie, ecoute, proprietaire, doublons)")
+print("=" * 70)
+try:
+    import asyncio as _aF, tempfile as _tfF, logging as _lgF, shutil as _shF
+    import time as _tiF, types as _tyF
+    import discord as _dF
+    import cogs.numeros as _nF, numgen as _gF, cogs.user as _uF
+    _savF = {k: getattr(_nF, k) for k in ("SALONS_FILE", "POLL_SECONDS")}
+    _savGF = {k: getattr(_gF, k) for k in (
+        "status", "get_number", "get_mail", "balances", "get_code", "get_mail_code",
+        "cancel", "mail_cancel", "finish", "retry")}
+    _savUF = _uF._is_staff_member
+    # Sur le VPS, VA_MACHINE_PROD=1 arme la boucle du recap a on_ready : une
+    # tache de plus dans la boucle factice, qui fausserait les comptes.
+    _envF = os.environ.pop("VA_MACHINE_PROD", None)
+    _tmpF = pathlib.Path(_tfF.mkdtemp(prefix="numrelec_"))
+    _auditF, _nEcritsF = _V2_AUDIT["actif"], len(_V2_AUDIT["ecrits"])
+    _V2_AUDIT["actif"] = True
+
+    class _JournalF(_lgF.Handler):
+        def __init__(self):
+            super().__init__(_lgF.DEBUG)
+            self.l = []
+
+        def emit(self, r):
+            self.l.append(r.getMessage())
+
+    _jF = _JournalF()
+    _lgNumF = _lgF.getLogger("vabot.numeros")
+    _niveauF = _lgNumF.level
+    _lgNumF.addHandler(_jF)
+    _lgNumF.setLevel(_lgF.DEBUG)
+
+    def _dit(motif, depuis=0):
+        return [x for x in _jF.l[depuis:] if motif in x]
+
+    _F = _tyF.SimpleNamespace(achats=[], mails=[], annules=[], mails_annules=[], finis=[],
+                              retries=[], code={}, mail_code={}, code_seq={},
+                              cancel_rep=[], mail_cancel_rep=[], retry_rep=None,
+                              appels={}, pendant=None)
+    try:
+        _nF.SALONS_FILE = _tmpF / "numgen_salons.json"
+        _nF.POLL_SECONDS = 1
+
+        def _gnF(service="ig", country=None):
+            _F.achats.append(service)
+            k = len(_F.achats)
+            return True, {"id": str(700 + k), "phone": "+1555777%04d" % k,
+                          "provider": "getatext", "country": "187"}
+
+        def _gmF(service="ig", domain="gmail.com"):
+            _F.mails.append(service)
+            k = len(_F.mails)
+            return True, {"id": "m%d" % k, "mail": "lena%d@gmail.com" % k, "stale": ""}
+
+        def _gcF(i, p="getatext"):
+            _F.appels[i] = _F.appels.get(i, 0) + 1
+            if _F.pendant is not None:
+                # Ce qui se passe PENDANT l'appel HTTP (un « Autre » concurrent).
+                f, _F.pendant = _F.pendant, None
+                f()
+            seq = _F.code_seq.get(i)
+            if seq:
+                return seq.pop(0)
+            return _F.code.get(i, ("wait", ""))
+
+        def _gmcF(i, stale=""):
+            _F.appels[i] = _F.appels.get(i, 0) + 1
+            e, v = _F.mail_code.get(i, ("wait", ""))
+            return ("wait", "") if (e == "code" and v == (stale or "")) else (e, v)
+
+        def _cancelF(i, p="getatext"):
+            r = _F.cancel_rep.pop(0) if _F.cancel_rep else (True, "ACCESS_CANCEL")
+            if r[0]:
+                _F.annules.append(i)
+            return r
+
+        def _mcancelF(i):
+            r = _F.mail_cancel_rep.pop(0) if _F.mail_cancel_rep else {"status": 1}
+            if r.get("status") not in (0, None):
+                _F.mails_annules.append(i)
+            return r
+
+        def _retryF(i, p="getatext"):
+            _F.retries.append(i)
+            return _F.retry_rep or (True, "ACCESS_RETRY_GET")
+
+        _gF.status = lambda: {"sms_ok": True, "mail_ok": True}
+        _gF.get_number, _gF.get_mail = _gnF, _gmF
+        _gF.get_code, _gF.get_mail_code = _gcF, _gmcF
+        _gF.cancel, _gF.mail_cancel = _cancelF, _mcancelF
+        _gF.finish = lambda i, p="getatext": (_F.finis.append(i) or "ACCESS_ACTIVATION")
+        _gF.retry = _retryF
+        _gF.balances = lambda: {"sms": "9 $", "mail": "1 $"}
+        _uF._is_staff_member = lambda m: getattr(m, "id", 0) == 3     # 3 = admin
+
+        def _RF(st):
+            return _tyF.SimpleNamespace(status=st, reason="x")
+
+        class _AutF:
+            def __init__(self, i, bot=True):
+                self.id, self.bot = i, bot
+
+        class _MsgF:
+            _k = 10 ** 17
+
+            def __init__(self, ch, view=None, embed=None, auteur=1, bot=True, pinned=False):
+                _MsgF._k += 1
+                self.id, self.ch, self.pinned = _MsgF._k, ch, pinned
+                self.author = _AutF(auteur, bot)
+                self.embeds = [embed] if embed is not None else []
+                self.view = view
+                self.flags = _tyF.SimpleNamespace(
+                    components_v2=bool(view is not None and view.has_components_v2()),
+                    ephemeral=False)
+                self.components = list(view.children) if view is not None else []
+
+            async def delete(self):
+                if self.ch.msgs.pop(self.id, None) is None:
+                    raise _dF.NotFound(_RF(404), "Unknown Message")
+                self.ch.suppr.append(self.id)
+
+        class _PartF:
+            def __init__(self, ch, mid):
+                self.ch, self.id = ch, int(mid)
+
+            async def edit(self, **k):
+                for f_ in k.get("attachments") or []:
+                    f_.close()
+                m = self.ch.msgs.get(self.id)
+                if m is None:
+                    raise _dF.NotFound(_RF(404), "Unknown Message")
+                self.ch.nb_edits += 1
+                if self.ch.casse is not None and self.ch.nb_edits >= self.ch.casse:
+                    raise _dF.HTTPException(_RF(500), "panne simulee")
+                v = k.get("view")
+                if v is not None:
+                    m.view, m.components = v, list(v.children)
+                    m.flags.components_v2 = m.flags.components_v2 or v.has_components_v2()
+                if "embed" in k:
+                    m.embeds = [k["embed"]] if k["embed"] is not None else []
+                self.ch.edites.append(self.id)
+
+            async def delete(self):
+                m = self.ch.msgs.get(self.id)
+                if m is None:
+                    raise _dF.NotFound(_RF(404), "Unknown Message")
+                await m.delete()
+
+        class _ChF:
+            def __init__(self, cid, peut_poster=True):
+                self.id, self.name = cid, "relec%d-numero-mail" % cid
+                self.msgs, self.suppr, self.edites = {}, [], []
+                self.nb_edits, self.casse, self.postes = 0, None, 0
+                self.peut_poster = peut_poster
+                self.guild = _tyF.SimpleNamespace(
+                    id=5, get_member=lambda i: _tyF.SimpleNamespace(
+                        id=i, display_name="va%d" % i, name="va%d" % i))
+
+            async def send(self, view=None, file=None, **k):
+                if file is not None:
+                    file.close()
+                if not self.peut_poster:
+                    raise _dF.Forbidden(_RF(403), "Missing Permissions")
+                m = _MsgF(self, view=view)
+                self.msgs[m.id] = m
+                self.postes += 1
+                return m
+
+            def get_partial_message(self, mid):
+                return _PartF(self, mid)
+
+            async def pins(self):
+                return [m for m in self.msgs.values() if m.pinned]
+
+            def history(self, limit=100):
+                async def g():
+                    for m in sorted(self.msgs.values(), key=lambda x: -x.id)[:limit]:
+                        yield m
+                return g()
+
+            def ajouter(self, **k):
+                m = _MsgF(self, **k)
+                self.msgs[m.id] = m
+                return m
+
+        class _LoopF:
+            def __init__(self):
+                self.t = []
+
+            def create_task(self, c):
+                self.t.append(c)
+
+        class _BotF:
+            def __init__(self, salons=(), pret=False):
+                self.user = _tyF.SimpleNamespace(id=1)
+                self.loop = _LoopF()
+                self.salons = {c.id: c for c in salons}
+                self.pret = pret
+
+            def get_cog(self, n_):
+                return None
+
+            def get_channel(self, i):
+                return self.salons.get(int(i))
+
+            def is_ready(self):
+                return self.pret
+
+            def add_view(self, v):
+                pass
+
+        class _RespF:
+            def __init__(self):
+                self.done, self.env = False, []
+
+            async def defer(self, **k):
+                self.done = True
+
+            def is_done(self):
+                return self.done
+
+            async def send_message(self, *a, **k):
+                self.done = True
+                self.env.append((a, k))
+
+            async def edit_message(self, **k):
+                self.done = True
+
+        class _FolF:
+            def __init__(self):
+                self.env = []
+
+            async def send(self, *a, **k):
+                self.env.append((a, k))
+
+        class _ItxF:
+            def __init__(self, ch, uid, bot, message=None):
+                self.channel, self.client, self.message = ch, bot, message
+                self.user = _tyF.SimpleNamespace(id=uid, name="u%d" % uid,
+                                                 display_name="u%d" % uid, roles=[])
+                self.response, self.followup = _RespF(), _FolF()
+                self.data, self.guild = {}, getattr(ch, "guild", None)
+
+            def mots(self):
+                out = [str(a[0]) for a, _k in self.response.env if a]
+                out += [str(a[0]) for a, _k in self.followup.env if a]
+                return " | ".join(out)
+
+            def prive(self):
+                return all(k.get("ephemeral") for _a, k in self.followup.env)
+
+        def _txtF(m):
+            v = getattr(m, "view", None)
+            return [i.content for i in v.walk_children()
+                    if isinstance(i, _dF.ui.TextDisplay)] if v is not None else []
+
+        async def _clicF(cog, cid, itx):
+            # Le repondant que discord.py trouve apres un redemarrage.
+            vue = _nF.PanneauNumero(cog, tous=True)
+            b = next(i for i in vue.walk_children()
+                     if isinstance(i, _dF.ui.Button) and i.custom_id == cid)
+            await b.callback(itx)
+
+        async def _tachesF(bot):
+            while bot.loop.t:
+                await bot.loop.t.pop(0)
+
+        def _jeterF(bot):
+            for t_ in bot.loop.t:
+                t_.close()
+            bot.loop.t.clear()
+
+        def _regF(ch):
+            return _nF._salon(ch.id)
+
+        def _histoF(i):
+            return next((e for e in _nF._histo_lire() if str(e.get("id")) == str(i)), {})
+
+        async def _salonF(bot, cid, **k):
+            ch = _ChF(cid, **k)
+            bot.salons[ch.id] = ch
+            cog = _nF.NumerosCog(bot)
+            await _nF.poser_panneau(bot, ch, cog)
+            (p,) = ch.msgs.values()
+            return ch, cog, p
+
+        async def _oui(cog, ch, uid, quoi, bot, act_id=None):
+            await _nF._ConfirmerView(cog, quoi, act_id=act_id).oui.callback(
+                _ItxF(ch, uid, bot))
+
+        async def _scenarioF():
+            _vraiSleep = _aF.sleep
+
+            async def _s0(*a, **k):
+                await _vraiSleep(0)
+            _nF.asyncio.sleep = _s0
+            TROP_TOT = _gF._MSG["EARLY_CANCEL_DENIED"]
+            try:
+                bot = _BotF()
+
+                # ---- 1. le rendu d'un numero inaffichable est VERIFIE --------
+                ch, cog, p = await _salonF(bot, 6101)
+                ch.casse = ch.nb_edits + 2        # le panneau s'ecrit, puis plus rien
+                _F.cancel_rep = [(False, TROP_TOT)]
+                j0 = len(_jF.l)
+                it = _ItxF(ch, 7, bot, message=p)
+                await _clicF(cog, "numgen:sms", it)
+                a1 = (_regF(ch).get("actif") or {}).get("id")
+                check("rendu refuse (trop tot) : le numero reste au registre, rien d efface",
+                      a1 == "701" and not _F.annules, _regF(ch))
+                check("rendu refuse : le VA lit la verite (pas encore rendu, nouvel essai)",
+                      "pas encore rendu" in it.mots() and "rendu (remboursé)" not in it.mots()
+                      and it.prive(), it.mots())
+                check("rendu refuse : dit au journal, ecoute ET rendu differe lances",
+                      _dit("REFUSE", j0) and len(bot.loop.t) == 2, (len(bot.loop.t), _jF.l[j0:j0 + 9]))
+                ch.casse = None
+                await _tachesF(bot)             # ecoute (rien), puis rendu differe
+                check("rendu differe : 2 min plus tard le numero est rendu, le panneau revide",
+                      _F.annules == ["701"] and not _regF(ch).get("actif")
+                      and _txtF(p)[:1] == ["## Numéro Instagram"]
+                      and _histoF("701").get("rendu_auto") is True, (_F.annules, _txtF(p)))
+                # Le code arrive AVANT le nouvel essai : le VA s'en sert, on n'y touche plus.
+                ch.casse = ch.nb_edits + 2
+                _F.cancel_rep = [(False, TROP_TOT)]
+                await _clicF(cog, "numgen:sms", _ItxF(ch, 7, bot, message=p))
+                ch.casse = None
+                _F.code["702"] = ("code", "424242")
+                await _tachesF(bot)
+                check("rendu differe : abandonne si le code est arrive entre-temps (et dit)",
+                      "702" not in _F.annules and _regF(ch).get("code_valeur") == "424242"
+                      and _dit("abandonne : son code est arrive"), _F.annules)
+                await _clicF(cog, "numgen:fini", _ItxF(ch, 7, bot, message=p))
+                # Mail : le retour de mail_cancel (un dict) est lu aussi.
+                ch.casse = ch.nb_edits + 2
+                _F.mail_cancel_rep = [{"status": 0, "error": "refus simule"}]
+                it = _ItxF(ch, 7, bot, message=p)
+                await _clicF(cog, "numgen:mail", it)
+                ch.casse = None
+                check("mail refuse (status 0) : garde au registre, rien de « rendu »",
+                      (_regF(ch).get("actif") or {}).get("id") == "m1" and not _F.mails_annules
+                      and "pas encore rendu" in it.mots(), (_regF(ch), it.mots()))
+                await _tachesF(bot)
+                check("mail : rendu au nouvel essai", _F.mails_annules == ["m1"]
+                      and not _regF(ch).get("actif"), _F.mails_annules)
+
+                # Annuler / Autre depuis le panneau : seul un rendu REUSSI efface.
+                await _clicF(cog, "numgen:sms", _ItxF(ch, 7, bot, message=p))
+                _jeterF(bot)
+                ida = _regF(ch)["actif"]["id"]
+                _F.cancel_rep = [(False, "ERR:HTTPSConnectionPool(host='x'): Read timed out.")]
+                await _oui(cog, ch, 7, "annuler", bot, act_id=ida)
+                check("Annuler en echec (timeout) : numero garde, raison affichee",
+                      (_regF(ch).get("actif") or {}).get("id") == ida and ida not in _F.annules
+                      and _txtF(p)[-1].startswith("❌ ERR:") and not _histoF(ida).get("annule_le"),
+                      _txtF(p))
+                n0 = len(_F.achats)
+                _F.cancel_rep = [(False, "BAD_STATUS")]
+                await _oui(cog, ch, 7, "autre", bot, act_id=ida)
+                check("Autre refuse : pas de second numero achete, le premier reste",
+                      len(_F.achats) == n0 and (_regF(ch).get("actif") or {}).get("id") == ida, _F.achats)
+                _F.cancel_rep = [(False, _gF._MSG["NO_ACTIVATION"])]
+                await _oui(cog, ch, 7, "annuler", bot, act_id=ida)
+                check("Annuler : activation inconnue du fournisseur -> effacee (rien a rendre)",
+                      not _regF(ch).get("actif") and _histoF(ida).get("annule_le"), _regF(ch))
+
+                # ---- 2. l'ecoute survit aux erreurs passageres, vit 20 min ----
+                await _clicF(cog, "numgen:sms", _ItxF(ch, 7, bot, message=p))
+                idd = _regF(ch)["actif"]["id"]
+                _F.code_seq[idd] = [("error", "ERR:HTTPSConnectionPool: Read timed out."),
+                                    ("error", "<html>502 Bad Gateway</html>")]
+                _F.code[idd] = ("code", "999000")
+                j0 = len(_jF.l)
+                await _tachesF(bot)
+                check("ecoute : deux erreurs passageres, puis le code s affiche tout seul",
+                      _regF(ch).get("code_valeur") == "999000" and "999000" in _txtF(p)[1]
+                      and len(_dit("erreur passagere", j0)) == 2, _txtF(p))
+                await _clicF(cog, "numgen:fini", _ItxF(ch, 7, bot, message=p))
+                await _clicF(cog, "numgen:sms", _ItxF(ch, 7, bot, message=p))
+                ide = _regF(ch)["actif"]["id"]
+                _F.code_seq[ide] = [("error", "ERR:x")] * _nF.ECOUTE_ERREURS_MAX
+                _F.appels.pop(ide, None)
+                await _tachesF(bot)
+                check("ecoute : %d erreurs d affilee -> arret, dit dans le panneau"
+                      % _nF.ECOUTE_ERREURS_MAX,
+                      _F.appels.get(ide) == _nF.ECOUTE_ERREURS_MAX and _txtF(p)[-1] == "❌ ERR:x",
+                      (_F.appels.get(ide), _txtF(p)))
+                # « Redemander » lit d'abord le code (attente), puis l'ecoute
+                # relancee tombe sur l'activation inconnue.
+                _F.code_seq[ide] = [("wait", ""), ("error", _gF._MSG["NO_ACTIVATION"])]
+                _F.appels.pop(ide, None)
+                _F.retry_rep = None
+                await _clicF(cog, "numgen:retry", _ItxF(ch, 7, bot, message=p))
+                await _tachesF(bot)
+                check("ecoute : une erreur DEFINITIVE (activation inconnue) arrete tout de suite",
+                      _F.appels.get(ide) == 2, _F.appels.get(ide))   # Redemander + 1 tour
+                _F.appels.pop(ide, None)
+                await _clicF(cog, "numgen:retry", _ItxF(ch, 7, bot, message=p))
+                await _tachesF(bot)
+                tours = _F.appels.get(ide, 0) - 1
+                check("ecoute : elle dure la vie du numero (plus de 3 min), puis le dit",
+                      tours > _nF.POLL_MAX // _nF.POLL_SECONDS
+                      and _txtF(p)[-1] == "❌ Aucun code reçu en %d min"
+                      % (_nF.DUREE_NUMERO_SEC // 60), (tours, _txtF(p)))
+                # « Redemander » refuse par le fournisseur : l'ecoute repart quand meme.
+                _F.retry_rep = (False, "BAD_STATUS")
+                await _clicF(cog, "numgen:retry", _ItxF(ch, 7, bot, message=p))
+                _F.retry_rep = None
+                check("Redemander refuse : l ecoute du numero vivant est relancee",
+                      len(bot.loop.t) == 1 and _txtF(p)[-1] == "❌ BAD_STATUS", len(bot.loop.t))
+                _F.code[ide] = ("code", "121212")
+                await _tachesF(bot)
+                check("Redemander refuse : le code arrive ensuite s affiche tout seul",
+                      "121212" in _txtF(p)[1], _txtF(p))
+
+                # ---- 3. les boutons du numero sont a son proprietaire --------
+                it = _ItxF(ch, 8, bot, message=p)
+                await _clicF(cog, "numgen:fini", it)
+                check("C est bon d un autre membre : refus 🔒 prive, le code reste",
+                      "🔒" in it.mots() and it.prive() and _regF(ch).get("code_valeur") == "121212"
+                      and "121212" in _txtF(p)[1], (it.mots(), _txtF(p)))
+                r0 = len(_F.retries)
+                it = _ItxF(ch, 8, bot, message=p)
+                await _clicF(cog, "numgen:retry", it)
+                check("Nouveau code d un autre membre : refus 🔒, rien redemande, code garde",
+                      "🔒" in it.mots() and len(_F.retries) == r0
+                      and _regF(ch).get("code_valeur") == "121212", it.mots())
+                it = _ItxF(ch, 3, bot, message=p)
+                await _clicF(cog, "numgen:fini", it)
+                check("C est bon d un admin : accepte", not _regF(ch).get("actif"), _regF(ch))
+                # Numero MORT avec son code (proprietaire parti) : n'importe qui libere le salon.
+                vieux = {"id": "555", "provider": "getatext", "kind": "sms", "service": "ig",
+                         "valeur": "+15550000555", "par": 7, "pris_le": int(_tiF.time()) - 3600}
+                _nF._salon_ecrire(ch.id, actif=vieux, code_valeur="1", code_de="555")
+                await _clicF(cog, "numgen:fini", _ItxF(ch, 8, bot, message=p))
+                check("C est bon d un autre sur un numero mort (plus de 20 min) : accepte",
+                      not _regF(ch).get("actif"), _regF(ch))
+
+                # ---- 4. course : le code d'un numero remplace ne s'ecrit pas --
+                await _clicF(cog, "numgen:sms", _ItxF(ch, 7, bot, message=p))
+                ida = _regF(ch)["actif"]["id"]
+                autreB = dict(_regF(ch)["actif"], id="B1", valeur="+15550000999")
+                _F.pendant = lambda: _nF._salon_ecrire(ch.id, actif=autreB, code_valeur=None,
+                                                       code_de=None)
+                _F.code[ida] = ("code", "111111")
+                j0 = len(_jF.l)
+                t_ = bot.loop.t.pop(0)
+                await t_
+                check("course : l ecoute de A voit son code APRES le remplacement -> ignore",
+                      _regF(ch)["actif"]["id"] == "B1" and not _regF(ch).get("code_valeur")
+                      and "111111" not in " ".join(_txtF(p))
+                      and _dit("arrive apres son remplacement", j0), (_regF(ch), _txtF(p)))
+                # Meme course par « Redemander » (get_code, puis ecriture).
+                _nF._salon_ecrire(ch.id, actif=dict(autreB, id=ida), code_valeur=None, code_de=None)
+                _F.pendant = lambda: _nF._salon_ecrire(ch.id, actif=autreB)
+                await _clicF(cog, "numgen:retry", _ItxF(ch, 7, bot, message=p))
+                check("course : Redemander n ecrit pas le code de A sous B",
+                      _regF(ch)["actif"]["id"] == "B1" and not _regF(ch).get("code_valeur"),
+                      _regF(ch))
+                # Filet : un code note pour une AUTRE activation n'est jamais montre.
+                check("filet : code_de different de l activation -> code non affiche",
+                      _nF._a_afficher({"actif": autreB, "code_valeur": "111111",
+                                       "code_de": ida})[1] is None
+                      and _nF._a_afficher({"actif": autreB, "code_valeur": "7",
+                                           "code_de": "B1"})[1] == "7")
+                import inspect as _inF
+                # Seconde relecture (27/09) : l'activation n'est plus close a la
+                # reception du code -- « Nouveau code » exige qu'elle soit
+                # ouverte. Plus aucun finish dans le chemin de l'ecoute, donc
+                # plus d'attente HTTP entre la lecture du registre et son
+                # ecriture (la course que ce test gardait).
+                _srcF = "".join(_inF.getsource(f_) for f_ in (
+                    _nF.NumerosCog._suivre, _nF.NumerosCog._montrer_code,
+                    _nF.NumerosCog._afficher_code))
+                check("reception du code : aucun finish dans l ecoute (« C'est bon » clot l activation)",
+                      "code_valeur=val" in _srcF and "_finir(" not in _srcF)
+                _nF._salon_ecrire(ch.id, actif=None, code_valeur=None, code_de=None)
+                _jeterF(bot)
+
+                # ---- 5. la confirmation vise le numero qu'elle nomme ----------
+                await _clicF(cog, "numgen:mail", _ItxF(ch, 7, bot, message=p))
+                _jeterF(bot)
+                mA = _regF(ch)["actif"]["id"]
+                i1, i2 = _ItxF(ch, 7, bot, message=p), _ItxF(ch, 7, bot, message=p)
+                await _clicF(cog, "numgen:autre", i1)
+                await _clicF(cog, "numgen:autre", i2)
+                v1 = i1.response.env[0][1]["view"]
+                v2 = i2.response.env[0][1]["view"]
+                await v1.oui.callback(_ItxF(ch, 7, bot))
+                mB = _regF(ch)["actif"]["id"]
+                i3 = _ItxF(ch, 7, bot)
+                await v2.oui.callback(i3)
+                check("double « Autre » : le 2e Oui (question sur A) ne rend pas B",
+                      v2.act_id == mA and mB != mA and _regF(ch)["actif"]["id"] == mB
+                      and _F.mails_annules[-1] == mA and mB not in _F.mails_annules
+                      and "déjà changé" in i3.mots(), (mA, mB, _F.mails_annules, i3.mots()))
+                await _oui(cog, ch, 7, "annuler", bot, act_id=mB)
+                _jeterF(bot)
+
+                # ---- 6. « Autre » par un admin : le numero reste au VA --------
+                await _clicF(cog, "numgen:sms", _ItxF(ch, 7, bot, message=p))
+                _jeterF(bot)
+                await _oui(cog, ch, 3, "autre", bot, act_id=_regF(ch)["actif"]["id"])
+                nv = _regF(ch)["actif"]
+                check("Autre clique par un admin : le nouveau numero reste au VA (par, historique)",
+                      nv["par"] == 7 and _histoF(nv["id"]).get("par") == 7
+                      and _histoF(nv["id"]).get("nom") == "va7", (nv, _histoF(nv["id"])))
+                it = _ItxF(ch, 7, bot, message=p)
+                await _clicF(cog, "numgen:annuler", it)
+                check("et le VA garde la main dessus (confirmation, pas 🔒)",
+                      isinstance(it.response.env[0][1].get("view"), _nF._ConfirmerView), it.mots())
+                await _oui(cog, ch, 7, "annuler", bot, act_id=nv["id"])
+                _jeterF(bot)
+
+                # ---- 7. panneau enregistre supprime : l'ancien est converti ---
+                for poster in (True, False):
+                    c7 = _ChF(6170 + int(poster), peut_poster=poster)
+                    p2 = c7.ajouter(embed=_dF.Embed(title="📱 Numéros & Mails Instagram"),
+                                    pinned=True)
+                    nm = c7.ajouter(embed=_dF.Embed(title="📱 Numéro"))
+                    cc = c7.ajouter(embed=_dF.Embed(title="🔑 Code"))
+                    for _h in range(150):
+                        c7.ajouter(auteur=55, bot=False)
+                    _nF._salon_ecrire(c7.id, panneau=10 ** 17 - 5, v2=True, numero=nm.id,
+                                      code=cc.id)
+                    ok7 = await _nF.poser_panneau(bot, c7, cog, vu=p2)
+                    bots7 = [m for m in c7.msgs.values() if m.author.bot]
+                    check("registre sur un panneau supprime (poster=%s) : l ancien clique est "
+                          "CONVERTI sur place, rien de poste, aucun doublon" % poster,
+                          ok7 and c7.postes == 0 and bots7 == [p2] and p2.flags.components_v2
+                          and _regF(c7).get("panneau") == p2.id, (ok7, c7.postes, len(bots7)))
+                # Panneau clique qui n'est PAS celui retenu : supprime par son id,
+                # meme au-dela de la fenetre du menage.
+                c7 = _ChF(6173)
+                bon7 = c7.ajouter(view=_nF.PanneauNumero(None, solde="1 $"))
+                _nF._salon_ecrire(c7.id, panneau=bon7.id, v2=True)
+                vieux7 = c7.ajouter(embed=_dF.Embed(title="📱 Numéros & Mails Instagram"),
+                                    pinned=True)
+                c7.msgs.pop(vieux7.id)
+                vieux7.id = min(c7.msgs) - 1        # le plus ancien du salon...
+                c7.msgs[vieux7.id] = vieux7
+                for _h in range(250):               # ... derriere 250 messages
+                    c7.ajouter(auteur=55, bot=False)
+                ok7 = await _nF.poser_panneau(bot, c7, cog, vu=vieux7, menage=False)
+                check("panneau clique non retenu : supprime par son id, meme hors fenetre",
+                      ok7 and vieux7.id not in c7.msgs and bon7.id in c7.msgs
+                      and c7.postes == 0 and _regF(c7)["panneau"] == bon7.id,
+                      (ok7, vieux7.id in c7.msgs, c7.postes))
+
+                # ---- 8. reprise des ecoutes (cog recharge sur un bot pret) ----
+                c8 = _ChF(6180)
+                _nF._salon_ecrire(c8.id, actif={"id": "881", "provider": "getatext",
+                                                "kind": "sms", "service": "ig",
+                                                "valeur": "+15550000881", "par": 7,
+                                                "pris_le": int(_tiF.time()) - 60})
+                _nF._salon_ecrire(6189, actif=["registre abime"])
+                bot8 = _BotF(salons=[c8], pret=True)
+                cog8 = _nF.NumerosCog(bot8)
+                j0 = len(_jF.l)
+                await cog8.cog_load()
+                check("reprise : cog charge sur un bot DEJA pret -> reprise programmee",
+                      len(bot8.loop.t) == 1, len(bot8.loop.t))
+                await bot8.loop.t.pop(0)
+                check("reprise : l ecoute repart, un salon abime est journalise sans tout bloquer",
+                      len(bot8.loop.t) == 1 and _dit("ecoute reprise pour #", j0)
+                      and _dit("salon 6189 non reprise", j0), _jF.l[j0:j0 + 6])
+                await cog8.on_ready()
+                check("reprise : une seule fois (on_ready ensuite ne double rien)",
+                      len(bot8.loop.t) == 1, len(bot8.loop.t))
+                _jeterF(bot8)
+                bot9 = _BotF(salons=[c8], pret=False)
+                await _nF.NumerosCog(bot9).cog_load()
+                check("reprise : au demarrage (bot pas pret), c est on_ready qui s en charge",
+                      not bot9.loop.t)
+                _nF._salon_ecrire(6189, actif=None)
+
+                # ---- 9. panneau V2 retrouve au-dela de 50 messages ------------
+                c9 = _ChF(6190)
+                pv = c9.ajouter(view=_nF.PanneauNumero(None, solde="1 $"))
+                for _h in range(150):
+                    c9.ajouter(auteur=55, bot=False)
+                trouve = await _nF._chercher_panneau(c9, 1)
+                await _nF.poser_panneau(bot, c9, cog)
+                check("registre perdu : le V2 est retrouve derriere 150 messages, pas de second",
+                      trouve is pv and c9.postes == 0 and _regF(c9).get("panneau") == pv.id,
+                      (trouve, c9.postes))
+                double = c9.ajouter(view=_nF.PanneauNumero(None, solde="1 $"))
+                c9.msgs.pop(double.id)
+                _MsgF._k += 1
+                double.id = pv.id - 1                # plus ancien que le panneau retenu
+                c9.msgs[double.id] = double
+                j0 = len(_jF.l)
+                await _nF.poser_panneau(bot, c9, cog, menage=False)
+                check("doublon V2 loin dans l historique : retire meme sans menage, et dit",
+                      double.id not in c9.msgs and pv.id in c9.msgs
+                      and _dit("panneau en double", j0), _jF.l[j0:j0 + 5])
+            finally:
+                _nF.asyncio.sleep = _vraiSleep
+                for b_ in [x for x in list(locals().values()) if isinstance(x, _BotF)]:
+                    _jeterF(b_)
+        _aF.run(_scenarioF())
+        check("relecture numero : rien d ecrit dans data/",
+              len(_V2_AUDIT["ecrits"]) == _nEcritsF, _V2_AUDIT["ecrits"][_nEcritsF:][:3])
+    finally:
+        for k_, v_ in _savF.items():
+            setattr(_nF, k_, v_)
+        for k_, v_ in _savGF.items():
+            setattr(_gF, k_, v_)
+        _uF._is_staff_member = _savUF
+        _V2_AUDIT["actif"] = _auditF
+        _lgNumF.removeHandler(_jF)
+        _lgNumF.setLevel(_niveauF)
+        if _envF is not None:
+            os.environ["VA_MACHINE_PROD"] = _envF
+        _shF.rmtree(_tmpF, ignore_errors=True)
+except Exception as _eF:
+    import traceback as _tbF
+    _tbF.print_exc()
+    check("panneau numero (relecture) : testable", False, repr(_eF)[:200])
+
+
+# ---------------------------------------------------------------------------
+# Recap des numeros dans « 📊・debrief-day » (27/09/2026). Le proprietaire veut
+# chaque nuit « qui a pris quoi, qui a echoue », comme le recap qu'une autre
+# agence recoit. Le registre des salons, ecrase a chaque prise, ne le savait
+# pas : l'historique garde une entree par activation, completee a chaque
+# evenement du panneau. Puis « je peux avoir un recap par jour en live ? » :
+# UN message par jour, cree au premier numero, edite au fil des evenements
+# (une edition par minute au plus), fige a minuit par EDITION du meme message.
+# Scenario complet et mutants : scratchpad recap_sim.py / recap_mut.py.
+print()
+print("=" * 70)
+print("Recap des numeros : historique a chaque evenement, « debrief-day »")
+print("=" * 70)
+try:
+    import asyncio as _aR, tempfile as _tfR, logging as _lgR, shutil as _shR
+    import types as _tyR
+    import discord as _dR
+    import cogs.numeros as _nR, numgen as _gR, cogs.user as _uR
+    from datetime import datetime as _dtR, timedelta as _tdR, timezone as _tzR
+    _savR = (_nR.SALONS_FILE, _nR.POLL_SECONDS, _gR.status, _gR.get_number, _gR.balances,
+             _gR.get_code, _gR.cancel, _gR.finish, _gR.retry, _uR._is_staff_member,
+             _nR.HISTO_FILE, _nR.RECAP_FILE)
+    _envR = os.environ.pop("VA_MACHINE_PROD", None)
+    _tmpR = pathlib.Path(_tfR.mkdtemp(prefix="recaptest_"))
+    _auditR, _nEcritsR = _V2_AUDIT["actif"], len(_V2_AUDIT["ecrits"])
+    _V2_AUDIT["actif"] = True
+    _achR, _codeR, _echecR = [], {}, {"apres_achat": None}
+
+    class _JournalR(_lgR.Handler):
+        def __init__(self):
+            super().__init__(_lgR.DEBUG)
+            self.l = []
+
+        def emit(self, r):
+            self.l.append(r.getMessage())
+    _jR = _JournalR()
+    # Le banc tourne sans configuration de journal : sans ce niveau, les
+    # lignes INFO (« retenu », « aucun numero ») n'arrivaient pas.
+    _logR = _lgR.getLogger("vabot.numeros")
+    _niveauR = _logR.level
+    _logR.setLevel(_lgR.INFO)
+    _logR.addHandler(_jR)
+    try:
+        _nR.SALONS_FILE = _tmpR / "numgen_salons.json"
+        # Les trois registres nommes un par un vers le dossier temporaire (et
+        # pas seulement par SALONS_FILE) : un banc d'avant avait ecrit un
+        # historique factice dans le vrai data/.
+        _nR.HISTO_FILE = _tmpR / "numgen_historique.json"
+        _nR.RECAP_FILE = _tmpR / "numgen_recap.json"
+        _nR.POLL_SECONDS = 1
+
+        def _numR(service="ig", country=None):
+            if _echecR["apres_achat"] is not None:
+                _echecR["apres_achat"].echec = 2
+                _echecR["apres_achat"] = None
+            _achR.append(service)
+            return True, {"id": str(900 + len(_achR)), "phone": "+1555000%04d" % len(_achR),
+                          "provider": "getatext", "country": "187"}
+        _gR.status = lambda: {"sms_ok": True, "mail_ok": True}
+        _gR.get_number = _numR
+        _gR.balances = lambda: {"sms": "1 $", "mail": "0 $"}
+        _gR.get_code = lambda i, p="getatext": _codeR.get(i, ("wait", ""))
+        _gR.cancel = lambda i, p="getatext": (True, "ACCESS_CANCEL")
+        _gR.finish = lambda i, p="getatext": "ACCESS_ACTIVATION"
+        _gR.retry = lambda i, p="getatext": (True, "ACCESS_RETRY_GET")
+        _uR._is_staff_member = lambda m: False
+
+        _idR = iter(range(10 ** 17, 10 ** 17 + 10 ** 5))
+
+        class _MsgR:
+            def __init__(self, ch, **k):
+                self.id = next(_idR); self.ch = ch; self.k = dict(k)
+                self.author = _tyR.SimpleNamespace(id=1, bot=True)
+                self.embeds = [k["embed"]] if k.get("embed") else []
+                v = k.get("view")
+                self.flags = _tyR.SimpleNamespace(
+                    components_v2=bool(v is not None and v.has_components_v2()), ephemeral=False)
+            async def delete(self):
+                self.ch.msgs.pop(self.id, None)
+
+        class _PartR:
+            def __init__(self, ch, mid): self.ch, self.mid = ch, mid
+            async def edit(self, **k):
+                if self.ch.echec:
+                    self.ch.echec -= 1
+                    raise _dR.HTTPException(_tyR.SimpleNamespace(status=400, reason="x"), "refus")
+                m = self.ch.msgs.get(self.mid)
+                if m is None:
+                    raise _dR.NotFound(_tyR.SimpleNamespace(status=404, reason="x"), "absent")
+                for f_ in k.get("attachments") or []:
+                    f_.close()
+                m.k.update(k)
+            async def delete(self):
+                self.ch.msgs.pop(self.mid, None)
+
+        class _ChR:
+            def __init__(self, cid, name, guild=None):
+                self.id, self.name, self.guild = cid, name, guild
+                self.msgs, self.echec = {}, 0
+                if guild is not None:
+                    guild.text_channels.append(self)
+            async def send(self, **k):
+                if k.get("file") is not None:
+                    k["file"].close()
+                e = k.get("embed")
+                if e is not None and (len(e.description or "") > 4096 or len(e) > 6000):
+                    raise _dR.HTTPException(_tyR.SimpleNamespace(status=400, reason="x"), "long")
+                m = _MsgR(self, **k); self.msgs[m.id] = m; return m
+            def get_partial_message(self, mid): return _PartR(self, mid)
+            async def pins(self): return []
+            def history(self, **k):
+                async def g():
+                    for m in list(self.msgs.values()):
+                        yield m
+                return g()
+
+        class _GuildR:
+            def __init__(self, gid, name, membres=None):
+                self.id, self.name, self.text_channels = gid, name, []
+                self.membres = dict(membres or {})
+            def get_member(self, uid):
+                d = self.membres.get(uid)
+                return _tyR.SimpleNamespace(id=uid, display_name=d) if d else None
+
+        class _LoopR:
+            def __init__(self): self.t = []
+            def create_task(self, c): self.t.append(c)
+
+        class _BotR:
+            def __init__(self, guilds=()):
+                self.user = _tyR.SimpleNamespace(id=1); self.loop = _LoopR()
+                self.guilds_ = {g.id: g for g in guilds}
+            def get_cog(self, n_): return None
+            def get_channel(self, i): return None
+            def get_guild(self, i): return self.guilds_.get(int(i))
+            def get_user(self, i): return None
+
+        class _RespR:
+            def __init__(self): self.done = False; self.env = []
+            async def defer(self, **k): self.done = True
+            def is_done(self): return self.done
+            async def send_message(self, *a, **k): self.done = True; self.env.append((a, k))
+            async def edit_message(self, **k): self.done = True
+
+        class _FolR:
+            def __init__(self): self.env = []
+            async def send(self, *a, **k): self.env.append((a, k))
+
+        class _ItxR:
+            def __init__(self, ch, uid, bot, message=None, nom=None):
+                self.channel = ch; self.client = bot; self.data = {}; self.message = message
+                self.user = _tyR.SimpleNamespace(id=uid, name="u%d" % uid,
+                                                 display_name=nom or "u%d" % uid)
+                self.response = _RespR(); self.followup = _FolR()
+
+        async def _clicR(cog, cid, itx):
+            vue = _nR.PanneauNumero(cog, tous=True)
+            b = next(i for i in vue.walk_children()
+                     if isinstance(i, _dR.ui.Button) and i.custom_id == cid)
+            await b.callback(itx)
+
+        async def _tachesR(bot, lancer=True):
+            for t_ in list(bot.loop.t):
+                if lancer:
+                    await t_
+                else:
+                    t_.close()
+            bot.loop.t.clear()
+
+        def _eR(aid, kind="sms"):
+            for e_ in reversed(_nR._histo_lire()):
+                if e_.get("id") == str(aid) and e_.get("type") == kind:
+                    return e_
+            return {}
+
+        _UTC1 = _tzR(_tdR(hours=1))
+
+        def _minuitR(j):
+            return _dtR(j.year, j.month, j.day, tzinfo=_UTC1).timestamp()
+        _seqR = iter(range(60000, 70000))
+
+        def _synR(guild, uid, pris, issue, nom=None, kind="sms"):
+            aid = str(next(_seqR))
+            actif = {"id": aid, "kind": kind, "provider": "getatext", "service": "ig",
+                     "valeur": "+1999%07d" % int(aid), "par": uid, "pris_le": int(pris)}
+            u = _tyR.SimpleNamespace(id=uid, display_name=nom) if nom else None
+            assert _nR.histo_prise(actif, _tyR.SimpleNamespace(id=guild.id + 1, guild=guild),
+                                   u, maintenant=pris)
+            if issue == "code":
+                assert _nR.histo_evenement(kind, aid, "code", maintenant=pris + 60)
+            elif issue in ("annule", "remplace"):
+                assert _nR.histo_evenement(kind, aid, issue, maintenant=pris + 60)
+            return aid
+
+        def _lignesR(m):
+            return (m.k["embed"].description or "").split("\n")
+
+        async def _scenR():
+            _vraiSleepR = _aR.sleep
+
+            async def _s0R(*a, **k):
+                await _vraiSleepR(0)
+            _nR.asyncio.sleep = _s0R
+            try:
+                G = _GuildR(777, "YouL4b US", {7: "Belarmin", 9: "Harrys la fureur 👹",
+                                               21: "Kora"})
+                H = _GuildR(888, "YouL4b", {12: "Hugo"})
+                bot = _BotR(guilds=[G, H])
+                cog = _nR.NumerosCog(bot)
+                DB = _ChR(5000, "📊・debrief-day", G)
+                _ChR(5001, "debrief-night", G)
+                ch = _ChR(42, "belarmin-numero-mail", G)
+                await _nR.poser_panneau(bot, ch, cog)
+                (p,) = [m for m in ch.msgs.values()]
+
+                # ---- l'historique suit CHAQUE evenement du panneau
+                await _clicR(cog, "numgen:sms", _ItxR(ch, 7, bot, p, "Belarmin"))       # 901
+                e1 = _eR("901")
+                check("historique : la prise est notee (fournisseur, sms, service, numero, "
+                      "par, nom, salon, serveur, pris_le)",
+                      e1.get("fournisseur") == "getatext" and e1.get("service") == "ig"
+                      and e1.get("numero") == "+15550000001" and e1.get("par") == 7
+                      and e1.get("nom") == "Belarmin" and e1.get("salon") == 42
+                      and e1.get("serveur") == 777 and abs(e1.get("pris_le", 0) - time.time()) < 5, e1)
+                _codeR["901"] = ("code", "482913")
+                await _tachesR(bot)
+                await _clicR(cog, "numgen:fini", _ItxR(ch, 7, bot, p))
+                check("historique : code recu (ecoute) puis « C'est bon »",
+                      _eR("901").get("code_le") and _eR("901").get("fini_le"), _eR("901"))
+                await _clicR(cog, "numgen:sms", _ItxR(ch, 7, bot, p))                   # 902
+                await _tachesR(bot, lancer=False)
+                await _nR._ConfirmerView(cog, "autre").oui.callback(_ItxR(ch, 7, bot))  # -> 903
+                await _tachesR(bot, lancer=False)
+                await _nR._ConfirmerView(cog, "annuler").oui.callback(_ItxR(ch, 7, bot))
+                check("historique : « Autre » = remplace_le (et une prise neuve), « Annuler » = annule_le",
+                      _eR("902").get("remplace_le") and not _eR("902").get("annule_le")
+                      and _eR("903").get("par") == 7 and _eR("903").get("annule_le"),
+                      (_eR("902"), _eR("903")))
+                await _clicR(cog, "numgen:sms", _ItxR(ch, 7, bot, p))                   # 904
+                await _tachesR(bot, lancer=False)
+                _codeR["904"] = ("code", "555111")
+                await _clicR(cog, "numgen:retry", _ItxR(ch, 7, bot, p))
+                check("historique : « Redemander » qui trouve le code deja arrive le note",
+                      _eR("904").get("code_le"), _eR("904"))
+                await _tachesR(bot, lancer=False)
+                ch2 = _ChR(43, "rendu-numero-mail", G)
+                await _nR.poser_panneau(bot, ch2, cog)
+                (p2,) = [m for m in ch2.msgs.values()]
+                _echecR["apres_achat"] = ch2
+                await _clicR(cog, "numgen:sms", _ItxR(ch2, 11, bot, p2))                # 905
+                check("historique : numero inaffichable rendu par le bot = rendu_le",
+                      _eR("905").get("rendu_le") and _eR("905").get("rendu_auto") is True, _eR("905"))
+                await _tachesR(bot, lancer=False)
+
+                # ---- la veille (V) : donnees synthetiques par l'API reelle
+                T = _dtR.fromtimestamp(time.time(), _UTC1).date()
+                V = T - _tdR(days=1)
+                m0 = _minuitR(V)
+                for i in range(3):
+                    _synR(G, 7, m0 + 8 * 3600 + i, "code", "Belarmin")
+                _synR(G, 7, m0 + 9 * 3600, "annule")
+                _synR(G, 7, m0 + 86400 - 1, "code")                 # 23:59:59 : la veille
+                _synR(G, 21, m0 + 3600, "code", "Kora")
+                _synR(G, 21, m0 + 3601, "code")
+                for iss in ("annule", "remplace", "expire", "expire"):
+                    _synR(G, 21, m0 + 7200, iss)
+                for iss in ("annule", "remplace", "expire"):
+                    _synR(G, 22, m0 + 7200, iss, "lil_bro_")        # parti : nom note
+                for iss in ("code", "code", "code", "annule"):
+                    _synR(G, 9, m0 + 10800, iss, "Harrys la fureur 👹")
+                pendu = _synR(G, 9, m0 + 86400 - 120, "attente")   # 23:58, sans suite
+                _synR(G, 8, m0 + 3600, "code", "Lena", kind="mail")
+                _synR(G, 8, m0 + 3700, "expire", "Lena", kind="mail")
+                _synR(G, 30, _minuitR(T), "code")                   # 00:00:00 : le lendemain
+                _synR(H, 12, m0 + 3600, "code", "Hugo")
+                check("bornes : 22:59:59 UTC est encore le jour meme, 23:00 UTC le lendemain (Benin)",
+                      _nR.jour_benin(_dtR(2026, 9, 26, 22, 59, 59, tzinfo=_tzR.utc).timestamp())
+                      == _dtR(2026, 9, 26).date()
+                      and _nR.jour_benin(_dtR(2026, 9, 26, 23, tzinfo=_tzR.utc).timestamp())
+                      == _dtR(2026, 9, 27).date())
+
+                jours_fr = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
+
+                def _titreR(j, direct=False):
+                    t_ = "📊 Récap numéros SMS — %s %s" % (jours_fr[j.weekday()], j.strftime("%d/%m"))
+                    return t_ + " · en direct" if direct else t_
+
+                def _duJourR(ch_, j):
+                    return [m for m in ch_.msgs.values()
+                            if m.k.get("embed") is not None
+                            and m.k["embed"].title in (_titreR(j), _titreR(j, True))]
+
+                def _sansMentionR(am):
+                    return (isinstance(am, _dR.AllowedMentions) and not am.everyone
+                            and not am.users and not am.roles)
+
+                def _enCoursR(ts):
+                    return "En cours : depuis 00h00, heure du Bénin — mis à jour à %s." % (
+                        _dtR.fromtimestamp(ts, _UTC1).strftime("%Hh%M"))
+
+                def _ficheR(j, gid):
+                    return ((_nR._recap_lire() or {}).get("jours", {}).get(j.isoformat(), {})
+                            .get(gid, {}))
+
+                attendu = [
+                    "Journée complète : de 00h00 à 23h59, heure du Bénin.",
+                    "",
+                    "• Kora — 6 numéro(s) · 2 codes (33 %) 🔎 4 sans code",
+                    "• Belarmin — 5 numéro(s) · 4 codes (80 %)",
+                    "• Harrys la fureur 👹 — 5 numéro(s) · 3 codes (60 %)",
+                    "• lil\\_bro\\_ — 3 numéro(s) · 0 code (0 %)",
+                    "",
+                    "Total : 19 numéro(s)",
+                    "📧 2 mail(s)",
+                ]
+                # Un historique plus ancien que la veille : le registre neuf
+                # prend la veille pour plancher (sinon journee « partielle »).
+                _synR(G, 7, _minuitR(V - _tdR(days=3)) + 3600, "code", "Belarmin")
+                l0 = len(_jR.l)
+                b = await cog.recap_tour(maintenant=_minuitR(T) - 1)            # 23:59:59
+                msgs = _duJourR(DB, V)
+                check("recap en direct : UN message « · en direct » dans « 📊・debrief-day » (salon "
+                      "decore reconnu), cree au premier tour",
+                      len(msgs) == 1 and b["postes"] == [(V.isoformat(), "777")]
+                      and msgs[0].k["embed"].title == _titreR(V, True), (b, len(msgs)))
+                check("recap en direct : memes lignes que le recap final, sous-titre « En cours »",
+                      msgs and _lignesR(msgs[0]) == [_enCoursR(_minuitR(T) - 1)] + attendu[1:],
+                      "\n".join(_lignesR(msgs[0])) if msgs else None)
+                check("recap en direct : sans mention qui notifie (AllowedMentions.none())",
+                      msgs and _sansMentionR(msgs[0].k.get("allowed_mentions")))
+                M = msgs[0] if msgs else None
+                b = await cog.recap_tour(maintenant=_minuitR(T) + 1)            # 00:00:01
+                msgs = _duJourR(DB, V)
+                check("recap a minuit : le MEME message devient le recap final, par EDITION (titre "
+                      "sans « en direct », « Journée complète »)",
+                      len(msgs) == 1 and msgs[0] is M and M.k["embed"].title == _titreR(V)
+                      and _lignesR(M) == attendu and b["finalises"] == [(V.isoformat(), "777")]
+                      and not b["postes"] and _sansMentionR(M.k.get("allowed_mentions")),
+                      (b, "\n".join(_lignesR(M)) if M else None))
+                b = await cog.recap_tour(maintenant=_minuitR(T) + 300)          # 00:05
+                check("recap : plus de second message a 00:05, et le numero de 23:58 qui attend "
+                      "son code est dit une fois",
+                      len(_duJourR(DB, V)) == 1 and not b["postes"]
+                      and len([x for x in _jR.l[l0:] if "attendent encore" in x]) == 1, b)
+                b = await cog.recap_tour(maintenant=_minuitR(T) + 18 * 60 + 1)  # 00:18:01
+                fV = _ficheR(V, "777")
+                check("recap : le numero de 23:58 est note « expire » ; texte inchange -> aucune "
+                      "edition, et le jour devient « fige »",
+                      _eR(pendu).get("expire") is True and (V.isoformat(), "777") not in b["edites"]
+                      and fV.get("finalise") is True and fV.get("fige") is True
+                      and fV.get("message") == M.id and _lignesR(M) == attendu, (b, fV))
+                check("recap : serveur sans « debrief-day » -> dit une fois (la boucle repasse "
+                      "chaque minute), rien poste ailleurs",
+                      b["sans_salon"] == [(V.isoformat(), "888")]
+                      and not any("Hugo" in "\n".join(_lignesR(m)) for m in DB.msgs.values())
+                      and len([x for x in _jR.l[l0:] if "aucun salon « debrief-day »" in x
+                               and V.isoformat() in x]) == 1,
+                      [x for x in _jR.l[l0:] if "aucun salon" in x])
+                cog2 = _nR.NumerosCog(bot)                                       # redemarrage
+                await cog2.recap_tour(maintenant=_minuitR(T) + 3600)
+                check("recap : une seule publication pour la veille (tour suivant, redemarrage)",
+                      len(_duJourR(DB, V)) == 1, len(_duJourR(DB, V)))
+                DBH = _ChR(6000, "debrief-day", H)
+                b = await cog2.recap_tour(maintenant=_minuitR(T) + 7200)
+                check("recap : le salon cree, le recap retenu part (et lui seul)",
+                      b["postes"] == [(V.isoformat(), "888")] and len(DBH.msgs) == 1
+                      and len(_duJourR(DB, V)) == 1, b)
+
+                # ---- rattrapage : bot arrete trois jours
+                _synR(G, 7, _minuitR(T + _tdR(days=2)) + 3600, "annule", "Belarmin")
+                b = await cog2.recap_tour(maintenant=_minuitR(T + _tdR(days=4)) + 10 * 3600)
+                mt = _duJourR(DB, T)
+                check("rattrapage : le jour du parcours (message en direct) est FIGE par edition, "
+                      "T+2 (sans message) est poste, les jours vides non",
+                      (T.isoformat(), "777") in b["finalises"]
+                      and b["postes"] == [((T + _tdR(days=2)).isoformat(), "777")]
+                      and (T + _tdR(days=1)).isoformat() in b["vides"]
+                      and len(mt) == 1 and mt[0].k["embed"].title == _titreR(T)
+                      and len(_duJourR(DB, T + _tdR(days=2))) == 1, b)
+                lt = _lignesR(mt[0]) if mt else []
+                check("rattrapage : le recap du parcours reel (Belarmin 4 · 2 codes, rendu a part, "
+                      "00:00:00 compte, id en repli de nom)",
+                      "• Belarmin — 4 numéro(s) · 2 codes (50 %)" in lt
+                      and "• 30 — 1 numéro(s) · 1 code (100 %)" in lt
+                      and "Total : 5 numéro(s)" in lt
+                      and any(x.startswith("↩️ 1 numéro(s) rendu(s)") for x in lt), lt)
+
+                # ---- en direct, heure par heure (jour D, processus neuf)
+                D = T + _tdR(days=5)
+                mD = _minuitR(D)
+                cogD = _nR.NumerosCog(bot)
+                a1 = _synR(G, 7, mD + 8 * 3600, "attente", "Belarmin")
+                b = await cogD.recap_tour(maintenant=mD + 8 * 3600 + 2)
+                (MD,) = _duJourR(DB, D) or (None,)
+                check("en direct : cree au PREMIER numero de la journee",
+                      MD is not None and b["postes"] == [(D.isoformat(), "777")]
+                      and _lignesR(MD) == [_enCoursR(mD + 8 * 3600 + 2), "",
+                                           "• Belarmin — 1 numéro(s) · 0 code (0 %)", "",
+                                           "Total : 1 numéro(s)"], b)
+                _editsR = {"n": 0}
+                _vraiEditR = _PartR.edit
+
+                async def _editCompteR(self_, **k):
+                    if self_.mid == MD.id:
+                        _editsR["n"] += 1
+                    return await _vraiEditR(self_, **k)
+                _PartR.edit = _editCompteR
+                try:
+                    assert _nR.histo_evenement("sms", a1, "code", maintenant=mD + 8 * 3600 + 10)
+                    br = [await cogD.recap_tour(maintenant=mD + 8 * 3600 + 11)]
+                    k1 = _synR(G, 21, mD + 8 * 3600 + 20, "attente", "Kora")
+                    br.append(await cogD.recap_tour(maintenant=mD + 8 * 3600 + 21))
+                    assert _nR.histo_evenement("sms", k1, "annule", maintenant=mD + 8 * 3600 + 30)
+                    br.append(await cogD.recap_tour(maintenant=mD + 8 * 3600 + 31))
+                    check("en direct : code, prise, annulation en 20 s -> AUCUNE edition par "
+                          "evenement (regroupes, reveil a la fin de la minute)",
+                          _editsR["n"] == 0
+                          and all(x["retenu"] and x["reveil"] == mD + 8 * 3600 + 62 for x in br),
+                          [(x["retenu"], x["reveil"]) for x in br])
+                    b = await cogD.recap_tour(maintenant=mD + 8 * 3600 + 62)
+                    check("en direct : a la fin de la minute, UNE edition porte les trois "
+                          "evenements (la derniere valeur part)",
+                          _editsR["n"] == 1 and _lignesR(MD)[2:] == [
+                              "• Belarmin — 1 numéro(s) · 1 code (100 %)",
+                              "• Kora — 1 numéro(s) · 0 code (0 %)", "", "Total : 2 numéro(s)"],
+                          (_editsR, _lignesR(MD)))
+                    hs = [_synR(G, 9, mD + 9 * 3600 + i, "attente", "Harrys la fureur 👹")
+                          for i in range(4)]
+                    await cogD.recap_tour(maintenant=mD + 9 * 3600 + 5)
+                    for h_ in hs[:2]:
+                        assert _nR.histo_evenement("sms", h_, "remplace",
+                                                   maintenant=mD + 9 * 3600 + 300)
+                    await cogD.recap_tour(maintenant=mD + 9 * 3600 + 302)
+                    n_av = _editsR["n"]
+                    b = await cogD.recap_tour(maintenant=mD + 9 * 3600 + 20 * 60 + 4)
+                    check("en direct : deux « Autre » (texte visible inchange) -> pas d'edition ; "
+                          "l'EXPIRATION des deux autres (sans evenement) -> edition, 🔎 4 sans code",
+                          n_av == 2 and _editsR["n"] == 3
+                          and "• Harrys la fureur 👹 — 4 numéro(s) · 0 code (0 %) 🔎 4 sans code"
+                          in _lignesR(MD), (n_av, _editsR, _lignesR(MD)))
+                finally:
+                    _PartR.edit = _vraiEditR
+                b = await cogD.recap_tour(maintenant=mD + 86400 + 2)             # minuit
+                fD = _ficheR(D, "777")
+                check("en direct -> minuit : le MEME message devient le recap final (edition), "
+                      "le registre garde son id et « finalise »",
+                      _duJourR(DB, D) == [MD] and MD.k["embed"].title == _titreR(D)
+                      and _lignesR(MD)[0] == "Journée complète : de 00h00 à 23h59, heure du Bénin."
+                      and b["finalises"] == [(D.isoformat(), "777")] and not b["postes"]
+                      and fD.get("message") == MD.id and fD.get("finalise") is True, (b, fD))
+                await cogD.recap_tour(maintenant=mD + 86400 + 300)
+                await _nR.NumerosCog(bot).recap_tour(maintenant=mD + 86400 + 3600)
+                check("en direct : aucune seconde publication (00:05, redemarrage)",
+                      _duJourR(DB, D) == [MD], len(_duJourR(DB, D)))
+
+                # ---- repli : le message du jour a disparu avant minuit
+                D1 = D + _tdR(days=1)
+                _synR(G, 7, _minuitR(D1) + 10 * 3600, "attente", "Belarmin")
+                await cogD.recap_tour(maintenant=_minuitR(D1) + 10 * 3600 + 2)
+                (M1,) = _duJourR(DB, D1) or (None,)
+                DB.msgs.pop(M1.id, None)                                         # supprime
+                b = await cogD.recap_tour(maintenant=_minuitR(D1) + 86400 + 2)
+                await cogD.recap_tour(maintenant=_minuitR(D1) + 86400 + 62)
+                await _nR.NumerosCog(bot).recap_tour(maintenant=_minuitR(D1) + 86400 + 600)
+                m1 = _duJourR(DB, D1)
+                check("repli : message du jour disparu -> recap final poste UNE fois (fiche "
+                      "« repli »), jamais double",
+                      len(m1) == 1 and m1[0].k["embed"].title == _titreR(D1)
+                      and b["replis"] == [(D1.isoformat(), "777")]
+                      and _ficheR(D1, "777").get("repli") is True
+                      and _ficheR(D1, "777").get("message") == m1[0].id, (b, len(m1)))
+
+                # ---- redemarrages : jour en cours remis a jour, veille figee
+                D2 = D + _tdR(days=2)
+                a2 = _synR(G, 7, _minuitR(D2) + 10 * 3600, "attente", "Belarmin")
+                await cogD.recap_tour(maintenant=_minuitR(D2) + 10 * 3600 + 2)
+                (M2,) = _duJourR(DB, D2) or (None,)
+                assert _nR.histo_evenement("sms", a2, "code", maintenant=_minuitR(D2) + 10 * 3600 + 300)
+                b = await _nR.NumerosCog(bot).recap_tour(maintenant=_minuitR(D2) + 10 * 3600 + 600)
+                check("redemarrage : le jour en cours est REMIS A JOUR (meme message edite, code "
+                      "arrive pendant l'arret)",
+                      _duJourR(DB, D2) == [M2] and (D2.isoformat(), "777") in b["edites"]
+                      and "• Belarmin — 1 numéro(s) · 1 code (100 %)" in _lignesR(M2), b)
+                b = await _nR.NumerosCog(bot).recap_tour(
+                    maintenant=_minuitR(D2 + _tdR(days=1)) + 1800)
+                check("redemarrage le lendemain : la veille restee « en direct » est FIGEE par "
+                      "edition, pas repostee",
+                      _duJourR(DB, D2) == [M2] and M2.k["embed"].title == _titreR(D2)
+                      and b["finalises"] == [(D2.isoformat(), "777")] and not b["postes"], b)
+
+                # ---- garde machine
+                _nR._MACHINE_DITE.clear()
+                bot3 = _BotR()
+                cog3 = _nR.NumerosCog(bot3)
+                await cog3.on_ready()
+                check("garde machine : sans VA_MACHINE_PROD, pas de boucle du recap (et c'est dit)",
+                      not bot3.loop.t and any("NON arme ici" in x for x in _jR.l), bot3.loop.t)
+                os.environ["VA_MACHINE_PROD"] = "1"
+                try:
+                    bot4 = _BotR()
+                    cog4 = _nR.NumerosCog(bot4)
+                    await cog4.on_ready()
+                    await cog4.on_ready()
+                finally:
+                    os.environ.pop("VA_MACHINE_PROD", None)
+                check("garde machine : avec VA_MACHINE_PROD=1, une seule boucle",
+                      [t_.cr_code.co_name for t_ in bot4.loop.t] == ["_boucle_recap"],
+                      [t_.cr_code.co_name for t_ in bot4.loop.t])
+                await _tachesR(bot4, lancer=False)
+            finally:
+                _nR.asyncio.sleep = _vraiSleepR
+        _aR.run(_scenR())
+    finally:
+        (_nR.SALONS_FILE, _nR.POLL_SECONDS, _gR.status, _gR.get_number, _gR.balances,
+         _gR.get_code, _gR.cancel, _gR.finish, _gR.retry, _uR._is_staff_member,
+         _nR.HISTO_FILE, _nR.RECAP_FILE) = _savR
+        if _envR is not None:
+            os.environ["VA_MACHINE_PROD"] = _envR
+        _logR.removeHandler(_jR)
+        _logR.setLevel(_niveauR)
+        _V2_AUDIT["actif"] = _auditR
+        _shR.rmtree(_tmpR, ignore_errors=True)
+    check("recap numeros : aucune ecriture dans data/",
+          len(_V2_AUDIT["ecrits"]) == _nEcritsR, str(_V2_AUDIT["ecrits"][_nEcritsR:][:5]))
+except Exception as _eR:
+    import traceback as _tbR
+    _tbR.print_exc()
+    check("recap numeros : testable", False, repr(_eR)[:200])
+
+
+# ---------------------------------------------------------------------------
+# Panneau numero et recap : seconde relecture du 27/09/2026. Treize constats
+# CONFIRMES par simulation ; chacun a son test ici (welcome.py et les bancs du
+# scratchpad, eux, se verifient hors de ce fichier) :
+#   C1 registre inecrivable : numero paye, jamais affiche, jamais rendu ;
+#   C2 un code arrive pendant la confirmation « Autre »/« Annuler » ;
+#   C3 « Redemander » effacait un code arrive pendant son appel ;
+#   C4 « Nouveau code » impossible : activation close des le premier code ;
+#   C5 verrouiller_salon rendait publics les -numero-mail ;
+#   C7 code ecrit mais jamais affiche, activation close quand meme ;
+#   C8 anciens boutons ephemeres : refus de rendu ignore ;
+#   R1 registre du recap perdu : 7 jours repostes au 2e tour ;
+#   R2 envoi du recap refuse : le jour sortait de la fenetre sans trace ;
+#   R3 premier recap : journee partielle annoncee « complete » ;
+#   R4 salon « 📊-debrief-day » non reconnu.
+# Le fournisseur est simule AU PROTOCOLE (numgen._stubs remplace) : ce sont
+# les vraies numgen.get_code / retry / finish / cancel qui l'interrogent.
+print()
+print("=" * 70)
+print("Panneau numero et recap : seconde relecture (13 constats)")
+print("=" * 70)
+try:
+    import asyncio as _aQ, tempfile as _tfQ, logging as _lgQ, shutil as _shQ
+    import time as _tiQ, types as _tyQ, inspect as _inQ
+    import threading as _thQ
+    from datetime import datetime as _dtQ, timedelta as _tdQ, timezone as _tzQ
+    import discord as _dQ
+    import safe_json as _sjQ
+    import cogs.numeros as _nQ, numgen as _gQ, cogs.user as _uQ
+
+    _savNQ = {k: getattr(_nQ, k) for k in ("SALONS_FILE", "POLL_SECONDS")}
+    _savGQ = {k: getattr(_gQ, k) for k in (
+        "_stubs", "_mail", "status", "balances", "getatext_key", "smsbower_key",
+        "default_country")}
+    _savUQ = _uQ._is_staff_member
+    _savSJQ = _sjQ.write
+    _envQ = os.environ.pop("VA_MACHINE_PROD", None)
+    _racineQ = pathlib.Path(_tfQ.mkdtemp(prefix="numrelec2_"))
+    _auditQ, _nEcritsQ = _V2_AUDIT["actif"], len(_V2_AUDIT["ecrits"])
+    _V2_AUDIT["actif"] = True
+
+    # Garde BLOQUANTE en plus du releve : une ecriture sous le vrai data/
+    # pendant cette partie leve au lieu d'etre seulement notee.
+    _gardeQ = {"actif": True, "bloques": []}
+    _dataQ = os.path.realpath("data")
+
+    def _garde_q(ev, args):
+        if not _gardeQ["actif"]:
+            return
+        chemins = []
+        if ev == "open":
+            mode, flags = args[1], args[2]
+            if (mode and any(c in str(mode) for c in "wax+")) or (
+                    isinstance(flags, int) and flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT)):
+                chemins = [args[0]]
+        elif ev in ("os.rename", "os.replace", "os.remove", "os.unlink", "os.mkdir"):
+            chemins = list(args[:2])
+        for p in chemins:
+            if isinstance(p, (str, bytes, os.PathLike)):
+                rp = os.path.realpath(os.fsdecode(p))
+                if rp == _dataQ or rp.startswith(_dataQ + os.sep):
+                    _gardeQ["bloques"].append(rp)
+                    raise PermissionError("ecriture sous data/ refusee pendant le banc : %s" % rp)
+    sys.addaudithook(_garde_q)
+
+    class _JournalQ(_lgQ.Handler):
+        def __init__(self):
+            super().__init__(_lgQ.DEBUG)
+            self.l = []
+
+        def emit(self, r):
+            self.l.append(r.getMessage())
+
+    _jQ = _JournalQ()
+    _logQ = _lgQ.getLogger("vabot.numeros")
+    _niveauQ = _logQ.level
+    _logQ.addHandler(_jQ)
+    _logQ.setLevel(_lgQ.DEBUG)
+
+    def _ditQ(motif, depuis=0):
+        return [x for x in _jQ.l[depuis:] if motif in x]
+
+    # ---- Faux fournisseur, protocole handler_api ----------------------------
+    class _FourQ:
+        """Etats WAIT, OK, RETRY, FINI, ANNULE. `pendant[cle]` : appele PENDANT
+        l'appel (course), `rep[cle]` : reponses forcees, `livrer[id]` : [n, code]
+        -- le SMS arrive au n-ieme getStatus."""
+
+        def __init__(self):
+            self.lk = _thQ.Lock()
+            self.acts, self.n, self.journal = {}, 0, []
+            self.pendant, self.rep, self.livrer = {}, {}, {}
+            self.mails, self.mail_n = {}, 0
+
+        def sms(self, i, code):
+            with self.lk:
+                a = self.acts[str(i)]
+                a["etat"], a["code"] = "OK", code
+
+        def actions(self, depuis=0, sans_get=True):
+            return [x for x in self.journal[depuis:] if not (sans_get and x[0] == "getStatus")]
+
+        def __call__(self, provider, action, **p):
+            st = str(p.get("status") or "")
+            cle = action if action != "setStatus" else "setStatus" + st
+            i = str(p.get("id") or "")
+            with self.lk:
+                self.journal.append((cle, i))
+                if action == "getNumber":
+                    self.n += 1
+                    i = str(800 + self.n)
+                    self.acts[i] = {"etat": "WAIT", "code": None}
+                    return "ACCESS_NUMBER:%s:1555888%04d" % (i, self.n)
+                a = self.acts.get(i)
+                f = self.pendant.pop(cle, None)
+            if a is None:
+                return "NO_ACTIVATION"
+            if f is not None:
+                f(a)
+            with self.lk:
+                forces = self.rep.get(cle)
+                if forces:
+                    return forces.pop(0)
+                if action == "getStatus":
+                    lv = self.livrer.get(i)
+                    if lv:
+                        lv[0] -= 1
+                        if lv[0] <= 0:
+                            a["etat"], a["code"] = "OK", lv[1]
+                            self.livrer.pop(i)
+                    return {"WAIT": "STATUS_WAIT_CODE", "OK": "STATUS_OK:%s" % a["code"],
+                            "RETRY": "STATUS_WAIT_RETRY:%s" % a["code"],
+                            "ANNULE": "STATUS_CANCEL",
+                            "FINI": "STATUS_OK:%s" % a["code"]}[a["etat"]]
+                if st == "3":
+                    # Le statut 3 exige une activation OUVERTE (protocole).
+                    if a["etat"] in ("FINI", "ANNULE"):
+                        return "NO_ACTIVATION"
+                    a["etat"] = "RETRY"
+                    return "ACCESS_RETRY_GET"
+                if st == "6":
+                    if a["etat"] in ("OK", "RETRY"):
+                        a["etat"] = "FINI"
+                        return "ACCESS_ACTIVATION"
+                    return "BAD_STATUS"
+                if st == "8":
+                    if a["etat"] in ("OK", "FINI", "RETRY"):
+                        return "BAD_STATUS"
+                    a["etat"] = "ANNULE"
+                    return "ACCESS_CANCEL"
+            return "BAD_ACTION"
+
+        def mail(self, endpoint, **p):
+            mid = str(p.get("mailId") or "")
+            cle = "mail:" + endpoint + (str(p.get("status") or ""))
+            with self.lk:
+                self.journal.append((cle, mid))
+                f = self.pendant.pop(cle, None)
+            if f is not None:
+                f(mid)
+            with self.lk:
+                if endpoint == "getActivation":
+                    self.mail_n += 1
+                    return {"status": 1, "mailId": "m%d" % self.mail_n,
+                            "mail": "lena%d@gmail.com" % self.mail_n}
+                if endpoint == "getCode":
+                    c = self.mails.get(mid)
+                    return {"status": 1, "code": c} if c else {"status": 0,
+                                                                "error": "no mails yet"}
+                if endpoint == "setStatus":
+                    return {"status": 1}
+            return {"status": 0, "error": "?"}
+
+    _FQ = _FourQ()
+    _panneQ = {"salons": False, "ment": False}
+
+    def _sjw_q(path, data, *a, **k):
+        # Registre des salons inecrivable (False, comme safe_json en vrai) ou
+        # « menteur » (True sans rien ecrire), a la demande.
+        if pathlib.Path(path).name == "numgen_salons.json":
+            if _panneQ["salons"]:
+                return False
+            if _panneQ["ment"]:
+                return True
+        return _savSJQ(path, data, *a, **k)
+
+    def _RQ(st):
+        return _tyQ.SimpleNamespace(status=st, reason="x")
+
+    class _MsgQ:
+        _k = 10 ** 17 + 5 * 10 ** 5
+
+        def __init__(self, ch, view=None):
+            _MsgQ._k += 1
+            self.id, self.ch, self.pinned = _MsgQ._k, ch, False
+            self.author = _tyQ.SimpleNamespace(id=1, bot=True)
+            self.embeds, self.view = [], view
+            self.flags = _tyQ.SimpleNamespace(
+                components_v2=bool(view is not None and view.has_components_v2()),
+                ephemeral=False)
+            self.components = list(view.children) if view is not None else []
+
+        async def delete(self):
+            self.ch.msgs.pop(self.id, None)
+
+    class _PartQ:
+        def __init__(self, ch, mid):
+            self.ch, self.id = ch, int(mid)
+
+        async def edit(self, **k):
+            for f_ in k.get("attachments") or []:
+                f_.close()
+            self.ch.essais += 1
+            if self.ch.pannes > 0:
+                self.ch.pannes -= 1
+                raise _dQ.HTTPException(_RQ(503), "Service Unavailable (simule)")
+            m = self.ch.msgs.get(self.id)
+            if m is None:
+                raise _dQ.NotFound(_RQ(404), "Unknown Message")
+            v = k.get("view")
+            if v is not None:
+                m.view, m.components = v, list(v.children)
+
+        async def delete(self):
+            self.ch.msgs.pop(self.id, None)
+
+    class _ChQ:
+        def __init__(self, cid):
+            self.id, self.name = cid, "q%d-numero-mail" % cid
+            self.msgs, self.pannes, self.essais = {}, 0, 0
+            self.guild = _tyQ.SimpleNamespace(
+                id=5, get_member=lambda i: _tyQ.SimpleNamespace(
+                    id=i, display_name="va%d" % i, name="va%d" % i))
+
+        async def send(self, view=None, file=None, **k):
+            if file is not None:
+                file.close()
+            m = _MsgQ(self, view=view)
+            self.msgs[m.id] = m
+            return m
+
+        def get_partial_message(self, mid):
+            return _PartQ(self, mid)
+
+        async def pins(self):
+            return []
+
+        def history(self, limit=100):
+            async def g():
+                for m in sorted(self.msgs.values(), key=lambda x: -x.id)[:limit]:
+                    yield m
+            return g()
+
+    class _BotQ:
+        def __init__(self):
+            self.user = _tyQ.SimpleNamespace(id=1)
+            self.loop = _tyQ.SimpleNamespace(t=[])
+            self.loop.create_task = self.loop.t.append
+            self.guildes = {}
+
+        def get_cog(self, n_):
+            return None
+
+        def get_channel(self, i):
+            return None
+
+        def get_guild(self, i):
+            return self.guildes.get(int(i))
+
+        def get_user(self, i):
+            return None
+
+        def is_ready(self):
+            return False
+
+    class _RespQ:
+        def __init__(self):
+            self.done, self.env = False, []
+
+        async def defer(self, **k):
+            self.done = True
+
+        def is_done(self):
+            return self.done
+
+        async def send_message(self, *a, **k):
+            self.done = True
+            self.env.append((a, k))
+
+        async def edit_message(self, **k):
+            self.done = True
+
+    class _FolQ:
+        def __init__(self):
+            self.env = []
+
+        async def send(self, *a, **k):
+            self.env.append((a, k))
+            return _tyQ.SimpleNamespace(id=0)
+
+    class _ItxQ:
+        def __init__(self, ch, uid, bot, message=None):
+            self.channel, self.client, self.message = ch, bot, message
+            self.user = _tyQ.SimpleNamespace(id=uid, name="u%d" % uid,
+                                             display_name="u%d" % uid, roles=[])
+            self.response, self.followup = _RespQ(), _FolQ()
+            self.data, self.guild = {}, getattr(ch, "guild", None)
+
+        def mots(self):
+            out = [str(a[0]) for a, _k in self.response.env if a]
+            out += [str(a[0]) for a, _k in self.followup.env if a]
+            return " | ".join(out)
+
+    def _txtQ(ch):
+        (m,) = list(ch.msgs.values())
+        return [i.content for i in m.view.walk_children()
+                if isinstance(i, _dQ.ui.TextDisplay)]
+
+    async def _clicQ(cog, ch, cid, uid=7):
+        # Le repondant que discord.py trouve apres un redemarrage : la vue
+        # persistante de cog_load, qui porte tous les boutons.
+        (m,) = list(ch.msgs.values())
+        itx = _ItxQ(ch, uid, cog.bot, message=m)
+        vue = _nQ.PanneauNumero(cog, tous=True)
+        b = next(i for i in vue.walk_children()
+                 if isinstance(i, _dQ.ui.Button) and i.custom_id == cid)
+        await b.callback(itx)
+        return itx
+
+    async def _confirmerQ(cog, ch, quoi, uid=7):
+        """Clic « Autre »/« Annuler » -> la question ephemere, sa vue reelle."""
+        itx = await _clicQ(cog, ch, "numgen:" + quoi, uid)
+        vue = itx.response.env[0][1].get("view") if itx.response.env else None
+        return vue
+
+    async def _ouiQ(cog, ch, vue, uid=7):
+        itx = _ItxQ(ch, uid, cog.bot)
+        await vue.oui.callback(itx)
+        return itx
+
+    async def _tachesQ(bot):
+        while bot.loop.t:
+            await bot.loop.t.pop(0)
+
+    def _jeterQ(bot):
+        for t_ in bot.loop.t:
+            t_.close()
+        bot.loop.t.clear()
+
+    def _regQ(ch):
+        return _nQ._salon(ch.id)
+
+    def _histoQ(i, kind="sms"):
+        return next((e for e in reversed(_nQ._histo_lire())
+                     if str(e.get("id")) == str(i) and (e.get("type") or "sms") == kind), {})
+
+    _numQ = [7000]
+    _BOTQ = [None]
+
+    async def _salonQ(bot, cog):
+        _numQ[0] += 1
+        ch = _ChQ(_numQ[0])
+        await _nQ.poser_panneau(bot, ch, cog)
+        return ch
+
+    async def _prendreQ(cog, ch, uid=7, garder_ecoute=False):
+        itx = await _clicQ(cog, ch, "numgen:sms", uid)
+        if not garder_ecoute:
+            _jeterQ(cog.bot)
+        return itx, (_regQ(ch).get("actif") or {}).get("id")
+
+    try:
+        _nQ.SALONS_FILE = _racineQ / "panneau" / "numgen_salons.json"
+        _nQ.POLL_SECONDS = 1
+        _gQ._stubs = _FQ
+        _gQ._mail = _FQ.mail
+        _gQ.status = lambda: {"sms_ok": True, "mail_ok": True}
+        _gQ.balances = lambda: {"sms": "9 $", "mail": "1 $"}
+        _gQ.getatext_key = lambda: "FAUX"
+        _gQ.smsbower_key = lambda: ""
+        _gQ.default_country = lambda: "187"
+        _uQ._is_staff_member = lambda m: getattr(m, "id", 0) == 3
+        _sjQ.write = _sjw_q
+
+        async def _groupeQ(nom, fn):
+            # Chaque groupe de constats a sa chance : une exception dans l'un
+            # (API changee, faux incomplet) est un echec NOMME, et les autres
+            # groupes tournent quand meme.
+            try:
+                await fn()
+            except Exception as e:                           # noqa: BLE001
+                import traceback as _tbG
+                _tbG.print_exc()
+                check("%s : le groupe va au bout" % nom, False, repr(e)[:200])
+            finally:
+                # Rien d'un groupe rate ne deborde sur le suivant.
+                _jeterQ(_BOTQ[0])
+                _panneQ["salons"] = _panneQ["ment"] = False
+                _FQ.rep.clear()
+                _FQ.pendant.clear()
+                _FQ.livrer.clear()
+
+        async def _scenarioQ():
+            _vraiSleep = _aQ.sleep
+
+            async def _s0(*a, **k):
+                await _vraiSleep(0)
+            _nQ.asyncio.sleep = _s0
+            try:
+                bot = _BotQ()
+                _BOTQ[0] = bot
+                cog = _nQ.NumerosCog(bot)
+                bot.cog = cog
+
+                # ======== C1 : registre des salons inecrivable ===========================
+                async def _groupe():
+                    ch = await _salonQ(bot, cog)
+                    j0, k0 = len(_jQ.l), len(_FQ.journal)
+                    _panneQ["salons"] = True
+                    try:
+                        it = await _clicQ(cog, ch, "numgen:sms")
+                    finally:
+                        _panneQ["salons"] = False
+                    check("C1 registre inecrivable avant l achat : RIEN n est achete, le VA le lit",
+                          not [x for x in _FQ.actions(k0) if x[0] == "getNumber"]
+                          and "rien n'a été acheté" in it.mots() and not bot.loop.t
+                          and _ditQ("inecrivable", j0), (_FQ.actions(k0), it.mots()))
+                    # Inecrivable APRES l'achat : le numero n'est pas inscrit -> RENDU.
+                    k0 = len(_FQ.journal)
+                    _gQ_orig = _gQ.get_number
+
+                    def _achat_puis_panne(service="ig", country=None):
+                        r = _gQ_orig(service, country)
+                        _panneQ["salons"] = True
+                        return r
+                    _gQ.get_number = _achat_puis_panne
+                    try:
+                        it = await _clicQ(cog, ch, "numgen:sms")
+                    finally:
+                        _panneQ["salons"] = False
+                        _gQ.get_number = _gQ_orig
+                    pris = [x[1] for x in _FQ.actions(k0) if x[0] == "setStatus8"]
+                    idc1 = str(800 + _FQ.n)
+                    check("C1 registre inecrivable apres l achat : le numero est RENDU (setStatus 8), "
+                          "le VA le lit, aucune ecoute sur un numero absent",
+                          pris == [idc1] and "rendu (remboursé)" in it.mots() and not bot.loop.t
+                          and _histoQ(idc1).get("rendu_auto") is True
+                          and _txtQ(ch)[0] == "## Numéro Instagram", (_FQ.actions(k0), it.mots(),
+                                                                      _txtQ(ch)))
+                    # ... et si le fournisseur refuse ce rendu (trop tot) : garde HORS
+                    # registre, porte par le seul rendu differe, et dit.
+                    _FQ.rep["setStatus8"] = ["EARLY_CANCEL_DENIED"]
+                    _gQ.get_number = _achat_puis_panne
+                    j0, k0 = len(_jQ.l), len(_FQ.journal)
+                    try:
+                        it = await _clicQ(cog, ch, "numgen:sms")
+                    finally:
+                        _panneQ["salons"] = False
+                        _gQ.get_number = _gQ_orig
+                    idc1b = str(800 + _FQ.n)
+                    noms = [getattr(t_, "cr_code", None) and t_.cr_code.co_name for t_ in bot.loop.t]
+                    check("C1 rendu refuse et registre inecrivable : branche « hors registre » atteinte "
+                          "(rendu differe seul, pas d ecoute), le VA lit « pas encore rendu »",
+                          noms == ["_rendre_plus_tard"] and "pas encore rendu" in it.mots()
+                          and _ditQ("hors registre", j0), (noms, it.mots(), _jQ.l[j0:j0 + 8]))
+                    await _tachesQ(bot)
+                    check("C1 ... et 2 min plus tard le rendu differe le rend",
+                          [x[1] for x in _FQ.actions(k0) if x[0] == "setStatus8"] == [idc1b, idc1b]
+                          and _histoQ(idc1b).get("rendu_auto") is True, _FQ.actions(k0))
+                    # Filet : l'ecriture dit « ok » mais le registre relu n'a pas le numero.
+                    _gQ_ment = _gQ.get_number
+
+                    def _achat_puis_ment(service="ig", country=None):
+                        r = _gQ_orig(service, country)
+                        _panneQ["ment"] = True
+                        return r
+                    _gQ.get_number = _achat_puis_ment
+                    j0, k0 = len(_jQ.l), len(_FQ.journal)
+                    try:
+                        it = await _clicQ(cog, ch, "numgen:sms")
+                    finally:
+                        _panneQ["ment"] = False
+                        _gQ.get_number = _gQ_ment
+                    idc1c = str(800 + _FQ.n)
+                    check("C1 filet : registre relu SANS le numero (panneau « vide » bien dessine) -> rendu",
+                          [x[1] for x in _FQ.actions(k0) if x[0] == "setStatus8"] == [idc1c]
+                          and _ditQ("absent du registre relu", j0) and "rendu" in it.mots(),
+                          (_FQ.actions(k0), _jQ.l[j0:j0 + 5]))
+                    _jeterQ(bot)
+                    # Registre inecrivable a l'ARRIVEE du code : le code s'affiche
+                    # quand meme (ligne de souci), l'activation reste ouverte.
+                    _it, aid = await _prendreQ(cog, ch, garder_ecoute=True)
+                    _FQ.sms(aid, "314159")
+                    k0 = len(_FQ.journal)
+                    _panneQ["salons"] = True
+                    try:
+                        await _tachesQ(bot)
+                    finally:
+                        _panneQ["salons"] = False
+                    check("C1 registre inecrivable a l arrivee du code : le code est MONTRE (souci), "
+                          "pas de fin d activation",
+                          any("314159" in t_ and "inécrivable" in t_ for t_ in _txtQ(ch))
+                          and not [x for x in _FQ.actions(k0) if x[0] == "setStatus6"],
+                          (_txtQ(ch), _FQ.actions(k0)))
+                    _nQ._salon_ecrire(ch.id, actif=None, code_valeur=None, code_de=None)
+
+                await _groupeQ('C1', _groupe)
+
+                # ======== C2 : un code arrive pendant la confirmation ====================
+                async def _groupe():
+                    for quoi in ("autre", "annuler"):
+                        ch = await _salonQ(bot, cog)
+                        _it, aid = await _prendreQ(cog, ch, garder_ecoute=True)
+                        vue = await _confirmerQ(cog, ch, quoi)
+                        _FQ.sms(aid, "482913")
+                        await _tachesQ(bot)                      # l'ecoute l'affiche
+                        k0, n0 = len(_FQ.journal), _FQ.n
+                        it = await _ouiQ(cog, ch, vue)
+                        check("C2 « %s » : code arrive pendant la question -> « Oui » ne change rien "
+                              "(ni rendu, ni fin, ni achat), le code reste, le VA le lit" % quoi,
+                              isinstance(vue, _nQ._ConfirmerView) and getattr(vue, "code_vu", None) is None
+                              and not _FQ.actions(k0) and _FQ.n == n0
+                              and _regQ(ch).get("actif", {}).get("id") == aid
+                              and _regQ(ch).get("code_valeur") == "482913"
+                              and "482913" in _txtQ(ch)[1]
+                              and "Le code vient d'arriver" in it.mots(),
+                              (_FQ.actions(k0), _regQ(ch), it.mots()))
+                    # Le code arrive PENDANT l'appel d'annulation : numero et code gardes.
+                    ch = await _salonQ(bot, cog)
+                    _it, aid = await _prendreQ(cog, ch)
+                    vue = await _confirmerQ(cog, ch, "autre")
+
+                    def _code_pendant_8(a, ch=ch, aid=aid):
+                        a["etat"], a["code"] = "OK", "777000"
+                        _nQ._salon_ecrire(ch.id, code_valeur="777000", code_de=aid,
+                                          code_affiche=False)
+                    _FQ.pendant["setStatus8"] = _code_pendant_8
+                    n0 = _FQ.n
+                    it = await _ouiQ(cog, ch, vue)
+                    check("C2 code arrive PENDANT l appel d annulation : numero et code gardes, "
+                          "aucun numero rachete",
+                          _FQ.n == n0 and _regQ(ch).get("actif", {}).get("id") == aid
+                          and _regQ(ch).get("code_valeur") == "777000"
+                          and "777000" in _txtQ(ch)[1] and "numéro est gardé" in it.mots(),
+                          (_FQ.n, n0, _regQ(ch), it.mots()))
+
+                await _groupeQ('C2', _groupe)
+
+                # ======== C3 : « Redemander » pendant l'arrivee du code ==================
+                async def _groupe():
+                    ch = await _salonQ(bot, cog)
+                    _it, aid = await _prendreQ(cog, ch)
+
+                    def _code_pendant_3(a, ch=ch, aid=aid):
+                        # Ce que fait l'ecoute pendant setStatus 3 : le SMS arrive,
+                        # elle l'ecrit (et l'affiche).
+                        a["etat"], a["code"] = "OK", "482913"
+                        _nQ._salon_ecrire(ch.id, code_valeur="482913", code_de=aid,
+                                          code_affiche=False)
+                    _FQ.pendant["setStatus3"] = _code_pendant_3
+                    j0, k0 = len(_jQ.l), len(_FQ.journal)
+                    await _clicQ(cog, ch, "numgen:retry")
+                    check("C3 code ecrit pendant setStatus 3 : il RESTE (registre et panneau), "
+                          "pas de nouvelle ecoute, et c est dit",
+                          _regQ(ch).get("code_valeur") == "482913" and "482913" in _txtQ(ch)[1]
+                          and not bot.loop.t and ("setStatus3", aid) in _FQ.actions(k0)
+                          and _ditQ("rien n'est redemande ni efface", j0),
+                          (_regQ(ch), _txtQ(ch), bot.loop.t))
+                    _jeterQ(bot)
+                    ch = await _salonQ(bot, cog)
+                    _it, aid = await _prendreQ(cog, ch)
+
+                    def _code_pendant_get(a, ch=ch, aid=aid):
+                        _nQ._salon_ecrire(ch.id, code_valeur="515151", code_de=aid,
+                                          code_affiche=False)
+                    _FQ.pendant["getStatus"] = _code_pendant_get
+                    k0 = len(_FQ.journal)
+                    await _clicQ(cog, ch, "numgen:retry")
+                    check("C3 code ecrit pendant la lecture du code : montre, AUCUN setStatus 3",
+                          _regQ(ch).get("code_valeur") == "515151" and "515151" in _txtQ(ch)[1]
+                          and not [x for x in _FQ.actions(k0) if x[0] == "setStatus3"],
+                          (_FQ.actions(k0), _regQ(ch)))
+                    _jeterQ(bot)
+                    # Branche mail : un code ecrit pendant get_mail_code n'est plus efface.
+                    ch = await _salonQ(bot, cog)
+                    await _clicQ(cog, ch, "numgen:mail")
+                    _jeterQ(bot)
+                    mid = _regQ(ch)["actif"]["id"]
+
+                    def _code_pendant_mail(m_, ch=ch, mid=mid):
+                        _nQ._salon_ecrire(ch.id, code_valeur="909090", code_de=mid,
+                                          code_affiche=False)
+                    _FQ.pendant["mail:getCode"] = _code_pendant_mail
+                    await _clicQ(cog, ch, "numgen:retry")
+                    check("C3 mail : un code ecrit pendant get_mail_code n est plus efface",
+                          _regQ(ch).get("code_valeur") == "909090" and "909090" in _txtQ(ch)[1],
+                          (_regQ(ch), _txtQ(ch)))
+                    _jeterQ(bot)
+
+                await _groupeQ('C3', _groupe)
+
+                # ======== C4 : « Nouveau code » en SMS ===================================
+                async def _groupe():
+                    _FQ.rep["getStatus"] = ["STATUS_WAIT_RETRY:482913", "STATUS_WAIT_RETRY"]
+                    _lusQ = [_gQ.get_code(str(800 + _FQ.n)), _gQ.get_code(str(800 + _FQ.n))]
+                    _FQ.rep.pop("getStatus", None)
+                    check("C4 numgen.get_code : STATUS_WAIT_RETRY avec ou sans « :<ancien code> » "
+                          "est une ATTENTE (plus une erreur)",
+                          _gQ.get_code.__module__ == "numgen"
+                          and _lusQ == [("wait", ""), ("wait", "")], _lusQ)
+                    ch = await _salonQ(bot, cog)
+                    _it, aid = await _prendreQ(cog, ch, garder_ecoute=True)
+                    _FQ.sms(aid, "482913")
+                    k0 = len(_FQ.journal)
+                    await _tachesQ(bot)
+                    check("C4 code recu : affiche, l activation reste OUVERTE (aucun setStatus 6)",
+                          "482913" in _txtQ(ch)[1] and _regQ(ch).get("code_affiche") is True
+                          and not [x for x in _FQ.actions(k0) if x[0] == "setStatus6"],
+                          _FQ.actions(k0))
+                    k0 = len(_FQ.journal)
+                    await _clicQ(cog, ch, "numgen:retry")
+                    # 6 x WAIT_RETRY:<ancien> (plus que ECOUTE_ERREURS_MAX), puis le SMS.
+                    _FQ.livrer[aid] = [_nQ.ECOUTE_ERREURS_MAX + 2, "777111"]
+                    await _tachesQ(bot)
+                    check("C4 « Nouveau code » : setStatus 3 accepte, WAIT_RETRY:… attendu sans "
+                          "erreur, le 2e SMS s affiche",
+                          ("setStatus3", aid) in _FQ.actions(k0) and "777111" in _txtQ(ch)[1]
+                          and not any("STATUS_WAIT_RETRY" in t_ for t_ in _txtQ(ch)),
+                          (_FQ.actions(k0), _txtQ(ch)))
+                    k0 = len(_FQ.journal)
+                    await _clicQ(cog, ch, "numgen:fini")
+                    check("C4 « C'est bon » clot l activation (setStatus 6, une fois), panneau vide",
+                          [x for x in _FQ.actions(k0) if x[0] == "setStatus6"] == [("setStatus6", aid)]
+                          and _FQ.acts[aid]["etat"] == "FINI"
+                          and _txtQ(ch)[0] == "## Numéro Instagram", (_FQ.actions(k0), _txtQ(ch)))
+                    # « Autre » apres un code : l'activation est TERMINEE (6), pas annulee (8).
+                    _it, aid = await _prendreQ(cog, ch, garder_ecoute=True)
+                    _FQ.sms(aid, "246810")
+                    await _tachesQ(bot)
+                    vue = await _confirmerQ(cog, ch, "autre")
+                    k0, n0 = len(_FQ.journal), _FQ.n
+                    await _ouiQ(cog, ch, vue)
+                    _jeterQ(bot)
+                    check("C4 « Autre » apres un code : setStatus 6 (pas 8), un nouveau numero",
+                          ("setStatus6", aid) in _FQ.actions(k0)
+                          and ("setStatus8", aid) not in _FQ.actions(k0) and _FQ.n == n0 + 1
+                          and vue.code_vu == "246810" and _histoQ(aid).get("remplace_le"),
+                          (_FQ.actions(k0), vue.code_vu))
+
+                await _groupeQ('C4', _groupe)
+
+                # ======== C7 : affichage du code en echec ================================
+                async def _groupe():
+                    ch = await _salonQ(bot, cog)
+                    _it, aid = await _prendreQ(cog, ch, garder_ecoute=True)
+                    _FQ.sms(aid, "112358")
+                    ch.pannes = 2 * _nQ.AFFICHAGE_ESSAIS     # chaque essai : edition + icone jointe
+                    j0, k0 = len(_jQ.l), len(_FQ.journal)
+                    await _tachesQ(bot)
+                    check("C7 editions refusees : %d essais, activation laissee OUVERTE, "
+                          "code note « jamais affiche », et dit" % _nQ.AFFICHAGE_ESSAIS,
+                          ch.pannes == 0 and len(_ditQ("pas encore affiche", j0))
+                          == _nQ.AFFICHAGE_ESSAIS - 1 and _ditQ("JAMAIS affiche", j0)
+                          and _regQ(ch).get("code_affiche") is False
+                          and not [x for x in _FQ.actions(k0) if x[0] == "setStatus6"]
+                          and "112358" not in " ".join(_txtQ(ch)),
+                          (ch.pannes, _jQ.l[j0:j0 + 8], _regQ(ch)))
+                    k0 = len(_FQ.journal)
+                    await _clicQ(cog, ch, "numgen:retry")
+                    check("C7 puis « Redemander » : le code jamais vu est MONTRE, rien redemande, "
+                          "rien efface",
+                          "112358" in _txtQ(ch)[1] and _regQ(ch).get("code_valeur") == "112358"
+                          and _regQ(ch).get("code_affiche") is True
+                          and not [x for x in _FQ.actions(k0) if x[0] == "setStatus3"],
+                          (_FQ.actions(k0), _txtQ(ch)))
+                    _nQ._salon_ecrire(ch.id, actif=None, code_valeur=None, code_de=None)
+                    _it, aid = await _prendreQ(cog, ch, garder_ecoute=True)
+                    _FQ.sms(aid, "998877")
+                    ch.pannes = 2                               # le 1er essai seulement
+                    j0 = len(_jQ.l)
+                    await _tachesQ(bot)
+                    check("C7 un essai rate puis reussi : code affiche et note comme tel",
+                          "998877" in _txtQ(ch)[1] and _regQ(ch).get("code_affiche") is True
+                          and len(_ditQ("pas encore affiche", j0)) == 1, _jQ.l[j0:j0 + 4])
+
+                await _groupeQ('C7', _groupe)
+
+                # ======== C8 : anciens boutons ephemeres =================================
+                async def _groupe():
+                    cog_w = cog.watch
+
+                    async def _watch_court(*a, **k):
+                        return None
+                    cog.watch = _watch_court
+                    try:
+                        ch8 = _ChQ(7900)
+
+                        async def _vue_ephemere():
+                            itx = _ItxQ(ch8, 7, bot)
+                            itx.response.done = True
+                            await cog.start_sms(itx, "ig")
+                            return next(k["view"] for _a, k in itx.followup.env
+                                        if isinstance(k.get("view"), _nQ._ActivationView))
+                        vue = await _vue_ephemere()
+                        _FQ.rep["setStatus8"] = ["EARLY_CANCEL_DENIED"]
+                        k0, n0 = len(_FQ.journal), _FQ.n
+                        it = _ItxQ(ch8, 7, bot)
+                        await vue.other_one.callback(it)
+                        check("C8 « Autre numéro » refuse (trop tot) : PAS de second numero, raison "
+                              "dite, vue active, rien a l historique",
+                              _FQ.n == n0 and "annulation trop tôt" in it.mots()
+                              and not vue.is_finished() and not _histoQ(vue.act_id).get("remplace_le"),
+                              (_FQ.n, n0, it.mots()))
+                        _FQ.rep["setStatus8"] = ["EARLY_CANCEL_DENIED"]
+                        it = _ItxQ(ch8, 7, bot)
+                        await vue.stop_it.callback(it)
+                        check("C8 « Annuler » refuse : pas de « annulé (remboursé…) », vue active, "
+                              "rien a l historique",
+                              "annulé" not in it.mots() and "annulation trop tôt" in it.mots()
+                              and not vue.is_finished() and not _histoQ(vue.act_id).get("annule_le"),
+                              it.mots())
+                        it = _ItxQ(ch8, 7, bot)
+                        await vue.stop_it.callback(it)
+                        check("C8 « Annuler » accepte ensuite : annule, rembourse, note",
+                              "annulé — remboursé" in it.mots() and vue.is_finished()
+                              and _histoQ(vue.act_id).get("annule_le"), it.mots())
+                        vue2 = await _vue_ephemere()
+                        n0 = _FQ.n
+                        await vue2.other_one.callback(_ItxQ(ch8, 7, bot))
+                        check("C8 « Autre numéro » accepte : un second numero, l ancien note remplace",
+                              _FQ.n == n0 + 1 and _histoQ(vue2.act_id).get("remplace_le"),
+                              (_FQ.n, n0))
+                    finally:
+                        cog.watch = cog_w
+                    _FQ.rep.pop("setStatus8", None)
+                await _groupeQ('C8', _groupe)
+
+            finally:
+                _nQ.asyncio.sleep = _vraiSleep
+                _jeterQ(bot)
+
+        _aQ.run(_scenarioQ())
+
+        # ======== C5 : verrouiller_salon, par le VRAI discord.py ==============
+        _envoyeQ = []
+
+        class _HttpQ:
+            async def edit_channel_permissions(self, cid, tid, allow, deny, typ, reason=None):
+                _envoyeQ.append((int(tid), int(allow), int(deny), typ))
+
+        _stQ = _tyQ.SimpleNamespace(http=_HttpQ())
+        _stQ.store_user = lambda d, cache=True: _dQ.User(state=_stQ, data=d)
+        _stQ.member_cache_flags = _dQ.MemberCacheFlags.all()
+        _gQ5 = _tyQ.SimpleNamespace(id=5, _state=_stQ)
+
+        def _membreQ(uid, bot_=False):
+            return _dQ.Member(data={"user": {"id": uid, "username": "u%d" % uid,
+                                             "discriminator": "0", "avatar": None, "bot": bot_},
+                                    "roles": [], "joined_at": None, "deaf": False,
+                                    "mute": False, "flags": 0}, guild=_gQ5, state=_stQ)
+        _everyQ = _dQ.Role(guild=_gQ5, state=_stQ, data={"id": 5, "name": "@everyone",
+                                                           "permissions": "0", "position": 0})
+        _staffQ = _dQ.Role(guild=_gQ5, state=_stQ, data={"id": 6, "name": "staff",
+                                                           "permissions": "0", "position": 1})
+        _vaQ, _moiQ, _horsQ = _membreQ(77), _membreQ(1, True), _membreQ(78)
+        _gQ5.default_role = _everyQ
+        _gQ5.get_role = {5: _everyQ, 6: _staffQ}.get
+        _gQ5.get_member = {77: _vaQ, 1: _moiQ}.get          # 78 : hors cache
+        _fetchQ = []
+
+        async def _fetch_q(i):
+            _fetchQ.append(i)
+            return _horsQ
+        _gQ5.fetch_member = _fetch_q
+
+        def _owQ(i, t, allow=None, deny=None):
+            return {"id": i, "type": t, "allow": str(_dQ.Permissions(**(allow or {})).value),
+                    "deny": str(_dQ.Permissions(**(deny or {})).value)}
+
+        def _salon5Q(everyone_deny):
+            return _dQ.TextChannel(state=_stQ, guild=_gQ5, data={
+                "id": 4242, "name": "va-numero-mail", "type": 0, "position": 0,
+                "permission_overwrites": [
+                    _owQ(5, 0, deny=everyone_deny),
+                    _owQ(77, 1, allow={"view_channel": True, "send_messages": True,
+                                       "read_message_history": True, "attach_files": True}),
+                    _owQ(1, 1, allow={"view_channel": True, "send_messages": True,
+                                      "manage_channels": True, "manage_messages": True}),
+                    _owQ(78, 1, allow={"view_channel": True, "send_messages": True}),
+                    _owQ(6, 0, allow={"view_channel": True, "send_messages": True})]})
+
+        async def _c5Q():
+            r1 = await _nQ.verrouiller_salon(_salon5Q({"view_channel": True}),
+                                             _tyQ.SimpleNamespace(user=_tyQ.SimpleNamespace(id=1)))
+            premier, fetchs = list(_envoyeQ), list(_fetchQ)
+            _envoyeQ.clear()
+            # Salon DEJA rendu public par l'ancien verrouillage (plus de refus
+            # de vue) : prive=True le remet.
+            r2 = await _nQ.verrouiller_salon(_salon5Q({"send_messages": True}), None, prive=True)
+            return r1, premier, fetchs, r2, list(_envoyeQ)
+        _r1Q, _p1Q, _f1Q, _r2Q, _p2Q = _aQ.run(_c5Q())
+        _par1Q = {t: (_dQ.Permissions(a), _dQ.Permissions(d)) for t, a, d, _ty in _p1Q}
+        _par2Q = {t: (_dQ.Permissions(a), _dQ.Permissions(d)) for t, a, d, _ty in _p2Q}
+        check("C5 @everyone : l overwrite est COMPLETE (refus de vue garde + refus d envoi)",
+              _r1Q and 5 in _par1Q and _par1Q[5][1].view_channel and _par1Q[5][1].send_messages
+              and _par1Q[5][0].value == 0, {k: (a.value, d.value) for k, (a, d) in _par1Q.items()})
+        check("C5 le VA du ticket ne peut plus ecrire, mais voit et lit toujours",
+              77 in _par1Q and _par1Q[77][1].send_messages and _par1Q[77][0].view_channel
+              and _par1Q[77][0].read_message_history and not _par1Q[77][0].send_messages,
+              _par1Q.get(77))
+        check("C5 le bot, les roles (staff) : intouches ; un membre hors cache : cherche puis bloque",
+              1 not in _par1Q and 6 not in _par1Q and _f1Q == [78]
+              and 78 in _par1Q and _par1Q[78][1].send_messages, (sorted(_par1Q), _f1Q))
+        check("C5 prive=True : un -numero-mail deja rendu public retrouve son refus de vue",
+              _r2Q and _par2Q[5][1].view_channel and _par2Q[5][1].send_messages, _par2Q.get(5))
+        _srcAllQ = _inQ.getsource(_nQ.NumerosCog.panelnumeroall.callback)
+        _srcUnQ = _inQ.getsource(_nQ.NumerosCog.panelnumero.callback)
+        check("C5 /panelnumeroall verrouille en prive, /panelnumero selon le nom du salon",
+              "verrouiller_salon(ch, self.bot, prive=True)" in _srcAllQ
+              and "prive=_prive_par_construction(ch)" in _srcUnQ
+              and _nQ._prive_par_construction(_tyQ.SimpleNamespace(name="lena-numero-mail"))
+              and not _nQ._prive_par_construction(_tyQ.SimpleNamespace(name="sms-email")))
+
+        # ======== Recap : R1 a R4 ==============================================
+        _UTC1Q = _tzQ(_tdQ(hours=1))
+
+        def _tsQ(j, h=0, m=0):
+            return _dtQ(j.year, j.month, j.day, h, m, tzinfo=_UTC1Q).timestamp()
+
+        class _SalonRQ:
+            def __init__(self, cid, name, guild, refus=None):
+                self.id, self.name, self.guild, self.refus = cid, name, guild, refus
+                self.envois = []
+                guild.text_channels.append(self)
+
+            async def send(self, embed=None, **k):
+                if self.refus is not None:
+                    raise self.refus
+                self.envois.append(embed)
+                return _tyQ.SimpleNamespace(id=10 ** 17 + len(self.envois))
+
+            def get_partial_message(self, mid):
+                # Le recap en direct est EDITE (puis fige a minuit) : l'edition
+                # remplace l'embed envoye sous le meme id.
+                salon = self
+
+                class _MsgRQ:
+                    async def edit(self, embed=None, **k):
+                        if salon.refus is not None:
+                            raise salon.refus
+                        salon.envois[int(mid) - 10 ** 17 - 1] = embed
+                return _MsgRQ()
+
+        class _GuildeRQ:
+            def __init__(self, gid):
+                self.id, self.name, self.text_channels = gid, "g%d" % gid, []
+
+            def get_member(self, uid):
+                return _tyQ.SimpleNamespace(id=uid, display_name="va%d" % uid)
+
+        def _recap_neufQ(nom):
+            # Chaque cas repart d'un historique et d'un registre neufs (ils
+            # suivent SALONS_FILE).
+            _nQ.SALONS_FILE = _racineQ / nom / "numgen_salons.json"
+            b = _BotQ()
+            g = _GuildeRQ(777)
+            b.guildes[777] = g
+            return b, _nQ.NumerosCog(b), g
+
+        def _priseQ(g, uid, ts, code=True):
+            aid = "r%d" % int(ts)
+            actif = {"id": aid, "kind": "sms", "provider": "getatext", "service": "ig",
+                     "valeur": "+1999%07d" % (int(ts) % 10 ** 7), "par": uid, "pris_le": int(ts)}
+            assert _nQ.histo_prise(actif, _tyQ.SimpleNamespace(id=1, guild=g), None,
+                                   maintenant=ts)
+            if code:
+                assert _nQ.histo_evenement("sms", aid, "code", maintenant=ts + 60)
+
+        async def _recapQ():
+            # R1 : registre perdu, 8 jours d'historique.
+            b, c, g = _recap_neufQ("r1")
+            db = _SalonRQ(1, "📊・debrief-day", g)
+            D = _dtQ(2026, 10, 10).date()
+            for k in range(1, 9):
+                _priseQ(g, 7, _tsQ(D - _tdQ(days=k), 8))
+            now = _tsQ(D, 10)
+            b1 = await c.recap_tour(maintenant=now)
+            b2 = await c.recap_tour(maintenant=now + 60)
+            b3 = await c.recap_tour(maintenant=now + 3600)
+            reg = _sjQ.load(_nQ._recap_fichier(), default={})
+            check("R1 registre perdu : la veille seule au 1er tour, RIEN aux tours suivants "
+                  "(plancher « depuis » durable)",
+                  b1["postes"] == [((D - _tdQ(days=1)).isoformat(), "777")]
+                  and not b2["postes"] and not b3["postes"] and len(db.envois) == 1
+                  and reg.get("depuis") == (D - _tdQ(days=1)).isoformat(),
+                  (b1["postes"], b2["postes"], b3["postes"], reg.get("depuis")))
+            b4 = await c.recap_tour(maintenant=_tsQ(D + _tdQ(days=2), 0, 6))
+            check("R1 ... le rattrapage reprend a partir du plancher (jours suivants)",
+                  not b4["postes"] and D.isoformat() in b4["vides"]
+                  and (D - _tdQ(days=2)).isoformat() not in b4["vides"], b4)
+
+            # R3 : historique ne AUJOURD'HUI (deploiement a 09:00).
+            b, c, g = _recap_neufQ("r3")
+            db = _SalonRQ(1, "debrief-day", g)
+            X = _dtQ(2026, 10, 20).date()
+            _priseQ(g, 7, _tsQ(X, 9))
+            _priseQ(g, 8, _tsQ(X, 11))
+            # 27/09/2026 : le proprietaire veut son recap EN DIRECT des la mise
+            # en route. La journee du deploiement a donc son message, mais
+            # annonce « depuis 09h00 » (premier numero connu) -- « Journée
+            # complète » aurait ete faux.
+            j0 = len(_jQ.l)
+            b0 = await c.recap_tour(maintenant=_tsQ(X, 11, 30))
+            bX = await c.recap_tour(maintenant=_tsQ(X + _tdQ(days=1), 0, 6))
+            reg = _sjQ.load(_nQ._recap_fichier(), default={})
+            txt = " ".join(str(getattr(e, "description", "") or e) for e in db.envois)
+            fige = "Journée partielle : de 09h00" in txt and "Journée complète" not in txt
+            check("R3 premier recap : la journee PARTIELLE du deploiement a son message, "
+                  "« depuis 09h00 », figee en « Journée partielle », et c est dit",
+                  b0["postes"] == [(X.isoformat(), "777")] and len(db.envois) == 1
+                  and (X.isoformat(), "777") in bX["finalises"]
+                  and reg.get("depuis") == X.isoformat()
+                  and reg.get("partiel", {}).get(X.isoformat()) == int(_tsQ(X, 9))
+                  and fige and _ditQ("journee partielle", j0),
+                  (b0, bX, reg.get("depuis"), txt[:300]))
+            _priseQ(g, 7, _tsQ(X + _tdQ(days=1), 8))
+            bY = await c.recap_tour(maintenant=_tsQ(X + _tdQ(days=2), 0, 6))
+            check("R3 ... le premier jour COMPLET part normalement",
+                  bY["postes"] == [((X + _tdQ(days=1)).isoformat(), "777")]
+                  and len(db.envois) == 2, bY)
+
+            # R2 : envoi refuse chaque jour, au-dela de la fenetre.
+            b, c, g = _recap_neufQ("r2")
+            refus = _dQ.Forbidden(_RQ(403), "Missing Permissions")
+            db = _SalonRQ(1, "📊・debrief-day", g, refus=refus)
+            E = _dtQ(2026, 11, 3).date()
+            _priseQ(g, 7, _tsQ(E, 8))
+            await c.recap_tour(maintenant=_tsQ(E + _tdQ(days=1), 0, 6))
+            fiche = (_sjQ.load(_nQ._recap_fichier(), default={}).get("jours", {})
+                     .get(E.isoformat(), {}).get("777", {}))
+            check("R2 envoi refuse : le jour est RETENU au registre (finalise False, envoi_refuse)",
+                  fiche.get("finalise") is False and fiche.get("envoi_refuse") == "Forbidden"
+                  and fiche.get("numeros") == 1, fiche)
+            j0 = len(_jQ.l)
+            for k in range(2, 11):
+                await c.recap_tour(maintenant=_tsQ(E + _tdQ(days=k), 0, 6))
+            fiche = (_sjQ.load(_nQ._recap_fichier(), default={}).get("jours", {})
+                     .get(E.isoformat(), {}).get("777", {}))
+            ab = _ditQ("recap du %s (serveur 777, 1 numero(s)) abandonne" % E.isoformat(), j0)
+            check("R2 ... hors fenetre : abandon DIT une fois, avec la vraie raison (envoi refuse)",
+                  len(ab) == 1 and "envoi toujours refuse (Forbidden)" in ab[0]
+                  and fiche.get("abandonne") is True, (ab, fiche))
+            db.refus = None
+            _priseQ(g, 7, _tsQ(E + _tdQ(days=11), 8))
+            bZ = await c.recap_tour(maintenant=_tsQ(E + _tdQ(days=12), 0, 6))
+            fZ = (_sjQ.load(_nQ._recap_fichier(), default={}).get("jours", {})
+                  .get((E + _tdQ(days=11)).isoformat(), {}).get("777", {}))
+            check("R2 ... une fois l envoi possible : poste, fiche complete sans « envoi_refuse »",
+                  bZ["postes"] == [((E + _tdQ(days=11)).isoformat(), "777")]
+                  and fZ.get("finalise") is True and "envoi_refuse" not in fZ, (bZ, fZ))
+
+        _aQ.run(_recapQ())
+        # R4 : le salon renomme avec un espace (Discord le change en tiret).
+        _vusQ = {}
+        for _nomQ in ("📊-debrief-day", "📊│debrief-day", "📊・debrief-day", "debrief-day",
+                      "📊-debrief-night", "debrief-day-2", "📊-debrief-day-archive"):
+            _gR4 = _tyQ.SimpleNamespace(name="g", text_channels=[_tyQ.SimpleNamespace(name=_nomQ)])
+            _vusQ[_nomQ] = _nQ.salon_debrief(_gR4) is not None
+        check("R4 « 📊-debrief-day » et « 📊│debrief-day » reconnus, pas les voisins",
+              _vusQ == {"📊-debrief-day": True, "📊│debrief-day": True, "📊・debrief-day": True,
+                        "debrief-day": True, "📊-debrief-night": False, "debrief-day-2": False,
+                        "📊-debrief-day-archive": False}, _vusQ)
+        check("relecture 2 : rien d ecrit dans data/ (releve ET garde bloquante)",
+              len(_V2_AUDIT["ecrits"]) == _nEcritsQ and not _gardeQ["bloques"],
+              (_V2_AUDIT["ecrits"][_nEcritsQ:][:3], _gardeQ["bloques"][:3]))
+    finally:
+        _gardeQ["actif"] = False
+        for k_, v_ in _savNQ.items():
+            setattr(_nQ, k_, v_)
+        for k_, v_ in _savGQ.items():
+            setattr(_gQ, k_, v_)
+        _uQ._is_staff_member = _savUQ
+        _sjQ.write = _savSJQ
+        _V2_AUDIT["actif"] = _auditQ
+        _logQ.removeHandler(_jQ)
+        _logQ.setLevel(_niveauQ)
+        if _envQ is not None:
+            os.environ["VA_MACHINE_PROD"] = _envQ
+        _shQ.rmtree(_racineQ, ignore_errors=True)
+except Exception as _eQ:
+    import traceback as _tbQ
+    _tbQ.print_exc()
+    check("panneau numero (relecture 2) : testable", False, repr(_eQ)[:200])
+
 
 if FAILS:
     print("ECHECS :")
